@@ -1,0 +1,1868 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Auriga shared DSH additive administration",
+    "version": "1.0.0",
+    "license": {
+      "name": "AGPL-3.0-only",
+      "identifier": "AGPL-3.0-only"
+    }
+  },
+  "servers": [
+    {
+      "url": "/api/workspace/v1"
+    }
+  ],
+  "security": [
+    {
+      "bearerAuth": []
+    }
+  ],
+  "tags": [
+    {
+      "name": "placements",
+      "description": "共享 DSH 管理。"
+    }
+  ],
+  "paths": {
+    "/admin/members/{memberId}/placement": {
+      "get": {
+        "tags": [
+          "placements"
+        ],
+        "operationId": "getMemberDshPlacement",
+        "summary": "读取成员分配及独立授权",
+        "x-admin-only": true,
+        "x-permission": "workspace.placements.read",
+        "description": "租户来自可信认证上下文；目标对象跨租户或不存在均404。每次重新检查有效管理会话和权限。",
+        "parameters": [
+          {
+            "name": "memberId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "权威快照；仅管理会话，同租户。",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              },
+              "ETag": {
+                "description": "服务端不透明强标签，客户端原样回传，禁止由 revision 拼装。",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DshMemberPlacement"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "common.validation_failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "common.unauthenticated",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "common.forbidden 或 iam.step_up_required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "common.not_found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "common.conflict 或 shared.stop_unconfirmed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "common.precondition_failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "428": {
+            "description": "缺少 If-Match，common.validation_failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "common.unavailable",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/admin/members/{memberId}/dedicated-entitlement": {
+      "put": {
+        "tags": [
+          "placements"
+        ],
+        "operationId": "setMemberDshDedicatedEntitlement",
+        "summary": "授予或撤销独立授权",
+        "x-admin-only": true,
+        "x-permission": "workspace.placements.write",
+        "x-step-up-max-age-seconds": 600,
+        "description": "租户来自可信认证上下文；目标对象跨租户或不存在均404。每次重新检查有效管理会话和权限。写入还要求 Origin/CSRF 和严格600秒内step-up；未来时间拒绝。幂等键按租户、操作者、操作、目标及完整请求指纹24小时持久化；同键异请求409，先查已有幂等结果再核原If-Match。",
+        "parameters": [
+          {
+            "name": "memberId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DshEntitlementRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "权威快照；仅管理会话，同租户。",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              },
+              "ETag": {
+                "description": "服务端不透明强标签，客户端原样回传，禁止由 revision 拼装。",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DshDedicatedEntitlement"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "common.validation_failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "common.unauthenticated",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "common.forbidden 或 iam.step_up_required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "common.not_found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "common.conflict 或 shared.stop_unconfirmed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "common.precondition_failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "428": {
+            "description": "缺少 If-Match，common.validation_failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "common.unavailable",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/admin/members/{memberId}/placement-switches/lookup": {
+      "get": {
+        "tags": [
+          "placements"
+        ],
+        "operationId": "findDshPlacementSwitch",
+        "summary": "按原幂等键恢复切换查询",
+        "x-admin-only": true,
+        "x-permission": "workspace.placements.read",
+        "description": "租户来自可信认证上下文；目标对象跨租户或不存在均404。每次重新检查有效管理会话和权限。",
+        "parameters": [
+          {
+            "name": "memberId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "权威快照；仅管理会话，同租户。",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              },
+              "ETag": {
+                "description": "服务端不透明强标签，客户端原样回传，禁止由 revision 拼装。",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "shared-dsh.yaml#/components/schemas/DshPlacementSwitch"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "common.validation_failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "common.unauthenticated",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "common.forbidden 或 iam.step_up_required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "common.not_found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "common.conflict 或 shared.stop_unconfirmed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "common.precondition_failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "428": {
+            "description": "缺少 If-Match，common.validation_failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "common.unavailable",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/admin/placement-rebuild-plans": {
+      "post": {
+        "tags": [
+          "placements"
+        ],
+        "operationId": "createDshRebuildPlan",
+        "summary": "持久化维护名单及继续独立选择",
+        "x-admin-only": true,
+        "x-permission": "workspace.placements.write",
+        "x-step-up-max-age-seconds": 600,
+        "description": "租户来自可信认证上下文；目标对象跨租户或不存在均404。每次重新检查有效管理会话和权限。写入还要求 Origin/CSRF 和严格600秒内step-up；未来时间拒绝。幂等键按租户、操作者、操作、目标及完整请求指纹24小时持久化；同键异请求409，先查已有幂等结果再核原If-Match。",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DshRebuildPlanRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "权威快照；仅管理会话，同租户。",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              },
+              "ETag": {
+                "description": "服务端不透明强标签，客户端原样回传，禁止由 revision 拼装。",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DshRebuildPlan"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "common.validation_failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "common.unauthenticated",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "common.forbidden 或 iam.step_up_required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "common.not_found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "common.conflict 或 shared.stop_unconfirmed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "common.precondition_failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "428": {
+            "description": "缺少 If-Match，common.validation_failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "common.unavailable",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/admin/placement-rebuild-plans/{planId}": {
+      "get": {
+        "tags": [
+          "placements"
+        ],
+        "operationId": "getDshRebuildPlan",
+        "summary": "读取维护名单",
+        "x-admin-only": true,
+        "x-permission": "workspace.placements.read",
+        "description": "租户来自可信认证上下文；目标对象跨租户或不存在均404。每次重新检查有效管理会话和权限。",
+        "parameters": [
+          {
+            "name": "planId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "权威快照；仅管理会话，同租户。",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              },
+              "ETag": {
+                "description": "服务端不透明强标签，客户端原样回传，禁止由 revision 拼装。",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DshRebuildPlan"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "common.validation_failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "common.unauthenticated",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "common.forbidden 或 iam.step_up_required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "common.not_found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "common.conflict 或 shared.stop_unconfirmed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "common.precondition_failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "428": {
+            "description": "缺少 If-Match，common.validation_failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "common.unavailable",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "placements"
+        ],
+        "operationId": "updateDshRebuildPlan",
+        "summary": "替换尚未执行的维护名单",
+        "x-admin-only": true,
+        "x-permission": "workspace.placements.write",
+        "x-step-up-max-age-seconds": 600,
+        "description": "租户来自可信认证上下文；目标对象跨租户或不存在均404。每次重新检查有效管理会话和权限。写入还要求 Origin/CSRF 和严格600秒内step-up；未来时间拒绝。幂等键按租户、操作者、操作、目标及完整请求指纹24小时持久化；同键异请求409，先查已有幂等结果再核原If-Match。",
+        "parameters": [
+          {
+            "name": "planId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DshRebuildPlanRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "权威快照；仅管理会话，同租户。",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              },
+              "ETag": {
+                "description": "服务端不透明强标签，客户端原样回传，禁止由 revision 拼装。",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DshRebuildPlan"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "common.validation_failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "common.unauthenticated",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "common.forbidden 或 iam.step_up_required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "common.not_found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "common.conflict 或 shared.stop_unconfirmed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "common.precondition_failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "428": {
+            "description": "缺少 If-Match，common.validation_failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "common.unavailable",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/admin/placement-rebuild-plans/{planId}/start": {
+      "post": {
+        "tags": [
+          "placements"
+        ],
+        "operationId": "startDshRebuildPlan",
+        "summary": "确认导出窗口后批量重建",
+        "x-admin-only": true,
+        "x-permission": "workspace.placements.write",
+        "x-step-up-max-age-seconds": 600,
+        "description": "租户来自可信认证上下文；目标对象跨租户或不存在均404。每次重新检查有效管理会话和权限。写入还要求 Origin/CSRF 和严格600秒内step-up；未来时间拒绝。幂等键按租户、操作者、操作、目标及完整请求指纹24小时持久化；同键异请求409，先查已有幂等结果再核原If-Match。",
+        "parameters": [
+          {
+            "name": "planId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DshRebuildStartRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "权威快照；仅管理会话，同租户。",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              },
+              "ETag": {
+                "description": "服务端不透明强标签，客户端原样回传，禁止由 revision 拼装。",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DshRebuildProgress"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "common.validation_failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "common.unauthenticated",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "common.forbidden 或 iam.step_up_required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "common.not_found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "common.conflict 或 shared.stop_unconfirmed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "common.precondition_failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "428": {
+            "description": "缺少 If-Match，common.validation_failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "common.unavailable",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/admin/placement-rebuild-plans/{planId}/progress": {
+      "get": {
+        "tags": [
+          "placements"
+        ],
+        "operationId": "getDshRebuildProgress",
+        "summary": "读取逐成员持久化进度",
+        "x-admin-only": true,
+        "x-permission": "workspace.placements.read",
+        "description": "租户来自可信认证上下文；目标对象跨租户或不存在均404。每次重新检查有效管理会话和权限。",
+        "parameters": [
+          {
+            "name": "planId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "权威快照；仅管理会话，同租户。",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              },
+              "ETag": {
+                "description": "服务端不透明强标签，客户端原样回传，禁止由 revision 拼装。",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DshRebuildProgress"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "common.validation_failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "common.unauthenticated",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "common.forbidden 或 iam.step_up_required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "common.not_found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "common.conflict 或 shared.stop_unconfirmed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "common.precondition_failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "428": {
+            "description": "缺少 If-Match，common.validation_failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "common.unavailable",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/admin/placement-capacity": {
+      "get": {
+        "tags": [
+          "placements"
+        ],
+        "operationId": "getDshPlacementCapacity",
+        "summary": "轮询实时池容量与全池影响",
+        "x-admin-only": true,
+        "x-permission": "workspace.placements.read",
+        "description": "租户来自可信认证上下文；目标对象跨租户或不存在均404。每次重新检查有效管理会话和权限。",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "权威快照；仅管理会话，同租户。",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string",
+                  "const": "no-store"
+                }
+              },
+              "ETag": {
+                "description": "服务端不透明强标签，客户端原样回传，禁止由 revision 拼装。",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DshCapacitySnapshot"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "common.validation_failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "common.unauthenticated",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "common.forbidden 或 iam.step_up_required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "common.not_found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "common.conflict 或 shared.stop_unconfirmed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "common.precondition_failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "428": {
+            "description": "缺少 If-Match，common.validation_failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "common.unavailable",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT"
+      }
+    },
+    "schemas": {
+      "Binding": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "tenantId",
+          "memberId",
+          "placementId",
+          "physicalInstanceId",
+          "mode",
+          "epoch",
+          "revision"
+        ],
+        "properties": {
+          "tenantId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "memberId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "placementId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "physicalInstanceId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "mode": {
+            "type": "string",
+            "enum": [
+              "shared",
+              "dedicated"
+            ]
+          },
+          "epoch": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991,
+            "format": "int64"
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991,
+            "format": "int64"
+          }
+        }
+      },
+      "GuardianImpact": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "schemaVersion",
+          "tenantId",
+          "physicalInstanceId",
+          "operationId",
+          "reason",
+          "scope",
+          "affected",
+          "state",
+          "observedAt"
+        ],
+        "properties": {
+          "schemaVersion": {
+            "const": 1,
+            "type": "integer",
+            "format": "int64"
+          },
+          "tenantId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "physicalInstanceId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "operationId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "reason": {
+            "type": "string",
+            "enum": [
+              "resource-expired",
+              "resource-revoked",
+              "cancel-timeout",
+              "credential-stop-unconfirmed",
+              "crash"
+            ]
+          },
+          "scope": {
+            "const": "pool",
+            "type": "string"
+          },
+          "affected": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "$ref": "#/components/schemas/Binding"
+            }
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "stopping",
+              "stopped",
+              "blocked"
+            ]
+          },
+          "observedAt": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991,
+            "format": "int64"
+          }
+        }
+      },
+      "DshDedicatedEntitlement": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "memberId",
+          "granted",
+          "revision"
+        ],
+        "properties": {
+          "memberId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "granted": {
+            "type": "boolean"
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991,
+            "format": "int64"
+          }
+        }
+      },
+      "DshMemberPlacement": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "memberId",
+          "entitlement"
+        ],
+        "properties": {
+          "memberId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "entitlement": {
+            "$ref": "#/components/schemas/DshDedicatedEntitlement"
+          },
+          "placement": {
+            "$ref": "shared-dsh.yaml#/components/schemas/DshPlacement"
+          }
+        }
+      },
+      "DshEntitlementRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "granted",
+          "reason"
+        ],
+        "properties": {
+          "granted": {
+            "type": "boolean"
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 512
+          }
+        }
+      },
+      "DshRebuildMember": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "memberId",
+          "legacyInstanceId",
+          "targetMode"
+        ],
+        "properties": {
+          "memberId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "legacyInstanceId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "targetMode": {
+            "$ref": "shared-dsh.yaml#/components/schemas/DshInstanceMode"
+          }
+        }
+      },
+      "DshRebuildPlanRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "members",
+          "reason"
+        ],
+        "properties": {
+          "members": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DshRebuildMember"
+            },
+            "minItems": 1,
+            "maxItems": 1000
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 512
+          }
+        }
+      },
+      "DshRebuildPlan": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "planId",
+          "revision",
+          "state",
+          "members",
+          "reason"
+        ],
+        "properties": {
+          "planId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991,
+            "format": "int64"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "draft",
+              "running",
+              "completed",
+              "blocked"
+            ]
+          },
+          "members": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DshRebuildMember"
+            },
+            "minItems": 1,
+            "maxItems": 1000
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 512
+          }
+        }
+      },
+      "DshRebuildStartRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "exportConfirmed",
+          "sessionPolicy",
+          "filePolicy"
+        ],
+        "properties": {
+          "exportConfirmed": {
+            "type": "boolean",
+            "const": true
+          },
+          "sessionPolicy": {
+            "type": "string",
+            "enum": [
+              "discard"
+            ]
+          },
+          "filePolicy": {
+            "type": "string",
+            "enum": [
+              "archive-and-reset"
+            ]
+          }
+        }
+      },
+      "DshRebuildMemberProgress": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "memberId",
+          "revision",
+          "sessionsDiscarded",
+          "workspaceEmpty",
+          "state"
+        ],
+        "properties": {
+          "memberId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "operationId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991,
+            "format": "int64"
+          },
+          "sessionsDiscarded": {
+            "type": "boolean"
+          },
+          "workspaceEmpty": {
+            "type": "boolean"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "accepted",
+              "fencing",
+              "draining",
+              "preparing",
+              "committing",
+              "succeeded",
+              "failed",
+              "blocked"
+            ]
+          },
+          "failureCode": {
+            "type": "string",
+            "enum": [
+              "capacity",
+              "stop-unconfirmed",
+              "prepare-failed",
+              "revoked",
+              "recovery-required"
+            ]
+          }
+        },
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "state": {
+                  "enum": [
+                    "failed",
+                    "blocked"
+                  ]
+                }
+              },
+              "required": [
+                "state"
+              ]
+            },
+            "then": {
+              "properties": {
+                "failureCode": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "failureCode"
+              ]
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "state": {
+                  "const": "succeeded"
+                }
+              },
+              "required": [
+                "state"
+              ]
+            },
+            "then": {
+              "required": [
+                "operationId"
+              ],
+              "properties": {
+                "operationId": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "failureCode": false,
+                "sessionsDiscarded": {
+                  "const": true
+                },
+                "workspaceEmpty": {
+                  "const": true
+                }
+              }
+            }
+          }
+        ]
+      },
+      "DshRebuildProgress": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "planId",
+          "revision",
+          "state",
+          "members"
+        ],
+        "properties": {
+          "planId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991,
+            "format": "int64"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "running",
+              "completed",
+              "blocked"
+            ]
+          },
+          "members": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DshRebuildMemberProgress"
+            }
+          }
+        }
+      },
+      "DshPoolCapacity": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "physicalInstanceId",
+          "registered",
+          "active",
+          "registeredLimit",
+          "activeLimit",
+          "perMemberActiveLimit",
+          "memoryUsedBytes",
+          "memoryLimitBytes",
+          "admissionMemoryPercent",
+          "workspaceBytesPerMember",
+          "workspaceInodesPerMember",
+          "accepting"
+        ],
+        "properties": {
+          "physicalInstanceId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "registered": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991,
+            "format": "int64"
+          },
+          "active": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991,
+            "format": "int64"
+          },
+          "registeredLimit": {
+            "type": "integer",
+            "const": 20,
+            "format": "int64"
+          },
+          "activeLimit": {
+            "type": "integer",
+            "const": 4,
+            "format": "int64"
+          },
+          "perMemberActiveLimit": {
+            "type": "integer",
+            "const": 1,
+            "format": "int64"
+          },
+          "memoryUsedBytes": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991,
+            "format": "int64"
+          },
+          "memoryLimitBytes": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991,
+            "format": "int64"
+          },
+          "admissionMemoryPercent": {
+            "type": "integer",
+            "const": 80,
+            "format": "int64"
+          },
+          "workspaceBytesPerMember": {
+            "type": "integer",
+            "const": 5368709120,
+            "format": "int64"
+          },
+          "workspaceInodesPerMember": {
+            "type": "integer",
+            "const": 100000,
+            "format": "int64"
+          },
+          "accepting": {
+            "type": "boolean"
+          }
+        }
+      },
+      "DshCapacitySnapshot": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "observedAt",
+          "validUntil",
+          "pools",
+          "impacts"
+        ],
+        "properties": {
+          "observedAt": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991,
+            "format": "int64"
+          },
+          "validUntil": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991,
+            "format": "int64"
+          },
+          "pools": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DshPoolCapacity"
+            }
+          },
+          "impacts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/GuardianImpact"
+            }
+          }
+        }
+      }
+    }
+  }
+}

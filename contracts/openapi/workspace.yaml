@@ -24,6 +24,22 @@ tags:
   - name: instance-api
   - name: connect
 paths:
+  /admin/members/{memberId}/placement:
+    $ref: 'shared-dsh-admin.yaml#/paths/~1admin~1members~1{memberId}~1placement'
+  /admin/members/{memberId}/dedicated-entitlement:
+    $ref: 'shared-dsh-admin.yaml#/paths/~1admin~1members~1{memberId}~1dedicated-entitlement'
+  /admin/members/{memberId}/placement-switches/lookup:
+    $ref: 'shared-dsh-admin.yaml#/paths/~1admin~1members~1{memberId}~1placement-switches~1lookup'
+  /admin/placement-rebuild-plans:
+    $ref: 'shared-dsh-admin.yaml#/paths/~1admin~1placement-rebuild-plans'
+  /admin/placement-rebuild-plans/{planId}:
+    $ref: 'shared-dsh-admin.yaml#/paths/~1admin~1placement-rebuild-plans~1{planId}'
+  /admin/placement-rebuild-plans/{planId}/start:
+    $ref: 'shared-dsh-admin.yaml#/paths/~1admin~1placement-rebuild-plans~1{planId}~1start'
+  /admin/placement-rebuild-plans/{planId}/progress:
+    $ref: 'shared-dsh-admin.yaml#/paths/~1admin~1placement-rebuild-plans~1{planId}~1progress'
+  /admin/placement-capacity:
+    $ref: 'shared-dsh-admin.yaml#/paths/~1admin~1placement-capacity'
   /me/placement/open:
     $ref: 'shared-dsh.yaml#/paths/~1me~1placement~1open'
   /me/placement:

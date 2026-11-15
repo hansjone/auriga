@@ -51,6 +51,22 @@ for (const service of [
     for (const child of Object.values(value)) preserveSignatureText(child);
   }
   preserveSignatureText(spec);
+  if (service === 'workspace') {
+    // Generator 7.26.0 renders a boolean const as an enum with String values,
+    // which does not compile. Preserve the original wire/schema contract and
+    // project the equivalent bean validation constraint for Java generation.
+    function projectBooleanConstants(value) {
+      if (!value || typeof value !== 'object') return;
+      if (value.type === 'boolean' && typeof value.const === 'boolean') {
+        value['x-field-extra-annotation'] = value.const
+          ? '@jakarta.validation.constraints.AssertTrue'
+          : '@jakarta.validation.constraints.AssertFalse';
+        delete value.const;
+      }
+      for (const child of Object.values(value)) projectBooleanConstants(child);
+    }
+    projectBooleanConstants(spec);
+  }
   if (service === 'network-keys-v2') {
     const javaSpec = structuredClone(spec);
     const models = javaSpec.components.schemas;
