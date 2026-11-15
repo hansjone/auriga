@@ -3,6 +3,8 @@ import { performance } from 'node:perf_hooks';
 import { request as httpsRequest } from 'node:https';
 import { lookup } from 'node:dns/promises';
 
+export const MAX_ENTERPRISE_BODY = 2 * 1024 * 1024;
+
 const requestHeaders = new Set([
   'content-type',
   'accept',
@@ -52,27 +54,31 @@ const json = (
 const failure = (/** @type {number} */ status, /** @type {string} */ error) =>
   Object.assign(new Error(error), { status, code: error });
 
-/** HTTPS only, no redirects; resolve once and pin that address to the TLS request.
- * The hostname remains the certificate/SNI identity. Private hosts are explicitly
- * selected by installation config, never by a caller's headers or DNS override.
- * @param {URL} url @param {any} options */
-export async function enterpriseRequest(url, options) {
+/** The shared enterprise transport sends one HTTPS request to a pinned address.
+ * Callers supply their admission check. URL authority owns Host, SNI and
+ * certificate identity. No pooling or redirect can change the pinned target.
+ * @param {URL} url @param {{address:string,family:number}} address
+ * @param {{method:string,headers:import('node:http').OutgoingHttpHeaders,body?:string|Buffer,signal:AbortSignal,check:()=>void}} options */
+export function requestPinnedEnterpriseHttps(url, address, options) {
+  if (
+    url.protocol !== 'https:' ||
+    url.username ||
+    url.password ||
+    url.hash ||
+    Object.keys(options.headers).some((key) => key.toLowerCase() === 'host')
+  )
+    throw new Error('invalid enterprise HTTPS target');
   options.signal.throwIfAborted();
-  /** @type {Awaited<ReturnType<typeof lookup>>} */
-  const address = await new Promise((resolve, reject) => {
-    const abort = () => reject(new Error('request cancelled'));
-    options.signal.addEventListener('abort', abort, { once: true });
-    lookup(url.hostname, { family: 0 })
-      .then(resolve, reject)
-      .finally(() => options.signal.removeEventListener('abort', abort));
-  });
   options.check();
+  /** @type {Promise<{statusCode:number|undefined,headers:import('node:http').IncomingHttpHeaders,body:Buffer}>} */
   return new Promise((resolve, reject) => {
     const req = httpsRequest(
       url,
       {
         method: options.method,
         headers: options.headers,
+        agent: false,
+        rejectUnauthorized: true,
         lookup: (_hostname, lookupOptions, callback) => {
           if (/** @type {any} */ (lookupOptions).all)
             callback(null, [
@@ -87,30 +93,46 @@ export async function enterpriseRequest(url, options) {
         let size = 0;
         res.on('data', (chunk) => {
           size += chunk.length;
-          if (size > 2097152) res.destroy(new Error('response limit'));
+          if (size > MAX_ENTERPRISE_BODY)
+            res.destroy(new Error('response limit'));
           else chunks.push(chunk);
         });
         res.on('error', reject);
-        res.on('end', () => {
-          const body = Buffer.concat(chunks).toString('utf8');
-          let value = null;
-          try {
-            value = JSON.parse(body);
-          } catch {
-            /* Non-JSON is a valid upstream body. */
-          }
+        res.on('end', () =>
           resolve({
             statusCode: res.statusCode,
             headers: res.headers,
-            body,
-            json: value,
-          });
-        });
+            body: Buffer.concat(chunks),
+          }),
+        );
       },
     );
     req.on('error', reject);
     req.end(options.body);
   });
+}
+
+/** Resolve once after the skill's private host/scope checks, then pin HTTPS.
+ * @param {URL} url @param {any} options */
+export async function enterpriseRequest(url, options) {
+  options.signal.throwIfAborted();
+  /** @type {Awaited<ReturnType<typeof lookup>>} */
+  const address = await new Promise((resolve, reject) => {
+    const abort = () => reject(new Error('request cancelled'));
+    options.signal.addEventListener('abort', abort, { once: true });
+    lookup(url.hostname, { family: 0 })
+      .then(resolve, reject)
+      .finally(() => options.signal.removeEventListener('abort', abort));
+  });
+  const response = await requestPinnedEnterpriseHttps(url, address, options);
+  const body = response.body.toString('utf8');
+  let value = null;
+  try {
+    value = JSON.parse(body);
+  } catch {
+    /* Non-JSON is a valid upstream body. */
+  }
+  return { ...response, body, json: value };
 }
 
 /** Host-only port. snapshot() must already enforce the shell snapshot deadline.

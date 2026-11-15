@@ -1,6 +1,6 @@
 import { afterEach, expect, it, vi } from 'vitest';
-import { registerPanel } from '../src/index';
-import { mountPanel, type NativeWrapper } from './native-host';
+import { registerPanel, type AurigaTeamPanel } from '../src/index';
+import { mountPanel, NativeWrapper } from './native-host';
 const wrappers: NativeWrapper[] = [];
 afterEach(() => wrappers.splice(0).forEach((wrapper) => wrapper.unmount()));
 it('rejects a foreign constructor instead of silently treating it as this module', () => {
@@ -80,4 +80,30 @@ it('has no product palette, font stack or standalone theme controls', () => {
   expect(css).toContain('--dsw-focus-ring-color');
   expect(wrapper.attributes('data-theme')).toBe(null);
   expect(wrapper.findAll('select,[data-theme-toggle]')).toHaveLength(0);
+});
+
+it('showTab switches the resource view for a host-owned tab bar', async () => {
+  registerPanel();
+  const panel = document.createElement('auriga-team-panel') as AurigaTeamPanel;
+  panel.context = {
+    mode: 'connect',
+    protocol: 1,
+    locale: 'en',
+    fetch: async () =>
+      new Response(JSON.stringify({ items: [] }), {
+        headers: { 'content-type': 'application/json' },
+      }),
+  };
+  document.body.append(panel);
+  const wrapper = new NativeWrapper(panel);
+  wrappers.push(wrapper);
+  expect(wrapper.find('[role="tab"][aria-selected="true"]').text()).toBe(
+    'Resource market',
+  );
+  panel.showTab('mine');
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  expect(wrapper.text()).toContain('installation inventory is unavailable');
+  expect(wrapper.find('[role="tab"][aria-selected="true"]').text()).toBe(
+    'My resources',
+  );
 });

@@ -67,7 +67,7 @@ export function canonicalize(value, limits = {}) {
 
 /** Reject ambiguous wire JSON before its original representation is lost.
  * @param {Uint8Array} bytes
- * @param {{maxBytes?:number,maxArray?:number,maxNodes?:number,maxDepth?:number}} [limits]
+ * @param {{maxBytes?:number,maxArray?:number,maxNodes?:number,maxDepth?:number,allowFiniteNumbers?:boolean}} [limits]
  * @returns {any}
  */
 export function parseStrictJson(bytes, limits = {}) {
@@ -87,6 +87,9 @@ export function parseStrictJson(bytes, limits = {}) {
   }
   let i = 0;
   let count = 0;
+  const number = limits.allowFiniteNumbers
+    ? /^(?:true|false|null|-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?)/
+    : /^(?:true|false|null|-?(?:0|[1-9][0-9]*))/;
   const ws = () => {
     while (i < text.length && ' \t\r\n'.includes(text[i])) i++;
   };
@@ -165,13 +168,16 @@ export function parseStrictJson(bytes, limits = {}) {
         bad('expected array end');
       }
     }
-    const token = /^(?:true|false|null|-?(?:0|[1-9][0-9]*))/.exec(
-      text.slice(i),
-    );
+    const token = number.exec(text.slice(i));
     if (!token) return bad('invalid value');
     i += token[0].length;
     const value = JSON.parse(token[0]);
-    if (typeof value === 'number' && !Number.isSafeInteger(value))
+    if (
+      typeof value === 'number' &&
+      !(limits.allowFiniteNumbers
+        ? Number.isFinite(value)
+        : Number.isSafeInteger(value))
+    )
       bad('unsafe number');
     return value;
   }

@@ -17,6 +17,7 @@ export function surfaceHost(
     consentFetch,
     settingsFetch,
     remote,
+    hash = '',
   } = {},
 ) {
   const dom = new JSDOM('<html><head></head><body></body></html>', {
@@ -27,7 +28,8 @@ export function surfaceHost(
   document.title = title;
   const modules = new Map(),
     moduleImports = [];
-  const navigations = [];
+  const navigations = [],
+    selections = [];
   const completeScript = (
     script,
     Constructor = class extends window.HTMLElement {},
@@ -169,7 +171,8 @@ export function surfaceHost(
       else if (key === 'className') node.className = prop;
       // React applies boolean DOM properties; disabled={false} is not an HTML
       // disabled="false" attribute (which would still disable the element).
-      else if (key === 'disabled') node.disabled = Boolean(prop);
+      else if (key === 'disabled' || key === 'hidden')
+        node[key] = Boolean(prop);
       else if (key !== 'key') node.setAttribute(key, String(prop));
     }
     value.children.forEach((child, i) =>
@@ -228,6 +231,8 @@ export function surfaceHost(
     ['sidebar.panellist', 'list'],
     ['settings.section', 'list'],
     ['settings.models.provider-card', 'keyed'],
+    ['sidebar.brand.mark', 'single'],
+    ['sidebar.brand.name', 'single'],
   ]);
   const counts = { registered: 0, unregistered: 0, timers: new Map() };
   let dictionary,
@@ -336,7 +341,7 @@ export function surfaceHost(
       window: new Proxy(window, {
         get(target, key) {
           if (key === 'location')
-            return { assign: (url) => navigations.push(String(url)) };
+            return { hash, assign: (url) => navigations.push(String(url)) };
           return Reflect.get(target, key);
         },
       }),
@@ -409,6 +414,20 @@ export function surfaceHost(
     },
   );
   const ctx = {
+    inject(names, apply) {
+      if (names.length === 1 && names[0] === 'layout')
+        apply({
+          layout: {
+            selectPanel(id) {
+              if (registrations.get('main')?.meta.key !== id)
+                throw new Error(
+                  'The panel must be registered before selection',
+                );
+              selections.push(id);
+            },
+          },
+        });
+    },
     get(name) {
       return name === 'remote' ? remote : undefined;
     },
@@ -475,6 +494,7 @@ export function surfaceHost(
     document,
     window,
     navigations,
+    selections,
     registrations,
     primitives,
     counts,
