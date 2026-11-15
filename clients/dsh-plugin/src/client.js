@@ -1728,7 +1728,7 @@ window.__ModuleLoader__.load({
             content,
           );
         }
-        function Settings({ embedded = false } = {}) {
+        function Settings({ embedded = false, gotoOverview } = {}) {
           const host = useHostState();
           const [phase, retry] = useBootstrap();
           const boot = phase.status === 'ready' ? phase.boot : undefined;
@@ -1767,6 +1767,7 @@ window.__ModuleLoader__.load({
                   locale: host.locale,
                   boot,
                   consent: h(ConsentSection, { settings: true }),
+                  gotoOverview,
                 })
               : h(
                   'p',
@@ -2890,7 +2891,14 @@ window.__ModuleLoader__.load({
             panel('inbox', h(ConsentSection)),
             panel(
               'settings',
-              tab === 'settings' && h(Settings, { embedded: true }),
+              tab === 'settings' &&
+                h(Settings, {
+                  embedded: true,
+                  gotoOverview: () => {
+                    setTab('overview');
+                    reloadShell();
+                  },
+                }),
             ),
           );
         }

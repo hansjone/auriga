@@ -1,5 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import {
   surfaceHost,
   flush,
@@ -88,6 +89,118 @@ test('desktop update polling refreshes the native banner and releases its interv
     host.close();
   }
 });
+
+for (const locale of ['zh-CN', 'en'])
+  test(`settings sign-in opens the inline login in the Overview tab: ${locale}`, async () => {
+    const commands = [];
+    let authenticating = false;
+    const localBoot = {
+      mode: 'connect',
+      protocol: 1,
+      pluginVersion: '0.0.0',
+      status: 'disconnected',
+      connection: { connected: false },
+      localPanel: {
+        source: 'package',
+        version: '0.0.0',
+        entry: 'auriga/local-panel.js',
+        integrity: 'sha384-YQ==',
+      },
+      fetchBase: null,
+    };
+    const host = surfaceHost(
+      async (url, init = {}) => {
+        const path = new URL(url).pathname;
+        if (path.endsWith('/shell/command')) {
+          commands.push(init);
+          authenticating = true;
+          return response(200, {});
+        }
+        if (path.endsWith('/shell/status'))
+          return response(200, {
+            loggedIn: false,
+            connected: false,
+            configured: true,
+            platform: authenticating ? 'authenticating' : 'signed_out',
+            brokerAvailable: true,
+            csrf: 'settings-login-csrf',
+            ...(authenticating
+              ? {
+                  inlineLogin: {
+                    providerId: '11111111-2222-4333-8444-555555555555',
+                    providers: [
+                      {
+                        id: '11111111-2222-4333-8444-555555555555',
+                        connectorType: 'team-account',
+                        displayName: { zh: '团队账号', en: 'Team account' },
+                      },
+                    ],
+                    step: {
+                      type: 'form',
+                      formId: 'password',
+                      fields: [
+                        {
+                          name: 'password',
+                          kind: 'password',
+                          label: { zh: '口令', en: 'Password' },
+                        },
+                      ],
+                    },
+                  },
+                }
+              : {}),
+          });
+        return response(200, localBoot);
+      },
+      {
+        locale,
+        settingsFetch: async (url) => {
+          if (String(url).endsWith('/view.js')) {
+            return new Response(
+              readFileSync(
+                new URL(
+                  '../../../clients/dsh-plugin/src/settings/view.js',
+                  import.meta.url,
+                ),
+                'utf8',
+              ),
+            );
+          }
+          return response(200, {
+            mode: 'connect',
+            platformOrigin: 'https://example.com',
+            activeOrigin: 'https://example.com',
+          });
+        },
+      },
+    );
+    let main;
+    try {
+      main = host.mount('main');
+      const settings = await openSettings(main);
+      await flush();
+      assert.equal(settings.root.hidden, false);
+      button(settings.root, locale === 'en' ? 'Sign in' : '登录').click();
+      await flush();
+      assert.equal(commands.length, 1);
+      assert.deepEqual(JSON.parse(commands[0].body), {
+        action: 'inline_login',
+      });
+      assert.equal(commands[0].headers['x-auriga-csrf'], 'settings-login-csrf');
+      assert.equal(
+        main.root.querySelector('#auriga-panel-settings').hidden,
+        true,
+      );
+      const overview = main.root.querySelector('#auriga-panel-overview');
+      assert.equal(overview.hidden, false);
+      assert.ok(overview.querySelector('input[type="password"]'));
+      assert.deepEqual(host.navigations, []);
+    } finally {
+      main?.close();
+      host.dispose();
+      host.close();
+    }
+  });
 
 test('plugin loading and panel mounting preserve the native host title', async () => {
   const title = 'DSH · Existing session';

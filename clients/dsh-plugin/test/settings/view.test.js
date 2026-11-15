@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { setImmediate } from 'node:timers/promises';
 import { createSettingsView } from '../../src/settings/view.js';
 
-function harness(fetcher, locale = 'zh') {
+function harness(fetcher, locale = 'zh', gotoOverview) {
   const values = [],
     effects = [];
   let cursor = 0,
@@ -50,7 +50,11 @@ function harness(fetcher, locale = 'zh') {
   return {
     render() {
       cursor = 0;
-      const tree = View({ locale, consent: 'consent-capability-marker' });
+      const tree = View({
+        locale,
+        consent: 'consent-capability-marker',
+        gotoOverview,
+      });
       effects.splice(0).forEach((fn) => fn());
       return tree;
     },
@@ -521,6 +525,71 @@ for (const locale of ['zh', 'en'])
           fixture.dispose();
         }
       });
+
+for (const locale of ['zh', 'en'])
+  test(`settings sign-in starts inline and opens Overview with CSRF: ${locale}`, async (t) => {
+    const calls = [];
+    let overviewCount = 0;
+    const fixture = harness(
+      async (url, init) => {
+        if (url.endsWith('/shell/command')) {
+          calls.push(init);
+          return Response.json({});
+        }
+        return Response.json(
+          url.endsWith('/status')
+            ? { loggedIn: false, connected: false, csrf: 'test-csrf' }
+            : settings,
+        );
+      },
+      locale,
+      () => {
+        overviewCount++;
+      },
+    );
+    t.after(() => fixture.dispose());
+    fixture.render();
+    await setImmediate();
+    await button(
+      fixture.render(),
+      locale === 'zh' ? '登录' : 'Sign in',
+    ).props.onClick();
+    await setImmediate();
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].method, 'POST');
+    assert.equal(calls[0].headers['x-auriga-csrf'], 'test-csrf');
+    assert.equal(calls[0].credentials, 'same-origin');
+    assert.deepEqual(JSON.parse(calls[0].body), { action: 'inline_login' });
+    assert.equal(overviewCount, 1);
+    assert.equal(fixture.navigated, undefined);
+  });
+
+test('failed settings inline sign-in shows its error before any Overview transition', async (t) => {
+  let overviewCount = 0;
+  const fixture = harness(
+    async (url) => {
+      if (url.endsWith('/shell/command'))
+        return Response.json({}, { status: 503 });
+      return Response.json(
+        url.endsWith('/status')
+          ? { loggedIn: false, connected: false, csrf: 'test-csrf' }
+          : settings,
+      );
+    },
+    'zh',
+    () => {
+      overviewCount++;
+    },
+  );
+  t.after(() => fixture.dispose());
+  fixture.render();
+  await setImmediate();
+  await button(fixture.render(), '登录').props.onClick();
+  await setImmediate();
+  assert.equal(overviewCount, 0);
+  assert.match(text(fixture.render()), /状态接口返回 HTTP 503/);
+  assert.equal(fixture.navigated, undefined);
+});
 
 test('R2 logout sends the explicit shell command with CSRF and refreshes status', async () => {
   let status = signedIn,
