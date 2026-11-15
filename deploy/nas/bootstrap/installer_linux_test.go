@@ -158,6 +158,37 @@ func TestNASFixedInstallerAndReceipt(t *testing.T) {
 				if before != nasSnapshot(t, out) {
 					t.Fatal("reentry changed source")
 				}
+				t.Run("optional-uac-reentry", func(t *testing.T) {
+					uac := filepath.Join(out, "uac")
+					if err := os.Remove(uac); err != nil {
+						t.Fatal(err)
+					}
+					if b, err := invoke(out); err != nil {
+						t.Fatalf("missing UAC: %v %s", err, b)
+					}
+					if err := os.Mkdir(uac, 0o750); err != nil {
+						t.Fatal(err)
+					}
+					if err := os.Chown(uac, 10001, 10001); err != nil {
+						t.Fatal(err)
+					}
+					for _, name := range []string{"uac.properties", "adapter.json", "members.json"} {
+						path := filepath.Join(uac, name)
+						if err := os.WriteFile(path, []byte("private fixture"), 0o640); err != nil {
+							t.Fatal(err)
+						}
+						if err := os.Chown(path, 10001, 10001); err != nil {
+							t.Fatal(err)
+						}
+					}
+					populated := nasSnapshot(t, out)
+					if b, err := invoke(out); err != nil {
+						t.Fatalf("populated UAC: %v %s", err, b)
+					}
+					if populated != nasSnapshot(t, out) {
+						t.Fatal("UAC reentry changed materials")
+					}
+				})
 				return
 			}
 			switch kind {

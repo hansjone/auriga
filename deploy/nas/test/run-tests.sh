@@ -311,11 +311,19 @@ if [ -x "$ROOT/bin/auriga-nas-bootstrap" ] && command -v openssl >/dev/null 2>&1
           docker compose -f "$ROOT/docker-compose.yml" --env-file "$DATA/stack.env" config --format json) >"$TMP/source-compose.json" \
         && python3 -c 'import json,sys; e=json.load(open(sys.argv[1]))["services"]["platform"]["environment"]; assert str(e["AURIGA_IAM_NETWORK_SOURCE_MAX_SECONDS"]) == sys.argv[2]; assert str(e["AURIGA_IAM_NETWORK_SOURCE_DECISION_SECONDS"]) == sys.argv[3]' "$TMP/source-compose.json" "$1" "$2"; then
         pass "source_authority_compose_$1"
+        if python3 "$ROOT/test/client-registration.py" "$TMP/source-compose.json"; then
+          pass "public_clients_and_uac_mount_$1"
+        else fail_msg public_clients_and_uac_mount "normalized client registration or mount differs"; fi
       else fail_msg "source_authority_compose_$1" "normalized override lost"; fi
     else printf 'SKIP source_authority_compose (need Docker Compose and Python 3)\n'; fi
   done
+  # Simulate an older receipted installation without optional UAC materials.
+  rmdir "$DATA/config/materials/uac"
   sh "$ROOT/scripts/render.sh" >"$TMP/source-render.log" 2>&1 \
     || fail_msg source_authority_restore "default render failed"
+  if [ "$(stat -c '%u:%g:%a' "$DATA/config/materials/uac")" = 10001:10001:750 ]; then
+    pass optional_uac_missing_render
+  else fail_msg optional_uac_missing_render "missing UAC bind source must be private before Compose"; fi
   if [ "$NAS_ALLOW_NONROOT" != 1 ]; then
     if [ "$(stat -c '%u:%a' "$DATA/config/postgres/init.sql")" = 999:600 ] \
       && [ "$(stat -c '%u:%g:%a' "$DATA/socket-share")" = 0:65532:750 ]; then

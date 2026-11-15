@@ -61,6 +61,8 @@ class EmergencyPolicyTests(unittest.TestCase):
                   'SCOPES': 'auriga.connect', 'GRANTS': 'urn:ietf:params:oauth:grant-type:device_code,refresh_token',
                   'PLATFORM': 'true', 'NATIVECONNECT': 'false'}
         self.environment = {'AURIGA_IAM_CLIENTS_0_' + key: value for key, value in native.items()}
+        self.environment.update({'AURIGA_IAM_CLIENTS_1_' + key: value for key, value in
+                                 dict(native, ID='auriga-dsh-native', NATIVECONNECT='true').items()})
         self.environment.update({
             'AURIGA_LINKS_TRUSTED_PROXIES': '192.0.2.138', 'SPRING_PROFILES_ACTIVE': 'combined',
             'AURIGA_IAM_NETWORK_SOURCE_MAX_SECONDS': '3600', 'AURIGA_IAM_NETWORK_SOURCE_DECISION_SECONDS': '60',
@@ -81,6 +83,17 @@ class EmergencyPolicyTests(unittest.TestCase):
             except SystemExit as error:
                 result = error.code
         return result, output.getvalue()
+
+    def test_native_client_registration_is_exact(self):
+        for key, value in [('AURIGA_IAM_CLIENTS_1_ID', 'auriga-dsh'),
+                           ('AURIGA_IAM_CLIENTS_1_NATIVECONNECT', 'false'),
+                           ('AURIGA_IAM_CLIENTS_1_TENANT', 'other'),
+                           ('AURIGA_IAM_CLIENTS_0_NATIVECONNECT', 'true')]:
+            with self.subTest(key=key):
+                original = self.environment[key]
+                self.environment[key] = value
+                self.assertEqual(self.run_checker(), (1, 'FAIL internal_heartbeat_native_public_client_exact_registration\n'))
+                self.environment[key] = original
 
     def test_only_explicit_boolean_setting_is_allowed(self):
         for value in ('true', 'false'):

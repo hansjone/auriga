@@ -101,7 +101,9 @@ native = {
 check(
     {key: str(value) for key, value in platform_env.items()
      if key.startswith('AURIGA_IAM_CLIENTS_')}
-    == {'AURIGA_IAM_CLIENTS_0_' + key: value for key, value in native.items()},
+    == dict({'AURIGA_IAM_CLIENTS_0_' + key: value for key, value in native.items()},
+            **{'AURIGA_IAM_CLIENTS_1_' + key: value for key, value in
+               dict(native, ID='auriga-dsh-native', NATIVECONNECT='true').items()}),
     'native_public_client_exact_registration',
 )
 check(native['TENANT'] == access['tenantId'], 'native_client_matches_installation_tenant')
