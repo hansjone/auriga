@@ -1,0 +1,5 @@
+{
+  "forgejo": "https://forgejo.example.com",
+  "owner": "alice",
+  "tokenEnv": "AURIGA_FORGEJO_TOKEN"
+}
