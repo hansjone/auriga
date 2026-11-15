@@ -65,7 +65,9 @@ for (const code of ['desktop.smoke_failed', 'unexpected_failure'])
     assert.equal(await launch({ root }), 0);
     const expected =
       `${BRAND_NAME} 更新失败，已保留旧版。` +
-      (code === 'desktop.smoke_failed' ? '[desktop.smoke_failed]' : '');
+      (code === 'desktop.smoke_failed'
+        ? '[desktop.smoke_failed]'
+        : '[updateFailed/unknown]');
     // Both startup and post-exit application must retain the same safe output.
     assert.deepEqual(errors, [[expected], [expected]]);
     assert.ok(!JSON.stringify(errors).includes(sensitive));
