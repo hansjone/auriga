@@ -13,7 +13,7 @@ import {
 } from './api';
 import { adminPlacementMessages } from './adminMessages';
 import { placementMessages } from './messages';
-const { t } = useI18n({
+const { t, te } = useI18n({
   useScope: 'local',
   messages: {
     'zh-CN': {
@@ -89,7 +89,7 @@ async function access(write = false) {
     rows.value = [];
     etag.value = '';
     confirmed.value = false;
-    throw new Error('permission');
+    return false;
   }
   return true;
 }
@@ -411,8 +411,18 @@ onBeforeUnmount(() => {
     <article v-for="impact in impacts" :key="impact.operationId" role="status">
       <p>
         {{ impact.physicalInstanceId }} · {{ impact.operationId }} ·
-        {{ t('reasons.' + impact.reason) }} ·
-        {{ t('impactStates.' + impact.state) }} · {{ time(impact.observedAt) }}
+        {{
+          te('reasons.' + impact.reason)
+            ? t('reasons.' + impact.reason)
+            : t('unknown')
+        }}
+        ·
+        {{
+          te('impactStates.' + impact.state)
+            ? t('impactStates.' + impact.state)
+            : t('unknown')
+        }}
+        · {{ time(impact.observedAt) }}
       </p>
       <p>
         {{ t('affected') }}:
@@ -496,11 +506,11 @@ onBeforeUnmount(() => {
       </fieldset>
     </form>
     <p>{{ risk('policy') }}</p>
-    <details>
-      <summary>{{ risk('title') }}</summary>
+    <div class="rebuild-risks">
+      <h4>{{ risk('title') }}</h4>
       <p>{{ risk('risks') }}</p>
       <p>{{ risk('impact') }}</p>
-    </details>
+    </div>
     <label
       ><input
         v-model="confirmed"
@@ -516,7 +526,7 @@ onBeforeUnmount(() => {
       {{ t('start') }}
     </button>
     <p v-if="pending" role="alert">
-      {{ t('uncertain') }} <code>{{ pending.key }}</code>
+      {{ t('uncertain') }} <code>{{ pending.key.slice(0, 8) }}</code>
     </p>
     <button
       v-if="pending"

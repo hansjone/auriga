@@ -1,4 +1,5 @@
 import type { ApiClient, WorkspaceComponents } from '@auriga/shared';
+import { readPlacementConfig } from './placement-config';
 export type Placement = WorkspaceComponents['schemas']['DshPlacement'];
 export type PlacementOpen = WorkspaceComponents['schemas']['DshPlacementOpen'];
 const base = '/api/workspace/v1';
@@ -16,17 +17,26 @@ export function createPlacementApi(client: ApiClient) {
       }),
   };
 }
-// The portal cannot infer trusted sibling domains. Domain deployments must
-// explicitly list their trusted E origins in deployment configuration.
-export function exchangeTarget(value: string, origins: readonly string[] = []) {
+const uuid = '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}';
+const exchangePath = new RegExp(`^/(?:i/${uuid}/)?_auriga/placement-ticket$`);
+export function exchangeTarget(value: string) {
   const url = new URL(value, location.origin);
+  const { instanceParentDomain } = readPlacementConfig();
+  const poolLabel = url.hostname.split('.')[0];
+  const trustedPool =
+    !!instanceParentDomain &&
+    url.protocol === 'https:' &&
+    !url.port &&
+    new RegExp(`^${uuid}$`).test(poolLabel) &&
+    url.hostname === `${poolLabel}.${instanceParentDomain}` &&
+    url.pathname === '/_auriga/placement-ticket';
   if (
     url.username ||
     url.password ||
     url.search ||
     url.hash ||
-    ![location.origin, ...origins].includes(url.origin) ||
-    !/^\/(?:i\/[a-zA-Z0-9-]+\/)?_auriga\/placement-ticket$/.test(url.pathname)
+    (url.origin !== location.origin && !trustedPool) ||
+    !exchangePath.test(url.pathname)
   )
     throw new Error('shared.invalid_entry');
   return url;
@@ -41,31 +51,23 @@ export async function exchangePlacement(
     value.expiresAt <= Date.now() / 1000
   )
     throw new Error('shared.not_ready');
-  const origins = (import.meta.env.VITE_SHARED_DSH_EXCHANGE_ORIGINS || '')
-    .split(',')
-    .filter(Boolean);
-  const url = exchangeTarget(value.exchangeUrl, origins);
+  const url = exchangeTarget(value.exchangeUrl);
   // JSON POST only; no query string, storage, DOM input or logging of the ticket.
   const response = await fetch(url, {
     method: 'POST',
     credentials: 'include',
+    redirect: 'manual',
     cache: 'no-store',
     signal,
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ ticket: value.ticket }),
   });
-  if (!response.ok) throw new Error('shared.exchange_failed');
+  // Fetch deliberately hides a manual redirect's status and Location. Edge's
+  // ticket contract uses 302 on success; navigate to the already trusted root.
+  if (response.type !== 'opaqueredirect')
+    throw new Error('shared.exchange_failed');
   const root = url.pathname.replace(/_auriga\/placement-ticket$/, '');
   const destination = new URL(root, url.origin);
-  const final = new URL(response.url);
-  if (
-    !response.redirected ||
-    final.origin !== destination.origin ||
-    final.pathname !== destination.pathname ||
-    final.search ||
-    final.hash
-  )
-    throw new Error('shared.invalid_entry');
   signal.throwIfAborted();
   location.assign(destination.href);
 }

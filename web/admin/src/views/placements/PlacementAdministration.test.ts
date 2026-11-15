@@ -82,6 +82,7 @@ it('does not read capacity without permission', async () => {
   const w = view();
   await flushPromises();
   expect(mock.capacity).not.toHaveBeenCalled();
+  expect(w.find('[role=alert]').exists()).toBe(false);
   expect(w.find('fieldset').attributes('disabled')).toBeDefined();
   w.unmount();
 });
@@ -125,6 +126,8 @@ it('requires explicit export confirmation, preserves ETag, and treats 202 only a
   const w = view();
   await flushPromises();
   await load(w);
+  expect(w.find('.rebuild-risks').text()).toContain('审计记在被冒用者名下');
+  expect(w.find('details').exists()).toBe(false);
   await click(w, '确认导出并开始重建');
   expect(mock.start).not.toHaveBeenCalled();
   await w.find('input[type=checkbox]').setValue(true);
@@ -240,5 +243,28 @@ it('rejects a completed response that omitted the planned member', async () => {
   expect(
     w.findAll('[role=status]').some((v) => v.text().includes('全部成功')),
   ).toBe(false);
+  w.unmount();
+});
+it('uses unknown text for an unrecognized impact reason and state', async () => {
+  mock.capacity.mockResolvedValue({
+    observedAt: 1,
+    validUntil: 2,
+    pools: [],
+    impacts: [
+      {
+        operationId: 'op',
+        physicalInstanceId: planId,
+        reason: 'future-reason',
+        state: 'future-state',
+        observedAt: 1,
+        affected: [],
+      },
+    ],
+  });
+  const w = view();
+  await flushPromises();
+  expect(w.text()).not.toContain('reasons.future-reason');
+  expect(w.text()).not.toContain('impactStates.future-state');
+  expect(w.text()).toContain('未知');
   w.unmount();
 });

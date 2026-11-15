@@ -76,12 +76,15 @@ onBeforeUnmount(() => {
 <template>
   <section :aria-busy="busy">
     <h2>{{ t('title') }}</h2>
-    <p v-if="placement">{{ t(placement.mode) }} ? {{ placement.state }}</p>
+    <p v-if="placement">
+      {{ t(placement.mode) }} · {{ t('states.' + placement.state) }}
+    </p>
     <p v-if="placement && placement.state !== 'ready'" role="status">
       {{ t('waiting') }}
     </p>
     <p v-if="empty">{{ t('empty') }}</p>
     <p v-if="error" role="alert">{{ error }}</p>
+    <a v-if="expired" href="/login">{{ t('signIn') }}</a>
     <ElButton
       type="primary"
       :disabled="busy || expired || (!empty && placement?.state !== 'ready')"

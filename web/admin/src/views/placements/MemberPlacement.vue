@@ -49,14 +49,14 @@ const eligible = computed(
     (target.value === 'shared' || snapshot.value.dedicatedEntitled),
 );
 async function load() {
+  if (pendingKey.value && !globalThis.confirm(t('abandonPending'))) return;
+  pendingKey.value = '';
   const version = ++generation;
   abort.abort();
   abort = new globalThis.AbortController();
   snapshot.value = undefined;
   permissions.value = [];
   confirmed.value = false;
-  operation.value = undefined;
-  operationId.value = '';
   error.value = '';
   busy.value = true;
   try {
@@ -99,12 +99,12 @@ async function submit() {
   const version = generation;
   busy.value = true;
   error.value = '';
-  pendingKey.value = intentKey();
   try {
     const access = await adminApi.membership();
     if (version !== generation) return;
     permissions.value = access.permissions;
     if (!writable.value) throw new Error('permission');
+    pendingKey.value = intentKey();
     const result = await port.switchMember(
       props.memberId,
       {
@@ -127,6 +127,15 @@ async function submit() {
     if (version === generation) {
       error.value = t('failed') + (isApiError(e) ? ` (${e.problem.code})` : '');
       snapshot.value = undefined;
+      if (
+        (isApiError(e) &&
+          e.status >= 400 &&
+          e.status < 500 &&
+          ![408, 429].includes(e.status)) ||
+        (e instanceof Error &&
+          ['操作已取消', 'Operation cancelled'].includes(e.message))
+      )
+        pendingKey.value = '';
     }
   } finally {
     if (version === generation) {
@@ -254,6 +263,8 @@ watch(
     entitlementIntent.value = undefined;
     saved.value = false;
     reason.value = '';
+    operation.value = undefined;
+    operationId.value = '';
     void load();
   },
   { immediate: true },
@@ -286,12 +297,13 @@ onBeforeUnmount(() => {
       }}
     </p>
     <p v-if="snapshot?.placement">
-      {{ t(snapshot.placement.mode) }} · {{ snapshot.placement.state }}
+      {{ t(snapshot.placement.mode) }} ·
+      {{ t('placementStates.' + snapshot.placement.state) }}
     </p>
     <p v-else-if="snapshot">{{ t('unassigned') }}</p>
     <p v-if="saved" role="status">{{ t('entitlementSaved') }}</p>
     <p v-if="pendingKey" role="alert">
-      {{ t('uncertain') }} <code>{{ pendingKey }}</code>
+      {{ t('uncertain') }} <code>{{ pendingKey.slice(0, 8) }}</code>
     </p>
     <button
       v-if="pendingKey"
@@ -311,7 +323,7 @@ onBeforeUnmount(() => {
     </button>
     <button
       type="button"
-      :disabled="busy || disabled || inFlight || !!entitlementIntent"
+      :disabled="busy || disabled || !!entitlementIntent"
       @click="load"
     >
       {{ t('refresh') }}

@@ -11,7 +11,7 @@ Shared pools are for mutually trusted teams only. Members may see each other's f
 
 ## Member entry
 
-Sign in at the portal home, read your placement and select Open Auriga DSH. A first placement defaults to shared. Refresh pending, switching or unavailable placements; never fall back to old sessions. After entitlement and a successful switch, the same button opens your dedicated container. UAC and invited members follow identical rules. Enterprise skills come only from platform unified resources. Ask an administrator for dedicated mode for personal keys, private skills, arbitrary plugins, member-shared skills/MCP, shell or terminal.
+After the deployment administrator enables the shared placement entry, sign in at the portal home and read your placement and select Open Auriga DSH. A first placement defaults to shared. Refresh pending, switching or unavailable placements; never fall back to old sessions. After entitlement and a successful switch, the same button opens your dedicated container. UAC and invited members follow identical rules. Enterprise skills come only from platform unified resources. Ask an administrator for dedicated mode for personal keys, private skills, arbitrary plugins, member-shared skills/MCP, shell or terminal.
 
 ## Administration and recovery
 

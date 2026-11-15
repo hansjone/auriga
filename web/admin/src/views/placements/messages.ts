@@ -1,5 +1,13 @@
 export const placementMessages = {
   'zh-CN': {
+    abandonPending:
+      '放弃原幂等键并重新读取？404无法证明操作未执行。请先核对原操作状态，再决定是否提交新切换。',
+    placementStates: {
+      pending: '等待分配',
+      ready: '已就绪',
+      switching: '切换中',
+      unavailable: '暂不可用',
+    },
     unassigned: '尚未分配；授权不会创建分配。',
     grant: '授予独立容器授权',
     revoke: '撤销独立容器授权',
@@ -14,7 +22,7 @@ export const placementMessages = {
     shared: '共享模式',
     dedicated: '独立容器',
     risks:
-      '共享池仅限互信团队。成员可能互相看到文件，并可能以 owner 能力操作。原生 Cookie/browserPeer 将不同成员映射到同一 owner，/connect 也可能构造 owner；签名成员头不自动替换原生 index/WS 身份，禁 shell 等限制可能被旁路。workspaceFiles/read、readBytes、stat 可跨成员路径，绝对路径、父目录、junction、硬链接与元数据均有风险，固定目录不构成文件隔离。成员之间会话内容可见，且可能以其他成员的身份操作内部应用、审计记在被冒用者名下。A 可打开并驱动 B 的会话、读取正文与历史；企业 skill 按会话绑定 B 凭据时，会以 B 执行业务，能力校验通过也不消除冒用。内存耗尽、事件循环阻塞、崩溃影响全池。',
+      '共享池仅限互信团队。成员可能互相看到文件，并可能以 owner 能力操作。成员之间会话内容可见，且可能以其他成员的身份操作内部应用、审计记在被冒用者名下。同一进程卡死、崩溃或取消超时会中断全池任务。需要保密或独立故障域请使用独立容器。 原生 Cookie/browserPeer 将不同成员映射到同一 owner，/connect 也可能构造 owner；签名成员头不自动替换原生 index/WS 身份，禁 shell 等限制可能被旁路。workspaceFiles/read、readBytes、stat 可跨成员路径，绝对路径、父目录、junction、硬链接与元数据均有风险，固定目录不构成文件隔离。成员之间会话内容可见，且可能以其他成员的身份操作内部应用、审计记在被冒用者名下。A 可打开并驱动 B 的会话、读取正文与历史；企业 skill 按会话绑定 B 凭据时，会以 B 执行业务，能力校验通过也不消除冒用。内存耗尽、事件循环阻塞、崩溃影响全池。',
     impact:
       '进程内无法选择性硬杀本人执行，仅支持合作取消。等待30秒超时后，由外部 supervisor 保守停止整个池及执行树，会中断其他成员任务；30秒不保证完成停池，未确认停止保持 blocked。任一统一资源到期或撤销也会停全池。需要保密或独立故障域请使用独立容器。',
     policy:
@@ -61,6 +69,14 @@ export const placementMessages = {
     },
   },
   en: {
+    abandonPending:
+      'Abandon the original key and reread? A 404 cannot prove the operation never ran. Check its status before deciding to submit a new switch.',
+    placementStates: {
+      pending: 'Pending',
+      ready: 'Ready',
+      switching: 'Switching',
+      unavailable: 'Unavailable',
+    },
     unassigned: 'No placement; entitlement does not allocate one.',
     grant: 'Grant dedicated entitlement',
     revoke: 'Revoke dedicated entitlement',
@@ -75,7 +91,7 @@ export const placementMessages = {
     shared: 'Shared',
     dedicated: 'Dedicated container',
     risks:
-      'Shared pools are for mutually trusted teams only. Native cookies/browserPeer may map different members to the same owner; /connect may also create an owner. Signed member headers do not replace native index/WS identity, so restrictions including shell bans may be bypassed. Members may read each other’s files via workspaceFiles/read, readBytes and stat, including absolute paths, parent paths, junctions, hard links and metadata. Fixed working directories do not provide file isolation. Session content is visible between members. A may open and drive B’s session and read its body and history. Enterprise skills bound to B’s credentials may then operate internal applications as B, with audit attributed to B; successful capability checks do not remove impersonation. Memory exhaustion, event-loop stalls and crashes affect the entire pool.',
+      "Shared pools are for mutually trusted teams only. Members may see each other's files, act with owner capabilities, read each other's sessions and operate internal applications as another member, with audit attributed to the impersonated member. Stalls, crashes and cancellation timeouts interrupt the entire pool. Use a dedicated container for confidentiality or an independent failure domain. Native cookies/browserPeer may map different members to the same owner; /connect may also create an owner. Signed member headers do not replace native index/WS identity, so restrictions including shell bans may be bypassed. Members may read each other’s files via workspaceFiles/read, readBytes and stat, including absolute paths, parent paths, junctions, hard links and metadata. Fixed working directories do not provide file isolation. Session content is visible between members. A may open and drive B’s session and read its body and history. Enterprise skills bound to B’s credentials may then operate internal applications as B, with audit attributed to B; successful capability checks do not remove impersonation. Memory exhaustion, event-loop stalls and crashes affect the entire pool.",
     impact:
       'In-process execution cannot be selectively hard-killed per member. Cooperative cancellation waits 30 seconds before the external supervisor stops the whole pool and execution tree, interrupting other members. This is not a 30-second stop guarantee; unconfirmed stops remain blocked. Expiry or revocation of any unified resource also stops the pool. Use a dedicated container for confidentiality or an independent failure domain.',
     policy:

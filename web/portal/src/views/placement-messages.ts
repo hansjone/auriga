@@ -1,5 +1,12 @@
 export const placementMessages = {
   'zh-CN': {
+    signIn: '重新登录',
+    states: {
+      pending: '等待分配',
+      ready: '已就绪',
+      switching: '切换中',
+      unavailable: '暂不可用',
+    },
     title: 'Auriga DSH',
     shared: '共享模式',
     dedicated: '独立容器',
@@ -16,6 +23,13 @@ export const placementMessages = {
     expired: '登录已失效，请重新登录。',
   },
   en: {
+    signIn: 'Sign in again',
+    states: {
+      pending: 'Pending',
+      ready: 'Ready',
+      switching: 'Switching',
+      unavailable: 'Unavailable',
+    },
     title: 'Auriga DSH',
     shared: 'Shared',
     dedicated: 'Dedicated container',

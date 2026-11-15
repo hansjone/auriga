@@ -1,13 +1,29 @@
 import { expect, it, vi, afterEach } from 'vitest';
 import { exchangeTarget, exchangePlacement } from './placement-api';
-afterEach(() => vi.unstubAllGlobals());
-it('posts ticket as JSON and navigates only after the edge root redirect', async () => {
+const id = '11111111-1111-4111-8111-111111111111';
+const origin = 'https://' + id + '.instances.example.test';
+function configure() {
+  const meta = document.createElement('meta');
+  meta.name = 'auriga-instance-parent-domain';
+  meta.content = 'instances.example.test';
+  document.head.append(meta);
+}
+afterEach(() => {
+  vi.unstubAllGlobals();
+  document
+    .querySelectorAll('meta[name="auriga-instance-parent-domain"]')
+    .forEach((tag) => tag.remove());
+});
+it('handles a cross-origin manual opaqueredirect without following the instance root', async () => {
+  configure();
   const assign = vi.fn();
-  vi.stubGlobal('location', { origin: 'http://localhost:3000', assign });
+  vi.stubGlobal('location', { origin: 'https://portal.example.test', assign });
   const fetch = vi.fn().mockResolvedValue({
-    ok: true,
-    redirected: true,
-    url: 'http://localhost:3000/i/abc/',
+    type: 'opaqueredirect',
+    status: 0,
+    ok: false,
+    url: '',
+    headers: new Headers(),
   });
   vi.stubGlobal('fetch', fetch);
   const ticket = crypto.randomUUID();
@@ -16,49 +32,62 @@ it('posts ticket as JSON and navigates only after the edge root redirect', async
       placement: {
         memberId: 'm',
         placementId: 'p',
-        mode: 'dedicated',
+        mode: 'shared',
         state: 'ready',
         epoch: 1,
         revision: 1,
       },
       ticket,
-      expiresAt: Math.floor(Date.now() / 1000) + 60,
-      exchangeUrl: '/i/abc/_auriga/placement-ticket',
+      expiresAt: Date.now() / 1000 + 60,
+      exchangeUrl: origin + '/_auriga/placement-ticket',
     },
     new AbortController().signal,
   );
-  expect(fetch).toHaveBeenCalledWith(
+  expect(fetch).toHaveBeenCalledExactlyOnceWith(
     expect.any(URL),
     expect.objectContaining({
       method: 'POST',
+      redirect: 'manual',
       credentials: 'include',
       body: JSON.stringify({ ticket }),
     }),
   );
   expect(String(fetch.mock.calls[0][0])).not.toContain(ticket);
-  expect(assign).toHaveBeenCalledWith('http://localhost:3000/i/abc/');
+  expect(assign).toHaveBeenCalledExactlyOnceWith(origin + '/');
 });
-it('allows only configured ticket endpoints, without query/fragment or credentials', () => {
-  expect(exchangeTarget('/i/abc/_auriga/placement-ticket').pathname).toBe(
-    '/i/abc/_auriga/placement-ticket',
+it('only accepts exact runtime pool domains and canonical lowercase UUID paths', () => {
+  configure();
+  expect(
+    exchangeTarget('/i/' + id + '/_auriga/placement-ticket').pathname,
+  ).toBe('/i/' + id + '/_auriga/placement-ticket');
+  expect(exchangeTarget(origin + '/_auriga/placement-ticket').origin).toBe(
+    origin,
   );
   for (const path of [
-    'https://evil.example/_auriga/placement-ticket',
+    'http://' + id + '.instances.example.test/_auriga/placement-ticket',
+    origin + ':8443/_auriga/placement-ticket',
+    'https://attacker.instances.example.test/_auriga/placement-ticket',
+    origin + '.evil.test/_auriga/placement-ticket',
+    'https://' + id + '.nested.instances.example.test/_auriga/placement-ticket',
+    '/i/abc/_auriga/placement-ticket',
+    '/i/aaaaaaaa-AAAA-aaaa-aaaa-aaaaaaaaaaaa/_auriga/placement-ticket',
     '/_auriga/placement-ticket?ticket=x',
     '/_auriga/placement-ticket#x',
     '//evil.example/x',
     '/open/abc',
     '/_auriga/../other',
+    'https://user:password@' +
+      id +
+      '.instances.example.test/_auriga/placement-ticket',
   ])
     expect(() => exchangeTarget(path)).toThrow();
-  expect(
-    exchangeTarget('https://dsh.example/_auriga/placement-ticket', [
-      'https://dsh.example',
-    ]).origin,
-  ).toBe('https://dsh.example');
 });
-it('does not send expired or nonready tickets', async () => {
-  const fetch = vi.fn();
+it('rejects failed exchange and expired/nonready tickets without navigation', async () => {
+  const assign = vi.fn();
+  vi.stubGlobal('location', { origin: 'http://localhost:3000', assign });
+  const fetch = vi
+    .fn()
+    .mockResolvedValue({ type: 'cors', status: 403, ok: false });
   vi.stubGlobal('fetch', fetch);
   const value = {
     placement: {
@@ -71,7 +100,7 @@ it('does not send expired or nonready tickets', async () => {
     },
     ticket: crypto.randomUUID(),
     expiresAt: 1,
-    exchangeUrl: '/_auriga/placement-ticket',
+    exchangeUrl: '/i/' + id + '/_auriga/placement-ticket',
   };
   await expect(
     exchangePlacement(value, new AbortController().signal),
@@ -87,4 +116,11 @@ it('does not send expired or nonready tickets', async () => {
     ),
   ).rejects.toThrow();
   expect(fetch).not.toHaveBeenCalled();
+  await expect(
+    exchangePlacement(
+      { ...value, expiresAt: Date.now() / 1000 + 60 },
+      new AbortController().signal,
+    ),
+  ).rejects.toThrow();
+  expect(assign).not.toHaveBeenCalled();
 });

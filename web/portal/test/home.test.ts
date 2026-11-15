@@ -20,6 +20,9 @@ beforeEach(async () => {
 });
 
 afterEach(() => {
+  document
+    .querySelectorAll('meta[name="auriga-shared-placement-enabled"]')
+    .forEach((tag) => tag.remove());
   vi.restoreAllMocks();
   vi.useRealTimers();
   disableAurigaMock();
@@ -27,6 +30,36 @@ afterEach(() => {
 });
 
 describe('HomeView', () => {
+  it.each([false, true])(
+    'uses the runtime placement switch enabled=%s',
+    async (enabled) => {
+      if (enabled) {
+        const meta = document.createElement('meta');
+        meta.name = 'auriga-shared-placement-enabled';
+        meta.content = 'true';
+        document.head.append(meta);
+      }
+      const router = createRouter({
+        history: createMemoryHistory(),
+        routes: [{ path: '/', component: HomeView }],
+      });
+      await router.push('/');
+      const wrapper = mount(HomeView, {
+        global: {
+          plugins: [router, createAurigaI18n('zh-CN')],
+          stubs: {
+            PlacementEntry: true,
+            InstanceCard: true,
+            DesktopDownload: true,
+          },
+        },
+      });
+      await flushPromises();
+      expect(wrapper.find('placement-entry-stub').exists()).toBe(enabled);
+      expect(wrapper.find('instance-card-stub').exists()).toBe(!enabled);
+      wrapper.unmount();
+    },
+  );
   it('displays department information and updates only the current session projection', async () => {
     const initial = await iamApi.getMe();
     vi.useFakeTimers();
@@ -53,7 +86,11 @@ describe('HomeView', () => {
     const wrapper = mount(HomeView, {
       global: {
         plugins: [router, createAurigaI18n('zh-CN')],
-        stubs: { PlacementEntry: true, DesktopDownload: true },
+        stubs: {
+          PlacementEntry: true,
+          InstanceCard: true,
+          DesktopDownload: true,
+        },
       },
     });
     await flushPromises();
@@ -84,14 +121,18 @@ describe('HomeView', () => {
     const wrapper = mount(HomeView, {
       global: {
         plugins: [router, createAurigaI18n('zh-CN')],
-        stubs: { PlacementEntry: true, DesktopDownload: true },
+        stubs: {
+          PlacementEntry: true,
+          InstanceCard: true,
+          DesktopDownload: true,
+        },
       },
     });
     await flushPromises();
     expect(wrapper.get('[data-testid=uac-department]').text()).toBe(
       '部门信息暂不可用',
     );
-    expect(wrapper.find('placement-entry-stub').exists()).toBe(true);
+    expect(wrapper.find('instance-card-stub').exists()).toBe(true);
     wrapper.unmount();
   });
   it.each([401, 403, 503])(

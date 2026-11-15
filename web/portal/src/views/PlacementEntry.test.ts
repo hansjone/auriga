@@ -8,9 +8,9 @@ beforeEach(() => {
   api.get.mockReset();
   api.post.mockReset();
 });
-function setup() {
+function setup(locale: 'zh-CN' | 'en' = 'zh-CN') {
   return mount(PlacementEntry, {
-    global: { plugins: [createAurigaI18n('zh-CN')] },
+    global: { plugins: [createAurigaI18n(locale)] },
   });
 }
 it('opens only from unassigned or ready, never posts during a switch', async () => {
@@ -19,6 +19,20 @@ it('opens only from unassigned or ready, never posts during a switch', async () 
   await flushPromises();
   expect(view.findAll('button')[0].attributes('disabled')).toBeDefined();
   expect(api.post).not.toHaveBeenCalled();
+  view.unmount();
+});
+it('shows English risk disclosure and a login action after expiry', async () => {
+  api.get.mockRejectedValue(
+    new ApiError({
+      status: 401,
+      title: 'expired',
+      code: 'common.unauthenticated',
+    }),
+  );
+  const view = setup('en');
+  await flushPromises();
+  expect(view.text()).toContain('audit attributed to that member');
+  expect(view.find('a[href="/login"]').text()).toBe('Sign in again');
   view.unmount();
 });
 it('allows first open after the contractual 404 and reports failure without fallback', async () => {
