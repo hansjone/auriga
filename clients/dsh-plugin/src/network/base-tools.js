@@ -22,7 +22,12 @@ export const BUILTIN_TOOL_NAMES = new Set([
 /** Only classified evidence is published, never raw transport errors.
  * @param {any} error */
 export function connectionReason(error) {
-  if (error?.status === 401 || error?.status === 403) return 'unauthorized';
+  if (
+    error?.status === 401 ||
+    error?.status === 403 ||
+    ['common.unauthenticated', 'common.forbidden'].includes(error?.code)
+  )
+    return 'unauthorized';
   if (
     [
       'ECONNREFUSED',

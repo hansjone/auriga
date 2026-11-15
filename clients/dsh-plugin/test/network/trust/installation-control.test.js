@@ -17,7 +17,7 @@ import {
 } from '../../../src/network/trust/installation-control.js';
 import { createFileLedgerStore } from '../../../src/network/host/store.js';
 import { openV2TrustStore } from '../../../src/network/trust/v2-store.js';
-import { createDeviceProvider } from '../../../src/network/device-provider.js';
+import { createDeviceProvider } from '../../../../shell-auth/device-provider.mjs';
 import { digest, jcs } from '../../../src/network/trust/v2.js';
 
 const spki = (pair) =>

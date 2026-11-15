@@ -2,10 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { Readable } from 'node:stream';
 import { createMemberRoutes } from '../../src/resources/member-routes.js';
-import {
-  createMemberApi,
-  installation,
-} from '../../src/resources/member-api.js';
+import { createMemberApi, installation } from './broker-fixture.js';
 import { id } from './fixtures.js';
 
 const identity = {};

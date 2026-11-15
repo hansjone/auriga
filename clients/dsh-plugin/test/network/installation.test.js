@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { generateKeyPairSync } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import ts from 'typescript';
-import { platformConfig } from '../../src/local/platform.js';
+import { platformConfig } from '../../src/local/config.js';
 
 const base = {
   platformOrigin: 'https://portal.example.com',

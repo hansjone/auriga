@@ -121,6 +121,10 @@ export function createNetworkLifecycle(options) {
                   ...input,
                   kind: 'device-connection',
                   signal: abort.signal,
+                  transportFactory:
+                    /** @type {import('./runtime-types.js').PreparedConnection} */ (
+                      prepared
+                    ).transportFactory,
                   prepared:
                     /** @type {import('./runtime-types.js').PreparedConnection} */ (
                       prepared
@@ -172,7 +176,11 @@ export function createNetworkLifecycle(options) {
           }
           runtime = undefined;
           phase = 'unavailable';
-          if (/** @type {any} */ (error)?.status === 403) reason = 'forbidden';
+          if (
+            /** @type {any} */ (error)?.status === 403 ||
+            /** @type {any} */ (error)?.code === 'common.forbidden'
+          )
+            reason = 'forbidden';
           else if (!ended) reason = 'unavailable';
           // Initial register/prepare uses the same bounded exponential retry
           // principle as transport ticket refresh. No synchronous retry loop.

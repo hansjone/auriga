@@ -35,6 +35,9 @@ export {
   totpCode,
 } from './modes/standalone.js';
 export { createManaged } from './modes/managed.js';
+export { createSharedRuntime } from './shared/runtime.js';
+export { createEnterpriseAdapter } from './shared/enterprise.js';
+export { installSharedHost, SHARED_PROFILE } from './shared/host.js';
 export { createEmergencyConnector } from './identity/emergency.js';
 export { createOidcConnector } from './identity/oidc.js';
 export {

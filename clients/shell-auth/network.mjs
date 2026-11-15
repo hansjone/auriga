@@ -178,7 +178,8 @@ export class NetworkProxy {
       )
         throw fail();
       const created = registeredHere && registration.created;
-      if (registeredHere) record.registration = { ...registration, created: false };
+      if (registeredHere)
+        record.registration = { ...registration, created: false };
       const stream = this.streams.create(context, owner, () => {
         record.streams.delete(stream.id);
         if (!record.streams.size) this.closeLink(record);
@@ -409,6 +410,7 @@ export class NetworkProxy {
       record.storageKey = prepared.storageKey;
       await prepared.refresh(trust, signal);
       record.registration = await prepared.register(signal);
+      this.check(record);
       const ticket = await prepared.getTicket(signal);
       this.check(record);
       record.until = ticket.expiresAtMs;

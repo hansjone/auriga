@@ -34,9 +34,8 @@ export interface AdapterOptions {
   hostApi: HostApi;
   /** Trusted deployment origin, with no path/query/userinfo/fragment. */
   apiBase: string;
-  fetch: typeof fetch;
-  /** In-memory broker; never receives model input and must not persist tokens. */
-  getAccessToken(signal: AbortSignal): Promise<AccessToken | null>;
+  /** OS-authenticated fixed-operation backend port; never a platform token. */
+  broker: any;
   /** Trusted exact-model facts; absence never creates capacity/capabilities. */
   modelLimits?: Record<string, Limits>;
   /** Exact token count from a trusted tokenizer, required for known contextWindow. */
