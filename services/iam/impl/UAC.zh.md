@@ -6,6 +6,8 @@ UAC 是显式配置后才能启用的身份源。通用 provider 创建只能创
 
 Compose 只读挂载 `deploy/compose/var/uac`，NAS 制品只读挂载 `${AURIGA_DATA_ROOT}/config/materials/uac` 到 `/etc/auriga/uac`。目录由部署方创建，限制为部署管理员与平台运行 UID 可读，不授予其他账号；配置文件建议 0640、目录 0750。两份 Compose 均可选导入其中 `uac.properties`。没有这个文件时保留原默认配置、UAC 仍不能启用；不要把这些私有文件放进制品或日志包。
 
+NAS 将 `uac` 作为可选运维受管目录，仅允许 `uac.properties`、`adapter.json`、`members.json` 三个普通文件；目录必须为 `10001:10001` / `0750`，文件必须为 `10001:10001` / `0640`，平台通过只读挂载读取。拒绝符号链接、硬链接、子目录、未知文件及错误元数据，不自动修复既有权限。未配置时可缺失或为空；新安装创建空目录，旧安装 render 在首次挂载前补建缺失目录。私有文件不进入生成材料的字节收据，可由部署管理员按原路径更新；每次启动仍检查其元数据。
+
 `uac.properties` 支持下列部署属性；值由部署方填写：
 
 - `auriga.iam.uac.adapter-config-file=/etc/auriga/uac/adapter.json`：私有企业协议映射。

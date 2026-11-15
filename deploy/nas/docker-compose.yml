@@ -336,6 +336,14 @@ services:
       AURIGA_IAM_CLIENTS_0_GRANTS: urn:ietf:params:oauth:grant-type:device_code,refresh_token
       AURIGA_IAM_CLIENTS_0_PLATFORM: 'true'
       AURIGA_IAM_CLIENTS_0_NATIVECONNECT: 'false'
+      AURIGA_IAM_CLIENTS_1_ID: auriga-dsh-native
+      AURIGA_IAM_CLIENTS_1_TENANT: ${AURIGA_NAS_NATIVE_CLIENT_TENANT_ID:-00000000-0000-0000-0000-000000000001}
+      AURIGA_IAM_CLIENTS_1_SECRETHASH: ''
+      AURIGA_IAM_CLIENTS_1_REDIRECTURIS: ''
+      AURIGA_IAM_CLIENTS_1_SCOPES: auriga.connect
+      AURIGA_IAM_CLIENTS_1_GRANTS: urn:ietf:params:oauth:grant-type:device_code,refresh_token
+      AURIGA_IAM_CLIENTS_1_PLATFORM: 'true'
+      AURIGA_IAM_CLIENTS_1_NATIVECONNECT: 'true'
       AURIGA_GRPC_PORT: '9091'
       AURIGA_GRPC_SERVER_HOST: 0.0.0.0
       AURIGA_GRPC_SERVER_TLS_CERT_CHAIN: /etc/auriga/pki/iam.crt
