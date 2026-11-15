@@ -107,8 +107,8 @@ func TestSharedRelayMemberRoutingAndStreamUsage(t *testing.T) {
 	}
 	mutated := calls[0]
 	mutated.Binding.Epoch++
-	if sharedRelayKey(mutated) == sharedRelayKey(calls[0]) {
-		t.Fatal("epoch omitted from key")
+	if sharedRelayKey(mutated) != sharedRelayKey(calls[0]) {
+		t.Fatal("epoch changed the stable call key")
 	}
 }
 

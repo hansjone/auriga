@@ -10,9 +10,10 @@ import (
 
 func CallKey(binding sharedauth.Binding, callID string) string {
 	key, _ := json.Marshal(struct {
-		Binding sharedauth.Binding
-		CallID  string
-	}{binding, callID})
+		TenantID string
+		MemberID string
+		CallID   string
+	}{binding.TenantID, binding.MemberID, callID})
 	digest := sha256.Sum256(key)
 	return "shared-" + hex.EncodeToString(digest[:])
 }

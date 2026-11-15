@@ -31,6 +31,7 @@ var ErrRevoked error = fault("shared.revoked")
 var ErrUnavailable error = fault("common.unavailable")
 var ErrExpired error = fault("shared.expired")
 var ErrSignature error = fault("shared.signature_invalid")
+var ErrConflict error = fault("common.conflict")
 
 // Binding is the explicit JSON mapping of K SessionBinding, not protojson.
 // Value semantics prevent requests from sharing mutable current-user state.
@@ -158,7 +159,19 @@ func (g *Gate) check(ctx context.Context, c Claims, tenant, session, task, audie
 	if !allowed(audience, scope) || !slices.Contains(c.Scopes, scope) {
 		return ErrRevoked
 	}
-	s, e := g.Resolve(ctx, Lookup{tenant, session, task, audience, c.JTI})
+	if err := g.checkAuthority(ctx, c); err != nil {
+		return err
+	}
+	// Online checks can consume the remaining lifetime; do not authorize a
+	// response that became expired while waiting on W/IAM/P.
+	if g.now().Unix() >= c.ExpiresAt {
+		return ErrExpired
+	}
+	return nil
+}
+
+func (g *Gate) checkAuthority(ctx context.Context, c Claims) error {
+	s, e := g.Resolve(ctx, Lookup{c.Binding.TenantID, c.Binding.SessionID, c.TaskID, c.Audience, c.JTI})
 	if e != nil {
 		return e
 	}
@@ -172,11 +185,6 @@ func (g *Gate) check(ctx context.Context, c Claims, tenant, session, task, audie
 		if !slices.Contains(s.Scopes, scope) {
 			return ErrRevoked
 		}
-	}
-	// Online checks can consume the remaining lifetime; do not authorize a
-	// response that became expired while waiting on W/IAM/P.
-	if g.now().Unix() >= c.ExpiresAt {
-		return ErrExpired
 	}
 	return nil
 }
@@ -268,4 +276,14 @@ func first(s []string) string {
 // Recheck is used before delivering stream chunks and queued side effects.
 func (g *Gate) Recheck(ctx context.Context, c Claims, scope string) error {
 	return g.check(ctx, c, c.Binding.TenantID, c.Binding.SessionID, c.TaskID, c.Audience, scope)
+}
+
+// RecheckModelStream renews online authorization for a model invocation already
+// admitted by Verify. Capability expiry only limits dispatch admission. Revoked
+// tasks, JTIs, scopes, credentials or bindings still terminate the running call.
+func (g *Gate) RecheckModelStream(ctx context.Context, c Claims) error {
+	if !valid(c) || c.Audience != Model || !slices.Contains(c.Scopes, "model.invoke") {
+		return ErrInvalid
+	}
+	return g.checkAuthority(ctx, c)
 }

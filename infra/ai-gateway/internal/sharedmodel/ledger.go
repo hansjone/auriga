@@ -23,7 +23,7 @@ func NewPostgresSharedLedger(s *store.Store) (*PostgresSharedLedger, error) {
 	return &PostgresSharedLedger{store: s}, nil
 }
 
-func sharedCallKey(binding sharedauth.Binding, callID string) ([]byte, [32]byte, error) {
+func sharedCallRecord(binding sharedauth.Binding, callID string) ([]byte, [32]byte, error) {
 	if !binding.Valid() || !sharedauth.UUID(callID) {
 		return nil, [32]byte{}, sharedauth.ErrInvalid
 	}
@@ -32,7 +32,7 @@ func sharedCallKey(binding sharedauth.Binding, callID string) ([]byte, [32]byte,
 }
 
 func (l *PostgresSharedLedger) Begin(ctx context.Context, binding sharedauth.Binding, callID string, fingerprint [32]byte) (bool, error) {
-	document, hash, err := sharedCallKey(binding, callID)
+	document, hash, err := sharedCallRecord(binding, callID)
 	if err != nil {
 		return false, err
 	}
@@ -45,17 +45,25 @@ func (l *PostgresSharedLedger) Begin(ctx context.Context, binding sharedauth.Bin
 			return err
 		}
 		fresh = result.RowsAffected() == 1
-		if fresh {
-			return nil
-		}
-		// A separate statement sees the winner of a concurrent INSERT after it
-		// commits. No dispatch permission is granted on an ambiguous commit.
-		var saved []byte
-		if err := tx.QueryRow(ctx, `SELECT fingerprint FROM ai.shared_model_call
- WHERE tenant_id=$1 AND binding_hash=$2 AND call_id=$3`, binding.TenantID, hash[:], callID).Scan(&saved); err != nil {
+		fence, err := tx.Exec(ctx, `INSERT INTO ai.shared_model_call_fence
+ (tenant_id,member_id,call_id,binding_hash) VALUES ($1,$2,$3,$4)
+ ON CONFLICT DO NOTHING`, binding.TenantID, binding.MemberID, callID, hash[:])
+		if err != nil {
 			return err
 		}
-		if !bytes.Equal(saved, fingerprint[:]) {
+		fresh = fresh && fence.RowsAffected() == 1
+		// A separate statement sees the winner of a concurrent INSERT after it
+		// commits. No dispatch permission is granted on an ambiguous commit.
+		var savedHash, savedFingerprint []byte
+		if err := tx.QueryRow(ctx, `SELECT c.binding_hash,c.fingerprint
+ FROM ai.shared_model_call_fence f JOIN ai.shared_model_call c
+ ON c.tenant_id=f.tenant_id AND c.binding_hash=f.binding_hash AND c.call_id=f.call_id
+ WHERE f.tenant_id=$1 AND f.member_id=$2 AND f.call_id=$3`, binding.TenantID, binding.MemberID, callID).Scan(&savedHash, &savedFingerprint); err != nil {
+			return err
+		}
+		// A changed binding must roll back its provisional row, rather than
+		// dispatching again or replacing the original accounting record.
+		if !bytes.Equal(savedHash, hash[:]) || !bytes.Equal(savedFingerprint, fingerprint[:]) {
 			return sharedauth.ErrBinding
 		}
 		return nil
@@ -70,7 +78,7 @@ func (l *PostgresSharedLedger) Begin(ctx context.Context, binding sharedauth.Bin
 }
 
 func (l *PostgresSharedLedger) Finish(ctx context.Context, binding sharedauth.Binding, callID string, usage SharedUsage, runErr error) error {
-	_, hash, err := sharedCallKey(binding, callID)
+	_, hash, err := sharedCallRecord(binding, callID)
 	if err != nil {
 		return err
 	}
@@ -90,8 +98,11 @@ func (l *PostgresSharedLedger) Finish(ctx context.Context, binding sharedauth.Bi
 	err = l.store.Transaction(ctx, binding.TenantID, func(tx pgx.Tx) error {
 		var savedState string
 		var savedInput, savedOutput *int64
-		if err := tx.QueryRow(ctx, `SELECT state,input_tokens,output_tokens FROM ai.shared_model_call
- WHERE tenant_id=$1 AND binding_hash=$2 AND call_id=$3 FOR UPDATE`, binding.TenantID, hash[:], callID).Scan(&savedState, &savedInput, &savedOutput); err != nil {
+		if err := tx.QueryRow(ctx, `SELECT c.state,c.input_tokens,c.output_tokens
+ FROM ai.shared_model_call c JOIN ai.shared_model_call_fence f
+ ON c.tenant_id=f.tenant_id AND c.binding_hash=f.binding_hash AND c.call_id=f.call_id
+ WHERE f.tenant_id=$1 AND f.member_id=$2 AND f.call_id=$3 AND c.binding_hash=$4
+ FOR UPDATE OF c`, binding.TenantID, binding.MemberID, callID, hash[:]).Scan(&savedState, &savedInput, &savedOutput); err != nil {
 			return err
 		}
 		if savedState != "dispatching" {

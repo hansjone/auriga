@@ -80,7 +80,7 @@ func sharedChatBody(call sharedmodel.SharedCall) ([]byte, bool, error) {
 }
 
 // sharedRelayKey fits the existing 128-character Idempotency-Key limit and
-// includes every binding field, so a later placement cannot reuse an old call.
+// remains stable for a member's call across placement and login changes.
 func sharedRelayKey(call sharedmodel.SharedCall) string {
 	return sharedmodel.CallKey(call.Binding, call.CallID)
 }

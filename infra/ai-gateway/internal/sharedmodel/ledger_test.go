@@ -79,4 +79,41 @@ func TestSharedLedgerPostgresConcurrentRestartAndIsolation(t *testing.T) {
 	if ok, err := restarted.Begin(context.Background(), binding, unknownID, fingerprint); ok || err != nil {
 		t.Fatal("unknown outcome replay")
 	}
+	changes := map[string]func(*sharedauth.Binding){
+		"epoch":    func(b *sharedauth.Binding) { b.Epoch++ },
+		"revision": func(b *sharedauth.Binding) { b.Revision++ },
+		"login":    func(b *sharedauth.Binding) { b.PlatformSessionID = uuid.NewString(); b.AuthGeneration++ },
+		"placement": func(b *sharedauth.Binding) {
+			b.PlacementID = uuid.NewString()
+			b.PhysicalInstanceID = uuid.NewString()
+			b.SessionID = uuid.NewString()
+			b.Epoch++
+		},
+	}
+	for name, change := range changes {
+		t.Run(name, func(t *testing.T) {
+			updated := binding
+			change(&updated)
+			for _, callID := range []string{id, unknownID} {
+				if fresh, err := restarted.Begin(context.Background(), updated, callID, fingerprint); fresh || !errors.Is(err, sharedauth.ErrBinding) {
+					t.Fatalf("changed binding replayed original call: fresh=%v err=%v", fresh, err)
+				}
+			}
+		})
+	}
+	if err := database.Transaction(context.Background(), binding.TenantID, func(tx pgx.Tx) error {
+		var records, fences int
+		if err := tx.QueryRow(context.Background(), "SELECT count(*) FROM ai.shared_model_call WHERE tenant_id=$1", binding.TenantID).Scan(&records); err != nil {
+			return err
+		}
+		if err := tx.QueryRow(context.Background(), "SELECT count(*) FROM ai.shared_model_call_fence WHERE tenant_id=$1", binding.TenantID).Scan(&fences); err != nil {
+			return err
+		}
+		if records != 2 || fences != 2 {
+			t.Fatalf("binding retries left additional records: records=%d fences=%d", records, fences)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
 }

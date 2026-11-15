@@ -3,7 +3,7 @@ package sharedmodel
 import (
 	"context"
 	"crypto/sha256"
-	"errors"
+	"sync"
 	"time"
 
 	"github.com/hansjone/auriga/infra/ai-gateway/internal/sharedauth"
@@ -29,8 +29,8 @@ type SharedRelay interface {
 	Stream(context.Context, SharedCall, func([]byte) error) (SharedUsage, error)
 }
 
-// SharedLedger is a required durable port. Begin atomically reserves by complete
-// binding+callId and rejects fingerprint conflicts; false means already begun
+// SharedLedger is a required durable port. Begin atomically reserves by stable
+// tenant/member/callId and rejects binding or fingerprint conflicts; false means already begun
 // (including ambiguous/cancelled outcomes) and MUST NOT invoke the relay again.
 // Finish must durably settle or quarantine unknown usage, idempotently.
 // PostgresSharedLedger owns call attribution and dispatch deduplication, while
@@ -44,6 +44,10 @@ type SharedProvider struct {
 	relay  SharedRelay
 	ledger SharedLedger
 }
+
+// Match the relay's existing maximum call lifetime, independent of capability
+// TTL. A caller's shorter deadline and cooperative cancellation still win.
+const MaxCallDuration = 150 * time.Second
 
 func NewSharedProvider(g *sharedauth.Gate, r SharedRelay, l SharedLedger) (*SharedProvider, error) {
 	if g == nil || r == nil || l == nil {
@@ -65,18 +69,32 @@ func (p *SharedProvider) Invoke(ctx context.Context, q SharedRequest, emit func(
 		return e
 	}
 	if !fresh {
-		return errors.New("common.conflict")
+		return sharedauth.ErrConflict
 	}
-	run, cancel := context.WithDeadline(ctx, time.Unix(c.ExpiresAt, 0))
+	run, cancel := context.WithTimeout(ctx, MaxCallDuration)
 	defer cancel()
-	// Recheck during silent streams as well as before every delivered chunk.
+	// The watcher always checks online. Fast chunks reuse only this invocation's
+	// latest success for at most one watcher interval, avoiding per-token RPCs.
+	const checkInterval = 250 * time.Millisecond
+	var checkMu sync.Mutex
+	var checkedAt time.Time
+	var checkErr error
+	checkStream := func(force bool) error {
+		checkMu.Lock()
+		defer checkMu.Unlock()
+		if force || checkedAt.IsZero() || time.Since(checkedAt) >= checkInterval {
+			checkErr = p.gate.RecheckModelStream(run, c)
+			checkedAt = time.Now()
+		}
+		return checkErr
+	}
 	done := make(chan struct{})
 	defer close(done)
 	watchDone := make(chan struct{})
 	defer func() { cancel(); <-watchDone }()
 	go func() {
 		defer close(watchDone)
-		tick := time.NewTicker(250 * time.Millisecond)
+		tick := time.NewTicker(checkInterval)
 		defer tick.Stop()
 		for {
 			select {
@@ -85,7 +103,7 @@ func (p *SharedProvider) Invoke(ctx context.Context, q SharedRequest, emit func(
 			case <-run.Done():
 				return
 			case <-tick.C:
-				if p.gate.Recheck(run, c, "model.invoke") != nil {
+				if checkStream(true) != nil {
 					cancel()
 					return
 				}
@@ -99,7 +117,7 @@ func (p *SharedProvider) Invoke(ctx context.Context, q SharedRequest, emit func(
 			if run.Err() != nil {
 				return run.Err()
 			}
-			if e := p.gate.Recheck(run, c, "model.invoke"); e != nil {
+			if e := checkStream(false); e != nil {
 				cancel()
 				return e
 			}
@@ -110,7 +128,7 @@ func (p *SharedProvider) Invoke(ctx context.Context, q SharedRequest, emit func(
 		runErr = run.Err()
 	}
 	if runErr == nil {
-		runErr = p.gate.Recheck(run, c, "model.invoke")
+		runErr = checkStream(true)
 	}
 	if usage.InputTokens < 0 || usage.OutputTokens < 0 || usage.InputTokens > 9007199254740991 || usage.OutputTokens > 9007199254740991 {
 		usage = SharedUsage{}
