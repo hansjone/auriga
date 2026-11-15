@@ -4,6 +4,8 @@
 
 `agent run` 从普通 JSON 配置的 `msgnetConfig` 或 `AURIGA_AGENT_MSGNET_CONFIG` 加载受保护的本地 JSON。字段为 `rootSpki`、`rootKid`、`nodePinsFile`、`schemaFile`、`proofOrigin`、`proofCaFile`。根、公有 pin、schema 和证明中继 origin 均由 D 固定安装。配置、pin 和 CA 文件须通过当前运行用户的私有 owner/ACL 检查。`run` 要求已存在且与 pin 匹配的独立确认钥。
 
+每个物理节点在 `agent/msgnet-state/control-state.json` 持久保存最高根控制、撤销和退役 CA 墓碑。更换确认身份继续使用该目录，新根必须更高并明确撤销旧确认身份。首次启动会验证并迁入旧身份目录中的 journal，旧文件保留。多个内容不同的旧 journal 会阻止启动，需由可信安装通路核实历史。
+
 Installer 验独立根，先持久化控制 fence，再由 NodeExecution 调固定中继。中继以原生 node 证书鉴别 node_id，并在服务端通过可信 pin 映射 target。IAM 提交消息拒连记录，edge 完成真实 CONNZ/KICK 和离线确认，随后 C 提交隔离事实，节点才返回独立 Ed25519 InstallationReceipt。执行失败会继续重试。该通路保留 NodeControl 和实例生命周期。
 
 公有控制包与回执沿既有 NodeControl 消息运输。Hello 后即可同步根控制，实例 inventory、隔离执行或运输包暂不可用时仍可送达公有根控制，成功回执继续等待实际执行确认。原生 gRPC 接收上限为32MiB加 protobuf 封装余量，消息队列继续有界。历史、过渡证明、全局确认和隔离执行使用单独的原生 mTLS HTTPS 中继，沿用冻结的模型和 `/api/collab/v2/network` 路径。节点不会取得内部服务 JWT。中继只开放 bootstrap/keys、transport/history、transport/transitions、transport/confirmation 和本节点的 isolation。所有请求重新检查原生证书的当前序列号与撤销状态。节点每次使用当前证书握手，中继服务端叶子按每次握手热加载。
@@ -13,11 +15,14 @@ Installer 验独立根，先持久化控制 fence，再由 NodeExecution 调固�
 服务端安装项如下。
 
 - `auriga.iam.msgnet.node-control-pins-file` 加载 D 的 NodeControlPins。
+- `auriga.iam.msgnet.root-spki` 和 `auriga.iam.msgnet.root-kid` 由独立安装通路固定发行根。IAM 在 READY 前验证原始根控制、发行授权、运输包及全局确认证据的签名、用途与当前撤销状态。
 - `auriga.iam.msgnet.targets-file` 加载本地数组，每行包含 `tenant_id`、`realm`、`device_id`、`target_id`，托管实例另含物理 `node_id`。IAM 用自己的 network_node 表把消息节点号解析为真实 device_id。该文件按私有 pin 文件规则读取。
 - `auriga.iam.msgnet-ledger.origin/key-store/trust-store/password-file/token-file` 使用独立内部 HTTPS 身份。JWT 需要 C 的 `collab.msgnet.read`、控制回执及 `collab.msgnet.isolation.enforce` 权限。
 - `auriga.iam.msgnet-ledger.isolation-origin` 指向 edge 专用私有执行监听器。broker SYS 身份留在 edge。
 - `auriga.workspace.msgnet-proof.host/port` 启用节点证明监听器。TLS 叶子使用 workspace 安装的 certificate/private-key 文件，客户端 CA 沿用原生 node CA。D 将其安装为固定 HTTPS origin。
 
 组合部署由 C 的 PlatformMsgnetNodeControl 使用认证 node_id 调 pendingNodeControl/confirmNodeControl。C 的普通 `/controls/receipts` 拒绝 node target。I 的远端适配仅在显式设置 `auriga.workspace.msgnet.remote-node-control=true` 且提供 node-aware ledger 时启用，普通 HTTP ledger 无此确认权限。C 未合并时，按同一 API 用替身测试。
+
+C 的 MessageNetworkControlLedger 实现须提供 `rootControlDocument`、`transportHistoryDocument` 和 `confirmationDocument` 的原始冻结 JSON 对象字节，保留签名对象中的字段。远端适配从既有 bootstrap、history、confirmation 端口取得这些对象。缺少原始对象时 READY 保持失败。
 
 K4 阶段推进先经节点原生 mTLS 证明中继 POST `/transport/expected-selectors` 读取 C 的独立授权台账，再读取全局确认。中继只开放冻结的 ExpectedSelectorsQuery/ExpectedSelectors，不下发服务 JWT；认证节点的 tenant/realm 必须匹配。响应绑定完整 bundle、最新根控制摘要、随机 challenge 和60秒有效期。缺项不等于显式 null；无 selector 的实际隔离行须同时匹配冻结身份和 null，有 selector 的所有行仍核完整摘要。没有台账、快照冲突、HTTP202 或验证失败均保持 projection_pending，每次重试重新查询。部署与正常用户入口验收由主控串行完成。

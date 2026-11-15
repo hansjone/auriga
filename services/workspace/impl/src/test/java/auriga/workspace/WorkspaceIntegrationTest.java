@@ -1465,7 +1465,19 @@ class WorkspaceIntegrationTest {
               store.tx(() -> delivery.claim(node, UuidV7.next(), Set.of())).isEmpty(),
               "restart cannot run with the previous credential");
           network.reconcile(store.tx(() -> store.instance(id)));
-          assertEquals(1, store.tx(() -> delivery.claim(node, UuidV7.next(), Set.of())).size());
+          sessions.dispatch();
+          var resumed = assertDoesNotThrow(fake::next);
+          if (resumed.hasApply()) {
+            assertTrue(resumed.getApply().getSpec().getSecrets().hasDeviceCredential());
+            assertEquals(
+                WorkspaceService.spec(store.tx(() -> store.instance(id))).getGeneration(),
+                resumed.getApply().getSpec().getGeneration());
+            resumed = assertDoesNotThrow(fake::next);
+          }
+          assertTrue(resumed.hasCommand());
+          assertEquals(id.toString(), resumed.getCommand().getInstanceId());
+          assertTrue(resumed.getCommand().hasRestart());
+          assertEquals("user", resumed.getCommand().getRestart().getReason());
           service.operate(id, actor(), "stop");
           assertTrue(service.dispatchable(store.tx(() -> store.instance(id))));
           assertFalse(bindings.get(request).getActive());
@@ -4009,6 +4021,124 @@ class WorkspaceIntegrationTest {
   }
 
   @Test
+  void nativeTlsNodeControlDeliversALegalLargeRevocationPackage() throws Exception {
+    sessions.close();
+    var msgnet = org.mockito.Mockito.mock(auriga.workspace.api.MsgnetNodeControl.class);
+    byte[] body = largeRevocationPackage();
+    assertTrue(body.length > 4 * 1024 * 1024);
+    assertTrue(body.length < 32 * 1024 * 1024);
+    var wire =
+        MsgnetControlPackage.newBuilder().setCanonicalJson(ByteString.copyFrom(body)).build();
+    org.mockito.Mockito.when(
+            msgnet.controls(
+                org.mockito.ArgumentMatchers.eq(tenant), org.mockito.ArgumentMatchers.any()))
+        .thenReturn(List.of(wire));
+    org.mockito.Mockito.when(
+            msgnet.transports(
+                org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any()))
+        .thenReturn(List.of());
+    sessions = new NodeSessions(enrollment, service, msgnet, null);
+    var serverKey = TestPki.key();
+    var serverCert =
+        TestPki.certificate(serverKey, caKey, ca.certificate(), clock.instant(), false);
+    Path certificate = directory.resolve("large-control-server.pem"),
+        privateKey = directory.resolve("large-control-server-key.pem");
+    Files.write(certificate, ca.chain(serverCert));
+    Files.writeString(privateKey, pemKey(serverKey));
+    var clientKey = TestPki.key();
+    var request = joinRequest(token().token(), clientKey);
+    var joined = enrollment.join(request);
+    try (var server =
+        new NodeGrpcServer(
+            "127.0.0.1", 0, certificate.toFile(), privateKey.toFile(), enrollment, sessions)) {
+      server.start();
+      ManagedChannel nodeChannel =
+          channel(server.port(), joined.getCertificateChain().toByteArray(), pemKey(clientKey));
+      try {
+        var node = new FakeNode();
+        var stream = NodeControlServiceGrpc.newStub(nodeChannel).session(node);
+        String keyId =
+            HexFormat.of()
+                .formatHex(WorkspaceCrypto.hash(request.getSealingPublicKey().toByteArray()))
+                .substring(0, 16);
+        var hello =
+            Hello.newBuilder()
+                .setNodeId(joined.getNodeId())
+                .setProtocolVersion(1)
+                .setOs("linux")
+                .setArch("amd64")
+                .setSealingKeyId(keyId)
+                .addDrivers(RuntimeKind.RUNTIME_KIND_DOCKER)
+                .setCapacity(
+                    Capacity.newBuilder()
+                        .setCpuMillis(4000)
+                        .setMemoryMb(4096)
+                        .setDiskGb(20)
+                        .setMaxInstances(2));
+        stream.onNext(SessionRequest.newBuilder().setHello(hello).build());
+        assertTrue(node.next().hasWelcome());
+        var received = node.next();
+        assertTrue(received.hasMsgnetControlPackage());
+        assertEquals(wire, received.getMsgnetControlPackage());
+        stream.onNext(
+            SessionRequest.newBuilder().setInventory(Inventory.getDefaultInstance()).build());
+        assertFalse(node.error.isDone());
+        org.mockito.Mockito.verify(msgnet, org.mockito.Mockito.atLeastOnce())
+            .controls(tenant, UUID.fromString(joined.getNodeId()));
+        stream.onCompleted();
+      } finally {
+        nodeChannel.shutdownNow().awaitTermination(5, TimeUnit.SECONDS);
+      }
+    }
+  }
+
+  private byte[] largeRevocationPackage() throws Exception {
+    var revoked = new ArrayList<String>();
+    for (int index = 0; index < 34000; index++)
+      revoked.add(String.format(java.util.Locale.ROOT, "%08d", index) + "x".repeat(120));
+    var payload = new java.util.TreeMap<String, Object>();
+    payload.put("schema_version", 2);
+    payload.put("tenant_id", tenant.toString());
+    payload.put("realm", "1");
+    payload.put("control_revision", "2");
+    payload.put(
+        "issued_at", clock.instant().truncatedTo(java.time.temporal.ChronoUnit.SECONDS).toString());
+    payload.put("allowed_authorities", List.of());
+    payload.put("revoked_authority_ids", List.of());
+    payload.put("revoked_installation_ids", revoked);
+    payload.put("minimum_generation", "1");
+    payload.put("minimum_keyset_version", "1");
+    var root = java.security.KeyPairGenerator.getInstance("Ed25519").generateKeyPair();
+    var signature = java.security.Signature.getInstance("Ed25519");
+    signature.initSign(root.getPrivate());
+    signature.update(
+        "Auriga.NetworkRootControl.v2\0".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+    signature.update(WorkspaceService.JSON.writeValueAsBytes(payload));
+    var auth = new java.util.TreeMap<String, Object>();
+    auth.put("alg", "Ed25519");
+    auth.put("kid", "test-installed-root");
+    auth.put("signature", Base64.getUrlEncoder().withoutPadding().encodeToString(signature.sign()));
+    var control = new java.util.TreeMap<String, Object>();
+    control.put("payload", payload);
+    control.put("root_auth", auth);
+    var packet = new java.util.TreeMap<String, Object>();
+    packet.put("package_id", "large-root-control");
+    packet.put("tenant_id", tenant.toString());
+    packet.put("realm", "1");
+    packet.put("target_id", "fixed-node-target");
+    packet.put("control", control);
+    packet.put(
+        "control_digest",
+        "sha256:"
+            + HexFormat.of()
+                .formatHex(WorkspaceCrypto.hash(WorkspaceService.JSON.writeValueAsBytes(control))));
+    byte[] challenge = new byte[32];
+    new java.security.SecureRandom().nextBytes(challenge);
+    packet.put("challenge", Base64.getUrlEncoder().withoutPadding().encodeToString(challenge));
+    return WorkspaceService.JSON.writeValueAsBytes(packet);
+  }
+
+  @Test
   void revokedNodeCannotRenew() throws Exception {
     var key = TestPki.key();
     var joined = enrollment.join(joinRequest(token().token(), key));
@@ -4032,7 +4162,10 @@ class WorkspaceIntegrationTest {
       ssl.keyManager(
           new ByteArrayInputStream(certificate),
           new ByteArrayInputStream(key.getBytes(java.nio.charset.StandardCharsets.US_ASCII)));
-    return NettyChannelBuilder.forAddress("127.0.0.1", port).sslContext(ssl.build()).build();
+    return NettyChannelBuilder.forAddress("127.0.0.1", port)
+        .sslContext(ssl.build())
+        .maxInboundMessageSize(NodeOutput.MAX_MESSAGE_FRAME_BYTES)
+        .build();
   }
 
   static String pemKey(KeyPair key) {

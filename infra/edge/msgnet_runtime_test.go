@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"crypto/ecdsa"
 	"crypto/ed25519"
@@ -435,6 +436,31 @@ func TestMsgnetRuntimeLoadsRootVerifiedTLSAndDisconnectsRevokedIdentity(t *testi
 		}
 		write(filepath.Join(cfg.Root, "selector.json"), g.Selector)
 	}
+	retained := x.active
+	assertRetained := func() {
+		t.Helper()
+		x.mu.Lock()
+		valid := x.active == retained && x.currentLocked() == nil && len(x.connections) >= 2
+		x.mu.Unlock()
+		if !valid {
+			t.Fatal("still-authorized previous TLS snapshot was lost while projection is pending")
+		}
+		if err := conn.SetDeadline(time.Now().Add(2 * time.Second)); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := fmt.Fprintf(conn, "GET /retained HTTP/1.1\r\nHost: %s\r\n\r\n", u.Host); err != nil {
+			t.Fatal("old TLS connection closed:", err)
+		}
+		response, err := http.ReadResponse(bufio.NewReader(conn), nil)
+		if err != nil {
+			t.Fatal("old TLS connection no longer usable:", err)
+		}
+		_ = response.Body.Close()
+		if response.StatusCode != http.StatusNoContent {
+			t.Fatal("unexpected old connection response", response.StatusCode)
+		}
+		_ = conn.SetDeadline(time.Time{})
+	}
 	lastBundle := b
 	for version := 2; version <= 6; version++ {
 		candidate := lastBundle
@@ -496,6 +522,7 @@ func TestMsgnetRuntimeLoadsRootVerifiedTLSAndDisconnectsRevokedIdentity(t *testi
 				if x.consumer.State.Bundle.Payload.BundleVersion != "1" {
 					t.Fatal("failed ledger check persisted a later bundle")
 				}
+				assertRetained()
 			}
 			ledgerFault.Store(0)
 			confirmationPending.Store(true)
@@ -505,6 +532,7 @@ func TestMsgnetRuntimeLoadsRootVerifiedTLSAndDisconnectsRevokedIdentity(t *testi
 			if x.consumer.State.Bundle.Payload.BundleVersion != "1" {
 				t.Fatal("202 confirmation persisted a later bundle")
 			}
+			assertRetained()
 			confirmationPending.Store(false)
 		}
 

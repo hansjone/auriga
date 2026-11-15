@@ -56,8 +56,15 @@ public class MessageNetworkLedgerConfiguration {
       NodeControlAuthority nodes,
       MessageNetworkControlLedger ledger,
       MessageNetworkDisconnector disconnector,
-      java.time.Clock clock) {
-    return new MessageNetworkIsolationExecution(store, targets, nodes, ledger, disconnector, clock);
+      java.time.Clock clock,
+      Environment env) {
+    var proofs =
+        new MessageNetworkProofVerifier(
+            env.getRequiredProperty("auriga.iam.msgnet.root-spki"),
+            env.getRequiredProperty("auriga.iam.msgnet.root-kid"),
+            clock);
+    return new MessageNetworkIsolationExecution(
+        store, targets, nodes, ledger, disconnector, clock, proofs);
   }
 
   @Bean

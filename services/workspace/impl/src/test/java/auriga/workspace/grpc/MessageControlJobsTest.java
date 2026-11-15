@@ -31,10 +31,11 @@ class MessageControlJobsTest {
             .setMsgnetControlPackage(
                 auriga.contracts.node.v1.MsgnetControlPackage.newBuilder()
                     .setCanonicalJson(
-                        com.google.protobuf.ByteString.copyFrom(new byte[NodeOutput.MAX_BYTES])))
+                        com.google.protobuf.ByteString.copyFrom(
+                            new byte[NodeOutput.MAX_MESSAGE_FRAME_BYTES])))
             .build();
     assertFalse(output.trySendMessageControl(tooLarge));
-    assertEquals(0, failures.get());
+    assertEquals(1, failures.get());
     assertTrue(
         output.send(
             auriga.contracts.node.v1.SessionResponse.newBuilder()

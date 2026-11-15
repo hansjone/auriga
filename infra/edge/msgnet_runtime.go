@@ -174,12 +174,16 @@ func (x *edgeMsgnet) prepare(s api.LocalProjectionSelector, m api.LocalProjectio
 	if e != nil {
 		return nil, e
 	}
-	// Every transport update first denies and closes existing message connections.
-	// This supplies real local isolation for emergency recovery, never a wire flag.
-	isolated := x.withdrawLocked()
+	// A pending ordinary rotation keeps the currently authorized snapshot live.
+	// Emergency recovery still proves actual local disconnection before Accept.
+	isolated := false
+	if transition := c.Payload.TransportTransition; transition != nil && transition.Mode == "emergency_recovery" {
+		isolated = x.withdrawLocked()
+	}
 	if e = x.consumer.Accept(ctx, b, p.Authority, isolated); e != nil {
 		return nil, e
 	}
+	x.withdrawLocked()
 	next := x.ledger
 	next.Publication = publication
 	if e = x.save(next); e != nil {

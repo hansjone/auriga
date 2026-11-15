@@ -12,6 +12,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"sync/atomic"
 	"testing"
@@ -20,6 +21,7 @@ import (
 	"github.com/hansjone/auriga/infra/agent/internal/identity"
 	"github.com/hansjone/auriga/infra/agent/internal/msgnet"
 	"github.com/hansjone/auriga/infra/agent/internal/testutil"
+	trust "github.com/hansjone/auriga/infra/edge/pkg/msgnet"
 	api "github.com/hansjone/auriga/infra/gen/msgnetapi"
 )
 
@@ -207,4 +209,107 @@ func TestMsgnetRunAssemblyRequiresActualExecutionAndIndependentReceipt(t *testin
 	if receipt, err := installer.InstallControl(context.Background(), raw); err == nil || len(receipt) != 0 {
 		t.Fatal("cached receipt bypassed mismatched execution scope")
 	}
+	wrongScope.Store(false)
+	signControl := func(revision string, revoked []string) []byte {
+		t.Helper()
+		next := pkg
+		next.Control.Payload.ControlRevision = revision
+		next.Control.Payload.RevokedAuthorityIds = []string{"obsolete-authority"}
+		next.Control.Payload.RevokedInstallationIds = revoked
+		body, err := msgnet.Bytes(next.Control.Payload)
+		if err != nil {
+			t.Fatal(err)
+		}
+		next.Control.RootAuth.Signature = base64.RawURLEncoding.EncodeToString(ed25519.Sign(rootPrivate, append([]byte("Auriga.NetworkRootControl.v2\x00"), body...)))
+		signed, err := msgnet.Bytes(next.Control)
+		if err != nil {
+			t.Fatal(err)
+		}
+		next.ControlDigest = msgnet.Digest(signed)
+		wire, err := msgnet.Bytes(next)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return wire
+	}
+	if _, err := installer.InstallControl(context.Background(), signControl("3", []string{"older-confirmation"})); err != nil {
+		t.Fatal(err)
+	}
+	closeInstaller()
+	statePath := filepath.Join(agentDir, "msgnet-state", "control-state.json")
+	journal, err := os.ReadFile(statePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var saved map[string]json.RawMessage
+	if err = json.Unmarshal(journal, &saved); err != nil {
+		t.Fatal(err)
+	}
+	var transportState trust.TransportState
+	if err = json.Unmarshal(saved["transport"], &transportState); err != nil {
+		t.Fatal(err)
+	}
+	transportState.CAs = map[string]api.TransportCa{"retired-ca": {CaId: "retired-ca", Role: "client", CertificateDer: base64.RawURLEncoding.EncodeToString(ca.Cert.Raw), NotBefore: ca.Cert.NotBefore.UTC().Format(time.RFC3339), NotAfter: ca.Cert.NotAfter.UTC().Format(time.RFC3339)}}
+	transportState.Retired = map[string]bool{"retired-ca": true}
+	saved["transport"], _ = json.Marshal(transportState)
+	journal, err = msgnet.Bytes(saved)
+	if err != nil {
+		t.Fatal(err)
+	}
+	oldKeyDirectory, err := identity.MsgnetIdentityDir(agentDir, pin.IdentityId)
+	if err != nil {
+		t.Fatal(err)
+	}
+	legacyJournal := filepath.Join(oldKeyDirectory, "control-state.json")
+	if err = identity.WritePrivateSnapshot(legacyJournal, journal); err != nil {
+		t.Fatal(err)
+	}
+	if err = os.Remove(statePath); err != nil {
+		t.Fatal(err)
+	}
+	output.Reset()
+	if err = RunCLI([]string{"msgnet-pin", "--data-root", rootDir, "--target-id", "node-target", "--identity-id", "replacement-id", "--identity-revision", "2"}, &output, &bytes.Buffer{}); err != nil {
+		t.Fatal(err)
+	}
+	var replacementPin api.NodeControlPin
+	if err = json.Unmarshal(output.Bytes(), &replacementPin); err != nil {
+		t.Fatal(err)
+	}
+	write("node-pins.json", api.NodeControlPins{SchemaVersion: 2, TenantId: "tenant", Realm: "1", Pins: []api.NodeControlPin{replacementPin}})
+	replacement, closeReplacement, err := newMsgnetInstaller(agentDir, config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer closeReplacement()
+	for _, rejected := range [][]byte{raw, signControl("3", []string{"older-confirmation"}), signControl("4", []string{"older-confirmation"}), signControl("4", []string{pin.IdentityId})} {
+		if receipt, err := replacement.InstallControl(context.Background(), rejected); err == nil || len(receipt) != 0 {
+			t.Fatal("replacement forgot the old root or cumulative revocations")
+		}
+	}
+	if _, err = replacement.InstallControl(context.Background(), signControl("4", []string{"older-confirmation", pin.IdentityId})); err != nil {
+		t.Fatal(err)
+	}
+	updated, err := os.ReadFile(statePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = json.Unmarshal(updated, &saved); err != nil {
+		t.Fatal(err)
+	}
+	if err = json.Unmarshal(saved["transport"], &transportState); err != nil {
+		t.Fatal(err)
+	}
+	if !transportState.Retired["retired-ca"] || transportState.CAs["retired-ca"].CertificateDer != base64.RawURLEncoding.EncodeToString(ca.Cert.Raw) {
+		t.Fatal("replacement lost retired CA tombstones")
+	}
+	if _, err = os.Stat(legacyJournal); err != nil {
+		t.Fatal("legacy journal was removed", err)
+	}
+	closeReplacement()
+	_, closeRestart, err := newMsgnetInstaller(agentDir, config)
+	if err != nil {
+		t.Fatal("replacement state is not restartable:", err)
+	}
+	closeRestart()
+
 }

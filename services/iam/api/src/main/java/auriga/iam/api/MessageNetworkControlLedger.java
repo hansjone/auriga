@@ -21,6 +21,19 @@ public interface MessageNetworkControlLedger {
 
   SignedTransportTrustBundle transport();
 
+  /** Frozen signed documents retain absent fields exactly across the trust boundary. */
+  default byte[] rootControlDocument() {
+    throw new UnsupportedOperationException();
+  }
+
+  default byte[] transportHistoryDocument(String digest) {
+    throw new UnsupportedOperationException();
+  }
+
+  default byte[] confirmationDocument(TransportConfirmationQuery query) {
+    throw new UnsupportedOperationException();
+  }
+
   default TransportPredecessor history(String digest) {
     throw new UnsupportedOperationException();
   }

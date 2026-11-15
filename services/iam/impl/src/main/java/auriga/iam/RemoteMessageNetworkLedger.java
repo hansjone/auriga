@@ -147,6 +147,29 @@ public final class RemoteMessageNetworkLedger
   }
 
   @Override
+  public byte[] rootControlDocument() {
+    return publicDocument("/bootstrap/controls", "SignedRootControl", null);
+  }
+
+  @Override
+  public byte[] transportHistoryDocument(String digest) {
+    return publicDocument("/transport/history/" + digest(digest), "TransportPredecessor", null);
+  }
+
+  @Override
+  public byte[] confirmationDocument(TransportConfirmationQuery query) {
+    schemas.validate(
+        "network/auto-renewal-v2.schema.json#/$defs/TransportConfirmationQuery",
+        Json.MAPPER.valueToTree(query));
+    return publicDocument("/transport/confirmation", "SignedTransportConfirmation", query);
+  }
+
+  private byte[] publicDocument(String path, String definition, Object body) {
+    var document = read(path, definition, tools.jackson.databind.JsonNode.class, body, false);
+    return InstallationJson.canonical(document).getBytes(StandardCharsets.UTF_8);
+  }
+
+  @Override
   public TransportPredecessor history(String digest) {
     var value =
         read(

@@ -14,6 +14,7 @@ final class MessageNetworkIsolationExecution implements MessageNetworkIsolation 
   private final MessageNetworkControlLedger ledger;
   private final MessageNetworkDisconnector disconnector;
   private final java.time.Clock clock;
+  private final MessageNetworkProofVerifier proofs;
 
   MessageNetworkIsolationExecution(
       IamStore store,
@@ -21,13 +22,15 @@ final class MessageNetworkIsolationExecution implements MessageNetworkIsolation 
       NodeControlAuthority nodes,
       MessageNetworkControlLedger ledger,
       MessageNetworkDisconnector disconnector,
-      java.time.Clock clock) {
+      java.time.Clock clock,
+      MessageNetworkProofVerifier proofs) {
     this.store = store;
     this.targets = targets;
     this.nodes = nodes;
     this.ledger = ledger;
     this.disconnector = disconnector;
     this.clock = clock;
+    this.proofs = Objects.requireNonNull(proofs);
   }
 
   @Override
@@ -84,7 +87,18 @@ final class MessageNetworkIsolationExecution implements MessageNetworkIsolation 
               current.getMinimumControlRevision(),
               current.getControlDigest(),
               clock.instant());
-          var evidence = ledger.confirmation(query).getPayload();
+          byte[] confirmation = ledger.confirmationDocument(query);
+          var evidence =
+              proofs
+                  .verify(
+                      bundle,
+                      ledger.transportHistoryDocument(digest),
+                      ledger.rootControlDocument(),
+                      confirmation,
+                      current,
+                      binding.tenant(),
+                      binding.realm())
+                  .getPayload();
           MessageNetworkSelectors.verify(
               snapshot,
               selectorQuery,

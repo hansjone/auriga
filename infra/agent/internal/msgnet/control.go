@@ -246,6 +246,9 @@ func (i *Installer) control(p api.ControlPackage) error {
 		if revision < old || (i.replacement && revision <= old) {
 			return fmt.Errorf("control rollback")
 		}
+		if i.replacement && !slices.Contains(c.RevokedInstallationIds, i.state.IdentityId) {
+			return fmt.Errorf("replacement control must revoke the previous confirmation identity")
+		}
 		if revision == old && !Equal(p, i.state.Package) {
 			return fmt.Errorf("control conflict")
 		}

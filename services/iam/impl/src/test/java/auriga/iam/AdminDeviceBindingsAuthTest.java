@@ -41,7 +41,7 @@ class AdminDeviceBindingsAuthTest {
           return null;
         });
     verifyNoInteractions(devices);
-    when(devices.connectionBindings()).thenReturn(Json.object("items", java.util.List.of()));
+    when(devices.messageConnectionBindings()).thenReturn(Json.object("items", java.util.List.of()));
     identity.as(
         "svc:edge",
         identity.tenant,
@@ -52,6 +52,6 @@ class AdminDeviceBindingsAuthTest {
           assertEquals(0, result.values.getFirst().getItemsCount());
           return null;
         });
-    verify(devices).connectionBindings();
+    verify(devices).messageConnectionBindings();
   }
 }

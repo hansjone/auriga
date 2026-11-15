@@ -150,7 +150,14 @@ class NetworkAuthorityPostgresTest {
                 if (!disconnected.get()) throw new IllegalStateException("broker unavailable");
               };
           var execution =
-              new MessageNetworkIsolationExecution(store, targets, null, ledger, disconnect, clock);
+              new MessageNetworkIsolationExecution(
+                  store,
+                  targets,
+                  null,
+                  ledger,
+                  disconnect,
+                  clock,
+                  mock(MessageNetworkProofVerifier.class));
           var binding = targets.bindings().getFirst();
           assertFalse(targets.ready(store, ledger, null, tenant, node.realm(), node.node()));
           assertThrows(IllegalStateException.class, () -> execution.reconcileDevice(binding));
@@ -245,7 +252,8 @@ class NetworkAuthorityPostgresTest {
                   nodes,
                   ledger,
                   value -> store.requireTransactionReleased(),
-                  clock);
+                  clock,
+                  mock(MessageNetworkProofVerifier.class));
           execution.beforeControl(tenant, host);
           execution.reconcileDevice(targetMap.bindings().getFirst());
           assertEquals(

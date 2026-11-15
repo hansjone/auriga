@@ -38,7 +38,7 @@ class RemoteMessageNetworkLedgerTest {
           executor.submit(
               () -> {
                 try {
-                  for (int count = 0; count < 8; count++)
+                  for (int count = 0; count < 11; count++)
                     try (var socket = (SSLSocket) listener.accept()) {
                       socket.setSoTimeout(5000);
                       socket.startHandshake();
@@ -126,9 +126,28 @@ class RemoteMessageNetworkLedgerTest {
         responseStatus.set(202);
         body.set("{}");
         assertThrows(IllegalStateException.class, () -> ledger.expectedSelectors(query));
+        responseStatus.set(200);
+        var signed = new MessageNetworkProofFixture();
+        body.set(signed.control.toString());
+        assertEquals(signed.control, InstallationJson.parse(ledger.rootControlDocument()));
+        body.set(new String(signed.history(), StandardCharsets.UTF_8));
+        assertEquals(
+            InstallationJson.parse(signed.history()),
+            InstallationJson.parse(
+                ledger.transportHistoryDocument(MessageNetworkProofFixture.digest(signed.bundle))));
+        var proofQuery =
+            new auriga.contracts.msgnet.model.TransportConfirmationQuery()
+                .tenantId(signed.tenant.toString())
+                .realm("1")
+                .bundleVersion(signed.bundle.path("payload").path("bundle_version").asText())
+                .bundleDigest(MessageNetworkProofFixture.digest(signed.bundle))
+                .challenge(signed.evidence.path("payload").path("challenge").asText());
+        body.set(signed.evidence.toString());
+        assertEquals(
+            signed.evidence, InstallationJson.parse(ledger.confirmationDocument(proofQuery)));
       }
       server.get(15, TimeUnit.SECONDS);
-      assertEquals(8, authorization.size());
+      assertEquals(10, authorization.size());
       assertEquals(
           4,
           requests.stream()

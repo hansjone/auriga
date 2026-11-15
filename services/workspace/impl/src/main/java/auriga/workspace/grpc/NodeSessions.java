@@ -421,26 +421,26 @@ public final class NodeSessions implements AutoCloseable {
       if (!messageJobs.submit(
           () -> {
             try {
-              var messages = new ArrayList<SessionResponse>();
-              for (var control : msgnet.controls(tenant, node).stream().limit(32).toList())
-                if (control.getCanonicalJson().size() <= 32 * 1024 * 1024)
-                  messages.add(
-                      SessionResponse.newBuilder().setMsgnetControlPackage(control).build());
-              synchronized (Session.this) {
-                if (closed || sessions.get(node) != Session.this) return;
-                for (var message : messages) if (!outbound.trySendMessageControl(message)) break;
+              for (var control : msgnet.controls(tenant, node).stream().limit(32).toList()) {
+                if (control.getCanonicalJson().size() > 32 * 1024 * 1024)
+                  throw new IllegalArgumentException(
+                      "public root control exceeds the frozen size limit");
+                synchronized (Session.this) {
+                  if (closed || sessions.get(node) != Session.this) return;
+                  if (!outbound.trySendMessageControl(
+                      SessionResponse.newBuilder().setMsgnetControlPackage(control).build())) break;
+                }
               }
-              // Root controls must still arrive while isolation or message transport is
-              // unavailable.
               if (messageIsolation != null) messageIsolation.beforeControl(tenant, node);
-              messages.clear();
-              for (var bundle : msgnet.transports(tenant, node).stream().limit(32).toList())
-                if (bundle.getCanonicalJson().size() <= 32 * 1024 * 1024)
-                  messages.add(
-                      SessionResponse.newBuilder().setMsgnetTransportBundle(bundle).build());
-              synchronized (Session.this) {
-                if (closed || sessions.get(node) != Session.this) return;
-                for (var message : messages) if (!outbound.trySendMessageControl(message)) break;
+              for (var bundle : msgnet.transports(tenant, node).stream().limit(32).toList()) {
+                if (bundle.getCanonicalJson().size() > 32 * 1024 * 1024)
+                  throw new IllegalArgumentException(
+                      "public transport bundle exceeds the frozen size limit");
+                synchronized (Session.this) {
+                  if (closed || sessions.get(node) != Session.this) return;
+                  if (!outbound.trySendMessageControl(
+                      SessionResponse.newBuilder().setMsgnetTransportBundle(bundle).build())) break;
+                }
               }
             } catch (RuntimeException unavailable) {
               org.slf4j.LoggerFactory.getLogger(getClass())

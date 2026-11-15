@@ -6,6 +6,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/base64"
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -23,7 +24,31 @@ import (
 	"github.com/nats-io/nats.go"
 )
 
+type managedIsolationFixture struct {
+	Address, TokenFile, CA, Cert, Key, Tenant, Device, Directory string
+}
+
 func TestMsgnetIsolationPinnedServiceAndRealBrokerKick(t *testing.T) {
+	runMsgnetIsolation(t, nil)
+}
+
+func TestMsgnetIsolationWithProductionManagedBindings(t *testing.T) {
+	file := os.Getenv("AURIGA_MSGNET_MANAGED_BINDINGS")
+	if file == "" {
+		t.Skip("requires the isolated Java IAM/PG fixture")
+	}
+	raw, err := os.ReadFile(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var fixture managedIsolationFixture
+	if err = json.Unmarshal(raw, &fixture); err != nil {
+		t.Fatal(err)
+	}
+	runMsgnetIsolation(t, &fixture)
+}
+
+func runMsgnetIsolation(t *testing.T, fixture *managedIsolationFixture) {
 	pki := createAccessPKI(t)
 	clientTLS, e := iamTLS(pki.hop, pki.hop.ServerName)
 	if e != nil {
@@ -59,19 +84,57 @@ func TestMsgnetIsolationPinnedServiceAndRealBrokerKick(t *testing.T) {
 	if e = os.WriteFile(secret, []byte("fixture"), 0600); e != nil {
 		t.Fatal(e)
 	}
-	g, _, _ := accessFixture(t, false, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(204) }))
+	g, _, _ := accessFixtureConfigured(t, false, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(204) }), func(_ *Config, document map[string]any) {
+		if fixture != nil {
+			document["tenantId"] = fixture.Tenant
+		}
+	})
 	g.Cfg.DevicePresence = DevicePresenceConfig{URL: brokerURL, Username: "edge-presence", PasswordFile: secret, CAFile: pki.hop.CAFile, CertFile: pki.hop.CertFile, KeyFile: pki.hop.KeyFile, ServerName: pki.hop.ServerName}
 	device := "01900000-0000-7000-8000-00000000abce"
+	if fixture != nil {
+		device = fixture.Device
+	}
 	var reads atomic.Int32
 	var wrongOwner atomic.Bool
-	g.DevicesRPC = deviceBindingsFunc(func(context.Context, string) ([]deviceBinding, error) {
-		reads.Add(1)
-		account := "CLIENTS"
-		if wrongOwner.Load() {
-			account = "OTHER"
+	if fixture == nil {
+		g.DevicesRPC = deviceBindingsFunc(func(context.Context, string) ([]deviceBinding, error) {
+			reads.Add(1)
+			account := "CLIENTS"
+			if wrongOwner.Load() {
+				account = "OTHER"
+			}
+			return []deviceBinding{{Device: device, Server: srv.ID(), Client: strconv.FormatUint(cid, 10), Account: account, Ingress: ingress}}, nil
+		})
+	} else {
+		rpc, err := newIAMRPC(IAMRPCConfig{Address: fixture.Address, ServiceTokenFile: fixture.TokenFile, ServerName: "localhost", TimeoutMillis: 3000},
+			IAMHopConfig{CAFile: fixture.CA, CertFile: fixture.Cert, KeyFile: fixture.Key, ServerName: "localhost"})
+		if err != nil {
+			t.Fatal(err)
 		}
-		return []deviceBinding{{Device: device, Server: srv.ID(), Client: strconv.FormatUint(cid, 10), Account: account, Ingress: ingress}}, nil
-	})
+		defer func() { _ = rpc.conn.Close() }()
+		g.DevicesRPC = deviceBindingsFunc(func(ctx context.Context, tenant string) ([]deviceBinding, error) {
+			reads.Add(1)
+			return rpc.ReadDeviceBindings(ctx, tenant)
+		})
+		binding, err := json.Marshal(deviceBinding{Device: device, Server: srv.ID(), Client: strconv.FormatUint(cid, 10), Account: "CLIENTS", Ingress: ingress})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err = os.WriteFile(filepath.Join(fixture.Directory, "managed-binding.json"), binding, 0600); err != nil {
+			t.Fatal(err)
+		}
+		deadline := time.Now().Add(15 * time.Second)
+		for {
+			if _, err = os.Stat(filepath.Join(fixture.Directory, "binding-ready")); err == nil {
+				break
+			}
+			if time.Now().After(deadline) {
+				t.Fatal("production IAM binding was not seeded")
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
+
 	schemas, e := trust.LoadSchemas("../../contracts/network/auto-renewal-v2.schema.json")
 	if e != nil {
 		t.Fatal(e)
@@ -110,11 +173,13 @@ func TestMsgnetIsolationPinnedServiceAndRealBrokerKick(t *testing.T) {
 	if request(clientTLS, "unmapped-target") != 403 || reads.Load() != 0 {
 		t.Fatal("wire target established an execution mapping")
 	}
-	wrongOwner.Store(true)
-	if request(clientTLS, "node-target") != 503 || !nc.IsConnected() {
-		t.Fatal("wrong broker ownership was confirmed")
+	if fixture == nil {
+		wrongOwner.Store(true)
+		if request(clientTLS, "node-target") != 503 || !nc.IsConnected() {
+			t.Fatal("wrong broker ownership was confirmed")
+		}
+		wrongOwner.Store(false)
 	}
-	wrongOwner.Store(false)
 	if request(clientTLS, "node-target") != 200 {
 		t.Fatal("actual disconnection not confirmed")
 	}

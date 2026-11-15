@@ -11,10 +11,12 @@ import java.util.function.Consumer;
  */
 public final class NodeOutput {
   public static final int MAX_FRAMES = 128, MAX_BYTES = 4 * 1024 * 1024;
+  public static final int MAX_MESSAGE_FRAME_BYTES = 32 * 1024 * 1024 + 1024;
   private final StreamObserver<SessionResponse> output;
   private final Consumer<Throwable> failure;
   private final ArrayDeque<SessionResponse> queue = new ArrayDeque<>();
   private int bytes;
+  private boolean messageQueued;
   private boolean draining, closed, terminalDelivered;
   private Throwable terminal;
   private final java.time.Clock clock;
@@ -50,12 +52,19 @@ public final class NodeOutput {
 
   private boolean enqueue(SessionResponse response, boolean failOnOverflow) {
     boolean overflow;
+    int size = response.getSerializedSize();
+    boolean message = response.hasMsgnetControlPackage() || response.hasMsgnetTransportBundle();
+    if (message && size > MAX_MESSAGE_FRAME_BYTES) {
+      failure.accept(new AurigaException(CommonErrors.RATE_LIMITED));
+      return false;
+    }
     synchronized (this) {
       if (closed) return false;
-      overflow = queue.size() >= MAX_FRAMES || response.getSerializedSize() > MAX_BYTES - bytes;
+      overflow = queue.size() >= MAX_FRAMES || (message ? messageQueued : size > MAX_BYTES - bytes);
       if (!overflow) {
         queue.add(response);
-        bytes += response.getSerializedSize();
+        if (message) messageQueued = true;
+        else bytes += size;
       }
     }
     if (overflow) {
@@ -73,6 +82,7 @@ public final class NodeOutput {
       terminal = error;
       queue.clear();
       bytes = 0;
+      messageQueued = false;
     }
     drain();
   }
@@ -114,7 +124,9 @@ public final class NodeOutput {
         } else {
           blockedSince = null;
           next = queue.remove();
-          bytes -= next.getSerializedSize();
+          if (next.hasMsgnetControlPackage() || next.hasMsgnetTransportBundle())
+            messageQueued = false;
+          else bytes -= next.getSerializedSize();
         }
       }
       try {
@@ -134,6 +146,7 @@ public final class NodeOutput {
           terminalDelivered = true;
           queue.clear();
           bytes = 0;
+          messageQueued = false;
         }
         failure.accept(e);
         return;
