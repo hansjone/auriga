@@ -63,6 +63,7 @@ export async function startDesktopAuth({
           confirmedOrigin: installation.confirmedOrigin,
           issuer: installation.issuer,
           clientId: installation.clientId,
+          nativeClientId: installation.nativeClientId,
           network: installation.network,
         }),
       ),

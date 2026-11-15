@@ -1,7 +1,7 @@
 ﻿# 首联授权 UI（本地可信端口）
 
-界面沿现有 `src/client.js` 的 ModuleLoader/React 和 `main`、`settings.section` 注册。
-收件箱是功能页内的折叠区；授权默认值和持续名单在原生统一设置中。
+界面沿现有 `src/client.js` 的 ModuleLoader/React 和 `main` 注册。
+收件箱是功能页的“收件箱”页签；授权默认值和持续名单在功能页“设置”页签中。
 不新增浏览器入口、独立框架、模型工具或平台 API。
 
 ## 当前接线

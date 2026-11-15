@@ -83,7 +83,10 @@ test('control page displays only its own device code, polls across revisions and
     OWNER,
   );
   assert.equal(other.snapshot.deviceAttempt, undefined);
-  assert.ok(!f.opened[0].includes(attempt.userCode));
+  assert.equal(
+    new URL(f.opened[0]).searchParams.get('user_code'),
+    attempt.userCode,
+  );
   await nodes.skip.onclick();
   release(f.tokens);
   await Promise.all([...f.broker.inflight]);

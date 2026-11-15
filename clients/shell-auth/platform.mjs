@@ -58,10 +58,17 @@ export function trustedConfig(input) {
     throw new Error('invalid issuer');
   if (!/^[\w.-]{1,128}$/.test(input.clientId ?? 'auriga-dsh'))
     throw new Error('invalid client id');
+  if (
+    !/^[\w.-]{1,128}$/.test(input.nativeClientId ?? 'auriga-dsh-native') ||
+    (input.nativeClientId ?? 'auriga-dsh-native') ===
+      (input.clientId ?? 'auriga-dsh')
+  )
+    throw new Error('distinct native client id required');
   return Object.freeze({
     platformOrigin: url.origin,
     issuer: issuer.href.replace(/\/$/, ''),
     clientId: input.clientId ?? 'auriga-dsh',
+    nativeClientId: input.nativeClientId ?? 'auriga-dsh-native',
     deviceName: 'Auriga Desktop',
     ...(input.network ? { network: structuredClone(input.network) } : {}),
   });
@@ -101,6 +108,7 @@ export function createPlatform(config, fetcher = globalThis.fetch) {
       body,
       signal,
       headers = {},
+      cookieJar,
     } = {},
   ) {
     const url = new URL(path, config.platformOrigin);
@@ -120,6 +128,21 @@ export function createPlatform(config, fetcher = globalThis.fetch) {
         : AbortSignal.timeout(15000),
       headers: {
         ...headers,
+        ...(cookieJar
+          ? {
+              Origin: config.platformOrigin,
+              'Sec-Fetch-Site': 'same-origin',
+              'Sec-Fetch-Mode': 'cors',
+              'Sec-Fetch-Dest': 'empty',
+              ...(cookieJar.size
+                ? {
+                    Cookie: [...cookieJar]
+                      .map(([k, v]) => k + '=' + v)
+                      .join('; '),
+                  }
+                : {}),
+            }
+          : {}),
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
         ...(body !== undefined
           ? {
@@ -137,13 +160,33 @@ export function createPlatform(config, fetcher = globalThis.fetch) {
           }
         : {}),
     });
+    if (cookieJar)
+      for (const cookie of response.headers.getSetCookie()) {
+        const pair = cookie.split(';')[0];
+        const at = pair.indexOf('=');
+        const name = pair.slice(0, at),
+          value = pair.slice(at + 1);
+        if (
+          /^(?:__Host-)?auriga_portal_login_tx$/.test(name) &&
+          value.length <= 4096
+        )
+          value ? cookieJar.set(name, value) : cookieJar.delete(name);
+      }
     const raw = await boundedBody(response);
-    const correlationId = response.headers.get('x-auriga-correlation-id');
+    const rawCorrelationId = response.headers.get('x-auriga-correlation-id');
+    const correlationId = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(
+      rawCorrelationId ?? '',
+    )
+      ? rawCorrelationId
+      : undefined;
     let data;
     try {
       data = raw.length ? JSON.parse(raw.toString('utf8')) : {};
     } catch {
-      throw new PlatformError(response.status, 'common.unavailable');
+      throw Object.assign(
+        new PlatformError(response.status, 'common.unavailable'),
+        { correlationId },
+      );
     }
     if (!response.ok)
       throw Object.assign(
@@ -169,6 +212,20 @@ export function createPlatform(config, fetcher = globalThis.fetch) {
       });
     return data;
   }
+  function selectedClient(id = config.clientId) {
+    if (![config.clientId, config.nativeClientId].includes(id))
+      throw new Error('unregistered client id');
+    return id;
+  }
+  async function clientTokens(clientId, body, signal) {
+    const id = selectedClient(clientId);
+    const result = await request(issuerPath + '/oauth2/token', {
+      form: true,
+      body: { ...body, client_id: id },
+      signal,
+    });
+    return { ...result, client_id: id };
+  }
   async function verifyDevice(token, expected, audience = 'auriga') {
     if (typeof token !== 'string' || token.length > 16384)
       throw new Error('invalid credential');
@@ -178,6 +235,8 @@ export function createPlatform(config, fetcher = globalThis.fetch) {
     const header = JSON.parse(Buffer.from(parts[0], 'base64url').toString()),
       claims = JSON.parse(Buffer.from(parts[1], 'base64url').toString());
     const now = Date.now() / 1000;
+    // Standard devices use scalar aud; native TokenService may encode a singleton array.
+    // Both representations must identify this one exact audience.
     if (
       header.alg !== 'ES256' ||
       !header.kid ||
@@ -186,7 +245,12 @@ export function createPlatform(config, fetcher = globalThis.fetch) {
       header.jwk ||
       header.x5u ||
       claims.iss !== config.issuer ||
-      claims.aud !== audience ||
+      (claims.aud !== audience &&
+        !(
+          Array.isArray(claims.aud) &&
+          claims.aud.length === 1 &&
+          claims.aud[0] === audience
+        )) ||
       claims.ptyp !== 'device' ||
       claims.ctx !== 'device' ||
       claims.scope !== 'auriga.connect' ||
@@ -252,6 +316,32 @@ export function createPlatform(config, fetcher = globalThis.fetch) {
     config,
     request,
     verifyDevice,
+    loginSession: (signal) => {
+      const cookieJar = new Map();
+      return (path, options = {}) => {
+        if (
+          !/^\/api\/iam\/v1\/login\/(?:providers|transactions(?:\/[0-9a-f-]{36}(?:\/advance)?)?|uac\/challenges(?:\/[0-9a-f-]{36}(?:\/complete)?)?)$/.test(
+            path,
+          )
+        )
+          throw new Error('invalid login route');
+        return request(path, {
+          ...options,
+          signal: options.method === 'DELETE' ? undefined : signal,
+          cookieJar,
+        });
+      };
+    },
+    nativePoll: (code, verifier, signal) =>
+      clientTokens(
+        config.nativeClientId,
+        {
+          grant_type: 'urn:ietf:params:oauth:grant-type:device_code',
+          device_code: code,
+          code_verifier: verifier,
+        },
+        signal,
+      ),
     begin: (signal) =>
       request(issuerPath + '/oauth2/device_authorization', {
         form: true,
@@ -268,21 +358,17 @@ export function createPlatform(config, fetcher = globalThis.fetch) {
         },
         signal,
       }),
-    refresh: (token) =>
-      request(issuerPath + '/oauth2/token', {
-        form: true,
-        body: {
-          client_id: config.clientId,
-          grant_type: 'refresh_token',
-          refresh_token: token,
-        },
+    refresh: (token, clientId) =>
+      clientTokens(clientId, {
+        grant_type: 'refresh_token',
+        refresh_token: token,
       }),
-    revoke: (token) =>
+    revoke: (token, clientId) =>
       request(issuerPath + '/oauth2/revoke', {
         form: true,
-        body: { client_id: config.clientId, token },
+        body: { client_id: selectedClient(clientId), token },
       }),
-    async profile(token, claims) {
+    async profile(token, claims, clientId) {
       const me = requireValid(
         'StandardDeviceIdentity',
         await request('/api/iam/v1/me/device-session', { token }),
@@ -291,7 +377,7 @@ export function createPlatform(config, fetcher = globalThis.fetch) {
         me.accountId !== claims.sub ||
         me.tenantId !== claims.tid ||
         me.deviceId !== claims.did ||
-        me.clientId !== config.clientId ||
+        me.clientId !== selectedClient(clientId) ||
         Date.parse(me.expiresAt) <= Date.now() ||
         Boolean(me.uacSessionBinding) !== Boolean(claims.uacSessionBinding) ||
         (me.uacSessionBinding &&
@@ -329,17 +415,13 @@ export function createPlatform(config, fetcher = globalThis.fetch) {
         method: 'POST',
         body: {},
       }),
-    async audience(refreshToken, claims, audience) {
+    async audience(refreshToken, claims, audience, clientId) {
       if (audience !== 'auriga.ai-gateway')
         throw new Error('unsupported audience');
-      const result = await request(issuerPath + '/oauth2/token', {
-        form: true,
-        body: {
-          client_id: config.clientId,
-          grant_type: 'refresh_token',
-          refresh_token: refreshToken,
-          resource: 'urn:auriga:ai-gateway',
-        },
+      const result = await clientTokens(clientId, {
+        grant_type: 'refresh_token',
+        refresh_token: refreshToken,
+        resource: 'urn:auriga:ai-gateway',
       });
       await verifyDevice(result.access_token, claims, audience);
       return result;

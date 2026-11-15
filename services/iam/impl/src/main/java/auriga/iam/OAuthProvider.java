@@ -204,14 +204,22 @@ public final class OAuthProvider {
             && grant.path("status").asString().equals("pending")
             && clock.instant().isBefore(Instant.parse(grant.path("expiresAt").asString()))
             && client(grant.path("clientId").asString()).nativeConnect()
-            && session.path("mfa").asBoolean()
-            && session.has("stepUpAt")
-            && !Instant.parse(session.path("stepUpAt").asString())
-                .isBefore(Instant.parse(tx.path("nativeStartedAt").asString()))
-            && !Instant.parse(session.path("stepUpAt").asString())
-                .isBefore(clock.instant().minusSeconds(600)),
+            && (session.path("mfa").asBoolean()
+                    && session.has("stepUpAt")
+                    && !Instant.parse(session.path("stepUpAt").asString())
+                        .isBefore(Instant.parse(tx.path("nativeStartedAt").asString()))
+                    && !Instant.parse(session.path("stepUpAt").asString())
+                        .isBefore(clock.instant().minusSeconds(600))
+                || tx.path("uacVerified").asBoolean()
+                    && tx.has("uacCredential")
+                    && session.has("uacSessionBinding")
+                    && session.path("providerId").equals(tx.path("providerId"))
+                    && !Instant.parse(session.path("authTime").asString())
+                        .isBefore(Instant.parse(tx.path("nativeStartedAt").asString()))),
         "invalid_grant",
         400);
+    if (session.has("uacSessionBinding"))
+      grant.set("uacSessionBinding", session.path("uacSessionBinding"));
     grant.put("status", "approved");
     grant.put("sessionId", session.path("sessionId").asString());
     grant.put("accountId", session.path("accountId").asString());
@@ -738,6 +746,8 @@ public final class OAuthProvider {
             session.path("sessionId").asString(),
             "clientId",
             c.id(),
+            "providerId",
+            session.path("providerId").asString(),
             "scope",
             grant.path("scope").asString(),
             "authorizationMode",
@@ -754,6 +764,88 @@ public final class OAuthProvider {
     grant.put("used", true);
     store.save("oauth_grant", grant);
     return userTokens(c, grant, session, true);
+  }
+
+  /** Route by the signed bearer and tenant authority, independent of the request principal. */
+  boolean nativeDevice(String raw) {
+    ObjectNode claims = tokens.verify(raw);
+    return store.tx(
+        () -> {
+          ObjectNode device = store.get("device", claims.path("did").asString(), false);
+          return device != null && "native_tx".equals(device.path("authorizationMode").asString());
+        });
+  }
+
+  ObjectNode nativeIdentity(String raw, boolean profile) {
+    ObjectNode claims = tokens.verify(raw);
+    IamError.require(
+        DeviceAccessAuthority.platformAudience(claims)
+            && "device".equals(claims.path("ptyp").asString())
+            && "device".equals(claims.path("ctx").asString())
+            && "auriga.connect".equals(claims.path("scope").asString()),
+        "invalid_token",
+        401);
+    return store.tx(
+        () -> {
+          var valid =
+              deviceAuthority()
+                  .credential(
+                      claims.path("tid").asString(),
+                      claims.path("sub").asString(),
+                      claims.path("did").asString());
+          IamError.require(valid != null, "invalid_token", 401);
+          ObjectNode device = store.get("device", valid.device(), false);
+          IamError.require(
+              device != null && "native_tx".equals(device.path("authorizationMode").asString()),
+              "invalid_token",
+              401);
+          ObjectNode session = sessions.activeById(device.path("sessionId").asString());
+          IamError.require(
+              session != null && UacSessions.boundTo(device, session), "invalid_token", 401);
+          ObjectNode account = store.get("account", valid.account(), false);
+          ObjectNode provider =
+              store.get("idp_provider", session.path("providerId").asString(), false);
+          IamError.require(
+              account != null
+                  && "active".equals(account.path("status").asString())
+                  && provider != null
+                  && provider.path("enabled").asBoolean(),
+              "invalid_token",
+              401);
+          if (profile)
+            return Json.object(
+                "account",
+                Json.object(
+                    "id",
+                    valid.account(),
+                    "tenantId",
+                    valid.tenant(),
+                    "displayName",
+                    account.path("displayName").asString("")));
+          ObjectNode result =
+              Json.object(
+                  "accountId",
+                  valid.account(),
+                  "memberId",
+                  valid.account(),
+                  "tenantId",
+                  valid.tenant(),
+                  "deviceId",
+                  valid.device(),
+                  "clientId",
+                  device.path("clientId"),
+                  "providerId",
+                  session.path("providerId"),
+                  "authorizationMode",
+                  "native_tx",
+                  "expiresAt",
+                  valid.expiresAt().isBefore(Instant.ofEpochSecond(claims.path("exp").asLong()))
+                      ? valid.expiresAt().toString()
+                      : Instant.ofEpochSecond(claims.path("exp").asLong()).toString());
+          if (session.has("uacSessionBinding"))
+            result.set("uacSessionBinding", session.path("uacSessionBinding"));
+          return result;
+        });
   }
 
   public ObjectNode userinfo(String raw) {

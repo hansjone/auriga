@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { surfaceHost, flush, response } from './shell-host.mjs';
+import { surfaceHost, flush, response, openSettings } from './shell-host.mjs';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -10,6 +10,7 @@ import { Socket } from 'node:net';
 import { setTimeout, clearTimeout } from 'node:timers';
 import { createSettingsStore } from '../../../clients/dsh-plugin/src/settings/store.js';
 import { createSettingsHandler } from '../../../clients/dsh-plugin/src/settings/host.js';
+
 const deferred = () => {
   let resolve;
   const promise = new Promise((done) => {
@@ -183,7 +184,7 @@ async function exerciseRealSettings(delayed) {
       },
     );
     const main = host.mount('main'),
-      settings = host.mount('settings.section');
+      settings = await openSettings(main);
     const ready = waitForSettings(host, settings.root, statusBody.promise);
     if (delayed !== 'none') {
       // Hold the real route/body beyond every turn of the old guard.
@@ -285,8 +286,14 @@ test('local connection state drives the real shell entry and endpoint/acceptance
     );
     try {
       const main = host.mount('main'),
-        settings = host.mount('settings.section');
+        settings = await openSettings(main);
       await flush();
+      assert.match(
+        settings.root.textContent,
+        /本机端点00000000-0000-4000-8000-000000000001/,
+      );
+      assert.match(settings.root.textContent, /已收消息3/);
+      assert.doesNotMatch(settings.root.textContent, /尚未配置总部连接/);
       const tabs = [...main.root.querySelectorAll('[role="tab"]')];
       assert.deepEqual(
         tabs.map((tab) => tab.textContent),
@@ -305,12 +312,6 @@ test('local connection state drives the real shell entry and endpoint/acceptance
         main.root.textContent,
         connected ? /平台已连接/ : /已登录，通信未就绪.*前往概览/,
       );
-      assert.match(
-        settings.root.textContent,
-        /本机端点00000000-0000-4000-8000-000000000001/,
-      );
-      assert.match(settings.root.textContent, /已收消息3/);
-      assert.doesNotMatch(settings.root.textContent, /尚未配置总部连接/);
       main.close();
       settings.close();
       host.dispose();
@@ -414,7 +415,7 @@ for (const consent of [false, undefined])
       );
       try {
         const main = host.mount('main'),
-          settings = host.mount('settings.section');
+          settings = await openSettings(main);
         await flush();
         assert.equal(main.root.querySelector('.auriga-consent'), null);
         assert.equal(settings.root.querySelector('.auriga-consent'), null);
@@ -478,7 +479,7 @@ test('consent children use independent hooks and the authenticated HTTP bridge w
   );
   try {
     const main = host.mount('main'),
-      settings = host.mount('settings.section');
+      settings = await openSettings(main);
     await flush();
     const panel = main.root.querySelector('auriga-team-panel');
     const context = panel.context;

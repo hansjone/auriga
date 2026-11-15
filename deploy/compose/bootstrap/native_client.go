@@ -16,13 +16,22 @@ const nativeClientProperties = "auriga.iam.clients[0].id=auriga-dsh\n" +
 	"auriga.iam.clients[0].grants[0]=urn:ietf:params:oauth:grant-type:device_code\n" +
 	"auriga.iam.clients[0].grants[1]=refresh_token\n" +
 	"auriga.iam.clients[0].platform=true\n" +
-	"auriga.iam.clients[0].native-connect=true\n"
+	"auriga.iam.clients[0].native-connect=false\n" +
+	"auriga.iam.clients[1].id=auriga-dsh-native\n" +
+	"auriga.iam.clients[1].tenant=" + composeTenant + "\n" +
+	"auriga.iam.clients[1].secret-hash=\n" +
+	"auriga.iam.clients[1].redirect-uris=\n" +
+	"auriga.iam.clients[1].scopes[0]=auriga.connect\n" +
+	"auriga.iam.clients[1].grants[0]=urn:ietf:params:oauth:grant-type:device_code\n" +
+	"auriga.iam.clients[1].grants[1]=refresh_token\n" +
+	"auriga.iam.clients[1].platform=true\n" +
+	"auriga.iam.clients[1].native-connect=true\n"
 
 func composeRecipe(https bool) string {
 	if https {
-		return "network-wss-v7-https-native-client-managed-device-panel-bifrost-private-broker"
+		return "network-wss-v8-https-dual-client-managed-device-panel-bifrost-private-broker"
 	}
-	return "network-wss-v4-https-bifrost-private-broker"
+	return "network-wss-v5-https-dual-client-bifrost-private-broker"
 }
 
 func nativeClientSection(raw []byte) string {

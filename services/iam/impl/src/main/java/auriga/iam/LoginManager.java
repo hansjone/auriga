@@ -55,7 +55,13 @@ public final class LoginManager {
     this.nativeDevices = devices;
   }
 
-  private static void validateNative(JsonNode request, String audience) {
+  ObjectNode beginUacNative(ObjectNode tx, JsonNode request, String audience) {
+    validateNative(request, audience);
+    IamError.require(nativeDevices != null, "invalid_config", 400);
+    return nativeDevices.beginNative(tx, request.path("nativeConnect"));
+  }
+
+  static void validateNative(JsonNode request, String audience) {
     if (!request.has("nativeConnect")) return;
     IamError.validate(
         request.isObject()
@@ -246,8 +252,12 @@ public final class LoginManager {
           if (request.has("nativeConnect"))
             IamError.require(
                 nativeDevices != null
-                    && provider.path("connectorType").asString().equals("team-account")
-                    && config(provider).path("primaryStep").asString("form").equals("form"),
+                    && (provider.path("connectorType").asString().equals("emergency")
+                        || provider.path("connectorType").asString().equals("team-account")
+                            && config(provider)
+                                .path("primaryStep")
+                                .asString("form")
+                                .equals("form")),
                 "invalid_config",
                 400);
           String purpose = request.path("purpose").asString("login");
@@ -653,7 +663,9 @@ public final class LoginManager {
       IamError.require(
           Set.of("done", "fail").contains(step.path("type").asString())
               || step.path("type").asString().equals("form")
-                  && Set.of("password", "totp").contains(step.path("formId").asString()),
+                  && (Set.of("password", "totp").contains(step.path("formId").asString())
+                      || provider.path("connectorType").asString().equals("emergency")
+                          && step.path("formId").asString().equals("emergency")),
           "invalid_step_input",
           400);
     if (step.path("type").asString().equals("done"))
@@ -819,7 +831,7 @@ public final class LoginManager {
     if (!mfa
         && (!policy.path("mfa").asString("new_device").equals("never")
             || purpose.equals("stepup")
-            || tx.has("nativeGrantHash"))) {
+            || tx.has("nativeGrantHash") && !uac)) {
       tx.put("pendingAccount", accountId);
       tx.put("pendingProfile", secrets.encrypt(profile.toString(), aad(tx)));
       if (team && !teamAccounts.hasMfa(UUID.fromString(accountId))) {
@@ -950,9 +962,11 @@ public final class LoginManager {
             : issued.session().path("sessionId").asString();
     if (tx.has("nativeGrantHash")) {
       IamError.require(
-          mfa
-              && issued != null
-              && (coreMfa || tx.path("step").path("formId").asString().equals("totp")),
+          issued != null
+              && (mfa && (coreMfa || tx.path("step").path("formId").asString().equals("totp"))
+                  || uac
+                      && tx.path("uacVerified").asBoolean()
+                      && policy.path("mfa").asString("new_device").equals("never")),
           "mfa_required",
           403);
       nativeDevices.approveNative(tx, issued.session());
@@ -981,6 +995,8 @@ public final class LoginManager {
             .actor(new AuditEntry.Actor("user", accountId))
             .target("account", accountId)
             .detail("connectorType", provider.path("connectorType").asString())
+            .detail("clientId", tx.path("nativeConnect").path("clientId").asString(""))
+            .detail("authorizationMode", tx.has("nativeGrantHash") ? "native_tx" : "browser")
             .build());
     tx.put("status", "completed");
     tx.remove("pendingProfile");

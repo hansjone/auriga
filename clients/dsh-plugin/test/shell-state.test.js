@@ -271,3 +271,29 @@ test('login reply cannot acknowledge progress interrupted by cancellation and a 
   assert.equal(f.shell.current().state, 'authenticating');
   assert.equal(f.shell.current().revision, 5);
 });
+
+test('owner device attempt and platform error survive safe projection and clear on next state', async (t) => {
+  const f = await fixture(t);
+  f.next('authenticating');
+  const attempt = {
+    attemptId: randomUUID(),
+    pageOwner: randomUUID(),
+    userCode: 'BCDF-GHJK',
+    expiresAt: new Date(Date.now() + 60000).toISOString(),
+    verificationRequired: true,
+  };
+  f.event({ deviceAttempt: { ...attempt, device_code: 'secret' } });
+  assert.deepEqual(f.shell.current().deviceAttempt, attempt);
+  f.next('signed_out');
+  const loginError = { code: 'invalid_client', correlationId: randomUUID() };
+  f.event({
+    reason: 'platform_rejected',
+    loginError: { ...loginError, body: 'secret' },
+  });
+  assert.equal(f.shell.current().reason, 'platform_rejected');
+  assert.deepEqual(f.shell.current().loginError, loginError);
+  assert.equal(f.shell.current().deviceAttempt, undefined);
+  f.next('authenticating');
+  f.event();
+  assert.equal(f.shell.current().loginError, undefined);
+});

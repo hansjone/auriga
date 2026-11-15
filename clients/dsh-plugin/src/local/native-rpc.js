@@ -46,7 +46,7 @@ export function installNativeLoginRPC(ctx, getRuntime) {
             : await runtime.command(
                 request,
                 method === 'aurigaAuth/login'
-                  ? 'open_login'
+                  ? 'inline_login'
                   : method === 'aurigaAuth/logout'
                     ? 'logout'
                     : 'cancel_login',

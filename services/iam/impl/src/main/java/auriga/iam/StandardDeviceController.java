@@ -33,7 +33,7 @@ public class StandardDeviceController {
     IamError.validate(request.getParameterMap().isEmpty());
     response.setHeader("Cache-Control", "no-store");
     response.setHeader("Pragma", "no-cache");
-    return requests.call(request, () -> oauth.standardDevices().identity(bearer(request)));
+    return requests.call(request, () -> identity(bearer(request), false));
   }
 
   @GetMapping("/api/iam/v1/me/device-profile")
@@ -42,6 +42,12 @@ public class StandardDeviceController {
     IamError.validate(request.getParameterMap().isEmpty());
     response.setHeader("Cache-Control", "no-store");
     response.setHeader("Pragma", "no-cache");
-    return requests.call(request, () -> oauth.standardDevices().profile(bearer(request)));
+    return requests.call(request, () -> identity(bearer(request), true));
+  }
+
+  private ObjectNode identity(String raw, boolean profile) {
+    return oauth.nativeDevice(raw)
+        ? oauth.nativeIdentity(raw, profile)
+        : (profile ? oauth.standardDevices().profile(raw) : oauth.standardDevices().identity(raw));
   }
 }

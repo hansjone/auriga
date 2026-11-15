@@ -719,10 +719,11 @@ export function createSettingsView(
   }
 
   return function SettingsView(
-    /** @type {{locale:string,boot?:any,consent?:any}} */ {
+    /** @type {{locale:string,boot?:any,consent?:any,gotoOverview?:()=>void}} */ {
       locale,
       boot,
       consent,
+      gotoOverview,
     },
   ) {
     const t = messages[locale?.startsWith('zh') ? 'zh' : 'en'];
@@ -906,11 +907,11 @@ export function createSettingsView(
       await call('auriga/shell/command', { action }, { csrf: account?.csrf });
       await reload();
     };
-    const enter = () => {
-      void shellCommand('open_login').catch((error) =>
-        setNotice(explain(error)),
-      );
-    };
+    const enter = () =>
+      run(async () => {
+        await shellCommand('inline_login');
+        gotoOverview?.();
+      });
     const action = statusError
       ? button(t.retry, reload)
       : managed
@@ -942,6 +943,36 @@ export function createSettingsView(
         !managed && (!loggedIn || !ready) && h('p', null, t.local),
         action,
       ),
+      h(
+        'section',
+        { 'aria-label': t.account },
+        h('h3', null, t.account),
+        row(
+          t.identity,
+          managed
+            ? name
+            : statusError || (loggedIn || recovering ? name : t.signedOut),
+        ),
+        managed
+          ? h('p', null, t.managed)
+          : h(
+              'div',
+              null,
+              (loggedIn || recovering) &&
+                (account.deviceName ?? state?.deviceName) &&
+                row(t.device, account.deviceName ?? state?.deviceName),
+              account?.uacLoginInfo?.status === 'available' &&
+                row(t.department, account.uacLoginInfo.department),
+              (loggedIn || recovering) &&
+                account.loginTime &&
+                row(
+                  t.loginTime,
+                  new Date(account.loginTime).toLocaleString(locale),
+                ),
+              // Sign-in lives on the status card above; only sign-out here.
+              !statusError && loggedIn && button(t.logout, logout),
+            ),
+      ),
       !managed &&
         state?.desktop &&
         h(
@@ -952,7 +983,8 @@ export function createSettingsView(
             h('p', { role: 'alert' }, t.desktopConfirmationRequired),
           h(
             'label',
-            null,
+            { className: 'auriga-setting' },
+            h('span', null, t.autoCheck),
             h('input', {
               type: 'checkbox',
               checked: state.desktop.enabled,
@@ -968,13 +1000,12 @@ export function createSettingsView(
                   await readState();
                 }),
             }),
-            t.autoCheck,
           ),
           state.desktop.required && h('p', { role: 'alert' }, t.requiredUpdate),
           h(
             'label',
-            null,
-            t.updateChannel,
+            { className: 'auriga-setting' },
+            h('span', null, t.updateChannel),
             h(
               'select',
               {
@@ -1022,29 +1053,35 @@ export function createSettingsView(
             ),
           state.desktop.phase === 'cancelled' && h('p', null, t.updatePaused),
           state.desktop.error && h('p', { role: 'alert' }, t.updateFailed),
-          h('p', null, t.updateRestart),
-          !state.desktop.confirmationRequired &&
-            button(t.checkUpdate, () =>
-              run(async () => {
-                await call('auriga/settings/desktop', { action: 'check' });
-                await readState();
-              }),
-            ),
-          state.desktop.available &&
+          (state.desktop.available || state.desktop.downloading) &&
             !state.desktop.restartRequired &&
-            !state.desktop.busy &&
-            button(t.update, () =>
-              run(async () => {
-                // The runtime bounds transfer idle time. A status-read deadline
-                // must not cancel a healthy package download before it queues.
-                await call(
-                  'auriga/settings/desktop',
-                  { action: 'update' },
-                  { timeoutMs: null },
-                );
-                await readState();
-              }),
-            ),
+            h('p', null, t.updateRestart),
+          h(
+            'div',
+            { className: 'auriga-setting-actions' },
+            !state.desktop.confirmationRequired &&
+              button(t.checkUpdate, () =>
+                run(async () => {
+                  await call('auriga/settings/desktop', { action: 'check' });
+                  await readState();
+                }),
+              ),
+            state.desktop.available &&
+              !state.desktop.restartRequired &&
+              !state.desktop.busy &&
+              button(t.update, () =>
+                run(async () => {
+                  // The runtime bounds transfer idle time. A status-read deadline
+                  // must not cancel a healthy package download before it queues.
+                  await call(
+                    'auriga/settings/desktop',
+                    { action: 'update' },
+                    { timeoutMs: null },
+                  );
+                  await readState();
+                }),
+              ),
+          ),
           state.desktop.restartRequired &&
             h('p', { role: 'status' }, t.updateRestart),
         ),
@@ -1108,40 +1145,6 @@ export function createSettingsView(
             state.platformOrigin !== state.activeOrigin &&
             h('p', null, t.pending),
         ),
-      h(
-        'section',
-        { 'aria-label': t.account },
-        h('h3', null, t.account),
-        row(
-          t.identity,
-          managed
-            ? name
-            : statusError || (loggedIn || recovering ? name : t.signedOut),
-        ),
-        managed
-          ? h('p', null, t.managed)
-          : h(
-              'div',
-              null,
-              (loggedIn || recovering) &&
-                (account.deviceName ?? state?.deviceName) &&
-                row(t.device, account.deviceName ?? state?.deviceName),
-              account?.uacLoginInfo?.status === 'available' &&
-                row(t.department, account.uacLoginInfo.department),
-              (loggedIn || recovering) &&
-                account.loginTime &&
-                row(
-                  t.loginTime,
-                  new Date(account.loginTime).toLocaleString(locale),
-                ),
-              !statusError &&
-                (loggedIn
-                  ? button(t.logout, logout)
-                  : configured && !recovering
-                    ? button(t.login, enter)
-                    : null),
-            ),
-      ),
       h(
         'section',
         { 'aria-label': t.networkTitle },

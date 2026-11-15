@@ -10,13 +10,21 @@ const require = createRequire(
   new URL('../../dsh-plugin/package.json', import.meta.url),
 );
 const Ajv = require('ajv/dist/2020.js').default;
-const ajv = new Ajv({ strict: true });
+const ajv = new Ajv({ strict: true, allowUnionTypes: true });
 ajv.addFormat(
   'uuid',
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i,
 );
+ajv.addFormat('uri', (s) => {
+  try {
+    return !!new URL(s).protocol;
+  } catch {
+    return false;
+  }
+});
 ajv.addFormat('date-time', (s) => Number.isFinite(Date.parse(s)));
 for (const file of [
+  'identity/steps',
   'auth/uac-login-info',
   'auth/uac-session-binding',
   'plugin/shell-auth',

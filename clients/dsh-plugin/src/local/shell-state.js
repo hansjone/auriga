@@ -25,6 +25,8 @@ const reasons = new Set([
   'user_logout',
   'admin_disabled',
   'member_disabled',
+  'platform_rejected',
+  'login_denied',
 ]);
 const fail = (code = 'common.unauthenticated') =>
   Object.assign(new Error(code), { code });
@@ -187,6 +189,36 @@ export function createShellState(options) {
         JSON.stringify(value.identity.uacSessionBinding),
       );
     if (reasons.has(value.reason)) snapshot.reason = value.reason;
+    if (
+      value.loginError &&
+      /^[a-zA-Z][a-zA-Z0-9_.-]{0,127}$/.test(value.loginError.code) &&
+      uuid(value.loginError.correlationId)
+    )
+      snapshot.loginError = {
+        code: value.loginError.code,
+        correlationId: value.loginError.correlationId,
+      };
+    const attempt = value.deviceAttempt;
+    if (
+      value.state === 'authenticating' &&
+      attempt &&
+      uuid(attempt.attemptId) &&
+      uuid(attempt.pageOwner) &&
+      /^[BCDFGHJKLMNPQRSTVWXZ]{4}-?[BCDFGHJKLMNPQRSTVWXZ]{4}$/.test(
+        attempt.userCode,
+      ) &&
+      Date.parse(attempt.expiresAt) > now() &&
+      attempt.verificationRequired === true
+    )
+      snapshot.deviceAttempt = {
+        attemptId: attempt.attemptId,
+        pageOwner: attempt.pageOwner,
+        userCode: attempt.userCode,
+        expiresAt: attempt.expiresAt,
+        verificationRequired: true,
+      };
+    if (value.state === 'authenticating' && value.inlineLogin)
+      snapshot.inlineLogin = JSON.parse(JSON.stringify(value.inlineLogin));
     const info = value.uacLoginInfo;
     if (
       info?.purpose === 'login_info' &&
@@ -328,10 +360,21 @@ export function createShellState(options) {
         invalidate();
       }
     },
-    async command(/** @type {string} */ action) {
-      if (!['open_login', 'cancel_login', 'logout'].includes(action))
+    async command(
+      /** @type {string} */ action,
+      /** @type {any} */ input = undefined,
+    ) {
+      if (
+        ![
+          'open_login',
+          'inline_login',
+          'inline_advance',
+          'cancel_login',
+          'logout',
+        ].includes(action)
+      )
         throw fail('common.validation_failed');
-      const command = envelope(action);
+      const command = { ...envelope(action), ...(input ? { input } : {}) };
       if (action === 'logout') {
         authorizationKey = null;
         floor = command.expectedRevision + 1;
@@ -359,7 +402,7 @@ export function createShellState(options) {
           accept(event.snapshot);
         return;
       }
-      if (action === 'open_login')
+      if (['open_login', 'inline_login'].includes(action))
         loginCommands.set(command.requestId, {
           revision: command.expectedRevision,
           interrupted: false,

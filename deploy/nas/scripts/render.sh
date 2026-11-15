@@ -26,6 +26,12 @@ SECRETS="$AURIGA_DATA_ROOT/secrets"
 CONFIG="$AURIGA_DATA_ROOT/config"
 [ -d "$SECRETS" ] || die "secrets directory missing; run init.sh first"
 bootstrap_nas_materials
+# Older installations may have no UAC directory. Publish an empty private bind
+# source before Compose can create a root-owned 0755 directory implicitly.
+if [ ! -e "$CONFIG/materials/uac" ] && [ ! -L "$CONFIG/materials/uac" ]; then
+  (umask 027; mkdir "$CONFIG/materials/uac")
+  chown_required 10001:10001 "$CONFIG/materials/uac"
+fi
 # start owns a separate, non-fatal message configuration boundary. Direct
 # render/init/activation retain their strict material checks.
 if [ "$_core_only" != 1 ]; then sh "$NAS_ROOT/scripts/render-collab.sh"; fi
