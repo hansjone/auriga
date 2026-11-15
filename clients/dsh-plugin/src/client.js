@@ -196,6 +196,7 @@ window.__ModuleLoader__.load({
         '门户默认 UAC 扫码；不能扫码时在门户选择团队账号或应急账号。',
       loginCompare: '请核对门户预填的确认码与此处一致，仅确认自己发起的登录：',
       loginRejected: '平台拒绝了登录请求，请联系管理员检查客户端配置。',
+      loginBadCredentials: '口令或验证码错误，请重试。',
       loginMethods: '默认使用 UAC 扫码，也可选择团队账号或应急账号。',
       platformLogin: '登录平台',
       configurePlatform: '配置平台地址',
@@ -204,7 +205,7 @@ window.__ModuleLoader__.load({
       loginExpired: '设备登录已过期，请重新登录。',
       loginUnreachable: '暂时无法连接平台，请稍后重试。',
       loginCancelled: '已取消平台登录。',
-      loginDenied: '平台登录未完成或已被拒绝。',
+      loginDenied: '登录已拒绝，可重新登录。',
       identityLabel: '成员',
       platformNeeded: '此功能需要平台身份。请先在“概览”登录平台或检查连接。',
       gotoOverview: '前往概览',
@@ -409,6 +410,8 @@ window.__ModuleLoader__.load({
         'Check that the portal confirmation code matches. Only approve a login you started:',
       loginRejected:
         'The platform rejected sign-in. Ask your administrator to check the client configuration.',
+      loginBadCredentials:
+        'Incorrect password or verification code. Try again.',
       loginMethods:
         'Use UAC scan, or choose a team account or emergency account.',
       platformLogin: 'Sign in to platform',
@@ -418,7 +421,7 @@ window.__ModuleLoader__.load({
       loginExpired: 'Device sign-in expired. Sign in again.',
       loginUnreachable: 'Cannot reach the platform. Try again later.',
       loginCancelled: 'Platform sign-in cancelled.',
-      loginDenied: 'Platform sign-in was not completed or was denied.',
+      loginDenied: 'Sign-in was denied. You can try again.',
       identityLabel: 'Member',
       platformNeeded:
         'This feature needs a platform identity. Sign in or check the connection in Overview.',
@@ -2452,8 +2455,10 @@ window.__ModuleLoader__.load({
                     h(
                       'p',
                       { role: 'alert' },
-                      localized(inline.step.error.message) ||
-                        inline.step.error.code,
+                      inline.step.error.code === 'iam.invalid_credentials'
+                        ? t('loginBadCredentials')
+                        : localized(inline.step.error.message) ||
+                            inline.step.error.code,
                     ),
                   ...inline.step.fields.map((field) =>
                     h(
@@ -2562,6 +2567,16 @@ window.__ModuleLoader__.load({
               ),
             shell?.reason === 'platform_rejected' &&
               h('p', { role: 'alert' }, t('loginRejected')),
+            shell?.reason === 'login_denied' &&
+              h(
+                'p',
+                { role: 'alert' },
+                t(
+                  shell?.loginError?.code === 'iam.invalid_credentials'
+                    ? 'loginBadCredentials'
+                    : 'loginDenied',
+                ),
+              ),
             shell?.loginError &&
               h(
                 'p',

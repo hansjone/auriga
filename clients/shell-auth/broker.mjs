@@ -24,6 +24,53 @@ const reasonFor = (error) =>
     'iam.admin_disabled': 'admin_disabled',
   })[error.code] ?? 'revalidation_rejected';
 
+const clientErrors = new Set([
+  'invalid_client',
+  'unauthorized_client',
+  'invalid_request',
+  'unsupported_grant_type',
+  'invalid_scope',
+  'invalid_config',
+]);
+function loginFailure(error, fallbackCorrelationId) {
+  const code =
+    typeof error.code === 'string' &&
+    /^[a-zA-Z][a-zA-Z0-9_.-]{0,127}$/.test(error.code)
+      ? error.code
+      : 'common.unavailable';
+  const correlationId = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(
+    error.correlationId ?? '',
+  )
+    ? error.correlationId
+    : fallbackCorrelationId;
+  const shortCode = code.replace(/^iam\./, '');
+  if (
+    ['expired_token', 'login_tx_expired', 'device_expired'].includes(shortCode)
+  )
+    return {
+      state: 'reauth_required',
+      reason: 'expired',
+      error: { code, correlationId },
+    };
+  if (clientErrors.has(shortCode))
+    return {
+      state: 'signed_out',
+      reason: 'platform_rejected',
+      error: { code, correlationId },
+    };
+  if (error.status >= 400 && error.status < 500)
+    return {
+      state: 'signed_out',
+      reason: 'login_denied',
+      error: { code, correlationId },
+    };
+  return {
+    state: 'unreachable',
+    reason: 'offline',
+    error: { code, correlationId },
+  };
+}
+
 export class Broker extends EventEmitter {
   constructor({
     platform,
@@ -122,6 +169,10 @@ export class Broker extends EventEmitter {
         state === 'authenticated' ? this.tokenUntil : Infinity,
       ),
     );
+    const inlineLogin =
+      state === 'authenticating' && this.attempt?.owner === pageOwner
+        ? this.attempt.inline?.view()
+        : undefined;
     return requireValid('ShellAuthSnapshot', {
       protocolVersion: 1,
       shellEpoch: this.epoch,
@@ -130,15 +181,8 @@ export class Broker extends EventEmitter {
       expiresAt: new Date(expiry).toISOString(),
       ...(reason ? { reason } : {}),
       ...(this.loginError ? { loginError: this.loginError } : {}),
-      ...(state === 'authenticating' &&
-      this.attempt?.inline?.step &&
-      this.attempt.owner === pageOwner
-        ? {
-            inlineLogin: requireValid(
-              'ShellAuthInlineView',
-              this.attempt.inline.view(),
-            ),
-          }
+      ...(inlineLogin
+        ? { inlineLogin: requireValid('ShellAuthInlineView', inlineLogin) }
         : {}),
       ...(state === 'authenticated' && this.projection ? this.projection : {}),
       ...(state === 'authenticating' &&
@@ -256,13 +300,24 @@ export class Broker extends EventEmitter {
       command.expectedRevision !== this.revision
     )
       throw conflict();
-    const publish = () =>
-      send({
-        protocolVersion: 1,
-        requestId: command.requestId,
-        type: 'changed',
-        snapshot: this.snapshot(owner),
-      });
+    const publish = () => {
+      try {
+        send({
+          protocolVersion: 1,
+          requestId: command.requestId,
+          type: 'changed',
+          snapshot: this.snapshot(owner),
+        });
+      } catch {
+        this.log({
+          stage: 'shell_identity',
+          phase: 'end',
+          result: 'failure',
+          code: 'common.unavailable',
+          correlationId: randomUUID(),
+        });
+      }
+    };
     this.on('changed', publish);
     publish(); // listener installed before initial projection
     const timer = setInterval(publish, 10000);
@@ -326,48 +381,17 @@ export class Broker extends EventEmitter {
       if (this.record.tokens === tokens) delete this.record.tokens;
       if (tokens) await this.queueRevoke(tokens).catch(() => {});
       if (!this.current(attempt)) return;
-      if (
-        !tokens &&
-        error.code === 'iam.invalid_credentials' &&
-        attempt.inline.step?.type === 'form'
-      ) {
-        attempt.inline.step = {
-          ...attempt.inline.step,
-          error: { code: error.code },
-        };
-        this.transition('authenticating');
-        return;
-      }
       await attempt.inline.cancel();
       this.attempt = undefined;
-      const code = /^[a-zA-Z][a-zA-Z0-9_.-]{0,127}$/.test(error.code ?? '')
-        ? error.code
-        : 'common.unavailable';
-      const correlationId =
-        /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(
-          error.correlationId ?? '',
-        )
-          ? error.correlationId
-          : attempt.correlationId;
-      this.loginError = { code, correlationId };
-      this.transition(
-        code === 'expired_token'
-          ? 'reauth_required'
-          : error.status >= 400 && error.status < 500
-            ? 'signed_out'
-            : 'unreachable',
-        code === 'expired_token'
-          ? 'expired'
-          : error.status >= 400 && error.status < 500
-            ? 'platform_rejected'
-            : 'offline',
-      );
+      const failure = loginFailure(error, attempt.correlationId);
+      this.loginError = failure.error;
+      this.transition(failure.state, failure.reason);
       this.log({
         stage: 'device_authorization',
         phase: 'end',
         result: 'failure',
-        code,
-        correlationId,
+        code: failure.error.code,
+        correlationId: failure.error.correlationId,
       });
     }
   }
@@ -395,6 +419,7 @@ export class Broker extends EventEmitter {
     const correlationId = randomUUID(),
       metadata = {
         correlationId,
+        clientId: tokens.client_id ?? this.platform.config.clientId,
         ...(identity
           ? { tenantId: identity.tenantId, providerId: identity.providerId }
           : {}),
@@ -446,7 +471,7 @@ export class Broker extends EventEmitter {
           tokenHashPrefix: hash.slice(0, 12),
         });
         try {
-          const result = await this.platform.revoke(token);
+          const result = await this.platform.revoke(token, metadata.clientId);
           this.record.revocations = this.record.revocations.filter(
             (t) => t !== token,
           );
@@ -637,24 +662,9 @@ export class Broker extends EventEmitter {
       if (tokens) await this.queueRevoke(tokens).catch(() => {});
       if (this.current(attempt)) {
         this.attempt = undefined;
-        const rejected = error.status >= 400 && error.status < 500;
-        const expired = error.code === 'expired_token';
-        const code =
-          typeof error.code === 'string' &&
-          /^[a-zA-Z][a-zA-Z0-9_.-]{0,127}$/.test(error.code)
-            ? error.code
-            : 'common.unavailable';
-        const correlationId =
-          /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(
-            error.correlationId ?? '',
-          )
-            ? error.correlationId
-            : attempt.correlationId;
-        this.loginError = { code, correlationId };
-        this.transition(
-          expired ? 'reauth_required' : rejected ? 'signed_out' : 'unreachable',
-          expired ? 'expired' : rejected ? 'platform_rejected' : 'offline',
-        );
+        const failure = loginFailure(error, attempt.correlationId);
+        this.loginError = failure.error;
+        this.transition(failure.state, failure.reason);
       }
       this.log({
         stage: 'device_authorization',
@@ -678,7 +688,11 @@ export class Broker extends EventEmitter {
       tokens.access_token,
       expected,
     );
-    const projection = await this.platform.profile(tokens.access_token, claims);
+    const projection = await this.platform.profile(
+      tokens.access_token,
+      claims,
+      tokens.client_id,
+    );
     if (
       expected &&
       this.projection &&
@@ -746,7 +760,9 @@ export class Broker extends EventEmitter {
         !this.claims ||
         this.tokenUntil - this.now() < 60000 ||
         this.state === 'unreachable';
-      next = refresh ? await this.platform.refresh(old.refresh_token) : old;
+      next = refresh
+        ? await this.platform.refresh(old.refresh_token, old.client_id)
+        : old;
       if (generation !== this.generation || this.closed) {
         if (next !== old) await this.queueRevoke(next);
         return;
@@ -818,6 +834,7 @@ export class Broker extends EventEmitter {
           this.record.tokens.refresh_token,
           this.claims,
           audience,
+          this.record.tokens.client_id,
         );
         if (context.generation !== this.generation || this.closed) {
           await this.queueRevoke(result);

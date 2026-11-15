@@ -11,15 +11,6 @@ export class InlineLogin {
     this.platform = platform;
     this.signal = signal;
     this.request = platform.loginSession(signal);
-    this.verifier = randomBytes(32).toString('base64url');
-    this.nativeConnect = {
-      clientId: platform.config.clientId,
-      codeChallenge: createHash('sha256')
-        .update(this.verifier)
-        .digest('base64url'),
-      codeChallengeMethod: 'S256',
-      deviceName: 'Auriga Desktop',
-    };
     this.providers = [];
   }
   async start() {
@@ -47,6 +38,15 @@ export class InlineLogin {
     if (!provider) throw fail();
     await this.cancel();
     this.providerId = id;
+    this.verifier = randomBytes(32).toString('base64url');
+    this.nativeConnect = {
+      clientId: this.platform.config.nativeClientId,
+      codeChallenge: createHash('sha256')
+        .update(this.verifier)
+        .digest('base64url'),
+      codeChallengeMethod: 'S256',
+      deviceName: 'Auriga Desktop',
+    };
     const uac = provider.connectorType === 'uac';
     const tx = await this.request(
       uac
@@ -92,11 +92,17 @@ export class InlineLogin {
       !['form', 'complete', 'fail'].includes(tx.step.type)
     )
       throw fail();
+    if (tx.status === 'expired') throw fail('expired_token');
+    if (['failed', 'cancelled'].includes(tx.status)) {
+      const code =
+        typeof tx.step.code === 'string' &&
+        /^[a-zA-Z][a-zA-Z0-9_.-]{0,127}$/.test(tx.step.code)
+          ? tx.step.code
+          : 'access_denied';
+      throw Object.assign(fail(code), { correlationId: tx.correlationId });
+    }
     this.step = tx.step;
     this.completed = tx.status === 'completed' && tx.step.type === 'complete';
-    if (tx.status === 'expired') throw fail('expired_token');
-    if (['failed', 'cancelled'].includes(tx.status))
-      throw fail('access_denied');
   }
   async advance(input) {
     if (!this.grant || Date.parse(this.grant.expiresAt) <= Date.now())
@@ -138,15 +144,28 @@ export class InlineLogin {
         input.formId !== this.step.formId
       )
         throw fail();
-      this.update(
-        await this.request(
-          '/api/iam/v1/login/transactions/' + this.transactionId + '/advance',
-          {
-            method: 'POST',
-            body: { type: 'form', formId: input.formId, values: input.values },
-          },
-        ),
-      );
+      try {
+        this.update(
+          await this.request(
+            '/api/iam/v1/login/transactions/' + this.transactionId + '/advance',
+            {
+              method: 'POST',
+              body: {
+                type: 'form',
+                formId: input.formId,
+                values: input.values,
+              },
+            },
+          ),
+        );
+      } catch (error) {
+        if (error.code !== 'iam.invalid_credentials') throw error;
+        // IAM terminates failed transactions and invalidates their device grants.
+        // Restart on the selected provider before accepting another credential.
+        await this.select(this.providerId);
+        if (this.step.type !== 'form') throw fail();
+        this.step.error = { code: error.code };
+      }
     }
   }
   async tokens() {
@@ -158,6 +177,7 @@ export class InlineLogin {
     );
   }
   view() {
+    if (!['form', 'qr'].includes(this.step?.type)) return undefined;
     return {
       providers: this.providers,
       providerId: this.providerId,

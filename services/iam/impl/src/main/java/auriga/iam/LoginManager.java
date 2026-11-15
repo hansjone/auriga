@@ -995,6 +995,8 @@ public final class LoginManager {
             .actor(new AuditEntry.Actor("user", accountId))
             .target("account", accountId)
             .detail("connectorType", provider.path("connectorType").asString())
+            .detail("clientId", tx.path("nativeConnect").path("clientId").asString(""))
+            .detail("authorizationMode", tx.has("nativeGrantHash") ? "native_tx" : "browser")
             .build());
     tx.put("status", "completed");
     tx.remove("pendingProfile");

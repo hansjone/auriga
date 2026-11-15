@@ -315,11 +315,7 @@ test('platform rejection reports code and correlation without claiming network f
 test('device expiry and rejection are terminal while transport failure is offline', async () => {
   for (const [error, state, reason] of [
     [new PlatformError(400, 'expired_token'), 'reauth_required', 'expired'],
-    [
-      new PlatformError(400, 'access_denied'),
-      'signed_out',
-      'platform_rejected',
-    ],
+    [new PlatformError(400, 'access_denied'), 'signed_out', 'login_denied'],
     [new TypeError('fetch failed'), 'unreachable', 'offline'],
   ]) {
     const f = fixture({

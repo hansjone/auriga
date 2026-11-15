@@ -239,3 +239,47 @@ test('overview login stays inline and its QR/form controls submit native command
     f.close();
   }
 });
+
+test('business denial and wrong credentials show retry feedback separately from client configuration', async () => {
+  const f = await fixture(async () => ({ ok: true, json: async () => ({}) }));
+  try {
+    const status = {
+      configured: true,
+      platform: 'signed_out',
+      brokerAvailable: true,
+      loggedIn: false,
+      csrf: 'csrf',
+    };
+    let tree = await f.render({
+      ...status,
+      reason: 'login_denied',
+      loginError: { code: 'access_denied' },
+    });
+    assert.match(text(tree), /已拒绝.*重新登录/);
+    assert.doesNotMatch(text(tree), /检查客户端配置/);
+    tree = await f.render({
+      ...status,
+      platform: 'authenticating',
+      inlineLogin: {
+        providerId: 'test',
+        providers: [],
+        step: {
+          type: 'form',
+          formId: 'password',
+          fields: [],
+          error: { code: 'iam.invalid_credentials' },
+        },
+      },
+    });
+    assert.match(text(tree), /口令或验证码错误.*重试/);
+    assert.doesNotMatch(text(tree), /检查客户端配置/);
+    tree = await f.render({
+      ...status,
+      reason: 'platform_rejected',
+      loginError: { code: 'invalid_client' },
+    });
+    assert.match(text(tree), /检查客户端配置/);
+  } finally {
+    f.close();
+  }
+});

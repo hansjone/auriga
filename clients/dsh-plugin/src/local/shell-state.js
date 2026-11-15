@@ -26,6 +26,7 @@ const reasons = new Set([
   'admin_disabled',
   'member_disabled',
   'platform_rejected',
+  'login_denied',
 ]);
 const fail = (code = 'common.unauthenticated') =>
   Object.assign(new Error(code), { code });

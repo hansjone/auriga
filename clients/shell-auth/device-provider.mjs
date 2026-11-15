@@ -80,7 +80,10 @@ export function createDeviceProvider({
   migrationPermit,
   loadInstallation,
 }) {
-  const config = platformConfig(input),
+  // The native OAuth client belongs to the broker, outside network configuration.
+  const networkConfig = { ...input };
+  delete networkConfig.nativeClientId;
+  const config = platformConfig(networkConfig),
     installation = config.network;
   if (!installation) throw new Error('network installation required');
   /** @param {any} value @param {{tid:string,did:string}} claims @param {boolean} created @returns {import('../dsh-plugin/src/network/runtime-types.js').DeviceRegistration} */

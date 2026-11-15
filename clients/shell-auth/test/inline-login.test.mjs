@@ -2,12 +2,15 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { fixture, command, OWNER, OTHER } from './fixtures.mjs';
+import { valid } from '../schema.mjs';
+import { Broker } from '../broker.mjs';
 import { createPlatform, trustedConfig } from '../platform.mjs';
 
 function setup() {
   const providerId = randomUUID(),
-    transactionId = randomUUID(),
     challengeId = randomUUID();
+  let transactionId = randomUUID(),
+    rejectNext = false;
   const f = fixture(),
     calls = [];
   let state = 'waiting',
@@ -38,7 +41,11 @@ function setup() {
           ],
         });
       if (path.endsWith('/challenges') || path.endsWith('/transactions')) {
+        transactionId = randomUUID();
+        nativeDevice.deviceCode = randomUUID();
+        form.formId = mode === 'emergency' ? 'emergency' : 'password';
         const body = JSON.parse(options.body);
+        assert.equal(body.nativeConnect.clientId, 'auriga-dsh-native');
         assert.equal(body.nativeConnect.codeChallengeMethod, 'S256');
         assert.match(body.nativeConnect.codeChallenge, /^[\w-]{43}$/);
         return Response.json(
@@ -82,6 +89,14 @@ function setup() {
         return Response.json({ id: challengeId, state });
       if (path.endsWith('/complete'))
         return Response.json({ transactionId, state: 'authenticated' });
+      if (path.endsWith('/advance') && rejectNext) {
+        rejectNext = false;
+        return Response.json({
+          id: transactionId,
+          status: 'failed',
+          step: { type: 'fail', code: 'iam.invalid_credentials' },
+        });
+      }
       return Response.json({
         id: transactionId,
         status: 'completed',
@@ -106,6 +121,9 @@ function setup() {
     run,
     state: (value) => (state = value),
     mode: (value) => (mode = value),
+    reject: () => {
+      rejectNext = true;
+    },
   };
 }
 
@@ -136,7 +154,7 @@ test('inline team and emergency submit their transaction form without returning 
     assert.equal(f.broker.snapshot(OWNER).inlineLogin.step.type, 'form');
     await run('inline_advance', {
       operation: 'submit',
-      formId: 'password',
+      formId: f.broker.snapshot(OWNER).inlineLogin.step.formId,
       values: { password: randomUUID() },
     });
     assert.equal(f.broker.state, 'authenticated');
@@ -154,6 +172,8 @@ test('inline QR expiry and denial close the attempt, and cancel removes projecti
       terminal === 'expired' ? 'reauth_required' : 'signed_out',
     );
     assert.equal(f.broker.snapshot(OWNER).inlineLogin, undefined);
+    if (terminal === 'denied')
+      assert.equal(f.broker.snapshot().reason, 'login_denied');
     await f.broker.close();
   }
   const { f, run } = setup();
@@ -221,36 +241,134 @@ test('inline invalid_client preserves platform reason and correlation without op
   await f.broker.close();
 });
 
-test('an invalid password remains in the same native form and can be retried', async () => {
+for (const mode of ['team-account', 'emergency']) {
+  test(`real IAM failed transaction restarts ${mode} with a fresh grant and PKCE`, async () => {
+    const setupResult = setup();
+    const { f, run, calls, reject } = setupResult;
+    setupResult.mode(mode);
+    await run('inline_login');
+    const first = f.broker.attempt.inline;
+    const oldId = first.transactionId;
+    const oldVerifier = first.verifier;
+    const oldCode = first.grant.deviceCode;
+    const input = {
+      operation: 'submit',
+      formId: first.step.formId,
+      values: { password: 'test' },
+    };
+    reject();
+    await run('inline_advance', input);
+    const view = f.broker.snapshot(OWNER);
+    assert.equal(view.reason, undefined);
+    assert.equal(view.inlineLogin.step.error.code, 'iam.invalid_credentials');
+    assert.notEqual(first.transactionId, oldId);
+    assert.notEqual(first.grant.deviceCode, oldCode);
+    assert.notEqual(first.verifier, oldVerifier);
+    await run('inline_advance', input);
+    assert.equal(f.broker.state, 'authenticated');
+    assert.equal(calls.filter((c) => c.path.endsWith('/token')).length, 1);
+    await f.broker.close();
+  });
+}
+
+test('completed attempt remains valid during token, verification and persistence awaits', async () => {
   const { f, run, mode } = setup();
   mode('team-account');
-  const session = f.platform.loginSession;
-  let rejected = false;
-  f.platform.loginSession = (signal) => {
-    const request = session(signal);
-    return (path, options) => {
-      if (path.endsWith('/advance') && !rejected) {
-        rejected = true;
-        throw Object.assign(new Error('invalid credentials'), {
-          status: 401,
-          code: 'iam.invalid_credentials',
-        });
-      }
-      return request(path, options);
-    };
+  const phases = [];
+  let enterToken, releaseToken;
+  const entered = new Promise((resolve) => {
+    enterToken = resolve;
+  });
+  f.platform.nativePoll = () => {
+    enterToken();
+    return new Promise((resolve) => {
+      releaseToken = resolve;
+    });
+  };
+  const originalVerify = f.platform.verifyDevice;
+  f.platform.verifyDevice = async (...args) => {
+    phases.push(f.broker.snapshot(OWNER));
+    return originalVerify(...args);
+  };
+  const save = f.vault.save;
+  f.vault.save = async (record) => {
+    phases.push(f.broker.snapshot(OWNER));
+    return save(record);
   };
   await run('inline_login');
-  const input = {
+  const events = [];
+  const stop = f.broker.subscribe(
+    command(f.broker, 'subscribe'),
+    OWNER,
+    (event) => events.push(event),
+  );
+  const pending = run('inline_advance', {
     operation: 'submit',
     formId: 'password',
     values: { password: 'test' },
-  };
-  await run('inline_advance', input);
-  assert.equal(
-    f.broker.snapshot(OWNER).inlineLogin.step.error.code,
-    'iam.invalid_credentials',
+  });
+  await entered;
+  const snapshot = await run('snapshot');
+  assert.equal(valid('ShellAuthSnapshot', snapshot.snapshot), true);
+  assert.equal(snapshot.snapshot.inlineLogin, undefined);
+  releaseToken(f.tokens);
+  await pending;
+  assert.ok(
+    phases.every((s) => valid('ShellAuthSnapshot', s) && !s.inlineLogin),
   );
-  await run('inline_advance', input);
   assert.equal(f.broker.state, 'authenticated');
+  stop();
   await f.broker.close();
+});
+
+test('subscription timers contain snapshot and subscriber exceptions', async (t) => {
+  t.mock.timers.enable({ apis: ['setInterval'] });
+  const { f } = setup();
+  const stop = f.broker.subscribe(command(f.broker, 'subscribe'), OWNER, () => {
+    throw new Error('closed subscriber');
+  });
+  assert.doesNotThrow(() => t.mock.timers.tick(10000));
+  const snapshot = f.broker.snapshot;
+  f.broker.snapshot = () => {
+    throw new Error('projection unavailable');
+  };
+  assert.doesNotThrow(() => t.mock.timers.tick(10000));
+  f.broker.snapshot = snapshot;
+  stop();
+  await f.broker.close();
+});
+
+test('native revocation outbox preserves client ownership across broker restart', async () => {
+  const { f, run, mode } = setup();
+  mode('team-account');
+  await run('inline_login');
+  await run('inline_advance', {
+    operation: 'submit',
+    formId: 'password',
+    values: { password: 'test' },
+  });
+  assert.equal(f.broker.record.tokens.client_id, 'auriga-dsh-native');
+  f.platform.revoke = async () => {
+    throw new Error('offline');
+  };
+  await f.broker.logout();
+  await Promise.all([...f.broker.inflight]);
+  assert.ok(
+    Object.values(f.broker.record.revocationBindings).every(
+      (value) => value.clientId === 'auriga-dsh-native',
+    ),
+  );
+  await f.broker.close();
+  const clients = [];
+  f.platform.revoke = async (token, clientId) => {
+    clients.push(clientId);
+  };
+  const restarted = new Broker({
+    platform: f.platform,
+    vault: f.vault,
+    openBrowser: async () => {},
+  });
+  await restarted.initialize();
+  assert.deepEqual(clients, ['auriga-dsh-native', 'auriga-dsh-native']);
+  await restarted.close();
 });

@@ -81,6 +81,7 @@ const allowed = {
     'admin_disabled',
     'member_disabled',
     'platform_rejected',
+    'login_denied',
   ],
   strategy: ['token-verify', 'department'],
   cookieFamily: ['portal', 'uds', 'none'],

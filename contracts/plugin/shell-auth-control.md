@@ -130,7 +130,7 @@ Desktop 按 manifest 校验插件内全部文件，并逐文件比较插件与�
 
 The transitional device flow opens a same-origin `/device?user_code=...`. The broker validates the complete URI origin, path and unique user_code against this grant. When an older platform omits the complete URI, the broker constructs it from the validated base URI. The portal still requires explicit confirmation; manual mode is preserved.
 ShellAuthSnapshot.deviceAttempt is projected only to the initiating page or authenticated OS connection. Each subscription recomputes its owner projection. The plugin displays the code only during authentication and clears it on completion/cancellation. Device codes and tokens stay in the broker.
-ShellAuthSnapshot adds optional loginError={code,correlationId} and reason=platform_rejected. HTTP 4xx yields signed_out/platform_rejected; expired_token yields reauth_required/expired; transport and server failures remain unreachable/offline. Correlation IDs must be UUIDs, with the current attempt ID as fallback. Codes have bounded length and characters; response bodies are never projected. New login, cancellation and logout clear the error.
+ShellAuthSnapshot adds optional loginError={code,correlationId}. Client configuration errors yield signed_out/platform_rejected. User or account refusals yield signed_out/login_denied. Expiry yields reauth_required/expired. Transport and server failures yield unreachable/offline. Correlation IDs must be UUIDs, with the current attempt ID as fallback. Codes have bounded length and characters. New login, cancellation and logout clear the error.
 
 ## 插件概览内原生登录（续做1）
 
@@ -140,4 +140,10 @@ broker 每次尝试在内存生成 S256 verifier 和隔离 cookie jar。只访�
 
 UAC challenge 创建新增可选 NativeConnect 和一次性 nativeDevice 响应，禁止 link/invitation 混用。完成时只批准该 challenge 对应事务自己的 grant，保留账户、租户、provider、origin、binding、PKCE、过期和单次兑换检查。UAC 遵守原门户 MFA 策略：never 允许本次已验证扫码建立设备绑定，其他策略仍完成平台 MFA；团队账号保留 TOTP，应急账号只允许内置 emergency 表单并验证 OTP。UAC 源会话绑定复制到 grant/device，不能将普通门户会话直接作为插件凭据。
 
-设备身份与资料查询按在线权威区分 standard_device/native_tx；原生分支验证签名、类型、scope、租户、有效设备及来源会话、账户/provider 和已登记原生客户端。返回同一受限身份/资料 DTO，不返回 backing session。部署必须将本客户端 nativeConnect 设为 true，且刷新、撤销、AI/通信接线同批验证；原先设备流客户端设置 false 的过渡说明仅适用于旧入口。
+设备身份与资料查询按在线权威区分 standard_device/native_tx。原生分支验证签名、类型、scope、租户、有效设备及来源会话、账户/provider 和已登记原生客户端。标准客户端 `auriga-dsh` 保持 `nativeConnect=false`，原生客户端 `auriga-dsh-native` 设为 true。broker 在原生令牌、刷新结果和持久撤销记录中保存可信 client_id，刷新、撤销和 AI 换票均沿用该归属。缺少归属的旧记录默认使用标准客户端。
+
+真实 IAM 口令错误返回 HTTP 200 和 failed 事务，其 step.code 会透传。错误口令重试必须在原 provider 创建新事务、新 grant 和新 PKCE，再展示错误反馈。扫码端拒绝按业务拒绝提示重试。complete 步骤到令牌验证/持久化期间不投影表单或二维码，订阅定时发布的异常由 broker 捕获。
+
+UAC 原生登录和门户 UAC 均有转发二维码钓鱼的剩余风险。攻击者可转发自己发起的二维码，诱使其他人扫码授权。事务绑定、PKCE 和单次兑换限制跨事务兑换及重放，不能证明扫码者看见了正确的发起端。采用 `mfa=never` 的租户接受仅凭扫码建立该来源会话及原生设备的风险。需要 MFA 的策略继续要求平台二次验证。扫码端展示桌面客户端登录用途有助于用户辨认发起目的。
+
+应急账号保留原生设备凭据能力。成功原生登录写入 `iam.identity.login` 审计，记录 connectorType=emergency、原生 clientId 和 authorizationMode=native_tx，设备刷新仍受应急来源会话期限约束。

@@ -24,6 +24,8 @@ class NativeConnectPostgresTest {
   final UUID tenant = UUID.randomUUID(), provider = UUID.randomUUID(), account = UUID.randomUUID();
   final AdminCsrfPostgresTest.Time clock = new AdminCsrfPostgresTest.Time();
   LoginManager login;
+  AuditLogger audit;
+  EmergencyAccounts emergency;
   OAuthProvider oauth;
   SessionManager sessions;
   TokenService tokens;
@@ -81,7 +83,7 @@ class NativeConnectPostgresTest {
                           List.of("https://native.example.com"));
                   SessionKv kv = mock(SessionKv.class);
                   EventPublisher events = mock(EventPublisher.class);
-                  AuditLogger audit = mock(AuditLogger.class);
+                  audit = mock(AuditLogger.class);
                   sessions = new SessionManager(store, kv, tokens, clock, events, audit);
                   TeamAccounts team = new TeamAccounts(store, secrets, clock, events);
                   TeamPasskeys passkeys = new TeamPasskeys(store, secrets, clock, events);
@@ -98,7 +100,7 @@ class NativeConnectPostgresTest {
                           secrets,
                           schemas,
                           registry,
-                          new EmergencyAccounts(store, secrets, clock, false),
+                          emergency = new EmergencyAccounts(store, secrets, clock, false),
                           team,
                           sessions,
                           mock(IdentityPolicyHooks.class),
@@ -276,6 +278,61 @@ class NativeConnectPostgresTest {
             "native-example",
             "refresh_token",
             token.path("refresh_token").asString()));
+  }
+
+  @Test
+  void emergencyNativeCredentialApprovalIsAuditedWithItsClient() {
+    TenantContext.run(
+        tenant,
+        () -> {
+          var enrollment = emergency.install(tenant);
+          var started =
+              login.begin(
+                  request().put("providerId", enrollment.providerId().toString()),
+                  "portal",
+                  "127.0.0.1",
+                  "native-test",
+                  issuer,
+                  null);
+          var done =
+              login.advance(
+                  started.transaction().path("id").asString(),
+                  started.bindingCookie(),
+                  Json.object(
+                      "type",
+                      "form",
+                      "formId",
+                      "emergency",
+                      "values",
+                      Json.object(
+                          "username",
+                          enrollment.username(),
+                          "password",
+                          enrollment.password(),
+                          "otp",
+                          Totp.code(
+                              enrollment.totpSecret(), clock.instant().getEpochSecond() / 30))),
+                  false);
+          assertEquals("completed", done.transaction().path("status").asString());
+          var credential =
+              oauth.token(
+                  exchange(
+                      started.transaction().path("nativeDevice").path("deviceCode").asString(),
+                      verifier));
+          assertTrue(credential.hasNonNull("access_token"));
+          var captured = org.mockito.ArgumentCaptor.forClass(auriga.common.audit.AuditEntry.class);
+          verify(audit, atLeastOnce()).record(captured.capture());
+          var entry =
+              captured.getAllValues().stream()
+                  .filter(e -> e.action().equals("iam.identity.login"))
+                  .findFirst()
+                  .orElseThrow();
+          assertEquals("emergency", entry.details().get("connectorType"));
+          assertEquals("native-example", entry.details().get("clientId"));
+          assertEquals("native_tx", entry.details().get("authorizationMode"));
+          assertFalse(entry.details().containsKey("password"));
+          assertFalse(entry.details().containsKey("token"));
+        });
   }
 
   @Test

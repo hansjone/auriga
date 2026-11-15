@@ -1,7 +1,83 @@
+/* global Headers */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { generateKeyPairSync, sign, randomUUID } from 'node:crypto';
 import { createPlatform, trustedConfig } from '../platform.mjs';
+
+test('standard and native clients coexist and each token operation retains its client', async () => {
+  const forms = [];
+  const config = trustedConfig({ platformOrigin: 'https://example.com' });
+  const platform = createPlatform(config, async (url, options) => {
+    forms.push(new URLSearchParams(options.body));
+    return Response.json({ access_token: 'test', refresh_token: 'refresh' });
+  });
+  await platform.begin();
+  await platform.poll('standard-code');
+  const native = await platform.nativePoll('native-code', 'v'.repeat(43));
+  assert.equal(native.client_id, 'auriga-dsh-native');
+  const refreshed = await platform.refresh(
+    native.refresh_token,
+    native.client_id,
+  );
+  assert.equal(refreshed.client_id, native.client_id);
+  await platform.revoke('native-token', native.client_id);
+  await platform.refresh('legacy-refresh');
+  await platform.revoke('legacy-token');
+  await assert.rejects(
+    platform.audience(
+      'native-refresh',
+      {},
+      'auriga.ai-gateway',
+      native.client_id,
+    ),
+  );
+  assert.deepEqual(
+    forms.map((form) => form.get('client_id')),
+    [
+      'auriga-dsh',
+      'auriga-dsh',
+      'auriga-dsh-native',
+      'auriga-dsh-native',
+      'auriga-dsh-native',
+      'auriga-dsh',
+      'auriga-dsh',
+      'auriga-dsh-native',
+    ],
+  );
+  assert.equal(forms.at(-1).get('resource'), 'urn:auriga:ai-gateway');
+  assert.throws(() =>
+    trustedConfig({
+      platformOrigin: 'https://example.com',
+      nativeClientId: 'auriga-dsh',
+    }),
+  );
+});
+
+test('login jar retains only the transaction binding cookie', async () => {
+  const requests = [];
+  const platform = createPlatform(
+    trustedConfig({ platformOrigin: 'https://example.com' }),
+    async (url, options) => {
+      requests.push(options);
+      const headers = new Headers();
+      for (const cookie of [
+        '__Host-auriga_portal_login_tx=bound',
+        '__Host-auriga_session=private',
+        'auriga_csrf=private',
+        'foreign=private',
+      ])
+        headers.append('set-cookie', cookie + '; Path=/; Secure');
+      return Response.json({}, { headers });
+    },
+  );
+  const session = platform.loginSession();
+  await session('/api/iam/v1/login/providers');
+  await session('/api/iam/v1/login/providers');
+  assert.equal(
+    requests[1].headers.Cookie,
+    '__Host-auriga_portal_login_tx=bound',
+  );
+});
 test('device credentials require real signature, exact issuer/audience and device-only identity', async () => {
   const keys = generateKeyPairSync('ec', { namedCurve: 'prime256v1' }),
     config = trustedConfig({ platformOrigin: 'https://example.com' });

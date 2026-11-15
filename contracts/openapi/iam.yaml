@@ -2379,7 +2379,7 @@ components:
         - expiresAt
         - pollIntervalSeconds
       properties:
-        nativeDevice: { $ref: '#/components/schemas/CreateLoginTransactionResult/allOf/1/properties/nativeDevice' }
+        nativeDevice: { $ref: '#/components/schemas/NativeDeviceGrant' }
         id:
           type: string
           format: uuid
@@ -2567,19 +2567,20 @@ components:
         codeChallengeMethod: { type: string, const: S256 }
         deviceName: { type: string, maxLength: 64 }
       required: [clientId, codeChallenge, codeChallengeMethod]
+    NativeDeviceGrant:
+      type: object
+      additionalProperties: false
+      properties:
+        deviceCode: { type: string, description: 服务端自产256-bit明文，仅本创建响应一次回给Host内存。 }
+        expiresAt: { type: string, format: date-time }
+        interval: { type: integer, minimum: 1, description: token轮询间隔秒数，初始5。 }
+      required: [deviceCode, expiresAt, interval]
     CreateLoginTransactionResult:
       allOf:
         - { $ref: '#/components/schemas/LoginTransaction' }
         - type: object
           properties:
-            nativeDevice:
-              type: object
-              additionalProperties: false
-              properties:
-                deviceCode: { type: string, description: 服务端自产256-bit明文，仅本创建响应一次回给Host内存。 }
-                expiresAt: { type: string, format: date-time }
-                interval: { type: integer, minimum: 1, description: token轮询间隔秒数，初始5。 }
-              required: [deviceCode, expiresAt, interval]
+            nativeDevice: { $ref: '#/components/schemas/NativeDeviceGrant' }
     LoginTransaction:
       type: object
       properties:

@@ -241,11 +241,20 @@ export interface components {
         | 'revalidation_unreachable'
         | 'user_logout'
         | 'admin_disabled'
-        | 'member_disabled';
+        | 'member_disabled'
+        | 'platform_rejected'
+        | 'login_denied';
       /** @description 仅authenticated且身份匹配时的可选只读展示资料，注销或切换身份立即清除 */
       uacLoginInfo?: components['schemas']['UacLoginInfo'];
       deviceAttempt?: components['schemas']['ShellAuthDeviceAttempt'];
-    } & (unknown & unknown & unknown & unknown);
+      /** @description Bounded platform login error code and correlation UUID. No response body or credentials. Cleared on new login, cancellation or logout. */
+      loginError?: {
+        code: string;
+        /** Format: uuid */
+        correlationId: string;
+      };
+      inlineLogin?: components['schemas']['ShellAuthInlineView'];
+    } & (unknown & unknown & unknown & unknown & unknown);
     ShellAuthIdentity: {
       /** Format: uuid */
       tenantId: string;
@@ -268,8 +277,15 @@ export interface components {
       expectedRevision: number;
       /** @enum {string} */
       action:
-        'snapshot' | 'subscribe' | 'open_login' | 'cancel_login' | 'logout';
-    };
+        | 'snapshot'
+        | 'subscribe'
+        | 'open_login'
+        | 'cancel_login'
+        | 'logout'
+        | 'inline_login'
+        | 'inline_advance';
+      input?: components['schemas']['ShellAuthInlineInput'];
+    } & unknown;
     ShellAuthEvent: {
       /** @enum {integer} */
       protocolVersion: 1;
@@ -1472,6 +1488,25 @@ export interface components {
       /** Format: date-time */
       expiresAt: string;
     };
+    ShellAuthInlineInput:
+      | {
+          /** @constant */
+          operation: 'poll';
+        }
+      | {
+          /** @constant */
+          operation: 'select';
+          /** Format: uuid */
+          providerId: string;
+        }
+      | {
+          /** @constant */
+          operation: 'submit';
+          formId: string;
+          values: {
+            [key: string]: string | boolean;
+          };
+        };
     UacSessionBinding: {
       /** Format: uuid */
       sourceSessionId: string;
@@ -1503,6 +1538,95 @@ export interface components {
       /** Format: date-time */
       expiresAt: string;
       verificationRequired: boolean;
+    };
+    /**
+     * @description 按语言给出的文案，键是 BCP 47 语言标签。至少要有 `en`；前端按当前语言选，没有就用 `en`。
+     * @example {
+     *       "en": "Password",
+     *       "zh-CN": "口令"
+     *     }
+     */
+    LocalizedText: {
+      en: string;
+    } & {
+      [key: string]: string;
+    };
+    FormField: {
+      name: string;
+      /** @enum {unknown} */
+      kind:
+        | 'text'
+        | 'password'
+        | 'email'
+        | 'tel'
+        | 'otp'
+        | 'select'
+        | 'checkbox'
+        | 'hidden'
+        | 'info';
+      label?: components['schemas']['LocalizedText'];
+      placeholder?: components['schemas']['LocalizedText'];
+      help?: components['schemas']['LocalizedText'];
+      /** @default false */
+      required: boolean;
+      /** @description HTML autocomplete 值，例如 `username`、`current-password`、`one-time-code`。 */
+      autocomplete?: string;
+      pattern?: string;
+      minLength?: number;
+      maxLength?: number;
+      /** @description kind=select 时的选项。 */
+      options?: {
+        value: string;
+        label: components['schemas']['LocalizedText'];
+      }[];
+      /** @description 默认值；kind=hidden 时原样提交。kind=info 时不用。 */
+      value?: string | boolean;
+    };
+    StepError: {
+      /** @description 错误码，例如 `iam.invalid_credentials`。 */
+      code: string;
+      message?: components['schemas']['LocalizedText'];
+    };
+    /** @description 按字段定义渲染表单（口令、LDAP、TOTP、注册资料等），提交后继续。 */
+    FormStep: {
+      /** @constant */
+      type: 'form';
+      /** @description 表单标识，提交时原样带回，例如 `password`、`totp`、`register`。 */
+      formId: string;
+      title?: components['schemas']['LocalizedText'];
+      description?: components['schemas']['LocalizedText'];
+      fields: components['schemas']['FormField'][];
+      submitLabel?: components['schemas']['LocalizedText'];
+      /** @description 上一次提交的错误（整表）。 */
+      error?: components['schemas']['StepError'];
+      /** @description 上一次提交的字段错误，键是字段名。 */
+      fieldErrors?: {
+        [key: string]: components['schemas']['StepError'];
+      };
+    };
+    ShellAuthInlineView: {
+      providers: {
+        /** Format: uuid */
+        id: string;
+        /** @enum {unknown} */
+        connectorType: 'uac' | 'team-account' | 'emergency';
+        displayName: {
+          [key: string]: string;
+        };
+      }[];
+      /** Format: uuid */
+      providerId: string;
+      step:
+        | components['schemas']['FormStep']
+        | {
+            /** @constant */
+            type: 'qr';
+            content: string;
+            /** @enum {unknown} */
+            status: 'waiting' | 'scanned';
+            /** Format: date-time */
+            expiresAt: string;
+          };
     };
     ShellAuthInput_listResourcePackages: {
       /** @default 50 */

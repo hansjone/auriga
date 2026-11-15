@@ -58,7 +58,8 @@
             "user_logout",
             "admin_disabled",
             "member_disabled",
-            "platform_rejected"
+            "platform_rejected",
+            "login_denied"
           ]
         },
         "uacLoginInfo": {

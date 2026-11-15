@@ -784,7 +784,7 @@ public final class OAuthProvider {
                       claims.path("sub").asString(),
                       claims.path("did").asString());
           IamError.require(valid != null, "invalid_token", 401);
-          ObjectNode device = store.get("device", valid.device(), true);
+          ObjectNode device = store.get("device", valid.device(), false);
           IamError.require(
               device != null && "native_tx".equals(device.path("authorizationMode").asString()),
               "invalid_token",
