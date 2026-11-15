@@ -25,7 +25,11 @@ test(
     const base = tempBase(t);
     const longTemp = join(
       base,
-      'default-temp-longer-than-real-user-profile'.repeat(2),
+      // Keep the legacy test root below its directory limit so its first
+      // failure occurs in the deep package tree, even under a longer D: cache.
+      'default-temp-longer-than-real-user-profile'
+        .repeat(2)
+        .slice(0, Math.max(1, 180 - base.length - 1)),
     );
     mkdirSync(longTemp);
     const env = {

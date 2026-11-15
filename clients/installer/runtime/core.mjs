@@ -92,6 +92,8 @@ const OWNED_ENTRIES = [
   'txn.json',
   'desktop-update.json',
   'desktop-update.json.tmp',
+  'desktop-update.log',
+  'desktop-update.log.1',
   'desktop-pending',
   '.desktop-resume',
   '.desktop-update-lock',
@@ -1301,12 +1303,18 @@ async function launchLocked({
       try {
         if (existsSync(join(root, 'desktop-pending')))
           report({ event: 'update', phase: 'installing' });
-        if (await applyPending(root, { session: versionSession }))
+        if (
+          await applyPending(root, {
+            session: versionSession,
+            onState: (state) => report({ event: 'update', ...state }),
+          })
+        )
           report({ event: 'update', phase: 'installed' });
       } catch (error) {
         report({
           event: 'update',
           phase: 'failed',
+          ...error.updateFailure,
           reason:
             error?.code === 'desktop.smoke_failed'
               ? 'desktop.smoke_failed'
@@ -1316,7 +1324,7 @@ async function launchLocked({
         console.error(
           error?.code === 'desktop.smoke_failed'
             ? `${BRAND_NAME} 更新失败，已保留旧版。[desktop.smoke_failed]`
-            : `${BRAND_NAME} 更新失败，已保留旧版。`,
+            : `${BRAND_NAME} 更新失败，已保留旧版。[${error.updateFailure?.code ?? 'updateFailed'}/${error.updateFailure?.stage ?? 'unknown'}]`,
         );
       }
     };
