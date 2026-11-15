@@ -642,7 +642,15 @@ public final class SharedDshPlacements implements SharedDshAuthority {
               store.jdbc.queryForList(
                   "SELECT * FROM shared_dsh_operation WHERE tenant_id=? AND state='failed' AND"
                       + " recovery_pending AND recovery_intent IS NOT NULL",
-                  tenant())) emit("runtime", parseIntent((byte[]) op.get("recovery_intent")));
+                  tenant())) {
+            var command = parseIntent((byte[]) op.get("recovery_intent"));
+            if (command.getAction().equals("cooperative-cancel")
+                && now() - number(op, "recovery_started_at") >= CANCEL_SECONDS) {
+              String stage =
+                  op.get("recovery_stage").equals("cancel-source") ? "stop-source" : "stop-target";
+              recoveryNext(op, stage, command.getBinding(), "stop-pool");
+            } else emit("runtime", command);
+          }
           for (var done :
               store.jdbc.queryForList(
                   "SELECT id FROM shared_dsh_operation WHERE tenant_id=? AND (state='committing' OR"
@@ -934,13 +942,7 @@ public final class SharedDshPlacements implements SharedDshAuthority {
             case "cooperative-cancel" -> {
               if (source(op).getMode() == DshInstanceMode.DSH_INSTANCE_MODE_DEDICATED) {
                 requestStop(id, expected.getBinding(), "credential-stop-unconfirmed");
-                next(op, expected.getBinding(), "stop-pool", "blocked");
-                store.jdbc.update(
-                    "UPDATE shared_dsh_operation SET failure_code='stop-unconfirmed' WHERE"
-                        + " tenant_id=? AND id=?",
-                    tenant(),
-                    id);
-                audit(operation(id), "blocked", "stop-unconfirmed");
+                next(op, expected.getBinding(), "stop-pool", "draining");
               } else next(op, expected.getBinding(), "discard-sessions", "preparing");
             }
             case "stop-pool" -> {
@@ -1127,7 +1129,7 @@ public final class SharedDshPlacements implements SharedDshAuthority {
       case "stop-target", "cancel-target" -> {
         if (stage.equals("stop-target")) {
           if (!stopped(receipt)) return false;
-          retire((UUID) op.get("target_pool"));
+          if (op.get("target_mode").equals("dedicated")) retire((UUID) op.get("target_pool"));
         }
         UUID rollback = reserve((UUID) row.get("member_id"), mode(source(op).getMode()));
         store.jdbc.update(

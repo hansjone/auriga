@@ -32,31 +32,43 @@ const CSC = join(
 );
 const MAGIC = 'AURZIP01';
 
-export function compileStub(output) {
+export function compileStub(output, icon) {
   if (!existsSync(CSC)) throw new Error(`C# compiler not found: ${CSC}`);
   const source = join(here, '..', 'windows', 'sfx', 'Stub.cs');
   const result = spawnSync(
     CSC,
-    ['/nologo', '/target:exe', '/optimize+', `/out:${output}`, source],
+    [
+      '/nologo',
+      '/target:exe',
+      '/optimize+',
+      '/r:System.Windows.Forms.dll',
+      '/r:System.Drawing.dll',
+      `/win32manifest:${join(here, '../windows/sfx/app.manifest')}`,
+      ...(icon ? [`/win32icon:${icon}`] : []),
+      `/out:${output}`,
+      source,
+    ],
     { encoding: 'utf8' },
   );
   if (result.status !== 0)
     throw new Error(`csc failed: ${result.stdout}${result.stderr}`);
 }
 
-export function makeExe({ stage, out }) {
+export function makeExe({ stage, out, icon, archive }) {
   stage = resolve(stage);
   out = resolve(out);
   const work = `${out}.work`;
   rmSync(work, { recursive: true, force: true });
   mkdirSync(work, { recursive: true });
-  const zip = join(work, 'package.zip');
-  const tar = spawnSync(TAR, ['-a', '-cf', zip, '-C', stage, '.'], {
-    encoding: 'utf8',
-  });
+  const zip = archive ? resolve(archive) : join(work, 'package.zip');
+  const tar = archive
+    ? { status: 0 }
+    : spawnSync(TAR, ['-a', '-cf', zip, '-C', stage, '.'], {
+        encoding: 'utf8',
+      });
   if (tar.status !== 0) throw new Error(`zip failed: ${tar.stderr}`);
   rmSync(out, { force: true });
-  compileStub(out);
+  compileStub(out, icon);
   const trailer = Buffer.alloc(16);
   trailer.write(MAGIC, 0, 'ascii');
   trailer.writeBigInt64LE(BigInt(statSync(zip).size), 8);

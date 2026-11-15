@@ -1,6 +1,12 @@
-# Removes Auriga Desktop. User data (profile, sessions) is kept unless -PurgeData is given.
+﻿# Removes Auriga Desktop. User data (profile, sessions) is kept unless -PurgeData is given.
 # Only files this installer created are removed; unknown files in the install folder stay.
-param([switch]$PurgeData)
+param([switch]$PurgeData, [switch]$Quiet)
+if (-not $Quiet -and -not $PurgeData) {
+  Add-Type -AssemblyName System.Windows.Forms
+  $choice = [System.Windows.Forms.MessageBox]::Show('是否保留用户数据（配置、会话和登录信息）？选择“取消”终止卸载。', '卸载 Auriga DSH', 'YesNoCancel', 'Question', 'Button1')
+  if ($choice -eq 'Cancel') { exit 0 }
+  $PurgeData = $choice -eq 'No'
+}
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
 $cur = (Get-Content -LiteralPath (Join-Path $root 'current.txt') -TotalCount 1).Trim()
