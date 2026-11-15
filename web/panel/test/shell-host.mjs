@@ -171,7 +171,10 @@ export function surfaceHost(
       else if (key === 'className') node.className = prop;
       // React applies boolean DOM properties; disabled={false} is not an HTML
       // disabled="false" attribute (which would still disable the element).
-      else if (key === 'disabled' || key === 'hidden')
+      else if (key === 'hidden' && value.type.includes('-')) {
+        if (prop == null) node.removeAttribute(key);
+        else node.setAttribute(key, String(prop));
+      } else if (key === 'disabled' || key === 'hidden')
         node[key] = Boolean(prop);
       else if (key !== 'key') node.setAttribute(key, String(prop));
     }

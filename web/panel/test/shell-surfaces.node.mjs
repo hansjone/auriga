@@ -1105,3 +1105,25 @@ test('managed renderer resource identity and local server channel survive the re
     host.close();
   }
 });
+
+// React 18 serializes false on custom elements; hidden="false" still hides them.
+test('resource tabs expose the trusted element with React 18 attribute semantics', async () => {
+  const host = surfaceHost(async () => response());
+  let main;
+  try {
+    main = host.mount('main');
+    await flush();
+    for (const label of ['market', 'mine', 'overview', 'market']) {
+      main.root.querySelector('#auriga-tab-' + label).click();
+      await flush();
+      const el = main.root.querySelector('auriga-team-panel');
+      assert.equal(el.hidden, false);
+      if (label !== 'overview')
+        assert.equal(el.closest('[role="tabpanel"]').hidden, false);
+    }
+  } finally {
+    main?.close();
+    host.dispose();
+    host.close();
+  }
+});
