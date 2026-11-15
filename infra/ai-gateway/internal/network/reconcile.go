@@ -86,6 +86,20 @@ func (r *IAMRedeemer) reconcileRound(ctx context.Context, cfg ReconcileConfig, k
 		grace = 1500 * time.Millisecond
 	}
 	bindings := r.snapshot()
+	if r.cfg.CurrentServerID != nil {
+		current := r.serverID()
+		if current != "" {
+			live := bindings[:0]
+			for _, b := range bindings {
+				if b.ServerID != current {
+					r.forget(b.Ingress)
+				} else {
+					live = append(live, b)
+				}
+			}
+			bindings = live
+		}
+	}
 	if len(bindings) == 0 {
 		return
 	}
@@ -105,7 +119,7 @@ func (r *IAMRedeemer) reconcileRound(ctx context.Context, cfg ReconcileConfig, k
 		if !state.snapshotDegraded && time.Since(state.snapshotFailedSince) >= grace {
 			state.snapshotDegraded = true
 			if cfg.OnError != nil {
-				cfg.OnError(Binding{ServerID: r.cfg.ServerID}, errors.New("network: CONNZ outage grace exhausted; kicking known revoked CIDs"))
+				cfg.OnError(Binding{ServerID: r.serverID()}, errors.New("network: CONNZ outage grace exhausted; kicking known revoked CIDs"))
 			}
 		}
 	}

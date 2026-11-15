@@ -35,12 +35,13 @@ func ingressForTicket(ticket string) string {
 }
 
 type IAMConfig struct {
-	ServerID       string
-	ServerAudience string
-	Account        string
-	RedeemTimeout  time.Duration
-	AuthTimeout    time.Duration
-	MaxConnections int
+	ServerID        string
+	CurrentServerID func() string
+	ServerAudience  string
+	Account         string
+	RedeemTimeout   time.Duration
+	AuthTimeout     time.Duration
+	MaxConnections  int
 }
 
 type liveBinding struct {
@@ -84,7 +85,7 @@ func NewIAMRedeemer(rpc grpc.ClientConnInterface, cfg IAMConfig) (*IAMRedeemer, 
 }
 
 func (r *IAMRedeemer) Redeem(ctx context.Context, a Attempt) (Grant, error) {
-	if a.ServerID != r.cfg.ServerID || a.ClientID == 0 || a.UserNkey == "" || len(a.Ticket) > 2048 {
+	if a.ServerID != r.serverID() || a.ServerID == "" || a.ClientID == 0 || a.UserNkey == "" || len(a.Ticket) > 2048 {
 		return Grant{}, errUnauthorized
 	}
 	var token struct {
@@ -122,6 +123,9 @@ func (r *IAMRedeemer) Redeem(ctx context.Context, a Attempt) (Grant, error) {
 	if err := ctx.Err(); err != nil {
 		return Grant{}, err
 	}
+	if a.ServerID != r.serverID() {
+		return Grant{}, errUnauthorized
+	}
 	expiry, err := time.Parse(time.RFC3339Nano, resp.GetExpiresAt())
 	if err != nil || !expiry.After(time.Now()) || !validNetworkNumber(resp.GetRealm()) || resp.GetNode() != token.Node || resp.GetDevice() != token.Device || resp.GetServerAudience() != r.cfg.ServerAudience || resp.GetIngress() != ingress {
 		return Grant{}, errUnauthorized
@@ -139,6 +143,12 @@ func (r *IAMRedeemer) Redeem(ctx context.Context, a Attempt) (Grant, error) {
 		}
 	}
 	return Grant{Ingress: ingress, NotAfter: expiry}, nil
+}
+func (r *IAMRedeemer) serverID() string {
+	if r.cfg.CurrentServerID != nil {
+		return r.cfg.CurrentServerID()
+	}
+	return r.cfg.ServerID
 }
 
 func (r *IAMRedeemer) snapshot() []liveBinding {

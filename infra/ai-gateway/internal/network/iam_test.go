@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -17,6 +18,41 @@ import (
 const testTenant = "01900000-0000-7000-8000-000000000001"
 const testDevice = "01900000-0000-7000-8000-000000000002"
 const connectTicket = `{"tenant":"` + testTenant + `","node":"1","device":"` + testDevice + `","ticket":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"}`
+
+func TestProjectedRedeemerFollowsRestartedBrokerAndDropsOldBindings(t *testing.T) {
+	f := &fakeIAM{}
+	r := testRedeemer(t, f)
+	var current atomic.Value
+	current.Store("server-new")
+	r.cfg.CurrentServerID = func() string { return current.Load().(string) }
+	a := Attempt{ServerID: "server-id", ClientID: 42, UserNkey: "user-key", Ticket: connectTicket}
+	if _, e := r.Redeem(context.Background(), a); e == nil {
+		t.Fatal("old broker redeemed after restart")
+	}
+	a.ServerID = "server-new"
+	if _, e := r.Redeem(context.Background(), a); e != nil {
+		t.Fatal(e)
+	}
+	current.Store("server-next")
+	r.reconcileRound(context.Background(), ReconcileConfig{RequestTimeout: time.Second, Snapshot: func(context.Context) (map[uint64]*ConnInfo, error) { return map[uint64]*ConnInfo{}, nil }}, func(context.Context, Binding) error {
+		t.Fatal("old broker binding must not kick a reused CID")
+		return nil
+	}, &reconcileState{})
+	if len(r.snapshot()) != 0 {
+		t.Fatal("old broker bindings retained")
+	}
+	f.mu.Lock()
+	f.used = false
+	f.mutate = func(*iam.RedeemNetworkTicketResponse) { current.Store("server-last") }
+	f.mu.Unlock()
+	a.ServerID = "server-next"
+	if _, e := r.Redeem(context.Background(), a); e == nil {
+		t.Fatal("broker changed during redemption")
+	}
+	if len(r.snapshot()) != 0 {
+		t.Fatal("obsolete redemption created binding")
+	}
+}
 
 type fakeIAM struct {
 	iam.UnimplementedNetworkGatewayServiceServer

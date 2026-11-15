@@ -64,7 +64,17 @@ func newSubmitHandler(r *IAMRedeemer, c *MailboxClient, v verifySubmitDevice) *s
 // SubmitHandler shares the callout runtime's current READY bindings. It cannot
 // be mounted in a separate process with a separately guessed connection tuple.
 func (r *Runtime) SubmitHandler() http.Handler {
-	return newSubmitHandler(r.redeemer, r.mailbox.client, submitDeviceVerifier(iam.NewDeviceAccessServiceClient(r.iam)))
+	h := newSubmitHandler(r.redeemer, r.mailbox.client, submitDeviceVerifier(iam.NewDeviceAccessServiceClient(r.iam)))
+	if r.projection == nil {
+		return h
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, q *http.Request) {
+		if r.projection.checkLocalSnapshot(r.projection.snapshot.Load()) != nil || r.projection.reader.Withdrawn(time.Now()) {
+			submitError(w, http.StatusServiceUnavailable, "network.overloaded")
+			return
+		}
+		h.ServeHTTP(w, q)
+	})
 }
 
 func (h *submitHandler) ServeHTTP(w http.ResponseWriter, q *http.Request) {

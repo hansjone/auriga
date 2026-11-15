@@ -26,6 +26,9 @@ func (r *Runtime) startSubmitHTTP(ctx context.Context, c *SubmitHTTPConfig) erro
 	if c == nil {
 		return nil
 	}
+	if r.projection != nil {
+		return r.startProjectedSubmit(ctx, c)
+	}
 	if c.Listen == "" || c.TLSCertFile == "" || c.TLSKeyFile == "" || c.ClientCAFile == "" {
 		return errors.New("network: submit HTTPS listener requires address, TLS keypair and dedicated client CA")
 	}
