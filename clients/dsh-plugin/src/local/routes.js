@@ -3,7 +3,7 @@ import { createConsentRoutes } from './consent-routes.js';
 import { createMessagingRoutes } from './messaging-routes.js';
 import { parseStrictJson } from '../network/trust/jcs.js';
 const BASE = '/auriga/shell';
-const actions = new Set(['open_login', 'cancel_login', 'logout']);
+const actions = new Set(['open_login', 'cancel_login', 'logout', 'reconnect']);
 /** @param {any} res @param {number} status @param {any} body */
 function json(res, status, body) {
   res.writeHead(status, {

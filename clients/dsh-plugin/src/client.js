@@ -3,12 +3,18 @@
 window.__ModuleLoader__.load({
   id: 'auriga-dsh/client',
   factory(require) {
-    const BRAND_NAME = 'Auriga DSH';
+    const NAV_NAME = 'Auriga';
     const React = require('react');
-    const {
-      IconUsersOutlineRegular,
-      IconUsersOutlineMedium,
-    } = require('@deepseek-ai/dsh-client-ui-primitives');
+    const primitives = require('@deepseek-ai/dsh-client-ui-primitives');
+    const { IconUsersOutlineRegular, IconUsersOutlineMedium } = primitives;
+    const probe = (name) =>
+      typeof primitives?.[name] === 'function' ||
+      (typeof primitives?.[name] === 'object' && primitives[name] !== null)
+        ? primitives[name]
+        : undefined;
+    const HostButton = probe('Button');
+    const HostSegmentedTabs = probe('SegmentedTabs');
+    const HostStateDot = probe('StateDot');
     const h = React.createElement;
     const NS = 'auriga.shell';
     const PANEL_ID = 'auriga-team';
@@ -22,7 +28,7 @@ window.__ModuleLoader__.load({
       updateDownloading: '正在下载',
       updateRestart: '更新已准备好，请关闭并重新打开 Auriga DSH',
       updateFailed: '更新失败，旧版和数据已保留，请重试',
-      panel: BRAND_NAME,
+      panel: NAV_NAME,
       loading: '正在加载…',
       failed: '加载失败',
       retry: '重试',
@@ -57,7 +63,7 @@ window.__ModuleLoader__.load({
       conversation: '在会话中使用 Team 工具',
       logout: '退出本机登录',
       connectHint:
-        '在 DSH 会话中使用 auriga_list_endpoints、auriga_open_thread、auriga_reply_thread 和 auriga_read_thread。接收消息会创建真实 DSH 会话；退出登录不会停止已有任务。',
+        '接收消息会创建 DSH 会话。退出平台后，已启动的任务继续运行。',
       packageHint: '当前界面随插件安装包提供。尚未接通总部认证与资源服务。',
       uiSource: '界面来源',
       package: '插件安装包',
@@ -113,6 +119,92 @@ window.__ModuleLoader__.load({
       empty: '暂无待处理请求',
       noRules: '暂无规则',
       revokeHint: '撤销后重新核权；已执行的动作无法撤回，拒绝冷却仍然有效。',
+      tab_overview: '概览',
+      tab_market: '资源市场',
+      tab_mine: '我的资源',
+      tab_team: 'Team 工具',
+      tab_inbox: '收件箱',
+      tab_settings: '设置',
+      chipLocal: '本机',
+      chipPlatform: '平台',
+      signedOut: '未登录',
+      localIdentity: '本机身份',
+      uacMethod: 'UAC 扫码',
+      uacPrompt: '使用公司 App 扫码登录本机，平台断开时也可登录。',
+      uacStart: '获取二维码',
+      uacRetry: '重新获取二维码',
+      uacQr: '本机登录二维码',
+      uac_waiting: '请扫码登录',
+      uac_scanned: '已扫码，请在手机上确认',
+      uac_verifying: '正在校验登录',
+      uac_authenticated: '登录成功',
+      uac_expired: '二维码已过期，请重新获取',
+      uac_denied: '本次登录已被拒绝',
+      uac_rejected: '登录未通过校验',
+      uac_unavailable: '公司登录服务暂不可用，请稍后重试',
+      uac_cancelled: '已取消登录',
+      uac_failed: '登录失败，请重新获取二维码',
+      uacValidity: '剩余有效期',
+      uacWarning: '请仅为本人扫码，不要转发二维码或共享屏幕。',
+      uacExpiredRescan: '登录已失效，请重新扫码。',
+      uacUnavailable: '暂时无法完成操作，请稍后重试。',
+      uacConfigInvalid: '本机扫码配置不完整或无效，请联系管理员检查配置。',
+      uacStorageUnavailable: '本机身份存储不可用，请联系管理员。',
+      uacSignedIn: '已登录本机',
+      uacLocalHint:
+        '本机身份只用于本机 DSH；资源市场、Team 工具等平台功能仍需登录平台。',
+      uacLogout: '退出本机登录',
+      ownerBound: '本机已绑定工号，只允许该工号登录。',
+      ownerMismatch: '工号与本机绑定的主人不一致',
+      empNo: '工号',
+      loginTime: '登录时间',
+      revalidation: '定期复验',
+      revalidationOk: '正常',
+      revalidationRetrying: '复验暂不可达，正在重试',
+      platformMismatch:
+        '平台账号与本机 UAC 工号不一致，请退出平台并用本人账号登录。',
+      platformMatched: '平台账号和本机 UAC 工号一致。',
+      platformLogout: '退出平台',
+      reference: '关联编号',
+      cancel: '取消',
+      platformCard: '平台连接',
+      platform_managed: '系统托管',
+      platform_unconfigured: '未配置平台',
+      platform_authenticating: '正在登录平台',
+      platform_unreachable: '平台不可达',
+      platform_reauth: '平台登录已过期',
+      platform_signedOut: '未登录平台',
+      platform_connected: '平台已连接',
+      platform_degraded: '已登录，通信未就绪',
+      platformHint_managed: '连接由系统提供，无法在此修改。',
+      platformHint_unconfigured: '在“设置”中填写团队平台地址后即可登录平台。',
+      platformHint_authenticating:
+        '浏览器已打开 Auriga 门户，请完成登录并核对设备用户码后批准。',
+      platformHint_unreachable: '本机 DSH 照常可用；网络恢复后可重新连接。',
+      platformHint_reauth: '请重新登录平台；本机 DSH 和已有任务不受影响。',
+      platformHint_signedOut: '登录平台后可使用资源市场、Team 工具和云端互通。',
+      platformHint_connected: '资源市场、我的资源和 Team 工具可用。',
+      platformHint_degraded: '平台已登录，消息网络仍在连接；稍后刷新。',
+      platformHint_communicationUnavailable:
+        '平台已登录，消息网络暂不可用。可以重新连接。',
+      platformHint_brokerUnavailable:
+        '本机暂未连上平台认证服务。可先使用本机 DSH，再重新连接。',
+      platformHint_accessDisabled:
+        '平台已停用此登录来源或成员。请联系团队管理员。',
+      loginBrowserHint:
+        '门户默认 UAC 扫码；不能扫码时在门户选择团队账号或应急账号。',
+      loginMethods: '门户登录默认使用 UAC 扫码，其他方式：团队账号、应急账号。',
+      platformLogin: '登录平台',
+      configurePlatform: '配置平台地址',
+      reconnect: '重新连接',
+      loginDone: '平台登录成功。',
+      loginExpired: '设备登录已过期，请重新登录。',
+      loginUnreachable: '暂时无法连接平台，请稍后重试。',
+      loginCancelled: '已取消平台登录。',
+      loginDenied: '平台登录未完成或已被拒绝。',
+      identityLabel: '成员',
+      platformNeeded: '此功能需要平台身份。请先在“概览”登录平台或检查连接。',
+      gotoOverview: '前往概览',
     };
     const en = {
       updateAvailable: 'Desktop update available',
@@ -124,7 +216,7 @@ window.__ModuleLoader__.load({
       updateRestart: 'Update ready. Close and reopen Auriga DSH.',
       updateFailed:
         'Update failed. Previous version and data preserved. Retry.',
-      panel: BRAND_NAME,
+      panel: NAV_NAME,
       loading: 'Loading…',
       failed: 'Failed to load',
       retry: 'Retry',
@@ -162,7 +254,7 @@ window.__ModuleLoader__.load({
       conversation: 'Use Team tools in a conversation',
       logout: 'Sign out locally',
       connectHint:
-        'Use auriga_list_endpoints, auriga_open_thread, auriga_reply_thread and auriga_read_thread in a DSH conversation. Incoming messages create real DSH sessions. Signing out does not stop existing tasks.',
+        'Incoming messages create DSH sessions. Existing tasks continue after you sign out of the platform.',
       packageHint:
         'This UI ships with the plugin package. Headquarters authentication and resource services are not connected yet.',
       uiSource: 'UI source',
@@ -224,13 +316,112 @@ window.__ModuleLoader__.load({
       noRules: 'No rules',
       revokeHint:
         'Revocation requires authorization again. Completed actions cannot be undone; rejection cooldowns remain active.',
+      tab_overview: 'Overview',
+      tab_market: 'Marketplace',
+      tab_mine: 'My resources',
+      tab_team: 'Team tools',
+      tab_inbox: 'Inbox',
+      tab_settings: 'Settings',
+      chipLocal: 'Local',
+      chipPlatform: 'Platform',
+      signedOut: 'Signed out',
+      localIdentity: 'Local identity',
+      uacMethod: 'UAC scan',
+      uacPrompt:
+        'Scan with the company app to sign in locally, even when the platform is offline.',
+      uacStart: 'Get QR code',
+      uacRetry: 'New QR code',
+      uacQr: 'Local sign-in QR code',
+      uac_waiting: 'Scan to sign in',
+      uac_scanned: 'Scanned. Confirm on your phone',
+      uac_verifying: 'Verifying sign-in',
+      uac_authenticated: 'Signed in',
+      uac_expired: 'QR code expired. Request a new code.',
+      uac_denied: 'Sign-in was denied',
+      uac_rejected: 'Sign-in did not pass verification',
+      uac_unavailable: 'Company sign-in is unavailable. Try again later.',
+      uac_cancelled: 'Sign-in cancelled',
+      uac_failed: 'Sign-in failed. Request a new code.',
+      uacValidity: 'Expires in',
+      uacWarning:
+        'Scan only for yourself. Do not share this code or your screen.',
+      uacExpiredRescan: 'Your sign-in expired. Scan again.',
+      uacUnavailable: 'Temporarily unavailable. Try again later.',
+      uacConfigInvalid:
+        'Local QR sign-in configuration is invalid. Contact your administrator.',
+      uacStorageUnavailable:
+        'Local identity storage is unavailable. Contact your administrator.',
+      uacSignedIn: 'Signed in locally',
+      uacLocalHint:
+        'The local identity applies only to this DSH. Marketplace, Team tools and other platform features still require platform sign-in.',
+      uacLogout: 'Sign out locally',
+      ownerBound:
+        'This device is bound to its owner; only that employee can sign in.',
+      ownerMismatch: 'Employee does not match the bound owner',
+      empNo: 'Employee no.',
+      loginTime: 'Signed in',
+      revalidation: 'Revalidation',
+      revalidationOk: 'OK',
+      revalidationRetrying: 'Revalidation unreachable; retrying',
+      platformMismatch:
+        'The platform account differs from the local UAC employee. Sign out of the platform and sign in with your own account.',
+      platformMatched: 'The platform account and local UAC employee match.',
+      platformLogout: 'Sign out of the platform',
+      reference: 'Reference',
+      cancel: 'Cancel',
+      platformCard: 'Platform connection',
+      platform_managed: 'System managed',
+      platform_unconfigured: 'Platform not configured',
+      platform_authenticating: 'Signing in to platform',
+      platform_unreachable: 'Platform unreachable',
+      platform_reauth: 'Platform sign-in expired',
+      platform_signedOut: 'Not signed in to platform',
+      platform_connected: 'Platform connected',
+      platform_degraded: 'Signed in; network not ready',
+      platformHint_managed: 'The system supplies this connection.',
+      platformHint_unconfigured:
+        'Enter your team platform address in Settings, then sign in.',
+      platformHint_authenticating:
+        'Your browser opened the Auriga portal. Sign in, check the device user code and approve.',
+      platformHint_unreachable:
+        'Local DSH keeps working. Reconnect when the network returns.',
+      platformHint_reauth:
+        'Sign in to the platform again. Local DSH and running tasks are unaffected.',
+      platformHint_signedOut:
+        'Sign in to use Marketplace, Team tools and cloud interop.',
+      platformHint_connected:
+        'Marketplace, My resources and Team tools are available.',
+      platformHint_degraded:
+        'Signed in; the message network is still connecting. Refresh shortly.',
+      platformHint_communicationUnavailable:
+        'Signed in; the message network is unavailable. Try reconnecting.',
+      platformHint_brokerUnavailable:
+        'This client cannot reach the platform sign-in service. You can use local DSH and reconnect later.',
+      platformHint_accessDisabled:
+        'The platform disabled this member or sign-in method. Contact your team administrator.',
+      loginBrowserHint:
+        'The portal defaults to UAC scan. If you cannot scan, choose team account or emergency account there.',
+      loginMethods:
+        'Portal sign-in defaults to UAC scan. Other ways: team account, emergency account.',
+      platformLogin: 'Sign in to platform',
+      configurePlatform: 'Configure platform',
+      reconnect: 'Reconnect',
+      loginDone: 'Signed in to the platform.',
+      loginExpired: 'Device sign-in expired. Sign in again.',
+      loginUnreachable: 'Cannot reach the platform. Try again later.',
+      loginCancelled: 'Platform sign-in cancelled.',
+      loginDenied: 'Platform sign-in was not completed or was denied.',
+      identityLabel: 'Member',
+      platformNeeded:
+        'This feature needs a platform identity. Sign in or check the connection in Overview.',
+      gotoOverview: 'Go to Overview',
     };
     const css = `
 .auriga-shell{box-sizing:border-box;color:var(--dsw-alias-label-primary,inherit);font:inherit;min-width:0}
-.auriga-shell button{font:inherit;padding:5px 10px;border:1px solid var(--dsw-alias-border-l2,currentColor);border-radius:6px;background:var(--dsw-alias-bg-layer-1,transparent);color:var(--dsw-alias-label-primary,inherit);cursor:pointer}
-.auriga-shell button:hover{background:var(--dsw-alias-interactive-bg-hover,transparent)}
-.auriga-shell button:focus-visible,.auriga-shell summary:focus-visible{outline:var(--dsw-focus-ring-width,2px) solid var(--dsw-focus-ring-color,var(--dsw-alias-state-business-primary,currentColor));outline-offset:2px}
-.auriga-shell button:disabled{opacity:.5;cursor:default}
+.auriga-shell button:not(.auriga-host-control,.auriga-tabs button){font:inherit;padding:5px 10px;border:1px solid var(--dsw-alias-border-l2,currentColor);border-radius:6px;background:var(--dsw-alias-bg-layer-1,transparent);color:var(--dsw-alias-label-primary,inherit);cursor:pointer}
+.auriga-shell button:not(.auriga-host-control,.auriga-tabs button):hover,.auriga-tabs-fallback button:hover{background:var(--dsw-alias-interactive-bg-hover,transparent)}
+.auriga-shell button:not(.auriga-host-control,.auriga-tabs button):focus-visible,.auriga-tabs-fallback button:focus-visible,.auriga-shell summary:focus-visible{outline:var(--dsw-focus-ring-width,2px) solid var(--dsw-focus-ring-color,var(--dsw-alias-state-business-primary,currentColor));outline-offset:2px}
+.auriga-shell button:not(.auriga-host-control,.auriga-tabs button):disabled{opacity:.5;cursor:default}
 .auriga-shell-status{padding:14px 0;display:flex;gap:12px;align-items:center;flex-wrap:wrap}
 .auriga-settings{padding:4px 4px 24px;font-size:13px;line-height:1.5}
 .auriga-settings h2{font-size:20px;font-weight:600;margin:0 0 24px}
@@ -246,6 +437,49 @@ window.__ModuleLoader__.load({
 .auriga-consent select:focus-visible{outline:2px solid var(--dsw-alias-label-secondary,currentColor)}
 .auriga-consent-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
 .auriga-consent p{overflow-wrap:anywhere}.auriga-consent small{color:var(--dsw-alias-label-secondary,inherit)}
+.auriga-app{height:100%;display:flex;flex-direction:column;gap:12px;padding:20px 24px 0;overflow:auto}
+.auriga-head{display:flex;flex:none;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
+.auriga-head h2{font-size:20px;font-weight:600;margin:0;letter-spacing:.01em}
+.auriga-chips{display:flex;gap:8px;flex-wrap:wrap}
+.auriga-chip{display:inline-flex;align-items:center;gap:6px;padding:3px 10px;border:1px solid var(--dsw-alias-border-l1,currentColor);border-radius:999px;font-size:12px;color:var(--dsw-alias-label-secondary,inherit)}
+.auriga-banner{display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:8px 12px;border-radius:8px;background:var(--dsw-alias-bg-layer-2,transparent);font-size:13px}
+.auriga-tabs{flex:none;max-width:1080px;overflow-x:auto}
+.auriga-tabs-fallback{display:flex;gap:4px;border-bottom:1px solid var(--dsw-alias-border-l1,currentColor)}
+.auriga-tabs-fallback>button{font:inherit;cursor:pointer;border:0;border-bottom:2px solid transparent;border-radius:0;background:transparent;padding:8px 12px;color:var(--dsw-alias-label-secondary,inherit);white-space:nowrap}
+.auriga-tabs-fallback>button[aria-selected=true]{color:var(--dsw-alias-label-primary,inherit);border-bottom-color:var(--dsw-alias-state-business-primary,currentColor);font-weight:600}
+.auriga-tabpanel{min-width:0}.auriga-tabpanel[hidden],.auriga-tabpanel>auriga-team-panel[hidden]{display:none}
+.auriga-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,320px),1fr));gap:16px;max-width:1080px;padding-bottom:24px}
+.auriga-card{border:1px solid var(--dsw-alias-border-l2,currentColor);border-radius:12px;padding:18px 20px;display:flex;flex-direction:column;gap:10px;min-width:0;background:var(--dsw-alias-bg-layer-1,transparent)}
+.auriga-card header{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.auriga-card h3{font-size:15px;font-weight:600;margin:0}
+.auriga-card p{margin:0;font-size:13px;line-height:1.55;color:var(--dsw-alias-label-secondary,inherit);overflow-wrap:anywhere}
+.auriga-card dl{display:grid;grid-template-columns:max-content 1fr;gap:6px 16px;margin:0;font-size:13px}
+.auriga-card dt{color:var(--dsw-alias-label-tertiary,inherit)}.auriga-card dd{margin:0;overflow-wrap:anywhere}
+.auriga-badge{font-size:12px;padding:2px 8px;border-radius:6px;background:var(--dsw-alias-bg-layer-2,transparent);color:var(--dsw-alias-label-secondary,inherit)}
+.auriga-row{display:flex;align-items:center;gap:8px;font-size:14px}
+.auriga-dot{display:inline-block;width:8px;height:8px;border-radius:50%;flex:none;background:var(--dsw-alias-label-tertiary,currentColor)}
+.auriga-dot[data-tone=done]{background:var(--dsw-alias-state-success-primary,currentColor)}
+.auriga-dot[data-tone=warning]{background:var(--dsw-alias-state-warn-primary,currentColor)}
+.auriga-dot[data-tone=error]{background:var(--dsw-alias-state-error-primary,currentColor)}
+.auriga-dot[data-tone=ongoing]{background:var(--dsw-alias-state-business-primary,currentColor)}
+.auriga-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:4px}
+.auriga-shell button.auriga-primary{background:var(--dsw-alias-button-primary-fill,var(--dsw-alias-state-business-primary,transparent));border-color:transparent;color:var(--dsw-alias-label-primary-foreground,inherit)}
+.auriga-scan{display:flex;gap:20px;align-items:flex-start;flex-wrap:wrap}
+.auriga-scan-side{flex:1;min-width:200px;display:flex;flex-direction:column;gap:8px}
+.auriga-lead{color:var(--dsw-alias-label-primary,inherit)!important;font-size:14px!important;font-weight:600}
+.auriga-qr{position:relative;width:168px;height:168px;margin:0;flex:none;border:1px solid var(--dsw-alias-border-l2,currentColor);border-radius:8px;overflow:hidden}
+.auriga-qr svg{display:block}
+.auriga-qr-empty{display:flex;align-items:center;justify-content:center;background:var(--dsw-alias-bg-layer-2,transparent);text-align:center;font-size:12px;padding:12px;box-sizing:border-box;color:var(--dsw-alias-label-tertiary,inherit)}
+.auriga-qr-overlay{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;padding:12px;text-align:center;font-weight:600;background:var(--dsw-alias-bg-layer-1,transparent);opacity:.92;color:var(--dsw-alias-label-primary,inherit)}
+.auriga-warn{color:var(--dsw-alias-state-warn-label,var(--dsw-alias-state-warn-primary,inherit))!important}
+.auriga-muted{color:var(--dsw-alias-label-tertiary,inherit)!important}
+.auriga-ref{font-size:11px;color:var(--dsw-alias-label-tertiary,inherit)}
+.auriga-blocked{max-width:560px;margin:32px 0;display:flex;flex-direction:column;gap:10px}
+.auriga-blocked p{margin:0;color:var(--dsw-alias-label-secondary,inherit);font-size:13px}
+.auriga-blocked button{align-self:flex-start}
+.auriga-brand-name{display:inline-flex;align-items:baseline;gap:5px;font-size:16px;font-weight:700;letter-spacing:.02em;color:var(--dsw-alias-label-primary,inherit);white-space:nowrap}.auriga-brand-suffix{font-size:11px;font-weight:600;letter-spacing:.12em;color:var(--dsw-alias-label-secondary,inherit)}
+.auriga-tools{margin:0;padding-left:18px;font-size:13px;display:grid;gap:4px}
+.auriga-app>.auriga-settings,.auriga-tabpanel .auriga-settings{padding-top:0}
 `;
     function failure(reason = 'unavailable') {
       if (
@@ -1058,12 +1292,16 @@ window.__ModuleLoader__.load({
           const [attempt, setAttempt] = React.useState(0);
           React.useEffect(() => {
             let alive = true;
+            let currentBoot;
             const controller = new AbortController();
             setPhase({ status: 'loading' });
             requestBootstrap(controller.signal)
               .then(async (boot) => {
-                if (panel && alive && !disposed)
+                currentBoot = boot;
+                if (panel && alive && !disposed) {
+                  setPhase({ status: 'loading', boot });
                   await ensurePanel(boot, controller.signal);
+                }
                 if (alive && !disposed) setPhase({ status: 'ready', boot });
               })
               .catch((error) => {
@@ -1071,6 +1309,7 @@ window.__ModuleLoader__.load({
                   setPhase({
                     status: 'error',
                     reason: error?.reason ?? 'unavailable',
+                    boot: currentBoot,
                   });
               });
             return () => {
@@ -1486,7 +1725,7 @@ window.__ModuleLoader__.load({
             content,
           );
         }
-        function Settings() {
+        function Settings({ embedded = false } = {}) {
           const host = useHostState();
           const [phase, retry] = useBootstrap();
           const boot = phase.status === 'ready' ? phase.boot : undefined;
@@ -1516,9 +1755,9 @@ window.__ModuleLoader__.load({
             'section',
             {
               className: 'auriga-shell auriga-settings',
-              'aria-label': BRAND_NAME,
+              'aria-label': t('panel'),
             },
-            h('h2', null, BRAND_NAME),
+            !embedded && h('h2', null, t('panel')),
             phase.status !== 'ready' && notice(phase, retry, true),
             View
               ? h(View, {
@@ -1609,13 +1848,607 @@ window.__ModuleLoader__.load({
           };
           return [desktop, action];
         }
+        // Polls one authenticated local JSON status route. Errors become null.
+        const useLocalStatus = (path, interval, enabled) => {
+          const [value, setValue] = React.useState(undefined);
+          const [tick, bump] = React.useReducer((n) => n + 1, 0);
+          const revision = React.useRef(0);
+          const update = React.useRef(null);
+          if (!update.current)
+            update.current = (next) => {
+              revision.current++;
+              setValue(next);
+            };
+          React.useEffect(() => {
+            if (!enabled) return undefined;
+            let live = true;
+            let reading = false;
+            const controller = new AbortController();
+            const read = async () => {
+              if (reading) return;
+              reading = true;
+              const started = revision.current;
+              const next = await fetch(localURL(path), {
+                credentials: 'same-origin',
+                cache: 'no-store',
+                redirect: 'error',
+                signal: controller.signal,
+              })
+                .then(async (response) =>
+                  response.ok ? await response.json() : null,
+                )
+                .catch(() => null);
+              reading = false;
+              if (live && !disposed && revision.current === started)
+                setValue((previous) => next ?? previous);
+            };
+            void read();
+            const timer = setInterval(read, interval);
+            return () => {
+              live = false;
+              controller.abort();
+              clearInterval(timer);
+            };
+          }, [tick, interval, enabled]);
+          return [value, bump, update.current];
+        };
+        const postLocal = async (path, csrf, body = {}, signal) => {
+          const response = await fetch(localURL(path), {
+            method: 'POST',
+            credentials: 'same-origin',
+            cache: 'no-store',
+            redirect: 'error',
+            signal,
+            headers: {
+              'content-type': 'application/json',
+              ...(csrf ? { 'X-Auriga-CSRF': csrf } : {}),
+            },
+            body: JSON.stringify(body),
+          });
+          if (!response.ok) throw failure();
+          return response.json();
+        };
+        // Native host controls when the public primitives expose them;
+        // plain semantic elements otherwise (capability probe, no version pin).
+        const Action = ({ primary = false, children, ...props }) =>
+          HostButton
+            ? h(
+                HostButton,
+                {
+                  variant: primary ? 'primary' : 'outline',
+                  size: 'sm',
+                  className: 'auriga-host-control',
+                  ...props,
+                },
+                children,
+              )
+            : h(
+                'button',
+                {
+                  type: 'button',
+                  className: primary ? 'auriga-primary' : undefined,
+                  ...props,
+                },
+                children,
+              );
+        const Dot = ({ tone }) =>
+          HostStateDot
+            ? h(HostStateDot, { state: tone, size: 8 })
+            : h('span', {
+                className: 'auriga-dot',
+                'data-tone': tone,
+                'aria-hidden': true,
+              });
+        const TABS = [
+          'overview',
+          'market',
+          'mine',
+          'team',
+          'inbox',
+          'settings',
+        ];
+        function Tabs({ value, onChange }) {
+          const items = TABS.map((id) => ({
+            value: id,
+            label: t('tab_' + id),
+            id: 'auriga-tab-' + id,
+            panelId: 'auriga-panel-' + id,
+          }));
+          if (HostSegmentedTabs)
+            return h(HostSegmentedTabs, {
+              items,
+              value,
+              onChange,
+              label: t('panel'),
+              className: 'auriga-tabs',
+            });
+          return h(
+            'div',
+            {
+              role: 'tablist',
+              'aria-label': t('panel'),
+              className: 'auriga-tabs auriga-tabs-fallback',
+            },
+            ...items.map((item, index) =>
+              h(
+                'button',
+                {
+                  key: item.value,
+                  type: 'button',
+                  role: 'tab',
+                  id: item.id,
+                  'aria-selected': value === item.value,
+                  'aria-controls': item.panelId,
+                  tabIndex: value === item.value ? 0 : -1,
+                  onClick: () => onChange(item.value),
+                  onKeyDown: (event) => {
+                    const next = {
+                      ArrowLeft: (index + items.length - 1) % items.length,
+                      ArrowRight: (index + 1) % items.length,
+                      Home: 0,
+                      End: items.length - 1,
+                    }[event.key];
+                    if (next === undefined) return;
+                    event.preventDefault();
+                    event.currentTarget.parentElement
+                      ?.querySelectorAll('[role="tab"]')
+                      .item(next)
+                      ?.focus();
+                    onChange(items[next].value);
+                  },
+                },
+                item.label,
+              ),
+            ),
+          );
+        }
+        // One empty/blocked state for every tab: what happened and the next step.
+        const Blocked = ({ tone = 'idle', title, detail, action }) =>
+          h(
+            'div',
+            { className: 'auriga-blocked', role: 'status' },
+            h(
+              'div',
+              { className: 'auriga-row' },
+              h(Dot, { tone }),
+              h('strong', null, title),
+            ),
+            detail && h('p', null, detail),
+            action,
+          );
+        // Platform session projection from the shell status route.
+        const platformView = (boot, shell) => {
+          if (boot?.mode === 'managed')
+            return { kind: 'managed', tone: 'done' };
+          if (boot?.mode === 'standalone' || shell?.configured === false)
+            return { kind: 'unconfigured', tone: 'idle' };
+          if (!shell) return { kind: 'unreachable', tone: 'warning' };
+          if (shell.platform === 'authenticating')
+            return { kind: 'authenticating', tone: 'ongoing' };
+          if (!shell.loggedIn)
+            return {
+              kind:
+                shell.platform === 'unreachable' || !shell.brokerAvailable
+                  ? 'unreachable'
+                  : shell.platform === 'reauth_required'
+                    ? 'reauth'
+                    : 'signedOut',
+              tone: shell.platform === 'unreachable' ? 'warning' : 'idle',
+            };
+          return shell.connected
+            ? { kind: 'connected', tone: 'done' }
+            : { kind: 'degraded', tone: 'warning' };
+        };
+        function LocalIdentityCard({ uac, setUac, reload, active }) {
+          const [busy, setBusy] = React.useState(false);
+          const [error, setError] = React.useState('');
+          const opened = React.useRef(false);
+          const operation = React.useRef(0);
+          const challenge = uac.challenge;
+          const pending =
+            challenge &&
+            ['waiting', 'scanned', 'verifying'].includes(challenge.state);
+          React.useEffect(() => {
+            if (!active || !pending || busy) return undefined;
+            let live = true;
+            let timer;
+            const controller = new AbortController();
+            const poll = () => {
+              const started = operation.current;
+              postLocal(
+                'auriga/uac/poll',
+                uac.csrf,
+                { id: challenge.id },
+                controller.signal,
+              )
+                .then((next) => {
+                  if (live && !disposed && started === operation.current)
+                    setUac(next);
+                })
+                .catch(() => {
+                  if (live && !disposed) reload();
+                })
+                .finally(() => {
+                  if (live && !disposed) timer = setTimeout(poll, 2000);
+                });
+            };
+            timer = setTimeout(poll, 2000);
+            return () => {
+              live = false;
+              controller.abort();
+              clearTimeout(timer);
+            };
+          }, [active, pending, busy, challenge?.id, uac.csrf]);
+          const run = (path, body) => {
+            operation.current++;
+            setBusy(true);
+            setError('');
+            postLocal(path, uac.csrf, body)
+              .then((next) => {
+                if (!disposed) setUac(next);
+              })
+              .catch(() => {
+                if (!disposed) setError(t('uacUnavailable'));
+              })
+              .finally(() => {
+                if (!disposed) setBusy(false);
+              });
+          };
+          const signedIn = uac.state === 'authenticated';
+          React.useEffect(() => {
+            if (!active || opened.current || uac.reason) return;
+            opened.current = true;
+            if (!signedIn && !challenge && !uac.lastOutcome)
+              run('auriga/uac/start');
+          }, [active, signedIn, challenge, uac.reason]);
+          if (uac.reason)
+            return h(Blocked, {
+              tone: 'warning',
+              title: t('localIdentity'),
+              detail: t(
+                uac.reason === 'invalid'
+                  ? 'uacConfigInvalid'
+                  : 'uacStorageUnavailable',
+              ),
+              action: h(Action, { onClick: reload }, t('refresh')),
+            });
+          const seconds = challenge
+            ? Math.max(
+                0,
+                Math.round(
+                  (Date.parse(challenge.expiresAt) - Date.now()) / 1000,
+                ),
+              )
+            : 0;
+          return h(
+            'section',
+            { className: 'auriga-card', 'aria-label': t('localIdentity') },
+            h(
+              'header',
+              null,
+              h('h3', null, t('localIdentity')),
+              h('span', { className: 'auriga-badge' }, t('uacMethod')),
+            ),
+            signedIn
+              ? h(
+                  'div',
+                  { className: 'auriga-facts' },
+                  h(
+                    'div',
+                    { className: 'auriga-row' },
+                    h(Dot, { tone: 'done' }),
+                    h('strong', null, t('uacSignedIn')),
+                  ),
+                  h(
+                    'dl',
+                    null,
+                    h('dt', null, t('empNo')),
+                    h('dd', null, uac.empNo),
+                    h('dt', null, t('loginTime')),
+                    h(
+                      'dd',
+                      null,
+                      new Date(uac.loginAt).toLocaleString(state.locale),
+                    ),
+                    h('dt', null, t('revalidation')),
+                    h(
+                      'dd',
+                      null,
+                      t(
+                        uac.revalidation === 'retrying'
+                          ? 'revalidationRetrying'
+                          : 'revalidationOk',
+                      ),
+                    ),
+                  ),
+                  uac.platformLink === 'mismatch' &&
+                    h(
+                      'p',
+                      { role: 'alert', className: 'auriga-warn' },
+                      t('platformMismatch'),
+                    ),
+                  uac.platformLink === 'matched' &&
+                    h('p', null, t('platformMatched')),
+                  h('p', null, t('uacLocalHint')),
+                  h(
+                    'div',
+                    { className: 'auriga-actions' },
+                    h(
+                      Action,
+                      {
+                        disabled: busy,
+                        onClick: () => run('auriga/uac/logout'),
+                      },
+                      t('uacLogout'),
+                    ),
+                  ),
+                )
+              : h(
+                  'div',
+                  { className: 'auriga-scan' },
+                  pending && challenge.qr
+                    ? h(
+                        'figure',
+                        {
+                          className: 'auriga-qr',
+                          'data-state': challenge.state,
+                        },
+                        h(
+                          'svg',
+                          {
+                            viewBox: `0 0 ${challenge.qr.size} ${challenge.qr.size}`,
+                            width: 168,
+                            height: 168,
+                            role: 'img',
+                            'aria-label': t('uacQr'),
+                          },
+                          h('rect', {
+                            width: challenge.qr.size,
+                            height: challenge.qr.size,
+                            fill: '#fff',
+                          }),
+                          h('path', { d: challenge.qr.path, fill: '#000' }),
+                        ),
+                        challenge.state === 'scanned' &&
+                          h(
+                            'figcaption',
+                            { className: 'auriga-qr-overlay' },
+                            t('uac_scanned'),
+                          ),
+                      )
+                    : h(
+                        'div',
+                        {
+                          className: 'auriga-qr auriga-qr-empty',
+                          'aria-hidden': true,
+                        },
+                        h(
+                          'span',
+                          null,
+                          challenge ? t('uac_' + challenge.state) : '',
+                        ),
+                      ),
+                  h(
+                    'div',
+                    { className: 'auriga-scan-side' },
+                    h(
+                      'p',
+                      {
+                        role: 'status',
+                        'aria-live': 'polite',
+                        className: 'auriga-lead',
+                      },
+                      challenge
+                        ? t('uac_' + challenge.state) +
+                            (challenge.failureCode === 'owner_mismatch'
+                              ? ' · ' + t('ownerMismatch')
+                              : '')
+                        : uac.lastOutcome &&
+                            uac.lastOutcome.startsWith('revalidation')
+                          ? t('uacExpiredRescan')
+                          : t('uacPrompt'),
+                    ),
+                    pending &&
+                      h('p', null, t('uacValidity') + ' ' + seconds + 's'),
+                    h('p', null, t('uacWarning')),
+                    uac.ownerBound && h('p', null, t('ownerBound')),
+                    error &&
+                      h(
+                        'p',
+                        { role: 'alert', className: 'auriga-warn' },
+                        error,
+                      ),
+                    h(
+                      'div',
+                      { className: 'auriga-actions' },
+                      pending
+                        ? h(
+                            Action,
+                            {
+                              disabled: busy,
+                              onClick: () =>
+                                run('auriga/uac/cancel', { id: challenge.id }),
+                            },
+                            t('cancel'),
+                          )
+                        : h(
+                            Action,
+                            {
+                              primary: true,
+                              disabled: busy,
+                              onClick: () => run('auriga/uac/start'),
+                            },
+                            t(challenge ? 'uacRetry' : 'uacStart'),
+                          ),
+                    ),
+                    challenge &&
+                      h(
+                        'small',
+                        { className: 'auriga-ref' },
+                        t('reference') +
+                          ' ' +
+                          challenge.correlationId.slice(0, 8),
+                      ),
+                  ),
+                ),
+          );
+        }
+        function PlatformCard({ boot, shell, reloadShell, gotoSettings }) {
+          const [busy, setBusy] = React.useState(false);
+          const [outcome, setOutcome] = React.useState('');
+          const intent = React.useRef(null);
+          const view = platformView(boot, shell);
+          const previous = React.useRef(view.kind);
+          React.useEffect(() => {
+            const before = previous.current;
+            previous.current = view.kind;
+            if (before !== 'authenticating' || view.kind === 'authenticating')
+              return;
+            setOutcome(
+              view.kind === 'connected' || view.kind === 'degraded'
+                ? 'loginDone'
+                : view.kind === 'reauth'
+                  ? 'loginExpired'
+                  : view.kind === 'unreachable'
+                    ? 'loginUnreachable'
+                    : intent.current === 'cancel'
+                      ? 'loginCancelled'
+                      : 'loginDenied',
+            );
+            intent.current = null;
+          }, [view.kind]);
+          const command = (action) => {
+            intent.current = action === 'cancel_login' ? 'cancel' : action;
+            setBusy(true);
+            setOutcome('');
+            postLocal('auriga/shell/command', shell?.csrf, { action })
+              .catch(() => {
+                if (!disposed) setOutcome('loginUnreachable');
+              })
+              .finally(() => {
+                if (disposed) return;
+                setBusy(false);
+                reloadShell();
+              });
+          };
+          const account = shell?.account;
+          const hint = [
+            'source_disabled',
+            'admin_disabled',
+            'member_disabled',
+          ].includes(shell?.reason)
+            ? 'accessDisabled'
+            : view.kind === 'unreachable' && !shell?.brokerAvailable
+              ? 'brokerUnavailable'
+              : view.kind === 'degraded' &&
+                  shell?.communication === 'unavailable'
+                ? 'communicationUnavailable'
+                : view.kind;
+          return h(
+            'section',
+            { className: 'auriga-card', 'aria-label': t('platformCard') },
+            h('header', null, h('h3', null, t('platformCard'))),
+            h(
+              'div',
+              { className: 'auriga-row' },
+              h(Dot, { tone: view.tone }),
+              h('strong', { role: 'status' }, t('platform_' + view.kind)),
+            ),
+            h('p', null, t('platformHint_' + hint)),
+            shell?.loggedIn &&
+              h(
+                'dl',
+                null,
+                account?.displayName && h('dt', null, t('identityLabel')),
+                account?.displayName && h('dd', null, account.displayName),
+                boot?.connection?.endpointId && h('dt', null, t('endpoint')),
+                boot?.connection?.endpointId &&
+                  h('dd', null, boot.connection.endpointId),
+                h('dt', null, t('received')),
+                h('dd', null, String(boot?.connection?.received ?? 0)),
+              ),
+            view.kind === 'authenticating' &&
+              h('p', null, t('loginBrowserHint')),
+            ['signedOut', 'reauth'].includes(view.kind) &&
+              h('p', { className: 'auriga-muted' }, t('loginMethods')),
+            outcome &&
+              h('p', { role: 'status', 'aria-live': 'polite' }, t(outcome)),
+            h(
+              'div',
+              { className: 'auriga-actions' },
+              view.kind === 'unconfigured' &&
+                h(
+                  Action,
+                  { primary: true, onClick: gotoSettings },
+                  t('configurePlatform'),
+                ),
+              ['signedOut', 'reauth'].includes(view.kind) &&
+                h(
+                  Action,
+                  {
+                    primary: true,
+                    disabled: busy || !shell?.csrf,
+                    onClick: () => command('open_login'),
+                  },
+                  t('platformLogin'),
+                ),
+              view.kind === 'authenticating' &&
+                h(
+                  Action,
+                  { disabled: busy, onClick: () => command('cancel_login') },
+                  t('cancel'),
+                ),
+              ['unreachable', 'degraded', 'connected'].includes(view.kind) &&
+                h(
+                  Action,
+                  {
+                    disabled: busy,
+                    onClick:
+                      view.kind !== 'connected' && shell?.csrf
+                        ? () => command('reconnect')
+                        : reloadShell,
+                  },
+                  t(view.kind === 'connected' ? 'refresh' : 'reconnect'),
+                ),
+              shell?.loggedIn &&
+                h(
+                  Action,
+                  { disabled: busy, onClick: () => command('logout') },
+                  t('platformLogout'),
+                ),
+            ),
+          );
+        }
         function Main() {
           const [desktop, desktopAction] = useDesktopUpdate();
           const host = useHostState();
           const [phase, retry] = useBootstrap(true);
           const [authRequired, setAuthRequired] = React.useState(false);
+          const [tab, setTab] = React.useState('overview');
           const ref = React.useRef(null);
           const boot = phase.status === 'ready' ? phase.boot : undefined;
+          // Desktop is a loopback DSH host. Start its identity route even
+          // when the resource bundle is missing or has failed integrity checks.
+          const local = phase.boot
+            ? phase.boot.mode !== 'managed'
+            : ['127.0.0.1', '[::1]', 'localhost'].includes(
+                window.location.hostname,
+              );
+          const [shell, reloadShell] = useLocalStatus(
+            'auriga/shell/status',
+            4000,
+            local,
+          );
+          const [uac, reloadUac, setUac] = useLocalStatus(
+            'auriga/uac/status',
+            15000,
+            local,
+          );
+          const platform = platformView(phase.boot, local ? shell : undefined);
+          const resourcesReady =
+            !!boot &&
+            (boot.mode === 'managed' ||
+              (boot.mode === 'connect' && shell?.loggedIn === true));
           React.useEffect(() => {
             const el = ref.current;
             if (!el || !boot) return;
@@ -1657,30 +2490,85 @@ window.__ModuleLoader__.load({
               if (index >= 0) cleanups.splice(index, 1);
             };
           }, [boot]);
-          if (phase.status !== 'ready')
-            return h(
-              'div',
-              { className: 'auriga-shell' },
-              notice(phase, retry),
-              h(ConsentSection),
+          React.useEffect(() => {
+            const el = ref.current;
+            if (tab === 'market' || tab === 'mine') el?.showTab?.(tab);
+          }, [tab, boot]);
+          React.useEffect(() => {
+            const root = ref.current?.shadowRoot;
+            if (!root || !boot) return;
+            // Panel versions already distributed before host tabs still render
+            // their own first navigation. The verified panel keeps handling all
+            // resource actions and only its duplicate tablist is suppressed.
+            const style = document.createElement('style');
+            style.textContent =
+              'aside.resources > nav[role="tablist"] { display: none }';
+            root.append(style);
+            return () => style.remove();
+          }, [boot]);
+          const gotoOverview = h(
+            Action,
+            { onClick: () => setTab('overview') },
+            t('gotoOverview'),
+          );
+          const platformBlocked = () =>
+            h(Blocked, {
+              tone: platform.tone,
+              title: t('platform_' + platform.kind),
+              detail: t('platformNeeded'),
+              action: gotoOverview,
+            });
+          const panel = (id, ...children) =>
+            h(
+              'section',
+              {
+                role: 'tabpanel',
+                id: 'auriga-panel-' + id,
+                'aria-labelledby': 'auriga-tab-' + id,
+                className: 'auriga-tabpanel',
+                hidden: tab !== id,
+              },
+              ...children,
             );
+          const resourceTab = tab === 'market' || tab === 'mine';
           return h(
             'div',
-            {
-              className: 'auriga-shell',
-              style: {
-                height: '100%',
-                display: 'flex',
-                flexDirection: 'column',
-              },
-            },
+            { className: 'auriga-shell auriga-app' },
+            h(
+              'header',
+              { className: 'auriga-head' },
+              h('h2', null, t('panel')),
+              h(
+                'div',
+                { className: 'auriga-chips' },
+                uac?.available &&
+                  h(
+                    'span',
+                    { className: 'auriga-chip' },
+                    h(Dot, {
+                      tone: uac.state === 'authenticated' ? 'done' : 'idle',
+                    }),
+                    t('chipLocal') +
+                      ' · ' +
+                      (uac.state === 'authenticated'
+                        ? uac.empNo
+                        : t('signedOut')),
+                  ),
+                h(
+                  'span',
+                  { className: 'auriga-chip' },
+                  h(Dot, { tone: platform.tone }),
+                  t('chipPlatform') + ' · ' + t('platform_' + platform.kind),
+                ),
+              ),
+            ),
             desktop &&
               (desktop.available || desktop.restartRequired || desktop.error) &&
               h(
                 'section',
                 {
                   role: desktop.required ? 'alert' : 'status',
-                  className: 'auriga-shell-status',
+                  className: 'auriga-shell-status auriga-banner',
                 },
                 h(
                   'span',
@@ -1716,55 +2604,113 @@ window.__ModuleLoader__.load({
                     t(desktop.downloading ? 'updateCancel' : 'updateNow'),
                   ),
               ),
-            authRequired &&
-              h(
-                'div',
-                { role: 'status' },
-                h('span', null, t('authRequired')),
-                h(
-                  'button',
-                  { type: 'button', onClick: () => setAuthRequired(false) },
-                  t('dismiss'),
-                ),
-              ),
             host.toast &&
               h(
                 'div',
-                { role: 'status', 'data-level': host.toast.level },
+                {
+                  role: 'status',
+                  'data-level': host.toast.level,
+                  className: 'auriga-banner',
+                },
                 host.toast.message,
               ),
-            boot.connection &&
+            h(Tabs, { value: tab, onChange: setTab }),
+            panel(
+              'overview',
               h(
-                'section',
-                { className: 'auriga-shell-status' },
-                h(
-                  'span',
-                  null,
-                  t(boot.connection.connected ? 'connected' : 'disconnected'),
-                ),
-                h(
-                  'button',
-                  {
-                    type: 'button',
-                    disabled: !boot.connection.connected || desktop?.required,
-                    onClick: () => navigate('session:new'),
+                'div',
+                { className: 'auriga-grid' },
+                uac?.available &&
+                  h(LocalIdentityCard, {
+                    uac,
+                    setUac,
+                    reload: reloadUac,
+                    active: tab === 'overview' && !desktop?.required,
+                  }),
+                h(PlatformCard, {
+                  boot: phase.boot,
+                  shell: local ? shell : undefined,
+                  reloadShell: () => {
+                    reloadShell();
+                    retry();
                   },
-                  t('conversation'),
-                ),
+                  gotoSettings: () => setTab('settings'),
+                }),
               ),
-            h(
-              'details',
-              null,
-              h('summary', null, t('inbox')),
-              h(ConsentSection),
+              phase.status !== 'ready' && notice(phase, retry),
             ),
-            h(ELEMENT, {
-              ref,
-              style: {
-                flex: 1,
-                display: desktop?.required ? 'none' : undefined,
-              },
-            }),
+            panel(tab === 'mine' ? 'market' : 'mine'),
+            panel(
+              tab === 'mine' ? 'mine' : 'market',
+              phase.status !== 'ready'
+                ? resourceTab && notice(phase, retry)
+                : !resourcesReady && resourceTab && platformBlocked(),
+              authRequired &&
+                h(
+                  'div',
+                  { role: 'status', className: 'auriga-banner' },
+                  h('span', null, t('authRequired')),
+                  h(
+                    Action,
+                    { onClick: () => setAuthRequired(false) },
+                    t('dismiss'),
+                  ),
+                ),
+              // Keep the trusted element mounted when switching pages and tabs.
+              boot &&
+                h(ELEMENT, {
+                  ref,
+                  tabs: 'host',
+                  hidden: desktop?.required || !resourcesReady,
+                }),
+            ),
+            panel(
+              'team',
+              boot?.connection?.connected &&
+                (boot.mode === 'managed' || shell?.loggedIn)
+                ? h(
+                    'div',
+                    { className: 'auriga-card' },
+                    h(
+                      'div',
+                      { className: 'auriga-row' },
+                      h(Dot, { tone: 'done' }),
+                      h('strong', null, t('connected')),
+                    ),
+                    h('p', null, t('connectHint')),
+                    h(
+                      'ul',
+                      { className: 'auriga-tools' },
+                      ...[
+                        'auriga_list_endpoints',
+                        'auriga_open_thread',
+                        'auriga_reply_thread',
+                        'auriga_read_thread',
+                      ].map((name) =>
+                        h('li', { key: name }, h('code', null, name)),
+                      ),
+                    ),
+                    h(
+                      'div',
+                      { className: 'auriga-actions' },
+                      h(
+                        Action,
+                        {
+                          primary: true,
+                          disabled: desktop?.required,
+                          onClick: () => navigate('session:new'),
+                        },
+                        t('conversation'),
+                      ),
+                    ),
+                  )
+                : platformBlocked(),
+            ),
+            panel('inbox', h(ConsentSection)),
+            panel(
+              'settings',
+              tab === 'settings' && h(Settings, { embedded: true }),
+            ),
           );
         }
         effect(
@@ -1786,14 +2732,93 @@ window.__ModuleLoader__.load({
             ),
           'auriga-shell: sidebar',
         );
+        // Public sidebar brand slots (single, root scope). A dynamically
+        // registered occupant shadows the shipped brand; disposal restores it.
+        const BrandMark = ({ size = 24 }) =>
+          h(
+            'svg',
+            {
+              width: size,
+              height: size,
+              viewBox: '0 0 64 64',
+              fill: 'none',
+              'aria-hidden': true,
+              className: 'auriga-brand-mark',
+            },
+            h('rect', { width: 64, height: 64, rx: 16, fill: '#10283b' }),
+            h('path', {
+              d: 'M31 10 51 25 44 51 18 49 11 24Z',
+              stroke: '#8fb9d6',
+              strokeWidth: 3,
+              strokeLinejoin: 'round',
+            }),
+            h('path', {
+              d: 'm18 49 13-26 13 28M24 37h14',
+              stroke: '#e8f0f7',
+              strokeWidth: 3,
+              strokeLinejoin: 'round',
+            }),
+            h('circle', { cx: 31, cy: 10, r: 4, fill: '#e8f0f7' }),
+            ...[
+              [51, 25],
+              [44, 51],
+              [18, 49],
+              [11, 24],
+            ].map(([cx, cy]) =>
+              h('circle', { key: cx, cx, cy, r: 3, fill: '#8fb9d6' }),
+            ),
+          );
+        const BrandName = () =>
+          h(
+            'span',
+            { className: 'auriga-brand-name' },
+            h('span', null, 'Auriga'),
+            h('span', { className: 'auriga-brand-suffix' }, 'DSH'),
+          );
         effect(
           () =>
-            ctx.slots.inject('main', () =>
+            ctx.slots.inject('sidebar.brand.mark', () =>
               ctx.slots.register(
-                { name: 'main', key: PANEL_ID, locale: NS },
-                Main,
+                { name: 'sidebar.brand.mark', priority: -1 },
+                BrandMark,
               ),
             ),
+          'auriga-shell: brand mark',
+        );
+        effect(
+          () =>
+            ctx.slots.inject('sidebar.brand.name', () =>
+              ctx.slots.register(
+                { name: 'sidebar.brand.name', priority: -1 },
+                BrandName,
+              ),
+            ),
+          'auriga-shell: brand name',
+        );
+        let launchSelected = false;
+        effect(
+          () =>
+            ctx.slots.inject('main', () => {
+              const unregister = ctx.slots.register(
+                { name: 'main', key: PANEL_ID, locale: NS },
+                Main,
+              );
+              // The browser retains this fragment through native admission.
+              // It only selects an existing panel after the host loads it.
+              const navigate =
+                window.location.hash === '#auriga=login'
+                  ? ctx.inject?.(['layout'], (scope) => {
+                      if (!launchSelected && !disposed) {
+                        scope.layout.selectPanel(PANEL_ID);
+                        launchSelected = true;
+                      }
+                    })
+                  : undefined;
+              return () => {
+                if (typeof navigate === 'function') navigate();
+                unregister();
+              };
+            }),
           'auriga-shell: main',
         );
         effect(
@@ -2048,7 +3073,7 @@ window.__ModuleLoader__.load({
                   name: 'settings.section',
                   id: PANEL_ID,
                   order: 22,
-                  label: BRAND_NAME,
+                  label: NAV_NAME,
                   locale: NS,
                   icon: 'users',
                 },
