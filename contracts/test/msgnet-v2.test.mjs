@@ -393,3 +393,53 @@ test('K3 consumer instructions preserve UTF-8 transport catchup text', () => {
   assert.doesNotMatch(text, /\?{2,}|\uFFFD/);
   assert.match(text, /^transport_catchup \p{Script=Han}[^\n]+JSON/mu);
 });
+
+test('K4 isolated absence and pending diagnostics retain strict wire boundaries', () => {
+  const source = structuredClone(
+    fixture.boundary_cases.find((v) => v.id === 'k4-isolated-no-selector').input
+      .evidence.payload,
+  );
+  const validate = ajv.getSchema(
+    schema.$id + '#/$defs/TransportReaderEvidence',
+  );
+  const row = source.readers[0];
+  assert.ok(validate(row), JSON.stringify(validate.errors));
+  for (const phase of ['loaded', 'handshake_verified'])
+    assert.equal(validate({ ...row, phase }), false);
+  assert.equal(validate({ ...row, selector: null }), false);
+  const pending = ajv.getSchema(
+    schema.$id + '#/$defs/TransportConfirmationPending',
+  );
+  const diagnostic = {
+    ...source,
+    state: 'projection_pending',
+    readers: [{ ...row, phase: 'pending', isolation_enforced: false }],
+  };
+  assert.ok(pending(diagnostic), JSON.stringify(pending.errors));
+  assert.equal(
+    ajv.getSchema(schema.$id + '#/$defs/TransportConfirmation')(diagnostic),
+    false,
+  );
+  assert.equal(pending({ ...diagnostic, runtime_auth: {} }), false);
+});
+test('K4 authoritative mapping endpoint and incomplete response are explicit', () => {
+  const api = YAML.parse(
+    readFileSync(
+      new URL('../openapi/network-keys-v2.yaml', import.meta.url),
+      'utf8',
+    ),
+  );
+  const op =
+    api.paths['/api/collab/v2/network/transport/expected-selectors'].post;
+  assert.equal(op['x-permission'], 'collab.msgnet.read');
+  assert.ok(
+    op.responses['200'].content['application/json'].schema.$ref.endsWith(
+      '/ExpectedSelectors',
+    ),
+  );
+  assert.ok(
+    api.paths['/api/collab/v2/network/transport/confirmation'].post.responses[
+      '202'
+    ],
+  );
+});

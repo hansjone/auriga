@@ -25,6 +25,28 @@ export type LocalProjectionResponse =
  * via the `definition` "RenewalStatusOutput".
  */
 export type RenewalStatusOutput = RenewalStatus | UnpublishedRenewalStatus;
+/**
+ * This interface was referenced by `AurigaV2`'s JSON-Schema
+ * via the `definition` "TransportReaderEvidence".
+ */
+export type TransportReaderEvidence = {
+  reader_id: string;
+  identity_id: string;
+  selector?: LocalProjectionSelector;
+  phase: 'loaded' | 'handshake_verified' | 'isolated';
+  isolation_enforced: boolean;
+};
+/**
+ * This interface was referenced by `AurigaV2`'s JSON-Schema
+ * via the `definition` "TransportPendingReader".
+ */
+export type TransportPendingReader = {
+  reader_id: string;
+  identity_id: string;
+  selector?: LocalProjectionSelector;
+  phase: 'loaded' | 'handshake_verified' | 'isolated' | 'pending';
+  isolation_enforced: boolean;
+};
 
 /**
  * 严格受签对象，拒绝未知字段和重复键。跨字段规则见 auto-renewal-v2.md。整数序列为十进制字符串，须检查 uint64 上界。
@@ -1020,17 +1042,6 @@ export interface TransportPredecessor {
 }
 /**
  * This interface was referenced by `AurigaV2`'s JSON-Schema
- * via the `definition` "TransportReaderEvidence".
- */
-export interface TransportReaderEvidence {
-  reader_id: string;
-  identity_id: string;
-  selector: LocalProjectionSelector;
-  phase: 'loaded' | 'handshake_verified' | 'isolated';
-  isolation_enforced: boolean;
-}
-/**
- * This interface was referenced by `AurigaV2`'s JSON-Schema
  * via the `definition` "TransportConfirmation".
  */
 export interface TransportConfirmation {
@@ -1105,4 +1116,70 @@ export interface TransportTransitionProof {
   predecessor: TransportPredecessor;
   first_bundle: SignedTransportTrustBundle;
   authority: SignedRuntimeAuthority;
+}
+/**
+ * This interface was referenced by `AurigaV2`'s JSON-Schema
+ * via the `definition` "ExpectedSelectorsQuery".
+ */
+export interface ExpectedSelectorsQuery {
+  tenant_id: string;
+  realm: string;
+  bundle_version: string;
+  bundle_digest: string;
+  challenge: string;
+  control_revision: string;
+  control_digest: string;
+}
+/**
+ * This interface was referenced by `AurigaV2`'s JSON-Schema
+ * via the `definition` "ExpectedSelectors".
+ */
+export interface ExpectedSelectors {
+  tenant_id: string;
+  realm: string;
+  authority_id: string;
+  authority_digest: string;
+  control_revision: string;
+  bundle_version: string;
+  bundle_digest: string;
+  phase: 'dual_trust' | 'new_leaves' | 'retire_old';
+  /**
+   * @maxItems 65536
+   */
+  required_reader_ids: string[];
+  challenge: string;
+  issued_at: string;
+  generation: string;
+  control_digest: string;
+  expected_selectors: {
+    [k: string]: string | null;
+  };
+  reader_identities: {
+    [k: string]: string;
+  };
+}
+/**
+ * This interface was referenced by `AurigaV2`'s JSON-Schema
+ * via the `definition` "TransportConfirmationPending".
+ */
+export interface TransportConfirmationPending {
+  tenant_id: string;
+  realm: string;
+  authority_id: string;
+  authority_digest: string;
+  control_revision: string;
+  bundle_version: string;
+  bundle_digest: string;
+  phase: 'dual_trust' | 'new_leaves' | 'retire_old';
+  /**
+   * @maxItems 65536
+   */
+  required_reader_ids: string[];
+  /**
+   * @maxItems 65536
+   */
+  readers: TransportPendingReader[];
+  challenge: string;
+  issued_at: string;
+  state: 'projection_pending';
 }
