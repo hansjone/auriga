@@ -559,3 +559,22 @@ export const response = (status = 200, body = boot()) => ({
   ok: status >= 200 && status < 300,
   json: async () => body,
 });
+
+// Auriga settings live in the main surface's own tab (no native settings.section).
+// Pass the host to mount a dedicated main surface, or an already mounted main.
+export async function openSettings(target) {
+  const owned = typeof target.mount === 'function';
+  const main = owned ? target.mount('main') : target;
+  await flush();
+  const tab = [...main.root.querySelectorAll('[role="tab"]')].find((element) =>
+    ['设置', 'Settings'].includes(element.textContent),
+  );
+  tab.click();
+  await flush();
+  return {
+    root: main.root.querySelector('#auriga-panel-settings'),
+    close() {
+      if (owned && main.alive !== false) main.close();
+    },
+  };
+}
