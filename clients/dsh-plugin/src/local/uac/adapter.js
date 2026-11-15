@@ -1,7 +1,6 @@
 import { createHash } from 'node:crypto';
-import { isIP } from 'node:net';
 import { canonicalize, parseStrictJson } from '../../network/trust/jcs.js';
-import { createUacHttp, MAX_BODY } from './http.js';
+import { createUacHttp, MAX_BODY, parseIpAddress } from './http.js';
 
 /*
  * Local port of the platform `UacConfiguredAdapter` (services/iam): the same
@@ -85,8 +84,7 @@ export function at(root, pointer) {
 /** @param {string} value */
 function literalIp(value) {
   if (value === '') return;
-  if (value.length > 64 || !/^[0-9a-fA-F:.]+$/.test(value) || !isIP(value))
-    throw invalid();
+  if (!parseIpAddress(value)) throw invalid();
 }
 
 /** @param {string} name */
@@ -148,7 +146,7 @@ function parse(body) {
 /**
  * @param {any} settings adapter.json contents (private)
  * @param {{baseUrl:string,systemCode:string}} provider private provider binding
- * @param {{http?:ReturnType<typeof createUacHttp>,lookup?:any,testLoopback?:boolean}} [options]
+ * @param {{http?:ReturnType<typeof createUacHttp>,lookup?:any}} [options]
  */
 export function createUacAdapter(settings, provider, options = {}) {
   if (!settings || typeof settings !== 'object' || Array.isArray(settings))
@@ -168,7 +166,6 @@ export function createUacAdapter(settings, provider, options = {}) {
     options.http ??
     createUacHttp(settings, {
       lookup: options.lookup,
-      testLoopback: options.testLoopback,
     });
 
   /** @param {Record<string,string>} input @param {any} operation */
@@ -218,6 +215,7 @@ export function createUacAdapter(settings, provider, options = {}) {
   function headers(mapping, vals) {
     /** @type {Record<string,string>} */ const out = {};
     for (const [key, value] of Object.entries(mapping?.headers ?? {})) {
+      if (key.toLowerCase() === 'host') throw invalid();
       const rendered = expand(value, vals);
       if (typeof rendered !== 'string') throw invalid();
       out[key] = rendered;

@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
-import { test } from 'node:test';
-import { createServer } from 'node:http';
+import { after, before, test } from 'node:test';
+import { createServer } from 'node:https';
+import { getCACertificates, setDefaultCACertificates } from 'node:tls';
 import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -12,7 +13,7 @@ import {
   sealSecret,
 } from '../src/local/utils/secret-box.js';
 import { createUacAdapter, formEncode } from '../src/local/uac/adapter.js';
-import { createUacHttp } from '../src/local/uac/http.js';
+import { createUacHttp, parseIpAddress } from '../src/local/uac/http.js';
 import { readUacConfig } from '../src/local/uac/config.js';
 import {
   CHALLENGE_TTL_MS,
@@ -20,6 +21,12 @@ import {
   tokenHash,
 } from '../src/local/uac/session.js';
 import { createUacRoutes } from '../src/local/uac/routes.js';
+import { createTestPki } from './network/transport/support/pki.js';
+
+const pki = createTestPki();
+const defaultCertificates = getCACertificates('default');
+before(() => setDefaultCACertificates([...defaultCertificates, pki.rootPem]));
+after(() => setDefaultCACertificates(defaultCertificates));
 
 // Synthetic protocol only (see services/iam/impl/UAC.zh.md). A loopback
 // replica stands in for the private enterprise service; no real hosts.
@@ -58,26 +65,32 @@ function settings(origin) {
   };
 }
 
-async function replica() {
+async function replica(certificates = pki) {
   const calls = [];
   const script = { scan: [], verify: [], info: [] };
-  const server = createServer(async (req, res) => {
-    let body = '';
-    for await (const chunk of req) body += chunk;
-    const parsed = JSON.parse(body || 'null');
-    calls.push({ path: req.url, body: parsed, headers: req.headers });
-    const queue = script[req.url.slice(1)] ?? [];
-    const next = queue.length > 1 ? queue.shift() : queue[0];
-    if (!next) {
-      res.writeHead(500).end();
-      return;
-    }
-    const value = typeof next === 'function' ? await next(parsed) : next;
-    res.writeHead(value.status ?? 200, { 'content-type': 'application/json' });
-    res.end(value.rawBody ?? JSON.stringify(value.body));
-  });
+  const server = createServer(
+    { key: certificates.keyPem, cert: certificates.certPem },
+    async (req, res) => {
+      let body = '';
+      for await (const chunk of req) body += chunk;
+      const parsed = JSON.parse(body || 'null');
+      calls.push({ path: req.url, body: parsed, headers: req.headers });
+      const queue = script[req.url.slice(1)] ?? [];
+      const next = queue.length > 1 ? queue.shift() : queue[0];
+      if (!next) {
+        res.writeHead(500).end();
+        return;
+      }
+      const value = typeof next === 'function' ? await next(parsed) : next;
+      res.writeHead(value.status ?? 200, {
+        'content-type': 'application/json',
+        ...value.headers,
+      });
+      res.end(value.rawBody ?? JSON.stringify(value.body));
+    },
+  );
   await new Promise((r) => server.listen(0, '127.0.0.1', r));
-  const origin = `http://127.0.0.1:${server.address().port}`;
+  const origin = `https://127.0.0.1:${server.address().port}`;
   return {
     origin,
     calls,
@@ -146,7 +159,6 @@ async function setup(t, { config = true, ...rest } = {}) {
   const make = () =>
     createLocalUacIdentity({
       directory,
-      createAdapter: (s, p) => createUacAdapter(s, p, { testLoopback: true }),
       now: time.now,
       setTimer: time.setTimer,
       clearTimer: time.clearTimer,
@@ -857,22 +869,119 @@ test('local UAC http: resolved address must be allowlisted; redirects are not fo
   const upstream = await replica();
   t.after(() => upstream.close());
   upstream.script.scan = [
-    { status: 302, body: { state: 'verified', token: 't', employee: 'A' } },
-  ];
-  const adapter = createUacAdapter(
-    settings(upstream.origin),
     {
-      baseUrl: upstream.origin,
-      systemCode: 'S',
+      status: 302,
+      headers: { location: upstream.origin + '/verify' },
+      body: { state: 'verified', token: 't', employee: 'A' },
     },
-    { testLoopback: true },
-  );
+  ];
+  const adapter = createUacAdapter(settings(upstream.origin), {
+    baseUrl: upstream.origin,
+    systemCode: 'S',
+  });
   const result = await adapter.scan({ x: '0'.repeat(32), y: '1'.repeat(32) });
   assert.deepEqual(result, {
     state: 'unavailable',
     failureCode: 'transport_error',
   });
   assert.equal(upstream.calls.length, 1);
+});
+
+test('local UAC http: only canonical numeric address families reach DNS pinning', () => {
+  assert.deepEqual(parseIpAddress('127.0.0.1'), {
+    address: '127.0.0.1',
+    family: 4,
+  });
+  assert.deepEqual(parseIpAddress('0:0:0:0:0:0:0:1'), {
+    address: '::1',
+    family: 6,
+  });
+  assert.deepEqual(parseIpAddress('::ffff:127.0.0.1'), {
+    address: '::ffff:7f00:1',
+    family: 6,
+  });
+  for (const address of [
+    '127.1',
+    '0x7f000001',
+    '127.0.0.01',
+    '256.0.0.1',
+    '127.0.0.1\n',
+    'fe80::1%eth0',
+    ':::1',
+    'dead.beef',
+  ])
+    assert.equal(parseIpAddress(address), null, address);
+});
+
+test('local UAC http: the pinned TLS socket keeps the authorized origin and certificate identity', async (t) => {
+  const upstream = await replica();
+  t.after(() => upstream.close());
+  upstream.script.scan = [{ body: { state: 'waiting' } }];
+  const target = new URL(upstream.origin);
+  target.hostname = 'localhost';
+  target.pathname = '/scan';
+  const requests = [];
+  const port = createUacHttp(settings(target.origin), {
+    lookup: async (host) => {
+      requests.push(host);
+      return [{ address: '127.0.0.1', family: 4 }];
+    },
+  });
+  const body = { sample: 'synthetic' };
+  const result = await port.post(target, body, {}, 3);
+  assert.equal(result.status, 200);
+  assert.deepEqual(requests, ['localhost']);
+  assert.equal(upstream.calls[0].headers.host, target.host);
+  assert.deepEqual(upstream.calls[0].body, body);
+
+  const otherPort = new URL(target);
+  otherPort.port = target.port === '1' ? '2' : '1';
+  await assert.rejects(
+    port.post(otherPort, body, {}, 3),
+    /UAC destination rejected/,
+  );
+  await assert.rejects(
+    port.post(target, body, { hOsT: 'other.invalid' }, 3),
+    /invalid enterprise HTTPS target/,
+  );
+  const mixed = createUacHttp(settings(target.origin), {
+    lookup: async () => [
+      { address: '127.0.0.1', family: 4 },
+      { address: '192.0.2.99', family: 4 },
+    ],
+  });
+  await assert.rejects(
+    mixed.post(target, body, {}, 3),
+    /UAC destination rejected/,
+  );
+
+  const otherHostname = new URL(target);
+  otherHostname.hostname = 'different-uac.invalid';
+  const wrongIdentity = createUacHttp(settings(otherHostname.origin), {
+    lookup: async () => [{ address: '127.0.0.1', family: 4 }],
+  });
+  await assert.rejects(wrongIdentity.post(otherHostname, body, {}, 3), {
+    code: 'ERR_TLS_CERT_ALTNAME_INVALID',
+  });
+  assert.equal(upstream.calls.length, 1);
+});
+
+test('local UAC http: an untrusted certificate prevents any credential POST', async (t) => {
+  const upstream = await replica(createTestPki());
+  t.after(() => upstream.close());
+  await assert.rejects(
+    createUacHttp(settings(upstream.origin)).post(
+      new URL(upstream.origin + '/verify'),
+      { sample: 'synthetic' },
+      {},
+      3,
+    ),
+    (error) =>
+      ['UNABLE_TO_GET_ISSUER_CERT_LOCALLY', 'CERT_SIGNATURE_FAILURE'].includes(
+        error.code,
+      ),
+  );
+  assert.equal(upstream.calls.length, 0);
 });
 
 test('local UAC routes: native auth, same-origin, CSRF and platform association', async (t) => {

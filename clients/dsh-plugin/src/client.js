@@ -2839,7 +2839,7 @@ window.__ModuleLoader__.load({
                   : undefined;
               return () => {
                 if (typeof navigate === 'function') navigate();
-                unregister();
+                if (typeof unregister === 'function') unregister();
               };
             }),
           'auriga-shell: main',
