@@ -15,6 +15,20 @@ const adminCSRFBootstrapPath = "/api/iam/v1/admin/session/csrf-tokens"
 var loginTransactionPath = regexp.MustCompile(`^/api/iam/v1/login/transactions/[0-9a-fA-F-]+(?:/advance|/events)?$`)
 var loginCallbackPath = regexp.MustCompile(`^/api/iam/v1/login/callback/[0-9a-fA-F-]+$`)
 var invitationPreviewPath = regexp.MustCompile(`^/api/org/v1/invitations/preview/[^/]+$`)
+var uacAdminProviderPath = regexp.MustCompile(`^/api/iam/v1/admin/providers/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/uac(?:/diagnostics)?$`)
+
+func uacAdminBrowserOperation(r *http.Request) bool {
+	if r.URL.EscapedPath() != r.URL.Path {
+		return false
+	}
+	switch r.Method {
+	case http.MethodGet, http.MethodPut:
+		return uacAdminProviderPath.MatchString(r.URL.Path)
+	case http.MethodPost:
+		return r.URL.Path == "/api/iam/v1/admin/uac/diagnostic-bundles"
+	}
+	return false
+}
 
 func loginOperation(r *http.Request) bool {
 	p := r.URL.Path
@@ -193,7 +207,7 @@ func (g *Gateway) proxyAccessAPI(w http.ResponseWriter, r *http.Request, target 
 		unavailable("iam_transport_unavailable")
 		return
 	}
-	selectedCookies, err := g.iamCookies(r, e, bootstrap)
+	selectedCookies, err := g.iamCookies(r, e, bootstrap, iam && sess != nil)
 	if err != nil {
 		fail(400, "common.validation_failed")
 		return
@@ -313,8 +327,16 @@ func (g *Gateway) proxyAccessAPI(w http.ResponseWriter, r *http.Request, target 
 	proxy.ServeHTTP(w, r)
 }
 
-func (g *Gateway) iamCookies(r *http.Request, e accessEntry, bootstrap bool) (string, error) {
+func (g *Gateway) iamCookies(r *http.Request, e accessEntry, bootstrap, authenticatedIAMBrowser bool) (string, error) {
 	var names []string
+	// These endpoints revalidate the admin browser session in IAM, and recheck
+	// CSRF for writes. Forward only the cookies needed by those exact routes.
+	if authenticatedIAMBrowser && e.role == "admin" && uacAdminBrowserOperation(r) {
+		names = append(names, sessionCookieBase(e.role))
+		if isWriteMethod(r.Method) && g.Cfg.Access.Mode() != "ip" {
+			names = append(names, csrfCookieBase())
+		}
+	}
 	if bootstrap {
 		names = append(names, sessionCookieBase(e.role))
 	}
