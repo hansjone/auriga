@@ -220,7 +220,18 @@ func runAgent(args []string, logs io.Writer) error {
 
 	reg := ingress.NewMapRegistry()
 	targets := &observer.SliceTargets{}
+	var messageControl conn.MsgnetControl
+	if cfg.MsgnetConfig != "" {
+		installer, closeInstaller, loadError := newMsgnetInstaller(cfg.AgentDir(), cfg.MsgnetConfig)
+		if loadError != nil {
+			logger.Warn("message control configuration unavailable", "error", loadError)
+		} else {
+			defer closeInstaller()
+			messageControl = installer
+		}
+	}
 	sess := conn.New(conn.Config{
+		Msgnet:        messageControl,
 		AgentDir:      cfg.AgentDir(),
 		AgentVersion:  cfg.AgentVersion,
 		ControlURL:    cfg.ControlEndpoint,

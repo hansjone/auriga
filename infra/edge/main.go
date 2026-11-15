@@ -99,6 +99,11 @@ func run(args []string, out, logs io.Writer) error {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	closeIsolation, err := gw.startMsgnetIsolation(ctx, cfg.MsgnetIsolation)
+	if err != nil {
+		return err
+	}
+	defer closeIsolation()
 
 	srv := &Server{Cfg: cfg, Handler: gw.Handler(), Log: logger}
 	logger.Info("edge starting", "version", version, "listen", cfg.Listen, "tls", cfg.TLS.Mode)

@@ -51,6 +51,7 @@ type Config struct {
 	DevicePresence         DevicePresenceConfig          `json:"devicePresence"`
 	ManagedIngress         ManagedIngressConfig          `json:"managedIngress"`
 	MsgnetProjection       *MsgnetProjectionConfig       `json:"msgnetProjection,omitempty"`
+	MsgnetIsolation        *MsgnetIsolationConfig        `json:"msgnetIsolation,omitempty"`
 }
 
 type StaticConfig struct {

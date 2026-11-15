@@ -160,6 +160,258 @@ class WorkspaceIntegrationTest {
     sessions = new NodeSessions(enrollment, service);
   }
 
+  @Test
+  void nativeMsgnetProofRelayUsesAuthenticatedNodeAndReloadsTls() throws Exception {
+    var nativeKey = TestPki.key();
+    var joined = enrollment.join(joinRequest(token().token(), nativeKey));
+    UUID node = UUID.fromString(joined.getNodeId());
+    var nativeCertificate = NodeCa.parse(joined.getCertificateChain().toByteArray());
+    var pins = org.mockito.Mockito.mock(auriga.iam.api.NodeControlAuthority.class);
+    var ledger = org.mockito.Mockito.mock(auriga.iam.api.MessageNetworkControlLedger.class);
+    var isolation = org.mockito.Mockito.mock(auriga.iam.api.MessageNetworkIsolation.class);
+    org.mockito.Mockito.when(pins.binding(tenant, node))
+        .thenReturn(
+            new auriga.iam.api.NodeControlAuthority.Binding(
+                tenant.toString(),
+                "1",
+                new auriga.contracts.msgnet.model.NodeControlPin()
+                    .nodeId(node.toString())
+                    .targetId("trusted-node")));
+    var record =
+        new auriga.contracts.msgnet.model.IsolationRecord()
+            .tenantId(tenant.toString())
+            .realm("1")
+            .targetId("trusted-node")
+            .minimumControlRevision("2")
+            .controlDigest("sha256:" + "2".repeat(64))
+            .challenge("current-challenge")
+            .state(auriga.contracts.msgnet.model.IsolationRecord.StateEnum.QUARANTINED)
+            .identityCompromised(false)
+            .newChainReady(false);
+    org.mockito.Mockito.when(ledger.isolation(tenant.toString(), "1", "trusted-node"))
+        .thenReturn(record);
+    org.mockito.Mockito.when(ledger.canonicalPublic(org.mockito.ArgumentMatchers.any()))
+        .thenAnswer(call -> WorkspaceService.JSON.writeValueAsBytes(call.getArgument(0)));
+    org.mockito.Mockito.when(ledger.confirmationQuery(org.mockito.ArgumentMatchers.any()))
+        .thenAnswer(
+            call ->
+                WorkspaceService.JSON.readValue(
+                    (byte[]) call.getArgument(0),
+                    auriga.contracts.msgnet.model.TransportConfirmationQuery.class));
+    var serverKey = TestPki.key();
+    var serverCertificate =
+        TestPki.certificate(serverKey, caKey, NodeCa.parse(ca.bundle()), clock.instant(), false);
+    Path certFile = directory.resolve("proof-server.crt"),
+        keyFile = directory.resolve("proof-server.key");
+    Files.write(certFile, ca.chain(serverCertificate));
+    Files.writeString(keyFile, pemKey(serverKey));
+    proofSecret(keyFile);
+    var serverTls = MsgnetRelayTls.context(certFile, keyFile, ca.bundle());
+    var clientTls = proofClient(nativeKey, nativeCertificate);
+    try (var relay =
+        new MsgnetProofRelay(
+            new java.net.InetSocketAddress("127.0.0.1", 0),
+            serverTls,
+            enrollment,
+            pins,
+            ledger,
+            isolation)) {
+      relay.start();
+      String origin = "https://localhost:" + relay.port();
+      java.util.function.BiFunction<String, String, java.net.http.HttpResponse<String>> request =
+          (path, body) -> {
+            try (var client =
+                java.net.http.HttpClient.newBuilder()
+                    .sslContext(clientTls)
+                    .followRedirects(java.net.http.HttpClient.Redirect.NEVER)
+                    .build()) {
+              var builder =
+                  java.net.http.HttpRequest.newBuilder(
+                          java.net.URI.create(origin + "/api/collab/v2/network" + path))
+                      .timeout(java.time.Duration.ofSeconds(10));
+              if (body == null) builder.GET();
+              else builder.POST(java.net.http.HttpRequest.BodyPublishers.ofString(body));
+              return client.send(
+                  builder.build(), java.net.http.HttpResponse.BodyHandlers.ofString());
+            } catch (Exception failure) {
+              throw new RuntimeException(failure);
+            }
+          };
+      assertEquals(403, request.apply("/isolation/self-reported-target", null).statusCode());
+      assertEquals(403, request.apply("/bootstrap/materials", null).statusCode());
+      assertEquals(
+          403,
+          request
+              .apply(
+                  "/transport/confirmation",
+                  "{\"tenant_id\":\"foreign\",\"realm\":\"1\",\"bundle_version\":\"1\",\"bundle_digest\":\"sha256:"
+                      + "0".repeat(64)
+                      + "\",\"challenge\":\"challenge\"}")
+              .statusCode());
+      org.mockito.Mockito.verify(isolation, org.mockito.Mockito.never())
+          .beforeControl(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any());
+      var first = request.apply("/isolation/trusted-node", null);
+      assertEquals(200, first.statusCode());
+      org.mockito.Mockito.verify(isolation).beforeControl(tenant, node);
+      var before =
+          ((java.security.cert.X509Certificate)
+                  first.sslSession().orElseThrow().getPeerCertificates()[0])
+              .getSerialNumber();
+      serverKey = TestPki.key();
+      serverCertificate =
+          TestPki.certificate(serverKey, caKey, NodeCa.parse(ca.bundle()), clock.instant(), false);
+      Files.writeString(keyFile, pemKey(serverKey));
+      Files.write(certFile, ca.chain(serverCertificate));
+      var rotated = request.apply("/isolation/trusted-node", null);
+      assertEquals(200, rotated.statusCode());
+      assertNotEquals(
+          before,
+          ((java.security.cert.X509Certificate)
+                  rotated.sslSession().orElseThrow().getPeerCertificates()[0])
+              .getSerialNumber());
+      var older =
+          new auriga.contracts.msgnet.model.ControlPackage()
+              .tenantId(tenant.toString())
+              .realm("1")
+              .targetId("trusted-node")
+              .control(
+                  new auriga.contracts.msgnet.model.SignedRootControl()
+                      .payload(
+                          new auriga.contracts.msgnet.model.RootControl().controlRevision("1")))
+              .controlDigest("sha256:" + "1".repeat(64))
+              .challenge("older-outstanding-challenge");
+      org.mockito.Mockito.when(ledger.pending(tenant.toString(), "1", "trusted-node"))
+          .thenReturn(Optional.of(older));
+      org.mockito.Mockito.when(ledger.isolationRequest(org.mockito.ArgumentMatchers.any()))
+          .thenAnswer(
+              call ->
+                  WorkspaceService.JSON.readValue(
+                      (byte[]) call.getArgument(0),
+                      auriga.contracts.msgnet.model.IsolationRecord.class));
+      var queued = WorkspaceService.JSON.valueToTree(record).deepCopy();
+      ((tools.jackson.databind.node.ObjectNode) queued)
+          .put("minimum_control_revision", "1")
+          .put("control_digest", older.getControlDigest())
+          .put("challenge", older.getChallenge());
+      assertEquals(
+          200,
+          request
+              .apply("/isolation", WorkspaceService.JSON.writeValueAsString(queued))
+              .statusCode());
+      ((tools.jackson.databind.node.ObjectNode) queued).put("challenge", "wrong-challenge");
+      assertEquals(
+          403,
+          request
+              .apply("/isolation", WorkspaceService.JSON.writeValueAsString(queued))
+              .statusCode());
+      int reads = org.mockito.Mockito.mockingDetails(ledger).getInvocations().size();
+      store.in(
+          tenant,
+          () -> {
+            store.jdbc.update(
+                "UPDATE node SET revoked=true WHERE tenant_id=? AND id=?", tenant, node);
+            return null;
+          });
+      assertEquals(503, request.apply("/isolation/trusted-node", null).statusCode());
+      assertEquals(reads, org.mockito.Mockito.mockingDetails(ledger).getInvocations().size());
+    }
+  }
+
+  private static void proofSecret(Path file) throws Exception {
+    if (file.getFileSystem().supportedFileAttributeViews().contains("posix"))
+      Files.setPosixFilePermissions(
+          file, java.nio.file.attribute.PosixFilePermissions.fromString("rw-------"));
+    else {
+      var view =
+          Files.getFileAttributeView(file, java.nio.file.attribute.AclFileAttributeView.class);
+      view.setAcl(
+          List.of(
+              java.nio.file.attribute.AclEntry.newBuilder()
+                  .setType(java.nio.file.attribute.AclEntryType.ALLOW)
+                  .setPrincipal(view.getOwner())
+                  .setPermissions(
+                      java.util.EnumSet.allOf(java.nio.file.attribute.AclEntryPermission.class))
+                  .build()));
+    }
+  }
+
+  private javax.net.ssl.SSLContext proofClient(
+      KeyPair key, java.security.cert.X509Certificate certificate) throws Exception {
+    var keys = java.security.KeyStore.getInstance("PKCS12");
+    keys.load(null);
+    keys.setKeyEntry(
+        "native",
+        key.getPrivate(),
+        new char[0],
+        new java.security.cert.Certificate[] {certificate, NodeCa.parse(ca.bundle())});
+    var km =
+        javax.net.ssl.KeyManagerFactory.getInstance(
+            javax.net.ssl.KeyManagerFactory.getDefaultAlgorithm());
+    km.init(keys, new char[0]);
+    var roots = java.security.KeyStore.getInstance("PKCS12");
+    roots.load(null);
+    roots.setCertificateEntry("ca", NodeCa.parse(ca.bundle()));
+    var tm =
+        javax.net.ssl.TrustManagerFactory.getInstance(
+            javax.net.ssl.TrustManagerFactory.getDefaultAlgorithm());
+    tm.init(roots);
+    var context = javax.net.ssl.SSLContext.getInstance("TLS");
+    context.init(km.getKeyManagers(), tm.getTrustManagers(), new java.security.SecureRandom());
+    return context;
+  }
+
+  @Test
+  void nodeControlIsolationFailurePreservesLifecycleAndUsesAuthenticatedNode() throws Exception {
+    sessions.close();
+    var msgnet = org.mockito.Mockito.mock(auriga.workspace.api.MsgnetNodeControl.class);
+    var allowed = new java.util.concurrent.atomic.AtomicBoolean();
+    var attempted = new CountDownLatch(1);
+    auriga.iam.api.MessageNetworkIsolation isolation =
+        (authenticatedTenant, authenticatedNode) -> {
+          assertFalse(
+              org.springframework.transaction.support.TransactionSynchronizationManager
+                  .isActualTransactionActive());
+          assertFalse(
+              org.springframework.transaction.support.TransactionSynchronizationManager.hasResource(
+                  store.jdbc.getDataSource()));
+          assertEquals(tenant, authenticatedTenant);
+          attempted.countDown();
+          if (!allowed.get()) throw new IllegalStateException("actual disconnect pending");
+        };
+    sessions = new NodeSessions(enrollment, service, msgnet, isolation);
+    var control = new RecoveryControl(tenant);
+    control.stream.onNext(
+        SessionRequest.newBuilder().setInventory(Inventory.getDefaultInstance()).build());
+    assertTrue(attempted.await(5, TimeUnit.SECONDS));
+    assertFalse(control.fake.error.isDone());
+    org.mockito.Mockito.verify(msgnet, org.mockito.Mockito.never())
+        .controls(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any());
+    var wire =
+        MsgnetControlPackage.newBuilder().setCanonicalJson(ByteString.copyFromUtf8("{}")).build();
+    org.mockito.Mockito.when(msgnet.controls(tenant, control.node)).thenReturn(List.of(wire));
+    org.mockito.Mockito.when(msgnet.transports(tenant, control.node)).thenReturn(List.of());
+    allowed.set(true);
+    SessionResponse delivered = null;
+    long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+    while (delivered == null && System.nanoTime() < deadline) {
+      sessions.dispatch();
+      var value = control.fake.responses.poll(50, TimeUnit.MILLISECONDS);
+      if (value != null && value.hasMsgnetControlPackage()) delivered = value;
+    }
+    assertNotNull(delivered);
+    org.mockito.Mockito.verify(msgnet, org.mockito.Mockito.atLeastOnce())
+        .controls(tenant, control.node);
+    var receipt =
+        MsgnetControlReceipt.newBuilder()
+            .setCanonicalJson(ByteString.copyFromUtf8("{\"node_id\":\"self-reported-node\"}"))
+            .build();
+    control.stream.onNext(SessionRequest.newBuilder().setMsgnetControlReceipt(receipt).build());
+    org.mockito.Mockito.verify(msgnet, org.mockito.Mockito.timeout(5000))
+        .receipt(tenant, control.node, receipt);
+    assertFalse(control.fake.error.isDone());
+    control.stream.onCompleted();
+  }
+
   @AfterEach
   void close() {
     sessions.close();

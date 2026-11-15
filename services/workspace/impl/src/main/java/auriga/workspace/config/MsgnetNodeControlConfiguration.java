@@ -16,8 +16,12 @@ import org.springframework.context.annotation.*;
 public class MsgnetNodeControlConfiguration {
   @Bean
   @ConditionalOnMissingBean(MsgnetNodeControl.class)
+  @ConditionalOnProperty(
+      prefix = "auriga.workspace.msgnet",
+      name = "remote-node-control",
+      havingValue = "true")
   @ConditionalOnProperty(prefix = "auriga.iam.msgnet", name = "node-control-pins-file")
-  MsgnetNodeControl msgnetNodeControl(
+  MsgnetNodeControl pinnedMsgnetNodeControl(
       NodeControlAuthority pins, MessageNetworkControlLedger ledger) {
     return new PinnedMsgnetNodeControl(pins, ledger);
   }

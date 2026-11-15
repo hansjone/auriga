@@ -142,6 +142,9 @@ func New(o Options) (*Installer, error) {
 			}
 		}
 		installer.state = &saved
+		if backend, ok := o.Backend.(interface{ ResumeControl(api.ControlPackage) }); ok {
+			backend.ResumeControl(saved.Package)
+		}
 	} else if !os.IsNotExist(e) {
 		return nil, e
 	}

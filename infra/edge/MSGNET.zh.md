@@ -22,3 +22,13 @@ reader 每5秒检查控制与固定 selector，失败持续重试；60秒未恢�
 N 继续按冻结本地模型发送 reload/confirm。C 的 /transport/history、/transport/transitions 和 /transport/confirmation 必须提供 no-store 的冻结对象。全局确认签名代表根授权运行钥对 C 授权台账的声明，消费端不从证据行反填 expected_selectors。
 
 本线测试包含两轮阶段推进、新 CA/新叶子、真实 mTLS/WSS/NATS presence 握手、退休 CA 复活拒绝与撤销断连；不代表 C/N/D 的整线或真实 NAS 验收已完成。
+
+## 消息隔离执行
+
+edge 配置 `msgnetIsolation` 可启用独立的 Linux 私有 mTLS 监听器。字段为 `listen`、`certFile`、`keyFile`、`caFile`、`callerSpki`、`targetsFile`、`schemaFile`。`callerSpki` 固定 IAM 执行服务叶子的公有 SPKI。私钥和 target 文件的父目录须为当前 edge 用户私有目录，Linux0700/0600。该监听器不注册到普通 Gateway Handler。
+
+`targetsFile` 是 D 提供的本地数组，每行包含 `tenant_id`、`realm`、`target_id`、`devices`。`devices` 为该目标的 IAM device UUID 数组。物理节点目标列全体所辖设备，插件目标列自身设备。映射与 IAM 的受保护 target 配置应同批安装，更新映射需重启读取快照。
+
+仅已登记 IAM mTLS 身份可 POST 冻结 IsolationRecord 到 `/api/collab/v2/network/isolation`。IAM 先提交自己的拒连 fence，再请求此端口。edge 从 IAM 的内部 ReadBindings RPC 读取真实连接归属，使用自身最小权限 presence 身份执行 CONNZ/KICK，确认目标连接全部离线后才返回成功。空连接集、已退役 broker generation 可确认离线，未知归属、监控不可用、超时和断连失败均拒绝确认。C 的 enforceIsolation 由 IAM 在此成功之后调用。
+
+IAM 的 V18 表按 tenant/device/target 保存独立消息 fence，启用 FORCE RLS。签发、兑换、活跃检查和消息源授权核对该 fence。物理节点与插件目标各自确认 READY 后分别解除各自记录。普通设备与实例生命周期继续由原权限管理。

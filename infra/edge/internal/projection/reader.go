@@ -114,6 +114,20 @@ func openFixedRoot(path string) (*os.Root, error) {
 	return os.OpenRoot(path)
 }
 
+// ReadPrivateConfiguration reads a deployment-selected immutable configuration
+// through the same owner/mode and no-link checks as the reader's private state.
+func ReadPrivateConfiguration(path string, limit int64) ([]byte, error) {
+	if !filepath.IsAbs(path) || filepath.Clean(path) != path {
+		return nil, fmt.Errorf("absolute private configuration required")
+	}
+	root, e := openFixedRoot(filepath.Dir(path))
+	if e != nil {
+		return nil, e
+	}
+	defer func() { _ = root.Close() }()
+	return readRegular(root, filepath.Base(path), limit)
+}
+
 func (r *Reader) scope(s api.LocalProjectionSelector) bool {
 	return s.TenantId == r.Scope.TenantId && s.Realm == r.Scope.Realm && s.InstallationId == r.Scope.InstallationId && s.Component == r.Scope.Component
 }

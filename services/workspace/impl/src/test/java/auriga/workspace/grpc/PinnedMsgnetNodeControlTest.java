@@ -48,6 +48,16 @@ class PinnedMsgnetNodeControlTest {
                     .setCanonicalJson(ByteString.copyFrom(raw))
                     .build()));
     verify(ledger, never()).confirm(any());
+    verify(ledger, never()).confirmNode(any(), any(), any());
+    var accepted = new InstallationReceipt().targetId("fixed-target");
+    when(authority.verify(eq(tenant), eq(node), any(byte[].class), eq(pending)))
+        .thenReturn(accepted);
+    service.receipt(
+        tenant,
+        node,
+        MsgnetControlReceipt.newBuilder().setCanonicalJson(ByteString.copyFrom(raw)).build());
+    verify(ledger).confirmNode(tenant, node, accepted);
+    verify(ledger, never()).confirm(any());
     when(ledger.transport())
         .thenReturn(
             new SignedTransportTrustBundle()

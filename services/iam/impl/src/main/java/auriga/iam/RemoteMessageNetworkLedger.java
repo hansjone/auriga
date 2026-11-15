@@ -140,6 +140,117 @@ public final class RemoteMessageNetworkLedger
         false);
   }
 
+  private static String digest(String value) {
+    if (value == null || !value.matches("sha256:[0-9a-f]{64}"))
+      throw new IllegalArgumentException("invalid ledger digest");
+    return value;
+  }
+
+  @Override
+  public TransportPredecessor history(String digest) {
+    var value =
+        read(
+            "/transport/history/" + digest(digest),
+            "TransportPredecessor",
+            TransportPredecessor.class,
+            null,
+            false);
+    String actual =
+        "sha256:"
+            + Secrets.hash(InstallationJson.canonical(Json.MAPPER.valueToTree(value.getBundle())));
+    if (!actual.equals(digest)) throw new IllegalStateException("ledger history mismatch");
+    return value;
+  }
+
+  @Override
+  public TransportTransitionProof transition(String authorityDigest) {
+    return read(
+        "/transport/transitions/" + digest(authorityDigest),
+        "TransportTransitionProof",
+        TransportTransitionProof.class,
+        null,
+        false);
+  }
+
+  @Override
+  public SignedTransportConfirmation confirmation(TransportConfirmationQuery query) {
+    schemas.validate(
+        "network/auto-renewal-v2.schema.json#/$defs/TransportConfirmationQuery",
+        Json.MAPPER.valueToTree(query));
+    var value =
+        read(
+            "/transport/confirmation",
+            "SignedTransportConfirmation",
+            SignedTransportConfirmation.class,
+            query,
+            false);
+    var p = value.getPayload();
+    if (!Objects.equals(query.getTenantId(), p.getTenantId())
+        || !Objects.equals(query.getRealm(), p.getRealm())
+        || !Objects.equals(query.getBundleVersion(), p.getBundleVersion())
+        || !Objects.equals(query.getBundleDigest(), p.getBundleDigest())
+        || !Objects.equals(query.getChallenge(), p.getChallenge()))
+      throw new IllegalStateException("ledger confirmation mismatch");
+    return value;
+  }
+
+  @Override
+  public IsolationRecord enforceIsolation(IsolationRecord record) {
+    schemas.validate(
+        "network/auto-renewal-v2.schema.json#/$defs/IsolationRecord",
+        Json.MAPPER.valueToTree(record));
+    if (record.getState() == IsolationRecord.StateEnum.READY
+        && !Boolean.TRUE.equals(record.getNewChainReady()))
+      throw new IllegalArgumentException("new-chain evidence required");
+    var value = read("/isolation", "IsolationRecord", IsolationRecord.class, record, false);
+    scope(
+        record.getTenantId(),
+        record.getRealm(),
+        record.getTargetId(),
+        value.getTenantId(),
+        value.getRealm(),
+        value.getTargetId());
+    if (!record.equals(value)) throw new IllegalStateException("isolation confirmation mismatch");
+    return value;
+  }
+
+  @Override
+  public Publication publication() {
+    return read("/bootstrap/keys", "Publication", Publication.class, null, false);
+  }
+
+  @Override
+  public byte[] canonicalPublic(Object value) {
+    String name = value.getClass().getSimpleName();
+    if (!Set.of(
+            "Publication",
+            "TransportPredecessor",
+            "TransportTransitionProof",
+            "SignedTransportConfirmation",
+            "IsolationRecord",
+            "SignedTransportTrustBundle")
+        .contains(name)) throw new IllegalArgumentException("nonpublic relay model");
+    schemas.validate(
+        "network/auto-renewal-v2.schema.json#/$defs/" + name, Json.MAPPER.valueToTree(value));
+    return canonical(value);
+  }
+
+  private <T> T request(byte[] raw, String definition, Class<T> type) {
+    var value = InstallationJson.parse(raw);
+    schemas.validate("network/auto-renewal-v2.schema.json#/$defs/" + definition, value);
+    return Json.MAPPER.treeToValue(value, type);
+  }
+
+  @Override
+  public IsolationRecord isolationRequest(byte[] raw) {
+    return request(raw, "IsolationRecord", IsolationRecord.class);
+  }
+
+  @Override
+  public TransportConfirmationQuery confirmationQuery(byte[] raw) {
+    return request(raw, "TransportConfirmationQuery", TransportConfirmationQuery.class);
+  }
+
   private byte[] canonical(Object value) {
     return InstallationJson.canonical(Json.MAPPER.valueToTree(value))
         .getBytes(StandardCharsets.UTF_8);

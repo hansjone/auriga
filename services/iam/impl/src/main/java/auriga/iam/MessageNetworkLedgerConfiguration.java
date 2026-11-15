@@ -20,6 +20,54 @@ public class MessageNetworkLedgerConfiguration {
   @Bean(destroyMethod = "close")
   @ConditionalOnMissingBean(MessageNetworkControlLedger.class)
   RemoteMessageNetworkLedger msgnetRemoteLedger(Environment env) throws Exception {
+    return client(env, env.getRequiredProperty("auriga.iam.msgnet-ledger.origin"));
+  }
+
+  @Bean(destroyMethod = "close")
+  @ConditionalOnProperty(prefix = "auriga.iam.msgnet-ledger", name = "isolation-origin")
+  EdgeDisconnector msgnetDisconnector(Environment env) throws Exception {
+    return new EdgeDisconnector(
+        client(env, env.getRequiredProperty("auriga.iam.msgnet-ledger.isolation-origin")));
+  }
+
+  static final class EdgeDisconnector implements MessageNetworkDisconnector, AutoCloseable {
+    private final RemoteMessageNetworkLedger client;
+
+    EdgeDisconnector(RemoteMessageNetworkLedger client) {
+      this.client = client;
+    }
+
+    @Override
+    public void disconnect(auriga.contracts.msgnet.model.IsolationRecord record) {
+      client.enforceIsolation(record);
+    }
+
+    @Override
+    public void close() {
+      client.close();
+    }
+  }
+
+  @Bean
+  @ConditionalOnProperty(prefix = "auriga.iam.msgnet", name = "targets-file")
+  MessageNetworkIsolationExecution msgnetIsolationExecution(
+      IamStore store,
+      MessageNetworkTargets targets,
+      NodeControlAuthority nodes,
+      MessageNetworkControlLedger ledger,
+      MessageNetworkDisconnector disconnector,
+      java.time.Clock clock) {
+    return new MessageNetworkIsolationExecution(store, targets, nodes, ledger, disconnector, clock);
+  }
+
+  @Bean
+  @ConditionalOnProperty(prefix = "auriga.iam.msgnet", name = "targets-file")
+  MessageNetworkIsolationJob msgnetIsolationJob(
+      MessageNetworkTargets targets, MessageNetworkIsolationExecution execution) {
+    return new MessageNetworkIsolationJob(targets, execution);
+  }
+
+  private RemoteMessageNetworkLedger client(Environment env, String origin) throws Exception {
     String prefix = "auriga.iam.msgnet-ledger.";
     byte[] passwordBytes =
         InstallationPinFile.read(Path.of(env.getRequiredProperty(prefix + "password-file")));
@@ -48,7 +96,7 @@ public class MessageNetworkLedgerConfiguration {
       tls.init(km.getKeyManagers(), tm.getTrustManagers(), new SecureRandom());
       Path token = Path.of(env.getRequiredProperty(prefix + "token-file"));
       return new RemoteMessageNetworkLedger(
-          URI.create(env.getRequiredProperty(prefix + "origin")),
+          URI.create(origin),
           tls,
           () -> {
             try {

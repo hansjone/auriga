@@ -25,6 +25,7 @@ public final class NodeSessions implements AutoCloseable {
   private final NodeEnrollment enrollment;
   private final WorkspaceService workspace;
   private final auriga.workspace.api.MsgnetNodeControl msgnet;
+  private final auriga.iam.api.MessageNetworkIsolation messageIsolation;
   private final MessageControlJobs messageJobs = new MessageControlJobs(16);
   private final Map<UUID, Session> sessions = new ConcurrentHashMap<>();
   private final ExecutorService notifications =
@@ -40,7 +41,16 @@ public final class NodeSessions implements AutoCloseable {
       NodeEnrollment enrollment,
       WorkspaceService workspace,
       auriga.workspace.api.MsgnetNodeControl msgnet) {
+    this(enrollment, workspace, msgnet, null);
+  }
+
+  public NodeSessions(
+      NodeEnrollment enrollment,
+      WorkspaceService workspace,
+      auriga.workspace.api.MsgnetNodeControl msgnet,
+      auriga.iam.api.MessageNetworkIsolation isolation) {
     this.msgnet = msgnet;
+    this.messageIsolation = isolation;
     this.enrollment = enrollment;
     this.workspace = workspace;
     // afterCommit still holds the caller's connection until cleanup. Never wait for another
@@ -407,6 +417,9 @@ public final class NodeSessions implements AutoCloseable {
           () -> {
             try {
               var messages = new ArrayList<SessionResponse>();
+              if (messageIsolation == null)
+                throw new IllegalStateException("message isolation executor unavailable");
+              messageIsolation.beforeControl(tenant, node);
               for (var control : msgnet.controls(tenant, node).stream().limit(32).toList())
                 if (control.getCanonicalJson().size() <= 32 * 1024 * 1024)
                   messages.add(

@@ -13,6 +13,7 @@ import (
 
 // Config drives auriga-agent. Defaults are safe: no public listen.
 type Config struct {
+	MsgnetConfig string `json:"msgnetConfig"`
 	// Server is the platform base URL used by `join` (https://host:port).
 	Server string `json:"server"`
 	// DataRoot is <data>/ in the node-agent layout (agent/, instances/, …).
@@ -89,6 +90,7 @@ func applyEnv(cfg *Config) {
 		}
 	}
 	set("AURIGA_AGENT_SERVER", &cfg.Server)
+	set("AURIGA_AGENT_MSGNET_CONFIG", &cfg.MsgnetConfig)
 	set("AURIGA_AGENT_DATA_ROOT", &cfg.DataRoot)
 	set("AURIGA_AGENT_CONTROL_ENDPOINT", &cfg.ControlEndpoint)
 	set("AURIGA_AGENT_VERSION", &cfg.AgentVersion)

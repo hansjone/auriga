@@ -13,7 +13,46 @@ public interface MessageNetworkControlLedger {
 
   IsolationRecord confirm(InstallationReceipt receipt);
 
+  /** Native nodes require C's node-aware port, not the generic installation receipt endpoint. */
+  default IsolationRecord confirmNode(
+      java.util.UUID tenant, java.util.UUID node, InstallationReceipt receipt) {
+    throw new UnsupportedOperationException("node-aware control ledger required");
+  }
+
   SignedTransportTrustBundle transport();
+
+  default TransportPredecessor history(String digest) {
+    throw new UnsupportedOperationException();
+  }
+
+  default TransportTransitionProof transition(String authorityDigest) {
+    throw new UnsupportedOperationException();
+  }
+
+  default SignedTransportConfirmation confirmation(TransportConfirmationQuery query) {
+    throw new UnsupportedOperationException();
+  }
+
+  /** Caller has committed its deny fence and independently confirmed disconnection. */
+  default IsolationRecord enforceIsolation(IsolationRecord record) {
+    throw new UnsupportedOperationException();
+  }
+
+  default Publication publication() {
+    throw new UnsupportedOperationException();
+  }
+
+  default byte[] canonicalPublic(Object value) {
+    throw new UnsupportedOperationException();
+  }
+
+  default IsolationRecord isolationRequest(byte[] raw) {
+    throw new UnsupportedOperationException();
+  }
+
+  default TransportConfirmationQuery confirmationQuery(byte[] raw) {
+    throw new UnsupportedOperationException();
+  }
 
   byte[] canonicalControl(ControlPackage value);
 

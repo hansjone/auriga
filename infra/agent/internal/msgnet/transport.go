@@ -10,8 +10,9 @@ import (
 	"slices"
 )
 
-// TransportIsolation inspects an actual local message deny/disconnect mechanism;
-// a remotely asserted boolean cannot implement this port.
+// TransportIsolation inspects the message deny/disconnect mechanism, either
+// locally or through the authenticated native execution relay. A proof is bound
+// to the installed package and follows actual IAM fence/broker disconnection.
 type TransportIsolation interface {
 	Isolated(context.Context) (bool, error)
 }

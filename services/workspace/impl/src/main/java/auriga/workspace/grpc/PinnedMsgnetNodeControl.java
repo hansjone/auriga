@@ -68,6 +68,6 @@ public final class PinnedMsgnetNodeControl implements MsgnetNodeControl {
         authority.verify(tenant, node, wire.getCanonicalJson().toByteArray(), pending(binding));
     // No local READY flag. C atomically checks the outstanding challenge, durable
     // isolation/compromise status and new-chain readiness before committing.
-    ledger.confirm(value);
+    ledger.confirmNode(tenant, node, value);
   }
 }
