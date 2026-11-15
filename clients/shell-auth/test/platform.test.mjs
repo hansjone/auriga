@@ -84,6 +84,57 @@ test('OAuth requests never forward browser state; redirect and arbitrary route a
   );
 });
 
+test('HTTP is trusted only for the installer-confirmed private IP binding', () => {
+  const ip = (platformOrigin, extra = {}) =>
+    trustedConfig({
+      platformOrigin,
+      accessMode: 'ip',
+      confirmedOrigin: platformOrigin,
+      ...extra,
+    });
+  for (const origin of [
+    'http://192.168.2.10:8080', // gitleaks:allow
+    'http://10.1.2.3', // gitleaks:allow
+    'http://172.16.0.9:8080', // gitleaks:allow
+    'http://127.0.0.1:9000',
+    'http://[::1]:8080',
+    'http://[fd00::1]:8080',
+  ]) {
+    const config = ip(origin);
+    assert.equal(config.platformOrigin, origin);
+    assert.equal(config.issuer, origin);
+  }
+  for (const origin of [
+    'http://example.com',
+    'http://localhost:8080',
+    'http://203.0.113.10:8080',
+    'http://172.32.0.1:8080', // gitleaks:allow
+    'http://3232236042:8080',
+    'http://0x7f.0.0.1:8080',
+    'http://[::ffff:192.168.2.10]:8080', // gitleaks:allow
+    'http://192.168.2.10:8080/', // gitleaks:allow
+    'http://192.168.2.10:8080/portal', // gitleaks:allow
+    'http://user@192.168.2.10:8080', // gitleaks:allow
+  ])
+    assert.throws(() => ip(origin), /HTTPS/, origin);
+  const lan = 'http://192.168.2.10:8080'; // gitleaks:allow
+  assert.throws(() => trustedConfig({ platformOrigin: lan }), /HTTPS/);
+  assert.throws(
+    () => ip(lan, { accessMode: undefined }),
+    /HTTPS/,
+    'IP mode is required',
+  );
+  assert.throws(
+    () => ip(lan, { confirmedOrigin: 'http://192.168.2.11:8080' }), // gitleaks:allow
+    /HTTPS/,
+    'confirmation must match exactly',
+  );
+  assert.throws(
+    () => ip(lan, { issuer: 'http://192.168.2.11:8080' }), // gitleaks:allow
+    /issuer/,
+  );
+});
+
 test('K2 device projection uses authoritative member and source; AI claims keep the same source and restricted permissions', async () => {
   const config = trustedConfig({ platformOrigin: 'https://example.com' });
   const keys = generateKeyPairSync('ec', { namedCurve: 'prime256v1' });

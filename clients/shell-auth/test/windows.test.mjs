@@ -1,6 +1,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, readFileSync, writeFileSync } from 'node:fs';
+import {
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+  readFileSync,
+  writeFileSync,
+} from 'node:fs';
 import { randomUUID, randomBytes } from 'node:crypto';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -68,6 +74,45 @@ test(
   },
 );
 test(
+  'secure succeeds under a Modify-only parent grant without widening the private ACL',
+  { skip: process.platform !== 'win32', timeout: 15000 },
+  async (t) => {
+    const directory = mkdtempSync(join(tmpdir(), 'auriga-shell-acl-'));
+    t.after(() => rmSync(directory, { recursive: true, force: true }));
+    const helper = buildHelper(join(directory, 'helper.exe'));
+    const system = (name) =>
+      join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', name);
+    const sid = execFileSync(system('whoami.exe'), ['/user', '/fo', 'csv'], {
+      encoding: 'utf8',
+    }).match(/S-1-5-[0-9-]+/)[0];
+    // Typical non-profile drive: the user may create and modify, but holds no WRITE_OWNER.
+    const parent = join(directory, 'modify-only');
+    mkdirSync(parent);
+    execFileSync(system('icacls.exe'), [
+      parent,
+      '/inheritance:r',
+      '/grant:r',
+      `*${sid}:(OI)(CI)M`,
+    ]);
+    const data = join(parent, 'private');
+    mkdirSync(data);
+    const acl = JSON.parse(
+      execFileSync(helper, ['secure', data], { encoding: 'utf8' }),
+    );
+    assert.equal(acl.protectedAcl, true);
+    const aces = execFileSync(system('icacls.exe'), [data], {
+      encoding: 'utf8',
+    })
+      .slice(data.length)
+      .split('\n')
+      .filter((line) => line.includes('('));
+    // Exactly one explicit full-control ACE for the user, nothing inherited.
+    assert.equal(aces.length, 1);
+    assert.match(aces[0], /:\(OI\)\(CI\)\(F\)/);
+    assert.doesNotMatch(aces[0], /\(I\)/);
+  },
+);
+test(
   'real named-pipe helper accepts registered child through inherited capability',
   { skip: process.platform !== 'win32', timeout: 15000 },
   async (t) => {
@@ -126,12 +171,12 @@ test(
       windowsHide: true,
       stdio: ['pipe', 'pipe', 'pipe'],
     });
+    const serverExited = once(server, 'exit');
     server.stderr.resume();
     const lines = createInterface({ input: server.stdout });
     t.after(async () => {
-      const ended = once(server, 'exit');
-      server.kill();
-      await ended;
+      if (server.exitCode === null && server.signalCode === null) server.kill();
+      await serverExited;
       lines.close();
       rmSync(directory, {
         recursive: true,
@@ -140,9 +185,18 @@ test(
         retryDelay: 100,
       });
     });
-    const listening = once(lines, 'line');
+    const listening = Promise.race([
+      once(lines, 'line'),
+      serverExited.then(([code, signal]) => {
+        throw new Error(
+          `owning server exited before listening: ${code ?? signal}`,
+        );
+      }),
+    ]);
     server.stdin.write(JSON.stringify({ capability }) + '\n');
-    await listening;
+    const [ready] = await listening;
+    assert.equal(JSON.parse(ready).listening, pipe);
+    // stdin reaches EOF immediately after spawnSync sends the setup line.
     const duplicate = spawnSync(helper, ['server', pipe], {
       input: JSON.stringify({ capability }) + '\n',
       encoding: 'utf8',
@@ -154,6 +208,7 @@ test(
       1,
       'first pipe instance must reject a second server',
     );
+    assert.equal(duplicate.stdout.trim(), '');
     assert.equal(duplicate.stderr.trim(), 'shell helper unavailable');
     let client = connectIpc({ helperPath: helper, pipe, capability });
     await assert.rejects(
@@ -174,6 +229,8 @@ test(
       /disconnected/,
     );
     client.close();
+    server.stdin.end();
+    assert.deepEqual(await serverExited, [0, null]);
   },
 );
 

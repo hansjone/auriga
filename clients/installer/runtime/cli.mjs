@@ -1,8 +1,16 @@
 /** Command line entry of the installer core, run with the bundled Node. */
-import { existsSync, readFileSync } from 'node:fs';
+import { closeSync, existsSync, openSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { install, launch, rollback, uninstall } from './core.mjs';
+import {
+  CancelledError,
+  install,
+  launch,
+  rollback,
+  uninstall,
+} from './core.mjs';
+import { desktopInfo, updateCommand } from './desktop-control.mjs';
+import { createControl } from './tray-control.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const [command, ...rest] = process.argv.slice(2);
@@ -36,7 +44,30 @@ try {
     const defaults = existsSync(defaultsFile)
       ? JSON.parse(readFileSync(defaultsFile, 'utf8'))
       : {};
+    const cancelFile =
+      typeof values['cancel-file'] === 'string' ? values['cancel-file'] : null;
     const result = install({
+      ...(values.progress === true
+        ? {
+            // Machine-readable steps for the setup wizard (no paths or secrets).
+            progress: (stage, fraction) =>
+              console.log(`@@progress ${JSON.stringify({ stage, fraction })}`),
+          }
+        : {}),
+      ...(cancelFile
+        ? {
+            cancelled: () => existsSync(cancelFile),
+            beginCommit() {
+              // Cancel and commit compete for the same exclusive decision file.
+              try {
+                closeSync(openSync(cancelFile, 'wx', 0o600));
+              } catch (error) {
+                if (error.code === 'EEXIST') throw new CancelledError();
+                throw error;
+              }
+            },
+          }
+        : {}),
       payload,
       root: values.root,
       dataHome: values['data-home'],
@@ -82,14 +113,35 @@ try {
     console.log(JSON.stringify(result));
     if (result.partial) process.exitCode = 3;
   } else if (command === 'launch') {
-    process.exitCode = await launch({ root: values.root, args: positional });
+    const tray = values['stdin-control'] === true;
+    try {
+      process.exitCode = await launch({
+        root: values.root,
+        args: positional,
+        ...(tray ? { control: createControl() } : {}),
+      });
+    } finally {
+      // DSH may also end on its own; an open control pipe must not keep us alive.
+      if (tray) process.stdin.destroy();
+    }
+  } else if (command === 'status') {
+    console.log(JSON.stringify(desktopInfo(values.root)));
+  } else if (command === 'update') {
+    await updateCommand(values.root, positional[0], {
+      enabled:
+        values.enabled === 'true'
+          ? true
+          : values.enabled === 'false'
+            ? false
+            : undefined,
+    });
   } else {
     console.error(
-      'usage: cli.mjs install|rollback|uninstall|launch|diagnostics export --root <dir> --output <dir> ...',
+      'usage: cli.mjs install|rollback|uninstall|launch|status|update check|download|approve|configure|diagnostics export --root <dir> ...',
     );
     process.exitCode = 2;
   }
 } catch (error) {
   console.error(error instanceof Error ? error.message : String(error));
-  process.exitCode = 1;
+  process.exitCode = error instanceof CancelledError ? 2 : 1;
 }

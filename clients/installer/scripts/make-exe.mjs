@@ -39,10 +39,14 @@ export function compileStub(output, icon) {
     CSC,
     [
       '/nologo',
+      '/codepage:65001',
       '/target:exe',
       '/optimize+',
       '/r:System.Windows.Forms.dll',
       '/r:System.Drawing.dll',
+      '/r:System.IO.Compression.dll',
+      '/r:System.IO.Compression.FileSystem.dll',
+      '/r:System.Web.Extensions.dll',
       `/win32manifest:${join(here, '../windows/sfx/app.manifest')}`,
       ...(icon ? [`/win32icon:${icon}`] : []),
       `/out:${output}`,
@@ -52,6 +56,33 @@ export function compileStub(output, icon) {
   );
   if (result.status !== 0)
     throw new Error(`csc failed: ${result.stdout}${result.stderr}`);
+}
+
+/** The tray app (windows/tray/Tray.cs): Start menu target, DSH owner, updates, uninstall UI. */
+export function compileTray(output, icon) {
+  if (!existsSync(CSC)) throw new Error(`C# compiler not found: ${CSC}`);
+  mkdirSync(dirname(output), { recursive: true });
+  const result = spawnSync(
+    CSC,
+    [
+      '/nologo',
+      '/codepage:65001',
+      '/target:winexe',
+      '/optimize+',
+      '/r:System.Windows.Forms.dll',
+      '/r:System.Drawing.dll',
+      '/r:System.Web.Extensions.dll',
+      `/win32manifest:${join(here, '../windows/sfx/app.manifest')}`,
+      ...(icon ? [`/win32icon:${icon}`] : []),
+      `/out:${output}`,
+      join(here, '..', 'windows', 'tray', 'Tray.cs'),
+      join(here, '..', 'windows', 'launcher', 'DesktopShortcut.cs'),
+    ],
+    { encoding: 'utf8' },
+  );
+  if (result.status !== 0)
+    throw new Error(`csc failed: ${result.stdout}${result.stderr}`);
+  return output;
 }
 
 export function makeExe({ stage, out, icon, archive }) {

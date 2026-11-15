@@ -13,7 +13,12 @@ import {
 } from 'node:fs';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
-import { cleanupDownloads, downloadLock } from '../runtime/update-state.mjs';
+import {
+  changeUpdateState,
+  cleanupDownloads,
+  downloadLock,
+  readUpdateState,
+} from '../runtime/update-state.mjs';
 import { downloadPackage } from '../runtime/update.mjs';
 import {
   canonical,
@@ -134,6 +139,99 @@ test('同一安装目录拒绝同时启动第二个 DSH，退出后可重开', (
   session.close();
   const reopened = desktopSession(base);
   reopened.close();
+});
+
+test('另一个进程延迟返回的已签名旧发行不能回退水位或覆盖设置', async (t) => {
+  const f = fixture(t);
+  const origin = 'https://example.com';
+  const runtime = new URL('../runtime/update.mjs', import.meta.url).href;
+  const publicKey = keys.publicKey.export({ type: 'spki', format: 'pem' });
+  const args = { root: f.root, origin, publicKey };
+  const worker = spawn(
+    process.execPath,
+    [
+      '--input-type=module',
+      '-e',
+      `import { once } from 'node:events';import { createUpdater } from ${JSON.stringify(runtime)};
+    const updater=createUpdater({...(${JSON.stringify(args)}),now:()=>${now},request: async()=>{const response=once(process,'message');process.send('requested');return Response.json((await response)[0]);}});
+    try {await updater.check();process.send('accepted');} catch(error) {process.send(error.message);} finally {process.disconnect();}`,
+    ],
+    { stdio: ['ignore', 'ignore', 'inherit', 'ipc'] },
+  );
+  t.after(() => worker.kill());
+  assert.equal((await once(worker, 'message'))[0], 'requested');
+  const newer = signed({
+    sequence: 3,
+    publishedAt: '2026-11-11T12:00:00Z',
+  });
+  const tray = createUpdater({
+    ...args,
+    now: () => now,
+    request: async () => Response.json(newer),
+  });
+  await tray.check();
+  tray.configure(false);
+  const result = once(worker, 'message');
+  worker.send(signed());
+  assert.match((await result)[0], /replay/);
+  const state = readUpdateState(f.root);
+  assert.equal(state.channelWatermarks.stable.highestSequence, 3);
+  assert.equal(state.available.sequence, 3);
+  assert.equal(state.enabled, false);
+});
+
+test('启动第二个更新器不会把仍在下载的进度覆盖为取消', (t) => {
+  const f = fixture(t);
+  const release = downloadLock(f.root);
+  try {
+    changeUpdateState(f.root, (state) => ({
+      ...state,
+      phase: 'downloading',
+      downloadedBytes: 2,
+    }));
+    const second = createUpdater({
+      root: f.root,
+      origin: 'https://example.com',
+      publicKey: keys.publicKey,
+    });
+    assert.equal(second.status().phase, 'downloading');
+    assert.equal(second.status().downloadedBytes, 2);
+  } finally {
+    release();
+  }
+  createUpdater({
+    root: f.root,
+    origin: 'https://example.com',
+    publicKey: keys.publicKey,
+  });
+  assert.equal(readUpdateState(f.root).phase, 'cancelled');
+});
+
+test('旧版全局水位迁入 stable，继续拒绝重放', async (t) => {
+  const f = fixture(t);
+  const file = join(f.root, 'desktop-update.json');
+  writeFileSync(
+    file,
+    JSON.stringify({
+      enabled: true,
+      highestSequence: 7,
+      highestPublishedAt: '2026-11-11T00:00:00Z',
+      highestVersion: '2.0.0',
+      acceptedDigest: signed().sha256,
+    }),
+  );
+  const updater = createUpdater({
+    root: f.root,
+    origin: 'https://example.com',
+    publicKey: keys.publicKey,
+    now: () => now,
+    request: async () => Response.json(signed()),
+  });
+  await assert.rejects(updater.check(), /replay/);
+  assert.equal(
+    readUpdateState(f.root).channelWatermarks.stable.highestSequence,
+    7,
+  );
 });
 
 function fixture(

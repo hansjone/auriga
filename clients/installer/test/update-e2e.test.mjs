@@ -17,7 +17,11 @@ import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { signRelease, reviewRelease } from '../scripts/sign-release.mjs';
 import { systemTool } from '../runtime/system-tools.mjs';
-import { createUpdater, applyPending } from '../runtime/update.mjs';
+import {
+  approvePending,
+  createUpdater,
+  applyPending,
+} from '../runtime/update.mjs';
 import { install, readState, profileDir } from '../runtime/core.mjs';
 import { buildPayload, tempBase } from './helpers.mjs';
 
@@ -106,6 +110,7 @@ test('沙箱：发布、检测、点击、退出安装；坏包拒绝，旧数�
     origin: 'https://example.com',
     request,
     publicKey: keys.publicKey,
+    requireApproval: true,
   });
   await updater.check();
   assert.equal(updater.status().available.version, '2.0.0');
@@ -119,6 +124,14 @@ test('沙箱：发布、检测、点击、退出安装；坏包拒绝，旧数�
   assert.equal(resumed, true);
   assert.equal(queued.queued, true);
   assert.equal(readState(root).current, old.id); // no live-session mutation
+  const approval = join(root, 'desktop-pending', 'approval-required');
+  assert.equal(
+    await applyPending(root, { publicKey: keys.publicKey, request }),
+    false,
+  );
+  assert.equal(existsSync(approval), true);
+  approvePending(root);
+  assert.equal(existsSync(approval), false);
   withdrawn = true;
   await assert.rejects(
     applyPending(root, { publicKey: keys.publicKey, request, smoke: () => {} }),
@@ -128,6 +141,7 @@ test('沙箱：发布、检测、点击、退出安装；坏包拒绝，旧数�
   withdrawn = false;
   await updater.check();
   await updater.update();
+  approvePending(root);
   await assert.rejects(
     applyPending(root, {
       publicKey: keys.publicKey,
@@ -145,6 +159,7 @@ test('沙箱：发布、检测、点击、退出安装；坏包拒绝，旧数�
   );
   await updater.check();
   await updater.update();
+  approvePending(root);
   await applyPending(root, {
     publicKey: keys.publicKey,
     smoke: () => {},

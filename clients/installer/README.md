@@ -8,10 +8,10 @@ node scripts/build.mjs --exe                 # 默认上游版本见 upstream.js
 node scripts/build.mjs --upstream 0.2.1-rc.4 # 换上游版本重新出开发包
 node scripts/build.mjs --platform-origin <https地址> --without-libreoffice
 pnpm test                                    # INSTALLER_STAGE=<包目录> 可额外校验成品
-node scripts/e2e.mjs --old <包目录或setup.exe> --sandbox <目录>
+node scripts/e2e.mjs --old <包目录或setup.exe> --sandbox <目录> --disposable-windows-user true
 ```
 
-本包是 pnpm 工作区成员 `@auriga/installer`，脚本只用 Node 内置模块。输出默认在已忽略的 `target/`。
+本包是 pnpm 工作区成员 `@auriga/installer`，脚本只用 Node 内置模块。输出默认在已忽略的 `target/`。原生 E2E 会写入当前 Windows 用户的测试登记和快捷方式，请在一次性 Windows 测试用户或临时虚拟机中运行。
 
 ## 发布新版本
 
@@ -91,7 +91,7 @@ edge 精确放行这两种路径的 GET。客户端也使用相同匿名接口�
 
 设置页的更新操作等待后台完成下载、校验和排队，不套用普通状态读取的 15 秒超时；下载的空闲超时和校验规则仍由后台执行。默认冒烟失败时，启动器仅输出固定原因码 `desktop.smoke_failed`，不输出上游配置或错误详情。
 
-下架当前记录后，登录首页和更新检查返回上一个仍上架的记录。续期会创建新记录，若要撤回某个坏包，应将该包的全部续期记录一并下架。已安装更高版本的客户端会拒绝未授权降级，管理台须以更高序号发布含精确 `rollbackFrom` 的签名回滚清单，或发布更高版本修复包。下架保留最高序号。同包重签使用新序号，调整策略可沿用仍有效的 `notAfter`，延长有效期时再更新该字段。第一代安装器需先人工安装一次带更新能力的包。
+下架当前记录后，登录首页和更新检查返回上一个仍上架的记录。续期会创建新记录，若要撤回某个坏包，应将该包的全部续期记录一并下架。已安装更高版本的客户端会拒绝未授权降级，管理台须以更高序号发布含精确 `rollbackFrom` 的签名回滚清单，或发布更高版本修复包。下架保留最高序号。同包重签使用新序号，调整策略可沿用仍有效的 `notAfter`，延长有效期时再更新该字段。第一代安装器需先人工安装一次带更新能力的包；0.1.3 起的包（含门户序号 106 的 0.1.3-e2e.2）已带更新器与发行公钥，可经应用内更新升级到带托盘的版本，无需重装。
 
 隔离验证运行 `node --test test/update-e2e.test.mjs`，使用随机端口发布替身、真实 EXE、临时测试钥和安装事务，验证坏包拒绝、退出安装和数据保留。真实 DSH 宿主另按 `scripts/e2e.mjs` 验证。
 
@@ -131,12 +131,45 @@ node payload/auriga/runtime/cli.mjs install --payload payload --root <独立安�
 
 ## Windows exe 安装向导
 
-用户下载件：`AurigaDSH-Setup-<Desktop版本>.exe`。双击显示中文向导，仅为当前用户安装，
-默认 `%LOCALAPPDATA%\Programs\AurigaDesktop`，无需管理员权限，可改路径。
-自动创建开始菜单快捷方式，桌面快捷方式可选，完成后默认启动。
-从 Windows“应用”卸载会询问是否保留数据，默认“是”，取消则终止。
-自动化安装用 `/VERYSILENT`，路径沿用 `AURIGA_INSTALL_DIR` 等环境变量或 `-InstallDir` 参数；
-自动化卸载用 `bin/uninstall.ps1 -Quiet`，默认保留数据。
+用户下载件：`AurigaDSH-Setup-<Desktop版本>.exe`。双击显示中文向导，仅为当前用户安装（`asInvoker`，不提权）：
+
+1. 欢迎页：显示包内版本；检测到已安装（HKCU 卸载登记的安装位置带 `.auriga-desktop-install` 标记）时说明“升级并保留配置、会话和登录信息”。
+2. 安装位置：默认 `%LOCALAPPDATA%\Programs\AurigaDesktop`，可改；升级固定为原位置。下一步前校验：完整本机路径、非盘根、非网络路径、空目录或我方安装、磁盘空间、写权限。需要管理员权限的目录（如 `C:\Program Files`）在写入前拒绝并提示改选可写位置；不支持全机安装。桌面快捷方式可选。
+3. 进度：分阶段显示步骤与百分比——解包（按条目）、校验安装包、复制程序文件（按单元）、校验已复制文件、配置用户环境、启动自检、完成安装、快捷方式与登记。提交前任何阶段可取消：首次安装取消或失败后不留安装目录、数据目录、登记和快捷方式；升级取消或失败回到原版本。日志写 `%TEMP%\AurigaDSH-Setup-<时间>.log`（令牌已遮蔽）。
+4. 完成：勾选“立即启动”（默认勾选）启动托盘程序。
+
+升级时向导先通过命名事件请求运行中的托盘退出（托盘停止 DSH 后释放单实例锁）；旧版无托盘的命令行窗口仍在运行时提示用户先关闭。
+自动化安装用 `/VERYSILENT`，路径沿用 `AURIGA_INSTALL_DIR` 等环境变量或 `-InstallDir` 参数；升级沿用原安装的数据目录。
+
+“应用和功能”登记：显示名、版本、发布者、图标（`bin\auriga.ico`）、大小（KiB）、安装日期、卸载命令。
+开始菜单建 `Auriga DSH` 与 `卸载 Auriga DSH` 两个快捷方式。
+
+### 卸载
+
+三个入口打开同一图形卸载程序：“应用和功能”（`bin\uninstall.ps1`）、开始菜单“卸载 Auriga DSH”、安装目录 `bin\uninstall.cmd`。
+程序先复制到临时目录运行，确认框可勾选“同时删除用户数据”（默认保留）。随后请求托盘退出并等待 DSH、守护和子进程停止，显示进度，
+删除所有版本、`bin`、快捷方式（`shell.json` 记录，含经自动更新后托盘补建的卸载快捷方式）、开机自启项和卸载登记，完成后提示。
+选择删除数据只会同步清理该安装创建且仍有独占归属凭据的专用目录。预先存在、旧版缺少凭据、被其他安装复用、含外来内容或无法同步删除的数据会保留。
+卸载先把已知程序文件移入本次独立的隔离目录。无法移入时卸载失败（`desktop.in_use`），可关闭占用程序再试。只有已移入的程序文件可通过本用户 RunOnce 在下次登录清理。
+自动化卸载用 `bin\uninstall.ps1 -Quiet [-PurgeData]`。没有计划任务需要清理。
+
+### 托盘程序
+
+开始菜单入口仍是 `bin\auriga-desktop.cmd`；无参数时启动当前版本的 `auriga\tray\AurigaDesktop.exe`（带参数时保持原前台启动，供自动化与诊断）。
+托盘按安装目录单实例（`Local\AurigaDesktop-<摘要>` 互斥体）；重复启动把“打开”请求交给已运行实例。托盘以 `cli.mjs launch --stdin-control -- --no-open` 托管启动器：
+stdin 一行 `stop` 或 stdin 关闭会通知 DSH 执行正常停止和持久化。超出宽限时间才强制清理进程树，该次停止不会应用排队更新。启动器在 stdout 输出不含令牌、身份和路径的 `@@auriga` 状态事件。
+
+菜单：打开 Auriga、运行状态与版本、平台状态（已登录/未登录/不可达/未接入的具体原因码）、检查更新、立即更新（下载进度、可取消续传）、重启以完成更新、
+设置（开机自启、自动检查更新、有更新时自动下载但安装前询问、平台地址）、打开日志目录（`<数据目录>\auriga\logs`，托盘日志 `desktop-tray.log`）、关于（Desktop 与 DSH/Node/插件/pnpm 版本）、退出。
+发现新版本或下载完成时以气泡提示。默认由用户点“立即更新”，在批准重启安装前，托盘下载的更新保持待确认。
+
+从开始菜单启动或在托盘选择“打开 Auriga”时，未登录会先打开壳认证的本机登录页。完成平台登录或选择跳过后打开 DSH 首页。选“本机登录”同样使用本地 DSH，由插件导航到 Auriga 面板。已登录或平台未接入时直接打开 DSH。开机自启只启动托盘与 DSH。
+开机自启经 `bin/auriga-autostart.ps1` 按当时的版本指针分派。回退到无托盘的早期版本时暂停自启，仍可从开始菜单打开可见的控制台启动器。切回托盘版时恢复已保存的自启偏好。回退后仍使用支持归属校验的卸载入口。
+
+### 旧启动器的就地更新
+
+`cmd.exe` 在批处理命令返回后按原字节偏移重读已被替换的批处理文件。已发布 0.1.x 的 `auriga-desktop.cmd` 在偏移 244、`rollback.cmd` 在偏移 195 处续读，
+因此新启动器在这两个偏移固定放置 `exit /b %ERRORLEVEL%`，前面用 `goto main` 跳过；新启动器的长命令都在同一行以 `& call exit /b %%ERRORLEVEL%%` 结束，以后不再重读文件。构建时把 `.cmd` 统一为 CRLF。
 
 工具沿用 Windows 自带 .NET Framework C# 编译器与本仓库开源 WinForms 向导，
 无需付费工具或额外下载。`app.manifest` 明确 `asInvoker`。

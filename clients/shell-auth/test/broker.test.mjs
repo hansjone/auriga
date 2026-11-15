@@ -21,6 +21,37 @@ test('device login opens only base HTTPS verification page, stores secrets priva
   await f.broker.close();
 });
 
+test('confirmed IP binding opens only its own HTTP device page; HTTPS platforms never accept HTTP', async () => {
+  const lan = 'http://192.168.2.10:8080'; // gitleaks:allow
+  const ipLogin = fixture();
+  ipLogin.platform.config = { platformOrigin: lan };
+  const begin = ipLogin.platform.begin;
+  ipLogin.platform.begin = async () => ({
+    ...(await begin()),
+    verification_uri: `${lan}/device`,
+  });
+  await login(ipLogin);
+  assert.deepEqual(ipLogin.opened, [`${lan}/device`]);
+  await ipLogin.broker.close();
+  for (const [platformOrigin, verification_uri] of [
+    ['https://example.com', 'http://example.com/device'],
+    [lan, 'https://192.168.2.10:8080/device'], // gitleaks:allow
+    [lan, 'http://192.168.2.11:8080/device'], // gitleaks:allow
+  ]) {
+    const f = fixture();
+    f.platform.config = { platformOrigin };
+    const original = f.platform.begin;
+    f.platform.begin = async () => ({
+      ...(await original()),
+      verification_uri,
+    });
+    await login(f);
+    assert.equal(f.broker.state, 'unreachable');
+    assert.deepEqual(f.opened, []);
+    await f.broker.close();
+  }
+});
+
 test('device authorization rejects absent or untrusted verification URI and never falls back to the complete URI', async () => {
   for (const verification_uri of [
     undefined,

@@ -4,8 +4,11 @@
   history.replaceState(null, '', '/');
   let session, snapshot;
   const status = document.getElementById('status');
-  async function command(action) {
-    const response = await fetch('/loopback/messages', {
+  async function command(action, localLogin = false) {
+    const endpoint = localLogin
+      ? '/loopback/messages?auriga=login'
+      : '/loopback/messages';
+    const response = await fetch(endpoint, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -59,16 +62,17 @@
     if (!response.ok) throw new Error();
     session = await response.json();
     await command('snapshot');
-    for (const [id, action] of [
+    for (const [id, action, localLogin] of [
       ['login', 'open_login'],
       ['cancel', 'cancel_login'],
       ['skip', 'skip_login'],
+      ['local-login', 'skip_login', true],
     ]) {
       const button = document.getElementById(id);
       if (!(button instanceof HTMLButtonElement)) throw new Error();
       button.disabled = false;
       button.onclick = () =>
-        command(action).catch((e) => {
+        command(action, localLogin).catch((e) => {
           status.textContent = e.message;
         });
     }

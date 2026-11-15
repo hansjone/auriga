@@ -31,6 +31,8 @@ for (const code of ['desktop.smoke_failed', 'unexpected_failure'])
         async stopTree() {}
       }
       export function assertNTFS() {}
+      export function processIdentity() { return null; }
+      export function sameProcess() { return false; }
       export function notifyPrivateOnly() {}
       export function notifySharedRestart() {}`,
     );

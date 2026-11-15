@@ -1,10 +1,18 @@
+/* global setInterval, clearInterval */
 import { BRAND_NAME } from './brand.mjs';
 import { updateOrigin, normalizePlatformBinding } from './platform-origin.mjs';
-import { cleanupDownloads } from './update-state.mjs';
+import {
+  cleanupDownloads,
+  holdsTransfer,
+  transferLock,
+  withUpdateStateLock,
+} from './update-state.mjs';
 import { createRequire } from 'node:module';
 import { upgradeSkillPatch, yamlParser } from './skill-config.mjs';
 import {
   ProcessTree,
+  processIdentity,
+  sameProcess,
   assertNTFS,
   notifyPrivateOnly,
   notifySharedRestart,
@@ -12,6 +20,8 @@ import {
 import { Supervisor, packagedTrust } from './supervisor.mjs';
 import { superviseDsh } from './desktop-supervision.mjs';
 import { startShellAuth } from './shell-auth.mjs';
+import { assertLocalPath } from './host-lock.mjs';
+import { pathOperationLock, processAlive } from './operation-lock.mjs';
 /**
  * Installer core: pure Node (no dependencies) so it runs under the bundled
  * Node runtime on any platform and under plain `node --test`.
@@ -37,9 +47,11 @@ import {
   closeSync,
   readdirSync,
   readFileSync,
+  realpathSync,
   renameSync,
   rmSync,
   rmdirSync,
+  statSync,
   writeFileSync,
 } from 'node:fs';
 import {
@@ -50,6 +62,7 @@ import {
   parse as parsePath,
   relative,
   resolve,
+  sep,
 } from 'node:path';
 import { spawnSync, spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
@@ -64,7 +77,9 @@ const PROVIDER_ID = 'discover';
 const PLUGIN_SPEC = 'file:./.auriga/auriga-dsh.tgz';
 const BUNDLES = ['@deepseek-ai/dsh-base', '@deepseek-ai/dsh-web-app', PLUGIN];
 const INSTALL_MARKER = '.auriga-desktop-install';
+const UNINSTALL_MARKER = '.auriga-desktop-uninstall-pending';
 const DATA_MARKER = '.auriga-desktop';
+const DATA_OWNER = '.auriga-desktop-data-owner';
 /** Everything uninstall may remove from the install directory. */
 const OWNED_ENTRIES = [
   'versions',
@@ -79,8 +94,11 @@ const OWNED_ENTRIES = [
   'desktop-update.json.tmp',
   'desktop-pending',
   '.desktop-resume',
+  '.desktop-update-lock',
   'desktop-origin.json',
-  'desktop-session.json',
+  'desktop-tray.json',
+  'desktop-tray.json.tmp',
+  'shell.json.tmp',
 ];
 
 export class CrashError extends Error {}
@@ -153,7 +171,10 @@ const norm = (p) =>
 
 function isInside(parent, child) {
   const rel = relative(norm(parent), norm(child));
-  return rel === '' || (!rel.startsWith('..') && !isAbsolute(rel));
+  return (
+    rel === '' ||
+    (rel !== '..' && !rel.startsWith('..' + sep) && !isAbsolute(rel))
+  );
 }
 
 /**
@@ -161,14 +182,32 @@ function isInside(parent, child) {
  * existing install directory must be empty or already ours.
  */
 export function assertLayout(root, dataHome) {
+  assertLocalPath(root);
+  assertLocalPath(dataHome);
   if (parsePath(root).root === resolve(root))
     throw new Error('install directory must not be a drive or filesystem root');
   if (isInside(root, dataHome))
     throw new Error('data directory must not be inside the install directory');
   if (isInside(dataHome, root))
     throw new Error('install directory must not be inside the data directory');
+  if (
+    dataHome
+      .split(/[\\/]/)
+      .some((part) =>
+        /^\.(?:uninstall|auriga-data-purge)-[0-9a-f-]{36}$/i.test(part),
+      )
+  )
+    throw new Error('data directory may not be an uninstall quarantine');
+  for (let path = dataHome; path !== dirname(path); path = dirname(path))
+    if (
+      existsSync(join(path, INSTALL_MARKER)) ||
+      existsSync(join(path, UNINSTALL_MARKER))
+    )
+      throw new Error('data directory may not be an installation directory');
   if (existsSync(root)) {
     const entries = readdirSync(root);
+    if (entries.includes(UNINSTALL_MARKER))
+      throw new Error('卸载清理尚未完成，请重新登录 Windows 后再安装。');
     if (entries.length > 0 && !entries.includes(INSTALL_MARKER))
       throw new Error(
         `install directory is not empty and is not an ${BRAND_NAME} installation`,
@@ -392,7 +431,22 @@ function writeLaunchers(root, dir, fault) {
   for (const name of readdirSync(bin))
     cpSync(join(bin, name), join(`${prev}.partial`, name));
   renameSync(`${prev}.partial`, prev);
+  const keepMaintenance =
+    existsSync(join(bin, 'maintenance.ps1')) &&
+    !existsSync(join(source, 'maintenance.ps1'));
+  const maintenance = [
+    'uninstall.cmd',
+    'uninstall.ps1',
+    'rollback.cmd',
+    'rollback.ps1',
+    'maintenance.ps1',
+    'shell-integration.ps1',
+    'DesktopShortcut.cs',
+    'uninstall-cleanup.ps1',
+    'auriga-autostart.ps1',
+  ];
   for (const name of readdirSync(source)) {
+    if (keepMaintenance && maintenance.includes(name)) continue;
     writeAtomic(join(bin, name), readFileSync(join(source, name)));
     fault('launcher-file');
   }
@@ -480,6 +534,7 @@ function transition({
   target,
   apply,
   fault,
+  dataOwner = from?.dataOwner,
 }) {
   const profile = profileDir(dataHome);
   const profileExisted = existsSync(profile);
@@ -489,7 +544,11 @@ function transition({
     phase: 'prepare',
     dataHome,
     from: from
-      ? { current: from.current, previous: from.previous ?? null }
+      ? {
+          current: from.current,
+          previous: from.previous ?? null,
+          ...(from.dataOwner && { dataOwner: from.dataOwner }),
+        }
       : null,
     to: toId,
     label,
@@ -510,6 +569,7 @@ function transition({
       dataHome,
       current: toId,
       previous,
+      ...(dataOwner && { dataOwner }),
     });
     fault('after-install-json');
     writeAtomic(join(root, 'current.txt'), toId + '\n');
@@ -523,11 +583,275 @@ function transition({
 
 const noFault = () => {};
 
+/** Thrown at a cancellation checkpoint; the normal failure path then rolls back. */
+export class CancelledError extends Error {
+  constructor() {
+    super('installation cancelled');
+    this.code = 'desktop.install_cancelled';
+  }
+}
+
+/**
+ * Copy a payload in many small units so a long copy can report progress and
+ * stop at a checkpoint. Directories are expanded down to package contents.
+ */
+function copyTreeSteps(from, to, step) {
+  const units = [];
+  const walk = (rel, depth) => {
+    mkdirSync(join(to, rel), { recursive: true });
+    for (const entry of readdirSync(join(from, rel), { withFileTypes: true })) {
+      const path = rel ? join(rel, entry.name) : entry.name;
+      if (entry.isDirectory() && !entry.isSymbolicLink() && depth < 4)
+        walk(path, depth + 1);
+      else units.push(path);
+    }
+  };
+  walk('', 0);
+  let reported = -1;
+  units.forEach((path, index) => {
+    copyTree(join(from, path), join(to, path));
+    const fraction = Math.floor(((index + 1) / units.length) * 100);
+    if (fraction !== reported) {
+      reported = fraction;
+      step(fraction / 100);
+    }
+  });
+}
+
+/** Remove only the empty directories and marker a failed first install created. */
+function cleanupFreshInstall(root, dataHome, created) {
+  const removeEmpty = (dir) => {
+    try {
+      rmdirSync(dir);
+    } catch {
+      // Not empty (user files) or absent: keep it.
+    }
+  };
+  for (const entry of OWNED_ENTRIES)
+    rmSync(join(root, entry), { recursive: true, force: true });
+  rmSync(join(root, INSTALL_MARKER), { force: true });
+  if (created.root) removeEmpty(root);
+  if (created.profile) {
+    rmSync(join(backupsDir(dataHome), DATA_MARKER), { force: true });
+    removeEmpty(backupsDir(dataHome));
+    removeEmpty(dirname(backupsDir(dataHome)));
+    removeEmpty(dirname(profileDir(dataHome)));
+  }
+  if (created.dataHome) {
+    rmSync(join(dataHome, DATA_OWNER), { force: true });
+    removeEmpty(dataHome);
+  }
+}
+
+function dataIdentity(path) {
+  const info = statSync(path, { bigint: true });
+  return `${info.dev}:${info.ino}:${info.birthtimeNs}`;
+}
+
+function claimDataHome(root, dataHome, existing, created) {
+  const marker = join(dataHome, DATA_OWNER);
+  if (!existsSync(dataHome)) {
+    mkdirSync(dirname(dataHome), { recursive: true });
+    mkdirSync(dataHome);
+    created.dataHome = true;
+    const owner = {
+      root: norm(root),
+      token: randomUUID(),
+      identity: dataIdentity(dataHome),
+    };
+    writeFileSync(marker, JSON.stringify(owner), { flag: 'wx', mode: 0o600 });
+    return owner.token;
+  }
+  if (ownsDataHome(root, dataHome, existing?.dataOwner))
+    return existing.dataOwner;
+  // Reuse by another installation revokes the original installation's claim.
+  revokeForeignDataClaim(root, dataHome, existing?.dataOwner);
+  return null;
+}
+
+function revokeForeignDataClaim(root, dataHome, token) {
+  const previous = readDataOwner(dataHome);
+  if (
+    previous &&
+    (previous.root !== norm(root) || previous.token !== token) &&
+    previous.identity === dataIdentity(dataHome)
+  )
+    rmSync(join(dataHome, DATA_OWNER));
+}
+
+function ownsDataHome(root, dataHome, token) {
+  const owner = token && readDataOwner(dataHome);
+  return Boolean(
+    owner &&
+    owner.root === norm(root) &&
+    owner.token === token &&
+    owner.identity === dataIdentity(dataHome),
+  );
+}
+
+function readDataOwner(dataHome) {
+  try {
+    const marker = join(dataHome, DATA_OWNER);
+    assertLocalPath(marker);
+    const info = statSync(marker);
+    if (!info.isFile() || info.size > 2048) return null;
+    const owner = readJson(marker);
+    return typeof owner?.root === 'string' &&
+      /^[0-9a-f-]{36}$/.test(owner.token)
+      ? owner
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+const versionSessions = new WeakMap();
+
+function desktopWriters(root, dataHome) {
+  const file = join(dataHome, 'auriga', 'guardian', 'process.json');
+  const record = existsSync(file) ? new ProcessTree(dataHome).record : null;
+  const identities = new Map();
+  const current = (pid) => {
+    if (!identities.has(pid)) identities.set(pid, processIdentity(pid));
+    return identities.get(pid);
+  };
+  const recorded = record
+    ? [record.launcher, record.root, ...record.children].filter(Boolean)
+    : [];
+  const active = record
+    ? [record.root, ...record.children].filter(Boolean)
+    : [];
+  if (record?.launcher && existsSync(join(dirname(file), 'supervisor.lock.d')))
+    active.push(record.launcher);
+  return {
+    active: () =>
+      active.some((entry) => {
+        if (!processAlive(entry.pid)) return false;
+        if (process.platform !== 'win32') return true;
+        const actual = current(entry.pid);
+        return !actual || sameProcess(actual, entry);
+      }),
+    staleSession({ pid, createdAt }) {
+      if (process.platform !== 'win32') return false;
+      const actual = current(pid);
+      if (!actual) return false;
+      if (Number.isFinite(Date.parse(createdAt)))
+        return !sameProcess(actual, { pid, createdAt });
+      if (recorded.some((entry) => sameProcess(actual, entry))) return false;
+      // Known bundled Windows launchers use versions/<id>/upstream/node/node.exe.
+      // A legacy lock has no creation time of its own. A different historical
+      // journal entry for the same PID cannot disprove a live bundled process.
+      if (!actual.executable || !/^[a-z]:\\/i.test(actual.executable))
+        return false;
+      try {
+        const versions = realpathSync.native(join(root, 'versions'));
+        const executable = realpathSync.native(actual.executable);
+        const rel = relative(norm(versions), norm(executable));
+        return !/^[^\\/]+[\\/]upstream[\\/]node[\\/]node\.exe$/i.test(rel);
+      } catch {
+        return false;
+      }
+    },
+  };
+}
+
+// Both the installation root and the separate data directory are locked.
+// The old launcher also observes desktop-session.json during bridge upgrades.
+export function openVersionSession(root, { dataHome, launching = false } = {}) {
+  root = resolve(root);
+  assertLocalPath(root);
+  const releaseRoot = pathOperationLock(root);
+  let releaseData, legacy;
+  try {
+    const current = readState(root);
+    dataHome = resolve(dataHome ?? current?.dataHome);
+    if (current && norm(dataHome) !== norm(current.dataHome))
+      throw new Error(
+        'this installation already uses the data directory ' +
+          current.dataHome +
+          '; moving data is not supported',
+      );
+    assertLocalPath(dataHome);
+    releaseData = pathOperationLock(dataHome);
+    if (!launching) {
+      const writers = desktopWriters(root, dataHome);
+      if (existsSync(join(root, INSTALL_MARKER)))
+        legacy = desktopSession(root, writers.staleSession);
+      if (writers.active())
+        throw Object.assign(
+          new Error('Auriga DSH 的数据仍在使用，请先退出。'),
+          { code: 'desktop.in_use' },
+        );
+    }
+  } catch (error) {
+    try {
+      legacy?.close();
+    } finally {
+      try {
+        releaseData?.();
+      } finally {
+        releaseRoot();
+      }
+    }
+    throw error;
+  }
+  const session = {
+    close() {
+      versionSessions.delete(session);
+      try {
+        legacy?.close();
+      } finally {
+        try {
+          releaseData();
+        } finally {
+          releaseRoot();
+        }
+      }
+    },
+  };
+  versionSessions.set(session, { root: norm(root), dataHome: norm(dataHome) });
+  return session;
+}
+
+function useVersionSession(root, dataHome, session, run) {
+  if (session) {
+    const held = versionSessions.get(session);
+    if (held?.root !== norm(root) || held.dataHome !== norm(dataHome))
+      throw new Error('installation session ownership lost');
+    return run();
+  }
+  const own = openVersionSession(root, { dataHome });
+  try {
+    return run();
+  } finally {
+    own.close();
+  }
+}
+
 /**
  * Install or upgrade from a staged payload directory.
  * Returns { id, previous, upgraded }.
+ *
+ * `progress(stage, fraction)` reports the current step; `cancelled()` is
+ * polled at checkpoints before the commit. A failed or cancelled first install
+ * leaves no installation behind; an upgrade is rolled back to the old version.
  */
-export function install({
+export function install(options) {
+  const { root, dataHome, session, transfer } = options;
+  assertLayout(resolve(root), resolve(dataHome));
+  return useVersionSession(root, dataHome, session, () => {
+    if (transfer && !holdsTransfer(root, transfer))
+      throw new Error('installer update ownership lost');
+    const release = transfer ? null : transferLock(root);
+    try {
+      return installStopped(options);
+    } finally {
+      release?.();
+    }
+  });
+}
+
+function installStopped({
   payload,
   root,
   dataHome,
@@ -535,7 +859,13 @@ export function install({
   platformBinding = {},
   smoke = defaultSmoke,
   fault = noFault,
+  progress = () => {},
+  cancelled = () => false,
+  beginCommit = () => {},
 }) {
+  const checkpoint = () => {
+    if (cancelled()) throw new CancelledError();
+  };
   const explicitConfirmation = platformBinding.confirmedOrigin !== undefined;
   const selectedBinding = platformOrigin
     ? normalizePlatformBinding(platformOrigin, platformBinding)
@@ -569,60 +899,106 @@ export function install({
         'moving data is not supported, uninstall first or keep the same directory',
     );
   // Verify before anything is copied into place or executed.
+  progress('verify', 0);
   const manifest = verifyPackage(payload, { trees: false });
   assertGuardianCompatible(payload, dataHome);
+  checkpoint();
+  const created = {
+    root: !existsSync(root),
+    dataHome: false,
+    profile: false,
+  };
+  const firstInstall = !existing;
   mkdirSync(join(root, 'versions'), { recursive: true });
   writeFileSync(
     join(root, INSTALL_MARKER),
     JSON.stringify({ product: 'Auriga Desktop', schema: 1 }) + '\n',
   );
-  recover(root);
-  const id = manifest.id;
-  const state = readState(root);
-  const previous = state?.current ?? null;
-  const target = versionDir(root, id);
-  let fresh = !existsSync(target);
-  if (!fresh) {
-    try {
-      verifyPackage(target);
-    } catch {
-      rmSync(target, { recursive: true, force: true });
-      fresh = true;
+  let id, previous;
+  try {
+    recover(root);
+    id = manifest.id;
+    const state = readState(root);
+    const dataOwner = claimDataHome(root, dataHome, state, created);
+    previous = state?.current ?? null;
+    const target = versionDir(root, id);
+    let fresh = !existsSync(target);
+    if (!fresh) {
+      try {
+        verifyPackage(target);
+      } catch {
+        rmSync(target, { recursive: true, force: true });
+        fresh = true;
+      }
     }
-  }
-  if (fresh) {
-    const staging = `${target}.partial`;
-    rmSync(staging, { recursive: true, force: true });
-    try {
-      copyTree(payload, staging);
-      verifyPackage(staging);
-    } catch (error) {
+    if (fresh) {
+      const staging = `${target}.partial`;
       rmSync(staging, { recursive: true, force: true });
-      throw error;
+      try {
+        copyTreeSteps(payload, staging, (fraction) => {
+          progress('copy', fraction);
+          checkpoint();
+        });
+        progress('verify-copy', 0);
+        verifyPackage(staging);
+        checkpoint();
+      } catch (error) {
+        rmSync(staging, { recursive: true, force: true });
+        throw error;
+      }
+      renameSync(staging, target);
     }
-    renameSync(staging, target);
+    transition({
+      root,
+      dataHome,
+      from: state,
+      toId: id,
+      fresh,
+      target,
+      fault,
+      dataOwner,
+      apply() {
+        progress('profile', 0);
+        created.profile = !existsSync(profileDir(dataHome));
+        seedProfile(dataHome, { platformOrigin, target });
+        syncPlugin(target, dataHome);
+        checkpoint();
+        progress('smoke', 0);
+        smoke(target, dataHome);
+        checkpoint();
+        beginCommit();
+        progress('commit', 0);
+      },
+    });
+  } catch (error) {
+    if (firstInstall && !(error instanceof CrashError))
+      cleanupFreshInstall(root, dataHome, created);
+    throw error;
   }
-  transition({
-    root,
-    dataHome,
-    from: state,
-    toId: id,
-    fresh,
-    target,
-    fault,
-    apply() {
-      seedProfile(dataHome, { platformOrigin, target });
-      syncPlugin(target, dataHome);
-      smoke(target, dataHome);
-    },
-  });
+  progress('done', 1);
   if (selectedBinding && (explicitConfirmation || !previousBinding))
     writeJsonAtomic(bindingFile, selectedBinding);
   return { id, previous, upgraded: Boolean(previous && previous !== id) };
 }
 
 /** Switch back to the previous version and restore its plugin files. */
-export function rollback({ root, smoke = defaultSmoke, fault = noFault }) {
+export function rollback(options) {
+  const root = resolve(options.root);
+  assertOwned(root);
+  const session = openVersionSession(root);
+  try {
+    const release = transferLock(root);
+    try {
+      return rollbackStopped(options);
+    } finally {
+      release();
+    }
+  } finally {
+    session.close();
+  }
+}
+
+function rollbackStopped({ root, smoke = defaultSmoke, fault = noFault }) {
   root = resolve(root);
   assertOwned(root);
   recover(root);
@@ -633,6 +1009,7 @@ export function rollback({ root, smoke = defaultSmoke, fault = noFault }) {
     throw new Error(`previous version missing: ${state.previous}`);
   verifyPackage(dir);
   assertGuardianCompatible(dir, state.dataHome);
+  revokeForeignDataClaim(root, state.dataHome, state.dataOwner);
   transition({
     root,
     dataHome: state.dataHome,
@@ -661,93 +1038,253 @@ export function rollback({ root, smoke = defaultSmoke, fault = noFault }) {
 export function uninstall({ root, purgeData = false }) {
   root = resolve(root);
   assertOwned(root);
+  const session = openVersionSession(root);
+  let result;
+  try {
+    const release = transferLock(root);
+    try {
+      result = withUpdateStateLock(root, () =>
+        uninstallStopped(root, purgeData),
+      );
+    } finally {
+      release();
+    }
+  } finally {
+    session.close();
+  }
+  if (!result.pending.length) {
+    try {
+      rmdirSync(root);
+    } catch {
+      /* Keep unrelated files and directories. */
+    }
+  }
+  return result;
+}
+
+function uninstallStopped(root, purgeData) {
   recover(root);
-  cleanupDownloads(root, { stopped: true });
   const state = readState(root);
   if (!state) throw new Error(`no installation state in ${root}`);
-  if (purgeData) {
-    for (const dir of [
-      profileDir(state.dataHome),
-      backupsDir(state.dataHome),
-    ]) {
-      if (!existsSync(dir)) continue;
-      if (!existsSync(join(dir, DATA_MARKER)))
-        throw new Error(`refusing to remove unmarked directory: ${dir}`);
-    }
-    rmSync(profileDir(state.dataHome), { recursive: true, force: true });
-    rmSync(backupsDir(state.dataHome), { recursive: true, force: true });
+  const entries = [
+    ...OWNED_ENTRIES,
+    ...readdirSync(root).filter((entry) =>
+      /^(?:\.desktop-download-[A-Za-z0-9-]+|desktop-update\.json\.[a-f0-9-]{36}\.tmp)$/.test(
+        entry,
+      ),
+    ),
+    INSTALL_MARKER,
+  ].filter((entry) => existsSync(join(root, entry)));
+  for (const entry of entries) {
+    const source = join(root, entry);
+    assertLocalPath(source);
+    if (isInside(source, state.dataHome))
+      throw new Error('the data directory overlaps program files');
   }
-  for (const entry of OWNED_ENTRIES)
-    rmSync(join(root, entry), { recursive: true, force: true });
-  rmSync(join(root, INSTALL_MARKER), { force: true });
+  const cleanupId = randomUUID();
+  const trash = join(root, `.uninstall-${cleanupId}`);
+  const moved = [];
+  mkdirSync(trash);
   try {
-    rmdirSync(root);
-  } catch {
-    // Not empty (user files) or still in use: leave it.
+    for (const entry of entries) {
+      renameSync(join(root, entry), join(trash, entry));
+      moved.push(entry);
+    }
+  } catch (cause) {
+    for (const entry of moved.reverse())
+      renameSync(join(trash, entry), join(root, entry));
+    rmdirSync(trash);
+    throw Object.assign(
+      new Error(`${BRAND_NAME} 的文件正在使用，请先退出后再卸载。`, { cause }),
+      { code: 'desktop.in_use' },
+    );
   }
-  return { dataKept: !purgeData, dataHome: state.dataHome };
+
+  const dataKept = !purgeData || !removeDedicatedData(root, state);
+  const result = { dataKept, dataHome: state.dataHome, pending: [] };
+  try {
+    rmSync(trash, { recursive: true, force: true, maxRetries: 3 });
+    return result;
+  } catch {
+    // Only the unique program quarantine is eligible for delayed cleanup.
+    writeFileSync(join(root, UNINSTALL_MARKER), cleanupId, { flag: 'wx' });
+    return { ...result, pending: [trash], cleanupId };
+  }
+}
+
+/**
+ * A matching install-time claim is necessary. Foreign content or another install
+ * revoking the claim keeps the entire data directory. Data is never queued.
+ */
+function removeDedicatedData(root, { dataHome, dataOwner }) {
+  let detached;
+  try {
+    if (
+      isInside(root, dataHome) ||
+      isInside(dataHome, root) ||
+      !ownsDataHome(root, dataHome, dataOwner)
+    )
+      return false;
+    const known = [
+      DATA_OWNER,
+      'auriga',
+      'profiles',
+      'profile-backups',
+      'sessions',
+      'pnpm-store',
+    ];
+    if (readdirSync(dataHome).some((name) => !known.includes(name)))
+      return false;
+    for (const dir of ['profiles', 'profile-backups']) {
+      const path = join(dataHome, dir);
+      assertLocalPath(path);
+      if (
+        existsSync(path) &&
+        readdirSync(path).some((name) => name !== PROFILE)
+      )
+        return false;
+    }
+    assertLocalPath(join(profileDir(dataHome), DATA_MARKER));
+    if (!existsSync(join(profileDir(dataHome), DATA_MARKER))) return false;
+    const journal = join(dataHome, 'auriga', 'guardian', 'process.json');
+    if (existsSync(journal)) {
+      assertLocalPath(journal);
+      const { launcher } = readJson(journal);
+      if (
+        launcher &&
+        (!launcher.executable || !isInside(root, launcher.executable))
+      )
+        return false;
+    }
+    const quarantine = join(
+      dirname(dataHome),
+      `.auriga-data-purge-${randomUUID()}`,
+    );
+    renameSync(dataHome, quarantine);
+    detached = quarantine;
+    if (!ownsDataHome(root, detached, dataOwner))
+      throw new Error('data ownership changed during removal');
+    rmSync(detached, { recursive: true, force: true, maxRetries: 3 });
+    return true;
+  } catch {
+    // Never give the remaining data path to a deferred cleanup job.
+    if (detached && !existsSync(dataHome)) {
+      try {
+        renameSync(detached, dataHome);
+      } catch {
+        /* Preserve the quarantined remainder. */
+      }
+    }
+    return false;
+  }
 }
 
 /** One running DSH per installation: deferred updates may only mutate a stopped profile. */
-export function desktopSession(root) {
+export function desktopSession(root, staleSession = () => false) {
   const file = join(root, 'desktop-session.json');
   const token = randomUUID();
+  const claim = (pid) => {
+    const identity = process.platform === 'win32' ? processIdentity(pid) : null;
+    return { pid, token, createdAt: identity?.createdAt };
+  };
+  const mine = JSON.stringify(claim(process.pid));
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
       const fd = openSync(file, 'wx', 0o600);
       try {
-        writeFileSync(fd, JSON.stringify({ pid: process.pid, token }));
+        writeFileSync(fd, mine);
       } finally {
         closeSync(fd);
       }
       return {
         child(pid) {
-          writeJsonAtomic(file, { pid, token });
+          writeJsonAtomic(file, claim(pid));
         },
         close() {
-          if (readJson(file).token === token) rmSync(file, { force: true });
+          if (existsSync(file) && readJson(file).token === token)
+            rmSync(file, { force: true });
         },
       };
     } catch (error) {
       if (error.code !== 'EEXIST') throw error;
       const previous = readFileSync(file, 'utf8');
-      const { pid } = JSON.parse(previous);
+      const record = JSON.parse(previous);
+      const { pid } = record;
       if (!Number.isSafeInteger(pid) || pid < 1)
         throw new Error('invalid desktop session lock');
-      try {
-        process.kill(pid, 0);
-      } catch (check) {
-        if (check.code === 'ESRCH' && readFileSync(file, 'utf8') === previous) {
-          rmSync(file);
-          continue;
-        }
+      if (
+        (!processAlive(pid) || staleSession(record)) &&
+        readFileSync(file, 'utf8') === previous
+      ) {
+        rmSync(file);
+        continue;
       }
-      throw new Error(`${BRAND_NAME} 已在运行，请先退出。`);
+      throw Object.assign(new Error(`${BRAND_NAME} 已在运行，请先退出。`), {
+        code: 'desktop.in_use',
+      });
     }
   }
   throw new Error('desktop session busy');
 }
 
-export async function launch({ root, args = [], env = process.env }) {
+/** Secret-free platform status for the tray: state and fixed reason codes only. */
+export function platformStatus(shellAuth, failure) {
+  if (!shellAuth)
+    return { state: 'unavailable', reason: failure ?? 'unavailable' };
+  try {
+    const { state, reason } = shellAuth.snapshot();
+    return reason ? { state, reason } : { state };
+  } catch {
+    return { state: 'unavailable', reason: 'snapshot_failed' };
+  }
+}
+
+/**
+ * `control` (tray mode): `{ requested, report(event), release() }`. A stop
+ * request ends DSH cleanly, applies a queued update and returns; status
+ * events are reported without tokens, identities or paths.
+ */
+export async function launch(options) {
+  const root = resolve(options.root);
+  assertOwned(root);
+  const versionSession = openVersionSession(root, { launching: true });
+  try {
+    return await launchLocked({ ...options, versionSession });
+  } finally {
+    versionSession.close();
+  }
+}
+
+async function launchLocked({
+  root,
+  args = [],
+  env = process.env,
+  control,
+  versionSession,
+  openLoginOnStart = !args.includes('--no-open'),
+}) {
   root = resolve(root);
+  const report = (event) => {
+    try {
+      control?.report(event);
+    } catch {
+      // A closed tray pipe must not break the launcher.
+    }
+  };
   assertOwned(root);
   const initial = readState(root);
   if (!initial) throw new Error('installation state missing');
   verifyPackage(versionDir(root, initial.current), { trees: false });
   assertNTFS(initial.dataHome);
   const tree = new ProcessTree(initial.dataHome);
-  const oldProcesses = [
-    tree.record.launcher,
-    tree.record.root,
-    ...tree.record.children,
-  ].filter(Boolean);
+  const writers = desktopWriters(root, initial.dataHome);
   const supervisor = new Supervisor(
     initial.dataHome,
     tree,
     packagedTrust(versionDir(root, initial.current)),
   );
   const releaseSingleton = tree.singleton();
-  let session, shellAuth;
+  let session, shellAuth, shellFailure, statusTimer;
   const hasShell = existsSync(
     join(versionDir(root, initial.current), 'auriga/shell-auth/desktop.mjs'),
   );
@@ -755,19 +1292,27 @@ export async function launch({ root, args = [], env = process.env }) {
 
   try {
     await supervisor.prepare();
-    const sessionFile = join(root, 'desktop-session.json');
-    if (existsSync(sessionFile) && (await tree.isStopped())) {
-      const previous = readJson(sessionFile);
-      if (oldProcesses.some((p) => p.pid === previous.pid)) rmSync(sessionFile);
-    }
-    session = desktopSession(root);
+    session = desktopSession(root, writers.staleSession);
     recover(root);
-    cleanupDownloads(root, { stopped: true });
+    const current = readState(root);
+    revokeForeignDataClaim(root, current.dataHome, current.dataOwner);
+    cleanupDownloads(root);
     const { applyPending } = await import('./update.mjs');
     const apply = async () => {
       try {
-        await applyPending(root);
+        if (existsSync(join(root, 'desktop-pending')))
+          report({ event: 'update', phase: 'installing' });
+        if (await applyPending(root, { session: versionSession }))
+          report({ event: 'update', phase: 'installed' });
       } catch (error) {
+        report({
+          event: 'update',
+          phase: 'failed',
+          reason:
+            error?.code === 'desktop.smoke_failed'
+              ? 'desktop.smoke_failed'
+              : 'updateFailed',
+        });
         // Keep upstream config/error output private; expose only a fixed reason.
         console.error(
           error?.code === 'desktop.smoke_failed'
@@ -784,7 +1329,48 @@ export async function launch({ root, args = [], env = process.env }) {
     supervisor.trust = packagedTrust(dir);
     if (existsSync(join(dir, 'auriga/shell-auth/desktop.mjs'))) {
       supervisor.shellSnapshot = () => shellAuth?.snapshot();
-      shellAuth = await startShellAuth({ root, dataHome: state.dataHome, dir });
+      shellAuth = await startShellAuth({
+        root,
+        dataHome: state.dataHome,
+        dir,
+        openLoginOnStart,
+        onSkipLogin: (localLogin) =>
+          report({
+            event: 'login',
+            opened: false,
+            state: localLogin ? 'local_login' : 'skipped',
+          }),
+        onFailure: (reason) => {
+          shellFailure = reason;
+        },
+      });
+    } else shellFailure = 'component_missing';
+    if (control) {
+      let last = '';
+      const publish = () => {
+        const platform = platformStatus(shellAuth, shellFailure);
+        const text = JSON.stringify(platform);
+        if (text === last) return;
+        last = text;
+        report({ event: 'platform', ...platform });
+      };
+      publish();
+      statusTimer = setInterval(publish, 2000);
+      statusTimer.unref();
+      // "Open Auriga" while signed out shows the platform sign-in page first.
+      control.on?.('login', () => {
+        const platform = platformStatus(shellAuth, shellFailure);
+        if (!shellAuth?.openLogin || platform.state === 'authenticated') {
+          report({ event: 'login', opened: false, state: platform.state });
+          return;
+        }
+        Promise.resolve()
+          .then(() => shellAuth.openLogin())
+          .then(
+            () => report({ event: 'login', opened: true }),
+            () => report({ event: 'login', opened: false, state: 'failed' }),
+          );
+      });
     }
     await supervisor.reconcile(true);
     if (
@@ -793,6 +1379,7 @@ export async function launch({ root, args = [], env = process.env }) {
     )
       notifyPrivateOnly();
     const status = await superviseDsh({
+      stopRequested: () => Boolean(control?.requested),
       tree,
       supervisor,
       session,
@@ -808,21 +1395,46 @@ export async function launch({ root, args = [], env = process.env }) {
         }
       },
       start: () =>
-        spawn(nodeBin(dir), [dshBin(dir), '--profile', PROFILE, ...args], {
-          stdio: shellAuth
-            ? ['inherit', 'inherit', 'inherit', 'pipe']
-            : 'inherit',
-          env: launchEnv(dir, state.dataHome, {
-            ...env,
-            AURIGA_DESKTOP_ROOT: root,
-            AURIGA_DESKTOP_RUNTIME: join(dir, 'auriga/runtime/update.mjs'),
-          }),
-        }),
+        spawn(
+          nodeBin(dir),
+          [
+            ...(control
+              ? [
+                  '--import',
+                  new URL('./dsh-shutdown.mjs', import.meta.url).href,
+                ]
+              : []),
+            dshBin(dir),
+            '--profile',
+            PROFILE,
+            ...args,
+          ],
+          {
+            // In tray mode stdin is the tray's control pipe; DSH must not own it.
+            stdio: [
+              control ? 'ignore' : 'inherit',
+              'inherit',
+              'inherit',
+              ...(control
+                ? [shellAuth ? 'pipe' : 'ignore', 'ipc']
+                : shellAuth
+                  ? ['pipe']
+                  : []),
+            ],
+            env: launchEnv(dir, state.dataHome, {
+              ...env,
+              AURIGA_DESKTOP_ROOT: root,
+              AURIGA_DESKTOP_RUNTIME: join(dir, 'auriga/runtime/update.mjs'),
+            }),
+          },
+        ),
     });
     session.child(process.pid);
-    await apply();
+    report({ event: 'dsh', state: 'stopped' });
+    if (status === 0) await apply();
     return status;
   } finally {
+    clearInterval(statusTimer);
     try {
       try {
         await shellAuth?.close();

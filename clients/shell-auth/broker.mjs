@@ -390,7 +390,9 @@ export class Broker extends EventEmitter {
         throw new Error('invalid device grant');
       const url = new URL(grant.verification_uri);
       if (
-        url.protocol !== 'https:' ||
+        // Same scheme as the trusted platform: HTTPS, or the confirmed IP binding.
+        url.protocol !==
+          new URL(this.platform.config.platformOrigin).protocol ||
         url.origin !== this.platform.config.platformOrigin ||
         url.pathname !== '/device' ||
         url.username ||

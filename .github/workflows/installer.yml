@@ -126,8 +126,14 @@ jobs:
         run: pnpm --filter @auriga/installer test
       - name: Isolated install from the setup exe, launch, uninstall
         working-directory: clients/installer
-        shell: bash
-        run: node scripts/e2e.mjs --old "$INSTALLER_EXE" --sandbox "$RUNNER_TEMP/sandbox"
+        shell: pwsh
+        run: node scripts/e2e.mjs --old $env:INSTALLER_EXE --sandbox (Join-Path $env:RUNNER_TEMP 'sandbox') --disposable-windows-user true
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: desktop-e2e-diagnostics-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/sandbox/result.json
+          if-no-files-found: ignore
       - uses: actions/upload-artifact@v4
         if: github.event_name != 'pull_request'
         with:

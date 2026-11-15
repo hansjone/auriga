@@ -108,6 +108,9 @@ public static class Helper {
   static void Server(string name) {
     var setup = Decode(Line(Input, 4096)); Capability = (string)setup["capability"];
     if (Capability.Length != 43) throw new IOException("capability");
+    // Reserve the first instance before stdin EOF can stop the process.
+    var listener = Pipe(name, true);
+    Emit(new { listening = name, sid = Sid });
     var input = new Thread(() => {
       try {
         for (string line; (line = Line(Input, 4194304)) != null;) {
@@ -124,8 +127,6 @@ public static class Helper {
         }
       } catch {} finally { Closing = true; Environment.Exit(0); }
     }); input.IsBackground = true; input.Start();
-    var listener = Pipe(name, true);
-    Emit(new { listening = name, sid = Sid });
     int active = 0;
     while (!Closing) {
       listener.WaitForConnection();
@@ -170,10 +171,20 @@ public static class Helper {
   }
   static void Secure(string path) {
     if ((File.GetAttributes(path) & FileAttributes.ReparsePoint) != 0) throw new IOException("reparse");
+    var user = new SecurityIdentifier(Sid);
     var security = new DirectorySecurity(); security.SetAccessRuleProtection(true, false);
-    security.SetOwner(new SecurityIdentifier(Sid));
-    security.AddAccessRule(new FileSystemAccessRule(new SecurityIdentifier(Sid), FileSystemRights.FullControl, InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit, PropagationFlags.None, AccessControlType.Allow));
+    // Writing the owner needs WRITE_OWNER, which a Modify-only parent grant (common on
+    // non-profile drives) does not give. Only take ownership when it is not ours already;
+    // an owner already equal to the user keeps implicit WRITE_DAC for the DACL below.
+    if (!user.Equals(Directory.GetAccessControl(path, AccessControlSections.Owner).GetOwner(typeof(SecurityIdentifier)))) security.SetOwner(user);
+    security.AddAccessRule(new FileSystemAccessRule(user, FileSystemRights.FullControl, InheritanceFlags.ContainerInherit | InheritanceFlags.ObjectInherit, PropagationFlags.None, AccessControlType.Allow));
     Directory.SetAccessControl(path, security);
+    // Fail closed unless the result is exactly: owner = user, protected, a single full-control ACE for the user.
+    var result = Directory.GetAccessControl(path, AccessControlSections.Owner | AccessControlSections.Access);
+    var rules = result.GetAccessRules(true, true, typeof(SecurityIdentifier));
+    if (!user.Equals(result.GetOwner(typeof(SecurityIdentifier))) || !result.AreAccessRulesProtected || rules.Count != 1) throw new IOException("acl");
+    var rule = (FileSystemAccessRule)rules[0];
+    if (!user.Equals(rule.IdentityReference) || rule.AccessControlType != AccessControlType.Allow || (rule.FileSystemRights & FileSystemRights.FullControl) != FileSystemRights.FullControl || rule.IsInherited) throw new IOException("acl");
   }
   public static int Main(string[] args) {
     try {

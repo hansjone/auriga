@@ -35,10 +35,13 @@ if (process.platform === 'win32')
     cpSync(process.execPath, join(version, 'upstream/node/node.exe'));
     const wrapper = join(root, 'bin/uninstall.ps1');
     cpSync(
-      fileURLToPath(
-        new URL('../windows/launcher/uninstall.ps1', import.meta.url),
-      ),
-      wrapper,
+      fileURLToPath(new URL('../windows/launcher/', import.meta.url)),
+      join(root, 'bin'),
+      { recursive: true },
+    );
+    cpSync(
+      join(root, 'bin', 'maintenance.ps1'),
+      join(version, 'auriga', 'launcher', 'maintenance.ps1'),
     );
     const partial = join(base, 'old-temp-copy');
     mkdirSync(partial);

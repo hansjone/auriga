@@ -13,6 +13,7 @@ const denied = () =>
 export async function createLoopback({
   broker,
   validate,
+  onSkipLogin = () => {},
   now = () => performance.now(),
 }) {
   if (typeof validate !== 'function')
@@ -60,7 +61,11 @@ export async function createLoopback({
         req.headers['sec-fetch-dest'] !== 'empty'
       )
         throw denied();
-      if (!['/loopback/exchange', '/loopback/messages'].includes(req.url))
+      const localLogin = req.url === '/loopback/messages?auriga=login';
+      if (
+        !localLogin &&
+        !['/loopback/exchange', '/loopback/messages'].includes(req.url)
+      )
         throw denied();
       for (const [k, v] of tickets) if (v.until <= now()) tickets.delete(k);
       for (const [k, v] of sessions) if (v.until <= now()) sessions.delete(k);
@@ -123,11 +128,13 @@ export async function createLoopback({
       )
         throw denied();
       if (!validate('ShellAuthPageCommand', body)) throw denied();
+      if (localLogin && body.action !== 'skip_login') throw denied();
       const result = await broker.pageCommand(body, session.owner);
       if (session.until <= now() || session.epoch !== broker.epoch)
         throw denied();
       if (!validate('ShellAuthEvent', result))
         throw new Error('invalid broker projection');
+      if (body.action === 'skip_login') onSkipLogin(localLogin);
       send(200, result);
     } catch (error) {
       const status =
