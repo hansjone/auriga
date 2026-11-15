@@ -20,6 +20,7 @@ class RemoteMessageNetworkLedgerTest {
         clientTLS = IamHopTlsTest.client(service, ca);
     var requests = new CopyOnWriteArrayList<String>();
     var authorization = new CopyOnWriteArrayList<String>();
+    var responseStatus = new java.util.concurrent.atomic.AtomicInteger(200);
     var body =
         new AtomicReference<>(
             "{\"tenant_id\":\"tenant\",\"realm\":\"1\",\"target_id\":\"target\",\"minimum_control_revision\":\"1\",\"control_digest\":\"sha256:"
@@ -37,7 +38,7 @@ class RemoteMessageNetworkLedgerTest {
           executor.submit(
               () -> {
                 try {
-                  for (int count = 0; count < 4; count++)
+                  for (int count = 0; count < 8; count++)
                     try (var socket = (SSLSocket) listener.accept()) {
                       socket.setSoTimeout(5000);
                       socket.startHandshake();
@@ -52,7 +53,10 @@ class RemoteMessageNetworkLedgerTest {
                         if (line.toLowerCase(java.util.Locale.ROOT).startsWith("authorization:"))
                           authorization.add(line);
                       String payload = body.get();
-                      int status = requests.getLast().contains("/controls/pending/") ? 404 : 200;
+                      int status =
+                          requests.getLast().contains("/controls/pending/")
+                              ? 404
+                              : responseStatus.get();
                       byte[] raw = payload.getBytes(StandardCharsets.UTF_8);
                       socket
                           .getOutputStream()
@@ -80,10 +84,57 @@ class RemoteMessageNetworkLedgerTest {
         assertThrows(RuntimeException.class, () -> ledger.isolation("tenant", "1", "target"));
         assertThrows(
             IllegalArgumentException.class, () -> ledger.isolation("tenant", "1", "../untrusted"));
+        String digest = "sha256:" + "0".repeat(64), nonce = "A".repeat(43);
+        var query =
+            new auriga.contracts.msgnet.model.ExpectedSelectorsQuery()
+                .tenantId("tenant")
+                .realm("1")
+                .bundleVersion("1")
+                .bundleDigest(digest)
+                .controlRevision("1")
+                .controlDigest(digest)
+                .challenge(nonce);
+        var snapshot =
+            new auriga.contracts.msgnet.model.ExpectedSelectors()
+                .tenantId("tenant")
+                .realm("1")
+                .authorityId("authority")
+                .authorityDigest(digest)
+                .generation("1")
+                .bundleVersion("1")
+                .bundleDigest(digest)
+                .phase(auriga.contracts.msgnet.model.ExpectedSelectors.PhaseEnum.DUAL_TRUST)
+                .controlRevision("1")
+                .controlDigest(digest)
+                .challenge(nonce)
+                .issuedAt("2026-11-15T00:00:00Z")
+                .requiredReaderIds(java.util.Set.of("reader"))
+                .readerIdentities(java.util.Map.of("reader", "installation"));
+        var selectors = new java.util.HashMap<String, String>();
+        selectors.put("reader", null);
+        snapshot.expectedSelectors(selectors);
+        body.set(Json.MAPPER.writeValueAsString(snapshot));
+        var read = ledger.expectedSelectors(query);
+        assertTrue(read.getExpectedSelectors().containsKey("reader"));
+        assertNull(read.getExpectedSelectors().get("reader"));
+        snapshot.controlDigest("sha256:" + "1".repeat(64));
+        body.set(Json.MAPPER.writeValueAsString(snapshot));
+        assertThrows(IllegalStateException.class, () -> ledger.expectedSelectors(query));
+        snapshot.controlDigest(digest).challenge("B".repeat(42) + "A");
+        body.set(Json.MAPPER.writeValueAsString(snapshot));
+        assertThrows(IllegalStateException.class, () -> ledger.expectedSelectors(query));
+        responseStatus.set(202);
+        body.set("{}");
+        assertThrows(IllegalStateException.class, () -> ledger.expectedSelectors(query));
       }
       server.get(15, TimeUnit.SECONDS);
-      assertEquals(4, authorization.size());
-      assertTrue(requests.stream().allMatch(r -> r.startsWith("GET /api/collab/v2/network/")));
+      assertEquals(8, authorization.size());
+      assertEquals(
+          4,
+          requests.stream()
+              .filter(
+                  r -> r.startsWith("POST /api/collab/v2/network/transport/expected-selectors "))
+              .count());
     }
   }
 }

@@ -17,6 +17,7 @@ type TransportSource interface {
 	Predecessor(context.Context, string) (api.TransportPredecessor, error)
 	Transition(context.Context, string) (api.TransportTransitionProof, error)
 	Confirmation(context.Context, api.TransportConfirmationQuery) (api.SignedTransportConfirmation, error)
+	ExpectedSelectors(context.Context, api.ExpectedSelectorsQuery) (api.ExpectedSelectors, error)
 }
 
 // TransportState is a private reader ledger, not a wire model. Removed CA IDs
@@ -216,6 +217,25 @@ func (t *TransportConsumer) stage(ctx context.Context, b api.SignedTransportTrus
 		return e
 	}
 	q := api.TransportConfirmationQuery{TenantId: t.Domain.Tenant, Realm: t.Domain.Realm, BundleVersion: p.Bundle.Payload.BundleVersion, BundleDigest: pd, Challenge: base64.RawURLEncoding.EncodeToString(challenge)}
+	// Keep one accepted root snapshot across both independent requests. A change
+	// requires a fresh challenge and requery; no old null mapping is cached.
+	control := *t.State.Control
+	cd, err := ObjectDigest(control)
+	if err != nil {
+		return err
+	}
+	query := api.ExpectedSelectorsQuery{TenantId: q.TenantId, Realm: q.Realm, BundleVersion: q.BundleVersion, BundleDigest: q.BundleDigest, Challenge: q.Challenge, ControlRevision: control.Payload.ControlRevision, ControlDigest: cd}
+	selectors, e := t.Source.ExpectedSelectors(ctx, query)
+	if e != nil {
+		return Fault("projection_pending")
+	}
+	var snapshot api.ExpectedSelectors
+	if e = t.model("ExpectedSelectors", selectors, &snapshot); e != nil {
+		return e
+	}
+	if e = VerifyExpectedSelectors(snapshot, query, p.Bundle, control, t.Domain, t.now(), true); e != nil {
+		return e
+	}
 	evidence, e := t.Source.Confirmation(ctx, q)
 	if e != nil {
 		return e
@@ -224,7 +244,13 @@ func (t *TransportConsumer) stage(ctx context.Context, b api.SignedTransportTrus
 	if e = t.model("SignedTransportConfirmation", evidence, &check); e != nil {
 		return e
 	}
-	return VerifyTransportAttestation(evidence, p.Bundle, a, *t.State.Control, ConfirmationFacts{Domain: t.Domain, Now: t.now(), Challenge: q.Challenge, RequiredPhase: level})
+	if !Equal(control, *t.State.Control) {
+		return Fault("control_required")
+	}
+	if e = VerifyExpectedSelectors(snapshot, query, p.Bundle, control, t.Domain, t.now(), true); e != nil {
+		return e
+	}
+	return VerifyTransportConfirmation(evidence, p.Bundle, a, control, ConfirmationFacts{Domain: t.Domain, Now: t.now(), Challenge: q.Challenge, RequiredPhase: level, ExpectedSelectors: snapshot.ExpectedSelectors, ExpectedIdentities: snapshot.ReaderIdentities})
 }
 
 // Accept verifies production transport state, obtains fresh globally signed

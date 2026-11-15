@@ -65,7 +65,35 @@ final class MessageNetworkIsolationExecution implements MessageNetworkIsolation 
                   .bundleVersion(bundle.getPayload().getBundleVersion())
                   .bundleDigest(digest)
                   .challenge(Base64.getUrlEncoder().withoutPadding().encodeToString(challenge));
+          var selectorQuery =
+              new auriga.contracts.msgnet.model.ExpectedSelectorsQuery()
+                  .tenantId(query.getTenantId())
+                  .realm(query.getRealm())
+                  .bundleVersion(query.getBundleVersion())
+                  .bundleDigest(digest)
+                  .challenge(query.getChallenge())
+                  .controlRevision(current.getMinimumControlRevision())
+                  .controlDigest(current.getControlDigest());
+          var snapshot = ledger.expectedSelectors(selectorQuery);
+          MessageNetworkSelectors.verify(
+              snapshot,
+              selectorQuery,
+              bundle,
+              binding.tenant(),
+              binding.realm(),
+              current.getMinimumControlRevision(),
+              current.getControlDigest(),
+              clock.instant());
           var evidence = ledger.confirmation(query).getPayload();
+          MessageNetworkSelectors.verify(
+              snapshot,
+              selectorQuery,
+              bundle,
+              binding.tenant(),
+              binding.realm(),
+              current.getMinimumControlRevision(),
+              current.getControlDigest(),
+              clock.instant());
           var issued = java.time.Instant.parse(evidence.getIssuedAt());
           if (!evidence.getTenantId().equals(query.getTenantId())
               || !evidence.getRealm().equals(query.getRealm())
@@ -83,6 +111,7 @@ final class MessageNetworkIsolationExecution implements MessageNetworkIsolation 
               || issued.isBefore(clock.instant().minusSeconds(60)))
             throw new IllegalStateException("current global transport evidence required");
           var readers = new HashSet<String>();
+          MessageNetworkSelectors.readers(evidence.getReaders(), snapshot, bundle);
           for (var row : evidence.getReaders()) {
             if (!readers.add(row.getReaderId()))
               throw new IllegalStateException("duplicate transport reader");

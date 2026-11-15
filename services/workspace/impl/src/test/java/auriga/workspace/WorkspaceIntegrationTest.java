@@ -198,6 +198,17 @@ class WorkspaceIntegrationTest {
                 WorkspaceService.JSON.readValue(
                     (byte[]) call.getArgument(0),
                     auriga.contracts.msgnet.model.TransportConfirmationQuery.class));
+    org.mockito.Mockito.when(ledger.expectedSelectorsQuery(org.mockito.ArgumentMatchers.any()))
+        .thenAnswer(
+            call ->
+                WorkspaceService.JSON.readValue(
+                    (byte[]) call.getArgument(0),
+                    auriga.contracts.msgnet.model.ExpectedSelectorsQuery.class));
+    org.mockito.Mockito.when(ledger.expectedSelectors(org.mockito.ArgumentMatchers.any()))
+        .thenReturn(
+            new auriga.contracts.msgnet.model.ExpectedSelectors()
+                .tenantId(tenant.toString())
+                .realm("1"));
     var serverKey = TestPki.key();
     var serverCertificate =
         TestPki.certificate(serverKey, caKey, NodeCa.parse(ca.bundle()), clock.instant(), false);
@@ -239,6 +250,20 @@ class WorkspaceIntegrationTest {
           };
       assertEquals(403, request.apply("/isolation/self-reported-target", null).statusCode());
       assertEquals(403, request.apply("/bootstrap/materials", null).statusCode());
+      assertEquals(
+          403,
+          request
+              .apply("/transport/expected-selectors", "{\"tenant_id\":\"foreign\",\"realm\":\"1\"}")
+              .statusCode());
+      org.mockito.Mockito.verify(ledger, org.mockito.Mockito.never())
+          .expectedSelectors(org.mockito.ArgumentMatchers.any());
+      assertEquals(
+          200,
+          request
+              .apply(
+                  "/transport/expected-selectors",
+                  "{\"tenant_id\":\"" + tenant + "\",\"realm\":\"1\"}")
+              .statusCode());
       assertEquals(
           403,
           request

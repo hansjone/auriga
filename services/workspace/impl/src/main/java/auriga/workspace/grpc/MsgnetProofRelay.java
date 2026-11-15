@@ -145,6 +145,11 @@ public final class MsgnetProofRelay implements SmartLifecycle, AutoCloseable {
     if (!method.equals("POST")) throw new SecurityException();
     byte[] raw = exchange.getRequestBody().readNBytes(65537);
     if (raw.length > 65536) throw new SecurityException();
+    if (path.equals(BASE + "/transport/expected-selectors")) {
+      var query = ledger.expectedSelectorsQuery(raw);
+      scope(binding, query.getTenantId(), query.getRealm());
+      return ledger.expectedSelectors(query);
+    }
     if (path.equals(BASE + "/transport/confirmation")) {
       var query = ledger.confirmationQuery(raw);
       scope(binding, query.getTenantId(), query.getRealm());

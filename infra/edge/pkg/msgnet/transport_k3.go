@@ -159,22 +159,15 @@ type ConfirmationFacts struct {
 	Domain                   TransportDomain
 	Now                      time.Time
 	Challenge, RequiredPhase string
-	ExpectedSelectors        map[string]string
+	ExpectedSelectors        map[string]*string
+	ExpectedIdentities       map[string]string
 }
 
 func VerifyTransportConfirmation(evidence api.SignedTransportConfirmation, bundle api.SignedTransportTrustBundle, authority api.SignedRuntimeAuthority, control api.SignedRootControl, f ConfirmationFacts) error {
-	return verifyTransportConfirmation(evidence, bundle, authority, control, f, true)
+	return verifyTransportConfirmation(evidence, bundle, authority, control, f)
 }
 
-// VerifyTransportAttestation is the remote consumer's trust boundary: the
-// root-authorized runtime attests to C's PG authorization ledger. Only the
-// issuer/auditor with independent access to that ledger can use the full
-// ExpectedSelectors check above. Never reconstruct that map from evidence.
-func VerifyTransportAttestation(evidence api.SignedTransportConfirmation, bundle api.SignedTransportTrustBundle, authority api.SignedRuntimeAuthority, control api.SignedRootControl, f ConfirmationFacts) error {
-	return verifyTransportConfirmation(evidence, bundle, authority, control, f, false)
-}
-
-func verifyTransportConfirmation(evidence api.SignedTransportConfirmation, bundle api.SignedTransportTrustBundle, authority api.SignedRuntimeAuthority, control api.SignedRootControl, f ConfirmationFacts, audit bool) error {
+func verifyTransportConfirmation(evidence api.SignedTransportConfirmation, bundle api.SignedTransportTrustBundle, authority api.SignedRuntimeAuthority, control api.SignedRootControl, f ConfirmationFacts) error {
 	e, b, a, c := evidence.Payload, bundle.Payload, authority.Payload, control.Payload
 	for _, verify := range []func() error{
 		func() error { return signedRoot(control, f.Domain.RootSPKI) },
@@ -227,10 +220,26 @@ func verifyTransportConfirmation(evidence api.SignedTransportConfirmation, bundl
 	if len(rows) != len(b.RequiredReaderIds) {
 		return Fault("projection_pending")
 	}
+	if !exactReaderKeys(f.ExpectedSelectors, b.RequiredReaderIds) || f.ExpectedIdentities != nil && !exactReaderKeys(f.ExpectedIdentities, b.RequiredReaderIds) {
+		return Fault("invalid_chain")
+	}
 	for _, id := range b.RequiredReaderIds {
 		row, found := rows[id]
 		if !found {
 			return Fault("projection_pending")
+		}
+		if f.ExpectedIdentities != nil && f.ExpectedIdentities[id] != row.IdentityId {
+			return Fault("invalid_chain")
+		}
+		if row.Selector == nil {
+			if row.Phase != "isolated" || f.ExpectedSelectors[id] != nil || f.ExpectedIdentities[id] != row.IdentityId {
+				return Fault("invalid_chain")
+			}
+		} else {
+			digest, err := ObjectDigest(*row.Selector)
+			if err != nil || CheckSelector(*row.Selector) != nil || row.Selector.TenantId != e.TenantId || row.Selector.Realm != e.Realm || row.Selector.InstallationId != row.IdentityId || row.Selector.BundleDigest != e.BundleDigest || row.Selector.BundleVersion != e.BundleVersion || f.ExpectedSelectors[id] == nil || *f.ExpectedSelectors[id] != digest {
+				return Fault("invalid_chain")
+			}
 		}
 		if row.Phase == "isolated" {
 			if !row.IsolationEnforced {
@@ -238,8 +247,7 @@ func verifyTransportConfirmation(evidence api.SignedTransportConfirmation, bundl
 			}
 			continue
 		}
-		digest, _ := ObjectDigest(row.Selector)
-		if CheckSelector(row.Selector) != nil || row.Selector.TenantId != e.TenantId || row.Selector.Realm != e.Realm || row.Selector.InstallationId != row.IdentityId || row.Selector.BundleDigest != e.BundleDigest || row.Selector.BundleVersion != e.BundleVersion || audit && f.ExpectedSelectors[id] != digest {
+		if row.Phase != "loaded" && row.Phase != "handshake_verified" {
 			return Fault("invalid_chain")
 		}
 		if f.RequiredPhase == "handshake_verified" && row.Phase != "handshake_verified" {

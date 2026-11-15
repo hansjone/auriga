@@ -215,6 +215,29 @@ public final class RemoteMessageNetworkLedger
   }
 
   @Override
+  public ExpectedSelectors expectedSelectors(ExpectedSelectorsQuery query) {
+    schemas.validate(
+        "network/auto-renewal-v2.schema.json#/$defs/ExpectedSelectorsQuery",
+        Json.MAPPER.valueToTree(query));
+    var value =
+        read(
+            "/transport/expected-selectors",
+            "ExpectedSelectors",
+            ExpectedSelectors.class,
+            query,
+            false);
+    if (!Objects.equals(query.getTenantId(), value.getTenantId())
+        || !Objects.equals(query.getRealm(), value.getRealm())
+        || !Objects.equals(query.getBundleVersion(), value.getBundleVersion())
+        || !Objects.equals(query.getBundleDigest(), value.getBundleDigest())
+        || !Objects.equals(query.getControlRevision(), value.getControlRevision())
+        || !Objects.equals(query.getControlDigest(), value.getControlDigest())
+        || !Objects.equals(query.getChallenge(), value.getChallenge()))
+      throw new IllegalStateException("ledger selectors mismatch");
+    return value;
+  }
+
+  @Override
   public Publication publication() {
     return read("/bootstrap/keys", "Publication", Publication.class, null, false);
   }
@@ -227,11 +250,12 @@ public final class RemoteMessageNetworkLedger
             "TransportPredecessor",
             "TransportTransitionProof",
             "SignedTransportConfirmation",
+            "ExpectedSelectors",
             "IsolationRecord",
             "SignedTransportTrustBundle")
         .contains(name)) throw new IllegalArgumentException("nonpublic relay model");
     schemas.validate(
-        "network/auto-renewal-v2.schema.json#/$defs/" + name, Json.MAPPER.valueToTree(value));
+        "network/auto-renewal-v2.schema.json#/$defs/" + name, MessageNetworkWire.tree(value));
     return canonical(value);
   }
 
@@ -251,8 +275,13 @@ public final class RemoteMessageNetworkLedger
     return request(raw, "TransportConfirmationQuery", TransportConfirmationQuery.class);
   }
 
+  @Override
+  public ExpectedSelectorsQuery expectedSelectorsQuery(byte[] raw) {
+    return request(raw, "ExpectedSelectorsQuery", ExpectedSelectorsQuery.class);
+  }
+
   private byte[] canonical(Object value) {
-    return InstallationJson.canonical(Json.MAPPER.valueToTree(value))
+    return InstallationJson.canonical(MessageNetworkWire.tree(value))
         .getBytes(StandardCharsets.UTF_8);
   }
 
@@ -260,7 +289,7 @@ public final class RemoteMessageNetworkLedger
   public byte[] canonicalControl(ControlPackage value) {
     schemas.validate(
         "network/auto-renewal-v2.schema.json#/$defs/ControlPackage",
-        Json.MAPPER.valueToTree(value));
+        MessageNetworkWire.tree(value));
     return canonical(value);
   }
 

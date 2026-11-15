@@ -20,4 +20,4 @@ Installer 验独立根，先持久化控制 fence，再由 NodeExecution 调固�
 
 组合部署由 C 的 PlatformMsgnetNodeControl 使用认证 node_id 调 pendingNodeControl/confirmNodeControl。C 的普通 `/controls/receipts` 拒绝 node target。I 的远端适配仅在显式设置 `auriga.workspace.msgnet.remote-node-control=true` 且提供 node-aware ledger 时启用，普通 HTTP ledger 无此确认权限。C 未合并时，按同一 API 用替身测试。
 
-K4 的 selector/ExpectedSelectors 接缝仍按冻结契约失败封闭。部署与正常用户入口验收由主控串行完成。
+K4 阶段推进先经节点原生 mTLS 证明中继 POST `/transport/expected-selectors` 读取 C 的独立授权台账，再读取全局确认。中继只开放冻结的 ExpectedSelectorsQuery/ExpectedSelectors，不下发服务 JWT；认证节点的 tenant/realm 必须匹配。响应绑定完整 bundle、最新根控制摘要、随机 challenge 和60秒有效期。缺项不等于显式 null；无 selector 的实际隔离行须同时匹配冻结身份和 null，有 selector 的所有行仍核完整摘要。没有台账、快照冲突、HTTP202 或验证失败均保持 projection_pending，每次重试重新查询。部署与正常用户入口验收由主控串行完成。

@@ -199,3 +199,17 @@ func (n *NodeExecution) ResolveAuthority(ctx context.Context, id, digest string)
 	}
 	return publication.Authority, nil
 }
+
+func (n *NodeExecution) ExpectedSelectors(ctx context.Context, query api.ExpectedSelectorsQuery) (api.ExpectedSelectors, error) {
+	var result api.ExpectedSelectors
+	raw, e := Bytes(query)
+	if e != nil {
+		return result, e
+	}
+	var checked api.ExpectedSelectorsQuery
+	if e = n.schemas.Decode("ExpectedSelectorsQuery", raw, &checked); e != nil {
+		return result, e
+	}
+	e = n.read(ctx, "/transport/expected-selectors", "ExpectedSelectors", query, &result)
+	return result, e
+}

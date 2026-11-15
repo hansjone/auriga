@@ -259,15 +259,29 @@ func TestTransportRevocationPrecedesHigherVersion(t *testing.T) {
 	p.ControlDigest = Digest(raw)
 	history := map[string]api.TransportPredecessor{}
 	source := &testTransportSource{history: history}
+	selectorFor := func(bp api.TransportTrustBundle, bundleDigest string) api.LocalProjectionSelector {
+		digest := Digest(nil)
+		selector := api.LocalProjectionSelector{TenantId: o.Tenant, Realm: o.Realm, InstallationId: scope.IdentityId, Component: "edge", Nonce: p.Challenge, Generation: bp.Generation, KeysetVersion: "1", PublicationDigest: digest, BundleVersion: bp.BundleVersion, BundleDigest: bundleDigest, MaterialRevision: "1", ManifestDigest: digest}
+		return selector
+	}
+	source.expected = func(q api.ExpectedSelectorsQuery) (api.ExpectedSelectors, error) {
+		previous, ok := history[q.BundleDigest]
+		if !ok {
+			return api.ExpectedSelectors{}, errors.New("unknown authorization")
+		}
+		bp := previous.Bundle.Payload
+		selector := selectorFor(bp, q.BundleDigest)
+		sd, err := trust.ObjectDigest(selector)
+		return api.ExpectedSelectors{TenantId: o.Tenant, Realm: o.Realm, AuthorityId: bp.AuthorityId, AuthorityDigest: bp.AuthorityDigest, Generation: bp.Generation, BundleVersion: bp.BundleVersion, BundleDigest: q.BundleDigest, Phase: bp.Phase, RequiredReaderIds: bp.RequiredReaderIds, ControlRevision: p.Control.Payload.ControlRevision, ControlDigest: q.ControlDigest, Challenge: q.Challenge, IssuedAt: o.Now().Format(time.RFC3339), ExpectedSelectors: map[string]*string{bp.RequiredReaderIds[0]: &sd}, ReaderIdentities: map[string]string{bp.RequiredReaderIds[0]: scope.IdentityId}}, err
+	}
 	source.confirm = func(q api.TransportConfirmationQuery) (api.SignedTransportConfirmation, error) {
 		previous, ok := history[q.BundleDigest]
 		if !ok {
 			return api.SignedTransportConfirmation{}, errors.New("no committed bundle")
 		}
 		bp := previous.Bundle.Payload
-		digest := Digest(nil)
-		selector := api.LocalProjectionSelector{TenantId: o.Tenant, Realm: o.Realm, InstallationId: scope.IdentityId, Component: "edge", Nonce: p.Challenge, Generation: bp.Generation, KeysetVersion: "1", PublicationDigest: digest, BundleVersion: bp.BundleVersion, BundleDigest: q.BundleDigest, MaterialRevision: "1", ManifestDigest: digest}
-		proof := api.TransportConfirmation{TenantId: o.Tenant, Realm: o.Realm, AuthorityId: a.AuthorityId, AuthorityDigest: bp.AuthorityDigest, ControlRevision: p.Control.Payload.ControlRevision, BundleVersion: bp.BundleVersion, BundleDigest: q.BundleDigest, Phase: bp.Phase, RequiredReaderIds: bp.RequiredReaderIds, Readers: []api.TransportReaderEvidence{{ReaderId: bp.RequiredReaderIds[0], IdentityId: scope.IdentityId, Selector: selector, Phase: "handshake_verified"}}, Challenge: q.Challenge, IssuedAt: o.Now().Format(time.RFC3339)}
+		selector := selectorFor(bp, q.BundleDigest)
+		proof := api.TransportConfirmation{TenantId: o.Tenant, Realm: o.Realm, AuthorityId: a.AuthorityId, AuthorityDigest: bp.AuthorityDigest, ControlRevision: p.Control.Payload.ControlRevision, BundleVersion: bp.BundleVersion, BundleDigest: q.BundleDigest, Phase: bp.Phase, RequiredReaderIds: bp.RequiredReaderIds, Readers: []api.TransportReaderEvidence{{ReaderId: bp.RequiredReaderIds[0], IdentityId: scope.IdentityId, Selector: &selector, Phase: "handshake_verified"}}, Challenge: q.Challenge, IssuedAt: o.Now().Format(time.RFC3339)}
 		return api.SignedTransportConfirmation{Payload: proof, RuntimeAuth: signature(t, runtimePrivate, a.RuntimeKid, "Auriga.NetworkTransportConfirmation.v2", proof)}, nil
 	}
 	o.TransportSource = source
@@ -365,8 +379,9 @@ func TestTransportRevocationPrecedesHigherVersion(t *testing.T) {
 }
 
 type testTransportSource struct {
-	history map[string]api.TransportPredecessor
-	confirm func(api.TransportConfirmationQuery) (api.SignedTransportConfirmation, error)
+	history  map[string]api.TransportPredecessor
+	confirm  func(api.TransportConfirmationQuery) (api.SignedTransportConfirmation, error)
+	expected func(api.ExpectedSelectorsQuery) (api.ExpectedSelectors, error)
 }
 
 func (s *testTransportSource) Predecessor(_ context.Context, d string) (api.TransportPredecessor, error) {
@@ -473,4 +488,8 @@ func TestNestedUnknownFieldsAndDeepJSONAreRejected(t *testing.T) {
 	if _, e = Canonical([]byte(strings.Repeat("[", 65) + "0" + strings.Repeat("]", 65))); e == nil {
 		t.Fatal("unbounded nesting")
 	}
+}
+
+func (s *testTransportSource) ExpectedSelectors(_ context.Context, q api.ExpectedSelectorsQuery) (api.ExpectedSelectors, error) {
+	return s.expected(q)
 }

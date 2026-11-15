@@ -37,8 +37,9 @@ type confirmationVector struct {
 	Root                  string `json:"root_spki"`
 	Tenant                string `json:"tenant_id"`
 	Realm, Now, Challenge string
-	RequiredPhase         string            `json:"required_phase"`
-	Selectors             map[string]string `json:"expected_selectors"`
+	RequiredPhase         string             `json:"required_phase"`
+	Selectors             map[string]*string `json:"expected_selectors"`
+	Identities            map[string]string  `json:"expected_identities"`
 	Evidence              api.SignedTransportConfirmation
 	Bundle                api.SignedTransportTrustBundle
 	Authority             api.SignedRuntimeAuthority
@@ -46,7 +47,7 @@ type confirmationVector struct {
 }
 
 func (v confirmationVector) stage() StageConfirmation {
-	return StageConfirmation{Evidence: v.Evidence, Bundle: v.Bundle, Authority: v.Authority, Control: v.Control, Facts: ConfirmationFacts{Domain: TransportDomain{RootSPKI: v.Root, Tenant: v.Tenant, Realm: v.Realm}, Now: stamp(v.Now), Challenge: v.Challenge, RequiredPhase: v.RequiredPhase, ExpectedSelectors: v.Selectors}}
+	return StageConfirmation{Evidence: v.Evidence, Bundle: v.Bundle, Authority: v.Authority, Control: v.Control, Facts: ConfirmationFacts{Domain: TransportDomain{RootSPKI: v.Root, Tenant: v.Tenant, Realm: v.Realm}, Now: stamp(v.Now), Challenge: v.Challenge, RequiredPhase: v.RequiredPhase, ExpectedSelectors: v.Selectors, ExpectedIdentities: v.Identities}}
 }
 
 func k3Verdict(t *testing.T, operation string, raw map[string]json.RawMessage) error {
@@ -62,6 +63,18 @@ func k3Verdict(t *testing.T, operation string, raw map[string]json.RawMessage) e
 		}
 	}
 	switch operation {
+	case "expected_selectors":
+		var v struct {
+			Tenant        string `json:"tenant_id"`
+			Realm, Now    string
+			Authenticated bool `json:"authenticated_c_ledger"`
+			Bundle        api.SignedTransportTrustBundle
+			Control       api.SignedRootControl
+			Query         api.ExpectedSelectorsQuery
+			Response      api.ExpectedSelectors
+		}
+		decode(&v)
+		return VerifyExpectedSelectors(v.Response, v.Query, v.Bundle, v.Control, TransportDomain{Tenant: v.Tenant, Realm: v.Realm}, stamp(v.Now), v.Authenticated)
 	case "transport_transition":
 		var v transitionVector
 		decode(&v)

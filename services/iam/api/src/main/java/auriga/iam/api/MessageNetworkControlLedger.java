@@ -33,6 +33,15 @@ public interface MessageNetworkControlLedger {
     throw new UnsupportedOperationException();
   }
 
+  /** C's independent material-authorization snapshot, never reconstructed from evidence. */
+  default ExpectedSelectors expectedSelectors(ExpectedSelectorsQuery query) {
+    throw new UnsupportedOperationException();
+  }
+
+  default ExpectedSelectorsQuery expectedSelectorsQuery(byte[] raw) {
+    throw new UnsupportedOperationException();
+  }
+
   /** Caller has committed its deny fence and independently confirmed disconnection. */
   default IsolationRecord enforceIsolation(IsolationRecord record) {
     throw new UnsupportedOperationException();

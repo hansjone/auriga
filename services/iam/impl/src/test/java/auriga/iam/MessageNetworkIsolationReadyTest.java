@@ -67,10 +67,37 @@ class MessageNetworkIsolationReadyTest {
                     .realm("1")
                     .authorityId("authority")
                     .authorityDigest("sha256:" + "3".repeat(64))
+                    .generation("1")
                     .bundleVersion("1")
                     .phase(TransportTrustBundle.PhaseEnum.DUAL_TRUST)
                     .requiredReaderIds(List.of("network-reader")));
     when(ledger.transport()).thenReturn(bundle);
+    var authorized = new HashMap<String, String>();
+    authorized.put("network-reader", null);
+    var identities = new HashMap<String, String>();
+    identities.put("network-reader", "network-installation");
+    when(ledger.expectedSelectors(any()))
+        .thenAnswer(
+            call -> {
+              ExpectedSelectorsQuery q = call.getArgument(0);
+              var b = bundle.getPayload();
+              return new ExpectedSelectors()
+                  .tenantId(tenant.toString())
+                  .realm("1")
+                  .authorityId(b.getAuthorityId())
+                  .authorityDigest(b.getAuthorityDigest())
+                  .generation(b.getGeneration())
+                  .bundleVersion(b.getBundleVersion())
+                  .bundleDigest(q.getBundleDigest())
+                  .phase(ExpectedSelectors.PhaseEnum.valueOf(b.getPhase().name()))
+                  .controlRevision(q.getControlRevision())
+                  .controlDigest(q.getControlDigest())
+                  .challenge(q.getChallenge())
+                  .issuedAt(clock.instant().toString())
+                  .requiredReaderIds(Set.of("network-reader"))
+                  .expectedSelectors(new HashMap<>(authorized))
+                  .readerIdentities(new HashMap<>(identities));
+            });
     var rows = new ArrayList<TransportReaderEvidence>();
     var stamp = new java.util.concurrent.atomic.AtomicReference<>(clock.instant());
     var corruptNonce = new java.util.concurrent.atomic.AtomicBoolean();
@@ -113,6 +140,9 @@ class MessageNetworkIsolationReadyTest {
             .selector(selector)
             .phase(TransportReaderEvidence.PhaseEnum.LOADED)
             .isolationEnforced(false));
+    // A proof cannot authorize its own selector; first require C's independent grant.
+    assertThrows(IllegalStateException.class, () -> execution.ready(tenant, node, request));
+    authorized.put("network-reader", MessageNetworkSelectors.digest(selector));
     stamp.set(clock.instant().minusSeconds(61));
     assertThrows(IllegalStateException.class, () -> execution.ready(tenant, node, request));
     stamp.set(clock.instant());
@@ -124,8 +154,22 @@ class MessageNetworkIsolationReadyTest {
         "sha256:" + Secrets.hash(InstallationJson.canonical(Json.MAPPER.valueToTree(bundle))));
     assertThrows(IllegalStateException.class, () -> execution.ready(tenant, node, request));
     rows.getFirst().phase(TransportReaderEvidence.PhaseEnum.HANDSHAKE_VERIFIED);
+    assertThrows(IllegalStateException.class, () -> execution.ready(tenant, node, request));
+    authorized.put("network-reader", MessageNetworkSelectors.digest(selector));
+    identities.put("network-reader", "replacement-installation");
+    assertThrows(IllegalStateException.class, () -> execution.ready(tenant, node, request));
+    identities.put("network-reader", "network-installation");
     when(ledger.enforceIsolation(request)).thenReturn(request);
     assertEquals(request, execution.ready(tenant, node, request));
-    verify(ledger, times(1)).enforceIsolation(request);
+    rows.getFirst()
+        .phase(TransportReaderEvidence.PhaseEnum.ISOLATED)
+        .selector(null)
+        .isolationEnforced(true);
+    assertThrows(IllegalStateException.class, () -> execution.ready(tenant, node, request));
+    authorized.put("network-reader", null);
+    assertEquals(request, execution.ready(tenant, node, request));
+    authorized.remove("network-reader");
+    assertThrows(IllegalStateException.class, () -> execution.ready(tenant, node, request));
+    verify(ledger, times(2)).enforceIsolation(request);
   }
 }

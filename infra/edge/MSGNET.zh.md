@@ -19,7 +19,7 @@ reader/projector 均 UID/GID65532。材料/控制/状态目录0700、材料文�
 
 reader 每5秒检查控制与固定 selector，失败持续重试；60秒未恢复即撤下消息句柄。根撤销立即拒绝新连接并关闭受管的 submit/WSS/presence 连接。精确 selector 重试不关闭连接。重启恢复耐久控制与 CA 墓碑，但不会恢复 loaded/handshake_verified 的内存确认；两个叶子用途均真实握手才确认 handshake_verified。公有/NodeControl TLS 和 DSH 生命周期由原入口管理。
 
-N 继续按冻结本地模型发送 reload/confirm。C 的 /transport/history、/transport/transitions 和 /transport/confirmation 必须提供 no-store 的冻结对象。全局确认签名代表根授权运行钥对 C 授权台账的声明，消费端不从证据行反填 expected_selectors。
+N 继续按冻结本地模型发送 reload/confirm。C 的 /transport/history、/transport/transitions、/transport/expected-selectors 和 /transport/confirmation 必须提供 no-store 的冻结对象。reader 先通过独立 HTTPS+mTLS/JWT 读取 ExpectedSelectors，核精确 bundle、最新根控制摘要、随机 challenge、60秒有效期及冻结 reader/身份集合，再核全局确认签名与逐行 selector。消费端不从证据行反填 expected_selectors；无 selector 的实际隔离行仅在独立台账显式 null 且身份精确匹配时接受。HTTP202 不推进阶段，台账缺失或失效继续等待投影，重试重新查询。
 
 本线测试包含两轮阶段推进、新 CA/新叶子、真实 mTLS/WSS/NATS presence 握手、退休 CA 复活拒绝与撤销断连；不代表 C/N/D 的整线或真实 NAS 验收已完成。
 

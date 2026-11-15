@@ -124,3 +124,17 @@ func (s *HTTPSource) Control(ctx context.Context) (api.SignedRootControl, error)
 	e := s.read(ctx, http.MethodGet, "/bootstrap/controls", "SignedRootControl", nil, &v)
 	return v, e
 }
+
+func (s *HTTPSource) ExpectedSelectors(ctx context.Context, q api.ExpectedSelectorsQuery) (api.ExpectedSelectors, error) {
+	var v api.ExpectedSelectors
+	raw, e := Bytes(q)
+	if e != nil {
+		return v, e
+	}
+	var check api.ExpectedSelectorsQuery
+	if e = s.schemas.Decode("ExpectedSelectorsQuery", raw, &check); e != nil {
+		return v, e
+	}
+	e = s.read(ctx, http.MethodPost, "/transport/expected-selectors", "ExpectedSelectors", q, &v)
+	return v, e
+}

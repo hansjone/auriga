@@ -159,7 +159,7 @@ func TestBoundaryVectors(t *testing.T) {
 				err = VerifyArchive(text("issued_at"), text("before"), numeric("grace_seconds"), removed, reappeared, tombs)
 			case "config":
 				err = CheckConfig(schemas, i["config"])
-			case "transport_transition", "transport_catchup", "transport_confirmation", "node_control_binding", "projection_access":
+			case "transport_transition", "transport_catchup", "transport_confirmation", "node_control_binding", "projection_access", "expected_selectors":
 				err = k3Verdict(t, v.Operation, i)
 			default:
 				t.Fatalf("unknown production boundary %s", v.Operation)

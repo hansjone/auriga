@@ -134,6 +134,8 @@ func TestMsgnetRuntimeLoadsRootVerifiedTLSAndDisconnectsRevokedIdentity(t *testi
 	history := map[string]api.TransportPredecessor{initialDigest: {Bundle: b, Authority: a, Control: c}}
 	grants := map[string]api.LocalProjectionSelector{initialDigest: g.Selector}
 	confirmed := map[string]string{initialDigest: "loaded"}
+	var ledgerFault atomic.Int32
+	var confirmationPending atomic.Bool
 	server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if isUpgradeRequest(r) {
 			websocket.Server{Handshake: func(_ *websocket.Config, r *http.Request) error {
@@ -183,7 +185,61 @@ func TestMsgnetRuntimeLoadsRootVerifiedTLSAndDisconnectsRevokedIdentity(t *testi
 			writePublic(value)
 			return
 		}
+		if r.URL.Path == "/api/collab/v2/network/transport/expected-selectors" {
+			if r.Header.Get("Authorization") == "" {
+				w.WriteHeader(403)
+				return
+			}
+			if ledgerFault.Load() == 1 {
+				w.WriteHeader(202)
+				return
+			}
+			var q api.ExpectedSelectorsQuery
+			if err := json.NewDecoder(r.Body).Decode(&q); err != nil {
+				t.Error(err)
+				w.WriteHeader(400)
+				return
+			}
+			mu.Lock()
+			previous, ok := history[q.BundleDigest]
+			selector, authorized := grants[q.BundleDigest]
+			control := current
+			mu.Unlock()
+			if !ok {
+				w.WriteHeader(404)
+				return
+			}
+			bp := previous.Bundle.Payload
+			cd, _ := trust.ObjectDigest(control)
+			var sd *string
+			if authorized {
+				digest, err := trust.ObjectDigest(selector)
+				if err != nil {
+					t.Error(err)
+				}
+				sd = &digest
+			}
+			snapshot := api.ExpectedSelectors{TenantId: tenant, Realm: "1", AuthorityId: bp.AuthorityId, AuthorityDigest: bp.AuthorityDigest, Generation: bp.Generation, BundleVersion: bp.BundleVersion, BundleDigest: q.BundleDigest, Phase: bp.Phase, RequiredReaderIds: bp.RequiredReaderIds, ControlRevision: control.Payload.ControlRevision, ControlDigest: cd, Challenge: q.Challenge, IssuedAt: stamp(time.Now().UTC().Truncate(time.Second)), ExpectedSelectors: map[string]*string{"edge-reader": sd}, ReaderIdentities: map[string]string{"edge-reader": "edge-install"}}
+			switch ledgerFault.Load() {
+			case 2:
+				delete(snapshot.ExpectedSelectors, "edge-reader")
+			case 3:
+				snapshot.ControlDigest = "sha256:" + strings.Repeat("f", 64)
+			case 4:
+				snapshot.ExpectedSelectors["edge-reader"] = nil
+			case 5:
+				snapshot.IssuedAt = stamp(time.Now().UTC().Truncate(time.Second).Add(-61 * time.Second))
+			case 6:
+				snapshot.ReaderIdentities["edge-reader"] = "replacement-installation"
+			}
+			writePublic(snapshot)
+			return
+		}
 		if r.URL.Path == "/api/collab/v2/network/transport/confirmation" {
+			if confirmationPending.Load() {
+				w.WriteHeader(202)
+				return
+			}
 			if r.Header.Get("Authorization") == "" {
 				t.Error("confirmation omitted internal credential")
 				w.WriteHeader(403)
@@ -206,7 +262,7 @@ func TestMsgnetRuntimeLoadsRootVerifiedTLSAndDisconnectsRevokedIdentity(t *testi
 				return
 			}
 			bp := previous.Bundle.Payload
-			proof := api.TransportConfirmation{TenantId: tenant, Realm: "1", AuthorityId: a.Payload.AuthorityId, AuthorityDigest: ad, ControlRevision: control.Payload.ControlRevision, BundleVersion: bp.BundleVersion, BundleDigest: q.BundleDigest, Phase: bp.Phase, RequiredReaderIds: bp.RequiredReaderIds, Readers: []api.TransportReaderEvidence{{ReaderId: "edge-reader", IdentityId: "edge-install", Selector: selector, Phase: level}}, Challenge: q.Challenge, IssuedAt: stamp(time.Now().UTC().Truncate(time.Second))}
+			proof := api.TransportConfirmation{TenantId: tenant, Realm: "1", AuthorityId: a.Payload.AuthorityId, AuthorityDigest: ad, ControlRevision: control.Payload.ControlRevision, BundleVersion: bp.BundleVersion, BundleDigest: q.BundleDigest, Phase: bp.Phase, RequiredReaderIds: bp.RequiredReaderIds, Readers: []api.TransportReaderEvidence{{ReaderId: "edge-reader", IdentityId: "edge-install", Selector: &selector, Phase: level}}, Challenge: q.Challenge, IssuedAt: stamp(time.Now().UTC().Truncate(time.Second))}
 			writePublic(api.SignedTransportConfirmation{Payload: proof, RuntimeAuth: sign(proof, runtime, "runtime", "Auriga.NetworkTransportConfirmation.v2")})
 			return
 		}
@@ -431,6 +487,27 @@ func TestMsgnetRuntimeLoadsRootVerifiedTLSAndDisconnectsRevokedIdentity(t *testi
 		history[bd] = api.TransportPredecessor{Bundle: candidate, Authority: a, Control: c}
 		grants[bd] = generation.Selector
 		mu.Unlock()
+		if version == 2 {
+			for mode := int32(1); mode <= 6; mode++ {
+				ledgerFault.Store(mode)
+				if err := x.reader.Reload(); err == nil {
+					t.Fatalf("invalid independent ledger mode %d advanced transport", mode)
+				}
+				if x.consumer.State.Bundle.Payload.BundleVersion != "1" {
+					t.Fatal("failed ledger check persisted a later bundle")
+				}
+			}
+			ledgerFault.Store(0)
+			confirmationPending.Store(true)
+			if err := x.reader.Reload(); err == nil {
+				t.Fatal("202 confirmation advanced transport")
+			}
+			if x.consumer.State.Bundle.Payload.BundleVersion != "1" {
+				t.Fatal("202 confirmation persisted a later bundle")
+			}
+			confirmationPending.Store(false)
+		}
+
 		if e = x.reader.Reload(); e != nil {
 			t.Fatalf("cycle version %d: %v", version, e)
 		}
