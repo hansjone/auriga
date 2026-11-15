@@ -12,10 +12,13 @@ import auriga.iam.api.IdentityPolicyHooks;
 import auriga.testsupport.PostgresExtension;
 import java.time.*;
 import java.util.*;
+import java.util.function.Supplier;
 import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.*;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.mock.web.MockHttpServletRequest;
+import org.springframework.mock.web.MockHttpServletResponse;
 import tools.jackson.databind.node.ObjectNode;
 
 @ExtendWith(PostgresExtension.class)
@@ -366,6 +369,38 @@ class NativeConnectPostgresTest {
           assertEquals("emergency", started.transaction().path("step").path("formId").asString());
           assertFalse(
               started.transaction().path("nativeDevice").path("deviceCode").asString().isEmpty());
+        });
+  }
+
+  @Test
+  void controllerRoutesSignedNativeBearerWithoutRequestPrincipal() {
+    TenantContext.run(
+        tenant,
+        () -> {
+          assertTrue(auriga.common.security.AuthorizationRules.currentPrincipal().isEmpty());
+          String raw = connected().path("access_token").asString();
+          var requests = mock(RequestIdentity.class);
+          when(requests.call(any(), any())).thenAnswer(i -> ((Supplier<?>) i.getArgument(1)).get());
+          var controller = new StandardDeviceController(oauth, requests);
+          var request = new MockHttpServletRequest();
+          request.addHeader("Authorization", "Bearer " + raw);
+          var response = new MockHttpServletResponse();
+          var identity = controller.identity(request, response);
+          assertEquals("native_tx", identity.path("authorizationMode").asString());
+          assertEquals("native-example", identity.path("clientId").asString());
+          assertEquals(account.toString(), identity.path("accountId").asString());
+          assertEquals(
+              account.toString(),
+              controller.profile(request, response).path("account").path("id").asString());
+          assertEquals("no-store", response.getHeader("Cache-Control"));
+          assertEquals("no-cache", response.getHeader("Pragma"));
+          assertEquals(0, response.getCookies().length);
+          request.removeHeader("Authorization");
+          request.addHeader("Authorization", "Bearer " + raw + "-invalid");
+          var rejected =
+              assertThrows(AurigaException.class, () -> controller.identity(request, response));
+          assertEquals("iam.invalid_token", rejected.errorCode().code());
+          assertEquals(401, rejected.errorCode().httpStatus());
         });
   }
 

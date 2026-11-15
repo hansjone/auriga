@@ -46,10 +46,8 @@ public class StandardDeviceController {
   }
 
   private ObjectNode identity(String raw, boolean profile) {
-    var claims = oauth.deviceAuthority();
-    var principal = auriga.common.security.AuthorizationRules.currentPrincipal().orElseThrow();
-    return claims.standard(principal.deviceId())
-        ? (profile ? oauth.standardDevices().profile(raw) : oauth.standardDevices().identity(raw))
-        : oauth.nativeIdentity(raw, profile);
+    return oauth.nativeDevice(raw)
+        ? oauth.nativeIdentity(raw, profile)
+        : (profile ? oauth.standardDevices().profile(raw) : oauth.standardDevices().identity(raw));
   }
 }

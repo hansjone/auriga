@@ -766,6 +766,16 @@ public final class OAuthProvider {
     return userTokens(c, grant, session, true);
   }
 
+  /** Route by the signed bearer and tenant authority, independent of the request principal. */
+  boolean nativeDevice(String raw) {
+    ObjectNode claims = tokens.verify(raw);
+    return store.tx(
+        () -> {
+          ObjectNode device = store.get("device", claims.path("did").asString(), false);
+          return device != null && "native_tx".equals(device.path("authorizationMode").asString());
+        });
+  }
+
   ObjectNode nativeIdentity(String raw, boolean profile) {
     ObjectNode claims = tokens.verify(raw);
     IamError.require(
