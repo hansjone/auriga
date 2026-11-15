@@ -111,36 +111,6 @@
               }
             }
           },
-          "409": {
-            "description": "common.conflict 或 shared.stop_unconfirmed",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "common.yaml#/components/schemas/Problem"
-                }
-              }
-            }
-          },
-          "412": {
-            "description": "common.precondition_failed",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "common.yaml#/components/schemas/Problem"
-                }
-              }
-            }
-          },
-          "428": {
-            "description": "缺少 If-Match，common.validation_failed",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "common.yaml#/components/schemas/Problem"
-                }
-              }
-            }
-          },
           "503": {
             "description": "common.unavailable",
             "content": {
@@ -410,36 +380,6 @@
               }
             }
           },
-          "409": {
-            "description": "common.conflict 或 shared.stop_unconfirmed",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "common.yaml#/components/schemas/Problem"
-                }
-              }
-            }
-          },
-          "412": {
-            "description": "common.precondition_failed",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "common.yaml#/components/schemas/Problem"
-                }
-              }
-            }
-          },
-          "428": {
-            "description": "缺少 If-Match，common.validation_failed",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "common.yaml#/components/schemas/Problem"
-                }
-              }
-            }
-          },
           "503": {
             "description": "common.unavailable",
             "content": {
@@ -561,26 +501,6 @@
               }
             }
           },
-          "412": {
-            "description": "common.precondition_failed",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "common.yaml#/components/schemas/Problem"
-                }
-              }
-            }
-          },
-          "428": {
-            "description": "缺少 If-Match，common.validation_failed",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "common.yaml#/components/schemas/Problem"
-                }
-              }
-            }
-          },
           "503": {
             "description": "common.unavailable",
             "content": {
@@ -672,36 +592,6 @@
           },
           "404": {
             "description": "common.not_found",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "common.yaml#/components/schemas/Problem"
-                }
-              }
-            }
-          },
-          "409": {
-            "description": "common.conflict 或 shared.stop_unconfirmed",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "common.yaml#/components/schemas/Problem"
-                }
-              }
-            }
-          },
-          "412": {
-            "description": "common.precondition_failed",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "common.yaml#/components/schemas/Problem"
-                }
-              }
-            }
-          },
-          "428": {
-            "description": "缺少 If-Match，common.validation_failed",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -1127,36 +1017,6 @@
               }
             }
           },
-          "409": {
-            "description": "common.conflict 或 shared.stop_unconfirmed",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "common.yaml#/components/schemas/Problem"
-                }
-              }
-            }
-          },
-          "412": {
-            "description": "common.precondition_failed",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "common.yaml#/components/schemas/Problem"
-                }
-              }
-            }
-          },
-          "428": {
-            "description": "缺少 If-Match，common.validation_failed",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "common.yaml#/components/schemas/Problem"
-                }
-              }
-            }
-          },
           "503": {
             "description": "common.unavailable",
             "content": {
@@ -1238,36 +1098,6 @@
           },
           "404": {
             "description": "common.not_found",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "common.yaml#/components/schemas/Problem"
-                }
-              }
-            }
-          },
-          "409": {
-            "description": "common.conflict 或 shared.stop_unconfirmed",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "common.yaml#/components/schemas/Problem"
-                }
-              }
-            }
-          },
-          "412": {
-            "description": "common.precondition_failed",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "common.yaml#/components/schemas/Problem"
-                }
-              }
-            }
-          },
-          "428": {
-            "description": "缺少 If-Match，common.validation_failed",
             "content": {
               "application/problem+json": {
                 "schema": {

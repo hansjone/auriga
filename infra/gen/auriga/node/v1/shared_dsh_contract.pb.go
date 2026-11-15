@@ -24,6 +24,107 @@ const (
 )
 
 // Wire validation and semantic constraints: contracts/shared-dsh/README.md.
+type SharedDshPoolMemorySample struct {
+	state              protoimpl.MessageState `protogen:"open.v1"`
+	SchemaVersion      int64                  `protobuf:"varint,1,opt,name=schema_version,json=schemaVersion,proto3" json:"schema_version,omitempty"`
+	TenantId           string                 `protobuf:"bytes,2,opt,name=tenant_id,json=tenantId,proto3" json:"tenant_id,omitempty"`
+	PhysicalInstanceId string                 `protobuf:"bytes,3,opt,name=physical_instance_id,json=physicalInstanceId,proto3" json:"physical_instance_id,omitempty"`
+	ObservedGeneration int64                  `protobuf:"varint,4,opt,name=observed_generation,json=observedGeneration,proto3" json:"observed_generation,omitempty"`
+	ObservedAt         int64                  `protobuf:"varint,5,opt,name=observed_at,json=observedAt,proto3" json:"observed_at,omitempty"`
+	ValidUntil         int64                  `protobuf:"varint,6,opt,name=valid_until,json=validUntil,proto3" json:"valid_until,omitempty"`
+	MemoryUsedBytes    int64                  `protobuf:"varint,7,opt,name=memory_used_bytes,json=memoryUsedBytes,proto3" json:"memory_used_bytes,omitempty"`
+	MemoryLimitBytes   int64                  `protobuf:"varint,8,opt,name=memory_limit_bytes,json=memoryLimitBytes,proto3" json:"memory_limit_bytes,omitempty"`
+	unknownFields      protoimpl.UnknownFields
+	sizeCache          protoimpl.SizeCache
+}
+
+func (x *SharedDshPoolMemorySample) Reset() {
+	*x = SharedDshPoolMemorySample{}
+	mi := &file_auriga_node_v1_shared_dsh_contract_proto_msgTypes[0]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SharedDshPoolMemorySample) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SharedDshPoolMemorySample) ProtoMessage() {}
+
+func (x *SharedDshPoolMemorySample) ProtoReflect() protoreflect.Message {
+	mi := &file_auriga_node_v1_shared_dsh_contract_proto_msgTypes[0]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SharedDshPoolMemorySample.ProtoReflect.Descriptor instead.
+func (*SharedDshPoolMemorySample) Descriptor() ([]byte, []int) {
+	return file_auriga_node_v1_shared_dsh_contract_proto_rawDescGZIP(), []int{0}
+}
+
+func (x *SharedDshPoolMemorySample) GetSchemaVersion() int64 {
+	if x != nil {
+		return x.SchemaVersion
+	}
+	return 0
+}
+
+func (x *SharedDshPoolMemorySample) GetTenantId() string {
+	if x != nil {
+		return x.TenantId
+	}
+	return ""
+}
+
+func (x *SharedDshPoolMemorySample) GetPhysicalInstanceId() string {
+	if x != nil {
+		return x.PhysicalInstanceId
+	}
+	return ""
+}
+
+func (x *SharedDshPoolMemorySample) GetObservedGeneration() int64 {
+	if x != nil {
+		return x.ObservedGeneration
+	}
+	return 0
+}
+
+func (x *SharedDshPoolMemorySample) GetObservedAt() int64 {
+	if x != nil {
+		return x.ObservedAt
+	}
+	return 0
+}
+
+func (x *SharedDshPoolMemorySample) GetValidUntil() int64 {
+	if x != nil {
+		return x.ValidUntil
+	}
+	return 0
+}
+
+func (x *SharedDshPoolMemorySample) GetMemoryUsedBytes() int64 {
+	if x != nil {
+		return x.MemoryUsedBytes
+	}
+	return 0
+}
+
+func (x *SharedDshPoolMemorySample) GetMemoryLimitBytes() int64 {
+	if x != nil {
+		return x.MemoryLimitBytes
+	}
+	return 0
+}
+
+// Wire validation and semantic constraints: contracts/shared-dsh/README.md.
 type SharedDshTicketExchangeRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Ticket        string                 `protobuf:"bytes,1,opt,name=ticket,proto3" json:"ticket,omitempty"`
@@ -33,7 +134,7 @@ type SharedDshTicketExchangeRequest struct {
 
 func (x *SharedDshTicketExchangeRequest) Reset() {
 	*x = SharedDshTicketExchangeRequest{}
-	mi := &file_auriga_node_v1_shared_dsh_contract_proto_msgTypes[0]
+	mi := &file_auriga_node_v1_shared_dsh_contract_proto_msgTypes[1]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -45,7 +146,7 @@ func (x *SharedDshTicketExchangeRequest) String() string {
 func (*SharedDshTicketExchangeRequest) ProtoMessage() {}
 
 func (x *SharedDshTicketExchangeRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_auriga_node_v1_shared_dsh_contract_proto_msgTypes[0]
+	mi := &file_auriga_node_v1_shared_dsh_contract_proto_msgTypes[1]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -58,7 +159,7 @@ func (x *SharedDshTicketExchangeRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SharedDshTicketExchangeRequest.ProtoReflect.Descriptor instead.
 func (*SharedDshTicketExchangeRequest) Descriptor() ([]byte, []int) {
-	return file_auriga_node_v1_shared_dsh_contract_proto_rawDescGZIP(), []int{0}
+	return file_auriga_node_v1_shared_dsh_contract_proto_rawDescGZIP(), []int{1}
 }
 
 func (x *SharedDshTicketExchangeRequest) GetTicket() string {
@@ -80,7 +181,7 @@ type SharedDshSignedHeader struct {
 
 func (x *SharedDshSignedHeader) Reset() {
 	*x = SharedDshSignedHeader{}
-	mi := &file_auriga_node_v1_shared_dsh_contract_proto_msgTypes[1]
+	mi := &file_auriga_node_v1_shared_dsh_contract_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -92,7 +193,7 @@ func (x *SharedDshSignedHeader) String() string {
 func (*SharedDshSignedHeader) ProtoMessage() {}
 
 func (x *SharedDshSignedHeader) ProtoReflect() protoreflect.Message {
-	mi := &file_auriga_node_v1_shared_dsh_contract_proto_msgTypes[1]
+	mi := &file_auriga_node_v1_shared_dsh_contract_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -105,7 +206,7 @@ func (x *SharedDshSignedHeader) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SharedDshSignedHeader.ProtoReflect.Descriptor instead.
 func (*SharedDshSignedHeader) Descriptor() ([]byte, []int) {
-	return file_auriga_node_v1_shared_dsh_contract_proto_rawDescGZIP(), []int{1}
+	return file_auriga_node_v1_shared_dsh_contract_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *SharedDshSignedHeader) GetAlg() string {
@@ -145,7 +246,7 @@ type SharedDshBinding struct {
 
 func (x *SharedDshBinding) Reset() {
 	*x = SharedDshBinding{}
-	mi := &file_auriga_node_v1_shared_dsh_contract_proto_msgTypes[2]
+	mi := &file_auriga_node_v1_shared_dsh_contract_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -157,7 +258,7 @@ func (x *SharedDshBinding) String() string {
 func (*SharedDshBinding) ProtoMessage() {}
 
 func (x *SharedDshBinding) ProtoReflect() protoreflect.Message {
-	mi := &file_auriga_node_v1_shared_dsh_contract_proto_msgTypes[2]
+	mi := &file_auriga_node_v1_shared_dsh_contract_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -170,7 +271,7 @@ func (x *SharedDshBinding) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SharedDshBinding.ProtoReflect.Descriptor instead.
 func (*SharedDshBinding) Descriptor() ([]byte, []int) {
-	return file_auriga_node_v1_shared_dsh_contract_proto_rawDescGZIP(), []int{2}
+	return file_auriga_node_v1_shared_dsh_contract_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *SharedDshBinding) GetTenantId() string {
@@ -241,7 +342,7 @@ type SharedDshSessionBinding struct {
 
 func (x *SharedDshSessionBinding) Reset() {
 	*x = SharedDshSessionBinding{}
-	mi := &file_auriga_node_v1_shared_dsh_contract_proto_msgTypes[3]
+	mi := &file_auriga_node_v1_shared_dsh_contract_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -253,7 +354,7 @@ func (x *SharedDshSessionBinding) String() string {
 func (*SharedDshSessionBinding) ProtoMessage() {}
 
 func (x *SharedDshSessionBinding) ProtoReflect() protoreflect.Message {
-	mi := &file_auriga_node_v1_shared_dsh_contract_proto_msgTypes[3]
+	mi := &file_auriga_node_v1_shared_dsh_contract_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -266,7 +367,7 @@ func (x *SharedDshSessionBinding) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SharedDshSessionBinding.ProtoReflect.Descriptor instead.
 func (*SharedDshSessionBinding) Descriptor() ([]byte, []int) {
-	return file_auriga_node_v1_shared_dsh_contract_proto_rawDescGZIP(), []int{3}
+	return file_auriga_node_v1_shared_dsh_contract_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *SharedDshSessionBinding) GetTenantId() string {
@@ -355,7 +456,7 @@ type SharedDshOpenTicket struct {
 
 func (x *SharedDshOpenTicket) Reset() {
 	*x = SharedDshOpenTicket{}
-	mi := &file_auriga_node_v1_shared_dsh_contract_proto_msgTypes[4]
+	mi := &file_auriga_node_v1_shared_dsh_contract_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -367,7 +468,7 @@ func (x *SharedDshOpenTicket) String() string {
 func (*SharedDshOpenTicket) ProtoMessage() {}
 
 func (x *SharedDshOpenTicket) ProtoReflect() protoreflect.Message {
-	mi := &file_auriga_node_v1_shared_dsh_contract_proto_msgTypes[4]
+	mi := &file_auriga_node_v1_shared_dsh_contract_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -380,7 +481,7 @@ func (x *SharedDshOpenTicket) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SharedDshOpenTicket.ProtoReflect.Descriptor instead.
 func (*SharedDshOpenTicket) Descriptor() ([]byte, []int) {
-	return file_auriga_node_v1_shared_dsh_contract_proto_rawDescGZIP(), []int{4}
+	return file_auriga_node_v1_shared_dsh_contract_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *SharedDshOpenTicket) GetSchemaVersion() int64 {
@@ -451,7 +552,7 @@ type SharedDshIdentity struct {
 
 func (x *SharedDshIdentity) Reset() {
 	*x = SharedDshIdentity{}
-	mi := &file_auriga_node_v1_shared_dsh_contract_proto_msgTypes[5]
+	mi := &file_auriga_node_v1_shared_dsh_contract_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -463,7 +564,7 @@ func (x *SharedDshIdentity) String() string {
 func (*SharedDshIdentity) ProtoMessage() {}
 
 func (x *SharedDshIdentity) ProtoReflect() protoreflect.Message {
-	mi := &file_auriga_node_v1_shared_dsh_contract_proto_msgTypes[5]
+	mi := &file_auriga_node_v1_shared_dsh_contract_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -476,7 +577,7 @@ func (x *SharedDshIdentity) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SharedDshIdentity.ProtoReflect.Descriptor instead.
 func (*SharedDshIdentity) Descriptor() ([]byte, []int) {
-	return file_auriga_node_v1_shared_dsh_contract_proto_rawDescGZIP(), []int{5}
+	return file_auriga_node_v1_shared_dsh_contract_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *SharedDshIdentity) GetSchemaVersion() int64 {
@@ -567,7 +668,7 @@ type SharedDshCapability struct {
 
 func (x *SharedDshCapability) Reset() {
 	*x = SharedDshCapability{}
-	mi := &file_auriga_node_v1_shared_dsh_contract_proto_msgTypes[6]
+	mi := &file_auriga_node_v1_shared_dsh_contract_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -579,7 +680,7 @@ func (x *SharedDshCapability) String() string {
 func (*SharedDshCapability) ProtoMessage() {}
 
 func (x *SharedDshCapability) ProtoReflect() protoreflect.Message {
-	mi := &file_auriga_node_v1_shared_dsh_contract_proto_msgTypes[6]
+	mi := &file_auriga_node_v1_shared_dsh_contract_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -592,7 +693,7 @@ func (x *SharedDshCapability) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SharedDshCapability.ProtoReflect.Descriptor instead.
 func (*SharedDshCapability) Descriptor() ([]byte, []int) {
-	return file_auriga_node_v1_shared_dsh_contract_proto_rawDescGZIP(), []int{6}
+	return file_auriga_node_v1_shared_dsh_contract_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *SharedDshCapability) GetSchemaVersion() int64 {
@@ -676,7 +777,7 @@ type SharedDshRevocation struct {
 
 func (x *SharedDshRevocation) Reset() {
 	*x = SharedDshRevocation{}
-	mi := &file_auriga_node_v1_shared_dsh_contract_proto_msgTypes[7]
+	mi := &file_auriga_node_v1_shared_dsh_contract_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -688,7 +789,7 @@ func (x *SharedDshRevocation) String() string {
 func (*SharedDshRevocation) ProtoMessage() {}
 
 func (x *SharedDshRevocation) ProtoReflect() protoreflect.Message {
-	mi := &file_auriga_node_v1_shared_dsh_contract_proto_msgTypes[7]
+	mi := &file_auriga_node_v1_shared_dsh_contract_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -701,7 +802,7 @@ func (x *SharedDshRevocation) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SharedDshRevocation.ProtoReflect.Descriptor instead.
 func (*SharedDshRevocation) Descriptor() ([]byte, []int) {
-	return file_auriga_node_v1_shared_dsh_contract_proto_rawDescGZIP(), []int{7}
+	return file_auriga_node_v1_shared_dsh_contract_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *SharedDshRevocation) GetSchemaVersion() int64 {
@@ -780,7 +881,7 @@ type SharedDshResource struct {
 
 func (x *SharedDshResource) Reset() {
 	*x = SharedDshResource{}
-	mi := &file_auriga_node_v1_shared_dsh_contract_proto_msgTypes[8]
+	mi := &file_auriga_node_v1_shared_dsh_contract_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -792,7 +893,7 @@ func (x *SharedDshResource) String() string {
 func (*SharedDshResource) ProtoMessage() {}
 
 func (x *SharedDshResource) ProtoReflect() protoreflect.Message {
-	mi := &file_auriga_node_v1_shared_dsh_contract_proto_msgTypes[8]
+	mi := &file_auriga_node_v1_shared_dsh_contract_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -805,7 +906,7 @@ func (x *SharedDshResource) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SharedDshResource.ProtoReflect.Descriptor instead.
 func (*SharedDshResource) Descriptor() ([]byte, []int) {
-	return file_auriga_node_v1_shared_dsh_contract_proto_rawDescGZIP(), []int{8}
+	return file_auriga_node_v1_shared_dsh_contract_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *SharedDshResource) GetResourceId() string {
@@ -851,7 +952,7 @@ type SharedDshResourceView struct {
 
 func (x *SharedDshResourceView) Reset() {
 	*x = SharedDshResourceView{}
-	mi := &file_auriga_node_v1_shared_dsh_contract_proto_msgTypes[9]
+	mi := &file_auriga_node_v1_shared_dsh_contract_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -863,7 +964,7 @@ func (x *SharedDshResourceView) String() string {
 func (*SharedDshResourceView) ProtoMessage() {}
 
 func (x *SharedDshResourceView) ProtoReflect() protoreflect.Message {
-	mi := &file_auriga_node_v1_shared_dsh_contract_proto_msgTypes[9]
+	mi := &file_auriga_node_v1_shared_dsh_contract_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -876,7 +977,7 @@ func (x *SharedDshResourceView) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SharedDshResourceView.ProtoReflect.Descriptor instead.
 func (*SharedDshResourceView) Descriptor() ([]byte, []int) {
-	return file_auriga_node_v1_shared_dsh_contract_proto_rawDescGZIP(), []int{9}
+	return file_auriga_node_v1_shared_dsh_contract_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *SharedDshResourceView) GetSchemaVersion() int64 {
@@ -936,7 +1037,7 @@ type SharedDshResourceReport struct {
 
 func (x *SharedDshResourceReport) Reset() {
 	*x = SharedDshResourceReport{}
-	mi := &file_auriga_node_v1_shared_dsh_contract_proto_msgTypes[10]
+	mi := &file_auriga_node_v1_shared_dsh_contract_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -948,7 +1049,7 @@ func (x *SharedDshResourceReport) String() string {
 func (*SharedDshResourceReport) ProtoMessage() {}
 
 func (x *SharedDshResourceReport) ProtoReflect() protoreflect.Message {
-	mi := &file_auriga_node_v1_shared_dsh_contract_proto_msgTypes[10]
+	mi := &file_auriga_node_v1_shared_dsh_contract_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -961,7 +1062,7 @@ func (x *SharedDshResourceReport) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SharedDshResourceReport.ProtoReflect.Descriptor instead.
 func (*SharedDshResourceReport) Descriptor() ([]byte, []int) {
-	return file_auriga_node_v1_shared_dsh_contract_proto_rawDescGZIP(), []int{10}
+	return file_auriga_node_v1_shared_dsh_contract_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *SharedDshResourceReport) GetSchemaVersion() int64 {
@@ -1023,7 +1124,7 @@ type SharedDshRuntimeIntent struct {
 
 func (x *SharedDshRuntimeIntent) Reset() {
 	*x = SharedDshRuntimeIntent{}
-	mi := &file_auriga_node_v1_shared_dsh_contract_proto_msgTypes[11]
+	mi := &file_auriga_node_v1_shared_dsh_contract_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1035,7 +1136,7 @@ func (x *SharedDshRuntimeIntent) String() string {
 func (*SharedDshRuntimeIntent) ProtoMessage() {}
 
 func (x *SharedDshRuntimeIntent) ProtoReflect() protoreflect.Message {
-	mi := &file_auriga_node_v1_shared_dsh_contract_proto_msgTypes[11]
+	mi := &file_auriga_node_v1_shared_dsh_contract_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1048,7 +1149,7 @@ func (x *SharedDshRuntimeIntent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SharedDshRuntimeIntent.ProtoReflect.Descriptor instead.
 func (*SharedDshRuntimeIntent) Descriptor() ([]byte, []int) {
-	return file_auriga_node_v1_shared_dsh_contract_proto_rawDescGZIP(), []int{11}
+	return file_auriga_node_v1_shared_dsh_contract_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *SharedDshRuntimeIntent) GetSchemaVersion() int64 {
@@ -1128,7 +1229,7 @@ type SharedDshRuntimeReceipt struct {
 
 func (x *SharedDshRuntimeReceipt) Reset() {
 	*x = SharedDshRuntimeReceipt{}
-	mi := &file_auriga_node_v1_shared_dsh_contract_proto_msgTypes[12]
+	mi := &file_auriga_node_v1_shared_dsh_contract_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1140,7 +1241,7 @@ func (x *SharedDshRuntimeReceipt) String() string {
 func (*SharedDshRuntimeReceipt) ProtoMessage() {}
 
 func (x *SharedDshRuntimeReceipt) ProtoReflect() protoreflect.Message {
-	mi := &file_auriga_node_v1_shared_dsh_contract_proto_msgTypes[12]
+	mi := &file_auriga_node_v1_shared_dsh_contract_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1153,7 +1254,7 @@ func (x *SharedDshRuntimeReceipt) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SharedDshRuntimeReceipt.ProtoReflect.Descriptor instead.
 func (*SharedDshRuntimeReceipt) Descriptor() ([]byte, []int) {
-	return file_auriga_node_v1_shared_dsh_contract_proto_rawDescGZIP(), []int{12}
+	return file_auriga_node_v1_shared_dsh_contract_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *SharedDshRuntimeReceipt) GetSchemaVersion() int64 {
@@ -1258,7 +1359,7 @@ type SharedDshGuardianImpact struct {
 
 func (x *SharedDshGuardianImpact) Reset() {
 	*x = SharedDshGuardianImpact{}
-	mi := &file_auriga_node_v1_shared_dsh_contract_proto_msgTypes[13]
+	mi := &file_auriga_node_v1_shared_dsh_contract_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1270,7 +1371,7 @@ func (x *SharedDshGuardianImpact) String() string {
 func (*SharedDshGuardianImpact) ProtoMessage() {}
 
 func (x *SharedDshGuardianImpact) ProtoReflect() protoreflect.Message {
-	mi := &file_auriga_node_v1_shared_dsh_contract_proto_msgTypes[13]
+	mi := &file_auriga_node_v1_shared_dsh_contract_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1283,7 +1384,7 @@ func (x *SharedDshGuardianImpact) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SharedDshGuardianImpact.ProtoReflect.Descriptor instead.
 func (*SharedDshGuardianImpact) Descriptor() ([]byte, []int) {
-	return file_auriga_node_v1_shared_dsh_contract_proto_rawDescGZIP(), []int{13}
+	return file_auriga_node_v1_shared_dsh_contract_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *SharedDshGuardianImpact) GetSchemaVersion() int64 {
@@ -1353,7 +1454,18 @@ var File_auriga_node_v1_shared_dsh_contract_proto protoreflect.FileDescriptor
 
 const file_auriga_node_v1_shared_dsh_contract_proto_rawDesc = "" +
 	"\n" +
-	"(auriga/node/v1/shared_dsh_contract.proto\x12\x0eauriga.node.v1\x1a\x1fauriga/node/v1/shared_dsh.proto\"8\n" +
+	"(auriga/node/v1/shared_dsh_contract.proto\x12\x0eauriga.node.v1\x1a\x1fauriga/node/v1/shared_dsh.proto\"\xde\x02\n" +
+	"\x19SharedDshPoolMemorySample\x12%\n" +
+	"\x0eschema_version\x18\x01 \x01(\x03R\rschemaVersion\x12\x1b\n" +
+	"\ttenant_id\x18\x02 \x01(\tR\btenantId\x120\n" +
+	"\x14physical_instance_id\x18\x03 \x01(\tR\x12physicalInstanceId\x12/\n" +
+	"\x13observed_generation\x18\x04 \x01(\x03R\x12observedGeneration\x12\x1f\n" +
+	"\vobserved_at\x18\x05 \x01(\x03R\n" +
+	"observedAt\x12\x1f\n" +
+	"\vvalid_until\x18\x06 \x01(\x03R\n" +
+	"validUntil\x12*\n" +
+	"\x11memory_used_bytes\x18\a \x01(\x03R\x0fmemoryUsedBytes\x12,\n" +
+	"\x12memory_limit_bytes\x18\b \x01(\x03R\x10memoryLimitBytes\"8\n" +
 	"\x1eSharedDshTicketExchangeRequest\x12\x16\n" +
 	"\x06ticket\x18\x01 \x01(\tR\x06ticket\"M\n" +
 	"\x15SharedDshSignedHeader\x12\x10\n" +
@@ -1498,36 +1610,37 @@ func file_auriga_node_v1_shared_dsh_contract_proto_rawDescGZIP() []byte {
 	return file_auriga_node_v1_shared_dsh_contract_proto_rawDescData
 }
 
-var file_auriga_node_v1_shared_dsh_contract_proto_msgTypes = make([]protoimpl.MessageInfo, 14)
+var file_auriga_node_v1_shared_dsh_contract_proto_msgTypes = make([]protoimpl.MessageInfo, 15)
 var file_auriga_node_v1_shared_dsh_contract_proto_goTypes = []any{
-	(*SharedDshTicketExchangeRequest)(nil), // 0: auriga.node.v1.SharedDshTicketExchangeRequest
-	(*SharedDshSignedHeader)(nil),          // 1: auriga.node.v1.SharedDshSignedHeader
-	(*SharedDshBinding)(nil),               // 2: auriga.node.v1.SharedDshBinding
-	(*SharedDshSessionBinding)(nil),        // 3: auriga.node.v1.SharedDshSessionBinding
-	(*SharedDshOpenTicket)(nil),            // 4: auriga.node.v1.SharedDshOpenTicket
-	(*SharedDshIdentity)(nil),              // 5: auriga.node.v1.SharedDshIdentity
-	(*SharedDshCapability)(nil),            // 6: auriga.node.v1.SharedDshCapability
-	(*SharedDshRevocation)(nil),            // 7: auriga.node.v1.SharedDshRevocation
-	(*SharedDshResource)(nil),              // 8: auriga.node.v1.SharedDshResource
-	(*SharedDshResourceView)(nil),          // 9: auriga.node.v1.SharedDshResourceView
-	(*SharedDshResourceReport)(nil),        // 10: auriga.node.v1.SharedDshResourceReport
-	(*SharedDshRuntimeIntent)(nil),         // 11: auriga.node.v1.SharedDshRuntimeIntent
-	(*SharedDshRuntimeReceipt)(nil),        // 12: auriga.node.v1.SharedDshRuntimeReceipt
-	(*SharedDshGuardianImpact)(nil),        // 13: auriga.node.v1.SharedDshGuardianImpact
-	(DshInstanceMode)(0),                   // 14: auriga.node.v1.DshInstanceMode
+	(*SharedDshPoolMemorySample)(nil),      // 0: auriga.node.v1.SharedDshPoolMemorySample
+	(*SharedDshTicketExchangeRequest)(nil), // 1: auriga.node.v1.SharedDshTicketExchangeRequest
+	(*SharedDshSignedHeader)(nil),          // 2: auriga.node.v1.SharedDshSignedHeader
+	(*SharedDshBinding)(nil),               // 3: auriga.node.v1.SharedDshBinding
+	(*SharedDshSessionBinding)(nil),        // 4: auriga.node.v1.SharedDshSessionBinding
+	(*SharedDshOpenTicket)(nil),            // 5: auriga.node.v1.SharedDshOpenTicket
+	(*SharedDshIdentity)(nil),              // 6: auriga.node.v1.SharedDshIdentity
+	(*SharedDshCapability)(nil),            // 7: auriga.node.v1.SharedDshCapability
+	(*SharedDshRevocation)(nil),            // 8: auriga.node.v1.SharedDshRevocation
+	(*SharedDshResource)(nil),              // 9: auriga.node.v1.SharedDshResource
+	(*SharedDshResourceView)(nil),          // 10: auriga.node.v1.SharedDshResourceView
+	(*SharedDshResourceReport)(nil),        // 11: auriga.node.v1.SharedDshResourceReport
+	(*SharedDshRuntimeIntent)(nil),         // 12: auriga.node.v1.SharedDshRuntimeIntent
+	(*SharedDshRuntimeReceipt)(nil),        // 13: auriga.node.v1.SharedDshRuntimeReceipt
+	(*SharedDshGuardianImpact)(nil),        // 14: auriga.node.v1.SharedDshGuardianImpact
+	(DshInstanceMode)(0),                   // 15: auriga.node.v1.DshInstanceMode
 }
 var file_auriga_node_v1_shared_dsh_contract_proto_depIdxs = []int32{
-	14, // 0: auriga.node.v1.SharedDshBinding.mode:type_name -> auriga.node.v1.DshInstanceMode
-	14, // 1: auriga.node.v1.SharedDshSessionBinding.mode:type_name -> auriga.node.v1.DshInstanceMode
-	2,  // 2: auriga.node.v1.SharedDshOpenTicket.binding:type_name -> auriga.node.v1.SharedDshBinding
-	2,  // 3: auriga.node.v1.SharedDshIdentity.binding:type_name -> auriga.node.v1.SharedDshBinding
-	3,  // 4: auriga.node.v1.SharedDshCapability.binding:type_name -> auriga.node.v1.SharedDshSessionBinding
-	2,  // 5: auriga.node.v1.SharedDshResourceView.binding:type_name -> auriga.node.v1.SharedDshBinding
-	8,  // 6: auriga.node.v1.SharedDshResourceView.resources:type_name -> auriga.node.v1.SharedDshResource
-	2,  // 7: auriga.node.v1.SharedDshResourceReport.binding:type_name -> auriga.node.v1.SharedDshBinding
-	2,  // 8: auriga.node.v1.SharedDshRuntimeIntent.binding:type_name -> auriga.node.v1.SharedDshBinding
-	2,  // 9: auriga.node.v1.SharedDshRuntimeReceipt.binding:type_name -> auriga.node.v1.SharedDshBinding
-	2,  // 10: auriga.node.v1.SharedDshGuardianImpact.affected:type_name -> auriga.node.v1.SharedDshBinding
+	15, // 0: auriga.node.v1.SharedDshBinding.mode:type_name -> auriga.node.v1.DshInstanceMode
+	15, // 1: auriga.node.v1.SharedDshSessionBinding.mode:type_name -> auriga.node.v1.DshInstanceMode
+	3,  // 2: auriga.node.v1.SharedDshOpenTicket.binding:type_name -> auriga.node.v1.SharedDshBinding
+	3,  // 3: auriga.node.v1.SharedDshIdentity.binding:type_name -> auriga.node.v1.SharedDshBinding
+	4,  // 4: auriga.node.v1.SharedDshCapability.binding:type_name -> auriga.node.v1.SharedDshSessionBinding
+	3,  // 5: auriga.node.v1.SharedDshResourceView.binding:type_name -> auriga.node.v1.SharedDshBinding
+	9,  // 6: auriga.node.v1.SharedDshResourceView.resources:type_name -> auriga.node.v1.SharedDshResource
+	3,  // 7: auriga.node.v1.SharedDshResourceReport.binding:type_name -> auriga.node.v1.SharedDshBinding
+	3,  // 8: auriga.node.v1.SharedDshRuntimeIntent.binding:type_name -> auriga.node.v1.SharedDshBinding
+	3,  // 9: auriga.node.v1.SharedDshRuntimeReceipt.binding:type_name -> auriga.node.v1.SharedDshBinding
+	3,  // 10: auriga.node.v1.SharedDshGuardianImpact.affected:type_name -> auriga.node.v1.SharedDshBinding
 	11, // [11:11] is the sub-list for method output_type
 	11, // [11:11] is the sub-list for method input_type
 	11, // [11:11] is the sub-list for extension type_name
@@ -1547,7 +1660,7 @@ func file_auriga_node_v1_shared_dsh_contract_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_auriga_node_v1_shared_dsh_contract_proto_rawDesc), len(file_auriga_node_v1_shared_dsh_contract_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   14,
+			NumMessages:   15,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

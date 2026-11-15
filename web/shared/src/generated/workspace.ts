@@ -1599,33 +1599,6 @@ export interface operations {
           'application/problem+json': components['schemas']['Problem'];
         };
       };
-      /** @description common.conflict 或 shared.stop_unconfirmed */
-      409: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          'application/problem+json': components['schemas']['Problem'];
-        };
-      };
-      /** @description common.precondition_failed */
-      412: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          'application/problem+json': components['schemas']['Problem'];
-        };
-      };
-      /** @description 缺少 If-Match，common.validation_failed */
-      428: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          'application/problem+json': components['schemas']['Problem'];
-        };
-      };
       /** @description common.unavailable */
       503: {
         headers: {
@@ -1802,33 +1775,6 @@ export interface operations {
           'application/problem+json': components['schemas']['Problem'];
         };
       };
-      /** @description common.conflict 或 shared.stop_unconfirmed */
-      409: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          'application/problem+json': components['schemas']['Problem'];
-        };
-      };
-      /** @description common.precondition_failed */
-      412: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          'application/problem+json': components['schemas']['Problem'];
-        };
-      };
-      /** @description 缺少 If-Match，common.validation_failed */
-      428: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          'application/problem+json': components['schemas']['Problem'];
-        };
-      };
       /** @description common.unavailable */
       503: {
         headers: {
@@ -1912,24 +1858,6 @@ export interface operations {
           'application/problem+json': components['schemas']['Problem'];
         };
       };
-      /** @description common.precondition_failed */
-      412: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          'application/problem+json': components['schemas']['Problem'];
-        };
-      };
-      /** @description 缺少 If-Match，common.validation_failed */
-      428: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          'application/problem+json': components['schemas']['Problem'];
-        };
-      };
       /** @description common.unavailable */
       503: {
         headers: {
@@ -1993,33 +1921,6 @@ export interface operations {
       };
       /** @description common.not_found */
       404: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          'application/problem+json': components['schemas']['Problem'];
-        };
-      };
-      /** @description common.conflict 或 shared.stop_unconfirmed */
-      409: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          'application/problem+json': components['schemas']['Problem'];
-        };
-      };
-      /** @description common.precondition_failed */
-      412: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          'application/problem+json': components['schemas']['Problem'];
-        };
-      };
-      /** @description 缺少 If-Match，common.validation_failed */
-      428: {
         headers: {
           [name: string]: unknown;
         };
@@ -2305,33 +2206,6 @@ export interface operations {
           'application/problem+json': components['schemas']['Problem'];
         };
       };
-      /** @description common.conflict 或 shared.stop_unconfirmed */
-      409: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          'application/problem+json': components['schemas']['Problem'];
-        };
-      };
-      /** @description common.precondition_failed */
-      412: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          'application/problem+json': components['schemas']['Problem'];
-        };
-      };
-      /** @description 缺少 If-Match，common.validation_failed */
-      428: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          'application/problem+json': components['schemas']['Problem'];
-        };
-      };
       /** @description common.unavailable */
       503: {
         headers: {
@@ -2393,33 +2267,6 @@ export interface operations {
       };
       /** @description common.not_found */
       404: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          'application/problem+json': components['schemas']['Problem'];
-        };
-      };
-      /** @description common.conflict 或 shared.stop_unconfirmed */
-      409: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          'application/problem+json': components['schemas']['Problem'];
-        };
-      };
-      /** @description common.precondition_failed */
-      412: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          'application/problem+json': components['schemas']['Problem'];
-        };
-      };
-      /** @description 缺少 If-Match，common.validation_failed */
-      428: {
         headers: {
           [name: string]: unknown;
         };

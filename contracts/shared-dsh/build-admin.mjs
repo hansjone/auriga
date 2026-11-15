@@ -225,7 +225,17 @@ const operation = (
   responses: {
     [accepted ? '202' : '200']: response(result),
     ...Object.fromEntries(
-      ['400', '401', '403', '404', '409', '412', '428', '503'].map((code) => [
+      [
+        '400',
+        '401',
+        '403',
+        '404',
+        ...(input ? ['409'] : []),
+        ...(parameters.some((p) => p.name === 'If-Match')
+          ? ['412', '428']
+          : []),
+        '503',
+      ].map((code) => [
         code,
         {
           description: {

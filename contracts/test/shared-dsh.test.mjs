@@ -1,5 +1,6 @@
 import test from 'node:test';
 import '../shared-dsh/contract.test.mjs';
+import '../shared-dsh/k3.test.mjs';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { parse } from '../../services/contracts/node_modules/yaml/dist/index.js';
