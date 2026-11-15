@@ -499,6 +499,37 @@ test('local UAC: same identity domain accepts transport changes; other domains c
   }
 });
 
+test('local UAC: platform-only adapter changes preserve the bound owner across restart', async (t) => {
+  const env = await setup(t);
+  await loginFlow(env);
+  await env.identity.close();
+  const adapterPath = join(env.directory, 'uac', 'adapter.json');
+  const vaultPath = join(env.directory, 'uac-local.json');
+  const binding = await readFile(vaultPath, 'utf8');
+  for (const change of [
+    (adapter) => (adapter.diagnostics = { enabled: true }),
+    (adapter) => (adapter.cookies = { name: 'synthetic-portal-cookie' }),
+    (adapter) => (adapter.qr.derived.integrity.description = 'portal metadata'),
+  ]) {
+    const adapter = settings(env.upstream.origin);
+    change(adapter);
+    await writeFile(adapterPath, JSON.stringify(adapter));
+    const restarted = env.make();
+    await restarted.ready;
+    assert.deepEqual(restarted.status(), {
+      available: true,
+      state: 'signed_out',
+      ownerBound: true,
+    });
+    assert.deepEqual(
+      (await loginFlow({ ...env, identity: restarted })).states,
+      ['waiting', 'scanned', 'authenticated'],
+    );
+    assert.equal(await readFile(vaultPath, 'utf8'), binding);
+    await restarted.close();
+  }
+});
+
 test('local UAC: works with the platform offline and hides without private config', async (t) => {
   // No platform runtime is involved at all: the identity only talks to UAC.
   const env = await setup(t);
@@ -616,18 +647,21 @@ test('local UAC: incomplete, malformed, or ambiguous response mappings disable s
   await env.identity.close();
   for (const modify of [
     (value) => delete value.qr.success,
-    (value) => delete value.qr.waiting,
-    (value) => delete value.qr.scanned,
+    (value) => delete value.qr.statusPointer,
+    (value) => (value.qr.waiting = null),
+    (value) => (value.qr.scanned = 1),
     (value) => delete value.qr.tokenPointer,
     (value) => delete value.qr.empNoPointer,
     (value) => (value.qr.statusPointer = 'state'),
     (value) => (value.qr.tokenPointer = '/token~2'),
     (value) => (value.qr.statusPointer = value.qr.tokenPointer),
     (value) => (value.qr.scanned = value.qr.waiting),
+    (value) => (value.qr.waiting = value.qr.success),
     (value) => (value.qr.success = ' '),
     (value) => delete value.department.successValue,
     (value) => (value.department.successPointer = null),
-    (value) => (value.department.listPointer = ''),
+    (value) => delete value.department.listPointer,
+    (value) => (value.department.listPointer = '/rows~'),
     (value) => delete value.department.empNoPointer,
     (value) => (value.department.departmentPointers = []),
   ]) {
@@ -647,6 +681,58 @@ test('local UAC: incomplete, malformed, or ambiguous response mappings disable s
   }
   assert.equal(env.upstream.calls.length, 0);
 });
+
+for (const pending of [['waiting'], ['scanned'], []])
+  test(
+    'local UAC: optional scan status mappings: ' +
+      (pending.join(', ') || 'none'),
+    async (t) => {
+      const env = await setup(t);
+      await env.identity.close();
+      const adapter = settings(env.upstream.origin);
+      for (const state of ['waiting', 'scanned'])
+        if (!pending.includes(state)) delete adapter.qr[state];
+      await writeFile(
+        join(env.directory, 'uac', 'adapter.json'),
+        JSON.stringify(adapter),
+      );
+      const identity = env.make();
+      await identity.ready;
+
+      env.upstream.script.scan = [
+        { body: { token: 'synthetic', employee: 'A1001' } },
+      ];
+      const malformed = await identity.start();
+      assert.equal(
+        (await identity.poll(malformed.id)).challenge.failureCode,
+        'invalid_scan_state',
+      );
+      assert.equal(
+        env.upstream.calls.some((call) => call.path === '/verify'),
+        false,
+      );
+
+      env.upstream.script.scan = [
+        ...pending.map((state) => ({ body: { state } })),
+        { body: { state: 'verified', token: 'synthetic', employee: 'A1001' } },
+      ];
+      env.upstream.script.verify = [ok('A1001')];
+      const challenge = await identity.start();
+      for (const state of [...pending, 'authenticated']) {
+        await env.time.advance(2000);
+        assert.equal(
+          (await identity.poll(challenge.id)).challenge.state,
+          state,
+        );
+      }
+      assert.equal(identity.status().empNo, 'A1001');
+      assert.equal(
+        env.upstream.calls.filter((call) => call.path === '/verify').length,
+        1,
+      );
+      await identity.close();
+    },
+  );
 
 test('local UAC: missing, malformed, or duplicate upstream status never reaches verify', async (t) => {
   const env = await setup(t);
@@ -713,6 +799,42 @@ test('local UAC: department revalidation requires explicit success and a matchin
   assert.equal(identity.status().state, 'signed_out');
   assert.equal(identity.status().lastOutcome, 'revalidation_rejected');
   assert.equal(identity.status().challenge, undefined);
+  await identity.close();
+});
+
+test('local UAC: department checks the explicitly approved list at the RFC 6901 root', async (t) => {
+  const env = await setup(t);
+  await env.identity.close();
+  const adapter = settings(env.upstream.origin);
+  adapter.department.listPointer = '';
+  adapter.department.successPointer = '/0/ok';
+  await writeFile(
+    join(env.directory, 'uac', 'adapter.json'),
+    JSON.stringify(adapter),
+  );
+  await writeFile(
+    join(env.directory, 'uac', 'provider.json'),
+    JSON.stringify({
+      baseUrl: env.upstream.origin,
+      systemCode: 'SYS1',
+      revalidation: { strategy: 'department', intervalSeconds: 60 },
+    }),
+  );
+  const identity = env.make();
+  await identity.ready;
+  await loginFlow({ ...env, identity });
+  const row = { ok: true, employee: 'A1001', department: 'Fixture team' };
+  env.upstream.script.info = [{ body: [row] }];
+  await env.time.advance(60_000);
+  assert.equal(identity.status().state, 'authenticated');
+  assert.equal(
+    identity.status().verifiedAt,
+    new Date(env.time.now()).toISOString(),
+  );
+  env.upstream.script.info = [{ body: { 0: row } }];
+  await env.time.advance(60_000);
+  assert.equal(identity.status().state, 'signed_out');
+  assert.equal(identity.status().lastOutcome, 'revalidation_rejected');
   await identity.close();
 });
 

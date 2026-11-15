@@ -26,7 +26,7 @@ const invalid = () => new Error('invalid UAC configuration');
 /** @param {unknown} value */
 const isPointer = (value) =>
   typeof value === 'string' &&
-  value.startsWith('/') &&
+  (value === '' || value.startsWith('/')) &&
   value.length <= 512 &&
   !/~(?![01])/.test(value);
 
@@ -37,7 +37,9 @@ const isScanStatus = (value) =>
 /** @param {any} qr @param {any} department */
 function validateMappings(qr, department) {
   const scanPointers = [qr?.statusPointer, qr?.tokenPointer, qr?.empNoPointer];
-  const states = [qr?.waiting, qr?.scanned, qr?.success];
+  const states = [qr?.success];
+  for (const pending of ['waiting', 'scanned'])
+    if (qr && Object.hasOwn(qr, pending)) states.push(qr[pending]);
   const departmentPointers = department?.departmentPointers;
   if (
     !scanPointers.every(isPointer) ||
@@ -63,9 +65,8 @@ function validateMappings(qr, department) {
 /** RFC 6901 pointer lookup; undefined when absent.
  * @param {any} root @param {unknown} pointer */
 export function at(root, pointer) {
-  if (typeof pointer !== 'string') return undefined;
+  if (typeof pointer !== 'string' || !isPointer(pointer)) return undefined;
   if (pointer === '') return root;
-  if (!isPointer(pointer)) return undefined;
   let node = root;
   for (const raw of pointer.slice(1).split('/')) {
     const key = raw.replaceAll('~1', '/').replaceAll('~0', '~');
@@ -277,26 +278,19 @@ export function createUacAdapter(settings, provider, options = {}) {
   }
 
   /** Bind owner identity to the service endpoints, system code and protocol
-   * mapping. Address allowlist rotation and request timeouts change transport
-   * policy only. Derived fields evaluate in configured order. */
+   * mapping used by the local adapter. Platform metadata and transport tuning
+   * do not affect the binding. Derived fields evaluate in configured order. */
   function identityDomain() {
-    const {
-      allowedDestinations: _destinations,
-      qr,
-      department,
-      ...protocol
-    } = settings;
-    const {
-      timeoutSeconds: _timeout,
-      path,
-      derived: scanDerived,
-      ...scan
-    } = qr;
-    const {
-      url,
-      derived: departmentDerived,
-      ...departmentMapping
-    } = department;
+    const { qr, department, constants, clientIP } = settings;
+    /** @param {any} mapping */
+    const requestFields = (mapping) => ({
+      body: mapping.body,
+      ...(mapping.headers === undefined ? {} : { headers: mapping.headers }),
+      derived: Object.entries(mapping.derived ?? {}).map(([name, value]) => {
+        const { algorithm, template } = /** @type {any} */ (value);
+        return [name, { algorithm, template }];
+      }),
+    });
     return createHash('sha256')
       .update(
         canonicalize(
@@ -305,17 +299,28 @@ export function createUacAdapter(settings, provider, options = {}) {
             baseUrl: new URL(provider.baseUrl).href,
             systemCode: provider.systemCode,
             protocol: {
-              ...protocol,
+              ...(constants === undefined ? {} : { constants }),
+              ...(clientIP === undefined ? {} : { clientIP }),
               tokenVerifyUrl: new URL(settings.tokenVerifyUrl).href,
               qr: {
-                ...scan,
-                url: new URL(provider.baseUrl + path).href,
-                derived: Object.entries(scanDerived ?? {}),
+                url: new URL(provider.baseUrl + qr.path).href,
+                ...requestFields(qr),
+                contentTemplate: qr.contentTemplate,
+                statusPointer: qr.statusPointer,
+                success: qr.success,
+                ...(qr.waiting === undefined ? {} : { waiting: qr.waiting }),
+                ...(qr.scanned === undefined ? {} : { scanned: qr.scanned }),
+                tokenPointer: qr.tokenPointer,
+                empNoPointer: qr.empNoPointer,
               },
               department: {
-                ...departmentMapping,
-                url: new URL(url).href,
-                derived: Object.entries(departmentDerived ?? {}),
+                url: new URL(department.url).href,
+                ...requestFields(department),
+                successPointer: department.successPointer,
+                successValue: department.successValue,
+                listPointer: department.listPointer,
+                empNoPointer: department.empNoPointer,
+                departmentPointers: department.departmentPointers,
               },
             },
           },
