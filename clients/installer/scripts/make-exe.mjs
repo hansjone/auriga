@@ -76,6 +76,7 @@ export function compileTray(output, icon) {
       ...(icon ? [`/win32icon:${icon}`] : []),
       `/out:${output}`,
       join(here, '..', 'windows', 'tray', 'Tray.cs'),
+      join(here, '..', 'windows', 'launcher', 'DesktopShortcut.cs'),
     ],
     { encoding: 'utf8' },
   );

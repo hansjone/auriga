@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { Buffer } from 'node:buffer';
 import { spawnSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import {
@@ -110,6 +111,14 @@ test(
     assert.deepEqual(result.ownership, [false, false, true, true]);
     assert.equal(result.chosen, join(root, 'fixture-shortcuts', 'App (A).lnk'));
     assert.equal(result.retained, result.chosen);
+    assert.equal(result.legacyTarget, join(other, 'bin', 'auriga-desktop.cmd'));
+    assert.equal(result.unicodeTarget, join(root, 'bin', 'uninstall.cmd'));
+    assert.equal(
+      Buffer.from(result.unicodeName, 'base64').toString('utf8'),
+      '卸载 App.lnk',
+    );
+    assert.equal(result.removed, true);
+    assert.equal(result.foreignKept, true);
     assert.equal(result.new.file, join(trayDir, 'AurigaDesktop.exe'));
     assert.deepEqual(result.new.args, ['/autostart']);
     assert.deepEqual(result.old, []);

@@ -37,7 +37,9 @@ $ver = Get-DesktopMaintenanceVersion $root
 # Shortcuts and the Apps & features entry recorded at install time (read before the root is cleaned).
 $shellFile = Join-Path $root 'shell.json'
 $shellInfo = $null
-if (Test-Path -LiteralPath $shellFile) { $shellInfo = Get-Content -Raw -LiteralPath $shellFile | ConvertFrom-Json }
+if (Test-Path -LiteralPath $shellFile) { $shellInfo = Get-Content -Raw -Encoding UTF8 -LiteralPath $shellFile | ConvertFrom-Json }
+# Load the shortcut code while its source is still in the installation.
+if ($shellInfo.shortcuts) { Initialize-DesktopShortcuts }
 # Run from a temp copy so the running node.exe and scripts do not lock the install root.
 $tmp = Join-Path $tempRoot ('auriga-desktop-uninstall-' + [guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $tmp | Out-Null
@@ -77,19 +79,7 @@ try {
 }
 # Only after the core succeeded: shortcuts, autostart and registry entry.
 if ($shellInfo) {
-  if ($shellInfo.shortcuts) {
-    $shell = New-Object -ComObject WScript.Shell
-    $launcher = Join-Path $root 'bin\auriga-desktop.cmd'
-    $uninstaller = Join-Path $root 'bin\uninstall.cmd'
-    foreach ($link in @($shellInfo.shortcuts)) {
-      if (-not $link -or -not $link.EndsWith('.lnk',[StringComparison]::OrdinalIgnoreCase) -or
-          -not (Test-Path -LiteralPath $link -PathType Leaf)) { continue }
-      $target = $shell.CreateShortcut($link).TargetPath
-      if ((Test-DesktopPath $target $launcher) -or (Test-DesktopPath $target $uninstaller)) {
-        Remove-Item -LiteralPath $link -Force -ErrorAction SilentlyContinue
-      }
-    }
-  }
+  Remove-DesktopOwnedShortcuts $root $shellInfo.shortcuts
   if ($shellInfo.registryKey -match '^[A-Za-z0-9._-]{1,64}$') {
     $name = $shellInfo.registryKey
     $key = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\$name"

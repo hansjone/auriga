@@ -30,7 +30,18 @@ function Get-DesktopRootSuffix([string]$Root) {
   } finally { $hash.Dispose() }
 }
 
-function Find-DesktopShortcutPath($Shell, [string]$Directory, [string]$Label, [string]$Target, [string]$Suffix) {
+function Initialize-DesktopShortcuts {
+  if (-not ('Auriga.Windows.DesktopShortcut' -as [type])) {
+    Add-Type -LiteralPath (Join-Path $PSScriptRoot 'DesktopShortcut.cs')
+  }
+}
+
+function Get-DesktopShortcutTarget([string]$Path) {
+  Initialize-DesktopShortcuts
+  return [Auriga.Windows.DesktopShortcut]::GetTarget($Path)
+}
+
+function Find-DesktopShortcutPath([string]$Directory, [string]$Label, [string]$Target, [string]$Suffix) {
   $available = $null
   foreach ($name in @("$Label.lnk", "$Label ($Suffix).lnk")) {
     $path = Join-Path $Directory $name
@@ -39,10 +50,23 @@ function Find-DesktopShortcutPath($Shell, [string]$Directory, [string]$Label, [s
       continue
     }
     if ((Test-Path -LiteralPath $path -PathType Leaf) -and
-        (Test-DesktopPath ($Shell.CreateShortcut($path).TargetPath) $Target)) { return $path }
+        (Test-DesktopPath (Get-DesktopShortcutTarget $path) $Target)) { return $path }
   }
   if ($available) { return $available }
   throw "Desktop shortcut name already in use: $Label"
+}
+
+function Remove-DesktopOwnedShortcuts([string]$Root, [string[]]$Shortcuts) {
+  $launcher = Join-Path $Root 'bin\auriga-desktop.cmd'
+  $uninstaller = Join-Path $Root 'bin\uninstall.cmd'
+  foreach ($link in $Shortcuts) {
+    if (-not $link -or -not $link.EndsWith('.lnk', [StringComparison]::OrdinalIgnoreCase) -or
+        -not (Test-Path -LiteralPath $link -PathType Leaf)) { continue }
+    $target = Get-DesktopShortcutTarget $link
+    if ((Test-DesktopPath $target $launcher) -or (Test-DesktopPath $target $uninstaller)) {
+      Remove-Item -LiteralPath $link -Force -ErrorAction SilentlyContinue
+    }
+  }
 }
 
 # Use the native user hive API. A clean Windows user may have no Uninstall key.

@@ -15,6 +15,7 @@ using System.Text.RegularExpressions;
 using System.Threading;
 using System.Web.Script.Serialization;
 using System.Windows.Forms;
+using Auriga.Windows;
 using Microsoft.Win32;
 
 static class Desktop
@@ -347,11 +348,6 @@ sealed class TrayApp : ApplicationContext
         catch (Exception e) { Log("shell refresh failed: " + e.Message); }
     }
 
-    static object Com(object target, string member, BindingFlags kind, params object[] args)
-    {
-        return target.GetType().InvokeMember(member, kind, null, target, args);
-    }
-
     /// Installs upgraded in-app from versions without an uninstall shortcut get one next to the
     /// recorded Start menu entry; it is added to shell.json so the uninstaller removes it.
     void EnsureShortcuts()
@@ -368,36 +364,19 @@ sealed class TrayApp : ApplicationContext
             foreach (object item in (System.Collections.IEnumerable)raw)
                 if (item != null) links.Add(Convert.ToString(item));
         }
-        object wsh = Activator.CreateInstance(Type.GetTypeFromProgID("WScript.Shell"));
         string launcher = Path.Combine(root, "bin", "auriga-desktop.cmd");
         string start = links.Find(l => File.Exists(l) && l.EndsWith(".lnk", StringComparison.OrdinalIgnoreCase) &&
-            Desktop.SamePath(Convert.ToString(Com(Com(wsh, "CreateShortcut", BindingFlags.InvokeMethod, l),
-                "TargetPath", BindingFlags.GetProperty)), launcher));
+            Desktop.SamePath(DesktopShortcut.GetTarget(l), launcher));
         if (start == null) return;
-        string uninstall = Path.Combine(Path.GetDirectoryName(start), "卸载 " + Path.GetFileName(start));
+        string uninstall = Path.Combine(Path.GetDirectoryName(start), DesktopShortcut.UninstallLabel(Path.GetFileName(start)));
         string cmd = Path.Combine(root, "bin", "uninstall.cmd");
         string ico = Path.Combine(root, "bin", "auriga.ico");
         if (!File.Exists(cmd)) return;
-        if (File.Exists(start) && File.Exists(ico))
-        {
-            object link = Com(wsh, "CreateShortcut", BindingFlags.InvokeMethod, start);
-            string target = Convert.ToString(Com(link, "TargetPath", BindingFlags.GetProperty));
-            if (target.Equals(Path.Combine(root, "bin", "auriga-desktop.cmd"), StringComparison.OrdinalIgnoreCase))
-            {
-                Com(link, "IconLocation", BindingFlags.SetProperty, ico + ",0");
-                Com(link, "Save", BindingFlags.InvokeMethod);
-            }
-        }
+        if (File.Exists(ico)) DesktopShortcut.SetIcon(start, launcher, ico);
         if (links.Exists(l => l.Equals(uninstall, StringComparison.OrdinalIgnoreCase)) && File.Exists(uninstall)) return;
-        object remove = Com(wsh, "CreateShortcut", BindingFlags.InvokeMethod, uninstall);
-        if (File.Exists(uninstall) && !Desktop.SamePath(Convert.ToString(Com(remove, "TargetPath", BindingFlags.GetProperty)), cmd))
+        if (File.Exists(uninstall) && !Desktop.SamePath(DesktopShortcut.GetTarget(uninstall), cmd))
             return;
-        Com(remove, "TargetPath", BindingFlags.SetProperty, cmd);
-        Com(remove, "WorkingDirectory", BindingFlags.SetProperty, Environment.SystemDirectory);
-        Com(remove, "WindowStyle", BindingFlags.SetProperty, 7);
-        Com(remove, "Description", BindingFlags.SetProperty, "卸载 " + Desktop.Brand);
-        if (File.Exists(ico)) Com(remove, "IconLocation", BindingFlags.SetProperty, ico + ",0");
-        Com(remove, "Save", BindingFlags.InvokeMethod);
+        DesktopShortcut.Save(uninstall, cmd, Environment.SystemDirectory, DesktopShortcut.UninstallLabel(Desktop.Brand), ico);
         if (!links.Exists(l => l.Equals(uninstall, StringComparison.OrdinalIgnoreCase))) links.Add(uninstall);
         shell["shortcuts"] = links.ToArray();
         File.WriteAllText(file + ".tmp", Desktop.Json.Serialize(shell), new UTF8Encoding(false));

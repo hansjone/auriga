@@ -16,6 +16,7 @@ param(
   [string]$CancelFile
 )
 $ErrorActionPreference = 'Stop'
+[Console]::OutputEncoding = [Text.Encoding]::UTF8
 $BrandName = 'Auriga DSH'
 $payload = Join-Path $PSScriptRoot 'payload'
 . (Join-Path $payload 'auriga\launcher\shell-integration.ps1')
@@ -32,18 +33,17 @@ $oldShell = $null
 if ($upgrading) {
   $previousShell = Join-Path $InstallDir 'shell.json'
   if (Test-Path -LiteralPath $previousShell) {
-    $oldShell = Get-Content -Raw -LiteralPath $previousShell | ConvertFrom-Json
+    $oldShell = Get-Content -Raw -Encoding UTF8 -LiteralPath $previousShell | ConvertFrom-Json
   }
 }
 if ($upgrading -and -not $installArgs.ContainsKey('DataHome') -and -not $env:AURIGA_DATA_HOME) {
-  $DataHome = (Get-Content -Raw -LiteralPath $stateFile | ConvertFrom-Json).dataHome
+  $DataHome = (Get-Content -Raw -Encoding UTF8 -LiteralPath $stateFile | ConvertFrom-Json).dataHome
 }
 if ($oldShell -and -not $installArgs.ContainsKey('NoDesktopShortcut')) {
-    $existingShell = New-Object -ComObject WScript.Shell
     $oldDesktop = @($oldShell.shortcuts | Where-Object {
       (Test-DesktopPath (Split-Path -Parent $_) $DesktopDir) -and
       (Test-Path -LiteralPath $_ -PathType Leaf) -and
-      (Test-DesktopPath ($existingShell.CreateShortcut($_).TargetPath) (Join-Path $InstallDir 'bin\auriga-desktop.cmd'))
+      (Test-DesktopPath (Get-DesktopShortcutTarget $_) (Join-Path $InstallDir 'bin\auriga-desktop.cmd'))
     })
     $NoDesktopShortcut = $oldDesktop.Count -eq 0
 }
@@ -59,9 +59,8 @@ if ($LASTEXITCODE -ne 0) { throw "install failed ($LASTEXITCODE)" }
 
 # Shell integration (best effort: the installation itself already succeeded).
 try {
-  $manifest = Get-Content -Raw -LiteralPath (Join-Path $payload 'manifest.json') | ConvertFrom-Json
+  $manifest = Get-Content -Raw -Encoding UTF8 -LiteralPath (Join-Path $payload 'manifest.json') | ConvertFrom-Json
   $launcher = Join-Path $InstallDir 'bin\auriga-desktop.cmd'
-  $shell = New-Object -ComObject WScript.Shell
   $suffix = Get-DesktopRootSuffix $InstallDir
   $links = @()
   $removeTarget = Join-Path $InstallDir 'bin\uninstall.cmd'
@@ -69,41 +68,29 @@ try {
     $links += @($oldShell.shortcuts | Where-Object {
       if (-not $_ -or -not $_.EndsWith('.lnk', [StringComparison]::OrdinalIgnoreCase) -or
           -not (Test-Path -LiteralPath $_ -PathType Leaf)) { return $false }
-      $target = $shell.CreateShortcut($_).TargetPath
+      $target = Get-DesktopShortcutTarget $_
       (Test-DesktopPath $target $launcher) -or (Test-DesktopPath $target $removeTarget)
     })
   }
   if (-not $NoShortcuts) {
+    Initialize-DesktopShortcuts
+    $ico = Join-Path $InstallDir 'bin\auriga.ico'
     $shortcutDirs = @($StartMenuDir)
     if (-not $NoDesktopShortcut) { $shortcutDirs += $DesktopDir }
     foreach ($dir in $shortcutDirs) {
       New-Item -ItemType Directory -Force -Path $dir | Out-Null
-      $path = Find-DesktopShortcutPath $shell $dir $BrandName $launcher $suffix
-      $link = $shell.CreateShortcut($path)
-      $link.TargetPath = $launcher
-      $link.WorkingDirectory = $InstallDir
-      $link.WindowStyle = 7
-      $link.Description = $BrandName
-      $ico = Join-Path $InstallDir 'bin\auriga.ico'
-      if (Test-Path -LiteralPath $ico) { $link.IconLocation = "$ico,0" }
-      $link.Save()
+      $path = Find-DesktopShortcutPath $dir $BrandName $launcher $suffix
+      [Auriga.Windows.DesktopShortcut]::Save($path, $launcher, $InstallDir, $BrandName, $ico)
       $oldPath = Join-Path $dir 'Auriga Desktop.lnk'
       if (Test-Path -LiteralPath $oldPath) {
-        $oldLink = $shell.CreateShortcut($oldPath)
-        if ($oldLink.TargetPath -eq $launcher) { Remove-Item -LiteralPath $oldPath -Force }
+        if (Test-DesktopPath (Get-DesktopShortcutTarget $oldPath) $launcher) { Remove-Item -LiteralPath $oldPath -Force }
       }
       if ($links -notcontains $path) { $links += $path }
     }
     # Start menu uninstall entry (the Apps & features entry and bin\uninstall.cmd open the same uninstaller).
-    $removeLink = Find-DesktopShortcutPath $shell $StartMenuDir "卸载 $BrandName" $removeTarget $suffix
-    $remove = $shell.CreateShortcut($removeLink)
-    $remove.TargetPath = $removeTarget
-    $remove.WorkingDirectory = [Environment]::SystemDirectory
-    $remove.WindowStyle = 7
-    $remove.Description = "卸载 $BrandName"
-    $ico = Join-Path $InstallDir 'bin\auriga.ico'
-    if (Test-Path -LiteralPath $ico) { $remove.IconLocation = "$ico,0" }
-    $remove.Save()
+    $removeLabel = [Auriga.Windows.DesktopShortcut]::UninstallLabel($BrandName)
+    $removeLink = Find-DesktopShortcutPath $StartMenuDir $removeLabel $removeTarget $suffix
+    [Auriga.Windows.DesktopShortcut]::Save($removeLink, $removeTarget, [Environment]::SystemDirectory, $removeLabel, $ico)
     if ($links -notcontains $removeLink) { $links += $removeLink }
   }
   try {

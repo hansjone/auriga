@@ -441,6 +441,7 @@ function writeLaunchers(root, dir, fault) {
     'rollback.ps1',
     'maintenance.ps1',
     'shell-integration.ps1',
+    'DesktopShortcut.cs',
     'uninstall-cleanup.ps1',
     'auriga-autostart.ps1',
   ];
