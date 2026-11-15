@@ -9,6 +9,7 @@ import { useAdminI18n } from '../admin/messages';
 import ActionConfirm from '../admin/ActionConfirm.vue';
 import AdminDialog from '../admin/AdminDialog.vue';
 import MemberRoles from '../admin/MemberRoles.vue';
+import MemberPlacement from './placements/MemberPlacement.vue';
 import '../admin/management.css';
 
 const { t, state } = useAdminI18n();
@@ -167,6 +168,11 @@ function setStatus(action: 'enable' | 'disable') {
           <dt>{{ t('created') }}</dt>
           <dd>{{ selected.createdAt }}</dd>
         </dl>
+        <MemberPlacement
+          :key="selected.id"
+          :member-id="selected.id"
+          :disabled="pageLocked"
+        />
         <MemberRoles
           :key="selected.id"
           :member-id="selected.id"

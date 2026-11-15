@@ -1,0 +1,28 @@
+# Auriga DSH shared and dedicated modes
+
+Shared pools are for mutually trusted teams only. Members may see each other's files, act with owner capabilities, read each other's sessions and operate internal applications as another member, with audit attributed to the impersonated member. Stalls, crashes and cancellation timeouts interrupt the entire pool. Use a dedicated container for confidentiality or an independent failure domain.
+
+## Accepted first-release risks
+
+1. Native cookies/browserPeer can map different members to the same owner; /connect may also construct an owner. Signed platform headers do not replace native cookies, index snapshots or WS identity. Member policies, including shell bans, may be bypassed. Not all entries are non-owner entries.
+2. Native workspaceFiles/read, readBytes and stat accept other members' file paths. Absolute paths, parent paths, Windows junctions and hard links can enable cross-member reads; stat can leak metadata. Fixed working directories, hidden buttons and one realpath check do not provide isolation. File observation and downloads also remain at risk.
+3. Memory exhaustion, synchronous stalls and crashes affect the entire pool. A member's execution cannot be selectively hard-killed in-process. Cooperative cancellation waits 30 seconds before an external supervisor conservatively stops the whole pool and execution tree, interrupting others. This is not a 30-second completion guarantee. Unconfirmed stops remain blocked. Expiry or revocation of any unified resource also stops the pool.
+4. A can open, read and drive B's session and history through a native owner entry. Enterprise skills bound to B's session credentials may execute A's instructions as B, with both platform and application audit attributed to B. Successful capability checks do not remove impersonation. Controlled non-owner carriers, restricted file services and external member execution domains are future improvements.
+
+## Member entry
+
+After the deployment administrator enables the shared placement entry, sign in at the portal home and read your placement and select Open Auriga DSH. A first placement defaults to shared. Refresh pending, switching or unavailable placements; never fall back to old sessions. After entitlement and a successful switch, the same button opens your dedicated container. UAC and invited members follow identical rules. Enterprise skills come only from platform unified resources. Ask an administrator for dedicated mode for personal keys, private skills, arbitrary plugins, member-shared skills/MCP, shell or terminal.
+
+## Administration and recovery
+
+Open Members → Details → Auriga DSH · Member mode. Read/write placement permissions and verification within 600 seconds are required. Enter a reason and confirm risks and impacts. Both upgrade and downgrade archive personal files for 30 days, start an empty workspace and discard sessions. Old tasks, .dsh, .env, model keys and plugin runtime state are not restored. File recovery requires an explicit personal request, audited administrator export and scanning, limited to the member's workspace.
+
+Granting or revoking dedicated entitlement is separate from switching: granting does not allocate or switch a placement. Complete downgrade before revoking an existing dedicated placement or an in-flight switch. Unassigned members may receive entitlement first. Writes use the server's opaque composite ETag; reread and confirm again after a conflict.
+
+202 means registration only. Retain the operation ID and read progress through fencing, draining, preparing, committing or classified failure. Retry failed queries without repeating writes. If a switch response is lost, look up the original idempotency key in the request header, never the URL. A 404 does not prove it never executed; do not automatically resend with a new key. Blocked is not success and does not return to a live old session; administrators must reconcile. After success, re-enter from the portal and verify an empty workspace and new session.
+
+Under Member instances → Auriga DSH · Maintenance and pool capacity, announce maintenance and file export windows, then enter each member UUID, unique owned legacy instance UUID and target mode. Remain dedicated requires existing entitlement. Plans contain 1–1,000 unique members and instances; split larger lists into separate plans without truncation. Saving persists only a draft and does not delete files or sessions. Retain the plan ID for recovery. Draft lists may be replaced; started lists cannot be edited. Explicitly confirm that the export window ended and accept archiving, empty workspaces, discarded sessions and pool impacts before starting. Read per-member progress by plan ID; blocked or failed is not completed. Retry uncertain responses only with the original request, ETag and idempotency key. Do not create another plan automatically. Sessions are not migrated; first login does not silently destroy data.
+
+Capacity displays snapshot time, registered/active counts, memory and whole-pool impacts. Missing authoritative telemetry or failed reads show Unknown rather than fabricated zero. Expired snapshots do not prove current admission. Expiry, revocation, cancellation timeout and crash impacts show affected members; the latest stop records remain after capacity recovers. Stopped does not mean safe to restart. Undeployed or unavailable management APIs show actual errors without falling back to old endpoints. End-to-end usability still requires backend deployment verification.
+
+Initial budgets, not measured limits: 20 registered / 4 active per pool; 1 active, 5 GiB / 100,000 inodes per member. Stop admission at 80% memory and add pools at capacity without silently moving running sessions.
