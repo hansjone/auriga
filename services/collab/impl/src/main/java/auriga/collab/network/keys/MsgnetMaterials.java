@@ -75,12 +75,14 @@ public final class MsgnetMaterials {
         RootKeyPublication.publicKey(identity.signingSpki()));
     require(
         identity.identityId().equals(text(request.path("identity_auth"), "kid")), "scope_denied");
-    identities.requireUsable(identity);
+    identities.requireProjectionAllowed(identity);
     return identity;
   }
 
-  private JsonNode consume(JsonNode request) {
+  private JsonNode consume(JsonNode request, MsgnetControlLedger.Identity identity) {
     renewal.lock();
+    // Root control and target changes use this same realm lock. Recheck after acquiring it.
+    identities.requireProjectionAllowed(identity);
     var p = NetworkJson.parse(renewal.publication(), 1048576);
     var k = p.path("keyset").path("payload");
     require(
@@ -107,20 +109,7 @@ public final class MsgnetMaterials {
         () -> {
           var identity = authorize(request, true);
           require("network".equals(text(request, "component")), "scope_denied");
-          var publication = consume(request);
-          var binding = MsgnetRenewal.object();
-          for (String field :
-              java.util.List.of("tenant_id", "realm", "installation_id", "component", "nonce"))
-            binding.set(field, request.path(field));
-          binding.set("generation", publication.path("keyset").path("payload").path("generation"));
-          binding.set(
-              "keyset_version", publication.path("keyset").path("payload").path("keyset_version"));
-          MsgnetPolicy.projection(
-              request,
-              binding,
-              RootKeyPublication.publicKey(identity.signingSpki()),
-              false,
-              java.util.List.of("protocol_response"));
+          var publication = consume(request, identity);
           return protocolMaterial(publication);
         });
   }
@@ -149,7 +138,7 @@ public final class MsgnetMaterials {
     return renewal.run(
         () -> {
           var identity = authorize(request, true);
-          return material(request, identity, consume(request));
+          return material(request, identity, consume(request, identity));
         });
   }
 
@@ -183,7 +172,7 @@ public final class MsgnetMaterials {
     return renewal.run(
         () -> {
           var identity = authorize(request, false);
-          var material = material(request, identity, consume(request));
+          var material = material(request, identity, consume(request, identity));
           var metadata = MsgnetRenewal.object();
           for (String field :
               java.util.List.of(
@@ -222,7 +211,7 @@ public final class MsgnetMaterials {
           require(
               identity.identityId().equals(text(receipt.path("identity_auth"), "kid")),
               "scope_denied");
-          identities.requireUsable(identity);
+          identities.requireProjectionAllowed(identity);
           MsgnetPolicy.identitySignature(
               receipt,
               "Auriga.NetworkProjectionReceipt.v2",

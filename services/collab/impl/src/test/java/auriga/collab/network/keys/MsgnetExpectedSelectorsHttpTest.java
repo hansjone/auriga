@@ -164,9 +164,7 @@ class MsgnetExpectedSelectorsHttpTest {
               "gateway",
               "",
               "CN=projector");
-      controls =
-          new MsgnetControlLedger(
-              renewal, MsgnetRenewalPostgresTest.jdbc, base.tenant, "1", Map.of("target", pin));
+      controls = new MsgnetControlLedger(renewal, reads, base.tenant, "1", Map.of("target", pin));
       api =
           new MsgnetNetworkRenewal(
               renewal,
@@ -265,6 +263,10 @@ class MsgnetExpectedSelectorsHttpTest {
     }
 
     String token(UUID tenant, boolean permission) throws Exception {
+      return token(tenant, permission ? List.of("collab.msgnet.read") : List.of());
+    }
+
+    String token(UUID tenant, List<String> permissions) throws Exception {
       Instant now = Instant.now();
       var claims =
           new JWTClaimsSet.Builder()
@@ -280,7 +282,7 @@ class MsgnetExpectedSelectorsHttpTest {
               .claim("ctx", "portal")
               .claim("sid", UUID.randomUUID().toString())
               .claim("roles", List.of("member"))
-              .claim("perms", permission ? List.of("collab.msgnet.read") : List.of())
+              .claim("perms", permissions)
               .build();
       var signed =
           new SignedJWT(
@@ -304,10 +306,19 @@ class MsgnetExpectedSelectorsHttpTest {
 
   static final class FaultJdbc extends org.springframework.jdbc.core.JdbcTemplate {
     volatile boolean unavailable;
+    volatile boolean queueUnavailable;
     volatile java.util.concurrent.CountDownLatch entered, release;
 
     FaultJdbc(javax.sql.DataSource source) {
       super(source);
+    }
+
+    @Override
+    public int update(String sql, Object... args) {
+      if (queueUnavailable && sql.startsWith("INSERT INTO collab.msgnet_control_queue"))
+        throw new org.springframework.dao.DataAccessResourceFailureException(
+            "test queue unavailable");
+      return super.update(sql, args);
     }
 
     @Override
@@ -336,7 +347,11 @@ class MsgnetExpectedSelectorsHttpTest {
   HttpResponse<String> post(String endpoint, JsonNode query, String token, SSLContext ssl)
       throws Exception {
     var request =
-        HttpRequest.newBuilder(URI.create("https://127.0.0.1:" + port + PREFIX + endpoint))
+        HttpRequest.newBuilder(
+                URI.create(
+                    "https://127.0.0.1:"
+                        + port
+                        + (endpoint.startsWith("/") ? endpoint : PREFIX + endpoint)))
             .timeout(java.time.Duration.ofSeconds(30))
             .header("Content-Type", "application/json")
             .POST(HttpRequest.BodyPublishers.ofString(MsgnetRenewal.canonical(query)));
@@ -542,5 +557,66 @@ class MsgnetExpectedSelectorsHttpTest {
                 text(cq, "challenge"),
                 base.wall.instant(),
                 "loaded"));
+    controlPackageFailureRollsBackAllRealmState(f);
+  }
+
+  private void controlPackageFailureRollsBackAllRealmState(Fixture f) throws Exception {
+    var current = NetworkJson.parse(f.renewal.publicControl());
+    var changed = (ObjectNode) current.path("payload").deepCopy();
+    changed.put(
+        "control_revision",
+        number(changed, "control_revision").add(java.math.BigInteger.ONE).toString());
+    // A failed request must not apply even a correctly root-signed revocation.
+    ((tools.jackson.databind.node.ArrayNode) changed.path("revoked_installation_ids"))
+        .add("synthetic-projector");
+    var next = f.base.rootSigned(changed, "NetworkRootControl");
+    var request = f.base.controlRequest("target");
+    request.set("control", next);
+    request.put("control_digest", digest(next));
+    String endpoint = "/api/collab/v2/network/controls/packages";
+    String token = f.token(f.base.tenant, List.of("collab.msgnet.control.install"));
+    var before = controlState(f);
+    var badDigest = request.deepCopy().put("control_digest", "sha256:" + "0".repeat(64));
+    assertEquals(409, post(endpoint, badDigest, token, f.client).statusCode());
+    assertEquals(before, controlState(f));
+    assertEquals(
+        403,
+        post(endpoint, request.deepCopy().put("target_id", "unknown"), token, f.client)
+            .statusCode());
+    assertEquals(before, controlState(f));
+    f.reads.queueUnavailable = true;
+    try {
+      assertEquals(503, post(endpoint, request, token, f.client).statusCode());
+    } finally {
+      f.reads.queueUnavailable = false;
+    }
+    assertEquals(before, controlState(f));
+    var installed = post(endpoint, request, token, f.client);
+    assertEquals(200, installed.statusCode());
+    assertEquals(next, NetworkJson.parse(f.renewal.publicControl()));
+    var after = controlState(f);
+    assertNotEquals(before, after);
+    var retry = post(endpoint, request, token, f.client);
+    assertEquals(200, retry.statusCode());
+    assertEquals(NetworkJson.parse(installed.body()), NetworkJson.parse(retry.body()));
+    assertEquals(after, controlState(f));
+  }
+
+  private List<List<Map<String, Object>>> controlState(Fixture f) {
+    return f.renewal.run(
+        () ->
+            List.of(
+                MsgnetRenewalPostgresTest.jdbc.queryForList(
+                    "SELECT root_control FROM collab.msgnet_public_control WHERE tenant_id = ? AND realm = '1'",
+                    f.base.tenant),
+                MsgnetRenewalPostgresTest.jdbc.queryForList(
+                    "SELECT root_control, runtime_authority, publication, announcement, generation, keyset_version FROM collab.msgnet_realm WHERE tenant_id = ? AND realm = '1'",
+                    f.base.tenant),
+                MsgnetRenewalPostgresTest.jdbc.queryForList(
+                    "SELECT * FROM collab.msgnet_control_target WHERE tenant_id = ? AND realm = '1' ORDER BY target_id",
+                    f.base.tenant),
+                MsgnetRenewalPostgresTest.jdbc.queryForList(
+                    "SELECT * FROM collab.msgnet_control_queue WHERE tenant_id = ? AND realm = '1' ORDER BY target_id, control_revision",
+                    f.base.tenant)));
   }
 }

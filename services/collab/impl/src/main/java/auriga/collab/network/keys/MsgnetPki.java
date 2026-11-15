@@ -100,18 +100,21 @@ public final class MsgnetPki implements MsgnetMaterials.Transport {
             payload = (ObjectNode) previous.path("payload").deepCopy();
             String phase = text(payload, "phase");
             if ("dual_trust".equals(phase)) {
-              if (!acknowledged(previous, false)) return null;
-              payload.put("phase", "new_leaves");
-              issueLeaves = true;
+              if (acknowledged(previous, false)) {
+                payload.put("phase", "new_leaves");
+                issueLeaves = true;
+              } else if (!needsReprojection(previous)) return null;
             } else if ("new_leaves".equals(phase)) {
               if (!acknowledged(previous, true)) {
                 issueLeaves(payload, authority.path("payload").path("transport_scope"), now, false);
-                return null;
+                if (!needsReprojection(previous)) return null;
+              } else {
+                var cas = list(payload.path("cas"));
+                var retained = payload.putArray("cas");
+                for (var ca : cas.subList(Math.max(0, cas.size() - 2), cas.size()))
+                  retained.add(ca);
+                payload.put("phase", "retire_old");
               }
-              var cas = list(payload.path("cas"));
-              var retained = payload.putArray("cas");
-              for (var ca : cas.subList(Math.max(0, cas.size() - 2), cas.size())) retained.add(ca);
-              payload.put("phase", "retire_old");
             } else {
               boolean renewCa =
                   list(payload.path("cas")).stream()
@@ -129,7 +132,7 @@ public final class MsgnetPki implements MsgnetMaterials.Transport {
                 payload.put("phase", "dual_trust");
               } else {
                 issueLeaves(payload, authority.path("payload").path("transport_scope"), now, false);
-                return null;
+                if (!needsReprojection(previous)) return null;
               }
             }
           }
@@ -168,7 +171,15 @@ public final class MsgnetPki implements MsgnetMaterials.Transport {
                   "previous_bundle_digest",
                   previous == null
                       ? "sha256:" + "0".repeat(64)
-                      : MsgnetV2Verifier.digest(previous));
+                      // A replacement in the same phase still depends on the completed
+                      // preceding phase, never on an incomplete same-phase snapshot.
+                      : !transition
+                              && !"dual_trust".equals(text(payload, "phase"))
+                              && payload
+                                  .path("phase")
+                                  .equals(previous.path("payload").path("phase"))
+                          ? text(previous.path("payload"), "previous_bundle_digest")
+                          : MsgnetV2Verifier.digest(previous));
           payload.set("scope", authority.path("payload").path("transport_scope").deepCopy());
           if (previous == null || emergency) {
             var readers = payload.putArray("required_reader_ids");
@@ -237,6 +248,32 @@ public final class MsgnetPki implements MsgnetMaterials.Transport {
       if (!"collab.msgnet_projection_pending".equals(failure.errorCode().code())) throw failure;
       return false;
     }
+  }
+
+  private boolean needsReprojection(JsonNode bundle) {
+    var approved = MsgnetSelectorLedger.read(jdbc, tenant, realm, bundle);
+    var publication = renewal.requiredState().path("publication").path("keyset").path("payload");
+    var revoked =
+        renewal.requiredState().path("control").path("payload").path("revoked_installation_ids");
+    for (String reader : approved.bindings().propertyNames()) {
+      String identity = text(approved.identities(), reader);
+      if (isolated(identity) || contains(revoked, identity)) continue;
+      var selector = approved.bindings().path(reader);
+      if (!selector.path("generation").equals(publication.path("generation"))
+          || !selector.path("keyset_version").equals(publication.path("keyset_version")))
+        return true;
+      var superseded =
+          jdbc.queryForList(
+              "SELECT superseded FROM collab.msgnet_projection_nonce WHERE tenant_id = ? AND realm = ? AND installation_id = ? AND nonce = ?",
+              Boolean.class,
+              tenant,
+              realm,
+              identity,
+              text(selector, "nonce"));
+      require(superseded.size() == 1, "projection_pending");
+      if (Boolean.TRUE.equals(superseded.getFirst())) return true;
+    }
+    return false;
   }
 
   private boolean allIsolated(JsonNode payload) {

@@ -284,7 +284,7 @@ public class MsgnetRenewalConfiguration {
       ObjectProvider<MsgnetControlLedger> controls) {
     return (tenant, realm, identity, target) ->
         MsgnetNetworkRenewal.available(controls::getObject)
-            .permitted(tenant, realm, identity, target);
+            .projectionPermitted(tenant, realm, identity, target);
   }
 
   @Bean

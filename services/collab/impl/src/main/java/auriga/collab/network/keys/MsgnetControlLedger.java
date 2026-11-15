@@ -138,6 +138,14 @@ public final class MsgnetControlLedger {
   }
 
   void requireUsable(Identity identity) {
+    requireProjectionAllowed(identity);
+    require(
+        "ready".equals(text(row(identity.targetId()).path("isolation"), "state")),
+        "identity_quarantined");
+  }
+
+  /** Confirmed clean installations may only fetch/project their scoped recovery material. */
+  void requireProjectionAllowed(Identity identity) {
     var control = renewal.requiredState().path("control").path("payload");
     require(
         !contains(control.path("revoked_installation_ids"), identity.identityId()),
@@ -157,7 +165,8 @@ public final class MsgnetControlLedger {
               && identity.signingSpki().equals(text(row, "identity_spki")),
           "identity_quarantined");
       require(
-          "ready".equals(text(row.path("isolation"), "state"))
+          java.util.Set.of("confirmed", "ready").contains(text(row.path("isolation"), "state"))
+              && row.has("receipt")
               && !row.path("isolation").path("identity_compromised").asBoolean(),
           "identity_quarantined");
     }
@@ -176,7 +185,6 @@ public final class MsgnetControlLedger {
 
   public ObjectNode create(JsonNode request) {
     schema("ControlPackage", request, "invalid_chain");
-    renewal.installControl(request.path("control"));
     return renewal.run(
         () -> {
           lock();
@@ -185,12 +193,26 @@ public final class MsgnetControlLedger {
                   && realm.equals(text(request, "realm")),
               "scope_denied");
           var identity = target(text(request, "target_id"));
+          require(
+              digest(request.path("control")).equals(text(request, "control_digest")),
+              "control_rollback");
+          renewal.installControl(request.path("control"));
           var control = renewal.requiredState().path("control");
           require(
               control.equals(request.path("control"))
                   && MsgnetV2Verifier.digest(control).equals(text(request, "control_digest")),
               "control_rollback");
           var previous = row(identity.targetId());
+          if (previous != null
+              && "0".equals(identity.revision())
+              && (!identity.identityId().equals(text(previous, "identity_id"))
+                  || !identity.signingSpki().equals(text(previous, "identity_spki"))))
+            require(
+                !identity.identityId().equals(text(previous, "identity_id"))
+                    && contains(
+                        control.path("payload").path("revoked_installation_ids"),
+                        text(previous, "identity_id")),
+                "identity_quarantined");
           if (previous != null && !"0".equals(identity.revision())) {
             int order =
                 integer(identity.revision())
@@ -238,8 +260,7 @@ public final class MsgnetControlLedger {
                       "identity_compromised",
                       previous != null
                           && previous.path("isolation").path("identity_compromised").asBoolean()
-                          && ("0".equals(identity.revision())
-                              || identity.identityId().equals(text(previous, "identity_id"))))
+                          && identity.identityId().equals(text(previous, "identity_id")))
                   .put("challenge", text(pack, "challenge"))
                   .put("new_chain_ready", false);
           jdbc.update(
@@ -424,6 +445,23 @@ public final class MsgnetControlLedger {
     }
   }
 
+  public boolean projectionPermitted(
+      String callerTenant, String callerRealm, String identityId, String targetId) {
+    if (!tenant.toString().equals(callerTenant) || !realm.equals(callerRealm)) return false;
+    try {
+      return renewal.run(
+          () -> {
+            var identity = identity(identityId);
+            require(identity.targetId().equals(targetId), "scope_denied");
+            requireProjectionAllowed(identity);
+            return true;
+          });
+    } catch (auriga.common.error.AurigaException
+        | org.springframework.dao.DataAccessException unavailable) {
+      return false;
+    }
+  }
+
   public boolean claim(auriga.contracts.msgnet.model.ProjectionRequest request) {
     var value = MsgnetNetworkRenewal.tree(request);
     schema("ProjectionRequest", value, "invalid_chain");
@@ -432,12 +470,10 @@ public final class MsgnetControlLedger {
           lock();
           var identity = identity(text(value, "installation_id"));
           require(
-              permitted(
-                  text(value, "tenant_id"),
-                  text(value, "realm"),
-                  identity.identityId(),
-                  identity.targetId()),
-              "identity_quarantined");
+              tenant.toString().equals(text(value, "tenant_id"))
+                  && realm.equals(text(value, "realm")),
+              "scope_denied");
+          requireProjectionAllowed(identity);
           MsgnetPolicy.identitySignature(
               value,
               "Auriga.NetworkProjectionRequest.v2",
