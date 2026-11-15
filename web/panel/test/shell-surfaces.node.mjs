@@ -1,6 +1,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { surfaceHost, flush, boot, response } from './shell-host.mjs';
+import {
+  surfaceHost,
+  flush,
+  boot,
+  response,
+  openSettings,
+} from './shell-host.mjs';
 
 const button = (root, label) =>
   [...root.querySelectorAll('button')].find((el) => el.textContent === label);
@@ -89,7 +95,7 @@ test('plugin loading and panel mounting preserve the native host title', async (
   try {
     assert.equal(host.document.title, title);
     const main = host.mount('main');
-    const settings = host.mount('settings.section');
+    const settings = await openSettings(main);
     await flush();
     assert.equal(host.document.title, title);
     main.close();
@@ -289,20 +295,13 @@ test('independent native slots: settings retains trusted bootstrap and versions 
   try {
     assert.deepEqual(
       [...host.registrations.keys()],
-      [
-        'sidebar.panellist',
-        'sidebar.brand.mark',
-        'sidebar.brand.name',
-        'main',
-        'settings.section',
-      ],
+      ['sidebar.panellist', 'sidebar.brand.mark', 'sidebar.brand.name', 'main'],
     );
     assert.equal(
       host.registrations.get('main').meta.key,
       host.registrations.get('sidebar.panellist').meta.id,
     );
-    assert.equal(host.registrations.get('settings.section').meta.order, 22);
-    const settings = host.mount('settings.section');
+    const settings = await openSettings(host);
     await flush();
     assert.match(settings.root.textContent, /系统托管.*协议版本1/);
     assert.match(settings.root.textContent, /插件版本0\.2\.3/);
@@ -334,8 +333,8 @@ test('independent native slots: settings retains trusted bootstrap and versions 
     assert.equal(calls[0].init.redirect, 'error');
     settings.close();
     host.dispose();
-    assert.equal(host.counts.registered, 5);
-    assert.equal(host.counts.unregistered, 5);
+    assert.equal(host.counts.registered, 4);
+    assert.equal(host.counts.unregistered, 4);
     assert.equal(host.registrations.size, 0);
     assert.equal(host.scheme.size, 0);
     assert.equal(host.subscriptions.size, 0);
@@ -356,7 +355,7 @@ test('opening, refreshing and closing host settings preserves main resource elem
     const context = panel.context;
     panel.dataset.resourceTab = 'mine';
     panel.dataset.search = 'retained';
-    const settings = host.mount('settings.section');
+    const settings = await openSettings(main);
     await flush();
     button(settings.root, '刷新状态').click();
     await flush();
@@ -395,7 +394,7 @@ test('host language and dark/light changes update native settings and panel cont
   const host = surfaceHost(async () => response());
   try {
     const main = host.mount('main'),
-      settings = host.mount('settings.section');
+      settings = await openSettings(main);
     await flush();
     host.locale('en');
     host.theme('dark');
@@ -444,7 +443,7 @@ for (const [status, code, text] of [
       }),
     );
     try {
-      const settings = host.mount('settings.section');
+      const settings = await openSettings(host);
       await flush();
       assert.ok(settings.root.querySelector('[role="alert"]'));
       assert.ok(settings.root.textContent.includes(text));
@@ -463,12 +462,13 @@ test('retry uses a new request; old completion after settings close cannot updat
   const host = surfaceHost(async (_url, init) => {
     if (!new URL(_url).pathname.endsWith('/bootstrap'))
       return response(200, { loggedIn: false, connected: false });
+    // Call 1 is the main surface; settings in its tab bootstraps next.
     calls++;
-    if (calls === 1)
+    if (calls === 2)
       throw Object.assign(new Error('private failure'), {
         reason: 'private-token https://private.example.com',
       });
-    if (calls === 2) {
+    if (calls === 3) {
       oldSignal = init.signal;
       return new Promise((resolve) => {
         late = resolve;
@@ -477,7 +477,7 @@ test('retry uses a new request; old completion after settings close cannot updat
     return response();
   });
   try {
-    const first = host.mount('settings.section');
+    const first = await openSettings(host);
     await flush();
     assert.doesNotMatch(
       first.root.textContent,
@@ -485,10 +485,10 @@ test('retry uses a new request; old completion after settings close cannot updat
     );
     button(first.root, '重试').click();
     await flush();
-    assert.equal(calls, 2);
+    assert.equal(calls, 3);
     first.close();
     assert.equal(oldSignal.aborted, true);
-    const next = host.mount('settings.section');
+    const next = await openSettings(host);
     await flush();
     late(response(200, { ...boot(), pluginVersion: '9.9.9' }));
     await flush();
@@ -511,7 +511,7 @@ test('hung bootstrap times out and retry is available; plugin disposal aborts pe
     return new Promise(() => {});
   });
   try {
-    const settings = host.mount('settings.section');
+    const settings = await openSettings(host);
     await flush();
     host.expire(15_000);
     await flush();
@@ -519,11 +519,11 @@ test('hung bootstrap times out and retry is available; plugin disposal aborts pe
     assert.ok(button(settings.root, '重试'));
     button(settings.root, '重试').click();
     await flush();
+    settings.close();
     host.dispose();
     await flush();
     assert.equal(signal.aborted, true);
     assert.equal(host.counts.timers.size, 0);
-    settings.close();
   } finally {
     host.close();
   }
@@ -600,7 +600,7 @@ test('bootstrap rejects external panel/API origins and does not expose their val
       response(200, { ...boot(), ...extra }),
     );
     try {
-      const settings = host.mount('settings.section');
+      const settings = await openSettings(host);
       await flush();
       assert.ok(settings.root.querySelector('[role="alert"]'));
       assert.doesNotMatch(settings.root.textContent, /private.example/);
@@ -629,7 +629,7 @@ test('packaged UI shows unconfigured native main/settings without a resource fet
   const host = surfaceHost(async () => response(200, local));
   try {
     const main = host.mount('main'),
-      settings = host.mount('settings.section');
+      settings = await openSettings(main);
     await flush();
     const panel = main.root.querySelector('auriga-team-panel');
     assert.ok(panel);
@@ -669,34 +669,6 @@ test('managed failures never load or fall back to the packaged local panel', asy
       1,
     );
     assert.doesNotMatch(calls.join(' '), /local-panel/);
-    main.close();
-    host.dispose();
-  } finally {
-    host.close();
-  }
-});
-
-test('host owns the settings dialog and Esc; opening/closing cannot navigate main', async () => {
-  const host = surfaceHost(async () => response());
-  try {
-    const main = host.mount('main');
-    await flush();
-    const panel = main.root.querySelector('auriga-team-panel');
-    panel.dataset.search = 'keep';
-    const settings = host.mount('settings.section');
-    await flush();
-    const close = (event) => {
-      if (event.key === 'Escape') settings.close();
-    };
-    host.document.addEventListener('keydown', close);
-    host.document.dispatchEvent(
-      new host.window.KeyboardEvent('keydown', { key: 'Escape' }),
-    );
-    await flush();
-    assert.equal(settings.root.isConnected, false);
-    assert.equal(main.root.querySelector('auriga-team-panel'), panel);
-    assert.equal(panel.dataset.search, 'keep');
-    host.document.removeEventListener('keydown', close);
     main.close();
     host.dispose();
   } finally {
@@ -867,7 +839,7 @@ test('host theme overrides opposite OS preference and never installs an independ
   });
   try {
     const main = host.mount('main'),
-      settings = host.mount('settings.section');
+      settings = await openSettings(main);
     await flush();
     const panel = main.root.querySelector('auriga-team-panel');
     assert.equal(panel.context.theme, 'light');

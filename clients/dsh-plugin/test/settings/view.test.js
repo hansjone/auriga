@@ -512,8 +512,8 @@ for (const locale of ['zh', 'en'])
                 ]
               : [
                   'Auriga DSH status',
-                  locale === 'zh' ? '平台' : 'Platform',
                   locale === 'zh' ? '账号' : 'Account',
+                  locale === 'zh' ? '平台' : 'Platform',
                   locale === 'zh' ? '消息网络' : 'Message network',
                 ],
           );
