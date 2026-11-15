@@ -425,10 +425,10 @@ window.__ModuleLoader__.load({
     };
     const css = `
 .auriga-shell{box-sizing:border-box;color:var(--dsw-alias-label-primary,inherit);font:inherit;min-width:0}
-.auriga-shell button:not(.auriga-host-control,.auriga-tabs button){font:inherit;padding:5px 10px;border:1px solid var(--dsw-alias-border-l2,currentColor);border-radius:6px;background:var(--dsw-alias-bg-layer-1,transparent);color:var(--dsw-alias-label-primary,inherit);cursor:pointer}
-.auriga-shell button:not(.auriga-host-control,.auriga-tabs button):hover,.auriga-tabs-fallback button:hover{background:var(--dsw-alias-interactive-bg-hover,transparent)}
-.auriga-shell button:not(.auriga-host-control,.auriga-tabs button):focus-visible,.auriga-tabs-fallback button:focus-visible,.auriga-shell summary:focus-visible{outline:var(--dsw-focus-ring-width,2px) solid var(--dsw-focus-ring-color,var(--dsw-alias-state-business-primary,currentColor));outline-offset:2px}
-.auriga-shell button:not(.auriga-host-control,.auriga-tabs button):disabled{opacity:.5;cursor:default}
+.auriga-shell button:not(.auriga-host-control,.auriga-tabs button,.auriga-tabs-fallback button){font:inherit;padding:5px 10px;border:1px solid var(--dsw-alias-border-l2,currentColor);border-radius:6px;background:var(--dsw-alias-bg-layer-1,transparent);color:var(--dsw-alias-label-primary,inherit);cursor:pointer}
+.auriga-shell button:not(.auriga-host-control,.auriga-tabs button,.auriga-tabs-fallback button):hover,.auriga-tabs-fallback button:hover{background:var(--dsw-alias-interactive-bg-hover,transparent)}
+.auriga-shell button:not(.auriga-host-control,.auriga-tabs button,.auriga-tabs-fallback button):focus-visible,.auriga-tabs-fallback button:focus-visible,.auriga-shell summary:focus-visible{outline:var(--dsw-focus-ring-width,2px) solid var(--dsw-focus-ring-color,var(--dsw-alias-state-business-primary,currentColor));outline-offset:2px}
+.auriga-shell button:not(.auriga-host-control,.auriga-tabs button,.auriga-tabs-fallback button):disabled{opacity:.5;cursor:default}
 .auriga-shell-status{padding:14px 0;display:flex;gap:12px;align-items:center;flex-wrap:wrap}
 .auriga-settings{padding:4px 4px 24px;font-size:13px;line-height:1.5}
 .auriga-settings h2{font-size:20px;font-weight:600;margin:0 0 24px}
@@ -446,7 +446,9 @@ window.__ModuleLoader__.load({
 .auriga-consent p{overflow-wrap:anywhere}.auriga-consent small{color:var(--dsw-alias-label-secondary,inherit)}
 .auriga-app{height:100%;display:flex;flex-direction:column;gap:12px;padding:20px 24px 0;overflow:auto}
 .auriga-banner{display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:8px 12px;border-radius:8px;background:var(--dsw-alias-bg-layer-2,transparent);font-size:13px}
-.auriga-tabs{box-sizing:border-box;flex:none;min-width:0;width:100%;overflow-x:auto}
+.auriga-tabs-scroll{box-sizing:border-box;flex:none;min-width:0;width:100%;overflow-x:auto}
+.auriga-tabs{box-sizing:border-box;min-width:max-content;width:100%;white-space:nowrap}
+.auriga-tabs button{flex:none;white-space:nowrap}
 .auriga-tabs-fallback{display:flex;gap:4px;border-bottom:1px solid var(--dsw-alias-border-l1,currentColor)}
 .auriga-tabs-fallback>button{font:inherit;cursor:pointer;border:0;border-bottom:2px solid transparent;border-radius:0;background:transparent;padding:8px 12px;color:var(--dsw-alias-label-secondary,inherit);white-space:nowrap}
 .auriga-tabs-fallback>button[aria-selected=true]{color:var(--dsw-alias-label-primary,inherit);border-bottom-color:var(--dsw-alias-state-business-primary,currentColor);font-weight:600}
@@ -1970,19 +1972,23 @@ window.__ModuleLoader__.load({
             panelId: 'auriga-panel-' + id,
           }));
           if (HostSegmentedTabs)
-            return h(HostSegmentedTabs, {
-              items,
-              value,
-              onChange,
-              label: t('panel'),
-              className: 'auriga-tabs',
-            });
+            return h(
+              'div',
+              { className: 'auriga-tabs-scroll' },
+              h(HostSegmentedTabs, {
+                items,
+                value,
+                onChange,
+                label: t('panel'),
+                className: 'auriga-tabs',
+              }),
+            );
           return h(
             'div',
             {
               role: 'tablist',
               'aria-label': t('panel'),
-              className: 'auriga-tabs auriga-tabs-fallback',
+              className: 'auriga-tabs-scroll auriga-tabs-fallback',
             },
             ...items.map((item, index) =>
               h(

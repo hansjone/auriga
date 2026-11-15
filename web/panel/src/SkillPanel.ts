@@ -332,11 +332,27 @@ export class SkillPanel {
           card.append(this.element('p', this.source.get(id.packageId)));
         this.root.append(card);
       }
-      if (!this.rows.length)
+      if (!this.rows.length && !this.busy && !this.notice)
         this.root.append(
-          this.element('p', this.text('暂无共享技能', 'No shared skills')),
+          this.element(
+            'p',
+            this.text(
+              '暂无共享技能，请前往资源市场选择技能；私有技能可在原生设置中管理。',
+              'No shared skills. Choose a skill from the market or manage private skills in native settings.',
+            ),
+          ),
         );
     } else {
+      if (!this.packages.length && !this.busy && !this.notice)
+        this.root.append(
+          this.element(
+            'p',
+            this.text(
+              '市场暂无共享技能，请联系管理员前往管理台发布后刷新。',
+              'No shared skills in the market. Ask an administrator to publish from the admin console, then refresh.',
+            ),
+          ),
+        );
       for (const pack of this.packages) {
         const card = this.element('article');
         card.className = 'card';

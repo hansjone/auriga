@@ -1,14 +1,24 @@
 # 首批资源准备（未上架、未签名）
 
-在工位根执行 `node seed-resources/prepare.mjs <dsh-memwiki源码目录>`。需要锁定工作区依赖、Python。仅读源码的 lib、templates、skills、LICENSE、cordis.patch.yml 和包元数据，不访问用户记忆库、凭据或本机配置，不执行上游构建及生命周期脚本。
+执行 `node scripts/resource-seed/prepare.mjs <dsh-memwiki源码目录> [输出目录]`。默认产物位于工位 `seed-resources/`，入口从任意当前目录均可运行。需要 Node 22、npm 和锁定工作区依赖。
+
+每次在输出目录下创建独立 `build-*`，复制通用发行代码、包元数据及固定清单中的三个模板/技能文件，以 `npm ci --omit=dev --ignore-scripts --no-audit --no-fund` 安装锁定生产依赖。源码提交号、工作区改动和实际输入字节摘要一并记录。归档从显式文件映射构造，只收录四个 JS 入口、package.json、Cordis patch、许可证及固定资料文件。旧输出与隐藏附件不会进入映射。脚本只读源码，不访问用户记忆库、凭据或个人配置。
 
 产物为两个 tgz、两份 `*.auriga-resource.json`、`checksums.json`、`build-source.json`。制品和现场证据留工位且被忽略。memwiki 将发行 JS 和生产依赖打成 Node ESM，去掉 lifecycle scripts 和外网安装依赖，保留 host/client/MCP CLI、通用模板和 skills；修正 bundle 后模板相对路径，并收集依赖许可证。示例 skill 仅根据用户提供的文字总结任务，无命令、外连和敏感内容。
 
-现有校验器验证清单 schema、插件 validateArchive、skill packSkill/unpackSkill。签名声明不等于已签名。CLI 的 help 和空库初始化通过，也不能替代真实宿主安装及 MCP 完整读写验收。
+现有校验器验证清单 schema、插件 validateArchive、skill packSkill/unpackSkill。构建时执行 bundle 后的 CLI 空库初始化，核对模板路径。`build-source.json` 记录源码提交号、锁文件摘要、输入文件摘要、esbuild 版本、所有实际打入包中的依赖名和版本，以及包文件清单。
+
+可运行 `RESOURCE_SEED_SOURCE=<源码目录> node --test scripts/resource-seed/prepare.test.mjs` 验证两次干净安装的归档一致，旧输出中的额外文件被排除。在 PowerShell 中先设置 `$env:RESOURCE_SEED_SOURCE` 再运行该 Node 命令。
+
+## 插件能力与审核材料
+
+当前 dsh-memwiki 0.4.0 提供 18 个 MCP 工具，包括记忆库查询、增删改和 `memwiki_secret_list/get/set/delete`。工具名从源码提取后写入 `permissions.tools`，`dataAccess` 声明 workspace_read、workspace_write 和 user_selected_files。插件会执行 git，包括向用户所配置远端推送。主机由用户远端配置决定，`outboundHosts` 以 `*` 保守声明可访问任意主机，实际远端需在发布审核时核对。
+
+Windows 凭据使用 DPAPI，非 Windows 实现采用明文凭据存储。该包的 os=any 包含这一差异，发布审核与使用说明必须披露。能力说明同步写入清单 description 和构建来源文件。清单字段沿用现有契约，权限授权仍由宿主和平台执行。
 
 ## 主控发布步骤
 
-1. 核实 build-source.json 的源码/锁文件摘要及许可证，在隔离测试库验收 memwiki 设置、MCP 读写。插件具备访问记忆库及凭据存储能力，按供应链 A 级做完整安全审核。
+1. 核实 build-source.json 的源码提交、锁文件/输入摘要、依赖版本及许可证，在隔离测试库验收 memwiki 设置、MCP 读写，核对凭据存储差异和 Git 远端。按供应链 A 级做完整安全审核。
 2. 管理台资源中心创建共享 L3 草稿。plugin 使用原插件接口；skill 使用通用 catalog，不将 plugin 上传到 catalog。
 3. plugin：`POST /api/resource/v1/packages` 创建包，`POST /api/resource/v1/packages/{packageId}/versions` 上传整个 gzip。媒体类型、版本参数以 OpenAPI 为准。旧 Version.digest 是 tgz 原字节 SHA-256；外置通用清单仅作准备资料，当前不强行迁移 plugin 到 v2。
 4. skill：`POST /api/resource/v1/catalog/packages` 创建包，`POST /api/resource/v1/catalog/packages/{packageId}/versions` 提交原始清单，按 `.../versions/{versionId}/artifacts/{artifactId}` 上传制品。清单及制品摘要分别核对 checksums.json；具体 body、If-Match、Idempotency-Key 和近期验证依 contracts/openapi/resource.yaml。
@@ -22,4 +32,4 @@
 - 无需将私钥交给工人。没有读取私钥或伪造签名，主控走既有签名服务签发；安装端继续鉴权、验签、租约与撤销核验。
 - 用户明确选择的记忆库目录，包不附带用户库、`.memwiki`、凭据文件或个人配置；清单权限声明不能代替宿主权限控制。
 
-`real-ui.mjs` 是隔离 rc.3 页面验证脚本，资源 API 使用浏览器替身，不代表 NAS 或真实平台权限验收。按已有 public-host/e2e 锁文件将依赖分别安装到本目录 host/browser；浏览器使用系统 Chrome。临时宿主结束时清理。
+真实 rc.3 页面的一次性验证脚本、截图及 DOM 尺寸证据保存在工位 `seed-resources/`，由工位报告记录命令和结果。

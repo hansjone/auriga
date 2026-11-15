@@ -55,7 +55,7 @@ export const messages = {
     install: '安装',
     update: '更新',
     uninstall: '卸载',
-    localEmpty: '本机没有已配置的插件。',
+    localEmpty: '本机没有已配置的插件，请前往资源市场选择插件。',
     inventoryHint:
       '本机已配置插件与预设清单；不包含尚未配置的包或市场资源安装记录。',
     localEnabled: '本机启用状态',
@@ -154,7 +154,8 @@ export const messages = {
     install: 'Install',
     update: 'Update',
     uninstall: 'Uninstall',
-    localEmpty: 'No local plugins are configured.',
+    localEmpty:
+      'No local plugins are configured. Choose a plugin from the resource market.',
     inventoryHint:
       'Configured local plugins and presets; excludes unconfigured packages and market installation records.',
     localEnabled: 'Local enablement',

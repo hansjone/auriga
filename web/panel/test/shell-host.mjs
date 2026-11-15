@@ -164,6 +164,8 @@ export function surfaceHost(
       if (oldNode) oldNode.replaceWith(node);
       else parent.append(node);
     }
+    if (value.type.includes('-') && !Object.hasOwn(value.props, 'hidden'))
+      node.removeAttribute('hidden');
     for (const [key, prop] of Object.entries(value.props)) {
       if (key === 'ref') prop.current = node;
       else if (key === 'style') Object.assign(node.style, prop);
