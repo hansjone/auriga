@@ -36,33 +36,33 @@ openssl pkey -in <私有目录>/desktop-private.pem -pubout -out <公钥目录>/
 
 发行序号为严格递增正整数，默认采用工作流 run number。重跑或下架后发行仍须选择比已发布最高序号更大的值。tag 的版本后缀作为构建版本。
 
-CI 制品包含完整 ZIP、EXE、`desktop.sha256`、`desktop-release.unsigned.json` 和 `desktop-build.json`。构建记录包含源码 commit、Desktop 和各组件版本、ZIP SHA-256、EXE SHA-256、包 ID、workflow 路径、run、event、ref、main 祖先检查结果，以及包内公钥 SPKI DER 的 SHA-256 指纹。工作流执行安装器单测、包校验和隔离安装/启动/卸载验证后上传制品。
+CI 制品包含完整 EXE、内部 ZIP、`desktop.sha256`、`desktop-release.unsigned.json` 和 `desktop-build.json`。构建记录包含源码 commit、Desktop 和各组件版本、制品 SHA-256、EXE SHA-256、包 ID、workflow 路径、run、event、ref、main 祖先检查结果，以及包内公钥 SPKI DER 的 SHA-256 指纹。工作流执行安装器单测、包校验和隔离安装/启动/卸载验证后上传制品。
 
 ### 审阅与离线签名
 
-主控下载 CI 制品，先核对工作流来源、源码 commit、版本和 CI 记录，并用 `Get-FileHash -Algorithm SHA256` 核对 ZIP 和 EXE 的摘要。将 ZIP、未签名清单及构建记录放到签名机。
+主控下载 CI 制品，先核对工作流来源、源码 commit、版本和 CI 记录，并用 `Get-FileHash -Algorithm SHA256` 核对完整 EXE 的摘要。将 EXE、未签名清单及构建记录放到签名机。
 
 从 `clients/installer` 运行审阅命令。
 
 ```powershell
-node scripts/sign-release.mjs --review-only manifest=<制品目录>/desktop-release.unsigned.json buildRecord=<制品目录>/desktop-build.json archive=<完整ZIP> output=<输出目录>/desktop-release.json
+node scripts/sign-release.mjs --review-only manifest=<制品目录>/desktop-release.unsigned.json buildRecord=<制品目录>/desktop-build.json archive=<完整EXE> output=<输出目录>/desktop-release.json
 ```
 
-脚本核对 ZIP 与 CI 清单/记录，实际解包并验证包内文件和公钥指纹，输出版本、包摘要、上游组件、序号、有效期、workflow、ref、commit、公钥指纹和 `reviewSha256`，并保存 `<output>.review.json` 本地审阅检查点。审阅阶段无需私钥。来源必须是通过 main 祖先检查的 `desktop-v<版本>` tag 构建，否则拒签。构建记录仍须与 GitHub 对应运行人工核对，记录本身不是 CI 来源的加密证明。
+脚本核对 EXE 与 CI 清单/记录，实际解包并验证包内文件和公钥指纹，输出版本、包摘要、上游组件、序号、有效期、workflow、ref、commit、公钥指纹和 `reviewSha256`，并保存 `<output>.review.json` 本地审阅检查点。审阅阶段无需私钥。来源必须是通过 main 祖先检查的 `desktop-v<版本>` tag 构建，否则拒签。构建记录仍须与 GitHub 对应运行人工核对，记录本身不是 CI 来源的加密证明。
 
 核对输出与 CI 记录一致后，使用刚审阅的 `reviewSha256` 确认。
 
 ```powershell
-node scripts/sign-release.mjs manifest=<制品目录>/desktop-release.unsigned.json buildRecord=<制品目录>/desktop-build.json archive=<完整ZIP> output=<输出目录>/desktop-release.json keyFile=<私有目录>/desktop-private.pem --confirm-sha256=<reviewSha256>
+node scripts/sign-release.mjs manifest=<制品目录>/desktop-release.unsigned.json buildRecord=<制品目录>/desktop-build.json archive=<完整EXE> output=<输出目录>/desktop-release.json keyFile=<私有目录>/desktop-private.pem --confirm-sha256=<reviewSha256>
 ```
 
-确认摘要绑定完整未签名清单与构建记录。审阅后改变版本、摘要、说明、有效期等参数会被拒绝，须重新审阅。签名私钥推导出的公钥必须与 ZIP 内固定公钥指纹相同。输出文件须尚不存在。签名成功后清理检查点。私钥及其路径不会出现在脚本输出里。
+确认摘要绑定完整未签名清单与构建记录。审阅后改变版本、摘要、说明、有效期等参数会被拒绝，须重新审阅。签名私钥推导出的公钥必须与 EXE 内固定公钥指纹相同。输出文件须尚不存在。签名成功后清理检查点。私钥及其路径不会出现在脚本输出里。
 
 ### 同包续期
 
-自动更新清单默认有效 30 天。到期前可从原 tag 构建的已核对制品复制未签名清单，仅将 `sequence` 改成高于平台已见最高序号的新整数，将 `notAfter` 延长。保留原 ZIP、构建记录、Desktop 版本、包 ID、SHA、大小和组件版本。重新执行上述 `--review-only` 和 `--confirm-sha256` 两步，再在管理台上传新签名清单和原 ZIP。平台要求同版本的包身份相同且有效期严格延长，拒绝同版本替包。
+自动更新清单默认有效 30 天。到期前可从原 tag 构建的已核对制品复制未签名清单，仅将 `sequence` 改成高于平台已见最高序号的新整数，将 `notAfter` 延长。保留原 EXE、构建记录、Desktop 版本、包 ID、SHA、大小和组件版本。重新执行上述 `--review-only` 和 `--confirm-sha256` 两步，再在管理台上传新签名清单和原 EXE。平台要求同版本的包身份相同，拒绝同版本替包；同包策略调整和续期都使用更高序号重新签名。
 
-续期会成为新的上架记录并写发布审计。已安装该版本的客户端只记住新的序号，不重复安装。即使错过续期，登录页与匿名包下载仍提供最新上架的安装包供新用户下载；自动更新客户端继续严格拒绝过期清单，运营者须完成续期后才恢复自动更新。
+续期会成为新的上架记录并写发布审计。已安装该版本的客户端只记住新的序号，不重复安装。错过续期后，latest 与匿名包下载仍提供已上架发行，供新用户下载安装。自动更新客户端严格拒绝过期清单，运营者须以更高序号续期后才能恢复自动更新。
 
 ### 平台接线和发布
 
@@ -74,26 +74,26 @@ resource 服务需要以下配置。
 
 卷须支持 OS 文件锁和原子 rename。插件市场对象存储上限为 64 MiB，Desktop 使用独立卷存放大包。发行卷与 resource 数据库须纳入备份。反向代理允许上传实际包大小，产品上限 4 GiB，并设置足够超时。签名清单放在 base64url `X-Desktop-Manifest` 头中，代理和服务端头上限至少 44 KiB。
 
-管理台进入“运维 → 客户端版本” `/ops/desktop`，完成近期身份验证，选择签名清单和 ZIP 发布。管理操作要求有效 ADMIN 会话、`resource.versions.publish` 和 step-up。平台验证签名、有效期、SHA、大小、版本和序号后发布。
+管理台进入“运维 → 客户端版本” `/ops/desktop`，完成近期身份验证，选择签名清单和 EXE 发布。管理操作要求有效 ADMIN 会话、`resource.versions.publish` 和 step-up。平台验证签名、有效期、SHA、大小、版本和序号后发布。
 
 发布和下架先原子持久化发行状态及待投递审计，再经 resource outbox 向统一审计链路投递。数据库收据防止重试产生重复事件，审计暂不可用时每 30 秒补送。统一审计页可按 `resource.desktop.publish` 或 `resource.desktop.withdraw` 查询。
 
 ### 下载、更新和撤回
 
-云端登录首页显示版本、大小、发布时间、SHA-256 和 Windows 下载按钮。以下两个 GET 接口允许匿名访问，返回公开签名清单和 ZIP，复用 edge 的按客户端 IP 限速。
+云端登录首页显示版本、大小、发布时间、SHA-256 和 Windows 下载按钮。以下两个 GET 接口允许匿名访问，返回公开签名清单和 EXE，复用 edge 的按客户端 IP 限速。
 
 - `/api/resource/v1/desktop/latest`
 - `/api/resource/v1/desktop/packages/{sequence}`
 
-edge 精确放行这两种路径的 GET。客户端也使用相同匿名接口，首启检查一次，此后每 6 小时检查，可在 Auriga 设置中关闭或手动检查。下载仅使用首启绑定的 HTTPS origin。
+edge 精确放行这两种路径的 GET。客户端也使用相同匿名接口，启动检查一次，此后每 4–8 小时抖动检查，可在 Auriga 设置中关闭可选更新提示或手动检查。关闭后仍按同一周期联网检查最低版本要求，强制更新不能关闭。下载仅使用首启绑定并验证的 origin，IP 模式 HTTP 的限制见下文。
 
-用户点击更新后下载并校验暂存，须退出整个 Desktop/DSH 进程，启动器随后运行原有安装事务，下次启动进入新版。仅关闭浏览器页不足以退出 DSH。失败由安装事务还原旧版和 profile，用户数据保留。下载采用 60 秒无数据的空闲超时，持续接收数据不受总时长限制。一次更新最多自动尝试三次，中断后通过单个 `Range: bytes=<已下载长度>-` 续传，服务端返回 200 时安全重下，拼接后重新验证完整 SHA。重试耗尽或进程退出后，下次用户操作重新下载。进程被杀时残留锁记录 PID 和创建时间，下次启动在 DSH 启动前清理锁及暂存目录；卸载也清理残留。
+用户点击更新后下载并校验暂存，须退出整个 Desktop/DSH 进程，启动器随后运行原有安装事务，下次启动进入新版。仅关闭浏览器页不足以退出 DSH。失败由安装事务还原旧版和 profile，用户数据保留。下载采用 60 秒无数据的空闲超时，持续接收数据不受总时长限制。一次更新最多自动尝试三次，中断后通过单个 `Range: bytes=<已下载长度>-` 续传，服务端返回 200 时安全重下，拼接后重新验证完整 SHA。重试耗尽或进程退出后，下次用户操作从相同签名摘要的持久残片续传。进程被杀时残留锁记录 PID 和创建时间，下次启动在 DSH 启动前清理锁及暂存目录；卸载也清理残留。
 
 设置页的更新操作等待后台完成下载、校验和排队，不套用普通状态读取的 15 秒超时；下载的空闲超时和校验规则仍由后台执行。默认冒烟失败时，启动器仅输出固定原因码 `desktop.smoke_failed`，不输出上游配置或错误详情。
 
-下架当前记录后，登录首页和更新检查返回上一个仍上架的记录。续期会创建新记录，若要撤回某个坏包，应将该包的全部续期记录一并下架。已安装更高版本的客户端会拒绝降级，可执行 `rollback.cmd`，或等待更高版本的修复包。下架保留最高序号，修复包须新版本、新序号，同包续期须新序号和延长有效期。第一代安装器需先人工安装一次带更新能力的包。
+下架当前记录后，登录首页和更新检查返回上一个仍上架的记录。续期会创建新记录，若要撤回某个坏包，应将该包的全部续期记录一并下架。已安装更高版本的客户端会拒绝未授权降级，管理台须以更高序号发布含精确 `rollbackFrom` 的签名回滚清单，或发布更高版本修复包。下架保留最高序号。同包重签使用新序号，调整策略可沿用仍有效的 `notAfter`，延长有效期时再更新该字段。第一代安装器需先人工安装一次带更新能力的包。
 
-隔离验证运行 `node --test test/update-e2e.test.mjs`，使用随机端口发布替身、真实 ZIP、临时测试钥和安装事务，验证坏包拒绝、退出安装和数据保留。真实 DSH 宿主另按 `scripts/e2e.mjs` 验证。
+隔离验证运行 `node --test test/update-e2e.test.mjs`，使用随机端口发布替身、真实 EXE、临时测试钥和安装事务，验证坏包拒绝、退出安装和数据保留。真实 DSH 宿主另按 `scripts/e2e.mjs` 验证。
 
 # P1-E 集成状态
 
@@ -128,3 +128,64 @@ node payload/auriga/runtime/cli.mjs install --payload payload --root <独立安�
 更新的信任根始终是安装包内固定的发行 Ed25519 公钥，绝不从平台下载公钥。签名覆盖版本、序号、签发时间和包 SHA-256；客户端持久化已见最高版本、序号和签发时间，并拒绝版本回退、旧清单和篡改。下载完成先核对签名清单的包 SHA-256，再解包验证文件摘要和包 ID，最后执行安装事务及冒烟回滚。HTTP 仍会泄露下载元数据，也可被阻断；签名不能保证可用性或保密性。
 
 首次下载的安装程序及公钥需要通过受信的独立渠道核验 SHA-256 或人工预置，不能把 HTTP 首次下载本身当作信任来源。门户 HTTP 下载入口可用不代表首次引导已经具备安全认证。
+
+## Windows exe 安装向导
+
+用户下载件：`AurigaDSH-Setup-<Desktop版本>.exe`。双击显示中文向导，仅为当前用户安装，
+默认 `%LOCALAPPDATA%\Programs\AurigaDesktop`，无需管理员权限，可改路径。
+自动创建开始菜单快捷方式，桌面快捷方式可选，完成后默认启动。
+从 Windows“应用”卸载会询问是否保留数据，默认“是”，取消则终止。
+自动化安装用 `/VERYSILENT`，路径沿用 `AURIGA_INSTALL_DIR` 等环境变量或 `-InstallDir` 参数；
+自动化卸载用 `bin/uninstall.ps1 -Quiet`，默认保留数据。
+
+工具沿用 Windows 自带 .NET Framework C# 编译器与本仓库开源 WinForms 向导，
+无需付费工具或额外下载。`app.manifest` 明确 `asInvoker`。
+默认注入 `assets/brand/auriga-dsh.ico`；可用 `--installer-icon <ico>` 覆盖。
+换图标须重新构建、计算摘要和离线签名。
+
+CI 把 exe 作为 `make-release.mjs archive=` 输入，签名字段 `sha256`/`sizeBytes` 覆盖完整 exe。
+zip 仅为内部诊断制品。latest JSON 字段结构不变，大小和摘要改指 exe，响应头
+`X-Desktop-Filename` 返回文件名；下载响应 `Content-Disposition` 返回版本化 exe 文件名，支持 Range。
+管理台选择 exe，服务端存储使用 exe 扩展名，不读取旧 zip 存储。
+离线审阅从 exe 提取载荷验证包身份、公钥指纹和构建记录。
+更新器先验签、下载并校验整个 exe 的 SHA，再读取内嵌 ZIP，绝不执行下载的 exe；
+保留原有安装冒烟和失败回滚。旧 Windows 更新器的 System32 tar 也可读取该自解压 ZIP 格式。
+
+未购买或申请 Authenticode 证书。Ed25519 清单不能替代 Windows 发布者签名；
+网络下载的未签名 exe 可能显示“Windows 已保护你的电脑”或“未知发布者”，具体受系统策略影响。
+后续可选 Microsoft Artifact Signing：2026-11-15 核对官方 Basic 约 USD 9.99/月、5,000 次签名，
+须先核对身份验证、地区资格及付费 Azure 订阅；或申请受信任 CA 证书，DigiCert 页面列出的
+年订阅示例约 USD 696–972（配置不同，税费及密钥存储另核）。采购前须重新报价并经用户同意；
+签名不保证立即获得 SmartScreen 信誉，企业策略也可能阻止运行未签名程序。
+参考：[微软签名选项](https://learn.microsoft.com/en-us/windows/apps/package-and-deploy/code-signing-options)、
+[SmartScreen](https://learn.microsoft.com/windows/apps/package-and-deploy/smartscreen-reputation)、
+[Artifact Signing 价格](https://learn.microsoft.com/en-us/azure/artifact-signing/how-to-change-sku)、
+[DigiCert 订阅示例](https://www.digicert.com/signing/code-signing-certificates)。
+
+## 桌面更新运营（清单 schema 2）
+
+启动检查，之后每 4–8 小时随机检查一次。主界面与设置页均提示新版；点击更新后后台下载，刷新继续显示进度。
+取消保留安装目录 `.desktop-resume` 的部分文件，重开后再次点击更新按 Range 续传。只复用相同签名 SHA 的字节。
+包换版时删除旧残片，服务端不支持 Range 时安全重下。下载后重新确认发行仍未撤回，再排队；退出后安装并冒烟，失败自动恢复旧版本和配置。
+下载完成和启动前的在线复核遇到网络错误、超时或服务暂不可用时，保留已验证包供下一次重试。明确返回 404、发行已被签名替代或包校验失败时清理缓存。
+安装和回滚结果在下一次启动的状态中显示。安装器从不清理用户会话目录。
+
+`make-release.mjs` / `sign-release.mjs` 新增 `channel=stable|beta`、`rolloutPercentage=0..100`（默认100）、
+`rollbackFrom=<精确来源版本>`（默认null）。这些字段与 `minimumVersion` 都属于离线签名，管理台不会修改签名后内容或持有发行私钥。
+管理台上传签好的清单和 exe，预览并展示渠道、最低可用版本、灰度与回滚来源；调整策略需同包更高 sequence 重签发布。
+客户端低于 minimumVersion 时强制提示、停用 Auriga 平台操作，不能关检查或切渠道绕过；强制更新不受灰度限制。
+原生 DSH 的本地用户数据始终保留。灰度按本机随机安装 ID 与发行序号稳定分桶，不上传设备标识。
+
+正式和测试渠道通过 `GET /api/resource/v1/desktop/latest?channel=stable|beta` 隔离，未传为正式。
+防回退的最高版本、序号和签发时间按渠道保存。只有接受的更新或已安装版本的清单才推进水位，未命中灰度或已关闭的可选更新不推进。
+无签名的 HTTP 响应只能阻断可用性，不能授权安装、变更最低版本或回滚。
+实际降级只能由更高 sequence 的新签名授权，rollbackFrom 必须与受影响客户端的已装版本完全一致。
+若客户端已接受来源高版本但尚未安装，或安装后冒烟失败回滚，也允许 rollbackFrom 精确匹配该渠道已接受最高版本的替代发行，
+但替代版本不得低于本机实际已装版本；从未安装高版本的客户端不必先安装故障版才能恢复。
+管理台发布时还校验它等于该渠道上一发行版本，操作记入 rollback 审计。撤回保留账本及最高序号，撤回后包不可下载。
+过期清单仍可用于新用户匿名下载，客户端自动更新须等待更高序号的有效续期清单。
+
+schema 1 清单仍可验签，用于先发一版包含本更新器的过渡包。既有旧更新器仅识别 schema 1，
+运营者应先以 schema 1 发布过渡版本，再发布 schema 2 策略，不能让尚未升级的旧更新器直接解析 schema 2。
+CI 对应 `release_schema=1`。桥接版的 `minimumVersion` 必须不高于目标旧客户端版本，否则旧更新器会拒收桥接版。
+离线签名 CLI 的审阅摘要包含渠道/灰度/最低版本/回滚来源，确认摘要后才签名。

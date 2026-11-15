@@ -449,17 +449,49 @@ class WorkspaceIntegrationTest {
         };
     var placements = new SharedDshPlacements(store, port, b -> true, clock);
     var maintenance = new SharedDshMaintenance(store, placements, port, clock);
-    UUID batch = UUID.randomUUID(), session = UUID.randomUUID();
-    TenantContext.run(
-        tenant,
+    var browser = new SharedDshAdmin(store, placements, maintenance, port, clock);
+    UUID session = UUID.randomUUID();
+    var choices =
+        new SharedDshAdmin.PlanRequest(
+            List.of(new SharedDshAdmin.Member(owner, id, "shared")), "maintenance");
+    var saved =
+        TenantContext.call(
+            tenant, () -> browser.save(owner, session, null, choices, "create", null));
+    UUID batch = UUID.fromString(saved.body().get("planId").toString());
+    assertEquals("draft", saved.body().get("state"));
+    assertEquals(saved.etag(), TenantContext.call(tenant, () -> browser.plan(batch)).etag());
+    assertFalse(store.in(tenant, () -> (Boolean) store.instance(id).get("shared_rebuild_hold")));
+    var replaced =
+        TenantContext.call(
+            tenant, () -> browser.save(owner, session, batch, choices, "update", saved.etag()));
+    assertNotEquals(saved.etag(), replaced.etag());
+    assertThrows(
+        AurigaException.class,
         () ->
-            maintenance.plan(
-                owner,
-                session,
-                batch,
-                clock.instant().getEpochSecond(),
-                List.of(new SharedDshMaintenance.Choice(owner, id, false))));
-    TenantContext.call(tenant, () -> maintenance.start(owner, session, batch));
+            TenantContext.call(
+                tenant, () -> browser.start(owner, session, batch, "stale", saved.etag())));
+    var started =
+        TenantContext.call(
+            tenant, () -> browser.start(owner, session, batch, "start", replaced.etag()));
+    assertEquals("running", started.body().get("state"));
+    assertEquals(
+        started.etag(),
+        TenantContext.call(
+                tenant, () -> browser.start(owner, session, batch, "start", replaced.etag()))
+            .etag());
+    assertThrows(
+        AurigaException.class,
+        () ->
+            TenantContext.call(
+                tenant,
+                () ->
+                    browser.save(
+                        owner,
+                        session,
+                        batch,
+                        choices,
+                        "update-after-start",
+                        TenantContext.call(tenant, () -> browser.plan(batch)).etag())));
     assertThrows(
         AurigaException.class, () -> TenantContext.call(tenant, () -> service.open(owner)));
     assertThrows(
@@ -498,6 +530,13 @@ class WorkspaceIntegrationTest {
                             .setInstanceId(id.toString())
                             .build()))
             .getActive());
+    var unavailableShared = org.mockito.Mockito.mock(SharedDshPlacements.class);
+    org.mockito.Mockito.doThrow(new IllegalStateException("authority outage"))
+        .when(unavailableShared)
+        .recover();
+    service.sharedPlacements(unavailableShared);
+    assertDoesNotThrow(() -> TenantContext.run(tenant, service::tickTenant));
+    org.mockito.Mockito.verify(unavailableShared).recover();
     service.sharedPlacements(placements);
     var migration =
         TenantContext.call(tenant, () -> maintenance.progress(owner, session, batch)).getFirst();

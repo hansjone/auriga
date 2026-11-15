@@ -12,6 +12,7 @@ export {
   verifyTransportTransition,
   verifyTransportCatchup,
   verifyTransportConfirmation,
+  verifyExpectedSelectors,
 } from './v2-transport.js';
 /** @param {any} value */
 export const digest = (value) =>

@@ -8,7 +8,7 @@ const unavailable = (code = 'common.unavailable') =>
 /** Fixed platform client. Desktop uses C's OS-authenticated IPC; managed native
  * composition supplies its file-bound state. Both validate the frozen business
  * and host DTOs from the same producer artifact.
- * @param {{ipc:any,validate:(name:string,value:any)=>any,onInvalidate?:()=>void,onChange?:(snapshot:any)=>void,signal?:AbortSignal,stateFactory?:(options:any)=>any}} options */
+ * @param {{ipc:any,validate:(name:string,value:any)=>any,onInvalidate?:()=>void,onChange?:(snapshot:any)=>void,signal?:AbortSignal,stateFactory?:(options:any)=>any,checkBusinessAccess?:()=>void}} options */
 export async function createBroker({
   ipc,
   validate,
@@ -16,6 +16,7 @@ export async function createBroker({
   onChange,
   signal,
   stateFactory,
+  checkBusinessAccess,
 }) {
   /** @type {any} */ let receiver;
   /** @type {any} */ let disconnected;
@@ -126,7 +127,8 @@ export async function createBroker({
       clearTimeout(timer);
     }
   }
-  const envelope = () => {
+  const envelope = (requireAccess = true) => {
+    if (requireAccess) checkBusinessAccess?.();
     const s = state.current();
     if (s?.state !== 'authenticated' || closed)
       throw unavailable('common.unauthenticated');
@@ -147,7 +149,7 @@ export async function createBroker({
     /** @type {any} */ input,
   ) {
     const check = state.fence(),
-      command = { ...envelope(), ...input };
+      command = { ...envelope(input.action !== 'revoke'), ...input };
     validate(requestSchema, command);
     const event = await pending(() =>
       ipc.call({
@@ -235,7 +237,7 @@ export async function createBroker({
     },
     async streamCommand(/** @type {any} */ input) {
       const check = state.fence(),
-        s = envelope();
+        s = envelope(input.action !== 'cancel');
       const command = {
         shellEpoch: s.shellEpoch,
         expectedRevision: s.expectedRevision,

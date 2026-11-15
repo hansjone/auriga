@@ -1,5 +1,6 @@
 // 仅契约参考判定器；输入中的本地账本/认证事实必须由实现线权威端口提供。
 import { createPublicKey, verify } from 'node:crypto';
+import { checkReaderSelectors } from './msgnet-v2-k4-oracle.mjs';
 import { jcs, digest } from './msgnet-v2-oracle.mjs';
 const fail = (code) => {
   throw Error(code);
@@ -319,6 +320,7 @@ export function evaluateK3(v) {
           fail('invalid_chain');
         if (e.readers.length !== b.required_reader_ids.length)
           fail('projection_pending');
+        checkReaderSelectors(i);
         for (const id of b.required_reader_ids) {
           const row = e.readers.find((x) => x.reader_id === id);
           if (!row) fail('projection_pending');

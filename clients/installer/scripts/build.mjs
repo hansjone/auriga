@@ -530,7 +530,14 @@ export async function build(args) {
   }
   let exe = null;
   if (args.exe) {
-    exe = makeExe({ stage, out: join(out, `Auriga-Desktop-Setup-${id}.exe`) });
+    exe = makeExe({
+      stage,
+      icon:
+        args['installer-icon'] ??
+        resolve(installerDir, '../../assets/brand/auriga-dsh.ico'),
+      archive: zip,
+      out: join(out, `AurigaDSH-Setup-${desktopVersion}.exe`),
+    });
   }
   return { id, stage, zip, exe, manifest };
 }

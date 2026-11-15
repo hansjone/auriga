@@ -39,6 +39,8 @@ const keywords = new Set([
   'properties',
   'required',
   'additionalProperties',
+  'propertyNames',
+  'maxProperties',
   'const',
   'enum',
   'pattern',
@@ -65,6 +67,9 @@ function audit(node) {
   for (const child of node.oneOf ?? []) audit(child);
   if (node.items) audit(node.items);
   if (node.not) audit(node.not);
+  if (node.propertyNames) audit(node.propertyNames);
+  if (typeof node.additionalProperties === 'object')
+    audit(node.additionalProperties);
 }
 audit(schema);
 /** Strict evaluation of the frozen schema's finite keyword set.
@@ -92,13 +97,19 @@ function matches(value, rule) {
         value !== null &&
         typeof value === 'object' &&
         !Array.isArray(value) &&
+        Object.keys(value).length <= (rule.maxProperties ?? Infinity) &&
+        Object.keys(value).every(
+          (key) => !rule.propertyNames || matches(key, rule.propertyNames),
+        ) &&
         (rule.required ?? []).every((/** @type {string} */ k) =>
           Object.hasOwn(value, k),
         ) &&
         Object.keys(value).every((k) =>
           Object.hasOwn(rule.properties ?? {}, k)
             ? matches(value[k], rule.properties[k])
-            : rule.additionalProperties !== false,
+            : rule.additionalProperties !== false &&
+              (typeof rule.additionalProperties !== 'object' ||
+                matches(value[k], rule.additionalProperties)),
         )
       );
     case 'array':

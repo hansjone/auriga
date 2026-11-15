@@ -2448,14 +2448,26 @@ export const schema = {
           type: 'boolean',
         },
       },
-      required: [
-        'reader_id',
-        'identity_id',
-        'selector',
-        'phase',
-        'isolation_enforced',
-      ],
+      required: ['reader_id', 'identity_id', 'phase', 'isolation_enforced'],
       additionalProperties: false,
+      not: {
+        type: 'object',
+        properties: {
+          phase: {
+            enum: ['loaded', 'handshake_verified'],
+          },
+        },
+        required: ['phase'],
+        not: {
+          type: 'object',
+          properties: {
+            selector: {
+              $ref: '#/$defs/LocalProjectionSelector',
+            },
+          },
+          required: ['selector'],
+        },
+      },
     },
     TransportConfirmation: {
       type: 'object',
@@ -2669,6 +2681,306 @@ export const schema = {
         },
       },
       required: ['control', 'predecessor', 'first_bundle', 'authority'],
+      additionalProperties: false,
+    },
+    ExpectedSelectorsQuery: {
+      type: 'object',
+      properties: {
+        tenant_id: {
+          type: 'string',
+          minLength: 1,
+          maxLength: 128,
+        },
+        realm: {
+          type: 'string',
+          pattern: '^[1-9][0-9]{0,19}$',
+        },
+        bundle_version: {
+          type: 'string',
+          pattern: '^[1-9][0-9]{0,19}$',
+        },
+        bundle_digest: {
+          type: 'string',
+          pattern: '^sha256:[0-9a-f]{64}$',
+        },
+        challenge: {
+          type: 'string',
+          pattern: '^[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$',
+          minLength: 43,
+          maxLength: 43,
+        },
+        control_revision: {
+          type: 'string',
+          pattern: '^[1-9][0-9]{0,19}$',
+        },
+        control_digest: {
+          type: 'string',
+          pattern: '^sha256:[0-9a-f]{64}$',
+        },
+      },
+      required: [
+        'tenant_id',
+        'realm',
+        'bundle_version',
+        'bundle_digest',
+        'challenge',
+        'control_revision',
+        'control_digest',
+      ],
+      additionalProperties: false,
+    },
+    ExpectedSelectors: {
+      type: 'object',
+      properties: {
+        tenant_id: {
+          type: 'string',
+          minLength: 1,
+          maxLength: 128,
+        },
+        realm: {
+          type: 'string',
+          pattern: '^[1-9][0-9]{0,19}$',
+        },
+        authority_id: {
+          type: 'string',
+          minLength: 1,
+          maxLength: 128,
+        },
+        authority_digest: {
+          type: 'string',
+          pattern: '^sha256:[0-9a-f]{64}$',
+        },
+        control_revision: {
+          type: 'string',
+          pattern: '^[1-9][0-9]{0,19}$',
+        },
+        bundle_version: {
+          type: 'string',
+          pattern: '^[1-9][0-9]{0,19}$',
+        },
+        bundle_digest: {
+          type: 'string',
+          pattern: '^sha256:[0-9a-f]{64}$',
+        },
+        phase: {
+          type: 'string',
+          enum: ['dual_trust', 'new_leaves', 'retire_old'],
+        },
+        required_reader_ids: {
+          type: 'array',
+          items: {
+            type: 'string',
+            minLength: 1,
+            maxLength: 128,
+          },
+          uniqueItems: true,
+          maxItems: 65536,
+        },
+        challenge: {
+          type: 'string',
+          pattern: '^[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$',
+          minLength: 43,
+          maxLength: 43,
+        },
+        issued_at: {
+          type: 'string',
+          format: 'date-time',
+          pattern: '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$',
+          $comment: 'auriga-preserve-signature-text',
+        },
+        generation: {
+          type: 'string',
+          pattern: '^[1-9][0-9]{0,19}$',
+        },
+        control_digest: {
+          type: 'string',
+          pattern: '^sha256:[0-9a-f]{64}$',
+        },
+        expected_selectors: {
+          type: 'object',
+          propertyNames: {
+            type: 'string',
+            minLength: 1,
+            maxLength: 128,
+          },
+          additionalProperties: {
+            oneOf: [
+              {
+                type: 'string',
+                pattern: '^sha256:[0-9a-f]{64}$',
+                description:
+                  'Digest of this reader authorized LocalProjectionSelector.',
+              },
+              {
+                const: null,
+              },
+            ],
+          },
+          maxProperties: 65536,
+        },
+        reader_identities: {
+          type: 'object',
+          propertyNames: {
+            type: 'string',
+            minLength: 1,
+            maxLength: 128,
+          },
+          additionalProperties: {
+            type: 'string',
+            minLength: 1,
+            maxLength: 128,
+          },
+          maxProperties: 65536,
+        },
+      },
+      required: [
+        'tenant_id',
+        'realm',
+        'authority_id',
+        'authority_digest',
+        'control_revision',
+        'bundle_version',
+        'bundle_digest',
+        'phase',
+        'required_reader_ids',
+        'challenge',
+        'issued_at',
+        'generation',
+        'control_digest',
+        'expected_selectors',
+        'reader_identities',
+      ],
+      additionalProperties: false,
+    },
+    TransportPendingReader: {
+      type: 'object',
+      properties: {
+        reader_id: {
+          type: 'string',
+          minLength: 1,
+          maxLength: 128,
+        },
+        identity_id: {
+          type: 'string',
+          minLength: 1,
+          maxLength: 128,
+        },
+        selector: {
+          $ref: '#/$defs/LocalProjectionSelector',
+        },
+        phase: {
+          enum: ['loaded', 'handshake_verified', 'isolated', 'pending'],
+        },
+        isolation_enforced: {
+          type: 'boolean',
+        },
+      },
+      required: ['reader_id', 'identity_id', 'phase', 'isolation_enforced'],
+      additionalProperties: false,
+      not: {
+        type: 'object',
+        properties: {
+          phase: {
+            enum: ['loaded', 'handshake_verified'],
+          },
+        },
+        required: ['phase'],
+        not: {
+          type: 'object',
+          properties: {
+            selector: {
+              $ref: '#/$defs/LocalProjectionSelector',
+            },
+          },
+          required: ['selector'],
+        },
+      },
+    },
+    TransportConfirmationPending: {
+      type: 'object',
+      properties: {
+        tenant_id: {
+          type: 'string',
+          minLength: 1,
+          maxLength: 128,
+        },
+        realm: {
+          type: 'string',
+          pattern: '^[1-9][0-9]{0,19}$',
+        },
+        authority_id: {
+          type: 'string',
+          minLength: 1,
+          maxLength: 128,
+        },
+        authority_digest: {
+          type: 'string',
+          pattern: '^sha256:[0-9a-f]{64}$',
+        },
+        control_revision: {
+          type: 'string',
+          pattern: '^[1-9][0-9]{0,19}$',
+        },
+        bundle_version: {
+          type: 'string',
+          pattern: '^[1-9][0-9]{0,19}$',
+        },
+        bundle_digest: {
+          type: 'string',
+          pattern: '^sha256:[0-9a-f]{64}$',
+        },
+        phase: {
+          type: 'string',
+          enum: ['dual_trust', 'new_leaves', 'retire_old'],
+        },
+        required_reader_ids: {
+          type: 'array',
+          items: {
+            type: 'string',
+            minLength: 1,
+            maxLength: 128,
+          },
+          uniqueItems: true,
+          maxItems: 65536,
+        },
+        readers: {
+          type: 'array',
+          items: {
+            $ref: '#/$defs/TransportPendingReader',
+          },
+          maxItems: 65536,
+        },
+        challenge: {
+          type: 'string',
+          pattern: '^[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$',
+          minLength: 43,
+          maxLength: 43,
+        },
+        issued_at: {
+          type: 'string',
+          format: 'date-time',
+          pattern: '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$',
+          $comment: 'auriga-preserve-signature-text',
+        },
+        state: {
+          const: 'projection_pending',
+        },
+      },
+      required: [
+        'tenant_id',
+        'realm',
+        'authority_id',
+        'authority_digest',
+        'control_revision',
+        'bundle_version',
+        'bundle_digest',
+        'phase',
+        'required_reader_ids',
+        'readers',
+        'challenge',
+        'issued_at',
+        'state',
+      ],
       additionalProperties: false,
     },
   },

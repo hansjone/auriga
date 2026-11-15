@@ -1,3 +1,4 @@
+import { extendK4 } from './msgnet-v2-k4-vectors.mjs';
 import { extendK3 } from './msgnet-v2-k3-vectors.mjs';
 // 合成向量：密钥每次运行在内存中生成，输出仅含公钥/签名，无私钥。
 import {
@@ -524,6 +525,7 @@ extendK3({
   digest,
   generateKeyPairSync,
 });
+extendK4({ boundary_cases, auth, runtime, digest });
 for (const v of cases)
   for (const [field, domain] of [
     ['keyset', 'Auriga.NetworkKeyset.v2'],

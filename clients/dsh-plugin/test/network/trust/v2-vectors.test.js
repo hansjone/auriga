@@ -12,6 +12,7 @@ import {
   verifyTransportTransition,
   verifyTransportCatchup,
   verifyTransportConfirmation,
+  verifyExpectedSelectors,
 } from '../../../src/network/trust/v2.js';
 import { openV2TrustStore } from '../../../src/network/trust/v2-store.js';
 import {
@@ -122,6 +123,7 @@ for (const vector of vectors.boundary_cases) {
       'transport_transition',
       'transport_catchup',
       'transport_confirmation',
+      'expected_selectors',
     ].includes(vector.operation)
       ? 'production verification: '
       : 'test-side policy fixture: ') + vector.id,
@@ -130,6 +132,9 @@ for (const vector of vectors.boundary_cases) {
       let actual = 'accept';
       try {
         switch (vector.operation) {
+          case 'expected_selectors':
+            verifyExpectedSelectors(i);
+            break;
           case 'transport_transition':
             verifyTransportTransition(i);
             break;
