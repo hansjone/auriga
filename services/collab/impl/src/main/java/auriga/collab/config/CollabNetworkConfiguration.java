@@ -6,7 +6,6 @@ import auriga.common.error.AurigaException;
 import auriga.common.error.CommonErrors;
 import auriga.common.grpc.AurigaClientInterceptor;
 import auriga.common.grpc.GrpcChannels;
-import auriga.common.persistence.TenantTransactionManager;
 import io.grpc.ManagedChannel;
 import java.io.File;
 import java.nio.file.*;
@@ -19,7 +18,7 @@ import org.springframework.core.env.Environment;
 /** Standalone network authority is mandatory; missing settings fail startup. */
 @Configuration(proxyBeanMethods = false)
 @ConditionalOnExpression(
-    "${auriga.services.collab.enabled:true} && '${auriga.service.schema:}' == 'collab'")
+    "${auriga.services.collab.enabled:true} && ('${auriga.service.schema:}' == 'collab' || (${auriga.platform.combined:false} && ${auriga.collab.network.auto-renew.enabled:false}))")
 public class CollabNetworkConfiguration {
   private static final String PREFIX = "auriga.collab.network.";
 
@@ -73,7 +72,9 @@ public class CollabNetworkConfiguration {
   }
 
   @Bean
-  auriga.collab.network.local.LocalTargets networkLocalTargets(TenantTransactionManager manager) {
+  auriga.collab.network.local.LocalTargets networkLocalTargets(
+      org.springframework.context.ApplicationContext context, Environment env) {
+    var manager = auriga.collab.network.keys.MsgnetDatabase.manager(context, env);
     return new auriga.collab.network.local.LocalTargets(
         new org.springframework.jdbc.core.JdbcTemplate(manager.getDataSource()), manager);
   }
@@ -81,9 +82,13 @@ public class CollabNetworkConfiguration {
   @Bean
   NetworkSourceGrpcAuthority networkSourceGrpcAuthority(
       NetworkAuthorityClient client,
-      TenantTransactionManager manager,
+      org.springframework.context.ApplicationContext context,
+      Environment env,
       org.springframework.beans.factory.ObjectProvider<auriga.collab.api.NetworkLocalTargets>
           locals) {
-    return new NetworkSourceGrpcAuthority(client, manager, locals.getIfAvailable());
+    return new NetworkSourceGrpcAuthority(
+        client,
+        auriga.collab.network.keys.MsgnetDatabase.manager(context, env),
+        locals.getIfAvailable());
   }
 }

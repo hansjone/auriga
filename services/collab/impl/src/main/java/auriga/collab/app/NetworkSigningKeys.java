@@ -45,6 +45,61 @@ public final class NetworkSigningKeys implements NetworkPublicKeys, AutoCloseabl
   private final SigningGuard signingGuard;
   private final long publicationLifetimeSeconds;
   private final boolean automaticPublication;
+  private ObjectNode runtimePublication;
+  private SigningGuard runtimeGuard;
+
+  /**
+   * Atomically installs a root-chain-verified committed snapshot and its database signing fence.
+   */
+  public synchronized void installRuntimeSnapshot(
+      ObjectNode payload, Map<String, PrivateKey> privateKeys, SigningGuard guard) {
+    ensureOpen();
+    var replacement = new LinkedHashMap<String, Key>();
+    try {
+      for (var entry : payload.path("keys")) {
+        String kid = entry.path("kid").asString();
+        var state =
+            State.valueOf(entry.path("state").asString().toUpperCase(java.util.Locale.ROOT));
+        var pub =
+            KeyFactory.getInstance("Ed25519")
+                .generatePublic(
+                    new X509EncodedKeySpec(
+                        Base64.getUrlDecoder().decode(entry.path("public_key_spki").asString())));
+        var secret = privateKeys.get(kid);
+        if (state == State.ACTIVE || state == State.NEXT) {
+          if (secret == null) throw new IllegalArgumentException("Missing committed private key");
+          var verifier = Signature.getInstance("Ed25519");
+          verifier.initSign(secret);
+          verifier.update(new byte[] {0});
+          byte[] proof = verifier.sign();
+          verifier.initVerify(pub);
+          verifier.update(new byte[] {0});
+          if (!verifier.verify(proof))
+            throw new IllegalArgumentException("Mismatched committed private key");
+        } else secret = null;
+        replacement.put(
+            kid,
+            new Key(
+                payload.path("realm").asString(),
+                entry.path("purpose").asString(),
+                kid,
+                pub,
+                secret,
+                Instant.parse(entry.path("not_before").asString()),
+                Instant.parse(entry.path("not_after").asString()),
+                state));
+      }
+      long replacementVersion = Long.parseUnsignedLong(payload.path("keyset_version").asString());
+      var checkedGuard = java.util.Objects.requireNonNull(guard);
+      keys.clear();
+      keys.putAll(replacement);
+      version = replacementVersion;
+      runtimePublication = payload.deepCopy();
+      runtimeGuard = checkedGuard;
+    } catch (GeneralSecurityException e) {
+      throw new IllegalArgumentException("Invalid committed snapshot", e);
+    }
+  }
 
   @FunctionalInterface
   public interface SigningGuard {
@@ -146,6 +201,8 @@ public final class NetworkSigningKeys implements NetworkPublicKeys, AutoCloseabl
       Instant notAfter,
       State state) {
     ensureOpen();
+    if (runtimePublication != null)
+      throw new IllegalStateException("Runtime snapshots are transaction-owned");
     Key restored = keys.get(kid);
     if (!uint64(realm)
         || "0".equals(realm)
@@ -223,6 +280,8 @@ public final class NetworkSigningKeys implements NetworkPublicKeys, AutoCloseabl
   /** Atomic rotation; retired/revoked identifiers can never be reactivated or reused. */
   public synchronized void activate(String kid) {
     ensureOpen();
+    if (runtimePublication != null)
+      throw new IllegalStateException("Runtime snapshots are transaction-owned");
     Key next = requireKey(kid);
     Instant now = clock.instant();
     if (next.state != State.NEXT || now.isBefore(next.notBefore) || !now.isBefore(next.notAfter))
@@ -245,6 +304,8 @@ public final class NetworkSigningKeys implements NetworkPublicKeys, AutoCloseabl
 
   public synchronized void revoke(String kid) {
     ensureOpen();
+    if (runtimePublication != null)
+      throw new IllegalStateException("Runtime snapshots are transaction-owned");
     Key key = requireKey(kid);
     if (key.state == State.REVOKED) return;
     bumpVersion();
@@ -260,6 +321,12 @@ public final class NetworkSigningKeys implements NetworkPublicKeys, AutoCloseabl
   @Override
   public synchronized String publicKeysJson(String realm) {
     ensureOpen();
+    if (runtimePublication != null) {
+      markPublished();
+      if (!realm.equals(runtimePublication.path("realm").asString()))
+        throw new AurigaException(CommonErrors.UNAVAILABLE);
+      return NetworkJson.canonical(runtimePublication);
+    }
     markPublished();
     var out = NetworkJson.object();
     out.put("schema_version", 1).put("realm", realm).put("keyset_version", Long.toString(version));
@@ -309,7 +376,8 @@ public final class NetworkSigningKeys implements NetworkPublicKeys, AutoCloseabl
                         && now.isBefore(k.notAfter))
             .findFirst()
             .orElseThrow(() -> new AurigaException(CommonErrors.UNAVAILABLE));
-    return signingGuard.sign(this, () -> work.apply(key, version));
+    return (runtimeGuard == null ? signingGuard : runtimeGuard)
+        .sign(this, () -> work.apply(key, version));
   }
 
   private void bumpVersion() {
@@ -321,11 +389,20 @@ public final class NetworkSigningKeys implements NetworkPublicKeys, AutoCloseabl
   /** Explicit new publication; downloading the same version must never extend cache validity. */
   public synchronized void refreshPublication() {
     ensureOpen();
+    if (runtimePublication != null)
+      throw new IllegalStateException("Runtime snapshots are transaction-owned");
     bumpVersion();
     persist();
   }
 
   private void markPublished() {
+    if (runtimePublication != null) {
+      Instant now = clock.instant();
+      if (now.isBefore(Instant.parse(runtimePublication.path("issued_at").asString()))
+          || !now.isBefore(Instant.parse(runtimePublication.path("valid_until").asString())))
+        throw new AurigaException(CommonErrors.UNAVAILABLE);
+      return;
+    }
     if (!clock.instant().isBefore(publicationTime.plusSeconds(publicationLifetimeSeconds))) {
       if (!automaticPublication) throw new AurigaException(CommonErrors.UNAVAILABLE);
       bumpVersion();

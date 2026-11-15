@@ -29,6 +29,23 @@ final class ProtectedKeyFiles {
         auriga.collab.app.NetworkJson.parse(read(path, 65536)));
   }
 
+  static String readText(Path path, int maximum) {
+    check(path, false);
+    try {
+      String text =
+          java.nio.charset.StandardCharsets.UTF_8
+              .newDecoder()
+              .onMalformedInput(java.nio.charset.CodingErrorAction.REPORT)
+              .onUnmappableCharacter(java.nio.charset.CodingErrorAction.REPORT)
+              .decode(java.nio.ByteBuffer.wrap(read(path, maximum)))
+              .toString();
+      return auriga.collab.app.NetworkJson.canonical(
+          auriga.collab.app.NetworkJson.parse(text, maximum), maximum);
+    } catch (java.nio.charset.CharacterCodingException e) {
+      throw invalid();
+    }
+  }
+
   static byte[] read(Path path, int maximum) {
     try {
       if (!Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS)) throw invalid();

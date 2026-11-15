@@ -1823,4 +1823,119 @@ class NetworkMailboxPostgresTest {
       owner.execute("ALTER TABLE collab.network_message DROP CONSTRAINT mailbox_fault");
     }
   }
+
+  @Test
+  void durableRedeliveryUsesCurrentKeysWithoutChangingIdentityOrExpiryAndAckStaysTerminal()
+      throws Exception {
+    UUID tenant = UUID.randomUUID();
+    Instant start = Instant.parse("2026-11-01T00:00:00Z");
+    Clock clock = mock(Clock.class);
+    when(clock.instant()).thenReturn(start);
+    try (var oldKeys = new NetworkSigningKeys(clock, 1);
+        var newKeys = new NetworkSigningKeys(clock, 100)) {
+      for (String purpose : List.of("business_delivery", "protocol_response", "management_state")) {
+        var oldPair = KeyPairGenerator.getInstance("Ed25519").generateKeyPair();
+        oldKeys.add(
+            "2",
+            purpose,
+            "old-" + purpose,
+            oldPair.getPublic(),
+            oldPair.getPrivate(),
+            start.minusSeconds(3600),
+            start.plusSeconds(3600),
+            NetworkSigningKeys.State.ACTIVE);
+        var newPair = KeyPairGenerator.getInstance("Ed25519").generateKeyPair();
+        newKeys.add(
+            "2",
+            purpose,
+            "new-" + purpose,
+            newPair.getPublic(),
+            newPair.getPrivate(),
+            start,
+            start.plusSeconds(8 * 86400),
+            NetworkSigningKeys.State.ACTIVE);
+      }
+      var first =
+          new NetworkMailboxService(
+              jdbc, manager, authority(null, clock), oldKeys, clock, liveIam());
+      var saved =
+          call(
+              tenant,
+              () ->
+                  first.store(
+                      StoreRequest.unicast(tenant, "2", "10", "1", "retained", "20", "3"),
+                      "{\"ttl\":604800}"));
+      call(tenant, () -> first.ready(tenant, "2", "20"));
+      var original =
+          NetworkJson.parse(
+              call(tenant, () -> first.fetchSigned(tenant, "2", "20", 0, 10)).getFirst());
+      when(clock.instant()).thenReturn(start.plusSeconds(2 * 86400));
+      var recovered =
+          new NetworkMailboxService(
+              jdbc, manager, authority(null, clock), newKeys, clock, liveIam());
+      var route = call(tenant, () -> recovered.ready(tenant, "2", "20"));
+      var current =
+          NetworkJson.parse(
+              call(tenant, () -> recovered.fetchSigned(tenant, "2", "20", 0, 10)).getFirst());
+      assertEquals(original.path("message"), current.path("message"));
+      assertEquals(original.path("source_context"), current.path("source_context"));
+      assertEquals(original.path("delivery_id"), current.path("delivery_id"));
+      assertEquals(original.path("mail_seq"), current.path("mail_seq"));
+      assertNotEquals(
+          original.path("server_auth").path("kid"), current.path("server_auth").path("kid"));
+      assertNotEquals(
+          original.path("server_auth").path("audience"),
+          current.path("server_auth").path("audience"));
+      call(
+          tenant,
+          () ->
+              recovered.receipt(
+                  new ReceiptRequest(
+                      tenant,
+                      "2",
+                      "20",
+                      route.connectionEpoch(),
+                      saved.deliveries().getFirst().deliveryId(),
+                      saved.deliveries().getFirst().mailSeq(),
+                      List.of(
+                          new ReceiptItem(
+                              saved.deliveries().getFirst().recipientIds().getFirst(),
+                              "host_accepted")))));
+      var terminal =
+          NetworkJson.parse(
+              call(tenant, () -> recovered.fetchSigned(tenant, "2", "20", 0, 10)).getFirst());
+      assertEquals("terminal", terminal.path("type").asString());
+      assertEquals(
+          "host_accepted", terminal.path("recipients").get(0).path("transport_status").asString());
+      assertFalse(terminal.has("message"));
+      when(clock.instant()).thenReturn(start.plusSeconds(8 * 86400));
+      // A previously acknowledged business message never becomes a fresh execution after downtime.
+      // Protocol keys must still be valid for the terminal receipt itself.
+      var newest = KeyPairGenerator.getInstance("Ed25519").generateKeyPair();
+      newKeys.revoke("new-protocol_response");
+      newKeys.add(
+          "2",
+          "protocol_response",
+          "after-downtime",
+          newest.getPublic(),
+          newest.getPrivate(),
+          start.plusSeconds(7 * 86400),
+          start.plusSeconds(9 * 86400),
+          NetworkSigningKeys.State.ACTIVE);
+      var finalPage =
+          NetworkJson.parse(
+              call(tenant, () -> recovered.fetchSigned(tenant, "2", "20", 0, 10)).getFirst());
+      assertEquals(
+          "host_accepted", finalPage.path("recipients").get(0).path("transport_status").asString());
+      assertEquals(
+          1,
+          sql(
+              tenant,
+              () ->
+                  jdbc.queryForObject(
+                      "SELECT count(*) FROM collab.network_message WHERE tenant_id=?",
+                      Integer.class,
+                      tenant)));
+    }
+  }
 }

@@ -9,6 +9,8 @@
   </parent>
   <artifactId>collab-impl</artifactId>
   <dependencies>
+    <!-- Reuse IAM's pinned ASN.1 implementation for constrained internal Ed25519 X.509 issuance. -->
+    <dependency><groupId>org.bouncycastle</groupId><artifactId>bcprov-jdk18on</artifactId><version>1.83</version></dependency>
     <dependency><groupId>auriga</groupId><artifactId>iam-api</artifactId><version>${project.version}</version></dependency>
     <dependency><groupId>auriga</groupId><artifactId>test-support</artifactId><version>${project.version}</version><scope>test</scope></dependency>
     <dependency><groupId>org.springframework.boot</groupId><artifactId>spring-boot-starter-test</artifactId><scope>test</scope></dependency>

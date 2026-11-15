@@ -105,7 +105,7 @@ final class NetworkSourceStamp {
         > 16384) throw new AurigaException(NetworkErrors.PROTOCOL_ERROR);
     if (!message.has("ttl")) message.put("ttl", 86400);
     long ttl = message.path("ttl").asLong();
-    if (ttl < 1 || ttl > 86400) throw new AurigaException(NetworkErrors.PROTOCOL_ERROR);
+    if (ttl < 1 || ttl > 604800) throw new AurigaException(NetworkErrors.PROTOCOL_ERROR);
     Instant created = now.truncatedTo(ChronoUnit.SECONDS);
     message
         .put("created_at", created.toString())

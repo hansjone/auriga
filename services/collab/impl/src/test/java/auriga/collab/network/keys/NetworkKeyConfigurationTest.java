@@ -50,6 +50,22 @@ import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
 class NetworkKeyConfigurationTest {
+  @Test
+  void automaticRenewalExcludesTheLegacyControllerAndPublisher() {
+    new ApplicationContextRunner()
+        .withUserConfiguration(NetworkKeysController.class, NetworkKeyOperationsConfiguration.class)
+        .withPropertyValues(
+            "auriga.service.schema=collab",
+            "auriga.collab.network.key-operations.enabled=true",
+            "auriga.collab.network.auto-renew.enabled=true")
+        .run(
+            context -> {
+              assertNull(context.getStartupFailure());
+              assertEquals(0, context.getBeanNamesForType(NetworkKeysController.class).length);
+              assertEquals(0, context.getBeanNamesForType(NetworkKeyOperations.class).length);
+            });
+  }
+
   @TempDir(factory = WorkspaceTempDirectory.class)
   Path directory;
 
@@ -570,13 +586,19 @@ class NetworkKeyConfigurationTest {
     var client = mock(NetworkAuthorityClient.class);
     var locals = mock(NetworkLocalTargets.class);
     var factory = new StaticListableBeanFactory(Map.of("locals", locals));
-    NetworkSourceGrpcAuthority source =
-        ReflectionTestUtils.invokeMethod(
-            new CollabNetworkConfiguration(),
-            "networkSourceGrpcAuthority",
-            client,
-            manager,
-            factory.getBeanProvider(NetworkLocalTargets.class));
+    NetworkSourceGrpcAuthority source;
+    try (var context = new org.springframework.context.support.GenericApplicationContext()) {
+      context.registerBean(TenantTransactionManager.class, () -> manager);
+      context.refresh();
+      source =
+          ReflectionTestUtils.invokeMethod(
+              new CollabNetworkConfiguration(),
+              "networkSourceGrpcAuthority",
+              client,
+              context,
+              new org.springframework.mock.env.MockEnvironment(),
+              factory.getBeanProvider(NetworkLocalTargets.class));
+    }
     var order =
         approvedFirst
             ? new Class<?>[] {

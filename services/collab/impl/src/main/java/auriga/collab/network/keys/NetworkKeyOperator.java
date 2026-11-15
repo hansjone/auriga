@@ -203,6 +203,8 @@ public final class NetworkKeyOperator {
     return locked(
         () -> {
           var result = snapshot(release);
+          // Reject a v1 installation after the durable v2 barrier before touching live files.
+          operations.current();
           try {
             // The persistent lock is at the original state path; never copied or unlinked.
             SigningKeyLoader.installState(payload, state);

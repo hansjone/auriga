@@ -230,8 +230,8 @@ final class NetworkDurableSubmit {
     jdbc.update(
         """
         INSERT INTO collab.network_submit(id,tenant_id,source_binding,producer_epoch,producer_key,request_json,
-          message_id,delivery_id,recipient_id,message_json,source_context_json,source_fence_json,target_fence_json,reservation_until)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+          message_id,delivery_id,recipient_id,message_json,source_context_json,source_fence_json,target_fence_json,reservation_until,retain_until)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         """,
         id,
         tenant(),
@@ -250,7 +250,9 @@ final class NetworkDurableSubmit {
             Collections.min(
                 List.of(
                     clock.instant().plus(RESERVATION_TTL),
-                    Instant.parse(message.path("expires_at").asString())))));
+                    Instant.parse(message.path("expires_at").asString())))),
+        Timestamp.from(
+            Instant.parse(message.path("expires_at").asString()).plus(Duration.ofDays(7))));
     return jdbc.queryForMap(
         "SELECT * FROM collab.network_submit WHERE tenant_id=? AND id=?", tenant(), id);
   }

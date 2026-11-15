@@ -70,6 +70,7 @@ public final class NetworkKeyOperations {
               "SELECT pg_advisory_xact_lock(hashtextextended(?, 0))",
               Object.class,
               tenant + ":network-keys:" + realm);
+          assertLegacyEnabled();
           Stored old = stored();
           if (expiredRecovery && old == null) throw RootKeyPublication.invalid();
           ObjectNode history = JsonMapper.builder().build().createObjectNode();
@@ -112,10 +113,20 @@ public final class NetworkKeyOperations {
         });
   }
 
+  private void assertLegacyEnabled() {
+    if (jdbc.queryForObject(
+            "SELECT count(*) FROM collab.msgnet_realm WHERE tenant_id = ? AND realm = ? AND legacy_disabled",
+            Integer.class,
+            tenant,
+            realm)
+        != 0) throw unavailable();
+  }
+
   /** Fixed endpoint and response adapters share the same complete, currently valid release. */
   public RootKeyPublication.Release current() {
     return run(
         () -> {
+          assertLegacyEnabled();
           Stored row = stored();
           if (row == null || row.version().compareTo(floor) < 0) throw unavailable();
           try {
@@ -272,6 +283,13 @@ public final class NetworkKeyOperations {
   }
 
   private Stored stored() {
+    Boolean v2 =
+        jdbc.queryForObject(
+            "SELECT EXISTS (SELECT 1 FROM collab.msgnet_realm WHERE tenant_id = ? AND realm = ? AND legacy_disabled = true)",
+            Boolean.class,
+            tenant,
+            realm);
+    if (Boolean.TRUE.equals(v2)) throw unavailable();
     var rows =
         jdbc.query(
             "SELECT keyset_version, signed_keyset, announcement, first_published::text, pending_push FROM collab.network_key_publication WHERE tenant_id = ? AND realm = ?",
