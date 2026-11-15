@@ -143,7 +143,7 @@ func run() error {
 		if err != nil {
 			return err
 		}
-		source := &projection.TransportSource{Schemas: schemas, Root: root, Tenant: pins.TenantId, Realm: pins.Realm, Target: pin.TargetId, Request: request}
+		source := &projection.TransportSource{Schemas: schemas, Root: root, Tenant: pins.TenantId, Realm: pins.Realm, Target: pin.TargetId, Request: request.Request, ExpectedSelectors: request.ExpectedSelectors}
 		source.Bind(ctx, trust)
 	}
 	if *mode == "broker" {

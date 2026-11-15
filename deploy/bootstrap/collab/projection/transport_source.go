@@ -11,14 +11,14 @@ import (
 	api "github.com/hansjone/auriga/infra/gen/msgnetapi"
 )
 
-// TransportSource reads only the fixed K3 endpoints through an authenticated
-// HTTPS client. Selectors must be supplied from C's independent material ledger;
-// an absent provider fails closed rather than copying the evidence rows.
+// TransportSource reads the fixed K3/K4 endpoints. ExpectedSelectors is a trusted
+// management port installed from TransportHTTP.ExpectedSelectors, not a response
+// authentication flag. No map is retained across queries, retries or restarts.
 type TransportSource struct {
 	Schemas                     *Schemas
 	Root, Tenant, Realm, Target string
 	Request                     func(context.Context, string, string, any) ([]byte, error)
-	ExpectedSelectors           func(context.Context, api.SignedTransportTrustBundle) (map[string]string, error)
+	ExpectedSelectors           func(context.Context, api.ExpectedSelectorsQuery) (SelectorLedgerResponse, error)
 	Now                         func() time.Time
 }
 
@@ -34,6 +34,13 @@ func (s *TransportSource) read(ctx context.Context, path, name string, out any) 
 		return e
 	}
 	return s.Schemas.Decode(name, raw, out)
+}
+
+func (s *TransportSource) clock() time.Time {
+	if s.Now != nil {
+		return s.Now()
+	}
+	return time.Now()
 }
 
 func (s *TransportSource) confirm(ctx context.Context, current api.SignedTransportTrustBundle, a api.SignedRuntimeAuthority, c api.SignedRootControl) error {
@@ -70,11 +77,41 @@ func (s *TransportSource) confirm(ctx context.Context, current api.SignedTranspo
 	if history.Control.Payload.TenantId != s.Tenant || history.Control.Payload.Realm != s.Realm || !allowed(history.Control.Payload, a) || slices.Contains(history.Control.Payload.RevokedAuthorityIds, a.Payload.AuthorityId) || lt(history.Control.Payload.ControlRevision, history.Bundle.Payload.ControlRevision) {
 		return Fault("invalid_chain")
 	}
+	// Verify the historical signed bundle before binding any unsigned ledger
+	// query to it. The current root control, not this historical one, is queried.
+	if e := VerifySignature(history.Bundle.Payload, history.Bundle.RuntimeAuth, "Auriga.NetworkTransportTrustBundle.v2", a.Payload.PublicKeySpki); e != nil {
+		return e
+	}
+	ad, _ := ObjectDigest(a)
+	if history.Bundle.RuntimeAuth.Kid != a.Payload.RuntimeKid || history.Bundle.Payload.AuthorityId != a.Payload.AuthorityId || history.Bundle.Payload.AuthorityDigest != ad {
+		return Fault("invalid_chain")
+	}
+	if s.ExpectedSelectors == nil {
+		return Fault("projection_pending")
+	}
 	nonce := make([]byte, 32)
 	if _, e := rand.Read(nonce); e != nil {
 		return e
 	}
 	d, _ := ObjectDigest(history.Bundle)
+	cd, _ := ObjectDigest(c)
+	lq := api.ExpectedSelectorsQuery{TenantId: s.Tenant, Realm: s.Realm, BundleVersion: history.Bundle.Payload.BundleVersion, BundleDigest: d, ControlRevision: c.Payload.ControlRevision, ControlDigest: cd, Challenge: base64.RawURLEncoding.EncodeToString(nonce)}
+	ledgerRaw, e := s.ExpectedSelectors(ctx, lq)
+	if e != nil {
+		return Fault("projection_pending")
+	}
+	var ledger api.ExpectedSelectors
+	if e = s.Schemas.Decode("ExpectedSelectors", ledgerRaw.body, &ledger); e != nil {
+		return Fault("projection_pending")
+	}
+	if e = VerifyExpectedSelectors(ledger, lq, history.Bundle, c, SelectorLedgerFacts{Tenant: s.Tenant, Realm: s.Realm, Now: s.clock(), Authenticated: ledgerRaw.authenticated}); e != nil {
+		return Fault("projection_pending")
+	}
+	// A separate unpredictable challenge prevents a response from one port
+	// being replayed into the other. The ledger is rechecked after both reads.
+	if _, e = rand.Read(nonce); e != nil {
+		return e
+	}
 	q := api.TransportConfirmationQuery{TenantId: s.Tenant, Realm: s.Realm, BundleVersion: history.Bundle.Payload.BundleVersion, BundleDigest: d, Challenge: base64.RawURLEncoding.EncodeToString(nonce)}
 	raw, e := s.Request(ctx, "POST", "/api/collab/v2/network/transport/confirmation", q)
 	if e != nil {
@@ -84,18 +121,11 @@ func (s *TransportSource) confirm(ctx context.Context, current api.SignedTranspo
 	if e = s.Schemas.Decode("SignedTransportConfirmation", raw, &evidence); e != nil {
 		return e
 	}
-	if s.ExpectedSelectors == nil {
+	observed := s.clock()
+	if e = VerifyExpectedSelectors(ledger, lq, history.Bundle, c, SelectorLedgerFacts{Tenant: s.Tenant, Realm: s.Realm, Now: observed, Authenticated: ledgerRaw.authenticated}); e != nil {
 		return Fault("projection_pending")
 	}
-	expected, e := s.ExpectedSelectors(ctx, history.Bundle)
-	if e != nil {
-		return e
-	}
-	observed := time.Now()
-	if s.Now != nil {
-		observed = s.Now()
-	}
-	return VerifyTransportConfirmation(evidence, history.Bundle, a, c, ConfirmationFacts{Root: s.Root, Tenant: s.Tenant, Realm: s.Realm, Challenge: q.Challenge, RequiredPhase: required, Now: observed, ExpectedSelectors: expected})
+	return VerifyTransportConfirmation(evidence, history.Bundle, a, c, ConfirmationFacts{Root: s.Root, Tenant: s.Tenant, Realm: s.Realm, Challenge: q.Challenge, RequiredPhase: required, Now: observed, ExpectedSelectors: ledger.ExpectedSelectors, ExpectedIdentities: ledger.ReaderIdentities})
 }
 
 func (s *TransportSource) Verify(ctx context.Context, p api.Publication, b api.SignedTransportTrustBundle, c api.SignedRootControl, previous *api.SignedTransportTrustBundle, now time.Time) error {
@@ -104,6 +134,18 @@ func (s *TransportSource) Verify(ctx context.Context, p api.Publication, b api.S
 	}
 	if b.Payload.Generation != p.Keyset.Payload.Generation {
 		return Fault("scope_denied")
+	}
+	if e := VerifySignature(c.Payload, c.RootAuth, "Auriga.NetworkRootControl.v2", s.Root); e != nil {
+		return e
+	}
+	if e := VerifySignature(p.Authority.Payload, p.Authority.RootAuth, "Auriga.NetworkRuntimeAuthority.v2", s.Root); e != nil {
+		return e
+	}
+	if c.Payload.TenantId != s.Tenant || c.Payload.Realm != s.Realm || p.Authority.Payload.TenantId != s.Tenant || p.Authority.Payload.Realm != s.Realm || b.Payload.TenantId != s.Tenant || b.Payload.Realm != s.Realm {
+		return Fault("scope_denied")
+	}
+	if !allowed(c.Payload, p.Authority) || slices.Contains(c.Payload.RevokedAuthorityIds, p.Authority.Payload.AuthorityId) {
+		return Fault("authority_revoked")
 	}
 	// VerifyTransport also enforces the authority's transport scope and signing
 	// kid. Phase and high-water checks below use the independent bundle sequence.

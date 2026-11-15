@@ -158,6 +158,11 @@ func TestTransportSourceAuthenticatedGlobalGatesAndRestart(t *testing.T) {
 	}
 	phase := "loaded"
 	corrupt, stale, wrongChallenge := false, false, false
+	ledgerMissing := true
+	ledgerMutation, isolated := "", ""
+	pending, isolationDenied, advanceOnConfirmation := false, false, false
+	ledgerRequests := 0
+	challenges := map[string]bool{}
 	requests := 0
 	server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, q *http.Request) {
 		if strings.HasPrefix(q.URL.Path, "/api/collab/v2/network/bootstrap/") {
@@ -175,6 +180,64 @@ func TestTransportSourceAuthenticatedGlobalGatesAndRestart(t *testing.T) {
 		w.Header().Set("Cache-Control", "no-store")
 		write := func(v any) { _ = json.NewEncoder(w).Encode(v) }
 		switch {
+		case strings.HasSuffix(q.URL.Path, "/expected-selectors"):
+			ledgerRequests++
+			if ledgerMissing {
+				http.NotFound(w, q)
+				return
+			}
+			var query api.ExpectedSelectorsQuery
+			if json.NewDecoder(q.Body).Decode(&query) != nil {
+				http.Error(w, "query", http.StatusBadRequest)
+				return
+			}
+			if challenges[query.Challenge] {
+				t.Error("reused ledger challenge")
+			}
+			challenges[query.Challenge] = true
+			b, ok := bundles[query.BundleDigest]
+			if !ok || b.Payload.BundleVersion != query.BundleVersion {
+				http.Error(w, "bundle", http.StatusConflict)
+				return
+			}
+			c := f.Initial.Control
+			if b.Payload.AuthorityId == nextAuthority.Payload.AuthorityId {
+				c = nextControl
+			}
+			if query.ControlDigest != objectDigest(t, c) || query.ControlRevision != c.Payload.ControlRevision {
+				http.Error(w, "control", http.StatusConflict)
+				return
+			}
+			out := api.ExpectedSelectors{TenantId: b.Payload.TenantId, Realm: b.Payload.Realm, AuthorityId: b.Payload.AuthorityId, AuthorityDigest: b.Payload.AuthorityDigest, ControlRevision: query.ControlRevision, ControlDigest: query.ControlDigest, BundleVersion: b.Payload.BundleVersion, BundleDigest: query.BundleDigest, Generation: b.Payload.Generation, Phase: b.Payload.Phase, RequiredReaderIds: b.Payload.RequiredReaderIds, Challenge: query.Challenge, IssuedAt: now.Format(time.RFC3339), ExpectedSelectors: map[string]*string{}, ReaderIdentities: map[string]string{}}
+			for id, selector := range selectors[query.BundleDigest] {
+				d := objectDigest(t, selector)
+				out.ExpectedSelectors[id] = &d
+				out.ReaderIdentities[id] = selector.InstallationId
+				if isolated == "unassigned" {
+					out.ExpectedSelectors[id] = nil
+				}
+				switch ledgerMutation {
+				case "selector":
+					d = projection.Digest([]byte("replacement"))
+				case "identity":
+					out.ReaderIdentities[id] = "replacement"
+				}
+			}
+			switch ledgerMutation {
+			case "stale":
+				out.IssuedAt = now.Add(-61 * time.Second).Format(time.RFC3339)
+			case "future":
+				out.IssuedAt = now.Add(time.Second).Format(time.RFC3339)
+			case "challenge":
+				out.Challenge = base64.RawURLEncoding.EncodeToString(make([]byte, 32))
+			case "control":
+				out.ControlDigest = projection.Digest([]byte("replacement"))
+			case "bundle":
+				out.BundleDigest = projection.Digest([]byte("replacement"))
+			case "extra":
+				out.ExpectedSelectors["other"] = nil
+			}
+			write(out)
 		case strings.Contains(q.URL.Path, "/transitions/"):
 			if strings.HasSuffix(q.URL.Path, objectDigest(t, nextAuthority)) {
 				write(transition)
@@ -208,13 +271,32 @@ func TestTransportSourceAuthenticatedGlobalGatesAndRestart(t *testing.T) {
 			if b.Payload.AuthorityId == nextAuthority.Payload.AuthorityId {
 				a, c, k = nextAuthority, nextControl, nextRuntime
 			}
+			if advanceOnConfirmation {
+				now = now.Add(61 * time.Second)
+			}
+			if pending {
+				out := api.TransportConfirmationPending{TenantId: b.Payload.TenantId, Realm: b.Payload.Realm, AuthorityId: b.Payload.AuthorityId, AuthorityDigest: b.Payload.AuthorityDigest, ControlRevision: c.Payload.ControlRevision, BundleVersion: b.Payload.BundleVersion, BundleDigest: query.BundleDigest, Phase: b.Payload.Phase, RequiredReaderIds: b.Payload.RequiredReaderIds, Challenge: query.Challenge, IssuedAt: now.Format(time.RFC3339), State: "projection_pending"}
+				for _, id := range b.Payload.RequiredReaderIds {
+					out.Readers = append(out.Readers, api.TransportPendingReader{ReaderId: id, IdentityId: id, Phase: "pending"})
+				}
+				w.WriteHeader(http.StatusAccepted)
+				write(out)
+				return
+			}
 			payload := api.TransportConfirmation{TenantId: b.Payload.TenantId, Realm: b.Payload.Realm, AuthorityId: b.Payload.AuthorityId, AuthorityDigest: b.Payload.AuthorityDigest, ControlRevision: c.Payload.ControlRevision, BundleVersion: b.Payload.BundleVersion, BundleDigest: query.BundleDigest, Phase: b.Payload.Phase, RequiredReaderIds: b.Payload.RequiredReaderIds, Challenge: query.Challenge, IssuedAt: now.Format(time.RFC3339)}
 			for _, id := range b.Payload.RequiredReaderIds {
 				s := selectors[query.BundleDigest][id]
 				if corrupt {
 					s.MaterialRevision = "99"
 				}
-				payload.Readers = append(payload.Readers, api.TransportReaderEvidence{ReaderId: id, IdentityId: id, Selector: s, Phase: phase})
+				row := api.TransportReaderEvidence{ReaderId: id, IdentityId: id, Selector: &s, Phase: phase}
+				if isolated != "" {
+					row.Phase, row.IsolationEnforced = "isolated", !isolationDenied
+					if isolated == "unassigned" {
+						row.Selector = nil
+					}
+				}
+				payload.Readers = append(payload.Readers, row)
 			}
 			if stale {
 				payload.IssuedAt = now.Add(-61 * time.Second).Format(time.RFC3339)
@@ -235,10 +317,10 @@ func TestTransportSourceAuthenticatedGlobalGatesAndRestart(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	if _, e = request(context.Background(), "GET", "/api/collab/v2/network/bootstrap/controls", nil); e != nil {
+	if _, e = request.Request(context.Background(), "GET", "/api/collab/v2/network/bootstrap/controls", nil); e != nil {
 		t.Fatal("public bootstrap depended on service identity", e)
 	}
-	source := &projection.TransportSource{Schemas: schemas, Root: f.RootSPKI, Tenant: f.Initial.Keyset.Payload.TenantId, Realm: "1", Target: f.Pin.TargetId, Request: request, Now: func() time.Time { return now }}
+	source := &projection.TransportSource{Schemas: schemas, Root: f.RootSPKI, Tenant: f.Initial.Keyset.Payload.TenantId, Realm: "1", Target: f.Pin.TargetId, Request: request.Request, ExpectedSelectors: request.ExpectedSelectors, Now: func() time.Time { return now }}
 	trust, e := projection.NewTrustWithClock(schemas, f.RootSPKI, source.Tenant, "1", state, f.Pin, func() time.Time { return now })
 	if e != nil {
 		t.Fatal(e)
@@ -250,13 +332,50 @@ func TestTransportSourceAuthenticatedGlobalGatesAndRestart(t *testing.T) {
 	if e = trust.Accept(f.Initial, leaves); e == nil {
 		t.Fatal("accepted missing independent material ledger")
 	}
-	source.ExpectedSelectors = func(_ context.Context, b api.SignedTransportTrustBundle) (map[string]string, error) {
-		out := map[string]string{}
-		for id, s := range selectors[objectDigest(t, b)] {
-			out[id] = objectDigest(t, s)
+	ledgerMissing = false
+	// An anonymous client cannot enable the trusted management port, even when
+	// the server could claim authentication inside its response body.
+	for _, credentials := range [][3]string{{"", "", jwtPath}, {certPath, keyPath, ""}} {
+		anonymous, err := projection.NewTransportHTTP(server.URL, caPath, credentials[0], credentials[1], credentials[2])
+		if err != nil {
+			t.Fatal(err)
 		}
-		return out, nil
+		source.ExpectedSelectors = anonymous.ExpectedSelectors
+		if err = trust.Accept(f.Initial, leaves); err != projection.Fault("projection_pending") {
+			t.Fatal("untrusted ledger", err)
+		}
 	}
+	source.ExpectedSelectors = request.ExpectedSelectors
+	// Invalid local signed snapshots must not even reach the unsigned ledger.
+	beforeQueries := ledgerRequests
+	bad := leaves
+	bad.RuntimeAuth.Signature = base64.RawURLEncoding.EncodeToString(make([]byte, 64))
+	if e = source.Verify(context.Background(), f.Initial, bad, f.Initial.Control, &dual, now); e == nil || ledgerRequests != beforeQueries {
+		t.Fatal("queried ledger before bundle verification", e)
+	}
+	control := f.Initial.Control
+	control.RootAuth.Signature = bad.RuntimeAuth.Signature
+	if e = source.Verify(context.Background(), f.Initial, leaves, control, &dual, now); e == nil || ledgerRequests != beforeQueries {
+		t.Fatal("queried ledger before control verification", e)
+	}
+	for _, kind := range []string{"selector", "identity", "stale", "future", "challenge", "control", "bundle", "extra"} {
+		ledgerMutation = kind
+		if e = trust.Accept(f.Initial, leaves); e == nil {
+			t.Fatal("accepted ledger mutation", kind)
+		}
+	}
+	ledgerMutation = ""
+	pending = true
+	if e = trust.Accept(f.Initial, leaves); e != projection.Fault("projection_pending") {
+		t.Fatal("202 advanced stage", e)
+	}
+	pending = false
+	advanceOnConfirmation = true
+	if e = trust.Accept(f.Initial, leaves); e != projection.Fault("projection_pending") {
+		t.Fatal("reused ledger which expired during evidence read", e)
+	}
+	advanceOnConfirmation = false
+	now = now.Add(-61 * time.Second)
 	for _, kind := range []string{"selector", "stale", "challenge"} {
 		corrupt, stale, wrongChallenge = kind == "selector", kind == "stale", kind == "challenge"
 		if e = trust.Accept(f.Initial, leaves); e == nil {
@@ -264,9 +383,43 @@ func TestTransportSourceAuthenticatedGlobalGatesAndRestart(t *testing.T) {
 		}
 	}
 	corrupt, stale, wrongChallenge = false, false, false
+	// No selector is legal only for an actually isolated frozen identity with
+	// an explicit null in the independent ledger. Retry with allocated material
+	// checks that a previous null is never cached as a permanent authorization.
+	isolated, isolationDenied = "unassigned", true
+	if e = trust.Accept(f.Initial, leaves); e != projection.Fault("identity_quarantined") {
+		t.Fatal("planned isolation advanced stage", e)
+	}
+	isolationDenied = false
+	if e = trust.Accept(f.Initial, leaves); e != nil {
+		t.Fatal("isolated without material", e)
+	}
+	isolated = "assigned"
+	if e = trust.Accept(f.Initial, leaves); e != nil {
+		t.Fatal("isolated with exact material", e)
+	}
+	isolated = ""
 	if e = trust.Accept(f.Initial, leaves); e != nil {
 		t.Fatal(e)
 	}
+	var cached projection.SelectorLedgerResponse
+	cacheFilled := false
+	source.ExpectedSelectors = func(ctx context.Context, query api.ExpectedSelectorsQuery) (projection.SelectorLedgerResponse, error) {
+		if cacheFilled {
+			return cached, nil
+		}
+		var err error
+		cached, err = request.ExpectedSelectors(ctx, query)
+		cacheFilled = err == nil
+		return cached, err
+	}
+	if e = trust.Accept(f.Initial, leaves); e != nil {
+		t.Fatal("fresh authenticated ledger", e)
+	}
+	if e = trust.Accept(f.Initial, leaves); e != projection.Fault("projection_pending") {
+		t.Fatal("replayed a previous authenticated query result", e)
+	}
+	source.ExpectedSelectors = request.ExpectedSelectors
 	if e = trust.Accept(f.Initial, retired); e == nil {
 		t.Fatal("loaded falsely proved handshakes")
 	}

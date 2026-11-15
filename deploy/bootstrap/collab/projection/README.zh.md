@@ -63,15 +63,17 @@ broker 模式同时需要 `--reader-state`、固定 `--origin`、独立 `--https
 
 `--mode control-import --control-package <公有ControlPackage文件>` 使用安装根、pin 和独立安装签名私钥，持久更新公有 `root-control.json`，再生成 InstallationReceipt；默认写入组件控制卷，`--control-snapshot` 可以由 D 指定同一受控路径。回执缓存按包摘要保存，重试返回相同签名和时间；标准输出仅为公有回执 JSON，D 将它送 C 的控制确认入口。此命令不解除隔离、不创建身份。network 设置 controlSnapshotFile，broker 配置同一路径，以便独立管理机导入后直接采用更高控制，而非等运行清单更换。
 
-## K3 验证与跨线接缝
+## K3/K4 验证与跨线接缝
 
-Go 生产判定独立通过共享向量：消费端179、签发时钟12、独立边界242（含 K3 运输转换49、全局确认40、追平25、节点绑定8、权限27），本地投影24，共457条。测试运行时生成私钥；HPKE 使用 Go 标准库 RFC9180。Linux UID10001 的测试另覆盖密封 bootstrap、丢回执重试、事务保留追平、真实协议签名/TLS 换证、独立控制导入及真实 broker mTLS/受控重启；UID65532 实测独立 edge 目录、0600 socket 和双向 peer 检查。735天、147次5天换代和444把历史业务钥的虚拟时钟测试仍保留。
+Go 生产判定独立通过共享向量：消费端179、签发时钟12、独立边界291（含运输转换49、全局确认55、追平25、节点绑定8、权限27、K4独立台账34），本地投影24，共506条。测试运行时生成私钥；HPKE 使用 Go 标准库 RFC9180。Linux UID10001 的测试另覆盖密封 bootstrap、丢回执重试、事务保留追平、真实协议签名/TLS 换证、独立控制导入及真实 broker mTLS/受控重启；UID65532 实测独立 edge 目录、0600 socket 和双向 peer 检查。735天、147次5天换代和444把历史业务钥的虚拟时钟测试仍保留。
 
 `TransportSource` 读取固定 `/transport/history/{digest}`、`/transport/transitions/{authority_digest}`、`/isolation/{target_id}` 和 POST `/transport/confirmation`。历史链只验证，不替换最高根控制。跨授权先验根锚起点，再验当前快照和本地高水位；运输版本与业务版本独立，更高运输 generation 允许根授权的新版本空间。耐久 CA 历史保留已退休标记，拒绝旧 CA 重现或换 ID 复用证书。restart_recovery 对未成熟 next 保留原身份/期限并置 retired/revoked，成熟期等号按原规则。
 
 确认使用第四种运行签名域 `Auriga.NetworkTransportConfirmation.v2` 和 network_transport 能力。随机32字节 challenge、当前控制 revision、精确历史 bundle/阶段/冻结集合、唯一逐端行、selector 摘要、实际隔离和60秒新鲜度都参与验证；new_leaves 查前一 dual_trust/loaded，retire_old 查前一 new_leaves/handshake_verified。同代重试和重启后仍重新查询，已保存的本地 loaded/handshake 状态不代替全局证明。生产默认无独立台账时继续 projection_pending。
 
-剩余需 K/C 裁决：K3 明确要求 `expected_selectors` 来自独立材料台账且不能从证据行反填，但当前只读契约没有返回这份映射的模型/端点。SignedTransportConfirmation 只有待核的 readers，TransportPredecessor/TransitionProof 只有公有包；单机 selector 也不覆盖整个冻结集合。`TransportSource.ExpectedSelectors(ctx, previousBundle)` 是明确的耐久材料台账端口，测试以独立预存映射替代 C，CLI/network 不从响应行构造它。需要冻结并实现此只读来源（或明确修改消费者信任裁决），才能接通线上 new_leaves/retire_old。该来源应精确绑定 tenant/realm、bundle完整摘要/版本、当前控制与冻结 reader 集合，并支持离线追平。N 不自行扩展契约或放宽比较。
+K4 已补齐独立台账契约。`TransportSource.ExpectedSelectors(ctx, query)` 由 `TransportHTTP.ExpectedSelectors` 接到固定 POST `/api/collab/v2/network/transport/expected-selectors`，CLI projector/broker 和 network 均已装配。此端口只在本地已配置独立 mTLS 证书/私钥及服务 JWT 时可用，权限为 `collab.msgnet.read`；认证事实来自本地管理传输，不读响应自述。先核验当前控制和运输包的签名链、历史前驱签名，再生成独立32字节挑战；查询和响应精确绑定完整受签 bundle/control 摘要、版本/控制号、generation、phase、授权与冻结 reader 集合。逐 reader 摘要/身份映射 key 必须恰好覆盖冻结集合。只把这次校验通过的映射交给确认证据验证；取证后再核60秒新鲜度，无跨查询/重启缓存。台账缺失、认证失败、替换、过期或202诊断继续 projection_pending；控制变化须刷新控制重试。
+
+K4 合法 isolated 行可缺省 selector，但须在独立映射中显式为 null，身份与冻结 reader_identities 一致且 isolation_enforced=true。已分配 selector 的 isolated 行仍须核验完整 selector 摘要与材料绑定；缺 key、错身份、计划隔离均拒绝。null 只代表尚未授权，不证明隔离，不缓存为永久结论。C 尚未合入时使用严格 HTTPS+mTLS/JWT 契约替身，真实 C 联调由主控集成。
 
 `ValidateNodeControlPins` / `BindNodeControl` 提供独立节点 Ed25519 pin 的规范性、唯一性及认证连接绑定检查，不扩展 InstallationPins 的组件枚举；I 负责将它接到真实 NodeControl 认证连接和独立登记通路。节点始终不能领取 ProjectionMaterial。
 

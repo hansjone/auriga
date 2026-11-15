@@ -68,6 +68,16 @@ func TestBoundaryVectors(t *testing.T) {
 			numeric := func(key string) float64 { var n float64; decode(key, &n); return n }
 			var err error
 			switch v.Operation {
+			case "expected_selectors":
+				var q api.ExpectedSelectorsQuery
+				var r api.ExpectedSelectors
+				var b api.SignedTransportTrustBundle
+				var c api.SignedRootControl
+				decode("query", &q)
+				decode("response", &r)
+				decode("bundle", &b)
+				decode("control", &c)
+				err = VerifyExpectedSelectors(r, q, b, c, SelectorLedgerFacts{Tenant: text("tenant_id"), Realm: text("realm"), Now: stamp(text("now")), Authenticated: boolean("authenticated_c_ledger")})
 			case "signature_domain":
 				var signed struct {
 					Payload json.RawMessage
@@ -230,8 +240,9 @@ func confirmationInput(t *testing.T, i map[string]json.RawMessage) error {
 		Root                  string `json:"root_spki"`
 		Tenant                string `json:"tenant_id"`
 		Realm, Challenge, Now string
-		Required              string            `json:"required_phase"`
-		Selectors             map[string]string `json:"expected_selectors"`
+		Required              string             `json:"required_phase"`
+		Selectors             map[string]*string `json:"expected_selectors"`
+		Identities            map[string]string  `json:"expected_identities"`
 		Evidence              api.SignedTransportConfirmation
 		Bundle                api.SignedTransportTrustBundle
 		Authority             api.SignedRuntimeAuthority
@@ -241,5 +252,5 @@ func confirmationInput(t *testing.T, i map[string]json.RawMessage) error {
 	if e := json.Unmarshal(b, &input); e != nil {
 		t.Fatal(e)
 	}
-	return VerifyTransportConfirmation(input.Evidence, input.Bundle, input.Authority, input.Control, ConfirmationFacts{Root: input.Root, Tenant: input.Tenant, Realm: input.Realm, Challenge: input.Challenge, Now: stamp(input.Now), RequiredPhase: input.Required, ExpectedSelectors: input.Selectors})
+	return VerifyTransportConfirmation(input.Evidence, input.Bundle, input.Authority, input.Control, ConfirmationFacts{Root: input.Root, Tenant: input.Tenant, Realm: input.Realm, Challenge: input.Challenge, Now: stamp(input.Now), RequiredPhase: input.Required, ExpectedSelectors: input.Selectors, ExpectedIdentities: input.Identities})
 }

@@ -12,7 +12,8 @@ import (
 type ConfirmationFacts struct {
 	Root, Tenant, Realm, Challenge, RequiredPhase string
 	Now                                           time.Time
-	ExpectedSelectors                             map[string]string
+	ExpectedSelectors                             map[string]*string
+	ExpectedIdentities                            map[string]string
 }
 
 func VerifyTransportConfirmation(e api.SignedTransportConfirmation, b api.SignedTransportTrustBundle, a api.SignedRuntimeAuthority, c api.SignedRootControl, f ConfirmationFacts) error {
@@ -76,10 +77,27 @@ func VerifyTransportConfirmation(e api.SignedTransportConfirmation, b api.Signed
 	if len(rows) != len(b.Payload.RequiredReaderIds) {
 		return Fault("projection_pending")
 	}
+	if len(f.ExpectedSelectors) != len(b.Payload.RequiredReaderIds) || (f.ExpectedIdentities != nil && len(f.ExpectedIdentities) != len(b.Payload.RequiredReaderIds)) {
+		return Fault("invalid_chain")
+	}
 	for _, id := range b.Payload.RequiredReaderIds {
 		r, ok := rows[id]
 		if !ok {
 			return Fault("projection_pending")
+		}
+		expected, present := f.ExpectedSelectors[id]
+		if !present || (f.ExpectedIdentities != nil && f.ExpectedIdentities[id] != r.IdentityId) {
+			return Fault("invalid_chain")
+		}
+		if r.Selector == nil {
+			if r.Phase != "isolated" || expected != nil || f.ExpectedIdentities[id] != r.IdentityId {
+				return Fault("invalid_chain")
+			}
+		} else {
+			d, _ := ObjectDigest(r.Selector)
+			if expected == nil || *expected != d || r.Selector.InstallationId != r.IdentityId || r.Selector.BundleDigest != bd || r.Selector.BundleVersion != b.Payload.BundleVersion {
+				return Fault("invalid_chain")
+			}
 		}
 		if r.Phase == "isolated" {
 			if !r.IsolationEnforced {
@@ -89,10 +107,6 @@ func VerifyTransportConfirmation(e api.SignedTransportConfirmation, b api.Signed
 		}
 		if r.Phase != "loaded" && r.Phase != "handshake_verified" {
 			return Fault("projection_pending")
-		}
-		d, _ := ObjectDigest(r.Selector)
-		if r.Selector.InstallationId != r.IdentityId || r.Selector.BundleDigest != bd || r.Selector.BundleVersion != b.Payload.BundleVersion || f.ExpectedSelectors[id] != d {
-			return Fault("invalid_chain")
 		}
 		if f.RequiredPhase == "handshake_verified" && r.Phase != "handshake_verified" {
 			return Fault("projection_pending")

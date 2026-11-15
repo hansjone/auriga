@@ -85,7 +85,7 @@ func startProjection(ctx context.Context, c ProjectionConfig, signer *errorSigne
 	if e != nil {
 		return nil, e
 	}
-	source := &projection.TransportSource{Schemas: schemas, Root: c.RootSPKI, Tenant: c.TenantID, Realm: c.Realm, Target: pin.TargetId, Request: request}
+	source := &projection.TransportSource{Schemas: schemas, Root: c.RootSPKI, Tenant: c.TenantID, Realm: c.Realm, Target: pin.TargetId, Request: request.Request, ExpectedSelectors: request.ExpectedSelectors}
 	source.Bind(ctx, trust)
 	fence, e := publicationFence(ctx, c, schemas, trust, func() *projection.Snapshot { return r.snapshot.Load() })
 	if e != nil {
@@ -179,7 +179,7 @@ func publicationFence(parent context.Context, c ProjectionConfig, schemas *proje
 	if e != nil {
 		return nil, e
 	}
-	get := func(ctx context.Context, path string) ([]byte, error) { return request(ctx, "GET", path, nil) }
+	get := func(ctx context.Context, path string) ([]byte, error) { return request.Request(ctx, "GET", path, nil) }
 	return func() error {
 		snap := current()
 		if snap == nil {
