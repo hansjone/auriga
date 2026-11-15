@@ -46,6 +46,10 @@ setpriv --reuid=65534 --regid=65534 --clear-groups sh -ec '! test -f "$1/activat
 # receipt knowledge is the privileged export; Compose itself is an argv recorder.
 MOCK="$PARENT/compose-operator-$MODE"
 mkdir -p "$MOCK/scripts" "$MOCK/private"
+# The checkout may sit below a runner-only home. Copy the unchanged helper
+# into the traversable test tree before switching to the operator UID.
+cp "$ROOT/scripts/lib.sh" "$MOCK/scripts/lib.sh"
+chmod 0644 "$MOCK/scripts/lib.sh"
 chown 65534:65534 "$MOCK/private" "$EXPORT"
 chmod 0700 "$MOCK/private"
 cat >"$MOCK/scripts/installer.sh" <<'EOF'
@@ -58,7 +62,7 @@ cat >"$MOCK/compose" <<'EOF'
 printf '%s\n' "$@"
 EOF
 chmod 0755 "$MOCK/scripts/installer.sh" "$MOCK/compose"
-EXPORTED_ENV="$EXPORT" NAS_ROOT="$MOCK" LIB="$ROOT/scripts/lib.sh" \
+EXPORTED_ENV="$EXPORT" NAS_ROOT="$MOCK" LIB="$MOCK/scripts/lib.sh" \
   setpriv --reuid=65534 --regid=65534 --clear-groups sh -ec '
     . "$LIB"
     compose_cmd() { printf "%s\n" "$NAS_ROOT/compose"; }
