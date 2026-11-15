@@ -36,6 +36,8 @@ type DesktopManifest struct {
 	Notes                string                    `json:"notes"`
 	Signature            DesktopManifestSignature  `json:"signature"`
 	Components           DesktopManifestComponents `json:"components"`
+	RolloutPercentage    *int32                    `json:"rolloutPercentage,omitempty"`
+	RollbackFrom         *string                   `json:"rollbackFrom,omitempty"`
 	AdditionalProperties map[string]interface{}
 }
 
@@ -433,6 +435,70 @@ func (o *DesktopManifest) SetComponents(v DesktopManifestComponents) {
 	o.Components = v
 }
 
+// GetRolloutPercentage returns the RolloutPercentage field value if set, zero value otherwise.
+func (o *DesktopManifest) GetRolloutPercentage() int32 {
+	if o == nil || IsNil(o.RolloutPercentage) {
+		var ret int32
+		return ret
+	}
+	return *o.RolloutPercentage
+}
+
+// GetRolloutPercentageOk returns a tuple with the RolloutPercentage field value if set, nil otherwise
+// and a boolean to check if the value has been set.
+func (o *DesktopManifest) GetRolloutPercentageOk() (*int32, bool) {
+	if o == nil || IsNil(o.RolloutPercentage) {
+		return nil, false
+	}
+	return o.RolloutPercentage, true
+}
+
+// HasRolloutPercentage returns a boolean if a field has been set.
+func (o *DesktopManifest) HasRolloutPercentage() bool {
+	if o != nil && !IsNil(o.RolloutPercentage) {
+		return true
+	}
+
+	return false
+}
+
+// SetRolloutPercentage gets a reference to the given int32 and assigns it to the RolloutPercentage field.
+func (o *DesktopManifest) SetRolloutPercentage(v int32) {
+	o.RolloutPercentage = &v
+}
+
+// GetRollbackFrom returns the RollbackFrom field value if set, zero value otherwise.
+func (o *DesktopManifest) GetRollbackFrom() string {
+	if o == nil || IsNil(o.RollbackFrom) {
+		var ret string
+		return ret
+	}
+	return *o.RollbackFrom
+}
+
+// GetRollbackFromOk returns a tuple with the RollbackFrom field value if set, nil otherwise
+// and a boolean to check if the value has been set.
+func (o *DesktopManifest) GetRollbackFromOk() (*string, bool) {
+	if o == nil || IsNil(o.RollbackFrom) {
+		return nil, false
+	}
+	return o.RollbackFrom, true
+}
+
+// HasRollbackFrom returns a boolean if a field has been set.
+func (o *DesktopManifest) HasRollbackFrom() bool {
+	if o != nil && !IsNil(o.RollbackFrom) {
+		return true
+	}
+
+	return false
+}
+
+// SetRollbackFrom gets a reference to the given string and assigns it to the RollbackFrom field.
+func (o *DesktopManifest) SetRollbackFrom(v string) {
+	o.RollbackFrom = &v
+}
+
 func (o DesktopManifest) MarshalJSON() ([]byte, error) {
 	toSerialize, err := o.ToMap()
 	if err != nil {
@@ -458,6 +524,12 @@ func (o DesktopManifest) ToMap() (map[string]interface{}, error) {
 	toSerialize["notes"] = o.Notes
 	toSerialize["signature"] = o.Signature
 	toSerialize["components"] = o.Components
+	if !IsNil(o.RolloutPercentage) {
+		toSerialize["rolloutPercentage"] = o.RolloutPercentage
+	}
+	if !IsNil(o.RollbackFrom) {
+		toSerialize["rollbackFrom"] = o.RollbackFrom
+	}
 
 	for key, value := range o.AdditionalProperties {
 		toSerialize[key] = value
@@ -530,6 +602,8 @@ func (o *DesktopManifest) UnmarshalJSON(data []byte) (err error) {
 		delete(additionalProperties, "notes")
 		delete(additionalProperties, "signature")
 		delete(additionalProperties, "components")
+		delete(additionalProperties, "rolloutPercentage")
+		delete(additionalProperties, "rollbackFrom")
 		o.AdditionalProperties = additionalProperties
 	}
 
