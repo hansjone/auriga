@@ -6,7 +6,9 @@
 
 镜像身份、产物摘要、健康检查和余项记录在[构建验收记录](../../deploy/forgejo/build-acceptance.json)，新增包的完整回读统计见[发布核验记录](../../deploy/forgejo/publication-verification.json)。
 
-公开 `init.sh`、`start.sh --network-offline` 起栈后，平台正式 TLS 探针及 edge、bifrost、PostgreSQL、NATS 健康检查通过。门户和管理台 HTML 返回 200，实际 JavaScript 与冷建产物逐字节一致。首次管理员初始化被 `unknown NAS source leaf: uac` 阻断，Agent 等待首次加入令牌并周期重启。正常登录、Agent 加入和真实 DSH 签名运行时导入仍需主控完成验收。
+公开 `init.sh`、`start.sh --network-offline` 起栈后，平台正式 TLS 探针及 edge、bifrost、PostgreSQL、NATS 健康检查通过。门户和管理台 HTML 返回 200，实际 JavaScript 与冷建产物逐字节一致。上述 `84dca4a6` 快照的首次管理员初始化被 `unknown NAS source leaf: uac` 阻断，Agent 等待首次加入令牌并周期重启。
+
+主线 `3d7b07c878654b88045f890ca7b20724fcdf0bb3` 已修复可选 `uac` 目录校验，并登记 `auriga-dsh-native`。其 57 份语言锁文件与冻结输入匹配。新快照的冷建重验触发本机内存保护，完整冷建、首管初始化和 Agent 加入验收待资源恢复后继续。真实 DSH 签名运行时导入由主控安排验收。
 
 ## 清单与配置
 
@@ -98,4 +100,4 @@ Go 配方使用 `GOPROXY=file:///inputs/download`，Maven 使用本地仓库及 
 
 将应用镜像、两个 Go 辅助程序和公开 NAS 目录组成发行材料，按正常安装流程填写访问地址及镜像摘要，执行 `scripts/init.sh`、`scripts/start.sh --network-offline`。用生成的正式 TLS 探针检查平台，从门户、管理台页面继续验收首管创建、登录、Agent 加入及签名运行时导入。
 
-本轮五镜像 Docker 归档及 Go/JAR/Web 产物留在工位供主控取用，NAS 部署由主控串行安排。`uac` 安装白名单阻塞需在对应任务修复后复测。签名、源码范围及运行时校验继续按[正常安装流程](../../deploy/nas/README.md)执行。临时验证栈在结束后清理。
+已验收 `84dca4a6` 的五镜像 Docker 归档及 Go/JAR/Web 产物留在工位供主控取用，NAS 部署由主控串行安排。主控继续核验 `3d7b07c8` 的完整冷建、首管初始化及 Agent 加入。签名、源码范围及运行时校验继续按[正常安装流程](../../deploy/nas/README.md)执行。临时验证栈在结束后清理。
