@@ -117,7 +117,7 @@ func (r *SharedRelay) Stream(ctx context.Context, call sharedmodel.SharedCall, e
 	if err != nil {
 		return usage, sharedauth.ErrUnavailable
 	}
-	defer response.Body.Close()
+	defer func() { _ = response.Body.Close() }()
 	if response.StatusCode != http.StatusOK {
 		// Upstream errors may include keys or prompt material.
 		return usage, sharedauth.ErrUnavailable

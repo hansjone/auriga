@@ -62,7 +62,9 @@ func TestCapabilityKWireAndFences(t *testing.T) {
 	parts := strings.Split(tok, ".")
 	bytes, _ := base64.RawURLEncoding.DecodeString(parts[1])
 	var fields map[string]any
-	json.Unmarshal(bytes, &fields)
+	if err := json.Unmarshal(bytes, &fields); err != nil {
+		t.Fatal(err)
+	}
 	if len(fields) != len(schema.Defs["Capability"].Required) {
 		t.Fatal("K field drift")
 	}

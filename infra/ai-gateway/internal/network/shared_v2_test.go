@@ -38,7 +38,7 @@ func TestSharedV2UsesLiveConnectionAndOriginalProtocol(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 	client, err := NewMailboxClient(conn, time.Second)
 	if err != nil {
 		t.Fatal(err)
@@ -82,11 +82,17 @@ func TestSharedV2UsesLiveConnectionAndOriginalProtocol(t *testing.T) {
 		t.Fatal("invalid submit")
 	}
 	var source map[string]string
-	json.Unmarshal(request["source"], &source)
+	if err := json.Unmarshal(request["source"], &source); err != nil {
+		t.Fatal(err)
+	}
 	var idempotency map[string]string
-	json.Unmarshal(request["idempotency"], &idempotency)
+	if err := json.Unmarshal(request["idempotency"], &idempotency); err != nil {
+		t.Fatal(err)
+	}
 	var target map[string]any
-	json.Unmarshal(request["to"], &target)
+	if err := json.Unmarshal(request["to"], &target); err != nil {
+		t.Fatal(err)
+	}
 	if source["source_binding"] != "registered-source" || idempotency["producer_epoch"] != "7" || idempotency["key"] != delivery.MessageID || target["node"] != "65" || target["local"] != "2" {
 		t.Fatal("source/target/idempotency changed", string(raw))
 	}

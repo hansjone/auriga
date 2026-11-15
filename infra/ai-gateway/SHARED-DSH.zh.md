@@ -1,6 +1,6 @@
 # N：共享 DSH 模型与消息适配
 
-契约沿 main `f6001a02` 的 `contracts/shared-dsh` v1，续做已合并 main `edcdb32b`。本批实现短时能力、持久调用账本、Bifrost 成员 relay 及 msgnet-v2 适配，W/P 的在线会话权威与 typed-local 关联以替身独立验收，真实权威和正常页面在联合阶段接入。
+契约沿 main `f6001a02` 的 `contracts/shared-dsh` v1，续做已合并 main `f432efdc`，包含共享入口 E 与 IAM 授权改动。本批实现短时能力、持久调用账本、Bifrost 成员 relay 及 msgnet-v2 适配，W/P 的在线会话权威与 typed-local 关联以替身独立验收，真实权威和正常页面在联合阶段接入。
 
 ## 能力与模型
 

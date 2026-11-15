@@ -51,7 +51,9 @@ func TestSharedRelayMemberRoutingAndStreamUsage(t *testing.T) {
 				t.Error("member input")
 				return
 			}
-			json.NewEncoder(w).Encode(api.RelayKeyIssued{Key: api.RelayKey{Id: input.AccountId, AccountId: input.AccountId, Name: memberName(tenant, input.AccountId), Source: "member", Active: true}, Secret: "sk-bf-" + input.AccountId})
+			if err := json.NewEncoder(w).Encode(api.RelayKeyIssued{Key: api.RelayKey{Id: input.AccountId, AccountId: input.AccountId, Name: memberName(tenant, input.AccountId), Source: "member", Active: true}, Secret: "sk-bf-" + input.AccountId}); err != nil {
+				t.Error(err)
+			}
 			return
 		}
 		if r.URL.Path != "/v1/chat/completions" {
@@ -77,7 +79,9 @@ func TestSharedRelayMemberRoutingAndStreamUsage(t *testing.T) {
 		seen[member]++
 		mu.Unlock()
 		w.Header().Set("Content-Type", "text/event-stream")
-		fmt.Fprint(w, "data: {\"choices\":[{\"delta\":{\"content\":\"ok\"}}]}\n\ndata: {\"choices\":[],\"usage\":{\"prompt_tokens\":2,\"completion_tokens\":3,\"total_tokens\":5}}\n\ndata: [DONE]\n\n")
+		if _, err := fmt.Fprint(w, "data: {\"choices\":[{\"delta\":{\"content\":\"ok\"}}]}\n\ndata: {\"choices\":[],\"usage\":{\"prompt_tokens\":2,\"completion_tokens\":3,\"total_tokens\":5}}\n\ndata: [DONE]\n\n"); err != nil {
+			t.Error(err)
+		}
 	}))
 	defer server.Close()
 	relay, err := NewSharedRelay(server.URL, path, MemberPolicy{})
