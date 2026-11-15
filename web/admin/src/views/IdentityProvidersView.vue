@@ -12,6 +12,7 @@ import { isApiError, pickLocalized } from '@auriga/shared';
 import { useAdminI18n } from '../admin/messages';
 import { useOrgActions, orgError } from '../admin/useOrgActions';
 import ActionConfirm from '../admin/ActionConfirm.vue';
+import UacSettings from '../admin/UacSettings.vue';
 import {
   providersApi,
   type Provider,
@@ -192,7 +193,19 @@ async function select(id: string) {
 }
 onMounted(() => void load());
 function changeConnector() {
-  fields.value = configForm(currentConnector.value, {}, true);
+  fields.value =
+    connectorType.value === 'uac'
+      ? { fields: [], unsupported: [], createBlocked: false }
+      : configForm(currentConnector.value, {}, true);
+  if (connectorType.value === 'uac') enabled.value = false;
+}
+function updateUacState(value: boolean) {
+  if (!detail.value) return;
+  const id = detail.value.id;
+  detail.value = { ...detail.value, enabled: value };
+  providers.value = providers.value.map((p) =>
+    p.id === id ? { ...p, enabled: value } : p,
+  );
 }
 function newProvider() {
   if (
@@ -278,6 +291,10 @@ function save() {
     connectorType.value,
     original,
   );
+  if (creating.value && connectorType.value === 'uac') {
+    body.enabled = false;
+    body.config = {};
+  }
   if (!Object.keys(body).length) {
     notice.value = t('idpNoChanges');
     return;
@@ -547,8 +564,14 @@ function cancelConfirm() {
           <dt>{{ t('idpCallback') }}</dt>
           <dd>{{ detail.callbackUrl }}</dd>
         </dl>
-        <h3>{{ t('idpConfig') }}</h3>
-        <dl class="resource-facts">
+        <UacSettings
+          v-if="detail.connectorType === 'uac'"
+          :key="detail.id"
+          :provider-id="detail.id"
+          @saved="updateUacState"
+        />
+        <h3 v-if="detail.connectorType !== 'uac'">{{ t('idpConfig') }}</h3>
+        <dl v-if="detail.connectorType !== 'uac'" class="resource-facts">
           <template
             v-for="field in readFields.fields"
             :key="field.path.join('.')"
@@ -568,7 +591,10 @@ function cancelConfirm() {
             </dd></template
           >
         </dl>
-        <p v-if="readFields.unsupported.length" class="resource-notice">
+        <p
+          v-if="detail.connectorType !== 'uac' && readFields.unsupported.length"
+          class="resource-notice"
+        >
           {{
             t('idpSchemaReadonly', { paths: readFields.unsupported.join(', ') })
           }}
@@ -592,7 +618,13 @@ function cancelConfirm() {
         ><ElButton :disabled="locked" @click="closeDetail">{{
           t('close')
         }}</ElButton
-        ><template v-if="detail && canWrite && !builtin(detail)"
+        ><template
+          v-if="
+            detail &&
+            detail.connectorType !== 'uac' &&
+            canWrite &&
+            !builtin(detail)
+          "
           ><ElButton
             :disabled="locked || readback"
             data-testid="toggle-provider"
@@ -649,7 +681,7 @@ function cancelConfirm() {
             v-model="display[key as keyof typeof display]"
             :disabled="locked"
             :data-testid="`display-${key}`" /></label
-        ><label
+        ><label v-if="connectorType !== 'uac'"
           ><input
             v-model="enabled"
             :disabled="locked"
@@ -658,6 +690,9 @@ function cancelConfirm() {
           />
           {{ t('idpEnabled') }}</label
         >
+        <p v-if="connectorType === 'uac'" class="resource-muted">
+          UAC 将以关闭状态创建，请在详情中配置并启用。
+        </p>
         <h3>{{ t('idpConfig') }}</h3>
         <p class="resource-muted">{{ t('idpSecretHelp') }}</p>
         <div

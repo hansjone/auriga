@@ -7,6 +7,7 @@ import { createAurigaI18n } from '@auriga/shared';
 import { apiClient } from '../src/api';
 import IdentityProvidersView from '../src/views/IdentityProvidersView.vue';
 import ActionConfirm from '../src/admin/ActionConfirm.vue';
+import UacSettings from '../src/admin/UacSettings.vue';
 import {
   configForm,
   configChanges,
@@ -223,6 +224,52 @@ async function confirm() {
     .trigger('click');
   await flushPromises();
 }
+
+it('creates UAC as disabled empty draft and opens the dedicated config entry', async () => {
+  connector.descriptor.type = 'uac';
+  connector.descriptor.configSchema = {
+    type: 'object',
+    required: ['baseUrl', 'systemCode'],
+    properties: { baseUrl: { type: 'string' }, systemCode: { type: 'string' } },
+  } as unknown as ConnectorType['descriptor']['configSchema'];
+  intercept = (path) =>
+    path.endsWith('/uac')
+      ? json({ enabled: false, baseUrl: '', systemCode: '' })
+      : path.endsWith('/diagnostics')
+        ? json({ enabled: false, revision: 0 })
+        : undefined;
+  await render();
+  await click('new-provider');
+  await input('display-nameEn', 'Example UAC');
+  expect(wrapper!.find('[data-testid=provider-enabled]').exists()).toBe(false);
+  await click('save-provider');
+  await confirm();
+  const body = JSON.parse(String(writes()[0].init.body));
+  expect(body.connectorType).toBe('uac');
+  expect(body.enabled).toBe(false);
+  expect(body.config).toEqual({});
+  expect(wrapper!.text()).toContain('UAC 配置');
+  expect(wrapper!.find('[data-testid=toggle-provider]').exists()).toBe(false);
+  intercept = (path, init) => {
+    if (!path.endsWith('/uac')) return undefined;
+    const response = json({
+      enabled: init.method === 'PUT',
+      baseUrl: 'https://identity.example.com',
+      systemCode: 'example',
+    });
+    response.headers.set('ETag', '"provider-4"');
+    return response;
+  };
+  const uac = wrapper!.getComponent(UacSettings);
+  await uac.get('button').trigger('click');
+  await flushPromises();
+  await uac.get('[data-testid=uac-enabled]').setValue(true);
+  await uac.get('[data-testid=uac-save]').trigger('click');
+  uac.getComponent(ActionConfirm).vm.$emit('confirm');
+  await flushPromises();
+  expect(writes().filter((call) => call.method === 'PUT')).toHaveLength(1);
+  expect(uac.text()).toContain('UAC 配置已保存');
+});
 
 describe('provider schema and secret preservation', () => {
   it('keeps arrays containing embedded newlines read-only instead of changing their item boundaries', () => {
