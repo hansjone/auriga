@@ -2,13 +2,15 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { ElButton } from 'element-plus';
 import { isApiError } from '@auriga/shared';
+import { readResource } from '../api';
+import type { Provider } from './providersApi';
 import { uacApi, type UacConfig, type DiagnosticSettings } from './uacApi';
 import { useOrgActions, orgError } from './useOrgActions';
 import { useAdminI18n } from './messages';
 import { hasPermission } from './permissions';
 import ActionConfirm from './ActionConfirm.vue';
 const props = defineProps<{ providerId: string }>();
-const emit = defineEmits<{ saved: [enabled: boolean] }>();
+const emit = defineEmits<{ saved: [enabled: boolean, etag: string | null] }>();
 const { t } = useAdminI18n();
 const access = useOrgActions('iam.providers.read', 'iam.providers.write', t);
 const { canRead, canWrite, locked, busy, pending, error, notice } = access;
@@ -83,7 +85,29 @@ function failure(e: unknown) {
 }
 async function readConfig() {
   configTag.value = null;
-  const result = await uacApi.get(props.providerId, lifetime.signal);
+  config.value = undefined;
+  let result;
+  try {
+    result = await uacApi.get(props.providerId, lifetime.signal);
+  } catch (e) {
+    if (!isApiError(e) || e.status !== 404) throw e;
+    if (!access.isAlive() || !canRead.value || lifetime.signal.aborted) return;
+    const draft = await readResource<Provider>(
+      `/api/iam/v1/admin/providers/${encodeURIComponent(props.providerId)}`,
+      lifetime.signal,
+    );
+    // Only an existing, disabled, empty UAC placeholder may initialize a draft.
+    if (
+      draft.data.connectorType !== 'uac' ||
+      draft.data.enabled ||
+      Object.keys(draft.data.config).length
+    )
+      throw new Error('Invalid UAC placeholder');
+    result = {
+      data: { enabled: false, baseUrl: '', systemCode: '' },
+      etag: draft.etag,
+    };
+  }
   if (!access.isAlive() || !canRead.value) return;
   config.value = result.data;
   configTag.value = result.etag;
@@ -153,7 +177,7 @@ function save() {
       try {
         await readConfig();
         if (config.value && access.isAlive() && !signal.aborted)
-          emit('saved', config.value.enabled);
+          emit('saved', config.value.enabled, configTag.value);
       } catch (e) {
         error.value = `写请求已成功，重新加载后才能继续保存。${failure(e)}`;
       }
