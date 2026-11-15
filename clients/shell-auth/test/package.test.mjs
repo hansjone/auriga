@@ -160,6 +160,8 @@ test(
     });
     t.diagnostic('installed broker started');
     assert.equal(desktop.snapshot().state, 'signed_out');
+    assert.deepEqual(opened, [], 'startup must not open a browser');
+    await desktop.openLoginFallback();
     const launch = new URL(opened[0]);
     const page = await originalFetch(launch.origin);
     assert.ok((await page.text()).includes('page.js'));
@@ -205,7 +207,7 @@ test(
       ).json();
     await message('skip_login');
     assert.equal(skipped, 1);
-    await desktop.openLogin();
+    await desktop.openLoginFallback();
     assert.notEqual(opened[1], opened[0]);
     assert.equal(new URL(opened[1]).origin, launch.origin);
     await message('open_login');

@@ -1261,7 +1261,6 @@ async function launchLocked({
   env = process.env,
   control,
   versionSession,
-  openLoginOnStart = !args.includes('--no-open'),
 }) {
   root = resolve(root);
   const report = (event) => {
@@ -1333,7 +1332,6 @@ async function launchLocked({
         root,
         dataHome: state.dataHome,
         dir,
-        openLoginOnStart,
         onSkipLogin: (localLogin) =>
           report({
             event: 'login',
@@ -1357,20 +1355,6 @@ async function launchLocked({
       publish();
       statusTimer = setInterval(publish, 2000);
       statusTimer.unref();
-      // "Open Auriga" while signed out shows the platform sign-in page first.
-      control.on?.('login', () => {
-        const platform = platformStatus(shellAuth, shellFailure);
-        if (!shellAuth?.openLogin || platform.state === 'authenticated') {
-          report({ event: 'login', opened: false, state: platform.state });
-          return;
-        }
-        Promise.resolve()
-          .then(() => shellAuth.openLogin())
-          .then(
-            () => report({ event: 'login', opened: true }),
-            () => report({ event: 'login', opened: false, state: 'failed' }),
-          );
-      });
     }
     await supervisor.reconcile(true);
     if (

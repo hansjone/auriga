@@ -396,7 +396,8 @@ onUnmounted(() => {
         {{ status === 'ready' ? words.verify : words[status] }}
       </p>
       <p v-if="correlation" data-testid="device-correlation">
-        {{ correlation }}
+        {{ locale === 'en' ? 'Reference' : '关联编号' }}:
+        {{ correlation.slice(0, 8) }}
       </p>
       <LoginView
         v-if="status === 'login'"

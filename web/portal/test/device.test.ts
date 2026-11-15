@@ -214,7 +214,7 @@ describe('normal portal device confirmation', () => {
     await flushPromises();
     expect(wrapper!.text()).toContain('重新输入用户码');
     expect(wrapper!.get('[data-testid=device-correlation]').text()).toBe(
-      reference,
+      '关联编号: ' + reference.slice(0, 8),
     );
     expect((action('确认批准设备').element as HTMLButtonElement).disabled).toBe(
       true,

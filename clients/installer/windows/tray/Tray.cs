@@ -413,7 +413,6 @@ sealed class TrayApp : ApplicationContext
     {
         if (launcher != null && !launcher.HasExited) return;
         dshUrl = null; platformState = null; platformReason = null;
-        loginRequested = false; useLocalDsh = false; localLogin = false;
         var start = Desktop.NodeStart(root, "launch --root " + Desktop.Quote(root) + " --stdin-control -- --no-open");
         start.RedirectStandardInput = true;
         try
@@ -478,36 +477,17 @@ sealed class TrayApp : ApplicationContext
                 icon.ShowBalloonTip(4000, Desktop.Brand, "已登录 Auriga 平台。", ToolTipIcon.Info);
             MaybeOpen();
         }
-        else if (kind == "login" && !Desktop.Flag(e, "opened"))
-        {
-            // A skipped or unavailable sign-in can continue into local DSH.
-            useLocalDsh = true;
-            localLogin = Desktop.Str(e, "state") == "local_login";
-            MaybeOpen();
-        }
         UpdateMenu();
     }
 
-    bool loginRequested, useLocalDsh, localLogin;
-
-    /// Startup and "Open" request the sign-in page first. DSH follows after sign-in.
+    /// Open DSH immediately; Auriga owns platform login inside shell.overlay.
     void MaybeOpen()
     {
-        if (!openWhenReady || platformState == null) return;
-        if (useLocalDsh || platformState == "authenticated" || platformState == "unavailable")
-        {
-            if (dshUrl == null) return;
-            openWhenReady = false;
-            var url = new UriBuilder(dshUrl);
-            if (localLogin && string.IsNullOrEmpty(url.Fragment))
-                url.Fragment = "auriga=login";
-            Desktop.Open(url.Uri.AbsoluteUri);
-        }
-        else if (!loginRequested)
-        {
-            loginRequested = true;
-            Send("login");
-        }
+        if (!openWhenReady || dshUrl == null || platformState == null) return;
+        openWhenReady = false;
+        var url = new UriBuilder(dshUrl);
+        if (platformState != "authenticated") url.Fragment = "auriga=platform-login";
+        Desktop.Open(url.Uri.AbsoluteUri);
     }
 
     void OpenAuriga()
@@ -521,9 +501,6 @@ sealed class TrayApp : ApplicationContext
         if (platformState == null)
             icon.ShowBalloonTip(3000, Desktop.Brand, "Auriga 正在启动，稍后自动打开。", ToolTipIcon.Info);
         openWhenReady = true;
-        loginRequested = false;
-        useLocalDsh = false;
-        localLogin = false;
         MaybeOpen();
     }
 

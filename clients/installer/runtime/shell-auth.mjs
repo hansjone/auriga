@@ -23,7 +23,6 @@ export async function startShellAuth({
   root,
   dataHome,
   dir,
-  openLoginOnStart,
   onSkipLogin,
   onFailure = () => {},
 }) {
@@ -35,7 +34,6 @@ export async function startShellAuth({
     const auth = await startDesktopAuth({
       root,
       dataHome,
-      openLoginOnStart,
       onSkipLogin,
     });
     if (!auth) onFailure('not_configured');

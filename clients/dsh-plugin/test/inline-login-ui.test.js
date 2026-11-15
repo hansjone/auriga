@@ -10,7 +10,7 @@ import { JSDOM } from 'jsdom';
 async function fixture(http) {
   const api = undefined,
     locale = 'zh';
-  const dom = new JSDOM('<!doctype html>', { url: 'https://example.com/' });
+  const dom = new JSDOM('<!doctype html>', { url: 'http://127.0.0.1:12345/' });
   let module;
   let values = [],
     effects = [],
@@ -67,6 +67,8 @@ async function fixture(http) {
       customElements: dom.window.customElements,
       setTimeout,
       clearTimeout,
+      setInterval,
+      clearInterval,
       fetch:
         http ??
         (async (url, init = {}) => {
@@ -105,7 +107,8 @@ async function fixture(http) {
   );
   const plugin = module.factory((name) => {
     if (name === 'react') return React;
-    if (name === '@deepseek-ai/dsh-client-ui-primitives') return {};
+    if (name === '@deepseek-ai/dsh-client-ui-primitives')
+      return { Modal: function Modal() {} };
     throw new Error(name);
   });
   const slots = new Map();
@@ -144,6 +147,7 @@ async function fixture(http) {
     let tree = shallow(section.type, {
       boot: { mode: 'connect' },
       shell,
+      modal: true,
       reloadShell() {},
       gotoSettings() {},
     });
@@ -152,6 +156,7 @@ async function fixture(http) {
     tree = shallow(section.type, {
       boot: { mode: 'connect' },
       shell,
+      modal: true,
       reloadShell() {},
       gotoSettings() {},
     });
@@ -159,6 +164,19 @@ async function fixture(http) {
   };
   return {
     render,
+    async renderLogin() {
+      let tree;
+      for (let i = 0; i < 5; i++) {
+        tree = shallow(slots.get('shell.overlay'));
+        for (const effect of effects) effect();
+        await new Promise((resolve) => setImmediate(resolve));
+      }
+      return tree;
+    },
+    reopen() {
+      dom.window.history.replaceState(null, '', '#auriga=platform-login');
+      dom.window.dispatchEvent(new dom.window.Event('hashchange'));
+    },
     hasModelsCard: () => slots.has('settings.models.provider-card'),
     close: () => {
       for (const v of values) v?.cleanup?.();
@@ -174,7 +192,7 @@ function all(tree) {
 const text = (tree) =>
   typeof tree === 'string' ? tree : (tree?.children ?? []).map(text).join(' ');
 
-test('overview login stays inline and its QR/form controls submit native commands', async () => {
+test('native modal QR/form controls submit inline commands', async () => {
   const calls = [];
   const f = await fixture(async (url, init = {}) => {
     if (init.body) calls.push(JSON.parse(init.body));
@@ -279,6 +297,39 @@ test('business denial and wrong credentials show retry feedback separately from 
       loginError: { code: 'invalid_client' },
     });
     assert.match(text(tree), /检查客户端配置/);
+  } finally {
+    f.close();
+  }
+});
+
+test('global native modal starts login, skips for the session, reopens and closes on success', async () => {
+  let status = {
+    configured: true,
+    brokerAvailable: true,
+    platform: 'signed_out',
+    csrf: 'csrf',
+  };
+  const calls = [];
+  const f = await fixture(async (url, init = {}) => {
+    if (init.body) calls.push(JSON.parse(init.body));
+    return { ok: true, json: async () => status };
+  });
+  try {
+    let tree = await f.renderLogin();
+    assert.equal(tree.type.name, 'Modal');
+    assert.equal(calls.filter((c) => c.action === 'inline_login').length, 1);
+    tree.props.onClose();
+    assert.equal(await f.renderLogin(), null);
+    assert.equal(calls.at(-1).action, 'cancel_login');
+    f.reopen();
+    tree = await f.renderLogin();
+    assert.equal(tree.type.name, 'Modal');
+    assert.equal(calls.filter((c) => c.action === 'inline_login').length, 2);
+    status = { ...status, loggedIn: true, platform: 'authenticated' };
+    const card = all(tree).find((n) => n.type?.name === 'PlatformCard');
+    card.props.reloadShell();
+    assert.equal(await f.renderLogin(), null);
+    assert.ok(calls.every((c) => c.action !== 'open_login'));
   } finally {
     f.close();
   }

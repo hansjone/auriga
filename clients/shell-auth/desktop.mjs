@@ -36,7 +36,6 @@ export async function startDesktopAuth({
   root,
   dataHome,
   openBrowser = openSystemBrowser,
-  openLoginOnStart = true,
   onSkipLogin,
 }) {
   const originFile = safePath(join(root, 'desktop-origin.json'));
@@ -92,19 +91,11 @@ export async function startDesktopAuth({
     ipc = await startIpc({ helper, broker, business });
     const timer = setInterval(() => broker.check().catch(() => {}), 10000);
     timer.unref();
-    if (openLoginOnStart && broker.snapshot().state !== 'authenticated') {
-      // The user can retry from the tray if Windows could not open its browser.
-      try {
-        await openBrowser(loopback.issue());
-      } catch {
-        // Browser availability does not affect the authentication broker.
-      }
-    }
     return {
       broker,
       snapshot: () => broker.snapshot(),
-      // Launcher/tray entry: open the sign-in control page with a fresh one-time ticket.
-      openLogin: () => openBrowser(loopback.issue()),
+      // Explicit recovery only; startup and tray use the DSH modal.
+      openLoginFallback: () => openBrowser(loopback.issue()),
       attach: (child) => ipc.attach(child),
       async close() {
         clearInterval(timer);
