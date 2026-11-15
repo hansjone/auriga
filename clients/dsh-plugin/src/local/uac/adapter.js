@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { isIP } from 'node:net';
+import { canonicalize, parseStrictJson } from '../../network/trust/jcs.js';
 import { createUacHttp, MAX_BODY } from './http.js';
 
 /*
@@ -22,16 +23,58 @@ const VARIABLE = /\$\{([A-Za-z][A-Za-z0-9]{0,63})\}/g;
 
 const invalid = () => new Error('invalid UAC configuration');
 
+/** @param {unknown} value */
+const isPointer = (value) =>
+  typeof value === 'string' &&
+  value.startsWith('/') &&
+  value.length <= 512 &&
+  !/~(?![01])/.test(value);
+
+/** @param {unknown} value */
+const isScanStatus = (value) =>
+  typeof value === 'string' && value.length <= 128 && !!value.trim();
+
+/** @param {any} qr @param {any} department */
+function validateMappings(qr, department) {
+  const scanPointers = [qr?.statusPointer, qr?.tokenPointer, qr?.empNoPointer];
+  const states = [qr?.waiting, qr?.scanned, qr?.success];
+  const departmentPointers = department?.departmentPointers;
+  if (
+    !scanPointers.every(isPointer) ||
+    new Set(scanPointers).size !== scanPointers.length ||
+    !states.every(isScanStatus) ||
+    new Set(states.map((value) => value.trim())).size !== states.length ||
+    ![
+      department?.successPointer,
+      department?.listPointer,
+      department?.empNoPointer,
+    ].every(isPointer) ||
+    !Array.isArray(departmentPointers) ||
+    !departmentPointers.length ||
+    !departmentPointers.every(isPointer) ||
+    !Object.hasOwn(qr, 'body') ||
+    !Object.hasOwn(department, 'body') ||
+    !Object.hasOwn(department, 'successValue')
+  )
+    throw invalid();
+  canonicalize(department.successValue);
+}
+
 /** RFC 6901 pointer lookup; undefined when absent.
  * @param {any} root @param {unknown} pointer */
 export function at(root, pointer) {
   if (typeof pointer !== 'string') return undefined;
   if (pointer === '') return root;
-  if (!pointer.startsWith('/')) return undefined;
+  if (!isPointer(pointer)) return undefined;
   let node = root;
   for (const raw of pointer.slice(1).split('/')) {
     const key = raw.replaceAll('~1', '/').replaceAll('~0', '~');
-    if (node === null || typeof node !== 'object' || !Object.hasOwn(node, key))
+    if (
+      node === null ||
+      typeof node !== 'object' ||
+      (Array.isArray(node) && !/^(?:0|[1-9][0-9]*)$/.test(key)) ||
+      !Object.hasOwn(node, key)
+    )
       return undefined;
     node = node[key];
   }
@@ -90,11 +133,15 @@ const validUser = (/** @type {unknown} */ v) =>
 const validToken = (/** @type {unknown} */ v) =>
   typeof v === 'string' && v.trim().length > 0 && v.length <= 16384;
 
-/** Parse an upstream body. Floats and extra fields are permitted; size is bounded.
+/** Reject duplicate fields and malformed upstream payloads before interpreting status.
  * @param {Buffer} body */
 function parse(body) {
-  if (!body?.length || body.length > MAX_BODY) throw new Error('invalid_json');
-  return JSON.parse(body.toString('utf8'));
+  return parseStrictJson(body, {
+    allowFiniteNumbers: true,
+    maxBytes: MAX_BODY,
+    maxArray: 8192,
+    maxNodes: 16384,
+  });
 }
 
 /**
@@ -209,22 +256,73 @@ export function createUacAdapter(settings, provider, options = {}) {
     }
     if (typeof settings.qr?.path !== 'string' || !settings.qr.path.trim())
       throw invalid();
+    validateMappings(settings.qr, settings.department);
     http.validate(new URL(provider.baseUrl + settings.qr.path));
     const coordinates = { x: '0'.repeat(32), y: '0'.repeat(32) };
-    expand(settings.qr?.body, values(coordinates, settings.qr));
+    const scanValues = values(coordinates, settings.qr);
+    expand(settings.qr.body, scanValues);
+    headers(settings.qr, scanValues);
     qrContent(coordinates);
-    expand(
-      settings.department?.body,
-      values(
-        {
-          token: 'validation',
-          empNo: 'validation',
-          clientIP: '',
-          purpose: 'login_info',
-        },
-        settings.department,
-      ),
+    const departmentValues = values(
+      {
+        token: 'validation',
+        empNo: 'validation',
+        clientIP: '',
+        purpose: 'login_info',
+      },
+      settings.department,
     );
+    expand(settings.department.body, departmentValues);
+    headers(settings.department, departmentValues);
+  }
+
+  /** Bind owner identity to the service endpoints, system code and protocol
+   * mapping. Address allowlist rotation and request timeouts change transport
+   * policy only. Derived fields evaluate in configured order. */
+  function identityDomain() {
+    const {
+      allowedDestinations: _destinations,
+      qr,
+      department,
+      ...protocol
+    } = settings;
+    const {
+      timeoutSeconds: _timeout,
+      path,
+      derived: scanDerived,
+      ...scan
+    } = qr;
+    const {
+      url,
+      derived: departmentDerived,
+      ...departmentMapping
+    } = department;
+    return createHash('sha256')
+      .update(
+        canonicalize(
+          {
+            version: 1,
+            baseUrl: new URL(provider.baseUrl).href,
+            systemCode: provider.systemCode,
+            protocol: {
+              ...protocol,
+              tokenVerifyUrl: new URL(settings.tokenVerifyUrl).href,
+              qr: {
+                ...scan,
+                url: new URL(provider.baseUrl + path).href,
+                derived: Object.entries(scanDerived ?? {}),
+              },
+              department: {
+                ...departmentMapping,
+                url: new URL(url).href,
+                derived: Object.entries(departmentDerived ?? {}),
+              },
+            },
+          },
+          { maxBytes: 131072, maxDepth: 24 },
+        ),
+      )
+      .digest('hex');
   }
 
   /** @param {string} state @param {string} code */
@@ -251,9 +349,10 @@ export function createUacAdapter(settings, provider, options = {}) {
         return failure('failed', 'invalid_response');
       }
       const state = at(root, mapping.statusPointer);
+      if (!isScanStatus(state)) return failure('failed', 'invalid_scan_state');
       for (const pending of ['waiting', 'scanned'])
-        if (typeof mapping[pending] === 'string' && state === mapping[pending])
-          return { state: pending };
+        if (state === mapping[pending]) return { state: pending };
+      // The platform-shaped mapping treats every other explicit state as denial.
       if (state !== mapping.success)
         return failure('denied', 'upstream_rejected');
       const token = at(root, mapping.tokenPointer),
@@ -362,10 +461,16 @@ export function createUacAdapter(settings, provider, options = {}) {
       );
       if (response.status < 200 || response.status >= 300)
         return { available: false, faultReason: 'http_error' };
-      const root = parse(response.body);
+      let root;
+      try {
+        root = parse(response.body);
+      } catch {
+        return { available: false, faultReason: 'invalid_json' };
+      }
+      const state = at(root, mapping.successPointer);
       if (
-        JSON.stringify(at(root, mapping.successPointer)) !==
-        JSON.stringify(mapping.successValue)
+        state === undefined ||
+        JSON.stringify(state) !== JSON.stringify(mapping.successValue)
       )
         return { available: false, failureClass: 'business_rejected' };
       const list = at(root, mapping.listPointer);
@@ -387,17 +492,11 @@ export function createUacAdapter(settings, provider, options = {}) {
           return { available: true, department: strip(value) };
       }
       return { available: false, faultReason: 'missing_department' };
-    } catch (error) {
-      return {
-        available: false,
-        faultReason:
-          /** @type {any} */ (error) instanceof SyntaxError
-            ? 'invalid_json'
-            : 'transport_error',
-      };
+    } catch {
+      return { available: false, faultReason: 'transport_error' };
     }
   }
-  return { validate, qrContent, scan, verify, department };
+  return { validate, identityDomain, qrContent, scan, verify, department };
 }
 
 /** java.net.URLEncoder (UTF-8) semantics: keep [A-Za-z0-9.*_-], space as '+'.

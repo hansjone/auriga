@@ -625,10 +625,109 @@ test('local UAC scan works without a platform: waiting → scanned → signed in
         ['start', 'poll', 'poll'],
       );
       assert.equal(JSON.parse(writes[1].init.body).id, challenge('x').id);
+      const authenticated = uac;
+      for (const lastOutcome of [
+        'revalidation_rejected',
+        'revalidation_unreachable',
+        'user_logout',
+      ]) {
+        uac = {
+          ...authenticated,
+          state: 'signed_out',
+          lastOutcome,
+          // An older response can retain the previous successful challenge.
+          challenge: challenge('authenticated'),
+        };
+        host.expire(15000);
+        await flush();
+        assert.doesNotMatch(text(), /登录成功|已登录本机|A1001/);
+        assert.equal(main.root.querySelector('svg[role="img"]'), null);
+        assert.ok(
+          [...main.root.querySelectorAll('button')].some(
+            (button) => button.textContent === '获取二维码',
+          ),
+        );
+        assert.match(
+          text(),
+          lastOutcome === 'user_logout'
+            ? /使用公司 App 扫码登录本机/
+            : /登录已失效，请重新扫码/,
+        );
+      }
       main.close();
       host.dispose();
     } finally {
       host.close();
     }
+  }
+});
+
+test('Team availability follows the live authenticated shell without reloading bootstrap', async () => {
+  const status = {
+    available: true,
+    configured: true,
+    brokerAvailable: true,
+    loggedIn: false,
+    connected: false,
+    platform: 'signed_out',
+  };
+  let shell = response(200, status);
+  let bootstraps = 0;
+  const host = surfaceHost(async (url) => {
+    const path = new URL(url).pathname;
+    if (path.endsWith('/auriga/shell/status')) return shell;
+    if (path.endsWith('/auriga/uac/status'))
+      return response(200, { available: false });
+    if (path.endsWith('/auriga/bootstrap')) bootstraps++;
+    return response(200, localBoot(false));
+  });
+  const main = host.mount('main');
+  try {
+    await flush();
+    main.root.querySelector('#auriga-tab-team').click();
+    await flush();
+    const team = main.root.querySelector('#auriga-panel-team');
+    const overview = main.root.querySelector('#auriga-panel-overview');
+    const assertState = (connected, state) => {
+      assert.equal(team.hidden, false);
+      assert.equal(
+        [...team.querySelectorAll('button')].some(
+          (button) =>
+            button.textContent === '在会话中使用 Team 工具' && !button.disabled,
+        ),
+        connected,
+      );
+      assert.match(overview.textContent, state);
+      assert.match(team.textContent, state);
+    };
+    const update = async (next) => {
+      shell = next;
+      host.expire(4000);
+      await flush();
+    };
+    const signedIn = { ...status, loggedIn: true, platform: 'authenticated' };
+    const connected = { ...signedIn, connected: true };
+    assertState(false, /未登录平台/);
+    await update(response(200, signedIn));
+    assertState(false, /已登录，通信未就绪/);
+    await update(response(200, connected));
+    assertState(true, /平台已连接/);
+    await update(response(200, { ...signedIn, communication: 'unavailable' }));
+    assertState(false, /已登录，通信未就绪/);
+    await update(response(200, connected));
+    assertState(true, /平台已连接/);
+    await update(
+      response(200, { ...status, platform: 'revoked', connected: true }),
+    );
+    assertState(false, /未登录平台/);
+    await update(response(200, connected));
+    assertState(true, /平台已连接/);
+    await update(response(503, {}));
+    assertState(false, /平台不可达/);
+    assert.equal(bootstraps, 1);
+  } finally {
+    main.close();
+    host.dispose();
+    host.close();
   }
 });

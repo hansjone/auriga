@@ -21,12 +21,11 @@ export const tokenHash = (token) =>
   createHash('sha256').update(token, 'utf8').digest('hex').slice(0, 12);
 
 /**
- * Client-owned UAC identity, independent of the platform. The QR coordinates,
- * enterprise token and owner binding never leave this process except to the
- * private allowedDestinations. It admits only the single local DSH owner and
- * grants no platform authority: platform features still require the shell's
- * platform session.
+ * The encrypted vault stores only the owner binding. Active credentials and
+ * challenges end with the process, including after a failed storage operation.
+ * Platform features still require the shell's platform session.
  * @param {{directory:string,loadConfig?:typeof readUacConfig,createAdapter?:typeof createUacAdapter,
+ *   writeOwner?:typeof atomicWriteJson,
  *   now?:()=>number,setTimer?:(fn:()=>void,ms:number)=>any,clearTimer?:(t:any)=>void,
  *   log?:(level:string,message:string,fields:Record<string,unknown>)=>void}} options
  */
@@ -45,16 +44,19 @@ export function createLocalUacIdentity(options) {
   const path = join(directory, FILE);
   /** @type {any} */ let config = null;
   /** @type {any} */ let adapter = null;
-  /** @type {'ready'|'unconfigured'|'invalid'|'storage'} */ let availability =
+  /** @type {'ready'|'unconfigured'|'invalid'|'storage'|'owner_domain'} */ let availability =
     'unconfigured';
   /** @type {Buffer|undefined} */ let key;
-  /** @type {{version:1,owner:{empNo:string}|null,session:any}} */
-  let state = { version: 1, owner: null, session: null };
+  /** @type {string} */ let identityDomain;
+  /** @type {{empNo:string,identityDomain:string|null}|null} */ let owner =
+    null;
+  /** @type {{empNo:string,token:string,clientIP:string,loginAt:number,verifiedAt:number,attempt:number,nextRevalidateAt:number}|null} */
+  let session = null;
   /** @type {any} */ let challenge;
   /** @type {{outcome:string,at:number}|undefined} */ let last;
   /** @type {any} */ let timer;
   let closed = false;
-  let writing = Promise.resolve();
+  let operations = Promise.resolve();
 
   const emit = (
     /** @type {string} */ level,
@@ -64,18 +66,22 @@ export function createLocalUacIdentity(options) {
 
   /** @template T @param {()=>T|Promise<T>} change */
   function mutate(change) {
-    const job = writing.then(change);
-    writing = job.then(
+    const job = operations.then(change);
+    operations = job.then(
       () => {},
       () => {},
     );
     return job;
   }
 
-  /** @param {typeof state} next */
-  async function persist(next) {
+  /** @param {{empNo:string,identityDomain:string}} binding */
+  async function persistOwner(binding) {
     if (!key) throw new Error('local UAC storage unavailable');
-    await atomicWriteJson(path, sealSecret(key, JSON.stringify(next)));
+    const value = sealSecret(
+      key,
+      JSON.stringify({ version: 2, owner: binding }),
+    );
+    await (options.writeOwner ?? atomicWriteJson)(path, value);
   }
 
   const ready = (async () => {
@@ -87,6 +93,7 @@ export function createLocalUacIdentity(options) {
         config.provider,
       );
       adapter.validate();
+      identityDomain = adapter.identityDomain();
     } catch {
       config = null;
       adapter = null;
@@ -110,19 +117,17 @@ export function createLocalUacIdentity(options) {
       });
       if (raw !== undefined) {
         const value = JSON.parse(openSecret(key, JSON.parse(raw)) ?? 'null');
-        if (!validStoredState(value)) throw new Error();
-        state = {
-          version: 1,
-          owner: value.owner ?? null,
-          session: value.session ?? null,
-        };
+        owner = readOwner(value);
+      }
+      if (owner && owner.identityDomain !== identityDomain) {
+        availability = 'owner_domain';
+        emit('WARN', 'configuration', { result: 'owner_domain_mismatch' });
+        return;
       }
       availability = 'ready';
-      schedule();
     } catch {
       // Fail closed: an unreadable owner binding must never permit rebinding.
       availability = 'storage';
-      state = { version: 1, owner: null, session: null };
       emit('ERROR', 'storage', { result: 'unavailable' });
     }
   })();
@@ -130,7 +135,6 @@ export function createLocalUacIdentity(options) {
   function schedule() {
     clearTimer(timer);
     timer = undefined;
-    const session = state.session;
     if (closed || !session) return;
     timer = setTimer(
       () => revalidate().catch(() => {}),
@@ -139,19 +143,13 @@ export function createLocalUacIdentity(options) {
   }
 
   /** @param {string} outcome @param {string} correlationId */
-  async function signOut(outcome, correlationId) {
-    const hash = state.session ? tokenHash(state.session.token) : undefined;
-    state = { ...state, session: null };
+  function signOut(outcome, correlationId) {
+    const hash = session ? tokenHash(session.token) : undefined;
+    session = null;
+    challenge = undefined;
     clearTimer(timer);
     timer = undefined;
     last = { outcome, at: now() };
-    try {
-      await persist(state);
-    } catch (error) {
-      availability = 'storage';
-      emit('ERROR', 'storage', { result: 'unavailable', correlationId });
-      throw error;
-    }
     emit('INFO', 'session', {
       result: 'signed_out',
       reason: outcome,
@@ -161,33 +159,33 @@ export function createLocalUacIdentity(options) {
   }
 
   async function revalidate() {
-    const session = state.session;
-    if (closed || !session || !adapter) return;
+    const current = session;
+    if (closed || !current || !adapter) return;
     const correlationId = randomUUID();
     const policy = config.revalidation;
     const credential = {
-      empNo: session.empNo,
-      token: session.token,
-      clientIP: session.clientIP,
+      empNo: current.empNo,
+      token: current.token,
+      clientIP: current.clientIP,
     };
     emit('INFO', 'revalidate', {
       phase: 'start',
       strategy: policy.strategy,
-      attempt: session.attempt ?? 0,
+      attempt: current.attempt,
       maxRetries: policy.maxRetries,
-      tokenHash: tokenHash(session.token),
+      tokenHash: tokenHash(current.token),
       correlationId,
     });
     const department = policy.strategy === 'department';
     const result = department
       ? await adapter.department(credential, 'revalidate')
       : await adapter.verify(credential);
-    return mutate(async () => {
-      if (closed || state.session !== session) return;
-      const updated = { ...session };
+    return mutate(() => {
+      if (closed || session !== current) return;
+      const updated = { ...current };
       if (department ? result.available : result.success) {
         if (!department) {
-          if (fold(result.empNo) !== fold(session.empNo))
+          if (fold(result.empNo) !== fold(current.empNo))
             return signOut('revalidation_rejected', correlationId);
           updated.token = result.token;
         }
@@ -203,7 +201,7 @@ export function createLocalUacIdentity(options) {
         });
         return signOut('revalidation_rejected', correlationId);
       } else {
-        updated.attempt = session.attempt + 1;
+        updated.attempt = current.attempt + 1;
         if (updated.attempt > policy.maxRetries) {
           emit('WARN', 'revalidate', {
             phase: 'end',
@@ -222,13 +220,7 @@ export function createLocalUacIdentity(options) {
           correlationId,
         });
       }
-      const next = { ...state, session: updated };
-      try {
-        await persist(next);
-      } catch {
-        return signOut('revalidation_storage', correlationId);
-      }
-      state = next;
+      session = updated;
       if (updated.attempt === 0)
         emit('INFO', 'revalidate', {
           phase: 'end',
@@ -257,14 +249,13 @@ export function createLocalUacIdentity(options) {
   }
 
   function status() {
-    const session = state.session;
     return {
       available: availability !== 'unconfigured',
       ...(availability !== 'ready' && availability !== 'unconfigured'
         ? { reason: availability }
         : {}),
       state: session ? 'authenticated' : 'signed_out',
-      ownerBound: !!state.owner,
+      ownerBound: !!owner,
       ...(session
         ? {
             empNo: session.empNo,
@@ -287,7 +278,7 @@ export function createLocalUacIdentity(options) {
   }
 
   function beginChallenge() {
-    if (closed || availability !== 'ready' || state.session)
+    if (closed || availability !== 'ready' || session)
       throw failure('unavailable');
     if (challenge && !terminal(challenge.state) && now() < challenge.expiresAt)
       return projectChallenge();
@@ -365,8 +356,8 @@ export function createLocalUacIdentity(options) {
     if (result.state !== 'verified')
       return settle(current, result.state, result.failureCode);
     current.state = 'verifying';
-    // The owner binding is checked before any token is persisted.
-    if (state.owner && fold(state.owner.empNo) !== fold(result.empNo))
+    // A scan for a different employee must not send its token for verification.
+    if (owner && fold(owner.empNo) !== fold(result.empNo))
       return settle(current, 'rejected', 'owner_mismatch');
     const verified = await adapter.verify({
       empNo: result.empNo,
@@ -393,29 +384,28 @@ export function createLocalUacIdentity(options) {
     return mutate(async () => {
       if (closed || challenge !== current || terminal(current.state)) return;
       if (now() >= current.expiresAt) return settle(current, 'expired');
-      if (state.owner && fold(state.owner.empNo) !== fold(verified.empNo))
+      if (owner && fold(owner.empNo) !== fold(verified.empNo))
         return settle(current, 'rejected', 'owner_mismatch');
       const at = now();
-      const owner = state.owner ?? { empNo: verified.empNo };
-      const next = {
-        ...state,
-        owner,
-        session: {
-          empNo: owner.empNo,
-          token: verified.token,
-          clientIP: result.clientIP ?? '',
-          loginAt: at,
-          verifiedAt: at,
-          attempt: 0,
-          nextRevalidateAt: at + config.revalidation.intervalSeconds * 1000,
-        },
-      };
-      try {
-        await persist(next);
-      } catch {
-        return settle(current, 'failed', 'storage_unavailable');
+      if (!owner) {
+        const binding = { empNo: verified.empNo, identityDomain };
+        try {
+          await persistOwner(binding);
+        } catch {
+          return settle(current, 'failed', 'storage_unavailable');
+        }
+        owner = binding;
       }
-      state = next;
+      if (closed) return;
+      session = {
+        empNo: owner.empNo,
+        token: verified.token,
+        clientIP: result.clientIP ?? '',
+        loginAt: at,
+        verifiedAt: at,
+        attempt: 0,
+        nextRevalidateAt: at + config.revalidation.intervalSeconds * 1000,
+      };
       last = { outcome: 'signed_in', at };
       settle(current, 'authenticated');
       schedule();
@@ -462,10 +452,10 @@ export function createLocalUacIdentity(options) {
 
   async function logout() {
     await ready;
-    return mutate(async () => {
+    return mutate(() => {
       if (closed || availability !== 'ready') throw failure('unavailable');
       challenge = undefined;
-      if (state.session) await signOut('user_logout', randomUUID());
+      if (session) signOut('user_logout', randomUUID());
       return status();
     });
   }
@@ -482,32 +472,36 @@ export function createLocalUacIdentity(options) {
       challenge = undefined;
       clearTimer(timer);
       await ready;
-      await writing;
-      state = { version: 1, owner: null, session: null };
+      await operations;
+      owner = null;
+      session = null;
       key?.fill(0);
     },
   };
 }
 
 /** @param {any} stored */
-function validStoredState(stored) {
-  if (stored?.version !== 1) return false;
-  const { owner, session } = stored;
-  if (owner === null) return session === null;
-  if (typeof owner?.empNo !== 'string' || !fold(owner.empNo)) return false;
-  if (session === null) return true;
-  return (
-    session?.empNo === owner.empNo &&
-    typeof session.token === 'string' &&
-    !!session.token &&
-    typeof session.clientIP === 'string' &&
-    [session.loginAt, session.verifiedAt, session.nextRevalidateAt].every(
-      (time) =>
-        Number.isSafeInteger(time) && time >= 0 && time <= 8640000000000000,
-    ) &&
-    Number.isInteger(session.attempt) &&
-    session.attempt >= 0
-  );
+function readOwner(stored) {
+  if (stored?.version === 1 && stored.owner === null && stored.session === null)
+    return null;
+  const binding = stored?.owner;
+  if (
+    typeof binding?.empNo !== 'string' ||
+    !fold(binding.empNo) ||
+    binding.empNo.length > 128
+  )
+    throw new Error('invalid UAC owner binding');
+  // Keep an old binding reserved without assigning its employee to today's
+  // configuration. A version-one vault has no evidence of the original domain.
+  if (stored.version === 1)
+    return { empNo: binding.empNo, identityDomain: null };
+  if (
+    stored.version !== 2 ||
+    typeof binding.identityDomain !== 'string' ||
+    !/^[a-f0-9]{64}$/.test(binding.identityDomain)
+  )
+    throw new Error('invalid UAC owner binding');
+  return { empNo: binding.empNo, identityDomain: binding.identityDomain };
 }
 
 /** @param {string} code */

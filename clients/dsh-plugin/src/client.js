@@ -150,6 +150,8 @@ window.__ModuleLoader__.load({
       uacUnavailable: '暂时无法完成操作，请稍后重试。',
       uacConfigInvalid: '本机扫码配置不完整或无效，请联系管理员检查配置。',
       uacStorageUnavailable: '本机身份存储不可用，请联系管理员。',
+      uacOwnerDomain:
+        '本机工号绑定与当前企业登录配置不一致，请联系管理员核对。',
       uacSignedIn: '已登录本机',
       uacLocalHint:
         '本机身份只用于本机 DSH；资源市场、Team 工具等平台功能仍需登录平台。',
@@ -351,6 +353,8 @@ window.__ModuleLoader__.load({
         'Local QR sign-in configuration is invalid. Contact your administrator.',
       uacStorageUnavailable:
         'Local identity storage is unavailable. Contact your administrator.',
+      uacOwnerDomain:
+        'The local owner binding does not match this organization’s sign-in configuration. Contact your administrator.',
       uacSignedIn: 'Signed in locally',
       uacLocalHint:
         'The local identity applies only to this DSH. Marketplace, Team tools and other platform features still require platform sign-in.',
@@ -1849,7 +1853,12 @@ window.__ModuleLoader__.load({
           return [desktop, action];
         }
         // Polls one authenticated local JSON status route. Errors become null.
-        const useLocalStatus = (path, interval, enabled) => {
+        const useLocalStatus = (
+          path,
+          interval,
+          enabled,
+          keepAvailability = false,
+        ) => {
           const [value, setValue] = React.useState(undefined);
           const [tick, bump] = React.useReducer((n) => n + 1, 0);
           const revision = React.useRef(0);
@@ -1880,7 +1889,13 @@ window.__ModuleLoader__.load({
                 .catch(() => null);
               reading = false;
               if (live && !disposed && revision.current === started)
-                setValue((previous) => next ?? previous);
+                setValue(
+                  (previous) =>
+                    next ??
+                    (keepAvailability && previous?.available
+                      ? { available: true, reason: 'status_unavailable' }
+                      : null),
+                );
             };
             void read();
             const timer = setInterval(read, interval);
@@ -1889,7 +1904,7 @@ window.__ModuleLoader__.load({
               controller.abort();
               clearInterval(timer);
             };
-          }, [tick, interval, enabled]);
+          }, [tick, interval, enabled, keepAvailability]);
           return [value, bump, update.current];
         };
         const postLocal = async (path, csrf, body = {}, signal) => {
@@ -2044,7 +2059,10 @@ window.__ModuleLoader__.load({
           const [error, setError] = React.useState('');
           const opened = React.useRef(false);
           const operation = React.useRef(0);
-          const challenge = uac.challenge;
+          const challenge =
+            uac.challenge?.state === 'authenticated'
+              ? undefined
+              : uac.challenge;
           const pending =
             challenge &&
             ['waiting', 'scanned', 'verifying'].includes(challenge.state);
@@ -2106,9 +2124,11 @@ window.__ModuleLoader__.load({
               tone: 'warning',
               title: t('localIdentity'),
               detail: t(
-                uac.reason === 'invalid'
-                  ? 'uacConfigInvalid'
-                  : 'uacStorageUnavailable',
+                {
+                  invalid: 'uacConfigInvalid',
+                  storage: 'uacStorageUnavailable',
+                  owner_domain: 'uacOwnerDomain',
+                }[uac.reason] ?? 'uacUnavailable',
               ),
               action: h(Action, { onClick: reload }, t('refresh')),
             });
@@ -2443,8 +2463,12 @@ window.__ModuleLoader__.load({
             'auriga/uac/status',
             15000,
             local,
+            true,
           );
           const platform = platformView(phase.boot, local ? shell : undefined);
+          const teamReady = local
+            ? shell?.loggedIn === true && shell.connected === true
+            : boot?.mode === 'managed' && boot.connection?.connected === true;
           const resourcesReady =
             !!boot &&
             (boot.mode === 'managed' ||
@@ -2666,8 +2690,7 @@ window.__ModuleLoader__.load({
             ),
             panel(
               'team',
-              boot?.connection?.connected &&
-                (boot.mode === 'managed' || shell?.loggedIn)
+              teamReady
                 ? h(
                     'div',
                     { className: 'auriga-card' },

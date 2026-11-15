@@ -5,6 +5,12 @@ import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createHash } from 'node:crypto';
+import { atomicWriteJson } from '../src/local/utils/atomic-write.js';
+import {
+  loadOrCreateSecretKey,
+  openSecret,
+  sealSecret,
+} from '../src/local/utils/secret-box.js';
 import { createUacAdapter, formEncode } from '../src/local/uac/adapter.js';
 import { createUacHttp } from '../src/local/uac/http.js';
 import { readUacConfig } from '../src/local/uac/config.js';
@@ -68,7 +74,7 @@ async function replica() {
     }
     const value = typeof next === 'function' ? await next(parsed) : next;
     res.writeHead(value.status ?? 200, { 'content-type': 'application/json' });
-    res.end(JSON.stringify(value.body));
+    res.end(value.rawBody ?? JSON.stringify(value.body));
   });
   await new Promise((r) => server.listen(0, '127.0.0.1', r));
   const origin = `http://127.0.0.1:${server.address().port}`;
@@ -202,9 +208,17 @@ test('local UAC: waiting → scanned → success, verify by client, correlation 
   assert.ok(text.includes(tokenHash('scan-token')));
   for (const entry of env.logs.filter((l) => l.stage === 'scan'))
     assert.equal(entry.parentCorrelationId, challenge.correlationId);
-  // Stored credentials are encrypted at rest.
+  // Only the employee binding is persisted, and it is encrypted.
   const raw = await readFile(join(env.directory, 'uac-local.json'), 'utf8');
   assert.ok(!raw.includes('renewed-token') && !raw.includes('A1001'));
+  const key = await loadOrCreateSecretKey(env.directory, {
+    hasEncryptedData: true,
+  });
+  const durable = JSON.parse(openSecret(key, JSON.parse(raw)));
+  assert.deepEqual(Object.keys(durable), ['version', 'owner']);
+  assert.equal(durable.version, 2);
+  assert.equal(durable.owner.empNo, 'A1001');
+  assert.match(durable.owner.identityDomain, /^[0-9a-f]{64}$/);
 });
 
 test('local UAC: expired, denied and token-rejected branches never create a session', async (t) => {
@@ -278,6 +292,7 @@ test('local UAC: revalidation renews, retries faults, then returns to scan', asy
   const s = env.identity.status();
   assert.equal(s.state, 'signed_out');
   assert.equal(s.lastOutcome, 'revalidation_unreachable');
+  assert.equal(s.challenge, undefined);
   // Rejection signs out immediately.
   await loginFlow(env);
   env.upstream.script.verify = [
@@ -286,13 +301,202 @@ test('local UAC: revalidation renews, retries faults, then returns to scan', asy
   await env.time.advance(600_000);
   assert.equal(env.identity.status().state, 'signed_out');
   assert.equal(env.identity.status().lastOutcome, 'revalidation_rejected');
-  // Restart keeps the owner binding and the persisted schedule.
+  assert.equal(env.identity.status().challenge, undefined);
+  // A restart retains the owner, but requires a fresh scan.
   await loginFlow(env);
+  await env.identity.close();
+  const before = env.upstream.calls.length;
   const restarted = env.make();
   await restarted.ready;
-  assert.equal(restarted.status().state, 'authenticated');
+  assert.equal(restarted.status().state, 'signed_out');
   assert.equal(restarted.status().ownerBound, true);
+  await env.time.advance(600_000);
+  assert.equal(env.upstream.calls.length, before);
+  assert.deepEqual((await loginFlow({ ...env, identity: restarted })).states, [
+    'waiting',
+    'scanned',
+    'authenticated',
+  ]);
   await restarted.close();
+});
+
+for (const outcome of [
+  'user_logout',
+  'revalidation_rejected',
+  'revalidation_unreachable',
+])
+  test(
+    'local UAC: write failure cannot restore an invalidated session: ' +
+      outcome,
+    async (t) => {
+      let writable = false;
+      let writes = 0;
+      const env = await setup(t, {
+        async writeOwner(path, value) {
+          writes++;
+          if (!writable)
+            throw Object.assign(new Error('synthetic disk fault'), {
+              code: 'EACCES',
+            });
+          await atomicWriteJson(path, value);
+        },
+      });
+      assert.equal((await loginFlow(env)).states.at(-1), 'failed');
+      assert.equal(env.identity.status().state, 'signed_out');
+      assert.equal(env.identity.status().ownerBound, false);
+      writable = true;
+      await loginFlow(env);
+      assert.equal(env.identity.status().state, 'authenticated');
+      const path = join(env.directory, 'uac-local.json');
+      const saved = await readFile(path, 'utf8');
+      writable = false;
+
+      if (outcome === 'user_logout') await env.identity.logout();
+      else {
+        env.upstream.script.verify = [
+          outcome === 'revalidation_rejected'
+            ? { body: { code: { code: '0000' }, bo: { code: '9999' } } }
+            : { status: 502, body: {} },
+        ];
+        await env.time.advance(600_000);
+        if (outcome === 'revalidation_unreachable')
+          await env.time.advance(30_000);
+      }
+      assert.equal(env.identity.status().state, 'signed_out');
+      assert.equal(env.identity.status().lastOutcome, outcome);
+      assert.equal(env.identity.status().challenge, undefined);
+      assert.equal(writes, 2);
+      assert.equal(await readFile(path, 'utf8'), saved);
+      await env.identity.close();
+
+      const before = env.upstream.calls.length;
+      const restarted = env.make();
+      await restarted.ready;
+      assert.deepEqual(restarted.status(), {
+        available: true,
+        state: 'signed_out',
+        ownerBound: true,
+      });
+      await env.time.advance(600_000);
+      assert.equal(env.upstream.calls.length, before);
+      await restarted.close();
+    },
+  );
+
+test('local UAC: legacy ciphertext cannot restore or move an unscoped owner', async (t) => {
+  const env = await setup(t, {
+    writeOwner: async () => {
+      throw new Error('synthetic disk fault');
+    },
+  });
+  await env.identity.close();
+  const key = await loadOrCreateSecretKey(env.directory);
+  const now = env.time.now();
+  const path = join(env.directory, 'uac-local.json');
+  const legacy = sealSecret(
+    key,
+    JSON.stringify({
+      version: 1,
+      owner: { empNo: 'A1001' },
+      session: {
+        empNo: 'A1001',
+        token: 'legacy-synthetic-token',
+        clientIP: '',
+        loginAt: now,
+        verifiedAt: now,
+        nextRevalidateAt: now + 600_000,
+        attempt: 0,
+      },
+    }),
+  );
+  await writeFile(path, JSON.stringify(legacy));
+  const current = env.make();
+  await current.ready;
+  assert.deepEqual(current.status(), {
+    available: true,
+    reason: 'owner_domain',
+    state: 'signed_out',
+    ownerBound: true,
+  });
+  await assert.rejects(current.start(), { code: 'unavailable' });
+  await env.time.advance(600_000);
+  assert.equal(env.upstream.calls.length, 0);
+  assert.equal(await readFile(path, 'utf8'), JSON.stringify(legacy));
+  assert.doesNotMatch(JSON.stringify(env.logs), /legacy-synthetic-token|A1001/);
+  await current.close();
+});
+
+test('local UAC: same identity domain accepts transport changes; other domains cannot reuse the owner', async (t) => {
+  const env = await setup(t);
+  await loginFlow(env);
+  await env.identity.close();
+  const other = await replica();
+  t.after(() => other.close());
+  const adapterPath = join(env.directory, 'uac', 'adapter.json');
+  const providerPath = join(env.directory, 'uac', 'provider.json');
+  const adapter = settings(env.upstream.origin);
+  adapter.qr.timeoutSeconds = 8;
+  adapter.allowedDestinations[0].addresses.push('::1');
+  await writeFile(adapterPath, JSON.stringify(adapter));
+  await writeFile(
+    providerPath,
+    JSON.stringify({
+      baseUrl: env.upstream.origin,
+      systemCode: 'SYS1',
+      revalidation: { intervalSeconds: 300 },
+    }),
+  );
+  const same = env.make();
+  await same.ready;
+  assert.deepEqual(same.status(), {
+    available: true,
+    state: 'signed_out',
+    ownerBound: true,
+  });
+  assert.deepEqual((await loginFlow({ ...env, identity: same })).states, [
+    'waiting',
+    'scanned',
+    'authenticated',
+  ]);
+  await same.close();
+
+  const before = env.upstream.calls.length;
+  for (const change of [
+    'service address',
+    'system identifier',
+    'protocol mapping',
+  ]) {
+    const origin =
+      change === 'service address' ? other.origin : env.upstream.origin;
+    const next = settings(origin);
+    if (change === 'protocol mapping')
+      next.qr.contentTemplate = 'changed:${x}:${y}';
+    await writeFile(adapterPath, JSON.stringify(next));
+    await writeFile(
+      providerPath,
+      JSON.stringify({
+        baseUrl: origin,
+        systemCode: change === 'system identifier' ? 'SYS2' : 'SYS1',
+      }),
+    );
+    const moved = env.make();
+    await moved.ready;
+    assert.deepEqual(
+      moved.status(),
+      {
+        available: true,
+        reason: 'owner_domain',
+        state: 'signed_out',
+        ownerBound: true,
+      },
+      change,
+    );
+    await assert.rejects(moved.start(), { code: 'unavailable' });
+    await env.time.advance(600_000);
+    assert.equal(env.upstream.calls.length, before);
+    assert.equal(other.calls.length, 0);
+    await moved.close();
+  }
 });
 
 test('local UAC: works with the platform offline and hides without private config', async (t) => {
@@ -405,6 +609,111 @@ test('local UAC config: platform-isomorphic adapter.json, strict placement and v
     }).validate(),
   );
   assert.equal(formEncode("a b!*'~"), 'a+b%21*%27%7E');
+});
+
+test('local UAC: incomplete, malformed, or ambiguous response mappings disable scan', async (t) => {
+  const env = await setup(t);
+  await env.identity.close();
+  for (const modify of [
+    (value) => delete value.qr.success,
+    (value) => delete value.qr.waiting,
+    (value) => delete value.qr.scanned,
+    (value) => delete value.qr.tokenPointer,
+    (value) => delete value.qr.empNoPointer,
+    (value) => (value.qr.statusPointer = 'state'),
+    (value) => (value.qr.tokenPointer = '/token~2'),
+    (value) => (value.qr.statusPointer = value.qr.tokenPointer),
+    (value) => (value.qr.scanned = value.qr.waiting),
+    (value) => (value.qr.success = ' '),
+    (value) => delete value.department.successValue,
+    (value) => (value.department.successPointer = null),
+    (value) => (value.department.listPointer = ''),
+    (value) => delete value.department.empNoPointer,
+    (value) => (value.department.departmentPointers = []),
+  ]) {
+    const value = settings(env.upstream.origin);
+    modify(value);
+    await writeFile(
+      join(env.directory, 'uac', 'adapter.json'),
+      JSON.stringify(value),
+    );
+    const invalid = env.make();
+    await invalid.ready;
+    assert.equal(invalid.status().available, true);
+    assert.equal(invalid.status().reason, 'invalid');
+    assert.equal(invalid.status().state, 'signed_out');
+    await assert.rejects(invalid.start(), { code: 'unavailable' });
+    await invalid.close();
+  }
+  assert.equal(env.upstream.calls.length, 0);
+});
+
+test('local UAC: missing, malformed, or duplicate upstream status never reaches verify', async (t) => {
+  const env = await setup(t);
+  for (const [response, reason] of [
+    [{ body: { token: 'synthetic', employee: 'A1001' } }, 'invalid_scan_state'],
+    [
+      { body: { state: '', token: 'synthetic', employee: 'A1001' } },
+      'invalid_scan_state',
+    ],
+    [
+      { body: { state: true, token: 'synthetic', employee: 'A1001' } },
+      'invalid_scan_state',
+    ],
+    [
+      {
+        rawBody:
+          '{"state":"denied","state":"verified","token":"synthetic","employee":"A1001"}',
+      },
+      'invalid_response',
+    ],
+  ]) {
+    env.upstream.script.scan = [response];
+    const challenge = await env.identity.start();
+    const result = await env.identity.poll(challenge.id);
+    assert.equal(result.challenge.state, 'failed');
+    assert.equal(result.challenge.failureCode, reason);
+    assert.equal(result.state, 'signed_out');
+  }
+  assert.ok(env.upstream.calls.every((call) => call.path === '/scan'));
+  env.upstream.script.scan = [{ body: { state: 'waiting', unrelated: 0.5 } }];
+  const waiting = await env.identity.start();
+  assert.equal(
+    (await env.identity.poll(waiting.id)).challenge.state,
+    'waiting',
+  );
+});
+
+test('local UAC: department revalidation requires explicit success and a matching row', async (t) => {
+  const env = await setup(t);
+  await env.identity.close();
+  await writeFile(
+    join(env.directory, 'uac', 'provider.json'),
+    JSON.stringify({
+      baseUrl: env.upstream.origin,
+      systemCode: 'SYS1',
+      revalidation: { strategy: 'department', intervalSeconds: 60 },
+    }),
+  );
+  const identity = env.make();
+  await identity.ready;
+  await loginFlow({ ...env, identity });
+  const approved = {
+    rows: [{ employee: 'A1001', department: 'Fixture team' }],
+  };
+  env.upstream.script.info = [{ body: { ok: true, ...approved } }];
+  await env.time.advance(60_000);
+  assert.equal(identity.status().state, 'authenticated');
+  assert.equal(
+    identity.status().verifiedAt,
+    new Date(env.time.now()).toISOString(),
+  );
+  env.upstream.script.info = [{ body: approved }];
+  await env.time.advance(60_000);
+  assert.equal(identity.status().state, 'signed_out');
+  assert.equal(identity.status().lastOutcome, 'revalidation_rejected');
+  assert.equal(identity.status().challenge, undefined);
+  await identity.close();
 });
 
 test('local UAC http: resolved address must be allowlisted; redirects are not followed', async (t) => {
