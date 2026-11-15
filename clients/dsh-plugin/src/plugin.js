@@ -21,6 +21,8 @@ import { installNetworkDiagnosticSink } from './network/diagnostics.js';
 import { installObservability, logEvent } from './observability/index.js';
 import { installResourceChannel } from './resources/channel.js';
 import { createMemberRoutes } from './resources/member-routes.js';
+import { createLocalUacIdentity } from './local/uac/session.js';
+import { createUacRoutes } from './local/uac/routes.js';
 
 export const name = 'auriga-dsh';
 export const inject = ['webServer', 'connection'];
@@ -33,7 +35,7 @@ export async function apply(ctx, config) {
   installNetworkDiagnosticSink(ctx);
   installObservability(ctx);
   const mode = selectMode();
-  let binding, profileOwner, memberResources, managedRuntime;
+  let binding, profileOwner, memberResources, managedRuntime, localUac;
   installBaseToolsHost(ctx, () =>
     mode === 'managed' ? managedRuntime?.baseTools : binding?.runtime.baseTools,
   );
@@ -141,6 +143,21 @@ export async function apply(ctx, config) {
           }),
         'auriga-dsh: persistent login route',
       );
+      const uacRoutes = createUacRoutes({
+        auth: admission.nativeAuth,
+        sameOrigin: (req, write) => admission.sameOrigin(req, write),
+        identity: () => localUac,
+        platformEmployee: () => current()?.runtime.platformEmployee?.(),
+      });
+      ctx.effect(
+        () =>
+          ctx.webServer.register({
+            kind: 'prefix',
+            path: '/auriga/uac',
+            handler: uacRoutes,
+          }),
+        'auriga-dsh: local UAC identity',
+      );
       ctx.effect(
         () =>
           ctx.webServer.register({
@@ -176,6 +193,19 @@ export async function apply(ctx, config) {
           throw new Error(
             'auriga-dsh: host profile directory required for persistent state',
           );
+        // Client-owned UAC identity: independent of platform configuration and reachability.
+        const uac = createLocalUacIdentity({
+          directory: join(profile.dir, 'auriga-connect'),
+          log: (level, message, fields) => logEvent(level, message, fields),
+        });
+        localUac = uac;
+        profileCtx.effect(
+          () => () => {
+            if (localUac === uac) localUac = undefined;
+            return uac.close();
+          },
+          'auriga-dsh: local UAC lifetime',
+        );
         const resources = createMemberRoutes({
           directory: profile.dir,
           ctx: profileCtx,

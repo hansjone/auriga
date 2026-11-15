@@ -269,19 +269,41 @@ for (const delayed of ['none', 'asset', 'status']) {
 
 test('local connection state drives the real shell entry and endpoint/acceptance settings', async () => {
   for (const connected of [true, false]) {
-    const host = surfaceHost(async () => response(200, localBoot(connected)));
+    const host = surfaceHost(async (url) =>
+      String(url).endsWith('/auriga/shell/status')
+        ? response(200, {
+            ...localBoot(connected),
+            configured: true,
+            loggedIn: true,
+            connected,
+            platform: 'authenticated',
+            brokerAvailable: true,
+            csrf: 'local-csrf',
+            account: { subject: 'alice' },
+          })
+        : response(200, localBoot(connected)),
+    );
     try {
       const main = host.mount('main'),
         settings = host.mount('settings.section');
       await flush();
+      const tabs = [...main.root.querySelectorAll('[role="tab"]')];
+      assert.deepEqual(
+        tabs.map((tab) => tab.textContent),
+        ['概览', '资源市场', '我的资源', 'Team 工具', '收件箱', '设置'],
+      );
+      tabs[3].click();
+      await flush();
+      await flush();
       const start = [...main.root.querySelectorAll('button')].find(
         (b) => b.textContent === '在会话中使用 Team 工具',
       );
-      assert.ok(start);
-      assert.equal(start.disabled, !connected);
+      // Team tools render only with a connected platform; otherwise the tab
+      // shows the platform state and the next step instead of a dead button.
+      assert.equal(!!start, connected, main.root.textContent);
       assert.match(
         main.root.textContent,
-        connected ? /平台已连接/ : /平台连接暂不可用/,
+        connected ? /平台已连接/ : /已登录，通信未就绪.*前往概览/,
       );
       assert.match(
         settings.root.textContent,
@@ -519,6 +541,193 @@ test('connect resource context mounts the authenticated Node catalogue proxy', a
     main.close();
     host.dispose();
   } finally {
+    host.close();
+  }
+});
+
+test('local UAC scan works without a platform: waiting → scanned → signed in, hidden when not configured', async () => {
+  for (const configured of [true, false]) {
+    const writes = [];
+    const challenge = (state) => ({
+      id: '00000000-0000-4000-8000-0000000000aa',
+      state,
+      expiresAt: new Date(Date.now() + 60000).toISOString(),
+      qr: { size: 29, path: 'M4 4h1v1h-1z' },
+      correlationId: '00000000-0000-4000-8000-0000000000bb',
+    });
+    let uac = {
+      available: configured,
+      state: 'signed_out',
+      ownerBound: false,
+      csrf: 'uac-csrf',
+      platformLink: 'none',
+    };
+    const replies = [
+      { ...uac, challenge: challenge('waiting') },
+      { ...uac, challenge: challenge('scanned') },
+      {
+        ...uac,
+        state: 'authenticated',
+        ownerBound: true,
+        empNo: 'A1001',
+        loginAt: new Date(0).toISOString(),
+        verifiedAt: new Date(0).toISOString(),
+        revalidation: 'ok',
+        challenge: { ...challenge('authenticated'), qr: undefined },
+      },
+    ];
+    const host = surfaceHost(async (url, init = {}) => {
+      const path = new URL(String(url)).pathname;
+      if (path.endsWith('/auriga/uac/status')) return response(200, uac);
+      if (path.includes('/auriga/uac/')) {
+        writes.push({ path, init });
+        uac = replies.shift();
+        return response(200, uac);
+      }
+      if (path.endsWith('/auriga/shell/status'))
+        return response(200, {
+          available: true,
+          configured: false,
+          loggedIn: false,
+        });
+      return response(200, {
+        ...localBoot(false),
+        mode: 'standalone',
+        status: 'unconfigured',
+        connection: undefined,
+      });
+    });
+    try {
+      const main = host.mount('main');
+      await flush();
+      await flush();
+      const text = () => main.root.textContent;
+      assert.match(text(), /未配置平台/);
+      if (!configured) {
+        assert.doesNotMatch(text(), /本机身份|获取二维码/);
+        main.close();
+        host.dispose();
+        continue;
+      }
+      assert.match(text(), /本机身份.*UAC 扫码/);
+      assert.ok(main.root.querySelector('svg[role="img"] path'));
+      assert.match(text(), /请扫码登录/);
+      assert.equal(writes[0].init.headers['X-Auriga-CSRF'], 'uac-csrf');
+      host.expire(2000);
+      await flush();
+      assert.match(text(), /已扫码，请在手机上确认/);
+      host.expire(2000);
+      await flush();
+      assert.match(text(), /已登录本机.*工号A1001/);
+      assert.equal(main.root.querySelector('svg[role="img"]'), null);
+      assert.deepEqual(
+        writes.map((w) => w.path.split('/').pop()),
+        ['start', 'poll', 'poll'],
+      );
+      assert.equal(JSON.parse(writes[1].init.body).id, challenge('x').id);
+      const authenticated = uac;
+      for (const lastOutcome of [
+        'revalidation_rejected',
+        'revalidation_unreachable',
+        'user_logout',
+      ]) {
+        uac = {
+          ...authenticated,
+          state: 'signed_out',
+          lastOutcome,
+          // An older response can retain the previous successful challenge.
+          challenge: challenge('authenticated'),
+        };
+        host.expire(15000);
+        await flush();
+        assert.doesNotMatch(text(), /登录成功|已登录本机|A1001/);
+        assert.equal(main.root.querySelector('svg[role="img"]'), null);
+        assert.ok(
+          [...main.root.querySelectorAll('button')].some(
+            (button) => button.textContent === '获取二维码',
+          ),
+        );
+        assert.match(
+          text(),
+          lastOutcome === 'user_logout'
+            ? /使用公司 App 扫码登录本机/
+            : /登录已失效，请重新扫码/,
+        );
+      }
+      main.close();
+      host.dispose();
+    } finally {
+      host.close();
+    }
+  }
+});
+
+test('Team availability follows the live authenticated shell without reloading bootstrap', async () => {
+  const status = {
+    available: true,
+    configured: true,
+    brokerAvailable: true,
+    loggedIn: false,
+    connected: false,
+    platform: 'signed_out',
+  };
+  let shell = response(200, status);
+  let bootstraps = 0;
+  const host = surfaceHost(async (url) => {
+    const path = new URL(url).pathname;
+    if (path.endsWith('/auriga/shell/status')) return shell;
+    if (path.endsWith('/auriga/uac/status'))
+      return response(200, { available: false });
+    if (path.endsWith('/auriga/bootstrap')) bootstraps++;
+    return response(200, localBoot(false));
+  });
+  const main = host.mount('main');
+  try {
+    await flush();
+    main.root.querySelector('#auriga-tab-team').click();
+    await flush();
+    const team = main.root.querySelector('#auriga-panel-team');
+    const overview = main.root.querySelector('#auriga-panel-overview');
+    const assertState = (connected, state) => {
+      assert.equal(team.hidden, false);
+      assert.equal(
+        [...team.querySelectorAll('button')].some(
+          (button) =>
+            button.textContent === '在会话中使用 Team 工具' && !button.disabled,
+        ),
+        connected,
+      );
+      assert.match(overview.textContent, state);
+      assert.match(team.textContent, state);
+    };
+    const update = async (next) => {
+      shell = next;
+      host.expire(4000);
+      await flush();
+    };
+    const signedIn = { ...status, loggedIn: true, platform: 'authenticated' };
+    const connected = { ...signedIn, connected: true };
+    assertState(false, /未登录平台/);
+    await update(response(200, signedIn));
+    assertState(false, /已登录，通信未就绪/);
+    await update(response(200, connected));
+    assertState(true, /平台已连接/);
+    await update(response(200, { ...signedIn, communication: 'unavailable' }));
+    assertState(false, /已登录，通信未就绪/);
+    await update(response(200, connected));
+    assertState(true, /平台已连接/);
+    await update(
+      response(200, { ...status, platform: 'revoked', connected: true }),
+    );
+    assertState(false, /未登录平台/);
+    await update(response(200, connected));
+    assertState(true, /平台已连接/);
+    await update(response(503, {}));
+    assertState(false, /平台不可达/);
+    assert.equal(bootstraps, 1);
+  } finally {
+    main.close();
+    host.dispose();
     host.close();
   }
 });

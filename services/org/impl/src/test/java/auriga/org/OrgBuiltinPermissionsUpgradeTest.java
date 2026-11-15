@@ -20,6 +20,8 @@ class OrgBuiltinPermissionsUpgradeTest {
   @Test
   void legacyBuiltinRolesGainCurrentPermissionsWithoutChangingCustomRoles() {
     assertTrue(M3PermissionCatalog.adminOnly("iam.network.manage"));
+    var identityProviderPermissions = Set.of("iam.providers.read", "iam.providers.write");
+    identityProviderPermissions.forEach(key -> assertTrue(M3PermissionCatalog.adminOnly(key), key));
     assertEquals(
         Set.of("owner", "admin"),
         M3PermissionCatalog.all().stream()
@@ -56,6 +58,16 @@ class OrgBuiltinPermissionsUpgradeTest {
                           org.mockito.Mockito.mock(auriga.common.events.EventPublisher.class),
                           java.time.Clock.systemUTC())
                       .initializeBuiltinPermissions();
+                  assertEquals(
+                      identityProviderPermissions,
+                      Set.copyOf(
+                          store
+                              .jdbc()
+                              .queryForList(
+                                  "SELECT key FROM permission WHERE key IN (?,?)",
+                                  String.class,
+                                  "iam.providers.read",
+                                  "iam.providers.write")));
                   for (String role : new String[] {"owner", "admin", "member", "external"}) {
                     String[] permissions =
                         store
@@ -70,6 +82,12 @@ class OrgBuiltinPermissionsUpgradeTest {
                         Set.of("owner", "admin").contains(role),
                         actual.contains("iam.network.manage"),
                         role);
+                    for (String permission : identityProviderPermissions) {
+                      assertEquals(
+                          role.equals("owner"),
+                          actual.contains(permission),
+                          role + ": " + permission);
+                    }
                   }
                   assertArrayEquals(
                       new String[] {"org.members.read"},

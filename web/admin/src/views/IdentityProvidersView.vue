@@ -12,6 +12,8 @@ import { isApiError, pickLocalized } from '@auriga/shared';
 import { useAdminI18n } from '../admin/messages';
 import { useOrgActions, orgError } from '../admin/useOrgActions';
 import ActionConfirm from '../admin/ActionConfirm.vue';
+import UacSettings from '../admin/UacSettings.vue';
+import { readResource } from '../api';
 import {
   providersApi,
   type Provider,
@@ -38,6 +40,7 @@ const tab = ref('providers');
 const search = ref('');
 const selectedId = ref('');
 const detail = shallowRef<Provider>();
+const detailTag = ref<string | null>(null);
 const detailLoading = ref(false);
 const detailError = ref('');
 const editor = ref(false);
@@ -97,6 +100,7 @@ function closeDetail() {
   ++detailEpoch;
   selectedId.value = '';
   detail.value = undefined;
+  detailTag.value = null;
   detailLoading.value = false;
   detailError.value = '';
   clearEditor();
@@ -176,10 +180,14 @@ async function select(id: string) {
   detailLoading.value = true;
   try {
     if (!(await access.authorize()) || request !== detailEpoch) return false;
-    const result = await providersApi.get(id, lifetime.signal);
+    const result = await readResource<Provider>(
+      `/api/iam/v1/admin/providers/${encodeURIComponent(id)}`,
+      lifetime.signal,
+    );
     if (!access.isAlive() || request !== detailEpoch || !canRead.value)
       return false;
-    detail.value = result;
+    detail.value = result.data;
+    detailTag.value = result.etag;
     return true;
   } catch (e) {
     if (access.isAlive() && request === detailEpoch)
@@ -192,7 +200,20 @@ async function select(id: string) {
 }
 onMounted(() => void load());
 function changeConnector() {
-  fields.value = configForm(currentConnector.value, {}, true);
+  fields.value =
+    connectorType.value === 'uac'
+      ? { fields: [], unsupported: [], createBlocked: false }
+      : configForm(currentConnector.value, {}, true);
+  if (connectorType.value === 'uac') enabled.value = false;
+}
+function updateUacState(value: boolean, etag: string | null) {
+  if (!detail.value) return;
+  const id = detail.value.id;
+  detail.value = { ...detail.value, enabled: value };
+  detailTag.value = etag;
+  providers.value = providers.value.map((p) =>
+    p.id === id ? { ...p, enabled: value } : p,
+  );
 }
 function newProvider() {
   if (
@@ -226,7 +247,10 @@ function editProvider() {
   connectorType.value = detail.value.connectorType;
   display.value = displayDraft(detail.value);
   enabled.value = detail.value.enabled;
-  fields.value = configForm(detailConnector.value, detail.value.config, false);
+  fields.value =
+    connectorType.value === 'uac'
+      ? { fields: [], unsupported: [], createBlocked: false }
+      : configForm(detailConnector.value, detail.value.config, false);
   editor.value = true;
   error.value = '';
   notice.value = '';
@@ -271,13 +295,23 @@ function save() {
       !available.value.some((c) => c.descriptor.type === connectorType.value))
   )
     return;
-  const body = providerBody(
+  const candidate = providerBody(
     fields.value,
     display.value,
     enabled.value,
     connectorType.value,
     original,
   );
+  const body: ProviderInput | ProviderPatch =
+    original?.connectorType === 'uac'
+      ? candidate.display
+        ? { display: candidate.display }
+        : {}
+      : candidate;
+  if (creating.value && connectorType.value === 'uac') {
+    body.enabled = false;
+    body.config = {};
+  }
   if (!Object.keys(body).length) {
     notice.value = t('idpNoChanges');
     return;
@@ -299,6 +333,11 @@ function save() {
   const name = display.value.nameEn;
   const epoch = editEpoch;
   const signal = writes.signal;
+  const tag = original?.connectorType === 'uac' ? detailTag.value : undefined;
+  if (original?.connectorType === 'uac' && !tag) {
+    error.value = '未取得配置版本，请重新加载后保存。';
+    return;
+  }
   access.ask(
     original
       ? t('idpSaveConfirm', { name, changes })
@@ -313,12 +352,26 @@ function save() {
         return;
       try {
         const result = original
-          ? await providersApi.patch(original.id, body as ProviderPatch, signal)
+          ? await providersApi.patch(
+              original.id,
+              body as ProviderPatch,
+              signal,
+              tag ?? undefined,
+            )
           : await providersApi.create(body as ProviderInput, signal);
         if (!access.isAlive() || signal.aborted || !canRead.value) return;
         await readAfterWrite(result.id, t('idpSaved'));
       } catch (e) {
         if (!access.isAlive() || signal.aborted) return;
+        if (
+          original?.connectorType === 'uac' &&
+          isApiError(e) &&
+          e.status === 412
+        ) {
+          error.value = '配置已被他人修改，请核对重新加载的详情后再编辑。';
+          await select(original.id);
+          return;
+        }
         // Never retain a newly entered secret after any unconfirmed write response.
         fields.value.fields
           .filter((f) => f.secret)
@@ -547,8 +600,14 @@ function cancelConfirm() {
           <dt>{{ t('idpCallback') }}</dt>
           <dd>{{ detail.callbackUrl }}</dd>
         </dl>
-        <h3>{{ t('idpConfig') }}</h3>
-        <dl class="resource-facts">
+        <UacSettings
+          v-if="detail.connectorType === 'uac'"
+          :key="detail.id"
+          :provider-id="detail.id"
+          @saved="updateUacState"
+        />
+        <h3 v-if="detail.connectorType !== 'uac'">{{ t('idpConfig') }}</h3>
+        <dl v-if="detail.connectorType !== 'uac'" class="resource-facts">
           <template
             v-for="field in readFields.fields"
             :key="field.path.join('.')"
@@ -568,7 +627,10 @@ function cancelConfirm() {
             </dd></template
           >
         </dl>
-        <p v-if="readFields.unsupported.length" class="resource-notice">
+        <p
+          v-if="detail.connectorType !== 'uac' && readFields.unsupported.length"
+          class="resource-notice"
+        >
           {{
             t('idpSchemaReadonly', { paths: readFields.unsupported.join(', ') })
           }}
@@ -594,6 +656,7 @@ function cancelConfirm() {
         }}</ElButton
         ><template v-if="detail && canWrite && !builtin(detail)"
           ><ElButton
+            v-if="detail.connectorType !== 'uac'"
             :disabled="locked || readback"
             data-testid="toggle-provider"
             @click="toggle"
@@ -649,7 +712,7 @@ function cancelConfirm() {
             v-model="display[key as keyof typeof display]"
             :disabled="locked"
             :data-testid="`display-${key}`" /></label
-        ><label
+        ><label v-if="connectorType !== 'uac'"
           ><input
             v-model="enabled"
             :disabled="locked"
@@ -658,8 +721,13 @@ function cancelConfirm() {
           />
           {{ t('idpEnabled') }}</label
         >
-        <h3>{{ t('idpConfig') }}</h3>
-        <p class="resource-muted">{{ t('idpSecretHelp') }}</p>
+        <p v-if="creating && connectorType === 'uac'" class="resource-muted">
+          UAC 将以关闭状态创建，请在详情中配置并启用。
+        </p>
+        <h3 v-if="connectorType !== 'uac'">{{ t('idpConfig') }}</h3>
+        <p v-if="connectorType !== 'uac'" class="resource-muted">
+          {{ t('idpSecretHelp') }}
+        </p>
         <div
           v-for="field in fields.fields"
           :key="field.path.join('.')"

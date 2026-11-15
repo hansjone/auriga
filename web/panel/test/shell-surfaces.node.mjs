@@ -5,6 +5,30 @@ import { surfaceHost, flush, boot, response } from './shell-host.mjs';
 const button = (root, label) =>
   [...root.querySelectorAll('button')].find((el) => el.textContent === label);
 
+test('the local sign-in launch fragment selects the existing Auriga overview', async () => {
+  for (const hash of ['', '#auriga=login-other', '#auriga=login']) {
+    const host = surfaceHost(async () => response(), { hash });
+    try {
+      assert.deepEqual(
+        host.selections,
+        hash === '#auriga=login' ? ['auriga-team'] : [],
+      );
+      if (host.selections.length) {
+        const main = host.mount('main');
+        await flush();
+        assert.equal(
+          main.root.querySelector('#auriga-panel-overview').hidden,
+          false,
+        );
+        main.close();
+      }
+    } finally {
+      host.dispose();
+      host.close();
+    }
+  }
+});
+
 test('desktop update polling refreshes the native banner and releases its interval on unmount', async () => {
   let desktop = null;
   let reads = 0;
@@ -31,10 +55,7 @@ test('desktop update polling refreshes the native banner and releases its interv
     await flush();
     assert.equal(reads, 2);
     assert.match(main.root.textContent, /当前版本已停用.*2\.0\.0/);
-    assert.equal(
-      main.root.querySelector('auriga-team-panel').style.display,
-      'none',
-    );
+    assert.equal(main.root.querySelector('auriga-team-panel').hidden, true);
     await button(main.root, '更新').onclick();
     assert.deepEqual(actions, ['update']);
     desktop = {
@@ -91,11 +112,27 @@ test('sidebar label uses the native SlotLabel getter contract across host locale
     // Native resolveSlotLabel reads a string verbatim or invokes its getter;
     // the registration's locale namespace never translates a string label.
     const read = () => (typeof label === 'function' ? label() : label);
-    assert.equal(read(), 'Auriga DSH');
+    assert.equal(read(), 'Auriga');
     host.locale('en');
-    assert.equal(read(), 'Auriga DSH');
+    assert.equal(read(), 'Auriga');
     host.locale('zh-CN');
-    assert.equal(read(), 'Auriga DSH');
+    assert.equal(read(), 'Auriga');
+    // The public sidebar brand slots carry the Auriga DSH mark and name.
+    const mark = host.registrations.get('sidebar.brand.mark');
+    const name = host.registrations.get('sidebar.brand.name');
+    assert.equal(mark.meta.name, 'sidebar.brand.mark');
+    assert.equal(mark.meta.priority, -1);
+    assert.equal(name.meta.name, 'sidebar.brand.name');
+    assert.equal(name.meta.priority, -1);
+    const glyph = mark.Component({ size: 24 });
+    assert.equal(glyph.type, 'svg');
+    assert.equal(glyph.props.width, 24);
+    assert.equal(glyph.props['aria-hidden'], true);
+    const text = (node) =>
+      typeof node === 'string'
+        ? node
+        : (node?.children ?? []).map(text).join(' ');
+    assert.equal(text(name.Component({})), 'Auriga DSH');
     for (const [size, active] of [
       [16, false],
       [18, true],
@@ -252,7 +289,13 @@ test('independent native slots: settings retains trusted bootstrap and versions 
   try {
     assert.deepEqual(
       [...host.registrations.keys()],
-      ['sidebar.panellist', 'main', 'settings.section'],
+      [
+        'sidebar.panellist',
+        'sidebar.brand.mark',
+        'sidebar.brand.name',
+        'main',
+        'settings.section',
+      ],
     );
     assert.equal(
       host.registrations.get('main').meta.key,
@@ -291,8 +334,8 @@ test('independent native slots: settings retains trusted bootstrap and versions 
     assert.equal(calls[0].init.redirect, 'error');
     settings.close();
     host.dispose();
-    assert.equal(host.counts.registered, 3);
-    assert.equal(host.counts.unregistered, 3);
+    assert.equal(host.counts.registered, 5);
+    assert.equal(host.counts.unregistered, 5);
     assert.equal(host.registrations.size, 0);
     assert.equal(host.scheme.size, 0);
     assert.equal(host.subscriptions.size, 0);
@@ -323,7 +366,23 @@ test('opening, refreshing and closing host settings preserves main resource elem
     assert.equal(panel.context, context);
     assert.equal(panel.dataset.resourceTab, 'mine');
     assert.equal(panel.dataset.search, 'retained');
-    assert.equal(main.root.querySelector('[role="tab"]'), null);
+    // Main owns one native tab list; resource tabs live in it, not in the element.
+    assert.equal(main.root.querySelectorAll('[role="tablist"]').length, 1);
+    assert.equal(panel.getAttribute('tabs'), 'host');
+    for (const tab of main.root.querySelectorAll('[role="tab"]')) {
+      tab.click();
+      await flush();
+      const pane = main.root.querySelector(
+        '#' + tab.getAttribute('aria-controls'),
+      );
+      assert.equal(pane.getAttribute('aria-labelledby'), tab.id);
+      assert.equal(pane.hidden, false);
+      assert.equal(
+        main.root.querySelectorAll('[role="tabpanel"]:not([hidden])').length,
+        1,
+      );
+      assert.equal(main.root.querySelector('auriga-team-panel'), panel);
+    }
     main.close();
     assert.equal(panel.context, undefined);
     host.dispose();

@@ -593,9 +593,17 @@ export async function createConnectRuntime({
     prepare(/** @type {any} */ req) {
       return { body: this.status(req) };
     },
+    /** Platform-verified employee number, used only to show local UAC association. */
+    platformEmployee() {
+      const s = broker.state.current();
+      return s?.state === 'authenticated' ? s.identity?.empNo : undefined;
+    },
     async command(/** @type {any} */ req, /** @type {string} */ action) {
       if (!requests.has(req)) return refuse('common.forbidden');
-      await broker.state.command(action);
+      if (action === 'reconnect') {
+        if (!broker.state.current()) await broker.state.connect();
+        if (identity()) void beginTeam();
+      } else await broker.state.command(action);
       return this.status(req);
     },
     async resetAuthentication() {

@@ -73,7 +73,7 @@ func TestUACCookiesKeepAudienceIsolation(t *testing.T) {
 	g := &Gateway{Cfg: Config{UacSSOCookieNames: []string{"company_pair_a", "company_pair_b"}}}
 	r := httptest.NewRequest("POST", "/api/iam/v1/login/uac/sso", nil)
 	r.Header.Set("Cookie", "auriga_portal_login_tx=p; auriga_admin_login_tx=a; auriga_admin_session=secret; company_pair_a=one; company_pair_b=two; unrelated=private")
-	got, err := g.iamCookies(r, accessEntry{role: "portal", scheme: "http"}, false)
+	got, err := g.iamCookies(r, accessEntry{role: "portal", scheme: "http"}, false, false)
 	if err != nil || !strings.Contains(got, "company_pair_a=one") || !strings.Contains(got, "company_pair_b=two") || !strings.Contains(got, "auriga_portal_login_tx=p") || strings.Contains(got, "secret") || strings.Contains(got, "unrelated") || strings.Contains(got, "admin") {
 		t.Fatalf("unexpected cookies: %q %v", got, err)
 	}

@@ -38,6 +38,24 @@
         "admin"
       ]
     },
+    "iam.providers.read": {
+      "description": {
+        "en": "Read identity providers",
+        "zh-CN": "查看身份源"
+      },
+      "adminOnly": true,
+      "sensitive": false,
+      "builtinRoles": ["owner"]
+    },
+    "iam.providers.write": {
+      "description": {
+        "en": "Manage identity providers",
+        "zh-CN": "管理身份源"
+      },
+      "adminOnly": true,
+      "sensitive": true,
+      "builtinRoles": ["owner"]
+    },
     "ops.alerts.read": {
       "description": {
         "en": "Read operations alerts",

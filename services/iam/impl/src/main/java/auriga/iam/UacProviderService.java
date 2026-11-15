@@ -41,13 +41,13 @@ final class UacProviderService {
   }
 
   ObjectNode get(String id) {
-    return store.tx(
-        () -> {
-          var row = row(id, false);
-          if (!row.path("uacConfigured").asBoolean())
-            throw new AurigaException(CommonErrors.NOT_FOUND);
-          return projection(row);
-        });
+    return store.tx(() -> projection(configuredRow(id)));
+  }
+
+  ObjectNode configuredRow(String id) {
+    ObjectNode row = row(id, false);
+    if (!row.path("uacConfigured").asBoolean()) throw new AurigaException(CommonErrors.NOT_FOUND);
+    return row;
   }
 
   static String etag(JsonNode row) {

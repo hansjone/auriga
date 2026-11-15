@@ -56,6 +56,25 @@ test('R4 unreachable shell can recover by an authenticated push without restarti
     false,
   );
 });
+test('Overview reconnect requires CSRF and uses the existing shell snapshot command', async (t) => {
+  const f = await shellRuntimePeer(t);
+  const path = '/auriga/shell/command';
+  const command = { method: 'POST', body: { action: 'reconnect' } };
+  f.runtime.broker.state.disconnect();
+  const calls = f.connection.calls.length;
+  assert.equal((await f.http(path, { ...command, csrf: false })).status, 403);
+  assert.equal(f.connection.calls.length, calls);
+  const result = await f.http(path, command);
+  assert.equal(result.status, 200);
+  assert.equal(result.body.platform, 'authenticated');
+  assert.ok(
+    f.connection.calls.slice(calls).some((c) => c.action === 'snapshot'),
+  );
+  assert.equal(
+    f.connection.calls.some((c) => c.action === 'reconnect'),
+    false,
+  );
+});
 test('R4 closing a native RPC discards the result without issuing a shared cancel or logout', async (t) => {
   const f = await shellRuntimePeer(t),
     entered = Promise.withResolvers(),
