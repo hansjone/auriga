@@ -171,12 +171,12 @@ test(
       windowsHide: true,
       stdio: ['pipe', 'pipe', 'pipe'],
     });
+    const serverExited = once(server, 'exit');
     server.stderr.resume();
     const lines = createInterface({ input: server.stdout });
     t.after(async () => {
-      const ended = once(server, 'exit');
-      server.kill();
-      await ended;
+      if (server.exitCode === null && server.signalCode === null) server.kill();
+      await serverExited;
       lines.close();
       rmSync(directory, {
         recursive: true,
@@ -185,9 +185,18 @@ test(
         retryDelay: 100,
       });
     });
-    const listening = once(lines, 'line');
+    const listening = Promise.race([
+      once(lines, 'line'),
+      serverExited.then(([code, signal]) => {
+        throw new Error(
+          `owning server exited before listening: ${code ?? signal}`,
+        );
+      }),
+    ]);
     server.stdin.write(JSON.stringify({ capability }) + '\n');
-    await listening;
+    const [ready] = await listening;
+    assert.equal(JSON.parse(ready).listening, pipe);
+    // stdin reaches EOF immediately after spawnSync sends the setup line.
     const duplicate = spawnSync(helper, ['server', pipe], {
       input: JSON.stringify({ capability }) + '\n',
       encoding: 'utf8',
@@ -199,6 +208,7 @@ test(
       1,
       'first pipe instance must reject a second server',
     );
+    assert.equal(duplicate.stdout.trim(), '');
     assert.equal(duplicate.stderr.trim(), 'shell helper unavailable');
     let client = connectIpc({ helperPath: helper, pipe, capability });
     await assert.rejects(
@@ -219,6 +229,8 @@ test(
       /disconnected/,
     );
     client.close();
+    server.stdin.end();
+    assert.deepEqual(await serverExited, [0, null]);
   },
 );
 

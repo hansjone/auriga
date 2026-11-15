@@ -108,6 +108,9 @@ public static class Helper {
   static void Server(string name) {
     var setup = Decode(Line(Input, 4096)); Capability = (string)setup["capability"];
     if (Capability.Length != 43) throw new IOException("capability");
+    // Reserve the first instance before stdin EOF can stop the process.
+    var listener = Pipe(name, true);
+    Emit(new { listening = name, sid = Sid });
     var input = new Thread(() => {
       try {
         for (string line; (line = Line(Input, 4194304)) != null;) {
@@ -124,8 +127,6 @@ public static class Helper {
         }
       } catch {} finally { Closing = true; Environment.Exit(0); }
     }); input.IsBackground = true; input.Start();
-    var listener = Pipe(name, true);
-    Emit(new { listening = name, sid = Sid });
     int active = 0;
     while (!Closing) {
       listener.WaitForConnection();
