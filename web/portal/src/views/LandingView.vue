@@ -9,13 +9,13 @@ const messages = {
     login: '登录',
     home: 'Auriga DSH 首页',
     title: '一个团队，一套 AI 工作台。',
-    sub: '云端与桌面的 DSH 共用同一身份、模型与资源，在哪里都能接着干。',
+    sub: '云端与桌面的 DSH 共用同一身份、模型与资源，由团队统一管理。',
   },
   en: {
     login: 'Sign in',
     home: 'Auriga DSH home',
     title: 'One team, one AI workspace.',
-    sub: 'Cloud and desktop DSH share one identity, one set of models and resources. Pick up where you left off, anywhere.',
+    sub: 'Cloud and desktop DSH share one identity, models and resources, managed by your team.',
   },
 };
 const copy = computed(() => messages[locale.value === 'en' ? 'en' : 'zh-CN']);
