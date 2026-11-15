@@ -103,11 +103,19 @@ export async function createConnectRuntime({
     (await connectPackagedBroker({ config, dataHome: directory }).catch(
       () => undefined,
     ));
+  const desktop = config.platformOrigin
+    ? await desktopUpdater({ origin: config.platformOrigin }).catch(
+        desktopStartupFailure,
+      )
+    : undefined;
   const broker = await createBroker({
     signal,
     ipc: installed?.ipc,
     validate: installed?.validate ?? (() => refuse()),
     stateFactory: installed?.stateFactory,
+    checkBusinessAccess() {
+      if (desktop?.status().required) return refuse('desktop.update_required');
+    },
     onInvalidate() {
       principal = undefined;
       memberProfile = undefined;
@@ -194,11 +202,6 @@ export async function createConnectRuntime({
     origin: config.platformOrigin || 'https://unconfigured.invalid',
   });
   if (principal) models.login();
-  const desktop = config.platformOrigin
-    ? await desktopUpdater({ origin: config.platformOrigin }).catch(
-        desktopStartupFailure,
-      )
-    : undefined;
   const identity = () =>
     broker.state.current()?.state === 'authenticated' ? principal : undefined;
   contexts = createHostContexts({ broker, identity, ctx });
@@ -619,7 +622,9 @@ export async function createConnectRuntime({
         network.importControlOffline(input),
     },
     isReady() {
-      return !!identity() && communication === 'ready';
+      return (
+        !!identity() && communication === 'ready' && !desktop?.status().required
+      );
     },
     async upload(/** @type {Buffer} */ bytes, /** @type {string} */ mediaType) {
       const opened = (

@@ -1326,14 +1326,14 @@ export interface components {
       nextAfterPackageId?: string;
     };
     DesktopManifest: {
-      /** @constant */
-      schema: 1;
+      /** @enum {integer} */
+      schema: 1 | 2;
       /** @constant */
       product: 'Auriga Desktop';
       version: string;
       packageId: string;
-      /** @constant */
-      channel: 'stable';
+      /** @enum {string} */
+      channel: 'stable' | 'beta';
       /** @constant */
       platform: 'win-x64';
       /** Format: int64 */
@@ -1359,7 +1359,9 @@ export interface components {
         nodeVersion: string;
         pluginVersion: string;
       };
-    };
+      rolloutPercentage?: number;
+      rollbackFrom?: string | null;
+    } & unknown;
     DesktopReleaseItem: {
       manifest: components['schemas']['DesktopManifest'];
       withdrawn: boolean;
@@ -6148,7 +6150,9 @@ export interface operations {
   };
   getDesktopLatest: {
     parameters: {
-      query?: never;
+      query?: {
+        channel?: 'stable' | 'beta';
+      };
       header?: never;
       path?: never;
       cookie?: never;

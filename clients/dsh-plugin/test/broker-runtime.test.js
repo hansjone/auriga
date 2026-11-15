@@ -1,7 +1,7 @@
 import test from 'node:test';
 import { randomUUID, createHash } from 'node:crypto';
 import assert from 'node:assert/strict';
-import { mkdtemp, rm, writeFile, readFile } from 'node:fs/promises';
+import { mkdtemp, rm, mkdir, writeFile, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { createConnectRuntime } from '../src/local/runtime.js';
@@ -11,7 +11,7 @@ import { brokerFixture } from './broker-fixture.js';
 import { openLedger } from '../src/network/host/ledger.js';
 import { createFileLedgerStore } from '../src/network/host/store.js';
 
-async function fixture(t, legacy = false) {
+async function fixture(t, legacy = false, platformOrigin = '') {
   const directory = await mkdtemp(join(tmpdir(), 'auriga-shell-runtime-'));
   t.after(() => rm(directory, { recursive: true, force: true }));
   await writeFile(join(directory, 'private-content.txt'), 'private content');
@@ -27,7 +27,7 @@ async function fixture(t, legacy = false) {
   const connection = brokerFixture(),
     ctx = { sessions: { get: () => ({ id: 'session' }) } };
   const runtime = await createConnectRuntime({
-    config: { platformOrigin: '' },
+    config: { platformOrigin },
     directory,
     ctx,
     connection,
@@ -36,6 +36,100 @@ async function fixture(t, legacy = false) {
   const req = runtime.nativeRequest({ principal: { kind: 'owner' } });
   return { runtime, connection, req, directory };
 }
+
+test('required Desktop updates block broker business and credentials while shell status and cleanup remain available', async (t) => {
+  const root = await mkdtemp(join(tmpdir(), 'auriga-required-update-'));
+  const savedRoot = process.env.AURIGA_DESKTOP_ROOT;
+  const savedRuntime = process.env.AURIGA_DESKTOP_RUNTIME;
+  t.after(async () => {
+    if (savedRoot === undefined) delete process.env.AURIGA_DESKTOP_ROOT;
+    else process.env.AURIGA_DESKTOP_ROOT = savedRoot;
+    if (savedRuntime === undefined) delete process.env.AURIGA_DESKTOP_RUNTIME;
+    else process.env.AURIGA_DESKTOP_RUNTIME = savedRuntime;
+    await rm(root, { recursive: true, force: true });
+  });
+  const folder = join(root, 'versions', 'v1', 'auriga', 'runtime');
+  await mkdir(folder, { recursive: true });
+  await writeFile(
+    join(root, 'install.json'),
+    JSON.stringify({ current: 'v1' }),
+  );
+  const modulePath = join(folder, 'update.mjs');
+  await writeFile(
+    modulePath,
+    `export function platformUrl() {}
+     export function createUpdater() {
+       let required = false;
+       return {status: () => ({required}), configure(value) { required = value; }, start: () => () => {}};
+     }`,
+  );
+  process.env.AURIGA_DESKTOP_ROOT = root;
+  process.env.AURIGA_DESKTOP_RUNTIME = modulePath;
+  const { runtime, connection, req } = await fixture(
+    t,
+    false,
+    'https://example.com',
+  );
+  const context = {
+    kind: 'session',
+    hostSessionId: 'session',
+    expiresAt: new Date(Date.now() + 600000).toISOString(),
+  };
+  const registered = await runtime.broker.register(context);
+  await runtime.broker.call('UnifiedListResourcePackages', {
+    limit: 10,
+    kind: 'skill',
+  });
+  runtime.desktop.configure(true);
+  const before = connection.calls.length;
+  await assert.rejects(
+    runtime.broker.call('UnifiedListResourcePackages', {
+      limit: 10,
+      kind: 'skill',
+    }),
+    {
+      code: 'desktop.update_required',
+    },
+  );
+  await assert.rejects(runtime.broker.register(context), {
+    code: 'desktop.update_required',
+  });
+  await assert.rejects(
+    runtime.broker.credentials(registered.executionContextId, 'raw'),
+    { code: 'desktop.update_required' },
+  );
+  await assert.rejects(
+    runtime.broker.streamCommand({
+      streamId: randomUUID(),
+      action: 'credit',
+      creditBytes: 1,
+    }),
+    { code: 'desktop.update_required' },
+  );
+  await assert.rejects(
+    runtime.broker.subscribeStream(randomUUID(), () => {}),
+    { code: 'desktop.update_required' },
+  );
+  assert.equal(connection.calls.length, before);
+  assert.equal(runtime.status(req).loggedIn, true);
+  assert.equal(runtime.isReady(), false);
+  await runtime.broker.revoke(registered.executionContextId);
+  const cancelled = [];
+  connection.ipc.streamCommand = async (command) => {
+    cancelled.push(command);
+  };
+  await runtime.broker.streamCommand({
+    streamId: randomUUID(),
+    action: 'cancel',
+  });
+  assert.equal(cancelled.length, 1);
+  assert.equal(connection.contexts.size, 0);
+  runtime.desktop.configure(false);
+  await runtime.broker.call('UnifiedListResourcePackages', {
+    limit: 10,
+    kind: 'skill',
+  });
+});
 
 test('actual connect runtime inherits shell identity without platform credentials', async (t) => {
   const { runtime, connection, req } = await fixture(t);

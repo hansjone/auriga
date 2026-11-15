@@ -353,6 +353,14 @@ export function surfaceHost(
       clearTimeout(id) {
         counts.timers.delete(id);
       },
+      setInterval(fn, delay) {
+        const id = ++nextTimer;
+        counts.timers.set(id, { fn, delay, repeat: true });
+        return id;
+      },
+      clearInterval(id) {
+        counts.timers.delete(id);
+      },
     },
     {
       importModuleDynamically: async (specifier) => {
@@ -497,7 +505,7 @@ export function surfaceHost(
     expire(delay) {
       for (const [id, timer] of [...counts.timers])
         if (timer.delay === delay) {
-          counts.timers.delete(id);
+          if (!timer.repeat) counts.timers.delete(id);
           timer.fn();
         }
     },
