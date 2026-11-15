@@ -306,6 +306,11 @@ sealed class TrayApp : ApplicationContext
         updateEnabled = update == null || !update.ContainsKey("enabled") || Desktop.Flag(update, "enabled");
         availableVersion = Desktop.Str(update, "available");
         restartRequired = Desktop.Flag(update, "restartRequired");
+        if (Desktop.Flag(update, "manualRetryRequired"))
+        {
+            var failure = Desktop.Obj(update, "failure");
+            restartItem.Text = "重试更新（" + (Desktop.Str(failure, "code") ?? "updateFailed") + "/" + (Desktop.Str(failure, "stage") ?? "unknown") + "）";
+        }
         string origin = Desktop.Str(info, "platformOrigin");
         originItem.Text = "平台地址：" + (origin ?? "未配置") + (origin != null ? "（点击复制）" : "");
         originItem.Enabled = origin != null;
@@ -472,13 +477,15 @@ sealed class TrayApp : ApplicationContext
         {
             string phase = Desktop.Str(e, "phase"), stage = Desktop.Str(e, "stage"), code = Desktop.Str(e, "code");
             Log("update " + phase + " stage=" + stage + " code=" + code + " category=" + Desktop.Str(e, "pathCategory"));
-            if (phase == "failed")
+            if (phase == "failed" || phase == "awaiting-retry")
             {
                 restartRequired = File.Exists(Path.Combine(root, "desktop-pending", "release.json"));
                 restartItem.Text = "重试更新（" + (code ?? "updateFailed") + "/" + (stage ?? "unknown") + "）";
                 icon.ShowBalloonTip(8000, Desktop.Brand, "更新失败，原版本已保留。" + (code ?? "updateFailed") + " / " + stage + "。详情见安装目录 desktop-update.log。", ToolTipIcon.Warning);
             }
             else if (phase == "installed") restartItem.Text = "重启以完成更新";
+            UpdateMenu();
+            return;
         }
         else if (kind == "platform")
         {

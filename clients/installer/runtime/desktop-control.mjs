@@ -57,6 +57,8 @@ export function desktopInfo(root) {
       error: update.error ?? null,
       stage: update.stage ?? null,
       failure: update.failure ?? null,
+      manualRetryRequired: update.applyRetry?.manualRequired === true,
+      applyFailures: update.applyRetry?.failures ?? 0,
       lastCheckedAt: update.lastCheckedAt ?? null,
       restartRequired: existsSync(join(root, 'desktop-pending')),
     },
@@ -97,6 +99,8 @@ const summary = (status) => ({
   error: status.error,
   stage: status.stage,
   failure: status.failure,
+  manualRetryRequired: status.manualRetryRequired,
+  applyFailures: status.applyFailures,
   restartRequired: status.restartRequired,
 });
 

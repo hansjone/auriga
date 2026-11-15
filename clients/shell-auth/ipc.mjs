@@ -204,10 +204,11 @@ export async function startIpc({ helper, broker, business }) {
       );
     },
     async close() {
-      if (!closed) {
+      cleanup();
+      if (child.exitCode === null && child.signalCode === null) {
         const exited = once(child, 'exit');
-        cleanup();
-        child.stdin.end();
+        if (!child.stdin.destroyed && !child.stdin.writableEnded)
+          child.stdin.end();
         child.kill();
         await exited;
       }

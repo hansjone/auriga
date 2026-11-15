@@ -93,6 +93,7 @@ const OWNED_ENTRIES = [
   'desktop-update.json',
   'desktop-update.json.tmp',
   'desktop-update.log',
+  'desktop-update.log.1',
   'desktop-pending',
   '.desktop-resume',
   '.desktop-update-lock',
