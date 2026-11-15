@@ -13,13 +13,16 @@ import {
   loginInfoText,
   watchLoginInfo,
 } from '../../../shared/src/native-login/login-info';
+import PlacementEntry from './PlacementEntry.vue';
 import InstanceCard from '../components/InstanceCard.vue';
+import { readPlacementConfig } from './placement-config';
 import DesktopDownload from '../components/DesktopDownload.vue';
 import { portalMessages } from '../portal-messages';
 
 const { t, locale } = useI18n();
 const { t: portalT } = useI18n({ useScope: 'local', messages: portalMessages });
 const me = ref<Me | null>(null);
+const sharedPlacementEnabled = readPlacementConfig().sharedPlacementEnabled;
 const loginInfo = ref<Me['uacLoginInfo']>();
 const department = computed(() => loginInfoText(loginInfo.value, locale.value));
 let infoMonitor: ReturnType<typeof watchLoginInfo> | undefined;
@@ -116,7 +119,10 @@ async function logout() {
       <p v-if="me && department" data-testid="uac-department">
         {{ department }}
       </p>
-      <InstanceCard v-if="me" />
+      <template v-if="me">
+        <PlacementEntry v-if="sharedPlacementEnabled" />
+        <InstanceCard v-else />
+      </template>
       <DesktopDownload v-if="me" />
       <p v-if="loadError" role="alert">{{ t('errors.unknown') }}</p>
       <ElButton v-if="loadError" @click="loadMe">{{

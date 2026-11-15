@@ -41,6 +41,8 @@ message SessionRequest {
     SharedDshRuntimeReceipt shared_dsh_runtime_receipt = 9;
     SharedDshResourceReport shared_dsh_resource_report = 10;
     SharedDshGuardianImpact shared_dsh_guardian_impact = 11;
+    // Exact-byte pool telemetry; authenticated node and current generation required.
+    SharedDshPoolMemorySample shared_dsh_pool_memory_sample = 12;
   }
 }
 

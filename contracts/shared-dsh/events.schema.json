@@ -1,0 +1,58 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Shared DSH CloudEvents bridge",
+  "allOf": [{ "$ref": "../events/envelope.schema.json" }],
+  "type": "object",
+  "properties": {
+    "source": { "const": "auriga/workspace" },
+    "dataversion": { "const": "1" },
+    "subject": { "type": "string", "format": "uuid" },
+    "type": {
+      "enum": [
+        "placement.switched",
+        "placement.switch_failed",
+        "placement.revoked",
+        "placement.resource_reported",
+        "placement.guardian_impact"
+      ]
+    },
+    "data": { "type": "object" }
+  },
+  "required": ["subject", "type", "data"],
+  "oneOf": [
+    {
+      "properties": {
+        "type": { "const": "placement.switched" },
+        "data": {
+          "$ref": "../events/placement.schema.json#/$defs/PlacementSwitched"
+        }
+      }
+    },
+    {
+      "properties": {
+        "type": { "const": "placement.switch_failed" },
+        "data": {
+          "$ref": "../events/placement.schema.json#/$defs/PlacementSwitchFailed"
+        }
+      }
+    },
+    {
+      "properties": {
+        "type": { "const": "placement.revoked" },
+        "data": { "$ref": "shared-dsh.schema.json#/$defs/Revocation" }
+      }
+    },
+    {
+      "properties": {
+        "type": { "const": "placement.resource_reported" },
+        "data": { "$ref": "shared-dsh.schema.json#/$defs/ResourceReport" }
+      }
+    },
+    {
+      "properties": {
+        "type": { "const": "placement.guardian_impact" },
+        "data": { "$ref": "shared-dsh.schema.json#/$defs/GuardianImpact" }
+      }
+    }
+  ]
+}

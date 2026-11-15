@@ -48,6 +48,16 @@ const scope = enumeration(
   'message.receive',
 );
 const defs = {
+  PoolMemorySample: object({
+    schemaVersion: constant(1),
+    tenantId: id,
+    physicalInstanceId: id,
+    observedGeneration: n,
+    observedAt: time,
+    validUntil: time,
+    memoryUsedBytes: time,
+    memoryLimitBytes: n,
+  }),
   TicketExchangeRequest: object({
     ticket: {
       type: 'string',

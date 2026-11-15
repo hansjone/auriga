@@ -1,0 +1,139 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Shared DSH internal candidate entry probe v1",
+  "$defs": {
+    "ProbeHeader": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["alg", "kid", "typ"],
+      "properties": {
+        "alg": { "const": "EdDSA" },
+        "kid": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "typ": {
+          "enum": ["auriga-shared-probe+jwt", "auriga-shared-probe-receipt+jwt"]
+        }
+      }
+    },
+    "ProbeRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "issuer",
+        "audience",
+        "operationId",
+        "binding",
+        "platformSessionId",
+        "challenge",
+        "method",
+        "canonicalPath",
+        "issuedAt",
+        "expiresAt",
+        "jti"
+      ],
+      "properties": {
+        "schemaVersion": { "const": 1 },
+        "issuer": { "const": "auriga.workspace" },
+        "audience": { "const": "auriga.shared.probe.chain" },
+        "operationId": { "type": "string", "format": "uuid" },
+        "binding": { "$ref": "shared-dsh.schema.json#/$defs/Binding" },
+        "platformSessionId": { "type": "string", "format": "uuid" },
+        "challenge": { "type": "string", "pattern": "^[A-Za-z0-9_-]{43}$" },
+        "method": { "const": "GET" },
+        "canonicalPath": { "const": "/" },
+        "issuedAt": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "expiresAt": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "jti": { "type": "string", "format": "uuid" }
+      }
+    },
+    "ProbeReceipt": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "issuer",
+        "audience",
+        "operationId",
+        "binding",
+        "platformSessionId",
+        "challenge",
+        "requestJti",
+        "method",
+        "canonicalPath",
+        "statusCode",
+        "contentType",
+        "contentSha256",
+        "observedAt",
+        "issuedAt",
+        "expiresAt",
+        "jti"
+      ],
+      "properties": {
+        "schemaVersion": { "const": 1 },
+        "issuer": { "const": "auriga.shared.host" },
+        "audience": { "const": "auriga.workspace.probe-result" },
+        "operationId": { "type": "string", "format": "uuid" },
+        "binding": { "$ref": "shared-dsh.schema.json#/$defs/Binding" },
+        "platformSessionId": { "type": "string", "format": "uuid" },
+        "challenge": { "type": "string", "pattern": "^[A-Za-z0-9_-]{43}$" },
+        "requestJti": { "type": "string", "format": "uuid" },
+        "method": { "const": "GET" },
+        "canonicalPath": { "const": "/" },
+        "statusCode": { "const": 200 },
+        "contentType": { "const": "text/html" },
+        "contentSha256": {
+          "type": "string",
+          "pattern": "^sha256:[a-f0-9]{64}$"
+        },
+        "observedAt": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "issuedAt": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "expiresAt": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "jti": { "type": "string", "format": "uuid" }
+      }
+    },
+    "ProbeDispatch": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["probe"],
+      "properties": { "probe": { "$ref": "#/$defs/CompactJws" } }
+    },
+    "ProbeResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["receipt", "contentSha256"],
+      "properties": {
+        "receipt": { "$ref": "#/$defs/CompactJws" },
+        "contentSha256": {
+          "type": "string",
+          "pattern": "^sha256:[a-f0-9]{64}$"
+        }
+      }
+    },
+    "CompactJws": {
+      "type": "string",
+      "maxLength": 16384,
+      "pattern": "^[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+$",
+      "not": { "pattern": "[\\r\\n]" }
+    }
+  }
+}
