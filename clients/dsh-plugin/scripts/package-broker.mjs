@@ -1,4 +1,5 @@
 import { cp, mkdir, lstat } from 'node:fs/promises';
+import { dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { verifyBrokerPackage } from '../src/local/broker-package.js';
 
@@ -25,7 +26,7 @@ export async function packageBroker(
       throw new Error('broker artifact version conflict');
     return current.manifest;
   }
-  await mkdir(destination, { recursive: true });
+  await mkdir(dirname(destination), { recursive: true });
   await cp(artifact.base, destination, {
     recursive: true,
     dereference: false,

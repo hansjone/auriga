@@ -2449,6 +2449,10 @@ test('real NATS WSS with official device factory closes C1 before T2, binds new 
 });
 
 test('plugin actual entry resumes verified native device into official factory, durable C1/C2 connection and logout', async (t) => {
+  if (process.platform !== 'win32')
+    return t.skip(
+      'Requires Windows named-pipe peer verification and .NET helper',
+    );
   const root = fileURLToPath(
     new URL('../../../../.agent-evidence/', import.meta.url),
   );
