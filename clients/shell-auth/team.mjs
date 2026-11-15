@@ -84,7 +84,11 @@ export class TeamProxy {
         throw fail();
       body = input.arguments;
     }
-    const token = await this.broker.tokenFor(definition.audience, context);
+    const token = await this.broker.tokenFor(
+      definition.audience,
+      context,
+      definition.operation,
+    );
     this.broker.assert(context);
     if (execution)
       this.resolve(

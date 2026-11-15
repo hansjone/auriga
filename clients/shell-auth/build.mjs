@@ -67,7 +67,14 @@ export function buildBroker(output) {
           'uac-control',
           'standard-device',
         ]
-      : ['shell-auth', 'shell-auth-control', 'shell-business']) {
+      : [
+          'shell-auth',
+          'shell-auth-control',
+          'shell-business',
+          'local-login',
+          'managed-device',
+          'managed-model',
+        ]) {
       const file = `schemas/${part}/${name}.schema.json`;
       copyFileSync(
         join(source, '../../contracts', part, name + '.schema.json'),

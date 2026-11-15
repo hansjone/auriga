@@ -42,6 +42,21 @@ const files = [
   'plugin/shell-business',
 ];
 const definitions = new Map();
+ajv.addSchema(
+  JSON.parse(
+    readFileSync(new URL('network/address.schema.json', base), 'utf8'),
+  ),
+  'https://auriga.example.com/contracts/network/address.schema.json',
+);
+for (const name of ['local-login', 'managed-device', 'managed-model']) {
+  const schema = JSON.parse(
+    readFileSync(new URL('plugin/' + name + '.schema.json', base), 'utf8'),
+  );
+  const id =
+    'https://auriga.example.com/contracts/plugin/' + name + '.schema.json';
+  ajv.addSchema(schema, id);
+  if (name !== 'local-login') definitions.set(schema.title, id);
+}
 for (const file of files) {
   const url = new URL(file + '.schema.json', base),
     schema = JSON.parse(readFileSync(url, 'utf8'));
