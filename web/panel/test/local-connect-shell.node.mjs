@@ -10,7 +10,6 @@ import { Socket } from 'node:net';
 import { setTimeout, clearTimeout } from 'node:timers';
 import { createSettingsStore } from '../../../clients/dsh-plugin/src/settings/store.js';
 import { createSettingsHandler } from '../../../clients/dsh-plugin/src/settings/host.js';
-import { mountLocalLoginPage } from '../../../clients/dsh-plugin/src/login/page.js';
 const deferred = () => {
   let resolve;
   const promise = new Promise((done) => {
@@ -97,6 +96,7 @@ async function exerciseRealSettings(delayed) {
   const directory = await mkdtemp(join(tmpdir(), 'auriga-shell-settings-'));
   const socket = new Socket();
   let host;
+  const shellCommands = [];
   const gate = deferred(),
     entered = deferred(),
     statusBody = deferred();
@@ -111,7 +111,9 @@ async function exerciseRealSettings(delayed) {
     });
     const calls = [];
     host = surfaceHost(
-      async (url) => {
+      async (url, init = {}) => {
+        if (new URL(url).pathname.endsWith('/shell/command'))
+          shellCommands.push(init);
         const data = String(url).endsWith('/status')
           ? {
               loggedIn: true,
@@ -123,7 +125,7 @@ async function exerciseRealSettings(delayed) {
             }
           : localBoot(true);
         const result = response(200, data);
-        if (new URL(url).pathname.endsWith('/local-login/status')) {
+        if (new URL(url).pathname.endsWith('/shell/status')) {
           result.json = async () => {
             if (delayed === 'status') {
               entered.resolve();
@@ -226,38 +228,20 @@ async function exerciseRealSettings(delayed) {
       'same-origin',
     );
     assert.ok(calls.some((c) => c.url.endsWith('/view.js')));
-    // Both merged entry points coexist: the shell keeps LOGIN's explicit
-    // confirmation page while SETTINGS retains its reviewed view and handlers.
+    // The explicit native settings action delegates to the shell; no plugin
+    // login page or browser-selected navigation participates.
     const logout = [...settings.root.querySelectorAll('button')].find(
-      (b) => b.textContent === '退出登录',
+      (button) => button.textContent === '退出登录',
     );
     assert.ok(logout);
     logout.click();
-    assert.deepEqual(host.navigations, [
-      'https://instance.example.com/i/example/auriga/local-login?logout=1',
-    ]);
-    const logoutRoot = host.document.createElement('main');
-    host.document.body.append(logoutRoot);
-    let logoutRequests = 0;
-    const returned = [];
-    const logoutPage = mountLocalLoginPage(logoutRoot, {
-      logout: new URL(host.navigations[0]).searchParams.get('logout') === '1',
-      fetch: async () => {
-        logoutRequests++;
-        throw new Error('unexpected logout request');
-      },
-      navigate: (path) => returned.push(path),
-    });
-    try {
-      assert.match(logoutRoot.textContent, /确认退出本机登录/);
-      assert.equal(logoutRequests, 0, 'navigation and mount never sign out');
-      logoutRoot.querySelector('[data-action=return]').click();
-      assert.deepEqual(returned, ['/']);
-      assert.equal(logoutRequests, 0);
-    } finally {
-      logoutPage.dispose();
-      logoutRoot.remove();
-    }
+    await flush();
+    assert.deepEqual(host.navigations, []);
+    assert.equal(shellCommands.length, 1);
+    assert.deepEqual(JSON.parse(shellCommands[0].body), { action: 'logout' });
+    assert.equal(shellCommands[0].headers['x-auriga-csrf'], 'native-csrf');
+    assert.equal(shellCommands[0].credentials, 'same-origin');
+    assert.equal(shellCommands[0].redirect, 'error');
     assert.equal(main.root.querySelector('auriga-team-panel'), panel);
     assert.equal(panel.context, context);
     settings.close();
@@ -319,7 +303,7 @@ test('desktop resource port uses current local CSRF and keeps member credentials
   const host = surfaceHost(async (url, init) => {
     const path = new URL(url).pathname;
     calls.push({ path, init });
-    if (path.endsWith('/local-login/status'))
+    if (path.endsWith('/shell/status'))
       return response(200, { loggedIn, csrf: 'test-csrf' });
     if (path.includes('/resources/local/')) return response(200, { ok: true });
     return response(200, {

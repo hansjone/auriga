@@ -1025,7 +1025,7 @@ export interface TransportPredecessor {
 export interface TransportReaderEvidence {
   reader_id: string;
   identity_id: string;
-  selector: LocalProjectionSelector;
+  selector?: LocalProjectionSelector;
   phase: 'loaded' | 'handshake_verified' | 'isolated';
   isolation_enforced: boolean;
 }
@@ -1105,4 +1105,81 @@ export interface TransportTransitionProof {
   predecessor: TransportPredecessor;
   first_bundle: SignedTransportTrustBundle;
   authority: SignedRuntimeAuthority;
+}
+/**
+ * This interface was referenced by `AurigaV2`'s JSON-Schema
+ * via the `definition` "ExpectedSelectorsQuery".
+ */
+export interface ExpectedSelectorsQuery {
+  tenant_id: string;
+  realm: string;
+  bundle_version: string;
+  bundle_digest: string;
+  challenge: string;
+  control_revision: string;
+  control_digest: string;
+}
+/**
+ * This interface was referenced by `AurigaV2`'s JSON-Schema
+ * via the `definition` "ExpectedSelectors".
+ */
+export interface ExpectedSelectors {
+  tenant_id: string;
+  realm: string;
+  authority_id: string;
+  authority_digest: string;
+  control_revision: string;
+  bundle_version: string;
+  bundle_digest: string;
+  phase: 'dual_trust' | 'new_leaves' | 'retire_old';
+  /**
+   * @maxItems 65536
+   */
+  required_reader_ids: string[];
+  challenge: string;
+  issued_at: string;
+  generation: string;
+  control_digest: string;
+  expected_selectors: {
+    [k: string]: string | null;
+  };
+  reader_identities: {
+    [k: string]: string;
+  };
+}
+/**
+ * This interface was referenced by `AurigaV2`'s JSON-Schema
+ * via the `definition` "TransportPendingReader".
+ */
+export interface TransportPendingReader {
+  reader_id: string;
+  identity_id: string;
+  selector?: LocalProjectionSelector;
+  phase: 'loaded' | 'handshake_verified' | 'isolated' | 'pending';
+  isolation_enforced: boolean;
+}
+/**
+ * This interface was referenced by `AurigaV2`'s JSON-Schema
+ * via the `definition` "TransportConfirmationPending".
+ */
+export interface TransportConfirmationPending {
+  tenant_id: string;
+  realm: string;
+  authority_id: string;
+  authority_digest: string;
+  control_revision: string;
+  bundle_version: string;
+  bundle_digest: string;
+  phase: 'dual_trust' | 'new_leaves' | 'retire_old';
+  /**
+   * @maxItems 65536
+   */
+  required_reader_ids: string[];
+  /**
+   * @maxItems 65536
+   */
+  readers: TransportPendingReader[];
+  challenge: string;
+  issued_at: string;
+  state: 'projection_pending';
 }

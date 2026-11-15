@@ -37,7 +37,18 @@ describe('native logout delivery', () => {
           visit(imported);
       }
     }
+    expect(links.filter((link) => link.startsWith('/brand/'))).toEqual([
+      '/brand/favicon.svg',
+      '/brand/favicon-32.png',
+      '/brand/apple-touch-icon.png',
+    ]);
     for (const link of links) {
+      if (link.startsWith('/brand/')) {
+        expect(
+          (await readFile(new URL('../public' + link, import.meta.url))).length,
+        ).toBeGreaterThan(0);
+        continue;
+      }
       expect(link.startsWith('/assets/')).toBe(true);
       visit(link.slice(1));
     }

@@ -108,7 +108,67 @@ describe('UAC native login', () => {
     await tick();
     await vi.waitFor(() => expect(ctx.onComplete).toHaveBeenCalledOnce());
     expect(ctx.root.querySelector('svg')).toBeNull();
+    expect(ctx.root.dataset.uacState).toBe('authenticated');
+    expect(ctx.root.querySelector('.uac-symbol')?.textContent).toBe('✓');
     view.dispose();
+  });
+  it('shows a countdown and confirmation overlay, refreshes expired QR, and releases display timers', async () => {
+    vi.useFakeTimers();
+    const ctx = setup();
+    let state = 'waiting',
+      generation = 0;
+    ctx.fetch.mockImplementation(async (input, init) => {
+      if (init?.method === 'DELETE') return new Response(null, { status: 204 });
+      if (String(input).endsWith('/challenges')) generation++;
+      return new Response(
+        JSON.stringify({
+          ...challenge,
+          qrContent: 'public-qr-' + generation,
+          expiresAt: new Date(Date.now() + 60000).toISOString(),
+          state,
+        }),
+        { headers: { 'Content-Type': 'application/json' } },
+      );
+    });
+    const view = createUacLoginView(ctx.root, {
+      ...ctx,
+      providerId: 'provider',
+    });
+    await tick();
+    expect(
+      ctx.root.querySelector('[data-testid=uac-countdown]')?.textContent,
+    ).toBe('01:00');
+    const firstQr = ctx.root.querySelector('.uac-code')?.innerHTML;
+    state = 'scanned';
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(
+      ctx.root.querySelector('[data-testid=uac-countdown]')?.textContent,
+    ).toBe('00:58');
+    expect(ctx.root.dataset.uacState).toBe('scanned');
+    expect(ctx.root.querySelector('.uac-symbol')?.textContent).toBe('✓');
+    expect((ctx.root.querySelector('.uac-overlay') as HTMLElement).hidden).toBe(
+      false,
+    );
+    expect(ctx.root.textContent).toContain('已扫码，请在手机确认');
+    state = 'expired';
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(ctx.root.querySelector('.uac-code svg')).toBeNull();
+    expect(
+      (ctx.root.querySelector('.uac-countdown') as HTMLElement).hidden,
+    ).toBe(true);
+    state = 'waiting';
+    action(ctx.root, '重新获取二维码').click();
+    await tick();
+    expect(generation).toBe(2);
+    expect(ctx.root.querySelector('.uac-code')?.innerHTML).not.toBe(firstQr);
+    expect(
+      ctx.fetch.mock.calls.filter(([path]) =>
+        String(path).endsWith('/complete'),
+      ),
+    ).toHaveLength(0);
+    await view.dispose();
+    expect(vi.getTimerCount()).toBe(0);
+    expect(ctx.root.classList.contains('auriga-uac')).toBe(false);
   });
   it.each([
     { purpose: 'device' as const, autoSuppressed: false },
@@ -190,6 +250,17 @@ describe('SSO and terminal page states', () => {
       await tick();
       await vi.waitFor(() => expect(ctx.root.dataset.uacState).toBe(state));
       expect(ctx.root.textContent).not.toContain('SECRET-UPSTREAM');
+      const refresh = action(ctx.root, '重新获取二维码');
+      expect(refresh.hidden).toBe(state !== 'expired');
+      expect(refresh.parentElement?.classList.contains('uac-overlay')).toBe(
+        state === 'expired',
+      );
+      expect((ctx.root.querySelector('.uac-frame') as HTMLElement).hidden).toBe(
+        false,
+      );
+      expect(ctx.root.querySelector('.uac-overlay-caption')?.textContent).toBe(
+        ctx.root.querySelector('.uac-caption')?.textContent,
+      );
       if (state !== 'scanned') expect(ctx.root.querySelector('svg')).toBeNull();
       await view.dispose();
     },

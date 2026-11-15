@@ -5,15 +5,15 @@ import { mkdtemp, mkdir, rm } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import tls from 'node:tls';
-import { platformConfig } from '../../../src/local/platform.js';
+import { platformConfig } from '../../../src/local/config.js';
 import { openConnectionRuntime } from '../../../src/network/connection-runtime.js';
 import { createFileLedgerStore } from '../../../src/network/host/store.js';
 import { decodeJson, encodeJson } from '../../../src/network/session/frames.js';
 import { fixture as nativeFixture } from '../host/native/fixtures.js';
 import {
   publicationFixture,
-  signedAnnouncement,
-  signedKeyset,
+  signedV2Announcement as signedAnnouncement,
+  signedV2Keyset as signedKeyset,
   signedReadyResult,
   testRoots,
 } from '../trust/keyset-fixtures.js';
@@ -175,8 +175,8 @@ test('automatic source lifecycle over real NATS WSS: join, signed issue/Get, nat
       };
     },
     async refresh(trust) {
-      await trust.announce(signedAnnouncement(signer.payload));
       await trust.update(signedKeyset(signer.payload));
+      await trust.announce(signedAnnouncement(signer.payload));
     },
     async getTicket() {
       const ingress = String(++ticket).padStart(26, 'a');

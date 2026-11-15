@@ -11,6 +11,7 @@ API version: 1.0.0
 package shellauthapi
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 )
@@ -20,10 +21,9 @@ var _ MappedNullable = &ShellAuthOutputUnifiedCreateDownloadTicket{}
 
 // ShellAuthOutputUnifiedCreateDownloadTicket struct for ShellAuthOutputUnifiedCreateDownloadTicket
 type ShellAuthOutputUnifiedCreateDownloadTicket struct {
-	StatusCode           int32                                                       `json:"statusCode"`
-	Headers              *ShellAuthOutputListResourcePackagesHeaders                 `json:"headers,omitempty"`
-	Body                 ShellAuthresourceUnifiedSchemaJsonDefsUnifiedDownloadTicket `json:"body"`
-	AdditionalProperties map[string]interface{}
+	StatusCode int32                                          `json:"statusCode"`
+	Headers    *ShellAuthOutputListResourcePackagesHeaders    `json:"headers,omitempty"`
+	Body       ShellAuthOutputUnifiedCreateDownloadTicketBody `json:"body"`
 }
 
 type _ShellAuthOutputUnifiedCreateDownloadTicket ShellAuthOutputUnifiedCreateDownloadTicket
@@ -32,7 +32,7 @@ type _ShellAuthOutputUnifiedCreateDownloadTicket ShellAuthOutputUnifiedCreateDow
 // This constructor will assign default values to properties that have it defined,
 // and makes sure properties required by API are set, but the set of arguments
 // will change when the set of required properties is changed
-func NewShellAuthOutputUnifiedCreateDownloadTicket(statusCode int32, body ShellAuthresourceUnifiedSchemaJsonDefsUnifiedDownloadTicket) *ShellAuthOutputUnifiedCreateDownloadTicket {
+func NewShellAuthOutputUnifiedCreateDownloadTicket(statusCode int32, body ShellAuthOutputUnifiedCreateDownloadTicketBody) *ShellAuthOutputUnifiedCreateDownloadTicket {
 	this := ShellAuthOutputUnifiedCreateDownloadTicket{}
 	this.StatusCode = statusCode
 	this.Body = body
@@ -104,9 +104,9 @@ func (o *ShellAuthOutputUnifiedCreateDownloadTicket) SetHeaders(v ShellAuthOutpu
 }
 
 // GetBody returns the Body field value
-func (o *ShellAuthOutputUnifiedCreateDownloadTicket) GetBody() ShellAuthresourceUnifiedSchemaJsonDefsUnifiedDownloadTicket {
+func (o *ShellAuthOutputUnifiedCreateDownloadTicket) GetBody() ShellAuthOutputUnifiedCreateDownloadTicketBody {
 	if o == nil {
-		var ret ShellAuthresourceUnifiedSchemaJsonDefsUnifiedDownloadTicket
+		var ret ShellAuthOutputUnifiedCreateDownloadTicketBody
 		return ret
 	}
 
@@ -115,7 +115,7 @@ func (o *ShellAuthOutputUnifiedCreateDownloadTicket) GetBody() ShellAuthresource
 
 // GetBodyOk returns a tuple with the Body field value
 // and a boolean to check if the value has been set.
-func (o *ShellAuthOutputUnifiedCreateDownloadTicket) GetBodyOk() (*ShellAuthresourceUnifiedSchemaJsonDefsUnifiedDownloadTicket, bool) {
+func (o *ShellAuthOutputUnifiedCreateDownloadTicket) GetBodyOk() (*ShellAuthOutputUnifiedCreateDownloadTicketBody, bool) {
 	if o == nil {
 		return nil, false
 	}
@@ -123,7 +123,7 @@ func (o *ShellAuthOutputUnifiedCreateDownloadTicket) GetBodyOk() (*ShellAuthreso
 }
 
 // SetBody sets field value
-func (o *ShellAuthOutputUnifiedCreateDownloadTicket) SetBody(v ShellAuthresourceUnifiedSchemaJsonDefsUnifiedDownloadTicket) {
+func (o *ShellAuthOutputUnifiedCreateDownloadTicket) SetBody(v ShellAuthOutputUnifiedCreateDownloadTicketBody) {
 	o.Body = v
 }
 
@@ -142,11 +142,6 @@ func (o ShellAuthOutputUnifiedCreateDownloadTicket) ToMap() (map[string]interfac
 		toSerialize["headers"] = o.Headers
 	}
 	toSerialize["body"] = o.Body
-
-	for key, value := range o.AdditionalProperties {
-		toSerialize[key] = value
-	}
-
 	return toSerialize, nil
 }
 
@@ -175,22 +170,15 @@ func (o *ShellAuthOutputUnifiedCreateDownloadTicket) UnmarshalJSON(data []byte) 
 
 	varShellAuthOutputUnifiedCreateDownloadTicket := _ShellAuthOutputUnifiedCreateDownloadTicket{}
 
-	err = json.Unmarshal(data, &varShellAuthOutputUnifiedCreateDownloadTicket)
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+	err = decoder.Decode(&varShellAuthOutputUnifiedCreateDownloadTicket)
 
 	if err != nil {
 		return err
 	}
 
 	*o = ShellAuthOutputUnifiedCreateDownloadTicket(varShellAuthOutputUnifiedCreateDownloadTicket)
-
-	additionalProperties := make(map[string]interface{})
-
-	if err = json.Unmarshal(data, &additionalProperties); err == nil {
-		delete(additionalProperties, "statusCode")
-		delete(additionalProperties, "headers")
-		delete(additionalProperties, "body")
-		o.AdditionalProperties = additionalProperties
-	}
 
 	return err
 }

@@ -34,3 +34,12 @@ C 用自己持有的当前平台凭据调用既有 `POST /api/iam/v1/me/uac/cred
 成功与 error 互斥。ShellAuthHostError 只返回固定 code/reason/retryable：未认证 unauthenticated，非插件角色/跨 owner forbidden，旧 epoch/revision/身份 conflict，过期/已撤上下文 forbidden，材料未就绪或权威读取故障 unavailable。只有 unavailable/capacity_exceeded 可有界重试，不能在失败时退回旧缓存。所有错误无上游原文、token、Cookie 或身份选择器。
 
 秘密仅经已认证 IPC 进入本人后端 handler 内存；不得落盘、进入访问/调试日志、诊断、stdout/stderr、环境全局变量、页面、模型参数或工具结果。响应不订阅、不广播、不缓存。raw 经既有受控 handler 才交本人 skill 进程即时使用；outbound 只输出业务响应。退出时立即清材料及本地能力，网络撤销排队不能延迟本地停权。
+
+## K3 profile_read 的账号与成员边界
+
+选择以已验证 `/me/device-session` 的 memberId 为成员权威，不假定它与 accountId 相等。
+`profile_read` 的固定上游改为 `GET /api/iam/v1/me/device-profile`，仍只接收 `{}`；C 持有的当前平台设备 Bearer 不交给 D。返回 StandardDeviceProfile：`{account:{id,tenantId,displayName}}`，账号 id 只与已验证设备 JWT sub 比较，tenantId 与当前租户比较；C 输出 `{memberId,displayName}`，其中 memberId 始终来自设备会话。D 不得用 account.id 推导成员 ID，不得选择设备或来源会话。
+
+`StandardDeviceController` 的新接口与现有 device-session 共用 `StandardDevices.access` 的在线核验：签名/audience、已登记 client、tenant/account/device、Org 有效权限和当前来源状态均校验；在最终事务再次核对设备账号/来源，读取当前 active 账号资料。无查询参数，重复 Authorization 拒绝，响应 no-store，不返回或伪造浏览器 Me.session、Cookie 或令牌，不延长来源 idle。未知、失效来源或控制面失败均失败关闭。
+
+选择独立设备资料接口，是因为现有 `/me` 依赖浏览器 sid，不能用合法的无 sid 设备令牌读取。浏览器 `/me` 的 Me schema 和处理逻辑保持不变；原来 C 调 `/me` 的接线在本批迁移为 device-profile，不允许回退浏览器 cookie。IAM 本分支已实现所需接口，AUTH-D 无须再等一个资料接口补丁；仍须在主控安排的真实 Desktop/DSH 入口联调时验证。

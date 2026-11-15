@@ -617,6 +617,16 @@ export interface components {
           }
         | {
             /** @constant */
+            operation: 'getPublicNetworkControl';
+            input: components['schemas']['ShellAuthInput_getPublicNetworkControl'];
+          }
+        | {
+            /** @constant */
+            operation: 'confirmNetworkControl';
+            input: components['schemas']['ShellAuthInput_confirmNetworkControl'];
+          }
+        | {
+            /** @constant */
             operation: 'profile_read';
             input: components['schemas']['ShellAuthInput_profile_read'];
           }
@@ -1005,6 +1015,20 @@ export interface components {
           /** Format: uuid */
           requestId: string;
           /** @constant */
+          operation: 'getPublicNetworkControl';
+          output: components['schemas']['ShellAuthOutput_getPublicNetworkControl'];
+        }
+      | {
+          /** Format: uuid */
+          requestId: string;
+          /** @constant */
+          operation: 'confirmNetworkControl';
+          output: components['schemas']['ShellAuthOutput_confirmNetworkControl'];
+        }
+      | {
+          /** Format: uuid */
+          requestId: string;
+          /** @constant */
           operation: 'profile_read';
           output: components['schemas']['ShellAuthOutput_profile_read'];
         }
@@ -1130,6 +1154,8 @@ export interface components {
             | 'network_submit'
             | 'getNetworkKeys'
             | 'getNetworkKeyAnnouncement'
+            | 'getPublicNetworkControl'
+            | 'confirmNetworkControl'
             | 'profile_read'
             | 'provider_diagnostic'
             | 'team_list_endpoints'
@@ -1997,6 +2023,11 @@ export interface components {
     };
     ShellAuthInput_getNetworkKeys: Record<string, never>;
     ShellAuthInput_getNetworkKeyAnnouncement: Record<string, never>;
+    ShellAuthInput_getPublicNetworkControl: Record<string, never>;
+    ShellAuthInput_confirmNetworkControl: {
+      /** @description 解码后最多65536字节，必须严格验证 network/auto-renewal-v2.schema.json#/$defs/InstallationReceipt；保留原始受签字节，不经生成模型重序列化。 */
+      receiptWire: string;
+    };
     ShellAuthInput_profile_read: Record<string, never>;
     ShellAuthInput_provider_diagnostic: Record<string, never>;
     ShellAuthplugin_team_mcp_schema_json__defs_Limit: number;
@@ -2398,15 +2429,6 @@ export interface components {
       };
       body: components['schemas']['ShellAuthresource_signatures_schema_json__defs_RevocationList'];
     };
-    ShellAuthopenapi_resource_yaml_components_schemas_MemberDownloadTicket: {
-      ticket: string;
-      /** Format: uuid */
-      clientId: string;
-      /** Format: date-time */
-      expiresAt: string;
-      resourceEnvelope: components['schemas']['ShellAuthresource_signatures_schema_json__defs_ResourceEnvelope'];
-      revocations: components['schemas']['ShellAuthresource_signatures_schema_json__defs_RevocationList'];
-    };
     ShellAuthOutput_createMemberResourceDownloadTicket: {
       statusCode: number;
       headers?: {
@@ -2416,7 +2438,10 @@ export interface components {
         'content-range'?: string;
         'retry-after'?: string;
       };
-      body: components['schemas']['ShellAuthopenapi_resource_yaml_components_schemas_MemberDownloadTicket'];
+      body: {
+        /** @description 解码后最多65536字节，必须严格验证 original download ticket response；保留原始受签字节，不经生成模型重序列化。 */
+        wire: string & unknown;
+      };
     };
     ShellAuthOutput_consumeMemberResourceDownloadTicket: {
       statusCode: number;
@@ -2901,6 +2926,34 @@ export interface components {
         streamId: string;
       };
     };
+    ShellAuthOutput_UnifiedCreateDownloadTicket: {
+      statusCode: number;
+      headers?: {
+        etag?: string;
+        'content-type'?: string;
+        'content-length'?: string;
+        'content-range'?: string;
+        'retry-after'?: string;
+      };
+      body: {
+        /** @description 解码后最多65536字节，必须严格验证 original download ticket response；保留原始受签字节，不经生成模型重序列化。 */
+        wire: string & unknown;
+      };
+    };
+    ShellAuthOutput_UnifiedDownloadArtifact: {
+      statusCode: number;
+      headers?: {
+        etag?: string;
+        'content-type'?: string;
+        'content-length'?: string;
+        'content-range'?: string;
+        'retry-after'?: string;
+      };
+      body: {
+        /** Format: uuid */
+        streamId: string;
+      };
+    };
     ShellAuthresource_unified_schema_json__defs_UnifiedArtifactDownload: {
       artifactId: string;
       digest: components['schemas']['ShellAuthresource_signatures_schema_json__defs_Digest'];
@@ -2936,39 +2989,6 @@ export interface components {
        * @enum {string}
        */
       desiredState?: 'ENABLED' | 'DISABLED' | 'REMOVED';
-    };
-    ShellAuthresource_unified_schema_json__defs_UnifiedDownloadTicket: {
-      ticket: string;
-      /** Format: uuid */
-      clientId: string;
-      expiresAt: components['schemas']['ShellAuthresource_signatures_schema_json__defs_Time'];
-      resource: components['schemas']['ShellAuthresource_unified_schema_json__defs_UnifiedResourceRef'];
-      revocations: components['schemas']['ShellAuthresource_signatures_schema_json__defs_RevocationList'];
-    };
-    ShellAuthOutput_UnifiedCreateDownloadTicket: {
-      statusCode: number;
-      headers?: {
-        etag?: string;
-        'content-type'?: string;
-        'content-length'?: string;
-        'content-range'?: string;
-        'retry-after'?: string;
-      };
-      body: components['schemas']['ShellAuthresource_unified_schema_json__defs_UnifiedDownloadTicket'];
-    };
-    ShellAuthOutput_UnifiedDownloadArtifact: {
-      statusCode: number;
-      headers?: {
-        etag?: string;
-        'content-type'?: string;
-        'content-length'?: string;
-        'content-range'?: string;
-        'retry-after'?: string;
-      };
-      body: {
-        /** Format: uuid */
-        streamId: string;
-      };
     };
     ShellAuthresource_unified_schema_json__defs_UnifiedInstallationReport: {
       /** Format: uuid */
@@ -3071,7 +3091,10 @@ export interface components {
         'content-range'?: string;
         'retry-after'?: string;
       };
-      body: components['schemas']['ShellAuthresource_unified_schema_json__defs_UnifiedDownloadTicket'];
+      body: {
+        /** @description 解码后最多65536字节，必须严格验证 original download ticket response；保留原始受签字节，不经生成模型重序列化。 */
+        wire: string & unknown;
+      };
     };
     ShellAuthOutput_UnifiedDownloadVersionArtifact: {
       statusCode: number;
@@ -3288,6 +3311,21 @@ export interface components {
         available: boolean;
       };
     };
+    /**
+     * Network register result
+     * @description Authenticated HTTPS registration result, not a signed network frame or authorization token. created describes only this call's final committed transaction; never replay a historical true. See README.md#https-register-initialization for the one-use initialization boundary.
+     */
+    'register-result.schema': {
+      /** Format: uuid */
+      tenant: string;
+      realm: string;
+      node: string;
+      /** Format: uuid */
+      device: string;
+      systemAddress: string;
+      /** @description true only if this call actually INSERTed the authenticated device's new node in its final committed transaction. An existing node, idempotent retry or concurrent loser returns false; transaction retries cannot retain true from a rolled-back attempt. Only the current authenticated HTTPS request generation may consume true once, after fully verified signed READY confirms incarnation and the complete ledger is atomically committed. Never persist as reusable initialization permission. */
+      created: boolean;
+    };
     ShellAuthOutput_network_open: {
       statusCode: number;
       headers?: {
@@ -3297,6 +3335,15 @@ export interface components {
       body: {
         /** Format: uuid */
         streamId: string;
+        registration: components['schemas']['register-result.schema'];
+        binding: {
+          /** Format: uuid */
+          executionContextId: string;
+          /** Format: uuid */
+          shellEpoch: string;
+          /** Format: int64 */
+          revision: number;
+        };
       };
     };
     ShellAuthOutput_upload_open: {
@@ -3353,7 +3400,7 @@ export interface components {
         'retry-after'?: string;
       };
       body: {
-        /** @description 解码后最多65536字节，必须严格验证 network/keyset.schema.json#/$defs/SignedKeyset；保留原始受签字节，不经生成模型重序列化。 */
+        /** @description 解码后最多33554432字节，必须严格验证 network/auto-renewal-v2.schema.json#/$defs/Publication；保留原始受签字节，不经生成模型重序列化。 */
         wire: string;
       };
     };
@@ -3364,7 +3411,29 @@ export interface components {
         'retry-after'?: string;
       };
       body: {
-        /** @description 解码后最多65536字节，必须严格验证 network/protocol.schema.json#/$defs/KeysetAnnouncement；保留原始受签字节，不经生成模型重序列化。 */
+        /** @description 解码后最多33554432字节，必须严格验证 network/auto-renewal-v2.schema.json#/$defs/SignedKeysetAnnouncementV2；保留原始受签字节，不经生成模型重序列化。 */
+        wire: string;
+      };
+    };
+    ShellAuthOutput_getPublicNetworkControl: {
+      statusCode: number;
+      headers?: {
+        'content-type'?: string;
+        'retry-after'?: string;
+      };
+      body: {
+        /** @description 解码后最多33554432字节，必须严格验证 network/auto-renewal-v2.schema.json#/$defs/SignedRootControl；保留原始受签字节，不经生成模型重序列化。 */
+        wire: string;
+      };
+    };
+    ShellAuthOutput_confirmNetworkControl: {
+      statusCode: number;
+      headers?: {
+        'content-type'?: string;
+        'retry-after'?: string;
+      };
+      body: {
+        /** @description 解码后最多65536字节，必须严格验证 network/auto-renewal-v2.schema.json#/$defs/IsolationRecord；保留原始受签字节，不经生成模型重序列化。 */
         wire: string;
       };
     };
@@ -3375,7 +3444,10 @@ export interface components {
         'retry-after'?: string;
       };
       body: {
-        /** Format: uuid */
+        /**
+         * Format: uuid
+         * @description Authoritative memberId from /me/device-session; never inferred from account.id. Profile account.id must match verified device JWT sub (accountId).
+         */
         memberId: string;
         displayName: string;
       };

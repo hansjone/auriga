@@ -32,3 +32,7 @@
 尚未批准的设备流，RFC 8628 没有通用的客户端取消端口。本轮不发明新HTTP路径：C 本地取消立即停轮询、清页面尝试，服务端未批准 grant 等待其 TTL（沿现有5分钟）；不能报告为服务端即时撤销。取消竞态中迟到已签发 token 由 C 安全撤销队列调用上述 revoke，仅在本机受保护存储保留最小排队材料。网络不可用也先本地停权，清除可用 token，不向旧页面交结果。用户可在已验证门户沿既有 deny 拒绝 pending grant；此操作仍须其原有会话/Origin/CSRF/step-up边界。
 
 本契约不把 schema/夹具通过当作已实现标准客户端。A/C 需做共享存储并发批准/轮询/刷新/撤销、跨 tenant/client、来源失效、旧票连接关闭与撤销通知丢失等运行时验收；B/D 沿既有受信入口消费，不持有平台令牌。
+
+## 标准设备资料投影（AUTH-K3）
+
+`GET /api/iam/v1/me/device-profile` 使用当前 aud=auriga 标准设备 Bearer，并复用 device-session 的在线准入与最终来源复核；不接受查询身份选择器。StandardDeviceProfile 仅返回当前账号 id、tenantId、displayName，no-store、无浏览器 session/令牌，不 touch idle。账号 id 对应设备 JWT sub，不作为 memberId 的别名。C 将其名字与已验证 device-session.memberId 合成固定 profile_read DTO。浏览器 `/me` 不增加设备分支，旧浏览器返回结构不变。

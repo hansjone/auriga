@@ -206,7 +206,8 @@ async function render(component: Component, locale: 'zh-CN' | 'en' = 'zh-CN') {
   wrapper = mount(component, {
     global: {
       plugins: [createAurigaI18n(locale), ElementPlus],
-      stubs: { teleport: true },
+      // The separately tested maintenance panel performs its own permission reads.
+      stubs: { teleport: true, PlacementAdministration: true },
     },
   });
   await flushPromises();

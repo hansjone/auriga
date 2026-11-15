@@ -9,7 +9,7 @@ const base = packaged
 const loader = packaged
   ? createRequire(new URL('./package.json', import.meta.url))
   : createRequire(new URL('../dsh-plugin/package.json', import.meta.url));
-const Ajv = loader('ajv/dist/2020.js').default;
+const Ajv = loader(packaged ? './vendor-ajv.cjs' : 'ajv/dist/2020.js').default;
 const ajv = new Ajv({ strict: false, allErrors: true });
 ajv.addFormat(
   'uuid',
@@ -27,6 +27,11 @@ ajv.addFormat('uri', (s) => {
   }
 });
 ajv.addFormat('int64', { type: 'number', validate: Number.isSafeInteger });
+ajv.addSchema(
+  JSON.parse(
+    readFileSync(new URL('network/register-result.schema.json', base), 'utf8'),
+  ),
+);
 const files = [
   'auth/uac-login-info',
   'auth/uac-session-binding',
@@ -37,6 +42,21 @@ const files = [
   'plugin/shell-business',
 ];
 const definitions = new Map();
+ajv.addSchema(
+  JSON.parse(
+    readFileSync(new URL('network/address.schema.json', base), 'utf8'),
+  ),
+  'https://auriga.example.com/contracts/network/address.schema.json',
+);
+for (const name of ['local-login', 'managed-device', 'managed-model']) {
+  const schema = JSON.parse(
+    readFileSync(new URL('plugin/' + name + '.schema.json', base), 'utf8'),
+  );
+  const id =
+    'https://auriga.example.com/contracts/plugin/' + name + '.schema.json';
+  ajv.addSchema(schema, id);
+  if (name !== 'local-login') definitions.set(schema.title, id);
+}
 for (const file of files) {
   const url = new URL(file + '.schema.json', base),
     schema = JSON.parse(readFileSync(url, 'utf8'));

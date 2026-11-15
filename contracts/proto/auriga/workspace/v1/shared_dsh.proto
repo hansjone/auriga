@@ -1,0 +1,56 @@
+syntax = "proto3";
+
+package auriga.workspace.v1;
+
+import "auriga/node/v1/shared_dsh_contract.proto";
+
+option go_package = "github.com/hansjone/auriga/infra/gen/auriga/workspace/v1;workspacev1";
+option java_multiple_files = true;
+option java_package = "auriga.contracts.workspace.v1";
+
+// Workspace authority. Internal service authentication and delegated tenant are mandatory.
+// Implementations enforce README.md semantics; proto alone is not validation.
+service SharedDshService {
+  rpc ResolveSharedDsh(ResolveSharedDshRequest) returns (ResolveSharedDshResponse);
+  rpc RegisterSharedDshSession(RegisterSharedDshSessionRequest) returns (RegisterSharedDshSessionResponse);
+  rpc RevokeSharedDsh(RevokeSharedDshRequest) returns (RevokeSharedDshResponse);
+  rpc GetSharedDshResourceView(GetSharedDshResourceViewRequest) returns (GetSharedDshResourceViewResponse);
+  rpc ReportSharedDshResource(ReportSharedDshResourceRequest) returns (ReportSharedDshResourceResponse);
+}
+
+message ResolveSharedDshRequest {
+  string tenant_id = 1;
+  string member_id = 2;
+  string placement_id = 3;
+  string platform_session_id = 4;
+}
+message ResolveSharedDshResponse {
+  auriga.node.v1.SharedDshBinding binding = 1;
+  string state = 2;
+  int64 auth_generation = 3;
+}
+message RegisterSharedDshSessionRequest {
+  auriga.node.v1.SharedDshSessionBinding binding = 1;
+  string parent_session_id = 2;
+}
+message RegisterSharedDshSessionResponse {
+  auriga.node.v1.SharedDshSessionBinding binding = 1;
+}
+message RevokeSharedDshRequest {
+  auriga.node.v1.SharedDshRevocation revocation = 1;
+}
+message RevokeSharedDshResponse {
+  int64 revision = 1;
+}
+message GetSharedDshResourceViewRequest {
+  auriga.node.v1.SharedDshBinding binding = 1;
+}
+message GetSharedDshResourceViewResponse {
+  auriga.node.v1.SharedDshResourceView view = 1;
+}
+message ReportSharedDshResourceRequest {
+  auriga.node.v1.SharedDshResourceReport report = 1;
+}
+message ReportSharedDshResourceResponse {
+  int64 revision = 1;
+}

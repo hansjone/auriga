@@ -1,4 +1,4 @@
-import { PlatformError } from './platform.js';
+import { PlatformError } from './platform-error.js';
 
 const tlsCodes = new Set([
   'DEPTH_ZERO_SELF_SIGNED_CERT',

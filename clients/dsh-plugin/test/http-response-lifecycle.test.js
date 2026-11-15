@@ -1,9 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { installLocalAdmission } from '../src/local/host.js';
-import { runtimePeer } from './local-runtime-peer.js';
+import { shellRuntimePeer } from './shell-runtime-peer.js';
 test('R4 platform logout leaves the native DSH admission and transport owner intact', async (t) => {
-  const { runtime, request } = await runtimePeer(t);
+  const { runtime, request } = await shellRuntimePeer(t);
   const peer = { principal: { kind: 'owner' } };
   const connection = {
     admit: () => ({ peer }),
@@ -14,7 +14,7 @@ test('R4 platform logout leaves the native DSH admission and transport owner int
     protocol: 'http:',
   });
   try {
-    await runtime.logout(request);
+    await runtime.command(request, 'logout');
     assert.equal(runtime.status(request).loggedIn, false);
     assert.equal(
       connection.admit({ headers: {}, url: '/api/session/create' }).peer,
@@ -51,7 +51,7 @@ test('R4 native DSH rejection and non-owner rejection survive removed transport 
   assert.equal(connection.admit, original);
 });
 test('R4 runtime has no browser bearer or local transport-lifetime hooks', async (t) => {
-  const { runtime } = await runtimePeer(t);
+  const { runtime } = await shellRuntimePeer(t);
   for (const name of [
     'bindHttpResponse',
     'bindSocket',
@@ -61,7 +61,8 @@ test('R4 runtime has no browser bearer or local transport-lifetime hooks', async
     assert.equal(runtime[name], undefined);
   assert.equal(
     runtime.resolve({ headers: { cookie: 'auriga_local_session=forged' } }),
-    null,
+    undefined,
   );
-  assert.throws(() => runtime.prepare({ headers: {} }), /owner admission/);
+  assert.equal(runtime.prepare({ headers: {} }).body.loggedIn, false);
+  assert.equal(runtime.prepare({ headers: {} }).body.csrf, undefined);
 });

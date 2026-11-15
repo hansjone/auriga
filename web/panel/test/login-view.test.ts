@@ -1,10 +1,7 @@
 import { afterEach, expect, it, vi } from 'vitest';
-import { createLoginView } from '../../../clients/dsh-plugin/src/login/index.js';
-import type { LoginOptions } from '../../../clients/dsh-plugin/src/login/index.js';
-import type {
-  ClientStep,
-  FormStep,
-} from '../../../clients/dsh-plugin/src/generated/steps';
+import { createLoginView } from '../../shared/src/native-login/index.js';
+import type { LoginOptions } from '../../shared/src/native-login/index.js';
+import type { ClientStep, FormStep } from '../../shared/src/generated/steps';
 
 const disposals: (() => void)[] = [];
 

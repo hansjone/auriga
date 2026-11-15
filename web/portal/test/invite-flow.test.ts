@@ -104,8 +104,8 @@ describe('portal invitation flow', () => {
       invitation: 'invite+code',
       returnTo: '/',
     });
-    await wrapper!.get('[data-provider-id="team"]').trigger('click');
-    await flushPromises();
+    expect(wrapper!.find('[data-testid=login-methods]').exists()).toBe(false);
+    expect(wrapper!.find('input[name="username"]').exists()).toBe(true);
     expect(JSON.parse(fetch.mock.calls[2]?.[1].body)).toEqual({
       providerId: 'team',
       purpose: 'login',

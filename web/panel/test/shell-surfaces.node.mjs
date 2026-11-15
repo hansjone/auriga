@@ -5,6 +5,63 @@ import { surfaceHost, flush, boot, response } from './shell-host.mjs';
 const button = (root, label) =>
   [...root.querySelectorAll('button')].find((el) => el.textContent === label);
 
+test('desktop update polling refreshes the native banner and releases its interval on unmount', async () => {
+  let desktop = null;
+  let reads = 0;
+  let pollingSignal;
+  const actions = [];
+  const host = surfaceHost(async () => response(), {
+    settingsFetch: async (url, init) => {
+      if (new URL(url).pathname.endsWith('/state')) {
+        reads++;
+        pollingSignal = init.signal;
+        return response(200, { desktop });
+      }
+      actions.push(JSON.parse(init.body).action);
+      return response(200, desktop);
+    },
+  });
+  let main;
+  try {
+    main = host.mount('main');
+    await flush();
+    assert.equal(reads, 1);
+    desktop = { available: { version: '2.0.0' }, required: true };
+    host.expire(5000);
+    await flush();
+    assert.equal(reads, 2);
+    assert.match(main.root.textContent, /当前版本已停用.*2\.0\.0/);
+    assert.equal(
+      main.root.querySelector('auriga-team-panel').style.display,
+      'none',
+    );
+    await button(main.root, '更新').onclick();
+    assert.deepEqual(actions, ['update']);
+    desktop = {
+      available: { version: '2.0.0' },
+      downloading: true,
+      totalBytes: 100,
+      downloadedBytes: 40,
+    };
+    host.expire(5000);
+    await flush();
+    assert.equal(reads, 3);
+    assert.equal(main.root.querySelector('progress').value, 40);
+    await button(main.root, '取消下载').onclick();
+    assert.deepEqual(actions, ['update', 'cancel']);
+    main.close();
+    assert.equal(pollingSignal.aborted, true);
+    assert.equal(host.counts.timers.size, 0);
+    host.expire(5000);
+    await flush();
+    assert.equal(reads, 3);
+  } finally {
+    if (main?.alive) main.close();
+    host.dispose();
+    host.close();
+  }
+});
+
 test('plugin loading and panel mounting preserve the native host title', async () => {
   const title = 'DSH · Existing session';
   const host = surfaceHost(async () => response(), { title });
@@ -545,11 +602,11 @@ test('managed failures never load or fall back to the packaged local panel', asy
     assert.ok(main.root.querySelector('[role="alert"]'));
     assert.equal(host.document.querySelector('script'), null);
     assert.equal(
-      calls.filter((url) => !url.endsWith('/auriga/local-login/status')).length,
+      calls.filter((url) => !url.endsWith('/auriga/shell/status')).length,
       1,
     );
     assert.equal(
-      calls.filter((url) => url.endsWith('/auriga/local-login/status')).length,
+      calls.filter((url) => url.endsWith('/auriga/shell/status')).length,
       1,
     );
     assert.doesNotMatch(calls.join(' '), /local-panel/);
@@ -694,8 +751,12 @@ test('review M1: an import that finishes after timeout cannot claim its construc
     assert.equal(main.root.querySelector('auriga-team-panel'), null);
     assert.ok(main.root.querySelector('[role="alert"]'));
     assert.equal(host.moduleImports.length, 2);
-    assert.equal(host.counts.timers.size, 0);
+    assert.equal(host.counts.timers.size, 1);
+    const [poll] = host.counts.timers.values();
+    assert.equal(poll.delay, 5000);
+    assert.equal(poll.repeat, true);
     main.close();
+    assert.equal(host.counts.timers.size, 0);
     host.dispose();
   } finally {
     host.close();

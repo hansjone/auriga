@@ -124,7 +124,7 @@ test('设置更新操作保留主人认证和跨源门禁', async () => {
       },
       desktop: () => ({
         status: () => ({ enabled: true }),
-        update: async () => {
+        beginUpdate: () => {
           calls++;
           return { queued: true };
         },
@@ -152,7 +152,7 @@ test('设置更新操作保留主人认证和跨源门禁', async () => {
       403,
     );
     assert.equal(calls, 0);
-    assert.equal((await send({ 'x-owner': 'yes' })).status, 200);
+    assert.equal((await send({ 'x-owner': 'yes' })).status, 202);
     assert.equal(calls, 1);
   } finally {
     if (server) await new Promise((resolve) => server.close(resolve));

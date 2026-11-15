@@ -12,9 +12,9 @@ import {
 } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { createPlatform, platformConfig } from '../src/local/platform.js';
+import { createPlatform } from '../../shell-auth/platform.mjs';
 import { createVault } from '../src/local/vault.js';
-import { createTeam } from '../src/local/team.js';
+import { createTeam } from './team-broker-peer.js';
 
 const names = [
   'auriga_list_endpoints',
@@ -197,7 +197,7 @@ async function conversation() {
               d.status !== 'host_accepted',
           )
           .map((d) => {
-            d.leaseToken = proof();
+            d.leaseToken = randomUUID();
             d.leaseExpiresAt = new Date(Date.now() + 60000).toISOString();
             d.status = 'leased';
             return d;
@@ -281,15 +281,13 @@ async function conversation() {
         },
       },
     };
-    const platform = createPlatform(
-      platformConfig({
-        platformOrigin: origin,
-        issuer: origin,
-        clientId: 'transport-probe',
-        providerId: 'team',
-        allowLocalHttp: true,
-      }),
-    );
+    const platform = createPlatform({
+      platformOrigin: origin,
+      issuer: origin,
+      clientId: 'transport-probe',
+      providerId: 'team',
+      allowLocalHttp: true,
+    });
     // A mutable response adapter is used only by explicit malformed-response tests.
     let alter = (value) => value;
     const transport = {
@@ -298,7 +296,10 @@ async function conversation() {
         return alter(await platform.request(route, options), route, options);
       },
     };
+    const original = randomUUID();
+    await ctx.sessionController.create({ sessionId: original });
     const team = createTeam({
+      sourceSessionId: original,
       platform: transport,
       vault,
       getAccess: async () => token,
@@ -307,8 +308,6 @@ async function conversation() {
       label,
     });
     await team.start();
-    const original = randomUUID();
-    await ctx.sessionController.create({ sessionId: original });
     const exec = (sessionId) => ({
       agent: { session: ctx.sessions.get(sessionId) },
       callId: proof(),
@@ -329,6 +328,7 @@ async function conversation() {
       exec,
       reconnect: (nextVault) =>
         createTeam({
+          sourceSessionId: original,
           platform: transport,
           vault: nextVault,
           getAccess: async () => token,

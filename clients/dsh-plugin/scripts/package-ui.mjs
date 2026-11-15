@@ -5,6 +5,8 @@ import { spawnSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { packageNetworkTrust } from './package-network-trust.mjs';
+await packageNetworkTrust();
 const root = new URL('../../../', import.meta.url);
 const require = createRequire(new URL('package.json', root));
 const vite = join(dirname(require.resolve('vite/package.json')), 'bin/vite.js');

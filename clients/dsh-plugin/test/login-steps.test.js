@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { JSDOM } from 'jsdom';
-import { createLoginView } from '../src/login/index.js';
+import { createLoginView } from '../../../web/shared/src/native-login/index.js';
 
 const recovery = {
   type: 'form',
