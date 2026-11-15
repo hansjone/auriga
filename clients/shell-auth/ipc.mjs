@@ -27,11 +27,27 @@ export async function startIpc({ helper, broker, business }) {
     readyResolve = resolve;
     readyReject = reject;
   });
+  void ready.catch(() => {});
   const send = (value) => {
-    if (!closed && !child.stdin.destroyed)
-      child.stdin.write(JSON.stringify(value) + '\n');
+    if (closed) return;
+    if (
+      child.stdin.destroyed ||
+      !child.stdin.writable ||
+      child.stdin.writableEnded
+    ) {
+      cleanup();
+      return;
+    }
+    try {
+      child.stdin.write(JSON.stringify(value) + '\n', (error) => {
+        if (error) cleanup();
+      });
+    } catch {
+      cleanup();
+    }
   };
   const cleanup = () => {
+    if (closed) return;
     closed = true;
     for (const peer of peers.values()) host.disconnect(peer);
     peers.clear();
@@ -44,6 +60,7 @@ export async function startIpc({ helper, broker, business }) {
     waiters.clear();
   };
   child.on('error', cleanup);
+  child.stdin.on('error', cleanup);
   child.on('exit', cleanup);
   child.stderr.resume(); // helper has only a fixed safe error; no raw output forwarded
   const lines = createInterface({ input: child.stdout });
@@ -109,7 +126,8 @@ export async function startIpc({ helper, broker, business }) {
             keep: true,
           }),
         );
-        subscriptions.set(id, stop);
+        if (closed) stop();
+        else subscriptions.set(id, stop);
         return;
       }
       if (payload.path === '/business/streams') {
@@ -121,7 +139,8 @@ export async function startIpc({ helper, broker, business }) {
         const stop = broker.subscribe(payload, owner, (event) =>
           send({ id, payload: event, keep: true }),
         );
-        subscriptions.set(id, stop);
+        if (closed) stop();
+        else subscriptions.set(id, stop);
         return;
       }
       const response = payload.call
@@ -162,6 +181,7 @@ export async function startIpc({ helper, broker, business }) {
   }
   return {
     async attach(dsh) {
+      if (closed) throw new Error('shell IPC unavailable');
       const registered = new Promise((resolve, reject) => {
         waiters.set(dsh.pid, { resolve, reject });
       });
@@ -186,6 +206,7 @@ export async function startIpc({ helper, broker, business }) {
     async close() {
       if (!closed) {
         const exited = once(child, 'exit');
+        cleanup();
         child.stdin.end();
         child.kill();
         await exited;

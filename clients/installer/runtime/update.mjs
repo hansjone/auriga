@@ -13,7 +13,9 @@ import {
   closeSync,
   writeSync,
   statSync,
+  appendFileSync,
 } from 'node:fs';
+import { setTimeout as delay } from 'node:timers/promises';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { Buffer } from 'node:buffer';
@@ -63,7 +65,11 @@ export function extractArchive(archive, directory) {
   const result = spawnSync(systemTool('tar'), ['-xf', zip, '-C', directory], {
     encoding: 'utf8',
   });
-  if (result.status !== 0) throw new Error('update archive extraction failed');
+  if (result.error) throw result.error;
+  if (result.status !== 0)
+    throw Object.assign(new Error('update archive extraction failed'), {
+      code: 'desktop.extract_failed',
+    });
   rmSync(zip);
   return join(directory, 'payload');
 }
@@ -148,6 +154,8 @@ export function createUpdater({
       downloadedBytes: state.downloadedBytes ?? 0,
       totalBytes: state.totalBytes ?? 0,
       error: state.error ?? null,
+      stage: state.stage ?? null,
+      failure: state.failure ?? null,
       restartRequired: existsSync(join(root, 'desktop-pending')),
     };
   };
@@ -564,30 +572,119 @@ async function applyPendingLocked(
     request = fetch,
     session,
     transfer,
+    onState = () => {},
   } = {},
 ) {
   const queued = join(root, 'desktop-pending');
   if (!existsSync(queued) || existsSync(join(queued, 'approval-required')))
     return false;
-  let retain = false;
+  let retain = true;
+  let stage = 'verify-current';
+  const note = (next) => {
+    if (stage === next) return;
+    stage = next;
+    changeUpdateState(root, (state) => ({
+      ...state,
+      stage,
+      phase: 'installing',
+      failure: null,
+      error: null,
+    }));
+    try {
+      appendFileSync(
+        join(root, 'desktop-update.log'),
+        JSON.stringify({
+          at: new Date().toISOString(),
+          stage,
+          phase: 'installing',
+        }) + '\n',
+      );
+    } catch {
+      /* diagnostics are best effort */
+    }
+    onState({ phase: 'installing', stage });
+  };
+  const retry = async (operation) => {
+    for (let attempt = 0; ; attempt++) {
+      try {
+        return await operation();
+      } catch (error) {
+        if (
+          !['EBUSY', 'EPERM', 'EACCES', 'ENOTEMPTY'].includes(error.code) ||
+          attempt === 3
+        )
+          throw error;
+        const retryState = {
+          phase: 'retrying',
+          stage,
+          code: error.code,
+          attempt: attempt + 1,
+        };
+        try {
+          appendFileSync(
+            join(root, 'desktop-update.log'),
+            JSON.stringify({ at: new Date().toISOString(), ...retryState }) +
+              '\n',
+          );
+        } catch {
+          /* diagnostics are best effort */
+        }
+        onState(retryState);
+        await delay([150, 350, 750][attempt]);
+      }
+    }
+  };
+  const rejectInvalid = (operation, code = 'desktop.release_invalid') => {
+    try {
+      return operation();
+    } catch (error) {
+      // Native I/O failures can be retried. Untrusted bytes cannot.
+      if (!error.code || !/^(E[A-Z]+)$/.test(error.code)) {
+        retain = false;
+        error.code ??= code;
+      }
+      throw error;
+    }
+  };
   try {
     const current = readState(root);
     const old = verifyPackage(versionDir(root, current.current));
-    const envelope = JSON.parse(
-      readFileSync(join(queued, 'release.json'), 'utf8'),
+    note('verify-release');
+    const envelope = rejectInvalid(() =>
+      JSON.parse(readFileSync(join(queued, 'release.json'), 'utf8')),
     );
     const saved = readUpdateState(root);
-    const body = verifyRelease(envelope, {
-      publicKey,
-      now,
-      currentVersion: old.bundleVersion,
-      ...saved.channelWatermarks?.[saved.channel ?? 'stable'],
-      channel: saved.channel ?? 'stable',
-    });
+    const body = rejectInvalid(() =>
+      verifyRelease(envelope, {
+        publicKey,
+        now,
+        currentVersion: old.bundleVersion,
+        ...saved.channelWatermarks?.[saved.channel ?? 'stable'],
+        channel: saved.channel ?? 'stable',
+      }),
+    );
+    // Recognize a committed transaction whose input survived the crash.
+    if (
+      current.current === body.packageId &&
+      old.bundleVersion === body.version
+    ) {
+      retain = false;
+      changeUpdateState(root, (state) => ({
+        ...state,
+        phase: 'idle',
+        error: null,
+        failure: null,
+        stage: 'done',
+        available: null,
+        requiredRelease: null,
+      }));
+      return true;
+    }
     const binding = JSON.parse(
       readFileSync(join(root, 'desktop-origin.json'), 'utf8'),
     );
     retain = true;
+    note('check-release');
     const response = await request(
       platformUrl(
         binding.origin,
@@ -598,61 +695,146 @@ async function applyPendingLocked(
     );
     if (response.status === 404) {
       retain = false;
-      throw new Error('queued release withdrawn');
+      throw Object.assign(new Error('queued release withdrawn'), {
+        code: 'desktop.release_withdrawn',
+      });
     }
     if (!response.ok) throw new Error('queued release check unavailable');
-    const active = JSON.parse(
-      (await bounded(response, 32768)).toString('utf8'),
+    const activeText = (await bounded(response, 32768)).toString('utf8');
+    const active = rejectInvalid(() => JSON.parse(activeText));
+    const activeBody = rejectInvalid(() =>
+      verifyRelease(active, {
+        publicKey,
+        now,
+        channel: body.channel,
+      }),
     );
-    const activeBody = verifyRelease(active, {
-      publicKey,
-      now,
-      channel: body.channel,
-    });
     if (
       releaseDigest(activeBody) !== releaseDigest(body) ||
       JSON.stringify(active.signature) !== JSON.stringify(envelope.signature)
     ) {
       retain = false;
-      throw new Error('queued release replaced');
+      throw Object.assign(new Error('queued release replaced'), {
+        code: 'desktop.release_replaced',
+      });
     }
-    retain = false;
+    note('verify-archive');
     const archive = join(queued, 'desktop.exe');
-    if (sha256File(archive) !== body.sha256)
-      throw new Error('queued package SHA mismatch');
+    if (sha256File(archive) !== body.sha256) {
+      retain = false;
+      throw Object.assign(new Error('queued package SHA mismatch'), {
+        code: 'desktop.archive_invalid',
+      });
+    }
     const unpacked = join(queued, 'apply');
-    const payload = await extract(archive, unpacked);
-    const manifest = verifyPackage(payload);
+    note('extract');
+    const payload = await retry(async () => {
+      // The signed archive is the durable input. Rebuild scratch output after
+      // interruption or failed extraction, while holding the transfer lock.
+      rmSync(unpacked, { recursive: true, force: true });
+      return await extract(archive, unpacked);
+    });
+    note('verify-package');
+    const manifest = rejectInvalid(
+      () => verifyPackage(payload),
+      'desktop.package_invalid',
+    );
     if (
       manifest.id !== body.packageId ||
       manifest.bundleVersion !== body.version
-    )
-      throw new Error('queued package ID mismatch');
-    install({
-      root,
-      payload,
-      dataHome: current.dataHome,
-      smoke,
-      session,
-      transfer,
-    });
+    ) {
+      retain = false;
+      throw Object.assign(new Error('queued package ID mismatch'), {
+        code: 'desktop.package_invalid',
+      });
+    }
+    note('install');
+    await retry(() =>
+      install({
+        root,
+        payload,
+        dataHome: current.dataHome,
+        smoke,
+        session,
+        transfer,
+        progress: (step) => note(step),
+      }),
+    );
+    retain = false;
     changeUpdateState(root, (state) => ({
       ...state,
       phase: 'idle',
       error: null,
       available: null,
       requiredRelease: null,
+      failure: null,
+      stage: 'done',
     }));
     return true;
   } catch (error) {
+    const failure = {
+      stage,
+      code: /^(?:E[A-Z_]+|desktop\.[a-z_]+)$/.test(error.code ?? '')
+        ? error.code
+        : 'updateFailed',
+      pathCategory: ['verify-release', 'check-release'].includes(stage)
+        ? 'release'
+        : ['verify-archive', 'extract', 'verify-package'].includes(stage)
+          ? 'pending'
+          : ['profile', 'smoke'].includes(stage)
+            ? 'data'
+            : 'installation',
+    };
+    error.updateFailure = failure;
+    try {
+      appendFileSync(
+        join(root, 'desktop-update.log'),
+        JSON.stringify({ at: new Date().toISOString(), ...failure }) + '\n',
+      );
+    } catch {
+      /* keep the original failure */
+    }
     changeUpdateState(root, (state) => ({
       ...state,
       phase: 'failed',
       error: 'updateFailed',
+      stage,
+      failure,
     }));
+    onState({ phase: 'failed', ...failure });
     throw error;
   } finally {
-    if (!retain) rmSync(queued, { recursive: true, force: true });
+    if (!retain) {
+      try {
+        rmSync(queued, {
+          recursive: true,
+          force: true,
+          maxRetries: 3,
+          retryDelay: 200,
+        });
+      } catch (error) {
+        // Cleanup must not turn a committed update into an apparent rollback,
+        // or hide the original trust/installation error. A leftover queue is
+        // checked again on the next launch, including the committed-ID guard.
+        const cleanup = {
+          phase: 'cleanup',
+          stage: 'cleanup',
+          code: /^E[A-Z]+$/.test(error.code ?? '')
+            ? error.code
+            : 'updateFailed',
+          pathCategory: 'pending',
+        };
+        try {
+          appendFileSync(
+            join(root, 'desktop-update.log'),
+            JSON.stringify({ at: new Date().toISOString(), ...cleanup }) + '\n',
+          );
+        } catch {
+          /* diagnostics are best effort */
+        }
+        onState(cleanup);
+      }
+    }
   }
 }
 

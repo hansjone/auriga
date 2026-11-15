@@ -1,4 +1,4 @@
-/* global Response, setImmediate */
+/* global setImmediate */
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { generateKeyPairSync, sign, createHash } from 'node:crypto';
@@ -13,6 +13,7 @@ import {
 } from 'node:fs';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
+import { rmSync } from 'node:fs';
 import {
   changeUpdateState,
   cleanupDownloads,
@@ -974,5 +975,216 @@ for (const reason of ['withdrawn', 'replaced']) {
     );
     assert.equal(existsSync(join(f.root, 'desktop-pending')), false);
     assert.equal(readState(f.root).current, f.old.id);
+    assert.equal(
+      readUpdateState(f.root).failure.code,
+      reason === 'withdrawn'
+        ? 'desktop.release_withdrawn'
+        : 'desktop.release_replaced',
+    );
   });
+}
+
+for (const failure of ['interrupted', 'temporary', 'persistent', 'smoke']) {
+  test(`pending recovery retains signed input across ${failure} and retries safely`, async (t) => {
+    const f = fixture(t);
+    const manifest = signed({ packageId: f.next.id });
+    const request = async (url) =>
+      url.endsWith('/latest')
+        ? new Response(JSON.stringify(manifest))
+        : new Response('zip');
+    const updater = resumedUpdater(f, request, { defer: true });
+    await updater.check();
+    await updater.update();
+    const scratch = join(f.root, 'desktop-pending', 'apply');
+    mkdirSync(scratch);
+    writeFileSync(join(scratch, 'interrupted-output'), 'incomplete');
+    let attempts = 0;
+    const events = [];
+    const options = {
+      publicKey: keys.publicKey,
+      now,
+      request,
+      onState: (event) => events.push(event),
+      extract: (_archive, target) => {
+        attempts++;
+        mkdirSync(target); // Regression: old applyPending hit EEXIST here.
+        if (
+          failure === 'persistent' ||
+          (failure === 'temporary' && attempts === 1)
+        )
+          throw Object.assign(new Error('token=private-content'), {
+            code: 'EPERM',
+            path: 'private-user-path',
+          });
+        return f.next.dir;
+      },
+      smoke: () => {
+        if (failure === 'smoke')
+          throw Object.assign(new Error('private content'), {
+            code: 'desktop.smoke_failed',
+          });
+      },
+    };
+    if (['persistent', 'smoke'].includes(failure)) {
+      await assert.rejects(applyPending(f.root, options));
+      assert.equal(readState(f.root).current, f.old.id);
+      assert.equal(
+        readFileSync(join(f.root, 'desktop-pending', 'desktop.exe'), 'utf8'),
+        'zip',
+      );
+      const saved = readUpdateState(f.root);
+      assert.equal(
+        saved.failure.code,
+        failure === 'smoke' ? 'desktop.smoke_failed' : 'EPERM',
+      );
+      const log = readFileSync(join(f.root, 'desktop-update.log'), 'utf8');
+      assert.doesNotMatch(log, /private|token=/);
+      await applyPending(f.root, {
+        ...options,
+        smoke: () => {},
+        extract: () => f.next.dir,
+      });
+    } else await applyPending(f.root, options);
+    assert.equal(
+      attempts,
+      failure === 'temporary' ? 2 : failure === 'persistent' ? 4 : 1,
+    );
+    assert.equal(readState(f.root).current, f.next.id);
+    assert.equal(existsSync(join(f.root, 'desktop-pending')), false);
+    assert.equal(
+      readFileSync(join(profileDir(f.dataHome), 'user-data.txt'), 'utf8'),
+      'keep',
+    );
+    assert.ok(events.some((event) => event.stage === 'extract'));
+  });
+}
+
+test('pending signature and archive hash failures discard unusable input', async (t) => {
+  for (const mode of ['signature', 'hash']) {
+    const f = fixture(t);
+    const manifest = signed({ packageId: f.next.id });
+    const request = async (url) =>
+      url.endsWith('/latest')
+        ? new Response(JSON.stringify(manifest))
+        : new Response('zip');
+    const updater = resumedUpdater(f, request, { defer: true });
+    await updater.check();
+    await updater.update();
+    if (mode === 'signature')
+      writeFileSync(
+        join(f.root, 'desktop-pending/release.json'),
+        JSON.stringify({ ...manifest, notes: 'tampered' }),
+      );
+    else writeFileSync(join(f.root, 'desktop-pending/desktop.exe'), 'tampered');
+    await assert.rejects(
+      applyPending(f.root, { publicKey: keys.publicKey, now, request }),
+    );
+    assert.equal(existsSync(join(f.root, 'desktop-pending')), false);
+    assert.equal(readState(f.root).current, f.old.id);
+    assert.equal(
+      readUpdateState(f.root).failure.code,
+      mode === 'signature'
+        ? 'desktop.release_invalid'
+        : 'desktop.archive_invalid',
+    );
+  }
+});
+
+test('a committed transaction with leftover pending input preserves the previous version', async (t) => {
+  const f = fixture(t);
+  const manifest = signed({ packageId: f.next.id });
+  const request = async (url) =>
+    url.endsWith('/latest')
+      ? new Response(JSON.stringify(manifest))
+      : new Response('zip');
+  const updater = resumedUpdater(f, request, { defer: true });
+  await updater.check();
+  await updater.update();
+  install({
+    root: f.root,
+    dataHome: f.dataHome,
+    payload: f.next.dir,
+    smoke: () => {},
+  });
+  assert.equal(readState(f.root).previous, f.old.id);
+  await applyPending(f.root, {
+    publicKey: keys.publicKey,
+    now,
+    request,
+    extract: () => assert.fail('already committed'),
+  });
+  assert.equal(readState(f.root).previous, f.old.id);
+  assert.equal(existsSync(join(f.root, 'desktop-pending')), false);
+});
+
+for (const lockTarget of ['scratch', 'launcher']) {
+  for (const persistent of [false, true]) {
+    test(
+      `Windows native file lock on ${lockTarget} (${persistent ? 'persistent' : 'temporary'})`,
+      { skip: process.platform !== 'win32' },
+      async (t) => {
+        const f = fixture(t);
+        const manifest = signed({ packageId: f.next.id });
+        const request = async (url) =>
+          url.endsWith('/latest')
+            ? new Response(JSON.stringify(manifest))
+            : new Response('zip');
+        const updater = resumedUpdater(f, request, { defer: true });
+        await updater.check();
+        await updater.update();
+        const scratch = join(f.root, 'desktop-pending/apply');
+        mkdirSync(scratch);
+        const locked =
+          lockTarget === 'launcher'
+            ? join(f.root, 'bin', 'auriga-desktop.cmd')
+            : join(scratch, 'locked');
+        writeFileSync(locked, 'scratch');
+        const script = join(f.root, 'lock.ps1');
+        writeFileSync(
+          script,
+          `param([string]$File)\n$f=[IO.File]::Open($File,'Open','Read','None')\nWrite-Output 'locked'\n[Console]::ReadLine() | Out-Null\n$f.Dispose()\n`,
+        );
+        const child = spawn(
+          'powershell.exe',
+          ['-NoProfile', '-File', script, locked],
+          { windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] },
+        );
+        const exited = once(child, 'exit');
+        try {
+          await once(child.stdout, 'data');
+          assert.throws(
+            () => rmSync(locked),
+            (error) => {
+              t.diagnostic(
+                `first native lock error code=${error.code} syscall=${error.syscall} category=${lockTarget}`,
+              );
+              return ['EPERM', 'EBUSY', 'EACCES'].includes(error.code);
+            },
+          );
+          const options = {
+            publicKey: keys.publicKey,
+            now,
+            request,
+            smoke: () => {},
+            extract: () => f.next.dir,
+          };
+          if (persistent) {
+            await assert.rejects(applyPending(f.root, options), (error) =>
+              ['EPERM', 'EBUSY', 'EACCES'].includes(error.code),
+            );
+            assert.ok(existsSync(join(f.root, 'desktop-pending/desktop.exe')));
+            assert.equal(readState(f.root).current, f.old.id);
+          } else setTimeout(() => child.stdin.end('\n'), 400);
+          if (persistent) child.stdin.end('\n');
+          if (persistent) await exited;
+          await applyPending(f.root, options);
+          assert.equal(readState(f.root).current, f.next.id);
+        } finally {
+          if (child.exitCode === null) child.stdin.end('\n');
+          await exited;
+          rmSync(script, { force: true });
+        }
+      },
+    );
+  }
 }

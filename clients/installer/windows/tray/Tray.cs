@@ -252,7 +252,7 @@ sealed class TrayApp : ApplicationContext
         pendingTimer.Interval = 30 * 1000;
         pendingTimer.Tick += delegate
         {
-            bool queued = File.Exists(Path.Combine(root, "desktop-pending"));
+            bool queued = File.Exists(Path.Combine(root, "desktop-pending", "release.json"));
             if (queued && !restartRequired && !busy)
             {
                 restartRequired = true;
@@ -468,7 +468,19 @@ sealed class TrayApp : ApplicationContext
     void OnEvent(Dictionary<string, object> e)
     {
         string kind = Desktop.Str(e, "event");
-        if (kind == "platform")
+        if (kind == "update")
+        {
+            string phase = Desktop.Str(e, "phase"), stage = Desktop.Str(e, "stage"), code = Desktop.Str(e, "code");
+            Log("update " + phase + " stage=" + stage + " code=" + code + " category=" + Desktop.Str(e, "pathCategory"));
+            if (phase == "failed")
+            {
+                restartRequired = File.Exists(Path.Combine(root, "desktop-pending", "release.json"));
+                restartItem.Text = "重试更新（" + (code ?? "updateFailed") + "/" + (stage ?? "unknown") + "）";
+                icon.ShowBalloonTip(8000, Desktop.Brand, "更新失败，原版本已保留。" + (code ?? "updateFailed") + " / " + stage + "。详情见安装目录 desktop-update.log。", ToolTipIcon.Warning);
+            }
+            else if (phase == "installed") restartItem.Text = "重启以完成更新";
+        }
+        else if (kind == "platform")
         {
             string previous = platformState;
             platformState = Desktop.Str(e, "state");

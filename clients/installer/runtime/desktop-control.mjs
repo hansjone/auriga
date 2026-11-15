@@ -55,6 +55,8 @@ export function desktopInfo(root) {
       downloadedBytes: update.downloadedBytes ?? 0,
       totalBytes: update.totalBytes ?? 0,
       error: update.error ?? null,
+      stage: update.stage ?? null,
+      failure: update.failure ?? null,
       lastCheckedAt: update.lastCheckedAt ?? null,
       restartRequired: existsSync(join(root, 'desktop-pending')),
     },
@@ -93,6 +95,8 @@ const summary = (status) => ({
   downloadedBytes: status.downloadedBytes,
   totalBytes: status.totalBytes,
   error: status.error,
+  stage: status.stage,
+  failure: status.failure,
   restartRequired: status.restartRequired,
 });
 

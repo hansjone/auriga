@@ -12,12 +12,74 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { spawn, spawnSync, execFileSync } from 'node:child_process';
 import { once } from 'node:events';
+import { Buffer } from 'node:buffer';
 import { buildHelper } from '../windows/build.mjs';
 import { Vault } from '../vault.mjs';
 import { createInterface } from 'node:readline';
 import { BusinessProxy } from '../business.mjs';
 import { startIpc, connectIpc } from '../ipc.mjs';
 import { fixture, command, login } from './fixtures.mjs';
+
+test(
+  'server shutdown retires subscriptions before ending stdin and ignores late publisher writes',
+  { skip: process.platform !== 'win32', timeout: 20000 },
+  async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'auriga-ipc-shutdown-'));
+    const helper = buildHelper(join(directory, 'helper.exe'));
+    const f = fixture();
+    let publish,
+      stopped = 0;
+    const subscribe = f.broker.subscribe.bind(f.broker);
+    f.broker.subscribe = (request, owner, send) => {
+      publish = send;
+      const stop = subscribe(request, owner, send);
+      return () => {
+        stopped++;
+        stop();
+      };
+    };
+    const ipc = await startIpc({ helper, broker: f.broker, business: {} });
+    const script = `import {createReadStream} from 'node:fs';
+import {createInterface} from 'node:readline'; import {once} from 'node:events';
+import {connectIpc} from ${JSON.stringify(new URL('../ipc.mjs', import.meta.url).href)};
+const input=createReadStream('',{fd:3}); const lines=createInterface({input});
+const [line]=await once(lines,'line'); const descriptor=JSON.parse(line); lines.close(); input.destroy();
+const client=connectIpc(descriptor);
+const result=await client.call(${JSON.stringify({ ...command(f.broker, 'snapshot'), shellEpoch: '00000000-0000-0000-0000-000000000000' })});
+await client.subscribe({...${JSON.stringify(command(f.broker, 'subscribe'))},shellEpoch:result.snapshot.shellEpoch,expectedRevision:result.snapshot.revision},()=>console.log('subscribed'));
+process.stdin.resume(); process.stdin.once('end',()=>client.close());`;
+    const child = spawn(
+      process.execPath,
+      ['--input-type=module', '-e', script],
+      { windowsHide: true, stdio: ['pipe', 'pipe', 'pipe', 'pipe'] },
+    );
+    const exited = once(child, 'exit');
+    let stderr = '';
+    child.stderr.on('data', (bytes) => (stderr += bytes));
+    try {
+      await ipc.attach(child);
+      await once(child.stdout, 'data');
+      const closing = ipc.close();
+      for (let i = 0; i < 20; i++) publish({ type: 'changed' });
+      await closing;
+      assert.equal(stopped, 1);
+      await ipc.close();
+      await assert.rejects(ipc.attach(child), /unavailable/);
+    } finally {
+      child.stdin.end();
+      await exited;
+      await ipc.close();
+      await f.broker.close();
+      rmSync(directory, {
+        recursive: true,
+        force: true,
+        maxRetries: 5,
+        retryDelay: 100,
+      });
+    }
+    assert.doesNotMatch(stderr, /ERR_STREAM_WRITE_AFTER_END|Unhandled/);
+  },
+);
 
 test(
   'closing the real helper before handshake settles late calls without unhandled errors',
