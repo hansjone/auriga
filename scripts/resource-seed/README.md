@@ -12,7 +12,7 @@
 
 ## 插件能力与审核材料
 
-当前 dsh-memwiki 0.4.0 提供 18 个 MCP 工具，包括记忆库查询、增删改和 `memwiki_secret_list/get/set/delete`。工具名从源码提取后写入 `permissions.tools`，`dataAccess` 声明 workspace_read、workspace_write 和 user_selected_files。插件会执行 git，包括向用户所配置远端推送。主机由用户远端配置决定，`outboundHosts` 以 `*` 保守声明可访问任意主机，实际远端需在发布审核时核对。
+当前 dsh-memwiki 0.4.0 提供 18 个 MCP 工具，包括记忆库查询、增删改和 `memwiki_secret_list/get/set/delete`。工具名从源码提取后写入 `permissions.tools`，`dataAccess` 声明 workspace_read、workspace_write 和 user_selected_files。插件会执行 git，包括向用户所配置远端推送。服务端目录拒绝通配主机，`outboundHosts` 声明为空：插件访问的 git 远端完全由用户自行配置，发布说明须写明“远端主机由用户配置”，审核时核对。
 
 Windows 凭据使用 DPAPI，非 Windows 实现采用明文凭据存储。该包的 os=any 包含这一差异，发布审核与使用说明必须披露。能力说明同步写入清单 description 和构建来源文件。清单字段沿用现有契约，权限授权仍由宿主和平台执行。
 

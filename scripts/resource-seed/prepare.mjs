@@ -347,7 +347,8 @@ export async function prepare(sourceArgument, outputArgument) {
       license: kind === 'plugin' ? original.license : 'MIT',
       permissions: {
         tools: kind === 'plugin' ? tools : [],
-        outboundHosts: kind === 'plugin' ? ['*'] : [],
+        // The catalogue rejects wildcard hosts; git remotes are user-configured (see README).
+        outboundHosts: [],
         dataAccess:
           kind === 'plugin'
             ? ['workspace_read', 'workspace_write', 'user_selected_files']

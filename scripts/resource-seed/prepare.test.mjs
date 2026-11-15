@@ -63,6 +63,6 @@ test(
     assert.ok(manifest.permissions.tools.includes('memwiki_secret_get'));
     assert.ok(manifest.permissions.tools.includes('memwiki_secret_delete'));
     assert.match(manifest.description, /push.*user-configured.*plaintext/);
-    assert.deepEqual(manifest.permissions.outboundHosts, ['*']);
+    assert.deepEqual(manifest.permissions.outboundHosts, []);
   },
 );
