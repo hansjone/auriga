@@ -336,7 +336,7 @@ export async function prepare(sourceArgument, outputArgument) {
       version,
       description:
         kind === 'plugin'
-          ? `Shared memory wiki with ${tools.length} MCP tools, including credential list/get/set/delete. Reads and writes the selected vault and credentials. Executes git, including push to user-configured remotes. Windows secrets use DPAPI; non-Windows secrets are stored as plaintext. Outbound wildcard covers user-configured git hosts.`
+          ? `Shared memory wiki with ${tools.length} MCP tools, including credential list/get/set/delete. Reads and writes the selected vault and credentials. Executes git, including push to user-configured remotes. Windows secrets use DPAPI; non-Windows secrets are stored as plaintext. Git remote hosts are user-configured and not enumerable.`
           : meta.description,
       author: {
         displayName:
