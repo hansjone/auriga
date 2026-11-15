@@ -1,0 +1,677 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://auriga.dev/contracts/shared-dsh/v1",
+  "title": "Shared DSH v1 control and data plane",
+  "$defs": {
+    "TicketExchangeRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["ticket"],
+      "properties": {
+        "ticket": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 16384,
+          "pattern": "^[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+$",
+          "not": {
+            "pattern": "[\\r\\n]"
+          }
+        }
+      }
+    },
+    "SignedHeader": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["alg", "kid", "typ"],
+      "properties": {
+        "alg": {
+          "const": "EdDSA",
+          "type": "string"
+        },
+        "kid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "typ": {
+          "type": "string",
+          "enum": [
+            "auriga-shared-identity+jwt",
+            "auriga-shared-ticket+jwt",
+            "auriga-shared-capability+jwt"
+          ]
+        }
+      }
+    },
+    "Binding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "tenantId",
+        "memberId",
+        "placementId",
+        "physicalInstanceId",
+        "mode",
+        "epoch",
+        "revision"
+      ],
+      "properties": {
+        "tenantId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "memberId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "placementId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "physicalInstanceId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "mode": {
+          "type": "string",
+          "enum": ["shared", "dedicated"]
+        },
+        "epoch": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        }
+      }
+    },
+    "SessionBinding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "tenantId",
+        "memberId",
+        "placementId",
+        "physicalInstanceId",
+        "mode",
+        "epoch",
+        "revision",
+        "sessionId",
+        "platformSessionId",
+        "authGeneration"
+      ],
+      "properties": {
+        "tenantId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "memberId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "placementId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "physicalInstanceId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "mode": {
+          "type": "string",
+          "enum": ["shared", "dedicated"]
+        },
+        "epoch": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "sessionId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "platformSessionId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "authGeneration": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        }
+      }
+    },
+    "OpenTicket": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "binding",
+        "platformSessionId",
+        "audience",
+        "issuedAt",
+        "expiresAt",
+        "jti"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "const": 1,
+          "type": "integer"
+        },
+        "binding": {
+          "$ref": "#/$defs/Binding"
+        },
+        "platformSessionId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "audience": {
+          "const": "auriga.placement.exchange",
+          "type": "string"
+        },
+        "issuedAt": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "expiresAt": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "jti": {
+          "type": "string",
+          "format": "uuid"
+        }
+      }
+    },
+    "Identity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "issuer",
+        "audience",
+        "binding",
+        "platformSessionId",
+        "method",
+        "canonicalPath",
+        "issuedAt",
+        "expiresAt",
+        "jti"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "const": 2,
+          "type": "integer"
+        },
+        "issuer": {
+          "const": "auriga.edge",
+          "type": "string"
+        },
+        "audience": {
+          "const": "auriga.shared.ingress",
+          "type": "string"
+        },
+        "binding": {
+          "$ref": "#/$defs/Binding"
+        },
+        "platformSessionId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "method": {
+          "type": "string",
+          "enum": ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"]
+        },
+        "canonicalPath": {
+          "type": "string",
+          "pattern": "^/[^?#\\\\\\r\\n]*$",
+          "maxLength": 4096
+        },
+        "issuedAt": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "expiresAt": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "jti": {
+          "type": "string",
+          "format": "uuid"
+        }
+      }
+    },
+    "Capability": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "binding",
+        "taskId",
+        "audience",
+        "scopes",
+        "credentialVersion",
+        "issuedAt",
+        "expiresAt",
+        "jti"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "const": 1,
+          "type": "integer"
+        },
+        "binding": {
+          "$ref": "#/$defs/SessionBinding"
+        },
+        "taskId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "audience": {
+          "type": "string",
+          "enum": [
+            "auriga.shared.enterprise",
+            "auriga.shared.model",
+            "auriga.shared.message"
+          ]
+        },
+        "scopes": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "enum": [
+              "credentials",
+              "outbound",
+              "model.invoke",
+              "message.send",
+              "message.receive"
+            ]
+          }
+        },
+        "credentialVersion": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "issuedAt": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "expiresAt": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "jti": {
+          "type": "string",
+          "format": "uuid"
+        }
+      }
+    },
+    "Revocation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "tenantId",
+        "memberId",
+        "placementId",
+        "epoch",
+        "authGeneration",
+        "revision",
+        "reason",
+        "revokedAt"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "const": 1,
+          "type": "integer"
+        },
+        "tenantId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "memberId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "placementId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "epoch": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "authGeneration": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "reason": {
+          "type": "string",
+          "enum": ["logout", "credential-invalid", "switch", "member-disabled"]
+        },
+        "revokedAt": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      }
+    },
+    "Resource": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["resourceId", "digest", "leaseId", "expiresAt"],
+      "properties": {
+        "resourceId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "digest": {
+          "type": "string",
+          "pattern": "^sha256:[a-f0-9]{64}$"
+        },
+        "leaseId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "expiresAt": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      }
+    },
+    "ResourceView": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "binding",
+        "viewId",
+        "authorizationSetDigest",
+        "source",
+        "resources"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "const": 1,
+          "type": "integer"
+        },
+        "binding": {
+          "$ref": "#/$defs/Binding"
+        },
+        "viewId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "authorizationSetDigest": {
+          "type": "string",
+          "pattern": "^sha256:[a-f0-9]{64}$"
+        },
+        "source": {
+          "const": "platform",
+          "type": "string"
+        },
+        "resources": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Resource"
+          }
+        }
+      }
+    },
+    "ResourceReport": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "binding",
+        "viewId",
+        "status",
+        "observedAt",
+        "reason"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "const": 1,
+          "type": "integer"
+        },
+        "binding": {
+          "$ref": "#/$defs/Binding"
+        },
+        "viewId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "status": {
+          "type": "string",
+          "enum": ["ready", "rejected", "stopped"]
+        },
+        "observedAt": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "reason": {
+          "type": "string",
+          "enum": [
+            "verified",
+            "expired",
+            "revoked",
+            "authorization-mismatch",
+            "cleanup-unconfirmed"
+          ]
+        }
+      }
+    },
+    "RuntimeIntent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "operationId",
+        "binding",
+        "action",
+        "cancelWaitSeconds",
+        "archiveRetentionSeconds",
+        "workspacePolicy",
+        "sessionPolicy"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "const": 1,
+          "type": "integer"
+        },
+        "operationId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "binding": {
+          "$ref": "#/$defs/Binding"
+        },
+        "action": {
+          "type": "string",
+          "enum": [
+            "prepare-empty",
+            "cooperative-cancel",
+            "stop-pool",
+            "archive-reset",
+            "discard-sessions"
+          ]
+        },
+        "cancelWaitSeconds": {
+          "const": 30,
+          "type": "integer"
+        },
+        "archiveRetentionSeconds": {
+          "const": 2592000,
+          "type": "integer"
+        },
+        "workspacePolicy": {
+          "const": "empty",
+          "type": "string"
+        },
+        "sessionPolicy": {
+          "const": "discard",
+          "type": "string"
+        }
+      }
+    },
+    "RuntimeReceipt": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "operationId",
+        "binding",
+        "receiptId",
+        "action",
+        "outcome",
+        "observedAt",
+        "executionTreeStopped",
+        "sessionsDiscarded",
+        "workspaceEmpty"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "const": 1,
+          "type": "integer"
+        },
+        "operationId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "binding": {
+          "$ref": "#/$defs/Binding"
+        },
+        "receiptId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "action": {
+          "type": "string",
+          "enum": [
+            "prepare-empty",
+            "cooperative-cancel",
+            "stop-pool",
+            "archive-reset",
+            "discard-sessions"
+          ]
+        },
+        "outcome": {
+          "type": "string",
+          "enum": ["confirmed", "unconfirmed"]
+        },
+        "observedAt": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "executionTreeStopped": {
+          "type": "boolean"
+        },
+        "sessionsDiscarded": {
+          "type": "boolean"
+        },
+        "workspaceEmpty": {
+          "type": "boolean"
+        },
+        "archiveId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "archiveExpiresAt": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      }
+    },
+    "GuardianImpact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schemaVersion",
+        "tenantId",
+        "physicalInstanceId",
+        "operationId",
+        "reason",
+        "scope",
+        "affected",
+        "state",
+        "observedAt"
+      ],
+      "properties": {
+        "schemaVersion": {
+          "const": 1,
+          "type": "integer"
+        },
+        "tenantId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "physicalInstanceId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "operationId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "reason": {
+          "type": "string",
+          "enum": [
+            "resource-expired",
+            "resource-revoked",
+            "cancel-timeout",
+            "credential-stop-unconfirmed",
+            "crash"
+          ]
+        },
+        "scope": {
+          "const": "pool",
+          "type": "string"
+        },
+        "affected": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/Binding"
+          }
+        },
+        "state": {
+          "type": "string",
+          "enum": ["stopping", "stopped", "blocked"]
+        },
+        "observedAt": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      }
+    }
+  }
+}

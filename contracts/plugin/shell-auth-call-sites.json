@@ -189,6 +189,10 @@
     {
       "file": "settings/view.js",
       "sha256": "4d3140a5a0284b05d874926de3f41a9e6677384ce61028647f7ca350b69950ec"
+    },
+    {
+      "file": "shared/enterprise-transport.js",
+      "sha256": "4de2c23d267ae1bc894e16c46591e630fb7cc5388b4ee3b0a2aa19b84f7d18f0"
     }
   ],
   "migrationState": "broker",
@@ -446,6 +450,14 @@
       "routePatterns": ["^/oauth2/revoke$"],
       "reason": "Bounded one-pass revocation of encrypted legacy credentials at their stored issuer. Failed entries remain encrypted for the next startup; no reusable platform HTTP client is exported.",
       "design": "docs/design/auth-shell.zh.md section 7; PR349 rework 1"
+    },
+    {
+      "file": "shared/enterprise-transport.js",
+      "channel": "shared-enterprise-outbound",
+      "transports": ["call:fetchImpl"],
+      "routePatterns": [],
+      "reason": "设计第 5.1 节企业应用出站、目标仅限 outboundAllowedHosts",
+      "design": "docs/design/auth-shell.zh.md §3.1.2; docs/design/shared-dsh.zh.md §5.1"
     }
   ]
 }
