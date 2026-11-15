@@ -1,4 +1,4 @@
-/** Native DSH main surface and independent settings.section content. */
+/** Native DSH main surface; Auriga settings live in its own tab. */
 // @ts-nocheck — browser ModuleLoader globals
 window.__ModuleLoader__.load({
   id: 'auriga-dsh/client',
@@ -125,8 +125,6 @@ window.__ModuleLoader__.load({
       tab_team: 'Team 工具',
       tab_inbox: '收件箱',
       tab_settings: '设置',
-      chipLocal: '本机',
-      chipPlatform: '平台',
       signedOut: '未登录',
       localIdentity: '本机身份',
       uacMethod: 'UAC 扫码',
@@ -324,8 +322,6 @@ window.__ModuleLoader__.load({
       tab_team: 'Team tools',
       tab_inbox: 'Inbox',
       tab_settings: 'Settings',
-      chipLocal: 'Local',
-      chipPlatform: 'Platform',
       signedOut: 'Signed out',
       localIdentity: 'Local identity',
       uacMethod: 'UAC scan',
@@ -433,7 +429,7 @@ window.__ModuleLoader__.load({
 .auriga-settings p{color:var(--dsw-alias-label-secondary,inherit);font-size:12px;margin:8px 0 16px;overflow-wrap:anywhere}
 .auriga-setting{padding:14px 0;border-bottom:1px solid var(--dsw-alias-border-l1,currentColor);display:flex;align-items:center;gap:12px;flex-wrap:wrap}
 .auriga-setting>span:first-child{flex:1}.auriga-setting-value{color:var(--dsw-alias-label-secondary,inherit);overflow-wrap:anywhere}
-.auriga-settings-content{max-width:760px;display:grid;gap:24px}.auriga-settings-content h3{margin:0 0 4px}.auriga-status-card{border:1px solid var(--dsw-alias-border-l2,currentColor);border-radius:10px;padding:16px;display:flex;align-items:center;gap:12px;flex-wrap:wrap}.auriga-status-card p:first-child{font-size:14px;font-weight:600;flex:1;min-width:220px;color:inherit}.auriga-status-card p{margin:0}.auriga-status-card p+ p{flex-basis:100%;order:2}.auriga-setting-actions{display:flex;gap:8px;margin:12px 0}.auriga-setting input{font:inherit;color:inherit;background:var(--dsw-alias-bg-layer-1,transparent);border:1px solid var(--dsw-alias-border-l2,currentColor);border-radius:6px;padding:8px;min-width:0;flex:2}.auriga-settings details{display:block}.auriga-settings summary{cursor:pointer}.auriga-settings details p{margin-bottom:0}
+.auriga-settings-content{max-width:1080px;display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,400px),1fr));gap:16px;align-items:start;padding-bottom:24px}.auriga-settings-content>section,.auriga-settings-content>details{border:1px solid var(--dsw-alias-border-l2,currentColor);border-radius:12px;padding:16px 20px;background:var(--dsw-alias-bg-layer-1,transparent);min-width:0}.auriga-settings-content>.auriga-status-card,.auriga-settings-content>details,.auriga-settings-content>p{grid-column:1/-1}.auriga-settings-content>p{margin:0}.auriga-settings-content h3{margin:0 0 4px;font-size:15px}.auriga-settings-content .auriga-setting{padding:10px 0}.auriga-settings-content .auriga-setting:last-of-type{border-bottom:0}.auriga-setting select{font:inherit;color:inherit;background:var(--dsw-alias-bg-layer-1,transparent);border:1px solid var(--dsw-alias-border-l2,currentColor);border-radius:6px;padding:4px 8px}.auriga-setting input[type=checkbox]{flex:none;min-width:auto}.auriga-status-card{border:1px solid var(--dsw-alias-border-l2,currentColor);border-radius:10px;padding:16px;display:flex;align-items:center;gap:12px;flex-wrap:wrap}.auriga-status-card p:first-child{font-size:14px;font-weight:600;flex:1;min-width:220px;color:inherit}.auriga-status-card p{margin:0}.auriga-status-card p+ p{flex-basis:100%;order:2}.auriga-setting-actions{display:flex;gap:8px;margin:12px 0}.auriga-setting input{font:inherit;color:inherit;background:var(--dsw-alias-bg-layer-1,transparent);border:1px solid var(--dsw-alias-border-l2,currentColor);border-radius:6px;padding:8px;min-width:0;flex:2}.auriga-settings details{display:block}.auriga-settings summary{cursor:pointer}.auriga-settings details p{margin-bottom:0}
 .auriga-consent{padding:16px 0;min-width:0;overflow:auto}
 .auriga-consent article{padding:16px 0;border-bottom:1px solid var(--dsw-alias-border-l1,currentColor)}
 .auriga-consent pre{white-space:pre-wrap;overflow-wrap:anywhere;font:inherit;max-height:12em;overflow:auto;unicode-bidi:plaintext}
@@ -442,10 +438,6 @@ window.__ModuleLoader__.load({
 .auriga-consent-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
 .auriga-consent p{overflow-wrap:anywhere}.auriga-consent small{color:var(--dsw-alias-label-secondary,inherit)}
 .auriga-app{height:100%;display:flex;flex-direction:column;gap:12px;padding:20px 24px 0;overflow:auto}
-.auriga-head{display:flex;flex:none;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
-.auriga-head h2{font-size:20px;font-weight:600;margin:0;letter-spacing:.01em}
-.auriga-chips{display:flex;gap:8px;flex-wrap:wrap}
-.auriga-chip{display:inline-flex;align-items:center;gap:6px;padding:3px 10px;border:1px solid var(--dsw-alias-border-l1,currentColor);border-radius:999px;font-size:12px;color:var(--dsw-alias-label-secondary,inherit)}
 .auriga-banner{display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:8px 12px;border-radius:8px;background:var(--dsw-alias-bg-layer-2,transparent);font-size:13px}
 .auriga-tabs{flex:none;max-width:1080px;overflow-x:auto}
 .auriga-tabs-fallback{display:flex;gap:4px;border-bottom:1px solid var(--dsw-alias-border-l1,currentColor)}
@@ -2558,34 +2550,6 @@ window.__ModuleLoader__.load({
           return h(
             'div',
             { className: 'auriga-shell auriga-app' },
-            h(
-              'header',
-              { className: 'auriga-head' },
-              h('h2', null, t('panel')),
-              h(
-                'div',
-                { className: 'auriga-chips' },
-                uac?.available &&
-                  h(
-                    'span',
-                    { className: 'auriga-chip' },
-                    h(Dot, {
-                      tone: uac.state === 'authenticated' ? 'done' : 'idle',
-                    }),
-                    t('chipLocal') +
-                      ' · ' +
-                      (uac.state === 'authenticated'
-                        ? uac.empNo
-                        : t('signedOut')),
-                  ),
-                h(
-                  'span',
-                  { className: 'auriga-chip' },
-                  h(Dot, { tone: platform.tone }),
-                  t('chipPlatform') + ' · ' + t('platform_' + platform.kind),
-                ),
-              ),
-            ),
             desktop &&
               (desktop.available || desktop.restartRequired || desktop.error) &&
               h(
@@ -2769,24 +2733,26 @@ window.__ModuleLoader__.load({
               className: 'auriga-brand-mark',
             },
             h('rect', { width: 64, height: 64, rx: 16, fill: '#10283b' }),
+            // Regular pentagon centred on (32,33), circumradius 21.
             h('path', {
-              d: 'M31 10 51 25 44 51 18 49 11 24Z',
+              d: 'M32 12 51.97 26.51 44.34 49.99H19.66L12.03 26.51Z',
               stroke: '#8fb9d6',
               strokeWidth: 3,
               strokeLinejoin: 'round',
             }),
             h('path', {
-              d: 'm18 49 13-26 13 28M24 37h14',
+              d: 'M23.5 44 32 23l8.5 21M26.5 37h11',
               stroke: '#e8f0f7',
               strokeWidth: 3,
+              strokeLinecap: 'round',
               strokeLinejoin: 'round',
             }),
-            h('circle', { cx: 31, cy: 10, r: 4, fill: '#e8f0f7' }),
             ...[
-              [51, 25],
-              [44, 51],
-              [18, 49],
-              [11, 24],
+              [32, 12],
+              [51.97, 26.51],
+              [44.34, 49.99],
+              [19.66, 49.99],
+              [12.03, 26.51],
             ].map(([cx, cy]) =>
               h('circle', { key: cx, cx, cy, r: 3, fill: '#8fb9d6' }),
             ),
@@ -3087,23 +3053,6 @@ window.__ModuleLoader__.load({
               },
             ),
           'auriga-shell: model sync services',
-        );
-        effect(
-          () =>
-            ctx.slots.inject('settings.section', () =>
-              ctx.slots.register(
-                {
-                  name: 'settings.section',
-                  id: PANEL_ID,
-                  order: 22,
-                  label: NAV_NAME,
-                  locale: NS,
-                  icon: 'users',
-                },
-                Settings,
-              ),
-            ),
-          'auriga-shell: settings',
         );
         const dispose = () => {
           if (disposed) return;
