@@ -833,7 +833,14 @@ public final class WorkspaceService {
   }
 
   public void tickTenant() {
-    if (sharedPlacements != null) sharedPlacements.recover();
+    if (sharedPlacements != null) {
+      try {
+        sharedPlacements.recover();
+      } catch (RuntimeException error) {
+        org.slf4j.LoggerFactory.getLogger(getClass())
+            .warn("Shared DSH reconciliation deferred", error);
+      }
+    }
     UUID tenant = store.tenant();
     var policy = inputs.policy(tenant);
     store.tx(

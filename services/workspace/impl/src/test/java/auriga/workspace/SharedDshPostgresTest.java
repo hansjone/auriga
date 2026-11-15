@@ -158,6 +158,284 @@ class SharedDshPostgresTest {
                 }));
   }
 
+  auriga.workspace.app.SharedDshAdmin admin() {
+    return new auriga.workspace.app.SharedDshAdmin(
+        store,
+        service,
+        new auriga.workspace.app.SharedDshMaintenance(store, service, inputs, clock),
+        inputs,
+        clock);
+  }
+
+  @Test
+  void recoveryTargetCancelTimeoutStopsSharedPoolWithoutRetiringSiblingPool() throws Exception {
+    UUID member = UUID.randomUUID(), sibling = UUID.randomUUID();
+    ready(member);
+    UUID promotion = change(member, "dedicated", "promote");
+    finish(promotion);
+    var other = ready(sibling);
+    UUID id = change(member, "shared", "demote");
+    run(
+        () -> {
+          service.failOperation(id, "prepare-failed");
+          service.retryRecovery(id);
+          return null;
+        });
+    for (int n = 0; n < 6 && !op(id).get("recovery_stage").equals("cancel-target"); n++) {
+      var command = SharedDshRuntimeIntent.parseFrom((byte[]) op(id).get("recovery_intent"));
+      var receipt = ack(command);
+      switch (command.getAction()) {
+        case "stop-pool" -> receipt.setExecutionTreeStopped(true);
+        case "discard-sessions" -> receipt.setSessionsDiscarded(true);
+        case "archive-reset" ->
+            receipt
+                .setWorkspaceEmpty(true)
+                .setArchiveId(UUID.randomUUID().toString())
+                .setArchiveExpiresAt(seconds + 2592000);
+        default -> {}
+      }
+      assertTrue(run(() -> service.receipt(receipt.build())));
+    }
+    assertEquals("cancel-target", op(id).get("recovery_stage"));
+    seconds += 30;
+    run(
+        () -> {
+          service.recover();
+          return null;
+        });
+    assertEquals("stop-target", op(id).get("recovery_stage"));
+    var stop = SharedDshRuntimeIntent.parseFrom((byte[]) op(id).get("recovery_intent"));
+    assertEquals(
+        other.binding().getPhysicalInstanceId(), stop.getBinding().getPhysicalInstanceId());
+    assertTrue(run(() -> service.receipt(ack(stop).setExecutionTreeStopped(true).build())));
+    assertNotEquals("retired", poolRow(other.binding().getPhysicalInstanceId()).get("state"));
+    finishRecovery(id);
+    assertEquals("pending", run(() -> service.current(sibling, session)).state());
+    confirmPending(sibling);
+  }
+
+  @Test
+  void browserPlanPersistsOrderRechecksEntitlementsAndCompletesOnlyAfterAllReceipts() {
+    UUID first = UUID.randomUUID(), second = UUID.randomUUID();
+    UUID a = legacy(first), b = legacy(second);
+    var admin = admin();
+    var initial = run(() -> admin.member(first));
+    run(() -> admin.grant(actor, session, first, true, "allow", "allow", initial.etag()));
+    var request =
+        new auriga.workspace.app.SharedDshAdmin.PlanRequest(
+            List.of(
+                new auriga.workspace.app.SharedDshAdmin.Member(second, b, "shared"),
+                new auriga.workspace.app.SharedDshAdmin.Member(first, a, "dedicated")),
+            "rebuild");
+    var saved = run(() -> admin.save(actor, session, null, request, "plan", null));
+    UUID id = UUID.fromString(saved.body().get("planId").toString());
+    assertEquals(
+        id.toString(),
+        run(() -> admin.save(actor, session, null, request, "plan", null))
+            .body()
+            .get("planId")
+            .toString());
+    assertEquals(saved.etag(), run(() -> admin().plan(id)).etag());
+    var entitlement = run(() -> admin.member(first));
+    var revoked =
+        run(
+            () ->
+                admin.grant(actor, session, first, false, "revoke", "revoke", entitlement.etag()));
+    assertThrows(
+        auriga.common.error.AurigaException.class,
+        () -> run(() -> admin.start(actor, session, id, "start", saved.etag())));
+    run(() -> admin.grant(actor, session, first, true, "restore", "restore", revoked.etag()));
+    var started = run(() -> admin.start(actor, session, id, "start", saved.etag()));
+    assertEquals("running", started.body().get("state"));
+    var members = (List<Map<String, Object>>) started.body().get("members");
+    assertEquals(second, members.get(0).get("memberId"));
+    assertEquals(first, members.get(1).get("memberId"));
+    UUID op1 = (UUID) members.get(0).get("operationId"),
+        op2 = (UUID) members.get(1).get("operationId");
+    finish(op1);
+    assertNotEquals("completed", run(() -> admin.progress(id)).body().get("state"));
+    finish(op2);
+    assertEquals("completed", run(() -> admin().progress(id)).body().get("state"));
+    assertEquals("completed", run(() -> admin().plan(id)).body().get("state"));
+    assertEquals(
+        started.etag(), run(() -> admin().start(actor, session, id, "start", saved.etag())).etag());
+    assertThrows(
+        auriga.common.error.AurigaException.class,
+        () -> TenantContext.call(UUID.randomUUID(), () -> admin.plan(id)));
+  }
+
+  @Test
+  void normalDedicatedStopWaitIsDrainingAndRecoveryCancelEscalatesAtThirtySeconds()
+      throws Exception {
+    UUID member = UUID.randomUUID();
+    ready(member);
+    UUID promotion = change(member, "dedicated", "promotion");
+    finish(promotion);
+    UUID demotion = change(member, "shared", "demotion");
+    assertTrue(run(() -> service.receipt(ack(command(demotion)).build())));
+    assertEquals("stop-pool", command(demotion).getAction());
+    assertEquals("draining", run(() -> service.switchView(demotion)).getState().getValue());
+    assertNull(run(() -> service.switchView(demotion)).getFailureCode());
+    run(
+        () -> {
+          service.failOperation(demotion, "prepare-failed");
+          service.retryRecovery(demotion);
+          return null;
+        });
+    var cancel = SharedDshRuntimeIntent.parseFrom((byte[]) op(demotion).get("recovery_intent"));
+    seconds += 29;
+    run(
+        () -> {
+          service.recover();
+          return null;
+        });
+    assertEquals("cancel-source", op(demotion).get("recovery_stage"));
+    seconds++;
+    run(
+        () -> {
+          service.recover();
+          return null;
+        });
+    assertEquals("stop-source", op(demotion).get("recovery_stage"));
+    assertFalse(run(() -> service.receipt(ack(cancel).build())));
+    var stopId = op(demotion).get("recovery_id");
+    service = new SharedDshPlacements(store, inputs, b -> probe, clock);
+    run(
+        () -> {
+          service.recover();
+          return null;
+        });
+    assertEquals(stopId, op(demotion).get("recovery_id"));
+  }
+
+  @Test
+  void browserCompositeCasAndIdempotencyShareOneMemberBoundary() {
+    var admin = admin();
+    UUID member = UUID.randomUUID();
+    var initial = run(() -> admin.member(member));
+    assertFalse(initial.body().containsKey("placement"));
+    assertEquals(initial.etag(), run(() -> admin.member(member)).etag());
+    var granted =
+        run(() -> admin.grant(actor, session, member, true, "grant", "grant-key", initial.etag()));
+    assertNotEquals(initial.etag(), granted.etag());
+    assertEquals(
+        granted.etag(),
+        run(() -> admin.grant(actor, session, member, true, "grant", "grant-key", initial.etag()))
+            .etag());
+    assertEquals(
+        "common.conflict",
+        assertThrows(
+                auriga.common.error.AurigaException.class,
+                () ->
+                    run(
+                        () ->
+                            admin.grant(
+                                actor,
+                                session,
+                                member,
+                                false,
+                                "grant",
+                                "grant-key",
+                                initial.etag())))
+            .errorCode()
+            .code());
+    ready(member);
+    var current = run(() -> admin.member(member));
+    assertNotEquals(granted.etag(), current.etag());
+    assertEquals(
+        "common.precondition_failed",
+        assertThrows(
+                auriga.common.error.AurigaException.class,
+                () ->
+                    run(
+                        () ->
+                            admin.switchMode(
+                                actor,
+                                session,
+                                member,
+                                "dedicated",
+                                "switch",
+                                "stale",
+                                granted.etag())))
+            .errorCode()
+            .code());
+    assertEquals(
+        428,
+        assertThrows(
+                auriga.common.error.AurigaException.class,
+                () ->
+                    run(
+                        () ->
+                            admin.switchMode(
+                                actor, session, member, "dedicated", "switch", "missing", null)))
+            .errorCode()
+            .httpStatus());
+    assertThrows(
+        auriga.common.error.AurigaException.class,
+        () ->
+            run(
+                () ->
+                    admin.switchMode(
+                        actor, session, member, "dedicated", "switch", "numeric", "\"1\"")));
+    var switched =
+        run(
+            () ->
+                admin.switchMode(
+                    actor, session, member, "dedicated", "switch", "switch-key", current.etag()));
+    assertEquals(
+        switched.etag(),
+        run(() ->
+                admin.switchMode(
+                    actor, session, member, "dedicated", "switch", "switch-key", current.etag()))
+            .etag());
+    assertEquals(
+        switched.body().get("operationId").toString(),
+        run(() -> admin.lookup(actor, member, "switch-key")).body().get("operationId").toString());
+    assertThrows(
+        auriga.common.error.AurigaException.class,
+        () -> run(() -> admin.lookup(UUID.randomUUID(), member, "switch-key")));
+    assertThrows(
+        auriga.common.error.AurigaException.class,
+        () ->
+            run(
+                () ->
+                    admin.grant(
+                        actor, session, member, false, "revoke", "revoke", switched.etag())));
+    seconds += 86401;
+    assertThrows(
+        auriga.common.error.AurigaException.class,
+        () -> run(() -> admin.lookup(actor, member, "switch-key")));
+  }
+
+  @Test
+  void browserEntitlementDeniesDedicatedAndIsTenantScoped() {
+    UUID member = UUID.randomUUID();
+    ready(member);
+    var admin = admin();
+    var view = run(() -> admin.member(member));
+    assertEquals(
+        "common.forbidden",
+        assertThrows(
+                auriga.common.error.AurigaException.class,
+                () ->
+                    run(
+                        () ->
+                            admin.switchMode(
+                                actor, session, member, "dedicated", "switch", "key", view.etag())))
+            .errorCode()
+            .code());
+    var other = TenantContext.call(UUID.randomUUID(), () -> admin.member(member));
+    assertFalse(other.body().containsKey("placement"));
+    assertNotEquals(view.etag(), other.etag());
+    authorityAvailable = false;
+    assertEquals(
+        "common.unavailable",
+        assertThrows(
+                auriga.common.error.AurigaException.class, () -> run(() -> admin.member(member)))
+            .errorCode()
+            .code());
+  }
+
   @Test
   void tenantRlsAndTwentyRegisteredFourActiveOnePerMember() {
     List<UUID> members = new ArrayList<>();
