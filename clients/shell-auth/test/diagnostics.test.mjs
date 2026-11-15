@@ -130,3 +130,17 @@ test(
     );
   },
 );
+
+test('OAuth rejection retains safe diagnostic code and correlation but no body', () => {
+  const correlationId = randomUUID();
+  assert.deepEqual(
+    redact({
+      code: 'invalid_client',
+      correlationId,
+      reason: 'platform_rejected',
+      body: { token: 'secret' },
+    }),
+    { code: 'invalid_client', correlationId, reason: 'platform_rejected' },
+  );
+  assert.deepEqual(redact({ code: 'not-a-known-code' }), {});
+});

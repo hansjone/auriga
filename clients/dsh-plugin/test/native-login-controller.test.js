@@ -2,13 +2,13 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { shellRuntimePeer } from './shell-runtime-peer.js';
 
-test('native sign in delegates only open_login and keeps credentials and CSRF out of RPC', async (t) => {
+test('native sign in starts inline login and keeps credentials and CSRF out of RPC', async (t) => {
   const f = await shellRuntimePeer(t);
   const result = await f.rpc('aurigaAuth/login');
   assert.equal(result.ok, true);
   assert.equal(result.value.csrf, undefined);
   assert.equal(result.value.account.subject, f.connection.identity.memberId);
-  assert.equal(f.connection.calls.at(-1).action, 'open_login');
+  assert.equal(f.connection.calls.at(-1).action, 'inline_login');
   assert.equal(f.runtime.getAccess, undefined);
   assert.equal(f.runtime.vault.snapshot().credential, undefined);
   assert.equal(JSON.stringify(result).includes(f.connection.token()), false);

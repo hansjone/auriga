@@ -211,7 +211,7 @@ test(
     await message('open_login');
     const attempt = (await message('snapshot')).snapshot.deviceAttempt;
     assert.equal(attempt.userCode, userCode);
-    assert.equal(opened[2], 'https://example.com/device');
+    assert.equal(opened[2], 'https://example.com/device?user_code=' + userCode);
     while (desktop.snapshot().state === 'authenticating')
       await once(desktop.broker, 'changed');
     assert.equal(desktop.snapshot().state, 'authenticated');

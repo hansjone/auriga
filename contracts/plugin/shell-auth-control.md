@@ -125,3 +125,25 @@ Desktop 按 manifest 校验插件内全部文件，并逐文件比较插件与�
 `getPublicNetworkControl` 独立 GET `/api/collab/v2/network/bootstrap/controls`，平台请求不带 Authorization，不依赖消息连接或 `network_open` 权限。`confirmNetworkControl` 独立 POST `/api/collab/v2/network/controls/receipts`，权限 `collab.msgnet.control.install`，仅发送本地已持久化的安装签名回执；响应 `IsolationRecord` 的 scope、revision、digest、challenge 完全匹配后才清除待报标记。它们与调用点清单一一对应，均不接受 URL、header、pin 或私钥路径参数。本地 broker 的主人/epoch/revision 门禁仍适用。
 
 桌面 broker 使用同一生产 v2 信任库，tenant/realm 和安装身份从可信设备及安装配置派生，根控制隔离立即关闭现存连接；公有控制与回执操作可在没有 NATS 连接时执行。安装器通过受保护 pin/私钥文件提供独立身份，与插件安装说明一致。
+
+## Plugin login transition (PLUGIN-INLINE-LOGIN)
+
+The transitional device flow opens a same-origin `/device?user_code=...`. The broker validates the complete URI origin, path and unique user_code against this grant. When an older platform omits the complete URI, the broker constructs it from the validated base URI. The portal still requires explicit confirmation; manual mode is preserved.
+ShellAuthSnapshot.deviceAttempt is projected only to the initiating page or authenticated OS connection. Each subscription recomputes its owner projection. The plugin displays the code only during authentication and clears it on completion/cancellation. Device codes and tokens stay in the broker.
+ShellAuthSnapshot adds optional loginError={code,correlationId}. Client configuration errors yield signed_out/platform_rejected. User or account refusals yield signed_out/login_denied. Expiry yields reauth_required/expired. Transport and server failures yield unreachable/offline. Correlation IDs must be UUIDs, with the current attempt ID as fallback. Codes have bounded length and characters. New login, cancellation and logout clear the error.
+
+## 插件概览内原生登录（续做1）
+
+概览使用 `inline_login` 和 `inline_advance`，由 OS 认证连接的 owner 发起并推进。`input` 只允许 poll、选择已返回的 providerId、提交当前 formId 的字符串/布尔字段；浏览器不能提供 URL、cookie、令牌、设备码、PKCE 或身份。插件本地写入口仍核真实 owner、同源及进程 CSRF；输入有大小、字段数量及长度上限。
+
+broker 每次尝试在内存生成 S256 verifier 和隔离 cookie jar。只访问安装配置平台的固定登录路径，禁止重定向；Origin 和 Fetch Metadata 由可信 broker 固定，平台事务 cookie 只在该尝试内使用。二维码沿门户 UAC challenge 接口，账号沿现有 LoginManager 事务；两者均使用 nativeConnect，设备码只由首次创建响应取得并留在 broker。概览只收到 provider、公开二维码或当前表单步骤，不收到设备用户码、平台 cookie 或 OAuth 凭据。订阅按 owner 投影；取消、换代、退出和晚到结果继续失败关闭，晚到凭据撤销。
+
+UAC challenge 创建新增可选 NativeConnect 和一次性 nativeDevice 响应，禁止 link/invitation 混用。完成时只批准该 challenge 对应事务自己的 grant，保留账户、租户、provider、origin、binding、PKCE、过期和单次兑换检查。UAC 遵守原门户 MFA 策略：never 允许本次已验证扫码建立设备绑定，其他策略仍完成平台 MFA；团队账号保留 TOTP，应急账号只允许内置 emergency 表单并验证 OTP。UAC 源会话绑定复制到 grant/device，不能将普通门户会话直接作为插件凭据。
+
+设备身份与资料查询按在线权威区分 standard_device/native_tx。原生分支验证签名、类型、scope、租户、有效设备及来源会话、账户/provider 和已登记原生客户端。标准客户端 `auriga-dsh` 保持 `nativeConnect=false`，原生客户端 `auriga-dsh-native` 设为 true。broker 在原生令牌、刷新结果和持久撤销记录中保存可信 client_id，刷新、撤销和 AI 换票均沿用该归属。缺少归属的旧记录默认使用标准客户端。
+
+真实 IAM 口令错误返回 HTTP 200 和 failed 事务，其 step.code 会透传。错误口令重试必须在原 provider 创建新事务、新 grant 和新 PKCE，再展示错误反馈。扫码端拒绝按业务拒绝提示重试。complete 步骤到令牌验证/持久化期间不投影表单或二维码，订阅定时发布的异常由 broker 捕获。
+
+UAC 原生登录和门户 UAC 均有转发二维码钓鱼的剩余风险。攻击者可转发自己发起的二维码，诱使其他人扫码授权。事务绑定、PKCE 和单次兑换限制跨事务兑换及重放，不能证明扫码者看见了正确的发起端。采用 `mfa=never` 的租户接受仅凭扫码建立该来源会话及原生设备的风险。需要 MFA 的策略继续要求平台二次验证。扫码端展示桌面客户端登录用途有助于用户辨认发起目的。
+
+应急账号保留原生设备凭据能力。成功原生登录写入 `iam.identity.login` 审计，记录 connectorType=emergency、原生 clientId 和 authorizationMode=native_tx，设备刷新仍受应急来源会话期限约束。

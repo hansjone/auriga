@@ -4,7 +4,7 @@ import addFormats from '../../../services/contracts/node_modules/ajv-formats/dis
 import { randomUUID, randomBytes } from 'node:crypto';
 const root = new URL('../../../contracts/', import.meta.url);
 const read = (path) => JSON.parse(readFileSync(new URL(path, root), 'utf8'));
-const ajv = new Ajv({ strict: true, allErrors: true });
+const ajv = new Ajv({ strict: true, allowUnionTypes: true, allErrors: true });
 addFormats(ajv, { keywords: true });
 for (const path of [
   ...readdirSync(new URL('network/', root))
@@ -18,6 +18,7 @@ for (const path of [
   'auth/uac-login-info.schema.json',
   'auth/uac-session-binding.schema.json',
   'auth/uac-control.schema.json',
+  'identity/steps.schema.json',
 ])
   ajv.addSchema(read(path), new URL(path, root).href);
 export function validate(name, value) {

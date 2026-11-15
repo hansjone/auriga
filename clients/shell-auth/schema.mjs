@@ -33,6 +33,7 @@ ajv.addSchema(
   ),
 );
 const files = [
+  'identity/steps',
   'auth/uac-login-info',
   'auth/uac-session-binding',
   'auth/uac-control',

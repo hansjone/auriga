@@ -719,10 +719,11 @@ export function createSettingsView(
   }
 
   return function SettingsView(
-    /** @type {{locale:string,boot?:any,consent?:any}} */ {
+    /** @type {{locale:string,boot?:any,consent?:any,gotoOverview?:()=>void}} */ {
       locale,
       boot,
       consent,
+      gotoOverview,
     },
   ) {
     const t = messages[locale?.startsWith('zh') ? 'zh' : 'en'];
@@ -906,11 +907,11 @@ export function createSettingsView(
       await call('auriga/shell/command', { action }, { csrf: account?.csrf });
       await reload();
     };
-    const enter = () => {
-      void shellCommand('open_login').catch((error) =>
-        setNotice(explain(error)),
-      );
-    };
+    const enter = () =>
+      run(async () => {
+        await shellCommand('inline_login');
+        gotoOverview?.();
+      });
     const action = statusError
       ? button(t.retry, reload)
       : managed

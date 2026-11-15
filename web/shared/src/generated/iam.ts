@@ -418,7 +418,7 @@ export interface paths {
      * 开始一次登录（或绑定、补验证）
      * @description 返回第一步。按本入口下发 portal/admin 分名的登录事务cookie（见文首），绑定事务和浏览器，扫码类防转发。
      *     purpose=link / stepup 时需要已登录。
-     *     nativeConnect 仅已显式登记的第一方public client在portal的team-account账号+TOTP登录使用，
+     *     nativeConnect 仅已显式登记的第一方public client在portal的team-account账号+TOTP或内置emergency账号登录使用；UAC经同名challenge创建字段发起并遵循门户MFA策略，
      *     purpose固定login、returnTo省略或/、不带invitationCode；拒绝任何外来设备码/主体/权限和未知字段。
      *     创建响应nativeDevice只回一次，GET/SSE/advance不回放；完成登录仅批准本事务自己的grant，
      *     token端点仍须S256 verifier兑换device-only凭据，不得自动调用人工核码或consent接口。
@@ -1387,8 +1387,8 @@ export interface components {
       /** Format: uuid */
       providerId: string;
       clientId: string;
-      /** @constant */
-      authorizationMode: 'standard_device';
+      /** @enum {string} */
+      authorizationMode: 'standard_device' | 'native_tx';
       /** Format: date-time */
       expiresAt: string;
       uacSessionBinding?: components['schemas']['UacSessionBinding'];
@@ -1712,6 +1712,8 @@ export interface components {
       systemCode: string;
     };
     UacChallengeCreate: {
+      /** @description First-party native login only; purpose=login, no invitationCode. S256 binds the created device grant. */
+      nativeConnect?: components['schemas']['NativeConnect'];
       /** Format: uuid */
       providerId: string;
       invitationCode?: string;
@@ -1723,6 +1725,7 @@ export interface components {
       purpose: 'login' | 'link';
     };
     UacChallenge: {
+      nativeDevice?: components['schemas']['NativeDeviceGrant'];
       /** Format: uuid */
       id: string;
       /** Format: uuid */
@@ -1905,15 +1908,16 @@ export interface components {
       codeChallengeMethod: 'S256';
       deviceName?: string;
     };
+    NativeDeviceGrant: {
+      /** @description 服务端自产256-bit明文，仅本创建响应一次回给Host内存。 */
+      deviceCode: string;
+      /** Format: date-time */
+      expiresAt: string;
+      /** @description token轮询间隔秒数，初始5。 */
+      interval: number;
+    };
     CreateLoginTransactionResult: components['schemas']['LoginTransaction'] & {
-      nativeDevice?: {
-        /** @description 服务端自产256-bit明文，仅本创建响应一次回给Host内存。 */
-        deviceCode: string;
-        /** Format: date-time */
-        expiresAt: string;
-        /** @description token轮询间隔秒数，初始5。 */
-        interval: number;
-      };
+      nativeDevice?: components['schemas']['NativeDeviceGrant'];
     };
     LoginTransaction: {
       id: components['schemas']['Uuid'];

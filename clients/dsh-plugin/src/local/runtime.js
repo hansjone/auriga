@@ -1,3 +1,4 @@
+import { qrPath } from './uac/qr.js';
 import { networkInstallation } from '../network/installation.js';
 import { createNetworkLifecycle } from '../network/lifecycle.js';
 import { createBrokerNetworkProvider } from '../network/broker-provider.js';
@@ -575,6 +576,20 @@ export async function createConnectRuntime({
         connection: who && team ? team.summary : null,
         platform: s?.state ?? 'unreachable',
         reason: s?.reason,
+        ...(requests.has(req) && s?.inlineLogin
+          ? {
+              inlineLogin: {
+                ...s.inlineLogin,
+                ...(s.inlineLogin.step.type === 'qr'
+                  ? { qr: qrPath(s.inlineLogin.step.content) }
+                  : {}),
+              },
+            }
+          : {}),
+        ...(requests.has(req) && s?.deviceAttempt
+          ? { deviceAttempt: s.deviceAttempt }
+          : {}),
+        ...(s?.loginError ? { loginError: s.loginError } : {}),
         brokerAvailable: !!s,
         migrationRequired: legacy && !who,
         account: who
@@ -598,12 +613,16 @@ export async function createConnectRuntime({
       const s = broker.state.current();
       return s?.state === 'authenticated' ? s.identity?.empNo : undefined;
     },
-    async command(/** @type {any} */ req, /** @type {string} */ action) {
+    async command(
+      /** @type {any} */ req,
+      /** @type {string} */ action,
+      /** @type {any} */ input = undefined,
+    ) {
       if (!requests.has(req)) return refuse('common.forbidden');
       if (action === 'reconnect') {
         if (!broker.state.current()) await broker.state.connect();
         if (identity()) void beginTeam();
-      } else await broker.state.command(action);
+      } else await broker.state.command(action, input);
       return this.status(req);
     },
     async resetAuthentication() {

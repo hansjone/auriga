@@ -12,10 +12,13 @@ import auriga.iam.api.IdentityPolicyHooks;
 import auriga.testsupport.PostgresExtension;
 import java.time.*;
 import java.util.*;
+import java.util.function.Supplier;
 import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.*;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.mock.web.MockHttpServletRequest;
+import org.springframework.mock.web.MockHttpServletResponse;
 import tools.jackson.databind.node.ObjectNode;
 
 @ExtendWith(PostgresExtension.class)
@@ -24,6 +27,8 @@ class NativeConnectPostgresTest {
   final UUID tenant = UUID.randomUUID(), provider = UUID.randomUUID(), account = UUID.randomUUID();
   final AdminCsrfPostgresTest.Time clock = new AdminCsrfPostgresTest.Time();
   LoginManager login;
+  AuditLogger audit;
+  EmergencyAccounts emergency;
   OAuthProvider oauth;
   SessionManager sessions;
   TokenService tokens;
@@ -81,21 +86,24 @@ class NativeConnectPostgresTest {
                           List.of("https://native.example.com"));
                   SessionKv kv = mock(SessionKv.class);
                   EventPublisher events = mock(EventPublisher.class);
-                  AuditLogger audit = mock(AuditLogger.class);
+                  audit = mock(AuditLogger.class);
                   sessions = new SessionManager(store, kv, tokens, clock, events, audit);
                   TeamAccounts team = new TeamAccounts(store, secrets, clock, events);
                   TeamPasskeys passkeys = new TeamPasskeys(store, secrets, clock, events);
                   QrChallenges qr = new QrChallenges(store, clock);
                   ConnectorRegistry registry =
                       new ConnectorRegistry(
-                          schemas, List.of(new TeamAccountConnector(team, passkeys, qr, issuer)));
+                          schemas,
+                          List.of(
+                              new TeamAccountConnector(team, passkeys, qr, issuer),
+                              new EmergencyConnector()));
                   login =
                       new LoginManager(
                           store,
                           secrets,
                           schemas,
                           registry,
-                          new EmergencyAccounts(store, secrets, clock, false),
+                          emergency = new EmergencyAccounts(store, secrets, clock, false),
                           team,
                           sessions,
                           mock(IdentityPolicyHooks.class),
@@ -273,6 +281,148 @@ class NativeConnectPostgresTest {
             "native-example",
             "refresh_token",
             token.path("refresh_token").asString()));
+  }
+
+  @Test
+  void emergencyNativeCredentialApprovalIsAuditedWithItsClient() {
+    TenantContext.run(
+        tenant,
+        () -> {
+          var enrollment = emergency.install(tenant);
+          var started =
+              login.begin(
+                  request().put("providerId", enrollment.providerId().toString()),
+                  "portal",
+                  "127.0.0.1",
+                  "native-test",
+                  issuer,
+                  null);
+          var done =
+              login.advance(
+                  started.transaction().path("id").asString(),
+                  started.bindingCookie(),
+                  Json.object(
+                      "type",
+                      "form",
+                      "formId",
+                      "emergency",
+                      "values",
+                      Json.object(
+                          "username",
+                          enrollment.username(),
+                          "password",
+                          enrollment.password(),
+                          "otp",
+                          Totp.code(
+                              enrollment.totpSecret(), clock.instant().getEpochSecond() / 30))),
+                  false);
+          assertEquals("completed", done.transaction().path("status").asString());
+          var credential =
+              oauth.token(
+                  exchange(
+                      started.transaction().path("nativeDevice").path("deviceCode").asString(),
+                      verifier));
+          assertTrue(credential.hasNonNull("access_token"));
+          var captured = org.mockito.ArgumentCaptor.forClass(auriga.common.audit.AuditEntry.class);
+          verify(audit, atLeastOnce()).record(captured.capture());
+          var entry =
+              captured.getAllValues().stream()
+                  .filter(e -> e.action().equals("iam.identity.login"))
+                  .findFirst()
+                  .orElseThrow();
+          assertEquals("emergency", entry.details().get("connectorType"));
+          assertEquals("native-example", entry.details().get("clientId"));
+          assertEquals("native_tx", entry.details().get("authorizationMode"));
+          assertFalse(entry.details().containsKey("password"));
+          assertFalse(entry.details().containsKey("token"));
+        });
+  }
+
+  @Test
+  void nativeEmergencyBeginsOnlyItsOwnCredentialAndOtpForm() {
+    TenantContext.run(
+        tenant,
+        () -> {
+          UUID emergency = UUID.randomUUID();
+          store.tx(
+              () -> {
+                store.insert(
+                    "idp_provider",
+                    emergency.toString(),
+                    Json.object(
+                        "providerId",
+                        emergency,
+                        "connectorType",
+                        "emergency",
+                        "enabled",
+                        true,
+                        "display",
+                        Json.object("name", Json.object("en", "Emergency")),
+                        "config",
+                        secrets.encrypt("{}", "provider:" + tenant + ":" + emergency),
+                        "admission",
+                        Json.object("mfa", "always")),
+                    null);
+                return null;
+              });
+          var started = begin(request().put("providerId", emergency.toString()));
+          assertEquals("emergency", started.transaction().path("step").path("formId").asString());
+          assertFalse(
+              started.transaction().path("nativeDevice").path("deviceCode").asString().isEmpty());
+        });
+  }
+
+  @Test
+  void controllerRoutesSignedNativeBearerWithoutRequestPrincipal() {
+    TenantContext.run(
+        tenant,
+        () -> {
+          assertTrue(auriga.common.security.AuthorizationRules.currentPrincipal().isEmpty());
+          String raw = connected().path("access_token").asString();
+          var requests = mock(RequestIdentity.class);
+          when(requests.call(any(), any())).thenAnswer(i -> ((Supplier<?>) i.getArgument(1)).get());
+          var controller = new StandardDeviceController(oauth, requests);
+          var request = new MockHttpServletRequest();
+          request.addHeader("Authorization", "Bearer " + raw);
+          var response = new MockHttpServletResponse();
+          var identity = controller.identity(request, response);
+          assertEquals("native_tx", identity.path("authorizationMode").asString());
+          assertEquals("native-example", identity.path("clientId").asString());
+          assertEquals(account.toString(), identity.path("accountId").asString());
+          assertEquals(
+              account.toString(),
+              controller.profile(request, response).path("account").path("id").asString());
+          assertEquals("no-store", response.getHeader("Cache-Control"));
+          assertEquals("no-cache", response.getHeader("Pragma"));
+          assertEquals(0, response.getCookies().length);
+          request.removeHeader("Authorization");
+          request.addHeader("Authorization", "Bearer " + raw + "-invalid");
+          var rejected =
+              assertThrows(AurigaException.class, () -> controller.identity(request, response));
+          assertEquals("iam.invalid_token", rejected.errorCode().code());
+          assertEquals(401, rejected.errorCode().httpStatus());
+        });
+  }
+
+  @Test
+  void nativeDeviceIdentityUsesOnlineAuthorityAndDoesNotAcceptRevokedDevice() {
+    TenantContext.run(
+        tenant,
+        () -> {
+          ObjectNode connected = connected();
+          String raw = connected.path("access_token").asString();
+          ObjectNode identity = oauth.nativeIdentity(raw, false);
+          assertEquals("native_tx", identity.path("authorizationMode").asString());
+          assertEquals(provider.toString(), identity.path("providerId").asString());
+          assertEquals(account.toString(), identity.path("accountId").asString());
+          new ContractSchemas()
+              .validate("auth/standard-device.schema.json#/$defs/StandardDeviceIdentity", identity);
+          assertEquals(
+              account.toString(),
+              oauth.nativeIdentity(raw, true).path("account").path("id").asString());
+          oauth.revoke(Map.of("client_id", "native-example", "token", raw));
+          assertThrows(AurigaException.class, () -> oauth.nativeIdentity(raw, false));
+        });
   }
 
   @Test

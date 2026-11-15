@@ -57,7 +57,9 @@
             "revalidation_unreachable",
             "user_logout",
             "admin_disabled",
-            "member_disabled"
+            "member_disabled",
+            "platform_rejected",
+            "login_denied"
           ]
         },
         "uacLoginInfo": {
@@ -66,6 +68,28 @@
         },
         "deviceAttempt": {
           "$ref": "#/$defs/ShellAuthDeviceAttempt"
+        },
+        "loginError": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "code",
+            "correlationId"
+          ],
+          "properties": {
+            "code": {
+              "type": "string",
+              "pattern": "^[a-zA-Z][a-zA-Z0-9_.-]{0,127}$"
+            },
+            "correlationId": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "description": "Bounded platform login error code and correlation UUID. No response body or credentials. Cleared on new login, cancellation or logout."
+        },
+        "inlineLogin": {
+          "$ref": "#/$defs/ShellAuthInlineView"
         }
       },
       "additionalProperties": false,
@@ -160,6 +184,23 @@
               }
             }
           }
+        },
+        {
+          "if": {
+            "required": [
+              "inlineLogin"
+            ],
+            "properties": {
+              "inlineLogin": {}
+            }
+          },
+          "then": {
+            "properties": {
+              "state": {
+                "const": "authenticating"
+              }
+            }
+          }
         }
       ]
     },
@@ -233,11 +274,48 @@
             "subscribe",
             "open_login",
             "cancel_login",
-            "logout"
+            "logout",
+            "inline_login",
+            "inline_advance"
           ]
+        },
+        "input": {
+          "$ref": "#/$defs/ShellAuthInlineInput"
         }
       },
-      "additionalProperties": false
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "action": {
+                "const": "inline_advance"
+              }
+            },
+            "required": [
+              "action"
+            ]
+          },
+          "then": {
+            "required": [
+              "input"
+            ],
+            "properties": {
+              "input": {}
+            }
+          },
+          "else": {
+            "not": {
+              "required": [
+                "input"
+              ],
+              "properties": {
+                "input": {}
+              }
+            }
+          }
+        }
+      ]
     },
     "ShellAuthEvent": {
       "type": "object",
@@ -362,6 +440,159 @@
         }
       },
       "description": "broker只向发起控制页投影本次公开用户码；pageOwner来自票据交换的服务端页面会话，不接受命令自报。必须提示用户在可信门户人工核对本次用户码。无device_code、令牌或URL。"
+    },
+    "ShellAuthInlineInput": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "operation"
+          ],
+          "properties": {
+            "operation": {
+              "const": "poll"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "operation",
+            "providerId"
+          ],
+          "properties": {
+            "operation": {
+              "const": "select"
+            },
+            "providerId": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "operation",
+            "formId",
+            "values"
+          ],
+          "properties": {
+            "operation": {
+              "const": "submit"
+            },
+            "formId": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "values": {
+              "type": "object",
+              "maxProperties": 32,
+              "propertyNames": {
+                "pattern": "^[A-Za-z][A-Za-z0-9_]{0,63}$"
+              },
+              "additionalProperties": {
+                "oneOf": [
+                  {
+                    "type": "string",
+                    "maxLength": 4096
+                  },
+                  {
+                    "type": "boolean"
+                  }
+                ]
+              }
+            }
+          }
+        }
+      ]
+    },
+    "ShellAuthInlineView": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "providers",
+        "providerId",
+        "step"
+      ],
+      "properties": {
+        "providers": {
+          "type": "array",
+          "maxItems": 100,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "id",
+              "connectorType",
+              "displayName"
+            ],
+            "properties": {
+              "id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "connectorType": {
+                "enum": [
+                  "uac",
+                  "team-account",
+                  "emergency"
+                ]
+              },
+              "displayName": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "string",
+                  "maxLength": 256
+                }
+              }
+            }
+          }
+        },
+        "providerId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "step": {
+          "oneOf": [
+            {
+              "$ref": "../identity/steps.schema.json#/$defs/FormStep"
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "type",
+                "content",
+                "status",
+                "expiresAt"
+              ],
+              "properties": {
+                "type": {
+                  "const": "qr"
+                },
+                "content": {
+                  "type": "string",
+                  "maxLength": 2048
+                },
+                "status": {
+                  "enum": [
+                    "waiting",
+                    "scanned"
+                  ]
+                },
+                "expiresAt": {
+                  "type": "string",
+                  "format": "date-time"
+                }
+              }
+            }
+          ]
+        }
+      }
     }
   }
 }
