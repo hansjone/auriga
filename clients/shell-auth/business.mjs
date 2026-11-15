@@ -55,7 +55,9 @@ export class BusinessProxy {
     hostOptions = {},
   ) {
     this.streams = new Streams(broker, uploadDirectory);
-    this.host = new HostChannel(broker, this.streams, hostOptions);
+    this.host = hostOptions.hostFactory
+      ? hostOptions.hostFactory(broker, this.streams)
+      : new HostChannel(broker, this.streams, hostOptions);
     this.network = new NetworkProxy(broker, this.host, this.streams, {
       directory: hostOptions.networkDirectory,
       config: broker.platform.config.network,
@@ -224,7 +226,11 @@ export class BusinessProxy {
       definition.route.startsWith('/ai/team/node/');
     const token = isTeam
       ? undefined
-      : await this.broker.tokenFor(definition.audience, context);
+      : await this.broker.tokenFor(
+          definition.audience,
+          context,
+          definition.operation,
+        );
     this.broker.assert(context);
     const controller = new AbortController();
     this.controllers.add(controller);

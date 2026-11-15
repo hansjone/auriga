@@ -52,7 +52,7 @@ test('R7 expired managed sessions block business and upgrades, keeping health an
   assert.doesNotMatch(index.body, /未登录/);
   assert.equal(reached, 1);
   request('/_auriga/health');
-  request('/auriga/local-login/status');
+  request('/auriga/shell/status');
   assert.equal(reached, 3);
   request('/auriga/settings/state');
   request('/auriga/settings/view.js');

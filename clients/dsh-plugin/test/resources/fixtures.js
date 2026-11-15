@@ -1,10 +1,11 @@
-﻿import { generateKeyPairSync, sign, createHash } from 'node:crypto';
+import { resourceBroker } from './broker-fixture.js';
+import { generateKeyPairSync, sign, createHash } from 'node:crypto';
 import { gzipSync } from 'node:zlib';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { canonicalize } from '../../src/resources/json.js';
-import { openMemberResources } from '../../src/resources/engine.js';
+import { openMemberResources } from './broker-fixture.js';
 export const id = (n) =>
   `01900000-0000-7000-8000-${String(n).padStart(12, '0')}`;
 export function tarball(manifest, extra = {}) {
@@ -234,6 +235,7 @@ export async function fixture(t, options = {}) {
     },
     stop: () => hostCalls.push('stop'),
   };
+  resourceBroker(runtime, options.fetchImpl ?? fetchImpl);
   const engineOptions = {
     directory,
     runtime,

@@ -1,3 +1,4 @@
+import { resourceBroker } from './broker-fixture.js';
 /* global AbortSignal */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -10,7 +11,7 @@ import {
   readdirSync,
 } from 'node:fs';
 import { join } from 'node:path';
-import { catalogService } from '../../src/resources/catalog-service.js';
+import { catalogService } from './broker-fixture.js';
 import { createPrivateSkills } from '../../src/resources/private-skills.js';
 import { sha } from '../../src/resources/desktop-skills.js';
 import { requireSchema } from '../../src/resources/schema.js';
@@ -27,6 +28,7 @@ const action = (f) => ({
 });
 const json = (p) => JSON.parse(readFileSync(p, 'utf8'));
 function service(f, extra = {}) {
+  resourceBroker(extra.runtime ?? f.runtime, extra.fetchImpl ?? f.fetchImpl);
   return catalogService({
     ...f,
     privateSkills: createPrivateSkills({ home: f.home }),

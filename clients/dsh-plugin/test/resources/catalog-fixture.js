@@ -1,3 +1,4 @@
+import { resourceBroker } from './broker-fixture.js';
 import { clockBootId } from '../../src/resources/host-lock.js';
 import { generateKeyPairSync, sign } from 'node:crypto';
 import {
@@ -305,6 +306,7 @@ export function catalogFixture(t, temporaryRoot = tmpdir(), config = {}) {
     home,
     time: () => ({ bootId: '2026-11-12T00:00:00.000Z', monotonicMillis: 1000 }),
   });
+  resourceBroker(runtime, fetchImpl);
   return {
     home,
     who,

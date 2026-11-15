@@ -23,7 +23,9 @@
     "LICENSE",
     "README.md",
     "ui",
-    "cordis.patch.yml"
+    "skills",
+    "cordis.patch.yml",
+    "shell-auth"
   ],
   "scripts": {
     "lint": "eslint . && prettier --check .",

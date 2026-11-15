@@ -141,6 +141,7 @@ export interface DeviceRegistration {
   created: boolean;
 }
 export interface PreparedConnection {
+  transportFactory?: (options: any) => any;
   migrationPermit?: SignedMigrationPermit;
   controlIdentity?: ControlIdentity;
   confirmControlReceipt?(

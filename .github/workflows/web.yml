@@ -19,6 +19,8 @@ jobs:
           cache-dependency-path: web/pnpm-lock.yaml
       - name: Install
         run: pnpm install --frozen-lockfile --store-dir "$(pnpm store path)"
+      - name: Install pinned contract tools
+        run: npm ci --ignore-scripts --no-audit --no-fund --prefix services/contracts
       - name: Regenerate API and identity types
         run: |
           pnpm gen:api

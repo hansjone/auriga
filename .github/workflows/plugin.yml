@@ -23,6 +23,8 @@ jobs:
       - name: Install
         shell: bash
         run: pnpm install --frozen-lockfile --filter auriga-dsh... --filter . --store-dir "$(pnpm store path)"
+      - name: Install pinned contract tools
+        run: npm ci --ignore-scripts --no-audit --no-fund --prefix services/contracts
       - name: Install pinned rc.3 public host
         run: npm ci --ignore-scripts --prefix clients/dsh-plugin/test/public-host
       - name: Require public host verification

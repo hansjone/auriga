@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { catalogFixture } from './catalog-fixture.js';
-import { catalogService } from '../../src/resources/catalog-service.js';
+import { catalogService } from './broker-fixture.js';
 import { createPrivateSkills } from '../../src/resources/private-skills.js';
 import { unpackSkill } from '../../src/resources/skill-package.js';
 import { sha } from '../../src/resources/desktop-skills.js';

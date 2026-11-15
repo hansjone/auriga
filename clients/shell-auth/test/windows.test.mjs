@@ -14,6 +14,40 @@ import { startIpc, connectIpc } from '../ipc.mjs';
 import { fixture, command, login } from './fixtures.mjs';
 
 test(
+  'closing the real helper before handshake settles late calls without unhandled errors',
+  { skip: process.platform !== 'win32', timeout: 15000 },
+  async (t) => {
+    const directory = mkdtempSync(join(tmpdir(), 'auriga-shell-early-close-'));
+    t.after(() =>
+      rmSync(directory, {
+        recursive: true,
+        force: true,
+        maxRetries: 5,
+        retryDelay: 100,
+      }),
+    );
+    const helper = buildHelper(join(directory, 'helper.exe'));
+    const client = connectIpc({
+      helperPath: helper,
+      pipe: 'auriga-shell-' + randomBytes(16).toString('hex'),
+      capability: randomBytes(32).toString('base64url'),
+    });
+    client.close();
+    client.close();
+    await assert.rejects(
+      client.call({ requestId: randomUUID() }),
+      /disconnected/,
+    );
+    await assert.rejects(
+      client.subscribe({ requestId: randomUUID() }, () =>
+        assert.fail('closed subscriber'),
+      ),
+      /disconnected/,
+    );
+  },
+);
+
+test(
   'real Windows DPAPI roundtrip and protected current-user ACL; ciphertext contains no token',
   { skip: process.platform !== 'win32', timeout: 15000 },
   async (t) => {
