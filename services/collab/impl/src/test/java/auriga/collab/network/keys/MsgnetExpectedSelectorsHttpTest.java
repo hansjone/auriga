@@ -353,6 +353,22 @@ class MsgnetExpectedSelectorsHttpTest {
     var base = f.base;
     var bundle = f.pki.bundle();
     var control = NetworkJson.parse(f.renewal.publicControl());
+    // Consumer-side installation root, independently of the authenticated C response.
+    var consumer =
+        new MsgnetTransportVerifier(
+            new MsgnetV2Verifier(base.tenant.toString(), "1", "root", base.root.getPublic()));
+    var signedHistory = f.pki.history(digest(bundle));
+    consumer.ledgerBundle(signedHistory);
+    consumer.ledgerControl(control);
+    var badHistory = (ObjectNode) signedHistory.deepCopy();
+    ((ObjectNode) badHistory.path("bundle").path("payload"))
+        .put("authority_digest", "sha256:" + "0".repeat(64));
+    assertThrows(
+        auriga.common.error.AurigaException.class, () -> consumer.ledgerBundle(badHistory));
+    var badControl = (ObjectNode) control.deepCopy();
+    ((ObjectNode) badControl.path("payload")).put("minimum_generation", "9");
+    assertThrows(
+        auriga.common.error.AurigaException.class, () -> consumer.ledgerControl(badControl));
     var query =
         base.confirmationQuery(bundle)
             .put("control_revision", text(control.path("payload"), "control_revision"))
@@ -478,16 +494,8 @@ class MsgnetExpectedSelectorsHttpTest {
             "1",
             base.wall.instant(),
             true);
-    f.renewal
-        .transportVerifier()
-        .confirmation(
-            signed,
-            authority,
-            control,
-            text(cq, "challenge"),
-            base.wall.instant(),
-            "loaded",
-            verified);
+    consumer.confirmation(
+        signed, authority, control, text(cq, "challenge"), base.wall.instant(), "loaded", verified);
     assertThrows(
         auriga.common.error.AurigaException.class,
         () ->
