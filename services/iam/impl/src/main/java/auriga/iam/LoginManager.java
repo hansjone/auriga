@@ -23,6 +23,7 @@ public final class LoginManager {
   private final ConnectorRegistry connectors;
   private final EmergencyAccounts emergency;
   private final TeamAccounts teamAccounts;
+  private final TeamPasskeys passkeys;
   private final SessionManager sessions;
   private final IdentityPolicyHooks hooks;
   private final EventPublisher events;
@@ -125,6 +126,7 @@ public final class LoginManager {
     this.connectors = connectors;
     this.emergency = emergency;
     this.teamAccounts = teamAccounts;
+    this.passkeys = new TeamPasskeys(store, secrets, clock, events);
     this.sessions = sessions;
     this.hooks = hooks;
     this.events = events;
@@ -236,7 +238,11 @@ public final class LoginManager {
           charge("login-ip:" + ip, 30);
           String pid = request.path("providerId").asString();
           ObjectNode provider = provider(pid);
-          IamError.validate(!"uac".equals(provider.path("connectorType").asString()));
+          boolean uacStepUp = "uac".equals(provider.path("connectorType").asString());
+          IamError.validate(
+              !uacStepUp
+                  || "stepup".equals(request.path("purpose").asString())
+                      && !request.has("invitationCode"));
           if (request.has("nativeConnect"))
             IamError.require(
                 nativeDevices != null
@@ -304,6 +310,64 @@ public final class LoginManager {
           store.insert("login_tx", UuidV7.next().toString(), tx, clock.instant().plusSeconds(300));
           // Retrieval uses the generated transaction id, with no caller-controlled key.
           tx.put("txId", tx.path("id").asString());
+          if (uacStepUp) {
+            ObjectNode source = sessions.activeById(tx.path("sessionId").asString());
+            IamError.require(
+                source != null
+                    && source.has("uacCredentialId")
+                    && pid.equals(source.path("providerId").asString()),
+                "unauthenticated",
+                401);
+            ObjectNode identity =
+                store.matching("identity", "accountId", tx.path("accountId").asString()).stream()
+                    .filter(
+                        i ->
+                            pid.equals(i.path("providerId").asString())
+                                && tx.path("accountId").equals(i.path("accountId")))
+                    .findFirst()
+                    .orElseThrow(() -> IamError.error("invalid_credentials", 401));
+            tx.put("uacSessionStepUp", true);
+            tx.set("uacLinkAuthTime", source.path("authTime"));
+            tx.set("uacLinkGeneration", source.path("authGeneration"));
+            tx.put("pendingAccount", tx.path("accountId").asString());
+            tx.put(
+                "pendingProfile",
+                secrets.encrypt(
+                    Json.object("subject", identity.path("subject")).toString(), aad(tx)));
+            tx.set(
+                "step",
+                Json.object(
+                    "type",
+                    "form",
+                    "formId",
+                    "platform_totp",
+                    "fields",
+                    List.of(Json.object("name", "otp", "kind", "otp", "required", true))));
+            UUID account = UUID.fromString(tx.path("accountId").asString());
+            if (!teamAccounts.hasMfa(account)) {
+              Instant auth = Instant.parse(source.path("authTime").asString());
+              IamError.require(
+                  !auth.isAfter(clock.instant()) && auth.isAfter(clock.instant().minusSeconds(600)),
+                  "step_up_required",
+                  403);
+              tx.put("firstTotpSecret", secrets.encrypt(Totp.generate(), aad(tx) + ":first-totp"));
+              tx.set("step", firstTotpStep(null));
+            } else if (!teamAccounts.hasTotp(account)) {
+              ObjectNode passkeyConfig = uacPasskeyConfig();
+              IamError.require(
+                  java.util.stream.StreamSupport.stream(
+                          passkeyConfig.path("origins").spliterator(), false)
+                      .anyMatch(o -> origin.equals(o.asString())),
+                  "invalid_config",
+                  400);
+              ObjectNode assertion = passkeys.beginAssertionForAccount(pid, account, passkeyConfig);
+              tx.set("step", assertion.path("step"));
+              tx.put("state", secrets.encrypt(assertion.path("state").toString(), aad(tx)));
+              tx.set("uacPasskeyConfig", passkeyConfig);
+            }
+            store.save("login_tx", tx);
+            return new Result(view(tx, provider), binding, null);
+          }
           ObjectNode nativeDevice =
               request.has("nativeConnect")
                   ? nativeDevices.beginNative(tx, request.path("nativeConnect"))
@@ -426,14 +490,49 @@ public final class LoginManager {
           try {
             return store.atomic(
                 () -> {
+                  if (tx.path("uacSessionStepUp").asBoolean()
+                      && input.path("type").asString().equals("webauthn")) {
+                    ObjectNode passkeyConfig = uacPasskeyConfig();
+                    IamError.require(
+                        passkeyConfig.equals(tx.path("uacPasskeyConfig")),
+                        "invalid_credentials",
+                        401);
+                    JsonNode state =
+                        Json.read(secrets.decrypt(tx.path("state").asString(), aad(tx)));
+                    return finish(
+                        tx,
+                        provider,
+                        passkeys.finishAssertion(
+                            state.path("challengeId").asString(),
+                            input.path("credential"),
+                            passkeyConfig),
+                        true);
+                  }
                   if (input.path("formId").asString("").equals("first_totp")) {
                     IamError.require(
-                        provider.path("connectorType").asString().equals("team-account")
+                        (provider.path("connectorType").asString().equals("team-account")
+                                || tx.path("uacSessionStepUp").asBoolean())
                             && tx.has("firstTotpSecret")
                             && tx.has("pendingProfile"),
                         "invalid_step_input",
                         400);
                     UUID account = UUID.fromString(tx.path("pendingAccount").asString());
+                    if (tx.path("uacSessionStepUp").asBoolean()) {
+                      ObjectNode source = sessions.activeById(tx.path("sessionId").asString());
+                      IamError.require(
+                          source != null
+                              && source.path("accountId").equals(tx.path("accountId"))
+                              && source.path("authTime").equals(tx.path("uacLinkAuthTime"))
+                              && source.path("authGeneration").equals(tx.path("uacLinkGeneration")),
+                          "unauthenticated",
+                          401);
+                      Instant auth = Instant.parse(source.path("authTime").asString());
+                      IamError.require(
+                          !auth.isAfter(clock.instant())
+                              && auth.isAfter(clock.instant().minusSeconds(600)),
+                          "step_up_required",
+                          403);
+                    }
                     if (tx.path("newAccount").asBoolean()) {
                       JsonNode profile =
                           Json.read(secrets.decrypt(tx.path("pendingProfile").asString(), aad(tx)));
@@ -448,14 +547,15 @@ public final class LoginManager {
                             tx.path("firstTotpSecret").asString(), aad(tx) + ":first-totp"),
                         input.path("values").path("otp").asString(""));
                     tx.remove("firstTotpSecret");
-                    for (ObjectNode session : sessions.userSessions(account.toString()))
-                      if (session.path("accountId").asString().equals(account.toString())
-                          && !session
-                              .path("sessionId")
-                              .asString()
-                              .equals(tx.path("sessionId").asString(""))
-                          && !session.path("revoked").asBoolean())
-                        sessions.revokeOne(session, "security");
+                    if (!tx.path("uacSessionStepUp").asBoolean())
+                      for (ObjectNode session : sessions.userSessions(account.toString()))
+                        if (session.path("accountId").asString().equals(account.toString())
+                            && !session
+                                .path("sessionId")
+                                .asString()
+                                .equals(tx.path("sessionId").asString(""))
+                            && !session.path("revoked").asBoolean())
+                          sessions.revokeOne(session, "security");
                     return finish(
                         tx,
                         provider,
@@ -627,12 +727,17 @@ public final class LoginManager {
         policy = (ObjectNode) provider.path("admission");
     String purpose = tx.path("purpose").asString();
     if (uac) {
-      IamError.validate(tx.path("uacVerified").asBoolean() && tx.has("uacCredential"));
+      IamError.validate(
+          tx.path("uacVerified").asBoolean() && tx.has("uacCredential")
+              || purpose.equals("stepup") && tx.path("uacSessionStepUp").asBoolean());
       if (!purpose.equals("login")) {
         ObjectNode source = sessions.activeById(tx.path("sessionId").asString());
         IamError.require(
             source != null
                 && source.path("accountId").equals(tx.path("accountId"))
+                && source.path("audience").equals(tx.path("audience"))
+                && (!tx.path("uacSessionStepUp").asBoolean()
+                    || source.path("providerId").equals(tx.path("providerId")) && identity != null)
                 && source.path("authTime").equals(tx.path("uacLinkAuthTime"))
                 && source.path("authGeneration").asLong() == tx.path("uacLinkGeneration").asLong(),
             "unauthenticated",
@@ -643,7 +748,7 @@ public final class LoginManager {
           Instant step = Instant.parse(source.path("stepUpAt").asString());
           fresh |= !step.isBefore(now.minusSeconds(600)) && !step.isAfter(now.plusSeconds(30));
         }
-        IamError.require(fresh, "step_up_required", 403);
+        if (purpose.equals("link")) IamError.require(fresh, "step_up_required", 403);
       }
     }
     String accountId =
@@ -978,6 +1083,19 @@ public final class LoginManager {
     ObjectNode p = store.get("idp_provider", id, false);
     IamError.require(p != null && p.path("enabled").asBoolean(), "provider_unavailable", 404);
     return p;
+  }
+
+  private ObjectNode uacPasskeyConfig() {
+    ObjectNode provider =
+        store.all("idp_provider").stream()
+            .filter(
+                p ->
+                    p.path("connectorType").asString().equals("team-account")
+                        && p.path("enabled").asBoolean())
+            .findFirst()
+            .orElseThrow(() -> IamError.error("provider_unavailable", 404));
+    JsonNode config = config(provider);
+    return Json.object("rpId", config.path("rpId"), "origins", config.path("origins"));
   }
 
   private JsonNode config(ObjectNode p) {

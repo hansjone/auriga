@@ -1,0 +1,14 @@
+﻿import { readFileSync } from 'node:fs';
+import { generateKeyPairSync, createPublicKey } from 'node:crypto';
+import { verifyClaims, signClaims, EntryDouble, exchangeTicket } from '../../../contracts/shared-dsh/ports.mjs';
+const input=JSON.parse(readFileSync(0,'utf8'));
+const keys=new Map([['test',createPublicKey({key:{kty:'OKP',crv:'Ed25519',x:input.publicX},format:'jwk'})]]);
+const identity=verifyClaims(input.identity,'Identity','auriga-shared-identity+jwt',keys);
+const entry=new EntryDouble(identity.binding,identity.platformSessionId);
+entry.accept(identity,'Identity',{now:input.now,method:identity.method,canonicalPath:identity.canonicalPath});
+const {publicKey,privateKey}=generateKeyPairSync('ed25519');
+const claims={schemaVersion:1,binding:identity.binding,platformSessionId:identity.platformSessionId,audience:'auriga.placement.exchange',issuedAt:input.now,expiresAt:input.now+60,jti:input.ticketJti};
+const ticket=signClaims({alg:'EdDSA',kid:'w-test',typ:'auriga-shared-ticket+jwt'},claims,privateKey);
+const ticketEntry=new EntryDouble(identity.binding,identity.platformSessionId);
+exchangeTicket({ticket},ticketEntry,new Map([['w-test',publicKey]]),{now:input.now,physicalInstanceId:identity.binding.physicalInstanceId,ready:true,ipMode:true});
+process.stdout.write(JSON.stringify({ticket,publicX:publicKey.export({format:'jwk'}).x}));
