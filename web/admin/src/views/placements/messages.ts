@@ -1,5 +1,15 @@
 export const placementMessages = {
   'zh-CN': {
+    unassigned: '尚未分配；授权不会创建分配。',
+    grant: '授予独立容器授权',
+    revoke: '撤销独立容器授权',
+    entitlementHelp:
+      '授权不切换模式；仍在独立模式或有在途切换时，必须先完成降权再撤销。',
+    entitlementSaved: '授权已保存；以刷新后的权威状态为准。',
+    uncertain:
+      '提交结果尚未确认；请先查原操作。404不证明从未执行，不会自动换键重发。',
+    lookupPending: '按原幂等键查证',
+    retryEntitlement: '用原请求重试授权',
     title: 'Auriga DSH · 成员模式',
     shared: '共享模式',
     dedicated: '独立容器',
@@ -13,8 +23,7 @@ export const placementMessages = {
       '初始预算（非实测上限）：每池20登记 / 4活跃，每人1活跃、5GiB / 10万inode；内存达80%停止准入，满载扩池，不静默搬迁在途会话。',
     resources:
       '企业 skill 来源：平台统一资源。共享模式不开放任意插件、个人 Key、私有 skill、自行共享 skill/MCP、shell 或终端；需要这些功能请向管理员申请独立容器。',
-    missing:
-      '权威接线尚未就绪：无法读取成员分配、修订标签与独立授权，切换已禁用。',
+    missing: '无法读取成员分配、修订标签与独立授权，切换已禁用。请刷新重试。',
     refresh: '刷新状态',
     reason: '切换原因',
     confirm: '我已确认文件、会话处置及全池影响与共享风险',
@@ -32,7 +41,7 @@ export const placementMessages = {
     unknown: '尚未取得权威数据',
     preparingList: '维护窗口批量重建',
     listHelp:
-      '先通知维护及导出窗口，再登记“继续独立”名单。当前契约尚无名单保存、批量执行及逐成员进度接口，批量操作尚不可用；首次登录不会由此页面静默重建。',
+      '先通知维护及导出窗口，再登记“继续独立”名单。保存名单不执行重建；确认导出后再开始。',
     states: {
       accepted: '已登记',
       fencing: '撤销旧能力',
@@ -52,6 +61,16 @@ export const placementMessages = {
     },
   },
   en: {
+    unassigned: 'No placement; entitlement does not allocate one.',
+    grant: 'Grant dedicated entitlement',
+    revoke: 'Revoke dedicated entitlement',
+    entitlementHelp:
+      'Entitlement does not switch modes. Complete downgrade before revoking an existing dedicated placement or an in-flight switch.',
+    entitlementSaved: 'Entitlement saved; use refreshed authoritative state.',
+    uncertain:
+      'Write outcome is unknown. Look up the original operation first. A 404 does not prove it never ran; no automatic resend with a new key.',
+    lookupPending: 'Look up original intent',
+    retryEntitlement: 'Retry original entitlement request',
     title: 'Auriga DSH · Member mode',
     shared: 'Shared',
     dedicated: 'Dedicated container',
@@ -66,7 +85,7 @@ export const placementMessages = {
     resources:
       'Enterprise skill source: platform unified resources. Shared mode does not offer arbitrary plugins, personal keys, private skills, member-shared skills/MCP, shell or terminal. Ask an administrator for a dedicated container when needed.',
     missing:
-      'Authority integration is pending: member placement, ETag and dedicated entitlement cannot be read. Switching is disabled.',
+      'Member placement, ETag and entitlement cannot be read. Switching is disabled. Refresh to retry.',
     refresh: 'Refresh status',
     reason: 'Reason',
     confirm:
@@ -85,7 +104,7 @@ export const placementMessages = {
     unknown: 'Authoritative data unavailable',
     preparingList: 'Maintenance-window batch rebuild',
     listHelp:
-      'Notify members of maintenance and export windows, then register the “remain dedicated” list. The contract has no list persistence, batch execution or per-member batch progress API. Batch operations are unavailable; this page does not silently rebuild on first login.',
+      'Notify members of maintenance and export windows, then register the remain-dedicated list. Saving does not rebuild; confirm export completion before starting.',
     states: {
       accepted: 'Registered',
       fencing: 'Revoking old capabilities',

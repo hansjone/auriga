@@ -7,6 +7,7 @@ import { placementMessages } from './messages';
 import {
   placementPort,
   placementPortKey,
+  intentKey,
   type MemberPlacementSnapshot,
   type Switch,
 } from './api';
@@ -21,6 +22,14 @@ const busy = ref(false),
   error = ref(''),
   operationId = ref('');
 const operation = ref<Switch>();
+const pendingKey = ref('');
+const entitlementIntent = ref<{
+  granted: boolean;
+  reason: string;
+  etag: string;
+  key: string;
+}>();
+const saved = ref(false);
 const target = ref<'shared' | 'dedicated'>('dedicated');
 let generation = 0;
 let abort = new globalThis.AbortController();
@@ -34,7 +43,9 @@ const inFlight = computed(
 );
 const eligible = computed(
   () =>
-    snapshot.value?.placement.state === 'ready' &&
+    !pendingKey.value &&
+    !entitlementIntent.value &&
+    snapshot.value?.placement?.state === 'ready' &&
     (target.value === 'shared' || snapshot.value.dedicatedEntitled),
 );
 async function load() {
@@ -57,15 +68,18 @@ async function load() {
     const value = await port.readMember(props.memberId, abort.signal);
     if (version !== generation) return;
     if (
-      value.placement.memberId !== props.memberId ||
+      (value.placement && value.placement.memberId !== props.memberId) ||
       !value.etag ||
-      !['shared', 'dedicated'].includes(value.placement.mode)
+      (value.placement &&
+        !['shared', 'dedicated'].includes(value.placement.mode))
     )
       throw new Error('binding');
     snapshot.value = value;
-    target.value = value.placement.mode === 'shared' ? 'dedicated' : 'shared';
-  } catch {
-    if (version === generation) error.value = t('missing');
+    target.value = value.placement?.mode === 'shared' ? 'dedicated' : 'shared';
+  } catch (e) {
+    if (version === generation)
+      error.value =
+        t('missing') + (isApiError(e) ? ` (${e.problem.code})` : '');
   } finally {
     if (version === generation) busy.value = false;
   }
@@ -85,7 +99,12 @@ async function submit() {
   const version = generation;
   busy.value = true;
   error.value = '';
+  pendingKey.value = intentKey();
   try {
+    const access = await adminApi.membership();
+    if (version !== generation) return;
+    permissions.value = access.permissions;
+    if (!writable.value) throw new Error('permission');
     const result = await port.switchMember(
       props.memberId,
       {
@@ -95,16 +114,14 @@ async function submit() {
         filePolicy: 'archive-and-reset',
       },
       value.etag,
-      Array.from(
-        globalThis.crypto.getRandomValues(new Uint8Array(16)),
-        (byte) => byte.toString(16).padStart(2, '0'),
-      ).join(''),
+      pendingKey.value,
       abort.signal,
     );
     if (version !== generation) return;
     if (result.memberId !== props.memberId) throw new Error('binding');
     operation.value = result;
     operationId.value = result.operationId;
+    pendingKey.value = '';
     snapshot.value = undefined;
   } catch (e) {
     if (version === generation) {
@@ -116,6 +133,93 @@ async function submit() {
       busy.value = false;
       confirmed.value = false;
     }
+  }
+}
+async function lookupPending() {
+  if (
+    busy.value ||
+    !pendingKey.value ||
+    !permissions.value.includes('workspace.placements.read')
+  )
+    return;
+  const version = generation;
+  busy.value = true;
+  error.value = '';
+  try {
+    const value = await port.lookup(
+      props.memberId,
+      pendingKey.value,
+      abort.signal,
+    );
+    if (version !== generation) return;
+    if (value.memberId !== props.memberId) throw new Error('binding');
+    operation.value = value;
+    operationId.value = value.operationId;
+    pendingKey.value = '';
+  } catch (e) {
+    if (version === generation)
+      error.value =
+        t('uncertain') + (isApiError(e) ? ` (${e.problem.code})` : '');
+  } finally {
+    if (version === generation) busy.value = false;
+  }
+}
+async function setEntitlement(retry = false) {
+  if (
+    busy.value ||
+    props.disabled ||
+    !writable.value ||
+    pendingKey.value ||
+    inFlight.value
+  )
+    return;
+  if (!retry) {
+    if (!snapshot.value || !confirmed.value || !reason.value.trim()) return;
+    entitlementIntent.value = {
+      granted: !snapshot.value.dedicatedEntitled,
+      reason: reason.value.trim(),
+      etag: snapshot.value.etag,
+      key: intentKey(),
+    };
+  }
+  const intent = entitlementIntent.value;
+  if (!intent) return;
+  const version = generation;
+  busy.value = true;
+  error.value = '';
+  saved.value = false;
+  try {
+    const access = await adminApi.membership();
+    if (version !== generation) return;
+    permissions.value = access.permissions;
+    if (!writable.value) throw new Error('permission');
+    await port.entitlement(
+      props.memberId,
+      intent.granted,
+      intent.reason,
+      intent.etag,
+      intent.key,
+      abort.signal,
+    );
+    if (version !== generation) return;
+    entitlementIntent.value = undefined;
+    confirmed.value = false;
+    saved.value = true;
+    await load();
+  } catch (e) {
+    if (version === generation) {
+      snapshot.value = undefined;
+      error.value = t('failed') + (isApiError(e) ? ` (${e.problem.code})` : '');
+      if (
+        isApiError(e) &&
+        e.status >= 400 &&
+        e.status < 500 &&
+        ![408, 429].includes(e.status)
+      )
+        entitlementIntent.value = undefined;
+    }
+  } finally {
+    if (version === generation) busy.value = false;
   }
 }
 async function progress() {
@@ -143,7 +247,17 @@ async function progress() {
     if (version === generation) busy.value = false;
   }
 }
-watch(() => props.memberId, load, { immediate: true });
+watch(
+  () => props.memberId,
+  () => {
+    pendingKey.value = '';
+    entitlementIntent.value = undefined;
+    saved.value = false;
+    reason.value = '';
+    void load();
+  },
+  { immediate: true },
+);
 onBeforeUnmount(() => {
   generation++;
   abort.abort();
@@ -171,18 +285,39 @@ onBeforeUnmount(() => {
         )
       }}
     </p>
-    <p v-if="snapshot">
-      {{ t(snapshot.placement.mode) }} ? {{ snapshot.placement.state }}
+    <p v-if="snapshot?.placement">
+      {{ t(snapshot.placement.mode) }} · {{ snapshot.placement.state }}
+    </p>
+    <p v-else-if="snapshot">{{ t('unassigned') }}</p>
+    <p v-if="saved" role="status">{{ t('entitlementSaved') }}</p>
+    <p v-if="pendingKey" role="alert">
+      {{ t('uncertain') }} <code>{{ pendingKey }}</code>
     </p>
     <button
+      v-if="pendingKey"
       type="button"
-      :disabled="busy || disabled || inFlight"
+      :disabled="busy"
+      @click="lookupPending"
+    >
+      {{ t('lookupPending') }}
+    </button>
+    <button
+      v-if="entitlementIntent"
+      type="button"
+      :disabled="busy"
+      @click="setEntitlement(true)"
+    >
+      {{ t('retryEntitlement') }}
+    </button>
+    <button
+      type="button"
+      :disabled="busy || disabled || inFlight || !!entitlementIntent"
       @click="load"
     >
       {{ t('refresh') }}
     </button>
     <form v-if="snapshot && writable" @submit.prevent="submit">
-      <h4>{{ t(target) }}</h4>
+      <h4 v-if="snapshot.placement">{{ t(target) }}</h4>
       <p>{{ t('policy') }}</p>
       <p>{{ t('risks') }}</p>
       <p>{{ t('impact') }}</p>
@@ -203,6 +338,7 @@ onBeforeUnmount(() => {
         />{{ t('confirm') }}</label
       >
       <button
+        v-if="snapshot.placement"
         :disabled="
           busy ||
           disabled ||
@@ -214,6 +350,24 @@ onBeforeUnmount(() => {
       >
         {{ t('switch') }}
       </button>
+      <button
+        type="button"
+        :disabled="
+          busy ||
+          disabled ||
+          !confirmed ||
+          !reason.trim() ||
+          inFlight ||
+          !!pendingKey ||
+          !!entitlementIntent ||
+          snapshot.placement?.mode === 'dedicated' ||
+          snapshot.placement?.state === 'switching'
+        "
+        @click="setEntitlement()"
+      >
+        {{ t(snapshot.dedicatedEntitled ? 'revoke' : 'grant') }}
+      </button>
+      <p>{{ t('entitlementHelp') }}</p>
     </form>
     <label
       >{{ t('operation') }}<input v-model="operationId" :disabled="busy"
@@ -231,13 +385,11 @@ onBeforeUnmount(() => {
     </button>
     <div v-if="operation" role="status">
       <p v-if="operation.state === 'accepted'">{{ t('accepted') }}</p>
-      <p>{{ operation.operationId }} ? {{ t(`states.${operation.state}`) }}</p>
+      <p>{{ operation.operationId }} · {{ t(`states.${operation.state}`) }}</p>
       <p v-if="operation.failureCode">
         {{ t(`failures.${operation.failureCode}`) }}
       </p>
     </div>
-    <h4>{{ t('preparingList') }}</h4>
-    <p>{{ t('listHelp') }}</p>
   </section>
 </template>
 <style scoped>
