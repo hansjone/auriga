@@ -231,38 +231,20 @@ public final class MsgnetControlLedger {
                           text(previous, "identity_id")),
                   "identity_quarantined");
           }
+          freezeRevokedControls(identity, previous, control);
           if (previous != null
               && previous.path("package").path("control").equals(control)
               && identity.identityId().equals(text(previous, "identity_id"))
               && identity.signingSpki().equals(text(previous, "identity_spki")))
             return (ObjectNode) previous.path("package");
-          byte[] random = new byte[32];
-          new SecureRandom().nextBytes(random);
-          var pack =
-              MsgnetRenewal.object()
-                  .put("package_id", UUID.randomUUID().toString())
-                  .put("tenant_id", tenant.toString())
-                  .put("realm", realm)
-                  .put("target_id", identity.targetId())
-                  .put("control_digest", MsgnetV2Verifier.digest(control))
-                  .put("challenge", Base64.getUrlEncoder().withoutPadding().encodeToString(random));
-          pack.set("control", control);
+          var pack = controlPackage(identity.targetId(), control);
           var isolation =
-              MsgnetRenewal.object()
-                  .put("tenant_id", tenant.toString())
-                  .put("realm", realm)
-                  .put("target_id", identity.targetId())
-                  .put(
-                      "minimum_control_revision", text(control.path("payload"), "control_revision"))
-                  .put("control_digest", MsgnetV2Verifier.digest(control))
-                  .put("state", "quarantined")
+              quarantine(pack)
                   .put(
                       "identity_compromised",
                       previous != null
                           && previous.path("isolation").path("identity_compromised").asBoolean()
-                          && identity.identityId().equals(text(previous, "identity_id")))
-                  .put("challenge", text(pack, "challenge"))
-                  .put("new_chain_ready", false);
+                          && identity.identityId().equals(text(previous, "identity_id")));
           jdbc.update(
               """
           INSERT INTO collab.msgnet_control_target (id, tenant_id, realm, target_id, identity_id, identity_spki, control_package, isolation_record)
@@ -284,18 +266,129 @@ public final class MsgnetControlLedger {
               tenant,
               realm,
               identity.targetId());
-          jdbc.update(
-              "INSERT INTO collab.msgnet_control_queue (id, tenant_id, realm, target_id, identity_id, control_revision, package_id, control_package) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-              auriga.common.persistence.UuidV7.next(java.time.Clock.systemUTC()),
+          queue(pack, identity.identityId());
+          return pack;
+        });
+  }
+
+  private ObjectNode controlPackage(String target, JsonNode control) {
+    byte[] random = new byte[32];
+    new SecureRandom().nextBytes(random);
+    var pack =
+        MsgnetRenewal.object()
+            .put("package_id", UUID.randomUUID().toString())
+            .put("tenant_id", tenant.toString())
+            .put("realm", realm)
+            .put("target_id", target)
+            .put("control_digest", digest(control))
+            .put("challenge", Base64.getUrlEncoder().withoutPadding().encodeToString(random));
+    pack.set("control", control);
+    return pack;
+  }
+
+  private ObjectNode quarantine(JsonNode pack) {
+    var value = MsgnetRenewal.object();
+    for (String field :
+        java.util.List.of("tenant_id", "realm", "target_id", "control_digest", "challenge"))
+      value.set(field, pack.path(field));
+    return value
+        .put(
+            "minimum_control_revision",
+            text(pack.path("control").path("payload"), "control_revision"))
+        .put("state", "quarantined")
+        .put("identity_compromised", false)
+        .put("new_chain_ready", false);
+  }
+
+  private void queue(JsonNode pack, String identity) {
+    jdbc.update(
+        "INSERT INTO collab.msgnet_control_queue (id, tenant_id, realm, target_id, identity_id, control_revision, package_id, control_package) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        auriga.common.persistence.UuidV7.next(java.time.Clock.systemUTC()),
+        tenant,
+        realm,
+        text(pack, "target_id"),
+        identity,
+        new java.math.BigDecimal(text(pack.path("control").path("payload"), "control_revision")),
+        text(pack, "package_id"),
+        MsgnetRenewal.canonical(pack));
+  }
+
+  private void freezeRevokedControls(Target identity, JsonNode previous, JsonNode control) {
+    if (!"0".equals(identity.revision())) return;
+    // Queue bindings survive a target-row replacement, including replacements made before this
+    // recovery path was installed. Only C's recorded target mappings can name former identities.
+    var priorIds =
+        new java.util.HashSet<>(
+            jdbc.queryForList(
+                "SELECT DISTINCT identity_id FROM collab.msgnet_control_queue WHERE tenant_id = ? AND realm = ? AND target_id = ?",
+                String.class,
+                tenant,
+                realm,
+                identity.targetId()));
+    if (previous != null) priorIds.add(text(previous, "identity_id"));
+    for (String id : priorIds) {
+      if (id.equals(identity.identityId())
+          || !contains(control.path("payload").path("revoked_installation_ids"), id)) continue;
+      var queued =
+          jdbc.queryForList(
+              "SELECT control_package FROM collab.msgnet_control_queue WHERE tenant_id = ? AND realm = ? AND target_id = ? AND identity_id = ? AND control_revision = ?",
+              String.class,
               tenant,
               realm,
               identity.targetId(),
-              identity.identityId(),
-              new java.math.BigDecimal(text(control.path("payload"), "control_revision")),
-              text(pack, "package_id"),
-              MsgnetRenewal.canonical(pack));
-          return pack;
-        });
+              id,
+              new java.math.BigDecimal(text(control.path("payload"), "control_revision")));
+      if (queued.isEmpty()) queue(controlPackage(identity.targetId(), control), id);
+      else
+        require(
+            NetworkJson.parse(queued.getFirst(), 1048576).path("control").equals(control),
+            "same_version_conflict");
+    }
+  }
+
+  private record IsolationBinding(String identityId, ObjectNode isolation) {}
+
+  private java.util.List<IsolationBinding> revokedIsolations(String target, JsonNode control) {
+    var result = new java.util.ArrayList<IsolationBinding>();
+    var rows =
+        jdbc.queryForList(
+            "SELECT identity_id, control_package FROM collab.msgnet_control_queue WHERE tenant_id = ? AND realm = ? AND target_id = ? AND control_revision = ? ORDER BY identity_id",
+            tenant,
+            realm,
+            target,
+            new java.math.BigDecimal(text(control.path("payload"), "control_revision")));
+    for (var row : rows) {
+      String id = row.get("identity_id").toString();
+      var pack = NetworkJson.parse(row.get("control_package").toString(), 1048576);
+      if (!contains(control.path("payload").path("revoked_installation_ids"), id)) continue;
+      require(pack.path("control").equals(control), "control_required");
+      result.add(new IsolationBinding(id, quarantine(pack)));
+    }
+    return result;
+  }
+
+  private JsonNode enforcement(String identity, JsonNode control) {
+    var rows =
+        jdbc.queryForList(
+            "SELECT isolation_record FROM collab.msgnet_isolation_enforcement WHERE tenant_id = ? AND realm = ? AND identity_id = ? AND control_digest = ?",
+            String.class,
+            tenant,
+            realm,
+            identity,
+            digest(control));
+    return rows.isEmpty() ? null : NetworkJson.parse(rows.getFirst(), 1048576);
+  }
+
+  private static boolean sameIsolationBinding(JsonNode left, JsonNode right) {
+    for (String field :
+        java.util.List.of(
+            "tenant_id",
+            "realm",
+            "target_id",
+            "minimum_control_revision",
+            "control_digest",
+            "challenge")) if (!left.path(field).equals(right.path(field))) return false;
+    return true;
   }
 
   public ObjectNode confirm(JsonNode receipt) {
@@ -372,25 +465,32 @@ public final class MsgnetControlLedger {
           var row = row(text(request, "target_id"));
           require(row != null, "identity_quarantined");
           var stored = row.path("isolation");
+          var control = renewal.requiredState().path("control");
+          String identityId = text(row, "identity_id");
+          boolean historical = !sameIsolationBinding(stored, request);
+          if (historical) {
+            var binding =
+                revokedIsolations(text(request, "target_id"), control).stream()
+                    .filter(candidate -> sameIsolationBinding(candidate.isolation(), request))
+                    .findFirst()
+                    .orElseThrow(() -> failure("invalid_transition"));
+            require(
+                "quarantined".equals(text(request, "state"))
+                    && !request.path("new_chain_ready").asBoolean(),
+                "invalid_transition");
+            identityId = binding.identityId();
+            stored = binding.isolation();
+            var prior = enforcement(identityId, control);
+            if (prior != null && sameIsolationBinding(prior, stored))
+              ((ObjectNode) stored)
+                  .put("identity_compromised", prior.path("identity_compromised").asBoolean());
+          }
           require(
               stored
                   .path("minimum_control_revision")
-                  .equals(
-                      renewal
-                          .requiredState()
-                          .path("control")
-                          .path("payload")
-                          .path("control_revision")),
+                  .equals(control.path("payload").path("control_revision")),
               "control_required");
-          for (String field :
-              java.util.List.of(
-                  "tenant_id",
-                  "realm",
-                  "target_id",
-                  "minimum_control_revision",
-                  "control_digest",
-                  "challenge"))
-            require(stored.path(field).equals(request.path(field)), "invalid_transition");
+          require(sameIsolationBinding(stored, request), "invalid_transition");
           boolean compromised =
               stored.path("identity_compromised").asBoolean()
                   || request.path("identity_compromised").asBoolean();
@@ -401,20 +501,21 @@ public final class MsgnetControlLedger {
           var next = (ObjectNode) request.deepCopy();
           next.put("identity_compromised", compromised);
           if (compromised) next.put("state", "quarantined").put("new_chain_ready", false);
-          jdbc.update(
-              "UPDATE collab.msgnet_control_target SET isolation_record = ?, enforcement_confirmed = ? WHERE tenant_id = ? AND realm = ? AND target_id = ?",
-              MsgnetRenewal.canonical(next),
-              "quarantined".equals(text(next, "state")),
-              tenant,
-              realm,
-              text(request, "target_id"));
+          if (!historical)
+            jdbc.update(
+                "UPDATE collab.msgnet_control_target SET isolation_record = ?, enforcement_confirmed = ? WHERE tenant_id = ? AND realm = ? AND target_id = ?",
+                MsgnetRenewal.canonical(next),
+                "quarantined".equals(text(next, "state")),
+                tenant,
+                realm,
+                text(request, "target_id"));
           if ("quarantined".equals(text(next, "state")))
             jdbc.update(
                 "INSERT INTO collab.msgnet_isolation_enforcement (id, tenant_id, realm, identity_id, control_digest, isolation_record) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT (tenant_id, realm, identity_id, control_digest) DO UPDATE SET isolation_record = EXCLUDED.isolation_record",
                 auriga.common.persistence.UuidV7.next(java.time.Clock.systemUTC()),
                 tenant,
                 realm,
-                text(row, "identity_id"),
+                identityId,
                 text(next, "control_digest"),
                 MsgnetRenewal.canonical(next));
           else
@@ -422,7 +523,7 @@ public final class MsgnetControlLedger {
                 "DELETE FROM collab.msgnet_isolation_enforcement WHERE tenant_id = ? AND realm = ? AND identity_id = ? AND control_digest = ?",
                 tenant,
                 realm,
-                text(row, "identity_id"),
+                identityId,
                 text(next, "control_digest"));
           return next;
         });
@@ -550,6 +651,14 @@ public final class MsgnetControlLedger {
                       .equals(control.path("payload").path("control_revision"))
                   && text(value, "control_digest").equals(digest(control)),
               "identity_quarantined");
+          // The trusted enforcer must first report the old target's exact current-control
+          // challenge. A newly installed pin and its own quarantine do not acknowledge it.
+          for (var binding : revokedIsolations(target, control)) {
+            var fact = enforcement(binding.identityId(), control);
+            if (fact == null
+                || !sameIsolationBinding(fact, binding.isolation())
+                || !"quarantined".equals(text(fact, "state"))) return binding.isolation();
+          }
           return value;
         });
   }

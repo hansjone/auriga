@@ -100,7 +100,9 @@ class MsgnetReviewPostgresTest {
           .put("result", "installed")
           .put("persisted_at", base.wall.now.toString());
       sign(receipt, signer, identity.identityId(), "NetworkControlReceipt");
-      return controls.confirm(receipt);
+      var confirmed = controls.confirm(receipt);
+      assertEquals(confirmed, controls.confirm(receipt));
+      return confirmed;
     }
 
     void ready() throws Exception {
@@ -222,8 +224,25 @@ class MsgnetReviewPostgresTest {
   @Test
   void independentlyEnrolledReplacementRecoversAfterRootEventWhileOldIdentityStaysRevoked()
       throws Exception {
+    rootRecovery(false, false, null);
+  }
+
+  @org.junit.jupiter.params.ParameterizedTest
+  @org.junit.jupiter.params.provider.ValueSource(booleans = {false, true})
+  void maintenanceRefreshBeforeOldIsolationStillRecovers(
+      boolean existingReplacement, @org.junit.jupiter.api.io.TempDir java.nio.file.Path directory)
+      throws Exception {
+    rootRecovery(true, existingReplacement, directory);
+  }
+
+  private void rootRecovery(
+      boolean refreshFirst, boolean existingReplacement, java.nio.file.Path directory)
+      throws Exception {
     try (var f = new Fixture()) {
       f.ready();
+      var oldIsolation = (ObjectNode) f.ledger.isolation("target").deepCopy();
+      oldIsolation.put("state", "quarantined").put("new_chain_ready", false);
+      if (refreshFirst) f.ledger.enforce(oldIsolation);
       var oldBundle = f.pki.bundle();
       var oldPublication = NetworkJson.parse(f.renewal.publication());
       var signer = KeyTestMaterial.pair();
@@ -270,14 +289,103 @@ class MsgnetReviewPostgresTest {
           authority, f.base.rootSigned(c, "NetworkRootControl"), runtime.getPrivate().getEncoded());
       f.renewal.reconcile();
       assertThrows(AurigaException.class, f.pki::reconcile);
-      f.ledger.create(f.base.controlRequest("target"));
-      var isolation = (ObjectNode) f.ledger.isolation("target").deepCopy();
-      f.ledger.enforce(isolation.put("identity_compromised", true));
-      f.pki.reconcile();
-      assertEquals("2", text(f.pki.bundle().path("payload"), "generation"));
       var controls = f.ledger(pin);
+      ObjectNode delayedIsolation = null;
+      if (refreshFirst) {
+        maintenance(f, controls, directory);
+        if (existingReplacement) {
+          // Recreate the durable shape left by 7217ca96: the new target row exists,
+          // with only the old target's earlier-control queue association remaining.
+          f.renewal.run(
+              () ->
+                  MsgnetRenewalPostgresTest.jdbc.update(
+                      "DELETE FROM collab.msgnet_control_queue WHERE tenant_id = ? AND realm = '1' AND target_id = 'target' AND identity_id = ? AND control_revision = 3",
+                      f.base.tenant,
+                      f.pin.identityId()));
+          controls.refreshTargets();
+        }
+        assertEquals(
+            "collab.msgnet_identity_quarantined",
+            assertThrows(AurigaException.class, f.pki::reconcile).errorCode().code());
+        var current = currentIsolation(f);
+        // Reporting only the new target's quarantine cannot stand in for the old disconnect.
+        controls.enforce(current);
+        assertEquals(
+            "collab.msgnet_identity_quarantined",
+            assertThrows(AurigaException.class, f.pki::reconcile).errorCode().code());
+        var isolation = (ObjectNode) controls.isolation("target").deepCopy();
+        delayedIsolation = isolation.deepCopy();
+        assertNotEquals(text(current, "challenge"), text(isolation, "challenge"));
+        assertNotEquals(text(oldIsolation, "challenge"), text(isolation, "challenge"));
+        assertEquals("3", text(isolation, "minimum_control_revision"));
+        assertFalse(controls.permitted(f.base.tenant.toString(), "1", pin.identityId(), "target"));
+        assertIsolationMismatch(controls, oldIsolation);
+        for (String field :
+            List.of("tenant_id", "realm", "target_id", "control_digest", "challenge")) {
+          var wrong = isolation.deepCopy();
+          wrong.put(
+              field,
+              switch (field) {
+                case "tenant_id" -> java.util.UUID.randomUUID().toString();
+                case "realm" -> "2";
+                case "control_digest" -> "sha256:" + "0".repeat(64);
+                case "challenge" -> encode(MsgnetKeyEncryptionTest.kek());
+                default -> "other-target";
+              });
+          if ("target_id".equals(field))
+            assertEquals(
+                "collab.msgnet_identity_quarantined",
+                assertThrows(AurigaException.class, () -> controls.enforce(wrong))
+                    .errorCode()
+                    .code());
+          else assertIsolationMismatch(controls, wrong);
+        }
+        assertIsolationMismatch(
+            controls, isolation.deepCopy().put("minimum_control_revision", "2"));
+        assertIsolationMismatch(
+            controls, isolation.deepCopy().put("state", "ready").put("new_chain_ready", true));
+        assertIsolationMismatch(controls, isolation.deepCopy().put("state", "confirmed"));
+        int enforced = f.base.count("msgnet_isolation_enforcement");
+        controls.enforce(isolation.deepCopy().put("identity_compromised", true));
+        assertTrue(controls.enforce(isolation).path("identity_compromised").asBoolean());
+        assertEquals(enforced + 1, f.base.count("msgnet_isolation_enforcement"));
+        assertEquals(current, currentIsolation(f));
+        // Repeated scheduled refreshes preserve the pending new identity and the old proof.
+        maintenance(f, controls, directory);
+        assertEquals(current, currentIsolation(f));
+      } else {
+        f.ledger.create(f.base.controlRequest("target"));
+        var isolation = (ObjectNode) f.ledger.isolation("target").deepCopy();
+        f.ledger.enforce(isolation.put("identity_compromised", true));
+      }
+      if (!refreshFirst) f.pki.reconcile();
+      assertEquals("2", text(f.pki.bundle().path("payload"), "generation"));
       var materials = f.materials(controls);
       recover(f, controls, materials, pin, signer, sealer);
+      if (refreshFirst) {
+        var ready = currentIsolation(f);
+        int facts = f.base.count("msgnet_isolation_enforcement");
+        controls.enforce(delayedIsolation);
+        assertEquals(ready, currentIsolation(f));
+        assertEquals(facts, f.base.count("msgnet_isolation_enforcement"));
+        assertTrue(controls.permitted(f.base.tenant.toString(), "1", pin.identityId(), "target"));
+        var nextControl =
+            (ObjectNode) NetworkJson.parse(f.renewal.publicControl()).path("payload").deepCopy();
+        nextControl.put("control_revision", "4");
+        f.renewal.installControl(f.base.rootSigned(nextControl, "NetworkRootControl"));
+        controls.refreshTargets();
+        assertIsolationMismatch(controls, delayedIsolation);
+        var nextIsolation = (ObjectNode) controls.isolation("target").deepCopy();
+        assertEquals("4", text(nextIsolation, "minimum_control_revision"));
+        assertNotEquals(
+            text(delayedIsolation, "control_digest"), text(nextIsolation, "control_digest"));
+        var pending = currentIsolation(f);
+        controls.enforce(nextIsolation);
+        controls.enforce(nextIsolation);
+        assertEquals(facts + 1, f.base.count("msgnet_isolation_enforcement"));
+        assertEquals(pending, currentIsolation(f));
+        assertFalse(controls.permitted(f.base.tenant.toString(), "1", pin.identityId(), "target"));
+      }
       for (String entry : List.of("protocol", "transport", "sealed"))
         assertEquals(
             "collab.msgnet_identity_quarantined",
@@ -286,6 +394,55 @@ class MsgnetReviewPostgresTest {
                 .code());
       assertFalse(f.ledger.permitted(f.base.tenant.toString(), "1", f.pin.identityId(), "target"));
       assertEquals(oldBundle, f.pki.history(digest(oldBundle)).path("bundle"));
+    }
+  }
+
+  private void assertIsolationMismatch(MsgnetControlLedger controls, ObjectNode request) {
+    assertEquals(
+        "collab.msgnet_invalid_transition",
+        assertThrows(AurigaException.class, () -> controls.enforce(request)).errorCode().code());
+  }
+
+  private ObjectNode currentIsolation(Fixture f) {
+    return f.renewal.run(
+        () ->
+            (ObjectNode)
+                NetworkJson.parse(
+                    MsgnetRenewalPostgresTest.jdbc.queryForObject(
+                        "SELECT isolation_record FROM collab.msgnet_control_target WHERE tenant_id = ? AND realm = '1' AND target_id = 'target'",
+                        String.class,
+                        f.base.tenant)));
+  }
+
+  private void maintenance(Fixture f, MsgnetControlLedger controls, java.nio.file.Path directory)
+      throws Exception {
+    var file =
+        NetworkKeyConfigurationTest.protectedFile(
+            directory.resolve("control.json"),
+            f.renewal.publicControl().getBytes(StandardCharsets.UTF_8));
+    var publicControl =
+        new MsgnetPublicControl(
+            MsgnetRenewalPostgresTest.jdbc,
+            MsgnetRenewalPostgresTest.manager,
+            f.base.tenant,
+            "1",
+            new MsgnetV2Verifier(f.base.tenant.toString(), "1", "root", f.base.root.getPublic()),
+            file);
+    var beans = new org.springframework.beans.factory.support.StaticListableBeanFactory();
+    beans.addBean("renewal", f.renewal);
+    beans.addBean("controls", controls);
+    beans.addBean("pki", f.pki);
+    beans.addBean("publicControl", publicControl);
+    // Maintenance reloads a real signing registry before the PKI phase check.
+    try (var keys = new auriga.collab.app.NetworkSigningKeys(f.base.wall, 1)) {
+      new MsgnetRenewalConfiguration.Maintenance(
+              beans.getBeanProvider(MsgnetRenewal.class),
+              keys,
+              beans.getBeanProvider(NetworkKeyPush.class),
+              beans.getBeanProvider(MsgnetPki.class),
+              beans.getBeanProvider(MsgnetPublicControl.class),
+              beans.getBeanProvider(MsgnetControlLedger.class))
+          .refresh();
     }
   }
 
@@ -300,6 +457,7 @@ class MsgnetReviewPostgresTest {
     var confirmed = f.confirmControl(ledger, pin, signer);
     assertEquals("confirmed", text(confirmed, "state"));
     assertFalse(confirmed.path("new_chain_ready").asBoolean());
+    ledger.enforce(confirmed);
     assertFalse(ledger.permitted(f.base.tenant.toString(), "1", pin.identityId(), "target"));
     assertTrue(
         ledger.projectionPermitted(f.base.tenant.toString(), "1", pin.identityId(), "target"));
