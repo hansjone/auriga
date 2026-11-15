@@ -19,7 +19,7 @@ import {
 } from './process-tree.mjs';
 import { Supervisor, packagedTrust } from './supervisor.mjs';
 import { superviseDsh } from './desktop-supervision.mjs';
-import { startShellAuth } from './shell-auth.mjs';
+import { startShellAuth, registerFallbackLogin } from './shell-auth.mjs';
 import { assertLocalPath } from './host-lock.mjs';
 import { pathOperationLock, processAlive } from './operation-lock.mjs';
 /**
@@ -1332,12 +1332,6 @@ async function launchLocked({
         root,
         dataHome: state.dataHome,
         dir,
-        onSkipLogin: (localLogin) =>
-          report({
-            event: 'login',
-            opened: false,
-            state: localLogin ? 'local_login' : 'skipped',
-          }),
         onFailure: (reason) => {
           shellFailure = reason;
         },
@@ -1355,6 +1349,7 @@ async function launchLocked({
       publish();
       statusTimer = setInterval(publish, 2000);
       statusTimer.unref();
+      registerFallbackLogin(control, () => shellAuth, report);
     }
     await supervisor.reconcile(true);
     if (

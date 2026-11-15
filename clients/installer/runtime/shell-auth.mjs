@@ -23,7 +23,6 @@ export async function startShellAuth({
   root,
   dataHome,
   dir,
-  onSkipLogin,
   onFailure = () => {},
 }) {
   const directory = join(dir, 'auriga', 'shell-auth');
@@ -34,7 +33,6 @@ export async function startShellAuth({
     const auth = await startDesktopAuth({
       root,
       dataHome,
-      onSkipLogin,
     });
     if (!auth) onFailure('not_configured');
     return auth;
@@ -71,4 +69,21 @@ export async function startShellAuth({
     console.error('Auriga 平台认证暂不可用，继续使用本地 DSH。');
     return undefined;
   }
+}
+
+/** Only the trusted tray control channel can request browser recovery. */
+export function registerFallbackLogin(control, getAuth, report) {
+  control.on?.('login-fallback', async () => {
+    let opened = false;
+    try {
+      const auth = getAuth();
+      if (typeof auth?.openLoginFallback === 'function') {
+        await auth.openLoginFallback();
+        opened = true;
+      }
+    } catch {
+      /* Report a fixed outcome without upstream details or URLs. */
+    }
+    report({ event: 'fallback-login', opened });
+  });
 }

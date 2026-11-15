@@ -7,10 +7,18 @@ import { JSDOM } from 'jsdom';
 
 // A React hook/element harness: tests actual registered component handlers.
 // It does not pretend to implement native ModuleLoader resolution or rendering.
-async function fixture(http) {
+async function fixture(http, options = {}) {
   const api = undefined,
     locale = 'zh';
   const dom = new JSDOM('<!doctype html>', { url: 'http://127.0.0.1:12345/' });
+  if (options.hash) dom.window.history.replaceState(null, '', options.hash);
+  if (options.skipped)
+    dom.window.sessionStorage.setItem('auriga.login.skipped', '1');
+  Object.defineProperty(dom.window.navigator, 'locks', {
+    value: options.locks ?? lockManager(),
+  });
+  const intervals = new Map();
+  let intervalId = 0;
   let module;
   let values = [],
     effects = [],
@@ -67,8 +75,12 @@ async function fixture(http) {
       customElements: dom.window.customElements,
       setTimeout,
       clearTimeout,
-      setInterval,
-      clearInterval,
+      setInterval: (fn, ms) => {
+        const id = ++intervalId;
+        intervals.set(id, { fn, ms });
+        return id;
+      },
+      clearInterval: (id) => intervals.delete(id),
       fetch:
         http ??
         (async (url, init = {}) => {
@@ -143,11 +155,11 @@ async function fixture(http) {
   assert.ok(section, 'native shell includes shared consent component');
   values = [];
   effects = [];
-  const render = async (shell) => {
+  const render = async (shell, modal = true) => {
     let tree = shallow(section.type, {
       boot: { mode: 'connect' },
       shell,
-      modal: true,
+      modal,
       reloadShell() {},
       gotoSettings() {},
     });
@@ -156,7 +168,7 @@ async function fixture(http) {
     tree = shallow(section.type, {
       boot: { mode: 'connect' },
       shell,
-      modal: true,
+      modal,
       reloadShell() {},
       gotoSettings() {},
     });
@@ -172,6 +184,29 @@ async function fixture(http) {
         await new Promise((resolve) => setImmediate(resolve));
       }
       return tree;
+    },
+    intervals,
+    hash: () => dom.window.location.hash,
+    remount() {
+      for (const v of values) v?.cleanup?.();
+      values = [];
+      effects = [];
+    },
+    manual(shell) {
+      const saved = values;
+      values = [];
+      const tree = shallow(section.type, {
+        boot: { mode: 'connect' },
+        shell,
+        reloadShell() {},
+      });
+      values = saved;
+      all(tree)
+        .find(
+          (n) =>
+            n.type?.name === 'Action' && n.props.primary && n.props.onClick,
+        )
+        ?.props.onClick();
     },
     reopen() {
       dom.window.history.replaceState(null, '', '#auriga=platform-login');
@@ -321,7 +356,7 @@ test('global native modal starts login, skips for the session, reopens and close
     tree.props.onClose();
     assert.equal(await f.renderLogin(), null);
     assert.equal(calls.at(-1).action, 'cancel_login');
-    f.reopen();
+    f.manual(status);
     tree = await f.renderLogin();
     assert.equal(tree.type.name, 'Modal');
     assert.equal(calls.filter((c) => c.action === 'inline_login').length, 2);
@@ -329,7 +364,152 @@ test('global native modal starts login, skips for the session, reopens and close
     const card = all(tree).find((n) => n.type?.name === 'PlatformCard');
     card.props.reloadShell();
     assert.equal(await f.renderLogin(), null);
+    assert.equal(f.intervals.size, 0);
     assert.ok(calls.every((c) => c.action !== 'open_login'));
+  } finally {
+    f.close();
+  }
+});
+
+function lockManager() {
+  let held = false;
+  const queue = [];
+  const pump = () => {
+    if (held || !queue.length) return;
+    const job = queue.shift();
+    if (job.signal.aborted) {
+      job.reject(new Error('aborted'));
+      pump();
+      return;
+    }
+    held = true;
+    Promise.resolve(job.fn({ name: 'login' })).finally(() => {
+      held = false;
+      job.resolve();
+      pump();
+    });
+  };
+  return {
+    request(_name, { signal }, fn) {
+      return new Promise((resolve, reject) => {
+        queue.push({ signal, fn, resolve, reject });
+        pump();
+      });
+    },
+  };
+}
+const signedOut = {
+  configured: true,
+  brokerAvailable: true,
+  platform: 'signed_out',
+  csrf: 'csrf',
+};
+test('tray fragment is consumed and cannot bypass skip after a remount', async () => {
+  const calls = [];
+  const f = await fixture(
+    async (_url, init = {}) => {
+      if (init.body) calls.push(JSON.parse(init.body));
+      return { ok: true, json: async () => signedOut };
+    },
+    { hash: '#auriga=platform-login' },
+  );
+  try {
+    const tree = await f.renderLogin();
+    assert.equal(tree.type.name, 'Modal');
+    assert.equal(f.hash(), '');
+    tree.props.onClose();
+    await f.renderLogin();
+    f.reopen();
+    f.remount();
+    assert.equal(await f.renderLogin(), null);
+    assert.equal(f.hash(), '');
+    assert.equal(calls.filter((c) => c.action === 'inline_login').length, 1);
+    assert.equal(f.intervals.size, 0);
+  } finally {
+    f.close();
+  }
+});
+for (const status of [
+  { ...signedOut, configured: false },
+  { ...signedOut, brokerAvailable: false },
+])
+  test(
+    'tray does not open modal without configuration and broker readiness ' +
+      JSON.stringify(status),
+    async () => {
+      const calls = [];
+      const f = await fixture(
+        async (_url, init = {}) => {
+          if (init.body) calls.push(JSON.parse(init.body));
+          return { ok: true, json: async () => status };
+        },
+        { hash: '#auriga=platform-login' },
+      );
+      try {
+        assert.equal(await f.renderLogin(), null);
+        assert.equal(calls.length, 0);
+        assert.equal(f.hash(), '');
+        assert.ok([...f.intervals.values()].every((v) => v.ms !== 2000));
+      } finally {
+        f.close();
+      }
+    },
+  );
+test('only one tab owns login while the other waits without sending commands', async () => {
+  const locks = lockManager(),
+    calls = [[], []];
+  const fixtures = await Promise.all(
+    calls.map((list) =>
+      fixture(
+        async (_url, init = {}) => {
+          if (init.body) list.push(JSON.parse(init.body));
+          return { ok: true, json: async () => signedOut };
+        },
+        { locks },
+      ),
+    ),
+  );
+  try {
+    await fixtures[0].renderLogin();
+    const waiting = await fixtures[1].renderLogin();
+    assert.equal(calls[0].filter((c) => c.action === 'inline_login').length, 1);
+    assert.equal(calls[1].length, 0);
+    assert.ok(!all(waiting).some((n) => n.type?.name === 'PlatformCard'));
+    assert.match(text(waiting), /\u5176\u4ed6\u7a97\u53e3/);
+    assert.doesNotMatch(text(waiting), /unreachable/);
+    assert.equal(fixtures[1].intervals.size, 0);
+  } finally {
+    fixtures.forEach((f) => f.close());
+  }
+});
+
+test('overview never duplicates modal QR rendering and a busy broker is not reported offline', async () => {
+  const calls = [];
+  const f = await fixture(async (_url, init = {}) => {
+    if (init.body) calls.push(JSON.parse(init.body));
+    return { ok: false, status: 409, json: async () => ({}) };
+  });
+  const status = {
+    ...signedOut,
+    platform: 'authenticating',
+    inlineLogin: {
+      providerId: 'test',
+      providers: [],
+      step: { type: 'qr', status: 'waiting' },
+      qr: { size: 21, path: '' },
+    },
+  };
+  try {
+    const overview = await f.render(status, false);
+    assert.ok(!all(overview).some((n) => n.type === 'svg'));
+    const tree = await f.render({ ...signedOut });
+    all(tree)
+      .find((n) => n.type?.name === 'Action' && n.props.primary)
+      .props.onClick();
+    await new Promise((resolve) => setImmediate(resolve));
+    const result = await f.render(signedOut);
+    assert.doesNotMatch(text(result), /\u5e73\u53f0\u4e0d\u53ef\u8fbe/);
+    assert.equal(calls.at(-1).action, 'inline_login');
   } finally {
     f.close();
   }

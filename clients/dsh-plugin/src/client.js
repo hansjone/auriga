@@ -29,6 +29,10 @@ window.__ModuleLoader__.load({
       updateDownloading: '正在下载',
       updateRestart: '更新已准备好，请关闭并重新打开 Auriga DSH',
       updateFailed: '更新失败，旧版和数据已保留，请重试',
+      loginOtherWindow:
+        '\u5df2\u5728\u5176\u4ed6\u7a97\u53e3\u767b\u5f55\u4e2d',
+      loginWindowUnsupported:
+        '\u5f53\u524d\u6d4f\u89c8\u5668\u4e0d\u652f\u6301\u5b89\u5168\u7684\u591a\u7a97\u53e3\u767b\u5f55\uff0c\u8bf7\u4f7f\u7528\u6258\u76d8\u5907\u7528\u767b\u5f55',
       panel: NAV_NAME,
       loading: '正在加载…',
       failed: '加载失败',
@@ -219,6 +223,9 @@ window.__ModuleLoader__.load({
       updateRestart: 'Update ready. Close and reopen Auriga DSH.',
       updateFailed:
         'Update failed. Previous version and data preserved. Retry.',
+      loginOtherWindow: 'Sign-in is active in another window',
+      loginWindowUnsupported:
+        'This browser cannot coordinate sign-in windows. Use browser sign-in from the tray.',
       panel: NAV_NAME,
       loading: 'Loading…',
       failed: 'Failed to load',
@@ -1923,7 +1930,8 @@ window.__ModuleLoader__.load({
             },
             body: JSON.stringify(body),
           });
-          if (!response.ok) throw failure();
+          if (!response.ok)
+            throw Object.assign(failure(), { status: response.status });
           return response.json();
         };
         // Native host controls when the public primitives expose them;
@@ -2316,6 +2324,10 @@ window.__ModuleLoader__.load({
                 ),
           );
         }
+        const launchLoginFragment = [
+          '#auriga=login',
+          '#auriga=platform-login',
+        ].includes(window.location.hash);
         let loginOverlayAvailable = false;
         const loginRequests = new Set();
         const openPlatformLogin = () => loginRequests.forEach((open) => open());
@@ -2323,38 +2335,52 @@ window.__ModuleLoader__.load({
           const local = ['127.0.0.1', '[::1]', 'localhost'].includes(
             window.location.hostname,
           );
-          const [shell, reloadShell] = useLocalStatus(
-            'auriga/shell/status',
-            2000,
-            local,
-          );
           const [open, setOpen] = React.useState(false);
+          const [settled, setSettled] = React.useState(false);
+          const [ownsLogin, setOwnsLogin] = React.useState(false);
+          const [request, setRequest] = React.useState(0);
           const attempted = React.useRef(false);
-          const [retry, setRetry] = React.useState(0);
+          const manual = React.useRef(false);
+          const cancellation = React.useRef(null);
+          const [shell, reloadShell, setShell] = useLocalStatus(
+            'auriga/shell/status',
+            open && ownsLogin ? 2000 : 15000,
+            local && (!settled || (open && ownsLogin)),
+          );
           const show = () => {
-            attempted.current = false;
-            setOpen(true);
-            setRetry((n) => n + 1);
+            manual.current = true;
+            setSettled(false);
+            setRequest((n) => n + 1);
           };
           const skip = () => {
             attempted.current = true;
+            manual.current = false;
             try {
               window.sessionStorage.setItem('auriga.login.skipped', '1');
             } catch {
-              /* Storage may be disabled; the in-memory attempt still suppresses auto-open. */
+              /* The in-memory attempt also suppresses automatic reopening. */
             }
+            if (ownsLogin && shell?.csrf)
+              cancellation.current = postLocal(
+                'auriga/shell/command',
+                shell.csrf,
+                { action: 'cancel_login' },
+              ).catch(() => {});
             setOpen(false);
-            if (shell?.csrf)
-              postLocal('auriga/shell/command', shell.csrf, {
-                action: 'cancel_login',
-              })
-                .catch(() => {})
-                .finally(reloadShell);
+            setSettled(true);
           };
           React.useEffect(() => {
             loginRequests.add(show);
             const onHash = () => {
-              if (window.location.hash === '#auriga=platform-login') show();
+              if (window.location.hash !== '#auriga=platform-login') return;
+              window.history.replaceState(
+                null,
+                '',
+                window.location.pathname + window.location.search,
+              );
+              // A tray navigation is automatic: it must respect the session skip.
+              setSettled(false);
+              reloadShell();
             };
             window.addEventListener('hashchange', onHash);
             onHash();
@@ -2364,10 +2390,15 @@ window.__ModuleLoader__.load({
             };
           }, []);
           React.useEffect(() => {
-            if (!local || !shell?.configured || !shell?.brokerAvailable) return;
-            if (shell.loggedIn) {
+            if (!local || shell === undefined) return;
+            // Retry startup readiness slowly until the IPC broker appears.
+            setSettled(!shell?.configured || !!shell?.brokerAvailable);
+            if (
+              !shell?.configured ||
+              !shell?.brokerAvailable ||
+              shell.loggedIn
+            ) {
               setOpen(false);
-              attempted.current = true;
               return;
             }
             let skipped = false;
@@ -2375,12 +2406,69 @@ window.__ModuleLoader__.load({
               skipped =
                 window.sessionStorage.getItem('auriga.login.skipped') === '1';
             } catch {
-              /* Storage may be disabled; the in-memory attempt still suppresses auto-open. */
+              /* Storage is optional; attempted still guards this mount. */
             }
-            if (!attempted.current && !skipped) setOpen(true);
-          }, [shell]);
+            if (manual.current || (!attempted.current && !skipped)) {
+              manual.current = false;
+              attempted.current = false;
+              setOpen(true);
+            }
+          }, [shell, request]);
           React.useEffect(() => {
-            if (!open || attempted.current || !shell?.csrf || shell.loggedIn)
+            if (!open) return;
+            const controller = new AbortController();
+            let live = true,
+              release;
+            const locks = window.navigator?.locks;
+            if (typeof locks?.request !== 'function') return;
+            locks
+              .request(
+                'auriga-platform-login',
+                { signal: controller.signal },
+                async () => {
+                  if (!live) return;
+                  // Refresh after obtaining the lock: a previous window may have
+                  // authenticated or cancelled while this window was waiting.
+                  const current = await fetch(localURL('auriga/shell/status'), {
+                    credentials: 'same-origin',
+                    cache: 'no-store',
+                    redirect: 'error',
+                    signal: controller.signal,
+                  })
+                    .then((response) => (response.ok ? response.json() : null))
+                    .catch(() => null);
+                  if (!live) return;
+                  setShell(current);
+                  if (
+                    !current?.configured ||
+                    !current?.brokerAvailable ||
+                    current.loggedIn
+                  )
+                    return;
+                  setOwnsLogin(true);
+                  await new Promise((resolve) => {
+                    release = resolve;
+                  });
+                },
+              )
+              .catch(() => {});
+            return () => {
+              live = false;
+              controller.abort();
+              setOwnsLogin(false);
+              Promise.resolve(cancellation.current).finally(() => release?.());
+            };
+          }, [open]);
+          React.useEffect(() => {
+            if (
+              !open ||
+              !ownsLogin ||
+              attempted.current ||
+              !shell?.csrf ||
+              !shell.configured ||
+              !shell.brokerAvailable ||
+              shell.loggedIn
+            )
               return;
             attempted.current = true;
             if (shell.inlineLogin) return;
@@ -2389,17 +2477,33 @@ window.__ModuleLoader__.load({
             })
               .catch(() => {})
               .finally(reloadShell);
-          }, [open, shell?.csrf, retry]);
-          if (!open || shell?.loggedIn) return null;
+          }, [open, ownsLogin, shell]);
+          if (
+            !open ||
+            shell?.loggedIn ||
+            !shell?.configured ||
+            !shell?.brokerAvailable
+          )
+            return null;
           const content = h(
             'div',
             { className: 'auriga-shell' },
-            h(PlatformCard, {
-              boot: { mode: 'connect' },
-              shell,
-              reloadShell,
-              modal: true,
-            }),
+            ownsLogin
+              ? h(PlatformCard, {
+                  boot: { mode: 'connect' },
+                  shell,
+                  reloadShell,
+                  modal: true,
+                })
+              : h(
+                  'p',
+                  { role: 'status' },
+                  t(
+                    typeof window.navigator?.locks?.request === 'function'
+                      ? 'loginOtherWindow'
+                      : 'loginWindowUnsupported',
+                  ),
+                ),
             h(
               Action,
               { onClick: skip },
@@ -2480,8 +2584,9 @@ window.__ModuleLoader__.load({
               action,
               ...(input ? { input } : {}),
             })
-              .catch(() => {
-                if (!disposed) setOutcome('loginUnreachable');
+              .catch((error) => {
+                if (!disposed && error.status !== 409)
+                  setOutcome('loginUnreachable');
               })
               .finally(() => {
                 if (disposed) return;
@@ -2725,6 +2830,7 @@ window.__ModuleLoader__.load({
               'div',
               { className: 'auriga-actions' },
               view.kind === 'unconfigured' &&
+                typeof gotoSettings === 'function' &&
                 h(
                   Action,
                   { primary: true, onClick: gotoSettings },
@@ -3164,17 +3270,23 @@ window.__ModuleLoader__.load({
               );
               // The browser retains this fragment through native admission.
               // It only selects an existing panel after the host loads it.
-              const navigate = [
-                '#auriga=login',
-                '#auriga=platform-login',
-              ].includes(window.location.hash)
-                ? ctx.inject?.(['layout'], (scope) => {
-                    if (!launchSelected && !disposed) {
-                      scope.layout.selectPanel(PANEL_ID);
-                      launchSelected = true;
-                    }
-                  })
-                : undefined;
+              const navigate =
+                launchLoginFragment ||
+                ['#auriga=login', '#auriga=platform-login'].includes(
+                  window.location.hash,
+                )
+                  ? ctx.inject?.(['layout'], (scope) => {
+                      if (!launchSelected && !disposed) {
+                        scope.layout.selectPanel(PANEL_ID);
+                        launchSelected = true;
+                        window.history.replaceState(
+                          null,
+                          '',
+                          window.location.pathname + window.location.search,
+                        );
+                      }
+                    })
+                  : undefined;
               return () => {
                 if (typeof navigate === 'function') navigate();
                 if (typeof unregister === 'function') unregister();
