@@ -8,14 +8,121 @@ import auriga.common.audit.AuditLogger;
 import auriga.common.context.TenantContext;
 import auriga.common.error.AurigaException;
 import auriga.iam.api.IdentityConnector;
+import jakarta.servlet.http.HttpServletRequest;
 import java.time.Clock;
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Supplier;
 import org.junit.jupiter.api.Test;
+import org.springframework.mock.web.MockHttpServletResponse;
 import tools.jackson.databind.node.ObjectNode;
 
 class UacProviderGuardTest {
+  @Test
+  void genericHttpGetDoesNotPairPlaceholderBodyWithANewerRowEtag() {
+    assertHttpGetSnapshot(false);
+  }
+
+  @Test
+  void uacHttpGetDoesNotPairConfiguredBodyWithANewerRowEtag() {
+    assertHttpGetSnapshot(true);
+  }
+
+  private void assertHttpGetSnapshot(boolean specialized) {
+    TenantContext.run(
+        UUID.randomUUID(),
+        () -> {
+          var store = mock(IamStore.class);
+          when(store.tx(any())).thenAnswer(i -> ((Supplier<?>) i.getArgument(0)).get());
+          var adapter =
+              new UacConfiguredAdapter(
+                  UacConfiguredAdapterTest.settings("https://idp.example.com"), false);
+          var registry = new ConnectorRegistry(new ContractSchemas(), List.of(adapter));
+          var audit = mock(AuditLogger.class);
+          var sessions = mock(SessionManager.class);
+          var providers =
+              new ProviderManager(
+                  store,
+                  registry,
+                  new Secrets(UacProviderPostgresTest.key()),
+                  audit,
+                  Clock.systemUTC(),
+                  "https://portal.example.com");
+          var uac =
+              new UacProviderService(store, providers, adapter, sessions, audit, Clock.systemUTC());
+          String id = UUID.randomUUID().toString();
+          var oldRow =
+              Json.object(
+                  "providerId",
+                  id,
+                  "connectorType",
+                  "uac",
+                  "enabled",
+                  false,
+                  "display",
+                  Json.object(),
+                  "uacConfigured",
+                  specialized,
+                  "revision",
+                  1);
+          providers.encryptConfig(
+              oldRow,
+              specialized
+                  ? Json.object("baseUrl", "https://idp.example.com", "systemCode", "example-old")
+                  : Json.object());
+          var currentRow =
+              oldRow.deepCopy().put("enabled", true).put("uacConfigured", true).put("revision", 2);
+          providers.encryptConfig(
+              currentRow,
+              Json.object("baseUrl", "https://idp.example.com", "systemCode", "example-new"));
+          var reads = new AtomicInteger();
+          when(store.get("idp_provider", id, false))
+              .thenAnswer(
+                  i -> reads.getAndIncrement() == 0 ? oldRow.deepCopy() : currentRow.deepCopy());
+          when(store.get("idp_provider", id, true)).thenAnswer(i -> currentRow.deepCopy());
+          var request = mock(HttpServletRequest.class);
+          var identity = mock(RequestIdentity.class);
+          when(identity.call(eq(request), any()))
+              .thenAnswer(i -> ((Supplier<?>) i.getArgument(1)).get());
+          var response = new MockHttpServletResponse();
+          var body =
+              specialized
+                  ? new UacAdminController(uac, store, identity, sessions)
+                      .get(id, request, response)
+                  : new IamAdminController(providers, registry, store).get(id, response);
+          assertFalse(body.path("enabled").asBoolean(true));
+          assertEquals(UacProviderService.etag(oldRow), response.getHeader("ETag"));
+          assertEquals(1, reads.get());
+          if (specialized) {
+            assertEquals("example-old", body.path("systemCode").asString());
+            assertEquals("no-store", response.getHeader("Cache-Control"));
+            verify(identity).browserSession(request, sessions, false);
+          } else {
+            assertTrue(body.path("config").isEmpty());
+            assertNull(response.getHeader("Cache-Control"));
+          }
+          var overwrite =
+              Json.object(
+                  "enabled",
+                  true,
+                  "baseUrl",
+                  "https://idp.example.com",
+                  "systemCode",
+                  "example-stale");
+          assertEquals(
+              "common.precondition_failed",
+              assertThrows(
+                      AurigaException.class,
+                      () -> uac.put(id, overwrite, response.getHeader("ETag")))
+                  .errorCode()
+                  .code());
+          verify(store, never()).save(anyString(), any());
+          assertEquals(
+              "example-new", providers.decryptedConfig(currentRow).path("systemCode").asString());
+        });
+  }
+
   @Test
   void genericCreateOnlyAllowsDisabledUnconfiguredUacPlaceholder() {
     TenantContext.run(

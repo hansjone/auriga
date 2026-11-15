@@ -4,7 +4,11 @@ import type { AccessMode } from './access-mode';
 import type { components } from '../generated/iam';
 import { UAC_CORRELATION_HEADER, validCorrelationId } from './correlation';
 
-export type ApiRequestInit = RequestInit & { anonymousLogin?: boolean };
+export type ApiRequestInit = RequestInit & {
+  anonymousLogin?: boolean;
+  /** Return the successful response for headers or binary downloads. Errors still use ApiError. */
+  responseType?: 'response';
+};
 
 export type ApiClientOptions = {
   /** Prefix for API paths, default empty (paths already include /api/...). */
@@ -277,6 +281,7 @@ export function createApiClient(options: ApiClientOptions = {}): ApiClient {
     if (epoch !== generation) throw new Error('会话已改变 / Session changed');
     const fetchInit = { ...init };
     delete fetchInit.anonymousLogin;
+    delete fetchInit.responseType;
     const res = await fetchImpl(target, {
       ...fetchInit,
       method,
@@ -291,6 +296,11 @@ export function createApiClient(options: ApiClientOptions = {}): ApiClient {
       throw new Error(
         '管理请求不允许重定向 / Administrative redirects are blocked',
       );
+
+    if (init.responseType === 'response') {
+      if (!res.ok) throw await responseError(res);
+      return res as T;
+    }
 
     if (res.status === 204) {
       return undefined as T;

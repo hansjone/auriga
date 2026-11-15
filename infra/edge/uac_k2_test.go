@@ -150,7 +150,7 @@ func TestUACK2PrivateSSOCookieAmbiguity(t *testing.T) {
 	g := &Gateway{Cfg: Config{UacSSOCookieNames: []string{"company_token", "company_subject"}}}
 	req := httptest.NewRequest("POST", "/api/iam/v1/login/uac/sso", nil)
 	req.Header.Set("Cookie", "company_token="+testUACSecret(t)+"; company_token="+testUACSecret(t))
-	if _, err := g.iamCookies(req, accessEntry{role: "portal", scheme: "http"}, false); err == nil {
+	if _, err := g.iamCookies(req, accessEntry{role: "portal", scheme: "http"}, false, false); err == nil {
 		t.Fatal("ambiguous enterprise cookies accepted")
 	}
 }

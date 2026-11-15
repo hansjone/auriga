@@ -41,9 +41,9 @@ public class UacAdminController {
           return store.tx(
               () -> {
                 requests.browserSession(request, sessions, false);
-                ObjectNode result = providers.get(providerId);
-                response.setHeader(
-                    "ETag", UacProviderService.etag(providers.row(providerId, false)));
+                ObjectNode row = providers.configuredRow(providerId);
+                ObjectNode result = providers.projection(row);
+                response.setHeader("ETag", UacProviderService.etag(row));
                 response.setHeader("Cache-Control", "no-store");
                 return result;
               });
