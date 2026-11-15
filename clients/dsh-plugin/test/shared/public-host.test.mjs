@@ -9,13 +9,17 @@ import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises';
 import { resolve, sep } from 'node:path';
 
 const root = process.env.AURIGA_DSH_PUBLIC_PACKAGE_ROOT;
-if (process.env.CI && !root)
+const required = process.env.AURIGA_REQUIRE_PUBLIC_HOST === '1';
+if (required && !root)
   throw new Error(
-    'CI requires AURIGA_DSH_PUBLIC_PACKAGE_ROOT and the pinned public-host install',
+    'Plugin verification requires AURIGA_DSH_PUBLIC_PACKAGE_ROOT and the pinned public-host install',
   );
+const skip =
+  !root &&
+  'Public host is not installed in this workflow; Plugin workflow runs the pinned rc.3 verification';
 test(
   'public ToolRuntime guard prevents body execution after pre-execute allow',
-  { skip: !root },
+  { skip },
   async () => {
     const hostRequire = createRequire(join(root, 'package.json'));
     const { Context } = await import(
@@ -81,7 +85,7 @@ test(
 
 test(
   'rc.3 native cookie retains owner and native file APIs read another member directory',
-  { skip: !root },
+  { skip },
   async () => {
     const hostRequire = createRequire(join(root, 'package.json'));
     const load = async (name) =>

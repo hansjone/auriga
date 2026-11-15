@@ -30,6 +30,8 @@ jobs:
         run: echo "AURIGA_DSH_PUBLIC_PACKAGE_ROOT=$GITHUB_WORKSPACE/clients/dsh-plugin/test/public-host" >> "$GITHUB_ENV"
       - run: pnpm test
         working-directory: clients/dsh-plugin
+        env:
+          AURIGA_REQUIRE_PUBLIC_HOST: '1'
 
       - name: Shell-auth regression tests
         run: node --test clients/shell-auth/test/*.test.mjs

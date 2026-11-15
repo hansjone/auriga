@@ -56,6 +56,6 @@ Python helper 从 oclaw `0321a05b0db3797fdb5320aacabe5244436972f6` 的两处 `ud
 
 根目录执行 `node --test clients/dsh-plugin/test/shared/shared.test.mjs`，已纳入插件 test 脚本。测试密钥均运行时生成。schema 快照与 K 原文件逐对象比对。签名及 schema 覆盖使用的七种冻结消息。
 
-公开组件的 rc.3 package.json/package-lock.json 固定在 `clients/dsh-plugin/test/public-host`，来源为 SPIKE 提交7e7ea403。根目录执行 `npm ci --ignore-scripts --prefix clients/dsh-plugin/test/public-host`，将 AURIGA_DSH_PUBLIC_PACKAGE_ROOT 指向该绝对目录，再执行 `node --test clients/dsh-plugin/test/shared/public-host.test.mjs`。Plugin CI 的 Windows/Linux 两个任务均执行安装并设置该路径，CI 缺少路径时测试直接失败。测试组合公开 API，验证 pre-execute 放行后的 guard 拒绝及原生 owner/文件访问反例。本地未设置路径时可单独运行其余单元测试。
+公开组件的 rc.3 package.json/package-lock.json 固定在 `clients/dsh-plugin/test/public-host`，来源为 SPIKE 提交7e7ea403。根目录执行 `npm ci --ignore-scripts --prefix clients/dsh-plugin/test/public-host`，将 AURIGA_DSH_PUBLIC_PACKAGE_ROOT 指向该绝对目录，再执行 `node --test clients/dsh-plugin/test/shared/public-host.test.mjs`。Plugin CI 的 Windows/Linux 两个任务均安装并设置该路径，同时设置 AURIGA_REQUIRE_PUBLIC_HOST=1，缺少路径时测试直接失败。其他工作流未提供宿主路径时，两项测试跳过并打印由 Plugin 工作流承担验证的原因。测试组合公开 API，验证 pre-execute 放行后的 guard 拒绝及原生 owner/文件访问反例。
 
 双成员归属与企业应用通过替身验收，临时 HTTP 服务使用随机回环端口并在结束时关闭。锁定 rc.3 公开组件实测了原生 Cookie 将 A/B 映射到同一个 owner，以及该 Peer 通过 Gateway 读取 B 会话目录和本人会话跨目录文件。企业调用按 B 身份执行、审计归 B 的反例继续由企业应用替身记录。正常门户页面、完整 Web/WS、Linux 及 NAS 部署转主控串行联合验收，并保留第3.1节全部共享风险披露。
