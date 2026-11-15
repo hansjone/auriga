@@ -3,7 +3,14 @@ import { createConsentRoutes } from './consent-routes.js';
 import { createMessagingRoutes } from './messaging-routes.js';
 import { parseStrictJson } from '../network/trust/jcs.js';
 const BASE = '/auriga/shell';
-const actions = new Set(['open_login', 'cancel_login', 'logout', 'reconnect']);
+const actions = new Set([
+  'open_login',
+  'inline_login',
+  'inline_advance',
+  'cancel_login',
+  'logout',
+  'reconnect',
+]);
 /** @param {any} res @param {number} status @param {any} body */
 function json(res, status, body) {
   res.writeHead(status, {
@@ -65,7 +72,7 @@ export function createConnectRoutes({ runtime, admission }) {
       const chunks = [];
       let size = 0;
       for await (const chunk of req) {
-        if ((size += chunk.length) > 1024)
+        if ((size += chunk.length) > 16384)
           return json(res, 400, { code: 'common.validation_failed' });
         chunks.push(chunk);
       }
@@ -79,11 +86,16 @@ export function createConnectRoutes({ runtime, admission }) {
         !value ||
         typeof value !== 'object' ||
         Array.isArray(value) ||
-        Object.keys(value).join(',') !== 'action' ||
+        Object.keys(value).sort().join(',') !==
+          (value.action === 'inline_advance' ? 'action,input' : 'action') ||
         !actions.has(value.action)
       )
         return json(res, 400, { code: 'common.validation_failed' });
-      return json(res, 200, await runtime.command(req, value.action));
+      return json(
+        res,
+        200,
+        await runtime.command(req, value.action, value.input),
+      );
     } catch {
       return json(res, 503, { code: 'common.unavailable' });
     }

@@ -126,10 +126,18 @@ Desktop 按 manifest 校验插件内全部文件，并逐文件比较插件与�
 
 桌面 broker 使用同一生产 v2 信任库，tenant/realm 和安装身份从可信设备及安装配置派生，根控制隔离立即关闭现存连接；公有控制与回执操作可在没有 NATS 连接时执行。安装器通过受保护 pin/私钥文件提供独立身份，与插件安装说明一致。
 
-
 ## Plugin login transition (PLUGIN-INLINE-LOGIN)
 
 The transitional device flow opens a same-origin `/device?user_code=...`. The broker validates the complete URI origin, path and unique user_code against this grant. When an older platform omits the complete URI, the broker constructs it from the validated base URI. The portal still requires explicit confirmation; manual mode is preserved.
 ShellAuthSnapshot.deviceAttempt is projected only to the initiating page or authenticated OS connection. Each subscription recomputes its owner projection. The plugin displays the code only during authentication and clears it on completion/cancellation. Device codes and tokens stay in the broker.
 ShellAuthSnapshot adds optional loginError={code,correlationId} and reason=platform_rejected. HTTP 4xx yields signed_out/platform_rejected; expired_token yields reauth_required/expired; transport and server failures remain unreachable/offline. Correlation IDs must be UUIDs, with the current attempt ID as fallback. Codes have bounded length and characters; response bodies are never projected. New login, cancellation and logout clear the error.
-Inline nativeConnect login is not implemented by this batch. Follow-up work should reuse the existing S256 nativeConnect transaction and exchange, with UAC and isolated CSRF/transaction cookie handling. A portal session alone is not a device credential.
+
+## 插件概览内原生登录（续做1）
+
+概览使用 `inline_login` 和 `inline_advance`，由 OS 认证连接的 owner 发起并推进。`input` 只允许 poll、选择已返回的 providerId、提交当前 formId 的字符串/布尔字段；浏览器不能提供 URL、cookie、令牌、设备码、PKCE 或身份。插件本地写入口仍核真实 owner、同源及进程 CSRF；输入有大小、字段数量及长度上限。
+
+broker 每次尝试在内存生成 S256 verifier 和隔离 cookie jar。只访问安装配置平台的固定登录路径，禁止重定向；Origin 和 Fetch Metadata 由可信 broker 固定，平台事务 cookie 只在该尝试内使用。二维码沿门户 UAC challenge 接口，账号沿现有 LoginManager 事务；两者均使用 nativeConnect，设备码只由首次创建响应取得并留在 broker。概览只收到 provider、公开二维码或当前表单步骤，不收到设备用户码、平台 cookie 或 OAuth 凭据。订阅按 owner 投影；取消、换代、退出和晚到结果继续失败关闭，晚到凭据撤销。
+
+UAC challenge 创建新增可选 NativeConnect 和一次性 nativeDevice 响应，禁止 link/invitation 混用。完成时只批准该 challenge 对应事务自己的 grant，保留账户、租户、provider、origin、binding、PKCE、过期和单次兑换检查。UAC 遵守原门户 MFA 策略：never 允许本次已验证扫码建立设备绑定，其他策略仍完成平台 MFA；团队账号保留 TOTP，应急账号只允许内置 emergency 表单并验证 OTP。UAC 源会话绑定复制到 grant/device，不能将普通门户会话直接作为插件凭据。
+
+设备身份与资料查询按在线权威区分 standard_device/native_tx；原生分支验证签名、类型、scope、租户、有效设备及来源会话、账户/provider 和已登记原生客户端。返回同一受限身份/资料 DTO，不返回 backing session。部署必须将本客户端 nativeConnect 设为 true，且刷新、撤销、AI/通信接线同批验证；原先设备流客户端设置 false 的过渡说明仅适用于旧入口。

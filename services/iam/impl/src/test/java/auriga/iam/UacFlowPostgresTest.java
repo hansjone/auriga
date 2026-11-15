@@ -351,6 +351,135 @@ class UacFlowPostgresTest {
   }
 
   @ParameterizedTest
+  @CsvSource({"never,false", "always,true"})
+  void nativeUacUsesItsOwnPkceGrantAndRespectsPortalMfaPolicy(String policy, boolean needsMfa)
+      throws Exception {
+    try (var f = new Fixture("token-verify", 3)) {
+      String verifier = Secrets.random(), totp = "JBSWY3DPEHPK3PXP";
+      var oauth =
+          new OAuthProvider(
+              store,
+              f.sessions,
+              mock(TokenService.class),
+              f.time,
+              List.of(
+                  new OAuthClient(
+                      "inline-test",
+                      f.tenant,
+                      null,
+                      Set.of(),
+                      Set.of("auriga.connect"),
+                      Set.of(OAuthProvider.DEVICE, "refresh_token"),
+                      true,
+                      true)));
+      f.login.nativeDevices(oauth);
+      f.call(
+          () ->
+              store.tx(
+                  () -> {
+                    var row = store.get("idp_provider", f.provider, true);
+                    row.withObject("/admission").put("mfa", policy);
+                    store.save("idp_provider", row);
+                    return null;
+                  }));
+      var request =
+          Json.object(
+              "providerId",
+              f.provider,
+              "nativeConnect",
+              Json.object(
+                  "clientId",
+                  "inline-test",
+                  "codeChallenge",
+                  OAuthProvider.challenge(verifier),
+                  "codeChallengeMethod",
+                  "S256"));
+      var created =
+          f.call(
+              () ->
+                  f.flow.create(
+                      request, "portal", "https://portal.example.com", "127.0.0.1", null, null));
+      String raw = created.challenge().path("nativeDevice").path("deviceCode").asString();
+      assertFalse(raw.isEmpty());
+      assertFalse(
+          f.call(
+                  () ->
+                      f.flow.status(
+                          created.challenge().path("id").asString(),
+                          created.binding(),
+                          "portal",
+                          "https://portal.example.com"))
+              .has("nativeDevice"));
+      f.run();
+      var pending = f.complete(created);
+      LoginManager.Result done;
+      if (needsMfa) {
+        assertEquals("platform_totp", pending.transaction().path("step").path("formId").asString());
+        assertNull(pending.session());
+        f.call(
+            () ->
+                store.tx(
+                    () -> {
+                      store.insert(
+                          "team_totp",
+                          f.account.toString(),
+                          Json.object(
+                              "accountId",
+                              f.account,
+                              "totp",
+                              f.secrets.encrypt(totp, "totp:" + f.tenant + ":" + f.account),
+                              "lastCounter",
+                              -1),
+                          null);
+                      return null;
+                    }));
+        done =
+            f.call(
+                () ->
+                    f.login.advance(
+                        pending.transaction().path("id").asString(),
+                        created.binding(),
+                        Json.object(
+                            "type",
+                            "form",
+                            "formId",
+                            "platform_totp",
+                            "values",
+                            Json.object(
+                                "otp", Totp.code(totp, f.time.instant().getEpochSecond() / 30))),
+                        false));
+      } else {
+        done = pending;
+      }
+      assertEquals("completed", done.transaction().path("status").asString());
+      f.call(
+          () ->
+              store.tx(
+                  () -> {
+                    var grant = store.get("oauth_grant", Secrets.hash(raw), false);
+                    assertEquals("approved", grant.path("status").asString());
+                    for (String field : List.of("providerId", "sourceSessionId", "authGeneration"))
+                      assertEquals(
+                          done.session().session().path("uacSessionBinding").path(field).asString(),
+                          grant.path("uacSessionBinding").path(field).asString());
+                    return null;
+                  }));
+      assertThrows(
+          AurigaException.class,
+          () ->
+              f.call(
+                  () ->
+                      f.flow.create(
+                          request.deepCopy().put("purpose", "link"),
+                          "portal",
+                          "https://portal.example.com",
+                          "127.0.0.1",
+                          null,
+                          null)));
+    }
+  }
+
+  @ParameterizedTest
   @CsvSource({"false,false", "false,true", "true,false", "true,true"})
   void reviewN1ReplacementCancelsMfaAfterBrowserRecordsExpire(
       boolean fromNavigation, boolean toNavigation) throws Exception {

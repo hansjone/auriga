@@ -101,6 +101,7 @@ export function createPlatform(config, fetcher = globalThis.fetch) {
       body,
       signal,
       headers = {},
+      cookieJar,
     } = {},
   ) {
     const url = new URL(path, config.platformOrigin);
@@ -120,6 +121,21 @@ export function createPlatform(config, fetcher = globalThis.fetch) {
         : AbortSignal.timeout(15000),
       headers: {
         ...headers,
+        ...(cookieJar
+          ? {
+              Origin: config.platformOrigin,
+              'Sec-Fetch-Site': 'same-origin',
+              'Sec-Fetch-Mode': 'cors',
+              'Sec-Fetch-Dest': 'empty',
+              ...(cookieJar.size
+                ? {
+                    Cookie: [...cookieJar]
+                      .map(([k, v]) => k + '=' + v)
+                      .join('; '),
+                  }
+                : {}),
+            }
+          : {}),
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
         ...(body !== undefined
           ? {
@@ -137,6 +153,18 @@ export function createPlatform(config, fetcher = globalThis.fetch) {
           }
         : {}),
     });
+    if (cookieJar)
+      for (const cookie of response.headers.getSetCookie()) {
+        const pair = cookie.split(';')[0];
+        const at = pair.indexOf('=');
+        const name = pair.slice(0, at),
+          value = pair.slice(at + 1);
+        if (
+          /^(?:__Host-)?auriga_(?:portal_login_tx|session|csrf)$/.test(name) &&
+          value.length <= 4096
+        )
+          value ? cookieJar.set(name, value) : cookieJar.delete(name);
+      }
     const raw = await boundedBody(response);
     const rawCorrelationId = response.headers.get('x-auriga-correlation-id');
     const correlationId = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(
@@ -194,7 +222,12 @@ export function createPlatform(config, fetcher = globalThis.fetch) {
       header.jwk ||
       header.x5u ||
       claims.iss !== config.issuer ||
-      claims.aud !== audience ||
+      (claims.aud !== audience &&
+        !(
+          Array.isArray(claims.aud) &&
+          claims.aud.length === 1 &&
+          claims.aud[0] === audience
+        )) ||
       claims.ptyp !== 'device' ||
       claims.ctx !== 'device' ||
       claims.scope !== 'auriga.connect' ||
@@ -260,6 +293,33 @@ export function createPlatform(config, fetcher = globalThis.fetch) {
     config,
     request,
     verifyDevice,
+    loginSession: (signal) => {
+      const cookieJar = new Map();
+      return (path, options = {}) => {
+        if (
+          !/^\/api\/iam\/v1\/login\/(?:providers|transactions(?:\/[0-9a-f-]{36}(?:\/advance)?)?|uac\/challenges(?:\/[0-9a-f-]{36}(?:\/complete)?)?)$/.test(
+            path,
+          )
+        )
+          throw new Error('invalid login route');
+        return request(path, {
+          ...options,
+          signal: options.method === 'DELETE' ? undefined : signal,
+          cookieJar,
+        });
+      };
+    },
+    nativePoll: (code, verifier, signal) =>
+      request(issuerPath + '/oauth2/token', {
+        form: true,
+        signal,
+        body: {
+          client_id: config.clientId,
+          grant_type: 'urn:ietf:params:oauth:grant-type:device_code',
+          device_code: code,
+          code_verifier: verifier,
+        },
+      }),
     begin: (signal) =>
       request(issuerPath + '/oauth2/device_authorization', {
         form: true,

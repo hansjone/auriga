@@ -12,7 +12,11 @@ import {
 
 const root = new URL('../', import.meta.url);
 const read = (path) => readFileSync(new URL(path, root), 'utf8');
-const ajv = new Ajv2020({ strict: true, allErrors: true });
+const ajv = new Ajv2020({
+  strict: true,
+  allowUnionTypes: true,
+  allErrors: true,
+});
 addFormats(ajv, { keywords: true });
 for (const file of [
   ...readdirSync(new URL('network/', root))
@@ -23,6 +27,7 @@ for (const file of [
   'plugin/shell-business.schema.json',
   'plugin/shell-auth-control.schema.json',
   'auth/uac-control.schema.json',
+  'identity/steps.schema.json',
   'auth/standard-device.schema.json',
   'auth/uac-diagnostic-log.schema.json',
   'auth/uac-session-binding.schema.json',
@@ -1830,8 +1835,12 @@ test('K2 standard devices have a fixed AI resource, token-possession revocation 
     expiresAt: base.expiresAt,
   };
   assert.equal(deviceIdentity(identity), true);
+  assert.equal(
+    deviceIdentity({ ...identity, authorizationMode: 'native_tx' }),
+    true,
+  );
   for (const patch of [
-    { authorizationMode: 'native_tx' },
+    { authorizationMode: 'unknown' },
     { access_token: 'synthetic' },
     { session: { id } },
     { uacSessionBinding: { sourceSessionId: id } },

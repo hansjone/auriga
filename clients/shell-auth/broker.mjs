@@ -3,6 +3,7 @@ import { EventEmitter } from 'node:events';
 import { performance } from 'node:perf_hooks';
 import { setTimeout as delay } from 'node:timers/promises';
 import { requireValid } from './schema.mjs';
+import { InlineLogin } from './inline-login.mjs';
 
 const ZERO = '00000000-0000-0000-0000-000000000000';
 const conflict = () =>
@@ -129,6 +130,16 @@ export class Broker extends EventEmitter {
       expiresAt: new Date(expiry).toISOString(),
       ...(reason ? { reason } : {}),
       ...(this.loginError ? { loginError: this.loginError } : {}),
+      ...(state === 'authenticating' &&
+      this.attempt?.inline?.step &&
+      this.attempt.owner === pageOwner
+        ? {
+            inlineLogin: requireValid(
+              'ShellAuthInlineView',
+              this.attempt.inline.view(),
+            ),
+          }
+        : {}),
       ...(state === 'authenticated' && this.projection ? this.projection : {}),
       ...(state === 'authenticating' &&
       this.attempt?.display &&
@@ -185,7 +196,34 @@ export class Broker extends EventEmitter {
     return result;
   }
   async execute(command, owner) {
-    if (command.action === 'open_login') {
+    if (
+      command.action === 'inline_login' ||
+      command.action === 'inline_advance'
+    ) {
+      if (command.action === 'inline_login') {
+        if (this.state === 'authenticated' || this.attempt) throw conflict();
+        this.attempt = {
+          owner,
+          generation: ++this.generation,
+          controller: new AbortController(),
+          correlationId: randomUUID(),
+        };
+        this.attempt.inline = new InlineLogin(
+          this.platform,
+          this.attempt.controller.signal,
+        );
+        this.transition('authenticating');
+      }
+      const attempt = this.attempt;
+      if (!attempt?.inline || attempt.owner !== owner || attempt.busy)
+        throw conflict();
+      attempt.busy = true;
+      try {
+        await this.track(this.runInline(attempt, command.input));
+      } finally {
+        attempt.busy = false;
+      }
+    } else if (command.action === 'open_login') {
       if (this.state === 'authenticated' || this.attempt) throw conflict();
       this.begin(owner);
     } else if (
@@ -250,6 +288,89 @@ export class Broker extends EventEmitter {
     this.transition('authenticating');
     this.track(this.runLogin(attempt));
   }
+  async runInline(attempt, input) {
+    let tokens;
+    try {
+      if (input) await attempt.inline.advance(input);
+      else await attempt.inline.start();
+      if (!this.current(attempt)) {
+        await attempt.inline.cancel();
+        return;
+      }
+      tokens = await attempt.inline.tokens();
+      if (!this.current(attempt)) {
+        if (tokens) await this.queueRevoke(tokens);
+        return;
+      }
+      if (!tokens) {
+        this.transition('authenticating');
+        return;
+      }
+      const verified = await this.validateTokens(tokens);
+      if (!this.current(attempt)) {
+        await this.queueRevoke(tokens);
+        return;
+      }
+      this.record.tokens = tokens;
+      this.record.manualLoginRequired = false;
+      await this.save();
+      if (!this.current(attempt)) {
+        delete this.record.tokens;
+        await this.queueRevoke(tokens);
+        return;
+      }
+      this.attempt = undefined;
+      this.acceptVerified(verified);
+      this.transition('authenticated', undefined, verified.projection);
+    } catch (error) {
+      if (this.record.tokens === tokens) delete this.record.tokens;
+      if (tokens) await this.queueRevoke(tokens).catch(() => {});
+      if (!this.current(attempt)) return;
+      if (
+        !tokens &&
+        error.code === 'iam.invalid_credentials' &&
+        attempt.inline.step?.type === 'form'
+      ) {
+        attempt.inline.step = {
+          ...attempt.inline.step,
+          error: { code: error.code },
+        };
+        this.transition('authenticating');
+        return;
+      }
+      await attempt.inline.cancel();
+      this.attempt = undefined;
+      const code = /^[a-zA-Z][a-zA-Z0-9_.-]{0,127}$/.test(error.code ?? '')
+        ? error.code
+        : 'common.unavailable';
+      const correlationId =
+        /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(
+          error.correlationId ?? '',
+        )
+          ? error.correlationId
+          : attempt.correlationId;
+      this.loginError = { code, correlationId };
+      this.transition(
+        code === 'expired_token'
+          ? 'reauth_required'
+          : error.status >= 400 && error.status < 500
+            ? 'signed_out'
+            : 'unreachable',
+        code === 'expired_token'
+          ? 'expired'
+          : error.status >= 400 && error.status < 500
+            ? 'platform_rejected'
+            : 'offline',
+      );
+      this.log({
+        stage: 'device_authorization',
+        phase: 'end',
+        result: 'failure',
+        code,
+        correlationId,
+      });
+    }
+  }
   current(attempt) {
     return (
       !this.closed &&
@@ -262,6 +383,7 @@ export class Broker extends EventEmitter {
     const attempt = this.attempt;
     this.attempt = undefined;
     this.generation++;
+    if (attempt?.inline) this.track(attempt.inline.cancel());
     attempt?.controller.abort();
     // RFC8628 has no pre-approval revocation endpoint: stop polling. IAM expires
     // the unused grant; a response already in flight is revoked below.

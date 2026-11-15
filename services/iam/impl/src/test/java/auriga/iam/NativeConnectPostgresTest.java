@@ -88,7 +88,10 @@ class NativeConnectPostgresTest {
                   QrChallenges qr = new QrChallenges(store, clock);
                   ConnectorRegistry registry =
                       new ConnectorRegistry(
-                          schemas, List.of(new TeamAccountConnector(team, passkeys, qr, issuer)));
+                          schemas,
+                          List.of(
+                              new TeamAccountConnector(team, passkeys, qr, issuer),
+                              new EmergencyConnector()));
                   login =
                       new LoginManager(
                           store,
@@ -273,6 +276,61 @@ class NativeConnectPostgresTest {
             "native-example",
             "refresh_token",
             token.path("refresh_token").asString()));
+  }
+
+  @Test
+  void nativeEmergencyBeginsOnlyItsOwnCredentialAndOtpForm() {
+    TenantContext.run(
+        tenant,
+        () -> {
+          UUID emergency = UUID.randomUUID();
+          store.tx(
+              () -> {
+                store.insert(
+                    "idp_provider",
+                    emergency.toString(),
+                    Json.object(
+                        "providerId",
+                        emergency,
+                        "connectorType",
+                        "emergency",
+                        "enabled",
+                        true,
+                        "display",
+                        Json.object("name", Json.object("en", "Emergency")),
+                        "config",
+                        secrets.encrypt("{}", "provider:" + tenant + ":" + emergency),
+                        "admission",
+                        Json.object("mfa", "always")),
+                    null);
+                return null;
+              });
+          var started = begin(request().put("providerId", emergency.toString()));
+          assertEquals("emergency", started.transaction().path("step").path("formId").asString());
+          assertFalse(
+              started.transaction().path("nativeDevice").path("deviceCode").asString().isEmpty());
+        });
+  }
+
+  @Test
+  void nativeDeviceIdentityUsesOnlineAuthorityAndDoesNotAcceptRevokedDevice() {
+    TenantContext.run(
+        tenant,
+        () -> {
+          ObjectNode connected = connected();
+          String raw = connected.path("access_token").asString();
+          ObjectNode identity = oauth.nativeIdentity(raw, false);
+          assertEquals("native_tx", identity.path("authorizationMode").asString());
+          assertEquals(provider.toString(), identity.path("providerId").asString());
+          assertEquals(account.toString(), identity.path("accountId").asString());
+          new ContractSchemas()
+              .validate("auth/standard-device.schema.json#/$defs/StandardDeviceIdentity", identity);
+          assertEquals(
+              account.toString(),
+              oauth.nativeIdentity(raw, true).path("account").path("id").asString());
+          oauth.revoke(Map.of("client_id", "native-example", "token", raw));
+          assertThrows(AurigaException.class, () -> oauth.nativeIdentity(raw, false));
+        });
   }
 
   @Test

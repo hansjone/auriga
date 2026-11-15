@@ -111,7 +111,9 @@ final class UacFlow {
         .forEach(
             name ->
                 IamError.validate(
-                    Set.of("providerId", "purpose", "invitationCode").contains(name)));
+                    Set.of("providerId", "purpose", "invitationCode", "nativeConnect")
+                        .contains(name)));
+    if (body.has("nativeConnect")) LoginManager.validateNative(body, audience);
     String purpose = body.path("purpose").asString("login"),
         invitation = body.path("invitationCode").asString("");
     IamError.validate(
@@ -188,6 +190,8 @@ final class UacFlow {
                   invitation,
                   purpose.equals("link") ? source : null,
                   binding);
+          ObjectNode nativeDevice =
+              body.has("nativeConnect") ? login.beginUacNative(tx, body, audience) : null;
           String id = UuidV7.next().toString();
           var telemetry =
               uac.telemetry == null
@@ -253,7 +257,7 @@ final class UacFlow {
                     "nextAt",
                     clock.instant().toString()));
             created = true;
-            return new Created(
+            ObjectNode view =
                 Json.object(
                     "id",
                     id,
@@ -264,8 +268,9 @@ final class UacFlow {
                     "expiresAt",
                     challenge.path("expiresAt"),
                     "pollIntervalSeconds",
-                    2),
-                binding);
+                    2);
+            if (nativeDevice != null) view.set("nativeDevice", nativeDevice);
+            return new Created(view, binding);
           } finally {
             if (telemetry != null) telemetry.end(created ? "success" : "failure", Json.object());
           }

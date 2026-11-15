@@ -96,7 +96,10 @@
         },
         "authorizationMode": {
           "type": "string",
-          "const": "standard_device"
+          "enum": [
+            "standard_device",
+            "native_tx"
+          ]
         },
         "expiresAt": {
           "type": "string",

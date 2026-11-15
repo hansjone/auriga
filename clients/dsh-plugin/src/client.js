@@ -180,8 +180,7 @@ window.__ModuleLoader__.load({
       platform_degraded: '已登录，通信未就绪',
       platformHint_managed: '连接由系统提供，无法在此修改。',
       platformHint_unconfigured: '在“设置”中填写团队平台地址后即可登录平台。',
-      platformHint_authenticating:
-        '浏览器已打开 Auriga 门户，请完成登录并核对设备用户码后批准。',
+      platformHint_authenticating: '请完成扫码或账号登录。',
       platformHint_unreachable: '本机 DSH 照常可用；网络恢复后可重新连接。',
       platformHint_reauth: '请重新登录平台；本机 DSH 和已有任务不受影响。',
       platformHint_signedOut: '登录平台后可使用资源市场、Team 工具和云端互通。',
@@ -197,7 +196,7 @@ window.__ModuleLoader__.load({
         '门户默认 UAC 扫码；不能扫码时在门户选择团队账号或应急账号。',
       loginCompare: '请核对门户预填的确认码与此处一致，仅确认自己发起的登录：',
       loginRejected: '平台拒绝了登录请求，请联系管理员检查客户端配置。',
-      loginMethods: '门户登录默认使用 UAC 扫码，其他方式：团队账号、应急账号。',
+      loginMethods: '默认使用 UAC 扫码，也可选择团队账号或应急账号。',
       platformLogin: '登录平台',
       configurePlatform: '配置平台地址',
       reconnect: '重新连接',
@@ -387,8 +386,7 @@ window.__ModuleLoader__.load({
       platformHint_managed: 'The system supplies this connection.',
       platformHint_unconfigured:
         'Enter your team platform address in Settings, then sign in.',
-      platformHint_authenticating:
-        'Your browser opened the Auriga portal. Sign in, check the device user code and approve.',
+      platformHint_authenticating: 'Complete scan or account sign-in.',
       platformHint_unreachable:
         'Local DSH keeps working. Reconnect when the network returns.',
       platformHint_reauth:
@@ -412,7 +410,7 @@ window.__ModuleLoader__.load({
       loginRejected:
         'The platform rejected sign-in. Ask your administrator to check the client configuration.',
       loginMethods:
-        'Portal sign-in defaults to UAC scan. Other ways: team account, emergency account.',
+        'Use UAC scan, or choose a team account or emergency account.',
       platformLogin: 'Sign in to platform',
       configurePlatform: 'Configure platform',
       reconnect: 'Reconnect',
@@ -2343,11 +2341,14 @@ window.__ModuleLoader__.load({
             );
             intent.current = null;
           }, [view.kind]);
-          const command = (action) => {
+          const command = (action, input) => {
             intent.current = action === 'cancel_login' ? 'cancel' : action;
             setBusy(true);
             setOutcome('');
-            postLocal('auriga/shell/command', shell?.csrf, { action })
+            postLocal('auriga/shell/command', shell?.csrf, {
+              action,
+              ...(input ? { input } : {}),
+            })
               .catch(() => {
                 if (!disposed) setOutcome('loginUnreachable');
               })
@@ -2357,6 +2358,156 @@ window.__ModuleLoader__.load({
                 reloadShell();
               });
           };
+          const inline = shell?.inlineLogin;
+          React.useEffect(() => {
+            if (!inline || inline.step.type !== 'qr' || busy) return;
+            const timer = setTimeout(
+              () => command('inline_advance', { operation: 'poll' }),
+              2000,
+            );
+            return () => clearTimeout(timer);
+          }, [inline, busy]);
+          const localized = (text) => text?.[state.locale] ?? text?.en ?? '';
+          const inlineView =
+            inline &&
+            h(
+              'div',
+              { className: 'auriga-scan' },
+              h(
+                'div',
+                { className: 'auriga-actions' },
+                ...inline.providers.map((provider) =>
+                  h(
+                    Action,
+                    {
+                      key: provider.id,
+                      disabled: busy || provider.id === inline.providerId,
+                      onClick: () =>
+                        command('inline_advance', {
+                          operation: 'select',
+                          providerId: provider.id,
+                        }),
+                    },
+                    localized(provider.displayName),
+                  ),
+                ),
+              ),
+              inline.step.type === 'qr' &&
+                inline.qr &&
+                h(
+                  'figure',
+                  { className: 'auriga-qr', 'data-state': inline.step.status },
+                  h(
+                    'svg',
+                    {
+                      viewBox: `0 0 ${inline.qr.size} ${inline.qr.size}`,
+                      width: 168,
+                      height: 168,
+                      role: 'img',
+                      'aria-label': t('uacQr'),
+                    },
+                    h('rect', {
+                      width: inline.qr.size,
+                      height: inline.qr.size,
+                      fill: '#fff',
+                    }),
+                    h('path', { d: inline.qr.path, fill: '#000' }),
+                  ),
+                  h(
+                    'figcaption',
+                    { role: 'status' },
+                    t('uac_' + inline.step.status),
+                  ),
+                ),
+              inline.step.type === 'form' &&
+                h(
+                  'form',
+                  {
+                    key: inline.providerId + inline.step.formId,
+                    onSubmit: (event) => {
+                      event.preventDefault();
+                      const values = {};
+                      for (const field of inline.step.fields) {
+                        if (field.kind === 'info') continue;
+                        const control = event.currentTarget.elements.namedItem(
+                          field.name,
+                        );
+                        if (control)
+                          values[field.name] =
+                            field.kind === 'checkbox'
+                              ? control.checked
+                              : control.value;
+                      }
+                      event.currentTarget.reset();
+                      command('inline_advance', {
+                        operation: 'submit',
+                        formId: inline.step.formId,
+                        values,
+                      });
+                    },
+                  },
+                  inline.step.title &&
+                    h('h4', null, localized(inline.step.title)),
+                  inline.step.error &&
+                    h(
+                      'p',
+                      { role: 'alert' },
+                      localized(inline.step.error.message) ||
+                        inline.step.error.code,
+                    ),
+                  ...inline.step.fields.map((field) =>
+                    h(
+                      'label',
+                      { key: field.name },
+                      field.kind !== 'hidden' &&
+                        (localized(field.label) || field.name),
+                      field.kind === 'info'
+                        ? h('p', null, localized(field.help))
+                        : field.kind === 'select'
+                          ? h(
+                              'select',
+                              {
+                                name: field.name,
+                                disabled: busy,
+                                required: field.required,
+                              },
+                              ...(field.options ?? []).map((option) =>
+                                h(
+                                  'option',
+                                  { key: option.value, value: option.value },
+                                  localized(option.label),
+                                ),
+                              ),
+                            )
+                          : h('input', {
+                              name: field.name,
+                              type: [
+                                'password',
+                                'checkbox',
+                                'hidden',
+                                'email',
+                                'tel',
+                              ].includes(field.kind)
+                                ? field.kind
+                                : 'text',
+                              autoComplete: field.autocomplete,
+                              required: field.required,
+                              maxLength: field.maxLength,
+                              defaultValue:
+                                typeof field.value === 'string'
+                                  ? field.value
+                                  : undefined,
+                              disabled: busy,
+                            }),
+                    ),
+                  ),
+                  h(
+                    'button',
+                    { type: 'submit', disabled: busy },
+                    localized(inline.step.submitLabel) || t('platformLogin'),
+                  ),
+                ),
+            );
           const account = shell?.account;
           const hint = [
             'source_disabled',
@@ -2394,10 +2545,13 @@ window.__ModuleLoader__.load({
                 h('dd', null, String(boot?.connection?.received ?? 0)),
               ),
             view.kind === 'authenticating' &&
+              !inline &&
               h('p', null, t('loginBrowserHint')),
             ['signedOut', 'reauth'].includes(view.kind) &&
               h('p', { className: 'auriga-muted' }, t('loginMethods')),
+            inlineView,
             view.kind === 'authenticating' &&
+              !inline &&
               shell?.deviceAttempt &&
               h(
                 'p',
@@ -2433,7 +2587,7 @@ window.__ModuleLoader__.load({
                   {
                     primary: true,
                     disabled: busy || !shell?.csrf,
-                    onClick: () => command('open_login'),
+                    onClick: () => command('inline_login'),
                   },
                   t('platformLogin'),
                 ),

@@ -216,6 +216,8 @@ export function createShellState(options) {
         expiresAt: attempt.expiresAt,
         verificationRequired: true,
       };
+    if (value.state === 'authenticating' && value.inlineLogin)
+      snapshot.inlineLogin = JSON.parse(JSON.stringify(value.inlineLogin));
     const info = value.uacLoginInfo;
     if (
       info?.purpose === 'login_info' &&
@@ -357,10 +359,21 @@ export function createShellState(options) {
         invalidate();
       }
     },
-    async command(/** @type {string} */ action) {
-      if (!['open_login', 'cancel_login', 'logout'].includes(action))
+    async command(
+      /** @type {string} */ action,
+      /** @type {any} */ input = undefined,
+    ) {
+      if (
+        ![
+          'open_login',
+          'inline_login',
+          'inline_advance',
+          'cancel_login',
+          'logout',
+        ].includes(action)
+      )
         throw fail('common.validation_failed');
-      const command = envelope(action);
+      const command = { ...envelope(action), ...(input ? { input } : {}) };
       if (action === 'logout') {
         authorizationKey = null;
         floor = command.expectedRevision + 1;
@@ -388,7 +401,7 @@ export function createShellState(options) {
           accept(event.snapshot);
         return;
       }
-      if (action === 'open_login')
+      if (['open_login', 'inline_login'].includes(action))
         loginCommands.set(command.requestId, {
           revision: command.expectedRevision,
           interrupted: false,

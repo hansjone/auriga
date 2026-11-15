@@ -48,3 +48,9 @@ node clients/shell-auth/build.mjs clients/shell-auth/target/<空目录>
 AUTH-K3 发布接线：先 `node clients/shell-auth/build.mjs dist/broker` 构建一次。
 插件打包传 `--broker-artifact dist/broker`，Desktop 从 clients/installer 执行时传 `--broker-artifact ../../dist/broker --plugin-tgz <本次插件tgz>`。
 缺制品不再重新编译。完整契约及 D 接续见 `contracts/plugin/shell-auth-control.md` 的 AUTH-K3 节。
+
+## 概览内平台登录
+
+插件概览和原生登录入口使用 `inline_login`，默认显示平台 UAC 二维码，可切换团队账号或应急账号；后续步骤由 `inline_advance` 推进。平台 cookie、PKCE verifier、设备码和 OAuth 凭据仅留在 broker；页面只收到当前公开扫码/表单步骤，不打开外部浏览器。UAC 继续遵循门户的 MFA 策略，账号登录保留内置验证要求。
+
+部署该入口时，安装配置中的 `clientId` 必须对应已登记的第一方 public nativeConnect 客户端（`nativeConnect=true`，支持设备兑换和刷新，scope 为 `auriga.connect`）。原先 RFC8628 客户端切换配置后需要重新登录。IAM、插件、broker 应同批更新；完整边界见 `contracts/plugin/shell-auth-control.md`。

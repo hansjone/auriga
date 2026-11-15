@@ -58,6 +58,12 @@ export function buildBroker(output) {
     external: ['bufferutil', 'utf-8-validate'],
   });
   files.push('network-core.bundle.mjs');
+  mkdirSync(join(output, 'schemas', 'identity'), { recursive: true });
+  copyFileSync(
+    join(source, '../../contracts/identity/steps.schema.json'),
+    join(output, 'schemas/identity/steps.schema.json'),
+  );
+  files.push('schemas/identity/steps.schema.json');
   for (const part of ['auth', 'plugin']) {
     mkdirSync(join(output, 'schemas', part), { recursive: true });
     for (const name of part === 'auth'
