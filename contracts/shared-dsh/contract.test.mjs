@@ -423,7 +423,7 @@ test('K: proto数值常量为int64，mode复用已有枚举', () => {
     'utf8',
   );
   const versions = [...proto.matchAll(/\b(\w+) schema_version = 1;/g)];
-  assert.equal(versions.length, 9);
+  assert.equal(versions.length, 10);
   for (const [, type] of versions) assert.equal(type, 'int64');
   assert.match(proto, /int64 cancel_wait_seconds = 5;/);
   assert.match(proto, /int64 archive_retention_seconds = 6;/);

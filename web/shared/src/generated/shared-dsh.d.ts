@@ -10,6 +10,20 @@ export interface SharedDSHV1ControlAndDataPlane {
 }
 /**
  * This interface was referenced by `SharedDSHV1ControlAndDataPlane`'s JSON-Schema
+ * via the `definition` "PoolMemorySample".
+ */
+export interface PoolMemorySample {
+  schemaVersion: 1;
+  tenantId: string;
+  physicalInstanceId: string;
+  observedGeneration: number;
+  observedAt: number;
+  validUntil: number;
+  memoryUsedBytes: number;
+  memoryLimitBytes: number;
+}
+/**
+ * This interface was referenced by `SharedDSHV1ControlAndDataPlane`'s JSON-Schema
  * via the `definition` "TicketExchangeRequest".
  */
 export interface TicketExchangeRequest {

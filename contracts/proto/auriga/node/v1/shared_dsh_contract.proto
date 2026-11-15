@@ -10,6 +10,18 @@ option java_multiple_files = true;
 option java_package = "auriga.contracts.node.v1";
 
 // Wire validation and semantic constraints: contracts/shared-dsh/README.md.
+message SharedDshPoolMemorySample {
+  int64 schema_version = 1;
+  string tenant_id = 2;
+  string physical_instance_id = 3;
+  int64 observed_generation = 4;
+  int64 observed_at = 5;
+  int64 valid_until = 6;
+  int64 memory_used_bytes = 7;
+  int64 memory_limit_bytes = 8;
+}
+
+// Wire validation and semantic constraints: contracts/shared-dsh/README.md.
 message SharedDshTicketExchangeRequest {
   string ticket = 1;
 }

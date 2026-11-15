@@ -1,5 +1,7 @@
 # K2 增量管理契约与裁决（2026-11-15）
 
+K3 七项追补结论见 [K3.md](K3.md)，优先于本文“其他线”中当时尚未获得 N/P 输入及遥测缺口的描述；K2 已冻结业务语义继续适用。
+
 本批只新增浏览器管理协议。机器契约为 `openapi/shared-dsh-admin.yaml`，由 workspace 聚合；严格 JSON 定义为 `shared-dsh-admin.schema.json`。两份文件由 `node contracts/shared-dsh/build-admin.mjs` 生成，`--check` 只读查漂移。`admin-ports.mjs` 仅为测试 oracle。所有新增接口只允许有效 admin 会话，逐次核 `workspace.placements.read/write`；写入还核 Origin/CSRF、严格 `0 <= now-stepUpAt < 600`。跨租户目标404；授权不可核503。使用既有 IAM 生命周期，不新增登录或企业凭据存储。
 
 ## U 五项裁决：接受
