@@ -49,6 +49,15 @@ public class IamAdminDevices {
 
   /** Authenticated edge delegation only; never exposes tickets or device credentials. */
   public ObjectNode connectionBindings() {
+    return connectionBindings(false);
+  }
+
+  /** Internal edge ownership lookup includes existing managed DSH connections for isolation. */
+  public ObjectNode messageConnectionBindings() {
+    return connectionBindings(true);
+  }
+
+  private ObjectNode connectionBindings(boolean includeManaged) {
     return store.tx(
         () -> {
           var rows =
@@ -56,8 +65,11 @@ public class IamAdminDevices {
                   .networkJdbc()
                   .query(
                       "SELECT i.lookup_key,i.data::text FROM iam.network_ingress i JOIN iam.device d ON d.tenant_id=i.tenant_id AND d.id::text=i.data->>'device'"
-                          + " WHERE i.tenant_id=? AND d.data->>'kind'='dsh_connect' AND d.data->>'scope'='auriga.connect'"
-                          + " AND COALESCE(d.data->>'deviceType','')<>'managed' ORDER BY i.id LIMIT 10001",
+                          + " WHERE i.tenant_id=?"
+                          + (includeManaged
+                              ? ""
+                              : " AND d.data->>'kind'='dsh_connect' AND d.data->>'scope'='auriga.connect' AND COALESCE(d.data->>'deviceType','')<>'managed'")
+                          + " ORDER BY i.id LIMIT 10001",
                       (rs, index) -> {
                         var data = Json.read(rs.getString(2));
                         return Json.object(

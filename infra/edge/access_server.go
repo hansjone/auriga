@@ -56,11 +56,11 @@ func (s *Server) runAccess(ctx context.Context) error {
 			if entry.role == "managed" {
 				certFile, keyFile = s.Cfg.ManagedIngress.CertFile, s.Cfg.ManagedIngress.KeyFile
 			}
-			cert, err := tls.LoadX509KeyPair(certFile, keyFile)
+			leafConfig, err := reloadingServerTLS(certFile, keyFile)
 			if err != nil {
 				return fmt.Errorf("listener TLS material: %w", err)
 			}
-			tlsConfig = &tls.Config{MinVersion: tls.VersionTLS12, Certificates: []tls.Certificate{cert}}
+			tlsConfig = leafConfig
 			if s.Cfg.Access.IngressKind() == "trusted_proxy" && entry.role != "instanceControl" && entry.role != "managed" {
 				if s.Cfg.ProxyTLS.IdentityURI == "" {
 					return fmt.Errorf("proxyTLS.identityUri is required")
@@ -75,6 +75,16 @@ func (s *Server) runAccess(ctx context.Context) error {
 				}
 				tlsConfig.ClientCAs = roots
 				tlsConfig.ClientAuth = tls.RequireAndVerifyClientCert
+				reload := tlsConfig.GetConfigForClient
+				tlsConfig.GetConfigForClient = func(hello *tls.ClientHelloInfo) (*tls.Config, error) {
+					current, err := reload(hello)
+					if err != nil {
+						return nil, err
+					}
+					current.ClientCAs = roots
+					current.ClientAuth = tls.RequireAndVerifyClientCert
+					return current, nil
+				}
 			}
 		}
 		socket, err := listen("tcp", net.JoinHostPort(entry.config.Address, strconv.Itoa(int(entry.config.Port))))

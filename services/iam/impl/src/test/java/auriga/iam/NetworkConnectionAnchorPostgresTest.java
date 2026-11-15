@@ -109,7 +109,12 @@ class NetworkConnectionAnchorPostgresTest {
             StandardDevicePostgresTest.networkAuthorization());
     authority =
         new IamNetworkAuthority(
-            store, oauth.deviceAuthority(), mock(AuditLogger.class), clock, Set.of("server-a"));
+            store,
+            oauth.deviceAuthority(),
+            mock(AuditLogger.class),
+            clock,
+            Set.of("server-a"),
+            (controlTenant, controlRealm, controlTarget) -> true);
     rpc = new IamGrpcNetworkAuthority(authority, clock, mock(IamNetworkSourceAuthority.class));
     TenantContext.run(
         tenant,
@@ -579,7 +584,8 @@ class NetworkConnectionAnchorPostgresTest {
                 .standardDevices(oauth.standardDevices()),
             mock(AuditLogger.class),
             clock,
-            Set.of("server-a"));
+            Set.of("server-a"),
+            (controlTenant, controlRealm, controlTarget) -> true);
     TenantContext.run(
         tenant,
         () -> {

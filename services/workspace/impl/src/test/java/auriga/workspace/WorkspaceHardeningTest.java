@@ -113,6 +113,27 @@ class WorkspaceHardeningTest {
   }
 
   @Test
+  void oneLargePublicFrameRetainsAnIndependentLifecycleBudget() {
+    var transport = new Transport(new TestClock());
+    var large =
+        SessionResponse.newBuilder()
+            .setMsgnetControlPackage(
+                MsgnetControlPackage.newBuilder()
+                    .setCanonicalJson(
+                        com.google.protobuf.ByteString.copyFrom(new byte[5 * 1024 * 1024])))
+            .build();
+    assertTrue(transport.output.trySendMessageControl(large));
+    assertFalse(transport.output.trySendMessageControl(large));
+    assertTrue(transport.output.send(frame("lifecycle")));
+    assertNull(transport.failure.get());
+    transport.ready.set(true);
+    transport.callback.get().run();
+    assertEquals(List.of(large, frame("lifecycle")), transport.received);
+    assertTrue(transport.output.trySendMessageControl(large));
+    assertEquals(3, transport.received.size());
+  }
+
+  @Test
   void nonReadingPeerTimesOutEvenBelowQueueLimit() {
     var clock = new TestClock();
     var transport = new Transport(clock);

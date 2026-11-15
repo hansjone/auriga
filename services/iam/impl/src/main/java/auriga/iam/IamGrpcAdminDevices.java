@@ -27,7 +27,7 @@ public class IamGrpcAdminDevices
     if (TenantContext.current().filter(t -> !TenantContext.PLATFORM_TENANT.equals(t)).isEmpty())
       throw new AurigaException(CommonErrors.FORBIDDEN);
     var response = ReadBindingsResponse.newBuilder();
-    for (var row : devices.connectionBindings().path("items"))
+    for (var row : devices.messageConnectionBindings().path("items"))
       response.addItems(
           AdminDeviceConnectionBinding.newBuilder()
               .setDevice(row.path("device").asString())

@@ -277,8 +277,13 @@ public class WorkspaceRuntimeConfiguration {
   }
 
   @Bean
-  NodeSessions workspaceNodeSessions(NodeEnrollment enrollment, WorkspaceService service) {
-    return new NodeSessions(enrollment, service);
+  NodeSessions workspaceNodeSessions(
+      NodeEnrollment enrollment,
+      WorkspaceService service,
+      ObjectProvider<auriga.workspace.api.MsgnetNodeControl> msgnet,
+      ObjectProvider<auriga.iam.api.MessageNetworkIsolation> isolation) {
+    return new NodeSessions(
+        enrollment, service, msgnet.getIfAvailable(), isolation.getIfAvailable());
   }
 
   @Bean

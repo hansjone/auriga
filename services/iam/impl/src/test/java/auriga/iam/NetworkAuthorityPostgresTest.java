@@ -31,6 +31,8 @@ class NetworkAuthorityPostgresTest {
   final UUID tenant = UUID.randomUUID(), account = UUID.randomUUID(), device = UUID.randomUUID();
   final Clock clock = Clock.systemUTC();
   final DeviceAccessAuthority devices = mock(DeviceAccessAuthority.class);
+  final java.util.concurrent.atomic.AtomicBoolean controlReady =
+      new java.util.concurrent.atomic.AtomicBoolean(true);
   IamNetworkAuthority network;
   DeviceAccessAuthority.Identity identity;
 
@@ -92,7 +94,203 @@ class NetworkAuthorityPostgresTest {
                   return null;
                 }));
     network =
-        new IamNetworkAuthority(store, devices, mock(AuditLogger.class), clock, Set.of("server-a"));
+        new IamNetworkAuthority(
+            store,
+            devices,
+            mock(AuditLogger.class),
+            clock,
+            Set.of("server-a"),
+            (controlTenant, controlRealm, controlTarget) -> {
+              store.requireTransactionReleased();
+              return controlReady.get();
+            });
+  }
+
+  @Test
+  void trustedMappingAndActualDisconnectGateTheDurableMessageFence() {
+    TenantContext.run(
+        tenant,
+        () -> {
+          Node node = network.register("access");
+          String config =
+              "[{\"tenant_id\":\""
+                  + tenant
+                  + "\",\"realm\":\""
+                  + node.realm()
+                  + "\",\"device_id\":\""
+                  + device
+                  + "\",\"target_id\":\"plugin-target\"}]";
+          var targets =
+              new MessageNetworkTargets(config.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+          var ledger = mock(auriga.iam.api.MessageNetworkControlLedger.class);
+          var record =
+              new auriga.contracts.msgnet.model.IsolationRecord()
+                  .tenantId(tenant.toString())
+                  .realm(node.realm())
+                  .targetId("plugin-target")
+                  .minimumControlRevision("2")
+                  .controlDigest("sha256:" + "0".repeat(64))
+                  .state(auriga.contracts.msgnet.model.IsolationRecord.StateEnum.QUARANTINED)
+                  .identityCompromised(false)
+                  .challenge("challenge")
+                  .newChainReady(false);
+          when(ledger.isolation(tenant.toString(), node.realm(), "plugin-target"))
+              .thenAnswer(
+                  call -> {
+                    store.requireTransactionReleased();
+                    return record;
+                  });
+          var disconnected = new java.util.concurrent.atomic.AtomicBoolean();
+          MessageNetworkDisconnector disconnect =
+              value -> {
+                store.requireTransactionReleased();
+                assertThrows(
+                    AurigaException.class,
+                    () -> network.prepare("access", node.node(), "server-a"));
+                if (!disconnected.get()) throw new IllegalStateException("broker unavailable");
+              };
+          var execution =
+              new MessageNetworkIsolationExecution(
+                  store,
+                  targets,
+                  null,
+                  ledger,
+                  disconnect,
+                  clock,
+                  mock(MessageNetworkProofVerifier.class));
+          var binding = targets.bindings().getFirst();
+          assertFalse(targets.ready(store, ledger, null, tenant, node.realm(), node.node()));
+          assertThrows(IllegalStateException.class, () -> execution.reconcileDevice(binding));
+          verify(ledger, never()).enforceIsolation(any());
+          assertThrows(
+              AurigaException.class, () -> network.prepare("access", node.node(), "server-a"));
+          assertNotNull(
+              devices.credential(tenant.toString(), account.toString(), device.toString()));
+          disconnected.set(true);
+          execution.reconcileDevice(binding);
+          verify(ledger).enforceIsolation(any());
+          record.state(auriga.contracts.msgnet.model.IsolationRecord.StateEnum.CONFIRMED);
+          execution.reconcileDevice(binding);
+          verify(ledger, times(1)).enforceIsolation(any());
+          record
+              .state(auriga.contracts.msgnet.model.IsolationRecord.StateEnum.READY)
+              .newChainReady(true)
+              .identityCompromised(true);
+          assertFalse(targets.ready(store, ledger, null, tenant, node.realm(), node.node()));
+          execution.reconcileDevice(binding);
+          assertThrows(
+              AurigaException.class, () -> network.prepare("access", node.node(), "server-a"));
+          record.identityCompromised(false);
+          assertTrue(targets.ready(store, ledger, null, tenant, node.realm(), node.node()));
+          assertFalse(
+              targets.ready(store, ledger, null, tenant, node.realm(), "18446744073709551615"));
+          execution.reconcileDevice(binding);
+          assertNotNull(network.prepare("access", node.node(), "server-a"));
+          var spoof = record.targetId("another-target");
+          assertFalse(targets.ready(store, ledger, null, tenant, node.realm(), node.node()));
+        });
+  }
+
+  @Test
+  void hostAndPluginFencesHaveIndependentReadinessAndTenantIsolation() {
+    TenantContext.run(
+        tenant,
+        () -> {
+          Node node = network.register("access");
+          UUID host = UUID.randomUUID();
+          var targetMap =
+              new MessageNetworkTargets(
+                  Json.MAPPER.writeValueAsBytes(
+                      List.of(
+                          Map.of(
+                              "tenant_id",
+                              tenant.toString(),
+                              "realm",
+                              node.realm(),
+                              "device_id",
+                              device.toString(),
+                              "target_id",
+                              "plugin-target",
+                              "node_id",
+                              host.toString()))));
+          var pin =
+              new auriga.contracts.msgnet.model.NodeControlPin()
+                  .nodeId(host.toString())
+                  .targetId("host-target");
+          auriga.iam.api.NodeControlAuthority nodes =
+              mock(auriga.iam.api.NodeControlAuthority.class);
+          when(nodes.binding(tenant, host))
+              .thenReturn(
+                  new auriga.iam.api.NodeControlAuthority.Binding(
+                      tenant.toString(), node.realm(), pin));
+          var ledger = mock(auriga.iam.api.MessageNetworkControlLedger.class);
+          var hostRecord =
+              new auriga.contracts.msgnet.model.IsolationRecord()
+                  .tenantId(tenant.toString())
+                  .realm(node.realm())
+                  .targetId("host-target")
+                  .minimumControlRevision("2")
+                  .controlDigest("sha256:" + "1".repeat(64))
+                  .challenge("host-challenge")
+                  .state(auriga.contracts.msgnet.model.IsolationRecord.StateEnum.QUARANTINED)
+                  .identityCompromised(false)
+                  .newChainReady(false);
+          var pluginRecord =
+              Json.MAPPER
+                  .treeToValue(
+                      Json.MAPPER.valueToTree(hostRecord),
+                      auriga.contracts.msgnet.model.IsolationRecord.class)
+                  .targetId("plugin-target");
+          when(ledger.isolation(tenant.toString(), node.realm(), "host-target"))
+              .thenReturn(hostRecord);
+          when(ledger.isolation(tenant.toString(), node.realm(), "plugin-target"))
+              .thenReturn(pluginRecord);
+          var execution =
+              new MessageNetworkIsolationExecution(
+                  store,
+                  targetMap,
+                  nodes,
+                  ledger,
+                  value -> store.requireTransactionReleased(),
+                  clock,
+                  mock(MessageNetworkProofVerifier.class));
+          execution.beforeControl(tenant, host);
+          execution.reconcileDevice(targetMap.bindings().getFirst());
+          assertEquals(
+              2,
+              store.tx(
+                  () ->
+                      jdbc.queryForObject(
+                          "SELECT count(*) FROM iam.network_message_fence WHERE tenant_id=?",
+                          Integer.class,
+                          tenant)));
+          hostRecord
+              .state(auriga.contracts.msgnet.model.IsolationRecord.StateEnum.READY)
+              .newChainReady(true);
+          execution.beforeControl(tenant, host);
+          assertThrows(
+              AurigaException.class, () -> network.prepare("access", node.node(), "server-a"));
+          assertFalse(targetMap.ready(store, ledger, nodes, tenant, node.realm(), node.node()));
+          pluginRecord
+              .state(auriga.contracts.msgnet.model.IsolationRecord.StateEnum.READY)
+              .newChainReady(true);
+          execution.reconcileDevice(targetMap.bindings().getFirst());
+          assertTrue(targetMap.ready(store, ledger, nodes, tenant, node.realm(), node.node()));
+          assertNotNull(network.prepare("access", node.node(), "server-a"));
+          hostRecord
+              .state(auriga.contracts.msgnet.model.IsolationRecord.StateEnum.QUARANTINED)
+              .newChainReady(false);
+          execution.beforeControl(tenant, host);
+        });
+    TenantContext.run(
+        UUID.randomUUID(),
+        () ->
+            assertEquals(
+                0,
+                store.tx(
+                    () ->
+                        jdbc.queryForObject(
+                            "SELECT count(*) FROM iam.network_message_fence", Integer.class))));
   }
 
   @AfterEach
@@ -116,6 +314,57 @@ class NetworkAuthorityPostgresTest {
             null,
             null);
     SecurityContextHolder.getContext().setAuthentication(new AurigaAuthentication(p));
+  }
+
+  @Test
+  void quarantinedControlDeniesLiveBatchAndBurnsAlreadyIssuedTicket() {
+    TenantContext.run(
+        tenant,
+        () -> {
+          Node node = network.register("access");
+          store.tx(
+              () -> {
+                var d = store.get("device", device.toString(), true);
+                d.put("scope", "auriga.connect");
+                var session = store.get("session", d.path("sessionId").asString(), true);
+                session.put("audience", "portal");
+                session.put("expiresAt", clock.instant().plusSeconds(3600).toString());
+                session.put("idleExpiresAt", clock.instant().plusSeconds(1800).toString());
+                store.save("session", session);
+                store.save("device", d);
+                return null;
+              });
+          var ticket = network.prepare("access", node.node(), "server-a");
+          gateway();
+          var reference =
+              new auriga.iam.api.NetworkAuthority.NodeReference(node.realm(), node.node());
+          assertTrue(network.activeBatch(List.of(reference)).get(reference));
+          controlReady.set(false);
+          assertFalse(network.activeBatch(List.of(reference)).get(reference));
+          assertFalse(network.active(node.realm(), node.node()));
+          assertThrows(
+              AurigaException.class, () -> network.prepare("access", node.node(), "server-a"));
+          assertThrows(
+              AurigaException.class,
+              () ->
+                  network.redeem(
+                      ticket.ticket(),
+                      node.node(),
+                      device.toString(),
+                      "server-a",
+                      binding(ticket.ticket())));
+          controlReady.set(true);
+          assertThrows(
+              AurigaException.class,
+              () ->
+                  network.redeem(
+                      ticket.ticket(),
+                      node.node(),
+                      device.toString(),
+                      "server-a",
+                      binding(ticket.ticket())));
+          assertTrue(network.activeBatch(List.of(reference)).get(reference));
+        });
   }
 
   @Test

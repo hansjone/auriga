@@ -160,6 +160,286 @@ class WorkspaceIntegrationTest {
     sessions = new NodeSessions(enrollment, service);
   }
 
+  @Test
+  void nativeMsgnetProofRelayUsesAuthenticatedNodeAndReloadsTls() throws Exception {
+    var nativeKey = TestPki.key();
+    var joined = enrollment.join(joinRequest(token().token(), nativeKey));
+    UUID node = UUID.fromString(joined.getNodeId());
+    var nativeCertificate = NodeCa.parse(joined.getCertificateChain().toByteArray());
+    var pins = org.mockito.Mockito.mock(auriga.iam.api.NodeControlAuthority.class);
+    var ledger = org.mockito.Mockito.mock(auriga.iam.api.MessageNetworkControlLedger.class);
+    var isolation = org.mockito.Mockito.mock(auriga.iam.api.MessageNetworkIsolation.class);
+    org.mockito.Mockito.when(pins.binding(tenant, node))
+        .thenReturn(
+            new auriga.iam.api.NodeControlAuthority.Binding(
+                tenant.toString(),
+                "1",
+                new auriga.contracts.msgnet.model.NodeControlPin()
+                    .nodeId(node.toString())
+                    .targetId("trusted-node")));
+    var record =
+        new auriga.contracts.msgnet.model.IsolationRecord()
+            .tenantId(tenant.toString())
+            .realm("1")
+            .targetId("trusted-node")
+            .minimumControlRevision("2")
+            .controlDigest("sha256:" + "2".repeat(64))
+            .challenge("current-challenge")
+            .state(auriga.contracts.msgnet.model.IsolationRecord.StateEnum.QUARANTINED)
+            .identityCompromised(false)
+            .newChainReady(false);
+    org.mockito.Mockito.when(ledger.isolation(tenant.toString(), "1", "trusted-node"))
+        .thenReturn(record);
+    org.mockito.Mockito.when(ledger.canonicalPublic(org.mockito.ArgumentMatchers.any()))
+        .thenAnswer(call -> WorkspaceService.JSON.writeValueAsBytes(call.getArgument(0)));
+    org.mockito.Mockito.when(ledger.confirmationQuery(org.mockito.ArgumentMatchers.any()))
+        .thenAnswer(
+            call ->
+                WorkspaceService.JSON.readValue(
+                    (byte[]) call.getArgument(0),
+                    auriga.contracts.msgnet.model.TransportConfirmationQuery.class));
+    org.mockito.Mockito.when(ledger.expectedSelectorsQuery(org.mockito.ArgumentMatchers.any()))
+        .thenAnswer(
+            call ->
+                WorkspaceService.JSON.readValue(
+                    (byte[]) call.getArgument(0),
+                    auriga.contracts.msgnet.model.ExpectedSelectorsQuery.class));
+    org.mockito.Mockito.when(ledger.expectedSelectors(org.mockito.ArgumentMatchers.any()))
+        .thenReturn(
+            new auriga.contracts.msgnet.model.ExpectedSelectors()
+                .tenantId(tenant.toString())
+                .realm("1"));
+    var serverKey = TestPki.key();
+    var serverCertificate =
+        TestPki.certificate(serverKey, caKey, NodeCa.parse(ca.bundle()), clock.instant(), false);
+    Path certFile = directory.resolve("proof-server.crt"),
+        keyFile = directory.resolve("proof-server.key");
+    Files.write(certFile, ca.chain(serverCertificate));
+    Files.writeString(keyFile, pemKey(serverKey));
+    proofSecret(keyFile);
+    var serverTls = MsgnetRelayTls.context(certFile, keyFile, ca.bundle());
+    var clientTls = proofClient(nativeKey, nativeCertificate);
+    try (var relay =
+        new MsgnetProofRelay(
+            new java.net.InetSocketAddress("127.0.0.1", 0),
+            serverTls,
+            enrollment,
+            pins,
+            ledger,
+            isolation)) {
+      relay.start();
+      String origin = "https://localhost:" + relay.port();
+      java.util.function.BiFunction<String, String, java.net.http.HttpResponse<String>> request =
+          (path, body) -> {
+            try (var client =
+                java.net.http.HttpClient.newBuilder()
+                    .sslContext(clientTls)
+                    .followRedirects(java.net.http.HttpClient.Redirect.NEVER)
+                    .build()) {
+              var builder =
+                  java.net.http.HttpRequest.newBuilder(
+                          java.net.URI.create(origin + "/api/collab/v2/network" + path))
+                      .timeout(java.time.Duration.ofSeconds(10));
+              if (body == null) builder.GET();
+              else builder.POST(java.net.http.HttpRequest.BodyPublishers.ofString(body));
+              return client.send(
+                  builder.build(), java.net.http.HttpResponse.BodyHandlers.ofString());
+            } catch (Exception failure) {
+              throw new RuntimeException(failure);
+            }
+          };
+      assertEquals(403, request.apply("/isolation/self-reported-target", null).statusCode());
+      assertEquals(403, request.apply("/bootstrap/materials", null).statusCode());
+      assertEquals(
+          403,
+          request
+              .apply("/transport/expected-selectors", "{\"tenant_id\":\"foreign\",\"realm\":\"1\"}")
+              .statusCode());
+      org.mockito.Mockito.verify(ledger, org.mockito.Mockito.never())
+          .expectedSelectors(org.mockito.ArgumentMatchers.any());
+      assertEquals(
+          200,
+          request
+              .apply(
+                  "/transport/expected-selectors",
+                  "{\"tenant_id\":\"" + tenant + "\",\"realm\":\"1\"}")
+              .statusCode());
+      assertEquals(
+          403,
+          request
+              .apply(
+                  "/transport/confirmation",
+                  "{\"tenant_id\":\"foreign\",\"realm\":\"1\",\"bundle_version\":\"1\",\"bundle_digest\":\"sha256:"
+                      + "0".repeat(64)
+                      + "\",\"challenge\":\"challenge\"}")
+              .statusCode());
+      org.mockito.Mockito.verify(isolation, org.mockito.Mockito.never())
+          .beforeControl(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any());
+      var first = request.apply("/isolation/trusted-node", null);
+      assertEquals(200, first.statusCode());
+      org.mockito.Mockito.verify(isolation).beforeControl(tenant, node);
+      var before =
+          ((java.security.cert.X509Certificate)
+                  first.sslSession().orElseThrow().getPeerCertificates()[0])
+              .getSerialNumber();
+      serverKey = TestPki.key();
+      serverCertificate =
+          TestPki.certificate(serverKey, caKey, NodeCa.parse(ca.bundle()), clock.instant(), false);
+      Files.writeString(keyFile, pemKey(serverKey));
+      Files.write(certFile, ca.chain(serverCertificate));
+      var rotated = request.apply("/isolation/trusted-node", null);
+      assertEquals(200, rotated.statusCode());
+      assertNotEquals(
+          before,
+          ((java.security.cert.X509Certificate)
+                  rotated.sslSession().orElseThrow().getPeerCertificates()[0])
+              .getSerialNumber());
+      var older =
+          new auriga.contracts.msgnet.model.ControlPackage()
+              .tenantId(tenant.toString())
+              .realm("1")
+              .targetId("trusted-node")
+              .control(
+                  new auriga.contracts.msgnet.model.SignedRootControl()
+                      .payload(
+                          new auriga.contracts.msgnet.model.RootControl().controlRevision("1")))
+              .controlDigest("sha256:" + "1".repeat(64))
+              .challenge("older-outstanding-challenge");
+      org.mockito.Mockito.when(ledger.pending(tenant.toString(), "1", "trusted-node"))
+          .thenReturn(Optional.of(older));
+      org.mockito.Mockito.when(ledger.isolationRequest(org.mockito.ArgumentMatchers.any()))
+          .thenAnswer(
+              call ->
+                  WorkspaceService.JSON.readValue(
+                      (byte[]) call.getArgument(0),
+                      auriga.contracts.msgnet.model.IsolationRecord.class));
+      var queued = WorkspaceService.JSON.valueToTree(record).deepCopy();
+      ((tools.jackson.databind.node.ObjectNode) queued)
+          .put("minimum_control_revision", "1")
+          .put("control_digest", older.getControlDigest())
+          .put("challenge", older.getChallenge());
+      assertEquals(
+          200,
+          request
+              .apply("/isolation", WorkspaceService.JSON.writeValueAsString(queued))
+              .statusCode());
+      ((tools.jackson.databind.node.ObjectNode) queued).put("challenge", "wrong-challenge");
+      assertEquals(
+          403,
+          request
+              .apply("/isolation", WorkspaceService.JSON.writeValueAsString(queued))
+              .statusCode());
+      int reads = org.mockito.Mockito.mockingDetails(ledger).getInvocations().size();
+      store.in(
+          tenant,
+          () -> {
+            store.jdbc.update(
+                "UPDATE node SET revoked=true WHERE tenant_id=? AND id=?", tenant, node);
+            return null;
+          });
+      assertEquals(503, request.apply("/isolation/trusted-node", null).statusCode());
+      assertEquals(reads, org.mockito.Mockito.mockingDetails(ledger).getInvocations().size());
+    }
+  }
+
+  private static void proofSecret(Path file) throws Exception {
+    if (file.getFileSystem().supportedFileAttributeViews().contains("posix"))
+      Files.setPosixFilePermissions(
+          file, java.nio.file.attribute.PosixFilePermissions.fromString("rw-------"));
+    else {
+      var view =
+          Files.getFileAttributeView(file, java.nio.file.attribute.AclFileAttributeView.class);
+      view.setAcl(
+          List.of(
+              java.nio.file.attribute.AclEntry.newBuilder()
+                  .setType(java.nio.file.attribute.AclEntryType.ALLOW)
+                  .setPrincipal(view.getOwner())
+                  .setPermissions(
+                      java.util.EnumSet.allOf(java.nio.file.attribute.AclEntryPermission.class))
+                  .build()));
+    }
+  }
+
+  private javax.net.ssl.SSLContext proofClient(
+      KeyPair key, java.security.cert.X509Certificate certificate) throws Exception {
+    var keys = java.security.KeyStore.getInstance("PKCS12");
+    keys.load(null);
+    keys.setKeyEntry(
+        "native",
+        key.getPrivate(),
+        new char[0],
+        new java.security.cert.Certificate[] {certificate, NodeCa.parse(ca.bundle())});
+    var km =
+        javax.net.ssl.KeyManagerFactory.getInstance(
+            javax.net.ssl.KeyManagerFactory.getDefaultAlgorithm());
+    km.init(keys, new char[0]);
+    var roots = java.security.KeyStore.getInstance("PKCS12");
+    roots.load(null);
+    roots.setCertificateEntry("ca", NodeCa.parse(ca.bundle()));
+    var tm =
+        javax.net.ssl.TrustManagerFactory.getInstance(
+            javax.net.ssl.TrustManagerFactory.getDefaultAlgorithm());
+    tm.init(roots);
+    var context = javax.net.ssl.SSLContext.getInstance("TLS");
+    context.init(km.getKeyManagers(), tm.getTrustManagers(), new java.security.SecureRandom());
+    return context;
+  }
+
+  @Test
+  void nodeControlIsolationFailurePreservesLifecycleAndUsesAuthenticatedNode() throws Exception {
+    sessions.close();
+    var msgnet = org.mockito.Mockito.mock(auriga.workspace.api.MsgnetNodeControl.class);
+    var allowed = new java.util.concurrent.atomic.AtomicBoolean();
+    var attempted = new CountDownLatch(1);
+    auriga.iam.api.MessageNetworkIsolation isolation =
+        (authenticatedTenant, authenticatedNode) -> {
+          assertFalse(
+              org.springframework.transaction.support.TransactionSynchronizationManager
+                  .isActualTransactionActive());
+          assertFalse(
+              org.springframework.transaction.support.TransactionSynchronizationManager.hasResource(
+                  store.jdbc.getDataSource()));
+          assertEquals(tenant, authenticatedTenant);
+          attempted.countDown();
+          if (!allowed.get()) throw new IllegalStateException("actual disconnect pending");
+        };
+    var wire =
+        MsgnetControlPackage.newBuilder().setCanonicalJson(ByteString.copyFromUtf8("{}")).build();
+    org.mockito.Mockito.when(
+            msgnet.controls(
+                org.mockito.ArgumentMatchers.eq(tenant), org.mockito.ArgumentMatchers.any()))
+        .thenReturn(List.of(wire));
+    org.mockito.Mockito.when(
+            msgnet.transports(
+                org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any()))
+        .thenThrow(new IllegalStateException("transport unavailable"));
+    sessions = new NodeSessions(enrollment, service, msgnet, isolation);
+    var control = new RecoveryControl(tenant);
+    assertTrue(attempted.await(5, TimeUnit.SECONDS));
+    assertTrue(control.fake.next().hasMsgnetControlPackage());
+    assertFalse(control.fake.error.isDone());
+    org.mockito.Mockito.verify(msgnet, org.mockito.Mockito.atLeastOnce())
+        .controls(tenant, control.node);
+    allowed.set(true);
+    SessionResponse delivered = null;
+    long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+    while (delivered == null && System.nanoTime() < deadline) {
+      sessions.dispatch();
+      var value = control.fake.responses.poll(50, TimeUnit.MILLISECONDS);
+      if (value != null && value.hasMsgnetControlPackage()) delivered = value;
+    }
+    assertNotNull(delivered);
+    var receipt =
+        MsgnetControlReceipt.newBuilder()
+            .setCanonicalJson(ByteString.copyFromUtf8("{\"node_id\":\"self-reported-node\"}"))
+            .build();
+    control.stream.onNext(SessionRequest.newBuilder().setMsgnetControlReceipt(receipt).build());
+    org.mockito.Mockito.verify(msgnet, org.mockito.Mockito.timeout(5000))
+        .receipt(tenant, control.node, receipt);
+    assertFalse(control.fake.error.isDone());
+    control.stream.onCompleted();
+  }
+
   @AfterEach
   void close() {
     sessions.close();
@@ -1185,7 +1465,19 @@ class WorkspaceIntegrationTest {
               store.tx(() -> delivery.claim(node, UuidV7.next(), Set.of())).isEmpty(),
               "restart cannot run with the previous credential");
           network.reconcile(store.tx(() -> store.instance(id)));
-          assertEquals(1, store.tx(() -> delivery.claim(node, UuidV7.next(), Set.of())).size());
+          sessions.dispatch();
+          var resumed = assertDoesNotThrow(fake::next);
+          if (resumed.hasApply()) {
+            assertTrue(resumed.getApply().getSpec().getSecrets().hasDeviceCredential());
+            assertEquals(
+                WorkspaceService.spec(store.tx(() -> store.instance(id))).getGeneration(),
+                resumed.getApply().getSpec().getGeneration());
+            resumed = assertDoesNotThrow(fake::next);
+          }
+          assertTrue(resumed.hasCommand());
+          assertEquals(id.toString(), resumed.getCommand().getInstanceId());
+          assertTrue(resumed.getCommand().hasRestart());
+          assertEquals("user", resumed.getCommand().getRestart().getReason());
           service.operate(id, actor(), "stop");
           assertTrue(service.dispatchable(store.tx(() -> store.instance(id))));
           assertFalse(bindings.get(request).getActive());
@@ -3729,6 +4021,124 @@ class WorkspaceIntegrationTest {
   }
 
   @Test
+  void nativeTlsNodeControlDeliversALegalLargeRevocationPackage() throws Exception {
+    sessions.close();
+    var msgnet = org.mockito.Mockito.mock(auriga.workspace.api.MsgnetNodeControl.class);
+    byte[] body = largeRevocationPackage();
+    assertTrue(body.length > 4 * 1024 * 1024);
+    assertTrue(body.length < 32 * 1024 * 1024);
+    var wire =
+        MsgnetControlPackage.newBuilder().setCanonicalJson(ByteString.copyFrom(body)).build();
+    org.mockito.Mockito.when(
+            msgnet.controls(
+                org.mockito.ArgumentMatchers.eq(tenant), org.mockito.ArgumentMatchers.any()))
+        .thenReturn(List.of(wire));
+    org.mockito.Mockito.when(
+            msgnet.transports(
+                org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any()))
+        .thenReturn(List.of());
+    sessions = new NodeSessions(enrollment, service, msgnet, null);
+    var serverKey = TestPki.key();
+    var serverCert =
+        TestPki.certificate(serverKey, caKey, ca.certificate(), clock.instant(), false);
+    Path certificate = directory.resolve("large-control-server.pem"),
+        privateKey = directory.resolve("large-control-server-key.pem");
+    Files.write(certificate, ca.chain(serverCert));
+    Files.writeString(privateKey, pemKey(serverKey));
+    var clientKey = TestPki.key();
+    var request = joinRequest(token().token(), clientKey);
+    var joined = enrollment.join(request);
+    try (var server =
+        new NodeGrpcServer(
+            "127.0.0.1", 0, certificate.toFile(), privateKey.toFile(), enrollment, sessions)) {
+      server.start();
+      ManagedChannel nodeChannel =
+          channel(server.port(), joined.getCertificateChain().toByteArray(), pemKey(clientKey));
+      try {
+        var node = new FakeNode();
+        var stream = NodeControlServiceGrpc.newStub(nodeChannel).session(node);
+        String keyId =
+            HexFormat.of()
+                .formatHex(WorkspaceCrypto.hash(request.getSealingPublicKey().toByteArray()))
+                .substring(0, 16);
+        var hello =
+            Hello.newBuilder()
+                .setNodeId(joined.getNodeId())
+                .setProtocolVersion(1)
+                .setOs("linux")
+                .setArch("amd64")
+                .setSealingKeyId(keyId)
+                .addDrivers(RuntimeKind.RUNTIME_KIND_DOCKER)
+                .setCapacity(
+                    Capacity.newBuilder()
+                        .setCpuMillis(4000)
+                        .setMemoryMb(4096)
+                        .setDiskGb(20)
+                        .setMaxInstances(2));
+        stream.onNext(SessionRequest.newBuilder().setHello(hello).build());
+        assertTrue(node.next().hasWelcome());
+        var received = node.next();
+        assertTrue(received.hasMsgnetControlPackage());
+        assertEquals(wire, received.getMsgnetControlPackage());
+        stream.onNext(
+            SessionRequest.newBuilder().setInventory(Inventory.getDefaultInstance()).build());
+        assertFalse(node.error.isDone());
+        org.mockito.Mockito.verify(msgnet, org.mockito.Mockito.atLeastOnce())
+            .controls(tenant, UUID.fromString(joined.getNodeId()));
+        stream.onCompleted();
+      } finally {
+        nodeChannel.shutdownNow().awaitTermination(5, TimeUnit.SECONDS);
+      }
+    }
+  }
+
+  private byte[] largeRevocationPackage() throws Exception {
+    var revoked = new ArrayList<String>();
+    for (int index = 0; index < 34000; index++)
+      revoked.add(String.format(java.util.Locale.ROOT, "%08d", index) + "x".repeat(120));
+    var payload = new java.util.TreeMap<String, Object>();
+    payload.put("schema_version", 2);
+    payload.put("tenant_id", tenant.toString());
+    payload.put("realm", "1");
+    payload.put("control_revision", "2");
+    payload.put(
+        "issued_at", clock.instant().truncatedTo(java.time.temporal.ChronoUnit.SECONDS).toString());
+    payload.put("allowed_authorities", List.of());
+    payload.put("revoked_authority_ids", List.of());
+    payload.put("revoked_installation_ids", revoked);
+    payload.put("minimum_generation", "1");
+    payload.put("minimum_keyset_version", "1");
+    var root = java.security.KeyPairGenerator.getInstance("Ed25519").generateKeyPair();
+    var signature = java.security.Signature.getInstance("Ed25519");
+    signature.initSign(root.getPrivate());
+    signature.update(
+        "Auriga.NetworkRootControl.v2\0".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+    signature.update(WorkspaceService.JSON.writeValueAsBytes(payload));
+    var auth = new java.util.TreeMap<String, Object>();
+    auth.put("alg", "Ed25519");
+    auth.put("kid", "test-installed-root");
+    auth.put("signature", Base64.getUrlEncoder().withoutPadding().encodeToString(signature.sign()));
+    var control = new java.util.TreeMap<String, Object>();
+    control.put("payload", payload);
+    control.put("root_auth", auth);
+    var packet = new java.util.TreeMap<String, Object>();
+    packet.put("package_id", "large-root-control");
+    packet.put("tenant_id", tenant.toString());
+    packet.put("realm", "1");
+    packet.put("target_id", "fixed-node-target");
+    packet.put("control", control);
+    packet.put(
+        "control_digest",
+        "sha256:"
+            + HexFormat.of()
+                .formatHex(WorkspaceCrypto.hash(WorkspaceService.JSON.writeValueAsBytes(control))));
+    byte[] challenge = new byte[32];
+    new java.security.SecureRandom().nextBytes(challenge);
+    packet.put("challenge", Base64.getUrlEncoder().withoutPadding().encodeToString(challenge));
+    return WorkspaceService.JSON.writeValueAsBytes(packet);
+  }
+
+  @Test
   void revokedNodeCannotRenew() throws Exception {
     var key = TestPki.key();
     var joined = enrollment.join(joinRequest(token().token(), key));
@@ -3752,7 +4162,10 @@ class WorkspaceIntegrationTest {
       ssl.keyManager(
           new ByteArrayInputStream(certificate),
           new ByteArrayInputStream(key.getBytes(java.nio.charset.StandardCharsets.US_ASCII)));
-    return NettyChannelBuilder.forAddress("127.0.0.1", port).sslContext(ssl.build()).build();
+    return NettyChannelBuilder.forAddress("127.0.0.1", port)
+        .sslContext(ssl.build())
+        .maxInboundMessageSize(NodeOutput.MAX_MESSAGE_FRAME_BYTES)
+        .build();
   }
 
   static String pemKey(KeyPair key) {

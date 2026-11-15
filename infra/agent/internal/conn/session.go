@@ -26,6 +26,8 @@ import (
 	"github.com/hansjone/auriga/infra/agent/internal/telemetry"
 	"github.com/hansjone/auriga/infra/agent/internal/tlsutil"
 	nodev1 "github.com/hansjone/auriga/infra/gen/auriga/node/v1"
+	"google.golang.org/grpc"
+	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
@@ -55,21 +57,27 @@ type Config struct {
 	RenewCheckEvery time.Duration
 
 	OnWelcome func(*nodev1.Welcome)
+	// Msgnet handles public signed control material independently of the message
+	// network. InstallControl must verify, persist and isolate before returning
+	// an identity-signed receipt. A receipt never grants readiness locally.
+	Msgnet MsgnetControl
 }
 
 // Session runs Hello/Inventory/heartbeat and handles ApplySpec/Delete with reconnect.
 type Session struct {
 	cfg Config
 
-	mu          sync.Mutex
-	heartbeat   time.Duration
-	lastWelcome *nodev1.Welcome
-	welcomeAt   time.Time
-	connected   bool
-	statusCh    chan *nodev1.InstanceStatus
-	usageCh     chan *nodev1.NodeUsage
-	wakeCh      chan *nodev1.WakeSchedule
-	resultCh    chan *nodev1.CommandResult
+	mu              sync.Mutex
+	heartbeat       time.Duration
+	lastWelcome     *nodev1.Welcome
+	welcomeAt       time.Time
+	connected       bool
+	statusCh        chan *nodev1.InstanceStatus
+	usageCh         chan *nodev1.NodeUsage
+	wakeCh          chan *nodev1.WakeSchedule
+	resultCh        chan *nodev1.CommandResult
+	msgnetReceiptCh chan *nodev1.MsgnetControlReceipt
+	msgnetControlCh chan *nodev1.SessionResponse
 }
 
 // New creates a session manager.
@@ -99,12 +107,14 @@ func New(cfg Config) *Session {
 		cfg.BootID = fmt.Sprintf("boot-%d", time.Now().UnixNano())
 	}
 	return &Session{
-		cfg:       cfg,
-		heartbeat: cfg.HeartbeatInterval,
-		statusCh:  make(chan *nodev1.InstanceStatus, 64),
-		usageCh:   make(chan *nodev1.NodeUsage, 8),
-		wakeCh:    make(chan *nodev1.WakeSchedule, 16),
-		resultCh:  make(chan *nodev1.CommandResult, 64),
+		cfg:             cfg,
+		heartbeat:       cfg.HeartbeatInterval,
+		statusCh:        make(chan *nodev1.InstanceStatus, 64),
+		usageCh:         make(chan *nodev1.NodeUsage, 8),
+		wakeCh:          make(chan *nodev1.WakeSchedule, 16),
+		resultCh:        make(chan *nodev1.CommandResult, 64),
+		msgnetReceiptCh: make(chan *nodev1.MsgnetControlReceipt, 16),
+		msgnetControlCh: make(chan *nodev1.SessionResponse, 2),
 	}
 }
 
@@ -178,6 +188,7 @@ func (s *Session) Connected() bool {
 // Run loops connect → session → backoff until ctx is done.
 func (s *Session) Run(ctx context.Context) error {
 	renewCtx, cancelRenew := context.WithCancel(ctx)
+	go s.msgnetLoop(renewCtx)
 	renewDone := make(chan struct{})
 	go func() {
 		defer close(renewDone)
@@ -307,7 +318,7 @@ func (s *Session) runOnce(ctx context.Context) error {
 	defer func() { _ = conn.Close() }()
 
 	client := nodev1.NewNodeControlServiceClient(conn)
-	stream, err := client.Session(ctx)
+	stream, err := client.Session(ctx, grpc.MaxCallRecvMsgSize((32<<20)+1024))
 	if err != nil {
 		return fmt.Errorf("open session: %w", err)
 	}
@@ -394,6 +405,10 @@ func (s *Session) runOnce(ctx context.Context) error {
 			if err := stream.Send(&nodev1.SessionRequest{
 				Body: &nodev1.SessionRequest_Status{Status: st},
 			}); err != nil {
+				return err
+			}
+		case receipt := <-s.msgnetReceiptCh:
+			if err := stream.Send(&nodev1.SessionRequest{Body: &nodev1.SessionRequest_MsgnetControlReceipt{MsgnetControlReceipt: receipt}}); err != nil {
 				return err
 			}
 		case result := <-s.resultCh:
@@ -538,8 +553,50 @@ func (s *Session) recvLoop(ctx context.Context, stream nodev1.NodeControlService
 			}
 			return err
 		}
-		if err := s.handleControl(ctx, msg); err != nil {
+		if err := s.handleReceivedControl(ctx, msg); err != nil {
 			s.cfg.Logger.Warn("handle control", "error", err)
+		}
+	}
+}
+
+func (s *Session) handleReceivedControl(ctx context.Context, msg *nodev1.SessionResponse) error {
+	if msg == nil {
+		return nil
+	}
+	switch msg.Body.(type) {
+	case *nodev1.SessionResponse_MsgnetControlPackage, *nodev1.SessionResponse_MsgnetTransportBundle:
+		if s.cfg.Msgnet == nil {
+			return fmt.Errorf("msgnet installer unavailable")
+		}
+		// Public control I/O must never stall the DSH/lifecycle receive loop.
+		// Dropped entries remain pending in the server ledger and are redelivered.
+		if proto.Size(msg) > 32<<20 {
+			return fmt.Errorf("msgnet control frame too large")
+		}
+		select {
+		case s.msgnetControlCh <- proto.Clone(msg).(*nodev1.SessionResponse):
+			return nil
+		default:
+			return fmt.Errorf("msgnet control queue full; awaiting redelivery")
+		}
+	}
+	return s.handleControl(ctx, msg)
+}
+
+func (s *Session) msgnetLoop(ctx context.Context) {
+	for {
+		if ctx.Err() != nil {
+			return
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case msg := <-s.msgnetControlCh:
+			operation, cancel := context.WithTimeout(ctx, 30*time.Second)
+			if err := s.handleControl(operation, msg); err != nil {
+				s.cfg.Logger.Warn("message control deferred", "error", err)
+			}
+			cancel()
 		}
 	}
 }
@@ -549,6 +606,34 @@ func (s *Session) handleControl(ctx context.Context, msg *nodev1.SessionResponse
 		return nil
 	}
 	s.cfg.Logger.Info("control message received", "type", fmt.Sprintf("%T", msg.Body))
+	switch body := msg.Body.(type) {
+	case *nodev1.SessionResponse_MsgnetControlPackage:
+		if s.cfg.Msgnet == nil || body.MsgnetControlPackage == nil {
+			return fmt.Errorf("msgnet control installer unavailable")
+		}
+		receipt, err := s.cfg.Msgnet.InstallControl(ctx, append([]byte(nil), body.MsgnetControlPackage.CanonicalJson...))
+		if err != nil {
+			return err
+		}
+		if len(receipt) == 0 {
+			return fmt.Errorf("msgnet durable receipt unavailable")
+		}
+		// handleControl runs on the receive goroutine, hence uplink is serialized
+		// by the session send loop rather than calling stream.Send concurrently.
+		select {
+		case s.msgnetReceiptCh <- &nodev1.MsgnetControlReceipt{CanonicalJson: append([]byte(nil), receipt...)}:
+			return nil
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+			return fmt.Errorf("msgnet receipt queue full; awaiting redelivery")
+		}
+	case *nodev1.SessionResponse_MsgnetTransportBundle:
+		if s.cfg.Msgnet == nil || body.MsgnetTransportBundle == nil {
+			return fmt.Errorf("msgnet bundle installer unavailable")
+		}
+		return s.cfg.Msgnet.InstallTransport(ctx, append([]byte(nil), body.MsgnetTransportBundle.CanonicalJson...))
+	}
 	if s.cfg.Reconciler == nil {
 		return nil
 	}

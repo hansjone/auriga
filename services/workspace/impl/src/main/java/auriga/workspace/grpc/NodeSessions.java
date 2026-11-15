@@ -24,6 +24,9 @@ public final class NodeSessions implements AutoCloseable {
   public static final Context.Key<X509Certificate> PEER = Context.key("workspace-node-certificate");
   private final NodeEnrollment enrollment;
   private final WorkspaceService workspace;
+  private final auriga.workspace.api.MsgnetNodeControl msgnet;
+  private final auriga.iam.api.MessageNetworkIsolation messageIsolation;
+  private final MessageControlJobs messageJobs = new MessageControlJobs(16);
   private final Map<UUID, Session> sessions = new ConcurrentHashMap<>();
   private final ExecutorService notifications =
       Executors.newSingleThreadExecutor(
@@ -31,6 +34,23 @@ public final class NodeSessions implements AutoCloseable {
   private final AtomicBoolean dispatchPending = new AtomicBoolean();
 
   public NodeSessions(NodeEnrollment enrollment, WorkspaceService workspace) {
+    this(enrollment, workspace, null);
+  }
+
+  public NodeSessions(
+      NodeEnrollment enrollment,
+      WorkspaceService workspace,
+      auriga.workspace.api.MsgnetNodeControl msgnet) {
+    this(enrollment, workspace, msgnet, null);
+  }
+
+  public NodeSessions(
+      NodeEnrollment enrollment,
+      WorkspaceService workspace,
+      auriga.workspace.api.MsgnetNodeControl msgnet,
+      auriga.iam.api.MessageNetworkIsolation isolation) {
+    this.msgnet = msgnet;
+    this.messageIsolation = isolation;
     this.enrollment = enrollment;
     this.workspace = workspace;
     // afterCommit still holds the caller's connection until cleanup. Never wait for another
@@ -127,6 +147,7 @@ public final class NodeSessions implements AutoCloseable {
 
   @Override
   public void close() {
+    messageJobs.close();
     notifications.shutdownNow();
     for (var s : List.copyOf(sessions.values()))
       s.fail(new AurigaException(CommonErrors.UNAVAILABLE));
@@ -147,6 +168,7 @@ public final class NodeSessions implements AutoCloseable {
     UUID specCursor;
     boolean acquired;
     final Map<String, Long> sent = new HashMap<>();
+    final AtomicBoolean messageDispatch = new AtomicBoolean();
 
     Session(UUID node, UUID tenant, X509Certificate leaf, StreamObserver<SessionResponse> output) {
       this.node = node;
@@ -229,7 +251,8 @@ public final class NodeSessions implements AutoCloseable {
                                 .setHeartbeatInterval(Duration.newBuilder().setSeconds(15)))
                         .build());
               } else {
-                if (request.hasHello() || !inventory && !request.hasInventory())
+                if (request.hasHello()
+                    || !inventory && !request.hasInventory() && !request.hasMsgnetControlReceipt())
                   throw new AurigaException(CommonErrors.PRECONDITION_FAILED);
                 if (request.hasInventory()) {
                   inventory = true;
@@ -290,14 +313,30 @@ public final class NodeSessions implements AutoCloseable {
                     deliveries.result(node, holder, delivery, result);
                     inFlight.remove(id);
                   }
+                } else if (request.hasMsgnetControlReceipt()) {
+                  // An unavailable message ledger never tears down NodeControl.
                 } else if (!request.hasLog())
                   throw new AurigaException(CommonErrors.VALIDATION_FAILED);
               }
               seen = workspace.clock.instant();
               return null;
             });
+        // The ledger may be remote; call it after the local lease transaction
+        // releases its connection. A signed receipt alone cannot unlock a node.
+        if (request.hasMsgnetControlReceipt() && msgnet != null) {
+          if (request.getMsgnetControlReceipt().getCanonicalJson().size() <= 65536)
+            messageJobs.submit(
+                () -> {
+                  try {
+                    msgnet.receipt(tenant, node, request.getMsgnetControlReceipt());
+                  } catch (RuntimeException unavailable) {
+                    org.slf4j.LoggerFactory.getLogger(getClass())
+                        .warn("node {}: message control receipt not committed", node);
+                  }
+                });
+        }
         for (var response : responses) if (!outbound.send(response)) return;
-        if (request.hasInventory()) dispatch();
+        if (request.hasHello() || request.hasInventory()) dispatch();
       } catch (RuntimeException e) {
         fail(e);
       }
@@ -326,11 +365,15 @@ public final class NodeSessions implements AutoCloseable {
     }
 
     synchronized void dispatch() {
-      if (closed || !inventory) return;
+      if (closed) return;
       checkTimeouts();
       if (closed) return;
       try {
         enrollment.identity(leaf);
+        if (!inventory) {
+          dispatchMessageControl();
+          return;
+        }
         var messages =
             lease.guard(
                 () -> {
@@ -365,11 +408,47 @@ public final class NodeSessions implements AutoCloseable {
           org.slf4j.LoggerFactory.getLogger(getClass())
               .info("node {}: dispatching {} control message(s)", node, messages.size());
         for (var message : messages) if (!outbound.send(message)) break;
+        dispatchMessageControl();
       } catch (RuntimeException e) {
         org.slf4j.LoggerFactory.getLogger(getClass())
             .warn("node {}: dispatch failed, closing session", node, e);
         fail(e);
       }
+    }
+
+    private void dispatchMessageControl() {
+      if (msgnet == null || !messageDispatch.compareAndSet(false, true)) return;
+      if (!messageJobs.submit(
+          () -> {
+            try {
+              for (var control : msgnet.controls(tenant, node).stream().limit(32).toList()) {
+                if (control.getCanonicalJson().size() > 32 * 1024 * 1024)
+                  throw new IllegalArgumentException(
+                      "public root control exceeds the frozen size limit");
+                synchronized (Session.this) {
+                  if (closed || sessions.get(node) != Session.this) return;
+                  if (!outbound.trySendMessageControl(
+                      SessionResponse.newBuilder().setMsgnetControlPackage(control).build())) break;
+                }
+              }
+              if (messageIsolation != null) messageIsolation.beforeControl(tenant, node);
+              for (var bundle : msgnet.transports(tenant, node).stream().limit(32).toList()) {
+                if (bundle.getCanonicalJson().size() > 32 * 1024 * 1024)
+                  throw new IllegalArgumentException(
+                      "public transport bundle exceeds the frozen size limit");
+                synchronized (Session.this) {
+                  if (closed || sessions.get(node) != Session.this) return;
+                  if (!outbound.trySendMessageControl(
+                      SessionResponse.newBuilder().setMsgnetTransportBundle(bundle).build())) break;
+                }
+              }
+            } catch (RuntimeException unavailable) {
+              org.slf4j.LoggerFactory.getLogger(getClass())
+                  .warn("node {}: message control delivery unavailable", node);
+            } finally {
+              messageDispatch.set(false);
+            }
+          })) messageDispatch.set(false);
     }
 
     synchronized void fail(Throwable error) {

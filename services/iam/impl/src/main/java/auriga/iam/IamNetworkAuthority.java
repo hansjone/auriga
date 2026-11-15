@@ -31,13 +31,16 @@ public final class IamNetworkAuthority implements NetworkAuthority {
   private final AuditLogger audit;
   private final Clock clock;
   private final Set<String> servers;
+  private final auriga.iam.api.MessageNetworkAdmission admission;
 
   public IamNetworkAuthority(
       IamStore store,
       DeviceAccessAuthority devices,
       AuditLogger audit,
       Clock clock,
-      Set<String> servers) {
+      Set<String> servers,
+      auriga.iam.api.MessageNetworkAdmission admission) {
+    this.admission = java.util.Objects.requireNonNull(admission);
     this.store = store;
     this.jdbc = store.networkJdbc();
     this.policyRevision = new IamNetworkPolicyRevision(store);
@@ -119,12 +122,16 @@ public final class IamNetworkAuthority implements NetworkAuthority {
     var identity = require(devices.access(accessToken));
     if (!validNumber(nodeId, false) || audience == null || !servers.contains(audience))
       return denied();
+    Node before = store.tx(() -> node(nodeId));
+    if (!messageReady(before)) return denied();
     return transaction(
         () -> {
           enabled();
           Node node = node(nodeId);
           if (node == null
               || node.revoked()
+              || !node.equals(before)
+              || messageFenced(node)
               || !node.device().equals(identity.device())
               || !node.account().equals(identity.account())) return denied();
           var current =
@@ -193,7 +200,8 @@ public final class IamNetworkAuthority implements NetworkAuthority {
             });
     if (ticket == null) return denied();
     store.requireTransactionReleased();
-    if (!online(store.tx(() -> node(nodeId)))) return denied();
+    Node before = store.tx(() -> node(nodeId));
+    if (!online(before) || !messageReady(before)) return denied();
     Connection result =
         transaction(
             () -> {
@@ -209,6 +217,8 @@ public final class IamNetworkAuthority implements NetworkAuthority {
               Node node = node(nodeId);
               if (node == null
                   || node.revoked()
+                  || !node.equals(before)
+                  || messageFenced(node)
                   || !node.device().equals(device)
                   || !node.account().equals(ticket.path("account").asString())
                   || !node.realm().equals(ticket.path("realm").asString())) return null;
@@ -302,7 +312,8 @@ public final class IamNetworkAuthority implements NetworkAuthority {
     caller("svc:ai-gateway", "svc:collab");
     if (!validNumber(realm, false) || !validNumber(nodeId, false)) return false;
     store.requireTransactionReleased();
-    if (!online(store.tx(() -> node(nodeId)))) return false;
+    Node before = store.tx(() -> node(nodeId));
+    if (!online(before) || !messageReady(before)) return false;
     return transaction(() -> config().path("enabled").asBoolean(true) && live(node(nodeId), realm));
   }
 
@@ -363,6 +374,7 @@ public final class IamNetworkAuthority implements NetworkAuthority {
           JOIN iam.session s ON s.tenant_id=n.tenant_id AND s.id=(d.data->>'sessionId')::uuid
           JOIN iam.account a ON a.tenant_id=n.tenant_id AND a.id=n.account_id
           WHERE n.tenant_id=? AND NOT n.revoked
+            AND NOT EXISTS (SELECT 1 FROM iam.network_message_fence f WHERE f.tenant_id=n.tenant_id AND f.device_id=n.device_id)
             AND d.data->>'accountId'=n.account_id::text
             AND NOT COALESCE((d.data->>'revoked')::boolean,false)
             AND d.data->>'scope' ~ '(^| )auriga[.]connect( |$)'
@@ -395,7 +407,10 @@ public final class IamNetworkAuthority implements NetworkAuthority {
             });
     store.requireTransactionReleased();
     for (var entry : checked.entrySet()) {
-      if (entry.getValue() && !online(store.tx(() -> node(entry.getKey().node()))))
+      if (entry.getValue()
+          && (!online(store.tx(() -> node(entry.getKey().node())))
+              || !admission.ready(
+                  TenantContext.require(), entry.getKey().realm(), entry.getKey().node())))
         entry.setValue(false);
     }
     return checked;
@@ -407,9 +422,8 @@ public final class IamNetworkAuthority implements NetworkAuthority {
     store.requireTransactionReleased();
     boolean authorized =
         request != null
-            && online(store.tx(() -> node(request.sourceNode())))
-            && (request.operation() == Operation.CONNECT
-                || online(store.tx(() -> node(request.targetNode()))));
+            && available(request.sourceNode())
+            && (request.operation() == Operation.CONNECT || available(request.targetNode()));
     return transaction(
         () -> {
           var limits = limits();
@@ -485,7 +499,7 @@ public final class IamNetworkAuthority implements NetworkAuthority {
         || !binding.ingress().matches("[a-z2-7]{26}")) return null;
     TargetSnapshot before = store.tx(() -> targetSnapshot(binding, false));
     if (before == null) return null;
-    if (!online(before.node())) return null;
+    if (!online(before.node()) || !messageReady(before.node())) return null;
     // credential() reuses the canonical owner/device/backing-session checks, without idle touch.
     var credential =
         devices.credential(
@@ -542,7 +556,7 @@ public final class IamNetworkAuthority implements NetworkAuthority {
 
   private TargetSnapshot targetIdentity(TargetBinding b, boolean lock) {
     Node n = node(b.node());
-    if (n == null || n.revoked() || !n.realm().equals(b.realm())) return null;
+    if (n == null || n.revoked() || !n.realm().equals(b.realm()) || messageFenced(n)) return null;
     // Shared identity -> ingress order also used by source transactions and device refresh.
     // Read the device without a lock only to locate the backing session, then re-read under locks.
     ObjectNode device = store.get("device", n.device(), false);
@@ -840,10 +854,30 @@ public final class IamNetworkAuthority implements NetworkAuthority {
   }
 
   private boolean live(Node node, String realm) {
-    if (node == null || node.revoked() || !node.realm().equals(realm)) return false;
+    if (node == null || node.revoked() || !node.realm().equals(realm) || messageFenced(node))
+      return false;
     var credential =
         devices.credential(TenantContext.require().toString(), node.account(), node.device());
     return credential != null && clock.instant().isBefore(credential.expiresAt());
+  }
+
+  boolean messageReady(Node node) {
+    store.requireTransactionReleased();
+    return node != null && admission.ready(TenantContext.require(), node.realm(), node.node());
+  }
+
+  private boolean available(String id) {
+    Node value = store.tx(() -> node(id));
+    return online(value) && messageReady(value);
+  }
+
+  private boolean messageFenced(Node node) {
+    return Boolean.TRUE.equals(
+        jdbc.queryForObject(
+            "SELECT EXISTS (SELECT 1 FROM iam.network_message_fence WHERE tenant_id=? AND device_id=?)",
+            Boolean.class,
+            TenantContext.require(),
+            UUID.fromString(node.device())));
   }
 
   private boolean online(Node node) {

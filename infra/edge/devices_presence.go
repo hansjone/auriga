@@ -2,8 +2,6 @@ package main
 
 import (
 	"context"
-	"crypto/tls"
-	"crypto/x509"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -22,6 +20,7 @@ import (
 // Reuses the network gateway's least-privilege system-account CONNZ/KICK API.
 // Credentials must only allow these subjects and private inbox replies.
 type DevicePresenceConfig struct {
+	msgnet       *edgeMsgnet
 	URL          string `json:"url"`
 	CredsFile    string `json:"credsFile"`
 	Username     string `json:"username"`
@@ -33,6 +32,9 @@ type DevicePresenceConfig struct {
 }
 
 func (c DevicePresenceConfig) validate() error {
+	return c.validateWithProjection(c.msgnet != nil)
+}
+func (c DevicePresenceConfig) validateWithProjection(projected bool) error {
 	if c == (DevicePresenceConfig{}) {
 		return nil
 	}
@@ -41,7 +43,10 @@ func (c DevicePresenceConfig) validate() error {
 		return errDevicePresence
 	}
 	plain := u.Scheme == "nats" && net.ParseIP(u.Hostname()) != nil && net.ParseIP(u.Hostname()).IsLoopback()
-	if !plain && (u.Scheme != "tls" || c.CAFile == "" || c.CertFile == "" || c.KeyFile == "") {
+	if projected && u.Scheme != "tls" {
+		return errDevicePresence
+	}
+	if !plain && (u.Scheme != "tls" || !projected && (c.CAFile == "" || c.CertFile == "" || c.KeyFile == "")) {
 		return errDevicePresence
 	}
 	if (c.CAFile != "" || c.CertFile != "" || c.KeyFile != "") && (c.CAFile == "" || c.CertFile == "" || c.KeyFile == "") {
@@ -97,20 +102,20 @@ func openDevicePresence(cfg DevicePresenceConfig, heartbeats *deviceHeartbeats) 
 		return nil, errDevicePresence
 	}
 	opts := []nats.Option{nats.Name("auriga-edge-device-presence"), nats.Timeout(500 * time.Millisecond), nats.NoReconnect()}
-	if cfg.CAFile != "" {
-		ca, err := os.ReadFile(cfg.CAFile)
+	var confirmed func()
+	if cfg.msgnet != nil {
+		verified, mark, e := cfg.msgnet.presenceOptions(cfg.ServerName)
+		if e != nil {
+			return nil, errDevicePresence
+		}
+		opts = append(opts, verified...)
+		confirmed = mark
+	} else if cfg.CAFile != "" {
+		option, err := reloadingPresenceTLS(cfg)
 		if err != nil {
 			return nil, errDevicePresence
 		}
-		roots := x509.NewCertPool()
-		if !roots.AppendCertsFromPEM(ca) {
-			return nil, errDevicePresence
-		}
-		cert, err := tls.LoadX509KeyPair(cfg.CertFile, cfg.KeyFile)
-		if err != nil {
-			return nil, errDevicePresence
-		}
-		opts = append(opts, nats.Secure(&tls.Config{MinVersion: tls.VersionTLS12, RootCAs: roots, Certificates: []tls.Certificate{cert}, ServerName: cfg.ServerName}))
+		opts = append(opts, option)
 	}
 	if cfg.CredsFile != "" {
 		opts = append(opts, nats.UserCredentials(cfg.CredsFile))
@@ -127,6 +132,9 @@ func openDevicePresence(cfg DevicePresenceConfig, heartbeats *deviceHeartbeats) 
 	nc, err := nats.Connect(cfg.URL, opts...)
 	if err != nil {
 		return nil, errDevicePresence
+	}
+	if confirmed != nil {
+		confirmed()
 	}
 	return &devicePresence{request: func(ctx context.Context, subject string, body []byte) ([]byte, error) {
 		msg, err := nc.RequestWithContext(ctx, subject, body)

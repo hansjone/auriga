@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"net/http/httputil"
@@ -55,13 +56,14 @@ type Gateway struct {
 	panelStatic  http.Handler
 
 	networkWSS *NetworkWSS
+	msgnet     *edgeMsgnet
 }
 
 func NewGateway(cfg Config, sessions SessionStore, routes RouteStore, tickets TicketStore, signer IdentitySigner, log *slog.Logger) (*Gateway, error) {
 	if err := cfg.validateUacCookieNames(); err != nil {
 		return nil, err
 	}
-	if err := cfg.DevicePresence.validate(); err != nil {
+	if err := cfg.DevicePresence.validateWithProjection(cfg.MsgnetProjection != nil); err != nil {
 		return nil, err
 	}
 	limit := cfg.Static.GzipCacheBytes
@@ -132,6 +134,18 @@ func NewGateway(cfg Config, sessions SessionStore, routes RouteStore, tickets Ti
 		hub.CancelSession(sid)
 	})
 	wssConfig := cfg.NetworkWSS
+	var msgnet *edgeMsgnet
+	if cfg.MsgnetProjection != nil {
+		if !cfg.Access.Valid() {
+			return nil, fmt.Errorf("msgnet projection requires installed access configuration")
+		}
+		msgnet, err = newEdgeMsgnet(*cfg.MsgnetProjection, cfg.CollabHop)
+		if err != nil {
+			return nil, err
+		}
+		wssConfig.msgnet = msgnet
+		cfg.DevicePresence.msgnet = msgnet
+	}
 	if cfg.ManagedIngress.Origin != "" {
 		if _, err := cfg.managedEntry(); err != nil {
 			return nil, err
@@ -143,6 +157,7 @@ func NewGateway(cfg Config, sessions SessionStore, routes RouteStore, tickets Ti
 		return nil, err
 	}
 	g := &Gateway{
+		msgnet:       msgnet,
 		Cfg:          cfg,
 		Log:          log,
 		Trusted:      trusted,
@@ -188,10 +203,6 @@ func NewGateway(cfg Config, sessions SessionStore, routes RouteStore, tickets Ti
 			g.APITransports[deviceURL] = transport
 		}
 		if networkSubmitURL != nil {
-			transport, err := newIAMHopTransport(cfg.NetworkSubmitHop, networkSubmitURL)
-			if err != nil {
-				return nil, err
-			}
 			// Retain every device proxy timeout/limit, but use this hop's
 			// explicit trust material and never an environment proxy.
 			deviceTransport, ok := apiProxyTransport.(*http.Transport)
@@ -200,7 +211,20 @@ func NewGateway(cfg Config, sessions SessionStore, routes RouteStore, tickets Ti
 			}
 			trusted := deviceTransport.Clone()
 			trusted.Proxy = nil
-			trusted.TLSClientConfig = transport.TLSClientConfig
+			if msgnet != nil {
+				if networkSubmitURL.Scheme != "https" {
+					return nil, fmt.Errorf("msgnet submit requires HTTPS")
+				}
+				if err = msgnet.configure(trusted, "edge", cfg.NetworkSubmitHop.ServerName); err != nil {
+					return nil, err
+				}
+			} else {
+				transport, err := newIAMHopTransport(cfg.NetworkSubmitHop, networkSubmitURL)
+				if err != nil {
+					return nil, err
+				}
+				trusted.TLSClientConfig = transport.TLSClientConfig
+			}
 			g.APITransports[networkSubmitURL] = trusted
 		}
 		if resourceURL != nil {
@@ -419,6 +443,9 @@ func (g *Gateway) serveHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// Platform API / oauth routes
 	if path == "/api/collab" || strings.HasPrefix(path, "/api/collab/") {
+		if g.proxyMsgnetBootstrap(w, r, rid) {
+			return
+		}
 		g.proxyNetworkKeys(w, r, audience, clientIP, rid)
 		return
 	}

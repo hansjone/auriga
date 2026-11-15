@@ -351,6 +351,7 @@ final class IamNetworkSourceAuthority {
                 || effective.getMemberType() == MemberType.MEMBER_TYPE_EXTERNAL)
             && effective.getPermissionsList().contains("auriga.connect.collab.use"),
         FORBIDDEN);
+    require(network.messageReady(node), FORBIDDEN);
     return credential;
   }
 

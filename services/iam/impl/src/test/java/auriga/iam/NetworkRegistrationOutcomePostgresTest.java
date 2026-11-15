@@ -136,7 +136,13 @@ class NetworkRegistrationOutcomePostgresTest {
     access = credential.path("access_token").asString();
     device = tokens.verify(access).path("did").asString();
     authority =
-        new IamNetworkAuthority(store, oauth.deviceAuthority(), audit, clock, Set.of("server-a"));
+        new IamNetworkAuthority(
+            store,
+            oauth.deviceAuthority(),
+            audit,
+            clock,
+            Set.of("server-a"),
+            (controlTenant, controlRealm, controlTarget) -> true);
     var settings =
         new AccessTokenSettings(
             tokens.issuer(),

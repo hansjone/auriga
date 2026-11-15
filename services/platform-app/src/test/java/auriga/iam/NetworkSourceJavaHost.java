@@ -163,7 +163,14 @@ public final class NetworkSourceJavaHost implements AutoCloseable {
                       true)),
               permissions);
       var devices = oauth.deviceAuthority();
-      network = new IamNetworkAuthority(store, devices, audit, clock, Set.of("server-a"));
+      network =
+          new IamNetworkAuthority(
+              store,
+              devices,
+              audit,
+              clock,
+              Set.of("server-a"),
+              (controlTenant, controlRealm, controlTarget) -> true);
       var sources =
           new IamNetworkSourceAuthority(
               store,

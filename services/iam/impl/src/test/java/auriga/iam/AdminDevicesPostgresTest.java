@@ -167,6 +167,33 @@ class AdminDevicesPostgresTest {
                           "auriga.connect"),
                       null));
           assertEquals(1, devices.list(null, null).path("items").size());
+          store.tx(
+              () ->
+                  store.insert(
+                      "network_ingress",
+                      "b".repeat(26),
+                      Json.object(
+                          "device",
+                          managed,
+                          "serverId",
+                          "N" + "B".repeat(55),
+                          "clientId",
+                          "2",
+                          "account",
+                          "MANAGED",
+                          "userNkey",
+                          "private-connection-key"),
+                      null));
+          assertEquals(1, devices.connectionBindings().path("items").size());
+          var bindings = devices.messageConnectionBindings().path("items");
+          assertEquals(2, bindings.size());
+          assertTrue(
+              java.util.stream.StreamSupport.stream(bindings.spliterator(), false)
+                  .anyMatch(
+                      row ->
+                          row.path("device").asString().equals(managed)
+                              && row.path("account").asString().equals("MANAGED")));
+          assertFalse(bindings.toString().contains("userNkey"));
           assertEquals(
               "common.not_found",
               assertThrows(AurigaException.class, () -> devices.revoke(managed))
@@ -178,8 +205,42 @@ class AdminDevicesPostgresTest {
         () -> {
           assertEquals(0, devices.list(null, null).path("items").size());
           assertEquals(0, devices.connectionBindings().path("items").size());
+          assertEquals(0, devices.messageConnectionBindings().path("items").size());
           var e = assertThrows(AurigaException.class, () -> devices.revoke(id));
           assertEquals("common.not_found", e.errorCode().code());
         });
+  }
+
+  @Test
+  void managedConnectionIsolationReadsProductionBindingsAndConfirmsBrokerExit(
+      @org.junit.jupiter.api.io.TempDir java.nio.file.Path directory) throws Exception {
+    UUID tenant = UUID.randomUUID(), account = UUID.randomUUID(), device = UUID.randomUUID();
+    var devices = new IamAdminDevices(store, Clock.systemUTC(), mock(AuditLogger.class));
+    TenantContext.run(
+        tenant,
+        () ->
+            store.tx(
+                () -> {
+                  store.insert(
+                      "account", account.toString(), Json.object("displayName", "alice"), null);
+                  store.insert(
+                      "device",
+                      device.toString(),
+                      Json.object(
+                          "accountId",
+                          account.toString(),
+                          "kind",
+                          "dsh_connect",
+                          "deviceType",
+                          "managed",
+                          "scope",
+                          "auriga.connect"),
+                      null);
+                  return null;
+                }));
+    ManagedIsolationEdgeIntegration.run(directory, store, devices, tenant, device);
+    TenantContext.run(
+        UUID.randomUUID(),
+        () -> assertEquals(0, devices.messageConnectionBindings().path("items").size()));
   }
 }

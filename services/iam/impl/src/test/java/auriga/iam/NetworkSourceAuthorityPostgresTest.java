@@ -1396,7 +1396,12 @@ class NetworkSourceAuthorityPostgresTest {
             StandardDevicePostgresTest.networkAuthorization());
     authority =
         new IamNetworkAuthority(
-            store, oauth.deviceAuthority(), mock(AuditLogger.class), clock, Set.of("server-a"));
+            store,
+            oauth.deviceAuthority(),
+            mock(AuditLogger.class),
+            clock,
+            Set.of("server-a"),
+            (controlTenant, controlRealm, controlTarget) -> true);
     sources = authority(new IamNetworkSourceAuthority.Policy(30, 5));
     TenantContext.run(
         tenant,

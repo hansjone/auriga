@@ -1,6 +1,8 @@
 package main
 
 import (
+	"context"
+	"crypto/tls"
 	"fmt"
 	"io"
 	"net"
@@ -19,6 +21,7 @@ const DefaultNetworkWSSPath = "/net/v1/ws"
 // nats-server's websocket listener. NATS CONNECT / auth callout stay on the
 // Broker; this path never trusts payload-claimed tenant/node.
 type NetworkWSSConfig struct {
+	msgnet         *edgeMsgnet
 	Enabled        bool     `json:"enabled"`
 	Path           string   `json:"path"`
 	UpstreamURL    string   `json:"upstreamUrl"` // http(s)://host:port/ or ws(s)://…
@@ -55,9 +58,14 @@ func newNetworkWSS(cfg NetworkWSSConfig, portalHost string) (*NetworkWSS, error)
 	case "wss":
 		u.Scheme = "https"
 	}
-	tlsConfig, err := networkWSSTLS(cfg, u.Scheme)
-	if err != nil {
-		return nil, err
+	var tlsConfig *tls.Config
+	if cfg.msgnet == nil {
+		tlsConfig, err = networkWSSTLS(cfg, u.Scheme)
+		if err != nil {
+			return nil, err
+		}
+	} else if u.Scheme != "https" {
+		return nil, fmt.Errorf("msgnet WSS requires TLS")
 	}
 	path := cfg.Path
 	if path == "" {
@@ -84,6 +92,29 @@ func newNetworkWSS(cfg NetworkWSSConfig, portalHost string) (*NetworkWSS, error)
 		IdleConnTimeout:     90 * time.Second,
 		TLSHandshakeTimeout: 10 * time.Second,
 		TLSClientConfig:     tlsConfig,
+	}
+	if tlsConfig != nil {
+		var committed atomic.Pointer[tls.Config]
+		committed.Store(tlsConfig)
+		// Read the committed trust projection for every new upstream connection.
+		tr.DialTLSContext = func(ctx context.Context, network, address string) (net.Conn, error) {
+			current, err := networkWSSTLS(cfg, u.Scheme)
+			if err != nil {
+				current = committed.Load()
+			} else {
+				committed.Store(current)
+			}
+			return (&tls.Dialer{NetDialer: &net.Dialer{Timeout: 10 * time.Second}, Config: current}).DialContext(ctx, network, address)
+		}
+	}
+	if cfg.msgnet != nil {
+		name := cfg.ServerName
+		if name == "" {
+			name = u.Hostname()
+		}
+		if err = cfg.msgnet.configure(tr, "edge-presence", name); err != nil {
+			return nil, err
+		}
 	}
 	proxy := &httputil.ReverseProxy{
 		Rewrite: func(pr *httputil.ProxyRequest) {

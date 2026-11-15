@@ -316,7 +316,12 @@ class NetworkLocalSourceHistoryIntegrationTest {
       var devices = oauth.deviceAuthority();
       network =
           new IamNetworkAuthority(
-              store, devices, mock(AuditLogger.class), clock, Set.of("server-a"));
+              store,
+              devices,
+              mock(AuditLogger.class),
+              clock,
+              Set.of("server-a"),
+              (controlTenant, controlRealm, controlTarget) -> true);
       var sourceAuthority =
           new IamNetworkSourceAuthority(
               store,
