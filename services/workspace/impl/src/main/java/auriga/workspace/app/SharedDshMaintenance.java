@@ -40,6 +40,12 @@ public final class SharedDshMaintenance {
   }
 
   private <T> T locked(java.util.function.Supplier<T> work) {
+    if (org.springframework.transaction.support.TransactionSynchronizationManager
+        .isActualTransactionActive()) {
+      auriga.common.persistence.TenantTransactionManager.verifyTransactionTenant();
+      store.lock();
+      return work.get();
+    }
     return store.tx(
         () -> {
           store.lock();
