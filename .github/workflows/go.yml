@@ -80,6 +80,17 @@ jobs:
           test -z "$(git status --porcelain -- gen)"
       - name: Check formatting
         run: test -z "$(gofmt -l .)"
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: services/contracts/package-lock.json
+      - name: Install shared DSH oracle dependencies
+        working-directory: services/contracts
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Verify shared DSH cross-language signatures
+        working-directory: infra/edge
+        run: go test -count=1 -run '^TestSharedKOracleInterop$' -v .
       - name: Vet, test, and build every workspace module
         run: |
           # Race detector needs cgo; the Linux runner has gcc, Windows does not.
