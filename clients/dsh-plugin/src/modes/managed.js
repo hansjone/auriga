@@ -1,6 +1,6 @@
 // @ts-nocheck
 import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, dirname } from 'node:path';
 import { createManagedNetwork } from '../network/managed-device.js';
 import { installResourceChannel } from '../resources/channel.js';
 import { installManagedSessionGuard } from '../managed/session.js';
@@ -78,6 +78,7 @@ async function resolveInstanceToken(env, inline) {
  *   startHeartbeat?: boolean,
  *   config?: import('../generated/managed-config.js').ManagedConfig,
  *   connection?: any,
+ *   deviceCredentialFile?: string,
  * }} [options]
  */
 export async function createManaged(options = {}) {
@@ -367,6 +368,20 @@ export async function createManaged(options = {}) {
             ['tools', 'sessions', 'sessionController'],
             (networkCtx) => {
               const owned = createManagedNetwork({
+                file:
+                  options.deviceCredentialFile ??
+                  env.AURIGA_DEVICE_CREDENTIAL_FILE,
+                modelFile:
+                  (options.deviceCredentialFile ??
+                  env.AURIGA_DEVICE_CREDENTIAL_FILE)
+                    ? join(
+                        dirname(
+                          options.deviceCredentialFile ??
+                            env.AURIGA_DEVICE_CREDENTIAL_FILE,
+                        ),
+                        'model-credential.json',
+                      )
+                    : undefined,
                 platformOrigin: platformUrl,
                 directory: join(directory, 'auriga-managed'),
                 tenantId,

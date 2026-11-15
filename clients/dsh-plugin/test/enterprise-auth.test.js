@@ -9,6 +9,7 @@ import { createEnterpriseAuth } from '../src/local/enterprise.js';
 import { createEnterpriseEnvironment } from '../src/local/enterprise-environment.js';
 
 async function fixture(t) {
+  let authGeneration = 1;
   let sent;
   const sending = new Promise((resolve) => {
     sent = resolve;
@@ -35,6 +36,10 @@ async function fixture(t) {
     pending;
   const auth = createEnterpriseAuth({
     snapshot: () => snapshot,
+    binding: () =>
+      snapshot.state === 'signed_out'
+        ? null
+        : JSON.stringify([snapshot.shellEpoch, authGeneration]),
     getOwner: (id) => (id === 'session' ? 'member' : null),
     credentials: async () => ({ empNo: '00001', token, updatedAt: null }),
     config: () => config,
@@ -116,7 +121,31 @@ async function fixture(t) {
       config = { ...config, allowRawAgentToken: true };
     },
     logout() {
+      authGeneration++;
       snapshot = { state: 'signed_out', shellEpoch: 'epoch', revision: 2 };
+    },
+    progress() {
+      snapshot.revision++;
+    },
+    offline() {
+      snapshot = {
+        ...snapshot,
+        state: 'unreachable',
+        revision: snapshot.revision + 1,
+      };
+    },
+    recover() {
+      snapshot = {
+        ...snapshot,
+        state: 'authenticated',
+        revision: snapshot.revision + 1,
+      };
+    },
+    reauthenticate() {
+      authGeneration++;
+    },
+    hosts(outboundAllowedHosts) {
+      config = { ...config, outboundAllowedHosts };
     },
     expire() {
       time += 600001;
@@ -138,6 +167,39 @@ test('raw default enabled, latest credentials read every time, logout rejects', 
   assert.equal((await (await f.raw()).json()).token, f.token());
   f.logout();
   assert.equal((await f.raw()).status, 401);
+});
+test('capability survives transient revisions, returns temporary outage, and requires the same authentication generation', async (t) => {
+  const f = await fixture(t);
+  f.progress();
+  assert.equal((await f.raw()).status, 200);
+  f.offline();
+  assert.equal(f.auth.mint('session'), null);
+  assert.equal((await f.raw()).status, 503);
+  f.recover();
+  f.rotate();
+  assert.equal((await (await f.raw()).json()).token, f.token());
+  f.reauthenticate();
+  assert.equal((await f.raw()).status, 401);
+});
+test('enterprise outbound uses 443 by default and requires an explicitly allowed non-default port', async (t) => {
+  const f = await fixture(t);
+  assert.equal(
+    (await f.outbound({ url: 'https://service.example.com:443/operation' }))
+      .status,
+    500,
+  );
+  assert.equal(
+    (await f.outbound({ url: 'https://service.example.com:8443/operation' }))
+      .status,
+    403,
+  );
+  f.hosts(['service.example.com:8443']);
+  assert.equal(
+    (await f.outbound({ url: 'https://service.example.com:8443/operation' }))
+      .status,
+    500,
+  );
+  assert.equal((await f.outbound()).status, 403);
 });
 test('outbound rebuilds identity headers, strips response secrets and preserves upstream 500', async (t) => {
   const f = await fixture(t),

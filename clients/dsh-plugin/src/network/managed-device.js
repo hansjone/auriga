@@ -1,13 +1,16 @@
 import { createConnectRuntime } from '../local/runtime.js';
+import { createManagedFileConnection } from '../managed/file-connection.js';
 
-/** Managed hosts inherit the same authenticated broker; no instance/device token
- * file is parsed, refreshed, exchanged or sent by the plugin.
+/** Managed hosts use their private device file and the shared fixed executor.
+ * An explicitly supplied native connection remains supported by composition.
  * @param {{directory:string,tenantId:string,ownerId:string,instanceId:string,ctx:any,
- * platformOrigin?:string,connection?:any,authorizeLocal?:(context:any)=>Promise<boolean>}} options */
+ * platformOrigin?:string,connection?:any,file?:string,modelFile?:string,authorizeLocal?:(context:any)=>Promise<boolean>}} options */
 export function createManagedNetwork(options) {
   /** @type {Awaited<ReturnType<typeof createConnectRuntime>>|undefined} */ let runtime;
   /** @type {Promise<void>|undefined} */ let opening;
   let closed = false;
+  /** @type {any} */ let fileConnection;
+  /** @type {ReturnType<typeof setInterval>|undefined} */ let timer;
   const lifetime = new AbortController();
   const valid = () => {
     const who = runtime?.identity();
@@ -17,29 +20,70 @@ export function createManagedNetwork(options) {
       who?.ownerId === options.ownerId
     );
   };
-  return {
-    start() {
-      if (closed) return opening ?? Promise.resolve();
-      if (opening) return opening;
-      opening = (async () => {
+  function refresh() {
+    if (closed || opening || (runtime && !fileConnection?.stale))
+      return opening;
+    const work = (async () => {
+      if (runtime) {
+        const previous = runtime;
+        runtime = undefined;
+        await previous.close();
+      }
+      if (closed) return;
+      try {
+        const connection =
+          options.connection ??
+          (options.file
+            ? await createManagedFileConnection({
+                file: options.file,
+                modelFile: options.modelFile,
+                directory: options.directory,
+                tenantId: options.tenantId,
+                ownerId: options.ownerId,
+                instanceId: options.instanceId,
+                platformOrigin: options.platformOrigin ?? '',
+              })
+            : undefined);
+        fileConnection = options.connection ? undefined : connection;
         const candidate = await createConnectRuntime({
           directory: options.directory,
-          config: { platformOrigin: options.platformOrigin ?? '' },
+          config: connection?.config ?? {
+            platformOrigin: options.platformOrigin ?? '',
+          },
           ctx: options.ctx,
-          connection: options.connection,
+          connection,
           signal: lifetime.signal,
           expectedIdentity: {
             tenantId: options.tenantId,
             ownerId: options.ownerId,
           },
+          authorizeLocal: options.authorizeLocal,
         });
         if (closed) {
           await candidate.close();
           return;
         }
         runtime = candidate;
-      })();
-      return opening;
+      } catch {
+        fileConnection?.ipc.close();
+      }
+    })();
+    const pending = work.finally(() => {
+      if (opening === pending) opening = undefined;
+    });
+    opening = pending;
+    return pending;
+  }
+  return {
+    start() {
+      if (closed) return Promise.resolve();
+      if (!timer) {
+        timer = setInterval(() => {
+          void refresh();
+        }, 1000);
+        timer.unref();
+      }
+      return refresh();
     },
     get ready() {
       return opening ?? Promise.resolve();
@@ -91,6 +135,7 @@ export function createManagedNetwork(options) {
     },
     async close() {
       closed = true;
+      clearInterval(timer);
       lifetime.abort();
       const closing = runtime?.close();
       await opening?.catch(() => {});

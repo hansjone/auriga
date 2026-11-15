@@ -51,6 +51,8 @@ export function createShellState(options) {
   let lastRevision = -1,
     lastExpiry = 0,
     connection = 0;
+  /** @type {string|null} */ let authorizationKey = null;
+  let authorizationIdentity = '';
   /** @type {string|undefined} */ let subscription;
   /** @type {Set<()=>void>} */ const invalidations = new Set();
   /** @type {Map<string,{revision:number,interrupted:boolean,owner?:string}>} */
@@ -138,6 +140,22 @@ export function createShellState(options) {
       snapshot.shellEpoch !== value.shellEpoch ||
       snapshot.revision !== value.revision ||
       identity(snapshot) !== identity(value);
+    if (value.state === 'authenticated') {
+      const key = JSON.stringify([
+        value.shellEpoch,
+        value.identity?.tenantId,
+        value.identity?.memberId,
+        value.identity?.deviceId,
+        value.identity?.providerId,
+        value.identity?.uacSessionBinding?.sourceSessionId,
+        value.identity?.uacSessionBinding?.authGeneration,
+      ]);
+      if (!authorizationKey || key !== authorizationIdentity)
+        authorizationKey = randomUUID();
+      authorizationIdentity = key;
+    } else if (value.state !== 'unreachable') {
+      authorizationKey = null;
+    }
     if (changed) {
       generation++;
       notifyInvalidation();
@@ -263,6 +281,7 @@ export function createShellState(options) {
   }
   return {
     current,
+    authorization: () => authorizationKey,
     subscribeInvalidation(/** @type {()=>void} */ callback) {
       invalidations.add(callback);
       return () => {
@@ -314,6 +333,7 @@ export function createShellState(options) {
         throw fail('common.validation_failed');
       const command = envelope(action);
       if (action === 'logout') {
+        authorizationKey = null;
         floor = command.expectedRevision + 1;
         invalidate();
         // Keep the request's original epoch/revision; do not discover another
@@ -368,6 +388,7 @@ export function createShellState(options) {
       invalidate();
     },
     close() {
+      authorizationKey = null;
       connection++;
       closed = true;
       unsubscribe?.();

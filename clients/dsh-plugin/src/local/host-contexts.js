@@ -92,12 +92,11 @@ export function createHostContexts({ broker, identity, ctx }) {
       if (flights.get(id) === pending) flights.delete(id);
     }
   }
-  async function tool(/** @type {any} */ execution) {
+  async function tool(/** @type {any} */ execution, background = false) {
     const agent = execution?.agent,
       native = agent?.session,
       id = native?.header?.id;
     const currentHost = host;
-    let background = false;
     const live = () =>
       !closed &&
       currentHost &&
@@ -146,8 +145,9 @@ export function createHostContexts({ broker, identity, ctx }) {
         execution.signal?.removeEventListener('abort', abort);
       },
     });
-    execution.signal?.addEventListener('abort', abort, { once: true });
-    if (execution.signal?.aborted) {
+    if (!background)
+      execution.signal?.addEventListener('abort', abort, { once: true });
+    if (!background && execution.signal?.aborted) {
       await retireTool(handle.executionContextId);
       return fail();
     }
@@ -209,6 +209,19 @@ export function createHostContexts({ broker, identity, ctx }) {
         Date.parse(row.handle.expiresAt) > Date.now()
         ? (identity()?.ownerId ?? null)
         : null;
+    },
+    ownerProof(/** @type {string} */ id) {
+      const row = sessions.get(id),
+        owner = identity()?.ownerId,
+        capturedHost = host;
+      return () =>
+        !closed &&
+        row &&
+        owner &&
+        host === capturedHost &&
+        ctx.sessions?.get(id) === row.native
+          ? owner
+          : null;
     },
     close() {
       closed = true;

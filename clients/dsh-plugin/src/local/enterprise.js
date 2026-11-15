@@ -27,11 +27,12 @@ const binding = (/** @type {any} */ s) =>
   s?.state === 'authenticated'
     ? JSON.stringify([
         s.shellEpoch,
-        s.revision,
         s.identity?.tenantId,
         s.identity?.memberId,
         s.identity?.deviceId,
         s.identity?.providerId,
+        s.identity?.uacSessionBinding?.sourceSessionId,
+        s.identity?.uacSessionBinding?.authGeneration,
       ])
     : null;
 const json = (
@@ -116,8 +117,8 @@ export async function enterpriseRequest(url, options) {
  * getOwner reads the host's trusted session ownership, not HTTP/model input.
  * credentials reads current IAM material through the authenticated broker.
  * @param {{snapshot:()=>any,getOwner:(id:string)=>string|null,
- * credentials:(sessionId:string,purpose:'raw'|'outbound',executionContextId?:string)=>Promise<any>,onRevoke?:(id:string)=>void,config?:()=>any,send?:typeof enterpriseRequest,
- * now?:()=>number,monotonic?:()=>number}} options */
+ * credentials:(sessionId:string,purpose:'raw'|'outbound',executionContextId?:string,execution?:any,retained?:boolean)=>Promise<any>,onRevoke?:(id:string)=>void,config?:()=>any,send?:typeof enterpriseRequest,
+ * now?:()=>number,monotonic?:()=>number,binding?:()=>string|null,ownerProof?:(id:string)=>()=>string|null}} options */
 export function createEnterpriseAuth(options) {
   const config = options.config ?? (() => ({}));
   const raw = () => config().allowRawAgentToken !== false;
@@ -133,11 +134,16 @@ export function createEnterpriseAuth(options) {
   function mint(
     /** @type {string} */ sessionId,
     /** @type {string|undefined} */ executionContextId = undefined,
+    /** @type {any} */ execution = undefined,
   ) {
     if (closed) return null;
     const snapshot = options.snapshot(),
-      key = binding(snapshot);
-    if (!key || options.getOwner(sessionId) !== snapshot.identity.memberId)
+      key = options.binding ? options.binding() : binding(snapshot);
+    if (
+      snapshot?.state !== 'authenticated' ||
+      !key ||
+      options.getOwner(sessionId) !== snapshot.identity.memberId
+    )
       return null;
     for (const [token, cap] of capabilities)
       if (cap.until <= now() || cap.deadline <= monotonic()) revoke(token);
@@ -146,6 +152,11 @@ export function createEnterpriseAuth(options) {
     capabilities.set(token, {
       sessionId,
       executionContextId,
+      execution,
+      retained: false,
+      owner:
+        options.ownerProof?.(sessionId) ?? (() => options.getOwner(sessionId)),
+      memberId: snapshot.identity.memberId,
       key,
       audience: 'dsh-team-agent',
       scopes: raw() ? ['outbound', 'credentials'] : ['outbound'],
@@ -190,15 +201,22 @@ export function createEnterpriseAuth(options) {
         cap.audience !== 'dsh-team-agent' ||
         cap.sessionId !== sessionId ||
         !cap.scopes.includes(scope) ||
-        cap.key !== binding(s) ||
-        options.getOwner(sessionId) !== s?.identity?.memberId
+        cap.key !== (options.binding ? options.binding() : binding(s)) ||
+        cap.owner() !== cap.memberId
       )
         throw failure(401, 'caller_unauthenticated');
       if (scope === 'credentials' && !raw())
         throw failure(403, 'raw_token_disabled');
+      if (s?.state !== 'authenticated')
+        throw failure(503, 'no_skill_credentials');
     };
     check();
-    return { check, sessionId, executionContextId: cap.executionContextId };
+    return {
+      check,
+      sessionId,
+      cap,
+      executionContextId: cap.executionContextId,
+    };
   }
   async function body(/** @type {any} */ req) {
     if (req.method === 'GET') return {};
@@ -220,6 +238,10 @@ export function createEnterpriseAuth(options) {
   }
   return {
     mint,
+    retain(/** @type {string} */ token) {
+      const cap = capabilities.get(token);
+      if (cap) cap.retained = true;
+    },
     revoke,
     revokeAll() {
       capabilities.clear();
@@ -240,7 +262,7 @@ export function createEnterpriseAuth(options) {
         if (!(credentials ? ['GET', 'POST'] : ['POST']).includes(req.method))
           throw failure(405, 'method_not_allowed');
         const input = await body(req);
-        const { check, sessionId, executionContextId } = authorize(
+        const { check, sessionId, executionContextId, cap } = authorize(
           req,
           input,
           credentials ? 'credentials' : 'outbound',
@@ -251,7 +273,11 @@ export function createEnterpriseAuth(options) {
             sessionId,
             credentials ? 'raw' : 'outbound',
             executionContextId,
+            cap.execution,
+            cap.retained,
           );
+          if (material?.executionContextId)
+            cap.executionContextId = material.executionContextId;
         } catch {
           check();
           throw failure(503, 'no_skill_credentials');
@@ -287,7 +313,13 @@ export function createEnterpriseAuth(options) {
           url.hash
         )
           throw failure(400, 'invalid_url');
-        if (!(config().outboundAllowedHosts ?? []).includes(url.hostname))
+        if (
+          !(config().outboundAllowedHosts ?? []).some(
+            (/** @type {string} */ host) =>
+              (host === url.hostname && !url.port) ||
+              host === `${url.hostname}:${url.port || '443'}`,
+          )
+        )
           throw failure(403, 'host_not_allowed');
         const method = String(input.method || 'POST').toUpperCase();
         if (!['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD'].includes(method))

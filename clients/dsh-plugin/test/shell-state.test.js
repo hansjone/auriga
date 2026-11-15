@@ -185,6 +185,24 @@ test('missing broker leaves owner usable with no platform authority', async (t) 
   assert.equal(shell.current(), undefined);
   assert.throws(() => shell.fence(), { code: 'common.unauthenticated' });
 });
+test('enterprise authentication generation survives offline recovery and changes after logout', async (t) => {
+  const f = await fixture(t);
+  const initial = f.shell.authorization();
+  assert.ok(initial);
+  f.next('unreachable');
+  f.event();
+  assert.equal(f.shell.authorization(), initial);
+  assert.throws(() => f.shell.fence());
+  f.next('authenticated');
+  f.event();
+  assert.equal(f.shell.authorization(), initial);
+  f.next('signed_out');
+  f.event();
+  assert.equal(f.shell.authorization(), null);
+  f.next('authenticated');
+  f.event();
+  assert.notEqual(f.shell.authorization(), initial);
+});
 
 for (const action of ['cancel_login', 'logout']) {
   test(`${action} reply cannot replace a newer revocation push`, async (t) => {

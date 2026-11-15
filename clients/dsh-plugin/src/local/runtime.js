@@ -10,6 +10,7 @@ import { readFileSync, lstatSync } from 'node:fs';
 import { join } from 'node:path';
 import { desktopUpdater, desktopStartupFailure } from './desktop.js';
 import { createVault } from './vault.js';
+import { revokeLegacyCredentials } from './legacy-revocation.js';
 import { createBroker } from './broker.js';
 import { connectPackagedBroker } from './broker-package.js';
 import { createEnterpriseAuth } from './enterprise.js';
@@ -30,7 +31,7 @@ const refuse = (code = 'common.unavailable') => {
  * The encrypted legacy vault is used only for local state; old platform material
  * cannot be replayed. No import operation exists, so migration safely requires
  * a fresh shell login and removes only old authentication fields.
- * @param {{config:any,directory:string,ctx:any,connection?:any,enterpriseConfig?:()=>any,expectedIdentity?:{tenantId:string,ownerId:string},signal?:AbortSignal}} options */
+ * @param {{config:any,directory:string,ctx:any,connection?:any,enterpriseConfig?:()=>any,expectedIdentity?:{tenantId:string,ownerId:string},signal?:AbortSignal,authorizeLocal?:(context:any)=>Promise<boolean>}} options */
 export async function createConnectRuntime({
   config,
   directory,
@@ -39,6 +40,7 @@ export async function createConnectRuntime({
   enterpriseConfig,
   expectedIdentity,
   signal,
+  authorizeLocal,
 }) {
   config = Object.freeze({
     ...config,
@@ -49,13 +51,17 @@ export async function createConnectRuntime({
   const legacy =
     !!savedAuthentication.credential ||
     !!savedAuthentication.endpoint ||
-    (savedAuthentication.revocations?.length ?? 0) > 0;
-  if (legacy)
+    (savedAuthentication.revocations?.length ?? 0) > 0 ||
+    (savedAuthentication.legacyRevocations?.length ?? 0) > 0;
+  if (legacy) {
+    const pending = await revokeLegacyCredentials(savedAuthentication, config);
     await vault.update((s) => {
       s.credential = null;
       s.revocations = [];
       s.endpoint = null;
+      s.legacyRevocations = pending;
     });
+  }
   const requests = new WeakSet();
   const csrf = randomBytes(32).toString('base64url');
   /** @type {Set<()=>Promise<void>>} */ const listeners = new Set();
@@ -101,6 +107,7 @@ export async function createConnectRuntime({
     signal,
     ipc: installed?.ipc,
     validate: installed?.validate ?? (() => refuse()),
+    stateFactory: installed?.stateFactory,
     onInvalidate() {
       principal = undefined;
       memberProfile = undefined;
@@ -117,7 +124,6 @@ export async function createConnectRuntime({
       void closeStorage(teamVault);
       teamVault = undefined;
       communication = 'idle';
-      enterprise?.revokeAll();
       for (const listener of listeners)
         void Promise.resolve()
           .then(listener)
@@ -234,9 +240,11 @@ export async function createConnectRuntime({
     },
     authorizeLocal: async (context) =>
       !!identity() &&
-      typeof context === 'object' &&
-      context !== null &&
-      requests.has(context),
+      (authorizeLocal
+        ? await authorizeLocal(context)
+        : typeof context === 'object' &&
+          context !== null &&
+          requests.has(context)),
   });
   if (identity()) network.login();
 
@@ -350,6 +358,8 @@ export async function createConnectRuntime({
   }
   enterprise = createEnterpriseAuth({
     snapshot: broker.state.current,
+    binding: broker.state.authorization,
+    ownerProof: (id) => sessionContexts.ownerProof(id),
     getOwner: (id) => contexts?.owner(id) ?? null,
     config:
       enterpriseConfig ??
@@ -365,7 +375,14 @@ export async function createConnectRuntime({
           return { allowRawAgentToken: false, outboundAllowedHosts: [] };
         }
       }),
-    async credentials(_id, purpose, executionContextId) {
+    async credentials(_id, purpose, executionContextId, execution, retained) {
+      if (
+        executionContextId &&
+        !contexts?.valid(executionContextId) &&
+        execution
+      )
+        executionContextId = (await sessionContexts.tool(execution, retained))
+          .executionContextId;
       if (!executionContextId || !contexts?.valid(executionContextId))
         return refuse('common.unauthenticated');
       const result = await broker.credentials(executionContextId, purpose);
@@ -390,7 +407,7 @@ export async function createConnectRuntime({
           ))
       )
         return refuse('common.conflict');
-      return result;
+      return { ...result, executionContextId };
     },
     onRevoke(id) {
       if (contexts) void contexts.finish(id);

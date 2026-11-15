@@ -52,7 +52,7 @@ export function createEnterpriseEnvironment({
         port > 65535
       )
         return empty;
-      const cap = auth.mint(sessionId, contextId);
+      const cap = auth.mint(sessionId, contextId, execution);
       if (!cap) return empty;
       const row = {
         cap,
@@ -110,6 +110,7 @@ export function createEnterpriseEnvironment({
             return;
           }
           row.signal?.removeEventListener('abort', row.abort);
+          auth.retain?.(row.cap);
           row.signal = null;
           row.off = jobs.events.subscribe(
             { owner: row.sessionId },

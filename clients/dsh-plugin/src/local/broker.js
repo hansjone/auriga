@@ -5,15 +5,17 @@ import { createShellState } from './shell-state.js';
 const unavailable = (code = 'common.unavailable') =>
   Object.assign(new Error(code), { code });
 
-/** The only platform transport. ipc is C's OS-authenticated backend connection;
- * validate compiles the frozen producer schemas from that same broker artifact.
- * @param {{ipc:any,validate:(name:string,value:any)=>any,onInvalidate?:()=>void,onChange?:(snapshot:any)=>void,signal?:AbortSignal}} options */
+/** Fixed platform client. Desktop uses C's OS-authenticated IPC; managed native
+ * composition supplies its file-bound state. Both validate the frozen business
+ * and host DTOs from the same producer artifact.
+ * @param {{ipc:any,validate:(name:string,value:any)=>any,onInvalidate?:()=>void,onChange?:(snapshot:any)=>void,signal?:AbortSignal,stateFactory?:(options:any)=>any}} options */
 export async function createBroker({
   ipc,
   validate,
   onInvalidate,
   onChange,
   signal,
+  stateFactory,
 }) {
   /** @type {any} */ let receiver;
   /** @type {any} */ let disconnected;
@@ -86,7 +88,9 @@ export async function createBroker({
         },
       }
     : undefined;
-  const state = createShellState({ transport, onInvalidate, onChange });
+  const state = stateFactory
+    ? stateFactory({ onInvalidate, onChange })
+    : createShellState({ transport, onInvalidate, onChange });
   const stop = () => {
     closed = true;
     shutdown.abort();

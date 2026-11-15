@@ -339,6 +339,7 @@ export async function apply(ctx, config) {
   }
   const runtime = await createManaged({
     env: process.env,
+    deviceCredentialFile: process.env.AURIGA_DEVICE_CREDENTIAL_FILE,
     config: config ?? {},
     startHeartbeat: false,
   });

@@ -39,16 +39,32 @@
       "sha256": "b2dd8a6e36390392a1351958935fe03698b43ee1cafccab77bba2c0959ac4b72"
     },
     {
+      "file": "local/broker.js",
+      "sha256": "4105468c587d09c87b3c7914e5b3b5ddcbbc593c29297cf908176893c5b14d70"
+    },
+    {
       "file": "local/desktop.js",
       "sha256": "a2dcf8977e6cfdf0b422e80280df3a58f93851c5480516be43350cba96d155bf"
     },
     {
+      "file": "local/enterprise-environment.js",
+      "sha256": "6caca745c3f6fe005a16f4b285b10cbabb24f4e0faf1c1cf5548cb159ec56948"
+    },
+    {
       "file": "local/enterprise.js",
-      "sha256": "a5aa8bbeb80c2828d4498d95c72d027c12aaecbe8f21ebffa602baa36674d3d8"
+      "sha256": "de5cc396877821ae989b0f8d78b15ee9bb96783a77529ea03faa48e3b4e6fde5"
+    },
+    {
+      "file": "local/host-contexts.js",
+      "sha256": "26c91dc900d6a7f794357a8515fa85736c5e607053c626553b5993db390a50eb"
     },
     {
       "file": "local/host.js",
       "sha256": "29830717348ee7f08fe7c6956246fbe4c3a260311917b7eab80514f3fcd6ea18"
+    },
+    {
+      "file": "local/legacy-revocation.js",
+      "sha256": "7e8758eff6737a9a85e817158d19ca08e3f6c085abd69420f53651abe3e317cc"
     },
     {
       "file": "local/member-profile.js",
@@ -60,7 +76,11 @@
     },
     {
       "file": "local/runtime.js",
-      "sha256": "6b01be9ee38ab5c2396ae006a2a9f189ace1c2663de4a1a8bba288e38d6a4a13"
+      "sha256": "616afc04d393b54fa23f944539a3561d6cf383fc79798381f7155a45fe8fe5f1"
+    },
+    {
+      "file": "local/shell-state.js",
+      "sha256": "238d7cfa8f6f69edb0635b1e1f6b7129bc02db9a4b20c2e1258b37b0a631d033"
     },
     {
       "file": "local/team.js",
@@ -69,6 +89,10 @@
     {
       "file": "managed/door.js",
       "sha256": "1b84ee0f0486ab57d090819e9df407d1a712bf4a3aaa6a9228e4e73ec277dbf8"
+    },
+    {
+      "file": "managed/file-connection.js",
+      "sha256": "0f9dc86e335a3135e0f943e4d9cf82665c38f00108254864a995412766225827"
     },
     {
       "file": "managed/guards.js",
@@ -95,6 +119,10 @@
       "sha256": "053568e3251d3e3c93a51ca5f8c88143fc415a0ca681763c7b57047fd7a71ad8"
     },
     {
+      "file": "modes/managed.js",
+      "sha256": "3c67cd93b643c7305216c61822c6a0a3393bea1b970dc206b8796d2ac6bef77d"
+    },
+    {
       "file": "network/base-tools.js",
       "sha256": "57a51ede2ae9605d3d609f3883702b818e4d5a76576d44eee1bc20fb8b7703da"
     },
@@ -112,7 +140,7 @@
     },
     {
       "file": "network/managed-device.js",
-      "sha256": "de147d582ac239e82c378a5ee3dd088bded13509bfe76d1809c4f49562b7262d"
+      "sha256": "1c1b63e6e1685e336ab6bf13890c8c2d3fb01e09a7abb1ea2db602edbe571cbe"
     },
     {
       "file": "network/transport/ws-socket.js",
@@ -121,6 +149,10 @@
     {
       "file": "observability/index.js",
       "sha256": "47988a5ece5528af5ec6a2b13d153e7e9d4579baddeedae77a024e80890fc41c"
+    },
+    {
+      "file": "plugin.js",
+      "sha256": "03c38eea1b4b1964a809129539f0f75d31d4c21f49b40899e13d60e3b9f08e56"
     },
     {
       "file": "resources/broker-dispatch.js",
@@ -398,6 +430,22 @@
       "routePatterns": [],
       "reason": "Shared low-level NATS socket factory bundled by C. Normal plugin entry uses the broker transport; no platform HTTP route or device credential exchange is allowed.",
       "design": "docs/design/auth-shell.zh.md section 3.3"
+    },
+    {
+      "file": "managed/file-connection.js",
+      "channel": "managed-device-fixed-operations",
+      "transports": [],
+      "routePatterns": ["^/oauth2/token$", "^/ai/v1$"],
+      "reason": "Trusted managed-device file and verified short-lived JWT authenticate the shared fixed operation executor. The model-only key is separate and bound to the same instance; URLs and tokens cannot come from browser or model input.",
+      "design": "docs/design/auth-shell.zh.md section 3.3; PR349 rework 1"
+    },
+    {
+      "file": "local/legacy-revocation.js",
+      "channel": "legacy-credential-migration-revocation",
+      "transports": ["call:fetch"],
+      "routePatterns": ["^/oauth2/revoke$"],
+      "reason": "Bounded one-pass revocation of encrypted legacy credentials at their stored issuer. Failed entries remain encrypted for the next startup; no reusable platform HTTP client is exported.",
+      "design": "docs/design/auth-shell.zh.md section 7; PR349 rework 1"
     }
   ]
 }
