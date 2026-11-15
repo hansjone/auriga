@@ -2,6 +2,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { EventEmitter, once } from 'node:events';
+import { performance } from 'node:perf_hooks';
 import { createServer } from 'node:http';
 import { spawn } from 'node:child_process';
 import { generateKeyPairSync } from 'node:crypto';
@@ -14,6 +15,7 @@ import {
   platformStatus,
   profileDir,
   readState,
+  rollback,
   uninstall,
 } from '../runtime/core.mjs';
 import { createControl } from '../runtime/tray-control.mjs';
@@ -166,17 +168,19 @@ test('supervisor: an owner stop request ends DSH and returns a clean exit', asyn
     starts = 0,
     stops = 0,
     requested = false;
+  const flushed = join(tempBase(t), 'flushed');
+  const preload = new URL('../runtime/dsh-shutdown.mjs', import.meta.url).href;
   t.after(() => child?.kill());
   const tree = {
     attach() {},
     refresh() {},
     async stopTree() {
       stops++;
-      if (child && child.exitCode === null && child.signalCode === null) {
-        const done = once(child, 'exit');
-        child.kill();
-        await done;
-      }
+      assert.equal(
+        child.exitCode,
+        0,
+        'the DSH disposal completes before tree cleanup',
+      );
     },
   };
   const running = superviseDsh({
@@ -188,9 +192,18 @@ test('supervisor: an owner stop request ends DSH and returns a clean exit', asyn
     stopRequested: () => requested,
     start: () => {
       starts++;
-      child = spawn(process.execPath, ['-e', 'setInterval(()=>{},1000)'], {
-        stdio: 'ignore',
-      });
+      child = spawn(
+        process.execPath,
+        [
+          '--import',
+          preload,
+          '-e',
+          `const fs=require('node:fs'); process.on('SIGTERM',()=>setTimeout(()=>{fs.writeFileSync(${JSON.stringify(flushed)},'disposed');process.exit(0)},100));setInterval(()=>{},1000);`,
+        ],
+        {
+          stdio: ['ignore', 'ignore', 'ignore', 'ipc'],
+        },
+      );
       return child;
     },
   });
@@ -198,7 +211,8 @@ test('supervisor: an owner stop request ends DSH and returns a clean exit', asyn
   requested = true;
   assert.equal(await running, 0);
   assert.equal(starts, 1);
-  assert.ok(stops >= 1);
+  assert.equal(stops, 1);
+  assert.equal(existsSync(flushed), true);
   assert.ok(child.exitCode !== null || child.signalCode !== null);
   assert.equal(
     await superviseDsh({
@@ -211,6 +225,111 @@ test('supervisor: an owner stop request ends DSH and returns a clean exit', asyn
     }),
     0,
   );
+});
+
+test('an unresponsive DSH is force-cleaned only after the grace window and reports failure', async (t) => {
+  let child,
+    requested = false,
+    stopStarted;
+  t.after(() => child?.kill());
+  const running = superviseDsh({
+    tree: {
+      attach() {},
+      refresh() {},
+      async stopTree() {
+        assert.ok(performance.now() - stopStarted >= 100);
+        const done = once(child, 'exit');
+        child.kill();
+        await done;
+      },
+    },
+    session: { child() {} },
+    supervisor: { reconcile: async () => ({}) },
+    notify() {},
+    poll: () => delay(10),
+    graceMs: 150,
+    stopRequested: () => requested,
+    start() {
+      child = spawn(process.execPath, ['-e', 'setInterval(()=>{},1000)'], {
+        stdio: ['ignore', 'ignore', 'ignore', 'ipc'],
+      });
+      return child;
+    },
+  });
+  await delay(60);
+  stopStarted = performance.now();
+  requested = true;
+  assert.equal(await running, 1);
+});
+
+test('a separate process holding the launch lock fences manual version operations and shared data', async (t) => {
+  const base = tempBase(t);
+  const root = join(base, 'app'),
+    dataHome = join(base, 'home');
+  const first = buildPayload(base, { name: 'first' });
+  const next = buildPayload(base, { name: 'next', pluginVersion: '2.0.0' });
+  const initial = { root, dataHome, payload: first.dir, smoke: noSmoke };
+  install(initial);
+  const api = new URL('../runtime/core.mjs', import.meta.url).href;
+  const child = spawn(
+    process.execPath,
+    [
+      '--input-type=module',
+      '-e',
+      `import {openVersionSession} from ${JSON.stringify(api)};const session=openVersionSession(${JSON.stringify(root)}, {launching:true});console.log('ready');process.on('message',()=>{session.close();process.exit(0)});`,
+    ],
+    { stdio: ['ignore', 'pipe', 'inherit', 'ipc'] },
+  );
+  t.after(() => child.kill());
+  await once(child.stdout, 'data');
+  assert.throws(() => install({ ...initial, payload: next.dir }), {
+    code: 'desktop.in_use',
+  });
+  assert.throws(() => rollback({ root }), { code: 'desktop.in_use' });
+  assert.throws(() => uninstall({ root, purgeData: true }), {
+    code: 'desktop.in_use',
+  });
+  assert.throws(
+    () =>
+      install({ ...initial, root: join(base, 'second'), payload: next.dir }),
+    { code: 'desktop.in_use' },
+  );
+  assert.equal(readState(root).current, first.id);
+  const done = once(child, 'exit');
+  child.send('release');
+  assert.deepEqual(await done, [0, null]);
+  assert.equal(install({ ...initial, payload: next.dir }).id, next.id);
+});
+
+test('a cancel arriving at commit arbitration rolls the entire transaction back', (t) => {
+  const base = tempBase(t);
+  const root = join(base, 'app'),
+    dataHome = join(base, 'home');
+  const payload = buildPayload(base);
+  let smokeFinished = false,
+    commitPublished = false;
+  assert.throws(
+    () =>
+      install({
+        root,
+        dataHome,
+        payload: payload.dir,
+        smoke() {
+          smokeFinished = true;
+        },
+        beginCommit() {
+          assert.equal(smokeFinished, true);
+          throw new CancelledError();
+        },
+        progress(stage) {
+          if (stage === 'commit') commitPublished = true;
+        },
+      }),
+    CancelledError,
+  );
+  assert.equal(commitPublished, false);
+  assert.equal(existsSync(root), false);
+  assert.equal(existsSync(dataHome), false);
 });
 
 test('platform status exposes only state and fixed reason codes', () => {
@@ -399,5 +518,39 @@ test(
     await delay(200);
     assert.equal(uninstall({ root }).pending.length, 0);
     assert.equal(existsSync(root), false);
+  },
+);
+
+test(
+  'locked data never appears in a deferred cleanup record',
+  {
+    skip: process.platform !== 'win32',
+  },
+  async (t) => {
+    const base = tempBase(t);
+    const root = join(base, 'app'),
+      dataHome = join(base, 'home');
+    const first = buildPayload(base, { name: 'first' });
+    install({ payload: first.dir, root, dataHome, smoke: noSmoke });
+    const data = join(profileDir(dataHome), 'user-session.json');
+    writeFileSync(data, 'keep until the lock is gone');
+    const holder = spawn(
+      process.execPath,
+      ['-e', 'console.log("ready");setInterval(()=>{},1000)'],
+      {
+        cwd: dataHome,
+        stdio: ['ignore', 'pipe', 'inherit'],
+      },
+    );
+    t.after(() => holder.kill());
+    await once(holder.stdout, 'data');
+    const result = uninstall({ root, purgeData: true });
+    assert.equal(result.dataKept, true);
+    assert.deepEqual(result.pending, []);
+    assert.equal(existsSync(data), true);
+    assert.equal(existsSync(root), false);
+    const done = once(holder, 'exit');
+    holder.kill();
+    await done;
   },
 );

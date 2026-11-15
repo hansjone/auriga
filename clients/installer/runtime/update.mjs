@@ -20,8 +20,14 @@ import { Buffer } from 'node:buffer';
 import { randomUUID, createHash } from 'node:crypto';
 import { verifyRelease, releaseDigest } from './release.mjs';
 import { verifyPackage, sha256File } from './verify.mjs';
-import { install, readState, versionDir } from './core.mjs';
-import { downloadLock } from './update-state.mjs';
+import { install, openVersionSession, readState, versionDir } from './core.mjs';
+import {
+  changeUpdateState,
+  cleanupDownloads,
+  downloadLock,
+  readUpdateState,
+  transferLock,
+} from './update-state.mjs';
 import { systemTool } from './system-tools.mjs';
 import { compare } from './semver-lite.mjs';
 import { updateOrigin } from './platform-origin.mjs';
@@ -84,17 +90,10 @@ export function createUpdater({
   if (binding.origin && binding.origin !== origin)
     throw new Error('platform binding differs');
   updateOrigin(origin, binding);
-  const stateFile = join(root, 'desktop-update.json');
-  const load = () =>
-    existsSync(stateFile)
-      ? JSON.parse(readFileSync(stateFile, 'utf8'))
-      : { enabled: true, channelWatermarks: {} };
-  const save = (value) => {
-    writeFileSync(stateFile + '.tmp', JSON.stringify(value) + '\n', {
-      mode: 0o600,
-    });
-    renameSync(stateFile + '.tmp', stateFile);
-    onState(value);
+  const load = () => readUpdateState(root);
+  const change = (mutate) => {
+    const saved = changeUpdateState(root, mutate);
+    if (saved) onState(saved);
   };
   const current = () => {
     const state = readState(root);
@@ -109,31 +108,18 @@ export function createUpdater({
       ).bundleVersion,
     };
   };
-  let pending = load().available ?? null,
-    busy = false,
+  let busy = false,
     controller;
-  const initial = load();
-  if (!initial.channelWatermarks || !initial.clientId) {
-    const initialized = {
-      ...initial,
-      channelWatermarks: initial.channelWatermarks ?? {},
-      clientId: initial.clientId ?? randomUUID(),
-    };
-    for (const field of [
-      'highestSequence',
-      'highestPublishedAt',
-      'highestVersion',
-      'acceptedDigest',
-      'acceptedEnvelope',
-    ])
-      delete initialized[field];
-    save(initialized);
-  }
-  if (initial.phase === 'downloading') save({ ...load(), phase: 'cancelled' });
+  if (!load().clientId)
+    change((state) =>
+      state.clientId ? undefined : { ...state, clientId: randomUUID() },
+    );
+  if (['downloading', 'verifying'].includes(load().phase))
+    cleanupDownloads(root);
   const resume = join(root, '.desktop-resume');
-  const progress = (phase, extra = {}) => save({ ...load(), phase, ...extra });
-  const verified = (envelope) => {
-    const state = load();
+  const progress = (phase, extra = {}) =>
+    change((state) => ({ ...state, phase, ...extra }));
+  const verified = (envelope, state = load()) => {
     return verifyRelease(envelope, {
       publicKey,
       now: now(),
@@ -142,48 +128,57 @@ export function createUpdater({
       channel: state.channel ?? 'stable',
     });
   };
+  const status = (state) => {
+    let available = state.available ?? null;
+    let body;
+    try {
+      const policy = available ?? state.requiredRelease;
+      if (policy) body = verified(policy, state);
+    } catch {
+      available = null;
+    }
+    return {
+      enabled: state.enabled !== false,
+      channel: state.channel ?? 'stable',
+      available,
+      required: !!body && compare(current().version, body.minimumVersion) < 0,
+      phase: state.phase ?? 'idle',
+      busy,
+      downloading: busy && state.phase === 'downloading',
+      downloadedBytes: state.downloadedBytes ?? 0,
+      totalBytes: state.totalBytes ?? 0,
+      error: state.error ?? null,
+      restartRequired: existsSync(join(root, 'desktop-pending')),
+    };
+  };
   const api = {
     status() {
-      const state = load();
-      let body;
-      try {
-        const policy = pending ?? state.requiredRelease;
-        if (policy) body = verified(policy);
-      } catch {
-        pending = null;
-      }
-      return {
-        enabled: state.enabled !== false,
-        channel: state.channel ?? 'stable',
-        available: pending,
-        required: !!body && compare(current().version, body.minimumVersion) < 0,
-        phase: state.phase ?? 'idle',
-        busy,
-        downloading: busy && state.phase === 'downloading',
-        downloadedBytes: state.downloadedBytes ?? 0,
-        totalBytes: state.totalBytes ?? 0,
-        error: state.error ?? null,
-        restartRequired: existsSync(join(root, 'desktop-pending')),
-      };
+      return status(load());
     },
     configure(enabled) {
       if (typeof enabled !== 'boolean')
         throw new Error('invalid update preference');
-      if (!enabled && api.status().required)
-        throw new Error('mandatory update required');
-      save({ ...load(), enabled });
+      change((state) => {
+        if (!enabled && status(state).required)
+          throw new Error('mandatory update required');
+        return { ...state, enabled };
+      });
       return api.status();
     },
     setChannel(channel) {
-      if (
-        !['stable', 'beta'].includes(channel) ||
-        busy ||
-        api.status().required ||
-        api.status().restartRequired
-      )
+      if (!['stable', 'beta'].includes(channel) || busy)
         throw new Error('invalid update channel');
-      pending = null;
-      save({ ...load(), channel, available: null, requiredRelease: null });
+      const unlock = transferLock(root);
+      try {
+        change((state) => {
+          const current = status(state);
+          if (current.required || current.restartRequired)
+            throw new Error('invalid update channel');
+          return { ...state, channel, available: null, requiredRelease: null };
+        });
+      } finally {
+        unlock();
+      }
       return api.status();
     },
     cancel() {
@@ -191,7 +186,7 @@ export function createUpdater({
       return api.status();
     },
     beginUpdate() {
-      if (busy || !pending) throw new Error('no update ready');
+      if (busy || !api.status().available) throw new Error('no update ready');
       void api.update().catch(() => {});
       return api.status();
     },
@@ -199,7 +194,8 @@ export function createUpdater({
       if (busy || api.status().restartRequired) return api.status();
       busy = true;
       try {
-        const channel = load().channel ?? 'stable';
+        const observed = load();
+        const channel = observed.channel ?? 'stable';
         const response = await request(
           platformUrl(
             origin,
@@ -210,53 +206,73 @@ export function createUpdater({
             redirect: 'error',
           },
         );
-        if (response.status === 404) {
-          pending = null;
-          save({ ...load(), available: null });
+        const missing = response.status === 404;
+        if (!response.ok && !missing) throw new Error('release check failed');
+        const envelope = missing
+          ? null
+          : JSON.parse((await bounded(response, 32768)).toString('utf8'));
+        let unlock;
+        try {
+          unlock = transferLock(root);
+        } catch (error) {
+          if (error.code !== 'desktop.in_use') throw error;
           return api.status();
         }
-        if (!response.ok) throw new Error('release check failed');
-        const bytes = await bounded(response, 32768);
-        const envelope = JSON.parse(bytes.toString('utf8'));
-        const body = verified(envelope);
-        const required = compare(current().version, body.minimumVersion) < 0;
-        const bucket =
-          createHash('sha256')
-            .update(load().clientId + ':' + body.sequence)
-            .digest()
-            .readUInt32BE(0) % 100;
-        const eligible = required || bucket < (body.rolloutPercentage ?? 100);
-        pending =
-          eligible &&
-          compare(body.version, current().version) !== 0 &&
-          (load().enabled !== false || required)
-            ? envelope
-            : null;
-        const state = load();
-        const channelWatermarks = state.channelWatermarks ?? {};
-        if (pending || compare(body.version, current().version) === 0) {
-          channelWatermarks[channel] = {
-            highestSequence: body.sequence,
-            highestPublishedAt: body.publishedAt,
-            highestVersion: body.version,
-            acceptedDigest: body.sha256,
-            acceptedEnvelope: releaseDigest(body),
-          };
+        try {
+          change((state) => {
+            if (
+              (state.channel ?? 'stable') !== channel ||
+              existsSync(join(root, 'desktop-pending'))
+            )
+              return;
+            if (missing) {
+              if (observed.checkId !== state.checkId) return;
+              return { ...state, available: null, checkId: randomUUID() };
+            }
+            const body = verified(envelope, state);
+            const version = current().version;
+            const installed = compare(body.version, version) === 0;
+            const required = compare(version, body.minimumVersion) < 0;
+            const bucket =
+              createHash('sha256')
+                .update(state.clientId + ':' + body.sequence)
+                .digest()
+                .readUInt32BE(0) % 100;
+            const eligible =
+              required || bucket < (body.rolloutPercentage ?? 100);
+            const available =
+              eligible && !installed && (state.enabled !== false || required)
+                ? envelope
+                : null;
+            const channelWatermarks = { ...state.channelWatermarks };
+            if (available || installed) {
+              channelWatermarks[channel] = {
+                highestSequence: body.sequence,
+                highestPublishedAt: body.publishedAt,
+                highestVersion: body.version,
+                acceptedDigest: body.sha256,
+                acceptedEnvelope: releaseDigest(body),
+              };
+            }
+            return {
+              ...state,
+              channelWatermarks,
+              available,
+              requiredRelease: required ? envelope : null,
+              checkId: randomUUID(),
+              lastCheckedAt: now(),
+            };
+          });
+        } finally {
+          unlock();
         }
-        save({
-          ...state,
-          channelWatermarks,
-          available: pending,
-          requiredRelease: required ? envelope : null,
-          lastCheckedAt: now(),
-        });
         return api.status();
       } finally {
         busy = false;
       }
     },
     async update() {
-      if (busy || !pending) throw new Error('no update ready');
+      if (busy) throw new Error('no update ready');
       busy = true;
       let unlock,
         temporary,
@@ -264,6 +280,9 @@ export function createUpdater({
       controller = new AbortController();
       try {
         unlock = downloadLock(root);
+        const pending = load().available;
+        if (!pending || existsSync(join(root, 'desktop-pending')))
+          throw new Error('no update ready');
         const body = verified(pending),
           state = current();
         temporary = resume;
@@ -370,22 +389,27 @@ export function createUpdater({
             });
           renameSync(temporary, queued);
           temporary = undefined;
-          pending = null;
-          save({ ...load(), available: null, phase: 'ready' });
+          progress('ready', { available: null });
           return { restartRequired: true, queued: true };
         }
         progress('installing');
-        install({ root, payload, dataHome: state.dataHome, smoke });
-        save({ ...load(), available: null, phase: 'ready' });
-        pending = null;
+        install({
+          root,
+          payload,
+          dataHome: state.dataHome,
+          smoke,
+          transfer: unlock,
+        });
+        progress('ready', { available: null });
         return {
           restartRequired: true,
           message: `更新完成。请关闭并重新打开 ${BRAND_NAME}。`,
         };
       } catch (error) {
-        progress(controller.signal.aborted ? 'cancelled' : 'failed', {
-          error: controller.signal.aborted ? null : 'updateFailed',
-        });
+        if (temporary)
+          progress(controller.signal.aborted ? 'cancelled' : 'failed', {
+            error: controller.signal.aborted ? null : 'updateFailed',
+          });
         throw error;
       } finally {
         if (temporary && !retain)
@@ -497,14 +521,40 @@ export async function downloadPackage(
 }
 
 export function approvePending(root) {
-  const queued = join(root, 'desktop-pending');
-  if (!existsSync(join(queued, 'release.json')))
-    throw new Error('no pending update');
-  rmSync(join(queued, 'approval-required'), { force: true });
+  const release = transferLock(root);
+  try {
+    const queued = join(root, 'desktop-pending');
+    if (!existsSync(join(queued, 'release.json')))
+      throw new Error('no pending update');
+    rmSync(join(queued, 'approval-required'), { force: true });
+  } finally {
+    release();
+  }
 }
 
 /** Called only by the launcher after the old DSH has stopped (or before next launch). */
-export async function applyPending(
+export async function applyPending(root, options = {}) {
+  const queued = join(root, 'desktop-pending');
+  if (!existsSync(queued) || existsSync(join(queued, 'approval-required')))
+    return false;
+  const ownSession = options.session ? null : openVersionSession(root);
+  try {
+    const transfer = transferLock(root);
+    try {
+      return await applyPendingLocked(root, {
+        ...options,
+        transfer,
+        session: options.session ?? ownSession,
+      });
+    } finally {
+      transfer();
+    }
+  } finally {
+    ownSession?.close();
+  }
+}
+
+async function applyPendingLocked(
   root,
   {
     publicKey,
@@ -512,6 +562,8 @@ export async function applyPending(
     extract = extractArchive,
     now = Date.now(),
     request = fetch,
+    session,
+    transfer,
   } = {},
 ) {
   const queued = join(root, 'desktop-pending');
@@ -524,9 +576,7 @@ export async function applyPending(
     const envelope = JSON.parse(
       readFileSync(join(queued, 'release.json'), 'utf8'),
     );
-    const saved = JSON.parse(
-      readFileSync(join(root, 'desktop-update.json'), 'utf8'),
-    );
+    const saved = readUpdateState(root);
     const body = verifyRelease(envelope, {
       publicKey,
       now,
@@ -578,25 +628,28 @@ export async function applyPending(
       manifest.bundleVersion !== body.version
     )
       throw new Error('queued package ID mismatch');
-    install({ root, payload, dataHome: current.dataHome, smoke });
-    writeFileSync(
-      join(root, 'desktop-update.json'),
-      JSON.stringify({
-        ...saved,
-        phase: 'idle',
-        error: null,
-        available: null,
-        requiredRelease: null,
-      }),
-    );
+    install({
+      root,
+      payload,
+      dataHome: current.dataHome,
+      smoke,
+      session,
+      transfer,
+    });
+    changeUpdateState(root, (state) => ({
+      ...state,
+      phase: 'idle',
+      error: null,
+      available: null,
+      requiredRelease: null,
+    }));
     return true;
   } catch (error) {
-    const file = join(root, 'desktop-update.json');
-    const saved = JSON.parse(readFileSync(file, 'utf8'));
-    writeFileSync(
-      file,
-      JSON.stringify({ ...saved, phase: 'failed', error: 'updateFailed' }),
-    );
+    changeUpdateState(root, (state) => ({
+      ...state,
+      phase: 'failed',
+      error: 'updateFailed',
+    }));
     throw error;
   } finally {
     if (!retain) rmSync(queued, { recursive: true, force: true });

@@ -6,6 +6,7 @@ import {
   mkdirSync,
   readFileSync,
   readdirSync,
+  renameSync,
   rmSync,
   writeFileSync,
 } from 'node:fs';
@@ -142,6 +143,8 @@ test('fresh install seeds profile, plugin, ownership marker and platform address
 test('upgrade keeps user data and settings and keeps the previous version', (t) => {
   const f = fixture(t);
   const a = installA(f);
+  const { dataOwner } = readState(f.root);
+  assert.match(dataOwner, /^[a-f0-9-]{36}$/);
   mkdirSync(join(f.dataHome, 'sessions'), { recursive: true });
   writeFileSync(join(f.dataHome, 'sessions', 's1.json'), 'user-session');
   const patchFile = join(profileDir(f.dataHome), 'cordis.patch.yml');
@@ -160,6 +163,7 @@ test('upgrade keeps user data and settings and keeps the previous version', (t) 
     dataHome: f.dataHome,
     current: b.id,
     previous: a.id,
+    dataOwner,
   });
 });
 
@@ -396,17 +400,22 @@ test('first install failing leaves no pointers, profile or version behind', (t) 
 test('rollback restores previous version, plugin files and launchers', (t) => {
   const f = fixture(t);
   const a = installA(f);
+  const { dataOwner } = readState(f.root);
   const b = put(f, { name: 'b', pluginVersion: '1.1.0' });
+  const autostart = join(f.root, 'bin', 'auriga-autostart.ps1');
+  writeFileSync(autostart, 'dispatch current at sign-in');
   assert.deepEqual(rollback({ root: f.root, smoke: noSmoke }), {
     current: a.id,
   });
   assert.equal(text(join(f.root, 'current.txt')).trim(), a.id);
   assert.equal(pluginVersion(f.dataHome), '1.0.0');
   assert.match(launcher(f.root), /rem a/);
+  assert.equal(text(autostart), 'dispatch current at sign-in');
   assert.deepEqual(readState(f.root), {
     dataHome: f.dataHome,
     current: a.id,
     previous: b.id,
+    dataOwner,
   });
   // And forward again.
   assert.deepEqual(rollback({ root: f.root, smoke: noSmoke }), {
@@ -592,7 +601,7 @@ test('uninstall never deletes a data directory that ended up inside the install 
   assert.equal(text(join(inside, 'session.json')), 'precious');
 });
 
-test('purge removes our own data directory, but only our profile from a shared one, and refuses unmarked directories', (t) => {
+test('purge only removes a positively proven dedicated data directory', (t) => {
   const f = fixture(t);
   put(f, { name: 'a' });
   mkdirSync(join(f.dataHome, 'sessions'), { recursive: true });
@@ -606,28 +615,61 @@ test('purge removes our own data directory, but only our profile from a shared o
   mkdirSync(join(shared.dataHome, 'profiles', 'web'), { recursive: true });
   writeFileSync(join(shared.dataHome, 'keep.txt'), 'x');
   uninstall({ root: shared.root, purgeData: true });
-  assert.equal(existsSync(profileDir(shared.dataHome)), false);
+  assert.equal(existsSync(profileDir(shared.dataHome)), true);
   assert.equal(text(join(shared.dataHome, 'keep.txt')), 'x');
   assert.ok(existsSync(join(shared.dataHome, 'profiles', 'web')));
 
   const custom = fixture(t);
+  const preexisting = join(custom.dataHome, 'sessions', 'external.json');
+  mkdirSync(dirname(preexisting), { recursive: true });
+  writeFileSync(preexisting, 'external session');
   put(custom, { name: 'a' });
-  writeFileSync(join(custom.dataHome, 'keep.txt'), 'user document');
-  uninstall({ root: custom.root, purgeData: true });
-  assert.equal(text(join(custom.dataHome, 'keep.txt')), 'user document');
-  assert.equal(existsSync(profileDir(custom.dataHome)), false);
+  assert.equal(readState(custom.root).dataOwner, undefined);
+  const customResult = uninstall({ root: custom.root, purgeData: true });
+  assert.equal(customResult.dataKept, true);
+  assert.deepEqual(customResult.pending, []);
+  assert.equal(text(preexisting), 'external session');
+  assert.equal(existsSync(profileDir(custom.dataHome)), true);
 
   const g = fixture(t);
   put(g, { name: 'a' });
   writeFileSync(join(profileDir(g.dataHome), 'user-file.txt'), 'u');
   // A profile that is not ours (no marker): never removed.
   rmSync(join(profileDir(g.dataHome), '.auriga-desktop'));
-  assert.throws(
-    () => uninstall({ root: g.root, purgeData: true }),
-    /refusing to remove unmarked directory/,
-  );
+  assert.equal(uninstall({ root: g.root, purgeData: true }).dataKept, true);
   assert.equal(text(join(profileDir(g.dataHome), 'user-file.txt')), 'u');
-  assert.ok(existsSync(join(g.root, 'install.json')));
+});
+
+test('another install and reinstall revoke an earlier exclusive data claim', (t) => {
+  const f = fixture(t);
+  put(f, { name: 'a' });
+  const second = { ...f, root: join(f.base, 'second') };
+  put(second, { name: 'b' });
+  const session = join(f.dataHome, 'sessions', 'new-user-file.json');
+  mkdirSync(dirname(session), { recursive: true });
+  writeFileSync(session, 'second installation session');
+  assert.equal(uninstall({ root: f.root, purgeData: true }).dataKept, true);
+  uninstall({ root: second.root });
+  put(second, { name: 'c' });
+  assert.equal(
+    uninstall({ root: second.root, purgeData: true }).dataKept,
+    true,
+  );
+  assert.equal(text(session), 'second installation session');
+});
+
+test('copying an ownership marker into a replacement data directory cannot authorize destruction', (t) => {
+  const f = fixture(t);
+  put(f, { name: 'a' });
+  const saved = join(f.base, 'old-data');
+  const marker = '.auriga-desktop-data-owner';
+  renameSync(f.dataHome, saved);
+  mkdirSync(join(f.dataHome, 'sessions'), { recursive: true });
+  copyFileSync(join(saved, marker), join(f.dataHome, marker));
+  const session = join(f.dataHome, 'sessions', 'new-session');
+  writeFileSync(session, 'new directory identity');
+  assert.equal(uninstall({ root: f.root, purgeData: true }).dataKept, true);
+  assert.equal(text(session), 'new directory identity');
 });
 
 // --------------------------------------------------------- verification

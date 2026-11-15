@@ -9,6 +9,7 @@ using System.Drawing;
 using System.IO;
 using System.Reflection;
 using System.Security.Cryptography;
+using System.Security.Principal;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading;
@@ -128,6 +129,43 @@ static class Desktop
     {
         string name = Str(ReadJson(Path.Combine(root, "shell.json")), "registryKey");
         return string.IsNullOrEmpty(name) || !Regex.IsMatch(name, "^[A-Za-z0-9._-]{1,64}$") ? "AurigaDesktop" : name;
+    }
+
+    public static bool SamePath(string left, string right)
+    {
+        if (string.IsNullOrEmpty(left) || string.IsNullOrEmpty(right) ||
+            !Path.IsPathRooted(left) || !Path.IsPathRooted(right)) return false;
+        try { return string.Equals(Path.GetFullPath(left).TrimEnd('\\'), Path.GetFullPath(right).TrimEnd('\\'), StringComparison.OrdinalIgnoreCase); }
+        catch (Exception) { return false; }
+    }
+
+    public static string StartupCommand(string root)
+    {
+        string ps = Path.Combine(Environment.SystemDirectory, "WindowsPowerShell", "v1.0", "powershell.exe");
+        return Quote(ps) + " -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File " +
+            Quote(Path.Combine(root, "bin", "auriga-autostart.ps1"));
+    }
+
+    public static bool OwnsStartup(string root, string command)
+    {
+        if (string.IsNullOrEmpty(command)) return false;
+        if (string.Equals(command, StartupCommand(root), StringComparison.OrdinalIgnoreCase)) return true;
+        var match = Regex.Match(command, @"^""([^""]+)"" /autostart$", RegexOptions.IgnoreCase);
+        string versions = Regex.Escape(Path.Combine(root, "versions"));
+        return match.Success && Regex.IsMatch(match.Groups[1].Value,
+            "^" + versions + @"\\[A-Za-z0-9._-]+\\auriga\\tray\\AurigaDesktop\.exe$", RegexOptions.IgnoreCase);
+    }
+
+    public static void ShellChange(Action action)
+    {
+        string sid = WindowsIdentity.GetCurrent().User.Value;
+        using (var mutex = new Mutex(false, "Global\\AurigaDesktop-ShellIntegration-" + sid))
+        {
+            bool held;
+            try { held = mutex.WaitOne(15000); } catch (AbandonedMutexException) { held = true; }
+            if (!held) return;
+            try { action(); } finally { mutex.ReleaseMutex(); }
+        }
     }
 
     public static string PlatformText(string state, string reason)
@@ -270,7 +308,7 @@ sealed class TrayApp : ApplicationContext
         string origin = Desktop.Str(info, "platformOrigin");
         originItem.Text = "平台地址：" + (origin ?? "未配置") + (origin != null ? "（点击复制）" : "");
         originItem.Enabled = origin != null;
-        autostartItem.Checked = Registry.GetValue(RunKey, Desktop.RegistryName(root), null) != null;
+        autostartItem.Checked = Desktop.OwnsStartup(root, Registry.GetValue(RunKey, Desktop.RegistryName(root), null) as string);
         autoCheckItem.Checked = updateEnabled;
         autoDownloadItem.Checked = AutoDownload;
         bool configured = Desktop.Flag(info, "updatesConfigured");
@@ -282,29 +320,31 @@ sealed class TrayApp : ApplicationContext
     }
 
     const string RunKey = "HKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Run";
-    string TrayExe { get { return Assembly.GetExecutingAssembly().Location; } }
+    const string Registration = "Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\";
 
     /// After an in-app update the Apps & features entry and autostart must follow the new version.
     void RefreshShellIntegration()
     {
         try
         {
-            string name = Desktop.RegistryName(root);
-            if (Registry.GetValue(RunKey, name, null) != null)
-                Registry.SetValue(RunKey, name, Desktop.Quote(TrayExe) + " /autostart");
-            using (var key = Registry.CurrentUser.OpenSubKey("Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\" + name, true))
+            Desktop.ShellChange(delegate
             {
-                if (key == null || info == null) return;
-                string location = Convert.ToString(key.GetValue("InstallLocation", ""));
-                if (!string.Equals(Path.GetFullPath(location).TrimEnd('\\'), Path.GetFullPath(root).TrimEnd('\\'), StringComparison.OrdinalIgnoreCase)) return;
-                key.SetValue("DisplayVersion", Desktop.Str(info, "version") ?? "");
-                key.SetValue("Publisher", "Auriga");
-                string ico = Path.Combine(root, "bin", "auriga.ico");
-                if (File.Exists(ico)) key.SetValue("DisplayIcon", ico);
-            }
+                string name = Desktop.RegistryName(root);
+                using (var key = Registry.CurrentUser.OpenSubKey(Registration + name, true))
+                {
+                    if (key == null || info == null ||
+                        !Desktop.SamePath(key.GetValue("InstallLocation") as string, root)) return;
+                    if (Desktop.OwnsStartup(root, Registry.GetValue(RunKey, name, null) as string))
+                        Registry.SetValue(RunKey, name, Desktop.StartupCommand(root));
+                    key.SetValue("DisplayVersion", Desktop.Str(info, "version") ?? "");
+                    key.SetValue("Publisher", "Auriga");
+                    string ico = Path.Combine(root, "bin", "auriga.ico");
+                    if (File.Exists(ico)) key.SetValue("DisplayIcon", ico);
+                }
+                EnsureShortcuts();
+            });
         }
-        catch (Exception) { }
-        try { EnsureShortcuts(); } catch (Exception e) { Log("shortcut refresh failed: " + e.Message); }
+        catch (Exception e) { Log("shell refresh failed: " + e.Message); }
     }
 
     static object Com(object target, string member, BindingFlags kind, params object[] args)
@@ -328,13 +368,16 @@ sealed class TrayApp : ApplicationContext
             foreach (object item in (System.Collections.IEnumerable)raw)
                 if (item != null) links.Add(Convert.ToString(item));
         }
-        string start = links.Find(l => l.EndsWith("\\" + Desktop.Brand + ".lnk", StringComparison.OrdinalIgnoreCase));
+        object wsh = Activator.CreateInstance(Type.GetTypeFromProgID("WScript.Shell"));
+        string launcher = Path.Combine(root, "bin", "auriga-desktop.cmd");
+        string start = links.Find(l => File.Exists(l) && l.EndsWith(".lnk", StringComparison.OrdinalIgnoreCase) &&
+            Desktop.SamePath(Convert.ToString(Com(Com(wsh, "CreateShortcut", BindingFlags.InvokeMethod, l),
+                "TargetPath", BindingFlags.GetProperty)), launcher));
         if (start == null) return;
-        string uninstall = Path.Combine(Path.GetDirectoryName(start), "卸载 " + Desktop.Brand + ".lnk");
+        string uninstall = Path.Combine(Path.GetDirectoryName(start), "卸载 " + Path.GetFileName(start));
         string cmd = Path.Combine(root, "bin", "uninstall.cmd");
         string ico = Path.Combine(root, "bin", "auriga.ico");
         if (!File.Exists(cmd)) return;
-        object wsh = Activator.CreateInstance(Type.GetTypeFromProgID("WScript.Shell"));
         if (File.Exists(start) && File.Exists(ico))
         {
             object link = Com(wsh, "CreateShortcut", BindingFlags.InvokeMethod, start);
@@ -347,6 +390,8 @@ sealed class TrayApp : ApplicationContext
         }
         if (links.Exists(l => l.Equals(uninstall, StringComparison.OrdinalIgnoreCase)) && File.Exists(uninstall)) return;
         object remove = Com(wsh, "CreateShortcut", BindingFlags.InvokeMethod, uninstall);
+        if (File.Exists(uninstall) && !Desktop.SamePath(Convert.ToString(Com(remove, "TargetPath", BindingFlags.GetProperty)), cmd))
+            return;
         Com(remove, "TargetPath", BindingFlags.SetProperty, cmd);
         Com(remove, "WorkingDirectory", BindingFlags.SetProperty, Environment.SystemDirectory);
         Com(remove, "WindowStyle", BindingFlags.SetProperty, 7);
@@ -533,10 +578,11 @@ sealed class TrayApp : ApplicationContext
         if (p == null || p.HasExited) return true;
         Send("stop");
         try { p.StandardInput.Close(); } catch (Exception) { }
-        if (p.WaitForExit(seconds * 1000)) { p.WaitForExit(); return true; }
+        if (p.WaitForExit(seconds * 1000)) { p.WaitForExit(); return p.ExitCode == 0; }
         Log("launcher did not stop in time; ending its process tree");
         Desktop.KillTree(p.Id);
-        return p.WaitForExit(15000);
+        p.WaitForExit(15000);
+        return false;
     }
 
     Process StartUpdateWorker(ProcessStartInfo start)
@@ -710,8 +756,11 @@ sealed class TrayApp : ApplicationContext
                 {
                     restarting = false;
                     RefreshInfo();
-                    StartLauncher();
-                    MessageBox.Show("更新安装失败，已自动恢复到原版本，数据未受影响。详情见日志目录。", Desktop.Brand, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    if (stopped) StartLauncher();
+                    string reason = stopped
+                        ? "更新安装失败，已保留原版本。详情见日志目录。"
+                        : "DSH 未完成正常停止，本次未继续更新。请检查日志后重新打开。";
+                    MessageBox.Show(reason, Desktop.Brand, MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 }
                 UpdateMenu();
             });
@@ -720,13 +769,22 @@ sealed class TrayApp : ApplicationContext
 
     void ToggleAutostart()
     {
-        string name = Desktop.RegistryName(root);
-        using (var key = Registry.CurrentUser.CreateSubKey("Software\\Microsoft\\Windows\\CurrentVersion\\Run"))
+        Desktop.ShellChange(delegate
         {
-            if (autostartItem.Checked) key.DeleteValue(name, false);
-            else key.SetValue(name, Desktop.Quote(TrayExe) + " /autostart");
-        }
-        autostartItem.Checked = !autostartItem.Checked;
+            string name = Desktop.RegistryName(root);
+            using (var registration = Registry.CurrentUser.OpenSubKey(Registration + name))
+            {
+                if (registration == null || !Desktop.SamePath(registration.GetValue("InstallLocation") as string, root)) return;
+                using (var key = Registry.CurrentUser.CreateSubKey("Software\\Microsoft\\Windows\\CurrentVersion\\Run"))
+                {
+                    var command = key.GetValue(name) as string;
+                    if (Desktop.OwnsStartup(root, command)) key.DeleteValue(name, false);
+                    else if (command == null) key.SetValue(name, Desktop.StartupCommand(root));
+                    else return;
+                    autostartItem.Checked = command == null;
+                }
+            }
+        });
     }
 
     void ToggleAutoCheck()
@@ -889,15 +947,21 @@ sealed class UninstallForm : Form
         Step("正在删除程序文件、快捷方式和应用登记…", 40);
         bar.Style = ProgressBarStyle.Marquee;
         int code = -1;
+        bool dataKept = true;
         string script = Path.Combine(root, "bin", "uninstall.ps1");
         var thread = new Thread(() =>
         {
             try
             {
                 var start = new ProcessStartInfo(Path.Combine(Environment.SystemDirectory, "WindowsPowerShell", "v1.0", "powershell.exe"),
-                    "-NoProfile -ExecutionPolicy Bypass -File " + Desktop.Quote(script) + " -Quiet" + (purgeData ? " -PurgeData" : ""))
-                { UseShellExecute = false, CreateNoWindow = true, WorkingDirectory = Path.GetTempPath() };
-                using (var p = Process.Start(start)) { p.WaitForExit(); code = p.ExitCode; }
+                    "-NoProfile -ExecutionPolicy Bypass -File " + Desktop.Quote(script) + " -Quiet -ReportResult" + (purgeData ? " -PurgeData" : ""))
+                { UseShellExecute = false, CreateNoWindow = true, WorkingDirectory = Path.GetTempPath(), RedirectStandardOutput = true };
+                using (var p = Process.Start(start))
+                {
+                    for (string line; (line = p.StandardOutput.ReadLine()) != null;)
+                        if (line.StartsWith("{")) dataKept = Desktop.Flag(Desktop.Json.Deserialize<Dictionary<string, object>>(line), "dataKept");
+                    p.WaitForExit(); code = p.ExitCode;
+                }
             }
             catch (Exception) { code = -1; }
         });
@@ -907,7 +971,9 @@ sealed class UninstallForm : Form
         if (code == 0 || code == 3010)
         {
             Result = code;
-            string done = purgeData ? "已卸载。已处理 Auriga 用户数据。" : "已卸载。用户数据已保留，重新安装后可继续使用。";
+            string done = !dataKept ? "已卸载。该安装独占的用户数据已删除。"
+                : purgeData ? "已卸载。无法确认数据目录独占或部分数据仍在使用，未完成数据删除。"
+                : "已卸载。用户数据已保留，重新安装后可继续使用。";
             if (code == 3010) done += "\n仍被占用的文件会在下次登录 Windows 时清理。";
             Step(done, 100);
         }

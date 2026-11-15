@@ -1,8 +1,14 @@
 /** Command line entry of the installer core, run with the bundled Node. */
-import { existsSync, readFileSync } from 'node:fs';
+import { closeSync, existsSync, openSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { install, launch, rollback, uninstall } from './core.mjs';
+import {
+  CancelledError,
+  install,
+  launch,
+  rollback,
+  uninstall,
+} from './core.mjs';
 import { desktopInfo, updateCommand } from './desktop-control.mjs';
 import { createControl } from './tray-control.mjs';
 
@@ -48,7 +54,20 @@ try {
               console.log(`@@progress ${JSON.stringify({ stage, fraction })}`),
           }
         : {}),
-      ...(cancelFile ? { cancelled: () => existsSync(cancelFile) } : {}),
+      ...(cancelFile
+        ? {
+            cancelled: () => existsSync(cancelFile),
+            beginCommit() {
+              // Cancel and commit compete for the same exclusive decision file.
+              try {
+                closeSync(openSync(cancelFile, 'wx', 0o600));
+              } catch (error) {
+                if (error.code === 'EEXIST') throw new CancelledError();
+                throw error;
+              }
+            },
+          }
+        : {}),
       payload,
       root: values.root,
       dataHome: values['data-home'],
@@ -124,5 +143,5 @@ try {
   }
 } catch (error) {
   console.error(error instanceof Error ? error.message : String(error));
-  process.exitCode = 1;
+  process.exitCode = error instanceof CancelledError ? 2 : 1;
 }

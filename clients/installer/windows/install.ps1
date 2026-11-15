@@ -18,19 +18,31 @@ param(
 $ErrorActionPreference = 'Stop'
 $BrandName = 'Auriga DSH'
 $payload = Join-Path $PSScriptRoot 'payload'
+. (Join-Path $payload 'auriga\launcher\shell-integration.ps1')
+$InstallDir = [IO.Path]::GetFullPath($InstallDir)
+if ($InstallDir -ne [IO.Path]::GetPathRoot($InstallDir)) { $InstallDir = $InstallDir.TrimEnd('\') }
+$installArgs = $PSBoundParameters
+Invoke-DesktopShellChange {
 $node = Join-Path $payload 'upstream\node\node.exe'
 $cli = Join-Path $payload 'auriga\runtime\cli.mjs'
 # An upgrade keeps the data directory of the existing installation.
 $stateFile = Join-Path $InstallDir 'install.json'
 $upgrading = Test-Path -LiteralPath $stateFile
-if ($upgrading -and -not $PSBoundParameters.ContainsKey('DataHome') -and -not $env:AURIGA_DATA_HOME) {
+if ($upgrading -and -not $installArgs.ContainsKey('DataHome') -and -not $env:AURIGA_DATA_HOME) {
   $DataHome = (Get-Content -Raw -LiteralPath $stateFile | ConvertFrom-Json).dataHome
 }
-if ($upgrading -and -not $PSBoundParameters.ContainsKey('NoDesktopShortcut')) {
-  $NoDesktopShortcut = -not (
-    (Test-Path -LiteralPath (Join-Path $DesktopDir "$BrandName.lnk")) -or
-    (Test-Path -LiteralPath (Join-Path $DesktopDir 'Auriga Desktop.lnk'))
-  )
+if ($upgrading -and -not $installArgs.ContainsKey('NoDesktopShortcut')) {
+  $previousShell = Join-Path $InstallDir 'shell.json'
+  if (Test-Path -LiteralPath $previousShell) {
+    $oldShell = Get-Content -Raw -LiteralPath $previousShell | ConvertFrom-Json
+    $existingShell = New-Object -ComObject WScript.Shell
+    $oldDesktop = @($oldShell.shortcuts | Where-Object {
+      (Test-DesktopPath (Split-Path -Parent $_) $DesktopDir) -and
+      (Test-Path -LiteralPath $_ -PathType Leaf) -and
+      (Test-DesktopPath ($existingShell.CreateShortcut($_).TargetPath) (Join-Path $InstallDir 'bin\auriga-desktop.cmd'))
+    })
+    $NoDesktopShortcut = $oldDesktop.Count -eq 0
+  }
 }
 $argList = @($cli, 'install', '--payload', $payload, '--root', $InstallDir, '--data-home', $DataHome)
 if ($Progress) { $argList += '--progress' }
@@ -39,6 +51,7 @@ if ($PlatformOrigin) { $argList += @('--platform-origin', $PlatformOrigin) }
 if ($PlatformAccessMode) { $argList += @('--platform-access-mode', $PlatformAccessMode) }
 if ($ConfirmPlatformOrigin) { $argList += @('--confirm-platform-origin', $ConfirmPlatformOrigin) }
 & $node @argList
+if ($LASTEXITCODE -eq 2 -and $CancelFile) { exit 2 }
 if ($LASTEXITCODE -ne 0) { throw "install failed ($LASTEXITCODE)" }
 
 # Shell integration (best effort: the installation itself already succeeded).
@@ -46,13 +59,27 @@ try {
   $manifest = Get-Content -Raw -LiteralPath (Join-Path $payload 'manifest.json') | ConvertFrom-Json
   $launcher = Join-Path $InstallDir 'bin\auriga-desktop.cmd'
   $shell = New-Object -ComObject WScript.Shell
+  $suffix = Get-DesktopRootSuffix $InstallDir
+  if ($oldShell.registryKey -match '^[A-Za-z0-9._-]{1,64}$') { $RegistryKey = $oldShell.registryKey }
+  if ($RegistryKey -notmatch '^[A-Za-z0-9._-]{1,64}$') { throw 'Invalid Desktop registry key.' }
+  $uninstallKeys = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall'
+  $key = Join-Path $uninstallKeys $RegistryKey
+  $registered = Get-ItemProperty -LiteralPath $key -ErrorAction SilentlyContinue
+  if ($registered -and -not (Test-DesktopPath $registered.InstallLocation $InstallDir)) {
+    $RegistryKey = "AurigaDesktop-$suffix"
+    $key = Join-Path $uninstallKeys $RegistryKey
+    $registered = Get-ItemProperty -LiteralPath $key -ErrorAction SilentlyContinue
+    if ($registered -and -not (Test-DesktopPath $registered.InstallLocation $InstallDir)) {
+      throw 'Desktop registry key already belongs to another install.'
+    }
+  }
   $links = @()
   if (-not $NoShortcuts) {
     $shortcutDirs = @($StartMenuDir)
     if (-not $NoDesktopShortcut) { $shortcutDirs += $DesktopDir }
     foreach ($dir in $shortcutDirs) {
       New-Item -ItemType Directory -Force -Path $dir | Out-Null
-      $path = Join-Path $dir "$BrandName.lnk"
+      $path = Find-DesktopShortcutPath $shell $dir $BrandName $launcher $suffix
       $link = $shell.CreateShortcut($path)
       $link.TargetPath = $launcher
       $link.WorkingDirectory = $InstallDir
@@ -69,18 +96,19 @@ try {
       $links += $path
     }
     # Start menu uninstall entry (the Apps & features entry and bin\uninstall.cmd open the same uninstaller).
-    $remove = $shell.CreateShortcut((Join-Path $StartMenuDir "卸载 $BrandName.lnk"))
-    $remove.TargetPath = Join-Path $InstallDir 'bin\uninstall.cmd'
+    $removeTarget = Join-Path $InstallDir 'bin\uninstall.cmd'
+    $removeLink = Find-DesktopShortcutPath $shell $StartMenuDir "卸载 $BrandName" $removeTarget $suffix
+    $remove = $shell.CreateShortcut($removeLink)
+    $remove.TargetPath = $removeTarget
     $remove.WorkingDirectory = [Environment]::SystemDirectory
     $remove.WindowStyle = 7
     $remove.Description = "卸载 $BrandName"
     $ico = Join-Path $InstallDir 'bin\auriga.ico'
     if (Test-Path -LiteralPath $ico) { $remove.IconLocation = "$ico,0" }
     $remove.Save()
-    $links += (Join-Path $StartMenuDir "卸载 $BrandName.lnk")
+    $links += $removeLink
   }
-  $key = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\$RegistryKey"
-  New-Item -Path $key -Force | Out-Null
+  if (-not (Test-Path -LiteralPath $key)) { New-Item -Path $key | Out-Null }
   $uninstall = "powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$(Join-Path $InstallDir 'bin\uninstall.ps1')`""
   $values = @{
     DisplayName = $BrandName
@@ -104,3 +132,4 @@ try {
   Write-Warning "Shell integration failed: $_"
 }
 Write-Host "Installed $BrandName to $InstallDir. Start with: $InstallDir\bin\auriga-desktop.cmd"
+}

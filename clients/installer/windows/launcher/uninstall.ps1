@@ -1,7 +1,7 @@
 ﻿# Removes Auriga Desktop. User data (profile, sessions) is kept unless -PurgeData is given.
 # Only files this installer created are removed; unknown files in the install folder stay.
 # Interactive runs (Apps & features) open the graphical uninstaller: confirmation, progress, keep-data choice.
-param([switch]$PurgeData, [switch]$Quiet)
+param([switch]$PurgeData, [switch]$Quiet, [switch]$ReportResult)
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
 $tempRoot = [IO.Path]::GetTempPath()
@@ -32,6 +32,8 @@ if (Test-Path -LiteralPath $tray) {
   if ($choice -eq 'Cancel') { exit 0 }
   $PurgeData = $choice -eq 'No'
 }
+. (Join-Path $PSScriptRoot 'shell-integration.ps1')
+Invoke-DesktopShellChange {
 # Shortcuts and the Apps & features entry recorded at install time (read before the root is cleaned).
 $shellFile = Join-Path $root 'shell.json'
 $shellInfo = $null
@@ -55,11 +57,15 @@ try {
   $pending = @($result.pending).Count -gt 0
   if ($pending) {
     $id = [guid]::Parse($result.cleanupId).ToString()
+    $quarantine = Join-Path $root ".uninstall-$id"
+    if (@($result.pending).Count -ne 1 -or $result.pending[0] -ne $quarantine) {
+      throw 'Repudiated unexpected cleanup path.'
+    }
     $job = Join-Path $env:LOCALAPPDATA "AurigaDesktopCleanup\$id"
     New-Item -ItemType Directory -Path $job -Force | Out-Null
     $script = Join-Path $job 'uninstall-cleanup.ps1'
     Copy-Item -LiteralPath (Join-Path $tmp 'uninstall-cleanup.ps1') -Destination $script
-    @{ root = $root; id = $id; paths = @($result.pending) } | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $job 'cleanup.json') -Encoding UTF8
+    @{ schema = 1; root = $root; id = $id } | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $job 'cleanup.json') -Encoding UTF8
     $command = "powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$script`""
     # CreateSubKey opens an existing RunOnce key with its values intact.
     $runOnce = [Microsoft.Win32.Registry]::CurrentUser.CreateSubKey('Software\Microsoft\Windows\CurrentVersion\RunOnce')
@@ -71,10 +77,33 @@ try {
 }
 # Only after the core succeeded: shortcuts, autostart and registry entry.
 if ($shellInfo) {
-  foreach ($link in @($shellInfo.shortcuts)) { if ($link) { Remove-Item -LiteralPath $link -Force -ErrorAction SilentlyContinue } }
-  if ($shellInfo.registryKey) {
-    Remove-Item -LiteralPath "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\$($shellInfo.registryKey)" -Recurse -Force -ErrorAction SilentlyContinue
-    Remove-ItemProperty -LiteralPath 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run' -Name $shellInfo.registryKey -ErrorAction SilentlyContinue
+  if ($shellInfo.shortcuts) {
+    $shell = New-Object -ComObject WScript.Shell
+    $launcher = Join-Path $root 'bin\auriga-desktop.cmd'
+    $uninstaller = Join-Path $root 'bin\uninstall.cmd'
+    foreach ($link in @($shellInfo.shortcuts)) {
+      if (-not $link -or -not $link.EndsWith('.lnk',[StringComparison]::OrdinalIgnoreCase) -or
+          -not (Test-Path -LiteralPath $link -PathType Leaf)) { continue }
+      $target = $shell.CreateShortcut($link).TargetPath
+      if ((Test-DesktopPath $target $launcher) -or (Test-DesktopPath $target $uninstaller)) {
+        Remove-Item -LiteralPath $link -Force -ErrorAction SilentlyContinue
+      }
+    }
+  }
+  if ($shellInfo.registryKey -match '^[A-Za-z0-9._-]{1,64}$') {
+    $name = $shellInfo.registryKey
+    $key = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\$name"
+    $registered = Get-ItemProperty -LiteralPath $key -ErrorAction SilentlyContinue
+    if ($registered -and (Test-DesktopPath $registered.InstallLocation $root)) {
+      Remove-Item -LiteralPath $key -Recurse -Force -ErrorAction SilentlyContinue
+    }
+    $runKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
+    $auto = Get-ItemProperty -LiteralPath $runKey -Name $name -ErrorAction SilentlyContinue
+    if ($auto -and (Test-DesktopStartupCommand $auto.$name $root)) {
+      Remove-ItemProperty -LiteralPath $runKey -Name $name -ErrorAction SilentlyContinue
+    }
   }
 }
+if ($ReportResult) { @{ dataKept = [bool]$result.dataKept } | ConvertTo-Json -Compress }
 if ($pending) { exit 3010 }
+}

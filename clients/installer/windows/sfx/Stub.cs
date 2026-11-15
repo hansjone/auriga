@@ -205,8 +205,8 @@ sealed class Wizard : Form
     int page;
     string version = "?", existingRoot, existingVersion, logFile, cancelFile, temp;
     long unpackedBytes;
-    volatile bool cancelRequested;
-    bool canCancel = true, installing, succeeded;
+    volatile bool cancelRequested, canCancel = true;
+    bool installing, succeeded;
 
     public Wizard()
     {
@@ -420,6 +420,10 @@ sealed class Wizard : Form
 
     void StartInstall()
     {
+        temp = Path.Combine(Path.GetTempPath(), "auriga-desktop-setup-" + Guid.NewGuid().ToString("N"));
+        try { Directory.CreateDirectory(temp); }
+        catch (Exception e) { Fail("无法准备安装目录：" + e.Message); return; }
+        cancelFile = Path.Combine(temp, "decision");
         installing = true;
         logFile = Path.Combine(Path.GetTempPath(), "AurigaDSH-Setup-" + DateTime.Now.ToString("yyyyMMdd-HHmmss") + ".log");
         Show(2);
@@ -430,7 +434,6 @@ sealed class Wizard : Form
         {
             int code = 1;
             string failure = null;
-            temp = Path.Combine(Path.GetTempPath(), "auriga-desktop-setup-" + Guid.NewGuid().ToString("N"));
             try
             {
                 string package = Path.Combine(temp, "pkg");
@@ -454,7 +457,7 @@ sealed class Wizard : Form
                         Report("正在解包安装文件… " + Path.GetFileName(name), 0.35 * done / Math.Max(1, unpackedBytes));
                     }
                 }
-                cancelFile = Path.Combine(temp, "cancel");
+                if (cancelRequested) throw new OperationCanceledException();
                 string arguments = "-NoProfile -ExecutionPolicy Bypass -File \"" + Path.Combine(package, "install.ps1") + "\" -InstallDir \"" + root + "\" -Progress -CancelFile \"" + cancelFile + "\"" + (desktop || upgrade ? "" : " -NoDesktopShortcut");
                 string lastError = null;
                 code = Setup.Run(Setup.PowerShell, arguments, line =>
@@ -473,16 +476,16 @@ sealed class Wizard : Form
                     }
                     else if (line.StartsWith("[stderr] ") && line.Trim().Length > 9) lastError = line.Substring(9);
                 });
-                if (code != 0) failure = cancelRequested ? null : (lastError ?? "安装程序退出代码 " + code);
+                if (code != 0) failure = lastError ?? "安装程序退出代码 " + code;
                 else Report("安装完成", 1);
             }
             catch (OperationCanceledException) { code = 2; }
             catch (Exception e) { failure = e.Message; code = 1; Log("error " + e); }
             finally
             {
+                canCancel = false;
                 try { Directory.Delete(temp, true); } catch (Exception) { }
             }
-            if (cancelRequested && code != 0) code = 2;
             BeginInvoke((Action)delegate { Finished(code, failure); });
         }) { IsBackground = true };
         worker.Start();
@@ -506,12 +509,24 @@ sealed class Wizard : Form
     void Cancel()
     {
         if (!installing) { ExitCode = 2; Close(); return; }
+        if (cancelRequested) return;
         if (!canCancel) { MessageBox.Show(this, "正在完成最后的步骤，无法取消，请稍候。", Setup.Brand); return; }
         if (MessageBox.Show(this, "确定要取消安装吗？已完成的步骤会被回滚。", Setup.Brand, MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return;
+        try
+        {
+            using (File.Open(cancelFile, FileMode.CreateNew, FileAccess.Write)) { }
+        }
+        catch (Exception e)
+        {
+            string message = !canCancel || File.Exists(cancelFile)
+                ? "正在完成最后的步骤，无法取消，请稍候。"
+                : "未能提交取消请求：" + e.Message;
+            MessageBox.Show(this, message, Setup.Brand);
+            return;
+        }
         cancelRequested = true;
         cancel.Enabled = false;
         stepLabel.Text = "正在取消并回滚，请稍候…";
-        try { if (cancelFile != null) File.WriteAllText(cancelFile, "cancel"); } catch (Exception) { }
     }
 
     static void LaunchInstalled(string root)
