@@ -18,7 +18,9 @@ CREATE TABLE msgnet_transport_selector (
 -- access while owner visibility is enabled for the cross-tenant backfill; FORCE is restored below.
 ALTER TABLE msgnet_transport_history NO FORCE ROW LEVEL SECURITY;
 ALTER TABLE msgnet_projection_nonce NO FORCE ROW LEVEL SECURITY;
-WITH approvals AS (
+WITH migration_clock AS (
+  SELECT lpad(to_hex(floor(extract(epoch FROM statement_timestamp()) * 1000)::bigint), 12, '0') AS ms
+), approvals AS (
   SELECT n.*, dense_rank() OVER (
     PARTITION BY tenant_id, realm, installation_id, local_selector::jsonb ->> 'bundle_digest'
     ORDER BY (local_selector::jsonb ->> 'material_revision')::numeric DESC
@@ -28,11 +30,16 @@ WITH approvals AS (
 )
 INSERT INTO msgnet_transport_selector
   (id, tenant_id, realm, bundle_digest, reader_id, identity_id, selector, authorization_snapshot, ambiguous)
-SELECT gen_random_uuid(), h.tenant_id, h.realm, h.bundle_digest, r.id, r.id,
+SELECT overlay(
+    overlay(gen_random_uuid()::text PLACING '7' FROM 15 FOR 1)
+    PLACING (substr(migration_clock.ms, 1, 8) || '-' || substr(migration_clock.ms, 9, 4)) FROM 1 FOR 13
+  )::uuid,
+  h.tenant_id, h.realm, h.bundle_digest, r.id, r.id,
   CASE WHEN a.variants = 1 THEN a.selector END,
   CASE WHEN a.variants = 1 THEN a.snapshot END,
   coalesce(a.variants > 1, false)
 FROM msgnet_transport_history h
+CROSS JOIN migration_clock
 CROSS JOIN LATERAL jsonb_array_elements_text(h.predecessor::jsonb #> '{bundle,payload,required_reader_ids}') r(id)
 LEFT JOIN LATERAL (
   SELECT count(DISTINCT n.local_selector) AS variants, min(n.local_selector) AS selector,

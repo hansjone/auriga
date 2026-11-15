@@ -66,8 +66,11 @@ class MsgnetSelectorMigrationTest {
     snapshot.remove("manifest_digest");
     snapshot.putArray("files");
     snapshot.put("bundle_digest", digest(bundle));
-    UUID assigned = UUID.randomUUID(), empty = UUID.randomUUID(), ambiguous = UUID.randomUUID();
-    for (UUID tenant : java.util.List.of(assigned, empty, ambiguous)) {
+    UUID assigned = UUID.randomUUID(),
+        empty = UUID.randomUUID(),
+        ambiguous = UUID.randomUUID(),
+        refreshed = UUID.randomUUID();
+    for (UUID tenant : java.util.List.of(assigned, empty, ambiguous, refreshed)) {
       TenantContext.run(
           tenant,
           () ->
@@ -80,7 +83,7 @@ class MsgnetSelectorMigrationTest {
                         digest(bundle),
                         MsgnetRenewal.canonical(predecessor));
                     if (!tenant.equals(empty)) insertApproved(jdbc, tenant, snapshot);
-                    if (tenant.equals(ambiguous)) {
+                    if (tenant.equals(ambiguous) || tenant.equals(refreshed)) {
                       var second =
                           snapshot
                               .deepCopy()
@@ -89,7 +92,7 @@ class MsgnetSelectorMigrationTest {
                                   java.util.Base64.getUrlEncoder()
                                       .withoutPadding()
                                       .encodeToString(MsgnetKeyEncryptionTest.kek()));
-                      insertApproved(jdbc, tenant, second);
+                      insertApproved(jdbc, tenant, second, tenant.equals(refreshed) ? "2" : "1");
                     }
                     return null;
                   }));
@@ -107,6 +110,20 @@ class MsgnetSelectorMigrationTest {
             assigned,
             () -> tx.execute(status -> MsgnetSelectorLedger.read(jdbc, assigned, "1", bundle)));
     assertTrue(accepted.selectors().path(reader).isTextual());
+    var latest =
+        TenantContext.call(
+            refreshed,
+            () -> tx.execute(status -> MsgnetSelectorLedger.read(jdbc, refreshed, "1", bundle)));
+    assertEquals("2", text(latest.bindings().path(reader), "material_revision"));
+    var migratedId =
+        TenantContext.call(
+            assigned,
+            () ->
+                tx.execute(
+                    status ->
+                        jdbc.queryForObject(
+                            "SELECT id FROM collab.msgnet_transport_selector", UUID.class)));
+    assertEquals(7, migratedId.version());
     var unassigned =
         TenantContext.call(
             empty, () -> tx.execute(status -> MsgnetSelectorLedger.read(jdbc, empty, "1", bundle)));
@@ -164,7 +181,12 @@ class MsgnetSelectorMigrationTest {
   }
 
   private static void insertApproved(JdbcTemplate jdbc, UUID tenant, ObjectNode snapshot) {
-    var manifest = snapshot.deepCopy().put("material_revision", "1");
+    insertApproved(jdbc, tenant, snapshot, "1");
+  }
+
+  private static void insertApproved(
+      JdbcTemplate jdbc, UUID tenant, ObjectNode snapshot, String revision) {
+    var manifest = snapshot.deepCopy().put("material_revision", revision);
     var selector = manifest.deepCopy();
     selector.remove("files");
     selector.put("manifest_digest", digest(manifest));
