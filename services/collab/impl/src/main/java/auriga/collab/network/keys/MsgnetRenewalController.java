@@ -142,8 +142,29 @@ public class MsgnetRenewalController {
       produces = "application/json")
   public ResponseEntity<String> confirmation(@RequestBody byte[] request, HttpServletRequest http) {
     internalMtls(http);
+    return authenticated(
+        () -> {
+          var state =
+              api.transportConfirmationState(input(request, TransportConfirmationQuery.class));
+          return state.completed() != null
+              ? ResponseEntity.ok()
+                  .cacheControl(CacheControl.noStore())
+                  .body(json(state.completed()))
+              : ResponseEntity.accepted()
+                  .cacheControl(CacheControl.noStore())
+                  .body(json(state.pending()));
+        });
+  }
+
+  @RequiresPermission("collab.msgnet.read")
+  @PostMapping(
+      value = "/api/collab/v2/network/transport/expected-selectors",
+      produces = "application/json")
+  public ResponseEntity<String> expectedSelectors(
+      @RequestBody byte[] request, HttpServletRequest http) {
+    internalMtls(http);
     return response(
-        () -> json(api.transportConfirmation(input(request, TransportConfirmationQuery.class))));
+        () -> json(api.expectedSelectors(input(request, ExpectedSelectorsQuery.class))));
   }
 
   @RequiresPermission("collab.msgnet.read")
@@ -225,6 +246,12 @@ public class MsgnetRenewalController {
   }
 
   private ResponseEntity<String> response(java.util.function.Supplier<String> body) {
+    return authenticated(
+        () -> ResponseEntity.ok().cacheControl(CacheControl.noStore()).body(body.get()));
+  }
+
+  private ResponseEntity<String> authenticated(
+      java.util.function.Supplier<ResponseEntity<String>> body) {
     var principal =
         AuthorizationRules.currentPrincipal()
             .orElseThrow(() -> new AurigaException(CommonErrors.UNAUTHENTICATED));
@@ -233,7 +260,7 @@ public class MsgnetRenewalController {
           principal.tenantId(),
           () -> {
             MsgnetNetworkRenewal.available(service).requireCallerTenant();
-            return ResponseEntity.ok().cacheControl(CacheControl.noStore()).body(body.get());
+            return body.get();
           });
     } catch (org.springframework.dao.DataAccessException unavailable) {
       throw MsgnetV2Verifier.failure("projection_pending");

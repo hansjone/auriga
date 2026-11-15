@@ -276,6 +276,7 @@ public final class MsgnetMaterials {
               selector,
               receipt,
               prior.isEmpty() ? null : NetworkJson.parse(prior.getFirst(), 1048576));
+          MsgnetSelectorLedger.approve(jdbc, tenant, realm, snapshot, selector);
           if (row.get("local_selector") != null)
             require(
                 NetworkJson.parse(row.get("local_selector").toString(), 1048576).equals(selector),

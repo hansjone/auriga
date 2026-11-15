@@ -920,10 +920,14 @@ public final class MsgnetRenewal {
   }
 
   Instant checkedTime() {
-    Instant now = timeGuard.sample(databaseTime.get());
+    Instant now = ledgerTime();
     var state = requiredState();
     verifier.verifyAuthority(state.path("authority"), state.path("control"), now);
     return now;
+  }
+
+  Instant ledgerTime() {
+    return timeGuard.sample(databaseTime.get());
   }
 
   ObjectNode signTransport(JsonNode payload) {

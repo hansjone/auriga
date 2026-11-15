@@ -1,6 +1,8 @@
 package auriga.collab.api;
 
 import auriga.contracts.msgnet.model.ControlPackage;
+import auriga.contracts.msgnet.model.ExpectedSelectors;
+import auriga.contracts.msgnet.model.ExpectedSelectorsQuery;
 import auriga.contracts.msgnet.model.InstallationReceipt;
 import auriga.contracts.msgnet.model.IsolationRecord;
 import auriga.contracts.msgnet.model.ProjectionMaterial;
@@ -12,6 +14,7 @@ import auriga.contracts.msgnet.model.RenewalStatusOutput;
 import auriga.contracts.msgnet.model.SealedMaterial;
 import auriga.contracts.msgnet.model.SignedTransportConfirmation;
 import auriga.contracts.msgnet.model.SignedTransportTrustBundle;
+import auriga.contracts.msgnet.model.TransportConfirmationPending;
 import auriga.contracts.msgnet.model.TransportConfirmationQuery;
 import auriga.contracts.msgnet.model.TransportPredecessor;
 import auriga.contracts.msgnet.model.TransportTransitionProof;
@@ -33,6 +36,19 @@ public interface NetworkRenewal {
   IsolationRecord confirmNodeControl(String authenticatedNodeId, InstallationReceipt receipt);
 
   SignedTransportConfirmation transportConfirmation(TransportConfirmationQuery query);
+
+  ExpectedSelectors expectedSelectors(ExpectedSelectorsQuery query);
+
+  TransportConfirmationResult transportConfirmationState(TransportConfirmationQuery query);
+
+  /** Internal result envelope; HTTP returns only the generated 200 or 202 body. */
+  record TransportConfirmationResult(
+      SignedTransportConfirmation completed, TransportConfirmationPending pending) {
+    public TransportConfirmationResult {
+      if ((completed == null) == (pending == null))
+        throw new IllegalArgumentException("exactly one confirmation body is required");
+    }
+  }
 
   TransportPredecessor transportHistory(String digest);
 

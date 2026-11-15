@@ -46,6 +46,8 @@ public final class MsgnetNetworkRenewal implements NetworkRenewal {
       var names = new java.util.ArrayList<String>();
       object.propertyNames().forEach(names::add);
       for (String name : names) {
+        if ("expected_selectors".equals(name))
+          continue; // Explicit null map values are frozen K4 semantics.
         if (object.path(name).isNull()) object.remove(name);
         else omitOptionalNulls(object.path(name));
       }
@@ -109,8 +111,24 @@ public final class MsgnetNetworkRenewal implements NetworkRenewal {
 
   @Override
   public SignedTransportConfirmation transportConfirmation(TransportConfirmationQuery query) {
+    var result = transportConfirmationState(query);
+    if (result.completed() == null) throw MsgnetV2Verifier.failure("projection_pending");
+    return result.completed();
+  }
+
+  @Override
+  public ExpectedSelectors expectedSelectors(ExpectedSelectorsQuery query) {
     available(renewal).requireCallerTenant();
-    return model(transport().confirmation(tree(query)), SignedTransportConfirmation.class);
+    return model(transport().expectedSelectors(tree(query)), ExpectedSelectors.class);
+  }
+
+  @Override
+  public TransportConfirmationResult transportConfirmationState(TransportConfirmationQuery query) {
+    available(renewal).requireCallerTenant();
+    var value = transport().confirmation(tree(query));
+    return value.has("runtime_auth")
+        ? new TransportConfirmationResult(model(value, SignedTransportConfirmation.class), null)
+        : new TransportConfirmationResult(null, model(value, TransportConfirmationPending.class));
   }
 
   @Override

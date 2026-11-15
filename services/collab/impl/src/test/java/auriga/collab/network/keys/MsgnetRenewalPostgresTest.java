@@ -380,8 +380,40 @@ class MsgnetRenewalPostgresTest {
     return request;
   }
 
-  private JsonNode project(MsgnetPki pki, String component, String id, String phase)
-      throws Exception {
+  final Map<String, ObjectNode> projectedReceipts = new java.util.HashMap<>();
+
+  JsonNode project(MsgnetPki pki, String component, String id, String phase) throws Exception {
+    String projection = digest(pki.bundle()) + ":" + id;
+    if (projectedReceipts.containsKey(projection)) {
+      var saved = projectedReceipts.get(projection).deepCopy();
+      var signer = transportSigners.get(id);
+      saved.remove("identity_auth");
+      saved.put("phase", phase);
+      identitySign(saved, signer, id, "NetworkProjectionReceipt");
+      var pin =
+          new MsgnetControlLedger.Identity(
+              id,
+              id,
+              encode(signer.getPublic().getEncoded()),
+              component,
+              "gateway",
+              encode(transportSealers.get(id).getPublic().getEncoded()),
+              "CN=projector");
+      var renewal = service();
+      var ledger = new MsgnetControlLedger(renewal, jdbc, tenant, "1", Map.of(id, pin));
+      ready(ledger, pin, signer);
+      new MsgnetMaterials(
+              renewal,
+              ledger,
+              new MsgnetPrivateKeyStore(jdbc, manager, tenant, "1", ring),
+              jdbc,
+              tenant,
+              "1",
+              pki)
+          .confirm(saved);
+      projectedReceipts.put(projection, saved);
+      return saved.path("local_selector");
+    }
     var signer = transportSigners.computeIfAbsent(id, k -> KeyTestMaterial.pair());
     var sealer = transportSealers.get(id);
     if (sealer == null) {
@@ -473,6 +505,7 @@ class MsgnetRenewalPostgresTest {
       identitySign(receipt, signer, id, "NetworkProjectionReceipt");
       materials.confirm(receipt);
     }
+    projectedReceipts.put(projection, receipt.deepCopy());
     return selector;
   }
 
@@ -504,6 +537,98 @@ class MsgnetRenewalPostgresTest {
         .put("challenge", encode(MsgnetKeyEncryptionTest.kek()));
   }
 
+  ObjectNode expectedQuery(JsonNode bundle) {
+    var control = NetworkJson.parse(service().publicControl());
+    return confirmationQuery(bundle)
+        .put("control_revision", text(control.path("payload"), "control_revision"))
+        .put("control_digest", digest(control));
+  }
+
+  @Test
+  void k4FrozenUnassignedReadersRequireRealIsolationAndHistoricalMappingsSurviveRevocation()
+      throws Exception {
+    try (ring) {
+      install(true);
+      var renewal = service();
+      renewal.reconcile();
+      var pki = pki(renewal);
+      pki.reconcile();
+      var bundle = pki.bundle();
+      var query = expectedQuery(bundle);
+      var expected = pki.expectedSelectors(query);
+      assertEquals(3, expected.path("reader_identities").size());
+      assertEquals(3, expected.path("expected_selectors").size());
+      for (var value : expected.path("expected_selectors")) assertTrue(value.isNull());
+      var pending = pki.confirmation(confirmationQuery(bundle));
+      assertEquals(3, pending.path("readers").size());
+      assertEquals("projection_pending", text(pending, "state"));
+      int index = 0;
+      for (var id : bundle.path("payload").path("required_reader_ids")) {
+        String identity = id.asString();
+        var pair = KeyTestMaterial.pair();
+        var pin =
+            new MsgnetControlLedger.Identity(
+                "target-" + index++,
+                identity,
+                encode(pair.getPublic().getEncoded()),
+                "network",
+                "gateway",
+                "",
+                "CN=projector");
+        var ledger =
+            new MsgnetControlLedger(renewal, jdbc, tenant, "1", Map.of(pin.targetId(), pin));
+        ledger.create(controlRequest(pin.targetId()));
+        ledger.enforce(ledger.isolation(pin.targetId()));
+      }
+      var cq = confirmationQuery(bundle);
+      var completed = pki.confirmation(cq);
+      schema("SignedTransportConfirmation", completed, "invalid_chain");
+      for (var row : completed.path("payload").path("readers")) {
+        assertEquals("isolated", text(row, "phase"));
+        assertFalse(row.has("selector"));
+      }
+      var control = NetworkJson.parse(renewal.publicControl());
+      var accepted =
+          MsgnetExpectedSelectors.verify(
+              expected, query, bundle, control, tenant.toString(), "1", wall.instant(), true);
+      var authority = renewal.run(() -> renewal.requiredState().path("authority"));
+      accepted.confirmation(
+          renewal.transportVerifier(),
+          completed,
+          authority,
+          control,
+          text(cq, "challenge"),
+          wall.instant(),
+          "loaded");
+      pki.reconcile();
+      assertEquals("new_leaves", text(pki.bundle().path("payload"), "phase"));
+      assertEquals(
+          expected.path("reader_identities"),
+          pki.expectedSelectors(query).path("reader_identities"));
+      int hidden =
+          TenantContext.call(
+              UUID.randomUUID(),
+              () ->
+                  new TransactionTemplate(manager)
+                      .execute(
+                          tx ->
+                              jdbc.queryForObject(
+                                  "SELECT count(*) FROM collab.msgnet_transport_selector WHERE tenant_id = ?",
+                                  Integer.class,
+                                  tenant)));
+      assertEquals(0, hidden);
+      var revoked = (ObjectNode) control.path("payload").deepCopy();
+      revoked.put("control_revision", "3");
+      ((tools.jackson.databind.node.ArrayNode) revoked.path("revoked_authority_ids"))
+          .add(text(authority.path("payload"), "authority_id"));
+      renewal.installControl(rootSigned(revoked, "NetworkRootControl"));
+      var historical = pki.expectedSelectors(expectedQuery(bundle));
+      assertEquals(expected.path("reader_identities"), historical.path("reader_identities"));
+      assertEquals(expected.path("expected_selectors"), historical.path("expected_selectors"));
+      assertThrows(AurigaException.class, () -> pki.confirmation(cq));
+    }
+  }
+
   @Test
   void transportConfirmationUsesExactDurableSelectorsAndFreshChallengeWithoutWriting()
       throws Exception {
@@ -515,9 +640,10 @@ class MsgnetRenewalPostgresTest {
       pki.reconcile();
       var initial = pki.bundle();
       var query = confirmationQuery(initial);
-      assertEquals(
-          "collab.msgnet_projection_pending",
-          assertThrows(AurigaException.class, () -> pki.confirmation(query)).errorCode().code());
+      var pending = pki.confirmation(query);
+      assertEquals("projection_pending", text(pending, "state"));
+      assertFalse(pending.has("runtime_auth"));
+      schema("TransportConfirmationPending", pending, "invalid_chain");
       var selector = project(pki, "network", "synthetic-projector", "loaded");
       int nonces = count("msgnet_projection_nonce");
       var evidence = pki.confirmation(query);

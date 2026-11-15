@@ -129,7 +129,7 @@ public final class MsgnetTransportVerifier {
     schema("SignedTransportTrustBundle", bundle, "invalid_chain");
   }
 
-  public void confirmation(
+  void confirmation(
       JsonNode evidence,
       JsonNode bundle,
       JsonNode authority,
@@ -138,6 +138,28 @@ public final class MsgnetTransportVerifier {
       Instant now,
       String requiredPhase,
       JsonNode expectedSelectors) {
+    confirmation(
+        evidence,
+        bundle,
+        authority,
+        control,
+        challenge,
+        now,
+        requiredPhase,
+        expectedSelectors,
+        tools.jackson.databind.node.MissingNode.getInstance());
+  }
+
+  void confirmation(
+      JsonNode evidence,
+      JsonNode bundle,
+      JsonNode authority,
+      JsonNode control,
+      String challenge,
+      Instant now,
+      String requiredPhase,
+      JsonNode expectedSelectors,
+      JsonNode expectedIdentities) {
     var e = evidence.path("payload");
     var b = bundle.path("payload");
     var a = authority.path("payload");
@@ -173,11 +195,25 @@ public final class MsgnetTransportVerifier {
     var readers = new HashSet<String>();
     for (var row : e.path("readers")) require(readers.add(text(row, "reader_id")), "invalid_chain");
     require(readers.size() == b.path("required_reader_ids").size(), "projection_pending");
+    var ids = new HashSet<String>();
+    for (var id : b.path("required_reader_ids")) ids.add(id.asString());
+    require(MsgnetExpectedSelectors.keys(expectedSelectors).equals(ids), "invalid_chain");
+    if (!expectedIdentities.isMissingNode())
+      require(MsgnetExpectedSelectors.keys(expectedIdentities).equals(ids), "invalid_chain");
     for (var id : b.path("required_reader_ids")) {
       var row = find(e.path("readers"), "reader_id", id.asString());
       require(row != null, "projection_pending");
-      if ("isolated".equals(text(row, "phase"))) {
-        require(row.path("isolation_enforced").asBoolean(), "identity_quarantined");
+      if (!expectedIdentities.isMissingNode())
+        require(
+            row.path("identity_id").equals(expectedIdentities.path(id.asString())),
+            "invalid_chain");
+      if (!row.has("selector")) {
+        require(
+            "isolated".equals(text(row, "phase"))
+                && expectedSelectors.has(id.asString())
+                && expectedSelectors.path(id.asString()).isNull()
+                && row.path("identity_id").equals(expectedIdentities.path(id.asString())),
+            "invalid_chain");
       } else {
         var selector = row.path("selector");
         require(
@@ -186,6 +222,10 @@ public final class MsgnetTransportVerifier {
                 && selector.path("bundle_version").equals(e.path("bundle_version"))
                 && digest(selector).equals(expectedSelectors.path(id.asString()).asString("")),
             "invalid_chain");
+      }
+      if ("isolated".equals(text(row, "phase"))) {
+        require(row.path("isolation_enforced").asBoolean(), "identity_quarantined");
+      } else {
         require(
             !"handshake_verified".equals(requiredPhase)
                 || "handshake_verified".equals(text(row, "phase")),
@@ -193,6 +233,48 @@ public final class MsgnetTransportVerifier {
       }
     }
     schema("SignedTransportConfirmation", evidence, "invalid_chain");
+  }
+
+  public void confirmation(
+      JsonNode evidence,
+      JsonNode authority,
+      JsonNode control,
+      String challenge,
+      Instant now,
+      String requiredPhase,
+      MsgnetExpectedSelectors.Snapshot selectors) {
+    require(selectors != null, "projection_pending");
+    selectors.confirmation(this, evidence, authority, control, challenge, now, requiredPhase);
+  }
+
+  void ledgerBundle(JsonNode predecessor) {
+    var bundle = predecessor.path("bundle");
+    var authority = predecessor.path("authority");
+    var control = predecessor.path("control");
+    trust.verifyControl(control);
+    trust.rootSignature(authority, "NetworkRuntimeAuthority");
+    signedBundle(bundle, authority);
+    authorityBinding(bundle, authority);
+    for (var value :
+        List.of(bundle.path("payload"), authority.path("payload"), control.path("payload")))
+      require(trust.scope(value), "scope_denied");
+    require(allowed(control.path("payload"), authority), "authority_unknown");
+    capability(authority.path("payload"), "network_transport");
+    require(
+        !time(authority.path("payload"), "not_before")
+            .isAfter(time(bundle.path("payload"), "issued_at")),
+        "invalid_chain");
+    require(
+        !contains(
+            control.path("payload").path("revoked_authority_ids"),
+            text(authority.path("payload"), "authority_id")),
+        "authority_revoked");
+    schema("TransportPredecessor", predecessor, "invalid_chain");
+  }
+
+  void ledgerControl(JsonNode control) {
+    trust.verifyControl(control);
+    require(trust.scope(control.path("payload")), "scope_denied");
   }
 
   /**
@@ -257,7 +339,8 @@ public final class MsgnetTransportVerifier {
             text(i, "challenge"),
             time(i, "now"),
             text(i, "required_phase"),
-            i.path("expected_selectors"));
+            i.path("expected_selectors"),
+            i.path("expected_identities"));
       } catch (auriga.common.error.AurigaException failure) {
         throw failure("projection_pending");
       }

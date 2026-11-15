@@ -64,7 +64,7 @@ class MsgnetProductionVectorsTest {
       var result = new ArrayList<DynamicTest>();
       for (var vector : vectors.path("cases")) result.add(test(vector, false));
       for (var vector : vectors.path("boundary_cases")) result.add(test(vector, true));
-      assertEquals(421, result.size());
+      assertEquals(470, result.size());
       return result;
     }
   }
@@ -122,6 +122,16 @@ class MsgnetProductionVectorsTest {
   private static void boundary(JsonNode vector) throws Exception {
     var i = vector.path("input");
     switch (text(vector, "operation")) {
+      case "expected_selectors" ->
+          MsgnetExpectedSelectors.verify(
+              i.path("response"),
+              i.path("query"),
+              i.path("bundle"),
+              i.path("control"),
+              text(i, "tenant_id"),
+              text(i, "realm"),
+              time(i, "now"),
+              i.path("authenticated_c_ledger").asBoolean());
       case "transport_transition" -> transportTransition(i);
       case "transport_confirmation" ->
           new MsgnetTransportVerifier(verifier(i))
@@ -133,7 +143,8 @@ class MsgnetProductionVectorsTest {
                   text(i, "challenge"),
                   time(i, "now"),
                   text(i, "required_phase"),
-                  i.path("expected_selectors"));
+                  i.path("expected_selectors"),
+                  i.path("expected_identities"));
       case "transport_catchup" -> {
         var t = i.path("transition");
         var proof = MsgnetRenewal.object();

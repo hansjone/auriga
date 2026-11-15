@@ -7,6 +7,29 @@ import org.junit.jupiter.api.Test;
 
 class MsgnetContractAdapterTest {
   @Test
+  void expectedSelectorsRetainsExplicitNullWithoutInventingMissingKeys() throws Exception {
+    try (var input =
+        getClass()
+            .getClassLoader()
+            .getResourceAsStream("network-fixtures/auto-renewal-v2-vectors.json")) {
+      var source =
+          KeyTestMaterial.JSON
+              .readTree(input)
+              .path("boundary_cases")
+              .valueStream()
+              .filter(v -> "k4-ledger-null-unassigned".equals(v.path("id").asString()))
+              .findFirst()
+              .orElseThrow()
+              .path("input")
+              .path("response");
+      var model =
+          KeyTestMaterial.JSON.treeToValue(
+              source, auriga.contracts.msgnet.model.ExpectedSelectors.class);
+      assertEquals(source, MsgnetNetworkRenewal.tree(model));
+    }
+  }
+
+  @Test
   void generatedModelRoundTripKeepsSignedCanonicalBytes() throws Exception {
     try (var input =
         getClass()
