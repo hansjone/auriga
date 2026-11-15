@@ -2,6 +2,7 @@
  * Isolated end-to-end check of built packages (Windows).
  *
  *   node scripts/e2e.mjs --old <package dir|setup.exe> --sandbox <dir>
+ *        --disposable-windows-user true
  *        [--new <package dir>] [--broken <package dir>] [--expect-origin <origin>]
  *
  * Installs into a sandbox (install root, DSH_HOME, USERPROFILE/APPDATA, start
@@ -23,6 +24,8 @@ import {
 } from 'node:fs';
 import { createServer } from 'node:net';
 import { join, resolve } from 'node:path';
+import { randomUUID } from 'node:crypto';
+import { fileURLToPath } from 'node:url';
 import { setTimeout as delay } from 'node:timers/promises';
 import { launchEnv } from '../runtime/core.mjs';
 
@@ -32,6 +35,10 @@ const args = Object.fromEntries(
     return acc;
   }, []),
 );
+if (args['disposable-windows-user'] !== 'true')
+  throw new Error(
+    'Run the native installer E2E only as a disposable Windows user.',
+  );
 const sandbox = resolve(args.sandbox);
 const oldPkg = resolve(args.old);
 const newPkg = args.new ? resolve(args.new) : null;
@@ -41,14 +48,17 @@ const root = join(sandbox, 'root');
 const dataHome = join(sandbox, 'data');
 const startMenu = join(sandbox, 'startmenu');
 const desktop = join(sandbox, 'desktop');
-const registryKey = 'AurigaDesktop-e2e-test';
+const registryKey = `AurigaDesktop-e2e-${randomUUID()}`;
 const registryPath = `HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\${registryKey}`;
+const runPath = 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run';
 const env = {
   ...process.env,
   USERPROFILE: join(sandbox, 'home'),
   HOME: join(sandbox, 'home'),
   APPDATA: join(sandbox, 'appdata'),
   LOCALAPPDATA: join(sandbox, 'local'),
+  TMP: join(sandbox, 'temp'),
+  TEMP: join(sandbox, 'temp'),
   AURIGA_INSTALL_DIR: root,
   AURIGA_DATA_HOME: dataHome,
   AURIGA_START_MENU_DIR: startMenu,
@@ -57,7 +67,7 @@ const env = {
 };
 delete env.DSH_HOME;
 delete env.AURIGA_PLATFORM_ORIGIN;
-for (const d of ['home', 'appdata', 'local'])
+for (const d of ['home', 'appdata', 'local', 'temp'])
   mkdirSync(join(sandbox, d), { recursive: true });
 
 const steps = [];
@@ -67,12 +77,13 @@ const note = (name, detail) => {
 };
 function check(condition, name, detail) {
   if (!condition) {
-    console.log(`FAIL ${name}${detail ? ` - ${detail}` : ''}`);
-    throw new Error(`check failed: ${name}`);
+    steps.push({ name, ok: false, detail });
+    throw new Error(`check failed: ${name}${detail ? ` - ${detail}` : ''}`);
   }
   note(name, detail);
 }
-const readJson = (f) => JSON.parse(readFileSync(f, 'utf8'));
+const readJson = (f) =>
+  JSON.parse(readFileSync(f, 'utf8').replace(/^\uFEFF/, ''));
 const run = (cmd, argv, extra = {}) =>
   spawnSync(cmd, argv, {
     env,
@@ -82,6 +93,32 @@ const run = (cmd, argv, extra = {}) =>
     ...extra,
   });
 const regQuery = () => run('reg.exe', ['query', registryPath]);
+const shortcut = (path, target) =>
+  run('powershell.exe', [
+    '-NoProfile',
+    '-NonInteractive',
+    '-ExecutionPolicy',
+    'Bypass',
+    '-File',
+    fileURLToPath(new URL('./e2e-shortcut.ps1', import.meta.url)),
+    '-LinkPath',
+    path,
+    ...(target ? ['-TargetPath', target] : []),
+  ]);
+const sameWindowsPath = (a, b) =>
+  resolve(a).toLowerCase() === resolve(b).toLowerCase();
+
+function checkShortcut(label, path, expectedTarget) {
+  const result = shortcut(path);
+  check(
+    result.status === 0 &&
+      sameWindowsPath(result.stdout.trim(), expectedTarget),
+    label,
+    result.status === 0
+      ? `${path} -> ${result.stdout.trim()} (expected ${expectedTarget})`
+      : `${path}: ${result.stderr.trim()}`,
+  );
+}
 
 /** Install (or upgrade) from a package directory or a single-file setup exe. */
 function install(pkg, extra = []) {
@@ -101,6 +138,11 @@ function mustInstall(pkg, extra) {
   const r = install(pkg, extra);
   if (r.status !== 0)
     throw new Error(`install failed (${r.status}): ${r.stdout}\n${r.stderr}`);
+  const warning = [r.stdout, r.stderr]
+    .join('\n')
+    .split(/\r?\n/)
+    .find((line) => line.includes('Shell integration failed:'));
+  if (warning) throw new Error(warning);
   return JSON.parse(r.stdout.split('\n').find((l) => l.startsWith('{')));
 }
 
@@ -253,13 +295,23 @@ try {
   );
 
   // 2. shell integration: shortcuts and Apps & features entry (current user)
-  check(
-    existsSync(join(startMenu, 'Auriga DSH.lnk')) &&
-      (!existsSync(trayExecutable(first.id)) ||
-        existsSync(join(startMenu, '卸载 Auriga DSH.lnk'))) &&
-      existsSync(join(desktop, 'Auriga DSH.lnk')),
-    'start menu (open, uninstall) and desktop shortcuts created',
+  const launcher = join(root, 'bin', 'auriga-desktop.cmd');
+  checkShortcut(
+    'Start menu opens the installed launcher',
+    join(startMenu, 'Auriga DSH.lnk'),
+    launcher,
   );
+  checkShortcut(
+    'Desktop opens the installed launcher',
+    join(desktop, 'Auriga DSH.lnk'),
+    launcher,
+  );
+  if (existsSync(trayExecutable(first.id)))
+    checkShortcut(
+      'Start menu opens the installed uninstaller',
+      join(startMenu, '卸载 Auriga DSH.lnk'),
+      join(root, 'bin', 'uninstall.cmd'),
+    );
   const reg = regQuery();
   check(
     reg.status === 0 &&
@@ -512,6 +564,50 @@ try {
   }
 
   // 8. uninstall (keep data), then verify shell integration is gone
+  const shellFile = join(root, 'shell.json');
+  const foreignLink = join(startMenu, 'Another application.lnk');
+  const foreignTarget = join(sandbox, 'another-app.cmd');
+  const checksOwnership = existsSync(join(root, 'bin', 'maintenance.ps1'));
+  if (checksOwnership) {
+    writeFileSync(foreignTarget, '@exit /b 0\r\n');
+    const created = shortcut(foreignLink, foreignTarget);
+    check(
+      created.status === 0,
+      'create a foreign shortcut for the uninstall ownership check',
+      created.stderr.trim(),
+    );
+    const shell = readJson(shellFile);
+    // Simulate a recorded link whose real target changed after setup.
+    shell.shortcuts = [...shell.shortcuts, foreignLink];
+    writeFileSync(shellFile, JSON.stringify(shell));
+    const powershell = join(
+      process.env.SystemRoot,
+      'System32',
+      'WindowsPowerShell',
+      'v1.0',
+      'powershell.exe',
+    );
+    const startup = `"${powershell}" -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "${join(root, 'bin', 'auriga-autostart.ps1')}"`;
+    const saved = run('reg.exe', [
+      'add',
+      runPath,
+      '/v',
+      registryKey,
+      '/t',
+      'REG_SZ',
+      '/d',
+      startup,
+      '/f',
+    ]);
+    const found = run('reg.exe', ['query', runPath, '/v', registryKey]);
+    check(
+      saved.status === 0 &&
+        found.status === 0 &&
+        found.stdout.includes(startup),
+      'save this installation’s stable autostart value',
+      saved.stderr.trim() || found.stderr.trim(),
+    );
+  }
   const active = await startTrayForUninstall(
     readFileSync(join(root, 'current.txt'), 'utf8').trim(),
   );
@@ -547,6 +643,17 @@ try {
       regQuery().status !== 0,
     'uninstall removes shortcuts and registry entry',
   );
+  if (checksOwnership) {
+    checkShortcut(
+      'uninstall leaves a recorded link owned by another installation',
+      foreignLink,
+      foreignTarget,
+    );
+    check(
+      run('reg.exe', ['query', runPath, '/v', registryKey]).status !== 0,
+      'uninstall removes this installation’s stable autostart value',
+    );
+  }
   check(
     existsSync(join(dataHome, 'sessions', 'e2e-session.json')),
     'uninstall keeps user data by default',
@@ -589,5 +696,8 @@ try {
     if (c.exitCode === null)
       spawnSync('taskkill', ['/PID', String(c.pid), '/T', '/F']);
   spawnSync('reg.exe', ['delete', registryPath, '/f'], { stdio: 'ignore' });
+  spawnSync('reg.exe', ['delete', runPath, '/v', registryKey, '/f'], {
+    stdio: 'ignore',
+  });
   if (args.clean === 'true') rmSync(sandbox, { recursive: true, force: true });
 }

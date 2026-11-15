@@ -31,13 +31,35 @@ function Get-DesktopRootSuffix([string]$Root) {
 }
 
 function Find-DesktopShortcutPath($Shell, [string]$Directory, [string]$Label, [string]$Target, [string]$Suffix) {
+  $available = $null
   foreach ($name in @("$Label.lnk", "$Label ($Suffix).lnk")) {
     $path = Join-Path $Directory $name
-    if (-not (Test-Path -LiteralPath $path)) { return $path }
+    if (-not (Test-Path -LiteralPath $path)) {
+      if (-not $available) { $available = $path }
+      continue
+    }
     if ((Test-Path -LiteralPath $path -PathType Leaf) -and
         (Test-DesktopPath ($Shell.CreateShortcut($path).TargetPath) $Target)) { return $path }
   }
+  if ($available) { return $available }
   throw "Desktop shortcut name already in use: $Label"
+}
+
+# Use the native user hive API. A clean Windows user may have no Uninstall key.
+# Opening or creating the exact leaf does not replace existing values.
+function Get-DesktopRegistrationLocation([string]$Name) {
+  $key = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey("Software\Microsoft\Windows\CurrentVersion\Uninstall\$Name")
+  if ($key) {
+    try { return @{ InstallLocation = $key.GetValue('InstallLocation') } }
+    finally { $key.Dispose() }
+  }
+}
+
+function Set-DesktopRegistration([string]$Name, [hashtable]$Values) {
+  $key = [Microsoft.Win32.Registry]::CurrentUser.CreateSubKey("Software\Microsoft\Windows\CurrentVersion\Uninstall\$Name")
+  try {
+    foreach ($property in $Values.Keys) { $key.SetValue($property, $Values[$property]) }
+  } finally { $key.Dispose() }
 }
 
 function Invoke-DesktopShellChange([ScriptBlock]$Action) {

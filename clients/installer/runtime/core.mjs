@@ -11,6 +11,8 @@ import { createRequire } from 'node:module';
 import { upgradeSkillPatch, yamlParser } from './skill-config.mjs';
 import {
   ProcessTree,
+  processIdentity,
+  sameProcess,
   assertNTFS,
   notifyPrivateOnly,
   notifySharedRestart,
@@ -45,6 +47,7 @@ import {
   closeSync,
   readdirSync,
   readFileSync,
+  realpathSync,
   renameSync,
   rmSync,
   rmdirSync,
@@ -428,7 +431,21 @@ function writeLaunchers(root, dir, fault) {
   for (const name of readdirSync(bin))
     cpSync(join(bin, name), join(`${prev}.partial`, name));
   renameSync(`${prev}.partial`, prev);
+  const keepMaintenance =
+    existsSync(join(bin, 'maintenance.ps1')) &&
+    !existsSync(join(source, 'maintenance.ps1'));
+  const maintenance = [
+    'uninstall.cmd',
+    'uninstall.ps1',
+    'rollback.cmd',
+    'rollback.ps1',
+    'maintenance.ps1',
+    'shell-integration.ps1',
+    'uninstall-cleanup.ps1',
+    'auriga-autostart.ps1',
+  ];
   for (const name of readdirSync(source)) {
+    if (keepMaintenance && maintenance.includes(name)) continue;
     writeAtomic(join(bin, name), readFileSync(join(source, name)));
     fault('launcher-file');
   }
@@ -689,6 +706,54 @@ function readDataOwner(dataHome) {
 
 const versionSessions = new WeakMap();
 
+function desktopWriters(root, dataHome) {
+  const file = join(dataHome, 'auriga', 'guardian', 'process.json');
+  const record = existsSync(file) ? new ProcessTree(dataHome).record : null;
+  const identities = new Map();
+  const current = (pid) => {
+    if (!identities.has(pid)) identities.set(pid, processIdentity(pid));
+    return identities.get(pid);
+  };
+  const recorded = record
+    ? [record.launcher, record.root, ...record.children].filter(Boolean)
+    : [];
+  const active = record
+    ? [record.root, ...record.children].filter(Boolean)
+    : [];
+  if (record?.launcher && existsSync(join(dirname(file), 'supervisor.lock.d')))
+    active.push(record.launcher);
+  return {
+    active: () =>
+      active.some((entry) => {
+        if (!processAlive(entry.pid)) return false;
+        if (process.platform !== 'win32') return true;
+        const actual = current(entry.pid);
+        return !actual || sameProcess(actual, entry);
+      }),
+    staleSession({ pid, createdAt }) {
+      if (process.platform !== 'win32') return false;
+      const actual = current(pid);
+      if (!actual) return false;
+      if (Number.isFinite(Date.parse(createdAt)))
+        return !sameProcess(actual, { pid, createdAt });
+      if (recorded.some((entry) => sameProcess(actual, entry))) return false;
+      // Known bundled Windows launchers use versions/<id>/upstream/node/node.exe.
+      // A legacy lock has no creation time of its own. A different historical
+      // journal entry for the same PID cannot disprove a live bundled process.
+      if (!actual.executable || !/^[a-z]:\\/i.test(actual.executable))
+        return false;
+      try {
+        const versions = realpathSync.native(join(root, 'versions'));
+        const executable = realpathSync.native(actual.executable);
+        const rel = relative(norm(versions), norm(executable));
+        return !/^[^\\/]+[\\/]upstream[\\/]node[\\/]node\.exe$/i.test(rel);
+      } catch {
+        return false;
+      }
+    },
+  };
+}
+
 // Both the installation root and the separate data directory are locked.
 // The old launcher also observes desktop-session.json during bridge upgrades.
 export function openVersionSession(root, { dataHome, launching = false } = {}) {
@@ -708,20 +773,14 @@ export function openVersionSession(root, { dataHome, launching = false } = {}) {
     assertLocalPath(dataHome);
     releaseData = pathOperationLock(dataHome);
     if (!launching) {
-      if (existsSync(join(root, INSTALL_MARKER))) legacy = desktopSession(root);
-      const journal = join(dataHome, 'auriga', 'guardian', 'process.json');
-      if (existsSync(journal)) {
-        assertLocalPath(journal);
-        const { launcher, root: writer, children } = readJson(journal);
-        const live = [writer, ...children];
-        if (existsSync(join(dirname(journal), 'supervisor.lock.d')))
-          live.push(launcher);
-        if (live.some((entry) => entry && processAlive(entry.pid)))
-          throw Object.assign(
-            new Error('Auriga DSH 的数据仍在使用，请先退出。'),
-            { code: 'desktop.in_use' },
-          );
-      }
+      const writers = desktopWriters(root, dataHome);
+      if (existsSync(join(root, INSTALL_MARKER)))
+        legacy = desktopSession(root, writers.staleSession);
+      if (writers.active())
+        throw Object.assign(
+          new Error('Auriga DSH 的数据仍在使用，请先退出。'),
+          { code: 'desktop.in_use' },
+        );
     }
   } catch (error) {
     try {
@@ -1120,20 +1179,25 @@ function removeDedicatedData(root, { dataHome, dataOwner }) {
 }
 
 /** One running DSH per installation: deferred updates may only mutate a stopped profile. */
-export function desktopSession(root) {
+export function desktopSession(root, staleSession = () => false) {
   const file = join(root, 'desktop-session.json');
   const token = randomUUID();
+  const claim = (pid) => {
+    const identity = process.platform === 'win32' ? processIdentity(pid) : null;
+    return { pid, token, createdAt: identity?.createdAt };
+  };
+  const mine = JSON.stringify(claim(process.pid));
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
       const fd = openSync(file, 'wx', 0o600);
       try {
-        writeFileSync(fd, JSON.stringify({ pid: process.pid, token }));
+        writeFileSync(fd, mine);
       } finally {
         closeSync(fd);
       }
       return {
         child(pid) {
-          writeJsonAtomic(file, { pid, token });
+          writeJsonAtomic(file, claim(pid));
         },
         close() {
           if (existsSync(file) && readJson(file).token === token)
@@ -1143,18 +1207,20 @@ export function desktopSession(root) {
     } catch (error) {
       if (error.code !== 'EEXIST') throw error;
       const previous = readFileSync(file, 'utf8');
-      const { pid } = JSON.parse(previous);
+      const record = JSON.parse(previous);
+      const { pid } = record;
       if (!Number.isSafeInteger(pid) || pid < 1)
         throw new Error('invalid desktop session lock');
-      try {
-        process.kill(pid, 0);
-      } catch (check) {
-        if (check.code === 'ESRCH' && readFileSync(file, 'utf8') === previous) {
-          rmSync(file);
-          continue;
-        }
+      if (
+        (!processAlive(pid) || staleSession(record)) &&
+        readFileSync(file, 'utf8') === previous
+      ) {
+        rmSync(file);
+        continue;
       }
-      throw new Error(`${BRAND_NAME} 已在运行，请先退出。`);
+      throw Object.assign(new Error(`${BRAND_NAME} 已在运行，请先退出。`), {
+        code: 'desktop.in_use',
+      });
     }
   }
   throw new Error('desktop session busy');
@@ -1210,11 +1276,7 @@ async function launchLocked({
   verifyPackage(versionDir(root, initial.current), { trees: false });
   assertNTFS(initial.dataHome);
   const tree = new ProcessTree(initial.dataHome);
-  const oldProcesses = [
-    tree.record.launcher,
-    tree.record.root,
-    ...tree.record.children,
-  ].filter(Boolean);
+  const writers = desktopWriters(root, initial.dataHome);
   const supervisor = new Supervisor(
     initial.dataHome,
     tree,
@@ -1229,12 +1291,7 @@ async function launchLocked({
 
   try {
     await supervisor.prepare();
-    const sessionFile = join(root, 'desktop-session.json');
-    if (existsSync(sessionFile) && (await tree.isStopped())) {
-      const previous = readJson(sessionFile);
-      if (oldProcesses.some((p) => p.pid === previous.pid)) rmSync(sessionFile);
-    }
-    session = desktopSession(root);
+    session = desktopSession(root, writers.staleSession);
     recover(root);
     const current = readState(root);
     revokeForeignDataClaim(root, current.dataHome, current.dataOwner);

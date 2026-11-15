@@ -28,13 +28,17 @@ $cli = Join-Path $payload 'auriga\runtime\cli.mjs'
 # An upgrade keeps the data directory of the existing installation.
 $stateFile = Join-Path $InstallDir 'install.json'
 $upgrading = Test-Path -LiteralPath $stateFile
-if ($upgrading -and -not $installArgs.ContainsKey('DataHome') -and -not $env:AURIGA_DATA_HOME) {
-  $DataHome = (Get-Content -Raw -LiteralPath $stateFile | ConvertFrom-Json).dataHome
-}
-if ($upgrading -and -not $installArgs.ContainsKey('NoDesktopShortcut')) {
+$oldShell = $null
+if ($upgrading) {
   $previousShell = Join-Path $InstallDir 'shell.json'
   if (Test-Path -LiteralPath $previousShell) {
     $oldShell = Get-Content -Raw -LiteralPath $previousShell | ConvertFrom-Json
+  }
+}
+if ($upgrading -and -not $installArgs.ContainsKey('DataHome') -and -not $env:AURIGA_DATA_HOME) {
+  $DataHome = (Get-Content -Raw -LiteralPath $stateFile | ConvertFrom-Json).dataHome
+}
+if ($oldShell -and -not $installArgs.ContainsKey('NoDesktopShortcut')) {
     $existingShell = New-Object -ComObject WScript.Shell
     $oldDesktop = @($oldShell.shortcuts | Where-Object {
       (Test-DesktopPath (Split-Path -Parent $_) $DesktopDir) -and
@@ -42,7 +46,6 @@ if ($upgrading -and -not $installArgs.ContainsKey('NoDesktopShortcut')) {
       (Test-DesktopPath ($existingShell.CreateShortcut($_).TargetPath) (Join-Path $InstallDir 'bin\auriga-desktop.cmd'))
     })
     $NoDesktopShortcut = $oldDesktop.Count -eq 0
-  }
 }
 $argList = @($cli, 'install', '--payload', $payload, '--root', $InstallDir, '--data-home', $DataHome)
 if ($Progress) { $argList += '--progress' }
@@ -60,20 +63,16 @@ try {
   $launcher = Join-Path $InstallDir 'bin\auriga-desktop.cmd'
   $shell = New-Object -ComObject WScript.Shell
   $suffix = Get-DesktopRootSuffix $InstallDir
-  if ($oldShell.registryKey -match '^[A-Za-z0-9._-]{1,64}$') { $RegistryKey = $oldShell.registryKey }
-  if ($RegistryKey -notmatch '^[A-Za-z0-9._-]{1,64}$') { throw 'Invalid Desktop registry key.' }
-  $uninstallKeys = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall'
-  $key = Join-Path $uninstallKeys $RegistryKey
-  $registered = Get-ItemProperty -LiteralPath $key -ErrorAction SilentlyContinue
-  if ($registered -and -not (Test-DesktopPath $registered.InstallLocation $InstallDir)) {
-    $RegistryKey = "AurigaDesktop-$suffix"
-    $key = Join-Path $uninstallKeys $RegistryKey
-    $registered = Get-ItemProperty -LiteralPath $key -ErrorAction SilentlyContinue
-    if ($registered -and -not (Test-DesktopPath $registered.InstallLocation $InstallDir)) {
-      throw 'Desktop registry key already belongs to another install.'
-    }
-  }
   $links = @()
+  $removeTarget = Join-Path $InstallDir 'bin\uninstall.cmd'
+  if ($oldShell) {
+    $links += @($oldShell.shortcuts | Where-Object {
+      if (-not $_ -or -not $_.EndsWith('.lnk', [StringComparison]::OrdinalIgnoreCase) -or
+          -not (Test-Path -LiteralPath $_ -PathType Leaf)) { return $false }
+      $target = $shell.CreateShortcut($_).TargetPath
+      (Test-DesktopPath $target $launcher) -or (Test-DesktopPath $target $removeTarget)
+    })
+  }
   if (-not $NoShortcuts) {
     $shortcutDirs = @($StartMenuDir)
     if (-not $NoDesktopShortcut) { $shortcutDirs += $DesktopDir }
@@ -93,10 +92,9 @@ try {
         $oldLink = $shell.CreateShortcut($oldPath)
         if ($oldLink.TargetPath -eq $launcher) { Remove-Item -LiteralPath $oldPath -Force }
       }
-      $links += $path
+      if ($links -notcontains $path) { $links += $path }
     }
     # Start menu uninstall entry (the Apps & features entry and bin\uninstall.cmd open the same uninstaller).
-    $removeTarget = Join-Path $InstallDir 'bin\uninstall.cmd'
     $removeLink = Find-DesktopShortcutPath $shell $StartMenuDir "卸载 $BrandName" $removeTarget $suffix
     $remove = $shell.CreateShortcut($removeLink)
     $remove.TargetPath = $removeTarget
@@ -106,28 +104,40 @@ try {
     $ico = Join-Path $InstallDir 'bin\auriga.ico'
     if (Test-Path -LiteralPath $ico) { $remove.IconLocation = "$ico,0" }
     $remove.Save()
-    $links += $removeLink
+    if ($links -notcontains $removeLink) { $links += $removeLink }
   }
-  if (-not (Test-Path -LiteralPath $key)) { New-Item -Path $key | Out-Null }
-  $uninstall = "powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$(Join-Path $InstallDir 'bin\uninstall.ps1')`""
-  $values = @{
-    DisplayName = $BrandName
-    DisplayVersion = $manifest.bundleVersion
-    Publisher = 'Auriga'
-    DisplayIcon = (Join-Path $InstallDir 'bin\auriga.ico')
-    InstallDate = (Get-Date -Format 'yyyyMMdd')
-    InstallLocation = $InstallDir
-    UninstallString = $uninstall
-    QuietUninstallString = "$uninstall -Quiet"
+  try {
+    if ($oldShell -and $oldShell.registryKey -match '^[A-Za-z0-9._-]{1,64}$') { $RegistryKey = $oldShell.registryKey }
+    if ($RegistryKey -notmatch '^[A-Za-z0-9._-]{1,64}$') { throw 'Invalid Desktop registry key.' }
+    $registered = Get-DesktopRegistrationLocation $RegistryKey
+    if ($registered -and -not (Test-DesktopPath $registered.InstallLocation $InstallDir)) {
+      $RegistryKey = "AurigaDesktop-$suffix"
+      $registered = Get-DesktopRegistrationLocation $RegistryKey
+      if ($registered -and -not (Test-DesktopPath $registered.InstallLocation $InstallDir)) {
+        throw 'Desktop registry key already belongs to another install.'
+      }
+    }
+    $uninstall = "powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$(Join-Path $InstallDir 'bin\uninstall.ps1')`""
+    $values = @{
+      DisplayName = $BrandName
+      DisplayVersion = $manifest.bundleVersion
+      Publisher = 'Auriga'
+      DisplayIcon = (Join-Path $InstallDir 'bin\auriga.ico')
+      InstallDate = (Get-Date -Format 'yyyyMMdd')
+      InstallLocation = $InstallDir
+      UninstallString = $uninstall
+      QuietUninstallString = "$uninstall -Quiet"
+    }
+    # Apps & features size, in KiB, of the installed version.
+    $bytes = 0
+    foreach ($file in [IO.Directory]::EnumerateFiles((Join-Path $InstallDir "versions\$($manifest.id)"), '*', 'AllDirectories')) { $bytes += ([IO.FileInfo]$file).Length }
+    $values.EstimatedSize = [int]($bytes / 1024)
+    $values.NoModify = 1
+    $values.NoRepair = 1
+    Set-DesktopRegistration $RegistryKey $values
+  } finally {
+    @{ shortcuts = $links; registryKey = $RegistryKey } | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $InstallDir 'shell.json') -Encoding UTF8
   }
-  foreach ($name in $values.Keys) { New-ItemProperty -Path $key -Name $name -Value $values[$name] -PropertyType String -Force | Out-Null }
-  # Apps & features size, in KiB, of the installed version.
-  $bytes = 0
-  foreach ($file in [IO.Directory]::EnumerateFiles((Join-Path $InstallDir "versions\$($manifest.id)"), '*', 'AllDirectories')) { $bytes += ([IO.FileInfo]$file).Length }
-  New-ItemProperty -Path $key -Name EstimatedSize -Value ([int]($bytes / 1024)) -PropertyType DWord -Force | Out-Null
-  New-ItemProperty -Path $key -Name NoModify -Value 1 -PropertyType DWord -Force | Out-Null
-  New-ItemProperty -Path $key -Name NoRepair -Value 1 -PropertyType DWord -Force | Out-Null
-  @{ shortcuts = $links; registryKey = $RegistryKey } | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $InstallDir 'shell.json') -Encoding UTF8
 } catch {
   Write-Warning "Shell integration failed: $_"
 }

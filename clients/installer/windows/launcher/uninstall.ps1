@@ -7,9 +7,8 @@ $root = Split-Path -Parent $PSScriptRoot
 $tempRoot = [IO.Path]::GetTempPath()
 Set-Location -LiteralPath $tempRoot
 [Environment]::CurrentDirectory = $tempRoot
-$cur = (Get-Content -LiteralPath (Join-Path $root 'current.txt') -TotalCount 1).Trim()
-$ver = Join-Path $root "versions\$cur"
-$tray = Join-Path $ver 'auriga\tray\AurigaDesktop.exe'
+. (Join-Path $PSScriptRoot 'maintenance.ps1')
+$tray = Join-Path (Get-DesktopMaintenanceVersion $root) 'auriga\tray\AurigaDesktop.exe'
 if (Test-Path -LiteralPath $tray) {
   # Run from a temporary copy so the tray executable does not lock the install directory.
   $gui = Join-Path $tempRoot ('auriga-desktop-uninstall-ui-' + [guid]::NewGuid().ToString('N'))
@@ -34,6 +33,7 @@ if (Test-Path -LiteralPath $tray) {
 }
 . (Join-Path $PSScriptRoot 'shell-integration.ps1')
 Invoke-DesktopShellChange {
+$ver = Get-DesktopMaintenanceVersion $root
 # Shortcuts and the Apps & features entry recorded at install time (read before the root is cleaned).
 $shellFile = Join-Path $root 'shell.json'
 $shellInfo = $null

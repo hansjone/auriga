@@ -4,6 +4,4 @@ rem ----------------------------------------------------------------------------
 exit /b %ERRORLEVEL%
 :main
 setlocal
-set "ROOT=%~dp0.."
-set /p CUR=<"%ROOT%\current.txt"
-"%ROOT%\versions\%CUR%\upstream\node\node.exe" "%ROOT%\versions\%CUR%\auriga\runtime\cli.mjs" rollback --root "%ROOT%" & call exit /b %%ERRORLEVEL%%
+"%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -File "%~dp0rollback.ps1" & call exit /b %%ERRORLEVEL%%

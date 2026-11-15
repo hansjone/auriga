@@ -3,6 +3,7 @@ import { performance } from 'node:perf_hooks';
 import {
   existsSync,
   mkdirSync,
+  readFileSync,
   readdirSync,
   renameSync,
   rmdirSync,
@@ -11,6 +12,7 @@ import {
 } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { assertLocalPath } from './host-lock.mjs';
+import { processIdentity, sameProcess } from './process-tree.mjs';
 
 export function processAlive(pid) {
   if (!Number.isSafeInteger(pid) || pid < 1) return true;
@@ -24,6 +26,20 @@ export function processAlive(pid) {
 
 const ownerName = /^(\d+)-[0-9a-f-]{36}$/;
 const sleep = new Int32Array(new SharedArrayBuffer(4));
+
+function retiredOwner(path, name, pid) {
+  if (!processAlive(pid)) return true;
+  if (process.platform !== 'win32') return false;
+  try {
+    const stored = JSON.parse(readFileSync(join(path, name), 'utf8'));
+    if (stored?.pid !== pid || !Number.isFinite(Date.parse(stored.createdAt)))
+      return false;
+    const actual = processIdentity(pid);
+    return Boolean(actual && !sameProcess(actual, stored));
+  } catch {
+    return false;
+  }
+}
 
 function removeEmpty(path) {
   try {
@@ -46,7 +62,13 @@ export function acquireOperationLock(path, waitMs = 0) {
   const claim = `${path}.${token}.claim`;
   mkdirSync(claim);
   try {
-    writeFileSync(join(claim, owner), '', { flag: 'wx', mode: 0o600 });
+    const identity =
+      process.platform === 'win32' ? processIdentity(process.pid) : null;
+    writeFileSync(
+      join(claim, owner),
+      JSON.stringify(identity ?? { pid: process.pid }),
+      { flag: 'wx', mode: 0o600 },
+    );
     const start = performance.now();
     for (;;) {
       try {
@@ -73,7 +95,7 @@ export function acquireOperationLock(path, waitMs = 0) {
         if (!existsSync(path)) continue;
       } else if (entries.length === 1) {
         const previous = ownerName.exec(entries[0]);
-        if (previous && !processAlive(Number(previous[1]))) {
+        if (previous && retiredOwner(path, entries[0], Number(previous[1]))) {
           try {
             unlinkSync(join(path, entries[0]));
           } catch (error) {

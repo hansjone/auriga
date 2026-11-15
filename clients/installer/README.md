@@ -8,10 +8,10 @@ node scripts/build.mjs --exe                 # 默认上游版本见 upstream.js
 node scripts/build.mjs --upstream 0.2.1-rc.4 # 换上游版本重新出开发包
 node scripts/build.mjs --platform-origin <https地址> --without-libreoffice
 pnpm test                                    # INSTALLER_STAGE=<包目录> 可额外校验成品
-node scripts/e2e.mjs --old <包目录或setup.exe> --sandbox <目录>
+node scripts/e2e.mjs --old <包目录或setup.exe> --sandbox <目录> --disposable-windows-user true
 ```
 
-本包是 pnpm 工作区成员 `@auriga/installer`，脚本只用 Node 内置模块。输出默认在已忽略的 `target/`。
+本包是 pnpm 工作区成员 `@auriga/installer`，脚本只用 Node 内置模块。输出默认在已忽略的 `target/`。原生 E2E 会写入当前 Windows 用户的测试登记和快捷方式，请在一次性 Windows 测试用户或临时虚拟机中运行。
 
 ## 发布新版本
 
@@ -164,7 +164,7 @@ stdin 一行 `stop` 或 stdin 关闭会通知 DSH 执行正常停止和持久化
 发现新版本或下载完成时以气泡提示。默认由用户点“立即更新”，在批准重启安装前，托盘下载的更新保持待确认。
 
 从开始菜单启动或在托盘选择“打开 Auriga”时，未登录会先打开壳认证的本机登录页。完成平台登录或选择跳过后打开 DSH 首页。选“本机登录”同样使用本地 DSH，由插件导航到 Auriga 面板。已登录或平台未接入时直接打开 DSH。开机自启只启动托盘与 DSH。
-开机自启经 `bin/auriga-autostart.ps1` 按当时的版本指针分派，回退到早期版本时调用其原有命令行启动器。托盘只刷新实际归属本安装的登记和快捷方式。
+开机自启经 `bin/auriga-autostart.ps1` 按当时的版本指针分派。回退到无托盘的早期版本时暂停自启，仍可从开始菜单打开可见的控制台启动器。切回托盘版时恢复已保存的自启偏好。回退后仍使用支持归属校验的卸载入口。
 
 ### 旧启动器的就地更新
 

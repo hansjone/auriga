@@ -79,6 +79,8 @@ export function buildPayload(base, options = {}) {
   put(dir, 'auriga/runtime/core.mjs', coreContent);
   put(dir, 'auriga/launcher/auriga-desktop.cmd', `rem ${name}`);
   put(dir, 'auriga/launcher/rollback.cmd', `rem rollback ${name}`);
+  for (const [file, content] of Object.entries(options.launchers ?? {}))
+    put(dir, 'auriga/launcher/' + file, content);
   put(dir, 'licenses/NOTICE.txt', 'notice');
   if (options.releasePublicKey)
     put(dir, 'auriga/runtime/release-public-key.txt', options.releasePublicKey);

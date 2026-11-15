@@ -39,6 +39,10 @@ if (process.platform === 'win32')
       join(root, 'bin'),
       { recursive: true },
     );
+    cpSync(
+      join(root, 'bin', 'maintenance.ps1'),
+      join(version, 'auriga', 'launcher', 'maintenance.ps1'),
+    );
     const partial = join(base, 'old-temp-copy');
     mkdirSync(partial);
     for (const name of readdirSync(runtime).filter((n) => n.endsWith('.mjs')))

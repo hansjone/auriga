@@ -401,16 +401,30 @@ test('rollback restores previous version, plugin files and launchers', (t) => {
   const f = fixture(t);
   const a = installA(f);
   const { dataOwner } = readState(f.root);
-  const b = put(f, { name: 'b', pluginVersion: '1.1.0' });
-  const autostart = join(f.root, 'bin', 'auriga-autostart.ps1');
-  writeFileSync(autostart, 'dispatch current at sign-in');
+  const maintenance = {
+    'auriga-autostart.ps1': 'dispatch current at sign-in',
+    'maintenance.ps1': 'find compatible runtime',
+    'rollback.cmd': 'rem safe rollback',
+    'rollback.ps1': 'switch version using compatible runtime',
+    'uninstall.ps1': 'check ownership before cleanup',
+    'uninstall.cmd': 'rem safe uninstall',
+  };
+  const b = put(f, {
+    name: 'b',
+    pluginVersion: '1.1.0',
+    launchers: maintenance,
+  });
+  const checkMaintenance = () => {
+    for (const [name, contents] of Object.entries(maintenance))
+      assert.equal(text(join(f.root, 'bin', name)), contents);
+  };
   assert.deepEqual(rollback({ root: f.root, smoke: noSmoke }), {
     current: a.id,
   });
   assert.equal(text(join(f.root, 'current.txt')).trim(), a.id);
   assert.equal(pluginVersion(f.dataHome), '1.0.0');
   assert.match(launcher(f.root), /rem a/);
-  assert.equal(text(autostart), 'dispatch current at sign-in');
+  checkMaintenance();
   assert.deepEqual(readState(f.root), {
     dataHome: f.dataHome,
     current: a.id,
@@ -422,6 +436,7 @@ test('rollback restores previous version, plugin files and launchers', (t) => {
     current: b.id,
   });
   assert.equal(pluginVersion(f.dataHome), '1.1.0');
+  checkMaintenance();
 });
 
 test('rollback keeps settings changed after the upgrade', (t) => {

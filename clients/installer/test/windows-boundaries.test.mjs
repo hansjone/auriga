@@ -80,13 +80,26 @@ test(
     const other = join(base, 'Install B');
     const bin = join(root, 'bin');
     const trayDir = join(root, 'versions', 'with-tray', 'auriga', 'tray');
+    const launcherDir = join(
+      root,
+      'versions',
+      'with-tray',
+      'auriga',
+      'launcher',
+    );
     mkdirSync(bin, { recursive: true });
     mkdirSync(trayDir, { recursive: true });
+    mkdirSync(launcherDir, { recursive: true });
     writeFileSync(join(root, '.auriga-desktop-install'), '{}');
     writeFileSync(join(trayDir, 'AurigaDesktop.exe'), '');
     copyFileSync(
       source('auriga-autostart.ps1'),
       join(bin, 'auriga-autostart.ps1'),
+    );
+    copyFileSync(source('maintenance.ps1'), join(bin, 'maintenance.ps1'));
+    copyFileSync(
+      source('maintenance.ps1'),
+      join(launcherDir, 'maintenance.ps1'),
     );
     const script = fileURLToPath(
       new URL('./windows-shell-fixture.ps1', import.meta.url),
@@ -96,11 +109,11 @@ test(
     const result = JSON.parse(resolved.stdout);
     assert.deepEqual(result.ownership, [false, false, true, true]);
     assert.equal(result.chosen, join(root, 'fixture-shortcuts', 'App (A).lnk'));
+    assert.equal(result.retained, result.chosen);
     assert.equal(result.new.file, join(trayDir, 'AurigaDesktop.exe'));
     assert.deepEqual(result.new.args, ['/autostart']);
-    assert.match(result.old.file, /rolled-back\\upstream\\node\\node\.exe$/);
-    assert.ok(result.old.args.includes('--no-open'));
-    assert.ok(!result.old.args.includes('/autostart'));
-    assert.equal(result.new.hidden && result.old.hidden, true);
+    assert.deepEqual(result.old, []);
+    assert.equal(result.new.hidden, true);
+    assert.equal(result.maintenance, join(root, 'versions', 'with-tray'));
   },
 );

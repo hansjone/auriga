@@ -8,9 +8,6 @@ $version = Join-Path $root "versions\$current"
 $tray = Join-Path $version 'auriga\tray\AurigaDesktop.exe'
 if (Test-Path -LiteralPath $tray -PathType Leaf) {
   Start-Process -FilePath $tray -ArgumentList '/autostart' -WindowStyle Hidden -WorkingDirectory $root
-} else {
-  $node = Join-Path $version 'upstream\node\node.exe'
-  $cli = Join-Path $version 'auriga\runtime\cli.mjs'
-  # Older releases have a console launcher, without the tray control protocol.
-  Start-Process -FilePath $node -ArgumentList @(('"' + $cli + '"'), 'launch', '--root', ('"' + $root + '"'), '--', '--no-open') -WindowStyle Hidden -WorkingDirectory $root
 }
+# A legacy release has no tray to open or stop a hidden instance. Its normal
+# Start menu entry owns the visible console session. The preference resumes on upgrade.

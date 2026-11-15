@@ -5,8 +5,14 @@ import { EventEmitter, once } from 'node:events';
 import { performance } from 'node:perf_hooks';
 import { createServer } from 'node:http';
 import { spawn } from 'node:child_process';
-import { generateKeyPairSync } from 'node:crypto';
-import { existsSync, readdirSync, writeFileSync } from 'node:fs';
+import { generateKeyPairSync, randomUUID } from 'node:crypto';
+import {
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  writeFileSync,
+} from 'node:fs';
 import { setTimeout as delay } from 'node:timers/promises';
 import { join } from 'node:path';
 import {
@@ -23,6 +29,8 @@ import { superviseDsh } from '../runtime/desktop-supervision.mjs';
 import { shellAuthFailureReason } from '../runtime/shell-auth.mjs';
 import { desktopInfo, updateCommand } from '../runtime/desktop-control.mjs';
 import { idleRequest } from '../runtime/update.mjs';
+import { acquireOperationLock } from '../runtime/operation-lock.mjs';
+import { processIdentity } from '../runtime/process-tree.mjs';
 import { buildPayload, tempBase } from './helpers.mjs';
 
 const noSmoke = () => {};
@@ -140,6 +148,88 @@ test('cancelling an upgrade rolls back to the old version with user data intact'
   assert.ok(existsSync(join(profileDir(dataHome), 'conversation.json')));
   assert.ok(existsSync(join(root, '.auriga-desktop-install')));
 });
+
+test(
+  'version transactions recover reused Windows PIDs and still fence the original process',
+  { skip: process.platform !== 'win32' },
+  async (t) => {
+    const base = tempBase(t);
+    const root = join(base, 'app');
+    const dataHome = join(base, 'home');
+    const identity = processIdentity(process.pid);
+    assert.ok(
+      identity?.executable,
+      'Windows reports the actual Node executable',
+    );
+    const retired = { ...identity, createdAt: '2000-01-01T00:00:00.000Z' };
+    const lock = join(base, 'operation.lock');
+    const owner = join(lock, `${process.pid}-${randomUUID()}`);
+    mkdirSync(lock);
+    writeFileSync(owner, JSON.stringify(identity));
+    assert.throws(() => acquireOperationLock(lock), { code: 'desktop.in_use' });
+    writeFileSync(owner, JSON.stringify(retired));
+    const unlock = acquireOperationLock(lock);
+    assert.equal(existsSync(owner), false);
+    unlock();
+
+    const a = buildPayload(base, { name: 'a' });
+    const b = buildPayload(base, { name: 'b', pluginVersion: '1.1.0' });
+    for (const payload of [a, b])
+      install({ payload: payload.dir, root, dataHome, smoke: noSmoke });
+    const guardian = join(dataHome, 'auriga', 'guardian');
+    mkdirSync(guardian, { recursive: true });
+    const journal = join(guardian, 'process.json');
+    const session = join(root, 'desktop-session.json');
+    const setJournal = (entry) =>
+      writeFileSync(
+        journal,
+        JSON.stringify({
+          schemaVersion: 1,
+          launcher: null,
+          root: entry,
+          children: [],
+        }),
+      );
+    const switchBack = () => rollback({ root, smoke: noSmoke });
+    setJournal(identity);
+    assert.throws(switchBack, { code: 'desktop.in_use' });
+    writeFileSync(session, JSON.stringify({ pid: identity.pid, token: 'old' }));
+    assert.throws(switchBack, { code: 'desktop.in_use' });
+    setJournal(retired);
+    assert.deepEqual(switchBack(), { current: a.id });
+    assert.equal(existsSync(session), false);
+
+    setJournal(null);
+    writeFileSync(session, JSON.stringify({ pid: identity.pid, token: 'old' }));
+    assert.deepEqual(switchBack(), { current: b.id });
+    assert.equal(existsSync(session), false);
+
+    const bundled = join(root, 'versions', 'legacy-shell', 'upstream', 'node');
+    mkdirSync(bundled, { recursive: true });
+    const node = join(bundled, 'node.exe');
+    copyFileSync(process.execPath, node);
+    const child = spawn(node, [
+      '-e',
+      "console.log('ready'); process.stdin.resume()",
+    ]);
+    const exited = once(child, 'exit');
+    try {
+      await Promise.race([
+        once(child.stdout, 'data'),
+        exited.then(() => {
+          throw new Error('Bundled fixture exited before its readiness signal');
+        }),
+      ]);
+      setJournal({ ...retired, pid: child.pid });
+      writeFileSync(session, JSON.stringify({ pid: child.pid, token: 'old' }));
+      assert.throws(switchBack, { code: 'desktop.in_use' });
+      assert.equal(existsSync(session), true);
+    } finally {
+      child.stdin.end();
+      await exited;
+    }
+  },
+);
 
 test('tray control: stop line, end of stdin and named commands', async () => {
   const input = new EventEmitter();

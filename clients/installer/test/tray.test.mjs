@@ -36,6 +36,7 @@ test('launchers keep the exit line where older launchers resume after an update'
     for (const line of text.split('\r\n').filter((l) => /node\.exe/.test(l)))
       assert.match(line, /& call exit \/b %%ERRORLEVEL%%$/);
   assert.match(launcher, /start "" "%VER%\\auriga\\tray\\AurigaDesktop\.exe"/);
+  assert.match(rollback, /rollback\.ps1".*& call exit \/b %%ERRORLEVEL%%/);
 });
 
 test(

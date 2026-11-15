@@ -170,14 +170,7 @@ static class Setup
             if (DateTime.UtcNow >= until) return false;
             Thread.Sleep(250);
         }
-        // Older versions without tray run in a console window and keep a session file.
-        try
-        {
-            var session = new JavaScriptSerializer().Deserialize<Dictionary<string, object>>(File.ReadAllText(Path.Combine(root, "desktop-session.json")));
-            using (var p = Process.GetProcessById(Convert.ToInt32(session["pid"])))
-                if (!p.HasExited && p.ProcessName.Equals("node", StringComparison.OrdinalIgnoreCase)) return false;
-        }
-        catch (Exception) { }
+        // The installer core checks the legacy session and writer identities.
         return true;
     }
 }

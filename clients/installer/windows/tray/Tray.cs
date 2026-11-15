@@ -1008,15 +1008,7 @@ static class Program
             Thread.Sleep(250);
         }
         if (DateTime.UtcNow >= until) return false;
-        // An older launcher without tray (console window) still holds its session file.
-        var session = Desktop.ReadJson(Path.Combine(root, "desktop-session.json"));
-        string pid = Desktop.Str(session, "pid");
-        int id;
-        if (pid != null && int.TryParse(pid, out id))
-        {
-            try { using (var p = Process.GetProcessById(id)) if (!p.HasExited && p.ProcessName.Equals("node", StringComparison.OrdinalIgnoreCase)) return false; }
-            catch (ArgumentException) { }
-        }
+        // The installer core checks the legacy session and writer identities.
         return true;
     }
 

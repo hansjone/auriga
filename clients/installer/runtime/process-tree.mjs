@@ -61,7 +61,25 @@ export function processList() {
   const list = JSON.parse(output);
   return Array.isArray(list) ? list : [list];
 }
-const same = (a, b) => a && b && a.pid === b.pid && a.createdAt === b.createdAt;
+let ownIdentity;
+export function processIdentity(pid) {
+  if (!Number.isSafeInteger(pid) || pid < 1)
+    throw new Error('invalid process id');
+  if (pid === process.pid && ownIdentity) return ownIdentity;
+  try {
+    const output = ps(
+      `$p=Get-CimInstance Win32_Process -Filter "ProcessId=${pid}"; if ($p -and $p.CreationDate) { @{pid=[int]$p.ProcessId; createdAt=$p.CreationDate.ToUniversalTime().ToString('o'); executable=$p.ExecutablePath} | ConvertTo-Json -Compress }`,
+    ).trim();
+    const identity = output ? JSON.parse(output) : null;
+    if (pid === process.pid) ownIdentity = identity;
+    return identity;
+  } catch {
+    return null;
+  }
+}
+export const sameProcess = (a, b) =>
+  a && b && a.pid === b.pid && a.createdAt === b.createdAt;
+const same = sameProcess;
 export function notifyPrivateOnly() {
   notifyDesktop('共享技能已停用，建议新建会话。');
 }
