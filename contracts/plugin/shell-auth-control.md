@@ -125,3 +125,11 @@ Desktop 按 manifest 校验插件内全部文件，并逐文件比较插件与�
 `getPublicNetworkControl` 独立 GET `/api/collab/v2/network/bootstrap/controls`，平台请求不带 Authorization，不依赖消息连接或 `network_open` 权限。`confirmNetworkControl` 独立 POST `/api/collab/v2/network/controls/receipts`，权限 `collab.msgnet.control.install`，仅发送本地已持久化的安装签名回执；响应 `IsolationRecord` 的 scope、revision、digest、challenge 完全匹配后才清除待报标记。它们与调用点清单一一对应，均不接受 URL、header、pin 或私钥路径参数。本地 broker 的主人/epoch/revision 门禁仍适用。
 
 桌面 broker 使用同一生产 v2 信任库，tenant/realm 和安装身份从可信设备及安装配置派生，根控制隔离立即关闭现存连接；公有控制与回执操作可在没有 NATS 连接时执行。安装器通过受保护 pin/私钥文件提供独立身份，与插件安装说明一致。
+
+
+## Plugin login transition (PLUGIN-INLINE-LOGIN)
+
+The transitional device flow opens a same-origin `/device?user_code=...`. The broker validates the complete URI origin, path and unique user_code against this grant. When an older platform omits the complete URI, the broker constructs it from the validated base URI. The portal still requires explicit confirmation; manual mode is preserved.
+ShellAuthSnapshot.deviceAttempt is projected only to the initiating page or authenticated OS connection. Each subscription recomputes its owner projection. The plugin displays the code only during authentication and clears it on completion/cancellation. Device codes and tokens stay in the broker.
+ShellAuthSnapshot adds optional loginError={code,correlationId} and reason=platform_rejected. HTTP 4xx yields signed_out/platform_rejected; expired_token yields reauth_required/expired; transport and server failures remain unreachable/offline. Correlation IDs must be UUIDs, with the current attempt ID as fallback. Codes have bounded length and characters; response bodies are never projected. New login, cancellation and logout clear the error.
+Inline nativeConnect login is not implemented by this batch. Follow-up work should reuse the existing S256 nativeConnect transaction and exchange, with UAC and isolated CSRF/transaction cookie handling. A portal session alone is not a device credential.

@@ -57,7 +57,8 @@
             "revalidation_unreachable",
             "user_logout",
             "admin_disabled",
-            "member_disabled"
+            "member_disabled",
+            "platform_rejected"
           ]
         },
         "uacLoginInfo": {
@@ -66,6 +67,25 @@
         },
         "deviceAttempt": {
           "$ref": "#/$defs/ShellAuthDeviceAttempt"
+        },
+        "loginError": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "code",
+            "correlationId"
+          ],
+          "properties": {
+            "code": {
+              "type": "string",
+              "pattern": "^[a-zA-Z][a-zA-Z0-9_.-]{0,127}$"
+            },
+            "correlationId": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "description": "Bounded platform login error code and correlation UUID. No response body or credentials. Cleared on new login, cancellation or logout."
         }
       },
       "additionalProperties": false,

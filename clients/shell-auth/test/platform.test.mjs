@@ -236,3 +236,28 @@ test('K2 device projection uses authoritative member and source; AI claims keep 
     /identity mismatch/,
   );
 });
+
+test('platform 4xx retains status and correlation for JSON and non-JSON errors', async () => {
+  const correlationId = randomUUID();
+  for (const body of [
+    JSON.stringify({ error: 'invalid_client' }),
+    '<html>rejected</html>',
+  ]) {
+    const platform = createPlatform(
+      trustedConfig({ platformOrigin: 'https://example.com' }),
+      async () =>
+        new Response(body, {
+          status: 401,
+          headers: { 'x-auriga-correlation-id': correlationId },
+        }),
+    );
+    await assert.rejects(
+      platform.begin(),
+      (error) =>
+        error.status === 401 &&
+        error.correlationId === correlationId &&
+        error.code ===
+          (body.startsWith('{') ? 'invalid_client' : 'common.unavailable'),
+    );
+  }
+});

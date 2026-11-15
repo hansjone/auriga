@@ -138,12 +138,20 @@ export function createPlatform(config, fetcher = globalThis.fetch) {
         : {}),
     });
     const raw = await boundedBody(response);
-    const correlationId = response.headers.get('x-auriga-correlation-id');
+    const rawCorrelationId = response.headers.get('x-auriga-correlation-id');
+    const correlationId = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(
+      rawCorrelationId ?? '',
+    )
+      ? rawCorrelationId
+      : undefined;
     let data;
     try {
       data = raw.length ? JSON.parse(raw.toString('utf8')) : {};
     } catch {
-      throw new PlatformError(response.status, 'common.unavailable');
+      throw Object.assign(
+        new PlatformError(response.status, 'common.unavailable'),
+        { correlationId },
+      );
     }
     if (!response.ok)
       throw Object.assign(

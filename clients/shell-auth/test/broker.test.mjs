@@ -1,3 +1,4 @@
+import { setImmediate } from 'node:timers';
 import { OWNER, OTHER } from './fixtures.mjs';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -6,13 +7,14 @@ import { valid } from '../schema.mjs';
 
 import { fixture, command, login } from './fixtures.mjs';
 
-test('device login opens only base HTTPS verification page, stores secrets privately and pushes snapshot', async () => {
+test('device login opens prefilled HTTPS verification page, stores secrets privately and pushes snapshot', async () => {
   const f = fixture(),
     changes = [];
   f.broker.on('changed', (s) => changes.push(s));
   await f.broker.initialize();
   await login(f);
-  assert.equal(f.opened[0], 'https://example.com/device');
+  assert.equal(new URL(f.opened[0]).origin, 'https://example.com');
+  assert.ok(new URL(f.opened[0]).searchParams.get('user_code'));
   assert.equal(f.broker.snapshot().state, 'authenticated');
   assert.ok(changes.every((s) => valid('ShellAuthSnapshot', s)));
   assert.ok(!JSON.stringify(changes).includes(f.tokens.access_token));
@@ -31,7 +33,8 @@ test('confirmed IP binding opens only its own HTTP device page; HTTPS platforms 
     verification_uri: `${lan}/device`,
   });
   await login(ipLogin);
-  assert.deepEqual(ipLogin.opened, [`${lan}/device`]);
+  assert.equal(new URL(ipLogin.opened[0]).origin, lan);
+  assert.ok(new URL(ipLogin.opened[0]).searchParams.get('user_code'));
   await ipLogin.broker.close();
   for (const [platformOrigin, verification_uri] of [
     ['https://example.com', 'http://example.com/device'],
@@ -82,7 +85,7 @@ test('device authorization rejects absent or untrusted verification URI and neve
     verification_uri_complete: 'https://other.example.com/device',
   });
   await login(f);
-  assert.deepEqual(f.opened, ['https://example.com/device']);
+  assert.deepEqual(f.opened, []);
   await f.broker.close();
 });
 test('pending and slow_down are bounded, no workspace endpoint is called', async () => {
@@ -248,5 +251,124 @@ test('expired monotonic credential cannot become usable by rolling wall clock ba
   mono = until;
   assert.equal(f.broker.snapshot().state, 'reauth_required');
   assert.throws(() => f.broker.guard());
+  await f.broker.close();
+});
+
+test('prefilled authorization is bound to this grant and published only to its owner', async () => {
+  const f = fixture();
+  let release;
+  f.broker.wait = () =>
+    new Promise((resolve) => {
+      release = resolve;
+    });
+  const own = [],
+    foreign = [];
+  const stop = f.broker.subscribe(command(f.broker, 'subscribe'), OWNER, (e) =>
+    own.push(e.snapshot),
+  );
+  const stopOther = f.broker.subscribe(
+    command(f.broker, 'subscribe'),
+    OTHER,
+    (e) => foreign.push(e.snapshot),
+  );
+  await f.broker.command(command(f.broker, 'open_login'), OWNER);
+  await new Promise((resolve) => setImmediate(resolve));
+  const display = f.broker.snapshot(OWNER).deviceAttempt;
+  assert.equal(
+    new URL(f.opened[0]).searchParams.get('user_code'),
+    display.userCode,
+  );
+  assert.equal(own.at(-1).deviceAttempt.userCode, display.userCode);
+  assert.ok(foreign.every((s) => !s.deviceAttempt));
+  stop();
+  stopOther();
+  release();
+  await Promise.all([...f.broker.inflight]);
+  assert.equal(f.broker.snapshot(OWNER).deviceAttempt, undefined);
+  await f.broker.close();
+});
+test('platform rejection reports code and correlation without claiming network failure', async () => {
+  const correlationId = '11111111-2222-4333-8444-555555555555';
+  const f = fixture({
+    begin: async () => {
+      throw Object.assign(new PlatformError(401, 'invalid_client'), {
+        correlationId,
+      });
+    },
+  });
+  await login(f);
+  assert.equal(f.broker.state, 'signed_out');
+  assert.equal(f.broker.snapshot().reason, 'platform_rejected');
+  assert.deepEqual(f.broker.snapshot().loginError, {
+    code: 'invalid_client',
+    correlationId,
+  });
+  assert.ok(
+    f.logs.some(
+      (e) => e.code === 'invalid_client' && e.correlationId === correlationId,
+    ),
+  );
+  f.broker.cancel();
+  assert.equal(f.broker.snapshot().loginError, undefined);
+  await f.broker.close();
+});
+test('device expiry and rejection are terminal while transport failure is offline', async () => {
+  for (const [error, state, reason] of [
+    [new PlatformError(400, 'expired_token'), 'reauth_required', 'expired'],
+    [
+      new PlatformError(400, 'access_denied'),
+      'signed_out',
+      'platform_rejected',
+    ],
+    [new TypeError('fetch failed'), 'unreachable', 'offline'],
+  ]) {
+    const f = fixture({
+      poll: async () => {
+        throw error;
+      },
+    });
+    await login(f);
+    assert.equal(f.broker.state, state);
+    assert.equal(f.broker.snapshot().reason, reason);
+    await f.broker.close();
+  }
+});
+
+test('complete URI must match origin, route and exact grant code without extra parameters', async () => {
+  for (const uri of [
+    'https://other.example.com/device?user_code=BCDF-GHJK',
+    'https://example.com/device?user_code=BCDF-GHJK',
+    'https://example.com/device?user_code=BCDF-GHJK&user_code=BCDF-GHJK',
+    'https://example.com/device?user_code=BCDF-GHJK#bad',
+    'https://example.com/other?user_code=BCDF-GHJK',
+    'https://user@example.com/device?user_code=BCDF-GHJK',
+  ]) {
+    const f = fixture();
+    const begin = f.platform.begin;
+    f.platform.begin = async () => ({
+      ...(await begin()),
+      verification_uri_complete: uri,
+    });
+    await login(f);
+    assert.deepEqual(f.opened, []);
+    assert.equal(f.broker.record.tokens, undefined);
+    await f.broker.close();
+  }
+});
+test('a valid complete URI and manual login preserve prefill and require confirmation', async () => {
+  const f = fixture();
+  const begin = f.platform.begin;
+  f.platform.begin = async () => {
+    const grant = await begin();
+    return {
+      ...grant,
+      verification_uri_complete:
+        grant.verification_uri + '?user_code=' + grant.user_code,
+    };
+  };
+  f.broker.record.manualLoginRequired = true;
+  await login(f);
+  assert.equal(new URL(f.opened[0]).searchParams.get('mode'), 'manual');
+  assert.ok(new URL(f.opened[0]).searchParams.get('user_code'));
   await f.broker.close();
 });

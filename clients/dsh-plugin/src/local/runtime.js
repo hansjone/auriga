@@ -575,6 +575,10 @@ export async function createConnectRuntime({
         connection: who && team ? team.summary : null,
         platform: s?.state ?? 'unreachable',
         reason: s?.reason,
+        ...(requests.has(req) && s?.deviceAttempt
+          ? { deviceAttempt: s.deviceAttempt }
+          : {}),
+        ...(s?.loginError ? { loginError: s.loginError } : {}),
         brokerAvailable: !!s,
         migrationRequired: legacy && !who,
         account: who

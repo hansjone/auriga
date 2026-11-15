@@ -25,6 +25,7 @@ const reasons = new Set([
   'user_logout',
   'admin_disabled',
   'member_disabled',
+  'platform_rejected',
 ]);
 const fail = (code = 'common.unauthenticated') =>
   Object.assign(new Error(code), { code });
@@ -187,6 +188,34 @@ export function createShellState(options) {
         JSON.stringify(value.identity.uacSessionBinding),
       );
     if (reasons.has(value.reason)) snapshot.reason = value.reason;
+    if (
+      value.loginError &&
+      /^[a-zA-Z][a-zA-Z0-9_.-]{0,127}$/.test(value.loginError.code) &&
+      uuid(value.loginError.correlationId)
+    )
+      snapshot.loginError = {
+        code: value.loginError.code,
+        correlationId: value.loginError.correlationId,
+      };
+    const attempt = value.deviceAttempt;
+    if (
+      value.state === 'authenticating' &&
+      attempt &&
+      uuid(attempt.attemptId) &&
+      uuid(attempt.pageOwner) &&
+      /^[BCDFGHJKLMNPQRSTVWXZ]{4}-?[BCDFGHJKLMNPQRSTVWXZ]{4}$/.test(
+        attempt.userCode,
+      ) &&
+      Date.parse(attempt.expiresAt) > now() &&
+      attempt.verificationRequired === true
+    )
+      snapshot.deviceAttempt = {
+        attemptId: attempt.attemptId,
+        pageOwner: attempt.pageOwner,
+        userCode: attempt.userCode,
+        expiresAt: attempt.expiresAt,
+        verificationRequired: true,
+      };
     const info = value.uacLoginInfo;
     if (
       info?.purpose === 'login_info' &&

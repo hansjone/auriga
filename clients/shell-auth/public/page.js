@@ -44,6 +44,10 @@
       revoked: '平台授权已撤销，请重新登录。',
       reauth_required: '请重新登录。',
     }[snapshot.state];
+    if (snapshot.reason === 'platform_rejected')
+      status.textContent = '平台拒绝登录请求，请联系管理员检查客户端配置。';
+    if (snapshot.loginError)
+      status.textContent += ` ${snapshot.loginError.code} (${snapshot.loginError.correlationId})`;
   }
   try {
     const response = await fetch('/loopback/exchange', {

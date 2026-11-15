@@ -195,6 +195,8 @@ window.__ModuleLoader__.load({
         '平台已停用此登录来源或成员。请联系团队管理员。',
       loginBrowserHint:
         '门户默认 UAC 扫码；不能扫码时在门户选择团队账号或应急账号。',
+      loginCompare: '请核对门户预填的确认码与此处一致，仅确认自己发起的登录：',
+      loginRejected: '平台拒绝了登录请求，请联系管理员检查客户端配置。',
       loginMethods: '门户登录默认使用 UAC 扫码，其他方式：团队账号、应急账号。',
       platformLogin: '登录平台',
       configurePlatform: '配置平台地址',
@@ -405,6 +407,10 @@ window.__ModuleLoader__.load({
         'The platform disabled this member or sign-in method. Contact your team administrator.',
       loginBrowserHint:
         'The portal defaults to UAC scan. If you cannot scan, choose team account or emergency account there.',
+      loginCompare:
+        'Check that the portal confirmation code matches. Only approve a login you started:',
+      loginRejected:
+        'The platform rejected sign-in. Ask your administrator to check the client configuration.',
       loginMethods:
         'Portal sign-in defaults to UAC scan. Other ways: team account, emergency account.',
       platformLogin: 'Sign in to platform',
@@ -2391,6 +2397,25 @@ window.__ModuleLoader__.load({
               h('p', null, t('loginBrowserHint')),
             ['signedOut', 'reauth'].includes(view.kind) &&
               h('p', { className: 'auriga-muted' }, t('loginMethods')),
+            view.kind === 'authenticating' &&
+              shell?.deviceAttempt &&
+              h(
+                'p',
+                { role: 'status', 'aria-live': 'polite' },
+                t('loginCompare'),
+                ' ',
+                h('strong', null, shell.deviceAttempt.userCode),
+              ),
+            shell?.reason === 'platform_rejected' &&
+              h('p', { role: 'alert' }, t('loginRejected')),
+            shell?.loginError &&
+              h(
+                'p',
+                { className: 'auriga-muted' },
+                shell.loginError.code,
+                ' / ',
+                shell.loginError.correlationId,
+              ),
             outcome &&
               h('p', { role: 'status', 'aria-live': 'polite' }, t(outcome)),
             h(

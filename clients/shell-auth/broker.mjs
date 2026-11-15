@@ -79,6 +79,7 @@ export class Broker extends EventEmitter {
   }
   transition(state, reason, projection) {
     const identity = projection?.identity ?? this.projection?.identity;
+    if (state === 'authenticating' || !reason) this.loginError = undefined;
     this.state = state;
     this.reason = reason;
     this.projection = projection;
@@ -127,6 +128,7 @@ export class Broker extends EventEmitter {
       state,
       expiresAt: new Date(expiry).toISOString(),
       ...(reason ? { reason } : {}),
+      ...(this.loginError ? { loginError: this.loginError } : {}),
       ...(state === 'authenticated' && this.projection ? this.projection : {}),
       ...(state === 'authenticating' &&
       this.attempt?.display &&
@@ -216,16 +218,16 @@ export class Broker extends EventEmitter {
       command.expectedRevision !== this.revision
     )
       throw conflict();
-    const publish = (snapshot) =>
+    const publish = () =>
       send({
         protocolVersion: 1,
         requestId: command.requestId,
         type: 'changed',
-        snapshot,
+        snapshot: this.snapshot(owner),
       });
     this.on('changed', publish);
-    publish(this.snapshot()); // listener installed before initial projection
-    const timer = setInterval(() => publish(this.snapshot()), 10000);
+    publish(); // listener installed before initial projection
+    const timer = setInterval(publish, 10000);
     timer.unref();
     return () => {
       clearInterval(timer);
@@ -263,6 +265,7 @@ export class Broker extends EventEmitter {
     attempt?.controller.abort();
     // RFC8628 has no pre-approval revocation endpoint: stop polling. IAM expires
     // the unused grant; a response already in flight is revoked below.
+    this.loginError = undefined;
     this.transition('signed_out');
   }
   async queueRevoke(tokens, identity) {
@@ -401,6 +404,21 @@ export class Broker extends EventEmitter {
         url.hash
       )
         throw new Error('untrusted verification page');
+      // Never trust a platform-supplied redirect without binding its public
+      // user code to this exact grant. Legacy platforms can omit the complete URI.
+      const complete = new URL(grant.verification_uri_complete ?? url.href);
+      if (
+        grant.verification_uri_complete !== undefined &&
+        (complete.origin !== url.origin ||
+          complete.pathname !== '/device' ||
+          complete.username ||
+          complete.password ||
+          complete.hash ||
+          [...complete.searchParams.keys()].join(',') !== 'user_code' ||
+          complete.searchParams.get('user_code') !== grant.user_code)
+      )
+        throw new Error('untrusted complete verification page');
+      complete.searchParams.set('user_code', grant.user_code);
       const until = this.mono() + grant.expires_in * 1000;
       let interval = Math.max(
         5,
@@ -414,10 +432,10 @@ export class Broker extends EventEmitter {
         expiresAt: new Date(this.now() + grant.expires_in * 1000).toISOString(),
         verificationRequired: true,
       });
-      this.revision++;
+      this.transition('authenticating');
       if (this.record.manualLoginRequired)
-        url.searchParams.set('mode', 'manual');
-      await this.openBrowser(url.href);
+        complete.searchParams.set('mode', 'manual');
+      await this.openBrowser(complete.href);
       while (this.current(attempt) && this.mono() < until) {
         await this.wait(interval * 1000, undefined, { signal });
         if (!this.current(attempt) || this.mono() >= until) break;
@@ -497,16 +515,31 @@ export class Broker extends EventEmitter {
       if (tokens) await this.queueRevoke(tokens).catch(() => {});
       if (this.current(attempt)) {
         this.attempt = undefined;
+        const rejected = error.status >= 400 && error.status < 500;
+        const expired = error.code === 'expired_token';
+        const code =
+          typeof error.code === 'string' &&
+          /^[a-zA-Z][a-zA-Z0-9_.-]{0,127}$/.test(error.code)
+            ? error.code
+            : 'common.unavailable';
+        const correlationId =
+          /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(
+            error.correlationId ?? '',
+          )
+            ? error.correlationId
+            : attempt.correlationId;
+        this.loginError = { code, correlationId };
         this.transition(
-          error.code === 'access_denied' ? 'signed_out' : 'unreachable',
-          error.code === 'access_denied' ? undefined : 'offline',
+          expired ? 'reauth_required' : rejected ? 'signed_out' : 'unreachable',
+          expired ? 'expired' : rejected ? 'platform_rejected' : 'offline',
         );
       }
       this.log({
         stage: 'device_authorization',
         phase: 'end',
         result: signal.aborted ? 'cancelled' : 'failure',
-        correlationId: attempt.correlationId,
+        correlationId: this.loginError?.correlationId ?? attempt.correlationId,
+        ...(this.loginError ? { code: this.loginError.code } : {}),
       });
     }
   }
@@ -634,6 +667,7 @@ export class Broker extends EventEmitter {
     this.attempt = undefined;
     delete this.record.tokens;
     this.record.manualLoginRequired = true;
+    this.loginError = undefined;
     this.transition('signed_out', 'user_logout'); // local stop before network
     await this.save();
     this.track(this.queueRevoke(tokens, identity));
