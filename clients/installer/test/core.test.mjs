@@ -380,7 +380,13 @@ test('first install failing leaves no pointers, profile or version behind', (t) 
     assert.equal(existsSync(join(f.root, 'current.txt')), false, point);
     assert.equal(existsSync(join(f.root, 'bin')), false, point);
     assert.equal(existsSync(profileDir(f.dataHome)), false, point);
-    assert.deepEqual(readdirSync(join(f.root, 'versions')), [], point);
+    // No half-installed state: no version tree and no ownership marker remain.
+    assert.equal(existsSync(join(f.root, 'versions')), false, point);
+    assert.equal(
+      existsSync(join(f.root, '.auriga-desktop-install')),
+      false,
+      point,
+    );
     assert.equal(existsSync(join(f.root, 'txn.json')), false, point);
   }
 });
@@ -552,6 +558,7 @@ test('uninstall removes only what we own and keeps user data and foreign files',
   put(f, { name: 'a' });
   writeFileSync(join(f.dataHome, 'keep.txt'), 'x');
   writeFileSync(join(f.root, 'notes.txt'), 'user note in install dir');
+  writeFileSync(join(f.root, 'desktop-tray.json'), '{"autoDownload":true}');
   mkdirSync(join(f.root, 'extra'), { recursive: true });
   mkdirSync(join(f.root, '.desktop-resume'));
   writeFileSync(join(f.root, '.desktop-resume/desktop.exe'), 'partial update');
@@ -562,6 +569,7 @@ test('uninstall removes only what we own and keeps user data and foreign files',
   assert.deepEqual(uninstall({ root: f.root }), {
     dataKept: true,
     dataHome: f.dataHome,
+    pending: [],
   });
   assert.deepEqual(readdirSync(f.root).sort(), ['extra', 'notes.txt']);
   assert.ok(existsSync(join(profileDir(f.dataHome), 'package.json')));
@@ -584,13 +592,30 @@ test('uninstall never deletes a data directory that ended up inside the install 
   assert.equal(text(join(inside, 'session.json')), 'precious');
 });
 
-test('purge removes our marked profile only and refuses unmarked directories', (t) => {
+test('purge removes our own data directory, but only our profile from a shared one, and refuses unmarked directories', (t) => {
   const f = fixture(t);
   put(f, { name: 'a' });
-  writeFileSync(join(f.dataHome, 'keep.txt'), 'x');
+  mkdirSync(join(f.dataHome, 'sessions'), { recursive: true });
+  writeFileSync(join(f.dataHome, 'sessions', 's.json'), 'x');
   uninstall({ root: f.root, purgeData: true });
-  assert.equal(existsSync(profileDir(f.dataHome)), false);
-  assert.equal(text(join(f.dataHome, 'keep.txt')), 'x');
+  assert.equal(existsSync(f.dataHome), false);
+
+  const shared = fixture(t);
+  put(shared, { name: 'a' });
+  // Another DSH profile lives in the same data directory: keep everything not ours.
+  mkdirSync(join(shared.dataHome, 'profiles', 'web'), { recursive: true });
+  writeFileSync(join(shared.dataHome, 'keep.txt'), 'x');
+  uninstall({ root: shared.root, purgeData: true });
+  assert.equal(existsSync(profileDir(shared.dataHome)), false);
+  assert.equal(text(join(shared.dataHome, 'keep.txt')), 'x');
+  assert.ok(existsSync(join(shared.dataHome, 'profiles', 'web')));
+
+  const custom = fixture(t);
+  put(custom, { name: 'a' });
+  writeFileSync(join(custom.dataHome, 'keep.txt'), 'user document');
+  uninstall({ root: custom.root, purgeData: true });
+  assert.equal(text(join(custom.dataHome, 'keep.txt')), 'user document');
+  assert.equal(existsSync(profileDir(custom.dataHome)), false);
 
   const g = fixture(t);
   put(g, { name: 'a' });

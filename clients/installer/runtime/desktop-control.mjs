@@ -1,0 +1,150 @@
+/**
+ * One-shot commands for the Windows tray (and support): installation facts,
+ * update check/download and the update preference. They reuse the same signed
+ * updater as the plugin settings page; nothing here widens trust.
+ */
+import { existsSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { readState, versionDir } from './core.mjs';
+import { approvePending, createUpdater, idleRequest } from './update.mjs';
+
+const readJson = (file) => JSON.parse(readFileSync(file, 'utf8'));
+const optionalJson = (file) => (existsSync(file) ? readJson(file) : null);
+
+/** Display-only summary: no signature material, tokens or envelopes. */
+export function desktopInfo(root) {
+  const state = readState(root);
+  if (!state) throw new Error('desktop installation missing');
+  const manifest = readJson(
+    join(versionDir(root, state.current), 'manifest.json'),
+  );
+  const binding = optionalJson(join(root, 'desktop-origin.json'));
+  const update = optionalJson(join(root, 'desktop-update.json')) ?? {};
+  const envelopeVersion = (envelope) =>
+    typeof envelope?.version === 'string' ? envelope.version : null;
+  return {
+    product: manifest.product,
+    version: manifest.bundleVersion,
+    packageId: manifest.id,
+    previous: state.previous ?? null,
+    components: {
+      dsh: manifest.upstream?.version ?? null,
+      node: manifest.upstream?.nodeVersion ?? null,
+      plugin: manifest.plugin?.version ?? null,
+      pnpm: manifest.pnpm?.version ?? null,
+    },
+    dataHome: state.dataHome,
+    logs: join(state.dataHome, 'auriga', 'logs'),
+    platformOrigin: binding?.origin ?? null,
+    accessMode: binding?.accessMode ?? (binding ? 'domain' : null),
+    updatesConfigured: Boolean(
+      binding?.origin &&
+      existsSync(
+        join(
+          versionDir(root, state.current),
+          'auriga/runtime/release-public-key.txt',
+        ),
+      ),
+    ),
+    update: {
+      enabled: update.enabled !== false,
+      channel: update.channel ?? 'stable',
+      phase: update.phase ?? 'idle',
+      available: envelopeVersion(update.available),
+      required: Boolean(update.requiredRelease),
+      downloadedBytes: update.downloadedBytes ?? 0,
+      totalBytes: update.totalBytes ?? 0,
+      error: update.error ?? null,
+      lastCheckedAt: update.lastCheckedAt ?? null,
+      restartRequired: existsSync(join(root, 'desktop-pending')),
+    },
+  };
+}
+
+/** Updater bound to the installation's verified origin and packaged public key. */
+export function desktopUpdater(
+  root,
+  { onState, request, publicKey, requireApproval } = {},
+) {
+  const binding = optionalJson(join(root, 'desktop-origin.json'));
+  if (!binding?.origin)
+    throw Object.assign(new Error('desktop platform address not configured'), {
+      code: 'desktop.update_unconfigured',
+    });
+  return createUpdater({
+    root,
+    origin: binding.origin,
+    request: request ?? idleRequest(binding.origin),
+    ...(publicKey ? { publicKey } : {}),
+    onState,
+    requireApproval,
+  });
+}
+
+const summary = (status) => ({
+  enabled: status.enabled,
+  channel: status.channel,
+  available:
+    typeof status.available?.version === 'string'
+      ? status.available.version
+      : null,
+  required: status.required,
+  phase: status.phase,
+  downloadedBytes: status.downloadedBytes,
+  totalBytes: status.totalBytes,
+  error: status.error,
+  restartRequired: status.restartRequired,
+});
+
+/** Tray commands for checking, preparing and approving signed updates. */
+export async function updateCommand(
+  root,
+  action,
+  {
+    enabled,
+    print = (value) => console.log(JSON.stringify(value)),
+    ...options
+  } = {},
+) {
+  if (action === 'approve') {
+    approvePending(root);
+    print({ approved: true });
+    return;
+  }
+  if (action === 'configure') {
+    const updater = desktopUpdater(root, options);
+    print(summary(updater.configure(enabled)));
+    return;
+  }
+  let last = 0;
+  const updater = desktopUpdater(root, {
+    ...options,
+    requireApproval: action === 'download',
+    onState: (state) => {
+      if (action !== 'download' || Date.now() - last < 200) return;
+      last = Date.now();
+      print({
+        progress: true,
+        phase: state.phase ?? 'idle',
+        downloadedBytes: state.downloadedBytes ?? 0,
+        totalBytes: state.totalBytes ?? 0,
+      });
+    },
+  });
+  if (action === 'check') {
+    print(summary(await updater.check()));
+    return;
+  }
+  if (action !== 'download') throw new Error('unknown update action');
+  if (updater.status().restartRequired) {
+    print({ ...summary(updater.status()), queued: true });
+    return;
+  }
+  if (!updater.status().available) await updater.check();
+  if (!updater.status().available) {
+    print(summary(updater.status()));
+    return;
+  }
+  const result = await updater.update();
+  print({ ...summary(updater.status()), queued: Boolean(result.queued) });
+}

@@ -12,8 +12,11 @@ export async function superviseDsh({
   attach = async () => {},
   poll = () => delay(1000),
   now = () => Math.floor(uptime() * 1000),
+  stopRequested = () => false,
 }) {
   for (;;) {
+    // An exit requested by the owner (tray) is a clean application exit.
+    if (stopRequested()) return 0;
     const child = start();
     let ended = false;
     const exited = new Promise((resolve) => {
@@ -39,6 +42,7 @@ export async function superviseDsh({
       // the child's exit event is delivered before another synchronous scan.
       await delay(0);
       if (ended) break;
+      if (stopRequested()) break;
       if (now() - refreshed >= 15000) {
         tree.refresh();
         refreshed = now();
@@ -50,9 +54,11 @@ export async function superviseDsh({
         break;
       }
     }
+    if (!ended && stopRequested()) await tree.stopTree();
     const result = await exited;
     if (result.error) throw result.error;
     await tree.stopTree();
+    if (stopRequested()) return 0;
     if (!restart) return result.code;
     notify();
   }

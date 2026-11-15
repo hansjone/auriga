@@ -10,14 +10,31 @@ param(
   [string]$DesktopDir = $(if ($env:AURIGA_DESKTOP_DIR) { $env:AURIGA_DESKTOP_DIR } else { [Environment]::GetFolderPath('Desktop') }),
   [string]$RegistryKey = $(if ($env:AURIGA_REGISTRY_KEY) { $env:AURIGA_REGISTRY_KEY } else { 'AurigaDesktop' }),
   [switch]$NoDesktopShortcut,
-  [switch]$NoShortcuts
+  [switch]$NoShortcuts,
+  # Setup wizard: machine-readable steps on stdout, and cancellation by creating this file.
+  [switch]$Progress,
+  [string]$CancelFile
 )
 $ErrorActionPreference = 'Stop'
 $BrandName = 'Auriga DSH'
 $payload = Join-Path $PSScriptRoot 'payload'
 $node = Join-Path $payload 'upstream\node\node.exe'
 $cli = Join-Path $payload 'auriga\runtime\cli.mjs'
+# An upgrade keeps the data directory of the existing installation.
+$stateFile = Join-Path $InstallDir 'install.json'
+$upgrading = Test-Path -LiteralPath $stateFile
+if ($upgrading -and -not $PSBoundParameters.ContainsKey('DataHome') -and -not $env:AURIGA_DATA_HOME) {
+  $DataHome = (Get-Content -Raw -LiteralPath $stateFile | ConvertFrom-Json).dataHome
+}
+if ($upgrading -and -not $PSBoundParameters.ContainsKey('NoDesktopShortcut')) {
+  $NoDesktopShortcut = -not (
+    (Test-Path -LiteralPath (Join-Path $DesktopDir "$BrandName.lnk")) -or
+    (Test-Path -LiteralPath (Join-Path $DesktopDir 'Auriga Desktop.lnk'))
+  )
+}
 $argList = @($cli, 'install', '--payload', $payload, '--root', $InstallDir, '--data-home', $DataHome)
+if ($Progress) { $argList += '--progress' }
+if ($CancelFile) { $argList += @('--cancel-file', $CancelFile) }
 if ($PlatformOrigin) { $argList += @('--platform-origin', $PlatformOrigin) }
 if ($PlatformAccessMode) { $argList += @('--platform-access-mode', $PlatformAccessMode) }
 if ($ConfirmPlatformOrigin) { $argList += @('--confirm-platform-origin', $ConfirmPlatformOrigin) }
@@ -41,6 +58,8 @@ try {
       $link.WorkingDirectory = $InstallDir
       $link.WindowStyle = 7
       $link.Description = $BrandName
+      $ico = Join-Path $InstallDir 'bin\auriga.ico'
+      if (Test-Path -LiteralPath $ico) { $link.IconLocation = "$ico,0" }
       $link.Save()
       $oldPath = Join-Path $dir 'Auriga Desktop.lnk'
       if (Test-Path -LiteralPath $oldPath) {
@@ -49,19 +68,35 @@ try {
       }
       $links += $path
     }
+    # Start menu uninstall entry (the Apps & features entry and bin\uninstall.cmd open the same uninstaller).
+    $remove = $shell.CreateShortcut((Join-Path $StartMenuDir "卸载 $BrandName.lnk"))
+    $remove.TargetPath = Join-Path $InstallDir 'bin\uninstall.cmd'
+    $remove.WorkingDirectory = [Environment]::SystemDirectory
+    $remove.WindowStyle = 7
+    $remove.Description = "卸载 $BrandName"
+    $ico = Join-Path $InstallDir 'bin\auriga.ico'
+    if (Test-Path -LiteralPath $ico) { $remove.IconLocation = "$ico,0" }
+    $remove.Save()
+    $links += (Join-Path $StartMenuDir "卸载 $BrandName.lnk")
   }
   $key = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\$RegistryKey"
   New-Item -Path $key -Force | Out-Null
-  $uninstall = "powershell.exe -NoProfile -ExecutionPolicy Bypass -File `"$(Join-Path $InstallDir 'bin\uninstall.ps1')`""
+  $uninstall = "powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$(Join-Path $InstallDir 'bin\uninstall.ps1')`""
   $values = @{
     DisplayName = $BrandName
     DisplayVersion = $manifest.bundleVersion
-    Publisher = $BrandName
+    Publisher = 'Auriga'
+    DisplayIcon = (Join-Path $InstallDir 'bin\auriga.ico')
+    InstallDate = (Get-Date -Format 'yyyyMMdd')
     InstallLocation = $InstallDir
     UninstallString = $uninstall
     QuietUninstallString = "$uninstall -Quiet"
   }
   foreach ($name in $values.Keys) { New-ItemProperty -Path $key -Name $name -Value $values[$name] -PropertyType String -Force | Out-Null }
+  # Apps & features size, in KiB, of the installed version.
+  $bytes = 0
+  foreach ($file in [IO.Directory]::EnumerateFiles((Join-Path $InstallDir "versions\$($manifest.id)"), '*', 'AllDirectories')) { $bytes += ([IO.FileInfo]$file).Length }
+  New-ItemProperty -Path $key -Name EstimatedSize -Value ([int]($bytes / 1024)) -PropertyType DWord -Force | Out-Null
   New-ItemProperty -Path $key -Name NoModify -Value 1 -PropertyType DWord -Force | Out-Null
   New-ItemProperty -Path $key -Name NoRepair -Value 1 -PropertyType DWord -Force | Out-Null
   @{ shortcuts = $links; registryKey = $RegistryKey } | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $InstallDir 'shell.json') -Encoding UTF8

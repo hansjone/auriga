@@ -1,3 +1,4 @@
+/* global setInterval, clearInterval */
 import { BRAND_NAME } from './brand.mjs';
 import { updateOrigin, normalizePlatformBinding } from './platform-origin.mjs';
 import { cleanupDownloads } from './update-state.mjs';
@@ -64,6 +65,7 @@ const PROVIDER_ID = 'discover';
 const PLUGIN_SPEC = 'file:./.auriga/auriga-dsh.tgz';
 const BUNDLES = ['@deepseek-ai/dsh-base', '@deepseek-ai/dsh-web-app', PLUGIN];
 const INSTALL_MARKER = '.auriga-desktop-install';
+const UNINSTALL_MARKER = '.auriga-desktop-uninstall-pending';
 const DATA_MARKER = '.auriga-desktop';
 /** Everything uninstall may remove from the install directory. */
 const OWNED_ENTRIES = [
@@ -79,8 +81,12 @@ const OWNED_ENTRIES = [
   'desktop-update.json.tmp',
   'desktop-pending',
   '.desktop-resume',
+  '.desktop-update-lock',
   'desktop-origin.json',
   'desktop-session.json',
+  'desktop-tray.json',
+  'desktop-tray.json.tmp',
+  'shell.json.tmp',
 ];
 
 export class CrashError extends Error {}
@@ -169,6 +175,8 @@ export function assertLayout(root, dataHome) {
     throw new Error('install directory must not be inside the data directory');
   if (existsSync(root)) {
     const entries = readdirSync(root);
+    if (entries.includes(UNINSTALL_MARKER))
+      throw new Error('卸载清理尚未完成，请重新登录 Windows 后再安装。');
     if (entries.length > 0 && !entries.includes(INSTALL_MARKER))
       throw new Error(
         `install directory is not empty and is not an ${BRAND_NAME} installation`,
@@ -523,9 +531,70 @@ function transition({
 
 const noFault = () => {};
 
+/** Thrown at a cancellation checkpoint; the normal failure path then rolls back. */
+export class CancelledError extends Error {
+  constructor() {
+    super('installation cancelled');
+    this.code = 'desktop.install_cancelled';
+  }
+}
+
+/**
+ * Copy a payload in many small units so a long copy can report progress and
+ * stop at a checkpoint. Directories are expanded down to package contents.
+ */
+function copyTreeSteps(from, to, step) {
+  const units = [];
+  const walk = (rel, depth) => {
+    mkdirSync(join(to, rel), { recursive: true });
+    for (const entry of readdirSync(join(from, rel), { withFileTypes: true })) {
+      const path = rel ? join(rel, entry.name) : entry.name;
+      if (entry.isDirectory() && !entry.isSymbolicLink() && depth < 4)
+        walk(path, depth + 1);
+      else units.push(path);
+    }
+  };
+  walk('', 0);
+  let reported = -1;
+  units.forEach((path, index) => {
+    copyTree(join(from, path), join(to, path));
+    const fraction = Math.floor(((index + 1) / units.length) * 100);
+    if (fraction !== reported) {
+      reported = fraction;
+      step(fraction / 100);
+    }
+  });
+}
+
+/** Remove only the empty directories and marker a failed first install created. */
+function cleanupFreshInstall(root, dataHome, created) {
+  const removeEmpty = (dir) => {
+    try {
+      rmdirSync(dir);
+    } catch {
+      // Not empty (user files) or absent: keep it.
+    }
+  };
+  for (const entry of OWNED_ENTRIES)
+    rmSync(join(root, entry), { recursive: true, force: true });
+  rmSync(join(root, INSTALL_MARKER), { force: true });
+  if (created.root) removeEmpty(root);
+  if (created.profile) {
+    rmSync(join(backupsDir(dataHome), DATA_MARKER), { force: true });
+    removeEmpty(backupsDir(dataHome));
+    removeEmpty(dirname(backupsDir(dataHome)));
+    removeEmpty(dirname(profileDir(dataHome)));
+  }
+  if (created.dataHome) removeEmpty(dataHome);
+}
+
 /**
  * Install or upgrade from a staged payload directory.
  * Returns { id, previous, upgraded }.
+ *
+ * `progress(stage, fraction)` reports the current step; `cancelled()` is
+ * polled at checkpoints before the commit. A failed or cancelled first install
+ * leaves no installation behind; an upgrade is rolled back to the old version.
  */
 export function install({
   payload,
@@ -535,7 +604,12 @@ export function install({
   platformBinding = {},
   smoke = defaultSmoke,
   fault = noFault,
+  progress = () => {},
+  cancelled = () => false,
 }) {
+  const checkpoint = () => {
+    if (cancelled()) throw new CancelledError();
+  };
   const explicitConfirmation = platformBinding.confirmedOrigin !== undefined;
   const selectedBinding = platformOrigin
     ? normalizePlatformBinding(platformOrigin, platformBinding)
@@ -569,53 +643,79 @@ export function install({
         'moving data is not supported, uninstall first or keep the same directory',
     );
   // Verify before anything is copied into place or executed.
+  progress('verify', 0);
   const manifest = verifyPackage(payload, { trees: false });
   assertGuardianCompatible(payload, dataHome);
+  checkpoint();
+  const created = {
+    root: !existsSync(root),
+    dataHome: !existsSync(dataHome),
+    profile: !existsSync(profileDir(dataHome)),
+  };
+  const firstInstall = !existing;
   mkdirSync(join(root, 'versions'), { recursive: true });
   writeFileSync(
     join(root, INSTALL_MARKER),
     JSON.stringify({ product: 'Auriga Desktop', schema: 1 }) + '\n',
   );
-  recover(root);
-  const id = manifest.id;
-  const state = readState(root);
-  const previous = state?.current ?? null;
-  const target = versionDir(root, id);
-  let fresh = !existsSync(target);
-  if (!fresh) {
-    try {
-      verifyPackage(target);
-    } catch {
-      rmSync(target, { recursive: true, force: true });
-      fresh = true;
+  let id, previous;
+  try {
+    recover(root);
+    id = manifest.id;
+    const state = readState(root);
+    previous = state?.current ?? null;
+    const target = versionDir(root, id);
+    let fresh = !existsSync(target);
+    if (!fresh) {
+      try {
+        verifyPackage(target);
+      } catch {
+        rmSync(target, { recursive: true, force: true });
+        fresh = true;
+      }
     }
-  }
-  if (fresh) {
-    const staging = `${target}.partial`;
-    rmSync(staging, { recursive: true, force: true });
-    try {
-      copyTree(payload, staging);
-      verifyPackage(staging);
-    } catch (error) {
+    if (fresh) {
+      const staging = `${target}.partial`;
       rmSync(staging, { recursive: true, force: true });
-      throw error;
+      try {
+        copyTreeSteps(payload, staging, (fraction) => {
+          progress('copy', fraction);
+          checkpoint();
+        });
+        progress('verify-copy', 0);
+        verifyPackage(staging);
+        checkpoint();
+      } catch (error) {
+        rmSync(staging, { recursive: true, force: true });
+        throw error;
+      }
+      renameSync(staging, target);
     }
-    renameSync(staging, target);
+    transition({
+      root,
+      dataHome,
+      from: state,
+      toId: id,
+      fresh,
+      target,
+      fault,
+      apply() {
+        progress('profile', 0);
+        seedProfile(dataHome, { platformOrigin, target });
+        syncPlugin(target, dataHome);
+        checkpoint();
+        progress('smoke', 0);
+        smoke(target, dataHome);
+        checkpoint();
+        progress('commit', 0);
+      },
+    });
+  } catch (error) {
+    if (firstInstall && !(error instanceof CrashError))
+      cleanupFreshInstall(root, dataHome, created);
+    throw error;
   }
-  transition({
-    root,
-    dataHome,
-    from: state,
-    toId: id,
-    fresh,
-    target,
-    fault,
-    apply() {
-      seedProfile(dataHome, { platformOrigin, target });
-      syncPlugin(target, dataHome);
-      smoke(target, dataHome);
-    },
-  });
+  progress('done', 1);
   if (selectedBinding && (explicitConfirmation || !previousBinding))
     writeJsonAtomic(bindingFile, selectedBinding);
   return { id, previous, upgraded: Boolean(previous && previous !== id) };
@@ -661,11 +761,20 @@ export function rollback({ root, smoke = defaultSmoke, fault = noFault }) {
 export function uninstall({ root, purgeData = false }) {
   root = resolve(root);
   assertOwned(root);
+  const session = desktopSession(root);
+  try {
+    return uninstallStopped(root, purgeData);
+  } finally {
+    session.close();
+  }
+}
+
+function uninstallStopped(root, purgeData) {
   recover(root);
-  cleanupDownloads(root, { stopped: true });
   const state = readState(root);
   if (!state) throw new Error(`no installation state in ${root}`);
   if (purgeData) {
+    assertLayout(root, state.dataHome);
     for (const dir of [
       profileDir(state.dataHome),
       backupsDir(state.dataHome),
@@ -674,18 +783,82 @@ export function uninstall({ root, purgeData = false }) {
       if (!existsSync(join(dir, DATA_MARKER)))
         throw new Error(`refusing to remove unmarked directory: ${dir}`);
     }
-    rmSync(profileDir(state.dataHome), { recursive: true, force: true });
-    rmSync(backupsDir(state.dataHome), { recursive: true, force: true });
   }
-  for (const entry of OWNED_ENTRIES)
-    rmSync(join(root, entry), { recursive: true, force: true });
-  rmSync(join(root, INSTALL_MARKER), { force: true });
+  // Take the program files out of service in one rename first: a file still in
+  // use fails here, before anything is deleted, so there is no half-removed state.
+  const trash = join(root, `.uninstall-${randomUUID()}`);
+  if (existsSync(join(root, 'versions')))
+    try {
+      renameSync(join(root, 'versions'), trash);
+    } catch {
+      throw Object.assign(
+        new Error(`${BRAND_NAME} 的文件正在使用，请先退出后再卸载。`),
+        { code: 'desktop.in_use' },
+      );
+    }
+  const pending = [];
+  const remove = (path) => {
+    try {
+      rmSync(path, { recursive: true, force: true, maxRetries: 3 });
+    } catch {
+      pending.push(path);
+    }
+  };
+  if (purgeData) {
+    if (ownedDataHome(state.dataHome)) remove(state.dataHome);
+    else {
+      remove(profileDir(state.dataHome));
+      remove(backupsDir(state.dataHome));
+    }
+  }
+  remove(trash);
+  for (const entry of OWNED_ENTRIES) remove(join(root, entry));
+  for (const entry of readdirSync(root))
+    if (/^\.desktop-download-[A-Za-z0-9-]+$/.test(entry))
+      remove(join(root, entry));
+  remove(join(root, INSTALL_MARKER));
+  if (pending.length > 0) {
+    // Keep this root out of service until cleanup. A stale job must never
+    // touch a later installation that reused the same paths.
+    const cleanupId = randomUUID();
+    writeFileSync(join(root, UNINSTALL_MARKER), cleanupId, { flag: 'wx' });
+    return {
+      dataKept: !purgeData,
+      dataHome: state.dataHome,
+      pending,
+      cleanupId,
+    };
+  }
   try {
     rmdirSync(root);
   } catch {
     // Not empty (user files) or still in use: leave it.
   }
-  return { dataKept: !purgeData, dataHome: state.dataHome };
+  return { dataKept: !purgeData, dataHome: state.dataHome, pending };
+}
+
+/**
+ * The whole data directory is removed only when it is plainly ours: our
+ * marked profile is its only profile, and it is not a drive or home root.
+ */
+function ownedDataHome(dataHome) {
+  const profiles = join(dataHome, 'profiles');
+  if (parsePath(dataHome).root === resolve(dataHome)) return false;
+  for (const home of [process.env.USERPROFILE, process.env.HOME])
+    if (home && norm(home) === norm(dataHome)) return false;
+  return (
+    existsSync(join(profileDir(dataHome), DATA_MARKER)) &&
+    readdirSync(profiles).every((name) => name === PROFILE) &&
+    readdirSync(dataHome).every((name) =>
+      [
+        'auriga',
+        'profiles',
+        'profile-backups',
+        'sessions',
+        'pnpm-store',
+      ].includes(name),
+    )
+  );
 }
 
 /** One running DSH per installation: deferred updates may only mutate a stopped profile. */
@@ -705,7 +878,8 @@ export function desktopSession(root) {
           writeJsonAtomic(file, { pid, token });
         },
         close() {
-          if (readJson(file).token === token) rmSync(file, { force: true });
+          if (existsSync(file) && readJson(file).token === token)
+            rmSync(file, { force: true });
         },
       };
     } catch (error) {
@@ -728,8 +902,38 @@ export function desktopSession(root) {
   throw new Error('desktop session busy');
 }
 
-export async function launch({ root, args = [], env = process.env }) {
+/** Secret-free platform status for the tray: state and fixed reason codes only. */
+export function platformStatus(shellAuth, failure) {
+  if (!shellAuth)
+    return { state: 'unavailable', reason: failure ?? 'unavailable' };
+  try {
+    const { state, reason } = shellAuth.snapshot();
+    return reason ? { state, reason } : { state };
+  } catch {
+    return { state: 'unavailable', reason: 'snapshot_failed' };
+  }
+}
+
+/**
+ * `control` (tray mode): `{ requested, report(event), release() }`. A stop
+ * request ends DSH cleanly, applies a queued update and returns; status
+ * events are reported without tokens, identities or paths.
+ */
+export async function launch({
+  root,
+  args = [],
+  env = process.env,
+  control,
+  openLoginOnStart = !args.includes('--no-open'),
+}) {
   root = resolve(root);
+  const report = (event) => {
+    try {
+      control?.report(event);
+    } catch {
+      // A closed tray pipe must not break the launcher.
+    }
+  };
   assertOwned(root);
   const initial = readState(root);
   if (!initial) throw new Error('installation state missing');
@@ -747,7 +951,7 @@ export async function launch({ root, args = [], env = process.env }) {
     packagedTrust(versionDir(root, initial.current)),
   );
   const releaseSingleton = tree.singleton();
-  let session, shellAuth;
+  let session, shellAuth, shellFailure, statusTimer;
   const hasShell = existsSync(
     join(versionDir(root, initial.current), 'auriga/shell-auth/desktop.mjs'),
   );
@@ -766,8 +970,19 @@ export async function launch({ root, args = [], env = process.env }) {
     const { applyPending } = await import('./update.mjs');
     const apply = async () => {
       try {
-        await applyPending(root);
+        if (existsSync(join(root, 'desktop-pending')))
+          report({ event: 'update', phase: 'installing' });
+        if (await applyPending(root))
+          report({ event: 'update', phase: 'installed' });
       } catch (error) {
+        report({
+          event: 'update',
+          phase: 'failed',
+          reason:
+            error?.code === 'desktop.smoke_failed'
+              ? 'desktop.smoke_failed'
+              : 'updateFailed',
+        });
         // Keep upstream config/error output private; expose only a fixed reason.
         console.error(
           error?.code === 'desktop.smoke_failed'
@@ -784,7 +999,48 @@ export async function launch({ root, args = [], env = process.env }) {
     supervisor.trust = packagedTrust(dir);
     if (existsSync(join(dir, 'auriga/shell-auth/desktop.mjs'))) {
       supervisor.shellSnapshot = () => shellAuth?.snapshot();
-      shellAuth = await startShellAuth({ root, dataHome: state.dataHome, dir });
+      shellAuth = await startShellAuth({
+        root,
+        dataHome: state.dataHome,
+        dir,
+        openLoginOnStart,
+        onSkipLogin: (localLogin) =>
+          report({
+            event: 'login',
+            opened: false,
+            state: localLogin ? 'local_login' : 'skipped',
+          }),
+        onFailure: (reason) => {
+          shellFailure = reason;
+        },
+      });
+    } else shellFailure = 'component_missing';
+    if (control) {
+      let last = '';
+      const publish = () => {
+        const platform = platformStatus(shellAuth, shellFailure);
+        const text = JSON.stringify(platform);
+        if (text === last) return;
+        last = text;
+        report({ event: 'platform', ...platform });
+      };
+      publish();
+      statusTimer = setInterval(publish, 2000);
+      statusTimer.unref();
+      // "Open Auriga" while signed out shows the platform sign-in page first.
+      control.on?.('login', () => {
+        const platform = platformStatus(shellAuth, shellFailure);
+        if (!shellAuth?.openLogin || platform.state === 'authenticated') {
+          report({ event: 'login', opened: false, state: platform.state });
+          return;
+        }
+        Promise.resolve()
+          .then(() => shellAuth.openLogin())
+          .then(
+            () => report({ event: 'login', opened: true }),
+            () => report({ event: 'login', opened: false, state: 'failed' }),
+          );
+      });
     }
     await supervisor.reconcile(true);
     if (
@@ -793,6 +1049,7 @@ export async function launch({ root, args = [], env = process.env }) {
     )
       notifyPrivateOnly();
     const status = await superviseDsh({
+      stopRequested: () => Boolean(control?.requested),
       tree,
       supervisor,
       session,
@@ -809,9 +1066,13 @@ export async function launch({ root, args = [], env = process.env }) {
       },
       start: () =>
         spawn(nodeBin(dir), [dshBin(dir), '--profile', PROFILE, ...args], {
-          stdio: shellAuth
-            ? ['inherit', 'inherit', 'inherit', 'pipe']
-            : 'inherit',
+          // In tray mode stdin is the tray's control pipe; DSH must not own it.
+          stdio: [
+            control ? 'ignore' : 'inherit',
+            'inherit',
+            'inherit',
+            ...(shellAuth ? ['pipe'] : []),
+          ],
           env: launchEnv(dir, state.dataHome, {
             ...env,
             AURIGA_DESKTOP_ROOT: root,
@@ -820,9 +1081,11 @@ export async function launch({ root, args = [], env = process.env }) {
         }),
     });
     session.child(process.pid);
+    report({ event: 'dsh', state: 'stopped' });
     await apply();
     return status;
   } finally {
+    clearInterval(statusTimer);
     try {
       try {
         await shellAuth?.close();

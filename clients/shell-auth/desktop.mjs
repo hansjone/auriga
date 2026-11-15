@@ -36,6 +36,8 @@ export async function startDesktopAuth({
   root,
   dataHome,
   openBrowser = openSystemBrowser,
+  openLoginOnStart = true,
+  onSkipLogin,
 }) {
   const originFile = safePath(join(root, 'desktop-origin.json'));
   if (!existsSync(originFile)) return undefined;
@@ -57,6 +59,8 @@ export async function startDesktopAuth({
       platform: createPlatform(
         trustedConfig({
           platformOrigin: origin,
+          accessMode: installation.accessMode,
+          confirmedOrigin: installation.confirmedOrigin,
           issuer: installation.issuer,
           clientId: installation.clientId,
           network: installation.network,
@@ -67,7 +71,7 @@ export async function startDesktopAuth({
       log,
     });
     await broker.initialize();
-    loopback = await createLoopback({ broker, validate: valid });
+    loopback = await createLoopback({ broker, validate: valid, onSkipLogin });
     business = new BusinessProxy(
       broker,
       globalThis.fetch,
@@ -87,11 +91,19 @@ export async function startDesktopAuth({
     ipc = await startIpc({ helper, broker, business });
     const timer = setInterval(() => broker.check().catch(() => {}), 10000);
     timer.unref();
-    if (broker.snapshot().state !== 'authenticated')
-      await openBrowser(loopback.issue());
+    if (openLoginOnStart && broker.snapshot().state !== 'authenticated') {
+      // The user can retry from the tray if Windows could not open its browser.
+      try {
+        await openBrowser(loopback.issue());
+      } catch {
+        // Browser availability does not affect the authentication broker.
+      }
+    }
     return {
       broker,
       snapshot: () => broker.snapshot(),
+      // Launcher/tray entry: open the sign-in control page with a fresh one-time ticket.
+      openLogin: () => openBrowser(loopback.issue()),
       attach: (child) => ipc.attach(child),
       async close() {
         clearInterval(timer);

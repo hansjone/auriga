@@ -2,15 +2,46 @@ import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { randomUUID } from 'node:crypto';
 
+/**
+ * Fixed, secret-free reason codes for the tray status. Raw exception text can
+ * contain configuration, so only our own well-known messages are classified.
+ */
+export function shellAuthFailureReason(error) {
+  const message = String(error?.message ?? '');
+  if (/trusted HTTPS platform origin required|invalid issuer/.test(message))
+    return 'origin_rejected';
+  if (/Windows shell helper required/.test(message)) return 'helper_missing';
+  if (/\bsecure\b/.test(message) || error?.cmd?.includes?.(' secure '))
+    return 'acl_failed';
+  if (/reparse path rejected/.test(message)) return 'reparse_rejected';
+  if (error?.code === 'ERR_MODULE_NOT_FOUND') return 'component_missing';
+  return 'unavailable';
+}
+
 /** Authentication failure preserves local DSH and leaves a safe diagnosis. */
-export async function startShellAuth({ root, dataHome, dir }) {
+export async function startShellAuth({
+  root,
+  dataHome,
+  dir,
+  openLoginOnStart,
+  onSkipLogin,
+  onFailure = () => {},
+}) {
   const directory = join(dir, 'auriga', 'shell-auth');
   try {
     const { startDesktopAuth } = await import(
       pathToFileURL(join(directory, 'desktop.mjs')).href
     );
-    return await startDesktopAuth({ root, dataHome });
-  } catch {
+    const auth = await startDesktopAuth({
+      root,
+      dataHome,
+      openLoginOnStart,
+      onSkipLogin,
+    });
+    if (!auth) onFailure('not_configured');
+    return auth;
+  } catch (error) {
+    onFailure(shellAuthFailureReason(error));
     const event = {
       stage: 'shell_identity',
       phase: 'end',

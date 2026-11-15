@@ -71,9 +71,11 @@ export function createUpdater({
   smoke,
   now = () => Date.now(),
   defer = true,
+  requireApproval = false,
   random = Math.random,
   schedule = setTimeout,
   unschedule = clearTimeout,
+  onState = () => {},
 }) {
   const bindingFile = join(root, 'desktop-origin.json');
   const binding = existsSync(bindingFile)
@@ -92,6 +94,7 @@ export function createUpdater({
       mode: 0o600,
     });
     renameSync(stateFile + '.tmp', stateFile);
+    onState(value);
   };
   const current = () => {
     const state = readState(root);
@@ -361,6 +364,10 @@ export function createUpdater({
             JSON.stringify(pending),
             { mode: 0o600 },
           );
+          if (requireApproval)
+            writeFileSync(join(temporary, 'approval-required'), '', {
+              mode: 0o600,
+            });
           renameSync(temporary, queued);
           temporary = undefined;
           pending = null;
@@ -489,6 +496,13 @@ export async function downloadPackage(
   }
 }
 
+export function approvePending(root) {
+  const queued = join(root, 'desktop-pending');
+  if (!existsSync(join(queued, 'release.json')))
+    throw new Error('no pending update');
+  rmSync(join(queued, 'approval-required'), { force: true });
+}
+
 /** Called only by the launcher after the old DSH has stopped (or before next launch). */
 export async function applyPending(
   root,
@@ -501,7 +515,8 @@ export async function applyPending(
   } = {},
 ) {
   const queued = join(root, 'desktop-pending');
-  if (!existsSync(queued)) return false;
+  if (!existsSync(queued) || existsSync(join(queued, 'approval-required')))
+    return false;
   let retain = false;
   try {
     const current = readState(root);
@@ -586,4 +601,69 @@ export async function applyPending(
   } finally {
     if (!retain) rmSync(queued, { recursive: true, force: true });
   }
+}
+
+/**
+ * Origin-bound transport for launcher/tray commands: no redirects, no
+ * credentials, and an idle (not total) timeout that each received chunk renews.
+ */
+export function idleRequest(origin, { idleMs = 60_000, fetcher = fetch } = {}) {
+  return async (url, init = {}) => {
+    if (new URL(url).origin !== origin)
+      throw new Error('untrusted desktop download');
+    const controller = new AbortController();
+    let timer;
+    const reset = () => {
+      clearTimeout(timer);
+      timer = setTimeout(
+        () => controller.abort(new Error('desktop transfer idle timeout')),
+        idleMs,
+      );
+    };
+    reset();
+    let response;
+    try {
+      response = await fetcher(url, {
+        ...init,
+        credentials: 'omit',
+        redirect: 'error',
+        headers: { Accept: 'application/json', ...init.headers },
+        signal: init.signal
+          ? AbortSignal.any([init.signal, controller.signal])
+          : controller.signal,
+      });
+    } catch (error) {
+      clearTimeout(timer);
+      throw error;
+    }
+    if (!response.ok || !response.body) {
+      clearTimeout(timer);
+      await response.body?.cancel().catch(() => {});
+      return response;
+    }
+    const reader = response.body.getReader();
+    return {
+      ok: response.ok,
+      status: response.status,
+      headers: response.headers,
+      async cancel() {
+        clearTimeout(timer);
+        controller.abort();
+        await reader.cancel().catch(() => {});
+      },
+      body: (async function* () {
+        try {
+          for (;;) {
+            reset();
+            const { value, done } = await reader.read();
+            if (done) break;
+            yield value;
+          }
+        } finally {
+          clearTimeout(timer);
+          await reader.cancel().catch(() => {});
+        }
+      })(),
+    };
+  };
 }

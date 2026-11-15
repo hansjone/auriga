@@ -24,7 +24,7 @@ import {
 } from 'node:fs';
 import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { makeExe } from './make-exe.mjs';
+import { compileTray, makeExe } from './make-exe.mjs';
 import {
   copyBrokerArtifact,
   verifyBrokerArtifact,
@@ -464,6 +464,26 @@ export async function build(args) {
     join(installerDir, 'windows', 'launcher'),
     join(payload, 'auriga', 'launcher'),
     { recursive: true },
+  );
+  // Older launchers are resumed by byte offset after an update (see the
+  // launcher header): the shipped bytes must be CRLF on any build machine.
+  for (const name of readdirSync(join(payload, 'auriga', 'launcher')))
+    if (name.endsWith('.cmd')) {
+      const file = join(payload, 'auriga', 'launcher', name);
+      writeFileSync(
+        file,
+        readFileSync(file, 'latin1').replace(/\r?\n/g, '\r\n'),
+        'latin1',
+      );
+    }
+  cpSync(
+    resolve(installerDir, '../../assets/brand/auriga-dsh.ico'),
+    join(payload, 'auriga', 'launcher', 'auriga.ico'),
+  );
+  // Tray app (Start menu entry, update/exit owner), built with the Windows C# compiler.
+  compileTray(
+    join(payload, 'auriga', 'tray', 'AurigaDesktop.exe'),
+    resolve(installerDir, '../../assets/brand/auriga-dsh.ico'),
   );
   for (const f of ['install.ps1', 'install.cmd', 'README.txt'])
     cpSync(join(installerDir, 'windows', f), join(stage, f));

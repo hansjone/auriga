@@ -12,6 +12,7 @@
  * the test registry key is removed.
  */
 import { spawn, spawnSync } from 'node:child_process';
+import { once } from 'node:events';
 import {
   existsSync,
   mkdirSync,
@@ -22,6 +23,7 @@ import {
 } from 'node:fs';
 import { createServer } from 'node:net';
 import { join, resolve } from 'node:path';
+import { setTimeout as delay } from 'node:timers/promises';
 import { launchEnv } from '../runtime/core.mjs';
 
 const args = Object.fromEntries(
@@ -112,6 +114,49 @@ async function freePort() {
 }
 
 const started = [];
+function trayExecutable(id) {
+  return join(root, 'versions', id, 'auriga', 'tray', 'AurigaDesktop.exe');
+}
+
+function running(pid) {
+  if (!Number.isSafeInteger(pid) || pid < 1) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    if (error.code === 'ESRCH') return false;
+    throw error;
+  }
+}
+
+async function startTrayForUninstall(id) {
+  const tray = trayExecutable(id);
+  if (!existsSync(tray)) return null;
+  const options = { env, cwd: sandbox, windowsHide: true, stdio: 'ignore' };
+  const first = spawn(tray, ['/autostart'], options);
+  started.push(first);
+  const processFile = join(dataHome, 'auriga', 'guardian', 'process.json');
+  const deadline = Date.now() + 180000;
+  let processTree;
+  while (Date.now() < deadline && first.exitCode === null) {
+    const tree = existsSync(processFile) ? readJson(processFile) : null;
+    if (running(tree?.launcher?.pid) && running(tree?.root?.pid)) {
+      processTree = tree;
+      break;
+    }
+    await delay(500);
+  }
+  check(processTree, 'tray starts a real launcher and DSH');
+  const second = spawn(tray, ['/autostart'], options);
+  started.push(second);
+  const [code] = await once(second, 'exit');
+  check(
+    code === 0 && running(first.pid),
+    'second tray start exits; original instance remains',
+  );
+  return { first, processTree };
+}
+
 async function withDsh(fn) {
   const port = await freePort();
   const child = spawn(
@@ -210,8 +255,10 @@ try {
   // 2. shell integration: shortcuts and Apps & features entry (current user)
   check(
     existsSync(join(startMenu, 'Auriga DSH.lnk')) &&
+      (!existsSync(trayExecutable(first.id)) ||
+        existsSync(join(startMenu, '卸载 Auriga DSH.lnk'))) &&
       existsSync(join(desktop, 'Auriga DSH.lnk')),
-    'start menu and desktop shortcuts created',
+    'start menu (open, uninstall) and desktop shortcuts created',
   );
   const reg = regQuery();
   check(
@@ -465,6 +512,9 @@ try {
   }
 
   // 8. uninstall (keep data), then verify shell integration is gone
+  const active = await startTrayForUninstall(
+    readFileSync(join(root, 'current.txt'), 'utf8').trim(),
+  );
   const un = run('powershell.exe', [
     '-NoProfile',
     '-ExecutionPolicy',
@@ -478,8 +528,21 @@ try {
     'uninstall removes install root',
     un.stdout.trim(),
   );
+  if (active) {
+    const { first, processTree } = active;
+    check(
+      [
+        first.pid,
+        processTree.launcher.pid,
+        processTree.root.pid,
+        ...processTree.children.map(({ pid }) => pid),
+      ].every((pid) => !running(pid)),
+      'uninstall stops the running tray, launcher and DSH tree',
+    );
+  }
   check(
     !existsSync(join(startMenu, 'Auriga DSH.lnk')) &&
+      !existsSync(join(startMenu, '卸载 Auriga DSH.lnk')) &&
       !existsSync(join(desktop, 'Auriga DSH.lnk')) &&
       regQuery().status !== 0,
     'uninstall removes shortcuts and registry entry',
@@ -523,7 +586,8 @@ try {
   console.error(error);
 } finally {
   for (const c of started)
-    spawnSync('taskkill', ['/PID', String(c.pid), '/T', '/F']);
+    if (c.exitCode === null)
+      spawnSync('taskkill', ['/PID', String(c.pid), '/T', '/F']);
   spawnSync('reg.exe', ['delete', registryPath, '/f'], { stdio: 'ignore' });
   if (args.clean === 'true') rmSync(sandbox, { recursive: true, force: true });
 }

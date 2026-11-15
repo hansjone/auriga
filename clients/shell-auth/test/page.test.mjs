@@ -16,7 +16,12 @@ test('control page displays only its own device code, polls across revisions and
         release = resolve;
       }),
   });
-  const loop = await createLoopback({ broker: f.broker, validate: valid });
+  const navigations = [];
+  const loop = await createLoopback({
+    broker: f.broker,
+    validate: valid,
+    onSkipLogin: (localLogin) => navigations.push(localLogin),
+  });
   t.after(async () => {
     await loop.close();
     await f.broker.close();
@@ -27,7 +32,7 @@ test('control page displays only its own device code, polls across revisions and
     onclick;
   }
   const nodes = Object.fromEntries(
-    ['login', 'cancel', 'skip'].map((id) => [id, new Button()]),
+    ['login', 'cancel', 'skip', 'local-login'].map((id) => [id, new Button()]),
   );
   nodes.status = { textContent: '' };
   nodes.attempt = { textContent: '' };
@@ -86,4 +91,7 @@ test('control page displays only its own device code, polls across revisions and
   assert.equal(nodes.attempt.textContent, '');
   assert.equal(f.broker.state, 'signed_out');
   assert.equal(f.broker.record.tokens, undefined);
+  await nodes['local-login'].onclick();
+  assert.deepEqual(navigations, [false, true]);
+  assert.equal(f.broker.state, 'signed_out');
 });

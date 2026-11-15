@@ -1,4 +1,5 @@
 import { createPublicKey, verify } from 'node:crypto';
+import { isIP } from 'node:net';
 import { requireValid } from './schema.mjs';
 
 export class PlatformError extends Error {
@@ -8,10 +9,37 @@ export class PlatformError extends Error {
     this.code = code;
   }
 }
+/** HTTP only for the installer's explicitly confirmed IP binding (ADR 0022): a
+ * private or loopback literal IP, no path, and the same rule as the installer. */
+function confirmedIpOrigin(input) {
+  if (
+    input.accessMode !== 'ip' ||
+    typeof input.platformOrigin !== 'string' ||
+    input.confirmedOrigin !== input.platformOrigin
+  )
+    return false;
+  // Validate the original literal before WHATWG URL rewrites decimal/octal IPs.
+  const host = input.platformOrigin.match(
+    /^http:\/\/(\[[^\]]+\]|[^/:?#@]+)(?::\d+)?$/i,
+  )?.[1];
+  const literal = host?.replace(/^\[|\]$/g, '');
+  const kind = literal ? isIP(literal) : 0;
+  const octets = kind === 4 ? literal.split('.').map(Number) : [];
+  const local =
+    kind === 4
+      ? octets[0] === 127 ||
+        octets[0] === 10 ||
+        (octets[0] === 172 && octets[1] >= 16 && octets[1] <= 31) ||
+        (octets[0] === 192 && octets[1] === 168)
+      : kind === 6 && (literal === '::1' || /^f[cd][\da-f]{2}:/i.test(literal));
+  return local && new URL(input.platformOrigin).origin === input.platformOrigin;
+}
+
 export function trustedConfig(input) {
   const url = new URL(input.platformOrigin);
   if (
-    url.protocol !== 'https:' ||
+    (url.protocol !== 'https:' &&
+      !(url.protocol === 'http:' && confirmedIpOrigin(input))) ||
     url.username ||
     url.password ||
     url.search ||

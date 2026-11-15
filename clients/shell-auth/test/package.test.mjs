@@ -149,12 +149,14 @@ test(
       pathToFileURL(join(output, 'desktop.mjs')).href
     );
     const opened = [];
+    let skipped = 0;
     desktop = await startDesktopAuth({
       root,
       dataHome,
       openBrowser: async (url) => {
         opened.push(url);
       },
+      onSkipLogin: () => skipped++,
     });
     t.diagnostic('installed broker started');
     assert.equal(desktop.snapshot().state, 'signed_out');
@@ -201,10 +203,15 @@ test(
           }),
         })
       ).json();
+    await message('skip_login');
+    assert.equal(skipped, 1);
+    await desktop.openLogin();
+    assert.notEqual(opened[1], opened[0]);
+    assert.equal(new URL(opened[1]).origin, launch.origin);
     await message('open_login');
     const attempt = (await message('snapshot')).snapshot.deviceAttempt;
     assert.equal(attempt.userCode, userCode);
-    assert.equal(opened[1], 'https://example.com/device');
+    assert.equal(opened[2], 'https://example.com/device');
     while (desktop.snapshot().state === 'authenticating')
       await once(desktop.broker, 'changed');
     assert.equal(desktop.snapshot().state, 'authenticated');
@@ -229,7 +236,7 @@ test(
     assert.equal(desktop.snapshot().state, 'authenticated');
     assert.equal(
       opened.length,
-      2,
+      3,
       'restored login must not open another control page',
     );
     assert.notEqual(desktop.broker.epoch, oldEpoch);

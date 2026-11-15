@@ -1,6 +1,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, readFileSync, writeFileSync } from 'node:fs';
+import {
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+  readFileSync,
+  writeFileSync,
+} from 'node:fs';
 import { randomUUID, randomBytes } from 'node:crypto';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -65,6 +71,45 @@ test(
     );
     assert.equal(acl.protectedAcl, true);
     assert.match(acl.sid, /^S-1-/);
+  },
+);
+test(
+  'secure succeeds under a Modify-only parent grant without widening the private ACL',
+  { skip: process.platform !== 'win32', timeout: 15000 },
+  async (t) => {
+    const directory = mkdtempSync(join(tmpdir(), 'auriga-shell-acl-'));
+    t.after(() => rmSync(directory, { recursive: true, force: true }));
+    const helper = buildHelper(join(directory, 'helper.exe'));
+    const system = (name) =>
+      join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', name);
+    const sid = execFileSync(system('whoami.exe'), ['/user', '/fo', 'csv'], {
+      encoding: 'utf8',
+    }).match(/S-1-5-[0-9-]+/)[0];
+    // Typical non-profile drive: the user may create and modify, but holds no WRITE_OWNER.
+    const parent = join(directory, 'modify-only');
+    mkdirSync(parent);
+    execFileSync(system('icacls.exe'), [
+      parent,
+      '/inheritance:r',
+      '/grant:r',
+      `*${sid}:(OI)(CI)M`,
+    ]);
+    const data = join(parent, 'private');
+    mkdirSync(data);
+    const acl = JSON.parse(
+      execFileSync(helper, ['secure', data], { encoding: 'utf8' }),
+    );
+    assert.equal(acl.protectedAcl, true);
+    const aces = execFileSync(system('icacls.exe'), [data], {
+      encoding: 'utf8',
+    })
+      .slice(data.length)
+      .split('\n')
+      .filter((line) => line.includes('('));
+    // Exactly one explicit full-control ACE for the user, nothing inherited.
+    assert.equal(aces.length, 1);
+    assert.match(aces[0], /:\(OI\)\(CI\)\(F\)/);
+    assert.doesNotMatch(aces[0], /\(I\)/);
   },
 );
 test(
