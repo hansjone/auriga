@@ -5,12 +5,11 @@ import {
 } from '../../src/observability/index.js';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { sign, generateKeyPairSync } from 'node:crypto';
+import { sign, generateKeyPairSync, createHash } from 'node:crypto';
 import tls from 'node:tls';
 import { createServer } from 'node:http';
 import { once } from 'node:events';
 import { WebSocketServer } from 'ws';
-import * as Plugin from '../../src/plugin.js';
 import { createVault } from '../../src/local/vault.js';
 import { setImmediate } from 'node:timers/promises';
 import {
@@ -30,8 +29,8 @@ import { fixture as nativeFixture } from './host/native/fixtures.js';
 import { decodeJson, encodeJson } from '../../src/network/session/frames.js';
 import { digest, signingInput } from '../../src/network/trust/verifier.js';
 import {
-  signedKeyset,
-  signedAnnouncement,
+  signedV2Keyset as signedKeyset,
+  signedV2Announcement as signedAnnouncement,
   testRoots,
   publicationFixture,
   signedReadyResult,
@@ -41,7 +40,7 @@ import { TransportError } from '../../src/network/transport/errors.js';
 import {
   createDeviceProvider,
   DeviceControlUnavailable,
-} from '../../src/network/device-provider.js';
+} from '../../../shell-auth/device-provider.mjs';
 import { startNatsServer } from './transport/support/nats-server.js';
 import { ensureNatsServer } from './transport/support/nats-binary.js';
 import {
@@ -53,7 +52,18 @@ import {
 async function fixture(t, extra = {}) {
   const { openConnectionRuntime } =
     await import('../../src/network/connection-runtime.js');
-  const { pair, payload, now } = publicationFixture();
+  const { pair, payload, now: initialNow } = publicationFixture();
+  let clock = initialNow();
+  const now = () => clock;
+  if (extra.longTrust) {
+    payload.valid_until = new Date(clock + 24 * 3600000 - 60000)
+      .toISOString()
+      .replace('.000Z', 'Z');
+    for (const key of payload.keys)
+      key.not_after = new Date(clock + 7 * 86400000)
+        .toISOString()
+        .replace('.000Z', 'Z');
+  }
   const businessPair = extra.businessDelivery
     ? generateKeyPairSync('ed25519')
     : undefined;
@@ -106,9 +116,9 @@ async function fixture(t, extra = {}) {
     async refresh(trust, signal) {
       await extra.refresh?.(trust, signal);
       signal.throwIfAborted();
-      await trust.announce(signedAnnouncement(payload));
-      signal.throwIfAborted();
       await trust.update(signedKeyset(payload));
+      signal.throwIfAborted();
+      await trust.announce(signedAnnouncement(payload));
     },
     async getTicket(signal) {
       signal.throwIfAborted();
@@ -320,6 +330,9 @@ async function fixture(t, extra = {}) {
     prepared,
     payload,
     trustStore,
+    advance: (milliseconds) => {
+      clock += milliseconds;
+    },
   };
 }
 
@@ -1679,8 +1692,10 @@ test('invalid refreshed ticket still fails closed on a healthy connection', asyn
 });
 
 test('healthy refresh retries a control fetch failure but rejects trust validation failure', async (t) => {
-  const f = await fixture(t);
+  const f = await fixture(t, { longTrust: true });
   await f.runtime.start();
+  // The refresh deadline can be as late as 13.2h (12h + 10% jitter).
+  f.advance(14 * 3600000);
   const original = f.prepared.refresh;
   f.prepared.refresh = async () => {
     throw new DeviceControlUnavailable('network control unavailable');
@@ -1690,16 +1705,21 @@ test('healthy refresh retries a control fetch failure but rejects trust validati
   assert.equal(f.runtime.status.connected, true);
   f.prepared.refresh = original;
   await f.connections[1].ticket();
-  f.prepared.refresh = async () => {
+  const broken = await fixture(t, { longTrust: true });
+  await broken.runtime.start();
+  broken.advance(14 * 3600000);
+  broken.prepared.refresh = async () => {
     throw new TypeError('invalid keyset');
   };
-  await assert.rejects(f.connections[1].ticket(), /invalid keyset/);
-  assert.equal(f.runtime.status.available, false);
+  await assert.rejects(broken.connections[1].ticket(), /invalid keyset/);
+  assert.equal(broken.runtime.status.available, false);
 });
 
 test('transient refresh never preserves connected past a newer announcement without its full keyset', async (t) => {
-  const f = await fixture(t);
+  const f = await fixture(t, { longTrust: true });
   await f.runtime.start();
+  // Advance beyond the latest jittered deadline so refresh is guaranteed.
+  f.advance(14 * 3600000);
   const gate = latch();
   let entered = false;
   f.prepared.refresh = async (trust) => {
@@ -1903,7 +1923,7 @@ test('logout while C2 unknown-key verification refresh is pending cannot write a
       }
     },
     refresh: async () => {
-      if (++refreshes === 4) {
+      if (++refreshes === 2) {
         entered = true;
         await gate.promise;
       }
@@ -2307,13 +2327,22 @@ test('real NATS WSS with official device factory closes C1 before T2, binds new 
   t.mock.method(globalThis, 'fetch', async (url, init) => {
     const path = url.pathname;
     assert.equal(init.headers.cookie, undefined);
-    assert.equal(init.headers.authorization, 'Bearer native-device');
+    assert.equal(
+      init.headers.authorization,
+      path.endsWith('/bootstrap/controls') ? undefined : 'Bearer native-device',
+    );
     if (path.endsWith('/register'))
       return Response.json({ ...identity, created: true });
+    if (path.endsWith('/controls'))
+      return Response.json(
+        signedKeyset(signer.payload, identity.tenant).control,
+      );
     if (path.endsWith('/announcement'))
-      return Response.json(signedAnnouncement(signer.payload));
+      return Response.json(
+        signedAnnouncement(signer.payload, {}, identity.tenant),
+      );
     if (path.endsWith('/keys'))
-      return Response.json(signedKeyset(signer.payload));
+      return Response.json(signedKeyset(signer.payload, identity.tenant));
     assert.equal(path, '/api/iam/v1/network/tickets');
     if (refreshMode) {
       if (refreshFailures++ === 0) return Response.json({}, { status: 503 });
@@ -2420,6 +2449,10 @@ test('real NATS WSS with official device factory closes C1 before T2, binds new 
 });
 
 test('plugin actual entry resumes verified native device into official factory, durable C1/C2 connection and logout', async (t) => {
+  if (process.platform !== 'win32')
+    return t.skip(
+      'Requires Windows named-pipe peer verification and .NET helper',
+    );
   const root = fileURLToPath(
     new URL('../../../../.agent-evidence/', import.meta.url),
   );
@@ -2493,13 +2526,8 @@ test('plugin actual entry resumes verified native device into official factory, 
   );
   const wire = [],
     subjects = [],
-    calls = [],
-    tools = new Set(),
-    routes = new Map(),
-    effects = [],
-    jobs = [];
-  let ticketCount = 0,
-    hostCalls = 0;
+    calls = [];
+  let ticketCount = 0;
   peer.subscribe('auriga.net.up.*.*', {
     callback: (error, msg) => {
       assert.ifError(error);
@@ -2517,29 +2545,8 @@ test('plugin actual entry resumes verified native device into official factory, 
     },
   });
   await peer.flush();
-  const http = createServer((req, res) => {
-    const row = [...routes.values()].find((route) =>
-      req.url.startsWith(route.path),
-    );
-    if (row) void row.handler(req, res);
-    else {
-      res.writeHead(404);
-      res.end();
-    }
-  });
-  await new Promise((resolve) => http.listen(0, '127.0.0.1', resolve));
-  t.after(
-    () =>
-      new Promise((resolve) => {
-        http.closeAllConnections();
-        http.close(resolve);
-      }),
-  );
-  const localOrigin = 'http://127.0.0.1:' + http.address().port,
-    nativeFetch = globalThis.fetch;
   t.mock.method(globalThis, 'fetch', async (url, init = {}) => {
     url = new URL(url);
-    if (url.origin === localOrigin) return nativeFetch(url, init);
     const path = url.pathname;
     calls.push(path);
     assert.equal(new Headers(init.headers).has('cookie'), false);
@@ -2556,7 +2563,7 @@ test('plugin actual entry resumes verified native device into official factory, 
       });
     assert.equal(
       new Headers(init.headers).get('authorization'),
-      'Bearer ' + accessToken,
+      path.endsWith('/bootstrap/controls') ? null : 'Bearer ' + accessToken,
     );
     if (path === '/ai/team/node/register')
       return Response.json({
@@ -2587,10 +2594,16 @@ test('plugin actual entry resumes verified native device into official factory, 
     if (path === '/oauth2/revoke') return Response.json({});
     if (path === '/api/iam/v1/network/register')
       return Response.json({ ...identity, created: true });
+    if (path.endsWith('/controls'))
+      return Response.json(
+        signedKeyset(signing.payload, identity.tenant).control,
+      );
     if (path.endsWith('/announcement'))
-      return Response.json(signedAnnouncement(signing.payload));
-    if (path === '/api/collab/v1/network/keys')
-      return Response.json(signedKeyset(signing.payload));
+      return Response.json(
+        signedAnnouncement(signing.payload, {}, identity.tenant),
+      );
+    if (path === '/api/collab/v2/network/keys')
+      return Response.json(signedKeyset(signing.payload, identity.tenant));
     assert.equal(path, '/api/iam/v1/network/tickets');
     const vector = vectors[ticketCount++];
     return Response.json({
@@ -2602,95 +2615,128 @@ test('plugin actual entry resumes verified native device into official factory, 
       protocolVersion: 1,
     });
   });
-  const localOwnerPeer = { principal: { kind: 'owner' } };
-  const ctx = {
-    profileContext: { dir: profile },
-    webServer: {
-      protocol: 'http:',
-      register(route) {
-        routes.set(route.path, route);
-        return () => routes.delete(route.path);
-      },
-    },
-    connection: {
-      admit: () => ({ peer: localOwnerPeer }),
-      authorizeIndex: () => true,
-      isTrusted: () => true,
-      requestRejection: () => undefined,
-    },
-    tools: {
-      register(tool) {
-        tools.add(tool.name);
-        return () => tools.delete(tool.name);
-      },
-    },
-    sessions: {
-      get() {
-        hostCalls++;
-      },
-      flush() {
-        hostCalls++;
-      },
-    },
-    sessionController: {
-      create() {
-        hostCalls++;
-      },
-      prompt() {
-        hostCalls++;
-      },
-    },
-    on() {
-      return () => {};
-    },
-    effect(fn) {
-      effects.push(fn());
-    },
-    inject(names, fn) {
-      if (names.every((name) => ctx[name]))
-        jobs.push(Promise.resolve().then(() => fn(ctx)));
-    },
+  const { fixture: brokerFixture, login } =
+    await import('../../../shell-auth/test/fixtures.mjs');
+  const { BusinessProxy } = await import('../../../shell-auth/business.mjs');
+  const core = await import('../../../shell-auth/network-core.mjs');
+  const { buildBroker } = await import('../../../shell-auth/build.mjs');
+  const { startIpc } = await import('../../../shell-auth/ipc.mjs');
+  const { spawn } = await import('node:child_process');
+  const source = brokerFixture();
+  Object.assign(source.identity, {
+    tenantId: claims.tid,
+    memberId: claims.sub,
+    deviceId: claims.did,
+  });
+  Object.assign(source.claims, claims);
+  source.tokens.access_token = accessToken;
+  const connectionConfig = {
+    platformOrigin: claims.iss,
+    issuer: claims.iss,
+    clientId: 'auriga-dsh',
+    providerId: source.identity.providerId,
+    network: { realm: '2', roots: testRoots, wssUrl: server.url },
   };
+  source.platform.config = connectionConfig;
+  const begin = source.platform.begin;
+  source.platform.begin = async () => ({
+    ...(await begin()),
+    verification_uri: claims.iss + '/device',
+  });
+  source.platform.audience = async () => source.tokens;
+  await login(source);
+  const artifact = join(profile, 'broker');
+  buildBroker(artifact);
+  const isolatedBase = fileURLToPath(new URL('../../target/', import.meta.url));
+  await mkdir(isolatedBase, { recursive: true });
+  const isolated = await mkdtemp(join(isolatedBase, 'auth-k3-entry-'));
+  assert.ok(isolated.startsWith(isolatedBase));
+  await nodeFs.cp(
+    fileURLToPath(new URL('../../src', import.meta.url)),
+    join(isolated, 'src'),
+    { recursive: true },
+  );
+  await nodeFs.copyFile(
+    fileURLToPath(new URL('../../package.json', import.meta.url)),
+    join(isolated, 'package.json'),
+  );
+  await nodeFs.cp(artifact, join(isolated, 'shell-auth'), { recursive: true });
+  const uploads = join(profile, 'uploads'),
+    networkDirectory = join(profile, 'broker-network');
+  await mkdir(uploads);
+  await mkdir(networkDirectory);
+  const business = new BusinessProxy(source.broker, globalThis.fetch, uploads, {
+    networkDirectory,
+    networkCore: core,
+  });
+  const ipc = await startIpc({
+    helper: join(artifact, 'windows/shell-helper.exe'),
+    broker: source.broker,
+    business,
+  });
+  let child;
   t.after(async () => {
-    for (const dispose of effects.reverse()) dispose?.();
-    await waitFor(() => Promise.resolve(true), 'effects');
+    child?.kill();
+    await ipc.close();
+    business.close();
+    await source.broker.close();
+    await nodeFs.rm(isolated, { recursive: true, force: true });
   });
-  await Plugin.apply(ctx, {
-    connect: {
-      platformOrigin: claims.iss,
-      issuer: claims.iss,
-      clientId: 'auriga-dsh',
-      providerId: 'team',
-      network: { realm: '2', roots: testRoots, wssUrl: server.url },
+  child = spawn(
+    process.execPath,
+    [
+      fileURLToPath(new URL('../k3-plugin-entry-child.mjs', import.meta.url)),
+      isolated,
+      profile,
+      JSON.stringify(connectionConfig),
+    ],
+    {
+      windowsHide: true,
+      stdio: ['ignore', 'pipe', 'pipe', 'pipe'],
+      env: {
+        ...process.env,
+        LOCALAPPDATA: join(profile, 'local-state'),
+        XDG_STATE_HOME: join(profile, 'local-state'),
+      },
     },
+  );
+  let output = '';
+  child.stdout.on('data', (bytes) => {
+    output += bytes;
   });
-  await Promise.all(jobs);
-  const before = await nativeFetch(localOrigin + '/auriga/local-login/status');
-  const login = await before.json();
-  assert.equal(typeof login.network.connected, 'boolean');
+  child.stderr.on('data', (bytes) => {
+    output += bytes;
+  });
+  const exited = once(child, 'exit');
+  await ipc.attach(child);
+  const [code] = await exited;
+  assert.equal(code, 0, output);
+  const result = JSON.parse(
+    await readFile(join(profile, 'entry-result.json'), 'utf8'),
+  );
+  assert.equal(typeof result.status.network.connected, 'boolean');
   assert.ok(
     calls.length > 0,
-    'saved device restores platform capabilities without a browser login',
+    'shell device restores platform capabilities without a plugin browser login',
   );
-  const cookie = '';
-  const state = await waitFor(async () => {
-    const response = await nativeFetch(
-      localOrigin + '/auriga/local-login/status',
-      { headers: { cookie } },
-    );
-    const value = await response.json();
-    return value.network.connected && value;
-  }, 'plugin official connected');
-  assert.equal(state.network.connected, true);
+  assert.equal(result.status.loggedIn, true);
+  assert.equal(result.status.network.connected, true);
+  assert.equal(result.status.network.state, 'ready');
   assert.equal(ticketCount, 2);
   assert.notEqual(subjects[0], subjects[1]);
   assert.equal(wire.length, 2);
-  assert.equal(hostCalls, 0);
-  assert.equal(tools.has('auriga_send_message'), false);
+  assert.equal(result.hostCalls, 0);
+  assert.equal(result.hasSendTool, false);
   const deviceDirectories = await nodeFs.readdir(
     join(profile, 'auriga-connect/network/devices'),
   );
   assert.equal(deviceDirectories.length, 1);
+  assert.equal(
+    deviceDirectories[0],
+    createHash('sha256')
+      .update(JSON.stringify([claims.iss, claims.tid, claims.did]))
+      .digest('hex'),
+  );
   const hostDirectory = join(
     profile,
     'auriga-connect/network/devices',
@@ -2701,27 +2747,17 @@ test('plugin actual entry resumes verified native device into official factory, 
     await readFile(join(hostDirectory, 'ledger.json'), 'utf8'),
   );
   assert.equal(ledger.identity.nodeIncarnation, 'inc-1');
-  const logout = await nativeFetch(localOrigin + '/auriga/local-login/logout', {
-    method: 'POST',
-    headers: {
-      origin: localOrigin,
-      cookie,
-      'content-type': 'application/json',
-      'x-auriga-csrf': state.csrf,
-    },
-    body: '{}',
-  });
-  assert.equal(logout.status, 200);
+  assert.equal(result.logoutStatus, 200);
   await waitFor(async () => {
     try {
       await readFile(join(hostDirectory, 'ledger.lock'));
       return false;
-    } catch (e) {
-      return e.code === 'ENOENT';
+    } catch (error) {
+      return error.code === 'ENOENT';
     }
   }, 'logout releases host writer');
   assert.equal(ticketCount, 2);
-  assert.equal(hostCalls, 0);
+  assert.equal(result.hostCalls, 0);
 });
 
 test('initial commit diagnostics use the real final JSON sink and distinguish lifecycle generation', async (t) => {
@@ -2786,4 +2822,17 @@ test('initial commit diagnostics use the real final JSON sink and distinguish li
     else process.env.XDG_STATE_HOME = oldState;
     await nodeFs.rm(dir, { recursive: true, force: true });
   }
+});
+
+test('repeated ticket renewals reuse valid trust without repeating control HTTP refresh', async (t) => {
+  let refreshes = 0;
+  const f = await fixture(t, {
+    refresh: async () => {
+      refreshes++;
+    },
+  });
+  await f.runtime.start();
+  const initial = refreshes;
+  for (let i = 0; i < 5; i++) await f.connections[1].ticket();
+  assert.equal(refreshes, initial);
 });

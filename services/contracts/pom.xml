@@ -198,6 +198,16 @@
         </configuration>
         <executions>
           <execution>
+            <id>shared-dsh-edge-http</id>
+            <goals><goal>generate</goal></goals>
+            <configuration>
+              <inputSpec>${project.build.directory}/bundled/shared-dsh-edge.json</inputSpec>
+              <output>${project.build.directory}/generated-sources/openapi/shared-dsh-edge</output>
+              <apiPackage>auriga.contracts.sharededge.web.api</apiPackage>
+              <modelPackage>auriga.contracts.sharededge.web.model</modelPackage>
+            </configuration>
+          </execution>
+          <execution>
             <id>msgnet-v2-java</id>
             <goals>
               <goal>generate</goal>

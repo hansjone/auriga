@@ -47,6 +47,13 @@ public final class WorkspaceService {
   private volatile Runnable changed = () -> {};
   private volatile boolean managedNetworkRequired;
 
+  private volatile SharedDshPlacements sharedPlacements;
+
+  @org.springframework.beans.factory.annotation.Autowired(required = false)
+  public void sharedPlacements(SharedDshPlacements shared) {
+    this.sharedPlacements = shared;
+  }
+
   public void requireManagedNetworkCredentials() {
     managedNetworkRequired = true;
   }
@@ -56,6 +63,8 @@ public final class WorkspaceService {
   }
 
   public boolean dispatchable(Map<String, Object> row) {
+    if (Boolean.TRUE.equals(row.get("shared_rebuild_hold")))
+      return spec(row).getDesired() == DesiredState.DESIRED_STATE_STOPPED;
     return !managedNetworkRequired
         || spec(row).getDesired() != DesiredState.DESIRED_STATE_RUNNING
         || "disabled".equals(row.get("managed_network_state"))
@@ -196,6 +205,12 @@ public final class WorkspaceService {
     return store.tx(
         () -> {
           store.lock();
+          if (store.jdbc.queryForObject(
+                  "SELECT count(*) FROM shared_dsh_placement WHERE tenant_id=? AND member_id=?",
+                  Long.class,
+                  tenant,
+                  owner)
+              > 0) throw new AurigaException(CommonErrors.CONFLICT);
           var existing =
               store.jdbc.queryForList(
                   "SELECT * FROM instance WHERE tenant_id=? AND owner_id=? AND NOT deleted FOR UPDATE",
@@ -491,6 +506,8 @@ public final class WorkspaceService {
   }
 
   private void desire(Map<String, Object> row, boolean running, String reason, int maximum) {
+    if (running && Boolean.TRUE.equals(row.get("shared_rebuild_hold")))
+      throw new AurigaException(CommonErrors.CONFLICT);
     var previous = spec(row);
     var desired = running ? DesiredState.DESIRED_STATE_RUNNING : DesiredState.DESIRED_STATE_STOPPED;
     if (previous.getDesired() == desired) return;
@@ -528,6 +545,8 @@ public final class WorkspaceService {
         () -> {
           store.lock();
           var row = owned(id, actor);
+          if (Boolean.TRUE.equals(row.get("shared_rebuild_hold")))
+            throw new AurigaException(CommonErrors.CONFLICT);
           if (action.equals("start") || action.equals("restart")) {
             var owner = (UUID) row.get("owner_id");
             var quota = inputs.quota(store.tenant(), owner);
@@ -578,6 +597,7 @@ public final class WorkspaceService {
   }
 
   private void queueRestart(UUID id, String reason, boolean rotate) {
+    if (Boolean.TRUE.equals(store.instance(id).get("shared_rebuild_hold"))) return;
     long generation = ((Number) store.instance(id).get("generation")).longValue();
     // Automatic reconciliation must not reset the retry budget for the same generation.
     if (reason.equals("apply_pending")
@@ -813,6 +833,7 @@ public final class WorkspaceService {
   }
 
   public void tickTenant() {
+    if (sharedPlacements != null) sharedPlacements.recover();
     UUID tenant = store.tenant();
     var policy = inputs.policy(tenant);
     store.tx(
@@ -828,6 +849,7 @@ public final class WorkspaceService {
               store.jdbc.queryForList(
                   "SELECT * FROM instance WHERE tenant_id=? AND NOT deleted ORDER BY id FOR UPDATE",
                   tenant)) {
+            if (Boolean.TRUE.equals(row.get("shared_rebuild_hold"))) continue;
             if (Boolean.TRUE.equals(row.get("wake_report_pending"))
                 && wakeReportAllowed(row, now)) {
               applyWakeReport(row, instant(row, "pending_wake_at"), now);
@@ -1074,6 +1096,8 @@ public final class WorkspaceService {
           tenant,
           () -> {
             var row = store.instance(id);
+            if (Boolean.TRUE.equals(row.get("shared_rebuild_hold")))
+              throw new AurigaException(CommonErrors.UNAUTHENTICATED);
             if (!java.security.MessageDigest.isEqual(
                 (byte[]) row.get("token_hash"), WorkspaceCrypto.hash(token)))
               throw new AurigaException(CommonErrors.UNAUTHENTICATED);

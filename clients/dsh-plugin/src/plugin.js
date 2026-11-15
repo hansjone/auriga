@@ -8,7 +8,7 @@ import { createManaged } from './modes/managed.js';
 import { selectMode } from './index.js';
 import { createLocalSurfaceHandler } from './local-ui.js';
 import { createConnectRuntime } from './local/runtime.js';
-import { savedPlatformConfig } from './local/platform.js';
+import { savedPlatformConfig } from './local/config.js';
 import { installNativeLoginRPC } from './local/native-rpc.js';
 import { installLocalAdmission } from './local/host.js';
 import {
@@ -44,10 +44,15 @@ export async function apply(ctx, config) {
     ctx,
     config,
     mode === 'managed'
-      ? { mode: 'managed' }
+      ? {
+          mode: 'managed',
+          networkControl: () => managedRuntime?.networkControl,
+        }
       : {
           activeOrigin: () => binding?.runtime.config.platformOrigin ?? '',
           desktop: () => binding?.runtime.desktop,
+          broker: () => binding?.runtime.broker,
+          networkControl: () => binding?.runtime.networkControl,
           nativeAuth: {
             requestRejection: (req) =>
               admission
@@ -90,6 +95,21 @@ export async function apply(ctx, config) {
         protocol: ctx.webServer.protocol,
       });
       installNativeLoginRPC(ctx, () => current()?.runtime);
+      ctx.effect(
+        () =>
+          ctx.webServer.register({
+            kind: 'prefix',
+            path: '/dsh-team',
+            handler(req, res) {
+              const runtime = current()?.runtime;
+              if (runtime?.enterprise)
+                return runtime.enterprise.handle(req, res);
+              res.writeHead(503, { 'cache-control': 'no-store' });
+              res.end();
+            },
+          }),
+        'auriga: enterprise skill compatibility',
+      );
       installResourceChannel(ctx, {
         auth: admission.nativeAuth,
         current: () => current()?.runtime,
@@ -106,7 +126,7 @@ export async function apply(ctx, config) {
         () =>
           ctx.webServer.register({
             kind: 'prefix',
-            path: '/auriga/local-login',
+            path: '/auriga/shell',
             handler(req, res) {
               const active = current();
               if (active) return active.handler(req, res);
@@ -238,17 +258,6 @@ export async function apply(ctx, config) {
                 });
                 try {
                   await resources.beforeIdentity(runtime);
-                  const saved = runtime.vault.snapshot().credential;
-                  if (
-                    saved &&
-                    ((saved.platformOrigin ??
-                      new URL(saved.claims.iss).origin) !==
-                      effective.platformOrigin ||
-                      (saved.issuer ?? saved.claims.iss) !== effective.issuer ||
-                      (saved.clientId ?? effective.clientId) !==
-                        effective.clientId)
-                  )
-                    await runtime.resetAuthentication();
                   if (disposed || profileOwner !== owner) {
                     await runtime.close();
                     return;
@@ -330,6 +339,7 @@ export async function apply(ctx, config) {
   }
   const runtime = await createManaged({
     env: process.env,
+    deviceCredentialFile: process.env.AURIGA_DEVICE_CREDENTIAL_FILE,
     config: config ?? {},
     startHeartbeat: false,
   });

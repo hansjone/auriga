@@ -2,6 +2,30 @@
   "schemaVersion": 1,
   "description": "M3权限、域错误和新增事件来源的单一定义；OpenAPI x-permission/x-error-codes/x-events 仅为引用。现有common.*与iam.step_up_required复用既有契约和common映射，不在此重定义。",
   "permissions": {
+    "workspace.placements.read": {
+      "description": {
+        "zh-CN": "查看本租户成员的 DSH 分配切换结果",
+        "en": "Read tenant member DSH placement switch results"
+      },
+      "adminOnly": true,
+      "sensitive": false,
+      "builtinRoles": [
+        "owner",
+        "admin"
+      ]
+    },
+    "workspace.placements.write": {
+      "description": {
+        "zh-CN": "切换本租户成员的共享或独立 DSH 分配",
+        "en": "Switch tenant members between shared and dedicated DSH placements"
+      },
+      "adminOnly": true,
+      "sensitive": true,
+      "builtinRoles": [
+        "owner",
+        "admin"
+      ]
+    },
     "iam.network.manage": {
       "description": {
         "en": "Manage registered devices",
@@ -489,9 +513,67 @@
         "zh-CN": "资源对象存储暂时不可用",
         "en": "The resource object store is unavailable"
       }
+    },
+    "shared.binding_mismatch": {
+      "http": 403,
+      "grpc": "PERMISSION_DENIED",
+      "message": {
+        "zh-CN": "共享归属不匹配",
+        "en": "Shared binding mismatch"
+      }
+    },
+    "shared.expired": {
+      "http": 401,
+      "grpc": "UNAUTHENTICATED",
+      "message": {
+        "zh-CN": "共享授权已过期",
+        "en": "Shared authorization expired"
+      }
+    },
+    "shared.revoked": {
+      "http": 403,
+      "grpc": "PERMISSION_DENIED",
+      "message": {
+        "zh-CN": "共享授权已撤销",
+        "en": "Shared authorization revoked"
+      }
+    },
+    "shared.signature_invalid": {
+      "http": 401,
+      "grpc": "UNAUTHENTICATED",
+      "message": {
+        "zh-CN": "共享签名无效",
+        "en": "Invalid shared signature"
+      }
+    },
+    "shared.stop_unconfirmed": {
+      "http": 409,
+      "grpc": "FAILED_PRECONDITION",
+      "message": {
+        "zh-CN": "尚未确认执行树停止",
+        "en": "Execution tree stop unconfirmed"
+      }
     }
   },
   "events": {
+    "placement.switched": {
+      "source": "auriga/workspace",
+      "subject": "placementId",
+      "schema": "../events/placement.schema.json#/$defs/PlacementSwitched",
+      "consumers": [
+        "audit"
+      ],
+      "publish": "auriga.evt.placement.switched"
+    },
+    "placement.switch_failed": {
+      "source": "auriga/workspace",
+      "subject": "placementId",
+      "schema": "../events/placement.schema.json#/$defs/PlacementSwitchFailed",
+      "consumers": [
+        "audit"
+      ],
+      "publish": "auriga.evt.placement.switch_failed"
+    },
     "usage.recorded": {
       "source": "auriga/ai-gateway",
       "subject": "requestId",
@@ -570,6 +652,35 @@
         "audit"
       ],
       "publish": "auriga.evt.resource.catalog_distribution_requested"
+    },
+    "placement.revoked": {
+      "source": "auriga/workspace",
+      "subject": "placementId",
+      "schema": "../shared-dsh/shared-dsh.schema.json#/$defs/Revocation",
+      "consumers": [
+        "edge",
+        "ai-gateway",
+        "audit"
+      ],
+      "publish": "auriga.evt.placement.revoked"
+    },
+    "placement.resource_reported": {
+      "source": "auriga/workspace",
+      "subject": "binding.placementId",
+      "schema": "../shared-dsh/shared-dsh.schema.json#/$defs/ResourceReport",
+      "consumers": [
+        "audit"
+      ],
+      "publish": "auriga.evt.placement.resource_reported"
+    },
+    "placement.guardian_impact": {
+      "source": "auriga/workspace",
+      "subject": "physicalInstanceId",
+      "schema": "../shared-dsh/shared-dsh.schema.json#/$defs/GuardianImpact",
+      "consumers": [
+        "audit"
+      ],
+      "publish": "auriga.evt.placement.guardian_impact"
     }
   },
   "deviceMappings": {

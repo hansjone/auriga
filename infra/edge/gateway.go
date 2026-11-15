@@ -20,6 +20,7 @@ const maxInstanceBodyBytes = 64 << 20  // 64 MiB, aligned with agent uploads.
 
 // Gateway is the edge HTTP handler.
 type Gateway struct {
+	Shared        *SharedEntry
 	Cfg           Config
 	Log           *slog.Logger
 	Trusted       *TrustedProxies
@@ -782,6 +783,10 @@ func (g *Gateway) serveInstance(w http.ResponseWriter, r *http.Request, instance
 		if instPath == "" {
 			instPath = "/"
 		}
+	}
+
+	if g.serveShared(w, r, instanceID, instPath, clientIP, rid) {
+		return
 	}
 
 	if instPath == "/_auriga/ticket" {

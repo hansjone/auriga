@@ -13,7 +13,11 @@ import {
   peer,
 } from './host/fixtures.js';
 import { signingFixture } from './trust/fixtures.js';
-import { signedKeyset, testRoots } from './trust/keyset-fixtures.js';
+import {
+  signedV2Keyset as signedKeyset,
+  signedV2Announcement,
+  testRoots,
+} from './trust/keyset-fixtures.js';
 import { encodeJson, decodeJson } from '../../src/network/session/frames.js';
 import { digest } from '../../src/network/trust/verifier.js';
 
@@ -36,6 +40,10 @@ async function fixture(t, overrides = {}, runtimeOptions = {}) {
       ]),
     );
   const ports = {
+    async refreshTrust(trust) {
+      await trust.update(signedKeyset(signer.config));
+      await trust.announce(signedV2Announcement(signer.config));
+    },
     host,
     network: createFixturePlatform().network,
     async prepareTicket(input) {
@@ -97,6 +105,7 @@ async function fixture(t, overrides = {}, runtimeOptions = {}) {
       url: 'wss://network.example.com/',
       roots: testRoots,
       keyset,
+      announcement: signedV2Announcement(signer.config),
       initialize: true,
       ...runtimeOptions.prepared,
     },

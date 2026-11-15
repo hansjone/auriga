@@ -10,7 +10,7 @@ import {
 import { join } from 'node:path';
 import { createVault } from '../../src/local/vault.js';
 import { createCatalogIdentityFence } from '../../src/resources/identity-fence.js';
-import { catalogService } from '../../src/resources/catalog-service.js';
+import { catalogService } from './broker-fixture.js';
 import { catalogFixture } from './catalog-fixture.js';
 test('the verified proposed identity is not published until old shared files, including user edits, have been isolated', async (t) => {
   const f = catalogFixture(t),

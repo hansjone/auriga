@@ -110,6 +110,49 @@ const signedIn = {
   models: { available: false },
 };
 
+test('native settings imports a selected public file while signed out and offers the signed receipt', async (t) => {
+  const calls = [];
+  const f = harness(async (url, init) => {
+    if (url.endsWith('/network-control')) {
+      calls.push(init);
+      return Response.json({ receipt: { package_id: 'public-receipt' } });
+    }
+    return Response.json(
+      url.endsWith('/status')
+        ? { loggedIn: false }
+        : { ...settings, networkControl: { available: true } },
+    );
+  });
+  t.after(() => f.dispose());
+  f.render();
+  await setImmediate();
+  let tree = f.render();
+  const input = nodes(tree).find(
+    (n) => n.type === 'input' && n.props.type === 'file',
+  );
+  assert.equal(input.props.disabled, false);
+  await input.props.onChange({
+    target: { files: [{ size: 42, text: async () => 'original public JSON' }] },
+  });
+  tree = f.render();
+  const submit = button(tree, '导入控制包');
+  assert.equal(submit.props.disabled, false);
+  await submit.props.onClick();
+  assert.deepEqual(JSON.parse(calls[0].body), {
+    packageJson: 'original public JSON',
+  });
+  assert.equal(calls[0].headers['X-Auriga-Settings'], '1');
+  tree = f.render();
+  assert.match(text(tree), /联网后自动提交确认/);
+  const download = nodes(tree).find(
+    (n) => n.type === 'a' && n.props.download === 'auriga-control-receipt.json',
+  );
+  assert.deepEqual(
+    JSON.parse(decodeURIComponent(download.props.href.split(',')[1])),
+    { package_id: 'public-receipt' },
+  );
+});
+
 test('Desktop download survives the status deadline and displays the queued result', async (t) => {
   mockTimeouts(t);
   let finishDownload,
@@ -479,11 +522,11 @@ for (const locale of ['zh', 'en'])
         }
       });
 
-test('R2 logout preserves the existing explicit confirmation page', async () => {
+test('R2 logout sends the explicit shell command with CSRF and refreshes status', async () => {
   let status = signedIn,
     sent;
   const fixture = harness(async (url, init) => {
-    if (url.endsWith('/logout')) {
+    if (url.endsWith('/shell/command')) {
       sent = init;
       status = { loggedIn: false, connected: false };
       return Response.json({});
@@ -494,12 +537,14 @@ test('R2 logout preserves the existing explicit confirmation page', async () => 
     fixture.render();
     await setImmediate();
     await button(fixture.render(), '退出登录').props.onClick();
-    assert.equal(sent, undefined);
-    assert.ok(button(fixture.render(), '退出登录'));
-    assert.equal(
-      fixture.navigated,
-      'https://example.com/auriga/local-login?logout=1',
-    );
+    await setImmediate();
+    assert.equal(sent.method, 'POST');
+    assert.deepEqual(JSON.parse(sent.body), { action: 'logout' });
+    assert.equal(sent.headers['x-auriga-csrf'], 'test-csrf');
+    fixture.render();
+    await setImmediate();
+    assert.equal(button(fixture.render(), '退出登录'), undefined);
+    assert.equal(fixture.navigated, undefined);
   } finally {
     fixture.dispose();
   }

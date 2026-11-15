@@ -16,7 +16,7 @@ async function invoke({
     Readable.from([Buffer.from(JSON.stringify(body))]),
     {
       method,
-      url: '/auriga/local-login/messaging/' + action,
+      url: '/auriga/shell/messaging/' + action,
       headers: { 'content-type': 'application/json' },
     },
   );

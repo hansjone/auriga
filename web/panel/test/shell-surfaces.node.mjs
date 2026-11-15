@@ -545,11 +545,11 @@ test('managed failures never load or fall back to the packaged local panel', asy
     assert.ok(main.root.querySelector('[role="alert"]'));
     assert.equal(host.document.querySelector('script'), null);
     assert.equal(
-      calls.filter((url) => !url.endsWith('/auriga/local-login/status')).length,
+      calls.filter((url) => !url.endsWith('/auriga/shell/status')).length,
       1,
     );
     assert.equal(
-      calls.filter((url) => url.endsWith('/auriga/local-login/status')).length,
+      calls.filter((url) => url.endsWith('/auriga/shell/status')).length,
       1,
     );
     assert.doesNotMatch(calls.join(' '), /local-panel/);

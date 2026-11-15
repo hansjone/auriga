@@ -1,3 +1,4 @@
+import { resourceRequest } from './broker-transport.js';
 /* global AbortSignal */
 import { catalogRoutes, watchCatalogIdentity } from './catalog-routes.js';
 const prefix = '/auriga/resources';
@@ -38,10 +39,10 @@ export function createResourceHandler({
   auth,
   current,
   memberHandler,
-  fetchImpl = fetch,
+  fetchImpl: _fetchImpl,
   ctx,
 }) {
-  const catalog = catalogRoutes({ current, fetchImpl, ctx });
+  const catalog = catalogRoutes({ current, ctx });
   /** @param {any} req @param {any} res */
   const handle = async (req, res) => {
     /** @param {number} status @param {unknown} [body] */
@@ -129,29 +130,26 @@ export function createResourceHandler({
           return send(400);
         requestBody = JSON.stringify(input);
       }
-      const token = await runtime.getAccess();
+
       if (current() !== runtime || runtime.resolve(req) !== identity)
         return send(401);
-      const response = await fetchImpl(
-        new URL(path, runtime.config.platformOrigin),
-        {
-          method: write ? 'POST' : 'GET',
-          headers: {
-            accept: 'application/json',
-            authorization: 'Bearer ' + token,
-            ...(write
-              ? {
-                  'content-type': 'application/json',
-                  'idempotency-key': intentKey,
-                }
-              : {}),
-          },
-          credentials: 'omit',
-          redirect: 'error',
-          signal: AbortSignal.timeout(15000),
-          body: requestBody,
+      const response = await resourceRequest(runtime, path, {
+        method: write ? 'POST' : 'GET',
+        headers: {
+          accept: 'application/json',
+
+          ...(write
+            ? {
+                'content-type': 'application/json',
+                'idempotency-key': intentKey,
+              }
+            : {}),
         },
-      );
+        credentials: 'omit',
+        redirect: 'error',
+        signal: AbortSignal.timeout(15000),
+        body: requestBody,
+      });
       if (!response.ok) {
         await response.body?.cancel();
         return send(

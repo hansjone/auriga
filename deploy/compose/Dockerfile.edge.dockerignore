@@ -51,3 +51,8 @@
 **/node_modules
 **/dist
 **/.dev
+
+!web/portal/public/
+!web/portal/public/**
+!web/admin/public/
+!web/admin/public/**

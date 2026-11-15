@@ -1,6 +1,6 @@
 {
   "name": "auriga-dsh",
-  "version": "0.1.15",
+  "version": "0.1.17",
   "description": "Auriga DSH plugin (standalone identity, managed host, team panel shell)",
   "license": "MIT",
   "type": "module",
@@ -13,6 +13,7 @@
     ".": "./src/plugin.js",
     "./library": "./src/index.js",
     "./plugin": "./src/plugin.js",
+    "./shared": "./src/shared/plugin.js",
     "./client": "./src/client.js",
     "./cordis.patch.yml": "./cordis.patch.yml",
     "./package.json": "./package.json"
@@ -22,12 +23,14 @@
     "LICENSE",
     "README.md",
     "ui",
-    "cordis.patch.yml"
+    "skills",
+    "cordis.patch.yml",
+    "shell-auth"
   ],
   "scripts": {
     "lint": "eslint . && prettier --check .",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "node --test \"test/**/*.test.js\"",
+    "test": "node --test \"test/**/*.test.js\" \"test/shared/*.test.mjs\"",
     "build": "tsc --noEmit -p tsconfig.json",
     "gen:network-keyset": "node scripts/gen-network-keyset.mjs",
     "gen:network-tools": "node scripts/gen-network-tools.mjs",

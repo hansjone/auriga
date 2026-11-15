@@ -12,6 +12,79 @@ import {
 import { createSettingsStore } from '../../src/settings/store.js';
 import { createPrivateSkills } from '../../src/resources/private-skills.js';
 
+for (const mode of ['connect', 'managed'])
+  test(
+    'native owner control import works offline with same-origin admission: ' +
+      mode,
+    async (t) => {
+      const dir = await mkdtemp(join(tmpdir(), 'auriga-control-route-'));
+      t.after(() => rm(dir, { recursive: true, force: true }));
+      const store = await createSettingsStore(join(dir, 'settings'));
+      let rejected,
+        calls = 0;
+      const handler = createSettingsHandler({
+        store,
+        mode,
+        activeOrigin: '',
+        auth: { requestRejection: () => rejected },
+        networkControl: () => ({
+          available: true,
+          importPackage: async (input) => {
+            calls++;
+            assert.equal(input, 'original public JSON');
+            return { package_id: 'installed' };
+          },
+        }),
+      });
+      const write = (
+        body = { packageJson: 'original public JSON' },
+        headers = {},
+      ) =>
+        request('network-control', {
+          method: 'POST',
+          origin: 'http://localhost:3000',
+          body,
+          headers: {
+            'content-type': 'application/json',
+            'x-auriga-settings': '1',
+            ...headers,
+          },
+        });
+      rejected = 401;
+      assert.equal((await send(handler, write())).status, 401);
+      rejected = undefined;
+      const cross = write();
+      cross.headers.origin = 'https://other.example.com';
+      assert.equal((await send(handler, cross)).status, 403);
+      assert.equal(
+        (await send(handler, write(undefined, { 'x-auriga-settings': '0' })))
+          .status,
+        403,
+      );
+      assert.equal(
+        (
+          await send(
+            handler,
+            write({
+              packageJson: 'original public JSON',
+              keyFile: 'forbidden',
+            }),
+          )
+        ).status,
+        400,
+      );
+      assert.equal(calls, 0);
+      const response = await send(handler, write());
+      assert.equal(response.status, 200);
+      assert.equal(calls, 1);
+      assert.equal(JSON.parse(response.body).receipt.package_id, 'installed');
+      assert.deepEqual(
+        JSON.parse((await send(handler, request('state'))).body).networkControl,
+        { available: true },
+      );
+    },
+  );
+
 test('private skills use native owner admission and same-origin writes offline, including managed mode', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'auriga-private-route-'));
   try {
@@ -426,4 +499,51 @@ test('public host adapter owns a profile-scoped route and disposal', async () =>
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
+});
+
+test('control import rejects declared oversize before reading and stops chunked input at the first excess', async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), 'auriga-control-limit-'));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const handler = createSettingsHandler({
+    store: await createSettingsStore(dir),
+    activeOrigin: '',
+    auth: { requestRejection: () => undefined },
+    networkControl: () => ({
+      available: true,
+      importPackage: async () => {
+        throw Error('must not import');
+      },
+    }),
+  });
+  const make = () =>
+    request('network-control', {
+      method: 'POST',
+      origin: 'http://localhost:3000',
+      headers: { 'content-type': 'application/json', 'x-auriga-settings': '1' },
+    });
+  const declared = make();
+  declared.headers['content-length'] = String(64 * 1024 * 1024 + 1);
+  let reads = 0,
+    closed = false;
+  declared[Symbol.asyncIterator] = async function* () {
+    reads++;
+    yield Buffer.from('ignored');
+  };
+  assert.equal((await send(handler, declared)).status, 413);
+  assert.equal(reads, 0);
+  const chunked = make(),
+    chunk = Buffer.alloc(8 * 1024 * 1024);
+  chunked[Symbol.asyncIterator] = async function* () {
+    try {
+      for (let i = 0; i < 100; i++) {
+        reads++;
+        yield chunk;
+      }
+    } finally {
+      closed = true;
+    }
+  };
+  assert.equal((await send(handler, chunked)).status, 413);
+  assert.equal(reads, 9);
+  assert.equal(closed, true);
 });

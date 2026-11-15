@@ -8,8 +8,11 @@ import { bootstrapReady } from '../../../src/network/session/bootstrap-ready.js'
 import { createReadyRetry } from '../../../src/network/session/ready-retry.js';
 import { decodeJson, encodeJson } from '../../../src/network/session/frames.js';
 import { signingInput } from '../../../src/network/trust/verifier.js';
-import { openTrustStore } from '../../../src/network/trust/store.js';
-import { signedKeyset, testRoots } from '../trust/keyset-fixtures.js';
+import { openSignedTrust as openTrustStore } from '../trust/keyset-fixtures.js';
+import {
+  signedV2Keyset as signedKeyset,
+  testRoots,
+} from '../trust/keyset-fixtures.js';
 
 const registration = Object.freeze({
   tenant: 'tenant-1',
@@ -459,15 +462,20 @@ for (const change of ['revoked', 'expired', 'wrong root']) {
           cache: { async load() {}, async commit() {} },
           now: clock,
         }),
-        { code: 'network.key_unavailable' },
+        /invalid_chain/,
       );
     } else {
       f.config.keyset_version = '6';
       if (change === 'revoked') f.config.keys[0].state = 'revoked';
       else f.config.valid_until = '2026-10-25T00:00:30Z';
-      await f.trust.update(signedKeyset(f.config));
+      await assert.rejects(
+        f.trust.update(signedKeyset(f.config)),
+        /invalid_transition/,
+      );
       const pending = bootstrapReady(f.options);
-      f.emit(f.seal(f.result()));
+      const rejectedFrame = f.result();
+      rejectedFrame.server_auth.keyset_version = '6';
+      f.emit(f.seal(rejectedFrame));
       await assert.rejects(pending, { code: 'network.key_unavailable' });
     }
     f.clean();

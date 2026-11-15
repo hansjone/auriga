@@ -1,0 +1,27 @@
+{
+  "registration": {
+    "tenant": "11111111-1111-1111-1111-111111111111",
+    "device": "22222222-2222-2222-2222-222222222222",
+    "realm": "2",
+    "node": "64",
+    "systemAddress": "aur1:2.40.0",
+    "created": false
+  },
+  "wireCases": [
+    {
+      "name": "exponent",
+      "raw": " {\"version\":1e0,\"signature\":\"test\"}\n",
+      "wire": "IHsidmVyc2lvbiI6MWUwLCJzaWduYXR1cmUiOiJ0ZXN0In0K"
+    },
+    {
+      "name": "duplicate",
+      "raw": "{\"version\":1,\"version\":2,\"signature\":\"test\"}",
+      "wire": "eyJ2ZXJzaW9uIjoxLCJ2ZXJzaW9uIjoyLCJzaWduYXR1cmUiOiJ0ZXN0In0="
+    },
+    {
+      "name": "utf8",
+      "raw": "{\"name\":\"中文\",\"version\":1}",
+      "wire": "eyJuYW1lIjoi5Lit5paHIiwidmVyc2lvbiI6MX0="
+    }
+  ]
+}
