@@ -3,9 +3,61 @@ import assert from 'node:assert/strict';
 import { setImmediate } from 'node:timers';
 import { createNetworkLifecycle } from '../../src/network/lifecycle.js';
 import { generateKeyPairSync } from 'node:crypto';
-import { platformConfig } from '../../src/local/platform.js';
+import { platformConfig } from '../../src/local/config.js';
 
 const turn = () => new Promise((resolve) => setImmediate(resolve));
+
+test('offline control import pauses the only writer and cannot resurrect a logout during import', async (t) => {
+  let writer = false,
+    release,
+    entered;
+  const gate = new Promise((resolve) => {
+    release = resolve;
+  });
+  const started = new Promise((resolve) => {
+    entered = resolve;
+  });
+  const lifecycle = createNetworkLifecycle({
+    directory: 'unused',
+    ctx: {},
+    getAccess: async () => 'test',
+    authorizeLocal: async () => false,
+    defaultProvider: { prepare: async () => ({}) },
+    open: async () => {
+      writer = true;
+      return {
+        status: { connected: true },
+        start: async () => {},
+        close: async () => {
+          writer = false;
+        },
+      };
+    },
+    offlineControl: {
+      importPackage: async (input) => {
+        assert.equal(writer, false);
+        assert.equal(input, 'public');
+        entered();
+        await gate;
+        return 'receipt';
+      },
+    },
+  });
+  t.after(async () => {
+    release();
+    await lifecycle.close();
+  });
+  lifecycle.login();
+  await until(() => lifecycle.status.connected);
+  const operation = lifecycle.importControlOffline('public');
+  await started;
+  lifecycle.logout();
+  release();
+  assert.equal(await operation, 'receipt');
+  await turn();
+  assert.equal(writer, false);
+  assert.equal(lifecycle.status.connected, false);
+});
 
 test('R2 consent capability requires a live authenticated runtime and disappears on logout', async () => {
   const lifecycle = createNetworkLifecycle({

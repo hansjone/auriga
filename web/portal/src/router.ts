@@ -3,7 +3,7 @@ import { BRAND_NAME } from '@auriga/shared';
 import LoginView from './views/LoginView.vue';
 import InviteView from './views/InviteView.vue';
 import QrConfirmView from './views/QrConfirmView.vue';
-import HomeView from './views/HomeView.vue';
+import PortalEntry from './views/PortalEntry.vue';
 import AccountSecurityLayout from './views/account/AccountSecurityLayout.vue';
 import SecurityView from './views/account/SecurityView.vue';
 import DeviceView from './views/DeviceView.vue';
@@ -29,11 +29,13 @@ export const router = createRouter({
     },
     {
       path: '/',
+      component: PortalEntry,
+      meta: { public: true },
+    },
+    {
+      path: '/account',
       component: AccountSecurityLayout,
-      children: [
-        { path: '', component: HomeView },
-        { path: 'account/security', component: SecurityView },
-      ],
+      children: [{ path: 'security', component: SecurityView }],
     },
   ],
 });

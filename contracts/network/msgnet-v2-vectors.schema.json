@@ -1141,6 +1141,12 @@
                 "expected_selectors": {
                   "type": "object",
                   "additionalProperties": {
+                    "type": ["string", "null"]
+                  }
+                },
+                "expected_identities": {
+                  "type": "object",
+                  "additionalProperties": {
                     "type": "string"
                   }
                 }
@@ -1475,6 +1481,62 @@
                 "control",
                 "seen_version",
                 "seen_digest"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": ["id", "operation", "expected", "input"],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "operation": {
+              "const": "expected_selectors"
+            },
+            "expected": {
+              "type": "string"
+            },
+            "input": {
+              "type": "object",
+              "properties": {
+                "tenant_id": {
+                  "type": "string"
+                },
+                "realm": {
+                  "type": "string"
+                },
+                "authenticated_c_ledger": {
+                  "type": "boolean"
+                },
+                "now": {
+                  "type": "string"
+                },
+                "bundle": {
+                  "$ref": "auto-renewal-v2.schema.json#/$defs/SignedTransportTrustBundle"
+                },
+                "control": {
+                  "$ref": "auto-renewal-v2.schema.json#/$defs/SignedRootControl"
+                },
+                "query": {
+                  "$ref": "auto-renewal-v2.schema.json#/$defs/ExpectedSelectorsQuery"
+                },
+                "response": {
+                  "$ref": "auto-renewal-v2.schema.json#/$defs/ExpectedSelectors"
+                }
+              },
+              "required": [
+                "tenant_id",
+                "realm",
+                "authenticated_c_ledger",
+                "now",
+                "bundle",
+                "control",
+                "query",
+                "response"
               ],
               "additionalProperties": false
             }

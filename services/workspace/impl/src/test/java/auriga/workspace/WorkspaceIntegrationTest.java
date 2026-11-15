@@ -166,6 +166,145 @@ class WorkspaceIntegrationTest {
   }
 
   @Test
+  void sharedMaintenanceHoldBlocksLegacyOpenRestartDispatchCredentialsAndAdminDeletion() {
+    UUID id = TenantContext.call(tenant, () -> (UUID) service.open(owner).instance().get("id"));
+    String oldToken =
+        store.in(
+            tenant,
+            () ->
+                new String(
+                    managedCrypto.decrypt(
+                        (byte[]) store.instance(id).get("token_encrypted"), tenant + "/" + id),
+                    java.nio.charset.StandardCharsets.UTF_8));
+    var port =
+        new auriga.workspace.api.SharedDshAuthority.Inputs() {
+          public void requireMember(UUID t, UUID m) {}
+
+          public void requireSession(UUID t, UUID m, UUID session) {}
+
+          public String authorizationSetDigest(UUID t, UUID m) {
+            return "sha256:" + "a".repeat(64);
+          }
+
+          public SharedDshResourceView resourceView(SharedDshBinding binding) {
+            throw new UnsupportedOperationException();
+          }
+
+          public void requirePlacementWrite(UUID t, UUID actor, UUID session, long now) {}
+        };
+    var placements = new SharedDshPlacements(store, port, b -> true, clock);
+    var maintenance = new SharedDshMaintenance(store, placements, port, clock);
+    var browser = new SharedDshAdmin(store, placements, maintenance, port, clock);
+    UUID session = UUID.randomUUID();
+    var choices =
+        new SharedDshAdmin.PlanRequest(
+            List.of(new SharedDshAdmin.Member(owner, id, "shared")), "maintenance");
+    var saved =
+        TenantContext.call(
+            tenant, () -> browser.save(owner, session, null, choices, "create", null));
+    UUID batch = UUID.fromString(saved.body().get("planId").toString());
+    assertEquals("draft", saved.body().get("state"));
+    assertEquals(saved.etag(), TenantContext.call(tenant, () -> browser.plan(batch)).etag());
+    assertFalse(store.in(tenant, () -> (Boolean) store.instance(id).get("shared_rebuild_hold")));
+    var replaced =
+        TenantContext.call(
+            tenant, () -> browser.save(owner, session, batch, choices, "update", saved.etag()));
+    assertNotEquals(saved.etag(), replaced.etag());
+    assertThrows(
+        AurigaException.class,
+        () ->
+            TenantContext.call(
+                tenant, () -> browser.start(owner, session, batch, "stale", saved.etag())));
+    var started =
+        TenantContext.call(
+            tenant, () -> browser.start(owner, session, batch, "start", replaced.etag()));
+    assertEquals("running", started.body().get("state"));
+    assertEquals(
+        started.etag(),
+        TenantContext.call(
+                tenant, () -> browser.start(owner, session, batch, "start", replaced.etag()))
+            .etag());
+    assertThrows(
+        AurigaException.class,
+        () ->
+            TenantContext.call(
+                tenant,
+                () ->
+                    browser.save(
+                        owner,
+                        session,
+                        batch,
+                        choices,
+                        "update-after-start",
+                        TenantContext.call(tenant, () -> browser.plan(batch)).etag())));
+    assertThrows(
+        AurigaException.class, () -> TenantContext.call(tenant, () -> service.open(owner)));
+    assertThrows(
+        AurigaException.class,
+        () -> TenantContext.call(tenant, () -> service.operate(id, actor(), "restart")));
+    assertThrows(
+        AurigaException.class,
+        () -> TenantContext.call(tenant, () -> service.authenticateInstance(oldToken)));
+    var admin = new WorkspaceAdmin(service, inputs);
+    assertThrows(
+        AurigaException.class,
+        () -> TenantContext.run(tenant, () -> admin.delete(id, true, owner)));
+    assertThrows(
+        AurigaException.class,
+        () ->
+            TenantContext.call(
+                tenant, () -> admin.patch(id, WorkspaceService.JSON.createObjectNode(), null)));
+    long generation =
+        store.in(tenant, () -> ((Number) store.instance(id).get("generation")).longValue());
+    TenantContext.run(tenant, () -> service.tickTenant());
+    assertEquals(
+        generation,
+        store.in(tenant, () -> ((Number) store.instance(id).get("generation")).longValue()));
+    assertTrue(store.in(tenant, () -> service.dispatchable(store.instance(id))));
+    assertEquals(
+        DesiredState.DESIRED_STATE_STOPPED,
+        store.in(tenant, () -> WorkspaceService.spec(store.instance(id)).getDesired()));
+    var authority = new WorkspaceManagedBindings(store, inputs);
+    assertFalse(
+        TenantContext.call(
+                tenant,
+                () ->
+                    authority.get(
+                        auriga.contracts.workspace.v1.GetManagedInstanceBindingRequest.newBuilder()
+                            .setTenantId(tenant.toString())
+                            .setInstanceId(id.toString())
+                            .build()))
+            .getActive());
+    var unavailableShared = org.mockito.Mockito.mock(SharedDshPlacements.class);
+    org.mockito.Mockito.doThrow(new IllegalStateException("authority outage"))
+        .when(unavailableShared)
+        .recover();
+    service.sharedPlacements(unavailableShared);
+    assertDoesNotThrow(() -> TenantContext.run(tenant, service::tickTenant));
+    org.mockito.Mockito.verify(unavailableShared).recover();
+    service.sharedPlacements(placements);
+    var migration =
+        TenantContext.call(tenant, () -> maintenance.progress(owner, session, batch)).getFirst();
+    clock.now = clock.instant().plusSeconds(31);
+    TenantContext.run(tenant, () -> service.tickTenant());
+    assertEquals(
+        "blocked",
+        TenantContext.call(tenant, () -> maintenance.progress(owner, session, batch))
+            .getFirst()
+            .operationState());
+    assertTrue(
+        store.in(
+                tenant,
+                () ->
+                    store.jdbc.queryForObject(
+                        "SELECT count(*) FROM shared_dsh_pool_stop WHERE tenant_id=? AND id=?",
+                        Long.class,
+                        tenant,
+                        migration.operation()))
+            > 0);
+  }
+
+  @Test
   void unifiedIncrementalIntentsWaitForGapsAndApplyInOrder() throws Exception {
     var control = new RecoveryControl(tenant);
     UUID instance =

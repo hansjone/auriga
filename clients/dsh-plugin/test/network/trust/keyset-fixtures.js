@@ -1,10 +1,14 @@
-import { generateKeyPairSync, sign, createHash } from 'node:crypto';
+import { generateKeyPairSync, sign } from 'node:crypto';
 import { Buffer } from 'node:buffer';
 import { jcs } from '../../../../../contracts/test/network-lib.mjs';
-import { openTrustStore } from '../../../src/network/trust/store.js';
+import { openV2TrustStore } from '../../../src/network/trust/v2-store.js';
 import { signingInput } from '../../../src/network/trust/verifier.js';
+import { createV2Signer } from './v2-keyset-fixtures.js';
 
 const root = generateKeyPairSync('ed25519');
+const v2 = createV2Signer(root, 'test-offline-root');
+export const signedV2Keyset = v2.publication;
+export const signedV2Announcement = v2.announcement;
 export const testRoots = [
   {
     kid: 'test-offline-root',
@@ -13,51 +17,39 @@ export const testRoots = [
       .toString('base64url'),
   },
 ];
-export function signedKeyset(payload) {
-  return {
-    keyset: payload,
-    root_auth: {
-      alg: 'Ed25519',
-      kid: testRoots[0].kid,
-      signature: sign(
-        null,
-        Buffer.from('Auriga.NetworkKeyset.v1\0' + jcs(payload)),
-        root.privateKey,
-      ).toString('base64url'),
-    },
-  };
-}
-export function signedAnnouncement(payload, overrides = {}) {
-  const value = {
-    keyset_version: payload.keyset_version,
-    manifest_digest:
-      'sha256:' + createHash('sha256').update(jcs(payload)).digest('hex'),
-    valid_until: payload.valid_until,
-    root_kid: testRoots[0].kid,
-    ...overrides,
-  };
-  return {
-    ...value,
-    root_signature: sign(
-      null,
-      Buffer.from('Auriga.NetworkKeysetAnnouncement.v1\0' + jcs(value)),
-      root.privateKey,
-    ).toString('base64url'),
-  };
-}
-// Convenience for existing payload-based fixtures; the real store only sees
-// the contract's root-signed wrapper, including during refresh and restart.
-export async function openTestTrust(options) {
-  const store = await openTrustStore({
+// Fixture transport signs payloads; every validation, key lookup, fence and
+// refresh decision is performed by the production v2 store.
+export async function openSignedTrust(options) {
+  return openV2TrustStore({
     ...options,
+    realm: options.realm ?? options.config?.keyset?.payload.realm ?? '2',
+    tenant_id:
+      options.tenant_id ??
+      options.config?.keyset?.payload.tenant_id ??
+      'tenant-fixture',
+    requireAnnouncement: options.requireAnnouncement ?? false,
+  });
+}
+export async function openTestTrust(options) {
+  const signer = createV2Signer(root, 'test-offline-root');
+  let store;
+  const install = async (payload) => {
+    await store.update(signer.publication(payload));
+    await store.announce(signer.announcement(payload));
+  };
+  store = await openSignedTrust({
+    ...options,
+    config: undefined,
     roots: testRoots,
-    config: options.config && signedKeyset(options.config),
     refresh:
       options.refresh &&
-      (async (request) => signedKeyset(await options.refresh(request))),
+      (async (request) => {
+        await install(await options.refresh(request));
+      }),
   });
+  if (options.config) await install(options.config);
   return Object.defineProperties(
-    { ...store, update: (payload) => store.update(signedKeyset(payload)) },
+    { ...store, update: install },
     {
       diagnostics: { get: () => store.diagnostics },
       refreshRevision: { get: () => store.refreshRevision },
@@ -65,6 +57,20 @@ export async function openTestTrust(options) {
   );
 }
 
+export function signedV2Control(payload) {
+  return {
+    payload,
+    root_auth: {
+      kid: 'test-offline-root',
+      alg: 'Ed25519',
+      signature: sign(
+        null,
+        Buffer.from('Auriga.NetworkRootControl.v2\0' + jcs(payload)),
+        root.privateKey,
+      ).toString('base64url'),
+    },
+  };
+}
 export function publicationFixture() {
   const pair = generateKeyPairSync('ed25519');
   const now = Math.floor(Date.now() / 1000) * 1000;

@@ -3,6 +3,15 @@
 const messages = {
   zh: {
     desktop: '桌面更新',
+    requiredUpdate:
+      '此版本已低于最低可用版本，请完成更新并重启后继续使用平台功能。',
+    downloadProgress: '正在下载',
+    updateFailed: '更新未完成，旧版和用户数据已保留，可重试。',
+    cancelUpdate: '取消下载（保留进度）',
+    updatePaused: '下载已暂停，可继续下载',
+    updateChannel: '更新渠道',
+    stable: '正式',
+    beta: '测试',
     desktopConfirmationRequired:
       '更新地址尚未明确确认。请使用平台地址、IP 模式及地址确认参数重新安装 Desktop。',
     update: '更新',
@@ -22,6 +31,7 @@ const messages = {
     account: '账号',
     identity: '成员',
     memberId: '成员 ID',
+    department: '部门',
     device: '设备名',
     loginTime: '登录时间',
     signedOut: '未登录',
@@ -31,6 +41,11 @@ const messages = {
     managedVerifying: '正在验证实例会话',
     memberLoading: '正在读取成员资料',
     networkTitle: '消息网络',
+    controlFile: '公有控制包',
+    controlImport: '导入控制包',
+    controlSaved: '控制已保存；联网后自动提交确认。',
+    controlReceipt: '保存确认回执',
+    controlMissing: '安装身份未配置，请联系管理员。',
     networkReady: '就绪',
     networkPending: '未就绪',
     network: '总部不可达',
@@ -76,6 +91,16 @@ const messages = {
   },
   en: {
     desktop: 'Desktop updates',
+    requiredUpdate:
+      'This version is no longer supported. Update and restart to continue using platform features.',
+    downloadProgress: 'Downloading',
+    updateFailed:
+      'Update incomplete. Your previous version and data are preserved. Retry to continue.',
+    cancelUpdate: 'Cancel download (keep progress)',
+    updatePaused: 'Download paused; resume when ready',
+    updateChannel: 'Update channel',
+    stable: 'Stable',
+    beta: 'Beta',
     desktopConfirmationRequired:
       'The update address needs confirmation. Reinstall Desktop with the platform address, IP mode and address confirmation parameters.',
     update: 'Update',
@@ -96,6 +121,7 @@ const messages = {
     account: 'Account',
     identity: 'Member',
     memberId: 'Member ID',
+    department: 'Department',
     device: 'Device name',
     loginTime: 'Sign-in time',
     signedOut: 'Signed out',
@@ -105,6 +131,12 @@ const messages = {
     managedVerifying: 'Verifying instance session',
     memberLoading: 'Loading member profile',
     networkTitle: 'Message network',
+    controlFile: 'Public control package',
+    controlImport: 'Import control package',
+    controlSaved: 'Control saved. Confirmation will be sent when online.',
+    controlReceipt: 'Save installation receipt',
+    controlMissing:
+      'Installation identity is not configured. Contact your administrator.',
     networkReady: 'Ready',
     networkPending: 'Not ready',
     network: 'Platform unreachable',
@@ -153,7 +185,7 @@ const messages = {
 /** @param {any} React @param {{localURL:(path:string)=>string,fetcher?:typeof fetch,navigate:(url:string)=>void}} ports */
 export function createSettingsView(
   React,
-  { localURL, fetcher = fetch, navigate },
+  { localURL, fetcher = fetch, navigate: _navigate },
 ) {
   const h = React.createElement;
   function useReceiveSettings(
@@ -173,7 +205,7 @@ export function createSettingsView(
     React.useEffect(() => {
       let live = true;
       if (account?.loggedIn)
-        void fetcher(localURL('auriga/local-login/messaging/snapshot'), {
+        void fetcher(localURL('auriga/shell/messaging/snapshot'), {
           credentials: 'same-origin',
           cache: 'no-store',
         })
@@ -201,7 +233,7 @@ export function createSettingsView(
       setError('');
       try {
         const response = await fetcher(
-          localURL('auriga/local-login/messaging/receive'),
+          localURL('auriga/shell/messaging/receive'),
           {
             method: 'POST',
             credentials: 'same-origin',
@@ -260,7 +292,7 @@ export function createSettingsView(
   async function call(
     /** @type {string} */ path,
     /** @type {any} */ body = undefined,
-    /** @type {{ timeoutMs?: number | null }} */ options = {},
+    /** @type {{ timeoutMs?: number | null, csrf?: string }} */ options = {},
   ) {
     const response = await fetcher(localURL(path), {
       method: body === undefined ? 'GET' : 'POST',
@@ -276,6 +308,7 @@ export function createSettingsView(
           ? {}
           : {
               'content-type': 'application/json',
+              ...(options.csrf ? { 'x-auriga-csrf': options.csrf } : {}),
               ...(path.startsWith('auriga/resources/catalog/')
                 ? { 'x-auriga-catalog': '1' }
                 : { 'X-Auriga-Settings': '1' }),
@@ -698,6 +731,8 @@ export function createSettingsView(
     const [address, setAddress] = React.useState(''),
       [notice, setNotice] = React.useState(''),
       [statusError, setStatusError] = React.useState('');
+    const [controlText, setControlText] = React.useState('');
+    const [controlReceipt, setControlReceipt] = React.useState(null);
     const [busy, setBusy] = React.useState(false);
     const [revision, reload] = React.useReducer(
       (/** @type {number} */ n) => n + 1,
@@ -717,7 +752,7 @@ export function createSettingsView(
       setState(next);
       setAddress(next.platformOrigin ?? '');
       try {
-        const identity = await call('auriga/local-login/status');
+        const identity = await call('auriga/shell/status');
         if (
           typeof identity?.loggedIn !== 'boolean' ||
           (identity.loggedIn && typeof identity.account?.subject !== 'string')
@@ -737,9 +772,9 @@ export function createSettingsView(
         // Each read owns its cancellation guard; unmounted windows never publish.
         try {
           const next = await call('auriga/settings/state');
-          const identity = await call('auriga/local-login/status').catch(
-            (error) => ({ readError: explain(error) }),
-          );
+          const identity = await call('auriga/shell/status').catch((error) => ({
+            readError: explain(error),
+          }));
           if (!live) return;
           setState(next);
           if (first) setAddress(next.platformOrigin ?? '');
@@ -867,7 +902,15 @@ export function createSettingsView(
         { type: 'button', disabled: busy || disabled, onClick: action },
         label,
       );
-    const enter = () => navigate(localURL('auriga/local-login'));
+    const shellCommand = async (/** @type {string} */ action) => {
+      await call('auriga/shell/command', { action }, { csrf: account?.csrf });
+      await reload();
+    };
+    const enter = () => {
+      void shellCommand('open_login').catch((error) =>
+        setNotice(explain(error)),
+      );
+    };
     const action = statusError
       ? button(t.retry, reload)
       : managed
@@ -885,7 +928,9 @@ export function createSettingsView(
             : !loggedIn
               ? button(t.login, enter)
               : button(t.refresh, reload);
-    const logout = () => navigate(localURL('auriga/local-login') + '?logout=1');
+    const logout = () => {
+      void shellCommand('logout').catch((error) => setNotice(explain(error)));
+    };
     const receiveControls = useReceiveSettings({ t, account, revision });
     return h(
       'div',
@@ -911,7 +956,10 @@ export function createSettingsView(
             h('input', {
               type: 'checkbox',
               checked: state.desktop.enabled,
-              disabled: busy || state.desktop.confirmationRequired,
+              disabled:
+                busy ||
+                state.desktop.confirmationRequired ||
+                state.desktop.required,
               onChange: (/** @type {any} */ e) =>
                 run(async () => {
                   await call('auriga/settings/desktop', {
@@ -922,8 +970,58 @@ export function createSettingsView(
             }),
             t.autoCheck,
           ),
+          state.desktop.required && h('p', { role: 'alert' }, t.requiredUpdate),
+          h(
+            'label',
+            null,
+            t.updateChannel,
+            h(
+              'select',
+              {
+                value: state.desktop.channel ?? 'stable',
+                disabled:
+                  busy ||
+                  state.desktop.downloading ||
+                  state.desktop.required ||
+                  state.desktop.restartRequired,
+                onChange: (/** @type {any} */ e) =>
+                  run(async () => {
+                    await call('auriga/settings/desktop', {
+                      channel: e.target.value,
+                    });
+                    await call('auriga/settings/desktop', { action: 'check' });
+                    await readState();
+                  }),
+              },
+              h('option', { value: 'stable' }, t.stable),
+              h('option', { value: 'beta' }, t.beta),
+            ),
+          ),
           state.desktop.available &&
-            h('p', null, state.desktop.available.version),
+            h('p', { role: 'status' }, state.desktop.available.version),
+          state.desktop.downloading &&
+            h(
+              'div',
+              { role: 'status' },
+              t.downloadProgress +
+                ' ' +
+                (state.desktop.downloadedBytes / 1048576).toFixed(1) +
+                ' / ' +
+                (state.desktop.totalBytes / 1048576).toFixed(1) +
+                ' MiB',
+              h('progress', {
+                max: state.desktop.totalBytes,
+                value: state.desktop.downloadedBytes,
+              }),
+              button(t.cancelUpdate, () =>
+                run(async () => {
+                  await call('auriga/settings/desktop', { action: 'cancel' });
+                  await readState();
+                }),
+              ),
+            ),
+          state.desktop.phase === 'cancelled' && h('p', null, t.updatePaused),
+          state.desktop.error && h('p', { role: 'alert' }, t.updateFailed),
           h('p', null, t.updateRestart),
           !state.desktop.confirmationRequired &&
             button(t.checkUpdate, () =>
@@ -934,6 +1032,7 @@ export function createSettingsView(
             ),
           state.desktop.available &&
             !state.desktop.restartRequired &&
+            !state.desktop.busy &&
             button(t.update, () =>
               run(async () => {
                 // The runtime bounds transfer idle time. A status-read deadline
@@ -1027,6 +1126,8 @@ export function createSettingsView(
               (loggedIn || recovering) &&
                 (account.deviceName ?? state?.deviceName) &&
                 row(t.device, account.deviceName ?? state?.deviceName),
+              account?.uacLoginInfo?.status === 'available' &&
+                row(t.department, account.uacLoginInfo.department),
               (loggedIn || recovering) &&
                 account.loginTime &&
                 row(
@@ -1045,6 +1146,50 @@ export function createSettingsView(
         'section',
         { 'aria-label': t.networkTitle },
         h('h3', null, t.networkTitle),
+        h(
+          'label',
+          null,
+          t.controlFile,
+          h('input', {
+            type: 'file',
+            accept: '.json,application/json',
+            disabled: busy || !state?.networkControl?.available,
+            onChange: (/** @type {any} */ event) =>
+              run(async () => {
+                const file = event.target.files?.[0];
+                setControlReceipt(null);
+                setControlText('');
+                if (!file) return;
+                if (file.size > 32 * 1024 * 1024)
+                  throw new Error('invalidSettings');
+                setControlText(await file.text());
+              }),
+          }),
+        ),
+        button(
+          t.controlImport,
+          () =>
+            run(async () => {
+              const result = await call('auriga/settings/network-control', {
+                packageJson: controlText,
+              });
+              setControlReceipt(result.receipt);
+              setNotice(t.controlSaved);
+            }),
+          !controlText || !state?.networkControl?.available,
+        ),
+        !state?.networkControl?.available && h('p', null, t.controlMissing),
+        controlReceipt &&
+          h(
+            'a',
+            {
+              download: 'auriga-control-receipt.json',
+              href:
+                'data:application/json;charset=utf-8,' +
+                encodeURIComponent(JSON.stringify(controlReceipt)),
+            },
+            t.controlReceipt,
+          ),
         row(t.networkTitle, statusError || networkText),
         (network?.address ?? account?.connection?.endpointId) &&
           row(t.endpoint, network?.address ?? account?.connection?.endpointId),

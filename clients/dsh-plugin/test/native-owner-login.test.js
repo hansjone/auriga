@@ -1,36 +1,40 @@
-import { ownerRequest } from './owner-request.js';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { runtimePeer } from './local-runtime-peer.js';
+import { shellRuntimePeer } from './shell-runtime-peer.js';
 import { installLocalAdmission } from '../src/local/host.js';
 
 test('admitted owner resumes without plugin cookies; logout and expiry fence native business access', async (t) => {
-  const { runtime, credential } = await runtimePeer(t);
+  t.mock.timers.enable({ apis: ['Date'], now: Date.now() });
+  const { runtime, connection } = await shellRuntimePeer(t);
   const peer = { principal: { kind: 'owner' } };
   const request = runtime.nativeRequest(peer);
   assert.equal(request.headers.cookie, undefined);
-  const prepared = runtime.prepare(ownerRequest(runtime, request));
+  const prepared = runtime.prepare(request);
   assert.equal(prepared.setCookie, undefined);
   assert.equal(prepared.body.loggedIn, true);
 
   assert.equal(
-    runtime.resolve(runtime.nativeRequest(peer)).subject,
-    credential.claims.sub,
+    runtime.resolve(runtime.nativeRequest(peer)).ownerId,
+    connection.identity.memberId,
   );
   const business = { headers: {} };
   assert.ok(runtime.bindNativeRequest(peer, business));
   assert.equal(runtime.status(business).loggedIn, true);
   const other = { principal: { kind: 'owner' } };
   assert.equal(
-    runtime.resolve(runtime.nativeRequest(other)).subject,
-    credential.claims.sub,
+    runtime.resolve(runtime.nativeRequest(other)).ownerId,
+    connection.identity.memberId,
   );
-  t.mock.timers.enable({ apis: ['Date'], now: Date.now() + 1800001 });
-  assert.equal(runtime.resolve(runtime.nativeRequest(peer)), null);
-  assert.equal(runtime.bindNativeRequest(peer, { headers: {} }), null);
-  await runtime.logout(request);
-  assert.equal(runtime.resolve(runtime.nativeRequest(peer)), null);
-  assert.equal(runtime.vault.snapshot().credential, null);
+  t.mock.timers.tick(30001);
+  assert.equal(runtime.resolve(runtime.nativeRequest(peer)), undefined);
+  assert.equal(runtime.bindNativeRequest(peer, { headers: {} }), undefined);
+  await assert.rejects(runtime.command(request, 'logout'), {
+    code: 'common.unavailable',
+  });
+  connection.transition('authenticated');
+  await runtime.command(request, 'logout');
+  assert.equal(runtime.resolve(runtime.nativeRequest(peer)), undefined);
+  assert.equal(runtime.vault.snapshot().credential, undefined);
 });
 
 test('native RPC bootstrap needs a real admitted Peer; browser native-looking headers cannot select it', () => {

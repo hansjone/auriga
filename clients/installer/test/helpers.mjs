@@ -1,3 +1,4 @@
+import { Buffer } from 'node:buffer';
 import { createHash } from 'node:crypto';
 import {
   mkdirSync,
@@ -135,4 +136,15 @@ export function tempBase(t) {
     }),
   );
   return base;
+}
+
+export function wrapSetupFixture(archive) {
+  const zip = readFileSync(archive);
+  const trailer = Buffer.alloc(16);
+  trailer.write('AURZIP01');
+  trailer.writeBigInt64LE(BigInt(zip.length), 8);
+  writeFileSync(
+    archive,
+    Buffer.concat([Buffer.from('MZ-test-stub'), zip, trailer]),
+  );
 }

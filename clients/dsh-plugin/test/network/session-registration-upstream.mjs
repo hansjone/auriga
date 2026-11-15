@@ -18,8 +18,8 @@ import { signingInput } from '../../src/network/trust/verifier.js';
 import { decodeJson, encodeJson } from '../../src/network/session/frames.js';
 import {
   publicationFixture,
-  signedAnnouncement,
-  signedKeyset,
+  signedV2Announcement as signedAnnouncement,
+  signedV2Keyset as signedKeyset,
   signedReadyResult,
   testRoots,
 } from './trust/keyset-fixtures.js';
@@ -194,8 +194,8 @@ test('public rc.2 ToolRuntime joins an existing JSONL Session over real NATS WSS
       };
     },
     async refresh(trust) {
-      await trust.announce(signedAnnouncement(signer.payload));
       await trust.update(signedKeyset(signer.payload));
+      await trust.announce(signedAnnouncement(signer.payload));
     },
     async getTicket() {
       const ingress = String(++ticket).padStart(26, 'a');

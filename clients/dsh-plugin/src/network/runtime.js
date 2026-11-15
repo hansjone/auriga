@@ -2,7 +2,8 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { NatsTransport, createWsSocketFactory } from './transport/index.js';
-import { openTrustStore } from './trust/store.js';
+import { openV2TrustStore as openTrustStore } from './trust/v2-store.js';
+import { startTrustRefresh } from './trust/refresh-loop.js';
 import { openLedger } from './host/ledger.js';
 import { createFileLedgerStore } from './host/store.js';
 import { createHostAdapter } from './host/adapter.js';
@@ -98,6 +99,7 @@ export async function openNetworkRuntime(options) {
   const { prepared, ports, ctx } = options;
   const required = [
     ports?.prepareTicket,
+    ports?.refreshTrust,
     ports?.submit,
     ports?.resolveSource,
     ports?.organization,
@@ -224,15 +226,53 @@ export async function openNetworkRuntime(options) {
     });
     resources.push(() => ledger.close());
     const cache = await handle('trust');
-    const refreshKeys = ports.refreshKeys;
+    let controlImports = 0;
+    let controlFenced = false;
     const trust = await openTrustStore({
       cache,
+      realm: identity.realm,
+      tenant_id: identity.tenant,
+      identity_id: prepared.controlIdentity?.identity_id,
       roots: prepared.roots,
       config: prepared.keyset,
+      migrationPermit: prepared.migrationPermit,
       now: options.now,
-      refresh: refreshKeys
-        ? (hint) => refreshKeys(hint, controller.signal)
-        : undefined,
+      refresh: async () => {
+        await ports.refreshTrust(trust, controller.signal);
+      },
+    });
+    if (prepared.announcement) await trust.announce(prepared.announcement);
+    const stopTrustRefresh = startTrustRefresh({
+      refresh: async () => {
+        try {
+          await ports.refreshTrust(trust, controller.signal);
+          for (const receipt of trust.pendingControlReceipts())
+            if (ports.confirmControlReceipt) {
+              await ports.confirmControlReceipt(receipt, controller.signal);
+              await trust.acknowledgeControlReceipt(receipt.package_id);
+            }
+        } finally {
+          if (controlFenced && controlImports === 0)
+            void close('revoked').catch(() => {});
+        }
+      },
+      expiresAt: () => trust.expiresAt,
+      now: options.now ?? Date.now,
+      onExpired: () => {
+        void close('key_unavailable').catch(() => {});
+      },
+    });
+    resources.push(async () => {
+      stopTrustRefresh();
+    });
+    const releaseIsolation = trust.onIsolation(() => {
+      controlFenced = true;
+      connected = false;
+      session?.disconnect();
+      void transport?.stop().catch(() => {});
+    });
+    resources.push(async () => {
+      releaseIsolation();
     });
     consent = await openConsent({
       store: guardedStore(
@@ -731,6 +771,8 @@ export async function openNetworkRuntime(options) {
       createSocket: createWsSocketFactory({ ca: prepared.tls?.ca }),
       async getTicket(reason) {
         active();
+        await ports.refreshTrust(trust, controller.signal);
+        trust.assertUsable();
         const accessToken = await options.getAccess();
         active();
         let ticket;
@@ -930,6 +972,7 @@ export async function openNetworkRuntime(options) {
       if (closing) return closing;
       closeReason = reason;
       closed = true;
+      stopTrustRefresh();
       connected = false;
       controller.abort();
       unregister();
@@ -989,6 +1032,27 @@ export async function openNetworkRuntime(options) {
           );
         await transport.start();
         await handshake;
+      },
+      /** @param {unknown} input @param {unknown} context */
+      async importControlPackage(input, context) {
+        if (!(await options.authorizeLocal(context)))
+          throw new Error('local control import forbidden');
+        if (!prepared.controlIdentity)
+          throw new Error('installation identity signer unavailable');
+        controlImports++;
+        try {
+          const receipt = await trust.importControlPackage(
+            input,
+            prepared.controlIdentity,
+          );
+          await ports.confirmControlReceipt?.(receipt, controller.signal);
+          if (ports.confirmControlReceipt)
+            await trust.acknowledgeControlReceipt(receipt.package_id);
+          return receipt;
+        } finally {
+          controlImports--;
+          if (controlFenced) void close('revoked').catch(() => {});
+        }
       },
       /** Bind every method to the HTTP request; never capture a browser identity string. */
       consentAvailable: true,

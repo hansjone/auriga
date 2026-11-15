@@ -372,13 +372,43 @@ final class StandardDevices {
   }
 
   ObjectNode identity(String raw) {
+    return identity(raw, false);
+  }
+
+  ObjectNode profile(String raw) {
+    return identity(raw, true);
+  }
+
+  private ObjectNode identity(String raw, boolean profile) {
     var valid = access(raw, "auriga", null);
     if (valid == null) throw new AurigaException(CommonErrors.UNAUTHENTICATED);
     return store.tx(
         () -> {
           var device = store.get("device", valid.device(), false);
+          if (device == null || !valid.account().equals(device.path("accountId").asString()))
+            throw new AurigaException(CommonErrors.UNAUTHENTICATED);
           var state = source(clients.get(device.path("clientId").asString()), device);
           if (state == null) throw new AurigaException(CommonErrors.UNAUTHENTICATED);
+          if (profile) {
+            var account = store.get("account", valid.account(), false);
+            if (account == null || !"active".equals(account.path("status").asString()))
+              throw new AurigaException(CommonErrors.UNAUTHENTICATED);
+            var projected =
+                Json.object(
+                    "account",
+                    Json.object(
+                        "id",
+                        valid.account(),
+                        "tenantId",
+                        valid.tenant(),
+                        "displayName",
+                        account.path("displayName").asString("")));
+            new ContractSchemas()
+                .validate(
+                    "auth/standard-device.schema.json#/$defs/StandardDeviceProfile", projected);
+            return projected;
+          }
+
           var result =
               Json.object(
                   "accountId",

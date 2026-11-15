@@ -6,6 +6,7 @@ import { useManagement } from '../admin/useManagement';
 import { useAdminI18n } from '../admin/messages';
 import ActionConfirm from '../admin/ActionConfirm.vue';
 import AdminDialog from '../admin/AdminDialog.vue';
+import PlacementAdministration from './placements/PlacementAdministration.vue';
 import '../admin/management.css';
 
 const { t, state } = useAdminI18n();
@@ -204,5 +205,6 @@ function toggleAlwaysOn() {
       @confirm="confirm"
       @cancel="!busy && (pending = undefined)"
     />
+    <PlacementAdministration />
   </div>
 </template>

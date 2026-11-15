@@ -1,699 +1,210 @@
-import { test } from 'node:test';
+import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, writeFile, rm } from 'node:fs/promises';
+import { randomUUID } from 'node:crypto';
+import { mkdtemp, rm, writeFile, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createHash, generateKeyPairSync } from 'node:crypto';
+import { brokerFixture } from '../broker-fixture.js';
 import { createManagedNetwork } from '../../src/network/managed-device.js';
-import { createPlatform } from '../../src/local/platform.js';
-import { createNetworkLifecycle } from '../../src/network/lifecycle.js';
-import { setTimeout as delay } from 'node:timers/promises';
+import { setImmediate as nextTurn } from 'node:timers/promises';
 
-const ids = {
-  tenantId: '00000000-0000-4000-8000-000000000001',
-  ownerId: '00000000-0000-4000-8000-000000000002',
-  instanceId: '00000000-0000-4000-8000-000000000003',
-  deviceId: '00000000-0000-4000-8000-000000000004',
-};
-const installation = () => ({
-  realm: '9',
-  wssUrl: 'wss://portal.example.com/net/v1/ws',
-  roots: [
-    {
-      kid: 'root',
-      public_key_spki: generateKeyPairSync('ed25519')
-        .publicKey.export({ format: 'der', type: 'spki' })
-        .toString('base64url'),
-    },
-  ],
-});
-const material = () => ({
-  ...ids,
-  credential: 'a'.repeat(43),
-  expiresAt: new Date(Date.now() + 600000).toISOString(),
-  platformOrigin: 'https://portal.example.com',
-  issuer: 'https://portal.example.com',
-  network: installation(),
-});
-
-async function fixture(
-  t,
-  change = (x) => x,
-  realRequest = false,
-  lifecycleFactory,
-) {
-  const directory = await mkdtemp(join(tmpdir(), 'auriga-managed-'));
-  t.after(() => rm(directory, { recursive: true, force: true }));
-  const file = join(directory, 'device.json');
-  const value = change(material());
-  await writeFile(file, JSON.stringify(value), { mode: 0o600 });
-  const calls = [];
-  let requestHook, verifyHook;
-  let lifecycleInput,
-    invalid = false;
+async function fixture(t, configure) {
+  const directory = await mkdtemp(join(tmpdir(), 'auriga-managed-shell-'));
+  const connection = brokerFixture();
+  const tenantId = connection.identity.tenantId,
+    ownerId = connection.identity.memberId;
+  configure?.(connection);
   const network = createManagedNetwork({
     directory,
-    file,
-    ...ids,
+    tenantId,
+    ownerId,
+    instanceId: randomUUID(),
     ctx: {},
-    createPlatform(config) {
-      const platform = realRequest ? createPlatform(config) : undefined;
-      return {
-        async request(path, options) {
-          if (path.startsWith('/api/iam/v1/network/systems'))
-            return {
-              items: [{ ownerUserId: ids.ownerId, ownerDisplayName: 'Alice' }],
-            };
-          calls.push({ path, options });
-          if (platform) return platform.request(path, options);
-          await requestHook?.(options);
-          if (invalid)
-            throw Object.assign(new Error('revoked'), {
-              status: 403,
-              code: 'network.revoked',
-            });
-          return {
-            access_token: 'device-access',
-            token_type: 'Bearer',
-            scope: 'auriga.connect',
-            expires_in: 300,
-          };
-        },
-        async verifyDevice(_token, expected) {
-          await verifyHook?.();
-          return {
-            ...expected,
-            exp: Math.floor(Date.now() / 1000) + 300,
-          };
-        },
-      };
-    },
-    createLifecycle(input) {
-      lifecycleInput = input;
-      if (lifecycleFactory) return lifecycleFactory(input);
-      return {
-        login() {
-          calls.push('login');
-        },
-        logout() {
-          calls.push('logout');
-        },
-        attach() {
-          calls.push('attach');
-          return () => {};
-        },
-        close() {
-          calls.push('close');
-        },
-        get status() {
-          return { connected: true };
-        },
-      };
-    },
+    connection,
   });
-  t.after(() => network.close());
-  return {
-    network,
-    calls,
-    file,
-    value,
-    get input() {
-      return lifecycleInput;
-    },
-    revoke() {
-      invalid = true;
-    },
-    verify(fn) {
-      verifyHook = fn;
-    },
-    intercept(fn) {
-      requestHook = fn;
-    },
-  };
+  t.after(async () => {
+    await network.close();
+    await rm(directory, { recursive: true, force: true });
+  });
+  return { network, connection, directory, tenantId, ownerId };
 }
-
-test('managed credential uses the common device provider and lifecycle, never instance bearer', async (t) => {
-  const f = await fixture(t);
-  await f.network.refresh();
-  assert.equal(f.input.defaultProvider.kind, 'device-connection');
-  assert.ok(f.calls.includes('login'));
-  const exchange = f.calls.find((x) => typeof x === 'object');
-  assert.equal(exchange.path, '/oauth2/token');
-  assert.equal(exchange.options.body.credential, f.value.credential);
-  assert.equal(exchange.options.body.instance_id, ids.instanceId);
-  assert.equal(exchange.options.token, undefined);
-  f.network.attach({ prepare() {} });
-  assert.ok(f.calls.includes('attach'));
-});
-
-test('close cancels an in-flight grant and releases its referenced timeout', async (t) => {
-  const f = await fixture(t);
-  let entered;
-  const started = new Promise((resolve) => {
-    entered = resolve;
-  });
-  let requestTimer;
-  f.intercept(
-    (options) =>
-      new Promise((resolve, reject) => {
-        const stop = () => {
-          clearTimeout(requestTimer);
-          reject(new Error('grant interrupted'));
-        };
-        requestTimer = setTimeout(stop, 60000);
-        t.after(stop);
-        options.signal?.addEventListener('abort', stop, { once: true });
-        entered();
-      }),
-  );
-  const refreshing = f.network.refresh();
-  await started;
-  assert.ok(process.getActiveResourcesInfo().includes('Timeout'));
-  await f.network.close();
-  assert.equal(process.getActiveResourcesInfo().includes('Timeout'), false);
-  await refreshing;
-  assert.equal(f.network.sessionAvailable, false);
-  assert.equal(f.calls.includes('login'), false);
-});
-
-for (const result of ['accepted', 'unavailable', 'revoked'])
-  test(
-    'gateway startup revocation is adjudicated by IAM grant: ' + result,
-    async (t) => {
-      t.mock.timers.enable({ apis: ['Date'], now: 2000000000000 });
-      let opened = 0,
-        closed = 0;
-      const f = await fixture(
-        t,
-        (x) => x,
-        false,
-        (input) =>
-          createNetworkLifecycle({
-            ...input,
-            async open() {
-              const first = ++opened === 1;
-              let disposed = false;
-              return {
-                status: { connected: true },
-                async start() {
-                  if (first)
-                    throw Object.assign(new Error('gateway grace exhausted'), {
-                      code: 'network.revoked',
-                    });
-                },
-                async close() {
-                  if (!disposed) {
-                    disposed = true;
-                    closed++;
-                  }
-                },
-                messagingUI() {
-                  return 'ready';
-                },
-              };
-            },
-          }),
-      );
-      await f.network.refresh();
-      const until = async (predicate) => {
-        for (let i = 0; i < 200; i++) {
-          if (predicate()) return;
-          await delay(5);
-        }
-        assert.fail('lifecycle did not settle');
-      };
-      await until(() => closed === 1 && !f.network.sessionAvailable);
-      assert.equal(f.network.sessionRevoked, false);
-      assert.equal(f.network.status.connected, false);
-      assert.equal(f.network.status.reason, 'unavailable');
-      assert.throws(() => f.network.messagingUI({}), /unavailable/);
-      const grants = () => f.calls.filter((x) => typeof x === 'object').length;
-      assert.equal(grants(), 1);
-      await f.network.refresh();
-      assert.equal(grants(), 1, 'gateway signal must not cause a tight retry');
-      if (result !== 'accepted')
-        f.intercept(() => {
-          throw Object.assign(new Error('IAM result'), {
-            status: result === 'revoked' ? 403 : 503,
-            code:
-              result === 'revoked' ? 'network.revoked' : 'common.unavailable',
-          });
-        });
-      t.mock.timers.tick(1001);
-      await f.network.refresh();
-      assert.equal(
-        grants(),
-        2,
-        'must renew with IAM instead of reusing cached access',
-      );
-      if (result === 'revoked') {
-        assert.equal(f.network.sessionAvailable, false);
-        assert.equal(f.network.sessionRevoked, true);
-        for (let i = 0; i < 5; i++) {
-          t.mock.timers.tick(31000);
-          await f.network.refresh(true);
-        }
-        assert.equal(grants(), 2, 'authoritative rejection remains terminal');
-        assert.equal(opened, 1);
-        return;
-      }
-      if (result === 'unavailable') {
-        assert.equal(f.network.sessionAvailable, false);
-        assert.equal(f.network.sessionRevoked, false);
-        assert.throws(() => f.network.messagingUI({}), /unavailable/);
-        await f.network.refresh();
-        assert.equal(grants(), 2);
-        f.intercept(undefined);
-        t.mock.timers.tick(2001);
-        await f.network.refresh();
-        assert.equal(grants(), 3);
-      }
-      await until(() => f.network.status.connected);
-      assert.equal(f.network.sessionAvailable, true);
-      assert.equal(f.network.sessionRevoked, false);
-      assert.equal(f.network.messagingUI({}), 'ready');
-      assert.equal(opened, 2);
-    },
-  );
-
-for (const code of ['network.revoked', 'common.forbidden'])
-  test(
-    'managed grant reads response body code through platform request: ' + code,
-    async (t) => {
-      t.mock.timers.enable({ apis: ['Date'], now: 2000000000000 });
-      const originalFetch = globalThis.fetch;
-      t.after(() => {
-        globalThis.fetch = originalFetch;
-      });
-      let denied = true;
-      globalThis.fetch = async (url) => {
-        assert.equal(new URL(url).pathname, '/oauth2/token');
-        return denied
-          ? Response.json({ code }, { status: 403 })
-          : Response.json({
-              access_token: 'device-access',
-              token_type: 'Bearer',
-              scope: 'auriga.connect',
-              expires_in: 300,
-            });
-      };
-      const f = await fixture(t, (x) => x, true);
-      await f.network.refresh();
+const denied = [
+  ...[
+    'signed_out',
+    'authenticating',
+    'unreachable',
+    'reauth_required',
+    'revoked',
+  ].map((state) => [state, (c) => c.transition(state)]),
+  [
+    'other_tenant',
+    (c) => c.transition('authenticated', { tenantId: randomUUID() }),
+  ],
+  [
+    'other_member',
+    (c) => c.transition('authenticated', { memberId: randomUUID() }),
+  ],
+];
+for (const [state, configure] of denied)
+  for (const port of [
+    'resource',
+    'account',
+    'models',
+    'consent',
+    'diagnostics',
+  ])
+    test(`managed ${state} cannot authorize ${port} through inherited shell identity`, async (t) => {
+      const f = await fixture(t, configure);
+      await f.network.start();
       assert.equal(f.network.sessionAvailable, false);
-      assert.equal(f.network.sessionRevoked, code === 'network.revoked');
-      const count = f.calls.length;
-      denied = false;
-      t.mock.timers.tick(31000);
-      await f.network.refresh();
-      assert.equal(f.network.sessionAvailable, code !== 'network.revoked');
-      if (code === 'network.revoked') {
-        for (let i = 0; i < 5; i++) await f.network.refresh(true);
-        assert.equal(f.calls.length, count);
+      if (port === 'resource')
+        assert.equal(f.network.resourceSession, undefined);
+      if (port === 'account') assert.equal(f.network.account, undefined);
+      if (port === 'models') {
+        let registrations = 0;
+        const detach = await f.network.attachModels({
+          registerAdapter() {
+            registrations++;
+            return () => {};
+          },
+        });
+        assert.equal(registrations, 0);
+        detach();
       }
-    },
-  );
+      if (port === 'consent') {
+        assert.equal(f.network.consentAvailable, false);
+        assert.throws(() => f.network.consentUI({}));
+        assert.throws(() => f.network.messagingUI({}));
+      }
+      if (port === 'diagnostics')
+        assert.equal(f.network.baseTools.getState().loggedIn, false);
+      assert.equal(f.network.status.connected, false);
+      assert.equal(
+        f.connection.calls.filter((call) => call.call).length,
+        0,
+        'foreign or unauthenticated identity never starts platform work',
+      );
+    });
 
-test('material expired before startup is terminal without a grant request', async (t) => {
-  const f = await fixture(t, (value) => ({
-    ...value,
-    expiresAt: '2000-01-01T00:00:00Z',
-  }));
-  await f.network.refresh();
+test('managed admitted identity comes from broker and exposes no raw device material', async (t) => {
+  const f = await fixture(t);
+  assert.equal(f.network.sessionAvailable, false);
+  await f.network.start();
+  assert.equal(f.network.sessionAvailable, true);
+  assert.equal(f.network.account.subject, f.ownerId);
+  assert.equal(f.network.resourceSession.identity().tenantId, f.tenantId);
+  assert.equal(f.network.resourceSession.getAccess, undefined);
+  assert.equal(
+    f.network.resourceSession.vault.snapshot().credential,
+    undefined,
+  );
+  assert.equal(
+    f.network.status.connected,
+    false,
+    'authentication alone is not message READY',
+  );
+});
+test('managed source does not read legacy token files or use platform HTTP', async (t) => {
+  const f = await fixture(t),
+    path = join(f.directory, 'managed-device.json');
+  await writeFile(path, 'invalid legacy material');
+  t.mock.method(globalThis, 'fetch', () =>
+    assert.fail('no plugin platform fetch'),
+  );
+  await f.network.start();
+  assert.equal(f.network.sessionAvailable, true);
+  assert.equal(await readFile(path, 'utf8'), 'invalid legacy material');
+});
+test('concurrent managed startup shares exactly one shell subscription', async (t) => {
+  const f = await fixture(t),
+    original = f.connection.ipc.subscribe.bind(f.connection.ipc);
+  let subscriptions = 0;
+  f.connection.ipc.subscribe = (...args) => {
+    subscriptions++;
+    return original(...args);
+  };
+  const first = f.network.start();
+  assert.equal(f.network.start(), first);
+  await first;
+  assert.equal(subscriptions, 1);
+});
+test('managed close before startup cannot open or revive a broker', async (t) => {
+  const f = await fixture(t);
+  await f.network.close();
+  await f.network.start();
+  assert.equal(f.connection.calls.length, 0);
+  assert.equal(f.network.sessionAvailable, false);
+});
+test('close fences a late initial snapshot and all concurrent callers await cleanup', async (t) => {
+  const gate = Promise.withResolvers(),
+    entered = Promise.withResolvers();
+  const f = await fixture(t),
+    original = f.connection.ipc.subscribe.bind(f.connection.ipc);
+  f.connection.ipc.subscribe = async (...args) => {
+    entered.resolve();
+    await gate.promise;
+    return original(...args);
+  };
+  const start = f.network.start();
+  await entered.promise;
+  const closes = [f.network.close(), f.network.close()];
+  gate.resolve();
+  await Promise.all([start, ...closes]);
+  assert.equal(f.network.sessionAvailable, false);
+  assert.equal(f.network.resourceSession, undefined);
+});
+test('same-generation shell refresh preserves the verified resource session', async (t) => {
+  const f = await fixture(t);
+  await f.network.start();
+  const runtime = f.network.resourceSession;
+  f.connection.refresh();
+  await nextTurn();
+  assert.equal(f.network.resourceSession, runtime);
+  assert.equal(f.network.sessionAvailable, true);
+});
+test('expired shell freshness cannot keep authorizing a managed instance', async (t) => {
+  t.mock.timers.enable({ apis: ['Date', 'setTimeout'], now: 2000000000000 });
+  const f = await fixture(t);
+  await f.network.start();
+  assert.equal(f.network.sessionAvailable, true);
+  t.mock.timers.tick(29001);
+  assert.equal(f.network.sessionAvailable, false);
+  assert.equal(f.network.resourceSession, undefined);
+});
+test('broker revocation removes models and managed instance admission immediately', async (t) => {
+  const f = await fixture(t);
+  await f.network.start();
+  let registered = 0;
+  const detach = await f.network.attachModels({
+    registerAdapter() {
+      registered++;
+      return () => registered--;
+    },
+  });
+  assert.equal(registered, 1);
+  f.connection.transition('revoked');
+  assert.equal(registered, 0);
   assert.equal(f.network.sessionAvailable, false);
   assert.equal(f.network.sessionRevoked, true);
-  for (let i = 0; i < 5; i++) await f.network.refresh(true);
-  assert.equal(f.calls.length, 0);
+  detach();
 });
-
-test('R7 instance admission requires a live verified managed credential, not message readiness', async (t) => {
+test('foreign identity push removes models and later matching shell login restores only authorized ports', async (t) => {
   const f = await fixture(t);
-  assert.equal(f.network.sessionAvailable, false);
-  await f.network.refresh();
-  assert.equal(f.network.sessionAvailable, true);
-  f.revoke();
-  await f.network.refresh(true);
-  assert.equal(f.network.sessionAvailable, false);
-});
-
-test('R7 an unrenewed device token cannot authorize the instance after expiry', async (t) => {
-  t.mock.timers.enable({ apis: ['Date'], now: 2000000000000 });
-  const f = await fixture(t);
-  await f.network.refresh();
-  assert.equal(f.network.sessionAvailable, true);
-  t.mock.timers.tick(300001);
-  assert.equal(f.network.sessionAvailable, false);
-});
-
-test('R7 credential-file expiry and network revocation also fence the whole instance', async (t) => {
-  t.mock.timers.enable({ apis: ['Date'], now: 2000000000000 });
-  const f = await fixture(t, (value) => ({
-    ...value,
-    expiresAt: new Date(Date.now() + 10000).toISOString(),
-  }));
-  await f.network.refresh();
-  assert.equal(f.network.sessionAvailable, true);
-  t.mock.timers.tick(10001);
-  assert.equal(f.network.sessionAvailable, false);
-  const other = await fixture(t);
-  await other.network.refresh();
-  assert.equal(other.network.sessionAvailable, true);
-  other.input.onRevoked();
-  assert.equal(other.network.sessionAvailable, false);
-});
-
-test('R7 a transient IAM outage keeps only the already verified token lifetime', async (t) => {
-  t.mock.timers.enable({ apis: ['Date'], now: 2000000000000 });
-  const f = await fixture(t);
-  await f.network.refresh();
-  f.intercept(() => {
-    throw Object.assign(new Error('offline'), { status: 503 });
-  });
-  await f.network.refresh(true);
-  assert.equal(f.network.sessionAvailable, true);
-  t.mock.timers.tick(300001);
-  assert.equal(f.network.sessionAvailable, false);
-});
-
-test('file rotation closes old tools before admitting the new device; revocation closes tools', async (t) => {
-  const f = await fixture(t);
-  await f.network.refresh();
-  await writeFile(
-    f.file,
-    JSON.stringify({
-      ...f.value,
-      deviceId: '00000000-0000-4000-8000-000000000005',
-      credential: 'b'.repeat(43),
-    }),
-  );
-  await f.network.refresh();
-  assert.ok(f.calls.indexOf('close') < f.calls.lastIndexOf('login'));
-  assert.ok(f.input.directory.endsWith('00000000-0000-4000-8000-000000000005'));
-  f.revoke();
-  await f.network.refresh(true);
-  assert.equal(f.calls.at(-1), 'logout');
-  assert.equal(f.network.status.connected, false);
-});
-
-test('managed provider partitions storage by verified device and preserves the key across renewal', async (t) => {
-  const f = await fixture(t);
-  await f.network.refresh();
-  const signal = new AbortController().signal;
-  const first = await f.input.defaultProvider.prepare({ signal });
-  assert.equal(
-    first.storageKey,
-    createHash('sha256')
-      .update(JSON.stringify([f.value.issuer, ids.tenantId, ids.deviceId]))
-      .digest('hex'),
-  );
-  await f.network.refresh(true);
-  assert.equal(
-    (await f.input.defaultProvider.prepare({ signal })).storageKey,
-    first.storageKey,
-  );
-  await writeFile(
-    f.file,
-    JSON.stringify({
-      ...f.value,
-      deviceId: '00000000-0000-4000-8000-000000000005',
-      credential: 'b'.repeat(43),
-    }),
-  );
-  await f.network.refresh();
-  const rotated = await f.input.defaultProvider.prepare({ signal });
-  assert.match(rotated.storageKey, /^[a-f0-9]{64}$/);
-  assert.notEqual(rotated.storageKey, first.storageKey);
-});
-
-test('managed renewal reuses the current lifecycle and file removal revokes its tools', async (t) => {
-  const f = await fixture(t);
-  await f.network.refresh();
-  const initial = f.input;
-  await f.network.refresh(true);
-  assert.equal(f.input, initial);
-  assert.equal(f.calls.filter((x) => typeof x === 'object').length, 2);
-  assert.equal(f.calls.filter((x) => x === 'login').length, 1);
-  await rm(f.file);
-  await f.network.refresh();
-  assert.equal(f.calls.at(-1), 'close');
-  assert.equal(f.network.status.connected, false);
-});
-
-test('managed refresh coalesces slow exchanges and close fences their late results', async (t) => {
-  const f = await fixture(t);
-  let verifications = 0;
-  f.verify(() => {
-    verifications++;
-  });
-  let enter, release;
-  const entered = new Promise((r) => {
-    enter = r;
-  });
-  const blocked = new Promise((r) => {
-    release = r;
-  });
-  f.intercept(async () => {
-    enter();
-    await blocked;
-  });
-  const attempt = f.network.refresh();
-  for (let i = 0; i < 20; i++) assert.equal(f.network.refresh(), attempt);
-  await entered;
-  await f.network.close();
-  release();
-  await attempt;
-  assert.equal(f.input, undefined);
-  assert.equal(f.calls.filter((x) => typeof x === 'object').length, 1);
-  assert.equal(f.calls.includes('login'), false);
-  assert.equal(
-    verifications,
-    0,
-    'a late grant must not start a JWKS request after close',
-  );
-});
-
-test('all concurrent close callers wait for the same lifecycle cleanup', async (t) => {
-  let release;
-  const stopped = new Promise((resolve) => {
-    release = resolve;
-  });
-  const f = await fixture(
-    t,
-    (x) => x,
-    false,
-    () => ({ login() {}, close: () => stopped }),
-  );
-  await f.network.refresh();
-  const first = f.network.close();
-  let completed = false;
-  const second = f.network.close().then(() => {
-    completed = true;
-  });
-  t.after(release);
-  await Promise.resolve();
-  assert.equal(completed, false);
-  release();
-  await Promise.all([first, second]);
-});
-
-for (const field of [
-  'tenantId',
-  'ownerId',
-  'instanceId',
-  'expiresAt',
-  'platformOrigin',
-])
-  test('managed file rejects wrong ' + field, async (t) => {
-    const f = await fixture(t, (x) => ({
-      ...x,
-      [field]:
-        field === 'expiresAt'
-          ? '2000-01-01T00:00:00Z'
-          : field === 'platformOrigin'
-            ? 'http://portal.example.com'
-            : ids.deviceId,
-    }));
-    await f.network.refresh();
-    assert.equal(f.input, undefined);
-    assert.equal(f.network.status.connected, false);
-    assert.equal(f.calls.length, 0);
-  });
-
-test('429 renewal retains unexpired access and tools, backs off, and closes after expiry', async (t) => {
-  t.mock.timers.enable({ apis: ['Date'], now: Date.now() });
-  const f = await fixture(t);
-  await f.network.refresh();
-  const initial = f.input;
-  t.mock.timers.tick(271000);
-  f.intercept(() => {
-    throw Object.assign(new Error('rate limited'), { status: 429 });
-  });
-  await f.network.refresh(true);
-  assert.equal(f.network.status.connected, true);
-  assert.equal(f.input, initial);
-  assert.equal(f.calls.includes('close'), false);
-  assert.equal(f.calls.includes('logout'), false);
-  const count = f.calls.filter((x) => typeof x === 'object').length;
-  await f.network.refresh();
-  await initial.getAccess();
-  assert.equal(f.calls.filter((x) => typeof x === 'object').length, count);
-  t.mock.timers.tick(1001);
-  f.intercept(undefined);
-  await f.network.refresh();
-  assert.equal(f.input, initial);
-  assert.equal(f.calls.filter((x) => typeof x === 'object').length, count + 1);
-  f.intercept(() => {
-    throw Object.assign(new Error('rate limited'), { status: 429 });
-  });
-  t.mock.timers.tick(271000);
-  await f.network.refresh();
-  assert.equal(f.network.status.connected, true);
-  t.mock.timers.tick(30000);
-  await f.network.refresh();
-  assert.equal(f.network.status.connected, false);
-  assert.ok(f.calls.includes('close'));
-});
-
-test('missing optional managed credential starts no network tools and accepts late material', async (t) => {
-  const f = await fixture(t);
-  await rm(f.file);
-  await f.network.refresh();
-  assert.equal(f.input, undefined);
-  assert.equal(f.calls.length, 0);
-  await writeFile(f.file, JSON.stringify(f.value), { mode: 0o600 });
-  await f.network.refresh(true);
-  assert.ok(f.input);
-  assert.equal(f.calls.filter((x) => x === 'login').length, 1);
-});
-
-for (const point of ['grant401', 'jwks403', 'jwks503', 'edge403'])
-  test(
-    'temporary managed denial recovers with identical material: ' + point,
-    async (t) => {
-      t.mock.timers.enable({ apis: ['Date'], now: 2000000000000 });
-      const f = await fixture(t);
-      await f.network.refresh();
-      const fail = () => {
-        throw Object.assign(new Error('SECRET-canary'), {
-          status: point === 'grant401' ? 401 : point === 'jwks503' ? 503 : 403,
-        });
-      };
-      if (point.startsWith('jwks')) f.verify(fail);
-      else f.intercept(fail);
-      await f.network.refresh(true);
-      assert.equal(f.network.sessionAvailable, false);
-      assert.equal(f.network.status.connected, false);
-      assert.equal(f.network.status.reason, 'unavailable');
-      assert.throws(() => f.network.messagingUI({}), /unavailable/);
-      const count = f.calls.filter((x) => typeof x === 'object').length;
-      await f.network.refresh();
-      assert.equal(f.calls.filter((x) => typeof x === 'object').length, count);
-      f.verify(undefined);
-      f.intercept(undefined);
-      t.mock.timers.tick(1001);
-      await f.network.refresh();
-      assert.equal(f.network.sessionAvailable, true);
-      assert.equal(f.network.status.connected, true);
+  await f.network.start();
+  let registered = 0;
+  const detach = await f.network.attachModels({
+    registerAdapter() {
+      registered++;
+      return () => registered--;
     },
-  );
-
-test('authoritative managed revocation never retries identical material', async (t) => {
-  const f = await fixture(t);
-  await f.network.refresh();
-  f.revoke();
-  await f.network.refresh(true);
-  const count = f.calls.length;
-  for (let i = 0; i < 5; i++) await f.network.refresh(true);
-  assert.equal(f.calls.length, count);
-  assert.equal(f.network.sessionAvailable, false);
-});
-
-test('temporary renewal initiated by lifecycle resumes that lifecycle after grant recovers', async (t) => {
-  t.mock.timers.enable({ apis: ['Date'], now: 2000000000000 });
-  const f = await fixture(t);
-  await f.network.refresh();
-  const initial = f.input;
-  t.mock.timers.tick(271000);
-  f.intercept(() => {
-    throw Object.assign(new Error('temporary'), { status: 401 });
   });
-  await assert.rejects(initial.getAccess(), (error) => error.status === 401);
-  assert.equal(f.network.sessionAvailable, false);
-  f.intercept(undefined);
-  await f.network.refresh();
-  assert.equal(f.network.sessionAvailable, true);
-  assert.equal(f.input, initial);
-  assert.equal(f.calls.filter((x) => x === 'login').length, 2);
-});
-test('JWKS cannot revoke material by returning a revocation-looking error', async (t) => {
-  const f = await fixture(t);
-  f.verify(() => {
-    throw Object.assign(new Error('key service'), {
-      status: 403,
-      code: 'network.revoked',
-    });
-  });
-  await f.network.refresh();
-  assert.equal(f.network.sessionAvailable, false);
-  f.verify(undefined);
-  await f.network.refresh(true);
-  assert.equal(f.network.sessionAvailable, true);
-});
-test('managed resource access is fenced by credential logout and never enters browser SDK', async (t) => {
-  const f = await fixture(t);
-  await f.network.refresh();
-  const session = f.network.resourceSession;
-  assert.equal(session.config.platformOrigin, 'https://portal.example.com');
-  assert.equal(await session.getAccess(), 'device-access');
-  f.network.logout();
+  f.connection.transition('authenticated', { memberId: randomUUID() });
+  await nextTurn();
+  assert.equal(registered, 0);
   assert.equal(f.network.resourceSession, undefined);
-  await assert.rejects(session.getAccess());
-});
-test('retired resource adapter cannot obtain a rotated device token for its old origin', async (t) => {
-  const f = await fixture(t);
-  await f.network.refresh();
-  const before = f.network.resourceSession;
-  await writeFile(
-    f.file,
-    JSON.stringify({
-      ...f.value,
-      deviceId: '00000000-0000-4000-8000-000000000005',
-      credential: 'b'.repeat(43),
-    }),
-  );
-  await f.network.refresh();
-  assert.notEqual(f.network.resourceSession, before);
-  await assert.rejects(before.getAccess());
-  assert.equal(await f.network.resourceSession.getAccess(), 'device-access');
-});
-
-for (const code of [200, 401, 404, 500, 503])
-  test(`managed diagnostic HTTP ${code} never marks headquarters unreachable`, async (t) => {
-    const f = await fixture(t, (x) => x, true);
-    t.mock.method(
-      globalThis,
-      'fetch',
-      async () =>
-        new Response(code === 200 ? '<html>portal</html>' : '{}', {
-          status: code,
-        }),
-    );
-    await f.network.refresh(true);
-    const result = await f.network.baseTools.probe(
-      '/api/iam/v1/login/providers',
-      new AbortController().signal,
-    );
-    assert.equal(result.httpStatus, code);
-    assert.equal(f.network.baseTools.getState().reachable, true);
-    await f.network.refresh(true);
-    assert.equal(f.network.baseTools.getState().reachable, true);
-  });
-test('managed logout clears the verified ledger partition', async (t) => {
-  const f = await fixture(t);
-  await f.network.refresh();
-  assert.equal(await f.network.baseTools.readLocal(), null);
-  f.network.logout();
-  assert.throws(
-    () => f.network.baseTools.readLocal(),
-    /local identity unavailable/,
-  );
+  f.connection.transition('authenticated', { memberId: f.ownerId });
+  await nextTurn();
+  assert.equal(f.network.sessionAvailable, true);
+  assert.equal(registered, 1);
+  detach();
 });

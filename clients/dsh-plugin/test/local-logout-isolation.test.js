@@ -1,85 +1,55 @@
-import { ownerRequest } from './owner-request.js';
-import { test } from 'node:test';
+import test from 'node:test';
 import assert from 'node:assert/strict';
-import { EventEmitter } from 'node:events';
-import { Readable } from 'node:stream';
-import { createConnectRoutes } from '../src/local/routes.js';
-import { runtimePeer } from './local-runtime-peer.js';
+import { shellRuntimePeer } from './shell-runtime-peer.js';
+import { teamRuntimePeer } from './team-runtime-peer.js';
 
-test('R4 another admitted owner cancels a form without revoking shared device or Team', async (t) => {
-  const { runtime, request: a, registered, requests } = await runtimePeer(t);
-  const before = runtime.vault.snapshot();
-  const status = runtime.status(a);
-  const routes = createConnectRoutes({
-    runtime,
-    admission: {
-      nativeAuth: {
-        requestRejection: (req) => {
-          ownerRequest(runtime, req);
-          return undefined;
-        },
-      },
-      sameOrigin: () => true,
+test('another admitted owner cancelling shell login does not revoke shared identity or Team', async (t) => {
+  const f = await teamRuntimePeer(t);
+  await f.settled();
+  const second = f.runtime.nativeRequest({ principal: { kind: 'owner' } });
+  await f.runtime.command(second, 'cancel_login');
+  assert.equal(f.runtime.status(f.request).loggedIn, true);
+  assert.equal(f.tools.size, 4);
+  assert.equal(
+    f.connection.calls.some((m) => m.action === 'logout'),
+    false,
+  );
+  await f.runtime.command(second, 'logout');
+  assert.equal(f.runtime.resolve(f.request), undefined);
+  assert.equal(f.tools.size, 0);
+});
+test('a forged browser request cannot logout the shared shell identity', async (t) => {
+  const f = await shellRuntimePeer(t);
+  const before = f.connection.calls.length;
+  await assert.rejects(
+    f.runtime.command({ headers: { 'x-auriga-native': 'true' } }, 'logout'),
+    { code: 'common.forbidden' },
+  );
+  assert.equal(f.connection.calls.length, before);
+  assert.equal(f.runtime.status(f.request).loggedIn, true);
+});
+test('only admitted authenticated status exposes durable Team delivery and source counts', async (t) => {
+  const f = await teamRuntimePeer(t, {
+    saved(s) {
+      s.deliveries.failed = {
+        accepted: false,
+        status: 'unsupported',
+        reason: 'subagent_origin',
+      };
+      s.pendingOpens = {
+        source: { sessionId: 'trusted-source', expiresAt: Date.now() + 60000 },
+      };
+      s.openOutcomes = { expired: { status: 'result_unknown' } };
     },
   });
-  const req = Readable.from([Buffer.from('{}')]);
-  Object.assign(req, {
-    method: 'POST',
-    url: '/auriga/local-login/cancel',
-    headers: {
-      'x-auriga-csrf': status.csrf,
-      'content-type': 'application/json',
-    },
+  await f.settled();
+  assert.deepEqual(f.runtime.status(f.request).connection, {
+    unsupported: 1,
+    pendingSourceOpens: 1,
+    unknownSourceOpens: 1,
+    received: 0,
   });
-  const res = new EventEmitter();
-  res.writeHead = (code) => {
-    res.status = code;
-  };
-  res.end = (body) => {
-    res.body = JSON.parse(body);
-    res.writableEnded = true;
-  };
-  await routes(req, res);
-  assert.equal(res.status, 200);
-  assert.equal(res.body.cancelled, true);
-  assert.deepEqual(runtime.vault.snapshot(), before);
-  assert.deepEqual(runtime.status(a), status);
-  assert.equal(runtime.isReady(), true);
-  assert.equal(registered.size, 4);
-  assert.equal(requests.includes('/oauth2/revoke'), false);
-  await runtime.logout(a);
-  assert.equal(runtime.resolve(a), null);
-  assert.equal(registered.size, 0);
-  assert.equal(requests.filter((path) => path === '/oauth2/revoke').length, 1);
-});
-
-test('a browser session for another device cannot tombstone the current device', async (t) => {
-  const { runtime, request, registered, requests } = await runtimePeer(t);
-  await runtime.vault.update((s) => {
-    s.credential.claims.did = 'replacement-device';
-  });
-  const before = runtime.vault.snapshot();
-  await assert.rejects(runtime.logout(request), /device ownership/);
-  assert.deepEqual(runtime.vault.snapshot(), before);
-  assert.equal(registered.size, 4);
-  assert.equal(requests.includes('/oauth2/revoke'), false);
-});
-
-test('only authenticated status exposes unsupported delivery and unresolved source counts', async (t) => {
-  const { runtime, request } = await runtimePeer(t);
-  await runtime.vault.update((s) => {
-    s.deliveries.failed = {
-      accepted: false,
-      status: 'unsupported',
-      reason: 'subagent_origin',
-    };
-    s.pendingOpens = { source: { sessionId: 'trusted-source' } };
-    s.openOutcomes = { expired: { status: 'result_unknown' } };
-  });
-  const connection = runtime.status(request).connection;
-  assert.equal(connection.unsupported, 1);
-  assert.equal(connection.pendingSourceOpens, 1);
-  assert.equal(connection.unknownSourceOpens, 1);
-  assert.equal(connection.received, 0);
-  assert.equal(runtime.status({ headers: {} }).connection, null);
+  assert.equal(f.runtime.status({ headers: {} }).connection, null);
+  await f.runtime.command(f.request, 'logout');
+  assert.equal(f.runtime.status(f.request).connection, null);
 });

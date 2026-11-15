@@ -40,6 +40,7 @@ public final class WorkspaceManagedBindings implements ManagedInstanceBindings {
     var member = inputs.member(store.tenant(), owner);
     boolean active =
         !(boolean) row.get("deleted")
+            && !Boolean.TRUE.equals(row.get("shared_rebuild_hold"))
             && WorkspaceService.spec(row).getDesired() == DesiredState.DESIRED_STATE_RUNNING
             && member.getStatus() == MemberStatus.MEMBER_STATUS_ACTIVE
             && owner.toString().equals(member.getAccountId())

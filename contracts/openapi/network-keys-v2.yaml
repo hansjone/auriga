@@ -356,6 +356,36 @@ paths:
         "503":
           description: 材料不可用或clock_error
       security: []
+  /api/collab/v2/network/transport/expected-selectors:
+    post:
+      operationId: getNetworkExpectedSelectors
+      tags: [NetworkRenewal]
+      summary: Read authoritative selector ledger
+      description: Read-only consistent C material ledger snapshot, HTTPS+mTLS/JWT, authenticated tenant/realm, no-store, fresh challenge and maximum age 60 seconds. Historical exact bundles remain readable offline from the message network. Never derive this mapping from evidence rows.
+      x-permission: collab.msgnet.read
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: ../network/auto-renewal-v2.schema.json#/$defs/ExpectedSelectorsQuery
+      responses:
+        "200":
+          description: Authoritative material mapping, no private keys; not completion evidence.
+          content:
+            application/json:
+              schema:
+                $ref: ../network/auto-renewal-v2.schema.json#/$defs/ExpectedSelectors
+        "400":
+          description: Invalid query
+        "403":
+          description: Domain or permission denied
+        "404":
+          description: Exact bundle not recorded
+        "409":
+          description: Control changed or version/digest conflict; refresh control
+        "503":
+          description: Ledger unavailable; remain projection_pending
   /api/collab/v2/network/transport/confirmation:
     post:
       operationId: getTransportConfirmation
@@ -370,6 +400,12 @@ paths:
             schema:
               $ref: ../network/auto-renewal-v2.schema.json#/$defs/TransportConfirmationQuery
       responses:
+        "202":
+          description: Full frozen reader diagnostic rows; incomplete, never authorizes phase progression.
+          content:
+            application/json:
+              schema:
+                $ref: ../network/auto-renewal-v2.schema.json#/$defs/TransportConfirmationPending
         "200":
           description: 一个一致性台账快照，签名回显随机挑战
           content:
@@ -455,7 +491,7 @@ paths:
             type: string
             minLength: 71
             maxLength: 71
-            pattern: "^sha256:[0-9a-f]{64}$"
+            pattern: '^sha256:[0-9a-f]{64}$'
       responses:
         "200":
           description: 精确台账记录
@@ -484,7 +520,7 @@ paths:
             type: string
             minLength: 71
             maxLength: 71
-            pattern: "^sha256:[0-9a-f]{64}$"
+            pattern: '^sha256:[0-9a-f]{64}$'
       responses:
         "200":
           description: 根锚起点证明

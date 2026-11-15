@@ -129,3 +129,7 @@ contracts.yml 的契约测试与源 schema 做语义深比较，运行时产物�
 ## K3 实现接缝裁决
 
 [第三批消费方须知](auto-renewal-v2-k3.md)冻结跨授权运输锚、全局确认查询、edge专属projector UID65532、独立NodeControlPins以及Java状态生成视图。该文逐项列出替换K2的语义，C/N/I/P/D须同批跟进。
+
+## K4 selector 台账
+
+[第四批裁决](auto-renewal-v2-k4.md)补齐实际隔离但无材料的行、未完成202诊断和独立 ExpectedSelectors 只读映射；C/N按该文接线。

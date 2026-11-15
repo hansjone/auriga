@@ -11,18 +11,18 @@ import {
 } from '../../src/network/diagnostics.js';
 import { openConnectionRuntime } from '../../src/network/connection-runtime.js';
 import { createMemoryLedgerStore } from '../../src/network/host/store.js';
-import { openTrustStore } from '../../src/network/trust/store.js';
+import { openSignedTrust as openTrustStore } from './trust/keyset-fixtures.js';
 import {
   publicationFixture,
-  signedKeyset,
-  signedAnnouncement,
+  signedV2Keyset as signedKeyset,
+  signedV2Announcement as signedAnnouncement,
   testRoots,
 } from './trust/keyset-fixtures.js';
 
 async function deviceFixture(t, clockOffset = 0, diagnostics) {
   const { createDeviceProvider } = await import(
     process.env.AURIGA_DEVICE_PROVIDER_MODULE ??
-      '../../src/network/device-provider.js'
+      '../../../shell-auth/device-provider.mjs'
   );
   const { payload, now } = publicationFixture();
   const identity = {
@@ -399,7 +399,7 @@ for (const code of [
 
 test('native fetch and body-stream failure are transient control errors, not validation errors', async (t) => {
   const { DeviceControlUnavailable } =
-    await import('../../src/network/device-provider.js');
+    await import('../../../shell-auth/device-provider.mjs');
   const f = await deviceFixture(t);
   await f.prepared.register(f.controller.signal);
   f.respond(() => {
@@ -426,10 +426,10 @@ test('native fetch and body-stream failure are transient control errors, not val
 });
 
 for (const [name, mutate] of [
-  ['bad root', (a) => (a.root_kid = 'unknown')],
-  ['bad signature', (a) => (a.root_signature = 'a'.repeat(86))],
-  ['missing digest', (a) => delete a.manifest_digest],
-  ['bad version', (a) => (a.keyset_version = '0')],
+  ['bad root', (a) => (a.runtime_auth.kid = 'unknown')],
+  ['bad signature', (a) => (a.runtime_auth.signature = 'a'.repeat(86))],
+  ['missing digest', (a) => delete a.payload.keyset_digest],
+  ['bad version', (a) => (a.payload.keyset_version = '0')],
   ['extra field', (a) => (a.realm = '2')],
 ])
   test('announcement rejects ' + name, async () => {
@@ -459,15 +459,18 @@ test('validly signed wrong digest/deadline and wrong publication realm cannot op
   });
   await trust.announce(
     signedAnnouncement(payload, {
-      manifest_digest: 'sha256:' + 'a'.repeat(64),
+      keyset_digest: 'sha256:' + 'a'.repeat(64),
     }),
   );
   assert.throws(() => trust.assertUsable(), /announcement/);
   await assert.rejects(
     trust.update(signedKeyset({ ...payload, realm: '3', keyset_version: '6' })),
-    /realm/,
+    /scope_denied/,
   );
-  await assert.rejects(trust.announce(signedAnnouncement(payload)), /rollback/);
+  await assert.rejects(
+    trust.announce(signedAnnouncement(payload)),
+    /same_version_conflict/,
+  );
 });
 test('announcement write uncertainty fences old keys and late lower replies even after a failed commit', async () => {
   const { payload, now } = publicationFixture();
@@ -525,16 +528,19 @@ test('newer announcement observed while an older publication writes cannot be cl
   block = true;
   const six = { ...payload, keyset_version: '6' },
     seven = { ...payload, keyset_version: '7' };
-  const old = trust.update(signedKeyset(six));
+  const sixPublication = signedKeyset(six);
+  const old = trust.update(sixPublication);
   while (!entered) await new Promise((r) => setImmediate(r));
+  const sevenPublication = signedKeyset(seven);
   const announced = trust.announce(signedAnnouncement(seven));
   assert.throws(() => trust.key('response', 'protocol_response', '5'));
   release();
   await old;
   await announced;
   assert.throws(() => trust.assertUsable(), /announcement/);
-  await assert.rejects(trust.announce(signedAnnouncement(six)), /rollback/);
-  await trust.update(signedKeyset(seven));
+  const lower = signedAnnouncement(six);
+  await assert.rejects(trust.announce(lower), /rollback/);
+  await trust.update(sevenPublication);
   trust.assertUsable();
 });
 test('root signed announcement hard deadline does not extend on repeated GET', async () => {
@@ -560,7 +566,7 @@ test('root signed announcement hard deadline does not extend on repeated GET', a
 test('device factory uses exact authenticated routes, IAM sharded subjects and connection lifetime', async (t) => {
   const { createDeviceProvider } = await import(
     process.env.AURIGA_DEVICE_PROVIDER_MODULE ??
-      '../../src/network/device-provider.js'
+      '../../../shell-auth/device-provider.mjs'
   );
   const { payload, now } = publicationFixture();
   const registration = {
@@ -632,7 +638,12 @@ test('device factory uses exact authenticated routes, IAM sharded subjects and c
   assert.notEqual(value.expiresAtMs, Date.parse(ticket.expiresAt));
   for (const { url, init } of calls) {
     assert.equal(new URL(url).origin, 'https://portal.example.com');
-    assert.equal(init.headers.authorization, 'Bearer real-device');
+    assert.equal(
+      init.headers.authorization,
+      new URL(url).pathname.endsWith('/bootstrap/controls')
+        ? undefined
+        : 'Bearer real-device',
+    );
     assert.equal(init.headers.cookie, undefined);
     assert.equal(init.redirect, 'error');
     assert.equal(init.credentials, 'omit');

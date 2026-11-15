@@ -21,8 +21,8 @@ var _ MappedNullable = &ShellAuthBusinessCallCallOneOf54{}
 
 // ShellAuthBusinessCallCallOneOf54 struct for ShellAuthBusinessCallCallOneOf54
 type ShellAuthBusinessCallCallOneOf54 struct {
-	Operation string                     `json:"operation"`
-	Input     ShellAuthInputTeamNodeBind `json:"input"`
+	Operation string                       `json:"operation"`
+	Input     ShellAuthInputTeamReadThread `json:"input"`
 }
 
 type _ShellAuthBusinessCallCallOneOf54 ShellAuthBusinessCallCallOneOf54
@@ -31,7 +31,7 @@ type _ShellAuthBusinessCallCallOneOf54 ShellAuthBusinessCallCallOneOf54
 // This constructor will assign default values to properties that have it defined,
 // and makes sure properties required by API are set, but the set of arguments
 // will change when the set of required properties is changed
-func NewShellAuthBusinessCallCallOneOf54(operation string, input ShellAuthInputTeamNodeBind) *ShellAuthBusinessCallCallOneOf54 {
+func NewShellAuthBusinessCallCallOneOf54(operation string, input ShellAuthInputTeamReadThread) *ShellAuthBusinessCallCallOneOf54 {
 	this := ShellAuthBusinessCallCallOneOf54{}
 	this.Operation = operation
 	this.Input = input
@@ -71,9 +71,9 @@ func (o *ShellAuthBusinessCallCallOneOf54) SetOperation(v string) {
 }
 
 // GetInput returns the Input field value
-func (o *ShellAuthBusinessCallCallOneOf54) GetInput() ShellAuthInputTeamNodeBind {
+func (o *ShellAuthBusinessCallCallOneOf54) GetInput() ShellAuthInputTeamReadThread {
 	if o == nil {
-		var ret ShellAuthInputTeamNodeBind
+		var ret ShellAuthInputTeamReadThread
 		return ret
 	}
 
@@ -82,7 +82,7 @@ func (o *ShellAuthBusinessCallCallOneOf54) GetInput() ShellAuthInputTeamNodeBind
 
 // GetInputOk returns a tuple with the Input field value
 // and a boolean to check if the value has been set.
-func (o *ShellAuthBusinessCallCallOneOf54) GetInputOk() (*ShellAuthInputTeamNodeBind, bool) {
+func (o *ShellAuthBusinessCallCallOneOf54) GetInputOk() (*ShellAuthInputTeamReadThread, bool) {
 	if o == nil {
 		return nil, false
 	}
@@ -90,7 +90,7 @@ func (o *ShellAuthBusinessCallCallOneOf54) GetInputOk() (*ShellAuthInputTeamNode
 }
 
 // SetInput sets field value
-func (o *ShellAuthBusinessCallCallOneOf54) SetInput(v ShellAuthInputTeamNodeBind) {
+func (o *ShellAuthBusinessCallCallOneOf54) SetInput(v ShellAuthInputTeamReadThread) {
 	o.Input = v
 }
 

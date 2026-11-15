@@ -2,7 +2,16 @@ import js from '@eslint/js';
 
 /** Node-oriented flat config for the standalone plugin package. */
 export default [
-  { ignores: ['node_modules/**', 'src/generated/**', 'ui/**', 'dist/**'] },
+  // C owns and validates this immutable artifact; never rewrite bundled code.
+  {
+    ignores: [
+      'node_modules/**',
+      'src/generated/**',
+      'ui/**',
+      'dist/**',
+      'shell-auth/**',
+    ],
+  },
   js.configs.recommended,
   {
     languageOptions: {
