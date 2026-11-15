@@ -57,6 +57,58 @@ export function extendK4({ boundary_cases, auth, runtime, digest }) {
     'invalid_chain',
     (i) => delete i.expected_identities,
   );
+  // Keep the remaining checks satisfied so each vector guards one binding.
+  const assigned = structuredClone(base);
+  assigned.evidence.payload.readers[0].phase = 'isolated';
+  assigned.evidence.payload.readers[0].isolation_enforced = true;
+  assigned.expected_identities = { [row.reader_id]: row.identity_id };
+  const assignedCase = (id, expected, change) =>
+    add('transport_confirmation', id, assigned, expected, (input) => {
+      change?.(input);
+      input.evidence = auth(
+        input.evidence.payload,
+        'Auriga.NetworkTransportConfirmation.v2',
+        runtime,
+        'synthetic-runtime',
+      );
+    });
+  assignedCase('isolated-authorized-selector', 'accept');
+  for (const field of ['installation_id', 'bundle_digest', 'bundle_version']) {
+    assignedCase(
+      'isolated-selector-binding-' + field,
+      'invalid_chain',
+      (input) => {
+        const selector = input.evidence.payload.readers[0].selector;
+        selector[field] =
+          field === 'bundle_digest' ? 'sha256:' + 'f'.repeat(64) : '99';
+        input.expected_selectors[row.reader_id] = digest(selector);
+      },
+    );
+  }
+  assignedCase('isolated-selector-ledger-digest', 'invalid_chain', (input) => {
+    input.expected_selectors[row.reader_id] = 'sha256:' + 'f'.repeat(64);
+  });
+  assignedCase(
+    'isolated-selector-replaced-identity',
+    'invalid_chain',
+    (input) => {
+      input.expected_identities[row.reader_id] = 'replacement';
+    },
+  );
+  assignedCase(
+    'isolated-selector-missing-identity-key',
+    'invalid_chain',
+    (input) => {
+      delete input.expected_identities[row.reader_id];
+    },
+  );
+  assignedCase(
+    'isolated-selector-extra-identity-key',
+    'invalid_chain',
+    (input) => {
+      input.expected_identities.other = 'other';
+    },
+  );
   const b = base.bundle.payload,
     e = base.evidence.payload;
   const response = {
@@ -169,4 +221,37 @@ export function extendK4({ boundary_cases, auth, runtime, digest }) {
         (i.response[map].other = map === 'expected_selectors' ? null : 'other'),
     );
   }
+  for (const source of ['bundle', 'control', 'query']) {
+    for (const field of ['tenant_id', 'realm']) {
+      ledger(
+        'ledger-domain-' + source + '-' + field,
+        'scope_denied',
+        (input) => {
+          const target =
+            source === 'query' ? input.query : input[source].payload;
+          target[field] = field === 'realm' ? '99' : 'other';
+        },
+      );
+    }
+  }
+  ledger('ledger-bundle-digest-both-replaced', 'invalid_chain', (input) => {
+    input.query.bundle_digest = input.response.bundle_digest =
+      'sha256:' + 'f'.repeat(64);
+  });
+  ledger('ledger-query-bundle-digest', 'invalid_chain', (input) => {
+    input.query.bundle_digest = 'sha256:' + 'f'.repeat(64);
+  });
+  ledger('ledger-query-bundle-version', 'invalid_chain', (input) => {
+    input.query.bundle_version = '99';
+  });
+  ledger('ledger-query-control-revision', 'control_required', (input) => {
+    input.query.control_revision = '99';
+  });
+  ledger('ledger-control-digest-both-replaced', 'control_required', (input) => {
+    input.query.control_digest = input.response.control_digest =
+      'sha256:' + 'f'.repeat(64);
+  });
+  ledger('ledger-query-control-digest', 'control_required', (input) => {
+    input.query.control_digest = 'sha256:' + 'f'.repeat(64);
+  });
 }

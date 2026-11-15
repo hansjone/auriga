@@ -25,28 +25,6 @@ export type LocalProjectionResponse =
  * via the `definition` "RenewalStatusOutput".
  */
 export type RenewalStatusOutput = RenewalStatus | UnpublishedRenewalStatus;
-/**
- * This interface was referenced by `AurigaV2`'s JSON-Schema
- * via the `definition` "TransportReaderEvidence".
- */
-export type TransportReaderEvidence = {
-  reader_id: string;
-  identity_id: string;
-  selector?: LocalProjectionSelector;
-  phase: 'loaded' | 'handshake_verified' | 'isolated';
-  isolation_enforced: boolean;
-};
-/**
- * This interface was referenced by `AurigaV2`'s JSON-Schema
- * via the `definition` "TransportPendingReader".
- */
-export type TransportPendingReader = {
-  reader_id: string;
-  identity_id: string;
-  selector?: LocalProjectionSelector;
-  phase: 'loaded' | 'handshake_verified' | 'isolated' | 'pending';
-  isolation_enforced: boolean;
-};
 
 /**
  * 严格受签对象，拒绝未知字段和重复键。跨字段规则见 auto-renewal-v2.md。整数序列为十进制字符串，须检查 uint64 上界。
@@ -1042,6 +1020,17 @@ export interface TransportPredecessor {
 }
 /**
  * This interface was referenced by `AurigaV2`'s JSON-Schema
+ * via the `definition` "TransportReaderEvidence".
+ */
+export interface TransportReaderEvidence {
+  reader_id: string;
+  identity_id: string;
+  selector?: LocalProjectionSelector;
+  phase: 'loaded' | 'handshake_verified' | 'isolated';
+  isolation_enforced: boolean;
+}
+/**
+ * This interface was referenced by `AurigaV2`'s JSON-Schema
  * via the `definition` "TransportConfirmation".
  */
 export interface TransportConfirmation {
@@ -1157,6 +1146,17 @@ export interface ExpectedSelectors {
   reader_identities: {
     [k: string]: string;
   };
+}
+/**
+ * This interface was referenced by `AurigaV2`'s JSON-Schema
+ * via the `definition` "TransportPendingReader".
+ */
+export interface TransportPendingReader {
+  reader_id: string;
+  identity_id: string;
+  selector?: LocalProjectionSelector;
+  phase: 'loaded' | 'handshake_verified' | 'isolated' | 'pending';
+  isolation_enforced: boolean;
 }
 /**
  * This interface was referenced by `AurigaV2`'s JSON-Schema

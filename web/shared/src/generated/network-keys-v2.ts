@@ -1029,7 +1029,7 @@ export interface components {
       /** @enum {unknown} */
       phase: 'loaded' | 'handshake_verified' | 'isolated';
       isolation_enforced: boolean;
-    } & unknown;
+    };
     TransportConfirmation: {
       tenant_id: string;
       realm: string;
@@ -1103,7 +1103,7 @@ export interface components {
       generation: string;
       control_digest: string;
       expected_selectors: {
-        [key: string]: string | null;
+        [key: string]: string | unknown;
       };
       reader_identities: {
         [key: string]: string;
@@ -1116,7 +1116,7 @@ export interface components {
       /** @enum {unknown} */
       phase: 'loaded' | 'handshake_verified' | 'isolated' | 'pending';
       isolation_enforced: boolean;
-    } & unknown;
+    };
     TransportConfirmationPending: {
       tenant_id: string;
       realm: string;

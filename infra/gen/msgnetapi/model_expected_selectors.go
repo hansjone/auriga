@@ -11,7 +11,6 @@ API version: 2.0.0
 package msgnetapi
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
 )
@@ -21,21 +20,22 @@ var _ MappedNullable = &ExpectedSelectors{}
 
 // ExpectedSelectors struct for ExpectedSelectors
 type ExpectedSelectors struct {
-	TenantId          string             `json:"tenant_id"`
-	Realm             string             `json:"realm" validate:"regexp=^[1-9][0-9]{0\\,19}$"`
-	AuthorityId       string             `json:"authority_id"`
-	AuthorityDigest   string             `json:"authority_digest" validate:"regexp=^sha256:[0-9a-f]{64}$"`
-	ControlRevision   string             `json:"control_revision" validate:"regexp=^[1-9][0-9]{0\\,19}$"`
-	BundleVersion     string             `json:"bundle_version" validate:"regexp=^[1-9][0-9]{0\\,19}$"`
-	BundleDigest      string             `json:"bundle_digest" validate:"regexp=^sha256:[0-9a-f]{64}$"`
-	Phase             string             `json:"phase"`
-	RequiredReaderIds []string           `json:"required_reader_ids"`
-	Challenge         string             `json:"challenge" validate:"regexp=^[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$"`
-	IssuedAt          string             `json:"issued_at" validate:"regexp=^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"`
-	Generation        string             `json:"generation" validate:"regexp=^[1-9][0-9]{0\\,19}$"`
-	ControlDigest     string             `json:"control_digest" validate:"regexp=^sha256:[0-9a-f]{64}$"`
-	ExpectedSelectors map[string]*string `json:"expected_selectors"`
-	ReaderIdentities  map[string]string  `json:"reader_identities"`
+	TenantId             string             `json:"tenant_id"`
+	Realm                string             `json:"realm" validate:"regexp=^[1-9][0-9]{0\\,19}$"`
+	AuthorityId          string             `json:"authority_id"`
+	AuthorityDigest      string             `json:"authority_digest" validate:"regexp=^sha256:[0-9a-f]{64}$"`
+	ControlRevision      string             `json:"control_revision" validate:"regexp=^[1-9][0-9]{0\\,19}$"`
+	BundleVersion        string             `json:"bundle_version" validate:"regexp=^[1-9][0-9]{0\\,19}$"`
+	BundleDigest         string             `json:"bundle_digest" validate:"regexp=^sha256:[0-9a-f]{64}$"`
+	Phase                string             `json:"phase"`
+	RequiredReaderIds    []string           `json:"required_reader_ids"`
+	Challenge            string             `json:"challenge" validate:"regexp=^[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$"`
+	IssuedAt             string             `json:"issued_at" validate:"regexp=^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"`
+	Generation           string             `json:"generation" validate:"regexp=^[1-9][0-9]{0\\,19}$"`
+	ControlDigest        string             `json:"control_digest" validate:"regexp=^sha256:[0-9a-f]{64}$"`
+	ExpectedSelectors    map[string]*string `json:"expected_selectors"`
+	ReaderIdentities     map[string]string  `json:"reader_identities"`
+	AdditionalProperties map[string]interface{}
 }
 
 type _ExpectedSelectors ExpectedSelectors
@@ -457,6 +457,11 @@ func (o ExpectedSelectors) ToMap() (map[string]interface{}, error) {
 	toSerialize["control_digest"] = o.ControlDigest
 	toSerialize["expected_selectors"] = o.ExpectedSelectors
 	toSerialize["reader_identities"] = o.ReaderIdentities
+
+	for key, value := range o.AdditionalProperties {
+		toSerialize[key] = value
+	}
+
 	return toSerialize, nil
 }
 
@@ -498,15 +503,34 @@ func (o *ExpectedSelectors) UnmarshalJSON(data []byte) (err error) {
 
 	varExpectedSelectors := _ExpectedSelectors{}
 
-	decoder := json.NewDecoder(bytes.NewReader(data))
-	decoder.DisallowUnknownFields()
-	err = decoder.Decode(&varExpectedSelectors)
+	err = json.Unmarshal(data, &varExpectedSelectors)
 
 	if err != nil {
 		return err
 	}
 
 	*o = ExpectedSelectors(varExpectedSelectors)
+
+	additionalProperties := make(map[string]interface{})
+
+	if err = json.Unmarshal(data, &additionalProperties); err == nil {
+		delete(additionalProperties, "tenant_id")
+		delete(additionalProperties, "realm")
+		delete(additionalProperties, "authority_id")
+		delete(additionalProperties, "authority_digest")
+		delete(additionalProperties, "control_revision")
+		delete(additionalProperties, "bundle_version")
+		delete(additionalProperties, "bundle_digest")
+		delete(additionalProperties, "phase")
+		delete(additionalProperties, "required_reader_ids")
+		delete(additionalProperties, "challenge")
+		delete(additionalProperties, "issued_at")
+		delete(additionalProperties, "generation")
+		delete(additionalProperties, "control_digest")
+		delete(additionalProperties, "expected_selectors")
+		delete(additionalProperties, "reader_identities")
+		o.AdditionalProperties = additionalProperties
+	}
 
 	return err
 }

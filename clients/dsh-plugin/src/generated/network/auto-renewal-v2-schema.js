@@ -2450,26 +2450,24 @@ export const schema = {
       },
       required: ['reader_id', 'identity_id', 'phase', 'isolation_enforced'],
       additionalProperties: false,
-      allOf: [
-        {
-          if: {
-            properties: {
-              phase: {
-                type: 'string',
-                enum: ['loaded', 'handshake_verified'],
-              },
-            },
-          },
-          then: {
-            required: ['selector'],
-            properties: {
-              selector: {
-                $ref: '#/$defs/LocalProjectionSelector',
-              },
-            },
+      not: {
+        type: 'object',
+        properties: {
+          phase: {
+            enum: ['loaded', 'handshake_verified'],
           },
         },
-      ],
+        required: ['phase'],
+        not: {
+          type: 'object',
+          properties: {
+            selector: {
+              $ref: '#/$defs/LocalProjectionSelector',
+            },
+          },
+          required: ['selector'],
+        },
+      },
     },
     TransportConfirmation: {
       type: 'object',
@@ -2806,13 +2804,15 @@ export const schema = {
             maxLength: 128,
           },
           additionalProperties: {
-            anyOf: [
+            oneOf: [
               {
                 type: 'string',
                 pattern: '^sha256:[0-9a-f]{64}$',
+                description:
+                  'Digest of this reader authorized LocalProjectionSelector.',
               },
               {
-                type: 'null',
+                const: null,
               },
             ],
           },
@@ -2877,26 +2877,24 @@ export const schema = {
       },
       required: ['reader_id', 'identity_id', 'phase', 'isolation_enforced'],
       additionalProperties: false,
-      allOf: [
-        {
-          if: {
-            properties: {
-              phase: {
-                type: 'string',
-                enum: ['loaded', 'handshake_verified'],
-              },
-            },
-          },
-          then: {
-            required: ['selector'],
-            properties: {
-              selector: {
-                $ref: '#/$defs/LocalProjectionSelector',
-              },
-            },
+      not: {
+        type: 'object',
+        properties: {
+          phase: {
+            enum: ['loaded', 'handshake_verified'],
           },
         },
-      ],
+        required: ['phase'],
+        not: {
+          type: 'object',
+          properties: {
+            selector: {
+              $ref: '#/$defs/LocalProjectionSelector',
+            },
+          },
+          required: ['selector'],
+        },
+      },
     },
     TransportConfirmationPending: {
       type: 'object',
