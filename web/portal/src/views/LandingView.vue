@@ -8,14 +8,14 @@ const messages = {
   'zh-CN': {
     login: '登录',
     home: 'Auriga DSH 首页',
-    title: '团队的工作，在此汇合。',
-    sub: '团队共用的 DSH 云端工作台。连接云端与桌面，共享模型中转站。',
+    title: '一个团队，一套 AI 工作台。',
+    sub: '云端与桌面的 DSH 共用同一身份、模型与资源，在哪里都能接着干。',
   },
   en: {
     login: 'Sign in',
     home: 'Auriga DSH home',
-    title: 'Where your team’s work meets.',
-    sub: 'A shared DSH cloud workspace. Connect cloud and desktop with a team model relay.',
+    title: 'One team, one AI workspace.',
+    sub: 'Cloud and desktop DSH share one identity, one set of models and resources. Pick up where you left off, anywhere.',
   },
 };
 const copy = computed(() => messages[locale.value === 'en' ? 'en' : 'zh-CN']);
