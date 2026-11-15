@@ -80,8 +80,10 @@ public class IamAdminController {
       @PathVariable String id, jakarta.servlet.http.HttpServletResponse response) {
     return store.tx(
         () -> {
-          ObjectNode result = providers.get(id);
-          response.setHeader("ETag", UacProviderService.etag(store.get("idp_provider", id, false)));
+          ObjectNode row = store.get("idp_provider", id, false);
+          IamError.require(row != null, "not_found", 404);
+          ObjectNode result = providers.view(row);
+          response.setHeader("ETag", UacProviderService.etag(row));
           return result;
         });
   }

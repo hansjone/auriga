@@ -7,6 +7,7 @@ import { createAurigaI18n } from '@auriga/shared';
 import { apiClient } from '../src/api';
 import IdentityProvidersView from '../src/views/IdentityProvidersView.vue';
 import ActionConfirm from '../src/admin/ActionConfirm.vue';
+import UacSettings from '../src/admin/UacSettings.vue';
 import {
   configForm,
   configChanges,
@@ -218,11 +219,140 @@ async function creation() {
 }
 async function confirm() {
   await wrapper!
-    .getComponent(ActionConfirm)
+    .findAllComponents(ActionConfirm)
+    .find((component) => component.props('message'))!
     .get('[data-testid=confirm-action]')
     .trigger('click');
   await flushPromises();
 }
+
+it('creates a UAC draft, initializes after 404, saves configuration and then enables it', async () => {
+  connector.descriptor.type = 'uac';
+  connector.descriptor.configSchema = {
+    type: 'object',
+    required: ['baseUrl', 'systemCode'],
+    properties: { baseUrl: { type: 'string' }, systemCode: { type: 'string' } },
+  } as unknown as ConnectorType['descriptor']['configSchema'];
+  let stored:
+    { enabled: boolean; baseUrl: string; systemCode: string } | undefined;
+  let revision = 4;
+  intercept = (path, init) => {
+    if (path.endsWith('/uac')) {
+      if (init.method === 'PUT') {
+        stored = JSON.parse(String(init.body));
+        provider = { ...provider, enabled: stored!.enabled };
+        rows = [provider];
+        ++revision;
+      }
+      if (!stored) return problem(404, 'common.not_found');
+      const response = json(stored);
+      response.headers.set('ETag', '"provider-' + revision + '"');
+      return response;
+    }
+    if (path.endsWith('/diagnostics'))
+      return json({ enabled: false, revision: 0 });
+    if (path === base + '/' + id && init.method === 'GET') {
+      const response = json(provider);
+      response.headers.set('ETag', '"provider-' + revision + '"');
+      return response;
+    }
+    return undefined;
+  };
+  await render();
+  await click('new-provider');
+  await input('display-nameEn', 'Example UAC');
+  expect(wrapper!.find('[data-testid=provider-enabled]').exists()).toBe(false);
+  await click('save-provider');
+  await confirm();
+  expect(JSON.parse(String(writes()[0].init.body))).toMatchObject({
+    connectorType: 'uac',
+    enabled: false,
+    config: {},
+  });
+  expect(wrapper!.find('[data-testid=toggle-provider]').exists()).toBe(false);
+  let uac = wrapper!.getComponent(UacSettings);
+  expect(
+    (uac.get('[data-testid=uac-base-url]').element as HTMLInputElement).value,
+  ).toBe('');
+  expect(
+    (uac.get('[data-testid=uac-system-code]').element as HTMLInputElement)
+      .value,
+  ).toBe('');
+  expect(
+    (uac.get('[data-testid=uac-enabled]').element as HTMLInputElement).checked,
+  ).toBe(false);
+  await uac
+    .get('[data-testid=uac-base-url]')
+    .setValue('https://identity.example.com');
+  await uac.get('[data-testid=uac-system-code]').setValue('example');
+  const saveConfig = async () => {
+    await uac.get('[data-testid=uac-save]').trigger('click');
+    uac.getComponent(ActionConfirm).vm.$emit('confirm');
+    await flushPromises();
+  };
+  await saveConfig();
+  expect(stored?.enabled).toBe(false);
+  uac = wrapper!.getComponent(UacSettings);
+  await uac.get('[data-testid=uac-enabled]').setValue(true);
+  await saveConfig();
+  const puts = writes().filter((call) => call.method === 'PUT');
+  expect(puts).toHaveLength(2);
+  expect(new Headers(puts[0].init.headers).get('If-Match')).toBe(
+    '"provider-4"',
+  );
+  expect(new Headers(puts[1].init.headers).get('If-Match')).toBe(
+    '"provider-5"',
+  );
+  expect(stored).toEqual({
+    enabled: true,
+    baseUrl: 'https://identity.example.com',
+    systemCode: 'example',
+  });
+  expect(uac.text()).toContain('UAC 配置已保存');
+});
+
+it('edits only UAC display metadata using the generic provider whole-row ETag', async () => {
+  provider.connectorType = 'uac';
+  provider.config = {};
+  intercept = (path, init) => {
+    if (path === base + '/' + id && init.method === 'GET') {
+      const response = json(provider);
+      response.headers.set('ETag', '"provider-4"');
+      return response;
+    }
+    if (path.endsWith('/uac'))
+      return json({
+        enabled: true,
+        baseUrl: 'https://identity.example.com',
+        systemCode: 'example',
+      });
+    if (path.endsWith('/diagnostics'))
+      return json({ enabled: false, revision: 0 });
+    return undefined;
+  };
+  await render();
+  await edit();
+  expect(wrapper!.find('[data-testid=provider-enabled]').exists()).toBe(false);
+  expect(wrapper!.find('[data-testid=config-baseUrl]').exists()).toBe(false);
+  await input('display-nameEn', 'Example renamed');
+  await input('display-order', '25');
+  await click('save-provider');
+  await confirm();
+  const patches = writes().filter((call) => call.method === 'PATCH');
+  expect(patches).toHaveLength(1);
+  const body = JSON.parse(String(patches[0].init.body));
+  expect(Object.keys(body)).toEqual(['display']);
+  expect(body.display).toMatchObject({
+    name: { en: 'Example renamed' },
+    order: 25,
+  });
+  expect(new Headers(patches[0].init.headers).get('If-Match')).toBe(
+    '"provider-4"',
+  );
+  expect(
+    writes().some((call) => call.method === 'PUT' || call.method === 'DELETE'),
+  ).toBe(false);
+});
 
 describe('provider schema and secret preservation', () => {
   it('keeps arrays containing embedded newlines read-only instead of changing their item boundaries', () => {

@@ -218,6 +218,46 @@ func TestAccessControlListenerAndTrustedHopCookies(t *testing.T) {
 	}
 }
 
+func TestAccessUACAdminBrowserCookieBoundary(t *testing.T) {
+	seen := make(chan *http.Request, 10)
+	g, addresses, sessions := accessFixture(t, true, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seen <- r.Clone(context.Background())
+		w.WriteHeader(204)
+	}))
+	admin := putPortalSession(sessions, "admin", "proof", "admin-jwt")
+	admin.Audience, admin.TenantID = "admin", g.Cfg.Access.TenantID()
+	sessions.Put("admin", admin)
+	id := "/api/iam/v1/admin/providers/11111111-1111-4111-8111-111111111111"
+	session := "auriga_admin_session=admin"
+	csrf := "auriga_csrf=proof"
+	headers := http.Header{"Cookie": {session + "; " + csrf + "; auriga_session=portal; unrelated=private"}, "Origin": {g.Cfg.Access.AdminURL()}}
+	headers.Set("X-Auriga-CSRF", "proof")
+	for _, tc := range []struct{ method, path, cookies string }{
+		{"GET", id + "/uac", session},
+		{"PUT", id + "/uac", session + "; " + csrf},
+		{"GET", id + "/uac/diagnostics", session},
+		{"PUT", id + "/uac/diagnostics", session + "; " + csrf},
+		{"POST", "/api/iam/v1/admin/uac/diagnostic-bundles", session + "; " + csrf},
+		{"GET", id, ""},
+		{"GET", id + "/uac/unrelated", ""},
+	} {
+		if status, body := entryRequest(t, addresses["admin"], tc.method, tc.path, g.Cfg.AdminHost, headers); status != 204 {
+			t.Fatalf("%s %s: %d %s", tc.method, tc.path, status, body)
+		}
+		request := <-seen
+		if request.Header.Get("Cookie") != tc.cookies || request.Header.Get("Authorization") != "Bearer admin-jwt" {
+			t.Fatalf("%s %s: incorrect upstream authorization or cookies", tc.method, tc.path)
+		}
+	}
+	headers.Del("X-Auriga-CSRF")
+	requireEntryProblem(t, addresses["admin"], "PUT", id+"/uac", g.Cfg.AdminHost, headers, 403, "common.forbidden")
+	select {
+	case <-seen:
+		t.Fatal("write without CSRF reached IAM")
+	default:
+	}
+}
+
 func TestAccessDomainSameOriginLoginAndOAuthRegression(t *testing.T) {
 	seen := make(chan *http.Request, 10)
 	g, addresses, sessions := accessFixture(t, true, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

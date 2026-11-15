@@ -27,11 +27,22 @@ export const providersApi = {
     }),
   create: (body: ProviderInput, signal?: AbortSignal) =>
     apiClient.post<Provider>(`${base}/providers`, body, { signal }),
-  patch: (id: string, body: ProviderPatch, signal?: AbortSignal) =>
+  patch: (
+    id: string,
+    body: ProviderPatch,
+    signal?: AbortSignal,
+    etag?: string,
+  ) =>
     apiClient.patch<Provider>(
       `${base}/providers/${encodeURIComponent(id)}`,
       body,
-      { signal, headers: { 'Content-Type': 'application/merge-patch+json' } },
+      {
+        signal,
+        headers: {
+          'Content-Type': 'application/merge-patch+json',
+          ...(etag ? { 'If-Match': etag } : {}),
+        },
+      },
     ),
   disable: (id: string, signal?: AbortSignal) =>
     apiClient.delete<void>(`${base}/providers/${encodeURIComponent(id)}`, {

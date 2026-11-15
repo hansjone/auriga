@@ -34,7 +34,7 @@ export const apiClient = withStepUp(sessionClient, requestStepUp);
 
 // Resource detail editing needs the actual response ETag, not a guessed revision.
 // A reader per call keeps concurrent responses isolated; writes use apiClient.
-export async function readResource<T>(path: string) {
+export async function readResource<T>(path: string, signal?: AbortSignal) {
   let etag: string | null = null;
   const reader = createApiClient({
     ...clientOptions,
@@ -48,7 +48,7 @@ export async function readResource<T>(path: string) {
       return response;
     },
   });
-  const data = await reader.get<T>(path, { cache: 'no-store' });
+  const data = await reader.get<T>(path, { cache: 'no-store', signal });
   return { data, etag };
 }
 
