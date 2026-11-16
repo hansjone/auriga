@@ -14,7 +14,7 @@ export function clientPlatform(target = CLIENT_TARGET) {
     },
   };
   const selected = platforms[target];
-  throw new Error(`客户端目标 ${target} 尚未提供构建配方`);
+  if (!selected) throw new Error(`客户端目标 ${target} 尚未提供构建配方`);
   return selected;
 }
 
