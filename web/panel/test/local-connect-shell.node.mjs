@@ -93,6 +93,40 @@ const localBoot = (connected) => ({
   fetchBase: null,
 });
 
+test('connect resource elements remain hidden until platform sign-in', async () => {
+  const host = surfaceHost(async (url) =>
+    response(
+      200,
+      String(url).endsWith('/auriga/shell/status')
+        ? {
+            configured: true,
+            loggedIn: false,
+            connected: false,
+            platform: 'signed_out',
+            brokerAvailable: true,
+          }
+        : localBoot(false),
+    ),
+  );
+  let main;
+  try {
+    main = host.mount('main');
+    await flush();
+    for (const name of ['market', 'mine']) {
+      main.root.querySelector('#auriga-tab-' + name).click();
+      await flush();
+      const element = main.root.querySelector('auriga-team-panel');
+      assert.ok(element);
+      assert.equal(element.hidden, true);
+      assert.ok(element.hasAttribute('hidden'));
+    }
+  } finally {
+    main?.close();
+    host.dispose();
+    host.close();
+  }
+});
+
 async function exerciseRealSettings(delayed) {
   const directory = await mkdtemp(join(tmpdir(), 'auriga-shell-settings-'));
   const socket = new Socket();

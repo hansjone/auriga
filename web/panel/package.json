@@ -4,9 +4,9 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "lint": "eslint . && prettier --check .",
+    "lint": "eslint . ../../scripts/resource-seed/*.mjs && prettier --check . ../../scripts/resource-seed",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run && node --experimental-vm-modules --test test/shell-surfaces.node.mjs test/local-connect-shell.node.mjs",
+    "test": "vitest run && node --experimental-vm-modules --test test/shell-surfaces.node.mjs test/local-connect-shell.node.mjs && node --test ../../scripts/resource-seed/prepare.test.mjs",
     "build": "vite build",
     "test:bundle": "node test/bundle.mjs"
   }

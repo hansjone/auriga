@@ -435,10 +435,10 @@ window.__ModuleLoader__.load({
 .auriga-login-modal{pointer-events:auto;position:fixed;inset:0;margin:auto;z-index:1000;width:min(440px,90vw);max-height:85vh;overflow:auto;padding:24px;border:1px solid var(--dsw-alias-border-l2,currentColor);border-radius:16px;background:var(--dsw-alias-bg-layer-1,Canvas);color:var(--dsw-alias-label-primary,CanvasText);font:inherit;box-shadow:0 0 0 100vmax #0006}
 
 .auriga-shell{box-sizing:border-box;color:var(--dsw-alias-label-primary,inherit);font:inherit;min-width:0}
-.auriga-shell button:not(.auriga-host-control,.auriga-tabs button){font:inherit;padding:5px 10px;border:1px solid var(--dsw-alias-border-l2,currentColor);border-radius:6px;background:var(--dsw-alias-bg-layer-1,transparent);color:var(--dsw-alias-label-primary,inherit);cursor:pointer}
-.auriga-shell button:not(.auriga-host-control,.auriga-tabs button):hover,.auriga-tabs-fallback button:hover{background:var(--dsw-alias-interactive-bg-hover,transparent)}
-.auriga-shell button:not(.auriga-host-control,.auriga-tabs button):focus-visible,.auriga-tabs-fallback button:focus-visible,.auriga-shell summary:focus-visible{outline:var(--dsw-focus-ring-width,2px) solid var(--dsw-focus-ring-color,var(--dsw-alias-state-business-primary,currentColor));outline-offset:2px}
-.auriga-shell button:not(.auriga-host-control,.auriga-tabs button):disabled{opacity:.5;cursor:default}
+.auriga-shell button:not(.auriga-host-control,.auriga-tabs button,.auriga-tabs-fallback button){font:inherit;padding:5px 10px;border:1px solid var(--dsw-alias-border-l2,currentColor);border-radius:6px;background:var(--dsw-alias-bg-layer-1,transparent);color:var(--dsw-alias-label-primary,inherit);cursor:pointer}
+.auriga-shell button:not(.auriga-host-control,.auriga-tabs button,.auriga-tabs-fallback button):hover,.auriga-tabs-fallback button:hover{background:var(--dsw-alias-interactive-bg-hover,transparent)}
+.auriga-shell button:not(.auriga-host-control,.auriga-tabs button,.auriga-tabs-fallback button):focus-visible,.auriga-tabs-fallback button:focus-visible,.auriga-shell summary:focus-visible{outline:var(--dsw-focus-ring-width,2px) solid var(--dsw-focus-ring-color,var(--dsw-alias-state-business-primary,currentColor));outline-offset:2px}
+.auriga-shell button:not(.auriga-host-control,.auriga-tabs button,.auriga-tabs-fallback button):disabled{opacity:.5;cursor:default}
 .auriga-shell-status{padding:14px 0;display:flex;gap:12px;align-items:center;flex-wrap:wrap}
 .auriga-settings{padding:4px 4px 24px;font-size:13px;line-height:1.5}
 .auriga-settings h2{font-size:20px;font-weight:600;margin:0 0 24px}
@@ -446,7 +446,7 @@ window.__ModuleLoader__.load({
 .auriga-settings p{color:var(--dsw-alias-label-secondary,inherit);font-size:12px;margin:8px 0 16px;overflow-wrap:anywhere}
 .auriga-setting{padding:14px 0;border-bottom:1px solid var(--dsw-alias-border-l1,currentColor);display:flex;align-items:center;gap:12px;flex-wrap:wrap}
 .auriga-setting>span:first-child{flex:1}.auriga-setting-value{color:var(--dsw-alias-label-secondary,inherit);overflow-wrap:anywhere}
-.auriga-settings-content{max-width:1080px;display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,400px),1fr));gap:16px;align-items:start;padding-bottom:24px}.auriga-settings-content>section,.auriga-settings-content>details{border:1px solid var(--dsw-alias-border-l2,currentColor);border-radius:12px;padding:16px 20px;background:var(--dsw-alias-bg-layer-1,transparent);min-width:0}.auriga-settings-content>.auriga-status-card,.auriga-settings-content>details,.auriga-settings-content>p{grid-column:1/-1}.auriga-settings-content>p{margin:0}.auriga-settings-content h3{margin:0 0 4px;font-size:15px}.auriga-settings-content .auriga-setting{padding:10px 0}.auriga-settings-content .auriga-setting:last-of-type{border-bottom:0}.auriga-setting select{font:inherit;color:inherit;background:var(--dsw-alias-bg-layer-1,transparent);border:1px solid var(--dsw-alias-border-l2,currentColor);border-radius:6px;padding:4px 8px}.auriga-setting input[type=checkbox]{flex:none;min-width:auto}.auriga-status-card{border:1px solid var(--dsw-alias-border-l2,currentColor);border-radius:10px;padding:16px;display:flex;align-items:center;gap:12px;flex-wrap:wrap}.auriga-status-card p:first-child{font-size:14px;font-weight:600;flex:1;min-width:220px;color:inherit}.auriga-status-card p{margin:0}.auriga-status-card p+ p{flex-basis:100%;order:2}.auriga-setting-actions{display:flex;gap:8px;margin:12px 0}.auriga-setting input{font:inherit;color:inherit;background:var(--dsw-alias-bg-layer-1,transparent);border:1px solid var(--dsw-alias-border-l2,currentColor);border-radius:6px;padding:8px;min-width:0;flex:2}.auriga-settings details{display:block}.auriga-settings summary{cursor:pointer}.auriga-settings details p{margin-bottom:0}
+.auriga-settings-content{width:100%;display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,400px),1fr));gap:16px;align-items:start;padding-bottom:24px}.auriga-settings-content>section,.auriga-settings-content>details{border:1px solid var(--dsw-alias-border-l2,currentColor);border-radius:12px;padding:16px 20px;background:var(--dsw-alias-bg-layer-1,transparent);min-width:0}.auriga-settings-content>.auriga-status-card,.auriga-settings-content>details,.auriga-settings-content>p{grid-column:1/-1}.auriga-settings-content>p{margin:0}.auriga-settings-content h3{margin:0 0 4px;font-size:15px}.auriga-settings-content .auriga-setting{padding:10px 0}.auriga-settings-content .auriga-setting:last-of-type{border-bottom:0}.auriga-setting select{font:inherit;color:inherit;background:var(--dsw-alias-bg-layer-1,transparent);border:1px solid var(--dsw-alias-border-l2,currentColor);border-radius:6px;padding:4px 8px}.auriga-setting input[type=checkbox]{flex:none;min-width:auto}.auriga-status-card{border:1px solid var(--dsw-alias-border-l2,currentColor);border-radius:10px;padding:16px;display:flex;align-items:center;gap:12px;flex-wrap:wrap}.auriga-status-card p:first-child{font-size:14px;font-weight:600;flex:1;min-width:220px;color:inherit}.auriga-status-card p{margin:0}.auriga-status-card p+ p{flex-basis:100%;order:2}.auriga-setting-actions{display:flex;gap:8px;margin:12px 0}.auriga-setting input{font:inherit;color:inherit;background:var(--dsw-alias-bg-layer-1,transparent);border:1px solid var(--dsw-alias-border-l2,currentColor);border-radius:6px;padding:8px;min-width:0;flex:2}.auriga-settings details{display:block}.auriga-settings summary{cursor:pointer}.auriga-settings details p{margin-bottom:0}
 .auriga-consent{padding:16px 0;min-width:0;overflow:auto}
 .auriga-consent article{padding:16px 0;border-bottom:1px solid var(--dsw-alias-border-l1,currentColor)}
 .auriga-consent pre{white-space:pre-wrap;overflow-wrap:anywhere;font:inherit;max-height:12em;overflow:auto;unicode-bidi:plaintext}
@@ -456,12 +456,14 @@ window.__ModuleLoader__.load({
 .auriga-consent p{overflow-wrap:anywhere}.auriga-consent small{color:var(--dsw-alias-label-secondary,inherit)}
 .auriga-app{height:100%;display:flex;flex-direction:column;gap:12px;padding:20px 24px 0;overflow:auto}
 .auriga-banner{display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:8px 12px;border-radius:8px;background:var(--dsw-alias-bg-layer-2,transparent);font-size:13px}
-.auriga-tabs{flex:none;max-width:1080px;overflow-x:auto}
+.auriga-tabs-scroll{box-sizing:border-box;flex:none;min-width:0;width:100%;overflow-x:auto}
+.auriga-tabs{box-sizing:border-box;min-width:max-content;width:100%;white-space:nowrap}
+.auriga-tabs button{flex:none;white-space:nowrap}
 .auriga-tabs-fallback{display:flex;gap:4px;border-bottom:1px solid var(--dsw-alias-border-l1,currentColor)}
 .auriga-tabs-fallback>button{font:inherit;cursor:pointer;border:0;border-bottom:2px solid transparent;border-radius:0;background:transparent;padding:8px 12px;color:var(--dsw-alias-label-secondary,inherit);white-space:nowrap}
 .auriga-tabs-fallback>button[aria-selected=true]{color:var(--dsw-alias-label-primary,inherit);border-bottom-color:var(--dsw-alias-state-business-primary,currentColor);font-weight:600}
 .auriga-tabpanel{min-width:0}.auriga-tabpanel[hidden],.auriga-tabpanel>auriga-team-panel[hidden]{display:none}
-.auriga-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,320px),1fr));gap:16px;max-width:1080px;padding-bottom:24px}
+.auriga-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,320px),1fr));gap:16px;width:100%;padding-bottom:24px}
 .auriga-card{border:1px solid var(--dsw-alias-border-l2,currentColor);border-radius:12px;padding:18px 20px;display:flex;flex-direction:column;gap:10px;min-width:0;background:var(--dsw-alias-bg-layer-1,transparent)}
 .auriga-card header{display:flex;align-items:center;justify-content:space-between;gap:8px}
 .auriga-card h3{font-size:15px;font-weight:600;margin:0}
@@ -1981,19 +1983,23 @@ window.__ModuleLoader__.load({
             panelId: 'auriga-panel-' + id,
           }));
           if (HostSegmentedTabs)
-            return h(HostSegmentedTabs, {
-              items,
-              value,
-              onChange,
-              label: t('panel'),
-              className: 'auriga-tabs',
-            });
+            return h(
+              'div',
+              { className: 'auriga-tabs-scroll' },
+              h(HostSegmentedTabs, {
+                items,
+                value,
+                onChange,
+                label: t('panel'),
+                className: 'auriga-tabs',
+              }),
+            );
           return h(
             'div',
             {
               role: 'tablist',
               'aria-label': t('panel'),
-              className: 'auriga-tabs auriga-tabs-fallback',
+              className: 'auriga-tabs-scroll auriga-tabs-fallback',
             },
             ...items.map((item, index) =>
               h(
@@ -3095,7 +3101,9 @@ window.__ModuleLoader__.load({
                 h(ELEMENT, {
                   ref,
                   tabs: 'host',
-                  hidden: desktop?.required || !resourcesReady,
+                  // React 18 serializes false on custom elements as hidden="false".
+                  // Null removes the boolean HTML attribute so the panel is visible.
+                  hidden: desktop?.required || !resourcesReady ? true : null,
                 }),
             ),
             panel(
