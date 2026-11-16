@@ -12,6 +12,7 @@ window.__ModuleLoader__.load({
       (typeof primitives?.[name] === 'object' && primitives[name] !== null)
         ? primitives[name]
         : undefined;
+    const HostModal = probe('Modal');
     const HostButton = probe('Button');
     const HostSegmentedTabs = probe('SegmentedTabs');
     const HostStateDot = probe('StateDot');
@@ -28,6 +29,10 @@ window.__ModuleLoader__.load({
       updateDownloading: '正在下载',
       updateRestart: '更新已准备好，请关闭并重新打开 Auriga DSH',
       updateFailed: '更新失败，旧版和数据已保留，请重试',
+      loginOtherWindow:
+        '\u5df2\u5728\u5176\u4ed6\u7a97\u53e3\u767b\u5f55\u4e2d',
+      loginWindowUnsupported:
+        '\u5f53\u524d\u6d4f\u89c8\u5668\u4e0d\u652f\u6301\u5b89\u5168\u7684\u591a\u7a97\u53e3\u767b\u5f55\uff0c\u8bf7\u4f7f\u7528\u6258\u76d8\u5907\u7528\u767b\u5f55',
       panel: NAV_NAME,
       loading: '正在加载…',
       failed: '加载失败',
@@ -218,6 +223,9 @@ window.__ModuleLoader__.load({
       updateRestart: 'Update ready. Close and reopen Auriga DSH.',
       updateFailed:
         'Update failed. Previous version and data preserved. Retry.',
+      loginOtherWindow: 'Sign-in is active in another window',
+      loginWindowUnsupported:
+        'This browser cannot coordinate sign-in windows. Use browser sign-in from the tray.',
       panel: NAV_NAME,
       loading: 'Loading…',
       failed: 'Failed to load',
@@ -424,6 +432,8 @@ window.__ModuleLoader__.load({
       gotoOverview: 'Go to Overview',
     };
     const css = `
+.auriga-login-modal{pointer-events:auto;position:fixed;inset:0;margin:auto;z-index:1000;width:min(440px,90vw);max-height:85vh;overflow:auto;padding:24px;border:1px solid var(--dsw-alias-border-l2,currentColor);border-radius:16px;background:var(--dsw-alias-bg-layer-1,Canvas);color:var(--dsw-alias-label-primary,CanvasText);font:inherit;box-shadow:0 0 0 100vmax #0006}
+
 .auriga-shell{box-sizing:border-box;color:var(--dsw-alias-label-primary,inherit);font:inherit;min-width:0}
 .auriga-shell button:not(.auriga-host-control,.auriga-tabs button){font:inherit;padding:5px 10px;border:1px solid var(--dsw-alias-border-l2,currentColor);border-radius:6px;background:var(--dsw-alias-bg-layer-1,transparent);color:var(--dsw-alias-label-primary,inherit);cursor:pointer}
 .auriga-shell button:not(.auriga-host-control,.auriga-tabs button):hover,.auriga-tabs-fallback button:hover{background:var(--dsw-alias-interactive-bg-hover,transparent)}
@@ -1920,7 +1930,8 @@ window.__ModuleLoader__.load({
             },
             body: JSON.stringify(body),
           });
-          if (!response.ok) throw failure();
+          if (!response.ok)
+            throw Object.assign(failure(), { status: response.status });
           return response.json();
         };
         // Native host controls when the public primitives expose them;
@@ -2313,7 +2324,235 @@ window.__ModuleLoader__.load({
                 ),
           );
         }
-        function PlatformCard({ boot, shell, reloadShell, gotoSettings }) {
+        const launchLoginFragment = [
+          '#auriga=login',
+          '#auriga=platform-login',
+        ].includes(window.location.hash);
+        let loginOverlayAvailable = false;
+        const loginRequests = new Set();
+        const openPlatformLogin = () => loginRequests.forEach((open) => open());
+        function PlatformLogin() {
+          const local = ['127.0.0.1', '[::1]', 'localhost'].includes(
+            window.location.hostname,
+          );
+          const [open, setOpen] = React.useState(false);
+          const [settled, setSettled] = React.useState(false);
+          const [ownsLogin, setOwnsLogin] = React.useState(false);
+          const [request, setRequest] = React.useState(0);
+          const attempted = React.useRef(false);
+          const manual = React.useRef(false);
+          const cancellation = React.useRef(null);
+          const [shell, reloadShell, setShell] = useLocalStatus(
+            'auriga/shell/status',
+            open && ownsLogin ? 2000 : 15000,
+            local && (!settled || (open && ownsLogin)),
+          );
+          const show = () => {
+            manual.current = true;
+            setSettled(false);
+            setRequest((n) => n + 1);
+          };
+          const skip = () => {
+            attempted.current = true;
+            manual.current = false;
+            try {
+              window.sessionStorage.setItem('auriga.login.skipped', '1');
+            } catch {
+              /* The in-memory attempt also suppresses automatic reopening. */
+            }
+            if (ownsLogin && shell?.csrf)
+              cancellation.current = postLocal(
+                'auriga/shell/command',
+                shell.csrf,
+                { action: 'cancel_login' },
+              ).catch(() => {});
+            setOpen(false);
+            setSettled(true);
+          };
+          React.useEffect(() => {
+            loginRequests.add(show);
+            const onHash = () => {
+              if (window.location.hash !== '#auriga=platform-login') return;
+              window.history.replaceState(
+                null,
+                '',
+                window.location.pathname + window.location.search,
+              );
+              // A tray navigation is automatic: it must respect the session skip.
+              setSettled(false);
+              reloadShell();
+            };
+            window.addEventListener('hashchange', onHash);
+            onHash();
+            return () => {
+              loginRequests.delete(show);
+              window.removeEventListener('hashchange', onHash);
+            };
+          }, []);
+          React.useEffect(() => {
+            if (!local || shell === undefined) return;
+            // Retry startup readiness slowly until the IPC broker appears.
+            setSettled(!shell?.configured || !!shell?.brokerAvailable);
+            if (
+              !shell?.configured ||
+              !shell?.brokerAvailable ||
+              shell.loggedIn
+            ) {
+              setOpen(false);
+              return;
+            }
+            let skipped = false;
+            try {
+              skipped =
+                window.sessionStorage.getItem('auriga.login.skipped') === '1';
+            } catch {
+              /* Storage is optional; attempted still guards this mount. */
+            }
+            if (manual.current || (!attempted.current && !skipped)) {
+              manual.current = false;
+              attempted.current = false;
+              setOpen(true);
+            }
+          }, [shell, request]);
+          React.useEffect(() => {
+            if (!open) return;
+            const controller = new AbortController();
+            let live = true,
+              release;
+            const locks = window.navigator?.locks;
+            if (typeof locks?.request !== 'function') return;
+            locks
+              .request(
+                'auriga-platform-login',
+                { signal: controller.signal },
+                async () => {
+                  if (!live) return;
+                  // Refresh after obtaining the lock: a previous window may have
+                  // authenticated or cancelled while this window was waiting.
+                  const current = await fetch(localURL('auriga/shell/status'), {
+                    credentials: 'same-origin',
+                    cache: 'no-store',
+                    redirect: 'error',
+                    signal: controller.signal,
+                  })
+                    .then((response) => (response.ok ? response.json() : null))
+                    .catch(() => null);
+                  if (!live) return;
+                  setShell(current);
+                  if (
+                    !current?.configured ||
+                    !current?.brokerAvailable ||
+                    current.loggedIn
+                  )
+                    return;
+                  setOwnsLogin(true);
+                  await new Promise((resolve) => {
+                    release = resolve;
+                  });
+                },
+              )
+              .catch(() => {});
+            return () => {
+              live = false;
+              controller.abort();
+              setOwnsLogin(false);
+              Promise.resolve(cancellation.current).finally(() => release?.());
+            };
+          }, [open]);
+          React.useEffect(() => {
+            if (
+              !open ||
+              !ownsLogin ||
+              attempted.current ||
+              !shell?.csrf ||
+              !shell.configured ||
+              !shell.brokerAvailable ||
+              shell.loggedIn
+            )
+              return;
+            attempted.current = true;
+            if (shell.inlineLogin) return;
+            postLocal('auriga/shell/command', shell.csrf, {
+              action: 'inline_login',
+            })
+              .catch(() => {})
+              .finally(reloadShell);
+          }, [open, ownsLogin, shell]);
+          if (
+            !open ||
+            shell?.loggedIn ||
+            !shell?.configured ||
+            !shell?.brokerAvailable
+          )
+            return null;
+          const content = h(
+            'div',
+            { className: 'auriga-shell' },
+            ownsLogin
+              ? h(PlatformCard, {
+                  boot: { mode: 'connect' },
+                  shell,
+                  reloadShell,
+                  modal: true,
+                })
+              : h(
+                  'p',
+                  { role: 'status' },
+                  t(
+                    typeof window.navigator?.locks?.request === 'function'
+                      ? 'loginOtherWindow'
+                      : 'loginWindowUnsupported',
+                  ),
+                ),
+            h(
+              Action,
+              { onClick: skip },
+              state.locale === 'en'
+                ? 'Skip, use local DSH'
+                : '\u8df3\u8fc7\uff0c\u4f7f\u7528\u672c\u5730 DSH',
+            ),
+          );
+          return HostModal
+            ? h(
+                HostModal,
+                {
+                  open: true,
+                  onClose: skip,
+                  title:
+                    state.locale === 'en'
+                      ? 'Sign in to Auriga'
+                      : '\u767b\u5f55 Auriga',
+                  closeLabel: t('cancel'),
+                },
+                content,
+              )
+            : h(
+                'dialog',
+                {
+                  ref: (dialog) => {
+                    if (!dialog || dialog.open) return;
+                    if (typeof dialog.showModal === 'function')
+                      dialog.showModal();
+                    else dialog.open = true;
+                  },
+                  className: 'auriga-login-modal',
+                  'aria-modal': true,
+                  'aria-label': 'Auriga',
+                  onCancel: (e) => {
+                    e.preventDefault();
+                    skip();
+                  },
+                },
+                content,
+              );
+        }
+        function PlatformCard({
+          boot,
+          shell,
+          reloadShell,
+          gotoSettings,
+          modal = false,
+        }) {
           const [busy, setBusy] = React.useState(false);
           const [outcome, setOutcome] = React.useState('');
           const intent = React.useRef(null);
@@ -2345,8 +2584,9 @@ window.__ModuleLoader__.load({
               action,
               ...(input ? { input } : {}),
             })
-              .catch(() => {
-                if (!disposed) setOutcome('loginUnreachable');
+              .catch((error) => {
+                if (!disposed && error.status !== 409)
+                  setOutcome('loginUnreachable');
               })
               .finally(() => {
                 if (disposed) return;
@@ -2356,13 +2596,19 @@ window.__ModuleLoader__.load({
           };
           const inline = shell?.inlineLogin;
           React.useEffect(() => {
-            if (!inline || inline.step.type !== 'qr' || busy) return;
+            if (
+              (!modal && loginOverlayAvailable) ||
+              !inline ||
+              inline.step.type !== 'qr' ||
+              busy
+            )
+              return;
             const timer = setTimeout(
               () => command('inline_advance', { operation: 'poll' }),
               2000,
             );
             return () => clearTimeout(timer);
-          }, [inline, busy]);
+          }, [inline, busy, modal]);
           const localized = (text) => text?.[state.locale] ?? text?.en ?? '';
           const inlineView =
             inline &&
@@ -2547,7 +2793,7 @@ window.__ModuleLoader__.load({
               h('p', null, t('loginBrowserHint')),
             ['signedOut', 'reauth'].includes(view.kind) &&
               h('p', { className: 'auriga-muted' }, t('loginMethods')),
-            inlineView,
+            (modal || !loginOverlayAvailable) && inlineView,
             view.kind === 'authenticating' &&
               !inline &&
               shell?.deviceAttempt &&
@@ -2584,6 +2830,7 @@ window.__ModuleLoader__.load({
               'div',
               { className: 'auriga-actions' },
               view.kind === 'unconfigured' &&
+                typeof gotoSettings === 'function' &&
                 h(
                   Action,
                   { primary: true, onClick: gotoSettings },
@@ -2595,7 +2842,11 @@ window.__ModuleLoader__.load({
                   {
                     primary: true,
                     disabled: busy || !shell?.csrf,
-                    onClick: () => command('inline_login'),
+                    onClick: modal
+                      ? () => command('inline_login')
+                      : loginOverlayAvailable
+                        ? openPlatformLogin
+                        : () => command('inline_login'),
                   },
                   t('platformLogin'),
                 ),
@@ -2897,6 +3148,7 @@ window.__ModuleLoader__.load({
                   gotoOverview: () => {
                     setTab('overview');
                     reloadShell();
+                    openPlatformLogin();
                   },
                 }),
             ),
@@ -2986,6 +3238,28 @@ window.__ModuleLoader__.load({
             ),
           'auriga-shell: brand name',
         );
+        effect(() => {
+          try {
+            return ctx.slots.inject('shell.overlay', () => {
+              loginOverlayAvailable = true;
+              const remove = ctx.slots.register(
+                {
+                  name: 'shell.overlay',
+                  id: 'auriga-platform-login',
+                  locale: NS,
+                },
+                PlatformLogin,
+              );
+              return () => {
+                loginOverlayAvailable = false;
+                remove?.();
+              };
+            });
+          } catch {
+            // Hosts without the public overlay seat retain the overview login.
+            loginOverlayAvailable = false;
+          }
+        }, 'auriga-shell: platform login');
         let launchSelected = false;
         effect(
           () =>
@@ -2997,11 +3271,19 @@ window.__ModuleLoader__.load({
               // The browser retains this fragment through native admission.
               // It only selects an existing panel after the host loads it.
               const navigate =
-                window.location.hash === '#auriga=login'
+                launchLoginFragment ||
+                ['#auriga=login', '#auriga=platform-login'].includes(
+                  window.location.hash,
+                )
                   ? ctx.inject?.(['layout'], (scope) => {
                       if (!launchSelected && !disposed) {
                         scope.layout.selectPanel(PANEL_ID);
                         launchSelected = true;
+                        window.history.replaceState(
+                          null,
+                          '',
+                          window.location.pathname + window.location.search,
+                        );
                       }
                     })
                   : undefined;
