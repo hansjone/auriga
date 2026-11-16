@@ -1,9 +1,9 @@
 name: Go
 on:
   push:
-    paths: ['infra/**', 'third_party/bifrost/**', 'deploy/bootstrap/**', 'deploy/nas/**', 'contracts/proto/**', 'contracts/buf.yaml', '.github/workflows/go.yml', '.github/scripts/*artifact*', '.github/scripts/prepare-postgres.ps1']
+    paths: ['infra/**', 'third_party/bifrost/**', 'deploy/bootstrap/**', 'deploy/nas/**', 'deploy/offline/**', 'auriga', 'contracts/proto/**', 'contracts/buf.yaml', '.github/workflows/go.yml', '.github/scripts/*artifact*', '.github/scripts/prepare-postgres.ps1']
   pull_request:
-    paths: ['infra/**', 'third_party/bifrost/**', 'deploy/bootstrap/**', 'deploy/nas/**', 'contracts/proto/**', 'contracts/buf.yaml', '.github/workflows/go.yml', '.github/scripts/*artifact*', '.github/scripts/prepare-postgres.ps1']
+    paths: ['infra/**', 'third_party/bifrost/**', 'deploy/bootstrap/**', 'deploy/nas/**', 'deploy/offline/**', 'auriga', 'contracts/proto/**', 'contracts/buf.yaml', '.github/workflows/go.yml', '.github/scripts/*artifact*', '.github/scripts/prepare-postgres.ps1']
 permissions:
   contents: read
 jobs:
@@ -74,6 +74,20 @@ jobs:
             deploy/nas/bootstrap/go.sum
       - name: Regenerate contracts
         run: go run generate.go
+      - name: Verify standalone offline installer
+        working-directory: deploy/offline
+        run: |
+          test -z "$(gofmt -l .)"
+          go vet ./...
+          go test -count=1 ./...
+          go build ./...
+      - name: Verify offline cold backup and rollback as root
+        if: runner.os == 'Linux'
+        working-directory: deploy/offline
+        run: |
+          fixture_image=$(docker image inspect --format '{{.Id}}' postgres:17)
+          sudo env PATH="$PATH" GOTOOLCHAIN=local AURIGA_OFFLINE_VOLUME_TEST_IMAGE="$fixture_image" \
+            go test -count=1 -run 'TestColdBackup|TestResourceKeyPermissions|TestNamedVolume' -v .
       - name: Check committed generated code
         run: |
           git diff --exit-code -- gen

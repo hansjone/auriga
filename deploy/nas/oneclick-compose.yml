@@ -1,0 +1,19 @@
+# Only the one-click path enables this fixed overlay. Existing NAS access,
+# internal peer fences, mTLS, service identities and immutable images still apply.
+services:
+  edge:
+    volumes:
+      - ${AURIGA_DATA_ROOT}.oneclick/release/provenance.json:/srv/auriga/static/admin/provenance.json:ro
+    ports:
+      - '${AURIGA_NAS_PORTAL_TARGET_PORT}:${AURIGA_NAS_PORTAL_TARGET_PORT}'
+      - '${AURIGA_NAS_ADMIN_TARGET_PORT}:${AURIGA_NAS_ADMIN_TARGET_PORT}'
+  platform:
+    environment:
+      AURIGA_RESOURCE_OBJECT_DIRECTORY: /var/lib/auriga/resource-objects
+      AURIGA_RESOURCE_RELEASE_KID: ${AURIGA_RESOURCE_RELEASE_KID:-}
+      AURIGA_RESOURCE_RELEASE_KEY_FILE: /run/auriga-resource/release.pk8
+      AURIGA_RESOURCE_REVOCATION_KID: ${AURIGA_RESOURCE_REVOCATION_KID:-}
+      AURIGA_RESOURCE_REVOCATION_KEY_FILE: /run/auriga-resource/revocation.pk8
+    volumes:
+      - ${AURIGA_DATA_ROOT}/resource-keys/platform:/run/auriga-resource:ro
+      - ${AURIGA_DATA_ROOT}/resource-objects:/var/lib/auriga/resource-objects

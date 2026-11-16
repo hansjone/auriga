@@ -402,6 +402,11 @@ managed_identity_available() (
 )
 
 run_compose() (
+	case "${AURIGA_ONECLICK_PUBLISH:-false}" in
+	  true) set -- -f "$NAS_ROOT/oneclick-compose.yml" "$@" ;;
+	  false) ;;
+	  *) die 'AURIGA_ONECLICK_PUBLISH must be true or false' ;;
+	esac
   if [ "${AURIGA_INSTALL_MODE:-host}" = container ]; then
     container_compose "$@"
     return
