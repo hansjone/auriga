@@ -150,6 +150,10 @@ public final class TokenService
               default -> false;
             });
     Set<String> effective = permissions.resolve(tenant, subject, context);
+    if ("device".equals(context) && "auriga.ai-gateway".equals(audience)) {
+      effective = new HashSet<>(effective);
+      effective.retainAll(StandardDevices.AI);
+    }
     var perms =
         ("device".equals(context) && "auriga".equals(audience)
                 ? devicePermissions(effective).stream()
