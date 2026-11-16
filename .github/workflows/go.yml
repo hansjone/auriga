@@ -11,11 +11,13 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        # No infra Go module is packaged into the Windows desktop/plugin.
+        # Keep the existing Linux check name for branch protection.
+        os: [ubuntu-latest]
     runs-on: ${{ matrix.os }}
     services:
       postgres:
-        image: ${{ matrix.os == 'ubuntu-latest' && 'postgres:17' || '' }}
+        image: postgres:17
         env:
           POSTGRES_DB: auriga_ai_test
           POSTGRES_USER: postgres
@@ -47,22 +49,7 @@ jobs:
         shell: pwsh
         run: '& "$env:GITHUB_WORKSPACE/.github/scripts/prepare-postgres.ps1"'
       - name: Configure Linux AI test database
-        if: runner.os == 'Linux'
         run: echo "AURIGA_AI_TEST_PG_DSN=postgres://postgres@127.0.0.1:${{ job.services.postgres.ports['5432'] }}/auriga_ai_test?sslmode=disable" >> "$GITHUB_ENV"
-      - name: Start isolated Windows AI test database
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          $data = Join-Path $env:RUNNER_TEMP 'auriga-ai-pg'
-          $listener = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Loopback, 0)
-          $listener.Start()
-          $port = $listener.LocalEndpoint.Port
-          $listener.Stop()
-          & "$env:PGBIN/initdb.exe" -D $data -U postgres -A trust --no-locale -E UTF8
-          if ($LASTEXITCODE -ne 0) { throw 'AI test initdb failed' }
-          & "$env:PGBIN/pg_ctl.exe" -D $data -l "$env:RUNNER_TEMP/auriga-ai-pg.log" -o "-h 127.0.0.1 -p $port" -w start
-          if ($LASTEXITCODE -ne 0) { throw 'AI test PostgreSQL failed to start' }
-          "AURIGA_AI_TEST_PG_DSN=postgres://postgres@127.0.0.1:$port/postgres?sslmode=disable" >> $env:GITHUB_ENV
       - name: Require AI test database
         run: test -n "$AURIGA_AI_TEST_PG_DSN"
       - uses: actions/setup-go@v7
@@ -82,7 +69,6 @@ jobs:
           go test -count=1 ./...
           go build ./...
       - name: Verify offline cold backup and rollback as root
-        if: runner.os == 'Linux'
         working-directory: deploy/offline
         run: |
           fixture_image=$(docker image inspect --format '{{.Id}}' postgres:17)
@@ -107,22 +93,14 @@ jobs:
         run: go test -count=1 -run '^TestSharedKOracleInterop$' -v .
       - name: Vet, test, and build every workspace module
         run: |
-          # Race detector needs cgo; the Linux runner has gcc, Windows does not.
-          race=""; if [ "$RUNNER_OS" = "Linux" ]; then race="-race"; fi
           for module in gen edge ai-gateway egress agent ctl; do
-            (cd "$module" && go vet ./... && go test $race -count=1 -timeout=10m ./... && go build ./...) || exit 1
+            (cd "$module" && go vet ./... && go test -race -count=1 -timeout=10m ./... && go build ./...) || exit 1
           done
       - name: Verify NAS producer and agent policy as root
-        if: runner.os == 'Linux'
         working-directory: infra/agent
         run: |
           sudo env PATH="$PATH" GOMODCACHE="$(go env GOMODCACHE)" GOTOOLCHAIN=local AURIGA_NAS_REQUIRE_ROOT_TEST=1 \
             go test -count=1 -run '^TestNASRenderedAgentPolicy$' -v ./internal/policy
-      - name: Stop Windows AI test database
-        if: always() && runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          & "$env:PGBIN/pg_ctl.exe" -D (Join-Path $env:RUNNER_TEMP 'auriga-ai-pg') -m immediate -w stop
   lint:
     runs-on: ubuntu-latest
     strategy:

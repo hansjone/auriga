@@ -2,12 +2,10 @@ $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 . "$PSScriptRoot/download-artifact.ps1"
 
-if ($env:RUNNER_ARCH -ne 'X64') { throw 'PostgreSQL CI cache supports only X64 runners' }
-$platform = switch ($env:RUNNER_OS) {
-    'Windows' { 'windows-amd64' }
-    'Linux' { 'linux-amd64' }
-    default { throw "Unsupported PostgreSQL CI platform: $env:RUNNER_OS" }
+if ($env:RUNNER_OS -ne 'Linux' -or $env:RUNNER_ARCH -ne 'X64') {
+    throw 'PostgreSQL CI cache supports only Linux X64 runners'
 }
+$platform = 'linux-amd64'
 if (-not $env:AURIGA_PG_CACHE_DIR) { throw 'AURIGA_PG_CACHE_DIR is required' }
 $manifest = Get-Content -Raw "$PSScriptRoot/postgres-artifacts.json" | ConvertFrom-Json
 $name = "embedded-postgres-binaries-$platform-$($manifest.version)"
