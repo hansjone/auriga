@@ -15,11 +15,23 @@ function privateDirectory(directory) {
   const script = fileURLToPath(
     new URL('./private-directory.ps1', import.meta.url),
   );
+  // A pwsh 7 parent can inject modules incompatible with Windows PowerShell 5.1.
+  const environment = Object.fromEntries(
+    Object.entries(process.env).filter(
+      ([name]) => name.toLowerCase() !== 'psmodulepath',
+    ),
+  );
   const result = spawnSync(
-    'powershell.exe',
+    join(
+      process.env.SystemRoot ?? 'C:\\Windows',
+      'System32',
+      'WindowsPowerShell',
+      'v1.0',
+      'powershell.exe',
+    ),
     ['-NoProfile', '-NonInteractive', '-File', script],
     {
-      env: { ...process.env, AURIGA_RESOURCE_KEY_DIRECTORY: directory },
+      env: { ...environment, AURIGA_RESOURCE_KEY_DIRECTORY: directory },
       encoding: 'utf8',
     },
   );

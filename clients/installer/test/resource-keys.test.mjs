@@ -8,6 +8,7 @@ import {
   readFileSync,
   statSync,
   symlinkSync,
+  writeFileSync,
 } from 'node:fs';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -15,6 +16,89 @@ import { fileURLToPath } from 'node:url';
 import { tempBase } from './helpers.mjs';
 import { generateKeys } from '../../../scripts/resource-keys/generate.mjs';
 import { validateResourceRoots } from '../scripts/build.mjs';
+
+const windowsPowerShell = join(
+  process.env.SystemRoot ?? 'C:\\Windows',
+  'System32',
+  'WindowsPowerShell',
+  'v1.0',
+  'powershell.exe',
+);
+
+function windowsPowerShellEnvironment() {
+  return Object.fromEntries(
+    Object.entries(process.env).filter(
+      ([name]) => name.toLowerCase() !== 'psmodulepath',
+    ),
+  );
+}
+
+test(
+  'Windows resource key generator isolates inherited PowerShell module paths',
+  {
+    skip: process.platform !== 'win32',
+  },
+  (t) => {
+    const base = tempBase(t);
+    const modules = join(base, 'pwsh7 modules');
+    const security = join(modules, 'Microsoft.PowerShell.Security');
+    mkdirSync(security, { recursive: true });
+    writeFileSync(
+      join(security, 'Microsoft.PowerShell.Security.psd1'),
+      "@{ RootModule = 'Security.psm1'; ModuleVersion = '1.0.0'; FunctionsToExport = @('Get-Acl') }",
+    );
+    writeFileSync(
+      join(security, 'Security.psm1'),
+      "function Get-Acl { throw 'PSModulePath contamination reached ACL helper' }\nExport-ModuleMember -Function Get-Acl\n",
+    );
+    const environment = {
+      ...windowsPowerShellEnvironment(),
+      PSModulePath: modules,
+    };
+    const control = spawnSync(
+      windowsPowerShell,
+      [
+        '-NoProfile',
+        '-NonInteractive',
+        '-Command',
+        'Get-Acl -LiteralPath $env:TEMP',
+      ],
+      { env: environment, encoding: 'utf8' },
+    );
+    assert.notEqual(control.status, 0);
+    assert.match(
+      control.stderr,
+      /PSModulePath contamination reached ACL helper/,
+    );
+    const script = fileURLToPath(
+      new URL('../../../scripts/resource-keys/generate.mjs', import.meta.url),
+    );
+    for (const [index, name] of ['PSModulePath', 'psmodulepath'].entries()) {
+      const output = join(base, `keys-${index}`);
+      const result = spawnSync(
+        process.execPath,
+        [script, '--out', output, '--kid-prefix', 'isolated'],
+        {
+          env: { ...windowsPowerShellEnvironment(), [name]: modules },
+          encoding: 'utf8',
+        },
+      );
+      assert.equal(result.status, 0, result.stderr);
+      assert.match(
+        JSON.parse(result.stdout).resourceRootsSha256,
+        /^[a-f0-9]{64}$/,
+      );
+      assert.equal(
+        (result.stdout + result.stderr).includes('contamination'),
+        false,
+      );
+      const trust = JSON.parse(
+        readFileSync(join(output, 'resource-roots.json')),
+      );
+      assert.doesNotThrow(() => validateResourceRoots(trust));
+    }
+  },
+);
 
 test(
   'Windows resource key generation succeeds when the parent denies WRITE_OWNER',
@@ -25,7 +109,7 @@ test(
     const parent = join(tempBase(t), 'restricted parent');
     mkdirSync(parent);
     const setup = spawnSync(
-      'powershell.exe',
+      windowsPowerShell,
       [
         '-NoProfile',
         '-NonInteractive',
@@ -57,15 +141,28 @@ test(
       [Console]::WriteLine('WRITE_OWNER denied as required')
       exit 0
     }
-    throw 'Probe unexpectedly allowed WRITE_OWNER'
+    [Console]::WriteLine('WRITE_OWNER deny bypassed by the current Windows token')
   `,
       ],
       {
         encoding: 'utf8',
-        env: { ...process.env, RESOURCE_TEST_PARENT: parent },
+        env: {
+          ...windowsPowerShellEnvironment(),
+          RESOURCE_TEST_PARENT: parent,
+        },
       },
     );
     assert.equal(setup.status, 0, setup.stderr);
+    if (
+      setup.stdout.includes(
+        'WRITE_OWNER deny bypassed by the current Windows token',
+      )
+    ) {
+      t.skip(
+        'The current Windows token can set the owner despite the deny ACL, so WRITE_OWNER restrictions cannot be exercised',
+      );
+      return;
+    }
     assert.match(setup.stdout, /WRITE_OWNER denied as required/);
     const { directory, trust } = generateKeys(
       join(parent, 'keys'),
@@ -143,7 +240,7 @@ test('resource keys are independent PKCS#8 DER with matching SPKI roots and prot
   }
   if (process.platform === 'win32') {
     const check = spawnSync(
-      'powershell.exe',
+      windowsPowerShell,
       [
         '-NoProfile',
         '-NonInteractive',
@@ -163,7 +260,10 @@ test('resource keys are independent PKCS#8 DER with matching SPKI roots and prot
       ],
       {
         encoding: 'utf8',
-        env: { ...process.env, RESOURCE_TEST_DIRECTORY: directory },
+        env: {
+          ...windowsPowerShellEnvironment(),
+          RESOURCE_TEST_DIRECTORY: directory,
+        },
       },
     );
     assert.equal(check.status, 0, check.stderr);
