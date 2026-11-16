@@ -28,6 +28,30 @@ afterEach(() => {
   document.body.replaceChildren();
   vi.restoreAllMocks();
 });
+
+it('offers a next step for empty skill markets and installations', async () => {
+  const panel = document.createElement('auriga-test-skills') as AurigaTeamPanel;
+  panel.context = {
+    mode: 'connect',
+    protocol: 1,
+    locale: 'en',
+    fetch: vi.fn(async () => Response.json({ items: [] })),
+  };
+  document.body.append(panel);
+  await settle();
+  click(panel, 'Skills');
+  await vi.waitFor(() =>
+    expect(panel.shadowRoot!.textContent).toContain(
+      'Ask an administrator to publish',
+    ),
+  );
+  click(panel, 'My resources');
+  await vi.waitFor(() =>
+    expect(panel.shadowRoot!.textContent).toContain(
+      'Choose a skill from the market',
+    ),
+  );
+});
 async function settle() {
   for (let n = 0; n < 8; n++) await Promise.resolve();
 }

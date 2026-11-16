@@ -301,7 +301,7 @@ test('L5 deployment rejects all public vector keys regardless of kid', () => {
       root.publicKeySpkiBase64.slice(0, 8) +
       '\n' +
       root.publicKeySpkiBase64.slice(8);
-  assert.throws(() => validateResourceRoots(trust), /test resource key/);
+  assert.throws(() => validateResourceRoots(trust), /public key encoding/);
 });
 
 test('L4 extra empty directories do not match signed Skill bytes', async (t) => {

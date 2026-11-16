@@ -12,6 +12,7 @@ window.__ModuleLoader__.load({
       (typeof primitives?.[name] === 'object' && primitives[name] !== null)
         ? primitives[name]
         : undefined;
+    const HostModal = probe('Modal');
     const HostButton = probe('Button');
     const HostSegmentedTabs = probe('SegmentedTabs');
     const HostStateDot = probe('StateDot');
@@ -28,6 +29,10 @@ window.__ModuleLoader__.load({
       updateDownloading: '正在下载',
       updateRestart: '更新已准备好，请关闭并重新打开 Auriga DSH',
       updateFailed: '更新失败，旧版和数据已保留，请重试',
+      loginOtherWindow:
+        '\u5df2\u5728\u5176\u4ed6\u7a97\u53e3\u767b\u5f55\u4e2d',
+      loginWindowUnsupported:
+        '\u5f53\u524d\u6d4f\u89c8\u5668\u4e0d\u652f\u6301\u5b89\u5168\u7684\u591a\u7a97\u53e3\u767b\u5f55\uff0c\u8bf7\u4f7f\u7528\u6258\u76d8\u5907\u7528\u767b\u5f55',
       panel: NAV_NAME,
       loading: '正在加载…',
       failed: '加载失败',
@@ -218,6 +223,9 @@ window.__ModuleLoader__.load({
       updateRestart: 'Update ready. Close and reopen Auriga DSH.',
       updateFailed:
         'Update failed. Previous version and data preserved. Retry.',
+      loginOtherWindow: 'Sign-in is active in another window',
+      loginWindowUnsupported:
+        'This browser cannot coordinate sign-in windows. Use browser sign-in from the tray.',
       panel: NAV_NAME,
       loading: 'Loading…',
       failed: 'Failed to load',
@@ -424,11 +432,13 @@ window.__ModuleLoader__.load({
       gotoOverview: 'Go to Overview',
     };
     const css = `
+.auriga-login-modal{pointer-events:auto;position:fixed;inset:0;margin:auto;z-index:1000;width:min(440px,90vw);max-height:85vh;overflow:auto;padding:24px;border:1px solid var(--dsw-alias-border-l2,currentColor);border-radius:16px;background:var(--dsw-alias-bg-layer-1,Canvas);color:var(--dsw-alias-label-primary,CanvasText);font:inherit;box-shadow:0 0 0 100vmax #0006}
+
 .auriga-shell{box-sizing:border-box;color:var(--dsw-alias-label-primary,inherit);font:inherit;min-width:0}
-.auriga-shell button:not(.auriga-host-control,.auriga-tabs button){font:inherit;padding:5px 10px;border:1px solid var(--dsw-alias-border-l2,currentColor);border-radius:6px;background:var(--dsw-alias-bg-layer-1,transparent);color:var(--dsw-alias-label-primary,inherit);cursor:pointer}
-.auriga-shell button:not(.auriga-host-control,.auriga-tabs button):hover,.auriga-tabs-fallback button:hover{background:var(--dsw-alias-interactive-bg-hover,transparent)}
-.auriga-shell button:not(.auriga-host-control,.auriga-tabs button):focus-visible,.auriga-tabs-fallback button:focus-visible,.auriga-shell summary:focus-visible{outline:var(--dsw-focus-ring-width,2px) solid var(--dsw-focus-ring-color,var(--dsw-alias-state-business-primary,currentColor));outline-offset:2px}
-.auriga-shell button:not(.auriga-host-control,.auriga-tabs button):disabled{opacity:.5;cursor:default}
+.auriga-shell button:not(.auriga-host-control,.auriga-tabs button,.auriga-tabs-fallback button){font:inherit;padding:5px 10px;border:1px solid var(--dsw-alias-border-l2,currentColor);border-radius:6px;background:var(--dsw-alias-bg-layer-1,transparent);color:var(--dsw-alias-label-primary,inherit);cursor:pointer}
+.auriga-shell button:not(.auriga-host-control,.auriga-tabs button,.auriga-tabs-fallback button):hover,.auriga-tabs-fallback button:hover{background:var(--dsw-alias-interactive-bg-hover,transparent)}
+.auriga-shell button:not(.auriga-host-control,.auriga-tabs button,.auriga-tabs-fallback button):focus-visible,.auriga-tabs-fallback button:focus-visible,.auriga-shell summary:focus-visible{outline:var(--dsw-focus-ring-width,2px) solid var(--dsw-focus-ring-color,var(--dsw-alias-state-business-primary,currentColor));outline-offset:2px}
+.auriga-shell button:not(.auriga-host-control,.auriga-tabs button,.auriga-tabs-fallback button):disabled{opacity:.5;cursor:default}
 .auriga-shell-status{padding:14px 0;display:flex;gap:12px;align-items:center;flex-wrap:wrap}
 .auriga-settings{padding:4px 4px 24px;font-size:13px;line-height:1.5}
 .auriga-settings h2{font-size:20px;font-weight:600;margin:0 0 24px}
@@ -436,7 +446,7 @@ window.__ModuleLoader__.load({
 .auriga-settings p{color:var(--dsw-alias-label-secondary,inherit);font-size:12px;margin:8px 0 16px;overflow-wrap:anywhere}
 .auriga-setting{padding:14px 0;border-bottom:1px solid var(--dsw-alias-border-l1,currentColor);display:flex;align-items:center;gap:12px;flex-wrap:wrap}
 .auriga-setting>span:first-child{flex:1}.auriga-setting-value{color:var(--dsw-alias-label-secondary,inherit);overflow-wrap:anywhere}
-.auriga-settings-content{max-width:1080px;display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,400px),1fr));gap:16px;align-items:start;padding-bottom:24px}.auriga-settings-content>section,.auriga-settings-content>details{border:1px solid var(--dsw-alias-border-l2,currentColor);border-radius:12px;padding:16px 20px;background:var(--dsw-alias-bg-layer-1,transparent);min-width:0}.auriga-settings-content>.auriga-status-card,.auriga-settings-content>details,.auriga-settings-content>p{grid-column:1/-1}.auriga-settings-content>p{margin:0}.auriga-settings-content h3{margin:0 0 4px;font-size:15px}.auriga-settings-content .auriga-setting{padding:10px 0}.auriga-settings-content .auriga-setting:last-of-type{border-bottom:0}.auriga-setting select{font:inherit;color:inherit;background:var(--dsw-alias-bg-layer-1,transparent);border:1px solid var(--dsw-alias-border-l2,currentColor);border-radius:6px;padding:4px 8px}.auriga-setting input[type=checkbox]{flex:none;min-width:auto}.auriga-status-card{border:1px solid var(--dsw-alias-border-l2,currentColor);border-radius:10px;padding:16px;display:flex;align-items:center;gap:12px;flex-wrap:wrap}.auriga-status-card p:first-child{font-size:14px;font-weight:600;flex:1;min-width:220px;color:inherit}.auriga-status-card p{margin:0}.auriga-status-card p+ p{flex-basis:100%;order:2}.auriga-setting-actions{display:flex;gap:8px;margin:12px 0}.auriga-setting input{font:inherit;color:inherit;background:var(--dsw-alias-bg-layer-1,transparent);border:1px solid var(--dsw-alias-border-l2,currentColor);border-radius:6px;padding:8px;min-width:0;flex:2}.auriga-settings details{display:block}.auriga-settings summary{cursor:pointer}.auriga-settings details p{margin-bottom:0}
+.auriga-settings-content{width:100%;display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,400px),1fr));gap:16px;align-items:start;padding-bottom:24px}.auriga-settings-content>section,.auriga-settings-content>details{border:1px solid var(--dsw-alias-border-l2,currentColor);border-radius:12px;padding:16px 20px;background:var(--dsw-alias-bg-layer-1,transparent);min-width:0}.auriga-settings-content>.auriga-status-card,.auriga-settings-content>details,.auriga-settings-content>p{grid-column:1/-1}.auriga-settings-content>p{margin:0}.auriga-settings-content h3{margin:0 0 4px;font-size:15px}.auriga-settings-content .auriga-setting{padding:10px 0}.auriga-settings-content .auriga-setting:last-of-type{border-bottom:0}.auriga-setting select{font:inherit;color:inherit;background:var(--dsw-alias-bg-layer-1,transparent);border:1px solid var(--dsw-alias-border-l2,currentColor);border-radius:6px;padding:4px 8px}.auriga-setting input[type=checkbox]{flex:none;min-width:auto}.auriga-status-card{border:1px solid var(--dsw-alias-border-l2,currentColor);border-radius:10px;padding:16px;display:flex;align-items:center;gap:12px;flex-wrap:wrap}.auriga-status-card p:first-child{font-size:14px;font-weight:600;flex:1;min-width:220px;color:inherit}.auriga-status-card p{margin:0}.auriga-status-card p+ p{flex-basis:100%;order:2}.auriga-setting-actions{display:flex;gap:8px;margin:12px 0}.auriga-setting input{font:inherit;color:inherit;background:var(--dsw-alias-bg-layer-1,transparent);border:1px solid var(--dsw-alias-border-l2,currentColor);border-radius:6px;padding:8px;min-width:0;flex:2}.auriga-settings details{display:block}.auriga-settings summary{cursor:pointer}.auriga-settings details p{margin-bottom:0}
 .auriga-consent{padding:16px 0;min-width:0;overflow:auto}
 .auriga-consent article{padding:16px 0;border-bottom:1px solid var(--dsw-alias-border-l1,currentColor)}
 .auriga-consent pre{white-space:pre-wrap;overflow-wrap:anywhere;font:inherit;max-height:12em;overflow:auto;unicode-bidi:plaintext}
@@ -446,12 +456,14 @@ window.__ModuleLoader__.load({
 .auriga-consent p{overflow-wrap:anywhere}.auriga-consent small{color:var(--dsw-alias-label-secondary,inherit)}
 .auriga-app{height:100%;display:flex;flex-direction:column;gap:12px;padding:20px 24px 0;overflow:auto}
 .auriga-banner{display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:8px 12px;border-radius:8px;background:var(--dsw-alias-bg-layer-2,transparent);font-size:13px}
-.auriga-tabs{flex:none;max-width:1080px;overflow-x:auto}
+.auriga-tabs-scroll{box-sizing:border-box;flex:none;min-width:0;width:100%;overflow-x:auto}
+.auriga-tabs{box-sizing:border-box;min-width:max-content;width:100%;white-space:nowrap}
+.auriga-tabs button{flex:none;white-space:nowrap}
 .auriga-tabs-fallback{display:flex;gap:4px;border-bottom:1px solid var(--dsw-alias-border-l1,currentColor)}
 .auriga-tabs-fallback>button{font:inherit;cursor:pointer;border:0;border-bottom:2px solid transparent;border-radius:0;background:transparent;padding:8px 12px;color:var(--dsw-alias-label-secondary,inherit);white-space:nowrap}
 .auriga-tabs-fallback>button[aria-selected=true]{color:var(--dsw-alias-label-primary,inherit);border-bottom-color:var(--dsw-alias-state-business-primary,currentColor);font-weight:600}
 .auriga-tabpanel{min-width:0}.auriga-tabpanel[hidden],.auriga-tabpanel>auriga-team-panel[hidden]{display:none}
-.auriga-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,320px),1fr));gap:16px;max-width:1080px;padding-bottom:24px}
+.auriga-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,320px),1fr));gap:16px;width:100%;padding-bottom:24px}
 .auriga-card{border:1px solid var(--dsw-alias-border-l2,currentColor);border-radius:12px;padding:18px 20px;display:flex;flex-direction:column;gap:10px;min-width:0;background:var(--dsw-alias-bg-layer-1,transparent)}
 .auriga-card header{display:flex;align-items:center;justify-content:space-between;gap:8px}
 .auriga-card h3{font-size:15px;font-weight:600;margin:0}
@@ -1920,7 +1932,8 @@ window.__ModuleLoader__.load({
             },
             body: JSON.stringify(body),
           });
-          if (!response.ok) throw failure();
+          if (!response.ok)
+            throw Object.assign(failure(), { status: response.status });
           return response.json();
         };
         // Native host controls when the public primitives expose them;
@@ -1970,19 +1983,23 @@ window.__ModuleLoader__.load({
             panelId: 'auriga-panel-' + id,
           }));
           if (HostSegmentedTabs)
-            return h(HostSegmentedTabs, {
-              items,
-              value,
-              onChange,
-              label: t('panel'),
-              className: 'auriga-tabs',
-            });
+            return h(
+              'div',
+              { className: 'auriga-tabs-scroll' },
+              h(HostSegmentedTabs, {
+                items,
+                value,
+                onChange,
+                label: t('panel'),
+                className: 'auriga-tabs',
+              }),
+            );
           return h(
             'div',
             {
               role: 'tablist',
               'aria-label': t('panel'),
-              className: 'auriga-tabs auriga-tabs-fallback',
+              className: 'auriga-tabs-scroll auriga-tabs-fallback',
             },
             ...items.map((item, index) =>
               h(
@@ -2313,7 +2330,235 @@ window.__ModuleLoader__.load({
                 ),
           );
         }
-        function PlatformCard({ boot, shell, reloadShell, gotoSettings }) {
+        const launchLoginFragment = [
+          '#auriga=login',
+          '#auriga=platform-login',
+        ].includes(window.location.hash);
+        let loginOverlayAvailable = false;
+        const loginRequests = new Set();
+        const openPlatformLogin = () => loginRequests.forEach((open) => open());
+        function PlatformLogin() {
+          const local = ['127.0.0.1', '[::1]', 'localhost'].includes(
+            window.location.hostname,
+          );
+          const [open, setOpen] = React.useState(false);
+          const [settled, setSettled] = React.useState(false);
+          const [ownsLogin, setOwnsLogin] = React.useState(false);
+          const [request, setRequest] = React.useState(0);
+          const attempted = React.useRef(false);
+          const manual = React.useRef(false);
+          const cancellation = React.useRef(null);
+          const [shell, reloadShell, setShell] = useLocalStatus(
+            'auriga/shell/status',
+            open && ownsLogin ? 2000 : 15000,
+            local && (!settled || (open && ownsLogin)),
+          );
+          const show = () => {
+            manual.current = true;
+            setSettled(false);
+            setRequest((n) => n + 1);
+          };
+          const skip = () => {
+            attempted.current = true;
+            manual.current = false;
+            try {
+              window.sessionStorage.setItem('auriga.login.skipped', '1');
+            } catch {
+              /* The in-memory attempt also suppresses automatic reopening. */
+            }
+            if (ownsLogin && shell?.csrf)
+              cancellation.current = postLocal(
+                'auriga/shell/command',
+                shell.csrf,
+                { action: 'cancel_login' },
+              ).catch(() => {});
+            setOpen(false);
+            setSettled(true);
+          };
+          React.useEffect(() => {
+            loginRequests.add(show);
+            const onHash = () => {
+              if (window.location.hash !== '#auriga=platform-login') return;
+              window.history.replaceState(
+                null,
+                '',
+                window.location.pathname + window.location.search,
+              );
+              // A tray navigation is automatic: it must respect the session skip.
+              setSettled(false);
+              reloadShell();
+            };
+            window.addEventListener('hashchange', onHash);
+            onHash();
+            return () => {
+              loginRequests.delete(show);
+              window.removeEventListener('hashchange', onHash);
+            };
+          }, []);
+          React.useEffect(() => {
+            if (!local || shell === undefined) return;
+            // Retry startup readiness slowly until the IPC broker appears.
+            setSettled(!shell?.configured || !!shell?.brokerAvailable);
+            if (
+              !shell?.configured ||
+              !shell?.brokerAvailable ||
+              shell.loggedIn
+            ) {
+              setOpen(false);
+              return;
+            }
+            let skipped = false;
+            try {
+              skipped =
+                window.sessionStorage.getItem('auriga.login.skipped') === '1';
+            } catch {
+              /* Storage is optional; attempted still guards this mount. */
+            }
+            if (manual.current || (!attempted.current && !skipped)) {
+              manual.current = false;
+              attempted.current = false;
+              setOpen(true);
+            }
+          }, [shell, request]);
+          React.useEffect(() => {
+            if (!open) return;
+            const controller = new AbortController();
+            let live = true,
+              release;
+            const locks = window.navigator?.locks;
+            if (typeof locks?.request !== 'function') return;
+            locks
+              .request(
+                'auriga-platform-login',
+                { signal: controller.signal },
+                async () => {
+                  if (!live) return;
+                  // Refresh after obtaining the lock: a previous window may have
+                  // authenticated or cancelled while this window was waiting.
+                  const current = await fetch(localURL('auriga/shell/status'), {
+                    credentials: 'same-origin',
+                    cache: 'no-store',
+                    redirect: 'error',
+                    signal: controller.signal,
+                  })
+                    .then((response) => (response.ok ? response.json() : null))
+                    .catch(() => null);
+                  if (!live) return;
+                  setShell(current);
+                  if (
+                    !current?.configured ||
+                    !current?.brokerAvailable ||
+                    current.loggedIn
+                  )
+                    return;
+                  setOwnsLogin(true);
+                  await new Promise((resolve) => {
+                    release = resolve;
+                  });
+                },
+              )
+              .catch(() => {});
+            return () => {
+              live = false;
+              controller.abort();
+              setOwnsLogin(false);
+              Promise.resolve(cancellation.current).finally(() => release?.());
+            };
+          }, [open]);
+          React.useEffect(() => {
+            if (
+              !open ||
+              !ownsLogin ||
+              attempted.current ||
+              !shell?.csrf ||
+              !shell.configured ||
+              !shell.brokerAvailable ||
+              shell.loggedIn
+            )
+              return;
+            attempted.current = true;
+            if (shell.inlineLogin) return;
+            postLocal('auriga/shell/command', shell.csrf, {
+              action: 'inline_login',
+            })
+              .catch(() => {})
+              .finally(reloadShell);
+          }, [open, ownsLogin, shell]);
+          if (
+            !open ||
+            shell?.loggedIn ||
+            !shell?.configured ||
+            !shell?.brokerAvailable
+          )
+            return null;
+          const content = h(
+            'div',
+            { className: 'auriga-shell' },
+            ownsLogin
+              ? h(PlatformCard, {
+                  boot: { mode: 'connect' },
+                  shell,
+                  reloadShell,
+                  modal: true,
+                })
+              : h(
+                  'p',
+                  { role: 'status' },
+                  t(
+                    typeof window.navigator?.locks?.request === 'function'
+                      ? 'loginOtherWindow'
+                      : 'loginWindowUnsupported',
+                  ),
+                ),
+            h(
+              Action,
+              { onClick: skip },
+              state.locale === 'en'
+                ? 'Skip, use local DSH'
+                : '\u8df3\u8fc7\uff0c\u4f7f\u7528\u672c\u5730 DSH',
+            ),
+          );
+          return HostModal
+            ? h(
+                HostModal,
+                {
+                  open: true,
+                  onClose: skip,
+                  title:
+                    state.locale === 'en'
+                      ? 'Sign in to Auriga'
+                      : '\u767b\u5f55 Auriga',
+                  closeLabel: t('cancel'),
+                },
+                content,
+              )
+            : h(
+                'dialog',
+                {
+                  ref: (dialog) => {
+                    if (!dialog || dialog.open) return;
+                    if (typeof dialog.showModal === 'function')
+                      dialog.showModal();
+                    else dialog.open = true;
+                  },
+                  className: 'auriga-login-modal',
+                  'aria-modal': true,
+                  'aria-label': 'Auriga',
+                  onCancel: (e) => {
+                    e.preventDefault();
+                    skip();
+                  },
+                },
+                content,
+              );
+        }
+        function PlatformCard({
+          boot,
+          shell,
+          reloadShell,
+          gotoSettings,
+          modal = false,
+        }) {
           const [busy, setBusy] = React.useState(false);
           const [outcome, setOutcome] = React.useState('');
           const intent = React.useRef(null);
@@ -2345,8 +2590,9 @@ window.__ModuleLoader__.load({
               action,
               ...(input ? { input } : {}),
             })
-              .catch(() => {
-                if (!disposed) setOutcome('loginUnreachable');
+              .catch((error) => {
+                if (!disposed && error.status !== 409)
+                  setOutcome('loginUnreachable');
               })
               .finally(() => {
                 if (disposed) return;
@@ -2356,13 +2602,19 @@ window.__ModuleLoader__.load({
           };
           const inline = shell?.inlineLogin;
           React.useEffect(() => {
-            if (!inline || inline.step.type !== 'qr' || busy) return;
+            if (
+              (!modal && loginOverlayAvailable) ||
+              !inline ||
+              inline.step.type !== 'qr' ||
+              busy
+            )
+              return;
             const timer = setTimeout(
               () => command('inline_advance', { operation: 'poll' }),
               2000,
             );
             return () => clearTimeout(timer);
-          }, [inline, busy]);
+          }, [inline, busy, modal]);
           const localized = (text) => text?.[state.locale] ?? text?.en ?? '';
           const inlineView =
             inline &&
@@ -2547,7 +2799,7 @@ window.__ModuleLoader__.load({
               h('p', null, t('loginBrowserHint')),
             ['signedOut', 'reauth'].includes(view.kind) &&
               h('p', { className: 'auriga-muted' }, t('loginMethods')),
-            inlineView,
+            (modal || !loginOverlayAvailable) && inlineView,
             view.kind === 'authenticating' &&
               !inline &&
               shell?.deviceAttempt &&
@@ -2584,6 +2836,7 @@ window.__ModuleLoader__.load({
               'div',
               { className: 'auriga-actions' },
               view.kind === 'unconfigured' &&
+                typeof gotoSettings === 'function' &&
                 h(
                   Action,
                   { primary: true, onClick: gotoSettings },
@@ -2595,7 +2848,11 @@ window.__ModuleLoader__.load({
                   {
                     primary: true,
                     disabled: busy || !shell?.csrf,
-                    onClick: () => command('inline_login'),
+                    onClick: modal
+                      ? () => command('inline_login')
+                      : loginOverlayAvailable
+                        ? openPlatformLogin
+                        : () => command('inline_login'),
                   },
                   t('platformLogin'),
                 ),
@@ -2844,7 +3101,9 @@ window.__ModuleLoader__.load({
                 h(ELEMENT, {
                   ref,
                   tabs: 'host',
-                  hidden: desktop?.required || !resourcesReady,
+                  // React 18 serializes false on custom elements as hidden="false".
+                  // Null removes the boolean HTML attribute so the panel is visible.
+                  hidden: desktop?.required || !resourcesReady ? true : null,
                 }),
             ),
             panel(
@@ -2897,6 +3156,7 @@ window.__ModuleLoader__.load({
                   gotoOverview: () => {
                     setTab('overview');
                     reloadShell();
+                    openPlatformLogin();
                   },
                 }),
             ),
@@ -2986,6 +3246,28 @@ window.__ModuleLoader__.load({
             ),
           'auriga-shell: brand name',
         );
+        effect(() => {
+          try {
+            return ctx.slots.inject('shell.overlay', () => {
+              loginOverlayAvailable = true;
+              const remove = ctx.slots.register(
+                {
+                  name: 'shell.overlay',
+                  id: 'auriga-platform-login',
+                  locale: NS,
+                },
+                PlatformLogin,
+              );
+              return () => {
+                loginOverlayAvailable = false;
+                remove?.();
+              };
+            });
+          } catch {
+            // Hosts without the public overlay seat retain the overview login.
+            loginOverlayAvailable = false;
+          }
+        }, 'auriga-shell: platform login');
         let launchSelected = false;
         effect(
           () =>
@@ -2997,11 +3279,19 @@ window.__ModuleLoader__.load({
               // The browser retains this fragment through native admission.
               // It only selects an existing panel after the host loads it.
               const navigate =
-                window.location.hash === '#auriga=login'
+                launchLoginFragment ||
+                ['#auriga=login', '#auriga=platform-login'].includes(
+                  window.location.hash,
+                )
                   ? ctx.inject?.(['layout'], (scope) => {
                       if (!launchSelected && !disposed) {
                         scope.layout.selectPanel(PANEL_ID);
                         launchSelected = true;
+                        window.history.replaceState(
+                          null,
+                          '',
+                          window.location.pathname + window.location.search,
+                        );
                       }
                     })
                   : undefined;

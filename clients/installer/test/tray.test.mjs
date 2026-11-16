@@ -97,7 +97,7 @@ async function until(check, ms = 20000) {
 }
 
 test(
-  'tray: single instance, sign-in first, open hand-off and clean stop of the launcher',
+  'tray: single instance, DSH sign-in modal, open hand-off and clean stop of the launcher',
   { skip: !windows, timeout: 120000 },
   async (t) => {
     const base = tempBase(t);
@@ -161,14 +161,13 @@ if (command === 'status') {
     );
     assert.match(launchLine, /--stdin-control -- --no-open/);
     const launcherPid = Number(launchLine.split(' ')[1]);
-    // A normal initial start opens sign-in even before any further tray action.
-    await until(() => journalText().includes('command login'));
-    // Signed out: "Open" from a second start asks the launcher for the sign-in page.
+    // Startup opens DSH directly and never requests the loopback login page.
+    await delay(500);
+    assert.doesNotMatch(journalText(), /command login/);
+    // A second start reopens DSH without asking the launcher for browser login.
     const second = spawnSync(tray, [], { timeout: 20000 });
     assert.equal(second.status, 0);
-    await until(
-      () => (journalText().match(/command login/g) ?? []).length === 2,
-    );
+    assert.doesNotMatch(journalText(), /command login/);
     assert.equal(
       journalText()
         .split('\n')

@@ -1,7 +1,7 @@
 /**
  * Tray-owned launcher control. The tray writes one command per line to the
  * launcher's stdin: "stop" (or the end of stdin, e.g. the tray exited or
- * crashed) stops DSH cleanly; "login" asks for the platform sign-in page.
+ * crashed) stops DSH cleanly; "login-fallback" explicitly requests browser recovery.
  * Status events go to stdout as `@@auriga <json>` lines without secrets.
  */
 export function createControl({

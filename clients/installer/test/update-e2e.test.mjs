@@ -157,9 +157,8 @@ test('沙箱：发布、检测、点击、退出安装；坏包拒绝，旧数�
     readFileSync(join(profileDir(dataHome), 'conversations.json'), 'utf8'),
     'keep',
   );
-  await updater.check();
-  await updater.update();
-  approvePending(root);
+  assert.equal(existsSync(join(root, 'desktop-pending', 'desktop.exe')), true);
+  assert.equal(updater.status().restartRequired, true);
   await applyPending(root, {
     publicKey: keys.publicKey,
     smoke: () => {},

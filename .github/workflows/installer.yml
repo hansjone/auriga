@@ -9,6 +9,7 @@ on:
       - 'clients/shell-auth/**'
       - 'contracts/plugin/**'
       - 'scripts/plugin/**'
+      - 'scripts/resource-keys/**'
       - '.github/workflows/auth-release-artifacts.yml'
       - 'clients/installer/**'
       - 'clients/dsh-plugin/**'
@@ -44,6 +45,9 @@ on:
       rollback_from:
         description: 'Explicit rollback source Desktop version (empty for normal release)'
         required: false
+      resource_trust_json:
+        description: 'Resource public roots as JSON text or standard base64 (release/revocation/downgrade)'
+        required: false
 
 permissions:
   contents: read
@@ -75,7 +79,12 @@ jobs:
       - run: pnpm install --frozen-lockfile --store-dir "$(pnpm store path)"
         shell: bash
       - name: Lint and unit tests (core, upgrade/rollback, version lock, secret scan)
-        run: pnpm --filter @auriga/installer lint && pnpm --filter @auriga/installer test
+        shell: bash
+        run: |
+          set -euo pipefail
+          pnpm exec eslint scripts/resource-keys
+          pnpm exec prettier --check scripts/resource-keys/*.mjs
+          pnpm --filter @auriga/installer lint && pnpm --filter @auriga/installer test
       - uses: actions/download-artifact@v4
         with:
           name: auth-broker
@@ -93,6 +102,7 @@ jobs:
           RELEASE_PUBLIC_KEY: ${{ github.event_name != 'pull_request' && vars.DESKTOP_RELEASE_PUBLIC_KEY || '' }}
           PLATFORM_ORIGIN: ${{ vars.DESKTOP_PLATFORM_ORIGIN }}
           RELEASE_BUILD: ${{ github.event_name != 'pull_request' }}
+          RESOURCE_TRUST_JSON: ${{ inputs.resource_trust_json }}
         run: |
           set -euo pipefail
           extra=()
@@ -105,6 +115,10 @@ jobs:
             extra+=(--release-public-key "$RUNNER_TEMP/desktop-public.pem")
           fi
           if [ -n "$PLATFORM_ORIGIN" ]; then extra+=(--platform-origin "$PLATFORM_ORIGIN"); fi
+          if [ -n "$RESOURCE_TRUST_JSON" ]; then
+            node scripts/resource-trust-input.mjs "$RUNNER_TEMP/resource-roots.json"
+            extra+=(--resource-trust-json "$RUNNER_TEMP/resource-roots.json")
+          fi
           node scripts/build.mjs --broker-artifact ../../dist/broker --plugin-tgz "$(ls ../../dist/plugin/*.tgz)" "${extra[@]}" --out "$RUNNER_TEMP/installer" --exe
           echo "INSTALLER_STAGE=$(ls -d "$RUNNER_TEMP"/installer/auriga-desktop-*-win-x64)" >> "$GITHUB_ENV"
           echo "INSTALLER_EXE=$(ls "$RUNNER_TEMP"/installer/AurigaDSH-Setup-*.exe)" >> "$GITHUB_ENV"

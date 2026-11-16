@@ -13,6 +13,7 @@ import {
 } from 'node:fs';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
+import { rmSync } from 'node:fs';
 import {
   changeUpdateState,
   cleanupDownloads,
@@ -30,6 +31,7 @@ import {
   createUpdater,
   platformUrl,
   applyPending,
+  approvePending,
 } from '../runtime/update.mjs';
 import {
   install,
@@ -974,5 +976,406 @@ for (const reason of ['withdrawn', 'replaced']) {
     );
     assert.equal(existsSync(join(f.root, 'desktop-pending')), false);
     assert.equal(readState(f.root).current, f.old.id);
+    assert.equal(
+      readUpdateState(f.root).failure.code,
+      reason === 'withdrawn'
+        ? 'desktop.release_withdrawn'
+        : 'desktop.release_replaced',
+    );
   });
 }
+
+for (const failure of ['interrupted', 'temporary', 'persistent', 'smoke']) {
+  test(`pending recovery retains signed input across ${failure} and retries safely`, async (t) => {
+    const f = fixture(t);
+    const manifest = signed({ packageId: f.next.id });
+    const request = async (url) =>
+      url.endsWith('/latest')
+        ? new Response(JSON.stringify(manifest))
+        : new Response('zip');
+    const updater = resumedUpdater(f, request, { defer: true });
+    await updater.check();
+    await updater.update();
+    const scratch = join(f.root, 'desktop-pending', 'apply');
+    mkdirSync(scratch);
+    writeFileSync(join(scratch, 'interrupted-output'), 'incomplete');
+    let attempts = 0;
+    const events = [];
+    const options = {
+      publicKey: keys.publicKey,
+      now,
+      request,
+      onState: (event) => events.push(event),
+      extract: (_archive, target) => {
+        attempts++;
+        mkdirSync(target); // Regression: old applyPending hit EEXIST here.
+        if (
+          failure === 'persistent' ||
+          (failure === 'temporary' && attempts === 1)
+        )
+          throw Object.assign(new Error('token=private-content'), {
+            code: 'EPERM',
+            path: 'private-user-path',
+          });
+        return f.next.dir;
+      },
+      smoke: () => {
+        if (failure === 'smoke')
+          throw Object.assign(new Error('private content'), {
+            code: 'desktop.smoke_failed',
+          });
+      },
+    };
+    if (['persistent', 'smoke'].includes(failure)) {
+      await assert.rejects(applyPending(f.root, options));
+      assert.equal(readState(f.root).current, f.old.id);
+      assert.equal(
+        readFileSync(join(f.root, 'desktop-pending', 'desktop.exe'), 'utf8'),
+        'zip',
+      );
+      const saved = readUpdateState(f.root);
+      assert.equal(
+        saved.failure.code,
+        failure === 'smoke' ? 'desktop.smoke_failed' : 'EPERM',
+      );
+      const log = readFileSync(join(f.root, 'desktop-update.log'), 'utf8');
+      assert.doesNotMatch(log, /private|token=/);
+      await applyPending(f.root, {
+        ...options,
+        smoke: () => {},
+        extract: () => f.next.dir,
+      });
+    } else await applyPending(f.root, options);
+    assert.equal(
+      attempts,
+      failure === 'temporary' ? 2 : failure === 'persistent' ? 4 : 1,
+    );
+    assert.equal(readState(f.root).current, f.next.id);
+    assert.equal(existsSync(join(f.root, 'desktop-pending')), false);
+    assert.equal(
+      readFileSync(join(profileDir(f.dataHome), 'user-data.txt'), 'utf8'),
+      'keep',
+    );
+    assert.ok(events.some((event) => event.stage === 'extract'));
+  });
+}
+
+test('pending signature and archive hash failures discard unusable input', async (t) => {
+  for (const mode of ['signature', 'hash']) {
+    const f = fixture(t);
+    const manifest = signed({ packageId: f.next.id });
+    const request = async (url) =>
+      url.endsWith('/latest')
+        ? new Response(JSON.stringify(manifest))
+        : new Response('zip');
+    const updater = resumedUpdater(f, request, { defer: true });
+    await updater.check();
+    await updater.update();
+    if (mode === 'signature')
+      writeFileSync(
+        join(f.root, 'desktop-pending/release.json'),
+        JSON.stringify({ ...manifest, notes: 'tampered' }),
+      );
+    else writeFileSync(join(f.root, 'desktop-pending/desktop.exe'), 'tampered');
+    await assert.rejects(
+      applyPending(f.root, { publicKey: keys.publicKey, now, request }),
+    );
+    assert.equal(existsSync(join(f.root, 'desktop-pending')), false);
+    assert.equal(readState(f.root).current, f.old.id);
+    assert.equal(
+      readUpdateState(f.root).failure.code,
+      mode === 'signature'
+        ? 'desktop.release_invalid'
+        : 'desktop.archive_invalid',
+    );
+  }
+});
+
+test('a committed transaction with leftover pending input preserves the previous version', async (t) => {
+  const f = fixture(t);
+  const manifest = signed({ packageId: f.next.id });
+  const request = async (url) =>
+    url.endsWith('/latest')
+      ? new Response(JSON.stringify(manifest))
+      : new Response('zip');
+  const updater = resumedUpdater(f, request, { defer: true });
+  await updater.check();
+  await updater.update();
+  install({
+    root: f.root,
+    dataHome: f.dataHome,
+    payload: f.next.dir,
+    smoke: () => {},
+  });
+  assert.equal(readState(f.root).previous, f.old.id);
+  await applyPending(f.root, {
+    publicKey: keys.publicKey,
+    now,
+    request,
+    extract: () => assert.fail('already committed'),
+  });
+  assert.equal(readState(f.root).previous, f.old.id);
+  assert.equal(existsSync(join(f.root, 'desktop-pending')), false);
+});
+
+for (const lockTarget of ['scratch', 'launcher']) {
+  for (const persistent of [false, true]) {
+    test(
+      `Windows native file lock on ${lockTarget} (${persistent ? 'persistent' : 'temporary'})`,
+      { skip: process.platform !== 'win32' },
+      async (t) => {
+        const f = fixture(t);
+        const manifest = signed({ packageId: f.next.id });
+        const request = async (url) =>
+          url.endsWith('/latest')
+            ? new Response(JSON.stringify(manifest))
+            : new Response('zip');
+        const updater = resumedUpdater(f, request, { defer: true });
+        await updater.check();
+        await updater.update();
+        const scratch = join(f.root, 'desktop-pending/apply');
+        mkdirSync(scratch);
+        const locked =
+          lockTarget === 'launcher'
+            ? join(f.root, 'bin', 'auriga-desktop.cmd')
+            : join(scratch, 'locked');
+        writeFileSync(locked, 'scratch');
+        const script = join(f.root, 'lock.ps1');
+        writeFileSync(
+          script,
+          `param([string]$File)\n$f=[IO.File]::Open($File,'Open','Read','None')\nWrite-Output 'locked'\n[Console]::ReadLine() | Out-Null\n$f.Dispose()\n`,
+        );
+        const child = spawn(
+          'powershell.exe',
+          ['-NoProfile', '-File', script, locked],
+          { windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] },
+        );
+        const exited = once(child, 'exit');
+        try {
+          await once(child.stdout, 'data');
+          assert.throws(
+            () => rmSync(locked),
+            (error) => {
+              t.diagnostic(
+                `first native lock error code=${error.code} syscall=${error.syscall} category=${lockTarget}`,
+              );
+              return ['EPERM', 'EBUSY', 'EACCES'].includes(error.code);
+            },
+          );
+          const options = {
+            publicKey: keys.publicKey,
+            now,
+            request,
+            smoke: () => {},
+            extract: () => f.next.dir,
+          };
+          if (persistent) {
+            await assert.rejects(applyPending(f.root, options), (error) =>
+              ['EPERM', 'EBUSY', 'EACCES'].includes(error.code),
+            );
+            assert.ok(existsSync(join(f.root, 'desktop-pending/desktop.exe')));
+            assert.equal(readState(f.root).current, f.old.id);
+          } else setTimeout(() => child.stdin.end('\n'), 400);
+          if (persistent) child.stdin.end('\n');
+          if (persistent) await exited;
+          await applyPending(f.root, options);
+          assert.equal(readState(f.root).current, f.next.id);
+        } finally {
+          if (child.exitCode === null) child.stdin.end('\n');
+          await exited;
+          rmSync(script, { force: true });
+        }
+      },
+    );
+  }
+}
+
+for (const missing of ['empty', 'release.json', 'desktop.exe']) {
+  for (const entry of ['launch', 'check']) {
+    test(`incomplete pending (${missing}) recovers through ${entry} and discovers releases`, async (t) => {
+      const f = fixture(t);
+      const manifest = signed({ packageId: f.next.id });
+      const request = async (url) =>
+        url.endsWith('/latest')
+          ? new Response(JSON.stringify(manifest))
+          : new Response('zip');
+      const updater = resumedUpdater(f, request, { defer: true });
+      await updater.check();
+      await updater.update();
+      const queued = join(f.root, 'desktop-pending');
+      if (missing === 'empty') {
+        rmSync(queued, { recursive: true });
+        mkdirSync(queued);
+      } else rmSync(join(queued, missing));
+      if (entry === 'launch') {
+        assert.equal(
+          await applyPending(f.root, {
+            publicKey: keys.publicKey,
+            now,
+            request,
+          }),
+          false,
+        );
+        assert.equal(
+          readUpdateState(f.root).failure.code,
+          'desktop.pending_incomplete',
+        );
+      }
+      const status = await updater.check();
+      assert.equal(existsSync(queued), false);
+      assert.equal(status.available.version, '2.0.0');
+      await updater.update();
+      assert.ok(existsSync(join(queued, 'desktop.exe')));
+    });
+  }
+}
+
+async function pausePending(f) {
+  const manifest = signed({ packageId: f.next.id });
+  const request = async (url) =>
+    url.endsWith('/latest')
+      ? new Response(JSON.stringify(manifest))
+      : new Response('zip');
+  const updater = resumedUpdater(f, request, { defer: true });
+  await updater.check();
+  await updater.update();
+  let attempts = 0;
+  const options = {
+    publicKey: keys.publicKey,
+    now,
+    request,
+    extract: () => {
+      attempts++;
+      throw Object.assign(new Error('private extractor output'), {
+        code: 'desktop.extract_failed',
+      });
+    },
+  };
+  for (let i = 0; i < 3; i++)
+    await assert.rejects(applyPending(f.root, options));
+  return { manifest, request, options, attempts: () => attempts };
+}
+
+test('incomplete input cleanup preserves the installation ownership gate', async (t) => {
+  const f = fixture(t);
+  const queued = join(f.root, 'desktop-pending');
+  mkdirSync(queued);
+  const marker = join(f.root, '.auriga-desktop-install');
+  const original = readFileSync(marker);
+  rmSync(marker);
+  try {
+    await assert.rejects(f.updater.check(), /installation missing/);
+    assert.equal(existsSync(queued), true);
+  } finally {
+    writeFileSync(marker, original);
+  }
+});
+
+test('three deterministic failures persist across launches and require explicit manual retry', async (t) => {
+  const f = fixture(t);
+  const manifest = signed({ packageId: f.next.id });
+  const request = async (url) =>
+    url.endsWith('/latest')
+      ? new Response(JSON.stringify(manifest))
+      : new Response('zip');
+  const updater = resumedUpdater(f, request, { defer: true });
+  await updater.check();
+  await updater.update();
+  let smokeCalls = 0;
+  const options = {
+    publicKey: keys.publicKey,
+    now,
+    request,
+    extract: () => f.next.dir,
+    smoke: () => {
+      smokeCalls++;
+      throw Object.assign(new Error('smoke'), { code: 'desktop.smoke_failed' });
+    },
+  };
+  for (let i = 1; i <= 3; i++) {
+    await assert.rejects(applyPending(f.root, options));
+    assert.equal(readUpdateState(f.root).applyRetry.failures, i);
+  }
+  for (let i = 0; i < 2; i++)
+    assert.equal(await applyPending(f.root, options), false);
+  assert.equal(smokeCalls, 3);
+  const restarted = resumedUpdater(f, request);
+  assert.equal(restarted.status().manualRetryRequired, true);
+  assert.equal(restarted.status().phase, 'awaiting-retry');
+  await restarted.check();
+  assert.equal(restarted.status().applyFailures, 3);
+  assert.equal(restarted.status().failure.code, 'desktop.smoke_failed');
+  assert.ok(existsSync(join(f.root, 'desktop-pending/desktop.exe')));
+  approvePending(f.root);
+  assert.equal(restarted.status().manualRetryRequired, false);
+  await applyPending(f.root, { ...options, smoke: () => {} });
+  assert.equal(readState(f.root).current, f.next.id);
+  assert.equal(restarted.status().applyFailures, 0);
+});
+
+for (const change of ['withdrawn', 'replacement']) {
+  for (const entry of ['launch', 'check']) {
+    test(`paused deterministic extraction resets on ${change} through ${entry}`, async (t) => {
+      const f = fixture(t);
+      const paused = await pausePending(f);
+      assert.equal(await applyPending(f.root, paused.options), false);
+      assert.equal(paused.attempts(), 3);
+      const next = signed({ packageId: f.next.id, sequence: 3 });
+      const request = async () =>
+        change === 'withdrawn'
+          ? new Response('', { status: 404 })
+          : new Response(JSON.stringify(next));
+      if (entry === 'launch')
+        await assert.rejects(
+          applyPending(f.root, { ...paused.options, request }),
+          /withdrawn|replaced/,
+        );
+      else await resumedUpdater(f, request).check();
+      assert.equal(existsSync(join(f.root, 'desktop-pending')), false);
+      assert.equal(readUpdateState(f.root).applyRetry, null);
+      if (change === 'replacement' && entry === 'check')
+        assert.equal(resumedUpdater(f, request).status().available.sequence, 3);
+    });
+  }
+}
+
+test('each extraction retry rechecks the durable archive hash', async (t) => {
+  const f = fixture(t);
+  const manifest = signed({ packageId: f.next.id });
+  const request = async (url) =>
+    url.endsWith('/latest')
+      ? new Response(JSON.stringify(manifest))
+      : new Response('zip');
+  const updater = resumedUpdater(f, request, { defer: true });
+  await updater.check();
+  await updater.update();
+  let extractions = 0;
+  await assert.rejects(
+    applyPending(f.root, {
+      publicKey: keys.publicKey,
+      now,
+      request,
+      extract: (archive) => {
+        extractions++;
+        writeFileSync(archive, 'tampered');
+        throw Object.assign(new Error('busy'), { code: 'EPERM' });
+      },
+    }),
+    { code: 'desktop.archive_invalid' },
+  );
+  assert.equal(extractions, 1);
+  assert.equal(existsSync(join(f.root, 'desktop-pending')), false);
+});
+
+test('update diagnostics rotate at 256 KiB and uninstall removes both files', async (t) => {
+  const f = fixture(t);
+  const log = join(f.root, 'desktop-update.log');
+  writeFileSync(log, 'x'.repeat(256 * 1024));
+  await pausePending(f);
+  assert.equal(readFileSync(log + '.1').length, 256 * 1024);
+  assert.ok(readFileSync(log).length < 256 * 1024);
+  assert.equal(existsSync(log + '.2'), false);
+  uninstall({ root: f.root });
+  assert.equal(existsSync(log), false);
+  assert.equal(existsSync(log + '.1'), false);
+});

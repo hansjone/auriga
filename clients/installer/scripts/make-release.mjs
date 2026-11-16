@@ -36,6 +36,11 @@ export function makeRelease(options) {
           )
           .digest('hex')
       : null,
+    resourceTrustSha256: existsSync(
+      join(options.payload, 'auriga/runtime/resource-roots.json'),
+    )
+      ? sha256File(join(options.payload, 'auriga/runtime/resource-roots.json'))
+      : null,
     exeSha256: options.exe ? sha256File(options.exe) : null,
     sourceCommit,
     desktopVersion: body.version,

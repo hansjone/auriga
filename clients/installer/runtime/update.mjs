@@ -13,7 +13,9 @@ import {
   closeSync,
   writeSync,
   statSync,
+  appendFileSync,
 } from 'node:fs';
+import { setTimeout as delay } from 'node:timers/promises';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { Buffer } from 'node:buffer';
@@ -31,6 +33,63 @@ import {
 import { systemTool } from './system-tools.mjs';
 import { compare } from './semver-lite.mjs';
 import { updateOrigin } from './platform-origin.mjs';
+
+function logUpdate(root, entry) {
+  const file = join(root, 'desktop-update.log');
+  try {
+    if (existsSync(file) && statSync(file).size >= 256 * 1024) {
+      rmSync(file + '.1', { force: true });
+      renameSync(file, file + '.1');
+    }
+    appendFileSync(
+      file,
+      JSON.stringify({ at: new Date().toISOString(), ...entry }) + '\n',
+    );
+  } catch {
+    /* diagnostics must not replace the operation's result */
+  }
+}
+
+// Caller owns the transfer lock. Missing durable input cannot recover by retry.
+function discardIncompletePending(root) {
+  const queued = join(root, 'desktop-pending');
+  if (!existsSync(queued)) return false;
+  try {
+    for (const name of ['release.json', 'desktop.exe']) {
+      const file = statSync(join(queued, name));
+      if (!file.isFile() || file.size === 0)
+        throw Object.assign(new Error('pending input incomplete'), {
+          code: 'ENOENT',
+        });
+    }
+    return false;
+  } catch (error) {
+    if (!['ENOENT', 'ENOTDIR'].includes(error.code)) throw error;
+    if (!existsSync(join(root, '.auriga-desktop-install')) || !readState(root))
+      throw new Error('desktop installation missing');
+    rmSync(queued, {
+      recursive: true,
+      force: true,
+      maxRetries: 3,
+      retryDelay: 200,
+    });
+    const failure = {
+      stage: 'verify-input',
+      code: 'desktop.pending_incomplete',
+      pathCategory: 'pending',
+    };
+    changeUpdateState(root, (state) => ({
+      ...state,
+      phase: 'failed',
+      error: 'updateFailed',
+      stage: failure.stage,
+      failure,
+      applyRetry: null,
+    }));
+    logUpdate(root, failure);
+    return true;
+  }
+}
 
 export function platformUrl(origin, path, binding) {
   updateOrigin(origin, binding);
@@ -59,11 +118,17 @@ export function extractArchive(archive, directory) {
           p.split('/').includes('..'),
       )
   )
-    throw new Error('unsafe update archive');
+    throw Object.assign(new Error('unsafe update archive'), {
+      code: 'desktop.extract_failed',
+    });
   const result = spawnSync(systemTool('tar'), ['-xf', zip, '-C', directory], {
     encoding: 'utf8',
   });
-  if (result.status !== 0) throw new Error('update archive extraction failed');
+  if (result.error) throw result.error;
+  if (result.status !== 0)
+    throw Object.assign(new Error('update archive extraction failed'), {
+      code: 'desktop.extract_failed',
+    });
   rmSync(zip);
   return join(directory, 'payload');
 }
@@ -148,6 +213,10 @@ export function createUpdater({
       downloadedBytes: state.downloadedBytes ?? 0,
       totalBytes: state.totalBytes ?? 0,
       error: state.error ?? null,
+      stage: state.stage ?? null,
+      failure: state.failure ?? null,
+      manualRetryRequired: state.applyRetry?.manualRequired === true,
+      applyFailures: state.applyRetry?.failures ?? 0,
       restartRequired: existsSync(join(root, 'desktop-pending')),
     };
   };
@@ -191,9 +260,23 @@ export function createUpdater({
       return api.status();
     },
     async check() {
-      if (busy || api.status().restartRequired) return api.status();
+      if (busy) return api.status();
       busy = true;
       try {
+        let repairUnlock;
+        try {
+          repairUnlock = transferLock(root);
+        } catch (error) {
+          if (error.code === 'desktop.in_use') return api.status();
+          throw error;
+        }
+        try {
+          discardIncompletePending(root);
+        } finally {
+          repairUnlock();
+        }
+        if (api.status().restartRequired && !load().applyRetry?.manualRequired)
+          return api.status();
         const observed = load();
         const channel = observed.channel ?? 'stable';
         const response = await request(
@@ -220,11 +303,35 @@ export function createUpdater({
         }
         try {
           change((state) => {
-            if (
-              (state.channel ?? 'stable') !== channel ||
-              existsSync(join(root, 'desktop-pending'))
-            )
-              return;
+            if ((state.channel ?? 'stable') !== channel) return;
+            const queued = join(root, 'desktop-pending');
+            if (existsSync(queued)) {
+              if (!state.applyRetry?.manualRequired) return;
+              if (
+                observed.checkId !== state.checkId ||
+                observed.applyRetry?.digest !== state.applyRetry.digest
+              )
+                return;
+              if (!missing) {
+                const active = verified(envelope, state);
+                if (releaseDigest(active) === state.applyRetry.digest)
+                  return { ...state, lastCheckedAt: now() };
+              }
+              // A signed replacement or withdrawal retires the paused input.
+              rmSync(queued, {
+                recursive: true,
+                force: true,
+                maxRetries: 3,
+                retryDelay: 200,
+              });
+              state = {
+                ...state,
+                applyRetry: null,
+                failure: null,
+                error: null,
+                phase: 'idle',
+              };
+            }
             if (missing) {
               if (observed.checkId !== state.checkId) return;
               return { ...state, available: null, checkId: randomUUID() };
@@ -280,6 +387,7 @@ export function createUpdater({
       controller = new AbortController();
       try {
         unlock = downloadLock(root);
+        discardIncompletePending(root);
         const pending = load().available;
         if (!pending || existsSync(join(root, 'desktop-pending')))
           throw new Error('no update ready');
@@ -389,7 +497,7 @@ export function createUpdater({
             });
           renameSync(temporary, queued);
           temporary = undefined;
-          progress('ready', { available: null });
+          progress('ready', { available: null, applyRetry: null });
           return { restartRequired: true, queued: true };
         }
         progress('installing');
@@ -527,6 +635,11 @@ export function approvePending(root) {
     if (!existsSync(join(queued, 'release.json')))
       throw new Error('no pending update');
     rmSync(join(queued, 'approval-required'), { force: true });
+    changeUpdateState(root, (state) => ({
+      ...state,
+      applyRetry: null,
+      phase: 'ready',
+    }));
   } finally {
     release();
   }
@@ -535,12 +648,18 @@ export function approvePending(root) {
 /** Called only by the launcher after the old DSH has stopped (or before next launch). */
 export async function applyPending(root, options = {}) {
   const queued = join(root, 'desktop-pending');
-  if (!existsSync(queued) || existsSync(join(queued, 'approval-required')))
-    return false;
+  if (!existsSync(queued)) return false;
   const ownSession = options.session ? null : openVersionSession(root);
   try {
     const transfer = transferLock(root);
     try {
+      if (discardIncompletePending(root)) {
+        options.onState?.({
+          phase: 'failed',
+          ...readUpdateState(root).failure,
+        });
+        return false;
+      }
       return await applyPendingLocked(root, {
         ...options,
         transfer,
@@ -564,30 +683,116 @@ async function applyPendingLocked(
     request = fetch,
     session,
     transfer,
+    onState = () => {},
   } = {},
 ) {
   const queued = join(root, 'desktop-pending');
   if (!existsSync(queued) || existsSync(join(queued, 'approval-required')))
     return false;
-  let retain = false;
+  let retain = true;
+  let stage = 'verify-current';
+  let identity;
+  const note = (next) => {
+    if (stage === next) return;
+    stage = next;
+    changeUpdateState(root, (state) => ({
+      ...state,
+      stage,
+      phase: 'installing',
+      failure: null,
+      error: null,
+    }));
+    logUpdate(root, { stage, phase: 'installing' });
+    onState({ phase: 'installing', stage });
+  };
+  const retry = async (operation) => {
+    for (let attempt = 0; ; attempt++) {
+      try {
+        return await operation();
+      } catch (error) {
+        if (
+          !['EBUSY', 'EPERM', 'EACCES', 'ENOTEMPTY'].includes(error.code) ||
+          attempt === 3
+        )
+          throw error;
+        const retryState = {
+          phase: 'retrying',
+          stage,
+          code: error.code,
+          attempt: attempt + 1,
+        };
+        logUpdate(root, retryState);
+        onState(retryState);
+        await delay([150, 350, 750][attempt]);
+      }
+    }
+  };
+  const rejectInvalid = (operation, code = 'desktop.release_invalid') => {
+    try {
+      return operation();
+    } catch (error) {
+      // Native I/O failures can be retried. Untrusted bytes cannot.
+      if (!error.code || !/^(E[A-Z]+)$/.test(error.code)) {
+        retain = false;
+        error.code ??= code;
+      }
+      throw error;
+    }
+  };
+  const pendingInput = (operation) => {
+    try {
+      return operation();
+    } catch (error) {
+      if (['ENOENT', 'ENOTDIR'].includes(error.code)) {
+        retain = false;
+        error.code = 'desktop.pending_incomplete';
+      }
+      throw error;
+    }
+  };
   try {
+    const saved = readUpdateState(root);
     const current = readState(root);
     const old = verifyPackage(versionDir(root, current.current));
-    const envelope = JSON.parse(
-      readFileSync(join(queued, 'release.json'), 'utf8'),
+    note('verify-release');
+    const envelope = rejectInvalid(() =>
+      JSON.parse(
+        pendingInput(() => readFileSync(join(queued, 'release.json'), 'utf8')),
+      ),
     );
-    const saved = readUpdateState(root);
-    const body = verifyRelease(envelope, {
-      publicKey,
-      now,
-      currentVersion: old.bundleVersion,
-      ...saved.channelWatermarks?.[saved.channel ?? 'stable'],
-      channel: saved.channel ?? 'stable',
-    });
+    const body = rejectInvalid(() =>
+      verifyRelease(envelope, {
+        publicKey,
+        now,
+        currentVersion: old.bundleVersion,
+        ...saved.channelWatermarks?.[saved.channel ?? 'stable'],
+        channel: saved.channel ?? 'stable',
+      }),
+    );
+    identity = releaseDigest(body);
+    // Recognize a committed transaction whose input survived the crash.
+    if (
+      current.current === body.packageId &&
+      old.bundleVersion === body.version
+    ) {
+      retain = false;
+      changeUpdateState(root, (state) => ({
+        ...state,
+        phase: 'idle',
+        error: null,
+        failure: null,
+        stage: 'done',
+        available: null,
+        requiredRelease: null,
+        applyRetry: null,
+      }));
+      return true;
+    }
     const binding = JSON.parse(
       readFileSync(join(root, 'desktop-origin.json'), 'utf8'),
     );
     retain = true;
+    note('check-release');
     const response = await request(
       platformUrl(
         binding.origin,
@@ -598,61 +803,167 @@ async function applyPendingLocked(
     );
     if (response.status === 404) {
       retain = false;
-      throw new Error('queued release withdrawn');
+      throw Object.assign(new Error('queued release withdrawn'), {
+        code: 'desktop.release_withdrawn',
+      });
     }
     if (!response.ok) throw new Error('queued release check unavailable');
-    const active = JSON.parse(
-      (await bounded(response, 32768)).toString('utf8'),
+    const activeText = (await bounded(response, 32768)).toString('utf8');
+    const active = rejectInvalid(() => JSON.parse(activeText));
+    const activeBody = rejectInvalid(() =>
+      verifyRelease(active, {
+        publicKey,
+        now,
+        channel: body.channel,
+      }),
     );
-    const activeBody = verifyRelease(active, {
-      publicKey,
-      now,
-      channel: body.channel,
-    });
     if (
       releaseDigest(activeBody) !== releaseDigest(body) ||
       JSON.stringify(active.signature) !== JSON.stringify(envelope.signature)
     ) {
       retain = false;
-      throw new Error('queued release replaced');
+      throw Object.assign(new Error('queued release replaced'), {
+        code: 'desktop.release_replaced',
+      });
     }
-    retain = false;
+    if (
+      saved.applyRetry?.manualRequired &&
+      saved.applyRetry.digest === identity
+    ) {
+      changeUpdateState(root, (state) => ({
+        ...state,
+        phase: 'awaiting-retry',
+        stage: saved.stage,
+        failure: saved.failure,
+        error: 'updateFailed',
+      }));
+      onState({ phase: 'awaiting-retry', ...saved.failure });
+      return false;
+    }
+    note('verify-archive');
     const archive = join(queued, 'desktop.exe');
-    if (sha256File(archive) !== body.sha256)
-      throw new Error('queued package SHA mismatch');
+    const checkArchive = () => {
+      if (pendingInput(() => sha256File(archive)) !== body.sha256) {
+        retain = false;
+        throw Object.assign(new Error('queued package SHA mismatch'), {
+          code: 'desktop.archive_invalid',
+        });
+      }
+    };
     const unpacked = join(queued, 'apply');
-    const payload = await extract(archive, unpacked);
-    const manifest = verifyPackage(payload);
+    const payload = await retry(async () => {
+      note('verify-archive');
+      checkArchive();
+      note('extract');
+      // The signed archive is the durable input. Rebuild scratch output after
+      // interruption or failed extraction, while holding the transfer lock.
+      rmSync(unpacked, { recursive: true, force: true });
+      return await extract(archive, unpacked);
+    });
+    note('verify-package');
+    const manifest = rejectInvalid(
+      () => verifyPackage(payload),
+      'desktop.package_invalid',
+    );
     if (
       manifest.id !== body.packageId ||
       manifest.bundleVersion !== body.version
-    )
-      throw new Error('queued package ID mismatch');
-    install({
-      root,
-      payload,
-      dataHome: current.dataHome,
-      smoke,
-      session,
-      transfer,
-    });
+    ) {
+      retain = false;
+      throw Object.assign(new Error('queued package ID mismatch'), {
+        code: 'desktop.package_invalid',
+      });
+    }
+    note('install');
+    await retry(() =>
+      install({
+        root,
+        payload,
+        dataHome: current.dataHome,
+        smoke,
+        session,
+        transfer,
+        progress: (step) => note(step),
+      }),
+    );
+    retain = false;
     changeUpdateState(root, (state) => ({
       ...state,
       phase: 'idle',
       error: null,
       available: null,
       requiredRelease: null,
+      failure: null,
+      stage: 'done',
+      applyRetry: null,
     }));
     return true;
   } catch (error) {
-    changeUpdateState(root, (state) => ({
-      ...state,
-      phase: 'failed',
-      error: 'updateFailed',
-    }));
+    const failure = {
+      stage,
+      code: /^(?:E[A-Z_]+|desktop\.[a-z_]+)$/.test(error.code ?? '')
+        ? error.code
+        : 'updateFailed',
+      pathCategory: ['verify-release', 'check-release'].includes(stage)
+        ? 'release'
+        : ['verify-archive', 'extract', 'verify-package'].includes(stage)
+          ? 'pending'
+          : ['profile', 'smoke'].includes(stage)
+            ? 'data'
+            : 'installation',
+    };
+    error.updateFailure = failure;
+    logUpdate(root, failure);
+    const updated = changeUpdateState(root, (state) => {
+      let applyRetry = retain ? state.applyRetry : null;
+      const deterministic =
+        stage === 'smoke' ||
+        (stage === 'extract' && !/^E[A-Z]+$/.test(error.code ?? ''));
+      if (retain && identity && deterministic) {
+        const failures =
+          (applyRetry?.digest === identity ? applyRetry.failures : 0) + 1;
+        applyRetry = {
+          digest: identity,
+          failures,
+          manualRequired: failures >= 3,
+        };
+      }
+      return {
+        ...state,
+        phase: applyRetry?.manualRequired ? 'awaiting-retry' : 'failed',
+        error: 'updateFailed',
+        stage,
+        failure,
+        applyRetry,
+      };
+    });
+    onState({ phase: updated.phase, ...failure });
     throw error;
   } finally {
-    if (!retain) rmSync(queued, { recursive: true, force: true });
+    if (!retain) {
+      try {
+        rmSync(queued, {
+          recursive: true,
+          force: true,
+          maxRetries: 3,
+          retryDelay: 200,
+        });
+      } catch (error) {
+        // Cleanup must not turn a committed update into an apparent rollback,
+        // or hide the original trust/installation error. A leftover queue is
+        // checked again on the next launch, including the committed-ID guard.
+        const cleanup = {
+          phase: 'cleanup',
+          stage: 'cleanup',
+          code: /^E[A-Z]+$/.test(error.code ?? '')
+            ? error.code
+            : 'updateFailed',
+          pathCategory: 'pending',
+        };
+        logUpdate(root, cleanup);
+        onState(cleanup);
+      }
+    }
   }
 }
 

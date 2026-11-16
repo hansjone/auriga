@@ -206,7 +206,7 @@ sealed class TrayApp : ApplicationContext
     readonly NotifyIcon icon = new NotifyIcon();
     readonly ContextMenuStrip menu = new ContextMenuStrip();
     readonly Control ui = new Control();
-    readonly ToolStripMenuItem openItem, statusItem, platformItem, checkItem, updateItem, restartItem,
+    readonly ToolStripMenuItem openItem, fallbackLoginItem, statusItem, platformItem, checkItem, updateItem, restartItem,
         autostartItem, autoCheckItem, autoDownloadItem, originItem, logsItem, aboutItem, exitItem;
     readonly System.Windows.Forms.Timer checkTimer = new System.Windows.Forms.Timer();
     readonly System.Windows.Forms.Timer pendingTimer = new System.Windows.Forms.Timer();
@@ -225,6 +225,7 @@ sealed class TrayApp : ApplicationContext
         icon.Icon = Desktop.AppIcon();
         icon.Text = Desktop.Brand;
         openItem = new ToolStripMenuItem("打开 Auriga", null, delegate { OpenAuriga(); }) { Font = new Font(menu.Font, FontStyle.Bold) };
+        fallbackLoginItem = new ToolStripMenuItem("\u6d4f\u89c8\u5668\u767b\u5f55\uff08\u5907\u7528\uff09", null, delegate { Send("login-fallback"); });
         statusItem = new ToolStripMenuItem("正在启动…") { Enabled = false };
         platformItem = new ToolStripMenuItem(Desktop.PlatformText(null, null)) { Enabled = false };
         checkItem = new ToolStripMenuItem("检查更新", null, delegate { CheckUpdate(true); });
@@ -240,7 +241,7 @@ sealed class TrayApp : ApplicationContext
         aboutItem = new ToolStripMenuItem("关于 " + Desktop.Brand, null, delegate { About(); });
         exitItem = new ToolStripMenuItem("退出", null, delegate { ExitApp(); });
         menu.Items.AddRange(new ToolStripItem[] {
-            openItem, statusItem, platformItem, new ToolStripSeparator(),
+            openItem, fallbackLoginItem, statusItem, platformItem, new ToolStripSeparator(),
             checkItem, updateItem, restartItem, new ToolStripSeparator(),
             settings, logsItem, aboutItem, new ToolStripSeparator(), exitItem });
         icon.ContextMenuStrip = menu;
@@ -252,7 +253,7 @@ sealed class TrayApp : ApplicationContext
         pendingTimer.Interval = 30 * 1000;
         pendingTimer.Tick += delegate
         {
-            bool queued = File.Exists(Path.Combine(root, "desktop-pending"));
+            bool queued = File.Exists(Path.Combine(root, "desktop-pending", "release.json"));
             if (queued && !restartRequired && !busy)
             {
                 restartRequired = true;
@@ -306,6 +307,11 @@ sealed class TrayApp : ApplicationContext
         updateEnabled = update == null || !update.ContainsKey("enabled") || Desktop.Flag(update, "enabled");
         availableVersion = Desktop.Str(update, "available");
         restartRequired = Desktop.Flag(update, "restartRequired");
+        if (Desktop.Flag(update, "manualRetryRequired"))
+        {
+            var failure = Desktop.Obj(update, "failure");
+            restartItem.Text = "重试更新（" + (Desktop.Str(failure, "code") ?? "updateFailed") + "/" + (Desktop.Str(failure, "stage") ?? "unknown") + "）";
+        }
         string origin = Desktop.Str(info, "platformOrigin");
         originItem.Text = "平台地址：" + (origin ?? "未配置") + (origin != null ? "（点击复制）" : "");
         originItem.Enabled = origin != null;
@@ -405,6 +411,7 @@ sealed class TrayApp : ApplicationContext
         updateItem.Text = "立即更新到 " + availableVersion;
         updateItem.Enabled = !busy;
         restartItem.Visible = restartRequired;
+        fallbackLoginItem.Enabled = launcher != null && !launcher.HasExited && platformState != "authenticated";
         checkItem.Enabled = !busy && Desktop.Flag(info, "updatesConfigured");
         icon.Text = (Desktop.Brand + " · " + (running ? (platformState == "authenticated" ? "已连接" : "运行中") : "未运行")).Substring(0, Math.Min(63, (Desktop.Brand + " · " + (running ? (platformState == "authenticated" ? "已连接" : "运行中") : "未运行")).Length));
     }
@@ -413,7 +420,6 @@ sealed class TrayApp : ApplicationContext
     {
         if (launcher != null && !launcher.HasExited) return;
         dshUrl = null; platformState = null; platformReason = null;
-        loginRequested = false; useLocalDsh = false; localLogin = false;
         var start = Desktop.NodeStart(root, "launch --root " + Desktop.Quote(root) + " --stdin-control -- --no-open");
         start.RedirectStandardInput = true;
         try
@@ -468,7 +474,21 @@ sealed class TrayApp : ApplicationContext
     void OnEvent(Dictionary<string, object> e)
     {
         string kind = Desktop.Str(e, "event");
-        if (kind == "platform")
+        if (kind == "update")
+        {
+            string phase = Desktop.Str(e, "phase"), stage = Desktop.Str(e, "stage"), code = Desktop.Str(e, "code");
+            Log("update " + phase + " stage=" + stage + " code=" + code + " category=" + Desktop.Str(e, "pathCategory"));
+            if (phase == "failed" || phase == "awaiting-retry")
+            {
+                restartRequired = File.Exists(Path.Combine(root, "desktop-pending", "release.json"));
+                restartItem.Text = "重试更新（" + (code ?? "updateFailed") + "/" + (stage ?? "unknown") + "）";
+                icon.ShowBalloonTip(8000, Desktop.Brand, "更新失败，原版本已保留。" + (code ?? "updateFailed") + " / " + stage + "。详情见安装目录 desktop-update.log。", ToolTipIcon.Warning);
+            }
+            else if (phase == "installed") restartItem.Text = "重启以完成更新";
+            UpdateMenu();
+            return;
+        }
+        else if (kind == "platform")
         {
             string previous = platformState;
             platformState = Desktop.Str(e, "state");
@@ -478,36 +498,19 @@ sealed class TrayApp : ApplicationContext
                 icon.ShowBalloonTip(4000, Desktop.Brand, "已登录 Auriga 平台。", ToolTipIcon.Info);
             MaybeOpen();
         }
-        else if (kind == "login" && !Desktop.Flag(e, "opened"))
-        {
-            // A skipped or unavailable sign-in can continue into local DSH.
-            useLocalDsh = true;
-            localLogin = Desktop.Str(e, "state") == "local_login";
-            MaybeOpen();
-        }
+        if (kind == "fallback-login" && !Desktop.Flag(e, "opened"))
+            icon.ShowBalloonTip(3000, Desktop.Brand, "\u5907\u7528\u767b\u5f55\u6682\u4e0d\u53ef\u7528", ToolTipIcon.Info);
         UpdateMenu();
     }
 
-    bool loginRequested, useLocalDsh, localLogin;
-
-    /// Startup and "Open" request the sign-in page first. DSH follows after sign-in.
+    /// Open DSH immediately; Auriga owns platform login inside shell.overlay.
     void MaybeOpen()
     {
-        if (!openWhenReady || platformState == null) return;
-        if (useLocalDsh || platformState == "authenticated" || platformState == "unavailable")
-        {
-            if (dshUrl == null) return;
-            openWhenReady = false;
-            var url = new UriBuilder(dshUrl);
-            if (localLogin && string.IsNullOrEmpty(url.Fragment))
-                url.Fragment = "auriga=login";
-            Desktop.Open(url.Uri.AbsoluteUri);
-        }
-        else if (!loginRequested)
-        {
-            loginRequested = true;
-            Send("login");
-        }
+        if (!openWhenReady || dshUrl == null || platformState == null) return;
+        openWhenReady = false;
+        var url = new UriBuilder(dshUrl);
+        if (platformState != "authenticated") url.Fragment = "auriga=platform-login";
+        Desktop.Open(url.Uri.AbsoluteUri);
     }
 
     void OpenAuriga()
@@ -521,9 +524,6 @@ sealed class TrayApp : ApplicationContext
         if (platformState == null)
             icon.ShowBalloonTip(3000, Desktop.Brand, "Auriga 正在启动，稍后自动打开。", ToolTipIcon.Info);
         openWhenReady = true;
-        loginRequested = false;
-        useLocalDsh = false;
-        localLogin = false;
         MaybeOpen();
     }
 
