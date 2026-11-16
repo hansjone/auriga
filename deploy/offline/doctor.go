@@ -77,6 +77,10 @@ func healthyContainers(raw []byte) error {
 }
 
 func doctor(s state) error {
+	var installed release
+	if err := readJSON(filepath.Join(s.Package, "offline-release.json"), &installed); err == nil {
+		fmt.Println(printProvenance(installed.Source))
+	}
 	failures := 0
 	check := func(name, repair string, test func() error) {
 		if err := test(); err != nil {

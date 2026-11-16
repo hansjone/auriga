@@ -43,7 +43,9 @@ doctor 输出逐项 PASS/FAIL 和修复建议，可直接贴给 AI。完成安�
 
 仓库当前没有发布可直接使用的默认索引。维护者先按 `deploy/offline/release.example.json` 登记受信的 Forgejo NAS tar 及外层摘要、PostgreSQL/NATS/Registry 的 linux/amd64 镜像 digest。已批准且预加载的本机镜像可显式写 `sha256:<不可变ID>`，此类条目直接导出。NAS 制品须来自包含本安装器配方及 `image-extra-resolve` 的提交，使用 `.github/workflows/nas-bundle.yml` 产出目录再 tar 打包。联网 bundle 不接受未固定的基础镜像标签，也不自行推送镜像或发布制品。打包机 Docker Engine 需要支持 `docker save --platform`（API 1.48+）。私有发行页可通过环境变量 `AURIGA_BUNDLE_TOKEN` 提供 Bearer，仅发送给与 `AURIGA_BUNDLE_AUTH_HOST` 完全匹配的主机及端口。镜像仓库沿用打包机的 Docker 登录，凭据均不入包。
 
-`--build` 复用 `FORGEJO-SELF-HOSTED-DEPS` 的源码配方。索引 `build.recipes` 指向该分支批准快照的 git archive tar，`build.inputs` 指向已核摘要的 Go/Web/Java/system 依赖目录归档，`tools`/`bases` 固定 Forgejo 镜像 digest。脚本下载并校验输入，按当前源码 HEAD 生成快照，以 `--network none` 执行原 go-inputs/web-inputs/java-inputs，最后调用原 assemble-image 装配。必须先提交源码改动。此路径需要能运行完整构建的维护机内存，不在16GB开发机做冷建。
+`--build` 复用 `FORGEJO-SELF-HOSTED-DEPS` 的源码配方。索引 `build.recipes` 指向该分支批准快照的 git archive tar，`build.inputs` 指向已核摘要的 Go/Web/Java/system 依赖目录归档，`tools`/`bases` 固定 Forgejo 镜像 digest。脚本下载并校验输入，保存当前源码快照，包含提交、暂存/未暂存修改及未被 Git 忽略的新文件，以 `--network none` 执行原 go-inputs/web-inputs/java-inputs，最后调用原 assemble-image 装配。包内记录完整版本来源。此路径需要能运行完整构建的维护机内存，不在16GB开发机做冷建。
+
+需要在内网修改源码时，联网机用 `./auriga devkit --release /secure/release.json --out auriga-devkit.tar` 导出源码历史、依赖与工具链。内网开发机解包后进入 `source/`，先运行 `./auriga devkit --verify ..`，再修改并执行 `./auriga bundle --build --offline --version 0.2.0-site.3`。维护流程和跟进上游步骤见根目录 `MAINTAIN.md`。
 
 升级与备份使用以下命令。升级前核对新包外层摘要，签名安装会继续使用已固定公钥验证新包。
 

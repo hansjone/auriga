@@ -33,3 +33,8 @@ deploy/compose/var/
 .agent-task.md
 .agent-report.md
 /bin/auriga-cli
+/auriga-offline-*.tar
+/auriga-offline-*.tar.sha256
+/auriga-devkit-*.tar
+/auriga-devkit-*.tar.sha256
+/deploy/offline/__pycache__/

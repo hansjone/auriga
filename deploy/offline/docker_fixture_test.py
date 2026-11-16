@@ -108,6 +108,7 @@ docker run --rm --pull never --network none --mount "type=bind,src=$AURIGA_DATA_
     assert 'PASS 对象存储UID10001写入' in check.stdout
     assert (data_parent / 'auriga-data/resource-keys/offline/downgrade.pk8').stat().st_mode & 0o777 == 0o600
     print(f'PASS fixture_bundle_install_doctor bytes={output.stat().st_size} field_namespace=unshare--net')
+    return index, base
 
 
 def main():

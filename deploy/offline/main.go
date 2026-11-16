@@ -29,7 +29,7 @@ func main() {
 
 func dispatch(args []string) error {
 	if len(args) == 0 || args[0] == "--help" || args[0] == "help" {
-		fmt.Println("Auriga 离线部署\n  ./auriga bundle --release 发行索引.json --out 离线包.tar [--build]\n  sudo ./auriga install --address 192.0.2.10 [--data /srv/auriga]\n  sudo ./auriga doctor|backup|status|stop|logs [--data /srv/auriga]\n  sudo ./auriga upgrade 新离线包.tar [--data /srv/auriga]")
+		fmt.Println("Auriga 离线部署\n  ./auriga devkit --release 发行索引.json --out 开发套件.tar\n  ./auriga devkit --verify 套件目录 [--verify-key 公钥.pem]\n  ./auriga bundle --release 发行索引.json --out 离线包.tar [--build]\n  ./auriga bundle --build --offline [--version 0.2.0-site.3] [--out 离线包.tar]\n  sudo ./auriga install --address 192.0.2.10 [--data /srv/auriga]\n  sudo ./auriga doctor|backup|status|stop|logs [--data /srv/auriga]\n  sudo ./auriga upgrade 新离线包.tar [--data /srv/auriga]")
 		return nil
 	}
 	if runtime.GOOS != "linux" || runtime.GOARCH != "amd64" {
@@ -37,6 +37,9 @@ func dispatch(args []string) error {
 	}
 	if args[0] == "bundle" {
 		return bundle(args[1:])
+	}
+	if args[0] == "devkit" {
+		return devkit(args[1:])
 	}
 	if os.Geteuid() != 0 {
 		return errors.New("现场操作需要 sudo/root，以保护服务密钥及备份权限")

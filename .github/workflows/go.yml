@@ -84,7 +84,10 @@ jobs:
       - name: Verify offline cold backup and rollback as root
         if: runner.os == 'Linux'
         working-directory: deploy/offline
-        run: sudo env PATH="$PATH" GOTOOLCHAIN=local go test -count=1 -run 'TestColdBackup|TestResourceKeyPermissions' -v .
+        run: |
+          fixture_image=$(docker image inspect --format '{{.Id}}' postgres:17)
+          sudo env PATH="$PATH" GOTOOLCHAIN=local AURIGA_OFFLINE_VOLUME_TEST_IMAGE="$fixture_image" \
+            go test -count=1 -run 'TestColdBackup|TestResourceKeyPermissions|TestNamedVolume' -v .
       - name: Check committed generated code
         run: |
           git diff --exit-code -- gen

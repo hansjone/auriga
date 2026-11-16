@@ -44,6 +44,10 @@ func stopped(s state) error {
 }
 
 func coldBackup(s state) (string, error) {
+	volumes, err := configuredVolumes(s)
+	if err != nil {
+		return "", err
+	}
 	if err := nas(s, "stop", "--with-registered-instances"); err != nil {
 		return "", err
 	}
@@ -57,6 +61,14 @@ func coldBackup(s state) (string, error) {
 	if err := noSymlinks(dir); err != nil {
 		return "", err
 	}
+	snapshot, err := os.MkdirTemp(dir, ".volume-snapshot-")
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = os.RemoveAll(snapshot) }()
+	if err := snapshotVolumes(s, volumes, snapshot); err != nil {
+		return "", err
+	}
 	path := filepath.Join(dir, "backup-"+time.Now().UTC().Format("20060102T150405.000000000")+".tar")
 	// tar retains numeric ownership, modes and legitimate database symlinks. This
 	// archive is private installation state and is never a public release input.
@@ -64,7 +76,7 @@ func coldBackup(s state) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	err = command(nil, f, nil, "tar", "--numeric-owner", "-cpf", "-", "-C", filepath.Dir(s.Data), filepath.Base(s.Data), filepath.Base(s.Data)+".oneclick")
+	err = command(nil, f, nil, "tar", "--numeric-owner", "-cpf", "-", "-C", filepath.Dir(s.Data), filepath.Base(s.Data), filepath.Base(s.Data)+".oneclick", "-C", snapshot, "volumes")
 	closeErr := f.Close()
 	if err != nil {
 		return "", err
@@ -258,6 +270,9 @@ func rollback(p pendingUpgrade) error {
 			return err
 		}
 	}
+	if err := restoreVolumes(s, plan.Staging); err != nil {
+		return err
+	}
 	if err := nas(s, "start", "--network-offline"); err != nil {
 		return err
 	}
@@ -267,7 +282,7 @@ func rollback(p pendingUpgrade) error {
 	if err := os.Remove(s.Data + ".restore.json"); err != nil {
 		return err
 	}
-	if err := os.Remove(plan.Staging); err != nil {
+	if err := os.RemoveAll(plan.Staging); err != nil {
 		return err
 	}
 	fmt.Println("原数据库、密钥与发行已恢复。失败现场以 .failed-时间 后缀保留。")

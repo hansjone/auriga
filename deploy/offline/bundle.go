@@ -34,6 +34,7 @@ type release struct {
 	Desktop *artifact        `json:"desktop,omitempty"`
 	Seeds   *artifact        `json:"seeds,omitempty"`
 	Build   *buildSpec       `json:"build,omitempty"`
+	Source  *provenance      `json:"source,omitempty"`
 }
 
 type buildSpec struct {
@@ -128,15 +129,31 @@ func bundle(args []string) error {
 	index := f.String("release", "auriga-release.json", "")
 	out := f.String("out", "", "")
 	build := f.Bool("build", false, "")
+	offline := f.Bool("offline", false, "")
+	version := f.String("version", "", "")
 	sign := f.String("sign-key", "", "")
 	if err := f.Parse(args); err != nil {
 		return err
 	}
-	if *out == "" || f.NArg() != 0 {
-		return errors.New("bundle 需要 --out 文件.tar，发行索引用 --release 指定")
+	if f.NArg() != 0 || *offline && !*build {
+		return errors.New("--offline 须与 --build 同用，bundle 不接受多余参数")
 	}
 	var r release
-	if err := readJSON(*index, &r); err != nil {
+	source, err := os.Getwd()
+	if err != nil {
+		return err
+	}
+	options := buildOptions{Offline: *offline, Source: source}
+	var kit *devkitManifest
+	kitRoot := ""
+	if *offline {
+		kitRoot, kit, err = locateDevkit(source)
+		if err != nil {
+			return err
+		}
+		r = kit.Release
+		options.Cache = filepath.Join(kitRoot, "cache")
+	} else if err := readJSON(*index, &r); err != nil {
 		return fmt.Errorf("读取批准的发行索引失败，参考 deploy/offline/release.example.json %w", err)
 	}
 	if r.Schema != 1 || !regexpVersion.MatchString(r.Version) {
@@ -155,8 +172,31 @@ func bundle(args []string) error {
 		return err
 	}
 	defer func() { _ = os.RemoveAll(stage) }()
+	if *build {
+		options.Info, err = snapshotSource(source, filepath.Join(stage, "source"), *sign)
+		if err != nil {
+			return err
+		}
+		if kit != nil && kit.Source != nil {
+			options.Info.UpstreamVersion = kit.Source.UpstreamVersion
+			options.Info.SiteChanges = options.Info.Dirty || options.Info.Commit != kit.Source.Commit || options.Info.SnapshotSHA256 != kit.Source.SnapshotSHA256
+		}
+		if err := sourceVersion(options.Info, r, *version, true); err != nil {
+			return err
+		}
+		r.Source = options.Info
+		r.Version = options.Info.Version
+	} else if *version != "" {
+		r.Version = *version
+		if !regexpVersion.MatchString(r.Version) {
+			return errors.New("版本名无效")
+		}
+	}
+	if *out == "" {
+		*out = "auriga-offline-" + r.Version + ".tar"
+	}
 	archive := filepath.Join(stage, "nas.tar")
-	if err := fetch(r.NAS, archive); err != nil {
+	if err := fetchInput(r.NAS, archive, options); err != nil {
 		return err
 	}
 	root := filepath.Join(stage, "package")
@@ -181,8 +221,25 @@ func bundle(args []string) error {
 	if err := command(nil, os.Stdout, nil, boot, "image-check", root); err != nil {
 		return err
 	}
+	if *offline {
+		r, err = loadDevkitImages(kitRoot, *kit, boot)
+		if err != nil {
+			return err
+		}
+		r.Source = options.Info
+		r.Version = options.Info.Version
+	}
+	if r.Source == nil {
+		var manifest struct {
+			Commit string `json:"commit"`
+		}
+		if err := readJSONLoose(filepath.Join(root, "images/manifest.json"), &manifest); err != nil {
+			return err
+		}
+		r.Source = &provenance{Version: r.Version, UpstreamVersion: r.Version, Commit: manifest.Commit, Branch: "release"}
+	}
 	if *build {
-		if err := buildRelease(root, stage, r); err != nil {
+		if err := buildRelease(root, stage, r, options); err != nil {
 			return err
 		}
 	}
@@ -192,7 +249,7 @@ func bundle(args []string) error {
 		}
 		entry.Tag = "auriga/offline-" + name + ":" + r.Version
 		entry.Archive = "extra-images/" + name + ".tar"
-		if strings.Contains(entry.Ref, "@sha256:") {
+		if !*offline && strings.Contains(entry.Ref, "@sha256:") {
 			if err := command(nil, os.Stdout, nil, "docker", "pull", "--platform", "linux/amd64", entry.Ref); err != nil {
 				return err
 			}
@@ -215,13 +272,9 @@ func bundle(args []string) error {
 		if err := os.MkdirAll(filepath.Join(root, "optional"), 0755); err != nil {
 			return err
 		}
-		if err := fetch(*a, filepath.Join(root, "optional", name+".tar")); err != nil {
+		if err := fetchInput(*a, filepath.Join(root, "optional", name+".tar"), options); err != nil {
 			return err
 		}
-	}
-	source, err := os.Getwd()
-	if err != nil {
-		return err
 	}
 	for _, file := range []string{"auriga", "deploy/offline/README-OFFLINE.md"} {
 		target := filepath.Join(root, filepath.Base(file))
@@ -233,10 +286,16 @@ func bundle(args []string) error {
 	if err != nil {
 		return err
 	}
+	if *build {
+		exe = filepath.Join(stage, "output/go/auriga-cli")
+	}
 	if err := copyFile(exe, filepath.Join(root, "bin/auriga-cli"), 0755); err != nil {
 		return err
 	}
 	if err := jsonFile(filepath.Join(root, "offline-release.json"), r, 0644); err != nil {
+		return err
+	}
+	if err := jsonFile(filepath.Join(root, "provenance.json"), r.Source, 0644); err != nil {
 		return err
 	}
 	if err := os.Remove(filepath.Join(root, "SHA256SUMS")); err != nil {

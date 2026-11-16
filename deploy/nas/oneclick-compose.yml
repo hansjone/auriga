@@ -2,6 +2,8 @@
 # internal peer fences, mTLS, service identities and immutable images still apply.
 services:
   edge:
+    volumes:
+      - ${AURIGA_DATA_ROOT}.oneclick/release/provenance.json:/srv/auriga/static/admin/provenance.json:ro
     ports:
       - '${AURIGA_NAS_PORTAL_TARGET_PORT}:${AURIGA_NAS_PORTAL_TARGET_PORT}'
       - '${AURIGA_NAS_ADMIN_TARGET_PORT}:${AURIGA_NAS_ADMIN_TARGET_PORT}'

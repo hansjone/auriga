@@ -26,7 +26,8 @@ func TestColdBackupAndRollbackRestoreDatabaseAndKeys(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	for name, body := range map[string]string{"stop.sh": "exit 0", "start.sh": "exit 0", "oneclick-compose.sh": `printf '%s\n' '[{"Service":"postgres","State":"running"},{"Service":"nats","State":"running"},{"Service":"registry","State":"running"},{"Service":"platform","State":"running"},{"Service":"edge","State":"running"},{"Service":"agent","State":"running"},{"Service":"bifrost","State":"running"},{"Service":"egress","State":"running"}]'`} {
+	for name, body := range map[string]string{"stop.sh": "exit 0", "start.sh": "exit 0", "oneclick-compose.sh": `if [ "$1" = config ]; then echo '{"volumes":{}}'; exit 0; fi
+printf '%s\n' '[{"Service":"postgres","State":"running"},{"Service":"nats","State":"running"},{"Service":"registry","State":"running"},{"Service":"platform","State":"running"},{"Service":"edge","State":"running"},{"Service":"agent","State":"running"},{"Service":"bifrost","State":"running"},{"Service":"egress","State":"running"}]'`} {
 		if err := os.WriteFile(filepath.Join(scripts, name), []byte("#!/bin/sh\n"+body+"\n"), 0755); err != nil {
 			t.Fatal(err)
 		}

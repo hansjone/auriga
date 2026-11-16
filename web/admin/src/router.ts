@@ -1,4 +1,5 @@
 import DesktopView from './views/DesktopView.vue';
+import AboutView from './views/AboutView.vue';
 import EntriesView from './views/security/EntriesView.vue';
 import EgressView from './views/security/EgressView.vue';
 import CredentialsView from './views/CredentialsView.vue';
@@ -80,6 +81,7 @@ export const router = createRouter({
       path: '/',
       component: AdminLayout,
       children: [
+        { path: 'about', component: AboutView },
         { path: '', redirect: '/overview' },
         { path: 'security/credentials', component: CredentialsView },
         { path: 'overview', component: OverviewView },

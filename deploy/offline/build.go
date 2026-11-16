@@ -6,12 +6,13 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 // The recipe archive is the reviewed FORGEJO-SELF-HOSTED-DEPS source snapshot.
 // Its scripts enforce language locks and run the actual offline builds. This
 // wrapper only downloads approved inputs and orchestrates those existing steps.
-func buildRelease(root, stage string, r release) error {
+func buildRelease(root, stage string, r release, options buildOptions) error {
 	if r.Build == nil {
 		return errors.New("--build 需要发行索引 build 字段，复用 Forgejo 依赖分支配方")
 	}
@@ -21,7 +22,7 @@ func buildRelease(root, stage string, r release) error {
 	source := filepath.Join(stage, "source")
 	for name, a := range map[string]artifact{"inputs": b.Inputs, "recipes": b.Recipes} {
 		archive := filepath.Join(stage, name+".tar")
-		if err := fetch(a, archive); err != nil {
+		if err := fetchInput(a, archive, options); err != nil {
 			return err
 		}
 		dir := filepath.Join(stage, name)
@@ -31,17 +32,6 @@ func buildRelease(root, stage string, r release) error {
 		if err := unpack(archive, dir); err != nil {
 			return err
 		}
-	}
-	// git archive fixes source identity and avoids shipping untracked secrets.
-	archive := filepath.Join(stage, "source.tar")
-	if err := command(nil, os.Stdout, nil, "git", "archive", "--format=tar", "--output", archive, "HEAD"); err != nil {
-		return err
-	}
-	if err := os.Mkdir(source, 0755); err != nil {
-		return err
-	}
-	if err := unpack(archive, source); err != nil {
-		return err
 	}
 	recipeTarget := filepath.Join(source, "deploy/nas/offline-build")
 	if err := os.RemoveAll(recipeTarget); err != nil {
@@ -59,7 +49,7 @@ func buildRelease(root, stage string, r release) error {
 		if !immutable.MatchString(tool) {
 			return errors.New("构建工具镜像必须固定 digest")
 		}
-		if err := command(nil, os.Stdout, nil, "docker", "pull", "--platform", "linux/amd64", tool); err != nil {
+		if err := prepareBuildImage(tool, options.Offline); err != nil {
 			return err
 		}
 		if err := os.Mkdir(filepath.Join(output, kind), 0755); err != nil {
@@ -74,12 +64,21 @@ func buildRelease(root, stage string, r release) error {
 	if err := copyTree(filepath.Join(inputs, "system"), filepath.Join(output, "system")); err != nil {
 		return err
 	}
+	if _, err := os.Stat(filepath.Join(source, "deploy/offline/go.mod")); err == nil {
+		args := []string{"run", "--rm", "--pull", "never", "--network", "none", "--platform", "linux/amd64", "--mount", "type=bind,src=" + source + ",dst=/source,readonly", "--mount", "type=bind,src=" + filepath.Join(inputs, "go") + ",dst=/inputs,readonly", "--mount", "type=bind,src=" + filepath.Join(output, "go") + ",dst=/output", "--env", "GOPROXY=file:///inputs/download", "--env", "GOSUMDB=off", "--env", "GOTOOLCHAIN=local", "--env", "CGO_ENABLED=0", "--workdir", "/source/deploy/offline", b.Tools["go"], "go", "build", "-mod=readonly", "-o", "/output/auriga-cli", "."}
+		if err := command(nil, os.Stdout, nil, "docker", args...); err != nil {
+			return err
+		}
+	}
+	if err := jsonFile(filepath.Join(output, "web/admin/provenance.json"), options.Info, 0644); err != nil {
+		return err
+	}
 	for _, service := range []string{"platform", "edge", "agent", "bifrost", "operator"} {
 		base := b.Bases[service]
-		if !immutable.MatchString(base) {
+		if !options.Offline && !immutable.MatchString(base) {
 			return fmt.Errorf("%s 装配基镜像必须固定 digest", service)
 		}
-		if err := command(nil, os.Stdout, nil, "docker", "pull", "--platform", "linux/amd64", base); err != nil {
+		if err := prepareBuildImage(base, options.Offline); err != nil {
 			return err
 		}
 		if err := command(nil, os.Stdout, nil, "sh", filepath.Join(source, "deploy/nas/offline-build/assemble-image.sh"), service, "auriga/"+service+":nas", base, output); err != nil {
@@ -122,12 +121,8 @@ func buildRelease(root, stage string, r release) error {
 		proof["id"], proof["tar"] = id, name+".tar"
 	}
 	manifest["images"] = proofs
-	commit, err := capture("git", "rev-parse", "HEAD")
-	if err != nil {
-		return err
-	}
-	manifest["commit"] = commit
-	tree, err := capture("git", "rev-parse", "HEAD^{tree}")
+	manifest["commit"] = options.Info.Commit
+	tree, err := gitAt(options.Source, "rev-parse", "HEAD^{tree}")
 	if err != nil {
 		return err
 	}
@@ -150,6 +145,17 @@ func buildRelease(root, stage string, r release) error {
 		return err
 	}
 	return command(nil, os.Stdout, nil, boot, "image-check", root)
+}
+
+func prepareBuildImage(ref string, offline bool) error {
+	if !offline && strings.Contains(ref, "@sha256:") {
+		return command(nil, os.Stdout, nil, "docker", "pull", "--platform", "linux/amd64", ref)
+	}
+	platform, err := capture("docker", "image", "inspect", "--format", "{{.Os}}/{{.Architecture}}", ref)
+	if err != nil || platform != "linux/amd64" {
+		return fmt.Errorf("缺少本地 linux/amd64 构建镜像 %s，请重新准备 devkit", ref)
+	}
+	return nil
 }
 
 func writeImageSums(root string) error {
