@@ -45,20 +45,6 @@ if (($info.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -or
     ($Kind -eq 'file' -and ($info.PSIsContainer -or $info.Length -ne 0))) {
     throw "A new empty physical resource key $Kind is required"
 }
-$owner = $info.GetAccessControl([System.Security.AccessControl.AccessControlSections]::Owner).GetOwner([System.Security.Principal.SecurityIdentifier])
-if (-not $owner.Equals($sid)) {
-    $ownerSecurity = if ($info.PSIsContainer) {
-        New-Object System.Security.AccessControl.DirectorySecurity
-    } else {
-        New-Object System.Security.AccessControl.FileSecurity
-    }
-    $ownerSecurity.SetOwner($sid)
-    try {
-        $info.SetAccessControl($ownerSecurity)
-    } catch {
-        throw "Cannot set resource key $Kind owner to the current user: $($_.Exception.Message)"
-    }
-}
 $security = if ($info.PSIsContainer) {
     New-Object System.Security.AccessControl.DirectorySecurity
 } else {
@@ -81,4 +67,20 @@ $security.AddAccessRule($rule)
 # The caller exclusively reserved this empty path. Protect it before private
 # bytes are written, including when the token's default owner is Administrators.
 $info.SetAccessControl($security)
+# Harden the empty object first. Its default Administrators owner may have
+# WRITE_DAC while an inherited deny still prevents WRITE_OWNER.
+$owner = $info.GetAccessControl([System.Security.AccessControl.AccessControlSections]::Owner).GetOwner([System.Security.Principal.SecurityIdentifier])
+if (-not $owner.Equals($sid)) {
+    $ownerSecurity = if ($info.PSIsContainer) {
+        New-Object System.Security.AccessControl.DirectorySecurity
+    } else {
+        New-Object System.Security.AccessControl.FileSecurity
+    }
+    $ownerSecurity.SetOwner($sid)
+    try {
+        $info.SetAccessControl($ownerSecurity)
+    } catch {
+        throw "Cannot set resource key $Kind owner to the current user: $($_.Exception.Message)"
+    }
+}
 Assert-PrivatePath $info

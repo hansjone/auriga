@@ -67,9 +67,10 @@ test(
       return;
     }
     assert.match(result.stdout, /DefaultOwnerAdministrators=True/);
+    assert.match(result.stdout, /InheritedWriteOwnerDeny=True/);
     assert.match(result.stdout, /AllGeneratedOwnersAndAclsVerified=True/);
     t.diagnostic(
-      'Simulated Administrators default owner and verified every generated owner and ACL',
+      'Simulated Administrators default owner with inherited WRITE_OWNER deny and verified every generated owner and ACL',
     );
   },
 );
