@@ -29,12 +29,26 @@ func main() {
 
 func dispatch(args []string) error {
 	if len(args) == 0 || args[0] == "--help" || args[0] == "help" {
+		if runtime.GOOS == "windows" {
+			fmt.Println("Windows PowerShell 5.1离线开发（无需Go/Node/Git；客户端扩展自带Node）\n  .\\auriga.ps1 verify <文件或目录>\n  .\\auriga.ps1 unpack <tar或首卷> --out <新目录>\n  .\\auriga.ps1 devkit verify <套件目录> [--backend wsl --wsl-distro Ubuntu]\n  .\\auriga.ps1 devkit merge <增量包> --kit <套件目录>\n  .\\auriga.ps1 doctor --build [--backend wsl]\n  .\\auriga.ps1 changes export --out <补丁.tar>\n  .\\auriga.ps1 changes apply <补丁.tar>\n  .\\auriga.ps1 bundle --build --offline [--backend docker|wsl] [--memory-mib 4096 --cpus 2] [--out <安装包.tar>]\n客户端扩展合入后使用 .\\auriga.ps1 client ...；安装包交Linux服务器upgrade。前置离线安装见MAINTAIN.md。")
+			return nil
+		}
 		fmt.Println("浏览器下载Forgejo Release附件，现场无需Git/网络/语言工具链。\n校验附件：./auriga verify <文件或目录> [--verify-key <独立批准公钥>]\n自动解分卷：./auriga unpack <tar|part001|parts.json> --out <全新目录>\n校验源码依赖：./auriga devkit verify <套件目录> [--version <上游版本>]\n合并增量：./auriga devkit merge <增量tar或首卷> --kit <套件目录>\n现场补丁：./auriga changes export --out <补丁.tar> / changes apply <补丁.tar>\n维护者发行：./auriga release --tag <版本> --release <批准索引> --sign-key <私钥> --previous-devkit <上版目录>（首次 --new-baseline）")
 		fmt.Println("Auriga 离线部署\n  ./auriga bundle --build --offline [--version 0.2.0-site.3] [--out 离线包.tar]\n  sudo ./auriga install --address 192.0.2.10 [--data /srv/auriga]\n  sudo ./auriga doctor|backup|status|stop|logs [--data /srv/auriga]\n  sudo ./auriga upgrade 新离线包.tar [--data /srv/auriga]\n维护者自行打包及发行见 MAINTAIN.md。")
+		fmt.Println("构建资源诊断：./auriga doctor --build；默认工具容器4096MiB/2CPU并保留1GiB。Linux bundle可加--install --data /srv/auriga复用先备份再upgrade。")
 		return nil
 	}
-	if runtime.GOOS != "linux" || runtime.GOARCH != "amd64" {
+	if runtime.GOARCH != "amd64" {
+		return errors.New("当前离线工具支持amd64")
+	}
+	if runtime.GOOS == "windows" {
+		return windowsDispatch(args)
+	}
+	if runtime.GOOS != "linux" {
 		return errors.New("请在 Linux amd64 或 WSL 中运行")
+	}
+	if args[0] == "doctor" && len(args) > 1 && args[1] == "--build" {
+		return buildDoctor(args[2:])
 	}
 	if args[0] == "bundle" {
 		return bundle(args[1:])
@@ -43,7 +57,13 @@ func dispatch(args []string) error {
 		return isolatedGateBuild(args[1:])
 	}
 	if args[0] == "devkit" {
-		return devkit(args[1:])
+		if err := devkit(args[1:]); err != nil {
+			return err
+		}
+		if len(args) > 1 && args[1] == "verify" {
+			return buildEnvironment(buildBudget{4096, 2})
+		}
+		return nil
 	}
 	if args[0] == "unpack" {
 		return unpackCommand(args[1:])
@@ -170,6 +190,17 @@ func capture(name string, args ...string) (string, error) {
 func dockerReady() error {
 	if _, err := exec.LookPath("docker"); err != nil {
 		return errors.New("缺少 Docker Engine 和 Compose 插件，请用受信离线安装介质预装 Docker，随后重试")
+	}
+	endpoint := os.Getenv("DOCKER_HOST")
+	if endpoint == "" || os.Getenv("DOCKER_CONTEXT") != "" {
+		var err error
+		endpoint, err = capture("docker", "context", "inspect", "--format", "{{.Endpoints.docker.Host}}")
+		if err != nil {
+			return err
+		}
+	}
+	if err := localDockerEndpoint(endpoint); err != nil {
+		return err
 	}
 	if _, err := capture("docker", "info", "--format", "{{.ServerVersion}}"); err != nil {
 		return errors.New("本机 Docker Engine 不可用，检查 docker 服务和 socket 权限")

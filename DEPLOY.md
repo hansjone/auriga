@@ -11,6 +11,8 @@
 
 ## 三步安装
 
+Windows改代码可用PowerShell 5.1的`.\auriga.ps1`，Docker Desktop（WSL2/Linux容器）或WSL2发行版内Engine二选一，入口自动搬运并构建，不需进入WSL敲命令。也可Windows编辑后拷到现场Linux构建。离线安装文件清单、资源检查及操作见[MAINTAIN.md](MAINTAIN.md)。只部署仍按下面Linux服务器步骤。
+
 1. 在联网电脑用浏览器下载上述安装文件，拷入现场 `/media/auriga-release`。以下 `0.2.0` 是占位版本，替换成实际批准版本。
 2. 核对下载摘要，解包，并用包内公钥全离线校验：
 

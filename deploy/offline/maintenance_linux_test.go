@@ -89,6 +89,8 @@ func TestResourceKeyPermissionsAndPurposes(t *testing.T) {
 func TestDoctorDockerPrerequisites(t *testing.T) {
 	bin := t.TempDir()
 	t.Setenv("PATH", bin)
+	t.Setenv("DOCKER_HOST", "")
+	t.Setenv("DOCKER_CONTEXT", "")
 	if err := dockerReady(); err == nil {
 		t.Fatal("accepted missing Docker")
 	}
@@ -96,12 +98,16 @@ func TestDoctorDockerPrerequisites(t *testing.T) {
 		version string
 		want    bool
 	}{{"2.28.9", false}, {"2.29.0", true}, {"v2.40.0", true}, {"3.0.0", true}, {"garbage", false}} {
-		body := "#!/bin/sh\nif [ \"$1\" = info ]; then echo 29.1.3; else echo '" + test.version + "'; fi\n"
+		body := "#!/bin/sh\nif [ \"$1\" = context ]; then echo unix:///var/run/docker.sock; elif [ \"$1\" = info ]; then echo 29.1.3; else echo '" + test.version + "'; fi\n"
 		if err := os.WriteFile(filepath.Join(bin, "docker"), []byte(body), 0755); err != nil {
 			t.Fatal(err)
 		}
 		if err := dockerReady(); (err == nil) != test.want {
 			t.Fatalf("version=%s err=%v", test.version, err)
 		}
+	}
+	t.Setenv("DOCKER_HOST", "tcp://192.0.2.1:2376")
+	if err := dockerReady(); err == nil {
+		t.Fatal("accepted remote Docker endpoint")
 	}
 }

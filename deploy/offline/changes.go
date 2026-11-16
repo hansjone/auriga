@@ -74,7 +74,7 @@ func exportChanges(source, out string) error {
 		}
 		changes.Changes = append(changes.Changes, sourceChange{Path: name, Before: before, After: after})
 		if after != nil && !copied[after.SHA256] {
-			if err := copyFile(filepath.Join(source, name), filepath.Join(stage, "files", after.SHA256), 0644); err != nil {
+			if err := copySourceFile(filepath.Join(source, name), filepath.Join(stage, "files", after.SHA256), name, 0644); err != nil {
 				return err
 			}
 			copied[after.SHA256] = true
@@ -112,7 +112,7 @@ func replaceSourceFile(source, target string, mode fs.FileMode) error {
 	if err := copyFile(source, temp, mode); err != nil {
 		return err
 	}
-	return os.Rename(temp, target)
+	return renamePortable(temp, target)
 }
 
 func applyChanges(source, archive string) error {
@@ -144,6 +144,13 @@ func applyChanges(source, archive string) error {
 	}
 	current, _, err := fileInventory(source, names, m.Files)
 	if err != nil {
+		return err
+	}
+	portableNames := append([]string(nil), names...)
+	for _, change := range patch.Changes {
+		portableNames = append(portableNames, change.Path)
+	}
+	if err := portablePaths(portableNames); err != nil {
 		return err
 	}
 	seen := map[string]bool{}

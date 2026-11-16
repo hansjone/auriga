@@ -12,6 +12,7 @@ import (
 )
 
 type buildOptions struct {
+	Budget        buildBudget
 	Offline       bool
 	Cache, Source string
 	Info          *provenance

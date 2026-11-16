@@ -34,6 +34,7 @@ deploy/compose/var/
 .agent-report.md
 /.agent-forgejo/
 /bin/auriga-cli
+/bin/auriga-cli.exe
 /auriga-offline-*.tar
 /auriga-offline-*.tar.sha256
 /auriga-devkit-*.tar

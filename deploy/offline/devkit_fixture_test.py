@@ -10,6 +10,7 @@ import shutil
 import subprocess
 import tarfile
 import tempfile
+import sys
 
 import docker_fixture_test as transport
 
@@ -24,12 +25,55 @@ def archive_tree(source, output):
                 archive.add(path, arcname=str(path.relative_to(source)))
 
 
+def windows_exercise(original, kit):
+    parent = ROOT / '.offline-releases'
+    parent.mkdir(exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix='windows-entry-', dir=parent) as temporary:
+        stage = Path(temporary)
+        checkout, copied_kit = stage / 'source with spaces', stage / 'kit'
+        shutil.copytree(original, checkout)
+        shutil.copytree(kit, copied_kit)
+        def winpath(path):
+            return run('wslpath', '-w', path)
+        def ps(*args):
+            result = subprocess.run(['/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe',
+                                     '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File',
+                                     winpath(checkout / 'auriga.ps1'), *map(str, args)],
+                                    capture_output=True, text=True, encoding='utf-8', errors='replace')
+            print(result.stdout)
+            print(result.stderr)
+            assert result.returncode == 0, 'PowerShell entry failed'
+            return result.stdout + result.stderr
+        ps('verify', '.')
+        for path in list(checkout.rglob('*.sh')) + list(checkout.rglob('go.mod')):
+            path.write_bytes(path.read_bytes().replace(b'\r\n', b'\n').replace(b'\n', b'\r\n'))
+            path.chmod(0o644)
+        write(checkout / 'windows-new.sh', '#!/bin/sh\r\necho windows-edit\r\n')
+        ps('devkit', 'verify', winpath(copied_kit), '--backend', 'wsl')
+        patch = stage / 'windows changes.tar'
+        ps('changes', 'export', '--out', winpath(patch))
+        output = stage / 'windows-server.tar'
+        log = ps('bundle', '--build', '--offline', '--backend', 'wsl', '--out', winpath(output))
+        assert 'fixture-cgroup-memory=4294967296' in log
+        assert 'fixture-net-interfaces=lo,' in log
+        with tarfile.open(output) as archive:
+            provenance = json.load(archive.extractfile('provenance.json'))
+        assert provenance['siteChanges'] and provenance['version'].startswith('0.2.0-site.')
+        print(f'PASS powershell51_wsl_engine_offline_bundle_crlf_modes bytes={output.stat().st_size}')
+
+
 def exercise(directory):
     index, base = transport.exercise(directory)
     go = f'auriga/devkit-fixture-go:{os.getpid()}'
     build = directory / 'go-image'
     build.mkdir()
-    write(build / 'Dockerfile', 'FROM golang:1.27.3\nLABEL auriga.offline.fixture=true\n')
+    shutil.copy2('/usr/bin/docker', build / 'docker')
+    for plugin in json.loads(run('docker', 'info', '--format', '{{json .ClientInfo.Plugins}}')):
+        if plugin['Name'] in ('compose', 'buildx'):
+            destination = build / 'cli-plugins' / ('docker-' + plugin['Name'])
+            destination.parent.mkdir(exist_ok=True)
+            shutil.copy2(plugin['Path'], destination)
+    write(build / 'Dockerfile', 'FROM golang:1.27.3\nCOPY docker /usr/local/bin/docker\nCOPY cli-plugins/ /usr/local/lib/docker/cli-plugins/\nLABEL auriga.offline.fixture=true\n')
     run('docker', 'build', '--platform', 'linux/amd64', '--network', 'none', '--pull=false',
         '--provenance=false', '--sbom=false', '-t', go, build)
     go_id = run('docker', 'image', 'inspect', '--format', '{{.Id}}', go)
@@ -39,6 +83,7 @@ def exercise(directory):
     shutil.copytree(ROOT / 'deploy/offline', source / 'deploy/offline', ignore=shutil.ignore_patterns('*.out', '*.test', '__pycache__'))
     shutil.copytree(directory / 'nas/deploy-nas', source / 'deploy/nas', ignore=shutil.ignore_patterns('bin'))
     shutil.copy2(ROOT / 'auriga', source / 'auriga')
+    shutil.copy2(ROOT / 'auriga.ps1', source / 'auriga.ps1')
     (source / 'auriga').chmod(0o755)
     write(source / '.gitignore', '/bin/\n/.auriga-devkit.json\n/auriga-offline-*.tar\n/auriga-offline-*.tar.sha256\n')
     write(source / 'site.txt', 'upstream\n')
@@ -50,7 +95,7 @@ def exercise(directory):
     run('git', '-C', source, 'tag', '0.2.0')
     recipes = directory / 'fixture-recipes/deploy/nas/offline-build'
     recipes.mkdir(parents=True)
-    write(recipes / 'go-inputs.sh', '#!/bin/sh\nset -eu\ncp /inputs/auriga-nas-bootstrap /inputs/runtime-release "$2/"\n', 0o755)
+    write(recipes / 'go-inputs.sh', '#!/bin/sh\nset -eu\nprintf fixture-cgroup-memory=; cat /sys/fs/cgroup/memory.max\nprintf fixture-net-interfaces=; ls /sys/class/net | tr "\\n" ","; echo\nif [ -f /source/windows-new.sh ]; then test -x /source/windows-new.sh; /source/windows-new.sh; fi\ncp /inputs/auriga-nas-bootstrap /inputs/runtime-release "$2/"\n', 0o755)
     write(recipes / 'web-inputs.sh', '#!/bin/sh\nset -eu\nmkdir -p "$2/admin" "$2/portal" "$2/panel"\nprintf html >"$2/admin/index.html"\n', 0o755)
     write(recipes / 'java-inputs.sh', '#!/bin/sh\nset -eu\nprintf fixture >"$2/platform.jar"\n', 0o755)
     write(recipes / 'assemble-image.sh', '''#!/bin/sh
@@ -74,7 +119,7 @@ docker build --platform linux/amd64 --network none --pull=false --provenance=fal
     release['version'] = '0.2.0'
     release['build'] = dict(inputs=dict(url=str(inputs_tar), sha256=sha(inputs_tar)),
                             recipes=dict(url=str(recipe_tar), sha256=sha(recipe_tar)),
-                            tools=dict(go=go_id, web=base_id, java=base_id),
+                            tools=dict(go=go_id, web=base_id, java=base_id, runner=go_id),
                             bases={name: base_id for name in transport.SERVICES})
     write(index, json.dumps(release))
     private, public = directory / 'release-private.pem', directory / 'release-public.pem'
@@ -95,6 +140,14 @@ docker build --platform linux/amd64 --network none --pull=false --provenance=fal
     print(run('unshare', '--net', distribution / 'auriga', 'unpack',
               distribution / 'auriga-source-0.2.0.tar', '--out', original))
     assert not (original / '.git').exists()
+    if '--volume-only' not in sys.argv:
+        windows_exercise(original, kit)
+    volume_env = dict(os.environ, AURIGA_VOLUME_FIXTURE_SOURCE=str(original), AURIGA_VOLUME_FIXTURE_KIT=str(kit))
+    volume_result = subprocess.run([ROOT / 'deploy/offline/offline-linux.test', '-test.v', '-test.run', '^TestDockerVolumeTransferIntegration$'], env=volume_env, text=True, stdout=subprocess.PIPE)
+    print(volume_result.stdout)
+    volume_result.check_returncode()
+    if '--windows-only' in sys.argv or '--volume-only' in sys.argv:
+        return
     fakebin = directory / 'no-git'
     marker = directory / 'git-was-called'
     write(fakebin / 'git', '#!/bin/sh\nprintf "%s\\n" "$PWD: $*" >>"' + str(marker) + '"\nexit 99\n', 0o755)

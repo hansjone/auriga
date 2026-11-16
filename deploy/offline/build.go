@@ -57,6 +57,7 @@ func buildRelease(root, stage string, r release, options buildOptions) error {
 		}
 		envName := "AURIGA_" + map[string]string{"go": "GO_PROXY_DIR", "web": "WEB_INPUTS_DIR", "java": "JAVA_INPUTS_DIR"}[kind] + "=/inputs"
 		args := []string{"run", "--rm", "--pull", "never", "--network", "none", "--platform", "linux/amd64", "--mount", "type=bind,src=" + source + ",dst=/source,readonly", "--mount", "type=bind,src=" + filepath.Join(inputs, kind) + ",dst=/inputs,readonly", "--mount", "type=bind,src=" + filepath.Join(output, kind) + ",dst=/output", "--env", envName, tool, "sh", "/source/deploy/nas/offline-build/" + kind + "-inputs.sh", "build", "/output"}
+		args = append(append([]string{"run"}, options.Budget.dockerArgs()...), args[1:]...)
 		if err := command(nil, os.Stdout, nil, "docker", args...); err != nil {
 			return err
 		}
@@ -66,6 +67,7 @@ func buildRelease(root, stage string, r release, options buildOptions) error {
 	}
 	if _, err := os.Stat(filepath.Join(source, "deploy/offline/go.mod")); err == nil {
 		args := []string{"run", "--rm", "--pull", "never", "--network", "none", "--platform", "linux/amd64", "--mount", "type=bind,src=" + source + ",dst=/source,readonly", "--mount", "type=bind,src=" + filepath.Join(inputs, "go") + ",dst=/inputs,readonly", "--mount", "type=bind,src=" + filepath.Join(output, "go") + ",dst=/output", "--env", "GOPROXY=file:///inputs/download", "--env", "GOSUMDB=off", "--env", "GOTOOLCHAIN=local", "--env", "CGO_ENABLED=0", "--workdir", "/source/deploy/offline", b.Tools["go"], "go", "build", "-mod=readonly", "-o", "/output/auriga-cli", "."}
+		args = append(append([]string{"run"}, options.Budget.dockerArgs()...), args[1:]...)
 		if err := command(nil, os.Stdout, nil, "docker", args...); err != nil {
 			return err
 		}

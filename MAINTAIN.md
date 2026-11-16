@@ -6,7 +6,7 @@
 
 联网电脑只用浏览器，在批准标签的 Forgejo Release 下载 `DOWNLOADS.txt`、`SHA256SUMS`、源码归档 `auriga-source-<版本>.tar`、覆盖该版本的完整 `auriga-devkit-<版本>.tar`。分卷时下载该前缀全部分卷及清单/签名，再下载同页 `auriga` 引导程序。后续步骤可在无 Git、无外网、无 Forgejo 连接的现场完成。
 
-开发机是 Linux amd64，预装 Docker Engine 和 Compose 2.29+。不要求本地语言工具链。使用另附的 auriga-source 归档，其中有 `auriga-source.json`（标签、上游提交、源码文件摘要、锁摘要）、公钥、签名与 `bin/auriga-cli`。Forgejo 自动生成的 zip/tar 不含这些元数据与 CLI，因此应选另附源码包。
+开发机可为Windows或Linux amd64，Linux预装Docker Engine/Compose 2.29+，Windows见后面的双后端准备。不要求本地语言工具链。另附auriga-source归档含标签/提交/逐文件与锁摘要的auriga-source.json、公钥、签名、Linux版bin/auriga-cli及Windows版bin/auriga-cli.exe。Forgejo自动源码zip/tar不含这些发行元数据与CLI，应选另附源码包。
 
 ```sh
 cd /media/auriga-release
@@ -24,6 +24,74 @@ cd /opt/auriga-source-0.2.0
 `devkit verify` 在源码根写 `.auriga-devkit.json` 绑定套件路径。移动套件后重新运行。指定版本检查覆盖：`./auriga devkit verify /opt/auriga-devkit --version 0.2.0`；当前源码版本还校验每个依赖锁和上游提交。锁不匹配列出新增、缺失或不同文件及应下载版本；缺依赖绝不静默联网。
 
 ## 修改、导出与离线构建
+
+### Windows PowerShell 5.1
+
+建议至少16GiB物理内存、SSD和足够存放套件、展开文件及产物的磁盘。Windows本机只运行入口/编辑器，语言构建在Linux容器内。后端二选一：
+
+- Docker Desktop：启用WSL2后端与Linux容器并启动Engine。入口从签名devkit加载`tools.runner`镜像（Docker CLI、Compose、buildx、sh、tar），将源码/依赖传入临时Docker卷，避免从NTFS逐文件bind mount；构建后取回安装包并清理。缺runner的旧套件可用WSL后端。
+- WSL2 + 发行版内Docker Engine：无需Desktop。入口自动以root调用选定发行版，通过tar流把源码及当前版依赖放进`/var/tmp`，构建后清理。不需进入WSL交互终端，不自动安装或重启WSL/Engine。
+
+源码建议解到短目录`C:\auriga-src`。首次可用Windows内置tar解源码；也可下载同一Forgejo Release的`auriga.exe`，用`Get-FileHash`与发行SHA256SUMS核对后，运行`auriga.exe unpack`解包，支持分卷和长子路径。源码内自带Linux/Windows静态CLI，无需本机Go。
+
+```powershell
+Set-Location C:\auriga-src
+.\auriga.ps1 verify .
+.\auriga.ps1 unpack C:\media\auriga-devkit-0.2.0.tar --out C:\auriga-kit
+.\auriga.ps1 devkit verify C:\auriga-kit
+.\auriga.ps1 doctor --build
+# 修改并按模块规范测试后：
+.\auriga.ps1 changes export --out C:\exports\site-changes.tar
+.\auriga.ps1 bundle --build --offline --out C:\exports\auriga-site.tar
+```
+
+默认有`docker.exe`选Docker，否则选WSL。发行版内Engine给verify/doctor/bundle加`--backend wsl`，可加`--wsl-distro Ubuntu`；也可设置进程环境变量`AURIGA_WSL_DISTRO`。只允许本机socket/命名管道，拒绝远程TCP/SSH context。若脚本策略阻止入口，用`powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\auriga.ps1 ...`仅为本进程执行，或直接`.\bin\auriga-cli.exe ...`；工具不修改系统策略。
+
+完整性verify在编辑前执行。构建快照自动将已知UTF-8文本的CRLF转LF，去shell BOM，恢复清单执行位，新增.sh标0755；原始源码/签名清单不改写，实际锁改动仍拒绝。UTF-16、单独CR、大小写冲突、保留名、尾点/尾空格明确拒绝并报文件。Go文件操作处理超过260字符的子路径；根目录仍建议短路径。被Defender/编辑器占用时有限重试后提示，不关闭防护。
+
+doctor与devkit verify检查Docker/Compose、Linux后端和内存。工具容器默认4096MiB/2CPU，并留1024MiB给运行服务；Linux实际MemAvailable不足5120MiB则拒绝。Windows Docker先查VM总内存，Linux侧再查实际可用。WSL默认内存为物理内存的一半，可由用户在`%UserProfile%\.wslconfig`设置：
+
+```ini
+[wsl2]
+memory=8GB
+processors=2
+```
+
+设置需等全部WSL任务安全停止后，由用户安排重启才生效；入口不执行shutdown/terminate。见[Microsoft配置说明](https://learn.microsoft.com/en-us/windows/wsl/wsl-config)。生产全量构建资源须实测，小夹具不代表其内存需求。
+
+### 离线安装前置（现场IT准备）
+
+devkit默认不附OS/虚拟化安装器、不自动安装。联网电脑用浏览器准备独立批准介质，记录版本、大小、SHA256和签名验证结果再拷入现场：
+
+- 两路线均需匹配Windows/amd64的WSL MSI，以及本机缺失时的匹配Windows可选组件离线源、虚拟化前置。IT按[Microsoft离线安装说明](https://learn.microsoft.com/en-us/windows/wsl/install#offline-install)装MSI、启用VirtualMachinePlatform；旧系统另备WSL组件/内核包并安排必要重启。
+- Desktop路线另备批准的`Docker Desktop Installer.exe`及供应商校验记录，按[Docker安装说明](https://docs.docker.com/desktop/setup/install/windows-install/)选择WSL2/Linux容器。订阅适用性由IT核对[官方许可](https://docs.docker.com/subscription-billing/desktop-license/)；工具不代接受许可或再分发安装器。
+- WSL内Engine路线另备发行版.wsl或可导入的rootfs tar；以及匹配发行版/架构的containerd.io、docker-ce、docker-ce-cli、docker-buildx-plugin、docker-compose-plugin及系统依赖闭包。也可由IT提供已装Engine/Compose的批准WSL导出tar，保留第三方许可与通知。按[Docker离线包说明](https://docs.docker.com/engine/install/ubuntu/#install-from-a-package)准备，不能只带docker客户端。
+
+以下在PowerShell导入IT准备的完整rootfs，不需进入Linux终端（Windows系统组件由管理员预先处理）：
+
+```powershell
+wsl.exe --import AurigaBuild C:\WSL\AurigaBuild C:\media\auriga-build-rootfs.tar --version 2
+# IT已确认发行版内Engine运行后：
+.\auriga.ps1 doctor --build --backend wsl --wsl-distro AurigaBuild
+```
+
+前置与Auriga依赖分开管理，体积以实际介质清单为准；避免每版devkit重复携带整个发行版/WSL/Desktop，也避免未核准许可就再发行Desktop。现场不能安装WSL时用下一条文件搬运路径。
+
+### Windows编辑、现场Linux构建
+
+Windows编辑源码或changes export无需WSL/Docker。拷完整源码目录到Linux；或在Linux解新版本官方源码，再changes apply补丁。Linux构建机只需Docker/Compose，不需本地语言工具链：
+
+```sh
+cd /opt/auriga-source
+# Windows拷贝若使外层auriga变CRLF或丢执行位，直接使用ELF入口：
+chmod 0755 bin/auriga-cli
+./bin/auriga-cli devkit verify /opt/auriga-kit
+./bin/auriga-cli bundle --build --offline --out /exports/auriga-site.tar
+```
+
+快照规范化换行及执行位。产物给服务器upgrade。允许在部署服务器低峰构建，优先建议独立Linux构建机。默认检查可用内存并为语言工具容器设4GiB/2CPU；`--memory-mib`/`--cpus`可显式调整，保留1GiB余量。最终镜像层装配复用Engine的BuildKit，不是整个宿主/Engine的cgroup隔离；严格总资源要求请用独立构建机。
+
+Linux服务器可显式`sudo ./bin/auriga-cli bundle --build --offline --out /exports/auriga-site.tar --install --data /srv/auriga`：成功后调用原upgrade，先备份数据/密钥/卷再升级，失败回滚。已有固定公钥时新包仍须受信密钥签名，--install不放宽校验。Windows入口不执行服务器安装。
 
 无需 Git 的默认路径：修改源码，按模块规范测试，再构建。支持新增、修改和删除；对比归档基线摘要判断现场改动。内置忽略规则排除 `.env`、`.pem/.key`、部署数据、`node_modules/target/dist` 等缓存、根 `bin/` 及标准安装包输出；不解释全部 `.gitignore` 规则，其他普通文件按源码收录。凭据和额外产物放源码之外，导出前人工检查准备交付的代码。
 
@@ -99,7 +167,7 @@ sh deploy/offline/prepare-release.sh --tag 0.2.0 --release /secure/release.json 
 
 手工导出可用 `./auriga devkit --release /secure/release.json --out /exports/devkit.tar --sign-key /secure/release-private.pem --new-baseline`，后续传 `--previous-devkit`。手工导出不等于门禁通过。
 
-每版同时生成安装包、带元数据及 CLI 的源码、累积完整 devkit、相对上版增量、引导程序、公钥、下载说明、发行清单、总摘要及签名。超实际站点/代理上限或 4GiB-1 自动分卷，`--attachment-limit` 填实际最小限制。锁与批准输入不变时复用签名单版依赖缓存，再累积到新版；当前 NAS/可选发行文件另行刷新，避免复用旧部署代码。换签名密钥用新缓存，现有套件换根须重新批准完整套件。
+每版同时生成安装包、带元数据及双平台CLI的源码、累积完整devkit、相对上版增量、Linux/Windows引导程序、公钥、下载说明、发行清单、总摘要及签名。新索引必须有固定digest的build.tools.runner（Docker CLI/Compose/buildx/sh/tar），发行时断网探测这些工具，再用批准Go镜像交叉编译Windows CLI，宿主不需要Windows编译器。Desktop的runner需要访问本机Docker socket，不自动放宽组织策略。超站点上限或4GiB-1自动分卷。锁与批准输入未变则复用签名单版依赖缓存，再累积到新版；NAS/可选发行文件另刷新。换签名密钥用新缓存，换根须重新批准完整套件。
 
 不可跳过的发版门禁：最新累积套件绑定本次源码归档，在 `unshare --net` 中启动空存储的临时独立 Docker 引擎，实际运行 `bundle --build --offline`；引擎与构建进程均断网，容器另加断网和禁止拉镜像。只允许从本次套件加载镜像，宿主已有镜像无法掩盖缺依赖。不修改宿主原引擎，结束后清理临时引擎与数据；需为完整套件、展开依赖、临时镜像存储和产物预留磁盘，必要时设置 `TMPDIR` 到足够空间的本地磁盘。核对产物版本、提交、干净快照后才生成可上传目录。缺依赖或缺权限均失败，不在线回退。`release-manifest.json.offlineBuildGate` 记录提交/锁、源码/完整套件/清单/构建输出摘要、断网方式、起止时间。默认安装包用批准预建镜像，仍须门禁；`--build` 直接发行门禁产物。
 

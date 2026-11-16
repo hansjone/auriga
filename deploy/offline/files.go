@@ -146,6 +146,7 @@ func unpack(archive, destination string) error {
 func unpackReader(input io.Reader, destination string) error {
 	r := tar.NewReader(input)
 	seen := map[string]bool{}
+	portable := map[string]string{}
 	var size int64
 	for {
 		h, err := r.Next()
@@ -160,6 +161,9 @@ func unpackReader(input io.Reader, destination string) error {
 			return errors.New("归档含非法或重复路径")
 		}
 		seen[name] = true
+		if err := portablePath(portable, name); err != nil {
+			return err
+		}
 		if len(seen) > 100000 || h.Size < 0 || h.Size > (128<<30)-size {
 			return errors.New("归档超出大小限制")
 		}

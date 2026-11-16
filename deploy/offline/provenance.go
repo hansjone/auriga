@@ -109,6 +109,15 @@ func snapshotGitSource(root, target string, excluded ...string) (*provenance, er
 		return nil, err
 	}
 	names := strings.Split(raw, "\x00")
+	var nonempty []string
+	for _, name := range names {
+		if name != "" {
+			nonempty = append(nonempty, name)
+		}
+	}
+	if err := portablePaths(nonempty); err != nil {
+		return nil, err
+	}
 	sort.Strings(names)
 	seen := map[string]bool{}
 	hash := sha256.New()
@@ -139,7 +148,7 @@ func snapshotGitSource(root, target string, excluded ...string) (*provenance, er
 		if isExecutable || !indexed && st.Mode().Perm()&0111 != 0 {
 			mode = 0755
 		}
-		if err := copyFile(source, filepath.Join(target, filepath.FromSlash(name)), mode); err != nil {
+		if err := copySourceFile(source, filepath.Join(target, filepath.FromSlash(name)), name, mode); err != nil {
 			return nil, err
 		}
 		sum, err := digest(filepath.Join(target, filepath.FromSlash(name)))

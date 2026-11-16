@@ -29,6 +29,7 @@ func sourcePathAllowed(name string) bool {
 	if !safeRelative(name) {
 		return false
 	}
+	name = strings.ToLower(name)
 	for _, part := range strings.Split(name, "/") {
 		switch part {
 		case ".git", ".agents", ".agent-forgejo", ".idea", ".vscode", "node_modules", "target", "dist", ".pnpm-store", ".offline-releases", ".offline-devkit-cache", "__pycache__", ".dev":
@@ -43,7 +44,7 @@ func sourcePathAllowed(name string) bool {
 		return false
 	}
 	switch base {
-	case "auriga-source.json", "SHA256SUMS", "SHA256SUMS.sig", "release-public.pem", ".auriga-devkit.json", ".agent-task.md", ".agent-report.md":
+	case "auriga-source.json", "sha256sums", "sha256sums.sig", "release-public.pem", ".auriga-devkit.json", ".agent-task.md", ".agent-report.md":
 		return false
 	}
 	if base == ".env" || strings.HasPrefix(base, ".env.") && base != ".env.example" {
@@ -117,6 +118,9 @@ func sourceNames(root string) ([]string, error) {
 }
 
 func fileInventory(root string, names []string, baseline map[string]sourceFile) (map[string]sourceFile, string, error) {
+	if err := portablePaths(names); err != nil {
+		return nil, "", err
+	}
 	files := map[string]sourceFile{}
 	sort.Strings(names)
 	h := sha256.New()
@@ -139,13 +143,13 @@ func fileInventory(root string, names []string, baseline map[string]sourceFile) 
 			return nil, "", errors.New("源码只接受普通文件")
 		}
 		mode := uint32(0644)
-		if st.Mode().Perm()&0111 != 0 {
+		if st.Mode().Perm()&0111 != 0 || strings.HasSuffix(name, ".sh") || filepath.Base(name) == "mvnw" || filepath.Base(name) == "auriga" {
 			mode = 0755
 		}
 		if previous, ok := baseline[name]; ok {
 			mode = previous.Mode
 		}
-		hash, err := digest(path)
+		hash, err := sourceDigest(path, name, baseline[name].SHA256)
 		if err != nil {
 			return nil, "", err
 		}
@@ -282,7 +286,7 @@ func snapshotArchiveSource(root, target string, excluded ...string) (*provenance
 		return nil, err
 	}
 	for name, file := range files {
-		if err := copyFile(filepath.Join(root, name), filepath.Join(target, name), fs.FileMode(file.Mode)); err != nil {
+		if err := copySourceFile(filepath.Join(root, name), filepath.Join(target, name), name, fs.FileMode(file.Mode)); err != nil {
 			return nil, err
 		}
 	}

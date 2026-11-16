@@ -55,7 +55,7 @@ func locksFromNames(source string, r release, names []string) (lockInventory, er
 		if err := noSymlinks(path); err != nil {
 			return inv, err
 		}
-		hash, err := digest(path)
+		hash, err := sourceDigest(path, name, "")
 		if os.IsNotExist(err) {
 			inv.Files[name] = "MISSING"
 			continue

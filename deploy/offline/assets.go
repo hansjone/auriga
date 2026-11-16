@@ -249,7 +249,7 @@ func extractVerified(file, destination, key string) error {
 			}
 		}
 	}
-	return os.Rename(stage, destination)
+	return renamePortable(stage, destination)
 }
 
 func unpackCommand(args []string) error {

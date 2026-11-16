@@ -136,18 +136,30 @@ func bundleExpected(args []string, expectedCommit string) error {
 	offline := f.Bool("offline", false, "")
 	version := f.String("version", "", "")
 	sign := f.String("sign-key", "", "")
+	memory := f.Int("memory-mib", 4096, "")
+	cpus := f.Int("cpus", 2, "")
+	installAfter := f.Bool("install", false, "")
+	data := f.String("data", "/srv/auriga", "")
 	if err := f.Parse(args); err != nil {
 		return err
 	}
 	if f.NArg() != 0 || *offline && !*build {
 		return errors.New("--offline 须与 --build 同用，bundle 不接受多余参数")
 	}
+	if *installAfter && (!*offline || !*build) {
+		return errors.New("--install 只支持 bundle --build --offline，先备份再upgrade")
+	}
 	var r release
 	source, err := os.Getwd()
 	if err != nil {
 		return err
 	}
-	options := buildOptions{Offline: *offline, Source: source}
+	options := buildOptions{Offline: *offline, Source: source, Budget: buildBudget{MemoryMiB: *memory, CPUs: *cpus}}
+	if *build {
+		if err := buildEnvironment(options.Budget); err != nil {
+			return err
+		}
+	}
 	var kit *devkitManifest
 	kitRoot := ""
 	if *offline {
@@ -348,7 +360,17 @@ func bundleExpected(args []string, expectedCommit string) error {
 		return err
 	}
 	fmt.Printf("离线包 %s\n字节 %d\nSHA256 %s\n请通过受信的独立渠道传递此摘要。\n", *out, info.Size(), hash)
-	return os.WriteFile(*out+".sha256", []byte(hash+"\n"), 0644)
+	if err := os.WriteFile(*out+".sha256", []byte(hash+"\n"), 0644); err != nil {
+		return err
+	}
+	if *installAfter {
+		absolute, err := filepath.Abs(*out)
+		if err != nil {
+			return err
+		}
+		return dispatch([]string{"upgrade", absolute, "--data", *data})
+	}
+	return nil
 }
 
 func signSums(root, keyPath string) error {
