@@ -73,6 +73,13 @@ class M1CombinedAssemblyTest {
   @Autowired private org.springframework.context.ApplicationContext context;
   private static final String EDGE_SECRET = auriga.iam.Secrets.random();
 
+  @Test
+  void wiresProductionDeviceResourceAuthority() {
+    assertInstanceOf(
+        auriga.iam.IamDevicePermissionAuthority.class,
+        context.getBean(auriga.iam.api.DevicePermissionAuthority.class));
+  }
+
   @DynamicPropertySource
   static void props(DynamicPropertyRegistry registry) {
     var iam = PostgresExtension.serviceRole(M1CombinedAssemblyTest.class, "auriga_iam", "iam");

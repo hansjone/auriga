@@ -189,6 +189,33 @@ class StandardDevicePostgresTest {
   }
 
   @Test
+  void resourcePermissionAppearsOnRefreshAndNeverInDedicatedAiToken() throws Exception {
+    try (var h = new Harness()) {
+      var initial = h.exchange(h.issue());
+      assertFalse(h.claims(initial).path("perms").toString().contains("resource.packages.read"));
+      h.effective.addAll(
+          Set.of(
+              "auriga.connect.resources.use",
+              "resource.packages.read",
+              "resource.packages.upload",
+              "resource.versions.submit"));
+      var refreshed = h.refresh(initial.path("refresh_token").asString(), null);
+      var granted = h.claims(refreshed).path("perms");
+      assertTrue(granted.toString().contains("resource.packages.read"));
+      assertFalse(granted.toString().contains("resource.packages.upload"));
+      assertFalse(granted.toString().contains("resource.versions.submit"));
+      assertFalse(h.claims(initial).path("perms").toString().contains("resource.packages.read"));
+      var ai = h.refresh(refreshed.path("refresh_token").asString(), DeviceAiResource.RESOURCE);
+      assertEquals(
+          Json.MAPPER.valueToTree(StandardDevices.AI.stream().sorted().toList()),
+          h.claims(ai).path("perms"));
+      h.effective.remove("resource.packages.read");
+      var reduced = h.refresh(ai.path("refresh_token").asString(), null);
+      assertFalse(h.claims(reduced).path("perms").toString().contains("resource.packages.read"));
+    }
+  }
+
+  @Test
   void issuesBoundDeviceIdentityAndRotatesOneFamilyAcrossBothAudiencesWithoutTouchingSource()
       throws Exception {
     try (var h = new Harness()) {

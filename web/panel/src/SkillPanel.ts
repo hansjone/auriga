@@ -96,12 +96,17 @@ export class SkillPanel {
     } catch (error) {
       if (this.epoch === epoch)
         this.notice =
-          this.text(
-            '操作未完成，请刷新确认；冲突后请重新选择版本。',
-            'Operation incomplete. Refresh and reselect after a conflict.',
-          ) +
-          ' ' +
-          (error instanceof Error ? error.message : '');
+          error instanceof Error && error.message === '403'
+            ? this.text(
+                '当前账号或设备没有资源访问权限。请刷新登录凭据后重试，仍失败请联系管理员检查权限和设备状态。',
+                'Your account or device is not authorized to access resources. Refresh your sign-in credentials and retry. If access is still denied, contact an administrator to check permissions and device status.',
+              )
+            : this.text(
+                '操作未完成，请刷新确认；冲突后请重新选择版本。',
+                'Operation incomplete. Refresh and reselect after a conflict.',
+              ) +
+              ' ' +
+              (error instanceof Error ? error.message : '');
     } finally {
       if (this.epoch === epoch) {
         this.busy = false;

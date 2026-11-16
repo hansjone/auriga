@@ -149,9 +149,15 @@ public final class TokenService
                       && !"auriga.ai-gateway".equals(audience);
               default -> false;
             });
+    Set<String> effective = permissions.resolve(tenant, subject, context);
+    if ("device".equals(context) && "auriga.ai-gateway".equals(audience)) {
+      effective = new HashSet<>(effective);
+      effective.retainAll(StandardDevices.AI);
+    }
     var perms =
-        permissions.resolve(tenant, subject, context).stream()
-            .filter(p -> allowedPermission(p, context))
+        ("device".equals(context) && "auriga".equals(audience)
+                ? devicePermissions(effective).stream()
+                : effective.stream().filter(p -> allowedPermission(p, context)))
             .sorted()
             .toList();
     ObjectNode claims = base(tenant, subject, audience, principalType, context);
@@ -182,6 +188,19 @@ public final class TokenService
     return "admin".equals(context) || "service".equals(context);
   }
 
+  static Set<String> devicePermissions(Set<String> effective) {
+    Set<String> result = new TreeSet<>();
+    for (String permission : effective) {
+      if (!allowedPermission(permission, "device")) continue;
+      result.add(permission);
+    }
+    String capability = "auriga.connect.resources.use";
+    if (result.contains(capability))
+      for (String mapped : M3PermissionCatalog.devicePermissions(capability))
+        if (effective.contains(mapped)) result.add(mapped);
+    return Set.copyOf(result);
+  }
+
   record IssuedToken(String accessToken, Instant expiresAt) {}
 
   IssuedToken standardDevice(
@@ -202,7 +221,8 @@ public final class TokenService
     claims.put("scope", scope);
     claims.put("mtyp", memberType);
     claims.put("auth_time", Instant.parse(session.path("authTime").asString()).getEpochSecond());
-    claims.set("perms", Json.MAPPER.valueToTree(effective.stream().sorted().toList()));
+    var granted = "auriga".equals(audience) ? devicePermissions(effective) : effective;
+    claims.set("perms", Json.MAPPER.valueToTree(granted.stream().sorted().toList()));
     if (session.has("uacSessionBinding"))
       claims.set("uacSessionBinding", session.path("uacSessionBinding"));
     return new IssuedToken(signAccess(claims), expiry);
@@ -210,11 +230,30 @@ public final class TokenService
 
   IssuedToken managedDevice(
       UUID tenant, String owner, UUID device, Instant expiresAt, String memberType) {
+    return managedDevice(
+        tenant, owner, device, expiresAt, memberType, Set.of("auriga.connect.collab.use"));
+  }
+
+  IssuedToken managedDevice(
+      UUID tenant,
+      String owner,
+      UUID device,
+      Instant expiresAt,
+      String memberType,
+      Set<String> effective) {
     ObjectNode claims = base(tenant, owner, "auriga", "device", "device");
     claims.put("did", device.toString());
     claims.put("scope", "auriga.connect");
     claims.put("mtyp", memberType);
-    claims.set("perms", Json.MAPPER.valueToTree(List.of("auriga.connect.collab.use")));
+    // The managed model credential remains separate from the platform credential.
+    var granted = new HashSet<>(effective);
+    granted.removeIf(
+        p ->
+            allowedPermission(p, "device")
+                && !Set.of("auriga.connect.collab.use", "auriga.connect.resources.use")
+                    .contains(p));
+    claims.set(
+        "perms", Json.MAPPER.valueToTree(devicePermissions(granted).stream().sorted().toList()));
     Instant expiry = clock.instant().plusSeconds(300);
     if (expiresAt.isBefore(expiry)) expiry = expiresAt;
     claims.put("exp", expiry.getEpochSecond());

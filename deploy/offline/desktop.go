@@ -3,7 +3,9 @@ package main
 import (
 	"bytes"
 	"crypto/ed25519"
+	"crypto/sha256"
 	"crypto/x509"
+	"encoding/hex"
 	"encoding/pem"
 	"errors"
 	"os"
@@ -13,6 +15,37 @@ import (
 )
 
 var desktopTenant = regexp.MustCompile(`^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$`)
+
+func configureDesktop(s *state, publicFile, tenant string) error {
+	if publicFile == "" && tenant == "" {
+		if s.DesktopPublicKeyFingerprint == "" {
+			return nil
+		}
+		publicFile = filepath.Join(s.Data, "config/desktop/release-public.pem")
+		tenant = s.DesktopPublisherTenant
+	}
+	if err := desktopPhysical(publicFile); err != nil {
+		return err
+	}
+	raw, err := smallFile(publicFile, 4096)
+	if err != nil {
+		return err
+	}
+	block, _ := pem.Decode(raw)
+	if block == nil {
+		return errors.New("非法桌面发行公钥")
+	}
+	sum := sha256.Sum256(block.Bytes)
+	fingerprint := hex.EncodeToString(sum[:])
+	if s.DesktopPublicKeyFingerprint != "" && (s.DesktopPublicKeyFingerprint != fingerprint || s.DesktopPublisherTenant != tenant) {
+		return errors.New("桌面发行公钥或租户与安装state固定值不符")
+	}
+	if err := provisionDesktop(s.Data, publicFile, tenant); err != nil {
+		return err
+	}
+	s.DesktopPublicKeyFingerprint, s.DesktopPublisherTenant = fingerprint, tenant
+	return nil
+}
 
 // Public bootstrap only. The private desktop key never belongs on the platform.
 // install holds its existing exclusive lock; the existing NAS renderer owns

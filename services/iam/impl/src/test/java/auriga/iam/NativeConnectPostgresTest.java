@@ -284,6 +284,40 @@ class NativeConnectPostgresTest {
   }
 
   @Test
+  void nativeRefreshAddsOnlyMappedResourcePermissionWithinAccountCeiling() {
+    TenantContext.run(
+        tenant,
+        () -> {
+          var initial = connected();
+          effective.addAll(
+              Set.of(
+                  "auriga.connect.resources.use",
+                  "resource.packages.read",
+                  "resource.packages.upload",
+                  "resource.versions.publish"));
+          var refreshed = rotate(initial);
+          var granted =
+              tokens.verify(refreshed.path("access_token").asString()).path("perms").toString();
+          assertTrue(granted.contains("resource.packages.read"));
+          assertFalse(granted.contains("resource.packages.upload"));
+          assertFalse(granted.contains("resource.versions.publish"));
+          assertFalse(
+              tokens
+                  .verify(initial.path("access_token").asString())
+                  .path("perms")
+                  .toString()
+                  .contains("resource.packages.read"));
+          effective.remove("auriga.connect.resources.use");
+          assertFalse(
+              tokens
+                  .verify(rotate(refreshed).path("access_token").asString())
+                  .path("perms")
+                  .toString()
+                  .contains("resource.packages.read"));
+        });
+  }
+
+  @Test
   void emergencyNativeCredentialApprovalIsAuditedWithItsClient() {
     TenantContext.run(
         tenant,

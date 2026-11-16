@@ -2,9 +2,6 @@
 set -eu
 ROOT=$(CDPATH= cd -P -- "$(dirname -- "$0")" && pwd)
 cd "$ROOT"
-if [ "${1:-}" = client ]; then
-  exec "${AURIGA_CLIENT_NODE:-node}" "$ROOT/scripts/client-release/cli.mjs" "$@"
-fi
 if [ -x "$ROOT/bin/auriga-cli" ]; then
   exec "$ROOT/bin/auriga-cli" "$@"
 fi

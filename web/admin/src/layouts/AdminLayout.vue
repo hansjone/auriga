@@ -109,7 +109,11 @@ async function logout() {
           ><span>{{ adminT(item.key) }}</span></RouterLink
         >
       </nav>
-      <div class="admin-side-bottom">{{ adminT('navControl') }}</div>
+      <div class="admin-side-bottom">
+        <RouterLink to="/about">{{
+          locale === 'en' ? 'About' : '关于'
+        }}</RouterLink>
+      </div>
     </aside>
     <div class="admin-workspace">
       <header class="admin-top">

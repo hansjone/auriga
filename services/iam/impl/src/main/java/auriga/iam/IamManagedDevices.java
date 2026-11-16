@@ -428,7 +428,8 @@ public final class IamManagedDevices implements ManagedDeviceCredentials {
                     identity.expiresAt(),
                     effective.getMemberType() == MemberType.MEMBER_TYPE_EXTERNAL
                         ? "external"
-                        : "member");
+                        : "member",
+                    Set.copyOf(effective.getPermissionsList()));
             return Json.object(
                 "access_token",
                 token.accessToken(),

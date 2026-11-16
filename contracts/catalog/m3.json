@@ -284,6 +284,15 @@
         "member"
       ]
     },
+    "auriga.connect.resources.use": {
+      "description": {
+        "zh-CN": "通过本人设备读取和安装获授权资源",
+        "en": "Read and install authorized resources through an owned device"
+      },
+      "adminOnly": false,
+      "sensitive": false,
+      "builtinRoles": ["owner", "admin", "member"]
+    },
     "resource.packages.read": {
       "description": {
         "zh-CN": "读取可见资源目录和获授权包字节",
@@ -702,10 +711,13 @@
     }
   },
   "deviceMappings": {
+    "auriga.connect.resources.use": [
+      "resource.packages.read"
+    ],
     "auriga.connect.models.invoke": [
       "ai.models.invoke",
       "ai.usage.read"
     ]
   },
-  "roleRules": "这些是新增权限的内置角色映射；不改变既有角色。external默认无新增权限，授权仍受有效权限上限、模型ACL/资源可见范围制约。ctx=instance只取ai.models.invoke/ai.usage.read交集；portal剔除adminOnly；device只含connect范围。"
+  "roleRules": "这些是新增权限的内置角色映射；不改变既有角色。external默认无新增权限，授权仍受有效权限上限、模型ACL/资源可见范围制约。ctx=instance只取ai.models.invoke/ai.usage.read交集；portal剔除adminOnly；device平台令牌含connect范围及deviceMappings目标与账号有效权限的交集，资源访问须在线复查设备、成员与映射权限；专用AI令牌保持原有权限边界。"
 }

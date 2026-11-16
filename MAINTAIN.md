@@ -1,131 +1,174 @@
 # 现场维护
 
-先从管理台处理成员、邀请、角色、配额、身份源、模型供应商、凭据、入口和运维策略。需要调整 Agent 行为时，先使用资源市场的插件、技能和受控配置。业务规则或界面能力超出这些入口时，再修改源码。
+成员、邀请、角色、配额、身份源、模型供应商、凭据、入口和运维策略先通过管理台配置。Agent 行为优先使用资源市场的插件、技能和受控配置。超出这些能力后再改源码。禁止直接修改运行容器或部署服务器上的程序文件。
 
-## 准备离线开发机
+## 浏览器下载后离线开发
 
-普通使用者从 **Forgejo Release** 下载源码标签和同版本 `auriga-devkit-<版本>.tar`，不需要自己准备依赖或打包；GitHub 不放这些发行附件。开发机预装 Docker Engine、Compose 2.29+、Git；不要求本地 Go、Maven、Node，工具链均在 devkit 镜像中。
+联网电脑只用浏览器，在批准标签的 Forgejo Release 下载 `DOWNLOADS.txt`、`SHA256SUMS`、源码归档 `auriga-source-<版本>.tar`、覆盖该版本的完整 `auriga-devkit-<版本>.tar`。分卷时下载该前缀全部分卷及清单/签名，再下载同页 `auriga` 引导程序。后续步骤可在无 Git、无外网、无 Forgejo 连接的现场完成。
 
-联网电脑按 `DEPLOY.md` 下载发行附件，核验引导程序的独立批准 SHA-256、公钥及签名清单。下载标签源码时保留 `.git`，例如：
-
-```sh
-git clone --branch 0.2.0 https://forgejo.example.com/owner/auriga.git auriga-source
-git -C auriga-source rev-parse HEAD 'refs/tags/0.2.0^{commit}'
-```
-
-将源码目录（含 `.git`）和附件送进内网。Forgejo 网页自动生成的源码 zip/tar 没有 Git 历史，不能直接用作可追溯构建目录；也可使用套件内的 `source/`，但复用套件时它属于清单记载的原始版本，须先导入目标标签历史。
-
-用已核验的发行引导程序解包。若有分卷，把输入改为 `.tar.part001` 或 `.tar.parts.json`，同目录保存全部分卷和签名边车，无需手工拼接：
+服务端命令只在 Linux amd64 运行，构建机预装 Docker Engine/Compose 2.29+，不要求本地语言工具链。任意电脑（包括 Windows）可用于浏览器下载、编辑和拷贝文件，Windows 不运行 auriga。另附 auriga-source 归档含标签/提交/逐文件与锁摘要的 auriga-source.json、公钥、签名和 Linux 静态 bin/auriga-cli。Forgejo自动源码zip/tar不含这些发行元数据与CLI，应选另附源码包。
 
 ```sh
 cd /media/auriga-release
-./auriga unpack auriga-devkit-0.2.0.tar --out /opt/auriga-devkit-0.2.0 --verify-key /secure/release-public.pem
-cd /opt/auriga-source
-mkdir -p bin
-cp /media/auriga-release/auriga bin/auriga-cli
-chmod 0755 bin/auriga-cli
-./auriga devkit verify /opt/auriga-devkit-0.2.0 --verify-key /secure/release-public.pem
-git switch -c site/local-fix 0.2.0
-./auriga bundle --build --offline
+sha256sum --ignore-missing -c SHA256SUMS
+mkdir /opt/auriga-source-0.2.0
+tar -xf auriga-source-0.2.0.tar -C /opt/auriga-source-0.2.0
+cd /opt/auriga-source-0.2.0
+./auriga verify . --trust-fingerprint "$ISSUER_FP"
+./auriga unpack /media/auriga-release/auriga-devkit-0.2.0.tar --out /opt/auriga-devkit --trust-fingerprint "$ISSUER_FP"
+./auriga devkit verify /opt/auriga-devkit
 ```
 
-这里 `/opt/auriga-source` 是拷入的标签 checkout，操作时需对相应目录有权限。`devkit verify` 校验缓存及当前源码依赖，在源码根写被 Git 忽略的 `.auriga-devkit.json`；后续 `bundle --build --offline` 自动定位套件。也可用 `--source /opt/auriga-source` 从其他目录校验。以后仅检查已绑定套件可直接运行 `./auriga devkit verify --verify-key /secure/release-public.pem`。
+分卷时把 tar 输入替换为首卷；源码本身分卷时先用发行引导程序 `unpack`。归档无 `.git`，现场命令读取发行清单，不调用 Git。发行公钥指纹从独立批准的 Release 正文/组织文档核对，设置 `$ISSUER_FP`。verify/unpack/install 必须传 `--trust-fingerprint` 或 `--verify-key /secure/release-public.pem`；只用包内公钥打印指纹和“仅完整性，未核验发行身份”并非零退出。源码整体 `verify` 在修改前执行，修改后用补丁、快照和 `devkit verify` 检查。
 
-版本之间依赖未变时，发行流程复用 `auriga-devkit-<锁SHA256>.tar` 的相同字节，并以每版友好附件名供下载。`devkit.json` 与发行清单均记载锁摘要；发行清单还记录当前源码与套件原始提交。总键包括 Git 可见的 Go mod/sum/work、Maven pom/wrapper 配置、Node manifests/锁、Python 依赖、Dockerfile，以及批准 inputs/recipes 摘要与工具/基础/服务镜像 digest。业务源码改动不影响依赖键。新 checkout 绑定使用自身上游标签作构建基线，避免复用套件时误报旧上游。
+`devkit verify` 在源码根写 `.auriga-devkit.json` 绑定套件路径。移动套件后重新运行。指定版本检查覆盖：`./auriga devkit verify /opt/auriga-devkit --version 0.2.0`；当前源码版本还校验每个依赖锁和上游提交。锁不匹配列出新增、缺失或不同文件及应下载版本；缺依赖绝不静默联网。
 
-锁不匹配时会列出新增、缺少或不同的路径，并提示下载当前上游标签的 `auriga-devkit-<版本>.tar`。现场自行改依赖须维护者重新准备批准输入；绝不静默联网。保留 `cache/`、`devkit.json` 和根摘要清单原字节，构建逐次校验。首次解包用 `unpack --verify-key` 验完整原包；旧 `devkit --verify <目录>` 仅用于尚未修改源码的完整套件。
+## 修改、导出与离线构建
 
-仅维护者重出套件时，发行索引 `build` 登记依赖分支提供的 recipes、inputs（Go proxy、Maven/npm 缓存、pnpm store、Corepack、system 包）及固定 digest 镜像，按 `DEPLOY.md` 的 `prepare-release.sh` 在维护机/NAS 执行并由主控发布，不在 CI 完整冷建。
+### 拷到 Linux 后验证、改代码和构建
 
-## 修改、测试与构建
+在任意电脑上下载附件，把完整源码和套件拷到现场 Linux 服务器或独立 Linux 构建机。先按上面的指纹校验、解包并绑定 devkit，再改代码、按模块规范测试。也可在其他电脑编辑后拷回 Linux；changes export/apply、密钥生成、构建和安装/升级均在 Linux 执行。建议开发机至少 16GiB 内存、SSD，以及容纳完整套件、展开文件和产物的磁盘空间。
 
-在开发机源码目录修改，按对应模块开发规范运行针对性测试，建立普通提交便于审查和回退。构建也支持尚未提交的修改及未被 Git 忽略的新文件，删除会进入源码快照。被 Git 忽略的凭据、构建缓存、部署数据不进入快照。准备归档前核对 `git status`，防止把不应公开的未忽略文件当作源码。
+```sh
+cd /opt/auriga-source
+# 拷贝若使外层 auriga 变 CRLF 或丢执行位，直接使用 Linux ELF 入口：
+chmod 0755 bin/auriga-cli
+./bin/auriga-cli devkit verify /opt/auriga-kit
+./bin/auriga-cli doctor --build
+./bin/auriga-cli keygen site --out /secure/site-build-key
+# 把该公钥与独立核对的指纹送到服务器登记，具体见后面的信任流程。
+./bin/auriga-cli bundle --build --offline --out /exports/auriga-site.tar --sign-key /secure/site-build-key/site-private.pem
+```
+
+构建快照对已知 UTF-8 文本规范化 CRLF→LF、去除 shell BOM，并按签名清单恢复执行位；新增 .sh 按 0755。比较摘要不受纯换行变化影响；原始源码、签名清单不被改写，真实锁改动仍拒绝。UTF-16、单独 CR、大小写冲突、保留名、尾点/空格明确拒绝并指出文件。通用 .cmd/.bat/.ps1 文本副本保留其 CRLF，不代表支持在 Windows 运行 auriga。
+
+`devkit verify` 仅检查签名、依赖和源码匹配，不要求 Docker 可用或内存足够；`doctor --build` 单独检查 Linux Docker/Compose、cgroup 配额及内存。实际构建保留强制门禁：默认每个工具容器 4096MiB/2CPU，并预留 1024MiB 给运行服务，实际 MemAvailable 不足 5120MiB 时拒绝；用 `--memory-mib`/`--cpus` 显式调整。镜像层装配复用 Engine 的 BuildKit，不等于整个 Engine 的总 cgroup 隔离，严格总资源要求请用独立 Linux 构建机。
+
+Linux 服务器允许低峰构建。显式 `sudo ./bin/auriga-cli bundle --build --offline --out /exports/auriga-site.tar --sign-key /srv/auriga/auriga-data.oneclick/site-build-key/site-private.pem --install --data /srv/auriga` 会在构建成功后调用原 upgrade：先冷备份数据/密钥/卷，再升级，失败回滚；仍只接受 state 固定的公钥。
+
+离线 Linux 前置由 IT 使用受信介质预装：匹配发行版/架构的 Docker Engine、containerd、Docker CLI、buildx、Compose 插件和系统依赖闭包，不能只带客户端。默认 devkit 不再分发操作系统或 Docker 安装器；实际体积与许可证通知以 IT 介质清单为准。
+
+无需 Git 的默认路径：修改源码，按模块规范测试，再构建。支持新增、修改和删除；对比归档基线摘要判断现场改动。内置忽略规则排除 `.env`、`.pem/.key`、部署数据、`node_modules/target/dist` 等缓存、根 `bin/` 及标准安装包输出；不解释全部 `.gitignore` 规则，其他普通文件按源码收录。凭据和额外产物放源码之外，导出前人工检查准备交付的代码。
+
+```sh
+./auriga changes export --out /exports/auriga-changes-0.2.0-site.3.tar
+./auriga bundle --build --offline --version 0.2.0-site.3 --out /exports/auriga-offline-0.2.0-site.3.tar --sign-key /secure/site-build-key/site-private.pem
+```
+
+补丁包含基线版本、提交、改动前后摘要和新文件内容，是现场代码备份，不是官方签名发行。省略 `--version` 自动加基于源码摘要的 `-site.<摘要>`；上游版本、提交、是否有改动、源码摘要和时间写入包，doctor 与管理台“关于”可见。无 Git 分支显示 `site/archive`，提交号保留上游提交，现场差异由摘要标识。已知文件保留发行时执行模式；需要改变执行方式时改脚本内容或配方，而非仅 chmod。
+
+`--offline` 只读本地套件。工具容器 `--network none`、`--pull never`，镜像装配禁止拉取，缺依赖保留工具具体报错。修改锁或 Dockerfile 需维护者补齐新依赖、重出套件。保留套件根摘要、签名、`devkit-catalog.json` 和 `blobs/` 原字节。
+
+将产物及摘要送入服务器，在安装目录执行 `sudo ./auriga upgrade /media/auriga-offline-0.2.0-site.3.tar`，然后 doctor、正常页面登录与资源安装实测。升级先冷备份数据和已确认归属的 local named volumes；保留上一安装包、私钥备份和现场补丁。
+
+## 跟进上游：不用 Git
+
+1. 在旧源码目录 `changes export`，补丁放源码外并备份。
+2. 浏览器下载新源码与对应完整 devkit，或同基线逐版增量，拷入现场。新源码解到全新目录，先 `verify .`。
+3. 在新源码目录应用补丁、绑定依赖、测试、构建：
+
+```sh
+cd /opt/auriga-source-0.3.0
+./auriga changes apply /media/auriga-changes-0.2.0-site.3.tar
+./auriga devkit verify /opt/auriga-devkit
+./auriga bundle --build --offline --version 0.3.0-site.1 --out /exports/auriga-offline-0.3.0-site.1.tar --sign-key /secure/site-build-key/site-private.pem
+```
+
+`changes apply` 预检全部路径和改前摘要；上游与现场改了同一文件则列冲突并在写入前拒绝，不猜测合并。保留旧目录，对照旧代码在新源码人工解决，再导出补丁。重复应用相同补丁无害。基线元数据、Git 内部文件、凭据路径和符号链接不能通过补丁覆盖。
+
+## 可选：本地 Git 管理
+
+有 Git 的现场可在已验证源码目录离线初始化，不设远端：
+
+```sh
+git init
+git add .
+git commit -m 'import approved upstream 0.2.0'
+git tag upstream-0.2.0
+git switch -c site/local
+# 修改、测试后 git add 和 git commit 保存现场改动
+```
+
+Git 仅用于回退和审查；构建仍以 `auriga-source.json` 为上游基线，对当前文件比摘要，已提交改动同样标记 `siteChanges=true`。不修改或重建官方基线。跟进上游可用上述 `changes export/apply`，也可把新归档导入本地上游分支形成普通提交，再在现场分支 `git merge upstream-0.3.0`，解决冲突后使用新归档原始元数据及 CLI，重新绑定套件。导入须完整替换上游源码、正确处理删除、保留现场 `.git`，不提交依赖绑定、凭据或缓存。全部历史仅在本地，不需 git clone/fetch 访问 Forgejo。
+
+## 累积套件和增量
+
+完整 devkit 从基线到当前保存各发行版锁清单、依赖、工具和基础镜像。相同字节按 SHA-256 共用 `blobs/<摘要>`，不同版本并存；源码归档单独下载。构建临时展开当前版本依赖，用完清理。发行清单与 `devkit-catalog.json` 列支持版本及各版锁摘要，不能用“最新”推断跨基线兼容性。
+
+已有精确上版套件时：
+
+```sh
+./auriga devkit merge /media/auriga-devkit-0.2.1-delta.tar --kit /opt/auriga-devkit
+./auriga devkit verify /opt/auriga-devkit
+```
+
+增量支持首卷。合并固定旧套件公钥，校验精确前置清单、全部新增块和目标完整清单，在同盘临时目录准备后替换；重复执行无害。合并与构建串行进行。缺前置时逐版合并或下载最新完整套件。若进程在目录替换时中断，保留同盘 `.auriga-devkit-merge-*` 中的 `previous` 与 `.merge-lock`，确认进程退出后由维护者恢复，不删除唯一有效副本。
+
+默认累计阈值 64GiB（唯一依赖总字节），维护者可调整。跨大版本、超阈值或显式收拢时开新基线，增量标记 reset，拒绝合入旧基线；下载新完整套件到新目录。单版已超阈值则失败，需调整阈值。旧基线留在原 Forgejo Release 供旧版本使用，不删除。
+
+## 维护者：准备和发布附件
+
+以下仅由主控在批准的 Linux 维护机或 NAS 执行，不是现场默认路径，不在 CI 完整冷建。本16GB开发机只运行小夹具。源码 checkout 引导打包需要 Go 1.27.3，或 `AURIGA_GO_IMAGE` 指定批准的 Forgejo Go 工具镜像完整 digest；归档已有静态 CLI。Docker 需支持 `save --platform`（API 1.48+）。发版门禁另需本机 `dockerd`、root 和 `unshare --net` 权限。
+
+取得独审批准标签、对应 NAS tar、Forgejo 依赖输入与固定 digest 的镜像。索引格式见 `deploy/offline/release.example.json`；仓库无真实默认发行索引。索引和 Ed25519 PKCS8 PEM 私钥放源码外。NAS 制品提交须等于目标提交。`build.recipes` / `build.inputs` 复用已合 main 的 `deploy/nas/offline-build` 配方及 Go proxy、Maven、pnpm/npm/Corepack/system 输入，不重写生产规则。
 
 ```sh
 git status --short
-./auriga bundle --build --offline --version 0.2.0-site.3 --out /exports/auriga-offline-0.2.0-site.3.tar
+git rev-parse HEAD 'refs/tags/0.2.0^{commit}'
+sh deploy/offline/prepare-release.sh --tag 0.2.0 --release /secure/release.json --outdir /exports/0.2.0 --cache-dir /exports/devkit-cache --sign-key /secure/release-private.pem --attachment-limit 2147483648 --new-baseline --build
+# 后续同基线版本，把 --new-baseline 换为：
+# --previous-devkit /exports/unpacked-devkit-0.2.0
 ```
 
-省略 `--version` 时，包含现场提交或未提交修改的源码会得到基于源码摘要的现场后缀。省略 `--out` 时输出 `auriga-offline-<版本>.tar`。每次包记录上游版本、实际提交、分支、工作区状态、是否含现场改动、源码摘要和 UTC 构建时间。doctor 及管理台侧栏“关于”可查看这些信息。
+手工导出可用 `./auriga devkit --release /secure/release.json --out /exports/devkit.tar --sign-key /secure/release-private.pem --new-baseline`，后续传 `--previous-devkit`。手工导出不等于门禁通过。
 
-`--offline` 只从 devkit 的本地缓存读取依赖和镜像，构建容器使用 `--network none`、`--pull never`，装配复用原离线配方。缺少文件时输出对应路径，Go/Maven/pnpm 缺依赖时保留原工具的具体报错。修改依赖锁或上游 Dockerfile 后，需要回联网维护机重新准备匹配的依赖输入和 devkit。
+每版同时生成安装包、带元数据及 Linux 静态 CLI 的源码、累积完整 devkit、相对上版增量、Linux 引导程序、公钥、下载说明、发行清单、总摘要及签名。构建工具镜像固定 digest；发行不生成或探测 Windows 制品。超站点上限或 4GiB-1 自动分卷。锁与批准输入未变则复用签名单版依赖缓存，再累积到新版；NAS/可选发行文件另刷新。换签名密钥用新缓存，换根须重新批准完整套件。
 
-将产物与其独立批准摘要送入服务器，在安装目录执行升级，再从正常页面实测。
+不可跳过的发版门禁：最新累积套件绑定本次源码归档，在 `unshare --net` 中启动空存储的临时独立 Docker 引擎，实际运行 `bundle --build --offline`；引擎与构建进程均断网，容器另加断网和禁止拉镜像。只允许从本次套件加载镜像，宿主已有镜像无法掩盖缺依赖。不修改宿主原引擎，结束后清理临时引擎与数据；需为完整套件、展开依赖、临时镜像存储和产物预留磁盘，必要时设置 `TMPDIR` 到足够空间的本地磁盘。核对产物版本、提交、干净快照后才生成可上传目录。缺依赖或缺权限均失败，不在线回退。`release-manifest.json.offlineBuildGate` 记录提交/锁、源码/完整套件/清单/构建输出摘要、断网方式、起止时间。默认安装包用批准预建镜像，仍须门禁；`--build` 直接发行门禁产物。
+
+小夹具不替代生产配方完整离线演练。主控在 NAS 隔离构建区以真实索引执行上述命令，再将浏览器下载附件送到干净 Linux，按 DEPLOY.md 安装；正常页面登录、邀请、资源上传/发布和桌面安装全通过才宣称可验收。
+
+主控检查生成目录及门禁后，先预演、上传草稿、核验后发布：
 
 ```sh
-sudo ./auriga upgrade /media/auriga-offline-0.2.0-site.3.tar
-sudo ./auriga doctor
+sh deploy/offline/publish-forgejo.sh --server https://forgejo.example.com --repo owner/auriga --dir /exports/0.2.0 --verify-key /secure/release-public.pem
+# 仅主控执行，令牌通过 FORGEJO_TOKEN 环境变量提供，先同步精确标签：
+sh deploy/offline/publish-forgejo.sh --server https://forgejo.example.com --repo owner/auriga --dir /exports/0.2.0 --verify-key /secure/release-public.pem --execute
+sh deploy/offline/publish-forgejo.sh --server https://forgejo.example.com --repo owner/auriga --dir /exports/0.2.0 --verify-key /secure/release-public.pem --execute --publish
 ```
 
-升级会停核心栈和确认归属的实例，先备份数据目录、密钥、安装状态及 Compose 当前声明且已存在的 local named volumes。卷必须没有运行消费者。恢复会核对卷名称、驱动、选项、标签和归档摘要，失败时保留恢复记录供重试。旧版本备份可能缺少卷快照，恢复时会明确提示。
+预演不访问网络；上传先校验签名、附件和断网门禁，再验证 Forgejo 与远端精确标签。只走同源 HTTPS；相同附件续传跳过，冲突不覆盖，全部重新下载核验后才发布。私有输入可用 `AURIGA_BUNDLE_TOKEN` / `AURIGA_BUNDLE_AUTH_HOST`，镜像仓库沿用维护机 Docker 登录，凭据不入包。新基线发布不清理旧发行附件。
 
-## 跟进上游
+## 发行信任与站点构建签名
 
-在联网维护机取得新版本 devkit 和批准的标签。将其拷入内网开发机，先核验新套件，然后在旧现场分支的源码目录导入新历史。
+发行源码、devkit（包括 `.auriga-devkit.json` 指向的目录）必须保留完整签名和公钥；剥掉签名不再降级为通过。devkit 的发行公钥必须与已验证的源码发行公钥匹配。移动套件只修改绑定路径不能改变信任根。发行换根须独立批准新版源码/完整套件。
+
+首次 install 用 `--verify-key` 或从独立渠道核对的 `--trust-fingerprint` 固定发行公钥；公钥复制到 `<数据目录>.oneclick/trusted-keys/`，state 保存发行和站点公钥集合。upgrade、doctor、bundle --install 强制使用该集合，不能通过新包里的 release-public.pem 换根。发行流程将 SPKI DER SHA256 指纹同时写入 Forgejo Release 正文和 DOWNLOADS.txt；必须核对正文/组织记录，不能把待验证包自己显示的指纹当作独立批准。
+
+首次安装还生成本服务器专用站点构建钥：`<数据目录>.oneclick/site-build-key/{site-private.pem,site-public.pem}`，目录0700、私钥0600，仅root持有（不挂给业务服务），公钥自动登记。本机服务器构建使用该私钥并 `--install`，仍先冷备份。所有 `bundle --build --offline` 必须传 `--sign-key`；这也适用于发行断网构建门禁（由发行私钥签名）。
+
+独立 Linux 构建机生成自己的站点钥，私钥只留构建机，不复制服务器私钥：
 
 ```sh
-git fetch /media/new-devkit/cache/source-history.bundle 'refs/tags/*:refs/tags/*'
-git switch site/local-fix
-git merge <批准的新上游标签>
+./auriga keygen site --out /secure/site-build-key
+# 独立核对命令打印的 SHA256(SPKI) 指纹，仅将 site-public.pem 拷到服务器。
 ```
 
-先核验新版本同版本 devkit 和引导程序；依赖相同时可复用旧套件。合并完成后更新 CLI 并重新绑定；不要依赖复用套件内旧源码的版本标签。
+在服务器私密终端登记，用构建机独立核对的 64 位小写指纹替换 `$SITE_FP`（需要 root）：
 
 ```sh
-cp /media/new-release/auriga bin/auriga-cli
-chmod 0755 bin/auriga-cli
-./auriga devkit verify /opt/auriga-devkit-0.3.0 --verify-key /secure/release-public.pem
-./auriga bundle --build --offline --version 0.3.0-site.1 --out /exports/auriga-offline-0.3.0-site.1.tar
+sudo ./auriga trust add-site-key /media/site-public.pem --confirm-fingerprint "$SITE_FP" --data /srv/auriga
 ```
 
-复用套件的 `cache/source-history.bundle` 可能只含原始版本历史。目标标签不在里面时，从联网电脑目标源码 checkout 用 `git bundle create /exports/upstream.bundle --all` 导出并拷入，内网先执行 `git fetch /media/upstream.bundle 'refs/tags/*:refs/tags/*'` 再合并；勿强制覆盖已有标签。
+回到 Linux 源码目录验证依赖并签名构建：
 
-解决冲突、测试、审查后赋予新的现场版本并走 `upgrade`。保留原备份、源码提交和上一版本包，核对管理台“关于”与 doctor 是否显示目标版本。
-
-禁止直接在运行容器或部署服务器上修改程序文件。服务器仅负责加载批准包和保存数据，源码改动在开发机完成并形成可追溯的安装包。
-
-## 客户端发布
-
-客户端在 Windows x64 开发机离线构建。随平台 devkit 一起取得已签名核验的 Windows 部分 `auriga-client-windows-<锁SHA256>`、同版源码（含 Git 历史）及独立批准的 `windows-client.json` SHA-256；不要用 Linux 工具缓存代替。具体输入清单、准备工具、网络边界及一键安装公钥接口见 [客户端发行说明](scripts/client-release/README.md)。
-
-首次在可信离线签名机生成本现场自己的 Ed25519 桌面发行密钥。输出父目录必须已存在，输出目录必须全新。Windows 在写入私钥前保护空目录及文件，DACL 仅当前用户完全控制，签名前再次核验。
-
-```powershell
-$env:AURIGA_CLIENT_DEVKIT = 'D:\devkit\cache\windows\auriga-client-windows-<锁SHA256>'
-.\auriga.cmd client keygen --out C:\secure\site-desktop-keys
+```sh
+./auriga devkit verify /opt/auriga-kit
+./auriga bundle --build --offline --sign-key /secure/site-build-key/site-private.pem --out /exports/auriga-site.tar
 ```
 
-私钥 `desktop-private.pem` 留在签名机，备份到受控离线介质；仅将 `desktop-public.pem` 交给平台安装器。用 `./auriga install --desktop-public-key <公钥> --desktop-publisher-tenant <发行租户UUID>` 与原安装参数配置发行公钥和桌面卷。取得一键安装输出的 `resource-keys/resource-roots.json` 送入 Windows 构建机。资源三用途根与桌面发行根相互独立，禁止把资源私钥放进 devkit 或客户端。
+将产物拷入服务器后 `sudo ./auriga upgrade /media/auriga-site.tar --data /srv/auriga`。未登记站点钥、替换的自签发行钥或错误指纹均拒绝。任意电脑编辑的文件须拷到 Linux 后完成上述校验、构建和升级。
 
-修改客户端/插件/认证 broker/界面源码，完成针对性验证后执行。例中版本、序号、公钥根和入口均替换为本现场批准值，`--out` 必须新目录：
+轮换：生成新目录的新站点钥 → 独立核对新指纹并add-site-key → 新钥签名构建并升级 → `sudo ./auriga trust remove-site-key <旧指纹> --data /srv/auriga`。旧钥仍签着当前安装包时拒绝移除，固定发行公钥不能用该命令移除；私钥受控离线备份后按组织流程销毁，不交给普通业务服务。
 
-```powershell
-$env:AURIGA_CLIENT_DEVKIT = 'D:\devkit\cache\windows\auriga-client-windows-<锁SHA256>'
-.\auriga.cmd client build --offline --devkit $env:AURIGA_CLIENT_DEVKIT --devkit-sha256 <独立批准清单SHA256> --version 1.0.1-site.1 --sequence 101 --minimum-version 1.0.0 --channel stable --release-public-key C:\secure\site-desktop-keys\desktop-public.pem --resource-trust-json D:\site\resource-roots.json --out D:\exports\desktop-101
-```
-
-也可添加 `--platform-origin https://portal.example.com` 预置成员入口。IP/HTTP 必须同时提供 `--platform-access-mode ip --confirm-platform-origin <完全相同origin>`；支持的字面 IP 范围沿 installer 既有规则。构建不修改上游 DSH；依赖锁改变会明确拒绝旧套件，需维护者重出 Windows 输入。
-
-构建生成 exe、诊断 zip、未签清单、`desktop-build.json`、`desktop.sha256` 和离线网络证据。`desktop-build.json` 明确标为现场构建，记录 Git 提交、源码摘要/dirty、devkit/依赖锁摘要、公钥指纹、资源根摘要。先核对源码和套件，再在离线签名机审阅完整输出，不要直接用脚本自动提取摘要后立即确认：
-
-```powershell
-.\auriga.cmd client sign --dir D:\exports\desktop-101 --review-only
-.\auriga.cmd client sign --dir D:\exports\desktop-101 --key-file C:\secure\site-desktop-keys\desktop-private.pem --confirm-sha256 <人工审阅后的reviewSha256>
-```
-
-审阅包含源码身份、公钥指纹、资源根摘要、包 SHA-256、版本、序号、渠道、最低版本、有效期、灰度及回滚策略。任何制品或记录变化必须重新审阅；错误钥、宽松私钥权限和重复覆盖均拒绝。签名后的 `desktop-release.json` 与 exe 组成发行对，zip 不用于上传。默认有效期为构建后30天。
-
-管理员打开正常管理台 `/ops/desktop`（“桌面客户端”），先完成近期身份验证，选择 `desktop-release.json` 和对应 `AurigaDSH-Setup-*.exe`，确认策略后发布。需实际发行租户及 `resource.versions.publish` 权限。发布下一个序号前先看账本；序号必须高于全平台历史，不能因下架而重用，stable 与 beta 共用序号高水位。
-
-已持有正常近期管理员会话时，也可将 session cookie 和 CSRF 以 `{cookie,csrf}` JSON 注入当前进程环境变量 `AURIGA_CLIENT_ADMIN_AUTH`（不要写命令历史、工单或仓库），通过同一管理接口上传并自动回读核摘要：
-
-```powershell
-.\auriga.cmd client publish --dir D:\exports\desktop-101 --public-key C:\secure\site-desktop-keys\desktop-public.pem --admin-origin https://admin.example.com --portal-origin https://portal.example.com
-Remove-Item Env:AURIGA_CLIENT_ADMIN_AUTH
-```
-
-渠道、最低版本、`--rollout-percentage 0..100`、`--rollback-from <精确来源版本>` 在构建时设定并由签名覆盖，发布后不能改签名字段。最低版本高于已装版本会要求更新；日常发布不应随意抬高。beta 只面向对应渠道，低于当前发行版本的回退需显式签名来源，仍受服务端策略校验。
-
-发布后从门户“下载桌面客户端”下载并核 `desktop.sha256`，首次安装件及公钥摘要通过独立可信渠道确认。让装有旧版本且固定**同一现场发行公钥**的测试成员，在托盘“检查更新→立即更新→重启以完成更新”走完整流程，验证目标版本、配置/会话保留和资源市场验签。自动检查/下载沿成员设置，安装仍按已有确认策略，不强制无提示安装。`client publish` 的回读自检不代替真实安装/自动更新验收。
-
-平台不保管桌面私钥。丢失或泄露时停止使用该钥并制定现场切换方案；当前客户端固定单一发行根，**更换发行钥需要成员通过独立可信渠道重新安装**，没有自动获取新公钥或双根轮换。不要直接换平台公钥后向旧客户端发新版，旧客户端会拒绝签名。资源根轮换也要统筹平台与新客户端固定根；保留客户端更新高水位和现有数据，不能清状态绕过防回退。
+`--allow-unsigned` 仅用于 verify/unpack/install/upgrade 的显式应急缺签名例外，打印警告；不是未知签名者/错误签名的绕过。安装和升级记录永久告警，doctor持续FAIL；无签名首次安装不能自行接纳后来的包内发行根。源码基线和devkit不支持无签名例外。资源初始化残缺时保留原材料，从备份恢复；确认从未使用才由维护者人工隔离整个残缺目录重试。健康升级后的旧发行归档失败只警告，旧目录必须人工归档后才能再次升级。

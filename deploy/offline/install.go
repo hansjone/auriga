@@ -16,14 +16,23 @@ var regexpVersion = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._-]{0,95}$`)
 var regexpName = regexp.MustCompile(`^[a-z][a-z0-9-]{0,40}$`)
 var domainName = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?\.[a-z]{2,}$`)
 
-type installOptions struct{ Address, Domain, Proxy, Data, PublicKey, Package, DesktopPublicKey, DesktopPublisherTenant string }
+type installOptions struct {
+	Address, Domain, Proxy, Data, PublicKey, Package string
+	DesktopPublicKey, DesktopPublisherTenant         string
+	Fingerprint                                      string
+	AllowUnsigned                                    bool
+}
 type state struct {
-	Data          string            `json:"data"`
-	Package       string            `json:"package"`
-	Access        string            `json:"access"`
-	Images        map[string]string `json:"images"`
-	PublicKey     string            `json:"publicKey,omitempty"`
-	ResourceReady bool              `json:"resourceReady"`
+	Data                        string            `json:"data"`
+	Package                     string            `json:"package"`
+	Access                      string            `json:"access"`
+	Images                      map[string]string `json:"images"`
+	PublicKey                   string            `json:"publicKey,omitempty"`
+	TrustedKeys                 []string          `json:"trustedKeys,omitempty"`
+	AllowUnsigned               bool              `json:"allowUnsigned,omitempty"`
+	ResourceReady               bool              `json:"resourceReady"`
+	DesktopPublicKeyFingerprint string            `json:"desktopPublicKeyFingerprint,omitempty"`
+	DesktopPublisherTenant      string            `json:"desktopPublisherTenant,omitempty"`
 }
 
 func parseInstall(args []string) (installOptions, error) {
@@ -34,6 +43,8 @@ func parseInstall(args []string) (installOptions, error) {
 	f.StringVar(&o.Proxy, "proxy", "", "")
 	f.StringVar(&o.Data, "data", "/srv/auriga", "")
 	f.StringVar(&o.PublicKey, "verify-key", "", "")
+	f.StringVar(&o.Fingerprint, "trust-fingerprint", "", "")
+	f.BoolVar(&o.AllowUnsigned, "allow-unsigned", false, "")
 	f.StringVar(&o.Package, "package", "", "")
 	f.StringVar(&o.DesktopPublicKey, "desktop-public-key", "", "")
 	f.StringVar(&o.DesktopPublisherTenant, "desktop-publisher-tenant", "", "")
@@ -43,10 +54,10 @@ func parseInstall(args []string) (installOptions, error) {
 	if f.NArg() != 0 {
 		return o, errors.New("多余安装参数")
 	}
+	count := 0
 	if (o.DesktopPublicKey == "") != (o.DesktopPublisherTenant == "") {
 		return o, errors.New("--desktop-public-key 和 --desktop-publisher-tenant 必须一并提供")
 	}
-	count := 0
 	if o.Address != "" {
 		count++
 		ip := net.ParseIP(o.Address)
@@ -110,9 +121,6 @@ func compose(s state, output *bytes.Buffer, args ...string) error {
 }
 
 func install(o installOptions) error {
-	if err := dockerReady(); err != nil {
-		return err
-	}
 	root, err := packageRoot()
 	if err != nil {
 		return err
@@ -124,14 +132,34 @@ func install(o installOptions) error {
 		}
 		defer func() { _ = os.RemoveAll(stage) }()
 		root = filepath.Join(stage, "package")
-		if err := extractVerified(o.Package, root, o.PublicKey); err != nil {
+		if err := unpack(o.Package, root); err != nil {
 			return err
 		}
 	}
 	if err := verifySums(root); err != nil {
 		return err
 	}
-	if err := verifySignature(root, o.PublicKey); err != nil {
+	// Re-running install cannot replace an already pinned trust set.
+	var key string
+	var unsigned bool
+	if existing, err := readState(o.Data); err == nil {
+		unsigned, err = verifyStatePackage(existing, root, archiveIndex(o.Package), o.AllowUnsigned)
+		if err != nil {
+			return err
+		}
+	} else {
+		var err error
+		key, unsigned, err = verifyRootTrust(root, trustOptions{Key: o.PublicKey, Fingerprint: o.Fingerprint, AllowUnsigned: o.AllowUnsigned})
+		if err != nil {
+			return err
+		}
+		if index := archiveIndex(o.Package); index != "" && !unsigned {
+			if err := verifyFileSignature(index, key); err != nil {
+				return err
+			}
+		}
+	}
+	if err := dockerReady(); err != nil {
 		return err
 	}
 	return withLock(o.Data, func() error {
@@ -139,6 +167,19 @@ func install(o installOptions) error {
 			return errors.New("存在中断的升级，请先重新运行 upgrade 恢复")
 		}
 		if s, err := readState(o.Data); err == nil {
+			if err := verifySums(s.Package); err != nil {
+				return err
+			}
+			storedUnsigned, err := verifyStatePackage(s, s.Package, "", o.AllowUnsigned)
+			if err != nil {
+				return err
+			}
+			if unsigned || storedUnsigned {
+				s.AllowUnsigned = true
+				if err := saveState(s); err != nil {
+					return err
+				}
+			}
 			fmt.Println("已存在安装，复核配置并继续启动。更换发行请用 upgrade。")
 			if _, err := os.Stat(filepath.Join(s.Data, ".auriga-initialized")); err != nil {
 				if err := nas(s, "init"); err != nil {
@@ -154,7 +195,10 @@ func install(o installOptions) error {
 					return err
 				}
 			}
-			if err := provisionDesktop(s.Data, o.DesktopPublicKey, o.DesktopPublisherTenant); err != nil {
+			if err := configureDesktop(&s, o.DesktopPublicKey, o.DesktopPublisherTenant); err != nil {
+				return err
+			}
+			if err := saveState(s); err != nil {
 				return err
 			}
 			if err := nas(s, "start", "--network-offline"); err != nil {
@@ -179,12 +223,28 @@ func install(o installOptions) error {
 		if err := verifySums(s.Package); err != nil {
 			return err
 		}
-		if err := verifySignature(s.Package, o.PublicKey); err != nil {
+		s.AllowUnsigned = unsigned
+		if key != "" {
+			if err := pinInitialTrust(&s, key); err != nil {
+				return err
+			}
+		}
+		if !unsigned {
+			if _, err := verifyStatePackage(s, s.Package, "", false); err != nil {
+				return err
+			}
+		}
+		if err := generateSiteKey(filepath.Join(meta, "site-build-key")); err != nil {
 			return err
 		}
-		if o.PublicKey != "" {
-			s.PublicKey = filepath.Join(meta, "release-public.pem")
-			if err := copyFile(o.PublicKey, s.PublicKey, 0644); err != nil {
+		if key != "" {
+			// Local server builds use the same explicit registration mechanism.
+			pub := filepath.Join(meta, "site-build-key/site-public.pem")
+			fp, err := publicFingerprint(pub)
+			if err != nil {
+				return err
+			}
+			if err := registerSiteKey(&s, pub, fp); err != nil {
 				return err
 			}
 		}
@@ -218,7 +278,10 @@ func install(o installOptions) error {
 		if err := saveState(s); err != nil {
 			return err
 		}
-		if err := provisionDesktop(s.Data, o.DesktopPublicKey, o.DesktopPublisherTenant); err != nil {
+		if err := configureDesktop(&s, o.DesktopPublicKey, o.DesktopPublisherTenant); err != nil {
+			return err
+		}
+		if err := saveState(s); err != nil {
 			return err
 		}
 		if err := nas(s, "preflight"); err != nil {
@@ -263,6 +326,7 @@ func finishInstall(s state) error {
 	}
 	fmt.Printf("核心服务已启动。管理台 %s://%s:%d/\n应急材料仅在私密 TTY 显示。\n", access.AdminOrigin.Scheme, access.AdminOrigin.Host, access.AdminOrigin.Port)
 	fmt.Printf("资源公钥根 %s\n降级私钥请导出至受控离线介质 %s\n", filepath.Join(s.Data, "resource-keys/resource-roots.json"), filepath.Join(s.Data, "resource-keys/offline/downgrade.pk8"))
+	fmt.Printf("服务器站点构建私钥（仅root）%s；独立Linux构建机另行 keygen site，公钥通过 trust add-site-key 登记。\n", filepath.Join(s.Data+".oneclick", "site-build-key/site-private.pem"))
 	return nil
 }
 
@@ -419,37 +483,83 @@ func makeEnv(s state) error {
 
 func provisionResource(s state) error {
 	root := filepath.Join(s.Data, "resource-keys")
-	if err := resourceKeys(root); err != nil {
-		return err
-	}
-	if err := os.Chmod(root, 0755); err != nil {
-		return err
-	}
-	platform := filepath.Join(root, "platform")
-	for _, path := range []string{platform, filepath.Join(platform, "release.pk8"), filepath.Join(platform, "revocation.pk8")} {
-		if err := os.Chown(path, 10001, 10001); err != nil {
+	if _, err := os.Lstat(root); os.IsNotExist(err) {
+		stage, err := os.MkdirTemp(s.Data, ".auriga-resource-keys-")
+		if err != nil {
 			return err
+		}
+		defer func() { _ = os.RemoveAll(stage) }()
+		if err := writeResourceKeys(stage); err != nil {
+			return err
+		}
+		if err := os.Chmod(stage, 0755); err != nil {
+			return err
+		}
+		platform := filepath.Join(stage, "platform")
+		for _, path := range []string{platform, filepath.Join(platform, "release.pk8"), filepath.Join(platform, "revocation.pk8")} {
+			if err := os.Chown(path, 10001, 10001); err != nil {
+				return err
+			}
+		}
+		if err := os.Rename(stage, root); err != nil {
+			return err
+		}
+	} else if err != nil {
+		return err
+	}
+	if err := validateResourceMaterial(root); err != nil {
+		return err
+	}
+	for name, want := range map[string]string{"platform": "10001:10001:700", "platform/release.pk8": "10001:10001:600", "platform/revocation.pk8": "10001:10001:600", "offline": "0:0:700", "offline/downgrade.pk8": "0:0:600"} {
+		got, err := capture("stat", "-c", "%u:%g:%a", filepath.Join(root, name))
+		if err != nil {
+			return err
+		}
+		if got != want {
+			return fmt.Errorf("残缺或不安全的资源密钥权限 %s，保留材料并恢复属主/权限后重试", name)
 		}
 	}
 	objects := filepath.Join(s.Data, "resource-objects")
-	if err := os.Mkdir(objects, 0700); err != nil {
+	if _, err := os.Lstat(objects); os.IsNotExist(err) {
+		stage, err := os.MkdirTemp(s.Data, ".auriga-resource-objects-")
+		if err != nil {
+			return err
+		}
+		defer func() { _ = os.RemoveAll(stage) }()
+		if err := os.Chown(stage, 10001, 10001); err != nil {
+			return err
+		}
+		if err := os.Rename(stage, objects); err != nil {
+			return err
+		}
+	} else if err != nil {
 		return err
 	}
-	if err := os.Chown(objects, 10001, 10001); err != nil {
+	if err := noSymlinks(objects); err != nil {
 		return err
+	}
+	permission, err := capture("stat", "-c", "%u:%g:%a", objects)
+	if err != nil {
+		return err
+	}
+	if permission != "10001:10001:700" {
+		return fmt.Errorf("残缺或不安全的对象目录 %s；保留并从备份恢复正确属主/0700权限后重试", objects)
 	}
 	var roots map[string]map[string]string
 	if err := readJSON(filepath.Join(root, "resource-roots.json"), &roots); err != nil {
 		return err
 	}
-	f, err := os.OpenFile(filepath.Join(s.Data, "stack.env"), os.O_APPEND|os.O_WRONLY, 0600)
+	env := filepath.Join(s.Data, "stack.env")
+	raw, err := os.ReadFile(env)
 	if err != nil {
 		return err
 	}
-	_, err = fmt.Fprintf(f, "\nAURIGA_RESOURCE_RELEASE_KID=%s\nAURIGA_RESOURCE_REVOCATION_KID=%s\n", roots["release"]["kid"], roots["revocation"]["kid"])
-	closeErr := f.Close()
-	if err != nil {
-		return err
+	var lines []string
+	for _, line := range strings.Split(string(raw), "\n") {
+		if !strings.HasPrefix(line, "AURIGA_RESOURCE_RELEASE_KID=") && !strings.HasPrefix(line, "AURIGA_RESOURCE_REVOCATION_KID=") {
+			lines = append(lines, line)
+		}
 	}
-	return closeErr
+	lines = append(lines, "AURIGA_RESOURCE_RELEASE_KID="+roots["release"]["kid"], "AURIGA_RESOURCE_REVOCATION_KID="+roots["revocation"]["kid"], "")
+	return os.WriteFile(env, []byte(strings.Join(lines, "\n")), 0600)
 }

@@ -29,6 +29,48 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
+it.each([
+  [
+    'zh-CN',
+    '技能',
+    '当前账号或设备没有资源访问权限',
+    '刷新登录凭据',
+    '联系管理员',
+  ],
+  [
+    'en',
+    'Skills',
+    'Your account or device is not authorized to access resources',
+    'Refresh your sign-in credentials',
+    'contact an administrator',
+  ],
+])(
+  'explains resource authorization failures and recovery in %s',
+  async (locale, tab, reason, refresh, administrator) => {
+    const panel = document.createElement(
+      'auriga-test-skills',
+    ) as AurigaTeamPanel;
+    panel.context = {
+      mode: 'connect',
+      protocol: 1,
+      locale,
+      fetch: vi.fn(async (path: string) =>
+        path.startsWith('catalog/')
+          ? Response.json({}, { status: 403 })
+          : Response.json({ items: [] }),
+      ),
+    };
+    document.body.append(panel);
+    await settle();
+    click(panel, tab);
+    await vi.waitFor(() => {
+      expect(panel.shadowRoot!.textContent).toContain(reason);
+      expect(panel.shadowRoot!.textContent).toContain(refresh);
+      expect(panel.shadowRoot!.textContent).toContain(administrator);
+    });
+  },
+);
+
 it('offers a next step for empty skill markets and installations', async () => {
   const panel = document.createElement('auriga-test-skills') as AurigaTeamPanel;
   panel.context = {
