@@ -21,11 +21,10 @@ type releaseOptions struct {
 	MaxBytes                            int64
 }
 type releaseBuilders struct {
-	Bundle            func([]string, string) error
-	Devkit            func([]string) error
-	Executable        string
-	WindowsExecutable string
-	Gate              func(gateRequest) (buildGate, error)
+	Bundle     func([]string, string) error
+	Devkit     func([]string) error
+	Executable string
+	Gate       func(gateRequest) (buildGate, error)
 }
 type cachedKit struct {
 	Asset        assetInfo     `json:"asset"`
@@ -240,8 +239,8 @@ func generateRelease(o releaseOptions, builders releaseBuilders) error {
 	}
 	r.Version = o.Tag
 	r.Source = nil
-	if r.Build == nil || !immutable.MatchString(r.Build.Tools["runner"]) {
-		return errors.New("新发行需要build.tools.runner：固定摘要的Linux Docker CLI/Compose/sh/tar镜像，以支持Windows Docker Desktop离线构建")
+	if r.Build == nil {
+		return errors.New("离线发行需要build依赖与Linux构建配方")
 	}
 	locks, err := dependencyLocks(o.Source, r)
 	if err != nil {
@@ -294,16 +293,6 @@ func generateRelease(o releaseOptions, builders releaseBuilders) error {
 		return err
 	}
 	if err := refreshReleaseInputs(single, r, o.Key); err != nil {
-		return err
-	}
-	winExe := builders.WindowsExecutable
-	if winExe == "" {
-		winExe = filepath.Join(scratch, "windows/auriga-cli.exe")
-		if err := compileWindowsCLI(single, sourceRoot, winExe); err != nil {
-			return err
-		}
-	}
-	if err := copyFile(winExe, filepath.Join(sourceRoot, "bin/auriga-cli.exe"), 0644); err != nil {
 		return err
 	}
 	if err := writeSums(sourceRoot); err != nil {
@@ -392,14 +381,6 @@ func generateRelease(o releaseOptions, builders releaseBuilders) error {
 		return err
 	}
 	assets = append(assets, cli)
-	if err := copyFile(winExe, filepath.Join(stage, "auriga.exe"), 0644); err != nil {
-		return err
-	}
-	windowsAsset, err := describeAsset(filepath.Join(stage, "auriga.exe"))
-	if err != nil {
-		return err
-	}
-	assets = append(assets, windowsAsset)
 	if err := signingPublic(o.Key, filepath.Join(stage, "release-public.pem")); err != nil {
 		return err
 	}

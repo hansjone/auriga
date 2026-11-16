@@ -384,11 +384,11 @@ func mergeDevkit(root, archive, key string) error {
 		return err
 	}
 	backup := filepath.Join(scratch, "previous")
-	if err := renamePortable(root, backup); err != nil {
+	if err := os.Rename(root, backup); err != nil {
 		return err
 	}
-	if err := renamePortable(target, root); err != nil {
-		return errors.Join(err, renamePortable(backup, root))
+	if err := os.Rename(target, root); err != nil {
+		return errors.Join(err, os.Rename(backup, root))
 	}
 	fmt.Printf("PASS devkit已合并，基线 %s，覆盖 %d 版，最新 %s\n", cat.Baseline, len(cat.Versions), cat.Latest)
 	return nil

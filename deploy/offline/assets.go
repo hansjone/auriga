@@ -256,7 +256,7 @@ func extractWithTrust(file, destination string, o trustOptions, identity bool) e
 			return err
 		}
 	}
-	return renamePortable(stage, destination)
+	return os.Rename(stage, destination)
 }
 
 func unpackCommand(args []string) error {

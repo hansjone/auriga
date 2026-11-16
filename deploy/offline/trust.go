@@ -207,7 +207,7 @@ func copyTrustKey(source, target, fingerprint string) error {
 	if err != nil || actual != fingerprint {
 		return errors.New("复制期间公钥发生变化")
 	}
-	return renamePortable(temp, target)
+	return os.Rename(temp, target)
 }
 
 func generateSiteKey(target string) error {
@@ -225,9 +225,6 @@ func generateSiteKey(target string) error {
 		return err
 	}
 	defer func() { _ = os.RemoveAll(stage) }()
-	if err := protectTransferRoot(stage); err != nil {
-		return err
-	}
 	_, private, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
 		return err
@@ -243,7 +240,7 @@ func generateSiteKey(target string) error {
 	if err := signingPublic(secret, filepath.Join(stage, "site-public.pem")); err != nil {
 		return err
 	}
-	return renamePortable(stage, target)
+	return os.Rename(stage, target)
 }
 
 func keygenCommand(args []string) error {

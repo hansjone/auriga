@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"runtime"
 	"strconv"
 	"strings"
 )
@@ -16,10 +15,10 @@ type buildBudget struct {
 }
 
 func localDockerEndpoint(endpoint string) error {
-	if strings.HasPrefix(endpoint, "unix:///") || strings.HasPrefix(strings.ToLower(endpoint), "npipe:////./pipe/") {
+	if strings.HasPrefix(endpoint, "unix:///") {
 		return nil
 	}
-	return errors.New("构建/安装只允许本机Docker Unix socket或Windows命名管道；拒绝远程TCP/SSH context，请选择本机Engine")
+	return errors.New("构建/安装只允许Linux本机Docker Unix socket；拒绝命名管道或远程TCP/SSH context，请选择本机Engine")
 }
 
 func (b buildBudget) dockerArgs() []string {
@@ -32,7 +31,7 @@ func validateBuildBudget(b buildBudget, total, available uint64) error {
 	}
 	required := (uint64(b.MemoryMiB) + 1024) << 20
 	if total < required || available < required {
-		return fmt.Errorf("可用构建内存不足：Docker总内存%dMiB，可用%dMiB，至少需要%dMiB（含保留给运行服务的1024MiB）；低峰重试或用独立构建机。Windows请检查%%UserProfile%%\\.wslconfig [wsl2] memory=8GB/processors=2，调整后在所有任务停止时由用户重启WSL", total>>20, available>>20, required>>20)
+		return fmt.Errorf("可用构建内存不足：Docker总内存%dMiB，可用%dMiB，至少需要%dMiB（含保留给运行服务的1024MiB）；低峰重试或用独立Linux构建机", total>>20, available>>20, required>>20)
 	}
 	return nil
 }
@@ -54,33 +53,31 @@ func buildEnvironment(b buildBudget) error {
 		return err
 	}
 	if info.OSType != "linux" {
-		return errors.New("构建需要Docker Linux容器后端（WSL2）；当前不是Linux Engine")
+		return errors.New("构建需要本机Docker Linux Engine")
 	}
 	if !info.MemoryLimit || !info.CPUCfsQuota {
 		return errors.New("当前Linux Engine缺少内存/CPU配额控制，拒绝无保护构建；请使用支持cgroup限制的Engine或独立构建机")
 	}
-	available := info.MemTotal
-	if runtime.GOOS == "linux" {
-		text, err := os.ReadFile("/proc/meminfo")
-		if err != nil {
-			return err
-		}
-		found := false
-		for _, line := range strings.Split(string(text), "\n") {
-			fields := strings.Fields(line)
-			if len(fields) >= 2 && fields[0] == "MemAvailable:" {
-				kb, err := strconv.ParseUint(fields[1], 10, 64)
-				if err != nil {
-					return err
-				}
-				available = kb << 10
-				found = true
-				break
+	text, err := os.ReadFile("/proc/meminfo")
+	if err != nil {
+		return err
+	}
+	var available uint64
+	found := false
+	for _, line := range strings.Split(string(text), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) >= 2 && fields[0] == "MemAvailable:" {
+			kb, err := strconv.ParseUint(fields[1], 10, 64)
+			if err != nil {
+				return err
 			}
+			available = kb << 10
+			found = true
+			break
 		}
-		if !found {
-			return errors.New("无法读取MemAvailable，拒绝在资源未知时构建")
-		}
+	}
+	if !found {
+		return errors.New("无法读取MemAvailable，拒绝在资源未知时构建")
 	}
 	if err := validateBuildBudget(b, info.MemTotal, available); err != nil {
 		return err

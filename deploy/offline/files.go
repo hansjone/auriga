@@ -299,7 +299,7 @@ func resourceKeys(root string) error {
 	if err := writeResourceKeys(stage); err != nil {
 		return err
 	}
-	return renamePortable(stage, root)
+	return os.Rename(stage, root)
 }
 
 func writeResourceKeys(root string) error {

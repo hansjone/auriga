@@ -11,7 +11,7 @@
 
 ## 三步安装
 
-Windows改代码可用PowerShell 5.1的`.\auriga.ps1`，Docker Desktop（WSL2/Linux容器）或WSL2发行版内Engine二选一，入口自动搬运并构建，不需进入WSL敲命令。也可Windows编辑后拷到现场Linux构建。离线安装文件清单、资源检查及操作见[MAINTAIN.md](MAINTAIN.md)。只部署仍按下面Linux服务器步骤。
+任意电脑（包括 Windows）都可用浏览器下载并拷贝附件；auriga 只在 Linux amd64 服务器或独立 Linux 构建机运行。要改代码时，先拷入 Linux 完成 verify，再编辑、验证依赖、签名构建并安装/升级；也可在其他电脑编辑后拷回 Linux。操作与构建资源检查见 [MAINTAIN.md](MAINTAIN.md)。
 
 1. 在联网电脑用浏览器下载上述安装文件，拷入现场 `/media/auriga-release`。以下 `0.2.0` 是占位版本，替换成实际批准版本。
 2. 从独立核准的 Forgejo Release 正文或组织发布记录取得发行公钥指纹（SHA256，SPKI DER），核对下载摘要并解包。包内公钥无法自行证明发行身份；仅校验包内材料时程序打印指纹和“仅完整性，未核验发行身份”，并非零退出。将下例 `$ISSUER_FP` 设置为独立核对的64位小写指纹：

@@ -118,7 +118,7 @@ func replaceSourceFile(source, target string, mode fs.FileMode) error {
 	if copyErr != nil {
 		return copyErr
 	}
-	return renamePortable(temp, target)
+	return os.Rename(temp, target)
 }
 
 func applyChanges(source, archive string) error {

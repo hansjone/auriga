@@ -306,7 +306,7 @@ func finishInstall(s state) error {
 	}
 	fmt.Printf("核心服务已启动。管理台 %s://%s:%d/\n应急材料仅在私密 TTY 显示。\n", access.AdminOrigin.Scheme, access.AdminOrigin.Host, access.AdminOrigin.Port)
 	fmt.Printf("资源公钥根 %s\n降级私钥请导出至受控离线介质 %s\n", filepath.Join(s.Data, "resource-keys/resource-roots.json"), filepath.Join(s.Data, "resource-keys/offline/downgrade.pk8"))
-	fmt.Printf("服务器站点构建私钥（仅root）%s；Windows开发机另行 keygen site，公钥通过 trust add-site-key 登记。\n", filepath.Join(s.Data+".oneclick", "site-build-key/site-private.pem"))
+	fmt.Printf("服务器站点构建私钥（仅root）%s；独立Linux构建机另行 keygen site，公钥通过 trust add-site-key 登记。\n", filepath.Join(s.Data+".oneclick", "site-build-key/site-private.pem"))
 	return nil
 }
 
@@ -481,7 +481,7 @@ func provisionResource(s state) error {
 				return err
 			}
 		}
-		if err := renamePortable(stage, root); err != nil {
+		if err := os.Rename(stage, root); err != nil {
 			return err
 		}
 	} else if err != nil {
@@ -509,7 +509,7 @@ func provisionResource(s state) error {
 		if err := os.Chown(stage, 10001, 10001); err != nil {
 			return err
 		}
-		if err := renamePortable(stage, objects); err != nil {
+		if err := os.Rename(stage, objects); err != nil {
 			return err
 		}
 	} else if err != nil {

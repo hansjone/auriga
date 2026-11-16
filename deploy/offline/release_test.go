@@ -126,7 +126,6 @@ func TestReleaseCacheSignedPartsAndTagGate(t *testing.T) {
 		return buildGate{Passed: true, Commit: o.Commit, LockDigest: o.LockDigest, SourceSHA: o.SourceSHA, CatalogSHA: o.CatalogSHA, DevkitSHA: o.DevkitSHA, OutputSHA: hash, Network: gateNetwork}, err
 	}
 	builders.Executable = filepath.Join(t.TempDir(), "cli")
-	builders.WindowsExecutable = builders.Executable
 	if err := os.WriteFile(builders.Executable, []byte("fixture cli"), 0755); err != nil {
 		t.Fatal(err)
 	}
@@ -137,6 +136,9 @@ func TestReleaseCacheSignedPartsAndTagGate(t *testing.T) {
 	}
 	if err := verifySums(opts.Out); err != nil {
 		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(opts.Out, "auriga.exe")); !os.IsNotExist(err) {
+		t.Fatal("Linux release unexpectedly includes a Windows launcher", err)
 	}
 	fp, err := publicFingerprint(public)
 	if err != nil {
@@ -159,6 +161,9 @@ func TestReleaseCacheSignedPartsAndTagGate(t *testing.T) {
 	archived := filepath.Join(parent, "source")
 	if err := extractVerified(filepath.Join(opts.Out, "auriga-source-1.0.tar"), archived, ""); err != nil {
 		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(archived, "bin/auriga-cli.exe")); !os.IsNotExist(err) {
+		t.Fatal("source archive unexpectedly includes a Windows executable", err)
 	}
 	m, err := readSourceManifest(archived)
 	if err != nil || m.Source.UpstreamVersion != "1.0" {

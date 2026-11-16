@@ -95,12 +95,12 @@ func TestBuildBudgetRefusesInsufficientAvailableMemory(t *testing.T) {
 }
 
 func TestDockerEndpointRejectsRemoteBeforeConnection(t *testing.T) {
-	for _, endpoint := range []string{"tcp://192.0.2.1:2376", "ssh://example.com", "npipe:////remote/pipe/docker"} {
+	for _, endpoint := range []string{"tcp://192.0.2.1:2376", "ssh://example.com", "npipe:////remote/pipe/docker", "npipe:////./pipe/dockerDesktopLinuxEngine"} {
 		if err := localDockerEndpoint(endpoint); err == nil {
 			t.Fatal(endpoint)
 		}
 	}
-	for _, endpoint := range []string{"unix:///var/run/docker.sock", "npipe:////./pipe/dockerDesktopLinuxEngine"} {
+	for _, endpoint := range []string{"unix:///var/run/docker.sock"} {
 		if err := localDockerEndpoint(endpoint); err != nil {
 			t.Fatal(err)
 		}

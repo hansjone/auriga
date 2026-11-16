@@ -182,9 +182,6 @@ func TestReviewSiteKeyRegistrationAndSigning(t *testing.T) {
 	if err := bundle([]string{"--build", "--offline"}); err == nil || !strings.Contains(err.Error(), "--sign-key") {
 		t.Fatal(err)
 	}
-	if _, err := parseSiteBuild([]string{"--build", "--offline"}); err == nil {
-		t.Fatal("Windows accepted missing signer")
-	}
 }
 
 func reviewArchiveKit(t *testing.T) (string, string, string) {
@@ -238,7 +235,7 @@ func TestReviewDevkitVerifyDoesNotNeedBuildResources(t *testing.T) {
 	source, full, _ := reviewArchiveKit(t)
 	t.Chdir(source)
 	t.Setenv("PATH", t.TempDir())
-	if err := dispatch([]string{"devkit", "verify", full}); err != nil {
+	if err := devkit([]string{"verify", full}); err != nil {
 		t.Fatal("dependency verification required Docker/resources", err)
 	}
 }

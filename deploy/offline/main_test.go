@@ -3,9 +3,21 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
+
+func TestCLIRejectsUnsupportedHosts(t *testing.T) {
+	if runtime.GOOS == "linux" && runtime.GOARCH == "amd64" {
+		t.Skip("unsupported-host boundary runs in the non-Linux CI job")
+	}
+	for _, args := range [][]string{{"--help"}, {"keygen", "site"}, {"verify", "."}, {"bundle", "--build", "--offline"}} {
+		if err := dispatch(args); err == nil || !strings.Contains(err.Error(), "Linux amd64") {
+			t.Fatalf("unsupported host accepted %v: %v", args, err)
+		}
+	}
+}
 
 func TestInstallArguments(t *testing.T) {
 	for _, args := range [][]string{{"--wat"}, {"--address", "$(id)"}, {"--address", "192.0.2.10", "--domain", "example.com"}, {"--domain", "../evil"}} {
