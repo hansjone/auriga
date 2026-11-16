@@ -31,6 +31,8 @@ func TestDevkitCacheAllowsSourceEditsRejectsCacheTampering(t *testing.T) {
 	if err := writeSums(root); err != nil {
 		t.Fatal(err)
 	}
+	key, _ := testSigningKeys(t)
+	signTestRoot(t, root, key)
 	if err := os.WriteFile(filepath.Join(root, "source/main.go"), []byte("site edit"), 0644); err != nil {
 		t.Fatal(err)
 	}

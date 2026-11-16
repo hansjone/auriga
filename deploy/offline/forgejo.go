@@ -316,7 +316,11 @@ func uploadRelease(o uploadOptions, client *http.Client) error {
 		return err
 	}
 	if status == 404 {
-		body := map[string]any{"tag_name": manifest.Tag, "target_commitish": manifest.Commit, "name": manifest.Tag, "draft": true, "body": "Auriga 离线安装包与开发套件。下载 SHA256SUMS 和签名，从独立渠道核准发行公钥；使用源码中的 DEPLOY.md / MAINTAIN.md。"}
+		fp, err := publicFingerprint(o.Key)
+		if err != nil {
+			return err
+		}
+		body := map[string]any{"tag_name": manifest.Tag, "target_commitish": manifest.Commit, "name": manifest.Tag, "draft": true, "body": "Auriga 离线安装包与开发套件。发行公钥指纹 SHA256(SPKI DER)：" + fp + "。请从独立渠道核准，verify/unpack/install必须使用 --trust-fingerprint " + fp + " 或 --verify-key 批准公钥。使用源码中的 DEPLOY.md / MAINTAIN.md。"}
 		if err := a.json("POST", repo+"/releases", body, &remote, 201); err != nil {
 			return err
 		}
@@ -365,7 +369,11 @@ func uploadRelease(o uploadOptions, client *http.Client) error {
 		}
 	}
 	if o.Publish && remote.Draft {
-		if err := a.json("PATCH", releasePath, map[string]bool{"draft": false}, &remote, 200); err != nil {
+		fp, err := publicFingerprint(o.Key)
+		if err != nil {
+			return err
+		}
+		if err := a.json("PATCH", releasePath, map[string]any{"draft": false, "body": "Auriga 离线安装包与开发套件。发行公钥指纹 SHA256(SPKI DER)：" + fp + "。从独立渠道核对后使用 --trust-fingerprint " + fp + "；参见DEPLOY.md / MAINTAIN.md。"}, &remote, 200); err != nil {
 			return err
 		}
 	}

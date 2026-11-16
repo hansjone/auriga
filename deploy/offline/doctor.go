@@ -91,11 +91,15 @@ func doctor(s state) error {
 		}
 	}
 	check("Docker/Compose版本", "离线预装 Docker Engine 与 Compose 2.29+，检查本机 socket。", dockerReady)
+	check("发行信任状态", "从批准公钥重新建立受信安装；无签名历史标记不会自动清除。", func() error {
+		return trustHealth(s)
+	})
 	check("离线包完整性", "从受信原包恢复发行文件。", func() error {
 		if err := verifySums(s.Package); err != nil {
 			return err
 		}
-		return verifySignature(s.Package, s.PublicKey)
+		_, err := verifyStatePackage(s, s.Package, "", false)
+		return err
 	})
 	check("镜像摘要与层", "重拷离线包并由 install/upgrade 重新 load，勿直接替换镜像。", func() error {
 		var r release

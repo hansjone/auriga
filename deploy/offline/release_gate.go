@@ -110,6 +110,9 @@ func refreshReleaseInputs(root string, r release, key string) error {
 	if err := jsonFile(filepath.Join(root, "devkit.json"), kit, 0644); err != nil {
 		return err
 	}
+	if err := signingPublic(key, filepath.Join(root, "release-public.pem")); err != nil {
+		return err
+	}
 	if err := writeSums(root); err != nil {
 		return err
 	}
@@ -118,7 +121,12 @@ func refreshReleaseInputs(root string, r release, key string) error {
 
 func writeDownloads(root, tag string, cat devkitCatalog, assets []assetInfo) error {
 	var b strings.Builder
-	fmt.Fprintf(&b, "Auriga %s 浏览器下载说明（字节为精确大小）\n只从本版本 Forgejo Release 手动下载，再拷入现场；现场无需Git或网络。\n只部署：未分卷时只需 auriga-offline-%s.tar 和 SHA256SUMS 两个文件。\n先系统tar解包，进入包目录运行 ./auriga verify .，再 sudo ./auriga install --address 192.0.2.10。\n改代码：再下载 auriga-source-%s.tar 和 auriga-devkit-%s.tar。源码包自带Linux amd64 CLI、版本基线和公钥。\n分卷：下载同名前缀全部 .partNNN、.parts.json及.sig；另下载auriga引导程序，用 ./auriga unpack 首卷 --out 新目录。\n累积基线 %s，最新 %s，支持%d版；已有精确上版套件可只下载delta代替完整devkit。\n新基线/跨大版本/超阈值时下载完整套件解包到新目录；旧基线在原Forgejo Release保留。\n校验全离线，包内公钥默认用于完整性检查；如需独立身份核验，用已批准公钥 --verify-key 固定。\n\n", tag, tag, tag, tag, cat.Baseline, cat.Latest, len(cat.Versions))
+	fingerprint, err := publicFingerprint(filepath.Join(root, "release-public.pem"))
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(&b, "发行公钥指纹 SHA256(SPKI DER)：%s\n从独立核准的Forgejo Release正文/组织文档核对本指纹；所有verify/unpack/install示例必须追加 --trust-fingerprint %s（或--verify-key批准公钥）。\n仅包内公钥只能校验完整性，未核验身份会非零退出。\n", fingerprint, fingerprint)
+	fmt.Fprintf(&b, "Auriga %s 浏览器下载说明（字节为精确大小）\n只从本版本 Forgejo Release 手动下载，再拷入现场；现场无需Git或网络。\n只部署：未分卷时只需 auriga-offline-%s.tar 和 SHA256SUMS 两个文件。\n先系统tar解包，进入包目录运行 ./auriga verify .，再 sudo ./auriga install --address 192.0.2.10。\n改代码：再下载 auriga-source-%s.tar 和 auriga-devkit-%s.tar。源码包自带Linux amd64 CLI、版本基线和公钥。\n分卷：下载同名前缀全部 .partNNN、.parts.json及.sig；另下载auriga引导程序，用 ./auriga unpack 首卷 --out 新目录。\n累积基线 %s，最新 %s，支持%d版；已有精确上版套件可只下载delta代替完整devkit。\n新基线/跨大版本/超阈值时下载完整套件解包到新目录；旧基线在原Forgejo Release保留。\n校验全离线，必须用已独立核对的 --trust-fingerprint 或 --verify-key 固定发行身份。\n\n", tag, tag, tag, tag, cat.Baseline, cat.Latest, len(cat.Versions))
 	for _, a := range assets {
 		purpose := "可选：引导程序/公钥"
 		switch {

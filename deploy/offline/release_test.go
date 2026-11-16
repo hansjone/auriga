@@ -138,6 +138,14 @@ func TestReleaseCacheSignedPartsAndTagGate(t *testing.T) {
 	if err := verifySums(opts.Out); err != nil {
 		t.Fatal(err)
 	}
+	fp, err := publicFingerprint(public)
+	if err != nil {
+		t.Fatal(err)
+	}
+	downloads, err := os.ReadFile(filepath.Join(opts.Out, "DOWNLOADS.txt"))
+	if err != nil || !strings.Contains(string(downloads), fp) {
+		t.Fatal("download guide missing fingerprint", err)
+	}
 	if err := verifySignature(opts.Out, public); err != nil {
 		t.Fatal(err)
 	}

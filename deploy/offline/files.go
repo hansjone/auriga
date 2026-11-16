@@ -288,7 +288,22 @@ func jsonFile(path string, value any, mode fs.FileMode) error {
 }
 
 func resourceKeys(root string) error {
-	if err := os.Mkdir(root, 0700); err != nil {
+	if _, err := os.Lstat(root); !os.IsNotExist(err) {
+		return errors.New("资源密钥目录已存在或不可访问；拒绝覆盖，残缺目录请从备份恢复或隔离后重试")
+	}
+	stage, err := os.MkdirTemp(filepath.Dir(root), ".auriga-resource-keys-")
+	if err != nil {
+		return err
+	}
+	defer func() { _ = os.RemoveAll(stage) }()
+	if err := writeResourceKeys(stage); err != nil {
+		return err
+	}
+	return renamePortable(stage, root)
+}
+
+func writeResourceKeys(root string) error {
+	if err := os.Chmod(root, 0700); err != nil {
 		return err
 	}
 	for _, part := range []string{"platform", "offline"} {

@@ -24,7 +24,7 @@ func TestWindowsTransferPreservesModesAndCanonicalSource(t *testing.T) {
 		t.Fatal(err)
 	}
 	p := provenance{Commit: strings.Repeat("a", 40), UpstreamVersion: "1.0", Version: "1.0"}
-	if err := writeSourceManifest(source, p, strings.Repeat("b", 40), kit.Release); err != nil {
+	if err := signedTestSourceManifest(t, source, p, strings.Repeat("b", 40), kit.Release); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.Mkdir(filepath.Join(source, "bin"), 0755); err != nil {
@@ -45,6 +45,8 @@ func TestWindowsTransferPreservesModesAndCanonicalSource(t *testing.T) {
 		t.Fatal(err)
 	}
 	key, _ := testSigningKeys(t)
+	signTestRoot(t, source, key)
+	signTestRoot(t, single, key)
 	full := filepath.Join(t.TempDir(), "full")
 	if _, err := composeDevkit("", single, "1.0", p.Commit, full, key, 1<<30, true); err != nil {
 		t.Fatal(err)
@@ -56,7 +58,7 @@ func TestWindowsTransferPreservesModesAndCanonicalSource(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Chdir(source)
-	transfer, err := prepareSiteTransfer([]string{"--build", "--offline", "--out", filepath.Join(t.TempDir(), "out.tar")})
+	transfer, err := prepareSiteTransfer([]string{"--build", "--offline", "--sign-key", key, "--out", filepath.Join(t.TempDir(), "out.tar")})
 	if err != nil {
 		t.Fatal(err)
 	}

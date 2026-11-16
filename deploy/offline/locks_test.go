@@ -63,6 +63,7 @@ func TestDevkitVerifyBindsNewTagAndExplainsMismatch(t *testing.T) {
 		t.Fatal(err)
 	}
 	key, public := testSigningKeys(t)
+	signTestRoot(t, root, key)
 	if err := signSums(root, key); err != nil {
 		t.Fatal(err)
 	}

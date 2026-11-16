@@ -16,7 +16,11 @@ func TestDockerVolumeTransferIntegration(t *testing.T) {
 		t.Fatal(err)
 	}
 	out := filepath.Join(t.TempDir(), "volume.tar")
-	if err := (windowsBackend{Kind: "docker"}).build([]string{"--build", "--offline", "--out", out}); err != nil {
+	keydir := filepath.Join(t.TempDir(), "site-key")
+	if err := generateSiteKey(keydir); err != nil {
+		t.Fatal(err)
+	}
+	if err := (windowsBackend{Kind: "docker"}).build([]string{"--build", "--offline", "--out", out, "--sign-key", filepath.Join(keydir, "site-private.pem")}); err != nil {
 		t.Fatal(err)
 	}
 	target := filepath.Join(t.TempDir(), "package")

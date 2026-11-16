@@ -44,7 +44,9 @@ def windows_exercise(original, kit):
             print(result.stderr)
             assert result.returncode == 0, 'PowerShell entry failed'
             return result.stdout + result.stderr
-        ps('verify', '.')
+        ps('verify', '.', '--verify-key', winpath(checkout / 'release-public.pem'))
+        keydir = stage / 'site-key'
+        ps('keygen', 'site', '--out', winpath(keydir))
         for path in list(checkout.rglob('*.sh')) + list(checkout.rglob('go.mod')):
             path.write_bytes(path.read_bytes().replace(b'\r\n', b'\n').replace(b'\n', b'\r\n'))
             path.chmod(0o644)
@@ -53,7 +55,7 @@ def windows_exercise(original, kit):
         patch = stage / 'windows changes.tar'
         ps('changes', 'export', '--out', winpath(patch))
         output = stage / 'windows-server.tar'
-        log = ps('bundle', '--build', '--offline', '--backend', 'wsl', '--out', winpath(output))
+        log = ps('bundle', '--build', '--offline', '--backend', 'wsl', '--out', winpath(output), '--sign-key', winpath(keydir / 'site-private.pem'))
         assert 'fixture-cgroup-memory=4294967296' in log
         assert 'fixture-net-interfaces=lo,' in log
         with tarfile.open(output) as archive:
@@ -130,22 +132,23 @@ docker build --platform linux/amd64 --network none --pull=false --provenance=fal
     print(run('unshare', '--net', ROOT / 'bin/auriga-cli', 'release', '--tag', '0.2.0',
               '--release', index, '--outdir', distribution, '--cache-dir', cache,
               '--sign-key', private, '--attachment-limit', 32 << 20, '--build', '--new-baseline', cwd=source))
-    print(run('unshare', '--net', distribution / 'auriga', 'verify', distribution))
+    print(run('unshare', '--net', distribution / 'auriga', 'verify', distribution, '--verify-key', public))
     first_manifest = json.loads((distribution / 'release-manifest.json').read_text())
     assert first_manifest['offlineBuildGate']['passed']
     kit = directory / 'kit'
     print(run('unshare', '--net', distribution / 'auriga', 'unpack',
-              distribution / 'auriga-devkit-0.2.0.tar.part001', '--out', kit))
+              distribution / 'auriga-devkit-0.2.0.tar.part001', '--out', kit, '--verify-key', public))
     original = directory / 'original-source'
     print(run('unshare', '--net', distribution / 'auriga', 'unpack',
-              distribution / 'auriga-source-0.2.0.tar', '--out', original))
+              distribution / 'auriga-source-0.2.0.tar', '--out', original, '--verify-key', public))
     assert not (original / '.git').exists()
-    if '--volume-only' not in sys.argv:
+    if '--volume-only' not in sys.argv and '--linux-only' not in sys.argv:
         windows_exercise(original, kit)
-    volume_env = dict(os.environ, AURIGA_VOLUME_FIXTURE_SOURCE=str(original), AURIGA_VOLUME_FIXTURE_KIT=str(kit))
-    volume_result = subprocess.run([ROOT / 'deploy/offline/offline-linux.test', '-test.v', '-test.run', '^TestDockerVolumeTransferIntegration$'], env=volume_env, text=True, stdout=subprocess.PIPE)
-    print(volume_result.stdout)
-    volume_result.check_returncode()
+    if '--linux-only' not in sys.argv:
+        volume_env = dict(os.environ, AURIGA_VOLUME_FIXTURE_SOURCE=str(original), AURIGA_VOLUME_FIXTURE_KIT=str(kit))
+        volume_result = subprocess.run([ROOT / 'deploy/offline/offline-linux.test', '-test.v', '-test.run', '^TestDockerVolumeTransferIntegration$'], env=volume_env, text=True, stdout=subprocess.PIPE)
+        print(volume_result.stdout)
+        volume_result.check_returncode()
     if '--windows-only' in sys.argv or '--volume-only' in sys.argv:
         return
     fakebin = directory / 'no-git'
@@ -183,14 +186,17 @@ docker build --platform linux/amd64 --network none --pull=false --provenance=fal
     print(fieldrun(original / 'auriga', 'devkit', 'verify', kit, '--version', '0.2.0', cwd=original))
     print(fieldrun(original / 'auriga', 'install', '--package',
                    next_release / 'auriga-offline-0.2.1.tar.part001',
-                   '--proxy', directory / 'access.json', '--data', directory / 'multipart-site'))
+                   '--proxy', directory / 'access.json', '--data', directory / 'multipart-site', '--verify-key', public))
     checkout = directory / 'new-source'
-    print(fieldrun(original / 'auriga', 'unpack', next_release / 'auriga-source-0.2.1.tar', '--out', checkout))
+    print(fieldrun(original / 'auriga', 'unpack', next_release / 'auriga-source-0.2.1.tar', '--out', checkout, '--verify-key', public))
     print(fieldrun(checkout / 'auriga', 'changes', 'apply', patch, cwd=checkout))
     assert (checkout / 'local-feature.txt').read_text() == 'local site addition\n'
     print(fieldrun(checkout / 'auriga', 'devkit', 'verify', kit, cwd=checkout))
+    site_keys = directory / 'site-build-key'
+    print(fieldrun(checkout / 'auriga', 'keygen', 'site', '--out', site_keys))
+    site_private, site_public = site_keys / 'site-private.pem', site_keys / 'site-public.pem'
     output = directory / 'site.tar'
-    print(fieldrun(checkout / 'auriga', 'bundle', '--build', '--offline', '--version', '0.2.1-site.3', '--out', output, cwd=checkout))
+    print(fieldrun(checkout / 'auriga', 'bundle', '--build', '--offline', '--version', '0.2.1-site.3', '--out', output, '--sign-key', site_private, cwd=checkout))
     with tarfile.open(output) as archive:
         provenance = json.load(archive.extractfile('provenance.json'))
     assert provenance['version'] == '0.2.1-site.3' and provenance['dirty'] and provenance['siteChanges']
@@ -199,8 +205,14 @@ docker build --platform linux/amd64 --network none --pull=false --provenance=fal
     field.mkdir()
     with tarfile.open(output) as archive:
         archive.extractall(field, filter='data')
-    site = directory / 'new-site'
-    print(fieldrun(field / 'auriga', 'install', '--proxy', directory / 'access.json', '--data', site))
+    site = directory / 'multipart-site'
+    untrusted = subprocess.run(['unshare', '--net', original / 'auriga', 'upgrade', output, '--data', site], capture_output=True, text=True)
+    assert untrusted.returncode != 0 and 'state固定' in untrusted.stderr
+    der = subprocess.check_output(['openssl', 'pkey', '-pubin', '-in', str(site_public), '-outform', 'DER'])
+    import hashlib
+    fingerprint = hashlib.sha256(der).hexdigest()
+    print(fieldrun(original / 'auriga', 'trust', 'add-site-key', site_public, '--confirm-fingerprint', fingerprint, '--data', site))
+    print(fieldrun(original / 'auriga', 'upgrade', output, '--data', site))
     result = subprocess.run(['unshare', '--net', field / 'auriga', 'doctor', '--data', site], env=field_env, capture_output=True, text=True)
     assert result.returncode == 1 and '0.2.1-site.3' in result.stdout and provenance['commit'] in result.stdout
     print(result.stdout)
@@ -214,12 +226,12 @@ docker build --platform linux/amd64 --network none --pull=false --provenance=fal
     dependency = kit / 'blobs' / catalog['versions']['0.2.1']['files']['inputs.tar']
     saved = dependency.with_suffix('.saved')
     dependency.rename(saved)
-    failure = subprocess.run(['unshare', '--net', checkout / 'auriga', 'bundle', '--build', '--offline'], cwd=checkout, env=field_env, capture_output=True, text=True)
+    failure = subprocess.run(['unshare', '--net', checkout / 'auriga', 'bundle', '--build', '--offline', '--sign-key', site_private], cwd=checkout, env=field_env, capture_output=True, text=True)
     assert failure.returncode != 0 and 'inputs.tar' in failure.stderr
     saved.rename(dependency)
     with open(dependency, 'r+b') as stream:
         stream.write(b'tampered')
-    failure = subprocess.run(['unshare', '--net', checkout / 'auriga', 'bundle', '--build', '--offline'], cwd=checkout, env=field_env, capture_output=True, text=True)
+    failure = subprocess.run(['unshare', '--net', checkout / 'auriga', 'bundle', '--build', '--offline', '--sign-key', site_private], cwd=checkout, env=field_env, capture_output=True, text=True)
     assert failure.returncode != 0 and 'inputs.tar' in failure.stderr
     assert not marker.exists(), 'field command invoked Git'
     full_size = next(a['size'] for a in next_manifest['archives'] if a['name'] == 'auriga-devkit-0.2.1.tar')

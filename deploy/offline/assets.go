@@ -217,11 +217,10 @@ func openArchive(file string) (io.ReadCloser, error) {
 }
 
 func extractVerified(file, destination, key string) error {
-	if index := archiveIndex(file); index != "" {
-		if err := verifyFileSignature(index, key); err != nil {
-			return err
-		}
-	}
+	return extractWithTrust(file, destination, trustOptions{Key: key}, false)
+}
+
+func extractWithTrust(file, destination string, o trustOptions, identity bool) error {
 	if _, err := os.Lstat(destination); !os.IsNotExist(err) {
 		return errors.New("解包目标已存在或不可访问")
 	}
@@ -239,14 +238,22 @@ func extractVerified(file, destination, key string) error {
 	if err := verifySums(stage); err != nil {
 		return err
 	}
-	if err := verifySignature(stage, key); err != nil {
+	key, unsigned := o.Key, false
+	if identity {
+		var err error
+		key, unsigned, err = verifyRootTrust(stage, o)
+		if err != nil {
+			return err
+		}
+	} else if err := verifySignature(stage, key); err != nil {
 		return err
 	}
-	if index := archiveIndex(file); index != "" && key == "" {
-		if _, err := os.Stat(filepath.Join(stage, "release-public.pem")); err == nil {
-			if err := verifyFileSignature(index, filepath.Join(stage, "release-public.pem")); err != nil {
-				return err
-			}
+	if key == "" {
+		key = filepath.Join(stage, "release-public.pem")
+	}
+	if index := archiveIndex(file); index != "" && !unsigned {
+		if err := verifyFileSignature(index, key); err != nil {
+			return err
 		}
 	}
 	return renamePortable(stage, destination)
@@ -258,14 +265,15 @@ func unpackCommand(args []string) error {
 	}
 	f := flags("unpack")
 	out := f.String("out", "", "")
-	key := f.String("verify-key", "", "")
+	var o trustOptions
+	o.flags(f)
 	if err := f.Parse(args[1:]); err != nil {
 		return err
 	}
 	if *out == "" || f.NArg() != 0 {
 		return errors.New("unpack 需要 --out 全新目录")
 	}
-	return extractVerified(args[0], *out, *key)
+	return extractWithTrust(args[0], *out, o, true)
 }
 
 func verifyCommand(args []string) error {
@@ -273,7 +281,8 @@ func verifyCommand(args []string) error {
 		return errors.New("verify 需要发行附件目录")
 	}
 	f := flags("verify")
-	key := f.String("verify-key", "", "")
+	var o trustOptions
+	o.flags(f)
 	if err := f.Parse(args[1:]); err != nil {
 		return err
 	}
@@ -290,30 +299,18 @@ func verifyCommand(args []string) error {
 			return err
 		}
 		defer func() { _ = os.RemoveAll(stage) }()
-		if err := extractVerified(args[0], filepath.Join(stage, "package"), *key); err != nil {
+		if err := extractWithTrust(args[0], filepath.Join(stage, "package"), o, true); err != nil {
 			return err
 		}
-		if err := verifyDownloadedSignature(filepath.Join(stage, "package"), *key); err != nil {
-			return err
-		}
-		fmt.Println("PASS 归档/分卷摘要与包内签名校验")
+		fmt.Println("PASS 归档/分卷校验（无签名例外见警告）")
 		return nil
-	}
-	if err := verifyDownloadedSignature(args[0], *key); err != nil {
-		return err
 	}
 	if err := verifySums(args[0]); err != nil {
 		return err
 	}
-	fmt.Println("PASS 全部发行附件 SHA256SUMS 与 Ed25519 签名")
-	return nil
-}
-
-func verifyDownloadedSignature(root, key string) error {
-	if key == "" {
-		if _, err := os.Stat(filepath.Join(root, "release-public.pem")); err != nil {
-			return errors.New("下载内容缺少包内发行公钥；不能声称签名校验通过")
-		}
+	if _, _, err := verifyRootTrust(args[0], o); err != nil {
+		return err
 	}
-	return verifySignature(root, key)
+	fmt.Println("PASS 全部发行附件校验（无签名例外见警告）")
+	return nil
 }

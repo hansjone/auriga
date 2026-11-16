@@ -113,6 +113,10 @@ type pendingUpgrade struct {
 }
 
 func upgrade(data, archive string) error {
+	return upgradeAllowed(data, archive, false)
+}
+
+func upgradeAllowed(data, archive string, allow bool) error {
 	journal := data + ".upgrade.json"
 	if _, err := os.Lstat(journal); err == nil {
 		var pending pendingUpgrade
@@ -131,23 +135,26 @@ func upgrade(data, archive string) error {
 	if err != nil {
 		return err
 	}
+	if err := verifySums(s.Package); err != nil {
+		return err
+	}
+	oldUnsigned, err := verifyStatePackage(s, s.Package, "", allow)
+	if err != nil {
+		return err
+	}
 	stage, err := os.MkdirTemp(filepath.Dir(data), ".auriga-upgrade-")
 	if err != nil {
 		return err
 	}
 	defer func() { _ = os.RemoveAll(stage) }()
-	if index := archiveIndex(archive); index != "" {
-		if err := verifyFileSignature(index, s.PublicKey); err != nil {
-			return err
-		}
-	}
 	if err := unpack(archive, stage); err != nil {
 		return err
 	}
 	if err := verifySums(stage); err != nil {
 		return err
 	}
-	if err := verifySignature(stage, s.PublicKey); err != nil {
+	unsigned, err := verifyStatePackage(s, stage, archiveIndex(archive), allow)
+	if err != nil {
 		return err
 	}
 	images, err := loadImages(stage)
@@ -162,6 +169,7 @@ func upgrade(data, archive string) error {
 	if err := jsonFile(journal, pending, 0600); err != nil {
 		return errors.Join(err, nas(s, "start", "--network-offline"))
 	}
+	s.AllowUnsigned = s.AllowUnsigned || oldUnsigned || unsigned
 	activateErr := activateUpgrade(s, stage, images)
 	if activateErr != nil {
 		fmt.Println("升级失败，恢复升级前冷备份与原发行。")
@@ -230,7 +238,14 @@ func activateUpgrade(s state, stage string, images map[string]string) error {
 		return err
 	}
 	// Keep previous code with the cold backup, outside the next backup's tree.
-	return os.Rename(previous, filepath.Join(filepath.Dir(s.Data), "auriga-backups", "release-"+time.Now().UTC().Format("20060102T150405.000000000")))
+	archivePreviousRelease(previous, filepath.Join(filepath.Dir(s.Data), "auriga-backups", "release-"+time.Now().UTC().Format("20060102T150405.000000000")))
+	return nil
+}
+
+func archivePreviousRelease(previous, target string) {
+	if err := os.Rename(previous, target); err != nil {
+		fmt.Fprintf(os.Stderr, "警告：新发行已健康，旧发行归档移动失败；保留 %s，请人工归档后再升级：%v\n", previous, err)
+	}
 }
 
 func rollback(p pendingUpgrade) error {

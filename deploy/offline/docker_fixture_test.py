@@ -74,11 +74,11 @@ set -eu
 load_stack_env
 docker run --rm --pull never --network none --mount "type=bind,src=$AURIGA_DATA_ROOT,dst=/data" --entrypoint sh "$AURIGA_IMAGE_POSTGRES" -ec 'touch /data/.auriga-initialized'
 ''', 0o755)
-    for name in ('preflight', 'start', 'stop'):
+    for name in ('render', 'preflight', 'start', 'stop'):
         write(recipe / f'scripts/{name}.sh', '#!/bin/sh\nexit 0\n', 0o755)
     health = json.dumps([dict(Service=name, State='running') for name in
                          ('postgres', 'nats', 'registry', 'platform', 'edge', 'agent', 'bifrost', 'egress')])
-    write(recipe / 'scripts/oneclick-compose.sh', f"#!/bin/sh\nprintf '%s\\n' '{health}'\n", 0o755)
+    write(recipe / 'scripts/oneclick-compose.sh', f"#!/bin/sh\nif [ \"$1\" = config ]; then echo '{{\"volumes\":{{}}}}'; exit 0; fi\nprintf '%s\\n' '{health}'\n", 0o755)
     artifact = directory / 'nas.tar'
     with tarfile.open(artifact, 'w') as archive:
         for path in nas.rglob('*'):
@@ -89,8 +89,11 @@ docker run --rm --pull never --network none --mount "type=bind,src=$AURIGA_DATA_
     identity = run('docker', 'image', 'inspect', '--format', '{{.Id}}', base)
     write(index, json.dumps(dict(schemaVersion=1, version='fixture', nas=dict(url=str(artifact), sha256=sha(artifact)),
           images={name: dict(ref=identity, tag='', archive='') for name in ('postgres', 'nats', 'registry')})))
+    private, public = directory / 'transport-private.pem', directory / 'transport-public.pem'
+    run('openssl', 'genpkey', '-algorithm', 'ED25519', '-out', private)
+    run('openssl', 'pkey', '-in', private, '-pubout', '-out', public)
     output = directory / 'offline.tar'
-    print(run('unshare', '--net', ROOT / 'bin/auriga-cli', 'bundle', '--release', index, '--out', output, cwd=ROOT))
+    print(run('unshare', '--net', ROOT / 'bin/auriga-cli', 'bundle', '--release', index, '--out', output, '--sign-key', private, cwd=ROOT))
     # Both bundle and the field CLI run with no interfaces/routes. All container
     # helpers also use --network none and talk only through the local socket.
     extracted = directory / 'field'
@@ -100,13 +103,30 @@ docker run --rm --pull never --network none --mount "type=bind,src=$AURIGA_DATA_
     access = json.loads((recipe / 'access-ip.example.json').read_text())
     write(directory / 'access.json', json.dumps(access))
     data_parent = directory / 'site'
-    command = ['unshare', '--net', extracted / 'auriga', 'install', '--proxy', directory / 'access.json', '--data', data_parent]
+    command = ['unshare', '--net', extracted / 'auriga', 'install', '--proxy', directory / 'access.json', '--data', data_parent, '--verify-key', public]
     print(run(*command))
     check = subprocess.run(['unshare', '--net', extracted / 'auriga', 'doctor', '--data', data_parent], capture_output=True, text=True)
     print(check.stdout)
+    print(check.stderr)
     assert check.returncode == 1 and 'FAIL' in check.stdout and 'PASS' in check.stdout
     assert 'PASS 对象存储UID10001写入' in check.stdout
     assert (data_parent / 'auriga-data/resource-keys/offline/downgrade.pk8').stat().st_mode & 0o777 == 0o600
+    state = json.loads((data_parent / 'auriga-data.oneclick/state.json').read_text())
+    assert len(state['trustedKeys']) == 2 and not state.get('allowUnsigned', False)
+    assert Path(state['publicKey']).is_file()
+    assert (data_parent / 'auriga-data.oneclick/site-build-key/site-private.pem').stat().st_mode & 0o777 == 0o600
+    unsigned = directory / 'unsigned-field'
+    shutil.copytree(extracted, unsigned)
+    (unsigned / 'SHA256SUMS.sig').unlink()
+    emergency = directory / 'emergency-site'
+    rejected = subprocess.run(['unshare', '--net', unsigned / 'auriga', 'install', '--proxy', directory / 'access.json', '--data', emergency], capture_output=True, text=True)
+    assert rejected.returncode == 1 and '缺少签名' in rejected.stderr
+    exception = subprocess.run(['unshare', '--net', unsigned / 'auriga', 'install', '--proxy', directory / 'access.json', '--data', emergency, '--allow-unsigned'], capture_output=True, text=True)
+    assert exception.returncode == 0 and '警告：--allow-unsigned' in exception.stderr, exception.stderr
+    assert json.loads((emergency / 'auriga-data.oneclick/state.json').read_text())['allowUnsigned']
+    alarm = subprocess.run(['unshare', '--net', unsigned / 'auriga', 'doctor', '--data', emergency], capture_output=True, text=True)
+    assert alarm.returncode == 1 and 'state记录曾使用--allow-unsigned' in alarm.stdout
+    print('PASS unsigned_default_rejection_explicit_exception_state_and_doctor_alarm')
     print(f'PASS fixture_bundle_install_doctor bytes={output.stat().st_size} field_namespace=unshare--net')
     return index, base
 

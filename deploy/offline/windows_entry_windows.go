@@ -30,13 +30,6 @@ func windowsDispatch(args []string) error {
 			return errors.New("当前Windows支持devkit verify/merge；发行打包由Linux维护机执行")
 		}
 		result = devkit(rest[1:])
-		if result == nil && rest[1] == "verify" {
-			source, err := os.Getwd()
-			if err != nil {
-				return err
-			}
-			result = b.doctor(source, buildBudget{4096, 2})
-		}
 	case "doctor":
 		if len(rest) > 2 || len(rest) == 2 && rest[1] != "--build" {
 			return errors.New("当前Windows doctor检查本机构建环境；部署诊断请在Linux服务器运行")

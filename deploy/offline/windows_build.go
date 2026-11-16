@@ -105,6 +105,9 @@ func parseSiteBuild(args []string) (siteBuildOptions, error) {
 	if f.NArg() != 0 || !*build || !*offline {
 		return o, errors.New("当前Windows服务端打包需要 bundle --build --offline；安装/upgrade请在Linux服务器执行")
 	}
+	if *key == "" {
+		return o, errors.New("离线现场构建必须 --sign-key <已登记站点构建私钥>")
+	}
 	return siteBuildOptions{Out: *out, Version: *version, Key: *key, Budget: buildBudget{*memory, *cpus}}, nil
 }
 
@@ -129,7 +132,7 @@ func materializeSiteTransfer(o siteBuildOptions) (*siteTransfer, error) {
 	if err := readJSON(filepath.Join(source, ".auriga-devkit.json"), &binding); err != nil {
 		return nil, errors.New("先运行 .\\auriga.ps1 devkit verify <完整套件目录>")
 	}
-	cat, err := readCatalog(binding.Root, "")
+	cat, err := readCatalog(binding.Root, filepath.Join(source, "release-public.pem"))
 	if err != nil {
 		return nil, err
 	}
@@ -183,18 +186,9 @@ func materializeSiteTransfer(o siteBuildOptions) (*siteTransfer, error) {
 		}
 	}
 	modes["bin/auriga-cli"] = sourceFile{Mode: 0755}
-	kit := entry.Kit
-	kit.Source = &m.Source
-	kit.Release.Version = m.Source.UpstreamVersion
-	for name, hash := range entry.Files {
-		if err := copyFile(filepath.Join(binding.Root, "blobs", hash), filepath.Join(root, "kit/cache", name), 0644); err != nil {
-			return nil, err
-		}
-	}
-	if err := jsonFile(filepath.Join(root, "kit/devkit.json"), kit, 0644); err != nil {
-		return nil, err
-	}
-	if err := writeSums(filepath.Join(root, "kit")); err != nil {
+	// Preserve the original signed catalog and its content-addressed blobs.
+	// A locally rewritten unsigned devkit would lose the release trust chain.
+	if err := copyTree(binding.Root, filepath.Join(root, "kit")); err != nil {
 		return nil, err
 	}
 	if o.Key != "" {

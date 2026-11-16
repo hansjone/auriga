@@ -16,7 +16,7 @@ func TestPortableSourceCRLFAndExecutableModes(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if err := writeSourceManifest(root, provenance{Commit: strings.Repeat("a", 40), UpstreamVersion: "1.0", Version: "1.0"}, strings.Repeat("b", 40), r); err != nil {
+	if err := signedTestSourceManifest(t, root, provenance{Commit: strings.Repeat("a", 40), UpstreamVersion: "1.0", Version: "1.0"}, strings.Repeat("b", 40), r); err != nil {
 		t.Fatal(err)
 	}
 	before, err := dependencyLocks(root, r)

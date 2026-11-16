@@ -408,7 +408,11 @@ func materializeVersion(root string, entry devkitVersion) (string, error) {
 	return stage, nil
 }
 func locateCumulative(source, root string) (string, *devkitManifest, error) {
-	cat, err := readCatalog(root, "")
+	key, err := sourceVerificationKey(source)
+	if err != nil {
+		return "", nil, err
+	}
+	cat, err := readCatalog(root, key)
 	if err != nil {
 		return "", nil, err
 	}
@@ -442,6 +446,13 @@ func locateCumulative(source, root string) (string, *devkitManifest, error) {
 	return stage, &kit, nil
 }
 func verifyCumulative(root, source, version, key string) error {
+	if key == "" {
+		var err error
+		key, err = sourceVerificationKey(source)
+		if err != nil {
+			return err
+		}
+	}
 	cat, err := readCatalog(root, key)
 	if err != nil {
 		return err

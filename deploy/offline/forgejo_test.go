@@ -68,6 +68,16 @@ func TestForgejoUploadDraftRetryAndConflict(t *testing.T) {
 			}
 			_ = json.NewEncoder(w).Encode(map[string]any{"id": 7, "draft": draft, "tag_name": "1.0"})
 		case endpoint == "/api/v1/repos/owner/repo/releases" && r.Method == "POST":
+			var body struct {
+				Body string `json:"body"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Error(err)
+			}
+			fp, err := publicFingerprint(public)
+			if err != nil || !strings.Contains(body.Body, fp) {
+				t.Error("release body missing approved key fingerprint", err)
+			}
 			created = true
 			mutations++
 			w.WriteHeader(201)
@@ -108,6 +118,16 @@ func TestForgejoUploadDraftRetryAndConflict(t *testing.T) {
 		case strings.HasPrefix(endpoint, "/download/"):
 			_, _ = w.Write(files[strings.TrimPrefix(endpoint, "/download/")])
 		case strings.HasSuffix(endpoint, "/releases/7") && r.Method == "PATCH":
+			var body struct {
+				Body string `json:"body"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Error(err)
+			}
+			fp, err := publicFingerprint(public)
+			if err != nil || !strings.Contains(body.Body, fp) {
+				t.Error("published body missing approved key fingerprint", err)
+			}
 			draft = false
 			mutations++
 			_, _ = io.WriteString(w, `{"id":7,"draft":false,"tag_name":"1.0"}`)

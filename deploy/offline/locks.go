@@ -174,6 +174,12 @@ func devkitVerify(args []string) error {
 	if err != nil {
 		return err
 	}
+	if *key == "" {
+		*key, err = sourceVerificationKey(sourceAbs)
+		if err != nil {
+			return err
+		}
+	}
 	if _, err := os.Lstat(filepath.Join(rootAbs, "devkit-catalog.json")); err == nil {
 		return verifyCumulative(rootAbs, sourceAbs, *version, *key)
 	}

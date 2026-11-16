@@ -149,6 +149,9 @@ func bundleExpected(args []string, expectedCommit string) error {
 	if *installAfter && (!*offline || !*build) {
 		return errors.New("--install 只支持 bundle --build --offline，先备份再upgrade")
 	}
+	if *build && *offline && *sign == "" {
+		return errors.New("离线现场构建必须 --sign-key <已登记站点构建私钥>；先运行 keygen site 并在服务器 trust add-site-key")
+	}
 	var r release
 	source, err := os.Getwd()
 	if err != nil {
@@ -412,7 +415,7 @@ func verifySignature(root, publicPath string) error {
 
 func verifyFileSignature(file, publicPath string) error {
 	if publicPath == "" {
-		return nil
+		return errors.New("缺少签名公钥，默认拒绝未签名材料")
 	}
 	raw, err := smallFile(publicPath, 64<<10)
 	if err != nil {

@@ -32,7 +32,7 @@ func TestPowerShell51ArchiveChangesAndClientDispatch(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, "go.mod"), []byte("module fixture\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
-	if err := writeSourceManifest(root, provenance{Commit: strings.Repeat("a", 40), UpstreamVersion: "1.0", Version: "1.0"}, strings.Repeat("b", 40), release{Version: "1.0", Build: &buildSpec{}}); err != nil {
+	if err := signedTestSourceManifest(t, root, provenance{Commit: strings.Repeat("a", 40), UpstreamVersion: "1.0", Version: "1.0"}, strings.Repeat("b", 40), release{Version: "1.0", Build: &buildSpec{}}); err != nil {
 		t.Fatal(err)
 	}
 	key, _ := testSigningKeys(t)
@@ -53,8 +53,15 @@ func TestPowerShell51ArchiveChangesAndClientDispatch(t *testing.T) {
 		cmd := exec.Command("powershell.exe", append([]string{"-NoProfile", "-ExecutionPolicy", "Bypass", "-File", filepath.Join(source, "auriga.ps1")}, args...)...)
 		return cmd.CombinedOutput()
 	}
-	if raw, err := run(root, "verify", "."); err != nil || !strings.Contains(string(raw), "PASS") {
+	if raw, err := run(root, "verify", ".", "--verify-key", filepath.Join(root, "release-public.pem")); err != nil || !strings.Contains(string(raw), "PASS") {
 		t.Fatal(string(raw), err)
+	}
+	if raw, err := run(root, "verify", "."); err == nil || !strings.Contains(string(raw), "仅完整性，未核验发行身份") {
+		t.Fatal("PowerShell did not propagate identity rejection", string(raw), err)
+	}
+	keydir := filepath.Join(t.TempDir(), "private site key")
+	if raw, err := run(root, "keygen", "site", "--out", keydir); err != nil || !strings.Contains(string(raw), "SHA256(SPKI)") {
+		t.Fatal("PowerShell site keygen failed", string(raw), err)
 	}
 	if err := os.WriteFile(filepath.Join(root, "new file.txt"), []byte("line1\r\nline2\r\n"), 0644); err != nil {
 		t.Fatal(err)

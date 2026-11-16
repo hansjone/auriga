@@ -74,7 +74,7 @@ func exportChanges(source, out string) error {
 		}
 		changes.Changes = append(changes.Changes, sourceChange{Path: name, Before: before, After: after})
 		if after != nil && !copied[after.SHA256] {
-			if err := copySourceFile(filepath.Join(source, name), filepath.Join(stage, "files", after.SHA256), name, 0644); err != nil {
+			if err := copySourcePayload(filepath.Join(source, name), filepath.Join(stage, "files", after.SHA256), name, 0644); err != nil {
 				return err
 			}
 			copied[after.SHA256] = true
@@ -109,8 +109,14 @@ func replaceSourceFile(source, target string, mode fs.FileMode) error {
 		return err
 	}
 	defer func() { _ = os.Remove(temp) }()
-	if err := copyFile(source, temp, mode); err != nil {
-		return err
+	var copyErr error
+	if windowsScript(target) {
+		copyErr = copySourceFile(source, temp, filepath.Base(target), mode)
+	} else {
+		copyErr = copyFile(source, temp, mode)
+	}
+	if copyErr != nil {
+		return copyErr
 	}
 	return renamePortable(temp, target)
 }
@@ -170,7 +176,7 @@ func applyChanges(source, archive string) error {
 			}
 		}
 		if change.After != nil {
-			actual, err := digest(filepath.Join(stage, "files", change.After.SHA256))
+			actual, err := sourceDigest(filepath.Join(stage, "files", change.After.SHA256), change.Path, change.After.SHA256)
 			if err != nil {
 				return err
 			}

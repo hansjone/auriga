@@ -50,6 +50,8 @@ func fixtureSingleKit(t *testing.T, version, marker string) string {
 	if err := writeSums(root); err != nil {
 		t.Fatal(err)
 	}
+	key, _ := testSigningKeys(t)
+	signTestRoot(t, root, key)
 	return root
 }
 

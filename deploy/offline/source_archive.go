@@ -166,18 +166,11 @@ func readSourceManifest(root string) (sourceManifest, error) {
 			return m, err
 		}
 	}
-	_, signatureErr := os.Lstat(filepath.Join(root, "SHA256SUMS.sig"))
-	_, publicErr := os.Lstat(filepath.Join(root, "release-public.pem"))
-	if signatureErr == nil || publicErr == nil {
-		if _, err := os.Stat(filepath.Join(root, "release-public.pem")); err != nil {
-			return m, errors.New("签名源码归档缺少包内公钥")
-		}
-		if err := verifySignature(root, ""); err != nil {
-			return m, err
-		}
-		if err := verifyInventoryFile(root, "auriga-source.json"); err != nil {
-			return m, err
-		}
+	if err := verifySignature(root, ""); err != nil {
+		return m, err
+	}
+	if err := verifyInventoryFile(root, "auriga-source.json"); err != nil {
+		return m, err
 	}
 	if err := readJSON(filepath.Join(root, "auriga-source.json"), &m); err != nil {
 		return m, err

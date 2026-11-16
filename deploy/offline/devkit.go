@@ -129,6 +129,9 @@ func verifyDevkitCache(root string) error {
 	if err := noSymlinks(root); err != nil {
 		return err
 	}
+	if err := verifySignature(root, ""); err != nil {
+		return err
+	}
 	f, err := os.Open(filepath.Join(root, "SHA256SUMS"))
 	if err != nil {
 		return err
@@ -191,6 +194,13 @@ func locateDevkit(source string) (string, *devkitManifest, error) {
 	}
 	if _, err := os.Lstat(filepath.Join(root, "devkit-catalog.json")); err == nil {
 		return locateCumulative(source, root)
+	}
+	key, err := sourceVerificationKey(source)
+	if err != nil {
+		return "", nil, err
+	}
+	if err := verifySignature(root, key); err != nil {
+		return "", nil, err
 	}
 	if err := verifyDevkitCache(root); err != nil {
 		return "", nil, err

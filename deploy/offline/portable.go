@@ -101,12 +101,33 @@ func sourceDigest(path, name, expected string) (string, error) {
 }
 
 func copySourceFile(source, target, name string, mode fs.FileMode) error {
+	return copySourceText(source, target, name, mode, true)
+}
+
+// Content-addressed patch blobs use canonical bytes; materialized Windows
+// scripts regain CRLF at the destination, even when two file kinds share a blob.
+func copySourcePayload(source, target, name string, mode fs.FileMode) error {
+	return copySourceText(source, target, name, mode, false)
+}
+
+func windowsScript(name string) bool {
+	switch strings.ToLower(filepath.Ext(name)) {
+	case ".ps1", ".cmd", ".bat":
+		return true
+	}
+	return false
+}
+
+func copySourceText(source, target, name string, mode fs.FileMode, materialize bool) error {
 	if !sourceText(name) {
 		return copyFile(source, target, mode)
 	}
 	raw, err := canonicalSource(source, name)
 	if err != nil {
 		return err
+	}
+	if materialize && windowsScript(name) {
+		raw = bytes.ReplaceAll(raw, []byte("\n"), []byte("\r\n"))
 	}
 	if err := os.MkdirAll(filepath.Dir(target), 0755); err != nil {
 		return err

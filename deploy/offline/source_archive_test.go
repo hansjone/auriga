@@ -16,7 +16,7 @@ func TestArchiveSourceWithoutGitTracksChangesAndLocks(t *testing.T) {
 	}
 	r := release{Version: "1.0", Build: &buildSpec{}}
 	info := provenance{Commit: strings.Repeat("a", 40), Version: "1.0", UpstreamVersion: "1.0"}
-	if err := writeSourceManifest(root, info, strings.Repeat("b", 40), r); err != nil {
+	if err := signedTestSourceManifest(t, root, info, strings.Repeat("b", 40), r); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("PATH", t.TempDir())
@@ -65,7 +65,7 @@ func TestSignedSourceBaselineCannotBeRewritten(t *testing.T) {
 		t.Fatal(err)
 	}
 	r := release{Version: "1.0", Build: &buildSpec{}}
-	if err := writeSourceManifest(root, provenance{Commit: strings.Repeat("a", 40), UpstreamVersion: "1.0", Version: "1.0"}, strings.Repeat("b", 40), r); err != nil {
+	if err := signedTestSourceManifest(t, root, provenance{Commit: strings.Repeat("a", 40), UpstreamVersion: "1.0", Version: "1.0"}, strings.Repeat("b", 40), r); err != nil {
 		t.Fatal(err)
 	}
 	if err := signingPublic(key, filepath.Join(root, "release-public.pem")); err != nil {
@@ -111,7 +111,7 @@ func TestChangesRebaseConflictAndTraversal(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if err := writeSourceManifest(original, provenance{Commit: strings.Repeat("a", 40), Version: "1.0", UpstreamVersion: "1.0"}, strings.Repeat("b", 40), r); err != nil {
+	if err := signedTestSourceManifest(t, original, provenance{Commit: strings.Repeat("a", 40), Version: "1.0", UpstreamVersion: "1.0"}, strings.Repeat("b", 40), r); err != nil {
 		t.Fatal(err)
 	}
 	target := filepath.Join(t.TempDir(), "next")

@@ -19,11 +19,13 @@ func TestMultipartRoundTripAndRejection(t *testing.T) {
 	if err := writeSums(src); err != nil {
 		t.Fatal(err)
 	}
+	key, _ := testSigningKeys(t)
+	signTestRoot(t, src, key)
 	archive := filepath.Join(root, "auriga-offline-1.tar")
 	if err := pack(src, archive); err != nil {
 		t.Fatal(err)
 	}
-	assets, err := splitAsset(archive, 1024, "")
+	assets, err := splitAsset(archive, 1024, key)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -78,7 +80,7 @@ func TestDownloadedPackageUsesEmbeddedKeyAndRequiresPartSignature(t *testing.T) 
 	if err := signSums(root, key); err != nil {
 		t.Fatal(err)
 	}
-	if err := verifyCommand([]string{root}); err != nil {
+	if err := verifyCommand([]string{root, "--verify-key", filepath.Join(root, "release-public.pem")}); err != nil {
 		t.Fatal(err)
 	}
 	file := filepath.Join(t.TempDir(), "package.tar")
@@ -88,7 +90,7 @@ func TestDownloadedPackageUsesEmbeddedKeyAndRequiresPartSignature(t *testing.T) 
 	if _, err := splitAsset(file, 2048, key); err != nil {
 		t.Fatal(err)
 	}
-	if err := verifyCommand([]string{file + ".part001"}); err != nil {
+	if err := verifyCommand([]string{file + ".part001", "--verify-key", filepath.Join(root, "release-public.pem")}); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.Remove(file + ".parts.json.sig"); err != nil {

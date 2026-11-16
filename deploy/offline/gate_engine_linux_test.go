@@ -33,7 +33,7 @@ func TestIsolatedGateEngineFailureCleanup(t *testing.T) {
 	cmd := exec.Command("unshare", "--net", exe, "internal-offline-build", "--source", source, "--version", "1.0", "--out", filepath.Join(root, "out.tar"), "--sign-key", key)
 	cmd.Env = append(os.Environ(), "TMPDIR="+scratch, "DOCKER_HOST=unix:///nonexistent", "DOCKER_CONTEXT=invalid-gate-fixture")
 	raw, err := cmd.CombinedOutput()
-	if err == nil || !strings.Contains(string(raw), "SHA256SUMS") {
+	if err == nil || !strings.Contains(string(raw), "缺少签名公钥") {
 		t.Fatalf("expected missing-kit rejection after starting isolated engine: %v\n%s", err, raw)
 	}
 	entries, err := os.ReadDir(scratch)
