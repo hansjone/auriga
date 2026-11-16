@@ -4,6 +4,7 @@ import { JSDOM } from 'jsdom';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { gzipSync } from 'node:zlib';
 const dom = new JSDOM('<!doctype html><html><body></body></html>', {
   runScripts: 'outside-only',
 });
@@ -140,14 +141,20 @@ assert.doesNotMatch(
   'native bundle must not contain a Vue runtime',
 );
 assert.ok(
-  Buffer.byteLength(source) < 55_000,
-  // Shared Skill selection and observation add a second native surface, with no UI runtime dependency.
-  'native plugin and Skill panel must stay below its 55 kB uncompressed budget',
+  Buffer.byteLength(source) < 75_000,
+  // Native market cards, version details and bilingual diagnostics add no UI runtime dependency.
+  'native market UI and diagnostics must stay below their 75 kB uncompressed budget',
+);
+const gzipBytes = gzipSync(source).byteLength;
+assert.ok(
+  gzipBytes < 21_000,
+  'the native panel must stay below its 21 kB gzip transfer budget',
 );
 console.log(
   JSON.stringify({
     native: true,
     bytes: Buffer.byteLength(source),
+    gzipBytes,
     runtimeDependencies: [],
     noVue: true,
   }),

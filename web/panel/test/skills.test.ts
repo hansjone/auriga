@@ -1,5 +1,25 @@
 import { afterEach, expect, it, vi } from 'vitest';
 import { AurigaTeamPanel } from '../src/TeamPanel';
+import {
+  ResourceDiagnosticError,
+  resourceErrorMessage,
+  resourceResponseError,
+} from '../src/resource-diagnostics';
+it('rejects inherited diagnostic reasons and untrusted trace content', async () => {
+  const error = new ResourceDiagnosticError('toString', 'private content');
+  expect(resourceErrorMessage(error, false)).toContain('操作未完成');
+  expect(resourceErrorMessage(error, false)).not.toContain('private content');
+  expect(
+    (
+      await resourceResponseError(
+        Response.json(
+          { code: 'toString', reason: '__proto__' },
+          { status: 500 },
+        ),
+      )
+    ).reason,
+  ).toBe('internal_error');
+});
 const packageId = '019a0000-0000-7000-8000-000000000002',
   versionId = '019a0000-0000-7000-8000-000000000004';
 const identity = {
@@ -289,4 +309,105 @@ it('waits for explicit collision confirmation before retrying an exact install',
   await vi.waitFor(() => expect(actions).toHaveLength(2));
   expect(actions[1].confirmation).toBe('owner-bound-proof');
   expect(actions[1].key).toBe(actions[0].key);
+});
+
+it.each([
+  ['guardian_missing', '可信 guardian'],
+  ['trust_roots_missing', '签名信任根缺失'],
+  ['trust_roots_invalid', '签名信任根配置无效'],
+  ['signature_invalid', '有效期校验失败'],
+  ['platform_unreachable', '平台不可达'],
+  ['state_conflict', '安装状态已变化'],
+])(
+  'shows actionable %s diagnostics with trace instead of a generic 503 conflict',
+  async (reason, hint) => {
+    const panel = document.createElement(
+      'auriga-test-skills',
+    ) as AurigaTeamPanel;
+    panel.context = {
+      mode: 'connect',
+      protocol: 1,
+      locale: 'zh-CN',
+      fetch: async (path) =>
+        path.startsWith('catalog/')
+          ? Response.json(
+              { code: 'common.unavailable', reason, trace_id: 'a'.repeat(32) },
+              { status: 503 },
+            )
+          : Response.json({ items: [] }),
+    };
+    document.body.append(panel);
+    await settle();
+    click(panel, '技能');
+    await vi.waitFor(() =>
+      expect(panel.shadowRoot!.textContent).toContain(hint),
+    );
+    expect(panel.shadowRoot!.textContent).toContain('a'.repeat(32));
+    expect(panel.shadowRoot!.textContent).not.toContain('冲突后请重新选择版本');
+  },
+);
+it('lays out skill cards and version permissions without exposing owner UUIDs in the list', async () => {
+  const ownerId = '019a0000-0000-7000-8000-000000000012';
+  const manifest = {
+    description: '清理会话摘要',
+    author: { displayName: '资源维护团队' },
+    permissions: { tools: ['task.read'], outboundHosts: [], dataAccess: [] },
+  };
+  const panel = document.createElement('auriga-test-skills') as AurigaTeamPanel;
+  panel.context = {
+    mode: 'connect',
+    protocol: 1,
+    locale: 'zh-CN',
+    fetch: async (path) =>
+      Response.json(
+        path === 'catalog/packages?limit=50'
+          ? {
+              items: [
+                {
+                  id: packageId,
+                  ownerId,
+                  kind: 'skill',
+                  name: 'clear-task-summary',
+                  defaultVersionId: versionId,
+                },
+              ],
+            }
+          : path.startsWith('catalog/packages/')
+            ? path.includes('?')
+              ? {
+                  items: [
+                    {
+                      id: versionId,
+                      packageId,
+                      kind: 'skill',
+                      state: 'published',
+                      version: '1.0.0',
+                      manifest,
+                    },
+                  ],
+                }
+              : {
+                  id: versionId,
+                  packageId,
+                  kind: 'skill',
+                  state: 'published',
+                  version: '1.0.0',
+                  manifest,
+                }
+            : { items: [] },
+      ),
+  };
+  document.body.append(panel);
+  await settle();
+  click(panel, '技能');
+  await vi.waitFor(() =>
+    expect(panel.shadowRoot!.textContent).toContain('清理会话摘要'),
+  );
+  expect(panel.shadowRoot!.querySelector('.cards .resource-card')).toBeTruthy();
+  expect(panel.shadowRoot!.textContent).not.toContain(ownerId);
+  click(panel, '选择版本／更新');
+  await vi.waitFor(() =>
+    expect(panel.shadowRoot!.textContent).toContain('task.read'),
+  );
+  expect(panel.shadowRoot!.querySelector('.resource-version')).toBeTruthy();
 });

@@ -1,5 +1,6 @@
 import { homedir } from 'node:os';
 import { join } from 'node:path';
+import { diagnoseResource } from './diagnostics.js';
 import { catalogService } from './catalog-service.js';
 import { catalogApi } from './catalog-api.js';
 import { catalogHost } from './catalog-host.js';
@@ -242,33 +243,8 @@ export function catalogRoutes(options) {
       api.check();
       return send(path === 'actions' ? 202 : 200, result);
     } catch (error) {
-      const code = /** @type {any} */ (error).code ?? 'common.unavailable';
-      return send(
-        code === 'common.unauthenticated'
-          ? 401
-          : code === 'common.forbidden'
-            ? 403
-            : code === 'common.validation_failed'
-              ? 400
-              : ['common.conflict', 'common.precondition_failed'].includes(code)
-                ? 409
-                : 503,
-        {
-          code: [
-            'common.unauthenticated',
-            'common.forbidden',
-            'common.validation_failed',
-            'common.conflict',
-            'common.precondition_failed',
-            'common.not_found',
-            'resource.signature_invalid',
-            'resource.storage_unavailable',
-            'resource.apply_failed',
-          ].includes(code)
-            ? code
-            : 'common.unavailable',
-        },
-      );
+      const failure = diagnoseResource(error, 'catalog');
+      return send(failure.status, failure.body);
     }
   };
   return Object.assign(handle, {

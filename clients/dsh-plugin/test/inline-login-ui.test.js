@@ -261,7 +261,15 @@ test('native modal QR/form controls submit inline commands', async () => {
       platform: 'authenticating',
       inlineLogin: inline,
     });
-    assert.ok(all(tree).some((n) => n.type === 'svg'));
+    assert.equal(all(tree).find((n) => n.type === 'svg').props.width, 208);
+    assert.ok(
+      all(tree).some(
+        (n) => n.props?.role === 'tablist' || n.type?.name === 'SegmentedTabs',
+      ),
+    );
+    assert.ok(
+      !all(tree).some((n) => n.type === 'h3' && text(n) === '平台连接'),
+    );
     assert.doesNotMatch(text(tree), /用户码|系统浏览器/);
     const step = {
       type: 'form',
@@ -352,6 +360,10 @@ test('global native modal starts login, skips for the session, reopens and close
   try {
     let tree = await f.renderLogin();
     assert.equal(tree.type.name, 'Modal');
+    assert.equal(tree.props.className, 'auriga-platform-login-dialog');
+    assert.ok(
+      all(tree).some((n) => n.props?.className === 'auriga-login-footer'),
+    );
     assert.equal(calls.filter((c) => c.action === 'inline_login').length, 1);
     tree.props.onClose();
     assert.equal(await f.renderLogin(), null);

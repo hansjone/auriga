@@ -7,7 +7,13 @@ import { desktopSkills, sha } from './desktop-skills.js';
 import { packSkill } from './skill-package.js';
 import { canonicalize, parseStrictJson } from './json.js';
 import { schemaValid, requireSchema } from './schema.js';
-import { readResourceRoots, refuse, uuid } from './trust.js';
+import {
+  readResourceRoots,
+  packagedResourceTrustFile,
+  refuse,
+  uuid,
+} from './trust.js';
+import { resourceStage, resourceFailure } from './diagnostics.js';
 /** @param {{runtime:any,current:()=>any,home?:string,privateSkills:any,host:any,trustFile?:string,roots?:()=>Promise<any>,fetchImpl?:typeof fetch,desktop?:ReturnType<typeof desktopSkills>}} options */
 export function catalogService(options) {
   const api = catalogApi(options),
@@ -20,7 +26,14 @@ export function catalogService(options) {
       desktop =
         options.desktop ??
         (options.home &&
-        existsSync(join(options.home, 'auriga/guardian/state.json'))
+        (existsSync(join(options.home, 'auriga/guardian/state.json')) ||
+          (packagedResourceTrustFile() &&
+            existsSync(
+              join(
+                options.home,
+                'auriga/guardian/supervisor.lock.d/owner.json',
+              ),
+            )))
           ? desktopSkills({ home: options.home })
           : undefined);
     } catch {
@@ -36,9 +49,9 @@ export function catalogService(options) {
     return result;
   }
   async function trust() {
-    const roots = await (
-      options.roots ?? (() => readResourceRoots(options.trustFile))
-    )();
+    const roots = await resourceStage('trust_roots', () =>
+      (options.roots ?? (() => readResourceRoots(options.trustFile)))(),
+    );
     return Object.fromEntries(
       [
         ['release', roots.releaseKeys],
@@ -152,7 +165,9 @@ export function catalogService(options) {
     for (const installation of rows.filter(
       (r) => desiredState(r.resource) === 'ENABLED',
     )) {
-      const download = await api.download(installation),
+      const download = await resourceStage('download', () =>
+          api.download(installation),
+        ),
         manifest = parseStrictJson(download.manifest);
       const release = {
         protocol: 2,
@@ -169,10 +184,12 @@ export function catalogService(options) {
         expected: download.ref.identity,
         now: new Date().toISOString(),
       };
-      verifyTrust(
-        'revocation',
-        { release, list: parseStrictJson(download.revocations) },
-        roots,
+      await resourceStage('verification', async () =>
+        verifyTrust(
+          'revocation',
+          { release, list: parseStrictJson(download.revocations) },
+          roots,
+        ),
       );
       if (
         manifest.kind !== 'skill' ||
@@ -284,8 +301,14 @@ export function catalogService(options) {
           !/^[A-Za-z0-9_-]{1,64}$/.test(input.key)
         )
           refuse('common.validation_failed');
-        if (!cloud && !desktop) refuse('resource.storage_unavailable');
-        if (!cloud) desktop?.available();
+        if (!cloud && !desktop)
+          throw resourceFailure(
+            'resource.storage_unavailable',
+            'guardian_missing',
+            'storage',
+          );
+        if (!cloud)
+          await resourceStage('storage', async () => desktop?.available());
         let identity;
         if (['disable', 'remove'].includes(input.action)) {
           const existing = (await api.list()).find(

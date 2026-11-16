@@ -2,6 +2,14 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createResourceHandler, resourcePath } from './broker-fixture.js';
+import { operations } from '../broker-fixture.js';
+import {
+  diagnoseResource,
+  resourceStage,
+} from '../../src/resources/diagnostics.js';
+import { signed } from '../../src/resources/trust.js';
+import { canonicalize } from '../../src/resources/json.js';
+import { generateKeyPairSync, sign } from 'node:crypto';
 
 const path = '/api/resource/v1/packages';
 test('catalogue permits only fixed readers and bounded pagination', () => {
@@ -121,17 +129,18 @@ test('upstream errors expose only HTTP categories and oversized bodies are refus
     getAccess: async () => 'secret',
     config: { platformOrigin: 'https://platform.example.com' },
   };
-  for (const [upstream, expected] of [
+  for (const [upstream, expected, reason] of [
     [
       Response.json(
         { detail: 'private-token' },
         { status: 403, headers: { 'set-cookie': 'private-cookie' } },
       ),
       403,
+      'forbidden',
     ],
     // C rejects malformed/oversized output before any body crosses IPC.
-    [Response.json({ data: 'x'.repeat(1048577) }), 503],
-    [new Response('not json'), 503],
+    [Response.json({ data: 'x'.repeat(1048577) }), 503, 'platform_unreachable'],
+    [new Response('not json'), 503, 'platform_unreachable'],
   ]) {
     const handler = createResourceHandler({
       auth: { requestRejection: () => undefined },
@@ -145,7 +154,78 @@ test('upstream errors expose only HTTP categories and oversized bodies are refus
     );
     assert.equal(res.status, expected);
     assert.ok(!JSON.stringify(res).includes('private-'));
+    const diagnostic = JSON.parse(res.body);
+    assert.match(diagnostic.trace_id, /^[a-f0-9]{32}$/);
+    assert.equal(diagnostic.reason, reason);
+    assert.equal(
+      diagnostic.code,
+      expected === 403 ? 'common.forbidden' : 'common.unavailable',
+    );
   }
+});
+test('unsigned catalogue protocol failures never claim a signature verification failure', async () => {
+  for (const output of [
+    {
+      statusCode: 422,
+      headers: { 'content-type': 'application/json' },
+      body: {},
+    },
+    { statusCode: 200, headers: { 'content-type': 'text/plain' }, body: {} },
+    {
+      statusCode: 200,
+      headers: { 'content-type': 'application/json' },
+      body: { items: Array(2000).fill('x'.repeat(1024)) },
+    },
+  ]) {
+    const runtime = {
+      resolve: () => identity,
+      operations,
+      broker: { call: async () => output },
+    };
+    const identity = {};
+    const handler = createResourceHandler({
+      auth: { requestRejection: () => undefined },
+      current: () => runtime,
+    });
+    const res = response();
+    await handler(
+      { method: 'GET', url: '/auriga/resources' + path, headers: {} },
+      res,
+    );
+    assert.equal(res.status, 503);
+    assert.equal(JSON.parse(res.body).code, 'common.unavailable');
+    assert.equal(JSON.parse(res.body).reason, 'platform_unreachable');
+  }
+});
+test('a genuine Ed25519 verification failure retains signature_invalid diagnostics', async () => {
+  const key = generateKeyPairSync('ed25519');
+  const original = { name: 'signed resource' };
+  const statement = {
+    ...original,
+    signature: {
+      alg: 'Ed25519',
+      kid: 'release',
+      value: sign(
+        null,
+        Buffer.from(canonicalize(original)),
+        key.privateKey,
+      ).toString('base64url'),
+    },
+  };
+  statement.name = 'tampered resource';
+  await assert.rejects(
+    resourceStage('verification', async () =>
+      signed(statement, new Map([['release', key.publicKey]])),
+    ),
+    (error) => {
+      const diagnostic = diagnoseResource(error, 'catalog', () => {});
+      assert.equal(diagnostic.status, 422);
+      assert.equal(diagnostic.body.code, 'resource.signature_invalid');
+      assert.equal(diagnostic.body.reason, 'signature_invalid');
+      assert.equal(diagnostic.body.stage, 'verification');
+      return true;
+    },
+  );
 });
 // @ts-nocheck
 

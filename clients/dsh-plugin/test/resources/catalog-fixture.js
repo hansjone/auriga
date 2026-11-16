@@ -30,7 +30,9 @@ export function catalogFixture(t, temporaryRoot = tmpdir(), config = {}) {
   const release = config.release ?? generateKeyPairSync('ed25519'),
     revocation = config.revocation ?? generateKeyPairSync('ed25519');
   const roots = async () => ({
-    releaseKeys: new Map([['release-test', release.publicKey]]),
+    releaseKeys: new Map([
+      [config.releaseKid ?? 'release-test', release.publicKey],
+    ]),
     revocationKeys: new Map([['revoke-test', revocation.publicKey]]),
   });
   const signed = (body, key, kid) => ({
@@ -114,7 +116,7 @@ export function catalogFixture(t, temporaryRoot = tmpdir(), config = {}) {
       },
     },
     release,
-    'release-test',
+    config.releaseKid ?? 'release-test',
   );
   const revoked = signed(
     {

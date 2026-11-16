@@ -1,6 +1,6 @@
 import { createHash, createPublicKey, verify } from 'node:crypto';
 import { open, constants, realpath, lstat } from 'node:fs/promises';
-import { isAbsolute, dirname } from 'node:path';
+import { isAbsolute, dirname, join, basename } from 'node:path';
 import { canonicalize, parseStrictJson } from './json.js';
 
 /** @param {string} [code] @returns {never} */
@@ -70,7 +70,7 @@ export function signed(value, roots) {
  * panel. Deployment owns file ACLs; POSIX also rejects group/world-writable files.
  * Shape: {schemaVersion:1,releaseKeys:[{kid,publicKeySpki}],revocationKeys:[...]}.
  * @param {string|undefined} file */
-async function loadResourceRoots(file) {
+async function loadResourceRoots(file, packaged = false) {
   if (!file || !isAbsolute(file)) return refuse('resource.storage_unavailable');
   // Check links explicitly: Windows casing and native 8.3 names can identify
   // the same regular file while differing from its realpath spelling.
@@ -93,7 +93,23 @@ async function loadResourceRoots(file) {
       (process.platform !== 'win32' && stat.mode & 0o022)
     )
       refuse('resource.storage_unavailable');
-    const value = parseStrictJson(await handle.readFile(), true);
+    let value = parseStrictJson(await handle.readFile(), true);
+    if (packaged) {
+      // The launcher-owned package uses E's trust format. Never discover keys
+      // from user settings, a download, or a server response.
+      if (!exact(value, ['release', 'revocation', 'downgrade'])) refuse();
+      const entry = (/** @type {any} */ row) => {
+        if (!exact(row, ['kid', 'publicKeySpkiBase64'])) refuse();
+        const bytes = Buffer.from(row.publicKeySpkiBase64, 'base64');
+        if (bytes.toString('base64') !== row.publicKeySpkiBase64) refuse();
+        return { kid: row.kid, publicKeySpki: bytes.toString('base64url') };
+      };
+      value = {
+        schemaVersion: 1,
+        releaseKeys: [entry(value.release)],
+        revocationKeys: [entry(value.revocation)],
+      };
+    }
     if (
       !exact(value, ['schemaVersion', 'releaseKeys', 'revocationKeys']) ||
       value.schemaVersion !== 1
@@ -141,18 +157,42 @@ async function loadResourceRoots(file) {
     await handle.close();
   }
 }
+/** @param {string|undefined} [runtime] */
+export function packagedResourceTrustFile(
+  runtime = process.env.AURIGA_DESKTOP_RUNTIME,
+) {
+  if (
+    !runtime ||
+    !isAbsolute(runtime) ||
+    basename(runtime) !== 'update.mjs' ||
+    basename(dirname(runtime)) !== 'runtime' ||
+    basename(dirname(dirname(runtime))) !== 'auriga'
+  )
+    return undefined;
+  return join(dirname(runtime), 'resource-roots.json');
+}
 /** @param {string|undefined} file */
 export async function readResourceRoots(file) {
+  const source = file ?? packagedResourceTrustFile();
   try {
-    return await loadResourceRoots(file);
+    return await loadResourceRoots(source, !file);
   } catch (error) {
+    const failure = /** @type {any} */ (error);
+    failure.stage = 'trust_roots';
+    // Filesystem failures mean missing/unreadable deployment material. Once
+    // readable, shape/key/size/path-policy failures require correcting that material.
+    failure.reason =
+      !source || typeof failure.syscall === 'string'
+        ? 'trust_roots_missing'
+        : 'trust_roots_invalid';
     if (
       ['resource.signature_invalid', 'resource.storage_unavailable'].includes(
         /** @type {any} */ (error).code,
       )
     )
       throw error;
-    return refuse('resource.storage_unavailable');
+    failure.code = 'resource.storage_unavailable';
+    throw failure;
   }
 }
 /** @param {any} list @param {string} tenantId @param {ReadonlyMap<string, import('node:crypto').KeyObject>} keys
