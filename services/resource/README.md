@@ -25,6 +25,106 @@ resource 迁移角色、运行角色、数据库与游标签名配置。V3 迁�
 缺少对象存储、签名或 workspace 配置时，相应操作返回 503；只读元数据入口仍可用。
 前台可使用已有域名或纯 IP/HTTP 模式，内部节点下载始终要求 TLS/mTLS。
 
+## 开发与现场资源签名初始化
+
+### 本机生成与保管
+
+在可信本机、仓库根目录使用 Node 22 执行以下命令。输出目录的父目录须已存在，
+选择仓库外的新目录，并由生成账号独占管理其父目录。所有路径均为部署占位符。
+
+```powershell
+node scripts/resource-keys/generate.mjs --out C:\secure\auriga-resource-dev-batch1 --kid-prefix dev-batch1
+```
+
+Linux 同样使用 `--out /secure/auriga-resource-dev-batch1`。省略 `--kid-prefix` 时生成随机前缀，
+指定前缀支持 1–110 位字母、数字、点、下划线和短横线。每个用途追加独立后缀作为 kid。
+脚本仅调用本地密码学和文件系统，Windows 使用系统 PowerShell 设置 DACL。
+三把密钥临时生成后写入受保护文件，标准输出仅含目录和公钥根文件 SHA-256。
+
+- `platform/release.pk8` 与 `platform/revocation.pk8` 为平台签名私钥。
+- `offline/downgrade.pk8` 为独立降级授权私钥，应在离线受控介质保存。
+- `resource-roots.json` 仅含 release、revocation、downgrade 的 kid 与 SPKI DER base64 公钥。
+- `platform.properties` 含两个平台用途的 kid 和容器内私钥路径占位符。
+
+私钥采用无口令 PKCS#8 DER，Node 使用 `type: 'pkcs8', format: 'der'` 导出，
+对应 `ResourceSigning.load` 的 `PKCS8EncodedKeySpec`。POSIX 目录为 0700，文件为 0600。
+Windows 在写入私钥前关闭目录 ACL 继承，仅授予当前用户 SID 完全控制，文件继承该 DACL。
+输出目录已存在、父路径为符号链接或 junction 时拒绝。并发或重复生成不会覆盖旧输出。
+中途失败可能留下受保护的部分输出，核对后选用新的目录重新生成，保留原目录供排查。
+私钥、目录完整备份和终端重定向内容均应留在受控本机或离线介质，公钥 JSON 可用于 CI。
+
+平台 `ResourceRuntimeConfiguration.resourceSigning` 仅装配 release 与 revocation 私钥。
+当前平台没有 downgrade 私钥配置和在线降级授权签发入口，现有信任协议提供降级验签规则。
+本次生成的 downgrade 私钥只作离线保管，后续正式降级工具与审批流程另行接线。
+
+### NAS 或现场平台放置
+
+主控通过受控传输只复制 `platform` 下两把私钥到 NAS/现场密钥目录。
+在启动容器前将宿主机目录和文件所有者设为**容器实际服务 UID/GID**，目录权限 0700、
+文件权限 0600，逐项核实绝对物理路径及所有祖先路径均无符号链接。
+例如宿主机目录 `/srv/auriga/secrets/resource/platform` 只读挂载至
+`/run/secrets/auriga-resource`，Compose volume 片段如下。
+
+```yaml
+volumes:
+  - /srv/auriga/secrets/resource/platform:/run/secrets/auriga-resource:ro
+```
+
+私钥无需复制进镜像、构建上下文、对象存储或桌面包。服务使用生成的 properties 片段，
+按实际只读挂载路径调整 `key-file`。
+
+```properties
+auriga.resource.release-kid=dev-batch1-release
+auriga.resource.release-key-file=/run/secrets/auriga-resource/release.pk8
+auriga.resource.revocation-kid=dev-batch1-revocation
+auriga.resource.revocation-key-file=/run/secrets/auriga-resource/revocation.pk8
+```
+
+Windows 原生平台部署时使用实际服务账号所有的物理目录，配置绝对路径并使用正斜杠，
+如 `C:/secure/auriga-resource/platform/release.pk8`。生成账号与服务账号不同时，由部署管理员
+重新设置目录和文件所有者及受保护 DACL，使实际服务账号可读取、其他普通账号无权读私钥或写目录。
+不要使用映射盘、UNC 或 junction。启动后通过正常管理台上传、审核、发布，
+再从桌面资源市场安装一个已签资源，并核对撤销清单可获取及客户端验签成功。
+健康检查和 503 消失只证明部分配置就绪，完整验收仍需正常页面操作。
+
+### 桌面固定根与摘要核对
+
+在 Installer workflow 的 `workflow_dispatch` 输入 `resource_trust_json` 中提供同批次
+`resource-roots.json` 的原始 JSON 文本或标准 base64。该输入仅用于公钥，
+平台的私钥文件始终留在受控部署端。CI 写临时文件、复用构建器校验后传给
+`--resource-trust-json`，结构错误、非 Ed25519、公钥用途重复及公开测试向量公钥会被拒绝。
+未提供输入时沿用现有构建行为，包只提供私有技能能力。
+
+本机可使用以下命令读取公钥 JSON 并计算可比较的摘要。
+
+```powershell
+Get-Content -Raw C:\secure\auriga-resource-dev-batch1\resource-roots.json
+Get-FileHash -Algorithm SHA256 C:\secure\auriga-resource-dev-batch1\resource-roots.json
+```
+
+生成器输出紧凑 JSON，CI 和构建器保持相同 JSON 序列化。
+CI 日志的 `resourceTrustSha256` 与产物 `desktop-build.json` 同名字段
+记录实际包内 `payload/auriga/runtime/resource-roots.json` 的原字节 SHA-256，
+未固定根时记录 `null`。手工重排 JSON 字段或格式会改变文件摘要，核对时使用同一原字节文件。
+该文件还在包 manifest 的受校验文件清单内。Desktop 自身发行签名公钥
+`DESKTOP_RELEASE_PUBLIC_KEY` 是另一项现有配置，资源根按本节单独提供。
+
+### 轮换与撤销
+
+每个环境与每次轮换使用新目录、新密钥和新 kid，安全备份对应公钥、私钥及用途记录。
+当前 Desktop 每个用途只固定一个根，没有自动下载新根或双根过渡机制。
+轮换前需统筹平台签发、公钥固定的 Desktop 重建/升级与旧客户端停用窗口，
+旧根客户端无法验证新根签发的资源和撤销清单，新根客户端也无法验证旧根签名。
+需先完成受控切换方案和现场验收，保持撤销清单的可验证性及有效期。
+保留客户端既有高水位、已消费降级授权和撤销修订，按原数据重签并增加必要修订。
+不复用旧 kid 指向不同公钥，不通过清空客户端状态完成轮换。
+
+正常下架阻止新的下载与启用。恶意资源按正式紧急撤销流程签发更高修订清单，
+保留已有撤销事实；在线及时传播，离线最迟停用仍受有效期不超过 24 小时的清单约束。
+发行私钥泄露时使用独立撤销私钥撤销受影响发行 kid/制品，再执行受控根轮换。
+撤销私钥泄露或丢失时需通过独立可信的客户端发布渠道更换固定根，
+平台当前界面尚无发行 kid 撤销及根轮换管理入口，应由主控制定对应操作批次。
+
 管理台入口为 `/resources/review`、`/resources/published`、`/resources/distribution`。
 共享版本作者不能自审或自发；L4 本人私有版本显示“未审核”并独立签名。
 所有写操作确认后提交，冲突重新读取服务端版本，敏感操作沿既有身份再验证流程。
