@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"os"
 	"os/exec"
 	"os/user"
@@ -152,4 +153,100 @@ func TestWindowsTransferDirectoryOnlyCurrentUser(t *testing.T) {
 			t.Fatal("transfer directory exposed to another identity", sid)
 		}
 	}
+}
+
+func TestWindowsTransferDirectoryRemovesExplicitForeignAccess(t *testing.T) {
+	root := t.TempDir()
+	icacls := filepath.Join(os.Getenv("SystemRoot"), "System32", "icacls.exe")
+	if raw, err := exec.Command(icacls, root, "/grant", "*S-1-1-0:(OI)(CI)F", "*S-1-5-18:(OI)(CI)F").CombinedOutput(); err != nil {
+		t.Fatal("prepare explicit Everyone/SYSTEM access", string(raw), err)
+	}
+	script := filepath.Join(t.TempDir(), "read-acl.ps1")
+	if err := os.WriteFile(script, []byte(`param([string]$Target)
+$ErrorActionPreference = 'Stop'
+$acl = Get-Acl -LiteralPath $Target
+@{
+    Owner = $acl.GetOwner([System.Security.Principal.SecurityIdentifier]).Value
+    Protected = $acl.AreAccessRulesProtected
+    Rules = @($acl.GetAccessRules($true, $true, [System.Security.Principal.SecurityIdentifier]) | ForEach-Object {
+        @{
+            SID = $_.IdentityReference.Value
+            Rights = [int]$_.FileSystemRights
+            Inheritance = [int]$_.InheritanceFlags
+            Propagation = [int]$_.PropagationFlags
+            Type = [int]$_.AccessControlType
+            Inherited = $_.IsInherited
+        }
+    })
+} | ConvertTo-Json -Depth 3 -Compress
+`), 0644); err != nil {
+		t.Fatal(err)
+	}
+	type accessRule struct {
+		SID                                    string
+		Rights, Inheritance, Propagation, Type int
+		Inherited                              bool
+	}
+	type directoryACL struct {
+		Owner     string
+		Protected bool
+		Rules     []accessRule
+	}
+	readACL := func(path string) directoryACL {
+		t.Helper()
+		raw, err := exec.Command("powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", script, path).CombinedOutput()
+		if err != nil {
+			t.Fatal(string(raw), err)
+		}
+		var acl directoryACL
+		if err := json.Unmarshal(raw, &acl); err != nil {
+			t.Fatal(string(raw), err)
+		}
+		return acl
+	}
+	before := readACL(root)
+	for _, sid := range []string{"S-1-1-0", "S-1-5-18"} {
+		found := false
+		for _, rule := range before.Rules {
+			if rule.SID == sid && !rule.Inherited {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatal("fixture missing explicit foreign ACE", sid)
+		}
+	}
+	if err := protectTransferRoot(root); err != nil {
+		t.Fatal(err)
+	}
+	current, err := user.Current()
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertOnlyCurrent := func(path string, protected bool, inheritance int) {
+		t.Helper()
+		acl := readACL(path)
+		if acl.Owner != current.Uid || acl.Protected != protected || len(acl.Rules) != 1 {
+			t.Fatalf("unexpected owner/protection/ACE count: %+v", acl)
+		}
+		rule := acl.Rules[0]
+		if rule.SID != current.Uid || rule.Rights != 0x1f01ff || rule.Inheritance != inheritance || rule.Propagation != 0 || rule.Type != 0 || rule.Inherited == protected {
+			t.Fatalf("unexpected private directory access rule: %+v", rule)
+		}
+	}
+	assertOnlyCurrent(root, true, 3) // OBJECT_INHERIT_ACE | CONTAINER_INHERIT_ACE.
+	child := filepath.Join(root, "child")
+	if err := os.Mkdir(child, 0755); err != nil {
+		t.Fatal(err)
+	}
+	assertOnlyCurrent(child, false, 3)
+	file := filepath.Join(child, "private.pem")
+	if err := os.WriteFile(file, []byte("fixture"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	assertOnlyCurrent(file, false, 0)
+	if err := protectTransferRoot(root); err != nil {
+		t.Fatal("protecting again must remain safe", err)
+	}
+	assertOnlyCurrent(root, true, 3)
 }
