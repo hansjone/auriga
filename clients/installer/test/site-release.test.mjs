@@ -311,7 +311,6 @@ test('site-sign-review requires explicit site profile, current review digest and
     process.execPath,
     [
       join(ROOT, 'scripts/client-release/cli.mjs'),
-      'client',
       'sign',
       '--dir',
       dir,
@@ -372,7 +371,7 @@ test('client options reject online build, invalid release policies and unknown f
     { 'not-after': '2000-01-01T00:00:00Z' },
   ])
     assert.throws(() => validateBuildOptions({ ...base, ...patch }));
-  await assert.rejects(main(['client', 'build', '--online']));
+  await assert.rejects(main(['build', '--online']));
 });
 
 function release(privateKey, bytes, changes = {}) {

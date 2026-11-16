@@ -1,15 +1,9 @@
 /** Sequential, local-only Windows build, using exactly the existing CI recipes. */
 import { spawnSync } from 'node:child_process';
 import { Buffer } from 'node:buffer';
-import {
-  cpSync,
-  existsSync,
-  mkdirSync,
-  readFileSync,
-  writeFileSync,
-} from 'node:fs';
+import { cpSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
-import { ROOT, BUILD_NODE, digest, verifyInputs, physical } from './inputs.mjs';
+import { ROOT, BUILD_NODE, verifyInputs, physical } from './inputs.mjs';
 import {
   canonical,
   RELEASE_KID,
@@ -24,41 +18,17 @@ import {
 import { makeRelease } from '../../clients/installer/scripts/make-release.mjs';
 import { fingerprint } from './keys.mjs';
 
-function git(args) {
-  const result = spawnSync('git', args, {
-    cwd: ROOT,
-    encoding: 'utf8',
-    windowsHide: true,
-  });
-  if (result.status !== 0)
-    throw new Error('需要离线源码 checkout（含 .git）和预装 Git');
-  return result.stdout;
-}
-export function sourceIdentity() {
-  const paths = [
-    ...new Set(
-      git(['ls-files', '--cached', '--others', '--exclude-standard', '-z'])
-        .split('\0')
-        .filter(Boolean),
-    ),
-  ].sort();
-  const files = paths.map((path) => [
-    path,
-    existsSync(join(ROOT, path))
-      ? digest(readFileSync(join(ROOT, path)))
-      : null,
-  ]);
-  return {
-    sourceCommit: git(['rev-parse', 'HEAD']).trim(),
-    sourceTreeSha256: digest(canonical(files)),
-    dirty: git(['status', '--porcelain', '-z']).length > 0,
-  };
-}
+export { sourceIdentity } from './source.mjs';
+import { sourceIdentity } from './source.mjs';
+import { clientPlatform } from './platform.mjs';
+const inputTrust = (o) => ({
+  verifyKey: o['verify-key'],
+  trustFingerprint: o['trust-fingerprint'],
+});
 export function validateBuildOptions(o) {
   if (o.offline !== true) throw new Error('现场构建必须显式指定 --offline');
   for (const key of [
     'devkit',
-    'devkit-sha256',
     'out',
     'release-public-key',
     'resource-trust-json',
@@ -67,13 +37,14 @@ export function validateBuildOptions(o) {
   ])
     if (typeof o[key] !== 'string' || !o[key]) throw new Error(`缺少 --${key}`);
   parseVersion(o.version);
+  const target = clientPlatform(o.target);
   const unsigned = {
     schema: 2,
     product: 'Auriga Desktop',
     version: o.version,
     packageId: 'validation',
     channel: o.channel ?? 'stable',
-    platform: 'win-x64',
+    platform: target.target,
     sizeBytes: 1,
     sha256: '0'.repeat(64),
     minimumVersion: o['minimum-version'] ?? '0.0.0',
@@ -120,8 +91,22 @@ export function validateBuildOptions(o) {
   return unsigned;
 }
 export function startOfflineBuild(options) {
+  options = { ...options };
+  for (const key of [
+    'devkit',
+    'out',
+    'release-public-key',
+    'resource-trust-json',
+    'verify-key',
+  ])
+    if (options[key]) options[key] = resolve(options[key]);
   validateBuildOptions(options);
-  const kit = verifyInputs(options.devkit, options['devkit-sha256']);
+  const kit = verifyInputs(
+    options.devkit,
+    options['devkit-sha256'],
+    ROOT,
+    inputTrust(options),
+  );
   const out = resolve(options.out);
   physical(dirname(out));
   if (
@@ -158,7 +143,7 @@ export function startOfflineBuild(options) {
   });
   writeFileSync(env.AURIGA_CLIENT_NETWORK_LOG, '');
   const result = spawnSync(
-    join(kit.directory, 'build-node/node.exe'),
+    join(kit.directory, clientPlatform().buildNode),
     [
       join(ROOT, 'scripts/client-release/cli.mjs'),
       '_build-worker',
@@ -180,8 +165,8 @@ export async function buildWorker(optionsFile) {
     throw new Error('必须从受控离线入口构建');
   const o = JSON.parse(readFileSync(optionsFile, 'utf8'));
   const policy = validateBuildOptions(o);
-  const kit = verifyInputs(o.devkit, o['devkit-sha256']);
-  const source = sourceIdentity();
+  const kit = verifyInputs(o.devkit, o['devkit-sha256'], ROOT, inputTrust(o));
+  const source = sourceIdentity(ROOT, inputTrust(o));
   const pnpm = join(kit.directory, 'build-pnpm/node_modules/pnpm/bin/pnpm.cjs');
   const store = join(o.out, 'pnpm-store');
   cpSync(join(kit.directory, 'pnpm-store'), store, { recursive: true });
@@ -221,7 +206,7 @@ export async function buildWorker(optionsFile) {
   const result = await build({
     offline: true,
     'offline-inputs': kit.directory,
-    'offline-inputs-sha256': o['devkit-sha256'],
+    'offline-inputs-sha256': kit.manifestSha256,
     'broker-artifact': broker,
     'plugin-tgz': join(pluginOut, `auriga-dsh-${pluginVersion}.tgz`),
     out: o.out,
@@ -237,7 +222,10 @@ export async function buildWorker(optionsFile) {
         }
       : {}),
   });
-  if (sourceIdentity().sourceTreeSha256 !== source.sourceTreeSha256)
+  if (
+    sourceIdentity(ROOT, inputTrust(o)).sourceTreeSha256 !==
+    source.sourceTreeSha256
+  )
     throw new Error('源码在构建期间发生变化，请从新目录重建');
   if (readFileSync(process.env.AURIGA_CLIENT_NETWORK_LOG, 'utf8'))
     throw new Error('离线构建检测到被拒绝的联网尝试');
@@ -253,6 +241,7 @@ export async function buildWorker(optionsFile) {
     channel: policy.channel,
     rolloutPercentage: policy.rolloutPercentage,
     rollbackFrom: policy.rollbackFrom,
+    sourceInfo: source,
     siteOffline: {
       schema: 1,
       inputsSha256: kit.manifestSha256,
@@ -275,6 +264,8 @@ export async function buildWorker(optionsFile) {
         inputsSha256: kit.manifestSha256,
         sourceCommit: source.sourceCommit,
         sourceTreeSha256: source.sourceTreeSha256,
+        sourceType: source.sourceType,
+        siteChanges: source.siteChanges,
         exeSha256: record.exeSha256,
       },
       null,

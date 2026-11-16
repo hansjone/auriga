@@ -11,7 +11,6 @@ on:
       - 'scripts/plugin/**'
       - 'scripts/resource-keys/**'
       - 'scripts/client-release/**'
-      - 'auriga.cmd'
       - '.github/workflows/auth-release-artifacts.yml'
       - 'clients/installer/**'
       - 'clients/dsh-plugin/**'

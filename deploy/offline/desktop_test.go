@@ -8,6 +8,7 @@ import (
 	"encoding/pem"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -31,6 +32,21 @@ func TestSiteDesktopProvision(t *testing.T) {
 		t.Fatal(err)
 	}
 	tenant := "11111111-1111-4111-8111-111111111111"
+	s := state{Data: data}
+	if err := configureDesktop(&s, key, tenant); err != nil {
+		t.Fatal(err)
+	}
+	if s.DesktopPublicKeyFingerprint == "" || s.DesktopPublisherTenant != tenant {
+		t.Fatal("desktop trust not recorded in state")
+	}
+	if err := configureDesktop(&s, "", ""); err != nil {
+		t.Fatal(err)
+	}
+	bad := s
+	bad.DesktopPublicKeyFingerprint = strings.Repeat("0", 64)
+	if err := configureDesktop(&bad, key, tenant); err == nil {
+		t.Fatal("state trust replacement accepted")
+	}
 	for range 2 {
 		if err := provisionDesktop(data, key, tenant); err != nil {
 			t.Fatal(err)

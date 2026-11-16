@@ -112,6 +112,21 @@ export function reviewRelease(options) {
         evidence.networkPolicy !== 'node-deny-local-native-tools'
       )
         throw new Error('invalid site offline build record');
+      if (
+        record.source &&
+        (record.source.sourceCommit !== record.sourceCommit ||
+          record.source.sourceTreeSha256 !== evidence.sourceTreeSha256 ||
+          record.source.dirty !== evidence.dirty ||
+          typeof record.source.siteChanges !== 'boolean' ||
+          !['git', 'signed-archive'].includes(record.source.sourceType) ||
+          (record.source.sourceType === 'signed-archive' &&
+            ![
+              'sourceBaselineSha256',
+              'sourceManifestSha256',
+              'sourceIssuerFingerprint',
+            ].every((f) => /^[a-f0-9]{64}$/.test(record.source[f] ?? ''))))
+      )
+        throw new Error('invalid site source provenance');
     } else if (
       !['push', 'workflow_dispatch'].includes(record.event) ||
       record.ref !== `refs/tags/desktop-v${body.version}` ||
@@ -175,6 +190,9 @@ export function reviewRelease(options) {
       sizeBytes: body.sizeBytes,
       components: body.components,
       sourceCommit: record?.sourceCommit ?? null,
+      ...(record?.source
+        ? { source: record.source, siteChanges: record.siteChanges }
+        : {}),
       workflow: record?.workflow ?? null,
       workflowRun: record?.workflowRun ?? null,
       event: record?.event ?? null,

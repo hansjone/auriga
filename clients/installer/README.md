@@ -1,6 +1,6 @@
 # Auriga DSH installer (Windows test build)
 
-现场自行离线构建、现场发行密钥、审阅签名和发布入口见仓库根 `MAINTAIN.md` 的“客户端发布”，完整 Windows devkit 输入与一键安装接口见 [现场发行说明](../../scripts/client-release/README.md)。Windows PowerShell 5.1 使用 `auriga.cmd client build|sign|publish`，不需要访问 GitHub/Forgejo。
+现场离线构建、密钥、审阅签名与发布见根 `MAINTAIN.md` 的“客户端发布（Windows 开发机）”及[现场发行说明](../../scripts/client-release/README.md)。使用独立 `scripts/client-release/auriga-client.cmd build|sign|publish`，支持无 Git 的签名源码包；服务端 `./auriga` 仍仅运行于 Linux。
 
 设计见 `docs/design/dsh-installer.zh.md`。包一层不 fork，上游 `@deepseek-ai/dsh`、自带 Node 与 pnpm 是可替换组件，我们的插件、首启配置与安装核心单独存放。
 

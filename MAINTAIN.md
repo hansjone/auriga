@@ -172,3 +172,57 @@ sudo ./auriga trust add-site-key /media/site-public.pem --confirm-fingerprint "$
 轮换：生成新目录的新站点钥 → 独立核对新指纹并add-site-key → 新钥签名构建并升级 → `sudo ./auriga trust remove-site-key <旧指纹> --data /srv/auriga`。旧钥仍签着当前安装包时拒绝移除，固定发行公钥不能用该命令移除；私钥受控离线备份后按组织流程销毁，不交给普通业务服务。
 
 `--allow-unsigned` 仅用于 verify/unpack/install/upgrade 的显式应急缺签名例外，打印警告；不是未知签名者/错误签名的绕过。安装和升级记录永久告警，doctor持续FAIL；无签名首次安装不能自行接纳后来的包内发行根。源码基线和devkit不支持无签名例外。资源初始化残缺时保留原材料，从备份恢复；确认从未使用才由维护者人工隔离整个残缺目录重试。健康升级后的旧发行归档失败只警告，旧目录必须人工归档后才能再次升级。
+
+## 客户端发布（Windows 开发机）
+
+桌面客户端使用独立的 `scripts/client-release/auriga-client.cmd`，服务端 `./auriga` 仍只在 Linux 运行。当前客户端目标为 Windows x64；平台配方、引导程序布局和安装器命名集中于 `scripts/client-release/platform.mjs`，以后扩展 Linux 客户端时沿用来源与签名协议。
+
+浏览器下载同版签名源码包和 Windows 输入独立附件 `auriga-client-windows-<锁SHA256>.tar`。Windows 部分与 Linux 累积 devkit 分开，依赖未变可复用；包含 Node/npm/pnpm、store、Windows DSH 及其依赖，签名链沿用 #373 发行公钥。先用独立批准的发行说明核源码归档和引导 node.exe 的 SHA-256，再解包到本地固定磁盘。不能用未核验包内公钥或临时计算摘要冒充批准值。
+
+```powershell
+Get-FileHash -Algorithm SHA256 D:\media\auriga-source-0.2.0.tar
+Get-FileHash -Algorithm SHA256 D:\client-kit\build-node\node.exe
+$env:AURIGA_CLIENT_DEVKIT = 'D:\client-kit'
+$env:AURIGA_CLIENT_NODE_SHA256 = '<独立批准的node.exe SHA256>'
+.\scripts\client-release\auriga-client.cmd --help
+```
+
+薄壳先用 PowerShell5.1 核引导 Node 摘要，所有命令使用附件自带 Node，无需预装 Git/Node/pnpm。输入清单、Windows 系统工具与维护者封装见[客户端发行说明](scripts/client-release/README.md)。
+
+首次在受信离线签名机生成独立现场桌面发行钥；父目录须存在、输出目录须全新。私钥及目录仅当前用户可读写，签名前复核权限，备份到受控离线介质。
+
+```powershell
+.\scripts\client-release\auriga-client.cmd keygen --out C:\secure\site-desktop
+```
+
+只把 `desktop-public.pem` 送往 Linux 平台。首次 install 或沿原参数重跑 install 时，加 `--desktop-public-key /media/desktop-public.pem --desktop-publisher-tenant <实际发行租户UUID>`。平台在原 state 登记公钥指纹和租户，配置 AURIGA_RESOURCE_DESKTOP_PUBLIC_KEY_FILE 与桌面卷；重复安装及升级沿用并拒绝自动换钥/换租户。取得平台输出的 `resource-keys/resource-roots.json` 公钥根拷至 Windows。桌面私钥、资源私钥不进平台附件/源码/客户端。
+
+修改客户端、插件、认证或界面代码并按模块测试，保留原 auriga-source.json、SHA256SUMS、SHA256SUMS.sig 和 release-public.pem。无 Git 时优先验签源码清单，记录上游提交、签名基线和当前源码摘要、发行者指纹及 siteChanges；普通源码支持增删改，已知文本 CRLF 不算现场改动。清单存在时，即使另建 .git 也不替换基线；篡改/缺签名拒绝。仅无清单的 Git checkout 沿原 Git 流程，两种来源都没有则拒绝。
+
+```powershell
+.\scripts\client-release\auriga-client.cmd build --offline --devkit $env:AURIGA_CLIENT_DEVKIT --verify-key D:\approved\release-public.pem --version 1.0.2-site.1 --sequence 102 --minimum-version 1.0.0 --channel stable --release-public-key C:\secure\site-desktop\desktop-public.pem --resource-trust-json D:\site\resource-roots.json --out D:\exports\desktop-102
+```
+
+--verify-key 为独立批准的 #373 套件发行公钥，也可用 --trust-fingerprint <独立批准SPKI-SHA256>，同时核源码和 Windows 附件。它与现场桌面发行钥不同。输出须新目录；UNC、设备路径、网络映射盘、junction、缺失输入、摘要/依赖锁变化会拒绝。可用 --platform-origin 预置成员入口，IP/HTTP 沿 installer 既有显式确认参数。
+
+构建用 --offline --frozen-lockfile --ignore-scripts 恢复独立依赖，Node 子进程继承网络拒绝守卫；生产依赖只复制本地输入。输出 exe、诊断 zip、构建记录、未签清单、SHA-256 和网络证据。把目录带到离线签名机，审阅来源/现场改动、公钥/资源根、包摘要、版本/序号/最低版本/渠道等，再人工确认摘要：
+
+```powershell
+.\scripts\client-release\auriga-client.cmd sign --dir D:\exports\desktop-102 --review-only
+.\scripts\client-release\auriga-client.cmd sign --dir D:\exports\desktop-102 --key-file C:\secure\site-desktop\desktop-private.pem --confirm-sha256 <人工审阅后的reviewSha256>
+```
+
+制品或记录变化须重新审阅；错钥、宽松权限、重复覆盖均拒绝。签名后的 desktop-release.json 与 exe 配对发布，zip 不上传。默认有效期30天；渠道、--rollout-percentage 0..100、--minimum-version 和显式 --rollback-from 在构建时设定并签名，发布时不能修改。序号必须超过平台全部历史（含其他渠道及下架版本），日常发布不要随意抬高最低版本。
+
+管理员在正常管理台 `/ops/desktop` 完成近期身份验证，选择已签 JSON 和 exe 后发布，需实际发行租户及 resource.versions.publish 权限。也可将正常会话的 {cookie,csrf} JSON 仅注入当前进程 AURIGA_CLIENT_ADMIN_AUTH（不写命令历史/日志/仓库），用同一接口发布并回读：
+
+```powershell
+.\scripts\client-release\auriga-client.cmd publish --dir D:\exports\desktop-102 --public-key C:\secure\site-desktop\desktop-public.pem --admin-origin https://admin.example.com --portal-origin https://portal.example.com
+Remove-Item Env:AURIGA_CLIENT_ADMIN_AUTH
+```
+
+发布前验签、核 exe 摘要及账本序号，发布后从门户同渠道 latest 验签并完整下载核长度/SHA256，拒绝跳转。自检失败可能已发布，先核管理台，不自动重发或撤回；没有近期会话就走管理台，不另造令牌。
+
+从门户下载，独立核首次安装件摘要。让固定同一现场发行公钥的旧客户端走托盘“检查更新→立即更新→重启以完成更新”，核目标版本、配置/会话保留与资源验签；下载及安装确认仍沿成员设置。CLI 回读不替代真实自动更新验收。
+
+**更换发行钥当前需要成员通过独立可信渠道重新安装**，没有自动取新根或双根过渡；平台不自动轮换。资源根也须统筹平台和客户端切换，保留更新高水位及成员数据，不能清状态绕过防回退。
