@@ -73,8 +73,6 @@ childProcess.spawnSync = function(command, args, options) {
 
 syncBuiltinESMExports();
 
-
-
 SCREENSHOTS
 Real @deepseek-ai/dsh 0.2.1-rc.3 server + real ModuleLoader, native primitives and packaged panel;
 isolated DSH_HOME/workspace, random loopback ports, --no-open, Playwright 1.56.1 headless Chrome, 1440x1000.
