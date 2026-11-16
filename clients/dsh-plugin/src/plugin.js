@@ -166,7 +166,8 @@ export async function apply(ctx, config) {
             handler(req, res) {
               return createLocalSurfaceHandler({
                 mode: configured ? 'connect' : 'standalone',
-                memberResourcesAvailable: !!memberResources,
+                // Capability is registered before profile initialization; readiness is reported by its route.
+                memberResourcesAvailable: configured,
                 auth: admission?.nativeAuth ?? ctx.connection,
                 ...(configured ? { runtime: gate } : {}),
               })(req, res);

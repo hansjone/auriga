@@ -6,13 +6,22 @@ import { memberIdentity } from './member-api.js';
 import { uuid, refuse } from './trust.js';
 import { parseStrictJson, canonicalize } from './json.js';
 import { requireSchema } from './schema.js';
+import { resourceStage } from './diagnostics.js';
 /** @param {any} runtime */
 export function catalogIdentity(runtime) {
   if (runtime?.resourceIdentity) {
     const r = runtime.resourceIdentity;
     if (![r.tenantId, r.ownerId, r.instanceId].every(uuid))
       refuse('common.unauthenticated');
-    return { tenantId: r.tenantId, ownerId: r.ownerId, hostId: r.instanceId };
+    const verified = memberIdentity(runtime);
+    if (verified.tenantId !== r.tenantId || verified.ownerId !== r.ownerId)
+      refuse('common.unauthenticated');
+    // Catalog delivery is bound to the verified DEVICE did, not the managed instance ID.
+    return {
+      tenantId: r.tenantId,
+      ownerId: r.ownerId,
+      hostId: verified.clientId,
+    };
   }
   const r = memberIdentity(runtime);
   return { tenantId: r.tenantId, ownerId: r.ownerId, hostId: r.clientId };
@@ -46,23 +55,25 @@ export function catalogApi({ runtime, current, fetchImpl: _fetchImpl }) {
     check();
 
     check();
-    const response = await resourceRequest(runtime, path, {
-      method: body === undefined && !form ? 'GET' : 'POST',
-      credentials: 'omit',
-      redirect: 'error',
-      signal: AbortSignal.timeout(30000),
-      headers: {
-        accept: binary ? 'application/octet-stream' : 'application/json',
-        ...(body === undefined ? {} : { 'content-type': 'application/json' }),
-        ...(body === undefined && !form
-          ? {}
-          : {
-              'idempotency-key': key ?? randomUUID(),
-              'if-match': etag ?? '"0"',
-            }),
-      },
-      body: form ?? (body === undefined ? undefined : JSON.stringify(body)),
-    });
+    const response = await resourceStage('platform', () =>
+      resourceRequest(runtime, path, {
+        method: body === undefined && !form ? 'GET' : 'POST',
+        credentials: 'omit',
+        redirect: 'error',
+        signal: AbortSignal.timeout(30000),
+        headers: {
+          accept: binary ? 'application/octet-stream' : 'application/json',
+          ...(body === undefined ? {} : { 'content-type': 'application/json' }),
+          ...(body === undefined && !form
+            ? {}
+            : {
+                'idempotency-key': key ?? randomUUID(),
+                'if-match': etag ?? '"0"',
+              }),
+        },
+        body: form ?? (body === undefined ? undefined : JSON.stringify(body)),
+      }),
+    );
     check();
     if (!response.ok) {
       await response.body?.cancel();

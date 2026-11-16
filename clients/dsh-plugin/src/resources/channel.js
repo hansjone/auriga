@@ -1,3 +1,4 @@
+import { diagnoseResource, resourceFailure } from './diagnostics.js';
 import { resourceRequest } from './broker-transport.js';
 /* global AbortSignal */
 import { catalogRoutes, watchCatalogIdentity } from './catalog-routes.js';
@@ -54,12 +55,21 @@ export function createResourceHandler({
       });
       res.end(JSON.stringify(body));
     };
+    /** @param {string} reason */
+    const unavailable = (reason) => {
+      const failure = diagnoseResource(
+        resourceFailure('common.unavailable', reason, 'runtime'),
+        'runtime',
+      );
+      return send(failure.status, failure.body);
+    };
     const rejection = auth.requestRejection(req);
     if (rejection !== undefined) return send(rejection);
     if (req.url?.startsWith(prefix + '/catalog/')) return catalog(req, res);
     if (req.url?.startsWith(prefix + '/local/')) {
       const runtime = current();
-      if (!runtime || !memberHandler) return send(503);
+      if (!runtime) return unavailable('runtime_unavailable');
+      if (!memberHandler) return unavailable('installer_unavailable');
       if (!runtime.resolve(req)) return send(401);
       return memberHandler(runtime, req, res);
     }
@@ -78,7 +88,7 @@ export function createResourceHandler({
       return send(403);
     }
     const runtime = current();
-    if (!runtime) return send(503);
+    if (!runtime) return unavailable('runtime_unavailable');
     const identity = runtime.resolve(req);
     if (!identity) return send(401);
     if (write && (!runtime.resourceIdentity || !runtime.checkCsrf?.(req)))
@@ -152,11 +162,25 @@ export function createResourceHandler({
       });
       if (!response.ok) {
         await response.body?.cancel();
-        return send(
-          [400, 401, 403, 404, 409, 412, 422, 429].includes(response.status)
-            ? response.status
-            : 503,
+        const codes = {
+          400: 'common.validation_failed',
+          401: 'common.unauthenticated',
+          403: 'common.forbidden',
+          404: 'common.not_found',
+          409: 'common.conflict',
+          412: 'common.precondition_failed',
+          422: 'resource.signature_invalid',
+          429: 'common.rate_limited',
+        };
+        const failure = diagnoseResource(
+          {
+            code:
+              codes[/** @type {400} */ (response.status)] ??
+              'common.unavailable',
+          },
+          'platform',
         );
+        return send(failure.status, failure.body);
       }
       if (write && response.status !== 202) {
         await response.body?.cancel();
@@ -191,8 +215,11 @@ export function createResourceHandler({
       if (current() !== runtime || runtime.resolve(req) !== identity)
         return send(401);
       return send(write ? 202 : 200, body);
-    } catch {
-      return send(runtime.resolve(req) ? 503 : 401);
+    } catch (error) {
+      if (current() !== runtime || !runtime.resolve(req))
+        return send(401, { code: 'common.unauthenticated' });
+      const failure = diagnoseResource(error, 'platform');
+      return send(failure.status, failure.body);
     }
   };
   return Object.assign(handle, { reconcileCatalog: catalog.reconcile });

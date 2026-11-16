@@ -1,3 +1,8 @@
+import { element, resourceHeading, fieldList } from './market-ui';
+import {
+  resourceResponseError,
+  resourceErrorMessage,
+} from './resource-diagnostics';
 import type {
   PanelContext,
   SkillPackage as Package,
@@ -14,7 +19,8 @@ export class SkillPanel {
   private selected?: Package;
   private cursor?: string;
   private busy = false;
-  private sharedAvailable = true;
+  private sharedAvailable = false;
+  private summaries = new Map<string, Version>();
   private pendingRestart = false;
   private sharedReason?: string;
   private confirmation?: {
@@ -80,7 +86,7 @@ export class SkillPanel {
       },
       body: body === undefined ? undefined : JSON.stringify(body),
     });
-    if (!response.ok) throw new Error(String(response.status));
+    if (!response.ok) throw await resourceResponseError(response);
     if (!response.headers.get('content-type')?.startsWith('application/json'))
       throw new Error('invalid');
     return response.json();
@@ -95,18 +101,7 @@ export class SkillPanel {
       await work();
     } catch (error) {
       if (this.epoch === epoch)
-        this.notice =
-          error instanceof Error && error.message === '403'
-            ? this.text(
-                '当前账号或设备没有资源访问权限。请刷新登录凭据后重试，仍失败请联系管理员检查权限和设备状态。',
-                'Your account or device is not authorized to access resources. Refresh your sign-in credentials and retry. If access is still denied, contact an administrator to check permissions and device status.',
-              )
-            : this.text(
-                '操作未完成，请刷新确认；冲突后请重新选择版本。',
-                'Operation incomplete. Refresh and reselect after a conflict.',
-              ) +
-              ' ' +
-              (error instanceof Error ? error.message : '');
+        this.notice = resourceErrorMessage(error, !this.zh);
     } finally {
       if (this.epoch === epoch) {
         this.busy = false;
@@ -150,13 +145,42 @@ export class SkillPanel {
         this.sharedAvailable = installed.sharedAvailable !== false;
         this.sharedReason = installed.sharedUnavailableReason;
         this.pendingRestart = !!installed.pendingRestart;
+        if (!more) this.summaries.clear();
+        const displayed = this.packages.filter(
+          (pack) => pack.defaultVersionId && !this.summaries.has(pack.id),
+        );
+        for (let index = 0; index < displayed.length; index += 4) {
+          await Promise.allSettled(
+            displayed.slice(index, index + 4).map(async (pack) => {
+              const version = await this.request(
+                'packages/' + pack.id + '/versions/' + pack.defaultVersionId,
+              );
+              if (
+                epoch === this.epoch &&
+                version.kind === 'skill' &&
+                version.packageId === pack.id &&
+                version.id === pack.defaultVersionId
+              )
+                this.summaries.set(pack.id, version);
+            }),
+          );
+        }
+        if (this.selected) {
+          const detail = await this.request(
+            'packages/' + this.selected.id + '/versions?limit=200',
+          );
+          if (
+            !Array.isArray(detail.items) ||
+            detail.items.some(
+              (v: Version) =>
+                v.kind !== 'skill' || v.packageId !== this.selected!.id,
+            )
+          )
+            throw new Error('invalid');
+          if (epoch === this.epoch) this.versions = detail.items;
+        }
       }
     });
-  }
-  private element(tag: string, text?: string) {
-    const el = document.createElement(tag);
-    if (text !== undefined) el.textContent = text;
-    return el;
   }
   private button(label: string, action: () => void, disabled = false) {
     const b = document.createElement('button');
@@ -254,161 +278,322 @@ export class SkillPanel {
       this.rows = current.items;
     });
   }
+  private badge(text: string) {
+    return element('span', text, 'resource-badge');
+  }
+  private installation(packageId: string) {
+    return this.rows.find(
+      (row) => row.resource.identity.packageId === packageId,
+    );
+  }
+  private permissions(version: Version) {
+    const permissions = version.manifest.permissions;
+    return fieldList([
+      [
+        this.text('工具', 'Tools'),
+        permissions?.tools?.join('、') || this.text('无声明', 'None declared'),
+      ],
+      [
+        this.text('外部访问', 'Outbound hosts'),
+        permissions?.outboundHosts?.join('、') ||
+          this.text('无声明', 'None declared'),
+      ],
+      [
+        this.text('数据访问', 'Data access'),
+        permissions?.dataAccess?.join('、') ||
+          this.text('无声明', 'None declared'),
+      ],
+    ]);
+  }
   render() {
     this.root.replaceChildren();
-    this.root.append(
-      this.element(
+    this.root.setAttribute('aria-busy', String(this.busy));
+    const toolbar = element('div', undefined, 'toolbar');
+    const title = element('div', undefined, 'market-title');
+    title.append(
+      element(
         'h2',
         this.text(
           this.mine ? '我的共享技能' : '技能市场',
           this.mine ? 'My shared skills' : 'Skill market',
         ),
       ),
-    );
-    this.root.append(
-      this.element(
+      element(
         'p',
         this.text(
-          '共享技能仅在具备可信 guardian 的云端或 Auriga DSH 生效。私有技能在原生设置中管理。',
-          'Shared skills require a trusted cloud or Auriga DSH guardian. Manage private skills in native settings.',
+          '为新会话添加经过签名验证的能力。',
+          'Add signed capabilities to new sessions.',
         ),
+        'muted',
       ),
     );
-    this.root.append(
+    toolbar.append(
+      title,
       this.button(this.text('刷新', 'Refresh'), () => {
         void this.load();
       }),
     );
+    this.root.append(toolbar);
+    if (this.notice) {
+      const notice = element('p', this.notice, 'notice');
+      notice.setAttribute('role', 'status');
+      this.root.append(notice);
+    }
+    if (!this.sharedAvailable && !this.busy)
+      this.root.append(
+        element(
+          'p',
+          this.text(
+            this.sharedReason === 'local_storage_path'
+              ? '共享路径不可用：请使用本机文件系统的真实绝对路径；不支持短文件名、目录联接或符号链接。'
+              : '当前宿主尚无可信 guardian，共享安装暂不可用。请通过 Auriga 桌面启动器打开 DSH 后刷新。',
+            this.sharedReason === 'local_storage_path'
+              ? 'Shared storage requires a real absolute local filesystem path; short names, junctions and symbolic links are not supported.'
+              : 'Shared installation is unavailable until a trusted guardian is present. Open DSH through the Auriga desktop launcher, then refresh.',
+          ),
+          'notice',
+        ),
+      );
+    if (this.pendingRestart)
+      this.root.append(
+        element(
+          'p',
+          this.text(
+            '共享目录正在被占用，请关闭占用后刷新；仍无法完成时请重启 DSH。',
+            'Shared directory is occupied. Release it and refresh, or restart DSH.',
+          ),
+          'notice',
+        ),
+      );
+    if (this.busy) {
+      const loading = element(
+        'p',
+        this.text('正在读取资源…', 'Loading resources…'),
+        'muted',
+      );
+      loading.setAttribute('role', 'status');
+      this.root.append(loading);
+    }
     if (this.selected && !this.mine) {
+      const pack = this.selected;
       this.root.append(
         this.button(this.text('返回列表', 'Back'), () => {
           this.selected = undefined;
           this.render();
         }),
-        this.element('h3', this.selected.name),
+        resourceHeading(pack.name, 'skill', this.text('技能', 'Skill')),
+      );
+      const identity = element('details', undefined, 'resource-origin');
+      identity.append(
+        element(
+          'summary',
+          this.text('来源与资源标识', 'Source and resource identity'),
+        ),
+        fieldList([
+          [
+            this.text('资源所有者 ID', 'Resource owner ID'),
+            pack.ownerId ?? '—',
+          ],
+          [this.text('资源 ID', 'Resource ID'), pack.id],
+        ]),
+      );
+      this.root.append(
+        identity,
+        element(
+          'h3',
+          this.text('可用版本', 'Available versions'),
+          'section-title',
+        ),
       );
       for (const version of this.versions) {
-        const card = this.element('article');
-        card.className = 'card';
-        card.append(
-          this.element('h4', version.version),
-          this.element('p', this.status(version.state)),
-          this.element('p', version.manifest.description),
+        const card = element('article', undefined, 'resource-version');
+        const header = element('header', undefined, 'resource-version-header');
+        const label = element('div');
+        label.append(
+          element('h4', version.version),
+          this.badge(this.status(version.state)),
         );
+        const installed = this.installation(pack.id);
+        const action = this.button(
+          this.text('安装此精确版本', 'Install this exact version'),
+          () => this.action(pack.id, version.id, 'install'),
+          version.state !== 'published' || !this.sharedAvailable,
+        );
+        action.className = 'primary';
+        header.append(label, action);
         card.append(
-          this.button(
-            this.text('安装此精确版本', 'Install this exact version'),
-            () => this.action(this.selected!.id, version.id, 'install'),
-            version.state !== 'published' || !this.sharedAvailable,
+          header,
+          element('p', version.manifest.description, 'resource-description'),
+        );
+        if (installed?.resource.identity.versionId === version.id)
+          card.append(this.badge(this.status(installed.state)));
+        card.append(
+          fieldList([
+            [
+              this.text('作者', 'Author'),
+              version.manifest.author?.displayName ??
+                this.text('未提供', 'Not provided'),
+            ],
+            [this.text('许可证', 'License'), version.manifest.license ?? '—'],
+            [
+              this.text('签名', 'Signature'),
+              version.resourceEnvelope?.signature?.kid ??
+                this.text('安装时核验签名', 'Verified during installation'),
+            ],
+          ]),
+        );
+        const details = element('details', undefined, 'resource-origin');
+        details.append(
+          element(
+            'summary',
+            this.text('权限与内容摘要', 'Permissions and content digest'),
           ),
+          this.permissions(version),
+          fieldList([
+            [this.text('内容摘要', 'Content digest'), version.digest ?? '—'],
+          ]),
         );
+        card.append(details);
         this.root.append(card);
       }
-    } else if (this.mine) {
-      for (const row of this.rows) {
-        const id = row.resource.identity,
-          card = this.element('article');
-        card.className = 'card';
-        card.append(
-          this.element('h3', row.resource.envelope.statement.name),
-          this.element('p', id.version + ' · ' + this.status(row.state)),
-        );
-        for (const [action, zh, en] of [
-          ['enable', '启用', 'Enable'],
-          ['disable', '关闭', 'Disable'],
-          ['remove', '卸载', 'Remove'],
-        ])
-          card.append(
-            this.button(
-              this.text(zh, en),
-              () => this.action(id.packageId, id.versionId, action),
-              !this.sharedAvailable,
-            ),
-          );
-        card.append(
-          this.button(
-            this.text('在新会话检查来源', 'Check source in a new session'),
-            () => this.observe(row),
-            (row.resource.desiredState ??
-              (row.resource.enabled ? 'ENABLED' : 'DISABLED')) !== 'ENABLED',
-          ),
-        );
-        if (this.source.has(id.packageId))
-          card.append(this.element('p', this.source.get(id.packageId)));
-        this.root.append(card);
-      }
-      if (!this.rows.length && !this.busy && !this.notice)
+      if (!this.versions.length && !this.busy)
         this.root.append(
-          this.element(
+          element(
             'p',
             this.text(
-              '暂无共享技能，请前往资源市场选择技能；私有技能可在原生设置中管理。',
-              'No shared skills. Choose a skill from the market or manage private skills in native settings.',
+              '当前没有可见版本，请刷新或联系管理员。',
+              'No visible versions. Refresh or contact an administrator.',
             ),
+            'notice',
           ),
         );
     } else {
-      if (!this.packages.length && !this.busy && !this.notice)
-        this.root.append(
-          this.element(
-            'p',
-            this.text(
-              '市场暂无共享技能，请联系管理员前往管理台发布后刷新。',
-              'No shared skills in the market. Ask an administrator to publish from the admin console, then refresh.',
+      const cards = element('div', undefined, 'cards');
+      this.root.append(cards);
+      if (this.mine) {
+        for (const row of this.rows) {
+          const id = row.resource.identity;
+          const card = element('article', undefined, 'card resource-card');
+          card.append(
+            resourceHeading(
+              row.resource.envelope.statement.name,
+              'skill',
+              this.text('共享技能', 'Shared skill'),
             ),
-          ),
-        );
-      for (const pack of this.packages) {
-        const card = this.element('article');
-        card.className = 'card';
-        card.append(
-          this.element('h3', pack.name),
-          this.button(
-            this.text('选择版本／更新', 'Select version / update'),
-            () => {
-              void this.open(pack);
-            },
-          ),
-        );
-        this.root.append(card);
+            element('p', id.version, 'resource-version-label'),
+            this.badge(this.status(row.state)),
+          );
+          const actions = element('div', undefined, 'resource-actions');
+          for (const [action, zh, en] of [
+            ['enable', '启用', 'Enable'],
+            ['disable', '关闭', 'Disable'],
+            ['remove', '卸载', 'Remove'],
+          ])
+            actions.append(
+              this.button(
+                this.text(zh, en),
+                () => this.action(id.packageId, id.versionId, action),
+                !this.sharedAvailable,
+              ),
+            );
+          actions.append(
+            this.button(
+              this.text('在新会话检查来源', 'Check source in a new session'),
+              () => this.observe(row),
+              (row.resource.desiredState ??
+                (row.resource.enabled ? 'ENABLED' : 'DISABLED')) !== 'ENABLED',
+            ),
+          );
+          card.append(actions);
+          if (this.source.has(id.packageId))
+            card.append(element('p', this.source.get(id.packageId), 'muted'));
+          cards.append(card);
+        }
+      } else {
+        for (const pack of this.packages) {
+          const version = this.summaries.get(pack.id),
+            row = this.installation(pack.id);
+          const card = element('article', undefined, 'card resource-card');
+          card.append(
+            resourceHeading(pack.name, 'skill', this.text('技能', 'Skill')),
+            element(
+              'p',
+              version?.manifest.description ??
+                this.text(
+                  '查看版本、权限与来源，选择适合的技能。',
+                  'Review versions, permissions and source to choose a skill.',
+                ),
+              'resource-description',
+            ),
+          );
+          const metadata = element('div', undefined, 'resource-meta');
+          metadata.append(
+            this.badge('L3'),
+            this.badge(
+              row
+                ? this.status(row.state)
+                : this.sharedAvailable
+                  ? this.text('未安装', 'Not installed')
+                  : this.text('安装待配置', 'Setup required'),
+            ),
+          );
+          if (version)
+            metadata.append(
+              element('span', version.version, 'resource-version-label'),
+            );
+          card.append(metadata);
+          if (version?.manifest.author?.displayName)
+            card.append(
+              element('p', version.manifest.author.displayName, 'muted'),
+            );
+          const actions = element('div', undefined, 'resource-actions');
+          if (version) {
+            const install = this.button(
+              this.text('安装', 'Install') + ' ' + version.version,
+              () => this.action(pack.id, version.id, 'install'),
+              !this.sharedAvailable || version.state !== 'published',
+            );
+            install.className = 'primary';
+            actions.append(install);
+          }
+          actions.append(
+            this.button(
+              this.text('选择版本／更新', 'Select version / update'),
+              () => {
+                void this.open(pack);
+              },
+            ),
+          );
+          card.append(actions);
+          cards.append(card);
+        }
       }
-      if (this.cursor)
+      if (
+        !(this.mine ? this.rows : this.packages).length &&
+        !this.busy &&
+        !this.notice
+      )
+        this.root.append(
+          element(
+            'p',
+            this.mine
+              ? this.text(
+                  '暂无共享技能，请前往资源市场选择技能；私有技能可在原生设置中管理。',
+                  'No shared skills. Choose a skill from the market or manage private skills in native settings.',
+                )
+              : this.text(
+                  '市场暂无共享技能，请联系管理员前往管理台发布后刷新。',
+                  'No shared skills in the market. Ask an administrator to publish from the admin console, then refresh.',
+                ),
+            'notice',
+          ),
+        );
+      if (!this.mine && this.cursor)
         this.root.append(
           this.button(this.text('加载更多', 'Load more'), () => {
             void this.load(true);
           }),
         );
-    }
-    if (!this.sharedAvailable)
-      this.root.append(
-        this.element(
-          'p',
-          this.text(
-            this.sharedReason === 'local_storage_path'
-              ? '共享路径不可用：请使用本机文件系统的真实绝对路径；不支持短文件名、目录联接或符号链接。'
-              : '当前宿主尚无可信 guardian，共享安装暂不可用。',
-            this.sharedReason === 'local_storage_path'
-              ? 'Shared storage requires a real absolute local filesystem path; short names, junctions and symbolic links are not supported.'
-              : 'Shared installation is unavailable until a trusted guardian is present.',
-          ),
-        ),
-      );
-    if (this.pendingRestart)
-      this.root.append(
-        this.element(
-          'p',
-          this.text(
-            '共享目录正在被占用，请关闭相关会话后刷新重试。',
-            'Shared files are in use. Close affected sessions and refresh.',
-          ),
-        ),
-      );
-    if (this.busy)
-      this.root.append(this.element('p', this.text('正在处理…', 'Working…')));
-    if (this.notice) {
-      const notice = this.element('p', this.notice);
-      notice.setAttribute('role', 'status');
-      this.root.append(notice);
     }
     if (this.confirmation) {
       const pending = this.confirmation;

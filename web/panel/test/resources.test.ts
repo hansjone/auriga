@@ -216,7 +216,7 @@ describe('market reading', () => {
     await click(wrapper, 'View details');
     await click(wrapper, 'Load more');
     expect(wrapper.find('[role="alert"]').exists()).toBe(false);
-    expect(wrapper.findAll('.versions li')).toHaveLength(1);
+    expect(wrapper.findAll('.versions .resource-version')).toHaveLength(1);
     expect(wrapper.get('.detail').text()).toContain(version.version);
     expect(wrapper.text()).not.toContain('Load more');
     expect(host).toHaveBeenCalledTimes(4);
@@ -240,8 +240,8 @@ describe('market reading', () => {
     const wrapper = render(connect(host));
     await flushPromises();
     expect(wrapper.findAll('.card')).toHaveLength(1);
-    expect(wrapper.text()).toContain('Headquarters availability · Available');
-    expect(wrapper.text()).toContain('Local installation · Unknown');
+    expect(wrapper.text()).toContain('Signed plugin');
+    expect(wrapper.text()).toContain('Installer unavailable');
     await click(wrapper, 'Load more');
     expect(host.mock.calls[1][0]).toBe(
       '/api/resource/v1/packages?limit=50&cursor=page%2B2%26private%3Dno',
@@ -254,7 +254,7 @@ describe('market reading', () => {
     expect(wrapper.get('.detail').text()).toContain('1.0.0');
     expect(wrapper.get('.detail').text()).toContain('Published');
     await click(wrapper, 'Load more');
-    expect(wrapper.findAll('.versions li')).toHaveLength(2);
+    expect(wrapper.findAll('.versions .resource-version')).toHaveLength(2);
     expect(host.mock.calls[4][0]).toBe(
       `/api/resource/v1/packages/${packageId}/versions?limit=50&cursor=versions%3A2`,
     );
@@ -746,7 +746,7 @@ it('shows renewal failure and blocks enabling while the installed version remain
   ).toBe(true);
   expect(apply).not.toHaveBeenCalled();
 });
-it('uses the desktop server port to install, show the verified version and report state, and disable', async () => {
+it('uses the desktop server port to install, disable, remove and refresh the market state', async () => {
   const clientId = '01900000-0000-7000-8000-000000000009';
   const identity = {
     clientId,
@@ -770,8 +770,13 @@ it('uses the desktop server port to install, show the verified version and repor
         versionId,
         digest: version.digest,
         releaseSequence: 1,
-        level: 'l2',
-        desired: input.action === 'disable' ? 'disabled' : 'enabled',
+        level: 'l3',
+        desired:
+          input.action === 'remove'
+            ? 'removed'
+            : input.action === 'disable'
+              ? 'disabled'
+              : 'enabled',
         state: 'applied',
         revision,
         reportedRevision: revision,
@@ -808,7 +813,7 @@ it('uses the desktop server port to install, show the verified version and repor
   });
   await flushPromises();
   await click(wrapper, 'View details');
-  await click(wrapper, 'Install / update');
+  await click(wrapper, 'Install 1.0.0');
   expect(apply).not.toHaveBeenCalled();
   await click(wrapper, 'Confirm');
   expect(apply).toHaveBeenCalledTimes(1);
@@ -820,4 +825,64 @@ it('uses the desktop server port to install, show the verified version and repor
   await click(wrapper, 'Confirm');
   expect(apply).toHaveBeenCalledTimes(2);
   expect(apply.mock.calls[1][0].action).toBe('disable');
+  await click(wrapper, 'Uninstall');
+  await click(wrapper, 'Confirm');
+  expect(apply.mock.calls[2][0].action).toBe('remove');
+  await click(wrapper, 'Resource market');
+  await click(wrapper, 'Refresh');
+  expect(wrapper.text()).toContain('Removed');
+});
+
+describe('market installation affordances', () => {
+  const identity = {
+    tenantId: plugin.tenantId,
+    ownerId: plugin.ownerId,
+    clientId: versionId,
+  };
+  const fetch = async (path: string) =>
+    json(
+      path.includes('/versions/')
+        ? version
+        : path.includes('/versions')
+          ? { items: [version] }
+          : path.includes(packageId)
+            ? plugin
+            : { items: [plugin] },
+    );
+  it('shows installation prerequisites instead of silently hiding the button', async () => {
+    const wrapper = render({ ...connect(fetch), locale: 'zh-CN' });
+    await flushPromises();
+    expect(wrapper.find('.resource-card').exists()).toBe(true);
+    expect(wrapper.find('.resource-card').text()).not.toContain(plugin.ownerId);
+    expect(
+      wrapper.findAll('button').some((b) => b.text().includes('安装')),
+    ).toBe(true);
+    expect(wrapper.text()).toContain('安装组件尚未就绪');
+  });
+  it('refreshes real installation state and confirms the pinned default version', async () => {
+    const apply = vi.fn(async () => ({}));
+    const wrapper = render({
+      ...connect(fetch),
+      locale: 'zh-CN',
+      memberResources: {
+        list: async () => ({
+          identity,
+          items: [],
+          reportSource: 'member',
+          offline: false,
+        }),
+        apply,
+      },
+    });
+    await flushPromises();
+    expect(wrapper.text()).toContain('未安装');
+    await click(wrapper, '安装 1.0.0');
+    expect(wrapper.text()).toContain('Example plugin 1.0.0');
+    expect(apply).not.toHaveBeenCalled();
+    await click(wrapper, '取消');
+    expect(apply).not.toHaveBeenCalled();
+    await click(wrapper, '查看详情');
+    expect(wrapper.find('details').text()).toContain(plugin.ownerId);
+    expect(wrapper.text()).toContain('签名');
+  });
 });

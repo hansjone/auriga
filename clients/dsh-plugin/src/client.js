@@ -432,7 +432,7 @@ window.__ModuleLoader__.load({
       gotoOverview: 'Go to Overview',
     };
     const css = `
-.auriga-login-modal{pointer-events:auto;position:fixed;inset:0;margin:auto;z-index:1000;width:min(440px,90vw);max-height:85vh;overflow:auto;padding:24px;border:1px solid var(--dsw-alias-border-l2,currentColor);border-radius:16px;background:var(--dsw-alias-bg-layer-1,Canvas);color:var(--dsw-alias-label-primary,CanvasText);font:inherit;box-shadow:0 0 0 100vmax #0006}
+.auriga-login-modal{pointer-events:auto;position:fixed;inset:0;margin:auto;z-index:1000;width:min(544px,calc(100vw - 32px));max-height:85vh;overflow:auto;padding:24px;border:1px solid var(--dsw-alias-border-l2,currentColor);border-radius:16px;background:var(--dsw-alias-bg-layer-1,Canvas);color:var(--dsw-alias-label-primary,CanvasText);font:inherit;box-shadow:0 0 0 100vmax #0006}
 
 .auriga-shell{box-sizing:border-box;color:var(--dsw-alias-label-primary,inherit);font:inherit;min-width:0}
 .auriga-shell button:not(.auriga-host-control,.auriga-tabs button,.auriga-tabs-fallback button){font:inherit;padding:5px 10px;border:1px solid var(--dsw-alias-border-l2,currentColor);border-radius:6px;background:var(--dsw-alias-bg-layer-1,transparent);color:var(--dsw-alias-label-primary,inherit);cursor:pointer}
@@ -495,6 +495,22 @@ window.__ModuleLoader__.load({
 .auriga-brand-name{display:inline-flex;align-items:baseline;gap:5px;font-size:16px;font-weight:700;letter-spacing:.02em;color:var(--dsw-alias-label-primary,inherit);white-space:nowrap}.auriga-brand-suffix{font-size:11px;font-weight:600;letter-spacing:.12em;color:var(--dsw-alias-label-secondary,inherit)}
 .auriga-tools{margin:0;padding-left:18px;font-size:13px;display:grid;gap:4px}
 .auriga-app>.auriga-settings,.auriga-tabpanel .auriga-settings{padding-top:0}
+
+.auriga-platform-login-dialog{width:min(544px,calc(100vw - 32px));max-width:calc(100vw - 32px)}
+.auriga-login-content{display:flex;flex-direction:column;gap:20px;min-width:0}
+.auriga-login-intro{margin:0;color:var(--dsw-alias-label-secondary,inherit);font-size:13px;line-height:1.6}
+.auriga-login-content .auriga-login-card{margin:0;padding:0;border:0;background:transparent;box-shadow:none}
+.auriga-login-card>.auriga-row{font-size:13px;margin-bottom:16px;color:var(--dsw-alias-label-secondary,inherit)}
+.auriga-login-card .auriga-scan{display:flex;flex-direction:column;align-items:stretch;gap:24px}
+.auriga-login-methods{display:flex;gap:4px;width:100%;padding:4px;box-sizing:border-box;border-radius:8px;background:var(--dsw-alias-bg-layer-2,transparent)}
+.auriga-login-methods>button{flex:1;justify-content:center;min-height:36px;border:0}
+.auriga-login-methods>button[aria-selected=true]{background:var(--dsw-alias-bg-layer-1,transparent);color:var(--dsw-alias-label-primary,inherit)}
+.auriga-login-card .auriga-qr{align-self:center;width:208px;height:auto;margin:0;border:0;border-radius:0;overflow:visible;background:transparent}
+.auriga-login-card .auriga-qr svg{display:block;border-radius:8px}
+.auriga-login-card .auriga-qr figcaption{position:static;margin-top:14px;padding:0;text-align:center;background:transparent;color:var(--dsw-alias-label-secondary,inherit);font-size:13px}
+.auriga-login-card .auriga-scan form{width:100%;box-sizing:border-box}
+.auriga-login-card>.auriga-actions{justify-content:flex-end;margin-top:20px}
+.auriga-login-footer{display:flex;justify-content:flex-end;padding-top:16px;border-top:1px solid var(--dsw-alias-border-l1,currentColor)}
 `;
     function failure(reason = 'unavailable') {
       if (
@@ -1095,7 +1111,13 @@ window.__ModuleLoader__.load({
                     : response.status === 403
                       ? 'forbidden'
                       : 'unavailable';
-            throw Object.assign(failure(reason), { reason });
+            throw Object.assign(failure(reason), {
+              reason,
+              resourceReason: body.reason,
+              trace: /^[a-f0-9]{32}$/.test(body.trace_id)
+                ? body.trace_id
+                : undefined,
+            });
           }
           return body;
         };
@@ -2493,7 +2515,14 @@ window.__ModuleLoader__.load({
             return null;
           const content = h(
             'div',
-            { className: 'auriga-shell' },
+            { className: 'auriga-shell auriga-login-content' },
+            h(
+              'p',
+              { className: 'auriga-login-intro' },
+              state.locale === 'en'
+                ? 'Connect your account to access team resources. You can also sign in later.'
+                : '连接平台账号，使用团队资源与协作服务。也可以稍后登录。',
+            ),
             ownsLogin
               ? h(PlatformCard, {
                   boot: { mode: 'connect' },
@@ -2511,11 +2540,15 @@ window.__ModuleLoader__.load({
                   ),
                 ),
             h(
-              Action,
-              { onClick: skip },
-              state.locale === 'en'
-                ? 'Skip, use local DSH'
-                : '\u8df3\u8fc7\uff0c\u4f7f\u7528\u672c\u5730 DSH',
+              'div',
+              { className: 'auriga-login-footer' },
+              h(
+                Action,
+                { onClick: skip },
+                state.locale === 'en'
+                  ? 'Skip, use local DSH'
+                  : '\u8df3\u8fc7\uff0c\u4f7f\u7528\u672c\u5730 DSH',
+              ),
             ),
           );
           return HostModal
@@ -2523,6 +2556,7 @@ window.__ModuleLoader__.load({
                 HostModal,
                 {
                   open: true,
+                  className: 'auriga-platform-login-dialog',
                   onClose: skip,
                   title:
                     state.locale === 'en'
@@ -2621,25 +2655,66 @@ window.__ModuleLoader__.load({
             h(
               'div',
               { className: 'auriga-scan' },
-              h(
-                'div',
-                { className: 'auriga-actions' },
-                ...inline.providers.map((provider) =>
-                  h(
-                    Action,
-                    {
-                      key: provider.id,
-                      disabled: busy || provider.id === inline.providerId,
-                      onClick: () =>
+              HostSegmentedTabs && modal
+                ? h(HostSegmentedTabs, {
+                    items: inline.providers.map((provider) => ({
+                      value: provider.id,
+                      label: localized(provider.displayName),
+                    })),
+                    value: inline.providerId,
+                    label:
+                      state.locale === 'en' ? 'Sign-in method' : '登录方式',
+                    className: 'auriga-login-methods',
+                    onChange: (providerId) => {
+                      if (!busy && providerId !== inline.providerId)
                         command('inline_advance', {
                           operation: 'select',
-                          providerId: provider.id,
-                        }),
+                          providerId,
+                        });
                     },
-                    localized(provider.displayName),
+                  })
+                : h(
+                    'div',
+                    {
+                      className: modal
+                        ? 'auriga-login-methods'
+                        : 'auriga-actions',
+                      ...(modal
+                        ? {
+                            role: 'tablist',
+                            'aria-label':
+                              state.locale === 'en'
+                                ? 'Sign-in method'
+                                : '登录方式',
+                          }
+                        : {}),
+                    },
+                    ...inline.providers.map((provider) =>
+                      h(
+                        'button',
+                        {
+                          key: provider.id,
+                          type: 'button',
+                          disabled: busy,
+                          ...(modal
+                            ? {
+                                role: 'tab',
+                                'aria-selected':
+                                  provider.id === inline.providerId,
+                              }
+                            : {}),
+                          onClick: () => {
+                            if (provider.id !== inline.providerId)
+                              command('inline_advance', {
+                                operation: 'select',
+                                providerId: provider.id,
+                              });
+                          },
+                        },
+                        localized(provider.displayName),
+                      ),
+                    ),
                   ),
-                ),
-              ),
               inline.step.type === 'qr' &&
                 inline.qr &&
                 h(
@@ -2649,8 +2724,8 @@ window.__ModuleLoader__.load({
                     'svg',
                     {
                       viewBox: `0 0 ${inline.qr.size} ${inline.qr.size}`,
-                      width: 168,
-                      height: 168,
+                      width: modal ? 208 : 168,
+                      height: modal ? 208 : 168,
                       role: 'img',
                       'aria-label': t('uacQr'),
                     },
@@ -2773,15 +2848,20 @@ window.__ModuleLoader__.load({
                 : view.kind;
           return h(
             'section',
-            { className: 'auriga-card', 'aria-label': t('platformCard') },
-            h('header', null, h('h3', null, t('platformCard'))),
+            {
+              className: modal
+                ? 'auriga-card auriga-login-card'
+                : 'auriga-card',
+              'aria-label': t('platformCard'),
+            },
+            !modal && h('header', null, h('h3', null, t('platformCard'))),
             h(
               'div',
               { className: 'auriga-row' },
               h(Dot, { tone: view.tone }),
               h('strong', { role: 'status' }, t('platform_' + view.kind)),
             ),
-            h('p', null, t('platformHint_' + hint)),
+            !modal && h('p', null, t('platformHint_' + hint)),
             shell?.loggedIn &&
               h(
                 'dl',

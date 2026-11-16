@@ -1,3 +1,4 @@
+import { diagnoseResource } from './diagnostics.js';
 import { join } from 'node:path';
 import { readdir, lstat } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
@@ -244,36 +245,8 @@ export function createMemberRoutes(options) {
           return send(401, { code: 'common.unauthenticated' });
         return send(200, result);
       } catch (error) {
-        const code = /** @type {any} */ (error).code;
-        const allowed = [
-          'common.unauthenticated',
-          'common.forbidden',
-          'common.not_found',
-          'common.conflict',
-          'common.precondition_failed',
-          'common.validation_failed',
-          'common.rate_limited',
-          'resource.signature_invalid',
-          'resource.digest_mismatch',
-          'resource.level_locked',
-          'resource.apply_failed',
-          'resource.storage_unavailable',
-          'resource.state_conflict',
-        ];
-        const safe = allowed.includes(code) ? code : 'common.unavailable';
-        return send(
-          safe === 'common.unauthenticated'
-            ? 401
-            : safe === 'common.forbidden' || safe === 'resource.level_locked'
-              ? 403
-              : safe === 'common.conflict' ||
-                  safe === 'common.precondition_failed'
-                ? 409
-                : safe === 'common.validation_failed'
-                  ? 400
-                  : 503,
-          { code: safe },
-        );
+        const failure = diagnoseResource(error, 'plugin');
+        return send(failure.status, failure.body);
       }
     },
     async close() {

@@ -1,0 +1,86 @@
+Auriga DESKTOP-MARKET-UX validation evidence
+Base: 34faa467; Node v22.19.0; frozen pnpm dependencies; no production dependency/lockfile changes.
+
+COMMANDS / RESULTS
+1. node --test clients/shell-auth/test/*.test.mjs => exit 0, 75 passed.
+2. NODE_OPTIONS=--import=<worktree>/screenshots/test-environment.mjs pnpm -r --workspace-concurrency=1 test => exit 1.
+   Plugin: 2582 passed, 69 skipped, 0 failed (2651 total).
+   Installer: 296 passed, 4 skipped, 1 failed; stopped recursive command.
+3. node --test --test-name-pattern="Windows native file lock on launcher" <base-copy|current>/clients/installer/test/update.test.mjs => both exit 0, 2 passed each.
+4. node node_modules/vitest/vitest.mjs run --root <base-copy|current>/web/portal test/native-logout-lifecycle.test.ts => both exit 0, 10 passed each.
+   git diff 34faa467 -- clients/installer web/portal web/shared/src => empty. Base source copied with git show 34faa467:<path>.
+5. Same guarded NODE_OPTIONS; pnpm -r --workspace-concurrency=1 --filter "!auriga-dsh" test => exit 0.
+   Installer 297 passed / 4 skipped; panel 118 passed + 53 node tests + seed 1 passed / 1 skipped;
+   shared 100 passed; admin 651 passed; portal 255 passed (including the previous lifecycle failures).
+6. pnpm --filter @auriga/panel test => exit 0: 118 + 53 + seed 1 passed / 1 skipped.
+7. pnpm --filter auriga-dsh lint; pnpm --filter auriga-dsh typecheck; pnpm --filter @auriga/panel lint; pnpm --filter @auriga/panel typecheck => all exit 0.
+   Removed an interrupted-test target artifact from the lint tree before rerunning (moved to ignored dist).
+8. pnpm --filter @auriga/panel build => exit 0.
+9. node --test clients/dsh-plugin/test/resources/market-bootstrap.test.js => 5/5 passed;
+   latest production-constructor case: node --test --test-name-pattern="independent installer" clients/dsh-plugin/test/resources/market-bootstrap.test.js => 1/1 passed.
+10. NATS binary test: direct download failed through default fetch; inherited environment proxy via EnvHttpProxyAgent passes 5/5, also passes in plugin full suite.
+
+INSTALLER TRANSIENT FAILURE (unchanged source, standalone base/current and full retry pass)
+not ok 284 - Windows native file lock on launcher (temporary)
+failureType: uncaughtException; error: write after end; code: ERR_STREAM_WRITE_AFTER_END
+location: clients/installer/test/update.test.mjs:1123:5
+stack: Socket.end -> TestContext.<anonymous> clients/installer/test/update.test.mjs:1184:52
+
+TEST-ONLY ENVIRONMENT PRELOAD (no tracked installer changes; no visible browser launch)
+import { setGlobalDispatcher, EnvHttpProxyAgent } from '../clients/dsh-plugin/node_modules/undici/index.js';
+
+import childProcess from 'node:child_process';
+
+import { syncBuiltinESMExports } from 'node:module';
+
+import { readFileSync, writeFileSync } from 'node:fs';
+
+import { resolve, dirname } from 'node:path';
+
+import { fileURLToPath } from 'node:url';
+
+setGlobalDispatcher(new EnvHttpProxyAgent());
+
+const original = childProcess.spawnSync;
+
+childProcess.spawnSync = function(command, args, options) {
+
+  if (/csc(?:\.exe)?$/i.test(String(command)) && Array.isArray(args)) {
+
+    args = args.map(arg => {
+
+      if (!/[\\/]tray[\\/]Tray\.cs$/i.test(arg)) return arg;
+
+      const text = readFileSync(arg, 'utf8');
+
+      const target = 'try { Process.Start(new ProcessStartInfo(target) { UseShellExecute = true }); }';
+
+      if (!text.includes(target)) throw new Error('test browser guard no longer matches');
+
+      const dest = resolve(dirname(fileURLToPath(import.meta.url)), 'guarded-tray-' + process.pid + '.cs');
+
+      writeFileSync(dest, text.replace(target, 'try { System.Diagnostics.Debug.WriteLine(target); }'));
+
+      return dest;
+
+    });
+
+  }
+
+  return original.call(this, command, args, options);
+
+};
+
+syncBuiltinESMExports();
+
+
+
+SCREENSHOTS
+Real @deepseek-ai/dsh 0.2.1-rc.3 server + real ModuleLoader, native primitives and packaged panel;
+isolated DSH_HOME/workspace, random loopback ports, --no-open, Playwright 1.56.1 headless Chrome, 1440x1000.
+Before: exact base client.js and panel sources built locally. After: current client.js and panel bundle.
+Directory/catalog/QR are synthetic UI fixtures; no NAS, no live account, no real scan or published-package acceptance claimed.
+The same fixture shapes are used; before exposes the observed unavailable member port/guardian flag; after exposes the ready port/guardian flag.
+Temporary host and its two child processes were stopped. No native mouse/keyboard or visible browser used during continuation.
+10 PNGs: before/after plugin-list, plugin-detail, skill-list, skill-detail, login. Dialog width 380 -> 544 pixels.
+Temporary tool trees and raw logs were moved into ignored clients/dsh-plugin/dist/desktop-market-ux-tools after recursive deletion was blocked by policy.

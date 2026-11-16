@@ -130,8 +130,8 @@ test('upstream errors expose only HTTP categories and oversized bodies are refus
       403,
     ],
     // C rejects malformed/oversized output before any body crosses IPC.
-    [Response.json({ data: 'x'.repeat(1048577) }), 503],
-    [new Response('not json'), 503],
+    [Response.json({ data: 'x'.repeat(1048577) }), 422],
+    [new Response('not json'), 422],
   ]) {
     const handler = createResourceHandler({
       auth: { requestRejection: () => undefined },
@@ -145,6 +145,9 @@ test('upstream errors expose only HTTP categories and oversized bodies are refus
     );
     assert.equal(res.status, expected);
     assert.ok(!JSON.stringify(res).includes('private-'));
+    const diagnostic = JSON.parse(res.body);
+    assert.match(diagnostic.trace_id, /^[a-f0-9]{32}$/);
+    assert.ok(['forbidden', 'signature_invalid'].includes(diagnostic.reason));
   }
 });
 // @ts-nocheck

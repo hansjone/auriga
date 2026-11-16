@@ -1,6 +1,11 @@
 import { messages } from './messages';
 import style from './panel.css?inline';
 import { SkillPanel } from './SkillPanel';
+import { resourceHeading, fieldList } from './market-ui';
+import {
+  resourceErrorMessage,
+  ResourceDiagnosticError,
+} from './resource-diagnostics';
 import {
   readMembers,
   applyMember,
@@ -38,6 +43,8 @@ export class AurigaTeamPanel extends HTMLElement {
   private selectedId?: string;
   private detail?: ResourcePackage;
   private versions: ResourceVersion[] = [];
+  private summaries = new Map<string, ResourceVersion>();
+  private memberDiagnostic?: string;
   private versionCursor?: string;
   private busy = false;
   private failure?: Failure;
@@ -102,6 +109,7 @@ export class AurigaTeamPanel extends HTMLElement {
       this.memberConfirm = undefined;
       this.memberOperation = undefined;
       this.memberError = undefined;
+      this.memberDiagnostic = undefined;
       this.cancel();
       this.clearData();
       this.installed = undefined;
@@ -220,7 +228,30 @@ export class AurigaTeamPanel extends HTMLElement {
       this.loaded = false;
     }
     void this.run(
-      (signal) => reader.list(signal, cursor),
+      async (signal) => {
+        const page = await reader.list(signal, cursor);
+        const summaries = new Map<string, ResourceVersion>();
+        for (
+          let i = 0;
+          this.context?.memberResources && i < page.items.length;
+          i += 4
+        ) {
+          await Promise.allSettled(
+            page.items
+              .slice(i, i + 4)
+              .filter((p) => p.defaultVersionId)
+              .map(async (p) => {
+                const version = await reader.version(
+                  p.id,
+                  p.defaultVersionId!,
+                  signal,
+                );
+                if (version.state === 'published') summaries.set(p.id, version);
+              }),
+          );
+        }
+        return { ...page, summaries };
+      },
       (page) => {
         // Repeated cursors must never turn into an unbounded pagination loop.
         if (cursor && page.nextCursor === cursor)
@@ -232,6 +263,9 @@ export class AurigaTeamPanel extends HTMLElement {
               .map((item) => [item.id, item]),
           ).values(),
         ];
+        if (!more) this.summaries.clear();
+        for (const [id, version] of page.summaries)
+          this.summaries.set(id, version);
         this.nextCursor = page.nextCursor;
         this.loaded = true;
       },
@@ -327,9 +361,12 @@ export class AurigaTeamPanel extends HTMLElement {
       this.memberIdentity = data.identity;
       this.memberOffline = data.offline;
       this.memberError = undefined;
+      this.memberDiagnostic = undefined;
     } catch (error) {
       if (request !== this.memberRead) return;
       this.memberError = memberFailure(error);
+      this.memberDiagnostic = this.diagnostic(error);
+      this.memberIdentity = undefined;
       this.memberRows = undefined;
       if (this.memberError === 'auth') {
         this.cancel();
@@ -396,6 +433,7 @@ export class AurigaTeamPanel extends HTMLElement {
     } catch (error) {
       if (own !== this.memberOperation) return;
       own.failure = memberFailure(error);
+      this.memberDiagnostic = this.diagnostic(error);
       if (own.failure === 'auth')
         this.dispatchEvent(
           new CustomEvent('auriga-auth-required', {
@@ -433,7 +471,7 @@ export class AurigaTeamPanel extends HTMLElement {
         this.element(
           'p',
           op.failure
-            ? text[op.failure]
+            ? (this.memberDiagnostic ?? text[op.failure])
             : op.pending
               ? text.memberWorking
               : op.row?.restartRequired
@@ -454,7 +492,11 @@ export class AurigaTeamPanel extends HTMLElement {
     const text = this.text;
     section.append(this.button(text.refresh, () => void this.loadMembers()));
     if (this.memberError) {
-      const error = this.element('p', text[this.memberError], 'notice');
+      const error = this.element(
+        'p',
+        this.memberDiagnostic ?? text[this.memberError],
+        'notice',
+      );
       error.setAttribute('role', 'alert');
       section.append(error);
     }
@@ -466,9 +508,9 @@ export class AurigaTeamPanel extends HTMLElement {
       section.append(this.element('p', text.localEmpty));
     const cards = this.element('div', undefined, 'cards');
     for (const item of this.memberRows ?? []) {
-      const card = this.element('article', undefined, 'card');
+      const card = this.element('article', undefined, 'card resource-card');
       card.append(
-        this.element('h3', item.name),
+        resourceHeading(item.name, 'plugin', this.text.plugins),
         this.element(
           'p',
           text.memberLocalVersion + ' · ' + (item.localVersion ?? text.unknown),
@@ -518,6 +560,86 @@ export class AurigaTeamPanel extends HTMLElement {
     section.append(cards);
   }
 
+  private diagnostic(error: unknown) {
+    const data = error as { resourceReason?: string; trace?: string };
+    return data?.resourceReason
+      ? resourceErrorMessage(
+          new ResourceDiagnosticError(data.resourceReason, data.trace),
+          this.context?.locale?.startsWith('en') ?? false,
+        )
+      : undefined;
+  }
+  private installationState(item: ResourcePackage) {
+    const en = this.context?.locale?.startsWith('en');
+    if (!this.context?.memberResources)
+      return en ? 'Installer unavailable' : '安装组件未就绪';
+    if (!this.memberRows)
+      return en ? 'State unavailable · refresh' : '状态暂不可用 · 请刷新';
+    const row = this.memberRows.find((row) => row.packageId === item.id);
+    if (!row) return en ? 'Not installed' : '未安装';
+    if (row.restartRequired) return this.text.memberRestart;
+    if (row.desired === 'removed' && memberState(row) === 'applied')
+      return en ? 'Removed' : '已卸载';
+    return (
+      this.text[`member_${memberState(row)}`] +
+      ' · ' +
+      (row.localVersion ?? this.text.unknown) +
+      (row.localEnabled
+        ? ' · ' + this.text.enabled
+        : ' · ' + this.text.disabled)
+    );
+  }
+  private installControl(item: ResourcePackage, version?: ResourceVersion) {
+    const en = this.context?.locale?.startsWith('en');
+    const permitted =
+      !!this.memberIdentity &&
+      memberActions(item, this.memberIdentity).includes('install');
+    const button = this.button(
+      (en ? 'Install' : '安装') +
+        (version ? ' ' + version.version : en ? ' exact version' : '精确版本'),
+      () => {
+        if (!version) {
+          this.openDetail(item.id);
+          return;
+        }
+        this.memberConfirm = {
+          packageId: item.id,
+          versionId: version.id,
+          action: 'install',
+          label: item.name + ' ' + version.version,
+        };
+        this.render();
+      },
+      !this.context?.memberResources ||
+        !permitted ||
+        this.memberBlocked() ||
+        this.memberOffline ||
+        (version !== undefined && version.state !== 'published'),
+    );
+    button.className = 'primary';
+    return button;
+  }
+  private installationHint(item?: ResourcePackage) {
+    const en = this.context?.locale?.startsWith('en');
+    if (!this.context?.memberResources)
+      return this.context?.mode === 'managed'
+        ? this.text.managedDistributionUnavailable
+        : en
+          ? 'The local installer is not ready. Update Auriga and reopen it, then refresh.'
+          : '本机安装组件尚未就绪。请更新 Auriga 客户端并重新打开后刷新。';
+    if (this.memberError)
+      return this.memberDiagnostic ?? this.text[this.memberError];
+    if (!this.memberIdentity)
+      return en
+        ? 'Reading local installation permissions…'
+        : '正在读取本机安装权限…';
+    if (item && !memberActions(item, this.memberIdentity).includes('install'))
+      return en
+        ? 'This resource is managed by your organization or is unavailable to this account.'
+        : '此资源由组织管理，或当前账号不具备安装权限。';
+    if (this.memberOffline) return this.text.memberOffline;
+    return undefined;
+  }
   private element<K extends keyof HTMLElementTagNameMap>(
     tag: K,
     text?: string,
@@ -712,14 +834,24 @@ export class AurigaTeamPanel extends HTMLElement {
       toolbar.append(
         this.element('span', text.plugins, 'kind'),
         input,
-        this.button(text.refresh, () => this.loadPackages(), this.busy),
+        this.button(
+          text.refresh,
+          () => {
+            this.loadPackages();
+            void this.loadMembers();
+          },
+          this.busy,
+        ),
       );
     } else
       toolbar.append(
         this.button('← ' + text.back, () => this.showTab('market')),
         this.button(
           text.refresh,
-          () => this.openDetail(this.selectedId!),
+          () => {
+            this.openDetail(this.selectedId!);
+            void this.loadMembers();
+          },
           this.busy,
         ),
       );
@@ -749,21 +881,42 @@ export class AurigaTeamPanel extends HTMLElement {
           .toLocaleLowerCase()
           .includes(this.search.trim().toLocaleLowerCase()),
       );
+      const prerequisite = this.installationHint();
+      if (prerequisite)
+        section.append(this.element('p', prerequisite, 'notice prerequisite'));
       for (const item of filtered) {
-        const card = this.element('article', undefined, 'card');
-        card.append(
-          this.element('h3', item.name),
-          this.element('p', text.level + ' · ' + item.level.toUpperCase()),
-          this.element('p', text.author + ' · ' + item.ownerId, 'muted'),
+        const version = this.summaries.get(item.id);
+        const card = this.element('article', undefined, 'card resource-card');
+        const meta = this.element('div', undefined, 'resource-meta');
+        meta.append(
+          this.element('span', item.level.toUpperCase(), 'resource-badge'),
+          this.element('span', this.installationState(item), 'resource-badge'),
           this.element(
-            'p',
-            text.availability +
-              ' · ' +
-              (item.enabled ? text.enabled : text.disabled),
+            'span',
+            version?.version ?? text.versions,
+            'resource-version-label',
           ),
-          this.element('p', text.installState + ' · ' + text.unknown, 'muted'),
+        );
+        const actions = this.element('div', undefined, 'resource-actions');
+        actions.append(
+          this.installControl(item, version),
           this.button(text.details, () => this.openDetail(item.id)),
         );
+        card.append(
+          resourceHeading(item.name, 'plugin', text.plugins),
+          this.element(
+            'p',
+            this.context?.locale?.startsWith('en')
+              ? 'Signed plugin · extends the capabilities of this DSH host.'
+              : '已发布插件，为当前 DSH 扩展工具与服务能力。',
+            'resource-description',
+          ),
+          meta,
+          actions,
+        );
+        const hint = this.installationHint(item);
+        if (hint && hint !== prerequisite)
+          card.append(this.element('p', hint, 'muted'));
         if (item.level === 'l4')
           card.append(this.element('p', text.unreviewed, 'notice'));
         cards.append(card);
@@ -782,65 +935,78 @@ export class AurigaTeamPanel extends HTMLElement {
         );
     } else if (this.detail) {
       const item = this.detail,
-        detail = this.element('article', undefined, 'detail'),
-        list = this.element('dl');
-      for (const [label, value] of [
-        [text.author, item.ownerId],
-        [text.level, item.level.toUpperCase()],
-        [text.availability, item.enabled ? text.enabled : text.disabled],
-        [text.defaultVersion, item.defaultVersionId ?? text.noDefault],
-        [text.installState, text.unknown],
-        [text.review, item.level === 'l4' ? text.unreviewed : text.unknown],
-        [text.permissions, text.permissionsUnavailable],
-      ])
-        list.append(this.element('dt', label), this.element('dd', value));
-      if (item.level === 'l4') list.append(this.element('dt', text.unreviewed));
-      const versions = this.element('ul', undefined, 'versions');
-      for (const version of this.versions) {
-        const row = this.element('li');
-        row.append(
-          this.element('strong', version.version),
-          this.element('span', text[version.state]),
-          this.element('p', text.digest + ' · ' + version.digest, 'muted'),
-        );
-        if (
-          this.context?.memberResources &&
-          this.memberIdentity &&
-          memberActions(item, this.memberIdentity).includes('install')
-        ) {
-          row.append(
-            this.button(
-              text.installOrUpdate,
-              () => {
-                this.memberConfirm = {
-                  packageId: item.id,
-                  versionId: version.id,
-                  action: 'install',
-                  label: item.name + ' ' + version.version,
-                };
-                this.render();
-              },
-              this.memberBlocked() || this.memberOffline,
-            ),
-          );
-        }
-        versions.append(row);
-      }
+        detail = this.element('article', undefined, 'detail');
+      const origin = this.element('details', undefined, 'resource-origin');
+      origin.append(
+        this.element(
+          'summary',
+          this.context?.locale?.startsWith('en')
+            ? 'Source and identifiers'
+            : '来源与资源标识',
+        ),
+        fieldList([
+          [text.author, item.ownerId],
+          ['资源 ID', item.id],
+        ]),
+      );
+      if (item.level === 'l4')
+        detail.append(this.element('p', text.unreviewed, 'notice'));
       detail.append(
-        this.element('h2', item.name),
-        list,
+        resourceHeading(item.name, 'plugin', text.plugins),
         this.element(
           'p',
-          this.context?.memberResources
-            ? text.memberInstallHint
-            : this.context?.mode === 'managed'
-              ? text.managedDistributionUnavailable
-              : text.installHint,
-          'notice',
+          item.level.toUpperCase() + ' · ' + this.installationState(item),
+          'resource-badge',
         ),
-        this.element('h3', text.versions),
-        versions,
+        origin,
       );
+      const prerequisite = this.installationHint(item);
+      if (prerequisite)
+        detail.append(this.element('p', prerequisite, 'notice prerequisite'));
+      detail.append(this.element('h3', text.versions));
+      const versions = this.element('div', undefined, 'versions');
+      for (const version of this.versions) {
+        const row = this.element('article', undefined, 'resource-version');
+        const heading = this.element(
+          'div',
+          undefined,
+          'resource-version-header',
+        );
+        heading.append(
+          this.element('strong', version.version),
+          this.element('span', text[version.state], 'resource-badge'),
+          this.installControl(item, version),
+        );
+        const metadata = this.element('details');
+        metadata.append(
+          this.element(
+            'summary',
+            this.context?.locale?.startsWith('en')
+              ? 'Permissions, signature and digest'
+              : '权限、签名与摘要',
+          ),
+          fieldList([
+            [text.permissions, text.permissionsUnavailable],
+            [
+              this.context?.locale?.startsWith('en')
+                ? 'Signature key'
+                : '签名密钥',
+              version.resourceEnvelope?.signature?.kid ??
+                (this.context?.locale?.startsWith('en')
+                  ? 'Verified during installation'
+                  : '安装时验证签名'),
+            ],
+            [text.digest, version.digest],
+          ]),
+        );
+        row.append(
+          heading,
+          this.element('p', this.installationState(item), 'muted'),
+          metadata,
+        );
+        versions.append(row);
+      }
+      detail.append(versions);
       if (!this.versions.length && !this.busy)
         detail.append(this.element('p', text.versionEmpty));
       if (this.versionCursor)

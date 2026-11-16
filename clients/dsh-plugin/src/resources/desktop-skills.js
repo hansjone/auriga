@@ -649,7 +649,12 @@ export function desktopSkills({ home, time = hostTime }) {
     },
     available() {
       return locked(() => {
-        record(join(guardian, 'state.json'), 'UnifiedGuardianStateFile');
+        // E creates state only after observing the first prepared ledger. C may
+        // stage outside discovery before that, but can never issue E's permit.
+        if (existsSync(join(guardian, 'state.json')))
+          record(join(guardian, 'state.json'), 'UnifiedGuardianStateFile');
+        else if (existsSync(active) && readdirSync(active).length)
+          refuse('resource.state_conflict');
         return true;
       });
     },
@@ -763,11 +768,7 @@ export function desktopSkills({ home, time = hostTime }) {
      * @param {any} who @param {any[]} rows @param {{manifest:Buffer,artifacts:Buffer[],revocations:Buffer}[]} downloads */
     prepare(who, rows, downloads) {
       identity(who);
-      if (
-        !rows.length ||
-        rows.length > 128 ||
-        !existsSync(join(guardian, 'state.json'))
-      )
+      if (!rows.length || rows.length > 128)
         refuse('resource.storage_unavailable');
       for (const row of rows) {
         requireInstallation(row);
@@ -891,6 +892,7 @@ export function desktopSkills({ home, time = hostTime }) {
         if (pending.length === 0) return value;
         if (pending.length !== 1) refuse('resource.state_conflict');
         const tx = pending[0];
+        if (!existsSync(join(guardian, 'state.json'))) return value;
         const state = record(
           join(guardian, 'state.json'),
           'UnifiedGuardianStateFile',
