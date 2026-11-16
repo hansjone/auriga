@@ -72,9 +72,17 @@ public final class ResourceDeviceFixture {
   }
 
   public DevicePermissionAuthority authority() {
+    var beans = new org.springframework.beans.factory.support.DefaultListableBeanFactory();
+    beans.registerSingleton("resourceDeviceAuthorization", authorization);
     // Resolve the registration within the request's tenant, as in production OAuth wiring.
     return (tenant, account, device, permission) ->
-        new IamDevicePermissionAuthority(oauth(tenant).deviceAuthority(), authorization)
+        new IamRuntimeConfiguration()
+            .iamDevicePermissionAuthority(
+                store,
+                sessions,
+                tokens,
+                oauth(tenant).standardDevices(),
+                beans.getBeanProvider(InstanceAiAuthorization.class))
             .allowed(tenant, account, device, permission);
   }
 

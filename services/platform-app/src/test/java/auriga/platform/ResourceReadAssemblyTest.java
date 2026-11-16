@@ -474,7 +474,7 @@ class ResourceReadAssemblyTest {
   void deviceTokensReadInstallAndDownloadWhilePublicationOperationsRemainForbidden(String kind)
       throws Exception {
     admin.update(
-        "UPDATE org.role SET permissions=ARRAY['auriga.connect','auriga.connect.collab.use','auriga.connect.resources.use','resource.packages.read','resource.packages.upload','resource.versions.submit','resource.versions.review','resource.versions.publish'] WHERE id=?",
+        "UPDATE org.role SET permissions=ARRAY['auriga.connect','auriga.connect.collab.use','auriga.connect.resources.use','resource.packages.read','resource.packages.upload','resource.versions.submit','resource.versions.review','resource.versions.publish','resource.distributions.manage'] WHERE id=?",
         ROLE);
     UUID pkg = resource(550, "l4", "private", ALICE, T1, false);
     admin.update("UPDATE resource.resource_package SET name='example-plugin' WHERE id=?", pkg);
@@ -567,6 +567,7 @@ class ResourceReadAssemblyTest {
         List.of(
             "/packages",
             "/catalog/packages",
+            "/distributions",
             "/packages/" + pkg + "/versions/" + version + "/submissions",
             "/admin/reviews/" + UUID.randomUUID() + "/decisions",
             "/admin/packages/" + pkg + "/versions/" + version + "/publications")) {
@@ -574,6 +575,9 @@ class ResourceReadAssemblyTest {
       deviceStatus(403, denied);
       assertEquals("common.forbidden", JSON.readTree(denied.body()).path("code").asString());
     }
+    var distribution = deviceRequest("/distributions/" + UUID.randomUUID(), grant.token(), null);
+    deviceStatus(403, distribution);
+    assertEquals("common.forbidden", JSON.readTree(distribution.body()).path("code").asString());
     String multipart =
         "--device-resource\r\nContent-Disposition: form-data; name=\"metadata\"\r\n\r\n{}\r\n--device-resource--\r\n";
     for (String path :

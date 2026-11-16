@@ -49,6 +49,9 @@ import org.springframework.web.servlet.mvc.method.annotation.RequestMappingHandl
   auriga.resource.web.ResourceMemberController.class
 })
 public class ResourceRuntimeConfiguration {
+  private static final org.slf4j.Logger LOG =
+      org.slf4j.LoggerFactory.getLogger(ResourceRuntimeConfiguration.class);
+
   @Bean
   @ConditionalOnProperty({
     "auriga.resource.desktop-directory",
@@ -132,8 +135,12 @@ public class ResourceRuntimeConfiguration {
   ResourceAccess resourceAccess(
       ResourceAccessInputs inputs,
       ObjectProvider<auriga.iam.api.DevicePermissionAuthority> devices) {
-    return new ResourceAccess(
-        inputs, devices.getIfAvailable(() -> (tenant, account, device, permission) -> false));
+    var authority = devices.getIfAvailable();
+    if (authority == null) {
+      LOG.warn("DevicePermissionAuthority is unavailable. Device resource access is denied");
+      return new ResourceAccess(inputs);
+    }
+    return new ResourceAccess(inputs, authority);
   }
 
   @Bean

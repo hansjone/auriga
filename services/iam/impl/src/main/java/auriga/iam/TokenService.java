@@ -193,9 +193,11 @@ public final class TokenService
     for (String permission : effective) {
       if (!allowedPermission(permission, "device")) continue;
       result.add(permission);
-      for (String mapped : M3PermissionCatalog.devicePermissions(permission))
-        if (effective.contains(mapped)) result.add(mapped);
     }
+    String capability = "auriga.connect.resources.use";
+    if (result.contains(capability))
+      for (String mapped : M3PermissionCatalog.devicePermissions(capability))
+        if (effective.contains(mapped)) result.add(mapped);
     return Set.copyOf(result);
   }
 
@@ -244,15 +246,14 @@ public final class TokenService
     claims.put("scope", "auriga.connect");
     claims.put("mtyp", memberType);
     // The managed model credential remains separate from the platform credential.
-    var granted = new TreeSet<String>();
-    if (effective.contains("auriga.connect.collab.use")) granted.add("auriga.connect.collab.use");
-    String capability = "auriga.connect.resources.use";
-    Set<String> mapped = M3PermissionCatalog.devicePermissions(capability);
-    granted.addAll(
-        devicePermissions(effective).stream()
-            .filter(p -> p.equals(capability) || mapped.contains(p))
-            .toList());
-    claims.set("perms", Json.MAPPER.valueToTree(granted.stream().toList()));
+    var granted = new HashSet<>(effective);
+    granted.removeIf(
+        p ->
+            allowedPermission(p, "device")
+                && !Set.of("auriga.connect.collab.use", "auriga.connect.resources.use")
+                    .contains(p));
+    claims.set(
+        "perms", Json.MAPPER.valueToTree(devicePermissions(granted).stream().sorted().toList()));
     Instant expiry = clock.instant().plusSeconds(300);
     if (expiresAt.isBefore(expiry)) expiry = expiresAt;
     claims.put("exp", expiry.getEpochSecond());
