@@ -454,6 +454,23 @@ public class IamRuntimeConfiguration {
   }
 
   @Bean
+  DevicePermissionAuthority iamDevicePermissionAuthority(
+      IamStore store,
+      SessionManager sessions,
+      TokenService tokens,
+      StandardDevices standard,
+      org.springframework.beans.factory.ObjectProvider<InstanceAiAuthorization> authorization) {
+    return new IamDevicePermissionAuthority(
+        new DeviceAccessAuthority(store, sessions, tokens).standardDevices(standard),
+        authorization.getIfAvailable(
+            () ->
+                request -> {
+                  throw new auriga.common.error.AurigaException(
+                      auriga.common.error.CommonErrors.UNAVAILABLE);
+                }));
+  }
+
+  @Bean
   IamNetworkSourceAuthority iamNetworkSourceAuthority(
       IamStore store,
       IamNetworkAuthority network,

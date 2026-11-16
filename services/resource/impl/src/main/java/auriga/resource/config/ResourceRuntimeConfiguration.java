@@ -129,8 +129,11 @@ public class ResourceRuntimeConfiguration {
   }
 
   @Bean
-  ResourceAccess resourceAccess(ResourceAccessInputs inputs) {
-    return new ResourceAccess(inputs);
+  ResourceAccess resourceAccess(
+      ResourceAccessInputs inputs,
+      ObjectProvider<auriga.iam.api.DevicePermissionAuthority> devices) {
+    return new ResourceAccess(
+        inputs, devices.getIfAvailable(() -> (tenant, account, device, permission) -> false));
   }
 
   @Bean

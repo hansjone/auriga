@@ -82,6 +82,7 @@ class ResourceReadAssemblyTest {
   TenantTransactionManager resourceTransactions;
 
   @Autowired org.springframework.context.ApplicationContext context;
+  @Autowired auriga.iam.ResourceDeviceFixture deviceCredentials;
   JdbcTemplate admin;
   org.springframework.jdbc.datasource.SingleConnectionDataSource adminConnection;
   HttpClient http;
@@ -126,6 +127,33 @@ class ResourceReadAssemblyTest {
   @EnableAutoConfiguration
   @Import({ResourceModuleConfiguration.class, PlatformResourceConfiguration.class})
   static class App {
+    @Bean
+    auriga.iam.ResourceDeviceFixture resourceDeviceFixture(OrgService org, Clock clock) {
+      var roles =
+          PostgresExtension.serviceRoles(
+              ResourceReadAssemblyTest.class,
+              "resource_test_iam_owner",
+              "resource_test_iam_app",
+              "iam");
+      CommonMigrations.migrate(roles.owner().dataSource(), "iam");
+      CommonMigrations.serviceFlyway(
+              Flyway.configure()
+                  .dataSource(roles.owner().dataSource())
+                  .schemas("iam")
+                  .locations("classpath:db/iam")
+                  .load())
+          .migrate();
+      var permissions = new auriga.org.OrgPermissionResolver(org);
+      return new auriga.iam.ResourceDeviceFixture(
+          roles.runtime().dataSource(), KEY, ISSUER, clock, permissions, permissions);
+    }
+
+    @Bean
+    auriga.iam.api.DevicePermissionAuthority devicePermissionAuthority(
+        auriga.iam.ResourceDeviceFixture devices) {
+      return devices.authority();
+    }
+
     @Bean(destroyMethod = "close")
     auriga.resource.objectstore.ObjectStore resourceObjects() throws Exception {
       return new auriga.resource.objectstore.LocalObjectStore(
@@ -200,6 +228,7 @@ class ResourceReadAssemblyTest {
     admin = new JdbcTemplate(adminConnection);
     admin.execute(
         "TRUNCATE resource.resource_revoked_artifact, resource.resource_revocation_delivery, resource.outbox_event, resource.resource_operation, resource.resource_distribution, resource.resource_download, resource.resource_revocations, resource.resource_package_creation, resource.resource_package_group, resource.resource_package, resource.resource_version CASCADE");
+    admin.execute("TRUNCATE resource.catalog_package CASCADE");
     admin.execute(
         "DELETE FROM org.role_binding; DELETE FROM org.group_member; DELETE FROM org.member; DELETE FROM org.role WHERE builtin=false; DELETE FROM org.\"group\"");
     admin.update(
@@ -413,6 +442,189 @@ class ResourceReadAssemblyTest {
                 .build(),
             HttpResponse.BodyHandlers.ofString());
     assertEquals(401, node.statusCode(), node.body());
+  }
+
+  HttpResponse<byte[]> deviceRequest(String path, String token, String body) throws Exception {
+    return deviceRequest(path, token, body, "application/json");
+  }
+
+  HttpResponse<byte[]> deviceRequest(String path, String token, String body, String contentType)
+      throws Exception {
+    var builder =
+        HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + port + "/api/resource/v1" + path))
+            .timeout(Duration.ofSeconds(10))
+            .header("Authorization", "Bearer " + token);
+    if (body == null) builder.GET();
+    else
+      builder
+          .header("Content-Type", contentType)
+          .header("If-Match", "\"0\"")
+          .header("Idempotency-Key", UUID.randomUUID().toString())
+          .POST(HttpRequest.BodyPublishers.ofString(body));
+    return http.send(builder.build(), HttpResponse.BodyHandlers.ofByteArray());
+  }
+
+  void deviceStatus(int expected, HttpResponse<byte[]> response) {
+    assertEquals(
+        expected, response.statusCode(), new String(response.body(), StandardCharsets.UTF_8));
+  }
+
+  @org.junit.jupiter.params.ParameterizedTest
+  @org.junit.jupiter.params.provider.ValueSource(strings = {"standard", "native", "managed"})
+  void deviceTokensReadInstallAndDownloadWhilePublicationOperationsRemainForbidden(String kind)
+      throws Exception {
+    admin.update(
+        "UPDATE org.role SET permissions=ARRAY['auriga.connect','auriga.connect.collab.use','auriga.connect.resources.use','resource.packages.read','resource.packages.upload','resource.versions.submit','resource.versions.review','resource.versions.publish'] WHERE id=?",
+        ROLE);
+    UUID pkg = resource(550, "l4", "private", ALICE, T1, false);
+    admin.update("UPDATE resource.resource_package SET name='example-plugin' WHERE id=?", pkg);
+    byte[] archive = workflowArchive("valid");
+    uploadArchive(pkg, archive, "\"1\"", 201);
+    UUID version =
+        admin.queryForObject(
+            "SELECT id FROM resource.resource_version WHERE package_id=?", UUID.class, pkg);
+    String digest =
+        admin.queryForObject(
+            "SELECT digest FROM resource.resource_version WHERE id=?", String.class, version);
+    workflowRequest(
+        "/api/resource/v1/packages/" + pkg + "/versions/" + version + "/personal-signatures",
+        ALICE,
+        "{\"reason\":\"Device resource fixture\"}",
+        "\"1\"",
+        201);
+    admin.update("UPDATE resource.resource_package SET enabled=true WHERE id=?", pkg);
+    UUID skill = id(552), skillVersion = id(553);
+    byte[] manifest =
+        ("{\"kind\":\"skill\",\"name\":\"example-skill\",\"version\":\"1.0.0\",\"artifacts\":[]}")
+            .getBytes(StandardCharsets.UTF_8);
+    admin.update(
+        "INSERT INTO resource.catalog_package(id,tenant_id,owner_id,name,kind,visibility,created_at) VALUES(?,?,?,'example-skill','skill','tenant',now())",
+        skill,
+        T1,
+        ALICE);
+    admin.update(
+        "INSERT INTO resource.catalog_version(id,tenant_id,package_id,author_id,version,digest,manifest_bytes,manifest,state,minimum_risk,risk,created_at) VALUES(?,?,?,?,'1.0.0',?,?,?::jsonb,'draft','r1','r1',now())",
+        skillVersion,
+        T1,
+        skill,
+        ALICE,
+        auriga.resource.app.CatalogManifest.digest(manifest),
+        manifest,
+        new String(manifest, StandardCharsets.UTF_8));
+    var grant = deviceCredentials.issue(T1, ALICE, kind);
+    for (String path :
+        List.of(
+            "/revocations",
+            "/packages",
+            "/packages/" + pkg,
+            "/packages/" + pkg + "/versions",
+            "/packages/" + pkg + "/versions/" + version,
+            "/catalog/packages",
+            "/catalog/packages/" + skill,
+            "/catalog/packages/" + skill + "/versions",
+            "/catalog/packages/" + skill + "/versions/" + skillVersion,
+            "/member/installations?clientId=" + grant.device(),
+            "/catalog/member/installations?clientId=" + grant.device()))
+      deviceStatus(200, deviceRequest(path, grant.token(), null));
+    var manifestDownload =
+        deviceRequest(
+            "/catalog/packages/" + skill + "/versions/" + skillVersion + "/manifest",
+            grant.token(),
+            null);
+    deviceStatus(200, manifestDownload);
+    assertArrayEquals(manifest, manifestDownload.body());
+    var identity =
+        JSON.createObjectNode()
+            .put("clientId", grant.device().toString())
+            .put("packageId", pkg.toString())
+            .put("versionId", version.toString())
+            .put("digest", digest);
+    deviceStatus(
+        202,
+        deviceRequest(
+            "/member/installations",
+            grant.token(),
+            identity.deepCopy().put("action", "install").toString()));
+    var ticketResponse =
+        deviceRequest("/member/download-tickets", grant.token(), identity.toString());
+    deviceStatus(201, ticketResponse);
+    String ticket = JSON.readTree(ticketResponse.body()).path("ticket").asString();
+    var download =
+        deviceRequest(
+            "/member/downloads",
+            grant.token(),
+            JSON.createObjectNode()
+                .put("clientId", grant.device().toString())
+                .put("ticket", ticket)
+                .toString());
+    deviceStatus(200, download);
+    assertArrayEquals(archive, download.body());
+    deviceStatus(
+        200,
+        deviceRequest(
+            "/packages/" + pkg + "/versions/" + version + "/content", grant.token(), null));
+    for (String path :
+        List.of(
+            "/packages",
+            "/catalog/packages",
+            "/packages/" + pkg + "/versions/" + version + "/submissions",
+            "/admin/reviews/" + UUID.randomUUID() + "/decisions",
+            "/admin/packages/" + pkg + "/versions/" + version + "/publications")) {
+      var denied = deviceRequest(path, grant.token(), "{}");
+      deviceStatus(403, denied);
+      assertEquals("common.forbidden", JSON.readTree(denied.body()).path("code").asString());
+    }
+    String multipart =
+        "--device-resource\r\nContent-Disposition: form-data; name=\"metadata\"\r\n\r\n{}\r\n--device-resource--\r\n";
+    for (String path :
+        List.of("/packages/" + pkg + "/versions", "/catalog/packages/" + skill + "/versions")) {
+      var denied =
+          deviceRequest(
+              path, grant.token(), multipart, "multipart/form-data; boundary=device-resource");
+      deviceStatus(403, denied);
+      assertEquals("common.forbidden", JSON.readTree(denied.body()).path("code").asString());
+    }
+    deviceCredentials.revoke(T1, grant.device());
+    deviceStatus(403, deviceRequest("/revocations", grant.token(), null));
+  }
+
+  @org.junit.jupiter.params.ParameterizedTest
+  @org.junit.jupiter.params.provider.ValueSource(strings = {"standard", "native", "managed"})
+  void deviceRequestsRecheckCurrentMembershipAndBothPermissions(String kind) throws Exception {
+    admin.update(
+        "UPDATE org.role SET permissions=ARRAY['auriga.connect','auriga.connect.collab.use','auriga.connect.resources.use','resource.packages.read'] WHERE id=?",
+        ROLE);
+    var grant = deviceCredentials.issue(T1, ALICE, kind);
+    deviceStatus(200, deviceRequest("/revocations", grant.token(), null));
+    admin.update("UPDATE org.member SET status='disabled' WHERE id=?", ALICE);
+    deviceStatus(403, deviceRequest("/revocations", grant.token(), null));
+    admin.update("UPDATE org.member SET status='active' WHERE id=?", ALICE);
+    for (String permission : List.of("auriga.connect.resources.use", "resource.packages.read")) {
+      admin.update(
+          "UPDATE org.role SET permissions=array_remove(permissions,?) WHERE id=?",
+          permission,
+          ROLE);
+      deviceStatus(403, deviceRequest("/revocations", grant.token(), null));
+      admin.update(
+          "UPDATE org.role SET permissions=array_append(permissions,?) WHERE id=?",
+          permission,
+          ROLE);
+    }
+    deviceStatus(200, deviceRequest("/revocations", grant.token(), null));
+  }
+
+  @org.junit.jupiter.params.ParameterizedTest
+  @org.junit.jupiter.params.provider.ValueSource(strings = {"standard", "native", "managed"})
+  void externalDevicesKeepCurrentVisibilityBoundaries(String kind) throws Exception {
+    admin.update(
+        "UPDATE org.role SET permissions=ARRAY['auriga.connect','auriga.connect.collab.use','auriga.connect.resources.use','resource.packages.read'] WHERE id=?",
+        ROLE);
+    UUID privatePackage = resource(551, "l4", "private", ALICE, T1, false);
+    var grant = deviceCredentials.issue(T1, EXTERNAL, kind);
+    deviceStatus(200, deviceRequest("/revocations", grant.token(), null));
+    deviceStatus(200, deviceRequest("/packages", grant.token(), null));
+    deviceStatus(404, deviceRequest("/packages/" + privatePackage, grant.token(), null));
+    deviceStatus(404, deviceRequest("/catalog/packages/" + privatePackage, grant.token(), null));
   }
 
   @Test
@@ -1021,21 +1233,28 @@ class ResourceReadAssemblyTest {
     admin.update(
         "UPDATE resource.resource_member_ticket SET expires_at=now()-interval '1 second' WHERE consumed_at IS NULL");
     assertEquals(404, memberDownload(ALICE, consume, false).statusCode());
-    // A device credential is also accepted, and is restricted to its own did.
+    // Use IAM-issued credentials with live lineage and current resource capability.
+    admin.update(
+        "UPDATE org.role SET permissions=array_append(permissions,'auriga.connect.resources.use') WHERE id=?",
+        ROLE);
+    var deviceGrant = deviceCredentials.issue(T1, ALICE, "native");
+    var deviceIdentity = identity.deepCopy().put("clientId", deviceGrant.device().toString());
     var device =
         http.send(
             HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + port + tickets))
-                .header("Authorization", "Bearer " + workflowToken(ALICE, client))
+                .header("Authorization", "Bearer " + deviceGrant.token())
                 .header("Content-Type", "application/json")
                 .header("Idempotency-Key", UUID.randomUUID().toString())
-                .POST(HttpRequest.BodyPublishers.ofString(identity.toString()))
+                .POST(HttpRequest.BodyPublishers.ofString(deviceIdentity.toString()))
                 .build(),
             HttpResponse.BodyHandlers.ofString());
     assertEquals(201, device.statusCode(), device.body());
     var wrongClient =
         http.send(
             HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + port + tickets))
-                .header("Authorization", "Bearer " + workflowToken(ALICE, id(996)))
+                .header(
+                    "Authorization",
+                    "Bearer " + deviceCredentials.issue(T1, ALICE, "native").token())
                 .header("Content-Type", "application/json")
                 .header("Idempotency-Key", UUID.randomUUID().toString())
                 .POST(HttpRequest.BodyPublishers.ofString(identity.toString()))

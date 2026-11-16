@@ -9,6 +9,11 @@
   </parent>
   <artifactId>resource-impl</artifactId>
   <dependencies>
+    <dependency>
+      <groupId>auriga</groupId>
+      <artifactId>iam-api</artifactId>
+      <version>${project.version}</version>
+    </dependency>
     <dependency><groupId>org.yaml</groupId><artifactId>snakeyaml</artifactId></dependency>
     <dependency>
       <groupId>org.apache.commons</groupId>
