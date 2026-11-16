@@ -1,19 +1,23 @@
 /** Local-only resource root bootstrap. Private bytes never leave protected files. */
 import { generateKeyPairSync, randomUUID, createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
-import { lstatSync, mkdirSync, realpathSync, writeFileSync } from 'node:fs';
+import {
+  closeSync,
+  lstatSync,
+  mkdirSync,
+  openSync,
+  realpathSync,
+  writeFileSync,
+} from 'node:fs';
 import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-function privateDirectory(directory) {
-  // mkdir is exclusive even when two generators select the same output.
-  // On Windows there are no private bytes until the DACL is protected.
-  mkdirSync(directory, { mode: 0o700 });
+function protectWindowsPath(path, kind) {
   if (process.platform !== 'win32') {
     return;
   }
   const script = fileURLToPath(
-    new URL('./private-directory.ps1', import.meta.url),
+    new URL('./protect-private-path.ps1', import.meta.url),
   );
   // A pwsh 7 parent can inject modules incompatible with Windows PowerShell 5.1.
   const environment = Object.fromEntries(
@@ -29,9 +33,9 @@ function privateDirectory(directory) {
       'v1.0',
       'powershell.exe',
     ),
-    ['-NoProfile', '-NonInteractive', '-File', script],
+    ['-NoProfile', '-NonInteractive', '-File', script, '-Kind', kind],
     {
-      env: { ...environment, AURIGA_RESOURCE_KEY_DIRECTORY: directory },
+      env: { ...environment, AURIGA_RESOURCE_KEY_PATH: path },
       encoding: 'utf8',
     },
   );
@@ -41,7 +45,24 @@ function privateDirectory(directory) {
       result.stderr.trim() ||
       result.stdout.trim() ||
       `PowerShell exited with status ${result.status}`;
-    throw new Error(`Cannot protect new key directory: ${reason}`);
+    throw new Error(`Cannot protect new key ${kind}: ${reason}`);
+  }
+}
+
+function privateDirectory(directory) {
+  // Exclusively reserve the path before applying current-user ownership/ACLs.
+  mkdirSync(directory, { mode: 0o700 });
+  protectWindowsPath(directory, 'directory');
+}
+
+function writeProtectedFile(file, content) {
+  const descriptor = openSync(file, 'wx', 0o600);
+  try {
+    // Fix the default Windows owner while the file is still empty.
+    protectWindowsPath(file, 'file');
+    writeFileSync(descriptor, content);
+  } finally {
+    closeSync(descriptor);
   }
 }
 
@@ -71,17 +92,13 @@ export function generateKeys(output, kidPrefix = `resource-${randomUUID()}`) {
     const { privateKey, publicKey } = generateKeyPairSync('ed25519');
     const bytes = privateKey.export({ type: 'pkcs8', format: 'der' });
     try {
-      writeFileSync(
+      writeProtectedFile(
         join(
           directory,
           role === 'downgrade' ? 'offline' : 'platform',
           `${role}.pk8`,
         ),
         bytes,
-        {
-          mode: 0o600,
-          flag: 'wx',
-        },
       );
     } finally {
       bytes.fill(0);
@@ -94,11 +111,8 @@ export function generateKeys(output, kidPrefix = `resource-${randomUUID()}`) {
     };
   }
   const json = JSON.stringify(trust);
-  writeFileSync(join(directory, 'resource-roots.json'), json, {
-    mode: 0o600,
-    flag: 'wx',
-  });
-  writeFileSync(
+  writeProtectedFile(join(directory, 'resource-roots.json'), json);
+  writeProtectedFile(
     join(directory, 'platform.properties'),
     [
       `auriga.resource.release-kid=${trust.release.kid}`,
@@ -107,8 +121,8 @@ export function generateKeys(output, kidPrefix = `resource-${randomUUID()}`) {
       'auriga.resource.revocation-key-file=/run/secrets/auriga-resource/revocation.pk8',
       '',
     ].join('\n'),
-    { mode: 0o600, flag: 'wx' },
   );
+  protectWindowsPath(directory, 'verify');
   return {
     directory,
     trust,

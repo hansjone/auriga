@@ -48,7 +48,9 @@ Linux 同样使用 `--out /secure/auriga-resource-dev-batch1`。省略 `--kid-pr
 
 私钥采用无口令 PKCS#8 DER，Node 使用 `type: 'pkcs8', format: 'der'` 导出，
 对应 `ResourceSigning.load` 的 `PKCS8EncodedKeySpec`。POSIX 目录为 0700，文件为 0600。
-Windows 在写入私钥前关闭目录 ACL 继承，仅授予当前用户 SID 完全控制，文件继承该 DACL。
+Windows 在写入私钥前将目录和空文件的属主修正为当前用户 SID，分别关闭 ACL 继承，
+仅授予该 SID 完全控制。管理员令牌默认以 Administrators 组为属主时也按此规则修正，
+全部输出完成后逐项复核目录与文件的属主及 ACL。
 输出目录已存在、父路径为符号链接或 junction 时拒绝。并发或重复生成不会覆盖旧输出。
 中途失败可能留下受保护的部分输出，核对后选用新的目录重新生成，保留原目录供排查。
 私钥、目录完整备份和终端重定向内容均应留在受控本机或离线介质，公钥 JSON 可用于 CI。

@@ -34,6 +34,109 @@ function windowsPowerShellEnvironment() {
 }
 
 test(
+  'Windows resource keys replace an Administrators default owner with the current user',
+  {
+    skip: process.platform !== 'win32',
+  },
+  (t) => {
+    const result = spawnSync(
+      windowsPowerShell,
+      [
+        '-NoProfile',
+        '-NonInteractive',
+        '-File',
+        fileURLToPath(new URL('./resource-default-owner.ps1', import.meta.url)),
+        '-Node',
+        process.execPath,
+        '-Repository',
+        fileURLToPath(new URL('../../../', import.meta.url)),
+        '-Output',
+        tempBase(t),
+      ],
+      { env: windowsPowerShellEnvironment(), encoding: 'utf8' },
+    );
+    assert.equal(result.status, 0, result.stderr);
+    if (
+      result.stdout.includes(
+        'SKIP: Administrators default-owner simulation requires an elevated token',
+      )
+    ) {
+      t.skip(
+        'Administrators default-owner simulation requires an elevated Windows token',
+      );
+      return;
+    }
+    assert.match(result.stdout, /DefaultOwnerAdministrators=True/);
+    assert.match(result.stdout, /AllGeneratedOwnersAndAclsVerified=True/);
+    t.diagnostic(
+      'Simulated Administrators default owner and verified every generated owner and ACL',
+    );
+  },
+);
+
+test(
+  'Windows final resource key verification rejects an exposed file ACL',
+  {
+    skip: process.platform !== 'win32',
+  },
+  (t) => {
+    const { directory } = generateKeys(join(tempBase(t), 'keys'), 'verify');
+    const modify = spawnSync(
+      windowsPowerShell,
+      [
+        '-NoProfile',
+        '-NonInteractive',
+        '-Command',
+        `
+    $ErrorActionPreference = 'Stop'
+    $info = Get-Item -LiteralPath (Join-Path $env:RESOURCE_TEST_DIRECTORY 'platform/release.pk8')
+    $acl = $info.GetAccessControl()
+    $other = New-Object System.Security.Principal.SecurityIdentifier('S-1-5-11')
+    $acl.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule($other, 'ReadData', 'Allow')))
+    $info.SetAccessControl($acl)
+  `,
+      ],
+      {
+        env: {
+          ...windowsPowerShellEnvironment(),
+          RESOURCE_TEST_DIRECTORY: directory,
+        },
+        encoding: 'utf8',
+      },
+    );
+    assert.equal(modify.status, 0, modify.stderr);
+    const check = spawnSync(
+      windowsPowerShell,
+      [
+        '-NoProfile',
+        '-NonInteractive',
+        '-File',
+        fileURLToPath(
+          new URL(
+            '../../../scripts/resource-keys/protect-private-path.ps1',
+            import.meta.url,
+          ),
+        ),
+        '-Kind',
+        'verify',
+      ],
+      {
+        env: {
+          ...windowsPowerShellEnvironment(),
+          AURIGA_RESOURCE_KEY_PATH: directory,
+        },
+        encoding: 'utf8',
+      },
+    );
+    assert.notEqual(check.status, 0);
+    assert.match(
+      check.stderr,
+      /ACL must be protected with one current-user rule/,
+    );
+  },
+);
+
+test(
   'Windows resource key generator isolates inherited PowerShell module paths',
   {
     skip: process.platform !== 'win32',
@@ -117,6 +220,11 @@ test(
         `
     $ErrorActionPreference = 'Stop'
     $sid = [System.Security.Principal.WindowsIdentity]::GetCurrent().User
+    # Set the probe owner before inherited denies remove WRITE_OWNER.
+    $probe = New-Item -ItemType Directory -Path (Join-Path $env:RESOURCE_TEST_PARENT 'probe')
+    $probeOwner = New-Object System.Security.AccessControl.DirectorySecurity
+    $probeOwner.SetOwner($sid)
+    $probe.SetAccessControl($probeOwner)
     $security = New-Object System.Security.AccessControl.DirectorySecurity
     $security.SetAccessRuleProtection($true, $false)
     $inherit = [System.Security.AccessControl.InheritanceFlags]'ContainerInherit, ObjectInherit'
@@ -131,7 +239,6 @@ test(
     $ownerRights = New-Object System.Security.Principal.SecurityIdentifier('S-1-3-4')
     $blockedSecurity.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule($ownerRights, 'ChangePermissions', $inherit, 'None', 'Deny')))
     $blocked.SetAccessControl($blockedSecurity)
-    $probe = New-Item -ItemType Directory -Path (Join-Path $env:RESOURCE_TEST_PARENT 'probe')
     if ((Get-Acl -LiteralPath $probe.FullName).GetOwner([System.Security.Principal.SecurityIdentifier]).Value -ne $sid.Value) { throw 'Probe owner must be the current user' }
     $ownerOnly = New-Object System.Security.AccessControl.DirectorySecurity
     $ownerOnly.SetOwner($sid)
@@ -251,7 +358,9 @@ test('resource keys are independent PKCS#8 DER with matching SPKI roots and prot
       $items = @(Get-Item -LiteralPath $env:RESOURCE_TEST_DIRECTORY) + @(Get-ChildItem -LiteralPath $env:RESOURCE_TEST_DIRECTORY -Recurse)
       foreach ($item in $items) {
         $acl = Get-Acl -LiteralPath $item.FullName
-        if ($item.PSIsContainer -and !$acl.AreAccessRulesProtected) { throw 'inherited directory ACL' }
+        if ($acl.GetOwner([System.Security.Principal.SecurityIdentifier]).Value -ne $sid) { throw 'owner is not the current user' }
+        if (!$acl.AreAccessRulesProtected) { throw 'inherited resource key ACL' }
+        if ($acl.Access.Count -ne 1) { throw 'resource key ACL must contain exactly one rule' }
         foreach ($rule in $acl.Access) {
           if ($rule.AccessControlType -eq 'Allow' -and $rule.IdentityReference.Translate([System.Security.Principal.SecurityIdentifier]).Value -ne $sid) { throw 'exposed key ACL' }
         }
