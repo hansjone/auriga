@@ -4,7 +4,6 @@ import { createHash, createPublicKey, verify } from 'node:crypto';
 import { readFileSync, statSync, lstatSync } from 'node:fs';
 import { join } from 'node:path';
 import { physical } from './platform.mjs';
-import { sha256File } from '../../clients/installer/runtime/verify.mjs';
 
 // Source manifests contain thousands of file keys; the resource statement
 // parser's 512-key object limit is intentionally smaller. Keep a separate,
@@ -124,7 +123,7 @@ export function verifySignedInventory(
         throw new Error('缺少签名元数据摘要');
       const file = join(root, name);
       const bytes = smallFile(file, 32 * 1024 ** 2);
-      if (sha256File(file) !== entries.get(name))
+      if (hash(bytes) !== entries.get(name))
         throw new Error(`签名元数据摘要不匹配：${name}`);
       return parseMetadataJson(bytes);
     },

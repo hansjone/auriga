@@ -141,9 +141,11 @@ export function verifyInputs(
     if (release.lockSha256 !== lockIdentity(root).lockSha256)
       throw new Error('签名输入发行依赖锁不匹配');
   }
-  if (!HASH.test(expected ?? '') || sha256File(file) !== expected)
+  if (!lstatSync(file).isFile()) throw new Error('离线清单必须为普通文件');
+  const manifestBytes = readFileSync(file);
+  if (!HASH.test(expected ?? '') || digest(manifestBytes) !== expected)
     throw new Error('Windows devkit 清单缺少独立批准摘要或摘要不符');
-  const manifest = JSON.parse(readFileSync(file));
+  const manifest = JSON.parse(manifestBytes);
   const identity = lockIdentity(root);
   if (
     manifest.schema !== 1 ||
