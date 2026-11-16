@@ -19,7 +19,7 @@ import {
 } from './process-tree.mjs';
 import { Supervisor, packagedTrust } from './supervisor.mjs';
 import { superviseDsh } from './desktop-supervision.mjs';
-import { startShellAuth } from './shell-auth.mjs';
+import { startShellAuth, registerFallbackLogin } from './shell-auth.mjs';
 import { assertLocalPath } from './host-lock.mjs';
 import { pathOperationLock, processAlive } from './operation-lock.mjs';
 /**
@@ -92,6 +92,8 @@ const OWNED_ENTRIES = [
   'txn.json',
   'desktop-update.json',
   'desktop-update.json.tmp',
+  'desktop-update.log',
+  'desktop-update.log.1',
   'desktop-pending',
   '.desktop-resume',
   '.desktop-update-lock',
@@ -1261,7 +1263,6 @@ async function launchLocked({
   env = process.env,
   control,
   versionSession,
-  openLoginOnStart = !args.includes('--no-open'),
 }) {
   root = resolve(root);
   const report = (event) => {
@@ -1302,12 +1303,18 @@ async function launchLocked({
       try {
         if (existsSync(join(root, 'desktop-pending')))
           report({ event: 'update', phase: 'installing' });
-        if (await applyPending(root, { session: versionSession }))
+        if (
+          await applyPending(root, {
+            session: versionSession,
+            onState: (state) => report({ event: 'update', ...state }),
+          })
+        )
           report({ event: 'update', phase: 'installed' });
       } catch (error) {
         report({
           event: 'update',
           phase: 'failed',
+          ...error.updateFailure,
           reason:
             error?.code === 'desktop.smoke_failed'
               ? 'desktop.smoke_failed'
@@ -1317,7 +1324,7 @@ async function launchLocked({
         console.error(
           error?.code === 'desktop.smoke_failed'
             ? `${BRAND_NAME} 更新失败，已保留旧版。[desktop.smoke_failed]`
-            : `${BRAND_NAME} 更新失败，已保留旧版。`,
+            : `${BRAND_NAME} 更新失败，已保留旧版。[${error.updateFailure?.code ?? 'updateFailed'}/${error.updateFailure?.stage ?? 'unknown'}]`,
         );
       }
     };
@@ -1333,13 +1340,6 @@ async function launchLocked({
         root,
         dataHome: state.dataHome,
         dir,
-        openLoginOnStart,
-        onSkipLogin: (localLogin) =>
-          report({
-            event: 'login',
-            opened: false,
-            state: localLogin ? 'local_login' : 'skipped',
-          }),
         onFailure: (reason) => {
           shellFailure = reason;
         },
@@ -1357,20 +1357,7 @@ async function launchLocked({
       publish();
       statusTimer = setInterval(publish, 2000);
       statusTimer.unref();
-      // "Open Auriga" while signed out shows the platform sign-in page first.
-      control.on?.('login', () => {
-        const platform = platformStatus(shellAuth, shellFailure);
-        if (!shellAuth?.openLogin || platform.state === 'authenticated') {
-          report({ event: 'login', opened: false, state: platform.state });
-          return;
-        }
-        Promise.resolve()
-          .then(() => shellAuth.openLogin())
-          .then(
-            () => report({ event: 'login', opened: true }),
-            () => report({ event: 'login', opened: false, state: 'failed' }),
-          );
-      });
+      registerFallbackLogin(control, () => shellAuth, report);
     }
     await supervisor.reconcile(true);
     if (
