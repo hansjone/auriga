@@ -11,7 +11,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        # Keep the existing Linux check name for branch protection.
+        os: [ubuntu-latest]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
@@ -24,22 +25,16 @@ jobs:
         with:
           go-version: '1.27.3'
           cache-dependency-path: infra/gen/go.sum
-      - name: Verify (Linux)
-        if: runner.os != 'Windows'
+      - name: Verify
         run: bash ./mvnw -B -Pgo-openapi-models verify
-      - name: Check committed OpenAPI Go models (Linux)
-        if: runner.os != 'Windows'
+      - name: Check committed OpenAPI Go models
         run: |
           gofmt -w infra/gen/aiapi infra/gen/resourceapi infra/gen/deployment infra/gen/shellauthapi infra/gen/msgnetapi
           git diff --exit-code -- infra/gen/aiapi infra/gen/resourceapi infra/gen/deployment infra/gen/shellauthapi infra/gen/msgnetapi
           test -z "$(git status --porcelain -- infra/gen/aiapi infra/gen/resourceapi infra/gen/deployment infra/gen/shellauthapi infra/gen/msgnetapi)"
-      - name: Verify Java signing with Go (Linux)
-        if: runner.os != 'Windows'
+      - name: Verify Java signing with Go
         run: |
           test -s services/contracts/target/java-signature-vectors.json
           export AURIGA_JAVA_SIGNATURE_VECTORS="$PWD/services/contracts/target/java-signature-vectors.json"
           cd infra/gen
           go test -count=1 -v ./contracttest
-      - name: Verify (Windows)
-        if: runner.os == 'Windows'
-        run: .\mvnw.cmd -B verify

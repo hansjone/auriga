@@ -2,7 +2,7 @@
 
 ## Java
 
-`java.yml` 在 Ubuntu/Windows、Temurin 25 上运行 Maven Wrapper 的 `verify`，缓存
+`java.yml` 仅在 Ubuntu、Temurin 25 上运行 Maven Wrapper 的 `-Pgo-openapi-models verify`，缓存
 Maven 仓库及 wrapper 发行包。覆盖契约生成、编译、PostgreSQL 17 测试、随机端口 health、ArchUnit、
 Spotless。本地运行 `./mvnw -B verify`，Windows 为 `.\mvnw.cmd -B verify`。
 详见 [Java 开发](java.md)。
@@ -22,16 +22,32 @@ Maven 3.9.16 zip 另核对官方 `.zip.sha512`。
 两个制品的 SHA-256 固定在 wrapper properties，Linux/Windows wrapper 每次运行都校验
 jar，新发行包在执行前校验。升级时必须重新验证官方签名/摘要并同步 pin；缓存不能替代校验。
 
+## Go 与客户端 CI 平台
+
+服务端只部署 Linux：`go.yml` 的 `gen`、`edge`、`ai-gateway`、`egress`、`agent`、
+`ctl` 及 `deploy/offline` 仅在 Ubuntu 测试，infra 模块保留 `-race`。
+Java、Go 保留单元素 Ubuntu 矩阵，沿用 `verify (ubuntu-latest)`、`test (ubuntu-latest)`
+check 名称；Java 的 `verify (windows-latest)`、Go 的 `test (windows-latest)` 不再产生。
+主控需同步分支保护；Plugin 仍产生同名 `test (windows-latest)`，若规则仅按 check 名称
+匹配，不能将其当作 Go 专用检查直接删除。Go 的六个 `lint (<module>)` check 不变。
+
+Windows 桌面安装器和插件没有打包 infra Go 模块或 Java 组件；shell-auth broker 是
+JavaScript，其 Windows helper 由 C# 编译。`installer.yml`、`auth-release-artifacts.yml`
+继续在 Windows 构建并验证原生产物；`plugin.yml` 保留 Ubuntu/Windows 测试矩阵，
+`plugin-release.yml` 继续调用共享 Windows 认证制品工作流。`e2e.yml` 的容器服务栈仍在 Ubuntu。
+
 ## Go 测试 PostgreSQL 制品
 
 `go.yml` 在测试前运行 `.github/scripts/prepare-postgres.ps1`，按仓库中的
-`postgres-artifacts.json` 固定摘要预取 Zonky PostgreSQL 17.5.0 Windows/Linux amd64 jar。
+`postgres-artifacts.json` 固定摘要预取 Zonky PostgreSQL 17.5.0 Linux amd64 jar。
 摘要源为对应 Maven Central 制品的官方 `.jar.sha256`。网络错误最多尝试三次，每次超时
 120 秒，间隔 2、4 秒；校验失败直接拒绝，下载未完成的文件不进入正式缓存。
 命中 `actions/cache` 后仍校验 jar，并从校验成功的 jar 重新提取 txz，避免信任独立的旧 txz。
 缓存 key 包含 OS、架构和摘要清单，不缓存数据库数据或解压后的运行目录。
 ctl 通过 `AURIGA_PG_CACHE_DIR` 复用归档；显式 CacheDir/`--cache-dir` 优先，
-未配置仍使用各数据目录中的 `cache`。更新 ctl 内嵌版本时需同步清单。
+未配置仍使用各数据目录中的 `cache`。这些脚本仍服务于 Linux ctl 的内嵌数据库测试，
+独立于 AI 测试使用的 PostgreSQL service 容器；不再下载 Windows 制品。
+更新 ctl 内嵌版本时需同步清单。
 
 本地验证下载逻辑与引导重试（不需要 Pester）：
 
