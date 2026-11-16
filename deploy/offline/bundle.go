@@ -155,6 +155,9 @@ func bundleExpected(args []string, expectedCommit string) error {
 		if err != nil {
 			return err
 		}
+		if kit.cleanup != nil {
+			defer kit.cleanup()
+		}
 		r = kit.Release
 		options.Cache = filepath.Join(kitRoot, "cache")
 	} else if err := readJSON(*index, &r); err != nil {
@@ -181,9 +184,13 @@ func bundleExpected(args []string, expectedCommit string) error {
 		if err != nil {
 			return err
 		}
-		if kit != nil && kit.Source != nil {
+		_, archiveSourceErr := os.Lstat(filepath.Join(source, "auriga-source.json"))
+		if kit != nil && kit.Source != nil && os.IsNotExist(archiveSourceErr) {
 			options.Info.UpstreamVersion = kit.Source.UpstreamVersion
 			options.Info.SiteChanges = options.Info.Dirty || options.Info.Commit != kit.Source.Commit || kit.Source.SnapshotSHA256 != "" && options.Info.SnapshotSHA256 != kit.Source.SnapshotSHA256
+		}
+		if archiveSourceErr == nil {
+			r.Version = options.Info.UpstreamVersion
 		}
 		if err := sourceVersion(options.Info, r, *version, true); err != nil {
 			return err
@@ -316,6 +323,11 @@ func bundleExpected(args []string, expectedCommit string) error {
 	if err := os.Remove(filepath.Join(root, "SHA256SUMS")); err != nil {
 		return err
 	}
+	if *sign != "" {
+		if err := signingPublic(*sign, filepath.Join(root, "release-public.pem")); err != nil {
+			return err
+		}
+	}
 	if err := writeSums(root); err != nil {
 		return err
 	}
@@ -368,6 +380,11 @@ func signFile(file, keyPath string) error {
 }
 
 func verifySignature(root, publicPath string) error {
+	if publicPath == "" {
+		if _, err := os.Stat(filepath.Join(root, "release-public.pem")); err == nil {
+			publicPath = filepath.Join(root, "release-public.pem")
+		}
+	}
 	return verifyFileSignature(filepath.Join(root, "SHA256SUMS"), publicPath)
 }
 

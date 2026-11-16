@@ -242,6 +242,13 @@ func extractVerified(file, destination, key string) error {
 	if err := verifySignature(stage, key); err != nil {
 		return err
 	}
+	if index := archiveIndex(file); index != "" && key == "" {
+		if _, err := os.Stat(filepath.Join(stage, "release-public.pem")); err == nil {
+			if err := verifyFileSignature(index, filepath.Join(stage, "release-public.pem")); err != nil {
+				return err
+			}
+		}
+	}
 	return os.Rename(stage, destination)
 }
 
@@ -270,10 +277,29 @@ func verifyCommand(args []string) error {
 	if err := f.Parse(args[1:]); err != nil {
 		return err
 	}
-	if f.NArg() != 0 || *key == "" {
-		return errors.New("verify 需要 --verify-key 独立批准公钥")
+	if f.NArg() != 0 {
+		return errors.New("多余 verify 参数")
 	}
-	if err := verifySignature(args[0], *key); err != nil {
+	info, err := os.Stat(args[0])
+	if err != nil {
+		return err
+	}
+	if !info.IsDir() {
+		stage, err := os.MkdirTemp("", "auriga-verify-")
+		if err != nil {
+			return err
+		}
+		defer func() { _ = os.RemoveAll(stage) }()
+		if err := extractVerified(args[0], filepath.Join(stage, "package"), *key); err != nil {
+			return err
+		}
+		if err := verifyDownloadedSignature(filepath.Join(stage, "package"), *key); err != nil {
+			return err
+		}
+		fmt.Println("PASS 归档/分卷摘要与包内签名校验")
+		return nil
+	}
+	if err := verifyDownloadedSignature(args[0], *key); err != nil {
 		return err
 	}
 	if err := verifySums(args[0]); err != nil {
@@ -281,4 +307,13 @@ func verifyCommand(args []string) error {
 	}
 	fmt.Println("PASS 全部发行附件 SHA256SUMS 与 Ed25519 签名")
 	return nil
+}
+
+func verifyDownloadedSignature(root, key string) error {
+	if key == "" {
+		if _, err := os.Stat(filepath.Join(root, "release-public.pem")); err != nil {
+			return errors.New("下载内容缺少包内发行公钥；不能声称签名校验通过")
+		}
+	}
+	return verifySignature(root, key)
 }

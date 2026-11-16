@@ -5,6 +5,8 @@ import (
 	"crypto/rand"
 	"crypto/x509"
 	"encoding/pem"
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -56,8 +58,21 @@ func TestReleaseCacheSignedPartsAndTagGate(t *testing.T) {
 	if _, err := gitAt(source, "tag", "1.0"); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := gitAt(source, "tag", "1.0-alias"); err != nil {
+		t.Fatal(err)
+	}
 	key, public := testSigningKeys(t)
-	r := release{Schema: 1, Version: "1.0", Build: &buildSpec{Inputs: artifact{SHA256: strings.Repeat("a", 64)}, Recipes: artifact{SHA256: strings.Repeat("b", 64)}}}
+	single := fixtureSingleKit(t, "1.0", "a")
+	fixtureKit, err := readDevkit(single)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := fixtureKit.Release
+	r.NAS.URL = filepath.Join(single, "cache", "nas.tar")
+	r.NAS.SHA256, err = digest(r.NAS.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
 	index := filepath.Join(t.TempDir(), "release.json")
 	if err := jsonFile(index, r, 0644); err != nil {
 		t.Fatal(err)
@@ -65,7 +80,7 @@ func TestReleaseCacheSignedPartsAndTagGate(t *testing.T) {
 	builds := 0
 	fake := func(file string) error {
 		root := t.TempDir()
-		if err := os.WriteFile(filepath.Join(root, "payload"), []byte(strings.Repeat("data", 10000)), 0644); err != nil {
+		if err := os.WriteFile(filepath.Join(root, "payload"), []byte(strings.Repeat("data", 20000)), 0644); err != nil {
 			return err
 		}
 		if err := writeSums(root); err != nil {
@@ -78,13 +93,44 @@ func TestReleaseCacheSignedPartsAndTagGate(t *testing.T) {
 	}
 	builders := releaseBuilders{Bundle: func(_ []string, _ string) error { return nil }, Devkit: func(_ []string) error { return nil }}
 	builders.Bundle = func(args []string, _ string) error { return fake(flagValue(args, "--out")) }
-	builders.Devkit = func(args []string) error { builds++; return fake(flagValue(args, "--out")) }
+	builders.Devkit = func(args []string) error {
+		builds++
+		locks, err := dependencyLocks(source, r)
+		if err != nil {
+			return err
+		}
+		fixtureKit.Locks = &locks
+		fixtureKit.Release.NAS.SHA256 = r.NAS.SHA256
+		if err := jsonFile(filepath.Join(single, "devkit.json"), fixtureKit, 0644); err != nil {
+			return err
+		}
+		if err := writeSums(single); err != nil {
+			return err
+		}
+		if err := signingPublic(key, filepath.Join(single, "release-public.pem")); err != nil {
+			return err
+		}
+		if err := writeSums(single); err != nil {
+			return err
+		}
+		if err := signSums(single, key); err != nil {
+			return err
+		}
+		return pack(single, flagValue(args, "--out"))
+	}
+	builders.Gate = func(o gateRequest) (buildGate, error) {
+		if err := fake(o.Out); err != nil {
+			return buildGate{}, err
+		}
+		hash, err := digest(o.Out)
+		return buildGate{Passed: true, Commit: o.Commit, LockDigest: o.LockDigest, SourceSHA: o.SourceSHA, CatalogSHA: o.CatalogSHA, DevkitSHA: o.DevkitSHA, OutputSHA: hash, Network: gateNetwork}, err
+	}
 	builders.Executable = filepath.Join(t.TempDir(), "cli")
 	if err := os.WriteFile(builders.Executable, []byte("fixture cli"), 0755); err != nil {
 		t.Fatal(err)
 	}
 	parent := t.TempDir()
-	opts := releaseOptions{Source: source, Tag: "1.0", Index: index, Out: filepath.Join(parent, "v1"), Cache: filepath.Join(parent, "cache"), Key: key, Limit: 16384}
+	opts := releaseOptions{Source: source, Tag: "1.0", Index: index, Out: filepath.Join(parent, "v1"), Cache: filepath.Join(parent, "cache"), Key: key, Limit: 65536, NewBaseline: true}
 	if err := generateRelease(opts, builders); err != nil {
 		t.Fatal(err)
 	}
@@ -92,6 +138,38 @@ func TestReleaseCacheSignedPartsAndTagGate(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := verifySignature(opts.Out, public); err != nil {
+		t.Fatal(err)
+	}
+	var manifest distributionManifest
+	if err := readJSON(filepath.Join(opts.Out, "release-manifest.json"), &manifest); err != nil {
+		t.Fatal(err)
+	}
+	if err := validateBuildGate(opts.Out, manifest); err != nil {
+		t.Fatal(err)
+	}
+	archived := filepath.Join(parent, "source")
+	if err := extractVerified(filepath.Join(opts.Out, "auriga-source-1.0.tar"), archived, ""); err != nil {
+		t.Fatal(err)
+	}
+	m, err := readSourceManifest(archived)
+	if err != nil || m.Source.UpstreamVersion != "1.0" {
+		t.Fatal("explicit release tag must win over other same-commit tags", m, err)
+	}
+	guide, err := os.ReadFile(filepath.Join(opts.Out, "DOWNLOADS.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"SHA256SUMS", "SHA256SUMS.sig", "DOWNLOADS.txt", "release-manifest.json"} {
+		a, err := describeAsset(filepath.Join(opts.Out, name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(string(guide), fmt.Sprintf("%s  %d B", name, a.Size)) {
+			t.Fatal("download guide missing exact metadata size", name)
+		}
+	}
+	previous := filepath.Join(parent, "previous")
+	if err := extractVerified(filepath.Join(opts.Out, "auriga-devkit-1.0.tar"), previous, public); err != nil {
 		t.Fatal(err)
 	}
 	if err := extractVerified(filepath.Join(opts.Out, "auriga-offline-1.0.tar.part001"), filepath.Join(parent, "unpack"), public); err != nil {
@@ -115,11 +193,22 @@ func TestReleaseCacheSignedPartsAndTagGate(t *testing.T) {
 	}
 	opts.Tag = "1.1"
 	opts.Out = filepath.Join(parent, "v2")
+	opts.Previous = previous
+	opts.NewBaseline = false
 	if err := generateRelease(opts, builders); err != nil {
 		t.Fatal(err)
 	}
 	if builds != 1 {
 		t.Fatal("did not reuse lock-identical devkit", builds)
+	}
+	failing := builders
+	failing.Gate = func(gateRequest) (buildGate, error) { return buildGate{}, errors.New("missing fixture dependency") }
+	opts.Out = filepath.Join(parent, "gate-failure")
+	if err := generateRelease(opts, failing); err == nil {
+		t.Fatal("released without offline build")
+	}
+	if _, err := os.Stat(opts.Out); !os.IsNotExist(err) {
+		t.Fatal("failed gate left publishable output")
 	}
 	opts.Tag = "1.0"
 	opts.Out = filepath.Join(parent, "mismatch")
@@ -144,6 +233,38 @@ func TestReleaseCacheSignedPartsAndTagGate(t *testing.T) {
 	opts.Out = filepath.Join(parent, "tampered")
 	if err := generateRelease(opts, builders); err == nil {
 		t.Fatal("accepted tampered cached devkit")
+	}
+}
+
+func TestRefreshVersionedInputsOnDependencyReuse(t *testing.T) {
+	root := fixtureSingleKit(t, "1.0", "a")
+	key, _ := testSigningKeys(t)
+	kit, err := readDevkit(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(t.TempDir())
+	next := "new-nas.tar"
+	if err := os.WriteFile(next, []byte("new deployment scripts"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	r := kit.Release
+	r.Version = "1.1"
+	r.NAS.URL = next
+	r.NAS.SHA256, err = digest(next)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := refreshReleaseInputs(root, r, key); err != nil {
+		t.Fatal(err)
+	}
+	updated, err := readDevkit(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hash, err := digest(filepath.Join(root, "cache/nas.tar"))
+	if err != nil || hash != r.NAS.SHA256 || updated.Release.Version != "1.1" {
+		t.Fatal(updated, err)
 	}
 }
 

@@ -29,8 +29,8 @@ func main() {
 
 func dispatch(args []string) error {
 	if len(args) == 0 || args[0] == "--help" || args[0] == "help" {
-		fmt.Println("发行附件：./auriga release --tag <版本> --release <批准索引> --sign-key <私钥> [--attachment-limit <字节>]\n校验附件：./auriga verify <发行目录> --verify-key <公钥>\n自动解分卷：./auriga unpack <tar|part001|parts.json> --out <全新目录> --verify-key <公钥>\n校验源码依赖：./auriga devkit verify <解包套件目录> [--verify-key <公钥>]\n直接安装附件：sudo ./auriga install --package <tar|part001> --address 192.0.2.10 --verify-key <公钥>")
-		fmt.Println("Auriga 离线部署\n  ./auriga devkit --release 发行索引.json --out 开发套件.tar\n  ./auriga devkit --verify 套件目录 [--verify-key 公钥.pem]\n  ./auriga bundle --release 发行索引.json --out 离线包.tar [--build]\n  ./auriga bundle --build --offline [--version 0.2.0-site.3] [--out 离线包.tar]\n  sudo ./auriga install --address 192.0.2.10 [--data /srv/auriga]\n  sudo ./auriga doctor|backup|status|stop|logs [--data /srv/auriga]\n  sudo ./auriga upgrade 新离线包.tar [--data /srv/auriga]")
+		fmt.Println("浏览器下载Forgejo Release附件，现场无需Git/网络/语言工具链。\n校验附件：./auriga verify <文件或目录> [--verify-key <独立批准公钥>]\n自动解分卷：./auriga unpack <tar|part001|parts.json> --out <全新目录>\n校验源码依赖：./auriga devkit verify <套件目录> [--version <上游版本>]\n合并增量：./auriga devkit merge <增量tar或首卷> --kit <套件目录>\n现场补丁：./auriga changes export --out <补丁.tar> / changes apply <补丁.tar>\n维护者发行：./auriga release --tag <版本> --release <批准索引> --sign-key <私钥> --previous-devkit <上版目录>（首次 --new-baseline）")
+		fmt.Println("Auriga 离线部署\n  ./auriga bundle --build --offline [--version 0.2.0-site.3] [--out 离线包.tar]\n  sudo ./auriga install --address 192.0.2.10 [--data /srv/auriga]\n  sudo ./auriga doctor|backup|status|stop|logs [--data /srv/auriga]\n  sudo ./auriga upgrade 新离线包.tar [--data /srv/auriga]\n维护者自行打包及发行见 MAINTAIN.md。")
 		return nil
 	}
 	if runtime.GOOS != "linux" || runtime.GOARCH != "amd64" {
@@ -38,6 +38,9 @@ func dispatch(args []string) error {
 	}
 	if args[0] == "bundle" {
 		return bundle(args[1:])
+	}
+	if args[0] == "internal-offline-build" {
+		return isolatedGateBuild(args[1:])
 	}
 	if args[0] == "devkit" {
 		return devkit(args[1:])
@@ -50,6 +53,9 @@ func dispatch(args []string) error {
 	}
 	if args[0] == "release" {
 		return releaseCommand(args[1:])
+	}
+	if args[0] == "changes" {
+		return changesCommand(args[1:])
 	}
 	if os.Geteuid() != 0 {
 		return errors.New("现场操作需要 sudo/root，以保护服务密钥及备份权限")

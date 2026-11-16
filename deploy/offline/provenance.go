@@ -39,6 +39,13 @@ func gitFiles(root string, args ...string) (string, error) {
 // non-ignored new files. Ignored credentials, caches and worktree metadata stay
 // outside the snapshot. Index executable bits remain portable across DrvFS.
 func snapshotSource(root, target string, excluded ...string) (*provenance, error) {
+	if _, err := os.Lstat(filepath.Join(root, "auriga-source.json")); err == nil {
+		return snapshotArchiveSource(root, target, excluded...)
+	}
+	return snapshotGitSource(root, target, excluded...)
+}
+
+func snapshotGitSource(root, target string, excluded ...string) (*provenance, error) {
 	info := &provenance{BuiltAt: time.Now().UTC().Format(time.RFC3339)}
 	var err error
 	info.Commit, err = gitAt(root, "rev-parse", "HEAD")

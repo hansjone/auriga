@@ -91,7 +91,9 @@ func buildRelease(root, stage string, r release, options buildOptions) error {
 			}
 			base = tag
 		}
-		if err := command(nil, os.Stdout, nil, "sh", filepath.Join(source, "deploy/nas/offline-build/assemble-image.sh"), service, "auriga/"+service+":nas", base, output); err != nil {
+		// Buildx otherwise probes Git even for a source archive without .git.
+		// Provenance is supplied by our signed source manifest instead.
+		if err := command(nil, os.Stdout, []string{"BUILDX_GIT_INFO=false", "BUILDX_GIT_LABELS=false"}, "sh", filepath.Join(source, "deploy/nas/offline-build/assemble-image.sh"), service, "auriga/"+service+":nas", base, output); err != nil {
 			return err
 		}
 		if err := command(nil, os.Stdout, nil, "docker", "save", "--platform", "linux/amd64", "-o", filepath.Join(root, "images", service+".tar"), "auriga/"+service+":nas"); err != nil {
@@ -132,7 +134,7 @@ func buildRelease(root, stage string, r release, options buildOptions) error {
 	}
 	manifest["images"] = proofs
 	manifest["commit"] = options.Info.Commit
-	tree, err := gitAt(options.Source, "rev-parse", "HEAD^{tree}")
+	tree, err := sourceTree(options.Source)
 	if err != nil {
 		return err
 	}

@@ -233,6 +233,9 @@ func uploadRelease(o uploadOptions, client *http.Client) error {
 	if manifest.Schema != 1 || !regexpVersion.MatchString(manifest.Tag) || !regexp.MustCompile(`^[a-f0-9]{40,64}$`).MatchString(manifest.Commit) {
 		return errors.New("发行清单标签或提交无效")
 	}
+	if err := validateBuildGate(o.Dir, manifest); err != nil {
+		return err
+	}
 	names, err := regularFiles(o.Dir)
 	if err != nil {
 		return err

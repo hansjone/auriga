@@ -2,7 +2,7 @@
 
 包适用于 Linux amd64。现场预装 Docker Engine 和 Compose 2.29+，准备至少 4 GiB 可用内存与 20 GiB 可用磁盘。包不含 Docker 安装程序。
 
-正式附件只在 Forgejo Release 下载。先从独立渠道核准发行引导程序 `auriga` 的 SHA-256 和发行公钥。完整附件目录用 `./auriga verify <目录> --verify-key /secure/release-public.pem` 校验签名总清单。分卷包保留同目录全部 `.part001…`、`.parts.json` 和 `.parts.json.sig`，执行 `./auriga unpack <安装包.tar.part001> --out <全新目录> --verify-key /secure/release-public.pem`，自动逐卷校验和读取合并，无须手工拼大 tar。未分卷的 tar 也支持同一命令。
+正式附件只在 Forgejo Release 用浏览器手动下载。未分卷时只部署需安装 tar 和 SHA256SUMS；改代码再下源码归档与累积 devkit，见根 DEPLOY.md / MAINTAIN.md。包自带静态 CLI 和公钥，`./auriga verify <文件或目录>` 全离线校验摘要与签名；独立批准公钥可用 `--verify-key /secure/release-public.pem` 固定。分卷保留全部 `.part001…`、`.parts.json`、`.parts.json.sig`，用同页引导程序 `./auriga unpack <安装包.tar.part001> --out <全新目录>` 逐卷校验和读取，无须拼大 tar。未分卷 tar 也支持同一命令。
 
 已核验的发行引导程序可直接 `sudo ./auriga install --package <tar或part001> --address 192.0.2.10 --verify-key /secure/release-public.pem`。升级同样接受分卷并沿用固定公钥；其他维护命令请在解包安装目录使用。
 

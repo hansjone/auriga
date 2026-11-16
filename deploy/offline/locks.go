@@ -35,11 +35,16 @@ func isDependencyFile(name string) bool {
 // cannot accidentally alter the dependency key. Deleted tracked locks fail.
 func dependencyLocks(source string, r release) (lockInventory, error) {
 	inv := lockInventory{Files: map[string]string{}}
-	names, err := gitFiles(source, "ls-files", "--cached", "--others", "--exclude-standard", "-z")
+	names, err := sourceNames(source)
 	if err != nil {
 		return inv, err
 	}
-	for _, name := range strings.Split(names, "\x00") {
+	return locksFromNames(source, r, names)
+}
+
+func locksFromNames(source string, r release, names []string) (lockInventory, error) {
+	inv := lockInventory{Files: map[string]string{}}
+	for _, name := range names {
 		if name == "" || !isDependencyFile(name) {
 			continue
 		}
@@ -119,7 +124,7 @@ func checkKitLocks(source string, kit devkitManifest) error {
 	if current.Digest == kit.Locks.Digest {
 		return nil
 	}
-	version, _ := gitAt(source, "describe", "--tags", "--abbrev=0")
+	version := sourceVersionName(source)
 	if !regexpVersion.MatchString(version) {
 		version = "<当前上游版本>"
 	}
@@ -144,6 +149,7 @@ func devkitVerify(args []string) error {
 		args = args[1:]
 	}
 	f := flags("devkit verify")
+	version := f.String("version", "", "")
 	source := f.String("source", ".", "")
 	key := f.String("verify-key", "", "")
 	if err := f.Parse(args); err != nil {
@@ -168,6 +174,9 @@ func devkitVerify(args []string) error {
 	if err != nil {
 		return err
 	}
+	if _, err := os.Lstat(filepath.Join(rootAbs, "devkit-catalog.json")); err == nil {
+		return verifyCumulative(rootAbs, sourceAbs, *version, *key)
+	}
 	kit, err := readDevkit(rootAbs)
 	if err != nil {
 		return err
@@ -180,15 +189,25 @@ func devkitVerify(args []string) error {
 	}
 	// Reused kits retain their original source history. The checkout's upstream
 	// tag is the baseline for this build; committed site changes remain visible.
-	tag, err := gitAt(sourceAbs, "describe", "--tags", "--abbrev=0")
-	if err != nil {
+	tag := sourceVersionName(sourceAbs)
+	if tag == "" {
 		return errors.New("当前源码需要上游版本标签")
 	}
-	commit, err := gitAt(sourceAbs, "rev-parse", tag+"^{commit}")
-	if err != nil {
-		return err
+	var baseline provenance
+	if _, err := os.Lstat(filepath.Join(sourceAbs, "auriga-source.json")); err == nil {
+		m, err := readSourceManifest(sourceAbs)
+		if err != nil {
+			return err
+		}
+		baseline = m.Source
+	} else {
+		commit, err := gitAt(sourceAbs, "rev-parse", tag+"^{commit}")
+		if err != nil {
+			return err
+		}
+		baseline = provenance{Version: tag, UpstreamVersion: tag, Commit: commit}
 	}
-	binding := devkitBinding{Root: rootAbs, Digest: kit.Locks.Digest, Baseline: provenance{Version: tag, UpstreamVersion: tag, Commit: commit}}
+	binding := devkitBinding{Root: rootAbs, Digest: kit.Locks.Digest, Baseline: baseline}
 	if err := jsonFile(filepath.Join(sourceAbs, ".auriga-devkit.json"), binding, 0644); err != nil {
 		return err
 	}

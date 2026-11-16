@@ -23,6 +23,7 @@ type kitImage struct {
 	File string `json:"file"`
 }
 type devkitManifest struct {
+	cleanup func()
 	Locks   *lockInventory `json:"locks,omitempty"`
 	Schema  int            `json:"schemaVersion"`
 	Release release        `json:"release"`
@@ -187,6 +188,9 @@ func locateDevkit(source string) (string, *devkitManifest, error) {
 		root = binding.Root
 		bound = true
 	}
+	if _, err := os.Lstat(filepath.Join(root, "devkit-catalog.json")); err == nil {
+		return locateCumulative(source, root)
+	}
 	if err := verifyDevkitCache(root); err != nil {
 		return "", nil, err
 	}
@@ -212,7 +216,7 @@ func locateDevkit(source string) (string, *devkitManifest, error) {
 	return root, &kit, nil
 }
 
-func devkit(args []string) error {
+func devkitSingle(args []string) error {
 	if len(args) > 0 && args[0] == "verify" {
 		return devkitVerify(args[1:])
 	}
@@ -289,52 +293,15 @@ func devkit(args []string) error {
 		}
 		a.URL = file
 	}
-	// A source bundle carries reachable history and upstream version tags without
-	// worktree pointers, global Git config, hooks or remote credential material.
-	history := filepath.Join(cache, "source-history.bundle")
-	if err := command(nil, os.Stdout, nil, "git", "-C", source, "bundle", "create", history, "HEAD", "--tags"); err != nil {
-		return err
-	}
 	checkout := filepath.Join(root, "source")
-	if err := command(nil, os.Stdout, nil, "git", "clone", "--no-checkout", history, checkout); err != nil {
+	if err := copyTree(snapshot, checkout); err != nil {
 		return err
 	}
-	branch := info.Branch
-	if branch == "HEAD" {
-		branch = "site/local"
-	}
-	if err := command(nil, os.Stdout, nil, "git", "-C", checkout, "checkout", "-B", branch, info.Commit); err != nil {
-		return err
-	}
-	tracked, err := gitFiles(checkout, "ls-files", "-z")
+	tree, err := sourceTree(source)
 	if err != nil {
 		return err
 	}
-	for _, name := range strings.Split(tracked, "\x00") {
-		if name == "" {
-			continue
-		}
-		if err := os.Remove(filepath.Join(checkout, name)); err != nil && !os.IsNotExist(err) {
-			return err
-		}
-	}
-	names, err := regularFiles(snapshot)
-	if err != nil {
-		return err
-	}
-	for _, name := range names {
-		st, err := os.Stat(filepath.Join(snapshot, name))
-		if err != nil {
-			return err
-		}
-		if err := copyFile(filepath.Join(snapshot, name), filepath.Join(checkout, name), st.Mode().Perm()); err != nil {
-			return err
-		}
-	}
-	if _, err := gitAt(checkout, "add", "--all"); err != nil {
-		return err
-	}
-	if _, err := gitAt(checkout, "remote", "remove", "origin"); err != nil {
+	if err := writeSourceManifest(checkout, *info, tree, r); err != nil {
 		return err
 	}
 	bootRoot := filepath.Join(stage, "nas")
@@ -382,6 +349,11 @@ func devkit(args []string) error {
 	}
 	if err := copyFile(exe, filepath.Join(checkout, "bin/auriga-cli"), 0755); err != nil {
 		return err
+	}
+	if *sign != "" {
+		if err := signingPublic(*sign, filepath.Join(root, "release-public.pem")); err != nil {
+			return err
+		}
 	}
 	if err := jsonFile(filepath.Join(root, "devkit.json"), kit, 0644); err != nil {
 		return err

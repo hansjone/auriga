@@ -84,16 +84,30 @@ docker build --platform linux/amd64 --network none --pull=false --provenance=fal
     distribution = directory / 'release-0.2.0'
     print(run('unshare', '--net', ROOT / 'bin/auriga-cli', 'release', '--tag', '0.2.0',
               '--release', index, '--outdir', distribution, '--cache-dir', cache,
-              '--sign-key', private, '--attachment-limit', 32 << 20, '--build', cwd=source))
-    print(run('unshare', '--net', distribution / 'auriga', 'verify', distribution, '--verify-key', public))
+              '--sign-key', private, '--attachment-limit', 32 << 20, '--build', '--new-baseline', cwd=source))
+    print(run('unshare', '--net', distribution / 'auriga', 'verify', distribution))
     first_manifest = json.loads((distribution / 'release-manifest.json').read_text())
-    devkit_size = first_manifest['devkit']['asset']['size']
+    assert first_manifest['offlineBuildGate']['passed']
     kit = directory / 'kit'
     print(run('unshare', '--net', distribution / 'auriga', 'unpack',
-              distribution / 'auriga-devkit-0.2.0.tar.part001', '--out', kit, '--verify-key', public))
-    print(run(kit / 'source/auriga', 'devkit', '--verify', kit, '--verify-key', public, cwd=kit / 'source'))
-    # The next upstream tag changes only code. The release still rebuilds its
-    # installation images, while dependency-identical devkit bytes are reused.
+              distribution / 'auriga-devkit-0.2.0.tar.part001', '--out', kit))
+    original = directory / 'original-source'
+    print(run('unshare', '--net', distribution / 'auriga', 'unpack',
+              distribution / 'auriga-source-0.2.0.tar', '--out', original))
+    assert not (original / '.git').exists()
+    fakebin = directory / 'no-git'
+    marker = directory / 'git-was-called'
+    write(fakebin / 'git', '#!/bin/sh\nprintf "%s\\n" "$PWD: $*" >>"' + str(marker) + '"\nexit 99\n', 0o755)
+    field_env = dict(os.environ, PATH=str(fakebin) + ':' + os.environ['PATH'])
+    def fieldrun(*args, **kwargs):
+        result = run('unshare', '--net', *args, env=field_env, **kwargs)
+        assert not marker.exists(), 'field invoked Git: ' + (marker.read_text() if marker.exists() else '')
+        return result
+    print(fieldrun(original / 'auriga', 'devkit', 'verify', kit, cwd=original))
+    write(original / 'local-feature.txt', 'local site addition\n')
+    patch = directory / 'site-changes.tar'
+    print(fieldrun(original / 'auriga', 'changes', 'export', '--out', patch, cwd=original))
+    # Maintainer creates the next tag using Git. The field workflow never does.
     write(source / 'site.txt', 'new upstream\n')
     run('git', '-C', source, 'add', '.')
     run('git', '-C', source, 'commit', '-m', 'new upstream code')
@@ -101,54 +115,64 @@ docker build --platform linux/amd64 --network none --pull=false --provenance=fal
     next_release = directory / 'release-0.2.1'
     print(run('unshare', '--net', ROOT / 'bin/auriga-cli', 'release', '--tag', '0.2.1',
               '--release', index, '--outdir', next_release, '--cache-dir', cache,
-              '--sign-key', private, '--attachment-limit', 32 << 20, '--build', cwd=source))
+              '--sign-key', private, '--attachment-limit', 32 << 20, '--build',
+              '--previous-devkit', kit, cwd=source))
     next_manifest = json.loads((next_release / 'release-manifest.json').read_text())
+    assert next_manifest['offlineBuildGate']['passed']
     assert next_manifest['locks']['digest'] == first_manifest['locks']['digest']
     assert next_manifest['devkit']['asset']['sha256'] == first_manifest['devkit']['asset']['sha256']
     assert next_manifest['devkit']['sourceTag'] == '0.2.0'
     assert len(list(cache.glob('*/auriga-devkit-*.tar'))) == 1
-    print(run('unshare', '--net', next_release / 'auriga', 'install', '--package',
-              next_release / 'auriga-offline-0.2.1.tar.part001', '--verify-key', public,
-              '--proxy', directory / 'access.json', '--data', directory / 'multipart-site'))
-    checkout = source
-    (checkout / 'bin').mkdir(exist_ok=True)
-    shutil.copy2(next_release / 'auriga', checkout / 'bin/auriga-cli')
-    (checkout / 'bin/auriga-cli').chmod(0o755)
-    print(run('unshare', '--net', checkout / 'auriga', 'devkit', 'verify', kit, '--verify-key', public, cwd=checkout))
-    run('git', '-C', checkout, 'switch', '-c', 'site/fix')
-    write(checkout / 'site.txt', 'site modification\n')
+    assert set(next_manifest['supportedVersions']) == {'0.2.0', '0.2.1'}
+    delta = next_release / 'auriga-devkit-0.2.1-delta.tar'
+    assert delta.stat().st_size < (1 << 20)
+    print(fieldrun(original / 'auriga', 'devkit', 'merge', delta, '--kit', kit, cwd=original))
+    print(fieldrun(original / 'auriga', 'devkit', 'verify', kit, '--version', '0.2.0', cwd=original))
+    print(fieldrun(original / 'auriga', 'install', '--package',
+                   next_release / 'auriga-offline-0.2.1.tar.part001',
+                   '--proxy', directory / 'access.json', '--data', directory / 'multipart-site'))
+    checkout = directory / 'new-source'
+    print(fieldrun(original / 'auriga', 'unpack', next_release / 'auriga-source-0.2.1.tar', '--out', checkout))
+    print(fieldrun(checkout / 'auriga', 'changes', 'apply', patch, cwd=checkout))
+    assert (checkout / 'local-feature.txt').read_text() == 'local site addition\n'
+    print(fieldrun(checkout / 'auriga', 'devkit', 'verify', kit, cwd=checkout))
     output = directory / 'site.tar'
-    print(run('unshare', '--net', checkout / 'auriga', 'bundle', '--build', '--offline', '--version', '0.2.0-site.3', '--out', output, cwd=checkout))
+    print(fieldrun(checkout / 'auriga', 'bundle', '--build', '--offline', '--version', '0.2.1-site.3', '--out', output, cwd=checkout))
     with tarfile.open(output) as archive:
         provenance = json.load(archive.extractfile('provenance.json'))
-    assert provenance['version'] == '0.2.0-site.3' and provenance['dirty'] and provenance['siteChanges']
-    assert provenance['branch'] == 'site/fix' and provenance['upstreamVersion'] == '0.2.1'
-    # Install the resulting exact format through the same fixture entry points.
+    assert provenance['version'] == '0.2.1-site.3' and provenance['dirty'] and provenance['siteChanges']
+    assert provenance['branch'] == 'site/archive' and provenance['upstreamVersion'] == '0.2.1'
     field = directory / 'new-field'
     field.mkdir()
     with tarfile.open(output) as archive:
         archive.extractall(field, filter='data')
     site = directory / 'new-site'
-    print(run('unshare', '--net', field / 'auriga', 'install', '--proxy', directory / 'access.json', '--data', site))
-    result = subprocess.run(['unshare', '--net', field / 'auriga', 'doctor', '--data', site], capture_output=True, text=True)
-    assert result.returncode == 1 and '0.2.0-site.3' in result.stdout and provenance['commit'] in result.stdout
+    print(fieldrun(field / 'auriga', 'install', '--proxy', directory / 'access.json', '--data', site))
+    result = subprocess.run(['unshare', '--net', field / 'auriga', 'doctor', '--data', site], env=field_env, capture_output=True, text=True)
+    assert result.returncode == 1 and '0.2.1-site.3' in result.stdout and provenance['commit'] in result.stdout
     print(result.stdout)
     lock = checkout / 'deploy/offline/go.mod'
     lock_bytes = lock.read_bytes()
     lock.write_bytes(lock_bytes + b'\n// changed dependencies\n')
-    failure = subprocess.run([checkout / 'auriga', 'devkit', 'verify'], cwd=checkout, capture_output=True, text=True)
+    failure = subprocess.run([checkout / 'auriga', 'devkit', 'verify'], cwd=checkout, env=field_env, capture_output=True, text=True)
     assert failure.returncode != 0 and 'deploy/offline/go.mod' in failure.stderr and 'auriga-devkit-0.2.1.tar' in failure.stderr
     lock.write_bytes(lock_bytes)
-    dependency = kit / 'cache/inputs.tar'
-    dependency.rename(kit / 'cache/inputs.saved')
-    failure = subprocess.run(['unshare', '--net', checkout / 'auriga', 'bundle', '--build', '--offline'], cwd=checkout, capture_output=True, text=True)
+    catalog = json.loads((kit / 'devkit-catalog.json').read_text())
+    dependency = kit / 'blobs' / catalog['versions']['0.2.1']['files']['inputs.tar']
+    saved = dependency.with_suffix('.saved')
+    dependency.rename(saved)
+    failure = subprocess.run(['unshare', '--net', checkout / 'auriga', 'bundle', '--build', '--offline'], cwd=checkout, env=field_env, capture_output=True, text=True)
     assert failure.returncode != 0 and 'inputs.tar' in failure.stderr
-    (kit / 'cache/inputs.saved').rename(dependency)
+    saved.rename(dependency)
     with open(dependency, 'r+b') as stream:
         stream.write(b'tampered')
-    failure = subprocess.run(['unshare', '--net', checkout / 'auriga', 'bundle', '--build', '--offline'], cwd=checkout, capture_output=True, text=True)
+    failure = subprocess.run(['unshare', '--net', checkout / 'auriga', 'bundle', '--build', '--offline'], cwd=checkout, env=field_env, capture_output=True, text=True)
     assert failure.returncode != 0 and 'inputs.tar' in failure.stderr
-    print(f'PASS release_signed_multipart_devkit_reuse_verify_offline_build_install devkit_bytes={devkit_size} bundle_bytes={output.stat().st_size}')
+    assert not marker.exists(), 'field command invoked Git'
+    full_size = next(a['size'] for a in next_manifest['archives'] if a['name'] == 'auriga-devkit-0.2.1.tar')
+    source_size = next(a['size'] for a in next_manifest['archives'] if a['name'] == 'auriga-source-0.2.1.tar')
+    print(f'PASS gitless_source_changes_cumulative_delta_offline_gate_build_install full_bytes={full_size} delta_bytes={delta.stat().st_size} source_bytes={source_size} bundle_bytes={output.stat().st_size}')
+
 
 
 def main():
@@ -160,7 +184,7 @@ def main():
     had_network = subprocess.run(['docker', 'network', 'inspect', 'auriga-offline-lan'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0
     before = set(run('docker', 'image', 'ls', '--format', '{{.Repository}}:{{.Tag}}').splitlines())
     try:
-        with tempfile.TemporaryDirectory(prefix='auriga-devkit-fixture-') as name:
+        with tempfile.TemporaryDirectory(prefix='auriga-devkit-fixture-', dir='/var/tmp') as name:
             directory = Path(name)
             directory.chmod(0o755)
             exercise(directory)

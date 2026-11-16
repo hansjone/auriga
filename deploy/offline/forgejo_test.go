@@ -11,18 +11,30 @@ import (
 	"testing"
 )
 
+func fixtureDistribution(t *testing.T, root string) distributionManifest {
+	t.Helper()
+	m := distributionManifest{Schema: 1, Tag: "1.0", Commit: strings.Repeat("a", 40), Locks: lockInventory{Digest: strings.Repeat("b", 64)}}
+	for _, kind := range []string{"offline", "source", "devkit"} {
+		name := "auriga-" + kind + "-1.0.tar"
+		if err := os.WriteFile(filepath.Join(root, name), []byte("fixture tar "+kind), 0644); err != nil {
+			t.Fatal(err)
+		}
+		a, err := describeAsset(filepath.Join(root, name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		m.Assets = append(m.Assets, a)
+		m.Archives = append(m.Archives, a)
+	}
+	m.Gate = buildGate{Passed: true, Commit: m.Commit, LockDigest: m.Locks.Digest, SourceSHA: m.Archives[1].SHA256, DevkitSHA: m.Archives[2].SHA256, CatalogSHA: strings.Repeat("c", 64), OutputSHA: m.Archives[0].SHA256, Network: gateNetwork}
+	return m
+}
+
 func TestForgejoUploadDraftRetryAndConflict(t *testing.T) {
 	root := t.TempDir()
 	key, public := testSigningKeys(t)
-	manifest := distributionManifest{Schema: 1, Tag: "1.0", Commit: strings.Repeat("a", 40)}
-	if err := os.WriteFile(filepath.Join(root, "auriga-offline-1.0.tar"), []byte("fixture tar"), 0644); err != nil {
-		t.Fatal(err)
-	}
-	asset, err := describeAsset(filepath.Join(root, "auriga-offline-1.0.tar"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	manifest.Assets = []assetInfo{asset}
+	manifest := fixtureDistribution(t, root)
+	asset := manifest.Assets[0]
 	if err := jsonFile(filepath.Join(root, "release-manifest.json"), manifest, 0644); err != nil {
 		t.Fatal(err)
 	}
@@ -119,7 +131,7 @@ func TestForgejoUploadDraftRetryAndConflict(t *testing.T) {
 		t.Fatal(err)
 	}
 	first := mutations
-	if !draft || len(files) != 4 {
+	if !draft || len(files) != 6 {
 		t.Fatal("incomplete draft", len(files))
 	}
 	if err := uploadRelease(opts, server.Client()); err != nil {
@@ -149,7 +161,7 @@ func TestForgejoUploadDraftRetryAndConflict(t *testing.T) {
 func TestForgejoRedirectAndWrongTagNeverWrite(t *testing.T) {
 	root := t.TempDir()
 	key, public := testSigningKeys(t)
-	manifest := distributionManifest{Schema: 1, Tag: "1.0", Commit: strings.Repeat("a", 40)}
+	manifest := fixtureDistribution(t, root)
 	if err := jsonFile(filepath.Join(root, "release-manifest.json"), manifest, 0644); err != nil {
 		t.Fatal(err)
 	}

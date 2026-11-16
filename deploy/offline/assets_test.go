@@ -63,6 +63,52 @@ func TestMultipartRoundTripAndRejection(t *testing.T) {
 	}
 }
 
+func TestDownloadedPackageUsesEmbeddedKeyAndRequiresPartSignature(t *testing.T) {
+	root := t.TempDir()
+	key, _ := testSigningKeys(t)
+	if err := os.WriteFile(filepath.Join(root, "payload"), []byte(strings.Repeat("data", 1000)), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := signingPublic(key, filepath.Join(root, "release-public.pem")); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeSums(root); err != nil {
+		t.Fatal(err)
+	}
+	if err := signSums(root, key); err != nil {
+		t.Fatal(err)
+	}
+	if err := verifyCommand([]string{root}); err != nil {
+		t.Fatal(err)
+	}
+	file := filepath.Join(t.TempDir(), "package.tar")
+	if err := pack(root, file); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := splitAsset(file, 2048, key); err != nil {
+		t.Fatal(err)
+	}
+	if err := verifyCommand([]string{file + ".part001"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(file + ".parts.json.sig"); err != nil {
+		t.Fatal(err)
+	}
+	if err := extractVerified(file+".part001", filepath.Join(t.TempDir(), "dest"), ""); err == nil {
+		t.Fatal("accepted missing signed part inventory")
+	}
+	unsigned := t.TempDir()
+	if err := os.WriteFile(filepath.Join(unsigned, "data"), []byte("x"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeSums(unsigned); err != nil {
+		t.Fatal(err)
+	}
+	if err := verifyCommand([]string{unsigned}); err == nil {
+		t.Fatal("claimed signature verification for unsigned download")
+	}
+}
+
 func TestLocksReuseAndExplain(t *testing.T) {
 	root := t.TempDir()
 	for _, args := range [][]string{{"init"}, {"config", "user.name", "fixture"}, {"config", "user.email", "fixture@example.com"}} {
