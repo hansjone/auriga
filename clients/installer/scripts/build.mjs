@@ -43,7 +43,12 @@ const here = dirname(fileURLToPath(import.meta.url));
 const installerDir = resolve(here, '..');
 const pluginDir = resolve(installerDir, '..', 'dsh-plugin');
 export function validateResourceRoots(trust) {
-  if (Object.keys(trust).sort().join() !== 'downgrade,release,revocation')
+  if (
+    !trust ||
+    typeof trust !== 'object' ||
+    Array.isArray(trust) ||
+    Object.keys(trust).sort().join() !== 'downgrade,release,revocation'
+  )
     throw new Error('invalid resource trust roles');
   const fixtureKeys = Object.values(
     JSON.parse(
@@ -54,12 +59,27 @@ export function validateResourceRoots(trust) {
     ).trust,
   ).map((k) => k.publicKeySpkiBase64);
   const canonicalKeys = [];
+  const normalized = { ...trust };
   for (const role of ['release', 'revocation', 'downgrade']) {
     const root = trust[role];
-    if (!root || !/^[A-Za-z0-9._-]{1,128}$/.test(root.kid))
+    if (
+      !root ||
+      typeof root !== 'object' ||
+      Array.isArray(root) ||
+      Object.keys(root).sort().join() !== 'kid,publicKeySpkiBase64' ||
+      typeof root.kid !== 'string' ||
+      !/^[A-Za-z0-9._-]{1,128}$/.test(root.kid) ||
+      typeof root.publicKeySpkiBase64 !== 'string'
+    )
       throw new Error('invalid resource trust root');
+    const encoded = root.publicKeySpkiBase64.trim();
+    if (/\s/.test(encoded))
+      throw new Error('invalid resource trust public key encoding');
+    const der = Buffer.from(encoded, 'base64');
+    if (der.toString('base64') !== encoded)
+      throw new Error('invalid resource trust public key encoding');
     const key = createPublicKey({
-      key: Buffer.from(root.publicKeySpkiBase64, 'base64'),
+      key: der,
       type: 'spki',
       format: 'der',
     });
@@ -70,11 +90,15 @@ export function validateResourceRoots(trust) {
       .toString('base64');
     if (fixtureKeys.includes(canonical))
       throw new Error('public test resource key cannot be deployed');
+    if (canonical !== encoded) throw new Error('invalid resource trust SPKI');
     canonicalKeys.push(canonical);
+    normalized[role] = { ...root, publicKeySpkiBase64: canonical };
   }
   if (new Set(canonicalKeys).size !== 3)
     throw new Error('resource trust roles require independent keys');
-  return trust;
+  if (new Set(Object.values(trust).map((root) => root.kid)).size !== 3)
+    throw new Error('resource trust roles require independent kids');
+  return normalized;
 }
 const isWin = process.platform === 'win32';
 const NPM_FLAGS = [
@@ -218,6 +242,11 @@ function readTgzPackageJson(tgz) {
 export async function build(args) {
   if (typeof args['broker-artifact'] !== 'string')
     throw new Error('--broker-artifact is required');
+  const resourceTrust = args['resource-trust-json']
+    ? validateResourceRoots(
+        JSON.parse(readFileSync(args['resource-trust-json'], 'utf8')),
+      )
+    : null;
   const config = JSON.parse(
     readFileSync(join(installerDir, 'upstream.json'), 'utf8'),
   );
@@ -443,12 +472,10 @@ export async function build(args) {
     join(installerDir, '../../contracts/resource/guardian-transitions.json'),
     join(payload, 'auriga/runtime/schemas/guardian-transitions.json'),
   );
-  if (args['resource-trust-json']) {
-    const trust = JSON.parse(readFileSync(args['resource-trust-json'], 'utf8'));
-    validateResourceRoots(trust);
+  if (resourceTrust) {
     writeFileSync(
       join(payload, 'auriga', 'runtime', 'resource-roots.json'),
-      JSON.stringify(trust),
+      JSON.stringify(resourceTrust),
     );
   }
   if (args['release-public-key']) {

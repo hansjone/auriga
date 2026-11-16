@@ -103,6 +103,19 @@ C 正常持锁或在两次加锁间提交新 revision 时，E 有界退避重试
 
 构建时以 `--resource-trust-json <可信公钥文件>` 固定独立的 release/revocation/downgrade Ed25519 公钥；文件按 `{release:{kid,publicKeySpkiBase64},revocation:{...},downgrade:{...}}` 提供，禁止测试钥用于部署。未固定资源公钥的包只能使用私有技能。构建同时带入冻结 JSON Schema，使用锁定上游 Ajv 完整校验。运行时不从插件、环境变量或制品读取公钥。
 
+可信本机可运行 `node scripts/resource-keys/generate.mjs --out <仓库外的新目录> --kid-prefix <批次>`
+生成平台私钥与公钥 JSON。平台仅部署 `platform/release.pk8`、`platform/revocation.pk8`，
+`offline/downgrade.pk8` 留在离线受控介质。完整权限、只读挂载、properties 与轮换步骤见
+[资源服务部署说明](../../services/resource/README.md#开发与现场资源签名初始化)。
+
+Installer 的手动 workflow 输入 `resource_trust_json` 接受 `resource-roots.json` 文本或标准 base64，
+仅传公钥。CI 将其写入临时文件并校验，随后以 `--resource-trust-json` 交给构建器。
+留空时保持原行为。每次手动构建需要显式提供所需环境的根，标签触发仍沿用未提供输入的行为。
+输入通过环境变量读取，JSON 内容不插入 shell 命令。
+CI 日志与 `desktop-build.json.resourceTrustSha256` 记录包内 `resource-roots.json` 原字节 SHA-256，
+可与生成器输出或本机文件摘要对比。未固定根时字段为 `null`。
+手工改变 JSON 字段顺序或格式会影响文件摘要，核对时使用同一原字节文件。
+
 构建器会拒绝 unified 向量的公开测试公钥，即使改换 kid 也不能作为部署根。启动时校验包内 runtime、公钥和配置的 manifest 摘要。相同 OS 用户仍可一并改写程序、manifest 或 guardian 数据；本实现没有服务账户或操作系统隔离，包内校验不能防御这种同用户主动篡改。Windows LastBootUpTime 也可能随系统校时变化而触发保守重验，不应当作不会变化的硬件开机编号。
 
 每秒检查租约和轻量文件属性清单；文件、身份或代次变化时立即完整复核，稳定时最多每 30 秒完整复核一次，临近租约截止也复核。进程树每 15 秒枚举及停机前即时枚举；高水位只在变化时写入，时钟在完整核验时持久化。C 的已验证旧视图允许在新 prepared 集合等待切换期间保留，E 自有 authorized-ledger.json 只保存冻结格式的已授权账本，不能代替新集合的验签。

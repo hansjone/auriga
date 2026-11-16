@@ -84,6 +84,12 @@ export function buildPayload(base, options = {}) {
   put(dir, 'licenses/NOTICE.txt', 'notice');
   if (options.releasePublicKey)
     put(dir, 'auriga/runtime/release-public-key.txt', options.releasePublicKey);
+  if (options.resourceTrust)
+    put(
+      dir,
+      'auriga/runtime/resource-roots.json',
+      JSON.stringify(options.resourceTrust),
+    );
   const files = listFiles(dir)
     .filter((f) => f !== 'manifest.json' && !isPinnedPath(f))
     .map((f) => ({

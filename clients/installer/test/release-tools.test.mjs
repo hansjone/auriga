@@ -11,7 +11,7 @@ import {
 import { fileURLToPath } from 'node:url';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { generateKeyPairSync } from 'node:crypto';
+import { createHash, generateKeyPairSync } from 'node:crypto';
 import { systemTool } from '../runtime/system-tools.mjs';
 import { unsignedRelease } from '../scripts/sign-release.mjs';
 import { makeRelease } from '../scripts/make-release.mjs';
@@ -145,4 +145,54 @@ test('过渡包可生成严格schema1清单，不能夹带渠道灰度回滚策�
     () => unsignedRelease({ ...options, channel: 'beta' }),
     /schema policy/,
   );
+});
+
+test('构建记录保存实际包内资源公钥根文件摘要，未固定时为 null', (t) => {
+  const base = tempBase(t);
+  const trust = Object.fromEntries(
+    ['release', 'revocation', 'downgrade'].map((role) => [
+      role,
+      {
+        kid: `example-${role}`,
+        publicKeySpkiBase64: generateKeyPairSync('ed25519')
+          .publicKey.export({ type: 'spki', format: 'der' })
+          .toString('base64'),
+      },
+    ]),
+  );
+  for (const [name, resourceTrust] of [
+    ['private', undefined],
+    ['shared', trust],
+  ]) {
+    const payload = buildPayload(base, { name, resourceTrust });
+    const archive = join(base, `${name}.exe`);
+    const output = join(base, name);
+    mkdirSync(output);
+    writeFileSync(archive, 'setup');
+    const record = makeRelease({
+      payload: payload.dir,
+      archive,
+      output,
+      sequence: 1,
+      minimumVersion: '0.0.0',
+      notAfter: '2026-12-01T00:00:00Z',
+    });
+    assert.equal(
+      record.resourceTrustSha256,
+      resourceTrust
+        ? createHash('sha256')
+            .update(
+              readFileSync(
+                join(payload.dir, 'auriga/runtime/resource-roots.json'),
+              ),
+            )
+            .digest('hex')
+        : null,
+    );
+    assert.equal(
+      JSON.parse(readFileSync(join(output, 'desktop-build.json')))
+        .resourceTrustSha256,
+      record.resourceTrustSha256,
+    );
+  }
 });
