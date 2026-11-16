@@ -1,0 +1,61 @@
+{
+  "schemaVersion": 1,
+  "sourceCommit": "84dca4a66e6a09f6c6e00628d833fce41920d855",
+  "verifiedAt": "2026-11-15T20:14:54.212Z",
+  "verification": "Every listed file was completely read back over authenticated Forgejo HTTPS; byte length and SHA-256 matched the frozen local artifact",
+  "verifiedFiles": 242,
+  "expectedFiles": 242,
+  "bytes": 907937376,
+  "packages": [
+    {
+      "name": "auriga-site-build-extra-inputs",
+      "version": "84dca4a6-linux-amd64-r1",
+      "files": 56,
+      "bytes": 230312996,
+      "repositoryLinked": true
+    },
+    {
+      "name": "auriga-site-build-extra-images",
+      "version": "84dca4a6-linux-amd64-r1",
+      "files": 121,
+      "bytes": 495774711,
+      "repositoryLinked": true
+    },
+    {
+      "name": "auriga-site-build-overlays",
+      "version": "84dca4a6-linux-amd64-r1",
+      "files": 4,
+      "bytes": 531776,
+      "repositoryLinked": true
+    },
+    {
+      "name": "auriga-site-build-extra-java",
+      "version": "84dca4a6-linux-amd64-r1",
+      "files": 3,
+      "bytes": 5251568,
+      "repositoryLinked": true
+    },
+    {
+      "name": "auriga-site-build-ci-tools",
+      "version": "84dca4a6-linux-amd64-r1",
+      "files": 17,
+      "bytes": 56325651,
+      "repositoryLinked": true
+    },
+    {
+      "name": "auriga-site-build-ci-postgres",
+      "version": "84dca4a6-linux-amd64-r1",
+      "files": 11,
+      "bytes": 38064189,
+      "repositoryLinked": true
+    },
+    {
+      "name": "auriga-site-build-ci-actions",
+      "version": "84dca4a6-linux-amd64-r1",
+      "files": 30,
+      "bytes": 81676485,
+      "repositoryLinked": true
+    }
+  ],
+  "failures": []
+}

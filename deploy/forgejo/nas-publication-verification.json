@@ -1,0 +1,38 @@
+{
+  "schemaVersion": 1,
+  "sourceCommit": "b7359410db3dcf1107af240a2a6d2f85bae6a5e6",
+  "verifiedAt": "2026-11-16T07:55:07.296199+00:00",
+  "verification": "Complete authenticated Forgejo HTTPS readback; SHA-256 and length match frozen bytes; existing package association was independently rechecked after the repeat link returned HTTP 400",
+  "verifiedFiles": 37,
+  "expectedFiles": 37,
+  "bytes": 129845217,
+  "packages": [
+    {
+      "name": "auriga-site-build-overlays",
+      "version": "b7359410-linux-amd64-r1",
+      "files": 3,
+      "bytes": 2190,
+      "repositoryLinked": true,
+      "supersededBy": "b7359410-linux-amd64-r2"
+    },
+    {
+      "name": "auriga-site-nas-builder",
+      "version": "27.1.2-linux-amd64-r1",
+      "files": 31,
+      "bytes": 129840861,
+      "repositoryLinked": true
+    },
+    {
+      "name": "auriga-site-build-overlays",
+      "version": "b7359410-linux-amd64-r2",
+      "files": 3,
+      "bytes": 2166,
+      "repositoryLinked": true,
+      "reason": "LF-normalized metadata remains byte-identical after Git checkout"
+    }
+  ],
+  "failures": [],
+  "activeFiles": 34,
+  "activeBytes": 129843027,
+  "supersededFilesRetained": 3
+}

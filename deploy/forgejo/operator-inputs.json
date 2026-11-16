@@ -1,0 +1,109 @@
+{
+  "schemaVersion": 1,
+  "artifacts": [
+    {
+      "file": "auriga-build-operator-base-linux-amd64.tar.gz.part000",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-deps/963bfe65-linux-amd64-build-bases-rc1/auriga-build-operator-base-linux-amd64.tar.gz.part000",
+      "bytes": 4194304,
+      "sha256": "6a99c74ec7658d801dd39428e8c1ad96b6707839d995335051b094de5cea42e8",
+      "availability": "api-listed",
+      "version": "963bfe65-linux-amd64-build-bases-rc1"
+    },
+    {
+      "file": "auriga-build-operator-base-linux-amd64.tar.gz.part001",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-deps/963bfe65-linux-amd64-build-bases-rc1/auriga-build-operator-base-linux-amd64.tar.gz.part001",
+      "bytes": 4194304,
+      "sha256": "c8d81afe802e871448ed5a7d6952ad1128efed62dd5ef3a0d723d64a75d568ff",
+      "availability": "api-listed",
+      "version": "963bfe65-linux-amd64-build-bases-rc1"
+    },
+    {
+      "file": "auriga-build-operator-base-linux-amd64.tar.gz.part002",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-deps/963bfe65-linux-amd64-build-bases-rc1/auriga-build-operator-base-linux-amd64.tar.gz.part002",
+      "bytes": 4194304,
+      "sha256": "81d1e6276bcef3c175c40d95cc85d00e797854f4a1721329ea54f555937b44bf",
+      "availability": "api-listed",
+      "version": "963bfe65-linux-amd64-build-bases-rc1"
+    },
+    {
+      "file": "auriga-build-operator-base-linux-amd64.tar.gz.part003",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-deps/963bfe65-linux-amd64-build-bases-rc1/auriga-build-operator-base-linux-amd64.tar.gz.part003",
+      "bytes": 4194304,
+      "sha256": "5c861047db7465a89699ca310fe27f6af6ab605e88da90a1c7f267e84c2a3cdc",
+      "availability": "api-listed",
+      "version": "963bfe65-linux-amd64-build-bases-rc1"
+    },
+    {
+      "file": "auriga-build-operator-base-linux-amd64.tar.gz.part004",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-deps/963bfe65-linux-amd64-build-bases-rc1/auriga-build-operator-base-linux-amd64.tar.gz.part004",
+      "bytes": 4194304,
+      "sha256": "408f63d6840987aed28c5efcf948e6e77d41ffca2646177c486196952a92cba0",
+      "availability": "api-listed",
+      "version": "963bfe65-linux-amd64-build-bases-rc1"
+    },
+    {
+      "file": "auriga-build-operator-base-linux-amd64.tar.gz.part005",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-deps/963bfe65-linux-amd64-build-bases-rc1/auriga-build-operator-base-linux-amd64.tar.gz.part005",
+      "bytes": 4194304,
+      "sha256": "b1ccef396f9a08534f811fc6d494c30c3a557a579a688d536e3696523148386a",
+      "availability": "api-listed",
+      "version": "963bfe65-linux-amd64-build-bases-rc1"
+    },
+    {
+      "file": "auriga-build-operator-base-linux-amd64.tar.gz.part006",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-deps/963bfe65-linux-amd64-build-bases-rc1/auriga-build-operator-base-linux-amd64.tar.gz.part006",
+      "bytes": 4194304,
+      "sha256": "761b3b68189d2126e219641570b99be060bc5617fd571c90142e856021d2a661",
+      "availability": "api-listed",
+      "version": "963bfe65-linux-amd64-build-bases-rc1"
+    },
+    {
+      "file": "auriga-build-operator-base-linux-amd64.tar.gz.part007",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-deps/963bfe65-linux-amd64-build-bases-rc1/auriga-build-operator-base-linux-amd64.tar.gz.part007",
+      "bytes": 4194304,
+      "sha256": "c779a8b5bc65180cd00ddce4642296f6e529fd52b32d22e68873cba5893d47f7",
+      "availability": "api-listed",
+      "version": "963bfe65-linux-amd64-build-bases-rc1"
+    },
+    {
+      "file": "auriga-build-operator-base-linux-amd64.tar.gz.part008",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-deps/963bfe65-linux-amd64-build-bases-rc1/auriga-build-operator-base-linux-amd64.tar.gz.part008",
+      "bytes": 4194304,
+      "sha256": "86abbbc6eabda3bad63990d3ac95b2988feacd54446f49d578dcf014eac61e29",
+      "availability": "api-listed",
+      "version": "963bfe65-linux-amd64-build-bases-rc1"
+    },
+    {
+      "file": "auriga-build-operator-base-linux-amd64.tar.gz.part009",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-deps/963bfe65-linux-amd64-build-bases-rc1/auriga-build-operator-base-linux-amd64.tar.gz.part009",
+      "bytes": 4194304,
+      "sha256": "9b3777ad48a6caeb0890f8f57113b866eb6874139c9fe9f96072c0cd2e9d07e3",
+      "availability": "api-listed",
+      "version": "963bfe65-linux-amd64-build-bases-rc1"
+    },
+    {
+      "file": "auriga-build-operator-base-linux-amd64.tar.gz.part010",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-deps/963bfe65-linux-amd64-build-bases-rc1/auriga-build-operator-base-linux-amd64.tar.gz.part010",
+      "bytes": 2379039,
+      "sha256": "aba03d5abba451ad604e1b12c54d2134bacf0cba65c7ab57fdc3a3b9a7bbd296",
+      "availability": "api-listed",
+      "version": "963bfe65-linux-amd64-build-bases-rc1"
+    },
+    {
+      "file": "auriga-build-operator-wheels-linux-amd64.tar.gz.part000",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-deps/963bfe65-linux-amd64-system-rc1/auriga-build-operator-wheels-linux-amd64.tar.gz.part000",
+      "bytes": 4194304,
+      "sha256": "6fcedf8082b2d89a58146a1014de37820a37c43e17844452f705439e1061366b",
+      "availability": "api-listed",
+      "version": "963bfe65-linux-amd64-system-rc1"
+    },
+    {
+      "file": "auriga-build-operator-wheels-linux-amd64.tar.gz.part001",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-deps/963bfe65-linux-amd64-system-rc1/auriga-build-operator-wheels-linux-amd64.tar.gz.part001",
+      "bytes": 485299,
+      "sha256": "48b4a2881ef2333d15f2b351df38a3628cd5d042b5ce0f5b889c04ae339311cb",
+      "availability": "api-listed",
+      "version": "963bfe65-linux-amd64-system-rc1"
+    }
+  ]
+}

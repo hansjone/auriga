@@ -1,0 +1,71 @@
+ARG AGENT_BASE=debian:bookworm-slim
+ARG BIFROST_BASE=alpine:3.22
+ARG EDGE_BASE=gcr.io/distroless/static-debian12:nonroot
+ARG PLATFORM_BASE=eclipse-temurin:25-jre
+ARG OPERATOR_BASE=python:3.13.8-slim-bookworm
+
+FROM ${AGENT_BASE} AS agent
+RUN --mount=type=bind,source=system,target=/inputs,readonly \
+    cd /inputs && sha256sum -c SHA256SUMS \
+    && set -- /inputs/packages/*.deb \
+    && if [ -f "$1" ]; then dpkg --unpack "$@" && dpkg --configure --pending; fi \
+    && test "$(dpkg-query -W -f='${db:Status-Status}' ca-certificates)" = installed \
+    && rm -rf /var/lib/apt/lists/* \
+    && useradd --system --uid 10001 --create-home auriga
+COPY --chmod=0755 go/auriga-agent /usr/local/bin/auriga-agent
+COPY --chmod=0755 agent-entrypoint.sh /entrypoint.sh
+ENTRYPOINT ["/entrypoint.sh"]
+
+FROM ${BIFROST_BASE} AS bifrost
+RUN --mount=type=bind,source=system,target=/inputs,readonly \
+    cd /inputs && sha256sum -c SHA256SUMS \
+    && apk add --no-network --no-cache --repositories-file /dev/null /inputs/packages/*.apk
+COPY --chmod=0755 go/bifrost /usr/local/bin/bifrost
+COPY LICENSE THIRD_PARTY_NOTICES.md /usr/share/licenses/bifrost/
+COPY config.json /etc/auriga/bifrost-backend.json
+USER 10003:10003
+ENTRYPOINT ["/usr/local/bin/bifrost", "-config", "/etc/auriga/bifrost-backend.json"]
+
+FROM ${EDGE_BASE} AS edge
+COPY --chown=10001:10001 --chmod=0755 directories/policies /var/auriga-egress/policies
+COPY --chown=65532:65532 --chmod=0755 directories/reports /var/auriga-egress/reports
+COPY --chmod=0755 go/auriga-edge /auriga-edge
+COPY --chmod=0755 go/auriga-ai-gateway /auriga-ai-gateway
+COPY --chmod=0755 go/auriga-egress /auriga-egress
+COPY --chmod=0755 go/auriga-network-broker /auriga-network-broker
+COPY --chmod=0755 go/auriga-network-probe /auriga-network-probe
+COPY --chmod=0755 go/auriga-panel /auriga-panel
+COPY web/panel /srv/auriga/static/panel
+COPY web/portal /srv/auriga/static/portal
+COPY web/admin /srv/auriga/static/admin
+USER nonroot:nonroot
+ENTRYPOINT ["/auriga-edge"]
+
+FROM ${PLATFORM_BASE} AS platform
+RUN --mount=type=bind,source=system,target=/inputs,readonly \
+    cd /inputs && sha256sum -c SHA256SUMS \
+    && set -- /inputs/packages/*.deb \
+    && if [ -f "$1" ]; then dpkg --unpack "$@" && dpkg --configure --pending; fi \
+    && test "$(dpkg-query -W -f='${db:Status-Status}\n' curl openssl)" = "$(printf 'installed\ninstalled')" \
+    && rm -rf /var/lib/apt/lists/* \
+    && groupadd --gid 10001 auriga \
+    && useradd --uid 10001 --gid 10001 --home-dir /app --shell /usr/sbin/nologin auriga \
+    && mkdir -p /app/tmp \
+    && chown -R 10001:10001 /app
+RUN mkdir -p /var/auriga-egress/policies /var/auriga-egress/reports \
+    && chown 10001:10001 /var/auriga-egress/policies \
+    && chown 65532:65532 /var/auriga-egress/reports \
+    && chmod 0755 /var/auriga-egress/policies /var/auriga-egress/reports
+WORKDIR /app
+COPY --chown=10001:10001 java/platform.jar /app/platform.jar
+EXPOSE 8081 7443
+USER 10001:10001
+ENTRYPOINT ["java", "-jar", "/app/platform.jar"]
+
+FROM ${OPERATOR_BASE} AS operator
+COPY requirements.txt /tmp/requirements.txt
+RUN --mount=type=bind,source=system,target=/inputs,readonly \
+    cd /inputs && sha256sum -c SHA256SUMS \
+    && python -m pip install --no-cache-dir --disable-pip-version-check \
+        --no-index --find-links /inputs/packages -r /tmp/requirements.txt
+USER 10001:10001

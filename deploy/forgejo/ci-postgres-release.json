@@ -1,0 +1,85 @@
+{
+  "schemaVersion": 1,
+  "package": "auriga-site-build-ci-postgres",
+  "version": "84dca4a6-linux-amd64-r1",
+  "inputs": [
+    {
+      "file": "embedded-postgres-binaries-linux-amd64-17.5.0.jar",
+      "source": "https://repo.maven.apache.org/maven2/io/zonky/test/postgres/embedded-postgres-binaries-linux-amd64/17.5.0/embedded-postgres-binaries-linux-amd64-17.5.0.jar",
+      "sha256": "646f3269075d1a23904127374e3cdbcef96beb32979fedee25d835877400fcbe",
+      "bytes": 14873955,
+      "platform": "linux-amd64",
+      "version": "17.5.0"
+    },
+    {
+      "file": "embedded-postgres-binaries-windows-amd64-17.5.0.jar",
+      "source": "https://repo.maven.apache.org/maven2/io/zonky/test/postgres/embedded-postgres-binaries-windows-amd64/17.5.0/embedded-postgres-binaries-windows-amd64-17.5.0.jar",
+      "sha256": "06ced3b3267c569ffb3f85544aac0075926dd81bf78bd5247abb1aa9fe994d6b",
+      "bytes": 23185666,
+      "platform": "windows-amd64",
+      "version": "17.5.0"
+    }
+  ],
+  "artifacts": [
+    {
+      "file": "embedded-postgres-binaries-linux-amd64-17.5.0.jar.part000",
+      "bytes": 4194304,
+      "sha256": "c2f67a4e1a45608272ccfafbe6344be06a3d9551d25ebeb1e0054fa418d043d8",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-ci-postgres/84dca4a6-linux-amd64-r1/embedded-postgres-binaries-linux-amd64-17.5.0.jar.part000"
+    },
+    {
+      "file": "embedded-postgres-binaries-linux-amd64-17.5.0.jar.part001",
+      "bytes": 4194304,
+      "sha256": "3db2cbf60b8639572d62c448087b933c8b020f24ac587a87f170b3fd91895b6a",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-ci-postgres/84dca4a6-linux-amd64-r1/embedded-postgres-binaries-linux-amd64-17.5.0.jar.part001"
+    },
+    {
+      "file": "embedded-postgres-binaries-linux-amd64-17.5.0.jar.part002",
+      "bytes": 4194304,
+      "sha256": "9a13d742e2df5e0849a71ebfe0f5f9931df3d46716b8d3216a1c608df0b84153",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-ci-postgres/84dca4a6-linux-amd64-r1/embedded-postgres-binaries-linux-amd64-17.5.0.jar.part002"
+    },
+    {
+      "file": "embedded-postgres-binaries-linux-amd64-17.5.0.jar.part003",
+      "bytes": 2291043,
+      "sha256": "0720d156c9a60bf4c648a84ee874e2c1320bdfffbfe961ee7e3b2fba614037bd",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-ci-postgres/84dca4a6-linux-amd64-r1/embedded-postgres-binaries-linux-amd64-17.5.0.jar.part003"
+    },
+    {
+      "file": "embedded-postgres-binaries-windows-amd64-17.5.0.jar.part000",
+      "bytes": 4194304,
+      "sha256": "3f8483f647830e97d6e96daeb004cb3a30531df54b6bb128295b935548f2c36f",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-ci-postgres/84dca4a6-linux-amd64-r1/embedded-postgres-binaries-windows-amd64-17.5.0.jar.part000"
+    },
+    {
+      "file": "embedded-postgres-binaries-windows-amd64-17.5.0.jar.part001",
+      "bytes": 4194304,
+      "sha256": "1f46eb3d54246c15f60c9568d5c2a4ca47d3f0f74955985756d2dfd748bb9bed",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-ci-postgres/84dca4a6-linux-amd64-r1/embedded-postgres-binaries-windows-amd64-17.5.0.jar.part001"
+    },
+    {
+      "file": "embedded-postgres-binaries-windows-amd64-17.5.0.jar.part002",
+      "bytes": 4194304,
+      "sha256": "48e9c253f779c5b3f4abcd78ef86d4b8e0759273cf307c1ec04e77d44c838a36",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-ci-postgres/84dca4a6-linux-amd64-r1/embedded-postgres-binaries-windows-amd64-17.5.0.jar.part002"
+    },
+    {
+      "file": "embedded-postgres-binaries-windows-amd64-17.5.0.jar.part003",
+      "bytes": 4194304,
+      "sha256": "22599ff23b10f267eef5c15e69ff23b7766c871c1a9e0647648e9bb1753238ab",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-ci-postgres/84dca4a6-linux-amd64-r1/embedded-postgres-binaries-windows-amd64-17.5.0.jar.part003"
+    },
+    {
+      "file": "embedded-postgres-binaries-windows-amd64-17.5.0.jar.part004",
+      "bytes": 4194304,
+      "sha256": "edcc4b67fa41e5a36b2682fb3beb57188fa22e981b0e8bc46c9e134b828306b5",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-ci-postgres/84dca4a6-linux-amd64-r1/embedded-postgres-binaries-windows-amd64-17.5.0.jar.part004"
+    },
+    {
+      "file": "embedded-postgres-binaries-windows-amd64-17.5.0.jar.part005",
+      "bytes": 2214146,
+      "sha256": "0ecf73fa5839a63a9114ad96f4e19ff837cea01026076d98cc1ea29903f72aa3",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-ci-postgres/84dca4a6-linux-amd64-r1/embedded-postgres-binaries-windows-amd64-17.5.0.jar.part005"
+    }
+  ]
+}

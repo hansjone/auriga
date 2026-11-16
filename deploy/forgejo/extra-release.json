@@ -1,0 +1,344 @@
+{
+  "schemaVersion": 1,
+  "sourceCommit": "84dca4a66e6a09f6c6e00628d833fce41920d855",
+  "platform": "linux/amd64",
+  "package": "auriga-site-build-extra-inputs",
+  "version": "84dca4a6-linux-amd64-r1",
+  "artifacts": [
+    {
+      "file": "inputs-extra-84dca4a6-linux-amd64.tar.gz.part000",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-inputs/84dca4a6-linux-amd64-r1/inputs-extra-84dca4a6-linux-amd64.tar.gz.part000",
+      "bytes": 4194304,
+      "sha256": "b8b18066a6069bfe5d873f653e31ec05352cd4c8f45be7d530f307a209065189"
+    },
+    {
+      "file": "inputs-extra-84dca4a6-linux-amd64.tar.gz.part001",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-inputs/84dca4a6-linux-amd64-r1/inputs-extra-84dca4a6-linux-amd64.tar.gz.part001",
+      "bytes": 4194304,
+      "sha256": "3816d0c62350ea8b56d60b9cf7d94529570606fa27ee7485f6bb256307c9fcb0"
+    },
+    {
+      "file": "inputs-extra-84dca4a6-linux-amd64.tar.gz.part002",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-inputs/84dca4a6-linux-amd64-r1/inputs-extra-84dca4a6-linux-amd64.tar.gz.part002",
+      "bytes": 4194304,
+      "sha256": "2327d0008d0fd2e74560f14c034b3f804bc509916fd0f58e4e1a897cbf9a6610"
+    },
+    {
+      "file": "inputs-extra-84dca4a6-linux-amd64.tar.gz.part003",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-inputs/84dca4a6-linux-amd64-r1/inputs-extra-84dca4a6-linux-amd64.tar.gz.part003",
+      "bytes": 4194304,
+      "sha256": "0af1c0fe2ca4471e1f21d0a65753a7a9d31a282be4a59f1f284c33876ff72a01"
+    },
+    {
+      "file": "inputs-extra-84dca4a6-linux-amd64.tar.gz.part004",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-inputs/84dca4a6-linux-amd64-r1/inputs-extra-84dca4a6-linux-amd64.tar.gz.part004",
+      "bytes": 4194304,
+      "sha256": "0cc6cf9b09e84506f35a71b7db8fc6f3a68e8c55c8a8eb856cfed07a253330a3"
+    },
+    {
+      "file": "inputs-extra-84dca4a6-linux-amd64.tar.gz.part005",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-inputs/84dca4a6-linux-amd64-r1/inputs-extra-84dca4a6-linux-amd64.tar.gz.part005",
+      "bytes": 4194304,
+      "sha256": "527887638cc75186258f36401ad09fdd09934a2dc39e6e9e439aae3ffb5d994b"
+    },
+    {
+      "file": "inputs-extra-84dca4a6-linux-amd64.tar.gz.part006",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-inputs/84dca4a6-linux-amd64-r1/inputs-extra-84dca4a6-linux-amd64.tar.gz.part006",
+      "bytes": 4194304,
+      "sha256": "77e4fe068a9f9af7eca055ab428226eff2f300c371970aa9c85d23b87d1d3c78"
+    },
+    {
+      "file": "inputs-extra-84dca4a6-linux-amd64.tar.gz.part007",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-inputs/84dca4a6-linux-amd64-r1/inputs-extra-84dca4a6-linux-amd64.tar.gz.part007",
+      "bytes": 4194304,
+      "sha256": "6d05e6eb523e6d52b9870ff6d5aedc46bde7a68d78690e07ef1ea7a52ec736df"
+    },
+    {
+      "file": "inputs-extra-84dca4a6-linux-amd64.tar.gz.part008",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-inputs/84dca4a6-linux-amd64-r1/inputs-extra-84dca4a6-linux-amd64.tar.gz.part008",
+      "bytes": 4194304,
+      "sha256": "67823dda283c051858a38ec7d4fd3d993020e16ef824f31ef91679d2eb706cf7"
+    },
+    {
+      "file": "inputs-extra-84dca4a6-linux-amd64.tar.gz.part009",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-inputs/84dca4a6-linux-amd64-r1/inputs-extra-84dca4a6-linux-amd64.tar.gz.part009",
+      "bytes": 4194304,
+      "sha256": "c8344c4d800cfa89ecd8641c51ac1ecf9f8b5879201ba80eff653e3b6aadcf00"
+    },
+    {
+      "file": "inputs-extra-84dca4a6-linux-amd64.tar.gz.part010",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-inputs/84dca4a6-linux-amd64-r1/inputs-extra-84dca4a6-linux-amd64.tar.gz.part010",
+      "bytes": 4194304,
+      "sha256": "c315b916e1fd6de9712ba8aa2b01f7c8be2eb03bf0ac2ec6723f11577d2c0da4"
+    },
+    {
+      "file": "inputs-extra-84dca4a6-linux-amd64.tar.gz.part011",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-inputs/84dca4a6-linux-amd64-r1/inputs-extra-84dca4a6-linux-amd64.tar.gz.part011",
+      "bytes": 4194304,
+      "sha256": "dc689fdbc2c96dd648d24fc2e862dfa6c22477dc427eab13e07abdfae51aacdf"
+    },
+    {
+      "file": "inputs-extra-84dca4a6-linux-amd64.tar.gz.part012",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-inputs/84dca4a6-linux-amd64-r1/inputs-extra-84dca4a6-linux-amd64.tar.gz.part012",
+      "bytes": 4194304,
+      "sha256": "2ca10618f1e73b8d016cb496873f4e7a123a09f44f0fe7b565ef447ff201d561"
+    },
+    {
+      "file": "inputs-extra-84dca4a6-linux-amd64.tar.gz.part013",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-inputs/84dca4a6-linux-amd64-r1/inputs-extra-84dca4a6-linux-amd64.tar.gz.part013",
+      "bytes": 4194304,
+      "sha256": "25c39b874b357f54af7d3fffbae0947831e7e67001ec437fc9527f53bcaea4ac"
+    },
+    {
+      "file": "inputs-extra-84dca4a6-linux-amd64.tar.gz.part014",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-inputs/84dca4a6-linux-amd64-r1/inputs-extra-84dca4a6-linux-amd64.tar.gz.part014",
+      "bytes": 4194304,
+      "sha256": "05a53d90693034a4115f4f38bd7ead204999bb12e7931954e1d04bc0f7b594af"
+    },
+    {
+      "file": "inputs-extra-84dca4a6-linux-amd64.tar.gz.part015",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-inputs/84dca4a6-linux-amd64-r1/inputs-extra-84dca4a6-linux-amd64.tar.gz.part015",
+      "bytes": 4194304,
+      "sha256": "7fd7478e3336ef763ba69c914486dee8c4ab654f19e15c026debc2cb5c9a2c79"
+    },
+    {
+      "file": "inputs-extra-84dca4a6-linux-amd64.tar.gz.part016",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-inputs/84dca4a6-linux-amd64-r1/inputs-extra-84dca4a6-linux-amd64.tar.gz.part016",
+      "bytes": 4194304,
+      "sha256": "4da15746309d46541537ebc9a2e16f9febe479973234edb0ffe7548abf80c6a8"
+    },
+    {
+      "file": "inputs-extra-84dca4a6-linux-amd64.tar.gz.part017",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-inputs/84dca4a6-linux-amd64-r1/inputs-extra-84dca4a6-linux-amd64.tar.gz.part017",
+      "bytes": 4194304,
+      "sha256": "d5127beb04be2320597fa8eea0e76d05862d75bc4575774defbbd811c2681e69"
+    },
+    {
+      "file": "inputs-extra-84dca4a6-linux-amd64.tar.gz.part018",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-inputs/84dca4a6-linux-amd64-r1/inputs-extra-84dca4a6-linux-amd64.tar.gz.part018",
+      "bytes": 4194304,
+      "sha256": "5628584936ccc045bd2c8f954e80402792ad031b36ab71abda6f4127a0a6324e"
+    },
+    {
+      "file": "inputs-extra-84dca4a6-linux-amd64.tar.gz.part019",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-inputs/84dca4a6-linux-amd64-r1/inputs-extra-84dca4a6-linux-amd64.tar.gz.part019",
+      "bytes": 4194304,
+      "sha256": "c9fd63eb4e717b7d846e73ed558319fd7264ded61cd1273a68cd722956637430"
+    },
+    {
+      "file": "inputs-extra-84dca4a6-linux-amd64.tar.gz.part020",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-inputs/84dca4a6-linux-amd64-r1/inputs-extra-84dca4a6-linux-amd64.tar.gz.part020",
+      "bytes": 4194304,
+      "sha256": "8bcde168ddd85fd5a295c6c85d7699bf7b796487aa96e8278e64a21ccfe5c6a9"
+    },
+    {
+      "file": "inputs-extra-84dca4a6-linux-amd64.tar.gz.part021",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-inputs/84dca4a6-linux-amd64-r1/inputs-extra-84dca4a6-linux-amd64.tar.gz.part021",
+      "bytes": 4194304,
+      "sha256": "28b1318326164b41b9c9653535d7969b8b947f9573f5c3e5827cc860d4baf92e"
+    },
+    {
+      "file": "inputs-extra-84dca4a6-linux-amd64.tar.gz.part022",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-inputs/84dca4a6-linux-amd64-r1/inputs-extra-84dca4a6-linux-amd64.tar.gz.part022",
+      "bytes": 4194304,
+      "sha256": "bcb4ccbf270bf5e45fb35de80898ca05a6828a7f40a33d295deffbf8bfe1f426"
+    },
+    {
+      "file": "inputs-extra-84dca4a6-linux-amd64.tar.gz.part023",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-inputs/84dca4a6-linux-amd64-r1/inputs-extra-84dca4a6-linux-amd64.tar.gz.part023",
+      "bytes": 4194304,
+      "sha256": "3a3385f9e580c4f145aa912c307e219679912b3b161b9bf46e0cbc3d6b7f6435"
+    },
+    {
+      "file": "inputs-extra-84dca4a6-linux-amd64.tar.gz.part024",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-inputs/84dca4a6-linux-amd64-r1/inputs-extra-84dca4a6-linux-amd64.tar.gz.part024",
+      "bytes": 4194304,
+      "sha256": "7d5d4a0adf6a6e276582da6f2b9ab05bc6053e9bfbd638b30861022d31a221fe"
+    },
+    {
+      "file": "inputs-extra-84dca4a6-linux-amd64.tar.gz.part025",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-inputs/84dca4a6-linux-amd64-r1/inputs-extra-84dca4a6-linux-amd64.tar.gz.part025",
+      "bytes": 4194304,
+      "sha256": "65835e6f9038ce0b14b1a7b4ec1f7e96d7e75b6ce5f546150a99954cabfc2fd8"
+    },
+    {
+      "file": "inputs-extra-84dca4a6-linux-amd64.tar.gz.part026",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-inputs/84dca4a6-linux-amd64-r1/inputs-extra-84dca4a6-linux-amd64.tar.gz.part026",
+      "bytes": 4194304,
+      "sha256": "dd6361676213100c0cbb811df898176e428808e77636e935bfc1e6e219af11c9"
+    },
+    {
+      "file": "inputs-extra-84dca4a6-linux-amd64.tar.gz.part027",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-inputs/84dca4a6-linux-amd64-r1/inputs-extra-84dca4a6-linux-amd64.tar.gz.part027",
+      "bytes": 4194304,
+      "sha256": "a34992db2a3428b19941de978c7f40db6bddfd149e8085c3eea689a2d8229eb6"
+    },
+    {
+      "file": "inputs-extra-84dca4a6-linux-amd64.tar.gz.part028",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-inputs/84dca4a6-linux-amd64-r1/inputs-extra-84dca4a6-linux-amd64.tar.gz.part028",
+      "bytes": 4194304,
+      "sha256": "cdca717fa9dd1e0849756afc11435ab8d0e005fb8b5929c9be14b6f0a0761442"
+    },
+    {
+      "file": "inputs-extra-84dca4a6-linux-amd64.tar.gz.part029",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-inputs/84dca4a6-linux-amd64-r1/inputs-extra-84dca4a6-linux-amd64.tar.gz.part029",
+      "bytes": 4194304,
+      "sha256": "b6a5dab84780aa6862a7a54bde01787e4e0e9fabaf2eb5dfab433e967008fbb3"
+    },
+    {
+      "file": "inputs-extra-84dca4a6-linux-amd64.tar.gz.part030",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-inputs/84dca4a6-linux-amd64-r1/inputs-extra-84dca4a6-linux-amd64.tar.gz.part030",
+      "bytes": 4194304,
+      "sha256": "0cd660f8683e4d73da176167f0ebb76bf5bdd417c5db50371104a5b44a1ec763"
+    },
+    {
+      "file": "inputs-extra-84dca4a6-linux-amd64.tar.gz.part031",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-inputs/84dca4a6-linux-amd64-r1/inputs-extra-84dca4a6-linux-amd64.tar.gz.part031",
+      "bytes": 4194304,
+      "sha256": "33482b043d90077d02b0ca62f92b88fa61b62b69c5a5f6fac5124d5671d6432d"
+    },
+    {
+      "file": "inputs-extra-84dca4a6-linux-amd64.tar.gz.part032",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-inputs/84dca4a6-linux-amd64-r1/inputs-extra-84dca4a6-linux-amd64.tar.gz.part032",
+      "bytes": 4194304,
+      "sha256": "12441a84ff2e1058498157eee961e9029ae6f809b2df119bb7aa1dcbd2287db7"
+    },
+    {
+      "file": "inputs-extra-84dca4a6-linux-amd64.tar.gz.part033",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-inputs/84dca4a6-linux-amd64-r1/inputs-extra-84dca4a6-linux-amd64.tar.gz.part033",
+      "bytes": 4194304,
+      "sha256": "59780ad62d552ddb8898c48a2b29e5db2e39acb46ddde435dfba5cd126bf2100"
+    },
+    {
+      "file": "inputs-extra-84dca4a6-linux-amd64.tar.gz.part034",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-inputs/84dca4a6-linux-amd64-r1/inputs-extra-84dca4a6-linux-amd64.tar.gz.part034",
+      "bytes": 4194304,
+      "sha256": "ef1e9d4ebc51fb10c0d01a315c91c35679be9cea9b40ba1a54cc7c4f3461d28f"
+    },
+    {
+      "file": "inputs-extra-84dca4a6-linux-amd64.tar.gz.part035",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-inputs/84dca4a6-linux-amd64-r1/inputs-extra-84dca4a6-linux-amd64.tar.gz.part035",
+      "bytes": 4194304,
+      "sha256": "032dda03b03f0daf0a05753cee4557a7420187bff41f9a4d67e8b7d6e6abccab"
+    },
+    {
+      "file": "inputs-extra-84dca4a6-linux-amd64.tar.gz.part036",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-inputs/84dca4a6-linux-amd64-r1/inputs-extra-84dca4a6-linux-amd64.tar.gz.part036",
+      "bytes": 4194304,
+      "sha256": "5952feed994f8a629b30ba5610e9c126726ad7f692c4726167b2d74b04f7cd7e"
+    },
+    {
+      "file": "inputs-extra-84dca4a6-linux-amd64.tar.gz.part037",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-inputs/84dca4a6-linux-amd64-r1/inputs-extra-84dca4a6-linux-amd64.tar.gz.part037",
+      "bytes": 4194304,
+      "sha256": "5912c2393309acef68fb969ed0dc670d94ba0245143bb1aaeeb1a9b7bc1f1e7e"
+    },
+    {
+      "file": "inputs-extra-84dca4a6-linux-amd64.tar.gz.part038",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-inputs/84dca4a6-linux-amd64-r1/inputs-extra-84dca4a6-linux-amd64.tar.gz.part038",
+      "bytes": 4194304,
+      "sha256": "84ea9dc009eb1e043854ad886dc0909657b30b3786efd70973e54fb5f271e399"
+    },
+    {
+      "file": "inputs-extra-84dca4a6-linux-amd64.tar.gz.part039",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-inputs/84dca4a6-linux-amd64-r1/inputs-extra-84dca4a6-linux-amd64.tar.gz.part039",
+      "bytes": 4194304,
+      "sha256": "23104101009f61736ffdb45edd04740aa9d49c253ddc8dac7d1092585efbd24c"
+    },
+    {
+      "file": "inputs-extra-84dca4a6-linux-amd64.tar.gz.part040",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-inputs/84dca4a6-linux-amd64-r1/inputs-extra-84dca4a6-linux-amd64.tar.gz.part040",
+      "bytes": 4194304,
+      "sha256": "5187775fc90811f5d5f06f39c4feafa8881be9b95b7be282bb67480586e721ae"
+    },
+    {
+      "file": "inputs-extra-84dca4a6-linux-amd64.tar.gz.part041",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-inputs/84dca4a6-linux-amd64-r1/inputs-extra-84dca4a6-linux-amd64.tar.gz.part041",
+      "bytes": 4194304,
+      "sha256": "0077cfcba5c25907eee3b5c8b06dab8acca02c5497239e5a641832418d4781a7"
+    },
+    {
+      "file": "inputs-extra-84dca4a6-linux-amd64.tar.gz.part042",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-inputs/84dca4a6-linux-amd64-r1/inputs-extra-84dca4a6-linux-amd64.tar.gz.part042",
+      "bytes": 4194304,
+      "sha256": "8ac2bc27e374c0263bdf2e5cf582af89f46f5e5d66b4bd0579a9d8ad5276b6bc"
+    },
+    {
+      "file": "inputs-extra-84dca4a6-linux-amd64.tar.gz.part043",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-inputs/84dca4a6-linux-amd64-r1/inputs-extra-84dca4a6-linux-amd64.tar.gz.part043",
+      "bytes": 4194304,
+      "sha256": "b808fd39718473fcf5f1ed8df8e38e57d9bcbf72ae2edb7d96ec1ca488653415"
+    },
+    {
+      "file": "inputs-extra-84dca4a6-linux-amd64.tar.gz.part044",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-inputs/84dca4a6-linux-amd64-r1/inputs-extra-84dca4a6-linux-amd64.tar.gz.part044",
+      "bytes": 4194304,
+      "sha256": "ee0008840d6207dc7b7a0f24e5300118f87bc4e09e79f73d1536de7db6819134"
+    },
+    {
+      "file": "inputs-extra-84dca4a6-linux-amd64.tar.gz.part045",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-inputs/84dca4a6-linux-amd64-r1/inputs-extra-84dca4a6-linux-amd64.tar.gz.part045",
+      "bytes": 4194304,
+      "sha256": "507558343ce7319ffc0edec158b4cdad6d175d0df3d26ca0f182385dc092e0bc"
+    },
+    {
+      "file": "inputs-extra-84dca4a6-linux-amd64.tar.gz.part046",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-inputs/84dca4a6-linux-amd64-r1/inputs-extra-84dca4a6-linux-amd64.tar.gz.part046",
+      "bytes": 4194304,
+      "sha256": "e900a58f52e0ca42f0f8cd5b0618d2ae11bad28b4c62a40dde8bba8aee93a196"
+    },
+    {
+      "file": "inputs-extra-84dca4a6-linux-amd64.tar.gz.part047",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-inputs/84dca4a6-linux-amd64-r1/inputs-extra-84dca4a6-linux-amd64.tar.gz.part047",
+      "bytes": 4194304,
+      "sha256": "1abe96ea3e72839e48b443c238338d2374362b8cfd29cc469fdfc1b41922a4d0"
+    },
+    {
+      "file": "inputs-extra-84dca4a6-linux-amd64.tar.gz.part048",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-inputs/84dca4a6-linux-amd64-r1/inputs-extra-84dca4a6-linux-amd64.tar.gz.part048",
+      "bytes": 4194304,
+      "sha256": "11effab6c20efc511063825b484536b15265450f981a27fa2e6fba51ce4c9963"
+    },
+    {
+      "file": "inputs-extra-84dca4a6-linux-amd64.tar.gz.part049",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-inputs/84dca4a6-linux-amd64-r1/inputs-extra-84dca4a6-linux-amd64.tar.gz.part049",
+      "bytes": 4194304,
+      "sha256": "73dcc700956bef52d7d5e31dd0f00673f7cc7383f82ea1675dc897671f878ba0"
+    },
+    {
+      "file": "inputs-extra-84dca4a6-linux-amd64.tar.gz.part050",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-inputs/84dca4a6-linux-amd64-r1/inputs-extra-84dca4a6-linux-amd64.tar.gz.part050",
+      "bytes": 4194304,
+      "sha256": "29d5320c03f05720d4a02e4158da7a366288c7a199a81c91e277e336480d4a36"
+    },
+    {
+      "file": "inputs-extra-84dca4a6-linux-amd64.tar.gz.part051",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-inputs/84dca4a6-linux-amd64-r1/inputs-extra-84dca4a6-linux-amd64.tar.gz.part051",
+      "bytes": 4194304,
+      "sha256": "372c1f9a5a519e51b992b374437fa9454ef59217f34ae702db68c7d9b099c559"
+    },
+    {
+      "file": "inputs-extra-84dca4a6-linux-amd64.tar.gz.part052",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-inputs/84dca4a6-linux-amd64-r1/inputs-extra-84dca4a6-linux-amd64.tar.gz.part052",
+      "bytes": 4194304,
+      "sha256": "3007b261e22a4425b037b048256731a1266f39dec1ff5f7d35037221d6142eae"
+    },
+    {
+      "file": "inputs-extra-84dca4a6-linux-amd64.tar.gz.part053",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-inputs/84dca4a6-linux-amd64-r1/inputs-extra-84dca4a6-linux-amd64.tar.gz.part053",
+      "bytes": 4194304,
+      "sha256": "5cf14eb70447d09b03632dbc2875cd2398e4044b667abe52f176f6ff1378b33a"
+    },
+    {
+      "file": "inputs-extra-84dca4a6-linux-amd64.tar.gz.part054",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-inputs/84dca4a6-linux-amd64-r1/inputs-extra-84dca4a6-linux-amd64.tar.gz.part054",
+      "bytes": 3801640,
+      "sha256": "0db3ec03dc6b6b88ff23472d8710235d17dce9e2e453bef270ce514c375449d6"
+    }
+  ],
+  "archive": {
+    "file": "inputs-extra-84dca4a6-linux-amd64.tar.gz",
+    "bytes": 230294056,
+    "sha256": "d7c0759bc5c6fa5ed4456739262440d07769a0950362468ce8b2acb0af7deaed"
+  }
+}
