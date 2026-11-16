@@ -16,7 +16,7 @@ var regexpVersion = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._-]{0,95}$`)
 var regexpName = regexp.MustCompile(`^[a-z][a-z0-9-]{0,40}$`)
 var domainName = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?\.[a-z]{2,}$`)
 
-type installOptions struct{ Address, Domain, Proxy, Data, PublicKey string }
+type installOptions struct{ Address, Domain, Proxy, Data, PublicKey, Package string }
 type state struct {
 	Data          string            `json:"data"`
 	Package       string            `json:"package"`
@@ -34,6 +34,7 @@ func parseInstall(args []string) (installOptions, error) {
 	f.StringVar(&o.Proxy, "proxy", "", "")
 	f.StringVar(&o.Data, "data", "/srv/auriga", "")
 	f.StringVar(&o.PublicKey, "verify-key", "", "")
+	f.StringVar(&o.Package, "package", "", "")
 	if err := f.Parse(args); err != nil {
 		return o, err
 	}
@@ -110,6 +111,17 @@ func install(o installOptions) error {
 	root, err := packageRoot()
 	if err != nil {
 		return err
+	}
+	if o.Package != "" {
+		stage, err := os.MkdirTemp("", "auriga-install-")
+		if err != nil {
+			return err
+		}
+		defer func() { _ = os.RemoveAll(stage) }()
+		root = filepath.Join(stage, "package")
+		if err := extractVerified(o.Package, root, o.PublicKey); err != nil {
+			return err
+		}
 	}
 	if err := verifySums(root); err != nil {
 		return err

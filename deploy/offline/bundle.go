@@ -125,6 +125,10 @@ func fetch(a artifact, target string) error {
 }
 
 func bundle(args []string) error {
+	return bundleExpected(args, "")
+}
+
+func bundleExpected(args []string, expectedCommit string) error {
 	f := flags("bundle")
 	index := f.String("release", "auriga-release.json", "")
 	out := f.String("out", "", "")
@@ -179,7 +183,7 @@ func bundle(args []string) error {
 		}
 		if kit != nil && kit.Source != nil {
 			options.Info.UpstreamVersion = kit.Source.UpstreamVersion
-			options.Info.SiteChanges = options.Info.Dirty || options.Info.Commit != kit.Source.Commit || options.Info.SnapshotSHA256 != kit.Source.SnapshotSHA256
+			options.Info.SiteChanges = options.Info.Dirty || options.Info.Commit != kit.Source.Commit || kit.Source.SnapshotSHA256 != "" && options.Info.SnapshotSHA256 != kit.Source.SnapshotSHA256
 		}
 		if err := sourceVersion(options.Info, r, *version, true); err != nil {
 			return err
@@ -241,6 +245,17 @@ func bundle(args []string) error {
 	if *build {
 		if err := buildRelease(root, stage, r, options); err != nil {
 			return err
+		}
+	}
+	if expectedCommit != "" {
+		var manifest struct {
+			Commit string `json:"commit"`
+		}
+		if err := readJSONLoose(filepath.Join(root, "images/manifest.json"), &manifest); err != nil {
+			return err
+		}
+		if manifest.Commit != expectedCommit {
+			return errors.New("NAS 镜像制品提交与发行标签不符，重新构建该标签制品或使用 release --build")
 		}
 	}
 	for name, entry := range r.Images {
@@ -325,7 +340,11 @@ func bundle(args []string) error {
 }
 
 func signSums(root, keyPath string) error {
-	raw, err := os.ReadFile(keyPath)
+	return signFile(filepath.Join(root, "SHA256SUMS"), keyPath)
+}
+
+func signFile(file, keyPath string) error {
+	raw, err := smallFile(keyPath, 64<<10)
 	if err != nil {
 		return err
 	}
@@ -341,18 +360,22 @@ func signSums(root, keyPath string) error {
 	if !ok {
 		return errors.New("签名需要 Ed25519")
 	}
-	sums, err := os.ReadFile(filepath.Join(root, "SHA256SUMS"))
+	sums, err := smallFile(file, 4<<20)
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(filepath.Join(root, "SHA256SUMS.sig"), []byte(base64.StdEncoding.EncodeToString(ed25519.Sign(private, sums))+"\n"), 0644)
+	return os.WriteFile(file+".sig", []byte(base64.StdEncoding.EncodeToString(ed25519.Sign(private, sums))+"\n"), 0644)
 }
 
 func verifySignature(root, publicPath string) error {
+	return verifyFileSignature(filepath.Join(root, "SHA256SUMS"), publicPath)
+}
+
+func verifyFileSignature(file, publicPath string) error {
 	if publicPath == "" {
 		return nil
 	}
-	raw, err := os.ReadFile(publicPath)
+	raw, err := smallFile(publicPath, 64<<10)
 	if err != nil {
 		return err
 	}
@@ -368,11 +391,11 @@ func verifySignature(root, publicPath string) error {
 	if !ok {
 		return errors.New("签名公钥需要 Ed25519")
 	}
-	sums, err := os.ReadFile(filepath.Join(root, "SHA256SUMS"))
+	sums, err := smallFile(file, 4<<20)
 	if err != nil {
 		return err
 	}
-	raw, err = os.ReadFile(filepath.Join(root, "SHA256SUMS.sig"))
+	raw, err = smallFile(file+".sig", 1024)
 	if err != nil {
 		return err
 	}
@@ -384,4 +407,27 @@ func verifySignature(root, publicPath string) error {
 		return errors.New("离线包签名不匹配")
 	}
 	return nil
+}
+
+func smallFile(path string, limit int64) ([]byte, error) {
+	info, err := os.Stat(path)
+	if err != nil {
+		return nil, err
+	}
+	if !info.Mode().IsRegular() || info.Size() > limit {
+		return nil, fmt.Errorf("签名材料超出大小限制或不是普通文件 %s", filepath.Base(path))
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = f.Close() }()
+	raw, err := io.ReadAll(io.LimitReader(f, limit+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(raw)) > limit {
+		return nil, errors.New("签名材料超出大小限制")
+	}
+	return raw, nil
 }

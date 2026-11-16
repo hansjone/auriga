@@ -135,12 +135,16 @@ func verifySums(root string) error {
 // Extraction is deliberately limited to regular files/directories in a fresh
 // directory. No archive-supplied ownership, special bits, links or devices apply.
 func unpack(archive, destination string) error {
-	f, err := os.Open(archive)
+	f, err := openArchive(archive)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = f.Close() }()
-	r := tar.NewReader(f)
+	return unpackReader(f, destination)
+}
+
+func unpackReader(input io.Reader, destination string) error {
+	r := tar.NewReader(input)
 	seen := map[string]bool{}
 	var size int64
 	for {

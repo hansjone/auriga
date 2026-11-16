@@ -2,6 +2,10 @@
 
 包适用于 Linux amd64。现场预装 Docker Engine 和 Compose 2.29+，准备至少 4 GiB 可用内存与 20 GiB 可用磁盘。包不含 Docker 安装程序。
 
+正式附件只在 Forgejo Release 下载。先从独立渠道核准发行引导程序 `auriga` 的 SHA-256 和发行公钥。完整附件目录用 `./auriga verify <目录> --verify-key /secure/release-public.pem` 校验签名总清单。分卷包保留同目录全部 `.part001…`、`.parts.json` 和 `.parts.json.sig`，执行 `./auriga unpack <安装包.tar.part001> --out <全新目录> --verify-key /secure/release-public.pem`，自动逐卷校验和读取合并，无须手工拼大 tar。未分卷的 tar 也支持同一命令。
+
+已核验的发行引导程序可直接 `sudo ./auriga install --package <tar或part001> --address 192.0.2.10 --verify-key /secure/release-public.pem`。升级同样接受分卷并沿用固定公钥；其他维护命令请在解包安装目录使用。
+
 1. 从独立受信渠道取得外层 tar 的 SHA-256，核对后解包到 root 管理的物理目录。包内 `SHA256SUMS` 覆盖全部文件。若发行方签名，额外取得独立批准的 Ed25519 SPKI PEM 公钥。
 2. 在私密交互 TTY 执行 `sudo ./auriga install --address 192.0.2.10`。数据默认放 `/srv/auriga/auriga-data`。自定义父目录加 `--data /srv/auriga`。有签名时加 `--verify-key /secure/release-public.pem`。全程无下载、无构建。
 3. 打开输出的管理台地址，导入 TOTP，用应急账号登录后邀请成员。应急凭据仅向 TTY 显示，重定向时按提示到私密 TTY 查看。

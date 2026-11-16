@@ -38,3 +38,6 @@ deploy/compose/var/
 /auriga-devkit-*.tar
 /auriga-devkit-*.tar.sha256
 /deploy/offline/__pycache__/
+/.auriga-devkit.json
+/.offline-releases/
+/.offline-devkit-cache/

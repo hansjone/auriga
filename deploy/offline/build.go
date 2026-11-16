@@ -81,6 +81,16 @@ func buildRelease(root, stage string, r release, options buildOptions) error {
 		if err := prepareBuildImage(base, options.Offline); err != nil {
 			return err
 		}
+		// BuildKit treats a bare sha256 image ID in FROM as a registry name.
+		// Give an already verified local ID a digest-derived tag before handing
+		// it to the shared assembly recipe, just as devkit loading does.
+		if strings.HasPrefix(base, "sha256:") {
+			tag := kitImageTag("base-"+service, base)
+			if err := command(nil, os.Stdout, nil, "docker", "tag", base, tag); err != nil {
+				return err
+			}
+			base = tag
+		}
 		if err := command(nil, os.Stdout, nil, "sh", filepath.Join(source, "deploy/nas/offline-build/assemble-image.sh"), service, "auriga/"+service+":nas", base, output); err != nil {
 			return err
 		}

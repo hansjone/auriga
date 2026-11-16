@@ -4,23 +4,38 @@
 
 ## 准备离线开发机
 
-联网维护机取得批准的发行索引，`build` 字段登记 Forgejo 依赖分支提供的 recipes、inputs，以及 Go/Web/Java 工具和五种装配基础镜像的精确 digest。inputs 归档包含 Go proxy 文件、Maven/npm 内容缓存、pnpm store、Corepack 和各服务 system 包，保留原配方的锁文件及摘要清单。
+普通使用者从 **Forgejo Release** 下载源码标签和同版本 `auriga-devkit-<版本>.tar`，不需要自己准备依赖或打包；GitHub 不放这些发行附件。开发机预装 Docker Engine、Compose 2.29+、Git；不要求本地 Go、Maven、Node，工具链均在 devkit 镜像中。
+
+联网电脑按 `DEPLOY.md` 下载发行附件，核验引导程序的独立批准 SHA-256、公钥及签名清单。下载标签源码时保留 `.git`，例如：
 
 ```sh
-./auriga devkit --release /secure/auriga-release.json --out /exports/auriga-devkit.tar
+git clone --branch 0.2.0 https://forgejo.example.com/owner/auriga.git auriga-source
+git -C auriga-source rev-parse HEAD 'refs/tags/0.2.0^{commit}'
 ```
 
-devkit 保存完整源码快照、Git 可达历史及版本标签、全部登记的构建依赖与镜像层、安装器和 `SHA256SUMS`。可以加 `--sign-key` 签名。通过独立受信渠道核对外层摘要后，把套件拷入预装 Docker/Compose 和 Git 的内网开发机并解包。Go、Maven、Node 等编译工具在随包的工具镜像中运行。
+将源码目录（含 `.git`）和附件送进内网。Forgejo 网页自动生成的源码 zip/tar 没有 Git 历史，不能直接用作可追溯构建目录；也可使用套件内的 `source/`，但复用套件时它属于清单记载的原始版本，须先导入目标标签历史。
+
+用已核验的发行引导程序解包。若有分卷，把输入改为 `.tar.part001` 或 `.tar.parts.json`，同目录保存全部分卷和签名边车，无需手工拼接：
 
 ```sh
-mkdir auriga-devkit
-tar -xf auriga-devkit.tar -C auriga-devkit
-cd auriga-devkit/source
-./auriga devkit --verify ..
-git switch -c site/local-fix <批准的上游标签或提交>
+cd /media/auriga-release
+./auriga unpack auriga-devkit-0.2.0.tar --out /opt/auriga-devkit-0.2.0 --verify-key /secure/release-public.pem
+cd /opt/auriga-source
+mkdir -p bin
+cp /media/auriga-release/auriga bin/auriga-cli
+chmod 0755 bin/auriga-cli
+./auriga devkit verify /opt/auriga-devkit-0.2.0 --verify-key /secure/release-public.pem
+git switch -c site/local-fix 0.2.0
+./auriga bundle --build --offline
 ```
 
-签名套件校验另加 `--verify-key /secure/devkit-public.pem`。校验通过后保留 `cache/`、`devkit.json` 和根摘要清单原字节。源码与 Git 状态可以改变，离线构建会单独校验不可变依赖缓存。包内 Git 配置不带联网机远程地址和登录凭据。
+这里 `/opt/auriga-source` 是拷入的标签 checkout，操作时需对相应目录有权限。`devkit verify` 校验缓存及当前源码依赖，在源码根写被 Git 忽略的 `.auriga-devkit.json`；后续 `bundle --build --offline` 自动定位套件。也可用 `--source /opt/auriga-source` 从其他目录校验。以后仅检查已绑定套件可直接运行 `./auriga devkit verify --verify-key /secure/release-public.pem`。
+
+版本之间依赖未变时，发行流程复用 `auriga-devkit-<锁SHA256>.tar` 的相同字节，并以每版友好附件名供下载。`devkit.json` 与发行清单均记载锁摘要；发行清单还记录当前源码与套件原始提交。总键包括 Git 可见的 Go mod/sum/work、Maven pom/wrapper 配置、Node manifests/锁、Python 依赖、Dockerfile，以及批准 inputs/recipes 摘要与工具/基础/服务镜像 digest。业务源码改动不影响依赖键。新 checkout 绑定使用自身上游标签作构建基线，避免复用套件时误报旧上游。
+
+锁不匹配时会列出新增、缺少或不同的路径，并提示下载当前上游标签的 `auriga-devkit-<版本>.tar`。现场自行改依赖须维护者重新准备批准输入；绝不静默联网。保留 `cache/`、`devkit.json` 和根摘要清单原字节，构建逐次校验。首次解包用 `unpack --verify-key` 验完整原包；旧 `devkit --verify <目录>` 仅用于尚未修改源码的完整套件。
+
+仅维护者重出套件时，发行索引 `build` 登记依赖分支提供的 recipes、inputs（Go proxy、Maven/npm 缓存、pnpm store、Corepack、system 包）及固定 digest 镜像，按 `DEPLOY.md` 的 `prepare-release.sh` 在维护机/NAS 执行并由主控发布，不在 CI 完整冷建。
 
 ## 修改、测试与构建
 
@@ -54,16 +69,16 @@ git switch site/local-fix
 git merge <批准的新上游标签>
 ```
 
-在旧套件源码目录提交现场改动并导出分支，再在已核验的新套件源码目录导入。新套件自带新版安装器和匹配的依赖缓存。
+先核验新版本同版本 devkit 和引导程序；依赖相同时可复用旧套件。合并完成后更新 CLI 并重新绑定；不要依赖复用套件内旧源码的版本标签。
 
 ```sh
-git bundle create /exports/site.bundle site/local-fix
-cd /secure/new-devkit/source
-git fetch /media/site.bundle site/local-fix:site/local-fix
-git switch site/local-fix
-git merge <批准的新上游标签>
+cp /media/new-release/auriga bin/auriga-cli
+chmod 0755 bin/auriga-cli
+./auriga devkit verify /opt/auriga-devkit-0.3.0 --verify-key /secure/release-public.pem
 ./auriga bundle --build --offline --version 0.3.0-site.1 --out /exports/auriga-offline-0.3.0-site.1.tar
 ```
+
+复用套件的 `cache/source-history.bundle` 可能只含原始版本历史。目标标签不在里面时，从联网电脑目标源码 checkout 用 `git bundle create /exports/upstream.bundle --all` 导出并拷入，内网先执行 `git fetch /media/upstream.bundle 'refs/tags/*:refs/tags/*'` 再合并；勿强制覆盖已有标签。
 
 解决冲突、测试、审查后赋予新的现场版本并走 `upgrade`。保留原备份、源码提交和上一版本包，核对管理台“关于”与 doctor 是否显示目标版本。
 

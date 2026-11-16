@@ -23,10 +23,11 @@ type kitImage struct {
 	File string `json:"file"`
 }
 type devkitManifest struct {
-	Schema  int         `json:"schemaVersion"`
-	Release release     `json:"release"`
-	Images  []kitImage  `json:"images"`
-	Source  *provenance `json:"source"`
+	Locks   *lockInventory `json:"locks,omitempty"`
+	Schema  int            `json:"schemaVersion"`
+	Release release        `json:"release"`
+	Images  []kitImage     `json:"images"`
+	Source  *provenance    `json:"source"`
 }
 
 func buildImageRefs(r release) (map[string]string, error) {
@@ -177,6 +178,15 @@ func verifyDevkitCache(root string) error {
 
 func locateDevkit(source string) (string, *devkitManifest, error) {
 	root := filepath.Dir(source)
+	var binding devkitBinding
+	bound := false
+	if _, err := os.Lstat(filepath.Join(source, ".auriga-devkit.json")); err == nil {
+		if err := readJSON(filepath.Join(source, ".auriga-devkit.json"), &binding); err != nil {
+			return "", nil, err
+		}
+		root = binding.Root
+		bound = true
+	}
 	if err := verifyDevkitCache(root); err != nil {
 		return "", nil, err
 	}
@@ -187,10 +197,25 @@ func locateDevkit(source string) (string, *devkitManifest, error) {
 	if err := validateDevkit(kit); err != nil {
 		return "", nil, err
 	}
+	if kit.Locks != nil {
+		if err := checkKitLocks(source, kit); err != nil {
+			return "", nil, err
+		}
+	}
+	if bound {
+		if kit.Locks == nil || binding.Digest != kit.Locks.Digest {
+			return "", nil, errors.New("devkit 绑定已过期，重新运行 devkit verify")
+		}
+		kit.Source = &binding.Baseline
+		kit.Release.Version = binding.Baseline.Version
+	}
 	return root, &kit, nil
 }
 
 func devkit(args []string) error {
+	if len(args) > 0 && args[0] == "verify" {
+		return devkitVerify(args[1:])
+	}
 	f := flags("devkit")
 	index := f.String("release", "auriga-release.json", "")
 	out := f.String("out", "", "")
@@ -249,6 +274,11 @@ func devkit(args []string) error {
 		return err
 	}
 	kit := devkitManifest{Schema: 1, Release: r, Source: info}
+	locks, err := dependencyLocks(source, r)
+	if err != nil {
+		return err
+	}
+	kit.Locks = &locks
 	for name, a := range map[string]*artifact{"nas": &kit.Release.NAS, "inputs": &kit.Release.Build.Inputs, "recipes": &kit.Release.Build.Recipes, "desktop": kit.Release.Desktop, "seeds": kit.Release.Seeds} {
 		if a == nil {
 			continue

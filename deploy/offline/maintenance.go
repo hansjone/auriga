@@ -136,6 +136,11 @@ func upgrade(data, archive string) error {
 		return err
 	}
 	defer func() { _ = os.RemoveAll(stage) }()
+	if index := archiveIndex(archive); index != "" {
+		if err := verifyFileSignature(index, s.PublicKey); err != nil {
+			return err
+		}
+	}
 	if err := unpack(archive, stage); err != nil {
 		return err
 	}
