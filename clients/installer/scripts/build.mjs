@@ -59,6 +59,7 @@ export function validateResourceRoots(trust) {
     ).trust,
   ).map((k) => k.publicKeySpkiBase64);
   const canonicalKeys = [];
+  const normalized = { ...trust };
   for (const role of ['release', 'revocation', 'downgrade']) {
     const root = trust[role];
     if (
@@ -71,7 +72,9 @@ export function validateResourceRoots(trust) {
       typeof root.publicKeySpkiBase64 !== 'string'
     )
       throw new Error('invalid resource trust root');
-    const encoded = root.publicKeySpkiBase64.replace(/\s/g, '');
+    const encoded = root.publicKeySpkiBase64.trim();
+    if (/\s/.test(encoded))
+      throw new Error('invalid resource trust public key encoding');
     const der = Buffer.from(encoded, 'base64');
     if (der.toString('base64') !== encoded)
       throw new Error('invalid resource trust public key encoding');
@@ -89,12 +92,13 @@ export function validateResourceRoots(trust) {
       throw new Error('public test resource key cannot be deployed');
     if (canonical !== encoded) throw new Error('invalid resource trust SPKI');
     canonicalKeys.push(canonical);
+    normalized[role] = { ...root, publicKeySpkiBase64: canonical };
   }
   if (new Set(canonicalKeys).size !== 3)
     throw new Error('resource trust roles require independent keys');
   if (new Set(Object.values(trust).map((root) => root.kid)).size !== 3)
     throw new Error('resource trust roles require independent kids');
-  return trust;
+  return normalized;
 }
 const isWin = process.platform === 'win32';
 const NPM_FLAGS = [

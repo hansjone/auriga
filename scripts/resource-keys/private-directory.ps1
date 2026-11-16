@@ -1,4 +1,9 @@
 $ErrorActionPreference = 'Stop'
+[Console]::OutputEncoding = New-Object System.Text.UTF8Encoding($false)
+trap {
+    [Console]::Error.WriteLine(('{0}: {1}' -f $_.Exception.GetBaseException().GetType().Name, $_.Exception.Message))
+    exit 1
+}
 $directory = $env:AURIGA_RESOURCE_KEY_DIRECTORY
 if ([string]::IsNullOrEmpty($directory)) {
     throw 'A new empty directory is required'
@@ -10,8 +15,17 @@ if (-not $info.PSIsContainer -or
     throw 'A new empty physical directory is required'
 }
 $sid = [System.Security.Principal.WindowsIdentity]::GetCurrent().User
+$owner = $info.GetAccessControl([System.Security.AccessControl.AccessControlSections]::Owner).GetOwner([System.Security.Principal.SecurityIdentifier])
+if (-not $owner.Equals($sid)) {
+    $ownerSecurity = New-Object System.Security.AccessControl.DirectorySecurity
+    $ownerSecurity.SetOwner($sid)
+    try {
+        $info.SetAccessControl($ownerSecurity)
+    } catch {
+        throw "Cannot set resource key directory owner to the current user: $($_.Exception.Message)"
+    }
+}
 $security = New-Object System.Security.AccessControl.DirectorySecurity
-$security.SetOwner($sid)
 $security.SetAccessRuleProtection($true, $false)
 $rule = New-Object System.Security.AccessControl.FileSystemAccessRule(
     $sid,
@@ -26,4 +40,7 @@ $security.AddAccessRule($rule)
 $info.SetAccessControl($security)
 if (-not (Get-Acl -LiteralPath $directory).AreAccessRulesProtected) {
     throw 'Private directory ACL protection failed'
+}
+if (-not (Get-Acl -LiteralPath $directory).GetOwner([System.Security.Principal.SecurityIdentifier]).Equals($sid)) {
+    throw 'Private directory owner must be the current user'
 }

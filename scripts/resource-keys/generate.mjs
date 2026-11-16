@@ -23,7 +23,14 @@ function privateDirectory(directory) {
       encoding: 'utf8',
     },
   );
-  if (result.status !== 0) throw new Error('Cannot protect new key directory');
+  if (result.status !== 0) {
+    const reason =
+      result.error?.message ||
+      result.stderr.trim() ||
+      result.stdout.trim() ||
+      `PowerShell exited with status ${result.status}`;
+    throw new Error(`Cannot protect new key directory: ${reason}`);
+  }
 }
 
 export function generateKeys(output, kidPrefix = `resource-${randomUUID()}`) {

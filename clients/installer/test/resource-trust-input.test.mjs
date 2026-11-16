@@ -24,6 +24,38 @@ function roots() {
   );
 }
 
+test('resource roots trim surrounding whitespace before writing and reject internal whitespace', (t) => {
+  const base = tempBase(t);
+  const expected = roots();
+  const padded = JSON.parse(JSON.stringify(expected));
+  for (const root of Object.values(padded))
+    root.publicKeySpkiBase64 = ` \t${root.publicKeySpkiBase64}\r\n`;
+  assert.deepEqual(validateResourceRoots(padded), expected);
+  for (const [index, input] of [
+    JSON.stringify(padded),
+    Buffer.from(JSON.stringify(padded)).toString('base64'),
+  ].entries()) {
+    const output = join(base, `normalized-${index}.json`);
+    prepareResourceTrustInput(input, output);
+    assert.deepEqual(JSON.parse(readFileSync(output)), expected);
+  }
+  for (const whitespace of [' ', '\t', '\n']) {
+    const invalid = JSON.parse(JSON.stringify(expected));
+    const key = invalid.release.publicKeySpkiBase64;
+    invalid.release.publicKeySpkiBase64 =
+      key.slice(0, 8) + whitespace + key.slice(8);
+    assert.throws(() => validateResourceRoots(invalid), /public key encoding/);
+    assert.throws(
+      () =>
+        prepareResourceTrustInput(
+          JSON.stringify(invalid),
+          join(base, 'invalid.json'),
+        ),
+      /public key encoding/,
+    );
+  }
+});
+
 test('CI input accepts JSON and base64 and preserves the no-input build', (t) => {
   const base = tempBase(t);
   const trust = roots();

@@ -2,13 +2,102 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Buffer } from 'node:buffer';
 import { createPrivateKey, createPublicKey, sign, verify } from 'node:crypto';
-import { readFileSync, statSync, symlinkSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  statSync,
+  symlinkSync,
+} from 'node:fs';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { tempBase } from './helpers.mjs';
 import { generateKeys } from '../../../scripts/resource-keys/generate.mjs';
 import { validateResourceRoots } from '../scripts/build.mjs';
+
+test(
+  'Windows resource key generation succeeds when the parent denies WRITE_OWNER',
+  {
+    skip: process.platform !== 'win32',
+  },
+  (t) => {
+    const parent = join(tempBase(t), 'restricted parent');
+    mkdirSync(parent);
+    const setup = spawnSync(
+      'powershell.exe',
+      [
+        '-NoProfile',
+        '-NonInteractive',
+        '-Command',
+        `
+    $ErrorActionPreference = 'Stop'
+    $sid = [System.Security.Principal.WindowsIdentity]::GetCurrent().User
+    $security = New-Object System.Security.AccessControl.DirectorySecurity
+    $security.SetAccessRuleProtection($true, $false)
+    $inherit = [System.Security.AccessControl.InheritanceFlags]'ContainerInherit, ObjectInherit'
+    $security.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule($sid, 'Modify', $inherit, 'None', 'Allow')))
+    $security.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule($sid, 'TakeOwnership', $inherit, 'None', 'Deny')))
+    (Get-Item -LiteralPath $env:RESOURCE_TEST_PARENT).SetAccessControl($security)
+    $blocked = New-Item -ItemType Directory -Path (Join-Path $env:RESOURCE_TEST_PARENT 'blocked')
+    $blockedSecurity = New-Object System.Security.AccessControl.DirectorySecurity
+    $blockedSecurity.SetAccessRuleProtection($true, $false)
+    $blockedSecurity.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule($sid, 'Modify', $inherit, 'None', 'Allow')))
+    $blockedSecurity.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule($sid, 'ChangePermissions', $inherit, 'None', 'Deny')))
+    $ownerRights = New-Object System.Security.Principal.SecurityIdentifier('S-1-3-4')
+    $blockedSecurity.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule($ownerRights, 'ChangePermissions', $inherit, 'None', 'Deny')))
+    $blocked.SetAccessControl($blockedSecurity)
+    $probe = New-Item -ItemType Directory -Path (Join-Path $env:RESOURCE_TEST_PARENT 'probe')
+    if ((Get-Acl -LiteralPath $probe.FullName).GetOwner([System.Security.Principal.SecurityIdentifier]).Value -ne $sid.Value) { throw 'Probe owner must be the current user' }
+    $ownerOnly = New-Object System.Security.AccessControl.DirectorySecurity
+    $ownerOnly.SetOwner($sid)
+    try {
+      $probe.SetAccessControl($ownerOnly)
+    } catch [System.UnauthorizedAccessException] {
+      [Console]::WriteLine('WRITE_OWNER denied as required')
+      exit 0
+    }
+    throw 'Probe unexpectedly allowed WRITE_OWNER'
+  `,
+      ],
+      {
+        encoding: 'utf8',
+        env: { ...process.env, RESOURCE_TEST_PARENT: parent },
+      },
+    );
+    assert.equal(setup.status, 0, setup.stderr);
+    assert.match(setup.stdout, /WRITE_OWNER denied as required/);
+    const { directory, trust } = generateKeys(
+      join(parent, 'keys'),
+      'restricted',
+    );
+    assert.deepEqual(
+      JSON.parse(readFileSync(join(directory, 'resource-roots.json'))),
+      trust,
+    );
+    for (const role of ['release', 'revocation', 'downgrade']) {
+      const file = join(
+        directory,
+        role === 'downgrade' ? 'offline' : 'platform',
+        `${role}.pk8`,
+      );
+      assert.equal(
+        createPrivateKey({
+          key: readFileSync(file),
+          type: 'pkcs8',
+          format: 'der',
+        }).asymmetricKeyType,
+        'ed25519',
+      );
+    }
+    const blockedOutput = join(parent, 'blocked', 'keys');
+    assert.throws(
+      () => generateKeys(blockedOutput, 'blocked'),
+      /Cannot protect new key directory:[\s\S]*UnauthorizedAccessException/,
+    );
+    assert.equal(existsSync(join(blockedOutput, 'platform')), false);
+  },
+);
 
 test('resource keys are independent PKCS#8 DER with matching SPKI roots and protected storage', (t) => {
   const directory = join(tempBase(t), 'keys with spaces');

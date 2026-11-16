@@ -24,7 +24,7 @@ export function prepareResourceTrustInput(input, output) {
   } catch {
     throw new Error('Invalid resource trust JSON');
   }
-  validateResourceRoots(trust);
+  trust = validateResourceRoots(trust);
   writeFileSync(output, JSON.stringify(trust), { flag: 'wx', mode: 0o600 });
   return ['--resource-trust-json', output];
 }
