@@ -1,7 +1,12 @@
 {
-  "schemaVersion": 1,
-  "sourceCommit": "84dca4a66e6a09f6c6e00628d833fce41920d855",
-  "recipeBaseCommit": "48feff5be421d515cef7635a7eec248551be65c8",
+  "schemaVersion": 2,
+  "acceptanceStatus": "passed-with-qualifications",
+  "qualifications": [
+    "Early Go/Web parent memory accounting was not hierarchical; corrected before final assembly and stack acceptance",
+    "Agent minimum validation used an isolated disposable public runtime root; official DSH release trust is pending"
+  ],
+  "sourceCommit": "b7359410db3dcf1107af240a2a6d2f85bae6a5e6",
+  "recipeBaseCommit": "a403cb1d75642abb4e7ee8a44fcf4c866b512e28",
   "recipeOverlay": [
     {
       "file": "deploy/nas/offline-build/assemble-image.sh",
@@ -16,6 +21,10 @@
       "sha256": "feab2335419bf4b021e1312208d84a32568be40427422444070793253476b496"
     },
     {
+      "file": "deploy/nas/offline-build/field-operations.zh.md",
+      "sha256": "c4c13581945ab053d1d6cc517070762ce0dd1383920250866bf5789e4fb6ea65"
+    },
+    {
       "file": "deploy/nas/offline-build/go-inputs.sh",
       "sha256": "95fbede81482e2edc5900fc29e22f96e4d51bc579e188a6b7fa597ab3d971dba"
     },
@@ -28,55 +37,284 @@
       "sha256": "e75e8faf93fbb30d8186d6d085c8f5be14225886ff7a25a3e5034c1d827d8ab1"
     },
     {
+      "file": "deploy/nas/offline-build/README.zh.md",
+      "sha256": "d9b7ef95b18f1769d244e5ce2b32be3d46293d68859a4aa072a530a9d24af071"
+    },
+    {
       "file": "deploy/nas/offline-build/system-inputs.sh",
       "sha256": "3bb91ef670e97497cc9a597a307a2b26a63f15ff1cbe3712ffc4cdf45f1eec52"
+    },
+    {
+      "file": "deploy/nas/offline-build/upstream-recipes.sha256",
+      "sha256": "bd9c47216506de1cbb01331d0659235fbfc25fd43c8d47f6c20a71184d5a125b"
     },
     {
       "file": "deploy/nas/offline-build/web-inputs.sh",
       "sha256": "2120ea049ce12babe0c58639d6f46bb2ea1e4ba80657f658372cc69c907ec6fd"
     }
   ],
-  "sourceTransport": "Authenticated Forgejo HTTPS via a Node 24 bridge restricted to Git upload-pack",
-  "inputTransport": "Previously published and readback-verified Forgejo archives were restored into a separate empty Docker and language build environment",
+  "sourceTransport": "Authenticated Forgejo Git upload-pack through a fixed-upstream allowlist proxy; detached checkout verified",
+  "inputTransport": "All archives fetched from Forgejo in the NAS environment, each part and complete archive checked against frozen SHA-256; original publication separately read back over authenticated HTTPS",
+  "executionHarness": {
+    "path": "/api/packages/{owner}/generic/auriga-site-coldbuild-control/b7359410-linux-amd64-r18/control.tar.gz",
+    "bytes": 236754,
+    "sha256": "1885e3fd973ee9b948fe5d5ecda3e88d9eb9dbb815f73b84a9f25eee1da7497e",
+    "role": "Site-specific acceptance control scripts; no production default configuration changes"
+  },
+  "dependencySources": {
+    "baselineInventory": "forgejo-deps-inventory.json",
+    "currentCompatibility": "source-compatibility-b7359410.json",
+    "discoveryCounts": {
+      "present": 5908,
+      "source": 114,
+      "platform-excluded": 506,
+      "non-input-reference": 452,
+      "missing": 0
+    },
+    "supplyCounts": {
+      "existingOnly": 5384,
+      "includesSupplement": 524,
+      "missing": 0
+    },
+    "indexedDependencyFiles": 824,
+    "thisRoundPublication": {
+      "schemaVersion": 1,
+      "sourceCommit": "b7359410db3dcf1107af240a2a6d2f85bae6a5e6",
+      "verifiedAt": "2026-11-16T07:55:07.296199+00:00",
+      "verification": "Complete authenticated Forgejo HTTPS readback; SHA-256 and length match frozen bytes; existing package association was independently rechecked after the repeat link returned HTTP 400",
+      "verifiedFiles": 37,
+      "expectedFiles": 37,
+      "bytes": 129845217,
+      "packages": [
+        {
+          "name": "auriga-site-build-overlays",
+          "version": "b7359410-linux-amd64-r1",
+          "files": 3,
+          "bytes": 2190,
+          "repositoryLinked": true,
+          "supersededBy": "b7359410-linux-amd64-r2"
+        },
+        {
+          "name": "auriga-site-nas-builder",
+          "version": "27.1.2-linux-amd64-r1",
+          "files": 31,
+          "bytes": 129840861,
+          "repositoryLinked": true
+        },
+        {
+          "name": "auriga-site-build-overlays",
+          "version": "b7359410-linux-amd64-r2",
+          "files": 3,
+          "bytes": 2166,
+          "repositoryLinked": true,
+          "reason": "LF-normalized metadata remains byte-identical after Git checkout"
+        }
+      ],
+      "failures": [],
+      "activeFiles": 34,
+      "activeBytes": 129843027,
+      "supersededFilesRetained": 3
+    },
+    "downloadedArchives": [
+      {
+        "name": "auriga-build-go-toolchain-linux-amd64.tar.gz",
+        "sha256": "4a415642f4e3177ce9bda8416b8b42b0aa4e849ee8c92932fa04456d6b9bd4a0",
+        "parts": 76,
+        "bytes": 316742303
+      },
+      {
+        "name": "auriga-build-agent-base-linux-amd64.tar.gz",
+        "sha256": "c1d33a4891abe8e6b1d9c7ec29c9686cfaba9399a32bb7d72e94c709b1003f79",
+        "parts": 7,
+        "bytes": 28451118
+      },
+      {
+        "name": "auriga-build-web-toolchain-linux-amd64.tar.gz",
+        "sha256": "63456dfdac0dcaedf983276bfa283bb03664106570535d72a8c440799e785468",
+        "parts": 98,
+        "bytes": 409407173
+      },
+      {
+        "name": "auriga-build-jdk-base-linux-amd64.tar.gz",
+        "sha256": "5f04ad0c389709baf90a7144c3dcf47c93e494c55782304e40642fe4110f11bb",
+        "parts": 36,
+        "bytes": 149800941
+      },
+      {
+        "name": "auriga-build-platform-base-linux-amd64.tar.gz",
+        "sha256": "ae03a60cb87bf1de88bfbc082c8d06db11cc3ae3d493a078187b79922d230521",
+        "parts": 28,
+        "bytes": 116266660
+      },
+      {
+        "name": "auriga-build-edge-base-linux-amd64.tar.gz",
+        "sha256": "6cc2712bfecb30bcdff5c96e002c8efa23a53f0078f76656f30685f2d8032d5c",
+        "parts": 1,
+        "bytes": 715591
+      },
+      {
+        "name": "auriga-build-bifrost-base-linux-amd64.tar.gz",
+        "sha256": "625d39dcf29ae22aa6deaf20123abd58e45e38180a3d412c5304633cc6be3c72",
+        "parts": 1,
+        "bytes": 3807220
+      },
+      {
+        "name": "auriga-build-operator-base-linux-amd64.tar.gz",
+        "sha256": "4c33af41773d16ade196a3e6b597c6f742c42d7759114c45b00cd52b9db00c03",
+        "parts": 11,
+        "bytes": 44322079
+      },
+      {
+        "name": "auriga-go-inputs-linux-amd64-963bfe65.tar.gz",
+        "sha256": "cc1ca5078b6d81bf6bea2e65f9ee34fcc6f9892029484b47c31fb5a443283be9",
+        "parts": 23,
+        "bytes": 92770677
+      },
+      {
+        "name": "auriga-build-web-inputs-linux-amd64-963bfe65-r2.tar.gz",
+        "sha256": "34b7ef5fb8c2a7a9ed39c5444d352c77aa301307b80c2a554b2d6fc34f778d06",
+        "parts": 23,
+        "bytes": 95261566
+      },
+      {
+        "name": "auriga-build-java-inputs-linux-amd64-784643c8.tar.gz",
+        "sha256": "62b9367439c341f83f0cda4c55d5a992b3c485a08eae72c3097f236f61349edc",
+        "parts": 57,
+        "bytes": 363721826
+      },
+      {
+        "name": "auriga-build-agent-debs-linux-amd64.tar.gz",
+        "sha256": "271825dcd02b38dbe7e3fd0f904240bb667c2f47cb884cd0e8af2508949c46c4",
+        "parts": 1,
+        "bytes": 3643749
+      },
+      {
+        "name": "auriga-build-platform-debs-linux-amd64.tar.gz",
+        "sha256": "4048490034657fc0291e82ccd3a1b2b159f7564a8231def8a376140ddc39a265",
+        "parts": 1,
+        "bytes": 4062465
+      },
+      {
+        "name": "auriga-build-bifrost-apks-linux-amd64.tar.gz",
+        "sha256": "0954f120961bee7abc6edf1e957037b6e276e05f97a0baf22118cb6e2bf39502",
+        "parts": 1,
+        "bytes": 3030237
+      },
+      {
+        "name": "auriga-build-operator-wheels-linux-amd64.tar.gz",
+        "sha256": "994662bf14687e1662d9cbcb85f27ffa6f6e464c0269d520dc52e365f07459f0",
+        "parts": 2,
+        "bytes": 4679603
+      },
+      {
+        "name": "postgres-linux-amd64.tar.gz",
+        "sha256": "d453ee9264e4c491afd8775c3217792c050a7d5c270c8361deaa0a72c4ffa3ee",
+        "parts": 39,
+        "bytes": 160519072
+      },
+      {
+        "name": "nats-linux-amd64.tar.gz",
+        "sha256": "f52bc948a0337c3c30f1b8ce3dcc4511b9e2a3b7e65235b8cdd6cc1372b73aad",
+        "parts": 3,
+        "bytes": 10427955
+      },
+      {
+        "name": "registry-linux-amd64.tar.gz",
+        "sha256": "c88f0910759539eecb591e985d1b89c607231c656c19a71e9a9804d6ea211dfc",
+        "parts": 3,
+        "bytes": 10141529
+      }
+    ],
+    "builderTool": "nas-builder-release.json",
+    "locallyGeneratedConfiguration": "Disposable installation TLS materials, administrator enrollment and an independent acceptance-only public runtime root; no external downloads"
+  },
   "isolation": {
-    "independentMountAndNetworkNamespaces": true,
-    "externalDefaultRoutes": 0,
+    "privateDockerDaemon": true,
     "initialDockerImages": 0,
-    "initialBuildCaches": "empty",
-    "dataAndTemporaryFiles": "data disk",
-    "minimumSystemDiskFreeGiB": 15,
-    "serialBuilds": true
+    "initialBuildCache": "0B; initial-builder-cache.txt",
+    "initialLanguageWorkingCaches": "empty directories; frozen read-only input archives were restored separately",
+    "outerNetworkInternal": true,
+    "hostDockerSocketMounted": false,
+    "portsPublishedToNas": false,
+    "compileNetwork": "none",
+    "compilePull": "never",
+    "serialBuilds": true,
+    "externalDefaultRoutes": 0,
+    "externalProbes": {
+      "blockedHosts": [
+        "github.com",
+        "registry-1.docker.io",
+        "registry.npmjs.org",
+        "repo.maven.apache.org",
+        "proxy.golang.org"
+      ],
+      "blockedDirectIPv4": "1.1.1.1",
+      "nonForgejoProxyPathRejected": true,
+      "forgejoCloneAnd411InputPartsVerified": true,
+      "evidence": [
+        "initial-routes.txt",
+        "network-probes.txt",
+        "clone.log",
+        "download.log",
+        "proxy.jsonl"
+      ]
+    },
+    "privateCgroupNamespace": true
+  },
+  "resources": {
+    "daemonLimitMiB": 4864,
+    "proxyLimitMiB": 128,
+    "aggregateLimitAfterHierarchyCheckpointMiB": 4992,
+    "exportHelperLimitMiB": 128,
+    "maximumConfiguredAggregateDuringExportMiB": 5120,
+    "daemonCpuLimit": 2,
+    "proxyCpuLimit": 0.25,
+    "compileLimitsMiB": {
+      "go": 2048,
+      "web": 1536,
+      "java": 2560
+    },
+    "pauseThresholdAvailableKiB": 1572864,
+    "pauseTriggered": false,
+    "minimumObservedNasAvailableKiB": 5264712,
+    "samples": 513,
+    "curveFile": "nas-resource-curve-b7359410.json",
+    "curveSha256": "a2b4ff76b8a6bbff829a8e04b15310abec3d5cca99c5c117709242705417dbdd",
+    "hierarchyEnabledEpoch": 1794815992,
+    "earlyAccountingLimitation": "Initial Go/Web daemon stats did not include nested cgroups. Their total aggregate cap was not enforced by the parent. Java subsequently ran with daemon 2048 + compiler 2560 + proxy 128 MiB. The dedicated outer engine was then recreated preserving outputs and its own data, hierarchy enabled before inner containers, and subsequent assembly/stack/export inherited the aggregate cap. Historical samples are explicitly marked; no claim of uniform aggregate enforcement throughout the run."
   },
   "build": {
     "exitCode": 0,
-    "compileNetwork": "none",
-    "compilePull": "never",
+    "platform": "linux/amd64",
+    "javaGoal": "-o -DskipTests package",
+    "javaUnitTestsRun": false,
     "imageBuildArguments": [
       "--network=none",
       "--pull=false",
-      "--no-cache"
+      "--no-cache",
+      "--provenance=false",
+      "--sbom=false"
     ],
-    "javaGoal": "-o -DskipTests package",
     "go": [
       {
         "file": "auriga-agent",
-        "sha256": "f7920595fa3414662f9db5461f92381f4c5bfe16ea465acfd4d98ed31907d9fc"
+        "sha256": "a9d619852df4ceb8f771b24a162fd8a021b1385e17d990c2bccabc2a725242ea"
       },
       {
         "file": "auriga-ai-gateway",
-        "sha256": "2d0ad5b9aec621135325d48532f2738ca146060f4289ba66057a6730c143314d"
+        "sha256": "9992da4705d46bcfd783f5dc7c6f7f3675c76c38a60a99663bfab8828fbbb4e6"
       },
       {
         "file": "auriga-edge",
-        "sha256": "709e4d243056a4fc4be96eb704333d563ebc9e1ffa85cff29540e4cd8818a540"
+        "sha256": "bd95f4ba3787453f58ccc7b628d7273720c4affdf3a33090765db67de814ef78"
       },
       {
         "file": "auriga-egress",
-        "sha256": "cd57093d34c6f63249b5b36bae9ea900641bddb6211eaf94f3a0cb0c0883af44"
+        "sha256": "3c3f66bc66e0aff120c9a1f430fe8571e9d22c2c328c29614117383c32deec50"
       },
       {
         "file": "auriga-nas-bootstrap",
-        "sha256": "80f0fe3f553a2c356e79d6dfb3a02024ab31e7b84e7ce43d954cc4f6f6448df6"
+        "sha256": "15962ce726fa93fed10f16de83cdb1f59fdc9ba25ab1dd11ce28b9c0dc9c82cb"
       },
       {
         "file": "auriga-network-broker",
@@ -84,25 +322,19 @@
       },
       {
         "file": "auriga-network-probe",
-        "sha256": "9123cfdcbf0168d904fa67cfdb0c1546b958e617f15326216fe8ace00f7e584c"
+        "sha256": "35cfc8e054def82aae29108b4ac205939ee3f20f789ed0faae4c86a60af11e67"
       },
       {
         "file": "auriga-panel",
-        "sha256": "e9a1bfc40e1c8109cd9fe256c78e567e812c16e2f0c73fd38f98370397fbb37c"
+        "sha256": "b79fbb16772c696b58ffadc8175a3d64fc651efbb02818c5a007fb4943ef34d8"
       },
       {
         "file": "bifrost",
-        "sha256": "805f06577cab97e4a8d1d912e86f3c0e50281f5783d0e18dd7fbc8e627fe52ef"
+        "sha256": "a16d3afe29d8a83d04f8fa3780fe3ecd9ccc6a37edb96019dcd98bd65c51a17a"
       },
       {
         "file": "runtime-release",
-        "sha256": "8e19c1a29be2e68dd66cd33e0edec86b006bf239cfca3b0b93ab81f64be5427f"
-      }
-    ],
-    "java": [
-      {
-        "file": "platform.jar",
-        "sha256": "34fde2ca1c12a8cf8ed33b070714899fa23e1e8d198025d4ca082b0599ed36b8"
+        "sha256": "fd48cfddb0e8c3b851f87df79af8b12a0260f77ab70b50ccaefb8c0abc1bb07e"
       }
     ],
     "web": [
@@ -111,40 +343,40 @@
         "sha256": "04c9c5c61f386a14599ed6a9e0c8a50b5c485366a4e64192b2e88cd47bf0e434"
       },
       {
-        "file": "admin/assets/index-DyXwTIds.js",
-        "sha256": "98a25ed753696945d14d4bffb4907aede64a22348d1e217a4c595270fe334063"
+        "file": "admin/assets/index-D_QSBc2X.js",
+        "sha256": "f6ec4d99da4688103a476a578abf2714ddc184e7876d4811215f10226226d9ac"
       },
       {
         "file": "admin/brand/apple-touch-icon.png",
-        "sha256": "213141c61c935bcfec4372f70f23b26f35b7a448f1925171648dbfaedf786426"
+        "sha256": "98e4a802273d82fc5ece30fede07c6e8d26e9d8c924a7e95633b75407727ad6c"
       },
       {
         "file": "admin/brand/favicon-32.png",
-        "sha256": "1ca52ed1f7b337eb860da39c933f81ddc444fefb188aa98a05feec90a09adb67"
+        "sha256": "61db720782dd0e11092cc3a18a68117a37af61b30ee3f9b52a304cbb9e2b9964"
       },
       {
         "file": "admin/brand/favicon.svg",
-        "sha256": "571a7cef9d0fc618be40aaee5d368f98d1acc86e28d37067a227eb7370d433ce"
+        "sha256": "13e282c4cae4dc044c85f3fa18864f2c3c34911f6949e5951885b906bbb96fa4"
       },
       {
         "file": "admin/index.html",
-        "sha256": "32e8f0a818417984f4e8674ee0b846a81947274588c3e2144fb905746be47d9c"
+        "sha256": "cb42ef4b075391e13233fe6027e6a1c8f24a2e767dec4b1c2ddf4aebdd0cb25c"
       },
       {
         "file": "panel/auriga-team-panel.js",
-        "sha256": "64d11a0d4423e11a1499a0047a72b3a4bf75266ee54be2d315dfa0a7089b70ad"
+        "sha256": "7ee32646453ca3efcf25b600bfad0512d5cb7a43d6a6552a66085833addcaac2"
       },
       {
         "file": "portal/assets/iam-DVRK287h.js",
         "sha256": "1f2bc8e3d5622f1d180dcbeaf36c854dc612e5806e586cd2c0fc6ad166de1368"
       },
       {
-        "file": "portal/assets/index-IvGX4F6x.css",
-        "sha256": "e09b7e2441621f56f8f3ba1c85422807c145e7f1cfa5f67406f08999539ffa9f"
+        "file": "portal/assets/index-BxzZ7v0z.js",
+        "sha256": "a9d3b2d2f05061eb750d393db99f94e4e25588e1d1845a98bc4e6bbb246ef816"
       },
       {
-        "file": "portal/assets/index-jbF-h3As.js",
-        "sha256": "3ce58db26a154a0882dcb15755507bebda88188b18e5ef8e4a67f404758df7fb"
+        "file": "portal/assets/index-h4C2kS3v.css",
+        "sha256": "ec04d09712951d10751ac1b44e2d0eff80aa410bcfeedbf71192e203518e10ad"
       },
       {
         "file": "portal/assets/instanceLogin-BtcDonbC.css",
@@ -176,19 +408,19 @@
       },
       {
         "file": "portal/brand/apple-touch-icon.png",
-        "sha256": "213141c61c935bcfec4372f70f23b26f35b7a448f1925171648dbfaedf786426"
+        "sha256": "98e4a802273d82fc5ece30fede07c6e8d26e9d8c924a7e95633b75407727ad6c"
       },
       {
         "file": "portal/brand/favicon-32.png",
-        "sha256": "1ca52ed1f7b337eb860da39c933f81ddc444fefb188aa98a05feec90a09adb67"
+        "sha256": "61db720782dd0e11092cc3a18a68117a37af61b30ee3f9b52a304cbb9e2b9964"
       },
       {
         "file": "portal/brand/favicon.svg",
-        "sha256": "571a7cef9d0fc618be40aaee5d368f98d1acc86e28d37067a227eb7370d433ce"
+        "sha256": "13e282c4cae4dc044c85f3fa18864f2c3c34911f6949e5951885b906bbb96fa4"
       },
       {
         "file": "portal/index.html",
-        "sha256": "21b78724dfa31217960fbf6e7dcda9712c940cb17b3c38fd0ff084c378aa2645"
+        "sha256": "f8f80d466be2b3899d14bcce7285cd0e423c7430b2c62f5a5e6e1db43909a116"
       },
       {
         "file": "portal/instance-login.html",
@@ -199,88 +431,262 @@
         "sha256": "7c9f0dc30fc35eb46d274542e0ac9fd730e313178523f940fcfc759a5575522e"
       }
     ],
+    "java": [
+      {
+        "file": "platform.jar",
+        "sha256": "a5ac0174ffef9ee9272fe7baf9b5c112280172899bc879a083cf67bdd68362c9"
+      }
+    ],
     "images": [
       {
         "role": "agent",
-        "configDigest": "sha256:e6bf5c630cdb0b170c5ddcb6b2daa4078306eb9c4a9024de96c004e3cbf4a8dd",
+        "configDigest": "sha256:f2faf20895709158c61dec9b02ae819682e2a2a2948a94cf825fc80239b0f458",
         "platform": "linux/amd64"
       },
       {
         "role": "bifrost",
-        "configDigest": "sha256:234c80a317c94efea5105a8487f6bdaae2d2a9004f710755a2eb69a25815d9d7",
+        "configDigest": "sha256:e6000e498eb08ae4956514f7f3f375f86013cf0c4c0737325c38b2782687a9a1",
         "platform": "linux/amd64"
       },
       {
         "role": "edge",
-        "configDigest": "sha256:c04c50507cae5b6e7d10fa148465b477277a05f4651f9fd5f0be2197df4e53ad",
+        "configDigest": "sha256:8ee6ab3c7e5894ea77a690d8f44c52f47469ded79906730e129c16afd66b5c9e",
         "platform": "linux/amd64"
       },
       {
         "role": "platform",
-        "configDigest": "sha256:aaac0dd90785c7881a241b91af12413c3b2a72c88d69da7d913cbd479a0a79a1",
+        "configDigest": "sha256:a5cf1687287156aed2e635c9f8446a94f82d368a497954f43dd8f6f1e446c390",
         "platform": "linux/amd64"
       },
       {
         "role": "operator",
-        "configDigest": "sha256:5456c667f0c7a8c2219181e5fd0b7224c36d3ed8aaa7c8ad8d61e838ef0e7cb2",
+        "configDigest": "sha256:cc3789241252394a4ca35c4c9a4808437e138236801199ba1b0b10483d127bb9",
         "platform": "linux/amd64"
       }
+    ],
+    "imageArchiveIntegrity": {
+      "images": [
+        {
+          "tags": ["auriga/fj-edge:b7359410"],
+          "configDigest": "sha256:8ee6ab3c7e5894ea77a690d8f44c52f47469ded79906730e129c16afd66b5c9e",
+          "layers": 23
+        },
+        {
+          "tags": ["auriga/fj-platform:b7359410"],
+          "configDigest": "sha256:a5cf1687287156aed2e635c9f8446a94f82d368a497954f43dd8f6f1e446c390",
+          "layers": 10
+        },
+        {
+          "tags": ["auriga/fj-operator:b7359410"],
+          "configDigest": "sha256:cc3789241252394a4ca35c4c9a4808437e138236801199ba1b0b10483d127bb9",
+          "layers": 6
+        },
+        {
+          "tags": ["auriga/fj-agent:b7359410"],
+          "configDigest": "sha256:f2faf20895709158c61dec9b02ae819682e2a2a2948a94cf825fc80239b0f458",
+          "layers": 4
+        },
+        {
+          "tags": ["auriga/fj-bifrost:b7359410"],
+          "configDigest": "sha256:e6000e498eb08ae4956514f7f3f375f86013cf0c4c0737325c38b2782687a9a1",
+          "layers": 5
+        }
+      ],
+      "uniqueLayers": 47,
+      "verifiedOciBlobs": 105,
+      "verifiedOciDescriptors": 53,
+      "allLayerDiffIdsMatch": true
+    },
+    "phases": [
+      "2026-11-16T07:28:39+00:00 build go start",
+      "2026-11-16T07:35:37+00:00 build go passed",
+      "2026-11-16T07:35:37+00:00 build web start",
+      "2026-11-16T07:37:29+00:00 build web passed",
+      "2026-11-16T07:37:29+00:00 build java start",
+      "2026-11-16T07:49:40+00:00 build java start",
+      "2026-11-16T08:00:34+00:00 build java passed (preserved output)",
+      "2026-11-16T08:09:36+00:00 build java passed (preserved output)",
+      "2026-11-16T08:10:03+00:00 image agent passed",
+      "2026-11-16T08:10:23+00:00 image bifrost passed",
+      "2026-11-16T08:11:04+00:00 image edge passed",
+      "2026-11-16T08:11:50+00:00 image platform passed",
+      "2026-11-16T08:12:18+00:00 image operator passed",
+      "2026-11-16T08:35:13+00:00 build java passed (preserved output)",
+      "2026-11-16T08:36:04+00:00 image agent passed",
+      "2026-11-16T08:36:25+00:00 image bifrost passed",
+      "2026-11-16T08:37:05+00:00 image edge passed",
+      "2026-11-16T08:37:57+00:00 image platform passed",
+      "2026-11-16T08:38:18+00:00 image operator passed"
     ]
   },
   "stack": {
     "commands": [
       "scripts/init.sh",
-      "scripts/start.sh --network-offline"
+      "scripts/start.sh --network-offline",
+      "scripts/admin-bootstrap.sh <protected-recipient-public-key>",
+      "normal administrator login and join-token API",
+      "strict CA-pin TLS Agent join with a new identity directory",
+      "normal administrator nodes API heartbeat verification"
     ],
-    "coreHealthExitCode": 0,
-    "healthyServices": [
-      "platform",
-      "edge",
-      "bifrost",
-      "postgres",
-      "nats"
-    ],
+    "healthyServices": ["platform", "edge", "bifrost", "postgres", "nats"],
     "platformProbe": "/etc/auriga/iam-healthcheck.sh with generated TLS configuration",
-    "registryV2Status": 200,
     "operatorPipCheckExitCode": 0,
     "entryAssets": [
       {
-        "role": "portal",
+        "entry": "portal",
         "htmlStatus": 200,
         "javascriptMatchesColdBuild": true,
-        "javascriptSha256": "3ce58db26a154a0882dcb15755507bebda88188b18e5ef8e4a67f404758df7fb"
+        "javascriptSha256": "a9d3b2d2f05061eb750d393db99f94e4e25588e1d1845a98bc4e6bbb246ef816"
       },
       {
-        "role": "admin",
+        "entry": "admin",
         "htmlStatus": 200,
         "javascriptMatchesColdBuild": true,
-        "javascriptSha256": "98a25ed753696945d14d4bffb4907aede64a22348d1e217a4c595270fe334063"
+        "javascriptSha256": "f6ec4d99da4688103a476a578abf2714ddc184e7876d4811215f10226226d9ac"
       }
     ],
     "administratorBootstrap": {
-      "exitCode": 1,
-      "error": "unknown NAS source leaf: uac",
-      "occurredBeforeAdministratorCreation": true
+      "exitCode": 0,
+      "encryptedCompleteHandoff": true,
+      "administratorLogin": "passed",
+      "oneUseJoinTokenIssued": true
     },
-    "agentJoin": "pending first join token; agent periodically restarts",
-    "fullLoginAndSignedRuntimeImport": "pending"
+    "agentJoin": {
+      "administratorLogin": "passed",
+      "nodeCount": 2,
+      "revokedNodeCount": 1,
+      "onlineNodeCount": 1,
+      "nodeStatus": "online",
+      "nodeOs": "linux",
+      "nodeArch": "amd64",
+      "drivers": ["docker"],
+      "heartbeatAgeSeconds": 8.9
+    },
+    "runtimeTrust": {
+      "kid": "forgejo-cold-acceptance-root",
+      "sha256": "6b939ecedc2d905cdac65c87ce1e9e9edbd2e2182e3cac8fef796b4da0037b57",
+      "publicKey": "lzGd6nZkTdIC0HFKDf+sLi6BWuGjOHXkYt0V3mebUVY=",
+      "notAfterUnixSeconds": 1794905769,
+      "privateKeyPersisted": false,
+      "scope": "disposable isolated acceptance only; not an official DSH publishing authority"
+    },
+    "runtimeTrustConfiguration": "Disposable acceptance-only Compose override, separate public-key mount and normal artifact-keys-directory property. Original NAS Compose, sealed installation materials and existing NAS test stack were not edited. Initial empty-root Join was rejected and its server node was revoked through the normal administrator API; no identity/history was deleted or reused. This is not official runtime trust or signed DSH import validation."
   },
-  "deployableImageArchive": {
-    "file": "cold-app-images-84dca4a6.tar.gz",
-    "bytes": 427080065,
-    "sha256": "14d6ff6f20d4bf6ffbd947b7dafe4b6d3092205588a98ce4d80beb6f1702b0de",
-    "location": "worker-local .agent-forgejo directory for lead collection"
+  "recoveryNotes": [
+    "GNU tar 1.35 in the JDK Ubuntu base failed with Bad address on NAS5.10; default and unconfined probes reproduced it. Default security was retained and frozen Debian Node GNU tar1.34/cp/loader/libraries used for Java. Only the failed Java phase was resumed.",
+    "BusyBox lacks sha256sum --quiet; frozen Debian Node management driver executes unchanged assembly scripts. Frozen DinD BusyBox/musl provide real netstat/ip probes.",
+    "QNAP inherited ACLs affected public inputs, Docker filesystem and generated COPY layers. Task-owned inherited ACLs were removed, private POSIX modes retained and public source/input/output modes normalized. Rejected image identities were preserved and all five images reassembled with unchanged output bytes.",
+    "First PostgreSQL temporary initialization server closed the role-SQL connection. Its stable healthy instance passed the original idempotent start script on retry.",
+    "An immediate second administrator login returned iam.invalid_credentials. A later-window normal login succeeded; this record does not establish its sole cause.",
+    "Default NAS installation without an approved runtime bundle has no release root. Strict Agent Join correctly rejected it after server token consumption. Acceptance then used an explicitly disposable independent public root, a new token and a new identity directory; the failed server node was revoked via the normal API."
+  ],
+  "deployableOutput": {
+    "manifestFile": "cold-output-release-b7359410.json",
+    "manifest": {
+      "file": "delivery-manifest.json",
+      "path": "/api/packages/{owner}/generic/auriga-site-coldbuild-output/b7359410-linux-amd64-r1/delivery-manifest.json",
+      "bytes": 36061,
+      "sha256": "ef0f867b04ea985080a6c781f0a724314d4476510ce38e7346cf2783938daf00"
+    },
+    "workerHttpsReadback": {
+      "archives": 2,
+      "files": 104,
+      "bytes": 430076782,
+      "manifestSha256": "ef0f867b04ea985080a6c781f0a724314d4476510ce38e7346cf2783938daf00",
+      "verified": true
+    },
+    "nasArchiveIntegrity": {
+      "memberCount": 215,
+      "helpers": {
+        "bin/auriga-nas-bootstrap": {
+          "bytes": 22788656,
+          "sha256": "15962ce726fa93fed10f16de83cdb1f59fdc9ba25ab1dd11ce28b9c0dc9c82cb",
+          "mode": "0o755"
+        },
+        "bin/runtime-release": {
+          "bytes": 20493271,
+          "sha256": "fd48cfddb0e8c3b851f87df79af8b12a0260f77ab70b50ccaefb8c0abc1bb07e",
+          "mode": "0o755"
+        }
+      },
+      "pathAndLinkChecksPassed": true,
+      "credentialAndPrivateKeyScanPassed": true
+    },
+    "contents": [
+      "Five application Docker images",
+      "Public NAS recipes with cold-built auriga-nas-bootstrap and runtime-release"
+    ],
+    "excludes": [
+      "Site secrets and temporary acceptance runtime authority",
+      "Official signed DSH runtime bundle"
+    ]
+  },
+  "evidenceArchive": {
+    "path": "/api/packages/{owner}/generic/auriga-site-coldbuild-evidence/b7359410-linux-amd64-r1/acceptance-evidence.tar.gz",
+    "bytes": 246012,
+    "sha256": "f3603ea94a86d8dabc7dffffd9d30c5ada9e058ce6e89cd058797454d2e631f3",
+    "transport": "Forgejo HTTPS complete readback",
+    "contents": "Cold build logs, rejected and accepted image identities, source and input checks, network probes, public fixture metadata, API receipts and resource samples; no operator credentials or transfer key/capsule"
   },
   "cleanup": {
-    "temporaryContainersRemoved": true,
-    "privateDaemonsStopped": true,
-    "mountsAndLoopDeviceRemoved": true,
-    "temporaryEngineFileRemoved": true
+    "verified": true,
+    "verifiedAt": "2026-11-16T09:33:41.860751+00:00",
+    "taskDirectoryAbsent": true,
+    "dedicatedDaemonAndNestedImagesVolumesRemoved": true,
+    "taskContainersAndNetworkAbsent": true,
+    "newOuterToolImagesRemoved": true,
+    "existingNasTestContainersUnchanged": true,
+    "existingNasTestContainerCount": 17,
+    "remainingNasAvailableKiB": 6576284,
+    "cleanupLog": {
+      "file": ".agent-forgejo/round3/cleanup.log",
+      "bytes": 8093,
+      "sha256": "c76c9b588477984d426f121e8e00870891fcc6f34a827520c924495191d1fd8b"
+    },
+    "scope": "Only exact /share/CACHEDEV1_DATA/Container/auriga-forgejo-coldbuild and task-owned Docker resources; no global prune"
+  },
+  "packageRepositoryAssociations": [
+    {
+      "name": "auriga-site-nas-builder",
+      "version": "27.1.2-linux-amd64-r1",
+      "repository": "hansjone/auriga",
+      "verified": true
+    },
+    {
+      "name": "auriga-site-build-overlays",
+      "version": "b7359410-linux-amd64-r2",
+      "repository": "hansjone/auriga",
+      "verified": true
+    },
+    {
+      "name": "auriga-site-coldbuild-control",
+      "version": "b7359410-linux-amd64-r18",
+      "repository": "hansjone/auriga",
+      "verified": true
+    },
+    {
+      "name": "auriga-site-coldbuild-output",
+      "version": "b7359410-linux-amd64-r1",
+      "repository": "hansjone/auriga",
+      "verified": true
+    },
+    {
+      "name": "auriga-site-coldbuild-evidence",
+      "version": "b7359410-linux-amd64-r1",
+      "repository": "hansjone/auriga",
+      "verified": true
+    }
+  ],
+  "previousAcceptance": {
+    "sourceCommit": "84dca4a66e6a09f6c6e00628d833fce41920d855",
+    "gitCommit": "712748c8",
+    "file": "deploy/forgejo/build-acceptance.json",
+    "note": "Historical 84dca4a6 evidence remains in Git history and worker storage; its uac blocker has been fixed in main."
   },
   "pending": [
-    "Lead serial NAS development deployment and normal-page verification",
-    "Fix the public NAS uac source-leaf validation in its owning task and repeat administrator setup and Agent join",
-    "Target Docker Engine 26.1.4 import and full signed DSH runtime verification",
-    "Independent review and exact-head CI before main merge"
+    "Independent non-author review and exact-head CI before main merge",
+    "Lead serial deployment to the existing NAS development environment and normal user-page validation",
+    "Approved official signed DSH runtime bundle/root, actual DSH runtime import and end-to-end behavior; the disposable acceptance root cannot authorize production releases",
+    "Target Engine26.1.4 import compatibility if that target remains required; this acceptance used isolated Docker27.1.2"
   ]
 }

@@ -1,0 +1,646 @@
+{
+  "schemaVersion": 1,
+  "sourceCommit": "b7359410db3dcf1107af240a2a6d2f85bae6a5e6",
+  "platform": "linux/amd64",
+  "archives": [
+    {
+      "name": "cold-app-images-b7359410.tar.gz",
+      "bytes": 407200036,
+      "sha256": "c109fe61b45fe124dda0efd5463a84fd664e47bf291cd2dd563f5fbbaeecf3ee",
+      "parts": [
+        {
+          "file": "cold-app-images-b7359410.tar.gz.part000",
+          "path": "/api/packages/{owner}/generic/auriga-site-coldbuild-output/b7359410-linux-amd64-r1/cold-app-images-b7359410.tar.gz.part000",
+          "bytes": 4194304,
+          "sha256": "cd41417ed0cc04c5ba22cfaa420102d5c8453e4b7a20eb0909e8b96dee89fdcc"
+        },
+        {
+          "file": "cold-app-images-b7359410.tar.gz.part001",
+          "path": "/api/packages/{owner}/generic/auriga-site-coldbuild-output/b7359410-linux-amd64-r1/cold-app-images-b7359410.tar.gz.part001",
+          "bytes": 4194304,
+          "sha256": "ea0096bccd871f9e6050e8aecbc1f464877cefbd3ad95a7a47adb6c5529f4c78"
+        },
+        {
+          "file": "cold-app-images-b7359410.tar.gz.part002",
+          "path": "/api/packages/{owner}/generic/auriga-site-coldbuild-output/b7359410-linux-amd64-r1/cold-app-images-b7359410.tar.gz.part002",
+          "bytes": 4194304,
+          "sha256": "32690ca314f76aa005026b6d42e9ec93e0b56a401b36796fd5900c109a45185a"
+        },
+        {
+          "file": "cold-app-images-b7359410.tar.gz.part003",
+          "path": "/api/packages/{owner}/generic/auriga-site-coldbuild-output/b7359410-linux-amd64-r1/cold-app-images-b7359410.tar.gz.part003",
+          "bytes": 4194304,
+          "sha256": "01d688753fdb82d26df019c5daff6333f13657cd2b5a9ab838eb34c3c7654fcf"
+        },
+        {
+          "file": "cold-app-images-b7359410.tar.gz.part004",
+          "path": "/api/packages/{owner}/generic/auriga-site-coldbuild-output/b7359410-linux-amd64-r1/cold-app-images-b7359410.tar.gz.part004",
+          "bytes": 4194304,
+          "sha256": "59147737c14cb50fb23d3dd3920f32540772e252c1e2dffa6bd30c514df14bea"
+        },
+        {
+          "file": "cold-app-images-b7359410.tar.gz.part005",
+          "path": "/api/packages/{owner}/generic/auriga-site-coldbuild-output/b7359410-linux-amd64-r1/cold-app-images-b7359410.tar.gz.part005",
+          "bytes": 4194304,
+          "sha256": "c144e4363f942b4fd7c54bc12fec03ad874ca7802eaba50669e69932eef8de79"
+        },
+        {
+          "file": "cold-app-images-b7359410.tar.gz.part006",
+          "path": "/api/packages/{owner}/generic/auriga-site-coldbuild-output/b7359410-linux-amd64-r1/cold-app-images-b7359410.tar.gz.part006",
+          "bytes": 4194304,
+          "sha256": "7895404052c40442258a9f150a3ad0ecc8227f20b0580f5e788b8783abb76649"
+        },
+        {
+          "file": "cold-app-images-b7359410.tar.gz.part007",
+          "path": "/api/packages/{owner}/generic/auriga-site-coldbuild-output/b7359410-linux-amd64-r1/cold-app-images-b7359410.tar.gz.part007",
+          "bytes": 4194304,
+          "sha256": "b7bc45964bd534bb9898282547160336e54faea90406c39b5d71a15e8b4e9fd1"
+        },
+        {
+          "file": "cold-app-images-b7359410.tar.gz.part008",
+          "path": "/api/packages/{owner}/generic/auriga-site-coldbuild-output/b7359410-linux-amd64-r1/cold-app-images-b7359410.tar.gz.part008",
+          "bytes": 4194304,
+          "sha256": "f9669e4d185c7e861fb0ff42c2ca534acfeb7806d2b35428d4c8ba3d9d587fbc"
+        },
+        {
+          "file": "cold-app-images-b7359410.tar.gz.part009",
+          "path": "/api/packages/{owner}/generic/auriga-site-coldbuild-output/b7359410-linux-amd64-r1/cold-app-images-b7359410.tar.gz.part009",
+          "bytes": 4194304,
+          "sha256": "7d8e9318061a1a4b54f133514b0a085a06a5bba819d38c489388bc2b91dbe610"
+        },
+        {
+          "file": "cold-app-images-b7359410.tar.gz.part010",
+          "path": "/api/packages/{owner}/generic/auriga-site-coldbuild-output/b7359410-linux-amd64-r1/cold-app-images-b7359410.tar.gz.part010",
+          "bytes": 4194304,
+          "sha256": "bdfb7daf7ffebbfba073d4430a50d6f32a4a396e66359f5c9e04b89c606ce5dd"
+        },
+        {
+          "file": "cold-app-images-b7359410.tar.gz.part011",
+          "path": "/api/packages/{owner}/generic/auriga-site-coldbuild-output/b7359410-linux-amd64-r1/cold-app-images-b7359410.tar.gz.part011",
+          "bytes": 4194304,
+          "sha256": "2ec73d6137fa8b5128a300aa75fdf2f0988211ddfb7c609c5a704430182b89f1"
+        },
+        {
+          "file": "cold-app-images-b7359410.tar.gz.part012",
+          "path": "/api/packages/{owner}/generic/auriga-site-coldbuild-output/b7359410-linux-amd64-r1/cold-app-images-b7359410.tar.gz.part012",
+          "bytes": 4194304,
+          "sha256": "a3b06321fc4e7d5b0e26cc6568f65ccdb3771e46db79ffc20d4f3ea592147f6a"
+        },
+        {
+          "file": "cold-app-images-b7359410.tar.gz.part013",
+          "path": "/api/packages/{owner}/generic/auriga-site-coldbuild-output/b7359410-linux-amd64-r1/cold-app-images-b7359410.tar.gz.part013",
+          "bytes": 4194304,
+          "sha256": "04bed3a595b566df5e24e0e6df361f9bdcc8f742ed67ca7a0004c878ac97956d"
+        },
+        {
+          "file": "cold-app-images-b7359410.tar.gz.part014",
+          "path": "/api/packages/{owner}/generic/auriga-site-coldbuild-output/b7359410-linux-amd64-r1/cold-app-images-b7359410.tar.gz.part014",
+          "bytes": 4194304,
+          "sha256": "e19493ae503157e56da33cdd20b3804d442bc21c1dfc4835ead35b91aad56818"
+        },
+        {
+          "file": "cold-app-images-b7359410.tar.gz.part015",
+          "path": "/api/packages/{owner}/generic/auriga-site-coldbuild-output/b7359410-linux-amd64-r1/cold-app-images-b7359410.tar.gz.part015",
+          "bytes": 4194304,
+          "sha256": "2100647cd21125df2a8f1e449377ad0966c2fbf110099d5f1c26434867299503"
+        },
+        {
+          "file": "cold-app-images-b7359410.tar.gz.part016",
+          "path": "/api/packages/{owner}/generic/auriga-site-coldbuild-output/b7359410-linux-amd64-r1/cold-app-images-b7359410.tar.gz.part016",
+          "bytes": 4194304,
+          "sha256": "f6e1148b2e732b88a22cba5ce4fd04f2ecee17b44c263b535cb1d729c5bb8610"
+        },
+        {
+          "file": "cold-app-images-b7359410.tar.gz.part017",
+          "path": "/api/packages/{owner}/generic/auriga-site-coldbuild-output/b7359410-linux-amd64-r1/cold-app-images-b7359410.tar.gz.part017",
+          "bytes": 4194304,
+          "sha256": "b6487df9b72d543d27fdc843df581693a28cb19bb679e3654f57c93f1a101723"
+        },
+        {
+          "file": "cold-app-images-b7359410.tar.gz.part018",
+          "path": "/api/packages/{owner}/generic/auriga-site-coldbuild-output/b7359410-linux-amd64-r1/cold-app-images-b7359410.tar.gz.part018",
+          "bytes": 4194304,
+          "sha256": "e495c30f64b8504d22c09e1a8486b3b6dbe8202ca1a814876e1b831c875b361d"
+        },
+        {
+          "file": "cold-app-images-b7359410.tar.gz.part019",
+          "path": "/api/packages/{owner}/generic/auriga-site-coldbuild-output/b7359410-linux-amd64-r1/cold-app-images-b7359410.tar.gz.part019",
+          "bytes": 4194304,
+          "sha256": "52bdca75ae9fc4d26b4960846c3e1310efde45d8d2579752c39e9794917fbc0a"
+        },
+        {
+          "file": "cold-app-images-b7359410.tar.gz.part020",
+          "path": "/api/packages/{owner}/generic/auriga-site-coldbuild-output/b7359410-linux-amd64-r1/cold-app-images-b7359410.tar.gz.part020",
+          "bytes": 4194304,
+          "sha256": "574e2e12cf1fef5f09e350dab905f3f2c4cb897c48cad03a785462459bf24042"
+        },
+        {
+          "file": "cold-app-images-b7359410.tar.gz.part021",
+          "path": "/api/packages/{owner}/generic/auriga-site-coldbuild-output/b7359410-linux-amd64-r1/cold-app-images-b7359410.tar.gz.part021",
+          "bytes": 4194304,
+          "sha256": "0b225482d6c2ad91cba7c983c292ce5469484e5d923ddba16980c430b91b0837"
+        },
+        {
+          "file": "cold-app-images-b7359410.tar.gz.part022",
+          "path": "/api/packages/{owner}/generic/auriga-site-coldbuild-output/b7359410-linux-amd64-r1/cold-app-images-b7359410.tar.gz.part022",
+          "bytes": 4194304,
+          "sha256": "aac4ac9ab85b3eafd16998f9548106f0557aaf2d232f039b486ff797daff7928"
+        },
+        {
+          "file": "cold-app-images-b7359410.tar.gz.part023",
+          "path": "/api/packages/{owner}/generic/auriga-site-coldbuild-output/b7359410-linux-amd64-r1/cold-app-images-b7359410.tar.gz.part023",
+          "bytes": 4194304,
+          "sha256": "522bc0f3c6f6c3c4ad4c1cb05bff546d4ce21495f91424c527b482f64c7d0572"
+        },
+        {
+          "file": "cold-app-images-b7359410.tar.gz.part024",
+          "path": "/api/packages/{owner}/generic/auriga-site-coldbuild-output/b7359410-linux-amd64-r1/cold-app-images-b7359410.tar.gz.part024",
+          "bytes": 4194304,
+          "sha256": "8187f4460759bce0bf63f2b012fb3eff36ce0860cbe77e23f3d1afdbc0d672bb"
+        },
+        {
+          "file": "cold-app-images-b7359410.tar.gz.part025",
+          "path": "/api/packages/{owner}/generic/auriga-site-coldbuild-output/b7359410-linux-amd64-r1/cold-app-images-b7359410.tar.gz.part025",
+          "bytes": 4194304,
+          "sha256": "484b3851bcedd48d2efaaff4bd6b4b87c66d95c6431cb6a25a9019488ffa520f"
+        },
+        {
+          "file": "cold-app-images-b7359410.tar.gz.part026",
+          "path": "/api/packages/{owner}/generic/auriga-site-coldbuild-output/b7359410-linux-amd64-r1/cold-app-images-b7359410.tar.gz.part026",
+          "bytes": 4194304,
+          "sha256": "e753e19e7ede3582ecf1a8692857e74321fe695b6cb4dfafa6af1790e72fd838"
+        },
+        {
+          "file": "cold-app-images-b7359410.tar.gz.part027",
+          "path": "/api/packages/{owner}/generic/auriga-site-coldbuild-output/b7359410-linux-amd64-r1/cold-app-images-b7359410.tar.gz.part027",
+          "bytes": 4194304,
+          "sha256": "76b5c8597980f3d30679622be357d5e8291f2e02e85369fc18d2a02cd43ee93f"
+        },
+        {
+          "file": "cold-app-images-b7359410.tar.gz.part028",
+          "path": "/api/packages/{owner}/generic/auriga-site-coldbuild-output/b7359410-linux-amd64-r1/cold-app-images-b7359410.tar.gz.part028",
+          "bytes": 4194304,
+          "sha256": "37ce077d317d80babe8650de2f3351690a43a9a614daba48f5196ba36375a40f"
+        },
+        {
+          "file": "cold-app-images-b7359410.tar.gz.part029",
+          "path": "/api/packages/{owner}/generic/auriga-site-coldbuild-output/b7359410-linux-amd64-r1/cold-app-images-b7359410.tar.gz.part029",
+          "bytes": 4194304,
+          "sha256": "f32df9bd64a2e1d3c9e92658a8a6fce48b75bc03ff2285c1d0718d8d8264fdef"
+        },
+        {
+          "file": "cold-app-images-b7359410.tar.gz.part030",
+          "path": "/api/packages/{owner}/generic/auriga-site-coldbuild-output/b7359410-linux-amd64-r1/cold-app-images-b7359410.tar.gz.part030",
+          "bytes": 4194304,
+          "sha256": "ab1949ab2e8b61b4ca3e3af7b1dcbd509c67aaa52f0fc60c2e4761572f7114ce"
+        },
+        {
+          "file": "cold-app-images-b7359410.tar.gz.part031",
+          "path": "/api/packages/{owner}/generic/auriga-site-coldbuild-output/b7359410-linux-amd64-r1/cold-app-images-b7359410.tar.gz.part031",
+          "bytes": 4194304,
+          "sha256": "48afc7d4732cd1121aef0f73b27e8f0e0acd34f0a89e2e676c2568d1ce6b7614"
+        },
+        {
+          "file": "cold-app-images-b7359410.tar.gz.part032",
+          "path": "/api/packages/{owner}/generic/auriga-site-coldbuild-output/b7359410-linux-amd64-r1/cold-app-images-b7359410.tar.gz.part032",
+          "bytes": 4194304,
+          "sha256": "c5fbe0a5dccae723c78bfce4fd111408ffab75e962a29257e11f9039a0c64c9c"
+        },
+        {
+          "file": "cold-app-images-b7359410.tar.gz.part033",
+          "path": "/api/packages/{owner}/generic/auriga-site-coldbuild-output/b7359410-linux-amd64-r1/cold-app-images-b7359410.tar.gz.part033",
+          "bytes": 4194304,
+          "sha256": "58c97ef03a41fa9e76014e55629492625a2ffdff9591313bde7d208094aca2af"
+        },
+        {
+          "file": "cold-app-images-b7359410.tar.gz.part034",
+          "path": "/api/packages/{owner}/generic/auriga-site-coldbuild-output/b7359410-linux-amd64-r1/cold-app-images-b7359410.tar.gz.part034",
+          "bytes": 4194304,
+          "sha256": "16bdb9afe408da77e711b4d966470bbbe904e1f94bb139acc4c4d0eb003f0771"
+        },
+        {
+          "file": "cold-app-images-b7359410.tar.gz.part035",
+          "path": "/api/packages/{owner}/generic/auriga-site-coldbuild-output/b7359410-linux-amd64-r1/cold-app-images-b7359410.tar.gz.part035",
+          "bytes": 4194304,
+          "sha256": "29cf13d8c4581394eeff71dddb0107f0bbb660b745b9e6c3e47bee5646d1940a"
+        },
+        {
+          "file": "cold-app-images-b7359410.tar.gz.part036",
+          "path": "/api/packages/{owner}/generic/auriga-site-coldbuild-output/b7359410-linux-amd64-r1/cold-app-images-b7359410.tar.gz.part036",
+          "bytes": 4194304,
+          "sha256": "b41521d00f42d6b539fe20553052f97116f67fba74377a78fff29acdc48438b5"
+        },
+        {
+          "file": "cold-app-images-b7359410.tar.gz.part037",
+          "path": "/api/packages/{owner}/generic/auriga-site-coldbuild-output/b7359410-linux-amd64-r1/cold-app-images-b7359410.tar.gz.part037",
+          "bytes": 4194304,
+          "sha256": "dd2c32cd43d5495a751831976434435e3d31ef60fd144b4253b18f84c0454cce"
+        },
+        {
+          "file": "cold-app-images-b7359410.tar.gz.part038",
+          "path": "/api/packages/{owner}/generic/auriga-site-coldbuild-output/b7359410-linux-amd64-r1/cold-app-images-b7359410.tar.gz.part038",
+          "bytes": 4194304,
+          "sha256": "a400a1364ebb22bed73037679b753daef46f0b8bddf38a645987f31614486283"
+        },
+        {
+          "file": "cold-app-images-b7359410.tar.gz.part039",
+          "path": "/api/packages/{owner}/generic/auriga-site-coldbuild-output/b7359410-linux-amd64-r1/cold-app-images-b7359410.tar.gz.part039",
+          "bytes": 4194304,
+          "sha256": "3128cf039b763413f8d18a71c2df4b6a15c49e5c154998f4e9ba700587e2ba0d"
+        },
+        {
+          "file": "cold-app-images-b7359410.tar.gz.part040",
+          "path": "/api/packages/{owner}/generic/auriga-site-coldbuild-output/b7359410-linux-amd64-r1/cold-app-images-b7359410.tar.gz.part040",
+          "bytes": 4194304,
+          "sha256": "86b2838fda135ed4779917d62cfdcb4833bcc199e8a3ac8abe16c75f69b2c25a"
+        },
+        {
+          "file": "cold-app-images-b7359410.tar.gz.part041",
+          "path": "/api/packages/{owner}/generic/auriga-site-coldbuild-output/b7359410-linux-amd64-r1/cold-app-images-b7359410.tar.gz.part041",
+          "bytes": 4194304,
+          "sha256": "cd3ba4382e9a52dddd100d412e8a79283d5758488c7dc65b8e1a7d22841cb1c4"
+        },
+        {
+          "file": "cold-app-images-b7359410.tar.gz.part042",
+          "path": "/api/packages/{owner}/generic/auriga-site-coldbuild-output/b7359410-linux-amd64-r1/cold-app-images-b7359410.tar.gz.part042",
+          "bytes": 4194304,
+          "sha256": "c2c9e956f2338c6dae4e7a50facf3b5ab5eb9b619ea8b847daf6df880d6b7769"
+        },
+        {
+          "file": "cold-app-images-b7359410.tar.gz.part043",
+          "path": "/api/packages/{owner}/generic/auriga-site-coldbuild-output/b7359410-linux-amd64-r1/cold-app-images-b7359410.tar.gz.part043",
+          "bytes": 4194304,
+          "sha256": "0a25b0d4e6f7728c9a2b976e1998a7641808716d3bb4741b7342aeee916626c1"
+        },
+        {
+          "file": "cold-app-images-b7359410.tar.gz.part044",
+          "path": "/api/packages/{owner}/generic/auriga-site-coldbuild-output/b7359410-linux-amd64-r1/cold-app-images-b7359410.tar.gz.part044",
+          "bytes": 4194304,
+          "sha256": "1190468587f04861e779efb2629ec5666a80c1a9ed6548ae24aae430d9d8d5f2"
+        },
+        {
+          "file": "cold-app-images-b7359410.tar.gz.part045",
+          "path": "/api/packages/{owner}/generic/auriga-site-coldbuild-output/b7359410-linux-amd64-r1/cold-app-images-b7359410.tar.gz.part045",
+          "bytes": 4194304,
+          "sha256": "c254c00d384a9e6473a2d4bea363db431dcfa79a888db4b644190a75a16af8e8"
+        },
+        {
+          "file": "cold-app-images-b7359410.tar.gz.part046",
+          "path": "/api/packages/{owner}/generic/auriga-site-coldbuild-output/b7359410-linux-amd64-r1/cold-app-images-b7359410.tar.gz.part046",
+          "bytes": 4194304,
+          "sha256": "b406a940129c7a36600b0867563f953f0d239c6c323afb252bfa8c7b5536ddc1"
+        },
+        {
+          "file": "cold-app-images-b7359410.tar.gz.part047",
+          "path": "/api/packages/{owner}/generic/auriga-site-coldbuild-output/b7359410-linux-amd64-r1/cold-app-images-b7359410.tar.gz.part047",
+          "bytes": 4194304,
+          "sha256": "643e7a068cca235803488dfab0a07cfc8855f651cda4a0a7f4dfb827d535bab8"
+        },
+        {
+          "file": "cold-app-images-b7359410.tar.gz.part048",
+          "path": "/api/packages/{owner}/generic/auriga-site-coldbuild-output/b7359410-linux-amd64-r1/cold-app-images-b7359410.tar.gz.part048",
+          "bytes": 4194304,
+          "sha256": "0ad56af1e79cd2f93586c26d9eeec76a5d1b9f33e801005790481f472aea5fce"
+        },
+        {
+          "file": "cold-app-images-b7359410.tar.gz.part049",
+          "path": "/api/packages/{owner}/generic/auriga-site-coldbuild-output/b7359410-linux-amd64-r1/cold-app-images-b7359410.tar.gz.part049",
+          "bytes": 4194304,
+          "sha256": "b7c08ea711709f108a548bbe09b80f990c5c435df016113569114e4774021ad6"
+        },
+        {
+          "file": "cold-app-images-b7359410.tar.gz.part050",
+          "path": "/api/packages/{owner}/generic/auriga-site-coldbuild-output/b7359410-linux-amd64-r1/cold-app-images-b7359410.tar.gz.part050",
+          "bytes": 4194304,
+          "sha256": "56e3d8595e457a6664bde6775027daa63e1944a0191cc9df8bb1a9e082a17ac2"
+        },
+        {
+          "file": "cold-app-images-b7359410.tar.gz.part051",
+          "path": "/api/packages/{owner}/generic/auriga-site-coldbuild-output/b7359410-linux-amd64-r1/cold-app-images-b7359410.tar.gz.part051",
+          "bytes": 4194304,
+          "sha256": "4f5831ff3e41623c54cd28ef00f7900507edccfa0e5e17bb54ba6638c46f5787"
+        },
+        {
+          "file": "cold-app-images-b7359410.tar.gz.part052",
+          "path": "/api/packages/{owner}/generic/auriga-site-coldbuild-output/b7359410-linux-amd64-r1/cold-app-images-b7359410.tar.gz.part052",
+          "bytes": 4194304,
+          "sha256": "e6cfdc996227ea741e929ff94085e4eddab3830d5c886daa63ea92f8a4ae61b4"
+        },
+        {
+          "file": "cold-app-images-b7359410.tar.gz.part053",
+          "path": "/api/packages/{owner}/generic/auriga-site-coldbuild-output/b7359410-linux-amd64-r1/cold-app-images-b7359410.tar.gz.part053",
+          "bytes": 4194304,
+          "sha256": "589ecaa26228d28060f4a0e638f7744e2a0d881db1571dd0e55c5dabc97f2a7f"
+        },
+        {
+          "file": "cold-app-images-b7359410.tar.gz.part054",
+          "path": "/api/packages/{owner}/generic/auriga-site-coldbuild-output/b7359410-linux-amd64-r1/cold-app-images-b7359410.tar.gz.part054",
+          "bytes": 4194304,
+          "sha256": "79e15d91cc043cbbf7556f637b38ce53f39815f3c0d61dd57525a9dcae34a662"
+        },
+        {
+          "file": "cold-app-images-b7359410.tar.gz.part055",
+          "path": "/api/packages/{owner}/generic/auriga-site-coldbuild-output/b7359410-linux-amd64-r1/cold-app-images-b7359410.tar.gz.part055",
+          "bytes": 4194304,
+          "sha256": "d03e1d0c20f71bc64125cc26892b0c2812307e3532c64b25fb594dfccedb6ac2"
+        },
+        {
+          "file": "cold-app-images-b7359410.tar.gz.part056",
+          "path": "/api/packages/{owner}/generic/auriga-site-coldbuild-output/b7359410-linux-amd64-r1/cold-app-images-b7359410.tar.gz.part056",
+          "bytes": 4194304,
+          "sha256": "bf60657a03c23dfe1f7210c78753232df6f9141696baa6f47f204b9204c2551a"
+        },
+        {
+          "file": "cold-app-images-b7359410.tar.gz.part057",
+          "path": "/api/packages/{owner}/generic/auriga-site-coldbuild-output/b7359410-linux-amd64-r1/cold-app-images-b7359410.tar.gz.part057",
+          "bytes": 4194304,
+          "sha256": "2b848a09309b4d595bd1e4f7d3b0feca91b17b9cbca19820823ed57addfe2dcd"
+        },
+        {
+          "file": "cold-app-images-b7359410.tar.gz.part058",
+          "path": "/api/packages/{owner}/generic/auriga-site-coldbuild-output/b7359410-linux-amd64-r1/cold-app-images-b7359410.tar.gz.part058",
+          "bytes": 4194304,
+          "sha256": "fbdbe8bf4d7bbe764826e23895e61446b844280cfd8b3c39a68e1276a1644b2b"
+        },
+        {
+          "file": "cold-app-images-b7359410.tar.gz.part059",
+          "path": "/api/packages/{owner}/generic/auriga-site-coldbuild-output/b7359410-linux-amd64-r1/cold-app-images-b7359410.tar.gz.part059",
+          "bytes": 4194304,
+          "sha256": "e4a7484af08e364b3c40273ce8a20716d4a8f0eb489a613d64a12017333ca5b3"
+        },
+        {
+          "file": "cold-app-images-b7359410.tar.gz.part060",
+          "path": "/api/packages/{owner}/generic/auriga-site-coldbuild-output/b7359410-linux-amd64-r1/cold-app-images-b7359410.tar.gz.part060",
+          "bytes": 4194304,
+          "sha256": "4a1bb17068c5c9c3f9050eb4e72e4b45133d87e93c3a839f8d87926836e5614a"
+        },
+        {
+          "file": "cold-app-images-b7359410.tar.gz.part061",
+          "path": "/api/packages/{owner}/generic/auriga-site-coldbuild-output/b7359410-linux-amd64-r1/cold-app-images-b7359410.tar.gz.part061",
+          "bytes": 4194304,
+          "sha256": "586acc9db4e7f3f441ef7e71dce00174f0a93b9b7b2bfd311c9494face51ea49"
+        },
+        {
+          "file": "cold-app-images-b7359410.tar.gz.part062",
+          "path": "/api/packages/{owner}/generic/auriga-site-coldbuild-output/b7359410-linux-amd64-r1/cold-app-images-b7359410.tar.gz.part062",
+          "bytes": 4194304,
+          "sha256": "2d0f5ac1cf27f9a7a8f00e9294dbbdf77cf2a6b3d793a8ee6beda90fc6413bde"
+        },
+        {
+          "file": "cold-app-images-b7359410.tar.gz.part063",
+          "path": "/api/packages/{owner}/generic/auriga-site-coldbuild-output/b7359410-linux-amd64-r1/cold-app-images-b7359410.tar.gz.part063",
+          "bytes": 4194304,
+          "sha256": "470c459c06e766eb5b22096d1a3c8c71f8573d64979036fb2878331a0db91773"
+        },
+        {
+          "file": "cold-app-images-b7359410.tar.gz.part064",
+          "path": "/api/packages/{owner}/generic/auriga-site-coldbuild-output/b7359410-linux-amd64-r1/cold-app-images-b7359410.tar.gz.part064",
+          "bytes": 4194304,
+          "sha256": "89cf70d15b0c14998f181a5c411f9c741b3d70220750c2663f8f90581f1121b3"
+        },
+        {
+          "file": "cold-app-images-b7359410.tar.gz.part065",
+          "path": "/api/packages/{owner}/generic/auriga-site-coldbuild-output/b7359410-linux-amd64-r1/cold-app-images-b7359410.tar.gz.part065",
+          "bytes": 4194304,
+          "sha256": "1b83b7833ee63f7d5f38f090154d3fb1dea698413a98d1f58eaf532a801d9a13"
+        },
+        {
+          "file": "cold-app-images-b7359410.tar.gz.part066",
+          "path": "/api/packages/{owner}/generic/auriga-site-coldbuild-output/b7359410-linux-amd64-r1/cold-app-images-b7359410.tar.gz.part066",
+          "bytes": 4194304,
+          "sha256": "17af26a3a670c197814fa3aafa504d59883b051dd0271274dacef5f33296f433"
+        },
+        {
+          "file": "cold-app-images-b7359410.tar.gz.part067",
+          "path": "/api/packages/{owner}/generic/auriga-site-coldbuild-output/b7359410-linux-amd64-r1/cold-app-images-b7359410.tar.gz.part067",
+          "bytes": 4194304,
+          "sha256": "754185c8fe38f0562959fc7449573eca22a9e32e610993b7df6f8618be7f47ab"
+        },
+        {
+          "file": "cold-app-images-b7359410.tar.gz.part068",
+          "path": "/api/packages/{owner}/generic/auriga-site-coldbuild-output/b7359410-linux-amd64-r1/cold-app-images-b7359410.tar.gz.part068",
+          "bytes": 4194304,
+          "sha256": "80693799174c21ab60daf9e2d6c30e9dbfbb90b444b16840e7c9c7158a3eaf97"
+        },
+        {
+          "file": "cold-app-images-b7359410.tar.gz.part069",
+          "path": "/api/packages/{owner}/generic/auriga-site-coldbuild-output/b7359410-linux-amd64-r1/cold-app-images-b7359410.tar.gz.part069",
+          "bytes": 4194304,
+          "sha256": "f110ff5fba94a29160f888deca2296a4fc787bc6e6c7228a75b9f3e044f746c7"
+        },
+        {
+          "file": "cold-app-images-b7359410.tar.gz.part070",
+          "path": "/api/packages/{owner}/generic/auriga-site-coldbuild-output/b7359410-linux-amd64-r1/cold-app-images-b7359410.tar.gz.part070",
+          "bytes": 4194304,
+          "sha256": "9f51493fd2a7e25bef051fe4f9b73c2b7e485fc663aa4caf11c4883e85c5827b"
+        },
+        {
+          "file": "cold-app-images-b7359410.tar.gz.part071",
+          "path": "/api/packages/{owner}/generic/auriga-site-coldbuild-output/b7359410-linux-amd64-r1/cold-app-images-b7359410.tar.gz.part071",
+          "bytes": 4194304,
+          "sha256": "751762f4e0bf3057e3d27139ba2c69bf67b7513afc4db2faa2f1ef149e314c00"
+        },
+        {
+          "file": "cold-app-images-b7359410.tar.gz.part072",
+          "path": "/api/packages/{owner}/generic/auriga-site-coldbuild-output/b7359410-linux-amd64-r1/cold-app-images-b7359410.tar.gz.part072",
+          "bytes": 4194304,
+          "sha256": "bac0f0da9f46e8264342a84797baae1379a6d9dc7deba657a9f249980f1e66ed"
+        },
+        {
+          "file": "cold-app-images-b7359410.tar.gz.part073",
+          "path": "/api/packages/{owner}/generic/auriga-site-coldbuild-output/b7359410-linux-amd64-r1/cold-app-images-b7359410.tar.gz.part073",
+          "bytes": 4194304,
+          "sha256": "af3f3746ae6c518f07a6a515d557c0c244fb6e274f9edbd24f8adc00a4585bda"
+        },
+        {
+          "file": "cold-app-images-b7359410.tar.gz.part074",
+          "path": "/api/packages/{owner}/generic/auriga-site-coldbuild-output/b7359410-linux-amd64-r1/cold-app-images-b7359410.tar.gz.part074",
+          "bytes": 4194304,
+          "sha256": "d55475a1f58fac16030add092343d48a7cc60c7005d3ea254e7a8d6596c8515d"
+        },
+        {
+          "file": "cold-app-images-b7359410.tar.gz.part075",
+          "path": "/api/packages/{owner}/generic/auriga-site-coldbuild-output/b7359410-linux-amd64-r1/cold-app-images-b7359410.tar.gz.part075",
+          "bytes": 4194304,
+          "sha256": "06e48a933d08c99ecdeb999c7a86cf87b53bd8b23d94963fac4035b4fbd82565"
+        },
+        {
+          "file": "cold-app-images-b7359410.tar.gz.part076",
+          "path": "/api/packages/{owner}/generic/auriga-site-coldbuild-output/b7359410-linux-amd64-r1/cold-app-images-b7359410.tar.gz.part076",
+          "bytes": 4194304,
+          "sha256": "27281177391084a69dabe98f1d6f288bf71ed989a3029a1fa48c77ce4fa670f9"
+        },
+        {
+          "file": "cold-app-images-b7359410.tar.gz.part077",
+          "path": "/api/packages/{owner}/generic/auriga-site-coldbuild-output/b7359410-linux-amd64-r1/cold-app-images-b7359410.tar.gz.part077",
+          "bytes": 4194304,
+          "sha256": "7f59562257e319fe0c12c7ee3745271cc9a27e325c97efab1dfd562c5bfab6ec"
+        },
+        {
+          "file": "cold-app-images-b7359410.tar.gz.part078",
+          "path": "/api/packages/{owner}/generic/auriga-site-coldbuild-output/b7359410-linux-amd64-r1/cold-app-images-b7359410.tar.gz.part078",
+          "bytes": 4194304,
+          "sha256": "1b5f2431a5708bb4b1d78e9abc1ee726e7959d2178bcd7c9c4c7f5921b71d46f"
+        },
+        {
+          "file": "cold-app-images-b7359410.tar.gz.part079",
+          "path": "/api/packages/{owner}/generic/auriga-site-coldbuild-output/b7359410-linux-amd64-r1/cold-app-images-b7359410.tar.gz.part079",
+          "bytes": 4194304,
+          "sha256": "11a7af11e7cb12c4df4724cb7bd98a130ad3c7177fa0123a324fcd19bf023e1d"
+        },
+        {
+          "file": "cold-app-images-b7359410.tar.gz.part080",
+          "path": "/api/packages/{owner}/generic/auriga-site-coldbuild-output/b7359410-linux-amd64-r1/cold-app-images-b7359410.tar.gz.part080",
+          "bytes": 4194304,
+          "sha256": "519ca2ee1278f9a89f4966231f8d471967cb3842a32d74111c6ded3042f34e66"
+        },
+        {
+          "file": "cold-app-images-b7359410.tar.gz.part081",
+          "path": "/api/packages/{owner}/generic/auriga-site-coldbuild-output/b7359410-linux-amd64-r1/cold-app-images-b7359410.tar.gz.part081",
+          "bytes": 4194304,
+          "sha256": "37d6afa1541e295ef59b05f41fdd8fbdccdaa5f218b39d96962d4640dbf498c6"
+        },
+        {
+          "file": "cold-app-images-b7359410.tar.gz.part082",
+          "path": "/api/packages/{owner}/generic/auriga-site-coldbuild-output/b7359410-linux-amd64-r1/cold-app-images-b7359410.tar.gz.part082",
+          "bytes": 4194304,
+          "sha256": "3c5b6070efbabf405176290acc16923d980018fb5fdb38b80b5067874dbcff0a"
+        },
+        {
+          "file": "cold-app-images-b7359410.tar.gz.part083",
+          "path": "/api/packages/{owner}/generic/auriga-site-coldbuild-output/b7359410-linux-amd64-r1/cold-app-images-b7359410.tar.gz.part083",
+          "bytes": 4194304,
+          "sha256": "68e3a7ccb8d5b984ab792b5d7cbb1b6bf7a77a1c3647add69b14286e42da7068"
+        },
+        {
+          "file": "cold-app-images-b7359410.tar.gz.part084",
+          "path": "/api/packages/{owner}/generic/auriga-site-coldbuild-output/b7359410-linux-amd64-r1/cold-app-images-b7359410.tar.gz.part084",
+          "bytes": 4194304,
+          "sha256": "ae3eb59c0d86bece38e47a7e514cdbfc138a7906bbfd893c3929f37dd6b24067"
+        },
+        {
+          "file": "cold-app-images-b7359410.tar.gz.part085",
+          "path": "/api/packages/{owner}/generic/auriga-site-coldbuild-output/b7359410-linux-amd64-r1/cold-app-images-b7359410.tar.gz.part085",
+          "bytes": 4194304,
+          "sha256": "710d6ccf66b5c15f8b1c114a09bff4d65ffea456dda12856669672d65e7f63d8"
+        },
+        {
+          "file": "cold-app-images-b7359410.tar.gz.part086",
+          "path": "/api/packages/{owner}/generic/auriga-site-coldbuild-output/b7359410-linux-amd64-r1/cold-app-images-b7359410.tar.gz.part086",
+          "bytes": 4194304,
+          "sha256": "65dc56876b9ab047aa644b7231265843aa38d6b927e144d12542767eba7d6015"
+        },
+        {
+          "file": "cold-app-images-b7359410.tar.gz.part087",
+          "path": "/api/packages/{owner}/generic/auriga-site-coldbuild-output/b7359410-linux-amd64-r1/cold-app-images-b7359410.tar.gz.part087",
+          "bytes": 4194304,
+          "sha256": "a05dfd003a4b6c64beede2b83b47e75872dc0a0061b33459e92a25ad98f9b628"
+        },
+        {
+          "file": "cold-app-images-b7359410.tar.gz.part088",
+          "path": "/api/packages/{owner}/generic/auriga-site-coldbuild-output/b7359410-linux-amd64-r1/cold-app-images-b7359410.tar.gz.part088",
+          "bytes": 4194304,
+          "sha256": "4e5908430fa596700723afd9200940991ae03afb6c9c502246cd40d7ed21014d"
+        },
+        {
+          "file": "cold-app-images-b7359410.tar.gz.part089",
+          "path": "/api/packages/{owner}/generic/auriga-site-coldbuild-output/b7359410-linux-amd64-r1/cold-app-images-b7359410.tar.gz.part089",
+          "bytes": 4194304,
+          "sha256": "50089e83165303e90714a64e3232b87b40033d36a204ffb11157f8b1f4e98702"
+        },
+        {
+          "file": "cold-app-images-b7359410.tar.gz.part090",
+          "path": "/api/packages/{owner}/generic/auriga-site-coldbuild-output/b7359410-linux-amd64-r1/cold-app-images-b7359410.tar.gz.part090",
+          "bytes": 4194304,
+          "sha256": "1c2f8de4b7cc188b55d7edcd14cc13c6a0fb96146f8af595cd1c47bbeb4e79c4"
+        },
+        {
+          "file": "cold-app-images-b7359410.tar.gz.part091",
+          "path": "/api/packages/{owner}/generic/auriga-site-coldbuild-output/b7359410-linux-amd64-r1/cold-app-images-b7359410.tar.gz.part091",
+          "bytes": 4194304,
+          "sha256": "bcfba33e3c3a4c70fe7393f92cceabcb49094d5e8c7e4a841bccda4cf4cfa1d1"
+        },
+        {
+          "file": "cold-app-images-b7359410.tar.gz.part092",
+          "path": "/api/packages/{owner}/generic/auriga-site-coldbuild-output/b7359410-linux-amd64-r1/cold-app-images-b7359410.tar.gz.part092",
+          "bytes": 4194304,
+          "sha256": "8bb9cf88117187db7a0b3b911766a5b4eee2ae01796ec5d5b6304f1500e8782c"
+        },
+        {
+          "file": "cold-app-images-b7359410.tar.gz.part093",
+          "path": "/api/packages/{owner}/generic/auriga-site-coldbuild-output/b7359410-linux-amd64-r1/cold-app-images-b7359410.tar.gz.part093",
+          "bytes": 4194304,
+          "sha256": "8a281a0a2fbfc5c8a492310c5fea27621b36bd199cc93fab1dd88a9e8117b9bc"
+        },
+        {
+          "file": "cold-app-images-b7359410.tar.gz.part094",
+          "path": "/api/packages/{owner}/generic/auriga-site-coldbuild-output/b7359410-linux-amd64-r1/cold-app-images-b7359410.tar.gz.part094",
+          "bytes": 4194304,
+          "sha256": "aafb839c5e57506328bc9cb37325d7f7b5bd1fe6daf36fbd8ce5d805f7f2c85c"
+        },
+        {
+          "file": "cold-app-images-b7359410.tar.gz.part095",
+          "path": "/api/packages/{owner}/generic/auriga-site-coldbuild-output/b7359410-linux-amd64-r1/cold-app-images-b7359410.tar.gz.part095",
+          "bytes": 4194304,
+          "sha256": "8fd1a1820814ec63687a3b0fc1682fa5ce8cd15d78acae4f37e4eeb0b506d2ab"
+        },
+        {
+          "file": "cold-app-images-b7359410.tar.gz.part096",
+          "path": "/api/packages/{owner}/generic/auriga-site-coldbuild-output/b7359410-linux-amd64-r1/cold-app-images-b7359410.tar.gz.part096",
+          "bytes": 4194304,
+          "sha256": "2fc923336e45619ae5d31bfb64fef505aa4db8e55b380d8bbf45040109065063"
+        },
+        {
+          "file": "cold-app-images-b7359410.tar.gz.part097",
+          "path": "/api/packages/{owner}/generic/auriga-site-coldbuild-output/b7359410-linux-amd64-r1/cold-app-images-b7359410.tar.gz.part097",
+          "bytes": 352548,
+          "sha256": "c905b05663ed9ddd7e324537be8838203d857bd3087ca2d79e002dadd73076e6"
+        }
+      ]
+    },
+    {
+      "name": "nas-release-b7359410.tar.gz",
+      "bytes": 22876746,
+      "sha256": "2a76123bd9c2a913393e276eee5900a3262c50ab5fe2d966b9255bef2a75c1cb",
+      "parts": [
+        {
+          "file": "nas-release-b7359410.tar.gz.part000",
+          "path": "/api/packages/{owner}/generic/auriga-site-coldbuild-output/b7359410-linux-amd64-r1/nas-release-b7359410.tar.gz.part000",
+          "bytes": 4194304,
+          "sha256": "d2b7aeb666fe027e2e2c889604d5112a417d8921a77d313866f904fd51e2a751"
+        },
+        {
+          "file": "nas-release-b7359410.tar.gz.part001",
+          "path": "/api/packages/{owner}/generic/auriga-site-coldbuild-output/b7359410-linux-amd64-r1/nas-release-b7359410.tar.gz.part001",
+          "bytes": 4194304,
+          "sha256": "506917050f4ec359ff36c987567c816071a10b29e11c681080d38c08817e2a2e"
+        },
+        {
+          "file": "nas-release-b7359410.tar.gz.part002",
+          "path": "/api/packages/{owner}/generic/auriga-site-coldbuild-output/b7359410-linux-amd64-r1/nas-release-b7359410.tar.gz.part002",
+          "bytes": 4194304,
+          "sha256": "95a8d8ca694219b9216f77ad385d9f7462514bfc3fdb5b7a435564f0df852740"
+        },
+        {
+          "file": "nas-release-b7359410.tar.gz.part003",
+          "path": "/api/packages/{owner}/generic/auriga-site-coldbuild-output/b7359410-linux-amd64-r1/nas-release-b7359410.tar.gz.part003",
+          "bytes": 4194304,
+          "sha256": "b49348bc5cf7cc84a1f28d2257a047cf35e51600aa1ef5daccc6e523e387cafa"
+        },
+        {
+          "file": "nas-release-b7359410.tar.gz.part004",
+          "path": "/api/packages/{owner}/generic/auriga-site-coldbuild-output/b7359410-linux-amd64-r1/nas-release-b7359410.tar.gz.part004",
+          "bytes": 4194304,
+          "sha256": "0199b30478a00ec3307aeb6f80b183db88ded90abf14658d888a13d3f8ff1f07"
+        },
+        {
+          "file": "nas-release-b7359410.tar.gz.part005",
+          "path": "/api/packages/{owner}/generic/auriga-site-coldbuild-output/b7359410-linux-amd64-r1/nas-release-b7359410.tar.gz.part005",
+          "bytes": 1905226,
+          "sha256": "7af37240f8a5293ee837be520c428b655ff22f3111ffa48174beaab61c1a69d4"
+        }
+      ]
+    }
+  ],
+  "verification": "Complete Forgejo upload and byte-for-byte SHA-256/length readback for every part; package append only"
+}

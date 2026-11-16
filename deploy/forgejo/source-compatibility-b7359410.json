@@ -1,0 +1,118 @@
+{
+  "sourceCommit": "b7359410db3dcf1107af240a2a6d2f85bae6a5e6",
+  "compatibleWith": "84dca4a66e6a09f6c6e00628d833fce41920d855",
+  "unchangedCount": 56,
+  "changes": [
+    {
+      "file": "web/panel/package.json",
+      "oldSha256": "00a850b40840e8080f8d92fe01a3223a6a0d0da8afcd004cedc9b11de648a274",
+      "sha256": "8a8ae48090c07d270e2db18f2d2631ac0e84e5a3711091a4441ac85faa6ba389",
+      "onlyScriptsChanged": true
+    }
+  ],
+  "reviewedMovedReferences": [
+    {
+      "file": ".github/workflows/installer.yml",
+      "kind": "download-reference",
+      "name": "line:57",
+      "source": "uses: ./.github/workflows/auth-release-artifacts.yml"
+    },
+    {
+      "file": ".github/workflows/installer.yml",
+      "kind": "download-reference",
+      "name": "line:63",
+      "source": "- uses: actions/checkout@v4"
+    },
+    {
+      "file": ".github/workflows/installer.yml",
+      "kind": "download-reference",
+      "name": "line:73",
+      "source": "- uses: pnpm/action-setup@v4"
+    },
+    {
+      "file": ".github/workflows/installer.yml",
+      "kind": "download-reference",
+      "name": "line:74",
+      "source": "- uses: actions/setup-node@v4"
+    },
+    {
+      "file": ".github/workflows/installer.yml",
+      "kind": "download-reference",
+      "name": "line:79",
+      "source": "- run: pnpm install --frozen-lockfile --store-dir \"$(pnpm store path)\""
+    },
+    {
+      "file": ".github/workflows/installer.yml",
+      "kind": "download-reference",
+      "name": "line:88",
+      "source": "- uses: actions/download-artifact@v4"
+    },
+    {
+      "file": ".github/workflows/installer.yml",
+      "kind": "download-reference",
+      "name": "line:92",
+      "source": "- uses: actions/download-artifact@v4"
+    },
+    {
+      "file": ".github/workflows/installer.yml",
+      "kind": "download-reference",
+      "name": "line:145",
+      "source": "- uses: actions/upload-artifact@v4"
+    },
+    {
+      "file": ".github/workflows/installer.yml",
+      "kind": "download-reference",
+      "name": "line:151",
+      "source": "- uses: actions/upload-artifact@v4"
+    },
+    {
+      "file": "deploy/compose/docker-compose.yml",
+      "kind": "download-reference",
+      "name": "line:336",
+      "source": "'curl',"
+    },
+    {
+      "file": "deploy/compose/docker-compose.yml",
+      "kind": "download-reference",
+      "name": "line:350",
+      "source": "'https://collab.network.internal:8085/actuator/health',"
+    },
+    {
+      "file": "deploy/compose/docker-compose.yml",
+      "kind": "download-reference",
+      "name": "line:485",
+      "source": "'https://172.29.240.1:18443', # gitleaks:allow disposable M2 network"
+    },
+    {
+      "file": "deploy/nas/scripts/render.sh",
+      "kind": "download-reference",
+      "name": "line:285",
+      "source": "AURIGA_WORKSPACE_CONTROL_ENDPOINT=https://127.0.0.1:${HOST_NC}"
+    },
+    {
+      "file": "deploy/nas/scripts/render.sh",
+      "kind": "download-reference",
+      "name": "line:308",
+      "source": "AURIGA_AGENT_SERVER=https://127.0.0.1:${HOST_NC}"
+    }
+  ],
+  "languageDependencyChanges": 0,
+  "sourceChanges": "Only web/panel package scripts differ; Go and Java locks are unchanged",
+  "webOverlay": "web-overlay-b7359410.json",
+  "extraBuilderTool": "nas-builder-release.json",
+  "baselineInventory": "forgejo-deps-inventory.json",
+  "currentDiscoveryEntries": 6980,
+  "counts": {
+    "present": 5908,
+    "source": 114,
+    "platform-excluded": 506,
+    "non-input-reference": 452,
+    "missing": 0
+  },
+  "supplyCounts": {
+    "existingOnly": 5384,
+    "includesSupplement": 524,
+    "missing": 0
+  },
+  "webOverlayVersion": "b7359410-linux-amd64-r2"
+}

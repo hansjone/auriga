@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "sourceCommit": "b7359410db3dcf1107af240a2a6d2f85bae6a5e6",
+  "artifacts": [
+    {
+      "file": "web-files-b7359410.sha256",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-overlays/b7359410-linux-amd64-r2/web-files-b7359410.sha256",
+      "bytes": 248,
+      "sha256": "5d2094f4ed0c5c67f4d9634442c3dcbc02480174fc1dd444ed14cdb0caea4768"
+    },
+    {
+      "file": "web-overlay-b7359410.json",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-overlays/b7359410-linux-amd64-r2/web-overlay-b7359410.json",
+      "bytes": 927,
+      "sha256": "7b4057c273a42e2a4608945f9993f875e188df066e645c8969832df9c868f704"
+    },
+    {
+      "file": "web-source-locks-b7359410.sha256",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-overlays/b7359410-linux-amd64-r2/web-source-locks-b7359410.sha256",
+      "bytes": 991,
+      "sha256": "430ef213257d93f1a5abe8b0c67b607526319923f9359dc2708f35eed235a20d"
+    }
+  ]
+}

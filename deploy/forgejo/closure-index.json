@@ -23363,6 +23363,225 @@
         "status": "non-input-reference",
         "reason": "The matched line is a fixture, mock, assertion, or local test HTTP endpoint"
       }
+    },
+    {
+      "file": ".github/workflows/installer.yml",
+      "kind": "download-reference",
+      "name": "line:57",
+      "source": "uses: ./.github/workflows/auth-release-artifacts.yml",
+      "forgejo": {
+        "status": "source",
+        "sourceCommit": "84dca4a66e6a09f6c6e00628d833fce41920d855",
+        "member": ".github/workflows/auth-release-artifacts.yml",
+        "reason": "This workflow reuses an action or workflow committed in the pinned repository"
+      }
+    },
+    {
+      "file": ".github/workflows/installer.yml",
+      "kind": "download-reference",
+      "name": "line:63",
+      "source": "- uses: actions/checkout@v4",
+      "forgejo": {
+        "status": "present",
+        "reason": "The action source is frozen at a full commit and mirrored; executing hosted GitHub workflows still requires a CI runner and service integration",
+        "evidence": [
+          {
+            "archive": "actions-checkout-11d5960a326750d5838078e36cf38b85af677262.tar.gz",
+            "member": "actions-checkout-11d5960a326750d5838078e36cf38b85af677262.tar.gz",
+            "sha256": "0f48a50cf2edeea3d6e270f8dae645529128ca8b2954993891a2fb8f7b16145a",
+            "version": "11d5960a326750d5838078e36cf38b85af677262",
+            "packagePath": "/api/packages/{owner}/generic/auriga-site-build-ci-actions/84dca4a6-linux-amd64-r1/actions-checkout-11d5960a326750d5838078e36cf38b85af677262.tar.gz.part000",
+            "evidenceType": "github-action-source-archive"
+          }
+        ],
+        "scope": "ci-action-source"
+      }
+    },
+    {
+      "file": ".github/workflows/installer.yml",
+      "kind": "download-reference",
+      "name": "line:73",
+      "source": "- uses: pnpm/action-setup@v4",
+      "forgejo": {
+        "status": "present",
+        "reason": "The action source is frozen at a full commit and mirrored; executing hosted GitHub workflows still requires a CI runner and service integration",
+        "evidence": [
+          {
+            "archive": "pnpm-action-setup-b906affcce14559ad1aafd4ab0e942779e9f58b1.tar.gz",
+            "member": "pnpm-action-setup-b906affcce14559ad1aafd4ab0e942779e9f58b1.tar.gz",
+            "sha256": "3b1f54546ef1858bfc2dd693f8201408ae3510f699bb7a8c822c0a93ba8e06f0",
+            "version": "b906affcce14559ad1aafd4ab0e942779e9f58b1",
+            "packagePath": "/api/packages/{owner}/generic/auriga-site-build-ci-actions/84dca4a6-linux-amd64-r1/pnpm-action-setup-b906affcce14559ad1aafd4ab0e942779e9f58b1.tar.gz.part000",
+            "evidenceType": "github-action-source-archive"
+          }
+        ],
+        "scope": "ci-action-source"
+      }
+    },
+    {
+      "file": ".github/workflows/installer.yml",
+      "kind": "download-reference",
+      "name": "line:74",
+      "source": "- uses: actions/setup-node@v4",
+      "forgejo": {
+        "status": "present",
+        "reason": "The action source is frozen at a full commit and mirrored; executing hosted GitHub workflows still requires a CI runner and service integration",
+        "evidence": [
+          {
+            "archive": "actions-setup-node-49933ea5288caeca8642d1e84afbd3f7d6820020.tar.gz",
+            "member": "actions-setup-node-49933ea5288caeca8642d1e84afbd3f7d6820020.tar.gz",
+            "sha256": "8897425776cbef7ddfca2275e536ecc0c26b313161de2235c5aa9fda8ce961fc",
+            "version": "49933ea5288caeca8642d1e84afbd3f7d6820020",
+            "packagePath": "/api/packages/{owner}/generic/auriga-site-build-ci-actions/84dca4a6-linux-amd64-r1/actions-setup-node-49933ea5288caeca8642d1e84afbd3f7d6820020.tar.gz.part000",
+            "evidenceType": "github-action-source-archive"
+          }
+        ],
+        "scope": "ci-action-source"
+      }
+    },
+    {
+      "file": ".github/workflows/installer.yml",
+      "kind": "download-reference",
+      "name": "line:79",
+      "source": "- run: pnpm install --frozen-lockfile --store-dir \"$(pnpm store path)\"",
+      "forgejo": {
+        "status": "present",
+        "inputGroup": "npm"
+      }
+    },
+    {
+      "file": ".github/workflows/installer.yml",
+      "kind": "download-reference",
+      "name": "line:88",
+      "source": "- uses: actions/download-artifact@v4",
+      "forgejo": {
+        "status": "present",
+        "reason": "The action source is frozen at a full commit and mirrored; executing hosted GitHub workflows still requires a CI runner and service integration",
+        "evidence": [
+          {
+            "archive": "actions-download-artifact-d3f86a106a0bac45b974a628896c90dbdf5c8093.tar.gz",
+            "member": "actions-download-artifact-d3f86a106a0bac45b974a628896c90dbdf5c8093.tar.gz",
+            "sha256": "ede236531fa097435a9ecd9c2f75ad1eb43cbfced4d9c8d472e617751f40c452",
+            "version": "d3f86a106a0bac45b974a628896c90dbdf5c8093",
+            "packagePath": "/api/packages/{owner}/generic/auriga-site-build-ci-actions/84dca4a6-linux-amd64-r1/actions-download-artifact-d3f86a106a0bac45b974a628896c90dbdf5c8093.tar.gz.part000",
+            "evidenceType": "github-action-source-archive"
+          }
+        ],
+        "scope": "ci-action-source"
+      }
+    },
+    {
+      "file": ".github/workflows/installer.yml",
+      "kind": "download-reference",
+      "name": "line:92",
+      "source": "- uses: actions/download-artifact@v4",
+      "forgejo": {
+        "status": "present",
+        "reason": "The action source is frozen at a full commit and mirrored; executing hosted GitHub workflows still requires a CI runner and service integration",
+        "evidence": [
+          {
+            "archive": "actions-download-artifact-d3f86a106a0bac45b974a628896c90dbdf5c8093.tar.gz",
+            "member": "actions-download-artifact-d3f86a106a0bac45b974a628896c90dbdf5c8093.tar.gz",
+            "sha256": "ede236531fa097435a9ecd9c2f75ad1eb43cbfced4d9c8d472e617751f40c452",
+            "version": "d3f86a106a0bac45b974a628896c90dbdf5c8093",
+            "packagePath": "/api/packages/{owner}/generic/auriga-site-build-ci-actions/84dca4a6-linux-amd64-r1/actions-download-artifact-d3f86a106a0bac45b974a628896c90dbdf5c8093.tar.gz.part000",
+            "evidenceType": "github-action-source-archive"
+          }
+        ],
+        "scope": "ci-action-source"
+      }
+    },
+    {
+      "file": ".github/workflows/installer.yml",
+      "kind": "download-reference",
+      "name": "line:145",
+      "source": "- uses: actions/upload-artifact@v4",
+      "forgejo": {
+        "status": "present",
+        "reason": "The action source is frozen at a full commit and mirrored; executing hosted GitHub workflows still requires a CI runner and service integration",
+        "evidence": [
+          {
+            "archive": "actions-upload-artifact-ea165f8d65b6e75b540449e92b4886f43607fa02.tar.gz",
+            "member": "actions-upload-artifact-ea165f8d65b6e75b540449e92b4886f43607fa02.tar.gz",
+            "sha256": "b7e8bdaab718e6bd4b78925b8880a96bfc0272338005017453e24ab3f83149d0",
+            "version": "ea165f8d65b6e75b540449e92b4886f43607fa02",
+            "packagePath": "/api/packages/{owner}/generic/auriga-site-build-ci-actions/84dca4a6-linux-amd64-r1/actions-upload-artifact-ea165f8d65b6e75b540449e92b4886f43607fa02.tar.gz.part000",
+            "evidenceType": "github-action-source-archive"
+          }
+        ],
+        "scope": "ci-action-source"
+      }
+    },
+    {
+      "file": ".github/workflows/installer.yml",
+      "kind": "download-reference",
+      "name": "line:151",
+      "source": "- uses: actions/upload-artifact@v4",
+      "forgejo": {
+        "status": "present",
+        "reason": "The action source is frozen at a full commit and mirrored; executing hosted GitHub workflows still requires a CI runner and service integration",
+        "evidence": [
+          {
+            "archive": "actions-upload-artifact-ea165f8d65b6e75b540449e92b4886f43607fa02.tar.gz",
+            "member": "actions-upload-artifact-ea165f8d65b6e75b540449e92b4886f43607fa02.tar.gz",
+            "sha256": "b7e8bdaab718e6bd4b78925b8880a96bfc0272338005017453e24ab3f83149d0",
+            "version": "ea165f8d65b6e75b540449e92b4886f43607fa02",
+            "packagePath": "/api/packages/{owner}/generic/auriga-site-build-ci-actions/84dca4a6-linux-amd64-r1/actions-upload-artifact-ea165f8d65b6e75b540449e92b4886f43607fa02.tar.gz.part000",
+            "evidenceType": "github-action-source-archive"
+          }
+        ],
+        "scope": "ci-action-source"
+      }
+    },
+    {
+      "file": "deploy/compose/docker-compose.yml",
+      "kind": "download-reference",
+      "name": "line:336",
+      "source": "'curl',",
+      "forgejo": {
+        "status": "non-input-reference",
+        "reason": "The line configures or probes a running local service; it does not acquire a build or deployment package"
+      }
+    },
+    {
+      "file": "deploy/compose/docker-compose.yml",
+      "kind": "download-reference",
+      "name": "line:350",
+      "source": "'https://collab.network.internal:8085/actuator/health',",
+      "forgejo": {
+        "status": "non-input-reference",
+        "reason": "The line configures or probes a running local service; it does not acquire a build or deployment package"
+      }
+    },
+    {
+      "file": "deploy/compose/docker-compose.yml",
+      "kind": "download-reference",
+      "name": "line:485",
+      "source": "'https://172.29.240.1:18443', # gitleaks:allow disposable M2 network",
+      "forgejo": {
+        "status": "non-input-reference",
+        "reason": "The line configures or probes a running local service; it does not acquire a build or deployment package"
+      }
+    },
+    {
+      "file": "deploy/nas/scripts/render.sh",
+      "kind": "download-reference",
+      "name": "line:285",
+      "source": "AURIGA_WORKSPACE_CONTROL_ENDPOINT=https://127.0.0.1:${HOST_NC}",
+      "forgejo": {
+        "status": "non-input-reference",
+        "reason": "The line configures or probes a running local service; it does not acquire a build or deployment package"
+      }
+    },
+    {
+      "file": "deploy/nas/scripts/render.sh",
+      "kind": "download-reference",
+      "name": "line:308",
+      "source": "AURIGA_AGENT_SERVER=https://127.0.0.1:${HOST_NC}",
+      "forgejo": {
+        "status": "non-input-reference",
+        "reason": "The line configures or probes a running local service; it does not acquire a build or deployment package"
+      }
     }
   ],
   "supplementalArchives": [

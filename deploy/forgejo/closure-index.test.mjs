@@ -110,3 +110,96 @@ test('the Java overlay binds the new POM to unchanged verified dependency bytes'
       ),
   );
 });
+
+test('the Web overlay binds script-only source changes without changing cached dependencies', () => {
+  const overlay = read('web-overlay-b7359410.json');
+  const release = read('web-overlay-release.json');
+  for (const artifact of release.artifacts) {
+    const bytes = readFileSync(new URL(artifact.file, import.meta.url));
+    assert.equal(
+      bytes.includes(13),
+      false,
+      'published overlays must retain Git LF bytes',
+    );
+    assert.equal(bytes.length, artifact.bytes);
+    assert.equal(
+      createHash('sha256').update(bytes).digest('hex'),
+      artifact.sha256,
+    );
+  }
+  const closure = read('closure-index.json');
+  const archive = closure.archives.find(
+    (item) => item.name === overlay.baseArchive,
+  );
+  assert.equal(archive.sha256, overlay.baseArchiveSha256);
+  const contents = new Map();
+  for (const file of overlay.files) {
+    const bytes = readFileSync(new URL(file.file, import.meta.url));
+    const digest = createHash('sha256').update(bytes).digest('hex');
+    assert.equal(digest, file.sha256);
+    assert.equal(
+      release.artifacts.find((item) => item.file === file.file).sha256,
+      digest,
+    );
+    contents.set(file.destination, bytes);
+  }
+  const sums = new Map(
+    contents
+      .get('SHA256SUMS')
+      .toString()
+      .trim()
+      .split('\n')
+      .map((line) => {
+        const [sha256, file] = line.trim().split(/\s+/);
+        return [file, sha256];
+      }),
+  );
+  assert.deepEqual([...sums.keys()].sort(), [
+    'corepack.tgz',
+    'source-locks.sha256',
+    'web-cache.tar.gz',
+  ]);
+  assert.equal(
+    sums.get('source-locks.sha256'),
+    createHash('sha256')
+      .update(contents.get('source-locks.sha256'))
+      .digest('hex'),
+  );
+  assert.equal(
+    sums.get('corepack.tgz'),
+    closure.entries.find(
+      (item) => item.archive === archive.name && item.member === 'corepack.tgz',
+    ).sha256,
+  );
+  assert.equal(
+    sums.get('web-cache.tar.gz'),
+    '7618ca4a2186f4494e3a29691f0fcb797172a2e9a20207637699d142c319f9ab',
+  );
+  const manifest = JSON.parse(
+    readFileSync(
+      new URL('../../' + overlay.sourceChange.file, import.meta.url),
+    ),
+  );
+  delete manifest.scripts;
+  const canonical = JSON.stringify(
+    Object.fromEntries(
+      Object.entries(manifest).sort(([a], [b]) => a.localeCompare(b)),
+    ),
+  );
+  assert.equal(
+    createHash('sha256').update(canonical).digest('hex'),
+    overlay.sourceChange.manifestWithoutScriptsSha256,
+  );
+});
+
+test('the NAS builder tool is fixed to a verified Forgejo archive and image identity', () => {
+  const release = read('nas-builder-release.json');
+  assert.match(release.upstreamDigest, /^sha256:[a-f0-9]{64}$/);
+  assert.match(release.configDigest, /^sha256:[a-f0-9]{64}$/);
+  assert.match(release.archive.sha256, /^[a-f0-9]{64}$/);
+  validate(
+    { forgejo: 'https://forgejo.example.com', owner: 'alice' },
+    { artifacts: release.archive.parts },
+  );
+  assert.ok(release.archive.parts.length);
+});

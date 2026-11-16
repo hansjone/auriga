@@ -6320,6 +6320,278 @@
       "path": "/api/packages/{owner}/generic/auriga-site-build-ci-actions/84dca4a6-linux-amd64-r1/contributor-assistant-github-action-ca4a40a7d1004f18d9960b404b97e5f30a505a08.tar.gz.part006",
       "version": "84dca4a6-linux-amd64-r1",
       "availability": "uploaded-readback"
+    },
+    {
+      "file": "docker-27.1.2-dind-linux-amd64.tar.gz.part000",
+      "path": "/api/packages/{owner}/generic/auriga-site-nas-builder/27.1.2-linux-amd64-r1/docker-27.1.2-dind-linux-amd64.tar.gz.part000",
+      "bytes": 4194304,
+      "sha256": "9609b84e37ffa0cb2cb0ccd2a4b773087cbd846a9dfbf067363a1c242c0f0a90",
+      "version": "27.1.2-linux-amd64-r1",
+      "availability": "uploaded-readback"
+    },
+    {
+      "file": "docker-27.1.2-dind-linux-amd64.tar.gz.part001",
+      "path": "/api/packages/{owner}/generic/auriga-site-nas-builder/27.1.2-linux-amd64-r1/docker-27.1.2-dind-linux-amd64.tar.gz.part001",
+      "bytes": 4194304,
+      "sha256": "92d1b4c14538f6e4fbe9481225a361bef1095ff2cda7bdb8bce5f630f58830c1",
+      "version": "27.1.2-linux-amd64-r1",
+      "availability": "uploaded-readback"
+    },
+    {
+      "file": "docker-27.1.2-dind-linux-amd64.tar.gz.part002",
+      "path": "/api/packages/{owner}/generic/auriga-site-nas-builder/27.1.2-linux-amd64-r1/docker-27.1.2-dind-linux-amd64.tar.gz.part002",
+      "bytes": 4194304,
+      "sha256": "4039dd3ec113a81d0f82e9e9438c60c647f218012dd019aea12d49a656c1a10b",
+      "version": "27.1.2-linux-amd64-r1",
+      "availability": "uploaded-readback"
+    },
+    {
+      "file": "docker-27.1.2-dind-linux-amd64.tar.gz.part003",
+      "path": "/api/packages/{owner}/generic/auriga-site-nas-builder/27.1.2-linux-amd64-r1/docker-27.1.2-dind-linux-amd64.tar.gz.part003",
+      "bytes": 4194304,
+      "sha256": "04947fb38c2f9285d1e82a67e67ed176101520b697c4ec723563a58339754d90",
+      "version": "27.1.2-linux-amd64-r1",
+      "availability": "uploaded-readback"
+    },
+    {
+      "file": "docker-27.1.2-dind-linux-amd64.tar.gz.part004",
+      "path": "/api/packages/{owner}/generic/auriga-site-nas-builder/27.1.2-linux-amd64-r1/docker-27.1.2-dind-linux-amd64.tar.gz.part004",
+      "bytes": 4194304,
+      "sha256": "706528a66263956fbd9d03db6ba1820ff6e180ae93821074a47e544e80cf93a6",
+      "version": "27.1.2-linux-amd64-r1",
+      "availability": "uploaded-readback"
+    },
+    {
+      "file": "docker-27.1.2-dind-linux-amd64.tar.gz.part005",
+      "path": "/api/packages/{owner}/generic/auriga-site-nas-builder/27.1.2-linux-amd64-r1/docker-27.1.2-dind-linux-amd64.tar.gz.part005",
+      "bytes": 4194304,
+      "sha256": "e63d934e46547a466d95db59192d2ec6f9134c1260c1e28bd99cab6f92efca97",
+      "version": "27.1.2-linux-amd64-r1",
+      "availability": "uploaded-readback"
+    },
+    {
+      "file": "docker-27.1.2-dind-linux-amd64.tar.gz.part006",
+      "path": "/api/packages/{owner}/generic/auriga-site-nas-builder/27.1.2-linux-amd64-r1/docker-27.1.2-dind-linux-amd64.tar.gz.part006",
+      "bytes": 4194304,
+      "sha256": "d256433d27414a6295529d0b56084975832706dc88479de2951d45ee2d06f962",
+      "version": "27.1.2-linux-amd64-r1",
+      "availability": "uploaded-readback"
+    },
+    {
+      "file": "docker-27.1.2-dind-linux-amd64.tar.gz.part007",
+      "path": "/api/packages/{owner}/generic/auriga-site-nas-builder/27.1.2-linux-amd64-r1/docker-27.1.2-dind-linux-amd64.tar.gz.part007",
+      "bytes": 4194304,
+      "sha256": "b31505761bc836982c9f0dd6c0f50fb6a14164a8b53a600f5fcb3bf005c10a67",
+      "version": "27.1.2-linux-amd64-r1",
+      "availability": "uploaded-readback"
+    },
+    {
+      "file": "docker-27.1.2-dind-linux-amd64.tar.gz.part008",
+      "path": "/api/packages/{owner}/generic/auriga-site-nas-builder/27.1.2-linux-amd64-r1/docker-27.1.2-dind-linux-amd64.tar.gz.part008",
+      "bytes": 4194304,
+      "sha256": "516c5ac7271f461ebe54363ae498e483079d9876ffc58766195fb92fb5ae29cf",
+      "version": "27.1.2-linux-amd64-r1",
+      "availability": "uploaded-readback"
+    },
+    {
+      "file": "docker-27.1.2-dind-linux-amd64.tar.gz.part009",
+      "path": "/api/packages/{owner}/generic/auriga-site-nas-builder/27.1.2-linux-amd64-r1/docker-27.1.2-dind-linux-amd64.tar.gz.part009",
+      "bytes": 4194304,
+      "sha256": "6c0de4cec4140273cd0d9f920670017726ecc66923d24f8916de45b0c1e0e56c",
+      "version": "27.1.2-linux-amd64-r1",
+      "availability": "uploaded-readback"
+    },
+    {
+      "file": "docker-27.1.2-dind-linux-amd64.tar.gz.part010",
+      "path": "/api/packages/{owner}/generic/auriga-site-nas-builder/27.1.2-linux-amd64-r1/docker-27.1.2-dind-linux-amd64.tar.gz.part010",
+      "bytes": 4194304,
+      "sha256": "e2d692890ae5805683752786d4d0d49d652fc38c0558191457ab379f9da9828f",
+      "version": "27.1.2-linux-amd64-r1",
+      "availability": "uploaded-readback"
+    },
+    {
+      "file": "docker-27.1.2-dind-linux-amd64.tar.gz.part011",
+      "path": "/api/packages/{owner}/generic/auriga-site-nas-builder/27.1.2-linux-amd64-r1/docker-27.1.2-dind-linux-amd64.tar.gz.part011",
+      "bytes": 4194304,
+      "sha256": "2cd2d82d192483c62b08bab0fbb6421708a51c26781460a0e3c6adcda54db74b",
+      "version": "27.1.2-linux-amd64-r1",
+      "availability": "uploaded-readback"
+    },
+    {
+      "file": "docker-27.1.2-dind-linux-amd64.tar.gz.part012",
+      "path": "/api/packages/{owner}/generic/auriga-site-nas-builder/27.1.2-linux-amd64-r1/docker-27.1.2-dind-linux-amd64.tar.gz.part012",
+      "bytes": 4194304,
+      "sha256": "ddadd24967a254912a17be991ecd94fad740c87474b2a8f7e31edf259746d4fc",
+      "version": "27.1.2-linux-amd64-r1",
+      "availability": "uploaded-readback"
+    },
+    {
+      "file": "docker-27.1.2-dind-linux-amd64.tar.gz.part013",
+      "path": "/api/packages/{owner}/generic/auriga-site-nas-builder/27.1.2-linux-amd64-r1/docker-27.1.2-dind-linux-amd64.tar.gz.part013",
+      "bytes": 4194304,
+      "sha256": "be04101e2f330c03daca7f15b04b308085acd438857609f15d033fb9e5a24b10",
+      "version": "27.1.2-linux-amd64-r1",
+      "availability": "uploaded-readback"
+    },
+    {
+      "file": "docker-27.1.2-dind-linux-amd64.tar.gz.part014",
+      "path": "/api/packages/{owner}/generic/auriga-site-nas-builder/27.1.2-linux-amd64-r1/docker-27.1.2-dind-linux-amd64.tar.gz.part014",
+      "bytes": 4194304,
+      "sha256": "72669053182d310924b787aea4cd289a843685f3cf9cd88596cf43b7167d57a7",
+      "version": "27.1.2-linux-amd64-r1",
+      "availability": "uploaded-readback"
+    },
+    {
+      "file": "docker-27.1.2-dind-linux-amd64.tar.gz.part015",
+      "path": "/api/packages/{owner}/generic/auriga-site-nas-builder/27.1.2-linux-amd64-r1/docker-27.1.2-dind-linux-amd64.tar.gz.part015",
+      "bytes": 4194304,
+      "sha256": "7aec647b8cbdd94b6620f1e938785f94c8ca7f9228bc4a82b5edd264afbf17d5",
+      "version": "27.1.2-linux-amd64-r1",
+      "availability": "uploaded-readback"
+    },
+    {
+      "file": "docker-27.1.2-dind-linux-amd64.tar.gz.part016",
+      "path": "/api/packages/{owner}/generic/auriga-site-nas-builder/27.1.2-linux-amd64-r1/docker-27.1.2-dind-linux-amd64.tar.gz.part016",
+      "bytes": 4194304,
+      "sha256": "ff43827d8821d2e0ce926e3ba4f7499d63088701d6873199ab1762dc55e454b2",
+      "version": "27.1.2-linux-amd64-r1",
+      "availability": "uploaded-readback"
+    },
+    {
+      "file": "docker-27.1.2-dind-linux-amd64.tar.gz.part017",
+      "path": "/api/packages/{owner}/generic/auriga-site-nas-builder/27.1.2-linux-amd64-r1/docker-27.1.2-dind-linux-amd64.tar.gz.part017",
+      "bytes": 4194304,
+      "sha256": "b6137919350ef69432420917bf5d20dafdec8d68fd66600a0dfd5318f0fcbee4",
+      "version": "27.1.2-linux-amd64-r1",
+      "availability": "uploaded-readback"
+    },
+    {
+      "file": "docker-27.1.2-dind-linux-amd64.tar.gz.part018",
+      "path": "/api/packages/{owner}/generic/auriga-site-nas-builder/27.1.2-linux-amd64-r1/docker-27.1.2-dind-linux-amd64.tar.gz.part018",
+      "bytes": 4194304,
+      "sha256": "f637b85d215a8205d841dca6020b059c1ce0960a3f83ce22b494a598f576105c",
+      "version": "27.1.2-linux-amd64-r1",
+      "availability": "uploaded-readback"
+    },
+    {
+      "file": "docker-27.1.2-dind-linux-amd64.tar.gz.part019",
+      "path": "/api/packages/{owner}/generic/auriga-site-nas-builder/27.1.2-linux-amd64-r1/docker-27.1.2-dind-linux-amd64.tar.gz.part019",
+      "bytes": 4194304,
+      "sha256": "dc77e92413a43a6c9aa62a88c2a8194f8095f617af282dbe3d2fa0abae56d7e3",
+      "version": "27.1.2-linux-amd64-r1",
+      "availability": "uploaded-readback"
+    },
+    {
+      "file": "docker-27.1.2-dind-linux-amd64.tar.gz.part020",
+      "path": "/api/packages/{owner}/generic/auriga-site-nas-builder/27.1.2-linux-amd64-r1/docker-27.1.2-dind-linux-amd64.tar.gz.part020",
+      "bytes": 4194304,
+      "sha256": "bc1673ad28a3a97517e9b0e5e21d0e69cd8b75e2a39a1ecb83f0c0f7931b1f88",
+      "version": "27.1.2-linux-amd64-r1",
+      "availability": "uploaded-readback"
+    },
+    {
+      "file": "docker-27.1.2-dind-linux-amd64.tar.gz.part021",
+      "path": "/api/packages/{owner}/generic/auriga-site-nas-builder/27.1.2-linux-amd64-r1/docker-27.1.2-dind-linux-amd64.tar.gz.part021",
+      "bytes": 4194304,
+      "sha256": "ee6ea1c4fb2f17ffc09d595d744dda6c64d6218dc9fc8c85b211a62b72fb901d",
+      "version": "27.1.2-linux-amd64-r1",
+      "availability": "uploaded-readback"
+    },
+    {
+      "file": "docker-27.1.2-dind-linux-amd64.tar.gz.part022",
+      "path": "/api/packages/{owner}/generic/auriga-site-nas-builder/27.1.2-linux-amd64-r1/docker-27.1.2-dind-linux-amd64.tar.gz.part022",
+      "bytes": 4194304,
+      "sha256": "465e3ecf7eb9c585854a892e00a98277f0e3759b1141ed90ba48c4217940f769",
+      "version": "27.1.2-linux-amd64-r1",
+      "availability": "uploaded-readback"
+    },
+    {
+      "file": "docker-27.1.2-dind-linux-amd64.tar.gz.part023",
+      "path": "/api/packages/{owner}/generic/auriga-site-nas-builder/27.1.2-linux-amd64-r1/docker-27.1.2-dind-linux-amd64.tar.gz.part023",
+      "bytes": 4194304,
+      "sha256": "55372082b5c09ade217db905369f37c3d412bfce9983a903ad06b9955c83c396",
+      "version": "27.1.2-linux-amd64-r1",
+      "availability": "uploaded-readback"
+    },
+    {
+      "file": "docker-27.1.2-dind-linux-amd64.tar.gz.part024",
+      "path": "/api/packages/{owner}/generic/auriga-site-nas-builder/27.1.2-linux-amd64-r1/docker-27.1.2-dind-linux-amd64.tar.gz.part024",
+      "bytes": 4194304,
+      "sha256": "38bfb31d8a456119debf44568ba69de05bbd5c799b5f1b814b8d752b4c23940e",
+      "version": "27.1.2-linux-amd64-r1",
+      "availability": "uploaded-readback"
+    },
+    {
+      "file": "docker-27.1.2-dind-linux-amd64.tar.gz.part025",
+      "path": "/api/packages/{owner}/generic/auriga-site-nas-builder/27.1.2-linux-amd64-r1/docker-27.1.2-dind-linux-amd64.tar.gz.part025",
+      "bytes": 4194304,
+      "sha256": "dcddfac37753cecc6a69b37a22857f04521ae146f8dd64ddc0ce45d85d30b6c4",
+      "version": "27.1.2-linux-amd64-r1",
+      "availability": "uploaded-readback"
+    },
+    {
+      "file": "docker-27.1.2-dind-linux-amd64.tar.gz.part026",
+      "path": "/api/packages/{owner}/generic/auriga-site-nas-builder/27.1.2-linux-amd64-r1/docker-27.1.2-dind-linux-amd64.tar.gz.part026",
+      "bytes": 4194304,
+      "sha256": "43146885f57cb4070b125c72f1943fccda16b5392a9687ba85c24ff9f83add84",
+      "version": "27.1.2-linux-amd64-r1",
+      "availability": "uploaded-readback"
+    },
+    {
+      "file": "docker-27.1.2-dind-linux-amd64.tar.gz.part027",
+      "path": "/api/packages/{owner}/generic/auriga-site-nas-builder/27.1.2-linux-amd64-r1/docker-27.1.2-dind-linux-amd64.tar.gz.part027",
+      "bytes": 4194304,
+      "sha256": "9a8dcc5aa65ea0729438cc6cb02a74f194cf29650c022e5c427563ef74f2cc95",
+      "version": "27.1.2-linux-amd64-r1",
+      "availability": "uploaded-readback"
+    },
+    {
+      "file": "docker-27.1.2-dind-linux-amd64.tar.gz.part028",
+      "path": "/api/packages/{owner}/generic/auriga-site-nas-builder/27.1.2-linux-amd64-r1/docker-27.1.2-dind-linux-amd64.tar.gz.part028",
+      "bytes": 4194304,
+      "sha256": "c75fa1cb8cec25d06e191d52b776b67f137ca2d614f0285b393f1f34b1d19731",
+      "version": "27.1.2-linux-amd64-r1",
+      "availability": "uploaded-readback"
+    },
+    {
+      "file": "docker-27.1.2-dind-linux-amd64.tar.gz.part029",
+      "path": "/api/packages/{owner}/generic/auriga-site-nas-builder/27.1.2-linux-amd64-r1/docker-27.1.2-dind-linux-amd64.tar.gz.part029",
+      "bytes": 4194304,
+      "sha256": "dfc56b6f1eed327b36794e3d9beef0c35b355ba425b77e652bc854b896cfabda",
+      "version": "27.1.2-linux-amd64-r1",
+      "availability": "uploaded-readback"
+    },
+    {
+      "file": "docker-27.1.2-dind-linux-amd64.tar.gz.part030",
+      "path": "/api/packages/{owner}/generic/auriga-site-nas-builder/27.1.2-linux-amd64-r1/docker-27.1.2-dind-linux-amd64.tar.gz.part030",
+      "bytes": 4011741,
+      "sha256": "7ca3ec63a5d94807c43dfb27409e202cbb793a468449acd445fec8a18cf135ac",
+      "version": "27.1.2-linux-amd64-r1",
+      "availability": "uploaded-readback"
+    },
+    {
+      "file": "web-files-b7359410.sha256",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-overlays/b7359410-linux-amd64-r2/web-files-b7359410.sha256",
+      "bytes": 248,
+      "sha256": "5d2094f4ed0c5c67f4d9634442c3dcbc02480174fc1dd444ed14cdb0caea4768",
+      "availability": "uploaded-readback",
+      "version": "b7359410-linux-amd64-r2"
+    },
+    {
+      "file": "web-overlay-b7359410.json",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-overlays/b7359410-linux-amd64-r2/web-overlay-b7359410.json",
+      "bytes": 927,
+      "sha256": "7b4057c273a42e2a4608945f9993f875e188df066e645c8969832df9c868f704",
+      "availability": "uploaded-readback",
+      "version": "b7359410-linux-amd64-r2"
+    },
+    {
+      "file": "web-source-locks-b7359410.sha256",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-overlays/b7359410-linux-amd64-r2/web-source-locks-b7359410.sha256",
+      "bytes": 991,
+      "sha256": "430ef213257d93f1a5abe8b0c67b607526319923f9359dc2708f35eed235a20d",
+      "availability": "uploaded-readback",
+      "version": "b7359410-linux-amd64-r2"
     }
   ]
 }
