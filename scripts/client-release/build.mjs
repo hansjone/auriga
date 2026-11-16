@@ -101,6 +101,7 @@ export function startOfflineBuild(options) {
   ])
     if (options[key]) options[key] = resolve(options[key]);
   validateBuildOptions(options);
+  sourceIdentity(ROOT, inputTrust(options), { forBuild: true });
   const kit = verifyInputs(
     options.devkit,
     options['devkit-sha256'],
@@ -166,7 +167,7 @@ export async function buildWorker(optionsFile) {
   const o = JSON.parse(readFileSync(optionsFile, 'utf8'));
   const policy = validateBuildOptions(o);
   const kit = verifyInputs(o.devkit, o['devkit-sha256'], ROOT, inputTrust(o));
-  const source = sourceIdentity(ROOT, inputTrust(o));
+  const source = sourceIdentity(ROOT, inputTrust(o), { forBuild: true });
   const pnpm = join(kit.directory, 'build-pnpm/node_modules/pnpm/bin/pnpm.cjs');
   const store = join(o.out, 'pnpm-store');
   cpSync(join(kit.directory, 'pnpm-store'), store, { recursive: true });

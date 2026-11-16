@@ -26,7 +26,7 @@ Windows 自带 PowerShell5.1、System32 tar、.NET Framework4.x Framework64/v4.0
 
 保留 #373 源码包的 auriga-source.json、SHA256SUMS、SHA256SUMS.sig 和 release-public.pem。清单优先，即使现场后建 .git 也不替换基线。验发行身份、元数据摘要、文件表与基线快照，再按 Go 同格式 mode/sha256/path 换行计算当前源码摘要。已知文本 CRLF、shell BOM、执行模式沿 #373 规范；支持普通源码新增/修改/删除。固定上游 commit，记录当前/基线摘要、发行者指纹和 dirty/siteChanges。缺失、篡改或没有独立信任拒绝；无清单时仍支持原 Git checkout，两者都无则拒绝。
 
-Go→Node 互操作在 deploy/offline/desktop_source_test.go 检查。凭据、数据、bin、node_modules、target/dist、元数据等按 #373 规则排除；客户端生成的 clients/dsh-plugin/ui 在签名基线未含它时也排除，避免构建输出变成源码改动。依赖变更仍由 Windows 锁门禁拒绝。来源记录用于审阅追溯，不代替独立批准；其他额外产物放源码之外。
+Go→Node 互操作在 deploy/offline/desktop_source_test.go 检查。凭据、数据、bin、node_modules、target/dist、元数据等按 #373 规则排除；客户端生成的 clients/dsh-plugin/ui 在签名基线未含它时也排除，避免构建输出变成源码改动。为防止未记录内容参与构建，启动 worker 前和 worker 内恢复依赖前均拒绝源码树中的 node_modules、dist、.pnpm-store，以及基线未含的 clients/dsh-plugin/ui，并给出对应 PowerShell 清理命令。建议每次把源码解压到全新目录；重复构建须先核对并清理上次生成内容。依赖变更仍由 Windows 锁门禁拒绝。来源记录用于审阅追溯，不代替独立批准；其他额外产物放源码之外。
 
 ```powershell
 .\scripts\client-release\auriga-client.cmd build --offline --devkit $env:AURIGA_CLIENT_DEVKIT --verify-key D:\approved\release-public.pem --version 1.0.2-site.1 --sequence 102 --release-public-key C:\secure\site-desktop\desktop-public.pem --resource-trust-json D:\site\resource-roots.json --out D:\exports\desktop-102
@@ -38,10 +38,10 @@ Go→Node 互操作在 deploy/offline/desktop_source_test.go 检查。凭据、�
 
 ## Linux 公钥配置及发布
 
-Linux install 加 --desktop-public-key <独立Ed25519 SPKI PEM> 与 --desktop-publisher-tenant <实际发行租户UUID>，成对提供。现有安装锁内写原 state 的 desktopPublicKeyFingerprint/desktopPublisherTenant，保留 #373 TrustedKeys、AllowUnsigned、资源初始化及冷备份/回滚。重复安装复核固定公钥，拒绝自动换钥或租户；升级保存 operator settings 和 state。
+Linux install 加 --desktop-public-key <独立Ed25519 SPKI PEM>、--desktop-publisher-tenant <实际发行租户UUID> 和 --desktop-confirm-fingerprint <独立核对的64位小写SPKI-SHA256>，三者一并提供。指纹与 Windows keygen 输出 publicKeyFingerprint 独立核对，公钥不符拒绝登记，成功打印已登记指纹。现有安装锁内写原 state 的 desktopPublicKeyFingerprint/desktopPublisherTenant，保留 #373 TrustedKeys、AllowUnsigned、资源初始化及冷备份/回滚。重复安装省略三项时复核 state 中的固定指纹；显式提供公钥仍须确认指纹，拒绝自动换钥或租户；升级保存 operator settings 和 state。
 
 平台仅接收公钥，写 <data>/config/desktop/release-public.pem；stack.env 设置 AURIGA_DESKTOP_PUBLISHER_TENANT_ID。原 renderer/Compose 自动配置 AURIGA_RESOURCE_DESKTOP_PUBLIC_KEY_FILE=/etc/auriga/desktop/release-public.pem、AURIGA_RESOURCE_DESKTOP_DIRECTORY=/var/lib/auriga/desktop 和发布租户，桌面卷使用 UID/GID10001:10001、0700。备份发行卷、resource数据库、公钥及安装state。
 
-sign --review-only 展示来源/现场改动、包摘要、公钥/资源根、版本/序号/最低版本/渠道等，人工确认 reviewSha256 后才用现场桌面私钥签名。该钥与平台包/Windows附件发行钥分开。publish 通过正常 edge 管理 POST /api/resource/v1/admin/desktop/releases 上传 exe，X-Desktop-Manifest 为已签 JSON base64url；使用近期管理员会话 Cookie、Origin、X-Auriga-CSRF，要求 resource.versions.publish。会话 JSON 仅从 AURIGA_CLIENT_ADMIN_AUTH 环境读，不进入 argv/日志。
+sign --review-only 展示来源/现场改动、包摘要、公钥/资源根、版本/序号/最低版本/渠道等，Git 来源（无签名源码清单）醒目显示 sourceWarning，须独立核对源码提交及工作区。人工确认 reviewSha256 后才用现场桌面私钥签名。该钥与平台包/Windows附件发行钥分开。publish 要求同目录 desktop-build.json，先核 --public-key 的 SPKI 指纹等于构建记录 publicKeyFingerprint，再通过正常 edge 管理 POST /api/resource/v1/admin/desktop/releases 上传 exe，X-Desktop-Manifest 为已签 JSON base64url；使用近期管理员会话 Cookie、Origin、X-Auriga-CSRF，要求 resource.versions.publish。会话 JSON 仅从 AURIGA_CLIENT_ADMIN_AUTH 环境读，不进入 argv/日志。
 
 发布前核签名、摘要和全平台账本序号；发布后从门户同渠道 latest 验完整清单，再完整流式下载 /api/resource/v1/desktop/packages/<sequence> 核长度/SHA256。拒绝跳转，HTTP 需分别显式确认支持的私有/回环 IP origin。自检失败可能已发布，先看账本，不自动重发或撤回。管理台手动入口 /ops/desktop，完整操作及密钥轮换见根 [MAINTAIN.md](../../MAINTAIN.md#客户端发布windows-开发机)。当前更换桌面发行根需成员受信重新安装；门户/旧版托盘自动更新仍由主控隔离演练验收。

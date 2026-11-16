@@ -144,6 +144,7 @@ export async function main(argv) {
   const envelope = JSON.parse(readFileSync(manifest));
   return publish({
     manifest,
+    buildRecord: join(dir, 'desktop-build.json'),
     archive: join(
       dir,
       clientPlatform(envelope.platform).setupName(envelope.version),

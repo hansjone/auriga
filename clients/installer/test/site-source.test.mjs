@@ -9,6 +9,7 @@ import {
   rmSync,
 } from 'node:fs';
 import { join } from 'node:path';
+import { spawnSync } from 'node:child_process';
 import {
   ROOT,
   digest,
@@ -22,6 +23,7 @@ import { makeRelease } from '../scripts/make-release.mjs';
 import {
   sourceIdentity,
   snapshotInventory,
+  assertBuildSourceClean,
 } from '../../../scripts/client-release/source.mjs';
 import { verifySignedInventory } from '../../../scripts/client-release/trust.mjs';
 import { parseMetadataJson } from '../../../scripts/client-release/trust.mjs';
@@ -113,12 +115,17 @@ test('large source metadata permits thousands of files but rejects duplicate esc
     /不安全/,
   );
 });
-function fixture(t) {
+function fixture(t, { ui = false } = {}) {
   const root = mkdtempSync(join(ROOT, 'clients/installer/target/source-test-'));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   writeFileSync(join(root, 'main.go'), 'package example\n');
   writeFileSync(join(root, 'auriga'), '#!/bin/sh\n');
-  const { files, sha256 } = snapshotInventory(root);
+  const uiPath = 'clients/dsh-plugin/ui/panel.js';
+  if (ui) {
+    mkdirSync(join(root, 'clients/dsh-plugin/ui'), { recursive: true });
+    writeFileSync(join(root, uiPath), 'baseline source');
+  }
+  const { files, sha256 } = snapshotInventory(root, ui ? { [uiPath]: {} } : {});
   const manifest = {
     schemaVersion: 1,
     source: {
@@ -211,6 +218,107 @@ test('source manifest missing/tampered/unsigned/self-trusted/fingerprint mismatc
     () => sourceIdentity(f.root, { verifyKey: f.publicKey }),
     /Git|源码/,
   );
+});
+
+test('build preflight refuses unrecorded UI, node_modules and dist even when provenance reports no site changes', (t) => {
+  for (const path of [
+    'clients/dsh-plugin/ui',
+    'node_modules',
+    'web/panel/node_modules',
+    'dist',
+    'clients/dsh-plugin/dist',
+  ]) {
+    const f = fixture(t);
+    const trust = { verifyKey: f.publicKey };
+    mkdirSync(join(f.root, path), { recursive: true });
+    writeFileSync(join(f.root, path, 'preset.js'), 'unrecorded build input');
+    assert.equal(sourceIdentity(f.root, trust).siteChanges, false);
+    assert.throws(
+      () => sourceIdentity(f.root, trust, { forBuild: true }),
+      /预置生成内容/,
+    );
+    assert.throws(
+      () => assertBuildSourceClean(f.root),
+      (error) =>
+        error.message.includes(path) &&
+        /Remove-Item -LiteralPath/.test(error.message),
+    );
+  }
+});
+
+test('build preflight permits UI only when its files are included in the source baseline', (t) => {
+  const f = fixture(t);
+  assert.doesNotThrow(() => assertBuildSourceClean(f.root));
+  assert.equal(
+    sourceIdentity(f.root, { verifyKey: f.publicKey }, { forBuild: true })
+      .siteChanges,
+    false,
+  );
+  mkdirSync(join(f.root, 'clients/dsh-plugin/ui'), { recursive: true });
+  writeFileSync(
+    join(f.root, 'clients/dsh-plugin/ui/panel.js'),
+    'baseline source',
+  );
+  assert.doesNotThrow(() =>
+    assertBuildSourceClean(f.root, ['clients/dsh-plugin/ui/panel.js']),
+  );
+  const signedUI = fixture(t, { ui: true });
+  assert.equal(
+    sourceIdentity(
+      signedUI.root,
+      { verifyKey: signedUI.publicKey },
+      { forBuild: true },
+    ).siteChanges,
+    false,
+  );
+});
+
+test('Git build preflight rejects ignored generated inputs before a clean Git tree can produce a release', (t) => {
+  const root = mkdtempSync(
+    join(ROOT, 'clients/installer/target/git-source-test-'),
+  );
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const git = (args) => {
+    const result = spawnSync(
+      'git',
+      [
+        '-c',
+        'user.name=Fixture',
+        '-c',
+        'user.email=fixture@example.com',
+        '-c',
+        'commit.gpgsign=false',
+        ...args,
+      ],
+      { cwd: root, encoding: 'utf8', windowsHide: true },
+    );
+    assert.equal(result.status, 0, result.stderr);
+  };
+  git(['init', '--quiet']);
+  writeFileSync(
+    join(root, '.gitignore'),
+    'node_modules/\nclients/dsh-plugin/ui/\n',
+  );
+  git(['add', '.gitignore']);
+  git([
+    '-c',
+    'core.hooksPath=.unused-hooks',
+    'commit',
+    '--quiet',
+    '-m',
+    'fixture',
+  ]);
+  assert.equal(sourceIdentity(root, {}, { forBuild: true }).siteChanges, false);
+  for (const path of ['clients/dsh-plugin/ui', 'node_modules']) {
+    mkdirSync(join(root, path), { recursive: true });
+    writeFileSync(join(root, path, 'preset.js'), 'ignored input');
+    assert.equal(sourceIdentity(root).siteChanges, false);
+    assert.throws(
+      () => sourceIdentity(root, {}, { forBuild: true }),
+      /预置生成内容/,
+    );
+    rmSync(join(root, path), { recursive: true });
+  }
 });
 test('SHA256SUMS verifier follows PR373 base64 Ed25519 signature and binds metadata bytes', (t) => {
   const f = fixture(t);

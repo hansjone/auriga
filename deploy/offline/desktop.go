@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"encoding/pem"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -16,13 +17,14 @@ import (
 
 var desktopTenant = regexp.MustCompile(`^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$`)
 
-func configureDesktop(s *state, publicFile, tenant string) error {
-	if publicFile == "" && tenant == "" {
+func configureDesktop(s *state, publicFile, tenant, confirm string) error {
+	if publicFile == "" && tenant == "" && confirm == "" {
 		if s.DesktopPublicKeyFingerprint == "" {
 			return nil
 		}
 		publicFile = filepath.Join(s.Data, "config/desktop/release-public.pem")
 		tenant = s.DesktopPublisherTenant
+		confirm = s.DesktopPublicKeyFingerprint
 	}
 	if err := desktopPhysical(publicFile); err != nil {
 		return err
@@ -37,21 +39,25 @@ func configureDesktop(s *state, publicFile, tenant string) error {
 	}
 	sum := sha256.Sum256(block.Bytes)
 	fingerprint := hex.EncodeToString(sum[:])
+	if !hex64.MatchString(confirm) || fingerprint != confirm {
+		return errors.New("桌面发行公钥与 --desktop-confirm-fingerprint 不符，拒绝登记")
+	}
 	if s.DesktopPublicKeyFingerprint != "" && (s.DesktopPublicKeyFingerprint != fingerprint || s.DesktopPublisherTenant != tenant) {
 		return errors.New("桌面发行公钥或租户与安装state固定值不符")
 	}
-	if err := provisionDesktop(s.Data, publicFile, tenant); err != nil {
+	if err := provisionDesktop(s.Data, publicFile, tenant, confirm); err != nil {
 		return err
 	}
 	s.DesktopPublicKeyFingerprint, s.DesktopPublisherTenant = fingerprint, tenant
+	fmt.Printf("已登记桌面发行公钥指纹 SHA256(SPKI) %s\n", fingerprint)
 	return nil
 }
 
 // Public bootstrap only. The private desktop key never belongs on the platform.
 // install holds its existing exclusive lock; the existing NAS renderer owns
 // the desktop blob volume and configures the resource service environment.
-func provisionDesktop(data, publicFile, tenant string) error {
-	if publicFile == "" && tenant == "" {
+func provisionDesktop(data, publicFile, tenant, confirm string) error {
+	if publicFile == "" && tenant == "" && confirm == "" {
 		return nil
 	}
 	if publicFile == "" || !desktopTenant.MatchString(tenant) || tenant == "00000000-0000-0000-0000-000000000000" {
@@ -80,6 +86,10 @@ func provisionDesktop(data, publicFile, tenant string) error {
 	}
 	if _, ok := key.(ed25519.PublicKey); !ok {
 		return errors.New("桌面发行仅支持 Ed25519 公钥")
+	}
+	sum := sha256.Sum256(block.Bytes)
+	if !hex64.MatchString(confirm) || hex.EncodeToString(sum[:]) != confirm {
+		return errors.New("桌面发行公钥与 --desktop-confirm-fingerprint 不符，拒绝登记")
 	}
 	canonical := pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: block.Bytes})
 	envFile := filepath.Join(data, "stack.env")

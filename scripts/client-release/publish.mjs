@@ -9,6 +9,7 @@ import {
 } from '../../clients/installer/runtime/release.mjs';
 import { sha256File } from '../../clients/installer/runtime/verify.mjs';
 import { normalizePlatformBinding } from '../../clients/installer/runtime/platform-origin.mjs';
+import { fingerprint } from './keys.mjs';
 
 function origin(value, confirmation) {
   const url = new URL(value);
@@ -60,6 +61,9 @@ export async function publish(options) {
   )
     throw new Error('需正常管理员会话 cookie 和 csrf，仅通过环境变量传入');
   const publicKey = readFileSync(options.publicKey, 'utf8');
+  const record = JSON.parse(readFileSync(options.buildRecord, 'utf8'));
+  if (fingerprint(publicKey) !== record.publicKeyFingerprint)
+    throw new Error('发布公钥指纹与构建记录 publicKeyFingerprint 不符');
   const envelope = JSON.parse(readFileSync(options.manifest, 'utf8'));
   verifyRelease(envelope, {
     publicKey,

@@ -113,6 +113,36 @@ function sourceDigest(root, name, expected) {
 }
 const sorted = (names) =>
   names.sort((a, b) => Buffer.compare(Buffer.from(a), Buffer.from(b)));
+// Only a fresh source tree may supply the initial build inputs. Generated
+// outputs are excluded from provenance, so reject them before pnpm/build runs.
+export function assertBuildSourceClean(root, baselinePaths = []) {
+  physical(root);
+  const baselineUI = baselinePaths.some((p) =>
+    p.startsWith('clients/dsh-plugin/ui/'),
+  );
+  const walk = (prefix = '') => {
+    for (const entry of readdirSync(join(root, prefix), {
+      withFileTypes: true,
+    })) {
+      const name = prefix ? `${prefix}/${entry.name}` : entry.name;
+      const lower = entry.name.toLowerCase();
+      if (
+        ['node_modules', 'dist', '.pnpm-store'].includes(lower) ||
+        (!baselineUI && name.toLowerCase() === 'clients/dsh-plugin/ui')
+      ) {
+        const path = join(root, name).replaceAll("'", "''");
+        throw new Error(
+          `构建前发现预置生成内容：${name}；请核对后在 PowerShell 清理：Remove-Item -LiteralPath '${path}' -Recurse -Force；或重新解压源码到全新目录`,
+        );
+      }
+      if (!sourcePathAllowed(name)) continue;
+      const stat = lstatSync(join(root, name));
+      if (stat.isSymbolicLink()) throw new Error(`源码含链接：${name}`);
+      if (stat.isDirectory()) walk(name);
+    }
+  };
+  walk();
+}
 function treeDigest(files) {
   return digest(
     sorted(Object.keys(files))
@@ -172,7 +202,11 @@ export function snapshotInventory(root, baseline = {}) {
   checkPaths(Object.keys(files));
   return { files, sha256: treeDigest(files) };
 }
-export function sourceIdentity(root = ROOT, trust = {}) {
+export function sourceIdentity(
+  root = ROOT,
+  trust = {},
+  { forBuild = false } = {},
+) {
   physical(root);
   if (existsSync(join(root, 'auriga-source.json'))) {
     const approved = verifySignedInventory(root, trust);
@@ -199,6 +233,7 @@ export function sourceIdentity(root = ROOT, trust = {}) {
         throw new Error('签名源码文件摘要/模式无效');
     if (treeDigest(m.files) !== m.source.snapshotSha256)
       throw new Error('签名源码快照摘要不匹配');
+    if (forBuild) assertBuildSourceClean(root, Object.keys(m.files));
     const current = snapshotInventory(root, m.files);
     const changed = current.sha256 !== m.source.snapshotSha256;
     return {
@@ -233,6 +268,12 @@ export function sourceIdentity(root = ROOT, trust = {}) {
         .filter(Boolean),
     ),
   ].sort();
+  if (forBuild) {
+    const tracked = git(['ls-files', '--cached', '-z'])
+      .split('\0')
+      .filter(Boolean);
+    assertBuildSourceClean(root, tracked);
+  }
   const files = paths.map((p) => [
     p,
     existsSync(join(root, p)) ? digest(readFileSync(join(root, p))) : null,

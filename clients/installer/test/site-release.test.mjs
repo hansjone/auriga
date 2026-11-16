@@ -23,6 +23,7 @@ import {
 import {
   generateDesktopKeys,
   assertPrivateKey,
+  fingerprint,
 } from '../../../scripts/client-release/keys.mjs';
 import { publish } from '../../../scripts/client-release/publish.mjs';
 import { canonical, RELEASE_KID } from '../runtime/release.mjs';
@@ -251,6 +252,13 @@ test('site-sign-review requires explicit site profile, current review digest and
     minimumVersion: '0.0.0',
     notAfter: new Date(Date.now() + 86400000).toISOString(),
     siteOffline: evidence,
+    sourceInfo: {
+      sourceType: 'git',
+      sourceCommit: 'a'.repeat(40),
+      sourceTreeSha256: evidence.sourceTreeSha256,
+      dirty: true,
+      siteChanges: true,
+    },
   });
   const options = {
     manifest: join(dir, 'desktop-release.unsigned.json'),
@@ -268,6 +276,7 @@ test('site-sign-review requires explicit site profile, current review digest and
   const review = signCommand({ dir, 'review-only': true });
   assert.equal(review.event, 'site_offline');
   assert.equal(review.siteOffline.dirty, true);
+  assert.match(review.sourceWarning, /警告.*Git.*未.*签名/);
   assert.throws(
     () =>
       signCommand({
@@ -293,6 +302,23 @@ test('site-sign-review requires explicit site profile, current review digest and
   );
   writeFileSync(options.manifest, JSON.stringify(body));
   const record = JSON.parse(readFileSync(options.buildRecord));
+  writeFileSync(
+    options.buildRecord,
+    JSON.stringify({
+      ...record,
+      source: {
+        ...record.source,
+        sourceType: 'signed-archive',
+        sourceBaselineSha256: 'd'.repeat(64),
+        sourceManifestSha256: 'e'.repeat(64),
+        sourceIssuerFingerprint: 'f'.repeat(64),
+      },
+    }),
+  );
+  assert.equal(
+    signCommand({ dir, 'review-only': true }).sourceWarning,
+    undefined,
+  );
   for (const patch of [
     { resourceTrustSha256: '0'.repeat(64) },
     { sourceCommit: 'bad' },
@@ -416,16 +442,24 @@ test('publish-validation uses normal admin endpoint and verifies public download
   const bytes = Buffer.from('test setup bytes');
   const archive = join(dir, 'setup.exe'),
     manifest = join(dir, 'release.json'),
+    buildRecord = join(dir, 'desktop-build.json'),
     key = join(dir, 'public.pem');
   writeFileSync(archive, bytes);
   writeFileSync(key, publicKey.export({ type: 'spki', format: 'pem' }));
+  const keyFingerprint = fingerprint(readFileSync(key));
+  writeFileSync(
+    buildRecord,
+    JSON.stringify({ publicKeyFingerprint: keyFingerprint }),
+  );
   let envelope = release(privateKey, bytes),
     posts = 0,
+    requests = 0,
     badDownload = false,
     stale = false,
     redirect = false;
   writeFileSync(manifest, JSON.stringify(envelope));
   const server = createServer(async (req, res) => {
+    requests++;
     if (redirect) {
       res.writeHead(302, { Location: 'https://example.com' });
       res.end();
@@ -470,6 +504,7 @@ test('publish-validation uses normal admin endpoint and verifies public download
   const options = {
     archive,
     manifest,
+    buildRecord,
     publicKey: key,
     adminOrigin: origin,
     portalOrigin: origin,
@@ -478,6 +513,24 @@ test('publish-validation uses normal admin endpoint and verifies public download
   };
   assert.equal((await publish(options)).sha256, digest(bytes));
   assert.equal(posts, 1);
+  const beforeRequests = requests;
+  writeFileSync(
+    buildRecord,
+    JSON.stringify({ publicKeyFingerprint: '0'.repeat(64) }),
+  );
+  await assert.rejects(publish(options), /公钥指纹.*构建记录/);
+  assert.equal(requests, beforeRequests);
+  assert.equal(posts, 1);
+  writeFileSync(buildRecord, '{}');
+  await assert.rejects(publish(options), /公钥指纹.*构建记录/);
+  assert.equal(requests, beforeRequests);
+  rmSync(buildRecord);
+  await assert.rejects(publish(options), /ENOENT/);
+  assert.equal(requests, beforeRequests);
+  writeFileSync(
+    buildRecord,
+    JSON.stringify({ publicKeyFingerprint: keyFingerprint }),
+  );
   badDownload = true;
   await assert.rejects(publish(options), /下载摘要/);
   badDownload = false;

@@ -195,7 +195,7 @@ $env:AURIGA_CLIENT_NODE_SHA256 = '<独立批准的node.exe SHA256>'
 .\scripts\client-release\auriga-client.cmd keygen --out C:\secure\site-desktop
 ```
 
-只把 `desktop-public.pem` 送往 Linux 平台。首次 install 或沿原参数重跑 install 时，加 `--desktop-public-key /media/desktop-public.pem --desktop-publisher-tenant <实际发行租户UUID>`。平台在原 state 登记公钥指纹和租户，配置 AURIGA_RESOURCE_DESKTOP_PUBLIC_KEY_FILE 与桌面卷；重复安装及升级沿用并拒绝自动换钥/换租户。取得平台输出的 `resource-keys/resource-roots.json` 公钥根拷至 Windows。桌面私钥、资源私钥不进平台附件/源码/客户端。
+只把 `desktop-public.pem` 送往 Linux 平台。首次 install 或沿原参数重跑 install 时，加 `--desktop-public-key /media/desktop-public.pem --desktop-publisher-tenant <实际发行租户UUID> --desktop-confirm-fingerprint <独立核对的SPKI-SHA256>`，三项必须一并提供。指纹应从 Windows keygen 输出的 publicKeyFingerprint 独立核对（64位小写十六进制）；不符拒绝登记，成功打印已登记指纹。平台在原 state 登记公钥指纹和租户，配置 AURIGA_RESOURCE_DESKTOP_PUBLIC_KEY_FILE 与桌面卷；重复安装省略三项时复核 state 固定值，显式提供公钥仍须确认指纹，拒绝自动换钥/换租户。取得平台输出的 `resource-keys/resource-roots.json` 公钥根拷至 Windows。桌面私钥、资源私钥不进平台附件/源码/客户端。
 
 修改客户端、插件、认证或界面代码并按模块测试，保留原 auriga-source.json、SHA256SUMS、SHA256SUMS.sig 和 release-public.pem。无 Git 时优先验签源码清单，记录上游提交、签名基线和当前源码摘要、发行者指纹及 siteChanges；普通源码支持增删改，已知文本 CRLF 不算现场改动。清单存在时，即使另建 .git 也不替换基线；篡改/缺签名拒绝。仅无清单的 Git checkout 沿原 Git 流程，两种来源都没有则拒绝。
 
@@ -205,7 +205,7 @@ $env:AURIGA_CLIENT_NODE_SHA256 = '<独立批准的node.exe SHA256>'
 
 --verify-key 为独立批准的 #373 套件发行公钥，也可用 --trust-fingerprint <独立批准SPKI-SHA256>，同时核源码和 Windows 附件。它与现场桌面发行钥不同。输出须新目录；UNC、设备路径、网络映射盘、junction、缺失输入、摘要/依赖锁变化会拒绝。可用 --platform-origin 预置成员入口，IP/HTTP 沿 installer 既有显式确认参数。
 
-构建用 --offline --frozen-lockfile --ignore-scripts 恢复独立依赖，Node 子进程继承网络拒绝守卫；生产依赖只复制本地输入。输出 exe、诊断 zip、构建记录、未签清单、SHA-256 和网络证据。把目录带到离线签名机，审阅来源/现场改动、公钥/资源根、包摘要、版本/序号/最低版本/渠道等，再人工确认摘要：
+每次从全新源码目录构建；源码树中预置 node_modules、dist、.pnpm-store 或未列入基线的 clients/dsh-plugin/ui 会在启动构建前拒绝，并提示 PowerShell 清理命令。构建用 --offline --frozen-lockfile --ignore-scripts 恢复独立依赖，Node 子进程继承网络拒绝守卫；生产依赖只复制本地输入。输出 exe、诊断 zip、构建记录、未签清单、SHA-256 和网络证据。把目录带到离线签名机，审阅来源/现场改动、公钥/资源根、包摘要、版本/序号/最低版本/渠道等；Git 来源会显示未通过发行者签名清单认证的醒目警告，须独立核对。再人工确认摘要：
 
 ```powershell
 .\scripts\client-release\auriga-client.cmd sign --dir D:\exports\desktop-102 --review-only
@@ -221,7 +221,7 @@ $env:AURIGA_CLIENT_NODE_SHA256 = '<独立批准的node.exe SHA256>'
 Remove-Item Env:AURIGA_CLIENT_ADMIN_AUTH
 ```
 
-发布前验签、核 exe 摘要及账本序号，发布后从门户同渠道 latest 验签并完整下载核长度/SHA256，拒绝跳转。自检失败可能已发布，先核管理台，不自动重发或撤回；没有近期会话就走管理台，不另造令牌。
+发布目录须同时保留 desktop-build.json；CLI 在任何网络请求前核 --public-key 的 SPKI 指纹与构建记录 publicKeyFingerprint 一致，再验签、核 exe 摘要及账本序号，发布后从门户同渠道 latest 验签并完整下载核长度/SHA256，拒绝跳转。自检失败可能已发布，先核管理台，不自动重发或撤回；没有近期会话就走管理台，不另造令牌。
 
 从门户下载，独立核首次安装件摘要。让固定同一现场发行公钥的旧客户端走托盘“检查更新→立即更新→重启以完成更新”，核目标版本、配置/会话保留与资源验签；下载及安装确认仍沿成员设置。CLI 回读不替代真实自动更新验收。
 

@@ -190,6 +190,13 @@ export function reviewRelease(options) {
       sizeBytes: body.sizeBytes,
       components: body.components,
       sourceCommit: record?.sourceCommit ?? null,
+      ...(record?.event === 'site_offline' &&
+      record?.source?.sourceType !== 'signed-archive'
+        ? {
+            sourceWarning:
+              '警告：Git 来源未通过发行者签名源码清单认证，请独立核对源码提交及工作区。',
+          }
+        : {}),
       ...(record?.source
         ? { source: record.source, siteChanges: record.siteChanges }
         : {}),
