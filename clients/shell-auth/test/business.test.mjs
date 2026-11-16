@@ -200,6 +200,118 @@ const call = (broker, operation, input) => ({
   expiresAt: new Date(Date.now() + 25000).toISOString(),
   call: { operation, input },
 });
+test('bound query and path identities come from broker context and fail closed before token exchange', async (t) => {
+  const f = fixture();
+  await login(f);
+  let exchanges = 0;
+  const tokenFor = f.broker.tokenFor.bind(f.broker);
+  f.broker.tokenFor = (...args) => {
+    exchanges++;
+    return tokenFor(...args);
+  };
+  const seen = [];
+  const proxy = new BusinessProxy(f.broker, async (url) => {
+    seen.push(new URL(url));
+    return Response.json({ items: [] });
+  });
+  t.after(async () => {
+    proxy.close();
+    await f.broker.close();
+  });
+  const context = f.broker.guard(f.broker.epoch, f.broker.revision);
+  for (const operation of [
+    'UnifiedListInstallations',
+    'listMemberResourceInstallations',
+  ]) {
+    assert.ok(
+      (await proxy.call(call(f.broker, operation, { limit: 200 }), OWNER))
+        .output,
+    );
+    assert.equal(seen.at(-1).searchParams.get('clientId'), f.identity.deviceId);
+    for (const clientId of [f.identity.deviceId, randomUUID()])
+      await assert.rejects(
+        proxy.call(call(f.broker, operation, { clientId }), OWNER),
+        { code: 'common.validation_failed' },
+      );
+  }
+  const schema = 'ShellAuthBoundParam_UnifiedListInstallations_clientId';
+  const definition = {
+    operation: 'UnifiedListInstallations',
+    route: '/api/resource/v1/{tenantId}/{ownerId}/{memberId}/{clientId}',
+    method: 'get',
+    audience: 'auriga',
+    requestHeaders: [],
+    responseHeaders: [],
+    output: 'ShellAuthOutput_UnifiedListInstallations',
+    boundParams: [
+      {
+        name: 'tenantId',
+        identity: 'tenantId',
+        in: 'path',
+        required: true,
+        schema,
+      },
+      {
+        name: 'ownerId',
+        identity: 'memberId',
+        in: 'path',
+        required: true,
+        schema,
+      },
+      {
+        name: 'memberId',
+        identity: 'memberId',
+        in: 'path',
+        required: true,
+        schema,
+      },
+      {
+        name: 'clientId',
+        identity: 'deviceId',
+        in: 'path',
+        required: true,
+        schema,
+      },
+      {
+        name: 'deviceId',
+        identity: 'deviceId',
+        in: 'query',
+        required: true,
+        schema,
+      },
+      {
+        name: 'optionalId',
+        identity: 'absent',
+        in: 'query',
+        required: false,
+        schema,
+      },
+    ],
+  };
+  await proxy.execute(definition, { limit: 200 }, context, 25000, OWNER);
+  assert.equal(
+    seen.at(-1).pathname,
+    `/api/resource/v1/${f.identity.tenantId}/${f.identity.memberId}/${f.identity.memberId}/${f.identity.deviceId}`,
+  );
+  assert.equal(seen.at(-1).searchParams.get('deviceId'), f.identity.deviceId);
+  assert.equal(seen.at(-1).searchParams.has('optionalId'), false);
+  const requests = seen.length;
+  const previousExchanges = exchanges;
+  for (const value of [undefined, '', randomUUID() + '/escape']) {
+    await assert.rejects(
+      proxy.execute(
+        definition,
+        {},
+        { ...context, identity: { ...context.identity, deviceId: value } },
+        25000,
+        OWNER,
+      ),
+      { code: 'common.unauthenticated' },
+    );
+  }
+  assert.equal(seen.length, requests);
+  assert.equal(exchanges, previousExchanges);
+});
 test('fixed proxy binds origin, bearer, headers and schema; retries reuse result and errors omit upstream text', async () => {
   const f = fixture();
   await login(f);

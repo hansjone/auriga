@@ -224,7 +224,6 @@ export function createMemberApi({
       let after;
       for (let pages = 0; pages < 1000; pages++) {
         const query = new URLSearchParams({
-          clientId: identity.clientId,
           limit: '200',
           ...(after ? { afterPackageId: after } : {}),
         });

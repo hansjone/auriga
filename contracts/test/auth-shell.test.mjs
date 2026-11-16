@@ -57,6 +57,72 @@ const operations = JSON.parse(
   read('plugin/shell-business-operations.json'),
 ).operations;
 
+test('every projected identity parameter retains its location, requirement and broker binding', () => {
+  const bindings = {
+    clientId: 'deviceId',
+    deviceId: 'deviceId',
+    tenantId: 'tenantId',
+    ownerId: 'memberId',
+    memberId: 'memberId',
+  };
+  const schema = JSON.parse(read('plugin/shell-business.schema.json'));
+  const specs = new Map(
+    [...new Set(operations.map((op) => op.source).filter(Boolean))].map(
+      (source) => [source, YAML.parse(read(source))],
+    ),
+  );
+  const affected = [];
+  for (const definition of operations.filter((op) => op.source)) {
+    const spec = specs.get(definition.source);
+    const item = spec.paths[definition.route];
+    const op = item[definition.method];
+    const params = [...(item.parameters ?? []), ...(op.parameters ?? [])]
+      .map((param) => {
+        if (!param.$ref) return param;
+        const [relative, fragment] = param.$ref.split('#');
+        let value = YAML.parse(
+          read(
+            new URL(
+              relative || definition.source.split('/').at(-1),
+              new URL(definition.source, root),
+            ),
+          ),
+        );
+        for (const part of fragment.split('/').slice(1)) value = value[part];
+        return value;
+      })
+      .filter(
+        (p) =>
+          ['path', 'query'].includes(p.in) && Object.hasOwn(bindings, p.name),
+      );
+    assert.equal(
+      definition.boundParams?.length ?? 0,
+      params.length,
+      definition.operation,
+    );
+    for (const param of params) {
+      affected.push(definition.operation);
+      const bound = definition.boundParams.find(
+        (p) => p.name === param.name && p.in === param.in,
+      );
+      assert.equal(bound.identity, bindings[param.name]);
+      assert.equal(
+        bound.required,
+        param.in === 'path' || param.required === true,
+      );
+      assert.ok(schema.$defs[bound.schema]);
+      assert.equal(
+        Object.hasOwn(schema.$defs[definition.input].properties, param.name),
+        false,
+      );
+    }
+  }
+  assert.deepEqual(affected.sort(), [
+    'UnifiedListInstallations',
+    'listMemberResourceInstallations',
+  ]);
+});
+
 test('AUTH-K fixed operation projection stays current and covers all platform families', () => {
   const result = spawnSync(
     process.execPath,

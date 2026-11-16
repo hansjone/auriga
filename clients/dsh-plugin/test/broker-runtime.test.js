@@ -262,10 +262,20 @@ test('arbitrary fetch-style platform targets and unknown operations fail before 
     '//portal.example.com/api/resource/v1/catalog/packages',
     '/api/iam/v1/me',
     '/api/resource/v1/new',
-    '/api/resource/v1/catalog/packages?url=https://other.example.com',
     '/api/resource/v1/../packages',
   ])
     await assert.rejects(resourceRequest(runtime, path));
+  // The real schema emits a coded validation error, mapped to an HTTP response
+  // by the resource adapter before any IPC business request is sent.
+  assert.equal(
+    (
+      await resourceRequest(
+        runtime,
+        '/api/resource/v1/catalog/packages?url=https://other.example.com',
+      )
+    ).status,
+    400,
+  );
   assert.equal(connection.calls.length, before);
   await assert.rejects(runtime.broker.call('unknown', {}));
 });
