@@ -15,6 +15,7 @@ import { verifyResourceArchive } from '../../src/resources/verify.js';
 import { validateArchive } from '../../src/resources/archive.js';
 import { resourceHost } from '../../src/resources/host.js';
 import { id, tarball } from './fixtures.js';
+import { diagnoseResource } from '../../src/resources/diagnostics.js';
 const now = Date.parse('2026-11-12T00:00:00Z');
 const signed = (body, key, kid = 'revocation') => ({
   ...body,
@@ -106,11 +107,42 @@ test('resource trust roots come only from an explicit independent local deployme
   assert.equal((await readResourceRoots(file)).releaseKeys.size, 1);
   await assert.rejects(readResourceRoots(undefined), {
     code: 'resource.storage_unavailable',
+    reason: 'trust_roots_missing',
   });
+  await assert.rejects(readResourceRoots(join(dir, 'missing.json')), {
+    reason: 'trust_roots_missing',
+  });
+  await assert.rejects(readResourceRoots(join(file, 'unreadable.json')), {
+    reason: 'trust_roots_missing',
+  });
+  for (const invalid of [
+    '{broken json',
+    JSON.stringify({
+      ...value,
+      releaseKeys: [...value.releaseKeys, ...value.releaseKeys],
+    }),
+    JSON.stringify({ ...value, schemaVersion: 2 }),
+    JSON.stringify({
+      ...value,
+      releaseKeys: [{ kid: 'release', publicKeySpki: 'invalid-key' }],
+    }),
+  ]) {
+    await writeFile(file, invalid);
+    await assert.rejects(readResourceRoots(file), (error) => {
+      assert.equal(error.reason, 'trust_roots_invalid');
+      assert.equal(error.stage, 'trust_roots');
+      assert.equal(
+        diagnoseResource(error, 'catalog', () => {}).body.reason,
+        'trust_roots_invalid',
+      );
+      return true;
+    });
+  }
   value.revocationKeys = [entry('revocation', release)];
   await writeFile(file, JSON.stringify(value));
   await assert.rejects(readResourceRoots(file), {
     code: 'resource.signature_invalid',
+    reason: 'trust_roots_invalid',
   });
 });
 test('archive admission rejects traversal, links, scripts, unresolved dependencies and compression bombs without extraction', async () => {

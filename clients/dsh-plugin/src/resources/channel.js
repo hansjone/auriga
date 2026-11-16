@@ -169,7 +169,6 @@ export function createResourceHandler({
           404: 'common.not_found',
           409: 'common.conflict',
           412: 'common.precondition_failed',
-          422: 'resource.signature_invalid',
           429: 'common.rate_limited',
         };
         const failure = diagnoseResource(
@@ -184,13 +183,21 @@ export function createResourceHandler({
       }
       if (write && response.status !== 202) {
         await response.body?.cancel();
-        return send(502);
+        throw resourceFailure(
+          'common.unavailable',
+          'platform_unreachable',
+          'platform',
+        );
       }
       if (
         !response.headers.get('content-type')?.startsWith('application/json')
       ) {
         await response.body?.cancel();
-        return send(502);
+        throw resourceFailure(
+          'common.unavailable',
+          'platform_unreachable',
+          'platform',
+        );
       }
       const chunks = [];
       let size = 0;
@@ -203,7 +210,11 @@ export function createResourceHandler({
             size += value.byteLength;
             if (size > 1048576) {
               await stream.cancel();
-              return send(502);
+              throw resourceFailure(
+                'common.unavailable',
+                'platform_unreachable',
+                'platform',
+              );
             }
             chunks.push(value);
           }
@@ -218,7 +229,20 @@ export function createResourceHandler({
     } catch (error) {
       if (current() !== runtime || !runtime.resolve(req))
         return send(401, { code: 'common.unauthenticated' });
-      const failure = diagnoseResource(error, 'platform');
+      // This branch transports unsigned catalogue JSON. The strict wire parser
+      // shares a verifier error code; a protocol failure here is not a bad signature.
+      const failure = diagnoseResource(
+        ['resource.signature_invalid', 'resource.digest_mismatch'].includes(
+          /** @type {any} */ (error)?.code,
+        )
+          ? resourceFailure(
+              'common.unavailable',
+              'platform_unreachable',
+              'platform',
+            )
+          : error,
+        'platform',
+      );
       return send(failure.status, failure.body);
     }
   };

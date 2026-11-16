@@ -19,6 +19,7 @@ const statuses = {
 const reasons = new Set([
   'guardian_missing',
   'trust_roots_missing',
+  'trust_roots_invalid',
   'signature_invalid',
   'platform_unreachable',
   'storage_unavailable',

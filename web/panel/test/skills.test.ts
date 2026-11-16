@@ -314,6 +314,7 @@ it('waits for explicit collision confirmation before retrying an exact install',
 it.each([
   ['guardian_missing', '可信 guardian'],
   ['trust_roots_missing', '签名信任根缺失'],
+  ['trust_roots_invalid', '签名信任根配置无效'],
   ['signature_invalid', '有效期校验失败'],
   ['platform_unreachable', '平台不可达'],
   ['state_conflict', '安装状态已变化'],

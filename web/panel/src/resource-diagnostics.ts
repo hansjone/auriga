@@ -7,6 +7,10 @@ const hints: Record<string, [string, string]> = {
     '签名信任根缺失或不可读。请更新 Auriga 客户端，或请管理员检查资源签名配置后刷新。',
     'Signature trust roots are missing or unreadable. Update Auriga, or ask an administrator to check resource signing configuration.',
   ],
+  trust_roots_invalid: [
+    '签名信任根配置无效。请联系管理员检查文件格式、kid 是否重复及公钥内容，修复后刷新。',
+    'Signature trust root configuration is invalid. Ask an administrator to check the file format, duplicate key IDs and public keys, then refresh after correcting it.',
+  ],
   signature_invalid: [
     '资源签名、摘要、撤销或有效期校验失败。请检查本机时间，并联系管理员重新发布或续签此版本。',
     'Signature, digest, revocation or expiry checks failed. Check your clock and ask an administrator to publish or renew this version.',

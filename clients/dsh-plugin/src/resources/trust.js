@@ -173,12 +173,18 @@ export function packagedResourceTrustFile(
 }
 /** @param {string|undefined} file */
 export async function readResourceRoots(file) {
+  const source = file ?? packagedResourceTrustFile();
   try {
-    return await loadResourceRoots(file ?? packagedResourceTrustFile(), !file);
+    return await loadResourceRoots(source, !file);
   } catch (error) {
     const failure = /** @type {any} */ (error);
     failure.stage = 'trust_roots';
-    failure.reason = 'trust_roots_missing';
+    // Filesystem failures mean missing/unreadable deployment material. Once
+    // readable, shape/key/size/path-policy failures require correcting that material.
+    failure.reason =
+      !source || typeof failure.syscall === 'string'
+        ? 'trust_roots_missing'
+        : 'trust_roots_invalid';
     if (
       ['resource.signature_invalid', 'resource.storage_unavailable'].includes(
         /** @type {any} */ (error).code,
