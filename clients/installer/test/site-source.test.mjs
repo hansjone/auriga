@@ -24,6 +24,7 @@ import {
   snapshotInventory,
 } from '../../../scripts/client-release/source.mjs';
 import { verifySignedInventory } from '../../../scripts/client-release/trust.mjs';
+import { parseMetadataJson } from '../../../scripts/client-release/trust.mjs';
 
 test('signed Windows addition shares PR373 issuer trust and rejects metadata tampering', (t) => {
   const root = mkdtempSync(join(ROOT, 'clients/installer/target/addon-test-'));
@@ -90,6 +91,27 @@ test('makeRelease records signed archive provenance without invoking Git', (t) =
   } finally {
     process.env.PATH = previous;
   }
+});
+test('large source metadata permits thousands of files but rejects duplicate escaped keys and unsafe integers', () => {
+  const files = Object.fromEntries(
+    Array.from({ length: 1500 }, (_, i) => [
+      `f${i}.js`,
+      { sha256: 'a'.repeat(64), mode: 420 },
+    ]),
+  );
+  assert.equal(
+    Object.keys(parseMetadataJson(Buffer.from(JSON.stringify({ files }))).files)
+      .length,
+    1500,
+  );
+  assert.throws(
+    () => parseMetadataJson(Buffer.from('{"files":{},"\\u0066iles":{}}')),
+    /重复键/,
+  );
+  assert.throws(
+    () => parseMetadataJson(Buffer.from('{"n":9007199254740993}')),
+    /不安全/,
+  );
 });
 function fixture(t) {
   const root = mkdtempSync(join(ROOT, 'clients/installer/target/source-test-'));

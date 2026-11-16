@@ -1,11 +1,79 @@
 /** PR373 wire format: raw SHA256SUMS signed with Ed25519, standard base64. */
-import { Buffer } from 'node:buffer';
+import { Buffer, isUtf8 } from 'node:buffer';
 import { createHash, createPublicKey, verify } from 'node:crypto';
 import { readFileSync, statSync, lstatSync } from 'node:fs';
 import { join } from 'node:path';
 import { physical } from './platform.mjs';
 import { sha256File } from '../../clients/installer/runtime/verify.mjs';
-import { parseStrictJson } from '../../clients/installer/runtime/json.mjs';
+
+// Source manifests contain thousands of file keys; the resource statement
+// parser's 512-key object limit is intentionally smaller. Keep a separate,
+// bounded duplicate-key scan, and let JSON.parse validate the full grammar.
+export function parseMetadataJson(bytes) {
+  if (!bytes.length || bytes.length > 32 * 1024 ** 2 || !isUtf8(bytes))
+    throw new Error('发行元数据大小或UTF-8无效');
+  const text = bytes.toString('utf8');
+  const parsed = JSON.parse(text, (_key, value) => {
+    if (typeof value === 'number' && !Number.isSafeInteger(value))
+      throw new Error('发行元数据含不安全数值');
+    return value;
+  });
+  let index = 0,
+    count = 0;
+  const ws = () => {
+    while (index < text.length && /\s/.test(text[index])) index++;
+  };
+  const string = () => {
+    const start = index++;
+    while (index < text.length) {
+      if (text[index] === '\\') {
+        index += 2;
+        continue;
+      }
+      if (text[index++] === '"') break;
+    }
+    const value = JSON.parse(text.slice(start, index));
+    if (!value.isWellFormed() || value.length > 65536)
+      throw new Error('发行元数据字符串无效');
+    return value;
+  };
+  const scan = (depth) => {
+    if (depth > 16 || ++count > 500000) throw new Error('发行元数据结构超限');
+    ws();
+    if (text[index] === '"') {
+      string();
+      return;
+    }
+    const open = text[index];
+    if (open === '{' || open === '[') {
+      const close = open === '{' ? '}' : ']',
+        keys = new Set();
+      index++;
+      ws();
+      while (text[index] !== close) {
+        if (open === '{') {
+          const key = string();
+          if (keys.has(key)) throw new Error('发行元数据重复键');
+          keys.add(key);
+          ws();
+          index++;
+        }
+        scan(depth + 1);
+        ws();
+        if (text[index] === close) break;
+        index++;
+        ws();
+      }
+      index++;
+      return;
+    }
+    while (index < text.length && !/[\s,}\]]/.test(text[index])) index++;
+  };
+  scan(0);
+  ws();
+  if (index !== text.length) throw new Error('发行元数据格式无效');
+  return parsed;
+}
 
 export const hash = (bytes) => createHash('sha256').update(bytes).digest('hex');
 export function smallFile(path, limit) {
@@ -58,7 +126,7 @@ export function verifySignedInventory(
       const bytes = smallFile(file, 32 * 1024 ** 2);
       if (sha256File(file) !== entries.get(name))
         throw new Error(`签名元数据摘要不匹配：${name}`);
-      return parseStrictJson(bytes);
+      return parseMetadataJson(bytes);
     },
   };
 }
