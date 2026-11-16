@@ -158,7 +158,13 @@ if (
     const result = await main(process.argv.slice(2));
     if (result) console.log(JSON.stringify(result, null, 2));
   } catch (error) {
-    console.error(`客户端发行失败：${error.message}`);
+    const action =
+      process.argv[2] === 'client' ? process.argv[3] : process.argv[2];
+    console.error(
+      action === 'sign'
+        ? '客户端发行审阅或签名失败，请核对制品、私钥权限和确认摘要。'
+        : `客户端发行失败：${error.message}`,
+    );
     process.exitCode = 1;
   }
 }

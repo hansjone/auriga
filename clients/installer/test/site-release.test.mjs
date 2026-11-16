@@ -306,6 +306,25 @@ test('site-sign-review requires explicit site profile, current review digest and
   }
   writeFileSync(options.buildRecord, JSON.stringify(record));
   const next = signCommand({ dir, 'review-only': true });
+  const missingPrivate = join(dir, 'missing-private.pem');
+  const failed = spawnSync(
+    process.execPath,
+    [
+      join(ROOT, 'scripts/client-release/cli.mjs'),
+      'client',
+      'sign',
+      '--dir',
+      dir,
+      '--key-file',
+      missingPrivate,
+      '--confirm-sha256',
+      next.reviewSha256,
+    ],
+    { encoding: 'utf8' },
+  );
+  assert.equal(failed.status, 1);
+  assert.match(failed.stderr, /签名失败/);
+  assert.equal((failed.stdout + failed.stderr).includes(missingPrivate), false);
   const wrong = join(dir, 'wrong');
   generateDesktopKeys(wrong);
   assert.throws(
