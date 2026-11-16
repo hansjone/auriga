@@ -140,14 +140,13 @@ if exist %WRAPPER_JAR% (
         echo Downloading from: %WRAPPER_URL%
     )
 
-    @REM Use the JDK trust store, consistently with Maven itself.
-    pushd "%MAVEN_PROJECTBASEDIR%"
-    %MAVEN_JAVA_EXE% ".mvn\wrapper\MavenWrapperDownloader.java" "%WRAPPER_URL%" ".mvn\wrapper\maven-wrapper.jar"
-    if errorlevel 1 (
-        popd
-        goto error
-    )
-    popd
+    powershell -Command "&{"^
+		"$webclient = new-object System.Net.WebClient;"^
+		"if (-not ([string]::IsNullOrEmpty('%MVNW_USERNAME%') -and [string]::IsNullOrEmpty('%MVNW_PASSWORD%'))) {"^
+		"$webclient.Credentials = new-object System.Net.NetworkCredential('%MVNW_USERNAME%', '%MVNW_PASSWORD%');"^
+		"}"^
+		"[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; $webclient.DownloadFile('%WRAPPER_URL%', '%WRAPPER_JAR%')"^
+		"}"
     if "%MVNW_VERBOSE%" == "true" (
         echo Finished downloading %WRAPPER_JAR%
     )
