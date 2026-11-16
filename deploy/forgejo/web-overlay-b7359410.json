@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "sourceCommit": "b7359410db3dcf1107af240a2a6d2f85bae6a5e6",
+  "baseArchive": "auriga-build-web-inputs-linux-amd64-963bfe65-r2.tar.gz",
+  "baseArchiveSha256": "34b7ef5fb8c2a7a9ed39c5444d352c77aa301307b80c2a554b2d6fc34f778d06",
+  "baseSourceLocksSha256": "d148ea6727e1ecd0bd2efc76aa0c5b1db1c3a3a6b3d2b3ad3eb9ae01b02730c5",
+  "files": [
+    {
+      "file": "web-source-locks-b7359410.sha256",
+      "destination": "source-locks.sha256",
+      "sha256": "430ef213257d93f1a5abe8b0c67b607526319923f9359dc2708f35eed235a20d"
+    },
+    {
+      "file": "web-files-b7359410.sha256",
+      "destination": "SHA256SUMS",
+      "sha256": "5d2094f4ed0c5c67f4d9634442c3dcbc02480174fc1dd444ed14cdb0caea4768"
+    }
+  ],
+  "sourceChange": {
+    "file": "web/panel/package.json",
+    "onlyScriptsChanged": true,
+    "manifestWithoutScriptsSha256": "156accbef5e05c30e99a2c10330ffe67db21a9e0d62609e7b456f67cb6bc7f2c"
+  }
+}

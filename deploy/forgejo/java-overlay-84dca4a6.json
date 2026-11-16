@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 1,
+  "sourceCommit": "84dca4a66e6a09f6c6e00628d833fce41920d855",
+  "baseArchive": "auriga-build-java-inputs-linux-amd64-784643c8.tar.gz",
+  "baseArchiveSha256": "62b9367439c341f83f0cda4c55d5a992b3c485a08eae72c3097f236f61349edc",
+  "baseSourceLocksSha256": "0f0b50ead7efd27d9c5a93bd5bd808205b254ab69e18f532dde193428681503c",
+  "files": [
+    {
+      "destination": "source-locks.sha256",
+      "file": "java-source-locks-84dca4a6.sha256",
+      "sha256": "37e311b7b3bc7935230bc4cb9c6933c3247a995ae100b581c074a1264c2c31ae"
+    },
+    {
+      "destination": "SHA256SUMS",
+      "file": "java-files-84dca4a6.sha256",
+      "sha256": "480d744a3721048c614257f44bb7f2f0d0e8e628cfdb75553d186fdfe9f35d68"
+    }
+  ],
+  "dependencyChange": {
+    "file": "services/collab/impl/pom.xml",
+    "sha256": "460b0a9cc11949511199a4d2e7f42991953229f85cbfa47a2fccff0c20f88da6",
+    "coordinate": "org.bouncycastle:bcprov-jdk18on:1.83",
+    "jarSha256": "82cf3a2af766c3bc874f6d36b9f20a8b99a8f09762dc776e8a227a45d8daaafb"
+  }
+}

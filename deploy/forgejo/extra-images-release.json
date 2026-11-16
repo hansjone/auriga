@@ -1,0 +1,771 @@
+{
+  "schemaVersion": 1,
+  "sourceCommit": "84dca4a66e6a09f6c6e00628d833fce41920d855",
+  "platform": "linux/amd64",
+  "package": "auriga-site-build-extra-images",
+  "version": "84dca4a6-linux-amd64-r1",
+  "artifacts": [
+    {
+      "file": "grafana-alloy-v1.10.2.tar.gz.part000",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-alloy-v1.10.2.tar.gz.part000",
+      "bytes": 4194304,
+      "sha256": "89293682445aa39b503832ad342bd2105930e5b7da43e5c3259b2f715daf4f62"
+    },
+    {
+      "file": "grafana-alloy-v1.10.2.tar.gz.part001",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-alloy-v1.10.2.tar.gz.part001",
+      "bytes": 4194304,
+      "sha256": "96d9be035cfd2100d4cddc99dbe8d2d00f40eefa90fa4308c02105945229da70"
+    },
+    {
+      "file": "grafana-alloy-v1.10.2.tar.gz.part002",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-alloy-v1.10.2.tar.gz.part002",
+      "bytes": 4194304,
+      "sha256": "8b6886326eb35ef42676bb2d2670fd2a4efe945fbf67df91c3f813c79f7929d7"
+    },
+    {
+      "file": "grafana-alloy-v1.10.2.tar.gz.part003",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-alloy-v1.10.2.tar.gz.part003",
+      "bytes": 4194304,
+      "sha256": "8fed46b8ac3569cbdc63ab172f4f7a96e52889b1ae1ff196d3269c3062e118c8"
+    },
+    {
+      "file": "grafana-alloy-v1.10.2.tar.gz.part004",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-alloy-v1.10.2.tar.gz.part004",
+      "bytes": 4194304,
+      "sha256": "ee16a4d8ec211154bb07d266f0fe3eaf78d6075cc4398bed0decf4b766565974"
+    },
+    {
+      "file": "grafana-alloy-v1.10.2.tar.gz.part005",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-alloy-v1.10.2.tar.gz.part005",
+      "bytes": 4194304,
+      "sha256": "f3b15e0e552ba389a8bfc842bafb9234281ec5690b242f07c41fc258672f80fb"
+    },
+    {
+      "file": "grafana-alloy-v1.10.2.tar.gz.part006",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-alloy-v1.10.2.tar.gz.part006",
+      "bytes": 4194304,
+      "sha256": "2d2eaa4512b1f25a7ee83b5aae1dd0b6ab6583bb345ea110e259004b9e8087bf"
+    },
+    {
+      "file": "grafana-alloy-v1.10.2.tar.gz.part007",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-alloy-v1.10.2.tar.gz.part007",
+      "bytes": 4194304,
+      "sha256": "442c90e728e4a42fe0f79c8283781bcba3ba1a1d656b5ec73c49b5510b44ed86"
+    },
+    {
+      "file": "grafana-alloy-v1.10.2.tar.gz.part008",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-alloy-v1.10.2.tar.gz.part008",
+      "bytes": 4194304,
+      "sha256": "70cf0c4072044ccffe72af139c52a0f1f03518b2c1982bc335cfff4b0b038be4"
+    },
+    {
+      "file": "grafana-alloy-v1.10.2.tar.gz.part009",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-alloy-v1.10.2.tar.gz.part009",
+      "bytes": 4194304,
+      "sha256": "584c72308f4c3890440eba320638635a4074b83da46c8d4e764aba48502f5b43"
+    },
+    {
+      "file": "grafana-alloy-v1.10.2.tar.gz.part010",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-alloy-v1.10.2.tar.gz.part010",
+      "bytes": 4194304,
+      "sha256": "195458b30cefcdcb92d3da43b337fdcec489e97eb9a0a4903dea7592ee5515c6"
+    },
+    {
+      "file": "grafana-alloy-v1.10.2.tar.gz.part011",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-alloy-v1.10.2.tar.gz.part011",
+      "bytes": 4194304,
+      "sha256": "3b4023b43ff87be2077670771b741992aec8b9a5b4e479414917e8bbeeac64e3"
+    },
+    {
+      "file": "grafana-alloy-v1.10.2.tar.gz.part012",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-alloy-v1.10.2.tar.gz.part012",
+      "bytes": 4194304,
+      "sha256": "00ffe923c1e503b9eab6b9bd4d30e32647caf704e49c7ccaf0af9e0fe9b8548d"
+    },
+    {
+      "file": "grafana-alloy-v1.10.2.tar.gz.part013",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-alloy-v1.10.2.tar.gz.part013",
+      "bytes": 4194304,
+      "sha256": "33296fc2b2f5c4c8c4b3362b3296ff2a6dbec812290d9bfdd86e50322328f456"
+    },
+    {
+      "file": "grafana-alloy-v1.10.2.tar.gz.part014",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-alloy-v1.10.2.tar.gz.part014",
+      "bytes": 4194304,
+      "sha256": "633ef57cb4d0cc1bfe746d12e13ccce95eba273b1fb1daa82be06ca58d933d39"
+    },
+    {
+      "file": "grafana-alloy-v1.10.2.tar.gz.part015",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-alloy-v1.10.2.tar.gz.part015",
+      "bytes": 4194304,
+      "sha256": "8caacfde14993f482f0846c9b484aa585880355b534f3dde4e7231b77bff3716"
+    },
+    {
+      "file": "grafana-alloy-v1.10.2.tar.gz.part016",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-alloy-v1.10.2.tar.gz.part016",
+      "bytes": 4194304,
+      "sha256": "614ce855e66b446df9f7694e9a0eeac050b4321e8ee04961be802073e42896d0"
+    },
+    {
+      "file": "grafana-alloy-v1.10.2.tar.gz.part017",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-alloy-v1.10.2.tar.gz.part017",
+      "bytes": 4194304,
+      "sha256": "478056c580f270f61d12945a6d81ea6858dcdce37b239d0b7ea4d61ff8a43c6c"
+    },
+    {
+      "file": "grafana-alloy-v1.10.2.tar.gz.part018",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-alloy-v1.10.2.tar.gz.part018",
+      "bytes": 4194304,
+      "sha256": "45aff2a60256f3e67fd3dc18b71be6b46490097c4ad825d4e4e8be9a1480fc8d"
+    },
+    {
+      "file": "grafana-alloy-v1.10.2.tar.gz.part019",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-alloy-v1.10.2.tar.gz.part019",
+      "bytes": 4194304,
+      "sha256": "bf4331f5e5f4ec187419d0ca811d8218c4f9517f6ec0c91bc1bd324afbb0436f"
+    },
+    {
+      "file": "grafana-alloy-v1.10.2.tar.gz.part020",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-alloy-v1.10.2.tar.gz.part020",
+      "bytes": 4194304,
+      "sha256": "d6dd6d418e20ee594c4e68bf8e889315da8a16e150edae57176d74af0f5f89a5"
+    },
+    {
+      "file": "grafana-alloy-v1.10.2.tar.gz.part021",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-alloy-v1.10.2.tar.gz.part021",
+      "bytes": 4194304,
+      "sha256": "606418d1a6182946f945eed120150df2024cb63b1247419b7cab2323a25956ce"
+    },
+    {
+      "file": "grafana-alloy-v1.10.2.tar.gz.part022",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-alloy-v1.10.2.tar.gz.part022",
+      "bytes": 4194304,
+      "sha256": "bc26cb89d4ce6a2dfb6cb787fc0293400cc906369aa3beda893039a4f5483a52"
+    },
+    {
+      "file": "grafana-alloy-v1.10.2.tar.gz.part023",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-alloy-v1.10.2.tar.gz.part023",
+      "bytes": 4194304,
+      "sha256": "f5a08f147b1a42deea62e810652ce60ea73c4782415af03f47940341e60164de"
+    },
+    {
+      "file": "grafana-alloy-v1.10.2.tar.gz.part024",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-alloy-v1.10.2.tar.gz.part024",
+      "bytes": 4194304,
+      "sha256": "41748b51a06f011a6890f98642dacd3743572b54d2a3cf2aaf45a17030747cbd"
+    },
+    {
+      "file": "grafana-alloy-v1.10.2.tar.gz.part025",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-alloy-v1.10.2.tar.gz.part025",
+      "bytes": 4194304,
+      "sha256": "ed2ff2f30c4f44ff17b56e6ae5dd2b2d556481513b8865b7fb1175d6c41c9523"
+    },
+    {
+      "file": "grafana-alloy-v1.10.2.tar.gz.part026",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-alloy-v1.10.2.tar.gz.part026",
+      "bytes": 4194304,
+      "sha256": "f89d84323d2f4b14b547164878f42445bde099f7b5b5d43fec1d36008a2958df"
+    },
+    {
+      "file": "grafana-alloy-v1.10.2.tar.gz.part027",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-alloy-v1.10.2.tar.gz.part027",
+      "bytes": 4194304,
+      "sha256": "6f2b02ae1f2ea6e162ba8d627b5053c1cc65582c88e2e0282baa27f82a1e3483"
+    },
+    {
+      "file": "grafana-alloy-v1.10.2.tar.gz.part028",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-alloy-v1.10.2.tar.gz.part028",
+      "bytes": 4194304,
+      "sha256": "00daae5eb0450d11617a9f2227670d3500c829f03687a38eef08ff31554ed990"
+    },
+    {
+      "file": "grafana-alloy-v1.10.2.tar.gz.part029",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-alloy-v1.10.2.tar.gz.part029",
+      "bytes": 4194304,
+      "sha256": "322c8298641ae168d2e1b51b643916e2fc970505c1beba77249cb7a88ef06909"
+    },
+    {
+      "file": "grafana-alloy-v1.10.2.tar.gz.part030",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-alloy-v1.10.2.tar.gz.part030",
+      "bytes": 4194304,
+      "sha256": "fc5976f47b96f414d0934f4b6a1e15a32618e3a4cbbf856365c6bb9f56899a0d"
+    },
+    {
+      "file": "grafana-alloy-v1.10.2.tar.gz.part031",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-alloy-v1.10.2.tar.gz.part031",
+      "bytes": 4194304,
+      "sha256": "bdaf6d0e742ad3d3fd88e88f5235e2f9faf9906cb47654df0d6d67a18619ca7d"
+    },
+    {
+      "file": "grafana-alloy-v1.10.2.tar.gz.part032",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-alloy-v1.10.2.tar.gz.part032",
+      "bytes": 4194304,
+      "sha256": "99223a5fe97a76d0ef53421baf0f795fa487e78469dba834da13863b9261083b"
+    },
+    {
+      "file": "grafana-alloy-v1.10.2.tar.gz.part033",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-alloy-v1.10.2.tar.gz.part033",
+      "bytes": 4194304,
+      "sha256": "16ce488a00cb1abefe31fe9e8a6730a530c5dd05aaaaff00c659f43269a8548a"
+    },
+    {
+      "file": "grafana-alloy-v1.10.2.tar.gz.part034",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-alloy-v1.10.2.tar.gz.part034",
+      "bytes": 4194304,
+      "sha256": "36496e99f47275e9a685ac9a08972eb9f98a660a40e12e010313650aeb4ba092"
+    },
+    {
+      "file": "grafana-alloy-v1.10.2.tar.gz.part035",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-alloy-v1.10.2.tar.gz.part035",
+      "bytes": 4194304,
+      "sha256": "4cf28f24f3c91dd257394dd1f8880dba8691ad896103bd9b2ad9a622ed53ec3b"
+    },
+    {
+      "file": "grafana-alloy-v1.10.2.tar.gz.part036",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-alloy-v1.10.2.tar.gz.part036",
+      "bytes": 4194304,
+      "sha256": "b5efbacb480cc2c22343042fda7d8706d785350b7aabd4e90c6a6819a3850bd3"
+    },
+    {
+      "file": "grafana-alloy-v1.10.2.tar.gz.part037",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-alloy-v1.10.2.tar.gz.part037",
+      "bytes": 3160765,
+      "sha256": "d4d3fbe67fb0b4d10f986212c69565d0f7203f95100e22d16110e8d5d81bd17f"
+    },
+    {
+      "file": "grafana-grafana-12.1.1.tar.gz.part000",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-grafana-12.1.1.tar.gz.part000",
+      "bytes": 4194304,
+      "sha256": "71a350cac2ca9b5181353d9a09763b5a08a60bba5724fb66e71d80b544f39033"
+    },
+    {
+      "file": "grafana-grafana-12.1.1.tar.gz.part001",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-grafana-12.1.1.tar.gz.part001",
+      "bytes": 4194304,
+      "sha256": "5e99eba48dcf9a943a448a52fdda5bfc6e23e52d232f46600b6998448183ac37"
+    },
+    {
+      "file": "grafana-grafana-12.1.1.tar.gz.part002",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-grafana-12.1.1.tar.gz.part002",
+      "bytes": 4194304,
+      "sha256": "30f95dc30ee4c5f042e4ccbea4319fe95d434f4712e49298c022fc0776837499"
+    },
+    {
+      "file": "grafana-grafana-12.1.1.tar.gz.part003",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-grafana-12.1.1.tar.gz.part003",
+      "bytes": 4194304,
+      "sha256": "d8fe5ea8a4562a254a292a97bcd66fd2d1cfb9f5eaf8b724306d7426ed3eafcb"
+    },
+    {
+      "file": "grafana-grafana-12.1.1.tar.gz.part004",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-grafana-12.1.1.tar.gz.part004",
+      "bytes": 4194304,
+      "sha256": "f6405aba3dcba87c4f36f4bd01612e2f54f610843eb2cbfa74bec98a468b2588"
+    },
+    {
+      "file": "grafana-grafana-12.1.1.tar.gz.part005",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-grafana-12.1.1.tar.gz.part005",
+      "bytes": 4194304,
+      "sha256": "b3cb151362f83a12f6af403bb75d64fa6d186309c58f390b0eeaa97821e0fb6f"
+    },
+    {
+      "file": "grafana-grafana-12.1.1.tar.gz.part006",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-grafana-12.1.1.tar.gz.part006",
+      "bytes": 4194304,
+      "sha256": "61529962bb5e0114abd78bd3d37e0f8a6e0d319b744546923703c024d89682d9"
+    },
+    {
+      "file": "grafana-grafana-12.1.1.tar.gz.part007",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-grafana-12.1.1.tar.gz.part007",
+      "bytes": 4194304,
+      "sha256": "76885e37a23a3d2e06824e55869b58a84eea7ab2d02b90c3e8b562dfff056f02"
+    },
+    {
+      "file": "grafana-grafana-12.1.1.tar.gz.part008",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-grafana-12.1.1.tar.gz.part008",
+      "bytes": 4194304,
+      "sha256": "8fe5f8ec51adecdec8b6efab6a3429c7c15c15f149175b23e5ecee8ec743b0d0"
+    },
+    {
+      "file": "grafana-grafana-12.1.1.tar.gz.part009",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-grafana-12.1.1.tar.gz.part009",
+      "bytes": 4194304,
+      "sha256": "afb62d2e42434087c1c899dc65e061b7b681d8f1ccaa87ce9d3dc14df6c8c791"
+    },
+    {
+      "file": "grafana-grafana-12.1.1.tar.gz.part010",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-grafana-12.1.1.tar.gz.part010",
+      "bytes": 4194304,
+      "sha256": "315e34b14c3615684fc1ecca2c1cb69fe33d4a1d08623a8ff0c00c6b4d9954dd"
+    },
+    {
+      "file": "grafana-grafana-12.1.1.tar.gz.part011",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-grafana-12.1.1.tar.gz.part011",
+      "bytes": 4194304,
+      "sha256": "64e84832ce407e4f4aaa79d4c73bc8e32383e732a3618bb544c02232ea1128ef"
+    },
+    {
+      "file": "grafana-grafana-12.1.1.tar.gz.part012",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-grafana-12.1.1.tar.gz.part012",
+      "bytes": 4194304,
+      "sha256": "df476f4d8edd85a0ff555da449bb821471fe3eb8ebd2bb91dafa54c2f9bac5cc"
+    },
+    {
+      "file": "grafana-grafana-12.1.1.tar.gz.part013",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-grafana-12.1.1.tar.gz.part013",
+      "bytes": 4194304,
+      "sha256": "95ce6355ae19c4bd9775b63070ee36a902a5254db9791038027732ab5f416819"
+    },
+    {
+      "file": "grafana-grafana-12.1.1.tar.gz.part014",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-grafana-12.1.1.tar.gz.part014",
+      "bytes": 4194304,
+      "sha256": "368e155b94714468c18698323922de120786701ce58c25bac938fcd931be1258"
+    },
+    {
+      "file": "grafana-grafana-12.1.1.tar.gz.part015",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-grafana-12.1.1.tar.gz.part015",
+      "bytes": 4194304,
+      "sha256": "d355884deb9b6a3eb896e5bf63b70f8f97705ce2838493fb871fdeefab66b349"
+    },
+    {
+      "file": "grafana-grafana-12.1.1.tar.gz.part016",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-grafana-12.1.1.tar.gz.part016",
+      "bytes": 4194304,
+      "sha256": "c32ac862b1681c65b11f1dfc6db0ac36756b4b14e5cbdd545e31cdf3ebc92d1b"
+    },
+    {
+      "file": "grafana-grafana-12.1.1.tar.gz.part017",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-grafana-12.1.1.tar.gz.part017",
+      "bytes": 4194304,
+      "sha256": "70e9dc8c378c51ba7b05cdfd2047bb1f22f1c52b1c215056745774d68c4e602c"
+    },
+    {
+      "file": "grafana-grafana-12.1.1.tar.gz.part018",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-grafana-12.1.1.tar.gz.part018",
+      "bytes": 4194304,
+      "sha256": "0c4886ced0dba102954513b3b75875bc29d3cac45dd47982a29af213aba3d391"
+    },
+    {
+      "file": "grafana-grafana-12.1.1.tar.gz.part019",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-grafana-12.1.1.tar.gz.part019",
+      "bytes": 4194304,
+      "sha256": "60ae885cd40ca7658f720239e20c40834871a6cfa30de585d06657871857e4ef"
+    },
+    {
+      "file": "grafana-grafana-12.1.1.tar.gz.part020",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-grafana-12.1.1.tar.gz.part020",
+      "bytes": 4194304,
+      "sha256": "865cfe506407ccbf07a200be80f47907acdcc875ce434a2b0aca27fb2d03af70"
+    },
+    {
+      "file": "grafana-grafana-12.1.1.tar.gz.part021",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-grafana-12.1.1.tar.gz.part021",
+      "bytes": 4194304,
+      "sha256": "30339c95b10edcd3eb8d82e33104ee36e7c9cf4522814eaecc281fedc5e3cb25"
+    },
+    {
+      "file": "grafana-grafana-12.1.1.tar.gz.part022",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-grafana-12.1.1.tar.gz.part022",
+      "bytes": 4194304,
+      "sha256": "77ac0b5bdd7905c451941e7939553f2b7e8905a48f5719a61561c641551436d7"
+    },
+    {
+      "file": "grafana-grafana-12.1.1.tar.gz.part023",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-grafana-12.1.1.tar.gz.part023",
+      "bytes": 4194304,
+      "sha256": "f74c1f75b0380944d3c8564d2657000c65d645479175ccb101ff04a440f214bb"
+    },
+    {
+      "file": "grafana-grafana-12.1.1.tar.gz.part024",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-grafana-12.1.1.tar.gz.part024",
+      "bytes": 4194304,
+      "sha256": "0180ae25cb41f876d3bffa8a0d9a030e8b839ce62719d3f734b372898aef0f09"
+    },
+    {
+      "file": "grafana-grafana-12.1.1.tar.gz.part025",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-grafana-12.1.1.tar.gz.part025",
+      "bytes": 4194304,
+      "sha256": "7b6804f9788eefafbdbf2702faf34b73eaba57c8ffc53afd54aab06d92d5f809"
+    },
+    {
+      "file": "grafana-grafana-12.1.1.tar.gz.part026",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-grafana-12.1.1.tar.gz.part026",
+      "bytes": 4194304,
+      "sha256": "218c5a30060e116c69c2dbfa6b9f8860685aa3736402f4f0d2f1fdddf21db2b9"
+    },
+    {
+      "file": "grafana-grafana-12.1.1.tar.gz.part027",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-grafana-12.1.1.tar.gz.part027",
+      "bytes": 4194304,
+      "sha256": "fab79240406af05e69bfa7c8cd66fe39f40595e8d37f5e11e935aab36641f339"
+    },
+    {
+      "file": "grafana-grafana-12.1.1.tar.gz.part028",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-grafana-12.1.1.tar.gz.part028",
+      "bytes": 4194304,
+      "sha256": "1e8bcd02f28ee415814e2eb534352113e9f7c50b0ab8edeac82dd07509348817"
+    },
+    {
+      "file": "grafana-grafana-12.1.1.tar.gz.part029",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-grafana-12.1.1.tar.gz.part029",
+      "bytes": 4194304,
+      "sha256": "2bb24b1b61d794ac205bf33ce1fadb671aadee2ab9d097b2d512d868483e39ec"
+    },
+    {
+      "file": "grafana-grafana-12.1.1.tar.gz.part030",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-grafana-12.1.1.tar.gz.part030",
+      "bytes": 4194304,
+      "sha256": "ffbeefac16e5ffbbe867cc56b95f7afdca7edb6693b41b0b1fe43b3919bd820e"
+    },
+    {
+      "file": "grafana-grafana-12.1.1.tar.gz.part031",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-grafana-12.1.1.tar.gz.part031",
+      "bytes": 4194304,
+      "sha256": "5a852cec5aed17974a130c2f8d39a68a849ed296ad58334d04dcd2df14111828"
+    },
+    {
+      "file": "grafana-grafana-12.1.1.tar.gz.part032",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-grafana-12.1.1.tar.gz.part032",
+      "bytes": 4194304,
+      "sha256": "d6dc55fa21db8e884329482d4c84ad811d1f95376f2e6dd2e5c2536967cd2c36"
+    },
+    {
+      "file": "grafana-grafana-12.1.1.tar.gz.part033",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-grafana-12.1.1.tar.gz.part033",
+      "bytes": 4194304,
+      "sha256": "2db0ff95b468a63d994c1190984ac9067daf7325f29af13aa4c1dbaa8ec73430"
+    },
+    {
+      "file": "grafana-grafana-12.1.1.tar.gz.part034",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-grafana-12.1.1.tar.gz.part034",
+      "bytes": 4194304,
+      "sha256": "e89165d7d8e23c0f22deb8419aec4b661462bcfebb24123d27a0a513882d4300"
+    },
+    {
+      "file": "grafana-grafana-12.1.1.tar.gz.part035",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-grafana-12.1.1.tar.gz.part035",
+      "bytes": 4194304,
+      "sha256": "8442ed0e10f0f45a9b444bf93406c870a007230eff4793e52f49418523f3b57b"
+    },
+    {
+      "file": "grafana-grafana-12.1.1.tar.gz.part036",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-grafana-12.1.1.tar.gz.part036",
+      "bytes": 4194304,
+      "sha256": "3a4b3c87bc4656931a90ffb6a7fdd4c2e96155258d891b61877c6341ace17a56"
+    },
+    {
+      "file": "grafana-grafana-12.1.1.tar.gz.part037",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-grafana-12.1.1.tar.gz.part037",
+      "bytes": 4194304,
+      "sha256": "a5b3953cc256df468aba6e8bf545d3be80ee9a94674800aba5813bf56cbc2de9"
+    },
+    {
+      "file": "grafana-grafana-12.1.1.tar.gz.part038",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-grafana-12.1.1.tar.gz.part038",
+      "bytes": 4194304,
+      "sha256": "4f0e593a1a27c43cbc965faddbfb1f346ae62223d3f140efda61dd611d07545e"
+    },
+    {
+      "file": "grafana-grafana-12.1.1.tar.gz.part039",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-grafana-12.1.1.tar.gz.part039",
+      "bytes": 4194304,
+      "sha256": "4d4224368aa35d6785a2f13cc63c4669e408941abb4107550228f879d631942a"
+    },
+    {
+      "file": "grafana-grafana-12.1.1.tar.gz.part040",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-grafana-12.1.1.tar.gz.part040",
+      "bytes": 4194304,
+      "sha256": "ffe9727aa2b8c9dcb34f3399f6cfcaeffede621e1af5a41f5356cc9552e3fef2"
+    },
+    {
+      "file": "grafana-grafana-12.1.1.tar.gz.part041",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-grafana-12.1.1.tar.gz.part041",
+      "bytes": 4194304,
+      "sha256": "7cee81a792eb066f67757c34c5b522ca1b82f8525ac74d453e1052c57efcae89"
+    },
+    {
+      "file": "grafana-grafana-12.1.1.tar.gz.part042",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-grafana-12.1.1.tar.gz.part042",
+      "bytes": 4194304,
+      "sha256": "441156e86e143e3f4ed6f8bad7f331a1e175d158a76c335c1e5b5ee7870d0c0d"
+    },
+    {
+      "file": "grafana-grafana-12.1.1.tar.gz.part043",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-grafana-12.1.1.tar.gz.part043",
+      "bytes": 4194304,
+      "sha256": "549070faafdd94b18d26c7a323557dd2574f9d4a7910282f0795b82cc36b3d71"
+    },
+    {
+      "file": "grafana-grafana-12.1.1.tar.gz.part044",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-grafana-12.1.1.tar.gz.part044",
+      "bytes": 4194304,
+      "sha256": "d5939cc756fd7585f27dcf68bbf26ca1fe476bf26ee6323b8e47ea4bf302a294"
+    },
+    {
+      "file": "grafana-grafana-12.1.1.tar.gz.part045",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-grafana-12.1.1.tar.gz.part045",
+      "bytes": 4194304,
+      "sha256": "cbea942067b2f56f5cd89c2b871c12495d47791b1ec7ee08652bef18e850e8ea"
+    },
+    {
+      "file": "grafana-grafana-12.1.1.tar.gz.part046",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-grafana-12.1.1.tar.gz.part046",
+      "bytes": 4194304,
+      "sha256": "9a63c4f1d8862a9f0ad9c0a168edb9b3fdf6384ae0f2e07eafab06fbb96d4e6c"
+    },
+    {
+      "file": "grafana-grafana-12.1.1.tar.gz.part047",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-grafana-12.1.1.tar.gz.part047",
+      "bytes": 4194304,
+      "sha256": "69fa0fff2734c2ea0fe69b56b9f9cf672ff616c3163e2a2afa9ffc5f6400eb50"
+    },
+    {
+      "file": "grafana-grafana-12.1.1.tar.gz.part048",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-grafana-12.1.1.tar.gz.part048",
+      "bytes": 4194304,
+      "sha256": "e2e2b3540d0d19e14e3b78864f122caa0d80eeea3519d59212a95200c214ccdf"
+    },
+    {
+      "file": "grafana-grafana-12.1.1.tar.gz.part049",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-grafana-12.1.1.tar.gz.part049",
+      "bytes": 4194304,
+      "sha256": "680890b1d44bb60f9ccd02b7a024ba132b348ff7db6b3d18c24de22c28722a1d"
+    },
+    {
+      "file": "grafana-grafana-12.1.1.tar.gz.part050",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-grafana-12.1.1.tar.gz.part050",
+      "bytes": 4194304,
+      "sha256": "90b037054d27cb962dff5eb620aec0f32af6d2983dc687972c6fc0c7098d73dd"
+    },
+    {
+      "file": "grafana-grafana-12.1.1.tar.gz.part051",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-grafana-12.1.1.tar.gz.part051",
+      "bytes": 4194304,
+      "sha256": "7e07e57aa96dd8d0689d7d91cc44bd8b54a9847fb3d10549dbddb51e26287202"
+    },
+    {
+      "file": "grafana-grafana-12.1.1.tar.gz.part052",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-grafana-12.1.1.tar.gz.part052",
+      "bytes": 4194304,
+      "sha256": "e0227696688ef7c274f37094e87f1919c3724221179c4f0221ff4ad68c81704b"
+    },
+    {
+      "file": "grafana-grafana-12.1.1.tar.gz.part053",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-grafana-12.1.1.tar.gz.part053",
+      "bytes": 4194304,
+      "sha256": "7498568c7299569bf7a59ec2db5c8a5a151d76966537690ea33c4581694de419"
+    },
+    {
+      "file": "grafana-grafana-12.1.1.tar.gz.part054",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-grafana-12.1.1.tar.gz.part054",
+      "bytes": 853671,
+      "sha256": "fbc49e353ea5159444d924a31362baf448bd03a431d688568b6cfac1166a0796"
+    },
+    {
+      "file": "grafana-loki-3.5.5.tar.gz.part000",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-loki-3.5.5.tar.gz.part000",
+      "bytes": 4194304,
+      "sha256": "fcf5373013d5ba3bd960c6680f76cff1af5068370caf17945a5a7fc704339ed2"
+    },
+    {
+      "file": "grafana-loki-3.5.5.tar.gz.part001",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-loki-3.5.5.tar.gz.part001",
+      "bytes": 4194304,
+      "sha256": "2185ccb37b08d11c7a6106627ecf80a96a10a3d55d8134dc18786ef0b513aa51"
+    },
+    {
+      "file": "grafana-loki-3.5.5.tar.gz.part002",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-loki-3.5.5.tar.gz.part002",
+      "bytes": 4194304,
+      "sha256": "b57d8650584627067c9a49d4c288d9f2b7c37542d13e20acfffbe4bc4602313b"
+    },
+    {
+      "file": "grafana-loki-3.5.5.tar.gz.part003",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-loki-3.5.5.tar.gz.part003",
+      "bytes": 4194304,
+      "sha256": "f532844040120bbe48c28768d1b9cf94dcfbcb23079621d14dedcb341c2e2897"
+    },
+    {
+      "file": "grafana-loki-3.5.5.tar.gz.part004",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-loki-3.5.5.tar.gz.part004",
+      "bytes": 4194304,
+      "sha256": "57a0cd4949278a2a60089037c1401b5ad07532e86287d8f927e980f2409518c7"
+    },
+    {
+      "file": "grafana-loki-3.5.5.tar.gz.part005",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-loki-3.5.5.tar.gz.part005",
+      "bytes": 4194304,
+      "sha256": "1b3b235a21e027b83b034df95d2e53f7668ca373642d1d5e541da5e7991857de"
+    },
+    {
+      "file": "grafana-loki-3.5.5.tar.gz.part006",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-loki-3.5.5.tar.gz.part006",
+      "bytes": 4194304,
+      "sha256": "e70338a94005d66b2a822d241ba8d8b947fa9de37c7197a18e121db44730d1cd"
+    },
+    {
+      "file": "grafana-loki-3.5.5.tar.gz.part007",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-loki-3.5.5.tar.gz.part007",
+      "bytes": 4194304,
+      "sha256": "a51af3dcd1cd9fb2ba70657a0631aeacd34fe0a4173e7c85a0104dab0e8ea54a"
+    },
+    {
+      "file": "grafana-loki-3.5.5.tar.gz.part008",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-loki-3.5.5.tar.gz.part008",
+      "bytes": 4194304,
+      "sha256": "75c89975f728bac7fea8d5c4f7ea7b2c630167a373b701a8405912f3919020f4"
+    },
+    {
+      "file": "grafana-loki-3.5.5.tar.gz.part009",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-loki-3.5.5.tar.gz.part009",
+      "bytes": 4194304,
+      "sha256": "6d259634e8af0bcc4856de8a8a7198874db88ae7cea03f39f30c5c3b0cb82fd3"
+    },
+    {
+      "file": "grafana-loki-3.5.5.tar.gz.part010",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/grafana-loki-3.5.5.tar.gz.part010",
+      "bytes": 1338859,
+      "sha256": "dbbb47fffd8745c4acf64a9a3ac28f56c661c66a66b74af535ef6a404837262e"
+    },
+    {
+      "file": "node-22-alpine.tar.gz.part000",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/node-22-alpine.tar.gz.part000",
+      "bytes": 4194304,
+      "sha256": "e5301e9a05bce51f7e20682470b9cce3209d37a5dfe178045277ad2f5b318124"
+    },
+    {
+      "file": "node-22-alpine.tar.gz.part001",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/node-22-alpine.tar.gz.part001",
+      "bytes": 4194304,
+      "sha256": "2137ced1769e50ccccc88ea06456465fc1778cb3fdd3173877df4ac05e5ba317"
+    },
+    {
+      "file": "node-22-alpine.tar.gz.part002",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/node-22-alpine.tar.gz.part002",
+      "bytes": 4194304,
+      "sha256": "4dc8a476501e1072e893aba610333874bbc61df49ec779258452a97dcfc17e09"
+    },
+    {
+      "file": "node-22-alpine.tar.gz.part003",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/node-22-alpine.tar.gz.part003",
+      "bytes": 4194304,
+      "sha256": "ac82f459db5c34cee9baa391261d338b36bc6da94853d4550adcb23a1614c85c"
+    },
+    {
+      "file": "node-22-alpine.tar.gz.part004",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/node-22-alpine.tar.gz.part004",
+      "bytes": 4194304,
+      "sha256": "739c5214678096e5db3bfb4ee435657e8880877827ac08aaa03055b72ca07c06"
+    },
+    {
+      "file": "node-22-alpine.tar.gz.part005",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/node-22-alpine.tar.gz.part005",
+      "bytes": 4194304,
+      "sha256": "474bdc7f6c860b71925923c386ad138ee57087e4d3ebe682c453603728afb44b"
+    },
+    {
+      "file": "node-22-alpine.tar.gz.part006",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/node-22-alpine.tar.gz.part006",
+      "bytes": 4194304,
+      "sha256": "33ae37dd08664285eb8d171bb68febd76090d51078afe1ac6164f67d49e2305f"
+    },
+    {
+      "file": "node-22-alpine.tar.gz.part007",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/node-22-alpine.tar.gz.part007",
+      "bytes": 4194304,
+      "sha256": "fd50a3e0fb5f857f528221391381545e161d191962f5f6f485d1755e61e237b1"
+    },
+    {
+      "file": "node-22-alpine.tar.gz.part008",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/node-22-alpine.tar.gz.part008",
+      "bytes": 4194304,
+      "sha256": "36d209053edc82190ee488b602c78edb56aa966e6e71a1c41e550a3f383ae4db"
+    },
+    {
+      "file": "node-22-alpine.tar.gz.part009",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/node-22-alpine.tar.gz.part009",
+      "bytes": 4194304,
+      "sha256": "cc1a1822c2cb2a5c035cc2572adbe6811f52ab16e6123e9404d64f65c8fdc15f"
+    },
+    {
+      "file": "node-22-alpine.tar.gz.part010",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/node-22-alpine.tar.gz.part010",
+      "bytes": 4194304,
+      "sha256": "55dac0126c839f427b080190ea4674c6b5be2a75fda6abbe48f5aaf890f72dd0"
+    },
+    {
+      "file": "node-22-alpine.tar.gz.part011",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/node-22-alpine.tar.gz.part011",
+      "bytes": 4194304,
+      "sha256": "c3fd9ef43efeb03784f52df238d97089255f55eecd18b7fb55769837cb71b4a0"
+    },
+    {
+      "file": "node-22-alpine.tar.gz.part012",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/node-22-alpine.tar.gz.part012",
+      "bytes": 4194304,
+      "sha256": "4e70cc996be420aa075a06a80f1ea539c7b0c5fdbd9e8aeb741a3df0a1e317b1"
+    },
+    {
+      "file": "node-22-alpine.tar.gz.part013",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/node-22-alpine.tar.gz.part013",
+      "bytes": 4194304,
+      "sha256": "23f82581562371bfc8dcc28c40c86da31487bdef6a90431f8b800f14cb683b4e"
+    },
+    {
+      "file": "node-22-alpine.tar.gz.part014",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/node-22-alpine.tar.gz.part014",
+      "bytes": 4194304,
+      "sha256": "f8725f20cd9797beaa76f9e0986928de803b73c5e600a706948ee166618b12c6"
+    },
+    {
+      "file": "node-22-alpine.tar.gz.part015",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-extra-images/84dca4a6-linux-amd64-r1/node-22-alpine.tar.gz.part015",
+      "bytes": 3842813,
+      "sha256": "9d37710b6e69d6e3851c0af88aa703bcd8448ab5cb445496c6715427fc3920e8"
+    }
+  ],
+  "archives": [
+    {
+      "file": "grafana-alloy-v1.10.2.tar.gz",
+      "bytes": 158350013,
+      "sha256": "75f6565eb91b8b8a9b6dc2c8a3fa866e87da4e99e4990d212bc6c6abdf14576b",
+      "source": "grafana/alloy:v1.10.2",
+      "sourceDigests": [
+        "grafana/alloy@sha256:bcf27f18c4402869af112fb39e35e1db3804a404686f4caa20bdf77814219223"
+      ],
+      "configDigest": "sha256:622a4a32abf81c17ba21319a3df84da9f133e9bf0a23a48e2e741359fa242e40"
+    },
+    {
+      "file": "grafana-grafana-12.1.1.tar.gz",
+      "bytes": 227346087,
+      "sha256": "1b34deb2c6fb2ba59383858fd556baf607d1546eedacd06237de6b866d1a1665",
+      "source": "grafana/grafana:12.1.1",
+      "sourceDigests": [
+        "grafana/grafana@sha256:a1701c2180249361737a99a01bc770db39381640e4d631825d38ff4535efa47d"
+      ],
+      "configDigest": "sha256:0a7de979b3131ff29c2cdd8ffd040ee63cdfc863f70ec3902eec6c47edfc32fd"
+    },
+    {
+      "file": "grafana-loki-3.5.5.tar.gz",
+      "bytes": 43281899,
+      "sha256": "2417c43b4a0069a3b59b71effdfdfe5b4ac33826f35e7fee9cf1c93a1f0c1faa",
+      "source": "grafana/loki:3.5.5",
+      "sourceDigests": [
+        "grafana/loki@sha256:31628519045e7f28692a7ae73b4a3fd293dccb425585ed5d16ceea3b5c9592e6"
+      ],
+      "configDigest": "sha256:fd1a879e62ca9d47558fee718af5e745bd381b20be50723d0047615f46c8b64d"
+    },
+    {
+      "file": "node-22-alpine.tar.gz",
+      "bytes": 66757373,
+      "sha256": "fa90338122d3e0e652e80ed2b710eff45ef80f8ec2b49a5dc4bd2010180803e1",
+      "source": "node:22-alpine",
+      "sourceDigests": [
+        "node@sha256:1314fb30ec37592d5845e5a160d522c0e680972aa534549940b8d73bde88481a"
+      ],
+      "configDigest": "sha256:8049382e2048cff27289992d304206b4208b5b4f5110a19a5dbe21c18a0b8603"
+    }
+  ]
+}

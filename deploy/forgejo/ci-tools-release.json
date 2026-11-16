@@ -1,0 +1,129 @@
+{
+  "schemaVersion": 1,
+  "package": "auriga-site-build-ci-tools",
+  "version": "84dca4a6-linux-amd64-r1",
+  "inputs": [
+    {
+      "file": "buf-Linux-x86_64",
+      "source": "https://github.com/bufbuild/buf/releases/download/v1.74.0/buf-Linux-x86_64",
+      "bytes": 48083106,
+      "sha256": "92326d957d613712669fb55f9e4340946a8142a92120e09008459118778273d2"
+    },
+    {
+      "file": "buf-sha256.txt",
+      "source": "https://github.com/bufbuild/buf/releases/download/v1.74.0/sha256.txt",
+      "bytes": 5312,
+      "sha256": "ca4df0bbe2327eaaca4eda4035b49164b2a7fd47f42345bfa4a126b4c28f1efb"
+    },
+    {
+      "file": "gitleaks_8.30.1_linux_x64.tar.gz",
+      "source": "https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_linux_x64.tar.gz",
+      "bytes": 8230402,
+      "sha256": "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb"
+    },
+    {
+      "file": "gitleaks_8.30.1_checksums.txt",
+      "source": "https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_checksums.txt",
+      "bytes": 999,
+      "sha256": "061476c21adaf5441516f96f185c1a4706a83cd6329b9b38762271b3d4a52fae"
+    }
+  ],
+  "artifacts": [
+    {
+      "file": "buf-Linux-x86_64.part000",
+      "bytes": 4194304,
+      "sha256": "562a6fed6f186a5f27075cd54bf42a2cdad327ce5c8fa3820eb37b0452a2f461",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-ci-tools/84dca4a6-linux-amd64-r1/buf-Linux-x86_64.part000"
+    },
+    {
+      "file": "buf-Linux-x86_64.part001",
+      "bytes": 4194304,
+      "sha256": "55e1975f628f569b956aa99c1d174110a742132db14aa89d8a404beb5386a4ee",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-ci-tools/84dca4a6-linux-amd64-r1/buf-Linux-x86_64.part001"
+    },
+    {
+      "file": "buf-Linux-x86_64.part002",
+      "bytes": 4194304,
+      "sha256": "7b0e31d564f164cec1bd4a46dd1d837d28e344c0885e77f7cf6c4f341f5ac083",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-ci-tools/84dca4a6-linux-amd64-r1/buf-Linux-x86_64.part002"
+    },
+    {
+      "file": "buf-Linux-x86_64.part003",
+      "bytes": 4194304,
+      "sha256": "d3f4a418e001caea4d87231af1ead89bf62e93631189f2b4dce98576fce2d6a4",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-ci-tools/84dca4a6-linux-amd64-r1/buf-Linux-x86_64.part003"
+    },
+    {
+      "file": "buf-Linux-x86_64.part004",
+      "bytes": 4194304,
+      "sha256": "18a0e4da99aae47b1fde19b148e7cc618529a29eaafeca1a1c92b21327df4c9a",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-ci-tools/84dca4a6-linux-amd64-r1/buf-Linux-x86_64.part004"
+    },
+    {
+      "file": "buf-Linux-x86_64.part005",
+      "bytes": 4194304,
+      "sha256": "3fd8fe8ae4fa0c59939f1e408395678ce80b04073d584c81f2fbb298075fa53a",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-ci-tools/84dca4a6-linux-amd64-r1/buf-Linux-x86_64.part005"
+    },
+    {
+      "file": "buf-Linux-x86_64.part006",
+      "bytes": 4194304,
+      "sha256": "2a01d5dd723f6315f878b1ef62692bbc6665d2b91b31c3e805fbf2efb3f9263a",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-ci-tools/84dca4a6-linux-amd64-r1/buf-Linux-x86_64.part006"
+    },
+    {
+      "file": "buf-Linux-x86_64.part007",
+      "bytes": 4194304,
+      "sha256": "549c17cc60ab78a096aa2dc3616e84773e963bb7b62c211c1c376c960fa8e077",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-ci-tools/84dca4a6-linux-amd64-r1/buf-Linux-x86_64.part007"
+    },
+    {
+      "file": "buf-Linux-x86_64.part008",
+      "bytes": 4194304,
+      "sha256": "814c7cdda340ee70aa72f9c011a033776f7f299452872bf5d05765f942d6b3a8",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-ci-tools/84dca4a6-linux-amd64-r1/buf-Linux-x86_64.part008"
+    },
+    {
+      "file": "buf-Linux-x86_64.part009",
+      "bytes": 4194304,
+      "sha256": "14d20aca64c13eea6848cc79915d28d13b96bd9342e4ee4f262c7645cab0b2a2",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-ci-tools/84dca4a6-linux-amd64-r1/buf-Linux-x86_64.part009"
+    },
+    {
+      "file": "buf-Linux-x86_64.part010",
+      "bytes": 4194304,
+      "sha256": "94ee6825ad428a1bb4942551131b775031f2d74828ac4f772eaaf6b0b44a1106",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-ci-tools/84dca4a6-linux-amd64-r1/buf-Linux-x86_64.part010"
+    },
+    {
+      "file": "buf-Linux-x86_64.part011",
+      "bytes": 1945762,
+      "sha256": "28240904aaf3ea28c73a4bd236e2476489a9b964f07a047702acf3b464ae4c0e",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-ci-tools/84dca4a6-linux-amd64-r1/buf-Linux-x86_64.part011"
+    },
+    {
+      "file": "buf-sha256.txt.part000",
+      "bytes": 5312,
+      "sha256": "ca4df0bbe2327eaaca4eda4035b49164b2a7fd47f42345bfa4a126b4c28f1efb",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-ci-tools/84dca4a6-linux-amd64-r1/buf-sha256.txt.part000"
+    },
+    {
+      "file": "gitleaks_8.30.1_linux_x64.tar.gz.part000",
+      "bytes": 4194304,
+      "sha256": "8d646f2b463a7fd54cdbd91689c736613a5ac3309fe33101b0caee337669a4bd",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-ci-tools/84dca4a6-linux-amd64-r1/gitleaks_8.30.1_linux_x64.tar.gz.part000"
+    },
+    {
+      "file": "gitleaks_8.30.1_linux_x64.tar.gz.part001",
+      "bytes": 4036098,
+      "sha256": "39f387f53156038a7ad26e44f548c8c8297fa9c8d1f933bbb9baf25035de8633",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-ci-tools/84dca4a6-linux-amd64-r1/gitleaks_8.30.1_linux_x64.tar.gz.part001"
+    },
+    {
+      "file": "gitleaks_8.30.1_checksums.txt.part000",
+      "bytes": 999,
+      "sha256": "061476c21adaf5441516f96f185c1a4706a83cd6329b9b38762271b3d4a52fae",
+      "path": "/api/packages/{owner}/generic/auriga-site-build-ci-tools/84dca4a6-linux-amd64-r1/gitleaks_8.30.1_checksums.txt.part000"
+    }
+  ]
+}

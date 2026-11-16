@@ -1,0 +1,3144 @@
+{
+  "schemaVersion": 1,
+  "sourceCommit": "b7359410db3dcf1107af240a2a6d2f85bae6a5e6",
+  "units": {
+    "availableKiB": "NAS host MemAvailable in KiB",
+    "engineMemory": "Docker stats display value; nested containers included only after hierarchy checkpoint"
+  },
+  "hierarchyEnabledEpoch": 1794815992,
+  "samples": [
+    {
+      "time": "2026-11-16T15:15:55+0800",
+      "availableKiB": 6355352,
+      "engineMemory": "116.3MiB / 4.75GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:16:01+0800",
+      "availableKiB": 6225076,
+      "engineMemory": "116.3MiB / 4.75GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:16:08+0800",
+      "availableKiB": 6335108,
+      "engineMemory": "116.3MiB / 4.75GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:16:14+0800",
+      "availableKiB": 6353836,
+      "engineMemory": "116.3MiB / 4.75GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:16:21+0800",
+      "availableKiB": 6347344,
+      "engineMemory": "118.3MiB / 4.75GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:20:00+0800",
+      "availableKiB": 6331044,
+      "engineMemory": "131.2MiB / 4.75GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:20:07+0800",
+      "availableKiB": 6308704,
+      "engineMemory": "132.2MiB / 4.75GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:20:13+0800",
+      "availableKiB": 6294352,
+      "engineMemory": "137MiB / 4.75GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:20:20+0800",
+      "availableKiB": 6310452,
+      "engineMemory": "139.2MiB / 4.75GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:20:26+0800",
+      "availableKiB": 6310440,
+      "engineMemory": "149.9MiB / 4.75GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:20:33+0800",
+      "availableKiB": 6309648,
+      "engineMemory": "469.4MiB / 4.75GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:20:39+0800",
+      "availableKiB": 6343184,
+      "engineMemory": "478.2MiB / 4.75GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:20:46+0800",
+      "availableKiB": 6351780,
+      "engineMemory": "462.7MiB / 4.75GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:20:52+0800",
+      "availableKiB": 6340728,
+      "engineMemory": "453.9MiB / 4.75GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:20:59+0800",
+      "availableKiB": 6356444,
+      "engineMemory": "438.1MiB / 4.75GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:21:06+0800",
+      "availableKiB": 6299076,
+      "engineMemory": "425.4MiB / 4.75GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:21:12+0800",
+      "availableKiB": 6301708,
+      "engineMemory": "425.7MiB / 4.75GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:21:19+0800",
+      "availableKiB": 6293620,
+      "engineMemory": "426.7MiB / 4.75GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:21:25+0800",
+      "availableKiB": 6303400,
+      "engineMemory": "428.1MiB / 4.75GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:21:32+0800",
+      "availableKiB": 6309688,
+      "engineMemory": "794.8MiB / 4.75GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:21:38+0800",
+      "availableKiB": 6323612,
+      "engineMemory": "803.6MiB / 4.75GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:21:45+0800",
+      "availableKiB": 6364964,
+      "engineMemory": "773.6MiB / 4.75GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:21:52+0800",
+      "availableKiB": 6370032,
+      "engineMemory": "900.7MiB / 4.75GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:21:58+0800",
+      "availableKiB": 6360692,
+      "engineMemory": "890.8MiB / 4.75GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:22:05+0800",
+      "availableKiB": 6354380,
+      "engineMemory": "989.3MiB / 4.75GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:22:11+0800",
+      "availableKiB": 6385020,
+      "engineMemory": "1009MiB / 4.75GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:22:18+0800",
+      "availableKiB": 6385664,
+      "engineMemory": "949.7MiB / 4.75GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:22:25+0800",
+      "availableKiB": 6409288,
+      "engineMemory": "1002MiB / 4.75GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:22:32+0800",
+      "availableKiB": 6430808,
+      "engineMemory": "1.024GiB / 4.75GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:22:38+0800",
+      "availableKiB": 6425948,
+      "engineMemory": "1020MiB / 4.75GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:22:45+0800",
+      "availableKiB": 6426840,
+      "engineMemory": "995.5MiB / 4.75GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:22:51+0800",
+      "availableKiB": 6429020,
+      "engineMemory": "973.4MiB / 4.75GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:22:58+0800",
+      "availableKiB": 6434948,
+      "engineMemory": "942.5MiB / 4.75GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:23:04+0800",
+      "availableKiB": 6444972,
+      "engineMemory": "1.241GiB / 4.75GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:23:11+0800",
+      "availableKiB": 6446972,
+      "engineMemory": "1.227GiB / 4.75GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:23:18+0800",
+      "availableKiB": 6416264,
+      "engineMemory": "1.209GiB / 4.75GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:23:25+0800",
+      "availableKiB": 6461640,
+      "engineMemory": "1.149GiB / 4.75GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:23:32+0800",
+      "availableKiB": 6468400,
+      "engineMemory": "1.312GiB / 4.75GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:23:38+0800",
+      "availableKiB": 6472692,
+      "engineMemory": "1.485GiB / 4.75GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:23:45+0800",
+      "availableKiB": 6472576,
+      "engineMemory": "1.695GiB / 4.75GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:23:51+0800",
+      "availableKiB": 6474096,
+      "engineMemory": "652.2MiB / 4.75GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:23:58+0800",
+      "availableKiB": 6456500,
+      "engineMemory": "685.3MiB / 4.75GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:24:07+0800",
+      "availableKiB": 6420288,
+      "engineMemory": "685.8MiB / 4.75GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:24:14+0800",
+      "availableKiB": 6429508,
+      "engineMemory": "690.3MiB / 4.75GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:24:20+0800",
+      "availableKiB": 6374424,
+      "engineMemory": "690.7MiB / 4.75GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:24:27+0800",
+      "availableKiB": 6425744,
+      "engineMemory": "690.4MiB / 4.75GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:24:33+0800",
+      "availableKiB": 6426768,
+      "engineMemory": "704.4MiB / 4.75GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:24:40+0800",
+      "availableKiB": 6438536,
+      "engineMemory": "710.8MiB / 4.75GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:24:46+0800",
+      "availableKiB": 6449024,
+      "engineMemory": "720.6MiB / 4.75GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:24:53+0800",
+      "availableKiB": 6412728,
+      "engineMemory": "728.1MiB / 4.75GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:24:59+0800",
+      "availableKiB": 6436504,
+      "engineMemory": "728MiB / 4.75GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:25:06+0800",
+      "availableKiB": 6436876,
+      "engineMemory": "738.3MiB / 4.75GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:25:13+0800",
+      "availableKiB": 6443600,
+      "engineMemory": "743.6MiB / 4.75GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:25:19+0800",
+      "availableKiB": 6431204,
+      "engineMemory": "586.4MiB / 4.75GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:25:26+0800",
+      "availableKiB": 6426812,
+      "engineMemory": "586.8MiB / 4.75GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:25:32+0800",
+      "availableKiB": 6438652,
+      "engineMemory": "591.6MiB / 4.75GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:25:41+0800",
+      "availableKiB": 6471636,
+      "engineMemory": "595.1MiB / 4.75GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:25:48+0800",
+      "availableKiB": 6446576,
+      "engineMemory": "576.8MiB / 4.75GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:25:56+0800",
+      "availableKiB": 6419212,
+      "engineMemory": "582.9MiB / 4.75GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:26:02+0800",
+      "availableKiB": 6405624,
+      "engineMemory": "599.4MiB / 4.75GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:26:09+0800",
+      "availableKiB": 6424436,
+      "engineMemory": "606.5MiB / 4.75GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:26:15+0800",
+      "availableKiB": 6417516,
+      "engineMemory": "607.7MiB / 4.75GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:26:22+0800",
+      "availableKiB": 6419472,
+      "engineMemory": "260.5MiB / 4.75GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:26:29+0800",
+      "availableKiB": 6450196,
+      "engineMemory": "264MiB / 4.75GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:26:35+0800",
+      "availableKiB": 6453796,
+      "engineMemory": "280.8MiB / 4.75GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:26:42+0800",
+      "availableKiB": 6455652,
+      "engineMemory": "293.9MiB / 4.75GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:26:48+0800",
+      "availableKiB": 6450168,
+      "engineMemory": "328.3MiB / 4.75GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:26:55+0800",
+      "availableKiB": 6416184,
+      "engineMemory": "334.1MiB / 4.75GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:27:02+0800",
+      "availableKiB": 6373412,
+      "engineMemory": "304.8MiB / 4.75GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:27:08+0800",
+      "availableKiB": 6416260,
+      "engineMemory": "293.1MiB / 4.75GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:27:15+0800",
+      "availableKiB": 6448344,
+      "engineMemory": "288.4MiB / 4.75GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:27:22+0800",
+      "availableKiB": 6471284,
+      "engineMemory": "299MiB / 4.75GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:27:28+0800",
+      "availableKiB": 6464088,
+      "engineMemory": "306.8MiB / 4.75GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:27:35+0800",
+      "availableKiB": 6452412,
+      "engineMemory": "308.6MiB / 4.75GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:27:41+0800",
+      "availableKiB": 6448728,
+      "engineMemory": "319.5MiB / 4.75GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:27:48+0800",
+      "availableKiB": 6451752,
+      "engineMemory": "332.5MiB / 4.75GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:27:55+0800",
+      "availableKiB": 6430044,
+      "engineMemory": "333MiB / 4.75GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:28:02+0800",
+      "availableKiB": 6390580,
+      "engineMemory": "327.1MiB / 4.75GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:28:08+0800",
+      "availableKiB": 6432552,
+      "engineMemory": "336.1MiB / 4.75GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:28:15+0800",
+      "availableKiB": 6443620,
+      "engineMemory": "334MiB / 4.75GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:28:21+0800",
+      "availableKiB": 6439448,
+      "engineMemory": "329.5MiB / 4.75GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:28:28+0800",
+      "availableKiB": 6443280,
+      "engineMemory": "338MiB / 4.75GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:28:34+0800",
+      "availableKiB": 6439160,
+      "engineMemory": "326.3MiB / 4.75GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:28:41+0800",
+      "availableKiB": 6439388,
+      "engineMemory": "328.9MiB / 4.75GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:28:47+0800",
+      "availableKiB": 6437192,
+      "engineMemory": "357.6MiB / 4.75GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:28:54+0800",
+      "availableKiB": 6415768,
+      "engineMemory": "358.2MiB / 4.75GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:29:01+0800",
+      "availableKiB": 6326100,
+      "engineMemory": "358.2MiB / 4.75GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:29:07+0800",
+      "availableKiB": 6402472,
+      "engineMemory": "358.2MiB / 4.75GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:29:14+0800",
+      "availableKiB": 6218120,
+      "engineMemory": "358.1MiB / 4.75GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:29:20+0800",
+      "availableKiB": 6383804,
+      "engineMemory": "358.1MiB / 4.75GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:29:27+0800",
+      "availableKiB": 6396580,
+      "engineMemory": "358.1MiB / 4.75GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:29:33+0800",
+      "availableKiB": 6382528,
+      "engineMemory": "358.1MiB / 4.75GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:29:40+0800",
+      "availableKiB": 6406108,
+      "engineMemory": "358.1MiB / 4.75GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:29:47+0800",
+      "availableKiB": 6373448,
+      "engineMemory": "358.2MiB / 4.75GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:29:54+0800",
+      "availableKiB": 6321364,
+      "engineMemory": "344.7MiB / 4.75GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:30:01+0800",
+      "availableKiB": 6265088,
+      "engineMemory": "344.7MiB / 4.75GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:30:07+0800",
+      "availableKiB": 6367040,
+      "engineMemory": "344.8MiB / 4.75GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:30:14+0800",
+      "availableKiB": 6359148,
+      "engineMemory": "344.8MiB / 4.75GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:30:21+0800",
+      "availableKiB": 6259932,
+      "engineMemory": "344.9MiB / 4.75GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:30:27+0800",
+      "availableKiB": 6389944,
+      "engineMemory": "344.9MiB / 4.75GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:30:34+0800",
+      "availableKiB": 6313512,
+      "engineMemory": "344.9MiB / 4.75GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:30:40+0800",
+      "availableKiB": 6402824,
+      "engineMemory": "344.9MiB / 4.75GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:30:47+0800",
+      "availableKiB": 6379036,
+      "engineMemory": "344.9MiB / 4.75GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:30:54+0800",
+      "availableKiB": 6399596,
+      "engineMemory": "337.8MiB / 4.75GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:31:01+0800",
+      "availableKiB": 6255928,
+      "engineMemory": "326.3MiB / 4.75GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:31:07+0800",
+      "availableKiB": 6381116,
+      "engineMemory": "326.7MiB / 4.75GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:31:14+0800",
+      "availableKiB": 6357276,
+      "engineMemory": "326.7MiB / 4.75GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:31:20+0800",
+      "availableKiB": 6404888,
+      "engineMemory": "326.6MiB / 4.75GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:31:27+0800",
+      "availableKiB": 6340612,
+      "engineMemory": "326.6MiB / 4.75GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:31:34+0800",
+      "availableKiB": 6119628,
+      "engineMemory": "313.2MiB / 4.75GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:31:40+0800",
+      "availableKiB": 6416888,
+      "engineMemory": "313.2MiB / 4.75GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:31:47+0800",
+      "availableKiB": 6408572,
+      "engineMemory": "313.2MiB / 4.75GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:31:54+0800",
+      "availableKiB": 6330792,
+      "engineMemory": "313MiB / 4.75GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:32:01+0800",
+      "availableKiB": 5998648,
+      "engineMemory": "295.7MiB / 4.75GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:32:07+0800",
+      "availableKiB": 5911684,
+      "engineMemory": "295.7MiB / 4.75GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:32:14+0800",
+      "availableKiB": 5758152,
+      "engineMemory": "295.7MiB / 4.75GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:32:20+0800",
+      "availableKiB": 5675656,
+      "engineMemory": "295.7MiB / 4.75GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:32:27+0800",
+      "availableKiB": 6442028,
+      "engineMemory": "287.9MiB / 4.75GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:32:33+0800",
+      "availableKiB": 6459484,
+      "engineMemory": "287.9MiB / 4.75GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:32:40+0800",
+      "availableKiB": 6466732,
+      "engineMemory": "288MiB / 4.75GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:32:47+0800",
+      "availableKiB": 6453228,
+      "engineMemory": "288MiB / 4.75GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:32:54+0800",
+      "availableKiB": 6415316,
+      "engineMemory": "288MiB / 4.75GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:33:01+0800",
+      "availableKiB": 6383512,
+      "engineMemory": "288MiB / 4.75GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:33:07+0800",
+      "availableKiB": 6340392,
+      "engineMemory": "288MiB / 4.75GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:33:14+0800",
+      "availableKiB": 6330952,
+      "engineMemory": "288.1MiB / 4.75GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:33:20+0800",
+      "availableKiB": 6401112,
+      "engineMemory": "288.1MiB / 4.75GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:33:27+0800",
+      "availableKiB": 6319324,
+      "engineMemory": "288.1MiB / 4.75GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:33:34+0800",
+      "availableKiB": 6398792,
+      "engineMemory": "288.1MiB / 4.75GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:33:40+0800",
+      "availableKiB": 6331168,
+      "engineMemory": "287.8MiB / 4.75GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:33:47+0800",
+      "availableKiB": 6149752,
+      "engineMemory": "287.7MiB / 4.75GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:33:54+0800",
+      "availableKiB": 6248056,
+      "engineMemory": "287.7MiB / 4.75GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:34:01+0800",
+      "availableKiB": 6293804,
+      "engineMemory": "287.7MiB / 4.75GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:34:07+0800",
+      "availableKiB": 6202536,
+      "engineMemory": "287.7MiB / 4.75GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:34:14+0800",
+      "availableKiB": 6318896,
+      "engineMemory": "287.8MiB / 4.75GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:34:20+0800",
+      "availableKiB": 6288724,
+      "engineMemory": "287.8MiB / 4.75GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:34:27+0800",
+      "availableKiB": 6330624,
+      "engineMemory": "287.8MiB / 4.75GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:34:34+0800",
+      "availableKiB": 6449224,
+      "engineMemory": "287.9MiB / 4.75GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:34:40+0800",
+      "availableKiB": 6427272,
+      "engineMemory": "287.9MiB / 4.75GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:34:47+0800",
+      "availableKiB": 6418524,
+      "engineMemory": "287.8MiB / 4.75GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:34:54+0800",
+      "availableKiB": 6445896,
+      "engineMemory": "287.8MiB / 4.75GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:35:01+0800",
+      "availableKiB": 6430456,
+      "engineMemory": "287.8MiB / 4.75GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:35:07+0800",
+      "availableKiB": 6446832,
+      "engineMemory": "287.8MiB / 4.75GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:35:14+0800",
+      "availableKiB": 6406388,
+      "engineMemory": "287.8MiB / 4.75GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:35:20+0800",
+      "availableKiB": 6404644,
+      "engineMemory": "287.8MiB / 4.75GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:35:27+0800",
+      "availableKiB": 6454628,
+      "engineMemory": "287.8MiB / 4.75GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:35:34+0800",
+      "availableKiB": 6472620,
+      "engineMemory": "293.1MiB / 4.75GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:35:40+0800",
+      "availableKiB": 6466248,
+      "engineMemory": "333.6MiB / 4.75GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:35:47+0800",
+      "availableKiB": 6400628,
+      "engineMemory": "333.6MiB / 4.75GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:35:54+0800",
+      "availableKiB": 6256116,
+      "engineMemory": "336.3MiB / 4.75GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:36:01+0800",
+      "availableKiB": 6076556,
+      "engineMemory": "324.9MiB / 4.75GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:36:07+0800",
+      "availableKiB": 6148236,
+      "engineMemory": "325MiB / 4.75GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:36:14+0800",
+      "availableKiB": 6085780,
+      "engineMemory": "322.8MiB / 4.75GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:36:20+0800",
+      "availableKiB": 6318720,
+      "engineMemory": "330MiB / 4.75GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:36:27+0800",
+      "availableKiB": 6206068,
+      "engineMemory": "330MiB / 4.75GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:36:34+0800",
+      "availableKiB": 6177476,
+      "engineMemory": "330.2MiB / 4.75GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:36:40+0800",
+      "availableKiB": 5959412,
+      "engineMemory": "330.2MiB / 4.75GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:36:47+0800",
+      "availableKiB": 5902844,
+      "engineMemory": "330.2MiB / 4.75GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:36:54+0800",
+      "availableKiB": 6266204,
+      "engineMemory": "330.7MiB / 4.75GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:37:01+0800",
+      "availableKiB": 5976484,
+      "engineMemory": "330.7MiB / 4.75GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:37:07+0800",
+      "availableKiB": 5896576,
+      "engineMemory": "330.7MiB / 4.75GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:37:14+0800",
+      "availableKiB": 5832544,
+      "engineMemory": "329.6MiB / 4.75GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:37:20+0800",
+      "availableKiB": 5801736,
+      "engineMemory": "329.6MiB / 4.75GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:37:27+0800",
+      "availableKiB": 6471400,
+      "engineMemory": "333.1MiB / 4.75GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:37:34+0800",
+      "availableKiB": 6441104,
+      "engineMemory": "338.4MiB / 4.75GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:49:39+0800",
+      "availableKiB": 6445228,
+      "engineMemory": "361.4MiB / 4.75GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:49:46+0800",
+      "availableKiB": 6420040,
+      "engineMemory": "366.2MiB / 4.75GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:49:53+0800",
+      "availableKiB": 6429596,
+      "engineMemory": "302MiB / 4.75GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:49:59+0800",
+      "availableKiB": 6449644,
+      "engineMemory": "299MiB / 4.75GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:50:06+0800",
+      "availableKiB": 6374372,
+      "engineMemory": "298.1MiB / 4.75GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:50:12+0800",
+      "availableKiB": 6326344,
+      "engineMemory": "298MiB / 4.75GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:50:19+0800",
+      "availableKiB": 6250744,
+      "engineMemory": "286.2MiB / 4.75GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:50:26+0800",
+      "availableKiB": 6250540,
+      "engineMemory": "284MiB / 4.75GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:50:33+0800",
+      "availableKiB": 6242888,
+      "engineMemory": "284MiB / 4.75GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:50:39+0800",
+      "availableKiB": 6318128,
+      "engineMemory": "284MiB / 4.75GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:50:46+0800",
+      "availableKiB": 6269328,
+      "engineMemory": "284.1MiB / 4.75GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:50:52+0800",
+      "availableKiB": 6219116,
+      "engineMemory": "284.2MiB / 4.75GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:50:59+0800",
+      "availableKiB": 6161576,
+      "engineMemory": "284.6MiB / 4.75GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:51:05+0800",
+      "availableKiB": 6040492,
+      "engineMemory": "284.4MiB / 4.75GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:51:12+0800",
+      "availableKiB": 6036164,
+      "engineMemory": "284.4MiB / 4.75GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:51:19+0800",
+      "availableKiB": 5859456,
+      "engineMemory": "283.3MiB / 4.75GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:51:25+0800",
+      "availableKiB": 5813288,
+      "engineMemory": "283.3MiB / 4.75GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:51:32+0800",
+      "availableKiB": 5794520,
+      "engineMemory": "282.3MiB / 4.75GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:51:38+0800",
+      "availableKiB": 5669732,
+      "engineMemory": "281.7MiB / 4.75GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:51:45+0800",
+      "availableKiB": 5695768,
+      "engineMemory": "281.7MiB / 4.75GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:51:52+0800",
+      "availableKiB": 5707028,
+      "engineMemory": "281.7MiB / 4.75GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:51:58+0800",
+      "availableKiB": 5701764,
+      "engineMemory": "281.7MiB / 4.75GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:52:05+0800",
+      "availableKiB": 5677544,
+      "engineMemory": "281MiB / 4.75GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:52:11+0800",
+      "availableKiB": 5700132,
+      "engineMemory": "299MiB / 4.75GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:52:18+0800",
+      "availableKiB": 5694008,
+      "engineMemory": "298.8MiB / 4.75GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:52:25+0800",
+      "availableKiB": 5699908,
+      "engineMemory": "298.8MiB / 4.75GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:52:32+0800",
+      "availableKiB": 5703776,
+      "engineMemory": "298.8MiB / 4.75GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:52:38+0800",
+      "availableKiB": 5673376,
+      "engineMemory": "298.8MiB / 4.75GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:52:45+0800",
+      "availableKiB": 5664532,
+      "engineMemory": "298.8MiB / 4.75GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:52:51+0800",
+      "availableKiB": 5659336,
+      "engineMemory": "298.8MiB / 4.75GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:52:58+0800",
+      "availableKiB": 5652644,
+      "engineMemory": "298.8MiB / 4.75GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:53:05+0800",
+      "availableKiB": 5634908,
+      "engineMemory": "298MiB / 4.75GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:53:11+0800",
+      "availableKiB": 5623636,
+      "engineMemory": "297.9MiB / 4.75GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:53:18+0800",
+      "availableKiB": 5658264,
+      "engineMemory": "297.9MiB / 4.75GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:53:25+0800",
+      "availableKiB": 5641240,
+      "engineMemory": "297.9MiB / 4.75GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:53:32+0800",
+      "availableKiB": 5615232,
+      "engineMemory": "297.9MiB / 4.75GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:53:38+0800",
+      "availableKiB": 5648544,
+      "engineMemory": "298.1MiB / 4.75GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:53:45+0800",
+      "availableKiB": 5685636,
+      "engineMemory": "298MiB / 2GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:53:51+0800",
+      "availableKiB": 5693344,
+      "engineMemory": "298.3MiB / 2GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:53:58+0800",
+      "availableKiB": 5837940,
+      "engineMemory": "298MiB / 2GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:54:04+0800",
+      "availableKiB": 5803200,
+      "engineMemory": "298.1MiB / 2GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:54:11+0800",
+      "availableKiB": 6419980,
+      "engineMemory": "287.5MiB / 2GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:54:18+0800",
+      "availableKiB": 6436232,
+      "engineMemory": "287.5MiB / 2GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:54:25+0800",
+      "availableKiB": 6445128,
+      "engineMemory": "287.5MiB / 2GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:54:32+0800",
+      "availableKiB": 6460724,
+      "engineMemory": "287.6MiB / 2GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:54:38+0800",
+      "availableKiB": 6464804,
+      "engineMemory": "286.5MiB / 2GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:54:45+0800",
+      "availableKiB": 6448840,
+      "engineMemory": "286.5MiB / 2GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:54:51+0800",
+      "availableKiB": 6454952,
+      "engineMemory": "286.5MiB / 2GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:54:58+0800",
+      "availableKiB": 6458864,
+      "engineMemory": "286.5MiB / 2GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:55:04+0800",
+      "availableKiB": 6408692,
+      "engineMemory": "286.5MiB / 2GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:55:11+0800",
+      "availableKiB": 6456964,
+      "engineMemory": "286.5MiB / 2GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:55:17+0800",
+      "availableKiB": 6459268,
+      "engineMemory": "286.5MiB / 2GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:55:24+0800",
+      "availableKiB": 6445180,
+      "engineMemory": "286.5MiB / 2GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:55:31+0800",
+      "availableKiB": 6457164,
+      "engineMemory": "286.5MiB / 2GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:55:37+0800",
+      "availableKiB": 6456812,
+      "engineMemory": "286.5MiB / 2GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:55:44+0800",
+      "availableKiB": 6456212,
+      "engineMemory": "286.5MiB / 2GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:55:50+0800",
+      "availableKiB": 6458524,
+      "engineMemory": "286.5MiB / 2GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:55:57+0800",
+      "availableKiB": 6460680,
+      "engineMemory": "286.5MiB / 2GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:56:03+0800",
+      "availableKiB": 6464948,
+      "engineMemory": "286.5MiB / 2GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:56:10+0800",
+      "availableKiB": 6463572,
+      "engineMemory": "286.8MiB / 2GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:56:16+0800",
+      "availableKiB": 6466696,
+      "engineMemory": "286.8MiB / 2GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:56:23+0800",
+      "availableKiB": 6468188,
+      "engineMemory": "286.8MiB / 2GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:56:29+0800",
+      "availableKiB": 6463988,
+      "engineMemory": "286.8MiB / 2GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:56:36+0800",
+      "availableKiB": 6457452,
+      "engineMemory": "286.8MiB / 2GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:56:43+0800",
+      "availableKiB": 6467848,
+      "engineMemory": "286.8MiB / 2GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:56:49+0800",
+      "availableKiB": 6465488,
+      "engineMemory": "286.1MiB / 2GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:56:56+0800",
+      "availableKiB": 6465440,
+      "engineMemory": "286.1MiB / 2GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:57:02+0800",
+      "availableKiB": 6433624,
+      "engineMemory": "286.1MiB / 2GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:57:09+0800",
+      "availableKiB": 6438260,
+      "engineMemory": "286.1MiB / 2GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:57:15+0800",
+      "availableKiB": 6438952,
+      "engineMemory": "286.1MiB / 2GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:57:22+0800",
+      "availableKiB": 6462344,
+      "engineMemory": "286.1MiB / 2GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:57:28+0800",
+      "availableKiB": 6458684,
+      "engineMemory": "286.1MiB / 2GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:57:35+0800",
+      "availableKiB": 6473912,
+      "engineMemory": "286.1MiB / 2GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:57:41+0800",
+      "availableKiB": 6479252,
+      "engineMemory": "286.1MiB / 2GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:57:48+0800",
+      "availableKiB": 6476532,
+      "engineMemory": "286.1MiB / 2GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:57:55+0800",
+      "availableKiB": 6454752,
+      "engineMemory": "286.1MiB / 2GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:58:02+0800",
+      "availableKiB": 6430620,
+      "engineMemory": "285.8MiB / 2GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:58:08+0800",
+      "availableKiB": 6447936,
+      "engineMemory": "285.8MiB / 2GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:58:15+0800",
+      "availableKiB": 6440840,
+      "engineMemory": "285.8MiB / 2GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:58:21+0800",
+      "availableKiB": 6449284,
+      "engineMemory": "285.8MiB / 2GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:58:28+0800",
+      "availableKiB": 6429888,
+      "engineMemory": "285.8MiB / 2GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:58:34+0800",
+      "availableKiB": 6445168,
+      "engineMemory": "285.8MiB / 2GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:58:41+0800",
+      "availableKiB": 6446028,
+      "engineMemory": "285.8MiB / 2GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:58:47+0800",
+      "availableKiB": 6447220,
+      "engineMemory": "285.8MiB / 2GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:58:54+0800",
+      "availableKiB": 6442572,
+      "engineMemory": "285.8MiB / 2GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T15:59:01+0800",
+      "availableKiB": 6327388,
+      "engineMemory": "285.8MiB / 2GiB",
+      "nestedMemoryAccounted": false
+    },
+    {
+      "time": "2026-11-16T16:00:33+0800",
+      "availableKiB": 6450052,
+      "engineMemory": "26.07MiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T16:09:31+0800",
+      "availableKiB": 6424652,
+      "engineMemory": "30.27MiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T16:09:37+0800",
+      "availableKiB": 6432076,
+      "engineMemory": "39.69MiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T16:09:44+0800",
+      "availableKiB": 6393892,
+      "engineMemory": "141.1MiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T16:09:50+0800",
+      "availableKiB": 6390568,
+      "engineMemory": "159.9MiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T16:09:57+0800",
+      "availableKiB": 6410464,
+      "engineMemory": "149.3MiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T16:10:04+0800",
+      "availableKiB": 6412144,
+      "engineMemory": "199.6MiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T16:10:10+0800",
+      "availableKiB": 6409032,
+      "engineMemory": "186.4MiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T16:10:17+0800",
+      "availableKiB": 6403064,
+      "engineMemory": "193.4MiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T16:10:24+0800",
+      "availableKiB": 6414324,
+      "engineMemory": "187.9MiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T16:10:31+0800",
+      "availableKiB": 6397000,
+      "engineMemory": "240.5MiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T16:10:37+0800",
+      "availableKiB": 6397596,
+      "engineMemory": "256.5MiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T16:10:44+0800",
+      "availableKiB": 6384984,
+      "engineMemory": "258.7MiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T16:10:50+0800",
+      "availableKiB": 6399240,
+      "engineMemory": "259.6MiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T16:10:57+0800",
+      "availableKiB": 6402852,
+      "engineMemory": "265.8MiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T16:11:03+0800",
+      "availableKiB": 6396396,
+      "engineMemory": "184.5MiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T16:11:10+0800",
+      "availableKiB": 6395136,
+      "engineMemory": "224.4MiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T16:11:17+0800",
+      "availableKiB": 6369928,
+      "engineMemory": "238.8MiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T16:11:24+0800",
+      "availableKiB": 6380316,
+      "engineMemory": "241.1MiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T16:11:31+0800",
+      "availableKiB": 6376712,
+      "engineMemory": "238.9MiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T16:11:37+0800",
+      "availableKiB": 6371772,
+      "engineMemory": "234.8MiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T16:11:44+0800",
+      "availableKiB": 6347940,
+      "engineMemory": "262.6MiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T16:11:50+0800",
+      "availableKiB": 6357640,
+      "engineMemory": "280.4MiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T16:11:57+0800",
+      "availableKiB": 6385548,
+      "engineMemory": "269.7MiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T16:12:03+0800",
+      "availableKiB": 6316208,
+      "engineMemory": "305.5MiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T16:12:10+0800",
+      "availableKiB": 6344784,
+      "engineMemory": "276.7MiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T16:12:17+0800",
+      "availableKiB": 6354876,
+      "engineMemory": "258.2MiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T16:12:24+0800",
+      "availableKiB": 6362924,
+      "engineMemory": "245.8MiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T16:12:31+0800",
+      "availableKiB": 6397148,
+      "engineMemory": "247.6MiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T16:12:37+0800",
+      "availableKiB": 6419416,
+      "engineMemory": "250.1MiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T16:12:44+0800",
+      "availableKiB": 6429756,
+      "engineMemory": "259.6MiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T16:12:50+0800",
+      "availableKiB": 6419124,
+      "engineMemory": "227.5MiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T16:12:57+0800",
+      "availableKiB": 6403720,
+      "engineMemory": "222.6MiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T16:13:03+0800",
+      "availableKiB": 6373616,
+      "engineMemory": "219.7MiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T16:13:10+0800",
+      "availableKiB": 6404100,
+      "engineMemory": "221.8MiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T16:13:17+0800",
+      "availableKiB": 6398784,
+      "engineMemory": "227.4MiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T16:13:24+0800",
+      "availableKiB": 6417168,
+      "engineMemory": "224.5MiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T16:16:32+0800",
+      "availableKiB": 6437104,
+      "engineMemory": "226.8MiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T16:16:38+0800",
+      "availableKiB": 6422684,
+      "engineMemory": "365.8MiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T16:17:44+0800",
+      "availableKiB": 6440668,
+      "engineMemory": "393.4MiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T16:17:50+0800",
+      "availableKiB": 6425644,
+      "engineMemory": "482.4MiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T16:20:49+0800",
+      "availableKiB": 6448472,
+      "engineMemory": "475.8MiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T16:20:56+0800",
+      "availableKiB": 6418656,
+      "engineMemory": "490.8MiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T16:21:02+0800",
+      "availableKiB": 6369996,
+      "engineMemory": "525MiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T16:23:33+0800",
+      "availableKiB": 6422788,
+      "engineMemory": "522.8MiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T16:23:40+0800",
+      "availableKiB": 6402448,
+      "engineMemory": "536.2MiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T16:25:22+0800",
+      "availableKiB": 6354776,
+      "engineMemory": "330.7MiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T16:25:28+0800",
+      "availableKiB": 6333936,
+      "engineMemory": "349.8MiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T16:26:52+0800",
+      "availableKiB": 6359396,
+      "engineMemory": "340.6MiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T16:26:59+0800",
+      "availableKiB": 6329868,
+      "engineMemory": "353.5MiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T16:27:05+0800",
+      "availableKiB": 6318344,
+      "engineMemory": "353.2MiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T16:27:12+0800",
+      "availableKiB": 6285388,
+      "engineMemory": "353.7MiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T16:27:18+0800",
+      "availableKiB": 6311384,
+      "engineMemory": "354.1MiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T16:27:25+0800",
+      "availableKiB": 6322476,
+      "engineMemory": "354.3MiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T16:27:32+0800",
+      "availableKiB": 6309700,
+      "engineMemory": "366.5MiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T16:27:38+0800",
+      "availableKiB": 6332544,
+      "engineMemory": "377.5MiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T16:27:45+0800",
+      "availableKiB": 6311052,
+      "engineMemory": "417.5MiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T16:27:51+0800",
+      "availableKiB": 6306104,
+      "engineMemory": "440.6MiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T16:29:13+0800",
+      "availableKiB": 6315336,
+      "engineMemory": "425.6MiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T16:29:20+0800",
+      "availableKiB": 6308996,
+      "engineMemory": "438.5MiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T16:29:26+0800",
+      "availableKiB": 6305964,
+      "engineMemory": "457.5MiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T16:29:33+0800",
+      "availableKiB": 6296848,
+      "engineMemory": "438.8MiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T16:29:39+0800",
+      "availableKiB": 6271976,
+      "engineMemory": "439.8MiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T16:29:46+0800",
+      "availableKiB": 6290980,
+      "engineMemory": "453.1MiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T16:29:52+0800",
+      "availableKiB": 6293500,
+      "engineMemory": "454.3MiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T16:29:59+0800",
+      "availableKiB": 6295040,
+      "engineMemory": "455.2MiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T16:30:06+0800",
+      "availableKiB": 6255160,
+      "engineMemory": "497.3MiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T16:30:12+0800",
+      "availableKiB": 6265052,
+      "engineMemory": "452MiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T16:35:03+0800",
+      "availableKiB": 6213540,
+      "engineMemory": "465.4MiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T16:35:10+0800",
+      "availableKiB": 6256900,
+      "engineMemory": "472MiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T16:35:16+0800",
+      "availableKiB": 6257768,
+      "engineMemory": "472.4MiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T16:35:23+0800",
+      "availableKiB": 6208172,
+      "engineMemory": "461.5MiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T16:35:29+0800",
+      "availableKiB": 6143912,
+      "engineMemory": "465.1MiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T16:35:36+0800",
+      "availableKiB": 6206524,
+      "engineMemory": "476.4MiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T16:35:42+0800",
+      "availableKiB": 6208560,
+      "engineMemory": "480.2MiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T16:35:49+0800",
+      "availableKiB": 6204220,
+      "engineMemory": "482MiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T16:35:55+0800",
+      "availableKiB": 6235472,
+      "engineMemory": "475.4MiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T16:36:02+0800",
+      "availableKiB": 6111004,
+      "engineMemory": "488MiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T16:36:09+0800",
+      "availableKiB": 6213096,
+      "engineMemory": "622.4MiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T16:36:15+0800",
+      "availableKiB": 6229476,
+      "engineMemory": "611.2MiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T16:36:22+0800",
+      "availableKiB": 6230944,
+      "engineMemory": "607.4MiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T16:36:28+0800",
+      "availableKiB": 6241864,
+      "engineMemory": "551.4MiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T16:36:35+0800",
+      "availableKiB": 6216444,
+      "engineMemory": "535.9MiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T16:36:42+0800",
+      "availableKiB": 6220972,
+      "engineMemory": "529.7MiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T16:36:49+0800",
+      "availableKiB": 6334260,
+      "engineMemory": "531.7MiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T16:36:55+0800",
+      "availableKiB": 6331804,
+      "engineMemory": "533.2MiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T16:37:02+0800",
+      "availableKiB": 6218720,
+      "engineMemory": "559.8MiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T16:37:08+0800",
+      "availableKiB": 6294728,
+      "engineMemory": "565MiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T16:37:15+0800",
+      "availableKiB": 6333192,
+      "engineMemory": "538.1MiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T16:37:21+0800",
+      "availableKiB": 6317652,
+      "engineMemory": "567.9MiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T16:37:28+0800",
+      "availableKiB": 6311404,
+      "engineMemory": "570MiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T16:37:34+0800",
+      "availableKiB": 6318508,
+      "engineMemory": "563MiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T16:37:41+0800",
+      "availableKiB": 6320348,
+      "engineMemory": "558.3MiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T16:37:47+0800",
+      "availableKiB": 6325592,
+      "engineMemory": "554.5MiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T16:37:54+0800",
+      "availableKiB": 6274500,
+      "engineMemory": "600.7MiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T16:38:01+0800",
+      "availableKiB": 6151796,
+      "engineMemory": "461.2MiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T16:38:07+0800",
+      "availableKiB": 6290348,
+      "engineMemory": "498MiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T16:38:14+0800",
+      "availableKiB": 6308824,
+      "engineMemory": "487.9MiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T16:38:20+0800",
+      "availableKiB": 6317184,
+      "engineMemory": "476.3MiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T16:38:27+0800",
+      "availableKiB": 6333132,
+      "engineMemory": "469.8MiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T16:38:33+0800",
+      "availableKiB": 6331172,
+      "engineMemory": "457.8MiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T16:38:40+0800",
+      "availableKiB": 6338984,
+      "engineMemory": "458.4MiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T16:38:48+0800",
+      "availableKiB": 6336244,
+      "engineMemory": "453.8MiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T16:38:54+0800",
+      "availableKiB": 6335772,
+      "engineMemory": "454.5MiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T16:39:01+0800",
+      "availableKiB": 6183728,
+      "engineMemory": "468.8MiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T16:39:07+0800",
+      "availableKiB": 6294208,
+      "engineMemory": "472.2MiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T16:39:14+0800",
+      "availableKiB": 6289912,
+      "engineMemory": "471.7MiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T16:39:20+0800",
+      "availableKiB": 6262180,
+      "engineMemory": "488.4MiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T16:39:27+0800",
+      "availableKiB": 6256340,
+      "engineMemory": "523.4MiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T16:39:34+0800",
+      "availableKiB": 6193968,
+      "engineMemory": "584MiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T16:39:40+0800",
+      "availableKiB": 6122256,
+      "engineMemory": "648.3MiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T16:39:48+0800",
+      "availableKiB": 6019408,
+      "engineMemory": "735.4MiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T16:39:54+0800",
+      "availableKiB": 5990256,
+      "engineMemory": "785.7MiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T16:40:01+0800",
+      "availableKiB": 5837948,
+      "engineMemory": "849.3MiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T16:40:07+0800",
+      "availableKiB": 5898200,
+      "engineMemory": "892.3MiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T16:40:14+0800",
+      "availableKiB": 5878672,
+      "engineMemory": "910.8MiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T16:40:21+0800",
+      "availableKiB": 5823400,
+      "engineMemory": "982.6MiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T16:40:27+0800",
+      "availableKiB": 5787392,
+      "engineMemory": "1006MiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T16:40:34+0800",
+      "availableKiB": 5791116,
+      "engineMemory": "1007MiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T16:40:40+0800",
+      "availableKiB": 5791132,
+      "engineMemory": "1008MiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T16:40:48+0800",
+      "availableKiB": 5786076,
+      "engineMemory": "1008MiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T16:40:54+0800",
+      "availableKiB": 5782812,
+      "engineMemory": "1011MiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T16:41:01+0800",
+      "availableKiB": 5708996,
+      "engineMemory": "1007MiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T16:41:07+0800",
+      "availableKiB": 5788196,
+      "engineMemory": "1009MiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T16:41:14+0800",
+      "availableKiB": 5777972,
+      "engineMemory": "1013MiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T16:41:20+0800",
+      "availableKiB": 5776244,
+      "engineMemory": "1013MiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T16:41:27+0800",
+      "availableKiB": 5762408,
+      "engineMemory": "1.012GiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T16:41:33+0800",
+      "availableKiB": 5750476,
+      "engineMemory": "1.037GiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T16:41:40+0800",
+      "availableKiB": 5750452,
+      "engineMemory": "1.047GiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T16:41:46+0800",
+      "availableKiB": 5769412,
+      "engineMemory": "1.055GiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T16:41:53+0800",
+      "availableKiB": 5779428,
+      "engineMemory": "1.033GiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T16:42:00+0800",
+      "availableKiB": 5749520,
+      "engineMemory": "1.034GiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T16:42:06+0800",
+      "availableKiB": 5756268,
+      "engineMemory": "1.029GiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T16:42:13+0800",
+      "availableKiB": 5754452,
+      "engineMemory": "1.03GiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T16:42:19+0800",
+      "availableKiB": 5747740,
+      "engineMemory": "1.03GiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T16:42:26+0800",
+      "availableKiB": 5747612,
+      "engineMemory": "1.03GiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T16:42:32+0800",
+      "availableKiB": 5758116,
+      "engineMemory": "1.036GiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T16:42:39+0800",
+      "availableKiB": 5745184,
+      "engineMemory": "1.048GiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T16:42:45+0800",
+      "availableKiB": 5775632,
+      "engineMemory": "1.053GiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T16:42:52+0800",
+      "availableKiB": 5660184,
+      "engineMemory": "1.152GiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T16:42:59+0800",
+      "availableKiB": 5591612,
+      "engineMemory": "1.217GiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T16:43:05+0800",
+      "availableKiB": 5546680,
+      "engineMemory": "1.262GiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T16:43:12+0800",
+      "availableKiB": 5536592,
+      "engineMemory": "1.275GiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T16:43:19+0800",
+      "availableKiB": 5539348,
+      "engineMemory": "1.277GiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T16:43:25+0800",
+      "availableKiB": 5540980,
+      "engineMemory": "1.277GiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T16:43:32+0800",
+      "availableKiB": 5475556,
+      "engineMemory": "1.392GiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T16:43:38+0800",
+      "availableKiB": 5420976,
+      "engineMemory": "1.392GiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T16:43:45+0800",
+      "availableKiB": 5421812,
+      "engineMemory": "1.393GiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T16:43:51+0800",
+      "availableKiB": 5419804,
+      "engineMemory": "1.393GiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T16:43:58+0800",
+      "availableKiB": 5422840,
+      "engineMemory": "1.385GiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T16:44:04+0800",
+      "availableKiB": 5429960,
+      "engineMemory": "1.38GiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T16:44:11+0800",
+      "availableKiB": 5429604,
+      "engineMemory": "1.39GiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T16:44:18+0800",
+      "availableKiB": 5425924,
+      "engineMemory": "1.392GiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T16:44:24+0800",
+      "availableKiB": 5394340,
+      "engineMemory": "1.418GiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T16:46:27+0800",
+      "availableKiB": 5453992,
+      "engineMemory": "1.413GiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T16:46:34+0800",
+      "availableKiB": 5449184,
+      "engineMemory": "1.417GiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T16:46:40+0800",
+      "availableKiB": 5435628,
+      "engineMemory": "1.419GiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T16:46:48+0800",
+      "availableKiB": 5432532,
+      "engineMemory": "1.422GiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T16:46:54+0800",
+      "availableKiB": 5433552,
+      "engineMemory": "1.42GiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T16:47:01+0800",
+      "availableKiB": 5331368,
+      "engineMemory": "1.419GiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T16:47:07+0800",
+      "availableKiB": 5419776,
+      "engineMemory": "1.442GiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T16:47:14+0800",
+      "availableKiB": 5399720,
+      "engineMemory": "1.485GiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T16:47:20+0800",
+      "availableKiB": 5356240,
+      "engineMemory": "1.485GiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T16:47:27+0800",
+      "availableKiB": 5368656,
+      "engineMemory": "1.485GiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T16:47:34+0800",
+      "availableKiB": 5350036,
+      "engineMemory": "1.484GiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T16:47:40+0800",
+      "availableKiB": 5347192,
+      "engineMemory": "1.486GiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T16:47:48+0800",
+      "availableKiB": 5358648,
+      "engineMemory": "1.486GiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T16:47:54+0800",
+      "availableKiB": 5354664,
+      "engineMemory": "1.486GiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T16:48:01+0800",
+      "availableKiB": 5264712,
+      "engineMemory": "1.483GiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T16:48:07+0800",
+      "availableKiB": 5320216,
+      "engineMemory": "1.473GiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T16:48:14+0800",
+      "availableKiB": 5331896,
+      "engineMemory": "1.473GiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T16:48:20+0800",
+      "availableKiB": 5328032,
+      "engineMemory": "1.479GiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T16:48:27+0800",
+      "availableKiB": 5323216,
+      "engineMemory": "1.478GiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T16:48:34+0800",
+      "availableKiB": 5304316,
+      "engineMemory": "1.481GiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T16:48:40+0800",
+      "availableKiB": 5351364,
+      "engineMemory": "1.476GiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T16:48:48+0800",
+      "availableKiB": 5352280,
+      "engineMemory": "1.477GiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T16:48:54+0800",
+      "availableKiB": 5346652,
+      "engineMemory": "1.477GiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T16:49:01+0800",
+      "availableKiB": 5273372,
+      "engineMemory": "1.472GiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T16:49:07+0800",
+      "availableKiB": 5346676,
+      "engineMemory": "1.473GiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T16:49:14+0800",
+      "availableKiB": 5344768,
+      "engineMemory": "1.481GiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T16:49:20+0800",
+      "availableKiB": 5334368,
+      "engineMemory": "1.474GiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T16:49:27+0800",
+      "availableKiB": 5368180,
+      "engineMemory": "1.474GiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T16:49:33+0800",
+      "availableKiB": 5358364,
+      "engineMemory": "1.475GiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T16:49:40+0800",
+      "availableKiB": 5364580,
+      "engineMemory": "1.474GiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T16:49:48+0800",
+      "availableKiB": 5369860,
+      "engineMemory": "1.457GiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T16:56:02+0800",
+      "availableKiB": 5377276,
+      "engineMemory": "1.452GiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T16:56:08+0800",
+      "availableKiB": 5387664,
+      "engineMemory": "1.461GiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T16:58:09+0800",
+      "availableKiB": 5409428,
+      "engineMemory": "1.445GiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T16:58:16+0800",
+      "availableKiB": 5373176,
+      "engineMemory": "1.444GiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T16:58:23+0800",
+      "availableKiB": 6311756,
+      "engineMemory": "611.5MiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T16:58:29+0800",
+      "availableKiB": 6255044,
+      "engineMemory": "665.8MiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T16:58:36+0800",
+      "availableKiB": 6194064,
+      "engineMemory": "745.3MiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T16:58:43+0800",
+      "availableKiB": 6094044,
+      "engineMemory": "835.5MiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T16:58:49+0800",
+      "availableKiB": 6038720,
+      "engineMemory": "876.3MiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T16:58:56+0800",
+      "availableKiB": 5956744,
+      "engineMemory": "984.2MiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T16:59:02+0800",
+      "availableKiB": 5882696,
+      "engineMemory": "1.006GiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T16:59:09+0800",
+      "availableKiB": 5841224,
+      "engineMemory": "1.059GiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T16:59:16+0800",
+      "availableKiB": 5820996,
+      "engineMemory": "1.09GiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T16:59:22+0800",
+      "availableKiB": 5796612,
+      "engineMemory": "1.121GiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T16:59:29+0800",
+      "availableKiB": 5788668,
+      "engineMemory": "1.123GiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T16:59:35+0800",
+      "availableKiB": 5764100,
+      "engineMemory": "1.137GiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T16:59:42+0800",
+      "availableKiB": 5777612,
+      "engineMemory": "1.142GiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T16:59:49+0800",
+      "availableKiB": 5775108,
+      "engineMemory": "1.144GiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T16:59:55+0800",
+      "availableKiB": 5769580,
+      "engineMemory": "1.146GiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T17:00:02+0800",
+      "availableKiB": 5628520,
+      "engineMemory": "1.144GiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T17:00:08+0800",
+      "availableKiB": 5749672,
+      "engineMemory": "1.149GiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T17:00:15+0800",
+      "availableKiB": 5723612,
+      "engineMemory": "1.187GiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T17:00:22+0800",
+      "availableKiB": 5717204,
+      "engineMemory": "1.154GiB / 4.75GiB",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T17:01:44+0800",
+      "availableKiB": 5757580,
+      "engineMemory": "1.172GiB / 4.75GiB",
+      "stage": "delivery",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T17:01:50+0800",
+      "availableKiB": 5744716,
+      "engineMemory": "1.163GiB / 4.75GiB",
+      "stage": "delivery",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T17:01:57+0800",
+      "availableKiB": 5730964,
+      "engineMemory": "1.174GiB / 4.75GiB",
+      "stage": "delivery",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T17:02:03+0800",
+      "availableKiB": 5691716,
+      "engineMemory": "1.167GiB / 4.75GiB",
+      "stage": "delivery",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T17:02:10+0800",
+      "availableKiB": 5748664,
+      "engineMemory": "1.169GiB / 4.75GiB",
+      "stage": "delivery",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T17:02:16+0800",
+      "availableKiB": 5721888,
+      "engineMemory": "1.169GiB / 4.75GiB",
+      "stage": "delivery",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T17:02:23+0800",
+      "availableKiB": 5751020,
+      "engineMemory": "1.172GiB / 4.75GiB",
+      "stage": "delivery",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T17:02:29+0800",
+      "availableKiB": 5762100,
+      "engineMemory": "1.179GiB / 4.75GiB",
+      "stage": "delivery",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T17:02:36+0800",
+      "availableKiB": 5761628,
+      "engineMemory": "1.182GiB / 4.75GiB",
+      "stage": "delivery",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T17:02:43+0800",
+      "availableKiB": 5755176,
+      "engineMemory": "1.187GiB / 4.75GiB",
+      "stage": "delivery",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T17:02:49+0800",
+      "availableKiB": 5747696,
+      "engineMemory": "1.194GiB / 4.75GiB",
+      "stage": "delivery",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T17:02:56+0800",
+      "availableKiB": 5750048,
+      "engineMemory": "1.205GiB / 4.75GiB",
+      "stage": "delivery",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T17:03:02+0800",
+      "availableKiB": 5703588,
+      "engineMemory": "1.2GiB / 4.75GiB",
+      "stage": "delivery",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T17:03:09+0800",
+      "availableKiB": 5691688,
+      "engineMemory": "1.209GiB / 4.75GiB",
+      "stage": "delivery",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T17:03:15+0800",
+      "availableKiB": 5677968,
+      "engineMemory": "1.191GiB / 4.75GiB",
+      "stage": "delivery",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T17:03:22+0800",
+      "availableKiB": 5669044,
+      "engineMemory": "1.217GiB / 4.75GiB",
+      "stage": "delivery",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T17:03:28+0800",
+      "availableKiB": 5671544,
+      "engineMemory": "1.2GiB / 4.75GiB",
+      "stage": "delivery",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T17:03:35+0800",
+      "availableKiB": 5721192,
+      "engineMemory": "1.275GiB / 4.75GiB",
+      "stage": "delivery",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T17:03:41+0800",
+      "availableKiB": 5775584,
+      "engineMemory": "1.28GiB / 4.75GiB",
+      "stage": "delivery",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T17:03:48+0800",
+      "availableKiB": 5788684,
+      "engineMemory": "1.286GiB / 4.75GiB",
+      "stage": "delivery",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T17:03:55+0800",
+      "availableKiB": 5756532,
+      "engineMemory": "1.29GiB / 4.75GiB",
+      "stage": "delivery",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T17:04:01+0800",
+      "availableKiB": 5763844,
+      "engineMemory": "1.291GiB / 4.75GiB",
+      "stage": "delivery",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T17:04:08+0800",
+      "availableKiB": 5763560,
+      "engineMemory": "1.292GiB / 4.75GiB",
+      "stage": "delivery",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T17:04:14+0800",
+      "availableKiB": 5762728,
+      "engineMemory": "1.295GiB / 4.75GiB",
+      "stage": "delivery",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T17:04:21+0800",
+      "availableKiB": 5775380,
+      "engineMemory": "1.296GiB / 4.75GiB",
+      "stage": "delivery",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T17:04:28+0800",
+      "availableKiB": 5788612,
+      "engineMemory": "1.17GiB / 4.75GiB",
+      "stage": "delivery",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T17:04:34+0800",
+      "availableKiB": 5805988,
+      "engineMemory": "1.171GiB / 4.75GiB",
+      "stage": "delivery",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T17:04:41+0800",
+      "availableKiB": 5801348,
+      "engineMemory": "1.171GiB / 4.75GiB",
+      "stage": "delivery",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T17:04:47+0800",
+      "availableKiB": 5738916,
+      "engineMemory": "1.177GiB / 4.75GiB",
+      "stage": "delivery",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T17:04:54+0800",
+      "availableKiB": 5684912,
+      "engineMemory": "1.196GiB / 4.75GiB",
+      "stage": "delivery",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T17:05:00+0800",
+      "availableKiB": 5652128,
+      "engineMemory": "1.212GiB / 4.75GiB",
+      "stage": "delivery",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T17:05:07+0800",
+      "availableKiB": 5667868,
+      "engineMemory": "1.224GiB / 4.75GiB",
+      "stage": "delivery",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T17:05:14+0800",
+      "availableKiB": 5663008,
+      "engineMemory": "1.243GiB / 4.75GiB",
+      "stage": "delivery",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T17:05:20+0800",
+      "availableKiB": 5617068,
+      "engineMemory": "1.252GiB / 4.75GiB",
+      "stage": "delivery",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T17:05:27+0800",
+      "availableKiB": 5677824,
+      "engineMemory": "1.255GiB / 4.75GiB",
+      "stage": "delivery",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T17:05:33+0800",
+      "availableKiB": 5667844,
+      "engineMemory": "1.275GiB / 4.75GiB",
+      "stage": "delivery",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T17:05:40+0800",
+      "availableKiB": 5650792,
+      "engineMemory": "1.297GiB / 4.75GiB",
+      "stage": "delivery",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T17:05:46+0800",
+      "availableKiB": 5641952,
+      "engineMemory": "1.311GiB / 4.75GiB",
+      "stage": "delivery",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T17:05:53+0800",
+      "availableKiB": 5642276,
+      "engineMemory": "1.33GiB / 4.75GiB",
+      "stage": "delivery",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T17:05:59+0800",
+      "availableKiB": 5637168,
+      "engineMemory": "1.354GiB / 4.75GiB",
+      "stage": "delivery",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T17:06:06+0800",
+      "availableKiB": 5619228,
+      "engineMemory": "1.374GiB / 4.75GiB",
+      "stage": "delivery",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T17:06:14+0800",
+      "availableKiB": 5622984,
+      "engineMemory": "1.397GiB / 4.75GiB",
+      "stage": "delivery",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T17:06:20+0800",
+      "availableKiB": 5629784,
+      "engineMemory": "1.414GiB / 4.75GiB",
+      "stage": "delivery",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T17:06:27+0800",
+      "availableKiB": 5603248,
+      "engineMemory": "1.405GiB / 4.75GiB",
+      "stage": "delivery",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T17:06:33+0800",
+      "availableKiB": 5610380,
+      "engineMemory": "1.421GiB / 4.75GiB",
+      "stage": "delivery",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T17:06:40+0800",
+      "availableKiB": 5651100,
+      "engineMemory": "1.44GiB / 4.75GiB",
+      "stage": "delivery",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T17:06:46+0800",
+      "availableKiB": 5652312,
+      "engineMemory": "1.46GiB / 4.75GiB",
+      "stage": "delivery",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T17:06:53+0800",
+      "availableKiB": 5655216,
+      "engineMemory": "1.48GiB / 4.75GiB",
+      "stage": "delivery",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T17:06:59+0800",
+      "availableKiB": 5641392,
+      "engineMemory": "1.5GiB / 4.75GiB",
+      "stage": "delivery",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T17:07:06+0800",
+      "availableKiB": 5593360,
+      "engineMemory": "1.509GiB / 4.75GiB",
+      "stage": "delivery",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T17:07:14+0800",
+      "availableKiB": 5628896,
+      "engineMemory": "1.525GiB / 4.75GiB",
+      "stage": "delivery",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T17:07:20+0800",
+      "availableKiB": 5642204,
+      "engineMemory": "1.537GiB / 4.75GiB",
+      "stage": "delivery",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T17:07:27+0800",
+      "availableKiB": 5639448,
+      "engineMemory": "1.536GiB / 4.75GiB",
+      "stage": "delivery",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T17:07:33+0800",
+      "availableKiB": 5647484,
+      "engineMemory": "1.553GiB / 4.75GiB",
+      "stage": "delivery",
+      "nestedMemoryAccounted": true
+    },
+    {
+      "time": "2026-11-16T17:07:40+0800",
+      "availableKiB": 5649040,
+      "engineMemory": "1.571GiB / 4.75GiB",
+      "stage": "delivery",
+      "nestedMemoryAccounted": true
+    }
+  ]
+}

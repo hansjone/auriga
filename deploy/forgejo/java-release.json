@@ -1,0 +1,650 @@
+{
+  "schemaVersion": 1,
+  "sourceCommit": "784643c803edc46bba43c5a791070aa94bbb3023",
+  "platform": "linux/amd64",
+  "package": "auriga-site-build-java-inputs",
+  "version": "784643c8-linux-amd64-r1",
+  "downloadPathTemplate": "/api/packages/{owner}/generic/{package}/{version}/{name}",
+  "archive": {
+    "name": "auriga-build-java-inputs-linux-amd64-784643c8.tar.gz",
+    "bytes": 363721826,
+    "sha256": "62b9367439c341f83f0cda4c55d5a992b3c485a08eae72c3097f236f61349edc",
+    "partCount": 57,
+    "partsManifest": "JAVA-PARTS.SHA256SUMS"
+  },
+  "files": [
+    {
+      "name": "auriga-build-java-inputs-linux-amd64-784643c8.tar.gz.part-000",
+      "bytes": 67108864,
+      "sha256": "103577643361891380ed6460bb8d600214db336e8b6ea122afac254e3aed7bee"
+    },
+    {
+      "name": "auriga-build-java-inputs-linux-amd64-784643c8.tar.gz.part-001",
+      "bytes": 67108864,
+      "sha256": "ee8f138de45cfdaa61b922fd6e33ae7374b98244c2219cfb8ef817e0a5dd4df4"
+    },
+    {
+      "name": "auriga-build-java-inputs-linux-amd64-784643c8.tar.gz.part-002-000",
+      "bytes": 4194304,
+      "sha256": "c211e346f0defff92ba497cda4b48edda228d18657b386fd02d2cb3ce1e1adb6"
+    },
+    {
+      "name": "auriga-build-java-inputs-linux-amd64-784643c8.tar.gz.part-002-001",
+      "bytes": 4194304,
+      "sha256": "7bcd6bb8fbfcd98f15d015e0c0998a80c47a75772eac076e11a36502399d671a"
+    },
+    {
+      "name": "auriga-build-java-inputs-linux-amd64-784643c8.tar.gz.part-002-002",
+      "bytes": 4194304,
+      "sha256": "195d8bf407ff700715e7edf1ad43803f14320417d2ac43a6e255c5755571bdc1"
+    },
+    {
+      "name": "auriga-build-java-inputs-linux-amd64-784643c8.tar.gz.part-002-003",
+      "bytes": 4194304,
+      "sha256": "620bd542ef4cb9ef7f408a61c695ef2c45d572d670e3b32cf43d1a3a847ee66e"
+    },
+    {
+      "name": "auriga-build-java-inputs-linux-amd64-784643c8.tar.gz.part-002-004",
+      "bytes": 4194304,
+      "sha256": "39be8b080065cf043c57915fe3d2dcf03fc7b206c174ed3297c61e2feeb0151c"
+    },
+    {
+      "name": "auriga-build-java-inputs-linux-amd64-784643c8.tar.gz.part-002-005",
+      "bytes": 4194304,
+      "sha256": "2e53ce63b686ab4f76d749f63a611e07b6b1a60ed7776e15187f721127dc9652"
+    },
+    {
+      "name": "auriga-build-java-inputs-linux-amd64-784643c8.tar.gz.part-002-006",
+      "bytes": 4194304,
+      "sha256": "11797893392b87cb8727d9cf97a06d90557bd5db201146d0143c9af42b7c7141"
+    },
+    {
+      "name": "auriga-build-java-inputs-linux-amd64-784643c8.tar.gz.part-002-007",
+      "bytes": 4194304,
+      "sha256": "d98ce5b5a618aca6b2d05dac5f7b925996d4ae5dd6df33a13ce99e42223f5620"
+    },
+    {
+      "name": "auriga-build-java-inputs-linux-amd64-784643c8.tar.gz.part-002-008",
+      "bytes": 4194304,
+      "sha256": "74456fe55069656aacf3aff05ca10647a69cc0ed6d1845789e7b6ab269dacf33"
+    },
+    {
+      "name": "auriga-build-java-inputs-linux-amd64-784643c8.tar.gz.part-002-009",
+      "bytes": 4194304,
+      "sha256": "81ac5a691748ebf36a5564edd7363f9b58b9f8651eefd1181de1fe582008386c"
+    },
+    {
+      "name": "auriga-build-java-inputs-linux-amd64-784643c8.tar.gz.part-002-010",
+      "bytes": 4194304,
+      "sha256": "198535a41ecf2bda3da7d659bef89008751ac7fa3bb9a86374d7ea31e00bcd26"
+    },
+    {
+      "name": "auriga-build-java-inputs-linux-amd64-784643c8.tar.gz.part-002-011",
+      "bytes": 4194304,
+      "sha256": "acb94e528237b3fea16abf930bb4f5220bd3c7a7648af50e7acc452acc98259f"
+    },
+    {
+      "name": "auriga-build-java-inputs-linux-amd64-784643c8.tar.gz.part-002-012",
+      "bytes": 4194304,
+      "sha256": "1e572eee843d83d7aae132ee895cf8c8badbd84ecd8ffd8ce33bb4759a5d13d9"
+    },
+    {
+      "name": "auriga-build-java-inputs-linux-amd64-784643c8.tar.gz.part-002-013",
+      "bytes": 4194304,
+      "sha256": "2349fb0a66a1520bcd8fa203f91c6ef670949ec522d02a34594d4561cc628463"
+    },
+    {
+      "name": "auriga-build-java-inputs-linux-amd64-784643c8.tar.gz.part-002-014",
+      "bytes": 4194304,
+      "sha256": "e20c7c73ddb7e304f77a00decd45dbf98ec2a552ad116f3ff12919dc051f5ffc"
+    },
+    {
+      "name": "auriga-build-java-inputs-linux-amd64-784643c8.tar.gz.part-002-015",
+      "bytes": 4194304,
+      "sha256": "97997946358642dfbd968515d3e834a682fdc7246fffc5cd9b3321be32b7965e"
+    },
+    {
+      "name": "auriga-build-java-inputs-linux-amd64-784643c8.tar.gz.part-003-000",
+      "bytes": 4194304,
+      "sha256": "e02d18dd6698724beefd26df88432bfdce6f0673661f4d3f738475c825c69d47"
+    },
+    {
+      "name": "auriga-build-java-inputs-linux-amd64-784643c8.tar.gz.part-003-001",
+      "bytes": 4194304,
+      "sha256": "38c0705d8f8a9db2ad44915748558bce946e2cc30c6b134dc3f35827a5cb252a"
+    },
+    {
+      "name": "auriga-build-java-inputs-linux-amd64-784643c8.tar.gz.part-003-002",
+      "bytes": 4194304,
+      "sha256": "66bcee7568d3508f9f0c13d97163bb449ebaee7ef126bedf4c88dea7b6f7d9aa"
+    },
+    {
+      "name": "auriga-build-java-inputs-linux-amd64-784643c8.tar.gz.part-003-003",
+      "bytes": 4194304,
+      "sha256": "6d3b2706855cc5536eda16c4d2e3f5a581533e0c8d0495bb0f926f4fb6bb1f0b"
+    },
+    {
+      "name": "auriga-build-java-inputs-linux-amd64-784643c8.tar.gz.part-003-004",
+      "bytes": 4194304,
+      "sha256": "e502bdbd45b128fe5e1c96fa3abf3075c42e57d22e010f4cf03825e84a3805b4"
+    },
+    {
+      "name": "auriga-build-java-inputs-linux-amd64-784643c8.tar.gz.part-003-005",
+      "bytes": 4194304,
+      "sha256": "c355ba118a53dc1f203ece6bde99c681bea10640919042eb24ebaea2c420dcd9"
+    },
+    {
+      "name": "auriga-build-java-inputs-linux-amd64-784643c8.tar.gz.part-003-006",
+      "bytes": 4194304,
+      "sha256": "e78e88454474ff82422ff2863847cc8777ffa0ac58170ff06bedcfedce3d3989"
+    },
+    {
+      "name": "auriga-build-java-inputs-linux-amd64-784643c8.tar.gz.part-003-007",
+      "bytes": 4194304,
+      "sha256": "068eed3925a6a936b2c8fab2bbfe48d84df29e074f7870ae9cbe639433fb3e2c"
+    },
+    {
+      "name": "auriga-build-java-inputs-linux-amd64-784643c8.tar.gz.part-003-008",
+      "bytes": 4194304,
+      "sha256": "fe221a09275e876db291ba8f91305cc097f2f2ca44f7172b8ef526ddf12f5f2f"
+    },
+    {
+      "name": "auriga-build-java-inputs-linux-amd64-784643c8.tar.gz.part-003-009",
+      "bytes": 4194304,
+      "sha256": "a6a0542249173dfd9065efc64a6a621c0818881f3fa4907024eb8f0b92e6178a"
+    },
+    {
+      "name": "auriga-build-java-inputs-linux-amd64-784643c8.tar.gz.part-003-010",
+      "bytes": 4194304,
+      "sha256": "cbd49d23fbb63182f0e875a59470a7e93a629ebd4bc9fd8822e9dc34e1fa8609"
+    },
+    {
+      "name": "auriga-build-java-inputs-linux-amd64-784643c8.tar.gz.part-003-011",
+      "bytes": 4194304,
+      "sha256": "c1e9dfe17b4131b098b23a310e0c3d88238a696f54fd8b2fa450039b4c57ed07"
+    },
+    {
+      "name": "auriga-build-java-inputs-linux-amd64-784643c8.tar.gz.part-003-012",
+      "bytes": 4194304,
+      "sha256": "1155aa892ec0951394a5e489cc8a0eca472e44578d6940f1fdab560744d55fe2"
+    },
+    {
+      "name": "auriga-build-java-inputs-linux-amd64-784643c8.tar.gz.part-003-013",
+      "bytes": 4194304,
+      "sha256": "eb0a1f4e6a484e8ad4b75a96dd3cf36ac02cb118898224485e6011357901ad88"
+    },
+    {
+      "name": "auriga-build-java-inputs-linux-amd64-784643c8.tar.gz.part-003-014",
+      "bytes": 4194304,
+      "sha256": "21a418e842abe96fb2c48d372b6a45826e0394ba21477b4ce6ff7854e5556871"
+    },
+    {
+      "name": "auriga-build-java-inputs-linux-amd64-784643c8.tar.gz.part-003-015",
+      "bytes": 4194304,
+      "sha256": "e7b2925f862e74b770120c02463ec48a589d6f30e5bd84e077917c67a4af44d7"
+    },
+    {
+      "name": "auriga-build-java-inputs-linux-amd64-784643c8.tar.gz.part-004-000",
+      "bytes": 4194304,
+      "sha256": "864bb23637d43fccebcba141d4eea759908880669f0512c75844b0a13f730c2a"
+    },
+    {
+      "name": "auriga-build-java-inputs-linux-amd64-784643c8.tar.gz.part-004-001",
+      "bytes": 4194304,
+      "sha256": "336d58493a2bbfa99a1934a6616952e3fff7c947cb2444dc454fa7bc66a8009c"
+    },
+    {
+      "name": "auriga-build-java-inputs-linux-amd64-784643c8.tar.gz.part-004-002",
+      "bytes": 4194304,
+      "sha256": "cdb5a85cf7741c1853cb30992f7c8b6c389c83924b4352b0ac371180b7f4f551"
+    },
+    {
+      "name": "auriga-build-java-inputs-linux-amd64-784643c8.tar.gz.part-004-003",
+      "bytes": 4194304,
+      "sha256": "301b0d420d88d8e8b266f871d06b0e034a3a4e84a4e5eb3bf066ca3f89bd18eb"
+    },
+    {
+      "name": "auriga-build-java-inputs-linux-amd64-784643c8.tar.gz.part-004-004",
+      "bytes": 4194304,
+      "sha256": "2f1c40cfe01adad8d83746eaa589198b6dc1742376cbabf81a50e09fc1e9903c"
+    },
+    {
+      "name": "auriga-build-java-inputs-linux-amd64-784643c8.tar.gz.part-004-005",
+      "bytes": 4194304,
+      "sha256": "b5580060e1f25e147dd57c5ee03b687fc8b77789631e9579b790e1e40d4a4131"
+    },
+    {
+      "name": "auriga-build-java-inputs-linux-amd64-784643c8.tar.gz.part-004-006",
+      "bytes": 4194304,
+      "sha256": "9683047f388ce5e7f73884bf3205180de02ce9b250260e9cf2e6603057481cad"
+    },
+    {
+      "name": "auriga-build-java-inputs-linux-amd64-784643c8.tar.gz.part-004-007",
+      "bytes": 4194304,
+      "sha256": "32eeb1a01efc17bc19032f493fc21fd189548f9883425eb7000c7fb53abef086"
+    },
+    {
+      "name": "auriga-build-java-inputs-linux-amd64-784643c8.tar.gz.part-004-008",
+      "bytes": 4194304,
+      "sha256": "d5c180587e52999110e9a87fd5969a30dfa4a2fec494bb8960b0e4006fb5b05c"
+    },
+    {
+      "name": "auriga-build-java-inputs-linux-amd64-784643c8.tar.gz.part-004-009",
+      "bytes": 4194304,
+      "sha256": "99624a6c3d3fd1cee06bccac3d8c5a8860b71dbee9a13b0b3042105e69ce5577"
+    },
+    {
+      "name": "auriga-build-java-inputs-linux-amd64-784643c8.tar.gz.part-004-010",
+      "bytes": 4194304,
+      "sha256": "3ba3e402cc51a989cca3e11b9835ffe832638465f1eac828687d1021e13b1843"
+    },
+    {
+      "name": "auriga-build-java-inputs-linux-amd64-784643c8.tar.gz.part-004-011",
+      "bytes": 4194304,
+      "sha256": "c4af730002a8f8764d62ad5db037d59f0def29913736241d376d843126eb3c1f"
+    },
+    {
+      "name": "auriga-build-java-inputs-linux-amd64-784643c8.tar.gz.part-004-012",
+      "bytes": 4194304,
+      "sha256": "4fa69fa1d1f8f871f5bbef674bfe8f7d058f18a7823ef1ad6b99ff97bcfb04a7"
+    },
+    {
+      "name": "auriga-build-java-inputs-linux-amd64-784643c8.tar.gz.part-004-013",
+      "bytes": 4194304,
+      "sha256": "250843dd49de02f3aff62c553391171f096f0100d86a558275a90ca16dc9b43b"
+    },
+    {
+      "name": "auriga-build-java-inputs-linux-amd64-784643c8.tar.gz.part-004-014",
+      "bytes": 4194304,
+      "sha256": "65ec343fa25556cf9f068e26afb0856315c48e7d1d73bca9f8422528e5e24bfa"
+    },
+    {
+      "name": "auriga-build-java-inputs-linux-amd64-784643c8.tar.gz.part-004-015",
+      "bytes": 4194304,
+      "sha256": "a0a1c4aa029c65dadc7e55a5929c87d8d91a846b671cd78e52bac5b48e650c05"
+    },
+    {
+      "name": "auriga-build-java-inputs-linux-amd64-784643c8.tar.gz.part-005-000",
+      "bytes": 4194304,
+      "sha256": "d6d3c2ac338b95038ba5ca0c4ebf03aadc15931936ff248632a23ecc5975e534"
+    },
+    {
+      "name": "auriga-build-java-inputs-linux-amd64-784643c8.tar.gz.part-005-001",
+      "bytes": 4194304,
+      "sha256": "396461ddd7ee3787c2e7d6004e613be6265cfbc24ef6f1f40458ef501970c0de"
+    },
+    {
+      "name": "auriga-build-java-inputs-linux-amd64-784643c8.tar.gz.part-005-002",
+      "bytes": 4194304,
+      "sha256": "211e64eb56fb56a0fa9135aa7c864f3fe2471e9ad646755696696fffb927ced3"
+    },
+    {
+      "name": "auriga-build-java-inputs-linux-amd64-784643c8.tar.gz.part-005-003",
+      "bytes": 4194304,
+      "sha256": "da11ccf383ed7f1193f4fcc7fb604d90e2de3628dfd774f890217d5444418408"
+    },
+    {
+      "name": "auriga-build-java-inputs-linux-amd64-784643c8.tar.gz.part-005-004",
+      "bytes": 4194304,
+      "sha256": "06e6b2005f810b6b7752902f1f739ca729f1b42adca782d2cc97924efba47e41"
+    },
+    {
+      "name": "auriga-build-java-inputs-linux-amd64-784643c8.tar.gz.part-005-005",
+      "bytes": 4194304,
+      "sha256": "4454c42613c75c6e203c73f22c77e5e5078581a3d7155f36f5774fd7c31cabd9"
+    },
+    {
+      "name": "auriga-build-java-inputs-linux-amd64-784643c8.tar.gz.part-005-006",
+      "bytes": 3011682,
+      "sha256": "97a3b7a8443ea2e3dbca580cc597fc24c17b4b039b1d75d5665e0696524893b9"
+    },
+    {
+      "name": "JAVA-PARTS.SHA256SUMS",
+      "bytes": 7516,
+      "sha256": "108ec7722cd28592351016a6f15919d808d4abfa0193bbdcdcba20ff126abec9"
+    },
+    {
+      "name": "auriga-build-java-inputs-linux-amd64-784643c8.tar.gz.sha256",
+      "bytes": 119,
+      "sha256": "2fed43a0828dbfb0ae6fe9093cc8fbff2ce9d57bd479542183aaa5f5cc6305ef"
+    },
+    {
+      "name": "java-dependencies.json",
+      "bytes": 639327,
+      "sha256": "d7c89755a1f3252733074dcdac7f2877066896ce71cb5a334406da11acedc6ae"
+    },
+    {
+      "name": "java-input-files.sha256",
+      "bytes": 527124,
+      "sha256": "88ac59948bcc6e63984bf2d40e5634008f0a67239f05ebb49f8a7982c4170146"
+    },
+    {
+      "name": "java-source-locks.sha256",
+      "bytes": 2532,
+      "sha256": "0f0b50ead7efd27d9c5a93bd5bd808205b254ab69e18f532dde193428681503c"
+    }
+  ],
+  "existingInputs": [
+    {
+      "package": "auriga-site-build-deps",
+      "version": "963bfe65-linux-amd64-build-bases-rc1",
+      "files": [
+        {
+          "name": "auriga-build-jdk-base-linux-amd64.tar.gz.part000",
+          "bytes": 4194304,
+          "sha256": "880111fbf5fc2eadccc104d42ef0e54cec3663e0d1dcecfee3d1673f43c880d2"
+        },
+        {
+          "name": "auriga-build-jdk-base-linux-amd64.tar.gz.part001",
+          "bytes": 4194304,
+          "sha256": "d971540126f7dea2334905aded023e5de32bc3101878146a96600f7057c7bec9"
+        },
+        {
+          "name": "auriga-build-jdk-base-linux-amd64.tar.gz.part002",
+          "bytes": 4194304,
+          "sha256": "483c2135f44830c48adf27a65926a370013a2a2aeda26c068f9d15f818054a08"
+        },
+        {
+          "name": "auriga-build-jdk-base-linux-amd64.tar.gz.part003",
+          "bytes": 4194304,
+          "sha256": "4948d07e1a6e519e6ec7d947359f5de0a899626743e5ae5f70a40291b4645386"
+        },
+        {
+          "name": "auriga-build-jdk-base-linux-amd64.tar.gz.part004",
+          "bytes": 4194304,
+          "sha256": "ce6db753c77b92a4f9c91cbabf00bf7a0b4faff2379a14e471a6b024be35a7ad"
+        },
+        {
+          "name": "auriga-build-jdk-base-linux-amd64.tar.gz.part005",
+          "bytes": 4194304,
+          "sha256": "9d5db9c98d0eef42c19f21977b1672c267c6c2d515a93a70c7c46a18ceb9b170"
+        },
+        {
+          "name": "auriga-build-jdk-base-linux-amd64.tar.gz.part006",
+          "bytes": 4194304,
+          "sha256": "36517bcfad589d5d4b81b5a6818628b44aa557051454f04ab3ce91f8ef556488"
+        },
+        {
+          "name": "auriga-build-jdk-base-linux-amd64.tar.gz.part007",
+          "bytes": 4194304,
+          "sha256": "b926184304a029189de85142b7d837d0493849d3d3d2080aa3b05dc55e50f414"
+        },
+        {
+          "name": "auriga-build-jdk-base-linux-amd64.tar.gz.part008",
+          "bytes": 4194304,
+          "sha256": "1dd7f02e45f6c756739e12064649ca3f3c70e841f8f7f2f4b52306adfd1cdd11"
+        },
+        {
+          "name": "auriga-build-jdk-base-linux-amd64.tar.gz.part009",
+          "bytes": 4194304,
+          "sha256": "e2a38434074d553c2404fc5111f844dd6440e064d0decc0e403049a3764087eb"
+        },
+        {
+          "name": "auriga-build-jdk-base-linux-amd64.tar.gz.part010",
+          "bytes": 4194304,
+          "sha256": "d1735e45ec094d35e99451d1c04d5a17fac7aa339947204be3bf8baa3c6f5035"
+        },
+        {
+          "name": "auriga-build-jdk-base-linux-amd64.tar.gz.part011",
+          "bytes": 4194304,
+          "sha256": "5a265a6946332b3dc4e961004addcf64480fbed40dae41e42e78d254527c67e4"
+        },
+        {
+          "name": "auriga-build-jdk-base-linux-amd64.tar.gz.part012",
+          "bytes": 4194304,
+          "sha256": "4f17339f79ad39008a8a3334d673a6aea07d0ec2d8a8d1d05b4d5ec1246b322d"
+        },
+        {
+          "name": "auriga-build-jdk-base-linux-amd64.tar.gz.part013",
+          "bytes": 4194304,
+          "sha256": "40757d354be743fba024dfbe41d7a482e2dc245eed94ed39effad59af8a17d68"
+        },
+        {
+          "name": "auriga-build-jdk-base-linux-amd64.tar.gz.part014",
+          "bytes": 4194304,
+          "sha256": "b5b52198e57da6f0e1e337a832e74f187fa5e4af87ce67de9f8208dab6e461fb"
+        },
+        {
+          "name": "auriga-build-jdk-base-linux-amd64.tar.gz.part015",
+          "bytes": 4194304,
+          "sha256": "cd19315da2a502aaa83fad636c0c602e71e6da9c382acf1f7b35df34d0ea187d"
+        },
+        {
+          "name": "auriga-build-jdk-base-linux-amd64.tar.gz.part016",
+          "bytes": 4194304,
+          "sha256": "03ee20a44c2920c66e63e7aa5a3eb2b654ded28d2e1412cb3b891212638b1a01"
+        },
+        {
+          "name": "auriga-build-jdk-base-linux-amd64.tar.gz.part017",
+          "bytes": 4194304,
+          "sha256": "aee3f309a0234535ba8af190a2ae4b8b78493946d4749d87423c4bd2ea258a56"
+        },
+        {
+          "name": "auriga-build-jdk-base-linux-amd64.tar.gz.part018",
+          "bytes": 4194304,
+          "sha256": "88d14cd45fcaaf8e4bdc469193f4be72a48b7ad069f99c01d2369b9ebfd3be63"
+        },
+        {
+          "name": "auriga-build-jdk-base-linux-amd64.tar.gz.part019",
+          "bytes": 4194304,
+          "sha256": "299fa8e57588aa22ac9bb54e0a54e09d46216b25228b9b0728365616f78b6751"
+        },
+        {
+          "name": "auriga-build-jdk-base-linux-amd64.tar.gz.part020",
+          "bytes": 4194304,
+          "sha256": "dfa2486db768cb51030afb83f1e46e3a3f22b4cb861b81c9052b9574c8df81d9"
+        },
+        {
+          "name": "auriga-build-jdk-base-linux-amd64.tar.gz.part021",
+          "bytes": 4194304,
+          "sha256": "b66f828eba32384e12216be8863fc88ded90e216f8e9eba010400df0dfba2c79"
+        },
+        {
+          "name": "auriga-build-jdk-base-linux-amd64.tar.gz.part022",
+          "bytes": 4194304,
+          "sha256": "90051528b71bf6fbc720a0fd27c57d7ef9aece79b18ed18f8fbc5bf926a3976a"
+        },
+        {
+          "name": "auriga-build-jdk-base-linux-amd64.tar.gz.part023",
+          "bytes": 4194304,
+          "sha256": "0acd84c3593b524db58cea6e99d20bc254d504fedc46e52891ee5d73db8f90d4"
+        },
+        {
+          "name": "auriga-build-jdk-base-linux-amd64.tar.gz.part024",
+          "bytes": 4194304,
+          "sha256": "467c1ba8f3b6223758b53ec1445e8c4d2cdbc22bff275f8dfa7d59801f7ec771"
+        },
+        {
+          "name": "auriga-build-jdk-base-linux-amd64.tar.gz.part025",
+          "bytes": 4194304,
+          "sha256": "bcbe367af4b9c3b704fc398b9dc04c6a8586f0f963fa307dd1c0a48f36f2f9e3"
+        },
+        {
+          "name": "auriga-build-jdk-base-linux-amd64.tar.gz.part026",
+          "bytes": 4194304,
+          "sha256": "e7adc5b08ee93fc1e2a3565c46b4b7f93023bede944ca83873331d0c39da40a0"
+        },
+        {
+          "name": "auriga-build-jdk-base-linux-amd64.tar.gz.part027",
+          "bytes": 4194304,
+          "sha256": "6d9e6647a159af93bdd82d4ba19944e8af781eeb9c41653da5c6abfc1c66725e"
+        },
+        {
+          "name": "auriga-build-jdk-base-linux-amd64.tar.gz.part028",
+          "bytes": 4194304,
+          "sha256": "fd5d8f8be998377a98abaf9a41325661444579c5722cb358dd90410c1cf814b4"
+        },
+        {
+          "name": "auriga-build-jdk-base-linux-amd64.tar.gz.part029",
+          "bytes": 4194304,
+          "sha256": "0013e75902c02a044601357f8f1ac242d56044c848d0a1a54f6769c6ad49420e"
+        },
+        {
+          "name": "auriga-build-jdk-base-linux-amd64.tar.gz.part030",
+          "bytes": 4194304,
+          "sha256": "6ed64da6076aec77ba147a9d498d244f694afeab9dfd796349f6947befac0770"
+        },
+        {
+          "name": "auriga-build-jdk-base-linux-amd64.tar.gz.part031",
+          "bytes": 4194304,
+          "sha256": "02791fc780a062408fe6202e163f5850cea4c129ab886ec43bb90450026ce5e6"
+        },
+        {
+          "name": "auriga-build-jdk-base-linux-amd64.tar.gz.part032",
+          "bytes": 4194304,
+          "sha256": "a9aa8ca276a5e3c31e55d759796eeb397a9d00bfad9cd6806a0e17628efe2da8"
+        },
+        {
+          "name": "auriga-build-jdk-base-linux-amd64.tar.gz.part033",
+          "bytes": 4194304,
+          "sha256": "50fb7e9a70e88a9053b3e9220f9421d4ef1bb7a564b779d9f8763071d9b36ca1"
+        },
+        {
+          "name": "auriga-build-jdk-base-linux-amd64.tar.gz.part034",
+          "bytes": 4194304,
+          "sha256": "a97cc6183cbfb40082af927d2afa326c3c600ec1291a3c6c16c5e453b7457864"
+        },
+        {
+          "name": "auriga-build-jdk-base-linux-amd64.tar.gz.part035",
+          "bytes": 3000301,
+          "sha256": "541b332a37d70991b47d5557a72f40717b72e851d5477e660dc4bf015e2ea4da"
+        },
+        {
+          "name": "auriga-build-jdk-base-linux-amd64.tar.gz.PARTS.SHA256SUMS",
+          "bytes": 4140,
+          "sha256": "9e8ca8c5b97cee5018b903f89ae99e2b2a6dd1ef4ce47dfd32c0355c72b1a855"
+        },
+        {
+          "name": "auriga-build-jdk-base-linux-amd64.tar.gz.SHA256SUMS",
+          "bytes": 107,
+          "sha256": "7272611cc729e1bc108d8a96fce80196d2fba16066734548b6ba4aebcb4da93a"
+        }
+      ]
+    },
+    {
+      "package": "auriga-site-build-deps",
+      "version": "963bfe65-linux-amd64-java-tools-rc1",
+      "files": [
+        {
+          "name": "auriga-build-java-tools-linux-amd64-963bfe65.tar.gz.part000",
+          "bytes": 4194304,
+          "sha256": "d59967a17e26b828cb4a45c8dca23a1b97855bbff8550fcefa21496a6d51620c"
+        },
+        {
+          "name": "auriga-build-java-tools-linux-amd64-963bfe65.tar.gz.part001",
+          "bytes": 4194304,
+          "sha256": "515328f9301e585d80af64f2cde9cd97007a24ab0b947440d727e8a3a53a112e"
+        },
+        {
+          "name": "auriga-build-java-tools-linux-amd64-963bfe65.tar.gz.part002",
+          "bytes": 4194304,
+          "sha256": "abaadcd5392880eda9f273bf07dee5306ce6c85c441a9aa7c883943efb548eb5"
+        },
+        {
+          "name": "auriga-build-java-tools-linux-amd64-963bfe65.tar.gz.part003",
+          "bytes": 4194304,
+          "sha256": "f977bbe36c576dd6cc5992cf349f85e7d3bdaf4760b16297d3cc73d3cad05659"
+        },
+        {
+          "name": "auriga-build-java-tools-linux-amd64-963bfe65.tar.gz.part004",
+          "bytes": 4194304,
+          "sha256": "be0b32c03b05f627797fd713f2de9a20a7e71769aa8f06dd5a2a005e64e1a5c4"
+        },
+        {
+          "name": "auriga-build-java-tools-linux-amd64-963bfe65.tar.gz.part005",
+          "bytes": 4194304,
+          "sha256": "7bc08f2e16840c41907cb1e0fae18505c3bc7382f07ed0d5b90cd91add4c06a4"
+        },
+        {
+          "name": "auriga-build-java-tools-linux-amd64-963bfe65.tar.gz.part006",
+          "bytes": 4194304,
+          "sha256": "19e75b0d216e7d4cdfee8eeae3d79c2b2e7107506b58dfa864c42d38f128e1ab"
+        },
+        {
+          "name": "auriga-build-java-tools-linux-amd64-963bfe65.tar.gz.part007",
+          "bytes": 4194304,
+          "sha256": "f600c744dec970c558b194fb7afc806f46d274f781e06c9c40e0811ff13ecb36"
+        },
+        {
+          "name": "auriga-build-java-tools-linux-amd64-963bfe65.tar.gz.part008",
+          "bytes": 4194304,
+          "sha256": "83c20c763131b6ad601a3fcf14e42e04c96c6fcbac87cc832eb4e29d34d59ddf"
+        },
+        {
+          "name": "auriga-build-java-tools-linux-amd64-963bfe65.tar.gz.part009",
+          "bytes": 4194304,
+          "sha256": "418bbead4bd14125d28d84e62af043bdce1e7a6d9987c333716189cb4d1bd654"
+        },
+        {
+          "name": "auriga-build-java-tools-linux-amd64-963bfe65.tar.gz.part010",
+          "bytes": 4194304,
+          "sha256": "9f84e7387a8a020b99d21a76a2e580a2f220123709a15e250ea434d47a92929d"
+        },
+        {
+          "name": "auriga-build-java-tools-linux-amd64-963bfe65.tar.gz.part011",
+          "bytes": 4194304,
+          "sha256": "f64b492935d50a6742af03af3f77a3e7d8b34b909a3c7368275ff2497055366c"
+        },
+        {
+          "name": "auriga-build-java-tools-linux-amd64-963bfe65.tar.gz.part012",
+          "bytes": 4194304,
+          "sha256": "ab13e2620e4f5e2f43974723819599f4d510e35d8eb71df1e35fb97a9d18a2b1"
+        },
+        {
+          "name": "auriga-build-java-tools-linux-amd64-963bfe65.tar.gz.part013",
+          "bytes": 4194304,
+          "sha256": "9ecae21c348adcb3959b94d8985f2078da20c9fff26e73460bf6b7b804a28cce"
+        },
+        {
+          "name": "auriga-build-java-tools-linux-amd64-963bfe65.tar.gz.part014",
+          "bytes": 4194304,
+          "sha256": "ce1e156e6c61f1552abef680c50b14b409976abfc9a1a0a6bdd8866866f67992"
+        },
+        {
+          "name": "auriga-build-java-tools-linux-amd64-963bfe65.tar.gz.part015",
+          "bytes": 1061600,
+          "sha256": "d1575e0d4a4dfeb996b63bc92fbf07032606913a8654eedbe672161f2a5bc209"
+        },
+        {
+          "name": "auriga-build-java-tools-linux-amd64-963bfe65.tar.gz.PARTS.SHA256SUMS",
+          "bytes": 2016,
+          "sha256": "ef7a006669b49b2e7cbebe16e09fe74d61a6f804aedbb8ae704b0f6f5cd6861b"
+        },
+        {
+          "name": "auriga-build-java-tools-linux-amd64-963bfe65.tar.gz.SHA256SUMS",
+          "bytes": 118,
+          "sha256": "4f0c994b8c43b5d3d59b22b90a2d4205d955756106d546a8aee364498b63f024"
+        }
+      ]
+    }
+  ],
+  "toolchain": {
+    "jdk": "25.0.5+8",
+    "imageId": "sha256:b8705e936964c228dfce359e63dbf08f6c69cb380ed1d576b1f6b1064f15567d",
+    "upstream": "eclipse-temurin:25-jdk",
+    "wrapper": "3.3.4",
+    "maven": "3.9.16",
+    "node": "22.19.0",
+    "npm": "10.9.3",
+    "mavenInventoryEntries": 1288,
+    "javaRecipeSha256": "40f8bb17d52903aa323814a53b6e2014bcba2f893bb708f1e29deafda6dbd3db",
+    "imageArchive": {
+      "name": "auriga-build-jdk-base-linux-amd64.tar.gz",
+      "bytes": 149800941,
+      "sha256": "5f04ad0c389709baf90a7144c3dcf47c93e494c55782304e40642fe4110f11bb"
+    }
+  },
+  "verification": {
+    "preparation": "21 reactor modules BUILD SUCCESS; -DskipTests package",
+    "coldBuild": "passed: empty scratch/output, loopback only, 21 modules BUILD SUCCESS, 14:41",
+    "publication": "passed: all 62 selected files uploaded and downloaded with matching bytes/SHA-256; Forgejo metadata independently matched",
+    "docker": "29.1.3",
+    "compose": "2.40.3+ds1-0ubuntu1",
+    "limitations": [
+      "Unit tests skipped by official image recipe",
+      "No full platform service, real stack or Docker 26.1.4 acceptance performed"
+    ],
+    "jarSha256": "4ae5d0904e18eb36f4c784a50b231ef73847ce551daa61d49ba4035530d961b8",
+    "executedProbe": "Executed rebuilt class: auriga-platform-offline-rebuild"
+  }
+}
