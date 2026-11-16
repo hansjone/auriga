@@ -18,18 +18,22 @@ var domainName = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?\.[a-z]{2,
 
 type installOptions struct {
 	Address, Domain, Proxy, Data, PublicKey, Package string
+	DesktopPublicKey, DesktopPublisherTenant         string
+	DesktopConfirmFingerprint                        string
 	Fingerprint                                      string
 	AllowUnsigned                                    bool
 }
 type state struct {
-	Data          string            `json:"data"`
-	Package       string            `json:"package"`
-	Access        string            `json:"access"`
-	Images        map[string]string `json:"images"`
-	PublicKey     string            `json:"publicKey,omitempty"`
-	TrustedKeys   []string          `json:"trustedKeys,omitempty"`
-	AllowUnsigned bool              `json:"allowUnsigned,omitempty"`
-	ResourceReady bool              `json:"resourceReady"`
+	Data                        string            `json:"data"`
+	Package                     string            `json:"package"`
+	Access                      string            `json:"access"`
+	Images                      map[string]string `json:"images"`
+	PublicKey                   string            `json:"publicKey,omitempty"`
+	TrustedKeys                 []string          `json:"trustedKeys,omitempty"`
+	AllowUnsigned               bool              `json:"allowUnsigned,omitempty"`
+	ResourceReady               bool              `json:"resourceReady"`
+	DesktopPublicKeyFingerprint string            `json:"desktopPublicKeyFingerprint,omitempty"`
+	DesktopPublisherTenant      string            `json:"desktopPublisherTenant,omitempty"`
 }
 
 func parseInstall(args []string) (installOptions, error) {
@@ -43,6 +47,9 @@ func parseInstall(args []string) (installOptions, error) {
 	f.StringVar(&o.Fingerprint, "trust-fingerprint", "", "")
 	f.BoolVar(&o.AllowUnsigned, "allow-unsigned", false, "")
 	f.StringVar(&o.Package, "package", "", "")
+	f.StringVar(&o.DesktopPublicKey, "desktop-public-key", "", "")
+	f.StringVar(&o.DesktopPublisherTenant, "desktop-publisher-tenant", "", "")
+	f.StringVar(&o.DesktopConfirmFingerprint, "desktop-confirm-fingerprint", "", "")
 	if err := f.Parse(args); err != nil {
 		return o, err
 	}
@@ -50,6 +57,12 @@ func parseInstall(args []string) (installOptions, error) {
 		return o, errors.New("多余安装参数")
 	}
 	count := 0
+	if (o.DesktopPublicKey == "") != (o.DesktopPublisherTenant == "") || (o.DesktopPublicKey == "") != (o.DesktopConfirmFingerprint == "") {
+		return o, errors.New("--desktop-public-key、--desktop-publisher-tenant 和 --desktop-confirm-fingerprint 必须一并提供")
+	}
+	if o.DesktopConfirmFingerprint != "" && !hex64.MatchString(o.DesktopConfirmFingerprint) {
+		return o, errors.New("--desktop-confirm-fingerprint 需要64位小写SHA256（SPKI DER）")
+	}
 	if o.Address != "" {
 		count++
 		ip := net.ParseIP(o.Address)
@@ -187,6 +200,12 @@ func install(o installOptions) error {
 					return err
 				}
 			}
+			if err := configureDesktop(&s, o.DesktopPublicKey, o.DesktopPublisherTenant, o.DesktopConfirmFingerprint); err != nil {
+				return err
+			}
+			if err := saveState(s); err != nil {
+				return err
+			}
 			if err := nas(s, "start", "--network-offline"); err != nil {
 				return err
 			}
@@ -261,6 +280,12 @@ func install(o installOptions) error {
 			return err
 		}
 		s.ResourceReady = true
+		if err := saveState(s); err != nil {
+			return err
+		}
+		if err := configureDesktop(&s, o.DesktopPublicKey, o.DesktopPublisherTenant, o.DesktopConfirmFingerprint); err != nil {
+			return err
+		}
 		if err := saveState(s); err != nil {
 			return err
 		}

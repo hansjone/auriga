@@ -10,6 +10,7 @@ on:
       - 'contracts/plugin/**'
       - 'scripts/plugin/**'
       - 'scripts/resource-keys/**'
+      - 'scripts/client-release/**'
       - '.github/workflows/auth-release-artifacts.yml'
       - 'clients/installer/**'
       - 'clients/dsh-plugin/**'
@@ -84,6 +85,8 @@ jobs:
           set -euo pipefail
           pnpm exec eslint scripts/resource-keys
           pnpm exec prettier --check scripts/resource-keys/*.mjs
+          pnpm exec eslint scripts/client-release
+          pnpm exec prettier --check scripts/client-release/*.mjs scripts/client-release/*.cjs
           pnpm --filter @auriga/installer lint && pnpm --filter @auriga/installer test
       - uses: actions/download-artifact@v4
         with:

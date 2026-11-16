@@ -11,7 +11,9 @@ export function makeRelease(options) {
   const body = unsignedRelease(options);
   if (options.exe && sha256File(options.exe) !== body.sha256)
     throw new Error('release artifact must be the setup exe');
-  const commit = spawnSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' });
+  const commit = options.sourceInfo
+    ? { stdout: options.sourceInfo.sourceCommit, status: 0 }
+    : spawnSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' });
   const sourceCommit = commit.stdout.trim();
   if (commit.status !== 0 || !/^[a-f0-9]{40}$/.test(sourceCommit))
     throw new Error('source commit unavailable');
@@ -43,6 +45,12 @@ export function makeRelease(options) {
       : null,
     exeSha256: options.exe ? sha256File(options.exe) : null,
     sourceCommit,
+    ...(options.sourceInfo
+      ? {
+          source: options.sourceInfo,
+          siteChanges: options.sourceInfo.siteChanges,
+        }
+      : {}),
     desktopVersion: body.version,
     packageId: body.packageId,
     components: body.components,
@@ -50,7 +58,15 @@ export function makeRelease(options) {
     sizeBytes: body.sizeBytes,
     builtAt: new Date().toISOString(),
     workflowRun: options.workflowRun ?? null,
+    ...(options.siteOffline ? { siteOffline: options.siteOffline } : {}),
   };
+  if (options.siteOffline) {
+    record.event = 'site_offline';
+    record.workflow = 'scripts/client-release/cli.mjs';
+    record.ref = null;
+    record.sourceOnMain = false;
+    record.workflowRun = null;
+  }
   for (const [name, value] of [
     ['desktop-release.unsigned.json', body],
     ['desktop-build.json', record],
