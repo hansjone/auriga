@@ -137,8 +137,22 @@ try {
   const root = panel.shadowRoot;
   assert.equal(root.querySelector('aside').dataset.theme, 'dark');
   assert.equal(root.querySelectorAll('.card').length, 1);
-  assert.ok(root.querySelector('.card').textContent.includes(item.name));
-  assert.ok(root.textContent.includes('Local installation · Unknown'));
+  const card = root.querySelector('.resource-card');
+  assert.equal(
+    card.querySelector('.resource-heading h3').textContent,
+    item.name,
+  );
+  assert.ok(
+    [...card.querySelectorAll('.resource-meta .resource-badge')].some(
+      (badge) => badge.textContent === 'Installer unavailable',
+    ),
+    'the built card must render the unavailable local installation state',
+  );
+  assert.equal(
+    card.querySelector('.resource-actions .primary').disabled,
+    true,
+    'a missing local installer must keep the install action disabled',
+  );
   assert.deepEqual(
     calls.map((call) => call.url.pathname + call.url.search),
     [base + '?limit=50'],
@@ -149,9 +163,30 @@ try {
   assert.ok(details);
   details.click();
   await flush();
-  assert.equal(root.querySelector('.detail h2').textContent, item.name);
-  assert.ok(root.querySelector('.versions').textContent.includes('1.2.3'));
-  assert.ok(root.querySelector('.versions').textContent.includes('Published'));
+  assert.equal(
+    root.querySelector('.detail .resource-heading h3').textContent,
+    item.name,
+  );
+  assert.equal(
+    root.querySelector('.detail > .resource-badge').textContent,
+    'L2 · Installer unavailable',
+  );
+  const builtVersion = root.querySelector('.versions .resource-version');
+  assert.equal(
+    builtVersion.querySelector('.resource-version-header strong').textContent,
+    version.version,
+  );
+  assert.equal(
+    builtVersion.querySelector('.resource-version-header .resource-badge')
+      .textContent,
+    'Published',
+  );
+  assert.equal(
+    builtVersion.querySelector('p.muted').textContent,
+    'Installer unavailable',
+    'the exact version must retain its local installation state',
+  );
+  assert.equal(builtVersion.querySelector('.primary').disabled, true);
   assert.deepEqual(
     calls.slice(1).map((call) => call.url.pathname),
     [`${base}/${packageId}`, `${base}/${packageId}/versions`],
