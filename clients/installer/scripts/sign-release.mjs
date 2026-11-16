@@ -95,7 +95,24 @@ export function reviewRelease(options) {
   }
   let publicKeyFingerprint = null;
   if (record) {
-    if (
+    const site =
+      options.siteOffline === true && record.event === 'site_offline';
+    if (site) {
+      const evidence = record.siteOffline;
+      if (
+        record.workflow !== 'scripts/client-release/cli.mjs' ||
+        record.ref !== null ||
+        record.sourceOnMain !== false ||
+        record.workflowRun !== null ||
+        evidence?.schema !== 1 ||
+        !/^[a-f0-9]{64}$/.test(evidence.inputsSha256 ?? '') ||
+        !/^[a-f0-9]{64}$/.test(evidence.lockSha256 ?? '') ||
+        !/^[a-f0-9]{64}$/.test(evidence.sourceTreeSha256 ?? '') ||
+        typeof evidence.dirty !== 'boolean' ||
+        evidence.networkPolicy !== 'node-deny-local-native-tools'
+      )
+        throw new Error('invalid site offline build record');
+    } else if (
       !['push', 'workflow_dispatch'].includes(record.event) ||
       record.ref !== `refs/tags/desktop-v${body.version}` ||
       record.workflow !== '.github/workflows/installer.yml' ||
@@ -131,6 +148,16 @@ export function reviewRelease(options) {
         .digest('hex');
       if (record.publicKeyFingerprint !== publicKeyFingerprint)
         throw new Error('package public key differs from build record');
+      if (site) {
+        const roots = join(payload, 'auriga/runtime/resource-roots.json');
+        if (
+          !/^[a-f0-9]{64}$/.test(record.resourceTrustSha256 ?? '') ||
+          record.resourceTrustSha256 !== sha256File(roots)
+        )
+          throw new Error(
+            'package resource roots differ from site build record',
+          );
+      }
     } finally {
       rmSync(temporary, { recursive: true, force: true });
     }
@@ -161,6 +188,12 @@ export function reviewRelease(options) {
       rollbackFrom: body.rollbackFrom,
       publishedAt: body.publishedAt,
       notes: body.notes,
+      ...(record?.siteOffline
+        ? {
+            siteOffline: record.siteOffline,
+            resourceTrustSha256: record.resourceTrustSha256,
+          }
+        : {}),
     },
   };
 }
@@ -205,6 +238,10 @@ if (resolve(process.argv[1] ?? '') === fileURLToPath(import.meta.url)) {
       const arg = argv[index];
       if (arg === '--review-only') {
         options.reviewOnly = true;
+        continue;
+      }
+      if (arg === '--site-offline') {
+        options.siteOffline = true;
         continue;
       }
       if (arg === '--confirm-sha256') {

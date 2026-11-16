@@ -13,7 +13,9 @@ import {
   appendFileSync,
   existsSync,
   mkdirSync,
-  readFileSync,
+  openSync,
+  closeSync,
+  readSync,
   rmSync,
   statSync,
 } from 'node:fs';
@@ -103,7 +105,18 @@ export function makeExe({ stage, out, icon, archive }) {
   const trailer = Buffer.alloc(16);
   trailer.write(MAGIC, 0, 'ascii');
   trailer.writeBigInt64LE(BigInt(statSync(zip).size), 8);
-  appendFileSync(out, readFileSync(zip));
+  // Keep packaging usable on 16 GiB field machines even for large DSH archives.
+  const input = openSync(zip, 'r');
+  try {
+    const buffer = Buffer.allocUnsafe(1024 * 1024);
+    for (;;) {
+      const count = readSync(input, buffer, 0, buffer.length, null);
+      if (!count) break;
+      appendFileSync(out, buffer.subarray(0, count));
+    }
+  } finally {
+    closeSync(input);
+  }
   appendFileSync(out, trailer);
   rmSync(work, { recursive: true, force: true });
   return out;

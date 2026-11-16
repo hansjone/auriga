@@ -50,7 +50,15 @@ export function makeRelease(options) {
     sizeBytes: body.sizeBytes,
     builtAt: new Date().toISOString(),
     workflowRun: options.workflowRun ?? null,
+    ...(options.siteOffline ? { siteOffline: options.siteOffline } : {}),
   };
+  if (options.siteOffline) {
+    record.event = 'site_offline';
+    record.workflow = 'scripts/client-release/cli.mjs';
+    record.ref = null;
+    record.sourceOnMain = false;
+    record.workflowRun = null;
+  }
   for (const [name, value] of [
     ['desktop-release.unsigned.json', body],
     ['desktop-build.json', record],

@@ -38,6 +38,7 @@ import {
   treeDigest,
 } from '../runtime/verify.mjs';
 import { sha256File, assertNoSecrets, listFiles } from './lib/files.mjs';
+import { verifyInputs } from '../../../scripts/client-release/inputs.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const installerDir = resolve(here, '..');
@@ -211,12 +212,14 @@ async function download(url, file) {
   writeFileSync(file, Buffer.from(await response.arrayBuffer()));
 }
 
-async function nodeRuntime(version, expected, cache) {
-  mkdirSync(cache, { recursive: true });
+export async function nodeRuntime(version, expected, cache, offline = false) {
+  if (!offline) mkdirSync(cache, { recursive: true });
   const name = `node-v${version}-win-x64.zip`;
   const zip = join(cache, name);
   const base = `https://nodejs.org/dist/v${version}`;
   let sha = expected;
+  if (offline && (!sha || !existsSync(zip)))
+    throw new Error(`缺少离线输入：${name} 或固定摘要`);
   if (!sha) {
     const sums = join(cache, `SHASUMS256-${version}.txt`);
     if (!existsSync(sums)) await download(`${base}/SHASUMS256.txt`, sums);
@@ -229,7 +232,7 @@ async function nodeRuntime(version, expected, cache) {
   if (!existsSync(zip)) await download(`${base}/${name}`, zip);
   const actual = sha256File(zip);
   if (actual !== sha) {
-    rmSync(zip, { force: true });
+    if (!offline) rmSync(zip, { force: true });
     throw new Error(`node runtime checksum mismatch: ${actual} != ${sha}`);
   }
   return { zip, sha256: actual };
@@ -250,6 +253,14 @@ export async function build(args) {
   const config = JSON.parse(
     readFileSync(join(installerDir, 'upstream.json'), 'utf8'),
   );
+  const offline = args.offline === true;
+  const inputs = offline
+    ? verifyInputs(args['offline-inputs'], args['offline-inputs-sha256'])
+    : null;
+  if (offline && args.upstream && args.upstream !== config.dsh)
+    throw new Error('离线构建不能更换未批准的 DSH 版本');
+  if (offline && !args['plugin-tgz'])
+    throw new Error('离线构建必须提供本地重建的插件包');
   const dshVersion = args.upstream ?? config.dsh;
   const pinned = !args.upstream || args.upstream === config.dsh;
   const out = resolve(args.out ?? join(installerDir, 'target'));
@@ -295,7 +306,12 @@ export async function build(args) {
   const payload = join(stage, 'payload');
   mkdirSync(payload, { recursive: true });
 
-  const node = await nodeRuntime(config.node, config.nodeWinX64Sha256, cache);
+  const node = await nodeRuntime(
+    config.node,
+    config.nodeWinX64Sha256,
+    inputs ? join(inputs.directory, 'runtime') : cache,
+    offline,
+  );
   const nodeTmp = join(work, 'node');
   mkdirSync(nodeTmp, { recursive: true });
   run(TAR, ['-xf', node.zip, '-C', nodeTmp]);
@@ -324,7 +340,14 @@ export async function build(args) {
     `dsh-${dshVersion}.package-lock.json`,
   );
   const locked = existsSync(committedLock);
-  if (locked) {
+  if (offline) {
+    if (!locked) throw new Error('离线构建缺少固定 DSH 依赖锁');
+    cpSync(join(inputs.directory, 'upstream-app'), app, { recursive: true });
+    if (
+      sha256File(join(app, 'package-lock.json')) !== sha256File(committedLock)
+    )
+      throw new Error('离线 DSH 闭包与当前锁不符');
+  } else if (locked) {
     cpSync(committedLock, join(app, 'package-lock.json'));
     run('npm', ['ci', ...NPM_FLAGS], { cwd: app });
   } else {
@@ -337,14 +360,16 @@ export async function build(args) {
     throw new Error(
       `lock resolves dsh ${dshEntry?.version}, expected ${dshVersion}`,
     );
-  const registryIntegrity = JSON.parse(
-    run('npm', [
-      'view',
-      `@deepseek-ai/dsh@${dshVersion}`,
-      'dist.integrity',
-      '--json',
-    ]),
-  );
+  const registryIntegrity = offline
+    ? config.dshIntegrity
+    : JSON.parse(
+        run('npm', [
+          'view',
+          `@deepseek-ai/dsh@${dshVersion}`,
+          'dist.integrity',
+          '--json',
+        ]),
+      );
   if (dshEntry.integrity !== registryIntegrity)
     throw new Error('dsh integrity differs between lock and registry');
   if (
@@ -365,9 +390,30 @@ export async function build(args) {
     join(plugin, 'package.json'),
     '{"name":"auriga-plugin-closure","private":true}\n',
   );
-  run('npm', ['install', ...NPM_FLAGS, '--no-package-lock', tgz], {
-    cwd: plugin,
-  });
+  if (offline) {
+    const deps = join(inputs.directory, 'plugin-deps');
+    const dependencyPackage = JSON.parse(
+      readFileSync(join(deps, 'package.json'), 'utf8'),
+    );
+    if (
+      JSON.stringify(dependencyPackage.dependencies) !==
+      JSON.stringify(pluginPkg.dependencies)
+    )
+      throw new Error('离线插件依赖变化，请重新准备 devkit');
+    cpSync(join(deps, 'node_modules'), join(plugin, 'node_modules'), {
+      recursive: true,
+    });
+    const expanded = join(work, 'offline-plugin');
+    mkdirSync(expanded);
+    run(TAR, ['-xf', tgz, '-C', expanded]);
+    cpSync(join(expanded, 'package'), join(plugin, 'node_modules/auriga-dsh'), {
+      recursive: true,
+    });
+  } else {
+    run('npm', ['install', ...NPM_FLAGS, '--no-package-lock', tgz], {
+      cwd: plugin,
+    });
+  }
   cpSync(tgz, join(payload, 'auriga', 'plugin', 'auriga-dsh.tgz'));
   rmSync(join(plugin, 'package.json'));
 
@@ -395,14 +441,20 @@ export async function build(args) {
       dependencies: { pnpm: config.pnpm },
     }) + '\n',
   );
-  run('npm', ['install', ...NPM_FLAGS], { cwd: pnpmDir });
+  if (offline)
+    cpSync(join(inputs.directory, 'payload-pnpm'), pnpmDir, {
+      recursive: true,
+    });
+  else run('npm', ['install', ...NPM_FLAGS], { cwd: pnpmDir });
   const pnpmLock = JSON.parse(
     readFileSync(join(pnpmDir, 'package-lock.json'), 'utf8'),
   );
   const pnpmIntegrity = pnpmLock.packages['node_modules/pnpm']?.integrity;
-  const pnpmRegistry = JSON.parse(
-    run('npm', ['view', `pnpm@${config.pnpm}`, 'dist.integrity', '--json']),
-  );
+  const pnpmRegistry = offline
+    ? config.pnpmIntegrity
+    : JSON.parse(
+        run('npm', ['view', `pnpm@${config.pnpm}`, 'dist.integrity', '--json']),
+      );
   if (!pnpmIntegrity || pnpmIntegrity !== pnpmRegistry)
     throw new Error('pnpm integrity mismatch');
   if (config.pnpmIntegrity && config.pnpmIntegrity !== pnpmIntegrity)
