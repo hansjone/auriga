@@ -29,6 +29,55 @@ var imageDigest = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
 var imageHex = regexp.MustCompile(`^[0-9a-f]{64}$`)
 var imageCommit = regexp.MustCompile(`^[0-9a-f]{40}$`)
 
+// Extra archives (database, broker, registry and optional runtime) use the same
+// config/layer verification as the five NAS service archives. The caller first
+// authenticates the complete offline package and loads this exact archive.
+func extraImageCommand(ctx context.Context, args []string, stdout io.Writer) error {
+	if (len(args) != 2 && len(args) != 3) || args[1] == "" || strings.HasPrefix(args[1], "-") {
+		return errors.New("usage: image-extra-resolve ARCHIVE EXACT_TAG [IMMUTABLE_LOCAL_ID]")
+	}
+	selector := args[1]
+	if len(args) == 3 {
+		if !imageDigest.MatchString(args[2]) {
+			return errors.New("expected immutable local image ID")
+		}
+		selector = args[2]
+	}
+	f, err := openImageFile(args[0])
+	if err != nil {
+		return err
+	}
+	proof, err := readImageArchive(ctx, f, args[1], defaultImageLimits)
+	closeErr := f.Close()
+	if err != nil {
+		return err
+	}
+	if closeErr != nil {
+		return closeErr
+	}
+	actual, err := inspectDockerImage(ctx, selector)
+	if err != nil {
+		return err
+	}
+	if !imageDigest.MatchString(actual.ID) || actual.OS != "linux" || actual.Arch != "amd64" {
+		return errors.New("extra image must be an immutable linux/amd64 identity")
+	}
+	if err := exportDockerImage(ctx, actual.ID, func(r io.Reader) error {
+		got, err := readImageArchive(ctx, r, "", defaultImageLimits)
+		if err != nil {
+			return err
+		}
+		if got.ConfigID != proof.ConfigID || !equalImageLayers(got.diffIDs, proof.diffIDs) {
+			return errors.New("extra image differs from approved archive")
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+	_, err = fmt.Fprintln(stdout, actual.ID)
+	return err
+}
+
 type imageLimits struct {
 	tarBytes, expandedBytes  int64
 	entries                  int

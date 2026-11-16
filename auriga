@@ -1,0 +1,23 @@
+#!/bin/sh
+set -eu
+ROOT=$(CDPATH= cd -P -- "$(dirname -- "$0")" && pwd)
+if [ -x "$ROOT/bin/auriga-cli" ]; then
+  exec "$ROOT/bin/auriga-cli" "$@"
+fi
+# Source checkout on the connected packaging computer. Field packages already
+# carry the static executable, so installation never builds or pulls anything.
+cd "$ROOT"
+mkdir -p bin
+if command -v go >/dev/null 2>&1; then
+  (cd deploy/offline && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o ../../bin/auriga-cli .)
+else
+  case "${AURIGA_GO_IMAGE:-}" in
+    *@sha256:*) ;;
+    *) echo '联网打包机需要 Go 1.27.3，或设置 AURIGA_GO_IMAGE 为已批准的 Forgejo Go 工具镜像 digest。' >&2; exit 1 ;;
+  esac
+  docker run --rm --platform linux/amd64 --network none \
+    --mount "type=bind,src=$ROOT,dst=/source" -w /source/deploy/offline \
+    -e CGO_ENABLED=0 -e GOOS=linux -e GOARCH=amd64 \
+    "$AURIGA_GO_IMAGE" go build -o /source/bin/auriga-cli .
+fi
+exec "$ROOT/bin/auriga-cli" "$@"
