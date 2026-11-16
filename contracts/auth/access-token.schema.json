@@ -24,7 +24,7 @@
     "did": { "description": "设备 id（ctx=device 时）。", "type": "string", "format": "uuid" },
     "mtyp": { "description": "成员类型（ptyp=user / device 时）。", "enum": ["member", "external"] },
     "roles": { "type": "array", "items": { "type": "string" } },
-    "perms": { "description": "有效权限 key。ctx=device 时只含 `auriga.connect` 范围允许的权限，不含任何 `*.write`、`*.admin`、`*.grant`；ctx=portal 时不含管理类权限。", "type": "array", "items": { "type": "string" } },
+    "perms": { "description": "有效权限 key。ctx=device 的平台令牌含允许的 auriga.connect 能力，以及 catalog/m3.json 中资源能力 deviceMappings 目标与账号有效权限的交集；不展开 ai.* 目标，不含上传、送审、审核、发布、管理权限。专用 AI 设备令牌沿用既有能力集合。ctx=portal 时不含管理类权限。", "type": "array", "items": { "type": "string" } },
     "auth_time": { "description": "本次会话登录时间（Unix 秒）。", "type": "integer" },
     "stepup_time": { "description": "最近一次二次验证时间（Unix 秒）；要求\"近期做过二次验证\"的操作用它判断（默认 10 分钟内）。", "type": "integer" },
     "amr": { "description": "验证方式（RFC 8176），例如 pwd、otp、hwk、ext（外部身份源）。", "type": "array", "items": { "type": "string" } },

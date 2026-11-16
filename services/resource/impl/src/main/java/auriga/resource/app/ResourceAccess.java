@@ -19,9 +19,16 @@ public final class ResourceAccess {
   public static final String READ = "resource.packages.read";
   public static final String UPLOAD = "resource.packages.upload";
   private final ResourceAccessInputs inputs;
+  private final auriga.iam.api.DevicePermissionAuthority devices;
 
   public ResourceAccess(ResourceAccessInputs inputs) {
+    this(inputs, (tenant, account, device, permission) -> false);
+  }
+
+  public ResourceAccess(
+      ResourceAccessInputs inputs, auriga.iam.api.DevicePermissionAuthority devices) {
     this.inputs = inputs;
+    this.devices = devices;
   }
 
   public record Reader(
@@ -126,6 +133,12 @@ public final class ResourceAccess {
     } catch (IllegalArgumentException e) {
       throw new AurigaException(CommonErrors.FORBIDDEN);
     }
+    if (principal.type() == PrincipalType.DEVICE
+        && (principal.context() != auriga.common.security.TokenContext.DEVICE
+            || principal.deviceId() == null
+            || !devices.allowed(
+                principal.tenantId(), principal.subject(), principal.deviceId(), permission)))
+      throw new AurigaException(CommonErrors.FORBIDDEN);
     try {
       var member = member(principal.tenantId(), account);
       var permissions = inputs.permissions(principal.tenantId(), account);

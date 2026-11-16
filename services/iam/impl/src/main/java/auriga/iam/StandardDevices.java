@@ -176,8 +176,9 @@ final class StandardDevices {
     if (before == null) return OAuthProvider.error("invalid_grant");
     var effective = permissions(before.session().path("accountId").asString());
     if (effective == null) return OAuthProvider.error("invalid_grant");
-    Set<String> granted = new HashSet<>(effective.getPermissionsList());
-    granted.removeIf(p -> !TokenService.allowedPermission(p, "device") || ai && !AI.contains(p));
+    Set<String> granted =
+        new HashSet<>(TokenService.devicePermissions(Set.copyOf(effective.getPermissionsList())));
+    if (ai) granted.retainAll(AI);
     if (granted.isEmpty()) return OAuthProvider.error("invalid_grant");
     return tokens.withSigningKey(
         () ->
