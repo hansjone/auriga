@@ -607,6 +607,245 @@ class WorkspaceIntegrationTest {
     }
   }
 
+  @ParameterizedTest
+  @ValueSource(booleans = {true, false})
+  void safetyProjectionPreservesCredentialsAcrossDesiredStateChanges(boolean candidateRunning)
+      throws Exception {
+    var control = new RecoveryControl(tenant);
+    try (var resources =
+        new WorkspaceUnifiedResources(
+            service,
+            inputs,
+            request -> {
+              throw new AurigaException(auriga.common.error.CommonErrors.UNAVAILABLE);
+            },
+            true)) {
+      UUID instance =
+          TenantContext.call(tenant, () -> (UUID) service.open(owner).instance().get("id"));
+      store.in(
+          tenant,
+          () -> {
+            store.lock();
+            var row = store.instance(instance);
+            var approved =
+                UnifiedSpec.bump(
+                    WorkspaceService.spec(row).toBuilder()
+                        .setDesired(
+                            candidateRunning
+                                ? DesiredState.DESIRED_STATE_STOPPED
+                                : DesiredState.DESIRED_STATE_RUNNING)
+                        .build());
+            service.saveCatalogSpec(row, approved);
+            row = store.instance(instance);
+            service.saveSpec(
+                row,
+                UnifiedSpec.bump(
+                    WorkspaceService.spec(row).toBuilder()
+                        .setDesired(
+                            candidateRunning
+                                ? DesiredState.DESIRED_STATE_RUNNING
+                                : DesiredState.DESIRED_STATE_STOPPED)
+                        .build()));
+            seedSafetyCredentials(
+                instance,
+                candidateRunning ? "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01" : "");
+            row = store.instance(instance);
+            var before = row;
+            service.saveSafetySpec(
+                row,
+                UnifiedSpec.revocations(
+                    WorkspaceService.spec(row), unifiedReviewRevocations(), true));
+            row = store.instance(instance);
+            assertSafetySideEffectsPreserved(before, row);
+            var projected = WorkspaceService.spec(Map.of("spec", row.get("catalog_safety_spec")));
+            assertEquals(approved.getDesired(), projected.getDesired());
+            assertProjectionSecrets(control, before, projected);
+            assertTrue(projected.getGeneration() < WorkspaceService.spec(row).getGeneration());
+            assertEquals(
+                candidateRunning
+                    ? DesiredState.DESIRED_STATE_RUNNING
+                    : DesiredState.DESIRED_STATE_STOPPED,
+                WorkspaceService.spec(row).getDesired());
+            return null;
+          });
+      if (candidateRunning) {
+        control.stream.onNext(
+            SessionRequest.newBuilder().setInventory(Inventory.getDefaultInstance()).build());
+        var dispatched = control.fake.next().getApply().getSpec();
+        assertEquals(DesiredState.DESIRED_STATE_STOPPED, dispatched.getDesired());
+        store.in(
+            tenant,
+            () -> {
+              assertProjectionSecrets(control, store.instance(instance), dispatched);
+              return null;
+            });
+      }
+    }
+  }
+
+  @Test
+  void safetyProjectionDoesNotCreateRestartForUncheckedExecutionChange() throws Exception {
+    var control = new RecoveryControl(tenant);
+    try (var resources =
+        new WorkspaceUnifiedResources(
+            service,
+            inputs,
+            request -> {
+              throw new AurigaException(auriga.common.error.CommonErrors.UNAVAILABLE);
+            },
+            true)) {
+      UUID instance =
+          TenantContext.call(tenant, () -> (UUID) service.open(owner).instance().get("id"));
+      var running = unifiedReviewRef("approved", false);
+      store.in(
+          tenant,
+          () -> {
+            store.lock();
+            var row = store.instance(instance);
+            service.saveCatalogSpec(
+                row,
+                UnifiedSpec.bump(
+                    WorkspaceService.spec(row).toBuilder().addUnifiedResources(running).build()));
+            row = store.instance(instance);
+            service.saveSpec(
+                row,
+                UnifiedSpec.bump(
+                    WorkspaceService.spec(row).toBuilder()
+                        .setDsh(
+                            WorkspaceService.spec(row).getDsh().toBuilder()
+                                .setVersion("unchecked-runtime"))
+                        .build()));
+            seedSafetyCredentials(instance, null);
+            row = store.instance(instance);
+            var before = row;
+            long history =
+                store.jdbc.queryForObject(
+                    "SELECT count(*) FROM instance_spec WHERE tenant_id=? AND instance_id=?",
+                    Long.class,
+                    tenant,
+                    instance);
+            var disabled =
+                running.toBuilder()
+                    .setEnabled(false)
+                    .setInstallationRevision(2)
+                    .setDesiredState(
+                        UnifiedResourceDesiredState.UNIFIED_RESOURCE_DESIRED_STATE_DISABLED)
+                    .build();
+            var next =
+                UnifiedSpec.bump(
+                    UnifiedSpec.revocations(
+                        WorkspaceService.spec(row).toBuilder()
+                            .setUnifiedResources(0, disabled)
+                            .build(),
+                        unifiedReviewRevocations(),
+                        false));
+            service.saveSafetySpec(row, next);
+            row = store.instance(instance);
+            assertSafetySideEffectsPreserved(before, row);
+            assertEquals(
+                history + 1,
+                store.jdbc.queryForObject(
+                    "SELECT count(*) FROM instance_spec WHERE tenant_id=? AND instance_id=?",
+                    Long.class,
+                    tenant,
+                    instance),
+                "only the complete candidate belongs in primary spec history");
+            assertEquals("unchecked-runtime", WorkspaceService.spec(row).getDsh().getVersion());
+            var projected = service.dispatchSpec(row);
+            assertNotNull(projected);
+            assertNotEquals("unchecked-runtime", projected.getDsh().getVersion());
+            assertEquals(disabled, projected.getUnifiedResources(0));
+            assertProjectionSecrets(control, before, projected);
+            return null;
+          });
+      control.stream.onNext(
+          SessionRequest.newBuilder().setInventory(Inventory.getDefaultInstance()).build());
+      var dispatched = control.fake.next().getApply().getSpec();
+      store.in(
+          tenant,
+          () -> {
+            assertProjectionSecrets(control, store.instance(instance), dispatched);
+            return null;
+          });
+    }
+  }
+
+  void seedSafetyCredentials(UUID instance, String startupTrace) {
+    store.jdbc.update(
+        "UPDATE instance SET managed_credential=?,managed_model_credential=?,managed_credential_version=41,managed_synced_version=41,managed_network_state='ready',phase='running',restart_pending=false,startup_traceparent=? WHERE tenant_id=? AND id=?",
+        managedCrypto.encrypt(
+            "device-current".getBytes(java.nio.charset.StandardCharsets.UTF_8),
+            tenant + "/managed/" + instance),
+        managedCrypto.encrypt(
+            "model-current".getBytes(java.nio.charset.StandardCharsets.UTF_8),
+            tenant + "/managed-model/" + instance),
+        startupTrace,
+        tenant,
+        instance);
+  }
+
+  void assertSafetySideEffectsPreserved(Map<String, Object> before, Map<String, Object> after) {
+    for (String field :
+        List.of(
+            "managed_credential_version",
+            "managed_synced_version",
+            "managed_network_state",
+            "managed_retry_at",
+            "managed_wait_until",
+            "restart_pending",
+            "startup_traceparent")) assertEquals(before.get(field), after.get(field), field);
+    for (String field :
+        List.of(
+            "managed_credential",
+            "managed_model_credential",
+            "token_encrypted",
+            "catalog_admitted_spec"))
+      assertArrayEquals((byte[]) before.get(field), (byte[]) after.get(field), field);
+  }
+
+  void assertProjectionSecrets(
+      RecoveryControl control, Map<String, Object> row, InstanceSpec projected) {
+    assertArrayEquals(
+        managedCrypto.decrypt((byte[]) row.get("token_encrypted"), tenant + "/" + row.get("id")),
+        openProjectionSecret(
+            control, projected, "instance_token", projected.getSecrets().getInstanceToken()));
+    if (projected.getDesired() == DesiredState.DESIRED_STATE_RUNNING) {
+      assertArrayEquals(
+          "device-current".getBytes(java.nio.charset.StandardCharsets.UTF_8),
+          openProjectionSecret(
+              control,
+              projected,
+              "device_credential",
+              projected.getSecrets().getDeviceCredential()));
+      assertArrayEquals(
+          "model-current".getBytes(java.nio.charset.StandardCharsets.UTF_8),
+          openProjectionSecret(
+              control, projected, "model_credential", projected.getSecrets().getModelCredential()));
+    } else {
+      assertFalse(projected.getSecrets().hasDeviceCredential());
+      assertFalse(projected.getSecrets().hasModelCredential());
+    }
+  }
+
+  byte[] openProjectionSecret(
+      RecoveryControl control, InstanceSpec spec, String name, SealedSecret sealed) {
+    try {
+      var recipient =
+          WorkspaceCrypto.hpke()
+              .setupBaseR(
+                  sealed.getEnc().toByteArray(),
+                  control.sealingKey,
+                  ("auriga/sealed/v1/" + spec.getInstanceId() + "/" + name)
+                      .getBytes(java.nio.charset.StandardCharsets.UTF_8));
+      return recipient.open(
+          Long.toString(spec.getGeneration()).getBytes(java.nio.charset.StandardCharsets.UTF_8),
+          sealed.getCiphertext().toByteArray());
+    } catch (Exception failure) {
+      throw new AssertionError(
+          "projection secret is not valid for the dispatched generation", failure);
+    }
+  }
+
   @Test
   void nodeSessionSendsOnlySafetyProjectionUntilCatalogAdmission() throws Exception {
     var control = new RecoveryControl(tenant);
@@ -2696,6 +2935,8 @@ class WorkspaceIntegrationTest {
   }
 
   final class RecoveryControl {
+    final org.bouncycastle.crypto.AsymmetricCipherKeyPair sealingKey =
+        WorkspaceCrypto.hpke().generatePrivateKey();
     final UUID node;
     final Context context;
     final Hello hello;
@@ -2706,7 +2947,12 @@ class WorkspaceIntegrationTest {
       String token =
           TenantContext.call(
               nodeTenant, () -> enrollment.createToken("recovery", 5, owner).token());
-      var request = joinRequest(token, TestPki.key());
+      var request =
+          joinRequest(token, TestPki.key()).toBuilder()
+              .setSealingPublicKey(
+                  ByteString.copyFrom(
+                      WorkspaceCrypto.hpke().serializePublicKey(sealingKey.getPublic())))
+              .build();
       var joined = enrollment.join(request);
       node = UUID.fromString(joined.getNodeId());
       context =

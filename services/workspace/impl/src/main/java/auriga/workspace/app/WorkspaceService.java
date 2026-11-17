@@ -451,7 +451,9 @@ public final class WorkspaceService {
     if (!UnifiedSpec.safetyChange(spec(row), next))
       throw new AurigaException(CommonErrors.VALIDATION_FAILED);
     InstanceSpec admitted = null;
-    if (row.get("catalog_admitted_spec") instanceof byte[] bytes) {
+    Object admittedBytes = row.get("catalog_safety_spec");
+    if (admittedBytes == null) admittedBytes = row.get("catalog_admitted_spec");
+    if (admittedBytes instanceof byte[] bytes) {
       var snapshot = new HashMap<String, Object>(row);
       snapshot.put("spec", bytes);
       admitted = spec(snapshot);
@@ -464,18 +466,25 @@ public final class WorkspaceService {
     if (!previousAdmitted) {
       var projected = admitted == null ? null : UnifiedSpec.safetyProjection(admitted, next);
       if (projected == null) {
-        saveSpec(row, next, false, false);
+        persistSpec(
+            row,
+            sealSpec(row, next),
+            false,
+            (boolean) row.get("restart_pending"),
+            (String) row.get("startup_traceparent"));
         return;
       }
-      // Give the safety-only view its own generation. Later admission must send a newer full view.
-      saveSpec(row, projected, false, false, true);
-      var saved = store.instance((UUID) row.get("id"));
-      byte[] safetyBytes = (byte[]) saved.get("spec");
-      saveSpec(saved, UnifiedSpec.bump(next), false, false);
+      var safety = sealSpec(row, projected);
+      // Reserve the following generation for the complete pending candidate, stored once.
+      persistSpec(
+          row,
+          sealSpec(row, UnifiedSpec.bump(next)),
+          false,
+          (boolean) row.get("restart_pending"),
+          (String) row.get("startup_traceparent"));
       store.jdbc.update(
-          "UPDATE instance SET catalog_admitted_spec=?,catalog_safety_spec=? WHERE tenant_id=? AND id=?",
-          safetyBytes,
-          safetyBytes,
+          "UPDATE instance SET catalog_safety_spec=? WHERE tenant_id=? AND id=?",
+          safety.toByteArray(),
           store.tenant(),
           row.get("id"));
       return;
@@ -531,6 +540,16 @@ public final class WorkspaceService {
                     || auriga.workspace.domain.UnifiedSpec.executionChanged(previous, next)
                     || !previous.getNetwork().equals(next.getNetwork())
                     || !previous.getProfile().equals(next.getProfile())));
+    persistSpec(
+        row,
+        sealSpec(row, next),
+        catalogChecked,
+        restart,
+        startupTrace == null || startupTrace.isEmpty() ? null : startupTrace);
+  }
+
+  /** Seals current stored material for a specification generation. */
+  private InstanceSpec sealSpec(Map<String, Object> row, InstanceSpec next) {
     if (row.get("node_id") != null) {
       var node = store.node((UUID) row.get("node_id"));
       byte[] token =
@@ -577,6 +596,15 @@ public final class WorkspaceService {
       }
       next = next.toBuilder().setSecrets(secrets).build();
     }
+    return next;
+  }
+
+  private void persistSpec(
+      Map<String, Object> row,
+      InstanceSpec next,
+      boolean catalogChecked,
+      boolean restart,
+      String startupTrace) {
     store.jdbc.update(
         "UPDATE instance SET spec=?,ready=CASE WHEN generation<>? THEN false ELSE ready END,generation=?,restart_pending=?,updated_at=?,startup_traceparent=? WHERE tenant_id=? AND id=?",
         next.toByteArray(),
@@ -584,7 +612,7 @@ public final class WorkspaceService {
         next.getGeneration(),
         restart,
         time(clock.instant()),
-        startupTrace == null || startupTrace.isEmpty() ? null : startupTrace,
+        startupTrace,
         store.tenant(),
         row.get("id"));
     store.jdbc.update(
