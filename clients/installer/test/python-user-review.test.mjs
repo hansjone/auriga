@@ -19,7 +19,11 @@ import {
 for (const mode of ['path', 'import']) {
   test(
     `personal ${mode} .pth path stays behind built-in imports`,
-    { skip: process.platform !== 'win32' },
+    {
+      skip:
+        process.platform !== 'win32' ||
+        spawnSync('python', ['--version'], { windowsHide: true }).status !== 0,
+    },
     (t) => {
       const base = tempBase(t);
       const hook = fileURLToPath(
@@ -36,8 +40,8 @@ extra = managed / 'extra'
 for folder in (personal_site, builtin_site, extra):
     folder.mkdir(parents=True)
 (managed / 'auriga-python.json').write_text('{}')
-(builtin_site / 'docx.py').write_text('SOURCE = "builtin"')
-(extra / 'docx.py').write_text('SOURCE = "personal"')
+(builtin_site / 'auriga_review_collision.py').write_text('SOURCE = "builtin"')
+(extra / 'auriga_review_collision.py').write_text('SOURCE = "personal"')
 line = str(extra) if sys.argv[3] == 'path' else 'import sys; sys.path.insert(0, ' + repr(str(extra)) + ')'
 (personal_site / 'collision.pth').write_text(line + '\n')
 sys.prefix = str(managed)
@@ -46,8 +50,8 @@ sys.path.insert(0, str(builtin_site))
 site.addsitedir(str(personal_site))
 exec(compile(pathlib.Path(sys.argv[2]).read_text(), sys.argv[2], 'exec'))
 assert sys.path.index(str(extra)) > sys.path.index(str(builtin_site)), sys.path
-import docx
-assert docx.SOURCE == 'builtin', docx.__file__
+import auriga_review_collision as probe
+assert probe.SOURCE == 'builtin', probe.__file__
 print('builtin wins')
 `;
       assert.equal(
