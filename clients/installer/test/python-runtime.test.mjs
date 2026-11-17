@@ -6,6 +6,7 @@ import {
   mkdirSync,
   readFileSync,
   writeFileSync,
+  symlinkSync,
 } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
@@ -34,7 +35,7 @@ import { protectPythonDirectory } from '../runtime/python-protection.mjs';
 
 function smallInputsLock() {
   const lock = readPythonLock();
-  for (const row of [lock.archive, ...lock.wheels]) {
+  for (const row of [lock.archive, ...lock.wheels, lock.pip]) {
     row.bytes = 1;
     row.sha256 = createHash('sha256').update('x').digest('hex');
   }
@@ -71,7 +72,7 @@ test('Python online download follows HTTPS redirects and refuses HTTP before sen
     return { status: 200, ok: true, arrayBuffer: async () => Buffer.from('x') };
   };
   await downloadPythonInputs(smallInputsLock(), join(base, 'good'));
-  assert.equal(requests, 15);
+  assert.equal(requests, 16);
 });
 
 test('online Python caches remove corrupt archives and wheels while offline verification preserves inputs', async (t) => {
@@ -103,7 +104,7 @@ test('Python lock fixes install_only CPython and the complete upstream wheel set
   assert.equal(lock.version, '3.12.14');
   assert.equal(lock.release, '20260901');
   assert.equal(lock.wheels.length, 13);
-  assert.equal(pythonInputs(lock).length, 14);
+  assert.equal(pythonInputs(lock).length, 15);
   assert.ok(
     lockIdentity().locks['clients/installer/locks/python-win-x64.json'],
   );
@@ -125,6 +126,7 @@ test('a Python pin or wheel lock change rejects reuse of the previous devkit', (
   for (const change of [
     (l) => (l.archive.sha256 = '0'.repeat(64)),
     (l) => (l.wheels[0].sha256 = '0'.repeat(64)),
+    (l) => (l.pip.sha256 = '0'.repeat(64)),
   ]) {
     const lock = JSON.parse(original);
     change(lock);
@@ -145,10 +147,15 @@ test('Python pin validation rejects wrong release, hash, URL and incompatible/so
     (l) => (l.wheels[0].filename = 'numpy-2.3.5.tar.gz'),
     (l) => (l.wheels[0].filename = 'numpy-2.3.5-cp313-cp313-win_amd64.whl'),
     (l) => l.wheels.push(l.wheels[0]),
+    (l) => (l.pip.sha256 = ''),
+    (l) => (l.pip.filename = 'pip-26.3.tar.gz'),
   ]) {
     const lock = readPythonLock();
     change(lock);
-    assert.throws(() => validatePythonLock(lock), /Python pin|wheel pin/);
+    assert.throws(
+      () => validatePythonLock(lock),
+      /Python pin|wheel pin|pip pin/,
+    );
   }
 });
 
@@ -196,6 +203,30 @@ test(
       offline: true,
     });
     assert.equal(smokePython(payload).result, 'ok');
+    const tempDirectory = join(dirname(payload), 'canonical-temp');
+    const tempAlias = join(dirname(payload), 'temp-alias');
+    mkdirSync(tempDirectory);
+    symlinkSync(tempDirectory, tempAlias, 'junction');
+    const previousTemp = { TEMP: process.env.TEMP, TMP: process.env.TMP };
+    const errors = [];
+    const previousError = console.error;
+    try {
+      process.env.TEMP = tempAlias;
+      process.env.TMP = tempAlias;
+      console.error = (message) => errors.push(message);
+      assert.equal(smokePython(payload).result, 'ok');
+      assert.deepEqual(
+        errors,
+        [],
+        'smoke must prepare the personal environment under aliased TEMP',
+      );
+    } finally {
+      console.error = previousError;
+      for (const [key, value] of Object.entries(previousTemp)) {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      }
+    }
     const runtime = join(payload, 'runtime/python');
     assert.equal(existsSync(join(runtime, 'Lib/ensurepip')), false);
     assert.equal(existsSync(join(runtime, 'py.exe')), false);
@@ -262,7 +293,7 @@ test('Python archive and wheel digests are checked before extraction', (t) => {
   );
   // Keep all other checks passing so this specifically exercises the wheel check.
   const rows = pythonInputs(lock);
-  for (const row of [lock.archive, ...lock.wheels]) {
+  for (const row of [lock.archive, ...lock.wheels, lock.pip]) {
     row.bytes = 8;
     row.sha256 = sha256File(
       join(

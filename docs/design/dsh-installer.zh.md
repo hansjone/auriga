@@ -44,6 +44,24 @@ npm 版实测体量：隔离目录 `npm install @deepseek-ai/dsh@0.2.1-rc.3`，`
 
 - 构建用固定解释器 `-I -S -B -m compileall --invalidation-mode unchecked-hash` 预编译Lib及site-packages，pyc纳入包清单。安装时以当前用户SID创建显式保护DACL，复制校验后拒绝普通文件访问的内容写入和创建文件/目录，保留删除与WriteAttributes以兼容Windows/libuv清理。更新、回滚和卸载沿版本事务执行。此环境无pip/ensurepip，不支持向受管运行时安装依赖。校验发现额外文件时报告 `desktop.python_runtime_modified`，托盘提示退出并重新运行同版本安装包修复。 管理员持有并启用SeRestorePrivilege、以备份语义访问时可绕过DACL。此时依靠启动校验和上述修复路径处理已修改字节。管理员测试同时严格断言原生普通访问拒写，以及特权备份写入后无法启动、同版本重装可修复。
 
+#### 每用户 Python 加包环境
+
+用户2026-11-17决定增加个人加包层。每个数据 home 在 `python-user/cp312/` 保存一个带 `--system-site-packages` 的 venv，pip 与新增包只安装到该环境。该目录位于版本目录和 profile 备份之外，用户文件不进入发行包清单或签名。升级与回滚刷新 venv 的基座引用，保留已装包。当前仅支持 Windows x64 / CPython 3.12，跨 ABI 的迁移需单独设计。
+
+个人环境 marker 显式记录 `abi=cp312`，准备时先核对 runtime.json 的 Python ABI 与既有 marker。遇到其他 ABI 则停止准备个人环境并回退内置解释器，原有个人扩展保留。支持新 ABI 时须提供独立目录或显式迁移流程。
+
+选择 venv 的原因是默认安装目标明确，pip 可识别内置发行包位于环境外，卸载时保留这些包。`PYTHONUSERBASE` 的用户站点默认排在系统站点之前，而且缺少 venv 的环境外卸载保护。个人 venv 的受信 `sitecustomize.py` 随只读标准库携带，将内置站点排在个人站点之前。同名模块和同名发行元数据均以内置版本优先，普通 pip 安装通过 `constraints.txt` 固定全部13个内置包及 pip 的版本，不兼容要求会明确报依赖冲突。需要更新这些版本时由维护者更新客户端锁文件。个人加包仅接受兼容 wheel。
+
+重排包含 resolve 后位于个人 venv 内的全部路径，包括 `.pth` 追加或插入的路径。venv 的 `.pth` import 行会在 sitecustomize 之前执行个人代码，可产生导入和其他副作用，用户须自行承担所安装包的代码执行风险。
+
+pip 26.3 的 wheel 单独固定在同一 Python 锁的 `pip` 字段，devkit 增加第15个输入 `python/pip/pip-26.3-py3-none-any.whl`，随客户端放在 `auriga/python/`。首次准备 DSH 的 Python 环境时，以内置解释器创建无 pip 的 venv，再核摘要并离线解包 wheel 到个人站点，保留 wheel 内许可证。内置运行时仍无可导入的 pip/ensurepip。准备失败时启动器提示重置，DSH 使用内置解释器继续启动。
+
+DSH 的进程 PATH 前置个人环境 `Scripts`，提供真正的 `python.exe`/`python3.exe`，继而保留内置解释器路径。清除继承的全部 `PYTHON*` 与 `PIP_*` 后，仅设置本次会话的受管值。个人索引由本机 CLI 配置，保存在 `<home>/auriga/python.json` 并生成 `<home>/python-user/pip.conf`。未配置时明确 `no-index=true`，包名安装快速失败，本地 wheel 仍可安装。配置索引后重试为0、连接超时5秒并关闭版本探测和交互认证，具体操作见 `MAINTAIN.md`。配置改变后重新启动 DSH 生效。
+
+托盘“设置 → 重置个人 Python 环境”先提示会删除个人包，再正常停止运行中的 DSH，取得安装与数据写锁后删除重建 venv，保留有效的索引设置，按重置前的运行状态恢复 DSH。个人环境损坏与内置运行时的重装修复分别有对应入口。默认卸载保留个人环境，明确清除数据时按现有专属 home 归属门禁清理。
+
+重置会同时清理个人 pip 缓存。索引设置损坏时重写为离线模式，再删除重建环境。启动回退和重置失败日志只记录固定 reason code。HTTP 索引的传输可被中间人窃听或替换包内容，现场建议配置 HTTPS 索引并验证证书。
+
 ### 1.5 上游自动更新与我们插件更新的关系（概述，详见第 5 节）
 
 桌面版自带 nightly 自更新且有强制更新策略；npm 版无自更新（升级即换版本号）。插件声明 `engines.dsh >=0.2.1-rc.3`，且用能力探测失败封闭（`_auriga-common.md` 核心原则），所以“上游新、插件旧”不会拖垮 DSH，只会让 Auriga 功能显示明确诊断。

@@ -59,6 +59,12 @@ static class Desktop
         return map != null && map.TryGetValue(key, out value) && value is bool && (bool)value;
     }
 
+    public static string PythonFailureReason(string error)
+    {
+        var match = Regex.Match(error ?? "", @"\[(python_user\.(?:abi_mismatch|bootstrap_digest_mismatch|environment_failed|timeout|access_denied|file_missing|busy|invalid_state|path_alias|path_link|invalid_argument|unavailable))\]");
+        return match.Success ? match.Groups[1].Value : "python_user.reset_failed";
+    }
+
     public static string Current(string root)
     {
         return File.ReadAllText(Path.Combine(root, "current.txt")).Trim();
@@ -207,7 +213,7 @@ sealed class TrayApp : ApplicationContext
     readonly ContextMenuStrip menu = new ContextMenuStrip();
     readonly Control ui = new Control();
     readonly ToolStripMenuItem openItem, fallbackLoginItem, statusItem, platformItem, checkItem, updateItem, restartItem,
-        autostartItem, autoCheckItem, autoDownloadItem, originItem, logsItem, aboutItem, exitItem;
+        autostartItem, autoCheckItem, autoDownloadItem, originItem, pythonResetItem, logsItem, aboutItem, exitItem;
     readonly System.Windows.Forms.Timer checkTimer = new System.Windows.Forms.Timer();
     readonly System.Windows.Forms.Timer pendingTimer = new System.Windows.Forms.Timer();
     Process launcher;
@@ -235,8 +241,9 @@ sealed class TrayApp : ApplicationContext
         autoCheckItem = new ToolStripMenuItem("自动检查更新", null, delegate { ToggleAutoCheck(); });
         autoDownloadItem = new ToolStripMenuItem("有更新时自动下载（安装前询问）", null, delegate { ToggleAutoDownload(); });
         originItem = new ToolStripMenuItem("平台地址：未配置", null, delegate { CopyOrigin(); });
+        pythonResetItem = new ToolStripMenuItem("重置个人 Python 环境", null, delegate { ResetPython(); });
         var settings = new ToolStripMenuItem("设置");
-        settings.DropDownItems.AddRange(new ToolStripItem[] { autostartItem, autoCheckItem, autoDownloadItem, new ToolStripSeparator(), originItem });
+        settings.DropDownItems.AddRange(new ToolStripItem[] { autostartItem, autoCheckItem, autoDownloadItem, new ToolStripSeparator(), originItem, pythonResetItem });
         logsItem = new ToolStripMenuItem("打开日志目录", null, delegate { OpenLogs(); });
         aboutItem = new ToolStripMenuItem("关于 " + Desktop.Brand, null, delegate { About(); });
         exitItem = new ToolStripMenuItem("退出", null, delegate { ExitApp(); });
@@ -413,6 +420,7 @@ sealed class TrayApp : ApplicationContext
         restartItem.Visible = restartRequired;
         fallbackLoginItem.Enabled = launcher != null && !launcher.HasExited && platformState != "authenticated";
         checkItem.Enabled = !busy && Desktop.Flag(info, "updatesConfigured");
+        pythonResetItem.Enabled = !busy && !restarting;
         icon.Text = (Desktop.Brand + " · " + (running ? (platformState == "authenticated" ? "已连接" : "运行中") : "未运行")).Substring(0, Math.Min(63, (Desktop.Brand + " · " + (running ? (platformState == "authenticated" ? "已连接" : "运行中") : "未运行")).Length));
     }
 
@@ -781,6 +789,44 @@ sealed class TrayApp : ApplicationContext
         }
         updateEnabled = Desktop.Flag(result, "enabled");
         autoCheckItem.Checked = updateEnabled;
+    }
+
+    void ResetPython()
+    {
+        if (busy || restarting) return;
+        if (MessageBox.Show("将停止 Auriga，删除个人安装的 Python 包并重建环境。索引设置会保留。是否继续？", Desktop.Brand,
+            MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes) return;
+        bool wasRunning = launcher != null && !launcher.HasExited;
+        busy = true;
+        restarting = true;
+        UpdateMenu();
+        ThreadPool.QueueUserWorkItem(delegate
+        {
+            string error = null;
+            string failureReason = "python_user.reset_failed";
+            Dictionary<string, object> result = null;
+            try
+            {
+                if (!StopLauncher(300)) failureReason = "python_user.stop_failed";
+                else
+                {
+                    result = Desktop.RunJson(root, "python reset --root " + Desktop.Quote(root), out error, StartUpdateWorker);
+                    failureReason = Desktop.PythonFailureReason(error);
+                }
+            }
+            catch (Exception) { failureReason = "python_user.tray_failed"; }
+            Post(delegate
+            {
+                busy = false;
+                restarting = false;
+                if (result == null) Log("Python reset failed [" + failureReason + "]");
+                if (exiting) return;
+                RefreshInfo();
+                if (wasRunning) StartLauncher();
+                MessageBox.Show(result != null ? "个人 Python 环境已重置。" : "重置失败，请检查日志后重试。", Desktop.Brand,
+                    MessageBoxButtons.OK, result != null ? MessageBoxIcon.Information : MessageBoxIcon.Warning);
+            });
+        });
     }
 
     void ToggleAutoDownload()

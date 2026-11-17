@@ -133,7 +133,7 @@ jobs:
           node scripts/python-smoke.mjs (Join-Path $env:INSTALLER_STAGE 'payload') --dsh
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $env:AURIGA_PYTHON_INPUTS = Join-Path $env:RUNNER_TEMP 'installer/cache'
-          node --test test/python-runtime.test.mjs
+          node --test test/python-runtime.test.mjs test/python-user.test.mjs
           exit $LASTEXITCODE
       - name: Generate unsigned manifest, SHA-256 and source build record
         working-directory: clients/installer
