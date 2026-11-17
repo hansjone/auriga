@@ -5,6 +5,7 @@ import { acquireHostLock, assertLocalPath, durableJson } from './host-lock.js';
 import { canonicalize, parseStrictJson } from './json.js';
 import { exact, refuse, uuid } from './trust.js';
 import { requireSchema } from './schema.js';
+import { setTimeout as delay } from 'node:timers/promises';
 
 // Shared even across module reloads in one DSH process; a real restart changes it.
 const instanceKey = Symbol.for('auriga.catalog.plugin-process-instance');
@@ -112,7 +113,7 @@ export function pluginState({ home, who }) {
     },
     /** Persist the public operation result before reporting or scheduling another attempt.
      * @param {any} row @param {string} name @param {boolean} installed @param {string|null} [action] */
-    write(row, name, installed, action = null) {
+    async write(row, name, installed, action = null) {
       const value = {
         schemaVersion: 1,
         ...scope,
@@ -131,7 +132,17 @@ export function pluginState({ home, who }) {
       };
       const prior = read(row, name);
       if (prior && canonicalize(prior) === canonicalize(value)) return;
-      const lock = acquireHostLock(home);
+      let lock;
+      for (let attempt = 0; ; attempt++) {
+        try {
+          lock = acquireHostLock(home);
+          break;
+        } catch (error) {
+          if (/** @type {any} */ (error).code !== 'EEXIST' || attempt >= 3)
+            throw error;
+          await delay(25 * 2 ** attempt);
+        }
+      }
       try {
         const path = file(row);
         assertLocalPath(path);

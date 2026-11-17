@@ -66,7 +66,8 @@ export function catalogService(options) {
   let nextRefresh = 0,
     retryAfter = 0,
     failures = 0,
-    fastFollow = false;
+    fastFollow = false,
+    backoffBypassed = false;
   /** @type {Promise<any>} */ let tail = Promise.resolve();
   /** @template T @param {()=>Promise<T>} work */
   function serial(work) {
@@ -333,7 +334,7 @@ export function catalogService(options) {
       async function operation(action, installed, work) {
         const outcome = await work();
         api.check();
-        plugins?.write(
+        await plugins?.write(
           row,
           /** @type {string} */ (name),
           installed,
@@ -539,7 +540,17 @@ export function catalogService(options) {
             }
           : await syncReports(items);
         fastFollow =
-          waiting || synchronized.items.some((r) => r.state === 'applying');
+          waiting ||
+          !!(
+            !pendingRestart &&
+            desktop
+              ?.read(who)
+              ?.installations.some(
+                (/** @type {any} */ r) =>
+                  desiredState(r.resource) === 'ENABLED' &&
+                  r.state === 'applying',
+              )
+          );
         nextRefresh = now() + (fastFollow ? 1000 : 60000);
         failures = 0;
         retryAfter = 0;
@@ -561,7 +572,11 @@ export function catalogService(options) {
     /** @param {{changed?:boolean}} [event] */
     async reconcile({ changed = false } = {}) {
       if (cloud) return;
-      if (now() < retryAfter || (!changed && now() < nextRefresh)) return;
+      if (now() < retryAfter) {
+        if (!changed || backoffBypassed) return;
+        backoffBypassed = true;
+      } else backoffBypassed = false;
+      if (!changed && now() < nextRefresh) return;
       try {
         const result = await this.list();
         if (result.offline)

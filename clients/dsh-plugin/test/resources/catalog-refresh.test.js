@@ -3,11 +3,11 @@ import assert from 'node:assert/strict';
 import { catalogFixture } from './catalog-fixture.js';
 import { catalogService } from './broker-fixture.js';
 import { watchCatalogIdentity } from './broker-fixture.js';
-import { writeFileSync } from 'node:fs';
+import { writeFileSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import { setImmediate } from 'node:timers/promises';
 
-test('idle reconciliation refreshes by the minute and transport failures back off even on guardian changes', async (t) => {
+test('idle refresh is minute scoped and each backoff window permits one changed-state retry', async (t) => {
   const f = catalogFixture(t);
   let now = 0,
     calls = 0,
@@ -40,26 +40,20 @@ test('idle reconciliation refreshes by the minute and transport failures back of
   now++;
   await assert.rejects(service.reconcile({ changed: true }));
   const failedCalls = calls;
+  await assert.rejects(service.reconcile({ changed: true }));
+  assert.equal(calls, failedCalls + 1, 'one state change may bypass backoff');
   for (let i = 0; i < 59; i++) {
     now += 1000;
     await service.reconcile({ changed: true });
   }
   assert.equal(
     calls,
-    failedCalls,
-    'state events cannot bypass failure backoff',
+    failedCalls + 1,
+    'repeated state events cannot repeatedly bypass backoff',
   );
-  now += 1000;
+  now = 180001;
   await assert.rejects(service.reconcile({ changed: true }));
-  const secondFailure = calls;
-  now += 60000;
-  await service.reconcile({ changed: true });
-  assert.equal(
-    calls,
-    secondFailure,
-    'the second failure backs off for two minutes',
-  );
-  now += 60000;
+  now++;
   await assert.rejects(service.reconcile({ changed: true }));
   offline = false;
   now++;
@@ -72,6 +66,52 @@ test('idle reconciliation refreshes by the minute and transport failures back of
     recovered + 1,
     'a successful manual refresh clears stale failure backoff',
   );
+});
+
+test('server applying without desktop or while pending restart does not cause second polling', async (t) => {
+  for (const unavailable of [
+    'guardian_missing',
+    'storage_unavailable',
+    'pending_restart',
+  ]) {
+    const f = catalogFixture(t);
+    let now = 0;
+    let desktop;
+    if (unavailable === 'pending_restart')
+      desktop = {
+        ...f.desktop,
+        awaitingGuardian: () => false,
+        switchIdentity: () => {},
+        finish: () => {
+          throw Object.assign(new Error('occupied'), { code: 'EBUSY' });
+        },
+        read: () => ({ installations: [f.getRow()] }),
+      };
+    else unlinkSync(join(f.home, 'auriga/guardian/state.json'));
+    const options = {
+      ...f,
+      desktop,
+      now: () => now,
+      privateSkills: {},
+      host: {},
+    };
+    if (unavailable === 'storage_unavailable')
+      Object.defineProperty(options, 'desktop', {
+        get() {
+          throw new Error('storage unavailable');
+        },
+      });
+    const service = catalogService(options);
+    await service.reconcile();
+    const before = f.requests.length;
+    for (now = 1000; now < 60000; now += 1000) await service.reconcile();
+    assert.equal(f.requests.length, before, unavailable);
+    await service.reconcile();
+    assert.ok(
+      f.requests.length > before,
+      unavailable + ' still refreshes by the minute',
+    );
+  }
 });
 
 test('applying snapshots follow once per second without acquiring C writer locks', async (t) => {

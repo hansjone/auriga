@@ -5,6 +5,8 @@ import { join } from 'node:path';
 import { writeFileSync } from 'node:fs';
 import { pluginState } from '../../src/resources/plugin-state.js';
 import { catalogFixture } from './catalog-fixture.js';
+import { acquireHostLock } from '../../src/resources/host-lock.js';
+import { setTimeout as delay } from 'node:timers/promises';
 
 test('byte proof survives a real Node restart but the pending-operation process fence does not', async (t) => {
   const f = catalogFixture(t, undefined, { kind: 'plugin' });
@@ -12,7 +14,7 @@ test('byte proof survives a real Node restart but the pending-operation process 
   const state = pluginState(options),
     row = f.getRow(),
     name = f.manifest.plugin.packageName;
-  state.write(row, name, true, 'install');
+  await state.write(row, name, true, 'install');
   assert.equal(pluginState(options).waiting(state.read(row, name), row), true);
   const reloaded = await import('../../src/resources/plugin-state.js?reload');
   assert.equal(
@@ -80,4 +82,26 @@ test('byte proof survives a real Node restart but the pending-operation process 
     '{broken',
   );
   assert.throws(() => state.read(row, name));
+});
+
+test('proof writes briefly retry contention but never recover or remove another writer lock', async (t) => {
+  const f = catalogFixture(t, undefined, { kind: 'plugin' });
+  const store = pluginState({ home: f.home, who: f.who });
+  const name = f.manifest.plugin.packageName;
+  const lock = acquireHostLock(f.home);
+  const pending = store.write(f.getRow(), name, true);
+  await delay(15);
+  lock.release();
+  await pending;
+  assert.equal(store.read(f.getRow(), name).installed, true);
+  const other = acquireHostLock(f.home);
+  try {
+    await assert.rejects(store.write(f.getRow(), name, false), {
+      code: 'EEXIST',
+    });
+    other.check();
+    assert.equal(store.read(f.getRow(), name).installed, true);
+  } finally {
+    other.release();
+  }
 });
