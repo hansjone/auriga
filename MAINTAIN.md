@@ -258,7 +258,22 @@ python -m pip check
 
 制品或记录变化须重新审阅；错钥、宽松权限、重复覆盖均拒绝。签名后的 desktop-release.json 与 exe 配对发布，zip 不上传。默认有效期30天；渠道、--rollout-percentage 0..100、--minimum-version 和显式 --rollback-from 在构建时设定并签名，发布时不能修改。序号必须超过平台全部历史（含其他渠道及下架版本），日常发布不要随意抬高最低版本。
 
-管理员在正常管理台 `/ops/desktop` 完成近期身份验证，选择已签 JSON 和 exe 后发布，需实际发行租户及 resource.versions.publish 权限。也可将正常会话的 {cookie,csrf} JSON 仅注入当前进程 AURIGA_CLIENT_ADMIN_AUTH（不写命令历史/日志/仓库），用同一接口发布并回读：
+### 管理台发布与核对
+
+管理员从“运维 → 客户端发布与更新”进入 `/ops/desktop`，使用实际发行租户及 `resource.versions.publish` 权限。读取台账、渠道当前版本、登记公钥与清单预检均无需近期身份验证。发布和下架仍要求最近 10 分钟内的身份验证，过期时沿管理台续验流程完成后继续。
+
+1. 先看正式/测试渠道当前生效版本、sequence、最低版本、灰度比例及有效期，再核对发行台账中的下架记录。加载失败会显示权限、身份验证或服务错误，点击刷新重试。
+2. 选择已离线签名的 `desktop-release.json` 与对应 `.exe`，点击“校验文件”。浏览器分块计算 exe SHA256，核对大小、全平台 sequence 高水位、渠道策略与登记公钥 SPKI-SHA256。公钥与指纹来自平台登记配置。
+3. 页面在上传 exe 前将清单原文提交只读预检。平台以登记 Ed25519 公钥验证签名及当前发布策略，返回实际验签公钥指纹。该步骤支持纯 HTTP 管理入口，不需要浏览器 WebCrypto。清单未内嵌签名者指纹，页面通过登记公钥验签成功确认签名者一致。私钥始终保存在离线签名机。
+4. 核对预览中的版本、sequence、渠道、最低版本、灰度、rollbackFrom、大小、摘要和公钥指纹，勾选确认，再点击“发布”。选择其他文件或刷新台账后需重新校验确认。服务端提交时会再次完整校验并在账本锁内检查策略。
+5. 页面分别显示发布结果与同渠道 `latest` 完整清单自检。发布成功而自检或刷新失败时，先核对台账和渠道状态，再处理。管理台自检覆盖清单回读，完整下载验证可用下方 CLI。客户端真实自动更新仍需按后文演练。
+6. 下架保留历史记录与序号高水位，渠道回到上一份可下载清单。客户端最低版本、灰度及显式回滚策略由离线签名清单决定。
+
+设备版本分布来自当前租户未吊销桌面设备的最近认证上报，查看还需 `iam.network.manage` 权限。桌面登录完成后，以及更新下载失败、安装成功或失败回退后，使用现有 shell broker 的设备 Bearer 调用 `POST /api/iam/v1/me/desktop-report`。平台仅更新该凭据本人的设备记录，每设备每五分钟最多 30 次，保存当前安装版本、渠道及最近尝试的目标版本、结果、固定失败阶段与 reason code，详细日志留在本机。上报异步执行，网络异常后台重试；退出时尚未送达的事实保存在本机，下次登录继续发送。上报序号防止旧重试覆盖新状态，平台记录接收时间。
+
+页面按设备上报渠道核对当前版本，显示已更新、尚未更新、渠道版本未知和未上报台数。最近尝试失败数包含回退，可与尚未更新数量重叠。无上报时显示“暂无上报”。旧客户端仅有登记 `clientVersion` 时仍显示版本分布，其更新状态计入未上报。云端实例尚无桌面安装器版本字段。
+
+也可将正常会话的 {cookie,csrf} JSON 仅注入当前进程 AURIGA_CLIENT_ADMIN_AUTH（不写命令历史/日志/仓库），用同一接口发布并回读：
 
 ```powershell
 .\scripts\client-release\auriga-client.cmd publish --dir D:\exports\desktop-102 --public-key C:\secure\site-desktop\desktop-public.pem --admin-origin https://admin.example.com --portal-origin https://portal.example.com

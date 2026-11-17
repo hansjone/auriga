@@ -299,6 +299,11 @@ for (const bad of ['badSha', 'badId', 'smokeFails'])
     const f = fixture(t, { [bad]: true });
     await f.updater.check();
     await assert.rejects(f.updater.update());
+    assert.equal(
+      readUpdateState(f.root).lastAttempt.result,
+      bad === 'smokeFails' ? 'rolled_back' : 'failed',
+    );
+    assert.equal(readUpdateState(f.root).lastAttempt.targetVersion, '2.0.0');
     assert.equal(readState(f.root).current, f.old.id);
     assert.equal(existsSync(join(f.root, 'versions', f.next.id)), false);
     assert.equal(
@@ -311,6 +316,7 @@ test('下载中断后重试成功，关闭可选更新后不再提示', async (t
   await f.updater.check();
   await assert.rejects(f.updater.update(), /interrupted/);
   await f.updater.update();
+  assert.equal(readUpdateState(f.root).lastAttempt.result, 'succeeded');
   assert.equal(readState(f.root).current, f.next.id);
   f.updater.configure(false);
   assert.equal(f.updater.status().enabled, false);
@@ -922,6 +928,7 @@ for (const failure of ['network', 'unavailable']) {
       smoke: () => {},
       extract: () => f.next.dir,
     };
+    assert.equal(readUpdateState(f.root).lastAttempt.result, undefined);
     await assert.rejects(
       applyPending(f.root, {
         ...options,
@@ -941,6 +948,7 @@ for (const failure of ['network', 'unavailable']) {
       ...options,
       request: async () => new Response(JSON.stringify(manifest)),
     });
+    assert.equal(readUpdateState(f.root).lastAttempt.result, 'succeeded');
     assert.equal(readState(f.root).current, f.next.id);
   });
 }
@@ -1034,6 +1042,11 @@ for (const failure of ['interrupted', 'temporary', 'persistent', 'smoke']) {
         'zip',
       );
       const saved = readUpdateState(f.root);
+      assert.equal(
+        saved.lastAttempt.result,
+        failure === 'smoke' ? 'rolled_back' : 'failed',
+      );
+      assert.equal(saved.lastAttempt.targetVersion, '2.0.0');
       assert.equal(
         saved.failure.code,
         failure === 'smoke' ? 'desktop.smoke_failed' : 'EPERM',

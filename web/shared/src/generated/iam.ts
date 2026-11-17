@@ -1,4 +1,24 @@
 export interface paths {
+  '/me/desktop-report': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Report the authenticated device installation and last update result
+     * @description Platform device Bearer only, using the same authoritative identity/source checks as device-session. No device/account/tenant selectors. At most 30 requests per device per five minutes. Sequence is monotonic within installationId, stale retries are ignored and inconsistent same-sequence payloads return 409. Contains bounded installation facts and fixed reason codes only. Reported time is server assigned.
+     */
+    post: operations['reportDesktopDevice'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   '/me/device-profile': {
     parameters: {
       query?: never;
@@ -1837,6 +1857,70 @@ export interface components {
       serviceMetadataAvailable: boolean;
       sourceGaps?: components['schemas']['CredentialSourceGap'][];
     };
+    DesktopDeviceReport: {
+      /** Format: uuid */
+      installationId: string;
+      /** Format: int64 */
+      sequence: number;
+      clientVersion: string;
+      /** @enum {string} */
+      channel: 'stable' | 'beta';
+      lastUpdate?: {
+        /** Format: uuid */
+        attemptId: string;
+        targetVersion: components['schemas']['DesktopDeviceReport']['clientVersion'];
+        /** @enum {string} */
+        result: 'succeeded' | 'failed' | 'rolled_back';
+        /** @enum {string|null} */
+        stage:
+          | null
+          | 'verify-current'
+          | 'verify-release'
+          | 'check-release'
+          | 'verify-input'
+          | 'verify-archive'
+          | 'extract'
+          | 'verify-package'
+          | 'install'
+          | 'profile'
+          | 'smoke'
+          | 'download'
+          | 'verify'
+          | 'installation'
+          | 'copy'
+          | 'verify-copy'
+          | 'commit';
+        /** @enum {string|null} */
+        reasonCode:
+          | null
+          | 'updateFailed'
+          | 'ENOENT'
+          | 'ENOTDIR'
+          | 'EBUSY'
+          | 'EPERM'
+          | 'EACCES'
+          | 'ENOTEMPTY'
+          | 'desktop.pending_incomplete'
+          | 'desktop.release_invalid'
+          | 'desktop.release_withdrawn'
+          | 'desktop.release_replaced'
+          | 'desktop.archive_invalid'
+          | 'desktop.package_invalid'
+          | 'desktop.smoke_failed'
+          | 'desktop.extract_failed'
+          | 'desktop.install_cancelled'
+          | 'desktop.in_use';
+      };
+    };
+    DesktopDeviceReportSnapshot: {
+      installationId: components['schemas']['DesktopDeviceReport']['installationId'];
+      sequence: components['schemas']['DesktopDeviceReport']['sequence'];
+      clientVersion: components['schemas']['DesktopDeviceReport']['clientVersion'];
+      channel: components['schemas']['DesktopDeviceReport']['channel'];
+      lastUpdate?: components['schemas']['DesktopDeviceReport']['lastUpdate'];
+      /** Format: date-time */
+      reportedAt: string;
+    };
     AdminDevicesDevice: {
       /** Format: uuid */
       id: string;
@@ -1846,6 +1930,7 @@ export interface components {
       name: string;
       platform?: string;
       clientVersion?: string;
+      desktopReport?: components['schemas']['DesktopDeviceReportSnapshot'];
       createdAt?: string;
       lastSeenAt?: string;
       /**
@@ -2203,16 +2288,6 @@ export interface components {
       /** Format: date-time */
       createdAt: string;
     };
-    /** @description Online standard-device account profile; no browser session, credentials or identity selectors. account.id is accountId/JWT sub, not a memberId alias. */
-    StandardDeviceProfile: {
-      account: {
-        /** Format: uuid */
-        id: string;
-        /** Format: uuid */
-        tenantId: string;
-        displayName: string;
-      };
-    };
     FieldError: {
       /** @description JSON Pointer，例如 `/email`。 */
       field: string;
@@ -2243,6 +2318,16 @@ export interface components {
       /** @description 字段级错误（validation_failed 时）。 */
       errors?: components['schemas']['FieldError'][];
       traceId?: string;
+    };
+    /** @description Online standard-device account profile; no browser session, credentials or identity selectors. account.id is accountId/JWT sub, not a memberId alias. */
+    StandardDeviceProfile: {
+      account: {
+        /** Format: uuid */
+        id: string;
+        /** Format: uuid */
+        tenantId: string;
+        displayName: string;
+      };
     };
     /** Network register request */
     'register.schema': Record<string, never>;
@@ -2540,6 +2625,15 @@ export interface components {
     };
   };
   responses: {
+    /** @description 请求无效（common.validation_failed 等）。 */
+    BadRequest: {
+      headers: {
+        [name: string]: unknown;
+      };
+      content: {
+        'application/problem+json': components['schemas']['Problem'];
+      };
+    };
     /** @description 没有登录或凭据无效（common.unauthenticated）。 */
     Unauthenticated: {
       headers: {
@@ -2551,24 +2645,6 @@ export interface components {
     };
     /** @description 没有权限（common.forbidden 或更具体的码）。 */
     Forbidden: {
-      headers: {
-        [name: string]: unknown;
-      };
-      content: {
-        'application/problem+json': components['schemas']['Problem'];
-      };
-    };
-    /** @description 请求无效（common.validation_failed 等）。 */
-    BadRequest: {
-      headers: {
-        [name: string]: unknown;
-      };
-      content: {
-        'application/problem+json': components['schemas']['Problem'];
-      };
-    };
-    /** @description 资源不存在（common.not_found）。 */
-    NotFound: {
       headers: {
         [name: string]: unknown;
       };
@@ -2589,6 +2665,15 @@ export interface components {
     RateLimited: {
       headers: {
         'Retry-After': components['headers']['RetryAfter'];
+        [name: string]: unknown;
+      };
+      content: {
+        'application/problem+json': components['schemas']['Problem'];
+      };
+    };
+    /** @description 资源不存在（common.not_found）。 */
+    NotFound: {
+      headers: {
         [name: string]: unknown;
       };
       content: {
@@ -2632,6 +2717,33 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+  reportDesktopDevice: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['DesktopDeviceReport'];
+      };
+    };
+    responses: {
+      /** @description Recorded or already accepted */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      400: components['responses']['BadRequest'];
+      401: components['responses']['Unauthenticated'];
+      403: components['responses']['Forbidden'];
+      409: components['responses']['Conflict'];
+      429: components['responses']['RateLimited'];
+    };
+  };
   getStandardDeviceProfile: {
     parameters: {
       query?: never;

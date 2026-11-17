@@ -5544,8 +5544,7 @@
           "common.validation_failed",
           "common.not_found",
           "common.conflict",
-          "common.unavailable",
-          "iam.step_up_required"
+          "common.unavailable"
         ],
         "responses": {
           "200": {
@@ -5561,7 +5560,7 @@
         },
         "x-events": [],
         "x-admin-only": true,
-        "x-step-up-max-age-seconds": 600
+        "description": "Read release ledger, registered signing public key and actual channel latest with publisher-tenant admin permission. No recent step-up required."
       },
       "post": {
         "operationId": "publishDesktopRelease",
@@ -5590,7 +5589,7 @@
             }
           }
         },
-        "description": "Admin session and recent step-up required. Upload ZIP bytes and a base64url UTF-8 signed manifest in X-Desktop-Manifest. Signature and whole package digest verified before publication. Strictly increasing sequence and version. Signed bytes use integer canonical JSON; independent offline Ed25519 key.",
+        "description": "Admin session and recent step-up required. Upload EXE bytes and a base64url UTF-8 signed manifest in X-Desktop-Manifest. Signature and whole package digest verified before publication. Strictly increasing sequence and version. Signed bytes use integer canonical JSON; independent offline Ed25519 key.",
         "parameters": [
           {
             "name": "X-Desktop-Manifest",
@@ -11065,6 +11064,53 @@
         "x-admin-only": true,
         "x-step-up-max-age-seconds": 600
       }
+    },
+    "/api/resource/v1/admin/desktop/releases/preflight": {
+      "post": {
+        "operationId": "preflightDesktopRelease",
+        "tags": [
+          "Resource"
+        ],
+        "x-permission": "resource.versions.publish",
+        "x-admin-only": true,
+        "x-error-codes": [
+          "common.unauthenticated",
+          "common.forbidden",
+          "common.validation_failed",
+          "common.not_found",
+          "common.conflict",
+          "common.unavailable"
+        ],
+        "x-events": [],
+        "description": "Read-only signature and current sequence/channel policy validation. Does not publish, reserve a sequence, upload EXE bytes or require recent step-up. Publication rechecks under the ledger lock. Supports HTTP browsers without WebCrypto.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DesktopManifest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Signature verified against registered key and current release policy accepted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DesktopReleasePreflight"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "$ref": "./common.yaml#/components/parameters/IdempotencyKey"
+          }
+        ]
+      }
     }
   },
   "components": {
@@ -12512,6 +12558,27 @@
               "type": "object",
               "additionalProperties": true
             }
+          },
+          "publicKeyFingerprint": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$",
+            "description": "SHA256 of registered Ed25519 SPKI DER. Public metadata only."
+          },
+          "publicKeySpki": {
+            "type": "string",
+            "description": "Base64 Ed25519 SPKI DER registered on the platform. No private key."
+          },
+          "channels": {
+            "type": "object",
+            "description": "Actual public latest per channel, omitted when no downloadable release exists. Expired manifests remain visible, clients enforce notAfter.",
+            "properties": {
+              "stable": {
+                "$ref": "#/components/schemas/DesktopManifest"
+              },
+              "beta": {
+                "$ref": "#/components/schemas/DesktopManifest"
+              }
+            }
           }
         }
       },
@@ -13202,6 +13269,19 @@
       },
       "UnifiedAssignmentPage": {
         "$ref": "../resource/unified.schema.json#/$defs/UnifiedAssignmentPage"
+      },
+      "DesktopReleasePreflight": {
+        "type": "object",
+        "required": [
+          "publicKeyFingerprint"
+        ],
+        "properties": {
+          "publicKeyFingerprint": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$",
+            "description": "SHA256 of registered Ed25519 SPKI DER. Public metadata only."
+          }
+        }
       }
     }
   }
