@@ -4,6 +4,8 @@ import { existsSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { catalogApi, catalogIdentity } from './catalog-api.js';
 import { nativePluginPolicy } from './native-policy.js';
+import { pluginState } from './plugin-state.js';
+import { performance } from 'node:perf_hooks';
 import { desktopSkills, sha } from './desktop-skills.js';
 import { packSkill } from './skill-package.js';
 import { canonicalize, parseStrictJson } from './json.js';
@@ -16,7 +18,7 @@ import {
 } from './trust.js';
 import { resourceStage, resourceFailure } from './diagnostics.js';
 import { validateArchive } from './archive.js';
-/** @param {{runtime:any,current:()=>any,home?:string,privateSkills:any,host:any,pluginHost?:any,trustFile?:string,roots?:()=>Promise<any>,fetchImpl?:typeof fetch,desktop?:ReturnType<typeof desktopSkills>}} options */
+/** @param {{runtime:any,current:()=>any,home?:string,privateSkills:any,host:any,pluginHost?:any,trustFile?:string,roots?:()=>Promise<any>,fetchImpl?:typeof fetch,desktop?:ReturnType<typeof desktopSkills>,now?:()=>number}} options */
 export function catalogService(options) {
   const who = catalogIdentity(options.runtime),
     cloud = !!options.runtime.resourceIdentity;
@@ -56,7 +58,15 @@ export function catalogService(options) {
     }
   }
   const confirmations = new Map();
-  const installedPlugins = new Map();
+  const plugins =
+    !cloud && options.home
+      ? pluginState({ home: options.home, who })
+      : undefined;
+  const now = options.now ?? (() => performance.now());
+  let nextRefresh = 0,
+    retryAfter = 0,
+    failures = 0,
+    fastFollow = false;
   /** @type {Promise<any>} */ let tail = Promise.resolve();
   /** @template T @param {()=>Promise<T>} work */
   function serial(work) {
@@ -103,7 +113,6 @@ export function catalogService(options) {
     if (!cloud) {
       const local = desktop?.read(who);
       for (const row of items) {
-        if (row.resource.identity.kind === 'plugin') continue;
         const recorded = local?.installations.find(
           (/** @type {any} */ i) =>
             i.resource.identity.packageId === row.resource.identity.packageId &&
@@ -111,6 +120,11 @@ export function catalogService(options) {
             i.selectionRevision === row.selectionRevision &&
             i.generation === row.generation,
         );
+        if (
+          row.resource.identity.kind === 'plugin' &&
+          recorded?.state !== 'failed'
+        )
+          continue;
         if (
           !recorded ||
           ![
@@ -276,6 +290,7 @@ export function catalogService(options) {
       (r) => r.resource.identity.kind === 'plugin',
     )) {
       if (!host) refuse('resource.apply_failed');
+      if (!plugins) refuse('resource.storage_unavailable');
       const local = desktop
         .read(who)
         ?.installations.find(
@@ -314,6 +329,18 @@ export function catalogService(options) {
           refuse('common.conflict');
         }
       }
+      /** @param {string} action @param {boolean} installed @param {()=>Promise<any>} work */
+      async function operation(action, installed, work) {
+        const outcome = await work();
+        api.check();
+        plugins?.write(
+          row,
+          /** @type {string} */ (name),
+          installed,
+          outcome.restartRequired ? action : null,
+        );
+        return !outcome.restartRequired;
+      }
       api.check();
       if (enabled) {
         const bundle = desktop.pluginBundle(who, row);
@@ -324,24 +351,24 @@ export function catalogService(options) {
           version: bundle.manifest.version,
         });
         let actual = await host.observe(name);
-        const proof = canonicalize({
-          identity: row.resource.identity,
-          revision: row.installationRevision,
-        });
+        const proof = plugins?.read(row, name);
+        let ready = !plugins?.waiting(proof, row);
         if (
-          installedPlugins.get(name) !== proof ||
-          !actual?.installed ||
-          actual.version !== row.resource.identity.version
+          ready &&
+          (!proof?.installed ||
+            !actual?.installed ||
+            actual.version !== row.resource.identity.version)
         ) {
           api.check();
-          if (
-            actual?.enabled &&
-            (await host.enable(name, false)).restartRequired
-          )
-            continue;
+          if (actual?.enabled)
+            ready = await operation('disable', proof?.installed === true, () =>
+              host.enable(name, false),
+            );
           api.check();
-          if ((await host.install(bundle.file, name)).restartRequired) continue;
-          installedPlugins.set(name, proof);
+          if (ready)
+            ready = await operation('install', true, () =>
+              host.install(bundle.file, name),
+            );
         }
         api.check();
         // Installation may take time; the independent permit and bytes must still hold.
@@ -349,11 +376,14 @@ export function catalogService(options) {
         if (!desktop.pluginBundle(who, row))
           refuse('resource.signature_invalid');
         actual = await host.observe(name);
-        if (!actual?.enabled && (await host.enable(name, true)).restartRequired)
-          continue;
+        if (ready && !actual?.enabled)
+          ready = await operation('enable', true, () =>
+            host.enable(name, true),
+          );
         actual = await host.observe(name);
         api.check();
         state =
+          ready &&
           actual?.installed &&
           actual.enabled &&
           actual.active === true &&
@@ -361,24 +391,28 @@ export function catalogService(options) {
             ? 'applied'
             : 'pending_restart';
       } else {
-        name = desktop.pluginName(who, row);
+        name = /** @type {string} */ (desktop.pluginName(who, row));
+        const proof = plugins?.read(row, name);
+        let ready = !plugins?.waiting(proof, row);
         const actual = await host.observe(name);
-        if (actual?.enabled && (await host.enable(name, false)).restartRequired)
-          continue;
+        if (ready && actual?.enabled)
+          ready = await operation('disable', proof?.installed === true, () =>
+            host.enable(name, false),
+          );
         api.check();
         if (
+          ready &&
           desiredState(row.resource) === 'REMOVED' &&
-          actual?.installed &&
-          (await host.remove(name)).restartRequired
+          actual?.installed
         )
-          continue;
+          ready = await operation('remove', false, () => host.remove(name));
         const observed = await host.observe(name);
         if (
+          !ready ||
           observed?.enabled ||
           (desiredState(row.resource) === 'REMOVED' && observed?.installed)
         )
-          continue;
-        installedPlugins.delete(name);
+          state = 'pending_restart';
       }
       const report = {
         clientId: who.hostId,
@@ -408,9 +442,20 @@ export function catalogService(options) {
     api.check();
     let names = [];
     try {
-      names = desktop?.policyNames(who) ?? [];
+      // A missing guardian disables shared writes, not read-only ownership lookup.
+      const reader =
+        desktop ??
+        (options.home ? desktopSkills({ home: options.home }) : undefined);
+      if (!reader) refuse('resource.storage_unavailable');
+      names = reader.policyNames(who);
     } catch {
-      /* Invalid cache grants no native-policy exemptions. */
+      // An unreadable exemption list must not disable catalog plugins and then
+      // reinstall/claim them applied later in this same reconciliation.
+      throw resourceFailure(
+        'resource.storage_unavailable',
+        'storage_unavailable',
+        'storage',
+      );
     }
     const result = await options.pluginHost?.enforcePersonalPolicy(
       false,
@@ -454,8 +499,17 @@ export function catalogService(options) {
           }
           throw error;
         }
-        let waiting = !cloud && desktop?.awaitingGuardian(who, items);
-        if (!waiting) {
+        await enforcePersonalPolicy();
+        let waiting = false,
+          waitExpired = false;
+        try {
+          waiting = !!(!cloud && desktop?.awaitingGuardian(who, items));
+        } catch (error) {
+          if (!(/** @type {any} */ (error).guardianWaitExpired)) throw error;
+          desktop?.failGuardianWait(who, items);
+          waitExpired = true;
+        }
+        if (!waiting && !waitExpired) {
           try {
             await finish();
           } catch (error) {
@@ -471,9 +525,24 @@ export function catalogService(options) {
             await finish();
           }
           await syncPlugins(items);
-          waiting = !cloud && desktop?.awaitingGuardian(who, items);
+          waiting = !!(!cloud && desktop?.awaitingGuardian(who, items));
         }
         const personal = await enforcePersonalPolicy();
+        const synchronized = waiting
+          ? {
+              items: items.map((r) =>
+                desiredState(r.resource) === 'ENABLED'
+                  ? { ...r, state: 'applying' }
+                  : r,
+              ),
+              reportPending: false,
+            }
+          : await syncReports(items);
+        fastFollow =
+          waiting || synchronized.items.some((r) => r.state === 'applying');
+        nextRefresh = now() + (fastFollow ? 1000 : 60000);
+        failures = 0;
+        retryAfter = 0;
         return {
           identity: who,
           cloud,
@@ -485,26 +554,31 @@ export function catalogService(options) {
           allowPersonalPlugins: api.personalPluginsAllowed(),
           blockedPersonalPlugins: personal.blocked,
           personalPluginPolicyPendingRestart: personal.restartRequired === true,
-          ...(waiting
-            ? {
-                items: items.map((r) =>
-                  desiredState(r.resource) === 'ENABLED'
-                    ? { ...r, state: 'applying' }
-                    : r,
-                ),
-                reportPending: false,
-              }
-            : await syncReports(items)),
+          ...synchronized,
         };
       });
     },
-    async reconcile() {
+    /** @param {{changed?:boolean}} [event] */
+    async reconcile({ changed = false } = {}) {
       if (cloud) return;
-      await this.list();
+      if (now() < retryAfter || (!changed && now() < nextRefresh)) return;
+      try {
+        const result = await this.list();
+        if (result.offline)
+          throw Object.assign(new Error('offline'), {
+            code: 'common.unavailable',
+          });
+      } catch (error) {
+        retryAfter =
+          now() + Math.min(300000, 60000 * 2 ** Math.min(failures++, 3));
+        throw error;
+      }
     },
     /** @param {{packageId:string,versionId:string,action:string,revision:number,key:string,confirmation?:string}} input */
     apply(input) {
       return serial(async () => {
+        fastFollow = true;
+        nextRefresh = now() + 1000;
         await enforcePersonalPolicy();
         if (
           !uuid(input.packageId) ||
@@ -620,6 +694,10 @@ export function catalogService(options) {
           input.revision,
           input.key,
         );
+        // A successful explicit action proves recovery; stale network backoff
+        // must not delay this new installation's guardian follow-up.
+        failures = 0;
+        retryAfter = 0;
         if (cloud) return { installation: row, accepted: true, cloud: true }; // D alone downloads and materializes cloud files.
         desktop?.switchIdentity(who);
         const rows = await api.list();
@@ -667,6 +745,7 @@ export function catalogService(options) {
           };
         }
         const latest = await api.list();
+        await enforcePersonalPolicy();
         await syncPlugins(latest);
         const synchronized = await syncReports(latest);
         return {

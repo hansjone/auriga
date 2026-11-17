@@ -713,22 +713,23 @@ export function desktopSkills({ home, time = hostTime }) {
         return false;
       const transactions = readdirSync(join(root(who), 'transactions'));
       if (transactions.length > 8192) refuse('resource.storage_unavailable');
-      if (
-        !transactions.some((file) => {
+      const prepared = transactions
+        .map((file) => {
           const tx = record(
             join(root(who), 'transactions', file),
             'UnifiedTransactionFile',
           );
-          return (
+          return tx;
+        })
+        .find(
+          (tx) =>
             tx.phase === 'prepared' &&
             tx.operation === 'install' &&
             tx.expectedLedgerRevision === value.revision &&
             tx.selectionRevision === value.selectionRevision &&
-            tx.generation === value.generation
-          );
-        })
-      )
-        return false;
+            tx.generation === value.generation,
+        );
+      if (!prepared) return false;
       try {
         for (const r of value.installations.filter(
           (/** @type {any} */ r) => desiredState(r.resource) === 'ENABLED',
@@ -746,12 +747,56 @@ export function desktopSkills({ home, time = hostTime }) {
         throw error;
       }
       const stateFile = join(guardian, 'state.json');
-      if (!existsSync(stateFile)) return true;
-      const state = record(stateFile, 'UnifiedGuardianStateFile');
-      return (
+      const state = existsSync(stateFile)
+        ? record(stateFile, 'UnifiedGuardianStateFile')
+        : undefined;
+      const waiting =
+        !state ||
         state.guardian.state === 'verifying' ||
-        (state.guardian.state === 'active' && !permitted(who, value, state))
-      );
+        (state.guardian.state === 'active' && !permitted(who, value, state));
+      const age = Date.now() - Date.parse(prepared.recordedAt);
+      if (waiting && (age >= 300000 || age < -120000))
+        throw Object.assign(new Error('guardian preparation wait expired'), {
+          code: 'resource.apply_failed',
+          guardianWaitExpired: true,
+        });
+      return waiting;
+    },
+    /** A timed out prepared snapshot cannot be activated by a late permit.
+     * @param {any} who @param {any[]} rows */
+    failGuardianWait(who, rows) {
+      return locked((lock) => {
+        try {
+          this.awaitingGuardian(who, rows);
+          return;
+        } catch (error) {
+          if (!(/** @type {any} */ (error).guardianWaitExpired)) throw error;
+        }
+        const value = ledger(who);
+        if (!value) return;
+        for (const row of value.installations)
+          if (
+            row.state === 'applying' &&
+            desiredState(row.resource) === 'ENABLED'
+          )
+            row.state = 'failed';
+        value.revision++;
+        save(who, value, lock);
+        for (const file of readdirSync(join(root(who), 'transactions'))) {
+          const path = join(root(who), 'transactions', file);
+          const tx = record(path, 'UnifiedTransactionFile');
+          if (
+            tx.phase === 'prepared' &&
+            tx.operation === 'install' &&
+            tx.expectedLedgerRevision === value.revision - 1 &&
+            tx.selectionRevision === value.selectionRevision &&
+            tx.generation === value.generation
+          ) {
+            lock.check();
+            durableJson(path, { ...tx, phase: 'rolled_back' });
+          }
+        }
+      });
     },
     /** A changed metadata CAS invalidates a prepared permit; retry only the exact current selection.
      * @param {any} who @param {any[]} rows */
@@ -1215,25 +1260,23 @@ export function desktopSkills({ home, time = hostTime }) {
         return { manifest, file, bytes };
       });
     },
-    /** Read-only names for native policy reconciliation; no writer lock is needed
-     * because a stale snapshot can only withhold an exemption, never install code.
+    /** Every catalog plugin remains catalog-owned even when removed or expired.
+     * Read-only exemption lookup never installs or authorizes code.
      * @param {any} who */
     policyNames(who) {
       const names = [];
       const value = ledger(who);
       for (const row of value?.installations ?? []) {
-        if (
-          row.resource.identity.kind !== 'plugin' ||
-          desiredState(row.resource) !== 'ENABLED' ||
-          ['expired', 'revoked', 'failed', 'removed', 'disabled'].includes(
-            row.state,
-          )
-        )
-          continue;
+        if (row.resource.identity.kind !== 'plugin') continue;
         const manifest = parseStrictJson(
           cached(who, row.resource.identity.manifestDigest),
         );
-        if (manifest.kind === 'plugin') names.push(manifest.plugin.packageName);
+        if (
+          manifest.kind !== 'plugin' ||
+          typeof manifest.plugin?.packageName !== 'string'
+        )
+          refuse('resource.storage_unavailable');
+        names.push(manifest.plugin.packageName);
       }
       return names;
     },

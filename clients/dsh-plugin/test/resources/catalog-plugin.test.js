@@ -43,7 +43,16 @@ function setup(t, extra = {}, config = {}) {
     revision: 0,
     key: 'plugin-install',
   };
-  return { ...f, service, input, calls, pluginHost };
+  return {
+    ...f,
+    service,
+    input,
+    calls,
+    pluginHost,
+    setActual: (value) => {
+      actual = value;
+    },
+  };
 }
 
 test('unified plugin waits for guardian, installs tgz by npm name and reports only observed host application', async (t) => {
@@ -56,6 +65,18 @@ test('unified plugin waits for guardian, installs tgz by npm name and reports on
   const result = await f.service.list();
   assert.deepEqual(f.calls, ['install', 'enable']);
   assert.equal(result.items[0].state, 'applied');
+  const restarted = catalogService({
+    ...f,
+    privateSkills: {},
+    host: {},
+    pluginHost: f.pluginHost,
+  });
+  await restarted.list();
+  assert.deepEqual(
+    f.calls,
+    ['install', 'enable'],
+    'restart reuses durable byte proof',
+  );
   const ledgerBefore = readFileSync(f.directory + '/ledger.json', 'utf8');
   await f.service.list();
   assert.equal(
@@ -98,6 +119,81 @@ test('host restart intent or wrong observation never reports unified plugin appl
     f.allow();
     await f.service.list();
     assert.notEqual(f.getRow().state, 'applied');
+  }
+});
+
+test('restart-required installation is reported and is not retried by polling or service reconstruction', async (t) => {
+  let installs = 0;
+  const f = setup(t, {
+    install: async () => {
+      installs++;
+      return { restartRequired: true };
+    },
+  });
+  await f.service.apply(f.input);
+  f.allow();
+  await f.service.list();
+  assert.equal(f.getRow().state, 'pending_restart');
+  await f.service.list();
+  await catalogService({
+    ...f,
+    privateSkills: {},
+    host: {},
+    pluginHost: f.pluginHost,
+  }).list();
+  assert.equal(installs, 1);
+});
+
+test('an empty native bundle row list never proves active', async () => {
+  const host = resourceHost({
+    get: () => ({
+      listBundles: async () => [
+        { name: 'empty', installed: true, enabled: true, rows: [] },
+      ],
+      listPlugins: async () => [],
+      installBundle() {},
+      setBundleEnabled() {},
+      removeBundle() {},
+    }),
+  });
+  assert.equal((await host.observe('empty')).active, false);
+});
+
+test('restart-required disable and enable operations are reported once without reinstall loops', async (t) => {
+  for (const stage of ['disable', 'enable']) {
+    let attempts = 0;
+    const f = setup(t, {
+      enable: async () => {
+        attempts++;
+        return { restartRequired: true };
+      },
+    });
+    await f.service.apply(f.input);
+    if (stage === 'disable')
+      f.setActual({
+        name: f.manifest.plugin.packageName,
+        installed: true,
+        enabled: true,
+        version: '0.9.0',
+      });
+    f.allow();
+    await f.service.list();
+    assert.equal(f.getRow().state, 'pending_restart', stage);
+    const installs = f.calls.filter((call) => call === 'install').length;
+    await f.service.list();
+    await catalogService({
+      ...f,
+      privateSkills: {},
+      host: {},
+      pluginHost: f.pluginHost,
+    }).list();
+    assert.equal(attempts, 1, stage);
+    assert.equal(
+      f.calls.filter((call) => call === 'install').length,
+      installs,
+      stage,
+    );
+    assert.equal(installs, stage === 'disable' ? 0 : 1);
   }
 });
 

@@ -1,6 +1,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import {
+  readFileSync,
+  readdirSync,
+  writeFileSync,
+  existsSync,
+  unlinkSync,
+} from 'node:fs';
 import { join } from 'node:path';
 import { catalogFixture } from './catalog-fixture.js';
 import { catalogService } from './broker-fixture.js';
@@ -146,4 +152,162 @@ test('a previously applied remote report cannot claim a fresh local installation
   });
   assert.equal((await service.list()).items[0].state, 'applying');
   assert.equal((await service.list()).items[0].state, 'applying');
+});
+
+test('all ledger plugin names remain exempt across disabled removed revoked expired and failed states', async (t) => {
+  const f = catalogFixture(t, undefined, { kind: 'plugin' });
+  const service = catalogService({
+    ...f,
+    privateSkills: {},
+    host: {},
+    pluginHost: {},
+  });
+  await service.apply({
+    packageId: f.packageId,
+    versionId: f.versionId,
+    action: 'install',
+    revision: 0,
+    key: 'policy-names',
+  });
+  const file = join(f.directory, 'ledger.json');
+  const ledger = JSON.parse(readFileSync(file, 'utf8'));
+  for (const state of [
+    'applying',
+    'applied',
+    'pending_restart',
+    'disabled',
+    'removed',
+    'revoked',
+    'expired',
+    'failed',
+  ]) {
+    ledger.installations[0].state = state;
+    writeFileSync(file, JSON.stringify(ledger));
+    assert.deepEqual(
+      f.desktop.policyNames(f.who),
+      [f.manifest.plugin.packageName],
+      state,
+    );
+  }
+});
+
+test('corrupt catalog manifest cache stops policy reconciliation before any host mutation or applied report', async (t) => {
+  const f = catalogFixture(t, undefined, {
+    kind: 'plugin',
+    allowPersonalPlugins: false,
+  });
+  let mutations = 0;
+  const service = catalogService({
+    ...f,
+    privateSkills: {},
+    host: {},
+    pluginHost: {
+      enforcePersonalPolicy: async () => {
+        mutations++;
+        return { blocked: [], restartRequired: false };
+      },
+      install: async () => {
+        mutations++;
+      },
+      enable: async () => {
+        mutations++;
+      },
+    },
+  });
+  await service.apply({
+    packageId: f.packageId,
+    versionId: f.versionId,
+    action: 'install',
+    revision: 0,
+    key: 'corrupt-policy',
+  });
+  f.allow();
+  mutations = 0;
+  writeFileSync(
+    join(
+      f.directory,
+      'cache',
+      f.resource.identity.manifestDigest.slice(7),
+      'bytes',
+    ),
+    'broken',
+  );
+  await assert.rejects(service.list(), {
+    code: 'resource.storage_unavailable',
+  });
+  assert.equal(mutations, 0);
+  assert.equal(
+    f.requests.some(
+      (r) =>
+        r.path.endsWith('/installation-reports') &&
+        JSON.parse(r.options.body).state === 'applied',
+    ),
+    false,
+  );
+});
+
+test('guardian preparation times out durably reports failed and rejects a late permit', async (t) => {
+  const f = catalogFixture(t, undefined, { kind: 'plugin' });
+  const service = catalogService({
+    ...f,
+    privateSkills: {},
+    host: {},
+    pluginHost: {},
+  });
+  await service.apply({
+    packageId: f.packageId,
+    versionId: f.versionId,
+    action: 'install',
+    revision: 0,
+    key: 'wait-timeout',
+  });
+  const directory = join(f.directory, 'transactions');
+  for (const name of readdirSync(directory)) {
+    const path = join(directory, name),
+      tx = JSON.parse(readFileSync(path, 'utf8'));
+    if (tx.phase === 'prepared') {
+      tx.recordedAt = new Date(Date.now() - 301000).toISOString();
+      writeFileSync(path, JSON.stringify(tx));
+    }
+  }
+  assert.equal((await service.list()).items[0].state, 'failed');
+  assert.equal(f.getRow().state, 'failed');
+  assert.equal(f.desktop.read(f.who).installations[0].state, 'failed');
+  f.allow();
+  // Direct C finish must also refuse this snapshot after a service restart.
+  f.desktop.finish(f.who, () => true);
+  assert.equal(existsSync(f.active), false);
+});
+
+test('a missing guardian does not turn persisted catalog plugins into personal plugins', async (t) => {
+  const f = catalogFixture(t, undefined, {
+    kind: 'plugin',
+    allowPersonalPlugins: false,
+  });
+  const names = [];
+  const options = {
+    ...f,
+    privateSkills: {},
+    host: {},
+    pluginHost: {
+      enforcePersonalPolicy: async (_allowed, value) => {
+        names.push(value);
+        return { blocked: [], restartRequired: false };
+      },
+    },
+  };
+  await catalogService(options).apply({
+    packageId: f.packageId,
+    versionId: f.versionId,
+    action: 'install',
+    revision: 0,
+    key: 'no-guardian',
+  });
+  unlinkSync(join(f.home, 'auriga/guardian/state.json'));
+  const result = await catalogService({
+    ...options,
+    desktop: undefined,
+  }).list();
+  assert.equal(result.sharedAvailable, false);
+  assert.deepEqual(names.at(-1), [f.manifest.plugin.packageName]);
 });

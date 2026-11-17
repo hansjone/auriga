@@ -64,6 +64,7 @@ export function resourceHost(ctx) {
         row?.enabled &&
         !row.error &&
         Array.isArray(row.rows) &&
+        row.rows.length > 0 &&
         typeof manager().listPlugins === 'function'
       ) {
         const inventory = await manager().listPlugins();
