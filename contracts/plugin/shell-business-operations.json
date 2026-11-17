@@ -321,6 +321,15 @@
       "method": "get",
       "route": "/api/resource/v1/member/installations",
       "source": "openapi/resource.yaml",
+      "boundParams": [
+        {
+          "name": "clientId",
+          "in": "query",
+          "identity": "deviceId",
+          "required": true,
+          "schema": "ShellAuthBoundParam_listMemberResourceInstallations_clientId"
+        }
+      ],
       "permission": "resource.packages.read",
       "audience": "auriga",
       "stream": false,
@@ -615,6 +624,15 @@
       "method": "get",
       "route": "/api/resource/v1/catalog/member/installations",
       "source": "openapi/resource.yaml",
+      "boundParams": [
+        {
+          "name": "clientId",
+          "in": "query",
+          "identity": "deviceId",
+          "required": true,
+          "schema": "ShellAuthBoundParam_UnifiedListInstallations_clientId"
+        }
+      ],
       "permission": "resource.packages.read",
       "audience": "auriga",
       "stream": false,

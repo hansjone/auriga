@@ -31,7 +31,7 @@ export const installResourceChannel = (ctx, options) =>
   baseInstallChannel(ctx, bind(options));
 export const openMemberResources = (options) => baseOpen(bind(options));
 import { randomUUID, createHash } from 'node:crypto';
-import { operations } from '../broker-fixture.js';
+import { operations, validate } from '../broker-fixture.js';
 import { parseStrictJson } from '../../src/resources/json.js';
 
 /** Test-only upstream peer behind the fixed broker boundary. Product adapters
@@ -66,14 +66,28 @@ export function resourceBroker(runtime, fetcher) {
         (item) => item.operation === operation,
       );
       if (!definition) throw new Error('unknown fixed resource operation');
+      validate(definition.input, input);
+      const who = runtime.identity();
+      const identity = {
+        tenantId: who?.tenantId,
+        memberId: who?.ownerId,
+        deviceId: who?.clientId,
+      };
+      const params = { ...input };
+      for (const param of definition.boundParams ?? []) {
+        const value = identity[param.identity];
+        if (value === undefined && !param.required) continue;
+        validate(param.schema, value);
+        params[param.name] = value;
+      }
       let route = definition.route;
       const pathKeys = new Set();
       route = route.replace(/\{([^}]+)\}/g, (_, key) => {
         pathKeys.add(key);
-        return input[key];
+        return encodeURIComponent(params[key]);
       });
       const url = new URL(route, runtime.config.platformOrigin);
-      for (const [key, value] of Object.entries(input))
+      for (const [key, value] of Object.entries(params))
         if (!['body', 'headers'].includes(key) && !pathKeys.has(key))
           url.searchParams.set(key, String(value));
       let body = input.body;

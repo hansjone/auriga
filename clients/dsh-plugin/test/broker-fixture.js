@@ -31,6 +31,7 @@ export function validate(name, value) {
     if (check) {
       if (!check(value))
         throw Object.assign(new Error('contract rejected ' + name), {
+          code: 'common.validation_failed',
           errors: check.errors,
         });
       return;

@@ -17,18 +17,24 @@ test(
     const directory = await mkdtemp(join(tmpdir(), 'auriga-obs-cordis-'));
     const source = new URL('../src/observability/index.js', import.meta.url)
       .href;
+    const diagnostics = new URL(
+      '../src/resources/diagnostics.js',
+      import.meta.url,
+    ).href;
     const cordis = pathToFileURL(process.env.AURIGA_CORDIS_MODULE).href;
     const code = `
     import { Context } from ${JSON.stringify(cordis)};
     import { installObservability, logEvent, logDirectory } from ${JSON.stringify(source)};
+    import { diagnoseResource } from ${JSON.stringify(diagnostics)};
     const ctx = new Context();
     installObservability(ctx);
     process.on('message', async () => {
       await ctx.fiber.dispose();
-      process.stdout.write(logDirectory());
+      process.stdout.write(JSON.stringify({directory: logDirectory(), trace: failure.body.trace_id}));
       process.disconnect();
     });
     logEvent('ERROR', 'fixture failed', { trace_id:'4bf92f3577b34da6a3ce929d0e0e4736', account_id:'alice' }, new Error('Authorization: Bearer secret-fixture password=secret-password'));
+    const failure = diagnoseResource(Object.assign(new Error('private resource body'), {code:'common.validation_failed'}), 'catalog');
     process.send('ready');
   `;
     const child = spawn(process.execPath, ['--input-type=module', '-e', code], {
@@ -59,10 +65,17 @@ test(
       clearTimeout(timer);
       assert.equal(result, 0, stderr);
       assert.equal(stderr, '');
-      const names = await readdir(stdout);
+      const { directory: logs, trace } = JSON.parse(stdout);
+      const names = await readdir(logs);
       assert.deepEqual(names, ['auriga-dsh-0.jsonl']);
-      const file = await readFile(join(stdout, names[0]), 'utf8');
-      const event = JSON.parse(file);
+      const file = await readFile(join(logs, names[0]), 'utf8');
+      const [event, diagnostic] = file.trim().split('\n').map(JSON.parse);
+      assert.equal(diagnostic.trace_id, trace);
+      assert.equal(diagnostic.level, 'WARN');
+      assert.equal(diagnostic.code, 'common.validation_failed');
+      assert.equal(diagnostic.reason, 'validation_failed');
+      assert.equal(diagnostic.stage, 'catalog');
+      assert.ok(!file.includes('private resource body'));
       assert.equal(event.trace_id, '4bf92f3577b34da6a3ce929d0e0e4736');
       assert.equal(event.service, 'dsh-plugin');
       assert.equal(event.account_id, 'alice');

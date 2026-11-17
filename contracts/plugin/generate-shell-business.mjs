@@ -68,6 +68,13 @@ const integer = {
 };
 const operations = [];
 const arms = [];
+const identityParams = {
+  clientId: 'deviceId',
+  deviceId: 'deviceId',
+  tenantId: 'tenantId',
+  ownerId: 'memberId',
+  memberId: 'memberId',
+};
 const chunk64 = () => ({
   type: 'string',
   contentEncoding: 'base64',
@@ -146,6 +153,7 @@ for (const file of [
       const operation = op.operationId;
       const properties = {},
         required = [];
+      const boundParams = [];
       const headerProperties = {},
         headerRequired = [];
       for (let p of [...(item.parameters ?? []), ...(op.parameters ?? [])]) {
@@ -168,8 +176,18 @@ for (const file of [
         }
         if (!['path', 'query'].includes(p.in)) continue;
         // 本机设备/实例身份由 broker 派生，不能由插件指定。
-        if (['clientId', 'tenantId', 'ownerId', 'memberId'].includes(p.name))
+        if (Object.hasOwn(identityParams, p.name)) {
+          const schema = 'ShellAuthBoundParam_' + operation + '_' + p.name;
+          defs[schema] = expand(p.schema, file);
+          boundParams.push({
+            name: p.name,
+            in: p.in,
+            identity: identityParams[p.name],
+            required: p.in === 'path' || p.required === true,
+            schema,
+          });
           continue;
+        }
         properties[p.name] = expand(p.schema, file);
         if (p.required) required.push(p.name);
       }
@@ -228,6 +246,7 @@ for (const file of [
         method,
         route,
         source: file,
+        ...(boundParams.length ? { boundParams } : {}),
         permission: op['x-permission'] ?? 'auriga.connect',
         audience: file.includes('/ai.') ? 'auriga.ai-gateway' : 'auriga',
         stream: !output,

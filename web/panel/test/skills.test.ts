@@ -117,6 +117,56 @@ it('offers a next step for empty skill markets and installations', async () => {
 async function settle() {
   for (let n = 0; n < 8; n++) await Promise.resolve();
 }
+it.each([false, true])(
+  'keeps failed installation capability unknown (mine=%s)',
+  async (mine) => {
+    const root = document.createElement('div');
+    document.body.append(root);
+    let available: boolean | undefined = false;
+    let failed = true;
+    const { SkillPanel } = await import('../src/SkillPanel');
+    const panel = new SkillPanel(
+      root,
+      {
+        mode: 'connect',
+        protocol: 1,
+        locale: 'en',
+        fetch: async (path: string) => {
+          if (path === 'catalog/installations' && failed)
+            return Response.json(
+              { code: 'common.validation_failed', reason: 'validation_failed' },
+              { status: 400 },
+            );
+          return Response.json({
+            items: [],
+            ...(available === undefined ? {} : { sharedAvailable: available }),
+          });
+        },
+      },
+      mine,
+    );
+    try {
+      await vi.waitFor(() => expect(root.textContent).toContain('invalid'));
+      expect(root.textContent).not.toContain('trusted guardian');
+      failed = false;
+      root.querySelector('button')!.click();
+      await vi.waitFor(() =>
+        expect(root.textContent).toContain('trusted guardian'),
+      );
+      failed = true;
+      root.querySelector('button')!.click();
+      await vi.waitFor(() => expect(root.textContent).toContain('invalid'));
+      expect(root.textContent).not.toContain('trusted guardian');
+      failed = false;
+      available = undefined;
+      root.querySelector('button')!.click();
+      await vi.waitFor(() => expect(root.textContent).not.toContain('invalid'));
+      expect(root.textContent).not.toContain('trusted guardian');
+    } finally {
+      panel.dispose();
+    }
+  },
+);
 function click(panel: AurigaTeamPanel, label: string) {
   const button = [...panel.shadowRoot!.querySelectorAll('button')].find(
     (b) => b.textContent === label,

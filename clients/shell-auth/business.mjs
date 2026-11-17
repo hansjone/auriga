@@ -188,6 +188,17 @@ export class BusinessProxy {
     let route = definition.route;
     const query = new URLSearchParams(),
       headers = {};
+    for (const param of definition.boundParams ?? []) {
+      const value = context.identity?.[param.identity];
+      if (value === undefined && !param.required) continue;
+      if (value === undefined || !valid(param.schema, value))
+        throw Object.assign(new Error('missing bound identity'), {
+          code: 'common.unauthenticated',
+        });
+      if (param.in === 'path')
+        route = route.replaceAll(`{${param.name}}`, encodeURIComponent(value));
+      else query.set(param.name, value);
+    }
     for (const [key, value] of Object.entries(input)) {
       if (key === 'body' || key === 'headers') continue;
       if (route.includes(`{${key}}`))
@@ -198,10 +209,17 @@ export class BusinessProxy {
       throw Object.assign(new Error('invalid route'), {
         code: 'common.validation_failed',
       });
-    for (const key of ['tenantId', 'ownerId', 'deviceId', 'clientId']) {
+    for (const key of [
+      'tenantId',
+      'ownerId',
+      'memberId',
+      'deviceId',
+      'clientId',
+    ]) {
       const expected = {
         tenantId: context.identity.tenantId,
         ownerId: context.identity.memberId,
+        memberId: context.identity.memberId,
         deviceId: context.identity.deviceId,
         clientId: context.identity.deviceId,
       }[key];

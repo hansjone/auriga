@@ -132,7 +132,6 @@ export function catalogApi({ runtime, current, fetchImpl: _fetchImpl }) {
       const seen = new Set();
       for (let p = 0; p < 1000; p++) {
         const query = new URLSearchParams({
-          clientId: who.hostId,
           kind: 'skill',
           limit: '200',
           ...(cursor ? { cursor } : {}),

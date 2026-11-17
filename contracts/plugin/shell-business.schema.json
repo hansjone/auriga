@@ -1933,6 +1933,10 @@
         "body"
       ]
     },
+    "ShellAuthBoundParam_listMemberResourceInstallations_clientId": {
+      "type": "string",
+      "format": "uuid"
+    },
     "ShellAuthInput_listMemberResourceInstallations": {
       "type": "object",
       "additionalProperties": false,
@@ -4740,6 +4744,10 @@
         "statusCode",
         "body"
       ]
+    },
+    "ShellAuthBoundParam_UnifiedListInstallations_clientId": {
+      "type": "string",
+      "format": "uuid"
     },
     "ShellAuthInput_UnifiedListInstallations": {
       "type": "object",

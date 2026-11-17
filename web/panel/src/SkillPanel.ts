@@ -19,7 +19,7 @@ export class SkillPanel {
   private selected?: Package;
   private cursor?: string;
   private busy = false;
-  private sharedAvailable = false;
+  private sharedAvailable?: boolean;
   private summaries = new Map<string, Version>();
   private pendingRestart = false;
   private sharedReason?: string;
@@ -113,6 +113,8 @@ export class SkillPanel {
     this.controller?.abort();
     this.controller = new AbortController();
     const epoch = ++this.epoch;
+    this.sharedAvailable = undefined;
+    this.sharedReason = undefined;
     await this.run(async () => {
       if (this.mine) {
         const value = await this.request('installations');
@@ -339,7 +341,7 @@ export class SkillPanel {
       notice.setAttribute('role', 'status');
       this.root.append(notice);
     }
-    if (!this.sharedAvailable && !this.busy)
+    if (this.sharedAvailable === false && !this.busy)
       this.root.append(
         element(
           'p',
@@ -534,7 +536,12 @@ export class SkillPanel {
                 ? this.status(row.state)
                 : this.sharedAvailable
                   ? this.text('未安装', 'Not installed')
-                  : this.text('安装待配置', 'Setup required'),
+                  : this.sharedAvailable === false
+                    ? this.text('安装待配置', 'Setup required')
+                    : this.text(
+                        '安装状态未知',
+                        'Installation status unavailable',
+                      ),
             ),
           );
           if (version)
