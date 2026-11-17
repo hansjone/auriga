@@ -203,7 +203,11 @@ async function logout() {
           <RouterLink
             v-for="[path, key] in active.children"
             :key="path"
-            :to="path"
+            :to="
+              path.startsWith('/resources') && route.query.kind === 'skill'
+                ? { path, query: { kind: 'skill' } }
+                : path
+            "
             :aria-current="route.path === path ? 'page' : undefined"
             >{{ adminT(key) }}</RouterLink
           >
