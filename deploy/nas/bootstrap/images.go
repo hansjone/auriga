@@ -883,11 +883,15 @@ func exportDockerImage(ctx context.Context, id string, verify func(io.Reader) er
 		return err
 	}
 	err = verify(pipe)
+	contextErr := ctx.Err()
 	if err != nil {
 		cancel()
 	}
 	_ = pipe.Close()
 	waitErr := cmd.Wait()
+	if contextErr != nil {
+		return fmt.Errorf("docker image save interrupted: %w", contextErr)
+	}
 	if err != nil {
 		return err
 	}

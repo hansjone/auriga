@@ -500,6 +500,17 @@ func TestImageDockerSubprocessUsesDeadlineAndClosesFailedExport(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "reject immediately") || time.Since(start) > 3*time.Second {
 		t.Fatalf("export process not cancelled/reaped: %v", err)
 	}
+	ctx, cancelExport := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancelExport()
+	err = exportDockerImage(ctx, imageTestDigest([]byte("id")), func(input io.Reader) error {
+		if _, err := io.Copy(io.Discard, input); err != nil {
+			return err
+		}
+		return errors.New("truncated image tar end marker")
+	})
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("export deadline hidden by archive error: %v", err)
+	}
 	ctx, cancel2 := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel2()
 	start = time.Now()
