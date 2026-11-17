@@ -32,7 +32,7 @@ $env:AURIGA_PYTHON_INPUTS = 'D:\client-kit'
 node --test clients/installer/test/python-runtime.test.mjs
 ```
 
-冒烟检查13包精确版本、许可证及PATH上的 `python/python3` 导入office库。实际运行时位于 `versions/<id>/runtime/python`，仅影响DSH及子进程环境，不修改系统Python。系统py继续按原PATH解析。安装时创建当前用户SID显式保护DACL，复制校验后拒绝内容写入和新建目录项，保留删除/WriteAttributes供Windows清理使用。运行时无pip/ensurepip，不支持向受管环境装依赖。发现清单外文件提示 `desktop.python_runtime_modified`，退出后重新运行同版本安装包修复。Java和其他Python版本的审核签名按需渠道仍属P3。
+冒烟检查13包精确版本、许可证及PATH上的 `python/python3` 导入office库。实际运行时位于 `versions/<id>/runtime/python`，仅影响DSH及子进程环境，不修改系统Python。系统py继续按原PATH解析。安装时创建当前用户SID显式保护DACL，复制校验后拒绝普通文件访问的内容写入和新建目录项，保留删除/WriteAttributes供Windows清理使用。运行时无pip/ensurepip，不支持向受管环境装依赖。发现清单外文件提示 `desktop.python_runtime_modified`，退出后重新运行同版本安装包修复。 管理员启用SeRestorePrivilege并使用备份语义访问时，可覆盖DACL拒写。Node/libuv文件打开使用FILE_FLAG_BACKUP_SEMANTICS，因此此类令牌下的Node写入也属于该边界。启动前字节校验仍拒绝已修改运行时，修复路径相同。[Windows备份语义](https://learn.microsoft.com/en-us/windows/win32/api/fileapi/ns-fileapi-createfile2_extended_parameters)Java和其他Python版本的审核签名按需渠道仍属P3。
 
 Windows 自带 PowerShell5.1、System32 tar、.NET Framework4.x Framework64/v4.0.30319/csc.exe 与引用程序集用于认证 helper、托盘和自解压向导。无需额外 .NET SDK/NuGet/MSBuild/7-Zip/WiX 或付费打包工具。系统工具摘要固定在输入清单，补丁/工具变化需在匹配受信 Windows 基线重出套件，不能复制系统目录冒充便携 SDK。锁键包括根/一级 workspace manifests、workspace/config/pnpm lock、插件 npm lock、DSH npm lock、upstream pin、构建 Node 和目标；业务源码可复用，依赖/锁改变明确拒绝。
 

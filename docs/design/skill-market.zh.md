@@ -2,7 +2,7 @@
 
 用户于2026-11-12确认D1至D11全部按推荐执行，2026-11-17修订D8：Windows x64 Desktop随包内置python-build-standalone CPython 3.12.14及与上游primary-runtime一致的13个固定wheel，成员无需安装Python，离线可用；Node继续复用Desktop受管版本。Java（Eclipse Temurin 21 LTS）、其他Python版本及其他平台按需下载仍属P3，经平台审核签名。公共资源模型、统一清单、存储、签名、接口迁移和派工要求由主文档维护；Skill清单的runtimes仍为空。[统一资源包规范](resource-package.zh.md)
 
-Windows的office技能通过DSH继承的进程PATH调用 `python` 或 `python3`，均指向当前Desktop版本的 `runtime/python`。系统 `py` 启动器继续按原PATH解析。内置包为numpy 2.3.5、pandas 3.0.1、python-dateutil 2.9.0.post0、six 1.17.0、tzdata 2025.2、python-docx 1.2.0、python-pptx 1.0.2、openpyxl 3.1.5、Pillow 12.3.0、lxml 6.1.3、XlsxWriter 3.2.9、typing_extensions 4.16.0、et_xmlfile 2.0.0。运行时清单携带来源摘要和许可证，Lib/site-packages的pyc已预编译并校验，安装后的DACL阻止内容写入及新建文件/目录。运行时无pip/ensurepip，不支持向受管site-packages装新依赖。此决定提供执行环境，不改变D1的共享Skill text-only审核边界。
+Windows的office技能通过DSH继承的进程PATH调用 `python` 或 `python3`，均指向当前Desktop版本的 `runtime/python`。系统 `py` 启动器继续按原PATH解析。内置包为numpy 2.3.5、pandas 3.0.1、python-dateutil 2.9.0.post0、six 1.17.0、tzdata 2025.2、python-docx 1.2.0、python-pptx 1.0.2、openpyxl 3.1.5、Pillow 12.3.0、lxml 6.1.3、XlsxWriter 3.2.9、typing_extensions 4.16.0、et_xmlfile 2.0.0。运行时清单携带来源摘要和许可证，Lib/site-packages的pyc已预编译并校验，安装后的DACL阻止普通文件访问的内容写入及新建文件/目录。运行时无pip/ensurepip，不支持向受管site-packages装新依赖。此决定提供执行环境，不改变D1的共享Skill text-only审核边界。
 
 ## 原生格式与宿主能力
 

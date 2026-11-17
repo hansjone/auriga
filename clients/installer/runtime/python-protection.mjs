@@ -7,8 +7,9 @@ import { systemTool } from './system-tools.mjs';
 // Explicit current-user SID avoids OWNER RIGHTS/default Administrators ownership.
 // DELETE and WriteAttributes support Windows/libuv unlink during version cleanup.
 // WriteData/AppendData deny file contents, directory entries and cache creation.
-// Owners can change their own DACL, so this prevents incidental runtime writes,
-// rather than constituting a security boundary against the account owner.
+// Owners retain DACL control. Enabled SeRestorePrivilege with backup semantics
+// can override write denies, including Node/libuv file opens on an elevated host.
+// Package verification and launcher repair diagnostics cover those modified bytes.
 const script = `
 $ErrorActionPreference = 'Stop'
 $path = $env:AURIGA_PYTHON_RUNTIME_DIRECTORY

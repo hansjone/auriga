@@ -19,6 +19,9 @@ public static class PythonAccessProbe
     static extern IntPtr CreateFile(string path, uint access, uint share, IntPtr security,
         uint disposition, uint flags, IntPtr template);
 
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    static extern bool CreateDirectory(string path, IntPtr security);
+
     [DllImport("advapi32.dll", SetLastError = true)]
     static extern bool OpenProcessToken(IntPtr process, uint access, out IntPtr token);
 
@@ -45,6 +48,11 @@ public static class PythonAccessProbe
         if (handle == new IntPtr(-1)) return Marshal.GetLastWin32Error();
         CloseHandle(handle);
         return 0;
+    }
+
+    public static int MakeDirectory(string path)
+    {
+        return CreateDirectory(path, IntPtr.Zero) ? 0 : Marshal.GetLastWin32Error();
     }
 
     public static int Privilege(string name)
@@ -89,6 +97,16 @@ public static class PythonAccessProbe
 
     public static void SetRestore(bool enabled)
     {
+        ChangeRestore(enabled ? 2u : 0u);
+    }
+
+    public static void RemoveRestore()
+    {
+        ChangeRestore(4);
+    }
+
+    static void ChangeRestore(uint attributes)
+    {
         IntPtr token;
         if (!OpenProcessToken(GetCurrentProcess(), 0x28, out token))
             throw new Win32Exception(Marshal.GetLastWin32Error());
@@ -97,7 +115,7 @@ public static class PythonAccessProbe
             Luid id;
             if (!LookupPrivilegeValue(null, "SeRestorePrivilege", out id))
                 throw new Win32Exception(Marshal.GetLastWin32Error());
-            TokenPrivilege change = new TokenPrivilege { Count = 1, Id = id, Attributes = enabled ? 2u : 0u };
+            TokenPrivilege change = new TokenPrivilege { Count = 1, Id = id, Attributes = attributes };
             if (!AdjustTokenPrivileges(token, false, ref change, 0, IntPtr.Zero, IntPtr.Zero))
                 throw new Win32Exception(Marshal.GetLastWin32Error());
             int error = Marshal.GetLastWin32Error();

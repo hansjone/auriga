@@ -42,7 +42,7 @@ npm 版实测体量：隔离目录 `npm install @deepseek-ai/dsh@0.2.1-rc.3`，`
 - 本机开发机 Node 22.19.0 在 PATH（可作构建机），但**成员机器不能假设有 Node**，所以包内自带 Node。
 - **包内 Node 选 24.21.0（与上游桌面版自带版本一致），不用 22.19.0**。实测证据：同一台机器上访问平台首页，Node 22.19.0 的 `fetch` 报 `ECONNRESET`（curl 也握手失败），Node 24.21.0 返回 HTTP 200；插件的平台能力探测在 22.19 下得到 `{"reachable":false,"reason":"network"}`。这是本机网络环境对 TLS 客户端指纹的过滤，换用 24.21 即通过。DSH `engines` 为 `^22.19.0 || >=24`，插件要求 Node>=22.12，24 均满足。
 
-- 构建用固定解释器 `-I -S -B -m compileall --invalidation-mode unchecked-hash` 预编译Lib及site-packages，pyc纳入包清单。安装时以当前用户SID创建显式保护DACL，复制校验后拒绝内容写入和创建文件/目录，保留删除与WriteAttributes以兼容Windows/libuv清理。更新、回滚和卸载沿版本事务执行。此环境无pip/ensurepip，不支持向受管运行时安装依赖。校验发现额外文件时报告 `desktop.python_runtime_modified`，托盘提示退出并重新运行同版本安装包修复。
+- 构建用固定解释器 `-I -S -B -m compileall --invalidation-mode unchecked-hash` 预编译Lib及site-packages，pyc纳入包清单。安装时以当前用户SID创建显式保护DACL，复制校验后拒绝普通文件访问的内容写入和创建文件/目录，保留删除与WriteAttributes以兼容Windows/libuv清理。更新、回滚和卸载沿版本事务执行。此环境无pip/ensurepip，不支持向受管运行时安装依赖。校验发现额外文件时报告 `desktop.python_runtime_modified`，托盘提示退出并重新运行同版本安装包修复。 管理员持有并启用SeRestorePrivilege、以备份语义访问时可绕过DACL。此时依靠启动校验和上述修复路径处理已修改字节。管理员测试同时严格断言原生普通访问拒写，以及特权备份写入后无法启动、同版本重装可修复。
 
 ### 1.5 上游自动更新与我们插件更新的关系（概述，详见第 5 节）
 
