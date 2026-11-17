@@ -28,7 +28,7 @@
 
 云端由D的renderer（infra/agent/internal/renderer/cordis.go）唯一写customSkillDirs配置；D节点执行器也是共享清单/制品下载、验签、解包、ledger和活跃视图的唯一写者。C只发送共享选择/启停请求、显示来源和观察结果，不写云端共享目录。Desktop由E的installer（clients/installer/runtime/core.mjs）唯一写静态配置，C负责固定挂载点内的下载/验签/内容切换，E只在进程停机后的可信guardian隔离流程介入。C不改两端Cordis配置，也不通过私有宿主接口动态改customSkillDirs。私有Skill仍由C在原生user根管理。
 
-安装前检查同frontmatter.name的私有与已知根占用，有冲突先提示。项目来源可覆盖共享技能，UI显示实际来源和被覆盖状态。改名须重新打包送审，安装器遵循已签名称。依D3首期共享为L3，用户可关闭/卸载，接受项目覆盖边界。
+安装前检查同frontmatter.name的私有与已知根占用，有冲突先提示。项目来源可覆盖共享技能，UI显示实际来源和被覆盖状态。改名须重新打包送审，安装器遵循已签名称。依 D3 和 resource-package 第7节，共享技能采用范围分发 required/default/optional。required 禁止关闭和卸载，default 可关闭不可卸载，optional 可自行管理；多条分发取最严格。
 
 更新原子切换验证后的版本，Windows占用时保留旧状态并提示待重启。关闭移出活跃视图，卸载只清理ledger标记且摘要匹配的文件，用户手改保留冲突副本。事务恢复与高水位沿主文档。
 
@@ -36,7 +36,7 @@
 
 我的资源提供新建私有技能，预览、本地校验后写原生目录。手工技能按公开根列举和打开，用DSH原生文件能力编辑。接管手工目录前展示影响。私有内容仅在当前DSH，云端进入本人实例备份，默认不跨实例同步。
 
-提交共享前展示SKILL.md、全部附件、工具/域名声明，用户确认后冻结为通用L3草稿，走总部审核发布和分发。私有副本继续独立编辑，管理员默认看到用户提交的共享字节，沿F01和已确认范围2、3。[需求依据](auriga-admin/requirements-review.md)
+提交共享前展示SKILL.md、全部附件、工具/域名声明，用户确认后冻结为统一目录共享草稿，走总部审核发布和分发。私有副本继续独立编辑，管理员默认看到用户提交的共享字节，沿F01和已确认范围2、3。[需求依据](auriga-admin/requirements-review.md)
 
 发现后调用受模型/用户调用开关与工具授权约束。更新/关闭提示新会话生效，已经载入的正文保留在历史，磁盘变化影响后续加载。[工具消费契约](https://github.com/deepseek-ai/deepseek-harness/blob/master/packages/skill/tool-skill/README.md)
 

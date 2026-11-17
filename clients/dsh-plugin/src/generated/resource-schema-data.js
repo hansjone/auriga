@@ -930,6 +930,11 @@ export default {
             description:
               'Preferred desired state when present. If absent on legacy data, derive ENABLED/DISABLED from enabled. REMOVED is an uninstall tombstone carrying the new installationRevision, retained until a matching removed acknowledgement and retired in the next generation. Reject unknown or unspecified values.',
           },
+          installationMode: {
+            $ref: '#/$defs/UnifiedInstallationMode',
+            description:
+              'Server-resolved scope policy. Omission means optional for earlier records.',
+          },
         },
         required: [
           'identity',
@@ -1156,6 +1161,11 @@ export default {
             maxItems: 200,
           },
           nextCursor: { type: 'string', minLength: 1, maxLength: 2048 },
+          allowPersonalPlugins: {
+            type: 'boolean',
+            description:
+              'Current tenant permission for native personal plugin installation.',
+          },
         },
         required: ['items'],
         additionalProperties: false,
@@ -1911,6 +1921,67 @@ export default {
           'monotonicMillis',
           'leaseDurationMillis',
         ],
+      },
+      UnifiedInstallationMode: {
+        type: 'string',
+        enum: ['required', 'default', 'optional'],
+      },
+      UnifiedAssignmentInput: {
+        type: 'object',
+        properties: {
+          identity: { $ref: '#/$defs/UnifiedResourceIdentity' },
+          scope: {
+            type: 'string',
+            enum: ['tenant', 'member', 'group', 'instance'],
+          },
+          targetId: { type: 'string', format: 'uuid' },
+          installationMode: { $ref: '#/$defs/UnifiedInstallationMode' },
+        },
+        required: ['identity', 'scope', 'targetId', 'installationMode'],
+        additionalProperties: false,
+      },
+      UnifiedAssignment: {
+        type: 'object',
+        properties: {
+          identity: { $ref: '#/$defs/UnifiedResourceIdentity' },
+          scope: {
+            type: 'string',
+            enum: ['tenant', 'member', 'group', 'instance'],
+          },
+          targetId: { type: 'string', format: 'uuid' },
+          installationMode: { $ref: '#/$defs/UnifiedInstallationMode' },
+          id: { type: 'string', format: 'uuid' },
+          revision: {
+            type: 'integer',
+            format: 'int64',
+            minimum: 1,
+            maximum: 9007199254740991,
+          },
+          active: { type: 'boolean' },
+        },
+        required: [
+          'identity',
+          'scope',
+          'targetId',
+          'installationMode',
+          'id',
+          'revision',
+          'active',
+        ],
+        additionalProperties: false,
+      },
+      UnifiedAssignmentPage: {
+        type: 'object',
+        properties: {
+          items: {
+            type: 'array',
+            items: { $ref: '#/$defs/UnifiedAssignment' },
+            maxItems: 200,
+          },
+          nextCursor: { type: 'string', maxLength: 2048 },
+        },
+        required: ['items'],
+        additionalProperties: false,
       },
     },
   },

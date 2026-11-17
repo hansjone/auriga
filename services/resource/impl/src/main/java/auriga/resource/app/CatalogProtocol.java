@@ -55,6 +55,7 @@ public final class CatalogProtocol {
             .setManifestDownloadPath(n.path("manifestDownloadPath").asString())
             .setReleaseSequence(n.path("releaseSequence").asLong())
             .setEnabled(n.path("enabled").asBoolean())
+            .setInstallationMode(CatalogAssignments.mode(n))
             .setLease(
                 UnifiedLease.newBuilder()
                     .setEnvelopeNotAfter(l.path("envelopeNotAfter").asString())

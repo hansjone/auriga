@@ -46,6 +46,11 @@
     "UnifiedTrustedClock": "unified.schema.json#/$defs/UnifiedTrustedClock",
     "UnifiedGuardianStateFile": "unified.schema.json#/$defs/UnifiedGuardianStateFile",
     "UnifiedHighWatermarksFile": "unified.schema.json#/$defs/UnifiedHighWatermarksFile",
-    "UnifiedHostLockOwner": "unified.schema.json#/$defs/UnifiedHostLockOwner"
+    "UnifiedHostLockOwner": "unified.schema.json#/$defs/UnifiedHostLockOwner",
+    "UnifiedInstallationMode": "unified.schema.json#/$defs/UnifiedInstallationMode",
+    "UnifiedAssignmentInput": "unified.schema.json#/$defs/UnifiedAssignmentInput",
+    "UnifiedAssignment": "unified.schema.json#/$defs/UnifiedAssignment",
+    "UnifiedAssignmentPage": "unified.schema.json#/$defs/UnifiedAssignmentPage",
+    "UnifiedResourceAssignmentChanged": "../events/resource.schema.json#/$defs/UnifiedResourceAssignmentChanged"
   }
 }

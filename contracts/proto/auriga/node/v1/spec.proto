@@ -44,6 +44,8 @@ message InstanceSpec {
   // REMOVED entries remain until a matching removed report is accepted, then retire next generation.
   repeated auriga.resource.v1.UnifiedResourceRef unified_resources = 18;
   repeated auriga.resource.v1.UnifiedDowngradeAuthorization unified_downgrades = 19;
+  // Tenant policy for native personal plugin management, enforced by the host.
+  optional bool allow_personal_plugins = 20;
 }
 
 enum RuntimeKind {

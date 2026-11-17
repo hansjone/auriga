@@ -23,6 +23,8 @@ var _ MappedNullable = &ShellAuthresourceUnifiedSchemaJsonDefsUnifiedInstallatio
 type ShellAuthresourceUnifiedSchemaJsonDefsUnifiedInstallationPage struct {
 	Items      []ShellAuthresourceUnifiedSchemaJsonDefsUnifiedInstallation `json:"items"`
 	NextCursor *string                                                     `json:"nextCursor,omitempty"`
+	// Current tenant permission for native personal plugin installation.
+	AllowPersonalPlugins *bool `json:"allowPersonalPlugins,omitempty"`
 }
 
 type _ShellAuthresourceUnifiedSchemaJsonDefsUnifiedInstallationPage ShellAuthresourceUnifiedSchemaJsonDefsUnifiedInstallationPage
@@ -101,6 +103,38 @@ func (o *ShellAuthresourceUnifiedSchemaJsonDefsUnifiedInstallationPage) SetNextC
 	o.NextCursor = &v
 }
 
+// GetAllowPersonalPlugins returns the AllowPersonalPlugins field value if set, zero value otherwise.
+func (o *ShellAuthresourceUnifiedSchemaJsonDefsUnifiedInstallationPage) GetAllowPersonalPlugins() bool {
+	if o == nil || IsNil(o.AllowPersonalPlugins) {
+		var ret bool
+		return ret
+	}
+	return *o.AllowPersonalPlugins
+}
+
+// GetAllowPersonalPluginsOk returns a tuple with the AllowPersonalPlugins field value if set, nil otherwise
+// and a boolean to check if the value has been set.
+func (o *ShellAuthresourceUnifiedSchemaJsonDefsUnifiedInstallationPage) GetAllowPersonalPluginsOk() (*bool, bool) {
+	if o == nil || IsNil(o.AllowPersonalPlugins) {
+		return nil, false
+	}
+	return o.AllowPersonalPlugins, true
+}
+
+// HasAllowPersonalPlugins returns a boolean if a field has been set.
+func (o *ShellAuthresourceUnifiedSchemaJsonDefsUnifiedInstallationPage) HasAllowPersonalPlugins() bool {
+	if o != nil && !IsNil(o.AllowPersonalPlugins) {
+		return true
+	}
+
+	return false
+}
+
+// SetAllowPersonalPlugins gets a reference to the given bool and assigns it to the AllowPersonalPlugins field.
+func (o *ShellAuthresourceUnifiedSchemaJsonDefsUnifiedInstallationPage) SetAllowPersonalPlugins(v bool) {
+	o.AllowPersonalPlugins = &v
+}
+
 func (o ShellAuthresourceUnifiedSchemaJsonDefsUnifiedInstallationPage) MarshalJSON() ([]byte, error) {
 	toSerialize, err := o.ToMap()
 	if err != nil {
@@ -114,6 +148,9 @@ func (o ShellAuthresourceUnifiedSchemaJsonDefsUnifiedInstallationPage) ToMap() (
 	toSerialize["items"] = o.Items
 	if !IsNil(o.NextCursor) {
 		toSerialize["nextCursor"] = o.NextCursor
+	}
+	if !IsNil(o.AllowPersonalPlugins) {
+		toSerialize["allowPersonalPlugins"] = o.AllowPersonalPlugins
 	}
 	return toSerialize, nil
 }

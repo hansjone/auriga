@@ -2408,12 +2408,6 @@
           "type": "string",
           "format": "uuid"
         },
-        "level": {
-          "type": "string",
-          "enum": [
-            "l3"
-          ]
-        },
         "visibility": {
           "type": "string",
           "enum": [
@@ -2458,7 +2452,6 @@
         "name",
         "kind",
         "ownerId",
-        "level",
         "visibility",
         "groupIds",
         "revision",
@@ -4656,6 +4649,9 @@
             "REMOVED"
           ],
           "description": "Preferred desired state when present. If absent on legacy data, derive ENABLED/DISABLED from enabled. REMOVED is an uninstall tombstone carrying the new installationRevision, retained until a matching removed acknowledgement and retired in the next generation. Reject unknown or unspecified values."
+        },
+        "installationMode": {
+          "$ref": "#/$defs/ShellAuthresource_unified_schema_json__defs_UnifiedInstallationMode"
         }
       },
       "required": [
@@ -4727,6 +4723,14 @@
         "revocationRevision"
       ],
       "additionalProperties": false
+    },
+    "ShellAuthresource_unified_schema_json__defs_UnifiedInstallationMode": {
+      "type": "string",
+      "enum": [
+        "required",
+        "default",
+        "optional"
+      ]
     },
     "ShellAuthOutput_UnifiedCreateDownloadTicket": {
       "type": "object",
@@ -4961,6 +4965,10 @@
           "type": "string",
           "minLength": 1,
           "maxLength": 2048
+        },
+        "allowPersonalPlugins": {
+          "type": "boolean",
+          "description": "Current tenant permission for native personal plugin installation."
         }
       },
       "required": [

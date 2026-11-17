@@ -27,6 +27,8 @@ public final class CatalogEvents implements EventPublisher {
     String base = "classpath:auriga/contracts/events/resource.schema.json#/$defs/";
     schemas =
         Map.of(
+            "resource.catalog_assignment_changed",
+            registry.getSchema(SchemaLocation.of(base + "UnifiedResourceAssignmentChanged")),
             "resource.catalog_version_published",
             registry.getSchema(SchemaLocation.of(base + "UnifiedResourceVersionPublished")),
             "resource.catalog_version_withdrawn",

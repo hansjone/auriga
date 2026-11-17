@@ -46,6 +46,11 @@ public final class WorkspaceService {
   public final Clock clock;
   private volatile Runnable changed = () -> {};
   private volatile boolean managedNetworkRequired;
+  private volatile boolean catalogAssignmentsRequired;
+
+  public void requireCatalogAssignments() {
+    catalogAssignmentsRequired = true;
+  }
 
   private volatile SharedDshPlacements sharedPlacements;
 
@@ -65,6 +70,9 @@ public final class WorkspaceService {
   public boolean dispatchable(Map<String, Object> row) {
     if (Boolean.TRUE.equals(row.get("shared_rebuild_hold")))
       return spec(row).getDesired() == DesiredState.DESIRED_STATE_STOPPED;
+    if (catalogAssignmentsRequired
+        && spec(row).getDesired() == DesiredState.DESIRED_STATE_RUNNING
+        && !Boolean.TRUE.equals(row.get("catalog_policy_checked"))) return false;
     return !managedNetworkRequired
         || spec(row).getDesired() != DesiredState.DESIRED_STATE_RUNNING
         || "disabled".equals(row.get("managed_network_state"))
@@ -233,6 +241,7 @@ public final class WorkspaceService {
                   .setTenantId(tenant.toString())
                   .setOwnerId(owner.toString())
                   .setGeneration(1)
+                  .setAllowPersonalPlugins(Boolean.TRUE.equals(policy.getAllowPersonalPlugins()))
                   .setResources(resources)
                   .setDesired(DesiredState.DESIRED_STATE_RUNNING)
                   .build();
@@ -405,14 +414,28 @@ public final class WorkspaceService {
   }
 
   public void saveSpec(Map<String, Object> row, InstanceSpec next) {
-    saveSpec(row, next, false);
+    saveSpec(row, next, false, false);
   }
 
   void saveStartupSpec(Map<String, Object> row, InstanceSpec next) {
-    saveSpec(row, next, true);
+    saveSpec(row, next, true, false);
   }
 
-  private void saveSpec(Map<String, Object> row, InstanceSpec next, boolean startupDerivative) {
+  public void saveCatalogSpec(Map<String, Object> row, InstanceSpec next) {
+    saveSpec(row, next, false, true);
+  }
+
+  private void saveSpec(
+      Map<String, Object> row,
+      InstanceSpec next,
+      boolean startupDerivative,
+      boolean catalogChecked) {
+    if (next.getDesired() == DesiredState.DESIRED_STATE_RUNNING)
+      next =
+          next.toBuilder()
+              .setAllowPersonalPlugins(
+                  Boolean.TRUE.equals(inputs.policy(store.tenant()).getAllowPersonalPlugins()))
+              .build();
     var previous = spec(row);
     String startupTrace = null;
     if (next.getDesired() == DesiredState.DESIRED_STATE_RUNNING) {
@@ -484,6 +507,11 @@ public final class WorkspaceService {
         restart,
         time(clock.instant()),
         startupTrace == null || startupTrace.isEmpty() ? null : startupTrace,
+        store.tenant(),
+        row.get("id"));
+    store.jdbc.update(
+        "UPDATE instance SET catalog_policy_checked=? WHERE tenant_id=? AND id=?",
+        catalogChecked,
         store.tenant(),
         row.get("id"));
     store.jdbc.update(

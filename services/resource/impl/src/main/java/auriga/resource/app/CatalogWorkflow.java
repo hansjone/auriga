@@ -102,11 +102,11 @@ public final class CatalogWorkflow {
     return new AurigaException(CommonErrors.CONFLICT);
   }
 
-  private String visible(ResourceAccess.Reader r) {
+  String visible(ResourceAccess.Reader r) {
     return " AND (p.visibility='tenant' OR (p.visibility='members' AND NOT :external) OR (p.visibility='groups' AND p.group_ids && CAST(:groups AS uuid[])))";
   }
 
-  private Map<String, Object> args(ResourceAccess.Reader r, Object... pairs) {
+  Map<String, Object> args(ResourceAccess.Reader r, Object... pairs) {
     var a = db.args(pairs);
     a.put("external", r.external());
     a.put("groups", "{" + String.join(",", r.groups().stream().map(UUID::toString).toList()) + "}");
@@ -142,7 +142,6 @@ public final class CatalogWorkflow {
     for (String k : List.of("id", "name", "kind")) n.put(k, p.get(k).toString());
     n.put("tenantId", p.get("tenant_id").toString())
         .put("ownerId", p.get("owner_id").toString())
-        .put("level", "l3")
         .put("visibility", p.get("visibility").toString())
         .put("enabled", (Boolean) p.get("enabled"))
         .put("revision", number(p, "revision"))
@@ -187,6 +186,10 @@ public final class CatalogWorkflow {
 
   static String base(UUID p, UUID v) {
     return "/api/resource/v1/catalog/packages/" + p + "/versions/" + v;
+  }
+
+  void assignmentRecorded(ResourceAccess.Reader reader, UUID id) {
+    operations.recorded(reader, "resource.distribution.request", id);
   }
 
   public JsonNode create(AurigaPrincipal actor, ObjectNode body, String key, String etag) {

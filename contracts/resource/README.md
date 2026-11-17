@@ -99,7 +99,7 @@ resource事务记录意图和resource.distribution_requested；workspace复核�
 `docs/design/skill-market.zh.md`。本轮将第1轮Skill草案改成通用catalog命名空间，
 新增 `/api/resource/v1/catalog/**`、`/api/resource/v1/admin/catalog/**`，
 P1-K 已冻结 catalog 的目录、审核、原始清单、成员安装与分发接口，kind 筛选支持 plugin/skill/tool，实际写入开放 plugin/skill；具体操作以 OpenAPI 为准。
-统一 plugin 开放 L3 共享；L0–L4/private 未统一部分沿原接口，不将旧对象伪装成 UnifiedPackage。
+统一 plugin/skill 使用范围分发 required/default/optional，同一成员命中多条规则取最严格。L0 随部署交付，统一目录不接收；平台不提供 L4/private 未审核发行。旧接口保留至第三期删除。
 
 `package.schema.json` 定义auriga-resource.json公共字段与kind专属段，tool覆盖
 online/offline/git。清单位于制品外，制品按原字节SHA-256寻址，版本digest为清单原字节摘要。
@@ -114,7 +114,7 @@ online/offline/git。清单位于制品外，制品按原字节SHA-256寻址，�
 Git锁完整commit并引用源码快照/锁文件制品，installScripts=false；在线工具无本地制品。
 installScripts仍为必填且仅允许布尔false。Schema以boolean加not true表达，避开Java生成器
 对布尔const/单值enum生成错误字符串字面量的问题；生成模型不能替代服务端Schema校验。
-共享草案先用L3，私有/开发者侧载只在当前DSH使用，冻结快照后显式送审。
+共享草案不带 level；分发方式由管理员按租户/成员/组/实例设置，强制集合在创建/更新工作区时补齐。allowPersonalPlugins 控制 DSH 原生个人安装，客户端执行在第二期。
 跨制品引用、归档路径、平台/入口关系、runtime兼容性与时间窗口需服务端语义校验。
 
 UnifiedRiskAssessment为服务端只读风险下限/有效等级及审核人数，命令型或有工具/外连/数据权限的
@@ -125,7 +125,9 @@ UnifiedReviewPage/UnifiedReview提供reviewId、作者、版本风险和决定�
 UnifiedVersion.manifest仅展示，安装端从manifestDownloadPath逐次鉴权下载原始清单字节，核对digest
 及已验签Envelope后解析，禁止重序列化展示对象代替原字节。通用发布/下架使用新增
 resource.catalog_version_published/catalog_version_withdrawn，带kind、signatureVersion、manifestDigest
-和artifactDigests；旧resource.version_*的digest仍只指插件归档。通用分发将另增事件，不重载旧类型。
+和artifactDigests；旧resource.version_*的digest仍只指插件归档。通用分发使用 resource.catalog_distribution_requested，范围规则变更使用 resource.catalog_assignment_changed，不重载旧类型。
+
+范围规则通过 GET/POST /api/resource/v1/admin/catalog/assignments 和 DELETE /api/resource/v1/admin/catalog/assignments/{assignmentId} 管理，写入带 If-Match 与 Idempotency-Key。规则记录精确 identity、scope、targetId 与 installationMode，删除返回 inactive 规则及新修订。成员安装记录的 resource.installationMode 与 allowPersonalPlugins 供第二期客户端执行；云端 InstanceSpec 同步携带这些字段与精确安装修订。
 
 共享Skill固定挂载 `<DSH_HOME>/auriga/skills-active/current/`。K冻结路径，云端D唯一写配置与共享文件，
 Desktop E写配置、C切换内容，保留上游预置目录。超期离线先停DSH并隔离失效受管内容，确认清理后

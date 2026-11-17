@@ -1830,7 +1830,7 @@ export interface components {
       /** @enum {string} */
       kind?: 'plugin' | 'skill' | 'tool';
     };
-    /** @description Shared L3 plugin/skill. Server derives tenant, owner and level. Tool delivery remains gated; legacy IDs are not catalog IDs. */
+    /** @description Shared plugin/skill package, tenant and owner derived by the server. Native personal installation follows tenant policy. */
     ShellAuthopenapi_resource_yaml_components_schemas_UnifiedPackageInput: {
       name: string;
       /** @enum {string} */
@@ -2646,7 +2646,7 @@ export interface components {
       };
       body: components['schemas']['ShellAuthopenapi_resource_yaml_components_schemas_MemberInstallation'];
     };
-    /** @description Shared L3 unified resource. Legacy plugin governance remains available until its separate contract is implemented. */
+    /** @description Shared plugin/skill package. Installation governance is resolved from scope assignments. */
     ShellAuthopenapi_resource_yaml_components_schemas_UnifiedPackage: {
       /** Format: uuid */
       id: string;
@@ -2657,8 +2657,6 @@ export interface components {
       kind: 'plugin' | 'skill' | 'tool';
       /** Format: uuid */
       ownerId: string;
-      /** @enum {string} */
-      level: 'l3';
       /** @enum {string} */
       visibility: 'tenant' | 'members' | 'groups';
       groupIds: string[];
@@ -3134,6 +3132,9 @@ export interface components {
       /** Format: int64 */
       revocationRevision: number;
     };
+    /** @enum {string} */
+    ShellAuthresource_unified_schema_json__defs_UnifiedInstallationMode:
+      'required' | 'default' | 'optional';
     ShellAuthresource_unified_schema_json__defs_UnifiedResourceRef: {
       identity: components['schemas']['ShellAuthresource_unified_schema_json__defs_UnifiedResourceIdentity'];
       envelope: components['schemas']['ShellAuthresource_package_schema_json__defs_Envelope'];
@@ -3154,6 +3155,7 @@ export interface components {
        * @enum {string}
        */
       desiredState?: 'ENABLED' | 'DISABLED' | 'REMOVED';
+      installationMode?: components['schemas']['ShellAuthresource_unified_schema_json__defs_UnifiedInstallationMode'];
     };
     ShellAuthresource_unified_schema_json__defs_UnifiedInstallationReport: {
       /** Format: uuid */
@@ -3213,6 +3215,8 @@ export interface components {
     ShellAuthresource_unified_schema_json__defs_UnifiedInstallationPage: {
       items: components['schemas']['ShellAuthresource_unified_schema_json__defs_UnifiedInstallation'][];
       nextCursor?: string;
+      /** @description Current tenant permission for native personal plugin installation. */
+      allowPersonalPlugins?: boolean;
     };
     ShellAuthOutput_UnifiedListInstallations: {
       statusCode: number;

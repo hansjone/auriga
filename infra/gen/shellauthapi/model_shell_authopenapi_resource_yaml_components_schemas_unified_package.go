@@ -27,7 +27,6 @@ type ShellAuthopenapiResourceYamlComponentsSchemasUnifiedPackage struct {
 	Name             string         `json:"name" validate:"regexp=^[a-z0-9]+(?:-[a-z0-9]+)*$"`
 	Kind             string         `json:"kind"`
 	OwnerId          string         `json:"ownerId"`
-	Level            string         `json:"level"`
 	Visibility       string         `json:"visibility"`
 	GroupIds         []string       `json:"groupIds"`
 	Revision         int64          `json:"revision"`
@@ -42,14 +41,13 @@ type _ShellAuthopenapiResourceYamlComponentsSchemasUnifiedPackage ShellAuthopena
 // This constructor will assign default values to properties that have it defined,
 // and makes sure properties required by API are set, but the set of arguments
 // will change when the set of required properties is changed
-func NewShellAuthopenapiResourceYamlComponentsSchemasUnifiedPackage(id string, tenantId string, name string, kind string, ownerId string, level string, visibility string, groupIds []string, revision int64, createdAt time.Time, enabled bool, defaultVersionId NullableString) *ShellAuthopenapiResourceYamlComponentsSchemasUnifiedPackage {
+func NewShellAuthopenapiResourceYamlComponentsSchemasUnifiedPackage(id string, tenantId string, name string, kind string, ownerId string, visibility string, groupIds []string, revision int64, createdAt time.Time, enabled bool, defaultVersionId NullableString) *ShellAuthopenapiResourceYamlComponentsSchemasUnifiedPackage {
 	this := ShellAuthopenapiResourceYamlComponentsSchemasUnifiedPackage{}
 	this.Id = id
 	this.TenantId = tenantId
 	this.Name = name
 	this.Kind = kind
 	this.OwnerId = ownerId
-	this.Level = level
 	this.Visibility = visibility
 	this.GroupIds = groupIds
 	this.Revision = revision
@@ -185,30 +183,6 @@ func (o *ShellAuthopenapiResourceYamlComponentsSchemasUnifiedPackage) GetOwnerId
 // SetOwnerId sets field value
 func (o *ShellAuthopenapiResourceYamlComponentsSchemasUnifiedPackage) SetOwnerId(v string) {
 	o.OwnerId = v
-}
-
-// GetLevel returns the Level field value
-func (o *ShellAuthopenapiResourceYamlComponentsSchemasUnifiedPackage) GetLevel() string {
-	if o == nil {
-		var ret string
-		return ret
-	}
-
-	return o.Level
-}
-
-// GetLevelOk returns a tuple with the Level field value
-// and a boolean to check if the value has been set.
-func (o *ShellAuthopenapiResourceYamlComponentsSchemasUnifiedPackage) GetLevelOk() (*string, bool) {
-	if o == nil {
-		return nil, false
-	}
-	return &o.Level, true
-}
-
-// SetLevel sets field value
-func (o *ShellAuthopenapiResourceYamlComponentsSchemasUnifiedPackage) SetLevel(v string) {
-	o.Level = v
 }
 
 // GetVisibility returns the Visibility field value
@@ -372,7 +346,6 @@ func (o ShellAuthopenapiResourceYamlComponentsSchemasUnifiedPackage) ToMap() (ma
 	toSerialize["name"] = o.Name
 	toSerialize["kind"] = o.Kind
 	toSerialize["ownerId"] = o.OwnerId
-	toSerialize["level"] = o.Level
 	toSerialize["visibility"] = o.Visibility
 	toSerialize["groupIds"] = o.GroupIds
 	toSerialize["revision"] = o.Revision
@@ -392,7 +365,6 @@ func (o *ShellAuthopenapiResourceYamlComponentsSchemasUnifiedPackage) UnmarshalJ
 		"name",
 		"kind",
 		"ownerId",
-		"level",
 		"visibility",
 		"groupIds",
 		"revision",

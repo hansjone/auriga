@@ -942,6 +942,41 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  '/api/resource/v1/admin/catalog/assignments': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** @description List current tenant distribution assignments. */
+    get: operations['UnifiedListAssignments'];
+    put?: never;
+    /** @description Assign an exact published plugin/skill version to a live tenant/member/group/instance scope. Modes required/default/optional resolve by strictest match. */
+    post: operations['UnifiedCreateAssignment'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/resource/v1/admin/catalog/assignments/{assignmentId}': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post?: never;
+    /** @description Deactivate this tenant assignment. Existing matched policies are recomputed. */
+    delete: operations['UnifiedRemoveAssignment'];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -1400,8 +1435,6 @@ export interface components {
       /** Format: uuid */
       ownerId: string;
       /** @enum {string} */
-      level: 'l3';
-      /** @enum {string} */
       visibility: 'tenant' | 'members' | 'groups';
       groupIds: string[];
       /** Format: int64 */
@@ -1573,6 +1606,8 @@ export interface components {
        * @enum {string}
        */
       desiredState?: 'ENABLED' | 'DISABLED' | 'REMOVED';
+      /** @description Server-resolved scope policy. Omission means optional for earlier records. */
+      installationMode?: components['schemas']['UnifiedInstallationMode'];
     };
     UnifiedSelection: {
       identity: components['schemas']['UnifiedResourceIdentity'];
@@ -1663,6 +1698,8 @@ export interface components {
     UnifiedInstallationPage: {
       items: components['schemas']['UnifiedInstallation'][];
       nextCursor?: string;
+      /** @description Current tenant permission for native personal plugin installation. */
+      allowPersonalPlugins?: boolean;
     };
     UnifiedDistributionInput: {
       /** Format: uuid */
@@ -1991,6 +2028,31 @@ export interface components {
       /** @constant */
       leaseDurationMillis: 30000;
     };
+    UnifiedAssignmentInput: {
+      identity: components['schemas']['UnifiedResourceIdentity'];
+      /** @enum {string} */
+      scope: 'tenant' | 'member' | 'group' | 'instance';
+      /** Format: uuid */
+      targetId: string;
+      installationMode: components['schemas']['UnifiedInstallationMode'];
+    };
+    UnifiedAssignment: {
+      identity: components['schemas']['UnifiedResourceIdentity'];
+      /** @enum {string} */
+      scope: 'tenant' | 'member' | 'group' | 'instance';
+      /** Format: uuid */
+      targetId: string;
+      installationMode: components['schemas']['UnifiedInstallationMode'];
+      /** Format: uuid */
+      id: string;
+      /** Format: int64 */
+      revision: number;
+      active: boolean;
+    };
+    UnifiedAssignmentPage: {
+      items: components['schemas']['UnifiedAssignment'][];
+      nextCursor?: string;
+    };
     FieldError: {
       /** @description JSON Pointer，例如 `/email`。 */
       field: string;
@@ -2296,6 +2358,8 @@ export interface components {
       | components['schemas']['OnlineManifest']
       | components['schemas']['OfflineManifest']
       | components['schemas']['GitManifest'];
+    /** @enum {string} */
+    UnifiedInstallationMode: 'required' | 'default' | 'optional';
   };
   responses: never;
   parameters: {
@@ -9446,6 +9510,361 @@ export interface operations {
         };
       };
       /** @description resource.storage_unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description 未知失败使用脱敏common.internal；具体错误与HTTP/gRPC映射见catalog/m3.json。 */
+      default: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+    };
+  };
+  UnifiedListAssignments: {
+    parameters: {
+      query?: {
+        limit?: number;
+        cursor?: string;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Authorized response */
+      200: {
+        headers: {
+          /** @description Current revision ETag for the next conditional request. */
+          ETag?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['UnifiedAssignmentPage'];
+        };
+      };
+      /** @description common.validation_failed */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.unauthenticated */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.forbidden or iam.step_up_required */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.not_found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.precondition_failed */
+      412: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.rate_limited */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.internal */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description 未知失败使用脱敏common.internal；具体错误与HTTP/gRPC映射见catalog/m3.json。 */
+      default: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+    };
+  };
+  UnifiedCreateAssignment: {
+    parameters: {
+      query?: never;
+      header: {
+        /** @description Required idempotency key bound to the complete request fingerprint. */
+        'Idempotency-Key': string;
+        /** @description Current resource ETag; initial creation uses "0". Stale or absent preconditions reject the mutation. */
+        'If-Match': string;
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['UnifiedAssignmentInput'];
+      };
+    };
+    responses: {
+      /** @description Exact revision accepted; 202 requires matching authenticated observation before applied. */
+      201: {
+        headers: {
+          /** @description Current revision ETag for the next conditional request. */
+          ETag?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['UnifiedAssignment'];
+        };
+      };
+      /** @description common.validation_failed */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.unauthenticated */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.forbidden or iam.step_up_required */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.not_found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.precondition_failed */
+      412: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.rate_limited */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.internal */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description 未知失败使用脱敏common.internal；具体错误与HTTP/gRPC映射见catalog/m3.json。 */
+      default: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+    };
+  };
+  UnifiedRemoveAssignment: {
+    parameters: {
+      query?: never;
+      header: {
+        /** @description Required idempotency key bound to the complete request fingerprint. */
+        'Idempotency-Key': string;
+        /** @description Current resource ETag; initial creation uses "0". Stale or absent preconditions reject the mutation. */
+        'If-Match': string;
+      };
+      path: {
+        assignmentId: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Exact revision accepted; 202 requires matching authenticated observation before applied. */
+      200: {
+        headers: {
+          /** @description Current revision ETag for the next conditional request. */
+          ETag?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['UnifiedAssignment'];
+        };
+      };
+      /** @description common.validation_failed */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.unauthenticated */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.forbidden or iam.step_up_required */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.not_found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.precondition_failed */
+      412: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.rate_limited */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.internal */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.unavailable */
       503: {
         headers: {
           [name: string]: unknown;

@@ -250,7 +250,7 @@ test('AI/资源每个操作引用唯一权限和错误目录，管理面标注�
       }
     }
   }
-  assert.equal(count, 93);
+  assert.equal(count, 96);
   assert(ids.has('listRelayProviderModels'));
   assert.equal(assertSensitiveAdminStepup(apiSpecs).length, 36);
   for (const [key, p] of Object.entries(catalog.permissions)) {
@@ -813,12 +813,16 @@ test('通用路径替换本轮Skill路径，查询按kind筛选且上传保留�
   const paths = Object.entries(spec.paths).filter(([p]) =>
     p.includes('/catalog/'),
   );
-  assert.equal(paths.length, 22);
+  assert.equal(paths.length, 24);
   for (const [path, methods] of paths) {
     for (const [method, operation] of Object.entries(methods)) {
       assert(operation.operationId.startsWith('Unified'));
       assert.equal(operation['x-auriga-contract-stage'], 'frozen');
-      if (method === 'get' && !path.includes('{')) {
+      if (
+        method === 'get' &&
+        !path.includes('{') &&
+        !path.endsWith('/assignments')
+      ) {
         const kind = operation.parameters.find((p) => p.name === 'kind');
         assert.deepEqual(kind.schema.enum, ['plugin', 'skill', 'tool']);
       }
@@ -845,9 +849,9 @@ test('catalog统一清单接受plugin/skill/tool，旧插件ID不隐式投影', 
     spec.components.schemas.UnifiedPackage.properties.kind.enum,
     ['plugin', 'skill', 'tool'],
   );
-  assert.deepEqual(
-    spec.components.schemas.UnifiedPackage.properties.level.enum,
-    ['l3'],
+  assert.equal(
+    spec.components.schemas.UnifiedPackage.properties.level,
+    undefined,
   );
 });
 

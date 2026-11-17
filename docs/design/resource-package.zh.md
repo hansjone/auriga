@@ -86,13 +86,13 @@ Python采用python-build-standalone，Java采用Eclipse Temurin 21 LTS，均经�
 
 开发者模式在本机显式开启，允许本地目录/Git侧载、链接调试、日志与runtime选择。界面标“未审核”，本地目录摘要随内容变化，不能显示为平台已审核版本。链接目标限用户选择的目录，运行沿本机工具与数据授权。侧载资源只在当前DSH使用。
 
-一键提交送审先冻结快照，预览全部文件和凭据扫描结果，用户确认后创建共享L3草稿。链接目录后续编辑不影响审核对象。Git工作树未提交变化可先冻结，但正式Git交付要固定为可追溯commit。私有内容留在当前DSH，云端文件进入本人实例备份，管理员默认只看共享内容和授权回报。
+一键提交送审先冻结快照，预览全部文件和凭据扫描结果，用户确认后创建统一目录共享草稿。链接目录后续编辑不影响审核对象。Git工作树未提交变化可先冻结，但正式Git交付要固定为可追溯commit。私有内容留在当前DSH，云端文件进入本人实例备份，管理员默认只看共享内容和授权回报。
 
 ## 6. 审核、离线和审计
 
-L0–L4表示治理控制，风险另记R1/R2/R3。服务端在上传和送审时根据kind、delivery、permissions和正文扫描确定最低风险，写入risk.minimumLevel；审核人只能上调risk.level，不能降低下限。Skill的tools、outboundHosts、dataAccess任一非空，或正文含可执行命令/工具调用指示，即至少R2，命令型Skill不得自称纯资料R1。tool至少R2，git为R3，特权/高敏操作升R3。风险修改须提升修订并清空旧审核。
+治理由分发方式 required/default/optional 表达，风险另记 R1/R2/R3。服务端在上传和送审时根据kind、delivery、permissions和正文扫描确定最低风险，写入risk.minimumLevel；审核人只能上调risk.level，不能降低下限。Skill的tools、outboundHosts、dataAccess任一非空，或正文含可执行命令/工具调用指示，即至少R2，命令型Skill不得自称纯资料R1。tool至少R2，git为R3，特权/高敏操作升R3。风险修改须提升修订并清空旧审核。
 
-R1须至少一名非作者完整审核；R2/R3均须至少两名不同非作者且至少一名具备安全审核资格。UnifiedRiskAssessment表达等级、下限、所需人数/安全人数；UnifiedReview及其列表给出reviewId、作者、版本和决定历史，UnifiedReviewDecision.role为general/security。安全职责由服务端核对审核者资格，不能由客户端自报获得；同一人多角色只计一人，作者不得审核或发布，人数与职责在审核和发布事务中再次核对。统一共享接收 L3 plugin/skill，插件最低 R2。旧插件接口本期继续原规则，tool 后续开放。
+R1须至少一名非作者完整审核；R2/R3均须至少两名不同非作者且至少一名具备安全审核资格。UnifiedRiskAssessment表达等级、下限、所需人数/安全人数；UnifiedReview及其列表给出reviewId、作者、版本和决定历史，UnifiedReviewDecision.role为general/security。安全职责由服务端核对审核者资格，不能由客户端自报获得；同一人多角色只计一人，作者不得审核或发布，人数与职责在审核和发布事务中再次核对。统一共享接收 plugin/skill，插件最低 R2。旧插件接口本期继续原规则，tool 后续开放。
 
 共享租约截止为发行声明notAfter与撤销清单expiresAt较早值，各自最长24小时。缺失、过期、回滚清单或可信时间不可用时阻止新的受管启动/加载。普通下架阻止新下载/安装/启用，已应用版本在当前租约内保留，续签按下架策略重新授权。
 
@@ -104,22 +104,26 @@ R1须至少一名非作者完整审核；R2/R3均须至少两名不同非作者�
 
 ## 7. 插件统一（2026-11-17 决定）
 
-插件、技能及以后工具共用上传、送审、审核、发布、下架/更新、安装/分发、续签和撤销。统一接口为 `/api/resource/v1/catalog/**`、`/api/resource/v1/admin/catalog/**` 和 `/api/resource/v1/member/catalog/**`，kind 增加 plugin。tool 仍待后续开放。旧插件 ID 与新目录 ID 独立，不双写或伪造迁移关联。
+插件、技能及以后工具共用上传、送审、审核、发布、下架/更新、安装/分发、续签和撤销。统一接口为 `/api/resource/v1/catalog/**`、`/api/resource/v1/admin/catalog/**` 和 `/api/resource/v1/catalog/member/**`，kind 增加 plugin。tool 仍待后续开放。旧插件 ID 与新目录 ID 独立，不双写或伪造迁移关联。
 
-### L0–L4/private 治理能力盘点
+### 治理映射（2026-11-17 用户批准）
 
-治理 level 与执行风险 risk 正交；统一模型不能把全部旧插件默认为 L3。
+L0 核心插件随客户端安装包和云端镜像发布，由部署配置控制，作用于使用该安装包或镜像的客户端与云端实例；成员通过部署取得固定核心插件。统一资源目录不建模、不接收。包不再保存 level。原 L1/L2/L3 对应分发规则 installationMode，plugin 和 skill 采用相同规则。
 
-| 原等级/范围 | 含义、谁能装、强制性 | 统一模型对应及实例/工作区/成员作用 |
+| 原等级 | 分发方式 | 安装与成员操作 |
 |---|---|---|
-| L0 | 随部署固定的门锁/核心插件，普通资源 API 不可创建、改级、关闭、卸载 | 部署来源、level=l0 的只读系统资源；实例基础配置保留，工作区与成员选择不能覆盖 |
-| L1 | owner 治理、管理员向授权实例分发，成员不能关闭或卸载 | plugin level=l1、强制安装且启用；工作区创建/更新补齐强制集合，实例规格保留精确版本与安装修订，成员 disable/remove 拒绝 |
-| L2 | 管理者规定安装，成员可关闭不可卸载 | plugin level=l2、强制安装但允许 DISABLED，拒绝 REMOVED；工作区保留安装记录及回执 |
-| L3 | 已审核共享资源，当前可见成员可安装、更新、关闭、卸载 | level=l3，visibility=tenant/members/groups；成员选择和管理员分发共用 UnifiedSelection、精确版本及节点/成员报告来源 |
-| L4/private | 本人私有、仅 owner 安装，受 WorkspacePolicy.allowPersonalPlugins 控制；旧私有发行完整签名但标未审核 | plugin level=l4、visibility=private、ownerId；逐次本人 ACL 与个人插件策略，不进入共享分发；需要独立未审核发行策略，不能借管理员治理公开 |
-| tenant/members/groups | tenant 含本租户 external，members 不含 external，groups 限当前组成员 | visibility/groupIds 沿实时 ACL；实例 owner 也须满足可见性，无匿名或跨租户公共发布 |
+| L1 | required | 必须安装且启用，拒绝成员关闭、卸载 |
+| L2 | default | 必须安装，首次默认启用，成员可关闭，拒绝卸载 |
+| L3 | optional | 成员自行安装、更新、关闭、卸载 |
+| L4/private | DSH 原生个人安装 | 平台取消私有未审核发行通道，租户 allowPersonalPlugins 决定能否在 DSH 原生管理中自行安装 |
 
-第一期开放统一 L3 共享插件完整生命周期，原 L0–L4/private 接口继续可用。当前统一规格尚无治理策略，统一审核禁止作者自审自发，不能只加枚举就声称具备 L1/L2 强制集合、L0 部署来源和 L4 私有未审核发行。**这四项须交主控冻结补充契约并完成实现与验收，第三期删除旧链路前必须补齐；未补齐不得删旧链路或静默降为 L3。** 第一阶段对非 L3/private 输入保持拒绝，第二期界面须按真实能力开放。
+管理员在统一 assignments 接口指定精确 identity、scope（tenant/member/group/instance）、targetId 和 installationMode。tenant 的 targetId 必须等于认证租户，其余目标必须在当前租户内有效。规则变更通过事务 outbox 发送 resource.catalog_assignment_changed。各目标成员仍须实时满足包可见性与读权限。tenant 规则要求 tenant 可见包，group 规则不能扩大包的组范围，成员/实例规则核对当前成员及实例 owner。分发不授予额外可见性。
+
+同一成员命中多条规则时 installationMode 取 required > default > optional。精确版本从命中规则中按最高 releaseSequence 选择，同序号以规则 ID 确定稳定顺序，不解析 latest，不降低已持久化高水位。规则删除和版本撤销会从强制集合中排除相应规则。规则删除后仍可用的既有安装转为 optional 并保留启用选择，成员可自行卸载；原强制版本已撤销、下架或失去可见性时产生移除意图，已运行内容仍执行既有撤销停用流程。成员选择不能覆盖强制版本或提升/降低分发方式。
+
+成员列举安装记录时对账 required/default 集合。required 始终启用，default 保留成员已关闭的状态，optional 不自动安装。关闭 required 或卸载 required/default 返回 resource.installation_required，选择不符合锁定版本返回 resource.distribution_locked。安装修订随版本、意图或方式改变递增，重试保持同一代次。
+
+workspace 对所有已分配实例对账，包括空资源的新实例。创建、普通规格更新和规则事件会要求重新对账，运行规格在对账完成后才下发。对账沿可信资源解析端口产生精确分发意图，保留 installationRevision、selectionRevision、generation 和方式。租约更新不改变选择字节。allowPersonalPlugins 通过成员安装列表和实例规格下发，客户端与云端执行由第二期接线。
 
 ### 插件清单、制品与审核
 
@@ -133,7 +137,7 @@ plugin 段含 packageName（保留 npm 原名，含 `@scope/name`）和 dshVersi
 
 客户端通过统一 member installations、download-tickets、renewals、reports 选择/下载/续签/回报 kind=plugin；管理分发通过 UnifiedResourceRef 进入实例规格。核对签名、清单与制品摘要后，安装仍调用 DSH 公开 PluginManager 或 `dsh plugin add <tgz>`，不改上游 DSH。真实客户端与云端消费由第二期完成，后端已产生分发意图不等于宿主安装成功。
 
-分期：第一期契约、resource 后端、真实 PG 测试及统一 dsh-memwiki 种子发布路径；第二期管理台资源中心与 DSH/云端插件消费；第三期补齐治理能力后删除旧接口、表、事件、生成代码、页面、客户端旧路径与旧种子。本期迁移只追加。开发栈数据由主控重置重灌，部署后从正常页面验收。
+分期：第一期契约、范围分发治理、resource 后端、真实 PG 测试及统一 dsh-memwiki 种子发布路径；第二期管理台资源中心与 DSH/云端插件消费；第三期补齐治理能力后删除旧接口、表、事件、生成代码、页面、客户端旧路径与旧种子。本期迁移只追加。开发栈数据由主控重置重灌，部署后从正常页面验收。
 
 ## 8. 管理端与成员端
 
@@ -217,7 +221,7 @@ P3交付Git源码工具和Python/Java runtime。commit/快照/锁文件、隔离
 
 - D1，Skill首期采用text-only，禁止附带可执行脚本。工具源码和二进制按tool类型及对应风险等级审核，技能先以原生文本格式接入。
 - D2，共享Skill使用独立customSkillDirs活跃根，私有Skill使用原生user根，以便身份切换、到期停用和清理时核对文件归属。
-- D3，新增通用共享资源首期为L3，现有插件等级沿原规则迁移。Skill/tool的强制等级留后续独立范围，P1按照当前允许关闭/卸载的模型验收。
+- D3，plugin/skill 共用范围分发方式 required/default/optional，按第7节执行最严格规则、成员操作限制和工作区补齐。包不携带治理等级。L0 属于部署配置，平台取消 L4 私有未审核发行。
 - D4，共享资源采用最多24小时租约。Skill恶意撤销或租约到期时停止受影响DSH，恢复后新建会话并保留原历史。实现须明确提示可能中断该DSH其他任务，并验证停机和启动门禁。
 - D5，共享Skill首期仅在具备可信guardian的云端和Auriga Desktop开放。其他DSH提供私有技能，开放共享须先具备同等可验证的启动与进程控制能力。
 - D6，R1至少一名非作者完整审核，R2/R3至少两名非作者且含安全审核。服务端审核/发布均须强制核对，作者不得自审自发。

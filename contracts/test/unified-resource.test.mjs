@@ -615,3 +615,60 @@ test('generated plugin runtime schemas match the frozen source documents', async
   for (const name of ['signatures', 'package', 'unified'])
     assert.deepEqual(schemas[name], read('resource/' + name + '.schema.json'));
 });
+
+test('range assignments pin identities and validate installation modes for plugins and skills', () => {
+  const resource = read('resource/installation-revision-fixtures.json').cases[0]
+    .input.expected.resource;
+  for (const kind of ['plugin', 'skill']) {
+    for (const installationMode of ['required', 'default', 'optional']) {
+      assert(
+        check('unified', 'UnifiedResourceRef', {
+          ...resource,
+          installationMode,
+        }),
+      );
+      for (const scope of ['tenant', 'member', 'group', 'instance']) {
+        const input = {
+          identity: { ...resource.identity, kind },
+          scope,
+          targetId: resource.identity.tenantId,
+          installationMode,
+        };
+        assert(check('unified', 'UnifiedAssignmentInput', input));
+        assert(
+          !check('unified', 'UnifiedAssignmentInput', {
+            ...input,
+            installationMode: 'l1',
+          }),
+        );
+        assert(
+          !check('unified', 'UnifiedAssignmentInput', {
+            ...input,
+            scope: 'everyone',
+          }),
+        );
+        assert(
+          !check('unified', 'UnifiedAssignmentInput', {
+            ...input,
+            level: 'l1',
+          }),
+        );
+        const { installationMode: ignored, ...missing } = input;
+        assert.equal(ignored, installationMode);
+        assert(!check('unified', 'UnifiedAssignmentInput', missing));
+      }
+    }
+  }
+  assert(
+    !check('unified', 'UnifiedResourceRef', {
+      ...resource,
+      installationMode: 'l4',
+    }),
+  );
+  assert(
+    check('unified', 'UnifiedInstallationPage', {
+      items: [],
+      allowPersonalPlugins: false,
+    }),
+  );
+});

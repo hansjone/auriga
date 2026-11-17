@@ -8606,7 +8606,9 @@
           "common.precondition_failed",
           "common.rate_limited",
           "common.unavailable",
-          "common.internal"
+          "common.internal",
+          "resource.installation_required",
+          "resource.distribution_locked"
         ],
         "x-events": [],
         "parameters": [
@@ -9372,7 +9374,9 @@
           "common.rate_limited",
           "common.unavailable",
           "common.internal",
-          "iam.step_up_required"
+          "iam.step_up_required",
+          "resource.installation_required",
+          "resource.distribution_locked"
         ],
         "x-events": [
           "resource.catalog_distribution_requested"
@@ -10488,6 +10492,578 @@
         "x-authorization": "node-bound-grant",
         "x-internal-only": true,
         "x-auriga-contract-stage": "frozen"
+      }
+    },
+    "/api/resource/v1/admin/catalog/assignments": {
+      "post": {
+        "operationId": "UnifiedCreateAssignment",
+        "tags": [
+          "Resource"
+        ],
+        "description": "Assign an exact published plugin/skill version to a live tenant/member/group/instance scope. Modes required/default/optional resolve by strictest match.",
+        "x-permission": "resource.distributions.manage",
+        "x-error-codes": [
+          "common.unauthenticated",
+          "common.forbidden",
+          "common.validation_failed",
+          "common.not_found",
+          "common.conflict",
+          "common.precondition_failed",
+          "common.rate_limited",
+          "common.unavailable",
+          "common.internal",
+          "iam.step_up_required",
+          "resource.installation_required",
+          "resource.distribution_locked"
+        ],
+        "x-events": [
+          "resource.catalog_assignment_changed"
+        ],
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            "description": "Required idempotency key bound to the complete request fingerprint."
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "required": true,
+            "description": "Current resource ETag; initial creation uses \"0\". Stale or absent preconditions reject the mutation.",
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Exact revision accepted; 202 requires matching authenticated observation before applied.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UnifiedAssignment"
+                }
+              }
+            },
+            "headers": {
+              "ETag": {
+                "description": "Current revision ETag for the next conditional request.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "common.validation_failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "common.unauthenticated",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "common.forbidden or iam.step_up_required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "common.not_found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "common.conflict",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "common.precondition_failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "common.rate_limited",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "common.internal",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "common.unavailable",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "未知失败使用脱敏common.internal；具体错误与HTTP/gRPC映射见catalog/m3.json。",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "x-auriga-contract-stage": "frozen",
+        "x-authorization": {
+          "tenant": "authenticated",
+          "visibility": "package-version",
+          "resolveKind": true,
+          "allowedKinds": [
+            "plugin",
+            "skill",
+            "tool"
+          ],
+          "locatorGrantsAccess": false,
+          "checkEveryRead": true
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UnifiedAssignmentInput"
+              }
+            }
+          }
+        },
+        "x-admin-only": true,
+        "x-step-up-max-age-seconds": 600
+      },
+      "get": {
+        "operationId": "UnifiedListAssignments",
+        "tags": [
+          "Resource"
+        ],
+        "description": "List current tenant distribution assignments.",
+        "x-permission": "resource.distributions.manage",
+        "x-error-codes": [
+          "common.unauthenticated",
+          "common.forbidden",
+          "common.validation_failed",
+          "common.not_found",
+          "common.conflict",
+          "common.precondition_failed",
+          "common.rate_limited",
+          "common.unavailable",
+          "common.internal",
+          "iam.step_up_required",
+          "resource.installation_required",
+          "resource.distribution_locked"
+        ],
+        "x-events": [],
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 200,
+              "default": 50
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 2048
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Authorized response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UnifiedAssignmentPage"
+                }
+              }
+            },
+            "headers": {
+              "ETag": {
+                "description": "Current revision ETag for the next conditional request.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "common.validation_failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "common.unauthenticated",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "common.forbidden or iam.step_up_required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "common.not_found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "common.conflict",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "common.precondition_failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "common.rate_limited",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "common.internal",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "common.unavailable",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "未知失败使用脱敏common.internal；具体错误与HTTP/gRPC映射见catalog/m3.json。",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "x-auriga-contract-stage": "frozen",
+        "x-authorization": {
+          "tenant": "authenticated",
+          "visibility": "package-version",
+          "resolveKind": true,
+          "allowedKinds": [
+            "plugin",
+            "skill",
+            "tool"
+          ],
+          "locatorGrantsAccess": false,
+          "checkEveryRead": true
+        },
+        "x-admin-only": true,
+        "x-step-up-max-age-seconds": 600
+      }
+    },
+    "/api/resource/v1/admin/catalog/assignments/{assignmentId}": {
+      "delete": {
+        "operationId": "UnifiedRemoveAssignment",
+        "tags": [
+          "Resource"
+        ],
+        "description": "Deactivate this tenant assignment. Existing matched policies are recomputed.",
+        "x-permission": "resource.distributions.manage",
+        "x-error-codes": [
+          "common.unauthenticated",
+          "common.forbidden",
+          "common.validation_failed",
+          "common.not_found",
+          "common.conflict",
+          "common.precondition_failed",
+          "common.rate_limited",
+          "common.unavailable",
+          "common.internal",
+          "iam.step_up_required",
+          "resource.installation_required",
+          "resource.distribution_locked"
+        ],
+        "x-events": [
+          "resource.catalog_assignment_changed"
+        ],
+        "parameters": [
+          {
+            "name": "assignmentId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            "description": "Required idempotency key bound to the complete request fingerprint."
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "required": true,
+            "description": "Current resource ETag; initial creation uses \"0\". Stale or absent preconditions reject the mutation.",
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Exact revision accepted; 202 requires matching authenticated observation before applied.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UnifiedAssignment"
+                }
+              }
+            },
+            "headers": {
+              "ETag": {
+                "description": "Current revision ETag for the next conditional request.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "common.validation_failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "common.unauthenticated",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "common.forbidden or iam.step_up_required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "common.not_found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "common.conflict",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "common.precondition_failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "common.rate_limited",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "common.internal",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "common.unavailable",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "未知失败使用脱敏common.internal；具体错误与HTTP/gRPC映射见catalog/m3.json。",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "x-auriga-contract-stage": "frozen",
+        "x-authorization": {
+          "tenant": "authenticated",
+          "visibility": "package-version",
+          "resolveKind": true,
+          "allowedKinds": [
+            "plugin",
+            "skill",
+            "tool"
+          ],
+          "locatorGrantsAccess": false,
+          "checkEveryRead": true
+        },
+        "x-admin-only": true,
+        "x-step-up-max-age-seconds": 600
       }
     }
   },
@@ -12028,12 +12604,6 @@
             "type": "string",
             "format": "uuid"
           },
-          "level": {
-            "type": "string",
-            "enum": [
-              "l3"
-            ]
-          },
           "visibility": {
             "type": "string",
             "enum": [
@@ -12078,7 +12648,6 @@
           "name",
           "kind",
           "ownerId",
-          "level",
           "visibility",
           "groupIds",
           "revision",
@@ -12624,6 +13193,15 @@
       },
       "UnifiedHostLockOwner": {
         "$ref": "../resource/unified.schema.json#/$defs/UnifiedHostLockOwner"
+      },
+      "UnifiedAssignmentInput": {
+        "$ref": "../resource/unified.schema.json#/$defs/UnifiedAssignmentInput"
+      },
+      "UnifiedAssignment": {
+        "$ref": "../resource/unified.schema.json#/$defs/UnifiedAssignment"
+      },
+      "UnifiedAssignmentPage": {
+        "$ref": "../resource/unified.schema.json#/$defs/UnifiedAssignmentPage"
       }
     }
   }

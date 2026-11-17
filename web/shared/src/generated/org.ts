@@ -662,7 +662,7 @@ export interface components {
       maxConcurrentStarts: number;
       defaultDshVersion?: string;
       /**
-       * @description 是否允许 L4 个人插件。
+       * @description 是否允许成员在 DSH 原生插件管理中自行安装插件。统一目录不提供个人私有未审核发行。
        * @default true
        */
       allowPersonalPlugins: boolean;

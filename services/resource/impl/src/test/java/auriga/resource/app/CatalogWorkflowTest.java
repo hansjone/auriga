@@ -1,6 +1,7 @@
 package auriga.resource.app;
 
 import static auriga.resource.web.ResourceBody.JSON;
+import static auriga.resource.web.ResourceBody.uuid;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
@@ -27,6 +28,7 @@ import org.junit.jupiter.api.*;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.jdbc.core.JdbcTemplate;
 import tools.jackson.databind.JsonNode;
@@ -62,6 +64,10 @@ class CatalogWorkflowTest {
   ResourceAccess access;
   AtomicBoolean enabled = new AtomicBoolean(true);
   Set<UUID> security = new HashSet<>();
+  Map<UUID, Set<UUID>> groups = new HashMap<>();
+  Set<UUID> knownGroups = new HashSet<>();
+  Set<UUID> externalMembers = new HashSet<>();
+  AtomicBoolean personalAllowed = new AtomicBoolean(true);
   ResourceSigning signing;
   KeyPair releaseKey, revocationKey;
   java.util.concurrent.atomic.AtomicReference<Instant> now =
@@ -111,6 +117,14 @@ class CatalogWorkflowTest {
 
   @BeforeEach
   void setup() throws Exception {
+    TenantContext.run(
+        TENANT,
+        () ->
+            tx.write(
+                () ->
+                    db.update(
+                        "UPDATE resource.catalog_assignment SET active=false WHERE tenant_id=:tenant",
+                        db.args())));
     store = new LocalObjectStore(objects);
     security.add(SECURITY);
     access =
@@ -120,15 +134,23 @@ class CatalogWorkflowTest {
                 return Member.newBuilder()
                     .setTenantId(t.toString())
                     .setAccountId(a.toString())
-                    .setMemberType(MemberType.MEMBER_TYPE_MEMBER)
+                    .setMemberType(
+                        externalMembers.contains(a)
+                            ? MemberType.MEMBER_TYPE_EXTERNAL
+                            : MemberType.MEMBER_TYPE_MEMBER)
                     .setStatus(MemberStatus.MEMBER_STATUS_ACTIVE)
+                    .addAllGroupIds(
+                        groups.getOrDefault(a, Set.of()).stream().map(UUID::toString).toList())
                     .build();
               }
 
               public GetEffectivePermissionsResponse permissions(UUID t, UUID a) {
                 var b =
                     GetEffectivePermissionsResponse.newBuilder()
-                        .setMemberType(MemberType.MEMBER_TYPE_MEMBER)
+                        .setMemberType(
+                            externalMembers.contains(a)
+                                ? MemberType.MEMBER_TYPE_EXTERNAL
+                                : MemberType.MEMBER_TYPE_MEMBER)
                         .setStatus(MemberStatus.MEMBER_STATUS_ACTIVE);
                 for (String p : PERMS)
                   if (!p.equals(CatalogReviewPolicy.permission()) || security.contains(a))
@@ -137,7 +159,11 @@ class CatalogWorkflowTest {
               }
 
               public boolean allowPersonalPlugins(UUID t) {
-                return true;
+                return personalAllowed.get();
+              }
+
+              public boolean groupExists(UUID t, UUID group) {
+                return knownGroups.contains(group);
               }
             });
     var keys = KeyPairGenerator.getInstance("Ed25519");
@@ -186,6 +212,460 @@ class CatalogWorkflowTest {
         clock.instant(),
         clock.instant(),
         "test");
+  }
+
+  JsonNode approvePublish(Upload upload) {
+    var review = decide(submit(upload), GENERAL, "general");
+    if (upload.value.path("kind").asString().equals("plugin"))
+      review = decide(review, SECURITY, "security");
+    return publish(upload, review);
+  }
+
+  JsonNode assign(CatalogDelivery delivery, Upload upload, String scope, UUID target, String mode) {
+    var body =
+        JSON.createObjectNode()
+            .put("scope", scope)
+            .put("targetId", target.toString())
+            .put("installationMode", mode);
+    body.set("identity", identity(upload));
+    return delivery.createAssignment(actor(PUBLISHER), body, key(), "\"0\"");
+  }
+
+  ObjectNode choose(UUID client, Upload upload, String action) {
+    var body = JSON.createObjectNode().put("clientId", client.toString());
+    body.set(
+        "selection",
+        JSON.createObjectNode().put("action", action).set("identity", identity(upload)));
+    return body;
+  }
+
+  @ParameterizedTest
+  @ValueSource(strings = {"plugin", "skill"})
+  void assignmentsMergeModeAndPinnedVersionAndPreserveDefaultDisable(String kind) {
+    TenantContext.run(
+        TENANT,
+        () -> {
+          try {
+            var first = upload(false, kind);
+            approvePublish(first);
+            var delivery = delivery(null);
+            UUID client = UUID.randomUUID();
+            assign(delivery, first, "member", GENERAL, "default");
+            delivery.installations(actor(GENERAL), client, kind, 50, null);
+            String disableKey = key();
+            delivery.select(actor(GENERAL), choose(client, first, "disable"), disableKey, "\"1\"");
+            var manifest = (ObjectNode) first.value.path("manifest").deepCopy();
+            manifest.put("version", "1.1.0");
+            byte[] bytes =
+                kind.equals("plugin")
+                    ? pluginArchive(
+                        manifest.path("plugin").path("packageName").asString(),
+                        "1.1.0",
+                        "package/package.json",
+                        false,
+                        false)
+                    : first.payload;
+            ((ObjectNode) manifest.path("artifacts").get(0))
+                .put("digest", CatalogManifest.digest(bytes))
+                .put("sizeBytes", bytes.length);
+            byte[] raw = manifest.toString().getBytes(StandardCharsets.UTF_8);
+            var value =
+                catalog.upload(
+                    actor(AUTHOR),
+                    first.pkg,
+                    JSON.createObjectNode()
+                        .put("version", "1.1.0")
+                        .put("expectedDigest", CatalogManifest.digest(raw)),
+                    raw,
+                    List.of(new ByteArrayInputStream(bytes)),
+                    key(),
+                    etag(catalog.detail(actor(AUTHOR), first.pkg, null, false)));
+            var second = new Upload(first.pkg, uuid(value, "id"), value, raw, bytes);
+            approvePublish(second);
+            assign(delivery, second, "tenant", TENANT, "default");
+            var item =
+                delivery.installations(actor(GENERAL), client, kind, 50, null).path("items").get(0);
+            assertEquals(identity(second), item.path("resource").path("identity"));
+            assertEquals("DISABLED", item.path("resource").path("desiredState").asString());
+            assign(delivery, first, "member", GENERAL, "required");
+            item =
+                delivery.installations(actor(GENERAL), client, kind, 50, null).path("items").get(0);
+            assertEquals(identity(second), item.path("resource").path("identity"));
+            assertEquals("required", item.path("resource").path("installationMode").asString());
+            assertEquals("ENABLED", item.path("resource").path("desiredState").asString());
+            assertEquals(
+                "resource.installation_required",
+                assertThrows(
+                        AurigaException.class,
+                        () ->
+                            delivery.select(
+                                actor(GENERAL),
+                                choose(client, first, "disable"),
+                                disableKey,
+                                "\"1\""))
+                    .errorCode()
+                    .code());
+            var revision = "\"" + item.path("installationRevision").asLong() + "\"";
+            assertEquals(
+                "resource.distribution_locked",
+                assertThrows(
+                        AurigaException.class,
+                        () ->
+                            delivery.select(
+                                actor(GENERAL), choose(client, first, "install"), key(), revision))
+                    .errorCode()
+                    .code());
+            var foreign =
+                JSON.createObjectNode()
+                    .put("scope", "member")
+                    .put("targetId", GENERAL.toString())
+                    .put("installationMode", "required");
+            foreign.set("identity", identity(second).put("tenantId", UUID.randomUUID().toString()));
+            assertError(
+                CommonErrors.NOT_FOUND,
+                () -> delivery.createAssignment(actor(PUBLISHER), foreign, key(), "\"0\""));
+          } catch (Exception e) {
+            throw new RuntimeException(e);
+          }
+        });
+  }
+
+  @ParameterizedTest
+  @CsvSource({
+    "plugin,required",
+    "plugin,default",
+    "plugin,optional",
+    "skill,required",
+    "skill,default",
+    "skill,optional"
+  })
+  void assignmentModesControlMemberInstallation(String kind, String mode) {
+    TenantContext.run(
+        TENANT,
+        () -> {
+          try {
+            var upload = upload(false, kind);
+            approvePublish(upload);
+            var delivery = delivery(null);
+            UUID client = UUID.randomUUID();
+            assign(delivery, upload, "tenant", TENANT, mode);
+            personalAllowed.set(false);
+            var page = delivery.installations(actor(GENERAL), client, kind, 50, null);
+            assertFalse(page.path("allowPersonalPlugins").asBoolean());
+            JsonNode installed;
+            if (mode.equals("optional")) {
+              assertTrue(page.path("items").isEmpty());
+              installed =
+                  delivery.select(
+                      actor(GENERAL), choose(client, upload, "install"), key(), "\"0\"");
+            } else {
+              installed = page.path("items").get(0);
+              assertEquals(
+                  installed,
+                  delivery
+                      .installations(actor(GENERAL), client, kind, 50, null)
+                      .path("items")
+                      .get(0));
+            }
+            assertEquals(mode, installed.path("resource").path("installationMode").asString());
+            var renewal =
+                JSON.createObjectNode()
+                    .put("clientId", client.toString())
+                    .put("installationRevision", 1)
+                    .put("selectionRevision", 1)
+                    .put(
+                        "releaseSequence",
+                        installed.path("resource").path("releaseSequence").asLong());
+            renewal.set("identity", identity(upload));
+            assertEquals(
+                mode,
+                delivery
+                    .renew(actor(GENERAL), renewal, key(), "\"1\"")
+                    .path("resource")
+                    .path("installationMode")
+                    .asString());
+            assertFalse(catalog.detail(actor(GENERAL), upload.pkg, null, false).has("level"));
+            if (mode.equals("required")) {
+              assertEquals(
+                  "resource.installation_required",
+                  assertThrows(
+                          AurigaException.class,
+                          () ->
+                              delivery.select(
+                                  actor(GENERAL),
+                                  choose(client, upload, "disable"),
+                                  key(),
+                                  "\"1\""))
+                      .errorCode()
+                      .code());
+            } else {
+              var disabled =
+                  delivery.select(
+                      actor(GENERAL), choose(client, upload, "disable"), key(), "\"1\"");
+              assertEquals("DISABLED", disabled.path("resource").path("desiredState").asString());
+              assertEquals(
+                  "DISABLED",
+                  delivery
+                      .installations(actor(GENERAL), client, kind, 50, null)
+                      .path("items")
+                      .get(0)
+                      .path("resource")
+                      .path("desiredState")
+                      .asString());
+            }
+            if (!mode.equals("optional")) {
+              assertEquals(
+                  "resource.installation_required",
+                  assertThrows(
+                          AurigaException.class,
+                          () ->
+                              delivery.select(
+                                  actor(GENERAL),
+                                  choose(client, upload, "remove"),
+                                  key(),
+                                  mode.equals("required") ? "\"1\"" : "\"2\""))
+                      .errorCode()
+                      .code());
+            } else {
+              assertEquals(
+                  "REMOVED",
+                  delivery
+                      .select(actor(GENERAL), choose(client, upload, "remove"), key(), "\"2\"")
+                      .path("resource")
+                      .path("desiredState")
+                      .asString());
+            }
+          } catch (Exception e) {
+            throw new RuntimeException(e);
+          }
+        });
+  }
+
+  @ParameterizedTest
+  @ValueSource(strings = {"plugin", "skill"})
+  void overlappingScopesTakeStrictestAndRevocationDropsMandatorySet(String kind) {
+    TenantContext.run(
+        TENANT,
+        () -> {
+          try {
+            var upload = upload(false, kind);
+            var published = approvePublish(upload);
+            var delivery = delivery(null);
+            UUID group = UUID.randomUUID(), client = UUID.randomUUID();
+            knownGroups.add(group);
+            groups.put(GENERAL, Set.of(group));
+            assign(delivery, upload, "tenant", TENANT, "optional");
+            var def = assign(delivery, upload, "group", group, "default");
+            var req = assign(delivery, upload, "member", GENERAL, "required");
+            var item =
+                delivery.installations(actor(GENERAL), client, kind, 50, null).path("items").get(0);
+            assertEquals("required", item.path("resource").path("installationMode").asString());
+            delivery.removeAssignment(actor(PUBLISHER), uuid(req, "id"), key(), etag(req));
+            item =
+                delivery.installations(actor(GENERAL), client, kind, 50, null).path("items").get(0);
+            assertEquals("default", item.path("resource").path("installationMode").asString());
+            groups.put(GENERAL, Set.of());
+            item =
+                delivery.installations(actor(GENERAL), client, kind, 50, null).path("items").get(0);
+            assertEquals("optional", item.path("resource").path("installationMode").asString());
+            groups.put(GENERAL, Set.of(group));
+            item =
+                delivery.installations(actor(GENERAL), client, kind, 50, null).path("items").get(0);
+            assertEquals("default", item.path("resource").path("installationMode").asString());
+            catalog.withdraw(
+                actor(PUBLISHER),
+                upload.pkg,
+                upload.version,
+                reason().put("mode", "malicious"),
+                key(),
+                etag(published));
+            item =
+                delivery.installations(actor(GENERAL), client, kind, 50, null).path("items").get(0);
+            assertEquals("optional", item.path("resource").path("installationMode").asString());
+            assertEquals("REMOVED", item.path("resource").path("desiredState").asString());
+            assertEquals(
+                "resource.catalog_assignment_changed",
+                tx.read(
+                        () ->
+                            db.row(
+                                "SELECT event_type FROM resource.outbox_event WHERE tenant_id=:tenant AND subject_key=:id AND event_type='resource.catalog_assignment_changed' LIMIT 1",
+                                db.args("id", def.path("id").asString())))
+                    .get("event_type"));
+          } catch (Exception e) {
+            throw new RuntimeException(e);
+          }
+        });
+  }
+
+  @Test
+  void assignmentPagesFilterCurrentPackageVisibilityWithoutBlockingVisibleRules() {
+    TenantContext.run(
+        TENANT,
+        () -> {
+          try {
+            var hidden = upload(false);
+            var visible = upload(false);
+            approvePublish(hidden);
+            approvePublish(visible);
+            var delivery = delivery(null);
+            var hiddenRule = assign(delivery, hidden, "member", GENERAL, "optional");
+            var visibleRule = assign(delivery, visible, "member", GENERAL, "default");
+            tx.write(
+                () ->
+                    db.update(
+                        "UPDATE resource.catalog_package SET visibility='groups',group_ids=CAST(:groups AS uuid[]) WHERE tenant_id=:tenant AND id=:p",
+                        db.args("p", hidden.pkg, "groups", "{" + UUID.randomUUID() + "}")));
+            var page = delivery.assignments(actor(PUBLISHER), 200, null);
+            var ids = new HashSet<String>();
+            page.path("items").forEach(item -> ids.add(item.path("id").asString()));
+            assertTrue(ids.contains(visibleRule.path("id").asString()));
+            assertFalse(ids.contains(hiddenRule.path("id").asString()));
+            assertError(
+                CommonErrors.NOT_FOUND,
+                () ->
+                    delivery.removeAssignment(
+                        actor(PUBLISHER), uuid(hiddenRule, "id"), key(), etag(hiddenRule)));
+          } catch (Exception e) {
+            throw new RuntimeException(e);
+          }
+        });
+  }
+
+  @Test
+  void assignmentTargetsRequireTenantAndVisibilityAndCloudBootstrapPinsModes() {
+    TenantContext.run(
+        TENANT,
+        () -> {
+          try {
+            var upload = upload(false, "plugin");
+            approvePublish(upload);
+            UUID instance = UUID.randomUUID(), node = UUID.randomUUID();
+            var workspace = mock(UnifiedResourceWorkspace.class);
+            when(workspace.snapshot(TENANT, instance))
+                .thenReturn(
+                    new UnifiedResourceWorkspace.Snapshot(
+                        instance, GENERAL, node, 0, 1, 0, false, List.of(), List.of()));
+            var delivery = delivery(workspace);
+            assertError(
+                CommonErrors.NOT_FOUND,
+                () -> assign(delivery, upload, "tenant", UUID.randomUUID(), "required"));
+            assertError(
+                CommonErrors.NOT_FOUND,
+                () -> assign(delivery, upload, "group", UUID.randomUUID(), "default"));
+            tx.write(
+                () ->
+                    db.update(
+                        "UPDATE resource.catalog_package SET visibility='members' WHERE tenant_id=:tenant AND id=:p",
+                        db.args("p", upload.pkg)));
+            externalMembers.add(SECURITY);
+            assertError(
+                CommonErrors.NOT_FOUND,
+                () -> assign(delivery, upload, "member", SECURITY, "required"));
+            tx.write(
+                () ->
+                    db.update(
+                        "UPDATE resource.catalog_package SET visibility='tenant' WHERE tenant_id=:tenant AND id=:p",
+                        db.args("p", upload.pkg)));
+            var rule = assign(delivery, upload, "instance", instance, "required");
+            for (String action : List.of("disable", "remove"))
+              assertEquals(
+                  "resource.installation_required",
+                  assertThrows(
+                          AurigaException.class,
+                          () ->
+                              delivery.distribute(
+                                  actor(PUBLISHER),
+                                  distributionBody(instance, selection(upload, action)),
+                                  key(),
+                                  "\"0\""))
+                      .errorCode()
+                      .code());
+            assertTrue(
+                TenantContext.call(
+                        UUID.randomUUID(),
+                        () ->
+                            tx.read(
+                                () ->
+                                    db.rows(
+                                        "SELECT id FROM resource.catalog_assignment WHERE id=:id",
+                                        db.args("id", uuid(rule, "id")))))
+                    .isEmpty());
+            personalAllowed.set(false);
+            var request =
+                auriga.contracts.resource.v1.ResolveUnifiedResourcesRequest.newBuilder()
+                    .setTenantId(TENANT.toString())
+                    .setOwnerId(GENERAL.toString())
+                    .setInstanceId(instance.toString())
+                    .setNodeId(node.toString())
+                    .setSelectionRevision(0)
+                    .setSynchronizeAssignments(true)
+                    .build();
+            var plan = delivery.resolve(request);
+            assertEquals(1, plan.getSelectionRevision());
+            assertEquals(identity(upload), identityFromRef(plan.getResources(0)));
+            assertEquals("required", plan.getResources(0).getInstallationMode());
+            assertFalse(plan.getAllowPersonalPlugins());
+            assertEquals(plan, delivery.resolve(request));
+            assertError(
+                CommonErrors.CONFLICT,
+                () -> delivery.resolve(request.toBuilder().setOwnerId(AUTHOR.toString()).build()));
+            assertTrue(
+                delivery
+                    .installations(actor(AUTHOR), UUID.randomUUID(), "plugin", 50, null)
+                    .path("items")
+                    .isEmpty());
+            when(workspace.snapshot(TENANT, instance))
+                .thenReturn(
+                    new UnifiedResourceWorkspace.Snapshot(
+                        instance,
+                        GENERAL,
+                        node,
+                        1,
+                        2,
+                        0,
+                        false,
+                        List.of(),
+                        plan.getResourcesList()));
+            assertEquals(
+                1,
+                delivery
+                    .resolve(request.toBuilder().setSelectionRevision(1).build())
+                    .getSelectionRevision());
+            var current = catalog.detail(actor(AUTHOR), upload.pkg, upload.version, false);
+            catalog.withdraw(
+                actor(PUBLISHER),
+                upload.pkg,
+                upload.version,
+                reason().put("mode", "malicious"),
+                key(),
+                etag(current));
+            var removal = delivery.resolve(request.toBuilder().setSelectionRevision(1).build());
+            assertEquals(2, removal.getSelectionRevision());
+            assertEquals("remove", removal.getSelections(0).getAction());
+            assertEquals("optional", removal.getResources(0).getInstallationMode());
+            var resolvedRemoval =
+                delivery.resolve(
+                    request.toBuilder()
+                        .setSynchronizeAssignments(false)
+                        .setSelectionRevision(2)
+                        .addAllSelections(removal.getSelectionsList())
+                        .build());
+            assertEquals("REMOVED", CatalogStatePolicy.desired(resolvedRemoval.getResources(0)));
+          } catch (Exception e) {
+            throw new RuntimeException(e);
+          }
+        });
+  }
+
+  ObjectNode identityFromRef(auriga.contracts.resource.v1.UnifiedResourceRef ref) {
+    var id = ref.getIdentity();
+    return JSON.createObjectNode()
+        .put("tenantId", id.getTenantId())
+        .put("packageId", id.getPackageId())
+        .put("versionId", id.getVersionId())
+        .put("kind", id.getKind())
+        .put("version", id.getVersion())
+        .put("manifestDigest", id.getManifestDigest());
   }
 
   static void assertError(ErrorCode expected, org.junit.jupiter.api.function.Executable action) {
@@ -809,7 +1289,7 @@ class CatalogWorkflowTest {
         .put("packageId", u.pkg.toString())
         .put("versionId", u.version.toString())
         .put("kind", u.value.path("kind").asString())
-        .put("version", "1.0.0")
+        .put("version", u.value.path("version").asString())
         .put("manifestDigest", CatalogManifest.digest(u.manifest));
   }
 

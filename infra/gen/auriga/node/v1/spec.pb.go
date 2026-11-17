@@ -272,8 +272,10 @@ type InstanceSpec struct {
 	// REMOVED entries remain until a matching removed report is accepted, then retire next generation.
 	UnifiedResources  []*v1.UnifiedResourceRef            `protobuf:"bytes,18,rep,name=unified_resources,json=unifiedResources,proto3" json:"unified_resources,omitempty"`
 	UnifiedDowngrades []*v1.UnifiedDowngradeAuthorization `protobuf:"bytes,19,rep,name=unified_downgrades,json=unifiedDowngrades,proto3" json:"unified_downgrades,omitempty"`
-	unknownFields     protoimpl.UnknownFields
-	sizeCache         protoimpl.SizeCache
+	// Tenant policy for native personal plugin management, enforced by the host.
+	AllowPersonalPlugins *bool `protobuf:"varint,20,opt,name=allow_personal_plugins,json=allowPersonalPlugins,proto3,oneof" json:"allow_personal_plugins,omitempty"`
+	unknownFields        protoimpl.UnknownFields
+	sizeCache            protoimpl.SizeCache
 }
 
 func (x *InstanceSpec) Reset() {
@@ -437,6 +439,13 @@ func (x *InstanceSpec) GetUnifiedDowngrades() []*v1.UnifiedDowngradeAuthorizatio
 		return x.UnifiedDowngrades
 	}
 	return nil
+}
+
+func (x *InstanceSpec) GetAllowPersonalPlugins() bool {
+	if x != nil && x.AllowPersonalPlugins != nil {
+		return *x.AllowPersonalPlugins
+	}
+	return false
 }
 
 // DSH 运行时制品：Node + 指定版本的 DSH + 依赖，按 OS / 架构各一份，平台签名。
@@ -1572,7 +1581,7 @@ var File_auriga_node_v1_spec_proto protoreflect.FileDescriptor
 
 const file_auriga_node_v1_spec_proto_rawDesc = "" +
 	"\n" +
-	"\x19auriga/node/v1/spec.proto\x12\x0eauriga.node.v1\x1a\"auriga/node/v1/runtime_trust.proto\x1a\x1eauriga/resource/v1/trust.proto\x1a auriga/resource/v1/unified.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"\x96\t\n" +
+	"\x19auriga/node/v1/spec.proto\x12\x0eauriga.node.v1\x1a\"auriga/node/v1/runtime_trust.proto\x1a\x1eauriga/resource/v1/trust.proto\x1a auriga/resource/v1/unified.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"\xec\t\n" +
 	"\fInstanceSpec\x12\x1f\n" +
 	"\vinstance_id\x18\x01 \x01(\tR\n" +
 	"instanceId\x12\x1b\n" +
@@ -1596,10 +1605,12 @@ const file_auriga_node_v1_spec_proto_rawDesc = "" +
 	"\x14resource_revocations\x18\x10 \x03(\v2*.auriga.resource.v1.ResourceRevocationListR\x13resourceRevocations\x12c\n" +
 	"\x13resource_downgrades\x18\x11 \x03(\v22.auriga.resource.v1.ResourceDowngradeAuthorizationR\x12resourceDowngrades\x12S\n" +
 	"\x11unified_resources\x18\x12 \x03(\v2&.auriga.resource.v1.UnifiedResourceRefR\x10unifiedResources\x12`\n" +
-	"\x12unified_downgrades\x18\x13 \x03(\v21.auriga.resource.v1.UnifiedDowngradeAuthorizationR\x11unifiedDowngrades\x1a9\n" +
+	"\x12unified_downgrades\x18\x13 \x03(\v21.auriga.resource.v1.UnifiedDowngradeAuthorizationR\x11unifiedDowngrades\x129\n" +
+	"\x16allow_personal_plugins\x18\x14 \x01(\bH\x00R\x14allowPersonalPlugins\x88\x01\x01\x1a9\n" +
 	"\vLabelsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xd1\x02\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01B\x19\n" +
+	"\x17_allow_personal_plugins\"\xd1\x02\n" +
 	"\n" +
 	"DshRuntime\x12\x1f\n" +
 	"\vartifact_id\x18\x01 \x01(\tR\n" +
@@ -1825,6 +1836,7 @@ func file_auriga_node_v1_spec_proto_init() {
 		return
 	}
 	file_auriga_node_v1_runtime_trust_proto_init()
+	file_auriga_node_v1_spec_proto_msgTypes[0].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{

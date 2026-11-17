@@ -18,6 +18,7 @@ public final class UnifiedSpec {
               var old = prior.get(ref.getIdentity().getPackageId());
               return old == null
                   || !old.getIdentity().equals(ref.getIdentity())
+                  || !mode(old).equals(mode(ref))
                   || UnifiedResourceIntent.revision(old) != UnifiedResourceIntent.revision(ref)
                   || !UnifiedResourceIntent.desired(old).equals(UnifiedResourceIntent.desired(ref));
             });
@@ -61,10 +62,17 @@ public final class UnifiedSpec {
         switch (selection.getAction()) {
           case "install", "enable", "disable" -> {
             require(next != null && next.getIdentity().equals(id));
-            require(next.getEnabled() == !selection.getAction().equals("disable"));
+            boolean safetyDisabled =
+                !next.getEnabled()
+                    && UnifiedResourceIntent.desired(next).equals("DISABLED")
+                    && mode(next).equals("optional");
+            // The authoritative resolver can withdraw an exact pending install before execution.
+            require(
+                next.getEnabled() == !selection.getAction().equals("disable") || safetyDisabled);
             require(
                 UnifiedResourceIntent.desired(next)
-                    .equals(selection.getAction().equals("disable") ? "DISABLED" : "ENABLED"));
+                        .equals(selection.getAction().equals("disable") ? "DISABLED" : "ENABLED")
+                    || safetyDisabled);
             require(UnifiedResourceIntent.revision(next) > 0);
             if (previous != null) {
               require(
@@ -101,6 +109,10 @@ public final class UnifiedSpec {
     for (var ref : result.values()) {
       require(ref.getIdentity().getTenantId().equals(old.getTenantId()));
       require(Set.of("plugin", "skill").contains(ref.getIdentity().getKind()));
+      String mode = ref.getInstallationMode().isEmpty() ? "optional" : ref.getInstallationMode();
+      require(Set.of("required", "default", "optional").contains(mode));
+      require(!mode.equals("required") || UnifiedResourceIntent.desired(ref).equals("ENABLED"));
+      require(!mode.equals("default") || !UnifiedResourceIntent.desired(ref).equals("REMOVED"));
       require(UnifiedResourceIntent.revision(ref) > 0);
       UnifiedResourceIntent.desired(ref);
     }
@@ -121,8 +133,12 @@ public final class UnifiedSpec {
         revision = UnifiedResourceIntent.revision(next);
     // A resource-side withdrawal/revocation allocates a new CAS for a safety
     // disable. Ordinary signing/lease renewal still preserves intent and CAS.
-    return before.equals(after) && prior == revision
+    return before.equals(after) && prior == revision && mode(previous).equals(mode(next))
         || before.equals("ENABLED") && after.equals("DISABLED") && revision > prior;
+  }
+
+  private static String mode(UnifiedResourceRef ref) {
+    return ref.getInstallationMode().isEmpty() ? "optional" : ref.getInstallationMode();
   }
 
   public static boolean sameBytes(UnifiedResourceRef a, UnifiedResourceRef b) {

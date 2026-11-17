@@ -304,6 +304,123 @@ class WorkspaceIntegrationTest {
             > 0);
   }
 
+  @ParameterizedTest
+  @ValueSource(strings = {"plugin", "skill"})
+  void catalogAssignmentsGateNewAndUpdatedSpecsAndRemoveRevokedRequirements(String kind)
+      throws Exception {
+    new RecoveryControl(tenant);
+    policy.setAllowPersonalPlugins(false);
+    var required =
+        unifiedReviewRef("required", false).toBuilder()
+            .setIdentity(
+                unifiedReviewRef("identity", false).getIdentity().toBuilder().setKind(kind))
+            .setInstallationMode("required")
+            .build();
+    var defaults =
+        unifiedReviewRef("default", false).toBuilder().setInstallationMode("default").build();
+    var install =
+        UnifiedSelection.newBuilder()
+            .setIdentity(required.getIdentity())
+            .setAction("install")
+            .build();
+    var installDefault = install.toBuilder().setIdentity(defaults.getIdentity()).build();
+    var answer =
+        new java.util.concurrent.atomic.AtomicReference<>(
+            ResolveUnifiedResourcesResponse.newBuilder()
+                .setSelectionRevision(1)
+                .addResources(required)
+                .addResources(defaults)
+                .addSelections(install)
+                .addSelections(installDefault)
+                .setAllowPersonalPlugins(false)
+                .setRevocations(unifiedReviewRevocations())
+                .build());
+    var instanceId = new java.util.concurrent.atomic.AtomicReference<UUID>();
+    try (var resources =
+        new WorkspaceUnifiedResources(
+            service,
+            inputs,
+            request -> {
+              if (!request.getInstanceId().equals(String.valueOf(instanceId.get())))
+                throw new AurigaException(auriga.common.error.CommonErrors.UNAVAILABLE);
+              assertEquals(tenant.toString(), request.getTenantId());
+              assertEquals(owner.toString(), request.getOwnerId());
+              if (!request.getSynchronizeAssignments()) {
+                assertEquals(answer.get().getSelectionRevision(), request.getSelectionRevision());
+                assertEquals(answer.get().getSelectionsList(), request.getSelectionsList());
+              }
+              return answer.get();
+            },
+            true)) {
+      UUID instance =
+          TenantContext.call(tenant, () -> (UUID) service.open(owner).instance().get("id"));
+      instanceId.set(instance);
+      assertFalse(store.in(tenant, () -> service.dispatchable(store.instance(instance))));
+      assertEquals(0, resources.snapshot(tenant, instance).spec().getUnifiedResourcesCount());
+      resources.reconcile();
+      var first = resources.snapshot(tenant, instance).spec();
+      assertEquals(1, first.getResourceSelectionRevision());
+      assertEquals(List.of(required, defaults), first.getUnifiedResourcesList());
+      assertFalse(first.getAllowPersonalPlugins());
+      assertFalse(store.in(tenant, () -> service.dispatchable(store.instance(instance))));
+      resources.reconcile();
+      assertTrue(store.in(tenant, () -> service.dispatchable(store.instance(instance))));
+      assertThrows(
+          AurigaException.class,
+          () -> resources.apply(tenant, instance, UUID.randomUUID(), 2, List.of(install)));
+      assertThrows(AurigaException.class, () -> resources.snapshot(UUID.randomUUID(), instance));
+      policy.setAllowPersonalPlugins(true);
+      TenantContext.run(
+          tenant,
+          () ->
+              store.tx(
+                  () -> {
+                    service.saveSpec(store.instance(instance), UnifiedSpec.bump(first));
+                    return null;
+                  }));
+      assertFalse(store.in(tenant, () -> service.dispatchable(store.instance(instance))));
+      answer.set(answer.get().toBuilder().clearSelections().setAllowPersonalPlugins(true).build());
+      resources.reconcile();
+      assertTrue(resources.snapshot(tenant, instance).spec().getAllowPersonalPlugins());
+      assertTrue(store.in(tenant, () -> service.dispatchable(store.instance(instance))));
+      var removed =
+          required.toBuilder()
+              .setInstallationMode("optional")
+              .setInstallationRevision(2)
+              .setEnabled(false)
+              .setDesiredState(UnifiedResourceDesiredState.UNIFIED_RESOURCE_DESIRED_STATE_REMOVED)
+              .build();
+      answer.set(
+          answer.get().toBuilder()
+              .setSelectionRevision(2)
+              .clearResources()
+              .addResources(removed)
+              .addResources(defaults)
+              .addSelections(install.toBuilder().setAction("remove"))
+              .build());
+      resources.handle(
+          new ReceivedEvent(
+              UuidV7.next(),
+              "resource.catalog_assignment_changed",
+              "auriga/resource",
+              instance.toString(),
+              clock.instant(),
+              tenant,
+              "1",
+              null,
+              WorkspaceService.JSON.createObjectNode()));
+      assertFalse(store.in(tenant, () -> service.dispatchable(store.instance(instance))));
+      resources.reconcile();
+      var after = resources.snapshot(tenant, instance).spec();
+      assertEquals(2, after.getResourceSelectionRevision());
+      assertEquals(removed, after.getUnifiedResources(0));
+      assertEquals(defaults, after.getUnifiedResources(1));
+      assertFalse(store.in(tenant, () -> service.dispatchable(store.instance(instance))));
+      resources.reconcile();
+      assertTrue(store.in(tenant, () -> service.dispatchable(store.instance(instance))));
+    }
+  }
+
   @Test
   void unifiedIncrementalIntentsWaitForGapsAndApplyInOrder() throws Exception {
     var control = new RecoveryControl(tenant);

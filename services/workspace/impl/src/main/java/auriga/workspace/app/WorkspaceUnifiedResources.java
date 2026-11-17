@@ -27,6 +27,7 @@ public final class WorkspaceUnifiedResources implements EventHandler, AutoClosea
       List<UnifiedInstallationReport> reports) {}
 
   private final WorkspaceService service;
+  private final boolean assignmentPolicies;
   private final WorkspaceInputs inputs;
   private final Function<ResolveUnifiedResourcesRequest, ResolveUnifiedResourcesResponse> resolver;
   private final ScheduledExecutorService worker =
@@ -37,6 +38,16 @@ public final class WorkspaceUnifiedResources implements EventHandler, AutoClosea
       WorkspaceService service,
       WorkspaceInputs inputs,
       Function<ResolveUnifiedResourcesRequest, ResolveUnifiedResourcesResponse> resolver) {
+    this(service, inputs, resolver, false);
+  }
+
+  public WorkspaceUnifiedResources(
+      WorkspaceService service,
+      WorkspaceInputs inputs,
+      Function<ResolveUnifiedResourcesRequest, ResolveUnifiedResourcesResponse> resolver,
+      boolean assignmentPolicies) {
+    this.assignmentPolicies = assignmentPolicies;
+    if (assignmentPolicies) service.requireCatalogAssignments();
     this.service = service;
     this.inputs = inputs;
     this.resolver = resolver;
@@ -58,19 +69,23 @@ public final class WorkspaceUnifiedResources implements EventHandler, AutoClosea
 
   @Override
   public Set<String> eventTypes() {
-    return Set.of("resource.catalog_distribution_requested", "resource.catalog_version_withdrawn");
+    return Set.of(
+        "resource.catalog_distribution_requested",
+        "resource.catalog_version_withdrawn",
+        "resource.catalog_assignment_changed");
   }
 
   @Override
   public void handle(ReceivedEvent event) {
     if (!eventTypes().contains(event.type()) || !event.source().equals("auriga/resource"))
       throw new AurigaException(CommonErrors.FORBIDDEN);
-    if (event.type().equals("resource.catalog_version_withdrawn")) {
+    if (event.type().equals("resource.catalog_version_withdrawn")
+        || event.type().equals("resource.catalog_assignment_changed")) {
       service.store.in(
           event.tenantId(),
           () ->
               service.store.jdbc.update(
-                  "UPDATE instance SET unified_refresh_pending=true WHERE tenant_id=? AND NOT deleted",
+                  "UPDATE instance SET unified_refresh_pending=true,catalog_policy_checked=false WHERE tenant_id=? AND NOT deleted",
                   event.tenantId()));
       return;
     }
@@ -400,7 +415,61 @@ public final class WorkspaceUnifiedResources implements EventHandler, AutoClosea
                         "SELECT * FROM instance WHERE tenant_id=? AND NOT deleted", tenant));
         for (var row : instances) {
           var spec = WorkspaceService.spec(row);
-          if (spec.getUnifiedResourcesCount() == 0 || row.get("node_id") == null) continue;
+          if (row.get("node_id") == null) continue;
+          if (assignmentPolicies) {
+            try {
+              var plan =
+                  TenantContext.call(
+                      tenant,
+                      () ->
+                          resolver.apply(
+                              ResolveUnifiedResourcesRequest.newBuilder()
+                                  .setTenantId(tenant.toString())
+                                  .setOwnerId(spec.getOwnerId())
+                                  .setInstanceId(spec.getInstanceId())
+                                  .setNodeId(row.get("node_id").toString())
+                                  .setSelectionRevision(spec.getResourceSelectionRevision())
+                                  .setSynchronizeAssignments(true)
+                                  .build()));
+              if (plan.getSelectionRevision() > spec.getResourceSelectionRevision()) {
+                apply(
+                    tenant,
+                    (UUID) row.get("id"),
+                    (UUID) row.get("owner_id"),
+                    plan.getSelectionRevision(),
+                    plan.getSelectionsList());
+                continue;
+              }
+              if (plan.getSelectionRevision() != spec.getResourceSelectionRevision())
+                throw new AurigaException(CommonErrors.CONFLICT);
+              service.store.in(
+                  tenant,
+                  () -> {
+                    service.store.lock();
+                    var current = service.store.instance((UUID) row.get("id"));
+                    var before = WorkspaceService.spec(current);
+                    if (before.getGeneration() != spec.getGeneration()
+                        || !Objects.equals(current.get("node_id"), row.get("node_id")))
+                      throw new AurigaException(CommonErrors.CONFLICT);
+                    boolean personal =
+                        Boolean.TRUE.equals(inputs.policy(tenant).getAllowPersonalPlugins());
+                    var next = before.toBuilder().setAllowPersonalPlugins(personal).build();
+                    if (!next.equals(before))
+                      service.saveCatalogSpec(current, UnifiedSpec.bump(next));
+                    else
+                      service.store.jdbc.update(
+                          "UPDATE instance SET catalog_policy_checked=true WHERE tenant_id=? AND id=?",
+                          tenant,
+                          current.get("id"));
+                    return true;
+                  });
+            } catch (Exception e) {
+              org.slf4j.LoggerFactory.getLogger(getClass())
+                  .warn("Unified assignment reconciliation deferred");
+              continue;
+            }
+          }
+          if (spec.getUnifiedResourcesCount() == 0) continue;
           if (!Boolean.TRUE.equals(row.get("unified_refresh_pending"))) continue;
           try {
             var request =

@@ -274,7 +274,7 @@ type UnifiedResourceIdentity struct {
 	TenantId  string                 `protobuf:"bytes,1,opt,name=tenant_id,json=tenantId,proto3" json:"tenant_id,omitempty"`
 	PackageId string                 `protobuf:"bytes,2,opt,name=package_id,json=packageId,proto3" json:"package_id,omitempty"`
 	VersionId string                 `protobuf:"bytes,3,opt,name=version_id,json=versionId,proto3" json:"version_id,omitempty"`
-	// skill / tool
+	// plugin / skill / tool
 	Kind           string `protobuf:"bytes,4,opt,name=kind,proto3" json:"kind,omitempty"`
 	Version        string `protobuf:"bytes,5,opt,name=version,proto3" json:"version,omitempty"`
 	ManifestDigest string `protobuf:"bytes,6,opt,name=manifest_digest,json=manifestDigest,proto3" json:"manifest_digest,omitempty"`
@@ -504,9 +504,11 @@ type UnifiedResourceRef struct {
 	InstallationRevision uint64 `protobuf:"varint,8,opt,name=installation_revision,json=installationRevision,proto3" json:"installation_revision,omitempty"`
 	// Prefer when present. Absent legacy values derive ENABLED/DISABLED from enabled.
 	// Explicit UNSPECIFIED and unknown values are invalid. REMOVED carries the new revision.
-	DesiredState  *UnifiedResourceDesiredState `protobuf:"varint,9,opt,name=desired_state,json=desiredState,proto3,enum=auriga.resource.v1.UnifiedResourceDesiredState,oneof" json:"desired_state,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	DesiredState *UnifiedResourceDesiredState `protobuf:"varint,9,opt,name=desired_state,json=desiredState,proto3,enum=auriga.resource.v1.UnifiedResourceDesiredState,oneof" json:"desired_state,omitempty"`
+	// required / default / optional, resolved by the resource service.
+	InstallationMode string `protobuf:"bytes,10,opt,name=installation_mode,json=installationMode,proto3" json:"installation_mode,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
 }
 
 func (x *UnifiedResourceRef) Reset() {
@@ -600,6 +602,13 @@ func (x *UnifiedResourceRef) GetDesiredState() UnifiedResourceDesiredState {
 		return *x.DesiredState
 	}
 	return UnifiedResourceDesiredState_UNIFIED_RESOURCE_DESIRED_STATE_UNSPECIFIED
+}
+
+func (x *UnifiedResourceRef) GetInstallationMode() string {
+	if x != nil {
+		return x.InstallationMode
+	}
+	return ""
 }
 
 type UnifiedSelection struct {
@@ -1752,15 +1761,16 @@ func (x *UnifiedHighWatermark) GetVerifiedDigestAliases() []string {
 }
 
 type ResolveUnifiedResourcesRequest struct {
-	state             protoimpl.MessageState `protogen:"open.v1"`
-	TenantId          string                 `protobuf:"bytes,1,opt,name=tenant_id,json=tenantId,proto3" json:"tenant_id,omitempty"`
-	OwnerId           string                 `protobuf:"bytes,2,opt,name=owner_id,json=ownerId,proto3" json:"owner_id,omitempty"`
-	InstanceId        string                 `protobuf:"bytes,3,opt,name=instance_id,json=instanceId,proto3" json:"instance_id,omitempty"`
-	NodeId            string                 `protobuf:"bytes,4,opt,name=node_id,json=nodeId,proto3" json:"node_id,omitempty"`
-	SelectionRevision uint64                 `protobuf:"varint,5,opt,name=selection_revision,json=selectionRevision,proto3" json:"selection_revision,omitempty"`
-	Selections        []*UnifiedSelection    `protobuf:"bytes,6,rep,name=selections,proto3" json:"selections,omitempty"`
-	unknownFields     protoimpl.UnknownFields
-	sizeCache         protoimpl.SizeCache
+	state                  protoimpl.MessageState `protogen:"open.v1"`
+	TenantId               string                 `protobuf:"bytes,1,opt,name=tenant_id,json=tenantId,proto3" json:"tenant_id,omitempty"`
+	OwnerId                string                 `protobuf:"bytes,2,opt,name=owner_id,json=ownerId,proto3" json:"owner_id,omitempty"`
+	InstanceId             string                 `protobuf:"bytes,3,opt,name=instance_id,json=instanceId,proto3" json:"instance_id,omitempty"`
+	NodeId                 string                 `protobuf:"bytes,4,opt,name=node_id,json=nodeId,proto3" json:"node_id,omitempty"`
+	SelectionRevision      uint64                 `protobuf:"varint,5,opt,name=selection_revision,json=selectionRevision,proto3" json:"selection_revision,omitempty"`
+	Selections             []*UnifiedSelection    `protobuf:"bytes,6,rep,name=selections,proto3" json:"selections,omitempty"`
+	SynchronizeAssignments bool                   `protobuf:"varint,7,opt,name=synchronize_assignments,json=synchronizeAssignments,proto3" json:"synchronize_assignments,omitempty"`
+	unknownFields          protoimpl.UnknownFields
+	sizeCache              protoimpl.SizeCache
 }
 
 func (x *ResolveUnifiedResourcesRequest) Reset() {
@@ -1835,14 +1845,23 @@ func (x *ResolveUnifiedResourcesRequest) GetSelections() []*UnifiedSelection {
 	return nil
 }
 
+func (x *ResolveUnifiedResourcesRequest) GetSynchronizeAssignments() bool {
+	if x != nil {
+		return x.SynchronizeAssignments
+	}
+	return false
+}
+
 type ResolveUnifiedResourcesResponse struct {
 	state             protoimpl.MessageState `protogen:"open.v1"`
 	SelectionRevision uint64                 `protobuf:"varint,1,opt,name=selection_revision,json=selectionRevision,proto3" json:"selection_revision,omitempty"`
 	// Every entry carries its own installation_revision and desired_state, including REMOVED tombstones.
-	Resources     []*UnifiedResourceRef   `protobuf:"bytes,2,rep,name=resources,proto3" json:"resources,omitempty"`
-	Revocations   *ResourceRevocationList `protobuf:"bytes,3,opt,name=revocations,proto3" json:"revocations,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	Resources            []*UnifiedResourceRef   `protobuf:"bytes,2,rep,name=resources,proto3" json:"resources,omitempty"`
+	Revocations          *ResourceRevocationList `protobuf:"bytes,3,opt,name=revocations,proto3" json:"revocations,omitempty"`
+	Selections           []*UnifiedSelection     `protobuf:"bytes,4,rep,name=selections,proto3" json:"selections,omitempty"`
+	AllowPersonalPlugins *bool                   `protobuf:"varint,5,opt,name=allow_personal_plugins,json=allowPersonalPlugins,proto3,oneof" json:"allow_personal_plugins,omitempty"`
+	unknownFields        protoimpl.UnknownFields
+	sizeCache            protoimpl.SizeCache
 }
 
 func (x *ResolveUnifiedResourcesResponse) Reset() {
@@ -1894,6 +1913,20 @@ func (x *ResolveUnifiedResourcesResponse) GetRevocations() *ResourceRevocationLi
 		return x.Revocations
 	}
 	return nil
+}
+
+func (x *ResolveUnifiedResourcesResponse) GetSelections() []*UnifiedSelection {
+	if x != nil {
+		return x.Selections
+	}
+	return nil
+}
+
+func (x *ResolveUnifiedResourcesResponse) GetAllowPersonalPlugins() bool {
+	if x != nil && x.AllowPersonalPlugins != nil {
+		return *x.AllowPersonalPlugins
+	}
+	return false
 }
 
 // Independent downgrade-root signature over JCS. Exact identity and instance scope are mandatory.
@@ -2167,7 +2200,7 @@ const file_auriga_resource_v1_unified_proto_rawDesc = "" +
 	"\x06digest\x18\x02 \x01(\tR\x06digest\x12\x1d\n" +
 	"\n" +
 	"size_bytes\x18\x03 \x01(\x04R\tsizeBytes\x12#\n" +
-	"\rdownload_path\x18\x04 \x01(\tR\fdownloadPath\"\xbe\x04\n" +
+	"\rdownload_path\x18\x04 \x01(\tR\fdownloadPath\"\xeb\x04\n" +
 	"\x12UnifiedResourceRef\x12G\n" +
 	"\bidentity\x18\x01 \x01(\v2+.auriga.resource.v1.UnifiedResourceIdentityR\bidentity\x12?\n" +
 	"\benvelope\x18\x02 \x01(\v2#.auriga.resource.v1.UnifiedEnvelopeR\benvelope\x124\n" +
@@ -2177,7 +2210,9 @@ const file_auriga_resource_v1_unified_proto_rawDesc = "" +
 	"\x10release_sequence\x18\x06 \x01(\x04R\x0freleaseSequence\x12\x18\n" +
 	"\aenabled\x18\a \x01(\bR\aenabled\x123\n" +
 	"\x15installation_revision\x18\b \x01(\x04R\x14installationRevision\x12Y\n" +
-	"\rdesired_state\x18\t \x01(\x0e2/.auriga.resource.v1.UnifiedResourceDesiredStateH\x00R\fdesiredState\x88\x01\x01B\x10\n" +
+	"\rdesired_state\x18\t \x01(\x0e2/.auriga.resource.v1.UnifiedResourceDesiredStateH\x00R\fdesiredState\x88\x01\x01\x12+\n" +
+	"\x11installation_mode\x18\n" +
+	" \x01(\tR\x10installationModeB\x10\n" +
 	"\x0e_desired_state\"s\n" +
 	"\x10UnifiedSelection\x12G\n" +
 	"\bidentity\x18\x01 \x01(\v2+.auriga.resource.v1.UnifiedResourceIdentityR\bidentity\x12\x16\n" +
@@ -2292,7 +2327,7 @@ const file_auriga_resource_v1_unified_proto_rawDesc = "" +
 	"\x10release_sequence\x18\x03 \x01(\x04R\x0freleaseSequence\x12\x1d\n" +
 	"\n" +
 	"version_id\x18\x04 \x01(\tR\tversionId\x126\n" +
-	"\x17verified_digest_aliases\x18\x05 \x03(\tR\x15verifiedDigestAliases\"\x87\x02\n" +
+	"\x17verified_digest_aliases\x18\x05 \x03(\tR\x15verifiedDigestAliases\"\xc0\x02\n" +
 	"\x1eResolveUnifiedResourcesRequest\x12\x1b\n" +
 	"\ttenant_id\x18\x01 \x01(\tR\btenantId\x12\x19\n" +
 	"\bowner_id\x18\x02 \x01(\tR\aownerId\x12\x1f\n" +
@@ -2302,11 +2337,17 @@ const file_auriga_resource_v1_unified_proto_rawDesc = "" +
 	"\x12selection_revision\x18\x05 \x01(\x04R\x11selectionRevision\x12D\n" +
 	"\n" +
 	"selections\x18\x06 \x03(\v2$.auriga.resource.v1.UnifiedSelectionR\n" +
-	"selections\"\xe4\x01\n" +
+	"selections\x127\n" +
+	"\x17synchronize_assignments\x18\a \x01(\bR\x16synchronizeAssignments\"\x80\x03\n" +
 	"\x1fResolveUnifiedResourcesResponse\x12-\n" +
 	"\x12selection_revision\x18\x01 \x01(\x04R\x11selectionRevision\x12D\n" +
 	"\tresources\x18\x02 \x03(\v2&.auriga.resource.v1.UnifiedResourceRefR\tresources\x12L\n" +
-	"\vrevocations\x18\x03 \x01(\v2*.auriga.resource.v1.ResourceRevocationListR\vrevocations\"\xf2\x03\n" +
+	"\vrevocations\x18\x03 \x01(\v2*.auriga.resource.v1.ResourceRevocationListR\vrevocations\x12D\n" +
+	"\n" +
+	"selections\x18\x04 \x03(\v2$.auriga.resource.v1.UnifiedSelectionR\n" +
+	"selections\x129\n" +
+	"\x16allow_personal_plugins\x18\x05 \x01(\bH\x00R\x14allowPersonalPlugins\x88\x01\x01B\x19\n" +
+	"\x17_allow_personal_plugins\"\xf2\x03\n" +
 	"\x1dUnifiedDowngradeAuthorization\x12%\n" +
 	"\x0eschema_version\x18\x01 \x01(\rR\rschemaVersion\x12)\n" +
 	"\x10authorization_id\x18\x02 \x01(\tR\x0fauthorizationId\x12\x1f\n" +
@@ -2415,16 +2456,17 @@ var file_auriga_resource_v1_unified_proto_depIdxs = []int32{
 	7,  // 25: auriga.resource.v1.ResolveUnifiedResourcesRequest.selections:type_name -> auriga.resource.v1.UnifiedSelection
 	6,  // 26: auriga.resource.v1.ResolveUnifiedResourcesResponse.resources:type_name -> auriga.resource.v1.UnifiedResourceRef
 	27, // 27: auriga.resource.v1.ResolveUnifiedResourcesResponse.revocations:type_name -> auriga.resource.v1.ResourceRevocationList
-	3,  // 28: auriga.resource.v1.UnifiedDowngradeAuthorization.identity:type_name -> auriga.resource.v1.UnifiedResourceIdentity
-	26, // 29: auriga.resource.v1.UnifiedDowngradeAuthorization.signature:type_name -> auriga.resource.v1.ResourceSignature
-	26, // 30: auriga.resource.v1.UnifiedMigrationMarker.signature:type_name -> auriga.resource.v1.ResourceSignature
-	22, // 31: auriga.resource.v1.UnifiedResourceResolutionService.ResolveUnifiedResources:input_type -> auriga.resource.v1.ResolveUnifiedResourcesRequest
-	23, // 32: auriga.resource.v1.UnifiedResourceResolutionService.ResolveUnifiedResources:output_type -> auriga.resource.v1.ResolveUnifiedResourcesResponse
-	32, // [32:33] is the sub-list for method output_type
-	31, // [31:32] is the sub-list for method input_type
-	31, // [31:31] is the sub-list for extension type_name
-	31, // [31:31] is the sub-list for extension extendee
-	0,  // [0:31] is the sub-list for field type_name
+	7,  // 28: auriga.resource.v1.ResolveUnifiedResourcesResponse.selections:type_name -> auriga.resource.v1.UnifiedSelection
+	3,  // 29: auriga.resource.v1.UnifiedDowngradeAuthorization.identity:type_name -> auriga.resource.v1.UnifiedResourceIdentity
+	26, // 30: auriga.resource.v1.UnifiedDowngradeAuthorization.signature:type_name -> auriga.resource.v1.ResourceSignature
+	26, // 31: auriga.resource.v1.UnifiedMigrationMarker.signature:type_name -> auriga.resource.v1.ResourceSignature
+	22, // 32: auriga.resource.v1.UnifiedResourceResolutionService.ResolveUnifiedResources:input_type -> auriga.resource.v1.ResolveUnifiedResourcesRequest
+	23, // 33: auriga.resource.v1.UnifiedResourceResolutionService.ResolveUnifiedResources:output_type -> auriga.resource.v1.ResolveUnifiedResourcesResponse
+	33, // [33:34] is the sub-list for method output_type
+	32, // [32:33] is the sub-list for method input_type
+	32, // [32:32] is the sub-list for extension type_name
+	32, // [32:32] is the sub-list for extension extendee
+	0,  // [0:32] is the sub-list for field type_name
 }
 
 func init() { file_auriga_resource_v1_unified_proto_init() }
@@ -2434,6 +2476,7 @@ func file_auriga_resource_v1_unified_proto_init() {
 	}
 	file_auriga_resource_v1_trust_proto_init()
 	file_auriga_resource_v1_unified_proto_msgTypes[5].OneofWrappers = []any{}
+	file_auriga_resource_v1_unified_proto_msgTypes[22].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{

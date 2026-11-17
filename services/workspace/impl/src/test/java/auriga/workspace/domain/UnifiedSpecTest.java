@@ -77,6 +77,39 @@ class UnifiedSpecTest {
   }
 
   @Test
+  void authoritativeWithdrawalOfPendingRequiredInstallCanAdvanceSafely() {
+    var choice = UnifiedSelection.newBuilder().setIdentity(id).setAction("install").build();
+    var disabled =
+        ref.toBuilder()
+            .setEnabled(false)
+            .setInstallationMode("optional")
+            .setInstallationRevision(2)
+            .setDesiredState(UNIFIED_RESOURCE_DESIRED_STATE_DISABLED)
+            .build();
+    var next = UnifiedSpec.apply(empty, 2, List.of(choice), resolution(2, disabled), false);
+    assertEquals(disabled, next.getUnifiedResources(0));
+    assertThrows(
+        AurigaException.class,
+        () ->
+            UnifiedSpec.apply(
+                empty,
+                2,
+                List.of(choice),
+                resolution(2, disabled.toBuilder().setInstallationMode("required").build()),
+                false));
+    var installed = empty.toBuilder().addUnifiedResources(ref).build();
+    assertThrows(
+        AurigaException.class,
+        () ->
+            UnifiedSpec.apply(
+                installed,
+                1,
+                List.of(),
+                resolution(1, ref.toBuilder().setInstallationMode("required").build()),
+                true));
+  }
+
+  @Test
   void removalCarriesExactNewInstallationRevision() {
     var installed =
         empty.toBuilder().addUnifiedResources(ref).setResourceSelectionRevision(1).build();

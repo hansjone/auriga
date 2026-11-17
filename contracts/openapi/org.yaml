@@ -982,7 +982,7 @@ components:
         alwaysOnRequiresApproval: { type: boolean, default: true }
         maxConcurrentStarts: { type: integer, minimum: 1, default: 4, description: 准入：同时冷启动的上限，超出返回 429。 }
         defaultDshVersion: { type: string }
-        allowPersonalPlugins: { type: boolean, default: true, description: 是否允许 L4 个人插件。 }
+        allowPersonalPlugins: { type: boolean, default: true, description: 是否允许成员在 DSH 原生插件管理中自行安装插件。统一目录不提供个人私有未审核发行。 }
     EgressPolicy:
       type: object
       description: 策略键 egress。解析到内网地址的目标一律拒绝，不能通过策略放开。

@@ -308,6 +308,9 @@
         "selections"
       ],
       "additionalProperties": false
+    },
+    "UnifiedResourceAssignmentChanged": {
+      "$ref": "../resource/unified.schema.json#/$defs/UnifiedAssignment"
     }
   }
 }
