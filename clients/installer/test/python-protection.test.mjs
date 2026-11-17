@@ -77,7 +77,20 @@ test(
         '-NoProfile',
         '-NonInteractive',
         '-Command',
-        '$acl=Get-Acl -LiteralPath $env:PYTHON_ACL_TEST; @{protected=$acl.AreAccessRulesProtected; owner=$acl.GetOwner([Security.Principal.SecurityIdentifier]).Value; current=[Security.Principal.WindowsIdentity]::GetCurrent().User.Value} | ConvertTo-Json -Compress',
+        `
+        $identity=[Security.Principal.WindowsIdentity]::GetCurrent()
+        $sid=$identity.User
+        $acl=Get-Acl -LiteralPath $env:PYTHON_ACL_TEST
+        $paths=@('', 'runtime.json', 'python.exe', 'Lib/site-packages/fixture.py')
+        $details=@(foreach($relative in $paths) {
+          $path=if($relative){Join-Path $env:PYTHON_ACL_TEST $relative}else{$env:PYTHON_ACL_TEST}
+          $security=Get-Acl -LiteralPath $path
+          @{path=$relative; protected=$security.AreAccessRulesProtected; canonical=$security.AreAccessRulesCanonical; rules=@($security.GetAccessRules($true,$true,[Security.Principal.SecurityIdentifier]) | ForEach-Object {
+            @{subject=if($_.IdentityReference.Equals($sid)){'current-user'}elseif($_.IdentityReference.Value -eq 'S-1-5-18'){'SYSTEM'}else{'other'}; type=$_.AccessControlType.ToString(); rights=$_.FileSystemRights.ToString(); inherited=$_.IsInherited}
+          })}
+        })
+        @{protected=$acl.AreAccessRulesProtected; owner=$acl.GetOwner([Security.Principal.SecurityIdentifier]).Value; current=$sid.Value; administrator=(New-Object Security.Principal.WindowsPrincipal($identity)).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator); details=$details; privileges=@(& whoami.exe /priv | Select-String 'SeBackupPrivilege|SeRestorePrivilege|SeTakeOwnershipPrivilege' | ForEach-Object {$_.Line.Trim()})} | ConvertTo-Json -Depth 6 -Compress
+        `,
       ],
       {
         env: { ...process.env, PYTHON_ACL_TEST: runtime },
@@ -87,10 +100,17 @@ test(
     );
     assert.equal(acl.status, 0, acl.stderr);
     const security = JSON.parse(acl.stdout);
+    t.diagnostic(
+      JSON.stringify({
+        administrator: security.administrator,
+        details: security.details,
+        privileges: security.privileges,
+      }),
+    );
     assert.equal(security.protected, true);
     assert.equal(security.owner, security.current);
     assert.equal(readFileSync(join(runtime, 'python.exe'), 'utf8'), 'python');
-    for (const operation of [
+    for (const [index, operation] of [
       () => writeFileSync(join(runtime, 'runtime.json'), '{}'),
       () => writeFileSync(join(runtime, 'python.exe'), 'append', { flag: 'a' }),
       () => writeFileSync(join(runtime, 'unlisted.pyc'), 'cache'),
@@ -102,8 +122,12 @@ test(
         ),
       () =>
         writeFileSync(join(runtime, 'Lib/site-packages/extra.pyc'), 'cache'),
-    ])
-      assert.throws(operation, /EPERM|EACCES/);
+    ].entries())
+      assert.throws(
+        operation,
+        /EPERM|EACCES/,
+        `write operation ${index} must be denied; ${JSON.stringify(security.details)}`,
+      );
     const child = spawnSync(
       process.execPath,
       [
