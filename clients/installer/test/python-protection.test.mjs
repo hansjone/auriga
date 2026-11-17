@@ -122,6 +122,7 @@ test(
         '-NonInteractive',
         '-Command',
         `
+        $ErrorActionPreference='Stop'
         $identity=[Security.Principal.WindowsIdentity]::GetCurrent()
         $sid=$identity.User
         Add-Type -Path $env:PYTHON_ACL_PROBE_SOURCE
@@ -132,11 +133,11 @@ test(
         $native.directoryWithAmbientPrivileges=[PythonAccessProbe]::MakeDirectory((Join-Path $env:PYTHON_ACL_TEST 'native-cache'))
         $native.ordinaryNestedWrite=[PythonAccessProbe]::OpenForWrite((Join-Path $env:PYTHON_ACL_TEST 'Lib/site-packages/fixture.py'),$false,$false,$false)
         $native.ordinaryNestedCreate=[PythonAccessProbe]::OpenForWrite((Join-Path $env:PYTHON_ACL_TEST 'Lib/site-packages/native-extra.pyc'),$false,$true,$false)
-        $acl=Get-Acl -LiteralPath $env:PYTHON_ACL_TEST
+        $acl=[IO.Directory]::GetAccessControl($env:PYTHON_ACL_TEST)
         $paths=@('', 'runtime.json', 'python.exe', 'Lib/site-packages/fixture.py')
         $details=@(foreach($relative in $paths) {
           $path=if($relative){Join-Path $env:PYTHON_ACL_TEST $relative}else{$env:PYTHON_ACL_TEST}
-          $security=Get-Acl -LiteralPath $path
+          $security=if([IO.Directory]::Exists($path)){[IO.Directory]::GetAccessControl($path)}else{[IO.File]::GetAccessControl($path)}
           @{path=$relative; protected=$security.AreAccessRulesProtected; canonical=$security.AreAccessRulesCanonical; rules=@($security.GetAccessRules($true,$true,[Security.Principal.SecurityIdentifier]) | ForEach-Object {
             @{subject=if($_.IdentityReference.Equals($sid)){'current-user'}elseif($_.IdentityReference.Value -eq 'S-1-5-18'){'SYSTEM'}else{'other'}; type=$_.AccessControlType.ToString(); rights=$_.FileSystemRights.ToString(); inherited=$_.IsInherited}
           })}
