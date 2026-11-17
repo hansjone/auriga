@@ -495,6 +495,13 @@
         "allowPersonalPlugins": {
           "type": "boolean",
           "description": "Current tenant permission for native personal plugin installation."
+        },
+        "assignmentFailures": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/UnifiedAssignmentFailure"
+          },
+          "maxItems": 200
         }
       },
       "required": [
@@ -1703,6 +1710,30 @@
       },
       "required": [
         "items"
+      ],
+      "additionalProperties": false
+    },
+    "UnifiedAssignmentFailure": {
+      "type": "object",
+      "properties": {
+        "packageId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "state": {
+          "type": "string",
+          "const": "failed"
+        },
+        "errorCode": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        }
+      },
+      "required": [
+        "packageId",
+        "state",
+        "errorCode"
       ],
       "additionalProperties": false
     }

@@ -5,7 +5,7 @@
 package.json（单行、无尾换行）：
 
 ```json
-{"name":"@example/dsh-plugin","version":"1.0.0","description":"pack validation fixture","license":"MIT","main":"index.js"}
+{"name":"@example/dsh-plugin","version":"1.0.0","description":"pack validation fixture","license":"MIT","main":"index.js","dsh":{"bundle":{"patch":"./index.js"}}}
 ```
 
 index.js（LF 尾换行）：

@@ -10,6 +10,63 @@ import java.util.*;
 import org.junit.jupiter.api.Test;
 
 class UnifiedSpecTest {
+  @Test
+  void trustedAssignmentMaySupersedeAnUnappliedRevisionButCannotLowerReleaseSequence() {
+    var installed = empty.toBuilder().addUnifiedResources(ref).build();
+    var next = ref.toBuilder().setInstallationMode("required").setInstallationRevision(2).build();
+    var selection = UnifiedSelection.newBuilder().setIdentity(id).setAction("install").build();
+    assertThrows(
+        AurigaException.class,
+        () -> UnifiedSpec.apply(installed, 3, List.of(selection), resolution(3, next), false));
+    assertEquals(
+        next,
+        UnifiedSpec.apply(installed, 3, List.of(selection), resolution(3, next), false, true)
+            .getUnifiedResources(0));
+    assertThrows(
+        AurigaException.class,
+        () ->
+            UnifiedSpec.apply(
+                installed,
+                3,
+                List.of(selection),
+                resolution(3, next.toBuilder().setReleaseSequence(6).build()),
+                false,
+                true));
+  }
+
+  @Test
+  void safetyDispatchCannotCarryNewBytesOrAnOrdinaryPolicyChange() {
+    var installed = empty.toBuilder().addUnifiedResources(ref).build();
+    var disabled =
+        ref.toBuilder()
+            .setEnabled(false)
+            .setInstallationRevision(2)
+            .setDesiredState(UNIFIED_RESOURCE_DESIRED_STATE_DISABLED)
+            .build();
+    var stopped = installed.toBuilder().setGeneration(10).setUnifiedResources(0, disabled).build();
+    assertTrue(UnifiedSpec.safetyChange(installed, stopped));
+    assertFalse(
+        UnifiedSpec.safetyChange(
+            installed,
+            stopped.toBuilder()
+                .setUnifiedResources(0, disabled.toBuilder().setReleaseSequence(8))
+                .build()));
+    assertFalse(
+        UnifiedSpec.safetyChange(
+            installed, stopped.toBuilder().setAllowPersonalPlugins(true).build()));
+    assertFalse(
+        UnifiedSpec.safetyChange(installed, stopped.toBuilder().addUnifiedResources(ref).build()));
+    assertFalse(
+        UnifiedSpec.safetyChange(
+            installed,
+            installed.toBuilder()
+                .setUnifiedResources(0, ref.toBuilder().setInstallationMode("required"))
+                .build()));
+    assertTrue(
+        UnifiedSpec.safetyChange(
+            installed, installed.toBuilder().addResourceRevocations(list).build()));
+  }
+
   final UnifiedResourceIdentity id =
       UnifiedResourceIdentity.newBuilder()
           .setTenantId("tenant")

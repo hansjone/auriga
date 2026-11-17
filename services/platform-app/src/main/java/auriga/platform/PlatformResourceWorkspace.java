@@ -185,7 +185,7 @@ public final class PlatformResourceWorkspace implements ResourceWorkspace {
                 || old != null && old.getLevel() == PluginLevel.PLUGIN_LEVEL_L0)
               throw new AurigaException(CommonErrors.FORBIDDEN);
             if (plugin.getLevel() == PluginLevel.PLUGIN_LEVEL_L4
-                && !Boolean.TRUE.equals(inputs.policy(tenant).getAllowPersonalPlugins()))
+                && !WorkspaceService.allowPersonalPlugins(inputs.policy(tenant)))
               throw new AurigaException(CommonErrors.FORBIDDEN);
             if (old != null && old.hasResourceEnvelope()) {
               var before = old.getResourceEnvelope();

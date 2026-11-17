@@ -14,6 +14,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"strings"
 )
 
 // checks if the Plugin type satisfies the MappedNullable interface at compile time
@@ -21,11 +22,30 @@ var _ MappedNullable = &Plugin{}
 
 // Plugin struct for Plugin
 type Plugin struct {
-	PackageName     string `json:"packageName" validate:"regexp=^(@[a-z0-9._-]+/)?[a-z0-9._-]+$"`
+	PackageName     string `json:"packageName" validate:"regexp=^(?:@[a-z0-9-][a-z0-9._-]*[/])?[a-z0-9-][a-z0-9._-]*$"`
 	DshVersionRange string `json:"dshVersionRange"`
 }
 
 type _Plugin Plugin
+
+func (o *Plugin) validateStringEnumValues(data []byte) error {
+	var fields struct {
+		PackageName json.RawMessage `json:"packageName" validate:"regexp=^(?:@[a-z0-9-][a-z0-9._-]*[/])?[a-z0-9-][a-z0-9._-]*$"`
+	}
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return err
+	}
+	if raw := fields.PackageName; raw != nil {
+		var value interface{}
+		if err := json.Unmarshal(raw, &value); err != nil {
+			return err
+		}
+		if value == "node_modules" || value == "favicon.ico" {
+			return fmt.Errorf("excluded value %v for property %s", value, "packageName")
+		}
+	}
+	return nil
+}
 
 // NewPlugin instantiates a new Plugin object
 // This constructor will assign default values to properties that have it defined,
@@ -110,6 +130,9 @@ func (o Plugin) ToMap() (map[string]interface{}, error) {
 }
 
 func (o *Plugin) UnmarshalJSON(data []byte) (err error) {
+	if err := o.validateStringEnumValues(data); err != nil {
+		return err
+	}
 	// This validates that all required properties are included in the JSON object
 	// by unmarshalling the object into a generic map with string keys and checking
 	// that every required field exists as a key in the generic map.
@@ -126,8 +149,19 @@ func (o *Plugin) UnmarshalJSON(data []byte) (err error) {
 		return err
 	}
 
+	lookupRequiredProperty := func(requiredProperty string) (interface{}, string, bool) {
+		if value, exists := allProperties[requiredProperty]; exists {
+			return value, requiredProperty, true
+		}
+		for name, value := range allProperties {
+			if strings.EqualFold(name, requiredProperty) {
+				return value, name, true
+			}
+		}
+		return nil, "", false
+	}
 	for _, requiredProperty := range requiredProperties {
-		if _, exists := allProperties[requiredProperty]; !exists {
+		if _, _, exists := lookupRequiredProperty(requiredProperty); !exists {
 			return fmt.Errorf("no value given for required property %v", requiredProperty)
 		}
 	}

@@ -427,9 +427,49 @@ class WorkspaceIntegrationTest {
       assertEquals(2, after.getResourceSelectionRevision());
       assertEquals(removed, after.getUnifiedResources(0));
       assertEquals(defaults, after.getUnifiedResources(1));
-      assertFalse(store.in(tenant, () -> service.dispatchable(store.instance(instance))));
+      assertTrue(
+          store.in(tenant, () -> service.dispatchable(store.instance(instance))),
+          "security removal must bypass the outstanding catalog policy check");
       resources.reconcile();
       assertTrue(store.in(tenant, () -> service.dispatchable(store.instance(instance))));
+      answer.set(answer.get().toBuilder().setAssignmentRetryRequired(true).build());
+      resources.handle(
+          new ReceivedEvent(
+              UuidV7.next(),
+              "resource.catalog_assignment_changed",
+              "auriga/resource",
+              instance.toString(),
+              clock.instant(),
+              tenant,
+              "1",
+              null,
+              WorkspaceService.JSON.createObjectNode()));
+      resources.reconcile();
+      assertTrue(
+          store.in(tenant, () -> service.dispatchable(store.instance(instance))),
+          "a package-local retry must release the instance-wide catalog gate");
+      int retryCalls = assignmentCalls.get();
+      resources.reconcile();
+      assertTrue(assignmentCalls.get() > retryCalls);
+      assertTrue(store.in(tenant, () -> service.dispatchable(store.instance(instance))));
+      answer.set(answer.get().toBuilder().setAssignmentRetryRequired(false).build());
+      resources.reconcile();
+      int recoveredCalls = assignmentCalls.get();
+      resources.reconcile();
+      assertEquals(recoveredCalls, assignmentCalls.get());
+      store.in(
+          tenant,
+          () -> {
+            var row = store.instance(instance);
+            service.saveSpec(row, UnifiedSpec.bump(WorkspaceService.spec(row)));
+            return null;
+          });
+      assertFalse(store.in(tenant, () -> service.dispatchable(store.instance(instance))));
+      resources.revoke(
+          tenant, instance, unifiedReviewRevocations().toBuilder().setRevision(2).build());
+      assertTrue(
+          store.in(tenant, () -> service.dispatchable(store.instance(instance))),
+          "revocation delivery cannot wait for assignment reconciliation");
     }
   }
 

@@ -196,7 +196,8 @@
           "type": "string",
           "minLength": 1,
           "maxLength": 214,
-          "pattern": "^(@[a-z0-9._-]+/)?[a-z0-9._-]+$"
+          "pattern": "^(?:@[a-z0-9-][a-z0-9._-]*[/])?[a-z0-9-][a-z0-9._-]*$",
+          "not": { "enum": ["node_modules", "favicon.ico"] }
         },
         "dshVersionRange": {
           "type": "string",

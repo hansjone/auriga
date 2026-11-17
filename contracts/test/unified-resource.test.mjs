@@ -17,6 +17,79 @@ const check = (file, name, value) =>
     new URL(`resource/${file}.schema.json`, root).href + '#/$defs/' + name,
   )(value);
 
+test('npm package names reject dot segments and leading dot or underscore', () => {
+  for (const packageName of [
+    '.',
+    '..',
+    '.hidden',
+    '_hidden',
+    '@.scope/name',
+    '@_scope/name',
+    '@scope/.hidden',
+    '@scope/_hidden',
+    'node_modules',
+    'favicon.ico',
+  ]) {
+    assert.equal(
+      check('package', 'Plugin', { packageName, dshVersionRange: '*' }),
+      false,
+      packageName,
+    );
+  }
+  for (const packageName of [
+    'plugin',
+    '@example/plugin-name',
+    'plugin.name',
+    '@example.name/plugin_name',
+  ]) {
+    assert.equal(
+      check('package', 'Plugin', { packageName, dshVersionRange: '*' }),
+      true,
+      packageName,
+    );
+  }
+});
+
+test('generated Go plugin name validators preserve the contract pattern', () => {
+  const pattern = read('resource/package.schema.json').$defs.Plugin.properties
+    .packageName.pattern;
+  for (const file of [
+    '../infra/gen/resourceapi/model_plugin.go',
+    '../infra/gen/shellauthapi/model_shell_authresource_package_schema_json__defs_plugin.go',
+  ]) {
+    const source = readFileSync(new URL(file, root), 'utf8');
+    assert(source.includes('validate:"regexp=' + pattern + '"'), file);
+  }
+});
+
+test('member installation pages expose package-local assignment failures', () => {
+  const failure = {
+    packageId: '01900000-0000-7000-8000-000000000001',
+    state: 'failed',
+    errorCode: 'common.unavailable',
+  };
+  assert(
+    check('unified', 'UnifiedInstallationPage', {
+      items: [],
+      assignmentFailures: [failure],
+    }),
+  );
+  assert.equal(
+    check('unified', 'UnifiedAssignmentFailure', {
+      ...failure,
+      state: 'applied',
+    }),
+    false,
+  );
+  assert.equal(
+    check('unified', 'UnifiedAssignmentFailure', {
+      ...failure,
+      packageId: 'invalid',
+    }),
+    false,
+  );
+});
+
 test('catalog package descriptions define assignment-scoped governance', () => {
   const spec = parseYaml(
     readFileSync(new URL('openapi/resource.yaml', root), 'utf8'),

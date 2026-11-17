@@ -239,6 +239,421 @@ class CatalogWorkflowTest {
     return body;
   }
 
+  Upload nextSkillVersion(Upload first, String version) {
+    var manifest = (ObjectNode) first.value.path("manifest").deepCopy();
+    manifest.put("version", version);
+    byte[] raw = manifest.toString().getBytes(StandardCharsets.UTF_8);
+    var value =
+        catalog.upload(
+            actor(AUTHOR),
+            first.pkg,
+            JSON.createObjectNode()
+                .put("version", version)
+                .put("expectedDigest", CatalogManifest.digest(raw)),
+            raw,
+            List.of(new ByteArrayInputStream(first.payload)),
+            key(),
+            etag(catalog.detail(actor(AUTHOR), first.pkg, null, false)));
+    var next = new Upload(first.pkg, uuid(value, "id"), value, raw, first.payload);
+    approvePublish(next);
+    return next;
+  }
+
+  @Test
+  void removingInactiveAssignmentDoesNotAdvanceRevisionOrEmitAnotherEvent() throws Exception {
+    TenantContext.call(
+        TENANT,
+        () -> {
+          var upload = upload(false);
+          approvePublish(upload);
+          var delivery = delivery(null);
+          var rule = assign(delivery, upload, "member", GENERAL, "required");
+          var first = delivery.removeAssignment(actor(PUBLISHER), uuid(rule, "id"), key(), "\"1\"");
+          long events =
+              tx.read(
+                  () ->
+                      ((Number)
+                              db.row(
+                                      "SELECT count(*) AS n FROM resource.outbox_event WHERE tenant_id=:tenant",
+                                      db.args())
+                                  .get("n"))
+                          .longValue());
+          var second =
+              delivery.removeAssignment(actor(PUBLISHER), uuid(rule, "id"), key(), "\"2\"");
+          assertEquals(first, second);
+          assertEquals(
+              events,
+              tx.read(
+                  () ->
+                      ((Number)
+                              db.row(
+                                      "SELECT count(*) AS n FROM resource.outbox_event WHERE tenant_id=:tenant",
+                                      db.args())
+                                  .get("n"))
+                          .longValue()));
+          return null;
+        });
+  }
+
+  @ParameterizedTest
+  @ValueSource(booleans = {true, false})
+  void memberReconciliationIsolatesOnePackageAndRecoversAfterFailure(boolean installed)
+      throws Exception {
+    TenantContext.call(
+        TENANT,
+        () -> {
+          var bad = upload(false);
+          var good = upload(false);
+          approvePublish(bad);
+          approvePublish(good);
+          var delivery = delivery(null);
+          UUID client = UUID.randomUUID();
+          if (installed)
+            delivery.select(actor(GENERAL), choose(client, bad, "install"), key(), "\"0\"");
+          delivery.select(actor(GENERAL), choose(client, good, "install"), key(), "\"0\"");
+          assign(delivery, bad, "member", GENERAL, "required");
+          assign(delivery, good, "member", GENERAL, "required");
+          var owner = new JdbcTemplate(roles.owner().dataSource());
+          String constraint = "fixture_" + UUID.randomUUID().toString().replace("-", "");
+          owner.execute(
+              "ALTER TABLE resource.catalog_installation ADD CONSTRAINT "
+                  + constraint
+                  + " CHECK(package_id <> '"
+                  + bad.pkg
+                  + "'::uuid OR revision < "
+                  + (installed ? 2 : 1)
+                  + ")");
+          try {
+            var items =
+                delivery.installations(actor(GENERAL), client, "skill", 50, null).path("items");
+            assertEquals(installed ? 2 : 1, items.size());
+            for (var item : items) {
+              boolean failed = item.path("resource").path("identity").equals(identity(bad));
+              assertEquals(failed ? "failed" : "applying", item.path("state").asString());
+              assertEquals(
+                  failed ? "optional" : "required",
+                  item.path("resource").path("installationMode").asString());
+            }
+            var failures =
+                delivery
+                    .installations(actor(GENERAL), client, "skill", 50, null)
+                    .path("assignmentFailures");
+            assertEquals(1, failures.size());
+            assertEquals(bad.pkg.toString(), failures.get(0).path("packageId").asString());
+            assertTrue(
+                delivery
+                    .installations(actor(AUTHOR), client, "skill", 50, null)
+                    .path("assignmentFailures")
+                    .isEmpty());
+            assertTrue(
+                TenantContext.call(
+                        UUID.randomUUID(),
+                        () ->
+                            tx.read(
+                                () ->
+                                    db.rows(
+                                        "SELECT package_id FROM resource.catalog_assignment_failure WHERE target_id=:target",
+                                        db.args("target", client))))
+                    .isEmpty());
+          } finally {
+            owner.execute(
+                "ALTER TABLE resource.catalog_installation DROP CONSTRAINT " + constraint);
+          }
+          for (var item :
+              delivery.installations(actor(GENERAL), client, "skill", 50, null).path("items")) {
+            assertEquals("required", item.path("resource").path("installationMode").asString());
+            assertEquals(
+                !installed && item.path("resource").path("identity").equals(identity(bad)) ? 1 : 2,
+                item.path("installationRevision").asLong());
+            assertEquals("applying", item.path("state").asString());
+          }
+          assertTrue(
+              delivery
+                  .installations(actor(GENERAL), client, "skill", 50, null)
+                  .path("assignmentFailures")
+                  .isEmpty());
+          return null;
+        });
+  }
+
+  @Test
+  void cloudFailureRetriesOnlyTheFailedPackageWhileHealthyResourcesAdvance() throws Exception {
+    TenantContext.call(
+        TENANT,
+        () -> {
+          var bad = upload(false);
+          var good = upload(false);
+          approvePublish(bad);
+          approvePublish(good);
+          catalog = spy(catalog);
+          var failing = new AtomicBoolean(true);
+          doAnswer(
+                  call -> {
+                    Map<String, Object> version = call.getArgument(1);
+                    if (bad.version.equals(version.get("id")) && failing.get())
+                      throw new AurigaException(CommonErrors.UNAVAILABLE);
+                    return call.callRealMethod();
+                  })
+              .when(catalog)
+              .envelope(any(), anyMap(), anyLong());
+          UUID instance = UUID.randomUUID(), node = UUID.randomUUID();
+          var workspace = mock(UnifiedResourceWorkspace.class);
+          when(workspace.snapshot(TENANT, instance))
+              .thenReturn(
+                  new UnifiedResourceWorkspace.Snapshot(
+                      instance, GENERAL, node, 0, 1, 0, false, List.of(), List.of()));
+          var delivery = delivery(workspace);
+          assign(delivery, bad, "instance", instance, "required");
+          assign(delivery, good, "instance", instance, "required");
+          var request =
+              auriga.contracts.resource.v1.ResolveUnifiedResourcesRequest.newBuilder()
+                  .setTenantId(TENANT.toString())
+                  .setOwnerId(GENERAL.toString())
+                  .setInstanceId(instance.toString())
+                  .setNodeId(node.toString())
+                  .setSynchronizeAssignments(true)
+                  .build();
+          var plan = delivery.resolve(request);
+          assertTrue(plan.getAssignmentRetryRequired());
+          assertEquals(1, plan.getResourcesCount());
+          assertEquals(identity(good), identityFromRef(plan.getResources(0)));
+          when(workspace.snapshot(TENANT, instance))
+              .thenReturn(
+                  new UnifiedResourceWorkspace.Snapshot(
+                      instance, GENERAL, node, 1, 2, 0, false, List.of(), plan.getResourcesList()));
+          var retry = delivery.resolve(request.toBuilder().setSelectionRevision(1).build());
+          assertTrue(retry.getAssignmentRetryRequired());
+          assertEquals(1, retry.getSelectionRevision());
+          failing.set(false);
+          var recovered = delivery.resolve(request.toBuilder().setSelectionRevision(1).build());
+          assertFalse(recovered.getAssignmentRetryRequired());
+          assertEquals(2, recovered.getResourcesCount());
+          assertEquals(1, recovered.getSelectionsCount());
+          assertEquals(
+              identity(bad),
+              identityFromRef(
+                  recovered.getResourcesList().stream()
+                      .filter(ref -> ref.getIdentity().getPackageId().equals(bad.pkg.toString()))
+                      .findFirst()
+                      .orElseThrow()));
+          assertTrue(
+              tx.read(
+                      () ->
+                          db.rows(
+                              "SELECT package_id FROM resource.catalog_assignment_failure WHERE tenant_id=:tenant AND target_id=:target",
+                              db.args("target", instance)))
+                  .isEmpty());
+          return null;
+        });
+  }
+
+  @Test
+  void unchangedInstallationListDoesNotWaitForTenantOrPackageWriters() throws Exception {
+    TenantContext.call(
+        TENANT,
+        () -> {
+          var upload = upload(false);
+          approvePublish(upload);
+          var delivery = delivery(null);
+          UUID client = UUID.randomUUID();
+          assign(delivery, upload, "member", GENERAL, "default");
+          delivery.installations(actor(GENERAL), client, "skill", 50, null);
+          var locked = new java.util.concurrent.CountDownLatch(1);
+          var release = new java.util.concurrent.CountDownLatch(1);
+          try (var workers = java.util.concurrent.Executors.newVirtualThreadPerTaskExecutor()) {
+            var blocker =
+                workers.submit(
+                    () ->
+                        TenantContext.call(
+                            TENANT,
+                            () ->
+                                tx.write(
+                                    () -> {
+                                      db.lock("catalog-assignments");
+                                      catalog.pkg(access.member(actor(GENERAL)), upload.pkg, false);
+                                      locked.countDown();
+                                      try {
+                                        assertTrue(
+                                            release.await(
+                                                10, java.util.concurrent.TimeUnit.SECONDS));
+                                      } catch (InterruptedException e) {
+                                        Thread.currentThread().interrupt();
+                                        throw new RuntimeException(e);
+                                      }
+                                      return true;
+                                    })));
+            try {
+              assertTrue(locked.await(10, java.util.concurrent.TimeUnit.SECONDS));
+              var read =
+                  workers.submit(
+                      () ->
+                          TenantContext.call(
+                              TENANT,
+                              () ->
+                                  delivery.installations(
+                                      actor(GENERAL), client, "skill", 50, null)));
+              assertEquals(
+                  1, read.get(5, java.util.concurrent.TimeUnit.SECONDS).path("items").size());
+            } finally {
+              release.countDown();
+              blocker.get(10, java.util.concurrent.TimeUnit.SECONDS);
+            }
+          }
+          return null;
+        });
+  }
+
+  @Test
+  void olderRequiredRulePreservesDesktopHighWaterAndOptionalCannotRaiseIt() throws Exception {
+    TenantContext.call(
+        TENANT,
+        () -> {
+          var first = upload(false);
+          approvePublish(first);
+          var second = nextSkillVersion(first, "1.1.0");
+          var delivery = delivery(null);
+          UUID client = UUID.randomUUID();
+          delivery.select(actor(GENERAL), choose(client, second, "install"), key(), "\"0\"");
+          advance(86401);
+          var rule = assign(delivery, first, "member", GENERAL, "required");
+          var third = nextSkillVersion(first, "1.2.0");
+          assign(delivery, third, "member", GENERAL, "optional");
+          var other = upload(false);
+          approvePublish(other);
+          assign(delivery, other, "member", GENERAL, "default");
+          var items =
+              delivery.installations(actor(GENERAL), client, "skill", 50, null).path("items");
+          assertEquals(2, items.size());
+          var installed =
+              java.util.stream.StreamSupport.stream(items.spliterator(), false)
+                  .filter(
+                      n ->
+                          n.path("resource")
+                              .path("identity")
+                              .path("packageId")
+                              .asString()
+                              .equals(first.pkg.toString()))
+                  .findFirst()
+                  .orElseThrow();
+          assertEquals(identity(second), installed.path("resource").path("identity"));
+          assertTrue(
+              Instant.parse(installed.path("resource").path("lease").path("expiresAt").asString())
+                  .isAfter(clock.instant()),
+              "governance change refreshes the exact installed version lease");
+          assertEquals("required", installed.path("resource").path("installationMode").asString());
+          delivery.removeAssignment(actor(PUBLISHER), uuid(rule, "id"), key(), "\"1\"");
+          var revision = installed.path("installationRevision").asLong();
+          var restored =
+              delivery.installations(actor(GENERAL), client, "skill", 50, null).path("items");
+          var current =
+              java.util.stream.StreamSupport.stream(restored.spliterator(), false)
+                  .filter(n -> n.path("resource").path("identity").equals(identity(second)))
+                  .findFirst()
+                  .orElseThrow();
+          assertEquals("optional", current.path("resource").path("installationMode").asString());
+          assertEquals(revision + 1, current.path("installationRevision").asLong());
+          long currentRevision = current.path("installationRevision").asLong();
+          delivery.select(
+              actor(GENERAL),
+              choose(client, second, "disable"),
+              key(),
+              "\"" + currentRevision + "\"");
+          var enabled =
+              delivery.select(
+                  actor(GENERAL),
+                  choose(client, second, "enable"),
+                  key(),
+                  "\"" + (currentRevision + 1) + "\"");
+          assertEquals(identity(second), enabled.path("resource").path("identity"));
+          assertEquals("ENABLED", enabled.path("resource").path("desiredState").asString());
+          return null;
+        });
+  }
+
+  @Test
+  void cloudHighWaterAndPendingPlanFollowRuleReplacement() throws Exception {
+    TenantContext.call(
+        TENANT,
+        () -> {
+          var first = upload(false);
+          approvePublish(first);
+          var second = nextSkillVersion(first, "1.1.0");
+          UUID instance = UUID.randomUUID(), node = UUID.randomUUID();
+          var workspace = mock(UnifiedResourceWorkspace.class);
+          when(workspace.snapshot(TENANT, instance))
+              .thenReturn(
+                  new UnifiedResourceWorkspace.Snapshot(
+                      instance, GENERAL, node, 0, 1, 0, false, List.of(), List.of()));
+          var delivery = delivery(workspace);
+          delivery.distribute(
+              actor(PUBLISHER),
+              distributionBody(instance, selection(second, "install")),
+              key(),
+              "\"0\"");
+          var request =
+              auriga.contracts.resource.v1.ResolveUnifiedResourcesRequest.newBuilder()
+                  .setTenantId(TENANT.toString())
+                  .setOwnerId(GENERAL.toString())
+                  .setInstanceId(instance.toString())
+                  .setNodeId(node.toString())
+                  .setSelectionRevision(1)
+                  .addSelections(CatalogProtocol.selection(selection(second, "install")))
+                  .build();
+          var initial = delivery.resolve(request);
+          when(workspace.snapshot(TENANT, instance))
+              .thenReturn(
+                  new UnifiedResourceWorkspace.Snapshot(
+                      instance,
+                      GENERAL,
+                      node,
+                      1,
+                      2,
+                      0,
+                      false,
+                      List.of(),
+                      initial.getResourcesList()));
+          var rule = assign(delivery, first, "instance", instance, "required");
+          var third = nextSkillVersion(first, "1.2.0");
+          assign(delivery, third, "member", GENERAL, "optional");
+          var sync = request.toBuilder().clearSelections().setSynchronizeAssignments(true).build();
+          var plan = delivery.resolve(sync);
+          assertEquals(identity(second), identityFromRef(plan.getResources(0)));
+          assertEquals("required", plan.getResources(0).getInstallationMode());
+          assertEquals(plan, delivery.resolve(sync), "unchanged pending plan is idempotent");
+          delivery.removeAssignment(actor(PUBLISHER), uuid(rule, "id"), key(), "\"1\"");
+          assertEquals(
+              1,
+              delivery.resolve(sync).getSelectionRevision(),
+              "removed rule supersedes unapplied required intent");
+          var def = assign(delivery, first, "instance", instance, "default");
+          var replacement = delivery.resolve(sync);
+          assertTrue(replacement.getSelectionRevision() > plan.getSelectionRevision());
+          assertEquals(identity(second), identityFromRef(replacement.getResources(0)));
+          assertEquals("default", replacement.getResources(0).getInstallationMode());
+          when(workspace.snapshot(TENANT, instance))
+              .thenReturn(
+                  new UnifiedResourceWorkspace.Snapshot(
+                      instance,
+                      GENERAL,
+                      node,
+                      replacement.getSelectionRevision(),
+                      3,
+                      0,
+                      false,
+                      List.of(),
+                      replacement.getResourcesList()));
+          delivery.removeAssignment(actor(PUBLISHER), uuid(def, "id"), key(), "\"1\"");
+          var restored =
+              delivery.resolve(
+                  sync.toBuilder()
+                      .setSelectionRevision(replacement.getSelectionRevision())
+                      .build());
+          assertEquals("optional", restored.getResources(0).getInstallationMode());
+          assertEquals(identity(second), identityFromRef(restored.getResources(0)));
+          return null;
+        });
+  }
+
   @ParameterizedTest
   @ValueSource(strings = {"plugin", "skill"})
   void assignmentsMergeModeAndPinnedVersionAndPreserveDefaultDisable(String kind) {
@@ -639,6 +1054,27 @@ class CatalogWorkflowTest {
                 reason().put("mode", "malicious"),
                 key(),
                 etag(current));
+            var disabled =
+                delivery.resolve(
+                    request.toBuilder()
+                        .setSynchronizeAssignments(false)
+                        .setSelectionRevision(1)
+                        .addAllSelections(plan.getSelectionsList())
+                        .build());
+            assertEquals("DISABLED", CatalogStatePolicy.desired(disabled.getResources(0)));
+            assertEquals("optional", disabled.getResources(0).getInstallationMode());
+            when(workspace.snapshot(TENANT, instance))
+                .thenReturn(
+                    new UnifiedResourceWorkspace.Snapshot(
+                        instance,
+                        GENERAL,
+                        node,
+                        1,
+                        3,
+                        0,
+                        false,
+                        List.of(),
+                        disabled.getResourcesList()));
             var removal = delivery.resolve(request.toBuilder().setSelectionRevision(1).build());
             assertEquals(2, removal.getSelectionRevision());
             assertEquals("remove", removal.getSelections(0).getAction());
@@ -813,6 +1249,7 @@ class CatalogWorkflowTest {
     try (var gzip = new java.util.zip.GZIPOutputStream(out);
         var tar = new TarArchiveOutputStream(gzip)) {
       var pkg = JSON.createObjectNode().put("name", name).put("version", version);
+      pkg.putObject("dsh").putObject("bundle").put("patch", "./patch.js");
       if (script) pkg.set("scripts", JSON.createObjectNode().put("postinstall", "node install.js"));
       byte[] content = pkg.toString().getBytes(StandardCharsets.UTF_8);
       var entry =
@@ -822,6 +1259,13 @@ class CatalogWorkflowTest {
       entry.setSize(link ? 0 : content.length);
       tar.putArchiveEntry(entry);
       if (!link) tar.write(content);
+      tar.closeArchiveEntry();
+      var patch = new TarArchiveEntry("package/patch.js");
+      byte[] patchBytes = "export default {};".getBytes(StandardCharsets.UTF_8);
+      patch.setMode(0644);
+      patch.setSize(patchBytes.length);
+      tar.putArchiveEntry(patch);
+      tar.write(patchBytes);
       tar.closeArchiveEntry();
     }
     return out.toByteArray();
@@ -2059,12 +2503,26 @@ class CatalogWorkflowTest {
                     db.update(
                         "UPDATE resource.catalog_package SET visibility='groups',group_ids=CAST(:groups AS uuid[]) WHERE tenant_id=:tenant AND id=:pkg",
                         db.args("pkg", pending.pkg, "groups", "{" + UUID.randomUUID() + "}")));
-            assertError(
-                CommonErrors.NOT_FOUND,
-                () -> d.resolve(resolveRequest(instance, node, 3, next.path("selections"))));
+            var denied = d.resolve(resolveRequest(instance, node, 3, next.path("selections")));
+            var deniedItem =
+                denied.getResourcesList().stream()
+                    .filter(ref -> ref.getIdentity().getPackageId().equals(pending.pkg.toString()))
+                    .findFirst()
+                    .orElseThrow();
+            assertEquals("DISABLED", CatalogStatePolicy.desired(deniedItem));
+            assertEquals("optional", deniedItem.getInstallationMode());
+            assertTrue(
+                denied.getResourcesList().stream()
+                    .anyMatch(
+                        ref ->
+                            ref.getIdentity().getPackageId().equals(active.pkg.toString())
+                                && CatalogStatePolicy.desired(ref).equals("ENABLED")));
             var cancel = distributionBody(instance);
             var replacement = d.distribute(actor(PUBLISHER), cancel, key(), "\"2\"");
             assertEquals(4, replacement.path("selectionRevision").asLong());
+            assertError(
+                CommonErrors.CONFLICT,
+                () -> d.resolve(resolveRequest(instance, node, 3, next.path("selections"))));
             var resolution =
                 d.resolve(resolveRequest(instance, node, 4, cancel.path("selections")));
             assertEquals(1, resolution.getResourcesCount());

@@ -3153,7 +3153,13 @@
           "type": "string",
           "minLength": 1,
           "maxLength": 214,
-          "pattern": "^(@[a-z0-9._-]+/)?[a-z0-9._-]+$"
+          "pattern": "^(?:@[a-z0-9-][a-z0-9._-]*[/])?[a-z0-9-][a-z0-9._-]*$",
+          "not": {
+            "enum": [
+              "node_modules",
+              "favicon.ico"
+            ]
+          }
         },
         "dshVersionRange": {
           "type": "string",
@@ -4969,6 +4975,13 @@
         "allowPersonalPlugins": {
           "type": "boolean",
           "description": "Current tenant permission for native personal plugin installation."
+        },
+        "assignmentFailures": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ShellAuthresource_unified_schema_json__defs_UnifiedAssignmentFailure"
+          },
+          "maxItems": 200
         }
       },
       "required": [
@@ -5148,6 +5161,30 @@
           }
         }
       ]
+    },
+    "ShellAuthresource_unified_schema_json__defs_UnifiedAssignmentFailure": {
+      "type": "object",
+      "properties": {
+        "packageId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "state": {
+          "type": "string",
+          "const": "failed"
+        },
+        "errorCode": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        }
+      },
+      "required": [
+        "packageId",
+        "state",
+        "errorCode"
+      ],
+      "additionalProperties": false
     },
     "ShellAuthOutput_UnifiedListInstallations": {
       "type": "object",

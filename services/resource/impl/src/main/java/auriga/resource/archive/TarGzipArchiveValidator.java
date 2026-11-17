@@ -35,7 +35,8 @@ public final class TarGzipArchiveValidator {
       long expandedBytes,
       long fileBytes,
       List<FileEntry> inventory,
-      byte[] packageManifest) {}
+      byte[] packageManifest,
+      Map<String, byte[]> packageManifests) {}
 
   public record FileEntry(String path, long sizeBytes, String digest) {}
 
@@ -89,6 +90,7 @@ public final class TarGzipArchiveValidator {
             long payload = 0;
             var inventory = new ArrayList<FileEntry>();
             byte[] manifest = null;
+            var packageManifests = new LinkedHashMap<String, byte[]>();
             for (var entry = tar.getNextEntry(); entry != null; entry = tar.getNextEntry()) {
               if (npmPackage) {
                 String name = entry.getName();
@@ -109,9 +111,11 @@ public final class TarGzipArchiveValidator {
               String path = entry.getName().replaceAll("^(?:\\./)+", "");
               boolean packageJson =
                   !entry.isDirectory()
-                      && (path.equals("package.json") || path.equals("package/package.json"));
+                      && (path.equals("package.json")
+                          || path.equals("package/package.json")
+                          || npmPackage && path.endsWith("/package.json"));
               var captured = packageJson ? new ByteArrayOutputStream() : null;
-              if (packageJson && (manifest != null || entry.getSize() > 1048576))
+              if (packageJson && (entry.getSize() > 1048576 || !npmPackage && manifest != null))
                 throw StrictUstarInputStream.bad();
               for (int count; (count = tar.read(bytes)) != -1; ) {
                 size += count;
@@ -123,7 +127,12 @@ public final class TarGzipArchiveValidator {
                 inventory.add(
                     new FileEntry(
                         path, size, "sha256:" + HexFormat.of().formatHex(fileDigest.digest())));
-              if (captured != null) manifest = captured.toByteArray();
+              if (captured != null) {
+                var metadata = captured.toByteArray();
+                packageManifests.put(path, metadata);
+                if (path.equals("package.json") || path.equals("package/package.json"))
+                  manifest = metadata;
+              }
               if (size != entry.getSize()) throw StrictUstarInputStream.bad();
               expanded.paddingRemaining =
                   (StrictUstarInputStream.RECORD - size % StrictUstarInputStream.RECORD)
@@ -149,10 +158,19 @@ public final class TarGzipArchiveValidator {
                 expanded.count,
                 payload,
                 List.copyOf(inventory),
-                manifest);
+                manifest,
+                Map.copyOf(packageManifests));
           }
         }
       } catch (IOException e) {
+        if (e instanceof StrictUstarInputStream.UnsupportedFormat)
+          throw new AurigaException(
+              CommonErrors.VALIDATION_FAILED,
+              Map.of(
+                  "archiveFormat",
+                  "POSIX ustar",
+                  "unsupportedExtensions",
+                  List.of("PAX", "GNU", "sparse")));
         throw failure(storageRead(e) ? STORAGE : CommonErrors.VALIDATION_FAILED);
       } catch (IllegalArgumentException e) {
         throw failure(CommonErrors.VALIDATION_FAILED);

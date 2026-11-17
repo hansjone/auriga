@@ -185,6 +185,16 @@ public final class WorkspaceUnifiedResources implements EventHandler, AutoClosea
       UUID owner,
       long selectionRevision,
       List<UnifiedSelection> selections) {
+    return apply(tenant, instance, owner, selectionRevision, selections, false);
+  }
+
+  private View apply(
+      UUID tenant,
+      UUID instance,
+      UUID owner,
+      long selectionRevision,
+      List<UnifiedSelection> selections,
+      boolean supersedingAssignment) {
     record(tenant, instance, owner, selectionRevision, selections);
     var before = snapshot(tenant, instance);
     if (before.spec().getResourceSelectionRevision() >= selectionRevision) {
@@ -202,7 +212,8 @@ public final class WorkspaceUnifiedResources implements EventHandler, AutoClosea
       if (!applied) throw new AurigaException(CommonErrors.CONFLICT);
       return before;
     }
-    if (before.spec().getResourceSelectionRevision() + 1 != selectionRevision) return before;
+    if (!supersedingAssignment
+        && before.spec().getResourceSelectionRevision() + 1 != selectionRevision) return before;
     if (before.node() == null) throw new AurigaException(CommonErrors.UNAVAILABLE);
     var resolution =
         TenantContext.call(
@@ -225,12 +236,16 @@ public final class WorkspaceUnifiedResources implements EventHandler, AutoClosea
           authorize(tenant, owner, row);
           var old = WorkspaceService.spec(row);
           if (old.getResourceSelectionRevision() >= selectionRevision) return view(row);
-          if (old.getResourceSelectionRevision() + 1 != selectionRevision)
+          if (!supersedingAssignment && old.getResourceSelectionRevision() + 1 != selectionRevision)
             throw new AurigaException(CommonErrors.CONFLICT);
           if (!Objects.equals(row.get("node_id"), before.node()))
             throw new AurigaException(CommonErrors.CONFLICT);
-          var next = UnifiedSpec.apply(old, selectionRevision, selections, resolution, false);
-          service.saveSpec(row, UnifiedSpec.bump(next));
+          var next =
+              UnifiedSpec.apply(
+                  old, selectionRevision, selections, resolution, false, supersedingAssignment);
+          if (UnifiedSpec.safetyChange(old, next))
+            service.saveSafetySpec(row, UnifiedSpec.bump(next));
+          else service.saveSpec(row, UnifiedSpec.bump(next));
           service.store.jdbc.update(
               "UPDATE unified_resource_intent SET applied=true WHERE tenant_id=? AND instance_id=? AND selection_revision=?",
               tenant,
@@ -286,6 +301,7 @@ public final class WorkspaceUnifiedResources implements EventHandler, AutoClosea
             var updated = UnifiedSpec.bump(next);
             if (Boolean.TRUE.equals(row.get("catalog_policy_checked"))
                 && !UnifiedSpec.executionChanged(old, next)) service.saveCatalogSpec(row, updated);
+            else if (UnifiedSpec.safetyChange(old, next)) service.saveSafetySpec(row, updated);
             else service.saveSpec(row, updated);
           }
           service.store.jdbc.update(
@@ -304,7 +320,7 @@ public final class WorkspaceUnifiedResources implements EventHandler, AutoClosea
           var row = service.store.instance(instance);
           var old = WorkspaceService.spec(row);
           var next = UnifiedSpec.revocations(old, list, true);
-          if (!next.equals(old)) service.saveSpec(row, next);
+          if (!next.equals(old)) service.saveSafetySpec(row, next);
           return null;
         });
   }
@@ -424,7 +440,8 @@ public final class WorkspaceUnifiedResources implements EventHandler, AutoClosea
           if (assignmentPolicies) {
             try {
               boolean synchronizeAssignments =
-                  !Boolean.TRUE.equals(row.get("catalog_policy_checked"));
+                  !Boolean.TRUE.equals(row.get("catalog_policy_checked"))
+                      || Boolean.TRUE.equals(row.get("catalog_assignment_retry"));
               if (synchronizeAssignments) {
                 var plan =
                     TenantContext.call(
@@ -439,13 +456,22 @@ public final class WorkspaceUnifiedResources implements EventHandler, AutoClosea
                                     .setSelectionRevision(spec.getResourceSelectionRevision())
                                     .setSynchronizeAssignments(true)
                                     .build()));
+                service.store.in(
+                    tenant,
+                    () ->
+                        service.store.jdbc.update(
+                            "UPDATE instance SET catalog_assignment_retry=? WHERE tenant_id=? AND id=?",
+                            plan.getAssignmentRetryRequired(),
+                            tenant,
+                            row.get("id")));
                 if (plan.getSelectionRevision() > spec.getResourceSelectionRevision()) {
                   apply(
                       tenant,
                       (UUID) row.get("id"),
                       (UUID) row.get("owner_id"),
                       plan.getSelectionRevision(),
-                      plan.getSelectionsList());
+                      plan.getSelectionsList(),
+                      true);
                   continue;
                 }
                 if (plan.getSelectionRevision() != spec.getResourceSelectionRevision())
@@ -481,7 +507,6 @@ public final class WorkspaceUnifiedResources implements EventHandler, AutoClosea
             } catch (Exception e) {
               org.slf4j.LoggerFactory.getLogger(getClass())
                   .warn("Unified assignment reconciliation deferred");
-              continue;
             }
           }
           if (spec.getUnifiedResourcesCount() == 0) continue;

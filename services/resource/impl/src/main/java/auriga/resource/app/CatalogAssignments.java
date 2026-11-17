@@ -59,7 +59,18 @@ final class CatalogAssignments {
     return mode;
   }
 
-  static void check(Effective policy, JsonNode identity, String action) {
+  static Effective atLeast(Effective policy, JsonNode installed) {
+    if (policy == null
+        || policy.mode.equals("optional")
+        || installed == null
+        || installed.path("releaseSequence").asLong() <= policy.sequence) return policy;
+    return new Effective(
+        (ObjectNode) installed.path("identity").deepCopy(),
+        policy.mode,
+        installed.path("releaseSequence").asLong());
+  }
+
+  static void check(Effective policy, JsonNode identity, long sequence, String action) {
     if (policy == null) return;
     if ((policy.mode.equals("required") && action.equals("disable"))
         || (!policy.mode.equals("optional") && action.equals("remove")))
@@ -67,6 +78,7 @@ final class CatalogAssignments {
           ErrorCode.of("resource.installation_required", 403, Status.Code.PERMISSION_DENIED));
     if (!policy.mode.equals("optional")
         && !policy.identity.equals(identity)
+        && sequence <= policy.sequence
         && Set.of("install", "enable").contains(action))
       throw new AurigaException(
           ErrorCode.of("resource.distribution_locked", 403, Status.Code.PERMISSION_DENIED));
@@ -165,12 +177,15 @@ final class CatalogAssignments {
     var row = row(id);
     catalog.pkg(r, (UUID) row.get("package_id"), false);
     ResourceWorkflow.match(etag, number(row, "revision"));
-    db.update(
-        "UPDATE resource.catalog_assignment SET active=false,revision=revision+1 WHERE tenant_id=:tenant AND id=:id AND active",
-        db.args("id", id));
+    int changed =
+        db.update(
+            "UPDATE resource.catalog_assignment SET active=false,revision=revision+1 WHERE tenant_id=:tenant AND id=:id AND active",
+            db.args("id", id));
     var result = view(r, row(id));
-    catalog.assignmentRecorded(r, id);
-    events.publish("resource.catalog_assignment_changed", id.toString(), result);
+    if (changed != 0) {
+      catalog.assignmentRecorded(r, id);
+      events.publish("resource.catalog_assignment_changed", id.toString(), result);
+    }
     return result;
   }
 
@@ -190,8 +205,11 @@ final class CatalogAssignments {
     var result = new LinkedHashMap<UUID, Effective>();
     var rows =
         db.rows(
-            "SELECT * FROM resource.catalog_assignment WHERE tenant_id=:tenant AND active AND (scope='tenant' OR (scope='member' AND target_id=:owner) OR (scope='group' AND target_id=ANY(CAST(:groups AS uuid[]))) OR (scope='instance' AND target_id=:instance AND :cloud)) ORDER BY package_id,id",
-            db.args(
+            "SELECT v.*,a.installation_mode FROM resource.catalog_assignment a JOIN resource.catalog_package p ON p.tenant_id=a.tenant_id AND p.id=a.package_id JOIN resource.catalog_version v ON v.tenant_id=a.tenant_id AND v.id=a.version_id WHERE a.tenant_id=:tenant AND a.active AND v.state='published' AND p.enabled"
+                + catalog.visible(r)
+                + " AND (a.scope='tenant' OR (a.scope='member' AND a.target_id=:owner) OR (a.scope='group' AND a.target_id=ANY(CAST(:groups AS uuid[]))) OR (a.scope='instance' AND a.target_id=:instance AND :cloud)) ORDER BY a.package_id,a.id",
+            catalog.args(
+                r,
                 "owner",
                 r.account(),
                 "groups",
@@ -202,28 +220,26 @@ final class CatalogAssignments {
                 cloud));
     for (var row : rows) {
       UUID p = (UUID) row.get("package_id");
-      try {
-        var v = catalog.ver(r, p, (UUID) row.get("version_id"), false);
-        var pack = catalog.pkg(r, p, false);
-        if (!v.get("state").equals("published")
-            || !Boolean.TRUE.equals(pack.get("enabled"))
-            || catalog.revoked(v)) continue;
-        var next =
+      var v = row;
+      if (catalog.revoked(v)) continue;
+      var next =
+          new Effective(
+              identity(r, v),
+              row.get("installation_mode").toString(),
+              number(v, "release_sequence"));
+      var old = result.get(p);
+      if (old != null) {
+        boolean useNext =
+            old.mode.equals("optional") && !next.mode.equals("optional")
+                || old.mode.equals("optional") == next.mode.equals("optional")
+                    && next.sequence > old.sequence;
+        next =
             new Effective(
-                identity(r, v),
-                row.get("installation_mode").toString(),
-                number(v, "release_sequence"));
-        var old = result.get(p);
-        if (old != null)
-          next =
-              new Effective(
-                  next.sequence > old.sequence ? next.identity : old.identity,
-                  strength(next.mode) > strength(old.mode) ? next.mode : old.mode,
-                  Math.max(next.sequence, old.sequence));
-        result.put(p, next);
-      } catch (AurigaException e) {
-        if (!e.errorCode().equals(CommonErrors.NOT_FOUND)) throw e;
+                useNext ? next.identity : old.identity,
+                strength(next.mode) > strength(old.mode) ? next.mode : old.mode,
+                useNext ? next.sequence : old.sequence);
       }
+      result.put(p, next);
     }
     return result;
   }

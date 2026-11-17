@@ -1727,6 +1727,7 @@ export interface components {
       nextCursor?: string;
       /** @description Current tenant permission for native personal plugin installation. */
       allowPersonalPlugins?: boolean;
+      assignmentFailures?: components['schemas']['UnifiedAssignmentFailure'][];
     };
     UnifiedDistributionInput: {
       /** Format: uuid */
@@ -2391,6 +2392,13 @@ export interface components {
       | components['schemas']['GitManifest'];
     /** @enum {string} */
     UnifiedInstallationMode: 'required' | 'default' | 'optional';
+    UnifiedAssignmentFailure: {
+      /** Format: uuid */
+      packageId: string;
+      /** @constant */
+      state: 'failed';
+      errorCode: string;
+    };
   };
   responses: never;
   parameters: {

@@ -339,7 +339,8 @@ export default {
             type: 'string',
             minLength: 1,
             maxLength: 214,
-            pattern: '^(@[a-z0-9._-]+/)?[a-z0-9._-]+$',
+            pattern: '^(?:@[a-z0-9-][a-z0-9._-]*[/])?[a-z0-9-][a-z0-9._-]*$',
+            not: { enum: ['node_modules', 'favicon.ico'] },
           },
           dshVersionRange: { type: 'string', minLength: 1, maxLength: 128 },
         },
@@ -1166,6 +1167,11 @@ export default {
             description:
               'Current tenant permission for native personal plugin installation.',
           },
+          assignmentFailures: {
+            type: 'array',
+            items: { $ref: '#/$defs/UnifiedAssignmentFailure' },
+            maxItems: 200,
+          },
         },
         required: ['items'],
         additionalProperties: false,
@@ -1981,6 +1987,16 @@ export default {
           nextCursor: { type: 'string', maxLength: 2048 },
         },
         required: ['items'],
+        additionalProperties: false,
+      },
+      UnifiedAssignmentFailure: {
+        type: 'object',
+        properties: {
+          packageId: { type: 'string', format: 'uuid' },
+          state: { type: 'string', const: 'failed' },
+          errorCode: { type: 'string', minLength: 1, maxLength: 128 },
+        },
+        required: ['packageId', 'state', 'errorCode'],
         additionalProperties: false,
       },
     },

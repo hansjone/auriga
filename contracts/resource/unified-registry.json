@@ -51,6 +51,7 @@
     "UnifiedAssignmentInput": "unified.schema.json#/$defs/UnifiedAssignmentInput",
     "UnifiedAssignment": "unified.schema.json#/$defs/UnifiedAssignment",
     "UnifiedAssignmentPage": "unified.schema.json#/$defs/UnifiedAssignmentPage",
-    "UnifiedResourceAssignmentChanged": "../events/resource.schema.json#/$defs/UnifiedResourceAssignmentChanged"
+    "UnifiedResourceAssignmentChanged": "../events/resource.schema.json#/$defs/UnifiedResourceAssignmentChanged",
+    "UnifiedAssignmentFailure": "unified.schema.json#/$defs/UnifiedAssignmentFailure"
   }
 }

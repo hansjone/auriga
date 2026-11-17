@@ -38,7 +38,7 @@ public final class WorkspaceService {
 
   public static final JsonMapper JSON = JsonMapper.builder().build();
 
-  static boolean allowPersonalPlugins(WorkspacePolicy policy) {
+  public static boolean allowPersonalPlugins(WorkspacePolicy policy) {
     return policy == null || !Boolean.FALSE.equals(policy.getAllowPersonalPlugins());
   }
 
@@ -78,7 +78,10 @@ public final class WorkspaceService {
       return spec(row).getDesired() == DesiredState.DESIRED_STATE_STOPPED;
     if (catalogAssignmentsRequired
         && spec(row).getDesired() == DesiredState.DESIRED_STATE_RUNNING
-        && !Boolean.TRUE.equals(row.get("catalog_policy_checked"))) return false;
+        && !Boolean.TRUE.equals(row.get("catalog_policy_checked"))
+        && !(row.get("catalog_safety_generation") instanceof Number safety
+            && row.get("generation") instanceof Number generation
+            && safety.longValue() == generation.longValue())) return false;
     return !managedNetworkRequired
         || spec(row).getDesired() != DesiredState.DESIRED_STATE_RUNNING
         || "disabled".equals(row.get("managed_network_state"))
@@ -396,7 +399,7 @@ public final class WorkspaceService {
                         assigned.getGeneration(),
                         token)));
         store.jdbc.update(
-            "UPDATE instance SET node_id=?,spec=?,managed_retry_at=? WHERE tenant_id=? AND id=?",
+            "UPDATE instance SET node_id=?,spec=?,managed_retry_at=?,catalog_safety_generation=NULL WHERE tenant_id=? AND id=?",
             node.get("id"),
             assigned.build().toByteArray(),
             time(clock.instant()),
@@ -429,6 +432,17 @@ public final class WorkspaceService {
 
   public void saveCatalogSpec(Map<String, Object> row, InstanceSpec next) {
     saveSpec(row, next, false, true);
+  }
+
+  public void saveSafetySpec(Map<String, Object> row, InstanceSpec next) {
+    if (!UnifiedSpec.safetyChange(spec(row), next))
+      throw new AurigaException(CommonErrors.VALIDATION_FAILED);
+    saveSpec(row, next, false, false);
+    store.jdbc.update(
+        "UPDATE instance SET catalog_safety_generation=? WHERE tenant_id=? AND id=?",
+        next.getGeneration(),
+        store.tenant(),
+        row.get("id"));
   }
 
   private void saveSpec(
@@ -515,7 +529,7 @@ public final class WorkspaceService {
         store.tenant(),
         row.get("id"));
     store.jdbc.update(
-        "UPDATE instance SET catalog_policy_checked=? WHERE tenant_id=? AND id=?",
+        "UPDATE instance SET catalog_policy_checked=?,catalog_safety_generation=NULL WHERE tenant_id=? AND id=?",
         catalogChecked,
         store.tenant(),
         row.get("id"));

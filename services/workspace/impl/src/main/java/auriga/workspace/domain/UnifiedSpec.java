@@ -30,12 +30,24 @@ public final class UnifiedSpec {
       List<UnifiedSelection> selections,
       ResolveUnifiedResourcesResponse resolved,
       boolean renewal) {
+    return apply(old, revision, selections, resolved, renewal, false);
+  }
+
+  public static InstanceSpec apply(
+      InstanceSpec old,
+      long revision,
+      List<UnifiedSelection> selections,
+      ResolveUnifiedResourcesResponse resolved,
+      boolean renewal,
+      boolean supersedingAssignment) {
     require(revision > 0 && revision <= 9007199254740991L);
     require(resolved.getSelectionRevision() == revision);
     require(
         renewal
             ? old.getResourceSelectionRevision() == revision
-            : old.getResourceSelectionRevision() + 1 == revision);
+            : supersedingAssignment
+                ? old.getResourceSelectionRevision() < revision
+                : old.getResourceSelectionRevision() + 1 == revision);
     Map<String, UnifiedResourceRef> before = refs(old.getUnifiedResourcesList());
     Map<String, UnifiedResourceRef> incoming = refs(resolved.getResourcesList());
     var result = new LinkedHashMap<>(before);
@@ -123,6 +135,46 @@ public final class UnifiedSpec {
             .setResourceSelectionRevision(revision)
             .build();
     return revocations(next, resolved.getRevocations(), false);
+  }
+
+  /**
+   * Only unchanged bytes losing execution authority, or a revocation-list update, bypass policy.
+   */
+  public static boolean safetyChange(InstanceSpec before, InstanceSpec after) {
+    if (!before.toBuilder()
+        .clearUnifiedResources()
+        .clearResourceRevocations()
+        .clearGeneration()
+        .clearResourceSelectionRevision()
+        .build()
+        .equals(
+            after.toBuilder()
+                .clearUnifiedResources()
+                .clearResourceRevocations()
+                .clearGeneration()
+                .clearResourceSelectionRevision()
+                .build())) return false;
+    var previous = refs(before.getUnifiedResourcesList());
+    if (previous.size() != after.getUnifiedResourcesCount()) return false;
+    boolean safety =
+        !before.getResourceRevocationsList().equals(after.getResourceRevocationsList());
+    for (var next : after.getUnifiedResourcesList()) {
+      var old = previous.get(next.getIdentity().getPackageId());
+      if (old == null || !sameBytes(old, next)) return false;
+      if (old.equals(next)
+          || mode(old).equals(mode(next))
+              && UnifiedResourceIntent.desired(old).equals(UnifiedResourceIntent.desired(next))
+              && UnifiedResourceIntent.revision(old) == UnifiedResourceIntent.revision(next))
+        continue;
+      String prior = UnifiedResourceIntent.desired(old),
+          desired = UnifiedResourceIntent.desired(next);
+      if (!(prior.equals("ENABLED") && Set.of("DISABLED", "REMOVED").contains(desired)
+              || prior.equals("DISABLED") && desired.equals("REMOVED"))
+          || UnifiedResourceIntent.revision(next) <= UnifiedResourceIntent.revision(old))
+        return false;
+      safety = true;
+    }
+    return safety;
   }
 
   private static boolean sameIntentOrSafetyDisable(

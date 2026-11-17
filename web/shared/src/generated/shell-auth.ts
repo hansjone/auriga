@@ -3212,11 +3212,19 @@ export interface components {
       reportSource: 'member' | 'node';
       report?: components['schemas']['ShellAuthresource_unified_schema_json__defs_UnifiedInstallationReport'];
     };
+    ShellAuthresource_unified_schema_json__defs_UnifiedAssignmentFailure: {
+      /** Format: uuid */
+      packageId: string;
+      /** @constant */
+      state: 'failed';
+      errorCode: string;
+    };
     ShellAuthresource_unified_schema_json__defs_UnifiedInstallationPage: {
       items: components['schemas']['ShellAuthresource_unified_schema_json__defs_UnifiedInstallation'][];
       nextCursor?: string;
       /** @description Current tenant permission for native personal plugin installation. */
       allowPersonalPlugins?: boolean;
+      assignmentFailures?: components['schemas']['ShellAuthresource_unified_schema_json__defs_UnifiedAssignmentFailure'][];
     };
     ShellAuthOutput_UnifiedListInstallations: {
       statusCode: number;

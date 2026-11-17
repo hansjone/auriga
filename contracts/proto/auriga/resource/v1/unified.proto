@@ -231,6 +231,8 @@ message ResolveUnifiedResourcesResponse {
   ResourceRevocationList revocations = 3;
   repeated UnifiedSelection selections = 4;
   optional bool allow_personal_plugins = 5;
+  // Retry failed packages independently after releasing the whole-instance policy gate.
+  bool assignment_retry_required = 6;
 }
 
 // Independent downgrade-root signature over JCS. Exact identity and instance scope are mandatory.

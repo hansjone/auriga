@@ -140,7 +140,10 @@ public class PlatformResourceConfiguration {
         return TenantContext.call(
             tenantId,
             () -> {
-              var value = org.getPolicy("workspace").path("value").path("allowPersonalPlugins");
+              var policy = org.getPolicy("workspace");
+              if (policy == null) return true;
+              var value = policy.path("value").path("allowPersonalPlugins");
+              if (value.isMissingNode() || value.isNull()) return true;
               if (!value.isBoolean())
                 throw new IllegalStateException("Invalid workspace personal-plugin policy");
               return value.asBoolean();

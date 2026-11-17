@@ -17,6 +17,21 @@ import org.junit.jupiter.api.*;
 import org.junit.jupiter.api.io.TempDir;
 
 class TarGzipArchiveValidatorTest {
+  @Test
+  void unsupportedExtensionHeadersExplainTheAcceptedArchiveFormat() throws Exception {
+    for (byte flag : new byte[] {'x', 'g', 'L', 'K', 'S'}) {
+      byte[] header = header("package/metadata", false, 0);
+      header[TarConstants.LF_OFFSET] = flag;
+      checksum(header);
+      var failure =
+          assertThrows(
+              AurigaException.class,
+              () -> validate(gzip(rawTar(header, new byte[0], 2)), OsEnum.ANY));
+      assertEquals("POSIX ustar", failure.params().get("archiveFormat"));
+      assertEquals(List.of("PAX", "GNU", "sparse"), failure.params().get("unsupportedExtensions"));
+    }
+  }
+
   static final UUID TENANT = UUID.fromString("01900000-0000-7000-8000-000000000001");
   static final int PREFIX = 345;
   @TempDir Path root;
@@ -201,7 +216,16 @@ class TarGzipArchiveValidatorTest {
       try (var tar = new StrictUstarInputStream(input, false)) {
         assertThrows(IOException.class, tar::getNextEntry);
       }
-      invalid(gzip(concat(record, new byte[1024])));
+      var failure =
+          assertThrows(
+              AurigaException.class,
+              () -> validate(gzip(concat(record, new byte[1024])), OsEnum.LINUX));
+      assertEquals("common.validation_failed", failure.errorCode().code());
+      if ("xgXLKS".indexOf(flag) >= 0) {
+        assertEquals("POSIX ustar", failure.params().get("archiveFormat"));
+        assertEquals(
+            List.of("PAX", "GNU", "sparse"), failure.params().get("unsupportedExtensions"));
+      } else assertTrue(failure.params().isEmpty());
     }
   }
 

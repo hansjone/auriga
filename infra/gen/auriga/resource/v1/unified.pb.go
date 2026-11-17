@@ -1860,8 +1860,10 @@ type ResolveUnifiedResourcesResponse struct {
 	Revocations          *ResourceRevocationList `protobuf:"bytes,3,opt,name=revocations,proto3" json:"revocations,omitempty"`
 	Selections           []*UnifiedSelection     `protobuf:"bytes,4,rep,name=selections,proto3" json:"selections,omitempty"`
 	AllowPersonalPlugins *bool                   `protobuf:"varint,5,opt,name=allow_personal_plugins,json=allowPersonalPlugins,proto3,oneof" json:"allow_personal_plugins,omitempty"`
-	unknownFields        protoimpl.UnknownFields
-	sizeCache            protoimpl.SizeCache
+	// Retry failed packages independently after releasing the whole-instance policy gate.
+	AssignmentRetryRequired bool `protobuf:"varint,6,opt,name=assignment_retry_required,json=assignmentRetryRequired,proto3" json:"assignment_retry_required,omitempty"`
+	unknownFields           protoimpl.UnknownFields
+	sizeCache               protoimpl.SizeCache
 }
 
 func (x *ResolveUnifiedResourcesResponse) Reset() {
@@ -1925,6 +1927,13 @@ func (x *ResolveUnifiedResourcesResponse) GetSelections() []*UnifiedSelection {
 func (x *ResolveUnifiedResourcesResponse) GetAllowPersonalPlugins() bool {
 	if x != nil && x.AllowPersonalPlugins != nil {
 		return *x.AllowPersonalPlugins
+	}
+	return false
+}
+
+func (x *ResolveUnifiedResourcesResponse) GetAssignmentRetryRequired() bool {
+	if x != nil {
+		return x.AssignmentRetryRequired
 	}
 	return false
 }
@@ -2338,7 +2347,7 @@ const file_auriga_resource_v1_unified_proto_rawDesc = "" +
 	"\n" +
 	"selections\x18\x06 \x03(\v2$.auriga.resource.v1.UnifiedSelectionR\n" +
 	"selections\x127\n" +
-	"\x17synchronize_assignments\x18\a \x01(\bR\x16synchronizeAssignments\"\x80\x03\n" +
+	"\x17synchronize_assignments\x18\a \x01(\bR\x16synchronizeAssignments\"\xbc\x03\n" +
 	"\x1fResolveUnifiedResourcesResponse\x12-\n" +
 	"\x12selection_revision\x18\x01 \x01(\x04R\x11selectionRevision\x12D\n" +
 	"\tresources\x18\x02 \x03(\v2&.auriga.resource.v1.UnifiedResourceRefR\tresources\x12L\n" +
@@ -2346,7 +2355,8 @@ const file_auriga_resource_v1_unified_proto_rawDesc = "" +
 	"\n" +
 	"selections\x18\x04 \x03(\v2$.auriga.resource.v1.UnifiedSelectionR\n" +
 	"selections\x129\n" +
-	"\x16allow_personal_plugins\x18\x05 \x01(\bH\x00R\x14allowPersonalPlugins\x88\x01\x01B\x19\n" +
+	"\x16allow_personal_plugins\x18\x05 \x01(\bH\x00R\x14allowPersonalPlugins\x88\x01\x01\x12:\n" +
+	"\x19assignment_retry_required\x18\x06 \x01(\bR\x17assignmentRetryRequiredB\x19\n" +
 	"\x17_allow_personal_plugins\"\xf2\x03\n" +
 	"\x1dUnifiedDowngradeAuthorization\x12%\n" +
 	"\x0eschema_version\x18\x01 \x01(\rR\rschemaVersion\x12)\n" +
