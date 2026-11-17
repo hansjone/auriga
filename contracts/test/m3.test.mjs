@@ -667,7 +667,7 @@ function resourceManifest(kind) {
 
 test('通用草案按kind创建共享资源，拒绝私有上传与客户端指定身份', () => {
   const check = ajv.getSchema(unifiedUri + '#/$defs/UnifiedPackageInput');
-  for (const kind of ['skill', 'tool'])
+  for (const kind of ['plugin', 'skill', 'tool'])
     assert.equal(
       check({ name: 'network-guide', kind, visibility: 'members' }),
       true,
@@ -675,7 +675,7 @@ test('通用草案按kind创建共享资源，拒绝私有上传与客户端指�
     );
   const body = { name: 'network-guide', kind: 'skill', visibility: 'members' };
   for (const extra of [
-    { kind: 'plugin' },
+    { kind: 'unknown' },
     { kind: 'agent-preset' },
     { visibility: 'private' },
     { name: '../escape' },
@@ -820,7 +820,7 @@ test('通用路径替换本轮Skill路径，查询按kind筛选且上传保留�
       assert.equal(operation['x-auriga-contract-stage'], 'frozen');
       if (method === 'get' && !path.includes('{')) {
         const kind = operation.parameters.find((p) => p.name === 'kind');
-        assert.deepEqual(kind.schema.enum, ['skill', 'tool']);
+        assert.deepEqual(kind.schema.enum, ['plugin', 'skill', 'tool']);
       }
     }
   }
@@ -831,11 +831,11 @@ test('通用路径替换本轮Skill路径，查询按kind筛选且上传保留�
   assert.equal(multipart.properties.artifacts.type, 'array');
 });
 
-test('catalog不投影旧插件，统一清单只接受Skill/tool且保持内部插件迁移格式', () => {
+test('catalog统一清单接受plugin/skill/tool，旧插件ID不隐式投影', () => {
   const catalogManifest = ajv.getSchema(unifiedUri + '#/$defs/UnifiedManifest');
   assert.equal(catalogManifest(resourceManifest('skill')), true);
   assert.equal(catalogManifest(resourceManifest('tool')), true);
-  assert.equal(catalogManifest(resourceManifest('plugin')), false);
+  assert.equal(catalogManifest(resourceManifest('plugin')), true);
   assert.equal(
     validate(unifiedSchema, 'PluginManifest')(resourceManifest('plugin')),
     true,
@@ -843,7 +843,7 @@ test('catalog不投影旧插件，统一清单只接受Skill/tool且保持内部
   const spec = read('openapi/resource.yaml');
   assert.deepEqual(
     spec.components.schemas.UnifiedPackage.properties.kind.enum,
-    ['skill', 'tool'],
+    ['plugin', 'skill', 'tool'],
   );
   assert.deepEqual(
     spec.components.schemas.UnifiedPackage.properties.level.enum,
@@ -968,7 +968,7 @@ test('审核队列与详情带reviewId及版本风险，原始清单下载不能
     (v) => delete v.version.manifestDownloadPath,
     (v) =>
       (v.version.manifestDownloadPath = 'https://evil.example.com/manifest'),
-    (v) => (v.version.kind = 'plugin'),
+    (v) => (v.version.kind = 'unknown'),
   ]) {
     const invalid = clone(review);
     change(invalid);
@@ -1007,9 +1007,10 @@ test('新统一事件显式绑定kind和清单/制品摘要，不重载旧插件
     'UnifiedResourceVersionPublished',
   );
   assert.equal(published(event), true, JSON.stringify(published.errors));
+  assert.equal(published({ ...event, kind: 'plugin' }), true);
   for (const change of [
     (v) => delete v.kind,
-    (v) => (v.kind = 'plugin'),
+    (v) => (v.kind = 'unknown'),
     (v) => (v.signatureVersion = 1),
     (v) => (v.digest = v.manifestDigest),
     (v) => delete v.manifestDigest,

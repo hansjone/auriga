@@ -378,10 +378,10 @@
         "artifacts": {
           "type": "array",
           "items": {
-            "$ref": "#/$defs/Artifact"
+            "$ref": "#/$defs/PluginArtifact"
           },
           "minItems": 1,
-          "maxItems": 32
+          "maxItems": 1
         },
         "signature": {
           "type": "object",
@@ -904,6 +904,61 @@
         "signature"
       ],
       "additionalProperties": false
+    },
+    "PluginArtifact": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/Name"
+        },
+        "role": {
+          "type": "string",
+          "const": "payload"
+        },
+        "digest": {
+          "$ref": "./signatures.schema.json#/$defs/Digest"
+        },
+        "sizeBytes": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 67108864
+        },
+        "mediaType": {
+          "type": "string",
+          "const": "application/gzip"
+        },
+        "os": {
+          "type": "string",
+          "const": "any"
+        },
+        "arch": {
+          "type": "string",
+          "const": "any"
+        }
+      },
+      "required": [
+        "id",
+        "role",
+        "digest",
+        "sizeBytes",
+        "mediaType",
+        "os",
+        "arch"
+      ],
+      "additionalProperties": false
+    },
+    "UnifiedManifest": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/PluginManifest"
+        },
+        {
+          "$ref": "#/$defs/SkillManifest"
+        },
+        {
+          "$ref": "#/$defs/ToolManifest"
+        }
+      ]
     }
   }
 }

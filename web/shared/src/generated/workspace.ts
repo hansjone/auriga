@@ -1400,7 +1400,7 @@ export interface components {
       /** Format: uuid */
       versionId: string;
       /** @enum {string} */
-      kind: 'skill' | 'tool';
+      kind: 'plugin' | 'skill' | 'tool';
       version: components['schemas']['Version'];
       manifestDigest: components['schemas']['Digest'];
     };

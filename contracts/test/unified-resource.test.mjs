@@ -127,8 +127,7 @@ test('manifest ACL is rechecked on every read and old/new event digest fields ca
     tenant: 'authenticated',
     visibility: 'package-version',
     resolveKind: true,
-    allowedKinds: ['skill', 'tool'],
-    pluginStatus: 404,
+    allowedKinds: ['plugin', 'skill', 'tool'],
     locatorGrantsAccess: false,
     checkEveryRead: true,
   });
@@ -136,7 +135,7 @@ test('manifest ACL is rechecked on every read and old/new event digest fields ca
     c.sameTenant &&
     c.visibleVersion &&
     c.permission &&
-    ['skill', 'tool'].includes(c.kind);
+    ['plugin', 'skill', 'tool'].includes(c.kind);
   const good = {
     sameTenant: true,
     visibleVersion: true,
@@ -153,7 +152,8 @@ test('manifest ACL is rechecked on every read and old/new event digest fields ca
         hasLocator: true,
       }),
     );
-  assert(!allowed({ ...good, kind: 'plugin' }));
+  assert(allowed({ ...good, kind: 'plugin' }));
+  assert(!allowed({ ...good, kind: 'unknown' }));
   const eventFile = new URL('events/resource.schema.json', root);
   ajv.addSchema(read('events/resource.schema.json'), eventFile.href);
   const old = ajv.getSchema(
@@ -213,7 +213,7 @@ test('guardian private-only state requires stopped process, cleared view and new
   );
 });
 
-test('kind/delivery matrix fails closed for tool, plugin and unknown kinds at unified P1 entry', () => {
+test('kind/delivery matrix enables plugin/skill and fails closed for tool and unknown kinds at unified P1 entry', () => {
   const matrix = read('resource/unified-authorization.json');
   const allowed = (kind, delivery, permission) =>
     matrix.rules.some(
@@ -225,7 +225,9 @@ test('kind/delivery matrix fails closed for tool, plugin and unknown kinds at un
         permission === r.basePermission,
     );
   assert(allowed('skill', 'text-only', 'resource.packages.upload'));
-  for (const rule of matrix.rules.filter((r) => r.kind !== 'skill'))
+  assert(allowed('plugin', 'npm-tgz', 'resource.packages.upload'));
+  assert.equal(matrix.rules.find((r) => r.kind === 'plugin').minimumRisk, 'r2');
+  for (const rule of matrix.rules.filter((r) => r.kind === 'tool'))
     assert(!allowed(rule.kind, rule.delivery, 'resource.packages.upload'));
   assert(!allowed('unknown', 'text-only', 'resource.packages.upload'));
   assert(!allowed('skill', 'text-only', 'resource.packages.read'));
@@ -605,4 +607,11 @@ test('desired state schema accepts additive legacy refs and rejects unknown stat
       fixture.expect.state !== null,
       fixture.id,
     );
+});
+
+test('generated plugin runtime schemas match the frozen source documents', async () => {
+  const { default: schemas } =
+    await import('../../clients/dsh-plugin/src/generated/resource-schema-data.js');
+  for (const name of ['signatures', 'package', 'unified'])
+    assert.deepEqual(schemas[name], read('resource/' + name + '.schema.json'));
 });

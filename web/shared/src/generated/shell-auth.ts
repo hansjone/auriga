@@ -1828,13 +1828,13 @@ export interface components {
       limit: number;
       cursor?: string;
       /** @enum {string} */
-      kind?: 'skill' | 'tool';
+      kind?: 'plugin' | 'skill' | 'tool';
     };
-    /** @description Shared L3 skill/tool only. Server derives tenant, owner and level. Private skill stays local. Plugin CRUD uses legacy APIs; catalog rejects plugin kind/IDs. */
+    /** @description Shared L3 plugin/skill. Server derives tenant, owner and level. Tool delivery remains gated; legacy IDs are not catalog IDs. */
     ShellAuthopenapi_resource_yaml_components_schemas_UnifiedPackageInput: {
       name: string;
       /** @enum {string} */
-      kind: 'skill' | 'tool';
+      kind: 'plugin' | 'skill' | 'tool';
       /** @enum {string} */
       visibility: 'tenant' | 'members' | 'groups';
       groupIds?: string[];
@@ -1908,7 +1908,7 @@ export interface components {
       /** Format: uuid */
       versionId: string;
       /** @enum {string} */
-      kind: 'skill' | 'tool';
+      kind: 'plugin' | 'skill' | 'tool';
       version: components['schemas']['ShellAuthresource_package_schema_json__defs_Version'];
       manifestDigest: components['schemas']['ShellAuthresource_signatures_schema_json__defs_Digest'];
     };
@@ -1941,7 +1941,7 @@ export interface components {
     };
     ShellAuthInput_UnifiedListInstallations: {
       /** @enum {string} */
-      kind?: 'skill' | 'tool';
+      kind?: 'plugin' | 'skill' | 'tool';
       /** @default 50 */
       limit: number;
       cursor?: string;
@@ -2646,7 +2646,7 @@ export interface components {
       };
       body: components['schemas']['ShellAuthopenapi_resource_yaml_components_schemas_MemberInstallation'];
     };
-    /** @description Shared L3 skill/tool. Plugin L0-L4/private views continue through legacy APIs, without catalog projection. */
+    /** @description Shared L3 unified resource. Legacy plugin governance remains available until its separate contract is implemented. */
     ShellAuthopenapi_resource_yaml_components_schemas_UnifiedPackage: {
       /** Format: uuid */
       id: string;
@@ -2654,7 +2654,7 @@ export interface components {
       tenantId: string;
       name: string;
       /** @enum {string} */
-      kind: 'skill' | 'tool';
+      kind: 'plugin' | 'skill' | 'tool';
       /** Format: uuid */
       ownerId: string;
       /** @enum {string} */
@@ -2741,6 +2741,46 @@ export interface components {
       /** @enum {string} */
       kind: 'node' | 'python' | 'java';
       versionRange: string;
+    };
+    ShellAuthresource_package_schema_json__defs_PluginArtifact: {
+      id: components['schemas']['ShellAuthresource_package_schema_json__defs_Name'];
+      /** @constant */
+      role: 'payload';
+      digest: components['schemas']['ShellAuthresource_signatures_schema_json__defs_Digest'];
+      sizeBytes: number;
+      /** @constant */
+      mediaType: 'application/gzip';
+      /** @constant */
+      os: 'any';
+      /** @constant */
+      arch: 'any';
+    };
+    ShellAuthresource_package_schema_json__defs_Plugin: {
+      packageName: string;
+      dshVersionRange: string;
+    };
+    ShellAuthresource_package_schema_json__defs_PluginManifest: {
+      /** @constant */
+      schemaVersion: 1;
+      name: components['schemas']['ShellAuthresource_package_schema_json__defs_Name'];
+      version: components['schemas']['ShellAuthresource_package_schema_json__defs_Version'];
+      description: string;
+      author: {
+        displayName: string;
+      };
+      license: string;
+      permissions: components['schemas']['ShellAuthresource_package_schema_json__defs_Permissions'];
+      runtimes: components['schemas']['ShellAuthresource_package_schema_json__defs_Runtime'][];
+      artifacts: components['schemas']['ShellAuthresource_package_schema_json__defs_PluginArtifact'][];
+      signature: {
+        /** @constant */
+        mode: 'detached';
+        /** @constant */
+        algorithm: 'Ed25519';
+      };
+      /** @constant */
+      kind: 'plugin';
+      plugin: components['schemas']['ShellAuthresource_package_schema_json__defs_Plugin'];
     };
     ShellAuthresource_package_schema_json__defs_SkillArtifact: {
       id: components['schemas']['ShellAuthresource_package_schema_json__defs_Name'];
@@ -2909,14 +2949,15 @@ export interface components {
       | components['schemas']['ShellAuthresource_package_schema_json__defs_OnlineManifest']
       | components['schemas']['ShellAuthresource_package_schema_json__defs_OfflineManifest']
       | components['schemas']['ShellAuthresource_package_schema_json__defs_GitManifest'];
-    /** @description Catalog manifest for skill/tool. PluginManifest remains in the package format for internal migration only; catalog APIs do not expose plugin projections. */
+    /** @description Unified plugin/skill/tool manifest; plugin uses npm tgz and v2 detached signatures. Tool delivery remains gated. */
     ShellAuthopenapi_resource_yaml_components_schemas_UnifiedManifest:
+      | components['schemas']['ShellAuthresource_package_schema_json__defs_PluginManifest']
       | components['schemas']['ShellAuthresource_package_schema_json__defs_SkillManifest']
       | components['schemas']['ShellAuthresource_package_schema_json__defs_ToolManifest'];
     /** @description Read-only server assessment, recalculated on content/permission changes. Publication transaction checks the current assessment and review identities. */
     ShellAuthopenapi_resource_yaml_components_schemas_UnifiedRiskAssessment: {
       /**
-       * @description Server-derived floor: command skill or any nonempty tools/outboundHosts/dataAccess is at least r2; tool at least r2, git r3. Server scans text too; declarations cannot downgrade command content.
+       * @description Server-derived floor: plugin is at least r2; command skill or any nonempty tools/outboundHosts/dataAccess is at least r2; tool at least r2, git r3. Server scans text too; declarations cannot downgrade command content.
        * @enum {string}
        */
       minimumLevel: 'r1' | 'r2' | 'r3';
@@ -2956,7 +2997,7 @@ export interface components {
       createdAt: string;
       manifest: components['schemas']['ShellAuthopenapi_resource_yaml_components_schemas_UnifiedManifest'];
       /** @enum {string} */
-      kind: 'skill' | 'tool';
+      kind: 'plugin' | 'skill' | 'tool';
       risk: components['schemas']['ShellAuthopenapi_resource_yaml_components_schemas_UnifiedRiskAssessment'];
       /** @description Same-origin locator for exact immutable raw manifest UTF-8 bytes, not a bearer URL. Every request checks tenant/package/version ACL; caller must verify digest/envelope. Published and draft reads use the current corresponding ACL. */
       manifestDownloadPath: string;

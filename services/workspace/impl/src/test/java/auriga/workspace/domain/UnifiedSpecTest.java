@@ -54,6 +54,29 @@ class UnifiedSpecTest {
   }
 
   @Test
+  void pluginSelectionAndRenewalUseTheSameSpecWhileUnknownKindsAreDenied() {
+    var pluginId = id.toBuilder().setKind("plugin").build();
+    var plugin = ref.toBuilder().setIdentity(pluginId).build();
+    var choice = UnifiedSelection.newBuilder().setIdentity(pluginId).setAction("install").build();
+    var installed = UnifiedSpec.apply(empty, 2, List.of(choice), resolution(2, plugin), false);
+    assertEquals(pluginId, installed.getUnifiedResources(0).getIdentity());
+    assertEquals(
+        installed, UnifiedSpec.apply(installed, 2, List.of(), resolution(2, plugin), true));
+    for (String kind : List.of("tool", "unknown")) {
+      var bad = pluginId.toBuilder().setKind(kind).build();
+      assertThrows(
+          AurigaException.class,
+          () ->
+              UnifiedSpec.apply(
+                  empty,
+                  2,
+                  List.of(choice.toBuilder().setIdentity(bad).build()),
+                  resolution(2, plugin.toBuilder().setIdentity(bad).build()),
+                  false));
+    }
+  }
+
+  @Test
   void removalCarriesExactNewInstallationRevision() {
     var installed =
         empty.toBuilder().addUnifiedResources(ref).setResourceSelectionRevision(1).build();

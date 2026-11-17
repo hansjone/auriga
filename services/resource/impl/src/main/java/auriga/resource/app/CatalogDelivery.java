@@ -515,8 +515,9 @@ public final class CatalogDelivery implements UnifiedResourceResolution {
       Map<String, Object> a,
       String kind,
       boolean distribution) {
-    if (limit < 1 || limit > 200 || kind != null && !Set.of("skill", "tool").contains(kind))
-      throw invalid();
+    if (limit < 1
+        || limit > 200
+        || kind != null && !Set.of("plugin", "skill", "tool").contains(kind)) throw invalid();
     return tx.write(
         () -> {
           String where = " WHERE tenant_id=:tenant" + filter;

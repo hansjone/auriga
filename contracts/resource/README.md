@@ -6,7 +6,7 @@
 ## 资源流程、权限与对象存储
 
 本节描述既有v1及原插件路径，只有 `kind=plugin/purpose=plugin`；Skill不能冒充plugin。
-新增通用catalog草案见末节，P1的插件管理视图继续使用原接口，Skill/tool另走通用路径。
+新增通用catalog草案见末节，plugin/skill 共用统一目录，旧接口仅在分期期间保留治理能力。
 共享资源流程 `draft -> pending_review -> approved -> published -> deprecated/withdrawn`，
 `rejected -> draft`。审核绑定 digest+versionRevision；变更草稿清空审核。
 发布内容 `(tenant,package,version)` 不可覆盖；归档核验成功、审核与签名完成才能发布。
@@ -98,21 +98,17 @@ resource事务记录意图和resource.distribution_requested；workspace复核�
 统一主文档为 `docs/design/resource-package.zh.md`，skill专项为
 `docs/design/skill-market.zh.md`。本轮将第1轮Skill草案改成通用catalog命名空间，
 新增 `/api/resource/v1/catalog/**`、`/api/resource/v1/admin/catalog/**`，
-P1-K 已冻结 catalog 的目录、审核、原始清单、成员安装与分发接口，kind 筛选只支持 skill/tool；具体操作以 OpenAPI 为准。
-plugin不在通用接口展示或写入，旧L0–L4/private使用原接口；内部只读关联投影不冒充UnifiedPackage。
+P1-K 已冻结 catalog 的目录、审核、原始清单、成员安装与分发接口，kind 筛选支持 plugin/skill/tool，实际写入开放 plugin/skill；具体操作以 OpenAPI 为准。
+统一 plugin 开放 L3 共享；L0–L4/private 未统一部分沿原接口，不将旧对象伪装成 UnifiedPackage。
 
 `package.schema.json` 定义auriga-resource.json公共字段与kind专属段，tool覆盖
 online/offline/git。清单位于制品外，制品按原字节SHA-256寻址，版本digest为清单原字节摘要。
 清单signature字段声明detached/Ed25519协议，实际签名为独立Envelope v2，签名完整覆盖
 租户、资源、版本、安全序号、清单及制品摘要和有效期。旧ResourceEnvelope v1与
-旧Version.digest插件归档语义继续由原契约表达。迁移通过来源关联与协议选择接入，
+旧Version.digest插件归档语义继续由原契约表达。新旧 ID 独立，不创建迁移关联；
 保留撤销和高水位，原主干接口及schemas逐项保留。
 
-插件后续真正双签迁移时，同一版本的旧归档摘要A与新清单摘要M要经原始字节、两种签名和清单payload
-建立不可变关联；恶意撤销同事务写A/M两项。v2按packageId/versionId禁用整版本，并逐项核对清单及
-全部制品摘要与可信租户撤销表。高水位按tenant/package共用seq/versionId和已验证A/M别名，拒绝
-跨协议回滚、假关联或同序号换M。首个v2签发t0后不再用v1发新版本，旧v1续签固定截止t0+24h，
-回滚不能重置截止。具体规则与P1-K密码学向量/负例见主文档第2节，不改现有v1撤销格式。
+没有正式发行数据，统一插件仅用 v2，不实施旧 v1 双签迁移、双摘要映射或续签截止。原迁移表和类型本期不删除，第三期统一清理。
 
 统一清单严格区分plugin、text-only skill与三种工具，运行时支持Node/Python/Java声明。
 Git锁完整commit并引用源码快照/锁文件制品，installScripts=false；在线工具无本地制品。

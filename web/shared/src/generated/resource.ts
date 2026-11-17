@@ -571,10 +571,10 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** @description P1-K frozen contract; implementation follows in consuming work lines. Catalog covers skill and future tool only; plugin IDs are not exposed here and return 404. Plugin views use unchanged legacy APIs. Enforce live tenant ACL, ETag, idempotency, step-up and author separation. Upload permission alone does not authorize a tool kind/delivery or security reviewer role; server policy must authorize them. */
+    /** @description P1-K frozen contract; implementation follows in consuming work lines. Catalog covers unified L3 plugin/skill; legacy IDs are separate and return 404. Enforce live tenant ACL, ETag, idempotency, step-up and author separation. Upload permission alone does not authorize a tool kind/delivery or security reviewer role; server policy must authorize them. */
     get: operations['UnifiedListResourcePackages'];
     put?: never;
-    /** @description P1-K frozen contract; implementation follows in consuming work lines. Catalog covers skill and future tool only; plugin IDs are not exposed here and return 404. Plugin views use unchanged legacy APIs. Enforce live tenant ACL, ETag, idempotency, step-up and author separation. Upload permission alone does not authorize a tool kind/delivery or security reviewer role; server policy must authorize them. */
+    /** @description P1-K frozen contract; implementation follows in consuming work lines. Catalog covers unified L3 plugin/skill; legacy IDs are separate and return 404. Enforce live tenant ACL, ETag, idempotency, step-up and author separation. Upload permission alone does not authorize a tool kind/delivery or security reviewer role; server policy must authorize them. */
     post: operations['UnifiedCreateResourcePackage'];
     delete?: never;
     options?: never;
@@ -589,7 +589,7 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** @description P1-K frozen contract; implementation follows in consuming work lines. Catalog covers skill and future tool only; plugin IDs are not exposed here and return 404. Plugin views use unchanged legacy APIs. Enforce live tenant ACL, ETag, idempotency, step-up and author separation. Upload permission alone does not authorize a tool kind/delivery or security reviewer role; server policy must authorize them. */
+    /** @description P1-K frozen contract; implementation follows in consuming work lines. Catalog covers unified L3 plugin/skill; legacy IDs are separate and return 404. Enforce live tenant ACL, ETag, idempotency, step-up and author separation. Upload permission alone does not authorize a tool kind/delivery or security reviewer role; server policy must authorize them. */
     get: operations['UnifiedGetResourcePackage'];
     put?: never;
     post?: never;
@@ -606,10 +606,10 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** @description P1-K frozen contract; implementation follows in consuming work lines. Catalog covers skill and future tool only; plugin IDs are not exposed here and return 404. Plugin views use unchanged legacy APIs. Enforce live tenant ACL, ETag, idempotency, step-up and author separation. Upload permission alone does not authorize a tool kind/delivery or security reviewer role; server policy must authorize them. */
+    /** @description P1-K frozen contract; implementation follows in consuming work lines. Catalog covers unified L3 plugin/skill; legacy IDs are separate and return 404. Enforce live tenant ACL, ETag, idempotency, step-up and author separation. Upload permission alone does not authorize a tool kind/delivery or security reviewer role; server policy must authorize them. */
     get: operations['UnifiedListResourceVersions'];
     put?: never;
-    /** @description P1-K frozen contract; implementation follows in consuming work lines. Catalog covers skill and future tool only; plugin IDs are not exposed here and return 404. Plugin views use unchanged legacy APIs. Enforce live tenant ACL, ETag, idempotency, step-up and author separation. Upload permission alone does not authorize a tool kind/delivery or security reviewer role; server policy must authorize them. */
+    /** @description P1-K frozen contract; implementation follows in consuming work lines. Catalog covers unified L3 plugin/skill; legacy IDs are separate and return 404. Enforce live tenant ACL, ETag, idempotency, step-up and author separation. Upload permission alone does not authorize a tool kind/delivery or security reviewer role; server policy must authorize them. */
     post: operations['UnifiedUploadResourceVersion'];
     delete?: never;
     options?: never;
@@ -624,7 +624,7 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** @description P1-K frozen contract; implementation follows in consuming work lines. Catalog covers skill and future tool only; plugin IDs are not exposed here and return 404. Plugin views use unchanged legacy APIs. Enforce live tenant ACL, ETag, idempotency, step-up and author separation. Upload permission alone does not authorize a tool kind/delivery or security reviewer role; server policy must authorize them. */
+    /** @description P1-K frozen contract; implementation follows in consuming work lines. Catalog covers unified L3 plugin/skill; legacy IDs are separate and return 404. Enforce live tenant ACL, ETag, idempotency, step-up and author separation. Upload permission alone does not authorize a tool kind/delivery or security reviewer role; server policy must authorize them. */
     get: operations['UnifiedGetResourceVersion'];
     put?: never;
     post?: never;
@@ -643,7 +643,7 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** @description P1-K frozen contract; implementation follows in consuming work lines. Catalog covers skill and future tool only; plugin IDs are not exposed here and return 404. Plugin views use unchanged legacy APIs. Enforce live tenant ACL, ETag, idempotency, step-up and author separation. Upload permission alone does not authorize a tool kind/delivery or security reviewer role; server policy must authorize them. */
+    /** @description P1-K frozen contract; implementation follows in consuming work lines. Catalog covers unified L3 plugin/skill; legacy IDs are separate and return 404. Enforce live tenant ACL, ETag, idempotency, step-up and author separation. Upload permission alone does not authorize a tool kind/delivery or security reviewer role; server policy must authorize them. */
     post: operations['UnifiedSubmitResourceVersion'];
     delete?: never;
     options?: never;
@@ -658,7 +658,7 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** @description P1-K frozen contract; implementation follows in consuming work lines. Catalog covers skill and future tool only; plugin IDs are not exposed here and return 404. Plugin views use unchanged legacy APIs. Enforce live tenant ACL, ETag, idempotency, step-up and author separation. Upload permission alone does not authorize a tool kind/delivery or security reviewer role; server policy must authorize them. */
+    /** @description P1-K frozen contract; implementation follows in consuming work lines. Catalog covers unified L3 plugin/skill; legacy IDs are separate and return 404. Enforce live tenant ACL, ETag, idempotency, step-up and author separation. Upload permission alone does not authorize a tool kind/delivery or security reviewer role; server policy must authorize them. */
     get: operations['UnifiedListMarketAdminReview'];
     put?: never;
     post?: never;
@@ -675,7 +675,7 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** @description P1-K frozen contract; implementation follows in consuming work lines. Catalog covers skill and future tool only; plugin IDs are not exposed here and return 404. Plugin views use unchanged legacy APIs. Enforce live tenant ACL, ETag, idempotency, step-up and author separation. Upload permission alone does not authorize a tool kind/delivery or security reviewer role; server policy must authorize them. */
+    /** @description P1-K frozen contract; implementation follows in consuming work lines. Catalog covers unified L3 plugin/skill; legacy IDs are separate and return 404. Enforce live tenant ACL, ETag, idempotency, step-up and author separation. Upload permission alone does not authorize a tool kind/delivery or security reviewer role; server policy must authorize them. */
     get: operations['UnifiedListMarketAdminPublished'];
     put?: never;
     post?: never;
@@ -694,7 +694,7 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** @description P1-K frozen contract; implementation follows in consuming work lines. Catalog covers skill and future tool only; plugin IDs are not exposed here and return 404. Plugin views use unchanged legacy APIs. Enforce live tenant ACL, ETag, idempotency, step-up and author separation. Upload permission alone does not authorize a tool kind/delivery or security reviewer role; server policy must authorize them. */
+    /** @description P1-K frozen contract; implementation follows in consuming work lines. Catalog covers unified L3 plugin/skill; legacy IDs are separate and return 404. Enforce live tenant ACL, ETag, idempotency, step-up and author separation. Upload permission alone does not authorize a tool kind/delivery or security reviewer role; server policy must authorize them. */
     post: operations['UnifiedDecideResourceReview'];
     delete?: never;
     options?: never;
@@ -711,7 +711,7 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** @description P1-K frozen contract; implementation follows in consuming work lines. Catalog covers skill and future tool only; plugin IDs are not exposed here and return 404. Plugin views use unchanged legacy APIs. Enforce live tenant ACL, ETag, idempotency, step-up and author separation. Upload permission alone does not authorize a tool kind/delivery or security reviewer role; server policy must authorize them. */
+    /** @description P1-K frozen contract; implementation follows in consuming work lines. Catalog covers unified L3 plugin/skill; legacy IDs are separate and return 404. Enforce live tenant ACL, ETag, idempotency, step-up and author separation. Upload permission alone does not authorize a tool kind/delivery or security reviewer role; server policy must authorize them. */
     post: operations['UnifiedPublishResourceVersion'];
     delete?: never;
     options?: never;
@@ -728,7 +728,7 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** @description P1-K frozen contract; implementation follows in consuming work lines. Catalog covers skill and future tool only; plugin IDs are not exposed here and return 404. Plugin views use unchanged legacy APIs. Enforce live tenant ACL, ETag, idempotency, step-up and author separation. Upload permission alone does not authorize a tool kind/delivery or security reviewer role; server policy must authorize them. */
+    /** @description P1-K frozen contract; implementation follows in consuming work lines. Catalog covers unified L3 plugin/skill; legacy IDs are separate and return 404. Enforce live tenant ACL, ETag, idempotency, step-up and author separation. Upload permission alone does not authorize a tool kind/delivery or security reviewer role; server policy must authorize them. */
     post: operations['UnifiedWithdrawResourceVersion'];
     delete?: never;
     options?: never;
@@ -760,7 +760,7 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** @description P1-K frozen contract; implementation follows in consuming work lines. Catalog covers skill and future tool only; plugin IDs are not exposed here and return 404. Plugin views use unchanged legacy APIs. Enforce live tenant ACL, ETag, idempotency, step-up and author separation. Upload permission alone does not authorize a tool kind/delivery or security reviewer role; server policy must authorize them. */
+    /** @description P1-K frozen contract; implementation follows in consuming work lines. Catalog covers unified L3 plugin/skill; legacy IDs are separate and return 404. Enforce live tenant ACL, ETag, idempotency, step-up and author separation. Upload permission alone does not authorize a tool kind/delivery or security reviewer role; server policy must authorize them. */
     get: operations['UnifiedGetResourceReview'];
     put?: never;
     post?: never;
@@ -779,7 +779,7 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** @description P1-K frozen contract. Implementation follows in consuming work lines. Mutation requires If-Match and Idempotency-Key. Identity, tenant, ownership, kind and exact revision are checked from trusted authentication. Plugin IDs return 404. P1 enables skill only; tool delivery remains denied until dedicated authorization is enabled. */
+    /** @description P1-K frozen contract. Implementation follows in consuming work lines. Mutation requires If-Match and Idempotency-Key. Identity, tenant, ownership, kind and exact revision are checked from trusted authentication. Legacy plugin IDs return 404. Catalog enables L3 plugin/skill; tool delivery remains denied until dedicated authorization is enabled. */
     post: operations['UnifiedCreateDownloadTicket'];
     delete?: never;
     options?: never;
@@ -796,7 +796,7 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** @description P1-K frozen contract. Implementation follows in consuming work lines. Mutation requires If-Match and Idempotency-Key. Identity, tenant, ownership, kind and exact revision are checked from trusted authentication. Plugin IDs return 404. P1 enables skill only; tool delivery remains denied until dedicated authorization is enabled. */
+    /** @description P1-K frozen contract. Implementation follows in consuming work lines. Mutation requires If-Match and Idempotency-Key. Identity, tenant, ownership, kind and exact revision are checked from trusted authentication. Legacy plugin IDs return 404. Catalog enables L3 plugin/skill; tool delivery remains denied until dedicated authorization is enabled. */
     post: operations['UnifiedDownloadArtifact'];
     delete?: never;
     options?: never;
@@ -811,10 +811,10 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** @description P1-K frozen contract. Implementation follows in consuming work lines. Identity, tenant, ownership, kind and exact revision are checked from trusted authentication. Plugin IDs return 404. P1 enables skill only; tool delivery remains denied until dedicated authorization is enabled. */
+    /** @description P1-K frozen contract. Implementation follows in consuming work lines. Identity, tenant, ownership, kind and exact revision are checked from trusted authentication. Legacy plugin IDs return 404. Catalog enables L3 plugin/skill; tool delivery remains denied until dedicated authorization is enabled. */
     get: operations['UnifiedListInstallations'];
     put?: never;
-    /** @description P1-K frozen contract. Implementation follows in consuming work lines. Mutation requires If-Match and Idempotency-Key. Identity, tenant, ownership, kind and exact revision are checked from trusted authentication. Plugin IDs return 404. P1 enables skill only; tool delivery remains denied until dedicated authorization is enabled. */
+    /** @description P1-K frozen contract. Implementation follows in consuming work lines. Mutation requires If-Match and Idempotency-Key. Identity, tenant, ownership, kind and exact revision are checked from trusted authentication. Legacy plugin IDs return 404. Catalog enables L3 plugin/skill; tool delivery remains denied until dedicated authorization is enabled. */
     post: operations['UnifiedSelectInstallation'];
     delete?: never;
     options?: never;
@@ -831,7 +831,7 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** @description P1-K frozen contract. Implementation follows in consuming work lines. Mutation requires If-Match and Idempotency-Key. Identity, tenant, ownership, kind and exact revision are checked from trusted authentication. Plugin IDs return 404. P1 enables skill only; tool delivery remains denied until dedicated authorization is enabled. */
+    /** @description P1-K frozen contract. Implementation follows in consuming work lines. Mutation requires If-Match and Idempotency-Key. Identity, tenant, ownership, kind and exact revision are checked from trusted authentication. Legacy plugin IDs return 404. Catalog enables L3 plugin/skill; tool delivery remains denied until dedicated authorization is enabled. */
     post: operations['UnifiedReportInstallation'];
     delete?: never;
     options?: never;
@@ -848,7 +848,7 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** @description P1-K frozen contract. Implementation follows in consuming work lines. Mutation requires If-Match and Idempotency-Key. Identity, tenant, ownership, kind and exact revision are checked from trusted authentication. Plugin IDs return 404. P1 enables skill only; tool delivery remains denied until dedicated authorization is enabled. */
+    /** @description P1-K frozen contract. Implementation follows in consuming work lines. Mutation requires If-Match and Idempotency-Key. Identity, tenant, ownership, kind and exact revision are checked from trusted authentication. Legacy plugin IDs return 404. Catalog enables L3 plugin/skill; tool delivery remains denied until dedicated authorization is enabled. */
     post: operations['UnifiedRenewInstallation'];
     delete?: never;
     options?: never;
@@ -863,10 +863,10 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** @description P1-K frozen contract. Implementation follows in consuming work lines. Identity, tenant, ownership, kind and exact revision are checked from trusted authentication. Plugin IDs return 404. P1 enables skill only; tool delivery remains denied until dedicated authorization is enabled. */
+    /** @description P1-K frozen contract. Implementation follows in consuming work lines. Identity, tenant, ownership, kind and exact revision are checked from trusted authentication. Legacy plugin IDs return 404. Catalog enables L3 plugin/skill; tool delivery remains denied until dedicated authorization is enabled. */
     get: operations['UnifiedListDistributions'];
     put?: never;
-    /** @description P1-K frozen contract. Implementation follows in consuming work lines. Mutation requires If-Match and Idempotency-Key. Identity, tenant, ownership, kind and exact revision are checked from trusted authentication. Plugin IDs return 404. P1 enables skill only; tool delivery remains denied until dedicated authorization is enabled. */
+    /** @description P1-K frozen contract. Implementation follows in consuming work lines. Mutation requires If-Match and Idempotency-Key. Identity, tenant, ownership, kind and exact revision are checked from trusted authentication. Legacy plugin IDs return 404. Catalog enables L3 plugin/skill; tool delivery remains denied until dedicated authorization is enabled. */
     post: operations['UnifiedCreateDistribution'];
     delete?: never;
     options?: never;
@@ -881,7 +881,7 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** @description P1-K frozen contract. Implementation follows in consuming work lines. Identity, tenant, ownership, kind and exact revision are checked from trusted authentication. Plugin IDs return 404. P1 enables skill only; tool delivery remains denied until dedicated authorization is enabled. */
+    /** @description P1-K frozen contract. Implementation follows in consuming work lines. Identity, tenant, ownership, kind and exact revision are checked from trusted authentication. Legacy plugin IDs return 404. Catalog enables L3 plugin/skill; tool delivery remains denied until dedicated authorization is enabled. */
     get: operations['UnifiedGetDistribution'];
     put?: never;
     post?: never;
@@ -898,7 +898,7 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** @description P1-K frozen contract. Implementation follows in consuming work lines. Identity, tenant, ownership, kind and exact revision are checked from trusted authentication. Plugin IDs return 404. P1 enables skill only; tool delivery remains denied until dedicated authorization is enabled. */
+    /** @description P1-K frozen contract. Implementation follows in consuming work lines. Identity, tenant, ownership, kind and exact revision are checked from trusted authentication. Legacy plugin IDs return 404. Catalog enables L3 plugin/skill; tool delivery remains denied until dedicated authorization is enabled. */
     get: operations['UnifiedDownloadVersionArtifact'];
     put?: never;
     post?: never;
@@ -1373,21 +1373,22 @@ export interface components {
         [key: string]: unknown;
       }[];
     };
-    /** @description Catalog manifest for skill/tool. PluginManifest remains in the package format for internal migration only; catalog APIs do not expose plugin projections. */
+    /** @description Unified plugin/skill/tool manifest; plugin uses npm tgz and v2 detached signatures. Tool delivery remains gated. */
     UnifiedManifest:
+      | components['schemas']['PluginManifest']
       | components['schemas']['SkillManifest']
       | components['schemas']['ToolManifest'];
     UnifiedEnvelope: components['schemas']['Envelope'];
-    /** @description Shared L3 skill/tool only. Server derives tenant, owner and level. Private skill stays local. Plugin CRUD uses legacy APIs; catalog rejects plugin kind/IDs. */
+    /** @description Shared L3 plugin/skill. Server derives tenant, owner and level. Tool delivery remains gated; legacy IDs are not catalog IDs. */
     UnifiedPackageInput: {
       name: string;
       /** @enum {string} */
-      kind: 'skill' | 'tool';
+      kind: 'plugin' | 'skill' | 'tool';
       /** @enum {string} */
       visibility: 'tenant' | 'members' | 'groups';
       groupIds?: string[];
     };
-    /** @description Shared L3 skill/tool. Plugin L0-L4/private views continue through legacy APIs, without catalog projection. */
+    /** @description Shared L3 unified resource. Legacy plugin governance remains available until its separate contract is implemented. */
     UnifiedPackage: {
       /** Format: uuid */
       id: string;
@@ -1395,7 +1396,7 @@ export interface components {
       tenantId: string;
       name: string;
       /** @enum {string} */
-      kind: 'skill' | 'tool';
+      kind: 'plugin' | 'skill' | 'tool';
       /** Format: uuid */
       ownerId: string;
       /** @enum {string} */
@@ -1439,7 +1440,7 @@ export interface components {
       /** @description Display only; not signed JSON bytes. Never reserialize this field for verification or installation. Download exact bytes using manifestDownloadPath, hash them against digest and the verified envelope before parsing. */
       manifest: components['schemas']['UnifiedManifest'];
       /** @enum {string} */
-      kind: 'skill' | 'tool';
+      kind: 'plugin' | 'skill' | 'tool';
       readonly risk: components['schemas']['UnifiedRiskAssessment'];
       /** @description Same-origin locator for exact immutable raw manifest UTF-8 bytes, not a bearer URL. Every request checks tenant/package/version ACL; caller must verify digest/envelope. Published and draft reads use the current corresponding ACL. */
       manifestDownloadPath: string;
@@ -1461,7 +1462,7 @@ export interface components {
     /** @description Read-only server assessment, recalculated on content/permission changes. Publication transaction checks the current assessment and review identities. */
     UnifiedRiskAssessment: {
       /**
-       * @description Server-derived floor: command skill or any nonempty tools/outboundHosts/dataAccess is at least r2; tool at least r2, git r3. Server scans text too; declarations cannot downgrade command content.
+       * @description Server-derived floor: plugin is at least r2; command skill or any nonempty tools/outboundHosts/dataAccess is at least r2; tool at least r2, git r3. Server scans text too; declarations cannot downgrade command content.
        * @enum {string}
        */
       minimumLevel: 'r1' | 'r2' | 'r3';
@@ -1533,7 +1534,7 @@ export interface components {
       /** Format: uuid */
       versionId: string;
       /** @enum {string} */
-      kind: 'skill' | 'tool';
+      kind: 'plugin' | 'skill' | 'tool';
       version: components['schemas']['$defs-Version'];
       manifestDigest: components['schemas']['Digest'];
     };
@@ -2087,6 +2088,46 @@ export interface components {
       /** @enum {string} */
       kind: 'node' | 'python' | 'java';
       versionRange: string;
+    };
+    PluginArtifact: {
+      id: components['schemas']['Name'];
+      /** @constant */
+      role: 'payload';
+      digest: components['schemas']['Digest'];
+      sizeBytes: number;
+      /** @constant */
+      mediaType: 'application/gzip';
+      /** @constant */
+      os: 'any';
+      /** @constant */
+      arch: 'any';
+    };
+    Plugin: {
+      packageName: string;
+      dshVersionRange: string;
+    };
+    PluginManifest: {
+      /** @constant */
+      schemaVersion: 1;
+      name: components['schemas']['Name'];
+      version: components['schemas']['$defs-Version'];
+      description: string;
+      author: {
+        displayName: string;
+      };
+      license: string;
+      permissions: components['schemas']['Permissions'];
+      runtimes: components['schemas']['Runtime'][];
+      artifacts: components['schemas']['PluginArtifact'][];
+      signature: {
+        /** @constant */
+        mode: 'detached';
+        /** @constant */
+        algorithm: 'Ed25519';
+      };
+      /** @constant */
+      kind: 'plugin';
+      plugin: components['schemas']['Plugin'];
     };
     SkillArtifact: {
       id: components['schemas']['Name'];
@@ -6290,7 +6331,7 @@ export interface operations {
         limit?: components['parameters']['Limit'];
         /** @description 上一页响应里的 nextCursor。 */
         cursor?: components['parameters']['Cursor'];
-        kind?: 'skill' | 'tool';
+        kind?: 'plugin' | 'skill' | 'tool';
       };
       header?: never;
       path?: never;
@@ -7136,7 +7177,7 @@ export interface operations {
         limit?: components['parameters']['Limit'];
         /** @description 上一页响应里的 nextCursor。 */
         cursor?: components['parameters']['Cursor'];
-        kind?: 'skill' | 'tool';
+        kind?: 'plugin' | 'skill' | 'tool';
       };
       header?: never;
       path?: never;
@@ -7253,7 +7294,7 @@ export interface operations {
         limit?: components['parameters']['Limit'];
         /** @description 上一页响应里的 nextCursor。 */
         cursor?: components['parameters']['Cursor'];
-        kind?: 'skill' | 'tool';
+        kind?: 'plugin' | 'skill' | 'tool';
       };
       header?: never;
       path?: never;
@@ -8228,7 +8269,7 @@ export interface operations {
   UnifiedListInstallations: {
     parameters: {
       query: {
-        kind?: 'skill' | 'tool';
+        kind?: 'plugin' | 'skill' | 'tool';
         limit?: number;
         cursor?: string;
         clientId: string;
@@ -8708,7 +8749,7 @@ export interface operations {
   UnifiedListDistributions: {
     parameters: {
       query?: {
-        kind?: 'skill' | 'tool';
+        kind?: 'plugin' | 'skill' | 'tool';
         limit?: number;
         cursor?: string;
         instanceId?: string;

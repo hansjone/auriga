@@ -20,7 +20,7 @@
         },
         "kind": {
           "type": "string",
-          "enum": ["skill", "tool"]
+          "enum": ["plugin", "skill", "tool"]
         },
         "version": {
           "$ref": "./package.schema.json#/$defs/Version"
@@ -153,7 +153,11 @@
     },
     "UnifiedResourceDispatchRef": {
       "description": "Resource service outbound validation. Legacy readers use UnifiedResourceRef; every new dispatch must carry a positive installationRevision.",
-      "allOf": [{ "$ref": "#/$defs/UnifiedResourceRef" }],
+      "allOf": [
+        {
+          "$ref": "#/$defs/UnifiedResourceRef"
+        }
+      ],
       "type": "object",
       "properties": {
         "installationRevision": {

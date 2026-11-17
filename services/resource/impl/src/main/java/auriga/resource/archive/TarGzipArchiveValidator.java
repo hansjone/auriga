@@ -41,6 +41,20 @@ public final class TarGzipArchiveValidator {
 
   public Result validate(
       UUID tenant, StageId stage, ObjectInfo object, String expectedDigest, OsEnum targetOs) {
+    return validate(tenant, stage, object, expectedDigest, targetOs, false);
+  }
+
+  public Result validatePlugin(UUID tenant, ObjectStore.Staged stage) {
+    return validate(tenant, stage.id(), stage.object(), stage.object().digest(), OsEnum.ANY, true);
+  }
+
+  private Result validate(
+      UUID tenant,
+      StageId stage,
+      ObjectInfo object,
+      String expectedDigest,
+      OsEnum targetOs,
+      boolean npmPackage) {
     if (tenant == null
         || stage == null
         || stage.value() == null
@@ -76,6 +90,15 @@ public final class TarGzipArchiveValidator {
             var inventory = new ArrayList<FileEntry>();
             byte[] manifest = null;
             for (var entry = tar.getNextEntry(); entry != null; entry = tar.getNextEntry()) {
+              if (npmPackage) {
+                String name = entry.getName();
+                if (entry.isDirectory() && name.endsWith("/"))
+                  name = name.substring(0, name.length() - 1);
+                auriga.resource.app.CatalogManifest.path(name);
+                if ((!name.equals("package") && !name.startsWith("package/"))
+                    || name.getBytes(java.nio.charset.StandardCharsets.UTF_8).length > 240
+                    || name.split("/").length > 16) throw StrictUstarInputStream.bad();
+              }
               long size = 0;
               MessageDigest fileDigest;
               try {

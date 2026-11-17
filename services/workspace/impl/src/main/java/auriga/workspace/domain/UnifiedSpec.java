@@ -51,7 +51,9 @@ public final class UnifiedSpec {
     } else {
       for (var selection : selections) {
         var id = selection.getIdentity();
-        require(id.getTenantId().equals(old.getTenantId()) && id.getKind().equals("skill"));
+        require(
+            id.getTenantId().equals(old.getTenantId())
+                && Set.of("plugin", "skill").contains(id.getKind()));
         String key = id.getPackageId();
         require(changed.add(key));
         var next = incoming.remove(key);
@@ -98,7 +100,7 @@ public final class UnifiedSpec {
     }
     for (var ref : result.values()) {
       require(ref.getIdentity().getTenantId().equals(old.getTenantId()));
-      require(ref.getIdentity().getKind().equals("skill"));
+      require(Set.of("plugin", "skill").contains(ref.getIdentity().getKind()));
       require(UnifiedResourceIntent.revision(ref) > 0);
       UnifiedResourceIntent.desired(ref);
     }

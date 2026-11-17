@@ -26,6 +26,8 @@ import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.*;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.jdbc.core.JdbcTemplate;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.node.ObjectNode;
@@ -216,7 +218,21 @@ class CatalogWorkflowTest {
   record Upload(UUID pkg, UUID version, JsonNode value, byte[] manifest, byte[] payload) {}
 
   Upload upload(boolean command) throws Exception {
-    JsonNode p = create();
+    return upload(command, "skill");
+  }
+
+  Upload upload(boolean command, String kind) throws Exception {
+    JsonNode p =
+        kind.equals("skill")
+            ? create()
+            : catalog.create(
+                actor(AUTHOR),
+                JSON.createObjectNode()
+                    .put("kind", "plugin")
+                    .put("name", "plugin-" + key())
+                    .put("visibility", "tenant"),
+                key(),
+                "\"0\"");
     String name = p.path("name").asString();
     byte[] bytes =
         archive(
@@ -258,6 +274,25 @@ class CatalogWorkflowTest {
                 .put("mediaType", "application/gzip")
                 .put("os", "any")
                 .put("arch", "any"));
+    if (!kind.equals("skill")) {
+      bytes =
+          kind.equals("npm-plugin")
+              ? getClass()
+                  .getResourceAsStream("/plugin/example-dsh-plugin-1.0.0.tgz")
+                  .readAllBytes()
+              : pluginArchive("@example/" + name, "1.0.0", "package/package.json", false, false);
+      manifest.put("kind", "plugin");
+      manifest.remove("skill");
+      manifest.set(
+          "plugin",
+          JSON.createObjectNode()
+              .put(
+                  "packageName",
+                  kind.equals("npm-plugin") ? "@example/dsh-plugin" : "@example/" + name)
+              .put("dshVersionRange", "*"));
+      var artifact = (ObjectNode) manifest.path("artifacts").get(0);
+      artifact.put("digest", CatalogManifest.digest(bytes)).put("sizeBytes", bytes.length);
+    }
     byte[] raw = (" \n" + manifest + "\n").getBytes(StandardCharsets.UTF_8);
     UUID id = UUID.fromString(p.path("id").asString());
     var value =
@@ -292,6 +327,208 @@ class CatalogWorkflowTest {
     return out.toByteArray();
   }
 
+  static byte[] pluginArchive(
+      String name, String version, String path, boolean link, boolean script) throws Exception {
+    var out = new ByteArrayOutputStream();
+    try (var gzip = new java.util.zip.GZIPOutputStream(out);
+        var tar = new TarArchiveOutputStream(gzip)) {
+      var pkg = JSON.createObjectNode().put("name", name).put("version", version);
+      if (script) pkg.set("scripts", JSON.createObjectNode().put("postinstall", "node install.js"));
+      byte[] content = pkg.toString().getBytes(StandardCharsets.UTF_8);
+      var entry =
+          new TarArchiveEntry(path, link ? TarConstants.LF_SYMLINK : TarConstants.LF_NORMAL);
+      entry.setMode(0644);
+      if (link) entry.setLinkName("../../outside");
+      entry.setSize(link ? 0 : content.length);
+      tar.putArchiveEntry(entry);
+      if (!link) tar.write(content);
+      tar.closeArchiveEntry();
+    }
+    return out.toByteArray();
+  }
+
+  @Test
+  void acceptsActualNpmPackOutput() throws Exception {
+    TenantContext.run(
+        TENANT,
+        () -> {
+          try {
+            assertEquals(
+                "r2",
+                upload(false, "npm-plugin").value.path("risk").path("minimumLevel").asString());
+          } catch (Exception e) {
+            throw new RuntimeException(e);
+          }
+        });
+  }
+
+  @Test
+  void pluginUploadRejectsIdentityMismatchPathsLinksScriptsAndCompressedLimit() throws Exception {
+    TenantContext.call(
+        TENANT,
+        () -> {
+          try {
+            var u = upload(false, "plugin");
+            assertEquals("r2", u.value.path("risk").path("minimumLevel").asString());
+            assertEquals(2, u.value.path("risk").path("requiredReviewers").asInt());
+            String npmName = u.value.path("manifest").path("plugin").path("packageName").asString();
+            for (byte[] payload :
+                List.of(
+                    pluginArchive("other", "1.0.0", "package/package.json", false, false),
+                    pluginArchive(npmName, "2.0.0", "package/package.json", false, false),
+                    pluginArchive(npmName, "1.0.0", "package.json", false, false),
+                    pluginArchive(npmName, "1.0.0", "../package/package.json", false, false),
+                    pluginArchive(npmName, "1.0.0", "package/package.json", true, false),
+                    pluginArchive(npmName, "1.0.0", "package/package.json", false, true))) {
+              var m = (ObjectNode) JSON.readTree(u.manifest);
+              ((ObjectNode) m.path("artifacts").get(0))
+                  .put("digest", CatalogManifest.digest(payload))
+                  .put("sizeBytes", payload.length);
+              byte[] raw = m.toString().getBytes(StandardCharsets.UTF_8);
+              assertError(
+                  CommonErrors.VALIDATION_FAILED,
+                  () ->
+                      catalog.upload(
+                          actor(AUTHOR),
+                          u.pkg,
+                          JSON.createObjectNode()
+                              .put("version", "1.0.0")
+                              .put("expectedDigest", CatalogManifest.digest(raw)),
+                          raw,
+                          List.of(new ByteArrayInputStream(payload)),
+                          key(),
+                          "\"2\""));
+            }
+            var m = (ObjectNode) JSON.readTree(u.manifest);
+            ((ObjectNode) m.path("artifacts").get(0)).put("sizeBytes", 67108865);
+            byte[] raw = m.toString().getBytes(StandardCharsets.UTF_8);
+            assertError(
+                CommonErrors.VALIDATION_FAILED,
+                () ->
+                    CatalogManifest.parse(
+                        raw, m.path("name").asString(), "1.0.0", CatalogManifest.digest(raw)));
+            return null;
+          } catch (Exception e) {
+            throw new RuntimeException(e);
+          }
+        });
+  }
+
+  static byte[] pluginBudgetArchive(boolean manyEntries, String name) throws Exception {
+    var out = new ByteArrayOutputStream();
+    var params = new org.apache.commons.compress.compressors.gzip.GzipParameters();
+    params.setCompressionLevel(manyEntries ? 0 : 1);
+    try (var gzip =
+            new org.apache.commons.compress.compressors.gzip.GzipCompressorOutputStream(
+                out, params);
+        var tar = new TarArchiveOutputStream(gzip)) {
+      byte[] pkg =
+          JSON.createObjectNode()
+              .put("name", name)
+              .put("version", "1.0.0")
+              .toString()
+              .getBytes(StandardCharsets.UTF_8);
+      var json = new TarArchiveEntry("package/package.json");
+      json.setSize(pkg.length);
+      tar.putArchiveEntry(json);
+      tar.write(pkg);
+      tar.closeArchiveEntry();
+      if (manyEntries) {
+        for (int i = 0; i < 4096; i++) {
+          var entry = new TarArchiveEntry("package/file-" + i);
+          entry.setSize(0);
+          tar.putArchiveEntry(entry);
+          tar.closeArchiveEntry();
+        }
+      } else {
+        var entry = new TarArchiveEntry("package/large.js");
+        entry.setSize(268435456L);
+        tar.putArchiveEntry(entry);
+        byte[] noise = new byte[4 * 1024 * 1024];
+        new Random(17).nextBytes(noise);
+        tar.write(noise);
+        byte[] zeros = new byte[65536];
+        for (long remaining = entry.getSize() - noise.length;
+            remaining > 0;
+            remaining -= zeros.length) tar.write(zeros);
+        tar.closeArchiveEntry();
+      }
+    }
+    return out.toByteArray();
+  }
+
+  @Test
+  void pluginArchiveBudgetsAreEnforcedBeforeVersionInsert() throws Exception {
+    TenantContext.run(
+        TENANT,
+        () -> {
+          try {
+            var u = upload(false, "plugin");
+            for (byte[] payload :
+                List.of(
+                    pluginBudgetArchive(
+                        true,
+                        u.value.path("manifest").path("plugin").path("packageName").asString()),
+                    pluginBudgetArchive(
+                        false,
+                        u.value.path("manifest").path("plugin").path("packageName").asString()))) {
+              var m = (ObjectNode) JSON.readTree(u.manifest);
+              ((ObjectNode) m.path("artifacts").get(0))
+                  .put("digest", CatalogManifest.digest(payload))
+                  .put("sizeBytes", payload.length);
+              byte[] raw = m.toString().getBytes(StandardCharsets.UTF_8);
+              assertError(
+                  CommonErrors.VALIDATION_FAILED,
+                  () ->
+                      catalog.upload(
+                          actor(AUTHOR),
+                          u.pkg,
+                          JSON.createObjectNode()
+                              .put("version", "1.0.0")
+                              .put("expectedDigest", CatalogManifest.digest(raw)),
+                          raw,
+                          List.of(new ByteArrayInputStream(payload)),
+                          key(),
+                          "\"2\""));
+            }
+            var oversized =
+                new InputStream() {
+                  long remaining = 67108865;
+
+                  public int read() {
+                    return remaining-- > 0 ? 0 : -1;
+                  }
+
+                  public int read(byte[] bytes, int offset, int length) {
+                    if (remaining == 0) return -1;
+                    int n = (int) Math.min(remaining, length);
+                    Arrays.fill(bytes, offset, offset + n, (byte) 0);
+                    remaining -= n;
+                    return n;
+                  }
+                };
+            assertError(
+                CommonErrors.VALIDATION_FAILED,
+                () ->
+                    catalog.upload(
+                        actor(AUTHOR),
+                        u.pkg,
+                        JSON.createObjectNode()
+                            .put("version", "1.0.0")
+                            .put("expectedDigest", CatalogManifest.digest(u.manifest)),
+                        u.manifest,
+                        List.of(oversized),
+                        key(),
+                        "\"2\""));
+            assertEquals(
+                1,
+                catalog.list(actor(AUTHOR), u.pkg, "plugin", 50, null, null).path("items").size());
+          } catch (Exception e) {
+            throw new RuntimeException(e);
+          }
+        });
+  }
+
   JsonNode submit(Upload u) {
     return catalog.submit(actor(AUTHOR), u.pkg, u.version, reason(), key(), etag(u.value));
   }
@@ -312,8 +549,28 @@ class CatalogWorkflowTest {
   }
 
   JsonNode publish(Upload u, JsonNode review) {
-    return catalog.publish(
-        actor(PUBLISHER), u.pkg, u.version, reason(), key(), etag(review.path("version")));
+    var published =
+        catalog.publish(
+            actor(PUBLISHER), u.pkg, u.version, reason(), key(), etag(review.path("version")));
+    var envelope = (ObjectNode) published.path("resourceEnvelope").deepCopy();
+    String encoded = envelope.path("signature").path("value").asString();
+    envelope.remove("signature");
+    assertTrue(
+        assertDoesNotThrow(
+            () -> {
+              var verifier = Signature.getInstance("Ed25519");
+              verifier.initVerify(releaseKey.getPublic());
+              verifier.update(ResourceSigning.canonical(envelope).getBytes(StandardCharsets.UTF_8));
+              return verifier.verify(Base64.getUrlDecoder().decode(encoded));
+            }));
+    assertEquals(2, envelope.path("schemaVersion").asInt());
+    assertEquals(
+        CatalogManifest.digest(u.manifest),
+        envelope.path("statement").path("manifestDigest").asString());
+    assertEquals(
+        List.of(CatalogManifest.digest(u.payload)),
+        JSON.convertValue(envelope.path("statement").path("artifactDigests"), List.class));
+    return published;
   }
 
   @Test
@@ -381,13 +638,14 @@ class CatalogWorkflowTest {
         });
   }
 
-  @Test
-  void r2DistinctReviewersQualificationRevokedBeforePublication() throws Exception {
+  @ParameterizedTest
+  @ValueSource(strings = {"skill", "plugin"})
+  void r2DistinctReviewersQualificationRevokedBeforePublication(String kind) throws Exception {
     TenantContext.call(
         TENANT,
         () -> {
           try {
-            var u = upload(true);
+            var u = upload(true, kind);
             assertEquals("r2", u.value.path("risk").path("minimumLevel").asString());
             var review = submit(u);
             JsonNode initial = review;
@@ -415,7 +673,7 @@ class CatalogWorkflowTest {
   }
 
   @Test
-  void tenantIsolationIdempotencyAndPluginNonExposure() {
+  void tenantIsolationIdempotencyAndLegacyIdSeparation() {
     TenantContext.run(
         TENANT,
         () -> {
@@ -438,7 +696,7 @@ class CatalogWorkflowTest {
               CommonErrors.VALIDATION_FAILED,
               () ->
                   catalog.create(
-                      actor(AUTHOR), body.deepCopy().put("kind", "plugin"), key(), "\"0\""));
+                      actor(AUTHOR), body.deepCopy().put("kind", "tool"), key(), "\"0\""));
           UUID legacyId = UuidV7.next();
           tx.write(
               () ->
@@ -550,19 +808,22 @@ class CatalogWorkflowTest {
         .put("tenantId", TENANT.toString())
         .put("packageId", u.pkg.toString())
         .put("versionId", u.version.toString())
-        .put("kind", "skill")
+        .put("kind", u.value.path("kind").asString())
         .put("version", "1.0.0")
         .put("manifestDigest", CatalogManifest.digest(u.manifest));
   }
 
-  @Test
-  void memberTicketsReportsAndMaliciousWithdrawal() throws Exception {
+  @ParameterizedTest
+  @ValueSource(strings = {"skill", "plugin"})
+  void memberTicketsReportsAndMaliciousWithdrawal(String kind) throws Exception {
     TenantContext.call(
         TENANT,
         () -> {
           try {
-            var u = upload(false);
-            publish(u, decide(submit(u), GENERAL, "general"));
+            var u = upload(false, kind);
+            var review = decide(submit(u), GENERAL, "general");
+            if (kind.equals("plugin")) review = decide(review, SECURITY, "security");
+            publish(u, review);
             var d = delivery(null);
             UUID client = UUID.randomUUID();
             var selection = JSON.createObjectNode().put("clientId", client.toString());
@@ -571,6 +832,21 @@ class CatalogWorkflowTest {
                 JSON.createObjectNode().put("action", "install").set("identity", identity(u)));
             var installed = d.select(actor(GENERAL), selection, key(), "\"0\"");
             assertEquals("applying", installed.path("state").asString());
+            assertEquals(
+                identity(u),
+                d.installations(actor(GENERAL), client, kind, 50, null)
+                    .path("items")
+                    .get(0)
+                    .path("resource")
+                    .path("identity"));
+            assertTrue(
+                java.util.stream.StreamSupport.stream(
+                        catalog
+                            .list(actor(GENERAL), null, kind, 200, null, null)
+                            .path("items")
+                            .spliterator(),
+                        false)
+                    .anyMatch(item -> item.path("id").asString().equals(u.pkg.toString())));
             var ticketBody =
                 JSON.createObjectNode()
                     .put("clientId", client.toString())
@@ -655,14 +931,17 @@ class CatalogWorkflowTest {
         });
   }
 
-  @Test
-  void distributionPinsBytesAndWaitsForTrustedNodeObservation() throws Exception {
+  @ParameterizedTest
+  @ValueSource(strings = {"skill", "plugin"})
+  void distributionPinsBytesAndWaitsForTrustedNodeObservation(String kind) throws Exception {
     TenantContext.call(
         TENANT,
         () -> {
           try {
-            var u = upload(false);
-            publish(u, decide(submit(u), GENERAL, "general"));
+            var u = upload(false, kind);
+            var review = decide(submit(u), GENERAL, "general");
+            if (kind.equals("plugin")) review = decide(review, SECURITY, "security");
+            publish(u, review);
             UUID instance = UUID.randomUUID(), node = UUID.randomUUID();
             var workspace = mock(UnifiedResourceWorkspace.class);
             when(workspace.snapshot(TENANT, instance))
