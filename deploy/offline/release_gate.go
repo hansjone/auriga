@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"strings"
 	"time"
@@ -30,13 +31,20 @@ func offlineBuildGate(o gateRequest) (buildGate, error) {
 	if err := verifyCumulative(o.Kit, o.Source, o.Tag, ""); err != nil {
 		return proof, err
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Minute)
+	interrupted, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer stop()
+	ctx, cancel := context.WithTimeout(interrupted, gateBuildTimeout)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "unshare", "--net", o.Executable, "internal-offline-build", "--source", o.Source, "--version", o.Tag, "--out", o.Out, "--sign-key", o.Key)
 	cmd.Dir = o.Source
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
+	cmd.Cancel = func() error { return cmd.Process.Signal(os.Interrupt) }
+	cmd.WaitDelay = 15 * time.Second
 	if err := cmd.Run(); err != nil {
+		if ctx.Err() != nil {
+			return proof, fmt.Errorf("断网构建门禁已取消（完整构建时限 %s）: %w", gateBuildTimeout, ctx.Err())
+		}
 		return proof, fmt.Errorf("必须具有Linux unshare网络命名空间权限且所有依赖齐备（无在线回退）: %w", err)
 	}
 	extracted, err := os.MkdirTemp("", "auriga-gate-result-")

@@ -7,12 +7,14 @@ import (
 	"net"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"strings"
 	"time"
 )
 
 const gateNetwork = "unshare-net: isolated dockerd; containers --network none; --pull never"
+const gateBuildTimeout = 2 * time.Hour
 
 func gateDockerEnv(socket string) []string {
 	env := []string{}
@@ -76,7 +78,9 @@ func isolatedGateBuild(args []string) error {
 		return err
 	}
 	defer func() { _ = log.Close() }()
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Minute)
+	interrupted, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer stop()
+	ctx, cancel := context.WithTimeout(interrupted, gateBuildTimeout)
 	defer cancel()
 	socket := filepath.Join(runtimeRoot, "docker.sock")
 	daemon := exec.CommandContext(ctx, "dockerd", "--config-file", config, "--host", "unix://"+socket, "--data-root", filepath.Join(root, "data"), "--exec-root", filepath.Join(runtimeRoot, "exec"), "--pidfile", filepath.Join(runtimeRoot, "pid"), "--bridge=none", "--iptables=false", "--ip6tables=false", "--ip-forward=false", "--ip-masq=false", "--userland-proxy=false", "--storage-driver=vfs", "--log-level=error")
@@ -109,6 +113,8 @@ func isolatedGateBuild(args []string) error {
 			break
 		}
 		select {
+		case <-ctx.Done():
+			return ctx.Err()
 		case result := <-done:
 			done <- result
 			raw, _ := smallFile(logPath, 4<<20)
@@ -128,5 +134,10 @@ func isolatedGateBuild(args []string) error {
 	build.Env = env
 	build.Stdout = os.Stdout
 	build.Stderr = os.Stderr
-	return build.Run()
+	setGateProcessGroup(build)
+	err = build.Run()
+	if build.Process != nil {
+		stopGateProcessGroup(build, true)
+	}
+	return err
 }
