@@ -654,7 +654,7 @@ onBeforeUnmount(() => {
                   {{ p.name }}
                 </button>
               </td>
-              <td>{{ p.level.toUpperCase() }}</td>
+              <td>{{ p.kind }}</td>
               <td>{{ t(p.visibility) }}</td>
             </tr>
             <tr v-for="r in reviews" :key="r.reviewId">
