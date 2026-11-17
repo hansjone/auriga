@@ -91,6 +91,21 @@ check() {
   printf 'PASS %s (content/owner/mode/mtime/ACL unchanged)\n' "$name"
 }
 check all_service_identities_and_supplementary_group pass ''
+downgrade="$AURIGA_DATA_ROOT/secrets/resource-downgrade"
+printf 'AURIGA_RESOURCE_DOWNGRADE_KID=test-only-downgrade\n' >>"$AURIGA_DATA_ROOT/stack.env"
+install -d -o 10001 -g 10001 -m 0700 "$downgrade"
+check missing_downgrade_key fail 'service=platform.*path-category=resource-downgrade operation=secret-metadata'
+printf 'SECRET_MUST_NOT_APPEAR\n' >"$downgrade/downgrade.pk8"
+chown 10001:10001 "$downgrade/downgrade.pk8"
+chmod 0600 "$downgrade/downgrade.pk8"
+check downgrade_private_path_readable pass ''
+chmod 0755 "$downgrade"
+check exposed_downgrade_directory fail 'service=platform.*path-category=resource-downgrade operation=secret-directory-metadata'
+chmod 0700 "$downgrade"
+chmod 0644 "$downgrade/downgrade.pk8"
+check exposed_downgrade_key fail 'service=platform.*path-category=resource-downgrade operation=secret-metadata'
+printf 'AURIGA_RESOURCE_DOWNGRADE_KID=\n' >>"$AURIGA_DATA_ROOT/stack.env"
+check disabled_downgrade_ignores_unused_key pass ''
 # Inherited POSIX ACL denies edge despite a visible mode of 0755.
 mv "$AURIGA_DATA_ROOT/config/pki-edge" "$TMP/pki-backup"
 python3 - "$AURIGA_DATA_ROOT/config" <<'PY'

@@ -172,6 +172,11 @@ load_stack_env() {
   done
   [ -n "${AURIGA_ACCESS_FILE:-}" ] || die "AURIGA_ACCESS_FILE is required"
   case "$AURIGA_ACCESS_FILE" in /*) ;; *) die "AURIGA_ACCESS_FILE must be absolute" ;; esac
+  _nas_downgrade_kid=${AURIGA_RESOURCE_DOWNGRADE_KID:-}
+  case "$_nas_downgrade_kid" in
+    *[!A-Za-z0-9._-]*) die 'invalid resource downgrade signing kid' ;;
+  esac
+  [ "${#_nas_downgrade_kid}" -le 128 ] || die 'invalid resource downgrade signing kid'
   validate_data_root "$AURIGA_DATA_ROOT"
   case "${AURIGA_INSTALL_MODE:-host}" in
     host) validate_managed_tree ;;
@@ -407,6 +412,9 @@ run_compose() (
 	  false) ;;
 	  *) die 'AURIGA_ONECLICK_PUBLISH must be true or false' ;;
 	esac
+  if [ -n "${AURIGA_RESOURCE_DOWNGRADE_KID:-}" ]; then
+    set -- -f "$NAS_ROOT/resource-downgrade-compose.yml" "$@"
+  fi
   if [ "${AURIGA_INSTALL_MODE:-host}" = container ]; then
     container_compose "$@"
     return
