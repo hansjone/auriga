@@ -7,6 +7,29 @@ import { acquireOperationLock } from './operation-lock.mjs';
 import { sha256File } from './verify.mjs';
 
 const PYTHON_ABI = 'cp312';
+const PREPARE_STAGES = [
+  'bootstrap_path',
+  'runtime_manifest',
+  'root_path',
+  'prepare_lock',
+  'environment_path',
+  'pip_wheel',
+  'marker_read',
+  'venv_paths',
+  'venv_create',
+  'alias_copy',
+  'pip_bootstrap',
+  'marker_write',
+  'interpreter_probe',
+  'index_config',
+  'constraints',
+];
+
+export function pythonUserFailureStage(error) {
+  return PREPARE_STAGES.includes(error?.pythonUserStage)
+    ? error.pythonUserStage
+    : 'unknown';
+}
 
 /** A finite diagnostic vocabulary prevents paths or subprocess output entering logs. */
 export function pythonUserFailureReason(error) {
@@ -23,6 +46,11 @@ export function pythonUserFailureReason(error) {
     return 'python_user.access_denied';
   if (error?.code === 'ENOENT') return 'python_user.file_missing';
   if (error?.code === 'desktop.in_use') return 'python_user.busy';
+  if (error?.message === 'guardian path alias') return 'python_user.path_alias';
+  if (error?.message === 'guardian path contains a link')
+    return 'python_user.path_link';
+  if (['ERR_INVALID_ARG_TYPE', 'ERR_INVALID_ARG_VALUE'].includes(error?.code))
+    return 'python_user.invalid_argument';
   if (error instanceof SyntaxError) return 'python_user.invalid_state';
   return 'python_user.unavailable';
 }
@@ -149,23 +177,33 @@ export function cleanPythonEnv(base) {
 }
 
 export function preparePythonUser(dir, dataHome, base = process.env) {
-  const bootstrap = join(dir, 'auriga/python');
-  if (!existsSync(join(bootstrap, 'pip.json'))) return null;
-  const manifest = JSON.parse(
-    readFileSync(join(dir, 'runtime/python/runtime.json'), 'utf8'),
-  );
-  const versionParts = /^(\d+)\.(\d+)\.\d+$/.exec(manifest.version);
-  if (!versionParts || `cp${versionParts[1]}${versionParts[2]}` !== PYTHON_ABI)
-    throw Object.assign(
-      new Error('个人 Python 环境 ABI 不兼容，请使用匹配版本的客户端'),
-      { reason: 'python_user.abi_mismatch' },
-    );
-  const paths = pythonUserPaths(dataHome);
-  assertLocalPath(paths.root);
-  const release = acquireOperationLock(join(paths.root, 'prepare.lock'));
+  let stage = 'bootstrap_path';
+  let release;
   try {
+    const bootstrap = join(dir, 'auriga/python');
+    if (!existsSync(join(bootstrap, 'pip.json'))) return null;
+    stage = 'runtime_manifest';
+    const manifest = JSON.parse(
+      readFileSync(join(dir, 'runtime/python/runtime.json'), 'utf8'),
+    );
+    const versionParts = /^(\d+)\.(\d+)\.\d+$/.exec(manifest.version);
+    if (
+      !versionParts ||
+      `cp${versionParts[1]}${versionParts[2]}` !== PYTHON_ABI
+    )
+      throw Object.assign(
+        new Error('个人 Python 环境 ABI 不兼容，请使用匹配版本的客户端'),
+        { reason: 'python_user.abi_mismatch' },
+      );
+    const paths = pythonUserPaths(dataHome);
+    stage = 'root_path';
+    assertLocalPath(paths.root);
+    stage = 'prepare_lock';
+    release = acquireOperationLock(join(paths.root, 'prepare.lock'));
+    stage = 'environment_path';
     assertLocalPath(paths.environment);
     assertLocalPath(paths.site);
+    stage = 'pip_wheel';
     const pip = JSON.parse(readFileSync(join(bootstrap, 'pip.json'), 'utf8'));
     const wheel = join(bootstrap, pip.filename);
     if (sha256File(wheel) !== pip.sha256)
@@ -173,6 +211,7 @@ export function preparePythonUser(dir, dataHome, base = process.env) {
         reason: 'python_user.bootstrap_digest_mismatch',
       });
     const python = join(dir, 'runtime/python/python.exe');
+    stage = 'marker_read';
     const marker = join(paths.environment, 'auriga-python.json');
     assertLocalPath(marker);
     let previous;
@@ -196,6 +235,7 @@ export function preparePythonUser(dir, dataHome, base = process.env) {
       JSON.stringify(previous) !== JSON.stringify(identity) ||
       !existsSync(join(paths.bin, 'python.exe'))
     ) {
+      stage = 'venv_paths';
       for (const file of [
         'pyvenv.cfg',
         'Scripts/python.exe',
@@ -203,6 +243,7 @@ export function preparePythonUser(dir, dataHome, base = process.env) {
         'Scripts/pythonw.exe',
       ])
         assertLocalPath(join(paths.environment, file));
+      stage = 'venv_create';
       run(
         python,
         [
@@ -216,7 +257,9 @@ export function preparePythonUser(dir, dataHome, base = process.env) {
         ],
         env,
       );
+      stage = 'alias_copy';
       cpSync(join(paths.bin, 'python.exe'), join(paths.bin, 'python3.exe'));
+      stage = 'pip_bootstrap';
       run(
         python,
         [
@@ -230,16 +273,20 @@ export function preparePythonUser(dir, dataHome, base = process.env) {
         ],
         env,
       );
+      stage = 'marker_write';
       durableJson(marker, identity);
     }
+    stage = 'interpreter_probe';
     run(
       join(paths.bin, 'python.exe'),
       ['-I', '-B', '-c', 'import sys; assert sys.prefix != sys.base_prefix'],
       env,
     );
     // A damaged pip does not block launching DSH or importing the built-in packages.
+    stage = 'index_config';
     const index = configuredIndex(paths);
     writeConfig(paths, index);
+    stage = 'constraints';
     assertLocalPath(paths.constraints);
     durableWrite(
       paths.constraints,
@@ -250,8 +297,11 @@ export function preparePythonUser(dir, dataHome, base = process.env) {
       ].join('\n'),
     );
     return { ...paths, index };
+  } catch (error) {
+    error.pythonUserStage = stage;
+    throw error;
   } finally {
-    release();
+    release?.();
   }
 }
 

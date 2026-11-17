@@ -61,7 +61,7 @@ static class Desktop
 
     public static string PythonFailureReason(string error)
     {
-        var match = Regex.Match(error ?? "", @"\[(python_user\.(?:abi_mismatch|bootstrap_digest_mismatch|environment_failed|timeout|access_denied|file_missing|busy|invalid_state|unavailable))\]");
+        var match = Regex.Match(error ?? "", @"\[(python_user\.(?:abi_mismatch|bootstrap_digest_mismatch|environment_failed|timeout|access_denied|file_missing|busy|invalid_state|path_alias|path_link|invalid_argument|unavailable))\]");
         return match.Success ? match.Groups[1].Value : "python_user.reset_failed";
     }
 
