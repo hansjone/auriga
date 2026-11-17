@@ -653,17 +653,6 @@ onBeforeUnmount(() => {
         {{ t('refresh') }}
       </button>
     </header>
-    <nav class="market-tabs">
-      <RouterLink
-        v-for="tab in ['directory', 'review', 'published', 'distribution']"
-        :key="tab"
-        :to="{
-          path: tab === 'directory' ? '/resources' : '/resources/' + tab,
-          query: { kind },
-        }"
-        >{{ t(tab) }}</RouterLink
-      >
-    </nav>
     <p v-if="loading" role="status">{{ t('loading') }}</p>
     <p v-if="notice" role="status">{{ notice }}</p>
     <p v-if="error" role="alert">{{ error }}</p>
@@ -1172,7 +1161,6 @@ onBeforeUnmount(() => {
   padding: 16px;
 }
 .catalog-page :deep(.market-toolbar),
-.catalog-page .market-tabs,
 .catalog-page :deep(.resource-pager) {
   display: flex;
   align-items: center;
@@ -1186,13 +1174,6 @@ onBeforeUnmount(() => {
 }
 .catalog-page :deep(h2) {
   font-size: 18px;
-}
-.catalog-page :deep(.market-tabs a) {
-  color: var(--auriga-accent);
-  padding: 8px 0;
-}
-.catalog-page :deep(.market-tabs a.router-link-active) {
-  font-weight: 600;
 }
 .catalog-page :deep(button),
 .catalog-page :deep(input),
