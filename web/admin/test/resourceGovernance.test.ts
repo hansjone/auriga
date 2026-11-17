@@ -24,12 +24,26 @@ function open(phase: 'review' | 'published' | 'distribution') {
 }
 afterEach(() => vi.restoreAllMocks());
 describe('resource governance', () => {
-  it('routes all three entries to the real view', () => {
-    for (const phase of ['review', 'published', 'distribution'])
-      expect(
-        router.resolve('/resources/' + phase).matched.at(-1)?.components
-          ?.default,
-      ).toBe(ResourceCenterView);
+  it('routes every kind and phase to the real view', () => {
+    for (const kind of ['plugins', 'skills'])
+      for (const phase of ['', '/review', '/published', '/distribution']) {
+        const to = router.resolve(`/resources/${kind}${phase}`);
+        expect(to.matched.at(-1)?.components?.default).toBe(ResourceCenterView);
+      }
+  });
+  it('redirects old phase-first links to the kind-first pages', () => {
+    const target = (path: string) => {
+      const to = router.resolve(path);
+      const redirect = to.matched.at(-1)?.redirect;
+      return typeof redirect === 'function'
+        ? redirect(to as never, to as never)
+        : redirect;
+    };
+    expect(target('/resources/review?kind=skill')).toBe(
+      '/resources/skills/review',
+    );
+    expect(target('/resources/published')).toBe('/resources/plugins/published');
+    expect(target('/resources')).toBe('/resources/plugins');
   });
   it('does not read a review queue without explicit permission', async () => {
     membership(['resource.packages.read']);

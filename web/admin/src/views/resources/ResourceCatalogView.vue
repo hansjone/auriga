@@ -648,7 +648,6 @@ onBeforeUnmount(() => {
 <template>
   <section class="resource-page catalog-page">
     <header class="market-toolbar">
-      <h1>{{ t(phase) }}</h1>
       <button :disabled="loading || locked" @click="load(cursor)">
         {{ t('refresh') }}
       </button>
@@ -1167,10 +1166,6 @@ onBeforeUnmount(() => {
   gap: 12px;
   flex-wrap: wrap;
   margin-bottom: 16px;
-}
-.catalog-page h1 {
-  font-size: 22px;
-  margin: 0;
 }
 .catalog-page :deep(h2) {
   font-size: 18px;

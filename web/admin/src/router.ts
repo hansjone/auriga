@@ -7,7 +7,11 @@ import DevicesView from './views/DevicesView.vue';
 import UpgradesView from './views/ops/UpgradesView.vue';
 import BackupsView from './views/ops/BackupsView.vue';
 import LifecycleView from './views/ops/LifecycleView.vue';
-import { createRouter, createWebHistory } from 'vue-router';
+import {
+  createRouter,
+  createWebHistory,
+  type RouteRecordRaw,
+} from 'vue-router';
 import AuditView from './views/AuditView.vue';
 import LoginView from './views/LoginView.vue';
 import AdminLayout from './layouts/AdminLayout.vue';
@@ -49,9 +53,8 @@ const existing = new Set([
   '/models/providers',
   '/settings',
   '/resources',
-  '/resources/review',
-  '/resources/published',
-  '/resources/distribution',
+  '/resources/plugins',
+  '/resources/skills',
   '/members',
   '/nodes',
   '/instances',
@@ -94,16 +97,23 @@ export const router = createRouter({
         { path: 'audit', component: AuditView },
         { path: 'ops/alerts', component: AlertsView },
         { path: 'ops/notifications', component: NotificationsView },
+        { path: 'resources', redirect: '/resources/plugins' },
+        // Old phase-first links (`/resources/review?kind=skill`) keep working.
+        ...(['review', 'published', 'distribution'] as const).map(
+          (phase): RouteRecordRaw => ({
+            path: 'resources/' + phase,
+            redirect: (to) =>
+              `/resources/${to.query.kind === 'skill' ? 'skills' : 'plugins'}/${phase}`,
+          }),
+        ),
         {
-          path: 'resources',
+          path: 'resources/:kind(plugins|skills)/:phase(review|published|distribution)?',
           component: ResourceCenterView,
-          props: { phase: 'directory' },
+          props: (to) => ({
+            kind: to.params.kind === 'skills' ? 'skill' : 'plugin',
+            phase: to.params.phase || 'directory',
+          }),
         },
-        ...(['review', 'published', 'distribution'] as const).map((phase) => ({
-          path: 'resources/' + phase,
-          component: ResourceCenterView,
-          props: { phase },
-        })),
         { path: 'members', component: MembersView },
         { path: 'runtime/devices', component: DevicesView },
         { path: 'nodes', component: NodesView },

@@ -425,27 +425,26 @@ it('uses the unified source for both plugin and skill without legacy calls', asy
     history: createMemoryHistory(),
     routes: [
       {
-        path: '/resources/review',
+        path: '/resources/:kind(plugins|skills)/:phase?',
         component: Center,
-        props: { phase: 'review' },
       },
     ],
   });
-  await router.push('/resources/review');
+  await router.push('/resources/plugins/review');
   await router.isReady();
   const view = mount(Center, {
-    props: { phase: 'review' },
+    props: { kind: 'plugin', phase: 'review' },
     global: { plugins: [router, createAurigaI18n('en')], stubs },
   });
   views.push(view);
   await flushPromises();
   expect(legacy).not.toHaveBeenCalled();
   expect(unified).toHaveBeenCalledWith(undefined, 'plugin');
-  await view.get('[aria-pressed="false"]').trigger('click');
+  expect(view.findAll('[aria-current="page"]')).toHaveLength(1);
+  await view.setProps({ kind: 'skill', phase: 'review' });
   await flushPromises();
   expect(unified).toHaveBeenLastCalledWith(undefined, 'skill');
   expect(legacy).not.toHaveBeenCalled();
-  expect(view.text()).toContain('Skills');
 });
 it('rejects preview traversal, links, invalid UTF-8 and oversized streams', async () => {
   const tar = (name: string, type = '0', byte = 65) => {
