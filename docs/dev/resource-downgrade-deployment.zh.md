@@ -58,22 +58,24 @@ NAS 节点使用宿主网络。平台资源下载入口位于 HTTPS `8081` 监�
 
 节点使用自身已登记的 `node.crt`、`node.key` 和 `ca.crt` 建立 TLS 1.3 mTLS，服务端验证节点身份、租户、调度绑定及下载授权。TLS 名称验证必须开启。节点拒绝重定向，只接受授权 locator 的 HTTP `200` 完整响应、可解析的 `Date` 以及预算内字节。[下载控制器](../../services/resource/impl/src/main/java/auriga/resource/web/CatalogNodeController.java)、[节点下载实现](../../infra/agent/internal/runtime/unified_manager.go)定义了该入口。
 
-启用降级签发前，使用已有发行/撤销根发布一个全新测试版本，向隔离实例建立真实分发，取得该节点当前规格中实际授权的 `manifestDownloadPath` 和各制品 `downloadPath`。主控在节点实际网络及解析环境中，用该节点现有身份核对完整下载。以下命令示意原始清单探测，变量及证据目录由主控预先准备。
+主控先在原安装实例的实际 agent 容器中确认 `openssl version`，使用已有 OpenSSL 做传输探测。下面的命令也在该容器内执行，使用已挂载的节点 CA、证书和私钥。宿主先核对 `AURIGA_HOST_PUBLISH_PLATFORM_HTTP`，将实际值填入 `DOWNLOAD_PORT`。示例 `18081` 来自公开配方的默认值。命令以 `platform` 发送 SNI 并校验服务名，TCP 直接连接已核准的宿主回环发布入口。
 
 ```sh
-AGENT_DIR="${AURIGA_DATA_ROOT}/data/agent/agent"
-RESOURCE_ORIGIN="https://platform:${AURIGA_HOST_PUBLISH_PLATFORM_HTTP}"
-status=$(curl --silent --show-error --fail --proto '=https' --tlsv1.3 \
-  --cacert "$AGENT_DIR/ca.crt" \
-  --cert "$AGENT_DIR/node.crt" --key "$AGENT_DIR/node.key" \
-  --dump-header "$EVIDENCE_DIR/manifest.headers" \
-  --output "$EVIDENCE_DIR/manifest.json" --write-out '%{http_code}' \
-  "$RESOURCE_ORIGIN$MANIFEST_PATH")
-test "$status" = 200
-sha256sum "$EVIDENCE_DIR/manifest.json"
+AGENT_DIR="${AURIGA_AGENT_DATA_ROOT}/agent"
+DOWNLOAD_PORT=18081
+PROBE_PATH=/internal/resource/v1/catalog/downloads/00000000-0000-7000-8000-000000000000/manifest
+printf 'GET %s HTTP/1.1\r\nHost: platform:%s\r\nConnection: close\r\n\r\n' \
+  "$PROBE_PATH" "$DOWNLOAD_PORT" |
+  openssl s_client -quiet -tls1_3 \
+    -connect "127.0.0.1:$DOWNLOAD_PORT" -servername platform \
+    -verify_hostname platform -verify_return_error \
+    -CAfile "$AGENT_DIR/ca.crt" \
+    -cert "$AGENT_DIR/node.crt" -key "$AGENT_DIR/node.key"
 ```
 
-通过条件包括清单及全部制品均为 `200`、响应 `Date` 可解析、无 `Content-Range`、原字节 SHA-256 与已验签引用一致，以及实际节点成功下载并验签应用这个未缓存的新版本。保留节点来源的精确安装回报和宿主实际加载证据。探测命令只覆盖传输检查的一部分，最终以实际节点完整处理为准。代理存活、容器 healthy、TLS 握手或不存在下载 ID 的 `404` 均不足以满足此处判据。下载失败时先修复接线，再进入签发启用步骤。
+这是合成无效 grant 探测。主控记录 OpenSSL 版本、退出码、证书链与服务名校验结果及 HTTP 响应。校验通过且返回 `404` 只证明该路径的受信传输可达。此命令直接指定 TCP 地址，实际 Go 客户端仍按 `origin` 的主机名解析，主控须另行确认重建后的 agent 能解析 `platform`。执行环境与节点客户端见[agent 镜像配方](../../deploy/nas/docker/Dockerfile.agent)、[节点 mTLS 接线](../../infra/agent/internal/runtime/unified_wiring.go)。
+
+真实下载另作验收。启用降级签发前，使用已有发行/撤销根发布一个全新测试版本，向隔离实例建立真实分发，取得该节点当前规格中实际授权的 `manifestDownloadPath` 和各制品 `downloadPath`，由实际节点执行完整下载。通过条件包括清单及全部制品均为 `200`、响应 `Date` 可解析、无 `Content-Range`、原字节 SHA-256 与已验签引用一致，以及节点成功验签并应用这个未缓存的新版本。保留节点来源的精确安装回报和宿主实际加载证据。代理存活、容器 healthy、TLS 握手或合成 grant 的 `404` 均不足以满足完整下载判据。下载失败时先修复接线，再进入签发启用步骤。
 
 ## 再启用平台签发
 
@@ -96,9 +98,32 @@ auriga.resource.downgrade-key-file=/run/secrets/auriga-resource/downgrade.pk8
 
 这两项由现有 Spring 配置机制读取。采用独立 `resource.properties` 时，固定配方须只读挂载其目录，并将该文件追加到既有 `SPRING_CONFIG_IMPORT` 列表，同时保留原有安装、网络及 UAC 配置导入。主控也可在固定 Compose 的平台 `environment` 中显式设置 `AURIGA_RESOURCE_DOWNGRADE_KID`、`AURIGA_RESOURCE_DOWNGRADE_KEY_FILE`，文件路径须与真实只读挂载一致。以上是配方接线要求，当前通用脚本尚未提供对应的完整部署入口。
 
-由主控执行正常 `start.sh` 重建平台，核对实际容器环境与配置导入、挂载目标及 `RW=false`、父目录与私钥的容器内 UID/GID/权限、kid 与公钥对应关系，并确认平台成功启动。随后执行标准 runtime 升级时重复这些核验，保存前后配方摘要和容器配置回执。最终通过下文签名授权和节点消费的实测确认配置有效。
+### 属性变更后的平台显式重建
 
-平台签发端独立读取密钥，未读取节点根的有效窗。主控须在到期前复核窗口与节点时钟。在窗口失效或根撤回时，先停止降级签发，再按受审信任更新流程处理节点文件。降级根的撤回通过受信配置移除该根，资源撤销清单的 `revokedKids` 按发行签名用途检查。获批轮换使用独立新密钥和新 kid，先分发有效公钥、验证节点加载与受信下载，再切换平台签发，随后完成新 kid 授权消费实测。旧根退役须覆盖仍有效授权和全部目标节点，历史授权消费记录与高水位持续保留。
+固定只读挂载中的 `resource.properties` 内容改变后，Compose 声明可能保持相同。普通 `start.sh` 执行 `up -d`，仅显式重启 `agent`，平台旧进程可能继续保留原属性。启用、轮换、恢复和无降级根负例都须由主控在属性落盘后显式重建 `platform`，再确认新进程加载结果。
+
+主控持有 NAS 部署锁，预先将 `NAS_ROOT` 设为原安装实例实际采用的受审配方目录，将 `AURIGA_DATA_ROOT` 设为原数据根。下面使用该配方已有的 `lib.sh` 和 `run_compose`，保留固定项目、原安装模式及受控覆盖层的选择。
+
+```sh
+: "${NAS_ROOT:?set the original installed recipe directory}"
+: "${AURIGA_DATA_ROOT:?set the original instance data directory}"
+. "$NAS_ROOT/scripts/lib.sh"
+load_stack_env
+before_id=$(run_compose --env-file "$AURIGA_DATA_ROOT/stack.env" ps --all --quiet platform)
+test -n "$before_id"
+docker inspect --format '{{.Id}}|{{.State.StartedAt}}|{{.State.Status}}' "$before_id"
+run_compose --env-file "$AURIGA_DATA_ROOT/stack.env" up -d \
+  --no-deps --force-recreate --no-build --pull never \
+  --wait --wait-timeout 120 platform
+after_id=$(run_compose --env-file "$AURIGA_DATA_ROOT/stack.env" ps --all --quiet platform)
+test -n "$after_id"
+test "$after_id" != "$before_id"
+docker inspect --format '{{.Id}}|{{.State.StartedAt}}|{{.State.Health.Status}}' "$after_id"
+```
+
+记录重建前后的容器 ID、`StartedAt`、退出码、健康状态及属性文件摘要。核对新容器实际配置导入、挂载目标及 `RW=false`、父目录与私钥的 UID/GID/权限、kid 与公钥对应关系。新进程健康后，通过下文的签名授权及节点消费核实新 kid 生效，停用签发时核实回落失败且安全停用继续执行。证据仅保留所需非秘密字段。随后执行 `start.sh` 或标准 runtime 升级时复核这些项目，属性再次变化则重复显式重建步骤。[普通启动流程](../../deploy/nas/scripts/start.sh)、[固定 Compose 入口](../../deploy/nas/scripts/lib.sh)、[启动时配置装配](../../services/resource/impl/src/main/java/auriga/resource/config/ResourceRuntimeConfiguration.java)支持上述操作。
+
+平台签发端独立读取密钥，未读取节点根的有效窗。主控须在到期前复核窗口与节点时钟。在窗口失效或根撤回时，先停止降级签发并按上述步骤显式重建平台，再按受审信任更新流程处理节点文件。降级根的撤回通过受信配置移除该根，资源撤销清单的 `revokedKids` 按发行签名用途检查。获批轮换使用独立新密钥和新 kid，先分发有效公钥、验证节点加载与受信下载，再切换平台属性、显式重建并核实新进程加载，随后完成新 kid 授权消费实测。旧根退役须覆盖仍有效授权和全部目标节点，历史授权消费记录与高水位持续保留。
 
 ## 完整 runtime 与已有实例切换
 
@@ -115,7 +140,7 @@ runtime 脚本提交模板后，管理员须在点启动或重启之前，将目
 
 ### 两端配置恢复
 
-主控先通过同一持久配置入口停止降级签发，撤回 `downgrade-kid` 和 `downgrade-key-file` 两项并重建平台，核实发行/撤销签发仍可用。等待已有短期降级授权结束，或明确接受受影响安装失败关闭后，再恢复节点信任备份、重启代理并复验。原来没有信任文件时，主控先停止该批共享分发并确认受影响内容已停用，再撤回本次新增信任文件、重启代理，核验文件缺失时共享激活关闭的影响。私钥备份按原秘密保护方式保存。
+主控先通过同一持久配置入口停止降级签发，撤回 `downgrade-kid` 和 `downgrade-key-file` 两项，按[显式重建步骤](#属性变更后的平台显式重建)重建平台，核实新进程已停止降级签发且发行/撤销签发仍可用。等待已有短期降级授权结束，或明确接受受影响安装失败关闭后，再恢复节点信任备份、重启代理并复验。原来没有信任文件时，主控先停止该批共享分发并确认受影响内容已停用，再撤回本次新增信任文件、重启代理，核验文件缺失时共享激活关闭的影响。私钥备份按原秘密保护方式保存。
 
 恢复节点信任时保留该节点之后已批准的其他根变更，核对旧根有效窗。节点 ledger、`UsedAuthorizations`、最高高水位以及已安装资源的授权绑定持续保留。先撤回签发再恢复节点信任，避免平台继续发出节点已经撤回信任的新授权。[节点信任加载](../../infra/agent/internal/runtime/unified_wiring.go)、[防重放协议](../../contracts/resource/unified-protocol.md)说明了恢复边界。
 
@@ -127,16 +152,17 @@ runtime 脚本提交模板后，管理员须在点启动或重启之前，将目
 
 ## 自动回落的现场验收
 
-由主控使用隔离测试实例和专用测试资源执行两组用例，分别保存独立证据。以下步骤中的版本、摘要及序号均来自真实签名发行。
+由主控使用隔离测试实例和专用测试资源执行无根、有根两组用例，分别保存独立证据。两组用例均须在撤销前完成下面步骤1–3的共同前提。版本、摘要及序号均来自真实签名发行。
 
-1. 审核并发布同一包的低版本与更高版本，确保低版本仍可用且其摘要未被恶意撤销。在目标实例作用域设置指向低版本精确 identity 的有效 `required` 或 `default` 规则，核对 scope、targetId、规则修订和安装方式。`optional` 规则不满足自动回落条件。
-2. 安装并实际加载更高版本，取得节点来源的 `applied`。记录高版本实际名称、版本、来源 entryId、manifest/artifact 摘要、releaseSequence、installationRevision、selectionRevision 和 generation。节点 observedGeneration 必须等于当前 generation，并保留最高高水位。
-3. 对已经实际生效的高版本执行“恶意撤销”，观察已签撤销事实以及规则对账。普通下架 `withdrawn`、卸载和仅降低规则版本均不自动签发此类授权。若两个版本复用相同的恶意制品摘要，低版本也会被撤销，因此测试须使用相互独立且可明确识别的制品。
-4. 无降级根的负例中，主控在该隔离环境的持久配置中同时停用两项降级签发配置，再触发以上撤销。通过条件为高版本实际停用并有节点报告，回落保持可重试失败，低版本未被当作已授权安装。记录撤销后的正常页面、宿主加载状态与失败原因。
-5. 有降级根的用例中，主控先恢复经核准的签发配置，再让一个测试高版本实际生效并执行恶意撤销。确认 `UnifiedResourceRef.downgradeAuthorization` 包含 `purpose=downgrade`、`reason=revocation`、匹配的 ownerId、instanceId、低版本精确 identity、from/toReleaseSequence，以及不超过10分钟的有效期，签名 kid 为已分发的独立降级根。用例也可对负例中保留的合法回落重试，须记录它与原撤销的关联。
-6. 成功判据为低版本已由真实宿主加载，节点安装回报四元组 identity/installationRevision/selectionRevision/generation 与当前期望完全匹配，observedGeneration 等于 generation，并确认来源为节点。高版本停用、低版本 `applied`、正常页面和实例运行状态须有一致证据。`required` 的关闭/卸载在统一目录继续被拒绝，`default` 可从资源市场卸载，原生入口对受管插件的关闭/卸载须拒绝且实例继续运行。
-7. 对同一安装修订进行重试及节点重启，核对 `node-state.json` 中安装绑定的 `AuthorizationID`、`UsedAuthorizations` 与 `Watermarks`。同一已绑定安装可延续，已消费 ID 仅保留一份且最高高水位仍为原高版本。服务续签可刷新同一授权的时间和签名，并保留 authorizationId。通过受控验证检查已消费授权被用于新 installationRevision 时会被拒绝，或使用另一个经核验的新授权完成合法变更。保存逐次修订与消费记录，确认同一授权没有被用于新修订重装。
+1. 审核并发布同一包的低版本 L 与高版本 H，确保 L 已发布且其清单和制品摘要均未被恶意撤销。安装并实际加载 H，取得节点来源的 `applied`。记录 H 的实际名称、版本、来源 entryId、manifest/artifact 摘要、releaseSequence、installationRevision、selectionRevision 和 generation，确认 observedGeneration 等于 generation，并保留最高高水位。
+2. H 实际生效后，另行审核并发布第三个独立制品的默认版本 D，例如 L/H/D 分别采用 `1.0.0`、`1.2.0`、`1.3.0`。三个版本使用可明确区分的清单与制品摘要。发布 D 会将包的 `defaultVersionId` 设为 D 并保持 `enabled=true`。保留 D 的已发布、未撤销和默认版本回执，核实实例仍实际加载 H。
+3. 在目标实例作用域设置指向 L 精确 identity 的有效 `required` 或 `default` 规则，核对 scope、targetId、规则修订和安装方式。撤销前再次确认 H 仍在实例实际生效、包默认仍为独立已发布的 D、包仍 `enabled=true`，以及 L 对该实例主人仍可见、可选并符合规则分发准入。`optional` 规则不满足自动回落条件。此顺序参照 `CatalogWorkflowTest.mandatoryRulesRecoverAfterUnavailableHighVersion`，其先安装高版本，再额外发布默认版本，设置低版本规则后执行撤销。
+4. 对 H 执行“恶意撤销”，观察已签撤销事实及规则对账，复核包仍启用、默认仍为 D、L 仍满足候选条件。撤销当前默认版本会清空包默认并禁用整包，导致低版本失去可用性。任一默认保活前提失败时应修复测试准备后重做该组。普通下架 `withdrawn`、卸载和仅降低规则版本均不自动签发此类授权。恶意制品摘要复用会使相关版本一并被撤销，因此 D 和 L 都须与 H 的制品独立。
+5. 无降级根的负例中，主控在该隔离环境的持久配置中同时停用两项降级签发配置，按显式重建步骤确认新平台进程已加载停用配置，再完成共同前提和撤销。通过条件为 H 实际停用并有节点报告，回落保持可重试失败，L 未被当作已授权安装。记录正常页面、宿主加载状态及失败原因，并确认包仍启用、默认 D 和候选 L 仍可用，排除整包禁用导致的失败。
+6. 有降级根的用例中，主控先恢复经核准的签发属性、显式重建平台并核实新进程加载，再按相同的三版本共同前提让 H 实际生效并执行恶意撤销。确认 `UnifiedResourceRef.downgradeAuthorization` 包含 `purpose=downgrade`、`reason=revocation`、匹配的 ownerId、instanceId、L 的精确 identity、from/toReleaseSequence，以及不超过10分钟的有效期，签名 kid 为已分发的独立降级根。对负例中保留的合法回落重试时，也须重新核对包仍启用、默认 D 与候选 L 可用，并记录与原撤销的关联。
+7. 成功判据为低版本已由真实宿主加载，节点安装回报四元组 identity/installationRevision/selectionRevision/generation 与当前期望完全匹配，observedGeneration 等于 generation，并确认来源为节点。高版本停用、低版本 `applied`、正常页面和实例运行状态须有一致证据。`required` 的关闭/卸载在统一目录继续被拒绝，`default` 可从资源市场卸载，原生入口对受管插件的关闭/卸载须拒绝且实例继续运行。
+8. 对同一安装修订进行重试及节点重启，核对 `node-state.json` 中安装绑定的 `AuthorizationID`、`UsedAuthorizations` 与 `Watermarks`。同一已绑定安装可延续，已消费 ID 仅保留一份且最高高水位仍为原高版本。服务续签可刷新同一授权的时间和签名，并保留 authorizationId。通过受控验证检查已消费授权被用于新 installationRevision 时会被拒绝，或使用另一个经核验的新授权完成合法变更。保存逐次修订与消费记录，确认同一授权没有被用于新修订重装。
 
-自动签发条件见[资源分发实现](../../services/resource/impl/src/main/java/auriga/resource/app/CatalogDelivery.java)。节点绑定和防重放见[授权消费](../../infra/agent/internal/runtime/unified_history.go)、[状态持久化](../../infra/agent/internal/runtime/unified_manager.go)及[统一协议](../../contracts/resource/unified-protocol.md)。
+包默认与撤销行为见[目录状态机](../../services/resource/impl/src/main/java/auriga/resource/app/CatalogWorkflow.java)，准备顺序见[现有回落测试](../../services/resource/impl/src/test/java/auriga/resource/app/CatalogWorkflowTest.java)。自动签发条件见[资源分发实现](../../services/resource/impl/src/main/java/auriga/resource/app/CatalogDelivery.java)。节点绑定和防重放见[授权消费](../../infra/agent/internal/runtime/unified_history.go)、[状态持久化](../../infra/agent/internal/runtime/unified_manager.go)及[统一协议](../../contracts/resource/unified-protocol.md)。
 
 完整验收还包括插件 required/default/optional 分发和真实 applied、技能文件夹上传/审核/发布/分发及云端与桌面可见，以及 `allowPersonalPlugins=false` 时启动前清理命令行安装的个人插件。每项记录实际操作、截图、接口回执、宿主观察与未完成项。现场证据补齐后，主控按精确部署版本确认该批次的用户可见结果。
