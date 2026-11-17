@@ -199,7 +199,7 @@ export function desktopSkills({ home, time = hostTime }) {
     const file = join(root(who), 'cache', digest.slice(7), 'bytes');
     assertLocalPath(file);
     const stat = lstatSync(file);
-    if (!stat.isFile() || stat.size > 20971520)
+    if (!stat.isFile() || stat.size > 67108864)
       refuse('resource.storage_unavailable');
     const bytes = readFileSync(file);
     if (sha(bytes) !== digest) refuse('resource.digest_mismatch');
@@ -212,6 +212,7 @@ export function desktopSkills({ home, time = hostTime }) {
     const names = new Set();
     for (const row of rows.filter(
       (r) =>
+        r.resource.identity.kind === 'skill' &&
         desiredState(r.resource) === 'ENABLED' &&
         ['applying', 'applied', 'pending_restart', 'overridden'].includes(
           r.state,
@@ -687,8 +688,7 @@ export function desktopSkills({ home, time = hostTime }) {
      * @param {any} who @param {any[]} rows */
     needsPreparation(who, rows) {
       return locked((lock) => {
-        if (!rows.length || !rows.some((r) => r.state === 'applying'))
-          return false;
+        if (!rows.length) return false;
         recoverRecordTemps(who, lock);
         const value = ledger(who);
         if (!value) return true;
@@ -702,6 +702,7 @@ export function desktopSkills({ home, time = hostTime }) {
                   old.installationRevision === r.installationRevision &&
                   canonicalize(old.resource.identity) ===
                     canonicalize(r.resource.identity) &&
+                  canonicalize(old.resource) === canonicalize(r.resource) &&
                   desiredState(old.resource) === desiredState(r.resource),
               ),
           )
@@ -1086,6 +1087,74 @@ export function desktopSkills({ home, time = hostTime }) {
         recoverIdentity(who, lock);
         cleanup(who, lock);
         return ledger(who);
+      });
+    },
+    /** A guardian permit authorizes these exact cached plugin bytes, outside skill discovery.
+     * @param {any} who @param {any} row */
+    pluginBundle(who, row) {
+      return locked(() => {
+        const value = ledger(who);
+        const local = value?.installations.find(
+          (/** @type {any} */ i) =>
+            i.resource.identity.packageId === row.resource.identity.packageId,
+        );
+        if (
+          !local ||
+          row.resource.identity.kind !== 'plugin' ||
+          canonicalize(local.resource) !== canonicalize(row.resource) ||
+          local.installationRevision !== row.installationRevision ||
+          local.selectionRevision !== row.selectionRevision ||
+          local.generation !== row.generation ||
+          !['pending_restart', 'applied'].includes(local.state) ||
+          !permitted(
+            who,
+            value,
+            record(join(guardian, 'state.json'), 'UnifiedGuardianStateFile'),
+          )
+        )
+          return undefined;
+        const manifest = parseStrictJson(
+          cached(who, row.resource.identity.manifestDigest),
+        );
+        if (manifest.kind !== 'plugin' || manifest.artifacts.length !== 1)
+          refuse('resource.state_conflict');
+        const bytes = cached(who, manifest.artifacts[0].digest);
+        const directory = join(root(who), 'plugin-bundles');
+        assertLocalPath(directory);
+        mkdirSync(directory, { recursive: true });
+        const file = join(
+          directory,
+          manifest.artifacts[0].digest.slice(7) + '.tgz',
+        );
+        assertLocalPath(file);
+        if (existsSync(file)) {
+          if (
+            !lstatSync(file).isFile() ||
+            lstatSync(file).size !== bytes.length ||
+            sha(readFileSync(file)) !== manifest.artifacts[0].digest
+          )
+            refuse('resource.digest_mismatch');
+        } else {
+          const fd = openSync(file, 'wx', 0o600);
+          try {
+            writeFileSync(fd, bytes);
+            fsyncSync(fd);
+          } finally {
+            closeSync(fd);
+          }
+        }
+        return { manifest, file, bytes };
+      });
+    },
+    /** Read only a digest-bound manifest for a removal; expiry never prevents disabling.
+     * @param {any} who @param {any} row */
+    pluginName(who, row) {
+      return locked(() => {
+        const manifest = parseStrictJson(
+          cached(who, row.resource.identity.manifestDigest),
+        );
+        if (manifest.kind !== 'plugin') refuse('resource.state_conflict');
+        return manifest.plugin.packageName;
       });
     },
     /** Validate actual bytes again after public host observation; a path match alone is insufficient.

@@ -49,6 +49,10 @@ for (const code of ['desktop.smoke_failed', 'unexpected_failure'])
       join(runtime, 'desktop-supervision.mjs'),
       'export async function superviseDsh() { return 0; }',
     );
+    writeFileSync(
+      join(runtime, 'resource-plugins.mjs'),
+      'export function resourcePluginControl() { return {}; }',
+    );
     const sensitive = 'PRIVATE_UPSTREAM_CONFIG_' + randomUUID();
     writeFileSync(
       join(runtime, 'update.mjs'),

@@ -30,6 +30,7 @@ export function catalogIdentity(runtime) {
 export function catalogApi({ runtime, current, fetchImpl: _fetchImpl }) {
   const who = catalogIdentity(runtime),
     _origin = runtime.config.platformOrigin;
+  let allowPersonalPlugins = true;
   function check() {
     if (runtime.vault?.snapshot?.().resourceIsolationPending)
       refuse('resource.storage_unavailable');
@@ -126,13 +127,14 @@ export function catalogApi({ runtime, current, fetchImpl: _fetchImpl }) {
     who,
     check,
     request,
+    personalPluginsAllowed: () => allowPersonalPlugins,
     async list() {
       const rows = [];
       let cursor;
+      let pagePolicy;
       const seen = new Set();
       for (let p = 0; p < 1000; p++) {
         const query = new URLSearchParams({
-          kind: 'skill',
           limit: '200',
           ...(cursor ? { cursor } : {}),
         });
@@ -140,12 +142,20 @@ export function catalogApi({ runtime, current, fetchImpl: _fetchImpl }) {
           base + '/member/installations?' + query,
         );
         requireSchema('UnifiedInstallationPage', value);
+        if (
+          pagePolicy !== undefined &&
+          pagePolicy !== (value.allowPersonalPlugins ?? true)
+        )
+          refuse('common.conflict');
+        pagePolicy = value.allowPersonalPlugins ?? true;
+        allowPersonalPlugins = value.allowPersonalPlugins ?? true;
         for (const row of value.items) {
           requireInstallation(row);
           if (
             row.clientId !== who.hostId ||
             row.resource.identity.tenantId !== who.tenantId ||
-            row.resource.identity.kind !== 'skill' ||
+            !['skill', 'plugin'].includes(row.resource.identity.kind) ||
+            row.reportSource !== 'member' ||
             seen.has(row.resource.identity.packageId)
           )
             refuse('common.validation_failed');
@@ -163,7 +173,7 @@ export function catalogApi({ runtime, current, fetchImpl: _fetchImpl }) {
       requireSchema('UnifiedSelection', selection);
       if (
         selection.identity.tenantId !== who.tenantId ||
-        selection.identity.kind !== 'skill'
+        !['skill', 'plugin'].includes(selection.identity.kind)
       )
         refuse('common.forbidden');
       const result = await request(base + '/member/installations', {
@@ -234,7 +244,7 @@ export function catalogApi({ runtime, current, fetchImpl: _fetchImpl }) {
           },
           etag: '"' + row.installationRevision + '"',
           binary: true,
-          max: 5242880,
+          max: row.resource.identity.kind === 'plugin' ? 67108864 : 5242880,
         });
         artifacts.push(/** @type {Buffer} */ (value));
       }

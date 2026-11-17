@@ -4,6 +4,7 @@ import { diagnoseResource } from './diagnostics.js';
 import { catalogService } from './catalog-service.js';
 import { catalogApi } from './catalog-api.js';
 import { catalogHost } from './catalog-host.js';
+import { resourceHost } from './host.js';
 import { createPrivateSkills } from './private-skills.js';
 import { exact, refuse } from './trust.js';
 import { parseStrictJson } from './json.js';
@@ -96,6 +97,7 @@ export function catalogRoutes(options) {
           home,
           privateSkills: createPrivateSkills({ home }),
           host: catalogHost(options.ctx),
+          pluginHost: resourceHost(options.ctx),
           trustFile: process.env.AURIGA_RESOURCE_TRUST_FILE,
           fetchImpl: options.fetchImpl,
         });
@@ -161,7 +163,8 @@ export function catalogRoutes(options) {
         const params = new URLSearchParams(query);
         for (const [key, value] of params) {
           if (
-            !['cursor', 'limit'].includes(key) ||
+            !['cursor', 'limit', 'kind'].includes(key) ||
+            (key === 'kind' && !['plugin', 'skill'].includes(value)) ||
             params.getAll(key).length !== 1 ||
             (key === 'limit' &&
               !/^(?:[1-9]|[1-9][0-9]|1[0-9]{2}|200)$/.test(value)) ||
@@ -169,7 +172,6 @@ export function catalogRoutes(options) {
           )
             refuse('common.validation_failed');
         }
-        if (pathname === 'packages') params.set('kind', 'skill');
         const { value } = await api.request(
           '/api/resource/v1/catalog/' +
             pathname +
@@ -177,7 +179,11 @@ export function catalogRoutes(options) {
         );
         if (
           value.items &&
-          value.items.some((/** @type {any} */ item) => item.kind !== 'skill')
+          value.items.some(
+            (/** @type {any} */ item) =>
+              !['skill', 'plugin'].includes(item.kind) ||
+              (params.has('kind') && item.kind !== params.get('kind')),
+          )
         )
           refuse('common.validation_failed');
         return send(200, value);
