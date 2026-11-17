@@ -106,6 +106,16 @@ Go 配方使用 `GOPROXY=file:///inputs/download`，Maven 使用本地仓库及 
 
 ### NAS 隔离环境
 
+先核对本次入口要求的 Docker API、Compose 和容器运行时，再导入完整依赖。`MAINTAIN.md` 的发行入口需要 Engine/CLI 支持 API 1.48+ 的 `docker save --platform`，本页历史冻结的 DinD 27.1.2 使用 API 1.46。另备符合发行前置的独立工具时，先用已核验的工具镜像执行 `--pull never --network none` 启动探针，并验证 `unshare --net`。容器启动中的 `fchmodat2 AT_EMPTY_PATH` 等错误须保留现场，核对运行时与 NAS 内核的兼容性后继续。
+
+源码由普通用户准备、构建容器以 root 运行时，Git 的目录所有权检查可能令 Go 报 `error obtaining VCS status`。独立核对源码目录后，在该容器进程中为挂载路径设置 Git 信任。以下参数适用于源码挂载到 `/source` 的容器，放在镜像名前。管理容器使用它实际看到的源码绝对路径。
+
+```sh
+--env GIT_CONFIG_COUNT=1 \
+--env GIT_CONFIG_KEY_0=safe.directory \
+--env GIT_CONFIG_VALUE_0=/source
+```
+
 在 NAS 数据盘新建本次专用目录，从 Forgejo 下载并校验 `nas-builder-release.json` 中的 Docker 27.1.2 DinD 归档。独立 daemon 的镜像、BuildKit、语言临时目录和输出初始为空；不挂载 NAS 主 Docker socket，不挂载已有测试栈的目录或卷，也不发布端口到 NAS。
 
 外层使用新建的 `--internal` 网络。唯一连接外网的临时代理只接受固定 Forgejo Git upload-pack 和 Generic Packages 路径，拒绝任意 URL、CONNECT 和跳转。源码及所有输入经此代理从 Forgejo 获取，构建容器继续使用 `--network none`。保存实际 Git 克隆、包下载、外部域名与直接 IP 连接失败，以及代理拒绝非 Forgejo 路径的证据。
