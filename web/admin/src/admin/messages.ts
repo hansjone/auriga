@@ -68,7 +68,7 @@ const zh = {
   desktopLedger: '发行台账',
   desktopDevices: '设备版本分布',
   desktopDeviceSource:
-    '数据来自当前租户未吊销桌面设备的最近一次认证上报，包含安装版本、渠道及最近更新尝试结果。云端实例暂无桌面版本上报。',
+    '更新状态来自当前租户未吊销桌面设备的最近认证上报。版本分布同时保留旧客户端登记值。云端实例暂无桌面版本上报。',
   desktopUpdatedDevices: '已更新至本渠道当前版本',
   desktopPendingDevices: '尚未更新至本渠道当前版本',
   desktopUnknownTarget: '渠道当前版本未知',
@@ -294,7 +294,7 @@ const en = {
   desktopLedger: 'Release ledger',
   desktopDevices: 'Device version distribution',
   desktopDeviceSource:
-    'Source is the latest authenticated report from unrevoked desktop devices in this tenant, including installation version, channel and last update outcome. Cloud instances have no desktop version reports.',
+    'Update status comes from the latest authenticated report from unrevoked desktop devices in this tenant. Version distribution also includes legacy registration values. Cloud instances have no desktop version reports.',
   desktopUpdatedDevices: 'Updated to the current channel release',
   desktopPendingDevices: 'Awaiting the current channel release',
   desktopUnknownTarget: 'Current channel release unknown',
