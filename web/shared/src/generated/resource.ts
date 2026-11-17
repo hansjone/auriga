@@ -537,9 +537,10 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
+    /** @description Read release ledger, registered signing public key and actual channel latest with publisher-tenant admin permission. No recent step-up required. */
     get: operations['listDesktopReleases'];
     put?: never;
-    /** @description Admin session and recent step-up required. Upload ZIP bytes and a base64url UTF-8 signed manifest in X-Desktop-Manifest. Signature and whole package digest verified before publication. Strictly increasing sequence and version. Signed bytes use integer canonical JSON; independent offline Ed25519 key. */
+    /** @description Admin session and recent step-up required. Upload EXE bytes and a base64url UTF-8 signed manifest in X-Desktop-Manifest. Signature and whole package digest verified before publication. Strictly increasing sequence and version. Signed bytes use integer canonical JSON; independent offline Ed25519 key. */
     post: operations['publishDesktopRelease'];
     delete?: never;
     options?: never;
@@ -936,6 +937,23 @@ export interface paths {
     get: operations['UnifiedDownloadNodeArtifact'];
     put?: never;
     post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/resource/v1/admin/desktop/releases/preflight': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** @description Read-only signature and current sequence/channel policy validation. Does not publish, reserve a sequence, upload EXE bytes or require recent step-up. Publication rechecks under the ledger lock. Supports HTTP browsers without WebCrypto. */
+    post: operations['preflightDesktopRelease'];
     delete?: never;
     options?: never;
     head?: never;
@@ -1372,6 +1390,15 @@ export interface components {
       audit?: {
         [key: string]: unknown;
       }[];
+      /** @description SHA256 of registered Ed25519 SPKI DER. Public metadata only. */
+      publicKeyFingerprint?: string;
+      /** @description Base64 Ed25519 SPKI DER registered on the platform. No private key. */
+      publicKeySpki?: string;
+      /** @description Actual public latest per channel, omitted when no downloadable release exists. Expired manifests remain visible, clients enforce notAfter. */
+      channels?: {
+        stable?: components['schemas']['DesktopManifest'];
+        beta?: components['schemas']['DesktopManifest'];
+      };
     };
     /** @description Catalog manifest for skill/tool. PluginManifest remains in the package format for internal migration only; catalog APIs do not expose plugin projections. */
     UnifiedManifest:
@@ -1989,6 +2016,10 @@ export interface components {
       monotonicMillis: number;
       /** @constant */
       leaseDurationMillis: 30000;
+    };
+    DesktopReleasePreflight: {
+      /** @description SHA256 of registered Ed25519 SPKI DER. Public metadata only. */
+      publicKeyFingerprint: string;
     };
     FieldError: {
       /** @description JSON Pointer，例如 `/email`。 */
@@ -9420,6 +9451,32 @@ export interface operations {
         };
         content: {
           'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+    };
+  };
+  preflightDesktopRelease: {
+    parameters: {
+      query?: never;
+      header?: {
+        'Idempotency-Key'?: components['parameters']['IdempotencyKey'];
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['DesktopManifest'];
+      };
+    };
+    responses: {
+      /** @description Signature verified against registered key and current release policy accepted */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['DesktopReleasePreflight'];
         };
       };
     };

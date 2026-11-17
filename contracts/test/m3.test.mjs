@@ -188,9 +188,35 @@ function operations(specs) {
 function sensitiveAdminOperations(specs) {
   return operations(specs).filter(({ operation }) => {
     const permission = catalog.permissions[operation['x-permission']];
-    return permission?.adminOnly && permission.sensitive;
+    return (
+      permission?.adminOnly &&
+      permission.sensitive &&
+      !['listDesktopReleases', 'preflightDesktopRelease'].includes(
+        operation.operationId,
+      )
+    );
   });
 }
+test('Desktop 台账及清单预检免续验，发布和下架保留近期身份验证', () => {
+  const base = '/api/resource/v1/admin/desktop/releases';
+  const spec = apiSpecs.resource;
+  for (const operation of [
+    spec.paths[base].get,
+    spec.paths[base + '/preflight'].post,
+  ]) {
+    assert.equal(operation['x-permission'], 'resource.versions.publish');
+    assert.equal(operation['x-admin-only'], true);
+    assert.equal(operation['x-step-up-max-age-seconds'], undefined);
+    assert(!operation['x-error-codes'].includes('iam.step_up_required'));
+  }
+  for (const operation of [
+    spec.paths[base].post,
+    spec.paths[base + '/{sequence}'].delete,
+  ]) {
+    assert.equal(operation['x-step-up-max-age-seconds'], 600);
+    assert(operation['x-error-codes'].includes('iam.step_up_required'));
+  }
+});
 function assertSensitiveAdminStepup(specs) {
   const sensitive = sensitiveAdminOperations(specs);
   for (const { operation } of sensitive) {
@@ -250,9 +276,9 @@ test('AI/资源每个操作引用唯一权限和错误目录，管理面标注�
       }
     }
   }
-  assert.equal(count, 93);
+  assert.equal(count, 94);
   assert(ids.has('listRelayProviderModels'));
-  assert.equal(assertSensitiveAdminStepup(apiSpecs).length, 36);
+  assert.equal(assertSensitiveAdminStepup(apiSpecs).length, 35);
   for (const [key, p] of Object.entries(catalog.permissions)) {
     assert(p.description.en && p.description['zh-CN'], key);
     assert.equal(typeof p.adminOnly, 'boolean');

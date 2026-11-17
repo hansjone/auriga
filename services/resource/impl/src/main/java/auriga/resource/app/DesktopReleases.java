@@ -145,7 +145,37 @@ public final class DesktopReleases {
   public ObjectNode list(AurigaPrincipal principal) {
     var actor = access.administrator(principal, MANAGE);
     publisher(actor.tenant());
-    return store(publisherTenant).read();
+    var result = store(publisherTenant).read();
+    var channels = result.putObject("channels");
+    for (String channel : List.of("stable", "beta")) {
+      try {
+        channels.set(channel, latest(channel, result));
+      } catch (AurigaException e) {
+        if (!NOT_FOUND.equals(e.errorCode())) throw e;
+      }
+    }
+    result.put("publicKeySpki", Base64.getEncoder().encodeToString(key.getEncoded()));
+    result.put("publicKeyFingerprint", fingerprint());
+    return result;
+  }
+
+  private String fingerprint() {
+    try {
+      return HexFormat.of()
+          .formatHex(MessageDigest.getInstance("SHA-256").digest(key.getEncoded()));
+    } catch (GeneralSecurityException e) {
+      throw new AurigaException(UNAVAILABLE);
+    }
+  }
+
+  /** Read-only signature/policy check, including for HTTP browsers without WebCrypto. */
+  public ObjectNode preflight(AurigaPrincipal principal, ObjectNode envelope) {
+    var actor = access.administrator(principal, MANAGE);
+    publisher(actor.tenant());
+    var body = verify(envelope);
+    var state = store(publisherTenant).read();
+    validatePolicy(body, state);
+    return JSON.createObjectNode().put("publicKeyFingerprint", fingerprint());
   }
 
   public ObjectNode publish(AurigaPrincipal principal, ObjectNode envelope, InputStream input) {
@@ -176,37 +206,12 @@ public final class DesktopReleases {
               state -> {
                 access.administrator(principal, MANAGE);
                 verify(envelope);
+                validatePolicy(body, state);
                 long seq = body.path("sequence").asLong();
-                if (seq <= state.path("highestSequence").asLong())
-                  throw new AurigaException(CONFLICT);
                 var items = state.withArray("items");
-                tools.jackson.databind.JsonNode previous = null;
-                for (var item : items) {
-                  var candidate = item.path("manifest");
-                  if (candidate.path("channel").equals(body.path("channel"))
-                      && (previous == null
-                          || candidate.path("sequence").asLong()
-                              > previous.path("sequence").asLong())) previous = candidate;
-                }
                 boolean rollback =
                     !body.path("rollbackFrom").isMissingNode()
                         && !body.path("rollbackFrom").isNull();
-                if (rollback
-                    && (previous == null
-                        || !body.path("rollbackFrom").equals(previous.path("version"))))
-                  throw new AurigaException(CONFLICT);
-                if (previous != null) {
-                  int comparison =
-                      ResourceSemver.compare(
-                          body.path("version").asString(), previous.path("version").asString());
-                  if (comparison < 0 && !rollback) throw new AurigaException(CONFLICT);
-                  if (rollback && comparison >= 0) throw new AurigaException(CONFLICT);
-                  if (comparison == 0) {
-                    for (String field : Set.of("packageId", "sha256", "sizeBytes", "components"))
-                      if (!body.path(field).equals(previous.path(field)))
-                        throw new AurigaException(CONFLICT);
-                  }
-                }
                 try {
                   Path blob = store.root().resolve(body.path("sha256").asString() + ".exe");
                   if (Files.exists(blob)) Files.delete(stage);
@@ -232,6 +237,33 @@ public final class DesktopReleases {
           Files.deleteIfExists(temporary);
         } catch (IOException ignored) {
         }
+    }
+  }
+
+  private void validatePolicy(ObjectNode body, ObjectNode state) {
+    if (body.path("sequence").asLong() <= state.path("highestSequence").asLong())
+      throw new AurigaException(CONFLICT);
+    tools.jackson.databind.JsonNode previous = null;
+    for (var item : state.withArray("items")) {
+      var candidate = item.path("manifest");
+      if (candidate.path("channel").equals(body.path("channel"))
+          && (previous == null
+              || candidate.path("sequence").asLong() > previous.path("sequence").asLong()))
+        previous = candidate;
+    }
+    boolean rollback = body.hasNonNull("rollbackFrom");
+    if (rollback
+        && (previous == null || !body.path("rollbackFrom").equals(previous.path("version"))))
+      throw new AurigaException(CONFLICT);
+    if (previous == null) return;
+    int comparison =
+        ResourceSemver.compare(
+            body.path("version").asString(), previous.path("version").asString());
+    if ((comparison < 0 && !rollback) || (rollback && comparison >= 0))
+      throw new AurigaException(CONFLICT);
+    if (comparison == 0) {
+      for (String field : Set.of("packageId", "sha256", "sizeBytes", "components"))
+        if (!body.path(field).equals(previous.path(field))) throw new AurigaException(CONFLICT);
     }
   }
 
@@ -303,8 +335,12 @@ public final class DesktopReleases {
 
   public ObjectNode latest(String channel) {
     if (!Set.of("stable", "beta").contains(channel)) throw invalid();
+    return latest(channel, store(publisherTenant).read());
+  }
+
+  private ObjectNode latest(String channel, ObjectNode state) {
     ObjectNode best = null;
-    for (var item : store(publisherTenant).read().withArray("items")) {
+    for (var item : state.withArray("items")) {
       if (item.path("withdrawn").asBoolean()) continue;
       var manifest = (ObjectNode) item.path("manifest");
       if (!channel.equals(manifest.path("channel").asString())) continue;

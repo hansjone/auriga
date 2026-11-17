@@ -272,19 +272,49 @@ class DesktopReleasesTest {
     var valid = envelope();
     when(access.administrator(actor, DesktopReleases.MANAGE))
         .thenThrow(new AurigaException(CommonErrors.FORBIDDEN));
+    rejects(() -> releases.list(actor), CommonErrors.FORBIDDEN);
+    rejects(() -> releases.preflight(actor, valid), CommonErrors.FORBIDDEN);
     rejects(() -> releases.publish(actor, valid, zip()), CommonErrors.FORBIDDEN);
     rejects(() -> releases.withdraw(actor, 2), CommonErrors.FORBIDDEN);
     var other = mock(AurigaPrincipal.class);
     when(access.administrator(other, DesktopReleases.MANAGE))
         .thenReturn(new ResourceAccess.Reader(UUID.randomUUID(), account, false, Set.of(), false));
     rejects(() -> releases.list(other), CommonErrors.FORBIDDEN);
+    rejects(() -> releases.preflight(other, valid), CommonErrors.FORBIDDEN);
     for (var method : DesktopController.class.getDeclaredMethods()) {
       assertTrue(
           method.isAnnotationPresent(RequiresPermission.class)
               || method.isAnnotationPresent(PublicEndpoint.class));
-      if (Set.of("publish", "withdraw", "list").contains(method.getName()))
+      if (Set.of("publish", "withdraw").contains(method.getName()))
         assertNotNull(method.getAnnotation(RequiresRecentStepUp.class));
+      else assertNull(method.getAnnotation(RequiresRecentStepUp.class));
     }
+  }
+
+  @Test
+  void consoleStatusUsesActualLatestAndRegisteredSigningKey() throws Exception {
+    var empty = releases.list(actor);
+    assertTrue(empty.path("channels").isEmpty());
+    assertEquals(
+        HexFormat.of()
+            .formatHex(MessageDigest.getInstance("SHA-256").digest(keys.getPublic().getEncoded())),
+        empty.path("publicKeyFingerprint").asString());
+    assertEquals(
+        Base64.getEncoder().encodeToString(keys.getPublic().getEncoded()),
+        empty.path("publicKeySpki").asString());
+    var valid = envelope();
+    assertEquals(
+        empty.path("publicKeyFingerprint"),
+        releases.preflight(actor, valid).path("publicKeyFingerprint"));
+    assertTrue(releases.list(actor).path("items").isEmpty());
+    rejects(
+        () -> releases.preflight(actor, valid.deepCopy().put("version", "9.0.0")),
+        CommonErrors.VALIDATION_FAILED);
+    releases.publish(actor, valid, zip());
+    assertEquals(valid, releases.list(actor).path("channels").path("stable"));
+    rejects(() -> releases.preflight(actor, valid), CommonErrors.CONFLICT);
+    releases.withdraw(actor, 2);
+    assertTrue(releases.list(actor).path("channels").isEmpty());
   }
 
   @Test
@@ -339,6 +369,14 @@ class DesktopReleasesTest {
     org.springframework.security.core.context.SecurityContextHolder.getContext()
         .setAuthentication(new AurigaAuthentication(actor));
     try {
+      mvc.perform(
+              org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post(
+                      "/api/resource/v1/admin/desktop/releases/preflight")
+                  .contentType("application/json")
+                  .content(ResourceBody.JSON.writeValueAsBytes(policy)))
+          .andExpect(
+              org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().isOk());
+      assertTrue(releases.list(actor).path("items").isEmpty());
       mvc.perform(
               org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post(
                       "/api/resource/v1/admin/desktop/releases")

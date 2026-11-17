@@ -27,13 +27,34 @@ public class DesktopController {
   }
 
   @GetMapping("/admin/desktop/releases")
+  @AdminOnly
   @RequiresPermission(DesktopReleases.MANAGE)
-  @RequiresRecentStepUp
   public ResponseEntity<JsonNode> list() {
     return response(releases.list(actor()), 200);
   }
 
+  @PostMapping(value = "/admin/desktop/releases/preflight", consumes = "application/json")
+  @AdminOnly
+  @RequiresPermission(DesktopReleases.MANAGE)
+  public ResponseEntity<JsonNode> preflight(HttpServletRequest request) {
+    try {
+      return response(
+          releases.preflight(
+              actor(),
+              parse(
+                  request.getInputStream().readNBytes(32769),
+                  32768,
+                  null,
+                  Set.of("signature"),
+                  Set.of("rollbackFrom"))),
+          200);
+    } catch (java.io.IOException e) {
+      throw invalid();
+    }
+  }
+
   @PostMapping(value = "/admin/desktop/releases", consumes = "application/octet-stream")
+  @AdminOnly
   @RequiresPermission(DesktopReleases.MANAGE)
   @RequiresRecentStepUp
   public ResponseEntity<JsonNode> publish(HttpServletRequest request) throws java.io.IOException {
@@ -54,6 +75,7 @@ public class DesktopController {
   }
 
   @DeleteMapping("/admin/desktop/releases/{sequence}")
+  @AdminOnly
   @RequiresPermission(DesktopReleases.MANAGE)
   @RequiresRecentStepUp
   public ResponseEntity<Void> withdraw(@PathVariable long sequence) {

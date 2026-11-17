@@ -33,6 +33,11 @@ import {
 import { systemTool } from './system-tools.mjs';
 import { compare } from './semver-lite.mjs';
 import { updateOrigin } from './platform-origin.mjs';
+import {
+  rememberUpdateAttempt,
+  finishUpdateAttempt,
+  updateWasRolledBack,
+} from './desktop-report.mjs';
 
 function logUpdate(root, entry) {
   const file = join(root, 'desktop-update.log');
@@ -87,6 +92,7 @@ function discardIncompletePending(root) {
       applyRetry: null,
     }));
     logUpdate(root, failure);
+    finishUpdateAttempt(root, 'failed', failure.stage, failure.code);
     return true;
   }
 }
@@ -384,6 +390,8 @@ export function createUpdater({
       let unlock,
         temporary,
         retain = false;
+      let installStage = 'download',
+        previousId;
       controller = new AbortController();
       try {
         unlock = downloadLock(root);
@@ -393,6 +401,8 @@ export function createUpdater({
           throw new Error('no update ready');
         const body = verified(pending),
           state = current();
+        previousId = state.current;
+        rememberUpdateAttempt(root, body.version, body.channel, true);
         temporary = resume;
         const identity = join(resume, 'identity.json');
         if (
@@ -449,6 +459,7 @@ export function createUpdater({
         );
         retain = false;
         progress('verifying');
+        installStage = 'verify';
         if (sha256File(archive) !== body.sha256)
           throw new Error('package SHA mismatch');
         const payload = await extract(archive, join(temporary, 'unpacked'));
@@ -501,19 +512,33 @@ export function createUpdater({
           return { restartRequired: true, queued: true };
         }
         progress('installing');
+        installStage = 'installation';
         install({
           root,
           payload,
           dataHome: state.dataHome,
           smoke,
           transfer: unlock,
+          progress: (stage) => {
+            installStage = stage;
+          },
         });
+        finishUpdateAttempt(root, 'succeeded');
         progress('ready', { available: null });
         return {
           restartRequired: true,
           message: `更新完成。请关闭并重新打开 ${BRAND_NAME}。`,
         };
       } catch (error) {
+        if (previousId)
+          finishUpdateAttempt(
+            root,
+            updateWasRolledBack(root, previousId, installStage)
+              ? 'rolled_back'
+              : 'failed',
+            installStage,
+            error.code,
+          );
         if (temporary)
           progress(controller.signal.aborted ? 'cancelled' : 'failed', {
             error: controller.signal.aborted ? null : 'updateFailed',
@@ -692,6 +717,7 @@ async function applyPendingLocked(
   let retain = true;
   let stage = 'verify-current';
   let identity;
+  let previousId;
   const note = (next) => {
     if (stage === next) return;
     stage = next;
@@ -753,6 +779,7 @@ async function applyPendingLocked(
   try {
     const saved = readUpdateState(root);
     const current = readState(root);
+    previousId = current.current;
     const old = verifyPackage(versionDir(root, current.current));
     note('verify-release');
     const envelope = rejectInvalid(() =>
@@ -770,12 +797,14 @@ async function applyPendingLocked(
       }),
     );
     identity = releaseDigest(body);
+    rememberUpdateAttempt(root, body.version, body.channel);
     // Recognize a committed transaction whose input survived the crash.
     if (
       current.current === body.packageId &&
       old.bundleVersion === body.version
     ) {
       retain = false;
+      finishUpdateAttempt(root, 'succeeded');
       changeUpdateState(root, (state) => ({
         ...state,
         phase: 'idle',
@@ -887,6 +916,7 @@ async function applyPendingLocked(
       }),
     );
     retain = false;
+    finishUpdateAttempt(root, 'succeeded');
     changeUpdateState(root, (state) => ({
       ...state,
       phase: 'idle',
@@ -899,6 +929,12 @@ async function applyPendingLocked(
     }));
     return true;
   } catch (error) {
+    finishUpdateAttempt(
+      root,
+      updateWasRolledBack(root, previousId, stage) ? 'rolled_back' : 'failed',
+      stage,
+      error.code,
+    );
     const failure = {
       stage,
       code: /^(?:E[A-Z_]+|desktop\.[a-z_]+)$/.test(error.code ?? '')

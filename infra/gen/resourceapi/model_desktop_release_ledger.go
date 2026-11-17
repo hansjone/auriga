@@ -19,9 +19,14 @@ var _ MappedNullable = &DesktopReleaseLedger{}
 
 // DesktopReleaseLedger struct for DesktopReleaseLedger
 type DesktopReleaseLedger struct {
-	HighestSequence      *int32                   `json:"highestSequence,omitempty"`
-	Items                []DesktopReleaseItem     `json:"items,omitempty"`
-	Audit                []map[string]interface{} `json:"audit,omitempty"`
+	HighestSequence *int32                   `json:"highestSequence,omitempty"`
+	Items           []DesktopReleaseItem     `json:"items,omitempty"`
+	Audit           []map[string]interface{} `json:"audit,omitempty"`
+	// SHA256 of registered Ed25519 SPKI DER. Public metadata only.
+	PublicKeyFingerprint *string `json:"publicKeyFingerprint,omitempty" validate:"regexp=^[a-f0-9]{64}$"`
+	// Base64 Ed25519 SPKI DER registered on the platform. No private key.
+	PublicKeySpki        *string                       `json:"publicKeySpki,omitempty"`
+	Channels             *DesktopReleaseLedgerChannels `json:"channels,omitempty"`
 	AdditionalProperties map[string]interface{}
 }
 
@@ -140,6 +145,102 @@ func (o *DesktopReleaseLedger) SetAudit(v []map[string]interface{}) {
 	o.Audit = v
 }
 
+// GetPublicKeyFingerprint returns the PublicKeyFingerprint field value if set, zero value otherwise.
+func (o *DesktopReleaseLedger) GetPublicKeyFingerprint() string {
+	if o == nil || IsNil(o.PublicKeyFingerprint) {
+		var ret string
+		return ret
+	}
+	return *o.PublicKeyFingerprint
+}
+
+// GetPublicKeyFingerprintOk returns a tuple with the PublicKeyFingerprint field value if set, nil otherwise
+// and a boolean to check if the value has been set.
+func (o *DesktopReleaseLedger) GetPublicKeyFingerprintOk() (*string, bool) {
+	if o == nil || IsNil(o.PublicKeyFingerprint) {
+		return nil, false
+	}
+	return o.PublicKeyFingerprint, true
+}
+
+// HasPublicKeyFingerprint returns a boolean if a field has been set.
+func (o *DesktopReleaseLedger) HasPublicKeyFingerprint() bool {
+	if o != nil && !IsNil(o.PublicKeyFingerprint) {
+		return true
+	}
+
+	return false
+}
+
+// SetPublicKeyFingerprint gets a reference to the given string and assigns it to the PublicKeyFingerprint field.
+func (o *DesktopReleaseLedger) SetPublicKeyFingerprint(v string) {
+	o.PublicKeyFingerprint = &v
+}
+
+// GetPublicKeySpki returns the PublicKeySpki field value if set, zero value otherwise.
+func (o *DesktopReleaseLedger) GetPublicKeySpki() string {
+	if o == nil || IsNil(o.PublicKeySpki) {
+		var ret string
+		return ret
+	}
+	return *o.PublicKeySpki
+}
+
+// GetPublicKeySpkiOk returns a tuple with the PublicKeySpki field value if set, nil otherwise
+// and a boolean to check if the value has been set.
+func (o *DesktopReleaseLedger) GetPublicKeySpkiOk() (*string, bool) {
+	if o == nil || IsNil(o.PublicKeySpki) {
+		return nil, false
+	}
+	return o.PublicKeySpki, true
+}
+
+// HasPublicKeySpki returns a boolean if a field has been set.
+func (o *DesktopReleaseLedger) HasPublicKeySpki() bool {
+	if o != nil && !IsNil(o.PublicKeySpki) {
+		return true
+	}
+
+	return false
+}
+
+// SetPublicKeySpki gets a reference to the given string and assigns it to the PublicKeySpki field.
+func (o *DesktopReleaseLedger) SetPublicKeySpki(v string) {
+	o.PublicKeySpki = &v
+}
+
+// GetChannels returns the Channels field value if set, zero value otherwise.
+func (o *DesktopReleaseLedger) GetChannels() DesktopReleaseLedgerChannels {
+	if o == nil || IsNil(o.Channels) {
+		var ret DesktopReleaseLedgerChannels
+		return ret
+	}
+	return *o.Channels
+}
+
+// GetChannelsOk returns a tuple with the Channels field value if set, nil otherwise
+// and a boolean to check if the value has been set.
+func (o *DesktopReleaseLedger) GetChannelsOk() (*DesktopReleaseLedgerChannels, bool) {
+	if o == nil || IsNil(o.Channels) {
+		return nil, false
+	}
+	return o.Channels, true
+}
+
+// HasChannels returns a boolean if a field has been set.
+func (o *DesktopReleaseLedger) HasChannels() bool {
+	if o != nil && !IsNil(o.Channels) {
+		return true
+	}
+
+	return false
+}
+
+// SetChannels gets a reference to the given DesktopReleaseLedgerChannels and assigns it to the Channels field.
+func (o *DesktopReleaseLedger) SetChannels(v DesktopReleaseLedgerChannels) {
+	o.Channels = &v
+}
+
 func (o DesktopReleaseLedger) MarshalJSON() ([]byte, error) {
 	toSerialize, err := o.ToMap()
 	if err != nil {
@@ -158,6 +259,15 @@ func (o DesktopReleaseLedger) ToMap() (map[string]interface{}, error) {
 	}
 	if !IsNil(o.Audit) {
 		toSerialize["audit"] = o.Audit
+	}
+	if !IsNil(o.PublicKeyFingerprint) {
+		toSerialize["publicKeyFingerprint"] = o.PublicKeyFingerprint
+	}
+	if !IsNil(o.PublicKeySpki) {
+		toSerialize["publicKeySpki"] = o.PublicKeySpki
+	}
+	if !IsNil(o.Channels) {
+		toSerialize["channels"] = o.Channels
 	}
 
 	for key, value := range o.AdditionalProperties {
@@ -184,6 +294,9 @@ func (o *DesktopReleaseLedger) UnmarshalJSON(data []byte) (err error) {
 		delete(additionalProperties, "highestSequence")
 		delete(additionalProperties, "items")
 		delete(additionalProperties, "audit")
+		delete(additionalProperties, "publicKeyFingerprint")
+		delete(additionalProperties, "publicKeySpki")
+		delete(additionalProperties, "channels")
 		o.AdditionalProperties = additionalProperties
 	}
 
