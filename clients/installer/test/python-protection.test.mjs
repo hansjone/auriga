@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { existsSync, mkdirSync, writeFileSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import {
   install,
   rollback,
@@ -80,6 +81,9 @@ test(
         `
         $identity=[Security.Principal.WindowsIdentity]::GetCurrent()
         $sid=$identity.User
+        Add-Type -Path $env:PYTHON_ACL_PROBE_SOURCE
+        $file=Join-Path $env:PYTHON_ACL_TEST 'runtime.json'
+        $native=@{restore=[PythonAccessProbe]::Privilege('SeRestorePrivilege'); backup=[PythonAccessProbe]::Privilege('SeBackupPrivilege'); nodeRestore=[PythonAccessProbe]::PrivilegeForProcess([int]$env:PYTHON_ACL_PARENT_PID,'SeRestorePrivilege'); ordinaryWrite=[PythonAccessProbe]::OpenForWrite($file,$false,$false,$false); backupWrite=[PythonAccessProbe]::OpenForWrite($file,$true,$false,$false)}
         $acl=Get-Acl -LiteralPath $env:PYTHON_ACL_TEST
         $paths=@('', 'runtime.json', 'python.exe', 'Lib/site-packages/fixture.py')
         $details=@(foreach($relative in $paths) {
@@ -89,11 +93,18 @@ test(
             @{subject=if($_.IdentityReference.Equals($sid)){'current-user'}elseif($_.IdentityReference.Value -eq 'S-1-5-18'){'SYSTEM'}else{'other'}; type=$_.AccessControlType.ToString(); rights=$_.FileSystemRights.ToString(); inherited=$_.IsInherited}
           })}
         })
-        @{protected=$acl.AreAccessRulesProtected; owner=$acl.GetOwner([Security.Principal.SecurityIdentifier]).Value; current=$sid.Value; administrator=(New-Object Security.Principal.WindowsPrincipal($identity)).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator); details=$details; privileges=@(& whoami.exe /priv | Select-String 'SeBackupPrivilege|SeRestorePrivilege|SeTakeOwnershipPrivilege' | ForEach-Object {$_.Line.Trim()})} | ConvertTo-Json -Depth 6 -Compress
+        @{protected=$acl.AreAccessRulesProtected; owner=$acl.GetOwner([Security.Principal.SecurityIdentifier]).Value; current=$sid.Value; administrator=(New-Object Security.Principal.WindowsPrincipal($identity)).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator); details=$details; native=$native; privileges=@(& (Join-Path $env:SystemRoot 'System32/whoami.exe') /priv | Select-String 'SeBackupPrivilege|SeRestorePrivilege|SeTakeOwnershipPrivilege' | ForEach-Object {$_.Line.Trim()})} | ConvertTo-Json -Depth 6 -Compress
         `,
       ],
       {
-        env: { ...process.env, PYTHON_ACL_TEST: runtime },
+        env: {
+          ...process.env,
+          PYTHON_ACL_TEST: runtime,
+          PYTHON_ACL_PARENT_PID: String(process.pid),
+          PYTHON_ACL_PROBE_SOURCE: fileURLToPath(
+            new URL('./windows-python-access.cs', import.meta.url),
+          ),
+        },
         windowsHide: true,
         encoding: 'utf8',
       },
@@ -103,6 +114,7 @@ test(
     t.diagnostic(
       JSON.stringify({
         administrator: security.administrator,
+        native: security.native,
         details: security.details,
         privileges: security.privileges,
       }),
