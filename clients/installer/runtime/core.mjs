@@ -67,6 +67,18 @@ import {
 import { spawnSync, spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { verifyPackage } from './verify.mjs';
+import {
+  createPythonDirectory,
+  protectPythonDirectory,
+} from './python-protection.mjs';
+import {
+  cleanPythonEnv,
+  preparePythonUser,
+  resetPythonUser,
+  configurePythonIndex,
+  pythonUserFailureReason,
+  pythonUserFailureStage,
+} from './python-user.mjs';
 
 export const PROFILE = 'auriga';
 const PLUGIN = 'auriga-dsh';
@@ -376,18 +388,72 @@ function syncPlugin(dir, dataHome) {
 
 // ----------------------------------------------------------------- smoke --
 
-/** Environment for upstream DSH: own data home; bundled node and pnpm first on PATH. */
+/** Environment inherited by DSH and its shell tools; never changes system settings. */
 export function launchEnv(dir, dataHome, base = process.env) {
   const pathKey =
     Object.keys(base).find((k) => k.toLowerCase() === 'path') ?? 'PATH';
-  const extra = [join(dir, 'tools', 'bin'), dirname(nodeBin(dir))];
+  const python = join(dir, 'runtime', 'python');
+  let personal;
+  try {
+    personal = preparePythonUser(dir, dataHome, base);
+  } catch (error) {
+    console.error(
+      `个人 Python 环境不可用，已使用内置 Python。请在托盘设置中重置个人 Python 环境。[${pythonUserFailureReason(error)}][python_user.stage_${pythonUserFailureStage(error)}]`,
+    );
+  }
+  const extra = [
+    personal?.bin,
+    python,
+    join(dir, 'tools', 'bin'),
+    dirname(nodeBin(dir)),
+  ].filter(Boolean);
+  const clean = cleanPythonEnv(base);
   return {
-    ...base,
+    ...clean,
+    PYTHONNOUSERSITE: '1',
+    PYTHONDONTWRITEBYTECODE: '1',
+    ...(personal
+      ? {
+          PIP_CONFIG_FILE: personal.config,
+          PIP_CONSTRAINT: personal.constraints,
+          PIP_REQUIRE_VIRTUALENV: 'true',
+          PIP_DISABLE_PIP_VERSION_CHECK: '1',
+          PIP_NO_INPUT: '1',
+          PIP_NO_INDEX: personal.index ? '0' : '1',
+          ...(personal.index ? { PIP_INDEX_URL: personal.index } : {}),
+          PIP_RETRIES: '0',
+          PIP_TIMEOUT: '5',
+          PIP_ONLY_BINARY: ':all:',
+          PIP_CACHE_DIR: join(personal.root, 'cache'),
+        }
+      : {}),
     DSH_HOME: dataHome,
     // Keep the pnpm package store (plugin manager) with the user data, not the system.
     npm_config_store_dir: join(dataHome, 'pnpm-store'),
     [pathKey]: [...extra, base[pathKey]].filter(Boolean).join(delimiter),
   };
+}
+
+/** Called after the tray stops DSH. Uses the normal installation/data writer locks. */
+export function pythonCommand(root, action, { index } = {}) {
+  const session = openVersionSession(root);
+  try {
+    const state = readState(root);
+    if (!state) throw new Error('desktop installation missing');
+    const dir = versionDir(root, state.current);
+    verifyPackage(dir, { trees: false });
+    if (action === 'configure')
+      return configurePythonIndex(state.dataHome, index);
+    if (action !== 'reset') throw new Error('unknown Python action');
+    if (!existsSync(join(dir, 'auriga/python/pip.json')))
+      throw new Error('此版本未提供个人 Python 环境');
+    resetPythonUser(state.dataHome);
+    if (!preparePythonUser(dir, state.dataHome))
+      throw new Error('此版本未提供个人 Python 环境');
+    return { reset: true };
+  } finally {
+    session.close();
+  }
 }
 
 /** Default smoke check: the upstream CLI must load the profile with the plugin row. */
@@ -937,12 +1003,15 @@ function installStopped({
       const staging = `${target}.partial`;
       rmSync(staging, { recursive: true, force: true });
       try {
+        if (existsSync(join(payload, 'runtime/python')))
+          createPythonDirectory(staging);
         copyTreeSteps(payload, staging, (fraction) => {
           progress('copy', fraction);
           checkpoint();
         });
         progress('verify-copy', 0);
         verifyPackage(staging);
+        protectPythonDirectory(staging);
         checkpoint();
       } catch (error) {
         rmSync(staging, { recursive: true, force: true });
@@ -950,6 +1019,7 @@ function installStopped({
       }
       renameSync(staging, target);
     }
+    if (!fresh) protectPythonDirectory(target);
     transition({
       root,
       dataHome,
@@ -1010,6 +1080,7 @@ function rollbackStopped({ root, smoke = defaultSmoke, fault = noFault }) {
   if (!existsSync(dir))
     throw new Error(`previous version missing: ${state.previous}`);
   verifyPackage(dir);
+  protectPythonDirectory(dir);
   assertGuardianCompatible(dir, state.dataHome);
   revokeForeignDataClaim(root, state.dataHome, state.dataOwner);
   transition({
@@ -1134,6 +1205,7 @@ function removeDedicatedData(root, { dataHome, dataOwner }) {
       'profile-backups',
       'sessions',
       'pnpm-store',
+      'python-user',
     ];
     if (readdirSync(dataHome).some((name) => !known.includes(name)))
       return false;
