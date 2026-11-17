@@ -83,3 +83,6 @@ AURIGA_RESOURCE_CURSOR_SIGNING_KEY=<至少32字节随机密钥的标准base64>
 Windows使用 `mvnw.cmd`，按现有Auriga开发环境注入工具路径。测试结束关闭HTTP、连接池及数据库进程。
 
 R1A不新增DSH managed成员API桥接，不改变设备令牌audience。PLUGIN1的市场UI已有消费者，但在P3/受审访问通道接好前仍应显示能力不可用。真实安装管理闭环还依赖分发、workspace复核、节点下载/验签/实际应用、权威安装清单与配置契约；不能以本批四个GET通过代替该闭环。
+
+统一目录的开发环境降级根配置、节点公钥分发顺序及完整云端镜像更新，见
+[独立降级根部署指南](resource-downgrade-deployment.zh.md)。
