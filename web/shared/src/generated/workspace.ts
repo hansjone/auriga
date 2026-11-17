@@ -924,6 +924,8 @@ export interface components {
        * @enum {string}
        */
       desiredState?: 'ENABLED' | 'DISABLED' | 'REMOVED';
+      /** @description Server-resolved scope policy. Omission means optional for earlier records. */
+      installationMode?: components['schemas']['UnifiedInstallationMode'];
     };
     UnifiedSelection: {
       identity: components['schemas']['UnifiedResourceIdentity'];
@@ -1400,7 +1402,7 @@ export interface components {
       /** Format: uuid */
       versionId: string;
       /** @enum {string} */
-      kind: 'skill' | 'tool';
+      kind: 'plugin' | 'skill' | 'tool';
       version: components['schemas']['Version'];
       manifestDigest: components['schemas']['Digest'];
     };
@@ -1455,6 +1457,8 @@ export interface components {
       /** Format: int64 */
       revocationRevision: number;
     };
+    /** @enum {string} */
+    UnifiedInstallationMode: 'required' | 'default' | 'optional';
   };
   responses: {
     /** @description 插件协议版本过旧（plugin.protocol_unsupported），params 里有 current 和 minSupported */

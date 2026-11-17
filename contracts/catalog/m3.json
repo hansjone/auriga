@@ -580,6 +580,22 @@
         "zh-CN": "尚未确认执行树停止",
         "en": "Execution tree stop unconfirmed"
       }
+    },
+    "resource.installation_required": {
+      "http": 403,
+      "grpc": "PERMISSION_DENIED",
+      "message": {
+        "zh-CN": "该分发要求保持安装或启用，不能执行此操作",
+        "en": "This distribution requires installation or activation"
+      }
+    },
+    "resource.distribution_locked": {
+      "http": 403,
+      "grpc": "PERMISSION_DENIED",
+      "message": {
+        "zh-CN": "此资源版本已由分发策略锁定",
+        "en": "The version is fixed by distribution policy"
+      }
     }
   },
   "events": {
@@ -708,6 +724,16 @@
         "audit"
       ],
       "publish": "auriga.evt.placement.guardian_impact"
+    },
+    "resource.catalog_assignment_changed": {
+      "source": "auriga/resource",
+      "subject": "id",
+      "schema": "../events/resource.schema.json#/$defs/UnifiedResourceAssignmentChanged",
+      "consumers": [
+        "workspace",
+        "audit"
+      ],
+      "publish": "auriga.evt.resource.catalog_assignment_changed"
     }
   },
   "deviceMappings": {

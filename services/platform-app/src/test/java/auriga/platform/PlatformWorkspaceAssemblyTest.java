@@ -452,6 +452,15 @@ class PlatformWorkspaceAssemblyTest {
                     .setSelectionRevision(1)
                     .addSelections(selection)
                     .build()));
+    // Enter the lease window after the same assignment bootstrap used by a newly opened instance.
+    resources.reconcile();
+    acknowledgeRenewal(tenant, instance);
+    assertTrue(
+        workspace.store.in(
+            tenant,
+            () ->
+                Boolean.TRUE.equals(
+                    workspace.store.instance(instance).get("catalog_policy_checked"))));
     org.mockito.stubbing.Answer<Object> failFast =
         invocation -> {
           try {

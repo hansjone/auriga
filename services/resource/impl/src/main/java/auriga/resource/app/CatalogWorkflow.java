@@ -8,6 +8,7 @@ import auriga.common.error.*;
 import auriga.common.events.EventPublisher;
 import auriga.common.persistence.UuidV7;
 import auriga.common.security.AurigaPrincipal;
+import auriga.resource.archive.PluginArchiveValidator;
 import auriga.resource.archive.SkillArchiveValidator;
 import auriga.resource.objectstore.ObjectStore;
 import auriga.resource.persistence.*;
@@ -101,11 +102,11 @@ public final class CatalogWorkflow {
     return new AurigaException(CommonErrors.CONFLICT);
   }
 
-  private String visible(ResourceAccess.Reader r) {
+  String visible(ResourceAccess.Reader r) {
     return " AND (p.visibility='tenant' OR (p.visibility='members' AND NOT :external) OR (p.visibility='groups' AND p.group_ids && CAST(:groups AS uuid[])))";
   }
 
-  private Map<String, Object> args(ResourceAccess.Reader r, Object... pairs) {
+  Map<String, Object> args(ResourceAccess.Reader r, Object... pairs) {
     var a = db.args(pairs);
     a.put("external", r.external());
     a.put("groups", "{" + String.join(",", r.groups().stream().map(UUID::toString).toList()) + "}");
@@ -141,7 +142,6 @@ public final class CatalogWorkflow {
     for (String k : List.of("id", "name", "kind")) n.put(k, p.get(k).toString());
     n.put("tenantId", p.get("tenant_id").toString())
         .put("ownerId", p.get("owner_id").toString())
-        .put("level", "l3")
         .put("visibility", p.get("visibility").toString())
         .put("enabled", (Boolean) p.get("enabled"))
         .put("revision", number(p, "revision"))
@@ -188,12 +188,16 @@ public final class CatalogWorkflow {
     return "/api/resource/v1/catalog/packages/" + p + "/versions/" + v;
   }
 
+  void assignmentRecorded(ResourceAccess.Reader reader, UUID id) {
+    operations.recorded(reader, "resource.distribution.request", id);
+  }
+
   public JsonNode create(AurigaPrincipal actor, ObjectNode body, String key, String etag) {
     String name = text(body, "name", 64),
         kind = text(body, "kind", 16),
         visibility = text(body, "visibility", 16);
     if (!name.matches("[a-z0-9]+(?:-[a-z0-9]+)*")
-        || !kind.equals("skill")
+        || !Set.of("plugin", "skill").contains(kind)
         || !Set.of("tenant", "members", "groups").contains(visibility)) throw invalid();
     var groups = new TreeSet<UUID>();
     if (body.has("groupIds")) {
@@ -254,8 +258,9 @@ public final class CatalogWorkflow {
 
   public JsonNode list(
       AurigaPrincipal actor, UUID p, String kind, int limit, String cursor, String phase) {
-    if (limit < 1 || limit > 200 || kind != null && !Set.of("skill", "tool").contains(kind))
-      throw invalid();
+    if (limit < 1
+        || limit > 200
+        || kind != null && !Set.of("plugin", "skill", "tool").contains(kind)) throw invalid();
     var r =
         phase == null
             ? access.member(actor)
@@ -376,16 +381,19 @@ public final class CatalogWorkflow {
     var staged = new ArrayList<ObjectStore.Staged>();
     var store = objects.get();
     try {
-      String floor = "r1";
+      boolean plugin = m.path("kind").asString().equals("plugin");
+      String floor = plugin ? "r2" : "r1";
       for (int i = 0; i < inputs.size(); i++) {
-        var stage = store.putStaged(r.tenant(), inputs.get(i), 5242880);
+        var stage = store.putStaged(r.tenant(), inputs.get(i), plugin ? 67108864 : 5242880);
         staged.add(stage);
         var a = m.path("artifacts").get(i);
         if (!stage.object().digest().equals(a.path("digest").asString())
             || stage.object().sizeBytes() != a.path("sizeBytes").asLong()) throw invalid();
         floor =
-            SkillArchiveValidator.validate(
-                store.openStaged(r.tenant(), stage.id()), stage.object().sizeBytes(), m);
+            plugin
+                ? PluginArchiveValidator.validate(store, r.tenant(), stage, m)
+                : SkillArchiveValidator.validate(
+                    store.openStaged(r.tenant(), stage.id()), stage.object().sizeBytes(), m);
       }
       final String risk = floor;
       var fingerprint = metadata.deepCopy();

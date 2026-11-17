@@ -359,7 +359,7 @@ public class ResourceRuntimeConfiguration {
   @Bean
   jakarta.servlet.MultipartConfigElement resourceMultipart(
       auriga.resource.web.ResourceMultipartDirectory directory) {
-    return new jakarta.servlet.MultipartConfigElement(directory.location(), 67108864, 67239936, 0);
+    return new jakarta.servlet.MultipartConfigElement(directory.location(), 67108864, 67633152, 0);
   }
 
   @Bean

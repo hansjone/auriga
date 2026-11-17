@@ -11,7 +11,7 @@ import java.util.*;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.node.ObjectNode;
 
-/** Independent verification of frozen cross-protocol proofs. P1 never enables plugin v2. */
+/** Independent signature verification; legacy proof helpers remain until legacy cleanup. */
 public final class CatalogTrust {
   private final JsonNode trust;
   private final SchemaRegistry schemas =

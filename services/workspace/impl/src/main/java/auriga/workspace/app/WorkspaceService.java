@@ -11,6 +11,7 @@ import auriga.common.security.AurigaPrincipal;
 import auriga.contracts.node.v1.*;
 import auriga.contracts.org.v1.InstanceQuota;
 import auriga.contracts.org.v1.MemberStatus;
+import auriga.org.web.model.WorkspacePolicy;
 import auriga.workspace.api.WorkspaceInputs;
 import auriga.workspace.domain.*;
 import auriga.workspace.persistence.WorkspaceStore;
@@ -36,6 +37,11 @@ public final class WorkspaceService {
   static final Duration DONE_WAKE_RETENTION = Duration.ofDays(1);
 
   public static final JsonMapper JSON = JsonMapper.builder().build();
+
+  public static boolean allowPersonalPlugins(WorkspacePolicy policy) {
+    return policy == null || !Boolean.FALSE.equals(policy.getAllowPersonalPlugins());
+  }
+
   public final WorkspaceStore store;
   private final WorkspaceInputs inputs;
   public final WorkspaceTemplates templates;
@@ -46,6 +52,11 @@ public final class WorkspaceService {
   public final Clock clock;
   private volatile Runnable changed = () -> {};
   private volatile boolean managedNetworkRequired;
+  private volatile boolean catalogAssignmentsRequired;
+
+  public void requireCatalogAssignments() {
+    catalogAssignmentsRequired = true;
+  }
 
   private volatile SharedDshPlacements sharedPlacements;
 
@@ -65,6 +76,12 @@ public final class WorkspaceService {
   public boolean dispatchable(Map<String, Object> row) {
     if (Boolean.TRUE.equals(row.get("shared_rebuild_hold")))
       return spec(row).getDesired() == DesiredState.DESIRED_STATE_STOPPED;
+    if (catalogAssignmentsRequired
+        && spec(row).getDesired() == DesiredState.DESIRED_STATE_RUNNING
+        && !Boolean.TRUE.equals(row.get("catalog_policy_checked"))
+        && !(row.get("catalog_safety_generation") instanceof Number safety
+            && row.get("generation") instanceof Number generation
+            && safety.longValue() == generation.longValue())) return false;
     return !managedNetworkRequired
         || spec(row).getDesired() != DesiredState.DESIRED_STATE_RUNNING
         || "disabled".equals(row.get("managed_network_state"))
@@ -73,6 +90,19 @@ public final class WorkspaceService {
             && Objects.equals(
                 row.get("managed_synced_version"), row.get("managed_credential_version"))
             && spec(row).getSecrets().hasDeviceCredential());
+  }
+
+  /** Full specs and restart jobs remain gated; only a separately admitted safety spec may pass. */
+  public InstanceSpec dispatchSpec(Map<String, Object> row) {
+    if (dispatchable(row)) return spec(row);
+    if (!(row.get("catalog_safety_spec") instanceof byte[] bytes)) return null;
+    var safety = new HashMap<String, Object>(row);
+    safety.put("spec", bytes);
+    var projected = spec(safety);
+    safety.put("generation", projected.getGeneration());
+    safety.put("catalog_policy_checked", false);
+    safety.put("catalog_safety_generation", projected.getGeneration());
+    return dispatchable(safety) ? projected : null;
   }
 
   public WorkspaceService(
@@ -233,6 +263,7 @@ public final class WorkspaceService {
                   .setTenantId(tenant.toString())
                   .setOwnerId(owner.toString())
                   .setGeneration(1)
+                  .setAllowPersonalPlugins(allowPersonalPlugins(policy))
                   .setResources(resources)
                   .setDesired(DesiredState.DESIRED_STATE_RUNNING)
                   .build();
@@ -381,7 +412,7 @@ public final class WorkspaceService {
                         assigned.getGeneration(),
                         token)));
         store.jdbc.update(
-            "UPDATE instance SET node_id=?,spec=?,managed_retry_at=? WHERE tenant_id=? AND id=?",
+            "UPDATE instance SET node_id=?,spec=?,managed_retry_at=?,catalog_safety_generation=NULL,catalog_admitted_spec=NULL,catalog_safety_spec=NULL WHERE tenant_id=? AND id=?",
             node.get("id"),
             assigned.build().toByteArray(),
             time(clock.instant()),
@@ -405,14 +436,93 @@ public final class WorkspaceService {
   }
 
   public void saveSpec(Map<String, Object> row, InstanceSpec next) {
-    saveSpec(row, next, false);
+    saveSpec(row, next, false, false);
   }
 
   void saveStartupSpec(Map<String, Object> row, InstanceSpec next) {
-    saveSpec(row, next, true);
+    saveSpec(row, next, true, false);
   }
 
-  private void saveSpec(Map<String, Object> row, InstanceSpec next, boolean startupDerivative) {
+  public void saveCatalogSpec(Map<String, Object> row, InstanceSpec next) {
+    saveSpec(row, next, false, true);
+  }
+
+  public void saveSafetySpec(Map<String, Object> row, InstanceSpec next) {
+    if (!UnifiedSpec.safetyChange(spec(row), next))
+      throw new AurigaException(CommonErrors.VALIDATION_FAILED);
+    InstanceSpec admitted = null;
+    Object admittedBytes = row.get("catalog_safety_spec");
+    if (admittedBytes == null) admittedBytes = row.get("catalog_admitted_spec");
+    if (admittedBytes instanceof byte[] bytes) {
+      var snapshot = new HashMap<String, Object>(row);
+      snapshot.put("spec", bytes);
+      admitted = spec(snapshot);
+    }
+    boolean previousAdmitted =
+        Boolean.TRUE.equals(row.get("catalog_policy_checked"))
+            || row.get("catalog_safety_generation") instanceof Number safety
+                && safety.longValue() == ((Number) row.get("generation")).longValue()
+            || admitted != null && admitted.equals(spec(row));
+    if (!previousAdmitted) {
+      var projected = admitted == null ? null : UnifiedSpec.safetyProjection(admitted, next);
+      if (projected == null) {
+        persistSpec(
+            row,
+            sealSpec(row, next),
+            false,
+            (boolean) row.get("restart_pending"),
+            (String) row.get("startup_traceparent"));
+        return;
+      }
+      var safety = sealSpec(row, projected);
+      // Reserve the following generation for the complete pending candidate, stored once.
+      persistSpec(
+          row,
+          sealSpec(row, UnifiedSpec.bump(next)),
+          false,
+          (boolean) row.get("restart_pending"),
+          (String) row.get("startup_traceparent"));
+      store.jdbc.update(
+          "UPDATE instance SET catalog_safety_spec=? WHERE tenant_id=? AND id=?",
+          safety.toByteArray(),
+          store.tenant(),
+          row.get("id"));
+      return;
+    }
+    saveSpec(row, next, false, false, true);
+    store.jdbc.update(
+        "UPDATE instance SET catalog_safety_generation=?,catalog_admitted_spec=spec,catalog_safety_spec=NULL WHERE tenant_id=? AND id=?",
+        next.getGeneration(),
+        store.tenant(),
+        row.get("id"));
+  }
+
+  public void markCatalogChecked(Map<String, Object> row) {
+    store.jdbc.update(
+        "UPDATE instance SET catalog_policy_checked=true,catalog_admitted_spec=spec,catalog_safety_spec=NULL,catalog_safety_generation=NULL WHERE tenant_id=? AND id=?",
+        store.tenant(),
+        row.get("id"));
+  }
+
+  private void saveSpec(
+      Map<String, Object> row,
+      InstanceSpec next,
+      boolean startupDerivative,
+      boolean catalogChecked) {
+    saveSpec(row, next, startupDerivative, catalogChecked, false);
+  }
+
+  private void saveSpec(
+      Map<String, Object> row,
+      InstanceSpec next,
+      boolean startupDerivative,
+      boolean catalogChecked,
+      boolean safetyOnly) {
+    if (!safetyOnly && next.getDesired() == DesiredState.DESIRED_STATE_RUNNING)
+      next =
+          next.toBuilder()
+              .setAllowPersonalPlugins(allowPersonalPlugins(inputs.policy(store.tenant())))
+              .build();
     var previous = spec(row);
     String startupTrace = null;
     if (next.getDesired() == DesiredState.DESIRED_STATE_RUNNING) {
@@ -430,6 +540,16 @@ public final class WorkspaceService {
                     || auriga.workspace.domain.UnifiedSpec.executionChanged(previous, next)
                     || !previous.getNetwork().equals(next.getNetwork())
                     || !previous.getProfile().equals(next.getProfile())));
+    persistSpec(
+        row,
+        sealSpec(row, next),
+        catalogChecked,
+        restart,
+        startupTrace == null || startupTrace.isEmpty() ? null : startupTrace);
+  }
+
+  /** Seals current stored material for a specification generation. */
+  private InstanceSpec sealSpec(Map<String, Object> row, InstanceSpec next) {
     if (row.get("node_id") != null) {
       var node = store.node((UUID) row.get("node_id"));
       byte[] token =
@@ -476,6 +596,15 @@ public final class WorkspaceService {
       }
       next = next.toBuilder().setSecrets(secrets).build();
     }
+    return next;
+  }
+
+  private void persistSpec(
+      Map<String, Object> row,
+      InstanceSpec next,
+      boolean catalogChecked,
+      boolean restart,
+      String startupTrace) {
     store.jdbc.update(
         "UPDATE instance SET spec=?,ready=CASE WHEN generation<>? THEN false ELSE ready END,generation=?,restart_pending=?,updated_at=?,startup_traceparent=? WHERE tenant_id=? AND id=?",
         next.toByteArray(),
@@ -483,7 +612,14 @@ public final class WorkspaceService {
         next.getGeneration(),
         restart,
         time(clock.instant()),
-        startupTrace == null || startupTrace.isEmpty() ? null : startupTrace,
+        startupTrace,
+        store.tenant(),
+        row.get("id"));
+    store.jdbc.update(
+        "UPDATE instance SET catalog_policy_checked=?,catalog_safety_generation=NULL,catalog_admitted_spec=CASE WHEN ? THEN spec ELSE catalog_admitted_spec END,catalog_safety_spec=CASE WHEN ? THEN NULL ELSE catalog_safety_spec END WHERE tenant_id=? AND id=?",
+        catalogChecked,
+        catalogChecked,
+        catalogChecked,
         store.tenant(),
         row.get("id"));
     store.jdbc.update(

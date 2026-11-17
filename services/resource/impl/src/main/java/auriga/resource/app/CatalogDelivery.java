@@ -26,6 +26,7 @@ import tools.jackson.databind.node.ObjectNode;
  */
 public final class CatalogDelivery implements UnifiedResourceResolution {
   private final ResourceStore tx;
+  private final CatalogAssignments assignments;
   private final ResourceWorkflowStore db;
   private final ResourceAccess access;
   private final CatalogWorkflow catalog;
@@ -68,6 +69,7 @@ public final class CatalogDelivery implements UnifiedResourceResolution {
     this.clock = clock;
     this.cursors = cursors;
     this.tenants = tenants;
+    this.assignments = new CatalogAssignments(db, access, catalog, workspace, events, clock);
   }
 
   private void validate(String type, JsonNode n) {
@@ -142,6 +144,13 @@ public final class CatalogDelivery implements UnifiedResourceResolution {
     if (number(version, "release_sequence") != number(pack, "release_high_water")) throw conflict();
   }
 
+  private static boolean enableInstalled(JsonNode resource, JsonNode selection) {
+    return resource != null
+        && selection.path("action").asString().equals("enable")
+        && resource.path("identity").equals(selection.path("identity"))
+        && !CatalogStatePolicy.desired(resource).equals("REMOVED");
+  }
+
   private ObjectNode ref(ResourceAccess.Reader r, Map<String, Object> v) {
     if (v.get("release_sequence") == null
         || !v.get("state").equals("published")
@@ -158,7 +167,8 @@ public final class CatalogDelivery implements UnifiedResourceResolution {
             "manifestDownloadPath",
             CatalogWorkflow.base((UUID) v.get("package_id"), (UUID) v.get("id")) + "/manifest")
         .put("releaseSequence", sequence)
-        .put("enabled", true);
+        .put("enabled", true)
+        .put("installationMode", "optional");
     n.set(
         "lease",
         JSON.createObjectNode()
@@ -210,11 +220,20 @@ public final class CatalogDelivery implements UnifiedResourceResolution {
         key,
         etag,
         body,
-        r -> admit(r, id, Set.of("install", "enable").contains(action)),
+        r -> {
+          db.lock("catalog-assignments");
+          var version = admit(r, id, Set.of("install", "enable").contains(action));
+          CatalogAssignments.check(
+              assignments.effective(r, c, memberCloud(r, c)).get(p),
+              id,
+              number(version, "release_sequence"),
+              action);
+        },
         r -> {
           lock(r, c, p);
           var v = admit(r, id, Set.of("install", "enable").contains(action));
-          if (Set.of("install", "enable").contains(action)) fresh(r, v);
+          var policy = assignments.effective(r, c, memberCloud(r, c)).get(p);
+          // The installed high water is checked after the current installation is locked.
           var rows =
               db.rows(
                   "SELECT * FROM resource.catalog_installation WHERE tenant_id=:tenant AND owner_id=:o AND client_id=:c AND package_id=:p FOR UPDATE",
@@ -223,6 +242,22 @@ public final class CatalogDelivery implements UnifiedResourceResolution {
           match(etag, rev);
           if (rev == 0 && !action.equals("install")) throw missing();
           var old = rows.isEmpty() ? null : json(rows.getFirst(), "document");
+          policy =
+              CatalogAssignments.atLeast(
+                  policy,
+                  old == null ? null : old.path("resource"),
+                  identity -> available(r, identity));
+          CatalogAssignments.check(policy, id, number(v, "release_sequence"), action);
+          if (Set.of("install", "enable").contains(action)
+              && (policy == null || policy.mode().equals("optional"))
+              && !enableInstalled(old == null ? null : old.path("resource"), selection))
+            fresh(r, v);
+          if (old != null
+              && Set.of("install", "enable").contains(action)
+              && !CatalogStatePolicy.desired(old.path("resource")).equals("REMOVED")
+              && available(r, old.path("resource").path("identity"))
+              && number(v, "release_sequence")
+                  < old.path("resource").path("releaseSequence").asLong()) throw conflict();
           if (old != null
               && Set.of("disable", "remove").contains(action)
               && !old.path("resource").path("identity").equals(id)) throw conflict();
@@ -230,6 +265,8 @@ public final class CatalogDelivery implements UnifiedResourceResolution {
               Set.of("disable", "remove").contains(action)
                   ? old.path("resource").deepCopy()
                   : ref(r, v);
+          ((ObjectNode) resource)
+              .put("installationMode", policy == null ? "optional" : policy.mode());
           CatalogStatePolicy.dispatch(
               (ObjectNode) resource,
               CatalogStatePolicy.advance(rev, rev),
@@ -410,6 +447,7 @@ public final class CatalogDelivery implements UnifiedResourceResolution {
                   != doc.path("resource").path("releaseSequence").asLong()) throw conflict();
           var v = admit(r, body.path("identity"), true);
           var updated = ref(r, v);
+          updated.put("installationMode", CatalogAssignments.mode(doc.path("resource")));
           if (updated.path("releaseSequence").asLong() != counter(body, "releaseSequence"))
             throw conflict();
           CatalogStatePolicy.dispatch(
@@ -493,16 +531,463 @@ public final class CatalogDelivery implements UnifiedResourceResolution {
     var b = JSON.createObjectNode().put("clientId", c.toString());
     client(actor, b);
     var r = access.member(actor);
-    return page(
-        r,
-        "installations/" + c + "/" + kind,
-        limit,
-        cursor,
-        "catalog_installation",
-        " AND owner_id=:owner AND client_id=:client",
-        db.args("owner", r.account(), "client", c),
-        kind,
-        false);
+    reconcileMember(r, c);
+    var result =
+        (ObjectNode)
+            page(
+                r,
+                "installations/" + c + "/" + kind,
+                limit,
+                cursor,
+                "catalog_installation",
+                " AND owner_id=:owner AND client_id=:client",
+                db.args("owner", r.account(), "client", c),
+                kind,
+                false);
+    result.put("allowPersonalPlugins", r.personalPlugins());
+    var failures = result.putArray("assignmentFailures");
+    tx.read(
+            () ->
+                db.rows(
+                    "SELECT f.package_id,f.error_code FROM resource.catalog_assignment_failure f JOIN resource.catalog_package p ON p.tenant_id=f.tenant_id AND p.id=f.package_id WHERE f.tenant_id=:tenant AND f.owner_id=:owner AND f.target_id=:client AND f.scope='member'"
+                        + catalog.visible(r)
+                        + (kind == null ? "" : " AND p.kind=:kind")
+                        + " ORDER BY f.package_id LIMIT 200",
+                    catalog.args(r, "owner", r.account(), "client", c, "kind", kind)))
+        .forEach(
+            failure ->
+                failures.add(
+                    JSON.createObjectNode()
+                        .put("packageId", failure.get("package_id").toString())
+                        .put("state", "failed")
+                        .put("errorCode", failure.get("error_code").toString())));
+    return result;
+  }
+
+  public JsonNode createAssignment(
+      AurigaPrincipal actor, ObjectNode body, String key, String etag) {
+    validate("UnifiedAssignmentInput", body);
+    return catalog.mutate(
+        actor,
+        "resource.distributions.manage",
+        true,
+        "assignment-create",
+        key,
+        etag,
+        body,
+        r -> {},
+        r -> {
+          match(etag, 0);
+          return assignments.create(r, body);
+        });
+  }
+
+  public JsonNode removeAssignment(AurigaPrincipal actor, UUID id, String key, String etag) {
+    return catalog.mutate(
+        actor,
+        "resource.distributions.manage",
+        true,
+        "assignment-remove/" + id,
+        key,
+        etag,
+        JSON.createObjectNode().put("id", id.toString()),
+        r -> assignments.row(id),
+        r -> assignments.remove(r, id, etag));
+  }
+
+  public JsonNode assignments(AurigaPrincipal actor, int limit, String cursor) {
+    if (limit < 1 || limit > 200) throw invalid();
+    var reader = access.administrator(actor, "resource.distributions.manage");
+    return tx.write(
+        () -> {
+          String authorized =
+              " FROM resource.catalog_assignment a JOIN resource.catalog_package p ON p.tenant_id=a.tenant_id AND p.id=a.package_id WHERE a.tenant_id=:tenant"
+                  + catalog.visible(reader);
+          var position = cursors.decode(cursor, reader, "catalog/assignments", limit);
+          if (position == null) {
+            var top =
+                db.rows(
+                    "SELECT a.id" + authorized + " ORDER BY a.id DESC LIMIT 1",
+                    catalog.args(reader));
+            position =
+                cursors.initial(top.isEmpty() ? new UUID(0, 0) : (UUID) top.getFirst().get("id"));
+          }
+          var rows =
+              db.rows(
+                  "SELECT a.*"
+                      + authorized
+                      + " AND a.id>:after AND a.id<=:ceiling ORDER BY a.id LIMIT :limit",
+                  catalog.args(
+                      reader,
+                      "after",
+                      position.after(),
+                      "ceiling",
+                      position.ceiling(),
+                      "limit",
+                      limit + 1));
+          var result = JSON.createObjectNode();
+          var items = result.putArray("items");
+          for (var row : rows.subList(0, Math.min(limit, rows.size())))
+            items.add(assignments.view(reader, row));
+          if (rows.size() > limit)
+            result.put(
+                "nextCursor",
+                cursors.encode(
+                    reader,
+                    "catalog/assignments",
+                    limit,
+                    new ResourceCursor.Position(
+                        (UUID) rows.get(limit - 1).get("id"),
+                        position.ceiling(),
+                        position.expires())));
+          return result;
+        });
+  }
+
+  private boolean memberCloud(ResourceAccess.Reader reader, UUID client) {
+    var rules =
+        db.rows(
+            "SELECT id FROM resource.catalog_assignment WHERE tenant_id=:tenant AND scope='instance' AND target_id=:client AND active LIMIT 1",
+            db.args("client", client));
+    if (rules.isEmpty()) return false;
+    var snapshot = workspace().snapshot(reader.tenant(), client);
+    if (!snapshot.owner().equals(reader.account())) throw missing();
+    return true;
+  }
+
+  private Map<String, Object> failureArgs(
+      ResourceAccess.Reader reader, UUID target, UUID pkg, String scope) {
+    return db.args("owner", reader.account(), "target", target, "pkg", pkg, "scope", scope);
+  }
+
+  private void assignmentFailed(
+      ResourceAccess.Reader reader, UUID target, UUID pkg, String scope, RuntimeException failure) {
+    var args = failureArgs(reader, target, pkg, scope);
+    args.put(
+        "error",
+        failure instanceof AurigaException a
+            ? a.errorCode().code()
+            : CommonErrors.UNAVAILABLE.code());
+    args.put("now", Timestamp.from(clock.instant()));
+    if (!db.rows(
+            "SELECT package_id FROM resource.catalog_assignment_failure WHERE tenant_id=:tenant AND owner_id=:owner AND target_id=:target AND package_id=:pkg AND scope=:scope AND error_code=:error",
+            args)
+        .isEmpty()) return;
+    db.update(
+        "INSERT INTO resource.catalog_assignment_failure(tenant_id,owner_id,target_id,package_id,scope,error_code,updated_at) VALUES(:tenant,:owner,:target,:pkg,:scope,:error,:now) ON CONFLICT(tenant_id,owner_id,target_id,package_id,scope) DO UPDATE SET error_code=EXCLUDED.error_code,updated_at=EXCLUDED.updated_at WHERE catalog_assignment_failure.error_code IS DISTINCT FROM EXCLUDED.error_code",
+        args);
+  }
+
+  private boolean hasAssignmentFailure(
+      ResourceAccess.Reader reader, UUID target, UUID pkg, String scope) {
+    return !db.rows(
+            "SELECT package_id FROM resource.catalog_assignment_failure WHERE tenant_id=:tenant AND owner_id=:owner AND target_id=:target AND package_id=:pkg AND scope=:scope",
+            failureArgs(reader, target, pkg, scope))
+        .isEmpty();
+  }
+
+  private void assignmentRecovered(
+      ResourceAccess.Reader reader, UUID target, UUID pkg, String scope) {
+    db.update(
+        "DELETE FROM resource.catalog_assignment_failure WHERE tenant_id=:tenant AND owner_id=:owner AND target_id=:target AND package_id=:pkg AND scope=:scope",
+        failureArgs(reader, target, pkg, scope));
+  }
+
+  private boolean available(ResourceAccess.Reader reader, JsonNode identity) {
+    var rows =
+        db.rows(
+            "SELECT v.* FROM resource.catalog_version v JOIN resource.catalog_package p ON p.tenant_id=v.tenant_id AND p.id=v.package_id WHERE v.tenant_id=:tenant AND v.id=:v AND p.id=:p AND v.state='published' AND p.enabled"
+                + catalog.visible(reader),
+            catalog.args(
+                reader, "p", uuid(identity, "packageId"), "v", uuid(identity, "versionId")));
+    return !rows.isEmpty()
+        && identity(reader, rows.getFirst()).equals(identity)
+        && !catalog.revoked(rows.getFirst());
+  }
+
+  private void reconcileMember(ResourceAccess.Reader reader, UUID client) {
+    var packages =
+        tx.read(
+            () -> {
+              var ids = new TreeSet<UUID>();
+              db.rows(
+                      "SELECT package_id FROM resource.catalog_installation WHERE tenant_id=:tenant AND owner_id=:owner AND client_id=:client",
+                      db.args("owner", reader.account(), "client", client))
+                  .forEach(row -> ids.add((UUID) row.get("package_id")));
+              ids.addAll(
+                  assignments.effective(reader, client, memberCloud(reader, client)).keySet());
+              db.rows(
+                      "SELECT package_id FROM resource.catalog_assignment_failure WHERE tenant_id=:tenant AND owner_id=:owner AND target_id=:target AND scope='member'",
+                      db.args("owner", reader.account(), "target", client))
+                  .forEach(row -> ids.add((UUID) row.get("package_id")));
+              return ids;
+            });
+    for (UUID pkg : packages) {
+      try {
+        if (tx.read(() -> reconcileMemberPackage(reader, client, pkg, false)))
+          tx.writeIndependent(() -> reconcileMemberPackage(reader, client, pkg, true));
+      } catch (RuntimeException failure) {
+        tx.writeIndependent(
+            () -> {
+              lock(reader, client, pkg);
+              assignmentFailed(reader, client, pkg, "member", failure);
+              return null;
+            });
+        org.slf4j.LoggerFactory.getLogger(getClass())
+            .warn("Catalog assignment reconciliation failed for package {}", pkg);
+      }
+    }
+  }
+
+  private boolean reconcileMemberPackage(
+      ResourceAccess.Reader reader, UUID client, UUID pkg, boolean update) {
+    if (update) {
+      // Match package-before-installation ordering used by selections, tickets and reports.
+      db.rows(
+          "SELECT id FROM resource.catalog_package WHERE tenant_id=:tenant AND id=:pkg FOR UPDATE",
+          db.args("pkg", pkg));
+      lock(reader, client, pkg);
+    }
+    var policy = assignments.effective(reader, client, memberCloud(reader, client)).get(pkg);
+    if (policy != null && policy.mode().equals("optional")) policy = null;
+    var rows =
+        db.rows(
+            "SELECT * FROM resource.catalog_installation WHERE tenant_id=:tenant AND owner_id=:owner AND client_id=:client AND package_id=:pkg"
+                + (update ? " FOR UPDATE" : ""),
+            db.args("owner", reader.account(), "client", client, "pkg", pkg));
+    var row = rows.isEmpty() ? null : rows.getFirst();
+    var old = row == null ? null : (ObjectNode) json(row, "document");
+    var previous = old == null ? null : old.path("resource");
+    policy = CatalogAssignments.atLeast(policy, previous, identity -> available(reader, identity));
+    if (policy == null && old == null) {
+      if (update) assignmentRecovered(reader, client, pkg, "member");
+      return !update && hasAssignmentFailure(reader, client, pkg, "member");
+    }
+    var target = policy == null ? previous.path("identity") : policy.identity();
+    String desired = old == null ? "ENABLED" : CatalogStatePolicy.desired(previous);
+    if (policy != null && (policy.mode().equals("required") || desired.equals("REMOVED")))
+      desired = "ENABLED";
+    String mode = policy == null ? "optional" : policy.mode();
+    if (!available(reader, target)) {
+      if (old == null) throw missing();
+      target = previous.path("identity");
+      desired = "REMOVED";
+      mode = "optional";
+    }
+    if (old != null
+        && target.equals(previous.path("identity"))
+        && mode.equals(CatalogAssignments.mode(previous))
+        && desired.equals(CatalogStatePolicy.desired(previous))) {
+      if (update) assignmentRecovered(reader, client, pkg, "member");
+      return !update && hasAssignmentFailure(reader, client, pkg, "member");
+    }
+    if (!update) return true;
+    ObjectNode resource =
+        desired.equals("REMOVED")
+            ? (ObjectNode) previous.deepCopy()
+            : ref(reader, admit(reader, target, true));
+    long revision =
+        row == null
+            ? 1
+            : CatalogStatePolicy.advance(number(row, "revision"), number(row, "revision"));
+    resource.put("installationMode", mode);
+    CatalogStatePolicy.dispatch(resource, revision, desired);
+    var doc =
+        JSON.createObjectNode()
+            .put("clientId", client.toString())
+            .put("installationRevision", revision)
+            .put("selectionRevision", old == null ? 1 : old.path("selectionRevision").asLong() + 1)
+            .put("generation", old == null ? 1 : old.path("generation").asLong() + 1)
+            .put("state", "applying")
+            .put("reportSource", "member");
+    doc.set("resource", resource);
+    if (row == null)
+      db.update(
+          "INSERT INTO resource.catalog_installation(id,tenant_id,owner_id,client_id,package_id,version_id,revision,document) VALUES(:id,:tenant,:o,:c,:p,:v,:rev,CAST(:doc AS jsonb))",
+          db.args(
+              "id",
+              UuidV7.next(),
+              "o",
+              reader.account(),
+              "c",
+              client,
+              "p",
+              pkg,
+              "v",
+              uuid(resource.path("identity"), "versionId"),
+              "rev",
+              revision,
+              "doc",
+              doc.toString()));
+    else saveInstallation(row, doc, revision);
+    assignmentRecovered(reader, client, pkg, "member");
+    return true;
+  }
+
+  private ResolveUnifiedResourcesResponse reconcileAssignments(
+      ResolveUnifiedResourcesRequest request) {
+    if (!TenantContext.require().toString().equals(request.getTenantId())) throw missing();
+    return tx.write(
+        () -> {
+          db.lock("catalog-assignments");
+          UUID instance = UUID.fromString(request.getInstanceId());
+          db.lock("catalog-distribution/" + instance);
+          var snapshot = workspace().snapshot(TenantContext.require(), instance);
+          if (!snapshot.owner().toString().equals(request.getOwnerId())
+              || snapshot.node() == null
+              || !snapshot.node().toString().equals(request.getNodeId())
+              || snapshot.selectionRevision() != request.getSelectionRevision()) throw conflict();
+          synchronize(snapshot);
+          var reader = access.target(TenantContext.require(), snapshot.owner());
+          var pending =
+              db.rows(
+                  "SELECT * FROM resource.catalog_distribution WHERE tenant_id=:tenant AND instance_id=:instance AND selection_revision>:revision AND lifecycle='pending' ORDER BY selection_revision DESC LIMIT 1",
+                  db.args("instance", instance, "revision", snapshot.selectionRevision()));
+          var policies = assignments.effective(reader, instance, true);
+          var previous = new LinkedHashMap<UUID, UnifiedResourceRef>();
+          snapshot
+              .resources()
+              .forEach(ref -> previous.put(UUID.fromString(ref.getIdentity().getPackageId()), ref));
+          var packages = new TreeSet<UUID>(previous.keySet());
+          packages.addAll(policies.keySet());
+          db.rows(
+                  "SELECT package_id FROM resource.catalog_assignment_failure WHERE tenant_id=:tenant AND owner_id=:owner AND target_id=:target AND scope='instance'",
+                  db.args("owner", reader.account(), "target", instance))
+              .forEach(row -> packages.add((UUID) row.get("package_id")));
+          boolean retryAssignments = false;
+          var input = JSON.createObjectNode().put("instanceId", instance.toString());
+          var selections = input.putArray("selections");
+          for (UUID pkg : packages) {
+            var policy = policies.get(pkg);
+            if (policy != null && policy.mode().equals("optional")) policy = null;
+            var old = previous.get(pkg);
+            String oldMode =
+                old == null || old.getInstallationMode().isEmpty()
+                    ? "optional"
+                    : old.getInstallationMode();
+            if (old != null) {
+              var installed =
+                  JSON.createObjectNode()
+                      .put("releaseSequence", old.getReleaseSequence())
+                      .put("desiredState", CatalogStatePolicy.desired(old));
+              installed.set("identity", identityFromProto(old.getIdentity()));
+              policy =
+                  CatalogAssignments.atLeast(
+                      policy, installed, identity -> available(reader, identity));
+            }
+            if (policy == null
+                && oldMode.equals("optional")
+                && (old == null || available(reader, identityFromProto(old.getIdentity())))) {
+              assignmentRecovered(reader, instance, pkg, "instance");
+              continue;
+            }
+            String desired = old == null ? "ENABLED" : CatalogStatePolicy.desired(old);
+            if (policy != null && (policy.mode().equals("required") || desired.equals("REMOVED")))
+              desired = "ENABLED";
+            var id = policy == null ? identityFromProto(old.getIdentity()) : policy.identity();
+            if (!available(reader, id)) {
+              if (old == null) continue;
+              desired = "REMOVED";
+              id = identityFromProto(old.getIdentity());
+              policy = null;
+            }
+            // Validate each package before combining it with independent healthy selections.
+            if (!desired.equals("REMOVED")) {
+              try {
+                ref(reader, admit(reader, id, true));
+              } catch (RuntimeException failure) {
+                assignmentFailed(reader, instance, pkg, "instance", failure);
+                retryAssignments = true;
+                org.slf4j.LoggerFactory.getLogger(getClass())
+                    .warn("Cloud assignment reconciliation failed for package {}", pkg);
+                continue;
+              }
+            }
+            assignmentRecovered(reader, instance, pkg, "instance");
+            String mode = policy == null ? "optional" : policy.mode();
+            if (old != null
+                && CatalogProtocol.identity(id).equals(old.getIdentity())
+                && mode.equals(oldMode)
+                && desired.equals(CatalogStatePolicy.desired(old))) continue;
+            selections.add(
+                JSON.createObjectNode()
+                    .put(
+                        "action",
+                        desired.equals("ENABLED")
+                            ? "install"
+                            : desired.equals("DISABLED") ? "disable" : "remove")
+                    .set("identity", id));
+          }
+          if (!pending.isEmpty()
+              && !selections.isEmpty()
+              && selections.equals(json(pending.getFirst(), "document").path("selections"))) {
+            boolean sameModes = true;
+            for (var resource : json(pending.getFirst(), "resolution").path("resources")) {
+              if (!java.util.stream.StreamSupport.stream(selections.spliterator(), false)
+                  .anyMatch(
+                      choice ->
+                          choice
+                              .path("identity")
+                              .path("packageId")
+                              .equals(resource.path("identity").path("packageId")))) continue;
+              var policy = policies.get(uuid(resource.path("identity"), "packageId"));
+              String expected =
+                  CatalogStatePolicy.desired(resource).equals("REMOVED") || policy == null
+                      ? "optional"
+                      : policy.mode();
+              sameModes &= CatalogAssignments.mode(resource).equals(expected);
+            }
+            if (sameModes)
+              return assignmentResolution(reader, pending.getFirst()).toBuilder()
+                  .setAssignmentRetryRequired(retryAssignments)
+                  .build();
+          }
+          if (selections.isEmpty()) {
+            db.update(
+                "UPDATE resource.catalog_distribution SET lifecycle='superseded',next_reconcile_at=NULL WHERE tenant_id=:tenant AND instance_id=:instance AND lifecycle='pending'",
+                db.args("instance", instance));
+            return ResolveUnifiedResourcesResponse.newBuilder()
+                .setSelectionRevision(snapshot.selectionRevision())
+                .setAssignmentRetryRequired(retryAssignments)
+                .setAllowPersonalPlugins(reader.personalPlugins())
+                .build();
+          }
+          var view =
+              createDistribution(reader, input, "\"" + snapshot.selectionRevision() + "\"", false);
+          var row =
+              db.row(
+                  "SELECT * FROM resource.catalog_distribution WHERE tenant_id=:tenant AND id=:id",
+                  db.args("id", uuid(view, "distributionId")));
+          return assignmentResolution(reader, row).toBuilder()
+              .setAssignmentRetryRequired(retryAssignments)
+              .build();
+        });
+  }
+
+  private ObjectNode identityFromProto(UnifiedResourceIdentity identity) {
+    return JSON.createObjectNode()
+        .put("tenantId", identity.getTenantId())
+        .put("packageId", identity.getPackageId())
+        .put("versionId", identity.getVersionId())
+        .put("version", identity.getVersion())
+        .put("kind", identity.getKind())
+        .put("manifestDigest", identity.getManifestDigest());
+  }
+
+  private ResolveUnifiedResourcesResponse assignmentResolution(
+      ResourceAccess.Reader reader, Map<String, Object> row) {
+    var result =
+        ResolveUnifiedResourcesResponse.newBuilder()
+            .setSelectionRevision(number(row, "selection_revision"))
+            .setAllowPersonalPlugins(reader.personalPlugins())
+            .setRevocations(ResourceProtocol.revocations(legacy.revocations()));
+    json(row, "document")
+        .path("selections")
+        .forEach(s -> result.addSelections(CatalogProtocol.selection(s)));
+    json(row, "resolution")
+        .path("resources")
+        .forEach(r -> result.addResources(CatalogProtocol.ref(r)));
+    return result.build();
   }
 
   private JsonNode page(
@@ -515,8 +1000,9 @@ public final class CatalogDelivery implements UnifiedResourceResolution {
       Map<String, Object> a,
       String kind,
       boolean distribution) {
-    if (limit < 1 || limit > 200 || kind != null && !Set.of("skill", "tool").contains(kind))
-      throw invalid();
+    if (limit < 1
+        || limit > 200
+        || kind != null && !Set.of("plugin", "skill", "tool").contains(kind)) throw invalid();
     return tx.write(
         () -> {
           String where = " WHERE tenant_id=:tenant" + filter;
@@ -615,6 +1101,9 @@ public final class CatalogDelivery implements UnifiedResourceResolution {
 
   private boolean sameInstallation(JsonNode expected, UnifiedResourceRef actual) {
     return CatalogProtocol.identity(expected.path("identity")).equals(actual.getIdentity())
+        && CatalogAssignments.mode(expected)
+            .equals(
+                actual.getInstallationMode().isEmpty() ? "optional" : actual.getInstallationMode())
         && expected.path("installationRevision").asLong() == actual.getInstallationRevision()
         && CatalogStatePolicy.desired(expected).equals(CatalogStatePolicy.desired(actual));
   }
@@ -666,135 +1155,228 @@ public final class CatalogDelivery implements UnifiedResourceResolution {
         etag,
         body,
         r -> workspace().snapshot(r.tenant(), instance),
-        r -> {
-          db.lock("catalog-distribution/" + instance);
-          var snapshot = workspace().snapshot(r.tenant(), instance);
-          match(etag, snapshot.selectionRevision());
-          if (snapshot.node() == null) throw new AurigaException(CommonErrors.UNAVAILABLE);
-          var owner = access.target(r.tenant(), snapshot.owner());
-          synchronize(snapshot);
-          long revision =
-              Math.max(
-                      snapshot.selectionRevision(),
-                      number(
-                          db.row(
-                              "SELECT COALESCE(max(selection_revision),0) AS revision FROM resource.catalog_distribution WHERE tenant_id=:tenant AND instance_id=:instance",
-                              db.args("instance", instance)),
-                          "revision"))
-                  + 1;
-          if (revision > ResourceWorkflow.MAX) throw conflict();
-          UUID id = UuidV7.next();
-          var resolution = JSON.createObjectNode().put("selectionRevision", revision);
-          var resources = resolution.putArray("resources");
-          var retained = cloudResources(instance, snapshot.owner(), snapshot.selectionRevision());
-          var selected = new HashSet<UUID>();
-          var grants = new LinkedHashMap<UUID, JsonNode>();
-          for (var s : body.path("selections")) {
-            UUID p = uuid(s.path("identity"), "packageId");
-            if (!selected.add(p)) throw invalid();
-            boolean enabling = Set.of("install", "enable").contains(s.path("action").asString());
-            var v = admit(owner, s.path("identity"), enabling);
-            ObjectNode resource;
-            if (enabling) {
-              fresh(owner, v);
-              resource = ref(owner, v);
-            } else {
-              var previous = retained.get(p);
-              if (previous == null || !previous.path("identity").equals(s.path("identity")))
-                throw missing();
-              resource = previous.deepCopy();
-            }
-            CatalogStatePolicy.dispatch(
-                resource,
-                reserve(instance, p),
-                CatalogStatePolicy.stateForAction(s.path("action").asString()));
-            retained.put(p, resource);
-          }
-          for (var entry : retained.entrySet()) {
-            var resource = entry.getValue();
-            var persisted = cloudRow(instance, entry.getKey());
-            boolean changed = selected.contains(entry.getKey());
-            if (!changed && persisted != null && persisted.get("collected_generation") != null)
-              continue;
-            UUID grant = UuidV7.next();
-            grants.put(grant, resource.path("identity"));
-            resource.put(
-                "manifestDownloadPath",
-                "/internal/resource/v1/catalog/downloads/" + grant + "/manifest");
-            for (var artifact : resource.path("artifacts"))
-              ((ObjectNode) artifact)
-                  .put(
-                      "downloadPath",
-                      "/internal/resource/v1/catalog/downloads/"
-                          + grant
-                          + "/artifacts/"
-                          + artifact.path("artifactId").asString());
-            CatalogStatePolicy.dispatch(
-                resource,
-                resource.path("installationRevision").asLong(),
-                CatalogStatePolicy.desired(resource));
-            resources.add(resource);
-          }
-          resolution.set("revocations", legacy.revocations());
-          var doc =
-              JSON.createObjectNode()
-                  .put("distributionId", id.toString())
-                  .put("instanceId", instance.toString())
-                  .put("ownerId", snapshot.owner().toString())
-                  .put("selectionRevision", revision)
-                  .put("generation", Math.max(1, snapshot.generation() + 1))
-                  .put("state", "applying")
-                  .put("reportSource", "node");
-          doc.set("selections", body.path("selections"));
-          doc.putArray("reports");
-          db.update(
-              "UPDATE resource.catalog_distribution SET lifecycle='superseded',next_reconcile_at=NULL WHERE tenant_id=:tenant AND instance_id=:instance AND lifecycle='pending'",
-              db.args("instance", instance));
-          db.update(
-              "INSERT INTO resource.catalog_distribution(id,tenant_id,actor_id,instance_id,owner_id,node_id,selection_revision,fingerprint,document,resolution,next_reconcile_at) VALUES(:id,:tenant,:actor,:instance,:owner,:node,:rev,:fp,CAST(:doc AS jsonb),CAST(:resolution AS jsonb),:due)",
-              db.args(
-                  "id",
-                  id,
-                  "actor",
-                  r.account(),
-                  "instance",
-                  instance,
-                  "owner",
-                  snapshot.owner(),
-                  "node",
-                  snapshot.node(),
-                  "rev",
-                  revision,
-                  "fp",
-                  ResourceWorkflow.hash(ResourceSigning.canonical(body)),
-                  "doc",
-                  doc.toString(),
-                  "resolution",
-                  resolution.toString(),
-                  "due",
-                  Timestamp.from(clock.instant())));
-          for (var grant : grants.entrySet())
-            db.update(
-                "INSERT INTO resource.catalog_node_grant(id,tenant_id,distribution_id,package_id,version_id) VALUES(:id,:tenant,:d,:p,:v)",
-                db.args(
-                    "id",
-                    grant.getKey(),
-                    "d",
-                    id,
-                    "p",
-                    uuid(grant.getValue(), "packageId"),
-                    "v",
-                    uuid(grant.getValue(), "versionId")));
-          var event =
-              JSON.createObjectNode()
-                  .put("distributionId", id.toString())
-                  .put("instanceId", instance.toString())
-                  .put("ownerId", snapshot.owner().toString())
-                  .put("selectionRevision", revision);
-          event.set("selections", body.path("selections"));
-          events.publish("resource.catalog_distribution_requested", instance.toString(), event);
-          return doc;
-        });
+        r -> createDistribution(r, body, etag, true));
+  }
+
+  private JsonNode createDistribution(
+      ResourceAccess.Reader r, ObjectNode body, String etag, boolean manual) {
+    db.lock("catalog-assignments");
+    body = body.deepCopy();
+    UUID instance = uuid(body, "instanceId");
+    db.lock("catalog-distribution/" + instance);
+    var snapshot = workspace().snapshot(r.tenant(), instance);
+    match(etag, snapshot.selectionRevision());
+    if (snapshot.node() == null) throw new AurigaException(CommonErrors.UNAVAILABLE);
+    var owner = access.target(r.tenant(), snapshot.owner());
+    synchronize(snapshot);
+    var policies = assignments.effective(owner, instance, true);
+    long revision =
+        Math.max(
+                snapshot.selectionRevision(),
+                number(
+                    db.row(
+                        "SELECT COALESCE(max(selection_revision),0) AS revision FROM resource.catalog_distribution WHERE tenant_id=:tenant AND instance_id=:instance",
+                        db.args("instance", instance)),
+                    "revision"))
+            + 1;
+    if (revision > ResourceWorkflow.MAX) throw conflict();
+    UUID id = UuidV7.next();
+    var resolution = JSON.createObjectNode().put("selectionRevision", revision);
+    var resources = resolution.putArray("resources");
+    var retained = cloudResources(instance, snapshot.owner(), snapshot.selectionRevision());
+    policies.replaceAll(
+        (pkg, policy) ->
+            CatalogAssignments.atLeast(
+                policy, retained.get(pkg), identity -> available(owner, identity)));
+    var requested = new HashSet<UUID>();
+    body.path("selections")
+        .forEach(item -> requested.add(uuid(item.path("identity"), "packageId")));
+    if (manual) {
+      for (var entry : policies.entrySet()) {
+        var policy = entry.getValue();
+        if (policy.mode().equals("optional") || requested.contains(entry.getKey())) continue;
+        var old = retained.get(entry.getKey());
+        String desired =
+            policy.mode().equals("default")
+                    && old != null
+                    && CatalogStatePolicy.desired(old).equals("DISABLED")
+                ? "DISABLED"
+                : "ENABLED";
+        if (old == null
+            || !old.path("identity").equals(policy.identity())
+            || !CatalogAssignments.mode(old).equals(policy.mode())
+            || !CatalogStatePolicy.desired(old).equals(desired))
+          ((tools.jackson.databind.node.ArrayNode) body.path("selections"))
+              .add(
+                  JSON.createObjectNode()
+                      .put("action", desired.equals("ENABLED") ? "install" : "disable")
+                      .set("identity", policy.identity()));
+      }
+      for (var entry : retained.entrySet()) {
+        var policy = policies.get(entry.getKey());
+        var old = entry.getValue();
+        if (requested.contains(entry.getKey())
+            || policy != null && !policy.mode().equals("optional")
+            || CatalogAssignments.mode(old).equals("optional")) continue;
+        String desired = CatalogStatePolicy.desired(old);
+        try {
+          admit(owner, old.path("identity"), true);
+        } catch (AurigaException e) {
+          if (!e.errorCode().equals(CommonErrors.NOT_FOUND)) throw e;
+          desired = "REMOVED";
+        }
+        ((tools.jackson.databind.node.ArrayNode) body.path("selections"))
+            .add(
+                JSON.createObjectNode()
+                    .put(
+                        "action",
+                        desired.equals("ENABLED")
+                            ? "install"
+                            : desired.equals("DISABLED") ? "disable" : "remove")
+                    .set("identity", old.path("identity")));
+      }
+    }
+    if (body.path("selections").size() > 128) throw conflict();
+    var selected = new HashSet<UUID>();
+    var grants = new LinkedHashMap<UUID, JsonNode>();
+    for (var s : body.path("selections")) {
+      UUID p = uuid(s.path("identity"), "packageId");
+      if (!selected.add(p)) throw invalid();
+      boolean userSelection = manual && requested.contains(p);
+      boolean enabling = Set.of("install", "enable").contains(s.path("action").asString());
+      if (userSelection)
+        CatalogAssignments.check(
+            policies.get(p),
+            s.path("identity"),
+            number(admit(owner, s.path("identity"), false), "release_sequence"),
+            s.path("action").asString());
+      var policy = policies.get(p);
+      var v =
+          enabling || userSelection || (policy != null && !policy.mode().equals("optional"))
+              ? admit(
+                  owner,
+                  s.path("identity"),
+                  enabling || (policy != null && !policy.mode().equals("optional")))
+              : null;
+      ObjectNode resource;
+      if (enabling) {
+        if (userSelection
+            && (policy == null || policy.mode().equals("optional"))
+            && !enableInstalled(retained.get(p), s)) fresh(owner, v);
+        resource = ref(owner, v);
+        var installed = retained.get(p);
+        if (installed != null
+            && !CatalogStatePolicy.desired(installed).equals("REMOVED")
+            && available(owner, installed.path("identity"))
+            && resource.path("releaseSequence").asLong()
+                < installed.path("releaseSequence").asLong()) throw conflict();
+      } else {
+        var previous = retained.get(p);
+        if (previous == null) throw missing();
+        if (!userSelection
+            && policy != null
+            && !previous.path("identity").equals(s.path("identity"))) resource = ref(owner, v);
+        else {
+          if (!previous.path("identity").equals(s.path("identity"))) throw missing();
+          resource = previous.deepCopy();
+        }
+      }
+      CatalogStatePolicy.dispatch(
+          resource,
+          reserve(instance, p),
+          CatalogStatePolicy.stateForAction(s.path("action").asString()));
+      retained.put(p, resource);
+    }
+    if (retained.size() > 128) throw conflict();
+    for (var entry : retained.entrySet()) {
+      var resource = entry.getValue();
+      var policy = policies.get(entry.getKey());
+      if (manual || selected.contains(entry.getKey()))
+        resource.put(
+            "installationMode",
+            CatalogStatePolicy.desired(resource).equals("REMOVED") || policy == null
+                ? "optional"
+                : policy.mode());
+      var persisted = cloudRow(instance, entry.getKey());
+      boolean changed = selected.contains(entry.getKey());
+      if (!changed && persisted != null && persisted.get("collected_generation") != null) continue;
+      UUID grant = UuidV7.next();
+      grants.put(grant, resource.path("identity"));
+      resource.put(
+          "manifestDownloadPath", "/internal/resource/v1/catalog/downloads/" + grant + "/manifest");
+      for (var artifact : resource.path("artifacts"))
+        ((ObjectNode) artifact)
+            .put(
+                "downloadPath",
+                "/internal/resource/v1/catalog/downloads/"
+                    + grant
+                    + "/artifacts/"
+                    + artifact.path("artifactId").asString());
+      CatalogStatePolicy.dispatch(
+          resource,
+          resource.path("installationRevision").asLong(),
+          CatalogStatePolicy.desired(resource));
+      resources.add(resource);
+    }
+    resolution.set("revocations", legacy.revocations());
+    var doc =
+        JSON.createObjectNode()
+            .put("distributionId", id.toString())
+            .put("instanceId", instance.toString())
+            .put("ownerId", snapshot.owner().toString())
+            .put("selectionRevision", revision)
+            .put("generation", Math.max(1, snapshot.generation() + 1))
+            .put("state", "applying")
+            .put("reportSource", "node");
+    doc.set("selections", body.path("selections"));
+    doc.putArray("reports");
+    db.update(
+        "UPDATE resource.catalog_distribution SET lifecycle='superseded',next_reconcile_at=NULL WHERE tenant_id=:tenant AND instance_id=:instance AND lifecycle='pending'",
+        db.args("instance", instance));
+    db.update(
+        "INSERT INTO resource.catalog_distribution(id,tenant_id,actor_id,instance_id,owner_id,node_id,selection_revision,fingerprint,document,resolution,next_reconcile_at) VALUES(:id,:tenant,:actor,:instance,:owner,:node,:rev,:fp,CAST(:doc AS jsonb),CAST(:resolution AS jsonb),:due)",
+        db.args(
+            "id",
+            id,
+            "actor",
+            r.account(),
+            "instance",
+            instance,
+            "owner",
+            snapshot.owner(),
+            "node",
+            snapshot.node(),
+            "rev",
+            revision,
+            "fp",
+            ResourceWorkflow.hash(ResourceSigning.canonical(body)),
+            "doc",
+            doc.toString(),
+            "resolution",
+            resolution.toString(),
+            "due",
+            Timestamp.from(clock.instant())));
+    for (var grant : grants.entrySet())
+      db.update(
+          "INSERT INTO resource.catalog_node_grant(id,tenant_id,distribution_id,package_id,version_id) VALUES(:id,:tenant,:d,:p,:v)",
+          db.args(
+              "id",
+              grant.getKey(),
+              "d",
+              id,
+              "p",
+              uuid(grant.getValue(), "packageId"),
+              "v",
+              uuid(grant.getValue(), "versionId")));
+    var event =
+        JSON.createObjectNode()
+            .put("distributionId", id.toString())
+            .put("instanceId", instance.toString())
+            .put("ownerId", snapshot.owner().toString())
+            .put("selectionRevision", revision);
+    event.set("selections", body.path("selections"));
+    events.publish("resource.catalog_distribution_requested", instance.toString(), event);
+    return doc;
   }
 
   private ObjectNode distributionView(ResourceAccess.Reader r, Map<String, Object> row) {
@@ -911,6 +1493,7 @@ public final class CatalogDelivery implements UnifiedResourceResolution {
 
   @Override
   public ResolveUnifiedResourcesResponse resolve(ResolveUnifiedResourcesRequest request) {
+    if (request.getSynchronizeAssignments()) return reconcileAssignments(request);
     return resolve(request, null);
   }
 
@@ -948,15 +1531,28 @@ public final class CatalogDelivery implements UnifiedResourceResolution {
           var out =
               ResolveUnifiedResourcesResponse.newBuilder()
                   .setSelectionRevision(request.getSelectionRevision())
+                  .setAllowPersonalPlugins(owner.personalPlugins())
                   .setRevocations(ResourceProtocol.revocations(legacy.revocations()));
           var refreshed = JSON.createArrayNode();
           for (var resource : resolution.path("resources")) {
             boolean enabling = CatalogStatePolicy.desired(resource).equals("ENABLED");
-            var version = admit(owner, resource.path("identity"), false);
+            // Trusted remove/disable intents need no download authority after access is withdrawn.
+            Map<String, Object> version = null;
+            if (enabling) {
+              try {
+                version = admit(owner, resource.path("identity"), false);
+              } catch (AurigaException failure) {
+                if (!failure.errorCode().equals(CommonErrors.NOT_FOUND)) throw failure;
+              }
+            }
             var current = (ObjectNode) resource.deepCopy();
-            var pack = catalog.pkg(owner, uuid(resource.path("identity"), "packageId"), false);
+            var pack =
+                enabling && version != null
+                    ? catalog.pkg(owner, uuid(resource.path("identity"), "packageId"), false)
+                    : null;
             if (enabling
-                && (!version.get("state").equals("published")
+                && (version == null
+                    || !version.get("state").equals("published")
                     || !Boolean.TRUE.equals(pack.get("enabled"))
                     || catalog.revoked(version))) {
               CatalogStatePolicy.dispatch(
@@ -964,12 +1560,27 @@ public final class CatalogDelivery implements UnifiedResourceResolution {
                   reserve(
                       (UUID) row.get("instance_id"), uuid(resource.path("identity"), "packageId")),
                   "DISABLED");
+              current.put("installationMode", "optional");
               enabling = false;
             }
             if (enabling
                 && Instant.parse(current.path("lease").path("expiresAt").asString())
                     .isBefore(clock.instant().plusSeconds(300))) {
-              var renewal = ref(owner, version);
+              ObjectNode renewal;
+              try {
+                renewal = ref(owner, version);
+              } catch (AurigaException failure) {
+                if (!failure.errorCode().equals(CommonErrors.UNAVAILABLE)) throw failure;
+                assignmentFailed(
+                    owner,
+                    (UUID) row.get("instance_id"),
+                    uuid(resource.path("identity"), "packageId"),
+                    "instance",
+                    failure);
+                out.addResources(CatalogProtocol.ref(current));
+                refreshed.add(current);
+                continue;
+              }
               if (renewal.path("releaseSequence").asLong()
                   != current.path("releaseSequence").asLong()) throw conflict();
               current.set("envelope", renewal.path("envelope"));

@@ -20,14 +20,13 @@ import (
 // checks if the UnifiedPackage type satisfies the MappedNullable interface at compile time
 var _ MappedNullable = &UnifiedPackage{}
 
-// UnifiedPackage Shared L3 skill/tool. Plugin L0-L4/private views continue through legacy APIs, without catalog projection.
+// UnifiedPackage Shared unified resource. Installation mode is selected per scoped assignment; packages carry no governance level.
 type UnifiedPackage struct {
 	Id               string         `json:"id"`
 	TenantId         string         `json:"tenantId"`
 	Name             string         `json:"name" validate:"regexp=^[a-z0-9]+(?:-[a-z0-9]+)*$"`
 	Kind             string         `json:"kind"`
 	OwnerId          string         `json:"ownerId"`
-	Level            string         `json:"level"`
 	Visibility       string         `json:"visibility"`
 	GroupIds         []string       `json:"groupIds"`
 	Revision         int64          `json:"revision"`
@@ -42,14 +41,13 @@ type _UnifiedPackage UnifiedPackage
 // This constructor will assign default values to properties that have it defined,
 // and makes sure properties required by API are set, but the set of arguments
 // will change when the set of required properties is changed
-func NewUnifiedPackage(id string, tenantId string, name string, kind string, ownerId string, level string, visibility string, groupIds []string, revision int64, createdAt time.Time, enabled bool, defaultVersionId NullableString) *UnifiedPackage {
+func NewUnifiedPackage(id string, tenantId string, name string, kind string, ownerId string, visibility string, groupIds []string, revision int64, createdAt time.Time, enabled bool, defaultVersionId NullableString) *UnifiedPackage {
 	this := UnifiedPackage{}
 	this.Id = id
 	this.TenantId = tenantId
 	this.Name = name
 	this.Kind = kind
 	this.OwnerId = ownerId
-	this.Level = level
 	this.Visibility = visibility
 	this.GroupIds = groupIds
 	this.Revision = revision
@@ -185,30 +183,6 @@ func (o *UnifiedPackage) GetOwnerIdOk() (*string, bool) {
 // SetOwnerId sets field value
 func (o *UnifiedPackage) SetOwnerId(v string) {
 	o.OwnerId = v
-}
-
-// GetLevel returns the Level field value
-func (o *UnifiedPackage) GetLevel() string {
-	if o == nil {
-		var ret string
-		return ret
-	}
-
-	return o.Level
-}
-
-// GetLevelOk returns a tuple with the Level field value
-// and a boolean to check if the value has been set.
-func (o *UnifiedPackage) GetLevelOk() (*string, bool) {
-	if o == nil {
-		return nil, false
-	}
-	return &o.Level, true
-}
-
-// SetLevel sets field value
-func (o *UnifiedPackage) SetLevel(v string) {
-	o.Level = v
 }
 
 // GetVisibility returns the Visibility field value
@@ -372,7 +346,6 @@ func (o UnifiedPackage) ToMap() (map[string]interface{}, error) {
 	toSerialize["name"] = o.Name
 	toSerialize["kind"] = o.Kind
 	toSerialize["ownerId"] = o.OwnerId
-	toSerialize["level"] = o.Level
 	toSerialize["visibility"] = o.Visibility
 	toSerialize["groupIds"] = o.GroupIds
 	toSerialize["revision"] = o.Revision
@@ -392,7 +365,6 @@ func (o *UnifiedPackage) UnmarshalJSON(data []byte) (err error) {
 		"name",
 		"kind",
 		"ownerId",
-		"level",
 		"visibility",
 		"groupIds",
 		"revision",

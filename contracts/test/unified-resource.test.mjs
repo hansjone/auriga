@@ -16,6 +16,94 @@ const check = (file, name, value) =>
   ajv.getSchema(
     new URL(`resource/${file}.schema.json`, root).href + '#/$defs/' + name,
   )(value);
+
+test('npm package names reject dot segments and leading dot or underscore', () => {
+  for (const packageName of [
+    '.',
+    '..',
+    '.hidden',
+    '_hidden',
+    '@.scope/name',
+    '@_scope/name',
+    '@scope/.hidden',
+    '@scope/_hidden',
+    'node_modules',
+    'favicon.ico',
+  ]) {
+    assert.equal(
+      check('package', 'Plugin', { packageName, dshVersionRange: '*' }),
+      false,
+      packageName,
+    );
+  }
+  for (const packageName of [
+    'plugin',
+    '@example/plugin-name',
+    'plugin.name',
+    '@example.name/plugin_name',
+  ]) {
+    assert.equal(
+      check('package', 'Plugin', { packageName, dshVersionRange: '*' }),
+      true,
+      packageName,
+    );
+  }
+});
+
+test('generated Go plugin name validators preserve the contract pattern', () => {
+  const pattern = read('resource/package.schema.json').$defs.Plugin.properties
+    .packageName.pattern;
+  for (const file of [
+    '../infra/gen/resourceapi/model_plugin.go',
+    '../infra/gen/shellauthapi/model_shell_authresource_package_schema_json__defs_plugin.go',
+  ]) {
+    const source = readFileSync(new URL(file, root), 'utf8');
+    assert(source.includes('validate:"regexp=' + pattern + '"'), file);
+  }
+});
+
+test('member installation pages expose package-local assignment failures', () => {
+  const failure = {
+    packageId: '01900000-0000-7000-8000-000000000001',
+    state: 'failed',
+    errorCode: 'common.unavailable',
+  };
+  assert(
+    check('unified', 'UnifiedInstallationPage', {
+      items: [],
+      assignmentFailures: [failure],
+    }),
+  );
+  assert.equal(
+    check('unified', 'UnifiedAssignmentFailure', {
+      ...failure,
+      state: 'applied',
+    }),
+    false,
+  );
+  assert.equal(
+    check('unified', 'UnifiedAssignmentFailure', {
+      ...failure,
+      packageId: 'invalid',
+    }),
+    false,
+  );
+});
+
+test('catalog package descriptions define assignment-scoped governance', () => {
+  const spec = parseYaml(
+    readFileSync(new URL('openapi/resource.yaml', root), 'utf8'),
+  );
+  for (const name of ['UnifiedPackageInput', 'UnifiedPackage']) {
+    const definition = spec.components.schemas[name];
+    assert.match(definition.description, /scoped assignment/);
+    assert.doesNotMatch(
+      definition.description,
+      /\bL[0-4]\b|legacy plugin governance remains/i,
+    );
+    assert.equal(definition.properties.level, undefined);
+  }
+});
 const vectors = read('resource/unified-vectors.json');
 const canon = (value) => JSON.stringify(value);
 import { evaluateVector } from '../../services/contracts/scripts/unified-vector-runner.mjs';
@@ -127,8 +215,7 @@ test('manifest ACL is rechecked on every read and old/new event digest fields ca
     tenant: 'authenticated',
     visibility: 'package-version',
     resolveKind: true,
-    allowedKinds: ['skill', 'tool'],
-    pluginStatus: 404,
+    allowedKinds: ['plugin', 'skill', 'tool'],
     locatorGrantsAccess: false,
     checkEveryRead: true,
   });
@@ -136,7 +223,7 @@ test('manifest ACL is rechecked on every read and old/new event digest fields ca
     c.sameTenant &&
     c.visibleVersion &&
     c.permission &&
-    ['skill', 'tool'].includes(c.kind);
+    ['plugin', 'skill', 'tool'].includes(c.kind);
   const good = {
     sameTenant: true,
     visibleVersion: true,
@@ -153,7 +240,8 @@ test('manifest ACL is rechecked on every read and old/new event digest fields ca
         hasLocator: true,
       }),
     );
-  assert(!allowed({ ...good, kind: 'plugin' }));
+  assert(allowed({ ...good, kind: 'plugin' }));
+  assert(!allowed({ ...good, kind: 'unknown' }));
   const eventFile = new URL('events/resource.schema.json', root);
   ajv.addSchema(read('events/resource.schema.json'), eventFile.href);
   const old = ajv.getSchema(
@@ -213,7 +301,7 @@ test('guardian private-only state requires stopped process, cleared view and new
   );
 });
 
-test('kind/delivery matrix fails closed for tool, plugin and unknown kinds at unified P1 entry', () => {
+test('kind/delivery matrix enables plugin/skill and fails closed for tool and unknown kinds at unified P1 entry', () => {
   const matrix = read('resource/unified-authorization.json');
   const allowed = (kind, delivery, permission) =>
     matrix.rules.some(
@@ -225,7 +313,9 @@ test('kind/delivery matrix fails closed for tool, plugin and unknown kinds at un
         permission === r.basePermission,
     );
   assert(allowed('skill', 'text-only', 'resource.packages.upload'));
-  for (const rule of matrix.rules.filter((r) => r.kind !== 'skill'))
+  assert(allowed('plugin', 'npm-tgz', 'resource.packages.upload'));
+  assert.equal(matrix.rules.find((r) => r.kind === 'plugin').minimumRisk, 'r2');
+  for (const rule of matrix.rules.filter((r) => r.kind === 'tool'))
     assert(!allowed(rule.kind, rule.delivery, 'resource.packages.upload'));
   assert(!allowed('unknown', 'text-only', 'resource.packages.upload'));
   assert(!allowed('skill', 'text-only', 'resource.packages.read'));
@@ -605,4 +695,68 @@ test('desired state schema accepts additive legacy refs and rejects unknown stat
       fixture.expect.state !== null,
       fixture.id,
     );
+});
+
+test('generated plugin runtime schemas match the frozen source documents', async () => {
+  const { default: schemas } =
+    await import('../../clients/dsh-plugin/src/generated/resource-schema-data.js');
+  for (const name of ['signatures', 'package', 'unified'])
+    assert.deepEqual(schemas[name], read('resource/' + name + '.schema.json'));
+});
+
+test('range assignments pin identities and validate installation modes for plugins and skills', () => {
+  const resource = read('resource/installation-revision-fixtures.json').cases[0]
+    .input.expected.resource;
+  for (const kind of ['plugin', 'skill']) {
+    for (const installationMode of ['required', 'default', 'optional']) {
+      assert(
+        check('unified', 'UnifiedResourceRef', {
+          ...resource,
+          installationMode,
+        }),
+      );
+      for (const scope of ['tenant', 'member', 'group', 'instance']) {
+        const input = {
+          identity: { ...resource.identity, kind },
+          scope,
+          targetId: resource.identity.tenantId,
+          installationMode,
+        };
+        assert(check('unified', 'UnifiedAssignmentInput', input));
+        assert(
+          !check('unified', 'UnifiedAssignmentInput', {
+            ...input,
+            installationMode: 'l1',
+          }),
+        );
+        assert(
+          !check('unified', 'UnifiedAssignmentInput', {
+            ...input,
+            scope: 'everyone',
+          }),
+        );
+        assert(
+          !check('unified', 'UnifiedAssignmentInput', {
+            ...input,
+            level: 'l1',
+          }),
+        );
+        const { installationMode: ignored, ...missing } = input;
+        assert.equal(ignored, installationMode);
+        assert(!check('unified', 'UnifiedAssignmentInput', missing));
+      }
+    }
+  }
+  assert(
+    !check('unified', 'UnifiedResourceRef', {
+      ...resource,
+      installationMode: 'l4',
+    }),
+  );
+  assert(
+    check('unified', 'UnifiedInstallationPage', {
+      items: [],
+      allowPersonalPlugins: false,
+    }),
+  );
 });

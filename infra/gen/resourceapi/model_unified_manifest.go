@@ -16,10 +16,18 @@ import (
 	"gopkg.in/validator.v2"
 )
 
-// UnifiedManifest - Catalog manifest for skill/tool. PluginManifest remains in the package format for internal migration only; catalog APIs do not expose plugin projections.
+// UnifiedManifest - Unified plugin/skill/tool manifest; plugin uses npm tgz and v2 detached signatures. Tool delivery remains gated.
 type UnifiedManifest struct {
-	SkillManifest *SkillManifest
-	ToolManifest  *ToolManifest
+	PluginManifest *PluginManifest
+	SkillManifest  *SkillManifest
+	ToolManifest   *ToolManifest
+}
+
+// PluginManifestAsUnifiedManifest is a convenience function that returns PluginManifest wrapped in UnifiedManifest
+func PluginManifestAsUnifiedManifest(v *PluginManifest) UnifiedManifest {
+	return UnifiedManifest{
+		PluginManifest: v,
+	}
 }
 
 // SkillManifestAsUnifiedManifest is a convenience function that returns SkillManifest wrapped in UnifiedManifest
@@ -40,6 +48,23 @@ func ToolManifestAsUnifiedManifest(v *ToolManifest) UnifiedManifest {
 func (dst *UnifiedManifest) UnmarshalJSON(data []byte) error {
 	var err error
 	match := 0
+	// try to unmarshal data into PluginManifest
+	err = newStrictDecoder(data).Decode(&dst.PluginManifest)
+	if err == nil {
+		jsonPluginManifest, _ := json.Marshal(dst.PluginManifest)
+		if string(jsonPluginManifest) == "{}" { // empty struct
+			dst.PluginManifest = nil
+		} else {
+			if err = validator.Validate(dst.PluginManifest); err != nil {
+				dst.PluginManifest = nil
+			} else {
+				match++
+			}
+		}
+	} else {
+		dst.PluginManifest = nil
+	}
+
 	// try to unmarshal data into SkillManifest
 	err = newStrictDecoder(data).Decode(&dst.SkillManifest)
 	if err == nil {
@@ -76,6 +101,7 @@ func (dst *UnifiedManifest) UnmarshalJSON(data []byte) error {
 
 	if match > 1 { // more than 1 match
 		// reset to nil
+		dst.PluginManifest = nil
 		dst.SkillManifest = nil
 		dst.ToolManifest = nil
 
@@ -93,6 +119,10 @@ func (dst *UnifiedManifest) UnmarshalJSON(data []byte) error {
 
 // Marshal data from the first non-nil pointers in the struct to JSON
 func (src UnifiedManifest) MarshalJSON() ([]byte, error) {
+	if src.PluginManifest != nil {
+		return json.Marshal(&src.PluginManifest)
+	}
+
 	if src.SkillManifest != nil {
 		return json.Marshal(&src.SkillManifest)
 	}
@@ -109,6 +139,10 @@ func (obj *UnifiedManifest) GetActualInstance() interface{} {
 	if obj == nil {
 		return nil
 	}
+	if obj.PluginManifest != nil {
+		return obj.PluginManifest
+	}
+
 	if obj.SkillManifest != nil {
 		return obj.SkillManifest
 	}
@@ -123,6 +157,10 @@ func (obj *UnifiedManifest) GetActualInstance() interface{} {
 
 // Get the actual instance value
 func (obj UnifiedManifest) GetActualInstanceValue() interface{} {
+	if obj.PluginManifest != nil {
+		return *obj.PluginManifest
+	}
+
 	if obj.SkillManifest != nil {
 		return *obj.SkillManifest
 	}

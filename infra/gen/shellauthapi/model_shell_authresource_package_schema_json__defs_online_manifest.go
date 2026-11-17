@@ -20,18 +20,18 @@ var _ MappedNullable = &ShellAuthresourcePackageSchemaJsonDefsOnlineManifest{}
 
 // ShellAuthresourcePackageSchemaJsonDefsOnlineManifest struct for ShellAuthresourcePackageSchemaJsonDefsOnlineManifest
 type ShellAuthresourcePackageSchemaJsonDefsOnlineManifest struct {
-	SchemaVersion        int32                                                        `json:"schemaVersion"`
-	Name                 string                                                       `json:"name" validate:"regexp=^[a-z0-9]+(?:-[a-z0-9]+)*$"`
-	Version              string                                                       `json:"version" validate:"regexp=^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(?:-(?:0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*)(?:\\.(?:0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*))*)?(?:\\+[0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*)?$"`
-	Description          string                                                       `json:"description"`
-	Author               ShellAuthresourcePackageSchemaJsonDefsSkillManifestAuthor    `json:"author"`
-	License              string                                                       `json:"license"`
-	Permissions          ShellAuthresourcePackageSchemaJsonDefsPermissions            `json:"permissions"`
-	Runtimes             []ShellAuthresourcePackageSchemaJsonDefsRuntime              `json:"runtimes"`
-	Artifacts            []ShellAuthresourcePackageSchemaJsonDefsArtifact             `json:"artifacts"`
-	Signature            ShellAuthresourcePackageSchemaJsonDefsSkillManifestSignature `json:"signature"`
-	Kind                 string                                                       `json:"kind"`
-	Tool                 ShellAuthresourcePackageSchemaJsonDefsOnlineTool             `json:"tool"`
+	SchemaVersion        int32                                                         `json:"schemaVersion"`
+	Name                 string                                                        `json:"name" validate:"regexp=^[a-z0-9]+(?:-[a-z0-9]+)*$"`
+	Version              string                                                        `json:"version" validate:"regexp=^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(?:-(?:0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*)(?:\\.(?:0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*))*)?(?:\\+[0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*)?$"`
+	Description          string                                                        `json:"description"`
+	Author               ShellAuthresourcePackageSchemaJsonDefsPluginManifestAuthor    `json:"author"`
+	License              string                                                        `json:"license"`
+	Permissions          ShellAuthresourcePackageSchemaJsonDefsPermissions             `json:"permissions"`
+	Runtimes             []ShellAuthresourcePackageSchemaJsonDefsRuntime               `json:"runtimes"`
+	Artifacts            []ShellAuthresourcePackageSchemaJsonDefsArtifact              `json:"artifacts"`
+	Signature            ShellAuthresourcePackageSchemaJsonDefsPluginManifestSignature `json:"signature"`
+	Kind                 string                                                        `json:"kind"`
+	Tool                 ShellAuthresourcePackageSchemaJsonDefsOnlineTool              `json:"tool"`
 	AdditionalProperties map[string]interface{}
 }
 
@@ -41,7 +41,7 @@ type _ShellAuthresourcePackageSchemaJsonDefsOnlineManifest ShellAuthresourcePack
 // This constructor will assign default values to properties that have it defined,
 // and makes sure properties required by API are set, but the set of arguments
 // will change when the set of required properties is changed
-func NewShellAuthresourcePackageSchemaJsonDefsOnlineManifest(schemaVersion int32, name string, version string, description string, author ShellAuthresourcePackageSchemaJsonDefsSkillManifestAuthor, license string, permissions ShellAuthresourcePackageSchemaJsonDefsPermissions, runtimes []ShellAuthresourcePackageSchemaJsonDefsRuntime, artifacts []ShellAuthresourcePackageSchemaJsonDefsArtifact, signature ShellAuthresourcePackageSchemaJsonDefsSkillManifestSignature, kind string, tool ShellAuthresourcePackageSchemaJsonDefsOnlineTool) *ShellAuthresourcePackageSchemaJsonDefsOnlineManifest {
+func NewShellAuthresourcePackageSchemaJsonDefsOnlineManifest(schemaVersion int32, name string, version string, description string, author ShellAuthresourcePackageSchemaJsonDefsPluginManifestAuthor, license string, permissions ShellAuthresourcePackageSchemaJsonDefsPermissions, runtimes []ShellAuthresourcePackageSchemaJsonDefsRuntime, artifacts []ShellAuthresourcePackageSchemaJsonDefsArtifact, signature ShellAuthresourcePackageSchemaJsonDefsPluginManifestSignature, kind string, tool ShellAuthresourcePackageSchemaJsonDefsOnlineTool) *ShellAuthresourcePackageSchemaJsonDefsOnlineManifest {
 	this := ShellAuthresourcePackageSchemaJsonDefsOnlineManifest{}
 	this.SchemaVersion = schemaVersion
 	this.Name = name
@@ -163,9 +163,9 @@ func (o *ShellAuthresourcePackageSchemaJsonDefsOnlineManifest) SetDescription(v 
 }
 
 // GetAuthor returns the Author field value
-func (o *ShellAuthresourcePackageSchemaJsonDefsOnlineManifest) GetAuthor() ShellAuthresourcePackageSchemaJsonDefsSkillManifestAuthor {
+func (o *ShellAuthresourcePackageSchemaJsonDefsOnlineManifest) GetAuthor() ShellAuthresourcePackageSchemaJsonDefsPluginManifestAuthor {
 	if o == nil {
-		var ret ShellAuthresourcePackageSchemaJsonDefsSkillManifestAuthor
+		var ret ShellAuthresourcePackageSchemaJsonDefsPluginManifestAuthor
 		return ret
 	}
 
@@ -174,7 +174,7 @@ func (o *ShellAuthresourcePackageSchemaJsonDefsOnlineManifest) GetAuthor() Shell
 
 // GetAuthorOk returns a tuple with the Author field value
 // and a boolean to check if the value has been set.
-func (o *ShellAuthresourcePackageSchemaJsonDefsOnlineManifest) GetAuthorOk() (*ShellAuthresourcePackageSchemaJsonDefsSkillManifestAuthor, bool) {
+func (o *ShellAuthresourcePackageSchemaJsonDefsOnlineManifest) GetAuthorOk() (*ShellAuthresourcePackageSchemaJsonDefsPluginManifestAuthor, bool) {
 	if o == nil {
 		return nil, false
 	}
@@ -182,7 +182,7 @@ func (o *ShellAuthresourcePackageSchemaJsonDefsOnlineManifest) GetAuthorOk() (*S
 }
 
 // SetAuthor sets field value
-func (o *ShellAuthresourcePackageSchemaJsonDefsOnlineManifest) SetAuthor(v ShellAuthresourcePackageSchemaJsonDefsSkillManifestAuthor) {
+func (o *ShellAuthresourcePackageSchemaJsonDefsOnlineManifest) SetAuthor(v ShellAuthresourcePackageSchemaJsonDefsPluginManifestAuthor) {
 	o.Author = v
 }
 
@@ -283,9 +283,9 @@ func (o *ShellAuthresourcePackageSchemaJsonDefsOnlineManifest) SetArtifacts(v []
 }
 
 // GetSignature returns the Signature field value
-func (o *ShellAuthresourcePackageSchemaJsonDefsOnlineManifest) GetSignature() ShellAuthresourcePackageSchemaJsonDefsSkillManifestSignature {
+func (o *ShellAuthresourcePackageSchemaJsonDefsOnlineManifest) GetSignature() ShellAuthresourcePackageSchemaJsonDefsPluginManifestSignature {
 	if o == nil {
-		var ret ShellAuthresourcePackageSchemaJsonDefsSkillManifestSignature
+		var ret ShellAuthresourcePackageSchemaJsonDefsPluginManifestSignature
 		return ret
 	}
 
@@ -294,7 +294,7 @@ func (o *ShellAuthresourcePackageSchemaJsonDefsOnlineManifest) GetSignature() Sh
 
 // GetSignatureOk returns a tuple with the Signature field value
 // and a boolean to check if the value has been set.
-func (o *ShellAuthresourcePackageSchemaJsonDefsOnlineManifest) GetSignatureOk() (*ShellAuthresourcePackageSchemaJsonDefsSkillManifestSignature, bool) {
+func (o *ShellAuthresourcePackageSchemaJsonDefsOnlineManifest) GetSignatureOk() (*ShellAuthresourcePackageSchemaJsonDefsPluginManifestSignature, bool) {
 	if o == nil {
 		return nil, false
 	}
@@ -302,7 +302,7 @@ func (o *ShellAuthresourcePackageSchemaJsonDefsOnlineManifest) GetSignatureOk() 
 }
 
 // SetSignature sets field value
-func (o *ShellAuthresourcePackageSchemaJsonDefsOnlineManifest) SetSignature(v ShellAuthresourcePackageSchemaJsonDefsSkillManifestSignature) {
+func (o *ShellAuthresourcePackageSchemaJsonDefsOnlineManifest) SetSignature(v ShellAuthresourcePackageSchemaJsonDefsPluginManifestSignature) {
 	o.Signature = v
 }
 

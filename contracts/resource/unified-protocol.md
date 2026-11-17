@@ -1,12 +1,12 @@
 # P1-K 统一资源协议
 
-本文件和 unified.schema.json 冻结 P1 公共边界。新增公开 Schema 先查询 unified-registry.json，再集中登记。旧插件 HTTP、事件及 v1 消息继续遵循原语义。新增目录协议首期接收 skill，tool 的分支保留供后续期按下述矩阵开放。
+本文件和 unified.schema.json 冻结 P1 公共边界。新增公开 Schema 先查询 unified-registry.json，再集中登记。旧插件 HTTP、事件及 v1 消息继续遵循原语义。新增目录协议接收 plugin/skill，tool 的分支保留供后续期按下述矩阵开放。
 
 ## 版本、下载与回报
 
 UnifiedResourceIdentity 绑定可信 tenant、kind、packageId、versionId、严格 SemVer 及原始 manifestDigest。所有 ID 必须由服务端解析归属并比较。UnifiedResourceRef 同时绑定发行声明、精确制品列表与租约。manifestDownloadPath 和 downloadPath 必须是同源平台 locator，每次请求重新核验可见性和归属，摘要知识不能授予访问。
 
-成员票据绑定认证 tenant/owner、clientId、identity、installationRevision、制品范围及截止时间。下载同时验证当前身份、客户端绑定、安装修订、票据及租约，票据不放进 URL 或事件。直接清单/制品端点按当前版本 ACL 检查，草稿仅作者和获权审核人员可读，已发布仅可见成员可读，跨租户和 plugin ID 返回404。管理员读取原始清单仍需当前审核权限。下载原始清单后先核验原字节摘要，再与已验证 envelope 比较后解析。
+成员票据绑定认证 tenant/owner、clientId、identity、installationRevision、制品范围及截止时间。下载同时验证当前身份、客户端绑定、安装修订、票据及租约，票据不放进 URL 或事件。直接清单/制品端点按当前版本 ACL 检查，草稿仅作者和获权审核人员可读，已发布仅可见成员可读，跨租户及旧插件 ID 返回404。管理员读取原始清单仍需当前审核权限。下载原始清单后先核验原字节摘要，再与已验证 envelope 比较后解析。
 
 写操作带 If-Match 和 Idempotency-Key。幂等键绑定完整请求指纹，指纹变化返回冲突。installationRevision 是成员安装 CAS 代次，selectionRevision 是实例资源选择代次，generation 是实例规格代数。相同 selectionRevision 的重试锁定精确版本与字节，乱序选择不得覆盖新选择。续签只刷新同 identity/摘要/releaseSequence 的签名和租约，保留 selectionRevision，规格变更仍递增 generation。
 
@@ -34,13 +34,9 @@ UnifiedResourceRef 新增 desiredState，HTTP/JSON 枚举值为 ENABLED、DISABL
 
 所有签名按既有独立 release/revocation/downgrade 根验证，保留原 UTC 时间文本，JCS 去除顶层 signature 后验 Ed25519。v1 仅接受 schemaVersion=1/purpose=plugin，v2 仅接受 schemaVersion=2/purpose=resource。v2 artifactDigests 必须与原始清单集合精确一致、去重并按字典序排序。租约截止 expiresAt 必须等于 envelopeNotAfter 和 revocationsExpiresAt 的较早值，两个可信声明各自最多24小时。
 
-UnifiedMigrationProof 包含已签名 legacyEnvelope、unifiedEnvelope、legacyArtifactId 和首个 v2 激活时间 activatedAt。消费者必须取得原 v1 归档和原始 v2 清单字节，独立验证两份签名、摘要、tenant/package/version/releaseSequence 一致，且 plugin payload 的 legacyArtifactId 对应 digest 等于 v1 归档摘要 A。v2 清单摘要为 M。marker 是独立 release 根签名的 UnifiedMigrationMarker，覆盖 tenantId、packageId、首个 versionId/releaseSequence 和 activatedAt。proof.activatedAt 必须等于 marker.activatedAt；marker 首次签发与首个 v2 在同一事务持久化，消费者验签并持久化最早 t0，拒绝回滚或推迟 t0。关联表不可替代上述密码学证明，相同映射禁止更换 M。该格式只供未来插件迁移，P1 不据此启用插件 v2。
+统一目录插件仅用 v2，不创建旧 v1 迁移证明、双摘要关联或续签截止。旧接口在分期期间独立保留；旧迁移类型/夹具待第三期清理，不能作为新目录发布前置。
 
-高水位以 tenant/package 为键，跨协议共享最高 releaseSequence、versionId 和已验证摘要别名。相同序号仅接受同版本同摘要或完整证明固定的 A/M，跨租户、伪造映射、替换 M 均拒绝。低序号跨协议一律拒绝，独立降级授权须逐项绑定 tenant/instance/package/version/digest 和 from/to 序号，有效期内使用且保留最高水位。迁移证明和高水位在应用回滚、卸载后继续保留。
-
-恶意撤销迁移版本必须同一事务登记 A、M 两条撤销项及 outbox。v1 按 A 匹配，v2 对任一条目先按 packageId/versionId 禁用整个版本，再逐项对 manifestDigest 和全部 artifactDigest 匹配可信租户撤销表。相同恶意制品被其他版本复用也拒绝，服务端仍逐一传播所有引用版本撤销。普通 withdrawn 不写恶意撤销表。
-
-首个 v2 签发时刻 t0 以后禁止 v1 新版本。已应用版本 v1 续签 notAfter 不得超过固定 t0+24h，截止后拒绝续签。回滚不能重置 t0 或重开窗口。未实际开启插件 v2 的包继续原 v1 链路。
+高水位按 tenant/package 保存最高 releaseSequence、versionId、manifestDigest，同序号须同字节。恶意撤销同时按版本身份及清单/制品摘要匹配，复用恶意制品的版本一并撤销。普通 withdrawn 不写恶意撤销表。
 
 ## 固定目录和 guardian
 
@@ -52,7 +48,7 @@ UnifiedMigrationProof 包含已签名 legacyEnvelope、unifiedEnvelope、legacyA
 - 安装回执使用 UnifiedReceiptFile 的 installation 分支，C 唯一写入，E 只读。E 的停用回执使用同一 Schema 的 disable 分支，位于 `<DSH_HOME>/auriga/guardian/disable-receipts/<receiptId>.json`，E 唯一写入，C 只读；不得覆盖 C 的安装回执。
 - transactions/<transactionId>.json 使用 UnifiedTransactionFile，C 唯一写入，E 只读。C 激活前写 prepared，切换后写 switched，ledger/回执均持久化才写 committed。E 的隔离恢复日志放在自己的 state.json.pendingIsolation。
 - `<DSH_HOME>/auriga/guardian/state.json` 使用 UnifiedGuardianStateFile，E 唯一读写，C 可只读观察。
-- `<DSH_HOME>/auriga/guardian/high-watermarks.json` 使用 UnifiedHighWatermarksFile，E 唯一读写，C 只读。包含跨协议高水位、已验签迁移标记和已使用降级授权。C 暂存待激活数据，E 独立验签并原子持久化高水位后，C 重新获取锁核验 E 的 active 状态和完全相同的身份/代次/字节才切换 current；C 不直接写高水位，也不在等待 E 时占锁。
+- `<DSH_HOME>/auriga/guardian/high-watermarks.json` 使用 UnifiedHighWatermarksFile，E 唯一读写，C 只读。包含统一资源高水位和已使用降级授权；不为新插件创建迁移标记。C 暂存待激活数据，E 独立验签并原子持久化高水位后，C 重新获取锁核验 E 的 active 状态和完全相同的身份/代次/字节才切换 current；C 不直接写高水位，也不在等待 E 时占锁。
 
 所有 C/E 文件和 current 切换共用 `<DSH_HOME>/auriga/guardian/host.lock.d/` 目录锁，不依赖原生 Node 模块或额外二进制。Node fs.mkdir(path) 必须不带 recursive，只有创建成功者获锁，EEXIST 表示竞争失败；不得把已存在目录当作自己获锁。Windows 使用本地 NTFS、Linux 使用本地支持原子目录创建的文件系统，所有竞争者使用同一个已核验的绝对路径、同一卷；拒绝网络盘、链接、重解析点、路径别名和不能保证原子 mkdir 的文件系统。guardian 必须单实例，所有写者共同遵守本协议。
 
@@ -76,7 +72,7 @@ guardian 全部转移、守卫和动作见 guardian-transitions.json。未列转
 
 ## 服务端授权矩阵
 
-基础 resource.packages.upload 只授予上传基础能力。skill/text-only 还须 tenant/owner、L3共享、内容扫描及风险下限校验。plugin 继续旧专属接口与原等级规则。tool/online、tool/offline、tool/git 在 P1 全部拒绝，后续分别启用细分授权、端点/凭据与网络检查、二进制来源/平台检查、固定commit和隔离构建授权后开放。未知 kind/delivery 默认拒绝。
+基础 resource.packages.upload 只授予上传基础能力。skill/text-only 还须 tenant/owner、L3共享、内容扫描及风险下限校验。plugin/npm-tgz 走统一 L3 流程，至少 R2；原 L0–L4/private 能力补齐前继续保留旧接口。tool/online、tool/offline、tool/git 在 P1 全部拒绝，后续分别启用细分授权、端点/凭据与网络检查、二进制来源/平台检查、固定commit和隔离构建授权后开放。未知 kind/delivery 默认拒绝。
 
 审核/发布每次核验当前版本修订和原始摘要。R1 至少一名非作者，R2/R3 至少两名不同非作者且一名安全资格审核者。role=security 由服务端资格验证。同一人多个角色只计一次，作者禁止审核/发布。风险只可上调，内容或风险变更递增修订并清空旧审核。分发使用 resource.distributions.manage，且当前目标实例/主人/节点归属有效。原始清单和制品必须逐次授权，票据和 locator 均无法绕过 ACL。
 

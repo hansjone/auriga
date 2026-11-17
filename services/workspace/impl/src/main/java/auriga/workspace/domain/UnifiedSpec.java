@@ -18,6 +18,7 @@ public final class UnifiedSpec {
               var old = prior.get(ref.getIdentity().getPackageId());
               return old == null
                   || !old.getIdentity().equals(ref.getIdentity())
+                  || !mode(old).equals(mode(ref))
                   || UnifiedResourceIntent.revision(old) != UnifiedResourceIntent.revision(ref)
                   || !UnifiedResourceIntent.desired(old).equals(UnifiedResourceIntent.desired(ref));
             });
@@ -29,12 +30,24 @@ public final class UnifiedSpec {
       List<UnifiedSelection> selections,
       ResolveUnifiedResourcesResponse resolved,
       boolean renewal) {
+    return apply(old, revision, selections, resolved, renewal, false);
+  }
+
+  public static InstanceSpec apply(
+      InstanceSpec old,
+      long revision,
+      List<UnifiedSelection> selections,
+      ResolveUnifiedResourcesResponse resolved,
+      boolean renewal,
+      boolean supersedingAssignment) {
     require(revision > 0 && revision <= 9007199254740991L);
     require(resolved.getSelectionRevision() == revision);
     require(
         renewal
             ? old.getResourceSelectionRevision() == revision
-            : old.getResourceSelectionRevision() + 1 == revision);
+            : supersedingAssignment
+                ? old.getResourceSelectionRevision() < revision
+                : old.getResourceSelectionRevision() + 1 == revision);
     Map<String, UnifiedResourceRef> before = refs(old.getUnifiedResourcesList());
     Map<String, UnifiedResourceRef> incoming = refs(resolved.getResourcesList());
     var result = new LinkedHashMap<>(before);
@@ -51,7 +64,9 @@ public final class UnifiedSpec {
     } else {
       for (var selection : selections) {
         var id = selection.getIdentity();
-        require(id.getTenantId().equals(old.getTenantId()) && id.getKind().equals("skill"));
+        require(
+            id.getTenantId().equals(old.getTenantId())
+                && Set.of("plugin", "skill").contains(id.getKind()));
         String key = id.getPackageId();
         require(changed.add(key));
         var next = incoming.remove(key);
@@ -59,15 +74,29 @@ public final class UnifiedSpec {
         switch (selection.getAction()) {
           case "install", "enable", "disable" -> {
             require(next != null && next.getIdentity().equals(id));
-            require(next.getEnabled() == !selection.getAction().equals("disable"));
+            boolean safetyDisabled =
+                !next.getEnabled()
+                    && UnifiedResourceIntent.desired(next).equals("DISABLED")
+                    && mode(next).equals("optional");
+            // The authoritative resolver can withdraw an exact pending install before execution.
+            require(
+                next.getEnabled() == !selection.getAction().equals("disable") || safetyDisabled);
             require(
                 UnifiedResourceIntent.desired(next)
-                    .equals(selection.getAction().equals("disable") ? "DISABLED" : "ENABLED"));
+                        .equals(selection.getAction().equals("disable") ? "DISABLED" : "ENABLED")
+                    || safetyDisabled);
             require(UnifiedResourceIntent.revision(next) > 0);
             if (previous != null) {
               require(
                   UnifiedResourceIntent.revision(next) > UnifiedResourceIntent.revision(previous));
-              require(next.getReleaseSequence() >= previous.getReleaseSequence());
+              // Only the private authoritative assignment pass can restore a mandatory version
+              // after resource has excluded a removed/unavailable installation from its floor.
+              // Identity rebinding and every ordinary/member selection remain monotonic.
+              require(
+                  next.getReleaseSequence() >= previous.getReleaseSequence()
+                      || supersedingAssignment
+                          && !mode(next).equals("optional")
+                          && !previous.getIdentity().equals(next.getIdentity()));
               if (next.getReleaseSequence() == previous.getReleaseSequence())
                 require(sameBytes(previous, next));
             }
@@ -98,7 +127,11 @@ public final class UnifiedSpec {
     }
     for (var ref : result.values()) {
       require(ref.getIdentity().getTenantId().equals(old.getTenantId()));
-      require(ref.getIdentity().getKind().equals("skill"));
+      require(Set.of("plugin", "skill").contains(ref.getIdentity().getKind()));
+      String mode = ref.getInstallationMode().isEmpty() ? "optional" : ref.getInstallationMode();
+      require(Set.of("required", "default", "optional").contains(mode));
+      require(!mode.equals("required") || UnifiedResourceIntent.desired(ref).equals("ENABLED"));
+      require(!mode.equals("default") || !UnifiedResourceIntent.desired(ref).equals("REMOVED"));
       require(UnifiedResourceIntent.revision(ref) > 0);
       UnifiedResourceIntent.desired(ref);
     }
@@ -111,6 +144,46 @@ public final class UnifiedSpec {
     return revocations(next, resolved.getRevocations(), false);
   }
 
+  /**
+   * Only unchanged bytes losing execution authority, or a revocation-list update, bypass policy.
+   */
+  public static boolean safetyChange(InstanceSpec before, InstanceSpec after) {
+    if (!before.toBuilder()
+        .clearUnifiedResources()
+        .clearResourceRevocations()
+        .clearGeneration()
+        .clearResourceSelectionRevision()
+        .build()
+        .equals(
+            after.toBuilder()
+                .clearUnifiedResources()
+                .clearResourceRevocations()
+                .clearGeneration()
+                .clearResourceSelectionRevision()
+                .build())) return false;
+    var previous = refs(before.getUnifiedResourcesList());
+    if (previous.size() != after.getUnifiedResourcesCount()) return false;
+    boolean safety =
+        !before.getResourceRevocationsList().equals(after.getResourceRevocationsList());
+    for (var next : after.getUnifiedResourcesList()) {
+      var old = previous.get(next.getIdentity().getPackageId());
+      if (old == null || !sameBytes(old, next)) return false;
+      if (old.equals(next)
+          || mode(old).equals(mode(next))
+              && UnifiedResourceIntent.desired(old).equals(UnifiedResourceIntent.desired(next))
+              && UnifiedResourceIntent.revision(old) == UnifiedResourceIntent.revision(next))
+        continue;
+      String prior = UnifiedResourceIntent.desired(old),
+          desired = UnifiedResourceIntent.desired(next);
+      if (!(prior.equals("ENABLED") && Set.of("DISABLED", "REMOVED").contains(desired)
+              || prior.equals("DISABLED") && desired.equals("REMOVED"))
+          || UnifiedResourceIntent.revision(next) <= UnifiedResourceIntent.revision(old))
+        return false;
+      safety = true;
+    }
+    return safety;
+  }
+
   private static boolean sameIntentOrSafetyDisable(
       UnifiedResourceRef previous, UnifiedResourceRef next) {
     String before = UnifiedResourceIntent.desired(previous),
@@ -119,8 +192,40 @@ public final class UnifiedSpec {
         revision = UnifiedResourceIntent.revision(next);
     // A resource-side withdrawal/revocation allocates a new CAS for a safety
     // disable. Ordinary signing/lease renewal still preserves intent and CAS.
-    return before.equals(after) && prior == revision
+    return before.equals(after) && prior == revision && mode(previous).equals(mode(next))
         || before.equals("ENABLED") && after.equals("DISABLED") && revision > prior;
+  }
+
+  /**
+   * Projects only loss of authority onto the last admitted spec, never unchecked ordinary edits.
+   */
+  public static InstanceSpec safetyProjection(InstanceSpec admitted, InstanceSpec candidate) {
+    require(admitted.getInstanceId().equals(candidate.getInstanceId()));
+    require(admitted.getTenantId().equals(candidate.getTenantId()));
+    require(admitted.getOwnerId().equals(candidate.getOwnerId()));
+    var projected = admitted;
+    for (var list : candidate.getResourceRevocationsList())
+      projected = revocations(projected, list, false);
+    var changes = refs(candidate.getUnifiedResourcesList());
+    var next = projected.toBuilder().clearUnifiedResources();
+    for (var old : projected.getUnifiedResourcesList()) {
+      var changed = changes.get(old.getIdentity().getPackageId());
+      if (changed != null && sameBytes(old, changed)) {
+        var one = admitted.toBuilder().clearUnifiedResources().addUnifiedResources(old).build();
+        var stopped = one.toBuilder().setUnifiedResources(0, changed).build();
+        if (safetyChange(one, stopped)) {
+          next.addUnifiedResources(changed);
+          continue;
+        }
+      }
+      next.addUnifiedResources(old);
+    }
+    var result = next.setGeneration(candidate.getGeneration()).build();
+    return safetyChange(admitted, result) ? result : null;
+  }
+
+  private static String mode(UnifiedResourceRef ref) {
+    return ref.getInstallationMode().isEmpty() ? "optional" : ref.getInstallationMode();
   }
 
   public static boolean sameBytes(UnifiedResourceRef a, UnifiedResourceRef b) {

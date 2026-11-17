@@ -20,7 +20,11 @@
         },
         "kind": {
           "type": "string",
-          "enum": ["skill", "tool"]
+          "enum": [
+            "plugin",
+            "skill",
+            "tool"
+          ]
         },
         "version": {
           "$ref": "./package.schema.json#/$defs/Version"
@@ -90,7 +94,12 @@
           "description": "Same-origin path only. Reject absolute URLs, authority paths, query, fragments, percent escapes, redirects and dot segments."
         }
       },
-      "required": ["artifactId", "digest", "sizeBytes", "downloadPath"],
+      "required": [
+        "artifactId",
+        "digest",
+        "sizeBytes",
+        "downloadPath"
+      ],
       "additionalProperties": false
     },
     "UnifiedResourceRef": {
@@ -136,8 +145,16 @@
         },
         "desiredState": {
           "type": "string",
-          "enum": ["ENABLED", "DISABLED", "REMOVED"],
+          "enum": [
+            "ENABLED",
+            "DISABLED",
+            "REMOVED"
+          ],
           "description": "Preferred desired state when present. If absent on legacy data, derive ENABLED/DISABLED from enabled. REMOVED is an uninstall tombstone carrying the new installationRevision, retained until a matching removed acknowledgement and retired in the next generation. Reject unknown or unspecified values."
+        },
+        "installationMode": {
+          "$ref": "#/$defs/UnifiedInstallationMode",
+          "description": "Server-resolved scope policy. Omission means optional for earlier records."
         }
       },
       "required": [
@@ -153,14 +170,20 @@
     },
     "UnifiedResourceDispatchRef": {
       "description": "Resource service outbound validation. Legacy readers use UnifiedResourceRef; every new dispatch must carry a positive installationRevision.",
-      "allOf": [{ "$ref": "#/$defs/UnifiedResourceRef" }],
+      "allOf": [
+        {
+          "$ref": "#/$defs/UnifiedResourceRef"
+        }
+      ],
       "type": "object",
       "properties": {
         "installationRevision": {
           "$ref": "#/$defs/UnifiedResourceRef/properties/installationRevision"
         }
       },
-      "required": ["installationRevision"]
+      "required": [
+        "installationRevision"
+      ]
     },
     "UnifiedSelection": {
       "type": "object",
@@ -170,10 +193,18 @@
         },
         "action": {
           "type": "string",
-          "enum": ["install", "enable", "disable", "remove"]
+          "enum": [
+            "install",
+            "enable",
+            "disable",
+            "remove"
+          ]
         }
       },
-      "required": ["identity", "action"],
+      "required": [
+        "identity",
+        "action"
+      ],
       "additionalProperties": false
     },
     "UnifiedDownloadTicketInput": {
@@ -193,7 +224,11 @@
           "maximum": 9007199254740991
         }
       },
-      "required": ["clientId", "identity", "installationRevision"],
+      "required": [
+        "clientId",
+        "identity",
+        "installationRevision"
+      ],
       "additionalProperties": false
     },
     "UnifiedDownloadTicket": {
@@ -245,7 +280,11 @@
           "maxLength": 64
         }
       },
-      "required": ["clientId", "ticket", "artifactId"],
+      "required": [
+        "clientId",
+        "ticket",
+        "artifactId"
+      ],
       "additionalProperties": false
     },
     "UnifiedInstallationInput": {
@@ -259,7 +298,10 @@
           "$ref": "#/$defs/UnifiedSelection"
         }
       },
-      "required": ["clientId", "selection"],
+      "required": [
+        "clientId",
+        "selection"
+      ],
       "additionalProperties": false
     },
     "UnifiedInstallationReport": {
@@ -313,7 +355,10 @@
         },
         "reportSource": {
           "type": "string",
-          "enum": ["member", "node"]
+          "enum": [
+            "member",
+            "node"
+          ]
         },
         "errorCode": {
           "type": "string",
@@ -341,13 +386,21 @@
           "if": {
             "properties": {
               "state": {
-                "enum": ["failed", "expired", "revoked"]
+                "enum": [
+                  "failed",
+                  "expired",
+                  "revoked"
+                ]
               }
             },
-            "required": ["state"]
+            "required": [
+              "state"
+            ]
           },
           "then": {
-            "required": ["errorCode"],
+            "required": [
+              "errorCode"
+            ],
             "properties": {
               "errorCode": {
                 "type": "string",
@@ -404,7 +457,10 @@
         },
         "reportSource": {
           "type": "string",
-          "enum": ["member", "node"]
+          "enum": [
+            "member",
+            "node"
+          ]
         },
         "report": {
           "$ref": "#/$defs/UnifiedInstallationReport"
@@ -435,9 +491,22 @@
           "type": "string",
           "minLength": 1,
           "maxLength": 2048
+        },
+        "allowPersonalPlugins": {
+          "type": "boolean",
+          "description": "Current tenant permission for native personal plugin installation."
+        },
+        "assignmentFailures": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/UnifiedAssignmentFailure"
+          },
+          "maxItems": 200
         }
       },
-      "required": ["items"],
+      "required": [
+        "items"
+      ],
       "additionalProperties": false
     },
     "UnifiedDistributionInput": {
@@ -455,7 +524,10 @@
           "maxItems": 128
         }
       },
-      "required": ["instanceId", "selections"],
+      "required": [
+        "instanceId",
+        "selections"
+      ],
       "additionalProperties": false
     },
     "UnifiedDistribution": {
@@ -509,7 +581,9 @@
         },
         "reportSource": {
           "type": "string",
-          "enum": ["node"]
+          "enum": [
+            "node"
+          ]
         },
         "reports": {
           "type": "array",
@@ -548,7 +622,9 @@
           "maxLength": 2048
         }
       },
-      "required": ["items"],
+      "required": [
+        "items"
+      ],
       "additionalProperties": false
     },
     "UnifiedRenewalInput": {
@@ -674,7 +750,9 @@
                 "const": "private_only"
               }
             },
-            "required": ["state"]
+            "required": [
+              "state"
+            ]
           },
           "then": {
             "properties": {
@@ -911,13 +989,21 @@
           "if": {
             "properties": {
               "state": {
-                "enum": ["failed", "expired", "revoked"]
+                "enum": [
+                  "failed",
+                  "expired",
+                  "revoked"
+                ]
               }
             },
-            "required": ["state"]
+            "required": [
+              "state"
+            ]
           },
           "then": {
-            "required": ["errorCode"],
+            "required": [
+              "errorCode"
+            ],
             "properties": {
               "errorCode": {
                 "type": "string",
@@ -1252,11 +1338,21 @@
         },
         "operation": {
           "type": "string",
-          "enum": ["install", "activate", "remove", "cleanup"]
+          "enum": [
+            "install",
+            "activate",
+            "remove",
+            "cleanup"
+          ]
         },
         "phase": {
           "type": "string",
-          "enum": ["prepared", "switched", "committed", "rolled_back"]
+          "enum": [
+            "prepared",
+            "switched",
+            "committed",
+            "rolled_back"
+          ]
         },
         "expectedLedgerRevision": {
           "type": "integer",
@@ -1385,7 +1481,11 @@
               ]
             }
           },
-          "required": ["transactionId", "quarantinePath", "phase"],
+          "required": [
+            "transactionId",
+            "quarantinePath",
+            "phase"
+          ],
           "additionalProperties": false
         },
         "lastDisableReceiptId": {
@@ -1393,7 +1493,12 @@
           "format": "uuid"
         }
       },
-      "required": ["schemaVersion", "revision", "guardian", "clock"],
+      "required": [
+        "schemaVersion",
+        "revision",
+        "guardian",
+        "clock"
+      ],
       "additionalProperties": false
     },
     "UnifiedHighWatermarksFile": {
@@ -1455,7 +1560,10 @@
         },
         "role": {
           "type": "string",
-          "enum": ["C", "E"]
+          "enum": [
+            "C",
+            "E"
+          ]
         },
         "pid": {
           "type": "integer",
@@ -1498,6 +1606,136 @@
         "monotonicMillis",
         "leaseDurationMillis"
       ]
+    },
+    "UnifiedInstallationMode": {
+      "type": "string",
+      "enum": [
+        "required",
+        "default",
+        "optional"
+      ]
+    },
+    "UnifiedAssignmentInput": {
+      "type": "object",
+      "properties": {
+        "identity": {
+          "$ref": "#/$defs/UnifiedResourceIdentity"
+        },
+        "scope": {
+          "type": "string",
+          "enum": [
+            "tenant",
+            "member",
+            "group",
+            "instance"
+          ]
+        },
+        "targetId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "installationMode": {
+          "$ref": "#/$defs/UnifiedInstallationMode"
+        }
+      },
+      "required": [
+        "identity",
+        "scope",
+        "targetId",
+        "installationMode"
+      ],
+      "additionalProperties": false
+    },
+    "UnifiedAssignment": {
+      "type": "object",
+      "properties": {
+        "identity": {
+          "$ref": "#/$defs/UnifiedResourceIdentity"
+        },
+        "scope": {
+          "type": "string",
+          "enum": [
+            "tenant",
+            "member",
+            "group",
+            "instance"
+          ]
+        },
+        "targetId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "installationMode": {
+          "$ref": "#/$defs/UnifiedInstallationMode"
+        },
+        "id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "revision": {
+          "type": "integer",
+          "format": "int64",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "active": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "identity",
+        "scope",
+        "targetId",
+        "installationMode",
+        "id",
+        "revision",
+        "active"
+      ],
+      "additionalProperties": false
+    },
+    "UnifiedAssignmentPage": {
+      "type": "object",
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/UnifiedAssignment"
+          },
+          "maxItems": 200
+        },
+        "nextCursor": {
+          "type": "string",
+          "maxLength": 2048
+        }
+      },
+      "required": [
+        "items"
+      ],
+      "additionalProperties": false
+    },
+    "UnifiedAssignmentFailure": {
+      "type": "object",
+      "properties": {
+        "packageId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "state": {
+          "type": "string",
+          "const": "failed"
+        },
+        "errorCode": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        }
+      },
+      "required": [
+        "packageId",
+        "state",
+        "errorCode"
+      ],
+      "additionalProperties": false
     }
   }
 }

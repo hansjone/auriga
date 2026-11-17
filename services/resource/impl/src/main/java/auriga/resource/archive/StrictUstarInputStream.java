@@ -65,7 +65,10 @@ final class StrictUstarInputStream extends TarArchiveInputStream {
     byte flag = record[TarConstants.LF_OFFSET];
     if (flag != TarConstants.LF_NORMAL
         && flag != TarConstants.LF_OLDNORM
-        && flag != TarConstants.LF_DIR) throw bad();
+        && flag != TarConstants.LF_DIR) {
+      if ("xgXLKS".indexOf(flag) >= 0) throw new UnsupportedFormat();
+      throw bad();
+    }
     if (!ArchiveUtils.matchAsciiBuffer(
             TarConstants.MAGIC_POSIX, record, TarConstants.MAGIC_OFFSET, TarConstants.MAGICLEN)
         || !ArchiveUtils.matchAsciiBuffer(
@@ -135,5 +138,11 @@ final class StrictUstarInputStream extends TarArchiveInputStream {
 
   static IOException bad() {
     return new IOException("Invalid archive");
+  }
+
+  static final class UnsupportedFormat extends IOException {
+    UnsupportedFormat() {
+      super("Only POSIX ustar is supported. PAX/GNU extensions and sparse entries are rejected.");
+    }
   }
 }

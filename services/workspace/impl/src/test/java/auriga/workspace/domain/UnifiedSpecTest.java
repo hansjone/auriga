@@ -10,6 +10,96 @@ import java.util.*;
 import org.junit.jupiter.api.Test;
 
 class UnifiedSpecTest {
+  @Test
+  void trustedAssignmentMaySupersedeAnUnappliedRevisionButCannotRebindIdentitySequence() {
+    var installed = empty.toBuilder().addUnifiedResources(ref).build();
+    var next = ref.toBuilder().setInstallationMode("required").setInstallationRevision(2).build();
+    var selection = UnifiedSelection.newBuilder().setIdentity(id).setAction("install").build();
+    assertThrows(
+        AurigaException.class,
+        () -> UnifiedSpec.apply(installed, 3, List.of(selection), resolution(3, next), false));
+    assertEquals(
+        next,
+        UnifiedSpec.apply(installed, 3, List.of(selection), resolution(3, next), false, true)
+            .getUnifiedResources(0));
+    assertThrows(
+        AurigaException.class,
+        () ->
+            UnifiedSpec.apply(
+                installed,
+                3,
+                List.of(selection),
+                resolution(3, next.toBuilder().setReleaseSequence(6).build()),
+                false,
+                true));
+  }
+
+  @Test
+  void authoritativeAssignmentCanRestoreAnUnavailableMandatoryVersionOnly() {
+    var installed = empty.toBuilder().addUnifiedResources(ref).build();
+    var previousVersion =
+        id.toBuilder().setVersionId("previous-version").setVersion("0.9.0").build();
+    var restored =
+        ref.toBuilder()
+            .setIdentity(previousVersion)
+            .setReleaseSequence(6)
+            .setInstallationMode("required")
+            .setInstallationRevision(2)
+            .build();
+    var selection =
+        UnifiedSelection.newBuilder().setIdentity(previousVersion).setAction("install").build();
+    assertThrows(
+        AurigaException.class,
+        () -> UnifiedSpec.apply(installed, 2, List.of(selection), resolution(2, restored), false));
+    assertThrows(
+        AurigaException.class,
+        () ->
+            UnifiedSpec.apply(
+                installed,
+                2,
+                List.of(selection),
+                resolution(2, restored.toBuilder().setInstallationMode("optional").build()),
+                false,
+                true));
+    assertEquals(
+        restored,
+        UnifiedSpec.apply(installed, 2, List.of(selection), resolution(2, restored), false, true)
+            .getUnifiedResources(0));
+  }
+
+  @Test
+  void safetyDispatchCannotCarryNewBytesOrAnOrdinaryPolicyChange() {
+    var installed = empty.toBuilder().addUnifiedResources(ref).build();
+    var disabled =
+        ref.toBuilder()
+            .setEnabled(false)
+            .setInstallationRevision(2)
+            .setDesiredState(UNIFIED_RESOURCE_DESIRED_STATE_DISABLED)
+            .build();
+    var stopped = installed.toBuilder().setGeneration(10).setUnifiedResources(0, disabled).build();
+    assertTrue(UnifiedSpec.safetyChange(installed, stopped));
+    assertFalse(
+        UnifiedSpec.safetyChange(
+            installed,
+            stopped.toBuilder()
+                .setUnifiedResources(0, disabled.toBuilder().setReleaseSequence(8))
+                .build()));
+    assertFalse(
+        UnifiedSpec.safetyChange(
+            installed, stopped.toBuilder().setAllowPersonalPlugins(true).build()));
+    assertFalse(
+        UnifiedSpec.safetyChange(installed, stopped.toBuilder().addUnifiedResources(ref).build()));
+    assertFalse(
+        UnifiedSpec.safetyChange(
+            installed,
+            installed.toBuilder()
+                .setUnifiedResources(0, ref.toBuilder().setInstallationMode("required"))
+                .build()));
+    assertTrue(
+        UnifiedSpec.safetyChange(
+            installed, installed.toBuilder().addResourceRevocations(list).build()));
+  }
+
   final UnifiedResourceIdentity id =
       UnifiedResourceIdentity.newBuilder()
           .setTenantId("tenant")
@@ -51,6 +141,62 @@ class UnifiedSpecTest {
         .addAllResources(List.of(refs))
         .setRevocations(list)
         .build();
+  }
+
+  @Test
+  void pluginSelectionAndRenewalUseTheSameSpecWhileUnknownKindsAreDenied() {
+    var pluginId = id.toBuilder().setKind("plugin").build();
+    var plugin = ref.toBuilder().setIdentity(pluginId).build();
+    var choice = UnifiedSelection.newBuilder().setIdentity(pluginId).setAction("install").build();
+    var installed = UnifiedSpec.apply(empty, 2, List.of(choice), resolution(2, plugin), false);
+    assertEquals(pluginId, installed.getUnifiedResources(0).getIdentity());
+    assertEquals(
+        installed, UnifiedSpec.apply(installed, 2, List.of(), resolution(2, plugin), true));
+    for (String kind : List.of("tool", "unknown")) {
+      var bad = pluginId.toBuilder().setKind(kind).build();
+      assertThrows(
+          AurigaException.class,
+          () ->
+              UnifiedSpec.apply(
+                  empty,
+                  2,
+                  List.of(choice.toBuilder().setIdentity(bad).build()),
+                  resolution(2, plugin.toBuilder().setIdentity(bad).build()),
+                  false));
+    }
+  }
+
+  @Test
+  void authoritativeWithdrawalOfPendingRequiredInstallCanAdvanceSafely() {
+    var choice = UnifiedSelection.newBuilder().setIdentity(id).setAction("install").build();
+    var disabled =
+        ref.toBuilder()
+            .setEnabled(false)
+            .setInstallationMode("optional")
+            .setInstallationRevision(2)
+            .setDesiredState(UNIFIED_RESOURCE_DESIRED_STATE_DISABLED)
+            .build();
+    var next = UnifiedSpec.apply(empty, 2, List.of(choice), resolution(2, disabled), false);
+    assertEquals(disabled, next.getUnifiedResources(0));
+    assertThrows(
+        AurigaException.class,
+        () ->
+            UnifiedSpec.apply(
+                empty,
+                2,
+                List.of(choice),
+                resolution(2, disabled.toBuilder().setInstallationMode("required").build()),
+                false));
+    var installed = empty.toBuilder().addUnifiedResources(ref).build();
+    assertThrows(
+        AurigaException.class,
+        () ->
+            UnifiedSpec.apply(
+                installed,
+                1,
+                List.of(),
+                resolution(1, ref.toBuilder().setInstallationMode("required").build()),
+                true));
   }
 
   @Test

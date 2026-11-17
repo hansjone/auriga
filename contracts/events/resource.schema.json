@@ -160,6 +160,7 @@
         "kind": {
           "type": "string",
           "enum": [
+            "plugin",
             "skill",
             "tool"
           ]
@@ -216,6 +217,7 @@
         "kind": {
           "type": "string",
           "enum": [
+            "plugin",
             "skill",
             "tool"
           ]
@@ -306,6 +308,9 @@
         "selections"
       ],
       "additionalProperties": false
+    },
+    "UnifiedResourceAssignmentChanged": {
+      "$ref": "../resource/unified.schema.json#/$defs/UnifiedAssignment"
     }
   }
 }

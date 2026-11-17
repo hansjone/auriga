@@ -16,10 +16,18 @@ import (
 	"gopkg.in/validator.v2"
 )
 
-// ShellAuthopenapiResourceYamlComponentsSchemasUnifiedManifest - Catalog manifest for skill/tool. PluginManifest remains in the package format for internal migration only; catalog APIs do not expose plugin projections.
+// ShellAuthopenapiResourceYamlComponentsSchemasUnifiedManifest - Unified plugin/skill/tool manifest; plugin uses npm tgz and v2 detached signatures. Tool delivery remains gated.
 type ShellAuthopenapiResourceYamlComponentsSchemasUnifiedManifest struct {
-	ShellAuthresourcePackageSchemaJsonDefsSkillManifest *ShellAuthresourcePackageSchemaJsonDefsSkillManifest
-	ShellAuthresourcePackageSchemaJsonDefsToolManifest  *ShellAuthresourcePackageSchemaJsonDefsToolManifest
+	ShellAuthresourcePackageSchemaJsonDefsPluginManifest *ShellAuthresourcePackageSchemaJsonDefsPluginManifest
+	ShellAuthresourcePackageSchemaJsonDefsSkillManifest  *ShellAuthresourcePackageSchemaJsonDefsSkillManifest
+	ShellAuthresourcePackageSchemaJsonDefsToolManifest   *ShellAuthresourcePackageSchemaJsonDefsToolManifest
+}
+
+// ShellAuthresourcePackageSchemaJsonDefsPluginManifestAsShellAuthopenapiResourceYamlComponentsSchemasUnifiedManifest is a convenience function that returns ShellAuthresourcePackageSchemaJsonDefsPluginManifest wrapped in ShellAuthopenapiResourceYamlComponentsSchemasUnifiedManifest
+func ShellAuthresourcePackageSchemaJsonDefsPluginManifestAsShellAuthopenapiResourceYamlComponentsSchemasUnifiedManifest(v *ShellAuthresourcePackageSchemaJsonDefsPluginManifest) ShellAuthopenapiResourceYamlComponentsSchemasUnifiedManifest {
+	return ShellAuthopenapiResourceYamlComponentsSchemasUnifiedManifest{
+		ShellAuthresourcePackageSchemaJsonDefsPluginManifest: v,
+	}
 }
 
 // ShellAuthresourcePackageSchemaJsonDefsSkillManifestAsShellAuthopenapiResourceYamlComponentsSchemasUnifiedManifest is a convenience function that returns ShellAuthresourcePackageSchemaJsonDefsSkillManifest wrapped in ShellAuthopenapiResourceYamlComponentsSchemasUnifiedManifest
@@ -40,6 +48,23 @@ func ShellAuthresourcePackageSchemaJsonDefsToolManifestAsShellAuthopenapiResourc
 func (dst *ShellAuthopenapiResourceYamlComponentsSchemasUnifiedManifest) UnmarshalJSON(data []byte) error {
 	var err error
 	match := 0
+	// try to unmarshal data into ShellAuthresourcePackageSchemaJsonDefsPluginManifest
+	err = newStrictDecoder(data).Decode(&dst.ShellAuthresourcePackageSchemaJsonDefsPluginManifest)
+	if err == nil {
+		jsonShellAuthresourcePackageSchemaJsonDefsPluginManifest, _ := json.Marshal(dst.ShellAuthresourcePackageSchemaJsonDefsPluginManifest)
+		if string(jsonShellAuthresourcePackageSchemaJsonDefsPluginManifest) == "{}" { // empty struct
+			dst.ShellAuthresourcePackageSchemaJsonDefsPluginManifest = nil
+		} else {
+			if err = validator.Validate(dst.ShellAuthresourcePackageSchemaJsonDefsPluginManifest); err != nil {
+				dst.ShellAuthresourcePackageSchemaJsonDefsPluginManifest = nil
+			} else {
+				match++
+			}
+		}
+	} else {
+		dst.ShellAuthresourcePackageSchemaJsonDefsPluginManifest = nil
+	}
+
 	// try to unmarshal data into ShellAuthresourcePackageSchemaJsonDefsSkillManifest
 	err = newStrictDecoder(data).Decode(&dst.ShellAuthresourcePackageSchemaJsonDefsSkillManifest)
 	if err == nil {
@@ -76,6 +101,7 @@ func (dst *ShellAuthopenapiResourceYamlComponentsSchemasUnifiedManifest) Unmarsh
 
 	if match > 1 { // more than 1 match
 		// reset to nil
+		dst.ShellAuthresourcePackageSchemaJsonDefsPluginManifest = nil
 		dst.ShellAuthresourcePackageSchemaJsonDefsSkillManifest = nil
 		dst.ShellAuthresourcePackageSchemaJsonDefsToolManifest = nil
 
@@ -93,6 +119,10 @@ func (dst *ShellAuthopenapiResourceYamlComponentsSchemasUnifiedManifest) Unmarsh
 
 // Marshal data from the first non-nil pointers in the struct to JSON
 func (src ShellAuthopenapiResourceYamlComponentsSchemasUnifiedManifest) MarshalJSON() ([]byte, error) {
+	if src.ShellAuthresourcePackageSchemaJsonDefsPluginManifest != nil {
+		return json.Marshal(&src.ShellAuthresourcePackageSchemaJsonDefsPluginManifest)
+	}
+
 	if src.ShellAuthresourcePackageSchemaJsonDefsSkillManifest != nil {
 		return json.Marshal(&src.ShellAuthresourcePackageSchemaJsonDefsSkillManifest)
 	}
@@ -109,6 +139,10 @@ func (obj *ShellAuthopenapiResourceYamlComponentsSchemasUnifiedManifest) GetActu
 	if obj == nil {
 		return nil
 	}
+	if obj.ShellAuthresourcePackageSchemaJsonDefsPluginManifest != nil {
+		return obj.ShellAuthresourcePackageSchemaJsonDefsPluginManifest
+	}
+
 	if obj.ShellAuthresourcePackageSchemaJsonDefsSkillManifest != nil {
 		return obj.ShellAuthresourcePackageSchemaJsonDefsSkillManifest
 	}
@@ -123,6 +157,10 @@ func (obj *ShellAuthopenapiResourceYamlComponentsSchemasUnifiedManifest) GetActu
 
 // Get the actual instance value
 func (obj ShellAuthopenapiResourceYamlComponentsSchemasUnifiedManifest) GetActualInstanceValue() interface{} {
+	if obj.ShellAuthresourcePackageSchemaJsonDefsPluginManifest != nil {
+		return *obj.ShellAuthresourcePackageSchemaJsonDefsPluginManifest
+	}
+
 	if obj.ShellAuthresourcePackageSchemaJsonDefsSkillManifest != nil {
 		return *obj.ShellAuthresourcePackageSchemaJsonDefsSkillManifest
 	}
