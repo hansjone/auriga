@@ -17,10 +17,11 @@ import {
 } from '../src/admin/resourceCatalogPolicy';
 import { tarText, boundedBytes } from '../src/admin/resourceSkillPreview';
 import * as preview from '../src/admin/resourceSkillPreview';
-import * as uploadHelpers from '../src/admin/resourceCatalogUpload';
+import * as uploadHelpers from '../src/admin/resourceUploadParser';
 import * as stepUp from '../src/admin/stepUp';
 import Catalog from '../src/views/resources/ResourceCatalogView.vue';
 import Center from '../src/views/resources/ResourceCenterView.vue';
+import Unavailable from '../src/views/WorkflowUnavailableView.vue';
 
 const v: CatalogVersion = {
   id: 'v1',
@@ -500,8 +501,6 @@ it('enforces plugin R2 and distinct security quorum even on a malformed lower se
 it.each(['plugin', 'skill'] as const)(
   'creates, uploads and submits a %s using parsed manifest metadata and actual ETags',
   async (kind) => {
-    const view = setup('directory');
-    await view.setProps({ kind });
     const pack: CatalogPackageForTest = {
       id: 'p1',
       tenantId: 'tenant',
@@ -516,7 +515,7 @@ it.each(['plugin', 'skill'] as const)(
       createdAt: v.createdAt,
     };
     const draft = { ...v, kind, state: 'draft' as const };
-    vi.spyOn(api, 'packages').mockResolvedValue({ items: [pack] });
+    vi.spyOn(api, 'packages').mockResolvedValue({ items: [] });
     vi.spyOn(api, 'versions').mockResolvedValue({ items: [] });
     vi.spyOn(api, 'get').mockResolvedValue({
       data: pack,
@@ -527,10 +526,6 @@ it.each(['plugin', 'skill'] as const)(
     const submit = vi
       .spyOn(api, 'submit')
       .mockResolvedValue({ ...r, version: draft });
-    vi.mocked(api.version).mockResolvedValue({
-      data: draft,
-      etag: '"draft-tag"',
-    });
     const file = new File(['{}'], 'auriga-resource.json'),
       payload = new File(
         ['tgz'],
@@ -546,43 +541,43 @@ it.each(['plugin', 'skill'] as const)(
           }
         : v.manifest;
     draft.manifest = manifest;
-    vi.spyOn(uploadHelpers, 'prepareUpload').mockResolvedValue({
+    vi.spyOn(uploadHelpers, 'parseResourceSource').mockResolvedValue({
+      manifest,
+      payload,
+      embedded: false,
+    });
+    vi.spyOn(uploadHelpers, 'finalizeResourceUpload').mockResolvedValue({
       manifest,
       file,
       artifacts: [payload],
       metadata: { version: '1.0.0', expectedDigest: v.digest },
     });
+    const view = setup('directory');
+    await view.setProps({ kind });
     await flushPromises();
-    await view
-      .get('[data-testid="catalog-create"] input')
-      .setValue(v.manifest.name);
-    await view.get('[data-testid="catalog-create"]').trigger('submit');
-    await view.get('[data-testid="confirm"]').trigger('click');
+    const input = view.get('[data-testid="catalog-artifacts"]');
+    Object.defineProperty(input.element, 'files', {
+      value: [payload],
+      configurable: true,
+    });
+    await input.trigger('change');
+    await flushPromises();
+    expect(
+      (view.get('[data-testid="upload-name"]').element as HTMLInputElement)
+        .value,
+    ).toBe(manifest.name);
+    expect(
+      (view.get('[data-testid="upload-version"]').element as HTMLInputElement)
+        .value,
+    ).toBe(manifest.version);
+    if (kind === 'plugin') expect(view.text()).toContain('@example/sample');
+    await view.get('[data-testid="permissions-confirm"]').setValue(true);
+    await view.get('[data-testid="catalog-upload"]').trigger('submit');
     await flushPromises();
     expect(create).toHaveBeenCalledWith(
       { name: v.manifest.name, kind, visibility: 'tenant', groupIds: [] },
       expect.any(String),
     );
-    for (const [testId, selectedFile] of [
-      ['catalog-manifest', file],
-      ['catalog-artifacts', payload],
-    ] as const) {
-      const input = view.get(`[data-testid="${testId}"]`);
-      Object.defineProperty(input.element, 'files', {
-        value: [selectedFile],
-        configurable: true,
-      });
-      await input.trigger('change');
-      await flushPromises();
-    }
-    expect(view.get('[data-testid="catalog-upload-preview"]').text()).toContain(
-      v.digest,
-    );
-    if (kind === 'plugin') expect(view.text()).toContain('@example/sample');
-    await view.get('[data-testid="catalog-upload"]').trigger('submit');
-    await flushPromises();
-    await view.get('[data-testid="confirm"]').trigger('click');
-    await flushPromises();
     expect(upload).toHaveBeenCalledWith(
       'p1',
       { version: '1.0.0', expectedDigest: v.digest },
@@ -591,21 +586,11 @@ it.each(['plugin', 'skill'] as const)(
       '"package-tag"',
       expect.any(String),
     );
-    if (kind === 'plugin') expect(view.text()).not.toContain('对比版本 ID');
-    await view
-      .get('[data-testid="catalog-reason"]')
-      .setValue('Review these bytes');
-    await view
-      .findAll('button')
-      .find((b) => b.text() === '送审')!
-      .trigger('click');
-    await view.get('[data-testid="confirm"]').trigger('click');
-    await flushPromises();
     expect(submit).toHaveBeenCalledWith(
       'p1',
       'v1',
-      'Review these bytes',
-      '"draft-tag"',
+      expect.any(String),
+      '"2"',
       expect.any(String),
     );
   },
@@ -724,3 +709,22 @@ it('reads reviewer evidence through the admin endpoint when member version reads
   expect(view.find('[data-testid="catalog-approve"]').exists()).toBe(true);
   expect(api.version).not.toHaveBeenCalled();
 });
+it.each(['zh-CN', 'en'] as const)(
+  'explains unavailable tools without losing existing navigation translations (%s)',
+  async (locale) => {
+    const router = createRouter({
+      history: createMemoryHistory(),
+      routes: [{ path: '/resources/tools', component: Unavailable }],
+    });
+    await router.push('/resources/tools');
+    const view = mount(Unavailable, {
+      global: { plugins: [router, createAurigaI18n(locale)] },
+    });
+    views.push(view);
+    expect(view.text()).toContain(
+      locale === 'en' ? 'Tools are not available yet' : '工具暂未开放',
+    );
+    expect(view.text()).not.toContain('navNotOpen');
+    expect(view.text()).not.toContain('resourceTools');
+  },
+);

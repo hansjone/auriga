@@ -1,5 +1,4 @@
 <script setup lang="ts">
-/* global File, Event, HTMLInputElement */
 import { computed, onBeforeUnmount, ref, shallowRef, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { isApiError } from '@auriga/shared';
@@ -21,13 +20,8 @@ import {
   textDiff,
 } from '../../admin/resourceCatalogPolicy';
 import { skillPreview } from '../../admin/resourceSkillPreview';
-import {
-  packSkillFolder,
-  prepareFolderUpload,
-  prepareUpload,
-  type CatalogKind,
-  type PreparedUpload,
-} from '../../admin/resourceCatalogUpload';
+import type { CatalogKind } from '../../admin/resourceCatalogUpload';
+import ResourceUploadPanel from './ResourceUploadPanel.vue';
 import ResourceAssignments from './ResourceAssignments.vue';
 import { catalogMessages } from '../../admin/resourceCatalogMessages';
 import { strongEtag } from '../../admin/resourceApi';
@@ -63,19 +57,10 @@ const versionNext = ref<string>(),
   versionCursor = ref<string>(),
   versionHistory = ref<(string | undefined)[]>([]),
   versionsLoading = ref(false);
-const name = ref(''),
-  visibility = ref<'tenant' | 'members' | 'groups'>('tenant'),
-  groups = ref('');
 const pid = ref(''),
   vid = ref(''),
   reason = ref('');
-const manifest = shallowRef<File>(),
-  artifacts = shallowRef<File[]>([]);
-const prepared = shallowRef<PreparedUpload>();
-const folderPayload = shallowRef<File>();
-const uploadError = ref(''),
-  preparing = ref(false);
-let fileEpoch = 0;
+const uploadLocked = ref(false);
 const role = ref<'general' | 'security'>('general'),
   risk = ref<'r1' | 'r2' | 'r3'>('r1');
 const instance = ref(''),
@@ -97,7 +82,11 @@ let epoch = 0,
   detailEpoch = 0,
   alive = true;
 const locked = computed(
-  () => busy.value || !!pending.value || assignmentLocked.value,
+  () =>
+    busy.value ||
+    !!pending.value ||
+    assignmentLocked.value ||
+    uploadLocked.value,
 );
 const can = (p: string) => member.value?.permissions.includes(p) ?? false;
 const permission = computed(() =>
@@ -434,103 +423,6 @@ function versionAction(mode: 'submit' | 'publish' | 'withdrawn' | 'malicious') {
           : api.withdraw(v.packageId, v.id, mode, why, etag, key),
   );
 }
-function create() {
-  if (
-    !can('resource.packages.upload') ||
-    !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(name.value) ||
-    name.value.length > 64
-  ) {
-    error.value = t('invalid');
-    return;
-  }
-  const body = {
-      name: name.value,
-      kind: kind.value,
-      visibility: visibility.value,
-      groupIds:
-        visibility.value === 'groups'
-          ? groups.value
-              .split(',')
-              .map((s) => s.trim())
-              .filter(Boolean)
-          : [],
-    },
-    key = catalogKey();
-  prepare(
-    `${t('create')} · ${body.name} · ${t(body.visibility)} · ${body.groupIds.join(', ')}`,
-    async () => {
-      const p = await api.create(body, key);
-      if (alive) pid.value = p.id;
-      return p;
-    },
-  );
-}
-async function choose(event: Event, type: 'manifest' | 'artifacts' | 'folder') {
-  if (locked.value) return;
-  const e = ++fileEpoch;
-  prepared.value = undefined;
-  uploadError.value = '';
-  preparing.value = true;
-  const list = Array.from((event.target as HTMLInputElement).files ?? []);
-  try {
-    if (type === 'manifest') manifest.value = list[0];
-    else if (type === 'folder') {
-      artifacts.value = [];
-      folderPayload.value = undefined;
-      const packed = await packSkillFolder(list);
-      if (!alive || e !== fileEpoch) return;
-      artifacts.value = [packed];
-      folderPayload.value = packed;
-    } else {
-      artifacts.value = list;
-      folderPayload.value = undefined;
-    }
-    if (!alive || e !== fileEpoch) return;
-    if (manifest.value && artifacts.value.length) {
-      const result = folderPayload.value
-        ? await prepareFolderUpload(manifest.value, folderPayload.value)
-        : await prepareUpload(manifest.value, artifacts.value, kind.value);
-      if (alive && e === fileEpoch) prepared.value = result;
-    }
-  } catch {
-    if (alive && e === fileEpoch) uploadError.value = t('uploadInvalid');
-  } finally {
-    if (alive && e === fileEpoch) preparing.value = false;
-  }
-}
-async function upload() {
-  const draft = prepared.value,
-    p = pid.value.trim();
-  if (locked.value || preparing.value || !can('resource.packages.upload'))
-    return;
-  if (!draft || !p) {
-    error.value = t('invalid');
-    return;
-  }
-  busy.value = true;
-  try {
-    const pack = await api.get(p);
-    if (!alive) return;
-    if (
-      pack.data.kind !== kind.value ||
-      pack.data.name !== draft.manifest.name ||
-      !strongEtag(pack.etag)
-    )
-      throw new Error('Invalid package');
-    const etag = pack.etag,
-      key = catalogKey(),
-      body = { ...draft.metadata };
-    busy.value = false;
-    prepare(
-      `${t('upload')} · ${pack.data.name} ${body.version} · ${body.expectedDigest}`,
-      () => api.upload(p, body, draft.file, draft.artifacts, etag, key),
-    );
-  } catch (e) {
-    if (alive) error.value = failure(e);
-  } finally {
-    if (alive) busy.value = false;
-  }
-}
 async function distribute() {
   const p = pid.value.trim(),
     v = vid.value.trim(),
@@ -641,17 +533,11 @@ onBeforeUnmount(() => {
   alive = false;
   ++epoch;
   ++detailEpoch;
-  ++fileEpoch;
   pending.value = undefined;
 });
 </script>
 <template>
   <section class="resource-page catalog-page">
-    <header class="market-toolbar">
-      <button :disabled="loading || locked" @click="load(cursor)">
-        {{ t('refresh') }}
-      </button>
-    </header>
     <p v-if="loading" role="status">{{ t('loading') }}</p>
     <p v-if="notice" role="status">{{ notice }}</p>
     <p v-if="error" role="alert">{{ error }}</p>
@@ -661,88 +547,16 @@ onBeforeUnmount(() => {
       <button @click="confirming = true">{{ t('retry') }}</button>
     </p>
     <template v-if="can(permission)">
-      <fieldset
-        v-if="phase === 'directory'"
-        :disabled="locked || loading"
-        class="market-form"
-      >
-        <form
-          v-if="can('resource.packages.upload')"
-          data-testid="catalog-create"
-          @submit.prevent="create"
-        >
-          <label>{{ t('name') }}<input v-model="name" required /></label
-          ><label
-            >{{ t('visibility')
-            }}<select v-model="visibility">
-              <option
-                v-for="s in ['tenant', 'members', 'groups']"
-                :key="s"
-                :value="s"
-              >
-                {{ t(s) }}
-              </option>
-            </select></label
-          ><label v-if="visibility === 'groups'"
-            >{{ t('groupIds') }}<input v-model="groups" required /></label
-          ><button>{{ t('create') }}</button>
-        </form>
-        <form
-          v-if="can('resource.packages.upload')"
-          data-testid="catalog-upload"
-          @submit.prevent="upload"
-        >
-          <label>{{ t('packageId') }}<input v-model="pid" required /></label
-          ><label
-            >{{ t('manifest')
-            }}<input
-              data-testid="catalog-manifest"
-              type="file"
-              accept=".json"
-              required
-              @change="choose($event, 'manifest')" /></label
-          ><label
-            >{{ t(kind === 'plugin' ? 'npmPackage' : 'artifacts')
-            }}<input
-              data-testid="catalog-artifacts"
-              type="file"
-              :accept="kind === 'plugin' ? '.tgz' : '.gz,.tgz'"
-              @change="choose($event, 'artifacts')" /></label
-          ><label v-if="kind === 'skill'"
-            >{{ t('folder')
-            }}<input
-              data-testid="catalog-folder"
-              type="file"
-              webkitdirectory
-              multiple
-              @change="choose($event, 'folder')"
-          /></label>
-          <p v-if="preparing" role="status">{{ t('checkingUpload') }}</p>
-          <p v-if="uploadError" role="alert">{{ uploadError }}</p>
-          <p v-if="folderPayload">{{ t('folderManifest') }}</p>
-          <dl v-if="prepared" data-testid="catalog-upload-preview">
-            <dt>{{ t('name') }}</dt>
-            <dd>{{ prepared.manifest.name }}</dd>
-            <dt>{{ t('version') }}</dt>
-            <dd>{{ prepared.manifest.version }}</dd>
-            <template v-if="prepared.manifest.kind === 'plugin'"
-              ><dt>{{ t('npmName') }}</dt>
-              <dd>{{ prepared.manifest.plugin.packageName }}</dd></template
-            >
-            <dt>{{ t('digest') }}</dt>
-            <dd>{{ prepared.metadata.expectedDigest }}</dd>
-            <dt>{{ t('signature') }}</dt>
-            <dd>
-              {{ t('unsigned') }} · {{ prepared.manifest.signature.algorithm }}
-            </dd>
-            <dt>{{ t('artifacts') }}</dt>
-            <dd v-for="a in prepared.manifest.artifacts" :key="a.id">
-              {{ a.id }} · {{ a.sizeBytes }} · {{ a.digest }}
-            </dd>
-          </dl>
-          <button :disabled="!prepared || preparing">{{ t('upload') }}</button>
-        </form>
-      </fieldset>
+      <ResourceUploadPanel
+        v-if="phase === 'directory' && can('resource.packages.upload')"
+        :key="kind"
+        :kind="kind"
+        :author="member?.member.displayName || ''"
+        :can-submit="can('resource.versions.submit')"
+        :disabled="busy || !!pending || loading"
+        @locked="uploadLocked = $event"
+        @completed="load(cursor)"
+      />
       <ResourceAssignments
         v-if="phase === 'distribution'"
         :kind="kind"
@@ -778,13 +592,21 @@ onBeforeUnmount(() => {
           ><button>{{ t('distribute') }}</button>
         </fieldset>
       </form>
+      <header class="market-toolbar catalog-list-toolbar">
+        <h2>{{ t('listTitle') }}</h2>
+        <button :disabled="loading || locked" @click="load(cursor)">
+          {{ t('refresh') }}
+        </button>
+      </header>
       <div class="market-table">
         <table>
           <thead>
             <tr>
               <th>{{ t('name') }}</th>
-              <th>{{ t('version') }}</th>
-              <th>{{ t('status') }}</th>
+              <th>
+                {{ t(phase === 'directory' ? 'kind' : 'version') }}
+              </th>
+              <th>{{ t(phase === 'directory' ? 'visibility' : 'status') }}</th>
             </tr>
           </thead>
           <tbody>
@@ -794,7 +616,7 @@ onBeforeUnmount(() => {
                   {{ p.name }}
                 </button>
               </td>
-              <td>{{ p.kind }}</td>
+              <td>{{ t(p.kind) }}</td>
               <td>{{ t(p.visibility) }}</td>
             </tr>
             <tr v-for="r in reviews" :key="r.reviewId">
@@ -804,13 +626,13 @@ onBeforeUnmount(() => {
                   :disabled="locked"
                   @click="inspect(r.version, r)"
                 >
-                  {{ r.version.manifest.name }}</button
-                ><small>{{ r.reviewId }}</small>
+                  {{ r.version.manifest.name }}
+                </button>
               </td>
               <td>{{ r.version.version }}</td>
               <td>{{ t(r.status) }}</td>
             </tr>
-            <tr v-for="v in versions" :key="v.id">
+            <tr v-for="v in phase === 'directory' ? [] : versions" :key="v.id">
               <td>
                 <button
                   data-testid="catalog-version"
@@ -825,7 +647,7 @@ onBeforeUnmount(() => {
             </tr>
             <tr v-for="d in distributions" :key="d.distributionId">
               <td>
-                {{ d.instanceId }}<small>{{ d.distributionId }}</small>
+                {{ d.instanceId }}
                 <button
                   :disabled="locked"
                   @click="inspectDistribution(d.distributionId)"
@@ -835,8 +657,7 @@ onBeforeUnmount(() => {
               </td>
               <td>
                 <p v-for="s in d.selections" :key="s.identity.versionId">
-                  {{ s.identity.kind }} {{ s.identity.packageId }} /
-                  {{ s.identity.version }} / {{ s.identity.versionId }}
+                  {{ t(s.identity.kind) }} ? {{ s.identity.version }}
                 </p>
               </td>
               <td>
@@ -846,15 +667,41 @@ onBeforeUnmount(() => {
                     : d.state === 'applied'
                       ? t('applying')
                       : t(d.state, d.state)
-                }}<small>{{ d.selectionRevision }} / {{ d.generation }}</small>
+                }}
                 <p
                   v-for="r in d.reports"
                   :key="r.clientId + r.identity.versionId"
                 >
-                  {{ r.reportSource }} / {{ r.state }} /
-                  {{ r.observedGeneration }} <span>{{ r.errorCode }}</span>
+                  {{ t(r.reportSource) }} / {{ t(r.state) }}
+                  <span>{{ r.errorCode }}</span>
                 </p>
               </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <div v-if="phase === 'directory' && activePackage" class="market-table">
+        <table>
+          <thead>
+            <tr>
+              <th>{{ t('name') }}</th>
+              <th>{{ t('version') }}</th>
+              <th>{{ t('status') }}</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="v in versions" :key="v.id">
+              <td>
+                <button
+                  data-testid="catalog-version"
+                  :disabled="locked"
+                  @click="inspect(v)"
+                >
+                  {{ v.manifest.name }}
+                </button>
+              </td>
+              <td>{{ v.version }}</td>
+              <td>{{ t(v.state) }}</td>
             </tr>
           </tbody>
         </table>
@@ -913,7 +760,19 @@ onBeforeUnmount(() => {
           !distributions.length
         "
       >
-        {{ t('empty') }}
+        {{
+          t(
+            phase === 'directory'
+              ? kind === 'plugin'
+                ? 'emptyPlugin'
+                : 'emptySkill'
+              : phase === 'review'
+                ? 'emptyReview'
+                : phase === 'published'
+                  ? 'emptyPublished'
+                  : 'emptyDistribution',
+          )
+        }}
       </p>
       <footer class="resource-pager">
         <button
@@ -948,29 +807,34 @@ onBeforeUnmount(() => {
       </footer>
       <article v-if="selected" class="catalog-detail">
         <h2>{{ selected.manifest.name }} {{ selected.version }}</h2>
-        <p>{{ selected.digest }}</p>
-        <p v-if="selected.manifest.kind === 'plugin'">
-          {{ t('npmName') }}: {{ selected.manifest.plugin.packageName }}
-        </p>
-        <p>
-          {{ t('signature') }}:
-          {{ selected.resourceEnvelope ? t('signed') : t('unsigned') }}
-        </p>
-        <pre v-if="selected.resourceEnvelope">{{
-          JSON.stringify(selected.resourceEnvelope, null, 2)
-        }}</pre>
-        <p>
-          {{ t('risk') }}: {{ selected.risk.level.toUpperCase() }} /
-          {{ selected.risk.minimumLevel.toUpperCase() }}
-        </p>
-        <p>
-          {{ t('reviewers') }}: {{ selected.risk.requiredReviewers }} /
-          {{ selected.risk.requiredSecurityReviewers }}
-        </p>
-        <h3>{{ t('permissions') }}</h3>
-        <pre>{{ JSON.stringify(selected.manifest.permissions, null, 2) }}</pre>
-        <h3>{{ t('manifest') }}</h3>
-        <pre>{{ JSON.stringify(selected.manifest, null, 2) }}</pre>
+        <details>
+          <summary>{{ t('advanced') }}</summary>
+          <p>{{ selected.digest }}</p>
+          <p v-if="selected.manifest.kind === 'plugin'">
+            {{ t('npmName') }}: {{ selected.manifest.plugin.packageName }}
+          </p>
+          <p>
+            {{ t('signature') }}:
+            {{ selected.resourceEnvelope ? t('signed') : t('unsigned') }}
+          </p>
+          <pre v-if="selected.resourceEnvelope">{{
+            JSON.stringify(selected.resourceEnvelope, null, 2)
+          }}</pre>
+          <p>
+            {{ t('risk') }}: {{ selected.risk.level.toUpperCase() }} /
+            {{ selected.risk.minimumLevel.toUpperCase() }}
+          </p>
+          <p>
+            {{ t('reviewers') }}: {{ selected.risk.requiredReviewers }} /
+            {{ selected.risk.requiredSecurityReviewers }}
+          </p>
+          <h3>{{ t('permissions') }}</h3>
+          <pre>{{
+            JSON.stringify(selected.manifest.permissions, null, 2)
+          }}</pre>
+          <h3>{{ t('manifest') }}</h3>
+          <pre>{{ JSON.stringify(selected.manifest, null, 2) }}</pre>
+        </details>
         <form
           v-if="selected.state === 'approved' && !review"
           @submit.prevent="readReview"
@@ -1078,6 +942,7 @@ onBeforeUnmount(() => {
           >
           <button
             v-if="review && can('resource.versions.publish')"
+            class="catalog-primary"
             data-testid="catalog-publish"
             :disabled="!ready || !reason.trim() || !strongEtag(versionEtag)"
             @click="versionAction('publish')"
@@ -1101,11 +966,13 @@ onBeforeUnmount(() => {
             <button
               v-if="selected.state !== 'withdrawn'"
               :disabled="!reason.trim() || !strongEtag(versionEtag)"
+              class="catalog-danger"
               @click="versionAction('withdrawn')"
             >
               {{ t('withdraw') }}</button
             ><button
               :disabled="!reason.trim() || !strongEtag(versionEtag)"
+              class="catalog-danger"
               @click="versionAction('malicious')"
             >
               {{ t('revoke') }}
@@ -1127,6 +994,50 @@ onBeforeUnmount(() => {
   </section>
 </template>
 <style scoped>
+.catalog-page :deep(.market-form fieldset),
+.catalog-page :deep(.catalog-detail > fieldset) {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px 24px;
+}
+.catalog-page :deep(.market-form fieldset > label),
+.catalog-page :deep(.catalog-detail > fieldset > label) {
+  display: flex;
+  margin: 0;
+}
+.catalog-page :deep(.market-form fieldset > button) {
+  justify-self: start;
+  align-self: end;
+}
+@media (max-width: 700px) {
+  .catalog-page :deep(.market-form fieldset),
+  .catalog-page :deep(.catalog-detail > fieldset) {
+    grid-template-columns: 1fr;
+  }
+}
+
+.catalog-list-toolbar {
+  justify-content: space-between;
+}
+.catalog-list-toolbar h2 {
+  margin: 0;
+}
+.catalog-page :deep(.catalog-primary) {
+  background: var(--auriga-accent);
+  color: var(--auriga-on-accent);
+  border-color: var(--auriga-accent);
+}
+.catalog-page :deep(.catalog-danger) {
+  color: var(--auriga-danger);
+  border-color: var(--auriga-danger);
+}
+.catalog-page :deep(details) {
+  margin: 16px 0;
+}
+.catalog-page :deep(summary) {
+  cursor: pointer;
+  color: var(--auriga-muted);
+}
 .catalog-detail {
   margin-top: 24px;
   padding: 24px;

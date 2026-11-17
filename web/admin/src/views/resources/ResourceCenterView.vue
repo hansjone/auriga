@@ -13,6 +13,10 @@ const base = () =>
 </script>
 <template>
   <div class="resource-center">
+    <header class="resource-intro">
+      <p>{{ t(props.kind === 'plugin' ? 'pluginIntro' : 'skillIntro') }}</p>
+      <p>{{ t(props.phase + 'Intro') }} {{ t('workflowIntro') }}</p>
+    </header>
     <nav class="market-tabs" :aria-label="t(props.kind)">
       <RouterLink
         v-for="p in phases"
@@ -34,19 +38,31 @@ const base = () =>
 .resource-center > nav {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 24px;
   margin-bottom: 20px;
+  border-bottom: 1px solid var(--auriga-border);
 }
 .resource-center > nav a {
-  padding: 8px 20px;
-  border: 1px solid var(--auriga-border);
-  border-radius: 12px;
-  background: var(--auriga-surface);
-  color: var(--auriga-text);
+  padding: 12px 4px;
+  border-bottom: 2px solid transparent;
+  color: var(--auriga-muted);
   text-decoration: none;
 }
 .resource-center > nav a[aria-current='page'] {
-  border-color: var(--auriga-accent);
-  background: var(--admin-blue-soft);
+  border-bottom-color: var(--auriga-accent-line);
+  color: var(--auriga-text);
+}
+.resource-intro {
+  margin-bottom: 16px;
+  max-width: 80ch;
+}
+.resource-intro p {
+  line-height: 1.7;
+  margin: 0 0 8px;
+  color: var(--auriga-muted);
+}
+.resource-center > nav a:focus-visible {
+  outline: 2px solid var(--auriga-accent-line);
+  outline-offset: 3px;
 }
 </style>

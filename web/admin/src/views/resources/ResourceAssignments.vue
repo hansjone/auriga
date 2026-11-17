@@ -277,7 +277,7 @@ onBeforeUnmount(() => {
             </option>
           </select></label
         >
-        <button>{{ t('assign') }}</button>
+        <button class="catalog-primary">{{ t('assign') }}</button>
       </fieldset>
     </form>
     <div class="market-table">
@@ -340,6 +340,7 @@ onBeforeUnmount(() => {
       </dl>
       <button
         v-if="detail.active"
+        class="catalog-danger"
         data-testid="assignment-remove"
         :disabled="locked"
         @click="remove(detail)"
@@ -362,6 +363,34 @@ onBeforeUnmount(() => {
 <style scoped>
 .assignment-panel {
   margin: 20px 0;
+  padding: 24px;
+  border: 1px solid var(--auriga-border);
+  border-radius: 12px;
+  background: var(--auriga-surface);
+}
+.assignment-panel .market-toolbar {
+  justify-content: space-between;
+}
+.assignment-panel h2 {
+  margin: 0;
+}
+.assignment-panel fieldset {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px 24px;
+}
+.assignment-panel fieldset label {
+  display: flex;
+  margin: 0;
+}
+.assignment-panel fieldset button {
+  justify-self: start;
+  align-self: end;
+}
+@media (max-width: 700px) {
+  .assignment-panel fieldset {
+    grid-template-columns: 1fr;
+  }
 }
 dd {
   overflow-wrap: anywhere;
