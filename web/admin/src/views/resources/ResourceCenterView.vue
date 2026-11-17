@@ -2,8 +2,6 @@
 import { computed } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { useI18n } from 'vue-i18n';
-import ResourcesView from '../ResourcesView.vue';
-import ResourceGovernanceView from './ResourceGovernanceView.vue';
 import ResourceCatalogView from './ResourceCatalogView.vue';
 import { catalogMessages } from '../../admin/resourceCatalogMessages';
 const props = defineProps<{
@@ -27,15 +25,12 @@ const kind = computed(() =>
       >
         {{ t(k) }}
       </button>
-      <span>{{ t('tool') }}</span>
     </nav>
     <ResourceCatalogView
-      v-if="kind === 'skill'"
-      :key="props.phase"
+      :key="props.phase + kind"
       :phase="props.phase"
+      :kind="kind"
     />
-    <ResourcesView v-else-if="props.phase === 'directory'" />
-    <ResourceGovernanceView v-else :phase="props.phase" />
   </div>
 </template>
 <style scoped>

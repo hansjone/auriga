@@ -6,6 +6,8 @@ import { isApiError } from '@auriga/shared';
 import { adminApi } from '../../admin/api';
 import {
   resourceCatalogApi as api,
+  catalogKey,
+  catalogRevisionEtag,
   type CatalogVersion,
   type CatalogReview,
   type CatalogPackage,
@@ -13,11 +15,20 @@ import {
 } from '../../admin/resourceCatalogApi';
 import {
   publicationReady,
+  publicationBlockers,
   riskOptions,
   distributionApplied,
   textDiff,
 } from '../../admin/resourceCatalogPolicy';
 import { skillPreview } from '../../admin/resourceSkillPreview';
+import {
+  packSkillFolder,
+  prepareFolderUpload,
+  prepareUpload,
+  type CatalogKind,
+  type PreparedUpload,
+} from '../../admin/resourceCatalogUpload';
+import ResourceAssignments from './ResourceAssignments.vue';
 import { catalogMessages } from '../../admin/resourceCatalogMessages';
 import { strongEtag } from '../../admin/resourceApi';
 import { requestStepUp } from '../../admin/stepUp';
@@ -25,7 +36,9 @@ import ActionConfirm from '../../admin/ActionConfirm.vue';
 import '../../admin/resources.css';
 const props = defineProps<{
   phase: 'directory' | 'review' | 'published' | 'distribution';
+  kind?: CatalogKind;
 }>();
+const kind = computed(() => props.kind ?? 'skill');
 const { t } = useI18n({ useScope: 'local', messages: catalogMessages });
 const member = shallowRef<Awaited<ReturnType<typeof adminApi.membership>>>();
 const packages = shallowRef<CatalogPackage[]>([]),
@@ -36,6 +49,7 @@ const selected = shallowRef<CatalogVersion>(),
   review = shallowRef<CatalogReview>();
 const reviewEtag = ref<string | null>(null),
   versionEtag = ref<string | null>(null);
+const reviewId = ref('');
 const loading = ref(false),
   busy = ref(false),
   error = ref(''),
@@ -54,11 +68,14 @@ const name = ref(''),
   groups = ref('');
 const pid = ref(''),
   vid = ref(''),
-  versionNumber = ref(''),
-  digest = ref(''),
   reason = ref('');
 const manifest = shallowRef<File>(),
   artifacts = shallowRef<File[]>([]);
+const prepared = shallowRef<PreparedUpload>();
+const folderPayload = shallowRef<File>();
+const uploadError = ref(''),
+  preparing = ref(false);
+let fileEpoch = 0;
 const role = ref<'general' | 'security'>('general'),
   risk = ref<'r1' | 'r2' | 'r3'>('r1');
 const instance = ref(''),
@@ -75,10 +92,13 @@ const pending = shallowRef<{
   started: boolean;
 }>();
 const confirming = ref(false);
+const assignmentLocked = ref(false);
 let epoch = 0,
   detailEpoch = 0,
   alive = true;
-const locked = computed(() => busy.value || !!pending.value);
+const locked = computed(
+  () => busy.value || !!pending.value || assignmentLocked.value,
+);
 const can = (p: string) => member.value?.permissions.includes(p) ?? false;
 const permission = computed(() =>
   props.phase === 'review'
@@ -97,6 +117,23 @@ const ready = computed(
     !!review.value &&
     publicationReady(review.value, member.value?.member.id ?? ''),
 );
+const publicationIssues = computed(() =>
+  review.value
+    ? publicationBlockers(review.value, member.value?.member.id ?? '')
+    : [],
+);
+const distributionDetail = shallowRef<CatalogDistribution>();
+async function inspectDistribution(id: string) {
+  if (locked.value) return;
+  const e = ++detailEpoch;
+  distributionDetail.value = undefined;
+  try {
+    const result = await api.distribution(id);
+    if (alive && e === detailEpoch) distributionDetail.value = result.data;
+  } catch (err) {
+    if (alive && e === detailEpoch) error.value = failure(err);
+  }
+}
 const changes = computed(() =>
   [
     ...new Set([
@@ -133,12 +170,14 @@ function clearDetail() {
   ++detailEpoch;
   selected.value = undefined;
   review.value = undefined;
+  reviewId.value = '';
   reviewEtag.value = null;
   versionEtag.value = null;
   files.value = [];
   previous.value = [];
   comparison.value = '';
   previewError.value = '';
+  distributionDetail.value = undefined;
 }
 async function load(target?: string, direction?: 'next' | 'previous') {
   if (locked.value) return;
@@ -164,28 +203,28 @@ async function load(target?: string, direction?: 'next' | 'previous') {
     }
     const page =
       props.phase === 'directory'
-        ? await api.packages(target)
+        ? await api.packages(target, kind.value)
         : props.phase === 'review'
-          ? await api.reviews(target)
+          ? await api.reviews(target, kind.value)
           : props.phase === 'published'
-            ? await api.published(target)
-            : await api.distributions(target);
+            ? await api.published(target, kind.value)
+            : await api.distributions(target, kind.value);
     if (!alive || e !== epoch) return;
     if (props.phase === 'directory')
       packages.value = (page.items as CatalogPackage[]).filter(
-        (p) => p.kind === 'skill',
+        (p) => p.kind === kind.value,
       );
     else if (props.phase === 'review')
       reviews.value = (page.items as CatalogReview[]).filter(
-        (r) => r.version.kind === 'skill',
+        (r) => r.version.kind === kind.value,
       );
     else if (props.phase === 'published')
       versions.value = (page.items as CatalogVersion[]).filter(
-        (v) => v.kind === 'skill',
+        (v) => v.kind === kind.value,
       );
     else
       distributions.value = (page.items as CatalogDistribution[]).filter((d) =>
-        d.selections.some((s) => s.identity.kind === 'skill'),
+        d.selections.some((s) => s.identity.kind === kind.value),
       );
     next.value = page.nextCursor;
     if (direction === 'next') history.value.push(cursor.value);
@@ -215,7 +254,7 @@ async function openPackage(
   try {
     const page = await api.versions(p.id, target);
     if (alive && e === detailEpoch) {
-      versions.value = page.items.filter((v) => v.kind === 'skill');
+      versions.value = page.items.filter((v) => v.kind === kind.value);
       versionNext.value = page.nextCursor;
       if (direction === 'next') versionHistory.value.push(versionCursor.value);
       if (direction === 'previous') versionHistory.value.pop();
@@ -234,26 +273,59 @@ async function inspect(v: CatalogVersion, r?: CatalogReview) {
   error.value = '';
   reason.value = '';
   try {
-    const [version, evidence] = await Promise.all([
-      api.version(v.packageId, v.id),
-      r ? api.review(r.reviewId) : Promise.resolve(undefined),
-    ]);
+    const evidence = r ? await api.review(r.reviewId) : undefined;
+    // Unpublished member reads are intentionally author-only. Reviewers use
+    // the authorized admin evidence; approved publication rows are snapshots.
+    const version = evidence
+      ? {
+          data: evidence.data.version,
+          etag: catalogRevisionEtag(evidence.data.version.revision),
+        }
+      : props.phase === 'published' && v.state === 'approved'
+        ? { data: v, etag: catalogRevisionEtag(v.revision) }
+        : await api.version(v.packageId, v.id);
     if (!alive || e !== detailEpoch) return;
     if (
-      version.data.kind !== 'skill' ||
-      (evidence &&
-        (evidence.data.version.id !== version.data.id ||
-          evidence.data.version.packageId !== version.data.packageId ||
-          evidence.data.version.kind !== 'skill' ||
-          evidence.data.version.revision !== version.data.revision ||
-          evidence.data.version.digest !== version.data.digest))
+      version.data.kind !== kind.value ||
+      version.data.manifest.kind !== kind.value ||
+      version.data.id !== v.id ||
+      version.data.packageId !== v.packageId
     )
       throw new Error('Stale evidence');
     selected.value = version.data;
     versionEtag.value = version.etag;
     review.value = evidence?.data;
     reviewEtag.value = evidence?.etag ?? null;
-    risk.value = version.data.risk.level;
+    risk.value = riskOptions(
+      evidence?.data ?? ({ version: version.data } as CatalogReview),
+    )[0]!;
+  } catch (err) {
+    if (alive && e === detailEpoch) error.value = failure(err);
+  }
+}
+async function readReview() {
+  const v = selected.value,
+    id = reviewId.value.trim();
+  if (!v || !id || locked.value) return;
+  const e = ++detailEpoch;
+  review.value = undefined;
+  reviewEtag.value = null;
+  try {
+    const evidence = await api.review(id);
+    if (!alive || e !== detailEpoch) return;
+    const candidate = evidence.data.version;
+    if (
+      candidate.id !== v.id ||
+      candidate.packageId !== v.packageId ||
+      candidate.kind !== v.kind ||
+      candidate.revision !== v.revision ||
+      candidate.digest !== v.digest
+    )
+      throw new Error('Mismatched evidence');
+    review.value = evidence.data;
+    reviewEtag.value = evidence.etag;
+    versionEtag.value = catalogRevisionEtag(candidate.revision);
+    risk.value = riskOptions(evidence.data)[0]!;
   } catch (err) {
     if (alive && e === detailEpoch) error.value = failure(err);
   }
@@ -267,6 +339,9 @@ async function execute() {
   const intent = pending.value;
   if (!intent || busy.value) return;
   if (Date.now() - intent.at >= 86400000) {
+    pending.value = undefined;
+    confirming.value = false;
+    clearDetail();
     error.value = t('expired');
     return;
   }
@@ -274,12 +349,20 @@ async function execute() {
   confirming.value = false;
   intent.started = true;
   try {
-    await intent.run();
+    const result = await intent.run();
     if (!alive) return;
     pending.value = undefined;
     notice.value = t(props.phase === 'distribution' ? 'accepted' : 'saved');
     busy.value = false;
     await load(cursor.value);
+    if (result && typeof result === 'object') {
+      if ('reviewId' in result) {
+        const r = result as CatalogReview;
+        await inspect(r.version, r);
+      } else if ('manifest' in result) await inspect(result as CatalogVersion);
+      else if ('ownerId' in result && 'kind' in result)
+        await openPackage(result as CatalogPackage);
+    }
   } catch (e) {
     if (!alive) return;
     error.value = failure(e);
@@ -317,7 +400,7 @@ function decide(decision: 'approve' | 'reject') {
       versionRevision: r.version.revision,
       digest: r.version.digest,
     },
-    key = globalThis.crypto.randomUUID();
+    key = catalogKey();
   prepare(
     `${t(decision)} · ${r.version.manifest.name} ${r.version.version} · ${why}`,
     () => api.decide(r.reviewId, body, etag, key),
@@ -332,7 +415,7 @@ function versionAction(mode: 'submit' | 'publish' | 'withdrawn' | 'malicious') {
     return;
   if (
     mode === 'submit' &&
-    (!can('resource.packages.upload') || v.state !== 'draft')
+    (!can('resource.versions.submit') || v.state !== 'draft')
   )
     return;
   if (
@@ -340,7 +423,7 @@ function versionAction(mode: 'submit' | 'publish' | 'withdrawn' | 'malicious') {
     !can('resource.versions.publish')
   )
     return;
-  const key = globalThis.crypto.randomUUID();
+  const key = catalogKey();
   prepare(
     `${t(mode === 'withdrawn' ? 'withdraw' : mode === 'malicious' ? 'revoke' : mode)} · ${v.manifest.name} ${v.version} · ${why}`,
     () =>
@@ -362,7 +445,7 @@ function create() {
   }
   const body = {
       name: name.value,
-      kind: 'skill' as const,
+      kind: kind.value,
       visibility: visibility.value,
       groupIds:
         visibility.value === 'groups'
@@ -372,38 +455,55 @@ function create() {
               .filter(Boolean)
           : [],
     },
-    key = globalThis.crypto.randomUUID();
+    key = catalogKey();
   prepare(
     `${t('create')} · ${body.name} · ${t(body.visibility)} · ${body.groupIds.join(', ')}`,
     async () => {
       const p = await api.create(body, key);
       if (alive) pid.value = p.id;
+      return p;
     },
   );
 }
-function choose(event: Event, type: 'manifest' | 'artifacts') {
+async function choose(event: Event, type: 'manifest' | 'artifacts' | 'folder') {
+  if (locked.value) return;
+  const e = ++fileEpoch;
+  prepared.value = undefined;
+  uploadError.value = '';
+  preparing.value = true;
   const list = Array.from((event.target as HTMLInputElement).files ?? []);
-  if (type === 'manifest') manifest.value = list[0];
-  else artifacts.value = list;
+  try {
+    if (type === 'manifest') manifest.value = list[0];
+    else if (type === 'folder') {
+      artifacts.value = [];
+      folderPayload.value = undefined;
+      const packed = await packSkillFolder(list);
+      if (!alive || e !== fileEpoch) return;
+      artifacts.value = [packed];
+      folderPayload.value = packed;
+    } else {
+      artifacts.value = list;
+      folderPayload.value = undefined;
+    }
+    if (!alive || e !== fileEpoch) return;
+    if (manifest.value && artifacts.value.length) {
+      const result = folderPayload.value
+        ? await prepareFolderUpload(manifest.value, folderPayload.value)
+        : await prepareUpload(manifest.value, artifacts.value, kind.value);
+      if (alive && e === fileEpoch) prepared.value = result;
+    }
+  } catch {
+    if (alive && e === fileEpoch) uploadError.value = t('uploadInvalid');
+  } finally {
+    if (alive && e === fileEpoch) preparing.value = false;
+  }
 }
 async function upload() {
-  const file = manifest.value,
-    parts = [...artifacts.value],
-    p = pid.value.trim(),
-    number = versionNumber.value.trim(),
-    hash = digest.value.trim();
-  if (locked.value || !can('resource.packages.upload')) return;
-  if (
-    !file ||
-    !p ||
-    !number ||
-    !/^sha256:[0-9a-f]{64}$/.test(hash) ||
-    file.size > 262144 ||
-    !parts.length ||
-    parts.length > 32 ||
-    parts.some((f) => f.size > 536870912) ||
-    parts.reduce((n, f) => n + f.size, file.size) > 1073741824
-  ) {
+  const draft = prepared.value,
+    p = pid.value.trim();
+  if (locked.value || preparing.value || !can('resource.packages.upload'))
+    return;
+  if (!draft || !p) {
     error.value = t('invalid');
     return;
   }
@@ -411,14 +511,19 @@ async function upload() {
   try {
     const pack = await api.get(p);
     if (!alive) return;
-    if (pack.data.kind !== 'skill' || !strongEtag(pack.etag))
+    if (
+      pack.data.kind !== kind.value ||
+      pack.data.name !== draft.manifest.name ||
+      !strongEtag(pack.etag)
+    )
       throw new Error('Invalid package');
     const etag = pack.etag,
-      key = globalThis.crypto.randomUUID(),
-      body = { version: number, expectedDigest: hash };
+      key = catalogKey(),
+      body = { ...draft.metadata };
     busy.value = false;
-    prepare(`${t('upload')} · ${pack.data.name} ${number} · ${hash}`, () =>
-      api.upload(p, body, file, parts, etag, key),
+    prepare(
+      `${t('upload')} · ${pack.data.name} ${body.version} · ${body.expectedDigest}`,
+      () => api.upload(p, body, draft.file, draft.artifacts, etag, key),
     );
   } catch (e) {
     if (alive) error.value = failure(e);
@@ -450,8 +555,8 @@ async function distribute() {
     if (!alive) return;
     const value = version.data;
     if (
-      pack.data.kind !== 'skill' ||
-      value.kind !== 'skill' ||
+      pack.data.kind !== kind.value ||
+      value.kind !== kind.value ||
       value.packageId !== p ||
       value.id !== v ||
       (['install', 'enable'].includes(act) && value.state !== 'published') ||
@@ -463,14 +568,14 @@ async function distribute() {
         instanceId: target,
         selections: [
           ...(existing?.data.selections.filter(
-            (s) => s.identity.kind !== 'skill' || s.identity.packageId !== p,
+            (s) => s.identity.kind !== kind.value || s.identity.packageId !== p,
           ) ?? []),
           {
             identity: {
               tenantId: pack.data.tenantId,
               packageId: p,
               versionId: v,
-              kind: 'skill' as const,
+              kind: kind.value,
               version: value.version,
               manifestDigest: value.digest,
             },
@@ -479,7 +584,7 @@ async function distribute() {
         ],
       },
       etag = existing?.etag ?? '"0"',
-      key = globalThis.crypto.randomUUID();
+      key = catalogKey();
     busy.value = false;
     prepare(
       `${t('distribute')} · ${target} · ${value.manifest.name} ${value.version} · ${t(act)}`,
@@ -524,7 +629,7 @@ async function verify() {
   }
 }
 watch(
-  () => props.phase,
+  () => [props.phase, kind.value],
   () => {
     cursor.value = undefined;
     history.value = [];
@@ -536,6 +641,7 @@ onBeforeUnmount(() => {
   alive = false;
   ++epoch;
   ++detailEpoch;
+  ++fileEpoch;
   pending.value = undefined;
 });
 </script>
@@ -553,7 +659,7 @@ onBeforeUnmount(() => {
         :key="tab"
         :to="{
           path: tab === 'directory' ? '/resources' : '/resources/' + tab,
-          query: { kind: 'skill' },
+          query: { kind },
         }"
         >{{ t(tab) }}</RouterLink
       >
@@ -572,7 +678,11 @@ onBeforeUnmount(() => {
         :disabled="locked || loading"
         class="market-form"
       >
-        <form v-if="can('resource.packages.upload')" @submit.prevent="create">
+        <form
+          v-if="can('resource.packages.upload')"
+          data-testid="catalog-create"
+          @submit.prevent="create"
+        >
           <label>{{ t('name') }}<input v-model="name" required /></label
           ><label
             >{{ t('visibility')
@@ -589,30 +699,72 @@ onBeforeUnmount(() => {
             >{{ t('groupIds') }}<input v-model="groups" required /></label
           ><button>{{ t('create') }}</button>
         </form>
-        <form v-if="can('resource.packages.upload')" @submit.prevent="upload">
+        <form
+          v-if="can('resource.packages.upload')"
+          data-testid="catalog-upload"
+          @submit.prevent="upload"
+        >
           <label>{{ t('packageId') }}<input v-model="pid" required /></label
-          ><label
-            >{{ t('version') }}<input v-model="versionNumber" required /></label
-          ><label>{{ t('digest') }}<input v-model="digest" required /></label
           ><label
             >{{ t('manifest')
             }}<input
+              data-testid="catalog-manifest"
               type="file"
               accept=".json"
               required
               @change="choose($event, 'manifest')" /></label
           ><label
-            >{{ t('artifacts')
+            >{{ t(kind === 'plugin' ? 'npmPackage' : 'artifacts')
             }}<input
+              data-testid="catalog-artifacts"
               type="file"
-              multiple
-              required
+              :accept="kind === 'plugin' ? '.tgz' : '.gz,.tgz'"
               @change="choose($event, 'artifacts')" /></label
-          ><button>{{ t('upload') }}</button>
+          ><label v-if="kind === 'skill'"
+            >{{ t('folder')
+            }}<input
+              data-testid="catalog-folder"
+              type="file"
+              webkitdirectory
+              multiple
+              @change="choose($event, 'folder')"
+          /></label>
+          <p v-if="preparing" role="status">{{ t('checkingUpload') }}</p>
+          <p v-if="uploadError" role="alert">{{ uploadError }}</p>
+          <p v-if="folderPayload">{{ t('folderManifest') }}</p>
+          <dl v-if="prepared" data-testid="catalog-upload-preview">
+            <dt>{{ t('name') }}</dt>
+            <dd>{{ prepared.manifest.name }}</dd>
+            <dt>{{ t('version') }}</dt>
+            <dd>{{ prepared.manifest.version }}</dd>
+            <template v-if="prepared.manifest.kind === 'plugin'"
+              ><dt>{{ t('npmName') }}</dt>
+              <dd>{{ prepared.manifest.plugin.packageName }}</dd></template
+            >
+            <dt>{{ t('digest') }}</dt>
+            <dd>{{ prepared.metadata.expectedDigest }}</dd>
+            <dt>{{ t('signature') }}</dt>
+            <dd>
+              {{ t('unsigned') }} · {{ prepared.manifest.signature.algorithm }}
+            </dd>
+            <dt>{{ t('artifacts') }}</dt>
+            <dd v-for="a in prepared.manifest.artifacts" :key="a.id">
+              {{ a.id }} · {{ a.sizeBytes }} · {{ a.digest }}
+            </dd>
+          </dl>
+          <button :disabled="!prepared || preparing">{{ t('upload') }}</button>
         </form>
       </fieldset>
+      <ResourceAssignments
+        v-if="phase === 'distribution'"
+        :kind="kind"
+        :member="member"
+        :disabled="busy || !!pending || loading"
+        @locked="assignmentLocked = $event"
+      />
       <form
         v-if="phase === 'distribution'"
+        data-testid="catalog-distribute"
         class="market-form"
         @submit.prevent="distribute"
       >
@@ -686,6 +838,12 @@ onBeforeUnmount(() => {
             <tr v-for="d in distributions" :key="d.distributionId">
               <td>
                 {{ d.instanceId }}<small>{{ d.distributionId }}</small>
+                <button
+                  :disabled="locked"
+                  @click="inspectDistribution(d.distributionId)"
+                >
+                  {{ t('select') }}
+                </button>
               </td>
               <td>
                 <p v-for="s in d.selections" :key="s.identity.versionId">
@@ -713,6 +871,51 @@ onBeforeUnmount(() => {
           </tbody>
         </table>
       </div>
+      <article v-if="distributionDetail" class="catalog-detail">
+        <h2>
+          {{ t('distributionResult') }} · {{ distributionDetail.instanceId }}
+        </h2>
+        <p>
+          {{ t('status') }}:
+          {{
+            distributionApplied(distributionDetail)
+              ? t('applied')
+              : distributionDetail.state === 'applied'
+                ? t('applying')
+                : t(distributionDetail.state)
+          }}
+        </p>
+        <p>{{ t('targetOwner') }}: {{ distributionDetail.ownerId }}</p>
+        <p>
+          {{ t('distributionRevision') }}:
+          {{ distributionDetail.selectionRevision }} /
+          {{ distributionDetail.generation }}
+        </p>
+        <ul>
+          <li
+            v-for="s in distributionDetail.selections"
+            :key="s.identity.packageId"
+          >
+            {{ t(s.identity.kind) }} · {{ s.identity.packageId }} ·
+            {{ s.identity.version }} · {{ t(s.action)
+            }}<small>{{ s.identity.manifestDigest }}</small>
+          </li>
+        </ul>
+        <h3>{{ t('reports') }}</h3>
+        <p v-if="!distributionDetail.reports.length">
+          {{ t('awaitingReports') }}
+        </p>
+        <ul>
+          <li
+            v-for="r in distributionDetail.reports"
+            :key="r.clientId + r.identity.versionId"
+          >
+            {{ r.clientId }} · {{ t(r.reportSource) }} · {{ t(r.state) }} ·
+            {{ r.observedAt
+            }}<small>{{ r.identity.packageId }} · {{ r.errorCode }}</small>
+          </li>
+        </ul>
+      </article>
       <p
         v-if="
           !loading &&
@@ -758,6 +961,16 @@ onBeforeUnmount(() => {
       <article v-if="selected" class="catalog-detail">
         <h2>{{ selected.manifest.name }} {{ selected.version }}</h2>
         <p>{{ selected.digest }}</p>
+        <p v-if="selected.manifest.kind === 'plugin'">
+          {{ t('npmName') }}: {{ selected.manifest.plugin.packageName }}
+        </p>
+        <p>
+          {{ t('signature') }}:
+          {{ selected.resourceEnvelope ? t('signed') : t('unsigned') }}
+        </p>
+        <pre v-if="selected.resourceEnvelope">{{
+          JSON.stringify(selected.resourceEnvelope, null, 2)
+        }}</pre>
         <p>
           {{ t('risk') }}: {{ selected.risk.level.toUpperCase() }} /
           {{ selected.risk.minimumLevel.toUpperCase() }}
@@ -770,35 +983,57 @@ onBeforeUnmount(() => {
         <pre>{{ JSON.stringify(selected.manifest.permissions, null, 2) }}</pre>
         <h3>{{ t('manifest') }}</h3>
         <pre>{{ JSON.stringify(selected.manifest, null, 2) }}</pre>
-        <button :disabled="locked" @click="preview()">
-          {{ t('preview') }}
-        </button>
-        <p>{{ t('previewNote') }}</p>
-        <p v-if="previewError" role="alert">{{ previewError }}</p>
-        <section v-for="f in files" :key="f.path">
-          <h3>{{ f.path }}</h3>
-          <pre data-testid="skill-text">{{ f.text }}</pre>
-        </section>
-        <label
-          >{{ t('before')
-          }}<input v-model="comparison" :disabled="locked" /></label
-        ><button
-          :disabled="locked || !comparison.trim()"
-          @click="preview(true)"
+        <form
+          v-if="selected.state === 'approved' && !review"
+          @submit.prevent="readReview"
         >
-          {{ t('compare') }}
-        </button>
-        <section v-if="previous.length">
-          <h3>{{ t('changes') }}</h3>
-          <div v-for="f in changes" :key="f.path">
-            <h4>{{ f.path }}</h4>
-            <pre
-              v-for="line in f.lines.filter((l) => l.changed)"
-              :key="line.line"
-              >{{ line.line }} − {{ line.before }}
+          <p>{{ t('reviewRecovery') }}</p>
+          <label
+            >{{ t('reviewId')
+            }}<input
+              v-model="reviewId"
+              data-testid="catalog-review-id"
+              :disabled="locked"
+              required
+          /></label>
+          <button
+            data-testid="catalog-read-review"
+            :disabled="locked || !reviewId.trim()"
+          >
+            {{ t('readReview') }}
+          </button>
+        </form>
+        <template v-if="selected.kind === 'skill'"
+          ><button :disabled="locked" @click="preview()">
+            {{ t('preview') }}
+          </button>
+          <p>{{ t('previewNote') }}</p>
+          <p v-if="previewError" role="alert">{{ previewError }}</p>
+          <section v-for="f in files" :key="f.path">
+            <h3>{{ f.path }}</h3>
+            <pre data-testid="skill-text">{{ f.text }}</pre>
+          </section>
+          <label
+            >{{ t('before')
+            }}<input v-model="comparison" :disabled="locked" /></label
+          ><button
+            :disabled="locked || !comparison.trim()"
+            @click="preview(true)"
+          >
+            {{ t('compare') }}
+          </button>
+          <section v-if="previous.length">
+            <h3>{{ t('changes') }}</h3>
+            <div v-for="f in changes" :key="f.path">
+              <h4>{{ f.path }}</h4>
+              <pre
+                v-for="line in f.lines.filter((l) => l.changed)"
+                :key="line.line"
+                >{{ line.line }} − {{ line.before }}
 {{ line.line }} + {{ line.after }}</pre>
-          </div>
-        </section>
+            </div>
+          </section>
+        </template>
         <template v-if="review"
           ><h3>{{ t('history') }}</h3>
           <p>{{ review.reviewId }} / {{ review.authorId }}</p>
@@ -807,7 +1042,9 @@ onBeforeUnmount(() => {
             {{ d.reason }} · {{ d.versionRevision }} · {{ d.createdAt }}
           </p>
           <p v-if="author">{{ t('author') }}</p>
-          <p v-if="!ready">{{ t('quorum') }}</p></template
+          <p v-for="issue in publicationIssues" :key="issue.code">
+            {{ t(issue.code, issue) }}
+          </p></template
         >
         <fieldset :disabled="locked">
           <label
@@ -817,7 +1054,7 @@ onBeforeUnmount(() => {
           <template v-if="review && can('resource.versions.review')"
             ><label
               >{{ t('role')
-              }}<select v-model="role">
+              }}<select v-model="role" data-testid="catalog-role">
                 <option value="general">{{ t('general') }}</option>
                 <option value="security">{{ t('security') }}</option>
               </select></label
@@ -860,7 +1097,7 @@ onBeforeUnmount(() => {
             {{ t('publish') }}
           </button>
           <button
-            v-if="selected.state === 'draft' && can('resource.packages.upload')"
+            v-if="selected.state === 'draft' && can('resource.versions.submit')"
             :disabled="!reason.trim() || !strongEtag(versionEtag)"
             @click="versionAction('submit')"
           >
@@ -868,10 +1105,13 @@ onBeforeUnmount(() => {
           </button>
           <template
             v-if="
-              selected.state === 'published' && can('resource.versions.publish')
+              ['published', 'deprecated', 'withdrawn'].includes(
+                selected.state,
+              ) && can('resource.versions.publish')
             "
             ><p>{{ t('withdrawNote') }}</p>
             <button
+              v-if="selected.state !== 'withdrawn'"
               :disabled="!reason.trim() || !strongEtag(versionEtag)"
               @click="versionAction('withdrawn')"
             >
@@ -930,5 +1170,100 @@ onBeforeUnmount(() => {
   border-radius: 12px;
   margin: 16px 0;
   padding: 16px;
+}
+.catalog-page :deep(.market-toolbar),
+.catalog-page .market-tabs,
+.catalog-page :deep(.resource-pager) {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 16px;
+}
+.catalog-page h1 {
+  font-size: 22px;
+  margin: 0;
+}
+.catalog-page :deep(h2) {
+  font-size: 18px;
+}
+.catalog-page :deep(.market-tabs a) {
+  color: var(--auriga-accent);
+  padding: 8px 0;
+}
+.catalog-page :deep(.market-tabs a.router-link-active) {
+  font-weight: 600;
+}
+.catalog-page :deep(button),
+.catalog-page :deep(input),
+.catalog-page :deep(select) {
+  font: inherit;
+  color: var(--auriga-text);
+  background: var(--auriga-field-bg);
+  border: 1px solid var(--auriga-border-strong);
+  border-radius: 6px;
+  padding: 7px 10px;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+.catalog-page :deep(button) {
+  cursor: pointer;
+}
+.catalog-page :deep(button:hover:not(:disabled)) {
+  background: var(--admin-blue-soft);
+}
+.catalog-page :deep(:disabled) {
+  opacity: 0.55;
+  cursor: default;
+}
+.catalog-page :deep(:focus-visible) {
+  outline: 2px solid var(--auriga-accent);
+  outline-offset: 2px;
+}
+.catalog-page :deep(label) {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 6px 12px 6px 0;
+  max-width: 100%;
+}
+.catalog-page :deep(fieldset) {
+  border: 1px solid var(--auriga-border);
+  border-radius: 8px;
+  margin: 16px 0;
+  padding: 16px;
+  min-width: 0;
+}
+.catalog-page :deep(.market-table) {
+  overflow-x: auto;
+  margin: 16px 0;
+  border: 1px solid var(--auriga-border);
+  border-radius: 8px;
+}
+.catalog-page :deep(table) {
+  border-collapse: collapse;
+  width: 100%;
+  text-align: left;
+}
+.catalog-page :deep(th) {
+  background: var(--admin-soft);
+  font-weight: 500;
+  color: var(--auriga-muted);
+}
+.catalog-page :deep(th),
+.catalog-page :deep(td) {
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--auriga-border);
+  vertical-align: top;
+}
+.catalog-page :deep(dd) {
+  overflow-wrap: anywhere;
+  margin: 4px 0 12px;
+}
+.catalog-page :deep([role='alert']) {
+  color: var(--auriga-danger);
+}
+.catalog-page :deep([role='status']) {
+  color: var(--auriga-muted);
 }
 </style>
