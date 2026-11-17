@@ -248,3 +248,74 @@ it('allows correcting a definite upload rejection with a fresh operation', async
     w.get('[data-testid="upload-name"]').attributes('disabled'),
   ).toBeUndefined();
 });
+it.each([400, 403, 409, 412])(
+  'opens the saved draft after definite submission rejection %s instead of uploading the version again',
+  async (status) => {
+    const w = setup();
+    vi.mocked(api.submit).mockRejectedValueOnce(
+      new ApiError({ status, code: 'common.conflict', title: 'Rejected' }),
+    );
+    await select(w);
+    await w.get('[data-testid="permissions-confirm"]').setValue(true);
+    await w.get('[data-testid="catalog-upload"]').trigger('submit');
+    await flushPromises();
+    expect(w.text()).toContain('草稿已保存');
+    expect(w.text()).not.toContain('修改版本号');
+    expect(w.find('[data-testid="catalog-upload"]').exists()).toBe(false);
+    expect(w.find('[data-testid="upload-retry"]').exists()).toBe(false);
+    await w.get('[data-testid="upload-open-draft"]').trigger('click');
+    expect(w.emitted('resumeDraft')).toEqual([[draft]]);
+    expect(api.upload).toHaveBeenCalledTimes(1);
+  },
+);
+it('explains an invisible name conflict and leaves the name editable', async () => {
+  const w = setup();
+  vi.mocked(api.create).mockRejectedValueOnce(
+    new ApiError({ status: 409, code: 'common.conflict', title: 'Conflict' }),
+  );
+  await select(w);
+  await w.get('[data-testid="permissions-confirm"]').setValue(true);
+  await w.get('[data-testid="upload-draft"]').trigger('click');
+  await flushPromises();
+  expect(w.text()).toContain('同名资源已存在但你无权查看，请换名或联系管理员');
+  expect(
+    w.get('[data-testid="upload-name"]').attributes('disabled'),
+  ).toBeUndefined();
+  expect(api.upload).not.toHaveBeenCalled();
+});
+it('distinguishes a visible package created concurrently from an invisible name conflict', async () => {
+  const w = setup();
+  vi.mocked(api.packages)
+    .mockResolvedValueOnce({ items: [] })
+    .mockResolvedValueOnce({ items: [pack] });
+  vi.mocked(api.create).mockRejectedValueOnce(
+    new ApiError({ status: 409, code: 'common.conflict', title: 'Conflict' }),
+  );
+  await select(w);
+  await w.get('[data-testid="permissions-confirm"]').setValue(true);
+  await w.get('[data-testid="upload-draft"]').trigger('click');
+  await flushPromises();
+  expect(w.text()).toContain('状态发生冲突');
+  expect(w.text()).not.toContain('无权查看');
+  expect(api.upload).not.toHaveBeenCalled();
+});
+it('shows editable metadata notices and clear unsigned/snapshot information', async () => {
+  const w = setup();
+  vi.mocked(parser.parseResourceSource).mockResolvedValueOnce({
+    manifest: { ...manifest, name: 'a'.repeat(80) },
+    payload: file,
+    embedded: false,
+    warnings: ['nameInvalid', 'rangeDefaulted'],
+  });
+  await select(w);
+  expect(w.get('[data-testid="upload-name"]').element).toHaveProperty(
+    'value',
+    'a'.repeat(80),
+  );
+  expect(w.get('[data-testid="upload-preview-notices"]').text()).toContain(
+    '兼容范围',
+  );
+  expect(w.text()).toContain('未签发（发布时由平台签名）');
+  expect(w.text()).toContain('规范 SKILL.md 顶部格式');
+  expect(w.text()).not.toContain(' ?');
+});

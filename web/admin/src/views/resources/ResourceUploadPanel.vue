@@ -36,10 +36,15 @@ const props = defineProps<{
   canSubmit: boolean;
   disabled?: boolean;
 }>();
-const emit = defineEmits<{ completed: []; locked: [value: boolean] }>();
+const emit = defineEmits<{
+  completed: [];
+  locked: [value: boolean];
+  resumeDraft: [version: CatalogVersion];
+}>();
 const { t } = useI18n({ useScope: 'local', messages: catalogMessages });
 const source = shallowRef<ResourceSource>();
 const manifest = ref<ResourceSource['manifest']>();
+const savedDraft = shallowRef<CatalogVersion>();
 const parsing = ref(false),
   busy = ref(false),
   error = ref(''),
@@ -112,6 +117,7 @@ async function choose(files: File[]) {
   const e = ++epoch;
   parsing.value = true;
   source.value = undefined;
+  savedDraft.value = undefined;
   manifest.value = undefined;
   confirmed.value = false;
   error.value = '';
@@ -178,6 +184,7 @@ async function start(submit: boolean) {
     !confirmed.value ||
     !source.value ||
     !manifest.value ||
+    !!savedDraft.value ||
     (submit && !props.canSubmit)
   )
     return;
@@ -311,8 +318,23 @@ async function run() {
         e.status < 500 &&
         e.status !== 429 &&
         e.problem.code !== 'iam.step_up_required'
-      )
+      ) {
         intent.value = undefined;
+        if (i.version) {
+          savedDraft.value = i.version;
+          error.value = t('draftSubmissionRejected') + ' ' + message(e);
+        } else if (!i.pack && e.status === 409) {
+          // A create conflict may belong to a package hidden from this member.
+          // Re-read only; do not replay the failed write automatically.
+          try {
+            const visible = await findPackage(i.draft.manifest.name);
+            if (alive)
+              error.value = t(visible ? 'uploadConflict' : 'nameUnavailable');
+          } catch {
+            /* Keep the original conflict if this read cannot complete. */
+          }
+        }
+      }
     }
   } finally {
     if (alive) busy.value = false;
@@ -381,6 +403,15 @@ onBeforeUnmount(() => {
       }}</span>
     </div>
     <p v-if="parsing" role="status">{{ t('checkingUpload') }}</p>
+    <ul
+      v-if="manifest && source?.warnings?.length && !savedDraft"
+      data-testid="upload-preview-notices"
+      class="upload-notices"
+    >
+      <li v-for="warning in source.warnings" :key="warning">
+        {{ t('preview_' + warning) }}
+      </li>
+    </ul>
     <p v-if="error" role="alert">{{ error }}</p>
     <p v-if="notice" role="status">{{ notice }}</p>
     <button v-if="stepup" type="button" :disabled="busy" @click="verify">
@@ -394,8 +425,19 @@ onBeforeUnmount(() => {
     >
       {{ t('retry') }}
     </button>
+    <p v-if="savedDraft" class="saved-draft">
+      {{ savedDraft.manifest.name }} · {{ savedDraft.version }}
+      <button
+        data-testid="upload-open-draft"
+        type="button"
+        :disabled="locked || disabled"
+        @click="emit('resumeDraft', savedDraft)"
+      >
+        {{ t('openSavedDraft') }}
+      </button>
+    </p>
     <form
-      v-if="manifest"
+      v-if="manifest && !savedDraft"
       data-testid="catalog-upload"
       @submit.prevent="start(true)"
     >
@@ -428,6 +470,7 @@ onBeforeUnmount(() => {
             >{{ t('description')
             }}<textarea
               v-model="manifest.description"
+              data-testid="upload-description"
               rows="2"
               maxlength="1024"
               required
@@ -437,15 +480,25 @@ onBeforeUnmount(() => {
             >{{ t('authorName')
             }}<input
               v-model="manifest.author.displayName"
+              data-testid="upload-author"
               maxlength="128"
               required
           /></label>
           <label
             >{{ t('license')
-            }}<input v-model="manifest.license" maxlength="128" required
+            }}<input
+              v-model="manifest.license"
+              data-testid="upload-license"
+              maxlength="128"
+              required
           /></label>
           <label
-            >{{ t('dshRange') }}<input v-model="range" maxlength="128" required
+            >{{ t('dshRange')
+            }}<input
+              v-model="range"
+              data-testid="upload-range"
+              maxlength="128"
+              required
           /></label>
           <label
             >{{ t('visibility')
@@ -507,7 +560,7 @@ onBeforeUnmount(() => {
             {{ t('npmName') }}: {{ manifest.plugin.packageName }}
           </p>
           <p>
-            {{ t('signature') }}: {{ t('unsigned') }} ?
+            {{ t('signature') }}: {{ t('unsigned') }} ·
             {{ manifest.signature.algorithm }}
           </p>
         </details>
@@ -538,6 +591,17 @@ onBeforeUnmount(() => {
   border-radius: 12px;
   padding: 24px;
   margin-bottom: 24px;
+}
+.upload-notices {
+  color: var(--auriga-muted);
+  padding-left: 20px;
+  line-height: 1.7;
+}
+.saved-draft {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
 }
 .upload-panel h2 {
   margin: 0 0 8px;

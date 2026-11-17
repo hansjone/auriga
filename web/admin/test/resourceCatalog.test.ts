@@ -628,6 +628,63 @@ it('automatically loads approved review evidence and blocks mismatched versions'
   await flushPromises();
   expect(view.find('[data-testid="catalog-publish"]').exists()).toBe(false);
 });
+it('continues a definitely rejected submission from the saved version details with fresh evidence', async () => {
+  const pack: CatalogPackageForTest = {
+    id: 'p1',
+    tenantId: 'tenant',
+    kind: 'skill',
+    name: v.manifest.name,
+    ownerId: 'author',
+    visibility: 'tenant',
+    groupIds: [],
+    revision: 1,
+    enabled: true,
+    defaultVersionId: null,
+    createdAt: v.createdAt,
+  };
+  const draft = { ...v, state: 'draft' as const };
+  const file = new File(['payload'], 'skill.tar.gz');
+  vi.spyOn(api, 'packages').mockResolvedValue({ items: [pack] });
+  vi.spyOn(api, 'versions').mockResolvedValue({ items: [] });
+  vi.spyOn(api, 'get').mockResolvedValue({ data: pack, etag: '"1"' });
+  vi.spyOn(api, 'upload').mockResolvedValue(draft);
+  vi.spyOn(api, 'submit').mockRejectedValueOnce(
+    new ApiError({ status: 403, code: 'common.forbidden', title: 'Denied' }),
+  );
+  vi.spyOn(uploadHelpers, 'parseResourceSource').mockResolvedValue({
+    manifest: v.manifest,
+    payload: file,
+    embedded: false,
+  });
+  vi.spyOn(uploadHelpers, 'finalizeResourceUpload').mockResolvedValue({
+    manifest: v.manifest,
+    file,
+    artifacts: [file],
+    metadata: { version: v.version, expectedDigest: v.digest },
+  });
+  const view = setup('directory');
+  vi.mocked(api.version).mockResolvedValue({
+    data: draft,
+    etag: '"latest-draft"',
+  });
+  await flushPromises();
+  const input = view.get('[data-testid="catalog-folder"]');
+  Object.defineProperty(input.element, 'files', {
+    value: [file],
+    configurable: true,
+  });
+  await input.trigger('change');
+  await flushPromises();
+  await view.get('[data-testid="permissions-confirm"]').setValue(true);
+  await view.get('[data-testid="catalog-upload"]').trigger('submit');
+  await flushPromises();
+  await view.get('[data-testid="upload-open-draft"]').trigger('click');
+  await flushPromises();
+  expect(api.version).toHaveBeenCalledWith('p1', 'v1');
+  expect(view.find('[data-testid="catalog-reason"]').exists()).toBe(true);
+  expect(view.findAll('button').some((b) => b.text() === '送审')).toBe(true);
+  expect(api.upload).toHaveBeenCalledTimes(1);
+});
 it.each(['withdrawn', 'malicious'] as const)(
   'sends %s with the version ETag, including revocation after withdrawal',
   async (mode) => {

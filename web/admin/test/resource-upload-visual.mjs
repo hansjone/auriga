@@ -1,5 +1,6 @@
 ﻿// Local visual QA only: real admin routes with isolated, in-memory API fixtures.
 // Run from the worktree root: node web/admin/test/resource-upload-visual.mjs
+// Rework-only QA: set AURIGA_UPLOAD_REWORK=1 to capture notices and draft recovery.
 /* global localStorage */
 import { Buffer } from 'node:buffer';
 import { createServer } from 'vite';
@@ -12,6 +13,8 @@ import net from 'node:net';
 const output = resolve(
   'web/admin/node_modules/.cache/resource-upload-evidence',
 );
+const rework = process.env.AURIGA_UPLOAD_REWORK === '1';
+const prefix = rework ? 'rework-' : '';
 await mkdir(output, { recursive: true });
 const skillFolder = resolve(output, 'example-skill');
 await mkdir(skillFolder, { recursive: true });
@@ -53,9 +56,13 @@ await writeFile(
       name: '@example/team-summary',
       version: '1.2.0',
       description: 'Team documentation summaries for DSH.',
-      author: 'Alice',
+      author: rework
+        ? 'Alice <author@example.com> (https://example.com/alice)'
+        : 'Alice',
       license: 'MIT',
-      peerDependencies: { '@deepseek-ai/dsh': '^0.2.1-rc.3' },
+      peerDependencies: {
+        '@deepseek-ai/dsh': rework ? '0.2.x' : '^0.2.1-rc.3',
+      },
       dsh: { bundle: { patch: 'index.js' } },
     }),
     'package/index.js': 'export default {}',
@@ -76,15 +83,12 @@ try {
   browser = await chromium.launch({ headless: true, channel: 'chrome' });
   const errors = [],
     requests = [];
-  for (const width of [1280, 1600])
+  for (const width of rework ? [1280] : [1280, 1600])
     for (const theme of ['light', 'dark'])
-      for (const kind of ['plugin', 'skill'])
-        for (const phase of [
-          'directory',
-          'review',
-          'published',
-          'distribution',
-        ]) {
+      for (const kind of rework ? ['plugin'] : ['plugin', 'skill'])
+        for (const phase of rework
+          ? ['directory']
+          : ['directory', 'review', 'published', 'distribution']) {
           const context = await browser.newContext({
             viewport: { width, height: 1050 },
             deviceScaleFactor: 1,
@@ -172,6 +176,9 @@ try {
             revision: 1,
             decisions: [],
           };
+          let rejected = false,
+            uploadCount = 0,
+            versionReads = 0;
           await page.route('**/api/**', async (route) => {
             const req = route.request(),
               u = new URL(req.url());
@@ -214,6 +221,7 @@ try {
               u.pathname.endsWith('/versions') &&
               req.method() === 'POST'
             ) {
+              uploadCount++;
               assert.ok(
                 req.headers()['content-type'].includes('multipart/form-data'),
               );
@@ -223,14 +231,28 @@ try {
                   .includes(Buffer.from('auriga-resource.json')),
               );
               body = version;
-            } else if (u.pathname.endsWith('/submissions')) body = review;
-            else if (u.pathname.endsWith('/catalog/review'))
+            } else if (u.pathname.endsWith('/submissions')) {
+              if (rework && !rejected) {
+                rejected = true;
+                return route.fulfill({
+                  status: 403,
+                  json: {
+                    status: 403,
+                    code: 'common.forbidden',
+                    title: 'Denied',
+                  },
+                });
+              }
+              body = review;
+            } else if (u.pathname.endsWith('/catalog/review'))
               body = { items: [review] };
             else if (u.pathname.endsWith('/catalog/reviews/r1')) body = review;
             else if (u.pathname.endsWith('/catalog/published'))
               body = { items: [version] };
-            else if (u.pathname.endsWith('/versions/v1')) body = version;
-            else if (u.pathname.endsWith('/catalog/assignments'))
+            else if (u.pathname.endsWith('/versions/v1')) {
+              versionReads++;
+              body = version;
+            } else if (u.pathname.endsWith('/catalog/assignments'))
               body = { items: [] };
             else if (u.pathname.endsWith('/catalog/distributions'))
               body = {
@@ -304,6 +326,21 @@ try {
             await page
               .locator('[data-testid="catalog-upload-preview"]')
               .waitFor();
+            if (rework) {
+              await page
+                .locator('[data-testid="upload-preview-notices"]')
+                .waitFor();
+              assert.equal(
+                await page.locator('[data-testid="upload-range"]').inputValue(),
+                '^0.2.1-rc.3',
+              );
+              assert.equal(
+                await page
+                  .locator('[data-testid="upload-author"]')
+                  .inputValue(),
+                'Alice',
+              );
+            }
           }
           assert.equal(
             await page.locator('.admin-shell').getAttribute('data-admin-theme'),
@@ -326,7 +363,10 @@ try {
             .evaluate((el) => el.scrollWidth > el.clientWidth);
           assert.equal(overflow, false);
           await page.screenshot({
-            path: resolve(output, `${kind}-${phase}-${width}-${theme}.png`),
+            path: resolve(
+              output,
+              `${prefix}${kind}-${phase}-${width}-${theme}.png`,
+            ),
             fullPage: true,
           });
           if (phase === 'directory') {
@@ -337,24 +377,55 @@ try {
             await page.screenshot({
               path: resolve(
                 output,
-                `${kind}-permissions-${width}-${theme}.png`,
+                `${prefix}${kind}-permissions-${width}-${theme}.png`,
               ),
               fullPage: true,
             });
             await page.locator('[data-testid="upload-submit"]').click();
-            await page
-              .getByRole('status')
-              .filter({ hasText: '已上传并送审' })
-              .waitFor();
+            if (rework) {
+              await page.locator('[data-testid="upload-open-draft"]').waitFor();
+              assert.equal(
+                await page.locator('[data-testid="catalog-upload"]').count(),
+                0,
+              );
+              await page.screenshot({
+                path: resolve(output, `rework-draft-rejected-${theme}.png`),
+                fullPage: true,
+              });
+              await page.locator('[data-testid="upload-open-draft"]').click();
+              await page.locator('[data-testid="catalog-reason"]').waitFor();
+              await page
+                .locator('[data-testid="catalog-reason"]')
+                .fill(
+                  'Continue the saved draft after permissions are restored',
+                );
+              assert.equal(
+                await page
+                  .locator('.catalog-detail')
+                  .getByRole('button', { name: '送审', exact: true })
+                  .isEnabled(),
+                true,
+              );
+              assert.equal(uploadCount, 1);
+              assert.equal(versionReads, 1);
+              await page.screenshot({
+                path: resolve(output, `rework-draft-details-${theme}.png`),
+                fullPage: true,
+              });
+            } else
+              await page
+                .getByRole('status')
+                .filter({ hasText: '已上传并送审' })
+                .waitFor();
           }
           await context.close();
         }
   assert.deepEqual(errors, []);
   await writeFile(
-    resolve(output, 'visual-result.json'),
+    resolve(output, rework ? 'rework-result.json' : 'visual-result.json'),
     JSON.stringify(
       {
-        screenshots: 32,
+        screenshots: rework ? 8 : 32,
         errors,
         writeRequests: requests.filter((r) => r[0] === 'POST'),
         output,
@@ -363,7 +434,7 @@ try {
       2,
     ),
   );
-  console.log(JSON.stringify({ screenshots: 32, errors, output }));
+  console.log(JSON.stringify({ screenshots: rework ? 8 : 32, errors, output }));
 } finally {
   await browser?.close();
   await server.close();

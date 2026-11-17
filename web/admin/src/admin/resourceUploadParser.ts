@@ -8,14 +8,16 @@ import {
 import { sha256 } from './resourceHash';
 
 type Manifest = components['schemas']['UnifiedManifest'];
-type Entry = { path: string; bytes: Uint8Array };
+type Entry = { path: string; sizeBytes: number; bytes?: Uint8Array };
 export type ResourceSource = {
   manifest: Manifest;
   payload: File;
   skillFiles?: File[];
   embedded: boolean;
   pluginVersion?: string;
+  pluginPackageName?: string;
   engineRange?: string;
+  warnings?: string[];
 };
 export class UploadParseError extends Error {
   constructor(
@@ -65,6 +67,28 @@ function object(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : {};
+}
+function entryBytes(entry: Entry) {
+  if (!entry.bytes) fail('archiveInvalid', entry.path);
+  return entry.bytes;
+}
+function validRange(value: unknown): value is string {
+  return (
+    typeof value === 'string' &&
+    value.length > 0 &&
+    value.length <= 128 &&
+    (value === '*' ||
+      value.split('||').every(
+        (branch) =>
+          branch.trim() &&
+          branch
+            .trim()
+            .split(/\s+/)
+            .every((term) =>
+              semver.test(term.replace(/^(>=|<=|>|<|=|\^|~)/, '')),
+            ),
+      ))
+  );
 }
 function safePath(path: string) {
   // eslint-disable-next-line no-control-regex
@@ -243,7 +267,19 @@ async function archive(file: File, kind: CatalogKind): Promise<Entry[]> {
         )
           fail('metadataLimit', path);
       }
-      entries.push({ path, bytes: raw.slice(offset + 512, end) });
+      const capture =
+        kind === 'skill' ||
+        path.endsWith('/package.json') ||
+        path === 'package/auriga.manifest.json';
+      if (path === 'package/auriga.manifest.json' && size > 262144)
+        fail('sizeLimit', path);
+      // Only plugin metadata survives inspection; code/data entries retain paths
+      // and sizes without allocating a second copy of their expanded bytes.
+      entries.push({
+        path,
+        sizeBytes: size,
+        ...(capture ? { bytes: raw.slice(offset + 512, end) } : {}),
+      });
     }
     offset += 512 + Math.ceil(size / 512) * 512;
   }
@@ -255,8 +291,7 @@ async function archive(file: File, kind: CatalogKind): Promise<Entry[]> {
 function frontmatter(content: string) {
   const normalized = content.replace(/\r\n/g, '\n');
   const match = /^---\n([\s\S]*?)\n---\n/.exec(normalized);
-  if (!match || /(?:^|\s)[&*!][^\s]/m.test(match[1]!))
-    fail('frontmatterInvalid');
+  if (!match) fail('frontmatterInvalid');
   const lines = match[1]!.split('\n'),
     values: Record<string, string> = {},
     kept: string[] = [],
@@ -271,6 +306,7 @@ function frontmatter(content: string) {
     const m = /^([A-Za-z][\w-]*):(?:\s+(.*))?$/.exec(line);
     if (!m || seen.has(m[1]!)) fail('frontmatterInvalid');
     const key = m[1]!;
+    if (/^[&*!]\S/.test((m[2] ?? '').trim())) fail('frontmatterInvalid', key);
     seen.add(key);
     let j = i + 1;
     while (j < lines.length && (/^\s/.test(lines[j]!) || !lines[j]!.trim()))
@@ -322,7 +358,15 @@ function frontmatter(content: string) {
       if (typeof value !== 'string' || !value.trim())
         fail('frontmatterInvalid', key);
       values[key] = value;
-    } else kept.push(...lines.slice(i, j));
+    } else {
+      if (
+        lines
+          .slice(i + 1, j)
+          .some((line) => /^\s*(?:[^:#\n]+:\s*|-\s*)[&*!]\S/.test(line))
+      )
+        fail('frontmatterInvalid', key);
+      kept.push(...lines.slice(i, j));
+    }
     i = j;
   }
   if (!values.name || !values.description) fail('frontmatterInvalid');
@@ -349,8 +393,10 @@ function skillEntries(files: File[]) {
 function validatePlugin(entries: Entry[]) {
   const metadata = entries.find((e) => e.path === 'package/package.json');
   if (!metadata) fail('missingPackage');
-  const pkg = json(metadata.bytes, metadata.path);
+  const pkg = json(entryBytes(metadata), metadata.path);
   if (!npmName(pkg.name)) fail('npmNameInvalid');
+  if (pkg.name === 'auriga-dsh' || pkg.name.startsWith('@deepseek-ai/'))
+    fail('reservedPlugin');
   const files = new Set(entries.map((e) => e.path));
   for (const e of entries) {
     if (
@@ -360,7 +406,7 @@ function validatePlugin(entries: Entry[]) {
     )
       fail('pathUnsafe', e.path);
     if (!e.path.endsWith('/package.json')) continue;
-    const p = json(e.bytes, e.path),
+    const p = json(entryBytes(e), e.path),
       scripts = p.scripts;
     if (
       scripts != null &&
@@ -437,6 +483,7 @@ export async function parseResourceSource(
     entries = await Promise.all(
       listed.map(async (e) => ({
         path: e.path,
+        sizeBytes: e.file.size,
         bytes: new Uint8Array(await e.file.arrayBuffer()),
       })),
     );
@@ -452,23 +499,32 @@ export async function parseResourceSource(
       e.path === (kind === 'plugin' ? 'package/' : '') + 'auriga.manifest.json',
   );
   if (advanced) {
-    if (advanced.bytes.length > 262144) fail('sizeLimit', advanced.path);
-    embedded = json(advanced.bytes, advanced.path);
+    if (advanced.sizeBytes > 262144) fail('sizeLimit', advanced.path);
+    embedded = json(entryBytes(advanced), advanced.path);
   }
   let base: Record<string, unknown>,
     pluginVersion: string | undefined,
+    pluginPackageName: string | undefined,
     engineRange: string | undefined;
+  const warnings: string[] = [];
   if (kind === 'plugin') {
     const pkg = validatePlugin(entries);
     pluginVersion = String(pkg.version);
+    pluginPackageName = String(pkg.name);
     const engines = object(pkg.engines),
       peers = object(pkg.peerDependencies);
-    engineRange = typeof engines.dsh === 'string' ? engines.dsh : undefined;
-    const range =
+    engineRange = Object.hasOwn(engines, 'dsh')
+      ? typeof engines.dsh === 'string'
+        ? engines.dsh
+        : ''
+      : undefined;
+    const derivedRange =
+      engineRange ??
       peers['@deepseek-ai/dsh'] ??
       engines['@deepseek-ai/dsh'] ??
-      engineRange ??
       defaultDshRange;
+    const range = validRange(derivedRange) ? derivedRange : defaultDshRange;
+    if (!validRange(derivedRange)) warnings.push('rangeDefaulted');
     base = {
       name: String(pkg.name)
         .split('/')
@@ -482,6 +538,11 @@ export async function parseResourceSource(
         displayName:
           typeof pkg.author === 'string'
             ? pkg.author
+                .replace(/\s*<[^>]*>/g, '')
+                .replace(/\s*\([^)]*\)/g, '')
+                .trim() ||
+              author ||
+              'Author'
             : (object(pkg.author).name ?? (author || 'Author')),
       },
       license: pkg.license ?? 'UNLICENSED',
@@ -490,7 +551,7 @@ export async function parseResourceSource(
   } else {
     const skill = entries.find((e) => e.path === 'SKILL.md');
     if (!skill) fail('missingSkill');
-    const fm = frontmatter(text(skill.bytes, skill.path));
+    const fm = frontmatter(text(entryBytes(skill), skill.path));
     const seen = new Set<string>();
     skillFiles = [];
     for (const e of entries) {
@@ -508,9 +569,9 @@ export async function parseResourceSource(
         )
       )
         fail('skillFileInvalid', e.path);
-      if (e.bytes.length > (e.path === 'SKILL.md' ? 262144 : 2097152))
+      if (e.sizeBytes > (e.path === 'SKILL.md' ? 262144 : 2097152))
         fail('sizeLimit', e.path);
-      const content = text(e.bytes, e.path);
+      const content = text(entryBytes(e), e.path);
       // eslint-disable-next-line no-control-regex
       if (/[\x00-\x08\x0b\x0c\x0e-\x1f]/.test(content))
         fail('textInvalid', e.path);
@@ -539,19 +600,71 @@ export async function parseResourceSource(
   }) as Manifest;
   if (embedded && (manifest.schemaVersion !== 1 || manifest.kind !== kind))
     fail('manifestInvalid');
+  // Input widgets need strings even for legacy npm metadata. Preserve long
+  // strings for correction and disclose any object/default conversion.
+  const editableText = (value: unknown, fallback: string) => {
+    if (typeof value === 'string') return value;
+    warnings.push('metadataAdjusted');
+    return typeof object(value).type === 'string'
+      ? (object(value).type as string)
+      : fallback;
+  };
+  manifest.name = editableText(manifest.name, '');
+  manifest.version = editableText(manifest.version, '');
+  manifest.description = editableText(manifest.description, '');
+  manifest.author = {
+    ...object(manifest.author),
+    displayName: editableText(manifest.author?.displayName, author || 'Author'),
+  };
+  manifest.license = editableText(manifest.license, 'UNLICENSED');
+  validateManifest(manifest, kind, true);
+  if (
+    manifest.kind === 'plugin' &&
+    manifest.plugin.packageName !== pluginPackageName
+  )
+    fail('pluginMismatch');
+  if (!namePattern.test(manifest.name) || manifest.name.length > 64)
+    warnings.push('nameInvalid');
+  if (!semver.test(manifest.version) || manifest.version.length > 128)
+    warnings.push('versionInvalid');
+  if (
+    !manifest.description.trim() ||
+    manifest.description.length > 1024 ||
+    !manifest.author.displayName.trim() ||
+    manifest.author.displayName.length > 128 ||
+    !manifest.license.trim() ||
+    manifest.license.length > 128
+  )
+    warnings.push('metadataInvalid');
+  if (
+    !validRange(
+      manifest.kind === 'plugin'
+        ? manifest.plugin.dshVersionRange
+        : manifest.kind === 'skill'
+          ? manifest.skill.dshVersionRange
+          : '',
+    )
+  )
+    warnings.push('rangeInvalid');
   const source: ResourceSource = {
     manifest,
     payload,
     skillFiles,
     embedded: !!embedded,
     pluginVersion,
+    pluginPackageName,
     engineRange,
+    warnings: [...new Set(warnings)],
   };
-  validateManifest(manifest, kind);
-  const ready = await finalizeResourceUpload(source);
-  return { ...source, manifest: ready.manifest, payload: ready.artifacts[0]! };
+  const snapshot = await snapshotPayload(source, manifest);
+  manifest.artifacts = [await payloadArtifact(snapshot)];
+  return { ...source, payload: snapshot };
 }
-export function validateManifest(m: Manifest, kind: CatalogKind) {
+export function validateManifest(
+  m: Manifest,
+  kind: CatalogKind,
+  preview = false,
+) {
   if (!m || m.kind !== kind || m.schemaVersion !== 1) fail('manifestInvalid');
   const allowed = [
     'schemaVersion',
@@ -569,15 +682,17 @@ export function validateManifest(m: Manifest, kind: CatalogKind) {
   ];
   if (Object.keys(m).some((k) => !allowed.includes(k))) fail('manifestInvalid');
   if (
-    typeof m.name !== 'string' ||
-    !namePattern.test(m.name) ||
-    m.name.length > 64
+    !preview &&
+    (typeof m.name !== 'string' ||
+      !namePattern.test(m.name) ||
+      m.name.length > 64)
   )
     fail('nameInvalid');
   if (
-    typeof m.version !== 'string' ||
-    m.version.length > 128 ||
-    !semver.test(m.version)
+    !preview &&
+    (typeof m.version !== 'string' ||
+      m.version.length > 128 ||
+      !semver.test(m.version))
   )
     fail('versionInvalid');
   for (const [value, max] of [
@@ -585,7 +700,10 @@ export function validateManifest(m: Manifest, kind: CatalogKind) {
     [m.author?.displayName, 128],
     [m.license, 128],
   ] as const)
-    if (typeof value !== 'string' || !value.trim() || value.length > max)
+    if (
+      !preview &&
+      (typeof value !== 'string' || !value.trim() || value.length > max)
+    )
       fail('metadataInvalid');
   if (
     Object.keys(m.author).some((k) => k !== 'displayName') ||
@@ -611,23 +729,7 @@ export function validateManifest(m: Manifest, kind: CatalogKind) {
   if (Object.keys(part).some((k) => !partKeys.includes(k)))
     fail('manifestInvalid');
   const range = part.dshVersionRange;
-  if (
-    typeof range !== 'string' ||
-    !range ||
-    range.length > 128 ||
-    (range !== '*' &&
-      range.split('||').some(
-        (branch) =>
-          !branch.trim() ||
-          branch
-            .trim()
-            .split(/\s+/)
-            .some(
-              (term) => !semver.test(term.replace(/^(>=|<=|>|<|=|\^|~)/, '')),
-            ),
-      ))
-  )
-    fail('rangeInvalid');
+  if (!preview && !validRange(range)) fail('rangeInvalid');
   const p = m.permissions;
   if (
     !p ||
@@ -704,18 +806,25 @@ export async function finalizeResourceUpload(
   if (
     m.kind === 'plugin' &&
     (m.version !== source.pluginVersion ||
-      m.plugin.packageName !==
-        (source.manifest.kind === 'plugin'
-          ? source.manifest.plugin.packageName
-          : undefined))
+      m.plugin.packageName !== source.pluginPackageName)
   )
     fail('pluginMismatch');
   if (
     m.kind === 'plugin' &&
-    source.engineRange &&
+    source.engineRange !== undefined &&
     m.plugin.dshVersionRange !== source.engineRange
   )
     fail('rangeMismatch');
+  const payload = await snapshotPayload(source, m);
+  m.artifacts = [await payloadArtifact(payload)];
+  const file = new File(
+    [JSON.stringify(m, null, 2) + '\n'],
+    'auriga-resource.json',
+    { type: 'application/json' },
+  );
+  return prepareUpload(file, [payload], m.kind as CatalogKind);
+}
+async function snapshotPayload(source: ResourceSource, m: Manifest) {
   let payload = source.payload;
   if (source.skillFiles) {
     const files = await Promise.all(
@@ -734,21 +843,18 @@ export async function finalizeResourceUpload(
       return fail('skillSnapshotInvalid');
     }
   }
-  m.artifacts = [
-    {
-      id: 'payload',
-      role: 'payload',
-      digest: 'sha256:' + (await sha256(payload)),
-      sizeBytes: payload.size,
-      mediaType: 'application/gzip',
-      os: 'any',
-      arch: 'any',
-    },
-  ];
-  const file = new File(
-    [JSON.stringify(m, null, 2) + '\n'],
-    'auriga-resource.json',
-    { type: 'application/json' },
-  );
-  return prepareUpload(file, [payload], m.kind as CatalogKind);
+  return payload;
+}
+async function payloadArtifact(
+  payload: File,
+): Promise<Manifest['artifacts'][number]> {
+  return {
+    id: 'payload',
+    role: 'payload',
+    digest: 'sha256:' + (await sha256(payload)),
+    sizeBytes: payload.size,
+    mediaType: 'application/gzip',
+    os: 'any',
+    arch: 'any',
+  };
 }

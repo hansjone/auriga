@@ -1,5 +1,13 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref, shallowRef, watch } from 'vue';
+/* global HTMLElement */
+import {
+  computed,
+  nextTick,
+  onBeforeUnmount,
+  ref,
+  shallowRef,
+  watch,
+} from 'vue';
 import { useI18n } from 'vue-i18n';
 import { isApiError } from '@auriga/shared';
 import { adminApi } from '../../admin/api';
@@ -41,6 +49,7 @@ const packages = shallowRef<CatalogPackage[]>([]),
   distributions = shallowRef<CatalogDistribution[]>([]);
 const selected = shallowRef<CatalogVersion>(),
   review = shallowRef<CatalogReview>();
+const detailPanel = ref<HTMLElement>();
 const reviewEtag = ref<string | null>(null),
   versionEtag = ref<string | null>(null);
 const loading = ref(false),
@@ -252,6 +261,12 @@ async function openPackage(
   } finally {
     if (alive) versionsLoading.value = false;
   }
+}
+async function resumeDraft(v: CatalogVersion) {
+  await inspect(v);
+  await nextTick();
+  if (selected.value?.id === v.id)
+    detailPanel.value?.scrollIntoView?.({ block: 'start' });
 }
 async function inspect(v: CatalogVersion, r?: CatalogReview) {
   if (locked.value) return;
@@ -536,6 +551,7 @@ onBeforeUnmount(() => {
         :disabled="busy || !!pending || loading"
         @locked="uploadLocked = $event"
         @completed="load(cursor)"
+        @resume-draft="resumeDraft($event)"
       />
       <ResourceAssignments
         v-if="phase === 'distribution'"
@@ -785,7 +801,7 @@ onBeforeUnmount(() => {
           {{ t('next') }}
         </button>
       </footer>
-      <article v-if="selected" class="catalog-detail">
+      <article v-if="selected" ref="detailPanel" class="catalog-detail">
         <h2>{{ selected.manifest.name }} {{ selected.version }}</h2>
         <details>
           <summary>{{ t('advanced') }}</summary>

@@ -1,4 +1,5 @@
-﻿import { expect, it } from 'vitest';
+﻿import { expect, it, vi } from 'vitest';
+import { randomBytes } from 'node:crypto';
 import { File as NodeFile } from 'node:buffer';
 import { webcrypto } from 'node:crypto';
 import { gzipSync } from 'node:zlib';
@@ -143,11 +144,6 @@ it.each([
     () => folderFile('SKILL.md', 'no frontmatter'),
     'skill',
     'frontmatterInvalid',
-  ],
-  [
-    () => folderFile('SKILL.md', '---\nname: Bad Name\ndescription: x\n---\nx'),
-    'skill',
-    'nameInvalid',
   ],
 ] as const)(
   'rejects malformed sources with a specific reason %#',
@@ -296,4 +292,210 @@ it('extracts optional skill author and license into metadata accepted by the exi
   )[0]!;
   expect(entry.text).not.toContain('author:');
   expect(entry.text).not.toContain('license:');
+});
+it('uses engines.dsh ahead of a conflicting DSH peer range', async () => {
+  const source = await parseResourceSource(
+    [
+      plugin({
+        ...pkg,
+        engines: { dsh: '^0.2.1-rc.3' },
+        peerDependencies: { '@deepseek-ai/dsh': '^0.2.0' },
+      }),
+    ],
+    'plugin',
+    'Current',
+  );
+  expect(
+    source.manifest.kind === 'plugin' && source.manifest.plugin.dshVersionRange,
+  ).toBe('^0.2.1-rc.3');
+  await expect(finalizeResourceUpload(source)).resolves.toBeDefined();
+});
+it('previews an unsupported derived range with an editable default and validates the edited range on upload', async () => {
+  const source = await parseResourceSource(
+    [plugin({ ...pkg, peerDependencies: { '@deepseek-ai/dsh': '0.2.x' } })],
+    'plugin',
+    'Current',
+  );
+  expect(
+    source.manifest.kind === 'plugin' && source.manifest.plugin.dshVersionRange,
+  ).toBe('^0.2.1-rc.3');
+  expect(source.warnings).toContain('rangeDefaulted');
+  if (source.manifest.kind !== 'plugin') throw new Error('Plugin fixture');
+  await expect(
+    finalizeResourceUpload(source, {
+      ...source.manifest,
+      plugin: { ...source.manifest.plugin, dshVersionRange: '0.2.x' },
+    }),
+  ).rejects.toMatchObject({ code: 'rangeInvalid' });
+  await expect(finalizeResourceUpload(source)).resolves.toBeDefined();
+});
+it('keeps invalid engines.dsh editable in the preview while preserving the server equality requirement on upload', async () => {
+  const source = await parseResourceSource(
+    [plugin({ ...pkg, engines: { dsh: '0.2.x' } })],
+    'plugin',
+    'Current',
+  );
+  expect(source.warnings).toContain('rangeDefaulted');
+  await expect(finalizeResourceUpload(source)).rejects.toMatchObject({
+    code: 'rangeMismatch',
+  });
+});
+it.each(['', null, 123])(
+  'does not silently ignore an invalid engines.dsh value: %s',
+  async (range) => {
+    const source = await parseResourceSource(
+      [plugin({ ...pkg, engines: { dsh: range } })],
+      'plugin',
+      'Current',
+    );
+    expect(source.warnings).toContain('rangeDefaulted');
+    await expect(finalizeResourceUpload(source)).rejects.toMatchObject({
+      code: 'rangeMismatch',
+    });
+  },
+);
+it('allows correcting oversized and legacy npm metadata in the preview before strict upload validation', async () => {
+  const source = await parseResourceSource(
+    [
+      plugin({
+        ...pkg,
+        name: 'a'.repeat(80),
+        description: 'd'.repeat(1025),
+        author: 'A'.repeat(129),
+        license: { type: 'MIT', url: 'https://example.com/license' },
+      }),
+    ],
+    'plugin',
+    'Current',
+  );
+  expect(source.manifest.name).toHaveLength(80);
+  expect(source.manifest.description).toHaveLength(1025);
+  expect(source.manifest.author.displayName).toHaveLength(129);
+  expect(source.manifest.license).toBe('MIT');
+  expect(source.warnings).toEqual(
+    expect.arrayContaining([
+      'nameInvalid',
+      'metadataInvalid',
+      'metadataAdjusted',
+    ]),
+  );
+  await expect(finalizeResourceUpload(source)).rejects.toMatchObject({
+    code: 'nameInvalid',
+  });
+  const ready = await finalizeResourceUpload(source, {
+    ...source.manifest,
+    name: 'edited',
+    description: 'Edited',
+    author: { displayName: 'Alice' },
+  });
+  expect(ready.manifest.name).toBe('edited');
+});
+it.each([
+  'Use *wildcard* literally & keep !punctuation',
+  'Ask @scope/team for help',
+])(
+  'accepts literal punctuation inside frontmatter text: %s',
+  async (description) => {
+    const source = await parseResourceSource(
+      [
+        folderFile(
+          'SKILL.md',
+          `---\nname: sample\ndescription: ${description}\n---\nBody`,
+        ),
+      ],
+      'skill',
+      'Current',
+    );
+    expect(source.manifest.description).toBe(description);
+  },
+);
+it.each(['*alias', '&anchor text', '!tag text'])(
+  'rejects actual YAML aliases, anchors or tags at the start of a value: %s',
+  async (value) => {
+    await expect(
+      parseResourceSource(
+        [
+          folderFile(
+            'SKILL.md',
+            `---\nname: sample\ndescription: ${value}\n---\nBody`,
+          ),
+        ],
+        'skill',
+        'Current',
+      ),
+    ).rejects.toMatchObject({ code: 'frontmatterInvalid' });
+  },
+);
+it('checks embedded npm identity against the archive rather than against its own preview', async () => {
+  const original = await parseResourceSource([plugin()], 'plugin', 'Current');
+  if (original.manifest.kind !== 'plugin') throw new Error('Plugin fixture');
+  const embedded = {
+    ...original.manifest,
+    plugin: { ...original.manifest.plugin, packageName: '@example/other' },
+  };
+  await expect(
+    parseResourceSource(
+      [
+        plugin(pkg, {
+          'package/auriga.manifest.json': JSON.stringify(embedded),
+        }),
+      ],
+      'plugin',
+      'Current',
+    ),
+  ).rejects.toMatchObject({ code: 'pluginMismatch' });
+});
+it.each(['auriga-dsh', '@deepseek-ai/dsh', '@deepseek-ai/official-plugin'])(
+  'explains that reserved package %s is deployment-managed',
+  async (name) => {
+    await expect(
+      parseResourceSource([plugin({ ...pkg, name })], 'plugin', 'Current'),
+    ).rejects.toMatchObject({ code: 'reservedPlugin' });
+  },
+);
+it('removes npm author email and URL from the editable display name', async () => {
+  const source = await parseResourceSource(
+    [
+      plugin({
+        ...pkg,
+        author: 'Alice <author@example.com> (https://example.com/alice)',
+      }),
+    ],
+    'plugin',
+    'Current',
+  );
+  expect(source.manifest.author.displayName).toBe('Alice');
+});
+it('previews an invalid skill name and rejects it only when uploading', async () => {
+  const source = await parseResourceSource(
+    [folderFile('SKILL.md', '---\nname: Bad Name\ndescription: x\n---\nx')],
+    'skill',
+    'Current',
+  );
+  expect(source.warnings).toContain('nameInvalid');
+  await expect(finalizeResourceUpload(source)).rejects.toMatchObject({
+    code: 'nameInvalid',
+  });
+  await expect(
+    finalizeResourceUpload(source, {
+      ...source.manifest,
+      name: 'edited-skill',
+    }),
+  ).resolves.toBeDefined();
+});
+it('does not retain a second copy of expanded plugin code or binary payload bytes', async () => {
+  const binary = randomBytes(2 * 1024 * 1024).toString('base64');
+  const bytes = plugin(pkg, { 'package/data.bin': binary });
+  const slice = vi.spyOn(Uint8Array.prototype, 'slice');
+  try {
+    const source = await parseResourceSource([bytes], 'plugin', 'Current');
+    expect(source.payload).toBe(bytes);
+    expect(
+      slice.mock.results
+        .filter((r) => r.type === 'return')
+        .every((r) => r.value.byteLength < 1024 * 1024),
+    ).toBe(true);
+  } finally {
+    slice.mockRestore();
+  }
 });

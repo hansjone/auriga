@@ -1,5 +1,22 @@
 export const catalogMessages = {
   'zh-CN': {
+    preview_nameInvalid:
+      '读取到的目录名称需要调整：请使用不超过 64 个字符的小写字母、数字和连字符。',
+    preview_versionInvalid:
+      '读取到的版本号不符合完整版本格式；插件请重新打包，技能可在下方修改。',
+    preview_metadataInvalid:
+      '读取到的介绍、作者或许可证为空或超长，请在下方修改后上传（介绍最多 1024 字符，作者和许可证最多 128 字符）。',
+    preview_metadataAdjusted:
+      '部分包信息使用了旧格式，已转换为可编辑文字，请核对作者、许可证和其他预览字段。',
+    preview_rangeDefaulted:
+      '读取到的 DSH 兼容范围写法不受支持，已回退当前锁定版本的兼容范围，请在下方核对。若包内 engines.dsh 本身不合法，需要重新打包。',
+    preview_rangeInvalid:
+      '包内配置的 DSH 兼容范围不合法，请在下方修改为完整版本范围后上传。',
+    parse_reservedPlugin:
+      'auriga-dsh 和 @deepseek-ai/* 是核心或上游插件，由客户端和部署维护，不能通过共享目录发布。',
+    draftSubmissionRejected: '草稿已保存，送审未完成。请打开版本详情继续送审。',
+    openSavedDraft: '查看草稿并继续送审',
+    nameUnavailable: '同名资源已存在但你无权查看，请换名或联系管理员。',
     pluginIntro:
       '插件是供 DSH 使用的 npm 插件包（.tgz）。上传后由两名非作者审核，其中至少一名负责安全审核。',
     skillIntro:
@@ -46,7 +63,7 @@ export const catalogMessages = {
     permissionConfirm: '我已确认以上权限声明（含无权限）',
     embeddedHint: '已采用包内的高级配置，上传内容摘要会按实际文件重新计算。',
     snapshotHint:
-      '技能将整理为上传快照：高级配置与版本信息单独保存，正文名称与介绍按本次预览同步。',
+      '上传会规范 SKILL.md 顶部格式（包括换行和引号），名称与介绍按预览同步；高级配置、版本、作者和许可证信息单独保存。',
     uploadAndSubmit: '上传并送审',
     saveDraft: '保存草稿',
     uploadReviewReason: '作者确认内容与权限后提交审核',
@@ -116,7 +133,7 @@ export const catalogMessages = {
     uploadInvalid:
       '上传校验失败：请核对类型、名称、制品大小与 SHA-256；技能文件夹根须有 SKILL.md，仅允许 references/assets 文本附件。',
     signature: '发行签名',
-    unsigned: '尚未签发',
+    unsigned: '未签发（发布时由平台签名）',
     signed: '已签发（安装时仍须验签）',
     awaitingApproval: '审核或版本状态尚未通过，不能发布',
     hasRejection: '当前修订仍有驳回意见，不能发布',
@@ -234,6 +251,25 @@ export const catalogMessages = {
     expired: '请求已过期，请刷新',
   },
   en: {
+    preview_nameInvalid:
+      'Adjust the catalog name below: use lowercase letters, numbers and hyphens, up to 64 characters.',
+    preview_versionInvalid:
+      'The version is not a complete semantic version. Repack plugins; edit skill versions below.',
+    preview_metadataInvalid:
+      'The description, author or license is empty or too long. Edit below before uploading (description: 1024 characters; author and license: 128 each).',
+    preview_metadataAdjusted:
+      'Legacy package metadata was converted to editable text. Check the author, license and other preview fields.',
+    preview_rangeDefaulted:
+      'The derived DSH compatibility range is unsupported. The locked-version default is shown for editing. If engines.dsh itself is invalid, repack the plugin.',
+    preview_rangeInvalid:
+      'The embedded DSH range is invalid. Edit it to use complete versions before uploading.',
+    parse_reservedPlugin:
+      'auriga-dsh and @deepseek-ai/* are core or upstream plugins maintained by the client and deployment. They cannot be published through the shared catalog.',
+    draftSubmissionRejected:
+      'Draft saved; submission did not complete. Open version details to continue submission.',
+    openSavedDraft: 'Open draft and continue submission',
+    nameUnavailable:
+      'A package with this name already exists but is not visible to you. Choose another name or contact an administrator.',
     pluginIntro:
       'Plugins are DSH npm packages (.tgz). They require two non-author reviewers, including a security reviewer.',
     skillIntro:
@@ -290,7 +326,7 @@ export const catalogMessages = {
     embeddedHint:
       'Embedded advanced settings are used; content hashes are recalculated from actual files.',
     snapshotHint:
-      'The skill is frozen as a snapshot. Advanced settings and version are stored separately; the body name and description follow this preview.',
+      'Uploading normalizes the SKILL.md frontmatter format, including line endings and quoting. Name and description follow this preview; advanced settings, version, author and license are stored separately.',
     uploadAndSubmit: 'Upload and submit',
     saveDraft: 'Save draft',
     uploadReviewReason: 'Author confirmed content and permissions for review',
@@ -368,7 +404,7 @@ export const catalogMessages = {
     uploadInvalid:
       'Upload validation failed. Check kind, name, artifact size and SHA-256. Skill folders require root SKILL.md and text attachments under references/assets.',
     signature: 'Release signature',
-    unsigned: 'Not issued',
+    unsigned: 'Not issued (the platform signs on publication)',
     signed: 'Issued (installation still requires verification)',
     awaitingApproval:
       'Review and version must both be approved before publication',
