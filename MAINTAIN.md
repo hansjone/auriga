@@ -189,6 +189,8 @@ $env:AURIGA_CLIENT_NODE_SHA256 = '<独立批准的node.exe SHA256>'
 
 薄壳先用 PowerShell5.1 核引导 Node 摘要，所有命令使用附件自带 Node，无需预装 Git/Node/pnpm。输入清单、Windows 系统工具与维护者封装见[客户端发行说明](scripts/client-release/README.md)。
 
+2026-11-17决定：Windows x64客户端随包内置CPython 3.12.14和13个固定office/data wheel，成员无需另装Python，离线可用。`clients/installer/locks/python-win-x64.json`固定python-build-standalone release `20260901` install_only及全部wheel的URL/长度/SHA256/许可证；此锁进入Windows附件锁键，变化必须重出并审核附件。prepare只联网获取固定字节，现场离线构建只校验/解包，不执行pip、sdist、构建后端或安装脚本。运行时清单和许可证随包，`versions/<id>/runtime/python`随完整包验签、升级和回滚，启动器仅为DSH及其子进程前置PATH。自动更新当前传完整exe，无二进制差分，发行时应计入完整Python体积；Java及其他Python版本的按需下载仍属P3。发布前按发行说明离屏执行python-smoke，并核对包内13个精确版本。
+
 首次在受信离线签名机生成独立现场桌面发行钥；父目录须存在、输出目录须全新。私钥及目录仅当前用户可读写，签名前复核权限，备份到受控离线介质。
 
 ```powershell

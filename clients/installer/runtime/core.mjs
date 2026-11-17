@@ -376,13 +376,29 @@ function syncPlugin(dir, dataHome) {
 
 // ----------------------------------------------------------------- smoke --
 
-/** Environment for upstream DSH: own data home; bundled node and pnpm first on PATH. */
+/** Environment inherited by DSH and its shell tools; never changes system settings. */
 export function launchEnv(dir, dataHome, base = process.env) {
   const pathKey =
     Object.keys(base).find((k) => k.toLowerCase() === 'path') ?? 'PATH';
-  const extra = [join(dir, 'tools', 'bin'), dirname(nodeBin(dir))];
+  const python = join(dir, 'runtime', 'python');
+  const extra = [python, join(dir, 'tools', 'bin'), dirname(nodeBin(dir))];
+  const clean = Object.fromEntries(
+    Object.entries(base).filter(
+      ([key]) =>
+        ![
+          'pythonhome',
+          'pythonpath',
+          'pythonuserbase',
+          'pythonstartup',
+          'pythonnousersite',
+          'pythondontwritebytecode',
+        ].includes(key.toLowerCase()),
+    ),
+  );
   return {
-    ...base,
+    ...clean,
+    PYTHONNOUSERSITE: '1',
+    PYTHONDONTWRITEBYTECODE: '1',
     DSH_HOME: dataHome,
     // Keep the pnpm package store (plugin manager) with the user data, not the system.
     npm_config_store_dir: join(dataHome, 'pnpm-store'),

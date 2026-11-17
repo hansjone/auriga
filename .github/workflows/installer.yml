@@ -126,6 +126,15 @@ jobs:
           echo "INSTALLER_STAGE=$(ls -d "$RUNNER_TEMP"/installer/auriga-desktop-*-win-x64)" >> "$GITHUB_ENV"
           echo "INSTALLER_EXE=$(ls "$RUNNER_TEMP"/installer/AurigaDSH-Setup-*.exe)" >> "$GITHUB_ENV"
           echo "INSTALLER_ZIP=$(ls "$RUNNER_TEMP"/installer/auriga-desktop-*-win-x64.zip)" >> "$GITHUB_ENV"
+      - name: Offscreen bundled Python imports and offline reassembly
+        working-directory: clients/installer
+        shell: pwsh
+        run: |
+          node scripts/python-smoke.mjs (Join-Path $env:INSTALLER_STAGE 'payload') --dsh
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $env:AURIGA_PYTHON_INPUTS = Join-Path $env:RUNNER_TEMP 'installer/cache'
+          node --test test/python-runtime.test.mjs
+          exit $LASTEXITCODE
       - name: Generate unsigned manifest, SHA-256 and source build record
         working-directory: clients/installer
         shell: bash

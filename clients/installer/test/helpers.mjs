@@ -42,6 +42,10 @@ export function buildPayload(base, options = {}) {
   } = options;
   const dir = join(base, `payload-${name}`);
   put(dir, 'upstream/node/node.exe', nodeContent);
+  if (options.pythonContent) {
+    put(dir, 'runtime/python/python.exe', options.pythonContent);
+    put(dir, 'runtime/python/runtime.json', '{"version":"3.12.14"}');
+  }
   put(dir, 'upstream/app/package.json', '{}');
   put(
     dir,

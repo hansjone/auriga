@@ -35,7 +35,10 @@ npm 版实测体量：隔离目录 `npm install @deepseek-ai/dsh@0.2.1-rc.3`，`
 ### 1.4 依赖环境现状
 
 - 运行 DSH 本体只需 Node（`engines`：22.19+/24+）；桌面版用 Electron 内置 Node 24.21 并带 pnpm 11.28.5。
-- git/python 不是基础依赖：python 只在 office 技能运行时（桌面版 `primary-runtime` 离线自带）按需使用；git 用于“从 GitHub 装插件”前的检查。基础包不预装 git/python，缺失时相关功能明确失败。
+- 用户2026-11-17决定：Windows x64客户端随包内置CPython 3.12.14及上游primary-runtime同版13个office/data包，成员不必预装Python，离线可用。来源为python-build-standalone release `20260901` install_only，归档与wheel的URL/长度/SHA256/许可证固定在 `clients/installer/locks/python-win-x64.json`；只接受cp312/win_amd64及兼容纯Python wheel，不运行sdist、构建后端、pip或安装脚本。移除构建自带pip、头文件、静态库和PDB；wheel可选CLI脚本不安装，原许可证全部保留并在 `runtime/python/runtime.json`中列出。
+- Python落在 `versions/<id>/runtime/python`，文件进入Desktop包清单/包ID及发行签名输入，随安装、完整包自动更新和回滚整体切换。启动器仅给DSH进程设置PATH前置此目录，清除继承的PYTHONHOME/PYTHONPATH并禁用用户site-packages；解释器从自身目录定位标准库；不改系统PATH、注册表或用户已有Python。三个实际exe入口 `python`、`python3`、`py`指向同一CPython，`py`不实现Windows Launcher选版参数。
+- npm版DSH 0.2.1-rc.3通过公开子进程环境继承接入，无需桌面版 `resources/runtime/primary-runtime` 布局或私有配置。已按提交npm锁的integrity核对 `@deepseek-ai/dsh-subprocess` 的README/`scrubbedParentEnv()`：凭据和DSH_*清除，PATH/HOME等保留。shell-env只管理DSH_*，不替换Python路径。上游DSH保持原字节。Java、其他Python版本及平台的按需下载仍属P3，见资源包D8。
+- git仍用于“从GitHub装插件”前的检查，基础包不预装git，缺失时相关功能明确失败。
 - 本机开发机 Node 22.19.0 在 PATH（可作构建机），但**成员机器不能假设有 Node**，所以包内自带 Node。
 - **包内 Node 选 24.21.0（与上游桌面版自带版本一致），不用 22.19.0**。实测证据：同一台机器上访问平台首页，Node 22.19.0 的 `fetch` 报 `ECONNRESET`（curl 也握手失败），Node 24.21.0 返回 HTTP 200；插件的平台能力探测在 22.19 下得到 `{"reachable":false,"reason":"network"}`。这是本机网络环境对 TLS 客户端指纹的过滤，换用 24.21 即通过。DSH `engines` 为 `^22.19.0 || >=24`，插件要求 Node>=22.12，24 均满足。
 
