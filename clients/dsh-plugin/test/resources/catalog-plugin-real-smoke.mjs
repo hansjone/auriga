@@ -58,9 +58,8 @@ let control;
 const supervisor = new Supervisor(home, tree, null, {
   clearPlugins: (names) => control.clearPlugins(names),
   pluginsCleared: () => control?.pluginsCleared() ?? true,
-  time: () => ({ bootId: '2026-11-12T00:00:00.000Z', monotonicMillis: 1000 }),
 });
-const child = spawn(
+let child = spawn(
   process.execPath,
   [
     cli,
@@ -87,7 +86,7 @@ child.stdout.on('data', (b) => {
 child.stderr.on('data', (b) => {
   log += b;
 });
-const exited = once(child, 'exit');
+let exited = once(child, 'exit');
 tree.attach(child.pid);
 let release;
 async function result(name, timeout = 120000) {
@@ -116,18 +115,10 @@ try {
     remove: (names) => {
       const removed = spawnSync(
         process.execPath,
-        [
-          cli,
-          'plugin',
-          '--profile',
-          'web',
-          'remove',
-          ...names,
-          '--ignore-scripts',
-        ],
+        [cli, 'plugin', '--profile', 'web', 'remove', ...names],
         {
           cwd: evidence,
-          env,
+          env: { ...env, npm_config_ignore_scripts: 'true' },
           windowsHide: true,
           encoding: 'utf8',
           timeout: 120000,
@@ -156,16 +147,72 @@ try {
   assert.equal(installed.observed.name, '@example/catalog-plugin');
   assert.equal(installed.observed.active, true);
   assert.equal(installed.installation.state, 'applied');
-  const url = log.match(/http:\/\/127\.0\.0\.1:\d+/)?.[0];
+  const url = log.match(
+    /http:\/\/127\.0\.0\.1:\d+\/\?token=[A-Za-z0-9_-]+/,
+  )?.[0];
   assert.ok(url);
-  assert.equal((await fetch(url)).status, 200);
+  const bootstrap = await fetch(url, { redirect: 'manual' });
+  assert.equal(bootstrap.status, 303);
+  const cookie = bootstrap.headers.get('set-cookie')?.split(';')[0];
+  assert.ok(cookie);
+  assert.equal(
+    (
+      await fetch(new URL(bootstrap.headers.get('location'), url), {
+        headers: { cookie },
+      })
+    ).status,
+    200,
+  );
   writeFileSync(join(evidence, 'revoke-now'), '');
   await result('revoked');
   tree.refresh();
-  await supervisor.reconcile();
+  const revocationDeadline = Date.now() + 60000;
+  const revocationOutcomes = [];
+  do {
+    revocationOutcomes.push(await supervisor.reconcile());
+    writeFileSync(
+      join(evidence, 'revocation-outcomes.json'),
+      JSON.stringify(revocationOutcomes, null, 2),
+    );
+    if (await tree.isStopped()) break;
+    await delay(500);
+  } while (Date.now() < revocationDeadline);
   assert.equal(await tree.isStopped(), true);
   assert.equal(control.pluginsCleared(), true);
   assert.equal(supervisor.guardian.read().guardian.reason, 'revoked');
+  await exited;
+  child = spawn(
+    process.execPath,
+    [
+      cli,
+      'web',
+      '--patch',
+      patch,
+      '--no-open',
+      '--host',
+      '127.0.0.1',
+      '--port',
+      '0',
+    ],
+    {
+      cwd: evidence,
+      env: { ...env, P2B_PHASE: 'report' },
+      windowsHide: true,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    },
+  );
+  exited = once(child, 'exit');
+  child.stdout.on('data', (b) => {
+    log += b;
+  });
+  child.stderr.on('data', (b) => {
+    log += b;
+  });
+  tree.attach(child.pid);
+  const terminal = await result('terminal-report');
+  assert.equal(terminal.state, 'revoked');
+  assert.equal(terminal.reportSource, 'member');
+  assert.equal(terminal.observedGeneration, installed.installation.generation);
   writeFileSync(
     join(evidence, 'summary.json'),
     JSON.stringify(
@@ -177,6 +224,7 @@ try {
         stopped: true,
         removed: true,
         normalPageStatus: 200,
+        terminalReport: terminal,
       },
       null,
       2,

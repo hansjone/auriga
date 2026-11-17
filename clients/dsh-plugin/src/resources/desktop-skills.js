@@ -684,6 +684,75 @@ export function desktopSkills({ home, time = hostTime }) {
         return { cleanupPending: false };
       });
     },
+    /** Read-only waiting never takes C's writer lock: E must be able to acquire it
+     * to authorize the prepared snapshot. This shortcut can only delay work;
+     * finish still rechecks the permit and bytes under the lock before activation.
+     * @param {any} who @param {any[]} rows */
+    awaitingGuardian(who, rows) {
+      const value = ledger(who);
+      if (!value || !rows.length || rows.length !== value.installations.length)
+        return false;
+      if (
+        !rows.every((r) =>
+          value.installations.some(
+            (/** @type {any} */ old) =>
+              old.installationRevision === r.installationRevision &&
+              old.selectionRevision === r.selectionRevision &&
+              old.generation === r.generation &&
+              canonicalize(old.resource) === canonicalize(r.resource),
+          ),
+        )
+      )
+        return false;
+      if (
+        !value.installations.some(
+          (/** @type {any} */ r) =>
+            r.state === 'applying' && desiredState(r.resource) === 'ENABLED',
+        )
+      )
+        return false;
+      const transactions = readdirSync(join(root(who), 'transactions'));
+      if (transactions.length > 8192) refuse('resource.storage_unavailable');
+      if (
+        !transactions.some((file) => {
+          const tx = record(
+            join(root(who), 'transactions', file),
+            'UnifiedTransactionFile',
+          );
+          return (
+            tx.phase === 'prepared' &&
+            tx.operation === 'install' &&
+            tx.expectedLedgerRevision === value.revision &&
+            tx.selectionRevision === value.selectionRevision &&
+            tx.generation === value.generation
+          );
+        })
+      )
+        return false;
+      try {
+        for (const r of value.installations.filter(
+          (/** @type {any} */ r) => desiredState(r.resource) === 'ENABLED',
+        )) {
+          cached(who, r.resource.identity.manifestDigest);
+          for (const a of r.resource.artifacts) cached(who, a.digest);
+        }
+      } catch (error) {
+        if (
+          ['ENOENT', 'resource.digest_mismatch'].includes(
+            /** @type {any} */ (error).code,
+          )
+        )
+          return false;
+        throw error;
+      }
+      const stateFile = join(guardian, 'state.json');
+      if (!existsSync(stateFile)) return true;
+      const state = record(stateFile, 'UnifiedGuardianStateFile');
+      return (
+        state.guardian.state === 'verifying' ||
+        (state.guardian.state === 'active' && !permitted(who, value, state))
+      );
+    },
     /** A changed metadata CAS invalidates a prepared permit; retry only the exact current selection.
      * @param {any} who @param {any[]} rows */
     needsPreparation(who, rows) {
@@ -1145,6 +1214,28 @@ export function desktopSkills({ home, time = hostTime }) {
         }
         return { manifest, file, bytes };
       });
+    },
+    /** Read-only names for native policy reconciliation; no writer lock is needed
+     * because a stale snapshot can only withhold an exemption, never install code.
+     * @param {any} who */
+    policyNames(who) {
+      const names = [];
+      const value = ledger(who);
+      for (const row of value?.installations ?? []) {
+        if (
+          row.resource.identity.kind !== 'plugin' ||
+          desiredState(row.resource) !== 'ENABLED' ||
+          ['expired', 'revoked', 'failed', 'removed', 'disabled'].includes(
+            row.state,
+          )
+        )
+          continue;
+        const manifest = parseStrictJson(
+          cached(who, row.resource.identity.manifestDigest),
+        );
+        if (manifest.kind === 'plugin') names.push(manifest.plugin.packageName);
+      }
+      return names;
     },
     /** Read only a digest-bound manifest for a removal; expiry never prevents disabling.
      * @param {any} who @param {any} row */

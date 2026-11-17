@@ -3,8 +3,9 @@ import { join } from 'node:path';
 import { setImmediate } from 'node:timers';
 import { setTimeout as delay } from 'node:timers/promises';
 import { catalogFixture } from './catalog-fixture.js';
-import { catalogService } from './broker-fixture.js';
+import { catalogService, resourceBroker } from './broker-fixture.js';
 import { resourceHost } from '../../src/resources/host.js';
+import { hostTime } from '../../src/resources/host-lock.js';
 
 export const name = 'auriga-catalog-plugin-real-probe';
 export const inject = ['pluginManager'];
@@ -18,9 +19,60 @@ export function apply(ctx) {
   setImmediate(
     () =>
       void (async () => {
+        if (process.env.P2B_PHASE === 'report') {
+          const prepared = JSON.parse(
+            readFileSync(join(evidence, 'prepared.json'), 'utf8'),
+          );
+          let row = JSON.parse(
+            readFileSync(join(evidence, 'installed.json'), 'utf8'),
+          ).installation;
+          const identity = {
+            tenantId: row.resource.identity.tenantId,
+            ownerId: '019a0000-0000-7000-8000-000000000012',
+            clientId: row.clientId,
+          };
+          const runtime = {
+            config: { platformOrigin: 'http://platform.example.test' },
+            vault: {
+              snapshot: () => ({
+                credential: {
+                  claims: {
+                    tid: identity.tenantId,
+                    sub: identity.ownerId,
+                    did: identity.clientId,
+                  },
+                },
+              }),
+            },
+            getAccess: async () => 'fixture-token',
+          };
+          resourceBroker(runtime, async (url, options) => {
+            if (url.pathname.endsWith('/installations'))
+              return Response.json({ items: [row] });
+            if (url.pathname.endsWith('/installation-reports')) {
+              const report = JSON.parse(options.body);
+              put('terminal-report', report);
+              row = { ...row, state: report.state, report };
+              return Response.json(row);
+            }
+            throw new Error('unexpected recovery request');
+          });
+          const service = catalogService({
+            runtime,
+            current: () => runtime,
+            home: process.env.DSH_HOME,
+            privateSkills: {},
+            host: {},
+            pluginHost: resourceHost(ctx),
+            roots: async () => prepared.trust,
+          });
+          await service.list();
+          return;
+        }
         const f = catalogFixture({ after() {} }, undefined, {
           home: process.env.DSH_HOME,
           kind: 'plugin',
+          time: hostTime,
           bundleFiles: {
             'package/cordis.patch.yml':
               '- insert:\n    - id: catalog-managed-example\n      name: "@example/catalog-plugin"\n',

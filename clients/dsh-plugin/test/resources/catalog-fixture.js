@@ -274,6 +274,10 @@ export function catalogFixture(t, temporaryRoot = tmpdir(), config = {}) {
   };
   const guardianDir = join(home, 'auriga/guardian');
   mkdirSync(guardianDir, { recursive: true });
+  const time =
+    config.time ??
+    (() => ({ bootId: '2026-11-12T00:00:00.000Z', monotonicMillis: 1000 }));
+  const sample = time();
   const state = {
     schemaVersion: 1,
     revision: 1,
@@ -289,12 +293,12 @@ export function catalogFixture(t, temporaryRoot = tmpdir(), config = {}) {
       newSessionRequired: true,
     },
     clock: {
-      bootId: clockBootId('2026-11-12T00:00:00.000Z'),
+      bootId: clockBootId(sample.bootId),
       maxObservedTime: now,
       lastTrustedTime: now,
       lastTrustedTimeSource: 'authenticated_server',
-      lastMonotonicMillis: 1000,
-      leaseDeadlineMonotonicMillis: 3601000,
+      lastMonotonicMillis: sample.monotonicMillis,
+      leaseDeadlineMonotonicMillis: sample.monotonicMillis + 3600000,
     },
   };
   const writeState = () =>
@@ -328,7 +332,7 @@ export function catalogFixture(t, temporaryRoot = tmpdir(), config = {}) {
   };
   const desktop = desktopSkills({
     home,
-    time: () => ({ bootId: '2026-11-12T00:00:00.000Z', monotonicMillis: 1000 }),
+    time,
   });
   resourceBroker(runtime, fetchImpl);
   return {
@@ -341,10 +345,11 @@ export function catalogFixture(t, temporaryRoot = tmpdir(), config = {}) {
     archive,
     resource,
     revoked,
-    revoke: () =>
-      signed(
+    revoke: () => {
+      const { signature: _signature, ...body } = revoked;
+      return signed(
         {
-          ...revoked,
+          ...body,
           revision: revoked.revision + 1,
           revokedArtifacts: [
             { packageId, versionId, digest: id.manifestDigest },
@@ -352,7 +357,8 @@ export function catalogFixture(t, temporaryRoot = tmpdir(), config = {}) {
         },
         revocation,
         'revoke-test',
-      ),
+      );
+    },
     runtime,
     roots,
     desktop,

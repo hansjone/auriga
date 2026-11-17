@@ -1,4 +1,4 @@
-import { afterEach, expect, it, vi } from 'vitest';
+﻿import { afterEach, expect, it, vi } from 'vitest';
 import { AurigaTeamPanel } from '../src/TeamPanel';
 import {
   ResourceDiagnosticError,
@@ -110,7 +110,7 @@ it('offers a next step for empty skill markets and installations', async () => {
   click(panel, 'My resources');
   await vi.waitFor(() =>
     expect(panel.shadowRoot!.textContent).toContain(
-      'Choose a skill from the market',
+      'Choose a resource from the market',
     ),
   );
 });
@@ -179,7 +179,7 @@ it('separates Skill reads from legacy plugin APIs, installs the selected exact v
   const fetch = vi.fn(async (path: string, init?: RequestInit) => {
     if (path.startsWith('/api/resource/v1/packages'))
       return Response.json({ items: [] });
-    if (path === 'catalog/packages?limit=50')
+    if (path === 'catalog/packages?limit=50&kind=skill')
       return Response.json({
         items: [{ id: packageId, kind: 'skill', name: 'example' }],
       });
@@ -332,7 +332,7 @@ it('waits for explicit collision confirmation before retrying an exact install',
       });
     return Response.json({
       items:
-        path === 'catalog/packages?limit=50'
+        path === 'catalog/packages?limit=50&kind=skill'
           ? [{ id: packageId, kind: 'skill', name: 'example' }]
           : [],
     });
@@ -410,7 +410,7 @@ it('lays out skill cards and version permissions without exposing owner UUIDs in
     locale: 'zh-CN',
     fetch: async (path) =>
       Response.json(
-        path === 'catalog/packages?limit=50'
+        path === 'catalog/packages?limit=50&kind=skill'
           ? {
               items: [
                 {

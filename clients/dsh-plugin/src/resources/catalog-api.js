@@ -26,11 +26,16 @@ export function catalogIdentity(runtime) {
   const r = memberIdentity(runtime);
   return { tenantId: r.tenantId, ownerId: r.ownerId, hostId: r.clientId };
 }
-/** @param {{runtime:any,current:()=>any,fetchImpl?:typeof fetch}} options */
-export function catalogApi({ runtime, current, fetchImpl: _fetchImpl }) {
+/** @param {{runtime:any,current:()=>any,fetchImpl?:typeof fetch,policy?:{read:()=>boolean,write:(allowed:boolean)=>void}}} options */
+export function catalogApi({
+  runtime,
+  current,
+  fetchImpl: _fetchImpl,
+  policy,
+}) {
   const who = catalogIdentity(runtime),
     _origin = runtime.config.platformOrigin;
-  let allowPersonalPlugins = true;
+  let allowPersonalPlugins = policy?.read() ?? true;
   function check() {
     if (runtime.vault?.snapshot?.().resourceIsolationPending)
       refuse('resource.storage_unavailable');
@@ -148,7 +153,6 @@ export function catalogApi({ runtime, current, fetchImpl: _fetchImpl }) {
         )
           refuse('common.conflict');
         pagePolicy = value.allowPersonalPlugins ?? true;
-        allowPersonalPlugins = value.allowPersonalPlugins ?? true;
         for (const row of value.items) {
           requireInstallation(row);
           if (
@@ -162,7 +166,13 @@ export function catalogApi({ runtime, current, fetchImpl: _fetchImpl }) {
           seen.add(row.resource.identity.packageId);
           rows.push(row);
         }
-        if (!value.nextCursor) return rows;
+        if (!value.nextCursor) {
+          check();
+          policy?.write(pagePolicy);
+          check();
+          allowPersonalPlugins = pagePolicy;
+          return rows;
+        }
         if (value.nextCursor === cursor) refuse('common.validation_failed');
         cursor = value.nextCursor;
       }

@@ -57,12 +57,11 @@ export function watchCatalogIdentity({
     watcher.close();
   });
   const tick = () => {
-    if (closed || running || !existsSync(state)) return;
+    if (closed || running) return;
     const runtime = current();
     if (!runtime || runtime.resourceIdentity) return;
     running = true;
-    void fence
-      .fromRuntime(runtime)
+    void (existsSync(state) ? fence.fromRuntime(runtime) : Promise.resolve())
       .then(() => reconcile())
       .catch(() => {})
       .finally(() => {

@@ -2,7 +2,8 @@ import { desiredState } from './selection-state.js';
 import { existsSync } from 'node:fs';
 /* global FormData, Blob */
 import { join, resolve } from 'node:path';
-import { catalogApi } from './catalog-api.js';
+import { catalogApi, catalogIdentity } from './catalog-api.js';
+import { nativePluginPolicy } from './native-policy.js';
 import { desktopSkills, sha } from './desktop-skills.js';
 import { packSkill } from './skill-package.js';
 import { canonicalize, parseStrictJson } from './json.js';
@@ -17,9 +18,22 @@ import { resourceStage, resourceFailure } from './diagnostics.js';
 import { validateArchive } from './archive.js';
 /** @param {{runtime:any,current:()=>any,home?:string,privateSkills:any,host:any,pluginHost?:any,trustFile?:string,roots?:()=>Promise<any>,fetchImpl?:typeof fetch,desktop?:ReturnType<typeof desktopSkills>}} options */
 export function catalogService(options) {
-  const api = catalogApi(options),
-    who = api.who,
+  const who = catalogIdentity(options.runtime),
     cloud = !!options.runtime.resourceIdentity;
+  const policy =
+    !cloud && options.home
+      ? nativePluginPolicy({
+          home: options.home,
+          who,
+          origin: options.runtime.config.platformOrigin,
+        })
+      : undefined;
+  const api = catalogApi({
+    runtime: options.runtime,
+    current: options.current,
+    fetchImpl: options.fetchImpl,
+    policy,
+  });
   /** @type {ReturnType<typeof desktopSkills>|undefined} */ let desktop;
   /** @type {string|undefined} */ let storageReason;
   if (!cloud) {
@@ -69,7 +83,6 @@ export function catalogService(options) {
       ]),
     );
   }
-  let pending = true;
   async function finish() {
     if (!desktop) return;
     api.check();
@@ -389,59 +402,78 @@ export function catalogService(options) {
       row.state = state;
     }
   }
+  async function enforcePersonalPolicy() {
+    if (cloud || api.personalPluginsAllowed())
+      return { blocked: [], restartRequired: false };
+    api.check();
+    let names = [];
+    try {
+      names = desktop?.policyNames(who) ?? [];
+    } catch {
+      /* Invalid cache grants no native-policy exemptions. */
+    }
+    const result = await options.pluginHost?.enforcePersonalPolicy(
+      false,
+      names,
+    );
+    api.check();
+    if (!result || !Array.isArray(result.blocked))
+      refuse('resource.apply_failed');
+    return result;
+  }
   return {
     who,
     cloud,
     async list() {
       return serial(async () => {
         let pendingRestart = false;
+        // Apply the persisted restriction before any potentially failing refresh.
+        const cachedPersonal = await enforcePersonalPolicy();
+        let items;
         try {
-          await finish();
+          items = await api.list();
         } catch (error) {
-          if (!occupied(error)) throw error;
-          pendingRestart = true;
-        }
-        const items = await api.list();
-        if (
-          !cloud &&
-          !pendingRestart &&
-          desktop?.needsPreparation(who, items)
-        ) {
-          await prepareRows(items);
-          await finish();
-        }
-        await syncPlugins(items);
-        let blockedPersonalPlugins = [];
-        let personalPluginPolicyPendingRestart = false;
-        if (!cloud && !api.personalPluginsAllowed()) {
-          const names = [];
-          for (const row of items.filter(
-            (r) => r.resource.identity.kind === 'plugin',
-          )) {
-            try {
-              const name = desktop?.pluginName(who, row);
-              if (name) names.push(name);
-            } catch {
-              /* Unproven names receive no native-policy exemption. */
-            }
+          if (
+            !cloud &&
+            !api.personalPluginsAllowed() &&
+            /** @type {any} */ (error).code === 'common.unavailable'
+          ) {
+            return {
+              identity: who,
+              cloud: false,
+              items: [],
+              sharedAvailable: false,
+              sharedUnavailableReason: 'platform_offline',
+              offline: true,
+              reportPending: true,
+              allowPersonalPlugins: false,
+              blockedPersonalPlugins: cachedPersonal.blocked,
+              personalPluginPolicyPendingRestart:
+                cachedPersonal.restartRequired === true,
+            };
           }
-          const policy = await options.pluginHost?.enforcePersonalPolicy(
-            false,
-            names,
-          );
-          if (!policy || !Array.isArray(policy.blocked))
-            refuse('resource.apply_failed');
-          blockedPersonalPlugins = policy.blocked;
-          personalPluginPolicyPendingRestart = policy.restartRequired === true;
+          throw error;
         }
-        if (!cloud)
-          pending = !!desktop
-            ?.read(who)
-            ?.installations.some(
-              (/** @type {any} */ row) =>
-                desiredState(row.resource) === 'ENABLED' &&
-                row.state === 'applying',
-            );
+        let waiting = !cloud && desktop?.awaitingGuardian(who, items);
+        if (!waiting) {
+          try {
+            await finish();
+          } catch (error) {
+            if (!occupied(error)) throw error;
+            pendingRestart = true;
+          }
+          if (
+            !cloud &&
+            !pendingRestart &&
+            desktop?.needsPreparation(who, items)
+          ) {
+            await prepareRows(items);
+            await finish();
+          }
+          await syncPlugins(items);
+          waiting = !cloud && desktop?.awaitingGuardian(who, items);
+        }
+        const personal = await enforcePersonalPolicy();
         return {
           identity: who,
           cloud,
@@ -451,31 +483,29 @@ export function catalogService(options) {
             (!cloud && !desktop ? 'guardian_missing' : undefined),
           pendingRestart,
           allowPersonalPlugins: api.personalPluginsAllowed(),
-          blockedPersonalPlugins,
-          personalPluginPolicyPendingRestart,
-          ...(await syncReports(items)),
+          blockedPersonalPlugins: personal.blocked,
+          personalPluginPolicyPendingRestart: personal.restartRequired === true,
+          ...(waiting
+            ? {
+                items: items.map((r) =>
+                  desiredState(r.resource) === 'ENABLED'
+                    ? { ...r, state: 'applying' }
+                    : r,
+                ),
+                reportPending: false,
+              }
+            : await syncReports(items)),
         };
       });
     },
     async reconcile() {
       if (cloud) return;
-      // Also enforces native host state and new automatic distributions after application.
-      if (!pending) {
-        await this.list();
-        return;
-      }
-      await finish();
-      const local = desktop?.read(who);
-      pending = !!local?.installations.some(
-        (/** @type {any} */ row) =>
-          desiredState(row.resource) === 'ENABLED' && row.state === 'applying',
-      );
-      if (pending && desktop?.needsPreparation(who, local.installations))
-        await this.list();
+      await this.list();
     },
     /** @param {{packageId:string,versionId:string,action:string,revision:number,key:string,confirmation?:string}} input */
     apply(input) {
       return serial(async () => {
+        await enforcePersonalPolicy();
         if (
           !uuid(input.packageId) ||
           !uuid(input.versionId) ||
@@ -613,7 +643,6 @@ export function catalogService(options) {
           )
         )
           refuse('common.conflict');
-        pending = true;
         try {
           await prepareRows(rows);
           await finish();

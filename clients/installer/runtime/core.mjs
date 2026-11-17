@@ -1365,17 +1365,12 @@ async function launchLocked({
         const dir = versionDir(root, readState(root).current);
         const result = spawnSync(
           nodeBin(dir),
-          [
-            dshBin(dir),
-            'plugin',
-            '--profile',
-            PROFILE,
-            'remove',
-            ...names,
-            '--ignore-scripts',
-          ],
+          [dshBin(dir), 'plugin', '--profile', PROFILE, 'remove', ...names],
           {
-            env: launchEnv(dir, initial.dataHome, env),
+            env: {
+              ...launchEnv(dir, initial.dataHome, env),
+              npm_config_ignore_scripts: 'true',
+            },
             windowsHide: true,
             encoding: 'utf8',
             timeout: 120000,
