@@ -10,6 +10,8 @@ public final class UnifiedSpec {
   private UnifiedSpec() {}
 
   public static boolean executionChanged(InstanceSpec before, InstanceSpec after) {
+    if ((before.hasAllowPersonalPlugins() ? before.getAllowPersonalPlugins() : true)
+        != (after.hasAllowPersonalPlugins() ? after.getAllowPersonalPlugins() : true)) return true;
     if (before.getUnifiedResourcesCount() != after.getUnifiedResourcesCount()) return true;
     var prior = refs(before.getUnifiedResourcesList());
     return after.getUnifiedResourcesList().stream()
@@ -131,7 +133,6 @@ public final class UnifiedSpec {
       String mode = ref.getInstallationMode().isEmpty() ? "optional" : ref.getInstallationMode();
       require(Set.of("required", "default", "optional").contains(mode));
       require(!mode.equals("required") || UnifiedResourceIntent.desired(ref).equals("ENABLED"));
-      require(!mode.equals("default") || !UnifiedResourceIntent.desired(ref).equals("REMOVED"));
       require(UnifiedResourceIntent.revision(ref) > 0);
       UnifiedResourceIntent.desired(ref);
     }

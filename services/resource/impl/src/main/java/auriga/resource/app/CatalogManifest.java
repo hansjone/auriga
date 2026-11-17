@@ -41,6 +41,11 @@ public final class CatalogManifest {
         || !digest(raw).equals(expected)) throw invalid();
     for (var host : m.path("permissions").path("outboundHosts")) host(host.asString());
     boolean plugin = m.path("kind").asString().equals("plugin");
+    if (plugin) {
+      String packageName = m.path("plugin").path("packageName").asString();
+      if (packageName.equals("auriga-dsh") || packageName.startsWith("@deepseek-ai/"))
+        throw invalid();
+    }
     for (var runtime : m.path("runtimes")) range(text(runtime, "versionRange", 128));
     for (var a : m.path("artifacts"))
       if (!a.path("role").asString().equals("payload")

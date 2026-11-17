@@ -55,6 +55,14 @@ for (const name of [
     singleQuote: true,
   });
   await writeFile(fileURLToPath(new URL(name + '.ts', output)), body);
+  if (name === 'resource')
+    await writeFile(
+      new URL(
+        '../../../clients/dsh-plugin/src/generated/resource.d.ts',
+        import.meta.url,
+      ),
+      body,
+    );
 }
 
 // These contracts are consumed by the admin application only.

@@ -22,6 +22,8 @@ var _ MappedNullable = &ShellAuthopenapiResourceYamlComponentsSchemasUnifiedVers
 
 // ShellAuthopenapiResourceYamlComponentsSchemasUnifiedVersion Draft version. Reviews bind manifest digest and version revision. Published manifests and artifacts are immutable.
 type ShellAuthopenapiResourceYamlComponentsSchemasUnifiedVersion struct {
+	// Latest review record for this version. Load authorized review evidence and verify exact version identity, revision and digest before publication.
+	ReviewId         *string                                                            `json:"reviewId,omitempty"`
 	Id               string                                                             `json:"id"`
 	PackageId        string                                                             `json:"packageId"`
 	Version          string                                                             `json:"version"`
@@ -66,6 +68,38 @@ func NewShellAuthopenapiResourceYamlComponentsSchemasUnifiedVersion(id string, p
 func NewShellAuthopenapiResourceYamlComponentsSchemasUnifiedVersionWithDefaults() *ShellAuthopenapiResourceYamlComponentsSchemasUnifiedVersion {
 	this := ShellAuthopenapiResourceYamlComponentsSchemasUnifiedVersion{}
 	return &this
+}
+
+// GetReviewId returns the ReviewId field value if set, zero value otherwise.
+func (o *ShellAuthopenapiResourceYamlComponentsSchemasUnifiedVersion) GetReviewId() string {
+	if o == nil || IsNil(o.ReviewId) {
+		var ret string
+		return ret
+	}
+	return *o.ReviewId
+}
+
+// GetReviewIdOk returns a tuple with the ReviewId field value if set, nil otherwise
+// and a boolean to check if the value has been set.
+func (o *ShellAuthopenapiResourceYamlComponentsSchemasUnifiedVersion) GetReviewIdOk() (*string, bool) {
+	if o == nil || IsNil(o.ReviewId) {
+		return nil, false
+	}
+	return o.ReviewId, true
+}
+
+// HasReviewId returns a boolean if a field has been set.
+func (o *ShellAuthopenapiResourceYamlComponentsSchemasUnifiedVersion) HasReviewId() bool {
+	if o != nil && !IsNil(o.ReviewId) {
+		return true
+	}
+
+	return false
+}
+
+// SetReviewId gets a reference to the given string and assigns it to the ReviewId field.
+func (o *ShellAuthopenapiResourceYamlComponentsSchemasUnifiedVersion) SetReviewId(v string) {
+	o.ReviewId = &v
 }
 
 // GetId returns the Id field value
@@ -406,6 +440,9 @@ func (o ShellAuthopenapiResourceYamlComponentsSchemasUnifiedVersion) MarshalJSON
 
 func (o ShellAuthopenapiResourceYamlComponentsSchemasUnifiedVersion) ToMap() (map[string]interface{}, error) {
 	toSerialize := map[string]interface{}{}
+	if !IsNil(o.ReviewId) {
+		toSerialize["reviewId"] = o.ReviewId
+	}
 	toSerialize["id"] = o.Id
 	toSerialize["packageId"] = o.PackageId
 	toSerialize["version"] = o.Version

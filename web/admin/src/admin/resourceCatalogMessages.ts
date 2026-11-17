@@ -32,7 +32,7 @@ export const catalogMessages = {
     default: '默认安装',
     optional: '成员可选',
     modeNote:
-      '必装且启用：成员不可关闭或卸载；默认安装：成员可关闭、不可卸载；成员可选：自行安装、更新、关闭或卸载。多条规则取最严格方式；L0 由部署维护。',
+      '必装且启用：成员不可关闭或卸载；默认安装：成员可关闭或卸载；成员可选：自行安装、更新、关闭或卸载。多条规则取最严格方式；L0 由部署维护。',
     assign: '创建分发规则',
     removeAssignment: '停用规则',
     activeRule: '有效',
@@ -168,7 +168,7 @@ export const catalogMessages = {
     default: 'Installed by default',
     optional: 'Member optional',
     modeNote:
-      'Required: members cannot disable or remove. Default: members can disable but cannot remove. Optional: members choose installation, updates, disable and removal. The strictest matching rule applies. L0 belongs to deployment.',
+      'Required: members cannot disable or remove. Default: members can disable or remove. Optional: members choose installation, updates, disable and removal. The strictest matching rule applies. L0 belongs to deployment.',
     assign: 'Create distribution rule',
     removeAssignment: 'Deactivate rule',
     activeRule: 'Active',

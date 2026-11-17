@@ -20,11 +20,12 @@ var _ MappedNullable = &UnifiedHighWatermarksFile{}
 
 // UnifiedHighWatermarksFile struct for UnifiedHighWatermarksFile
 type UnifiedHighWatermarksFile struct {
-	SchemaVersion                     int32                    `json:"schemaVersion"`
-	Revision                          int64                    `json:"revision"`
-	Entries                           []UnifiedHighWatermark   `json:"entries"`
-	MigrationMarkers                  []UnifiedMigrationMarker `json:"migrationMarkers"`
-	ConsumedDowngradeAuthorizationIds []string                 `json:"consumedDowngradeAuthorizationIds"`
+	SchemaVersion    int32                    `json:"schemaVersion"`
+	Revision         int64                    `json:"revision"`
+	Entries          []UnifiedHighWatermark   `json:"entries"`
+	MigrationMarkers []UnifiedMigrationMarker `json:"migrationMarkers"`
+	// Durable, deduplicated single-use IDs, reserved under the host mutation lock before activation and never cleared by uninstall, ledger cleanup, rollback or restart. Keep the maximum release watermark. Fail closed when storage is full; never evict IDs to admit a replay.
+	ConsumedDowngradeAuthorizationIds []string `json:"consumedDowngradeAuthorizationIds"`
 	AdditionalProperties              map[string]interface{}
 }
 

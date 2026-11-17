@@ -11,6 +11,35 @@ import org.junit.jupiter.api.Test;
 
 class UnifiedSpecTest {
   @Test
+  void defaultAllowsRemovalWhileRequiredRejectsIt() {
+    var installed =
+        empty.toBuilder()
+            .addUnifiedResources(ref.toBuilder().setInstallationMode("default"))
+            .build();
+    var removed =
+        ref.toBuilder()
+            .setEnabled(false)
+            .setDesiredState(UNIFIED_RESOURCE_DESIRED_STATE_REMOVED)
+            .setInstallationMode("default")
+            .setInstallationRevision(2)
+            .build();
+    var selection = UnifiedSelection.newBuilder().setIdentity(id).setAction("remove").build();
+    assertEquals(
+        removed,
+        UnifiedSpec.apply(installed, 2, List.of(selection), resolution(2, removed), false)
+            .getUnifiedResources(0));
+    assertThrows(
+        AurigaException.class,
+        () ->
+            UnifiedSpec.apply(
+                installed,
+                2,
+                List.of(selection),
+                resolution(2, removed.toBuilder().setInstallationMode("required").build()),
+                false));
+  }
+
+  @Test
   void trustedAssignmentMaySupersedeAnUnappliedRevisionButCannotRebindIdentitySequence() {
     var installed = empty.toBuilder().addUnifiedResources(ref).build();
     var next = ref.toBuilder().setInstallationMode("required").setInstallationRevision(2).build();

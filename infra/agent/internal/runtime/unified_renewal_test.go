@@ -72,10 +72,13 @@ func TestUnifiedRenewalExtendsRunningDeadlineWithoutResettingCAS(t *testing.T) {
 		t.Fatal(err)
 	}
 	var policy struct {
-		SchemaVersion      int    `json:"schemaVersion"`
-		NewSessionRequired bool   `json:"newSessionRequired"`
-		LeaseExpiresAt     string `json:"leaseExpiresAt"`
-		TrustedTime        string `json:"trustedTime"`
+		SchemaVersion        int              `json:"schemaVersion"`
+		NewSessionRequired   bool             `json:"newSessionRequired"`
+		LeaseExpiresAt       string           `json:"leaseExpiresAt"`
+		TrustedTime          string           `json:"trustedTime"`
+		AllowPersonalPlugins bool             `json:"allowPersonalPlugins"`
+		ManagedPluginNames   []string         `json:"managedPluginNames"`
+		Plugins              []map[string]any `json:"plugins"`
 	}
 	if err := unifiedRead(filepath.Join(paths.Meta, "resource-session-policy.json"), &policy); err != nil || policy.LeaseExpiresAt != end {
 		t.Fatal("supervisor renewal not published", err)

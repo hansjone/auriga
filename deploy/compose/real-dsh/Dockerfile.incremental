@@ -4,6 +4,10 @@ ARG BASE_RUNTIME_IMAGE
 FROM ${BASE_RUNTIME_IMAGE}
 ARG BASE_RUNTIME_IMAGE
 USER 0:0
+# The public DSH plugin CLI requires the complete image's offline package manager.
+RUN if ! command -v corepack >/dev/null 2>&1 || ! command -v pnpm >/dev/null 2>&1 || ! COREPACK_ENABLE_NETWORK=0 pnpm --version; then \
+      echo "Incremental base lacks working pnpm/corepack; rebuild the full real-dsh image." >&2; exit 1; \
+    fi
 COPY deploy/compose/real-dsh/ /tmp/auriga-incremental/recipe/
 COPY clients/dsh-plugin/package*.json /tmp/auriga-incremental/plugin/
 # Refuse changed foundations and verify the existing manifest before deleting src.
