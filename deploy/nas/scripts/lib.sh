@@ -165,6 +165,8 @@ load_stack_env() {
   else
     die "stack.env not found (set AURIGA_DATA_ROOT or place stack.env under $NAS_ROOT)"
   fi
+  # Only the installation file may opt in to mounting the downgrade private key.
+  unset AURIGA_RESOURCE_DOWNGRADE_KID
   load_env_file "$_file"
   [ -n "${AURIGA_DATA_ROOT:-}" ] || die "AURIGA_DATA_ROOT is required"
   for _legacy in AURIGA_PORTAL_HOST AURIGA_ADMIN_HOST AURIGA_INSTANCE_PARENT_DOMAIN AURIGA_ISSUER AURIGA_TEAM_ORIGIN AURIGA_TEAM_RP_ID AURIGA_TLS_UPSTREAM AURIGA_SECURE_COOKIES AURIGA_TRUSTED_PROXIES; do

@@ -93,7 +93,8 @@ esac
 EOF
 chmod 0755 "$temp/bin/docker"
 export PATH="$temp/bin:$PATH"
-unset AURIGA_RESOURCE_DOWNGRADE_KID NAS_INSTALLER_ACTIVE AURIGA_NAS_BOOTSTRAP_BINARY
+unset NAS_INSTALLER_ACTIVE AURIGA_NAS_BOOTSTRAP_BINARY
+export AURIGA_RESOURCE_DOWNGRADE_KID=inherited-fixture-kid
 for leaf in bifrost.enabled collab.enabled managed.identity.enabled; do
   printf '0\n' >"$AURIGA_DATA_ROOT/$leaf"
 done

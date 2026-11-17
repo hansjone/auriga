@@ -106,20 +106,34 @@ NodeControl 的 `7443`。别名只加在 agent 容器内，TLS 仍核对 `platfo
 `start.sh` 与 `runtime-upgrade.sh` 通过同一个 Compose 入口读取该项。
 启用时只有 platform 只读挂载该私密目录，环境中只有 kid 和容器内的密钥路径
 `/run/auriga-resource-downgrade/downgrade.pk8`。
-留空或省略该项会在下次应用 Compose 配置时移除密钥挂载和两项 Spring 属性。
+NAS 脚本只从安装配置文件读取该项，忽略启动进程继承的同名环境变量。将 `stack.env` 中
+的项留空或删除后，下次应用 Compose 配置时会移除密钥挂载和两项 Spring 属性。
 预检按 platform 的实际 UID 检查目录与文件的权限和有效可读性，签发器启动时再次验证密钥。
 [Docker Compose bind 挂载](https://docs.docker.com/reference/compose-file/services/#volumes)
 
 升级已有开发栈时，在部署维护窗口核对并保留数据根、节点信任文件、安装密钥和现有
 `stack.env` 备份。换入同一审核提交的 NAS 配方，按现场需要迁移本机资源 origin 和配置降级根，
 再对原数据根执行 `preflight.sh` 和 `start.sh`。后者会应用新的 agent 容器别名并重启
-agent 读取节点信任文件。需要另行更新签名运行时的场景，继续使用
+agent 读取节点信任文件。启用降级签发的配方需配套使用识别 `resource-downgrade-compose.yml`
+的 bootstrap，消息启动、恢复和轮换据此校验既有容器的完整 Compose 文件列表。
+需要另行更新签名运行时的场景，继续使用
 `runtime-upgrade.sh` 和独立批准的运行时制品。
 
+对已经定点移植接线的 R9 开发栈，在原受信配方目录中合入本次 `scripts/lib.sh` 的
+签发配置读取修复，保留站点 Compose 扩展和既有 `resource-downgrade-compose.yml`。
+用原发行包的 `versions.txt`、`SHA256SUMS` 和当前 bootstrap 摘要确认对应源码，
+将本次 `owned()` 的精确路径校验移植到该源码并构建 Linux amd64 bootstrap。
+核对新二进制摘要后，用 `0755` 权限替换 `bin/auriga-nas-bootstrap` 或该安装实际
+选用的同名二进制。容器模式也使用此二进制，并在安装 helper 中只读映射。
+启动后检查消息就绪，必要时用
+`start-collab-network.sh` 恢复。变更签发开关前后产生的容器标签可以并存。
+
 验收时先核对 agent 容器内 `platform` 解析到环回、平台监听器发布在配置的环回端口。
-用该节点已登记的证书和 CA 请求合成的不存在授权，可以用 HTTP 404 确认已到达资源路由。
-随后从正常管理入口上架已签名插件和技能，在成员入口选择并启动真实 DSH 实例，
-核对生效状态、插件实际执行以及技能实际可用。启用降级时另测撤销已安装的高版本后，
+用该节点已登记的证书和 CA 请求合成的不存在授权，通用 HTTP 404 只确认 TLS 到 HTTPS
+监听器可达。用可归因的响应或服务端请求追踪确认 `CatalogNodeController` 命中，再通过
+正式流程签发有效节点 grant，取得签名清单和制品，核对签名及制品摘要。
+最后从正常管理入口上架已签名插件和技能，由成员选择资源并启动真实 DSH 实例，
+核对安装状态、插件实际执行及技能实际可用。启用降级时另测撤销已安装的高版本后，
 命中下位 required/default 规则，验证授权签名、下位版本生效和重复消费被拒。
 
 ## 初始化、启动、停止
