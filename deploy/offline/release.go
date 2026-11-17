@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"crypto/ed25519"
 	"crypto/sha256"
 	"crypto/x509"
@@ -9,7 +10,9 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/signal"
 	"path/filepath"
+	"syscall"
 )
 
 type releaseOptions struct {
@@ -215,6 +218,8 @@ func devkitByLocks(o releaseOptions, locks lockInventory, commit, index, public 
 }
 
 func generateRelease(o releaseOptions, builders releaseBuilders) error {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
 	if o.Key == "" || o.Out == "" || o.Cache == "" || o.Limit <= 0 {
 		return errors.New("release 需要 --sign-key、输出目录、缓存目录和正数附件上限")
 	}
@@ -334,15 +339,21 @@ func generateRelease(o releaseOptions, builders releaseBuilders) error {
 	if builders.Gate == nil {
 		return errors.New("缺少断网构建门禁")
 	}
-	gate, err := builders.Gate(gateRequest{Source: sourceRoot, Kit: cumulative, Out: gateOut, Executable: exe, Key: o.Key, Tag: o.Tag, Commit: commit, LockDigest: locks.Digest, SourceSHA: sourceAsset.SHA256, CatalogSHA: catalogSHA, DevkitSHA: kitSHA})
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	gate, err := builders.Gate(gateRequest{Context: ctx, Source: sourceRoot, Kit: cumulative, Out: gateOut, Executable: exe, Key: o.Key, Tag: o.Tag, Commit: commit, LockDigest: locks.Digest, SourceSHA: sourceAsset.SHA256, CatalogSHA: catalogSHA, DevkitSHA: kitSHA})
 	if err != nil {
 		return fmt.Errorf("断网构建门禁失败；补齐devkit后重新发版: %w", err)
+	}
+	if err := ctx.Err(); err != nil {
+		return err
 	}
 	if !gate.Passed || gate.Commit != commit || gate.LockDigest != locks.Digest || gate.SourceSHA != sourceAsset.SHA256 || gate.CatalogSHA != catalogSHA || gate.DevkitSHA != kitSHA {
 		return errors.New("断网构建门禁未通过或来源不符")
 	}
 	if o.Build {
-		if err := copyFile(gateOut, offline, 0644); err != nil {
+		if err := copyFileContext(ctx, gateOut, offline, 0644); err != nil {
 			return err
 		}
 	} else if err := builders.Bundle([]string{"--release", index, "--out", offline, "--sign-key", o.Key}, commit); err != nil {
@@ -351,17 +362,17 @@ func generateRelease(o releaseOptions, builders releaseBuilders) error {
 	var assets []assetInfo
 	var archives []assetInfo
 	for _, file := range []string{offline, kitTarget, deltaTarget, sourceTar} {
-		original, err := describeAsset(file)
+		original, err := describeAssetContext(ctx, file)
 		if err != nil {
 			return err
 		}
 		archives = append(archives, original)
-		names, err := splitAsset(file, o.Limit, o.Key)
+		names, err := splitAssetContext(ctx, file, o.Limit, o.Key)
 		if err != nil {
 			return err
 		}
 		for _, name := range names {
-			info, err := describeAsset(filepath.Join(stage, name))
+			info, err := describeAssetContext(ctx, filepath.Join(stage, name))
 			if err != nil {
 				return err
 			}
@@ -373,10 +384,10 @@ func generateRelease(o releaseOptions, builders releaseBuilders) error {
 			return err
 		}
 	}
-	if err := copyFile(exe, filepath.Join(stage, "auriga"), 0755); err != nil {
+	if err := copyFileContext(ctx, exe, filepath.Join(stage, "auriga"), 0755); err != nil {
 		return err
 	}
-	cli, err := describeAsset(filepath.Join(stage, "auriga"))
+	cli, err := describeAssetContext(ctx, filepath.Join(stage, "auriga"))
 	if err != nil {
 		return err
 	}
@@ -384,7 +395,7 @@ func generateRelease(o releaseOptions, builders releaseBuilders) error {
 	if err := signingPublic(o.Key, filepath.Join(stage, "release-public.pem")); err != nil {
 		return err
 	}
-	pubAsset, err := describeAsset(filepath.Join(stage, "release-public.pem"))
+	pubAsset, err := describeAssetContext(ctx, filepath.Join(stage, "release-public.pem"))
 	if err != nil {
 		return err
 	}
@@ -392,7 +403,7 @@ func generateRelease(o releaseOptions, builders releaseBuilders) error {
 	if err := writeDownloads(stage, o.Tag, cat, assets); err != nil {
 		return err
 	}
-	downloads, err := describeAsset(filepath.Join(stage, "DOWNLOADS.txt"))
+	downloads, err := describeAssetContext(ctx, filepath.Join(stage, "DOWNLOADS.txt"))
 	if err != nil {
 		return err
 	}
@@ -402,7 +413,7 @@ func generateRelease(o releaseOptions, builders releaseBuilders) error {
 		versions[tag] = entry.Kit.Locks.Digest
 	}
 	manifest := distributionManifest{Schema: 1, Tag: o.Tag, Commit: commit, Locks: locks, Devkit: cached, Assets: assets, Archives: archives, Baseline: cat.Baseline, Versions: versions, ResetReason: cat.ResetReason, Gate: gate}
-	if err := finalizeDistribution(stage, manifest, cat, o.Key); err != nil {
+	if err := finalizeDistribution(ctx, stage, manifest, cat, o.Key); err != nil {
 		return err
 	}
 	names, err := regularFiles(stage)
@@ -428,6 +439,9 @@ func generateRelease(o releaseOptions, builders releaseBuilders) error {
 	}
 	if finalLocks.Digest != locks.Digest {
 		return errors.New("发行期间依赖锁发生变化")
+	}
+	if err := ctx.Err(); err != nil {
+		return err
 	}
 	if err := os.Rename(stage, o.Out); err != nil {
 		return err

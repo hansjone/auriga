@@ -9,10 +9,24 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 )
 
-type gateRequest struct{ Source, Kit, Out, Executable, Key, Tag, Commit, LockDigest, SourceSHA, CatalogSHA, DevkitSHA string }
+type gateRequest struct {
+	Context    context.Context
+	Source     string
+	Kit        string
+	Out        string
+	Executable string
+	Key        string
+	Tag        string
+	Commit     string
+	LockDigest string
+	SourceSHA  string
+	CatalogSHA string
+	DevkitSHA  string
+}
 type buildGate struct {
 	Passed     bool   `json:"passed"`
 	Commit     string `json:"commit"`
@@ -26,21 +40,39 @@ type buildGate struct {
 	FinishedAt string `json:"finishedAt"`
 }
 
-func offlineBuildGate(o gateRequest) (buildGate, error) {
-	proof := buildGate{Commit: o.Commit, LockDigest: o.LockDigest, SourceSHA: o.SourceSHA, CatalogSHA: o.CatalogSHA, DevkitSHA: o.DevkitSHA, Network: gateNetwork, StartedAt: time.Now().UTC().Format(time.RFC3339)}
-	if err := verifyCumulative(o.Kit, o.Source, o.Tag, ""); err != nil {
-		return proof, err
+func offlineBuildGate(o gateRequest) (proof buildGate, gateErr error) {
+	proof = buildGate{Commit: o.Commit, LockDigest: o.LockDigest, SourceSHA: o.SourceSHA, CatalogSHA: o.CatalogSHA, DevkitSHA: o.DevkitSHA, Network: gateNetwork, StartedAt: time.Now().UTC().Format(time.RFC3339)}
+	parent := o.Context
+	if parent == nil {
+		parent = context.Background()
 	}
-	interrupted, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	interrupted, stop := signal.NotifyContext(parent, os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	ctx, cancel := context.WithTimeout(interrupted, gateBuildTimeout)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, "unshare", "--net", o.Executable, "internal-offline-build", "--source", o.Source, "--version", o.Tag, "--out", o.Out, "--sign-key", o.Key)
+	if err := verifyCumulative(o.Kit, o.Source, o.Tag, ""); err != nil {
+		return proof, err
+	}
+	if err := ctx.Err(); err != nil {
+		return proof, err
+	}
+	workspace, err := newGateWorkspace()
+	if err != nil {
+		return proof, err
+	}
+	defer func() {
+		closeErr := workspace.close()
+		gateErr = errors.Join(gateErr, closeErr, ctx.Err())
+		if gateErr != nil {
+			proof.Passed = false
+		}
+	}()
+	cmd := exec.CommandContext(ctx, "unshare", "--net", "--mount", "--propagation", "private", "--pid", "--fork", "--mount-proc", "--kill-child=KILL", o.Executable, "internal-offline-build", "--source", o.Source, "--version", o.Tag, "--out", o.Out, "--sign-key", o.Key, "--workdir", workspace.root, "--runtime-dir", workspace.runtime)
 	cmd.Dir = o.Source
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
-	cmd.Cancel = func() error { return cmd.Process.Signal(os.Interrupt) }
-	cmd.WaitDelay = 15 * time.Second
+	setGateProcessGroup(cmd)
+	cmd.WaitDelay = 45 * time.Second
 	if err := cmd.Run(); err != nil {
 		if ctx.Err() != nil {
 			return proof, fmt.Errorf("断网构建门禁已取消（完整构建时限 %s）: %w", gateBuildTimeout, ctx.Err())
@@ -51,9 +83,9 @@ func offlineBuildGate(o gateRequest) (buildGate, error) {
 	if err != nil {
 		return proof, err
 	}
-	defer func() { _ = os.RemoveAll(extracted) }()
+	defer func() { gateErr = errors.Join(gateErr, os.RemoveAll(extracted)) }()
 	result := filepath.Join(extracted, "package")
-	if err := extractVerified(o.Out, result, ""); err != nil {
+	if err := extractWithTrustContext(ctx, o.Out, result, trustOptions{}, false); err != nil {
 		return proof, err
 	}
 	var info provenance
@@ -63,8 +95,11 @@ func offlineBuildGate(o gateRequest) (buildGate, error) {
 	if info.Commit != o.Commit || info.UpstreamVersion != o.Tag || info.Version != o.Tag || info.SiteChanges || info.Dirty {
 		return proof, errors.New("门禁产物不是精确的干净目标源码")
 	}
-	proof.OutputSHA, err = digest(o.Out)
+	proof.OutputSHA, err = digestContext(ctx, o.Out)
 	if err != nil {
+		return proof, err
+	}
+	if err := ctx.Err(); err != nil {
 		return proof, err
 	}
 	proof.FinishedAt = time.Now().UTC().Format(time.RFC3339)
@@ -163,12 +198,12 @@ func writeDownloads(root, tag string, cat devkitCatalog, assets []assetInfo) err
 
 // Metadata sizes include this one-page guide itself. A short fixed point
 // iteration stabilizes those decimal sizes without hashing large assets again.
-func finalizeDistribution(root string, m distributionManifest, cat devkitCatalog, key string) error {
+func finalizeDistribution(ctx context.Context, root string, m distributionManifest, cat devkitCatalog, key string) error {
 	for attempt := 0; attempt < 12; attempt++ {
 		if err := jsonFile(filepath.Join(root, "release-manifest.json"), m, 0644); err != nil {
 			return err
 		}
-		if err := writeSums(root); err != nil {
+		if err := writeSumsContext(ctx, root); err != nil {
 			return err
 		}
 		if err := signSums(root, key); err != nil {
@@ -176,7 +211,7 @@ func finalizeDistribution(root string, m distributionManifest, cat devkitCatalog
 		}
 		listing := append([]assetInfo(nil), m.Assets...)
 		for _, name := range []string{"release-manifest.json", "SHA256SUMS", "SHA256SUMS.sig"} {
-			a, err := describeAsset(filepath.Join(root, name))
+			a, err := describeAssetContext(ctx, filepath.Join(root, name))
 			if err != nil {
 				return err
 			}
@@ -185,7 +220,7 @@ func finalizeDistribution(root string, m distributionManifest, cat devkitCatalog
 		if err := writeDownloads(root, m.Tag, cat, listing); err != nil {
 			return err
 		}
-		current, err := describeAsset(filepath.Join(root, "DOWNLOADS.txt"))
+		current, err := describeAssetContext(ctx, filepath.Join(root, "DOWNLOADS.txt"))
 		if err != nil {
 			return err
 		}
