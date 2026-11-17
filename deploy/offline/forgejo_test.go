@@ -83,11 +83,10 @@ func TestForgejoUploadDraftRetryAndConflict(t *testing.T) {
 			w.WriteHeader(201)
 			_ = json.NewEncoder(w).Encode(map[string]any{"id": 7, "draft": true, "tag_name": "1.0"})
 		case strings.HasSuffix(endpoint, "/assets") && r.Method == "GET":
+			// The release attachment endpoint does not paginate its response.
 			assets := []map[string]any{}
-			if r.URL.Query().Get("page") == "1" {
-				for name, body := range files {
-					assets = append(assets, map[string]any{"name": name, "size": len(body), "browser_download_url": base + "/download/" + name})
-				}
+			for name, body := range files {
+				assets = append(assets, map[string]any{"name": name, "size": len(body), "browser_download_url": base + "/download/" + name})
 			}
 			_ = json.NewEncoder(w).Encode(assets)
 		case strings.HasSuffix(endpoint, "/assets") && r.Method == "POST":

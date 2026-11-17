@@ -138,23 +138,19 @@ func (a *forgejoAPI) json(method, path string, input, output any, expected int) 
 }
 
 func (a *forgejoAPI) assets(path string) (map[string]forgejoAsset, error) {
-	result := map[string]forgejoAsset{}
-	for page := 1; page <= 10001; page++ {
-		var entries []forgejoAsset
-		if err := a.json("GET", fmt.Sprintf("%s?limit=50&page=%d", path, page), nil, &entries, 200); err != nil {
-			return nil, err
-		}
-		if len(entries) == 0 {
-			return result, nil
-		}
-		for _, entry := range entries {
-			if _, ok := result[entry.Name]; ok {
-				return nil, errors.New("远端附件重名")
-			}
-			result[entry.Name] = entry
-		}
+	// Forgejo returns the complete attachment list and ignores page parameters.
+	var entries []forgejoAsset
+	if err := a.json("GET", path, nil, &entries, 200); err != nil {
+		return nil, err
 	}
-	return nil, errors.New("远端附件分页超限")
+	result := map[string]forgejoAsset{}
+	for _, entry := range entries {
+		if _, ok := result[entry.Name]; ok {
+			return nil, errors.New("远端附件重名")
+		}
+		result[entry.Name] = entry
+	}
+	return result, nil
 }
 
 func (a *forgejoAPI) verifyAsset(remote forgejoAsset, local assetInfo) error {
