@@ -28,7 +28,9 @@ export const settingsZh = {
   alwaysOnRequiresApproval: '常驻运行需批准',
   maxConcurrentStarts: '同时冷启动上限',
   defaultDshVersion: '默认 DSH 版本',
-  allowPersonalPlugins: '允许个人插件',
+  allowPersonalPlugins: '允许成员在 DSH 原生管理中自行安装插件',
+  personalPluginsNote:
+    '控制 DSH 原生个人安装；缺省允许。平台统一目录仅发行经过审核的共享资源。',
 };
 export const settingsEn = {
   settingsTeam: 'Team profile',
@@ -64,5 +66,8 @@ export const settingsEn = {
   alwaysOnRequiresApproval: 'Always-on requires approval',
   maxConcurrentStarts: 'Maximum concurrent starts',
   defaultDshVersion: 'Default DSH version',
-  allowPersonalPlugins: 'Allow personal plugins',
+  allowPersonalPlugins:
+    'Allow members to install plugins in native DSH management',
+  personalPluginsNote:
+    'Controls native DSH personal installation; allowed when unset. The catalog only publishes reviewed shared resources.',
 };

@@ -1,30 +1,50 @@
 import type { components } from '../../../shared/src/generated/resource';
 import { ApiError } from '@auriga/shared';
 import { apiClient, readResource } from '../api';
+import type { CatalogKind } from './resourceCatalogUpload';
 
 export type CatalogVersion = components['schemas']['UnifiedVersion'];
 export type CatalogReview = components['schemas']['UnifiedReview'];
 export type CatalogDistribution = components['schemas']['UnifiedDistribution'];
 export type CatalogPackage = components['schemas']['UnifiedPackage'];
+export type CatalogAssignment = components['schemas']['UnifiedAssignment'];
+// CatalogController/ResourceWorkflowController encode the persisted revision as
+// a quoted decimal ETag. Admin review embeds the version snapshot but only sends
+// the review ETag; use its exact version revision for the version CAS.
+export function catalogRevisionEtag(revision: number) {
+  return Number.isSafeInteger(revision) && revision > 0
+    ? `"${revision}"`
+    : null;
+}
 type S = components['schemas'];
 type ReadResult<T> = Promise<{ data: T; etag: string | null }>;
 const base = '/api/resource/v1/catalog/packages';
 const admin = '/api/resource/v1/admin/catalog';
 const id = encodeURIComponent;
 const path = (p: string, v: string) => `${base}/${id(p)}/versions/${id(v)}`;
+// getRandomValues is available on supported HTTP origins too.
+export function catalogKey() {
+  const bytes = globalThis.crypto.getRandomValues(new Uint8Array(16));
+  bytes[6] = (bytes[6]! & 15) | 64;
+  bytes[8] = (bytes[8]! & 63) | 128;
+  const hex = Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join(
+    '',
+  );
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
 const headers = (etag: string, key: string) => ({
   'If-Match': etag,
   'Idempotency-Key': key,
 });
-const query = (cursor?: string) =>
+const query = (cursor?: string, kind?: CatalogKind) =>
   new URLSearchParams({
-    kind: 'skill',
+    ...(kind ? { kind } : {}),
     limit: '50',
     ...(cursor ? { cursor } : {}),
   });
 export const resourceCatalogApi = {
-  packages: (cursor?: string) =>
-    apiClient.get<S['UnifiedPackagePage']>(`${base}?${query(cursor)}`, {
+  packages: (cursor?: string, kind?: CatalogKind) =>
+    apiClient.get<S['UnifiedPackagePage']>(`${base}?${query(cursor, kind)}`, {
       cache: 'no-store',
     }),
   get: (p: string): ReadResult<CatalogPackage> =>
@@ -40,15 +60,18 @@ export const resourceCatalogApi = {
     ),
   version: (p: string, v: string): ReadResult<CatalogVersion> =>
     readResource<CatalogVersion>(path(p, v)),
-  reviews: (cursor?: string) =>
-    apiClient.get<S['UnifiedReviewPage']>(`${admin}/review?${query(cursor)}`, {
-      cache: 'no-store',
-    }),
+  reviews: (cursor?: string, kind?: CatalogKind) =>
+    apiClient.get<S['UnifiedReviewPage']>(
+      `${admin}/review?${query(cursor, kind)}`,
+      {
+        cache: 'no-store',
+      },
+    ),
   review: (r: string): ReadResult<CatalogReview> =>
     readResource<CatalogReview>(`${admin}/reviews/${id(r)}`),
-  published: (cursor?: string) =>
+  published: (cursor?: string, kind?: CatalogKind) =>
     apiClient.get<S['UnifiedVersionPage']>(
-      `${admin}/published?${query(cursor)}`,
+      `${admin}/published?${query(cursor, kind)}`,
       { cache: 'no-store' },
     ),
   decide: (
@@ -104,13 +127,27 @@ export const resourceCatalogApi = {
       headers: headers(etag, key),
     });
   },
-  distributions: (cursor?: string) =>
+  distributions: (cursor?: string, kind?: CatalogKind) =>
     apiClient.get<S['UnifiedDistributionPage']>(
-      `${admin}/distributions?${query(cursor)}`,
+      `${admin}/distributions?${query(cursor, kind)}`,
       { cache: 'no-store' },
     ),
   distribution: (d: string): ReadResult<CatalogDistribution> =>
     readResource<CatalogDistribution>(`${admin}/distributions/${id(d)}`),
+  assignments: (cursor?: string) =>
+    apiClient.get<S['UnifiedAssignmentPage']>(
+      `${admin}/assignments?${query(cursor)}`,
+      { cache: 'no-store' },
+    ),
+  assign: (body: S['UnifiedAssignmentInput'], key: string) =>
+    apiClient.post<CatalogAssignment>(`${admin}/assignments`, body, {
+      headers: headers('"0"', key),
+    }),
+  removeAssignment: (assignmentId: string, etag: string, key: string) =>
+    apiClient.delete<CatalogAssignment>(
+      `${admin}/assignments/${id(assignmentId)}`,
+      { headers: headers(etag, key) },
+    ),
   distribute: (
     body: S['UnifiedDistributionInput'],
     etag: string,
