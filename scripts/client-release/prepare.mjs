@@ -21,6 +21,10 @@ import {
   sealInputs,
 } from './inputs.mjs';
 import { sha256File } from '../../clients/installer/runtime/verify.mjs';
+import {
+  downloadPythonInputs,
+  readPythonLock,
+} from '../../clients/installer/scripts/python-runtime.mjs';
 
 function run(command, args, cwd, env = process.env) {
   const result = spawnSync(command, args, {
@@ -42,7 +46,10 @@ async function download(url, path) {
       '--fail',
       '--silent',
       '--show-error',
+      '--location',
       '--proto',
+      '=https',
+      '--proto-redir',
       '=https',
       '--max-time',
       '300',
@@ -83,6 +90,7 @@ export async function prepareInputs(parent) {
   const pnpmBuildVersion = packageManager.match(/^pnpm@(\d+\.\d+\.\d+)$/)?.[1];
   if (!pnpmBuildVersion) throw new Error('pnpm 必须固定精确版本');
   const tar = join(process.env.SystemRoot ?? 'C:\\Windows', 'System32/tar.exe');
+  await downloadPythonInputs(readPythonLock(), kit, download);
   mkdirSync(join(kit, 'runtime'));
   mkdirSync(join(kit, 'build-node'));
   for (const version of [...new Set([BUILD_NODE, runtime.node])]) {

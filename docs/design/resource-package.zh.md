@@ -78,7 +78,9 @@ delivery=git，repository为去凭据HTTPS地址，commit为完整40或64位十�
 
 规划 `<DataHome>/auriga/runtimes/<kind>/<精确版本>/<os>-<arch>/`，每项runtime带平台签名、来源、许可证、归档摘要、文件清单和兼容性元数据。Node可导入随包已验证副本，或登记受保护安装版本引用。后者须参与应用升级/回滚清理的引用核对，避免删除正在使用的Node。
 
-Python采用python-build-standalone，Java采用Eclipse Temurin 21 LTS，均经平台审核、签名后按需下载。Node复用Auriga Desktop自带的受管版本。Python固定精确版本、发行构建标识与平台，Temurin固定21 LTS的精确更新版本和构建号，发布记录保存来源、许可证与摘要。runtime范围解析为平台目录中允许的精确版本，下载与解包校验完成后写回执。多个工具共享只读runtime，依赖目录独立。回执同时记录安装版本、回滚保留、开发者固定引用和活进程租约。GC在锁内删前复核，下载/解包失败保留已有runtime。离线使用已缓存且仍可信的runtime和依赖。
+用户于2026-11-17修订D8：Windows x64 Auriga Desktop随安装包内置python-build-standalone CPython 3.12.14，开箱及离线可用；Node继续复用Desktop受管版本。Python固定release `20260901` 的 `x86_64-pc-windows-msvc-install_only` 归档，URL、SHA256、长度和13个wheel锁在 `clients/installer/locks/python-win-x64.json`。全部为cp312/win_amd64或兼容纯Python预构建wheel，先校验全部摘要再离线物化到site-packages，不运行pip、sdist、构建后端或安装脚本。包集合与上游桌面primary-runtime一致；保留Python和各wheel许可证原文，`runtime/python/runtime.json`记录版本、来源、wheel摘要、许可证路径及省略的CLI工具脚本。
+
+内置Python位于 `versions/<id>/runtime/python`，随Desktop完整包校验、升级切换、失败恢复和回滚；由启动器仅向DSH及其子进程前置PATH，`python`、`python3`解析到同一内置解释器，系统py仍按原PATH解析，不改系统PATH、注册表或用户Python。Lib与site-packages的unchecked-hash pyc由固定解释器预编译并纳入校验。安装后显式保护DACL拒绝普通文件访问的内容写入和新建目录项，保留Windows删除接口所需的删除/元数据属性权限。无pip/ensurepip，不支持向受管运行时装依赖。额外文件触发 `desktop.python_runtime_modified` 并提示重新运行同版本安装包。版本目录保留期间不得单独GC此运行时；不属于P3动态runtime缓存。Java仍采用Eclipse Temurin 21 LTS，其他Python版本及其他平台的runtime仍按P3经平台审核签名后按需下载。固定精确版本/构建号/平台，发布记录保存来源、许可证与摘要；runtime范围解析为允许的精确版本并写回执。多个工具共享只读runtime、工具依赖目录独立，GC核对活进程、回滚保留和开发者引用，失败保留已有runtime。
 
 普通模式采用平台维护的兼容版本和安全更新策略，新runtime先安装再逐工具切换，保留有效旧版回滚。开发者可显式选择自装runtime的绝对路径并查看实际版本。进程工作目录与环境允许表来自工具安装记录，平台访问令牌不传给工具。
 
@@ -199,7 +201,7 @@ K另冻结按kind/delivery的服务端授权矩阵：现有resource.packages.upl
 
 P2交付online与offline工具。端点/凭据绑定、平台payload和进程回报契约先行，后端制品/审核、客户端执行/终止、管理/成员页面并行。依赖P1的统一版本与发行模型。代理授权、独立来源页面、进程回收通过正常入口分别验收。
 
-P3交付Git源码工具和Python/Java runtime。commit/快照/锁文件、隔离构建契约先行，平台抓取/构建、客户端runtime/依赖、开发者侧载/日志并行。依赖P2工具生命周期与P1制品签名，验收runtime共享/GC、应用升级/回滚和活进程引用。
+P3交付Git源码工具和Java、其他Python版本/平台的按需runtime；Windows内置3.12.14不依赖P3。commit/快照/锁文件、隔离构建契约先行，平台抓取/构建、客户端runtime/依赖、开发者侧载/日志并行。依赖P2工具生命周期与P1制品签名，验收runtime共享/GC、应用升级/回滚和活进程引用。
 
 每期测跨身份/租户、篡改、过期、撤销、重放、并发、半完成恢复与卸载归属。P3额外测commit移动、锁文件篡改、构建脚本和GC竞争。云端/Desktop通过正常入口实测，各线交主控串行小批部署。真实PG/DSH全链由主控占唯一槽。
 
@@ -214,7 +216,7 @@ P3交付Git源码工具和Python/Java runtime。commit/快照/锁文件、隔离
 - D5，共享Skill首期仅在具备可信guardian的云端和Auriga Desktop开放。其他DSH提供私有技能，开放共享须先具备同等可验证的启动与进程控制能力。
 - D6，R1至少一名非作者完整审核，R2/R3至少两名非作者且含安全审核。服务端审核/发布均须强制核对，作者不得自审自发。
 - D7，统一清单放在制品之外，使用独立发行声明，复用现有插件归档并保存迁移关联，分别验证清单和制品摘要。
-- D8，Node复用Auriga Desktop自带的受管版本。Python采用python-build-standalone，Java采用Eclipse Temurin 21 LTS，两者由平台审核、签名后按需下载。多工具共享只读runtime，工具依赖目录独立，回收核对活进程与回滚引用。
+- D8（2026-11-17修订），Node复用Auriga Desktop受管版本；Windows x64客户端随包内置python-build-standalone CPython 3.12.14及上游primary-runtime同版13个带hash的wheel，离线开箱即用，随应用版本校验/升级/回滚。Java（Eclipse Temurin 21 LTS）、其他Python版本和其他平台的按需下载仍属P3，经平台审核签名。多工具共享只读runtime，工具依赖独立，回收核对活进程与回滚引用。
 - D9，Git工具锁完整commit，保存源码快照和锁文件，默认禁安装脚本，必要构建在平台隔离环境执行并记录来源证明，保证普通用户安装固定已审核字节。
 - D10，开发者模式由本机显式开启，侧载标未审核且仅在当前DSH可用，送审前冻结并预览快照，由用户明确提交共享。
 - D11，在线工具配置变化重新审核，远端服务周期复核，域名、认证域和工具清单变化触发复核，保留实际探测与审核证据。

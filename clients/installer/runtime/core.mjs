@@ -67,6 +67,10 @@ import {
 import { spawnSync, spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { verifyPackage } from './verify.mjs';
+import {
+  createPythonDirectory,
+  protectPythonDirectory,
+} from './python-protection.mjs';
 
 export const PROFILE = 'auriga';
 const PLUGIN = 'auriga-dsh';
@@ -376,13 +380,21 @@ function syncPlugin(dir, dataHome) {
 
 // ----------------------------------------------------------------- smoke --
 
-/** Environment for upstream DSH: own data home; bundled node and pnpm first on PATH. */
+/** Environment inherited by DSH and its shell tools; never changes system settings. */
 export function launchEnv(dir, dataHome, base = process.env) {
   const pathKey =
     Object.keys(base).find((k) => k.toLowerCase() === 'path') ?? 'PATH';
-  const extra = [join(dir, 'tools', 'bin'), dirname(nodeBin(dir))];
+  const python = join(dir, 'runtime', 'python');
+  const extra = [python, join(dir, 'tools', 'bin'), dirname(nodeBin(dir))];
+  const clean = Object.fromEntries(
+    Object.entries(base).filter(
+      ([key]) => !key.toUpperCase().startsWith('PYTHON'),
+    ),
+  );
   return {
-    ...base,
+    ...clean,
+    PYTHONNOUSERSITE: '1',
+    PYTHONDONTWRITEBYTECODE: '1',
     DSH_HOME: dataHome,
     // Keep the pnpm package store (plugin manager) with the user data, not the system.
     npm_config_store_dir: join(dataHome, 'pnpm-store'),
@@ -937,12 +949,15 @@ function installStopped({
       const staging = `${target}.partial`;
       rmSync(staging, { recursive: true, force: true });
       try {
+        if (existsSync(join(payload, 'runtime/python')))
+          createPythonDirectory(staging);
         copyTreeSteps(payload, staging, (fraction) => {
           progress('copy', fraction);
           checkpoint();
         });
         progress('verify-copy', 0);
         verifyPackage(staging);
+        protectPythonDirectory(staging);
         checkpoint();
       } catch (error) {
         rmSync(staging, { recursive: true, force: true });
@@ -950,6 +965,7 @@ function installStopped({
       }
       renameSync(staging, target);
     }
+    if (!fresh) protectPythonDirectory(target);
     transition({
       root,
       dataHome,
@@ -1010,6 +1026,7 @@ function rollbackStopped({ root, smoke = defaultSmoke, fault = noFault }) {
   if (!existsSync(dir))
     throw new Error(`previous version missing: ${state.previous}`);
   verifyPackage(dir);
+  protectPythonDirectory(dir);
   assertGuardianCompatible(dir, state.dataHome);
   revokeForeignDataClaim(root, state.dataHome, state.dataOwner);
   transition({

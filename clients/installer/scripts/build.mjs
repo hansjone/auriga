@@ -39,6 +39,7 @@ import {
 } from '../runtime/verify.mjs';
 import { sha256File, assertNoSecrets, listFiles } from './lib/files.mjs';
 import { verifyInputs } from '../../../scripts/client-release/inputs.mjs';
+import { assemblePython } from './python-runtime.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const installerDir = resolve(here, '..');
@@ -165,6 +166,8 @@ export function scanForSecrets(stage, tgz, work) {
     p.startsWith('/payload/upstream/app/node_modules/') ||
     p.startsWith('/payload/tools/pnpm/node_modules/') ||
     p.startsWith('/payload/upstream/node/') ||
+    (p.startsWith('/payload/runtime/python/') &&
+      p !== '/payload/runtime/python/runtime.json') ||
     (p.startsWith('/payload/auriga/plugin/node_modules/') &&
       !p.startsWith('/payload/auriga/plugin/node_modules/auriga-dsh/'));
   assertNoSecrets(stage, thirdParty);
@@ -319,6 +322,12 @@ export async function build(args) {
   mkdirSync(join(payload, 'upstream', 'node'), { recursive: true });
   for (const f of ['node.exe', 'LICENSE'])
     cpSync(join(nodeSrc, f), join(payload, 'upstream', 'node', f));
+
+  await assemblePython({
+    payload,
+    inputs: inputs ? inputs.directory : cache,
+    offline,
+  });
 
   const app = join(payload, 'upstream', 'app');
   mkdirSync(app, { recursive: true });

@@ -469,6 +469,7 @@ sealed class TrayApp : ApplicationContext
     {
         Log("[stderr] " + line);
         if (line.Contains("已在运行")) lastError = "already-running";
+        if (line.Contains("desktop.python_runtime_modified")) lastError = "python-runtime-modified";
     }
 
     void OnEvent(Dictionary<string, object> e)
@@ -543,6 +544,8 @@ sealed class TrayApp : ApplicationContext
         {
             if (lastError == "already-running")
                 MessageBox.Show(Desktop.Brand + " 已在运行（可能是旧版窗口），请先关闭它后再从开始菜单打开。", Desktop.Brand, MessageBoxButtons.OK, MessageBoxIcon.Information);
+            else if (lastError == "python-runtime-modified")
+                icon.ShowBalloonTip(12000, Desktop.Brand, "Python 运行时校验失败。请退出客户端，重新运行同版本安装包修复。详情见日志目录。", ToolTipIcon.Error);
             else if (code != 0)
                 icon.ShowBalloonTip(5000, Desktop.Brand, "Auriga 已停止（代码 " + code + "）。点“打开 Auriga”重新启动，详情见日志目录。", ToolTipIcon.Warning);
             lastError = null;

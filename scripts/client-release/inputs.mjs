@@ -27,6 +27,7 @@ export const LOCK_PATHS = [
   'clients/dsh-plugin/package.json',
   'clients/dsh-plugin/package-lock.json',
   'clients/installer/upstream.json',
+  'clients/installer/locks/python-win-x64.json',
 ];
 export const digest = (value) =>
   createHash('sha256').update(value).digest('hex');

@@ -22,15 +22,26 @@ import {
   createUpdater,
   applyPending,
 } from '../runtime/update.mjs';
-import { install, readState, profileDir } from '../runtime/core.mjs';
+import {
+  install,
+  readState,
+  profileDir,
+  versionDir,
+  rollback,
+  launchEnv,
+} from '../runtime/core.mjs';
 import { buildPayload, tempBase } from './helpers.mjs';
 
 test('沙箱：发布、检测、点击、退出安装；坏包拒绝，旧数据保留', async (t) => {
   const base = tempBase(t),
     root = join(base, 'install'),
     dataHome = join(base, 'data');
-  const old = buildPayload(base, { name: 'old' }),
-    next = buildPayload(base, { name: 'next', pluginVersion: '2.0.0' });
+  const old = buildPayload(base, { name: 'old', pythonContent: 'old-python' }),
+    next = buildPayload(base, {
+      name: 'next',
+      pluginVersion: '2.0.0',
+      pythonContent: 'next-python',
+    });
   const keys = generateKeyPairSync('ed25519'),
     keyFile = join(base, 'offline-key.pem');
   writeFileSync(
@@ -65,6 +76,9 @@ test('沙箱：发布、检测、点击、退出安装；坏包拒绝，旧数�
   let interrupted = false,
     resumed = false;
   const server = createServer((req, res) => {
+    // The isolated publisher closes each reply; avoid stale keep-alive reuse
+    // while Windows copies/scans the new runtime between requests.
+    res.setHeader('Connection', 'close');
     if (req.url.endsWith('/latest')) {
       if (withdrawn) {
         res.writeHead(404);
@@ -166,9 +180,29 @@ test('沙箱：发布、检测、点击、退出安装；坏包拒绝，旧数�
   });
   assert.equal(readState(root).current, next.id);
   assert.equal(
+    readFileSync(
+      join(versionDir(root, next.id), 'runtime/python/python.exe'),
+      'utf8',
+    ),
+    'next-python',
+  );
+  assert.equal(
+    launchEnv(versionDir(root, next.id), dataHome).PYTHONHOME,
+    undefined,
+  );
+  assert.equal(
     readFileSync(join(profileDir(dataHome), 'conversations.json'), 'utf8'),
     'keep',
   );
   manifest = { ...manifest, version: '1.0.0' };
   await assert.rejects(updater.check(), /signature/);
+  rollback({ root, dataHome, smoke: () => {} });
+  assert.equal(readState(root).current, old.id);
+  assert.equal(
+    readFileSync(
+      join(versionDir(root, old.id), 'runtime/python/python.exe'),
+      'utf8',
+    ),
+    'old-python',
+  );
 });

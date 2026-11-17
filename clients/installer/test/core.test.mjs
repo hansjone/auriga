@@ -800,15 +800,16 @@ test('a corrupted installed version is replaced when the package is installed ag
   );
 });
 
-test('launch environment: own data home, bundled node and pnpm first on PATH', () => {
+test('launch environment: own data home, bundled Python, node and pnpm first on PATH', () => {
   const dir = join(tmpdir(), 'v');
   const env = launchEnv(dir, join(tmpdir(), 'h'), { PATH: 'base', Foo: '1' });
   assert.equal(env.DSH_HOME, join(tmpdir(), 'h'));
   assert.equal(env.npm_config_store_dir, join(tmpdir(), 'h', 'pnpm-store'));
   const parts = env.PATH.split(delimiter);
-  assert.equal(parts[0], join(dir, 'tools', 'bin'));
-  assert.equal(parts[1], dirname(nodeBin(dir)));
-  assert.equal(parts[2], 'base');
+  assert.equal(parts[0], join(dir, 'runtime', 'python'));
+  assert.equal(parts[1], join(dir, 'tools', 'bin'));
+  assert.equal(parts[2], dirname(nodeBin(dir)));
+  assert.equal(parts[3], 'base');
   assert.equal(env.Foo, '1');
 });
 
