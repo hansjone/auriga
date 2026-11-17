@@ -107,8 +107,8 @@ func TestUnifiedPluginNativeGovernanceDoesNotIsolate(t *testing.T) {
 	}
 }
 
-func TestUnifiedSupervisorCleansPersonalWithoutManagedReferences(t *testing.T) {
-	cmd := exec.Command("node", "--test", "../renderer/resource_supervisor.test.mjs")
+func TestUnifiedPluginAndSupervisorNodeContracts(t *testing.T) {
+	cmd := exec.Command("node", "--test", "../renderer/resource_plugins.test.mjs", "../renderer/resource_supervisor.test.mjs")
 	if output, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("supervisor cleanup: %v %s", err, output)
 	}
