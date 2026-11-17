@@ -59,6 +59,12 @@ static class Desktop
         return map != null && map.TryGetValue(key, out value) && value is bool && (bool)value;
     }
 
+    public static string PythonFailureReason(string error)
+    {
+        var match = Regex.Match(error ?? "", @"\[(python_user\.(?:abi_mismatch|bootstrap_digest_mismatch|environment_failed|timeout|access_denied|file_missing|busy|invalid_state|unavailable))\]");
+        return match.Success ? match.Groups[1].Value : "python_user.reset_failed";
+    }
+
     public static string Current(string root)
     {
         return File.ReadAllText(Path.Combine(root, "current.txt")).Trim();
@@ -790,29 +796,35 @@ sealed class TrayApp : ApplicationContext
         if (busy || restarting) return;
         if (MessageBox.Show("将停止 Auriga，删除个人安装的 Python 包并重建环境。索引设置会保留。是否继续？", Desktop.Brand,
             MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes) return;
+        bool wasRunning = launcher != null && !launcher.HasExited;
         busy = true;
         restarting = true;
         UpdateMenu();
         ThreadPool.QueueUserWorkItem(delegate
         {
             string error = null;
+            string failureReason = "python_user.reset_failed";
             Dictionary<string, object> result = null;
             try
             {
-                if (!StopLauncher(300)) error = "Auriga 未完成正常停止，请退出后重试。";
-                else result = Desktop.RunJson(root, "python reset --root " + Desktop.Quote(root), out error, StartUpdateWorker);
+                if (!StopLauncher(300)) failureReason = "python_user.stop_failed";
+                else
+                {
+                    result = Desktop.RunJson(root, "python reset --root " + Desktop.Quote(root), out error, StartUpdateWorker);
+                    failureReason = Desktop.PythonFailureReason(error);
+                }
             }
-            catch (Exception e) { error = e.Message; }
+            catch (Exception) { failureReason = "python_user.tray_failed"; }
             Post(delegate
             {
                 busy = false;
                 restarting = false;
+                if (result == null) Log("Python reset failed [" + failureReason + "]");
                 if (exiting) return;
                 RefreshInfo();
-                StartLauncher();
+                if (wasRunning) StartLauncher();
                 MessageBox.Show(result != null ? "个人 Python 环境已重置。" : "重置失败，请检查日志后重试。", Desktop.Brand,
                     MessageBoxButtons.OK, result != null ? MessageBoxIcon.Information : MessageBoxIcon.Warning);
-                if (error != null) Log("Python reset failed");
             });
         });
     }

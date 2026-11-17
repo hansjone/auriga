@@ -12,6 +12,7 @@ import {
 } from './core.mjs';
 import { desktopInfo, updateCommand } from './desktop-control.mjs';
 import { createControl } from './tray-control.mjs';
+import { pythonUserFailureReason } from './python-user.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const [command, ...rest] = process.argv.slice(2);
@@ -151,6 +152,12 @@ try {
     process.exitCode = 2;
   }
 } catch (error) {
-  console.error(error instanceof Error ? error.message : String(error));
+  console.error(
+    command === 'python'
+      ? `Python 操作失败。[${pythonUserFailureReason(error)}]`
+      : error instanceof Error
+        ? error.message
+        : String(error),
+  );
   process.exitCode = error instanceof CancelledError ? 2 : 1;
 }

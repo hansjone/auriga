@@ -195,6 +195,8 @@ $env:AURIGA_CLIENT_NODE_SHA256 = '<独立批准的node.exe SHA256>'
 
 客户端在 `<DataHome>\python-user\cp312` 创建个人 venv，继承客户端内置包。pip 26.3 wheel 与解释器共同锁定，附件包括新增的 `python/pip/` 输入，共15项 Python 输入，锁变化后重新准备并审核 devkit。pip 首次准备时离线解包到个人 venv。普通安装进入个人目录，内置包优先并有精确版本约束，不兼容依赖会失败。只安装适用于 CPython 3.12 / Windows x64 的 wheel 或兼容纯 Python wheel。
 
+个人环境 marker 记录 cp312 ABI，客户端遇到不同 ABI 会保留旧个人目录并回退内置解释器。个人目录内的 `.pth` 路径排在内置包之后。`.pth` 的 import 行按 venv 机制在 sitecustomize 前执行个人代码，用户须承担所安装包的代码执行风险。
+
 现场 Forgejo 管理员启用包仓库功能，确定包归属用户或组织 `owner`，给上传账号该归属的包写权限。PyPI 包仓库随首次上传建立，可在归属主页“软件包”中查看，也可关联代码仓库。联网准备机用独立上传环境安装 twine，将所需包及其传递依赖的 wheel 全部带入现场。上传时由交互提示或受控凭据环境提供认证，令牌不写入仓库和索引 URL。Forgejo 的上传路径与下载索引路径如下。[Forgejo PyPI 文档](https://forgejo.org/docs/latest/user/packages/pypi/)
 
 ```powershell
@@ -202,6 +204,8 @@ python -m twine upload --repository-url https://forgejo.example.com/api/packages
 ```
 
 下载索引为 `https://forgejo.example.com/api/packages/owner/pypi/simple`。当前本机索引配置使用无凭据 URL，私有仓库认证通过 pip 支持的现场凭据机制单独设置，禁止把 token 放进下述命令或配置文件。需私有认证时在现场验证凭据可用，pip 已关闭交互输入。HTTP 索引也支持，显式配置后只为该主机生成 trusted-host。
+
+HTTP 索引存在中间人窃听与替换包内容的风险。现场建议使用 HTTPS 索引并验证证书。
 
 从托盘退出 Auriga 后，用已安装客户端的 Node 和 CLI 保存索引，再从正常入口启动 Auriga。以下安装根目录仅为示例。
 
@@ -223,7 +227,9 @@ python -m pip install --no-index --find-links D:\wheels package-name==1.0.0
 python -m pip check
 ```
 
-同名个人包无法替换内置包。需要更新内置13包时更新客户端锁并发行。个人环境会随升级/回滚保留，版本引用随当前客户端刷新。个人环境故障时使用托盘“设置 → 重置个人 Python 环境”，确认后停止 DSH、删除并离线重建环境，再自动启动 DSH，个人包需要重新安装，索引设置保留。也可在退出客户端后用上述 CLI 执行 `python reset --root $installRoot`。内置运行时损坏仍按启动器提示重装同版本客户端。
+同名个人包以内置版本优先。需要更新内置13包时更新客户端锁并发行。个人环境会随升级/回滚保留，版本引用随当前客户端刷新。个人环境故障时使用托盘“设置 → 重置个人 Python 环境”，确认后停止运行中的 DSH、删除并离线重建环境，个人包需要重新安装，有效索引设置保留。也可在退出客户端后用上述 CLI 执行 `python reset --root $installRoot`。内置运行时损坏仍按启动器提示重装同版本客户端。
+
+重置同时删除 pip 缓存，索引设置损坏时恢复离线模式。重置前运行中的 DSH 会在完成后恢复运行，原先停止的 DSH 保持停止。日志中的 `python_user.*` 固定原因码可用于排查失败。
 
 ### 现场桌面发行签名
 

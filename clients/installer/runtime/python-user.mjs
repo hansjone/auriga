@@ -6,9 +6,30 @@ import { assertLocalPath, durableJson, durableWrite } from './host-lock.mjs';
 import { acquireOperationLock } from './operation-lock.mjs';
 import { sha256File } from './verify.mjs';
 
+const PYTHON_ABI = 'cp312';
+
+/** A finite diagnostic vocabulary prevents paths or subprocess output entering logs. */
+export function pythonUserFailureReason(error) {
+  if (
+    [
+      'python_user.abi_mismatch',
+      'python_user.bootstrap_digest_mismatch',
+      'python_user.environment_failed',
+      'python_user.timeout',
+    ].includes(error?.reason)
+  )
+    return error.reason;
+  if (['EACCES', 'EPERM'].includes(error?.code))
+    return 'python_user.access_denied';
+  if (error?.code === 'ENOENT') return 'python_user.file_missing';
+  if (error?.code === 'desktop.in_use') return 'python_user.busy';
+  if (error instanceof SyntaxError) return 'python_user.invalid_state';
+  return 'python_user.unavailable';
+}
+
 export function pythonUserPaths(dataHome) {
   const root = join(resolve(dataHome), 'python-user');
-  const environment = join(root, 'cp312');
+  const environment = join(root, PYTHON_ABI);
   return {
     root,
     environment,
@@ -105,21 +126,40 @@ function run(python, args, env) {
     timeout: 60000,
   });
   if (result.status !== 0)
-    throw new Error(
-      '个人 Python 环境创建失败，请在托盘设置中重置个人 Python 环境',
+    throw Object.assign(
+      new Error('个人 Python 环境创建失败，请在托盘设置中重置个人 Python 环境'),
+      {
+        reason:
+          result.error?.code === 'ETIMEDOUT'
+            ? 'python_user.timeout'
+            : 'python_user.environment_failed',
+      },
     );
 }
 
 /** No inherited Python/pip settings can redirect a managed install. */
 export function cleanPythonEnv(base) {
   return Object.fromEntries(
-    Object.entries(base).filter(([key]) => !/^(python|pip_)/i.test(key)),
+    Object.entries(base).filter(
+      ([key]) =>
+        !/^(python|pip_)/i.test(key) &&
+        key.toUpperCase() !== '__PYVENV_LAUNCHER__',
+    ),
   );
 }
 
 export function preparePythonUser(dir, dataHome, base = process.env) {
   const bootstrap = join(dir, 'auriga/python');
   if (!existsSync(join(bootstrap, 'pip.json'))) return null;
+  const manifest = JSON.parse(
+    readFileSync(join(dir, 'runtime/python/runtime.json'), 'utf8'),
+  );
+  const versionParts = /^(\d+)\.(\d+)\.\d+$/.exec(manifest.version);
+  if (!versionParts || `cp${versionParts[1]}${versionParts[2]}` !== PYTHON_ABI)
+    throw Object.assign(
+      new Error('个人 Python 环境 ABI 不兼容，请使用匹配版本的客户端'),
+      { reason: 'python_user.abi_mismatch' },
+    );
   const paths = pythonUserPaths(dataHome);
   assertLocalPath(paths.root);
   const release = acquireOperationLock(join(paths.root, 'prepare.lock'));
@@ -128,7 +168,10 @@ export function preparePythonUser(dir, dataHome, base = process.env) {
     assertLocalPath(paths.site);
     const pip = JSON.parse(readFileSync(join(bootstrap, 'pip.json'), 'utf8'));
     const wheel = join(bootstrap, pip.filename);
-    if (sha256File(wheel) !== pip.sha256) throw new Error('pip wheel 校验失败');
+    if (sha256File(wheel) !== pip.sha256)
+      throw Object.assign(new Error('pip wheel 校验失败'), {
+        reason: 'python_user.bootstrap_digest_mismatch',
+      });
     const python = join(dir, 'runtime/python/python.exe');
     const marker = join(paths.environment, 'auriga-python.json');
     assertLocalPath(marker);
@@ -138,7 +181,16 @@ export function preparePythonUser(dir, dataHome, base = process.env) {
     } catch {
       /* Recreate incomplete state. */
     }
-    const identity = { runtime: resolve(dir), pipSha256: pip.sha256 };
+    if (previous?.abi && previous.abi !== PYTHON_ABI)
+      throw Object.assign(
+        new Error('个人 Python 环境 ABI 不兼容，请重置后重试'),
+        { reason: 'python_user.abi_mismatch' },
+      );
+    const identity = {
+      runtime: resolve(dir),
+      pipSha256: pip.sha256,
+      abi: PYTHON_ABI,
+    };
     const env = { ...cleanPythonEnv(base), PYTHONDONTWRITEBYTECODE: '1' };
     if (
       JSON.stringify(previous) !== JSON.stringify(identity) ||
@@ -189,9 +241,6 @@ export function preparePythonUser(dir, dataHome, base = process.env) {
     const index = configuredIndex(paths);
     writeConfig(paths, index);
     assertLocalPath(paths.constraints);
-    const manifest = JSON.parse(
-      readFileSync(join(dir, 'runtime/python/runtime.json'), 'utf8'),
-    );
     durableWrite(
       paths.constraints,
       [
@@ -211,12 +260,27 @@ export function resetPythonUser(dataHome) {
   assertLocalPath(paths.root);
   const release = acquireOperationLock(join(paths.root, 'prepare.lock'));
   try {
-    const target = resolve(paths.environment);
-    if (!target.startsWith(resolve(paths.root) + sep))
-      throw new Error('个人 Python 环境路径无效');
-    assertLocalPath(target);
-    rmSync(target, { recursive: true, force: true });
-    writeConfig(paths, configuredIndex(paths));
+    assertLocalPath(paths.settings);
+    let index;
+    try {
+      index = configuredIndex(paths);
+    } catch (error) {
+      if (error.code) throw error;
+      index = null;
+    }
+    const targets = [paths.environment, join(paths.root, 'cache')].map((path) =>
+      resolve(path),
+    );
+    for (const target of targets) {
+      if (!target.startsWith(resolve(paths.root) + sep))
+        throw new Error('个人 Python 环境路径无效');
+      assertLocalPath(target);
+    }
+    mkdirSync(dirname(paths.settings), { recursive: true });
+    durableJson(paths.settings, { schema: 1, indexUrl: index });
+    for (const target of targets)
+      rmSync(target, { recursive: true, force: true });
+    writeConfig(paths, index);
     return { reset: true };
   } finally {
     release();

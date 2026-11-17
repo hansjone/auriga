@@ -151,6 +151,11 @@ test('personal Python rejects a corrupt bootstrap wheel before creating its venv
   const base = tempBase(t);
   const dir = join(base, 'payload');
   mkdirSync(join(dir, 'auriga/python'), { recursive: true });
+  mkdirSync(join(dir, 'runtime/python'), { recursive: true });
+  writeFileSync(
+    join(dir, 'runtime/python/runtime.json'),
+    JSON.stringify({ version: '3.12.14', packages: [] }),
+  );
   writeFileSync(
     join(dir, 'auriga/python/pip.json'),
     JSON.stringify({ filename: 'pip.whl', sha256: '0'.repeat(64) }),
@@ -246,6 +251,29 @@ test(
     const imports =
       'import sys, pip, docx, pptx, openpyxl, pandas, PIL, lxml, xlsxwriter; assert sys.prefix != sys.base_prefix; print(pip.__version__)';
     assert.equal((await run(['-c', imports])).stdout.trim(), '26.3');
+    assert.equal(
+      JSON.parse(
+        readFileSync(join(paths.environment, 'auriga-python.json'), 'utf8'),
+      ).abi,
+      'cp312',
+    );
+    const pthPackages = join(paths.environment, 'pth-packages');
+    mkdirSync(pthPackages);
+    writeFileSync(
+      join(pthPackages, 'docx.py'),
+      'raise RuntimeError("personal .pth shadowed builtin")',
+    );
+    for (const line of [
+      pthPackages,
+      `import sys; sys.path.insert(0, ${JSON.stringify(pthPackages)})`,
+    ]) {
+      writeFileSync(join(paths.site, 'collision.pth'), line + '\n');
+      assert.ok(
+        (
+          await run(['-c', 'import docx; print(docx.__file__)'])
+        ).stdout.includes(runtime),
+      );
+    }
     assert.equal(
       (
         await execute(join(paths.bin, 'python3.exe'), ['-c', imports], {

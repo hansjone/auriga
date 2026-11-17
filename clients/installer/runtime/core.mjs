@@ -76,6 +76,7 @@ import {
   preparePythonUser,
   resetPythonUser,
   configurePythonIndex,
+  pythonUserFailureReason,
 } from './python-user.mjs';
 
 export const PROFILE = 'auriga';
@@ -394,9 +395,9 @@ export function launchEnv(dir, dataHome, base = process.env) {
   let personal;
   try {
     personal = preparePythonUser(dir, dataHome, base);
-  } catch {
+  } catch (error) {
     console.error(
-      '个人 Python 环境不可用，已使用内置 Python。请在托盘设置中重置个人 Python 环境。',
+      `个人 Python 环境不可用，已使用内置 Python。请在托盘设置中重置个人 Python 环境。[${pythonUserFailureReason(error)}]`,
     );
   }
   const extra = [
