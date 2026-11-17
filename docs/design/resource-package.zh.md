@@ -80,7 +80,7 @@ delivery=git，repository为去凭据HTTPS地址，commit为完整40或64位十�
 
 用户于2026-11-17修订D8：Windows x64 Auriga Desktop随安装包内置python-build-standalone CPython 3.12.14，开箱及离线可用；Node继续复用Desktop受管版本。Python固定release `20260901` 的 `x86_64-pc-windows-msvc-install_only` 归档，URL、SHA256、长度和13个wheel锁在 `clients/installer/locks/python-win-x64.json`。全部为cp312/win_amd64或兼容纯Python预构建wheel，先校验全部摘要再离线物化到site-packages，不运行pip、sdist、构建后端或安装脚本。包集合与上游桌面primary-runtime一致；保留Python和各wheel许可证原文，`runtime/python/runtime.json`记录版本、来源、wheel摘要、许可证路径及省略的CLI工具脚本。
 
-内置Python位于 `versions/<id>/runtime/python`，随Desktop完整包校验、升级切换、失败恢复和回滚；由启动器仅向DSH及其子进程前置PATH，`python`、`python3`、`py`解析到同一内置解释器，不改系统PATH、注册表或用户Python。版本目录保留期间不得单独GC此运行时；不属于P3动态runtime缓存。Java仍采用Eclipse Temurin 21 LTS，其他Python版本及其他平台的runtime仍按P3经平台审核签名后按需下载。固定精确版本/构建号/平台，发布记录保存来源、许可证与摘要；runtime范围解析为允许的精确版本并写回执。多个工具共享只读runtime、工具依赖目录独立，GC核对活进程、回滚保留和开发者引用，失败保留已有runtime。
+内置Python位于 `versions/<id>/runtime/python`，随Desktop完整包校验、升级切换、失败恢复和回滚；由启动器仅向DSH及其子进程前置PATH，`python`、`python3`解析到同一内置解释器，系统py仍按原PATH解析，不改系统PATH、注册表或用户Python。Lib与site-packages的unchecked-hash pyc由固定解释器预编译并纳入校验。安装后显式保护DACL拒绝内容写入和新建目录项，保留Windows删除接口所需的删除/元数据属性权限。无pip/ensurepip，不支持向受管运行时装依赖。额外文件触发 `desktop.python_runtime_modified` 并提示重新运行同版本安装包。版本目录保留期间不得单独GC此运行时；不属于P3动态runtime缓存。Java仍采用Eclipse Temurin 21 LTS，其他Python版本及其他平台的runtime仍按P3经平台审核签名后按需下载。固定精确版本/构建号/平台，发布记录保存来源、许可证与摘要；runtime范围解析为允许的精确版本并写回执。多个工具共享只读runtime、工具依赖目录独立，GC核对活进程、回滚保留和开发者引用，失败保留已有runtime。
 
 普通模式采用平台维护的兼容版本和安全更新策略，新runtime先安装再逐工具切换，保留有效旧版回滚。开发者可显式选择自装runtime的绝对路径并查看实际版本。进程工作目录与环境允许表来自工具安装记录，平台访问令牌不传给工具。
 

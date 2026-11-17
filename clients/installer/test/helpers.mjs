@@ -45,6 +45,7 @@ export function buildPayload(base, options = {}) {
   if (options.pythonContent) {
     put(dir, 'runtime/python/python.exe', options.pythonContent);
     put(dir, 'runtime/python/runtime.json', '{"version":"3.12.14"}');
+    put(dir, 'runtime/python/Lib/site-packages/fixture.py', 'pass');
   }
   put(dir, 'upstream/app/package.json', '{}');
   put(

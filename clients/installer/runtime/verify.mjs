@@ -112,6 +112,21 @@ function unsafe(path) {
 
 const readJson = (file) => JSON.parse(readFileSync(file, 'utf8'));
 
+function packageFileError(path, reason) {
+  if (path.startsWith('runtime/python/'))
+    return Object.assign(
+      new Error(
+        `desktop.python_runtime_modified：Python运行时校验失败（${reason}: ${path}）。请退出客户端，重新运行同版本安装包修复受管运行时。`,
+      ),
+      {
+        code: 'desktop.python_runtime_modified',
+        repair: 'reinstall',
+        pathCategory: 'python-runtime',
+      },
+    );
+  return new Error(`${reason}: ${path}`);
+}
+
 /**
  * Verify a package directory against its manifest. Throws on the first
  * problem; returns the parsed manifest.
@@ -149,15 +164,17 @@ export function verifyPackage(payload, { trees = true } = {}) {
       throw new Error(`duplicate manifest path: ${f.path}`);
     listed.add(f.path);
     const full = join(payload, ...f.path.split('/'));
-    if (!existsSync(full)) throw new Error(`listed file missing: ${f.path}`);
+    if (!existsSync(full))
+      throw packageFileError(f.path, 'listed file missing');
     if (statSync(full).size !== f.size)
-      throw new Error(`size mismatch: ${f.path}`);
+      throw packageFileError(f.path, 'size mismatch');
     if (sha256File(full) !== f.sha256)
-      throw new Error(`checksum mismatch: ${f.path}`);
+      throw packageFileError(f.path, 'checksum mismatch');
   }
   for (const path of listFiles(payload)) {
     if (path === 'manifest.json' || isPinnedPath(path)) continue;
-    if (!listed.has(path)) throw new Error(`unlisted file in package: ${path}`);
+    if (!listed.has(path))
+      throw packageFileError(path, 'unlisted file in package');
   }
 
   if (trees) {

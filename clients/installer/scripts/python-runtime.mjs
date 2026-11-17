@@ -99,12 +99,26 @@ export function verifyPythonInputs(lock, directory) {
 }
 
 async function fetchFile(url, path) {
-  const response = await globalThis.fetch(url);
-  if (!response.ok)
-    throw new Error(`Python download failed: ${response.status}`);
-  writeFileSync(path, Buffer.from(await response.arrayBuffer()), {
-    flag: 'wx',
-  });
+  for (let redirects = 0; redirects <= 5; redirects += 1) {
+    if (new URL(url).protocol !== 'https:')
+      throw new Error('Python downloads require HTTPS');
+    const response = await globalThis.fetch(url, { redirect: 'manual' });
+    if ([301, 302, 303, 307, 308].includes(response.status)) {
+      await response.body?.cancel();
+      const location = response.headers.get('location');
+      if (!location)
+        throw new Error('Python download redirect has no location');
+      url = new URL(location, url).href;
+      continue;
+    }
+    if (!response.ok)
+      throw new Error(`Python download failed: ${response.status}`);
+    writeFileSync(path, Buffer.from(await response.arrayBuffer()), {
+      flag: 'wx',
+    });
+    return;
+  }
+  throw new Error('Too many Python download redirects');
 }
 
 /** Called only on connected preparation/build paths; offline code never calls this. */
@@ -117,6 +131,16 @@ export async function downloadPythonInputs(
     const path = join(directory, row.directory, row.filename);
     mkdirSync(dirname(path), { recursive: true });
     if (!existsSync(path)) await download(row.url, path);
+    const info = lstatSync(path);
+    if (
+      !info.isFile() ||
+      info.size !== row.bytes ||
+      sha256File(path) !== row.sha256
+    ) {
+      // Online cache entries can be fetched again; offline verification never mutates inputs.
+      if (info.isFile()) rmSync(path);
+      throw new Error(`Python input digest mismatch: ${row.filename}`);
+    }
   }
   verifyPythonInputs(lock, directory);
 }
@@ -181,10 +205,17 @@ export async function assemblePython({
     rmSync(staging, { recursive: true });
   }
   // install_only includes build/debug artifacts and pip. Ship exactly our wheel set.
-  for (const path of ['include', 'libs', 'Scripts', 'Lib/site-packages'])
+  for (const path of [
+    'include',
+    'libs',
+    'Scripts',
+    'Lib/site-packages',
+    'Lib/ensurepip',
+  ])
     rmSync(join(directory, path), { recursive: true, force: true });
   for (const path of listFiles(directory))
-    if (path.endsWith('.pdb')) rmSync(join(directory, path));
+    if (path.endsWith('.pdb') || path.endsWith('.pyc'))
+      rmSync(join(directory, path));
   const python = join(directory, 'python.exe');
   const installed = JSON.parse(
     run(python, [
@@ -198,8 +229,21 @@ export async function assemblePython({
     ]),
   );
   // Real executables also work in bash and direct subprocess calls (unlike .cmd aliases).
-  for (const alias of ['python3.exe', 'py.exe'])
-    cpSync(python, join(directory, alias));
+  cpSync(python, join(directory, 'python3.exe'));
+  run(python, [
+    '-I',
+    '-S',
+    '-B',
+    '-m',
+    'compileall',
+    '--invalidation-mode',
+    'unchecked-hash',
+    '-q',
+    '-f',
+    '-d',
+    'auriga-python/Lib',
+    join(directory, 'Lib'),
+  ]);
   const manifest = runtimeManifest(lock, sha256File(lockFile), installed);
   writeFileSync(
     join(directory, 'runtime.json'),

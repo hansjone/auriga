@@ -22,7 +22,7 @@ node scripts/client-release/sign-inputs.mjs --devkit D:\exports\client-kits\auri
 
 2026-11-17起，Windows附件还包含 `python/cpython-3.12.14+20260901-x86_64-pc-windows-msvc-install_only.tar.gz` 与 `python/wheels/*.whl`。完整URL、长度、SHA256及许可证固定在 `clients/installer/locks/python-win-x64.json`；联网prepare按锁获取并校验全部14个输入，windows-client.json逐文件登记。该锁显式参与锁键，Python pin或wheel锁变化必需重出附件，旧附件拒绝复用；不得现场改版本或用sdist替代wheel。
 
-离线构建先验附件，再校验Python/wheel锁摘要；使用内置解释器的 `-I -S` 和stdlib解包wheel到 `payload/runtime/python/Lib/site-packages`，不调用pip、安装脚本、构建后端或联网解析。移除pip/开发调试文件，省略wheel的可选CLI脚本，保留许可证原文，生成 `runtime/python/runtime.json`（含全部wheel摘要、包版本和许可证路径）。运行时随完整安装包更新及回滚；现有自动更新不采用二进制差分，即使Python pin没变，每次更新仍携带完整运行时。
+离线构建先验附件，再校验Python/wheel锁摘要；使用内置解释器的 `-I -S` 和stdlib解包wheel到 `payload/runtime/python/Lib/site-packages`，不调用pip、安装脚本、构建后端或联网解析。移除pip、Lib/ensurepip及内嵌wheel、开发调试文件，省略wheel的可选CLI脚本，保留许可证原文，生成 `runtime/python/runtime.json`（含全部wheel摘要、包版本和许可证路径）。固定解释器再以 `-I -S -B -m compileall --invalidation-mode unchecked-hash` 预编译Lib/site-packages，pyc随包清单校验。运行时随完整安装包更新及回滚；现有自动更新不采用二进制差分，即使Python pin没变，每次更新仍携带完整运行时。
 
 隔离构建后可离屏验证，禁止指向真实安装目录：
 
@@ -32,7 +32,7 @@ $env:AURIGA_PYTHON_INPUTS = 'D:\client-kit'
 node --test clients/installer/test/python-runtime.test.mjs
 ```
 
-冒烟检查13包精确版本、许可证及PATH上的 `python/python3/py` 导入office库。实际运行时位于 `versions/<id>/runtime/python`，仅影响DSH及子进程环境，不修改系统Python。Java和其他Python版本的审核签名按需渠道仍属P3。
+冒烟检查13包精确版本、许可证及PATH上的 `python/python3` 导入office库。实际运行时位于 `versions/<id>/runtime/python`，仅影响DSH及子进程环境，不修改系统Python。系统py继续按原PATH解析。安装时创建当前用户SID显式保护DACL，复制校验后拒绝内容写入和新建目录项，保留删除/WriteAttributes供Windows清理使用。运行时无pip/ensurepip，不支持向受管环境装依赖。发现清单外文件提示 `desktop.python_runtime_modified`，退出后重新运行同版本安装包修复。Java和其他Python版本的审核签名按需渠道仍属P3。
 
 Windows 自带 PowerShell5.1、System32 tar、.NET Framework4.x Framework64/v4.0.30319/csc.exe 与引用程序集用于认证 helper、托盘和自解压向导。无需额外 .NET SDK/NuGet/MSBuild/7-Zip/WiX 或付费打包工具。系统工具摘要固定在输入清单，补丁/工具变化需在匹配受信 Windows 基线重出套件，不能复制系统目录冒充便携 SDK。锁键包括根/一级 workspace manifests、workspace/config/pnpm lock、插件 npm lock、DSH npm lock、upstream pin、构建 Node 和目标；业务源码可复用，依赖/锁改变明确拒绝。
 
@@ -48,7 +48,7 @@ Go→Node 互操作在 deploy/offline/desktop_source_test.go 检查。凭据、�
 
 --devkit-sha256 仅保留给有独立批准摘要的旧 Git 输入；正式无 Git 路径用同一发行钥核签名源码与 Windows 附件，不能用此参数跳过源码验签。本机固定磁盘输入/公钥根/签名目录/输出父目录要求，拒绝 UNC、设备路径、映射网络盘和 junction。离线介质先复制到本地，输出目录须全新，单一源码目录不并发构建。
 
-构建先核全部输入，把 store 复制到新输出目录，以 --offline --frozen-lockfile --ignore-scripts 恢复独立工作区依赖；清空代理，Node 子进程继承拒绝 TCP/TLS/HTTP/fetch/DNS（含 Resolver）/UDP 的 preload。原生子程序为本地csc、tar、esbuild及固定Python（仅以 `-I -S -B` 运行stdlib wheel解包器）；生产闭包只复制本地输入，不用npm view/联网解析。成功保留offline-evidence.json和空network-denials.log，出现拒绝请求则失败。它不是恶意源码/原生程序的OS沙箱，严格断网仍建议专用Windows VM；不改系统网络/防火墙、不操作用户桌面、不启动常驻项目服务。
+构建先核全部输入，把 store 复制到新输出目录，以 --offline --frozen-lockfile --ignore-scripts 恢复独立工作区依赖；清空代理，Node 子进程继承拒绝 TCP/TLS/HTTP/fetch/DNS（含 Resolver）/UDP 的 preload。原生子程序为本地csc、tar、esbuild及固定Python（以 `-I -S -B` 运行stdlib wheel解包器和compileall）；生产闭包只复制本地输入，不用npm view/联网解析。成功保留offline-evidence.json和空network-denials.log，出现拒绝请求则失败。它不是恶意源码/原生程序的OS沙箱，严格断网仍建议专用Windows VM；不改系统网络/防火墙、不操作用户桌面、不启动常驻项目服务。
 
 ## Linux 公钥配置及发布
 

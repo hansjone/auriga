@@ -1,6 +1,14 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { cpSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import {
+  cpSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  writeFileSync,
+} from 'node:fs';
+import { createHash } from 'node:crypto';
+import { spawnSync } from 'node:child_process';
 import { delimiter, dirname, join } from 'node:path';
 import {
   pythonInputs,
@@ -9,6 +17,7 @@ import {
   verifyPythonInputs,
   runtimeManifest,
   assemblePython,
+  downloadPythonInputs,
 } from '../scripts/python-runtime.mjs';
 import { smokePython } from '../scripts/python-smoke.mjs';
 import { launchEnv, install, rollback, versionDir } from '../runtime/core.mjs';
@@ -20,6 +29,74 @@ import {
 } from '../../../scripts/client-release/inputs.mjs';
 import { buildPayload, tempBase } from './helpers.mjs';
 import { sha256File, verifyPackage } from '../runtime/verify.mjs';
+import { listFiles } from '../runtime/verify.mjs';
+import { protectPythonDirectory } from '../runtime/python-protection.mjs';
+
+function smallInputsLock() {
+  const lock = readPythonLock();
+  for (const row of [lock.archive, ...lock.wheels]) {
+    row.bytes = 1;
+    row.sha256 = createHash('sha256').update('x').digest('hex');
+  }
+  return lock;
+}
+
+test('Python online download follows HTTPS redirects and refuses HTTP before sending a request', async (t) => {
+  const base = tempBase(t);
+  const previous = globalThis.fetch;
+  t.after(() => (globalThis.fetch = previous));
+  let requests = 0;
+  globalThis.fetch = async (_url, options) => {
+    assert.equal(options.redirect, 'manual');
+    requests += 1;
+    return {
+      status: 302,
+      headers: { get: () => 'http://example.com/insecure' },
+    };
+  };
+  await assert.rejects(
+    downloadPythonInputs(smallInputsLock(), join(base, 'bad')),
+    /require HTTPS/,
+  );
+  assert.equal(requests, 1);
+  requests = 0;
+  globalThis.fetch = async (_url, options) => {
+    assert.equal(options.redirect, 'manual');
+    requests += 1;
+    if (requests === 1)
+      return {
+        status: 302,
+        headers: { get: () => 'https://example.com/approved-redirect' },
+      };
+    return { status: 200, ok: true, arrayBuffer: async () => Buffer.from('x') };
+  };
+  await downloadPythonInputs(smallInputsLock(), join(base, 'good'));
+  assert.equal(requests, 15);
+});
+
+test('online Python caches remove corrupt archives and wheels while offline verification preserves inputs', async (t) => {
+  const base = tempBase(t);
+  const lock = smallInputsLock();
+  const rows = pythonInputs(lock);
+  for (const row of rows) {
+    mkdirSync(join(base, row.directory), { recursive: true });
+    writeFileSync(join(base, row.directory, row.filename), 'x');
+  }
+  for (const row of [rows[0], rows[1]]) {
+    const path = join(base, row.directory, row.filename);
+    writeFileSync(path, 'bad');
+    assert.throws(() => verifyPythonInputs(lock, base), /digest mismatch/);
+    assert.equal(existsSync(path), true);
+    await assert.rejects(
+      downloadPythonInputs(lock, base, () => {
+        throw new Error('unexpected download');
+      }),
+      /digest mismatch/,
+    );
+    assert.equal(existsSync(path), false);
+    writeFileSync(path, 'x');
+  }
+});
 
 test('Python lock fixes install_only CPython and the complete upstream wheel set', () => {
   const lock = readPythonLock();
@@ -119,6 +196,55 @@ test(
       offline: true,
     });
     assert.equal(smokePython(payload).result, 'ok');
+    const runtime = join(payload, 'runtime/python');
+    assert.equal(existsSync(join(runtime, 'Lib/ensurepip')), false);
+    assert.equal(existsSync(join(runtime, 'py.exe')), false);
+    for (const name of ['ensurepip', 'pip']) {
+      const result = spawnSync(
+        join(runtime, 'python.exe'),
+        ['-I', '-m', name],
+        { windowsHide: true, encoding: 'utf8' },
+      );
+      assert.notEqual(result.status, 0);
+      assert.match(result.stderr, /No module named/);
+    }
+    const pyc = readFileSync(
+      join(
+        runtime,
+        'Lib/site-packages/docx/__pycache__/__init__.cpython-312.pyc',
+      ),
+    );
+    assert.equal(pyc.readUInt32LE(4), 1); // PEP 552 unchecked-hash, supplied by the fixed interpreter.
+    protectPythonDirectory(payload);
+    const before = listFiles(runtime);
+    const unguarded = spawnSync(
+      join(runtime, 'python.exe'),
+      [
+        '-E',
+        '-c',
+        'import docx, pptx, openpyxl, pandas, PIL, lxml, xlsxwriter; print("ok")',
+      ],
+      {
+        encoding: 'utf8',
+        windowsHide: true,
+      },
+    );
+    assert.equal(unguarded.status, 0, unguarded.stderr);
+    assert.deepEqual(listFiles(runtime), before);
+    const write = spawnSync(
+      join(runtime, 'python.exe'),
+      [
+        '-E',
+        '-c',
+        'from pathlib import Path; import sys; Path(sys.prefix,"extra.pyc").write_bytes(b"cache")',
+      ],
+      {
+        encoding: 'utf8',
+        windowsHide: true,
+      },
+    );
+    assert.notEqual(write.status, 0);
+    assert.match(write.stderr, /PermissionError/);
     assert.equal(requests, 0);
   },
 );
@@ -183,6 +309,9 @@ test('Python environment follows installed version and rollback without mutating
     Path: 'system-path',
     PYTHONHOME: 'external',
     PYTHONPATH: 'external',
+    pYtHoNpYcAcHePrEfIx: 'external-cache',
+    PYTHONPLATLIBDIR: 'external-lib',
+    PYTHONINSPECT: '1',
   };
   const env = launchEnv(versionDir(root, b.id), dataHome, parent);
   assert.equal(
@@ -191,6 +320,12 @@ test('Python environment follows installed version and rollback without mutating
   );
   assert.equal(env.PYTHONHOME, undefined);
   assert.equal(env.PYTHONPATH, undefined);
+  assert.deepEqual(
+    Object.keys(env)
+      .filter((key) => /^python/i.test(key))
+      .sort(),
+    ['PYTHONDONTWRITEBYTECODE', 'PYTHONNOUSERSITE'],
+  );
   assert.equal(parent.PYTHONHOME, 'external');
   assert.equal(
     readFileSync(

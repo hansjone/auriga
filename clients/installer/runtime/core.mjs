@@ -67,6 +67,10 @@ import {
 import { spawnSync, spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { verifyPackage } from './verify.mjs';
+import {
+  createPythonDirectory,
+  protectPythonDirectory,
+} from './python-protection.mjs';
 
 export const PROFILE = 'auriga';
 const PLUGIN = 'auriga-dsh';
@@ -384,15 +388,7 @@ export function launchEnv(dir, dataHome, base = process.env) {
   const extra = [python, join(dir, 'tools', 'bin'), dirname(nodeBin(dir))];
   const clean = Object.fromEntries(
     Object.entries(base).filter(
-      ([key]) =>
-        ![
-          'pythonhome',
-          'pythonpath',
-          'pythonuserbase',
-          'pythonstartup',
-          'pythonnousersite',
-          'pythondontwritebytecode',
-        ].includes(key.toLowerCase()),
+      ([key]) => !key.toUpperCase().startsWith('PYTHON'),
     ),
   );
   return {
@@ -953,12 +949,15 @@ function installStopped({
       const staging = `${target}.partial`;
       rmSync(staging, { recursive: true, force: true });
       try {
+        if (existsSync(join(payload, 'runtime/python')))
+          createPythonDirectory(staging);
         copyTreeSteps(payload, staging, (fraction) => {
           progress('copy', fraction);
           checkpoint();
         });
         progress('verify-copy', 0);
         verifyPackage(staging);
+        protectPythonDirectory(staging);
         checkpoint();
       } catch (error) {
         rmSync(staging, { recursive: true, force: true });
@@ -966,6 +965,7 @@ function installStopped({
       }
       renameSync(staging, target);
     }
+    if (!fresh) protectPythonDirectory(target);
     transition({
       root,
       dataHome,
@@ -1026,6 +1026,7 @@ function rollbackStopped({ root, smoke = defaultSmoke, fault = noFault }) {
   if (!existsSync(dir))
     throw new Error(`previous version missing: ${state.previous}`);
   verifyPackage(dir);
+  protectPythonDirectory(dir);
   assertGuardianCompatible(dir, state.dataHome);
   revokeForeignDataClaim(root, state.dataHome, state.dataOwner);
   transition({
