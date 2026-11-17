@@ -4,11 +4,13 @@ import (
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync/atomic"
@@ -55,6 +57,61 @@ func newUnifiedPluginFixture(t *testing.T) *unifiedFixture {
 		t.Fatal(err)
 	}
 	return f
+}
+
+func TestUnifiedPluginNativeGovernanceDoesNotIsolate(t *testing.T) {
+	for _, mode := range []string{"required", "default", "optional"} {
+		for _, phase := range []string{"native", "cleanup"} {
+			t.Run(mode+"/"+phase, func(t *testing.T) {
+				f := newUnifiedPluginFixture(t)
+				f.ref.InstallationMode = mode
+				f.source.spec.AllowPersonalPlugins = new(bool)
+				if _, err := f.manager.Prepare(context.Background(), f.source.spec); err != nil {
+					t.Fatal(err)
+				}
+				s, _, _, err := f.manager.load(f.source.spec.InstanceId)
+				if err != nil {
+					t.Fatal(err)
+				}
+				policy, err := json.Marshal(f.manager.sessionPolicy(s))
+				if err != nil {
+					t.Fatal(err)
+				}
+				helper, err := filepath.Abs("../renderer/resource_plugins.mjs")
+				if err != nil {
+					t.Fatal(err)
+				}
+				cmd := exec.Command("node", "testdata/unified-plugin-governance.mjs", helper, string(policy), phase, base64.StdEncoding.EncodeToString(f.payload))
+				output, err := cmd.Output()
+				if err != nil {
+					var execution *exec.ExitError
+					if errors.As(err, &execution) {
+						t.Fatalf("native governance: %v %s", err, execution.Stderr)
+					}
+					t.Fatal(err)
+				}
+				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write(output) }))
+				t.Cleanup(server.Close)
+				f.driver.catalog = server.URL
+				stops := f.driver.stops
+				reports, _, err := f.manager.Observe(context.Background(), f.source.spec.InstanceId)
+				if err != nil || len(reports) != 1 || reports[0].State != "applied" {
+					t.Fatalf("guarded operation changed observation: %+v %v", reports, err)
+				}
+				s, _, _, err = f.manager.load(f.source.spec.InstanceId)
+				if err != nil || s.State != "active" || f.driver.stops != stops {
+					t.Fatal("guarded native operation isolated or stopped DSH", err)
+				}
+			})
+		}
+	}
+}
+
+func TestUnifiedSupervisorCleansPersonalWithoutManagedReferences(t *testing.T) {
+	cmd := exec.Command("node", "--test", "../renderer/resource_supervisor.test.mjs")
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("supervisor cleanup: %v %s", err, output)
+	}
 }
 
 func TestUnifiedPluginUsesNPMNameAndRealObservation(t *testing.T) {

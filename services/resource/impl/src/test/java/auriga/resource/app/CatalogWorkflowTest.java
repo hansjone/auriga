@@ -279,6 +279,8 @@ class CatalogWorkflowTest {
           var delivery = delivery(null);
           var rule = assign(delivery, upload, "member", GENERAL, "required");
           assertEquals(rule, delivery.assignment(actor(PUBLISHER), uuid(rule, "id")));
+          assertEquals(
+              rule, tx.read(() -> delivery.assignment(actor(PUBLISHER), uuid(rule, "id"))));
           var first = delivery.removeAssignment(actor(PUBLISHER), uuid(rule, "id"), key(), "\"1\"");
           assertEquals(first, delivery.assignment(actor(PUBLISHER), uuid(rule, "id")));
           UUID otherTenant = UUID.randomUUID();
@@ -1497,6 +1499,38 @@ class CatalogWorkflowTest {
             .put("visibility", "tenant"),
         key(),
         "\"0\"");
+  }
+
+  @ParameterizedTest
+  @ValueSource(strings = {"auriga-dsh", "@deepseek-ai/dsh", "@deepseek-ai/reserved-plugin"})
+  void uploadRejectsDeploymentOwnedPluginNames(String packageName) throws Exception {
+    TenantContext.call(
+        TENANT,
+        () -> {
+          var upload = upload(false, "plugin");
+          var manifest = (ObjectNode) upload.value.path("manifest").deepCopy();
+          manifest.put("version", "1.1.0");
+          ((ObjectNode) manifest.path("plugin")).put("packageName", packageName);
+          var payload = pluginArchive(packageName, "1.1.0", "package/package.json", false, false);
+          ((ObjectNode) manifest.path("artifacts").get(0))
+              .put("digest", CatalogManifest.digest(payload))
+              .put("sizeBytes", payload.length);
+          byte[] raw = manifest.toString().getBytes(StandardCharsets.UTF_8);
+          assertError(
+              CommonErrors.VALIDATION_FAILED,
+              () ->
+                  catalog.upload(
+                      actor(AUTHOR),
+                      upload.pkg,
+                      JSON.createObjectNode()
+                          .put("version", "1.1.0")
+                          .put("expectedDigest", CatalogManifest.digest(raw)),
+                      raw,
+                      List.of(new ByteArrayInputStream(payload)),
+                      key(),
+                      etag(catalog.detail(actor(AUTHOR), upload.pkg, null, false))));
+          return null;
+        });
   }
 
   record Upload(UUID pkg, UUID version, JsonNode value, byte[] manifest, byte[] payload) {}

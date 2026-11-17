@@ -169,8 +169,13 @@ final class CatalogAssignments {
   }
 
   Map<String, Object> row(UUID id) {
+    return row(id, true);
+  }
+
+  Map<String, Object> row(UUID id, boolean lock) {
     return db.row(
-        "SELECT * FROM resource.catalog_assignment WHERE tenant_id=:tenant AND id=:id FOR UPDATE",
+        "SELECT * FROM resource.catalog_assignment WHERE tenant_id=:tenant AND id=:id"
+            + (lock ? " FOR UPDATE" : ""),
         db.args("id", id));
   }
 
@@ -192,7 +197,11 @@ final class CatalogAssignments {
   }
 
   ObjectNode view(ResourceAccess.Reader r, Map<String, Object> row) {
-    var v = catalog.ver(r, (UUID) row.get("package_id"), (UUID) row.get("version_id"), false);
+    return view(r, row, true);
+  }
+
+  ObjectNode view(ResourceAccess.Reader r, Map<String, Object> row, boolean lock) {
+    var v = catalog.ver(r, (UUID) row.get("package_id"), (UUID) row.get("version_id"), false, lock);
     return JSON.createObjectNode()
         .put("id", row.get("id").toString())
         .put("scope", row.get("scope").toString())

@@ -82,7 +82,7 @@ test('public CLI receives verified tgz after removing the old managed package', 
     () => bytes,
   );
   assert.deepEqual(calls, [
-    ['remove', plugin.name, '--ignore-scripts'],
+    ['remove', plugin.name, '--config.ignore-scripts=true'],
     ['add', plugin.path, '--ignore-scripts'],
   ]);
 });
@@ -141,16 +141,87 @@ test('required/default/optional and personal policy guard public native mutation
     });
     await assert.rejects(manager.installBundle('file:/unverified.tgz'));
     await assert.rejects(manager.setBundleEnabled('personal', true));
-    if (mode === 'required') {
-      await assert.rejects(manager.setBundleEnabled(plugin.name, false));
-      await assert.rejects(manager.setPluginEnabled('entry', false));
-    } else
-      assert.equal(
-        await manager.setBundleEnabled(plugin.name, false),
-        'native',
-      );
-    if (mode === 'required')
-      await assert.rejects(manager.removeBundle(plugin.name));
-    else assert.equal(await manager.removeBundle(plugin.name), 'native');
+    await assert.rejects(
+      manager.setBundleEnabled(plugin.name, false),
+      /资源目录/,
+    );
+    await assert.rejects(manager.setPluginEnabled('entry', false), /资源目录/);
+    await assert.rejects(manager.removeBundle(plugin.name), /资源目录/);
+  }
+});
+
+test('retired managed names cannot be reinstalled from the native registry', async () => {
+  const manager = {
+    async inspect(name) {
+      return { status: 'accepted', kind: 'registry', name };
+    },
+    async listBundles() {
+      return [];
+    },
+    async installBundle() {
+      throw new Error('native install must not run');
+    },
+    async removeBundle() {},
+    async setBundleEnabled() {},
+    async setPluginEnabled() {},
+  };
+  governPlugins({ effect() {} }, manager, {
+    ...policy,
+    allowPersonalPlugins: true,
+    plugins: [],
+  });
+  await assert.rejects(manager.installBundle(plugin.name), /资源目录/);
+});
+
+test('disallowing personal plugins cleans command-line dependencies and preserves L0', async () => {
+  for (const managed of [true, false]) {
+    const calls = [];
+    const selected = managed
+      ? policy
+      : { ...policy, managedPluginNames: [], plugins: [] };
+    await preparePlugins(
+      selected,
+      async (args) => calls.push(args),
+      new Set([
+        'auriga-dsh',
+        '@deepseek-ai/dsh-base',
+        'personal-cli',
+        ...(managed ? [plugin.name] : []),
+      ]),
+      () => bytes,
+    );
+    assert(
+      calls.some((args) => args[0] === 'remove' && args[1] === 'personal-cli'),
+    );
+    assert(
+      !calls.some((args) =>
+        ['auriga-dsh', '@deepseek-ai/dsh-base'].includes(args[1]),
+      ),
+    );
+  }
+  const calls = [];
+  await preparePlugins(
+    { ...policy, allowPersonalPlugins: true },
+    async (args) => calls.push(args),
+    new Set(['personal-cli']),
+    () => bytes,
+  );
+  assert(
+    !calls.some((args) => args[0] === 'remove' && args[1] === 'personal-cli'),
+  );
+});
+
+test('a bundle without rows is not loaded and does not break the observation endpoint', async () => {
+  for (const rows of [undefined, null, []]) {
+    const result = await observePlugins({
+      async listPlugins() {
+        return [];
+      },
+      async listBundles() {
+        return [{ name: plugin.name, enabled: true, installed: true, rows }];
+      },
+    });
+    assert.equal(result[0].loaded, false);
+    assert.equal(result[0].pending, false);
   }
 });

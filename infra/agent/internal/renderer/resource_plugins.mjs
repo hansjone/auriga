@@ -10,7 +10,7 @@ export async function observePlugins(manager) {
     throw new Error('Public plugin observation API unavailable');
   const entries = await manager.listPlugins();
   return (await manager.listBundles()).map((row) => {
-    const actual = row.rows.map((entry) =>
+    const actual = (row.rows ?? []).map((entry) =>
       entries.find(
         (live) =>
           live.entryId === entry.entryId &&
@@ -87,8 +87,21 @@ export async function preparePlugins(
   read = readFileSync,
 ) {
   const { names, plugins } = pluginPlan(policy);
+  if (policy.allowPersonalPlugins === false) {
+    for (const name of installed) {
+      if (!packageName.test(name))
+        throw new Error('Invalid installed plugin name');
+      if (
+        name !== 'auriga-dsh' &&
+        !name.startsWith('@deepseek-ai/') &&
+        !names.includes(name)
+      )
+        await run(['remove', name, '--config.ignore-scripts=true']);
+    }
+  }
   for (const name of names)
-    if (installed.has(name)) await run(['remove', name, '--ignore-scripts']);
+    if (installed.has(name))
+      await run(['remove', name, '--config.ignore-scripts=true']);
   if (policy.newSessionRequired) return;
   for (const plugin of plugins) {
     if (plugin.desiredState !== 'ENABLED') continue;
@@ -112,15 +125,15 @@ export function governPlugins(ctx, manager, policy) {
         '请通过资源目录更新受管插件。 Use the resource catalog to update managed plugins.',
       );
     const rule = rules.get(name);
-    if (rule) {
+    if (names.includes(name)) {
       if (
         action === 'install' ||
-        (action === 'enable' && rule.desiredState !== 'ENABLED') ||
-        (action === 'disable' && rule.installationMode === 'required') ||
-        (action === 'remove' && rule.installationMode === 'required')
+        (action === 'enable' && rule?.desiredState !== 'ENABLED') ||
+        action === 'disable' ||
+        action === 'remove'
       )
         throw new Error(
-          '受管插件须通过资源目录操作。 Use the resource catalog for managed plugins.',
+          '受管插件请通过门户或插件市场的资源目录操作。 Use the resource catalog in the portal or plugin marketplace for managed plugins.',
         );
     } else if (
       policy.allowPersonalPlugins === false &&
@@ -147,7 +160,7 @@ export function governPlugins(ctx, manager, policy) {
           throw new Error(
             '管理员已禁止自行安装插件。 Personal plugin installation is disabled.',
           );
-        if (rules.size) {
+        if (names.length) {
           if (typeof manager.inspect !== 'function')
             throw new Error('Public plugin inspection API unavailable');
           const inspected = await manager.inspect(target);

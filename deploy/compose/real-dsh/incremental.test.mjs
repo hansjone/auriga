@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { createHash } from 'node:crypto';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import {
   existsSync,
   mkdirSync,
@@ -260,6 +260,61 @@ test('Docker recipe checks before mutation and regenerates original manifest', (
   );
   assert.match(recipe, /USER 200000:200000/);
   assert.match(recipe, /ENTRYPOINT \["node", "\/opt\/fixture\/start.mjs"\]/);
+});
+
+test('incremental Docker tool guard rejects absent or unusable package managers with a full rebuild hint', (t) => {
+  const f = fixture(t);
+  const recipe = readFileSync(
+    new URL('./Dockerfile.incremental', import.meta.url),
+    'utf8',
+  );
+  const guard = recipe
+    .match(/^RUN (if ! command -v corepack[\s\S]*?\n\s+fi)$/m)?.[1]
+    ?.replaceAll(/\\\r?\n/g, '\n');
+  assert(guard, 'incremental tool guard missing');
+  const shell =
+    process.platform === 'win32'
+      ? join(process.env.ProgramFiles, 'Git/usr/bin/bash.exe')
+      : '/bin/sh';
+  const bin = join(f.opt, 'tools');
+  mkdirSync(bin);
+  const path =
+    process.platform === 'win32'
+      ? bin
+          .replaceAll('\\', '/')
+          .replace(/^([A-Za-z]):/, (_, drive) => '/' + drive.toLowerCase())
+      : bin;
+  const run = () =>
+    spawnSync(shell, ['-c', guard], {
+      env: { ...process.env, PATH: path },
+      encoding: 'utf8',
+      windowsHide: true,
+    });
+  for (const state of [
+    'missing-corepack',
+    'missing-pnpm',
+    'broken-pnpm',
+    'ready',
+  ]) {
+    if (state !== 'missing-corepack')
+      writeFileSync(join(bin, 'corepack'), '#!/bin/sh\nexit 0\n', {
+        mode: 0o755,
+      });
+    if (state === 'broken-pnpm')
+      writeFileSync(join(bin, 'pnpm'), '#!/bin/sh\nexit 7\n', { mode: 0o755 });
+    if (state === 'ready')
+      writeFileSync(
+        join(bin, 'pnpm'),
+        '#!/bin/sh\ntest "$COREPACK_ENABLE_NETWORK" = 0 || exit 1\necho 11.28.6\n',
+        { mode: 0o755 },
+      );
+    const result = run();
+    assert.ifError(result.error);
+    assert.equal(result.status, state === 'ready' ? 0 : 1);
+    if (state !== 'ready')
+      assert.match(result.stderr, /rebuild the full real-dsh image/);
+    assert(existsSync(join(f.opt, 'auriga-dsh/src')));
+  }
 });
 
 test('incremental preload only skips no-op 0755 on regular files', () => {

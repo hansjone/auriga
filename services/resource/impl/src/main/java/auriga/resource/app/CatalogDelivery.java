@@ -712,7 +712,7 @@ public final class CatalogDelivery implements UnifiedResourceResolution {
 
   public JsonNode assignment(AurigaPrincipal actor, UUID id) {
     var reader = access.administrator(actor, "resource.distributions.manage");
-    return tx.write(() -> assignments.view(reader, assignments.row(id)));
+    return tx.read(() -> assignments.view(reader, assignments.row(id, false), false));
   }
 
   private boolean memberCloud(ResourceAccess.Reader reader, UUID client) {

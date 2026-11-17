@@ -125,6 +125,8 @@ L0 核心插件随客户端安装包和云端镜像发布，由部署配置控�
 
 成员列举安装记录时对账 required/default 集合。required 始终启用，default 保留成员已关闭或卸载的状态（包括云端移除墓碑已回收后及规则版本更新后），optional 不自动安装。关闭或卸载 required 返回 resource.installation_required，选择低于强制高水位返回 resource.distribution_locked。安装修订随版本、意图或方式改变递增，重试保持同一代次。
 
+受管插件无论 required/default/optional，DSH 原生入口均拒绝关闭和卸载，并提示前往门户或插件市场的统一资源目录操作；default 的成员关闭、卸载通过统一目录成员接口实现，required 在该接口继续拒绝。原生入口不直接改变受管插件状态，避免与服务端意图不一致后触发观察隔离。历史受管名即使已退役也不能经原生 registry 重装。allowPersonalPlugins=false 时，云端 supervisor 在 DSH 启动前通过公开 CLI 移除非 L0、非受管的个人插件依赖；L0（auriga-dsh、@deepseek-ai/*）由部署维护。
+
 成员安装列表先无锁读，仅对确需变更的包按成员/客户端/包独立事务写入，沿包行先于安装行的锁顺序。单包失败记录 catalog_assignment_failure，既有安装标为 failed，列表以 assignmentFailures 暴露逐包错误，其余包继续并可独立恢复。云端部分失败通过 assignment_retry_required 单独重试，完成的目录门禁仍可放行其他包与规格。规则变更会取代旧 pending 计划，可信规则全量对账可跨过被取代的 selectionRevision，普通增量意图仍按连续修订执行。
 
 撤销、下架及失去可见性的既有项产生安全停用和 remove 意图，停用后的 optional 项仍继续对账撤销移除。只有前代已核对，或前代本身是已获准下发的安全代次，才允许整份安全规格通过 catalog_safety_generation 旁路。若普通运行时、配置或资源变更仍未核对，只以最后获准规格为基础投影撤销清单与相同签名字节的停用/移除，单独分配安全代次下发；完整候选规格保留更高代次并继续受门禁约束，无已获准基础时不下发未核对内容。普通规格更新重新核对目录策略。逐包对账失败只保存在 catalog_assignment_failure，不改既有安装文档、状态或修订；相同错误不重复写失败记录，错误变化才更新，恢复后清除。

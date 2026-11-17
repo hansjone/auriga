@@ -32,7 +32,7 @@ policy();
 for (const signal of ['SIGTERM', 'SIGINT']) process.on(signal, stop);
 setInterval(() => { try { policy(); } catch { stop(); } }, 250).unref();
 const initial = JSON.parse(readFileSync(policyFile, 'utf8'));
-if (initial.managedPluginNames?.length) {
+if (initial.managedPluginNames?.length || initial.allowPersonalPlugins === false) {
   // The image owns this installation root. Discover the public executable from package metadata.
   const manifest = '/opt/dsh/node_modules/@deepseek-ai/dsh/package.json';
   const bin = JSON.parse(readFileSync(manifest, 'utf8')).bin?.dsh;
