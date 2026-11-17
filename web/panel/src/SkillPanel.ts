@@ -18,10 +18,15 @@ export class SkillPanel {
   private versions: Version[] = [];
   private selected?: Package;
   private cursor?: string;
+  private versionCursor?: string;
   private busy = false;
   private sharedAvailable?: boolean;
   private summaries = new Map<string, Version>();
   private pendingRestart = false;
+  private search = '';
+  private blockedPersonalPlugins: string[] = [];
+  private personalPluginPolicyPendingRestart = false;
+  private allowPersonalPlugins = true;
   private sharedReason?: string;
   private confirmation?: {
     packageId: string;
@@ -31,17 +36,78 @@ export class SkillPanel {
     token: string;
   };
   private notice = '';
+  private failed = false;
   private source = new Map<string, string>();
   constructor(
     private root: HTMLElement,
     private context: PanelContext,
     private mine: boolean,
+    private kind: 'plugin' | 'skill' = 'skill',
   ) {
     void this.load();
   }
   dispose() {
     this.epoch++;
     this.controller?.abort();
+  }
+  present(context: PanelContext) {
+    this.context = context;
+    this.render();
+  }
+  private get label() {
+    return this.kind === 'plugin'
+      ? this.text('插件', 'Plugin')
+      : this.text('技能', 'Skill');
+  }
+  private installationSnapshot(value: {
+    items: Installation[];
+    sharedAvailable?: boolean;
+    sharedUnavailableReason?: string;
+    pendingRestart?: boolean;
+    blockedPersonalPlugins?: string[];
+    personalPluginPolicyPendingRestart?: boolean;
+    allowPersonalPlugins?: boolean;
+  }) {
+    if (
+      !value ||
+      [
+        'sharedAvailable',
+        'pendingRestart',
+        'personalPluginPolicyPendingRestart',
+        'allowPersonalPlugins',
+      ].some(
+        (key) =>
+          key in value && typeof value[key as keyof typeof value] !== 'boolean',
+      )
+    )
+      throw new Error('invalid');
+    if (
+      !Array.isArray(value.items) ||
+      value.items.length > 10000 ||
+      value.items.some(
+        (r: Installation) =>
+          !r.resource?.identity ||
+          !['plugin', 'skill'].includes(r.resource.identity.kind),
+      )
+    )
+      throw new Error('invalid');
+    const blocked = value.blockedPersonalPlugins ?? [];
+    if (
+      !Array.isArray(blocked) ||
+      blocked.length > 10000 ||
+      blocked.some((v: unknown) => typeof v !== 'string' || v.length > 214)
+    )
+      throw new Error('invalid');
+    this.rows = value.items.filter(
+      (r: Installation) => r.resource.identity.kind === this.kind,
+    );
+    this.sharedAvailable = value.sharedAvailable !== false;
+    this.sharedReason = value.sharedUnavailableReason;
+    this.pendingRestart = !!value.pendingRestart;
+    this.blockedPersonalPlugins = blocked;
+    this.personalPluginPolicyPendingRestart =
+      value.personalPluginPolicyPendingRestart === true;
+    this.allowPersonalPlugins = value.allowPersonalPlugins !== false;
   }
   private get zh() {
     return !this.context.locale?.startsWith('en');
@@ -73,19 +139,57 @@ export class SkillPanel {
   }
   private async request(path: string, body?: unknown) {
     if (!this.context.fetch) throw new Error('unavailable');
-    const response = await this.context.fetch('catalog/' + path, {
-      method: body === undefined ? 'GET' : 'POST',
-      cache: 'no-store',
-      redirect: 'error',
-      signal: this.controller?.signal,
-      headers: {
-        accept: 'application/json',
-        ...(body === undefined
-          ? {}
-          : { 'content-type': 'application/json', 'x-auriga-catalog': '1' }),
-      },
-      body: body === undefined ? undefined : JSON.stringify(body),
-    });
+    const abort = new AbortController();
+    const parent = this.controller?.signal;
+    let rejectAbort: (() => void) | undefined;
+    const cancel = () => {
+      abort.abort();
+      rejectAbort?.();
+    };
+    parent?.addEventListener('abort', cancel, { once: true });
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let response: Response;
+    try {
+      response = await Promise.race([
+        this.context.fetch('catalog/' + path, {
+          method: body === undefined ? 'GET' : 'POST',
+          cache: 'no-store',
+          redirect: 'error',
+          signal: abort.signal,
+          headers: {
+            accept: 'application/json',
+            ...(body === undefined
+              ? {}
+              : {
+                  'content-type': 'application/json',
+                  'x-auriga-catalog': '1',
+                }),
+          },
+          body: body === undefined ? undefined : JSON.stringify(body),
+        }),
+        new Promise<never>((_, reject) => {
+          rejectAbort = () => reject(new Error('unavailable'));
+          if (abort.signal.aborted) rejectAbort();
+          timer = setTimeout(
+            () => {
+              abort.abort();
+              reject(new Error('unavailable'));
+            },
+            body === undefined ? 15000 : 90000,
+          );
+        }),
+      ]);
+    } finally {
+      clearTimeout(timer);
+      parent?.removeEventListener('abort', cancel);
+    }
+    if (response.status === 401)
+      this.root.dispatchEvent(
+        new CustomEvent('auriga-auth-required', {
+          bubbles: true,
+          composed: true,
+        }),
+      );
     if (!response.ok) throw await resourceResponseError(response);
     if (!response.headers.get('content-type')?.startsWith('application/json'))
       throw new Error('invalid');
@@ -96,12 +200,20 @@ export class SkillPanel {
     const epoch = this.epoch;
     this.busy = true;
     this.notice = '';
+    this.failed = false;
     this.render();
     try {
       await work();
     } catch (error) {
-      if (this.epoch === epoch)
+      if (this.epoch === epoch) {
+        this.failed = true;
+        this.packages = [];
+        this.versions = [];
+        this.selected = undefined;
+        this.rows = [];
+        this.summaries.clear();
         this.notice = resourceErrorMessage(error, !this.zh);
+      }
     } finally {
       if (this.epoch === epoch) {
         this.busy = false;
@@ -119,15 +231,11 @@ export class SkillPanel {
       if (this.mine) {
         const value = await this.request('installations');
         if (epoch !== this.epoch) return;
-        if (!Array.isArray(value.items) || value.items.length > 10000)
-          throw new Error('invalid');
-        this.rows = value.items;
-        this.sharedAvailable = value.sharedAvailable !== false;
-        this.sharedReason = value.sharedUnavailableReason;
-        this.pendingRestart = !!value.pendingRestart;
+        this.installationSnapshot(value);
       } else {
         const value = await this.request(
-          'packages?limit=50' +
+          'packages?limit=50&kind=' +
+            this.kind +
             (more && this.cursor
               ? '&cursor=' + encodeURIComponent(this.cursor)
               : ''),
@@ -136,17 +244,19 @@ export class SkillPanel {
         if (
           !Array.isArray(value.items) ||
           value.items.length > 200 ||
-          value.items.some((p: Package) => p.kind !== 'skill')
+          value.items.some((p: Package) => p.kind !== this.kind)
         )
           throw new Error('invalid');
-        this.packages = more ? [...this.packages, ...value.items] : value.items;
+        if (more && value.nextCursor && value.nextCursor === this.cursor)
+          throw new Error('invalid');
+        const merged = more ? [...this.packages, ...value.items] : value.items;
+        if (new Set(merged.map((p: Package) => p.id)).size !== merged.length)
+          throw new Error('invalid');
+        this.packages = merged;
         this.cursor = value.nextCursor;
         const installed = await this.request('installations');
         if (epoch !== this.epoch) return;
-        this.rows = installed.items;
-        this.sharedAvailable = installed.sharedAvailable !== false;
-        this.sharedReason = installed.sharedUnavailableReason;
-        this.pendingRestart = !!installed.pendingRestart;
+        this.installationSnapshot(installed);
         if (!more) this.summaries.clear();
         const displayed = this.packages.filter(
           (pack) => pack.defaultVersionId && !this.summaries.has(pack.id),
@@ -159,7 +269,7 @@ export class SkillPanel {
               );
               if (
                 epoch === this.epoch &&
-                version.kind === 'skill' &&
+                version.kind === this.kind &&
                 version.packageId === pack.id &&
                 version.id === pack.defaultVersionId
               )
@@ -175,7 +285,7 @@ export class SkillPanel {
             !Array.isArray(detail.items) ||
             detail.items.some(
               (v: Version) =>
-                v.kind !== 'skill' || v.packageId !== this.selected!.id,
+                v.kind !== this.kind || v.packageId !== this.selected!.id,
             )
           )
             throw new Error('invalid');
@@ -200,12 +310,13 @@ export class SkillPanel {
       if (
         !Array.isArray(value.items) ||
         value.items.some(
-          (v: Version) => v.kind !== 'skill' || v.packageId !== pack.id,
+          (v: Version) => v.kind !== this.kind || v.packageId !== pack.id,
         )
       )
         throw new Error('invalid');
       this.selected = pack;
       this.versions = value.items;
+      this.versionCursor = value.nextCursor;
     });
   }
   private action(
@@ -262,6 +373,33 @@ export class SkillPanel {
       }
     });
   }
+  private moreVersions() {
+    if (!this.selected || !this.versionCursor) return;
+    const pack = this.selected,
+      cursor = this.versionCursor;
+    void this.run(async () => {
+      const value = await this.request(
+        'packages/' +
+          pack.id +
+          '/versions?limit=200&cursor=' +
+          encodeURIComponent(cursor),
+      );
+      if (
+        !Array.isArray(value.items) ||
+        value.items.length > 200 ||
+        value.items.some(
+          (v: Version) => v.kind !== this.kind || v.packageId !== pack.id,
+        ) ||
+        (value.nextCursor && value.nextCursor === cursor)
+      )
+        throw new Error('invalid');
+      const merged = [...this.versions, ...value.items];
+      if (new Set(merged.map((v) => v.id)).size !== merged.length)
+        throw new Error('invalid');
+      this.versions = merged;
+      this.versionCursor = value.nextCursor || undefined;
+    });
+  }
   private observe(row: Installation) {
     void this.run(async () => {
       const value = await this.request('observe', {
@@ -316,8 +454,10 @@ export class SkillPanel {
       element(
         'h2',
         this.text(
-          this.mine ? '我的共享技能' : '技能市场',
-          this.mine ? 'My shared skills' : 'Skill market',
+          this.mine ? '我的共享' + this.label : this.label + '市场',
+          this.mine
+            ? 'My shared ' + this.label.toLowerCase() + 's'
+            : this.label + ' market',
         ),
       ),
       element(
@@ -336,9 +476,55 @@ export class SkillPanel {
       }),
     );
     this.root.append(toolbar);
+    if (!this.mine) {
+      const search = element('input');
+      search.type = 'search';
+      search.value = this.search;
+      search.setAttribute(
+        'aria-label',
+        this.text('搜索资源', 'Search resources'),
+      );
+      search.placeholder = this.text('搜索资源', 'Search resources');
+      search.oninput = () => {
+        this.search = search.value;
+        this.render();
+        this.root.querySelector<HTMLInputElement>('input')?.focus();
+      };
+      toolbar.append(search);
+    }
+    if (
+      !this.allowPersonalPlugins ||
+      this.blockedPersonalPlugins.length ||
+      this.personalPluginPolicyPendingRestart
+    ) {
+      const text = this.personalPluginPolicyPendingRestart
+        ? this.text(
+            '个人插件已设置为停用，请重启 DSH 以完成组织策略限制。',
+            'Personal plugins are set to disabled. Restart DSH to finish applying organization policy.',
+          )
+        : this.blockedPersonalPlugins.length
+          ? this.text(
+              '以下个人插件已按组织策略停用：',
+              'Personal plugins disabled by organization policy: ',
+            )
+          : this.text(
+              '组织策略不允许自行安装个人插件。',
+              'Organization policy does not allow personal plugin installation.',
+            );
+      const notice = element(
+        'p',
+        text +
+          (this.blockedPersonalPlugins.length
+            ? ' ' + this.blockedPersonalPlugins.join('、')
+            : ''),
+        'notice',
+      );
+      notice.setAttribute('role', 'status');
+      this.root.append(notice);
+    }
     if (this.notice) {
       const notice = element('p', this.notice, 'notice');
-      notice.setAttribute('role', 'status');
+      notice.setAttribute('role', this.failed ? 'alert' : 'status');
       this.root.append(notice);
     }
     if (this.sharedAvailable === false && !this.busy)
@@ -346,12 +532,16 @@ export class SkillPanel {
         element(
           'p',
           this.text(
-            this.sharedReason === 'local_storage_path'
-              ? '共享路径不可用：请使用本机文件系统的真实绝对路径；不支持短文件名、目录联接或符号链接。'
-              : '当前宿主尚无可信 guardian，共享安装暂不可用。请通过 Auriga 桌面启动器打开 DSH 后刷新。',
-            this.sharedReason === 'local_storage_path'
-              ? 'Shared storage requires a real absolute local filesystem path; short names, junctions and symbolic links are not supported.'
-              : 'Shared installation is unavailable until a trusted guardian is present. Open DSH through the Auriga desktop launcher, then refresh.',
+            this.sharedReason === 'platform_offline'
+              ? '平台离线，已应用最近一次已认证的个人插件策略。共享资源状态待联网确认。'
+              : this.sharedReason === 'local_storage_path'
+                ? '共享路径不可用：请使用本机文件系统的真实绝对路径；不支持短文件名、目录联接或符号链接。'
+                : '当前宿主尚无可信 guardian，共享安装暂不可用。请通过 Auriga 桌面启动器打开 DSH 后刷新。',
+            this.sharedReason === 'platform_offline'
+              ? 'The platform is offline. The last authenticated personal plugin policy is applied; shared resource status awaits an online refresh.'
+              : this.sharedReason === 'local_storage_path'
+                ? 'Shared storage requires a real absolute local filesystem path; short names, junctions and symbolic links are not supported.'
+                : 'Shared installation is unavailable until a trusted guardian is present. Open DSH through the Auriga desktop launcher, then refresh.',
           ),
           'notice',
         ),
@@ -383,7 +573,7 @@ export class SkillPanel {
           this.selected = undefined;
           this.render();
         }),
-        resourceHeading(pack.name, 'skill', this.text('技能', 'Skill')),
+        resourceHeading(pack.name, this.kind, this.label),
       );
       const identity = element('details', undefined, 'resource-origin');
       identity.append(
@@ -456,6 +646,15 @@ export class SkillPanel {
           ]),
         );
         card.append(details);
+        if (version.manifest.kind === 'plugin')
+          card.append(
+            fieldList([
+              [
+                this.text('npm 包名', 'npm package'),
+                version.manifest.plugin?.packageName ?? '—',
+              ],
+            ]),
+          );
         this.root.append(card);
       }
       if (!this.versions.length && !this.busy)
@@ -469,6 +668,12 @@ export class SkillPanel {
             'notice',
           ),
         );
+      if (this.versionCursor)
+        this.root.append(
+          this.button(this.text('更多版本', 'More versions'), () =>
+            this.moreVersions(),
+          ),
+        );
     } else {
       const cards = element('div', undefined, 'cards');
       this.root.append(cards);
@@ -479,8 +684,8 @@ export class SkillPanel {
           card.append(
             resourceHeading(
               row.resource.envelope.statement.name,
-              'skill',
-              this.text('共享技能', 'Shared skill'),
+              this.kind,
+              this.label,
             ),
             element('p', id.version, 'resource-version-label'),
             this.badge(this.status(row.state)),
@@ -495,29 +700,35 @@ export class SkillPanel {
               this.button(
                 this.text(zh, en),
                 () => this.action(id.packageId, id.versionId, action),
-                !this.sharedAvailable,
+                !this.sharedAvailable ||
+                  (row.resource.installationMode === 'required' &&
+                    ['disable', 'remove'].includes(action)),
               ),
             );
-          actions.append(
-            this.button(
-              this.text('在新会话检查来源', 'Check source in a new session'),
-              () => this.observe(row),
-              (row.resource.desiredState ??
-                (row.resource.enabled ? 'ENABLED' : 'DISABLED')) !== 'ENABLED',
-            ),
-          );
+          if (this.kind === 'skill')
+            actions.append(
+              this.button(
+                this.text('在新会话检查来源', 'Check source in a new session'),
+                () => this.observe(row),
+                (row.resource.desiredState ??
+                  (row.resource.enabled ? 'ENABLED' : 'DISABLED')) !==
+                  'ENABLED',
+              ),
+            );
           card.append(actions);
           if (this.source.has(id.packageId))
             card.append(element('p', this.source.get(id.packageId), 'muted'));
           cards.append(card);
         }
       } else {
-        for (const pack of this.packages) {
+        for (const pack of this.packages.filter((p) =>
+          p.name.toLowerCase().includes(this.search.toLowerCase()),
+        )) {
           const version = this.summaries.get(pack.id),
             row = this.installation(pack.id);
           const card = element('article', undefined, 'card resource-card');
           card.append(
-            resourceHeading(pack.name, 'skill', this.text('技能', 'Skill')),
+            resourceHeading(pack.name, this.kind, this.label),
             element(
               'p',
               version?.manifest.description ??
@@ -530,7 +741,14 @@ export class SkillPanel {
           );
           const metadata = element('div', undefined, 'resource-meta');
           metadata.append(
-            this.badge('L3'),
+            this.badge(
+              this.text(
+                { required: '必装', default: '默认安装', optional: '自选' }[
+                  row?.resource.installationMode ?? 'optional'
+                ],
+                row?.resource.installationMode ?? 'optional',
+              ),
+            ),
             this.badge(
               row
                 ? this.status(row.state)
@@ -585,12 +803,18 @@ export class SkillPanel {
             'p',
             this.mine
               ? this.text(
-                  '暂无共享技能，请前往资源市场选择技能；私有技能可在原生设置中管理。',
-                  'No shared skills. Choose a skill from the market or manage private skills in native settings.',
+                  '暂无共享' + this.label + '，请前往资源市场选择。',
+                  'No shared ' +
+                    this.label.toLowerCase() +
+                    's. Choose a resource from the market.',
                 )
               : this.text(
-                  '市场暂无共享技能，请联系管理员前往管理台发布后刷新。',
-                  'No shared skills in the market. Ask an administrator to publish from the admin console, then refresh.',
+                  '市场暂无共享' +
+                    this.label +
+                    '，请联系管理员前往管理台发布后刷新。',
+                  'No shared ' +
+                    this.label.toLowerCase() +
+                    's in the market. Ask an administrator to publish from the admin console, then refresh.',
                 ),
             'notice',
           ),

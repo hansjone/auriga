@@ -595,10 +595,10 @@ it.each(['plugin', 'skill'] as const)(
     );
   },
 );
-it('recovers approved review evidence from its real ID and blocks mismatched versions', async () => {
+it('automatically loads approved review evidence and blocks mismatched versions', async () => {
   const view = setup('published');
   vi.spyOn(api, 'published').mockResolvedValue({
-    items: [{ ...v, state: 'approved' }],
+    items: [{ ...v, state: 'approved', reviewId: 'review-1' }],
   });
   const approved = {
     ...r,
@@ -614,9 +614,8 @@ it('recovers approved review evidence from its real ID and blocks mismatched ver
   await flushPromises();
   await view.get('[data-testid="catalog-version"]').trigger('click');
   await flushPromises();
-  await view.get('[data-testid="catalog-review-id"]').setValue('review-1');
-  await view.get('[data-testid="catalog-read-review"]').trigger('submit');
-  await flushPromises();
+  expect(api.review).toHaveBeenCalledWith('review-1');
+  expect(view.find('[data-testid="catalog-review-id"]').exists()).toBe(false);
   await view.get('[data-testid="catalog-reason"]').setValue('Publish');
   expect(
     view.get('[data-testid="catalog-publish"]').attributes('disabled'),
@@ -626,9 +625,6 @@ it('recovers approved review evidence from its real ID and blocks mismatched ver
     etag: '"r"',
   });
   await view.get('[data-testid="catalog-version"]').trigger('click');
-  await flushPromises();
-  await view.get('[data-testid="catalog-review-id"]').setValue('wrong-review');
-  await view.get('[data-testid="catalog-read-review"]').trigger('submit');
   await flushPromises();
   expect(view.find('[data-testid="catalog-publish"]').exists()).toBe(false);
 });

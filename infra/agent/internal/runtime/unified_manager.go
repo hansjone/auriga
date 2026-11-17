@@ -58,6 +58,8 @@ type unifiedNodeState struct {
 	InstallationRevisions map[string]uint64
 	SelectionLocks        map[string]unifiedSelectionLock
 	ObservedAt            string
+	ManagedPluginNames    []string
+	AllowPersonalPlugins  bool
 }
 
 // UnifiedManager is the cloud's only shared-skill writer. Its private ledger,
@@ -115,6 +117,10 @@ func ReadUnifiedIntent(ref *resourcev1.UnifiedResourceRef) (uint64, string, erro
 	}
 	if ref.GetEnabled() != (state == "ENABLED") {
 		return 0, "", fmt.Errorf("inconsistent unified intent")
+	}
+	mode := ref.GetInstallationMode()
+	if mode != "" && mode != "required" && mode != "default" && mode != "optional" || mode == "required" && state != "ENABLED" {
+		return 0, "", fmt.Errorf("invalid resource distribution mode")
 	}
 	return r, state, nil
 }
@@ -335,14 +341,14 @@ func (m *UnifiedManager) validate(root string, ref *resourcev1.UnifiedResourceRe
 	}
 	envelope := ref.GetEnvelope()
 	id := ref.GetIdentity()
-	if id.GetKind() != "skill" || ref.GetReleaseSequence() != envelope.GetReleaseSequence() {
+	if (id.GetKind() != "skill" && id.GetKind() != "plugin") || ref.GetReleaseSequence() != envelope.GetReleaseSequence() {
 		return nil, fmt.Errorf("unsupported resource activation")
 	}
 	manifest, err := DecodeUnifiedJSON([]byte(us(input["rawManifest"])))
 	if err != nil {
 		return nil, err
 	}
-	if len(ua(manifest["artifacts"])) != 1 || len(ua(manifest["runtimes"])) != 0 || len(ref.GetArtifacts()) != 1 {
+	if len(ua(manifest["artifacts"])) != 1 || id.GetKind() == "skill" && len(ua(manifest["runtimes"])) != 0 || len(ref.GetArtifacts()) != 1 {
 		return nil, fmt.Errorf("skill payload profile mismatch")
 	}
 	a := um(ua(manifest["artifacts"])[0])
@@ -691,15 +697,15 @@ func (m *UnifiedManager) Prepare(ctx context.Context, spec *nodev1.InstanceSpec)
 			return "", err
 		}
 		id := ref.GetIdentity()
-		if id.GetTenantId() != spec.GetTenantId() || !uUUID.MatchString(id.GetPackageId()) || !uUUID.MatchString(id.GetVersionId()) || id.GetKind() != "skill" || seen[id.GetPackageId()] {
+		if id.GetTenantId() != spec.GetTenantId() || !uUUID.MatchString(id.GetPackageId()) || !uUUID.MatchString(id.GetVersionId()) || (id.GetKind() != "skill" && id.GetKind() != "plugin") || seen[id.GetPackageId()] {
 			return "", fmt.Errorf("invalid resource selection")
 		}
 		seen[id.GetPackageId()] = true
 		item := prepared{ref: ref, revision: revision, state: state, name: ref.GetEnvelope().GetStatement().GetName()}
-		if !uName.MatchString(item.name) || len(item.name) > 64 || names[item.name] {
+		if !uName.MatchString(item.name) || len(item.name) > 64 || names[id.GetKind()+"/"+item.name] {
 			return "", fmt.Errorf("invalid or duplicate skill name")
 		}
-		names[item.name] = true
+		names[id.GetKind()+"/"+item.name] = true
 		if state == "ENABLED" {
 			raw, online, err := m.download(ctx, ref.GetManifestDownloadPath(), 256*1024)
 			if err != nil {
@@ -716,7 +722,11 @@ func (m *UnifiedManager) Prepare(ctx context.Context, spec *nodev1.InstanceSpec)
 				return "", fmt.Errorf("one skill payload required")
 			}
 			artifact := ref.GetArtifacts()[0]
-			payload, artifactTime, err := m.download(ctx, artifact.GetDownloadPath(), 5*1024*1024)
+			maximum := int64(5 * 1024 * 1024)
+			if id.GetKind() == "plugin" {
+				maximum = 64 * 1024 * 1024
+			}
+			payload, artifactTime, err := m.download(ctx, artifact.GetDownloadPath(), maximum)
 			if err != nil {
 				return "", err
 			}
@@ -741,6 +751,30 @@ func (m *UnifiedManager) Prepare(ctx context.Context, spec *nodev1.InstanceSpec)
 				return "", err
 			}
 			item.input = input
+			if id.GetKind() == "plugin" {
+				manifest, err := DecodeUnifiedJSON([]byte(us(input["rawManifest"])))
+				if err != nil {
+					return "", err
+				}
+				item.name = us(um(manifest["plugin"])["packageName"])
+				if !unifiedPluginName(item.name) {
+					return "", fmt.Errorf("protected or invalid plugin package name")
+				}
+				paths, err := m.Layout.For(spec.GetInstanceId())
+				if err != nil {
+					return "", err
+				}
+				payloadRoot := filepath.Join(paths.Meta, "catalog-plugins")
+				if err := storage.CheckNoSymlink(paths.Meta, payloadRoot); err != nil {
+					return "", err
+				}
+				if err := os.MkdirAll(payloadRoot, 0755); err != nil {
+					return "", err
+				}
+				if err := unifiedAtomicMode(filepath.Join(paths.Meta, "catalog-plugins", strings.TrimPrefix(artifact.GetDigest(), "sha256:")+".tgz"), payload, 0644); err != nil {
+					return "", err
+				}
+			}
 			leaseEnd, err := time.Parse(time.RFC3339Nano, ref.GetLease().GetExpiresAt())
 			if err != nil {
 				return "", err
@@ -748,28 +782,30 @@ func (m *UnifiedManager) Prepare(ctx context.Context, spec *nodev1.InstanceSpec)
 			if deadline.IsZero() || leaseEnd.Before(deadline) {
 				deadline = leaseEnd
 			}
-			stage := filepath.Join(root, "staging", unifiedNonce())
-			staging = append(staging, stage)
-			if err := os.MkdirAll(filepath.Dir(stage), 0700); err != nil {
-				return "", err
+			if id.GetKind() == "skill" {
+				stage := filepath.Join(root, "staging", unifiedNonce())
+				staging = append(staging, stage)
+				if err := os.MkdirAll(filepath.Dir(stage), 0700); err != nil {
+					return "", err
+				}
+				if err := ExtractUnifiedSkill(payload, stage); err != nil {
+					return "", err
+				}
+				entry, err := os.ReadFile(filepath.Join(stage, "SKILL.md"))
+				if err != nil {
+					return "", err
+				}
+				text := strings.ReplaceAll(string(entry), "\r\n", "\n")
+				end := strings.Index(text[4:], "\n---")
+				var metadata struct{ Name, Description string }
+				if end < 0 {
+					return "", fmt.Errorf("invalid skill metadata")
+				}
+				if err := yaml.Unmarshal([]byte(text[4:4+end]), &metadata); err != nil || metadata.Name != item.name || metadata.Description == "" {
+					return "", fmt.Errorf("skill entry identity mismatch")
+				}
+				item.directory = stage
 			}
-			if err := ExtractUnifiedSkill(payload, stage); err != nil {
-				return "", err
-			}
-			entry, err := os.ReadFile(filepath.Join(stage, "SKILL.md"))
-			if err != nil {
-				return "", err
-			}
-			text := strings.ReplaceAll(string(entry), "\r\n", "\n")
-			end := strings.Index(text[4:], "\n---")
-			var metadata struct{ Name, Description string }
-			if end < 0 {
-				return "", fmt.Errorf("invalid skill metadata")
-			}
-			if err := yaml.Unmarshal([]byte(text[4:4+end]), &metadata); err != nil || metadata.Name != item.name || metadata.Description == "" {
-				return "", fmt.Errorf("skill entry identity mismatch")
-			}
-			item.directory = stage
 		}
 		ready = append(ready, item)
 	}
@@ -913,8 +949,10 @@ func (m *UnifiedManager) Prepare(ctx context.Context, spec *nodev1.InstanceSpec)
 		record := unifiedInstalled{Ref: wire, InstallationRevision: item.revision, DesiredState: item.state, Name: item.name, State: strings.ToLower(item.state)}
 		record.AuthorizationID = item.authorization
 		if item.state == "ENABLED" {
-			if err := unifiedRename(item.directory, filepath.Join(next, item.name)); err != nil {
-				return "", err
+			if item.ref.GetIdentity().GetKind() == "skill" {
+				if err := unifiedRename(item.directory, filepath.Join(next, item.name)); err != nil {
+					return "", err
+				}
 			}
 			record.State = "applying"
 			s.HasShared = true
@@ -937,6 +975,40 @@ func (m *UnifiedManager) Prepare(ctx context.Context, spec *nodev1.InstanceSpec)
 		installations = append(installations, record)
 		s.InstallationRevisions[spec.GetTenantId()+"/"+spec.GetOwnerId()+"/"+item.ref.GetIdentity().GetPackageId()] = item.revision
 	}
+	pluginNames := map[string]bool{}
+	for i := range installations {
+		if ready[i].ref.GetIdentity().GetKind() != "plugin" {
+			continue
+		}
+		if ready[i].state != "ENABLED" {
+			installations[i].Name = ""
+			if previous, ok := old[ready[i].ref.GetIdentity().GetPackageId()]; ok {
+				installations[i].Name = previous.Name
+			}
+		}
+		name := installations[i].Name
+		if name == "" {
+			continue
+		}
+		if pluginNames[name] {
+			return "", fmt.Errorf("duplicate managed npm package")
+		}
+		pluginNames[name] = true
+		if !unifiedPluginName(name) {
+			return "", fmt.Errorf("plugin tombstone lacks trusted installed name")
+		}
+		found := false
+		for _, prior := range s.ManagedPluginNames {
+			found = found || name == prior
+		}
+		if !found {
+			s.ManagedPluginNames = append(s.ManagedPluginNames, name)
+		}
+	}
+	if len(s.ManagedPluginNames) > 4096 {
+		return "", fmt.Errorf("managed plugin history budget exceeded")
+	}
+	s.AllowPersonalPlugins = spec.AllowPersonalPlugins == nil || spec.GetAllowPersonalPlugins()
 	s.Tenant, s.Owner, s.Host = spec.GetTenantId(), spec.GetOwnerId(), spec.GetInstanceId()
 	s.SelectionRevision, s.Generation = spec.GetResourceSelectionRevision(), spec.GetGeneration()
 	s.Installations = installations
@@ -1085,7 +1157,11 @@ func (m *UnifiedManager) Observe(ctx context.Context, id string) (reports []*res
 	expectedNames := map[string]bool{}
 	if s.State == "active" {
 		for _, record := range s.Installations {
-			if record.DesiredState == "ENABLED" {
+			var ref resourcev1.UnifiedResourceRef
+			if proto.Unmarshal(record.Ref, &ref) != nil {
+				return nil, guardian, fmt.Errorf("invalid installation ref")
+			}
+			if record.DesiredState == "ENABLED" && ref.GetIdentity().GetKind() == "skill" {
 				expectedNames[record.Name] = true
 			}
 		}
@@ -1123,12 +1199,32 @@ func (m *UnifiedManager) Observe(ctx context.Context, id string) (reports []*res
 	var catalog struct {
 		PrivateOnly bool                                                     `json:"privateOnly"`
 		Skills      []struct{ Name, Provider, Path, Content, Preset string } `json:"skills"`
+		Plugins     []unifiedPluginObservation                               `json:"plugins"`
 	}
 	if err := json.Unmarshal(raw, &catalog); err != nil {
 		return nil, guardian, err
 	}
 	if catalog.PrivateOnly != s.newSessionRequired() {
 		return nil, guardian, fmt.Errorf("private-only session gate unavailable")
+	}
+	expectedPlugins := map[string]bool{}
+	if s.State == "active" {
+		for _, record := range s.Installations {
+			var ref resourcev1.UnifiedResourceRef
+			if proto.Unmarshal(record.Ref, &ref) != nil {
+				return nil, guardian, fmt.Errorf("invalid plugin observation ledger")
+			}
+			if record.DesiredState == "ENABLED" && ref.GetIdentity().GetKind() == "plugin" {
+				expectedPlugins[record.Name] = true
+			}
+		}
+	}
+	for _, plugin := range catalog.Plugins {
+		for _, managed := range s.ManagedPluginNames {
+			if plugin.Name == managed && (plugin.Enabled || plugin.Loaded) && !expectedPlugins[managed] {
+				return nil, guardian, fmt.Errorf("unselected managed plugin still active")
+			}
+		}
 	}
 	for _, skill := range catalog.Skills {
 		if skill.Provider == "auriga-shared" && !expectedNames[skill.Name] {
@@ -1152,35 +1248,42 @@ func (m *UnifiedManager) Observe(ctx context.Context, id string) (reports []*res
 				state = "revoked"
 			}
 		}
-		foundShared := false
-		confirmed := map[string]bool{}
-		for _, skill := range catalog.Skills {
-			if skill.Name != record.Name {
-				continue
+		if ref.GetIdentity().GetKind() == "plugin" {
+			state, err = unifiedObservePlugin(s, record, &ref, catalog.Plugins)
+			if err != nil {
+				return nil, guardian, err
 			}
-			expected := filepath.ToSlash(filepath.Join("/home/dsh/.dsh/auriga/skills-active/current", record.Name, "SKILL.md"))
-			if skill.Provider == "auriga-shared" || strings.ReplaceAll(skill.Path, "\\", "/") == expected {
-				foundShared = true
-			}
-			if record.DesiredState == "ENABLED" && skill.Provider == "auriga-shared" && strings.ReplaceAll(skill.Path, "\\", "/") == expected && s.State == "active" {
-				content, err := os.ReadFile(filepath.Join(root, "skills-active", "current", record.Name, "SKILL.md"))
-				if err == nil && skill.Content == unifiedSkillBody(content) {
-					confirmed[skill.Preset] = true
+		} else {
+			foundShared := false
+			confirmed := map[string]bool{}
+			for _, skill := range catalog.Skills {
+				if skill.Name != record.Name {
+					continue
+				}
+				expected := filepath.ToSlash(filepath.Join("/home/dsh/.dsh/auriga/skills-active/current", record.Name, "SKILL.md"))
+				if skill.Provider == "auriga-shared" || strings.ReplaceAll(skill.Path, "\\", "/") == expected {
+					foundShared = true
+				}
+				if record.DesiredState == "ENABLED" && skill.Provider == "auriga-shared" && strings.ReplaceAll(skill.Path, "\\", "/") == expected && s.State == "active" {
+					content, err := os.ReadFile(filepath.Join(root, "skills-active", "current", record.Name, "SKILL.md"))
+					if err == nil && skill.Content == unifiedSkillBody(content) {
+						confirmed[skill.Preset] = true
+					}
 				}
 			}
-		}
-		if confirmed["cordis"] && confirmed["standard"] && confirmed["ptc"] {
-			state = "applied"
-		}
-		if record.DesiredState == "ENABLED" && s.State == "active" && state != "applied" {
-			return nil, guardian, fmt.Errorf("native catalog disagrees with node shared view")
-		}
-		if s.State == "private_only" && foundShared {
-			return nil, guardian, fmt.Errorf("isolated shared content still visible")
-		}
-		if record.DesiredState != "ENABLED" && !foundShared {
-			if _, err := os.Lstat(filepath.Join(root, "skills-active", "current", record.Name)); os.IsNotExist(err) {
-				state = strings.ToLower(record.DesiredState)
+			if confirmed["cordis"] && confirmed["standard"] && confirmed["ptc"] {
+				state = "applied"
+			}
+			if record.DesiredState == "ENABLED" && s.State == "active" && state != "applied" {
+				return nil, guardian, fmt.Errorf("native catalog disagrees with node shared view")
+			}
+			if s.State == "private_only" && foundShared {
+				return nil, guardian, fmt.Errorf("isolated shared content still visible")
+			}
+			if record.DesiredState != "ENABLED" && !foundShared {
+				if _, err := os.Lstat(filepath.Join(root, "skills-active", "current", record.Name)); os.IsNotExist(err) {
+					state = strings.ToLower(record.DesiredState)
+				}
 			}
 		}
 		changed = changed || s.Installations[i].State != state

@@ -115,7 +115,7 @@ L0 核心插件随客户端安装包和云端镜像发布，由部署配置控�
 | 原等级 | 分发方式 | 安装与成员操作 |
 |---|---|---|
 | L1 | required | 必须安装且启用，拒绝成员关闭、卸载 |
-| L2 | default | 必须安装，首次默认启用，成员可关闭，拒绝卸载 |
+| L2 | default | 自动安装且首次默认启用，成员可关闭、卸载 |
 | L3 | optional | 成员自行安装、更新、关闭、卸载 |
 | L4/private | DSH 原生个人安装 | 平台取消私有未审核发行通道，租户 allowPersonalPlugins 决定能否在 DSH 原生管理中自行安装 |
 
@@ -123,7 +123,9 @@ L0 核心插件随客户端安装包和云端镜像发布，由部署配置控�
 
 同一成员命中多条规则时 installationMode 取 required > default > optional。required/default 表示版本下限，强制版本 = max(命中的 required/default 规则版本, 该成员/实例仍在安装且仍可用版本的高水位)，按 releaseSequence 比较。REMOVED 安装及已撤销、下架或失去可见性的版本不参与此目录下限；这些版本回落到仍可用规则版本是强制集合恢复，不算目录对账的隐式降级。optional 不参与强制版本计算，同序号以规则 ID 确定稳定顺序。仍可用、未移除的高版本不得被规则隐式降低。显式降级沿既有 UnifiedDowngradeAuthorization 独立签名通道，精确绑定 identity、instanceId、from/toReleaseSequence，授权最长10分钟并单次消费，节点独立验签且保留高水位。本期不新增降级界面。规则删除和版本撤销会从强制集合中排除相应规则。规则删除后仍可用的既有安装转为 optional 并保留启用选择，成员可自行卸载；不存在可用规则版本时，原强制版本已撤销、下架或失去可见性产生移除意图，已运行内容仍执行既有撤销停用流程。成员可选择不低于强制高水位的已发布版本，不能改变分发方式。
 
-成员列举安装记录时对账 required/default 集合。required 始终启用，default 保留成员已关闭的状态，optional 不自动安装。关闭 required 或卸载 required/default 返回 resource.installation_required，选择低于强制高水位返回 resource.distribution_locked。安装修订随版本、意图或方式改变递增，重试保持同一代次。
+成员列举安装记录时对账 required/default 集合。required 始终启用，default 保留成员已关闭或卸载的状态（包括云端移除墓碑已回收后及规则版本更新后），optional 不自动安装。关闭或卸载 required 返回 resource.installation_required，选择低于强制高水位返回 resource.distribution_locked。安装修订随版本、意图或方式改变递增，重试保持同一代次。
+
+受管插件无论 required/default/optional，DSH 原生入口均拒绝关闭和卸载，并提示前往门户或插件市场的统一资源目录操作；default 的成员关闭、卸载通过统一目录成员接口实现，required 在该接口继续拒绝。原生入口不直接改变受管插件状态，避免与服务端意图不一致后触发观察隔离。历史受管名即使已退役也不能经原生 registry 重装。allowPersonalPlugins=false 时，云端 supervisor 在 DSH 启动前通过公开 CLI 移除非 L0、非受管的个人插件依赖；L0（auriga-dsh、@deepseek-ai/*）由部署维护。
 
 成员安装列表先无锁读，仅对确需变更的包按成员/客户端/包独立事务写入，沿包行先于安装行的锁顺序。单包失败记录 catalog_assignment_failure，既有安装标为 failed，列表以 assignmentFailures 暴露逐包错误，其余包继续并可独立恢复。云端部分失败通过 assignment_retry_required 单独重试，完成的目录门禁仍可放行其他包与规格。规则变更会取代旧 pending 计划，可信规则全量对账可跨过被取代的 selectionRevision，普通增量意图仍按连续修订执行。
 

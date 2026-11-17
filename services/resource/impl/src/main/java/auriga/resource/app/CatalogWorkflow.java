@@ -114,21 +114,30 @@ public final class CatalogWorkflow {
   }
 
   Map<String, Object> pkg(ResourceAccess.Reader r, UUID p, boolean own) {
+    return pkg(r, p, own, true);
+  }
+
+  Map<String, Object> pkg(ResourceAccess.Reader r, UUID p, boolean own, boolean lock) {
     var row =
         db.row(
             "SELECT p.* FROM resource.catalog_package p WHERE p.tenant_id=:tenant AND p.id=:p"
                 + visible(r)
-                + " FOR UPDATE",
+                + (lock ? " FOR UPDATE" : ""),
             args(r, "p", p));
     if (own && !r.account().equals(row.get("owner_id"))) throw forbidden();
     return row;
   }
 
   Map<String, Object> ver(ResourceAccess.Reader r, UUID p, UUID v, boolean admin) {
-    pkg(r, p, false);
+    return ver(r, p, v, admin, true);
+  }
+
+  Map<String, Object> ver(ResourceAccess.Reader r, UUID p, UUID v, boolean admin, boolean lock) {
+    pkg(r, p, false, lock);
     var row =
         db.row(
-            "SELECT * FROM resource.catalog_version WHERE tenant_id=:tenant AND package_id=:p AND id=:v FOR UPDATE",
+            "SELECT * FROM resource.catalog_version WHERE tenant_id=:tenant AND package_id=:p AND id=:v"
+                + (lock ? " FOR UPDATE" : ""),
             db.args("p", p, "v", v));
     if (!admin
         && !r.account().equals(row.get("author_id"))
@@ -170,6 +179,7 @@ public final class CatalogWorkflow {
         .put("revision", number(v, "revision"))
         .put("createdAt", instant(v.get("created_at")).toString());
     n.set("manifest", json(v, "manifest"));
+    if (v.get("review_id") != null) n.put("reviewId", v.get("review_id").toString());
     n.set(
         "risk",
         JSON.createObjectNode()
@@ -710,6 +720,10 @@ public final class CatalogWorkflow {
     CatalogManifest.artifactDigests(m).forEach(digests::add);
     n.set("statement", statement);
     return signing.get().sign(n, false);
+  }
+
+  ObjectNode signDowngrade(ObjectNode authorization) {
+    return signing.get().signDowngrade(authorization);
   }
 
   public JsonNode publish(

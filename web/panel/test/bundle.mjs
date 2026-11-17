@@ -53,15 +53,15 @@ assert.equal(
   'missing host transport must never use browser fetch',
 );
 for (const [status, message] of [
-  [401, 'Your session has expired'],
-  [403, 'This account cannot read these resources'],
+  [401, 'Your sign-in expired'],
+  [403, 'Your account or device is not authorized to access resources'],
 ]) {
   let hostRequests = 0;
   panel.context = {
     ...panel.context,
     fetch: async (path, init) => {
       hostRequests++;
-      assert.equal(path, '/api/resource/v1/packages?limit=50');
+      assert.equal(path, 'catalog/packages?limit=50&kind=plugin');
       assert.equal(init.method, 'GET');
       return Response.json(
         { detail: 'private-authorization-detail' },
@@ -77,7 +77,7 @@ for (const [status, message] of [
       .textContent.includes(message),
   );
   assert.equal(panel.shadowRoot.querySelectorAll('.card').length, 0);
-  assert.ok(!panel.shadowRoot.textContent.includes('No plugins are visible'));
+  assert.ok(!panel.shadowRoot.textContent.includes('No shared plugins'));
   assert.ok(
     !panel.shadowRoot.textContent.includes('private-authorization-detail'),
   );
@@ -99,17 +99,36 @@ assert.deepEqual(
   Array.from(tabs, (tab) => tab.textContent),
   ['Resource market', 'My resources', 'Plugins', 'Skills'],
 );
-tabs[1].click();
+const installationRequests = [];
+panel.context = {
+  ...panel.context,
+  fetch: async (path, init) => {
+    installationRequests.push({ path, method: init.method });
+    return Response.json(
+      { detail: 'private-authorization-detail' },
+      { status: 403 },
+    );
+  },
+};
+panel.shadowRoot.querySelectorAll('nav button')[1].click();
 await new Promise((resolve) => setTimeout(resolve, 0));
+assert.deepEqual(installationRequests, [
+  { path: 'catalog/packages?limit=50&kind=plugin', method: 'GET' },
+  { path: 'catalog/installations', method: 'GET' },
+]);
 assert.ok(
-  panel.shadowRoot.textContent.includes(
-    'installation inventory is unavailable',
-  ),
+  panel.shadowRoot
+    .querySelector('[role="alert"]')
+    .textContent.includes('Your account or device is not authorized'),
+);
+assert.equal(panel.shadowRoot.querySelectorAll('.card').length, 0);
+assert.ok(
+  !panel.shadowRoot.textContent.includes('private-authorization-detail'),
 );
 assert.equal(
   requests,
   0,
-  'local inventory must not fall back to browser fetch',
+  'catalog installations must not fall back to browser fetch',
 );
 panel.remove();
 dom.window.close();

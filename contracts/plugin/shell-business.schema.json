@@ -2733,6 +2733,12 @@
     "ShellAuthopenapi_resource_yaml_components_schemas_UnifiedVersion": {
       "type": "object",
       "properties": {
+        "reviewId": {
+          "type": "string",
+          "format": "uuid",
+          "readOnly": true,
+          "description": "Latest review record for this version. Load authorized review evidence and verify exact version identity, revision and digest before publication."
+        },
         "id": {
           "type": "string",
           "format": "uuid"
@@ -4658,6 +4664,9 @@
         },
         "installationMode": {
           "$ref": "#/$defs/ShellAuthresource_unified_schema_json__defs_UnifiedInstallationMode"
+        },
+        "downgradeAuthorization": {
+          "$ref": "#/$defs/ShellAuthresource_unified_schema_json__defs_UnifiedDowngradeAuthorization"
         }
       },
       "required": [
@@ -4736,7 +4745,104 @@
         "required",
         "default",
         "optional"
+      ],
+      "description": "required: automatically install and enable; members cannot disable or uninstall. default: automatically install initially; preserve member disable and uninstall choices. optional: marketplace choice only; no automatic installation."
+    },
+    "ShellAuthresource_unified_schema_json__defs_UnifiedDowngradeAuthorization": {
+      "type": "object",
+      "properties": {
+        "schemaVersion": {
+          "type": "integer",
+          "const": 2
+        },
+        "authorizationId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "instanceId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "identity": {
+          "$ref": "#/$defs/ShellAuthresource_unified_schema_json__defs_UnifiedResourceIdentity"
+        },
+        "fromReleaseSequence": {
+          "type": "integer",
+          "format": "int64",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "toReleaseSequence": {
+          "type": "integer",
+          "format": "int64",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "issuedAt": {
+          "$ref": "#/$defs/ShellAuthresource_signatures_schema_json__defs_Time"
+        },
+        "expiresAt": {
+          "$ref": "#/$defs/ShellAuthresource_signatures_schema_json__defs_Time"
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024
+        },
+        "signature": {
+          "$ref": "#/$defs/ShellAuthresource_signatures_schema_json__defs_Signature"
+        },
+        "purpose": {
+          "type": "string",
+          "const": "downgrade"
+        },
+        "ownerId": {
+          "type": "string",
+          "format": "uuid"
+        }
+      },
+      "required": [
+        "schemaVersion",
+        "authorizationId",
+        "instanceId",
+        "identity",
+        "fromReleaseSequence",
+        "toReleaseSequence",
+        "issuedAt",
+        "expiresAt",
+        "reason",
+        "signature",
+        "purpose"
+      ],
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "reason": {
+                "const": "revocation"
+              }
+            },
+            "required": [
+              "reason"
+            ]
+          },
+          "then": {
+            "required": [
+              "ownerId"
+            ],
+            "properties": {
+              "ownerId": {
+                "$ref": "#/$defs/ShellAuthresource_unified_schema_json__defs_UnifiedDowngradeAuthorization_properties_ownerId"
+              }
+            }
+          }
+        }
       ]
+    },
+    "ShellAuthresource_unified_schema_json__defs_UnifiedDowngradeAuthorization_properties_ownerId": {
+      "type": "string",
+      "format": "uuid"
     },
     "ShellAuthOutput_UnifiedCreateDownloadTicket": {
       "type": "object",

@@ -936,6 +936,9 @@ export default {
             description:
               'Server-resolved scope policy. Omission means optional for earlier records.',
           },
+          downgradeAuthorization: {
+            $ref: '#/$defs/UnifiedDowngradeAuthorization',
+          },
         },
         required: [
           'identity',
@@ -1448,6 +1451,7 @@ export default {
           reason: { type: 'string', minLength: 1, maxLength: 1024 },
           signature: { $ref: './signatures.schema.json#/$defs/Signature' },
           purpose: { type: 'string', const: 'downgrade' },
+          ownerId: { type: 'string', format: 'uuid' },
         },
         required: [
           'schemaVersion',
@@ -1463,6 +1467,22 @@ export default {
           'purpose',
         ],
         additionalProperties: false,
+        allOf: [
+          {
+            if: {
+              properties: { reason: { const: 'revocation' } },
+              required: ['reason'],
+            },
+            then: {
+              required: ['ownerId'],
+              properties: {
+                ownerId: {
+                  $ref: '#/$defs/UnifiedDowngradeAuthorization/properties/ownerId',
+                },
+              },
+            },
+          },
+        ],
       },
       UnifiedMemberInstallationReport: {
         type: 'object',
@@ -1768,6 +1788,9 @@ export default {
           },
           receiptId: { type: 'string', format: 'uuid' },
           recordedAt: { $ref: './signatures.schema.json#/$defs/Time' },
+          downgradeAuthorization: {
+            $ref: '#/$defs/UnifiedDowngradeAuthorization',
+          },
         },
         required: [
           'schemaVersion',
@@ -1886,6 +1909,8 @@ export default {
             maxItems: 8192,
             uniqueItems: true,
             items: { type: 'string', format: 'uuid' },
+            description:
+              'Durable, deduplicated single-use IDs, reserved under the host mutation lock before activation and never cleared by uninstall, ledger cleanup, rollback or restart. Keep the maximum release watermark. Fail closed when storage is full; never evict IDs to admit a replay.',
           },
         },
         required: [
@@ -1931,6 +1956,8 @@ export default {
       UnifiedInstallationMode: {
         type: 'string',
         enum: ['required', 'default', 'optional'],
+        description:
+          'required: automatically install and enable; members cannot disable or uninstall. default: automatically install initially; preserve member disable and uninstall choices. optional: marketplace choice only; no automatic installation.',
       },
       UnifiedAssignmentInput: {
         type: 'object',

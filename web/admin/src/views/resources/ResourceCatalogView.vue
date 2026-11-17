@@ -43,7 +43,6 @@ const selected = shallowRef<CatalogVersion>(),
   review = shallowRef<CatalogReview>();
 const reviewEtag = ref<string | null>(null),
   versionEtag = ref<string | null>(null);
-const reviewId = ref('');
 const loading = ref(false),
   busy = ref(false),
   error = ref(''),
@@ -159,7 +158,6 @@ function clearDetail() {
   ++detailEpoch;
   selected.value = undefined;
   review.value = undefined;
-  reviewId.value = '';
   reviewEtag.value = null;
   versionEtag.value = null;
   files.value = [];
@@ -262,7 +260,12 @@ async function inspect(v: CatalogVersion, r?: CatalogReview) {
   error.value = '';
   reason.value = '';
   try {
-    const evidence = r ? await api.review(r.reviewId) : undefined;
+    const reviewId =
+      r?.reviewId ??
+      (props.phase === 'published' && v.state === 'approved'
+        ? v.reviewId
+        : undefined);
+    const evidence = reviewId ? await api.review(reviewId) : undefined;
     // Unpublished member reads are intentionally author-only. Reviewers use
     // the authorized admin evidence; approved publication rows are snapshots.
     const version = evidence
@@ -278,7 +281,11 @@ async function inspect(v: CatalogVersion, r?: CatalogReview) {
       version.data.kind !== kind.value ||
       version.data.manifest.kind !== kind.value ||
       version.data.id !== v.id ||
-      version.data.packageId !== v.packageId
+      version.data.packageId !== v.packageId ||
+      (evidence &&
+        (evidence.data.reviewId !== reviewId ||
+          version.data.revision !== v.revision ||
+          version.data.digest !== v.digest))
     )
       throw new Error('Stale evidence');
     selected.value = version.data;
@@ -288,33 +295,6 @@ async function inspect(v: CatalogVersion, r?: CatalogReview) {
     risk.value = riskOptions(
       evidence?.data ?? ({ version: version.data } as CatalogReview),
     )[0]!;
-  } catch (err) {
-    if (alive && e === detailEpoch) error.value = failure(err);
-  }
-}
-async function readReview() {
-  const v = selected.value,
-    id = reviewId.value.trim();
-  if (!v || !id || locked.value) return;
-  const e = ++detailEpoch;
-  review.value = undefined;
-  reviewEtag.value = null;
-  try {
-    const evidence = await api.review(id);
-    if (!alive || e !== detailEpoch) return;
-    const candidate = evidence.data.version;
-    if (
-      candidate.id !== v.id ||
-      candidate.packageId !== v.packageId ||
-      candidate.kind !== v.kind ||
-      candidate.revision !== v.revision ||
-      candidate.digest !== v.digest
-    )
-      throw new Error('Mismatched evidence');
-    review.value = evidence.data;
-    reviewEtag.value = evidence.etag;
-    versionEtag.value = catalogRevisionEtag(candidate.revision);
-    risk.value = riskOptions(evidence.data)[0]!;
   } catch (err) {
     if (alive && e === detailEpoch) error.value = failure(err);
   }
@@ -835,26 +815,7 @@ onBeforeUnmount(() => {
           <h3>{{ t('manifest') }}</h3>
           <pre>{{ JSON.stringify(selected.manifest, null, 2) }}</pre>
         </details>
-        <form
-          v-if="selected.state === 'approved' && !review"
-          @submit.prevent="readReview"
-        >
-          <p>{{ t('reviewRecovery') }}</p>
-          <label
-            >{{ t('reviewId')
-            }}<input
-              v-model="reviewId"
-              data-testid="catalog-review-id"
-              :disabled="locked"
-              required
-          /></label>
-          <button
-            data-testid="catalog-read-review"
-            :disabled="locked || !reviewId.trim()"
-          >
-            {{ t('readReview') }}
-          </button>
-        </form>
+
         <template v-if="selected.kind === 'skill'"
           ><button :disabled="locked" @click="preview()">
             {{ t('preview') }}

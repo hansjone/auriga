@@ -8,6 +8,9 @@ var resourceObserver []byte
 //go:embed resource_supervisor.mjs
 var resourceSupervisor []byte
 
+//go:embed resource_plugins.mjs
+var resourcePlugins []byte
+
 const ContainerResourceSupervisor = ContainerMetaRoot + "/resource-supervisor.mjs"
 
 const ContainerResourceObserver = ContainerMetaRoot + "/resource-observer.mjs"
@@ -15,6 +18,9 @@ const ContainerResourcePolicy = ContainerMetaRoot + "/resource-session-policy.js
 
 // InstallResourceObserver writes only renderer-owned code, never a spec-supplied module.
 func installResourceObserver(opt Options) error {
+	if err := writeAtomic(opt.MetaDir+"/resource_plugins.mjs", resourcePlugins, 0644, nil, opt); err != nil {
+		return err
+	}
 	if err := writeAtomic(opt.MetaDir+"/resource-supervisor.mjs", resourceSupervisor, 0644, nil, opt); err != nil {
 		return err
 	}

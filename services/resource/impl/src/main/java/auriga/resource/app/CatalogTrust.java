@@ -261,6 +261,8 @@ public final class CatalogTrust {
         var a = input.path("authorization");
         schema("unified", "UnifiedDowngradeAuthorization", a);
         require(signed(a, "downgrade"), "downgrade_signature");
+        if (a.path("reason").asString().equals("revocation") || a.has("ownerId"))
+          require(a.path("ownerId").equals(input.path("ownerId")), "downgrade_scope");
         require(
             same(a, input, "identity", "instanceId", "fromReleaseSequence", "toReleaseSequence")
                 && a.path("toReleaseSequence").asLong() < a.path("fromReleaseSequence").asLong(),

@@ -27,6 +27,7 @@ func unifiedSelectionBytes(ref *resourcev1.UnifiedResourceRef) ([]byte, error) {
 	}
 	copyRef := proto.Clone(ref).(*resourcev1.UnifiedResourceRef)
 	copyRef.Lease = nil
+	copyRef.DowngradeAuthorization = nil
 	copyRef.ManifestDownloadPath = ""
 	if copyRef.Envelope != nil {
 		copyRef.Envelope.NotAfter = ""

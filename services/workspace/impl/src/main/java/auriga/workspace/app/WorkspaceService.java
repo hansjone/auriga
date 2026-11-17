@@ -480,7 +480,9 @@ public final class WorkspaceService {
           row,
           sealSpec(row, UnifiedSpec.bump(next)),
           false,
-          (boolean) row.get("restart_pending"),
+          (boolean) row.get("restart_pending")
+              || "running".equals(row.get("phase"))
+                  && UnifiedSpec.executionChanged(admitted, projected),
           (String) row.get("startup_traceparent"));
       store.jdbc.update(
           "UPDATE instance SET catalog_safety_spec=? WHERE tenant_id=? AND id=?",

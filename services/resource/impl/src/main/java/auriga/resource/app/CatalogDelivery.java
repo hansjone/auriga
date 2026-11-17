@@ -205,6 +205,65 @@ public final class CatalogDelivery implements UnifiedResourceResolution {
             uuid(document.path("resource").path("identity"), "versionId")));
   }
 
+  /** Only a revoked installed release falling back to an effective mandatory rule is automatic. */
+  private void authorizeRevocationFallback(
+      ResourceAccess.Reader reader,
+      UUID client,
+      JsonNode previous,
+      ObjectNode resource,
+      CatalogAssignments.Effective policy) {
+    if (previous == null) return;
+    long high =
+        Math.max(
+            previous.path("releaseSequence").asLong(),
+            previous.path("downgradeAuthorization").path("fromReleaseSequence").asLong());
+    if (resource.path("releaseSequence").asLong() >= high) return;
+    boolean continuing =
+        previous.path("identity").equals(resource.path("identity"))
+            && previous
+                .path("downgradeAuthorization")
+                .path("reason")
+                .asString()
+                .equals("revocation");
+    if (!continuing
+        && (policy == null
+            || policy.mode().equals("optional")
+            || !policy.identity().equals(resource.path("identity")))) throw conflict();
+    var old =
+        continuing
+            ? db.row(
+                "SELECT * FROM resource.catalog_version WHERE tenant_id=:tenant AND package_id=:pkg AND release_sequence=:sequence",
+                db.args("pkg", uuid(resource.path("identity"), "packageId"), "sequence", high))
+            : admit(reader, previous.path("identity"), false);
+    if (!catalog.revoked(old)) throw conflict();
+    var now = clock.instant();
+    var authorization =
+        JSON.createObjectNode()
+            .put("schemaVersion", 2)
+            .put("purpose", "downgrade")
+            .put("authorizationId", UuidV7.next().toString())
+            .put("ownerId", reader.account().toString())
+            .put("instanceId", client.toString())
+            .put("fromReleaseSequence", high)
+            .put("toReleaseSequence", resource.path("releaseSequence").asLong())
+            .put("issuedAt", ResourceSigning.time(now))
+            .put("expiresAt", ResourceSigning.time(now.plusSeconds(600)))
+            .put("reason", "revocation");
+    authorization.set("identity", resource.path("identity"));
+    resource.set("downgradeAuthorization", catalog.signDowngrade(authorization));
+  }
+
+  private void refreshDowngrade(ObjectNode resource) {
+    if (!resource.has("downgradeAuthorization")) return;
+    var authorization = (ObjectNode) resource.path("downgradeAuthorization").deepCopy();
+    if (Instant.parse(authorization.path("expiresAt").asString())
+        .isAfter(clock.instant().plusSeconds(30))) return;
+    authorization.put("issuedAt", ResourceSigning.time(clock.instant()));
+    authorization.put("expiresAt", ResourceSigning.time(clock.instant().plusSeconds(600)));
+    // Renew the same one-use grant, never mint a fresh ID on a retry.
+    resource.set("downgradeAuthorization", catalog.signDowngrade(authorization));
+  }
+
   public JsonNode select(AurigaPrincipal actor, ObjectNode body, String key, String etag) {
     validate("UnifiedInstallationInput", body);
     UUID c = client(actor, body);
@@ -267,6 +326,9 @@ public final class CatalogDelivery implements UnifiedResourceResolution {
                   : ref(r, v);
           ((ObjectNode) resource)
               .put("installationMode", policy == null ? "optional" : policy.mode());
+          if (Set.of("install", "enable").contains(action))
+            authorizeRevocationFallback(
+                r, c, old == null ? null : old.path("resource"), (ObjectNode) resource, policy);
           CatalogStatePolicy.dispatch(
               (ObjectNode) resource,
               CatalogStatePolicy.advance(rev, rev),
@@ -350,6 +412,7 @@ public final class CatalogDelivery implements UnifiedResourceResolution {
             CatalogStatePolicy.desired(doc.path("resource")));
     Instant lease = Instant.parse(resource.path("lease").path("expiresAt").asString());
     if (!clock.instant().isBefore(lease)) throw missing();
+    refreshDowngrade(resource);
     byte[] random = new byte[32];
     new java.security.SecureRandom().nextBytes(random);
     String ticket = Base64.getUrlEncoder().withoutPadding().encodeToString(random);
@@ -447,6 +510,9 @@ public final class CatalogDelivery implements UnifiedResourceResolution {
                   != doc.path("resource").path("releaseSequence").asLong()) throw conflict();
           var v = admit(r, body.path("identity"), true);
           var updated = ref(r, v);
+          if (doc.path("resource").has("downgradeAuthorization"))
+            updated.set(
+                "downgradeAuthorization", doc.path("resource").path("downgradeAuthorization"));
           updated.put("installationMode", CatalogAssignments.mode(doc.path("resource")));
           if (updated.path("releaseSequence").asLong() != counter(body, "releaseSequence"))
             throw conflict();
@@ -644,6 +710,11 @@ public final class CatalogDelivery implements UnifiedResourceResolution {
         });
   }
 
+  public JsonNode assignment(AurigaPrincipal actor, UUID id) {
+    var reader = access.administrator(actor, "resource.distributions.manage");
+    return tx.read(() -> assignments.view(reader, assignments.row(id, false), false));
+  }
+
   private boolean memberCloud(ResourceAccess.Reader reader, UUID client) {
     var rules =
         db.rows(
@@ -765,8 +836,8 @@ public final class CatalogDelivery implements UnifiedResourceResolution {
     }
     var target = policy == null ? previous.path("identity") : policy.identity();
     String desired = old == null ? "ENABLED" : CatalogStatePolicy.desired(previous);
-    if (policy != null && (policy.mode().equals("required") || desired.equals("REMOVED")))
-      desired = "ENABLED";
+    if (policy != null && policy.mode().equals("required")) desired = "ENABLED";
+    if (desired.equals("REMOVED")) target = previous.path("identity");
     String mode = policy == null ? "optional" : policy.mode();
     if (!available(reader, target)) {
       if (old == null) throw missing();
@@ -791,6 +862,8 @@ public final class CatalogDelivery implements UnifiedResourceResolution {
             ? 1
             : CatalogStatePolicy.advance(number(row, "revision"), number(row, "revision"));
     resource.put("installationMode", mode);
+    if (!desired.equals("REMOVED"))
+      authorizeRevocationFallback(reader, client, previous, resource, policy);
     CatalogStatePolicy.dispatch(resource, revision, desired);
     var doc =
         JSON.createObjectNode()
@@ -861,6 +934,13 @@ public final class CatalogDelivery implements UnifiedResourceResolution {
             var policy = policies.get(pkg);
             if (policy != null && policy.mode().equals("optional")) policy = null;
             var old = previous.get(pkg);
+            if (old == null && policy != null && policy.mode().equals("default")) {
+              var history = priorCloudResource(instance, snapshot.owner(), pkg, null);
+              if (history != null && CatalogStatePolicy.desired(history).equals("REMOVED")) {
+                assignmentRecovered(reader, instance, pkg, "instance");
+                continue;
+              }
+            }
             String oldMode =
                 old == null || old.getInstallationMode().isEmpty()
                     ? "optional"
@@ -882,9 +962,9 @@ public final class CatalogDelivery implements UnifiedResourceResolution {
               continue;
             }
             String desired = old == null ? "ENABLED" : CatalogStatePolicy.desired(old);
-            if (policy != null && (policy.mode().equals("required") || desired.equals("REMOVED")))
-              desired = "ENABLED";
+            if (policy != null && policy.mode().equals("required")) desired = "ENABLED";
             var id = policy == null ? identityFromProto(old.getIdentity()) : policy.identity();
+            if (desired.equals("REMOVED")) id = identityFromProto(old.getIdentity());
             if (!available(reader, id)) {
               if (old == null) continue;
               desired = "REMOVED";
@@ -894,7 +974,21 @@ public final class CatalogDelivery implements UnifiedResourceResolution {
             // Validate each package before combining it with independent healthy selections.
             if (!desired.equals("REMOVED")) {
               try {
-                ref(reader, admit(reader, id, true));
+                var candidate = ref(reader, admit(reader, id, true));
+                var history = priorCloudResource(instance, snapshot.owner(), pkg, null);
+                if (history != null) {
+                  authorizeRevocationFallback(reader, instance, history, candidate, policy);
+                } else if (old != null) {
+                  var prior =
+                      JSON.createObjectNode()
+                          .put(
+                              "releaseSequence",
+                              Math.max(
+                                  old.getReleaseSequence(),
+                                  old.getDowngradeAuthorization().getFromReleaseSequence()));
+                  prior.set("identity", identityFromProto(old.getIdentity()));
+                  authorizeRevocationFallback(reader, instance, prior, candidate, policy);
+                }
               } catch (RuntimeException failure) {
                 assignmentFailed(reader, instance, pkg, "instance", failure);
                 retryAssignments = true;
@@ -932,7 +1026,9 @@ public final class CatalogDelivery implements UnifiedResourceResolution {
                               .equals(resource.path("identity").path("packageId")))) continue;
               var policy = policies.get(uuid(resource.path("identity"), "packageId"));
               String expected =
-                  CatalogStatePolicy.desired(resource).equals("REMOVED") || policy == null
+                  policy == null
+                          || policy.mode().equals("required")
+                              && CatalogStatePolicy.desired(resource).equals("REMOVED")
                       ? "optional"
                       : policy.mode();
               sameModes &= CatalogAssignments.mode(resource).equals(expected);
@@ -1052,6 +1148,12 @@ public final class CatalogDelivery implements UnifiedResourceResolution {
             "SELECT * FROM resource.catalog_instance_installation WHERE tenant_id=:tenant AND instance_id=:instance AND package_id=:pkg FOR UPDATE",
             db.args("instance", instance, "pkg", pkg));
     return rows.isEmpty() ? null : rows.getFirst();
+  }
+
+  private JsonNode priorCloudResource(UUID instance, UUID owner, UUID pkg, JsonNode retained) {
+    if (retained != null) return retained;
+    var row = cloudRow(instance, pkg);
+    return row != null && owner.equals(row.get("owner_id")) ? json(row, "resource") : null;
   }
 
   private LinkedHashMap<UUID, ObjectNode> cloudResources(
@@ -1196,21 +1298,28 @@ public final class CatalogDelivery implements UnifiedResourceResolution {
         var policy = entry.getValue();
         if (policy.mode().equals("optional") || requested.contains(entry.getKey())) continue;
         var old = retained.get(entry.getKey());
+        if (old == null && policy.mode().equals("default")) {
+          var history = priorCloudResource(instance, snapshot.owner(), entry.getKey(), null);
+          if (history != null && CatalogStatePolicy.desired(history).equals("REMOVED")) continue;
+        }
         String desired =
-            policy.mode().equals("default")
-                    && old != null
-                    && CatalogStatePolicy.desired(old).equals("DISABLED")
-                ? "DISABLED"
+            policy.mode().equals("default") && old != null
+                ? CatalogStatePolicy.desired(old)
                 : "ENABLED";
+        var identity = desired.equals("REMOVED") ? old.path("identity") : policy.identity();
         if (old == null
-            || !old.path("identity").equals(policy.identity())
+            || !old.path("identity").equals(identity)
             || !CatalogAssignments.mode(old).equals(policy.mode())
             || !CatalogStatePolicy.desired(old).equals(desired))
           ((tools.jackson.databind.node.ArrayNode) body.path("selections"))
               .add(
                   JSON.createObjectNode()
-                      .put("action", desired.equals("ENABLED") ? "install" : "disable")
-                      .set("identity", policy.identity()));
+                      .put(
+                          "action",
+                          desired.equals("ENABLED")
+                              ? "install"
+                              : desired.equals("REMOVED") ? "remove" : "disable")
+                      .set("identity", identity));
       }
       for (var entry : retained.entrySet()) {
         var policy = policies.get(entry.getKey());
@@ -1285,6 +1394,13 @@ public final class CatalogDelivery implements UnifiedResourceResolution {
           resource,
           reserve(instance, p),
           CatalogStatePolicy.stateForAction(s.path("action").asString()));
+      if (enabling)
+        authorizeRevocationFallback(
+            owner,
+            instance,
+            priorCloudResource(instance, snapshot.owner(), p, retained.get(p)),
+            resource,
+            policy);
       retained.put(p, resource);
     }
     if (retained.size() > 128) throw conflict();
@@ -1294,7 +1410,9 @@ public final class CatalogDelivery implements UnifiedResourceResolution {
       if (manual || selected.contains(entry.getKey()))
         resource.put(
             "installationMode",
-            CatalogStatePolicy.desired(resource).equals("REMOVED") || policy == null
+            policy == null
+                    || policy.mode().equals("required")
+                        && CatalogStatePolicy.desired(resource).equals("REMOVED")
                 ? "optional"
                 : policy.mode());
       var persisted = cloudRow(instance, entry.getKey());
@@ -1562,6 +1680,22 @@ public final class CatalogDelivery implements UnifiedResourceResolution {
                   "DISABLED");
               current.put("installationMode", "optional");
               enabling = false;
+            }
+            if (enabling) {
+              try {
+                refreshDowngrade(current);
+              } catch (AurigaException failure) {
+                if (!failure.errorCode().equals(CommonErrors.UNAVAILABLE)) throw failure;
+                assignmentFailed(
+                    owner,
+                    (UUID) row.get("instance_id"),
+                    uuid(resource.path("identity"), "packageId"),
+                    "instance",
+                    failure);
+                out.addResources(CatalogProtocol.ref(current));
+                refreshed.add(current);
+                continue;
+              }
             }
             if (enabling
                 && Instant.parse(current.path("lease").path("expiresAt").asString())

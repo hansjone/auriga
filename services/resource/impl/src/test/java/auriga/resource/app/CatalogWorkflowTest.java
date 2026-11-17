@@ -69,7 +69,7 @@ class CatalogWorkflowTest {
   Set<UUID> externalMembers = new HashSet<>();
   AtomicBoolean personalAllowed = new AtomicBoolean(true);
   ResourceSigning signing;
-  KeyPair releaseKey, revocationKey;
+  KeyPair releaseKey, revocationKey, downgradeKey;
   java.util.concurrent.atomic.AtomicReference<Instant> now =
       new java.util.concurrent.atomic.AtomicReference<>(Instant.parse("2026-11-13T00:00:00Z"));
   Clock clock =
@@ -169,9 +169,15 @@ class CatalogWorkflowTest {
     var keys = KeyPairGenerator.getInstance("Ed25519");
     releaseKey = keys.generateKeyPair();
     revocationKey = keys.generateKeyPair();
+    downgradeKey = keys.generateKeyPair();
     signing =
         new ResourceSigning(
-            "release", releaseKey.getPrivate(), "revoke", revocationKey.getPrivate());
+            "release",
+            releaseKey.getPrivate(),
+            "revoke",
+            revocationKey.getPrivate(),
+            "downgrade",
+            downgradeKey.getPrivate());
     var events =
         new OutboxEventPublisher(
             jdbc, "resource", "resource", new EventSchemas(), JSON, clock, () -> {});
@@ -199,9 +205,13 @@ class CatalogWorkflowTest {
   }
 
   AurigaPrincipal actor(UUID id) {
+    return actor(id, TENANT);
+  }
+
+  AurigaPrincipal actor(UUID id, UUID tenant) {
     return new AurigaPrincipal(
         id.toString(),
-        TENANT,
+        tenant,
         PrincipalType.USER,
         TokenContext.ADMIN,
         "test",
@@ -268,7 +278,18 @@ class CatalogWorkflowTest {
           approvePublish(upload);
           var delivery = delivery(null);
           var rule = assign(delivery, upload, "member", GENERAL, "required");
+          assertEquals(rule, delivery.assignment(actor(PUBLISHER), uuid(rule, "id")));
+          assertEquals(
+              rule, tx.read(() -> delivery.assignment(actor(PUBLISHER), uuid(rule, "id"))));
           var first = delivery.removeAssignment(actor(PUBLISHER), uuid(rule, "id"), key(), "\"1\"");
+          assertEquals(first, delivery.assignment(actor(PUBLISHER), uuid(rule, "id")));
+          UUID otherTenant = UUID.randomUUID();
+          TenantContext.run(
+              otherTenant,
+              () ->
+                  assertError(
+                      CommonErrors.NOT_FOUND,
+                      () -> delivery.assignment(actor(PUBLISHER, otherTenant), uuid(rule, "id"))));
           long events =
               tx.read(
                   () ->
@@ -633,6 +654,7 @@ class CatalogWorkflowTest {
   @ParameterizedTest
   @CsvSource({
     "false,required,malicious", "true,required,malicious",
+    "false,default,malicious", "true,default,malicious",
     "false,default,withdrawn", "true,default,withdrawn",
     "false,required,removed", "true,required,removed",
     "false,default,removedWithdrawn", "true,default,removedWithdrawn"
@@ -762,17 +784,133 @@ class CatalogWorkflowTest {
                         .setSelectionRevision(selection)
                         .setSynchronizeAssignments(true)
                         .build());
+            if (mode.equals("default") && scenario.startsWith("removed")) {
+              assertFalse(restored.getAssignmentRetryRequired());
+              assertTrue(
+                  restored.getResourcesList().stream()
+                      .allMatch(
+                          ref ->
+                              CatalogStatePolicy.desired(ref).equals("REMOVED")
+                                  && !ref.hasDowngradeAuthorization()));
+              return null;
+            }
+            if (!scenario.equals("malicious")) {
+              assertTrue(restored.getAssignmentRetryRequired());
+              assertTrue(
+                  restored.getResourcesList().stream()
+                      .noneMatch(ref -> ref.hasDowngradeAuthorization()));
+              return null;
+            }
             assertFalse(restored.getAssignmentRetryRequired());
             assertEquals(identity(first), identityFromRef(restored.getResources(0)));
             assertEquals(mode, restored.getResources(0).getInstallationMode());
             assertEquals("ENABLED", CatalogStatePolicy.desired(restored.getResources(0)));
+            var authorization = restored.getResources(0).getDowngradeAuthorization();
+            assertEquals("revocation", authorization.getReason());
+            assertEquals(GENERAL.toString(), authorization.getOwnerId());
+            assertEquals(target.toString(), authorization.getInstanceId());
+            assertEquals(1, authorization.getToReleaseSequence());
+            assertEquals(3, authorization.getFromReleaseSequence());
+            when(workspace.snapshot(TENANT, target))
+                .thenReturn(
+                    new UnifiedResourceWorkspace.Snapshot(
+                        target,
+                        GENERAL,
+                        node,
+                        restored.getSelectionRevision(),
+                        3,
+                        0,
+                        false,
+                        List.of(),
+                        restored.getResourcesList()));
+            advance(601);
+            signing =
+                new ResourceSigning(
+                    "release", releaseKey.getPrivate(), "revoke", revocationKey.getPrivate());
+            catalog.withdraw(
+                actor(PUBLISHER),
+                first.pkg,
+                first.version,
+                reason().put("mode", "malicious"),
+                key(),
+                etag(catalog.detail(actor(AUTHOR), first.pkg, first.version, false)));
+            var disabled =
+                delivery.resolve(
+                    request
+                        .clearSelections()
+                        .setSynchronizeAssignments(false)
+                        .setSelectionRevision(restored.getSelectionRevision())
+                        .addSelections(CatalogProtocol.selection(selection(first, "install")))
+                        .build());
+            assertFalse(
+                disabled.getResources(0).getEnabled(),
+                "missing downgrade root must never block safety disable");
           } else {
             var page = delivery.installations(actor(GENERAL), target, "skill", 50, null);
+            if (mode.equals("default") && scenario.startsWith("removed")) {
+              assertTrue(page.path("assignmentFailures").isEmpty());
+              assertEquals(
+                  "REMOVED",
+                  page.path("items").get(0).path("resource").path("desiredState").asString());
+              return null;
+            }
+            if (!scenario.equals("malicious")) {
+              assertFalse(page.path("assignmentFailures").isEmpty());
+              assertTrue(
+                  java.util.stream.StreamSupport.stream(page.path("items").spliterator(), false)
+                      .noneMatch(item -> item.path("resource").has("downgradeAuthorization")));
+              return null;
+            }
             assertTrue(page.path("assignmentFailures").isEmpty());
             var resource = page.path("items").get(0).path("resource");
             assertEquals(identity(first), resource.path("identity"));
             assertEquals(mode, resource.path("installationMode").asString());
             assertEquals("ENABLED", resource.path("desiredState").asString());
+            var authorization = resource.path("downgradeAuthorization");
+            assertEquals("revocation", authorization.path("reason").asString());
+            assertEquals(GENERAL.toString(), authorization.path("ownerId").asString());
+            assertEquals(target.toString(), authorization.path("instanceId").asString());
+            var trust = JSON.createObjectNode();
+            trust.set(
+                "downgrade",
+                JSON.createObjectNode()
+                    .put("kid", "downgrade")
+                    .put(
+                        "publicKeySpkiBase64",
+                        Base64.getEncoder().encodeToString(downgradeKey.getPublic().getEncoded())));
+            var input = (ObjectNode) authorization.deepCopy();
+            input.set("authorization", authorization);
+            input.put("now", clock.instant().toString());
+            input.putArray("usedAuthorizationIds");
+            var verifier = new CatalogTrust(trust);
+            verifier.verify("downgrade", input);
+            input.put("ownerId", UUID.randomUUID().toString());
+            assertEquals(
+                "downgrade_scope",
+                assertThrows(
+                        IllegalArgumentException.class, () -> verifier.verify("downgrade", input))
+                    .getMessage());
+            input.put("ownerId", GENERAL.toString());
+            input.withArray("usedAuthorizationIds").add(authorization.path("authorizationId"));
+            assertEquals(
+                "downgrade_replay",
+                assertThrows(
+                        IllegalArgumentException.class, () -> verifier.verify("downgrade", input))
+                    .getMessage());
+            if (mode.equals("default")) {
+              long revision = page.path("items").get(0).path("installationRevision").asLong();
+              delivery.select(
+                  actor(GENERAL), choose(target, first, "disable"), key(), "\"" + revision + "\"");
+              var enabled =
+                  delivery.select(
+                      actor(GENERAL),
+                      choose(target, first, "enable"),
+                      key(),
+                      "\"" + (revision + 1) + "\"");
+              assertNotEquals(
+                  authorization.path("authorizationId"),
+                  enabled.path("resource").path("downgradeAuthorization").path("authorizationId"));
+            }
           }
           return null;
         });
@@ -1036,7 +1174,7 @@ class CatalogWorkflowTest {
                       .path("desiredState")
                       .asString());
             }
-            if (!mode.equals("optional")) {
+            if (mode.equals("required")) {
               assertEquals(
                   "resource.installation_required",
                   assertThrows(
@@ -1050,13 +1188,32 @@ class CatalogWorkflowTest {
                       .errorCode()
                       .code());
             } else {
+              var removed =
+                  delivery.select(actor(GENERAL), choose(client, upload, "remove"), key(), "\"2\"");
+              assertEquals("REMOVED", removed.path("resource").path("desiredState").asString());
               assertEquals(
-                  "REMOVED",
-                  delivery
-                      .select(actor(GENERAL), choose(client, upload, "remove"), key(), "\"2\"")
-                      .path("resource")
-                      .path("desiredState")
-                      .asString());
+                  ResourceSigning.canonical(removed),
+                  ResourceSigning.canonical(
+                      delivery
+                          .installations(actor(GENERAL), client, kind, 50, null)
+                          .path("items")
+                          .get(0)));
+              var reinstall = upload;
+              if (mode.equals("default") && kind.equals("skill")) {
+                reinstall = nextSkillVersion(upload, "1.1.0");
+                assign(delivery, reinstall, "tenant", TENANT, mode);
+                var retained =
+                    delivery
+                        .installations(actor(GENERAL), client, kind, 50, null)
+                        .path("items")
+                        .get(0);
+                assertEquals("REMOVED", retained.path("resource").path("desiredState").asString());
+                assertEquals(3, retained.path("installationRevision").asLong());
+              }
+              var restored =
+                  delivery.select(
+                      actor(GENERAL), choose(client, reinstall, "install"), key(), "\"3\"");
+              assertEquals("ENABLED", restored.path("resource").path("desiredState").asString());
             }
           } catch (Exception e) {
             throw new RuntimeException(e);
@@ -1143,6 +1300,11 @@ class CatalogWorkflowTest {
             page.path("items").forEach(item -> ids.add(item.path("id").asString()));
             assertTrue(ids.contains(visibleRule.path("id").asString()));
             assertFalse(ids.contains(hiddenRule.path("id").asString()));
+            assertEquals(
+                visibleRule, delivery.assignment(actor(PUBLISHER), uuid(visibleRule, "id")));
+            assertError(
+                CommonErrors.NOT_FOUND,
+                () -> delivery.assignment(actor(PUBLISHER), uuid(hiddenRule, "id")));
             assertError(
                 CommonErrors.NOT_FOUND,
                 () ->
@@ -1337,6 +1499,38 @@ class CatalogWorkflowTest {
             .put("visibility", "tenant"),
         key(),
         "\"0\"");
+  }
+
+  @ParameterizedTest
+  @ValueSource(strings = {"auriga-dsh", "@deepseek-ai/dsh", "@deepseek-ai/reserved-plugin"})
+  void uploadRejectsDeploymentOwnedPluginNames(String packageName) throws Exception {
+    TenantContext.call(
+        TENANT,
+        () -> {
+          var upload = upload(false, "plugin");
+          var manifest = (ObjectNode) upload.value.path("manifest").deepCopy();
+          manifest.put("version", "1.1.0");
+          ((ObjectNode) manifest.path("plugin")).put("packageName", packageName);
+          var payload = pluginArchive(packageName, "1.1.0", "package/package.json", false, false);
+          ((ObjectNode) manifest.path("artifacts").get(0))
+              .put("digest", CatalogManifest.digest(payload))
+              .put("sizeBytes", payload.length);
+          byte[] raw = manifest.toString().getBytes(StandardCharsets.UTF_8);
+          assertError(
+              CommonErrors.VALIDATION_FAILED,
+              () ->
+                  catalog.upload(
+                      actor(AUTHOR),
+                      upload.pkg,
+                      JSON.createObjectNode()
+                          .put("version", "1.1.0")
+                          .put("expectedDigest", CatalogManifest.digest(raw)),
+                      raw,
+                      List.of(new ByteArrayInputStream(payload)),
+                      key(),
+                      etag(catalog.detail(actor(AUTHOR), upload.pkg, null, false))));
+          return null;
+        });
   }
 
   record Upload(UUID pkg, UUID version, JsonNode value, byte[] manifest, byte[] payload) {}
@@ -1719,6 +1913,10 @@ class CatalogWorkflowTest {
             var review = decide(submit(u), GENERAL, "general");
             assertEquals("approved", review.path("status").asString());
             var published = publish(u, review);
+            assertEquals(review.path("reviewId"), published.path("reviewId"));
+            assertEquals(
+                review.path("reviewId"),
+                catalog.detail(actor(AUTHOR), u.pkg, u.version, false).path("reviewId"));
             assertEquals("published", published.path("state").asString());
             assertEquals(
                 CatalogManifest.digest(u.manifest),
@@ -2427,8 +2625,10 @@ class CatalogWorkflowTest {
     return body;
   }
 
-  @Test
-  void cloudTombstonesRequireExpectedRevisionAndRetireOnlyNextGeneration() throws Exception {
+  @ParameterizedTest
+  @ValueSource(strings = {"optional", "default"})
+  void cloudTombstonesRequireExpectedRevisionAndRetireOnlyNextGeneration(String mode)
+      throws Exception {
     TenantContext.call(
         TENANT,
         () -> {
@@ -2443,6 +2643,7 @@ class CatalogWorkflowTest {
                         instance, GENERAL, node, 1, 2, 2, true, List.of(), List.of()));
             when(workspace.snapshot(TENANT, instance)).thenAnswer(call -> current.get());
             var d = delivery(workspace);
+            if (mode.equals("default")) assign(d, u, "instance", instance, mode);
             var install = distributionBody(instance, selection(u, "install"));
             d.distribute(actor(PUBLISHER), install, key(), "\"1\"");
             var initial = d.resolve(resolveRequest(instance, node, 2, install.path("selections")));
@@ -2456,6 +2657,7 @@ class CatalogWorkflowTest {
             var tombstone = removal.getResources(0);
             assertEquals(2, tombstone.getInstallationRevision());
             assertEquals("REMOVED", CatalogStatePolicy.desired(tombstone));
+            assertEquals(mode, tombstone.getInstallationMode());
             var report =
                 auriga.contracts.resource.v1.UnifiedInstallationReport.newBuilder()
                     .setIdentity(tombstone.getIdentity())
@@ -2471,6 +2673,15 @@ class CatalogWorkflowTest {
             current.set(
                 new UnifiedResourceWorkspace.Snapshot(
                     instance, GENERAL, node, 3, 4, 4, true, List.of(report), List.of(tombstone)));
+            if (mode.equals("default")) {
+              var unchanged =
+                  d.resolve(
+                      resolveRequest(instance, node, 3, remove.path("selections")).toBuilder()
+                          .setSynchronizeAssignments(true)
+                          .build());
+              assertEquals(3, unchanged.getSelectionRevision());
+              assertEquals(0, unchanged.getResourcesCount());
+            }
             assertEquals(
                 "applying",
                 d.distribution(
@@ -2539,6 +2750,15 @@ class CatalogWorkflowTest {
                         actor(PUBLISHER), UUID.fromString(intent.path("distributionId").asString()))
                     .path("state")
                     .asString());
+            if (mode.equals("default")) {
+              var reconciled =
+                  d.resolve(
+                      resolveRequest(instance, node, 3, remove.path("selections")).toBuilder()
+                          .setSynchronizeAssignments(true)
+                          .build());
+              assertEquals(0, reconciled.getResourcesCount());
+              assertEquals(3, reconciled.getSelectionRevision());
+            }
             var reinstall = distributionBody(instance, selection(u, "install"));
             d.distribute(actor(PUBLISHER), reinstall, key(), "\"3\"");
             var again = d.resolve(resolveRequest(instance, node, 5, reinstall.path("selections")));

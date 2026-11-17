@@ -15,7 +15,7 @@ import (
 	"fmt"
 )
 
-// UnifiedInstallationMode the model 'UnifiedInstallationMode'
+// UnifiedInstallationMode required: automatically install and enable; members cannot disable or uninstall. default: automatically install initially; preserve member disable and uninstall choices. optional: marketplace choice only; no automatic installation.
 type UnifiedInstallationMode string
 
 // List of UnifiedInstallationMode

@@ -15,7 +15,7 @@ import (
 	"fmt"
 )
 
-// ShellAuthresourceUnifiedSchemaJsonDefsUnifiedInstallationMode the model 'ShellAuthresourceUnifiedSchemaJsonDefsUnifiedInstallationMode'
+// ShellAuthresourceUnifiedSchemaJsonDefsUnifiedInstallationMode required: automatically install and enable; members cannot disable or uninstall. default: automatically install initially; preserve member disable and uninstall choices. optional: marketplace choice only; no automatic installation.
 type ShellAuthresourceUnifiedSchemaJsonDefsUnifiedInstallationMode string
 
 // List of ShellAuthresource_unified_schema_json__defs_UnifiedInstallationMode

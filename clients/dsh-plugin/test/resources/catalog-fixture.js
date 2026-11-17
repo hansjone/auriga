@@ -12,12 +12,13 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { canonicalize } from '../../src/resources/json.js';
 import { packSkill } from '../../src/resources/skill-package.js';
+import { tarball } from './fixtures.js';
 import { sha, desktopSkills } from '../../src/resources/desktop-skills.js';
 export function catalogFixture(t, temporaryRoot = tmpdir(), config = {}) {
   // Windows runner TEMP can contain an 8.3 user-directory alias. Production
   // deliberately rejects aliases, so use the physical spelling in the fixture.
   const home = realpathSync.native(
-    mkdtempSync(join(temporaryRoot, 'auriga-catalog-')),
+    config.home ?? mkdtempSync(join(temporaryRoot, 'auriga-catalog-')),
   );
   t.after(() => rmSync(home, { recursive: true, force: true }));
   const who = {
@@ -56,13 +57,24 @@ export function catalogFixture(t, temporaryRoot = tmpdir(), config = {}) {
     '---\nname: ' +
     (config.name ?? 'example') +
     '\ndescription: "Public fixture"\n---\nVerified body.\n';
-  const archive = packSkill(
-    { 'SKILL.md': source, ...config.files },
-    { name: config.name ?? 'example', description: 'Public fixture' },
-  );
+  const kind = config.kind ?? 'skill';
+  const archive =
+    kind === 'plugin'
+      ? tarball(
+          {
+            name: config.packageName ?? '@example/catalog-plugin',
+            version: '1.0.0',
+            dsh: { bundle: { patch: './cordis.patch.yml' } },
+          },
+          config.bundleFiles,
+        )
+      : packSkill(
+          { 'SKILL.md': source, ...config.files },
+          { name: config.name ?? 'example', description: 'Public fixture' },
+        );
   const manifest = {
     schemaVersion: 1,
-    kind: 'skill',
+    kind,
     name: config.name ?? 'example',
     version: '1.0.0',
     description: 'Public fixture',
@@ -88,10 +100,17 @@ export function catalogFixture(t, temporaryRoot = tmpdir(), config = {}) {
       dshVersionRange: '>=0.2.1-rc.3',
     },
   };
+  if (kind === 'plugin') {
+    delete manifest.skill;
+    manifest.plugin = {
+      packageName: config.packageName ?? '@example/catalog-plugin',
+      dshVersionRange: '>=0.2.1-rc.3',
+    };
+  }
   const raw = Buffer.from(JSON.stringify(manifest) + '\n');
   const id = {
     tenantId: who.tenantId,
-    kind: 'skill',
+    kind,
     packageId,
     versionId,
     version: '1.0.0',
@@ -107,7 +126,7 @@ export function catalogFixture(t, temporaryRoot = tmpdir(), config = {}) {
       notAfter,
       statement: {
         purpose: 'resource',
-        kind: 'skill',
+        kind,
         name: config.name ?? 'example',
         version: '1.0.0',
         manifestDigest: sha(raw),
@@ -193,7 +212,7 @@ export function catalogFixture(t, temporaryRoot = tmpdir(), config = {}) {
       return Response.json({
         id: versionId,
         packageId,
-        kind: 'skill',
+        kind,
         state: 'published',
         digest: id.manifestDigest,
         manifest,
@@ -226,7 +245,10 @@ export function catalogFixture(t, temporaryRoot = tmpdir(), config = {}) {
       return Response.json(row, { status: 202 });
     }
     if (path === base + '/member/installations')
-      return Response.json({ items: [row] });
+      return Response.json({
+        items: [row],
+        allowPersonalPlugins: config.allowPersonalPlugins,
+      });
     if (path === base + '/member/download-tickets')
       return Response.json({
         clientId: who.hostId,
@@ -252,6 +274,10 @@ export function catalogFixture(t, temporaryRoot = tmpdir(), config = {}) {
   };
   const guardianDir = join(home, 'auriga/guardian');
   mkdirSync(guardianDir, { recursive: true });
+  const time =
+    config.time ??
+    (() => ({ bootId: '2026-11-12T00:00:00.000Z', monotonicMillis: 1000 }));
+  const sample = time();
   const state = {
     schemaVersion: 1,
     revision: 1,
@@ -267,12 +293,12 @@ export function catalogFixture(t, temporaryRoot = tmpdir(), config = {}) {
       newSessionRequired: true,
     },
     clock: {
-      bootId: clockBootId('2026-11-12T00:00:00.000Z'),
+      bootId: clockBootId(sample.bootId),
       maxObservedTime: now,
       lastTrustedTime: now,
       lastTrustedTimeSource: 'authenticated_server',
-      lastMonotonicMillis: 1000,
-      leaseDeadlineMonotonicMillis: 3601000,
+      lastMonotonicMillis: sample.monotonicMillis,
+      leaseDeadlineMonotonicMillis: sample.monotonicMillis + 3600000,
     },
   };
   const writeState = () =>
@@ -306,7 +332,7 @@ export function catalogFixture(t, temporaryRoot = tmpdir(), config = {}) {
   };
   const desktop = desktopSkills({
     home,
-    time: () => ({ bootId: '2026-11-12T00:00:00.000Z', monotonicMillis: 1000 }),
+    time,
   });
   resourceBroker(runtime, fetchImpl);
   return {
@@ -319,6 +345,20 @@ export function catalogFixture(t, temporaryRoot = tmpdir(), config = {}) {
     archive,
     resource,
     revoked,
+    revoke: () => {
+      const { signature: _signature, ...body } = revoked;
+      return signed(
+        {
+          ...body,
+          revision: revoked.revision + 1,
+          revokedArtifacts: [
+            { packageId, versionId, digest: id.manifestDigest },
+          ],
+        },
+        revocation,
+        'revoke-test',
+      );
+    },
     runtime,
     roots,
     desktop,

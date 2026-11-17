@@ -1,4 +1,4 @@
-import { afterEach, expect, it, vi } from 'vitest';
+﻿import { afterEach, expect, it, vi } from 'vitest';
 import { registerPanel, type AurigaTeamPanel } from '../src/index';
 import { mountPanel, NativeWrapper } from './native-host';
 const wrappers: NativeWrapper[] = [];
@@ -53,7 +53,7 @@ it('host presentation changes preserve resource filters and selected tab', async
   expect(wrapper.get('input').element.value).toBe('keep');
   await wrapper.findAll('[role="tab"]')[1].trigger('click');
   await wrapper.setProps({ context: { ...before, locale: 'en' } });
-  expect(wrapper.text()).toContain('installation inventory is unavailable');
+  await vi.waitFor(() => expect(wrapper.text()).toContain('No shared'));
 });
 it('native tabs support keyboard navigation', () => {
   const wrapper = mountPanel({ locale: 'en' });
@@ -102,7 +102,7 @@ it('showTab switches the resource view for a host-owned tab bar', async () => {
   );
   panel.showTab('mine');
   await new Promise((resolve) => setTimeout(resolve, 0));
-  expect(wrapper.text()).toContain('installation inventory is unavailable');
+  expect(wrapper.text()).toContain('No shared');
   expect(wrapper.find('[role="tab"][aria-selected="true"]').text()).toBe(
     'My resources',
   );
