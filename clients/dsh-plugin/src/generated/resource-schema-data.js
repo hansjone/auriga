@@ -1788,6 +1788,9 @@ export default {
           },
           receiptId: { type: 'string', format: 'uuid' },
           recordedAt: { $ref: './signatures.schema.json#/$defs/Time' },
+          downgradeAuthorization: {
+            $ref: '#/$defs/UnifiedDowngradeAuthorization',
+          },
         },
         required: [
           'schemaVersion',
@@ -1906,6 +1909,8 @@ export default {
             maxItems: 8192,
             uniqueItems: true,
             items: { type: 'string', format: 'uuid' },
+            description:
+              'Durable, deduplicated single-use IDs, reserved under the host mutation lock before activation and never cleared by uninstall, ledger cleanup, rollback or restart. Keep the maximum release watermark. Fail closed when storage is full; never evict IDs to admit a replay.',
           },
         },
         required: [
@@ -1951,6 +1956,8 @@ export default {
       UnifiedInstallationMode: {
         type: 'string',
         enum: ['required', 'default', 'optional'],
+        description:
+          'required: automatically install and enable; members cannot disable or uninstall. default: automatically install initially; preserve member disable and uninstall choices. optional: marketplace choice only; no automatic installation.',
       },
       UnifiedAssignmentInput: {
         type: 'object',

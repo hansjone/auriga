@@ -2971,6 +2971,11 @@ export interface components {
     } & (unknown & unknown & unknown);
     /** @description Draft version. Reviews bind manifest digest and version revision. Published manifests and artifacts are immutable. */
     ShellAuthopenapi_resource_yaml_components_schemas_UnifiedVersion: {
+      /**
+       * Format: uuid
+       * @description Latest review record for this version. Load authorized review evidence and verify exact version identity, revision and digest before publication.
+       */
+      readonly reviewId?: string;
       /** Format: uuid */
       id: string;
       /** Format: uuid */
@@ -3132,7 +3137,10 @@ export interface components {
       /** Format: int64 */
       revocationRevision: number;
     };
-    /** @enum {string} */
+    /**
+     * @description required: automatically install and enable; members cannot disable or uninstall. default: automatically install initially; preserve member disable and uninstall choices. optional: marketplace choice only; no automatic installation.
+     * @enum {string}
+     */
     ShellAuthresource_unified_schema_json__defs_UnifiedInstallationMode:
       'required' | 'default' | 'optional';
     /** Format: uuid */

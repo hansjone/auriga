@@ -149,7 +149,7 @@ test('required/default/optional and personal policy guard public native mutation
         await manager.setBundleEnabled(plugin.name, false),
         'native',
       );
-    if (mode !== 'optional')
+    if (mode === 'required')
       await assert.rejects(manager.removeBundle(plugin.name));
     else assert.equal(await manager.removeBundle(plugin.name), 'native');
   }

@@ -117,7 +117,7 @@ export function governPlugins(ctx, manager, policy) {
         action === 'install' ||
         (action === 'enable' && rule.desiredState !== 'ENABLED') ||
         (action === 'disable' && rule.installationMode === 'required') ||
-        (action === 'remove' && rule.installationMode !== 'optional')
+        (action === 'remove' && rule.installationMode === 'required')
       )
         throw new Error(
           '受管插件须通过资源目录操作。 Use the resource catalog for managed plugins.',

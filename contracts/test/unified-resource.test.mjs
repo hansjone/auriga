@@ -17,6 +17,67 @@ const check = (file, name, value) =>
     new URL(`resource/${file}.schema.json`, root).href + '#/$defs/' + name,
   )(value);
 
+test('revocation fallback grants survive transport, ledger and transaction validation', () => {
+  const authorization = read('resource/unified-vectors.json').cases.find(
+    (v) => v.operation === 'downgrade' && v.expect.decision === 'accept',
+  ).input.authorization;
+  const files = read('resource/local-file-fixtures.json').cases;
+  const ledger = structuredClone(
+    files.find((f) => f.id === 'UnifiedLedgerFile-valid').input,
+  );
+  ledger.installations[0].resource.downgradeAuthorization = authorization;
+  assert(check('unified', 'UnifiedLedgerFile', ledger));
+  const installation = ledger.installations[0];
+  assert(check('unified', 'UnifiedInstallation', installation));
+  assert(
+    check('unified', 'UnifiedDownloadTicket', {
+      ticket: 'test',
+      clientId: ledger.hostId,
+      expiresAt: authorization.expiresAt,
+      resource: installation.resource,
+      revocations: read('resource/unified-vectors.json').cases.find(
+        (v) => v.operation === 'revocation',
+      ).input.list,
+    }),
+  );
+  const transaction = {
+    ...files.find((f) => f.id === 'UnifiedTransactionFile-valid').input,
+    downgradeAuthorization: authorization,
+  };
+  assert(check('unified', 'UnifiedTransactionFile', transaction));
+  transaction.downgradeAuthorization = { ...authorization, unexpected: true };
+  assert(!check('unified', 'UnifiedTransactionFile', transaction));
+  const watermarks = structuredClone(
+    files.find((f) => f.id === 'UnifiedHighWatermarksFile-valid').input,
+  );
+  watermarks.consumedDowngradeAuthorizationIds = [
+    authorization.authorizationId,
+  ];
+  assert(check('unified', 'UnifiedHighWatermarksFile', watermarks));
+  watermarks.consumedDowngradeAuthorizationIds.push(
+    authorization.authorizationId,
+  );
+  assert(!check('unified', 'UnifiedHighWatermarksFile', watermarks));
+});
+
+test('assignment detail GET retains privilege, step-up and revision ETag', () => {
+  const api = read('openapi/resource.yaml');
+  const get =
+    api.paths['/api/resource/v1/admin/catalog/assignments/{assignmentId}'].get;
+  assert.equal(get['x-permission'], 'resource.distributions.manage');
+  assert.equal(get['x-step-up-max-age-seconds'], 600);
+  assert(get.responses['200'].headers.ETag);
+  assert.equal(
+    get.responses['200'].content['application/json'].schema.$ref,
+    '#/components/schemas/UnifiedAssignment',
+  );
+  assert(get.parameters.every((p) => p.in !== 'header'));
+  assert.equal(
+    api.components.schemas.UnifiedVersion.properties.reviewId.format,
+    'uuid',
+  );
+});
+
 test('npm package names reject dot segments and leading dot or underscore', () => {
   for (const packageName of [
     '.',

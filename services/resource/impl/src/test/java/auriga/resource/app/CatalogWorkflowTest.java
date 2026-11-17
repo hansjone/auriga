@@ -205,9 +205,13 @@ class CatalogWorkflowTest {
   }
 
   AurigaPrincipal actor(UUID id) {
+    return actor(id, TENANT);
+  }
+
+  AurigaPrincipal actor(UUID id, UUID tenant) {
     return new AurigaPrincipal(
         id.toString(),
-        TENANT,
+        tenant,
         PrincipalType.USER,
         TokenContext.ADMIN,
         "test",
@@ -274,7 +278,16 @@ class CatalogWorkflowTest {
           approvePublish(upload);
           var delivery = delivery(null);
           var rule = assign(delivery, upload, "member", GENERAL, "required");
+          assertEquals(rule, delivery.assignment(actor(PUBLISHER), uuid(rule, "id")));
           var first = delivery.removeAssignment(actor(PUBLISHER), uuid(rule, "id"), key(), "\"1\"");
+          assertEquals(first, delivery.assignment(actor(PUBLISHER), uuid(rule, "id")));
+          UUID otherTenant = UUID.randomUUID();
+          TenantContext.run(
+              otherTenant,
+              () ->
+                  assertError(
+                      CommonErrors.NOT_FOUND,
+                      () -> delivery.assignment(actor(PUBLISHER, otherTenant), uuid(rule, "id"))));
           long events =
               tx.read(
                   () ->
@@ -769,6 +782,16 @@ class CatalogWorkflowTest {
                         .setSelectionRevision(selection)
                         .setSynchronizeAssignments(true)
                         .build());
+            if (mode.equals("default") && scenario.startsWith("removed")) {
+              assertFalse(restored.getAssignmentRetryRequired());
+              assertTrue(
+                  restored.getResourcesList().stream()
+                      .allMatch(
+                          ref ->
+                              CatalogStatePolicy.desired(ref).equals("REMOVED")
+                                  && !ref.hasDowngradeAuthorization()));
+              return null;
+            }
             if (!scenario.equals("malicious")) {
               assertTrue(restored.getAssignmentRetryRequired());
               assertTrue(
@@ -822,6 +845,13 @@ class CatalogWorkflowTest {
                 "missing downgrade root must never block safety disable");
           } else {
             var page = delivery.installations(actor(GENERAL), target, "skill", 50, null);
+            if (mode.equals("default") && scenario.startsWith("removed")) {
+              assertTrue(page.path("assignmentFailures").isEmpty());
+              assertEquals(
+                  "REMOVED",
+                  page.path("items").get(0).path("resource").path("desiredState").asString());
+              return null;
+            }
             if (!scenario.equals("malicious")) {
               assertFalse(page.path("assignmentFailures").isEmpty());
               assertTrue(
@@ -1142,7 +1172,7 @@ class CatalogWorkflowTest {
                       .path("desiredState")
                       .asString());
             }
-            if (!mode.equals("optional")) {
+            if (mode.equals("required")) {
               assertEquals(
                   "resource.installation_required",
                   assertThrows(
@@ -1156,13 +1186,32 @@ class CatalogWorkflowTest {
                       .errorCode()
                       .code());
             } else {
+              var removed =
+                  delivery.select(actor(GENERAL), choose(client, upload, "remove"), key(), "\"2\"");
+              assertEquals("REMOVED", removed.path("resource").path("desiredState").asString());
               assertEquals(
-                  "REMOVED",
-                  delivery
-                      .select(actor(GENERAL), choose(client, upload, "remove"), key(), "\"2\"")
-                      .path("resource")
-                      .path("desiredState")
-                      .asString());
+                  ResourceSigning.canonical(removed),
+                  ResourceSigning.canonical(
+                      delivery
+                          .installations(actor(GENERAL), client, kind, 50, null)
+                          .path("items")
+                          .get(0)));
+              var reinstall = upload;
+              if (mode.equals("default") && kind.equals("skill")) {
+                reinstall = nextSkillVersion(upload, "1.1.0");
+                assign(delivery, reinstall, "tenant", TENANT, mode);
+                var retained =
+                    delivery
+                        .installations(actor(GENERAL), client, kind, 50, null)
+                        .path("items")
+                        .get(0);
+                assertEquals("REMOVED", retained.path("resource").path("desiredState").asString());
+                assertEquals(3, retained.path("installationRevision").asLong());
+              }
+              var restored =
+                  delivery.select(
+                      actor(GENERAL), choose(client, reinstall, "install"), key(), "\"3\"");
+              assertEquals("ENABLED", restored.path("resource").path("desiredState").asString());
             }
           } catch (Exception e) {
             throw new RuntimeException(e);
@@ -1249,6 +1298,11 @@ class CatalogWorkflowTest {
             page.path("items").forEach(item -> ids.add(item.path("id").asString()));
             assertTrue(ids.contains(visibleRule.path("id").asString()));
             assertFalse(ids.contains(hiddenRule.path("id").asString()));
+            assertEquals(
+                visibleRule, delivery.assignment(actor(PUBLISHER), uuid(visibleRule, "id")));
+            assertError(
+                CommonErrors.NOT_FOUND,
+                () -> delivery.assignment(actor(PUBLISHER), uuid(hiddenRule, "id")));
             assertError(
                 CommonErrors.NOT_FOUND,
                 () ->
@@ -1825,6 +1879,10 @@ class CatalogWorkflowTest {
             var review = decide(submit(u), GENERAL, "general");
             assertEquals("approved", review.path("status").asString());
             var published = publish(u, review);
+            assertEquals(review.path("reviewId"), published.path("reviewId"));
+            assertEquals(
+                review.path("reviewId"),
+                catalog.detail(actor(AUTHOR), u.pkg, u.version, false).path("reviewId"));
             assertEquals("published", published.path("state").asString());
             assertEquals(
                 CatalogManifest.digest(u.manifest),
@@ -2533,8 +2591,10 @@ class CatalogWorkflowTest {
     return body;
   }
 
-  @Test
-  void cloudTombstonesRequireExpectedRevisionAndRetireOnlyNextGeneration() throws Exception {
+  @ParameterizedTest
+  @ValueSource(strings = {"optional", "default"})
+  void cloudTombstonesRequireExpectedRevisionAndRetireOnlyNextGeneration(String mode)
+      throws Exception {
     TenantContext.call(
         TENANT,
         () -> {
@@ -2549,6 +2609,7 @@ class CatalogWorkflowTest {
                         instance, GENERAL, node, 1, 2, 2, true, List.of(), List.of()));
             when(workspace.snapshot(TENANT, instance)).thenAnswer(call -> current.get());
             var d = delivery(workspace);
+            if (mode.equals("default")) assign(d, u, "instance", instance, mode);
             var install = distributionBody(instance, selection(u, "install"));
             d.distribute(actor(PUBLISHER), install, key(), "\"1\"");
             var initial = d.resolve(resolveRequest(instance, node, 2, install.path("selections")));
@@ -2645,10 +2706,21 @@ class CatalogWorkflowTest {
                         actor(PUBLISHER), UUID.fromString(intent.path("distributionId").asString()))
                     .path("state")
                     .asString());
+            if (mode.equals("default")) {
+              var reconciled =
+                  d.resolve(
+                      resolveRequest(instance, node, 3, remove.path("selections")).toBuilder()
+                          .setSynchronizeAssignments(true)
+                          .build());
+              assertEquals(0, reconciled.getResourcesCount());
+              assertEquals(3, reconciled.getSelectionRevision());
+            }
             var reinstall = distributionBody(instance, selection(u, "install"));
             d.distribute(actor(PUBLISHER), reinstall, key(), "\"3\"");
             var again = d.resolve(resolveRequest(instance, node, 5, reinstall.path("selections")));
-            assertEquals(3, again.getResources(0).getInstallationRevision());
+            assertTrue(
+                again.getResources(0).getInstallationRevision()
+                    > tombstone.getInstallationRevision());
             current.set(
                 new UnifiedResourceWorkspace.Snapshot(
                     instance,
@@ -2670,7 +2742,7 @@ class CatalogWorkflowTest {
                     .getResourcesList();
             assertEquals(2, resources.size());
             assertEquals(
-                4,
+                again.getResources(0).getInstallationRevision() + 1,
                 resources.stream()
                     .filter(x -> x.getIdentity().getPackageId().equals(u.pkg.toString()))
                     .findFirst()

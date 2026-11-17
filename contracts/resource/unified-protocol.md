@@ -40,6 +40,8 @@ UnifiedResourceRef 新增 desiredState，HTTP/JSON 枚举值为 ENABLED、DISABL
 
 撤销后从已安装高版本回落到有效 required/default 规则时，resource 将单次 `UnifiedDowngradeAuthorization` 放入 `UnifiedResourceRef.downgradeAuthorization`；成员安装、下载票据、节点规格沿同一引用传递。`reason=revocation` 必须有 `ownerId`，消费端须同时核对可信成员、instanceId（Desktop 使用 clientId）、精确 identity、from/toReleaseSequence、独立 downgrade 根签名、最多10分钟有效期和已消费 authorizationId。普通下架、卸载或降低规则版本不自动签发。授权消费后仍保留最高高水位，重复准备只能延续同一已绑定安装，不得用于新修订重装。
 
+端侧正式落盘路径：`UnifiedLedgerFile.installations[].resource.downgradeAuthorization` 保存安装所绑定的完整签名授权；`UnifiedInstallation.resource` 和 `UnifiedDownloadTicket.resource` 复用同一字段，无需允许 ledger 任意额外属性。`UnifiedTransactionFile.downgradeAuthorization` 保存正在执行事务核验过的同一授权。持有宿主变更锁时，先核对可信身份、精确目标及高水位，再将 authorizationId 原子写入 `UnifiedHighWatermarksFile.consumedDowngradeAuthorizationIds`，持久化事务后才能切换可执行内容。恢复只允许完成同一事务，不允许凭已消费授权新建安装；失败、回滚、卸载、ledger 清理和重启均不能撤销消费或降低高水位。ID 存储达到上限时拒绝新降级，禁止淘汰旧 ID 绕过防重放。Desktop 接线遵守此写入顺序；节点继续使用其受保护状态内的同等持久消费记录。
+
 resource 的自动签发配置为 `auriga.resource.downgrade-kid` 与 `auriga.resource.downgrade-key-file`，必须使用独立于 release/revocation 的密钥，消费端信任同一 downgrade 公钥；缺失时回落失败并保留可重试错误。现有离线人工授权密钥的使用策略由部署方决定，不得将 release/revocation 密钥复用为自动授权根。
 
 云端节点复用清单原始字节、v2发行、制品摘要与撤销/租约校验，plugin payload 以 tgz 只读提供给独立容器 supervisor，启动 DSH 前通过公开 `dsh plugin --profile web remove/add --ignore-scripts` 清理旧受管包并安装已核验 payload；不按 SKILL.md 解包。镜像须提供已锁定的 pnpm 和公开 CLI。加载状态由 `PluginManager.listBundles` 的版本、enabled、installed、error 与每行实际 entryId 联合观察，只有真实加载后才回报 applied。独立 guardian 到期先停整个实例，私有新会话启动前清理所有历史受管 npm 名称；清理、CLI 或观察失败均失败封闭。L0 核心包及 `@deepseek-ai/` 部署命名空间不由统一目录覆盖。

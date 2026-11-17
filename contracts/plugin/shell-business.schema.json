@@ -2733,6 +2733,12 @@
     "ShellAuthopenapi_resource_yaml_components_schemas_UnifiedVersion": {
       "type": "object",
       "properties": {
+        "reviewId": {
+          "type": "string",
+          "format": "uuid",
+          "readOnly": true,
+          "description": "Latest review record for this version. Load authorized review evidence and verify exact version identity, revision and digest before publication."
+        },
         "id": {
           "type": "string",
           "format": "uuid"
@@ -4739,7 +4745,8 @@
         "required",
         "default",
         "optional"
-      ]
+      ],
+      "description": "required: automatically install and enable; members cannot disable or uninstall. default: automatically install initially; preserve member disable and uninstall choices. optional: marketplace choice only; no automatic installation."
     },
     "ShellAuthresource_unified_schema_json__defs_UnifiedDowngradeAuthorization": {
       "type": "object",

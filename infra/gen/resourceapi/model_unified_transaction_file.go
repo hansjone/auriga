@@ -20,19 +20,20 @@ var _ MappedNullable = &UnifiedTransactionFile{}
 
 // UnifiedTransactionFile struct for UnifiedTransactionFile
 type UnifiedTransactionFile struct {
-	SchemaVersion          int32  `json:"schemaVersion"`
-	TenantId               string `json:"tenantId"`
-	OwnerId                string `json:"ownerId"`
-	HostId                 string `json:"hostId"`
-	TransactionId          string `json:"transactionId"`
-	Writer                 string `json:"writer"`
-	Operation              string `json:"operation"`
-	Phase                  string `json:"phase"`
-	ExpectedLedgerRevision int64  `json:"expectedLedgerRevision"`
-	SelectionRevision      int64  `json:"selectionRevision"`
-	Generation             int64  `json:"generation"`
-	ReceiptId              string `json:"receiptId"`
-	RecordedAt             string `json:"recordedAt" validate:"regexp=^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]{1\\,9})?Z$"`
+	SchemaVersion          int32                          `json:"schemaVersion"`
+	TenantId               string                         `json:"tenantId"`
+	OwnerId                string                         `json:"ownerId"`
+	HostId                 string                         `json:"hostId"`
+	TransactionId          string                         `json:"transactionId"`
+	Writer                 string                         `json:"writer"`
+	Operation              string                         `json:"operation"`
+	Phase                  string                         `json:"phase"`
+	ExpectedLedgerRevision int64                          `json:"expectedLedgerRevision"`
+	SelectionRevision      int64                          `json:"selectionRevision"`
+	Generation             int64                          `json:"generation"`
+	ReceiptId              string                         `json:"receiptId"`
+	RecordedAt             string                         `json:"recordedAt" validate:"regexp=^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]{1\\,9})?Z$"`
+	DowngradeAuthorization *UnifiedDowngradeAuthorization `json:"downgradeAuthorization,omitempty"`
 	AdditionalProperties   map[string]interface{}
 }
 
@@ -380,6 +381,38 @@ func (o *UnifiedTransactionFile) SetRecordedAt(v string) {
 	o.RecordedAt = v
 }
 
+// GetDowngradeAuthorization returns the DowngradeAuthorization field value if set, zero value otherwise.
+func (o *UnifiedTransactionFile) GetDowngradeAuthorization() UnifiedDowngradeAuthorization {
+	if o == nil || IsNil(o.DowngradeAuthorization) {
+		var ret UnifiedDowngradeAuthorization
+		return ret
+	}
+	return *o.DowngradeAuthorization
+}
+
+// GetDowngradeAuthorizationOk returns a tuple with the DowngradeAuthorization field value if set, nil otherwise
+// and a boolean to check if the value has been set.
+func (o *UnifiedTransactionFile) GetDowngradeAuthorizationOk() (*UnifiedDowngradeAuthorization, bool) {
+	if o == nil || IsNil(o.DowngradeAuthorization) {
+		return nil, false
+	}
+	return o.DowngradeAuthorization, true
+}
+
+// HasDowngradeAuthorization returns a boolean if a field has been set.
+func (o *UnifiedTransactionFile) HasDowngradeAuthorization() bool {
+	if o != nil && !IsNil(o.DowngradeAuthorization) {
+		return true
+	}
+
+	return false
+}
+
+// SetDowngradeAuthorization gets a reference to the given UnifiedDowngradeAuthorization and assigns it to the DowngradeAuthorization field.
+func (o *UnifiedTransactionFile) SetDowngradeAuthorization(v UnifiedDowngradeAuthorization) {
+	o.DowngradeAuthorization = &v
+}
+
 func (o UnifiedTransactionFile) MarshalJSON() ([]byte, error) {
 	toSerialize, err := o.ToMap()
 	if err != nil {
@@ -403,6 +436,9 @@ func (o UnifiedTransactionFile) ToMap() (map[string]interface{}, error) {
 	toSerialize["generation"] = o.Generation
 	toSerialize["receiptId"] = o.ReceiptId
 	toSerialize["recordedAt"] = o.RecordedAt
+	if !IsNil(o.DowngradeAuthorization) {
+		toSerialize["downgradeAuthorization"] = o.DowngradeAuthorization
+	}
 
 	for key, value := range o.AdditionalProperties {
 		toSerialize[key] = value
@@ -471,6 +507,7 @@ func (o *UnifiedTransactionFile) UnmarshalJSON(data []byte) (err error) {
 		delete(additionalProperties, "generation")
 		delete(additionalProperties, "receiptId")
 		delete(additionalProperties, "recordedAt")
+		delete(additionalProperties, "downgradeAuthorization")
 		o.AdditionalProperties = additionalProperties
 	}
 

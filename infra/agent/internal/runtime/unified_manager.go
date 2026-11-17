@@ -119,7 +119,7 @@ func ReadUnifiedIntent(ref *resourcev1.UnifiedResourceRef) (uint64, string, erro
 		return 0, "", fmt.Errorf("inconsistent unified intent")
 	}
 	mode := ref.GetInstallationMode()
-	if mode != "" && mode != "required" && mode != "default" && mode != "optional" || mode == "required" && state != "ENABLED" || mode == "default" && state == "REMOVED" {
+	if mode != "" && mode != "required" && mode != "default" && mode != "optional" || mode == "required" && state != "ENABLED" {
 		return 0, "", fmt.Errorf("invalid resource distribution mode")
 	}
 	return r, state, nil

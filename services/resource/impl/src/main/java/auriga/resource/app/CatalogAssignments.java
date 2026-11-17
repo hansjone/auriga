@@ -75,8 +75,7 @@ final class CatalogAssignments {
 
   static void check(Effective policy, JsonNode identity, long sequence, String action) {
     if (policy == null) return;
-    if ((policy.mode.equals("required") && action.equals("disable"))
-        || (!policy.mode.equals("optional") && action.equals("remove")))
+    if (policy.mode.equals("required") && Set.of("disable", "remove").contains(action))
       throw new AurigaException(
           ErrorCode.of("resource.installation_required", 403, Status.Code.PERMISSION_DENIED));
     if (!policy.mode.equals("optional")

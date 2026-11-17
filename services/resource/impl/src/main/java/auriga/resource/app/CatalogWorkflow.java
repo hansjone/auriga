@@ -170,6 +170,7 @@ public final class CatalogWorkflow {
         .put("revision", number(v, "revision"))
         .put("createdAt", instant(v.get("created_at")).toString());
     n.set("manifest", json(v, "manifest"));
+    if (v.get("review_id") != null) n.put("reviewId", v.get("review_id").toString());
     n.set(
         "risk",
         JSON.createObjectNode()

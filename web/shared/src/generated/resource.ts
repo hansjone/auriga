@@ -968,7 +968,8 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    get?: never;
+    /** @description Read a tenant assignment, including inactive assignments, with current package visibility checks. */
+    get: operations['UnifiedGetAssignment'];
     put?: never;
     post?: never;
     /** @description Deactivate this tenant assignment. Existing matched policies are recomputed. */
@@ -1474,6 +1475,11 @@ export interface components {
     };
     /** @description Draft version. Reviews bind manifest digest and version revision. Published manifests and artifacts are immutable. */
     UnifiedVersion: {
+      /**
+       * Format: uuid
+       * @description Latest review record for this version. Load authorized review evidence and verify exact version identity, revision and digest before publication.
+       */
+      readonly reviewId?: string;
       /** Format: uuid */
       id: string;
       /** Format: uuid */
@@ -2001,6 +2007,7 @@ export interface components {
       /** Format: uuid */
       receiptId: string;
       recordedAt: components['schemas']['Time'];
+      downgradeAuthorization?: components['schemas']['UnifiedDowngradeAuthorization'];
     };
     UnifiedTrustedClock: {
       /** Format: uuid */
@@ -2039,6 +2046,7 @@ export interface components {
       revision: number;
       entries: components['schemas']['UnifiedHighWatermark'][];
       migrationMarkers: components['schemas']['UnifiedMigrationMarker'][];
+      /** @description Durable, deduplicated single-use IDs, reserved under the host mutation lock before activation and never cleared by uninstall, ledger cleanup, rollback or restart. Keep the maximum release watermark. Fail closed when storage is full; never evict IDs to admit a replay. */
       consumedDowngradeAuthorizationIds: string[];
     };
     UnifiedHostLockOwner: {
@@ -2393,7 +2401,10 @@ export interface components {
       | components['schemas']['OnlineManifest']
       | components['schemas']['OfflineManifest']
       | components['schemas']['GitManifest'];
-    /** @enum {string} */
+    /**
+     * @description required: automatically install and enable; members cannot disable or uninstall. default: automatically install initially; preserve member disable and uninstall choices. optional: marketplace choice only; no automatic installation.
+     * @enum {string}
+     */
     UnifiedInstallationMode: 'required' | 'default' | 'optional';
     /** Format: uuid */
     ownerId: string;
@@ -9708,6 +9719,120 @@ export interface operations {
     responses: {
       /** @description Exact revision accepted; 202 requires matching authenticated observation before applied. */
       201: {
+        headers: {
+          /** @description Current revision ETag for the next conditional request. */
+          ETag?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['UnifiedAssignment'];
+        };
+      };
+      /** @description common.validation_failed */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.unauthenticated */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.forbidden or iam.step_up_required */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.not_found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.precondition_failed */
+      412: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.rate_limited */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.internal */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description 未知失败使用脱敏common.internal；具体错误与HTTP/gRPC映射见catalog/m3.json。 */
+      default: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+    };
+  };
+  UnifiedGetAssignment: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        assignmentId: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Authorized response */
+      200: {
         headers: {
           /** @description Current revision ETag for the next conditional request. */
           ETag?: string;

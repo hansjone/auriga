@@ -127,6 +127,13 @@ public class CatalogDeliveryController {
         200);
   }
 
+  @GetMapping("/admin/catalog/assignments/{id}")
+  @RequiresPermission("resource.distributions.manage")
+  @RequiresRecentStepUp
+  public ResponseEntity<JsonNode> assignment(@PathVariable UUID id) {
+    return response(delivery.assignment(actor(), id), 200);
+  }
+
   @GetMapping("/admin/catalog/assignments")
   @RequiresPermission("resource.distributions.manage")
   @RequiresRecentStepUp

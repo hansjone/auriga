@@ -1458,7 +1458,10 @@ export interface components {
       /** Format: int64 */
       revocationRevision: number;
     };
-    /** @enum {string} */
+    /**
+     * @description required: automatically install and enable; members cannot disable or uninstall. default: automatically install initially; preserve member disable and uninstall choices. optional: marketplace choice only; no automatic installation.
+     * @enum {string}
+     */
     UnifiedInstallationMode: 'required' | 'default' | 'optional';
     /** Format: uuid */
     ownerId: string;
