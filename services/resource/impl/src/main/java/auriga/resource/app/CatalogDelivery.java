@@ -1026,7 +1026,9 @@ public final class CatalogDelivery implements UnifiedResourceResolution {
                               .equals(resource.path("identity").path("packageId")))) continue;
               var policy = policies.get(uuid(resource.path("identity"), "packageId"));
               String expected =
-                  CatalogStatePolicy.desired(resource).equals("REMOVED") || policy == null
+                  policy == null
+                          || policy.mode().equals("required")
+                              && CatalogStatePolicy.desired(resource).equals("REMOVED")
                       ? "optional"
                       : policy.mode();
               sameModes &= CatalogAssignments.mode(resource).equals(expected);
@@ -1408,7 +1410,9 @@ public final class CatalogDelivery implements UnifiedResourceResolution {
       if (manual || selected.contains(entry.getKey()))
         resource.put(
             "installationMode",
-            CatalogStatePolicy.desired(resource).equals("REMOVED") || policy == null
+            policy == null
+                    || policy.mode().equals("required")
+                        && CatalogStatePolicy.desired(resource).equals("REMOVED")
                 ? "optional"
                 : policy.mode());
       var persisted = cloudRow(instance, entry.getKey());

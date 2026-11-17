@@ -2623,6 +2623,7 @@ class CatalogWorkflowTest {
             var tombstone = removal.getResources(0);
             assertEquals(2, tombstone.getInstallationRevision());
             assertEquals("REMOVED", CatalogStatePolicy.desired(tombstone));
+            assertEquals(mode, tombstone.getInstallationMode());
             var report =
                 auriga.contracts.resource.v1.UnifiedInstallationReport.newBuilder()
                     .setIdentity(tombstone.getIdentity())
@@ -2638,6 +2639,15 @@ class CatalogWorkflowTest {
             current.set(
                 new UnifiedResourceWorkspace.Snapshot(
                     instance, GENERAL, node, 3, 4, 4, true, List.of(report), List.of(tombstone)));
+            if (mode.equals("default")) {
+              var unchanged =
+                  d.resolve(
+                      resolveRequest(instance, node, 3, remove.path("selections")).toBuilder()
+                          .setSynchronizeAssignments(true)
+                          .build());
+              assertEquals(3, unchanged.getSelectionRevision());
+              assertEquals(0, unchanged.getResourcesCount());
+            }
             assertEquals(
                 "applying",
                 d.distribution(
@@ -2718,9 +2728,7 @@ class CatalogWorkflowTest {
             var reinstall = distributionBody(instance, selection(u, "install"));
             d.distribute(actor(PUBLISHER), reinstall, key(), "\"3\"");
             var again = d.resolve(resolveRequest(instance, node, 5, reinstall.path("selections")));
-            assertTrue(
-                again.getResources(0).getInstallationRevision()
-                    > tombstone.getInstallationRevision());
+            assertEquals(3, again.getResources(0).getInstallationRevision());
             current.set(
                 new UnifiedResourceWorkspace.Snapshot(
                     instance,
@@ -2742,7 +2750,7 @@ class CatalogWorkflowTest {
                     .getResourcesList();
             assertEquals(2, resources.size());
             assertEquals(
-                again.getResources(0).getInstallationRevision() + 1,
+                4,
                 resources.stream()
                     .filter(x -> x.getIdentity().getPackageId().equals(u.pkg.toString()))
                     .findFirst()
