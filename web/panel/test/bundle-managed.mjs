@@ -4,8 +4,8 @@ import vm from 'node:vm';
 import { setTimeout, clearTimeout } from 'node:timers';
 import { surfaceHost, flush, response } from './shell-host.mjs';
 
-// Contract fixtures exercise the shipped artifact and actual client adapter,
-// without claiming an authorized production backend or a real DSH acceptance run.
+// Exercise the shipped artifact and actual client adapter with contract fixtures,
+// without claiming an authorized backend or a real DSH acceptance run.
 const packageId = '01900000-0000-7000-8000-000000000001';
 const versionId = '01900000-0000-7000-8000-000000000002';
 const item = {
@@ -14,54 +14,60 @@ const item = {
   ownerId: '01900000-0000-7000-8000-000000000004',
   name: 'Built managed plugin',
   kind: 'plugin',
-  level: 'l2',
-  visibility: 'tenant',
-  groupIds: [],
   revision: 1,
-  createdAt: '2026-10-25T00:00:00Z',
   enabled: true,
   defaultVersionId: versionId,
 };
 const version = {
   id: versionId,
   packageId,
+  kind: 'plugin',
   version: '1.2.3',
   digest: `sha256:${'a'.repeat(64)}`,
-  sizeBytes: 100,
-  mediaType: 'application/gzip',
   state: 'published',
-  revision: 1,
-  createdAt: '2026-10-25T00:00:00Z',
+  manifest: {
+    kind: 'plugin',
+    name: item.name,
+    version: '1.2.3',
+    description: 'Signed managed capability',
+    author: { displayName: 'Example author' },
+    license: 'MIT',
+    permissions: { tools: [], outboundHosts: [], dataAccess: [] },
+    plugin: { packageName: '@example/managed-plugin' },
+  },
 };
-const base = '/api/resource/v1/packages';
+const installed = {
+  clientId: '01900000-0000-7000-8000-000000000005',
+  installationRevision: 2,
+  selectionRevision: 7,
+  generation: 9,
+  state: 'applied',
+  reportSource: 'member',
+  resource: {
+    identity: {
+      tenantId: item.tenantId,
+      packageId,
+      versionId,
+      kind: 'plugin',
+      version: version.version,
+      manifestDigest: version.digest,
+    },
+    envelope: { statement: { name: item.name } },
+    enabled: true,
+    desiredState: 'ENABLED',
+    installationMode: 'optional',
+  },
+};
+// The bootstrap fixture supplies fetchBase='/'; the real adapter resolves the
+// panel's relative catalog channel against that same-origin host base.
+const base = '/catalog';
 const calls = [];
-let authorized = true;
-const localRow = {
-  entryId: 'healthy',
-  moduleName: 'healthy-local-plugin',
-  enabled: true,
-  fiberPhase: 'active',
+let authorizationStatus = 200;
+let legacyInventoryRequests = 0;
+let installationResult = {
+  status: 200,
+  body: { items: [], sharedAvailable: false },
 };
-const inventory = {
-  entries: [localRow],
-  agentPresets: [
-    {
-      id: 'healthy-preset',
-      isDefault: true,
-      rows: [
-        { ...localRow, entryId: null, moduleName: 'healthy-preset-plugin' },
-      ],
-    },
-    {
-      id: 'broken-preset',
-      name: 'Broken preset',
-      isDefault: false,
-      broken: 'private-broken-preset-error',
-      rows: [],
-    },
-  ],
-};
-let inventoryResult = { ok: true, value: inventory };
 const host = surfaceHost(
   async (url, init) => {
     const path = new URL(url).pathname;
@@ -73,18 +79,29 @@ const host = surfaceHost(
         account: { subject: 'fixture-member' },
         network: { connected: true, state: 'connected' },
       });
+    assert.equal(new URL(url).origin, 'https://instance.example.com');
     calls.push({ url: new URL(url), init });
     assert.equal(init.method, 'GET');
     assert.equal(init.credentials, 'omit');
     const headers = new globalThis.Headers(init.headers);
     assert.equal(headers.has('cookie'), false);
     assert.equal(headers.has('authorization'), false);
-    if (!authorized)
-      return Response.json({ detail: 'private-detail' }, { status: 401 });
-    if (path === base) return Response.json({ items: [item] });
-    if (path === `${base}/${packageId}`) return Response.json(item);
-    if (path === `${base}/${packageId}/versions`)
+    if (authorizationStatus !== 200)
+      return Response.json(
+        { detail: 'private-detail' },
+        { status: authorizationStatus },
+      );
+    if (path === `${base}/packages`) return Response.json({ items: [item] });
+    if (path === `${base}/packages/${packageId}/versions/${versionId}`)
+      return Response.json(version);
+    if (path === `${base}/packages/${packageId}/versions`)
       return Response.json({ items: [version] });
+    if (path === `${base}/installations`) {
+      if (installationResult instanceof Error) throw installationResult;
+      return Response.json(installationResult.body, {
+        status: installationResult.status,
+      });
+    }
     assert.fail(`unexpected host request: ${path}`);
   },
   {
@@ -95,8 +112,10 @@ const host = surfaceHost(
     remote: {
       pluginInventory: {
         async list() {
-          if (inventoryResult instanceof Error) throw inventoryResult;
-          return inventoryResult;
+          legacyInventoryRequests++;
+          throw new Error(
+            'The unified panel must not read the legacy inventory',
+          );
         },
       },
     },
@@ -135,6 +154,13 @@ try {
     'the real shell must mount the built Custom Element',
   );
   const root = panel.shadowRoot;
+  const button = (label) => {
+    const found = [...root.querySelectorAll('button')].find(
+      (element) => element.textContent === label,
+    );
+    assert.ok(found, label);
+    return found;
+  };
   assert.equal(root.querySelector('aside').dataset.theme, 'dark');
   assert.equal(root.querySelectorAll('.card').length, 1);
   const card = root.querySelector('.resource-card');
@@ -144,143 +170,142 @@ try {
   );
   assert.ok(
     [...card.querySelectorAll('.resource-meta .resource-badge')].some(
-      (badge) => badge.textContent === 'Installer unavailable',
+      (badge) => badge.textContent === 'Setup required',
     ),
-    'the built card must render the unavailable local installation state',
   );
   assert.equal(
     card.querySelector('.resource-actions .primary').disabled,
     true,
-    'a missing local installer must keep the install action disabled',
+    'unavailable shared installation must keep install disabled',
   );
   assert.deepEqual(
     calls.map((call) => call.url.pathname + call.url.search),
-    [base + '?limit=50'],
+    [
+      `${base}/packages?limit=50&kind=plugin`,
+      `${base}/installations`,
+      `${base}/packages/${packageId}/versions/${versionId}`,
+    ],
   );
-  const details = [...root.querySelectorAll('button')].find(
-    (button) => button.textContent === 'View details',
-  );
-  assert.ok(details);
-  details.click();
+  button('Select version / update').click();
   await flush();
   assert.equal(
-    root.querySelector('.detail .resource-heading h3').textContent,
+    root.querySelector('.resource-heading h3').textContent,
     item.name,
   );
+  const builtVersion = root.querySelector('.resource-version');
+  assert.equal(builtVersion.querySelector('h4').textContent, version.version);
   assert.equal(
-    root.querySelector('.detail > .resource-badge').textContent,
-    'L2 · Installer unavailable',
+    builtVersion.querySelector('.resource-badge').textContent,
+    'published',
   );
-  const builtVersion = root.querySelector('.versions .resource-version');
-  assert.equal(
-    builtVersion.querySelector('.resource-version-header strong').textContent,
-    version.version,
-  );
-  assert.equal(
-    builtVersion.querySelector('.resource-version-header .resource-badge')
-      .textContent,
-    'Published',
-  );
-  assert.equal(
-    builtVersion.querySelector('p.muted').textContent,
-    'Installer unavailable',
-    'the exact version must retain its local installation state',
-  );
+  assert.ok(builtVersion.textContent.includes('@example/managed-plugin'));
   assert.equal(builtVersion.querySelector('.primary').disabled, true);
-  assert.deepEqual(
-    calls.slice(1).map((call) => call.url.pathname),
-    [`${base}/${packageId}`, `${base}/${packageId}/versions`],
+  assert.equal(
+    calls.at(-1).url.pathname + calls.at(-1).url.search,
+    `${base}/packages/${packageId}/versions?limit=200`,
   );
   // Even an explicit caller override cannot switch the managed adapter to cookies.
-  await panel.context.fetch(base, { method: 'GET', credentials: 'include' });
+  await panel.context.fetch('catalog/packages?limit=50&kind=plugin', {
+    method: 'GET',
+    credentials: 'include',
+  });
   assert.equal(calls.at(-1).init.credentials, 'omit');
-  authorized = false;
+
+  installationResult = {
+    status: 200,
+    body: { items: [installed], sharedAvailable: true },
+  };
   const requestsBeforeInventory = calls.length;
-  const mine = [...root.querySelectorAll('nav button')].find(
-    (button) => button.textContent === 'My resources',
-  );
-  mine.click();
+  button('My resources').click();
   await flush();
-  assert.equal(root.querySelectorAll('.card').length, 2);
-  assert.ok(root.textContent.includes('healthy-local-plugin'));
-  assert.ok(root.textContent.includes('healthy-preset-plugin'));
-  assert.ok(root.textContent.includes('Broken preset'));
-  assert.ok(
-    root.textContent.includes(
-      'Preset inventory is unavailable; installation state is unknown.',
-    ),
-  );
-  assert.ok(!root.textContent.includes('private-broken-preset-error'));
-  assert.ok(!root.textContent.includes('No local plugins'));
-  assert.equal(
-    calls.length,
-    requestsBeforeInventory,
-    'local inventory stays available while the platform is unauthorized',
-  );
+  assert.equal(calls.length, requestsBeforeInventory + 1);
+  assert.equal(calls.at(-1).url.pathname, `${base}/installations`);
+  assert.equal(root.querySelectorAll('.card').length, 1);
+  assert.ok(root.textContent.includes(item.name));
+  assert.ok(root.textContent.includes('applied'));
+  assert.equal(button('Remove').disabled, false);
   for (const failure of [
     {
-      ok: false,
-      error: {
+      status: 503,
+      body: {
         code: 'private-inventory-code',
-        message: 'private-inventory-error',
+        detail: 'private-inventory-error',
       },
     },
     new Error('private-inventory-transport-error'),
   ]) {
-    inventoryResult = failure;
-    [...root.querySelectorAll('button')]
-      .find((button) => button.textContent === 'Refresh')
-      .click();
+    installationResult = failure;
+    button('Refresh').click();
     await flush();
     assert.ok(
       root
         .querySelector('[role="alert"]')
-        .textContent.includes('local installation inventory is unavailable'),
+        .textContent.includes('Cannot reach the platform'),
     );
     assert.equal(root.querySelectorAll('.card').length, 0);
     assert.ok(!root.textContent.includes('private-inventory'));
   }
-  inventoryResult = { ok: true, value: inventory };
-  [...root.querySelectorAll('button')]
-    .find((button) => button.textContent === 'Refresh')
-    .click();
+  installationResult = {
+    status: 200,
+    body: { items: [installed], sharedAvailable: true },
+  };
+  button('Refresh').click();
   await flush();
   assert.equal(
     root.querySelectorAll('.card').length,
-    2,
-    'a later successful Remote read recovers the healthy inventory',
+    1,
+    'a later successful catalog read recovers installation state',
   );
-  authorized = true;
-  root.querySelectorAll('nav button')[0].click();
-  await flush();
-  [...root.querySelectorAll('button')]
-    .find((button) => button.textContent === 'View details')
-    .click();
-  await flush();
-  authorized = false;
-  const refresh = [...root.querySelectorAll('button')].find(
-    (button) => button.textContent === 'Refresh',
-  );
-  refresh.click();
-  await flush();
+  for (const [status, hint] of [
+    [403, 'Your account or device is not authorized'],
+    [401, 'Platform sign-in required'],
+  ]) {
+    authorizationStatus = 200;
+    button('Resource market').click();
+    await flush();
+    button('Refresh').click();
+    await flush();
+    button('Select version / update').click();
+    await flush();
+    authorizationStatus = status;
+    button('Refresh').click();
+    await flush();
+    if (status === 401)
+      assert.ok(
+        main.root.textContent.includes(hint),
+        'the built panel must notify the real shell to request sign-in',
+      );
+    else
+      assert.ok(
+        root.querySelector('[role="alert"]').textContent.includes(hint),
+      );
+    const currentRoot =
+      main.root.querySelector('auriga-team-panel')?.shadowRoot;
+    assert.ok(currentRoot, 'the shell retains its mounted resource panel');
+    assert.equal(
+      currentRoot.querySelector('.resource-version'),
+      null,
+      'failed authorization clears the old resource',
+    );
+    assert.equal(currentRoot.querySelectorAll('.card').length, 0);
+    assert.ok(!currentRoot.textContent.includes(item.name));
+    assert.ok(!currentRoot.textContent.includes('private-detail'));
+  }
   assert.ok(
-    root
-      .querySelector('[role="alert"]')
-      .textContent.includes('Your session has expired'),
+    calls.every((call) => call.url.pathname.startsWith(`${base}/`)),
+    'the panel only uses the unified host channel',
   );
   assert.equal(
-    root.querySelector('.detail'),
-    null,
-    'failed authorization clears the old resource',
+    legacyInventoryRequests,
+    0,
+    'the unified panel must not fall back to legacy inventory',
   );
-  assert.ok(!root.textContent.includes(item.name));
-  assert.ok(!root.textContent.includes('private-detail'));
   main.close();
   main = undefined;
   host.dispose();
   assert.equal(host.counts.timers.size, 0);
   console.log(
-    'Built managed catalogue/detail/version render through the real cookie-free client adapter; authorization failure clears data.',
+    'Built managed catalog and versions use the cookie-free client adapter; installation recovery and 401/403 failures preserve the host boundary.',
   );
 } finally {
   main?.close();

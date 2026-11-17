@@ -9,6 +9,7 @@ import {
   verifyTrust,
   signedRevocationFact,
   signedRevocations,
+  signedResourceEnvelope,
 } from './resource-trust.mjs';
 
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
@@ -207,6 +208,7 @@ export function acceptedView(snapshot, trust, now) {
     verifyTrust('release', release, trust);
     revocations(snapshot, trust, now, release, []);
     const manifest = parseStrictJson(Buffer.from(rawManifest));
+    if (manifest.kind === 'plugin') continue;
     const payload = manifest.artifacts.find((a) => a.role === 'payload');
     expected.set(
       manifest.name,
@@ -252,7 +254,7 @@ export function verifySnapshot(
       installation.selectionRevision !== ledger.selectionRevision ||
       installation.generation !== ledger.generation ||
       r.identity.tenantId !== ledger.tenantId ||
-      r.identity.kind !== 'skill' ||
+      !['skill', 'plugin'].includes(r.identity.kind) ||
       r.releaseSequence !== r.envelope.releaseSequence
     )
       throw new Error('installation identity mismatch');
@@ -328,38 +330,40 @@ export function verifySnapshot(
     )
       throw new Error('resource ref binding');
     const payload = manifest.artifacts.find((a) => a.role === 'payload');
-    if (!payload) throw new Error('Skill payload missing');
-    const expectedFiles = skillFiles(
-      Buffer.from(artifactBytes[payload.id], 'base64'),
-    );
-    expected.set(manifest.name, expectedFiles);
-    const materialized =
-      installation.state === 'applying'
-        ? join(
-            directory,
-            'staging',
-            transactions.find(
-              (t) =>
-                t.phase === 'prepared' &&
-                t.expectedLedgerRevision === ledger.revision,
-            ).transactionId,
-            manifest.name,
-          )
-        : join(
-            directory,
-            '..',
-            '..',
-            '..',
-            '..',
-            '..',
-            'skills-active',
-            'current',
-            manifest.name,
-          );
-    verifySkillDirectory(materialized, expectedFiles, checkedFiles);
-    views.push({ directory: materialized, expected: expectedFiles });
-    if (installation.state !== 'applying')
-      materializedNames.push(manifest.name);
+    if (!payload) throw new Error('resource payload missing');
+    if (manifest.kind === 'skill') {
+      const expectedFiles = skillFiles(
+        Buffer.from(artifactBytes[payload.id], 'base64'),
+      );
+      expected.set(manifest.name, expectedFiles);
+      const materialized =
+        installation.state === 'applying'
+          ? join(
+              directory,
+              'staging',
+              transactions.find(
+                (t) =>
+                  t.phase === 'prepared' &&
+                  t.expectedLedgerRevision === ledger.revision,
+              ).transactionId,
+              manifest.name,
+            )
+          : join(
+              directory,
+              '..',
+              '..',
+              '..',
+              '..',
+              '..',
+              'skills-active',
+              'current',
+              manifest.name,
+            );
+      verifySkillDirectory(materialized, expectedFiles, checkedFiles);
+      views.push({ directory: materialized, expected: expectedFiles });
+      if (installation.state !== 'applying')
+        materializedNames.push(manifest.name);
+    }
     const list = revocations(snapshot, trust, now, release, checkedFiles);
     const expires = Math.min(
       Date.parse(r.envelope.notAfter),
@@ -422,6 +426,37 @@ export function verifySnapshot(
     actualNames,
     fingerprint: canonicalize(snapshot),
   };
+}
+
+/** Names are derived only from digest-bound original manifests, including disabled
+ * selections. The launcher uses these names with the public DSH removal command. */
+export function managedPluginNames(home, trust) {
+  const names = new Set();
+  for (const snapshot of observeLedgers(home)) {
+    for (const row of snapshot.ledger.installations) {
+      const r = row.resource;
+      if (r.identity.kind !== 'plugin') continue;
+      const manifest = parseStrictJson(
+        cached(snapshot.directory, r.identity.manifestDigest),
+      );
+      if (
+        !schemaValid('package', 'Manifest', manifest) ||
+        manifest.kind !== 'plugin' ||
+        !signedResourceEnvelope(r.envelope, trust) ||
+        r.envelope.tenantId !== snapshot.ledger.tenantId ||
+        r.envelope.packageId !== r.identity.packageId ||
+        r.envelope.versionId !== r.identity.versionId ||
+        r.envelope.statement.kind !== manifest.kind ||
+        r.envelope.statement.name !== manifest.name ||
+        r.envelope.statement.version !== manifest.version ||
+        manifest.version !== r.identity.version ||
+        r.identity.manifestDigest !== r.envelope.statement.manifestDigest
+      )
+        throw new Error('plugin manifest binding');
+      names.add(manifest.plugin.packageName);
+    }
+  }
+  return [...names];
 }
 
 export function recheckBytes(verification) {

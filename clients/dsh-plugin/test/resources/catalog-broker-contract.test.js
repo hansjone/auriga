@@ -76,7 +76,7 @@ for (const managed of [false, true])
       urls[0].pathname,
       '/api/resource/v1/catalog/member/installations',
     );
-    assert.equal(urls[0].searchParams.get('kind'), 'skill');
+    assert.equal(urls[0].searchParams.get('kind'), null);
     assert.equal(urls[1].pathname, '/api/resource/v1/member/installations');
     for (const url of urls)
       assert.equal(url.searchParams.get('clientId'), f.identity.deviceId);

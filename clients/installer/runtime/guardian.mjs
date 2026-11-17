@@ -11,6 +11,7 @@ import {
 import { join } from 'node:path';
 import { requireSchema } from './schema.mjs';
 import { parseStrictJson } from './json.mjs';
+import { managedPluginNames } from './resource-observer.mjs';
 import {
   acquireHostLock,
   assertLocalPath,
@@ -165,7 +166,12 @@ export class DesktopGuardian {
 
   cleared() {
     assertLocalPath(this.current);
-    return !existsSync(this.current) || readdirSync(this.current).length === 0;
+    return (
+      (!existsSync(this.current) || readdirSync(this.current).length === 0) &&
+      (this.ports.pluginsCleared?.() ??
+        (!existsSync(join(this.home, 'profiles')) ||
+          managedPluginNames(this.home, this.ports.trust?.()).length === 0))
+    );
   }
 
   // No plugin is needed here: stop and verify the whole owned tree before touching current.
@@ -227,6 +233,14 @@ export class DesktopGuardian {
       await this.ports.stopTree();
       if (!(await this.ports.isStopped()))
         throw new Error('DSH tree still running');
+      const plugins = managedPluginNames(this.home, this.ports.trust?.());
+      if (plugins.length) {
+        if (!this.ports.clearPlugins)
+          throw new Error('plugin isolation unavailable');
+        await this.ports.clearPlugins(plugins);
+        if (!this.ports.pluginsCleared?.())
+          throw new Error('managed plugins remain installed');
+      }
       this.locked((lock) => {
         const state = this.read();
         const pending = state.pendingIsolation;

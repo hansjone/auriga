@@ -34,7 +34,12 @@ function tar(body) {
     ]),
   );
 }
-export function resourceFixture(home, now = Date.now(), duration = 3600000) {
+export function resourceFixture(
+  home,
+  now = Date.now(),
+  duration = 3600000,
+  plugin = false,
+) {
   const keys = {};
   const trust = {};
   for (const role of ['release', 'revocation', 'downgrade']) {
@@ -74,6 +79,14 @@ export function resourceFixture(home, now = Date.now(), duration = 3600000) {
     '---\nname: example-resource\ndescription: Isolated Desktop guardian fixture.\n---\n\nFixture body.\n';
   const archive = tar(body);
   const manifest = JSON.parse(vector.rawManifest);
+  if (plugin) {
+    manifest.kind = 'plugin';
+    delete manifest.skill;
+    manifest.plugin = {
+      packageName: '@example/catalog-plugin',
+      dshVersionRange: '>=0.2.1-rc.3',
+    };
+  }
   manifest.artifacts[0].digest = digest(archive);
   manifest.artifacts[0].sizeBytes = archive.length;
   const rawManifest = JSON.stringify(manifest);
@@ -85,6 +98,7 @@ export function resourceFixture(home, now = Date.now(), duration = 3600000) {
       notAfter: expiresAt,
       statement: {
         ...vector.envelope.statement,
+        kind: manifest.kind,
         issuedAt,
         manifestDigest: digest(rawManifest),
         artifactDigests: [digest(archive)],
@@ -110,7 +124,7 @@ export function resourceFixture(home, now = Date.now(), duration = 3600000) {
       tenantId: id(1),
       packageId: id(2),
       versionId: id(4),
-      kind: 'skill',
+      kind: manifest.kind,
       version: '1.2.3',
       manifestDigest: digest(rawManifest),
     },
@@ -185,17 +199,18 @@ export function resourceFixture(home, now = Date.now(), duration = 3600000) {
   const receiptPath = join(directory, 'receipts', id(2), id(4) + '.json');
   mkdirSync(dirname(receiptPath), { recursive: true });
   durableJson(receiptPath, receipt);
-  put(
-    join(
-      home,
-      'auriga',
-      'skills-active',
-      'current',
-      'example-resource',
-      'SKILL.md',
-    ),
-    body,
-  );
+  if (!plugin)
+    put(
+      join(
+        home,
+        'auriga',
+        'skills-active',
+        'current',
+        'example-resource',
+        'SKILL.md',
+      ),
+      body,
+    );
   const renew = () => {
     ref.envelope = signed(
       {
@@ -208,5 +223,15 @@ export function resourceFixture(home, now = Date.now(), duration = 3600000) {
       'release',
     );
   };
-  return { home, trust, ledger, directory, cache, revocations, ref, renew };
+  return {
+    home,
+    trust,
+    ledger,
+    directory,
+    cache,
+    revocations,
+    ref,
+    renew,
+    signed,
+  };
 }

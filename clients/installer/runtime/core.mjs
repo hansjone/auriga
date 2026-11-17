@@ -18,6 +18,7 @@ import {
   notifySharedRestart,
 } from './process-tree.mjs';
 import { Supervisor, packagedTrust } from './supervisor.mjs';
+import { resourcePluginControl } from './resource-plugins.mjs';
 import { superviseDsh } from './desktop-supervision.mjs';
 import { startShellAuth, registerFallbackLogin } from './shell-auth.mjs';
 import { createDesktopReporter } from './desktop-report.mjs';
@@ -1356,6 +1357,29 @@ async function launchLocked({
     initial.dataHome,
     tree,
     packagedTrust(versionDir(root, initial.current)),
+    resourcePluginControl({
+      home: initial.dataHome,
+      trust: () => packagedTrust(versionDir(root, readState(root).current)),
+      profileFile: join(profileDir(initial.dataHome), 'package.json'),
+      remove: (names) => {
+        const dir = versionDir(root, readState(root).current);
+        const result = spawnSync(
+          nodeBin(dir),
+          [dshBin(dir), 'plugin', '--profile', PROFILE, 'remove', ...names],
+          {
+            env: {
+              ...launchEnv(dir, initial.dataHome, env),
+              npm_config_ignore_scripts: 'true',
+            },
+            windowsHide: true,
+            encoding: 'utf8',
+            timeout: 120000,
+          },
+        );
+        if (result.error || result.status !== 0)
+          throw new Error('managed plugin removal failed');
+      },
+    }),
   );
   const releaseSingleton = tree.singleton();
   let session, shellAuth, shellFailure, statusTimer, desktopReporter;

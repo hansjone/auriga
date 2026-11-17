@@ -4,15 +4,17 @@ import { diagnoseResource } from './diagnostics.js';
 import { catalogService } from './catalog-service.js';
 import { catalogApi } from './catalog-api.js';
 import { catalogHost } from './catalog-host.js';
+import { resourceHost } from './host.js';
 import { createPrivateSkills } from './private-skills.js';
 import { exact, refuse } from './trust.js';
-import { parseStrictJson } from './json.js';
-import { existsSync, watch } from 'node:fs';
+import { parseStrictJson, canonicalize } from './json.js';
+import { existsSync, lstatSync, readFileSync } from 'node:fs';
+import { assertLocalPath } from './host-lock.js';
 import { createCatalogIdentityFence } from './identity-fence.js';
 
 /** Owner identity changes must clear the old complete active view even without an HTTP request.
  * This is a content observer only; it neither runs a guardian nor recovers another writer's lock.
- * @param {{current:()=>any,home?:string,managed?:boolean,onChange?:()=>Promise<any>}} options */
+ * @param {{current:()=>any,home?:string,managed?:boolean,onChange?:(event:{changed:boolean})=>Promise<any>}} options */
 export function watchCatalogIdentity({
   current,
   home = process.env.DSH_HOME,
@@ -23,46 +25,51 @@ export function watchCatalogIdentity({
   const fence = createCatalogIdentityFence({ home });
   const state = join(home, 'auriga/guardian/state.json');
   let closed = false,
-    running = false,
-    reconciling = false,
-    requested = false;
-  const reconcile = async () => {
-    requested = true;
-    if (reconciling) return;
-    reconciling = true;
+    running = false;
+  /** @type {any} */ let runtimeSeen;
+  let stamp = '',
+    fingerprint = '',
+    previous = '';
+  // E may rewrite revision/clock every second. Only meaningful guardian changes
+  // bypass the service's minute schedule; the cheap file observer takes no C lock.
+  const guardianFingerprint = () => {
     try {
-      while (requested && !closed) {
-        requested = false;
-        try {
-          await onChange?.();
-        } catch {
-          /* A failed proof cannot publish an active view. */
-        }
+      assertLocalPath(state);
+      if (!existsSync(state)) {
+        stamp = '';
+        return 'missing';
       }
-    } finally {
-      reconciling = false;
+      const stat = lstatSync(state);
+      if (!stat.isFile() || stat.size > 2097152)
+        throw new Error('invalid state');
+      const current = stat.mtimeMs + ':' + stat.ino + ':' + stat.size;
+      if (current !== stamp) {
+        const value = parseStrictJson(readFileSync(state), true);
+        fingerprint = canonicalize({
+          guardian: value.guardian,
+          pendingIsolation: value.pendingIsolation ?? null,
+        });
+        stamp = current;
+      }
+      return fingerprint;
+    } catch {
+      stamp = '';
+      return 'invalid';
     }
   };
-  const watcher = existsSync(join(home, 'auriga/guardian'))
-    ? watch(
-        join(home, 'auriga/guardian'),
-        { persistent: false },
-        (_event, name) => {
-          if (name?.toString() === 'state.json') void reconcile();
-        },
-      )
-    : undefined;
-  watcher?.on('error', () => {
-    watcher.close();
-  });
   const tick = () => {
-    if (closed || running || !existsSync(state)) return;
+    if (closed || running) return;
     const runtime = current();
     if (!runtime || runtime.resourceIdentity) return;
+    const fingerprint = guardianFingerprint();
+    const changed = runtime !== runtimeSeen || fingerprint !== previous;
+    runtimeSeen = runtime;
+    previous = fingerprint;
     running = true;
-    void fence
-      .fromRuntime(runtime)
-      .then(() => reconcile())
+    void (existsSync(state) ? fence.fromRuntime(runtime) : Promise.resolve())
+      .then(() => {
+        if (!closed) return onChange?.({ changed });
+      })
       .catch(() => {})
       .finally(() => {
         running = false;
@@ -74,7 +81,6 @@ export function watchCatalogIdentity({
   return () => {
     closed = true;
     fence.close();
-    watcher?.close();
     clearInterval(timer);
   };
 }
@@ -96,6 +102,7 @@ export function catalogRoutes(options) {
           home,
           privateSkills: createPrivateSkills({ home }),
           host: catalogHost(options.ctx),
+          pluginHost: resourceHost(options.ctx),
           trustFile: process.env.AURIGA_RESOURCE_TRUST_FILE,
           fetchImpl: options.fetchImpl,
         });
@@ -161,7 +168,8 @@ export function catalogRoutes(options) {
         const params = new URLSearchParams(query);
         for (const [key, value] of params) {
           if (
-            !['cursor', 'limit'].includes(key) ||
+            !['cursor', 'limit', 'kind'].includes(key) ||
+            (key === 'kind' && !['plugin', 'skill'].includes(value)) ||
             params.getAll(key).length !== 1 ||
             (key === 'limit' &&
               !/^(?:[1-9]|[1-9][0-9]|1[0-9]{2}|200)$/.test(value)) ||
@@ -169,7 +177,6 @@ export function catalogRoutes(options) {
           )
             refuse('common.validation_failed');
         }
-        if (pathname === 'packages') params.set('kind', 'skill');
         const { value } = await api.request(
           '/api/resource/v1/catalog/' +
             pathname +
@@ -177,7 +184,11 @@ export function catalogRoutes(options) {
         );
         if (
           value.items &&
-          value.items.some((/** @type {any} */ item) => item.kind !== 'skill')
+          value.items.some(
+            (/** @type {any} */ item) =>
+              !['skill', 'plugin'].includes(item.kind) ||
+              (params.has('kind') && item.kind !== params.get('kind')),
+          )
         )
           refuse('common.validation_failed');
         return send(200, value);
@@ -248,10 +259,11 @@ export function catalogRoutes(options) {
     }
   };
   return Object.assign(handle, {
-    async reconcile() {
+    /** @param {{changed?:boolean}} [event] */
+    async reconcile(event) {
       const runtime = options.current();
       if (runtime && !runtime.resourceIdentity)
-        await service(runtime).reconcile();
+        await service(runtime).reconcile(event);
     },
   });
 }

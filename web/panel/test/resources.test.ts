@@ -1,888 +1,378 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
-import { flushPromises, mountPanel, type NativeWrapper } from './native-host';
-import {
-  createResourceReader,
-  type PanelContext,
-  type ResourcePackage,
-  type ResourceVersion,
-} from '../src/resources';
-
-// Contract fixtures are confined to component tests; no backend integration is claimed.
-const packageId = '01900000-0000-7000-8000-000000000001';
-const versionId = '01900000-0000-7000-8000-000000000002';
-const plugin: ResourcePackage = {
-  id: packageId,
-  tenantId: '01900000-0000-7000-8000-000000000003',
-  ownerId: '01900000-0000-7000-8000-000000000004',
-  name: 'Example plugin',
-  kind: 'plugin',
-  level: 'l2',
-  visibility: 'tenant',
-  groupIds: [],
-  revision: 1,
-  createdAt: '2026-10-23T00:00:00Z',
-  enabled: true,
-  defaultVersionId: versionId,
-};
-const version: ResourceVersion = {
-  id: versionId,
-  packageId,
-  version: '1.0.0',
-  digest: `sha256:${'a'.repeat(64)}`,
-  sizeBytes: 100,
-  mediaType: 'application/gzip',
-  state: 'published',
-  revision: 1,
-  createdAt: '2026-10-23T00:00:00Z',
-};
-function json(body: unknown, status = 200) {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { 'content-type': 'application/json' },
-  });
-}
-function connect(fetch: NonNullable<PanelContext['fetch']>): PanelContext {
-  return { mode: 'connect', protocol: 1, locale: 'en', theme: 'light', fetch };
-}
-let wrappers: NativeWrapper[] = [];
-function render(context?: PanelContext) {
-  const wrapper = mountPanel(context);
-  wrappers.push(wrapper);
-  return wrapper;
-}
-async function click(wrapper: NativeWrapper, label: string) {
-  const button = wrapper
-    .findAll('button')
-    .find((item) => item.text().includes(label));
-  expect(button, label).toBeDefined();
-  await button!.trigger('click');
-  await flushPromises();
-}
+﻿import { afterEach, describe, expect, it, vi } from 'vitest';
+import { mountPanel, flushPromises, type NativeWrapper } from './native-host';
+import type { PanelContext } from '../src/resources';
+const id = (n: number) =>
+  `01900000-0000-7000-8000-${String(n).padStart(12, '0')}`;
+const wrappers: NativeWrapper[] = [];
 afterEach(() => {
-  wrappers.forEach((wrapper) => wrapper.unmount());
-  wrappers = [];
-  vi.useRealTimers();
+  wrappers.splice(0).forEach((w) => w.unmount());
   vi.unstubAllGlobals();
 });
-
-describe('resource boundary', () => {
-  it.each(['standalone', undefined] as const)(
-    'never calls host or global fetch in %s mode',
-    async (mode) => {
-      const host = vi.fn();
+const json = (body: unknown, status = 200) => Response.json(body, { status });
+async function click(w: NativeWrapper, label: string) {
+  const b = w.findAll('button').find((b) => b.text().includes(label));
+  expect(b, label).toBeDefined();
+  await b!.trigger('click');
+  await flushPromises();
+}
+function fixture(
+  kind: 'plugin' | 'skill',
+  extra: Record<string, unknown> = {},
+) {
+  const pack = {
+    id: id(2),
+    tenantId: id(1),
+    ownerId: id(3),
+    name: 'Example ' + kind,
+    kind,
+    enabled: true,
+    defaultVersionId: id(4),
+    revision: 1,
+  };
+  const manifest = {
+    kind,
+    name: pack.name,
+    version: '1.0.0',
+    description: 'Signed capability',
+    author: { displayName: 'Example author' },
+    license: 'MIT',
+    permissions: { tools: [], outboundHosts: [], dataAccess: [] },
+    ...(kind === 'plugin'
+      ? { plugin: { packageName: '@example/npm-original' } }
+      : { skill: { entry: 'SKILL.md' } }),
+  };
+  const version = {
+    id: id(4),
+    packageId: pack.id,
+    kind,
+    version: '1.0.0',
+    state: 'published',
+    manifest,
+    digest: 'sha256:' + 'a'.repeat(64),
+  };
+  const row = {
+    clientId: id(5),
+    installationRevision: 2,
+    selectionRevision: 7,
+    generation: 9,
+    state: 'applying',
+    reportSource: 'member',
+    resource: {
+      identity: {
+        tenantId: id(1),
+        packageId: pack.id,
+        versionId: version.id,
+        kind,
+        version: version.version,
+        manifestDigest: version.digest,
+      },
+      envelope: { statement: { name: pack.name } },
+      enabled: true,
+      desiredState: 'ENABLED',
+      installationMode: 'optional',
+    },
+  };
+  const requests: { path: string; init?: RequestInit }[] = [];
+  const fetch = vi.fn(async (path: string, init?: RequestInit) => {
+    requests.push({ path, init });
+    if (path === 'catalog/installations')
+      return json({ items: [row], sharedAvailable: true, ...extra });
+    if (path === 'catalog/actions')
+      return json({ accepted: true, installation: row }, 202);
+    if (path.includes('/versions?')) return json({ items: [version] });
+    if (path.endsWith('/versions/' + version.id)) return json(version);
+    return json({ items: [pack] });
+  });
+  return { pack, version, row, requests, fetch };
+}
+async function render(
+  kind: 'plugin' | 'skill',
+  fetch: NonNullable<PanelContext['fetch']>,
+  extra: Partial<PanelContext> = {},
+) {
+  const w = mountPanel({
+    mode: 'connect',
+    protocol: 1,
+    locale: 'en',
+    fetch,
+    ...extra,
+  });
+  wrappers.push(w);
+  await flushPromises();
+  if (kind === 'skill') await click(w, 'Skills');
+  await flushPromises();
+  return w;
+}
+for (const kind of ['plugin', 'skill'] as const)
+  describe('unified ' + kind, () => {
+    it('uses catalog reads and never the old member port or global transport', async () => {
+      const f = fixture(kind);
+      const old = { list: vi.fn(), apply: vi.fn() };
       const global = vi.fn();
       vi.stubGlobal('fetch', global);
-      const wrapper = render({ ...connect(host), mode });
-      await flushPromises();
-      expect(host).not.toHaveBeenCalled();
+      const w = await render(kind, f.fetch, { memberResources: old });
+      expect(w.text()).toContain(f.pack.name);
+      expect(f.requests.some((r) => r.path.includes('kind=' + kind))).toBe(
+        true,
+      );
+      expect(f.requests.every((r) => r.path.startsWith('catalog/'))).toBe(true);
+      expect(old.list).not.toHaveBeenCalled();
+      expect(old.apply).not.toHaveBeenCalled();
       expect(global).not.toHaveBeenCalled();
-      expect(wrapper.find('[role="status"]').exists()).toBe(true);
-      expect(() => createResourceReader({ ...connect(host), mode })).toThrow(
-        'unavailable',
-      );
-    },
-  );
-  it('rejects unsupported protocols and missing transport without a global fallback', async () => {
-    const host = vi.fn();
-    const wrapper = render({ ...connect(host), protocol: 2 });
-    expect(wrapper.text()).toContain('protocol is unsupported');
-    await wrapper.setProps({
-      context: {
-        mode: 'connect',
-        protocol: 1,
-        locale: 'en',
-        apiBase: 'https://example.com',
-      },
     });
-    expect(wrapper.text()).toContain('No resource connection');
-    expect(host).not.toHaveBeenCalled();
-  });
-  it.each([
-    [401, 'session has expired'],
-    [403, 'cannot read'],
-    [404, 'does not exist'],
-    [429, 'Too many requests'],
-    [503, 'unreachable'],
-  ])(
-    'shows HTTP %s as failure, never as an empty market',
-    async (status, message) => {
-      const host = vi
-        .fn()
-        .mockResolvedValue(
-          json({ detail: 'Sensitive server detail' }, status as number),
-        );
-      const wrapper = render(connect(host));
-      await flushPromises();
-      expect(wrapper.get('[role="alert"]').text()).toContain(message);
-      expect(wrapper.text()).not.toContain('No plugins are visible');
-      expect(wrapper.text()).not.toContain('Sensitive server detail');
-      expect(host).toHaveBeenCalledTimes(1);
-    },
-  );
-  it.each([
-    {},
-    { items: [{ ...plugin, enabled: 'yes' }] },
-    { items: [{ ...plugin, kind: 'skill' }] },
-    { items: [plugin], nextCursor: 23 },
-    { items: [plugin], nextCursor: null },
-  ])('rejects malformed success payloads %#', async (body) => {
-    const wrapper = render(connect(vi.fn().mockResolvedValue(json(body))));
-    await flushPromises();
-    expect(wrapper.get('[role="alert"]').text()).toContain('unrecognized data');
-    expect(wrapper.findAll('.card')).toHaveLength(0);
-  });
-  it('rejects HTML fallback and invalid JSON', async () => {
-    const host = vi
-      .fn()
-      .mockResolvedValueOnce(
-        new Response('<html>login</html>', {
-          headers: { 'content-type': 'text/html' },
-        }),
-      )
-      .mockResolvedValueOnce(
-        new Response('{', { headers: { 'content-type': 'application/json' } }),
-      );
-    const wrapper = render(connect(host));
-    await flushPromises();
-    expect(wrapper.get('[role="alert"]').text()).toContain('unrecognized data');
-    await click(wrapper, 'Retry');
-    expect(wrapper.get('[role="alert"]').text()).toContain('unrecognized data');
-  });
-  it('rejects path traversal and mismatched package or version identities', async () => {
-    const host = vi
-      .fn()
-      .mockResolvedValueOnce(json({ ...plugin, id: versionId }))
-      .mockResolvedValueOnce(
-        json({ items: [{ ...version, packageId: versionId }] }),
-      );
-    const reader = createResourceReader(connect(host));
-    const signal = new AbortController().signal;
-    await expect(reader.detail('../admin', signal)).rejects.toThrow('invalid');
-    expect(host).not.toHaveBeenCalled();
-    await expect(reader.detail(packageId, signal)).rejects.toThrow('invalid');
-    await expect(reader.versions(packageId, signal)).rejects.toThrow('invalid');
-  });
-});
-
-describe('market reading', () => {
-  it.each([false, true])(
-    'accepts a terminal package page with an empty cursor (has items: %s)',
-    async (hasItems) => {
-      const items = hasItems ? [plugin] : [];
-      const reader = createResourceReader(
-        connect(vi.fn().mockResolvedValue(json({ items, nextCursor: '' }))),
-      );
-      await expect(reader.list(new AbortController().signal)).resolves.toEqual({
-        items,
-        nextCursor: undefined,
+    it('pins action identity and CAS and keeps 202 applying', async () => {
+      const f = fixture(kind);
+      const w = await render(kind, f.fetch);
+      await click(w, 'Install 1.0.0');
+      const r = f.requests.find((r) => r.path === 'catalog/actions')!;
+      expect(JSON.parse(String(r.init?.body))).toMatchObject({
+        packageId: f.pack.id,
+        versionId: f.version.id,
+        revision: 2,
+        action: 'install',
       });
-    },
-  );
-  it.each([false, true])(
-    'accepts a terminal version page with an empty cursor (has items: %s)',
-    async (hasItems) => {
-      const items = hasItems ? [version] : [];
-      const reader = createResourceReader(
-        connect(vi.fn().mockResolvedValue(json({ items, nextCursor: '' }))),
-      );
-      await expect(
-        reader.versions(packageId, new AbortController().signal),
-      ).resolves.toEqual({ items, nextCursor: undefined });
-    },
-  );
-  it('preserves loaded packages when the final page is empty and has an empty cursor', async () => {
-    const host = vi
-      .fn()
-      .mockResolvedValueOnce(json({ items: [plugin], nextCursor: 'next' }))
-      .mockResolvedValueOnce(json({ items: [], nextCursor: '' }));
-    const wrapper = render(connect(host));
-    await flushPromises();
-    await click(wrapper, 'Load more');
-    expect(wrapper.find('[role="alert"]').exists()).toBe(false);
-    expect(wrapper.findAll('.card')).toHaveLength(1);
-    expect(wrapper.text()).toContain(plugin.name);
-    expect(wrapper.text()).not.toContain('Load more');
-    expect(host).toHaveBeenCalledTimes(2);
-  });
-  it('preserves loaded versions when the final page is empty and has an empty cursor', async () => {
-    const host = vi
-      .fn()
-      .mockResolvedValueOnce(json({ items: [plugin] }))
-      .mockResolvedValueOnce(json(plugin))
-      .mockResolvedValueOnce(json({ items: [version], nextCursor: 'next' }))
-      .mockResolvedValueOnce(json({ items: [], nextCursor: '' }));
-    const wrapper = render(connect(host));
-    await flushPromises();
-    await click(wrapper, 'View details');
-    await click(wrapper, 'Load more');
-    expect(wrapper.find('[role="alert"]').exists()).toBe(false);
-    expect(wrapper.findAll('.versions .resource-version')).toHaveLength(1);
-    expect(wrapper.get('.detail').text()).toContain(version.version);
-    expect(wrapper.text()).not.toContain('Load more');
-    expect(host).toHaveBeenCalledTimes(4);
-  });
-  it('reads actual response fields, filters locally, paginates and opens version detail', async () => {
-    const host = vi
-      .fn()
-      .mockResolvedValueOnce(
-        json({ items: [plugin], nextCursor: 'page+2&private=no' }),
-      )
-      .mockResolvedValueOnce(
-        json({ items: [{ ...plugin, id: versionId, name: 'Another plugin' }] }),
-      )
-      .mockResolvedValueOnce(json(plugin))
-      .mockResolvedValueOnce(
-        json({ items: [version], nextCursor: 'versions:2' }),
-      )
-      .mockResolvedValueOnce(
-        json({ items: [{ ...version, id: packageId, version: '1.1.0' }] }),
-      );
-    const wrapper = render(connect(host));
-    await flushPromises();
-    expect(wrapper.findAll('.card')).toHaveLength(1);
-    expect(wrapper.text()).toContain('Signed plugin');
-    expect(wrapper.text()).toContain('Installer unavailable');
-    await click(wrapper, 'Load more');
-    expect(host.mock.calls[1][0]).toBe(
-      '/api/resource/v1/packages?limit=50&cursor=page%2B2%26private%3Dno',
-    );
-    expect(wrapper.findAll('.card')).toHaveLength(2);
-    await wrapper.get('input').setValue('Example');
-    expect(wrapper.findAll('.card')).toHaveLength(1);
-    expect(host).toHaveBeenCalledTimes(2);
-    await click(wrapper, 'View details');
-    expect(wrapper.get('.detail').text()).toContain('1.0.0');
-    expect(wrapper.get('.detail').text()).toContain('Published');
-    await click(wrapper, 'Load more');
-    expect(wrapper.findAll('.versions .resource-version')).toHaveLength(2);
-    expect(host.mock.calls[4][0]).toBe(
-      `/api/resource/v1/packages/${packageId}/versions?limit=50&cursor=versions%3A2`,
-    );
-    await click(wrapper, 'Back to market');
-    expect(wrapper.get('input').element.value).toBe('Example');
-    expect(wrapper.findAll('.card')).toHaveLength(1);
-    for (const [, init] of host.mock.calls) {
-      expect(init.method).toBe('GET');
-      expect(init.redirect).toBe('error');
-      expect(init.cache).toBe('no-store');
-      expect(init.headers).toEqual({ accept: 'application/json' });
-      expect(init).not.toHaveProperty('credentials');
-    }
-  });
-  it('keeps installation unknown even when the market is empty', async () => {
-    const host = vi.fn().mockResolvedValue(json({ items: [] }));
-    const wrapper = render(connect(host));
-    await flushPromises();
-    expect(wrapper.text()).toContain('No plugins are visible');
-    await click(wrapper, 'My resources');
-    expect(wrapper.text()).toContain(
-      'local installation inventory is unavailable',
-    );
-    expect(wrapper.find('input').exists()).toBe(false);
-    expect(host).toHaveBeenCalledTimes(1);
-  });
-  it('escapes package names instead of executing resource content', async () => {
-    const wrapper = render(
-      connect(
-        vi.fn().mockResolvedValue(
-          json({
-            items: [{ ...plugin, name: '<img src=x onerror=alert(1)>' }],
-          }),
-        ),
-      ),
-    );
-    await flushPromises();
-    expect(wrapper.text()).toContain('<img src=x onerror=alert(1)>');
-    expect(wrapper.find('img').exists()).toBe(false);
-  });
-  it('retries explicitly after a network failure', async () => {
-    const host = vi
-      .fn()
-      .mockRejectedValueOnce(new Error('private connection detail'))
-      .mockResolvedValueOnce(json({ items: [plugin] }));
-    const wrapper = render(connect(host));
-    await flushPromises();
-    expect(wrapper.get('[role="alert"]').text()).toContain('unreachable');
-    await click(wrapper, 'Retry');
-    expect(wrapper.find('[role="alert"]').exists()).toBe(false);
-    expect(wrapper.findAll('.card')).toHaveLength(1);
-  });
-  it('clears previously loaded data and emits a composed auth event on a later 401', async () => {
-    const host = vi
-      .fn()
-      .mockResolvedValueOnce(json({ items: [plugin], nextCursor: 'next' }))
-      .mockResolvedValueOnce(json({}, 401));
-    const wrapper = render(connect(host));
-    await flushPromises();
-    const events: Event[] = [];
-    wrapper.element.addEventListener('auriga-auth-required', (event: Event) =>
-      events.push(event),
-    );
-    await click(wrapper, 'Load more');
-    expect(wrapper.text()).not.toContain(plugin.name);
-    expect(events).toHaveLength(1);
-    expect(events[0].composed).toBe(true);
-    expect(events[0].bubbles).toBe(true);
-  });
-  it('detects a repeated cursor without fetching in a loop', async () => {
-    const host = vi
-      .fn()
-      .mockImplementation(() =>
-        Promise.resolve(json({ items: [plugin], nextCursor: 'same' })),
-      );
-    const wrapper = render(connect(host));
-    await flushPromises();
-    await click(wrapper, 'Load more');
-    expect(wrapper.get('[role="alert"]').text()).toContain('unrecognized data');
-    expect(host).toHaveBeenCalledTimes(2);
-  });
-  it('does not retain market data as an offline fallback after a later failure', async () => {
-    const host = vi
-      .fn()
-      .mockResolvedValueOnce(json({ items: [plugin], nextCursor: 'next' }))
-      .mockResolvedValueOnce(json({}, 503))
-      .mockResolvedValueOnce(json({ items: [plugin] }));
-    const wrapper = render(connect(host));
-    await flushPromises();
-    await click(wrapper, 'Load more');
-    expect(wrapper.text()).not.toContain(plugin.name);
-    expect(wrapper.get('[role="alert"]').text()).toContain('unreachable');
-    await click(wrapper, 'Retry');
-    expect(host.mock.calls[2][0]).toBe('/api/resource/v1/packages?limit=50');
-    expect(wrapper.findAll('.card')).toHaveLength(1);
-  });
-});
-
-describe('request lifecycle', () => {
-  it('aborts and ignores a previous connection response when host context changes', async () => {
-    let finish!: (response: Response) => void;
-    const oldHost = vi.fn().mockImplementation(
-      () =>
-        new Promise<Response>((resolve) => {
-          finish = resolve;
-        }),
-    );
-    const wrapper = render(connect(oldHost));
-    expect(wrapper.text()).toContain('Loading resources');
-    const newHost = vi
-      .fn()
-      .mockResolvedValue(
-        json({ items: [{ ...plugin, name: 'New connection' }] }),
-      );
-    await wrapper.setProps({ context: connect(newHost) });
-    await flushPromises();
-    finish(json({ items: [plugin] }));
-    await flushPromises();
-    expect(oldHost.mock.calls[0][1].signal.aborted).toBe(true);
-    expect(wrapper.text()).toContain('New connection');
-    expect(wrapper.text()).not.toContain('Example plugin');
-  });
-  it('clears data when the host changes to managed mode', async () => {
-    const host = vi
-      .fn()
-      .mockImplementation(async () => json({ items: [plugin] }));
-    const wrapper = render(connect(host));
-    await flushPromises();
-    await wrapper.setProps({ context: { ...connect(host), mode: 'managed' } });
-    expect(wrapper.text()).not.toContain(plugin.name);
-    expect(wrapper.text()).toContain('Loading resources');
-    await flushPromises();
-    expect(wrapper.text()).toContain(plugin.name);
-    expect(host).toHaveBeenCalledTimes(2);
-  });
-  it('ignores a failed detail request after returning to the market', async () => {
-    let reject!: (error: Error) => void;
-    const host = vi
-      .fn()
-      .mockResolvedValueOnce(json({ items: [plugin] }))
-      .mockImplementationOnce(
-        () =>
-          new Promise<Response>((_, fail) => {
-            reject = fail;
-          }),
-      )
-      .mockResolvedValueOnce(json({ items: [version] }));
-    const wrapper = render(connect(host));
-    await flushPromises();
-    await click(wrapper, 'View details');
-    await click(wrapper, 'Back to market');
-    reject(new Error('network'));
-    await flushPromises();
-    expect(wrapper.find('[role="alert"]').exists()).toBe(false);
-    expect(wrapper.findAll('.card')).toHaveLength(1);
-  });
-  it('bounds hung reads and cancels transport on unmount', async () => {
-    vi.useFakeTimers();
-    const host = vi
-      .fn()
-      .mockImplementation(() => new Promise<Response>(() => {}));
-    const wrapper = render(connect(host));
-    await vi.advanceTimersByTimeAsync(15_000);
-    expect(wrapper.get('[role="alert"]').text()).toContain('unreachable');
-    expect(host.mock.calls[0][1].signal.aborted).toBe(true);
-    await click(wrapper, 'Retry');
-    wrapper.unmount();
-    await flushPromises();
-    expect(host.mock.calls[1][1].signal.aborted).toBe(true);
-    expect(vi.getTimerCount()).toBe(0);
-  });
-});
-
-it('reads a managed catalogue through the supplied host channel', async () => {
-  const host = vi.fn().mockResolvedValue(json({ items: [plugin] }));
-  const wrapper = render({ ...connect(host), mode: 'managed' });
-  await flushPromises();
-  expect(wrapper.text()).toContain('Example plugin');
-  expect(host).toHaveBeenCalledTimes(1);
-});
-it('shows native inventory while the platform is offline and does not offer unmanaged mutations', async () => {
-  const host = vi.fn().mockRejectedValue(new Error('offline'));
-  const listInstalled = vi.fn().mockResolvedValue({
-    entries: [
-      {
-        entryId: 'example',
-        moduleName: 'example-plugin',
-        enabled: false,
-        fiberPhase: null,
-      },
-    ],
-  });
-  const wrapper = render({ ...connect(host), listInstalled });
-  await flushPromises();
-  await click(wrapper, 'My resources');
-  expect(wrapper.text()).toContain('example-plugin');
-  expect(wrapper.text()).toContain('Disabled');
-  expect(listInstalled).toHaveBeenCalledTimes(1);
-  for (const label of ['Install', 'Update', 'Uninstall']) {
-    const button = wrapper
-      .findAll('button')
-      .find((item) => item.text() === label);
-    expect(button).toBeUndefined();
-  }
-  expect(host).toHaveBeenCalledTimes(1);
-});
-it('does not present malformed native inventory as an empty installation', async () => {
-  const wrapper = render({
-    mode: 'standalone',
-    protocol: 1,
-    locale: 'en',
-    listInstalled: async () => ({ entries: [{ moduleName: '<script>' }] }),
-  });
-  await click(wrapper, 'My resources');
-  expect(wrapper.text()).toContain(
-    'local installation inventory is unavailable',
-  );
-  expect(wrapper.text()).not.toContain('No local plugins');
-});
-
-it('keeps healthy global and preset plugins when another public preset is broken', async () => {
-  const row = {
-    entryId: 'healthy',
-    moduleName: 'healthy-plugin',
-    enabled: true,
-    fiberPhase: 'active',
-  };
-  const wrapper = render({
-    mode: 'standalone',
-    protocol: 1,
-    locale: 'en',
-    listInstalled: async () => ({
-      entries: [row],
-      agentPresets: [
-        {
-          id: 'healthy-preset',
-          isDefault: true,
-          rows: [{ ...row, entryId: null, moduleName: 'preset-plugin' }],
-        },
-        {
-          id: 'broken-preset',
-          name: 'Broken preset',
-          isDefault: false,
-          broken: 'private-secret-error',
-          rows: [],
-        },
-      ],
-    }),
-  });
-  await click(wrapper, 'My resources');
-  expect(wrapper.findAll('.card')).toHaveLength(2);
-  expect(wrapper.text()).toContain('healthy-plugin');
-  expect(wrapper.text()).toContain('preset-plugin');
-  expect(wrapper.text()).toContain('Broken preset');
-  expect(wrapper.text()).toContain(
-    'Preset inventory is unavailable; installation state is unknown.',
-  );
-  expect(wrapper.text()).not.toContain('private-secret-error');
-  expect(wrapper.text()).not.toContain('No local plugins');
-});
-it('does not turn a broken-only preset into an empty installation', async () => {
-  const wrapper = render({
-    mode: 'standalone',
-    protocol: 1,
-    locale: 'en',
-    listInstalled: async () => ({
-      entries: [],
-      agentPresets: [
-        {
-          id: 'broken-only',
-          isDefault: false,
-          broken: 'private-error',
-          rows: [],
-        },
-      ],
-    }),
-  });
-  await click(wrapper, 'My resources');
-  expect(wrapper.text()).toContain('broken-only');
-  expect(wrapper.text()).toContain(
-    'Preset inventory is unavailable; installation state is unknown.',
-  );
-  expect(wrapper.text()).not.toContain('No local plugins');
-  expect(wrapper.text()).not.toContain('private-error');
-});
-it('labels personal L4 resources as unreviewed without inferring approval from publication', async () => {
-  const personal = {
-    ...plugin,
-    level: 'l4' as const,
-    visibility: 'private' as const,
-  };
-  const wrapper = render(
-    connect(async (path) =>
-      json(
-        path.includes('/versions')
-          ? { items: [version] }
-          : path.includes(packageId)
-            ? personal
-            : { items: [personal] },
-      ),
-    ),
-  );
-  await flushPromises();
-  expect(wrapper.text()).toContain('Unreviewed');
-  await click(wrapper, 'View details');
-  expect(wrapper.text()).toContain('Unreviewed');
-  expect(wrapper.text()).toContain('Permission declarations are unavailable');
-});
-it('keeps cloud operations platform-owned even when an older host advertises member distribution', async () => {
-  const fetch = vi.fn(async (path: string) =>
-    json(
-      path.includes('/versions')
-        ? { items: [version] }
-        : path.includes(packageId)
-          ? plugin
-          : { items: [plugin] },
-    ),
-  );
-  const wrapper = render({
-    ...connect(fetch),
-    mode: 'managed',
-    resourceDistributionAvailable: true,
-    resourceIdentity: {
-      instanceId: versionId,
-      tenantId: plugin.tenantId,
-      ownerId: plugin.ownerId,
-    },
-  });
-  await flushPromises();
-  await click(wrapper, 'View details');
-  expect(wrapper.text()).toContain(
-    'Managed resources are distributed by the platform',
-  );
-  expect(
-    wrapper
-      .findAll('button')
-      .some((button) => button.text() === 'Install / update'),
-  ).toBe(false);
-});
-it('cloud inventory remains available independently of platform distribution writes', async () => {
-  const wrapper = render({
-    ...connect(async () => json({ items: [] })),
-    mode: 'managed',
-    listInstalled: async () => ({
-      entries: [
-        {
-          entryId: 'configured',
-          moduleName: 'platform-plugin',
-          enabled: true,
-          fiberPhase: 'active',
-        },
-      ],
-    }),
-  });
-  await flushPromises();
-  await click(wrapper, 'My resources');
-  expect(wrapper.text()).toContain('platform-plugin');
-  expect(
-    wrapper.findAll('button').some((button) => button.text() === 'Uninstall'),
-  ).toBe(false);
-});
-it('keeps normal device-backed managed operations unavailable without claiming a successful writer grant', async () => {
-  const fetch = vi.fn(async (path: string, init?: RequestInit) => {
-    expect(init?.method).not.toBe('POST');
-    return json(
-      path.includes('/versions')
-        ? { items: [version] }
-        : path.includes(packageId)
-          ? { ...plugin, level: 'l3' }
-          : { items: [plugin] },
-    );
-  });
-  const wrapper = render({
-    ...connect(fetch),
-    mode: 'managed',
-    resourceIdentity: {
-      instanceId: versionId,
-      tenantId: plugin.tenantId,
-      ownerId: plugin.ownerId,
-    },
-    resourceDistributionAvailable: false,
-  });
-  await flushPromises();
-  await click(wrapper, 'View details');
-  expect(wrapper.text()).toContain(
-    'Managed resources are distributed by the platform',
-  );
-  expect(
-    wrapper
-      .findAll('button')
-      .some((button) => button.text() === 'Install / update'),
-  ).toBe(false);
-  expect(
-    fetch.mock.calls.some(
-      ([, init]) => (init as RequestInit | undefined)?.method === 'POST',
-    ),
-  ).toBe(false);
-});
-it('limits the member market to enabled published defaults and published versions', async () => {
-  const unpublished = {
-    ...plugin,
-    id: '01900000-0000-7000-8000-000000000006',
-    name: 'Unpublished plugin',
-    defaultVersionId: null,
-  };
-  const disabled = {
-    ...plugin,
-    id: '01900000-0000-7000-8000-000000000007',
-    name: 'Disabled plugin',
-    enabled: false,
-  };
-  const fetch = vi.fn(async (path: string) =>
-    json(
-      path.includes('/versions')
-        ? {
-            items: [
-              version,
-              {
-                ...version,
-                id: unpublished.id,
-                state: 'draft',
-                version: 'draft-version',
-              },
-            ],
-          }
-        : path.includes(packageId)
-          ? plugin
-          : { items: [plugin, unpublished, disabled] },
-    ),
-  );
-  const wrapper = render(connect(fetch));
-  await flushPromises();
-  expect(wrapper.findAll('.card')).toHaveLength(1);
-  expect(wrapper.text()).not.toContain('Unpublished plugin');
-  expect(wrapper.text()).not.toContain('Disabled plugin');
-  await click(wrapper, 'View details');
-  expect(wrapper.text()).toContain(version.version);
-  expect(wrapper.text()).not.toContain('draft-version');
-});
-it('shows renewal failure and blocks enabling while the installed version remains visible', async () => {
-  const identity = {
-    tenantId: plugin.tenantId,
-    ownerId: plugin.ownerId,
-    clientId: '01900000-0000-7000-8000-000000000006',
-  };
-  const apply = vi.fn();
-  const wrapper = render({
-    ...connect(vi.fn().mockResolvedValue(json({ items: [plugin] }))),
-    memberResources: {
-      list: async () => ({
-        identity,
-        reportSource: 'member',
-        offline: false,
-        items: [
-          {
-            ...identity,
-            packageId,
-            versionId,
-            digest: version.digest,
-            releaseSequence: 1,
-            level: 'l2',
-            desired: 'enabled',
-            state: 'applied',
-            revision: 1,
-            reportedRevision: 1,
-            reportSource: 'member',
-            name: plugin.name,
-            version: '1.0.0',
-            localVersion: '1.0.0',
-            localEnabled: true,
-            restartRequired: false,
-            syncPending: false,
-            renewalState: 'offline',
-          },
-        ],
-      }),
-      apply,
-    },
-  });
-  await flushPromises();
-  await click(wrapper, 'My resources');
-  expect(wrapper.text()).toContain('Renewal unavailable (offline)');
-  expect(wrapper.text()).toContain('1.0.0');
-  expect(
-    wrapper
-      .findAll('button')
-      .find((button) => button.text() === 'Enable')
-      ?.element?.hasAttribute('disabled'),
-  ).toBe(true);
-  expect(apply).not.toHaveBeenCalled();
-});
-it('uses the desktop server port to install, disable, remove and refresh the market state', async () => {
-  const clientId = '01900000-0000-7000-8000-000000000009';
-  const identity = {
-    clientId,
-    tenantId: plugin.tenantId,
-    ownerId: plugin.ownerId,
-  };
-  let row: Record<string, unknown> | undefined;
-  const apply = vi.fn(
-    async (input: {
-      packageId: string;
-      versionId: string;
-      action: string;
-      key: string;
-    }) => {
-      expect(input).not.toHaveProperty('clientId');
-      expect(input).not.toHaveProperty('tenantId');
-      const revision = (Number(row?.revision) || 0) + 1;
-      row = {
-        clientId,
-        packageId,
-        versionId,
-        digest: version.digest,
-        releaseSequence: 1,
-        level: 'l3',
-        desired:
-          input.action === 'remove'
-            ? 'removed'
-            : input.action === 'disable'
-              ? 'disabled'
-              : 'enabled',
-        state: 'applied',
-        revision,
-        reportedRevision: revision,
-        reportSource: 'member',
-        name: plugin.name,
-        version: version.version,
-        localVersion: version.version,
-        localEnabled: input.action !== 'disable',
-        restartRequired: false,
-        syncPending: false,
-      };
-      return row;
-    },
-  );
-  const wrapper = render({
-    ...connect(async (path) =>
-      json(
-        path.includes('/versions')
-          ? { items: [version] }
-          : path.includes(packageId)
-            ? plugin
-            : { items: [plugin] },
-      ),
-    ),
-    memberResources: {
-      list: async () => ({
-        identity,
-        items: row ? [row] : [],
-        reportSource: 'member',
-        offline: false,
-      }),
-      apply,
-    },
-  });
-  await flushPromises();
-  await click(wrapper, 'View details');
-  await click(wrapper, 'Install 1.0.0');
-  expect(apply).not.toHaveBeenCalled();
-  await click(wrapper, 'Confirm');
-  expect(apply).toHaveBeenCalledTimes(1);
-  await click(wrapper, 'My resources');
-  expect(wrapper.text()).toContain('Verified local version');
-  expect(wrapper.text()).toContain('1.0.0');
-  expect(wrapper.text()).toContain('Member installation report');
-  await click(wrapper, 'Disable');
-  await click(wrapper, 'Confirm');
-  expect(apply).toHaveBeenCalledTimes(2);
-  expect(apply.mock.calls[1][0].action).toBe('disable');
-  await click(wrapper, 'Uninstall');
-  await click(wrapper, 'Confirm');
-  expect(apply.mock.calls[2][0].action).toBe('remove');
-  await click(wrapper, 'Resource market');
-  await click(wrapper, 'Refresh');
-  expect(wrapper.text()).toContain('Removed');
-});
-
-describe('market installation affordances', () => {
-  const identity = {
-    tenantId: plugin.tenantId,
-    ownerId: plugin.ownerId,
-    clientId: versionId,
-  };
-  const fetch = async (path: string) =>
-    json(
-      path.includes('/versions/')
-        ? version
-        : path.includes('/versions')
-          ? { items: [version] }
-          : path.includes(packageId)
-            ? plugin
-            : { items: [plugin] },
-    );
-  it('shows installation prerequisites instead of silently hiding the button', async () => {
-    const wrapper = render({ ...connect(fetch), locale: 'zh-CN' });
-    await flushPromises();
-    expect(wrapper.find('.resource-card').exists()).toBe(true);
-    expect(wrapper.find('.resource-card').text()).not.toContain(plugin.ownerId);
-    expect(
-      wrapper.findAll('button').some((b) => b.text().includes('安装')),
-    ).toBe(true);
-    expect(wrapper.text()).toContain('安装组件尚未就绪');
-  });
-  it('refreshes real installation state and confirms the pinned default version', async () => {
-    const apply = vi.fn(async () => ({}));
-    const wrapper = render({
-      ...connect(fetch),
-      locale: 'zh-CN',
-      memberResources: {
-        list: async () => ({
-          identity,
-          items: [],
-          reportSource: 'member',
-          offline: false,
-        }),
-        apply,
-      },
+      expect(r.init?.headers).toMatchObject({ 'x-auriga-catalog': '1' });
+      expect(w.text()).toContain('applying');
+      expect(w.text()).not.toContain('applied');
     });
-    await flushPromises();
-    expect(wrapper.text()).toContain('未安装');
-    await click(wrapper, '安装 1.0.0');
-    expect(wrapper.text()).toContain('Example plugin 1.0.0');
-    expect(apply).not.toHaveBeenCalled();
-    await click(wrapper, '取消');
-    expect(apply).not.toHaveBeenCalled();
-    await click(wrapper, '查看详情');
-    expect(wrapper.find('details').text()).toContain(plugin.ownerId);
-    expect(wrapper.text()).toContain('签名');
+    it('shows manifest metadata and npm identity without old levels', async () => {
+      const f = fixture(kind);
+      const w = await render(kind, f.fetch);
+      await click(w, 'Select version');
+      expect(w.text()).toContain('Example author');
+      expect(w.text()).toContain('MIT');
+      if (kind === 'plugin')
+        expect(w.text()).toContain('@example/npm-original');
+      expect(w.text()).not.toMatch(/\bL[0-4]\b/);
+    });
+    it.each(['required', 'default', 'optional'])(
+      'enforces %s controls',
+      async (mode) => {
+        const f = fixture(kind);
+        f.row.resource.installationMode = mode;
+        const w = await render(kind, f.fetch);
+        await click(w, 'My resources');
+        for (const action of ['Disable', 'Remove']) {
+          const b = w.findAll('button').find((b) => b.text() === action)!;
+          expect((b.element as HTMLButtonElement).disabled).toBe(
+            mode === 'required',
+          );
+        }
+        expect(
+          w.findAll('button').some((b) => b.text().includes('Check source')),
+        ).toBe(kind === 'skill');
+      },
+    );
+    it.each([400, 401, 403, 404, 409, 429, 503])(
+      'clears stale results after HTTP %s',
+      async (status) => {
+        const f = fixture(kind);
+        let fail = false;
+        const w = await render(kind, async (p, i) =>
+          fail ? json({ code: 'common.unavailable' }, status) : f.fetch(p, i),
+        );
+        expect(w.text()).toContain(f.pack.name);
+        fail = true;
+        await click(w, 'Refresh');
+        expect(w.text()).not.toContain(f.pack.name);
+        expect(w.find('[role="alert"]').exists()).toBe(true);
+      },
+    );
+    it('emits native auth recovery on a 401', async () => {
+      const w = await render(kind, async () => json({}, 401));
+      const event = vi.fn();
+      w.element.addEventListener('auriga-auth-required', event);
+      await click(w, 'Refresh');
+      expect(event).toHaveBeenCalled();
+    });
+    it('renders resource and policy names as text', async () => {
+      const f = fixture(kind, {
+        allowPersonalPlugins: false,
+        blockedPersonalPlugins: ['<img src=x onerror=alert(1)>'],
+      });
+      f.pack.name = '<img src=x onerror=alert(1)>';
+      const w = await render(kind, f.fetch);
+      expect(w.find('img').exists()).toBe(false);
+      expect(w.text()).toContain('<img');
+    });
+    it.each([false, true])(
+      'reports policy restart=%s honestly',
+      async (restart) => {
+        const f = fixture(kind, {
+          allowPersonalPlugins: false,
+          blockedPersonalPlugins: ['personal-plugin'],
+          personalPluginPolicyPendingRestart: restart,
+        });
+        const w = await render(kind, f.fetch);
+        expect(w.text()).toContain('personal-plugin');
+        expect(w.text()).toContain(
+          restart ? 'Restart DSH' : 'disabled by organization policy',
+        );
+      },
+    );
+    it('displays an empty personal allowlist restriction', async () => {
+      const f = fixture(kind, { allowPersonalPlugins: false });
+      const w = await render(kind, f.fetch);
+      expect(w.text()).toContain('does not allow personal plugin');
+    });
+    it('requires a guardian for installation', async () => {
+      const f = fixture(kind, { sharedAvailable: false });
+      const w = await render(kind, f.fetch);
+      const b = w.findAll('button').find((b) => b.text() === 'Install 1.0.0')!;
+      expect((b.element as HTMLButtonElement).disabled).toBe(true);
+      expect(w.text()).toContain('guardian');
+    });
+    it('keeps filters across locale and theme changes', async () => {
+      const f = fixture(kind);
+      const w = await render(kind, f.fetch);
+      await w.get('input').setValue('no-match');
+      await w.setProps({
+        context: { ...w.element.context, locale: 'zh-CN', theme: 'dark' },
+      });
+      expect(w.get('input').element.value).toBe('no-match');
+      expect(w.attributes('data-theme')).toBe('dark');
+    });
+    it('keeps prior packages after an empty final page', async () => {
+      const f = fixture(kind);
+      const w = await render(kind, async (p, i) =>
+        p.includes('catalog/packages?')
+          ? json(
+              p.includes('cursor=next')
+                ? { items: [], nextCursor: '' }
+                : { items: [f.pack], nextCursor: 'next' },
+            )
+          : f.fetch(p, i),
+      );
+      await click(w, 'Load more');
+      expect(w.text()).toContain(f.pack.name);
+      expect(w.findAll('button').some((b) => b.text() === 'Load more')).toBe(
+        false,
+      );
+    });
+    it('refuses repeated page cursors', async () => {
+      const f = fixture(kind);
+      const w = await render(kind, async (p, i) =>
+        p.includes('catalog/packages?')
+          ? json({
+              items: p.includes('cursor=next') ? [] : [f.pack],
+              nextCursor: 'next',
+            })
+          : f.fetch(p, i),
+      );
+      await click(w, 'Load more');
+      expect(w.find('[role="alert"]').exists()).toBe(true);
+    });
+    it('refuses the wrong kind returned by the server', async () => {
+      const f = fixture(kind === 'plugin' ? 'skill' : 'plugin');
+      const w = await render(kind, f.fetch);
+      expect(w.text()).not.toContain(f.pack.name);
+      expect(w.find('[role="alert"]').exists()).toBe(true);
+    });
+    it.each(['withdrawn', 'draft'])('refuses a %s default', async (state) => {
+      const f = fixture(kind);
+      f.version.state = state;
+      const w = await render(kind, f.fetch);
+      const b = w.findAll('button').find((b) => b.text() === 'Install 1.0.0')!;
+      expect((b.element as HTMLButtonElement).disabled).toBe(true);
+    });
+    it('filters mixed installations by real kind', async () => {
+      const f = fixture(kind);
+      const other = fixture(kind === 'plugin' ? 'skill' : 'plugin');
+      const w = await render(kind, async (p, i) =>
+        p === 'catalog/installations'
+          ? json({ items: [f.row, other.row], sharedAvailable: true })
+          : f.fetch(p, i),
+      );
+      await click(w, 'My resources');
+      expect(w.text()).toContain(f.pack.name);
+      expect(w.text()).not.toContain(other.pack.name);
+    });
+    it('cancels a read when the native view disconnects', async () => {
+      let signal: AbortSignal | undefined;
+      const w = await render(kind, async (_p, i) => {
+        signal = i?.signal ?? undefined;
+        return new Promise<Response>(() => {});
+      });
+      w.unmount();
+      expect(signal?.aborted).toBe(true);
+    });
+    it('rejects malformed policy notices', async () => {
+      const f = fixture(kind, { blockedPersonalPlugins: [{ name: 'bad' }] });
+      const w = await render(kind, f.fetch);
+      expect(w.find('[role="alert"]').exists()).toBe(true);
+    });
+    it('uses the catalog in managed mode', async () => {
+      const f = fixture(kind);
+      const old = { list: vi.fn(), apply: vi.fn() };
+      const w = await render(kind, f.fetch, {
+        mode: 'managed',
+        memberResources: old,
+      });
+      expect(w.text()).toContain(f.pack.name);
+      expect(old.list).not.toHaveBeenCalled();
+    });
+    it('presents cached restrictions while the platform is offline', async () => {
+      const f = fixture(kind, {
+        sharedAvailable: false,
+        sharedUnavailableReason: 'platform_offline',
+        allowPersonalPlugins: false,
+        blockedPersonalPlugins: ['personal-plugin'],
+      });
+      const w = await render(kind, f.fetch);
+      expect(w.text()).toContain('last authenticated');
+      expect(w.text()).toContain('personal-plugin');
+    });
+    it.each(['Enable', 'Disable', 'Remove'])(
+      'sends a pinned member %s action through the catalog',
+      async (label) => {
+        const f = fixture(kind);
+        const w = await render(kind, f.fetch);
+        await click(w, 'My resources');
+        await click(w, label);
+        const request = f.requests.find((r) => r.path === 'catalog/actions')!;
+        expect(JSON.parse(String(request.init?.body))).toMatchObject({
+          packageId: f.pack.id,
+          versionId: f.version.id,
+          revision: 2,
+          action: label.toLowerCase(),
+        });
+      },
+    );
+    it('paginates exact versions while retaining earlier choices', async () => {
+      const f = fixture(kind);
+      const w = await render(kind, async (p, i) =>
+        p.includes('/versions?')
+          ? json(
+              p.includes('cursor=version-next')
+                ? {
+                    items: [{ ...f.version, id: id(6), version: '2.0.0' }],
+                    nextCursor: '',
+                  }
+                : { items: [f.version], nextCursor: 'version-next' },
+            )
+          : f.fetch(p, i),
+      );
+      await click(w, 'Select version');
+      await click(w, 'More versions');
+      expect(w.text()).toContain('1.0.0');
+      expect(w.text()).toContain('2.0.0');
+      expect(
+        w.findAll('button').some((b) => b.text() === 'More versions'),
+      ).toBe(false);
+    });
   });
+it.each([
+  { mode: 'standalone' as const, protocol: 1 },
+  { mode: 'connect' as const, protocol: 2 },
+  { mode: undefined, protocol: 1 },
+])('refuses unsupported context %o without network', async (extra) => {
+  const fetch = vi.fn();
+  const global = vi.fn();
+  vi.stubGlobal('fetch', global);
+  const w = mountPanel({ locale: 'en', fetch, ...extra });
+  wrappers.push(w);
+  await flushPromises();
+  expect(fetch).not.toHaveBeenCalled();
+  expect(global).not.toHaveBeenCalled();
+  expect(w.find('[role="status"]').exists()).toBe(true);
 });

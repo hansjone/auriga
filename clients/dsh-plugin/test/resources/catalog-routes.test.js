@@ -81,21 +81,23 @@ test('catalog mutations require native admission, runtime admission, same-origin
   await native(request(input), rejected);
   assert.equal(rejected.status, 401);
 });
-test('catalog readers pin skill kind and native access token, rejecting arbitrary query and download paths', async (t) => {
+test('catalog readers allow plugin/skill with native access token, rejecting arbitrary query and download paths', async (t) => {
   const f = catalogFixture(t);
   let calls = 0;
   const route = catalogRoutes({
     ...f,
     fetchImpl: async (url, init) => {
       calls++;
-      assert.equal(url.searchParams.get('kind'), 'skill');
+      assert.ok(
+        [null, 'skill', 'plugin'].includes(url.searchParams.get('kind')),
+      );
       assert.equal(init.headers.authorization, 'Bearer fixture-token');
       assert.equal(init.headers.cookie, undefined);
       return Response.json({ items: [] });
     },
   });
   for (const path of [
-    'packages?kind=plugin',
+    'packages?kind=tool',
     'packages?root=C:/evil',
     'packages?limit=201',
     'packages?cursor=x&cursor=y',
@@ -121,4 +123,17 @@ test('catalog readers pin skill kind and native access token, rejecting arbitrar
   );
   assert.equal(res.status, 200);
   assert.equal(calls, 1);
+  for (const kind of ['plugin', 'skill']) {
+    const selected = response();
+    await route(
+      {
+        method: 'GET',
+        url: '/auriga/resources/catalog/packages?kind=' + kind,
+        headers: {},
+      },
+      selected,
+    );
+    assert.equal(selected.status, 200);
+  }
+  assert.equal(calls, 3);
 });

@@ -68,6 +68,9 @@ export class Supervisor {
       time: options.time,
       stopTree: () => tree.stopTree(),
       isStopped: () => tree.isStopped(),
+      clearPlugins: options.clearPlugins,
+      pluginsCleared: options.pluginsCleared,
+      trust: () => this.trust,
     });
     this.watermarks = join(this.guardian.directory, 'high-watermarks.json');
     this.startedAt = this.now();
