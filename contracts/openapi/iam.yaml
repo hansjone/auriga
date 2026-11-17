@@ -32,6 +32,24 @@ tags:
   - name: admin-keys
   - name: admin-session
 paths:
+  /me/desktop-report:
+    post:
+      tags: [me]
+      operationId: reportDesktopDevice
+      summary: Report the authenticated device installation and last update result
+      description: Platform device Bearer only, using the same authoritative identity/source checks as device-session. No device/account/tenant selectors. At most 30 requests per device per five minutes. Sequence is monotonic within installationId, stale retries are ignored and inconsistent same-sequence payloads return 409. Contains bounded installation facts and fixed reason codes only. Reported time is server assigned.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/DesktopDeviceReport' }
+      responses:
+        '204': { description: Recorded or already accepted }
+        '400': { $ref: 'common.yaml#/components/responses/BadRequest' }
+        '401': { $ref: 'common.yaml#/components/responses/Unauthenticated' }
+        '403': { $ref: 'common.yaml#/components/responses/Forbidden' }
+        '409': { $ref: 'common.yaml#/components/responses/Conflict' }
+        '429': { $ref: 'common.yaml#/components/responses/RateLimited' }
   /me/device-profile:
     get:
       tags: [me]
@@ -2503,6 +2521,35 @@ components:
         items: { type: array, items: { $ref: '#/components/schemas/CredentialMetadata' } }
         serviceMetadataAvailable: { type: boolean, description: Whether service and node credential metadata is connected }
         sourceGaps: { type: array, items: { $ref: '#/components/schemas/CredentialSourceGap' } }
+    DesktopDeviceReport:
+      type: object
+      additionalProperties: false
+      required: [installationId, sequence, clientVersion, channel]
+      properties:
+        installationId: { type: string, format: uuid }
+        sequence: { type: integer, format: int64, minimum: 1, maximum: 9007199254740991 }
+        clientVersion: { type: string, maxLength: 128, pattern: '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$' }
+        channel: { type: string, enum: [stable, beta] }
+        lastUpdate:
+          type: object
+          additionalProperties: false
+          required: [attemptId, targetVersion, result, stage, reasonCode]
+          properties:
+            attemptId: { type: string, format: uuid }
+            targetVersion: { $ref: '#/components/schemas/DesktopDeviceReport/properties/clientVersion' }
+            result: { type: string, enum: [succeeded, failed, rolled_back] }
+            stage: { type: [string, 'null'], enum: [null, verify-current, verify-release, check-release, verify-input, verify-archive, extract, verify-package, install, profile, smoke, download, verify, installation, copy, verify-copy, commit] }
+            reasonCode: { type: [string, 'null'], enum: [null, updateFailed, ENOENT, ENOTDIR, EBUSY, EPERM, EACCES, ENOTEMPTY, desktop.pending_incomplete, desktop.release_invalid, desktop.release_withdrawn, desktop.release_replaced, desktop.archive_invalid, desktop.package_invalid, desktop.smoke_failed, desktop.extract_failed, desktop.install_cancelled, desktop.in_use] }
+    DesktopDeviceReportSnapshot:
+      type: object
+      required: [installationId, sequence, clientVersion, channel, reportedAt]
+      properties:
+        installationId: { $ref: '#/components/schemas/DesktopDeviceReport/properties/installationId' }
+        sequence: { $ref: '#/components/schemas/DesktopDeviceReport/properties/sequence' }
+        clientVersion: { $ref: '#/components/schemas/DesktopDeviceReport/properties/clientVersion' }
+        channel: { $ref: '#/components/schemas/DesktopDeviceReport/properties/channel' }
+        lastUpdate: { $ref: '#/components/schemas/DesktopDeviceReport/properties/lastUpdate' }
+        reportedAt: { type: string, format: date-time }
     AdminDevicesDevice:
       type: object
       required: [id, accountId, memberName, name, status, online, accessMode]
@@ -2513,6 +2560,7 @@ components:
         name: { type: string }
         platform: { type: string }
         clientVersion: { type: string }
+        desktopReport: { $ref: '#/components/schemas/DesktopDeviceReportSnapshot' }
         createdAt: { type: string }
         lastSeenAt: { type: string }
         lastHeartbeatAt: { type: string, format: date-time, description: Actual client PING/PONG observed on the edge WSS connection; absent until observed }

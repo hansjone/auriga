@@ -20,6 +20,7 @@ import {
 import { Supervisor, packagedTrust } from './supervisor.mjs';
 import { superviseDsh } from './desktop-supervision.mjs';
 import { startShellAuth, registerFallbackLogin } from './shell-auth.mjs';
+import { createDesktopReporter } from './desktop-report.mjs';
 import { assertLocalPath } from './host-lock.mjs';
 import { pathOperationLock, processAlive } from './operation-lock.mjs';
 /**
@@ -1302,7 +1303,7 @@ async function launchLocked({
     packagedTrust(versionDir(root, initial.current)),
   );
   const releaseSingleton = tree.singleton();
-  let session, shellAuth, shellFailure, statusTimer;
+  let session, shellAuth, shellFailure, statusTimer, desktopReporter;
   const hasShell = existsSync(
     join(versionDir(root, initial.current), 'auriga/shell-auth/desktop.mjs'),
   );
@@ -1362,6 +1363,10 @@ async function launchLocked({
         },
       });
     } else shellFailure = 'component_missing';
+    desktopReporter = createDesktopReporter({
+      root,
+      getAuth: () => shellAuth,
+    }).start();
     if (control) {
       let last = '';
       const publish = () => {
@@ -1436,9 +1441,11 @@ async function launchLocked({
     session.child(process.pid);
     report({ event: 'dsh', state: 'stopped' });
     if (status === 0) await apply();
+    void desktopReporter.tick();
     return status;
   } finally {
     clearInterval(statusTimer);
+    desktopReporter?.close();
     try {
       try {
         await shellAuth?.close();

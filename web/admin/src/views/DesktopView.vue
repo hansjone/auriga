@@ -51,6 +51,37 @@ const distribution = computed(() => {
   }
   return [...counts].sort(([a], [b]) => a.localeCompare(b));
 });
+const updateSummary = computed(() => {
+  const result = {
+    reported: 0,
+    updated: 0,
+    pending: 0,
+    unknown: 0,
+    unreported: 0,
+    failed: 0,
+    rolledBack: 0,
+  };
+  for (const device of devices.value ?? []) {
+    if (device.status !== 'active') continue;
+    const report = device.desktopReport;
+    if (!report) {
+      result.unreported++;
+      continue;
+    }
+    result.reported++;
+    const latest = ledger.value?.channels?.[report.channel];
+    if (!latest) result.unknown++;
+    else if (report.clientVersion === latest.version) result.updated++;
+    else result.pending++;
+    if (
+      report.lastUpdate?.result === 'failed' ||
+      report.lastUpdate?.result === 'rolled_back'
+    )
+      result.failed++;
+    if (report.lastUpdate?.result === 'rolled_back') result.rolledBack++;
+  }
+  return result;
+});
 const identityFresh = computed(() => verifiedAt.value > 0);
 function reason(error: unknown) {
   if (!isApiError(error)) return t('desktopServiceError');
@@ -675,8 +706,40 @@ onMounted(async () => {
           {{ deviceError }}
         </p>
         <template v-else-if="devices">
-          <p v-if="!distribution.some(([version]) => version)">
+          <p v-if="!updateSummary.reported">
             {{ t('desktopNoReports') }}
+          </p>
+          <template v-else>
+            <dl class="distribution" data-test="update-summary">
+              <dt>{{ t('desktopUpdatedDevices') }}</dt>
+              <dd data-test="updated">
+                {{ t('desktopDeviceCount', { count: updateSummary.updated }) }}
+              </dd>
+              <dt>{{ t('desktopPendingDevices') }}</dt>
+              <dd data-test="pending">
+                {{ t('desktopDeviceCount', { count: updateSummary.pending }) }}
+              </dd>
+              <dt>{{ t('desktopUnknownTarget') }}</dt>
+              <dd data-test="unknown">
+                {{ t('desktopDeviceCount', { count: updateSummary.unknown }) }}
+              </dd>
+              <dt>{{ t('desktopFailedDevices') }}</dt>
+              <dd data-test="failed">
+                {{ t('desktopDeviceCount', { count: updateSummary.failed }) }}
+              </dd>
+              <dt>{{ t('desktopRolledBackDevices') }}</dt>
+              <dd data-test="rolled-back">
+                {{
+                  t('desktopDeviceCount', { count: updateSummary.rolledBack })
+                }}
+              </dd>
+            </dl>
+            <p class="muted">{{ t('desktopUpdateCountsHelp') }}</p>
+          </template>
+          <p data-test="unreported">
+            {{
+              t('desktopUnreportedDevices', { count: updateSummary.unreported })
+            }}
           </p>
           <dl class="distribution">
             <template v-for="[version, count] in distribution" :key="version"
@@ -685,7 +748,9 @@ onMounted(async () => {
             >
           </dl>
         </template>
-        <p>{{ t('desktopFailureReports') }}</p>
+        <p v-if="deviceAllowed && devices && !updateSummary.reported">
+          {{ t('desktopFailureReports') }}
+        </p>
       </section>
     </template>
   </section>

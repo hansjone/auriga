@@ -146,6 +146,7 @@ public class IamAdminDevices {
             Set.of("native_tx", "manual").contains(mode) ? mode : "unknown");
     for (String key : List.of("platform", "clientVersion", "createdAt", "lastSeenAt", "revokedAt"))
       if (d.has(key)) v.put(key, d.path(key).asString());
+    if (d.has("desktopReport")) v.set("desktopReport", d.path("desktopReport").deepCopy());
     var nodes =
         store
             .networkJdbc()

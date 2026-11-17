@@ -369,3 +369,37 @@ it.each([0, 55, 56, 64, 65, 4194305])(
     wrapper.unmount();
   },
 );
+it('按真实渠道上报统计已更新、未更新、失败和回退，旧登记不冒充上报', async () => {
+  const report = (version: string, channel: string, result?: string) => ({
+    status: 'active',
+    clientVersion: version,
+    desktopReport: {
+      clientVersion: version,
+      channel,
+      ...(result ? { lastUpdate: { result } } : {}),
+    },
+  });
+  api.get.mockImplementation(async (path) =>
+    path.startsWith('/api/iam')
+      ? {
+          items: [
+            report('2.0.0', 'beta', 'succeeded'),
+            report('1.0.0', 'beta', 'failed'),
+            report('1.0.0', 'beta', 'rolled_back'),
+            report('1.0.0', 'stable'),
+            { status: 'active', clientVersion: '0.1.9' },
+            { ...report('1.0.0', 'beta', 'failed'), status: 'revoked' },
+          ],
+        }
+      : { ...ledger, channels: { beta: body } },
+  );
+  const wrapper = view();
+  await flushPromises();
+  expect(wrapper.find('[data-test="updated"]').text()).toContain('1');
+  expect(wrapper.find('[data-test="pending"]').text()).toContain('2');
+  expect(wrapper.find('[data-test="unknown"]').text()).toContain('1');
+  expect(wrapper.find('[data-test="failed"]').text()).toContain('2');
+  expect(wrapper.find('[data-test="rolled-back"]').text()).toContain('1');
+  expect(wrapper.find('[data-test="unreported"]').text()).toContain('1');
+  wrapper.unmount();
+});
