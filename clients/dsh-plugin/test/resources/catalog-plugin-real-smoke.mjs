@@ -111,6 +111,7 @@ async function result(name, timeout = 120000) {
 try {
   control = resourcePluginControl({
     home,
+    trust: () => supervisor.trust,
     profileFile: join(home, 'profiles/web/package.json'),
     remove: (names) => {
       const removed = spawnSync(

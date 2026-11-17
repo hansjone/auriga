@@ -9,6 +9,7 @@ import {
   verifyTrust,
   signedRevocationFact,
   signedRevocations,
+  signedResourceEnvelope,
 } from './resource-trust.mjs';
 
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
@@ -429,7 +430,7 @@ export function verifySnapshot(
 
 /** Names are derived only from digest-bound original manifests, including disabled
  * selections. The launcher uses these names with the public DSH removal command. */
-export function managedPluginNames(home) {
+export function managedPluginNames(home, trust) {
   const names = new Set();
   for (const snapshot of observeLedgers(home)) {
     for (const row of snapshot.ledger.installations) {
@@ -441,6 +442,13 @@ export function managedPluginNames(home) {
       if (
         !schemaValid('package', 'Manifest', manifest) ||
         manifest.kind !== 'plugin' ||
+        !signedResourceEnvelope(r.envelope, trust) ||
+        r.envelope.tenantId !== snapshot.ledger.tenantId ||
+        r.envelope.packageId !== r.identity.packageId ||
+        r.envelope.versionId !== r.identity.versionId ||
+        r.envelope.statement.kind !== manifest.kind ||
+        r.envelope.statement.name !== manifest.name ||
+        r.envelope.statement.version !== manifest.version ||
         manifest.version !== r.identity.version ||
         r.identity.manifestDigest !== r.envelope.statement.manifestDigest
       )

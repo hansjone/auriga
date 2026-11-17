@@ -5,7 +5,7 @@ import { parseStrictJson } from './json.mjs';
 
 /** Launcher-owned profile configuration is public DSH input. Mutations use only
  * `dsh plugin remove`, after the owned DSH tree has stopped. */
-export function resourcePluginControl({ home, profileFile, remove }) {
+export function resourcePluginControl({ home, profileFile, remove, trust }) {
   function dependencies() {
     assertLocalPath(profileFile);
     if (!existsSync(profileFile)) return {};
@@ -22,7 +22,10 @@ export function resourcePluginControl({ home, profileFile, remove }) {
     // With no non-core profile dependencies, no managed plugin can survive even
     // if an unrelated skill ledger is corrupt. Preserve private-only recovery.
     if (Object.keys(deps).every((name) => name === 'auriga-dsh')) return [];
-    return managedPluginNames(home).filter((name) => Object.hasOwn(deps, name));
+    return managedPluginNames(
+      home,
+      typeof trust === 'function' ? trust() : trust,
+    ).filter((name) => Object.hasOwn(deps, name));
   };
   return {
     pluginsCleared: () => installed().length === 0,

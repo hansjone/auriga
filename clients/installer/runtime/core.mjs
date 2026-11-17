@@ -1359,6 +1359,7 @@ async function launchLocked({
     packagedTrust(versionDir(root, initial.current)),
     resourcePluginControl({
       home: initial.dataHome,
+      trust: () => packagedTrust(versionDir(root, readState(root).current)),
       profileFile: join(profileDir(initial.dataHome), 'package.json'),
       remove: (names) => {
         const dir = versionDir(root, readState(root).current);

@@ -6,6 +6,7 @@ import { resourceFixture, id } from './resource-fixture.mjs';
 import { tempBase } from './helpers.mjs';
 import { Supervisor } from '../runtime/supervisor.mjs';
 import { resourcePluginControl } from '../runtime/resource-plugins.mjs';
+import { durableJson } from '../runtime/host-lock.mjs';
 
 test('plugin payload is verified independently without a skill scan and revocation removes it after stopping the host', async (t) => {
   const f = resourceFixture(tempBase(t), Date.now(), 3600000, true);
@@ -25,6 +26,7 @@ test('plugin payload is verified independently without a skill scan and revocati
   profile(false);
   const control = resourcePluginControl({
     home: f.home,
+    trust: f.trust,
     profileFile,
     remove: async (names) => {
       assert.equal(stopped, true);
@@ -96,4 +98,30 @@ test('failed public plugin removal blocks private-only restart', async (t) => {
   );
   assert.equal(supervisor.guardian.read().guardian.state, 'blocked');
   assert.equal(supervisor.guardian.cleared(), false);
+});
+
+test('tampered unsigned cleanup metadata cannot select a public plugin uninstall target', async (t) => {
+  const f = resourceFixture(tempBase(t), Date.now(), 3600000, true);
+  const profileFile = join(f.home, 'profiles/auriga/package.json');
+  mkdirSync(join(profileFile, '..'), { recursive: true });
+  writeFileSync(
+    profileFile,
+    JSON.stringify({
+      dependencies: { '@example/catalog-plugin': 'file:verified.tgz' },
+    }),
+  );
+  f.ref.envelope.signature.value = 'A'.repeat(86);
+  durableJson(join(f.directory, 'ledger.json'), f.ledger);
+  let removed = false;
+  const control = resourcePluginControl({
+    home: f.home,
+    profileFile,
+    trust: f.trust,
+    remove: async () => {
+      removed = true;
+    },
+  });
+  assert.throws(() => control.pluginsCleared(), /plugin manifest binding/);
+  await assert.rejects(control.clearPlugins(), /plugin manifest binding/);
+  assert.equal(removed, false);
 });

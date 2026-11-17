@@ -170,7 +170,7 @@ export class DesktopGuardian {
       (!existsSync(this.current) || readdirSync(this.current).length === 0) &&
       (this.ports.pluginsCleared?.() ??
         (!existsSync(join(this.home, 'profiles')) ||
-          managedPluginNames(this.home).length === 0))
+          managedPluginNames(this.home, this.ports.trust?.()).length === 0))
     );
   }
 
@@ -233,7 +233,7 @@ export class DesktopGuardian {
       await this.ports.stopTree();
       if (!(await this.ports.isStopped()))
         throw new Error('DSH tree still running');
-      const plugins = managedPluginNames(this.home);
+      const plugins = managedPluginNames(this.home, this.ports.trust?.());
       if (plugins.length) {
         if (!this.ports.clearPlugins)
           throw new Error('plugin isolation unavailable');
