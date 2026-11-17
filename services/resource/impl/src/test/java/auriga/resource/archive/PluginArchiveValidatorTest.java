@@ -58,6 +58,7 @@ class PluginArchiveValidatorTest {
         "peer",
         "binding",
         "nestedBinding",
+        "mixedCaseBinding",
         "gypfile",
         "nestedGypfile",
         "onlyBuiltDependencies",
@@ -86,6 +87,7 @@ class PluginArchiveValidatorTest {
       case "peer" -> pkg.putObject("peerDependencies").put("other-host", "*");
       case "binding" -> files.put("package/binding.gyp", "{}");
       case "nestedBinding" -> files.put("package/node_modules/vendored/binding.gyp", "{}");
+      case "mixedCaseBinding" -> files.put("package/node_modules/vendored/BiNdInG.GyP", "{}");
       case "gypfile" -> pkg.put("gypfile", true);
       case "nestedGypfile" -> nested.put("gypfile", true);
       case "onlyBuiltDependencies" ->

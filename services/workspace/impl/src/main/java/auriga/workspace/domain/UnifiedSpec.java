@@ -89,7 +89,14 @@ public final class UnifiedSpec {
             if (previous != null) {
               require(
                   UnifiedResourceIntent.revision(next) > UnifiedResourceIntent.revision(previous));
-              require(next.getReleaseSequence() >= previous.getReleaseSequence());
+              // Only the private authoritative assignment pass can restore a mandatory version
+              // after resource has excluded a removed/unavailable installation from its floor.
+              // Identity rebinding and every ordinary/member selection remain monotonic.
+              require(
+                  next.getReleaseSequence() >= previous.getReleaseSequence()
+                      || supersedingAssignment
+                          && !mode(next).equals("optional")
+                          && !previous.getIdentity().equals(next.getIdentity()));
               if (next.getReleaseSequence() == previous.getReleaseSequence())
                 require(sameBytes(previous, next));
             }
@@ -187,6 +194,34 @@ public final class UnifiedSpec {
     // disable. Ordinary signing/lease renewal still preserves intent and CAS.
     return before.equals(after) && prior == revision && mode(previous).equals(mode(next))
         || before.equals("ENABLED") && after.equals("DISABLED") && revision > prior;
+  }
+
+  /**
+   * Projects only loss of authority onto the last admitted spec, never unchecked ordinary edits.
+   */
+  public static InstanceSpec safetyProjection(InstanceSpec admitted, InstanceSpec candidate) {
+    require(admitted.getInstanceId().equals(candidate.getInstanceId()));
+    require(admitted.getTenantId().equals(candidate.getTenantId()));
+    require(admitted.getOwnerId().equals(candidate.getOwnerId()));
+    var projected = admitted;
+    for (var list : candidate.getResourceRevocationsList())
+      projected = revocations(projected, list, false);
+    var changes = refs(candidate.getUnifiedResourcesList());
+    var next = projected.toBuilder().clearUnifiedResources();
+    for (var old : projected.getUnifiedResourcesList()) {
+      var changed = changes.get(old.getIdentity().getPackageId());
+      if (changed != null && sameBytes(old, changed)) {
+        var one = admitted.toBuilder().clearUnifiedResources().addUnifiedResources(old).build();
+        var stopped = one.toBuilder().setUnifiedResources(0, changed).build();
+        if (safetyChange(one, stopped)) {
+          next.addUnifiedResources(changed);
+          continue;
+        }
+      }
+      next.addUnifiedResources(old);
+    }
+    var result = next.setGeneration(candidate.getGeneration()).build();
+    return safetyChange(admitted, result) ? result : null;
   }
 
   private static String mode(UnifiedResourceRef ref) {

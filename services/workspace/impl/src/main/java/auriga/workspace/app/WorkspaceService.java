@@ -92,6 +92,19 @@ public final class WorkspaceService {
             && spec(row).getSecrets().hasDeviceCredential());
   }
 
+  /** Full specs and restart jobs remain gated; only a separately admitted safety spec may pass. */
+  public InstanceSpec dispatchSpec(Map<String, Object> row) {
+    if (dispatchable(row)) return spec(row);
+    if (!(row.get("catalog_safety_spec") instanceof byte[] bytes)) return null;
+    var safety = new HashMap<String, Object>(row);
+    safety.put("spec", bytes);
+    var projected = spec(safety);
+    safety.put("generation", projected.getGeneration());
+    safety.put("catalog_policy_checked", false);
+    safety.put("catalog_safety_generation", projected.getGeneration());
+    return dispatchable(safety) ? projected : null;
+  }
+
   public WorkspaceService(
       WorkspaceStore store,
       WorkspaceInputs inputs,
@@ -399,7 +412,7 @@ public final class WorkspaceService {
                         assigned.getGeneration(),
                         token)));
         store.jdbc.update(
-            "UPDATE instance SET node_id=?,spec=?,managed_retry_at=?,catalog_safety_generation=NULL WHERE tenant_id=? AND id=?",
+            "UPDATE instance SET node_id=?,spec=?,managed_retry_at=?,catalog_safety_generation=NULL,catalog_admitted_spec=NULL,catalog_safety_spec=NULL WHERE tenant_id=? AND id=?",
             node.get("id"),
             assigned.build().toByteArray(),
             time(clock.instant()),
@@ -437,10 +450,47 @@ public final class WorkspaceService {
   public void saveSafetySpec(Map<String, Object> row, InstanceSpec next) {
     if (!UnifiedSpec.safetyChange(spec(row), next))
       throw new AurigaException(CommonErrors.VALIDATION_FAILED);
-    saveSpec(row, next, false, false);
+    InstanceSpec admitted = null;
+    if (row.get("catalog_admitted_spec") instanceof byte[] bytes) {
+      var snapshot = new HashMap<String, Object>(row);
+      snapshot.put("spec", bytes);
+      admitted = spec(snapshot);
+    }
+    boolean previousAdmitted =
+        Boolean.TRUE.equals(row.get("catalog_policy_checked"))
+            || row.get("catalog_safety_generation") instanceof Number safety
+                && safety.longValue() == ((Number) row.get("generation")).longValue()
+            || admitted != null && admitted.equals(spec(row));
+    if (!previousAdmitted) {
+      var projected = admitted == null ? null : UnifiedSpec.safetyProjection(admitted, next);
+      if (projected == null) {
+        saveSpec(row, next, false, false);
+        return;
+      }
+      // Give the safety-only view its own generation. Later admission must send a newer full view.
+      saveSpec(row, projected, false, false, true);
+      var saved = store.instance((UUID) row.get("id"));
+      byte[] safetyBytes = (byte[]) saved.get("spec");
+      saveSpec(saved, UnifiedSpec.bump(next), false, false);
+      store.jdbc.update(
+          "UPDATE instance SET catalog_admitted_spec=?,catalog_safety_spec=? WHERE tenant_id=? AND id=?",
+          safetyBytes,
+          safetyBytes,
+          store.tenant(),
+          row.get("id"));
+      return;
+    }
+    saveSpec(row, next, false, false, true);
     store.jdbc.update(
-        "UPDATE instance SET catalog_safety_generation=? WHERE tenant_id=? AND id=?",
+        "UPDATE instance SET catalog_safety_generation=?,catalog_admitted_spec=spec,catalog_safety_spec=NULL WHERE tenant_id=? AND id=?",
         next.getGeneration(),
+        store.tenant(),
+        row.get("id"));
+  }
+
+  public void markCatalogChecked(Map<String, Object> row) {
+    store.jdbc.update(
+        "UPDATE instance SET catalog_policy_checked=true,catalog_admitted_spec=spec,catalog_safety_spec=NULL,catalog_safety_generation=NULL WHERE tenant_id=? AND id=?",
         store.tenant(),
         row.get("id"));
   }
@@ -450,7 +500,16 @@ public final class WorkspaceService {
       InstanceSpec next,
       boolean startupDerivative,
       boolean catalogChecked) {
-    if (next.getDesired() == DesiredState.DESIRED_STATE_RUNNING)
+    saveSpec(row, next, startupDerivative, catalogChecked, false);
+  }
+
+  private void saveSpec(
+      Map<String, Object> row,
+      InstanceSpec next,
+      boolean startupDerivative,
+      boolean catalogChecked,
+      boolean safetyOnly) {
+    if (!safetyOnly && next.getDesired() == DesiredState.DESIRED_STATE_RUNNING)
       next =
           next.toBuilder()
               .setAllowPersonalPlugins(allowPersonalPlugins(inputs.policy(store.tenant())))
@@ -529,7 +588,9 @@ public final class WorkspaceService {
         store.tenant(),
         row.get("id"));
     store.jdbc.update(
-        "UPDATE instance SET catalog_policy_checked=?,catalog_safety_generation=NULL WHERE tenant_id=? AND id=?",
+        "UPDATE instance SET catalog_policy_checked=?,catalog_safety_generation=NULL,catalog_admitted_spec=CASE WHEN ? THEN spec ELSE catalog_admitted_spec END,catalog_safety_spec=CASE WHEN ? THEN NULL ELSE catalog_safety_spec END WHERE tenant_id=? AND id=?",
+        catalogChecked,
+        catalogChecked,
         catalogChecked,
         store.tenant(),
         row.get("id"));

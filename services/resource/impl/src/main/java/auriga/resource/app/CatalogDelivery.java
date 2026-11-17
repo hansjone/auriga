@@ -242,7 +242,11 @@ public final class CatalogDelivery implements UnifiedResourceResolution {
           match(etag, rev);
           if (rev == 0 && !action.equals("install")) throw missing();
           var old = rows.isEmpty() ? null : json(rows.getFirst(), "document");
-          policy = CatalogAssignments.atLeast(policy, old == null ? null : old.path("resource"));
+          policy =
+              CatalogAssignments.atLeast(
+                  policy,
+                  old == null ? null : old.path("resource"),
+                  identity -> available(r, identity));
           CatalogAssignments.check(policy, id, number(v, "release_sequence"), action);
           if (Set.of("install", "enable").contains(action)
               && (policy == null || policy.mode().equals("optional"))
@@ -250,6 +254,8 @@ public final class CatalogDelivery implements UnifiedResourceResolution {
             fresh(r, v);
           if (old != null
               && Set.of("install", "enable").contains(action)
+              && !CatalogStatePolicy.desired(old.path("resource")).equals("REMOVED")
+              && available(r, old.path("resource").path("identity"))
               && number(v, "release_sequence")
                   < old.path("resource").path("releaseSequence").asLong()) throw conflict();
           if (old != null
@@ -663,8 +669,12 @@ public final class CatalogDelivery implements UnifiedResourceResolution {
             ? a.errorCode().code()
             : CommonErrors.UNAVAILABLE.code());
     args.put("now", Timestamp.from(clock.instant()));
+    if (!db.rows(
+            "SELECT package_id FROM resource.catalog_assignment_failure WHERE tenant_id=:tenant AND owner_id=:owner AND target_id=:target AND package_id=:pkg AND scope=:scope AND error_code=:error",
+            args)
+        .isEmpty()) return;
     db.update(
-        "INSERT INTO resource.catalog_assignment_failure(tenant_id,owner_id,target_id,package_id,scope,error_code,updated_at) VALUES(:tenant,:owner,:target,:pkg,:scope,:error,:now) ON CONFLICT(tenant_id,owner_id,target_id,package_id,scope) DO UPDATE SET error_code=EXCLUDED.error_code,updated_at=EXCLUDED.updated_at",
+        "INSERT INTO resource.catalog_assignment_failure(tenant_id,owner_id,target_id,package_id,scope,error_code,updated_at) VALUES(:tenant,:owner,:target,:pkg,:scope,:error,:now) ON CONFLICT(tenant_id,owner_id,target_id,package_id,scope) DO UPDATE SET error_code=EXCLUDED.error_code,updated_at=EXCLUDED.updated_at WHERE catalog_assignment_failure.error_code IS DISTINCT FROM EXCLUDED.error_code",
         args);
   }
 
@@ -721,9 +731,7 @@ public final class CatalogDelivery implements UnifiedResourceResolution {
             () -> {
               lock(reader, client, pkg);
               assignmentFailed(reader, client, pkg, "member", failure);
-              return db.update(
-                  "UPDATE resource.catalog_installation SET document=jsonb_set(document,'{state}','\"failed\"'::jsonb) WHERE tenant_id=:tenant AND owner_id=:owner AND client_id=:client AND package_id=:pkg",
-                  db.args("owner", reader.account(), "client", client, "pkg", pkg));
+              return null;
             });
         org.slf4j.LoggerFactory.getLogger(getClass())
             .warn("Catalog assignment reconciliation failed for package {}", pkg);
@@ -750,7 +758,7 @@ public final class CatalogDelivery implements UnifiedResourceResolution {
     var row = rows.isEmpty() ? null : rows.getFirst();
     var old = row == null ? null : (ObjectNode) json(row, "document");
     var previous = old == null ? null : old.path("resource");
-    policy = CatalogAssignments.atLeast(policy, previous);
+    policy = CatalogAssignments.atLeast(policy, previous, identity -> available(reader, identity));
     if (policy == null && old == null) {
       if (update) assignmentRecovered(reader, client, pkg, "member");
       return !update && hasAssignmentFailure(reader, client, pkg, "member");
@@ -769,8 +777,7 @@ public final class CatalogDelivery implements UnifiedResourceResolution {
     if (old != null
         && target.equals(previous.path("identity"))
         && mode.equals(CatalogAssignments.mode(previous))
-        && desired.equals(CatalogStatePolicy.desired(previous))
-        && !old.path("state").asString().equals("failed")) {
+        && desired.equals(CatalogStatePolicy.desired(previous))) {
       if (update) assignmentRecovered(reader, client, pkg, "member");
       return !update && hasAssignmentFailure(reader, client, pkg, "member");
     }
@@ -860,9 +867,13 @@ public final class CatalogDelivery implements UnifiedResourceResolution {
                     : old.getInstallationMode();
             if (old != null) {
               var installed =
-                  JSON.createObjectNode().put("releaseSequence", old.getReleaseSequence());
+                  JSON.createObjectNode()
+                      .put("releaseSequence", old.getReleaseSequence())
+                      .put("desiredState", CatalogStatePolicy.desired(old));
               installed.set("identity", identityFromProto(old.getIdentity()));
-              policy = CatalogAssignments.atLeast(policy, installed);
+              policy =
+                  CatalogAssignments.atLeast(
+                      policy, installed, identity -> available(reader, identity));
             }
             if (policy == null
                 && oldMode.equals("optional")
@@ -1173,7 +1184,10 @@ public final class CatalogDelivery implements UnifiedResourceResolution {
     var resolution = JSON.createObjectNode().put("selectionRevision", revision);
     var resources = resolution.putArray("resources");
     var retained = cloudResources(instance, snapshot.owner(), snapshot.selectionRevision());
-    policies.replaceAll((pkg, policy) -> CatalogAssignments.atLeast(policy, retained.get(pkg)));
+    policies.replaceAll(
+        (pkg, policy) ->
+            CatalogAssignments.atLeast(
+                policy, retained.get(pkg), identity -> available(owner, identity)));
     var requested = new HashSet<UUID>();
     body.path("selections")
         .forEach(item -> requested.add(uuid(item.path("identity"), "packageId")));
@@ -1252,6 +1266,8 @@ public final class CatalogDelivery implements UnifiedResourceResolution {
         resource = ref(owner, v);
         var installed = retained.get(p);
         if (installed != null
+            && !CatalogStatePolicy.desired(installed).equals("REMOVED")
+            && available(owner, installed.path("identity"))
             && resource.path("releaseSequence").asLong()
                 < installed.path("releaseSequence").asLong()) throw conflict();
       } else {

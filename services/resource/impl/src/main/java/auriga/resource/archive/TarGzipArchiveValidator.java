@@ -16,6 +16,8 @@ public final class TarGzipArchiveValidator {
   static final long MAX_EXPANDED = 256L * 1024 * 1024;
   static final int MAX_ENTRIES = 4096;
   static final int MAX_GZIP_HEADER = 65536;
+  static final int MAX_PACKAGE_MANIFESTS = 512;
+  static final long MAX_PACKAGE_METADATA = 16L * 1024 * 1024;
   private static final ErrorCode DIGEST =
       ErrorCode.of("resource.digest_mismatch", 422, Status.Code.INVALID_ARGUMENT);
   private static final ErrorCode STORAGE =
@@ -91,6 +93,7 @@ public final class TarGzipArchiveValidator {
             var inventory = new ArrayList<FileEntry>();
             byte[] manifest = null;
             var packageManifests = new LinkedHashMap<String, byte[]>();
+            long metadataBytes = 0;
             for (var entry = tar.getNextEntry(); entry != null; entry = tar.getNextEntry()) {
               if (npmPackage) {
                 String name = entry.getName();
@@ -114,9 +117,15 @@ public final class TarGzipArchiveValidator {
                       && (path.equals("package.json")
                           || path.equals("package/package.json")
                           || npmPackage && path.endsWith("/package.json"));
-              var captured = packageJson ? new ByteArrayOutputStream() : null;
               if (packageJson && (entry.getSize() > 1048576 || !npmPackage && manifest != null))
                 throw StrictUstarInputStream.bad();
+              if (packageJson) {
+                if (packageManifests.size() >= MAX_PACKAGE_MANIFESTS
+                    || entry.getSize() > MAX_PACKAGE_METADATA - metadataBytes)
+                  throw StrictUstarInputStream.bad();
+                metadataBytes += entry.getSize();
+              }
+              var captured = packageJson ? new ByteArrayOutputStream() : null;
               for (int count; (count = tar.read(bytes)) != -1; ) {
                 size += count;
                 payload += count;

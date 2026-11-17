@@ -18,6 +18,37 @@ import org.junit.jupiter.api.io.TempDir;
 
 class TarGzipArchiveValidatorTest {
   @Test
+  void pluginMetadataCaptureHasAnAggregateCountLimit() throws Exception {
+    var parts = new ArrayList<Part>();
+    for (int i = 0; i < 512; i++)
+      parts.add(
+          new Part("package/node_modules/dep" + i + "/package.json", false, new byte[] {'{', '}'}));
+    var accepted = validator.validatePlugin(TENANT, stage(gzip(tar(parts.toArray(Part[]::new)))));
+    assertEquals(512, accepted.packageManifests().size());
+    parts.add(new Part("package/package.json", false, new byte[] {'{', '}'}));
+    failure(
+        "common.validation_failed",
+        () -> validator.validatePlugin(TENANT, stage(gzip(tar(parts.toArray(Part[]::new))))));
+  }
+
+  @Test
+  void pluginMetadataCaptureHasAnAggregateByteLimit() throws Exception {
+    var parts = new ArrayList<Part>();
+    var random = new Random(42);
+    for (int i = 0; i < 16; i++) {
+      byte[] metadata = new byte[1024 * 1024];
+      random.nextBytes(metadata);
+      parts.add(new Part("package/node_modules/dep" + i + "/package.json", false, metadata));
+    }
+    var accepted = validator.validatePlugin(TENANT, stage(gzip(tar(parts.toArray(Part[]::new)))));
+    assertEquals(16, accepted.packageManifests().size());
+    parts.add(new Part("package/package.json", false, new byte[] {'{', '}'}));
+    failure(
+        "common.validation_failed",
+        () -> validator.validatePlugin(TENANT, stage(gzip(tar(parts.toArray(Part[]::new))))));
+  }
+
+  @Test
   void unsupportedExtensionHeadersExplainTheAcceptedArchiveFormat() throws Exception {
     for (byte flag : new byte[] {'x', 'g', 'L', 'K', 'S'}) {
       byte[] header = header("package/metadata", false, 0);

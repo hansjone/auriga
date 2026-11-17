@@ -329,7 +329,7 @@ class CatalogWorkflowTest {
             assertEquals(installed ? 2 : 1, items.size());
             for (var item : items) {
               boolean failed = item.path("resource").path("identity").equals(identity(bad));
-              assertEquals(failed ? "failed" : "applying", item.path("state").asString());
+              assertEquals("applying", item.path("state").asString());
               assertEquals(
                   failed ? "optional" : "required",
                   item.path("resource").path("installationMode").asString());
@@ -372,6 +372,66 @@ class CatalogWorkflowTest {
                   .installations(actor(GENERAL), client, "skill", 50, null)
                   .path("assignmentFailures")
                   .isEmpty());
+          return null;
+        });
+  }
+
+  @Test
+  void memberFailuresPreserveInstallationAndDoNotRewriteUnchangedFailure() throws Exception {
+    TenantContext.call(
+        TENANT,
+        () -> {
+          var first = upload(false);
+          approvePublish(first);
+          var second = nextSkillVersion(first, "1.1.0");
+          catalog = spy(catalog);
+          doAnswer(
+                  call -> {
+                    Map<String, Object> version = call.getArgument(1);
+                    if (second.version.equals(version.get("id")))
+                      throw new AurigaException(CommonErrors.UNAVAILABLE);
+                    return call.callRealMethod();
+                  })
+              .when(catalog)
+              .envelope(any(), anyMap(), anyLong());
+          var delivery = delivery(null);
+          UUID client = UUID.randomUUID();
+          assign(delivery, first, "member", GENERAL, "default");
+          var original =
+              delivery
+                  .installations(actor(GENERAL), client, "skill", 50, null)
+                  .path("items")
+                  .get(0)
+                  .deepCopy();
+          var upgrade = assign(delivery, second, "member", GENERAL, "default");
+          var failed = delivery.installations(actor(GENERAL), client, "skill", 50, null);
+          assertEquals(
+              original,
+              failed.path("items").get(0),
+              "a transient failure must not mutate installation state or revision");
+          var physical =
+              tx.read(
+                  () ->
+                      db.row(
+                          "SELECT xmin::text AS xid,updated_at,error_code FROM resource.catalog_assignment_failure WHERE tenant_id=:tenant AND target_id=:target AND package_id=:pkg",
+                          db.args("target", client, "pkg", first.pkg)));
+          advance(10);
+          delivery.installations(actor(GENERAL), client, "skill", 50, null);
+          assertEquals(
+              physical,
+              tx.read(
+                  () ->
+                      db.row(
+                          "SELECT xmin::text AS xid,updated_at,error_code FROM resource.catalog_assignment_failure WHERE tenant_id=:tenant AND target_id=:target AND package_id=:pkg",
+                          db.args("target", client, "pkg", first.pkg))),
+              "unchanged failures must not rewrite PostgreSQL rows");
+          delivery.removeAssignment(actor(PUBLISHER), uuid(upgrade, "id"), key(), "\"1\"");
+          var recovered = delivery.installations(actor(GENERAL), client, "skill", 50, null);
+          assertEquals(
+              original,
+              recovered.path("items").get(0),
+              "recovering the original policy must not reinstall unchanged bytes");
+          assertTrue(recovered.path("assignmentFailures").isEmpty());
           return null;
         });
   }
@@ -566,6 +626,154 @@ class CatalogWorkflowTest {
                   "\"" + (currentRevision + 1) + "\"");
           assertEquals(identity(second), enabled.path("resource").path("identity"));
           assertEquals("ENABLED", enabled.path("resource").path("desiredState").asString());
+          return null;
+        });
+  }
+
+  @ParameterizedTest
+  @CsvSource({
+    "false,required,malicious", "true,required,malicious",
+    "false,default,withdrawn", "true,default,withdrawn",
+    "false,required,removed", "true,required,removed",
+    "false,default,removedWithdrawn", "true,default,removedWithdrawn"
+  })
+  void mandatoryRulesRecoverAfterUnavailableHighVersion(boolean cloud, String mode, String scenario)
+      throws Exception {
+    TenantContext.call(
+        TENANT,
+        () -> {
+          var first = upload(false);
+          approvePublish(first);
+          nextSkillVersion(first, "1.1.0");
+          var manifest = (ObjectNode) first.value.path("manifest").deepCopy();
+          manifest.put("version", "1.2.0");
+          byte[] payload =
+              archive(
+                  manifest.path("name").asString(),
+                  "Example",
+                  "Distinct third-version documentation.",
+                  "SKILL.md");
+          ((ObjectNode) manifest.path("artifacts").get(0))
+              .put("digest", CatalogManifest.digest(payload))
+              .put("sizeBytes", payload.length);
+          byte[] raw = manifest.toString().getBytes(StandardCharsets.UTF_8);
+          var uploaded =
+              catalog.upload(
+                  actor(AUTHOR),
+                  first.pkg,
+                  JSON.createObjectNode()
+                      .put("version", "1.2.0")
+                      .put("expectedDigest", CatalogManifest.digest(raw)),
+                  raw,
+                  List.of(new ByteArrayInputStream(payload)),
+                  key(),
+                  etag(catalog.detail(actor(AUTHOR), first.pkg, null, false)));
+          var third = new Upload(first.pkg, uuid(uploaded, "id"), uploaded, raw, payload);
+          approvePublish(third);
+          UUID target = UUID.randomUUID(), node = UUID.randomUUID();
+          var workspace = mock(UnifiedResourceWorkspace.class);
+          when(workspace.snapshot(TENANT, target))
+              .thenReturn(
+                  new UnifiedResourceWorkspace.Snapshot(
+                      target, GENERAL, node, 0, 1, 0, false, List.of(), List.of()));
+          var delivery = delivery(cloud ? workspace : null);
+          long selection = 0;
+          var request =
+              auriga.contracts.resource.v1.ResolveUnifiedResourcesRequest.newBuilder()
+                  .setTenantId(TENANT.toString())
+                  .setOwnerId(GENERAL.toString())
+                  .setInstanceId(target.toString())
+                  .setNodeId(node.toString());
+          if (cloud) {
+            delivery.distribute(
+                actor(PUBLISHER),
+                distributionBody(target, selection(third, "install")),
+                key(),
+                "\"0\"");
+            var initial =
+                delivery.resolve(
+                    request
+                        .setSelectionRevision(1)
+                        .addSelections(CatalogProtocol.selection(selection(third, "install")))
+                        .build());
+            var installed = initial.getResources(0);
+            selection = 1;
+            when(workspace.snapshot(TENANT, target))
+                .thenReturn(
+                    new UnifiedResourceWorkspace.Snapshot(
+                        target,
+                        GENERAL,
+                        node,
+                        selection,
+                        2,
+                        0,
+                        false,
+                        List.of(),
+                        List.of(installed)));
+            if (scenario.startsWith("removed")) {
+              delivery.distribute(
+                  actor(PUBLISHER),
+                  distributionBody(target, selection(third, "remove")),
+                  key(),
+                  "\"1\"");
+              var removal =
+                  delivery.resolve(
+                      request
+                          .clearSelections()
+                          .setSelectionRevision(2)
+                          .addSelections(CatalogProtocol.selection(selection(third, "remove")))
+                          .build());
+              selection = 2;
+              when(workspace.snapshot(TENANT, target))
+                  .thenReturn(
+                      new UnifiedResourceWorkspace.Snapshot(
+                          target,
+                          GENERAL,
+                          node,
+                          selection,
+                          3,
+                          0,
+                          false,
+                          List.of(),
+                          removal.getResourcesList()));
+            }
+          } else {
+            delivery.select(actor(GENERAL), choose(target, third, "install"), key(), "\"0\"");
+            if (scenario.startsWith("removed"))
+              delivery.select(actor(GENERAL), choose(target, third, "remove"), key(), "\"1\"");
+          }
+          // Keep the package enabled independently of v3: withdrawing the current default disables
+          // the entire package, in which case no version is available and recovery is forbidden.
+          nextSkillVersion(first, "1.3.0");
+          assign(delivery, first, cloud ? "instance" : "member", cloud ? target : GENERAL, mode);
+          if (!scenario.equals("removed"))
+            catalog.withdraw(
+                actor(PUBLISHER),
+                third.pkg,
+                third.version,
+                reason().put("mode", scenario.equals("malicious") ? "malicious" : "withdrawn"),
+                key(),
+                etag(catalog.detail(actor(AUTHOR), third.pkg, third.version, false)));
+          if (cloud) {
+            var restored =
+                delivery.resolve(
+                    request
+                        .clearSelections()
+                        .setSelectionRevision(selection)
+                        .setSynchronizeAssignments(true)
+                        .build());
+            assertFalse(restored.getAssignmentRetryRequired());
+            assertEquals(identity(first), identityFromRef(restored.getResources(0)));
+            assertEquals(mode, restored.getResources(0).getInstallationMode());
+            assertEquals("ENABLED", CatalogStatePolicy.desired(restored.getResources(0)));
+          } else {
+            var page = delivery.installations(actor(GENERAL), target, "skill", 50, null);
+            assertTrue(page.path("assignmentFailures").isEmpty());
+            var resource = page.path("items").get(0).path("resource");
+            assertEquals(identity(first), resource.path("identity"));
+            assertEquals(mode, resource.path("installationMode").asString());
+            assertEquals("ENABLED", resource.path("desiredState").asString());
+          }
           return null;
         });
   }

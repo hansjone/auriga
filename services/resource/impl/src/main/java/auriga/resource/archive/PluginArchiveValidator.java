@@ -19,8 +19,8 @@ public final class PluginArchiveValidator {
     var result = new TarGzipArchiveValidator(store).validatePlugin(tenant, stage);
     var files = new HashSet<String>();
     for (var entry : result.inventory()) {
-      if (!entry.path().startsWith("package/") || entry.path().endsWith("/binding.gyp"))
-        throw invalid();
+      if (!entry.path().startsWith("package/")
+          || entry.path().toLowerCase(Locale.ROOT).endsWith("/binding.gyp")) throw invalid();
       files.add(entry.path());
     }
     if (result.packageManifest() == null || !files.contains("package/package.json"))

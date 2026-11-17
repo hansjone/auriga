@@ -59,11 +59,14 @@ final class CatalogAssignments {
     return mode;
   }
 
-  static Effective atLeast(Effective policy, JsonNode installed) {
+  static Effective atLeast(
+      Effective policy, JsonNode installed, java.util.function.Predicate<JsonNode> available) {
     if (policy == null
         || policy.mode.equals("optional")
         || installed == null
-        || installed.path("releaseSequence").asLong() <= policy.sequence) return policy;
+        || installed.path("releaseSequence").asLong() <= policy.sequence
+        || CatalogStatePolicy.desired(installed).equals("REMOVED")
+        || !available.test(installed.path("identity"))) return policy;
     return new Effective(
         (ObjectNode) installed.path("identity").deepCopy(),
         policy.mode,

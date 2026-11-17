@@ -11,7 +11,7 @@ import org.junit.jupiter.api.Test;
 
 class UnifiedSpecTest {
   @Test
-  void trustedAssignmentMaySupersedeAnUnappliedRevisionButCannotLowerReleaseSequence() {
+  void trustedAssignmentMaySupersedeAnUnappliedRevisionButCannotRebindIdentitySequence() {
     var installed = empty.toBuilder().addUnifiedResources(ref).build();
     var next = ref.toBuilder().setInstallationMode("required").setInstallationRevision(2).build();
     var selection = UnifiedSelection.newBuilder().setIdentity(id).setAction("install").build();
@@ -32,6 +32,39 @@ class UnifiedSpecTest {
                 resolution(3, next.toBuilder().setReleaseSequence(6).build()),
                 false,
                 true));
+  }
+
+  @Test
+  void authoritativeAssignmentCanRestoreAnUnavailableMandatoryVersionOnly() {
+    var installed = empty.toBuilder().addUnifiedResources(ref).build();
+    var previousVersion =
+        id.toBuilder().setVersionId("previous-version").setVersion("0.9.0").build();
+    var restored =
+        ref.toBuilder()
+            .setIdentity(previousVersion)
+            .setReleaseSequence(6)
+            .setInstallationMode("required")
+            .setInstallationRevision(2)
+            .build();
+    var selection =
+        UnifiedSelection.newBuilder().setIdentity(previousVersion).setAction("install").build();
+    assertThrows(
+        AurigaException.class,
+        () -> UnifiedSpec.apply(installed, 2, List.of(selection), resolution(2, restored), false));
+    assertThrows(
+        AurigaException.class,
+        () ->
+            UnifiedSpec.apply(
+                installed,
+                2,
+                List.of(selection),
+                resolution(2, restored.toBuilder().setInstallationMode("optional").build()),
+                false,
+                true));
+    assertEquals(
+        restored,
+        UnifiedSpec.apply(installed, 2, List.of(selection), resolution(2, restored), false, true)
+            .getUnifiedResources(0));
   }
 
   @Test

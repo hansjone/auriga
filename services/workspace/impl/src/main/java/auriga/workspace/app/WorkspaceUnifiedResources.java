@@ -497,11 +497,7 @@ public final class WorkspaceUnifiedResources implements EventHandler, AutoClosea
                             || Boolean.TRUE.equals(current.get("catalog_policy_checked")))
                           service.saveCatalogSpec(current, updated);
                         else service.saveSpec(current, updated);
-                      } else if (synchronizeAssignments)
-                        service.store.jdbc.update(
-                            "UPDATE instance SET catalog_policy_checked=true WHERE tenant_id=? AND id=?",
-                            tenant,
-                            current.get("id"));
+                      } else if (synchronizeAssignments) service.markCatalogChecked(current);
                       return true;
                     });
             } catch (Exception e) {

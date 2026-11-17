@@ -121,13 +121,13 @@ L0 核心插件随客户端安装包和云端镜像发布，由部署配置控�
 
 管理员在统一 assignments 接口指定精确 identity、scope（tenant/member/group/instance）、targetId 和 installationMode。tenant 的 targetId 必须等于认证租户，其余目标必须在当前租户内有效。规则变更通过事务 outbox 发送 resource.catalog_assignment_changed。各目标成员仍须实时满足包可见性与读权限。tenant 规则要求 tenant 可见包，group 规则不能扩大包的组范围，成员/实例规则核对当前成员及实例 owner。分发不授予额外可见性。
 
-同一成员命中多条规则时 installationMode 取 required > default > optional。required/default 表示版本下限，强制版本 = max(命中的 required/default 规则版本, 该成员/实例已装版本的高水位)，按 releaseSequence 比较。optional 不参与强制版本计算，同序号以规则 ID 确定稳定顺序。常规对账不产生隐式降级。显式降级沿既有 UnifiedDowngradeAuthorization 独立签名通道，精确绑定 identity、instanceId、from/toReleaseSequence，授权最长10分钟并单次消费，节点独立验签且保留高水位。本期不新增降级界面。规则删除和版本撤销会从强制集合中排除相应规则。规则删除后仍可用的既有安装转为 optional 并保留启用选择，成员可自行卸载；原强制版本已撤销、下架或失去可见性时产生移除意图，已运行内容仍执行既有撤销停用流程。成员可选择不低于强制高水位的已发布版本，不能改变分发方式。
+同一成员命中多条规则时 installationMode 取 required > default > optional。required/default 表示版本下限，强制版本 = max(命中的 required/default 规则版本, 该成员/实例仍在安装且仍可用版本的高水位)，按 releaseSequence 比较。REMOVED 安装及已撤销、下架或失去可见性的版本不参与此目录下限；这些版本回落到仍可用规则版本是强制集合恢复，不算目录对账的隐式降级。optional 不参与强制版本计算，同序号以规则 ID 确定稳定顺序。仍可用、未移除的高版本不得被规则隐式降低。显式降级沿既有 UnifiedDowngradeAuthorization 独立签名通道，精确绑定 identity、instanceId、from/toReleaseSequence，授权最长10分钟并单次消费，节点独立验签且保留高水位。本期不新增降级界面。规则删除和版本撤销会从强制集合中排除相应规则。规则删除后仍可用的既有安装转为 optional 并保留启用选择，成员可自行卸载；不存在可用规则版本时，原强制版本已撤销、下架或失去可见性产生移除意图，已运行内容仍执行既有撤销停用流程。成员可选择不低于强制高水位的已发布版本，不能改变分发方式。
 
 成员列举安装记录时对账 required/default 集合。required 始终启用，default 保留成员已关闭的状态，optional 不自动安装。关闭 required 或卸载 required/default 返回 resource.installation_required，选择低于强制高水位返回 resource.distribution_locked。安装修订随版本、意图或方式改变递增，重试保持同一代次。
 
 成员安装列表先无锁读，仅对确需变更的包按成员/客户端/包独立事务写入，沿包行先于安装行的锁顺序。单包失败记录 catalog_assignment_failure，既有安装标为 failed，列表以 assignmentFailures 暴露逐包错误，其余包继续并可独立恢复。云端部分失败通过 assignment_retry_required 单独重试，完成的目录门禁仍可放行其他包与规格。规则变更会取代旧 pending 计划，可信规则全量对账可跨过被取代的 selectionRevision，普通增量意图仍按连续修订执行。
 
-撤销、下架及失去可见性的既有项产生安全停用和 remove 意图，停用后的 optional 项仍继续对账撤销移除。只改变既有资源执行权限和撤销清单的安全规格，通过按代次保存的 catalog_safety_generation 优先下发，避免 V14 对账门禁扣住安全操作。普通规格更新重新核对目录策略。
+撤销、下架及失去可见性的既有项产生安全停用和 remove 意图，停用后的 optional 项仍继续对账撤销移除。只有前代已核对，或前代本身是已获准下发的安全代次，才允许整份安全规格通过 catalog_safety_generation 旁路。若普通运行时、配置或资源变更仍未核对，只以最后获准规格为基础投影撤销清单与相同签名字节的停用/移除，单独分配安全代次下发；完整候选规格保留更高代次并继续受门禁约束，无已获准基础时不下发未核对内容。普通规格更新重新核对目录策略。逐包对账失败只保存在 catalog_assignment_failure，不改既有安装文档、状态或修订；相同错误不重复写失败记录，错误变化才更新，恢复后清除。
 
 workspace 对所有已分配实例对账，包括空资源的新实例。创建、普通规格更新和规则事件会要求重新对账，运行规格在对账完成后才下发。对账沿可信资源解析端口产生精确分发意图，保留 installationRevision、selectionRevision、generation 和方式。租约更新不改变选择字节。allowPersonalPlugins 对策略对象或字段缺省统一取契约默认 true，显式 false 生效。allowPersonalPlugins 通过成员安装列表和实例规格下发，客户端与云端执行由第二期接线。
 
@@ -135,7 +135,7 @@ workspace 对所有已分配实例对账，包括空资源的新实例。创建�
 
 plugin 段含 packageName（保留 npm 原名，含 `@scope/name`）和 dshVersionRange。目录 name 与 npm 名分离，version 为严格 SemVer。唯一 payload 是 `npm pack`/`pnpm pack` 产出的 .tgz，mediaType=application/gzip、os/arch=any。归档必须包含 `package/package.json`，其 name/version 精确匹配 plugin.packageName/manifest.version；如有 engines.dsh，须与 dshVersionRange 一致。
 
-压缩上限64 MiB、解压256 MiB、4096条目、压缩比100，沿安全路径、规范化碰撞和流式预算规则；拒绝穿越、符号/硬链接、设备和重复条目。不执行 npm 或安装脚本，仅接受 POSIX ustar，不接受 PAX/GNU 扩展头与 sparse 条目，打包方须使用此子集。格式错误返回 common.validation_failed，附 archiveFormat=POSIX ustar 和 unsupportedExtensions=[PAX,GNU,sparse]。服务端与客户端以此节为归档规则说明。任意层级 package.json 不得声明非空 scripts，依赖及 optionalDependencies 必须列入 bundledDependencies/bundleDependencies（或 true）且在同层 node_modules/<dep>/package.json 实际存在。peerDependencies 仅允许 @deepseek-ai/dsh 或 @deepseek-ai/dsh-*。服务端另拒绝任意层级 binding.gyp、gypfile 及 pnpm.onlyBuiltDependencies/allowBuilds/onlyBuiltDependenciesFile/dangerouslyAllowAllBuilds 构建声明。根 dsh.bundle.patch 必须是归档内实际存在的安全相对文件，npm 包名和作用域禁止以 . 或 _ 开头。插件包含可执行代码，最低 R2；R2/R3 至少两名不同非作者且含一名当前仍具安全审核资格者，发布重新核对，作者不得自审自发。
+压缩上限64 MiB、解压256 MiB、4096条目、压缩比100，沿安全路径、规范化碰撞和流式预算规则；拒绝穿越、符号/硬链接、设备和重复条目。不执行 npm 或安装脚本，仅接受 POSIX ustar，不接受 PAX/GNU 扩展头与 sparse 条目，打包方须使用此子集。格式错误返回 common.validation_failed，附 archiveFormat=POSIX ustar 和 unsupportedExtensions=[PAX,GNU,sparse]。服务端与客户端以此节为归档规则说明。任意层级 package.json 不得声明非空 scripts，依赖及 optionalDependencies 必须列入 bundledDependencies/bundleDependencies（或 true）且在同层 node_modules/<dep>/package.json 实际存在。peerDependencies 仅允许 @deepseek-ai/dsh 或 @deepseek-ai/dsh-*。package.json 每份最多1 MiB，所有捕获元数据合计最多16 MiB且最多512份，在分配捕获缓冲前累计检查；此限制避免完整解压预算被元数据常驻内存占满。服务端另拒绝任意层级 binding.gyp（文件名忽略大小写）、gypfile 及 pnpm.onlyBuiltDependencies/allowBuilds/onlyBuiltDependenciesFile/dangerouslyAllowAllBuilds 构建声明。根 dsh.bundle.patch 必须是归档内实际存在的安全相对文件，npm 包名和作用域禁止以 . 或 _ 开头。插件包含可执行代码，最低 R2；R2/R3 至少两名不同非作者且含一名当前仍具安全审核资格者，发布重新核对，作者不得自审自发。
 
 ### v2 签名与成员/云端安装
 

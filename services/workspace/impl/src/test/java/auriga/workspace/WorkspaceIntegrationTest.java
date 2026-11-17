@@ -467,9 +467,197 @@ class WorkspaceIntegrationTest {
       assertFalse(store.in(tenant, () -> service.dispatchable(store.instance(instance))));
       resources.revoke(
           tenant, instance, unifiedReviewRevocations().toBuilder().setRevision(2).build());
-      assertTrue(
+      var revocationDelivery =
+          store.in(tenant, () -> service.dispatchSpec(store.instance(instance)));
+      assertNotNull(
+          revocationDelivery, "revocation delivery cannot wait for assignment reconciliation");
+      assertEquals(2, revocationDelivery.getResourceRevocations(0).getRevision());
+      assertFalse(
           store.in(tenant, () -> service.dispatchable(store.instance(instance))),
-          "revocation delivery cannot wait for assignment reconciliation");
+          "the unchecked full generation remains gated while the safety view is delivered");
+    }
+  }
+
+  @Test
+  void uncheckedOrdinaryUpdateCannotRideSafetyDispatch() throws Exception {
+    new RecoveryControl(tenant);
+    policy.setAllowPersonalPlugins(false);
+    try (var resources =
+        new WorkspaceUnifiedResources(
+            service,
+            inputs,
+            request -> {
+              throw new AurigaException(auriga.common.error.CommonErrors.UNAVAILABLE);
+            },
+            true)) {
+      UUID instance =
+          TenantContext.call(tenant, () -> (UUID) service.open(owner).instance().get("id"));
+      var running = unifiedReviewRef("approved", false);
+      store.in(
+          tenant,
+          () -> {
+            store.lock();
+            var row = store.instance(instance);
+            var approved =
+                UnifiedSpec.bump(
+                    WorkspaceService.spec(row).toBuilder().addUnifiedResources(running).build());
+            service.saveCatalogSpec(row, approved);
+            row = store.instance(instance);
+            policy.setAllowPersonalPlugins(true);
+            var pending =
+                UnifiedSpec.bump(
+                    WorkspaceService.spec(row).toBuilder()
+                        .setDsh(approved.getDsh().toBuilder().setVersion("unreviewed-runtime"))
+                        .addUnifiedResources(unifiedReviewRef("unreviewed-plugin", false))
+                        .build());
+            service.saveSpec(row, pending);
+            row = store.instance(instance);
+            var list = unifiedReviewRevocations().toBuilder().setRevision(2).build();
+            var stopped =
+                running.toBuilder()
+                    .setEnabled(false)
+                    .setInstallationRevision(2)
+                    .setDesiredState(
+                        UnifiedResourceDesiredState.UNIFIED_RESOURCE_DESIRED_STATE_DISABLED)
+                    .build();
+            var safety =
+                UnifiedSpec.bump(
+                    UnifiedSpec.revocations(
+                        WorkspaceService.spec(row).toBuilder()
+                            .setUnifiedResources(0, stopped)
+                            .build(),
+                        list,
+                        false));
+            service.saveSafetySpec(row, safety);
+            row = store.instance(instance);
+            assertFalse(
+                service.dispatchable(row),
+                "the full unchecked runtime and plugin must remain gated after revocation");
+            var dispatched = service.dispatchSpec(row);
+            assertNotNull(
+                dispatched, "revocation must still have a separately dispatchable safety view");
+            assertEquals(approved.getDsh(), dispatched.getDsh());
+            assertFalse(
+                dispatched.getAllowPersonalPlugins(),
+                "unchecked policy updates must not leak into the safety projection");
+            assertEquals(1, dispatched.getUnifiedResourcesCount());
+            assertEquals(stopped, dispatched.getUnifiedResources(0));
+            assertEquals(list, dispatched.getResourceRevocations(0));
+            assertTrue(dispatched.getGeneration() < WorkspaceService.spec(row).getGeneration());
+            assertEquals("unreviewed-runtime", WorkspaceService.spec(row).getDsh().getVersion());
+            var removed =
+                stopped.toBuilder()
+                    .setInstallationRevision(3)
+                    .setDesiredState(
+                        UnifiedResourceDesiredState.UNIFIED_RESOURCE_DESIRED_STATE_REMOVED)
+                    .build();
+            service.saveSafetySpec(
+                row,
+                UnifiedSpec.bump(
+                    WorkspaceService.spec(row).toBuilder()
+                        .setUnifiedResources(0, removed)
+                        .build()));
+            row = store.instance(instance);
+            var removal = service.dispatchSpec(row);
+            assertNotNull(removal);
+            assertEquals(approved.getDsh(), removal.getDsh());
+            assertEquals(List.of(removed), removal.getUnifiedResourcesList());
+            assertTrue(removal.getGeneration() > dispatched.getGeneration());
+            assertFalse(service.dispatchable(row));
+            service.markCatalogChecked(row);
+            row = store.instance(instance);
+            assertTrue(service.dispatchable(row));
+            assertEquals(WorkspaceService.spec(row), service.dispatchSpec(row));
+            assertTrue(
+                service.dispatchSpec(row).getGeneration() > removal.getGeneration(),
+                "normal admission must use a newer generation than the safety-only delivery");
+            assertEquals(2, service.dispatchSpec(row).getUnifiedResourcesCount());
+            return null;
+          });
+    }
+  }
+
+  @Test
+  void safetyOnFreshUncheckedInstanceCannotAdmitOrdinaryContent() throws Exception {
+    new RecoveryControl(tenant);
+    try (var resources =
+        new WorkspaceUnifiedResources(
+            service,
+            inputs,
+            request -> {
+              throw new AurigaException(auriga.common.error.CommonErrors.UNAVAILABLE);
+            },
+            true)) {
+      UUID instance =
+          TenantContext.call(tenant, () -> (UUID) service.open(owner).instance().get("id"));
+      store.in(
+          tenant,
+          () -> {
+            store.lock();
+            var row = store.instance(instance);
+            var safety =
+                UnifiedSpec.revocations(
+                    WorkspaceService.spec(row), unifiedReviewRevocations(), true);
+            service.saveSafetySpec(row, safety);
+            row = store.instance(instance);
+            assertFalse(service.dispatchable(row));
+            assertNull(service.dispatchSpec(row));
+            return null;
+          });
+    }
+  }
+
+  @Test
+  void nodeSessionSendsOnlySafetyProjectionUntilCatalogAdmission() throws Exception {
+    var control = new RecoveryControl(tenant);
+    try (var resources =
+        new WorkspaceUnifiedResources(
+            service,
+            inputs,
+            request -> {
+              throw new AurigaException(auriga.common.error.CommonErrors.UNAVAILABLE);
+            },
+            true)) {
+      UUID instance =
+          TenantContext.call(tenant, () -> (UUID) service.open(owner).instance().get("id"));
+      store.in(
+          tenant,
+          () -> {
+            store.lock();
+            var row = store.instance(instance);
+            service.saveCatalogSpec(row, WorkspaceService.spec(row));
+            row = store.instance(instance);
+            service.saveSpec(
+                row,
+                UnifiedSpec.bump(
+                    WorkspaceService.spec(row).toBuilder()
+                        .putLabels("unreviewed", "pending")
+                        .build()));
+            return null;
+          });
+      resources.revoke(
+          tenant, instance, unifiedReviewRevocations().toBuilder().setRevision(2).build());
+      control.stream.onNext(
+          SessionRequest.newBuilder().setInventory(Inventory.getDefaultInstance()).build());
+      var safety = control.fake.next().getApply().getSpec();
+      assertEquals(instance.toString(), safety.getInstanceId());
+      assertFalse(safety.getLabelsMap().containsKey("unreviewed"));
+      assertEquals(2, safety.getResourceRevocations(0).getRevision());
+      store.in(
+          tenant,
+          () -> {
+            store.lock();
+            var row = store.instance(instance);
+            assertFalse(service.dispatchable(row));
+            assertTrue(WorkspaceService.spec(row).getLabelsMap().containsKey("unreviewed"));
+            service.markCatalogChecked(row);
+            return null;
+          });
+      control.stream.onNext(
+          SessionRequest.newBuilder().setInventory(Inventory.getDefaultInstance()).build());
+      var admitted = control.fake.next().getApply().getSpec();
+      assertEquals("pending", admitted.getLabelsOrThrow("unreviewed"));
+      assertTrue(admitted.getGeneration() > safety.getGeneration());
     }
   }
 
