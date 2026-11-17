@@ -59,6 +59,13 @@ func isolatedGateBuild(args []string) error {
 		return err
 	}
 	defer func() { _ = os.RemoveAll(root) }()
+	// Unix socket paths are limited to roughly 104 bytes. Keep runtime sockets
+	// separate from TMPDIR, which may point deep into a large data disk.
+	runtimeRoot, err := os.MkdirTemp("/run", "auriga-gate-")
+	if err != nil {
+		return fmt.Errorf("创建临时Docker运行目录失败: %w", err)
+	}
+	defer func() { _ = os.RemoveAll(runtimeRoot) }()
 	config := filepath.Join(root, "daemon.json")
 	if err := os.WriteFile(config, []byte("{}\n"), 0600); err != nil {
 		return err
@@ -71,8 +78,8 @@ func isolatedGateBuild(args []string) error {
 	defer func() { _ = log.Close() }()
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Minute)
 	defer cancel()
-	socket := filepath.Join(root, "docker.sock")
-	daemon := exec.CommandContext(ctx, "dockerd", "--config-file", config, "--host", "unix://"+socket, "--data-root", filepath.Join(root, "data"), "--exec-root", filepath.Join(root, "exec"), "--pidfile", filepath.Join(root, "pid"), "--bridge=none", "--iptables=false", "--ip6tables=false", "--ip-forward=false", "--ip-masq=false", "--userland-proxy=false", "--storage-driver=vfs", "--log-level=error")
+	socket := filepath.Join(runtimeRoot, "docker.sock")
+	daemon := exec.CommandContext(ctx, "dockerd", "--config-file", config, "--host", "unix://"+socket, "--data-root", filepath.Join(root, "data"), "--exec-root", filepath.Join(runtimeRoot, "exec"), "--pidfile", filepath.Join(runtimeRoot, "pid"), "--bridge=none", "--iptables=false", "--ip6tables=false", "--ip-forward=false", "--ip-masq=false", "--userland-proxy=false", "--storage-driver=vfs", "--log-level=error")
 	daemon.Stdout = log
 	daemon.Stderr = log
 	setGateProcessGroup(daemon)
