@@ -14,6 +14,7 @@ import {
   pythonUserPaths,
   resetPythonUser,
   pythonUserFailureReason,
+  pythonUserFailureStage,
 } from '../runtime/python-user.mjs';
 
 for (const mode of ['path', 'import']) {
@@ -169,6 +170,18 @@ test('Python diagnostics expose finite reasons and hide paths and credentials', 
     pythonUserFailureReason({ reason: 'private-path credential' }),
     'python_user.unavailable',
   );
+  assert.equal(
+    pythonUserFailureReason(new Error('guardian path alias')),
+    'python_user.path_alias',
+  );
+  assert.equal(
+    pythonUserFailureReason(new Error('guardian path contains a link')),
+    'python_user.path_link',
+  );
+  assert.equal(
+    pythonUserFailureStage({ pythonUserStage: 'private-path credential' }),
+    'unknown',
+  );
   const base = tempBase(t);
   const root = join(base, 'app');
   const home = join(base, 'home');
@@ -210,6 +223,7 @@ test('Python diagnostics expose finite reasons and hide paths and credentials', 
     console.error = previous;
   }
   assert.match(errors.join('\n'), /\[python_user\.invalid_state\]/);
+  assert.match(errors.join('\n'), /\[python_user\.stage_runtime_manifest\]/);
   assert.doesNotMatch(errors.join('\n'), /bad-runtime|\.dev/);
 });
 

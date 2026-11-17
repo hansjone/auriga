@@ -1,6 +1,12 @@
 /** Offscreen smoke: only temporary/staged payloads, no DSH server or desktop UI. */
 import { spawnSync } from 'node:child_process';
-import { existsSync, readFileSync, mkdtempSync, rmSync } from 'node:fs';
+import {
+  existsSync,
+  readFileSync,
+  mkdtempSync,
+  rmSync,
+  realpathSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -120,7 +126,9 @@ function checkDshPython(payload, env) {
 }
 
 function withSmokeHome(payload, check) {
-  const home = mkdtempSync(join(tmpdir(), 'auriga-python-smoke-'));
+  const home = realpathSync.native(
+    mkdtempSync(join(tmpdir(), 'auriga-python-smoke-')),
+  );
   try {
     return check(payload, launchEnv(payload, home));
   } finally {

@@ -6,6 +6,7 @@ import {
   mkdirSync,
   readFileSync,
   writeFileSync,
+  symlinkSync,
 } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
@@ -202,6 +203,30 @@ test(
       offline: true,
     });
     assert.equal(smokePython(payload).result, 'ok');
+    const tempDirectory = join(dirname(payload), 'canonical-temp');
+    const tempAlias = join(dirname(payload), 'temp-alias');
+    mkdirSync(tempDirectory);
+    symlinkSync(tempDirectory, tempAlias, 'junction');
+    const previousTemp = { TEMP: process.env.TEMP, TMP: process.env.TMP };
+    const errors = [];
+    const previousError = console.error;
+    try {
+      process.env.TEMP = tempAlias;
+      process.env.TMP = tempAlias;
+      console.error = (message) => errors.push(message);
+      assert.equal(smokePython(payload).result, 'ok');
+      assert.deepEqual(
+        errors,
+        [],
+        'smoke must prepare the personal environment under aliased TEMP',
+      );
+    } finally {
+      console.error = previousError;
+      for (const [key, value] of Object.entries(previousTemp)) {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      }
+    }
     const runtime = join(payload, 'runtime/python');
     assert.equal(existsSync(join(runtime, 'Lib/ensurepip')), false);
     assert.equal(existsSync(join(runtime, 'py.exe')), false);
