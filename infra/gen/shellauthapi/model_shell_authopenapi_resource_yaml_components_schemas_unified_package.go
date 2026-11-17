@@ -20,7 +20,7 @@ import (
 // checks if the ShellAuthopenapiResourceYamlComponentsSchemasUnifiedPackage type satisfies the MappedNullable interface at compile time
 var _ MappedNullable = &ShellAuthopenapiResourceYamlComponentsSchemasUnifiedPackage{}
 
-// ShellAuthopenapiResourceYamlComponentsSchemasUnifiedPackage Shared L3 unified resource. Legacy plugin governance remains available until its separate contract is implemented.
+// ShellAuthopenapiResourceYamlComponentsSchemasUnifiedPackage Shared unified resource. Installation mode is selected per scoped assignment; packages carry no governance level.
 type ShellAuthopenapiResourceYamlComponentsSchemasUnifiedPackage struct {
 	Id               string         `json:"id"`
 	TenantId         string         `json:"tenantId"`

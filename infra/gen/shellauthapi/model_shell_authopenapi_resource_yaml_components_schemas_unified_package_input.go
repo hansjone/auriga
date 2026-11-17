@@ -19,7 +19,7 @@ import (
 // checks if the ShellAuthopenapiResourceYamlComponentsSchemasUnifiedPackageInput type satisfies the MappedNullable interface at compile time
 var _ MappedNullable = &ShellAuthopenapiResourceYamlComponentsSchemasUnifiedPackageInput{}
 
-// ShellAuthopenapiResourceYamlComponentsSchemasUnifiedPackageInput Shared L3 plugin/skill. Server derives tenant, owner and level. Tool delivery remains gated; legacy IDs are not catalog IDs.
+// ShellAuthopenapiResourceYamlComponentsSchemasUnifiedPackageInput Shared plugin/skill. Server derives tenant and owner. Installation mode belongs to scoped assignments. Tool delivery remains gated; legacy IDs are not catalog IDs.
 type ShellAuthopenapiResourceYamlComponentsSchemasUnifiedPackageInput struct {
 	Name       string   `json:"name" validate:"regexp=^[a-z0-9]+(?:-[a-z0-9]+)*$"`
 	Kind       string   `json:"kind"`

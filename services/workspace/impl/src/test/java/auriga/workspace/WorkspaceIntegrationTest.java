@@ -336,6 +336,7 @@ class WorkspaceIntegrationTest {
                 .setRevocations(unifiedReviewRevocations())
                 .build());
     var instanceId = new java.util.concurrent.atomic.AtomicReference<UUID>();
+    var assignmentCalls = new java.util.concurrent.atomic.AtomicInteger();
     try (var resources =
         new WorkspaceUnifiedResources(
             service,
@@ -345,6 +346,7 @@ class WorkspaceIntegrationTest {
                 throw new AurigaException(auriga.common.error.CommonErrors.UNAVAILABLE);
               assertEquals(tenant.toString(), request.getTenantId());
               assertEquals(owner.toString(), request.getOwnerId());
+              if (request.getSynchronizeAssignments()) assignmentCalls.incrementAndGet();
               if (!request.getSynchronizeAssignments()) {
                 assertEquals(answer.get().getSelectionRevision(), request.getSelectionRevision());
                 assertEquals(answer.get().getSelectionsList(), request.getSelectionsList());
@@ -365,6 +367,15 @@ class WorkspaceIntegrationTest {
       assertFalse(store.in(tenant, () -> service.dispatchable(store.instance(instance))));
       resources.reconcile();
       assertTrue(store.in(tenant, () -> service.dispatchable(store.instance(instance))));
+      int checkedCalls = assignmentCalls.get();
+      policy.setAllowPersonalPlugins(true);
+      resources.reconcile();
+      assertTrue(resources.snapshot(tenant, instance).spec().getAllowPersonalPlugins());
+      assertEquals(checkedCalls, assignmentCalls.get());
+      policy.setAllowPersonalPlugins(false);
+      resources.reconcile();
+      assertFalse(resources.snapshot(tenant, instance).spec().getAllowPersonalPlugins());
+      assertEquals(checkedCalls, assignmentCalls.get());
       assertThrows(
           AurigaException.class,
           () -> resources.apply(tenant, instance, UUID.randomUUID(), 2, List.of(install)));
@@ -375,7 +386,8 @@ class WorkspaceIntegrationTest {
           () ->
               store.tx(
                   () -> {
-                    service.saveSpec(store.instance(instance), UnifiedSpec.bump(first));
+                    var row = store.instance(instance);
+                    service.saveSpec(row, UnifiedSpec.bump(WorkspaceService.spec(row)));
                     return null;
                   }));
       assertFalse(store.in(tenant, () -> service.dispatchable(store.instance(instance))));

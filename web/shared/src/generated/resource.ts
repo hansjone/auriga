@@ -1414,7 +1414,7 @@ export interface components {
       | components['schemas']['SkillManifest']
       | components['schemas']['ToolManifest'];
     UnifiedEnvelope: components['schemas']['Envelope'];
-    /** @description Shared L3 plugin/skill. Server derives tenant, owner and level. Tool delivery remains gated; legacy IDs are not catalog IDs. */
+    /** @description Shared plugin/skill. Server derives tenant and owner. Installation mode belongs to scoped assignments. Tool delivery remains gated; legacy IDs are not catalog IDs. */
     UnifiedPackageInput: {
       name: string;
       /** @enum {string} */
@@ -1423,7 +1423,7 @@ export interface components {
       visibility: 'tenant' | 'members' | 'groups';
       groupIds?: string[];
     };
-    /** @description Shared L3 unified resource. Legacy plugin governance remains available until its separate contract is implemented. */
+    /** @description Shared unified resource. Installation mode is selected per scoped assignment; packages carry no governance level. */
     UnifiedPackage: {
       /** Format: uuid */
       id: string;

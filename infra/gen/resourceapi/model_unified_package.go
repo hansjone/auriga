@@ -20,7 +20,7 @@ import (
 // checks if the UnifiedPackage type satisfies the MappedNullable interface at compile time
 var _ MappedNullable = &UnifiedPackage{}
 
-// UnifiedPackage Shared L3 unified resource. Legacy plugin governance remains available until its separate contract is implemented.
+// UnifiedPackage Shared unified resource. Installation mode is selected per scoped assignment; packages carry no governance level.
 type UnifiedPackage struct {
 	Id               string         `json:"id"`
 	TenantId         string         `json:"tenantId"`

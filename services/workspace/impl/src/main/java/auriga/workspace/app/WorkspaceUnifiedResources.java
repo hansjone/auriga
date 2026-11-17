@@ -282,7 +282,12 @@ public final class WorkspaceUnifiedResources implements EventHandler, AutoClosea
           var base =
               old.toBuilder().clearUnifiedResources().addAllUnifiedResources(retained).build();
           var next = UnifiedSpec.apply(base, selectionRevision, List.of(), renewal.build(), true);
-          if (!next.equals(old)) service.saveSpec(row, UnifiedSpec.bump(next));
+          if (!next.equals(old)) {
+            var updated = UnifiedSpec.bump(next);
+            if (Boolean.TRUE.equals(row.get("catalog_policy_checked"))
+                && !UnifiedSpec.executionChanged(old, next)) service.saveCatalogSpec(row, updated);
+            else service.saveSpec(row, updated);
+          }
           service.store.jdbc.update(
               "UPDATE instance SET unified_refresh_pending=false WHERE tenant_id=? AND id=?",
               tenant,
@@ -418,51 +423,61 @@ public final class WorkspaceUnifiedResources implements EventHandler, AutoClosea
           if (row.get("node_id") == null) continue;
           if (assignmentPolicies) {
             try {
-              var plan =
-                  TenantContext.call(
+              boolean synchronizeAssignments =
+                  !Boolean.TRUE.equals(row.get("catalog_policy_checked"));
+              if (synchronizeAssignments) {
+                var plan =
+                    TenantContext.call(
+                        tenant,
+                        () ->
+                            resolver.apply(
+                                ResolveUnifiedResourcesRequest.newBuilder()
+                                    .setTenantId(tenant.toString())
+                                    .setOwnerId(spec.getOwnerId())
+                                    .setInstanceId(spec.getInstanceId())
+                                    .setNodeId(row.get("node_id").toString())
+                                    .setSelectionRevision(spec.getResourceSelectionRevision())
+                                    .setSynchronizeAssignments(true)
+                                    .build()));
+                if (plan.getSelectionRevision() > spec.getResourceSelectionRevision()) {
+                  apply(
                       tenant,
-                      () ->
-                          resolver.apply(
-                              ResolveUnifiedResourcesRequest.newBuilder()
-                                  .setTenantId(tenant.toString())
-                                  .setOwnerId(spec.getOwnerId())
-                                  .setInstanceId(spec.getInstanceId())
-                                  .setNodeId(row.get("node_id").toString())
-                                  .setSelectionRevision(spec.getResourceSelectionRevision())
-                                  .setSynchronizeAssignments(true)
-                                  .build()));
-              if (plan.getSelectionRevision() > spec.getResourceSelectionRevision()) {
-                apply(
-                    tenant,
-                    (UUID) row.get("id"),
-                    (UUID) row.get("owner_id"),
-                    plan.getSelectionRevision(),
-                    plan.getSelectionsList());
-                continue;
+                      (UUID) row.get("id"),
+                      (UUID) row.get("owner_id"),
+                      plan.getSelectionRevision(),
+                      plan.getSelectionsList());
+                  continue;
+                }
+                if (plan.getSelectionRevision() != spec.getResourceSelectionRevision())
+                  throw new AurigaException(CommonErrors.CONFLICT);
               }
-              if (plan.getSelectionRevision() != spec.getResourceSelectionRevision())
-                throw new AurigaException(CommonErrors.CONFLICT);
-              service.store.in(
-                  tenant,
-                  () -> {
-                    service.store.lock();
-                    var current = service.store.instance((UUID) row.get("id"));
-                    var before = WorkspaceService.spec(current);
-                    if (before.getGeneration() != spec.getGeneration()
-                        || !Objects.equals(current.get("node_id"), row.get("node_id")))
-                      throw new AurigaException(CommonErrors.CONFLICT);
-                    boolean personal =
-                        Boolean.TRUE.equals(inputs.policy(tenant).getAllowPersonalPlugins());
-                    var next = before.toBuilder().setAllowPersonalPlugins(personal).build();
-                    if (!next.equals(before))
-                      service.saveCatalogSpec(current, UnifiedSpec.bump(next));
-                    else
-                      service.store.jdbc.update(
-                          "UPDATE instance SET catalog_policy_checked=true WHERE tenant_id=? AND id=?",
-                          tenant,
-                          current.get("id"));
-                    return true;
-                  });
+              boolean personal = WorkspaceService.allowPersonalPlugins(inputs.policy(tenant));
+              if (synchronizeAssignments
+                  || !spec.hasAllowPersonalPlugins()
+                  || spec.getAllowPersonalPlugins() != personal)
+                service.store.in(
+                    tenant,
+                    () -> {
+                      service.store.lock();
+                      var current = service.store.instance((UUID) row.get("id"));
+                      var before = WorkspaceService.spec(current);
+                      if (before.getGeneration() != spec.getGeneration()
+                          || !Objects.equals(current.get("node_id"), row.get("node_id")))
+                        throw new AurigaException(CommonErrors.CONFLICT);
+                      var next = before.toBuilder().setAllowPersonalPlugins(personal).build();
+                      if (!next.equals(before)) {
+                        var updated = UnifiedSpec.bump(next);
+                        if (synchronizeAssignments
+                            || Boolean.TRUE.equals(current.get("catalog_policy_checked")))
+                          service.saveCatalogSpec(current, updated);
+                        else service.saveSpec(current, updated);
+                      } else if (synchronizeAssignments)
+                        service.store.jdbc.update(
+                            "UPDATE instance SET catalog_policy_checked=true WHERE tenant_id=? AND id=?",
+                            tenant,
+                            current.get("id"));
+                      return true;
+                    });
             } catch (Exception e) {
               org.slf4j.LoggerFactory.getLogger(getClass())
                   .warn("Unified assignment reconciliation deferred");

@@ -16,6 +16,21 @@ const check = (file, name, value) =>
   ajv.getSchema(
     new URL(`resource/${file}.schema.json`, root).href + '#/$defs/' + name,
   )(value);
+
+test('catalog package descriptions define assignment-scoped governance', () => {
+  const spec = parseYaml(
+    readFileSync(new URL('openapi/resource.yaml', root), 'utf8'),
+  );
+  for (const name of ['UnifiedPackageInput', 'UnifiedPackage']) {
+    const definition = spec.components.schemas[name];
+    assert.match(definition.description, /scoped assignment/);
+    assert.doesNotMatch(
+      definition.description,
+      /\bL[0-4]\b|legacy plugin governance remains/i,
+    );
+    assert.equal(definition.properties.level, undefined);
+  }
+});
 const vectors = read('resource/unified-vectors.json');
 const canon = (value) => JSON.stringify(value);
 import { evaluateVector } from '../../services/contracts/scripts/unified-vector-runner.mjs';

@@ -11,6 +11,7 @@ import auriga.common.security.AurigaPrincipal;
 import auriga.contracts.node.v1.*;
 import auriga.contracts.org.v1.InstanceQuota;
 import auriga.contracts.org.v1.MemberStatus;
+import auriga.org.web.model.WorkspacePolicy;
 import auriga.workspace.api.WorkspaceInputs;
 import auriga.workspace.domain.*;
 import auriga.workspace.persistence.WorkspaceStore;
@@ -36,6 +37,11 @@ public final class WorkspaceService {
   static final Duration DONE_WAKE_RETENTION = Duration.ofDays(1);
 
   public static final JsonMapper JSON = JsonMapper.builder().build();
+
+  static boolean allowPersonalPlugins(WorkspacePolicy policy) {
+    return policy == null || !Boolean.FALSE.equals(policy.getAllowPersonalPlugins());
+  }
+
   public final WorkspaceStore store;
   private final WorkspaceInputs inputs;
   public final WorkspaceTemplates templates;
@@ -241,7 +247,7 @@ public final class WorkspaceService {
                   .setTenantId(tenant.toString())
                   .setOwnerId(owner.toString())
                   .setGeneration(1)
-                  .setAllowPersonalPlugins(Boolean.TRUE.equals(policy.getAllowPersonalPlugins()))
+                  .setAllowPersonalPlugins(allowPersonalPlugins(policy))
                   .setResources(resources)
                   .setDesired(DesiredState.DESIRED_STATE_RUNNING)
                   .build();
@@ -433,8 +439,7 @@ public final class WorkspaceService {
     if (next.getDesired() == DesiredState.DESIRED_STATE_RUNNING)
       next =
           next.toBuilder()
-              .setAllowPersonalPlugins(
-                  Boolean.TRUE.equals(inputs.policy(store.tenant()).getAllowPersonalPlugins()))
+              .setAllowPersonalPlugins(allowPersonalPlugins(inputs.policy(store.tenant())))
               .build();
     var previous = spec(row);
     String startupTrace = null;

@@ -1830,7 +1830,7 @@ export interface components {
       /** @enum {string} */
       kind?: 'plugin' | 'skill' | 'tool';
     };
-    /** @description Shared plugin/skill package, tenant and owner derived by the server. Native personal installation follows tenant policy. */
+    /** @description Shared plugin/skill. Server derives tenant and owner. Installation mode belongs to scoped assignments. Tool delivery remains gated; legacy IDs are not catalog IDs. */
     ShellAuthopenapi_resource_yaml_components_schemas_UnifiedPackageInput: {
       name: string;
       /** @enum {string} */
@@ -2646,7 +2646,7 @@ export interface components {
       };
       body: components['schemas']['ShellAuthopenapi_resource_yaml_components_schemas_MemberInstallation'];
     };
-    /** @description Shared plugin/skill package. Installation governance is resolved from scope assignments. */
+    /** @description Shared unified resource. Installation mode is selected per scoped assignment; packages carry no governance level. */
     ShellAuthopenapi_resource_yaml_components_schemas_UnifiedPackage: {
       /** Format: uuid */
       id: string;
