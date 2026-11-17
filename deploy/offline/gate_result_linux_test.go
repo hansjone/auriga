@@ -136,6 +136,9 @@ func TestGateSupervisorCancellationReapsNamespace(t *testing.T) {
 }
 
 func TestGateCancellationDuringResultExtraction(t *testing.T) {
+	if os.Geteuid() != 0 {
+		t.Skip("run as root for the gate supervisor's private /run workspace")
+	}
 	for _, interrupted := range []os.Signal{os.Interrupt, syscall.SIGTERM} {
 		t.Run(interrupted.String(), func(t *testing.T) {
 			root := t.TempDir()
