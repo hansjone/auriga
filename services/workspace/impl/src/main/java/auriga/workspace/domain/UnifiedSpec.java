@@ -10,6 +10,8 @@ public final class UnifiedSpec {
   private UnifiedSpec() {}
 
   public static boolean executionChanged(InstanceSpec before, InstanceSpec after) {
+    if ((before.hasAllowPersonalPlugins() ? before.getAllowPersonalPlugins() : true)
+        != (after.hasAllowPersonalPlugins() ? after.getAllowPersonalPlugins() : true)) return true;
     if (before.getUnifiedResourcesCount() != after.getUnifiedResourcesCount()) return true;
     var prior = refs(before.getUnifiedResourcesList());
     return after.getUnifiedResourcesList().stream()

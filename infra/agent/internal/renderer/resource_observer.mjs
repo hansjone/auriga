@@ -1,11 +1,13 @@
 import { readFileSync } from 'node:fs';
 import { timingSafeEqual } from 'node:crypto';
+import { governPlugins, observePlugins } from './resource_plugins.mjs';
 
 export const name = 'auriga-node-resource-observer';
-export const inject = ['webServer', 'skills', 'sessionController', 'agentPresets'];
+export const inject = ['webServer', 'skills', 'sessionController', 'agentPresets', 'pluginManager'];
 export async function apply(ctx, config) {
   const policy = JSON.parse(readFileSync(config.policyFile, 'utf8'));
   if (policy.schemaVersion !== 1 || typeof policy.newSessionRequired !== 'boolean') throw new Error('Invalid node session policy');
+  if (policy.allowPersonalPlugins !== undefined || policy.plugins?.length) governPlugins(ctx, ctx.pluginManager, policy);
   const permitted = new Set();
   if (policy.newSessionRequired) {
     const controller = ctx.sessionController;
@@ -40,7 +42,8 @@ export async function apply(ctx, config) {
           for (const row of await ctx.skills.list(options)) { const loaded = await ctx.skills.get(row.name, options); skills.push({ name: row.name, provider: row.provider, path: row.path, content: loaded?.content, preset }); }
         } finally { await lease?.[Symbol.asyncDispose]?.(); }
       }
-      res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' }); res.end(JSON.stringify({ privateOnly: policy.newSessionRequired, skills }));
+      const plugins = await observePlugins(ctx.pluginManager);
+      res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' }); res.end(JSON.stringify({ privateOnly: policy.newSessionRequired, skills, plugins }));
     } catch { res.writeHead(503, { 'cache-control': 'no-store' }); res.end(); }
   }}), 'auriga-node-resource-observer');
 }

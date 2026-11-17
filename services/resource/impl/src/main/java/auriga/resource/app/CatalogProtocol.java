@@ -64,6 +64,24 @@ public final class CatalogProtocol {
                     .setRevocationRevision(l.path("revocationRevision").asLong()));
     if (n.has("installationRevision"))
       b.setInstallationRevision(n.path("installationRevision").asLong());
+    if (n.has("downgradeAuthorization")) {
+      var a = n.path("downgradeAuthorization");
+      var authorization =
+          UnifiedDowngradeAuthorization.newBuilder()
+              .setSchemaVersion(a.path("schemaVersion").asInt())
+              .setPurpose(a.path("purpose").asString())
+              .setAuthorizationId(a.path("authorizationId").asString())
+              .setInstanceId(a.path("instanceId").asString())
+              .setIdentity(identity(a.path("identity")))
+              .setFromReleaseSequence(a.path("fromReleaseSequence").asLong())
+              .setToReleaseSequence(a.path("toReleaseSequence").asLong())
+              .setIssuedAt(a.path("issuedAt").asString())
+              .setExpiresAt(a.path("expiresAt").asString())
+              .setReason(a.path("reason").asString())
+              .setSignature(ResourceProtocol.signature(a.path("signature")));
+      if (a.has("ownerId")) authorization.setOwnerId(a.path("ownerId").asString());
+      b.setDowngradeAuthorization(authorization);
+    }
     if (n.has("desiredState"))
       b.setDesiredState(
           switch (CatalogStatePolicy.desired(n)) {

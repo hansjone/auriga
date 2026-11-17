@@ -506,9 +506,10 @@ type UnifiedResourceRef struct {
 	// Explicit UNSPECIFIED and unknown values are invalid. REMOVED carries the new revision.
 	DesiredState *UnifiedResourceDesiredState `protobuf:"varint,9,opt,name=desired_state,json=desiredState,proto3,enum=auriga.resource.v1.UnifiedResourceDesiredState,oneof" json:"desired_state,omitempty"`
 	// required / default / optional, resolved by the resource service.
-	InstallationMode string `protobuf:"bytes,10,opt,name=installation_mode,json=installationMode,proto3" json:"installation_mode,omitempty"`
-	unknownFields    protoimpl.UnknownFields
-	sizeCache        protoimpl.SizeCache
+	InstallationMode       string                         `protobuf:"bytes,10,opt,name=installation_mode,json=installationMode,proto3" json:"installation_mode,omitempty"`
+	DowngradeAuthorization *UnifiedDowngradeAuthorization `protobuf:"bytes,11,opt,name=downgrade_authorization,json=downgradeAuthorization,proto3" json:"downgrade_authorization,omitempty"`
+	unknownFields          protoimpl.UnknownFields
+	sizeCache              protoimpl.SizeCache
 }
 
 func (x *UnifiedResourceRef) Reset() {
@@ -609,6 +610,13 @@ func (x *UnifiedResourceRef) GetInstallationMode() string {
 		return x.InstallationMode
 	}
 	return ""
+}
+
+func (x *UnifiedResourceRef) GetDowngradeAuthorization() *UnifiedDowngradeAuthorization {
+	if x != nil {
+		return x.DowngradeAuthorization
+	}
+	return nil
 }
 
 type UnifiedSelection struct {
@@ -1952,8 +1960,10 @@ type UnifiedDowngradeAuthorization struct {
 	Reason              string                   `protobuf:"bytes,9,opt,name=reason,proto3" json:"reason,omitempty"`
 	Signature           *ResourceSignature       `protobuf:"bytes,10,opt,name=signature,proto3" json:"signature,omitempty"`
 	Purpose             string                   `protobuf:"bytes,11,opt,name=purpose,proto3" json:"purpose,omitempty"`
-	unknownFields       protoimpl.UnknownFields
-	sizeCache           protoimpl.SizeCache
+	// Required for revocation fallbacks; authenticated member, never a caller claim.
+	OwnerId       *string `protobuf:"bytes,12,opt,name=owner_id,json=ownerId,proto3,oneof" json:"owner_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *UnifiedDowngradeAuthorization) Reset() {
@@ -2059,6 +2069,13 @@ func (x *UnifiedDowngradeAuthorization) GetSignature() *ResourceSignature {
 func (x *UnifiedDowngradeAuthorization) GetPurpose() string {
 	if x != nil {
 		return x.Purpose
+	}
+	return ""
+}
+
+func (x *UnifiedDowngradeAuthorization) GetOwnerId() string {
+	if x != nil && x.OwnerId != nil {
+		return *x.OwnerId
 	}
 	return ""
 }
@@ -2209,7 +2226,7 @@ const file_auriga_resource_v1_unified_proto_rawDesc = "" +
 	"\x06digest\x18\x02 \x01(\tR\x06digest\x12\x1d\n" +
 	"\n" +
 	"size_bytes\x18\x03 \x01(\x04R\tsizeBytes\x12#\n" +
-	"\rdownload_path\x18\x04 \x01(\tR\fdownloadPath\"\xeb\x04\n" +
+	"\rdownload_path\x18\x04 \x01(\tR\fdownloadPath\"\xd7\x05\n" +
 	"\x12UnifiedResourceRef\x12G\n" +
 	"\bidentity\x18\x01 \x01(\v2+.auriga.resource.v1.UnifiedResourceIdentityR\bidentity\x12?\n" +
 	"\benvelope\x18\x02 \x01(\v2#.auriga.resource.v1.UnifiedEnvelopeR\benvelope\x124\n" +
@@ -2221,7 +2238,8 @@ const file_auriga_resource_v1_unified_proto_rawDesc = "" +
 	"\x15installation_revision\x18\b \x01(\x04R\x14installationRevision\x12Y\n" +
 	"\rdesired_state\x18\t \x01(\x0e2/.auriga.resource.v1.UnifiedResourceDesiredStateH\x00R\fdesiredState\x88\x01\x01\x12+\n" +
 	"\x11installation_mode\x18\n" +
-	" \x01(\tR\x10installationModeB\x10\n" +
+	" \x01(\tR\x10installationMode\x12j\n" +
+	"\x17downgrade_authorization\x18\v \x01(\v21.auriga.resource.v1.UnifiedDowngradeAuthorizationR\x16downgradeAuthorizationB\x10\n" +
 	"\x0e_desired_state\"s\n" +
 	"\x10UnifiedSelection\x12G\n" +
 	"\bidentity\x18\x01 \x01(\v2+.auriga.resource.v1.UnifiedResourceIdentityR\bidentity\x12\x16\n" +
@@ -2357,7 +2375,7 @@ const file_auriga_resource_v1_unified_proto_rawDesc = "" +
 	"selections\x129\n" +
 	"\x16allow_personal_plugins\x18\x05 \x01(\bH\x00R\x14allowPersonalPlugins\x88\x01\x01\x12:\n" +
 	"\x19assignment_retry_required\x18\x06 \x01(\bR\x17assignmentRetryRequiredB\x19\n" +
-	"\x17_allow_personal_plugins\"\xf2\x03\n" +
+	"\x17_allow_personal_plugins\"\x9f\x04\n" +
 	"\x1dUnifiedDowngradeAuthorization\x12%\n" +
 	"\x0eschema_version\x18\x01 \x01(\rR\rschemaVersion\x12)\n" +
 	"\x10authorization_id\x18\x02 \x01(\tR\x0fauthorizationId\x12\x1f\n" +
@@ -2372,7 +2390,9 @@ const file_auriga_resource_v1_unified_proto_rawDesc = "" +
 	"\x06reason\x18\t \x01(\tR\x06reason\x12C\n" +
 	"\tsignature\x18\n" +
 	" \x01(\v2%.auriga.resource.v1.ResourceSignatureR\tsignature\x12\x18\n" +
-	"\apurpose\x18\v \x01(\tR\apurpose\"\xdd\x02\n" +
+	"\apurpose\x18\v \x01(\tR\apurpose\x12\x1e\n" +
+	"\bowner_id\x18\f \x01(\tH\x00R\aownerId\x88\x01\x01B\v\n" +
+	"\t_owner_id\"\xdd\x02\n" +
 	"\x16UnifiedMigrationMarker\x12%\n" +
 	"\x0eschema_version\x18\x01 \x01(\rR\rschemaVersion\x12\x18\n" +
 	"\apurpose\x18\x02 \x01(\tR\apurpose\x12\x1b\n" +
@@ -2445,38 +2465,39 @@ var file_auriga_resource_v1_unified_proto_depIdxs = []int32{
 	5,  // 4: auriga.resource.v1.UnifiedResourceRef.artifacts:type_name -> auriga.resource.v1.UnifiedArtifactDownload
 	4,  // 5: auriga.resource.v1.UnifiedResourceRef.lease:type_name -> auriga.resource.v1.UnifiedLease
 	0,  // 6: auriga.resource.v1.UnifiedResourceRef.desired_state:type_name -> auriga.resource.v1.UnifiedResourceDesiredState
-	3,  // 7: auriga.resource.v1.UnifiedSelection.identity:type_name -> auriga.resource.v1.UnifiedResourceIdentity
-	3,  // 8: auriga.resource.v1.UnifiedDownloadTicketInput.identity:type_name -> auriga.resource.v1.UnifiedResourceIdentity
-	6,  // 9: auriga.resource.v1.UnifiedDownloadTicket.resource:type_name -> auriga.resource.v1.UnifiedResourceRef
-	27, // 10: auriga.resource.v1.UnifiedDownloadTicket.revocations:type_name -> auriga.resource.v1.ResourceRevocationList
-	7,  // 11: auriga.resource.v1.UnifiedInstallationInput.selection:type_name -> auriga.resource.v1.UnifiedSelection
-	3,  // 12: auriga.resource.v1.UnifiedInstallationReport.identity:type_name -> auriga.resource.v1.UnifiedResourceIdentity
-	6,  // 13: auriga.resource.v1.UnifiedInstallation.resource:type_name -> auriga.resource.v1.UnifiedResourceRef
-	12, // 14: auriga.resource.v1.UnifiedInstallation.report:type_name -> auriga.resource.v1.UnifiedInstallationReport
-	13, // 15: auriga.resource.v1.UnifiedInstallationPage.items:type_name -> auriga.resource.v1.UnifiedInstallation
-	7,  // 16: auriga.resource.v1.UnifiedDistributionInput.selections:type_name -> auriga.resource.v1.UnifiedSelection
-	7,  // 17: auriga.resource.v1.UnifiedDistribution.selections:type_name -> auriga.resource.v1.UnifiedSelection
-	12, // 18: auriga.resource.v1.UnifiedDistribution.reports:type_name -> auriga.resource.v1.UnifiedInstallationReport
-	16, // 19: auriga.resource.v1.UnifiedDistributionPage.items:type_name -> auriga.resource.v1.UnifiedDistribution
-	3,  // 20: auriga.resource.v1.UnifiedRenewalInput.identity:type_name -> auriga.resource.v1.UnifiedResourceIdentity
-	4,  // 21: auriga.resource.v1.UnifiedGuardianState.lease:type_name -> auriga.resource.v1.UnifiedLease
-	28, // 22: auriga.resource.v1.UnifiedMigrationProof.legacy_envelope:type_name -> auriga.resource.v1.ResourceEnvelope
-	2,  // 23: auriga.resource.v1.UnifiedMigrationProof.unified_envelope:type_name -> auriga.resource.v1.UnifiedEnvelope
-	25, // 24: auriga.resource.v1.UnifiedMigrationProof.marker:type_name -> auriga.resource.v1.UnifiedMigrationMarker
-	7,  // 25: auriga.resource.v1.ResolveUnifiedResourcesRequest.selections:type_name -> auriga.resource.v1.UnifiedSelection
-	6,  // 26: auriga.resource.v1.ResolveUnifiedResourcesResponse.resources:type_name -> auriga.resource.v1.UnifiedResourceRef
-	27, // 27: auriga.resource.v1.ResolveUnifiedResourcesResponse.revocations:type_name -> auriga.resource.v1.ResourceRevocationList
-	7,  // 28: auriga.resource.v1.ResolveUnifiedResourcesResponse.selections:type_name -> auriga.resource.v1.UnifiedSelection
-	3,  // 29: auriga.resource.v1.UnifiedDowngradeAuthorization.identity:type_name -> auriga.resource.v1.UnifiedResourceIdentity
-	26, // 30: auriga.resource.v1.UnifiedDowngradeAuthorization.signature:type_name -> auriga.resource.v1.ResourceSignature
-	26, // 31: auriga.resource.v1.UnifiedMigrationMarker.signature:type_name -> auriga.resource.v1.ResourceSignature
-	22, // 32: auriga.resource.v1.UnifiedResourceResolutionService.ResolveUnifiedResources:input_type -> auriga.resource.v1.ResolveUnifiedResourcesRequest
-	23, // 33: auriga.resource.v1.UnifiedResourceResolutionService.ResolveUnifiedResources:output_type -> auriga.resource.v1.ResolveUnifiedResourcesResponse
-	33, // [33:34] is the sub-list for method output_type
-	32, // [32:33] is the sub-list for method input_type
-	32, // [32:32] is the sub-list for extension type_name
-	32, // [32:32] is the sub-list for extension extendee
-	0,  // [0:32] is the sub-list for field type_name
+	24, // 7: auriga.resource.v1.UnifiedResourceRef.downgrade_authorization:type_name -> auriga.resource.v1.UnifiedDowngradeAuthorization
+	3,  // 8: auriga.resource.v1.UnifiedSelection.identity:type_name -> auriga.resource.v1.UnifiedResourceIdentity
+	3,  // 9: auriga.resource.v1.UnifiedDownloadTicketInput.identity:type_name -> auriga.resource.v1.UnifiedResourceIdentity
+	6,  // 10: auriga.resource.v1.UnifiedDownloadTicket.resource:type_name -> auriga.resource.v1.UnifiedResourceRef
+	27, // 11: auriga.resource.v1.UnifiedDownloadTicket.revocations:type_name -> auriga.resource.v1.ResourceRevocationList
+	7,  // 12: auriga.resource.v1.UnifiedInstallationInput.selection:type_name -> auriga.resource.v1.UnifiedSelection
+	3,  // 13: auriga.resource.v1.UnifiedInstallationReport.identity:type_name -> auriga.resource.v1.UnifiedResourceIdentity
+	6,  // 14: auriga.resource.v1.UnifiedInstallation.resource:type_name -> auriga.resource.v1.UnifiedResourceRef
+	12, // 15: auriga.resource.v1.UnifiedInstallation.report:type_name -> auriga.resource.v1.UnifiedInstallationReport
+	13, // 16: auriga.resource.v1.UnifiedInstallationPage.items:type_name -> auriga.resource.v1.UnifiedInstallation
+	7,  // 17: auriga.resource.v1.UnifiedDistributionInput.selections:type_name -> auriga.resource.v1.UnifiedSelection
+	7,  // 18: auriga.resource.v1.UnifiedDistribution.selections:type_name -> auriga.resource.v1.UnifiedSelection
+	12, // 19: auriga.resource.v1.UnifiedDistribution.reports:type_name -> auriga.resource.v1.UnifiedInstallationReport
+	16, // 20: auriga.resource.v1.UnifiedDistributionPage.items:type_name -> auriga.resource.v1.UnifiedDistribution
+	3,  // 21: auriga.resource.v1.UnifiedRenewalInput.identity:type_name -> auriga.resource.v1.UnifiedResourceIdentity
+	4,  // 22: auriga.resource.v1.UnifiedGuardianState.lease:type_name -> auriga.resource.v1.UnifiedLease
+	28, // 23: auriga.resource.v1.UnifiedMigrationProof.legacy_envelope:type_name -> auriga.resource.v1.ResourceEnvelope
+	2,  // 24: auriga.resource.v1.UnifiedMigrationProof.unified_envelope:type_name -> auriga.resource.v1.UnifiedEnvelope
+	25, // 25: auriga.resource.v1.UnifiedMigrationProof.marker:type_name -> auriga.resource.v1.UnifiedMigrationMarker
+	7,  // 26: auriga.resource.v1.ResolveUnifiedResourcesRequest.selections:type_name -> auriga.resource.v1.UnifiedSelection
+	6,  // 27: auriga.resource.v1.ResolveUnifiedResourcesResponse.resources:type_name -> auriga.resource.v1.UnifiedResourceRef
+	27, // 28: auriga.resource.v1.ResolveUnifiedResourcesResponse.revocations:type_name -> auriga.resource.v1.ResourceRevocationList
+	7,  // 29: auriga.resource.v1.ResolveUnifiedResourcesResponse.selections:type_name -> auriga.resource.v1.UnifiedSelection
+	3,  // 30: auriga.resource.v1.UnifiedDowngradeAuthorization.identity:type_name -> auriga.resource.v1.UnifiedResourceIdentity
+	26, // 31: auriga.resource.v1.UnifiedDowngradeAuthorization.signature:type_name -> auriga.resource.v1.ResourceSignature
+	26, // 32: auriga.resource.v1.UnifiedMigrationMarker.signature:type_name -> auriga.resource.v1.ResourceSignature
+	22, // 33: auriga.resource.v1.UnifiedResourceResolutionService.ResolveUnifiedResources:input_type -> auriga.resource.v1.ResolveUnifiedResourcesRequest
+	23, // 34: auriga.resource.v1.UnifiedResourceResolutionService.ResolveUnifiedResources:output_type -> auriga.resource.v1.ResolveUnifiedResourcesResponse
+	34, // [34:35] is the sub-list for method output_type
+	33, // [33:34] is the sub-list for method input_type
+	33, // [33:33] is the sub-list for extension type_name
+	33, // [33:33] is the sub-list for extension extendee
+	0,  // [0:33] is the sub-list for field type_name
 }
 
 func init() { file_auriga_resource_v1_unified_proto_init() }
@@ -2487,6 +2508,7 @@ func file_auriga_resource_v1_unified_proto_init() {
 	file_auriga_resource_v1_trust_proto_init()
 	file_auriga_resource_v1_unified_proto_msgTypes[5].OneofWrappers = []any{}
 	file_auriga_resource_v1_unified_proto_msgTypes[22].OneofWrappers = []any{}
+	file_auriga_resource_v1_unified_proto_msgTypes[23].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{

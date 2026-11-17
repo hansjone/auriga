@@ -3135,6 +3135,29 @@ export interface components {
     /** @enum {string} */
     ShellAuthresource_unified_schema_json__defs_UnifiedInstallationMode:
       'required' | 'default' | 'optional';
+    /** Format: uuid */
+    ShellAuthresource_unified_schema_json__defs_UnifiedDowngradeAuthorization_properties_ownerId: string;
+    ShellAuthresource_unified_schema_json__defs_UnifiedDowngradeAuthorization: {
+      /** @constant */
+      schemaVersion: 2;
+      /** Format: uuid */
+      authorizationId: string;
+      /** Format: uuid */
+      instanceId: string;
+      identity: components['schemas']['ShellAuthresource_unified_schema_json__defs_UnifiedResourceIdentity'];
+      /** Format: int64 */
+      fromReleaseSequence: number;
+      /** Format: int64 */
+      toReleaseSequence: number;
+      issuedAt: components['schemas']['ShellAuthresource_signatures_schema_json__defs_Time'];
+      expiresAt: components['schemas']['ShellAuthresource_signatures_schema_json__defs_Time'];
+      reason: string;
+      signature: components['schemas']['ShellAuthresource_signatures_schema_json__defs_Signature'];
+      /** @constant */
+      purpose: 'downgrade';
+      /** Format: uuid */
+      ownerId?: string;
+    } & unknown;
     ShellAuthresource_unified_schema_json__defs_UnifiedResourceRef: {
       identity: components['schemas']['ShellAuthresource_unified_schema_json__defs_UnifiedResourceIdentity'];
       envelope: components['schemas']['ShellAuthresource_package_schema_json__defs_Envelope'];
@@ -3156,6 +3179,7 @@ export interface components {
        */
       desiredState?: 'ENABLED' | 'DISABLED' | 'REMOVED';
       installationMode?: components['schemas']['ShellAuthresource_unified_schema_json__defs_UnifiedInstallationMode'];
+      downgradeAuthorization?: components['schemas']['ShellAuthresource_unified_schema_json__defs_UnifiedDowngradeAuthorization'];
     };
     ShellAuthresource_unified_schema_json__defs_UnifiedInstallationReport: {
       /** Format: uuid */

@@ -11,6 +11,7 @@ API version: 1.0.0
 package resourceapi
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 )
@@ -20,18 +21,18 @@ var _ MappedNullable = &UnifiedDowngradeAuthorization{}
 
 // UnifiedDowngradeAuthorization struct for UnifiedDowngradeAuthorization
 type UnifiedDowngradeAuthorization struct {
-	SchemaVersion        int32                   `json:"schemaVersion"`
-	AuthorizationId      string                  `json:"authorizationId"`
-	InstanceId           string                  `json:"instanceId"`
-	Identity             UnifiedResourceIdentity `json:"identity"`
-	FromReleaseSequence  int64                   `json:"fromReleaseSequence"`
-	ToReleaseSequence    int64                   `json:"toReleaseSequence"`
-	IssuedAt             string                  `json:"issuedAt" validate:"regexp=^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]{1\\,9})?Z$"`
-	ExpiresAt            string                  `json:"expiresAt" validate:"regexp=^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]{1\\,9})?Z$"`
-	Reason               string                  `json:"reason"`
-	Signature            Signature               `json:"signature"`
-	Purpose              string                  `json:"purpose"`
-	AdditionalProperties map[string]interface{}
+	SchemaVersion       int32                   `json:"schemaVersion"`
+	AuthorizationId     string                  `json:"authorizationId"`
+	InstanceId          string                  `json:"instanceId"`
+	Identity            UnifiedResourceIdentity `json:"identity"`
+	FromReleaseSequence int64                   `json:"fromReleaseSequence"`
+	ToReleaseSequence   int64                   `json:"toReleaseSequence"`
+	IssuedAt            string                  `json:"issuedAt" validate:"regexp=^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]{1\\,9})?Z$"`
+	ExpiresAt           string                  `json:"expiresAt" validate:"regexp=^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]{1\\,9})?Z$"`
+	Reason              string                  `json:"reason"`
+	Signature           Signature               `json:"signature"`
+	Purpose             string                  `json:"purpose"`
+	OwnerId             *string                 `json:"ownerId,omitempty"`
 }
 
 type _UnifiedDowngradeAuthorization UnifiedDowngradeAuthorization
@@ -328,6 +329,38 @@ func (o *UnifiedDowngradeAuthorization) SetPurpose(v string) {
 	o.Purpose = v
 }
 
+// GetOwnerId returns the OwnerId field value if set, zero value otherwise.
+func (o *UnifiedDowngradeAuthorization) GetOwnerId() string {
+	if o == nil || IsNil(o.OwnerId) {
+		var ret string
+		return ret
+	}
+	return *o.OwnerId
+}
+
+// GetOwnerIdOk returns a tuple with the OwnerId field value if set, nil otherwise
+// and a boolean to check if the value has been set.
+func (o *UnifiedDowngradeAuthorization) GetOwnerIdOk() (*string, bool) {
+	if o == nil || IsNil(o.OwnerId) {
+		return nil, false
+	}
+	return o.OwnerId, true
+}
+
+// HasOwnerId returns a boolean if a field has been set.
+func (o *UnifiedDowngradeAuthorization) HasOwnerId() bool {
+	if o != nil && !IsNil(o.OwnerId) {
+		return true
+	}
+
+	return false
+}
+
+// SetOwnerId gets a reference to the given string and assigns it to the OwnerId field.
+func (o *UnifiedDowngradeAuthorization) SetOwnerId(v string) {
+	o.OwnerId = &v
+}
+
 func (o UnifiedDowngradeAuthorization) MarshalJSON() ([]byte, error) {
 	toSerialize, err := o.ToMap()
 	if err != nil {
@@ -349,11 +382,9 @@ func (o UnifiedDowngradeAuthorization) ToMap() (map[string]interface{}, error) {
 	toSerialize["reason"] = o.Reason
 	toSerialize["signature"] = o.Signature
 	toSerialize["purpose"] = o.Purpose
-
-	for key, value := range o.AdditionalProperties {
-		toSerialize[key] = value
+	if !IsNil(o.OwnerId) {
+		toSerialize["ownerId"] = o.OwnerId
 	}
-
 	return toSerialize, nil
 }
 
@@ -391,30 +422,15 @@ func (o *UnifiedDowngradeAuthorization) UnmarshalJSON(data []byte) (err error) {
 
 	varUnifiedDowngradeAuthorization := _UnifiedDowngradeAuthorization{}
 
-	err = json.Unmarshal(data, &varUnifiedDowngradeAuthorization)
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+	err = decoder.Decode(&varUnifiedDowngradeAuthorization)
 
 	if err != nil {
 		return err
 	}
 
 	*o = UnifiedDowngradeAuthorization(varUnifiedDowngradeAuthorization)
-
-	additionalProperties := make(map[string]interface{})
-
-	if err = json.Unmarshal(data, &additionalProperties); err == nil {
-		delete(additionalProperties, "schemaVersion")
-		delete(additionalProperties, "authorizationId")
-		delete(additionalProperties, "instanceId")
-		delete(additionalProperties, "identity")
-		delete(additionalProperties, "fromReleaseSequence")
-		delete(additionalProperties, "toReleaseSequence")
-		delete(additionalProperties, "issuedAt")
-		delete(additionalProperties, "expiresAt")
-		delete(additionalProperties, "reason")
-		delete(additionalProperties, "signature")
-		delete(additionalProperties, "purpose")
-		o.AdditionalProperties = additionalProperties
-	}
 
 	return err
 }

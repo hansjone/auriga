@@ -42,23 +42,23 @@ for (const dir of [workspace, cache, temp, process.env.DSH_HOME]) {
 const profile = join(process.env.DSH_HOME, 'profiles', 'web');
 const modules = join(profile, 'node_modules');
 mkdirSync(modules, { recursive: true });
-writeFileSync(
-  join(profile, 'package.json'),
-  JSON.stringify(
-    {
+const profileFile = join(profile, 'package.json');
+const profilePackage = existsSync(profileFile)
+  ? JSON.parse(readFileSync(profileFile, 'utf8'))
+  : {
       name: 'auriga-real-dsh-profile',
       private: true,
-      dependencies: { 'auriga-dsh': plugin.version },
+      dependencies: {},
       dsh: {
         profile: {
           bundles: ['@deepseek-ai/dsh-base', '@deepseek-ai/dsh-web-app'],
         },
       },
-    },
-    null,
-    2,
-  ) + '\n',
-);
+    };
+// Keep public CLI selections and personal plugins across container replacements.
+profilePackage.dependencies ??= {};
+profilePackage.dependencies['auriga-dsh'] = 'link:/opt/auriga-dsh';
+writeFileSync(profileFile, JSON.stringify(profilePackage, null, 2) + '\n');
 const link = join(modules, 'auriga-dsh');
 if (!existsSync(link)) symlinkSync('/opt/auriga-dsh', link, 'dir');
 // No dependency installation, downloads, host config copying or token arguments.

@@ -69,7 +69,7 @@ class CatalogWorkflowTest {
   Set<UUID> externalMembers = new HashSet<>();
   AtomicBoolean personalAllowed = new AtomicBoolean(true);
   ResourceSigning signing;
-  KeyPair releaseKey, revocationKey;
+  KeyPair releaseKey, revocationKey, downgradeKey;
   java.util.concurrent.atomic.AtomicReference<Instant> now =
       new java.util.concurrent.atomic.AtomicReference<>(Instant.parse("2026-11-13T00:00:00Z"));
   Clock clock =
@@ -169,9 +169,15 @@ class CatalogWorkflowTest {
     var keys = KeyPairGenerator.getInstance("Ed25519");
     releaseKey = keys.generateKeyPair();
     revocationKey = keys.generateKeyPair();
+    downgradeKey = keys.generateKeyPair();
     signing =
         new ResourceSigning(
-            "release", releaseKey.getPrivate(), "revoke", revocationKey.getPrivate());
+            "release",
+            releaseKey.getPrivate(),
+            "revoke",
+            revocationKey.getPrivate(),
+            "downgrade",
+            downgradeKey.getPrivate());
     var events =
         new OutboxEventPublisher(
             jdbc, "resource", "resource", new EventSchemas(), JSON, clock, () -> {});
@@ -633,6 +639,7 @@ class CatalogWorkflowTest {
   @ParameterizedTest
   @CsvSource({
     "false,required,malicious", "true,required,malicious",
+    "false,default,malicious", "true,default,malicious",
     "false,default,withdrawn", "true,default,withdrawn",
     "false,required,removed", "true,required,removed",
     "false,default,removedWithdrawn", "true,default,removedWithdrawn"
@@ -762,17 +769,116 @@ class CatalogWorkflowTest {
                         .setSelectionRevision(selection)
                         .setSynchronizeAssignments(true)
                         .build());
+            if (!scenario.equals("malicious")) {
+              assertTrue(restored.getAssignmentRetryRequired());
+              assertTrue(
+                  restored.getResourcesList().stream()
+                      .noneMatch(ref -> ref.hasDowngradeAuthorization()));
+              return null;
+            }
             assertFalse(restored.getAssignmentRetryRequired());
             assertEquals(identity(first), identityFromRef(restored.getResources(0)));
             assertEquals(mode, restored.getResources(0).getInstallationMode());
             assertEquals("ENABLED", CatalogStatePolicy.desired(restored.getResources(0)));
+            var authorization = restored.getResources(0).getDowngradeAuthorization();
+            assertEquals("revocation", authorization.getReason());
+            assertEquals(GENERAL.toString(), authorization.getOwnerId());
+            assertEquals(target.toString(), authorization.getInstanceId());
+            assertEquals(1, authorization.getToReleaseSequence());
+            assertEquals(3, authorization.getFromReleaseSequence());
+            when(workspace.snapshot(TENANT, target))
+                .thenReturn(
+                    new UnifiedResourceWorkspace.Snapshot(
+                        target,
+                        GENERAL,
+                        node,
+                        restored.getSelectionRevision(),
+                        3,
+                        0,
+                        false,
+                        List.of(),
+                        restored.getResourcesList()));
+            advance(601);
+            signing =
+                new ResourceSigning(
+                    "release", releaseKey.getPrivate(), "revoke", revocationKey.getPrivate());
+            catalog.withdraw(
+                actor(PUBLISHER),
+                first.pkg,
+                first.version,
+                reason().put("mode", "malicious"),
+                key(),
+                etag(catalog.detail(actor(AUTHOR), first.pkg, first.version, false)));
+            var disabled =
+                delivery.resolve(
+                    request
+                        .clearSelections()
+                        .setSynchronizeAssignments(false)
+                        .setSelectionRevision(restored.getSelectionRevision())
+                        .addSelections(CatalogProtocol.selection(selection(first, "install")))
+                        .build());
+            assertFalse(
+                disabled.getResources(0).getEnabled(),
+                "missing downgrade root must never block safety disable");
           } else {
             var page = delivery.installations(actor(GENERAL), target, "skill", 50, null);
+            if (!scenario.equals("malicious")) {
+              assertFalse(page.path("assignmentFailures").isEmpty());
+              assertTrue(
+                  java.util.stream.StreamSupport.stream(page.path("items").spliterator(), false)
+                      .noneMatch(item -> item.path("resource").has("downgradeAuthorization")));
+              return null;
+            }
             assertTrue(page.path("assignmentFailures").isEmpty());
             var resource = page.path("items").get(0).path("resource");
             assertEquals(identity(first), resource.path("identity"));
             assertEquals(mode, resource.path("installationMode").asString());
             assertEquals("ENABLED", resource.path("desiredState").asString());
+            var authorization = resource.path("downgradeAuthorization");
+            assertEquals("revocation", authorization.path("reason").asString());
+            assertEquals(GENERAL.toString(), authorization.path("ownerId").asString());
+            assertEquals(target.toString(), authorization.path("instanceId").asString());
+            var trust = JSON.createObjectNode();
+            trust.set(
+                "downgrade",
+                JSON.createObjectNode()
+                    .put("kid", "downgrade")
+                    .put(
+                        "publicKeySpkiBase64",
+                        Base64.getEncoder().encodeToString(downgradeKey.getPublic().getEncoded())));
+            var input = (ObjectNode) authorization.deepCopy();
+            input.set("authorization", authorization);
+            input.put("now", clock.instant().toString());
+            input.putArray("usedAuthorizationIds");
+            var verifier = new CatalogTrust(trust);
+            verifier.verify("downgrade", input);
+            input.put("ownerId", UUID.randomUUID().toString());
+            assertEquals(
+                "downgrade_scope",
+                assertThrows(
+                        IllegalArgumentException.class, () -> verifier.verify("downgrade", input))
+                    .getMessage());
+            input.put("ownerId", GENERAL.toString());
+            input.withArray("usedAuthorizationIds").add(authorization.path("authorizationId"));
+            assertEquals(
+                "downgrade_replay",
+                assertThrows(
+                        IllegalArgumentException.class, () -> verifier.verify("downgrade", input))
+                    .getMessage());
+            if (mode.equals("default")) {
+              long revision = page.path("items").get(0).path("installationRevision").asLong();
+              delivery.select(
+                  actor(GENERAL), choose(target, first, "disable"), key(), "\"" + revision + "\"");
+              var enabled =
+                  delivery.select(
+                      actor(GENERAL),
+                      choose(target, first, "enable"),
+                      key(),
+                      "\"" + (revision + 1) + "\"");
+              assertNotEquals(
+                  authorization.path("authorizationId"),
+                  enabled.path("resource").path("downgradeAuthorization").path("authorizationId"));
+            }
           }
           return null;
         });

@@ -712,6 +712,10 @@ public final class CatalogWorkflow {
     return signing.get().sign(n, false);
   }
 
+  ObjectNode signDowngrade(ObjectNode authorization) {
+    return signing.get().signDowngrade(authorization);
+  }
+
   public JsonNode publish(
       AurigaPrincipal actor, UUID p, UUID id, ObjectNode body, String key, String etag) {
     text(body, "reason", 1024);

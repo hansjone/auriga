@@ -173,7 +173,7 @@ func uidentity(v any) {
 		urequire(uUUID.MatchString(us(o[key])), "schema")
 	}
 	urequire(uDigest.MatchString(us(o["manifestDigest"])) && uVersion.MatchString(us(o["version"])), "schema")
-	urequire(o["kind"] == "skill" || o["kind"] == "tool", "schema")
+	urequire(o["kind"] == "plugin" || o["kind"] == "skill" || o["kind"] == "tool", "schema")
 }
 func uenvelope(v any, protocol int64) {
 	o := uobject(v, "schemaVersion tenantId packageId versionId releaseSequence notAfter statement signature", "")
@@ -461,11 +461,14 @@ func (p UnifiedProtocol) evaluate(operation string, input map[string]any) {
 		urequire(ut(input["now"]).Before(cutoff) && !ut(e["notAfter"]).After(cutoff), "renewal_cutoff")
 		p.release(input)
 	case "downgrade":
-		a := uobject(input["authorization"], "schemaVersion purpose authorizationId instanceId identity fromReleaseSequence toReleaseSequence issuedAt expiresAt reason signature", "")
+		a := uobject(input["authorization"], "schemaVersion purpose authorizationId instanceId identity fromReleaseSequence toReleaseSequence issuedAt expiresAt reason signature", "ownerId")
 		urequire(un(a["schemaVersion"]) == 2 && a["purpose"] == "downgrade", "schema")
 		uidentity(a["identity"])
 		usignature(a["signature"])
 		urequire(p.signed(a, "downgrade", ut(input["now"])), "downgrade_signature")
+		if a["reason"] == "revocation" || a["ownerId"] != nil {
+			urequire(uUUID.MatchString(us(a["ownerId"])) && a["ownerId"] == input["ownerId"], "downgrade_scope")
+		}
 		urequire(uequal(a["identity"], input["identity"]) && a["instanceId"] == input["instanceId"] && uequal(a["fromReleaseSequence"], input["fromReleaseSequence"]) && uequal(a["toReleaseSequence"], input["toReleaseSequence"]) && un(a["toReleaseSequence"]) < un(a["fromReleaseSequence"]), "downgrade_scope")
 		urequire(uwindow(a["issuedAt"], a["expiresAt"], input["now"], 10*time.Minute), "downgrade_expired")
 		urequire(!ucontains(input["usedAuthorizationIds"], a["authorizationId"]), "downgrade_replay")

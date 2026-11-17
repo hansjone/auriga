@@ -926,6 +926,7 @@ export interface components {
       desiredState?: 'ENABLED' | 'DISABLED' | 'REMOVED';
       /** @description Server-resolved scope policy. Omission means optional for earlier records. */
       installationMode?: components['schemas']['UnifiedInstallationMode'];
+      downgradeAuthorization?: components['schemas']['UnifiedDowngradeAuthorization'];
     };
     UnifiedSelection: {
       identity: components['schemas']['UnifiedResourceIdentity'];
@@ -1459,6 +1460,29 @@ export interface components {
     };
     /** @enum {string} */
     UnifiedInstallationMode: 'required' | 'default' | 'optional';
+    /** Format: uuid */
+    ownerId: string;
+    UnifiedDowngradeAuthorization: {
+      /** @constant */
+      schemaVersion: 2;
+      /** Format: uuid */
+      authorizationId: string;
+      /** Format: uuid */
+      instanceId: string;
+      identity: components['schemas']['UnifiedResourceIdentity'];
+      /** Format: int64 */
+      fromReleaseSequence: number;
+      /** Format: int64 */
+      toReleaseSequence: number;
+      issuedAt: components['schemas']['Time'];
+      expiresAt: components['schemas']['Time'];
+      reason: string;
+      signature: components['schemas']['Signature'];
+      /** @constant */
+      purpose: 'downgrade';
+      /** Format: uuid */
+      ownerId?: string;
+    } & unknown;
   };
   responses: {
     /** @description 插件协议版本过旧（plugin.protocol_unsupported），params 里有 current 和 minSupported */

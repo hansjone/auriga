@@ -936,6 +936,9 @@ export default {
             description:
               'Server-resolved scope policy. Omission means optional for earlier records.',
           },
+          downgradeAuthorization: {
+            $ref: '#/$defs/UnifiedDowngradeAuthorization',
+          },
         },
         required: [
           'identity',
@@ -1448,6 +1451,7 @@ export default {
           reason: { type: 'string', minLength: 1, maxLength: 1024 },
           signature: { $ref: './signatures.schema.json#/$defs/Signature' },
           purpose: { type: 'string', const: 'downgrade' },
+          ownerId: { type: 'string', format: 'uuid' },
         },
         required: [
           'schemaVersion',
@@ -1463,6 +1467,22 @@ export default {
           'purpose',
         ],
         additionalProperties: false,
+        allOf: [
+          {
+            if: {
+              properties: { reason: { const: 'revocation' } },
+              required: ['reason'],
+            },
+            then: {
+              required: ['ownerId'],
+              properties: {
+                ownerId: {
+                  $ref: '#/$defs/UnifiedDowngradeAuthorization/properties/ownerId',
+                },
+              },
+            },
+          },
+        ],
       },
       UnifiedMemberInstallationReport: {
         type: 'object',

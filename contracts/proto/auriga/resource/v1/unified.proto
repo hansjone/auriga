@@ -80,6 +80,7 @@ message UnifiedResourceRef {
   optional UnifiedResourceDesiredState desired_state = 9;
   // required / default / optional, resolved by the resource service.
   string installation_mode = 10;
+  UnifiedDowngradeAuthorization downgrade_authorization = 11;
 }
 
 message UnifiedSelection {
@@ -248,6 +249,8 @@ message UnifiedDowngradeAuthorization {
   string reason = 9;
   ResourceSignature signature = 10;
   string purpose = 11;
+  // Required for revocation fallbacks; authenticated member, never a caller claim.
+  optional string owner_id = 12;
 }
 
 // Release-root signed immutable migration marker; activated_at is covered by its signature.

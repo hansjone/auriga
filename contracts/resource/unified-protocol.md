@@ -38,6 +38,12 @@ UnifiedResourceRef 新增 desiredState，HTTP/JSON 枚举值为 ENABLED、DISABL
 
 高水位按 tenant/package 保存最高 releaseSequence、versionId、manifestDigest，同序号须同字节。恶意撤销同时按版本身份及清单/制品摘要匹配，复用恶意制品的版本一并撤销。普通 withdrawn 不写恶意撤销表。
 
+撤销后从已安装高版本回落到有效 required/default 规则时，resource 将单次 `UnifiedDowngradeAuthorization` 放入 `UnifiedResourceRef.downgradeAuthorization`；成员安装、下载票据、节点规格沿同一引用传递。`reason=revocation` 必须有 `ownerId`，消费端须同时核对可信成员、instanceId（Desktop 使用 clientId）、精确 identity、from/toReleaseSequence、独立 downgrade 根签名、最多10分钟有效期和已消费 authorizationId。普通下架、卸载或降低规则版本不自动签发。授权消费后仍保留最高高水位，重复准备只能延续同一已绑定安装，不得用于新修订重装。
+
+resource 的自动签发配置为 `auriga.resource.downgrade-kid` 与 `auriga.resource.downgrade-key-file`，必须使用独立于 release/revocation 的密钥，消费端信任同一 downgrade 公钥；缺失时回落失败并保留可重试错误。现有离线人工授权密钥的使用策略由部署方决定，不得将 release/revocation 密钥复用为自动授权根。
+
+云端节点复用清单原始字节、v2发行、制品摘要与撤销/租约校验，plugin payload 以 tgz 只读提供给独立容器 supervisor，启动 DSH 前通过公开 `dsh plugin --profile web remove/add --ignore-scripts` 清理旧受管包并安装已核验 payload；不按 SKILL.md 解包。镜像须提供已锁定的 pnpm 和公开 CLI。加载状态由 `PluginManager.listBundles` 的版本、enabled、installed、error 与每行实际 entryId 联合观察，只有真实加载后才回报 applied。独立 guardian 到期先停整个实例，私有新会话启动前清理所有历史受管 npm 名称；清理、CLI 或观察失败均失败封闭。L0 核心包及 `@deepseek-ai/` 部署命名空间不由统一目录覆盖。
+
 ## 固定目录和 guardian
 
 不覆盖或复制任何上游预设行，也不向预设的 customSkillDirs 追加目录。只通过 Cordis 的 insert 操作新增宿主级 `auriga-shared-skills` 行，插件为 `@deepseek-ai/dsh-skill-filesystem`，独立 providerName 固定为 `auriga-shared`，includeDefaultRoots=false、watch=true、customSkillDirs 仅包含由可信绝对 DSH_HOME 推导的 `auriga/skills-active/current/`。宿主注册到全局层，cordis/standard/ptc 各自保留原提供者并合并读取共享目录；DSH 升级继续加载新的上游预设，不被我方快照冻结。该根下一层直接为 `<name>/SKILL.md`，登录身份只在可信运行期记录中保存。真实 YAML 输入和期望输出由 cordis-upgrade-fixture.json 索引；原文、已有表达式和用户配置保持不变。同一我方行且配置相同则不重复添加；我方行重复、配置冲突、providerName 被占用或 YAML 错误时保持原文件并拒绝共享。D/E 必须逐项消费夹具，并在受支持的真实宿主上核实各预设的共享与原有 Skill 均可见。

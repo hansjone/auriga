@@ -1635,6 +1635,7 @@ export interface components {
       desiredState?: 'ENABLED' | 'DISABLED' | 'REMOVED';
       /** @description Server-resolved scope policy. Omission means optional for earlier records. */
       installationMode?: components['schemas']['UnifiedInstallationMode'];
+      downgradeAuthorization?: components['schemas']['UnifiedDowngradeAuthorization'];
     };
     UnifiedSelection: {
       identity: components['schemas']['UnifiedResourceIdentity'];
@@ -1727,6 +1728,7 @@ export interface components {
       nextCursor?: string;
       /** @description Current tenant permission for native personal plugin installation. */
       allowPersonalPlugins?: boolean;
+      assignmentFailures?: components['schemas']['UnifiedAssignmentFailure'][];
     };
     UnifiedDistributionInput: {
       /** Format: uuid */
@@ -1848,7 +1850,9 @@ export interface components {
       signature: components['schemas']['Signature'];
       /** @constant */
       purpose: 'downgrade';
-    };
+      /** Format: uuid */
+      ownerId?: string;
+    } & unknown;
     UnifiedMemberInstallationReport: {
       /** Format: uuid */
       clientId: string;
@@ -2391,6 +2395,15 @@ export interface components {
       | components['schemas']['GitManifest'];
     /** @enum {string} */
     UnifiedInstallationMode: 'required' | 'default' | 'optional';
+    /** Format: uuid */
+    ownerId: string;
+    UnifiedAssignmentFailure: {
+      /** Format: uuid */
+      packageId: string;
+      /** @constant */
+      state: 'failed';
+      errorCode: string;
+    };
   };
   responses: never;
   parameters: {

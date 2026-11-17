@@ -128,6 +128,9 @@ func (m *UnifiedManager) publishSessionPolicy(file string, s *unifiedNodeState) 
 
 func (m *UnifiedManager) sessionPolicy(s *unifiedNodeState) map[string]any {
 	policy := map[string]any{"schemaVersion": 1, "newSessionRequired": s.newSessionRequired(), "leaseExpiresAt": "", "trustedTime": ""}
+	policy["allowPersonalPlugins"] = s.AllowPersonalPlugins
+	policy["managedPluginNames"] = append([]string{}, s.ManagedPluginNames...)
+	policy["plugins"] = unifiedPluginPolicy(s)
 	if s.State == "active" {
 		policy["leaseExpiresAt"] = s.LeaseExpiresAt
 		policy["trustedTime"] = s.Clock["maxObservedTime"]

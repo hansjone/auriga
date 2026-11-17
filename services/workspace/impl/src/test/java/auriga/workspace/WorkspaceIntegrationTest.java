@@ -657,6 +657,7 @@ class WorkspaceIntegrationTest {
                     WorkspaceService.spec(row), unifiedReviewRevocations(), true));
             row = store.instance(instance);
             assertSafetySideEffectsPreserved(before, row);
+            assertFalse((Boolean) row.get("restart_pending"));
             var projected = WorkspaceService.spec(Map.of("spec", row.get("catalog_safety_spec")));
             assertEquals(approved.getDesired(), projected.getDesired());
             assertProjectionSecrets(control, before, projected);
@@ -683,8 +684,10 @@ class WorkspaceIntegrationTest {
     }
   }
 
-  @Test
-  void safetyProjectionDoesNotCreateRestartForUncheckedExecutionChange() throws Exception {
+  @ParameterizedTest
+  @ValueSource(booleans = {true, false})
+  void safetyProjectionRestartsOnlyForAdmittedExecutionChange(boolean disableResource)
+      throws Exception {
     var control = new RecoveryControl(tenant);
     try (var resources =
         new WorkspaceUnifiedResources(
@@ -735,13 +738,14 @@ class WorkspaceIntegrationTest {
                 UnifiedSpec.bump(
                     UnifiedSpec.revocations(
                         WorkspaceService.spec(row).toBuilder()
-                            .setUnifiedResources(0, disabled)
+                            .setUnifiedResources(0, disableResource ? disabled : running)
                             .build(),
                         unifiedReviewRevocations(),
                         false));
             service.saveSafetySpec(row, next);
             row = store.instance(instance);
             assertSafetySideEffectsPreserved(before, row);
+            assertEquals(disableResource, row.get("restart_pending"));
             assertEquals(
                 history + 1,
                 store.jdbc.queryForObject(
@@ -754,7 +758,7 @@ class WorkspaceIntegrationTest {
             var projected = service.dispatchSpec(row);
             assertNotNull(projected);
             assertNotEquals("unchecked-runtime", projected.getDsh().getVersion());
-            assertEquals(disabled, projected.getUnifiedResources(0));
+            assertEquals(disableResource ? disabled : running, projected.getUnifiedResources(0));
             assertProjectionSecrets(control, before, projected);
             return null;
           });
@@ -792,7 +796,6 @@ class WorkspaceIntegrationTest {
             "managed_network_state",
             "managed_retry_at",
             "managed_wait_until",
-            "restart_pending",
             "startup_traceparent")) assertEquals(before.get(field), after.get(field), field);
     for (String field :
         List.of(

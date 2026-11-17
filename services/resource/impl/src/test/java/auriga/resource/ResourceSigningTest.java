@@ -11,6 +11,58 @@ import tools.jackson.databind.json.JsonMapper;
 
 class ResourceSigningTest {
   @Test
+  void automaticDowngradeNeedsAnIndependentRoot() throws Exception {
+    var keys = KeyPairGenerator.getInstance("Ed25519");
+    var release = keys.generateKeyPair();
+    var revoke = keys.generateKeyPair();
+    var downgrade = keys.generateKeyPair();
+    var unsigned = JsonMapper.builder().build().createObjectNode().put("purpose", "downgrade");
+    var missing =
+        new ResourceSigning("release", release.getPrivate(), "revoke", revoke.getPrivate());
+    assertEquals(
+        auriga.common.error.CommonErrors.UNAVAILABLE,
+        assertThrows(
+                auriga.common.error.AurigaException.class, () -> missing.signDowngrade(unsigned))
+            .errorCode());
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new ResourceSigning(
+                "release",
+                release.getPrivate(),
+                "revoke",
+                revoke.getPrivate(),
+                "down",
+                release.getPrivate()));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new ResourceSigning(
+                "release",
+                release.getPrivate(),
+                "revoke",
+                revoke.getPrivate(),
+                "release",
+                downgrade.getPrivate()));
+    var signing =
+        new ResourceSigning(
+            "release",
+            release.getPrivate(),
+            "revoke",
+            revoke.getPrivate(),
+            "down",
+            downgrade.getPrivate());
+    var signed = signing.signDowngrade(unsigned);
+    assertEquals("down", signed.path("signature").path("kid").asString());
+    var verifier = Signature.getInstance("Ed25519");
+    verifier.initVerify(downgrade.getPublic());
+    verifier.update(ResourceSigning.canonical(unsigned).getBytes(StandardCharsets.UTF_8));
+    assertTrue(
+        verifier.verify(
+            Base64.getUrlDecoder().decode(signed.path("signature").path("value").asString())));
+  }
+
+  @Test
   void shortestTimestampMappingAndLegacySignatureUseTheSameInstant() throws Exception {
     var json = JsonMapper.builder().build();
     var release = KeyPairGenerator.getInstance("Ed25519").generateKeyPair();

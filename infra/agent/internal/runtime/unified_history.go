@@ -122,12 +122,15 @@ func (m *UnifiedManager) authorizeDowngrade(spec *nodev1.InstanceSpec, s *unifie
 	for _, id := range s.UsedAuthorizations {
 		used = append(used, id)
 	}
-	for _, authorization := range spec.GetUnifiedDowngrades() {
+	for _, authorization := range append(append([]*resourcev1.UnifiedDowngradeAuthorization{}, spec.GetUnifiedDowngrades()...), ref.GetDowngradeAuthorization()) {
+		if authorization == nil {
+			continue
+		}
 		document, err := unifiedProto(authorization)
 		if err != nil {
 			continue
 		}
-		input := map[string]any{"authorization": document, "identity": identity, "instanceId": spec.GetInstanceId(), "fromReleaseSequence": high["releaseSequence"], "toReleaseSequence": json.Number(fmt.Sprint(ref.GetReleaseSequence())), "now": m.now().Format(time.RFC3339Nano), "usedAuthorizationIds": used}
+		input := map[string]any{"authorization": document, "identity": identity, "ownerId": spec.GetOwnerId(), "instanceId": spec.GetInstanceId(), "fromReleaseSequence": high["releaseSequence"], "toReleaseSequence": json.Number(fmt.Sprint(ref.GetReleaseSequence())), "now": m.now().Format(time.RFC3339Nano), "usedAuthorizationIds": used}
 		if m.Protocol.Evaluate("downgrade", input) == nil {
 			return authorization.GetAuthorizationId(), nil
 		}
