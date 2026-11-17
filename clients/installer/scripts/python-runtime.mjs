@@ -66,6 +66,20 @@ export function validatePythonLock(lock) {
       throw new Error(`invalid wheel pin: ${wheel.name}`);
     seen.add(name);
   }
+  const pip = lock.pip;
+  if (
+    !pip ||
+    pip.name !== 'pip' ||
+    pip.version !== '26.3' ||
+    pip.filename !== `pip-${pip.version}-py3-none-any.whl` ||
+    !pip.url?.startsWith('https://files.pythonhosted.org/packages/') ||
+    new URL(pip.url).pathname.split('/').pop() !== pip.filename ||
+    !HASH.test(pip.sha256) ||
+    !Number.isSafeInteger(pip.bytes) ||
+    pip.bytes <= 0 ||
+    pip.license !== 'MIT'
+  )
+    throw new Error('invalid pip pin');
   return lock;
 }
 
@@ -78,6 +92,7 @@ export function pythonInputs(lock) {
   return [
     { ...lock.archive, directory: 'python' },
     ...lock.wheels.map((wheel) => ({ ...wheel, directory: 'python/wheels' })),
+    { ...lock.pip, directory: 'python/pip' },
   ];
 }
 
@@ -217,6 +232,24 @@ export async function assemblePython({
     if (path.endsWith('.pdb') || path.endsWith('.pyc'))
       rmSync(join(directory, path));
   const python = join(directory, 'python.exe');
+  const bootstrap = join(payload, 'auriga/python');
+  mkdirSync(bootstrap, { recursive: true });
+  cpSync(
+    join(inputs, 'python/pip', lock.pip.filename),
+    join(bootstrap, lock.pip.filename),
+  );
+  writeFileSync(
+    join(bootstrap, 'pip.json'),
+    JSON.stringify(lock.pip, null, 2) + '\n',
+  );
+  cpSync(
+    join(here, 'lib/bootstrap-pip.py'),
+    join(bootstrap, 'bootstrap-pip.py'),
+  );
+  cpSync(
+    join(here, 'lib/python-sitecustomize.py'),
+    join(directory, 'Lib/sitecustomize.py'),
+  );
   const installed = JSON.parse(
     run(python, [
       '-I',

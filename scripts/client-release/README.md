@@ -20,7 +20,7 @@ node scripts/client-release/sign-inputs.mjs --devkit D:\exports\client-kits\auri
 
 输入包括构建 Node22.19.0/npm10.9.3、根 packageManager 固定 pnpm、完整 Windows pnpm store（含 esbuild/rollup 可选二进制）、upstream.json 固定运行 Node/zip摘要、内置 pnpm/integrity、已提交 DSH npm lock 对应完整 Windows 生产闭包（含 DSH runtime/LibreOffice）及插件生产依赖。broker/helper、UI、插件由现场当前源码重建，不使用旧产物替代，不改上游 DSH；可选宿主 peer 不另装副本。
 
-2026-11-17起，Windows附件还包含 `python/cpython-3.12.14+20260901-x86_64-pc-windows-msvc-install_only.tar.gz` 与 `python/wheels/*.whl`。完整URL、长度、SHA256及许可证固定在 `clients/installer/locks/python-win-x64.json`；联网prepare按锁获取并校验全部14个输入，windows-client.json逐文件登记。该锁显式参与锁键，Python pin或wheel锁变化必需重出附件，旧附件拒绝复用；不得现场改版本或用sdist替代wheel。
+2026-11-17起，Windows附件还包含 `python/cpython-3.12.14+20260901-x86_64-pc-windows-msvc-install_only.tar.gz`、`python/wheels/*.whl` 与个人环境引导输入 `python/pip/pip-26.3-py3-none-any.whl`。完整URL、长度、SHA256及许可证固定在 `clients/installer/locks/python-win-x64.json`；联网prepare按锁获取并校验全部15个输入，windows-client.json逐文件登记。该锁显式参与锁键，Python pin或wheel锁变化必需重出附件，旧附件拒绝复用；不得现场改版本或用sdist替代wheel。
 
 离线构建先验附件，再校验Python/wheel锁摘要；使用内置解释器的 `-I -S` 和stdlib解包wheel到 `payload/runtime/python/Lib/site-packages`，不调用pip、安装脚本、构建后端或联网解析。移除pip、Lib/ensurepip及内嵌wheel、开发调试文件，省略wheel的可选CLI脚本，保留许可证原文，生成 `runtime/python/runtime.json`（含全部wheel摘要、包版本和许可证路径）。固定解释器再以 `-I -S -B -m compileall --invalidation-mode unchecked-hash` 预编译Lib/site-packages，pyc随包清单校验。运行时随完整安装包更新及回滚；现有自动更新不采用二进制差分，即使Python pin没变，每次更新仍携带完整运行时。
 

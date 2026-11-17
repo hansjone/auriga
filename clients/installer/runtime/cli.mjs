@@ -8,6 +8,7 @@ import {
   launch,
   rollback,
   uninstall,
+  pythonCommand,
 } from './core.mjs';
 import { desktopInfo, updateCommand } from './desktop-control.mjs';
 import { createControl } from './tray-control.mjs';
@@ -124,6 +125,14 @@ try {
       // DSH may also end on its own; an open control pipe must not keep us alive.
       if (tray) process.stdin.destroy();
     }
+  } else if (command === 'python') {
+    console.log(
+      JSON.stringify(
+        pythonCommand(values.root, positional[0], {
+          index: values.index === 'none' ? null : values.index,
+        }),
+      ),
+    );
   } else if (command === 'status') {
     console.log(JSON.stringify(desktopInfo(values.root)));
   } else if (command === 'update') {
@@ -137,7 +146,7 @@ try {
     });
   } else {
     console.error(
-      'usage: cli.mjs install|rollback|uninstall|launch|status|update check|download|approve|configure|diagnostics export --root <dir> ...',
+      'usage: cli.mjs install|rollback|uninstall|launch|status|update check|download|approve|configure|python reset|configure --index <url|none>|diagnostics export --root <dir> ...',
     );
     process.exitCode = 2;
   }

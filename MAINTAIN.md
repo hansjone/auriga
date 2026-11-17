@@ -191,6 +191,42 @@ $env:AURIGA_CLIENT_NODE_SHA256 = '<独立批准的node.exe SHA256>'
 
 2026-11-17决定：Windows x64客户端随包内置CPython 3.12.14和13个固定office/data wheel，成员无需另装Python，离线可用。`clients/installer/locks/python-win-x64.json`固定python-build-standalone release `20260901` install_only及全部wheel的URL/长度/SHA256/许可证；此锁进入Windows附件锁键，变化必须重出并审核附件。prepare只联网获取固定字节，现场离线构建只校验/解包，不执行pip、sdist、构建后端或安装脚本。运行时清单和许可证随包，`versions/<id>/runtime/python`随完整包验签、升级和回滚，启动器仅为DSH及其子进程前置PATH。自动更新当前传完整exe，无二进制差分，发行时应计入完整Python体积；Java及其他Python版本的按需下载仍属P3。固定解释器预编译unchecked-hash pyc并纳入校验。安装时用当前用户SID创建显式保护DACL，复制校验后拒绝普通文件访问的内容写入和新建目录项，保留删除/WriteAttributes支持清理。运行时无pip/ensurepip，不支持安装额外依赖。提供python/python3，系统py按原PATH解析。运行时额外文件触发desktop.python_runtime_modified并提示重新运行同版本安装包修复。发布前按发行说明离屏执行python-smoke，并核对包内13个精确版本。
 
+### 现场个人 Python 加包
+
+客户端在 `<DataHome>\python-user\cp312` 创建个人 venv，继承客户端内置包。pip 26.3 wheel 与解释器共同锁定，附件包括新增的 `python/pip/` 输入，共15项 Python 输入，锁变化后重新准备并审核 devkit。pip 首次准备时离线解包到个人 venv。普通安装进入个人目录，内置包优先并有精确版本约束，不兼容依赖会失败。只安装适用于 CPython 3.12 / Windows x64 的 wheel 或兼容纯 Python wheel。
+
+现场 Forgejo 管理员启用包仓库功能，确定包归属用户或组织 `owner`，给上传账号该归属的包写权限。PyPI 包仓库随首次上传建立，可在归属主页“软件包”中查看，也可关联代码仓库。联网准备机用独立上传环境安装 twine，将所需包及其传递依赖的 wheel 全部带入现场。上传时由交互提示或受控凭据环境提供认证，令牌不写入仓库和索引 URL。Forgejo 的上传路径与下载索引路径如下。[Forgejo PyPI 文档](https://forgejo.org/docs/latest/user/packages/pypi/)
+
+```powershell
+python -m twine upload --repository-url https://forgejo.example.com/api/packages/owner/pypi D:\wheels\*.whl
+```
+
+下载索引为 `https://forgejo.example.com/api/packages/owner/pypi/simple`。当前本机索引配置使用无凭据 URL，私有仓库认证通过 pip 支持的现场凭据机制单独设置，禁止把 token 放进下述命令或配置文件。需私有认证时在现场验证凭据可用，pip 已关闭交互输入。HTTP 索引也支持，显式配置后只为该主机生成 trusted-host。
+
+从托盘退出 Auriga 后，用已安装客户端的 Node 和 CLI 保存索引，再从正常入口启动 Auriga。以下安装根目录仅为示例。
+
+```powershell
+$installRoot = 'C:\Apps\AurigaDesktop'
+$packageId = (Get-Content -LiteralPath "$installRoot\current.txt").Trim()
+$clientVersion = Join-Path $installRoot "versions\$packageId"
+& "$clientVersion\upstream\node\node.exe" "$clientVersion\auriga\runtime\cli.mjs" python configure --root $installRoot --index https://forgejo.example.com/api/packages/owner/pypi/simple
+```
+
+设置保存在 `<DataHome>\auriga\python.json`，个人 `<DataHome>\python-user\pip.conf` 在准备时生成，DSH 子进程通过 `PIP_CONFIG_FILE` 使用它。环境清理继承的 PYTHON/PIP 设置。索引变化在重启后生效。无索引时包名安装直接失败，可用同一命令 `--index none` 恢复离线模式。离线 wheel 使用完整路径安装，所有依赖也须预置在 wheel 目录。
+
+在 DSH 会话中执行以下命令，或让会话中的助手执行。
+
+```text
+python -m pip --version
+python -m pip install package-name==1.0.0
+python -m pip install --no-index --find-links D:\wheels package-name==1.0.0
+python -m pip check
+```
+
+同名个人包无法替换内置包。需要更新内置13包时更新客户端锁并发行。个人环境会随升级/回滚保留，版本引用随当前客户端刷新。个人环境故障时使用托盘“设置 → 重置个人 Python 环境”，确认后停止 DSH、删除并离线重建环境，再自动启动 DSH，个人包需要重新安装，索引设置保留。也可在退出客户端后用上述 CLI 执行 `python reset --root $installRoot`。内置运行时损坏仍按启动器提示重装同版本客户端。
+
+### 现场桌面发行签名
+
 首次在受信离线签名机生成独立现场桌面发行钥；父目录须存在、输出目录须全新。私钥及目录仅当前用户可读写，签名前复核权限，备份到受控离线介质。
 
 ```powershell
