@@ -834,7 +834,7 @@ func equalImageLayers(a, b []string) bool {
 // the sole save selector: a concurrent mutable tag change cannot redirect it.
 func inspectDockerImage(ctx context.Context, tag string) (imageInspection, error) {
 	var actual imageInspection
-	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "docker", "image", "inspect", "--format", `{"Id":{{json .Id}},"Os":{{json .Os}},"Architecture":{{json .Architecture}}}`, tag)
 	var out imageLimitedBuffer
@@ -843,6 +843,9 @@ func inspectDockerImage(ctx context.Context, tag string) (imageInspection, error
 	cmd.Stderr = io.Discard
 	cmd.WaitDelay = 2 * time.Second
 	if err := cmd.Run(); err != nil {
+		if ctx.Err() != nil {
+			return actual, fmt.Errorf("docker image inspect interrupted: %w", ctx.Err())
+		}
 		return actual, fmt.Errorf("docker image inspect failed: %w", err)
 	}
 	var record struct {

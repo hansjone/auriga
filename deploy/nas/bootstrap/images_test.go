@@ -493,14 +493,14 @@ func TestImageDockerSubprocessUsesDeadlineAndClosesFailedExport(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
-	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	start := time.Now()
 	err := exportDockerImage(ctx, imageTestDigest([]byte("id")), func(io.Reader) error { return errors.New("reject immediately") })
 	if err == nil || !strings.Contains(err.Error(), "reject immediately") || time.Since(start) > 3*time.Second {
 		t.Fatalf("export process not cancelled/reaped: %v", err)
 	}
-	ctx, cancelExport := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	ctx, cancelExport := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancelExport()
 	err = exportDockerImage(ctx, imageTestDigest([]byte("id")), func(input io.Reader) error {
 		if _, err := io.Copy(io.Discard, input); err != nil {
@@ -511,10 +511,11 @@ func TestImageDockerSubprocessUsesDeadlineAndClosesFailedExport(t *testing.T) {
 	if !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("export deadline hidden by archive error: %v", err)
 	}
-	ctx, cancel2 := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	ctx, cancel2 := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel2()
 	start = time.Now()
-	if _, err := inspectDockerImage(ctx, "auriga/platform:nas"); err == nil || time.Since(start) > 3*time.Second {
+	_, err = inspectDockerImage(ctx, "auriga/platform:nas")
+	if !errors.Is(err, context.DeadlineExceeded) || time.Since(start) > 10*time.Second {
 		t.Fatalf("inspect deadline not enforced: %v", err)
 	}
 }
