@@ -118,6 +118,13 @@ static class Desktop
 
     public static void Open(string target)
     {
+        // Tests record the hand-off instead of launching the user's real browser.
+        var log = Environment.GetEnvironmentVariable("AURIGA_TEST_OPEN_LOG");
+        if (!string.IsNullOrEmpty(log))
+        {
+            try { File.AppendAllText(log, target + Environment.NewLine); } catch (Exception) { }
+            return;
+        }
         try { Process.Start(new ProcessStartInfo(target) { UseShellExecute = true }); }
         catch (Exception) { }
     }
