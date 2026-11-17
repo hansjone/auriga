@@ -69,7 +69,7 @@ export function apply(ctx) {
           } catch (error) {
             if (error.code !== 'EEXIST') throw error;
           }
-          if (installation.state === 'applied') break;
+          if (installation?.state === 'applied') break;
           await delay(500);
         }
         if (installation?.state !== 'applied')
