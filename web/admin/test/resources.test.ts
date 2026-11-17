@@ -717,7 +717,8 @@ describe('resource async boundaries and navigation', () => {
         realRouter.resolve(path).matched.at(-1)?.components?.default,
       ).toBeTruthy();
     expect(
-      realRouter.resolve('/resources').matched.at(-1)?.components?.default,
+      realRouter.resolve('/resources/plugins').matched.at(-1)?.components
+        ?.default,
     ).toBe(ResourceCenterView);
   });
   it('preserves headquarters and devices as unavailable and retains relay navigation for the platform pages', async () => {

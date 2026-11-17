@@ -30,11 +30,13 @@ let alive = true;
 onBeforeUnmount(() => {
   alive = false;
 });
+const inSection = (path: string) =>
+  route.path === path || route.path.startsWith(path + '/');
 const active = computed(() =>
   navigation.find(
     (item) =>
       item.path === route.path ||
-      item.children.some(([path]) => path === route.path),
+      item.children.some(([path]) => inSection(path)),
   ),
 );
 onMounted(async () => {
@@ -204,7 +206,7 @@ async function logout() {
             v-for="[path, key] in active.children"
             :key="path"
             :to="path"
-            :aria-current="route.path === path ? 'page' : undefined"
+            :aria-current="inSection(path) ? 'page' : undefined"
             >{{ adminT(key) }}</RouterLink
           >
         </nav>
