@@ -208,7 +208,7 @@ exec "$AURIGA_LIFECYCLE_TEST_BOOTSTRAP" "$@"
 	}
 	vars = filepath.Join(n1Root, "var")
 	proofs, image := runtimeProofFixture(t, "real")
-	args := []string{"-out", vars, "-access-file", access, "-edge-container", "public-test-edge", "-image", image, "-fixture", "real", "-runtime-proofs", proofs,
+	args := []string{"-out", vars, "-access-file", access, "-edge-container", "public-test-edge", "-image", image, "-fixture", "real", "-runtime-proofs", proofs, "-real-dsh-metadata", realFixtureMetadata(t, image),
 		"-https-cert-file", filepath.Join(f.out, "browser-tls", "browser.crt"), "-https-key-file", filepath.Join(f.out, "browser-tls", "browser.key"), "-network-collab-file", f.input}
 	if b, e := exec.Command(f.binary, args...).CombinedOutput(); e != nil {
 		t.Fatalf("sealed N1 fixture: %v %s", e, b)

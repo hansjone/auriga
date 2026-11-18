@@ -33,6 +33,7 @@ func TestComposeDirectHTTPSCLI(t *testing.T) {
 		t.Fatalf("build: %v %s", err, b)
 	}
 	proofs, image := runtimeProofFixture(t, "real")
+	metadata := realFixtureMetadata(t, image)
 	for _, mode := range []string{"domain", "ip"} {
 		t.Run(mode, func(t *testing.T) {
 			a := customAccess(mode)
@@ -85,7 +86,7 @@ func TestComposeDirectHTTPSCLI(t *testing.T) {
 			if err := os.Chmod(out, 0755); err != nil {
 				t.Fatal(err)
 			}
-			args := []string{"-out", out, "-access-file", input, "-edge-container", "public-test-edge", "-image", image, "-fixture", "real", "-runtime-proofs", proofs, "-https-cert-file", certFile, "-https-key-file", keyFile}
+			args := []string{"-out", out, "-access-file", input, "-edge-container", "public-test-edge", "-image", image, "-fixture", "real", "-runtime-proofs", proofs, "-real-dsh-metadata", metadata, "-https-cert-file", certFile, "-https-key-file", keyFile}
 			for i := 0; i < 2; i++ {
 				if b, err := exec.Command(binary, args...).CombinedOutput(); err != nil {
 					t.Fatalf("HTTPS generation/reentry: %v %s", err, b)

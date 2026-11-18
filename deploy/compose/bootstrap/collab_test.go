@@ -184,7 +184,7 @@ func TestCollabProjectionAndReceipt(t *testing.T) {
 	if err := os.WriteFile(keyFile, key, 0600); err != nil {
 		t.Fatal(err)
 	}
-	args := []string{"-out", out, "-access-file", accessFile, "-edge-container", "public-test-edge", "-image", image, "-fixture", "real", "-runtime-proofs", proofs, "-https-cert-file", certFile, "-https-key-file", keyFile, "-network-collab-file", file}
+	args := []string{"-out", out, "-access-file", accessFile, "-edge-container", "public-test-edge", "-image", image, "-fixture", "real", "-runtime-proofs", proofs, "-real-dsh-metadata", realFixtureMetadata(t, image), "-https-cert-file", certFile, "-https-key-file", keyFile, "-network-collab-file", file}
 	if runtime.GOOS != "linux" {
 		if b, e := exec.Command(binary, args...).CombinedOutput(); e == nil || !strings.Contains(string(b), "activation requires Linux") {
 			t.Fatalf("non-Linux activation accepted/wrong error: %v %s", e, b)

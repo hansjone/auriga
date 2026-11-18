@@ -36,7 +36,7 @@ import (
 
 const iamRPCPort = 9091
 
-// Keep direct bootstrap invocations on the same pin as the real-dsh build.
+// A new real fixture must match the pin verified by the real-dsh build.
 // TestFixtureTemplates checks it against versions.json and the npm lock.
 const pinnedRealDSHVersion = "0.2.1-rc.3"
 
@@ -50,7 +50,7 @@ func main() {
 	out := flag.String("out", "deploy/compose/var", "output directory")
 	image := flag.String("image", "", "docker image ref repo@sha256:… for the selected DSH fixture")
 	fixture := flag.String("fixture", "fake", "DSH fixture: fake or real")
-	realDSHMetadata := flag.String("real-dsh-metadata", "", "build metadata for the selected real DSH image (first installation only)")
+	realDSHMetadata := flag.String("real-dsh-metadata", "", "trusted image and version from the verified real DSH build (required for first real installation)")
 	edgeContainer := flag.String("edge-container", "auriga-m2-edge", "trusted edge container identity (must match Compose project)")
 	accessFile := flag.String("access-file", "", "trusted deployment access JSON (default: disposable M2 domain recipe)")
 	httpsCert := flag.String("https-cert-file", "", "external direct HTTPS PEM certificate chain")
@@ -163,7 +163,10 @@ func main() {
 		fmt.Printf("bootstrap ok out=%s ca_sha256=%s image=%s (existing installation)\n", *out, fp, *image)
 		return
 	}
-	if *fixture == "real" && *realDSHMetadata != "" {
+	if *fixture == "real" {
+		if *realDSHMetadata == "" {
+			fatalf("first real installation requires -real-dsh-metadata from the verified build; use deploy/compose/scripts/prepare.sh")
+		}
 		if err := validateRealDSHMetadata(*realDSHMetadata, *image); err != nil {
 			fatalf("%v", err)
 		}
