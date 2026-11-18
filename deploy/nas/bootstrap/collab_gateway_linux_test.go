@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"crypto/x509"
 	"io"
 	"os"
 	"os/exec"
@@ -198,8 +199,20 @@ func nasCheckProductionGatewayConsumer(t *testing.T, f *nasRotationFixture, runt
 	}
 	version := f.payload.Version
 	check := filepath.Join(work, "verify.json")
-	nasRotationTestJSON(t, check, map[string]string{"frames": output, "signed": filepath.Join(f.r.root, "installs", version, "config/signed.json"), "root": filepath.Join(f.r.source, "collab-installation/root.der")})
+	nasRotationTestJSON(t, check, map[string]string{
+		"frames": output,
+		"signed": filepath.Join(f.r.root, "installs", version, "config/signed.json"),
+		"trust":  filepath.Join(f.r.root, "requests", version, "trust.json"),
+		"root":   filepath.Join(f.r.source, "collab-installation/root.der"),
+	})
+	// Let the consumer fixture sign a v2 chain under this test installation's root.
+	rootKey, e := x509.MarshalPKCS8PrivateKey(f.root)
+	if e != nil {
+		t.Fatal(e)
+	}
+	defer clear(rootKey)
 	cmd = exec.Command("node", filepath.Join(repo, "deploy/nas/test/gateway-protocol-verify.mjs"), check)
+	cmd.Stdin = bytes.NewReader(rootKey)
 	if b, e := cmd.CombinedOutput(); e != nil {
 		t.Fatalf("production plugin verifier: %v\n%s", e, b)
 	} else {
