@@ -9,7 +9,7 @@ node scripts/resource-seed/prepare.mjs 'D:\path\to\dsh-memwiki'
 node seed-resources/publish-unified-plugin.mjs ./seed-resources/dsh-memwiki-0.4.0.tgz ./seed-resources/dsh-memwiki.auriga-resource.json
 ```
 
-预览校验原始清单 schema、tgz 的大小与 SHA-256，以及归档内 `package/package.json` 的 npm 名称和版本，直接输出原始清单字节。目录资源名、能力、DSH 兼容范围和版本均来自清单。预览无需网络、平台地址或令牌。
+预览使用与发布相同的本地校验，核对原始清单 schema、权限域名与版本范围、tgz 大小与 SHA-256、归档格式及 npm 元数据。包内 `engines.dsh` 如果存在，须与清单的 DSH 范围逐字一致。成功时直接输出原始清单字节，预览无需网络、平台地址或令牌。
 
 ## IP 模式使用浏览器管理台
 
@@ -26,4 +26,4 @@ node seed-resources/publish-unified-plugin.mjs ./seed-resources/dsh-memwiki-0.4.
 
 确认两名不同的非作者已分别审核并批准这组字节，安全审核者具备当前资格，有权发布者为非作者。主控在授权环境中给同一条预览命令追加 `--publish`。
 
-脚本通过统一目录创建、multipart 上传原始清单及 tgz、送审并以对应角色记录两个审核决定，最后由平台签发 v2 并发布。执行完成后回执包含 `packageId`、`versionId`、`manifestDigest` 和 `artifactDigest`，与准备产物摘要核对后从正常市场入口验证安装。该流程用于目标目录初次上架。已有同名资源时请求会失败，按管理台当前状态处理。部分失败可能留下草稿，先核对服务端进度再续办。
+脚本通过统一目录创建、multipart 上传原始清单及 tgz、送审并以对应角色记录两个审核决定，最后由平台签发 v2 并发布。执行完成后回执包含 `packageId`、`versionId`、`manifestDigest` 和 `artifactDigest`，与准备产物摘要核对后从正常市场入口验证安装。该流程用于目标目录初次上架。服务端仍会在每步核对当前权限、版本和资源状态。遇到已有同名资源或写入后出现权限、网络等问题时，先到管理台核对服务端进度，再接续处理已有草稿或审核记录。

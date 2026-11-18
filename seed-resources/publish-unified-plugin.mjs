@@ -2,9 +2,13 @@ import { readFile } from 'node:fs/promises';
 import { createHash, randomUUID } from 'node:crypto';
 import { isIP } from 'node:net';
 import { pathToFileURL } from 'node:url';
-import { validateArchive } from '../clients/dsh-plugin/src/resources/archive.js';
 import { parseStrictJson } from '../clients/dsh-plugin/src/resources/json.js';
 import { schemaValid } from '../clients/dsh-plugin/src/resources/schema.js';
+import {
+  catalogTrim,
+  validCatalogHost,
+  verifyCatalogPluginArchive,
+} from './catalog-plugin-preflight.mjs';
 
 const digest = (bytes) =>
   'sha256:' + createHash('sha256').update(bytes).digest('hex');
@@ -12,14 +16,13 @@ const semver =
   /^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:-(?:0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*))*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/;
 const validRange = (range) =>
   range === '*' ||
-  range.split('||').every(
-    (branch) =>
-      branch.trim() &&
-      branch
-        .trim()
-        .split(/\s+/)
+  (range === catalogTrim(range) &&
+    !range.includes('\0') &&
+    range.split('||').every((branch) =>
+      catalogTrim(branch)
+        .split(/[ \t\n\v\f\r]+/)
         .every((term) => semver.test(term.replace(/^(>=|<=|>|<|=|\^|~)/, ''))),
-  );
+    ));
 
 async function verifySeed(payload, rawManifest) {
   if (!rawManifest.length || rawManifest.length > 262144)
@@ -27,6 +30,15 @@ async function verifySeed(payload, rawManifest) {
   const manifest = parseStrictJson(rawManifest, true);
   if (!schemaValid('package', 'PluginManifest', manifest))
     throw new Error('Invalid plugin manifest');
+  if (!manifest.permissions.outboundHosts.every(validCatalogHost))
+    throw new Error(
+      'Plugin manifest outboundHosts must contain lowercase DNS names or valid numeric IP addresses',
+    );
+  if (
+    manifest.plugin.packageName === 'auriga-dsh' ||
+    manifest.plugin.packageName.startsWith('@deepseek-ai/')
+  )
+    throw new Error('Plugin manifest uses a reserved npm package name');
   if (
     !validRange(manifest.plugin.dshVersionRange) ||
     manifest.runtimes.some(({ versionRange }) => !validRange(versionRange))
@@ -40,10 +52,7 @@ async function verifySeed(payload, rawManifest) {
     artifact.digest !== digest(payload)
   )
     throw new Error('Plugin tgz does not match its manifest size and digest');
-  await validateArchive(payload, {
-    name: manifest.plugin.packageName,
-    version: manifest.version,
-  });
+  await verifyCatalogPluginArchive(payload, manifest);
   return manifest;
 }
 

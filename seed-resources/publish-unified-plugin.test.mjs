@@ -7,6 +7,8 @@ import { mkdtemp, readFile, rmdir, unlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { gzipSync, gunzipSync } from 'node:zlib';
+import { schemaValid } from '../clients/dsh-plugin/src/resources/schema.js';
 import { publishPlugin } from './publish-unified-plugin.mjs';
 
 const archive = new URL(
@@ -54,6 +56,55 @@ const publishedPath =
   '/api/resource/v1/admin/catalog/published?kind=plugin&limit=1';
 const tokens = { author: 'a', general: 'g', security: 's', publisher: 'p' };
 
+function manifestBytes(tgz, changes) {
+  return Buffer.from(
+    JSON.stringify(
+      {
+        ...manifest,
+        ...changes,
+        artifacts: [
+          { ...manifest.artifacts[0], digest: digest(tgz), sizeBytes: tgz.length },
+        ],
+      },
+      null,
+      2,
+    ) + '\n',
+  );
+}
+
+function packageMetadataVariant(changes) {
+  const tar = gunzipSync(payload);
+  for (let offset = 0; offset < tar.length; ) {
+    const header = Buffer.from(tar.subarray(offset, offset + 512));
+    if (header.every((byte) => byte === 0)) break;
+    const name = header.toString('utf8', 0, 100).split('\0')[0];
+    const size = Number.parseInt(header.toString('ascii', 124, 136), 8);
+    const start = offset + 512;
+    const next = start + Math.ceil(size / 512) * 512;
+    if (name === 'package/package.json') {
+      const metadata = JSON.parse(tar.subarray(start, start + size));
+      const updated = Buffer.from(JSON.stringify({ ...metadata, ...changes }));
+      header.write(updated.length.toString(8).padStart(11, '0') + '\0', 124);
+      header.fill(32, 148, 156);
+      const checksum = header.reduce((sum, byte) => sum + byte, 0);
+      header.write(checksum.toString(8).padStart(6, '0') + '\0 ', 148);
+      return gzipSync(
+        Buffer.concat([
+          tar.subarray(0, offset),
+          header,
+          updated,
+          Buffer.alloc((512 - (updated.length % 512)) % 512),
+          tar.subarray(next),
+        ]),
+      );
+    }
+    offset = next;
+  }
+  assert.fail('fixture has no package/package.json');
+}
+
+const noNetwork = () => assert.fail('unexpected preflight or write request');
+
 function adminPreflight(url, request) {
   assert.equal(request.redirect, 'error');
   if (url.pathname === '/resources/plugins') {
@@ -68,10 +119,11 @@ function adminPreflight(url, request) {
   return Response.json({ items: [] });
 }
 
-test('seed uses original multipart bytes, distinct review roles, exact digest and revision', async () => {
+async function assertPublication(tgz, sidecar) {
   const calls = [];
   const reads = [];
-  const manifestDigest = digest(rawManifest);
+  const expected = JSON.parse(sidecar);
+  const manifestDigest = digest(sidecar);
   const send = async (url, request) => {
     assert.equal(url.origin, adminOrigin);
     assert.equal(request.redirect, 'error');
@@ -85,7 +137,7 @@ test('seed uses original multipart bytes, distinct review roles, exact digest an
     switch (calls.length) {
       case 1:
         assert.deepEqual(JSON.parse(request.body), {
-          name: manifest.name,
+          name: expected.name,
           kind: 'plugin',
           visibility: 'tenant',
         });
@@ -97,14 +149,14 @@ test('seed uses original multipart bytes, distinct review roles, exact digest an
         const raw = Buffer.from(
           await request.body.get('manifest').arrayBuffer(),
         );
-        assert.deepEqual(raw, rawManifest);
+        assert.deepEqual(raw, sidecar);
         assert.equal(
           JSON.parse(await request.body.get('metadata').text()).expectedDigest,
           manifestDigest,
         );
         assert.deepEqual(
           Buffer.from(await request.body.get('artifacts').arrayBuffer()),
-          payload,
+          tgz,
         );
         result = { id: 'version-id', revision: 1 };
         break;
@@ -144,8 +196,8 @@ test('seed uses original multipart bytes, distinct review roles, exact digest an
   };
   const receipt = await publishPlugin(
     new URL(adminOrigin),
-    payload,
-    rawManifest,
+    tgz,
+    sidecar,
     tokens,
     send,
   );
@@ -155,7 +207,7 @@ test('seed uses original multipart bytes, distinct review roles, exact digest an
     kind: 'plugin',
     state: 'published',
     manifestDigest,
-    artifactDigest: digest(payload),
+    artifactDigest: digest(tgz),
   });
   assert.deepEqual(reads, ['/resources/plugins', publishedPath, publishedPath]);
   assert.deepEqual(
@@ -177,6 +229,107 @@ test('seed uses original multipart bytes, distinct review roles, exact digest an
     new Set(calls.map((call) => call.headers['Idempotency-Key'])).size,
     6,
   );
+}
+
+test('seed uses original multipart bytes, distinct review roles, exact digest and revision', async () => {
+  await assertPublication(payload, rawManifest);
+});
+
+test('schema-valid outbound hosts and npm metadata fail before any request when the catalog would reject them', async () => {
+  for (const host of [
+    'Example.TEST',
+    '*.example.test',
+    '192.0.02.10',
+    '999.0.2.10',
+    '::ffff:c000:20a',
+    '2001:db8::g',
+  ]) {
+    const sidecar = manifestBytes(payload, {
+      permissions: { ...manifest.permissions, outboundHosts: [host] },
+    });
+    assert(schemaValid('package', 'PluginManifest', JSON.parse(sidecar)), host);
+    await assert.rejects(
+      publishPlugin(adminOrigin, payload, sidecar, tokens, noNetwork),
+      /outboundHosts/,
+      host,
+    );
+  }
+
+  const tgz = packageMetadataVariant({
+    engines: { dsh: manifest.plugin.dshVersionRange },
+  });
+  await assert.rejects(
+    publishPlugin(
+      adminOrigin,
+      tgz,
+      manifestBytes(tgz, {
+        plugin: { ...manifest.plugin, dshVersionRange: '*' },
+      }),
+      tokens,
+      noNetwork,
+    ),
+    /engines\.dsh must exactly match/,
+  );
+  await assertPublication(
+    tgz,
+    manifestBytes(tgz, {
+      permissions: {
+        ...manifest.permissions,
+        outboundHosts: ['example.test', '192.0.2.10', '2001:db8::1'],
+      },
+    }),
+  );
+});
+
+test('catalog rejects reserved names, noncanonical ranges and unsupported npm declarations before preflight', async () => {
+  const tar = gunzipSync(payload);
+  const firstSize = Number.parseInt(tar.toString('ascii', 124, 136), 8);
+  assert.notEqual(firstSize % 512, 0);
+  tar[512 + firstSize] = 1;
+  for (const [tgz, changes, error] of [
+    [
+      payload,
+      { plugin: { ...manifest.plugin, packageName: '@deepseek-ai/dsh' } },
+      /reserved npm package name/,
+    ],
+    [
+      payload,
+      { plugin: { ...manifest.plugin, dshVersionRange: ' >=0.2.1-rc.3' } },
+      /full SemVer/,
+    ],
+    [
+      packageMetadataVariant({ engines: null }),
+      {},
+      /engines must be an object/,
+    ],
+    [
+      packageMetadataVariant({ gypfile: false }),
+      {},
+      /native build declaration/,
+    ],
+    [
+      packageMetadataVariant({ pnpm: { onlyBuiltDependencies: [] } }),
+      {},
+      /pnpm build declarations/,
+    ],
+    [
+      Buffer.concat([payload, gzipSync(Buffer.alloc(0))]),
+      {},
+      /one gzip member/,
+    ],
+    [gzipSync(tar), {}, /nonzero ustar padding/],
+  ]) {
+    await assert.rejects(
+      publishPlugin(
+        adminOrigin,
+        tgz,
+        manifestBytes(tgz, changes),
+        tokens,
+        noNetwork,
+      ),
+      error,
+    );
+  }
 });
 
 test('seed rejects a mismatched payload or npm version before creating a package', async () => {
