@@ -10,14 +10,18 @@ import (
 	"strings"
 
 	"github.com/hansjone/auriga/infra/gen/deployment"
+	"golang.org/x/net/http/httpguts"
 	"golang.org/x/net/idna"
 )
+
+const catalogWriteHeader = "X-Auriga-Catalog"
 
 type accessRoleKey struct{}
 type accessEntryKey struct{}
 type accessEntry struct {
 	role, scheme, host string
 	port               int
+	catalogWriteMarker bool
 }
 
 var entryDNSProfile = idna.New(idna.ValidateForRegistration(), idna.VerifyDNSLength(true), idna.Transitional(false))
@@ -206,8 +210,17 @@ func (g *Gateway) accessHandler(next http.Handler) http.Handler {
 			return
 		}
 		r = r.WithContext(context.WithValue(r.Context(), linkOriginKey{}, g.Cfg.linkOrigin(r, scheme)))
-		stripUntrustedEntryHeaders(r.Header)
 		e := accessEntry{role: role, scheme: scheme, host: host, port: port}
+		if role == "portal" && r.Method == http.MethodPost {
+			values := r.Header.Values(catalogWriteHeader)
+			connection := r.Header.Values("Connection")
+			// Carry only the write intent through header stripping. A hop-by-hop
+			// field must not remove the downstream Fetch Metadata check.
+			e.catalogWriteMarker = len(values) == 1 && values[0] == "1" &&
+				!httpguts.HeaderValuesContainsToken(connection, catalogWriteHeader) &&
+				!httpguts.HeaderValuesContainsToken(connection, "Sec-Fetch-Site")
+		}
+		stripUntrustedEntryHeaders(r.Header)
 		if role == "managed" {
 			e.role = "portal"
 		}

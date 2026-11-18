@@ -58,6 +58,9 @@ func TestSharedIPBrowser(t *testing.T) {
 	pub, priv, _ := ed25519.GenerateKey(rand.Reader)
 	seen := make(chan map[string]any, 4)
 	browser := newIPBrowser(t, false, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if len(r.Header.Values("X-Auriga-Catalog")) != 0 {
+			t.Error("catalog write marker was forwarded on the shared route")
+		}
 		c, e := sharedVerify(r.Header.Get("Auriga-Identity"), map[string]ed25519.PublicKey{"test": pub}, true, time.Now().Unix())
 		if e != nil {
 			t.Error(e)
@@ -89,6 +92,21 @@ func TestSharedIPBrowser(t *testing.T) {
 	got := <-seen
 	if got["canonicalPath"] != "/api" || !sharedEqual(got["binding"], c["binding"]) {
 		t.Fatal("wrong forwarded identity")
+	}
+	r, err = http.NewRequest("POST", browser.root+instanceMount(sharedTestID)+"auriga/resources/catalog/actions", strings.NewReader("{}"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.Header.Set("Origin", browser.root)
+	r.Header.Set("Content-Type", "application/json")
+	r.Header.Set("X-Auriga-Catalog", "1")
+	resp, err = browser.client.Do(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	readIPResponse(t, resp, 204, "")
+	if got := <-seen; got["canonicalPath"] != "/auriga/resources/catalog/actions" || got["method"] != "POST" {
+		t.Fatal("wrong shared catalog request identity")
 	}
 	a.mu.Lock()
 	a.binding["epoch"] = 2
