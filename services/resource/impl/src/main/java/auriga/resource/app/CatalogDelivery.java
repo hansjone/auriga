@@ -90,7 +90,7 @@ public final class CatalogDelivery implements UnifiedResourceResolution {
   }
 
   private static void match(String etag, long rev) {
-    ResourceWorkflow.match(etag, rev);
+    ResourceOperations.match(etag, rev);
   }
 
   private UnifiedResourceWorkspace workspace() {
@@ -437,7 +437,7 @@ public final class CatalogDelivery implements UnifiedResourceResolution {
             "rev",
             doc.path("installationRevision").asLong(),
             "hash",
-            ResourceWorkflow.hash(ticket),
+            ResourceOperations.hash(ticket),
             "expiry",
             Timestamp.from(expiry)));
     var n =
@@ -468,7 +468,7 @@ public final class CatalogDelivery implements UnifiedResourceResolution {
                       "c",
                       c,
                       "hash",
-                      ResourceWorkflow.hash(body.path("ticket").asString())));
+                      ResourceOperations.hash(body.path("ticket").asString())));
           if (!((Timestamp) ticket.get("expires_at")).toInstant().isAfter(clock.instant()))
             throw missing();
           catalog.pkg(r, (UUID) ticket.get("package_id"), false);
@@ -658,7 +658,7 @@ public final class CatalogDelivery implements UnifiedResourceResolution {
                     .putObject(pkg.toString())
                     .put("mode", policy.mode())
                     .set("identity", policy.identity()));
-    return ResourceWorkflow.hash(ResourceSigning.canonical(rules));
+    return ResourceOperations.hash(ResourceSigning.canonical(rules));
   }
 
   private Map<String, Object> marketPending(UnifiedResourceWorkspace.Snapshot snapshot) {
@@ -1475,7 +1475,7 @@ public final class CatalogDelivery implements UnifiedResourceResolution {
     var rows =
         db.rows(
             "INSERT INTO resource.catalog_instance_counter(tenant_id,instance_id,package_id,revision) VALUES(:tenant,:instance,:pkg,1) ON CONFLICT(tenant_id,instance_id,package_id) DO UPDATE SET revision=catalog_instance_counter.revision+1 WHERE catalog_instance_counter.revision<:maximum RETURNING revision",
-            db.args("instance", instance, "pkg", pkg, "maximum", ResourceWorkflow.MAX));
+            db.args("instance", instance, "pkg", pkg, "maximum", ResourceOperations.MAX));
     if (rows.isEmpty()) throw CatalogStatePolicy.conflict();
     return number(rows.getFirst(), "revision");
   }
@@ -1568,7 +1568,7 @@ public final class CatalogDelivery implements UnifiedResourceResolution {
                         db.args("instance", instance)),
                     "revision"))
             + 1;
-    if (revision > ResourceWorkflow.MAX) throw conflict();
+    if (revision > ResourceOperations.MAX) throw conflict();
     UUID id = UuidV7.next();
     var resolution = JSON.createObjectNode().put("selectionRevision", revision);
     // Private resolution metadata survives retries. The distribution document and event stay
@@ -1757,7 +1757,7 @@ public final class CatalogDelivery implements UnifiedResourceResolution {
             "rev",
             revision,
             "fp",
-            ResourceWorkflow.hash(ResourceSigning.canonical(body)),
+            ResourceOperations.hash(ResourceSigning.canonical(body)),
             "doc",
             doc.toString(),
             "resolution",

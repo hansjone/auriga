@@ -35,7 +35,7 @@ public final class CatalogStatePolicy {
 
   public static long advance(long persisted, long expected) {
     if (persisted != expected) throw new AurigaException(CommonErrors.PRECONDITION_FAILED);
-    if (persisted < 0 || persisted >= ResourceWorkflow.MAX) throw conflict();
+    if (persisted < 0 || persisted >= ResourceOperations.MAX) throw conflict();
     return persisted + 1;
   }
 
@@ -82,7 +82,7 @@ public final class CatalogStatePolicy {
   }
 
   public static ObjectNode assign(ObjectNode resource, long revision, String state) {
-    if (revision < 1 || revision > ResourceWorkflow.MAX) throw invalid();
+    if (revision < 1 || revision > ResourceOperations.MAX) throw invalid();
     success(state);
     resource
         .put("installationRevision", revision)

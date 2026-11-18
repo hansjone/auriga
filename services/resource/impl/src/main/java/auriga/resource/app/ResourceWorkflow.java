@@ -1,10 +1,11 @@
 package auriga.resource.app;
 
+import static auriga.resource.app.ResourceOperations.MAX;
+import static auriga.resource.app.ResourceOperations.match;
 import static auriga.resource.persistence.ResourceWorkflowStore.json;
 import static auriga.resource.persistence.ResourceWorkflowStore.number;
 import static auriga.resource.web.ResourceBody.*;
 
-import auriga.common.audit.*;
 import auriga.common.error.*;
 import auriga.common.events.EventPublisher;
 import auriga.common.persistence.UuidV7;
@@ -14,8 +15,6 @@ import auriga.resource.objectstore.*;
 import auriga.resource.persistence.*;
 import auriga.resource.web.model.*;
 import java.io.*;
-import java.nio.charset.StandardCharsets;
-import java.security.*;
 import java.time.*;
 import java.util.*;
 import java.util.function.*;
@@ -24,20 +23,20 @@ import tools.jackson.databind.node.ObjectNode;
 
 /** Immutable bytes, exact review binding and serialized tenant-scoped workflow mutations. */
 public final class ResourceWorkflow {
-  public static final long MAX = 9007199254740991L;
   private final ResourceStore resources;
   private final ResourceWorkflowStore db;
   private final ResourceAccess access;
+  private final ResourceOperations operations;
   private final Supplier<ObjectStore> objects;
   private final Supplier<ResourceSigning> signing;
   private final EventPublisher events;
-  private final AuditLogger audit;
   private final Clock clock;
 
   public ResourceWorkflow(
       ResourceStore resources,
       ResourceWorkflowStore db,
       ResourceAccess access,
+      ResourceOperations operations,
       Supplier<ObjectStore> objects,
       Supplier<ResourceSigning> signing,
       EventPublisher events,
@@ -45,87 +44,11 @@ public final class ResourceWorkflow {
     this.resources = resources;
     this.db = db;
     this.access = access;
+    this.operations = operations;
     this.objects = objects;
     this.signing = signing;
     this.events = events;
     this.clock = clock;
-    this.audit = new OutboxAuditLogger(events);
-  }
-
-  public static void match(String etag, long revision) {
-    if (etag == null || !etag.equals("\"" + revision + "\""))
-      throw new AurigaException(CommonErrors.PRECONDITION_FAILED);
-    if (revision >= MAX) throw new AurigaException(CommonErrors.CONFLICT);
-  }
-
-  private ResourceAccess.Reader authorize(AurigaPrincipal actor, String permission, boolean admin) {
-    if (permission.equals(ResourceAccess.READ)) return access.member(actor);
-    if (permission.equals("resource.levels.admin")) return access.owner(actor);
-    return admin ? access.administrator(actor, permission) : access.memberWriter(actor, permission);
-  }
-
-  JsonNode operation(
-      AurigaPrincipal actor,
-      String permission,
-      boolean admin,
-      String op,
-      String key,
-      ObjectNode body,
-      String etag,
-      Consumer<ResourceAccess.Reader> guard,
-      Function<ResourceAccess.Reader, JsonNode> action) {
-    return operation(actor, permission, admin, op, key, body, etag, guard, action, true);
-  }
-
-  JsonNode operation(
-      AurigaPrincipal actor,
-      String permission,
-      boolean admin,
-      String op,
-      String key,
-      ObjectNode body,
-      String etag,
-      Consumer<ResourceAccess.Reader> guard,
-      Function<ResourceAccess.Reader, JsonNode> action,
-      boolean replayResponse) {
-    authorize(actor, permission, admin);
-    if (key == null || !key.matches("[\\x21-\\x7E]{1,128}")) throw invalid();
-    String fingerprint;
-    try {
-      fingerprint =
-          hash(op + "\n" + Objects.toString(etag, "") + "\n" + ResourceSigning.canonical(body));
-    } catch (IllegalArgumentException e) {
-      throw invalid();
-    }
-    try {
-      return resources.write(
-          () -> {
-            db.lock(actor.subject() + ":" + op + ":" + key);
-            var r = authorize(actor, permission, admin);
-            guard.accept(r);
-            var replay = db.replay(r.account(), op, key, fingerprint, clock.instant());
-            if (replay.isPresent()) {
-              if (!replayResponse) throw new AurigaException(CommonErrors.CONFLICT);
-              return replay.get();
-            }
-            var result = action.apply(r);
-            var receipt = replayResponse ? result : JSON.createObjectNode().put("completed", true);
-            db.remember(r.account(), op, key, fingerprint, receipt, clock.instant());
-            return result;
-          });
-    } catch (org.springframework.dao.DataIntegrityViolationException e) {
-      throw new AurigaException(CommonErrors.CONFLICT);
-    }
-  }
-
-  public static String hash(String text) {
-    try {
-      return HexFormat.of()
-          .formatHex(
-              MessageDigest.getInstance("SHA-256").digest(text.getBytes(StandardCharsets.UTF_8)));
-    } catch (NoSuchAlgorithmException e) {
-      throw new IllegalStateException(e);
-    }
   }
 
   ModelPackage pkg(ResourceAccess.Reader r, UUID id, boolean owner, boolean shared) {
@@ -152,26 +75,9 @@ public final class ResourceWorkflow {
     return row;
   }
 
-  void recorded(ResourceAccess.Reader r, String action, UUID id) {
-    audit.record(
-        AuditEntry.builder(action)
-            .target("resource", id.toString())
-            .actor(new AuditEntry.Actor("user", r.account().toString()))
-            .build());
-  }
-
   private static String safeReason(String reason) {
     return auriga.common.observability.SensitiveDataMasker.mask(reason)
         .replaceAll("(?i)https?://[^\\s]+", "[url omitted]");
-  }
-
-  private void recorded(ResourceAccess.Reader r, String action, UUID id, String reason) {
-    audit.record(
-        AuditEntry.builder(action)
-            .target("resource", id.toString())
-            .actor(new AuditEntry.Actor("user", r.account().toString()))
-            .detail("reason", reason)
-            .build());
   }
 
   private void state(UUID p, UUID v, String state) {
@@ -247,7 +153,7 @@ public final class ResourceWorkflow {
       }
       ObjectNode stored = metadata.deepCopy();
       stored.set("permissions", declared);
-      return operation(
+      return operations.operation(
           actor,
           ResourceAccess.UPLOAD,
           false,
@@ -291,7 +197,7 @@ public final class ResourceWorkflow {
             db.update(
                 "UPDATE resource.resource_package SET revision=revision+1 WHERE tenant_id=:tenant AND id=:id",
                 db.args("id", p));
-            recorded(current, "resource.version.upload", id);
+            operations.recorded(current, "resource.version.upload", id);
             return db.versionJson(db.version(p, id));
           });
     } finally {
@@ -302,7 +208,7 @@ public final class ResourceWorkflow {
   public JsonNode submit(
       AurigaPrincipal actor, UUID p, UUID v, ObjectNode body, String key, String etag) {
     String reason = text(body, "reason", 1024);
-    return operation(
+    return operations.operation(
         actor,
         "resource.versions.submit",
         false,
@@ -337,7 +243,7 @@ public final class ResourceWorkflow {
                   reason,
                   "created",
                   OffsetDateTime.ofInstant(clock.instant(), ZoneOffset.UTC)));
-          recorded(r, "resource.version.submit", v);
+          operations.recorded(r, "resource.version.submit", v);
           return db.reviewJson(db.review(id));
         });
   }
@@ -345,7 +251,7 @@ public final class ResourceWorkflow {
   public JsonNode draft(
       AurigaPrincipal actor, UUID p, UUID v, ObjectNode body, String key, String etag) {
     text(body, "reason", 1024);
-    return operation(
+    return operations.operation(
         actor,
         ResourceAccess.UPLOAD,
         false,
@@ -359,7 +265,7 @@ public final class ResourceWorkflow {
           match(etag, number(row, "revision"));
           requireState(row, "rejected");
           state(p, v, "draft");
-          recorded(r, "resource.version.draft", v);
+          operations.recorded(r, "resource.version.draft", v);
           return db.versionJson(db.version(p, v));
         });
   }
@@ -373,7 +279,7 @@ public final class ResourceWorkflow {
   public JsonNode decide(AurigaPrincipal actor, UUID id, ObjectNode body, String key, String etag) {
     String reason = text(body, "reason", 1024), decision = text(body, "decision", 16);
     if (!Set.of("approve", "reject").contains(decision)) throw invalid();
-    return operation(
+    return operations.operation(
         actor,
         "resource.versions.review",
         true,
@@ -411,7 +317,7 @@ public final class ResourceWorkflow {
                   "now",
                   OffsetDateTime.ofInstant(clock.instant(), ZoneOffset.UTC)));
           state(p, v, next);
-          recorded(r, "resource.review." + decision, v);
+          operations.recorded(r, "resource.review." + decision, v);
           return db.reviewJson(db.review(id));
         });
   }
@@ -425,7 +331,7 @@ public final class ResourceWorkflow {
       String etag,
       boolean personal) {
     text(body, "reason", 1024);
-    return operation(
+    return operations.operation(
         actor,
         personal ? ResourceAccess.UPLOAD : "resource.versions.publish",
         !personal,
@@ -481,7 +387,8 @@ public final class ResourceWorkflow {
           db.update(
               "UPDATE resource.resource_package SET release_high_water=:seq,enabled=true,default_version_id=:version,revision=revision+1 WHERE tenant_id=:tenant AND id=:id AND revision<9007199254740991",
               db.args("id", p, "version", v, "seq", sequence));
-          recorded(r, personal ? "resource.personal.sign" : "resource.version.publish", v);
+          operations.recorded(
+              r, personal ? "resource.personal.sign" : "resource.version.publish", v);
           var next = db.version(p, v);
           events.publish("resource.version_published", v.toString(), event(next), "1");
           return db.versionJson(next);
@@ -544,7 +451,7 @@ public final class ResourceWorkflow {
     String reason = safeReason(text(body, "reason", 1024));
     String mode = text(body, "mode", 16);
     if (!Set.of("withdrawn", "malicious").contains(mode)) throw invalid();
-    return operation(
+    return operations.operation(
         actor,
         "resource.versions.publish",
         true,
@@ -598,7 +505,7 @@ public final class ResourceWorkflow {
           db.update(
               "UPDATE resource.resource_package SET enabled=CASE WHEN default_version_id=:version THEN false ELSE enabled END,revision=revision+1 WHERE tenant_id=:tenant AND id=:id",
               db.args("id", p, "version", v));
-          recorded(r, "resource.version." + mode, v, reason);
+          operations.recorded(r, "resource.version." + mode, v, reason);
           var next = db.version(p, v);
           var data = event(next);
           data.put("mode", mode);
@@ -770,7 +677,7 @@ public final class ResourceWorkflow {
             db.update(
                 "INSERT INTO resource.resource_package_group(id,tenant_id,package_id,group_id) VALUES(:key,:tenant,:id,:group)",
                 db.args("key", UuidV7.next(), "id", p, "group", group));
-          recorded(r, "resource.package.govern", p, reason);
+          operations.recorded(r, "resource.package.govern", p, reason);
           // Return the authorized result even when the new visibility removes the caller's
           // membership.
           pack.setLevel(ModelPackage.LevelEnum.fromValue(level));
