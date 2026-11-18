@@ -259,11 +259,48 @@ type reviewBrokenWriter struct{ *httptest.ResponseRecorder }
 func (w reviewBrokenWriter) Write([]byte) (int, error) {
 	return 0, errors.New("downstream disconnected")
 }
+
+// Expire the request's provider deadline only after the upstream has received
+// it. Database admission latency belongs to the pre-dispatch regression below.
+type reviewProviderDeadline struct {
+	context.Context
+	expired <-chan struct{}
+}
+
+func (ctx reviewProviderDeadline) Done() <-chan struct{} { return ctx.expired }
+func (ctx reviewProviderDeadline) Err() error {
+	select {
+	case <-ctx.expired:
+		return context.DeadlineExceeded
+	default:
+		return nil
+	}
+}
+
 func TestReviewTimeoutAndDisconnectedStreamReleaseCapacity(t *testing.T) {
 	for _, stream := range []bool{false, true} {
 		t.Run(map[bool]string{false: "timeout", true: "stream-disconnect"}[stream], func(t *testing.T) {
 			b, _, _, tenant := reviewBackend(t)
+			deadlines := make(chan context.CancelFunc, 1)
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				upstreamLimit := time.NewTimer(250 * time.Millisecond)
+				defer upstreamLimit.Stop()
+				if !stream {
+					expire := <-deadlines
+					timer := time.NewTimer(80 * time.Millisecond)
+					defer timer.Stop()
+					select {
+					case <-timer.C:
+						expire()
+					case <-r.Context().Done():
+						return
+					}
+					select {
+					case <-r.Context().Done():
+					case <-upstreamLimit.C:
+					}
+					return
+				}
 				if stream {
 					w.Header().Set("Content-Type", "text/event-stream")
 					_, _ = w.Write([]byte("data: {\"id\":\"partial\",\"object\":\"chat.completion.chunk\",\"created\":1,\"model\":\"test\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"ok\"},\"finish_reason\":null}]}\n\n"))
@@ -271,7 +308,7 @@ func TestReviewTimeoutAndDisconnectedStreamReleaseCapacity(t *testing.T) {
 				}
 				select {
 				case <-r.Context().Done():
-				case <-time.After(250 * time.Millisecond):
+				case <-upstreamLimit.C:
 				}
 			}))
 			t.Cleanup(server.Close)
@@ -283,8 +320,11 @@ func TestReviewTimeoutAndDisconnectedStreamReleaseCapacity(t *testing.T) {
 				}
 				r := httptest.NewRequest("POST", "/v1/chat/completions", strings.NewReader(body))
 				r.Header.Set("Authorization", "Bearer "+key.Secret)
-				ctx, cancel := context.WithTimeout(t.Context(), 80*time.Millisecond)
-				r = r.WithContext(ctx)
+				expired, cancel := context.WithCancel(t.Context())
+				if !stream {
+					deadlines <- cancel
+					r = r.WithContext(reviewProviderDeadline{Context: t.Context(), expired: expired.Done()})
+				}
 				rec := httptest.NewRecorder()
 				if stream {
 					b.ServeHTTP(reviewBrokenWriter{rec}, r)

@@ -524,18 +524,24 @@ func (b *Backend) chat(w http.ResponseWriter, r *http.Request, tenant string, ke
 	snapshot := budget.TrustedSnapshot{Admission: admission, Price: pool.Price, ValidUntil: expiry}
 	reservation, e := b.admit(r.Context(), key, snapshot, budget.Request{Method: "POST", Path: "/ai/v1/chat/completions", Key: r.Header.Get("Idempotency-Key"), Fingerprint: sha256.Sum256(raw)})
 	if e != nil {
+		if pending, ok := budget.AdmissionPendingRef(e); ok {
+			_ = b.cancelUndispatched(pending, 1, pool.Price)
+		}
 		reject(w, e)
 		return
 	}
 	ref := budget.Ref{TenantID: tenant, AccountID: key.Id, RequestID: reservation.Admission.RequestId}
+	reservedRevision := reservation.Revision
 	reservation, e = b.ledger.MarkDispatching(r.Context(), ref, reservation.Revision)
 	if e != nil {
+		_ = b.cancelUndispatched(ref, reservedRevision, pool.Price)
 		reject(w, e)
 		return
 	}
+	dispatchCtx := withCompatibleChatDiagnostic(r.Context(), key.Source, routes, stream, fields)
 	var body []byte
 	started := false
-	result, runErr := Run(r.Context(), routes, raw, b.allowPrivate, func(chunk []byte) error {
+	result, runErr := Run(dispatchCtx, routes, raw, b.allowPrivate, func(chunk []byte) error {
 		if !stream {
 			body = bytes.Clone(chunk)
 			return nil

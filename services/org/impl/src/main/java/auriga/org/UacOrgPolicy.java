@@ -8,7 +8,7 @@ import java.time.*;
 import java.util.*;
 import tools.jackson.databind.JsonNode;
 
-/** Only trusted deployment records can supply an employee or invitation binding. */
+/** Employee bindings come from deployment verification or a verified IAM login. */
 final class UacOrgPolicy {
   record Redemption(UUID invitation, UUID provider, String employee, UUID account) {}
 
@@ -50,6 +50,90 @@ final class UacOrgPolicy {
                 .member(account)
                 .filter(m -> "active".equals(m.status()))
                 .map(m -> new IdentityPolicyHooks.UacMember(m.displayName(), m.memberType())));
+  }
+
+  Optional<UUID> known(UUID provider, String employee) {
+    String subject = employee(employee);
+    return store.tx(
+        () ->
+            store
+                .jdbc()
+                .query(
+                    "SELECT account_id FROM uac_employee_binding WHERE tenant_id=? AND provider_id=? AND employee=?",
+                    (rs, i) -> (UUID) rs.getObject(1),
+                    store.tenantId(),
+                    provider,
+                    subject)
+                .stream()
+                .findFirst());
+  }
+
+  boolean canResumeVerifiedMember(UUID provider, String employee, UUID account) {
+    String subject = employee(employee);
+    return store.tx(
+        () ->
+            Boolean.TRUE.equals(
+                store
+                    .jdbc()
+                    .queryForObject(
+                        """
+                        SELECT EXISTS (
+                          SELECT 1 FROM uac_employee_binding b
+                          JOIN member m ON m.tenant_id=b.tenant_id AND m.id=b.account_id
+                          WHERE b.tenant_id=? AND b.provider_id=? AND b.employee=? AND b.account_id=?
+                            AND b.first_login AND m.status='active' AND m.member_type='member'
+                            AND NOT EXISTS (
+                              SELECT 1 FROM uac_employee_binding other
+                              WHERE other.tenant_id=b.tenant_id AND other.provider_id=b.provider_id
+                                AND other.employee<>b.employee
+                                AND translate(other.employee,'ABCDEFGHIJKLMNOPQRSTUVWXYZ','abcdefghijklmnopqrstuvwxyz')=?
+                            )
+                        )
+                        """,
+                        Boolean.class,
+                        store.tenantId(),
+                        provider,
+                        subject,
+                        account,
+                        auriga.iam.api.UacEmployee.asciiFold(subject))));
+  }
+
+  boolean provisionVerifiedMember(
+      UUID provider, String employee, UUID account, String displayName) {
+    String subject = employee(employee);
+    return store.tx(
+        () -> {
+          store.lockGroupHierarchy();
+          var bindings =
+              store
+                  .jdbc()
+                  .queryForList(
+                      "SELECT employee,account_id FROM uac_employee_binding WHERE tenant_id=? AND provider_id=?"
+                          + " AND translate(employee,'ABCDEFGHIJKLMNOPQRSTUVWXYZ','abcdefghijklmnopqrstuvwxyz')=? FOR UPDATE",
+                      store.tenantId(),
+                      provider,
+                      auriga.iam.api.UacEmployee.asciiFold(subject));
+          // Include disabled/offboarded rows: resolve() hides them for sign-in,
+          // but a repeat scan must never replace the existing binding.
+          if (!bindings.isEmpty())
+            return bindings.size() == 1
+                && subject.equals(bindings.getFirst().get("employee"))
+                && account.equals(bindings.getFirst().get("account_id"))
+                && member(account).filter(m -> "member".equals(m.memberType())).isPresent();
+          if (!org.createVerifiedUacMember(account, displayName)) return false;
+          store
+              .jdbc()
+              .update(
+                  "INSERT INTO uac_employee_binding(id,tenant_id,provider_id,employee,account_id,verified_by,verified_at,first_login) VALUES (?,?,?,?,?,?,?,true)",
+                  UuidV7.next(),
+                  store.tenantId(),
+                  provider,
+                  subject,
+                  account,
+                  account, // The UAC service verified this very account; no admin was involved.
+                  java.sql.Timestamp.from(clock.instant()));
+          return true;
+        });
   }
 
   boolean consume(String code, UUID provider, String employee, UUID account) {
