@@ -1,4 +1,5 @@
 # Optional plugin-only update from an operator-verified signed real-dsh image.
+# Build with scripts/build-real-dsh-incremental.mjs and its checked private context.
 # BASE_RUNTIME_IMAGE must be a complete repository@sha256 digest, never a tag.
 ARG BASE_RUNTIME_IMAGE
 FROM ${BASE_RUNTIME_IMAGE}
@@ -8,13 +9,13 @@ USER 0:0
 RUN if ! command -v corepack >/dev/null 2>&1 || ! command -v pnpm >/dev/null 2>&1 || ! COREPACK_ENABLE_NETWORK=0 pnpm --version; then \
       echo "Incremental base lacks working pnpm/corepack; rebuild the full real-dsh image." >&2; exit 1; \
     fi
-COPY deploy/compose/real-dsh/ /tmp/auriga-incremental/recipe/
-COPY clients/dsh-plugin/package*.json /tmp/auriga-incremental/plugin/
+COPY real-dsh-inputs/deploy/compose/real-dsh/ /tmp/auriga-incremental/recipe/
+COPY real-dsh-inputs/clients/dsh-plugin/package*.json /tmp/auriga-incremental/plugin/
 # Refuse changed foundations and verify the existing manifest before deleting src.
 RUN node /tmp/auriga-incremental/recipe/incremental.mjs
-COPY clients/dsh-plugin/src /opt/auriga-dsh/src
-COPY clients/dsh-plugin/LICENSE /opt/auriga-dsh/LICENSE
-COPY clients/dsh-plugin/cordis.patch.yml /opt/auriga-dsh/cordis.patch.yml
+COPY real-dsh-inputs/clients/dsh-plugin/src /opt/auriga-dsh/src
+COPY real-dsh-inputs/clients/dsh-plugin/LICENSE /opt/auriga-dsh/LICENSE
+COPY real-dsh-inputs/clients/dsh-plugin/cordis.patch.yml /opt/auriga-dsh/cordis.patch.yml
 # Normalize only the new public plugin inputs. Keep proof generation on the base toolchain.
 RUN node /tmp/auriga-incremental/recipe/source-modes.mjs /opt/auriga-dsh/src \
       /opt/auriga-dsh/LICENSE /opt/auriga-dsh/cordis.patch.yml \

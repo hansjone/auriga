@@ -5,11 +5,12 @@
 先用原根验证上一份运行时签发包及实际镜像摘要，确认它是没有用户 home、现场配置或秘密的干净构建制品。将已验证的镜像固定为完整 digest，再从仓库根执行：
 
 ```sh
-docker build --platform linux/amd64 --provenance=false --sbom=false \
-  --build-arg BASE_RUNTIME_IMAGE=registry.example.com/auriga/real-dsh@sha256:<完整摘要> \
-  -f deploy/compose/real-dsh/Dockerfile.incremental \
-  -t registry.example.com/auriga/real-dsh:plugin-update .
+node deploy/compose/scripts/build-real-dsh-incremental.mjs \
+  --base-runtime-image "registry.example.com/auriga/real-dsh@sha256:<完整摘要>" \
+  --image-tag registry.example.com/auriga/real-dsh:plugin-update
 ```
+
+增量入口在复制前检查工作树根、白名单输入的每级路径及源码树中的链接，然后交给 Docker 使用私有临时上下文。此前以仓库根为上下文直接运行 `docker build -f deploy/compose/real-dsh/Dockerfile.incremental .` 的调用需迁移到上面的脚本，配方的 `COPY` 路径现在以脚本生成的上下文为准。脚本构建并标记本地镜像，仍由运营者按下一步流程推送和签发。
 
 守卫先核对基础镜像清单中的实际文件、两组 package/lock、Node/npm、DSH 实际安装版本，以及 versions/build/inputs/runtime/start 的字节。插件安装时使用的生产 lock 会从本次原始输入重新推导并逐字比较。任一输入改变会拒绝增量构建，应使用完整构建。
 
