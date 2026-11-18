@@ -9,12 +9,15 @@ export function createSharedDownstream({ runtime, ports }) {
   async function authorize(sessionId, scope, signal) {
     if (closed || signal?.aborted) fail();
     const binding = await runtime.session(sessionId);
-    const task = await ports.taskForSession(binding, signal);
-    if (!task?.taskId || (scope === 'model.invoke' && !task.callId)) fail();
     const audience =
       scope === 'model.invoke'
         ? 'auriga.shared.model'
         : 'auriga.shared.message';
+    const task = await ports.taskForSession(binding, signal, {
+      audience,
+      scope,
+    });
+    if (!task?.taskId || (scope === 'model.invoke' && !task.callId)) fail();
     const capability = await ports.issue(
       binding,
       task.taskId,

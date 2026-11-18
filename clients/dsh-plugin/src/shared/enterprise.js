@@ -69,19 +69,21 @@ export function createEnterpriseAdapter({ runtime, ports, config }) {
       call.body?.dshSessionId,
       call.headers?.['x-dsh-session-id'],
     );
-    const token = alias(
+    let token = alias(
       call.body?.taskCapability,
       call.body?.capability,
       call.headers?.['x-dsh-team-task-capability'],
     );
+    if (scope === 'credentials' && settings().allowRawAgentToken === false)
+      fail('raw_token_disabled');
+    if (ports.refreshCapability)
+      token = await ports.refreshCapability(token, sessionId, scope);
     let taskId;
     try {
       taskId = await ports.taskId(token);
     } catch {
       fail('shared.revoked');
     }
-    if (scope === 'credentials' && settings().allowRawAgentToken === false)
-      fail('raw_token_disabled');
     return {
       sessionId,
       token,

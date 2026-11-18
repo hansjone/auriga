@@ -44,6 +44,30 @@ export async function openSharedTask({
   try {
     const taskId = await ports.enterprise.taskId(token);
     await runtime.capability(token, sessionId, taskId, 'outbound');
+    const credentials = { DSH_AURIGA_ID: '', DSH_AURIGA_TOKEN: '' };
+    if (scopes.includes('credentials')) {
+      const authorized = await runtime.capability(
+        token,
+        sessionId,
+        taskId,
+        'credentials',
+      );
+      const material = await ports.enterprise.credentials(
+        binding,
+        authorized.claims,
+      );
+      await runtime.capability(token, sessionId, taskId, 'credentials');
+      if (
+        material?.credentialVersion !== authorized.claims.credentialVersion ||
+        typeof material.empNo !== 'string' ||
+        !material.empNo ||
+        typeof material.token !== 'string' ||
+        !material.token
+      )
+        fail();
+      credentials.DSH_AURIGA_ID = material.empNo;
+      credentials.DSH_AURIGA_TOKEN = material.token;
+    }
     let env;
     if (ports.helperBase) {
       const base = new URL(ports.helperBase);
@@ -58,6 +82,7 @@ export async function openSharedTask({
       )
         fail('common.validation_failed');
       env = Object.freeze({
+        ...credentials,
         DSH_SESSION_ID: sessionId,
         DSH_TEAM_TASK_CAPABILITY: token,
         DSH_TEAM_BASE: base.href,
