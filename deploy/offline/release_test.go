@@ -349,6 +349,20 @@ exec "$GATE_COMMIT_REAL_GIT" "$@"
 		sourceOnly := opts
 		sourceOnly.SourceOnly = true
 		sourceOnly.Out = filepath.Join(parent, "source-only")
+		sourceOnly.Index = filepath.Join(t.TempDir(), "release-with-desktop.json")
+		desktop := filepath.Join(t.TempDir(), "desktop.tar")
+		if err := os.WriteFile(desktop, []byte("signed prebuilt desktop fixture"), 0644); err != nil {
+			t.Fatal(err)
+		}
+		desktopSHA, err := digest(desktop)
+		if err != nil {
+			t.Fatal(err)
+		}
+		withDesktop := r
+		withDesktop.Desktop = &artifact{URL: desktop, SHA256: desktopSHA}
+		if err := jsonFile(sourceOnly.Index, withDesktop, 0644); err != nil {
+			t.Fatal(err)
+		}
 		gateRan := false
 		probe := builders
 		probe.Gate = func(request gateRequest) (buildGate, error) {
@@ -374,6 +388,45 @@ exec "$GATE_COMMIT_REAL_GIT" "$@"
 		}
 		if err := uploadRelease(uploadOptions{Server: "https://forgejo.example.test", Repo: "owner/auriga", Dir: sourceOnly.Out, Key: public}, http.DefaultClient); err != nil {
 			t.Fatalf("source-only Forgejo dry run failed: %v", err)
+		}
+		kitPath := filepath.Join(t.TempDir(), "devkit")
+		if err := extractVerified(filepath.Join(sourceOnly.Out, "auriga-devkit-1.1.tar"), kitPath, public); err != nil {
+			t.Fatal(err)
+		}
+		kit, err := readCatalog(kitPath, public)
+		if err != nil || kit.Versions["1.1"].Kit.Release.Desktop != nil || kit.Blobs[desktopSHA] != 0 {
+			t.Fatalf("source-only devkit retained a prebuilt desktop: %v", err)
+		}
+		prior := filepath.Join(t.TempDir(), "prior-with-desktop")
+		previousEntry := kit.Versions["1.0"]
+		previousSingle, err := materializeVersion(kitPath, previousEntry)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = os.RemoveAll(previousSingle) })
+		if err := jsonFile(filepath.Join(previousSingle, "devkit.json"), previousEntry.Kit, 0644); err != nil {
+			t.Fatal(err)
+		}
+		if err := signingPublic(key, filepath.Join(previousSingle, "release-public.pem")); err != nil {
+			t.Fatal(err)
+		}
+		if err := writeSums(previousSingle); err != nil {
+			t.Fatal(err)
+		}
+		if err := signSums(previousSingle, key); err != nil {
+			t.Fatal(err)
+		}
+		withDesktop.Version = "1.0"
+		if err := refreshReleaseInputs(previousSingle, withDesktop, key); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := composeDevkit("", previousSingle, "1.0", previousEntry.Commit, prior, key, 1<<30, true); err != nil {
+			t.Fatal(err)
+		}
+		sourceOnly.Previous = prior
+		sourceOnly.Out = filepath.Join(parent, "source-only-old-desktop")
+		if err := generateRelease(sourceOnly, probe); err == nil || !strings.Contains(err.Error(), "--new-baseline") {
+			t.Fatalf("source-only accepted a previous kit with an installer: %v", err)
 		}
 	})
 	failing := builders

@@ -271,6 +271,9 @@ func generateRelease(o releaseOptions, builders releaseBuilders) error {
 	}
 	r.Version = o.Tag
 	r.Source = nil
+	if o.SourceOnly {
+		r.Desktop = nil
+	}
 	if r.Build == nil {
 		return errors.New("离线发行需要build依赖与Linux构建配方")
 	}
@@ -300,6 +303,19 @@ func generateRelease(o releaseOptions, builders releaseBuilders) error {
 	public := filepath.Join(scratch, "public.pem")
 	if err := signingPublic(o.Key, public); err != nil {
 		return err
+	}
+	if o.SourceOnly && o.Previous != "" && !o.NewBaseline {
+		prior, err := readCatalogContext(ctx, o.Previous, public)
+		if err != nil {
+			return err
+		}
+		if versionMajor(prior.Baseline) == versionMajor(o.Tag) {
+			for _, entry := range prior.Versions {
+				if entry.Kit.Release.Desktop != nil || entry.Files["desktop.tar"] != "" {
+					return errors.New("上版开发套件含成品桌面安装程序，源码发行请使用 --new-baseline")
+				}
+			}
+		}
 	}
 	windowsTar := filepath.Join(stage, filepath.Base(o.WindowsClient))
 	if err := noSymlinks(o.WindowsClient); err != nil {

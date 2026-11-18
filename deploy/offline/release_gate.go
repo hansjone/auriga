@@ -171,12 +171,12 @@ func writeDownloads(root string, m distributionManifest, cat devkitCatalog, asse
 	if err != nil {
 		return err
 	}
-	fmt.Fprintf(&b, "发行公钥指纹 SHA256(SPKI DER)：%s\n从独立核准的Forgejo Release正文/组织文档核对本指纹；所有verify/unpack/install示例必须追加 --trust-fingerprint %s（或--verify-key批准公钥）。\n仅包内公钥只能校验完整性，未核验身份会非零退出。\n", fingerprint, fingerprint)
+	fmt.Fprintf(&b, "发行公钥指纹 SHA256(SPKI DER)：%s\n从独立核准的 Forgejo Release 正文或组织文档核对本指纹。验证与解包发行归档时使用 --trust-fingerprint %s 或 --verify-key 指定批准公钥。\n仅包内公钥只能校验完整性，未核验身份会非零退出。\n", fingerprint, fingerprint)
 	fmt.Fprintf(&b, "Auriga %s 浏览器下载说明（字节为精确大小）\n只从本版本 Forgejo Release 手动下载，再拷入现场；现场无需 Git 或外网。\n", tag)
 	if m.SourceOnly {
-		b.WriteString("这是源码和开发套件发行。现场从源码构建，并用现场密钥签发自己的服务端和桌面版本。安装与更新按 MAINTAIN.md。\n")
+		b.WriteString("这是源码和开发套件发行。现场从源码构建，并用现场密钥签发自己的服务端和桌面版本。首次安装现场服务端包时用现场构建公钥验签。安装与更新按 MAINTAIN.md。\n")
 	} else {
-		fmt.Fprintf(&b, "只部署：未分卷时只需 auriga-offline-%s.tar 和 SHA256SUMS 两个文件。\n先系统 tar 解包，进入包目录运行 ./auriga verify .，再 sudo ./auriga install --address 192.0.2.10。\n", tag)
+		fmt.Fprintf(&b, "只部署：未分卷时只需 auriga-offline-%s.tar 和 SHA256SUMS 两个文件。\n先系统 tar 解包，进入包目录运行 ./auriga verify .，再 sudo ./auriga install --address 192.0.2.10。上述发行包验证和安装均指定已批准的发行公钥或指纹。\n", tag)
 	}
 	fmt.Fprintf(&b, "源码和 Linux 构建：下载 auriga-source-%s.tar 和 auriga-devkit-%s.tar。源码包自带 Linux amd64 CLI、版本基线和公钥。\n服务端分卷：下载同名前缀全部 .partNNN、.parts.json 及 .sig；另下载 auriga 引导程序，用 ./auriga unpack 首卷 --out 新目录。\n累积基线 %s，最新 %s，支持 %d 版。\n", tag, tag, cat.Baseline, cat.Latest, len(cat.Versions))
 	if m.Baseline == tag {

@@ -156,6 +156,8 @@ TMPDIR=/build/auriga-tmp sh deploy/offline/prepare-release.sh \
 
 Linux 在构建前流式核验 Windows 套件的归档、签名、依赖锁及各项输入，并核对 DSH 提交归档与 npm 锁。`--source-only` 生成签名源码、Linux 和 Windows 开发套件、DSH 源码和发行元数据。现场用这些材料自己构建并签发服务端和桌面版本。Forgejo 默认发布完整归档。需要经 FAT32 等受限介质转运时，显式指定正数 `--attachment-limit`（字节），分卷上限为 4 GiB 减 1 字节。后续同基线发版，将 `--new-baseline` 换成 `--previous-devkit /exports/unpacked-devkit-0.2.0`。锁与批准输入未变可复用签名单版缓存。NAS 与可选材料按版刷新。
 
+若旧累积套件包含成品桌面安装程序，第一次发行源码和套件时用 `--new-baseline`，确保旧安装程序不会被重新打包。
+
 `unshare --net` 门禁使用空存储的独立 Docker 引擎，既有引擎的镜像缓存无法参与。门禁执行 `bundle --build --offline`，工具容器使用 `--network none --pull never`。`release-manifest.json.offlineBuildGate` 记录精确提交、锁、源码、完整套件、清单、构建输出摘要及起止时间。源码发行的验证包留在临时目录并随验证清理。历史安装包发行命令仍支持 `--build` 选择门禁构建的安装包。
 
 - QNAP 若在容器启动时报 `fchmodat2 AT_EMPTY_PATH`，先在本次维护环境验证受信且兼容宿主内核的 runc，或改用受支持的 Linux 维护机。R1 在私有 Docker 工具目录使用冻结 DinD 镜像的兼容 runc。保留工具摘要，NAS 主引擎继续使用其自身配置。
