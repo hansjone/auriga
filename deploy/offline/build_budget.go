@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -36,10 +37,14 @@ func validateBuildBudget(b buildBudget, total, available uint64) error {
 	return nil
 }
 func buildEnvironment(b buildBudget) error {
-	if err := dockerReady(); err != nil {
+	return buildEnvironmentContext(context.Background(), b)
+}
+
+func buildEnvironmentContext(ctx context.Context, b buildBudget) error {
+	if err := dockerReadyContext(ctx); err != nil {
 		return err
 	}
-	raw, err := capture("docker", "info", "--format", "{{json .}}")
+	raw, err := captureContext(ctx, "docker", "info", "--format", "{{json .}}")
 	if err != nil {
 		return err
 	}

@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"net"
@@ -336,7 +337,11 @@ func finishInstall(s state) error {
 }
 
 func copyTree(source, target string) error {
-	names, err := regularFiles(source)
+	return copyTreeContext(context.Background(), source, target)
+}
+
+func copyTreeContext(ctx context.Context, source, target string) error {
+	names, err := regularFilesContext(ctx, source)
 	if err != nil {
 		return err
 	}
@@ -348,7 +353,7 @@ func copyTree(source, target string) error {
 		if err != nil {
 			return err
 		}
-		if err := copyFile(filepath.Join(source, name), filepath.Join(target, name), info.Mode().Perm()); err != nil {
+		if err := copyFileContext(ctx, filepath.Join(source, name), filepath.Join(target, name), info.Mode().Perm()); err != nil {
 			return err
 		}
 	}

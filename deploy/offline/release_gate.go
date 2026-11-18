@@ -6,12 +6,27 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 )
 
-type gateRequest struct{ Source, Kit, Out, Executable, Key, Tag, Commit, LockDigest, SourceSHA, CatalogSHA, DevkitSHA string }
+type gateRequest struct {
+	Context    context.Context
+	Source     string
+	Kit        string
+	Out        string
+	Executable string
+	Key        string
+	Tag        string
+	Commit     string
+	LockDigest string
+	SourceSHA  string
+	CatalogSHA string
+	DevkitSHA  string
+}
 type buildGate struct {
 	Passed     bool   `json:"passed"`
 	Commit     string `json:"commit"`
@@ -25,27 +40,50 @@ type buildGate struct {
 	FinishedAt string `json:"finishedAt"`
 }
 
-func offlineBuildGate(o gateRequest) (buildGate, error) {
-	proof := buildGate{Commit: o.Commit, LockDigest: o.LockDigest, SourceSHA: o.SourceSHA, CatalogSHA: o.CatalogSHA, DevkitSHA: o.DevkitSHA, Network: gateNetwork, StartedAt: time.Now().UTC().Format(time.RFC3339)}
-	if err := verifyCumulative(o.Kit, o.Source, o.Tag, ""); err != nil {
+func offlineBuildGate(o gateRequest) (proof buildGate, gateErr error) {
+	proof = buildGate{Commit: o.Commit, LockDigest: o.LockDigest, SourceSHA: o.SourceSHA, CatalogSHA: o.CatalogSHA, DevkitSHA: o.DevkitSHA, Network: gateNetwork, StartedAt: time.Now().UTC().Format(time.RFC3339)}
+	parent := o.Context
+	if parent == nil {
+		parent = context.Background()
+	}
+	interrupted, stop := signal.NotifyContext(parent, os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	ctx, cancel := context.WithTimeout(interrupted, gateBuildTimeout)
+	defer cancel()
+	if err := verifyCumulativeContext(ctx, o.Kit, o.Source, o.Tag, ""); err != nil {
 		return proof, err
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Minute)
-	defer cancel()
-	cmd := exec.CommandContext(ctx, "unshare", "--net", o.Executable, "internal-offline-build", "--source", o.Source, "--version", o.Tag, "--out", o.Out, "--sign-key", o.Key)
+	if err := ctx.Err(); err != nil {
+		return proof, err
+	}
+	workspace, err := newGateWorkspace()
+	if err != nil {
+		return proof, err
+	}
+	defer func() {
+		closeErr := workspace.close()
+		gateErr = errors.Join(gateErr, closeErr, ctx.Err())
+		if gateErr != nil {
+			proof.Passed = false
+		}
+	}()
+	cmd := exec.CommandContext(ctx, "unshare", "--net", "--mount", "--propagation", "private", "--mount-proc", o.Executable, "internal-offline-build", "--source", o.Source, "--version", o.Tag, "--out", o.Out, "--sign-key", o.Key, "--workdir", workspace.root, "--runtime-dir", workspace.runtime, "--supervised")
 	cmd.Dir = o.Source
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
-	if err := cmd.Run(); err != nil {
+	if err := runGateProcess(ctx, cmd, workspace, o.Executable); err != nil {
+		if ctx.Err() != nil {
+			return proof, fmt.Errorf("断网构建门禁已取消（完整构建时限 %s）: %w", gateBuildTimeout, errors.Join(err, ctx.Err()))
+		}
 		return proof, fmt.Errorf("必须具有Linux unshare网络命名空间权限且所有依赖齐备（无在线回退）: %w", err)
 	}
 	extracted, err := os.MkdirTemp("", "auriga-gate-result-")
 	if err != nil {
 		return proof, err
 	}
-	defer func() { _ = os.RemoveAll(extracted) }()
+	defer func() { gateErr = errors.Join(gateErr, os.RemoveAll(extracted)) }()
 	result := filepath.Join(extracted, "package")
-	if err := extractVerified(o.Out, result, ""); err != nil {
+	if err := extractWithTrustContext(ctx, o.Out, result, trustOptions{}, false); err != nil {
 		return proof, err
 	}
 	var info provenance
@@ -55,8 +93,11 @@ func offlineBuildGate(o gateRequest) (buildGate, error) {
 	if info.Commit != o.Commit || info.UpstreamVersion != o.Tag || info.Version != o.Tag || info.SiteChanges || info.Dirty {
 		return proof, errors.New("门禁产物不是精确的干净目标源码")
 	}
-	proof.OutputSHA, err = digest(o.Out)
+	proof.OutputSHA, err = digestContext(ctx, o.Out)
 	if err != nil {
+		return proof, err
+	}
+	if err := ctx.Err(); err != nil {
 		return proof, err
 	}
 	proof.FinishedAt = time.Now().UTC().Format(time.RFC3339)
@@ -67,7 +108,11 @@ func offlineBuildGate(o gateRequest) (buildGate, error) {
 // Dependency-only cache keys exclude versioned deployment files and optional
 // release payloads. Refresh those from the current approved index on cache reuse.
 func refreshReleaseInputs(root string, r release, key string) error {
-	kit, err := readDevkit(root)
+	return refreshReleaseInputsContext(context.Background(), root, r, key)
+}
+
+func refreshReleaseInputsContext(ctx context.Context, root string, r release, key string) error {
+	kit, err := readDevkitContext(ctx, root)
 	if err != nil {
 		return err
 	}
@@ -89,12 +134,12 @@ func refreshReleaseInputs(root string, r release, key string) error {
 			continue
 		}
 		cached := filepath.Join(root, "cache", name+".tar")
-		hash, _ := digest(cached)
+		hash, _ := digestContext(ctx, cached)
 		if hash != current.SHA256 {
 			if err := os.Remove(cached); err != nil && !os.IsNotExist(err) {
 				return err
 			}
-			if err := fetch(*current, cached); err != nil {
+			if err := fetchContext(ctx, *current, cached); err != nil {
 				return fmt.Errorf("刷新发行依赖 %s: %w", name, err)
 			}
 		}
@@ -113,7 +158,7 @@ func refreshReleaseInputs(root string, r release, key string) error {
 	if err := signingPublic(key, filepath.Join(root, "release-public.pem")); err != nil {
 		return err
 	}
-	if err := writeSums(root); err != nil {
+	if err := writeSumsContext(ctx, root); err != nil {
 		return err
 	}
 	return signSums(root, key)
@@ -155,12 +200,12 @@ func writeDownloads(root, tag string, cat devkitCatalog, assets []assetInfo) err
 
 // Metadata sizes include this one-page guide itself. A short fixed point
 // iteration stabilizes those decimal sizes without hashing large assets again.
-func finalizeDistribution(root string, m distributionManifest, cat devkitCatalog, key string) error {
+func finalizeDistribution(ctx context.Context, root string, m distributionManifest, cat devkitCatalog, key string) error {
 	for attempt := 0; attempt < 12; attempt++ {
 		if err := jsonFile(filepath.Join(root, "release-manifest.json"), m, 0644); err != nil {
 			return err
 		}
-		if err := writeSums(root); err != nil {
+		if err := writeSumsContext(ctx, root); err != nil {
 			return err
 		}
 		if err := signSums(root, key); err != nil {
@@ -168,7 +213,7 @@ func finalizeDistribution(root string, m distributionManifest, cat devkitCatalog
 		}
 		listing := append([]assetInfo(nil), m.Assets...)
 		for _, name := range []string{"release-manifest.json", "SHA256SUMS", "SHA256SUMS.sig"} {
-			a, err := describeAsset(filepath.Join(root, name))
+			a, err := describeAssetContext(ctx, filepath.Join(root, name))
 			if err != nil {
 				return err
 			}
@@ -177,7 +222,7 @@ func finalizeDistribution(root string, m distributionManifest, cat devkitCatalog
 		if err := writeDownloads(root, m.Tag, cat, listing); err != nil {
 			return err
 		}
-		current, err := describeAsset(filepath.Join(root, "DOWNLOADS.txt"))
+		current, err := describeAssetContext(ctx, filepath.Join(root, "DOWNLOADS.txt"))
 		if err != nil {
 			return err
 		}

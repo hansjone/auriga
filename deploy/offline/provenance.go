@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
@@ -26,12 +27,16 @@ type provenance struct {
 }
 
 func gitAt(root string, args ...string) (string, error) {
-	return capture("git", append([]string{"-C", root}, args...)...)
+	return gitAtContext(context.Background(), root, args...)
 }
 
-func gitFiles(root string, args ...string) (string, error) {
+func gitAtContext(ctx context.Context, root string, args ...string) (string, error) {
+	return captureContext(ctx, "git", append([]string{"-C", root}, args...)...)
+}
+
+func gitFilesContext(ctx context.Context, root string, args ...string) (string, error) {
 	var out bytes.Buffer
-	err := command(nil, &out, nil, "git", append([]string{"-C", root}, args...)...)
+	err := commandContext(ctx, nil, &out, nil, "git", append([]string{"-C", root}, args...)...)
 	return out.String(), err
 }
 
@@ -39,24 +44,28 @@ func gitFiles(root string, args ...string) (string, error) {
 // non-ignored new files. Ignored credentials, caches and worktree metadata stay
 // outside the snapshot. Index executable bits remain portable across DrvFS.
 func snapshotSource(root, target string, excluded ...string) (*provenance, error) {
-	if _, err := os.Lstat(filepath.Join(root, "auriga-source.json")); err == nil {
-		return snapshotArchiveSource(root, target, excluded...)
-	}
-	return snapshotGitSource(root, target, excluded...)
+	return snapshotSourceContext(context.Background(), root, target, excluded...)
 }
 
-func snapshotGitSource(root, target string, excluded ...string) (*provenance, error) {
+func snapshotSourceContext(ctx context.Context, root, target string, excluded ...string) (*provenance, error) {
+	if _, err := os.Lstat(filepath.Join(root, "auriga-source.json")); err == nil {
+		return snapshotArchiveSourceContext(ctx, root, target, excluded...)
+	}
+	return snapshotGitSourceContext(ctx, root, target, excluded...)
+}
+
+func snapshotGitSourceContext(ctx context.Context, root, target string, excluded ...string) (*provenance, error) {
 	info := &provenance{BuiltAt: time.Now().UTC().Format(time.RFC3339)}
 	var err error
-	info.Commit, err = gitAt(root, "rev-parse", "HEAD")
+	info.Commit, err = gitAtContext(ctx, root, "rev-parse", "HEAD")
 	if err != nil {
 		return nil, err
 	}
-	info.Branch, err = gitAt(root, "rev-parse", "--abbrev-ref", "HEAD")
+	info.Branch, err = gitAtContext(ctx, root, "rev-parse", "--abbrev-ref", "HEAD")
 	if err != nil {
 		return nil, err
 	}
-	status, err := gitAt(root, "status", "--porcelain=v1", "--untracked-files=all")
+	status, err := gitAtContext(ctx, root, "status", "--porcelain=v1", "--untracked-files=all")
 	if err != nil {
 		return nil, err
 	}
@@ -79,22 +88,34 @@ func snapshotGitSource(root, target string, excluded ...string) (*provenance, er
 			continue
 		}
 		rel = filepath.ToSlash(rel)
-		check := exec.Command("git", "-C", root, "ls-files", "--error-unmatch", "--", ":(literal)"+rel)
+		check := exec.CommandContext(ctx, "git", "-C", root, "ls-files", "--error-unmatch", "--", ":(literal)"+rel)
+		if ctx.Done() != nil {
+			setGateProcessGroup(check)
+		}
 		if _, err := check.Output(); err == nil {
 			return nil, errors.New("签名私钥已被 Git 跟踪，不能将其历史打入源码套件")
+		}
+		if err := ctx.Err(); err != nil {
+			return nil, err
 		}
 		excludedNames[rel] = true
 	}
 	// A checkout without an upstream tag uses the approved release version later.
-	tagCmd := exec.Command("git", "-C", root, "describe", "--tags", "--abbrev=0")
+	tagCmd := exec.CommandContext(ctx, "git", "-C", root, "describe", "--tags", "--abbrev=0")
+	if ctx.Done() != nil {
+		setGateProcessGroup(tagCmd)
+	}
 	if raw, err := tagCmd.Output(); err == nil {
 		info.UpstreamVersion = strings.TrimSpace(string(raw))
 	}
-	raw, err := gitFiles(root, "ls-files", "-z", "--cached", "--others", "--exclude-standard")
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	raw, err := gitFilesContext(ctx, root, "ls-files", "-z", "--cached", "--others", "--exclude-standard")
 	if err != nil {
 		return nil, err
 	}
-	index, err := gitFiles(root, "ls-files", "--stage", "-z")
+	index, err := gitFilesContext(ctx, root, "ls-files", "--stage", "-z")
 	if err != nil {
 		return nil, err
 	}
@@ -148,10 +169,10 @@ func snapshotGitSource(root, target string, excluded ...string) (*provenance, er
 		if isExecutable || !indexed && st.Mode().Perm()&0111 != 0 {
 			mode = 0755
 		}
-		if err := copySourceFile(source, filepath.Join(target, filepath.FromSlash(name)), name, mode); err != nil {
+		if err := copySourceFileContext(ctx, source, filepath.Join(target, filepath.FromSlash(name)), name, mode); err != nil {
 			return nil, err
 		}
-		sum, err := digest(filepath.Join(target, filepath.FromSlash(name)))
+		sum, err := digestContext(ctx, filepath.Join(target, filepath.FromSlash(name)))
 		if err != nil {
 			return nil, err
 		}

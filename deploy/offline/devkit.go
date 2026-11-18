@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -12,11 +13,20 @@ import (
 )
 
 type buildOptions struct {
+	Context       context.Context
 	Budget        buildBudget
 	Offline       bool
 	Cache, Source string
 	Info          *provenance
 }
+
+func (o buildOptions) context() context.Context {
+	if o.Context != nil {
+		return o.Context
+	}
+	return context.Background()
+}
+
 type kitImage struct {
 	Role string `json:"role"`
 	Ref  string `json:"ref"`
@@ -100,8 +110,9 @@ func validateDevkit(kit devkitManifest) error {
 }
 
 func fetchInput(a artifact, target string, options buildOptions) error {
+	ctx := options.context()
 	if !options.Offline {
-		return fetch(a, target)
+		return fetchContext(ctx, a, target)
 	}
 	if !safeRelative(a.URL) || a.URL == "SHA256SUMS" {
 		return fmt.Errorf("离线依赖必须使用套件缓存相对路径 %s", a.URL)
@@ -110,10 +121,10 @@ func fetchInput(a artifact, target string, options buildOptions) error {
 	if err := noSymlinks(source); err != nil {
 		return err
 	}
-	if err := copyFile(source, target, 0644); err != nil {
+	if err := copyFileContext(ctx, source, target, 0644); err != nil {
 		return fmt.Errorf("缺少离线依赖 %s %w", a.URL, err)
 	}
-	hash, err := digest(target)
+	hash, err := digestContext(ctx, target)
 	if err != nil {
 		return err
 	}
@@ -126,6 +137,10 @@ func fetchInput(a artifact, target string, options buildOptions) error {
 // Source and Git state may change at the site. All original cache bytes and the
 // manifest remain bound to the devkit's original complete checksum inventory.
 func verifyDevkitCache(root string) error {
+	return verifyDevkitCacheContext(context.Background(), root)
+}
+
+func verifyDevkitCacheContext(ctx context.Context, root string) error {
 	if err := noSymlinks(root); err != nil {
 		return err
 	}
@@ -155,7 +170,7 @@ func verifyDevkitCache(root string) error {
 		if err := noSymlinks(filepath.Join(root, name)); err != nil {
 			return err
 		}
-		hash, err := digest(filepath.Join(root, name))
+		hash, err := digestContext(ctx, filepath.Join(root, name))
 		if err != nil {
 			return fmt.Errorf("缺少离线依赖 %s %w", name, err)
 		}
@@ -169,7 +184,7 @@ func verifyDevkitCache(root string) error {
 	if !seen["devkit.json"] {
 		return errors.New("devkit.json 未受校验")
 	}
-	names, err := regularFiles(filepath.Join(root, "cache"))
+	names, err := regularFilesContext(ctx, filepath.Join(root, "cache"))
 	if err != nil {
 		return err
 	}
@@ -228,6 +243,10 @@ func locateDevkit(source string) (string, *devkitManifest, error) {
 }
 
 func devkitSingle(args []string) error {
+	return devkitSingleContext(context.Background(), args)
+}
+
+func devkitSingleContext(ctx context.Context, args []string) error {
 	if len(args) > 0 && args[0] == "verify" {
 		return devkitVerify(args[1:])
 	}
@@ -244,7 +263,7 @@ func devkitSingle(args []string) error {
 		return errors.New("多余 devkit 参数")
 	}
 	if *verify != "" {
-		if err := verifySums(*verify); err != nil {
+		if err := verifySumsContext(ctx, *verify); err != nil {
 			return err
 		}
 		return verifySignature(*verify, *key)
@@ -260,7 +279,7 @@ func devkitSingle(args []string) error {
 	if err != nil {
 		return err
 	}
-	if err := dockerReady(); err != nil {
+	if err := dockerReadyContext(ctx); err != nil {
 		return err
 	}
 	stage, err := os.MkdirTemp("", "auriga-devkit-")
@@ -281,7 +300,7 @@ func devkitSingle(args []string) error {
 		return err
 	}
 	snapshot := filepath.Join(stage, "snapshot")
-	info, err := snapshotSource(source, snapshot, *sign)
+	info, err := snapshotSourceContext(ctx, source, snapshot, *sign)
 	if err != nil {
 		return err
 	}
@@ -289,7 +308,7 @@ func devkitSingle(args []string) error {
 		return err
 	}
 	kit := devkitManifest{Schema: 1, Release: r, Source: info}
-	locks, err := dependencyLocks(source, r)
+	locks, err := dependencyLocksContext(ctx, source, r)
 	if err != nil {
 		return err
 	}
@@ -299,31 +318,31 @@ func devkitSingle(args []string) error {
 			continue
 		}
 		file := name + ".tar"
-		if err := fetch(*a, filepath.Join(cache, file)); err != nil {
+		if err := fetchContext(ctx, *a, filepath.Join(cache, file)); err != nil {
 			return fmt.Errorf("devkit 依赖 %s %w", name, err)
 		}
 		a.URL = file
 	}
 	checkout := filepath.Join(root, "source")
-	if err := copyTree(snapshot, checkout); err != nil {
+	if err := copyTreeContext(ctx, snapshot, checkout); err != nil {
 		return err
 	}
-	tree, err := sourceTree(source)
+	tree, err := sourceTreeContext(ctx, source)
 	if err != nil {
 		return err
 	}
-	if err := writeSourceManifest(checkout, *info, tree, r); err != nil {
+	if err := writeSourceManifestContext(ctx, checkout, *info, tree, r); err != nil {
 		return err
 	}
 	bootRoot := filepath.Join(stage, "nas")
 	if err := os.Mkdir(bootRoot, 0755); err != nil {
 		return err
 	}
-	if err := unpack(filepath.Join(cache, "nas.tar"), bootRoot); err != nil {
+	if err := unpackContext(ctx, filepath.Join(cache, "nas.tar"), bootRoot); err != nil {
 		return err
 	}
 	boot := filepath.Join(bootRoot, "deploy-nas/bin/auriga-nas-bootstrap")
-	if err := command(nil, os.Stdout, nil, boot, "image-check", bootRoot); err != nil {
+	if err := commandContext(ctx, nil, os.Stdout, nil, boot, "image-check", bootRoot); err != nil {
 		return err
 	}
 	roles := make([]string, 0, len(refs))
@@ -334,7 +353,7 @@ func devkitSingle(args []string) error {
 	for _, role := range roles {
 		ref := refs[role]
 		if strings.Contains(ref, "@sha256:") {
-			if err := command(nil, os.Stdout, nil, "docker", "pull", "--platform", "linux/amd64", ref); err != nil {
+			if err := commandContext(ctx, nil, os.Stdout, nil, "docker", "pull", "--platform", "linux/amd64", ref); err != nil {
 				return err
 			}
 		}
@@ -343,13 +362,13 @@ func devkitSingle(args []string) error {
 		if err := os.MkdirAll(filepath.Join(cache, "images"), 0755); err != nil {
 			return err
 		}
-		if err := command(nil, os.Stdout, nil, "docker", "tag", ref, tag); err != nil {
+		if err := commandContext(ctx, nil, os.Stdout, nil, "docker", "tag", ref, tag); err != nil {
 			return err
 		}
-		if err := command(nil, os.Stdout, nil, "docker", "save", "--platform", "linux/amd64", "-o", filepath.Join(cache, file), tag); err != nil {
+		if err := commandContext(ctx, nil, os.Stdout, nil, "docker", "save", "--platform", "linux/amd64", "-o", filepath.Join(cache, file), tag); err != nil {
 			return err
 		}
-		if _, err := capture(boot, "image-extra-resolve", filepath.Join(cache, file), tag); err != nil {
+		if _, err := captureContext(ctx, boot, "image-extra-resolve", filepath.Join(cache, file), tag); err != nil {
 			return err
 		}
 		kit.Images = append(kit.Images, kitImage{Role: role, Ref: ref, Tag: tag, File: file})
@@ -358,7 +377,7 @@ func devkitSingle(args []string) error {
 	if err != nil {
 		return err
 	}
-	if err := copyFile(exe, filepath.Join(checkout, "bin/auriga-cli"), 0755); err != nil {
+	if err := copyFileContext(ctx, exe, filepath.Join(checkout, "bin/auriga-cli"), 0755); err != nil {
 		return err
 	}
 	if *sign != "" {
@@ -369,7 +388,7 @@ func devkitSingle(args []string) error {
 	if err := jsonFile(filepath.Join(root, "devkit.json"), kit, 0644); err != nil {
 		return err
 	}
-	if err := writeSums(root); err != nil {
+	if err := writeSumsContext(ctx, root); err != nil {
 		return err
 	}
 	if *sign != "" {
@@ -377,10 +396,10 @@ func devkitSingle(args []string) error {
 			return err
 		}
 	}
-	if err := pack(root, *out); err != nil {
+	if err := packContext(ctx, root, *out); err != nil {
 		return err
 	}
-	hash, err := digest(*out)
+	hash, err := digestContext(ctx, *out)
 	if err != nil {
 		return err
 	}
@@ -388,7 +407,7 @@ func devkitSingle(args []string) error {
 	return os.WriteFile(*out+".sha256", []byte(hash+"\n"), 0644)
 }
 
-func loadDevkitImages(root string, kit devkitManifest, boot string) (release, error) {
+func loadDevkitImagesContext(ctx context.Context, root string, kit devkitManifest, boot string) (release, error) {
 	if err := validateDevkit(kit); err != nil {
 		return release{}, err
 	}
@@ -402,10 +421,10 @@ func loadDevkitImages(root string, kit devkitManifest, boot string) (release, er
 	}
 	for _, entry := range kit.Images {
 		file := filepath.Join(root, "cache", entry.File)
-		if err := command(nil, os.Stdout, nil, "docker", "load", "-i", file); err != nil {
+		if err := commandContext(ctx, nil, os.Stdout, nil, "docker", "load", "-i", file); err != nil {
 			return r, err
 		}
-		id, err := capture(boot, "image-extra-resolve", file, entry.Tag)
+		id, err := captureContext(ctx, boot, "image-extra-resolve", file, entry.Tag)
 		if err != nil {
 			return r, err
 		}

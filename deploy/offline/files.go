@@ -3,6 +3,7 @@ package main
 import (
 	"archive/tar"
 	"bufio"
+	"context"
 	"crypto/ed25519"
 	"crypto/rand"
 	"crypto/sha256"
@@ -21,13 +22,19 @@ import (
 )
 
 func digest(file string) (string, error) {
+	return digestContext(context.Background(), file)
+}
+
+func digestContext(ctx context.Context, file string) (string, error) {
 	f, err := os.Open(file)
 	if err != nil {
 		return "", err
 	}
 	defer func() { _ = f.Close() }()
+	stop := context.AfterFunc(ctx, func() { _ = f.Close() })
+	defer stop()
 	h := sha256.New()
-	if _, err := io.Copy(h, f); err != nil {
+	if _, err := io.Copy(h, cancellationReader(ctx, f)); err != nil {
 		return "", err
 	}
 	return hex.EncodeToString(h.Sum(nil)), nil
@@ -38,8 +45,15 @@ func safeRelative(name string) bool {
 }
 
 func regularFiles(root string) ([]string, error) {
+	return regularFilesContext(context.Background(), root)
+}
+
+func regularFilesContext(ctx context.Context, root string) ([]string, error) {
 	var names []string
 	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		if cancelled := ctx.Err(); cancelled != nil {
+			return cancelled
+		}
 		if err != nil {
 			return err
 		}
@@ -65,7 +79,14 @@ func regularFiles(root string) ([]string, error) {
 }
 
 func writeSums(root string) error {
-	names, err := regularFiles(root)
+	return writeSumsContext(context.Background(), root)
+}
+
+func writeSumsContext(ctx context.Context, root string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	names, err := regularFilesContext(ctx, root)
 	if err != nil {
 		return err
 	}
@@ -74,7 +95,7 @@ func writeSums(root string) error {
 		if name == "SHA256SUMS" || name == "SHA256SUMS.sig" {
 			continue
 		}
-		hash, err := digest(filepath.Join(root, name))
+		hash, err := digestContext(ctx, filepath.Join(root, name))
 		if err != nil {
 			return err
 		}
@@ -84,10 +105,17 @@ func writeSums(root string) error {
 }
 
 func verifySums(root string) error {
+	return verifySumsContext(context.Background(), root)
+}
+
+func verifySumsContext(ctx context.Context, root string) error {
 	if err := noSymlinks(root); err != nil {
 		return err
 	}
-	names, err := regularFiles(root)
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	names, err := regularFilesContext(ctx, root)
 	if err != nil {
 		return err
 	}
@@ -109,7 +137,7 @@ func verifySums(root string) error {
 			return errors.New("重复摘要条目")
 		}
 		seen[name] = true
-		actual, err := digest(filepath.Join(root, name))
+		actual, err := digestContext(ctx, filepath.Join(root, name))
 		if err != nil {
 			return err
 		}
@@ -135,12 +163,24 @@ func verifySums(root string) error {
 // Extraction is deliberately limited to regular files/directories in a fresh
 // directory. No archive-supplied ownership, special bits, links or devices apply.
 func unpack(archive, destination string) error {
-	f, err := openArchive(archive)
+	return unpackContext(context.Background(), archive, destination)
+}
+
+func unpackContext(ctx context.Context, archive, destination string) error {
+	f, err := openArchiveContext(ctx, archive)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = f.Close() }()
-	return unpackReader(f, destination)
+	if file, ok := f.(*os.File); ok {
+		stop := context.AfterFunc(ctx, func() { _ = file.Close() })
+		defer stop()
+	}
+	err = unpackReader(cancellationReader(ctx, f), destination)
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+	return err
 }
 
 func unpackReader(input io.Reader, destination string) error {
@@ -201,7 +241,11 @@ func unpackReader(input io.Reader, destination string) error {
 }
 
 func pack(root, archive string) error {
-	names, err := regularFiles(root)
+	return packContext(context.Background(), root, archive)
+}
+
+func packContext(ctx context.Context, root, archive string) error {
+	names, err := regularFilesContext(ctx, root)
 	if err != nil {
 		return err
 	}
@@ -236,7 +280,7 @@ func pack(root, archive string) error {
 			_ = f.Close()
 			return err
 		}
-		_, err = io.Copy(tw, in)
+		_, err = io.Copy(tw, cancellationReader(ctx, in))
 		_ = in.Close()
 		if err != nil {
 			_ = tw.Close()
@@ -252,6 +296,10 @@ func pack(root, archive string) error {
 }
 
 func copyFile(source, target string, mode fs.FileMode) error {
+	return copyFileContext(context.Background(), source, target, mode)
+}
+
+func copyFileContext(ctx context.Context, source, target string, mode fs.FileMode) error {
 	info, err := os.Lstat(source)
 	if err != nil {
 		return err
@@ -264,6 +312,8 @@ func copyFile(source, target string, mode fs.FileMode) error {
 		return err
 	}
 	defer func() { _ = in.Close() }()
+	stop := context.AfterFunc(ctx, func() { _ = in.Close() })
+	defer stop()
 	if err := os.MkdirAll(filepath.Dir(target), 0755); err != nil {
 		return err
 	}
@@ -271,7 +321,7 @@ func copyFile(source, target string, mode fs.FileMode) error {
 	if err != nil {
 		return err
 	}
-	_, err = io.Copy(out, in)
+	_, err = io.Copy(out, cancellationReader(ctx, in))
 	closeErr := out.Close()
 	if err != nil {
 		return err

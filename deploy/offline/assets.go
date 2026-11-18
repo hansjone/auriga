@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
@@ -31,6 +32,10 @@ func effectivePartLimit(limit int64) int64 {
 }
 
 func describeAsset(file string) (assetInfo, error) {
+	return describeAssetContext(context.Background(), file)
+}
+
+func describeAssetContext(ctx context.Context, file string) (assetInfo, error) {
 	st, err := os.Lstat(file)
 	if err != nil {
 		return assetInfo{}, err
@@ -38,18 +43,22 @@ func describeAsset(file string) (assetInfo, error) {
 	if !st.Mode().IsRegular() {
 		return assetInfo{}, errors.New("附件必须是普通文件")
 	}
-	hash, err := digest(file)
+	hash, err := digestContext(ctx, file)
 	return assetInfo{Name: filepath.Base(file), Size: st.Size(), SHA256: hash}, err
 }
 
 // Read at most one part into the kernel's page cache at a time. No joined tar is
 // written, so extraction also works on a FAT32 transfer medium.
 func splitAsset(file string, limit int64, key string) ([]string, error) {
+	return splitAssetContext(context.Background(), file, limit, key)
+}
+
+func splitAssetContext(ctx context.Context, file string, limit int64, key string) ([]string, error) {
 	limit = effectivePartLimit(limit)
 	if limit <= 0 {
 		return nil, errors.New("附件上限必须大于零")
 	}
-	info, err := describeAsset(file)
+	info, err := describeAssetContext(ctx, file)
 	if err != nil {
 		return nil, err
 	}
@@ -72,7 +81,7 @@ func splitAsset(file string, limit int64, key string) ([]string, error) {
 		if err != nil {
 			return nil, err
 		}
-		n, copyErr := io.CopyN(out, in, min(limit, remaining))
+		n, copyErr := io.CopyN(out, cancellationReader(ctx, in), min(limit, remaining))
 		closeErr := out.Close()
 		if copyErr != nil {
 			return nil, copyErr
@@ -80,13 +89,16 @@ func splitAsset(file string, limit int64, key string) ([]string, error) {
 		if closeErr != nil {
 			return nil, closeErr
 		}
-		part, err := describeAsset(name)
+		part, err := describeAssetContext(ctx, name)
 		if err != nil {
 			return nil, err
 		}
 		manifest.Parts = append(manifest.Parts, part)
 		names = append(names, part.Name)
 		remaining -= n
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
 	}
 	index := file + ".parts.json"
 	if err := jsonFile(index, manifest, 0644); err != nil {
@@ -160,6 +172,10 @@ func archiveIndex(file string) string {
 }
 
 func openArchive(file string) (io.ReadCloser, error) {
+	return openArchiveContext(context.Background(), file)
+}
+
+func openArchiveContext(ctx context.Context, file string) (io.ReadCloser, error) {
 	index := archiveIndex(file)
 	if index == "" {
 		if err := noSymlinks(file); err != nil {
@@ -189,7 +205,7 @@ func openArchive(file string) (io.ReadCloser, error) {
 		if err := noSymlinks(path); err != nil {
 			return nil, err
 		}
-		actual, err := describeAsset(path)
+		actual, err := describeAssetContext(ctx, path)
 		if err != nil {
 			return nil, fmt.Errorf("缺少分卷 %s: %w", p.Name, err)
 		}
@@ -200,7 +216,7 @@ func openArchive(file string) (io.ReadCloser, error) {
 		if err != nil {
 			return nil, err
 		}
-		_, copyErr := io.Copy(h, f)
+		_, copyErr := io.Copy(h, cancellationReader(ctx, f))
 		closeErr := f.Close()
 		if copyErr != nil {
 			return nil, copyErr
@@ -221,6 +237,10 @@ func extractVerified(file, destination, key string) error {
 }
 
 func extractWithTrust(file, destination string, o trustOptions, identity bool) error {
+	return extractWithTrustContext(context.Background(), file, destination, o, identity)
+}
+
+func extractWithTrustContext(ctx context.Context, file, destination string, o trustOptions, identity bool) error {
 	if _, err := os.Lstat(destination); !os.IsNotExist(err) {
 		return errors.New("解包目标已存在或不可访问")
 	}
@@ -232,10 +252,10 @@ func extractWithTrust(file, destination string, o trustOptions, identity bool) e
 		return err
 	}
 	defer func() { _ = os.RemoveAll(stage) }()
-	if err := unpack(file, stage); err != nil {
+	if err := unpackContext(ctx, file, stage); err != nil {
 		return err
 	}
-	if err := verifySums(stage); err != nil {
+	if err := verifySumsContext(ctx, stage); err != nil {
 		return err
 	}
 	key, unsigned := o.Key, false
@@ -255,6 +275,9 @@ func extractWithTrust(file, destination string, o trustOptions, identity bool) e
 		if err := verifyFileSignature(index, key); err != nil {
 			return err
 		}
+	}
+	if err := ctx.Err(); err != nil {
+		return err
 	}
 	return os.Rename(stage, destination)
 }

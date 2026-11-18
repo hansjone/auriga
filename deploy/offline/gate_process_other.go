@@ -6,3 +6,4 @@ import "os/exec"
 
 func setGateProcessGroup(_ *exec.Cmd)            {}
 func stopGateProcessGroup(cmd *exec.Cmd, _ bool) { _ = cmd.Process.Kill() }
+func unmountGatePaths(_ ...string) error         { return nil }

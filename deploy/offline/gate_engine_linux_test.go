@@ -23,7 +23,9 @@ func TestIsolatedGateEngineFailureCleanup(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = os.RemoveAll(root) })
 	source := filepath.Join(root, "source")
-	scratch := filepath.Join(root, "tmp")
+	// Containerd sockets must remain short even when the data disk's temporary
+	// directory has a long absolute path.
+	scratch := filepath.Join(root, strings.Repeat("long-temp-", 12))
 	for _, path := range []string{source, scratch} {
 		if err := os.Mkdir(path, 0700); err != nil {
 			t.Fatal(err)

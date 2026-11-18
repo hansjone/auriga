@@ -8,9 +8,14 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
+	"os/signal"
 	"path/filepath"
+	"runtime"
 	"strings"
+	"syscall"
 	"testing"
+	"time"
 )
 
 func testSigningKeys(t *testing.T) (string, string) {
@@ -133,6 +138,85 @@ func TestReleaseCacheSignedPartsAndTagGate(t *testing.T) {
 	opts := releaseOptions{Source: source, Tag: "1.0", Index: index, Out: filepath.Join(parent, "v1"), Cache: filepath.Join(parent, "cache"), Key: key, Limit: 65536, NewBaseline: true}
 	if err := generateRelease(opts, builders); err != nil {
 		t.Fatal(err)
+	}
+	if runtime.GOOS == "linux" {
+		for _, interrupted := range []os.Signal{os.Interrupt, syscall.SIGTERM} {
+			t.Run("cancel-after-gate-"+interrupted.String(), func(t *testing.T) {
+				observed := make(chan os.Signal, 1)
+				signal.Notify(observed, interrupted)
+				defer signal.Stop(observed)
+				cancelled := builders
+				cancelled.Gate = func(request gateRequest) (buildGate, error) {
+					proof, err := builders.Gate(request)
+					process, findErr := os.FindProcess(os.Getpid())
+					if findErr != nil {
+						t.Fatal(findErr)
+					}
+					if err := process.Signal(interrupted); err != nil {
+						t.Fatal(err)
+					}
+					<-observed
+					// Allow both signal.Notify subscribers to receive this signal.
+					time.Sleep(20 * time.Millisecond)
+					return proof, err
+				}
+				cancelOpts := opts
+				cancelOpts.Out = filepath.Join(parent, "cancelled-"+interrupted.String())
+				if err := generateRelease(cancelOpts, cancelled); err == nil {
+					t.Error("cancelled release committed its signed distribution")
+				}
+				if _, err := os.Stat(cancelOpts.Out); !os.IsNotExist(err) {
+					t.Error("cancelled release left its final output directory", err)
+				}
+			})
+		}
+		t.Run("cancel-before-final-rename", func(t *testing.T) {
+			realGit, err := exec.LookPath("git")
+			if err != nil {
+				t.Fatal(err)
+			}
+			bin := t.TempDir()
+			arm := filepath.Join(bin, "armed")
+			program := `#!/bin/sh
+set -eu
+if test -f "$GATE_COMMIT_CANCEL_ARM"; then
+  rm "$GATE_COMMIT_CANCEL_ARM"
+  kill -INT "$PPID"
+  sleep .02
+fi
+exec "$GATE_COMMIT_REAL_GIT" "$@"
+`
+			if err := os.WriteFile(filepath.Join(bin, "git"), []byte(program), 0755); err != nil {
+				t.Fatal(err)
+			}
+			t.Setenv("GATE_COMMIT_REAL_GIT", realGit)
+			t.Setenv("GATE_COMMIT_CANCEL_ARM", arm)
+			t.Setenv("PATH", bin+":"+os.Getenv("PATH"))
+			observed := make(chan os.Signal, 1)
+			signal.Notify(observed, os.Interrupt)
+			defer signal.Stop(observed)
+			cancelled := builders
+			cancelled.Gate = func(request gateRequest) (buildGate, error) {
+				proof, err := builders.Gate(request)
+				if err != nil {
+					return proof, err
+				}
+				return proof, os.WriteFile(arm, nil, 0600)
+			}
+			cancelOpts := opts
+			cancelOpts.Out = filepath.Join(parent, "cancelled-before-rename")
+			if err := generateRelease(cancelOpts, cancelled); err == nil {
+				t.Error("late cancellation committed signed output")
+			}
+			select {
+			case <-observed:
+			default:
+				t.Error("fixture did not reach final source validation")
+			}
+			if _, err := os.Stat(cancelOpts.Out); !os.IsNotExist(err) {
+				t.Error("late cancellation left final output", err)
+			}
+		})
 	}
 	if err := verifySums(opts.Out); err != nil {
 		t.Fatal(err)

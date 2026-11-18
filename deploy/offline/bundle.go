@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"crypto/ed25519"
 	"crypto/x509"
 	"encoding/base64"
@@ -62,7 +63,7 @@ func readJSON(path string, output any) error {
 	return nil
 }
 
-func fetch(a artifact, target string) error {
+func fetchContext(ctx context.Context, a artifact, target string) error {
 	if !hex64.MatchString(a.SHA256) {
 		return errors.New("发行索引需要独立批准的 SHA256")
 	}
@@ -71,7 +72,7 @@ func fetch(a artifact, target string) error {
 		return err
 	}
 	if u.Scheme == "" {
-		if err := copyFile(a.URL, target, 0644); err != nil {
+		if err := copyFileContext(ctx, a.URL, target, 0644); err != nil {
 			return err
 		}
 	} else {
@@ -84,7 +85,7 @@ func fetch(a artifact, target string) error {
 			}
 			return nil
 		}}
-		request, err := http.NewRequest(http.MethodGet, a.URL, nil)
+		request, err := http.NewRequestWithContext(ctx, http.MethodGet, a.URL, nil)
 		if err != nil {
 			return err
 		}
@@ -95,7 +96,7 @@ func fetch(a artifact, target string) error {
 		}
 		response, err := client.Do(request)
 		if err != nil {
-			return err
+			return errors.Join(err, ctx.Err())
 		}
 		defer func() { _ = response.Body.Close() }()
 		if response.StatusCode != 200 {
@@ -105,7 +106,7 @@ func fetch(a artifact, target string) error {
 		if err != nil {
 			return err
 		}
-		_, err = io.Copy(out, io.LimitReader(response.Body, (128<<30)+1))
+		_, err = io.Copy(out, cancellationReader(ctx, io.LimitReader(response.Body, (128<<30)+1)))
 		closeErr := out.Close()
 		if err != nil {
 			return err
@@ -114,7 +115,7 @@ func fetch(a artifact, target string) error {
 			return closeErr
 		}
 	}
-	hash, err := digest(target)
+	hash, err := digestContext(ctx, target)
 	if err != nil {
 		return err
 	}
@@ -129,6 +130,10 @@ func bundle(args []string) error {
 }
 
 func bundleExpected(args []string, expectedCommit string) error {
+	return bundleExpectedContext(context.Background(), args, expectedCommit)
+}
+
+func bundleExpectedContext(ctx context.Context, args []string, expectedCommit string) error {
 	f := flags("bundle")
 	index := f.String("release", "auriga-release.json", "")
 	out := f.String("out", "", "")
@@ -157,9 +162,9 @@ func bundleExpected(args []string, expectedCommit string) error {
 	if err != nil {
 		return err
 	}
-	options := buildOptions{Offline: *offline, Source: source, Budget: buildBudget{MemoryMiB: *memory, CPUs: *cpus}}
+	options := buildOptions{Context: ctx, Offline: *offline, Source: source, Budget: buildBudget{MemoryMiB: *memory, CPUs: *cpus}}
 	if *build {
-		if err := buildEnvironment(options.Budget); err != nil {
+		if err := buildEnvironmentContext(ctx, options.Budget); err != nil {
 			return err
 		}
 	}
@@ -186,7 +191,7 @@ func bundleExpected(args []string, expectedCommit string) error {
 			return fmt.Errorf("%s 必须按仓库 digest 固定", name)
 		}
 	}
-	if err := dockerReady(); err != nil {
+	if err := dockerReadyContext(ctx); err != nil {
 		return err
 	}
 	stage, err := os.MkdirTemp("", "auriga-offline-bundle-")
@@ -195,7 +200,7 @@ func bundleExpected(args []string, expectedCommit string) error {
 	}
 	defer func() { _ = os.RemoveAll(stage) }()
 	if *build {
-		options.Info, err = snapshotSource(source, filepath.Join(stage, "source"), *sign)
+		options.Info, err = snapshotSourceContext(ctx, source, filepath.Join(stage, "source"), *sign)
 		if err != nil {
 			return err
 		}
@@ -229,7 +234,7 @@ func bundleExpected(args []string, expectedCommit string) error {
 	if err := os.Mkdir(root, 0755); err != nil {
 		return err
 	}
-	if err := unpack(archive, root); err != nil {
+	if err := unpackContext(ctx, archive, root); err != nil {
 		return err
 	}
 	// The NAS artifact retains its original, narrower manifest for the existing
@@ -237,18 +242,18 @@ func bundleExpected(args []string, expectedCommit string) error {
 	if err := os.Rename(filepath.Join(root, "SHA256SUMS"), filepath.Join(root, "NAS-SHA256SUMS")); err != nil {
 		return err
 	}
-	if err := copyFile(filepath.Join(root, "NAS-SHA256SUMS"), filepath.Join(root, "SHA256SUMS"), 0644); err != nil {
+	if err := copyFileContext(ctx, filepath.Join(root, "NAS-SHA256SUMS"), filepath.Join(root, "SHA256SUMS"), 0644); err != nil {
 		return err
 	}
 	boot := filepath.Join(root, "deploy-nas/bin/auriga-nas-bootstrap")
 	if _, err := os.Stat(filepath.Join(root, "deploy-nas/scripts/oneclick-compose.sh")); !*build && err != nil {
 		return errors.New("NAS 发行缺少一键安装配方，需要包含本功能的发行制品")
 	}
-	if err := command(nil, os.Stdout, nil, boot, "image-check", root); err != nil {
+	if err := commandContext(ctx, nil, os.Stdout, nil, boot, "image-check", root); err != nil {
 		return err
 	}
 	if *offline {
-		r, err = loadDevkitImages(kitRoot, *kit, boot)
+		r, err = loadDevkitImagesContext(ctx, kitRoot, *kit, boot)
 		if err != nil {
 			return err
 		}
@@ -287,17 +292,17 @@ func bundleExpected(args []string, expectedCommit string) error {
 		entry.Tag = "auriga/offline-" + name + ":" + r.Version
 		entry.Archive = "extra-images/" + name + ".tar"
 		if !*offline && strings.Contains(entry.Ref, "@sha256:") {
-			if err := command(nil, os.Stdout, nil, "docker", "pull", "--platform", "linux/amd64", entry.Ref); err != nil {
+			if err := commandContext(ctx, nil, os.Stdout, nil, "docker", "pull", "--platform", "linux/amd64", entry.Ref); err != nil {
 				return err
 			}
 		}
-		if err := command(nil, os.Stdout, nil, "docker", "tag", entry.Ref, entry.Tag); err != nil {
+		if err := commandContext(ctx, nil, os.Stdout, nil, "docker", "tag", entry.Ref, entry.Tag); err != nil {
 			return err
 		}
 		if err := os.MkdirAll(filepath.Join(root, "extra-images"), 0755); err != nil {
 			return err
 		}
-		if err := command(nil, os.Stdout, nil, "docker", "save", "--platform", "linux/amd64", "-o", filepath.Join(root, entry.Archive), entry.Tag); err != nil {
+		if err := commandContext(ctx, nil, os.Stdout, nil, "docker", "save", "--platform", "linux/amd64", "-o", filepath.Join(root, entry.Archive), entry.Tag); err != nil {
 			return err
 		}
 		r.Images[name] = entry
@@ -315,7 +320,7 @@ func bundleExpected(args []string, expectedCommit string) error {
 	}
 	for _, file := range []string{"auriga", "deploy/offline/README-OFFLINE.md"} {
 		target := filepath.Join(root, filepath.Base(file))
-		if err := copyFile(filepath.Join(source, file), target, 0755); err != nil {
+		if err := copyFileContext(ctx, filepath.Join(source, file), target, 0755); err != nil {
 			return err
 		}
 	}
@@ -326,7 +331,7 @@ func bundleExpected(args []string, expectedCommit string) error {
 	if *build {
 		exe = filepath.Join(stage, "output/go/auriga-cli")
 	}
-	if err := copyFile(exe, filepath.Join(root, "bin/auriga-cli"), 0755); err != nil {
+	if err := copyFileContext(ctx, exe, filepath.Join(root, "bin/auriga-cli"), 0755); err != nil {
 		return err
 	}
 	if err := jsonFile(filepath.Join(root, "offline-release.json"), r, 0644); err != nil {
@@ -343,7 +348,7 @@ func bundleExpected(args []string, expectedCommit string) error {
 			return err
 		}
 	}
-	if err := writeSums(root); err != nil {
+	if err := writeSumsContext(ctx, root); err != nil {
 		return err
 	}
 	if *sign != "" {
@@ -351,10 +356,10 @@ func bundleExpected(args []string, expectedCommit string) error {
 			return err
 		}
 	}
-	if err := pack(root, *out); err != nil {
+	if err := packContext(ctx, root, *out); err != nil {
 		return err
 	}
-	hash, err := digest(*out)
+	hash, err := digestContext(ctx, *out)
 	if err != nil {
 		return err
 	}
@@ -452,6 +457,10 @@ func verifyFileSignature(file, publicPath string) error {
 }
 
 func smallFile(path string, limit int64) ([]byte, error) {
+	return smallFileContext(context.Background(), path, limit)
+}
+
+func smallFileContext(ctx context.Context, path string, limit int64) ([]byte, error) {
 	info, err := os.Stat(path)
 	if err != nil {
 		return nil, err
@@ -464,7 +473,9 @@ func smallFile(path string, limit int64) ([]byte, error) {
 		return nil, err
 	}
 	defer func() { _ = f.Close() }()
-	raw, err := io.ReadAll(io.LimitReader(f, limit+1))
+	stop := context.AfterFunc(ctx, func() { _ = f.Close() })
+	defer stop()
+	raw, err := io.ReadAll(cancellationReader(ctx, io.LimitReader(f, limit+1)))
 	if err != nil {
 		return nil, err
 	}

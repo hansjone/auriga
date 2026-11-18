@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -34,15 +35,19 @@ func isDependencyFile(name string) bool {
 // Git supplies the inventory, so ignored module caches and private settings
 // cannot accidentally alter the dependency key. Deleted tracked locks fail.
 func dependencyLocks(source string, r release) (lockInventory, error) {
+	return dependencyLocksContext(context.Background(), source, r)
+}
+
+func dependencyLocksContext(ctx context.Context, source string, r release) (lockInventory, error) {
 	inv := lockInventory{Files: map[string]string{}}
-	names, err := sourceNames(source)
+	names, err := sourceNamesContext(ctx, source)
 	if err != nil {
 		return inv, err
 	}
-	return locksFromNames(source, r, names)
+	return locksFromNamesContext(ctx, source, r, names)
 }
 
-func locksFromNames(source string, r release, names []string) (lockInventory, error) {
+func locksFromNamesContext(ctx context.Context, source string, r release, names []string) (lockInventory, error) {
 	inv := lockInventory{Files: map[string]string{}}
 	for _, name := range names {
 		if name == "" || !isDependencyFile(name) {
@@ -55,7 +60,7 @@ func locksFromNames(source string, r release, names []string) (lockInventory, er
 		if err := noSymlinks(path); err != nil {
 			return inv, err
 		}
-		hash, err := sourceDigest(path, name, "")
+		hash, err := sourceDigestContext(ctx, path, name, "")
 		if os.IsNotExist(err) {
 			inv.Files[name] = "MISSING"
 			continue
@@ -114,10 +119,14 @@ func lockDifferences(expected, actual lockInventory) string {
 }
 
 func checkKitLocks(source string, kit devkitManifest) error {
+	return checkKitLocksContext(context.Background(), source, kit)
+}
+
+func checkKitLocksContext(ctx context.Context, source string, kit devkitManifest) error {
 	if kit.Locks == nil {
 		return errors.New("旧 devkit 未记录锁摘要，请从当前源码标签的 Forgejo Release 下载 auriga-devkit-<版本>.tar")
 	}
-	current, err := dependencyLocks(source, kit.Release)
+	current, err := dependencyLocksContext(ctx, source, kit.Release)
 	if err != nil {
 		return err
 	}
@@ -132,8 +141,12 @@ func checkKitLocks(source string, kit devkitManifest) error {
 }
 
 func readDevkit(root string) (devkitManifest, error) {
+	return readDevkitContext(context.Background(), root)
+}
+
+func readDevkitContext(ctx context.Context, root string) (devkitManifest, error) {
 	var kit devkitManifest
-	if err := verifyDevkitCache(root); err != nil {
+	if err := verifyDevkitCacheContext(ctx, root); err != nil {
 		return kit, err
 	}
 	if err := readJSON(filepath.Join(root, "devkit.json"), &kit); err != nil {
