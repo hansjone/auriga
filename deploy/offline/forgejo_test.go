@@ -93,24 +93,15 @@ func TestForgejoUploadDraftRetryAndConflict(t *testing.T) {
 			}
 			_ = json.NewEncoder(w).Encode(assets)
 		case strings.HasSuffix(endpoint, "/assets") && r.Method == "POST":
-			reader, err := r.MultipartReader()
+			if r.Header.Get("Content-Type") != "application/octet-stream" {
+				t.Error("expected an unwrapped attachment stream")
+			}
+			body, err := io.ReadAll(r.Body)
 			if err != nil {
 				t.Error(err)
-				w.WriteHeader(400)
-				return
 			}
-			part, err := reader.NextPart()
-			if err != nil {
-				t.Error(err)
-				w.WriteHeader(400)
-				return
-			}
-			if part.FormName() != "attachment" {
-				t.Error("incorrect multipart field")
-			}
-			body, err := io.ReadAll(part)
-			if err != nil {
-				t.Error(err)
+			if r.ContentLength != int64(len(body)) {
+				t.Error("attachment content length differs from the request body")
 			}
 			name := r.URL.Query().Get("name")
 			files[name] = body

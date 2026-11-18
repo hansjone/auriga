@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"mime/multipart"
 	"net/http"
 	"net/netip"
 	"net/url"
@@ -234,14 +233,12 @@ func (a *forgejoAPI) upload(path, root string, info assetInfo) error {
 		return err
 	}
 	defer func() { _ = in.Close() }()
-	var header bytes.Buffer
-	writer := multipart.NewWriter(&header)
-	if _, err := writer.CreateFormFile("attachment", info.Name); err != nil {
-		return err
+	var body io.Reader = in
+	if info.Size == 0 {
+		body = http.NoBody
 	}
-	footer := "\r\n--" + writer.Boundary() + "--\r\n"
-	body := io.MultiReader(bytes.NewReader(header.Bytes()), in, strings.NewReader(footer))
-	response, err := a.request("POST", a.base+path+"?name="+url.QueryEscape(info.Name), body, writer.FormDataContentType(), int64(header.Len())+info.Size+int64(len(footer)))
+	// Forgejo can stream the request body directly to attachment storage.
+	response, err := a.request("POST", a.base+path+"?name="+url.QueryEscape(info.Name), body, "application/octet-stream", info.Size)
 	if err != nil {
 		return err
 	}

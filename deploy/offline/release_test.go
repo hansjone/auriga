@@ -325,6 +325,9 @@ exec "$GATE_COMMIT_REAL_GIT" "$@"
 	if _, err := os.Stat(filepath.Join(opts.Out, "auriga-devkit-1.1-delta.tar")); err != nil {
 		t.Fatal("same baseline did not ship a delta", err)
 	}
+	if err := verifySums(opts.Out); err != nil {
+		t.Fatal(err)
+	}
 	if err := verifySignature(opts.Out, public); err != nil {
 		t.Fatal(err)
 	}
