@@ -1793,6 +1793,25 @@ public final class OrgService {
                 }));
   }
 
+  /** Called inside a verified UAC admission transaction holding the hierarchy lock. */
+  boolean createVerifiedUacMember(UUID accountId, String displayName) {
+    if (store.member(accountId).isPresent()) return false;
+    var member =
+        new OrgStore.MemberRow(
+            accountId,
+            displayName == null || displayName.isBlank() ? "UAC member" : displayName,
+            null,
+            "member",
+            "active",
+            1,
+            clock.instant(),
+            null,
+            null);
+    store.insertMember(member);
+    userEvents.created(toMemberJson(member), "auto_provision", null, null);
+    return true;
+  }
+
   private void requireInvitationTargets(List<UUID> roleIds, List<UUID> groupIds) {
     for (UUID roleId : roleIds) {
       OrgError.require(

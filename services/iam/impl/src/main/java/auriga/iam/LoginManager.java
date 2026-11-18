@@ -519,9 +519,13 @@ public final class LoginManager {
                         true);
                   }
                   if (input.path("formId").asString("").equals("first_totp")) {
+                    boolean uacEnrollment =
+                        provider.path("connectorType").asString().equals("uac")
+                            && tx.path("uacEnrollTotp").asBoolean();
                     IamError.require(
                         (provider.path("connectorType").asString().equals("team-account")
-                                || tx.path("uacSessionStepUp").asBoolean())
+                                || tx.path("uacSessionStepUp").asBoolean()
+                                || uacEnrollment)
                             && tx.has("firstTotpSecret")
                             && tx.has("pendingProfile"),
                         "invalid_step_input",
@@ -543,7 +547,26 @@ public final class LoginManager {
                           "step_up_required",
                           403);
                     }
-                    if (tx.path("newAccount").asBoolean()) {
+                    if (uacEnrollment) {
+                      String pid = provider.path("providerId").asString();
+                      JsonNode profile =
+                          Json.read(secrets.decrypt(tx.path("pendingProfile").asString(), aad(tx)));
+                      String subject =
+                          auriga.iam.api.UacEmployee.canonical(profile.path("subject").asString());
+                      lockIdentity(pid, subject, true);
+                      IamError.require(
+                          tx.path("purpose").asString().equals("login")
+                              && tx.path("audience").asString().equals("portal")
+                              && tx.path("uacVerified").asBoolean()
+                              && tx.has("uacCredential")
+                              && tx.path("newAccount").asBoolean()
+                              && account
+                                  .toString()
+                                  .equals(tx.path("uacPendingAccountId").asString())
+                              && store.get("identity", pid + ":" + subject, false) == null,
+                          "invalid_credentials",
+                          401);
+                    } else if (tx.path("newAccount").asBoolean()) {
                       JsonNode profile =
                           Json.read(secrets.decrypt(tx.path("pendingProfile").asString(), aad(tx)));
                       teamAccounts.lockPendingRegistration(
@@ -557,6 +580,7 @@ public final class LoginManager {
                             tx.path("firstTotpSecret").asString(), aad(tx) + ":first-totp"),
                         input.path("values").path("otp").asString(""));
                     tx.remove("firstTotpSecret");
+                    tx.remove("uacEnrollTotp");
                     if (!tx.path("uacSessionStepUp").asBoolean())
                       for (ObjectNode session : sessions.userSessions(account.toString()))
                         if (session.path("accountId").asString().equals(account.toString())
@@ -734,7 +758,7 @@ public final class LoginManager {
             uac
                 ? auriga.iam.api.UacEmployee.canonical(profile.path("subject").asString())
                 : profile.path("subject").asString();
-    store.lock("identity:" + pid + ":" + subject);
+    lockIdentity(pid, subject, uac);
     ObjectNode identity = store.get("identity", pid + ":" + subject, true),
         policy = (ObjectNode) provider.path("admission");
     String purpose = tx.path("purpose").asString();
@@ -773,6 +797,14 @@ public final class LoginManager {
           "identity_already_linked",
           409);
       accountId = tx.path("accountId").asString();
+      if (uac && purpose.equals("link") && identity == null)
+        IamError.require(
+            hooks
+                .knownUacEmployee(UUID.fromString(pid), subject)
+                .map(UUID.fromString(accountId)::equals)
+                .orElse(true),
+            "identity_already_linked",
+            409);
       if (uac)
         for (ObjectNode other : store.matching("identity", "accountId", accountId))
           IamError.require(
@@ -788,14 +820,29 @@ public final class LoginManager {
             hooks.resolveUacEmployee(UUID.fromString(pid), subject).map(UUID::toString).orElse("");
       if (uac && !accountId.isEmpty()) tx.put("uacResolved", true);
     }
+    boolean uacAutoJoin =
+        uac
+            && purpose.equals("login")
+            && tx.path("audience").asString().equals("portal")
+            && tx.path("invitationCode").asString("").isBlank()
+            && !tx.path("uacResolved").asBoolean();
     if (accountId.isEmpty()) {
       boolean admit =
-          !uac
+          uacAutoJoin
+              || !uac
                   && policy.path("mode").asString().equals("auto_provision")
                   && autoProvision(policy, profile)
               || policy.path("mode").asString().equals("invite_only")
                   && !tx.path("invitationCode").asString("").isBlank();
       IamError.require(admit, "admission_denied", 403);
+      // An inactive verified binding is intentionally hidden from the login lookup.
+      // Do not treat it as an unregistered employee or start first-factor enrollment.
+      if (uacAutoJoin)
+        IamError.require(
+            !store.hasUacCaseVariant(pid, subject)
+                && hooks.knownUacEmployee(UUID.fromString(pid), subject).isEmpty(),
+            "admission_denied",
+            403);
       accountId = uac ? tx.path("uacPendingAccountId").asString() : UuidV7.next().toString();
       IamError.require(!accountId.isBlank(), "admission_denied", 403);
       tx.put("pendingAccount", accountId);
@@ -815,7 +862,7 @@ public final class LoginManager {
               "createdAt",
               clock.instant().toString(),
               "memberType",
-              policy.path("defaultMemberType").asString("member"));
+              uacAutoJoin ? "member" : policy.path("defaultMemberType").asString("member"));
     }
     IamError.require(
         account != null && account.path("status").asString().equals("active"),
@@ -834,13 +881,15 @@ public final class LoginManager {
             || tx.has("nativeGrantHash") && !uac)) {
       tx.put("pendingAccount", accountId);
       tx.put("pendingProfile", secrets.encrypt(profile.toString(), aad(tx)));
-      if (team && !teamAccounts.hasMfa(UUID.fromString(accountId))) {
-        if (tx.path("newAccount").asBoolean())
+      boolean uacEnrollment = uacAutoJoin && tx.path("newAccount").asBoolean() && identity == null;
+      if ((team || uacEnrollment) && !teamAccounts.hasMfa(UUID.fromString(accountId))) {
+        if (team && tx.path("newAccount").asBoolean())
           teamAccounts.pendingRegistrationUntil(
               pid,
               subject,
               tx.path("id").asString(),
               Instant.parse(tx.path("expiresAt").asString()));
+        if (uacEnrollment) tx.put("uacEnrollTotp", true);
         tx.put("firstTotpSecret", secrets.encrypt(Totp.generate(), aad(tx) + ":first-totp"));
         tx.set("step", firstTotpStep(null));
         store.save("login_tx", tx);
@@ -861,7 +910,18 @@ public final class LoginManager {
     }
     if (identity == null) {
       if (tx.path("newAccount").asBoolean() && store.get("account", accountId, false) == null) {
-        if (policy.path("mode").asString().equals("invite_only")
+        if (uacAutoJoin) {
+          IamError.require(
+              !store.hasUacCaseVariant(pid, subject)
+                  && hooks.provisionVerifiedUacMember(
+                      UUID.fromString(pid),
+                      subject,
+                      UUID.fromString(accountId),
+                      account.path("displayName").asString("")),
+              "admission_denied",
+              403);
+        } else if ((uac && !tx.path("invitationCode").asString("").isBlank()
+                || policy.path("mode").asString().equals("invite_only"))
             && !tx.path("uacResolved").asBoolean()) {
           ObjectNode inviteProfile =
               profile.isObject() ? ((ObjectNode) profile).deepCopy() : Json.object();
@@ -1001,6 +1061,7 @@ public final class LoginManager {
     tx.put("status", "completed");
     tx.remove("pendingProfile");
     tx.remove("firstTotpSecret");
+    tx.remove("uacEnrollTotp");
     tx.remove("state");
     tx.remove("uacCredential");
     tx.set("step", Json.object("type", "complete", "redirectTo", tx.path("returnTo").asString()));
@@ -1079,6 +1140,14 @@ public final class LoginManager {
           profile.path("subject").asString(),
           tx.path("id").asString());
     }
+  }
+
+  private void lockIdentity(String provider, String subject, boolean uac) {
+    store.lock(
+        "identity:"
+            + provider
+            + ":"
+            + (uac ? auriga.iam.api.UacEmployee.asciiFold(subject) : subject));
   }
 
   private ObjectNode client(ObjectNode tx) {

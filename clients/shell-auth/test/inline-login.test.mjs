@@ -6,7 +6,7 @@ import { valid } from '../schema.mjs';
 import { Broker } from '../broker.mjs';
 import { createPlatform, trustedConfig } from '../platform.mjs';
 
-function setup({ teamAlongsideUac = false } = {}) {
+function setup({ teamAlongsideUac = false, uacFirstFactor = false } = {}) {
   const providerId = randomUUID(),
     challengeId = randomUUID();
   let transactionId = randomUUID(),
@@ -97,7 +97,20 @@ function setup({ teamAlongsideUac = false } = {}) {
       if (path.endsWith('/' + challengeId))
         return Response.json({ id: challengeId, state });
       if (path.endsWith('/complete'))
-        return Response.json({ transactionId, state: 'authenticated' });
+        return Response.json({
+          transactionId,
+          state: uacFirstFactor ? 'additional_step_required' : 'authenticated',
+        });
+      if (uacFirstFactor && path.endsWith('/' + transactionId))
+        return Response.json({
+          id: transactionId,
+          status: 'pending',
+          step: {
+            type: 'form',
+            formId: 'first_totp',
+            fields: [{ name: 'otp', kind: 'otp', required: true }],
+          },
+        });
       if (path.endsWith('/advance') && rejectNext) {
         rejectNext = false;
         return Response.json({
@@ -155,6 +168,32 @@ test('inline UAC waiting to scanned to success uses PKCE and isolated cookies wi
   assert.ok(calls.every((c) => !c.path.includes('device_authorization')));
   await f.broker.close();
 });
+test('first inline UAC login completes tenant-required enrollment before exchanging the device grant', async (t) => {
+  const { f, calls, run, state } = setup({ uacFirstFactor: true });
+  t.after(() => f.broker.close());
+  await run('inline_login');
+  state('verified');
+  await run('inline_advance', { operation: 'poll' });
+  assert.equal(f.broker.snapshot(OWNER).inlineLogin.step.formId, 'first_totp');
+  assert.equal(f.broker.snapshot(OTHER).inlineLogin, undefined);
+  assert.ok(calls.every(({ path }) => !path.endsWith('/token')));
+
+  await run('inline_advance', {
+    operation: 'submit',
+    formId: 'first_totp',
+    values: { otp: '123456' },
+  });
+  assert.equal(f.broker.state, 'authenticated');
+  const advance = calls.findIndex(({ path }) => path.endsWith('/advance'));
+  const exchange = calls.findIndex(({ path }) => path.endsWith('/token'));
+  assert.ok(advance >= 0 && exchange > advance);
+  assert.deepEqual(JSON.parse(calls[advance].body), {
+    type: 'form',
+    formId: 'first_totp',
+    values: { otp: '123456' },
+  });
+});
+
 test('inline team and emergency submit their transaction form without returning credentials', async () => {
   for (const type of ['team-account', 'emergency']) {
     const { f, run, mode, calls } = setup();

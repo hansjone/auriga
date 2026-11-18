@@ -29,6 +29,7 @@ import org.junit.jupiter.api.*;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.mock.env.MockEnvironment;
 import tools.jackson.databind.JsonNode;
@@ -1389,8 +1390,7 @@ class UacFlowPostgresTest {
   }
 
   @Test
-  void unknownEmployeeCannotJoinWithoutVerifiedInvitationAndInactiveOwnerCannotLogin()
-      throws Exception {
+  void inactiveOwnerCannotLoginAndMissingProvisioningAuthorityFailsClosed() throws Exception {
     try (var f = new Fixture("token-verify", 3)) {
       var c = f.begin();
       f.run();
@@ -1415,6 +1415,210 @@ class UacFlowPostgresTest {
                     assertTrue(store.all("session").isEmpty());
                     return null;
                   }));
+    }
+  }
+
+  @ParameterizedTest
+  @ValueSource(booleans = {false, true})
+  void verifiedScanAndSsoShareOneOrdinaryMemberAndKeepNumericLeadingZeros(boolean ssoFirst)
+      throws Exception {
+    try (var f = new Fixture("token-verify", 3)) {
+      String employee = "000942", padded = "\u3000" + employee + "\u00a0";
+      f.scanEmployee.set(padded);
+      f.expectedVerifyAccount.set(employee);
+      f.verifyBody.set(
+          Json.object(
+              "code",
+              Json.object("code", "0000"),
+              "bo",
+              Json.object("code", "0000"),
+              "other",
+              Json.object("token", f.replacement)));
+      var owner = new AtomicReference<UUID>();
+      when(f.hooks.provisionVerifiedUacMember(
+              eq(UUID.fromString(f.provider)), eq(employee), any(), anyString()))
+          .thenAnswer(i -> owner.compareAndSet(null, i.getArgument(2)));
+      var cookies =
+          Json.object(
+              "test_portal_token", List.of(f.token), "test_portal_account", List.of(padded));
+      Supplier<LoginManager.Result> sso =
+          () -> {
+            var nav = navigation(f, "true");
+            var issued = f.call(() -> nav.issue(navigationInput(f, "portal"), false));
+            var prepared = prepare(f, nav, issued, "auto", null, null);
+            var verified = f.call(() -> nav.verify(prepared, cookies));
+            assertTrue(verified.path("success").asBoolean());
+            var completed =
+                f.call(
+                    () ->
+                        nav.finish(
+                            prepared, verified, issued.path("transactionCookie").asString()));
+            assertEquals("authenticated", completed.state());
+            return completed.result();
+          };
+      var first = ssoFirst ? sso.get() : f.login();
+      assertNotNull(first.session());
+      assertNotNull(owner.get());
+      assertNotEquals(f.account, owner.get());
+      assertEquals(owner.get().toString(), first.session().session().path("accountId").asString());
+      var second = ssoFirst ? f.login() : sso.get();
+      assertEquals(owner.get().toString(), second.session().session().path("accountId").asString());
+      verify(f.hooks, times(1)).provisionVerifiedUacMember(any(), anyString(), any(), anyString());
+      verify(f.hooks, never()).consumeUacInvitation(anyString(), any(), anyString(), any());
+      f.call(
+          () ->
+              store.tx(
+                  () -> {
+                    assertEquals(
+                        "member",
+                        store
+                            .get("account", owner.get().toString(), false)
+                            .path("memberType")
+                            .asString());
+                    assertEquals(
+                        owner.get().toString(),
+                        store
+                            .get("identity", f.provider + ":" + employee, false)
+                            .path("accountId")
+                            .asString());
+                    return null;
+                  }));
+    }
+  }
+
+  @Test
+  void existingInactiveEmployeeBindingCannotStartFirstFactorEnrollment() throws Exception {
+    try (var f = new Fixture("token-verify", 3)) {
+      String employee = "000942";
+      f.scanEmployee.set(employee);
+      when(f.hooks.knownUacEmployee(UUID.fromString(f.provider), employee))
+          .thenReturn(Optional.of(f.account));
+      f.call(
+          () ->
+              store.tx(
+                  () -> {
+                    var provider = store.get("idp_provider", f.provider, true);
+                    provider.withObject("/admission").put("mfa", "always");
+                    store.save("idp_provider", provider);
+                    return null;
+                  }));
+      var challenge = f.begin();
+      f.run();
+      assertEquals(
+          "iam.admission_denied",
+          assertThrows(AurigaException.class, () -> f.complete(challenge)).errorCode().code());
+      verify(f.hooks, never()).provisionVerifiedUacMember(any(), anyString(), any(), anyString());
+      f.call(
+          () ->
+              store.tx(
+                  () -> {
+                    var tx =
+                        store.get(
+                            "login_tx",
+                            challenge.challenge().path("transactionId").asString(),
+                            false);
+                    assertNotNull(tx);
+                    assertFalse(tx.has("firstTotpSecret"));
+                    assertTrue(store.all("session").isEmpty());
+                    return null;
+                  }));
+    }
+  }
+
+  @Test
+  void firstVerifiedPortalScanCanEnrollTheFactorRequiredByTheProvider() throws Exception {
+    try (var f = new Fixture("token-verify", 3)) {
+      f.call(
+          () ->
+              store.tx(
+                  () -> {
+                    var provider = store.get("idp_provider", f.provider, true);
+                    ((ObjectNode) provider.path("admission")).put("mfa", "new_device");
+                    store.save("idp_provider", provider);
+                    return null;
+                  }));
+      f.scanEmployee.set("009Xy");
+      f.expectedVerifyAccount.set("009Xy");
+      f.verifyBody.set(
+          Json.object(
+              "code",
+              Json.object("code", "0000"),
+              "bo",
+              Json.object("code", "0000"),
+              "other",
+              Json.object("token", f.replacement)));
+      when(f.hooks.provisionVerifiedUacMember(
+              eq(UUID.fromString(f.provider)), eq("009Xy"), any(), anyString()))
+          .thenReturn(true);
+      var challenge = f.begin();
+      f.run();
+      var pending = f.complete(challenge);
+      assertNull(pending.session());
+      verify(f.hooks, never()).provisionVerifiedUacMember(any(), anyString(), any(), anyString());
+      var tx = pending.transaction();
+      assertEquals("first_totp", tx.path("step").path("formId").asString());
+      String label = tx.path("step").path("fields").get(0).path("label").path("en").asString();
+      String secret = label.substring(label.lastIndexOf(' ') + 1);
+      var input =
+          Json.object(
+              "type",
+              "form",
+              "formId",
+              "first_totp",
+              "values",
+              Json.object("otp", Totp.code(secret, f.time.instant().getEpochSecond() / 30)));
+      assertThrows(
+          AurigaException.class,
+          () ->
+              f.call(
+                  () -> f.login.advance(tx.path("id").asString(), Secrets.random(), input, false)));
+      var completed =
+          f.call(
+              () -> f.login.advance(tx.path("id").asString(), challenge.binding(), input, false));
+      assertNotNull(completed.session());
+      verify(f.hooks, times(1)).provisionVerifiedUacMember(any(), anyString(), any(), anyString());
+    }
+  }
+
+  @Test
+  void aCaseVariantCannotEnrollAroundAnExistingBindingAndAnInvalidInviteDoesNotAutoJoin()
+      throws Exception {
+    try (var f = new Fixture("token-verify", 3)) {
+      f.scanEmployee.set("001AB");
+      f.expectedVerifyAccount.set("001AB");
+      var caseVariant = f.begin();
+      f.run();
+      assertEquals(
+          "iam.admission_denied",
+          assertThrows(AurigaException.class, () -> f.complete(caseVariant)).errorCode().code());
+      f.scanEmployee.set("009Xy");
+      f.expectedVerifyAccount.set("009Xy");
+      f.verifyBody.set(
+          Json.object(
+              "code",
+              Json.object("code", "0000"),
+              "bo",
+              Json.object("code", "0000"),
+              "other",
+              Json.object("token", f.replacement)));
+      var deniedInvite =
+          f.call(
+              () ->
+                  f.flow.create(
+                      Json.object("providerId", f.provider, "invitationCode", "invalid-invite"),
+                      "portal",
+                      "https://portal.example.com",
+                      "127.0.0.1",
+                      null,
+                      null));
+      f.run();
+      assertEquals(
+          "iam.admission_denied",
+          assertThrows(AurigaException.class, () -> f.complete(deniedInvite)).errorCode().code());
+      verify(f.hooks, never()).provisionVerifiedUacMember(any(), anyString(), any(), anyString());
+      verify(f.hooks)
+          .consumeUacInvitation(
+              eq("invalid-invite"), eq(UUID.fromString(f.provider)), eq("009Xy"), any());
     }
   }
 

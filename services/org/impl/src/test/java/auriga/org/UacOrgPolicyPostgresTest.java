@@ -131,6 +131,38 @@ class UacOrgPolicyPostgresTest {
   }
 
   @Test
+  void verifiedSelfProvisioningDoesNotReuseAnAccountOrRestoreInactiveBindings() {
+    UUID candidate = UuidV7.next();
+    store.tenant(
+        tenant,
+        () -> {
+          assertTrue(policy.provisionVerifiedMember(provider, "009Xy", candidate, "Test member"));
+          assertTrue(policy.provisionVerifiedMember(provider, "009Xy", candidate, "Test member"));
+          assertEquals(candidate, policy.resolve(provider, "009Xy").orElseThrow());
+          assertEquals("member", store.member(candidate).orElseThrow().memberType());
+          assertTrue(org.memberJson(candidate).path("roleKeys").isEmpty());
+          assertFalse(policy.provisionVerifiedMember(provider, "009XY", UuidV7.next(), "Other"));
+          assertFalse(policy.provisionVerifiedMember(provider, "009Xy", UuidV7.next(), "Other"));
+          assertFalse(policy.provisionVerifiedMember(provider, "001Z", candidate, "Other"));
+          for (String status : List.of("disabled", "offboarded")) {
+            store
+                .jdbc()
+                .update(
+                    "UPDATE member SET status=? WHERE tenant_id=? AND id=?",
+                    status,
+                    tenant,
+                    candidate);
+            assertEquals(candidate, policy.known(provider, "009Xy").orElseThrow());
+            assertTrue(policy.resolve(provider, "009Xy").isEmpty());
+            assertFalse(
+                policy.provisionVerifiedMember(provider, "009Xy", candidate, "Test member"));
+            assertFalse(policy.provisionVerifiedMember(provider, "009Xy", UuidV7.next(), "Other"));
+          }
+          return null;
+        });
+  }
+
+  @Test
   void verifiedMappingRequiresExactProviderTenantAndActiveMemberAndPreservesZeroes()
       throws Exception {
     UUID account = member("active");

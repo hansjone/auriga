@@ -183,7 +183,7 @@ domain 与纯 IP 部署均沿现有入口契约。IP 同源实例保留已知弱
 
 IAM按内部资料映射选择完整token/account对：Portal体系优先，缺完整配对再取UDS体系，均无则fallback扫码；不把不同体系的token与工号交叉拼接。两体系同时存在时只验证优先的完整配对，该配对验证失败直接扫码，避免静默切到另一个账号。语言按Portal、UDS、默认简体中文；客户端IP按私有UDS资料映射取值，仅视为上游校验所需的非可信资料，校验长度和IP字面量格式，不做解析访问、不将其用于我方授权或审计客户端地址。缺失时用第2.4.3节部署值。版本等非必要字段不外发，序列号不采集。缺字段、重复同名Cookie、格式非法均安全回落扫码，不向浏览器暴露具体Cookie名或原文。
 
-后端计算verifyCode，调用第2.4.3节token验证接口，双层成功码、归一化工号及新token均通过才执行成员/邀请准入和必要MFA，保存验证返回的令牌，不能保存未验证Cookie旧token。首次SSO验证任意明确拒绝、上游故障或资料不完整都回落扫码，不为尚未成立的会话启动复验重试，也不撤销浏览器里其他账号会话。成员准入拒绝仍按既有策略提示申请邀请，不能用扫码绕过；MFA未完成仍是additional_step_required。成功后轮换我方session ID、清事务证明，并与扫码共用一次login_info作业、nextRevalidateAt、设备绑定、撤销及日志。SSO用于login，不自动执行link/stepup，也不从普通业务GET建立新会话。
+后端计算verifyCode，调用第2.4.3节token验证接口，双层成功码、归一化工号及新token均通过才执行成员/邀请准入和必要MFA，保存验证返回的令牌，不能保存未验证Cookie旧token。首次SSO验证任意明确拒绝、上游故障或资料不完整都回落扫码，不为尚未成立的会话启动复验重试，也不撤销浏览器里其他账号会话。首次经本租户入口验证、符合现有 MFA 策略且未提供邀请的主体默认加入为普通成员；其他准入拒绝不能用扫码绕过；MFA未完成仍是additional_step_required。成功后轮换我方session ID、清事务证明，并与扫码共用一次login_info作业、nextRevalidateAt、设备绑定、撤销及日志。SSO用于login，不自动执行link/stepup，也不从普通业务GET建立新会话。
 
 退出的同源受保护POST在清会话前，将“本次浏览器会话禁止自动SSO”的标记写入服务端浏览器会话记录，配套独立host-only、HttpOnly、SameSite=Lax的会话cookie（HTTPS用__Host-前缀，无Domain/Expires/Max-Age，不含UAC材料）。该标记与平台session分离、跨标签页共享，登出与浏览器返回登录页不会清掉。普通重载、重定向、会话轮换及现存企业Cookie都不能绕过标记；同一浏览器会话内仅显示“用公司账号继续”和扫码，不再自动尝试。显式继续仅为本事务授权一次，不清抑制标记，不退出公司其他应用。浏览器恢复会话可能保留session cookie，届时继续抑制属安全降级。标记存储不可用时禁止自动SSO、保留显式继续/扫码。登录/退出响应no-store，页面frame-ancestors 'none'，外部returnTo严格受信相对路径允许列表，防CSRF与登录固定。
 
@@ -198,7 +198,7 @@ IAM按内部资料映射选择完整token/account对：Portal体系优先，缺�
 
 两接口按真实socket对端检查仅本机调用，沿原型核对任务能力的audience、有效期、撤销状态和DSH会话owner。skill发送 `X-DSH-Session-Id: <DSH_SESSION_ID>` 与 `X-Dsh-Team-Task-Capability: <DSH_TEAM_TASK_CAPABILITY>`，兼容原型body的sessionId/dshSessionId和taskCapability/capability字段。原始读取要求本次任务credentials scope，代发要求outbound scope，按各自所需权限校验。调用者身份和会话归属从已验证任务及宿主会话取值，body.empNo不参与授权。
 
-插件部署配置保留 `allowRawAgentToken`，默认true，用户接受该风险，部署配置可关。沿原型使用实时配置读取，开关关闭后下一次原始读取即拒绝。默认shellEnv任务能力包含outbound和credentials，部署方关闭raw后只注入outbound。shellEnv原样提供 `DSH_TEAM_TASK_CAPABILITY` 和 `DSH_TEAM_BASE`，后者为当前宿主回环地址加/dsh-team。宿主既有 `DSH_SESSION_ID` 仍表示本次agent会话，helper保留 `DSH_WEB_URL` 加/dsh-team的地址回退和 `DSH_TEAM_HELPERS` 的模块定位用法。任务能力沿原型600秒期限，执行结束/撤销时清理，后台任务沿已有jobs生命周期释放。UAC原始token由handler即时读取，环境注入只承载上述既有任务调用信息。
+插件部署配置保留 `allowRawAgentToken`，默认true，用户接受该风险，部署配置可关。沿原型使用实时配置读取，开关关闭后下一次原始读取即拒绝。默认shellEnv任务能力包含outbound和credentials，部署方关闭raw后只注入outbound。shellEnv原样提供 `DSH_TEAM_TASK_CAPABILITY` 和 `DSH_TEAM_BASE`，后者为当前宿主回环地址加/dsh-team。宿主既有 `DSH_SESSION_ID` 仍表示本次agent会话，helper保留 `DSH_WEB_URL` 加/dsh-team的地址回退和 `DSH_TEAM_HELPERS` 的模块定位用法。任务能力沿原型600秒期限，执行结束/撤销时清理，后台任务沿已有jobs生命周期释放。当前已认证的本人 Desktop 工具启动经相同权限即时把工号和令牌投影为 auriga_id、auriga_token；运行中的工具通过既有 handler 按需读新值，不能刷新运行中的进程环境。
 
 插件内部继续使用当前平台会话或已绑定设备凭据调用 `POST /api/iam/v1/me/uac/credentials`，请求空对象，取UacEnterpriseCredentials的empNo、最新token、updatedAt及必要的可选cookies。该IAM接口供handler读取权威当前值，现场skill仍调用上述兼容路径。复验换发并提交新令牌后，两handler下一次调用使用新值。退出、会话撤销/到期、成员或身份源停用后拒绝。复用既有认证代次检查处理并发账号切换，凭据始终归当前已认证用户自己的DSH会话。交给skill的凭据副本不写静态配置、文件、日志、stdout/stderr或会话记录，日志只留token哈希前缀，skill给AI的工具结果仅含业务结果或安全状态。IAM权威材料按第2.4节加密保存。
 
@@ -360,7 +360,7 @@ SSO免扫码按第3.1.1节进入第一期且默认开启，支持现场单IP、�
 
 既有产品决定及本轮用户确认的单域部署取舍如下。
 
-1. 首次成员关联仅允许管理员核实员工号、双认证绑定或有效邀请，默认关闭自动入团队注册，避免自填员工号接管既有账号。
+1. 配置 UAC 的租户，首次通过门户扫码或 SSO 完成企业验证与已有 MFA 后，缺省创建普通成员，不赋予额外角色或组。保留管理员核实、双认证绑定与明确提供有效邀请的接缝。禁止按自填工号、姓名或邮箱合并、改绑或恢复停用／离职成员。仅本机桌面扫码不创建团队成员。
 2. Desktop首期默认系统浏览器打开云端门户，通过SSO或扫码/团队账号完成身份认证，再沿现有RFC8628人工核码取得device-only凭据；本机页只控制状态/取消/跳过，平台不可达时本地DSH仍可使用。
 3. 门户第一期默认先检查SSO Cookie并验证，无Cookie或验证失败回落扫码。扫码取得token和工号即完成UAC登录，两种成功方式随后一次purpose=login_info部门查询只补充展示，失败仅WARN，不影响登录或nextRevalidateAt。复验周期默认7200秒，可通过第2.4节部署配置调整。每个会话持久化nextRevalidateAt，到期后按部署策略执行purpose=revalidate，默认token-verify（扫码token兼容性已由用户确认），上游故障按有界预算重试，完整响应中的明确业务/身份失败或预算耗尽撤销；department保留为备用，单次查不到部门立即撤销。服务重启仅处理已到期复验会话，日志分别记录网络与业务原因，本地DSH能力保持可用。
 4. 已激活共享内容的退出/跨身份切换采用受控停止、隔离和新会话，避免旧身份内容残留在上下文。普通补登录通过快照推送生效。

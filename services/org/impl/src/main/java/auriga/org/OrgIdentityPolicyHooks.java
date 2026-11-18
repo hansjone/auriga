@@ -35,6 +35,17 @@ public final class OrgIdentityPolicyHooks implements IdentityPolicyHooks {
   }
 
   @Override
+  public Optional<UUID> knownUacEmployee(UUID provider, String employee) {
+    return uac == null ? Optional.empty() : uac.known(provider, employee);
+  }
+
+  @Override
+  public boolean provisionVerifiedUacMember(
+      UUID provider, String employee, UUID account, String displayName) {
+    return uac != null && uac.provisionVerifiedMember(provider, employee, account, displayName);
+  }
+
+  @Override
   public boolean consumeUacInvitation(String code, UUID provider, String employee, UUID account) {
     return uac != null && uac.consume(code, provider, employee, account);
   }

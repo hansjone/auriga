@@ -426,6 +426,19 @@ public final class IamStore {
         TenantContext.require() + ":" + namespace);
   }
 
+  boolean hasUacCaseVariant(String provider, String employee) {
+    String lookup = provider + ":" + employee;
+    return Boolean.TRUE.equals(
+        jdbc.queryForObject(
+            "SELECT EXISTS (SELECT 1 FROM iam.\"identity\" WHERE tenant_id=? AND starts_with(lookup_key,?)"
+                + " AND lookup_key<>? AND translate(lookup_key,'ABCDEFGHIJKLMNOPQRSTUVWXYZ','abcdefghijklmnopqrstuvwxyz')=?)",
+            Boolean.class,
+            TenantContext.require(),
+            provider + ":",
+            lookup,
+            auriga.iam.api.UacEmployee.asciiFold(lookup)));
+  }
+
   public void limit(String key, Instant now, int maximum) {
     // Authentication failures must not roll back their own attempt counter.
     isolated(
