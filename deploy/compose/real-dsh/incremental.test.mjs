@@ -252,7 +252,7 @@ test('Docker recipe checks before mutation and regenerates original manifest', (
   assert.match(recipe, /FROM \$\{BASE_RUNTIME_IMAGE\}/);
   assert.ok(
     recipe.indexOf('incremental.mjs') <
-      recipe.indexOf('COPY clients/dsh-plugin/src'),
+      recipe.indexOf('COPY real-dsh-inputs/clients/dsh-plugin/src'),
   );
   assert.match(
     recipe,

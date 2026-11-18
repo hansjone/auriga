@@ -2,18 +2,19 @@
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import {
-  cpSync,
   mkdirSync,
-  mkdtempSync,
   readFileSync,
   readdirSync,
   lstatSync,
-  rmSync,
   writeFileSync,
 } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { fileURLToPath } from 'node:url';
 import { dirname, join, resolve } from 'node:path';
+import {
+  checkoutFromEntry,
+  commonInputs,
+  recipePath,
+  withRealDshContext,
+} from './real-dsh-context.mjs';
 import { buildArgs, selectRepoDigest } from './runtime-image-input.mjs';
 
 // prepare keeps metadata isolated until bootstrap has accepted the installation.
@@ -22,27 +23,12 @@ if (commandArgs.filter((arg) => arg === '--local-only').length > 1)
   throw new Error('Duplicate --local-only');
 const localOnly = commandArgs.includes('--local-only');
 const args = buildArgs(commandArgs.filter((arg) => arg !== '--local-only'));
-const root = fileURLToPath(new URL('../../../', import.meta.url));
+const root = checkoutFromEntry(process.argv[1]);
 const nodeImage = process.env.NODE_IMAGE || '';
 const tag = `${args.image.fullRepository}:${args.image.tag}`;
 if (!/^node:22\.19\.0-bookworm-slim@sha256:[a-f0-9]{64}$/.test(nodeImage)) {
   throw new Error(
     'Set NODE_IMAGE=node:22.19.0-bookworm-slim@sha256:<reviewed manifest digest>',
-  );
-}
-// Bind to the immutable input recorded in versions.json, not just its shape.
-// Registry resolution establishes provenance; independent approval is separate.
-const pinned = JSON.parse(
-  readFileSync(new URL('../real-dsh/versions.json', import.meta.url), 'utf8'),
-).nodeImage;
-if (!pinned) {
-  throw new Error(
-    'real-dsh/versions.json nodeImage is empty: record the base image digest and provenance first',
-  );
-}
-if (nodeImage !== pinned) {
-  throw new Error(
-    'NODE_IMAGE does not match the pinned real-dsh/versions.json nodeImage',
   );
 }
 function docker(args, capture = false) {
@@ -56,9 +42,6 @@ function docker(args, capture = false) {
     throw new Error(`docker ${args[0]} failed`);
   return result.stdout?.trim();
 }
-// Never send .git, var/, credentials or the workspace node_modules junction to
-// the Docker daemon. Keep this list aligned with the Dockerfile's COPY inputs.
-const context = mkdtempSync(join(tmpdir(), 'auriga-real-dsh-'));
 function contextManifest(directory, prefix = '') {
   const files = [];
   for (const name of readdirSync(directory).sort()) {
@@ -79,48 +62,44 @@ function contextManifest(directory, prefix = '') {
   }
   return files;
 }
-let contextInputs;
-try {
-  for (const path of [
-    'deploy/compose/real-dsh/Dockerfile',
-    'deploy/compose/real-dsh/package.json',
-    'deploy/compose/real-dsh/package-lock.json',
-    'deploy/compose/real-dsh/versions.json',
-    'deploy/compose/real-dsh/build.mjs',
-    'deploy/compose/real-dsh/inputs.mjs',
-    'deploy/compose/real-dsh/runtime.mjs',
-    'deploy/compose/real-dsh/start.mjs',
-    'clients/dsh-plugin/package.json',
-    'clients/dsh-plugin/package-lock.json',
-    'clients/dsh-plugin/LICENSE',
-    'clients/dsh-plugin/cordis.patch.yml',
-    'clients/dsh-plugin/src',
-  ]) {
-    const destination = join(context, path);
-    mkdirSync(dirname(destination), { recursive: true });
-    cpSync(join(root, path), destination, { recursive: true });
-  }
-  contextInputs = contextManifest(context);
-  docker([
-    'build',
-    '--platform=linux/amd64',
-    '--provenance=false',
-    '--sbom=false',
-    '--build-arg',
-    `NODE_IMAGE=${nodeImage}`,
-    '-f',
-    join(context, 'deploy/compose/real-dsh/Dockerfile'),
-    '-t',
-    tag,
-    context,
-  ]);
-  if (
-    JSON.stringify(contextManifest(context)) !== JSON.stringify(contextInputs)
-  )
-    throw new Error('Build context changed during Docker build');
-} finally {
-  rmSync(context, { recursive: true, force: true });
-}
+// Keep the whitelist aligned with the Dockerfile's COPY inputs.
+const contextInputs = await withRealDshContext(
+  root,
+  [`${recipePath}/Dockerfile`, ...commonInputs],
+  (context) => {
+    // Bind to the reviewed versions.json from the same snapshot Docker will use.
+    const pinned = JSON.parse(
+      readFileSync(join(context, recipePath, 'versions.json'), 'utf8'),
+    ).nodeImage;
+    if (!pinned) {
+      throw new Error(
+        'real-dsh/versions.json nodeImage is empty: record the base image digest and provenance first',
+      );
+    }
+    if (nodeImage !== pinned) {
+      throw new Error(
+        'NODE_IMAGE does not match the pinned real-dsh/versions.json nodeImage',
+      );
+    }
+    const inputs = contextManifest(context);
+    docker([
+      'build',
+      '--platform=linux/amd64',
+      '--provenance=false',
+      '--sbom=false',
+      '--build-arg',
+      `NODE_IMAGE=${nodeImage}`,
+      '-f',
+      join(context, recipePath, 'Dockerfile'),
+      '-t',
+      tag,
+      context,
+    ]);
+    if (JSON.stringify(contextManifest(context)) !== JSON.stringify(inputs))
+      throw new Error('Build context changed during Docker build');
+    return inputs;
+  },
+);
 if (!localOnly) docker(['push', tag]);
 const inspected = JSON.parse(docker(['image', 'inspect', tag], true));
 const image = localOnly
