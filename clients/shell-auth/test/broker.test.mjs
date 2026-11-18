@@ -14,7 +14,7 @@ test('device login opens prefilled HTTPS verification page, stores secrets priva
   await f.broker.initialize();
   await login(f);
   assert.equal(new URL(f.opened[0]).origin, 'https://example.com');
-  assert.ok(new URL(f.opened[0]).searchParams.get('user_code'));
+  assert.match(new URL(f.opened[0]).pathname, /^\/device\/[A-Z]{8}$/);
   assert.equal(f.broker.snapshot().state, 'authenticated');
   assert.ok(changes.every((s) => valid('ShellAuthSnapshot', s)));
   assert.ok(!JSON.stringify(changes).includes(f.tokens.access_token));
@@ -34,7 +34,7 @@ test('confirmed IP binding opens only its own HTTP device page; HTTPS platforms 
   });
   await login(ipLogin);
   assert.equal(new URL(ipLogin.opened[0]).origin, lan);
-  assert.ok(new URL(ipLogin.opened[0]).searchParams.get('user_code'));
+  assert.match(new URL(ipLogin.opened[0]).pathname, /^\/device\/[A-Z]{8}$/);
   await ipLogin.broker.close();
   for (const [platformOrigin, verification_uri] of [
     ['https://example.com', 'http://example.com/device'],
@@ -275,8 +275,8 @@ test('prefilled authorization is bound to this grant and published only to its o
   await new Promise((resolve) => setImmediate(resolve));
   const display = f.broker.snapshot(OWNER).deviceAttempt;
   assert.equal(
-    new URL(f.opened[0]).searchParams.get('user_code'),
-    display.userCode,
+    new URL(f.opened[0]).pathname,
+    '/device/' + display.userCode.replaceAll('-', ''),
   );
   assert.equal(own.at(-1).deviceAttempt.userCode, display.userCode);
   assert.ok(foreign.every((s) => !s.deviceAttempt));
@@ -365,6 +365,6 @@ test('a valid complete URI and manual login preserve prefill and require confirm
   f.broker.record.manualLoginRequired = true;
   await login(f);
   assert.equal(new URL(f.opened[0]).searchParams.get('mode'), 'manual');
-  assert.ok(new URL(f.opened[0]).searchParams.get('user_code'));
+  assert.match(new URL(f.opened[0]).pathname, /^\/device\/[A-Z]{8}$/);
   await f.broker.close();
 });

@@ -2820,8 +2820,7 @@ class UacFlowPostgresTest {
   }
 
   @Test
-  void deviceNavigationResolvesOnlyPendingOwnUserCodeAndNeverAutomaticallyVerifiesOrApproves()
-      throws Exception {
+  void deviceNavigationCanSignInTheBrowserButStillNeverApprovesTheDevice() throws Exception {
     try (var f = new Fixture("token-verify", 3)) {
       var nav = navigation(f, "true");
       String id = UUID.randomUUID().toString();
@@ -2850,6 +2849,7 @@ class UacFlowPostgresTest {
                   }));
       var input = navigationInput(f, "device");
       input.put("userCode", "BCDF-GHJK");
+      ((ObjectNode) input.path("fetchMetadata")).put("site", "cross-site");
       assertThrows(AurigaException.class, () -> f.call(() -> nav.issue(input, false)));
       var legacy = navigationInput(f, "device");
       legacy.put("deviceGrantId", id);
@@ -2863,14 +2863,14 @@ class UacFlowPostgresTest {
       assertEquals(0, f.verifications.get());
       var next = navigationInput(f, "device");
       next.put("userCode", "BCDF-GHJK");
-      var explicit = f.call(() -> nav.issue(next, true));
-      var prepared = prepare(f, nav, explicit, "continue", null, null);
+      ((ObjectNode) next.path("fetchMetadata")).remove("user");
+      var desktop = f.call(() -> nav.issue(next, true));
+      assertTrue(desktop.path("context").path("autoEligible").asBoolean());
+      var prepared = prepare(f, nav, desktop, "auto", null, null);
       JsonNode verified = f.call(() -> nav.verify(prepared, ssoCookies(f)));
       assertEquals(
           "authenticated",
-          f.call(
-                  () ->
-                      nav.finish(prepared, verified, explicit.path("transactionCookie").asString()))
+          f.call(() -> nav.finish(prepared, verified, desktop.path("transactionCookie").asString()))
               .state());
       f.call(
           () ->

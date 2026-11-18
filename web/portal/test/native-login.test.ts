@@ -160,6 +160,41 @@ afterEach(() => {
 });
 
 describe('native cloud sign-in', () => {
+  it('defaults to scanning when browser sign-in evidence is unavailable and offers a team account', async () => {
+    const uac = {
+      ...provider,
+      id: txId,
+      connectorType: 'uac',
+      primaryStep: 'qr',
+    };
+    const challenge = {
+      id: txId,
+      transactionId: txId,
+      qrContent: 'synthetic-test-qr',
+      expiresAt: '2099-01-01T00:00:00Z',
+      pollIntervalSeconds: 2,
+    };
+    fetcher.mockImplementation(async (input) => {
+      const path = String(input);
+      if (path.endsWith('/me')) return expired();
+      if (path.endsWith('/providers')) return json({ items: [provider, uac] });
+      if (path.endsWith('/challenges')) return json(challenge);
+      if (path.endsWith('/' + txId))
+        return json({ ...challenge, state: 'waiting' });
+      throw new Error('Unexpected request');
+    });
+    render();
+    await flush();
+    expect(
+      root.querySelector('[data-uac-state]')?.getAttribute('data-uac-state'),
+    ).toBe('waiting');
+    expect(
+      fetcher.mock.calls.some(([path]) => String(path).endsWith('/sso')),
+    ).toBe(false);
+    button('更换登录方式').click();
+    await flush();
+    expect(button('团队账号').hidden).toBe(false);
+  });
   it('starts QR sign-in for an enabled UAC provider without a navigation proof', async () => {
     const id = '01900000-0000-7000-8000-000000000009';
     fetcher.mockImplementation(async (input, init) => {

@@ -659,13 +659,9 @@ public final class OAuthProvider {
               409);
           if (StandardDevices.MODE.equals(grant.path("authorizationMode").asString())) {
             IamError.require(
-                "portal".equals(session.path("audience").asString())
-                    && (!grant.has("uacNavigationProviderId")
-                        || grant
-                            .path("uacNavigationProviderId")
-                            .equals(session.path("providerId"))),
-                "invalid_grant",
-                400);
+                "portal".equals(session.path("audience").asString()), "invalid_grant", 400);
+            // The optional UAC navigation proof selects a browser sign-in route.
+            // Approval binds the actual portal account, including team-account fallback.
             grant.set("accountId", session.path("accountId"));
             grant.set("providerId", session.path("providerId"));
           }

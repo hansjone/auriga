@@ -582,17 +582,14 @@ export function mountInstanceLogin(
     )
       throw new Error('Invalid login providers');
     providers = result.items;
-    show(providers.length ? 'providers' : 'empty');
-    const navigationProvider = doc.getElementById('auriga-uac-navigation')
-      ? navigationProviderId(doc)
-      : undefined;
-    const preferred =
-      providers.find(
-        (p) => p.connectorType === 'uac' && p.id === navigationProvider,
-      ) ?? providers.find((p) => p.connectorType === 'uac');
-    // The navigation proof controls SSO only. IAM's enabled providers also
-    // support anonymous QR sign-in when Edge cannot supply that proof.
-    if (preferred) void selectProvider(preferred.id);
+    const preferred = providers.find(
+      (p) => p.connectorType === 'uac' && p.id === navigationProviderId(doc),
+    );
+    const uac =
+      (doc.getElementById('auriga-uac-navigation') ? preferred : undefined) ??
+      providers.find((p) => p.connectorType === 'uac');
+    if (uac) void selectProvider(uac.id);
+    else show(providers.length ? 'providers' : 'empty');
   }
 
   async function verifyAndOpen() {

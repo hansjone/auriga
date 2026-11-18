@@ -184,12 +184,12 @@ final class UacNavigation {
           ObjectNode tx =
               flow.transaction(provider, "login", "portal", origin, "", "", null, binding);
           JsonNode metadata = normalized.path("fetchMetadata");
+          String activation = metadata.path("user").asString();
           boolean auto =
-              continuation.equals("portal")
-                  && "document".equals(metadata.path("dest").asString())
+              "document".equals(metadata.path("dest").asString())
                   && "navigate".equals(metadata.path("mode").asString())
                   && Set.of("none", "same-origin").contains(metadata.path("site").asString())
-                  && "?1".equals(metadata.path("user").asString());
+                  && ("?1".equals(activation) || (device != null && activation.isEmpty()));
           boolean suppressed =
               suppressed(normalized.path("suppressionCookie").asString(null), origin);
           ObjectNode nav =
@@ -288,6 +288,15 @@ final class UacNavigation {
         || grant.path("revoked").asBoolean()
         || "native_tx".equals(grant.path("authorizationMode").asString())
         || !clock.instant().isBefore(Instant.parse(grant.path("expiresAt").asString())))
+      throw new AurigaException(CommonErrors.NOT_FOUND);
+  }
+
+  private void checkDeviceNavigation(ObjectNode navigation) {
+    if (!"device".equals(navigation.path("continuation").asString())) return;
+    ObjectNode grant =
+        store.byId("oauth_grant", navigation.path("deviceGrantId").asString(), false);
+    devicePending(grant);
+    if (!navigation.path("providerId").equals(grant.path("uacNavigationProviderId")))
       throw new AurigaException(CommonErrors.NOT_FOUND);
   }
 
@@ -393,6 +402,7 @@ final class UacNavigation {
               || !Secrets.same(nav.path("csrfHash").asString(), Secrets.hash(csrfCookie)))
             throw new AurigaException(CommonErrors.FORBIDDEN);
           if (nav.path("consumed").asBoolean()) throw new AurigaException(CommonErrors.CONFLICT);
+          checkDeviceNavigation(nav);
           nav.put("consumed", true);
           store.save("uac_navigation", nav);
           ObjectNode existing =
@@ -405,9 +415,7 @@ final class UacNavigation {
                   && UacProviderService.etag(provider)
                       .equals(nav.path("providerRevision").asString())
                   && (!"auto".equals(input.path("mode").asString())
-                      || nav.path("autoEligible").asBoolean()
-                          && "portal".equals(nav.path("continuation").asString())
-                          && !suppressed(suppression, origin));
+                      || nav.path("autoEligible").asBoolean() && !suppressed(suppression, origin));
           nav.put("invitationCode", input.path("invitationCode").asString(""));
           nav.put("eligible", attempt);
           nav.put("suppressed", suppressed(suppression, origin));
@@ -491,6 +499,7 @@ final class UacNavigation {
               || nav.path("cancelled").asBoolean()
               || !clock.instant().isBefore(Instant.parse(nav.path("expiresAt").asString())))
             throw new AurigaException(CommonErrors.CONFLICT);
+          checkDeviceNavigation(nav);
           nav.put("finished", true);
           store.save("uac_navigation", nav);
           ObjectNode tx = store.get("login_tx", nav.path("transactionId").asString(), true);

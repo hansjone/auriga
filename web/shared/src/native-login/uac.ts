@@ -14,7 +14,6 @@ const messages = {
   'zh-CN': {
     preparing: '正在获取二维码',
     sso: '正在尝试企业登录',
-    continue_required: '请选择继续企业登录或获取二维码',
     waiting: '请扫码登录',
     scanned: '已扫码，请在手机确认',
     completing: '正在完成登录',
@@ -30,7 +29,6 @@ const messages = {
     uncertain: '已取消等待，登录结果尚未确认，请刷新页面',
     retry: '重新获取二维码',
     cancel: '取消',
-    proceed: '继续企业登录',
     reload: '刷新页面',
     warning: '请仅为本人扫码，避免转发二维码或共享屏幕。',
     qr: '登录二维码',
@@ -40,7 +38,6 @@ const messages = {
   en: {
     preparing: 'Preparing QR code',
     sso: 'Trying company sign-in',
-    continue_required: 'Continue with company sign-in or request a QR code',
     waiting: 'Scan to sign in',
     scanned: 'Confirm on your phone',
     completing: 'Completing sign-in',
@@ -56,7 +53,6 @@ const messages = {
     uncertain: 'Stopped waiting. Sign-in is not confirmed. Reload the page.',
     retry: 'New QR code',
     cancel: 'Cancel',
-    proceed: 'Continue with company sign-in',
     reload: 'Reload page',
     warning: 'Scan only for yourself. Do not share this code or your screen.',
     qr: 'Sign-in QR code',
@@ -66,14 +62,7 @@ const messages = {
 };
 type State = Exclude<
   keyof typeof messages.en,
-  | 'retry'
-  | 'cancel'
-  | 'proceed'
-  | 'reload'
-  | 'warning'
-  | 'qr'
-  | 'reference'
-  | 'validity'
+  'retry' | 'cancel' | 'reload' | 'warning' | 'qr' | 'reference' | 'validity'
 >;
 type Stage = 'sso' | 'challenge' | 'status' | 'complete' | 'cancel';
 
@@ -167,11 +156,10 @@ export function createUacLoginView(
   reference.className = 'uac-reference';
   const retry = doc.createElement('button'),
     cancel = doc.createElement('button');
-  const proceed = doc.createElement('button'),
-    reload = doc.createElement('button');
-  for (const button of [retry, cancel, proceed, reload]) button.type = 'button';
+  const reload = doc.createElement('button');
+  for (const button of [retry, cancel, reload]) button.type = 'button';
   cancel.className = 'uac-cancel';
-  actions.append(proceed, retry, cancel, reload);
+  actions.append(retry, cancel, reload);
   root.replaceChildren(target, frame, statusRow, warning, actions, reference);
   const current = (version: number) => !disposed && epoch === version;
   function updateCountdown() {
@@ -233,13 +221,9 @@ export function createUacLoginView(
     retry.textContent = words.retry;
     retry.setAttribute('aria-label', words.retry);
     cancel.textContent = words.cancel;
-    proceed.textContent = words.proceed;
     reload.textContent = words.reload;
     const needsReload = state === 'uncertain' || state === 'invalid_request';
-    retry.hidden =
-      completed ||
-      needsReload ||
-      !['expired', 'continue_required'].includes(state);
+    retry.hidden = completed || needsReload || state !== 'expired';
     retry.disabled = busy() || Date.now() < retryAt;
     cancel.hidden =
       completed ||
@@ -252,8 +236,6 @@ export function createUacLoginView(
         'unavailable',
         'limited',
       ].includes(state);
-    proceed.hidden = !proof || completed || needsReload;
-    proceed.disabled = busy();
     reload.hidden = !needsReload;
     root.setAttribute('aria-busy', String(busy()));
     qr.querySelector('svg')?.setAttribute('aria-label', words.qr);
@@ -525,7 +507,7 @@ export function createUacLoginView(
       failed(error, version);
     }
   }
-  async function sso(mode: 'auto' | 'continue') {
+  async function sso() {
     if (disposed || busy() || completed) return;
     const context = proof;
     proof = undefined;
@@ -533,10 +515,8 @@ export function createUacLoginView(
       !context ||
       !Number.isFinite(Date.parse(context.expiresAt)) ||
       Date.parse(context.expiresAt) <= Date.now() ||
-      (mode === 'auto' &&
-        (context.purpose !== 'portal' ||
-          !context.autoEligible ||
-          context.autoSuppressed))
+      !context.autoEligible ||
+      context.autoSuppressed
     )
       return scan();
     const cleanup = invalidate(),
@@ -549,7 +529,7 @@ export function createUacLoginView(
         options.api.loginUacSso({
           providerId: options.providerId,
           navigationProof: context.navigationProof,
-          mode,
+          mode: 'auto',
           invitationCode: options.invitationCode,
         }),
       );
@@ -571,18 +551,9 @@ export function createUacLoginView(
     void invalidate();
     show(uncertain ? 'uncertain' : 'cancelled');
   };
-  proceed.onclick = () => {
-    operation = sso('continue');
-  };
   reload.onclick = () => doc.defaultView?.location.reload();
   render();
-  if (
-    proof?.purpose === 'portal' &&
-    proof.autoEligible &&
-    !proof.autoSuppressed
-  )
-    operation = sso('auto');
-  else if (proof) show('continue_required');
+  if (proof?.autoEligible && !proof.autoSuppressed) operation = sso();
   else operation = scan();
   return {
     setLocale(value: string) {
