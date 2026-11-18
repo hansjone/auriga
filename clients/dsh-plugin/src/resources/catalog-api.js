@@ -16,7 +16,7 @@ export function catalogIdentity(runtime) {
     const verified = memberIdentity(runtime);
     if (verified.tenantId !== r.tenantId || verified.ownerId !== r.ownerId)
       refuse('common.unauthenticated');
-    // Catalog delivery is bound to the verified DEVICE did, not the managed instance ID.
+    // The broker binds the request to did. IAM resolves that device's instance server-side.
     return {
       tenantId: r.tenantId,
       ownerId: r.ownerId,
@@ -34,6 +34,8 @@ export function catalogApi({
   policy,
 }) {
   const who = catalogIdentity(runtime),
+    instance = runtime.resourceIdentity?.instanceId,
+    source = instance ? 'node' : 'member',
     _origin = runtime.config.platformOrigin;
   let allowPersonalPlugins = policy?.read() ?? true;
   function check() {
@@ -41,6 +43,7 @@ export function catalogApi({
       refuse('resource.storage_unavailable');
     if (
       current() !== runtime ||
+      runtime.resourceIdentity?.instanceId !== instance ||
       canonicalize(catalogIdentity(runtime)) !== canonicalize(who)
     )
       refuse('common.unauthenticated');
@@ -159,8 +162,23 @@ export function catalogApi({
             row.clientId !== who.hostId ||
             row.resource.identity.tenantId !== who.tenantId ||
             !['skill', 'plugin'].includes(row.resource.identity.kind) ||
-            row.reportSource !== 'member' ||
+            row.reportSource !== source ||
             seen.has(row.resource.identity.packageId)
+          )
+            refuse('common.validation_failed');
+          if (
+            instance &&
+            (!row.report
+              ? !['applying', 'removed'].includes(row.state)
+              : row.report.clientId !== instance ||
+                row.report.reportSource !== 'node' ||
+                row.report.installationRevision !== row.installationRevision ||
+                row.report.selectionRevision !== row.selectionRevision ||
+                row.report.generation !== row.generation ||
+                row.report.observedGeneration !== row.generation ||
+                row.report.state !== row.state ||
+                canonicalize(row.report.identity) !==
+                  canonicalize(row.resource.identity))
           )
             refuse('common.validation_failed');
           seen.add(row.resource.identity.packageId);
@@ -196,6 +214,8 @@ export function catalogApi({
         canonicalize(row.resource.identity) !==
           canonicalize(selection.identity) ||
         row.clientId !== who.hostId ||
+        row.reportSource !== source ||
+        (instance && row.state !== 'applying') ||
         desiredState(row.resource) !==
           (['install', 'enable'].includes(selection.action)
             ? 'ENABLED'

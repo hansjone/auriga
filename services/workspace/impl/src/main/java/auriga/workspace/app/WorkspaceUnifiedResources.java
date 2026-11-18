@@ -147,8 +147,10 @@ public final class WorkspaceUnifiedResources implements EventHandler, AutoClosea
             return null;
           }
           var spec = WorkspaceService.spec(row);
+          long currentRevision = spec.getResourceSelectionRevision();
+          if (selectionRevision < currentRevision) return null;
           boolean contained =
-              spec.getResourceSelectionRevision() >= selectionRevision
+              currentRevision == selectionRevision
                   && selections.stream()
                       .allMatch(
                           selection ->
@@ -166,6 +168,8 @@ public final class WorkspaceUnifiedResources implements EventHandler, AutoClosea
                                                             throw new AurigaException(
                                                                 CommonErrors.VALIDATION_FAILED);
                                                       })));
+          if (currentRevision == selectionRevision && !contained)
+            throw new AurigaException(CommonErrors.CONFLICT);
           service.store.jdbc.update(
               "INSERT INTO unified_resource_intent(id,tenant_id,instance_id,owner_id,selection_revision,request,applied) VALUES(?,?,?,?,?,?,?)",
               UuidV7.next(service.clock),
@@ -177,6 +181,13 @@ public final class WorkspaceUnifiedResources implements EventHandler, AutoClosea
               contained);
           return null;
         });
+  }
+
+  private void retryAssignments(UUID tenant, UUID instance) {
+    service.store.jdbc.update(
+        "UPDATE instance SET catalog_assignment_retry=true WHERE tenant_id=? AND id=?",
+        tenant,
+        instance);
   }
 
   public View apply(
@@ -197,14 +208,15 @@ public final class WorkspaceUnifiedResources implements EventHandler, AutoClosea
       boolean supersedingAssignment) {
     record(tenant, instance, owner, selectionRevision, selections);
     var before = snapshot(tenant, instance);
-    if (before.spec().getResourceSelectionRevision() >= selectionRevision) {
+    if (before.spec().getResourceSelectionRevision() > selectionRevision) return before;
+    if (before.spec().getResourceSelectionRevision() == selectionRevision) {
       boolean applied =
           service.store.in(
               tenant,
               () ->
                   Boolean.TRUE.equals(
                       service.store.jdbc.queryForObject(
-                          "SELECT applied FROM unified_resource_intent WHERE tenant_id=? AND instance_id=? AND selection_revision=?",
+                          "SELECT EXISTS(SELECT 1 FROM unified_resource_intent WHERE tenant_id=? AND instance_id=? AND selection_revision=? AND applied)",
                           Boolean.class,
                           tenant,
                           instance,
@@ -212,8 +224,10 @@ public final class WorkspaceUnifiedResources implements EventHandler, AutoClosea
       if (!applied) throw new AurigaException(CommonErrors.CONFLICT);
       return before;
     }
-    if (!supersedingAssignment
-        && before.spec().getResourceSelectionRevision() + 1 != selectionRevision) return before;
+    boolean gap =
+        !supersedingAssignment
+            && before.spec().getResourceSelectionRevision() + 1 != selectionRevision;
+    if (gap && !assignmentPolicies) return before;
     if (before.node() == null) throw new AurigaException(CommonErrors.UNAVAILABLE);
     var resolution =
         TenantContext.call(
@@ -228,6 +242,16 @@ public final class WorkspaceUnifiedResources implements EventHandler, AutoClosea
                         .setSelectionRevision(selectionRevision)
                         .addAllSelections(selections)
                         .build()));
+    if (gap) {
+      // The normal outbox path cannot skip a revision. Let the assignment pass choose a successor.
+      service.store.in(
+          tenant,
+          () -> {
+            retryAssignments(tenant, instance);
+            return null;
+          });
+      return before;
+    }
     return service.store.in(
         tenant,
         () -> {
@@ -248,6 +272,11 @@ public final class WorkspaceUnifiedResources implements EventHandler, AutoClosea
           else service.saveSpec(row, UnifiedSpec.bump(next));
           service.store.jdbc.update(
               "UPDATE unified_resource_intent SET applied=true WHERE tenant_id=? AND instance_id=? AND selection_revision=?",
+              tenant,
+              instance,
+              selectionRevision);
+          service.store.jdbc.update(
+              "DELETE FROM unified_resource_intent WHERE tenant_id=? AND instance_id=? AND selection_revision<? AND NOT applied",
               tenant,
               instance,
               selectionRevision);
@@ -396,6 +425,31 @@ public final class WorkspaceUnifiedResources implements EventHandler, AutoClosea
       throw new AurigaException(CommonErrors.FORBIDDEN);
   }
 
+  private List<Map<String, Object>> pending(UUID tenant) {
+    return service.store.in(
+        tenant,
+        () -> {
+          service.store.lock();
+          var pending =
+              service.store.jdbc.queryForList(
+                  "SELECT p.*,i.spec FROM unified_resource_intent p JOIN instance i ON i.tenant_id=p.tenant_id AND i.id=p.instance_id WHERE p.tenant_id=? AND NOT p.applied ORDER BY p.instance_id,p.selection_revision LIMIT 200",
+                  tenant);
+          var current = new ArrayList<Map<String, Object>>();
+          for (var intent : pending) {
+            long revision = ((Number) intent.get("selection_revision")).longValue();
+            if (revision < WorkspaceService.spec(intent).getResourceSelectionRevision()) {
+              service.store.jdbc.update(
+                  "DELETE FROM unified_resource_intent WHERE tenant_id=? AND id=? AND NOT applied",
+                  tenant,
+                  intent.get("id"));
+            } else {
+              current.add(intent);
+            }
+          }
+          return current;
+        });
+  }
+
   public void reconcile() {
     List<UUID> tenants;
     try {
@@ -407,14 +461,7 @@ public final class WorkspaceUnifiedResources implements EventHandler, AutoClosea
     }
     for (UUID tenant : tenants) {
       try {
-        var pending =
-            service.store.in(
-                tenant,
-                () ->
-                    service.store.jdbc.queryForList(
-                        "SELECT * FROM unified_resource_intent WHERE tenant_id=? AND NOT applied ORDER BY instance_id,selection_revision ASC LIMIT 200",
-                        tenant));
-        for (var intent : pending) {
+        for (var intent : pending(tenant)) {
           try {
             var input = UnifiedDistributionInput.parseFrom((byte[]) intent.get("request"));
             apply(
@@ -424,6 +471,22 @@ public final class WorkspaceUnifiedResources implements EventHandler, AutoClosea
                 ((Number) intent.get("selection_revision")).longValue(),
                 input.getSelectionsList());
           } catch (Exception e) {
+            if (e instanceof AurigaException stale
+                && stale.errorCode().equals(CommonErrors.PRECONDITION_FAILED)) {
+              // Resource has permanently superseded this uncommitted selection.
+              service.store.in(
+                  tenant,
+                  () -> {
+                    service.store.jdbc.update(
+                        "DELETE FROM unified_resource_intent WHERE tenant_id=? AND id=? AND NOT applied",
+                        tenant,
+                        intent.get("id"));
+                    if (assignmentPolicies)
+                      retryAssignments(tenant, (UUID) intent.get("instance_id"));
+                    return null;
+                  });
+              continue;
+            }
             org.slf4j.LoggerFactory.getLogger(getClass())
                 .warn("Unified resource intent reconciliation deferred");
           }

@@ -49,4 +49,9 @@ public final class IamDevicePermissionAuthority implements DevicePermissionAutho
         && permissions.contains(permission)
         && devices.credential(tenant.toString(), account, device) != null;
   }
+
+  @Override
+  public Optional<UUID> installationInstance(UUID tenant, String account, String device) {
+    return devices.installationInstance(tenant.toString(), account, device);
+  }
 }

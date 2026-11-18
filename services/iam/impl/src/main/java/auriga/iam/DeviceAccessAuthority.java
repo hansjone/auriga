@@ -111,6 +111,51 @@ public final class DeviceAccessAuthority {
 
   record CredentialSnapshot(Identity identity, String session) {}
 
+  Optional<UUID> installationInstance(String tenant, String account, String device) {
+    return store.tx(
+        () -> {
+          if (credential(tenant, account, device) == null) throw forbidden();
+          var row = store.get("device", device, false);
+          if (row == null) throw forbidden();
+          boolean managed = "managed".equals(row.path("deviceType").asString());
+          var session = store.byId("session", row.path("sessionId").asString(), false);
+          boolean managedSession =
+              session != null
+                  && ("managed_device".equals(session.path("kind").asString())
+                      || session.has("managedInstance")
+                      || session.has("managedVersion"));
+          if (!managed
+              && !managedSession
+              && !row.has("managedInstance")
+              && !row.has("managedVersion")) return Optional.empty();
+
+          String instance = row.path("managedInstance").asString();
+          long version = row.path("managedVersion").asLong();
+          if (!managed
+              || !managedSession
+              || !"managed_device".equals(session.path("kind").asString())
+              || !uuid(instance)
+              || version < 1
+              || !device.equals(row.path("deviceId").asString())
+              || !instance.equals(session.path("managedInstance").asString())
+              || version != session.path("managedVersion").asLong()) throw forbidden();
+          // credential() has checked the backing session against the live Workspace binding.
+          // Match the current IAM lineage too, without taking the rotation lock after the session.
+          var lineage = store.get("managed_device", instance, false);
+          if (lineage == null
+              || lineage.path("revoked").asBoolean()
+              || !account.equals(lineage.path("owner").asString())
+              || !device.equals(lineage.path("device").asString())
+              || !lineage.path("expiresAt").equals(session.path("expiresAt"))
+              || version != lineage.path("version").asLong()) throw forbidden();
+          return Optional.of(UUID.fromString(instance));
+        });
+  }
+
+  private static AurigaException forbidden() {
+    return new AurigaException(CommonErrors.FORBIDDEN);
+  }
+
   /** Network entry points call this before taking their local policy/identity locks. */
   boolean standardOnline(String tenant, String account, String device) {
     if (!standard(device)) return true;

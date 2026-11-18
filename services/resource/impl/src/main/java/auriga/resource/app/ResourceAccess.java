@@ -8,6 +8,7 @@ import auriga.common.security.PrincipalType;
 import auriga.contracts.org.v1.MemberStatus;
 import auriga.contracts.org.v1.MemberType;
 import auriga.resource.api.ResourceAccessInputs;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
@@ -61,6 +62,32 @@ public final class ResourceAccess {
     return resolve(principal, READ);
   }
 
+  Optional<UUID> installationInstance(AurigaPrincipal principal) {
+    if (principal.type() != PrincipalType.DEVICE) return Optional.empty();
+    return installationInstance(principal.tenantId(), principal.subject(), principal.deviceId());
+  }
+
+  private Optional<UUID> installationInstance(UUID tenant, String owner, String device) {
+    try {
+      return devices.installationInstance(tenant, owner, device);
+    } catch (UnsupportedOperationException unavailable) {
+      throw new AurigaException(CommonErrors.UNAVAILABLE);
+    }
+  }
+
+  boolean currentInstallationDevice(Reader owner, UUID device, UUID instance) {
+    String account = owner.account().toString(), did = device.toString();
+    if (!devices.allowed(owner.tenant(), account, did, READ)) return false;
+    try {
+      return installationInstance(owner.tenant(), account, did)
+          .filter(instance::equals)
+          .isPresent();
+    } catch (AurigaException e) {
+      if (e.errorCode().equals(CommonErrors.FORBIDDEN)) return false;
+      throw e;
+    }
+  }
+
   public Reader administrator(AurigaPrincipal principal, String permission) {
     if (principal == null) throw new AurigaException(CommonErrors.UNAUTHENTICATED);
     if (principal.type() != PrincipalType.USER
@@ -90,6 +117,15 @@ public final class ResourceAccess {
   }
 
   public Reader target(UUID tenant, UUID account, String permission) {
+    return target(tenant, account, permission, false);
+  }
+
+  /** Null means Org confirmed that this active market owner has lost read permission. */
+  Reader targetForPendingMarket(UUID tenant, UUID account) {
+    return target(tenant, account, READ, true);
+  }
+
+  private Reader target(UUID tenant, UUID account, String permission, boolean confirmReadLoss) {
     try {
       var member = member(tenant, account);
       var permissions = inputs.permissions(tenant, account);
@@ -97,11 +133,14 @@ public final class ResourceAccess {
           || !member.getAccountId().equals(account.toString())
           || member.getStatus() != MemberStatus.MEMBER_STATUS_ACTIVE
           || permissions.getStatus() != MemberStatus.MEMBER_STATUS_ACTIVE
-          || !permissions.getPermissionsList().contains(permission)
           || (member.getMemberType() != MemberType.MEMBER_TYPE_MEMBER
               && member.getMemberType() != MemberType.MEMBER_TYPE_EXTERNAL)
           || member.getMemberType() != permissions.getMemberType())
         throw new AurigaException(CommonErrors.FORBIDDEN);
+      if (!permissions.getPermissionsList().contains(permission)) {
+        if (confirmReadLoss) return null;
+        throw new AurigaException(CommonErrors.FORBIDDEN);
+      }
       return new Reader(
           tenant,
           account,

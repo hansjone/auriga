@@ -19,13 +19,20 @@ import org.springframework.jdbc.core.JdbcTemplate;
 
 /** Real IAM signing, PostgreSQL lineage and OAuth exchanges for resource HTTP tests. */
 public final class ResourceDeviceFixture {
-  public record Grant(String token, UUID device) {}
+  public record Grant(String token, UUID device, UUID instance) {
+    Grant(String token, UUID device) {
+      this(token, device, null);
+    }
+  }
 
   private final IamStore store;
   private final SessionManager sessions;
   private final TokenService tokens;
   private final InstanceAiAuthorization authorization;
   private final Clock clock;
+  private final IamManagedDevices managed;
+  private final Map<String, GetManagedInstanceBindingResponse> bindings =
+      new java.util.concurrent.ConcurrentHashMap<>();
 
   public ResourceDeviceFixture(
       DataSource source,
@@ -50,6 +57,19 @@ public final class ResourceDeviceFixture {
             mock(AuditLogger.class));
     this.authorization = authorization;
     this.clock = clock;
+    byte[] encryptionKey = new byte[32];
+    new java.security.SecureRandom().nextBytes(encryptionKey);
+    ManagedInstanceBindings binding = request -> bindings.get(request.getInstanceId());
+    managed =
+        new IamManagedDevices(
+            store,
+            sessions,
+            tokens,
+            new Secrets(Base64.getEncoder().encodeToString(encryptionKey)),
+            binding,
+            authorization,
+            clock);
+    sessions.managedValidator(managed::validSession);
   }
 
   private OAuthProvider oauth(UUID tenant) {
@@ -75,15 +95,25 @@ public final class ResourceDeviceFixture {
     var beans = new org.springframework.beans.factory.support.DefaultListableBeanFactory();
     beans.registerSingleton("resourceDeviceAuthorization", authorization);
     // Resolve the registration within the request's tenant, as in production OAuth wiring.
-    return (tenant, account, device, permission) ->
-        new IamRuntimeConfiguration()
+    return new DevicePermissionAuthority() {
+      private DevicePermissionAuthority authority(UUID tenant) {
+        return new IamRuntimeConfiguration()
             .iamDevicePermissionAuthority(
                 store,
                 sessions,
                 tokens,
                 oauth(tenant).standardDevices(),
-                beans.getBeanProvider(InstanceAiAuthorization.class))
-            .allowed(tenant, account, device, permission);
+                beans.getBeanProvider(InstanceAiAuthorization.class));
+      }
+
+      public boolean allowed(UUID tenant, String account, String device, String permission) {
+        return authority(tenant).allowed(tenant, account, device, permission);
+      }
+
+      public Optional<UUID> installationInstance(UUID tenant, String account, String device) {
+        return authority(tenant).installationInstance(tenant, account, device);
+      }
+    };
   }
 
   public Grant issue(UUID tenant, UUID account, String kind) {
@@ -127,7 +157,7 @@ public final class ResourceDeviceFixture {
                             Duration.ofHours(1))
                         .session();
                   });
-          if (kind.equals("managed")) return managed(tenant, account);
+          if (kind.equals("managed")) return managed(tenant, account, UUID.randomUUID(), 1);
           var oauth = oauth(tenant);
           if (kind.equals("standard")) {
             var challenge =
@@ -187,50 +217,41 @@ public final class ResourceDeviceFixture {
         });
   }
 
-  private Grant managed(UUID tenant, UUID account) {
-    UUID instance = UUID.randomUUID();
-    byte[] encryptionKey = new byte[32];
-    new java.security.SecureRandom().nextBytes(encryptionKey);
-    ManagedInstanceBindings bindings =
-        request ->
-            GetManagedInstanceBindingResponse.newBuilder()
-                .setTenantId(tenant.toString())
-                .setOwnerId(account.toString())
-                .setInstanceId(instance.toString())
-                .setCredentialVersion(1)
-                .setActive(true)
-                .build();
-    var managed =
-        new IamManagedDevices(
-            store,
-            sessions,
-            tokens,
-            new Secrets(Base64.getEncoder().encodeToString(encryptionKey)),
-            bindings,
-            authorization,
-            clock);
-    sessions.managedValidator(managed::validSession);
-    var issued =
-        managed.issue(
-            IssueManagedDeviceRequest.newBuilder()
-                .setTenantId(tenant.toString())
-                .setOwnerId(account.toString())
-                .setInstanceId(instance.toString())
-                .setCredentialVersion(1)
-                .build());
-    String token =
-        managed
-            .exchange(
-                Map.of(
-                    "instance_id",
-                    instance.toString(),
-                    "owner_id",
-                    account.toString(),
-                    "credential",
-                    issued.getCredential()))
-            .path("access_token")
-            .asString();
-    return new Grant(token, UUID.fromString(issued.getDeviceId()));
+  public Grant managed(UUID tenant, UUID account, UUID instance, long version) {
+    bindings.put(
+        instance.toString(),
+        GetManagedInstanceBindingResponse.newBuilder()
+            .setTenantId(tenant.toString())
+            .setOwnerId(account.toString())
+            .setInstanceId(instance.toString())
+            .setCredentialVersion(version)
+            .setActive(true)
+            .build());
+    return TenantContext.call(
+        tenant,
+        () -> {
+          var issued =
+              managed.issue(
+                  IssueManagedDeviceRequest.newBuilder()
+                      .setTenantId(tenant.toString())
+                      .setOwnerId(account.toString())
+                      .setInstanceId(instance.toString())
+                      .setCredentialVersion(version)
+                      .build());
+          String token =
+              managed
+                  .exchange(
+                      Map.of(
+                          "instance_id",
+                          instance.toString(),
+                          "owner_id",
+                          account.toString(),
+                          "credential",
+                          issued.getCredential()))
+                  .path("access_token")
+                  .asString();
+          return new Grant(token, UUID.fromString(issued.getDeviceId()), instance);
+        });
   }
 
   public void revoke(UUID tenant, UUID device) {

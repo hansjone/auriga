@@ -17,7 +17,7 @@ import {
   type CatalogPackage,
   type CatalogVersion,
 } from '../../admin/resourceCatalogApi';
-import { strongEtag } from '../../admin/resourceApi';
+import { strongEtag } from '../../admin/etag';
 import {
   parseResourceSource,
   finalizeResourceUpload,

@@ -1,12 +1,17 @@
 package auriga.platform;
 
 import auriga.common.context.TenantContext;
+import auriga.common.events.EventTransport;
+import auriga.common.events.OutboxForwarder;
+import auriga.common.observability.EventMetrics;
 import auriga.common.persistence.CommonMigrations;
 import auriga.common.persistence.TenantTransactionManager;
 import auriga.contracts.org.v1.*;
 import auriga.org.OrgService;
 import auriga.resource.api.ResourceAccessInputs;
 import com.zaxxer.hikari.HikariDataSource;
+import java.time.Clock;
+import java.time.Duration;
 import java.util.UUID;
 import javax.sql.DataSource;
 import org.flywaydb.core.Flyway;
@@ -88,6 +93,28 @@ public class PlatformResourceConfiguration {
   TenantTransactionManager resourceTransactionManager(
       @Qualifier("resourceDataSource") DataSource source) {
     return new TenantTransactionManager(source);
+  }
+
+  @Bean
+  @ConditionalOnExpression("'${auriga.events.nats-url:}' != ''")
+  OutboxForwarder resourceOutboxForwarder(
+      @Qualifier("resourceDataSource") DataSource source,
+      EventTransport transport,
+      EventMetrics metrics,
+      Clock clock,
+      Environment env) {
+    return new OutboxForwarder(
+        source,
+        "resource",
+        transport,
+        metrics,
+        clock,
+        new OutboxForwarder.Settings(
+            env.getProperty("auriga.events.batch-size", Integer.class, 100),
+            env.getProperty("auriga.events.poll-interval", Duration.class, Duration.ofMillis(500)),
+            env.getProperty("auriga.events.base-backoff", Duration.class, Duration.ofSeconds(1)),
+            env.getProperty("auriga.events.max-backoff", Duration.class, Duration.ofMinutes(5)),
+            env.getProperty("auriga.events.retention", Duration.class, Duration.ofDays(7))));
   }
 
   @Bean

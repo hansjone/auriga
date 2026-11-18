@@ -1,7 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createPublicKey } from 'node:crypto';
+import { EventEmitter } from 'node:events';
 import {
+  createDoorLock,
   verifyIdentityHeader,
   createReplayCache,
 } from '../src/managed/door.js';
@@ -12,6 +14,41 @@ import {
   OWNER_ID,
   OTHER_OWNER,
 } from './managed-helpers.js';
+
+test('removing the managed door rejects a pending signed request', async () => {
+  const { keys, getPublicKey } = setup();
+  const entered = Promise.withResolvers();
+  const release = Promise.withResolvers();
+  const done = Promise.withResolvers();
+  const server = new EventEmitter();
+  server.on('request', () => done.resolve(200));
+  const door = createDoorLock({
+    instanceId: INSTANCE_ID,
+    ownerId: OWNER_ID,
+    async getPublicKey(kid) {
+      entered.resolve();
+      await release.promise;
+      return getPublicKey(kid);
+    },
+  });
+  const uninstall = door.install(server);
+  const { token } = signIdentity(keys.privateKey, keys.kid, {
+    htm: 'GET',
+    htu: '/app',
+  });
+  server.emit(
+    'request',
+    { method: 'GET', url: '/app', headers: { 'auriga-identity': token } },
+    {
+      writeHead: (code) => done.resolve(code),
+      end() {},
+    },
+  );
+  await entered.promise;
+  uninstall();
+  release.resolve();
+  assert.equal(await done.promise, 401);
+});
 
 function setup() {
   const keys = makeIdentityKeys();
