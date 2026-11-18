@@ -1,10 +1,11 @@
 import { fileURLToPath } from 'node:url';
 
 /** Use the async tool dispatch hook before the host synchronously collects env.
- * @param {{auth:any,getServer:()=>any,prepare?:(execution:any)=>Promise<string|undefined>,finishContext?:(id:string)=>void,retain?:(id:string)=>boolean}} options */
+ * @param {{auth:any,getServer:()=>any,authorization?:()=>string|null,prepare?:(execution:any)=>Promise<string|undefined>,finishContext?:(id:string)=>void,retain?:(id:string)=>boolean}} options */
 export function createEnterpriseEnvironment({
   auth,
   getServer,
+  authorization,
   prepare,
   finishContext,
   retain,
@@ -62,9 +63,11 @@ export function createEnterpriseEnvironment({
     contributor,
     release,
     async run(/** @type {any} */ execution, /** @type {()=>any} */ next) {
+      const authorizationAtEntry = authorization?.();
       const sessionId = execution?.agent?.session?.header?.id;
       const port = Number(getServer()?.port);
       if (
+        (authorization && !authorizationAtEntry) ||
         typeof sessionId !== 'string' ||
         execution?.signal?.aborted ||
         !Number.isInteger(port) ||
@@ -74,6 +77,10 @@ export function createEnterpriseEnvironment({
         return next();
       const contextId = await prepare?.(execution);
       if (prepare && !contextId) return next();
+      if (authorization && authorization() !== authorizationAtEntry) {
+        if (contextId) finishContext?.(contextId);
+        return next();
+      }
       const cap = auth.mint(sessionId, contextId, execution);
       if (!cap || execution.signal?.aborted) {
         if (cap) auth.revoke(cap);

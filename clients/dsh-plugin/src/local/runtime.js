@@ -439,6 +439,7 @@ export async function createConnectRuntime({
       const toolEnvironment = createEnterpriseEnvironment({
         auth: enterprise,
         getServer: () => child.webServer,
+        authorization: broker.state.authorization,
         retain: (id) => taskContexts.retain(id),
         finishContext: (id) => void taskContexts.finish(id),
         async prepare(execution) {

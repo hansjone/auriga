@@ -14,7 +14,7 @@ test('native background skill capability reacquires current host context after o
     join(tmpdir(), 'auriga-enterprise-recovery-'),
   );
   const connection = brokerFixture();
-  let runtime, contributor, dispatchTool, jobResult;
+  let runtime, contributor, dispatchTool, jobResult, waitForAgent;
   const effects = [];
   const server = createServer(
     (req, res) => void runtime.enterprise.handle(req, res),
@@ -35,7 +35,12 @@ test('native background skill capability reacquires current host context after o
     agents: { get: (id) => (id === session.id ? agent : undefined) },
     workspaceRegistry: { archivedSessionIds: [] },
     sessionPersistence: {},
-    sessionController: { resolveAgent: async () => ({ agent }) },
+    sessionController: {
+      async resolveAgent() {
+        await waitForAgent?.();
+        return { agent };
+      },
+    },
     webServer: { server, port: server.address().port },
     shellEnv: {
       register(value) {
@@ -170,4 +175,26 @@ test('native background skill capability reacquires current host context after o
   const restored = await restart(otherLogin);
   assert.equal(restored.DSH_AURIGA_ID, '00001');
   assert.equal(restored.DSH_AURIGA_TOKEN, connection.token());
+
+  let entered, release;
+  const enteredAgent = new Promise((resolve) => (entered = resolve));
+  const agentGate = new Promise((resolve) => (release = resolve));
+  waitForAgent = () => {
+    entered();
+    return agentGate;
+  };
+  const inFlight = runResumedTool();
+  await enteredAgent;
+  waitForAgent = undefined;
+  connection.transition('signed_out');
+  connection.rotate();
+  connection.transition('authenticated', original);
+  await setImmediate();
+  release();
+  const interrupted = await inFlight;
+  assert.equal(interrupted.DSH_TEAM_TASK_CAPABILITY, '');
+  assert.equal(interrupted.DSH_AURIGA_ID, '');
+  assert.equal(interrupted.DSH_AURIGA_TOKEN, '');
+  const after = await runResumedTool();
+  assert.equal(after.DSH_AURIGA_TOKEN, connection.token());
 });
