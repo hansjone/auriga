@@ -104,46 +104,86 @@ Git 仅用于回退和审查；构建仍以 `auriga-source.json` 为上游基线
 
 增量支持首卷。合并固定旧套件公钥，校验精确前置清单、全部新增块和目标完整清单，在同盘临时目录准备后替换；重复执行无害。合并与构建串行进行。缺前置时逐版合并或下载最新完整套件。若进程在目录替换时中断，保留同盘 `.auriga-devkit-merge-*` 中的 `previous` 与 `.merge-lock`，确认进程退出后由维护者恢复，不删除唯一有效副本。
 
-默认累计阈值 64GiB（唯一依赖总字节），维护者可调整。跨大版本、超阈值或显式收拢时开新基线，增量标记 reset，拒绝合入旧基线；下载新完整套件到新目录。单版已超阈值则失败，需调整阈值。旧基线留在原 Forgejo Release 供旧版本使用，不删除。
+默认累计阈值为 64GiB（唯一依赖总字节）。跨大版本、超阈值或显式收拢时开新基线，下载新完整套件到新目录。每次新开基线只发布完整套件，同基线后续版本才有增量。单版超过阈值时须调整阈值。旧基线仍可从原 Forgejo Release 下载。
 
 ## 维护者：准备和发布附件
 
-以下仅由主控在批准的 Linux 维护机或 NAS 执行，不是现场默认路径，不在 CI 完整冷建。本16GB开发机只运行小夹具。源码 checkout 引导打包需要 Go 1.27.3，或 `AURIGA_GO_IMAGE` 指定批准的 Forgejo Go 工具镜像完整 digest；归档已有静态 CLI。Docker 需支持 `save --platform`（API 1.48+）。发版门禁另需本机 `dockerd`、root 和 `unshare --net` 权限。
+### 1. 固定标签与输入
 
-取得独审批准标签、对应 NAS tar、Forgejo 依赖输入与固定 digest 的镜像。索引格式见 `deploy/offline/release.example.json`；仓库无真实默认发行索引。索引和 Ed25519 PKCS8 PEM 私钥放源码外。NAS 制品提交须等于目标提交。`build.recipes` / `build.inputs` 复用已合 main 的 `deploy/nas/offline-build` 配方及 Go proxy、Maven、pnpm/npm/Corepack/system 输入，不重写生产规则。
+主控在批准的 Windows x64 与 Linux amd64 维护机上使用同一干净、独审通过的标签。先同步精确标签到 Forgejo。取得目标提交对应的 NAS tar、Forgejo 构建输入、当前配方和 digest 固定的镜像。索引格式见 `deploy/offline/release.example.json`。把实际索引、Ed25519 PKCS8 PEM 发行私钥及制品放在源码外。`build.recipes` / `build.inputs` 沿用 `deploy/nas/offline-build` 的配方及锁定的语言输入。
+
+DSH 源码使用 `deploy/offline/dsh-source-pin.json` 固定的官方标签提交归档。先将原始归档放入批准的 Forgejo 制品区，Linux 从该区下载到本地，或将该 HTTPS 附件 URL 直接交给 `--dsh-source`。当前归档可用，发布其原字节并附带原始 LICENSE 和来源清单。更新 DSH 时同步复核 npm 锁、官方标签提交与归档 SHA256。若上游无法提供对应提交归档，先审批新材料方案，保留 npm 锁对应闭包的原始 tarball、许可证与完整性证据。
+
+### 2. Windows 先准备、签名并转运
+
+联网 Windows x64 维护机在标签根目录使用 Node 22.19.0 准备输入。以下 `$kitName` 取 `prepare.mjs` 输出的目录名。通过受控密钥介质在 Windows 签名，使其公钥与 Linux 发版公钥相同。传输材料只有 tar 和独立核对的整包 SHA256。
+
+```powershell
+$kitParent = 'D:\exports\client-kits'
+New-Item -ItemType Directory -Force -Path $kitParent
+node scripts/client-release/prepare.mjs $kitParent
+$kitName = 'auriga-client-windows-<prepare 输出的锁 SHA256>'
+$kit = Join-Path $kitParent $kitName
+node scripts/client-release/sign-inputs.mjs --devkit $kit --key-file C:\secure\issuer\release-private.pem --version 0.2.0
+$archive = "$kit.tar"
+tar.exe -cf $archive -C $kitParent $kitName
+(Get-FileHash -Algorithm SHA256 -LiteralPath $archive).Hash.ToLowerInvariant()
+```
+
+通过批准的 Forgejo 大文件转运把该 tar 放入 Linux 本地制品目录，保留文件名，核对接收回执中的长度与 SHA256。签发版本随 Windows 输入保留。若复用旧套件，当前标签的 Windows 锁与旧套件签名公钥均须匹配。
+
+### 3. Linux 生成发行目录
+
+在新标签 checkout 中使用 Go 1.27.3，或设置 `AURIGA_GO_IMAGE` 为已批准的 Forgejo Go 工具镜像完整 digest。复用 checkout 时先重编 `bin/auriga-cli`，避免加载上一版的缓存二进制。Docker 需支持 `save --platform`（API 1.48+）。门禁需 Linux root、`dockerd`、`unshare` 及 `nsenter`，以及私有网络、mount 和 PID 命名空间权限。
 
 ```sh
 git status --short
 git rev-parse HEAD 'refs/tags/0.2.0^{commit}'
-sh deploy/offline/prepare-release.sh --tag 0.2.0 --release /secure/release.json --outdir /exports/0.2.0 --cache-dir /exports/devkit-cache --sign-key /secure/release-private.pem --attachment-limit 2147483648 --new-baseline --build
-# 后续同基线版本，把 --new-baseline 换为：
-# --previous-devkit /exports/unpacked-devkit-0.2.0
+TMPDIR=/build/auriga-tmp sh deploy/offline/prepare-release.sh \
+  --tag 0.2.0 --release /secure/release.json --outdir /exports/0.2.0 \
+  --cache-dir /exports/devkit-cache --sign-key /secure/release-private.pem \
+  --windows-client "$WINDOWS_TAR" --windows-client-sha256 "$WINDOWS_SHA256" \
+  --dsh-source "$DSH_SOURCE" --attachment-limit 2147483648 --new-baseline --build
 ```
 
-手工导出可用 `./auriga devkit --release /secure/release.json --out /exports/devkit.tar --sign-key /secure/release-private.pem --new-baseline`，后续传 `--previous-devkit`。手工导出不等于门禁通过。
+先创建命令所用 `TMPDIR`，设定 `WINDOWS_TAR` 为转运到本地的归档路径，`WINDOWS_SHA256` 为 Windows 回执值，`DSH_SOURCE` 为绝对本地路径或上述 HTTPS 附件地址。私有输入按批准主机设置 `AURIGA_BUNDLE_AUTH_HOST`，在进程环境提供 `AURIGA_BUNDLE_TOKEN`。镜像仓库使用维护机 Docker 登录。
 
-每版同时生成安装包、带元数据及 Linux 静态 CLI 的源码、累积完整 devkit、相对上版增量、Linux 引导程序、公钥、下载说明、发行清单、总摘要及签名。构建工具镜像固定 digest；发行不生成或探测 Windows 制品。超站点上限或 4GiB-1 自动分卷。锁与批准输入未变则复用签名单版依赖缓存，再累积到新版；NAS/可选发行文件另刷新。换签名密钥用新缓存，换根须重新批准完整套件。
+Linux 在构建前流式核验 Windows tar、内部发行签名、依赖锁及每个输入，核对 DSH 提交归档与 npm 锁。发行命令一次生成 Linux 安装包、签名源码和 devkit、Windows 套件、DSH 源码及元数据，并用同一发行钥签全套摘要。超过站点限制或 4GiB-1 自动分卷。后续同基线发版，将 `--new-baseline` 换成 `--previous-devkit /exports/unpacked-devkit-0.2.0`。锁与批准输入未变可复用签名单版缓存。NAS 与可选材料按版刷新。
 
-不可跳过的发版门禁：最新累积套件绑定本次源码归档，在 `unshare --net` 中启动空存储的临时独立 Docker 引擎，实际运行 `bundle --build --offline`；引擎与构建进程均断网，容器另加断网和禁止拉镜像。只允许从本次套件加载镜像，宿主已有镜像无法掩盖缺依赖。不修改宿主原引擎，结束后清理临时引擎与数据；需为完整套件、展开依赖、临时镜像存储和产物预留磁盘，必要时设置 `TMPDIR` 到足够空间的本地磁盘。引擎的 socket、containerd 运行状态与 pid 使用 `/run/auriga-gate-*` 短目录，数据仍放在 `TMPDIR`，以满足 Unix socket 路径长度限制。核对产物版本、提交、干净快照后才生成可上传目录。缺依赖或缺权限均失败，不在线回退。`release-manifest.json.offlineBuildGate` 记录提交/锁、源码/完整套件/清单/构建输出摘要、断网方式、起止时间。默认安装包用批准预建镜像，仍须门禁；`--build` 直接发行门禁产物。
+`unshare --net` 门禁使用空存储的独立 Docker 引擎，既有引擎的镜像缓存无法参与。门禁执行真正的 `bundle --build --offline`，工具容器使用 `--network none --pull never`。`release-manifest.json.offlineBuildGate` 记录精确提交、锁、源码/完整套件/清单/构建输出摘要及起止时间。`--build` 发行门禁构建出的安装包，省略该参数则发行批准的预建镜像包并仍执行完整门禁。
 
-镜像导入后会读取 Docker 元数据，再重新导出并核对 config 与各层摘要。单次元数据读取的时限为两分钟，单次导出为三分钟。慢磁盘上的 VFS 临时引擎可能在此处超时，导致 Docker 输出提前结束。先核对相关子进程的超时和隔离构建区的存储吞吐，并记录运行环境调整，再重跑完整门禁。
+- QNAP 若在容器启动时报 `fchmodat2 AT_EMPTY_PATH`，先在本次维护环境验证受信且兼容宿主内核的 runc，或改用受支持的 Linux 维护机。R1 在私有 Docker 工具目录使用冻结 DinD 镜像的兼容 runc。保留工具摘要，NAS 主引擎继续使用其自身配置。
+- 若 GNU tar 报 `Bad address`，先做目录提取与 `cp -a` 探针。R1 使用冻结的 Debian Node 基底中 GNU tar 1.34、cp、loader 和库，构建工具镜像重新核定 digest 后进入签名 devkit。兼容层制作见 [Forgejo 冷建指南](docs/dev/forgejo-only-build.zh.md)。
+- 独立引擎就绪限 30 秒，单次探针限 2 秒。Docker 元数据读取限 2 分钟，重新导出核 config 与层摘要限 3 分钟，完整断网门禁限 2 小时。VFS 在慢盘容易超时。用足够空间的快盘作为 `TMPDIR`，预留展开套件、镜像和编译空间，先确认最大工具镜像导入和重新导出耗时。
+- 门禁运行状态在短路径 `/run/auriga-gate-*`，大数据留在 `TMPDIR`。若仍报告 Unix socket 路径过长，检查兼容运行时是否另用长目录，以及独立容器各层是否都能看到对应绝对路径。
+- Ctrl+C 与 SIGTERM 触发进程、容器和私有挂载的有界清理。若报清理失败，按错误中的目录查 daemon 日志，核实本次进程与挂载是否退出再处理。最终发行目录在门禁和清理全部结束后才出现。
 
-完整断网构建的时限为两小时，覆盖套件展开、逐文件核验、编译、镜像装配与打包。就绪阶段另限30秒，单次Docker探针限2秒，daemon提前退出会停止当前探针并输出启动日志。门禁使用私有mount/PID命名空间，隔离PID 1是监督进程直接创建、等待的子进程。启动引擎前，父方先持有所属mount命名空间。运行环境需具有Linux PID命名空间权限，并支持util-linux的`unshare --net --mount --propagation private --mount-proc`和`nsenter --mount`。监督进程持有引擎、构建临时空间和短运行目录。
+### 4. Forgejo 草稿、核验与发布
 
-Ctrl+C与SIGTERM都触发取消，依次终止构建进程组、移除本次独立引擎的容器、停止daemon、卸载该门禁目录内的挂载，再删除临时空间。容器清理预算10秒，daemon退出预算15秒，外层另留45秒协作清理窗口，超出后强制终止隔离PID 1，并直接等待其与命名空间后代退出，再进入所持mount命名空间清理任务挂载。取消后60秒仍未确认退出，或挂载清理进程20秒仍未确认退出时，返回清晰错误并保留工作目录、短运行目录及daemon日志，按错误给出的私有路径核实资源后处理。正式`release`从套件准备起持续观察同一次取消，覆盖默认安装包的下载、Docker调用、解包、摘要与后续分卷，最终目录重命名前再检查一次。清理失败或取消均返回非零，发行目录仅在全部检查成功后生成。
-
-小夹具不替代生产配方完整离线演练。主控在 NAS 隔离构建区以真实索引执行上述命令，再将浏览器下载附件送到干净 Linux，按 DEPLOY.md 安装；正常页面登录、邀请、资源上传/发布和桌面安装全通过才宣称可验收。
-
-主控检查生成目录及门禁后，先预演、上传草稿、核验后发布：
+默认使用公开 HTTPS，私有 CA 可通过 Linux 发布进程的 `SSL_CERT_FILE` 使用独立批准的 CA 文件。若 NAS 无法通过公开 HTTPS 路由到同一 Forgejo，将 `FORGEJO_INTERNAL_URL` 设置为批准的内网 HTTP 地址（私有或回环 IP，带端口），再加 `--internal-http "$FORGEJO_INTERNAL_URL"`。此选项仅用于受控直连网络，HTTP 上的令牌以明文传输，发布程序会绕开代理。两种路径均使用公开 `--server` 标识站点，附件回读拒绝跨站跳转。
 
 ```sh
-sh deploy/offline/publish-forgejo.sh --server https://forgejo.example.com --repo owner/auriga --dir /exports/0.2.0 --verify-key /secure/release-public.pem
-# 仅主控执行，令牌通过 FORGEJO_TOKEN 环境变量提供，先同步精确标签：
-sh deploy/offline/publish-forgejo.sh --server https://forgejo.example.com --repo owner/auriga --dir /exports/0.2.0 --verify-key /secure/release-public.pem --execute
-sh deploy/offline/publish-forgejo.sh --server https://forgejo.example.com --repo owner/auriga --dir /exports/0.2.0 --verify-key /secure/release-public.pem --execute --publish
+publish_release() {
+  sh deploy/offline/publish-forgejo.sh \
+    --server https://forgejo.example.com --repo owner/auriga \
+    --dir /exports/0.2.0 --verify-key /secure/release-public.pem "$@"
+}
+# HTTPS 预演只检查本地产物
+publish_release
+# 主控从批准的密钥渠道将 FORGEJO_TOKEN 注入进程环境后，上传草稿
+publish_release --execute
 ```
 
-预演不访问网络；上传先校验签名、附件和断网门禁，再验证 Forgejo 与远端精确标签。只走同源 HTTPS；相同附件续传跳过，冲突不覆盖，全部重新下载核验后才发布。私有输入可用 `AURIGA_BUNDLE_TOKEN` / `AURIGA_BUNDLE_AUTH_HOST`，镜像仓库沿用维护机 Docker 登录，凭据不入包。新基线发布不清理旧发行附件。
+令牌只由进程环境读取。维护终端关闭命令跟踪，通过密钥管理器或受控的标准输入读入环境，避免把令牌写进命令行、容器配置、文件或日志。内网方式在每次执行追加相同的 `--internal-http` 参数。上传前核签名、附件、断网门禁及 Forgejo 精确标签，重跑复用同名同字节附件，遇冲突停止。草稿回读校验全部附件后再执行以下发布命令。
+
+```sh
+publish_release --execute --publish
+unset FORGEJO_TOKEN
+```
+
+发布命令在 Forgejo 回读同一个发行 ID、同一标签且确认已退出草稿后返回成功。写请求遇到重定向即报错。遇到写入失败或回读失败，先在 Forgejo 核对该标签的实际发行状态，再用同一发行目录和参数重试。若服务端已经发布，重试只逐字节核验现有附件。
+
+从正常 Forgejo Release 页面核对版本、附件、发行公钥指纹及 Windows 引导摘要，并下载后按 `DEPLOY.md` 安装。Windows 与 DSH 如有分卷，按 `.parts.json` 顺序以二进制拼接并核对 `DOWNLOADS.txt` 所列完整归档摘要，再按各自用途使用。安装后的正常页面登录、邀请、资源上传/发布和桌面安装由主控实测。
 
 ## 发行信任与站点构建签名
 
@@ -183,13 +223,29 @@ sudo ./auriga trust add-site-key /media/site-public.pem --confirm-fingerprint "$
 
 桌面客户端使用独立的 `scripts/client-release/auriga-client.cmd`，服务端 `./auriga` 仍只在 Linux 运行。当前客户端目标为 Windows x64；平台配方、引导程序布局和安装器命名集中于 `scripts/client-release/platform.mjs`，以后扩展 Linux 客户端时沿用来源与签名协议。
 
-浏览器下载同版签名源码包和 Windows 输入独立附件 `auriga-client-windows-<锁SHA256>.tar`。Windows 部分与 Linux 累积 devkit 分开，依赖未变可复用；包含 Node/npm/pnpm、store、Windows DSH 及其依赖，签名链沿用 #373 发行公钥。先用独立批准的发行说明核源码归档和引导 node.exe 的 SHA-256，再解包到本地固定磁盘。不能用未核验包内公钥或临时计算摘要冒充批准值。
+浏览器下载同版签名源码包和 Windows 输入独立附件 `auriga-client-windows-<锁SHA256>.tar`。Windows 套件包含 Node/npm/pnpm、store、Windows DSH 及其依赖，签名链沿用 #373 发行公钥。分卷先拼成完整归档。从独立批准的发行说明取两份完整归档与引导 `node.exe` 的 SHA-256。用 `Get-FileHash` 核对两份归档后解包到本地固定磁盘，再核对解包出来的 `node.exe`，通过后执行客户端命令。
 
 ```powershell
-Get-FileHash -Algorithm SHA256 D:\media\auriga-source-0.2.0.tar
-Get-FileHash -Algorithm SHA256 D:\client-kit\build-node\node.exe
-$env:AURIGA_CLIENT_DEVKIT = 'D:\client-kit'
-$env:AURIGA_CLIENT_NODE_SHA256 = '<独立批准的node.exe SHA256>'
+$sourceArchive = 'D:\media\auriga-source-0.2.0.tar'
+$kitArchive = 'D:\media\auriga-client-windows-<锁SHA256>.tar'
+$sourceSHA = '<独立批准的源码归档 SHA256>'
+$kitSHA = '<独立批准的 Windows 套件归档 SHA256>'
+$nodeSHA = '<独立批准的 node.exe SHA256>'
+if ((Get-FileHash -Algorithm SHA256 -LiteralPath $sourceArchive).Hash -ne $sourceSHA) { throw '源码归档摘要不符' }
+if ((Get-FileHash -Algorithm SHA256 -LiteralPath $kitArchive).Hash -ne $kitSHA) { throw 'Windows 套件归档摘要不符' }
+$sourceRoot = 'D:\auriga-source-0.2.0'
+$kitParent = 'D:\client-kits'
+New-Item -ItemType Directory -Path $sourceRoot, $kitParent -ErrorAction Stop
+tar.exe -xf $sourceArchive -C $sourceRoot
+if ($LASTEXITCODE -ne 0) { throw '源码解包失败' }
+tar.exe -xf $kitArchive -C $kitParent
+if ($LASTEXITCODE -ne 0) { throw 'Windows 套件解包失败' }
+$kitRoot = Join-Path $kitParent ([IO.Path]::GetFileNameWithoutExtension($kitArchive))
+$nodeFile = Join-Path $kitRoot 'build-node\node.exe'
+if ((Get-FileHash -Algorithm SHA256 -LiteralPath $nodeFile).Hash -ne $nodeSHA) { throw '引导 Node 摘要不符' }
+$env:AURIGA_CLIENT_DEVKIT = $kitRoot
+$env:AURIGA_CLIENT_NODE_SHA256 = $nodeSHA.ToLowerInvariant()
+Set-Location -LiteralPath $sourceRoot
 .\scripts\client-release\auriga-client.cmd --help
 ```
 

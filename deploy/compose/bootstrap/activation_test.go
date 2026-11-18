@@ -108,7 +108,7 @@ func activationFixture(t *testing.T) activationFixtureData {
 	certFile, keyFile := write("browser.crt", chain), write("browser.key", key)
 	proofs, image := runtimeProofFixture(t, "real")
 	out := filepath.Join(root, "var")
-	if b, e := exec.Command(binary, "-out", out, "-access-file", access, "-edge-container", "public-test-edge", "-fixture", "real", "-image", image, "-runtime-proofs", proofs, "-https-cert-file", certFile, "-https-key-file", keyFile).CombinedOutput(); e != nil {
+	if b, e := exec.Command(binary, "-out", out, "-access-file", access, "-edge-container", "public-test-edge", "-fixture", "real", "-image", image, "-runtime-proofs", proofs, "-real-dsh-metadata", realFixtureMetadata(t, image), "-https-cert-file", certFile, "-https-key-file", keyFile).CombinedOutput(); e != nil {
 		t.Fatalf("base CLI: %v %s", e, b)
 	}
 	receipt, e := os.ReadFile(filepath.Join(out, "iam-installation", "bootstrap.receipt"))

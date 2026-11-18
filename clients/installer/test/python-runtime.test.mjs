@@ -116,7 +116,10 @@ test('a Python pin or wheel lock change rejects reuse of the previous devkit', (
   const kit = join(base, 'kit');
   mkdirSync(kit);
   writeFileSync(join(kit, 'input'), 'pinned');
-  for (const path of Object.keys(lockIdentity().locks)) {
+  for (const path of [
+    ...Object.keys(lockIdentity().locks),
+    'scripts/client-release/build-node.json',
+  ]) {
     mkdirSync(dirname(join(source, path)), { recursive: true });
     cpSync(join(ROOT, path), join(source, path));
   }

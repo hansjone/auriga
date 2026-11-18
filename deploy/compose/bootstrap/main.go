@@ -36,6 +36,10 @@ import (
 
 const iamRPCPort = 9091
 
+// A new real fixture must match the pin verified by the real-dsh build.
+// TestFixtureTemplates checks it against versions.json and the npm lock.
+const pinnedRealDSHVersion = "0.2.1-rc.3"
+
 func main() {
 	if len(os.Args) > 1 && os.Args[1] == "key-rotation" {
 		if err := keyRotationCLI(os.Args[2:]); err != nil {
@@ -44,8 +48,9 @@ func main() {
 		return
 	}
 	out := flag.String("out", "deploy/compose/var", "output directory")
-	image := flag.String("image", "", "docker image ref repo@sha256:… for fake DSH template")
+	image := flag.String("image", "", "docker image ref repo@sha256:… for the selected DSH fixture")
 	fixture := flag.String("fixture", "fake", "DSH fixture: fake or real")
+	realDSHMetadata := flag.String("real-dsh-metadata", "", "trusted image and version from the verified real DSH build (required for first real installation)")
 	edgeContainer := flag.String("edge-container", "auriga-m2-edge", "trusted edge container identity (must match Compose project)")
 	accessFile := flag.String("access-file", "", "trusted deployment access JSON (default: disposable M2 domain recipe)")
 	httpsCert := flag.String("https-cert-file", "", "external direct HTTPS PEM certificate chain")
@@ -158,6 +163,14 @@ func main() {
 		fmt.Printf("bootstrap ok out=%s ca_sha256=%s image=%s (existing installation)\n", *out, fp, *image)
 		return
 	}
+	if *fixture == "real" {
+		if *realDSHMetadata == "" {
+			fatalf("first real installation requires -real-dsh-metadata from the verified build; use deploy/compose/scripts/prepare.sh")
+		}
+		if err := validateRealDSHMetadata(*realDSHMetadata, *image); err != nil {
+			fatalf("%v", err)
+		}
+	}
 	manifest, config, err := loadRuntimeProofs(*proofs, *image)
 	if err != nil {
 		fatalf("%v", err)
@@ -222,7 +235,7 @@ func main() {
 	name, version := "fake-dsh", "0.0.0-fake"
 	memoryMB := int64(512)
 	if *fixture == "real" {
-		name, version = "real-dsh", "0.2.0-rc.2"
+		name, version = "real-dsh", pinnedRealDSHVersion
 		memoryMB = 1024
 	}
 	spec := &nodev1.InstanceSpec{

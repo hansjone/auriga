@@ -9,12 +9,13 @@ import {
   rmSync,
   symlinkSync,
 } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { generateKeyPairSync, sign } from 'node:crypto';
 import { createServer } from 'node:http';
 import {
   ROOT,
+  lockIdentity,
   sealInputs,
   verifyInputs,
   digest,
@@ -73,6 +74,32 @@ test('input-manifest requires independent digest, exact locks, full files and re
     () => verifyInputs(dir, digest(bytes), ROOT, { checkTools: false }),
     /依赖锁/,
   );
+});
+
+test('changing only the target build Node version invalidates a Windows kit', (t) => {
+  const source = temporary(t);
+  const kit = temporary(t);
+  const pinPath = 'scripts/client-release/build-node.json';
+  const original = lockIdentity();
+  for (const path of Object.keys(original.locks)) {
+    mkdirSync(dirname(join(source, path)), { recursive: true });
+    cpSync(join(ROOT, path), join(source, path));
+  }
+  const pin = join(source, pinPath);
+  mkdirSync(dirname(pin), { recursive: true });
+  writeFileSync(pin, JSON.stringify({ version: original.buildNode }));
+  writeFileSync(join(kit, 'input'), 'pinned');
+  const sealed = sealInputs(kit, [], source);
+  const verify = () =>
+    verifyInputs(kit, sealed.manifestSha256, source, { checkTools: false });
+  assert.equal(verify().buildNode, original.buildNode);
+  assert.equal(sealed.lockSha256, original.lockSha256);
+  const upgraded = original.buildNode.replace(/\d+$/, (patch) =>
+    String(Number(patch) + 1),
+  );
+  writeFileSync(pin, JSON.stringify({ version: upgraded }));
+  assert.deepEqual(lockIdentity(source).locks, original.locks);
+  assert.throws(verify, /依赖锁不匹配/);
 });
 
 test('local input gate refuses UNC/device paths and junction descendants before following them', (t) => {

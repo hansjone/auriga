@@ -23,7 +23,11 @@ import (
 
 func runtimeProofFixture(t *testing.T, fixture string) (string, string) {
 	t.Helper()
-	config := []byte("{\n \"architecture\":\"amd64\", \"os\":\"linux\"\n}")
+	return runtimeProofFixtureWithConfig(t, fixture, []byte("{\n \"architecture\":\"amd64\", \"os\":\"linux\"\n}"))
+}
+
+func runtimeProofFixtureWithConfig(t *testing.T, fixture string, config []byte) (string, string) {
+	t.Helper()
 	manifest := []byte(fmt.Sprintf(`{"schemaVersion":2,"mediaType":"application/vnd.oci.image.manifest.v1+json","config":{"mediaType":"application/vnd.oci.image.config.v1+json","digest":%q,"size":%d},"layers":[]}`, proofDigest(config), len(config)))
 	image := "127.0.0.1:5000/auriga/" + fixture + "-dsh@" + proofDigest(manifest)
 	root := t.TempDir()

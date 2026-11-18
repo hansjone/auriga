@@ -32,6 +32,7 @@ echo "==> start local registry if needed"
 bash "$COMPOSE/scripts/compose.sh" bootstrap-registry
 sleep 2
 
+FIXTURE_ARGS=()
 case "$FIXTURE" in
   fake)
     echo "==> build and push fake-dsh"
@@ -42,7 +43,14 @@ case "$FIXTURE" in
   real)
     echo "==> build and push pinned real DSH (S4 inputs)"
     node "$COMPOSE/scripts/build-real-dsh.mjs" --metadata-out "$PREPARE_TMP/real-dsh.json"
-    DIGEST="$(node -p 'JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8")).image' "$PREPARE_TMP/real-dsh.json")"
+    # The full build metadata includes a file inventory larger than bootstrap's proof limit.
+    DIGEST="$(node -e '
+      const fs = require("node:fs");
+      const { image, dshVersion } = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+      fs.writeFileSync(process.argv[2], JSON.stringify({ image, dshVersion }) + "\n");
+      process.stdout.write(image);
+    ' "$PREPARE_TMP/real-dsh.json" "$PREPARE_TMP/real-dsh-release-input.json")"
+    FIXTURE_ARGS=(-real-dsh-metadata "$PREPARE_TMP/real-dsh-release-input.json")
     ;;
   *) echo "DSH_FIXTURE must be fake or real" >&2; exit 1 ;;
 esac
@@ -59,7 +67,7 @@ fi
 (
   cd "$COMPOSE/bootstrap"
   go run . -out "$VAR" -image "$DIGEST" -fixture "$FIXTURE" -runtime-proofs "$PROOF_TMP" \
-    -edge-container "${COMPOSE_PROJECT_NAME:-auriga-m2}-edge" "${OBSERVER_ARGS[@]}" "${ACCESS_ARGS[@]}"
+    -edge-container "${COMPOSE_PROJECT_NAME:-auriga-m2}-edge" "${FIXTURE_ARGS[@]}" "${OBSERVER_ARGS[@]}" "${ACCESS_ARGS[@]}"
 )
 
 if [ "$FIXTURE" = real ]; then

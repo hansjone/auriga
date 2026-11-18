@@ -17,7 +17,16 @@ import { canonical } from '../../clients/installer/runtime/release.mjs';
 import { verifySignedInventory } from './trust.mjs';
 
 export const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
-export const BUILD_NODE = '22.19.0';
+function readBuildNode(root) {
+  const { version } = JSON.parse(
+    readFileSync(join(root, 'scripts/client-release/build-node.json'), 'utf8'),
+  );
+  if (typeof version !== 'string' || !/^\d+\.\d+\.\d+$/.test(version))
+    throw new Error('Windows 目标源码的构建 Node 版本无效');
+  return version;
+}
+
+export const BUILD_NODE = readBuildNode(ROOT);
 export const HASH = /^[a-f0-9]{64}$/;
 export const LOCK_PATHS = [
   'package.json',
@@ -60,13 +69,15 @@ export function dependencyLocks(root = ROOT) {
 }
 export function lockIdentity(root = ROOT) {
   const locks = dependencyLocks(root);
+  const buildNode = readBuildNode(root);
   return {
+    buildNode,
     locks,
     lockSha256: digest(
       canonical({
         schema: 1,
         platform: CLIENT_TARGET,
-        buildNode: BUILD_NODE,
+        buildNode,
         locks,
       }),
     ),
@@ -105,7 +116,6 @@ export function sealInputs(directory, tools, root = ROOT) {
   const manifest = {
     schema: 1,
     platform: CLIENT_TARGET,
-    buildNode: BUILD_NODE,
     ...identity,
     tools,
     files,
@@ -123,6 +133,7 @@ export function verifyInputs(
 ) {
   physical(directory);
   const file = join(directory, 'windows-client.json');
+  const identity = lockIdentity(root);
   if (verifyKey || trustFingerprint) {
     const signed = verifySignedInventory(directory, {
       verifyKey,
@@ -139,7 +150,7 @@ export function verifyInputs(
     if (expected && expected !== release.manifestSha256)
       throw new Error('批准摘要与签名输入发行不符');
     expected = release.manifestSha256;
-    if (release.lockSha256 !== lockIdentity(root).lockSha256)
+    if (release.lockSha256 !== identity.lockSha256)
       throw new Error('签名输入发行依赖锁不匹配');
   }
   if (!lstatSync(file).isFile()) throw new Error('离线清单必须为普通文件');
@@ -147,11 +158,10 @@ export function verifyInputs(
   if (!HASH.test(expected ?? '') || digest(manifestBytes) !== expected)
     throw new Error('Windows devkit 清单缺少独立批准摘要或摘要不符');
   const manifest = JSON.parse(manifestBytes);
-  const identity = lockIdentity(root);
   if (
     manifest.schema !== 1 ||
     manifest.platform !== CLIENT_TARGET ||
-    manifest.buildNode !== BUILD_NODE ||
+    manifest.buildNode !== identity.buildNode ||
     manifest.lockSha256 !== identity.lockSha256 ||
     canonical(manifest.locks) !== canonical(identity.locks)
   )
