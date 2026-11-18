@@ -147,6 +147,10 @@ func (r *Reconciler) handleRestart(ctx context.Context, command *nodev1.Command)
 	if err != nil || actual.Status == nil || actual.Status.Phase != nodev1.InstancePhase_INSTANCE_PHASE_RUNNING || !actual.Status.Ready || actual.Status.ObservedGeneration != spec.Generation {
 		return failed()
 	}
+	if err := r.checkCommittedReady(ctx, actual.Status); err != nil {
+		r.fail(command.InstanceId, spec.Generation, actual.Attempts, "agent.start_failed", "committed runtime endpoint unavailable", true)
+		return failed()
+	}
 	record.Complete = true
 	if err := r.Store.PutRestartCommand(command.CommandId, *record); err != nil {
 		return failed()

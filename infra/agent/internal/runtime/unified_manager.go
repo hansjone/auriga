@@ -41,6 +41,7 @@ type unifiedNodeState struct {
 	Tenant, Owner, Host   string
 	SelectionRevision     uint64
 	Generation            int64
+	ViewGeneration        int64 `json:",omitempty"` // generation that projected the active resource view
 	Revision              uint64
 	State, Reason         string
 	Clock                 map[string]any
@@ -203,7 +204,7 @@ func (m *UnifiedManager) load(id string) (*unifiedNodeState, string, string, err
 	if err != nil && !os.IsNotExist(err) {
 		return nil, "", "", err
 	}
-	if s.SchemaVersion != 1 || s.Host != id || s.Watermarks == nil {
+	if s.SchemaVersion != 1 || s.Host != id || s.Watermarks == nil || s.ViewGeneration < 0 || s.ViewGeneration > s.Generation {
 		return nil, "", "", fmt.Errorf("invalid managed resource ledger")
 	}
 	if s.InstallationRevisions == nil {
@@ -221,6 +222,18 @@ func (m *UnifiedManager) load(id string) (*unifiedNodeState, string, string, err
 		s.SafetyIsolationReason = s.Reason
 	}
 	return s, root, current, nil
+}
+
+func (s *unifiedNodeState) needsObservation() bool {
+	return len(s.Installations) != 0 || s.HasShared || s.SafetyIsolationReason != ""
+}
+
+// Older ledgers without the binding identify only their own generation.
+func (s *unifiedNodeState) observedGeneration() uint64 {
+	if s.State == "active" && s.ViewGeneration > 0 {
+		return uint64(s.ViewGeneration)
+	}
+	return uint64(s.Generation)
 }
 
 func unifiedGuardianReason(reason string) string {
@@ -878,7 +891,7 @@ func (m *UnifiedManager) Prepare(ctx context.Context, spec *nodev1.InstanceSpec)
 			}
 		}
 	}
-	if s.Generation == spec.GetGeneration() && s.SelectionRevision == spec.GetResourceSelectionRevision() && s.Tenant == spec.GetTenantId() && s.Owner == spec.GetOwnerId() && s.State == "active" && len(s.Installations) == len(ready) {
+	if s.Generation == spec.GetGeneration() && s.observedGeneration() == uint64(spec.GetGeneration()) && s.SelectionRevision == spec.GetResourceSelectionRevision() && s.Tenant == spec.GetTenantId() && s.Owner == spec.GetOwnerId() && s.State == "active" && len(s.Installations) == len(ready) {
 		same := true
 		for i, item := range ready {
 			wire, err := proto.Marshal(item.ref)
@@ -1011,6 +1024,7 @@ func (m *UnifiedManager) Prepare(ctx context.Context, spec *nodev1.InstanceSpec)
 	s.AllowPersonalPlugins = spec.AllowPersonalPlugins == nil || spec.GetAllowPersonalPlugins()
 	s.Tenant, s.Owner, s.Host = spec.GetTenantId(), spec.GetOwnerId(), spec.GetInstanceId()
 	s.SelectionRevision, s.Generation = spec.GetResourceSelectionRevision(), spec.GetGeneration()
+	s.ViewGeneration = s.Generation
 	s.Installations = installations
 	s.HasShared = hasEnabled
 	s.ObservedAt = ""
@@ -1101,7 +1115,7 @@ func (m *UnifiedManager) Observe(ctx context.Context, id string) (reports []*res
 
 // A startup probe is passed only by Docker.start inside its release execution.
 // Public observation must continue to use the committed runtime endpoint.
-func (m *UnifiedManager) observe(ctx context.Context, id string, startupProbe func(int64, uint64) (Endpoint, error)) (reports []*resourcev1.UnifiedInstallationReport, guardian *resourcev1.UnifiedGuardianState, failure error) {
+func (m *UnifiedManager) observe(ctx context.Context, id string, startupProbe func(*unifiedNodeState) (Endpoint, error)) (reports []*resourcev1.UnifiedInstallationReport, guardian *resourcev1.UnifiedGuardianState, failure error) {
 	defer m.lock(id)()
 	defer func() {
 		if failure != nil && m.Driver != nil {
@@ -1117,7 +1131,7 @@ func (m *UnifiedManager) observe(ctx context.Context, id string, startupProbe fu
 		return nil, nil, err
 	}
 	guardian = unifiedGuardian(s)
-	if len(s.Installations) == 0 && !s.HasShared && s.SafetyIsolationReason == "" {
+	if !s.needsObservation() {
 		return reports, guardian, nil
 	}
 	defer func() {
@@ -1133,7 +1147,7 @@ func (m *UnifiedManager) observe(ctx context.Context, id string, startupProbe fu
 	}()
 	var endpoint Endpoint
 	if startupProbe != nil {
-		endpoint, err = startupProbe(s.Generation, s.SelectionRevision)
+		endpoint, err = startupProbe(s)
 	} else {
 		if verifier, ok := m.Driver.(interface {
 			VerifyResourceView(context.Context, string) error
@@ -1299,7 +1313,7 @@ func (m *UnifiedManager) observe(ctx context.Context, id string, startupProbe fu
 		}
 		changed = changed || s.Installations[i].State != state
 		s.Installations[i].State = state
-		reports = append(reports, &resourcev1.UnifiedInstallationReport{ClientId: id, Identity: ref.GetIdentity(), InstallationRevision: record.InstallationRevision, SelectionRevision: s.SelectionRevision, Generation: uint64(s.Generation), ObservedGeneration: uint64(s.Generation), State: state, ReportSource: "node", ObservedAt: m.now().Format(time.RFC3339Nano)})
+		reports = append(reports, &resourcev1.UnifiedInstallationReport{ClientId: id, Identity: ref.GetIdentity(), InstallationRevision: record.InstallationRevision, SelectionRevision: s.SelectionRevision, Generation: s.observedGeneration(), ObservedGeneration: s.observedGeneration(), State: state, ReportSource: "node", ObservedAt: m.now().Format(time.RFC3339Nano)})
 	}
 	if changed {
 		s.ObservedAt = m.now().Format(time.RFC3339Nano)
@@ -1313,7 +1327,7 @@ func (m *UnifiedManager) observe(ctx context.Context, id string, startupProbe fu
 	// Both the catalog response and the durable receipt writes may outlive the
 	// process. Keep any receipts private until this final check and commit.
 	if startupProbe != nil {
-		if _, err := startupProbe(s.Generation, s.SelectionRevision); err != nil {
+		if _, err := startupProbe(s); err != nil {
 			return nil, guardian, err
 		}
 	}
@@ -1321,5 +1335,5 @@ func (m *UnifiedManager) observe(ctx context.Context, id string, startupProbe fu
 }
 
 func unifiedGuardian(s *unifiedNodeState) *resourcev1.UnifiedGuardianState {
-	return &resourcev1.UnifiedGuardianState{TenantId: s.Tenant, OwnerId: s.Owner, HostId: s.Host, SelectionRevision: s.SelectionRevision, Generation: uint64(s.Generation), State: s.State, Reason: unifiedGuardianReason(s.Reason), NewSessionRequired: s.newSessionRequired(), ViewCleared: s.State == "private_only"}
+	return &resourcev1.UnifiedGuardianState{TenantId: s.Tenant, OwnerId: s.Owner, HostId: s.Host, SelectionRevision: s.SelectionRevision, Generation: s.observedGeneration(), State: s.State, Reason: unifiedGuardianReason(s.Reason), NewSessionRequired: s.newSessionRequired(), ViewCleared: s.State == "private_only"}
 }

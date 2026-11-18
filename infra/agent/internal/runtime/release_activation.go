@@ -6,6 +6,7 @@ import (
 	"fmt"
 	goruntime "runtime"
 	"sync"
+	"time"
 
 	"github.com/hansjone/auriga/infra/agent/internal/artifacts"
 	"github.com/hansjone/auriga/infra/agent/internal/policy"
@@ -31,7 +32,7 @@ type ReleaseActivation struct {
 // the real trust store, partition lock and bbolt high-water commit.
 type ReleaseState interface {
 	GetReleaseTrust() (releasetrust.Ring, error)
-	WithReleaseExecution(context.Context, state.ReleaseCandidate, func(context.Context) error, func(context.Context, *state.ReleaseExecution) error) error
+	WithReleaseExecution(context.Context, state.ReleaseCandidate, func(context.Context) error, func(context.Context, *state.ReleaseExecution) error, ...func() error) error
 	GetExecution(string) (*state.ExecutionRecord, error)
 	PutExecution(state.ExecutionRecord) error
 	DeleteExecution(string, string) error
@@ -50,7 +51,7 @@ type activationScope struct {
 	execution     *state.ReleaseExecution
 	record        *state.ExecutionRecord
 	recovering    bool
-	finishStart   func(commit bool) error
+	finishStart   func(context.Context, bool) error
 	mu            sync.Mutex
 	active        bool
 }
@@ -120,7 +121,7 @@ func (a *ReleaseActivation) coordinate(ctx context.Context, spec *nodev1.Instanc
 	defer func() { scope.mu.Lock(); scope.active = false; scope.mu.Unlock() }()
 	defer func() {
 		if scope.finishStart != nil {
-			_ = scope.finishStart(false)
+			_ = scope.finishStart(ctx, false)
 		}
 	}()
 	// Cancellation while qualifying must still interrupt lock/artifact waits.
@@ -140,7 +141,7 @@ func (a *ReleaseActivation) coordinate(ctx context.Context, spec *nodev1.Instanc
 		}
 	})
 	defer stopQualification()
-	err = a.Store.WithReleaseExecution(qualification, candidate, func(ctx context.Context) error {
+	return a.Store.WithReleaseExecution(qualification, candidate, func(ctx context.Context) error {
 		if err := scope.recheck(); err != nil {
 			return err
 		}
@@ -168,14 +169,17 @@ func (a *ReleaseActivation) coordinate(ctx context.Context, spec *nodev1.Instanc
 			return err
 		}
 		return errors.Join(run(context.WithValue(parent, activationKey{}, scope)), parent.Err())
-	})
-	if err == nil && scope.finishStart != nil {
+	}, func() error {
+		if scope.finishStart == nil {
+			return nil
+		}
 		if err := parent.Err(); err != nil {
 			return err
 		}
-		return scope.finishStart(true)
-	}
-	return err
+		publishCtx, cancel := context.WithTimeout(parent, 5*time.Second)
+		defer cancel()
+		return scope.finishStart(publishCtx, true)
+	})
 }
 
 func (s *activationScope) recheck() error {

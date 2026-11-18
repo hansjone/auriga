@@ -60,12 +60,15 @@ func newUnifiedPluginFixture(t *testing.T) *unifiedFixture {
 	return f
 }
 
-func NewUnifiedRequiredPluginFixture(t *testing.T) (*UnifiedManager, *nodev1.InstanceSpec) {
+func NewUnifiedRequiredPluginFixture(t *testing.T) (*UnifiedManager, *nodev1.InstanceSpec, func(*nodev1.InstanceSpec)) {
 	t.Helper()
 	f := newUnifiedPluginFixture(t)
 	f.ref.InstallationMode = "required"
 	f.source.spec.AllowPersonalPlugins = new(bool)
-	return f.manager, f.source.spec
+	return f.manager, f.source.spec, func(spec *nodev1.InstanceSpec) {
+		renewFixtureResource(t, f, spec.UnifiedResources[0], spec.ResourceRevocations[0])
+		spec.Generation++
+	}
 }
 
 func TestUnifiedPluginNativeGovernanceDoesNotIsolate(t *testing.T) {

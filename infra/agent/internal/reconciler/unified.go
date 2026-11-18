@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"slices"
+	"time"
 
 	"github.com/hansjone/auriga/infra/agent/internal/runtime"
 	nodev1 "github.com/hansjone/auriga/infra/gen/auriga/node/v1"
@@ -81,4 +82,32 @@ func filterAppliedReports(status *nodev1.InstanceStatus) {
 			report.GetGeneration() != uint64(status.GetObservedGeneration()) ||
 			report.GetSelectionRevision() != guardian.GetSelectionRevision())
 	})
+}
+
+// READY for a signed runtime needs the current committed endpoint, not just
+// a successful Start or a cached resource observation.
+func (r *Reconciler) checkCommittedReady(ctx context.Context, status *nodev1.InstanceStatus) error {
+	if r.Activation == nil {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	actual, err := r.Driver.Inspect(ctx, status.InstanceId)
+	if err != nil {
+		return err
+	}
+	if !actual.Running || !actual.Ready || actual.Generation != status.ObservedGeneration {
+		return errors.New("committed runtime endpoint unavailable")
+	}
+	return ctx.Err()
+}
+
+func (r *Reconciler) guardReady(ctx context.Context, status *nodev1.InstanceStatus) {
+	if !status.Ready || r.checkCommittedReady(ctx, status) == nil {
+		return
+	}
+	status.Ready = false
+	status.Phase = nodev1.InstancePhase_INSTANCE_PHASE_FAILED
+	status.Error = &nodev1.InstanceError{Code: "agent.start_failed", Message: "committed runtime endpoint unavailable", Retryable: true}
+	filterAppliedReports(status)
 }

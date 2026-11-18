@@ -259,9 +259,12 @@ func (e *ReleaseExecution) BeginAction() (func(bool), error) {
 // lock. An intent is synced before any Engine mutation. Only this invocation may
 // compare/delete its own intent after all actions have definite replies. Panic,
 // cancellation or loss of a reply leaves the partition blocked across reopen.
-func (s *Store) WithReleaseExecution(ctx context.Context, c ReleaseCandidate, authorize func(context.Context) error, activate func(context.Context, *ReleaseExecution) error) error {
-	if authorize == nil || activate == nil {
-		return fmt.Errorf("execution requires both callbacks")
+// The optional commit callback runs only after successful durable deletion
+// and activation, still under the partition lock. It must not mutate Engine
+// state or reenter activation: the execution capability is already closed.
+func (s *Store) WithReleaseExecution(ctx context.Context, c ReleaseCandidate, authorize func(context.Context) error, activate func(context.Context, *ReleaseExecution) error, committed ...func() error) error {
+	if authorize == nil || activate == nil || len(committed) > 1 || (len(committed) == 1 && committed[0] == nil) {
+		return fmt.Errorf("execution requires both callbacks and at most one commit callback")
 	}
 	return s.WithReleaseActivation(ctx, c, func(ctx context.Context) error {
 		if err := s.checkIntent(c.Partition); err != nil {
@@ -326,6 +329,12 @@ func (s *Store) WithReleaseExecution(ctx context.Context, c ReleaseCandidate, au
 		})
 		// Open uses bbolt's synchronous commits. A successful Update is the
 		// definite durable deletion; a failed commit preserves fail-closed state.
-		return errors.Join(err, clearErr)
+		if err := errors.Join(err, clearErr); err != nil {
+			return err
+		}
+		if len(committed) == 1 {
+			return committed[0]()
+		}
+		return nil
 	})
 }

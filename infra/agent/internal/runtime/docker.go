@@ -411,6 +411,13 @@ func (d *Docker) start(ctx context.Context, id string, resources *UnifiedManager
 	if err != nil {
 		return err
 	}
+	liveState, _ := before["State"].(map[string]any)
+	reusedProcess := record.Phase == "started" && liveState["Running"] == true
+	if resources != nil && scope.recovering && !reusedProcess {
+		if err := resources.checkStoppedRecovery(id, record.Generation); err != nil {
+			return err
+		}
+	}
 	// A replacement edge loses its endpoints on existing instance networks.
 	// Restore the trusted bridge before starting or publishing the instance.
 	var bridges []trustedBridge
@@ -428,7 +435,6 @@ func (d *Docker) start(ctx context.Context, id string, resources *UnifiedManager
 		return err
 	}
 	name := record.ContainerID
-	liveState, _ := before["State"].(map[string]any)
 	var original processLifetime
 	if liveState["Running"] == true {
 		original, err = containerProcess(before)
@@ -492,16 +498,9 @@ func (d *Docker) start(ctx context.Context, id string, resources *UnifiedManager
 	}
 	// Durable saving may block. Do not publish a proof for a process that was
 	// replaced while that save completed, even inside the same container.
-	published, err := d.startContainerView(ctx, record, bridges)
-	if err != nil {
+	proof := dockerEndpoint{url: endpoint, process: process, record: record, bridges: bridges, sharedMount: hasSharedResourceMount(before), pending: scope}
+	if _, err := d.checkEndpointView(ctx, record, proof); err != nil {
 		return err
-	}
-	publishedProcess, err := containerProcess(published)
-	if err != nil {
-		return err
-	}
-	if publishedProcess != process {
-		return fmt.Errorf("docker: process changed before endpoint publication")
 	}
 	d.mu.Lock()
 	// Saving the execution is synchronous and may outlive the Start deadline.
@@ -510,9 +509,30 @@ func (d *Docker) start(ctx context.Context, id string, resources *UnifiedManager
 		d.mu.Unlock()
 		return err
 	}
-	d.endpoints[id] = dockerEndpoint{url: endpoint, process: process, pending: scope}
+	d.endpoints[id] = proof
 	d.mu.Unlock()
-	scope.finishStart = func(commit bool) error {
+	var observed bool
+	var resourceRevision uint64
+	scope.finishStart = func(ctx context.Context, commit bool) error {
+		if commit {
+			// A definite commit cannot vouch for the process or network
+			// while the disk write was in flight.
+			if err := scope.recheck(); err != nil {
+				return err
+			}
+			if observed {
+				if err := resources.recheckStartupView(scope, resourceRevision, reusedProcess); err != nil {
+					return err
+				}
+			}
+			actual, err := d.observationRecord(id)
+			if err != nil {
+				return err
+			}
+			if err := d.checkCommittedEndpoint(ctx, actual, proof); err != nil {
+				return err
+			}
+		}
 		d.mu.Lock()
 		defer d.mu.Unlock()
 		ep := d.endpoints[id]
@@ -523,6 +543,9 @@ func (d *Docker) start(ctx context.Context, id string, resources *UnifiedManager
 			return nil
 		}
 		if commit {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
 			ep.pending = nil
 			d.endpoints[id] = ep
 		} else {
@@ -531,8 +554,15 @@ func (d *Docker) start(ctx context.Context, id string, resources *UnifiedManager
 		return nil
 	}
 	if resources != nil {
-		_, _, err := resources.observe(ctx, id, func(generation int64, revision uint64) (Endpoint, error) {
-			return d.probeStartupResources(ctx, scope, record, endpoint, process, bridges, generation, revision)
+		_, _, err := resources.observe(ctx, id, func(s *unifiedNodeState) (Endpoint, error) {
+			if err := resources.checkStartupView(scope, s, reusedProcess); err != nil {
+				return Endpoint{}, err
+			}
+			ep, err := d.probeStartupResources(ctx, scope, proof)
+			if err == nil {
+				observed, resourceRevision = true, s.Revision
+			}
+			return ep, err
 		})
 		return err
 	}
@@ -735,46 +765,71 @@ func (d *Docker) endpoint(ctx context.Context, id string) (Endpoint, error) {
 		d.revoke(id)
 		return Endpoint{}, err
 	}
-	if _, err := d.observationRecord(id); err != nil {
-		return Endpoint{}, err
-	}
-	record, err := d.actualRecord(id)
+	actual, err := d.observationRecord(id)
 	if err != nil {
-		return Endpoint{}, err
-	}
-	insp, err := d.verifyContainer(ctx, record)
-	if err != nil {
-		d.revoke(id)
-		return Endpoint{}, err
-	}
-	live, _ := insp["State"].(map[string]any)
-	if live["Running"] != true {
-		d.revoke(id)
-		return Endpoint{}, fmt.Errorf("docker: actual container is not running")
-	}
-	if _, err := d.observationRecord(id); err != nil {
-		return Endpoint{}, err
-	}
-	if err := ctx.Err(); err != nil {
-		d.revoke(id)
 		return Endpoint{}, err
 	}
 	d.mu.Lock()
 	ep := d.endpoints[id]
 	d.mu.Unlock()
-	if err := ctx.Err(); err != nil {
-		d.revoke(id)
-		return Endpoint{}, err
-	}
 	if ep.url == "" || ep.pending != nil {
+		if _, err := d.verifyContainer(ctx, actual); err != nil {
+			d.withdraw(id, true)
+			return Endpoint{}, err
+		}
 		return Endpoint{}, fmt.Errorf("docker: no endpoint for %s", id)
 	}
-	process, err := containerProcess(insp)
-	if err != nil || process != ep.process {
-		d.revoke(id)
-		return Endpoint{}, fmt.Errorf("docker: endpoint process lifetime changed")
+	if err := d.checkCommittedEndpoint(ctx, actual, ep); err != nil {
+		d.withdraw(id, true)
+		return Endpoint{}, err
+	}
+	d.mu.Lock()
+	unchanged := d.endpoints[id].record == ep.record && d.endpoints[id].pending == nil
+	d.mu.Unlock()
+	if !unchanged {
+		return Endpoint{}, fmt.Errorf("docker: endpoint proof was withdrawn")
 	}
 	return Endpoint{URL: ep.url}, nil
+}
+
+func (d *Docker) checkCommittedEndpoint(ctx context.Context, actual *state.ExecutionRecord, proof dockerEndpoint) error {
+	if _, err := d.checkEndpointView(ctx, actual, proof); err != nil {
+		return err
+	}
+	current, err := d.observationRecord(actual.InstanceID)
+	if err != nil {
+		return err
+	}
+	if current.Phase != "started" || !sameExecution(current, proof.record) {
+		return fmt.Errorf("docker: endpoint execution changed")
+	}
+	return ctx.Err()
+}
+
+func (d *Docker) checkEndpointView(ctx context.Context, actual *state.ExecutionRecord, proof dockerEndpoint) (map[string]any, error) {
+	if actual.Phase != "started" || !sameExecution(actual, proof.record) {
+		return nil, fmt.Errorf("docker: endpoint execution changed")
+	}
+	insp, err := d.startContainerView(ctx, actual, proof.bridges)
+	if err != nil {
+		return nil, err
+	}
+	if proof.sharedMount && !hasSharedResourceMount(insp) {
+		return nil, fmt.Errorf("docker: endpoint lost its trusted read-only resource mount")
+	}
+	process, err := containerProcess(insp)
+	if err != nil || process != proof.process {
+		return nil, fmt.Errorf("docker: endpoint process changed")
+	}
+	port, err := instancePort(insp)
+	if err != nil {
+		return nil, err
+	}
+	url, err := instanceEndpoint(insp, networkName(actual.InstanceID), port)
+	if err != nil || url != proof.url {
+		return nil, fmt.Errorf("docker: endpoint address changed")
+	}
+	return insp, ctx.Err()
 }
 
 func (d *Docker) List(ctx context.Context) ([]Status, error) {

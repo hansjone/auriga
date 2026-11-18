@@ -100,6 +100,7 @@ func (r *Reconciler) cancelHealthLocked(id string) {
 // Publishing a stale observation can therefore never overwrite a newer command.
 func (r *Reconciler) persistHealth(ctx context.Context, epoch uint64, spec *nodev1.InstanceSpec, st *nodev1.InstanceStatus, attempts uint32) bool {
 	r.enrichResources(ctx, st)
+	r.guardReady(ctx, st)
 	r.mu.Lock()
 	latest, err := r.Store.GetDesired(st.InstanceId)
 	if err != nil || r.closed || ctx.Err() != nil || epoch != r.healthEpochs[st.InstanceId] || !proto.Equal(spec, latest) {

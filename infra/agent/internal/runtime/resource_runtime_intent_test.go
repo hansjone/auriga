@@ -29,19 +29,21 @@ const requiredPluginCatalog = `{"privateOnly":false,"skills":[],"plugins":[{"nam
 const resourceFixtureToken = "signed-runtime-resource-fixture"
 
 type resourceRuntimeFixture struct {
-	engine    *releaseEngine
-	driver    *runtime.Docker
-	release   *dockerReleaseFixture
-	manager   *runtime.UnifiedManager
-	preparing *runtime.Preparing
-	plain     *nodev1.InstanceSpec
-	required  *nodev1.InstanceSpec
+	engine     *releaseEngine
+	driver     *runtime.Docker
+	release    *dockerReleaseFixture
+	manager    *runtime.UnifiedManager
+	preparing  *runtime.Preparing
+	plain      *nodev1.InstanceSpec
+	required   *nodev1.InstanceSpec
+	renew      func(*nodev1.InstanceSpec)
+	sealingKey [32]byte
 }
 
 func newResourceRuntimeFixture(t *testing.T) *resourceRuntimeFixture {
 	t.Helper()
 	e, d, release := newReleaseEngine(t)
-	manager, required := runtime.NewUnifiedRequiredPluginFixture(t)
+	manager, required, renew := runtime.NewUnifiedRequiredPluginFixture(t)
 	required.Dsh = proto.Clone(release.dsh).(*nodev1.DshRuntime)
 	required.Profile = &nodev1.Profile{ListenPort: 7860}
 	required.Generation, required.ResourceSelectionRevision = 2, 4
@@ -68,7 +70,7 @@ func newResourceRuntimeFixture(t *testing.T) *resourceRuntimeFixture {
 		}
 		spec.Secrets = &nodev1.Secrets{InstanceToken: token}
 	}
-	return &resourceRuntimeFixture{e, d, release, manager, prep, plain, required}
+	return &resourceRuntimeFixture{e, d, release, manager, prep, plain, required, renew, pub}
 }
 
 func (f *resourceRuntimeFixture) pendingRestart(t *testing.T, r *reconciler.Reconciler, statuses <-chan *nodev1.InstanceStatus) *state.ExecutionRecord {
@@ -94,7 +96,7 @@ func (f *resourceRuntimeFixture) pendingRestart(t *testing.T, r *reconciler.Reco
 	return record
 }
 
-func startResourceReconciler(t *testing.T, store *state.Store, prep *runtime.Preparing) (*reconciler.Reconciler, <-chan *nodev1.InstanceStatus) {
+func startResourceReconciler(t *testing.T, store *state.Store, prep runtime.Driver) (*reconciler.Reconciler, <-chan *nodev1.InstanceStatus) {
 	t.Helper()
 	r := reconciler.New(store, prep, nil, 1)
 	ch := make(chan *nodev1.InstanceStatus, 32)
@@ -123,10 +125,14 @@ func awaitResourceRuntime(t *testing.T, statuses <-chan *nodev1.InstanceStatus, 
 }
 
 func resourceRestart(t *testing.T, r *reconciler.Reconciler, id string) *nodev1.CommandResult {
+	return resourceRestartAs(t, r, id, "restart-for-required-plugin")
+}
+
+func resourceRestartAs(t *testing.T, r *reconciler.Reconciler, id, command string) *nodev1.CommandResult {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(t.Context(), 12*time.Second)
 	defer cancel()
-	return r.Command(ctx, &nodev1.Command{CommandId: "restart-for-required-plugin", InstanceId: id,
+	return r.Command(ctx, &nodev1.Command{CommandId: command, InstanceId: id,
 		Kind: &nodev1.Command_Restart{Restart: &nodev1.RestartCommand{Grace: durationpb.New(time.Second), Reason: "user"}}})
 }
 
@@ -166,14 +172,14 @@ func (s *resourceIntentFixtureStore) PutExecution(r state.ExecutionRecord) error
 	return s.Store.PutExecution(r)
 }
 
-func (s *resourceIntentFixtureStore) WithReleaseExecution(ctx context.Context, c state.ReleaseCandidate, authorize func(context.Context) error, activate func(context.Context, *state.ReleaseExecution) error) error {
+func (s *resourceIntentFixtureStore) WithReleaseExecution(ctx context.Context, c state.ReleaseCandidate, authorize func(context.Context) error, activate func(context.Context, *state.ReleaseExecution) error, committed ...func() error) error {
 	return s.Store.WithReleaseExecution(ctx, c, authorize, func(ctx context.Context, execution *state.ReleaseExecution) error {
 		err := activate(ctx, execution)
 		if err == nil && s.beforeCommit != nil {
 			err = s.beforeCommit(ctx)
 		}
 		return err
-	})
+	}, committed...)
 }
 
 func (f *resourceRuntimeFixture) setCatalog(handler http.HandlerFunc) {
@@ -291,7 +297,7 @@ func TestSignedResourceRuntimeFailsClosed(t *testing.T) {
 		{"definite-stop", "native plugin", "private_only", false},
 		{"uncertain-stop", "stop response is uncertain", "blocked", true},
 		{"prior-intent", state.ErrReleaseUnresolved.Error(), "", true},
-		{"process-replacement", "process changed during startup", "private_only", false},
+		{"process-replacement", "endpoint process changed", "private_only", false},
 		{"started-write", "injected started record write failure", "active", false},
 		{"catalog-timeout", "context deadline exceeded", "private_only", false},
 		{"post-observation-abort", "injected callback failure after resource verification", "active", false},

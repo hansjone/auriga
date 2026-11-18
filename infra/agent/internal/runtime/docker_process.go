@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"math"
 	"time"
+
+	"github.com/hansjone/auriga/infra/agent/internal/state"
 )
 
 // Container identity survives process restarts. A readiness proof belongs to one
@@ -14,9 +16,12 @@ type processLifetime struct {
 }
 
 type dockerEndpoint struct {
-	url     string
-	process processLifetime
-	pending *activationScope // private until this exact activation commits
+	url         string
+	process     processLifetime
+	record      *state.ExecutionRecord
+	bridges     []trustedBridge
+	sharedMount bool
+	pending     *activationScope // private until this exact activation commits
 }
 
 func containerProcess(insp map[string]any) (processLifetime, error) {

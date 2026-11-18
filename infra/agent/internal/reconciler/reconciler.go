@@ -472,7 +472,7 @@ func (r *Reconciler) applySpec(ctx context.Context, id string, spec *nodev1.Inst
 		st.ObservedGeneration = spec.Generation
 		st.StartedAt = timestamppb.Now()
 		st.UpdatedAt = timestamppb.Now()
-		if r.persist(st, 0) == nil {
+		if r.persist(st, 0) == nil && st.Ready {
 			telemetry.Stage(ctx, "ready")
 		}
 	case nodev1.DesiredState_DESIRED_STATE_STOPPED:
@@ -531,7 +531,7 @@ func (r *Reconciler) recoverRunning(ctx context.Context, rec state.ActualRecord,
 	st.Ready = true
 	st.UpdatedAt = timestamppb.Now()
 	// Start may merely rediscover an existing container. Preserve its start time.
-	if r.persist(st, 0) == nil {
+	if r.persist(st, 0) == nil && st.Ready {
 		telemetry.Stage(ctx, "ready")
 	}
 }
@@ -597,6 +597,7 @@ func (r *Reconciler) fail(id string, generation int64, attempts uint32, code, ms
 
 func (r *Reconciler) persist(st *nodev1.InstanceStatus, attempts uint32) error {
 	r.enrichPersistedResources(st)
+	r.guardReady(context.Background(), st)
 	if err := r.Store.PutActual(state.ActualRecord{Status: st, Attempts: attempts}); err != nil {
 		r.Log.Warn("persist runtime status failed", "instance_id", st.InstanceId, "error", err)
 		return err
