@@ -1266,7 +1266,8 @@ func (m *UnifiedManager) Observe(ctx context.Context, id string) (reports []*res
 				}
 				if record.DesiredState == "ENABLED" && skill.Provider == "auriga-shared" && strings.ReplaceAll(skill.Path, "\\", "/") == expected && s.State == "active" {
 					content, err := os.ReadFile(filepath.Join(root, "skills-active", "current", record.Name, "SKILL.md"))
-					if err == nil && skill.Content == unifiedSkillBody(content) {
+					// DSH trims the parsed body but preserves its internal line endings.
+					if err == nil && strings.ReplaceAll(skill.Content, "\r\n", "\n") == unifiedSkillBody(content) {
 						confirmed[skill.Preset] = true
 					}
 				}
