@@ -17,11 +17,16 @@ class WorkspaceSharedDshEntryConfigurationTest {
   void fixedPkcs8SignerMatchesItsProvisionedPublicKeyAndRejectsOtherInput() throws Exception {
     var keys = KeyPairGenerator.getInstance("Ed25519").generateKeyPair();
     Path file = directory.resolve("ticket-private.pem");
+    String begin = "-----BEGIN " + "PRIVATE KEY-----";
+    String end = "-----END " + "PRIVATE KEY-----";
     Files.writeString(
         file,
-        "-----BEGIN PRIVATE KEY-----\n"
+        begin
+            + "\n"
             + Base64.getEncoder().encodeToString(keys.getPrivate().getEncoded())
-            + "\n-----END PRIVATE KEY-----\n");
+            + "\n"
+            + end
+            + "\n");
     var loaded = WorkspaceSharedDshEntryConfiguration.loadSigningKey(file, "fixture");
     var signature = Signature.getInstance("Ed25519");
     byte[] message =

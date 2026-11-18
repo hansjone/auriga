@@ -70,7 +70,7 @@ func openSharedEntry(cfg Config, routes RouteStore, ownerSigner IdentitySigner) 
 		return nil, nil, fmt.Errorf("shared entry requires installation access, routes and dedicated NATS credentials")
 	}
 	origin := cfg.Access.PortalOrigin()
-	if origin.Scheme != "https" && !(cfg.Access.Mode() == "ip" && cfg.Access.InsecureHTTPAcknowledged() && origin.Scheme == "http") {
+	if origin.Scheme != "https" && (cfg.Access.Mode() != "ip" || !cfg.Access.InsecureHTTPAcknowledged() || origin.Scheme != "http") {
 		return nil, nil, fmt.Errorf("shared entry requires HTTPS or explicitly acknowledged IP HTTP")
 	}
 	keys, err := loadSharedTicketKeys(shared.TicketPublicKeysFile)
