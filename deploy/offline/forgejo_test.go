@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/hex"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -217,6 +218,120 @@ func TestForgejoRedirectAndWrongTagNeverWrite(t *testing.T) {
 			err := uploadRelease(uploadOptions{Server: server.URL, Repo: "owner/repo", Dir: root, Key: public, Execute: true}, server.Client())
 			if err == nil || writes != 0 || leaked {
 				t.Fatal("unsafe publish", err, writes, leaked)
+			}
+		})
+	}
+}
+
+func TestForgejoInternalHTTPRequiresExplicitPrivateRoute(t *testing.T) {
+	for _, site := range []string{"http://127.0.0.1:3000", "http://10.20.30.40:3000"} {
+		t.Run(site, func(t *testing.T) {
+			err := uploadCommand([]string{"--server", "https://forgejo.example.com", "--internal-http", site, "--repo", "owner/repo"})
+			if err == nil || !strings.Contains(err.Error(), "--verify-key") {
+				t.Fatalf("approved internal address did not reach local validation: %v", err)
+			}
+		})
+	}
+	for _, site := range []string{"http://192.0.2.10:3000", "http://forgejo.example.com:3000", "http://user@127.0.0.1:3000", "http://127.0.0.1:3000/?token=fixture-secret"} {
+		t.Run(site, func(t *testing.T) {
+			err := uploadCommand([]string{"--server", "https://forgejo.example.com", "--internal-http", site, "--repo", "owner/repo"})
+			if err == nil || !strings.Contains(err.Error(), "内网") || strings.Contains(err.Error(), "fixture-secret") {
+				t.Fatalf("unsafe address not rejected without echoing credentials: %v", err)
+			}
+		})
+	}
+}
+
+func TestForgejoInternalHTTPReadbackUsesApprovedOrigin(t *testing.T) {
+	root := t.TempDir()
+	key, public := testSigningKeys(t)
+	m := fixtureDistribution(t, root)
+	if err := jsonFile(filepath.Join(root, "release-manifest.json"), m, 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeSums(root); err != nil {
+		t.Fatal(err)
+	}
+	if err := signSums(root, key); err != nil {
+		t.Fatal(err)
+	}
+	names, err := regularFiles(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const token = "fixture-secret"
+	t.Setenv("FORGEJO_TOKEN", token)
+	external := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Error("publisher contacted the external site from the internal route")
+		w.WriteHeader(500)
+	}))
+	defer external.Close()
+	t.Setenv("HTTP_PROXY", external.URL)
+	canonical := external.URL + "/forge"
+	for _, mode := range []string{"readback", "foreign-url", "redirect"} {
+		t.Run(mode, func(t *testing.T) {
+			files := map[string][]byte{}
+			var assets []forgejoAsset
+			for _, name := range names {
+				body, err := os.ReadFile(filepath.Join(root, name))
+				if err != nil {
+					t.Fatal(err)
+				}
+				route := "/attachments/" + hex.EncodeToString([]byte(name))
+				files[route] = body
+				ad := canonical + route
+				if mode == "foreign-url" {
+					ad = "https://unapproved.example.com" + route
+				}
+				assets = append(assets, forgejoAsset{Name: name, Size: int64(len(body)), URL: ad})
+			}
+			const repo = "/api/v1/repos/owner/repo"
+			internal := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Header.Get("Authorization") != "token "+token {
+					t.Error("missing scoped internal token")
+				}
+				if r.Method != http.MethodGet {
+					t.Error("complete drafts only need readback")
+					w.WriteHeader(500)
+					return
+				}
+				switch r.URL.Path {
+				case "/api/forgejo/v1/version":
+					_, _ = io.WriteString(w, `{"version":"11.0.16"}`)
+				case repo + "/tags/1.0":
+					_ = json.NewEncoder(w).Encode(map[string]any{"commit": map[string]string{"sha": m.Commit}})
+				case repo + "/releases/tags/1.0":
+					_, _ = io.WriteString(w, `{"id":7,"draft":true,"tag_name":"1.0"}`)
+				case repo + "/releases/7/assets":
+					_ = json.NewEncoder(w).Encode(assets)
+				default:
+					if body, ok := files[r.URL.Path]; ok {
+						if mode == "redirect" {
+							http.Redirect(w, r, canonical+r.URL.Path, http.StatusTemporaryRedirect)
+							return
+						}
+						_, _ = w.Write(body)
+					} else {
+						t.Errorf("unexpected internal route %s", r.URL.Path)
+						w.WriteHeader(404)
+					}
+				}
+			}))
+			defer internal.Close()
+			err := uploadRelease(uploadOptions{Server: canonical, InternalHTTP: internal.URL, Repo: "owner/repo", Dir: root, Key: public, Execute: true}, internal.Client())
+			switch mode {
+			case "readback":
+				if err != nil {
+					t.Fatal(err)
+				}
+			case "foreign-url":
+				if err == nil || !strings.Contains(err.Error(), "拒绝跨站点") {
+					t.Fatal(err)
+				}
+			case "redirect":
+				if err == nil || !strings.Contains(err.Error(), "拒绝跨主机或降级重定向") {
+					t.Fatal(err)
+				}
 			}
 		})
 	}

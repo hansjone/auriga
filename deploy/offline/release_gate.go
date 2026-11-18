@@ -164,14 +164,31 @@ func refreshReleaseInputsContext(ctx context.Context, root string, r release, ke
 	return signSums(root, key)
 }
 
-func writeDownloads(root, tag string, cat devkitCatalog, assets []assetInfo) error {
+func writeDownloads(root string, m distributionManifest, cat devkitCatalog, assets []assetInfo) error {
 	var b strings.Builder
+	tag := m.Tag
 	fingerprint, err := publicFingerprint(filepath.Join(root, "release-public.pem"))
 	if err != nil {
 		return err
 	}
 	fmt.Fprintf(&b, "发行公钥指纹 SHA256(SPKI DER)：%s\n从独立核准的Forgejo Release正文/组织文档核对本指纹；所有verify/unpack/install示例必须追加 --trust-fingerprint %s（或--verify-key批准公钥）。\n仅包内公钥只能校验完整性，未核验身份会非零退出。\n", fingerprint, fingerprint)
-	fmt.Fprintf(&b, "Auriga %s 浏览器下载说明（字节为精确大小）\n只从本版本 Forgejo Release 手动下载，再拷入现场；现场无需Git或网络。\n只部署：未分卷时只需 auriga-offline-%s.tar 和 SHA256SUMS 两个文件。\n先系统tar解包，进入包目录运行 ./auriga verify .，再 sudo ./auriga install --address 192.0.2.10。\n改代码：再下载 auriga-source-%s.tar 和 auriga-devkit-%s.tar。源码包自带Linux amd64 CLI、版本基线和公钥。\n分卷：下载同名前缀全部 .partNNN、.parts.json及.sig；另下载auriga引导程序，用 ./auriga unpack 首卷 --out 新目录。\n累积基线 %s，最新 %s，支持%d版；已有精确上版套件可只下载delta代替完整devkit。\n新基线/跨大版本/超阈值时下载完整套件解包到新目录；旧基线在原Forgejo Release保留。\n校验全离线，必须用已独立核对的 --trust-fingerprint 或 --verify-key 固定发行身份。\n\n", tag, tag, tag, tag, cat.Baseline, cat.Latest, len(cat.Versions))
+	fmt.Fprintf(&b, "Auriga %s 浏览器下载说明（字节为精确大小）\n只从本版本 Forgejo Release 手动下载，再拷入现场；现场无需Git或网络。\n只部署：未分卷时只需 auriga-offline-%s.tar 和 SHA256SUMS 两个文件。\n先系统tar解包，进入包目录运行 ./auriga verify .，再 sudo ./auriga install --address 192.0.2.10。\n改代码：再下载 auriga-source-%s.tar 和 auriga-devkit-%s.tar。源码包自带Linux amd64 CLI、版本基线和公钥。\n服务端分卷：下载同名前缀全部 .partNNN、.parts.json及.sig；另下载auriga引导程序，用 ./auriga unpack 首卷 --out 新目录。\n累积基线 %s，最新 %s，支持%d版。\n", tag, tag, tag, tag, cat.Baseline, cat.Latest, len(cat.Versions))
+	if m.Baseline == tag {
+		b.WriteString("本版为新基线，请下载完整 devkit 到新目录。旧基线仍可从原发行下载。\n")
+	} else {
+		b.WriteString("同一基线且已有精确上版套件，可下载本版 delta 代替完整 devkit。\n")
+	}
+	if m.Windows != nil {
+		b.WriteString("Windows 开发：下载签名源码与对应 Windows 输入套件。执行任何程序前，从核准的 Release 正文或组织文档核对源码归档与引导 Node 的 SHA256，然后用 Get-FileHash 校验。\n")
+		fmt.Fprintf(&b, "Windows 引导 Node SHA256 %s  %s\n", m.Windows.BuildNodeSHA, windowsBuildNodePath)
+	}
+	for _, archive := range m.Archives {
+		if strings.HasPrefix(archive.Name, windowsClientPrefix) || strings.HasPrefix(archive.Name, dshArchivePrefix) ||
+			(m.Windows != nil && archive.Name == "auriga-source-"+tag+".tar") {
+			fmt.Fprintf(&b, "完整归档 SHA256 %s  %s\n", archive.SHA256, archive.Name)
+		}
+	}
+	b.WriteString("Windows 或 DSH 分卷：按 .parts.json 顺序以二进制拼接，校验完整归档 SHA256。DSH 源码供只读参考，许可证与来源清单同页下载。\n校验全离线，必须用已独立核对的 --trust-fingerprint 或 --verify-key 固定发行身份。\n\n")
 	for _, a := range assets {
 		purpose := "可选：引导程序/公钥"
 		switch {
@@ -183,6 +200,10 @@ func writeDownloads(root, tag string, cat devkitCatalog, assets []assetInfo) err
 			purpose = "已有上版套件可选：相对上版增量（新基线需完整套件）"
 		case strings.HasPrefix(a.Name, "auriga-devkit-"):
 			purpose = "首次改代码必下：累积依赖/工具镜像"
+		case strings.HasPrefix(a.Name, windowsClientPrefix):
+			purpose = "Windows 开发必下：签名客户端输入套件或分卷"
+		case strings.HasPrefix(a.Name, dshArchivePrefix):
+			purpose = "DSH 上游只读参考：源码、许可证或来源清单"
 		case a.Name == "SHA256SUMS":
 			purpose = "必下：全部附件摘要"
 		case a.Name == "SHA256SUMS.sig":
@@ -219,7 +240,7 @@ func finalizeDistribution(ctx context.Context, root string, m distributionManife
 			}
 			listing = append(listing, a)
 		}
-		if err := writeDownloads(root, m.Tag, cat, listing); err != nil {
+		if err := writeDownloads(root, m, cat, listing); err != nil {
 			return err
 		}
 		current, err := describeAssetContext(ctx, filepath.Join(root, "DOWNLOADS.txt"))

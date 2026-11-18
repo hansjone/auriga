@@ -16,12 +16,13 @@ import (
 )
 
 type releaseOptions struct {
-	Source, Tag, Index, Out, Cache, Key string
-	Limit                               int64
-	Build                               bool
-	Previous                            string
-	NewBaseline                         bool
-	MaxBytes                            int64
+	Source, Tag, Index, Out, Cache, Key  string
+	WindowsClient, WindowsSHA, DSHSource string
+	Limit                                int64
+	Build                                bool
+	Previous                             string
+	NewBaseline                          bool
+	MaxBytes                             int64
 }
 type releaseBuilders struct {
 	Bundle     func([]string, string) error
@@ -36,17 +37,18 @@ type cachedKit struct {
 	SourceTag    string        `json:"sourceTag"`
 }
 type distributionManifest struct {
-	Schema      int               `json:"schemaVersion"`
-	Tag         string            `json:"tag"`
-	Commit      string            `json:"commit"`
-	Locks       lockInventory     `json:"locks"`
-	Devkit      cachedKit         `json:"devkit"`
-	Assets      []assetInfo       `json:"assets"`
-	Archives    []assetInfo       `json:"archives"`
-	Baseline    string            `json:"baseline"`
-	Versions    map[string]string `json:"supportedVersions"`
-	ResetReason string            `json:"resetReason,omitempty"`
-	Gate        buildGate         `json:"offlineBuildGate"`
+	Schema      int                  `json:"schemaVersion"`
+	Tag         string               `json:"tag"`
+	Commit      string               `json:"commit"`
+	Locks       lockInventory        `json:"locks"`
+	Devkit      cachedKit            `json:"devkit"`
+	Assets      []assetInfo          `json:"assets"`
+	Archives    []assetInfo          `json:"archives"`
+	Baseline    string               `json:"baseline"`
+	Versions    map[string]string    `json:"supportedVersions"`
+	ResetReason string               `json:"resetReason,omitempty"`
+	Gate        buildGate            `json:"offlineBuildGate"`
+	Windows     *windowsReleaseInput `json:"windowsClient,omitempty"`
 }
 
 func releaseCommand(args []string) error {
@@ -60,6 +62,9 @@ func releaseCommand(args []string) error {
 	f.StringVar(&o.Out, "outdir", "", "")
 	f.StringVar(&o.Cache, "cache-dir", ".offline-devkit-cache", "")
 	f.StringVar(&o.Key, "sign-key", "", "")
+	f.StringVar(&o.WindowsClient, "windows-client", "", "Windows 签名客户端输入 tar")
+	f.StringVar(&o.WindowsSHA, "windows-client-sha256", "", "Windows 侧确认的完整 tar SHA256")
+	f.StringVar(&o.DSHSource, "dsh-source", "", "批准的 DSH 源码归档文件或 Forgejo HTTPS 附件 URL")
 	f.Int64Var(&o.Limit, "attachment-limit", (4<<30)-1, "")
 	f.BoolVar(&o.Build, "build", false, "")
 	f.StringVar(&o.Previous, "previous-devkit", "", "")
@@ -236,6 +241,9 @@ func generateRelease(o releaseOptions, builders releaseBuilders) error {
 	if o.Key == "" || o.Out == "" || o.Cache == "" || o.Limit <= 0 {
 		return errors.New("release 需要 --sign-key、输出目录、缓存目录和正数附件上限")
 	}
+	if o.WindowsClient == "" || !hex64.MatchString(o.WindowsSHA) || o.DSHSource == "" {
+		return errors.New("release 需要 --windows-client、--windows-client-sha256 和 --dsh-source")
+	}
 	if o.Previous == "" && !o.NewBaseline {
 		return errors.New("累积发行必须 --previous-devkit 上版完整套件目录；首次或主动收拢需 --new-baseline")
 	}
@@ -287,6 +295,21 @@ func generateRelease(o releaseOptions, builders releaseBuilders) error {
 	if err := signingPublic(o.Key, public); err != nil {
 		return err
 	}
+	windowsTar := filepath.Join(stage, filepath.Base(o.WindowsClient))
+	if err := noSymlinks(o.WindowsClient); err != nil {
+		return err
+	}
+	if err := copyFileContext(ctx, o.WindowsClient, windowsTar, 0644); err != nil {
+		return err
+	}
+	windows, err := verifyWindowsRelease(ctx, windowsTar, o.WindowsSHA, o.Source, public, scratch)
+	if err != nil {
+		return fmt.Errorf("Windows 客户端附件: %w", err)
+	}
+	dshArchive, extraFiles, err := stageDSHSource(ctx, o.Source, o.DSHSource, stage)
+	if err != nil {
+		return fmt.Errorf("DSH 上游源码附件: %w", err)
+	}
 	if err := jsonFile(index, r, 0644); err != nil {
 		return err
 	}
@@ -335,9 +358,13 @@ func generateRelease(o releaseOptions, builders releaseBuilders) error {
 	if err := packContext(ctx, cumulative, kitTarget); err != nil {
 		return err
 	}
-	deltaTarget := filepath.Join(stage, "auriga-devkit-"+o.Tag+"-delta.tar")
-	if err := writeDevkitDeltaContext(ctx, o.Previous, cumulative, deltaTarget, o.Key); err != nil {
-		return err
+	releaseArchives := []string{kitTarget, sourceTar, windowsTar, dshArchive}
+	if o.Previous != "" && cat.Baseline != o.Tag {
+		deltaTarget := filepath.Join(stage, "auriga-devkit-"+o.Tag+"-delta.tar")
+		if err := writeDevkitDeltaContext(ctx, o.Previous, cumulative, deltaTarget, o.Key); err != nil {
+			return err
+		}
+		releaseArchives = append(releaseArchives, deltaTarget)
 	}
 	catalogSHA, err := digestContext(ctx, filepath.Join(cumulative, "devkit-catalog.json"))
 	if err != nil {
@@ -374,7 +401,8 @@ func generateRelease(o releaseOptions, builders releaseBuilders) error {
 	}
 	var assets []assetInfo
 	var archives []assetInfo
-	for _, file := range []string{offline, kitTarget, deltaTarget, sourceTar} {
+	releaseArchives = append(releaseArchives, offline)
+	for _, file := range releaseArchives {
 		original, err := describeAssetContext(ctx, file)
 		if err != nil {
 			return err
@@ -397,6 +425,13 @@ func generateRelease(o releaseOptions, builders releaseBuilders) error {
 			return err
 		}
 	}
+	for _, file := range extraFiles {
+		info, err := describeAssetContext(ctx, file)
+		if err != nil {
+			return err
+		}
+		assets = append(assets, info)
+	}
 	if err := copyFileContext(ctx, exe, filepath.Join(stage, "auriga"), 0755); err != nil {
 		return err
 	}
@@ -413,7 +448,8 @@ func generateRelease(o releaseOptions, builders releaseBuilders) error {
 		return err
 	}
 	assets = append(assets, pubAsset)
-	if err := writeDownloads(stage, o.Tag, cat, assets); err != nil {
+	manifest := distributionManifest{Schema: 1, Tag: o.Tag, Commit: commit, Locks: locks, Devkit: cached, Assets: assets, Archives: archives, Baseline: cat.Baseline, ResetReason: cat.ResetReason, Gate: gate, Windows: &windows}
+	if err := writeDownloads(stage, manifest, cat, assets); err != nil {
 		return err
 	}
 	downloads, err := describeAssetContext(ctx, filepath.Join(stage, "DOWNLOADS.txt"))
@@ -425,7 +461,8 @@ func generateRelease(o releaseOptions, builders releaseBuilders) error {
 	for tag, entry := range cat.Versions {
 		versions[tag] = entry.Kit.Locks.Digest
 	}
-	manifest := distributionManifest{Schema: 1, Tag: o.Tag, Commit: commit, Locks: locks, Devkit: cached, Assets: assets, Archives: archives, Baseline: cat.Baseline, Versions: versions, ResetReason: cat.ResetReason, Gate: gate}
+	manifest.Assets = assets
+	manifest.Versions = versions
 	if err := finalizeDistribution(ctx, stage, manifest, cat, o.Key); err != nil {
 		return err
 	}

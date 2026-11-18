@@ -10,6 +10,7 @@ import (
 	"io"
 	"mime/multipart"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -20,6 +21,7 @@ import (
 
 type uploadOptions struct {
 	Server, Repo, Dir, Key string
+	InternalHTTP           string
 	Execute, Publish       bool
 }
 type forgejoRelease struct {
@@ -35,16 +37,19 @@ type forgejoAsset struct {
 type forgejoAPI struct {
 	base   string
 	origin *url.URL
+	public *url.URL
 	client *http.Client
 	token  string
 }
 
 var repoPart = regexp.MustCompile(`^[a-zA-Z0-9_.-]+$`)
+var attachmentRoute = regexp.MustCompile(`^/attachments/[a-fA-F0-9-]+$`)
 
 func uploadCommand(args []string) error {
 	f := flags("release upload")
 	var o uploadOptions
 	f.StringVar(&o.Server, "server", "", "")
+	f.StringVar(&o.InternalHTTP, "internal-http", "", "仅在受控内网直连 Forgejo HTTP（私有或回环 IP）")
 	f.StringVar(&o.Repo, "repo", "", "")
 	f.StringVar(&o.Dir, "dir", "", "")
 	f.StringVar(&o.Key, "verify-key", "", "")
@@ -61,10 +66,7 @@ func uploadCommand(args []string) error {
 
 func forgejoOrigin(server, repo string) (*url.URL, error) {
 	u, err := url.Parse(server)
-	if err != nil {
-		return nil, err
-	}
-	if u.Scheme != "https" || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || strings.Contains(u.Path, "..") {
+	if err != nil || u.Scheme != "https" || u.Hostname() == "" || u.User != nil || u.RawQuery != "" || u.ForceQuery || u.Fragment != "" || strings.Contains(u.Path, "..") {
 		return nil, errors.New("发布 --server 需要无凭据的 Forgejo HTTPS 站点地址")
 	}
 	host := strings.ToLower(strings.TrimSuffix(u.Hostname(), "."))
@@ -85,14 +87,47 @@ func forgejoOrigin(server, repo string) (*url.URL, error) {
 	return u, nil
 }
 
-// All requests, including attachment verification, remain on the approved
-// HTTPS origin. Redirects cannot send the token to an object store or GitHub.
-func (a *forgejoAPI) request(method, address string, body io.Reader, contentType string, length int64) (*http.Response, error) {
+func forgejoInternalOrigin(server string) (*url.URL, error) {
+	u, err := url.Parse(server)
+	invalid := errors.New("--internal-http 需要无凭据、带端口的 Forgejo 内网 HTTP 地址（私有或回环 IP）")
+	if err != nil || u.Scheme != "http" || u.Port() == "" || u.User != nil || u.RawQuery != "" || u.ForceQuery || u.Fragment != "" || strings.Contains(u.Path, "..") {
+		return nil, invalid
+	}
+	ip, err := netip.ParseAddr(u.Hostname())
+	if err != nil || ip.Zone() != "" || (!ip.Unmap().IsPrivate() && !ip.Unmap().IsLoopback()) {
+		return nil, invalid
+	}
+	return u, nil
+}
+
+func sameForgejoOrigin(u, origin *url.URL) bool {
+	return u.Scheme == origin.Scheme && u.Host == origin.Host && u.User == nil
+}
+
+// Only remap Forgejo's own attachment route when its canonical HTTPS address
+// is different from the approved internal transport.
+func (a *forgejoAPI) attachmentAddress(address string) (string, error) {
 	u, err := url.Parse(address)
 	if err != nil {
-		return nil, err
+		return "", errors.New("无效 Forgejo 附件地址")
 	}
-	if u.Scheme != "https" || u.Host != a.origin.Host || u.User != nil {
+	if a.public == nil {
+		return address, nil
+	}
+	if u.RawQuery == "" && !u.ForceQuery && u.Fragment == "" && u.RawPath == "" {
+		for _, origin := range []*url.URL{a.public, a.origin} {
+			route, ok := strings.CutPrefix(u.Path, strings.TrimSuffix(origin.Path, "/"))
+			if ok && sameForgejoOrigin(u, origin) && attachmentRoute.MatchString(route) {
+				return a.base + route, nil
+			}
+		}
+	}
+	return "", errors.New("拒绝跨站点或非 Forgejo 附件地址")
+}
+
+func (a *forgejoAPI) request(method, address string, body io.Reader, contentType string, length int64) (*http.Response, error) {
+	u, err := url.Parse(address)
+	if err != nil || !sameForgejoOrigin(u, a.origin) {
 		return nil, errors.New("拒绝跨站点附件地址")
 	}
 	req, err := http.NewRequest(method, address, body)
@@ -109,7 +144,7 @@ func (a *forgejoAPI) request(method, address string, body io.Reader, contentType
 	}
 	response, err := a.client.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("发布 Forgejo %s 请求失败: %w", method, err)
+		return nil, fmt.Errorf("发布 Forgejo %s 请求失败: %s", method, strings.ReplaceAll(err.Error(), a.token, "[已隐藏]"))
 	}
 	return response, nil
 }
@@ -157,7 +192,11 @@ func (a *forgejoAPI) verifyAsset(remote forgejoAsset, local assetInfo) error {
 	if remote.Name != local.Name || remote.Size != local.Size {
 		return fmt.Errorf("远端附件冲突 %s，不覆盖或删除", local.Name)
 	}
-	response, err := a.request("GET", remote.URL, nil, "", -1)
+	address, err := a.attachmentAddress(remote.URL)
+	if err != nil {
+		return err
+	}
+	response, err := a.request("GET", address, nil, "", -1)
 	if err != nil {
 		return err
 	}
@@ -208,10 +247,37 @@ func (a *forgejoAPI) upload(path, root string, info assetInfo) error {
 	return nil
 }
 
+func forgejoReleaseBody(m distributionManifest, key string) (string, error) {
+	fp, err := publicFingerprint(key)
+	if err != nil {
+		return "", err
+	}
+	var body strings.Builder
+	fmt.Fprintf(&body, "Auriga 离线安装包与开发套件。发行公钥指纹 SHA256(SPKI DER)：`%s`。从独立渠道核对后使用 `--trust-fingerprint %s` 或 `--verify-key`，参见 DEPLOY.md / MAINTAIN.md。\n\n", fp, fp)
+	if m.Windows != nil {
+		fmt.Fprintf(&body, "Windows 执行前用 Get-FileHash 核验源码归档及引导 Node。\n\n- `%s` SHA256 `%s`\n", windowsBuildNodePath, m.Windows.BuildNodeSHA)
+		for _, file := range m.Archives {
+			if file.Name == "auriga-source-"+m.Tag+".tar" || strings.HasPrefix(file.Name, windowsClientPrefix) {
+				fmt.Fprintf(&body, "- `%s` SHA256 `%s`\n", file.Name, file.SHA256)
+			}
+		}
+	}
+	body.WriteString("\n附件选择、分卷与 DSH 上游参考材料见 DOWNLOADS.txt。")
+	return body.String(), nil
+}
+
 func uploadRelease(o uploadOptions, client *http.Client) error {
 	origin, err := forgejoOrigin(o.Server, o.Repo)
 	if err != nil {
 		return err
+	}
+	var public *url.URL
+	if o.InternalHTTP != "" {
+		public = origin
+		origin, err = forgejoInternalOrigin(o.InternalHTTP)
+		if err != nil {
+			return err
+		}
 	}
 	if o.Key == "" {
 		return errors.New("发布须 --verify-key 独立批准的发行公钥")
@@ -230,6 +296,10 @@ func uploadRelease(o uploadOptions, client *http.Client) error {
 		return errors.New("发行清单标签或提交无效")
 	}
 	if err := validateBuildGate(o.Dir, manifest); err != nil {
+		return err
+	}
+	releaseBody, err := forgejoReleaseBody(manifest, o.Key)
+	if err != nil {
 		return err
 	}
 	names, err := regularFiles(o.Dir)
@@ -270,13 +340,19 @@ func uploadRelease(o uploadOptions, client *http.Client) error {
 		return errors.New("设置 FORGEJO_TOKEN 环境变量，不把令牌放参数中")
 	}
 	scoped := *client
+	if public != nil {
+		transport := http.DefaultTransport.(*http.Transport).Clone()
+		transport.Proxy = nil
+		defer transport.CloseIdleConnections()
+		scoped.Transport = transport
+	}
 	scoped.CheckRedirect = func(req *http.Request, via []*http.Request) error {
-		if len(via) >= 5 || req.URL.Scheme != "https" || req.URL.Host != origin.Host || req.URL.User != nil {
+		if len(via) >= 5 || !sameForgejoOrigin(req.URL, origin) {
 			return errors.New("拒绝跨主机或降级重定向")
 		}
 		return nil
 	}
-	a := forgejoAPI{base: strings.TrimSuffix(o.Server, "/"), origin: origin, client: &scoped, token: token}
+	a := forgejoAPI{base: strings.TrimSuffix(origin.String(), "/"), origin: origin, public: public, client: &scoped, token: token}
 	var version struct {
 		Version string `json:"version"`
 	}
@@ -312,11 +388,7 @@ func uploadRelease(o uploadOptions, client *http.Client) error {
 		return err
 	}
 	if status == 404 {
-		fp, err := publicFingerprint(o.Key)
-		if err != nil {
-			return err
-		}
-		body := map[string]any{"tag_name": manifest.Tag, "target_commitish": manifest.Commit, "name": manifest.Tag, "draft": true, "body": "Auriga 离线安装包与开发套件。发行公钥指纹 SHA256(SPKI DER)：" + fp + "。请从独立渠道核准，verify/unpack/install必须使用 --trust-fingerprint " + fp + " 或 --verify-key 批准公钥。使用源码中的 DEPLOY.md / MAINTAIN.md。"}
+		body := map[string]any{"tag_name": manifest.Tag, "target_commitish": manifest.Commit, "name": manifest.Tag, "draft": true, "body": releaseBody}
 		if err := a.json("POST", repo+"/releases", body, &remote, 201); err != nil {
 			return err
 		}
@@ -365,11 +437,7 @@ func uploadRelease(o uploadOptions, client *http.Client) error {
 		}
 	}
 	if o.Publish && remote.Draft {
-		fp, err := publicFingerprint(o.Key)
-		if err != nil {
-			return err
-		}
-		if err := a.json("PATCH", releasePath, map[string]any{"draft": false, "body": "Auriga 离线安装包与开发套件。发行公钥指纹 SHA256(SPKI DER)：" + fp + "。从独立渠道核对后使用 --trust-fingerprint " + fp + "；参见DEPLOY.md / MAINTAIN.md。"}, &remote, 200); err != nil {
+		if err := a.json("PATCH", releasePath, map[string]any{"draft": false, "body": releaseBody}, &remote, 200); err != nil {
 			return err
 		}
 	}

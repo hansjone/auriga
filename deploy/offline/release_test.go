@@ -46,6 +46,9 @@ func testSigningKeys(t *testing.T) (string, string) {
 
 func TestReleaseCacheSignedPartsAndTagGate(t *testing.T) {
 	source := t.TempDir()
+	key, public := testSigningKeys(t)
+	dshSource := fixtureDSHReleaseInput(t, source)
+	windowsArchive, windowsSHA, nodeSHA := fixtureWindowsReleaseInput(t, source, t.TempDir(), key)
 	for _, args := range [][]string{{"init"}, {"config", "user.name", "fixture"}, {"config", "user.email", "fixture@example.com"}} {
 		if _, err := gitAt(source, args...); err != nil {
 			t.Fatal(err)
@@ -66,7 +69,6 @@ func TestReleaseCacheSignedPartsAndTagGate(t *testing.T) {
 	if _, err := gitAt(source, "tag", "1.0-alias"); err != nil {
 		t.Fatal(err)
 	}
-	key, public := testSigningKeys(t)
 	single := fixtureSingleKit(t, "1.0", "a")
 	fixtureKit, err := readDevkit(single)
 	if err != nil {
@@ -135,7 +137,7 @@ func TestReleaseCacheSignedPartsAndTagGate(t *testing.T) {
 		t.Fatal(err)
 	}
 	parent := t.TempDir()
-	opts := releaseOptions{Source: source, Tag: "1.0", Index: index, Out: filepath.Join(parent, "v1"), Cache: filepath.Join(parent, "cache"), Key: key, Limit: 65536, NewBaseline: true}
+	opts := releaseOptions{Source: source, Tag: "1.0", Index: index, Out: filepath.Join(parent, "v1"), Cache: filepath.Join(parent, "cache"), Key: key, Limit: 65536, NewBaseline: true, WindowsClient: windowsArchive, WindowsSHA: windowsSHA, DSHSource: dshSource}
 	if err := generateRelease(opts, builders); err != nil {
 		t.Fatal(err)
 	}
@@ -242,6 +244,26 @@ exec "$GATE_COMMIT_REAL_GIT" "$@"
 	if err := validateBuildGate(opts.Out, manifest); err != nil {
 		t.Fatal(err)
 	}
+	for _, asset := range manifest.Archives {
+		if strings.Contains(asset.Name, "-delta.tar") {
+			t.Fatalf("fresh baseline ships a redundant full delta: %s", asset.Name)
+		}
+	}
+	if manifest.Windows == nil || manifest.Windows.BuildNodeSHA != nodeSHA {
+		t.Fatal("release manifest missing verified Windows bootstrap digest")
+	}
+	for _, attachment := range []string{filepath.Base(windowsArchive), "auriga-dsh-source-0.2.1.tar.gz", "auriga-dsh-source-0.2.1-LICENSE.txt", "auriga-dsh-source-0.2.1-provenance.json"} {
+		found := false
+		for _, asset := range manifest.Assets {
+			found = found || asset.Name == attachment
+		}
+		if !found || !strings.Contains(string(downloads), attachment) {
+			t.Fatal("release manifest or downloads missing", attachment)
+		}
+	}
+	if !strings.Contains(string(downloads), nodeSHA) || !strings.Contains(string(downloads), manifest.Gate.SourceSHA) {
+		t.Fatal("download guide missing Windows trust bootstrap digests")
+	}
 	archived := filepath.Join(parent, "source")
 	if err := extractVerified(filepath.Join(opts.Out, "auriga-source-1.0.tar"), archived, ""); err != nil {
 		t.Fatal(err)
@@ -298,6 +320,9 @@ exec "$GATE_COMMIT_REAL_GIT" "$@"
 	}
 	if builds != 1 {
 		t.Fatal("did not reuse lock-identical devkit", builds)
+	}
+	if _, err := os.Stat(filepath.Join(opts.Out, "auriga-devkit-1.1-delta.tar")); err != nil {
+		t.Fatal("same baseline did not ship a delta", err)
 	}
 	failing := builders
 	failing.Gate = func(gateRequest) (buildGate, error) { return buildGate{}, errors.New("missing fixture dependency") }
