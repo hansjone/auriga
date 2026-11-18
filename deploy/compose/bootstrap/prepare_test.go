@@ -96,8 +96,8 @@ cpSync(process.env.PREPARE_TEST_PROOFS, process.argv[3], { recursive: true });
 		build["dshVersion"] = version
 		writeJSON(metadata, build, 0o600)
 		cmd := exec.Command(bash, "--noprofile", "--norc", "-c",
-			`export PATH="$PREPARE_TEST_BIN:/usr/bin:/bin:$PATH"; exec bash --noprofile --norc "$1"`,
-			"prepare-fixture", bashPath(filepath.Join(scripts, "prepare.sh")))
+			`export PATH="$PREPARE_TEST_BIN:/usr/bin:/bin:$PATH"; exec bash --noprofile --norc "$@"`,
+			"prepare-fixture", bashPath(filepath.Join(scripts, "prepare.sh")), "--dev-resource-route")
 		cmd.Env = append(os.Environ(),
 			"DSH_FIXTURE=real", "COMPOSE_PROJECT_NAME=prepare-fixture", "TMPDIR="+bashPath(tmp),
 			"PREPARE_TEST_BIN="+bashPath(bin), "PREPARE_TEST_BOOTSTRAP="+bashPath(bootstrap),
@@ -134,6 +134,9 @@ cpSync(process.env.PREPARE_TEST_PROOFS, process.argv[3], { recursive: true });
 		}
 		if err := validateRuntimeTemplate(out); err != nil {
 			t.Fatal(err)
+		}
+		if route := readResourceRouteConfig(t, out).Upstreams["resource"]; route != resourcePlatformOrigin {
+			t.Fatalf("public prepare did not forward the development resource option: %q", route)
 		}
 		t.Logf("public prepare signed the real template and preserved %d bytes with %d file entries", len(saved), len(files))
 	})

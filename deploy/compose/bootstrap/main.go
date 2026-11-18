@@ -66,10 +66,14 @@ func main() {
 	printRecipe := flag.Bool("print-compose-recipe", false, "print the sealed project and optional fixed managed CA recipe tag")
 	validateOnly := flag.Bool("validate-access", false, "validate access and Compose support without writing materials")
 	proofs := flag.String("runtime-proofs", "", "isolated collected raw OCI proof root (first installation only)")
-	observer := flag.Bool("heartbeat-observer", false, "route all combined APIs through the local authenticated heartbeat observer")
+	observer := flag.Bool("heartbeat-observer", false, "route IAM, Org and Workspace APIs through the local authenticated heartbeat observer")
+	devResourceRoute := flag.Bool("dev-resource-route", false, "seal the local development resource route to the combined HTTPS platform")
 	flag.Parse()
 	if *managedCAPath != "" && (*printProject || *printRecipe || *activate || *checkActivation) {
 		fatalf("managed CA is a base installation input")
+	}
+	if *devResourceRoute && (*printProject || *printRecipe || *activate || *checkActivation) {
+		fatalf("development resource route is a base installation input")
 	}
 	if *printRecipe || (*printProject && !*activate) {
 		if (*printRecipe && (*printProject || *activate)) || *checkActivation || *validateOnly || *stopped || *collabFile != "" || *baseReceipt != "" || *baseIdentity != "" {
@@ -151,6 +155,10 @@ func main() {
 	}
 	if managedCA != nil {
 		inputDigest = digestBytes([]byte(inputDigest + "\nmanaged-ca-v1\n" + digestBytes(managedCA)))
+	}
+	if *devResourceRoute {
+		// Keep the input digest of every existing default recipe unchanged.
+		inputDigest = digestBytes([]byte(inputDigest + "\ndev-resource-route-v1"))
 	}
 	existing, err := preflightRuntimeInstallation(*out)
 	if err != nil {
@@ -303,21 +311,27 @@ func main() {
 	}
 	writeFile(filepath.Join(tpl, name+".pb"), raw, 0o644)
 
-	upstreamPort := iamPort
+	platformOrigin := fmt.Sprintf("https://host.docker.internal:%d", iamPort)
+	combinedOrigin := platformOrigin
 	if *observer {
-		upstreamPort = observerPort
+		combinedOrigin = fmt.Sprintf("https://host.docker.internal:%d", observerPort)
+	}
+	upstreams := map[string]string{
+		"ai-device":      "https://ai-relay:18445",
+		"network-submit": "https://172.29.240.1:18443", // gitleaks:allow disposable M2 network
+		"iam":            combinedOrigin,
+		"org":            combinedOrigin,
+		"workspace":      combinedOrigin,
+	}
+	if *devResourceRoute {
+		// Resource uses the existing IAM mTLS identity and goes directly to platform.
+		upstreams["resource"] = platformOrigin
 	}
 	edgeCfg := map[string]any{
 		"static":            map[string]string{"panelRoot": "/srv/auriga/panel"},
 		"accessConfigFile":  "/etc/auriga/access.json",
 		"allowLocalIngress": true,
-		"upstreams": map[string]string{
-			"ai-device":      "https://ai-relay:18445",
-			"network-submit": "https://172.29.240.1:18443", // gitleaks:allow disposable M2 network
-			"iam":            fmt.Sprintf("https://host.docker.internal:%d", upstreamPort),
-			"org":            fmt.Sprintf("https://host.docker.internal:%d", upstreamPort),
-			"workspace":      fmt.Sprintf("https://host.docker.internal:%d", upstreamPort),
-		},
+		"upstreams":         upstreams,
 		"iamHop": map[string]string{
 			"certFile": "/etc/auriga/pki/edge-iam.crt", "keyFile": "/etc/auriga/pki/edge-iam.key",
 			"caFile": "/etc/auriga/pki/ca.crt", "serverName": iamServerName,
@@ -352,7 +366,7 @@ func main() {
 		edgeCfg["tls"] = map[string]string{"mode": "files", "certFile": "/etc/auriga/https/browser.crt", "keyFile": "/etc/auriga/https/browser.key"}
 	}
 	if collab != nil {
-		edgeCfg["upstreams"].(map[string]string)["collab"] = "https://172.29.240.1:8085" // gitleaks:allow disposable M2 network
+		upstreams["collab"] = "https://172.29.240.1:8085" // gitleaks:allow disposable M2 network
 		edgeCfg["collabHop"] = map[string]string{"certFile": "/etc/auriga/collab-edge/edge-collab.crt", "keyFile": "/etc/auriga/collab-edge/edge-collab.key", "caFile": "/etc/auriga/collab-edge/ca.crt", "serverName": "collab.network.internal"}
 	}
 	writeJSON(filepath.Join(*out, "edge.config.json"), edgeCfg, 0o644)
