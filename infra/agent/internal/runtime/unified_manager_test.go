@@ -15,6 +15,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -98,6 +99,11 @@ const unifiedSkillText = "---\nname: example-skill\ndescription: Public isolated
 
 func newUnifiedFixture(t *testing.T) *unifiedFixture {
 	t.Helper()
+	return newUnifiedSkillFixture(t, unifiedSkillText, "Public fixture body.", nil)
+}
+
+func newUnifiedSkillFixture(t *testing.T, markdown, catalogBody string, keepSkill func(map[string]string) bool) *unifiedFixture {
+	t.Helper()
 	f := &unifiedFixture{now: time.Date(2026, 11, 13, 0, 0, 0, 0, time.UTC)}
 	pub, key, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
@@ -109,7 +115,7 @@ func newUnifiedFixture(t *testing.T) *unifiedFixture {
 	}
 	f.revPrivate = revKey
 	f.releasePrivate = key
-	f.payload = skillArchive(t, map[string]string{"SKILL.md": unifiedSkillText, "references/notes.txt": "Public reference."})
+	f.payload = skillArchive(t, map[string]string{"SKILL.md": markdown, "references/notes.txt": "Public reference."})
 	manifest := map[string]any{"schemaVersion": 1, "kind": "skill", "name": "example-skill", "version": "1.0.0", "description": "Fixture", "author": map[string]any{"displayName": "Example"}, "license": "MIT", "permissions": map[string]any{"tools": []any{}, "outboundHosts": []any{}, "dataAccess": []any{}}, "runtimes": []any{}, "signature": map[string]any{"mode": "detached", "algorithm": "Ed25519"}, "skill": map[string]any{"entry": "SKILL.md", "contentProfile": "text-only", "dshVersionRange": ">=0.2.0"}, "artifacts": []any{map[string]any{"id": "payload", "role": "payload", "digest": udigest(f.payload), "sizeBytes": len(f.payload), "mediaType": "application/gzip", "os": "any", "arch": "any"}}}
 	f.manifest, err = json.Marshal(manifest)
 	if err != nil {
@@ -173,10 +179,10 @@ func newUnifiedFixture(t *testing.T) *unifiedFixture {
 			w.WriteHeader(403)
 			return
 		}
-		rows := []map[string]any{}
+		rows := []map[string]string{}
 		if (f.catalogPrivate || f.catalogEmpty) && f.privateCollision {
 			for _, preset := range []string{"cordis", "standard", "ptc"} {
-				rows = append(rows, map[string]any{"name": "example-skill", "provider": "user", "path": "/home/dsh/.dsh/skills/example-skill/SKILL.md", "content": "Private colliding name.", "preset": preset})
+				rows = append(rows, map[string]string{"name": "example-skill", "provider": "user", "path": "/home/dsh/.dsh/skills/example-skill/SKILL.md", "content": "Private colliding name.", "preset": preset})
 			}
 		}
 		if !f.catalogPrivate && !f.catalogEmpty {
@@ -185,7 +191,10 @@ func newUnifiedFixture(t *testing.T) *unifiedFixture {
 				if f.override && preset == "ptc" {
 					provider = "user"
 				}
-				rows = append(rows, map[string]any{"name": "example-skill", "provider": provider, "path": "/home/dsh/.dsh/auriga/skills-active/current/example-skill/SKILL.md", "content": "Public fixture body.", "preset": preset})
+				skill := map[string]string{"name": "example-skill", "provider": provider, "path": "/home/dsh/.dsh/auriga/skills-active/current/example-skill/SKILL.md", "content": catalogBody, "preset": preset}
+				if keepSkill == nil || keepSkill(skill) {
+					rows = append(rows, skill)
+				}
 			}
 		}
 		_ = json.NewEncoder(w).Encode(map[string]any{"privateOnly": f.catalogPrivate, "skills": rows})
@@ -243,6 +252,72 @@ func TestUnifiedManagerActivationObservationAndExpiry(t *testing.T) {
 	state, _, _, err := f.manager.load(f.source.spec.InstanceId)
 	if err != nil || len(state.Watermarks) != 1 {
 		t.Fatalf("high water lost: %v", err)
+	}
+}
+
+func TestUnifiedManagerObservesSignedSkillLineEndings(t *testing.T) {
+	const body = "First line.  \n  Indented line.\n\nLast line."
+	// The locked DSH filesystem provider trims the parsed body's outer
+	// whitespace but preserves its internal line endings and spaces.
+	const markdown = "---\nname: example-skill\ndescription: Public isolated skill fixture.\n---\n\n \t" + body + "\n \t\n"
+	for _, tc := range []struct {
+		name, newline, omittedPreset string
+		editPTC                      func(map[string]string)
+	}{
+		{name: "LF", newline: "\n"},
+		{name: "CRLF", newline: "\r\n"},
+		{name: "different-body", editPTC: func(row map[string]string) {
+			row["content"] = strings.Replace(row["content"], "Last line.", "Other line.", 1)
+		}},
+		{name: "different-markdown-spacing", editPTC: func(row map[string]string) { row["content"] = strings.Replace(row["content"], "  \r\n", "\r\n", 1) }},
+		{name: "extra-outer-space", editPTC: func(row map[string]string) { row["content"] += " " }},
+		{name: "bare-CR", editPTC: func(row map[string]string) { row["content"] = strings.Replace(row["content"], "\r\n", "\r", 1) }},
+		{name: "missing-cordis", omittedPreset: "cordis"},
+		{name: "missing-standard", omittedPreset: "standard"},
+		{name: "missing-ptc", omittedPreset: "ptc"},
+		{name: "untrusted-path", editPTC: func(row map[string]string) { row["path"] = "/home/dsh/.dsh/skills/example-skill/SKILL.md" }},
+		{name: "untrusted-provider", editPTC: func(row map[string]string) { row["provider"] = "user" }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			newline := tc.newline
+			if newline == "" {
+				newline = "\r\n"
+			}
+			signedMarkdown := strings.ReplaceAll(markdown, "\n", newline)
+			catalogBody := strings.ReplaceAll(body, "\n", newline)
+			f := newUnifiedSkillFixture(t, signedMarkdown, catalogBody, func(row map[string]string) bool {
+				if row["preset"] == "ptc" && tc.editPTC != nil {
+					tc.editPTC(row)
+				}
+				return row["preset"] != tc.omittedPreset
+			})
+			ctx, id := t.Context(), f.source.spec.InstanceId
+			current, err := f.manager.Prepare(ctx, f.source.spec)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := f.manager.AuthorizeStart(ctx, id); err != nil {
+				t.Fatal(err)
+			}
+			reports, guardian, err := f.manager.Observe(ctx, id)
+			if tc.omittedPreset != "" || tc.editPTC != nil {
+				if err == nil || err.Error() != "native catalog disagrees with node shared view" || len(reports) != 0 || guardian.GetState() != "private_only" {
+					t.Fatalf("unverified skill not isolated: reports=%v guardian=%v err=%v", reports, guardian, err)
+				}
+				return
+			}
+			if err != nil || len(reports) != 1 || reports[0].GetState() != "applied" || guardian.GetState() != "active" {
+				t.Fatalf("signed skill not applied: reports=%v guardian=%v err=%v", reports, guardian, err)
+			}
+			if raw, err := os.ReadFile(filepath.Join(current, "example-skill", "SKILL.md")); err != nil || !bytes.Equal(raw, []byte(signedMarkdown)) {
+				t.Fatalf("projected SKILL.md changed: %v", err)
+			}
+			root := filepath.Dir(filepath.Dir(current))
+			archive := filepath.Join(root, "cache", strings.TrimPrefix(f.ref.GetArtifacts()[0].GetDigest(), "sha256:"), "payload.tgz")
+			if raw, err := os.ReadFile(archive); err != nil || !bytes.Equal(raw, f.payload) {
+				t.Fatalf("signed payload archive changed: %v", err)
+			}
+		})
 	}
 }
 
