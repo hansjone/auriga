@@ -84,8 +84,8 @@ test('control page displays only its own device code, polls across revisions and
   );
   assert.equal(other.snapshot.deviceAttempt, undefined);
   assert.equal(
-    new URL(f.opened[0]).searchParams.get('user_code'),
-    attempt.userCode,
+    new URL(f.opened[0]).pathname,
+    '/device/' + attempt.userCode.replaceAll('-', ''),
   );
   await nodes.skip.onclick();
   release(f.tokens);

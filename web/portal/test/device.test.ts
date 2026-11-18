@@ -152,7 +152,7 @@ describe('normal portal device confirmation', () => {
       fetcher.mock.calls.some(([path]) => String(path).includes('workspace')),
     ).toBe(false);
   });
-  it('keeps anonymous device SSO explicit, then returns to manual confirmation with the header reference', async () => {
+  it('automatically signs in an eligible browser and still waits for manual device confirmation', async () => {
     const reference = globalThis.crypto.randomUUID();
     document.head.insertAdjacentHTML(
       'beforeend',
@@ -164,7 +164,7 @@ describe('normal portal device confirmation', () => {
     context.id = 'auriga-uac-navigation';
     context.textContent = JSON.stringify({
       purpose: 'device',
-      autoEligible: false,
+      autoEligible: true,
       autoSuppressed: false,
       navigationProof: btoa(
         String.fromCharCode(
@@ -207,11 +207,11 @@ describe('normal portal device confirmation', () => {
       throw new Error('Unexpected request');
     });
     await render();
-    expect(
-      fetcher.mock.calls.some(([path]) => String(path).endsWith('/sso')),
-    ).toBe(false);
-    await action('继续企业登录').trigger('click');
     await flushPromises();
+    const ssoCall = fetcher.mock.calls.find(([path]) =>
+      String(path).endsWith('/sso'),
+    );
+    expect(JSON.parse(String(ssoCall?.[1]?.body)).mode).toBe('auto');
     expect(wrapper!.text()).toContain('重新输入用户码');
     expect(wrapper!.get('[data-testid=device-correlation]').text()).toBe(
       '关联编号: ' + reference,

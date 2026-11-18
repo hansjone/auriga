@@ -123,6 +123,9 @@ func (g *Gateway) serveUacNavigation(w http.ResponseWriter, r *http.Request) boo
 	purpose, endpoint := "portal", "/api/iam/v1/internal/uac/navigation-proofs"
 	if device != nil {
 		purpose, endpoint = "device", "/api/iam/v1/internal/uac/device-navigation-proofs"
+		if r.URL.Query().Get("mode") == "manual" {
+			delete(metadata, "site")
+		}
 	}
 	payload := map[string]any{"requestId": requestID, "providerId": g.Cfg.UacProviderID, "origin": g.Cfg.Access.PortalURL(), "continuation": purpose, "fetchMetadata": metadata}
 	if device != nil {
@@ -205,7 +208,10 @@ func (g *Gateway) serveUacNavigation(w http.ResponseWriter, r *http.Request) boo
 		return true
 	}
 	nav := issued.Context
-	if nav.Purpose != purpose || !uacProof.MatchString(nav.NavigationProof) || !uacUUID.MatchString(nav.TransactionID) || !nav.ExpiresAt.After(g.Now()) || nav.ExpiresAt.After(g.Now().Add(121*time.Second)) || purpose == "device" && nav.AutoEligible {
+	deviceAuto := device != nil && metadata["dest"] == "document" && metadata["mode"] == "navigate" &&
+		(metadata["site"] == "none" || metadata["site"] == "same-origin") &&
+		(metadata["user"] == "" || metadata["user"] == "?1")
+	if nav.Purpose != purpose || !uacProof.MatchString(nav.NavigationProof) || !uacUUID.MatchString(nav.TransactionID) || !nav.ExpiresAt.After(g.Now()) || nav.ExpiresAt.After(g.Now().Add(121*time.Second)) || purpose == "device" && nav.AutoEligible && !deviceAuto {
 		fail(503)
 		return true
 	}
