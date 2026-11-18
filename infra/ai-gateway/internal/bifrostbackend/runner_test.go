@@ -2,12 +2,48 @@ package bifrostbackend
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"sync/atomic"
 	"testing"
+	"time"
 )
+
+func TestRunnerDeadlineAfterProviderReceivesRequest(t *testing.T) {
+	expired, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	var calls atomic.Int32
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		upstreamLimit := time.NewTimer(250 * time.Millisecond)
+		defer upstreamLimit.Stop()
+		timer := time.NewTimer(80 * time.Millisecond)
+		defer timer.Stop()
+		select {
+		case <-r.Context().Done():
+			return
+		case <-timer.C:
+			cancel()
+		}
+		select {
+		case <-r.Context().Done():
+		case <-upstreamLimit.C:
+		}
+	}))
+	t.Cleanup(upstream.Close)
+	ctx := reviewProviderDeadline{Context: t.Context(), expired: expired.Done()}
+	result, err := Run(ctx, []Route{{ID: "provider", Kind: "openai-compatible", URL: upstream.URL, Model: "test", Secret: "fixture", Weight: 1}}, []byte(reviewChat), true, func([]byte) error {
+		t.Error("timed out upstream produced a response")
+		return nil
+	})
+	var failure *ProviderFailure
+	if !errors.As(err, &failure) || failure.Status != http.StatusGatewayTimeout || failure.Code != "provider_timeout" || failure.Definitive || result.NoCharge || calls.Load() != 1 {
+		t.Fatalf("result=%+v error=%v calls=%d", result, err, calls.Load())
+	}
+}
 
 func TestRunnerUsesBifrostFallbackAndStreaming(t *testing.T) {
 	var failed, succeeded atomic.Int32
