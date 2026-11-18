@@ -12,6 +12,10 @@ Windows helper 使用当前 SID 的命名管道 DACL、禁远程标志、真实�
 
 `enterprise(message)` 接收 `ShellAuthHostCredentialsRequest`，返回完整 `ShellAuthHostCredentialsResult`，不再支持无上下文读取。D 先核本人任务能力和 raw/outbound scope，再提交当前句柄。C 每次向 IAM 读取权威当前凭据，校验来源绑定及 credentialVersion；相同 requestId 也重读。`allowRawAgentToken` 从受信安装配置实时读取，缺省 true，读取失败关闭 raw；提交前再次检查，outbound 不受该开关影响。凭据不缓存、广播或落盘；D 只将其用于对应本人 handler。版本更新不改变认证来源代次。
 
+Desktop 工具调用按客户端当前已验证的登录账号读取凭据，通过 raw 权限和当前宿主工具句柄提供 `DSH_AURIGA_ID`（原样工号）和 `DSH_AURIGA_TOKEN`（UAC 上游令牌）。扫码或 SSO 完成且设备与来源会话已绑定后可用。令牌续期或到期重登后，当前会话和旧会话的下一次调用都读取当前凭据。已经启动的任务可以用自己的 `agent-credentials` 接口刷新。退出、撤销或重新登录后，原登录产生的任务能力失效。关闭 raw 后停止提供原始工号和令牌，授权的代发请求仍可用。仅本机 UAC 与平台账号分别认证。单独登录本机 UAC 不授予平台任务凭据。普通云端托管文件连接和多人共享实例沿各自原有准入。
+
+正在运行的子进程保留它的启动环境。需要当前值时，用已有本人任务能力调用 `/dsh-team/agent-credentials`，例如用 `uds_skill_auth.resolve(apply_env_aliases=False)` 取得 `empNo`、`token`，在进程内直接使用。能力到期、退出或任务结束后调用失败；需要实时授权时优先使用 `request()` 代发。验收可在合成 UAC 测试账号下比较两次新任务与一个运行中任务的读取结果，仅报告是否一致，无需打印任何工号或令牌。
+
 `Broker` 负责 epoch/revision、请求 ID 幂等、设备轮询、取消归属、晚结果撤销、立即本地退出、DPAPI 撤销队列和刷新单飞。页面只开放冻结的 snapshot/open_login/cancel_login/skip_login，不能读取凭据。控制页用 30 秒一次性票据和 15 分钟内存双令牌保护；每次 POST 同时核对 `X-Auriga-Shell-Nonce` 与交换时的 clientNonce，页面仅在内存保存它们；刷新需重新从启动器打开。启动时已认证则不自动弹出控制页。
 
 安装器中，认证尚未就绪或 unreachable 只暂停平台请求，不因这些状态清除现有共享视图或重启 DSH。主动退出、撤销和已认证身份变化仍停用共享视图并要求新 DSH 会话。资源本身的签名、租约及撤销验证独立保留，离线不会绕过这些门禁。
