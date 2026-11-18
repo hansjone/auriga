@@ -201,11 +201,12 @@ describe('native cloud sign-in', () => {
   });
 
   it.each([
-    ['automatically after a wrong code', 'iam.invalid_credentials'],
-    ['from the retry button', 'common.not_found'],
+    ['automatically after a wrong code', 'iam.invalid_credentials', false],
+    ['from the retry button', 'common.not_found', false],
+    ['after restoring the transaction by URL', 'iam.invalid_credentials', true],
   ])(
     'restarts UAC first MFA %s through a fresh QR challenge',
-    async (_, code) => {
+    async (_, code, restored) => {
       const id = '01900000-0000-7000-8000-000000000009';
       const first = '01900000-0000-7000-8000-000000000010';
       const second = '01900000-0000-7000-8000-000000000011';
@@ -229,7 +230,8 @@ describe('native cloud sign-in', () => {
             providerId: id,
             purpose: 'login',
           });
-          const initial = ++created === 1;
+          created++;
+          const initial = !restored && created === 1;
           return json({
             id: initial ? first : second,
             transactionId: initial ? txId : replacementTx,
@@ -264,6 +266,12 @@ describe('native cloud sign-in', () => {
             : json({ id: second, state: 'waiting' });
         throw new Error('Unexpected login request: ' + path);
       });
+      if (restored)
+        globalThis.history.replaceState(
+          null,
+          '',
+          '/instance-login.html?tx=' + txId,
+        );
       render();
       await flush();
       field('otp', '000000');
@@ -274,7 +282,7 @@ describe('native cloud sign-in', () => {
         button('重新开始', '.card button').click();
         await flush();
       }
-      expect(created).toBe(2);
+      expect(created).toBe(restored ? 1 : 2);
       expect(root.querySelector('input[name="otp"]')).toBeNull();
       expect(
         root.querySelector('[data-uac-state]')?.getAttribute('data-uac-state'),

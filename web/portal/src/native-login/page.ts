@@ -448,10 +448,11 @@ export function mountInstanceLogin(
         if (
           current(version) &&
           !signal.aborted &&
-          providers.some(
-            (provider) =>
-              provider.id === id && provider.connectorType === 'uac',
-          )
+          ((tx?.provider.id === id && tx.provider.connectorType === 'uac') ||
+            providers.some(
+              (provider) =>
+                provider.id === id && provider.connectorType === 'uac',
+            ))
         ) {
           await selectProvider(id, true);
           // The provider switch disposes this step view, so it ignores the return value.
@@ -489,7 +490,9 @@ export function mountInstanceLogin(
     invalidate();
     tx = undefined;
     providerId = id;
-    const selected = providers.find((p) => p.id === id);
+    const selected =
+      providers.find((p) => p.id === id) ??
+      (previous?.provider.id === id ? previous.provider : undefined);
     if (selected?.connectorType === 'uac') {
       const version = epoch;
       if (freshScan && previous?.status === 'pending') {
