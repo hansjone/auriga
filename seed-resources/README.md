@@ -1,15 +1,16 @@
-# 开发种子资源
+# 统一目录插件种子
 
-本目录的归档和运行回执默认忽略，原旧插件种子保持原用法。本期新增统一目录发布路径，供主控重置开发数据后使用；本任务不实际发布。
+正式插件种子通过统一目录发布。先按[种子资源准备说明](../scripts/resource-seed/README.md)构建，取同一次构建生成的 npm 格式 tgz、原始清单和 `checksums.json`。确认 `build-source.json` 记录的构建来源及能力说明已审核。本目录的归档和运行回执默认忽略。
 
-从 dsh-memwiki 项目按其锁文件构建后运行 `npm pack --ignore-scripts` 或 `pnpm pack --ignore-scripts`，使用已构建的 tgz，不对上游 DSH 做改动。归档内 `package/package.json` 的 name 必须是 `dsh-memwiki`，version 必须与传入版本一致；服务端重新核对，不执行脚本。若发布包保留 prepare/prepack 等生命周期声明，须在种子构建阶段产出没有这些声明的发行 package.json 后再 pack，不能仅依赖打包时的 ignore-scripts。
-
-默认只输出原始清单预览，不访问网络：
+在仓库根目录运行准备和离线预览命令。以下用 dsh-memwiki 0.4.0 举例，tgz 文件名以准备输出的 `checksums.json` 为准。
 
 ```powershell
-node seed-resources/publish-unified-plugin.mjs ./seed-resources/dsh-memwiki-0.4.0.tgz 0.4.0
+node scripts/resource-seed/prepare.mjs 'D:\path\to\dsh-memwiki'
+node seed-resources/publish-unified-plugin.mjs ./seed-resources/dsh-memwiki-0.4.0.tgz ./seed-resources/dsh-memwiki.auriga-resource.json
 ```
 
-实际发布由主控在已授权环境显式添加 `--publish`。配置 `AURIGA_SEED_ORIGIN`（如 `http://192.0.2.10:8080`）、`AURIGA_SEED_DSH_RANGE`，以及 `AURIGA_SEED_AUTHOR_TOKEN`、`AURIGA_SEED_GENERAL_TOKEN`、`AURIGA_SEED_SECURITY_TOKEN`、`AURIGA_SEED_PUBLISHER_TOKEN`。令牌只从环境读取，不放参数或回执；作者、普通审核者、安全审核者须不同，安全审核者须有当前安全审核资格，发布者不能是作者，并满足接口近期验证要求。
+预览校验原始清单 schema、tgz 的大小与 SHA-256，以及归档内 `package/package.json` 的 npm 名称和版本，直接输出原始清单字节。目录资源名、能力、DSH 兼容范围和版本均来自清单。预览无需网络、平台地址或令牌。
 
-脚本按统一接口创建统一目录 plugin、上传、送审、两人审核、v2 签名发布，输出 packageId/versionId。用于空目录种子；已有同名资源会失败，不覆盖或降级已有版本。失败保留服务端草稿供管理中心处理，不能重复执行后冒称幂等恢复。第二期客户端仍需从正常入口安装验收。
+实际发布由主控在授权环境中给同一条预览命令追加 `--publish`。从环境提供 `AURIGA_SEED_ORIGIN`、`AURIGA_SEED_AUTHOR_TOKEN`、`AURIGA_SEED_GENERAL_TOKEN`、`AURIGA_SEED_SECURITY_TOKEN` 和 `AURIGA_SEED_PUBLISHER_TOKEN`。确认两名不同的非作者已分别审核并批准这组字节，安全审核者具备当前资格，有权发布者为非作者。各角色满足接口的权限及近期验证要求，令牌只从环境读取。
+
+脚本通过统一目录创建、multipart 上传原始清单及 tgz、送审并以对应角色记录两个审核决定，最后由平台签发 v2 并发布。执行完成后回执包含 `packageId`、`versionId`、`manifestDigest` 和 `artifactDigest`，与准备产物摘要核对后从正常市场入口验证安装。该流程用于目标目录初次上架。已有同名资源时请求会失败，按管理台当前状态处理。部分失败可能留下草稿，先核对服务端进度再续办。

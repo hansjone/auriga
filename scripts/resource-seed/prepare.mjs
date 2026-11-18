@@ -355,7 +355,7 @@ export async function prepare(sourceArgument, outputArgument) {
             : [],
       },
       runtimes:
-        kind === 'plugin' ? [{ kind: 'node', versionRange: '>=22' }] : [],
+        kind === 'plugin' ? [{ kind: 'node', versionRange: '>=22.0.0' }] : [],
       artifacts: [
         {
           id: 'payload',

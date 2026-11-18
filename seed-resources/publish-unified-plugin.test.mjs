@@ -1,14 +1,57 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { Buffer } from 'node:buffer';
+import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { manifestFor, publishPlugin } from './publish-unified-plugin.mjs';
+import { mkdtemp, readFile, rmdir, unlink, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { publishPlugin } from './publish-unified-plugin.mjs';
 
-test('seed uses unified multipart, distinct review roles, exact digest and revision', async () => {
-  const payload = Buffer.from('test payload');
-  const digest = (bytes) =>
-    'sha256:' + createHash('sha256').update(bytes).digest('hex');
+const archive = new URL(
+  '../services/resource/impl/src/test/resources/plugin/example-dsh-plugin-1.0.0.tgz',
+  import.meta.url,
+);
+const payload = await readFile(archive);
+const digest = (bytes) =>
+  'sha256:' + createHash('sha256').update(bytes).digest('hex');
+const manifest = {
+  schemaVersion: 1,
+  kind: 'plugin',
+  name: 'example-seed',
+  version: '1.0.0',
+  description: 'Seed fixture with prepared capabilities',
+  author: { displayName: 'Fixture' },
+  license: 'MIT',
+  permissions: {
+    tools: ['fixture_read'],
+    outboundHosts: [],
+    dataAccess: ['workspace_read', 'user_selected_files'],
+  },
+  runtimes: [{ kind: 'node', versionRange: '>=22.0.0' }],
+  plugin: {
+    packageName: '@example/dsh-plugin',
+    dshVersionRange: '>=0.2.1-rc.3',
+  },
+  artifacts: [
+    {
+      id: 'payload',
+      role: 'payload',
+      digest: digest(payload),
+      sizeBytes: payload.length,
+      mediaType: 'application/gzip',
+      os: 'any',
+      arch: 'any',
+    },
+  ],
+  signature: { mode: 'detached', algorithm: 'Ed25519' },
+};
+const rawManifest = Buffer.from(JSON.stringify(manifest, null, 2) + '\n');
+
+test('seed uses original multipart bytes, distinct review roles, exact digest and revision', async () => {
   const calls = [];
-  let manifestDigest;
+  const manifestDigest = digest(rawManifest);
   const send = async (url, request) => {
     assert.equal(url.origin, 'http://192.0.2.10:8080');
     assert.equal(request.redirect, 'error');
@@ -17,7 +60,7 @@ test('seed uses unified multipart, distinct review roles, exact digest and revis
     switch (calls.length) {
       case 1:
         assert.deepEqual(JSON.parse(request.body), {
-          name: 'dsh-memwiki',
+          name: manifest.name,
           kind: 'plugin',
           visibility: 'tenant',
         });
@@ -25,17 +68,15 @@ test('seed uses unified multipart, distinct review roles, exact digest and revis
         break;
       case 2: {
         assert.equal(request.headers['If-Match'], '"1"');
-        assert(request.body instanceof FormData);
+        assert(request.body instanceof globalThis.FormData);
         const raw = Buffer.from(
           await request.body.get('manifest').arrayBuffer(),
         );
-        const manifest = JSON.parse(raw);
-        manifestDigest = digest(raw);
+        assert.deepEqual(raw, rawManifest);
         assert.equal(
           JSON.parse(await request.body.get('metadata').text()).expectedDigest,
           manifestDigest,
         );
-        assert.equal(manifest.artifacts[0].digest, digest(payload));
         assert.deepEqual(
           Buffer.from(await request.body.get('artifacts').arrayBuffer()),
           payload,
@@ -79,24 +120,76 @@ test('seed uses unified multipart, distinct review roles, exact digest and revis
   const receipt = await publishPlugin(
     new URL('http://192.0.2.10:8080'),
     payload,
-    { version: '1.0.0' },
+    rawManifest,
     { author: 'a', general: 'g', security: 's', publisher: 'p' },
     send,
   );
-  assert.equal(receipt.state, 'published');
+  assert.deepEqual(receipt, {
+    packageId: 'package-id',
+    versionId: 'version-id',
+    kind: 'plugin',
+    state: 'published',
+    manifestDigest,
+    artifactDigest: digest(payload),
+  });
   assert.deepEqual(
     calls.map((call) => call.headers.Authorization),
     ['Bearer a', 'Bearer a', 'Bearer a', 'Bearer g', 'Bearer s', 'Bearer p'],
   );
-  assert(calls.every((call) => call.path.includes('/catalog/')));
+  assert.deepEqual(
+    calls.map((call) => call.path),
+    [
+      '/api/resource/v1/catalog/packages',
+      '/api/resource/v1/catalog/packages/package-id/versions',
+      '/api/resource/v1/catalog/packages/package-id/versions/version-id/submissions',
+      '/api/resource/v1/admin/catalog/reviews/review-id/decisions',
+      '/api/resource/v1/admin/catalog/reviews/review-id/decisions',
+      '/api/resource/v1/admin/catalog/packages/package-id/versions/version-id/publications',
+    ],
+  );
   assert.equal(
     new Set(calls.map((call) => call.headers['Idempotency-Key'])).size,
     6,
   );
-  assert.equal(
-    manifestFor(payload, { version: '1.0.0' }).plugin.packageName,
-    'dsh-memwiki',
+});
+
+test('seed rejects a mismatched payload or npm version before creating a package', async () => {
+  const send = () => assert.fail('unexpected network request');
+  const changedPayload = Buffer.from(payload);
+  changedPayload[0] ^= 1;
+  await assert.rejects(
+    publishPlugin('https://example.com', changedPayload, rawManifest, {}, send),
+    /does not match its manifest size and digest/,
   );
+  const changedVersion = Buffer.from(
+    JSON.stringify({ ...manifest, version: '1.0.1' }),
+  );
+  await assert.rejects(
+    publishPlugin('https://example.com', payload, changedVersion, {}, send),
+    /resource.apply_failed/,
+  );
+});
+
+test('CLI with archive and manifest paths previews the original bytes offline', async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), 'auriga-seed-preview-'));
+  const sidecar = join(directory, 'example-seed.auriga-resource.json');
+  await writeFile(sidecar, rawManifest);
+  t.after(async () => {
+    await unlink(sidecar);
+    await rmdir(directory);
+  });
+  const preview = execFileSync(
+    process.execPath,
+    [
+      '--import',
+      'data:text/javascript,globalThis.fetch=()=>{throw new Error("unexpected fetch")}',
+      fileURLToPath(new URL('./publish-unified-plugin.mjs', import.meta.url)),
+      fileURLToPath(archive),
+      sidecar,
+    ],
+    { env: { AURIGA_SEED_ORIGIN: 'invalid' } },
+  );
+  assert.deepEqual(preview, rawManifest);
 });
 
 test('seed stops on rejected upload without leaking response or token', async () => {
@@ -104,8 +197,8 @@ test('seed stops on rejected upload without leaking response or token', async ()
   await assert.rejects(
     publishPlugin(
       'https://example.com',
-      Buffer.from('payload'),
-      { version: '1.0.0' },
+      payload,
+      rawManifest,
       { author: 'secret-value' },
       async () => {
         count++;

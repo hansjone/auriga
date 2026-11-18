@@ -1,42 +1,30 @@
 import { readFile } from 'node:fs/promises';
 import { createHash, randomUUID } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
+import { validateArchive } from '../clients/dsh-plugin/src/resources/archive.js';
+import { parseStrictJson } from '../clients/dsh-plugin/src/resources/json.js';
+import { schemaValid } from '../clients/dsh-plugin/src/resources/schema.js';
 
 const digest = (bytes) =>
   'sha256:' + createHash('sha256').update(bytes).digest('hex');
 
-export function manifestFor(payload, options) {
-  return {
-    schemaVersion: 1,
-    kind: 'plugin',
-    name: options.name ?? 'dsh-memwiki',
-    version: options.version,
-    description: options.description ?? 'Shared memory wiki for DSH',
-    author: { displayName: options.author ?? 'Auriga seed publisher' },
-    license: options.license ?? 'MIT',
-    permissions: {
-      tools: ['memwiki'],
-      outboundHosts: [],
-      dataAccess: ['workspace_read', 'workspace_write'],
-    },
-    runtimes: [],
-    plugin: {
-      packageName: options.packageName ?? 'dsh-memwiki',
-      dshVersionRange: options.dshVersionRange ?? '*',
-    },
-    artifacts: [
-      {
-        id: 'payload',
-        role: 'payload',
-        digest: digest(payload),
-        sizeBytes: payload.length,
-        mediaType: 'application/gzip',
-        os: 'any',
-        arch: 'any',
-      },
-    ],
-    signature: { mode: 'detached', algorithm: 'Ed25519' },
-  };
+async function verifySeed(payload, rawManifest) {
+  if (!rawManifest.length || rawManifest.length > 262144)
+    throw new Error('Plugin manifest must be 1..262144 bytes');
+  const manifest = parseStrictJson(rawManifest, true);
+  if (!schemaValid('package', 'PluginManifest', manifest))
+    throw new Error('Invalid plugin manifest');
+  const [artifact] = manifest.artifacts;
+  if (
+    artifact.sizeBytes !== payload.length ||
+    artifact.digest !== digest(payload)
+  )
+    throw new Error('Plugin tgz does not match its manifest size and digest');
+  await validateArchive(payload, {
+    name: manifest.plugin.packageName,
+    version: manifest.version,
+  });
+  return manifest;
 }
 
 // The server enforces distinct current identities, recent step-up and reviewer qualification.
@@ -44,15 +32,15 @@ export function manifestFor(payload, options) {
 export async function publishPlugin(
   origin,
   payload,
-  options,
+  rawManifest,
   tokens,
-  send = fetch,
+  send = globalThis.fetch,
 ) {
-  const manifest = manifestFor(payload, options);
-  const raw = Buffer.from(JSON.stringify(manifest));
+  const manifest = await verifySeed(payload, rawManifest);
+  const manifestDigest = digest(rawManifest);
   const versionMetadata = {
     version: manifest.version,
-    expectedDigest: digest(raw),
+    expectedDigest: manifestDigest,
   };
   async function call(path, token, body, etag, multipart = false) {
     const headers = {
@@ -83,19 +71,21 @@ export async function publishPlugin(
     '"0"',
   );
   const packagePath = base + '/' + pack.id;
-  const form = new FormData();
+  const form = new globalThis.FormData();
   form.set(
     'metadata',
-    new Blob([JSON.stringify(versionMetadata)], { type: 'application/json' }),
+    new globalThis.Blob([JSON.stringify(versionMetadata)], {
+      type: 'application/json',
+    }),
   );
   form.set(
     'manifest',
-    new Blob([raw], { type: 'application/json' }),
+    new globalThis.Blob([rawManifest], { type: 'application/json' }),
     'auriga-resource.json',
   );
   form.append(
     'artifacts',
-    new Blob([payload], { type: 'application/gzip' }),
+    new globalThis.Blob([payload], { type: 'application/gzip' }),
     'plugin.tgz',
   );
   const version = await call(
@@ -126,7 +116,7 @@ export async function publishPlugin(
         reason: 'Seed artifact reviewed',
         role,
         versionRevision: review.version.revision,
-        digest: review.version.digest,
+        digest: manifestDigest,
       },
       etag(review),
     );
@@ -146,27 +136,29 @@ export async function publishPlugin(
     versionId: version.id,
     kind: 'plugin',
     state: published.state,
-    manifestDigest: digest(raw),
+    manifestDigest,
+    artifactDigest: manifest.artifacts[0].digest,
   };
 }
 
 async function main() {
-  const [archive, version] = process.argv
-    .slice(2)
-    .filter((arg) => arg !== '--publish');
-  if (!archive || !version)
+  const [archive, manifestPath, mode, ...extra] = process.argv.slice(2);
+  if (
+    !archive ||
+    !manifestPath ||
+    (mode && mode !== '--publish') ||
+    extra.length
+  )
     throw new Error(
-      'Usage: node seed-resources/publish-unified-plugin.mjs <plugin.tgz> <version> [--publish]',
+      'Usage: node seed-resources/publish-unified-plugin.mjs <plugin.tgz> <manifest.json> [--publish]',
     );
-  const payload = await readFile(archive);
-  if (payload.length < 1 || payload.length > 67108864)
-    throw new Error('Plugin tgz must be 1..67108864 bytes');
-  const options = {
-    version,
-    dshVersionRange: process.env.AURIGA_SEED_DSH_RANGE ?? '*',
-  };
-  if (!process.argv.includes('--publish')) {
-    console.log(JSON.stringify(manifestFor(payload, options), null, 2));
+  const [payload, rawManifest] = await Promise.all([
+    readFile(archive),
+    readFile(manifestPath),
+  ]);
+  if (!mode) {
+    await verifySeed(payload, rawManifest);
+    process.stdout.write(rawManifest);
     return;
   }
   const origin = new URL(process.env.AURIGA_SEED_ORIGIN);
@@ -188,7 +180,7 @@ async function main() {
   if (Object.values(tokens).some((token) => !token))
     throw new Error('All four AURIGA_SEED_*_TOKEN variables are required');
   console.log(
-    JSON.stringify(await publishPlugin(origin, payload, options, tokens)),
+    JSON.stringify(await publishPlugin(origin, payload, rawManifest, tokens)),
   );
 }
 
