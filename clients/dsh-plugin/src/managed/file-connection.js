@@ -137,15 +137,17 @@ export async function createManagedFileConnection(options) {
     tokenUntil: { get: () => verified?.until ?? 0 },
     sourceUntil: { get: () => Date.parse(material.expiresAt) },
   });
+  let materialLost = false;
   const currentMaterial = () => {
+    if (materialLost) return false;
     try {
-      return (
-        readPrivate(options.file) === raw &&
-        Date.parse(material.expiresAt) > Date.now()
-      );
+      materialLost =
+        readPrivate(options.file) !== raw ||
+        Date.parse(material.expiresAt) <= Date.now();
     } catch {
-      return false;
+      materialLost = true;
     }
+    return !materialLost;
   };
   const publish = (/** @type {string} */ next, force = false) => {
     if (state === next && !force) return;
@@ -158,7 +160,7 @@ export async function createManagedFileConnection(options) {
     callbacks.onChange?.(snapshot());
   };
   const snapshot = () => {
-    if (!closed && !currentMaterial()) publish('revoked');
+    if (!closed && (rejected || !currentMaterial())) publish('revoked');
     else if (
       !closed &&
       verified &&
@@ -408,6 +410,10 @@ export async function createManagedFileConnection(options) {
     get stale() {
       return !currentMaterial();
     },
+    get observationState() {
+      if (closed || rejected || !currentMaterial()) return 'denied';
+      return verified ? 'verified' : 'pending';
+    },
     stateFactory(/** @type {any} */ options) {
       callbacks = options;
       return {
@@ -422,6 +428,7 @@ export async function createManagedFileConnection(options) {
         },
         async connect() {
           await refresh();
+          if (closed) return;
           callbacks.onChange?.(snapshot());
           timer = setInterval(() => {
             snapshot();
@@ -435,7 +442,7 @@ export async function createManagedFileConnection(options) {
           publish('revoked');
         },
         disconnect() {
-          publish('unreachable');
+          publish(rejected ? 'revoked' : 'unreachable');
         },
         close: () => ipc.close(),
       };

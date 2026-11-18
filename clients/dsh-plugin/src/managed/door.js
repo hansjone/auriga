@@ -4,6 +4,7 @@ import { sendProblem } from './problem.js';
 import { PROTOCOL_VERSION } from './protocol.js';
 import { rawRequestPath } from './raw-path.js';
 import { NODE_RESOURCE_PATH } from './node-resource-observation.js';
+import { installServerEmitGuard } from './server-emit.js';
 
 const CLOCK_SKEW_SEC = 5;
 const UNAUTH = 'common.unauthenticated';
@@ -243,8 +244,8 @@ export function createDoorLock(cfg) {
         'auriga-dsh: door lock requires http.Server (ctx.webServer.server)',
       );
     }
-    const original = server.emit.bind(server);
-    server.emit = function guardedEmit(event, ...args) {
+    let installed = true;
+    function guardedEmit(original, event, ...args) {
       if (event === 'request') {
         const req = args[0];
         const res = args[1];
@@ -256,7 +257,7 @@ export function createDoorLock(cfg) {
         }
         void check(req)
           .then((result) => {
-            if (result.ok) {
+            if (installed && result.ok) {
               admit(req, result);
               original(event, ...args);
               return;
@@ -277,7 +278,7 @@ export function createDoorLock(cfg) {
         const socket = args[1];
         void check(req, true)
           .then((result) => {
-            if (result.ok) {
+            if (installed && result.ok) {
               admit(req, result);
               original(event, ...args);
               return;
@@ -326,9 +327,11 @@ export function createDoorLock(cfg) {
         return false;
       }
       return original(event, ...args);
-    };
+    }
+    const uninstall = installServerEmitGuard(server, guardedEmit);
     return () => {
-      server.emit = original;
+      installed = false;
+      uninstall();
     };
   }
 

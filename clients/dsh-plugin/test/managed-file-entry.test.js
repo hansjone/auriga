@@ -105,6 +105,13 @@ test(
       token,
       origin,
       hold;
+    const pause = () => ({
+      started: Promise.withResolvers(),
+      release: Promise.withResolvers(),
+    });
+    const firstExchange = pause();
+    let exchange = { credential, deviceId: ids.deviceId, pause: firstExchange };
+    cleanup.unshift(() => firstExchange.release.resolve());
     peer.subscribe('auriga.net.up.*.*', {
       callback(error, msg) {
         assert.ifError(error);
@@ -139,11 +146,16 @@ test(
         };
         if (path === '/oauth2/token') {
           const form = new URLSearchParams(body);
-          assert.equal(form.get('credential'), credential);
+          const material = exchange;
+          assert.ok(form.get('credential') === material.credential);
           assert.equal(
             form.get('grant_type'),
             'urn:auriga:params:oauth:grant-type:managed-device',
           );
+          material.pause?.started.resolve();
+          await material.pause?.release.promise;
+          if (material.status)
+            return json({ error: 'fixture' }, material.status);
           const now = Math.floor(Date.now() / 1000);
           const input = [
             { alg: 'ES256', kid: 'managed-jwk', typ: 'at+jwt' },
@@ -155,7 +167,7 @@ test(
               scope: 'auriga.connect',
               tid: ids.tenantId,
               sub: ids.ownerId,
-              did: ids.deviceId,
+              did: material.deviceId,
               iat: now,
               exp: now + 180,
             },
@@ -417,16 +429,20 @@ test(
           jobs.push(Promise.resolve().then(() => fn(ctx)));
       },
     };
-    cleanup.push(async () => {
-      for (const dispose of effects.reverse()) await dispose?.();
-    });
-    await apply(ctx, {
-      browserOrigin: {
-        scheme: 'http',
-        host: '127.0.0.1',
-        port: server.address().port,
-      },
-    });
+    const unmount = async () => {
+      for (const dispose of effects.splice(0).reverse()) await dispose?.();
+      routes.length = 0;
+    };
+    cleanup.push(unmount);
+    const mount = () =>
+      apply(ctx, {
+        browserOrigin: {
+          scheme: 'http',
+          host: '127.0.0.1',
+          port: server.address().port,
+        },
+      });
+    await mount();
     const policyFile = join(dir, 'observer-policy.json');
     await writeFile(
       policyFile,
@@ -436,6 +452,9 @@ test(
     await attachObserver(
       {
         ...ctx,
+        effect(fn) {
+          cleanup.push(fn());
+        },
         agentPresets: { acquireScope: async (key) => ({ key }) },
         skills: {
           async list() {
@@ -496,6 +515,14 @@ test(
       }
     };
     let lastStatus;
+    await firstExchange.started.promise;
+    assert.equal(
+      await observe(),
+      200,
+      'initial observation does not wait for device login',
+    );
+    assert.equal((await request('/auriga/bootstrap')).status, 401);
+    firstExchange.release.resolve();
     const status = await until(async () => {
       const response = await request('/auriga/shell/status');
       if (!response.ok) return;
@@ -534,6 +561,81 @@ test(
       ),
     );
     assert.equal((await request('/auriga/settings/state')).status, 200);
+
+    const prior = (observationPause = pause());
+    cleanup.unshift(() => prior.release.resolve());
+    const underOldCredential = observe();
+    await prior.started.promise;
+    observationPause = undefined;
+    const renewal = pause();
+    cleanup.unshift(() => renewal.release.resolve());
+    const renewed = {
+      ...material,
+      credential: randomBytes(32).toString('base64url'),
+    };
+    exchange = { ...renewed, pause: renewal };
+    await writeFile(file, JSON.stringify(renewed));
+    await renewal.started.promise;
+    // Wait for successful JWT verification and the browser identity to be restored.
+    const whileRenewing = await observe();
+    renewal.release.resolve();
+    await until(async () => (await request('/auriga/bootstrap')).ok);
+    prior.release.resolve();
+    assert.deepEqual(
+      [whileRenewing, await underOldCredential, await observe()],
+      [401, 403, 200],
+    );
+
+    // Only the node observes through a temporary outage. The panel still
+    // waits for device access, and a confirmed rejection closes both paths.
+    const realNow = Date.now;
+    let advance = 125_000;
+    t.mock.method(Date, 'now', () => realNow() + advance);
+    const outage = pause();
+    outage.release.resolve();
+    exchange = { ...renewed, status: 503, pause: outage };
+    await outage.started.promise;
+    advance += 60_000;
+    assert.equal((await request('/auriga/bootstrap')).status, 401);
+    assert.equal(await observe(), 200);
+
+    const denial = pause();
+    denial.release.resolve();
+    exchange = { ...renewed, status: 403, pause: denial };
+    // Allow the exponential retry window to elapse on the fixture clock.
+    advance += 30_000;
+    await denial.started.promise;
+    await until(async () => (await observe()) === 401);
+    assert.equal((await request('/auriga/bootstrap')).status, 401);
+
+    await unmount();
+    const reload = pause();
+    cleanup.unshift(() => reload.release.resolve());
+    exchange = { ...renewed, status: 403, pause: reload };
+    await mount();
+    await reload.started.promise;
+    assert.equal(
+      await observe(),
+      401,
+      'same server reload does not grant a second cold start',
+    );
+    reload.release.resolve();
+
+    const nextFile = {
+      ...renewed,
+      deviceId: randomUUID(),
+      credential: randomBytes(32).toString('base64url'),
+    };
+    const nextExchange = pause();
+    cleanup.unshift(() => nextExchange.release.resolve());
+    exchange = { ...nextFile, pause: nextExchange };
+    await writeFile(file, JSON.stringify(nextFile));
+    await nextExchange.started.promise;
+    assert.equal(await observe(), 401);
+    nextExchange.release.resolve();
+    await until(async () => (await request('/auriga/bootstrap')).ok);
+    assert.equal(await observe(), 200);
+
     const release = Promise.withResolvers();
     hold = release.promise;
     const pending = request('/auriga/resources/api/resource/v1/packages');

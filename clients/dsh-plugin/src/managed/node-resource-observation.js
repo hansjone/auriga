@@ -42,12 +42,16 @@ function authorized(req, tokenFile) {
 /**
  * @typedef {(req: import('node:http').IncomingMessage, res: import('node:http').ServerResponse, canPublish: () => boolean) => Promise<void>} Observer
  * @param {import('node:http').Server & {[OBSERVER]?: Observer}} server
- * @param {{tokenFile?: string, revoked: () => boolean}} options
+ * @param {{tokenFile?: string, observationScope: () => object | undefined}} options
  */
-export function createNodeResourceObservation(server, { tokenFile, revoked }) {
+export function createNodeResourceObservation(
+  server,
+  { tokenFile, observationScope },
+) {
   /** @type {(req: import('node:http').IncomingMessage, res: import('node:http').ServerResponse) => Promise<void>} */
   const dispatch = async (req, res) => {
-    if (!authorized(req, tokenFile) || revoked()) {
+    const scope = authorized(req, tokenFile) && observationScope();
+    if (!scope) {
       sendProblem(res, 401, 'common.unauthenticated');
       return;
     }
@@ -61,7 +65,7 @@ export function createNodeResourceObservation(server, { tokenFile, revoked }) {
         req,
         res,
         () =>
-          !revoked() &&
+          observationScope() === scope &&
           server[OBSERVER] === observer &&
           authorized(req, tokenFile),
       );

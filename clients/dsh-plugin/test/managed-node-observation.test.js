@@ -247,3 +247,159 @@ test('production managed door confines the node Bearer to the renderer observer'
     'panel still requires a ready user session',
   );
 });
+
+for (const released of [
+  'entry',
+  'runtime',
+  'profile',
+  'network',
+  'overlapping entry',
+]) {
+  test(
+    'node observation cannot publish after releasing the ' + released,
+    async (t) => {
+      const dir = await mkdtemp(join(tmpdir(), 'auriga-observation-lifetime-'));
+      const tokenFile = join(dir, 'instance.token');
+      const policyFile = join(dir, 'policy.json');
+      const bearer = 'Bearer ' + randomBytes(32).toString('base64url');
+      await writeFile(tokenFile, bearer.slice(7), { mode: 0o600 });
+      await writeFile(
+        policyFile,
+        JSON.stringify({ schemaVersion: 1, newSessionRequired: false }),
+      );
+      const { publicKey } = generateKeyPairSync('ed25519');
+      const managed = () =>
+        createManaged({
+          env: {
+            AURIGA_INSTANCE_ID: INSTANCE_ID,
+            AURIGA_OWNER_ID: OWNER_ID,
+            AURIGA_PLATFORM_URL: 'http://127.0.0.1:1',
+            AURIGA_INSTANCE_TOKEN_FILE: tokenFile,
+          },
+          identityKeys: {
+            keys: [{ ...publicKey.export({ format: 'jwk' }), kid: 'edge' }],
+          },
+          config: { browserOrigin: { scheme: 'https', host, port: 443 } },
+          startHeartbeat: false,
+        });
+      const server = createServer((_req, res) => res.writeHead(404).end());
+      const original = server.emit;
+      let endProfile, endNetwork, detachObserver;
+      const entered = Promise.withResolvers();
+      const release = Promise.withResolvers();
+      let first = true;
+      const runtimes = [];
+      t.after(async () => {
+        release.resolve();
+        for (const runtime of runtimes.reverse()) await runtime.close();
+        detachObserver?.();
+        server.closeAllConnections();
+        if (server.listening)
+          await new Promise((resolve) => server.close(resolve));
+        await rm(dir, { recursive: true, force: true });
+      });
+      const webServer = { server, register() {} };
+      await attachObserver(
+        {
+          webServer,
+          effect(fn) {
+            detachObserver = fn();
+          },
+          agentPresets: { acquireScope: async (key) => ({ key }) },
+          skills: {
+            async list() {
+              if (first) {
+                first = false;
+                entered.resolve();
+                await release.promise;
+              }
+              return [];
+            },
+            get() {},
+          },
+          pluginManager: { listBundles: () => [], listPlugins: () => [] },
+        },
+        { tokenFile, policyFile },
+      );
+      const ctx = { webServer, effect: (fn) => fn(), on: () => () => {} };
+      const base = await managed();
+      runtimes.push(base);
+      const stop = base.apply({
+        ...ctx,
+        inject(names, attach) {
+          if (
+            names[0] !== 'profileContext' ||
+            !['profile', 'network'].includes(released)
+          )
+            return;
+          attach({
+            profileContext: { dir },
+            effect(fn) {
+              endProfile = fn();
+            },
+            inject(names, attach) {
+              if (released === 'network' && names[0] === 'tools')
+                attach({
+                  effect(fn) {
+                    endNetwork = fn();
+                  },
+                  inject() {},
+                });
+            },
+          });
+        },
+      });
+      await base.ready;
+      await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+      const observe = () =>
+        new Promise((resolve, reject) => {
+          const req = request(
+            {
+              hostname: '127.0.0.1',
+              port: server.address().port,
+              path: catalogPath,
+              headers: { Authorization: bearer },
+              agent: false,
+              timeout: 5000,
+            },
+            (res) => {
+              res.resume();
+              res.once('end', () => resolve(res.statusCode));
+              res.once('error', reject);
+            },
+          );
+          req.on('error', reject);
+          req.on('timeout', () =>
+            req.destroy(new Error('observation timed out')),
+          );
+          req.end();
+        });
+      const pending = observe();
+      await Promise.race([
+        entered.promise,
+        pending.then(() => assert.fail('observer was not reached')),
+      ]);
+      const mountNext = async () => {
+        const next = await managed();
+        runtimes.push(next);
+        return next.apply(ctx);
+      };
+      let stopNext;
+      if (released === 'overlapping entry') stopNext = await mountNext();
+      if (released === 'runtime') await base.close();
+      else if (released === 'profile') endProfile?.();
+      else if (released === 'network') await endNetwork?.();
+      else await stop();
+      release.resolve();
+      const oldResponse = await pending;
+      if (released === 'profile' || released === 'network') {
+        assert.equal(await observe(), 401);
+        await stop();
+      }
+      stopNext ??= await mountNext();
+      assert.deepEqual([oldResponse, await observe()], [403, 200]);
+      await stopNext();
+      assert.equal(server.emit, original);
+    },
+  );
+}

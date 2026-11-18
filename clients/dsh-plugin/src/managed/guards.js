@@ -4,6 +4,7 @@ import { sendProblem } from './problem.js';
 import { normalizeHttpPath, rawRequestPath } from './raw-path.js';
 import { guardDirectoryPicker } from './directories.js';
 import { installManagedSettingsPolicy } from './settings-policy.js';
+import { installServerEmitGuard } from './server-emit.js';
 
 /** Native DSH pluginManager mutations blocked in managed mode (DSH 0.2.0-rc.2). */
 export const NATIVE_PLUGIN_MUTATIONS = Object.freeze([
@@ -136,8 +137,7 @@ export function guardWorkspaceRegistry(
  */
 export function installNativePluginHttpGuard(server) {
   if (!server || typeof server.emit !== 'function') return () => {};
-  const original = server.emit.bind(server);
-  server.emit = function guardedEmit(event, ...args) {
+  return installServerEmitGuard(server, (next, event, ...args) => {
     if (event === 'request') {
       const req = args[0];
       const res = args[1];
@@ -146,11 +146,8 @@ export function installNativePluginHttpGuard(server) {
         return false;
       }
     }
-    return original(event, ...args);
-  };
-  return () => {
-    server.emit = original;
-  };
+    return next(event, ...args);
+  });
 }
 
 /**
