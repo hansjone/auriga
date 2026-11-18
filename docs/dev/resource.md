@@ -83,3 +83,9 @@ AURIGA_RESOURCE_CURSOR_SIGNING_KEY=<至少32字节随机密钥的标准base64>
 Windows使用 `mvnw.cmd`，按现有Auriga开发环境注入工具路径。测试结束关闭HTTP、连接池及数据库进程。
 
 R1A不新增DSH managed成员API桥接，不改变设备令牌audience。PLUGIN1的市场UI已有消费者，但在P3/受审访问通道接好前仍应显示能力不可用。真实安装管理闭环还依赖分发、workspace复核、节点下载/验签/实际应用、权威安装清单与配置契约；不能以本批四个GET通过代替该闭环。
+
+NAS 当前配方的资源 HTTPS origin、可选降级签发启停及旧栈升级，沿用
+[NAS 公开流程](nas.md#云端资源下载和可选降级签发)。
+独立降级根准备、节点 mTLS 探测与真实下载判据、旧站点属性接线及显式平台重建、
+已有实例模板切换、恢复边界和三版本回落验收，见
+[独立降级根部署指南](resource-downgrade-deployment.zh.md)。
