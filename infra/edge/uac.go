@@ -270,7 +270,13 @@ func (g *Gateway) uacPageHTML(r *http.Request) ([]byte, error) {
 		return nil, fmt.Errorf("invalid portal document")
 	}
 	if file == "index.html" {
-		return injectAccessMode(html, g.Cfg.Access.Mode())
+		html, err = injectAccessMode(html, g.Cfg.Access.Mode())
+		if err != nil {
+			return nil, err
+		}
+	}
+	if g.Cfg.SharedDsh != nil {
+		return injectSharedPlacementMetadata(html, g.Cfg.Access.InstanceParentDomain())
 	}
 	return html, nil
 }

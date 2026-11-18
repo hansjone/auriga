@@ -16,6 +16,9 @@ type sharedModeCache struct {
 }
 
 func (e *SharedEntry) instanceShared(ctx context.Context, id string) (bool, error) {
+	if e.LiveModes {
+		return e.Authority.IsShared(ctx, id)
+	}
 	e.modes.mu.Lock()
 	mode, known := e.modes.modes[id]
 	generation := e.modes.generation
