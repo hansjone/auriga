@@ -40,3 +40,11 @@ b5aeaf0e1109dcdb5073d1fef69f1c5a0662d753:e2e/phase1/cloud-desk.test.mjs:private-
 # PR392 historical synthetic addresses in the release guide and Forgejo route test.
 8a7a2af2d8557dd10241c40a60c8cdae3061a3ad:MAINTAIN.md:private-ipv4:163
 8a7a2af2d8557dd10241c40a60c8cdae3061a3ad:deploy/offline/forgejo_test.go:private-ipv4:227
+
+# Shared-runtime PEM parsing and runtime-generated test keys contain delimiter
+# literals only. These four exact historical findings contain no embedded key.
+# Current source assembles delimiters; all other history and file scans remain on.
+bad79d3f273f252c8ba146658cf829268ed70d22:services/workspace/impl/src/main/java/auriga/workspace/config/WorkspaceSharedDshEntryConfiguration.java:private-key:60
+bad79d3f273f252c8ba146658cf829268ed70d22:services/workspace/impl/src/test/java/auriga/workspace/config/WorkspaceSharedDshEntryConfigurationTest.java:private-key:22
+0a3b4edeab92be3848c4dd442f938c4a6f9c418d:services/iam/impl/src/main/java/auriga/iam/SharedTaskRuntimeConfiguration.java:private-key:34
+0a3b4edeab92be3848c4dd442f938c4a6f9c418d:services/iam/impl/src/test/java/auriga/iam/SharedTaskTokensTest.java:private-key:88
