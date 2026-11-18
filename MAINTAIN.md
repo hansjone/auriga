@@ -143,12 +143,12 @@ TMPDIR=/build/auriga-tmp sh deploy/offline/prepare-release.sh \
   --tag 0.2.0 --release /secure/release.json --outdir /exports/0.2.0 \
   --cache-dir /exports/devkit-cache --sign-key /secure/release-private.pem \
   --windows-client "$WINDOWS_TAR" --windows-client-sha256 "$WINDOWS_SHA256" \
-  --dsh-source "$DSH_SOURCE" --attachment-limit 2147483648 --new-baseline --build
+  --dsh-source "$DSH_SOURCE" --new-baseline --build
 ```
 
 先创建命令所用 `TMPDIR`，设定 `WINDOWS_TAR` 为转运到本地的归档路径，`WINDOWS_SHA256` 为 Windows 回执值，`DSH_SOURCE` 为绝对本地路径或上述 HTTPS 附件地址。私有输入按批准主机设置 `AURIGA_BUNDLE_AUTH_HOST`，在进程环境提供 `AURIGA_BUNDLE_TOKEN`。镜像仓库使用维护机 Docker 登录。
 
-Linux 在构建前流式核验 Windows tar、内部发行签名、依赖锁及每个输入，核对 DSH 提交归档与 npm 锁。发行命令一次生成 Linux 安装包、签名源码和 devkit、Windows 套件、DSH 源码及元数据，并用同一发行钥签全套摘要。超过站点限制或 4GiB-1 自动分卷。后续同基线发版，将 `--new-baseline` 换成 `--previous-devkit /exports/unpacked-devkit-0.2.0`。锁与批准输入未变可复用签名单版缓存。NAS 与可选材料按版刷新。
+Linux 在构建前流式核验 Windows tar、内部发行签名、依赖锁及每个输入，核对 DSH 提交归档与 npm 锁。发行命令一次生成 Linux 安装包、签名源码和 devkit、Windows 套件、DSH 源码及元数据，并用同一发行钥签全套摘要。Forgejo 默认发布完整归档，`--attachment-limit 0` 行为相同；发布前核对 Forgejo 和反向代理允许该次发行的最大附件。需要经 FAT32 等受限介质转运时，显式指定正数 `--attachment-limit`（字节），分卷上限为 4 GiB 减 1 字节。后续同基线发版，将 `--new-baseline` 换成 `--previous-devkit /exports/unpacked-devkit-0.2.0`。锁与批准输入未变可复用签名单版缓存。NAS 与可选材料按版刷新。
 
 `unshare --net` 门禁使用空存储的独立 Docker 引擎，既有引擎的镜像缓存无法参与。门禁执行真正的 `bundle --build --offline`，工具容器使用 `--network none --pull never`。`release-manifest.json.offlineBuildGate` 记录精确提交、锁、源码/完整套件/清单/构建输出摘要及起止时间。`--build` 发行门禁构建出的安装包，省略该参数则发行批准的预建镜像包并仍执行完整门禁。
 
