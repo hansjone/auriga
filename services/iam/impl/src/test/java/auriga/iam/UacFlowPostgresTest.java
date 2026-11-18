@@ -2116,11 +2116,9 @@ class UacFlowPostgresTest {
       f.scanEmployee.set(employee);
       when(f.hooks.resolveUacEmployee(UUID.fromString(f.provider), employee))
           .thenReturn(Optional.of(f.account));
-      var bo = Json.object("code", "0000", "token", f.token);
-      var response = Json.object("code", Json.object("code", "0000"), "bo", bo);
-      if ("no_echo".equals(echo)) {
-        response.set("other", Json.object("token", f.replacement));
-      } else {
+      boolean noEcho = "no_echo".equals(echo);
+      var bo = Json.object("code", "0000", "token", noEcho ? f.token : f.replacement);
+      if (!noEcho) {
         bo.put(
             "user",
             switch (echo) {
@@ -2129,8 +2127,9 @@ class UacFlowPostgresTest {
               case "mismatch" -> "001235";
               default -> throw new AssertionError(echo);
             });
-        bo.put("token", f.replacement);
       }
+      var response = Json.object("code", Json.object("code", "0000"), "bo", bo);
+      if (noEcho) response.set("other", Json.object("token", f.replacement));
       f.verifyBody.set(response);
       var cookies =
           Json.object(
