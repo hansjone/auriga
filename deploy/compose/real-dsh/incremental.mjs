@@ -60,14 +60,18 @@ function verifyManifest(opt) {
     throw new Error('Incremental base manifest contains missing files');
 }
 
-/** Verify all stable inputs before removing the previous plugin source snapshot. */
-export function prepareIncremental({ opt, expected, baseImage, toolchain }) {
+export function assertIncrementalBaseImage(baseImage) {
   if (
     typeof baseImage !== 'string' ||
     !/^[A-Za-z0-9][A-Za-z0-9._:/-]*@sha256:[a-f0-9]{64}$/.test(baseImage) ||
     baseImage.includes('://')
   )
     throw new Error('Incremental base must use a complete image digest');
+}
+
+/** Verify all stable inputs before removing the previous plugin source snapshot. */
+export function prepareIncremental({ opt, expected, baseImage, toolchain }) {
+  assertIncrementalBaseImage(baseImage);
   opt = resolve(opt);
   expected = resolve(expected);
   verifyManifest(opt);
