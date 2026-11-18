@@ -59,7 +59,7 @@ type workItem struct {
 	spec          *nodev1.InstanceSpec
 	del           *nodev1.DeleteInstance
 	command       *nodev1.Command
-	result        chan *nodev1.CommandResult
+	result        chan commandReply
 	parent        string
 	healthContext context.Context
 	healthEpoch   uint64
@@ -274,7 +274,7 @@ func (r *Reconciler) loop(id string, ch chan workItem) {
 		case "health":
 			r.handleHealth(id, item.healthContext, item.healthEpoch)
 		case "restart":
-			item.result <- r.handleRestart(ctx, item.command)
+			item.result <- r.restartReply(ctx, item.command)
 		case "delete":
 			r.handleDelete(ctx, id, item.del)
 		default:

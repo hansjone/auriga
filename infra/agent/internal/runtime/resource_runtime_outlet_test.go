@@ -9,9 +9,34 @@ import (
 	"testing"
 	"time"
 
+	"github.com/hansjone/auriga/infra/agent/internal/runtime"
 	nodev1 "github.com/hansjone/auriga/infra/gen/auriga/node/v1"
 	"google.golang.org/protobuf/proto"
 )
+
+func TestSignedResourceRuntimeReadOnlyInspectionKeepsProof(t *testing.T) {
+	f := newResourceRuntimeFixture(t)
+	elapse := f.controlLeaseClock(t, false)
+	r, statuses := startResourceReconciler(t, f.release.store, f.preparing)
+	f.pendingRestart(t, r, statuses)
+	f.validCatalog()
+	id := f.required.InstanceId
+	if result := resourceRestart(t, r, id); !result.GetOk() {
+		t.Fatal(result)
+	}
+	record := assertRequiredResourceReady(t, awaitResourceRuntime(t, statuses, nodev1.InstancePhase_INSTANCE_PHASE_RUNNING), f.preparing, f.release.store, f.required)
+	r.Close()
+	var withdrawals atomic.Int32
+	f.driver.SetEndpointRevoker(func(string) { withdrawals.Add(1) })
+	elapse()
+	live, err := runtime.InspectReadOnly(t.Context(), f.preparing, id)
+	if err != nil || live.Ready || !live.Running || live.ContainerID != record.ContainerID || withdrawals.Load() != 0 {
+		t.Fatal("read-only readiness check touched publication", live, err, withdrawals.Load())
+	}
+	if ep, err := f.preparing.Endpoint(id); ep.URL != "" || err == nil || withdrawals.Load() != 1 {
+		t.Fatal("normal Endpoint read did not withdraw the expired proof", ep, err, withdrawals.Load())
+	}
+}
 
 func TestSignedResourceRuntimeRenewalBetweenHealthAndCatalog(t *testing.T) {
 	for _, expire := range []bool{false, true} {

@@ -696,23 +696,23 @@ func (d *Docker) Inspect(ctx context.Context, id string) (Status, error) {
 	}
 	proof := d.endpointProof(id)
 	if err := ctx.Err(); err != nil {
-		d.withdrawObserved(id, proof)
+		d.withdrawInspected(ctx, id, proof)
 		return Status{InstanceID: id}, err
 	}
 	record, err := d.observationRecord(id)
 	if err != nil {
-		d.withdrawObserved(id, proof)
+		d.withdrawInspected(ctx, id, proof)
 		return Status{InstanceID: id}, err
 	}
 	insp, err := d.verifyContainer(ctx, record)
 	if err != nil {
-		d.withdrawObserved(id, proof)
+		d.withdrawInspected(ctx, id, proof)
 		return Status{InstanceID: id}, err
 	}
 	if insp == nil {
 		return Status{InstanceID: id}, nil
 	}
-	st := Status{InstanceID: id}
+	st := Status{InstanceID: id, ContainerID: record.ContainerID}
 	if state, ok := insp["State"].(map[string]any); ok {
 		st.Running, _ = state["Running"].(bool)
 		_, endpointErr := d.endpointForProof(ctx, id, proof)
@@ -734,7 +734,7 @@ func (d *Docker) Inspect(ctx context.Context, id string) (Status, error) {
 		}
 	}
 	if err := ctx.Err(); err != nil {
-		d.withdrawObserved(id, proof)
+		d.withdrawInspected(ctx, id, proof)
 		return Status{InstanceID: id}, err
 	}
 	return st, nil
@@ -781,7 +781,7 @@ func (d *Docker) endpointForProof(ctx context.Context, id string, ep dockerEndpo
 	defer cancel()
 	defer func() {
 		if err != nil {
-			d.withdrawObserved(id, ep)
+			d.withdrawInspected(ctx, id, ep)
 		}
 	}()
 	if err := ctx.Err(); err != nil {
@@ -815,6 +815,12 @@ func (d *Docker) endpointForProof(ctx context.Context, id string, ep dockerEndpo
 		return Endpoint{}, fmt.Errorf("%w: %w", errEndpointUnready, leaseErr)
 	}
 	return Endpoint{URL: ep.url}, nil
+}
+
+func (d *Docker) withdrawInspected(ctx context.Context, id string, proof dockerEndpoint) {
+	if ctx.Value(readOnlyInspectionKey{}) == nil {
+		d.withdrawObserved(id, proof)
+	}
 }
 
 func (d *Docker) checkCommittedEndpoint(ctx context.Context, actual *state.ExecutionRecord, proof dockerEndpoint) error {

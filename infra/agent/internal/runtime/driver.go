@@ -43,11 +43,20 @@ type Rendered struct {
 
 // Status is the observed runtime status of one instance.
 type Status struct {
-	InstanceID string
-	Running    bool
-	Ready      bool
-	Generation int64
-	Error      string
+	InstanceID  string
+	ContainerID string
+	Running     bool
+	Ready       bool
+	Generation  int64
+	Error       string
+}
+
+type readOnlyInspectionKey struct{}
+
+// InspectReadOnly checks the current proof without withdrawing it. A queued
+// message may refer to an older execution than the one being inspected.
+func InspectReadOnly(ctx context.Context, driver Driver, id string) (Status, error) {
+	return driver.Inspect(context.WithValue(ctx, readOnlyInspectionKey{}, struct{}{}), id)
 }
 
 // HealthChecker revalidates the current execution, control network and public

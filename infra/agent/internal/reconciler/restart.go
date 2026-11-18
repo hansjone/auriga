@@ -14,21 +14,27 @@ import (
 
 // Command serializes an authorized restart with this instance's apply/delete work.
 func (r *Reconciler) Command(ctx context.Context, command *nodev1.Command) *nodev1.CommandResult {
+	result, _ := r.CommandForUplink(ctx, command)
+	return result
+}
+
+// CommandForUplink also returns the execution identity captured by the worker.
+func (r *Reconciler) CommandForUplink(ctx context.Context, command *nodev1.Command) (*nodev1.CommandResult, UplinkExecution) {
 	if command == nil {
-		return commandFailure(nil, "agent.policy_denied", false)
+		return commandFailure(nil, "agent.policy_denied", false), UplinkExecution{}
 	}
 	command = proto.Clone(command).(*nodev1.Command)
 	if command.CommandId == "" || len(command.CommandId) > 128 || command.InstanceId == "" || command.GetRestart() == nil {
-		return commandFailure(command, "agent.policy_denied", false)
+		return commandFailure(command, "agent.policy_denied", false), UplinkExecution{}
 	}
 	if ctx.Err() != nil {
-		return commandFailure(command, "common.unavailable", true)
+		return commandFailure(command, "common.unavailable", true), UplinkExecution{}
 	}
-	reply := make(chan *nodev1.CommandResult, 1)
+	reply := make(chan commandReply, 1)
 	r.mu.Lock()
 	if r.closed {
 		r.mu.Unlock()
-		return commandFailure(command, "common.unavailable", true)
+		return commandFailure(command, "common.unavailable", true), UplinkExecution{}
 	}
 	r.cancelHealthLocked(command.InstanceId)
 	ch, ok := r.workers[command.InstanceId]
@@ -43,20 +49,36 @@ func (r *Reconciler) Command(ctx context.Context, command *nodev1.Command) *node
 		r.mu.Unlock()
 	default:
 		r.mu.Unlock()
-		return commandFailure(command, "common.unavailable", true)
+		return commandFailure(command, "common.unavailable", true), UplinkExecution{}
 	}
 	select {
-	case result := <-reply:
-		if result.GetOk() && r.Activation != nil {
+	case response := <-reply:
+		if response.result.GetOk() && r.Activation != nil {
 			record, err := r.Store.GetRestartCommand(command.CommandId)
 			if err != nil || record == nil || !record.Complete || !r.restartProofReady(ctx, command.InstanceId, record.Generation) {
-				return commandFailure(command, "agent.start_failed", true)
+				return commandFailure(command, "agent.start_failed", true), UplinkExecution{}
 			}
 		}
-		return result
+		return response.result, response.execution
 	case <-ctx.Done():
-		return commandFailure(command, "common.unavailable", true)
+		return commandFailure(command, "common.unavailable", true), UplinkExecution{}
 	}
+}
+
+type commandReply struct {
+	result    *nodev1.CommandResult
+	execution UplinkExecution
+}
+
+func (r *Reconciler) restartReply(ctx context.Context, command *nodev1.Command) commandReply {
+	reply := commandReply{result: r.handleRestart(ctx, command)}
+	if reply.result.GetOk() && r.Activation != nil {
+		record, err := r.Store.GetRestartCommand(command.GetCommandId())
+		if err == nil && record != nil && record.Complete {
+			reply.execution = r.CaptureUplinkExecution(command.GetInstanceId(), record.Generation)
+		}
+	}
+	return reply
 }
 
 func commandFailure(command *nodev1.Command, code string, retryable bool) *nodev1.CommandResult {
