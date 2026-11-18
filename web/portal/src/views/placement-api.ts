@@ -17,6 +17,13 @@ export function createPlacementApi(client: ApiClient) {
       }),
   };
 }
+
+export function placementRequestKey() {
+  return Array.from(
+    globalThis.crypto.getRandomValues(new Uint8Array(16)),
+    (byte) => byte.toString(16).padStart(2, '0'),
+  ).join('');
+}
 const uuid = '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}';
 const exchangePath = new RegExp(`^/(?:i/${uuid}/)?_auriga/placement-ticket$`);
 export function exchangeTarget(value: string) {
@@ -44,6 +51,10 @@ export function exchangeTarget(value: string) {
 export async function exchangePlacement(
   value: PlacementOpen,
   signal: AbortSignal,
+  browser: { fetch: typeof fetch; navigate: (url: string) => void } = {
+    fetch: globalThis.fetch,
+    navigate: (url) => location.assign(url),
+  },
 ) {
   if (
     value.placement.state !== 'ready' ||
@@ -53,7 +64,7 @@ export async function exchangePlacement(
     throw new Error('shared.not_ready');
   const url = exchangeTarget(value.exchangeUrl);
   // JSON POST only; no query string, storage, DOM input or logging of the ticket.
-  const response = await fetch(url, {
+  const response = await browser.fetch(url, {
     method: 'POST',
     credentials: 'include',
     redirect: 'manual',
@@ -69,5 +80,5 @@ export async function exchangePlacement(
   const root = url.pathname.replace(/_auriga\/placement-ticket$/, '');
   const destination = new URL(root, url.origin);
   signal.throwIfAborted();
-  location.assign(destination.href);
+  browser.navigate(destination.href);
 }

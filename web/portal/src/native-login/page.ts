@@ -22,6 +22,12 @@ import type {
 } from '../../../shared/src/generated/steps';
 import { createApiClient } from '../../../shared/src/api/client';
 import {
+  createPlacementApi,
+  exchangePlacement,
+  placementRequestKey,
+} from '../views/placement-api';
+import { readPlacementConfig } from '../views/placement-config';
+import {
   createIamApi,
   type LoginProvider,
   type LoginTransaction,
@@ -204,6 +210,9 @@ export function mountInstanceLogin(
   });
   const iam = createIamApi(client);
   const workspace = createWorkspaceApi(client);
+  const placement = readPlacementConfig(doc).sharedPlacementEnabled
+    ? createPlacementApi(client)
+    : undefined;
   const current = (version: number) => !disposed && version === epoch;
   const words = () => messages[locale];
 
@@ -610,6 +619,16 @@ export function mountInstanceLogin(
       });
       tx = undefined;
       show('preparing');
+      if (placement) {
+        const opened = await placement.open(placementRequestKey(), signal);
+        if (!current(version)) return;
+        await exchangePlacement(opened, signal, {
+          fetch: options.fetch ?? globalThis.fetch,
+          navigate:
+            options.navigate ?? ((target) => win!.location.assign(target)),
+        });
+        return;
+      }
       await observe((await workspace.open(signal)).instance, version, signal);
     } catch (error) {
       if (!current(version)) return;
