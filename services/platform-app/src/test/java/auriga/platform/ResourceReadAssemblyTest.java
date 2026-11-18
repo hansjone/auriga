@@ -3,12 +3,24 @@ package auriga.platform;
 import static org.junit.jupiter.api.Assertions.*;
 
 import auriga.common.context.TenantContext;
+import auriga.common.error.CommonErrors;
 import auriga.common.events.*;
 import auriga.common.persistence.*;
+import auriga.contracts.node.v1.InstancePhase;
+import auriga.contracts.node.v1.InstanceSpec;
+import auriga.contracts.node.v1.InstanceStatus;
+import auriga.contracts.resource.v1.*;
+import auriga.iam.ResourceDeviceFixture.Grant;
 import auriga.org.OrgService;
 import auriga.org.OrgStore;
 import auriga.resource.ResourceModuleConfiguration;
+import auriga.resource.app.CatalogDelivery;
+import auriga.resource.app.CatalogProtocol;
 import auriga.testsupport.PostgresExtension;
+import auriga.workspace.app.WorkspaceService;
+import auriga.workspace.app.WorkspaceUnifiedResources;
+import auriga.workspace.domain.UnifiedSpec;
+import auriga.workspace.persistence.WorkspaceStore;
 import com.nimbusds.jose.*;
 import com.nimbusds.jose.crypto.ECDSASigner;
 import com.nimbusds.jose.jwk.*;
@@ -62,6 +74,8 @@ class ResourceReadAssemblyTest {
   static final ECKey KEY = key();
   static final Map<String, java.security.PublicKey> RESOURCE_KEYS = new HashMap<>();
   static final JsonMapper JSON = JsonMapper.builder().build();
+  static final java.util.concurrent.atomic.AtomicBoolean CATALOG_WRITES =
+      new java.util.concurrent.atomic.AtomicBoolean();
   final java.util.concurrent.atomic.AtomicInteger revokeFailures =
       new java.util.concurrent.atomic.AtomicInteger();
   static final String ISSUER = "https://auth.example.com";
@@ -83,6 +97,8 @@ class ResourceReadAssemblyTest {
 
   @Autowired org.springframework.context.ApplicationContext context;
   @Autowired auriga.iam.ResourceDeviceFixture deviceCredentials;
+  @Autowired MarketWorkspace marketWorkspace;
+  @Autowired CatalogDelivery catalogDelivery;
   JdbcTemplate admin;
   org.springframework.jdbc.datasource.SingleConnectionDataSource adminConnection;
   HttpClient http;
@@ -118,6 +134,7 @@ class ResourceReadAssemblyTest {
     registry.add("auriga.platform.resource.migration-username", () -> roles.owner().role());
     registry.add("auriga.platform.resource.migration-password", () -> "");
     registry.add("auriga.resource.cursor-signing-key", ResourceReadAssemblyTest::randomKey);
+    registry.add("auriga.resource.catalog-writes-enabled", CATALOG_WRITES::get);
     registry.add(
         "auriga.resource.download-base-url",
         () -> "https://resource.example.com/internal/resource/v1/downloads/");
@@ -152,6 +169,26 @@ class ResourceReadAssemblyTest {
     auriga.iam.api.DevicePermissionAuthority devicePermissionAuthority(
         auriga.iam.ResourceDeviceFixture devices) {
       return devices.authority();
+    }
+
+    @Bean
+    MarketWorkspace marketWorkspace() {
+      return new MarketWorkspace();
+    }
+
+    @Bean(destroyMethod = "close")
+    WorkspaceUnifiedResources marketWorkspaceResources(MarketWorkspace fixture, Clock clock) {
+      return new WorkspaceUnifiedResources(
+          new WorkspaceService(
+              fixture.store, null, null, null, (a, b, c, v) -> UuidV7.next(), clock),
+          null,
+          null);
+    }
+
+    @Bean
+    auriga.resource.api.UnifiedResourceWorkspace marketWorkspacePort(
+        WorkspaceUnifiedResources fixture) {
+      return new PlatformResourceWorkspace.Unified(fixture);
     }
 
     @Bean(destroyMethod = "close")
@@ -220,6 +257,8 @@ class ResourceReadAssemblyTest {
 
   @BeforeEach
   void setup() throws java.sql.SQLException {
+    CATALOG_WRITES.set(false);
+    marketWorkspace.rows.clear();
     http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build();
     // Reuse a real fixture connection instead of starting a Windows PG backend for each statement.
     adminConnection =
@@ -469,6 +508,453 @@ class ResourceReadAssemblyTest {
         expected, response.statusCode(), new String(response.body(), StandardCharsets.UTF_8));
   }
 
+  static final class MarketWorkspace {
+    final Map<UUID, Map<String, Object>> rows = new java.util.concurrent.ConcurrentHashMap<>();
+    final WorkspaceStore store = org.mockito.Mockito.mock(WorkspaceStore.class);
+
+    MarketWorkspace() {
+      org.mockito.Mockito.when(
+              store.in(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any()))
+          .thenAnswer(call -> call.<java.util.function.Supplier<?>>getArgument(1).get());
+      org.mockito.Mockito.when(store.instance(org.mockito.ArgumentMatchers.any()))
+          .thenAnswer(
+              call -> {
+                var row = rows.get(call.<UUID>getArgument(0));
+                if (row == null)
+                  throw new auriga.common.error.AurigaException(
+                      auriga.common.error.CommonErrors.NOT_FOUND);
+                return row;
+              });
+    }
+
+    void seed(UUID tenant, UUID owner, UUID instance) {
+      var spec =
+          InstanceSpec.newBuilder()
+              .setTenantId(tenant.toString())
+              .setOwnerId(owner.toString())
+              .setInstanceId(instance.toString())
+              .setGeneration(37)
+              .build();
+      set(spec, UUID.randomUUID(), null);
+    }
+
+    InstanceSpec spec(UUID instance) {
+      return WorkspaceService.spec(rows.get(instance));
+    }
+
+    UUID node(UUID instance) {
+      return (UUID) rows.get(instance).get("node_id");
+    }
+
+    void set(InstanceSpec spec, UUID node, InstanceStatus status) {
+      var row = new HashMap<String, Object>();
+      row.put("id", UUID.fromString(spec.getInstanceId()));
+      row.put("owner_id", UUID.fromString(spec.getOwnerId()));
+      row.put("node_id", node);
+      row.put("spec", spec.toByteArray());
+      row.put("observed_generation", status == null ? 0L : status.getObservedGeneration());
+      row.put("ready", status != null && status.getReady());
+      if (status != null) row.put("status", status.toByteArray());
+      rows.put(UUID.fromString(spec.getInstanceId()), row);
+    }
+
+    void report(UUID instance, long generation, long selection, long revOffset) {
+      var spec = spec(instance);
+      var status =
+          InstanceStatus.newBuilder()
+              .setInstanceId(spec.getInstanceId())
+              .setPhase(InstancePhase.INSTANCE_PHASE_RUNNING)
+              .setObservedGeneration(generation)
+              .setReady(true)
+              .setUnifiedGuardian(
+                  UnifiedGuardianState.newBuilder()
+                      .setTenantId(spec.getTenantId())
+                      .setOwnerId(spec.getOwnerId())
+                      .setHostId(instance.toString())
+                      .setGeneration(generation)
+                      .setSelectionRevision(selection)
+                      .setState("active"));
+      for (var ref : spec.getUnifiedResourcesList()) {
+        var state =
+            switch (ref.getDesiredState()) {
+              case UNIFIED_RESOURCE_DESIRED_STATE_DISABLED -> "disabled";
+              case UNIFIED_RESOURCE_DESIRED_STATE_REMOVED -> "removed";
+              default -> "applied";
+            };
+        status.addUnifiedResourceReports(
+            UnifiedInstallationReport.newBuilder()
+                .setClientId(instance.toString())
+                .setIdentity(ref.getIdentity())
+                .setState(state)
+                .setInstallationRevision(ref.getInstallationRevision() + revOffset)
+                .setSelectionRevision(selection)
+                .setGeneration(generation)
+                .setObservedGeneration(generation)
+                .setReportSource("node")
+                .setObservedAt("2026-11-18T00:00:00Z"));
+      }
+      set(spec, node(instance), status.build());
+    }
+  }
+
+  private JsonNode marketPackage(int number, long sequence, String name) {
+    UUID pkg = id(number), versionId = id(number + 1);
+    String manifest =
+        """
+        {"name":"%s","kind":"skill","version":"1.0.0",
+        "artifacts":[{"id":"payload","digest":"sha256:%s","sizeBytes":42}]}
+        """
+            .formatted(name, "a".repeat(64));
+    byte[] bytes = manifest.getBytes(StandardCharsets.UTF_8);
+    String digest = auriga.resource.app.CatalogManifest.digest(bytes);
+    admin.update(
+        "INSERT INTO resource.catalog_package(id,tenant_id,owner_id,name,kind,visibility,enabled,release_high_water,created_at) VALUES(?,?,?,?,'skill','tenant',true,?,now())",
+        pkg,
+        T1,
+        ALICE,
+        name,
+        sequence);
+    admin.update(
+        "INSERT INTO resource.catalog_version(id,tenant_id,package_id,author_id,version,digest,manifest_bytes,manifest,state,minimum_risk,risk,release_sequence,created_at) VALUES(?,?,?,?,'1.0.0',?,?,?::jsonb,'published','r1','r1',?,now())",
+        versionId,
+        T1,
+        pkg,
+        ALICE,
+        digest,
+        bytes,
+        manifest,
+        sequence);
+    return JSON.createObjectNode()
+        .put("tenantId", T1.toString())
+        .put("packageId", pkg.toString())
+        .put("versionId", versionId.toString())
+        .put("kind", "skill")
+        .put("version", "1.0.0")
+        .put("manifestDigest", digest);
+  }
+
+  private void marketRule(Grant grant, JsonNode identity, String mode) {
+    admin.update(
+        "INSERT INTO resource.catalog_assignment(id,tenant_id,package_id,version_id,scope,target_id,installation_mode,created_at) VALUES(?,?,?,?,'instance',?,?,now())",
+        UuidV7.next(),
+        T1,
+        UUID.fromString(identity.path("packageId").asString()),
+        UUID.fromString(identity.path("versionId").asString()),
+        grant.instance(),
+        mode);
+  }
+
+  private static final String MARKET = "/catalog/member/installations";
+
+  private JsonNode marketList(Grant grant) throws Exception {
+    var response = deviceRequest(MARKET + "?clientId=" + grant.device(), grant.token(), null);
+    deviceStatus(200, response);
+    return JSON.readTree(response.body()).path("items");
+  }
+
+  private JsonNode marketItem(Grant grant, JsonNode identity) throws Exception {
+    for (var row : marketList(grant))
+      if (row.path("resource").path("identity").equals(identity)) return row;
+    return JSON.missingNode();
+  }
+
+  private HttpResponse<String> marketSelect(
+      Grant grant, UUID client, JsonNode identity, String action, long revision, String key)
+      throws Exception {
+    var body = JSON.createObjectNode().put("clientId", client.toString());
+    body.putObject("selection").put("action", action).set("identity", identity);
+    return http.send(
+        HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + port + "/api/resource/v1" + MARKET))
+            .header("Authorization", "Bearer " + grant.token())
+            .header("Content-Type", "application/json")
+            .header("Idempotency-Key", key)
+            .header("If-Match", "\"" + revision + "\"")
+            .POST(HttpRequest.BodyPublishers.ofString(body.toString()))
+            .build(),
+        HttpResponse.BodyHandlers.ofString());
+  }
+
+  private ResolveUnifiedResourcesRequest.Builder marketResolve(Grant grant) {
+    return ResolveUnifiedResourcesRequest.newBuilder()
+        .setTenantId(T1.toString())
+        .setInstanceId(grant.instance().toString())
+        .setOwnerId(ALICE.toString())
+        .setNodeId(marketWorkspace.node(grant.instance()).toString())
+        .setSelectionRevision(
+            marketWorkspace.spec(grant.instance()).getResourceSelectionRevision());
+  }
+
+  private ResolveUnifiedResourcesResponse marketPlan(Grant grant) {
+    return TenantContext.call(
+        T1,
+        () ->
+            catalogDelivery.resolve(marketResolve(grant).setSynchronizeAssignments(true).build()));
+  }
+
+  private ResolveUnifiedResourcesRequest marketEvent(Grant grant) {
+    var event =
+        JSON.readTree(
+            admin.queryForObject(
+                "SELECT (envelope->'data')::text FROM resource.outbox_event WHERE tenant_id=? AND subject_key=? AND event_type='resource.catalog_distribution_requested' ORDER BY id DESC LIMIT 1",
+                String.class,
+                T1,
+                grant.instance().toString()));
+    var request =
+        marketResolve(grant).setSelectionRevision(event.path("selectionRevision").asLong());
+    event.path("selections").forEach(s -> request.addSelections(CatalogProtocol.selection(s)));
+    return request.build();
+  }
+
+  private void applyMarket(
+      Grant grant, ResolveUnifiedResourcesRequest request, boolean assignment) {
+    var resolution = TenantContext.call(T1, () -> catalogDelivery.resolve(request));
+    var next =
+        UnifiedSpec.apply(
+            marketWorkspace.spec(grant.instance()),
+            request.getSelectionRevision(),
+            request.getSelectionsList(),
+            resolution,
+            false,
+            assignment);
+    marketWorkspace.set(UnifiedSpec.bump(next), marketWorkspace.node(grant.instance()), null);
+  }
+
+  @Test
+  void managedMarketUsesItsOwnNodeAndOutboxWithLiveIamAndDesktopIsolation() throws Exception {
+    CATALOG_WRITES.set(true);
+    admin.update(
+        "UPDATE org.role SET permissions=ARRAY['auriga.connect','auriga.connect.collab.use','auriga.connect.resources.use','resource.packages.read'] WHERE id IN (?,?)",
+        ROLE,
+        id(16));
+    var desktop = deviceCredentials.issue(T1, ALICE, "standard");
+    var a = deviceCredentials.managed(T1, ALICE, UUID.randomUUID(), 1);
+    var b = deviceCredentials.managed(T1, ALICE, UUID.randomUUID(), 1);
+    var foreign = deviceCredentials.issue(T2, id(15), "managed");
+    marketWorkspace.seed(T1, ALICE, a.instance());
+    marketWorkspace.seed(T1, ALICE, b.instance());
+    marketWorkspace.seed(T2, id(15), foreign.instance());
+    assertNotEquals(a.device(), a.instance());
+    assertNotEquals(b.device(), b.instance());
+    var required = marketPackage(1500, 1, "market-required");
+    var optional = marketPackage(1510, 2, "market-optional");
+    var defaultInstall = marketPackage(1520, 3, "market-default");
+    marketRule(a, required, "required");
+    marketRule(a, defaultInstall, "default");
+    var plan = marketPlan(a);
+    assertEquals(2, plan.getSelectionsCount());
+    applyMarket(a, marketEvent(a), true);
+    var spec = marketWorkspace.spec(a.instance());
+    assertEquals("applying", marketItem(a, required).path("state").asString());
+    marketWorkspace.report(
+        a.instance(), spec.getGeneration() - 1, spec.getResourceSelectionRevision(), 0);
+    assertEquals("applying", marketItem(a, required).path("state").asString());
+    marketWorkspace.report(
+        a.instance(), spec.getGeneration(), spec.getResourceSelectionRevision(), 1);
+    assertEquals("applying", marketItem(a, required).path("state").asString());
+    marketWorkspace.report(
+        a.instance(), spec.getGeneration(), spec.getResourceSelectionRevision(), 0);
+    var installed = marketItem(a, required);
+    assertEquals("applied", installed.path("state").asString());
+    assertEquals("required", installed.path("resource").path("installationMode").asString());
+    assertEquals(a.device().toString(), installed.path("clientId").asString());
+    assertEquals(a.instance().toString(), installed.path("report").path("clientId").asString());
+    assertEquals(0, marketList(b).size());
+    assertEquals(0, marketList(desktop).size());
+    assertEquals(0, marketList(foreign).size());
+    deviceStatus(404, deviceRequest(MARKET + "?clientId=" + b.device(), a.token(), null));
+    deviceStatus(404, deviceRequest(MARKET + "?clientId=" + a.instance(), a.token(), null));
+    failure(
+        marketSelect(b, a.device(), optional, "install", 0, "other-did"), 404, "common.not_found");
+    failure(
+        marketSelect(foreign, foreign.device(), optional, "install", 0, "other-tenant"),
+        404,
+        "common.not_found");
+    for (String action : List.of("disable", "remove"))
+      failure(
+          marketSelect(
+              a,
+              a.device(),
+              required,
+              action,
+              installed.path("installationRevision").asLong(),
+              "required-" + action),
+          403,
+          "resource.installation_required");
+    var previous = 0L;
+    for (String action : List.of("install", "disable", "enable", "remove")) {
+      var selected =
+          result(
+              marketSelect(a, a.device(), optional, action, previous, "optional-" + action), 202);
+      assertEquals(
+          selected,
+          result(
+              marketSelect(a, a.device(), optional, action, previous, "optional-" + action), 202));
+      if (action.equals("install"))
+        failure(
+            marketSelect(a, a.device(), optional, action, previous, "parallel-before-apply"),
+            409,
+            "common.conflict");
+      assertEquals("applying", marketItem(a, optional).path("state").asString());
+      previous = selected.path("installationRevision").asLong();
+      var request = marketEvent(a);
+      assertEquals(a.instance().toString(), request.getInstanceId());
+      applyMarket(a, request, false);
+      var current = marketWorkspace.spec(a.instance());
+      marketWorkspace.report(
+          a.instance(), current.getGeneration(), current.getResourceSelectionRevision(), 0);
+      assertEquals(
+          switch (action) {
+            case "disable" -> "disabled";
+            case "remove" -> "removed";
+            default -> "applied";
+          },
+          marketItem(a, optional).path("state").asString());
+    }
+    assertEquals(0, marketPlan(a).getSelectionsCount());
+    failure(
+        marketSelect(a, a.device(), optional, "install", 0, "old-cas"),
+        412,
+        "common.precondition_failed");
+    var defaultRow = marketItem(a, defaultInstall);
+    result(
+        marketSelect(
+            a,
+            a.device(),
+            defaultInstall,
+            "remove",
+            defaultRow.path("installationRevision").asLong(),
+            "remove-default"),
+        202);
+    applyMarket(a, marketEvent(a), false);
+    assertEquals(0, marketPlan(a).getSelectionsCount());
+    var beforeCollection = marketWorkspace.spec(a.instance());
+    marketWorkspace.report(
+        a.instance(),
+        beforeCollection.getGeneration(),
+        beforeCollection.getResourceSelectionRevision(),
+        0);
+    assertEquals("removed", marketItem(a, defaultInstall).path("state").asString());
+    // The resource worker drops the tombstone from the execution spec and retains its CAS record.
+    String defaultPackageId = defaultInstall.path("packageId").asString();
+    var collected =
+        UnifiedSpec.bump(
+            beforeCollection.toBuilder()
+                .clearUnifiedResources()
+                .addAllUnifiedResources(
+                    beforeCollection.getUnifiedResourcesList().stream()
+                        .filter(ref -> !ref.getIdentity().getPackageId().equals(defaultPackageId))
+                        .toList())
+                .build());
+    marketWorkspace.set(collected, marketWorkspace.node(a.instance()), null);
+    assertEquals(
+        1,
+        admin.update(
+            "UPDATE resource.catalog_instance_installation SET collected_generation=? WHERE instance_id=? AND package_id=?",
+            collected.getGeneration(),
+            a.instance(),
+            UUID.fromString(defaultPackageId)));
+    assertEquals(0, marketPlan(a).getSelectionsCount());
+    var tombstone = marketItem(a, defaultInstall);
+    assertEquals("removed", tombstone.path("state").asString());
+    assertFalse(tombstone.has("report"));
+    assertEquals(
+        defaultRow.path("installationRevision").asLong() + 1,
+        tombstone.path("installationRevision").asLong());
+    result(
+        marketSelect(
+            a,
+            a.device(),
+            defaultInstall,
+            "enable",
+            tombstone.path("installationRevision").asLong(),
+            "explicit-restore"),
+        202);
+    applyMarket(a, marketEvent(a), false);
+    assertEquals(
+        0,
+        admin.queryForObject("SELECT count(*) FROM resource.catalog_installation", Integer.class));
+    assertEquals(
+        7,
+        admin.queryForObject(
+            "SELECT count(*) FROM resource.outbox_event WHERE event_type='resource.catalog_distribution_requested' AND subject_key=?",
+            Integer.class,
+            a.instance().toString()));
+    assertEquals(
+        0,
+        admin.queryForObject(
+            "SELECT count(*) FROM resource.catalog_distribution WHERE instance_id=?",
+            Integer.class,
+            b.instance()));
+
+    result(marketSelect(b, b.device(), optional, "install", 0, "pending-before-policy"), 202);
+    var superseded = marketEvent(b);
+    marketRule(b, required, "required");
+    var rejected =
+        assertThrows(
+            auriga.common.error.AurigaException.class,
+            () -> TenantContext.call(T1, () -> catalogDelivery.resolve(superseded)));
+    assertEquals(auriga.common.error.CommonErrors.PRECONDITION_FAILED, rejected.errorCode());
+    assertTrue(marketItem(b, optional).isMissingNode());
+    assertEquals(1, marketPlan(b).getSelectionsCount());
+    applyMarket(b, marketEvent(b), true);
+    assertTrue(marketItem(b, optional).isMissingNode());
+    assertFalse(marketItem(b, required).isMissingNode());
+    var bSpec = marketWorkspace.spec(b.instance());
+    marketWorkspace.set(
+        bSpec.toBuilder().setOwnerId(BOB.toString()).build(),
+        marketWorkspace.node(b.instance()),
+        null);
+    deviceStatus(404, deviceRequest(MARKET + "?clientId=" + b.device(), b.token(), null));
+    marketWorkspace.set(bSpec, null, null);
+    deviceStatus(503, deviceRequest(MARKET + "?clientId=" + b.device(), b.token(), null));
+
+    assertEquals(
+        "member",
+        result(marketSelect(desktop, desktop.device(), optional, "install", 0, "desktop"), 202)
+            .path("reportSource")
+            .asString());
+    assertEquals("member", marketItem(desktop, optional).path("reportSource").asString());
+
+    result(
+        marketSelect(a, a.device(), optional, "install", previous, "queued-before-rotation"), 202);
+    var queuedBeforeRotation = marketEvent(a);
+    var replacement = deviceCredentials.managed(T1, ALICE, a.instance(), 2);
+    assertNotEquals(a.device(), replacement.device());
+    deviceStatus(403, deviceRequest(MARKET + "?clientId=" + a.device(), a.token(), null));
+    assertEquals(
+        CommonErrors.PRECONDITION_FAILED,
+        assertThrows(
+                auriga.common.error.AurigaException.class,
+                () -> TenantContext.call(T1, () -> catalogDelivery.resolve(queuedBeforeRotation)))
+            .errorCode());
+    failure(
+        marketSelect(a, a.device(), optional, "install", previous, "replaced"),
+        403,
+        "common.forbidden");
+    assertFalse(marketItem(replacement, required).isMissingNode());
+    admin.update(
+        "UPDATE org.role SET permissions=array_remove(permissions,'auriga.connect.resources.use') WHERE id=?",
+        ROLE);
+    deviceStatus(
+        403,
+        deviceRequest(MARKET + "?clientId=" + replacement.device(), replacement.token(), null));
+    failure(
+        marketSelect(
+            replacement, replacement.device(), optional, "install", previous, "no-permission"),
+        403,
+        "common.forbidden");
+    admin.update(
+        "UPDATE org.role SET permissions=array_append(permissions,'auriga.connect.resources.use') WHERE id=?",
+        ROLE);
+    deviceCredentials.revoke(T1, replacement.device());
+    deviceStatus(
+        403,
+        deviceRequest(MARKET + "?clientId=" + replacement.device(), replacement.token(), null));
+    assertEquals(
+        1,
+        admin.queryForObject("SELECT count(*) FROM resource.catalog_installation", Integer.class));
+  }
+
   @org.junit.jupiter.params.ParameterizedTest
   @org.junit.jupiter.params.provider.ValueSource(strings = {"standard", "native", "managed"})
   void deviceTokensReadInstallAndDownloadWhilePublicationOperationsRemainForbidden(String kind)
@@ -512,6 +998,7 @@ class ResourceReadAssemblyTest {
         manifest,
         new String(manifest, StandardCharsets.UTF_8));
     var grant = deviceCredentials.issue(T1, ALICE, kind);
+    if (grant.instance() != null) marketWorkspace.seed(T1, ALICE, grant.instance());
     for (String path :
         List.of(
             "/revocations",

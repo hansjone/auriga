@@ -8,6 +8,7 @@ import auriga.common.security.PrincipalType;
 import auriga.contracts.org.v1.MemberStatus;
 import auriga.contracts.org.v1.MemberType;
 import auriga.resource.api.ResourceAccessInputs;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
@@ -59,6 +60,32 @@ public final class ResourceAccess {
                 || principal.context() == auriga.common.security.TokenContext.ADMIN);
     if (!device && !user) throw new AurigaException(CommonErrors.FORBIDDEN);
     return resolve(principal, READ);
+  }
+
+  Optional<UUID> installationInstance(AurigaPrincipal principal) {
+    if (principal.type() != PrincipalType.DEVICE) return Optional.empty();
+    return installationInstance(principal.tenantId(), principal.subject(), principal.deviceId());
+  }
+
+  private Optional<UUID> installationInstance(UUID tenant, String owner, String device) {
+    try {
+      return devices.installationInstance(tenant, owner, device);
+    } catch (UnsupportedOperationException unavailable) {
+      throw new AurigaException(CommonErrors.UNAVAILABLE);
+    }
+  }
+
+  boolean currentInstallationDevice(Reader owner, UUID device, UUID instance) {
+    String account = owner.account().toString(), did = device.toString();
+    if (!devices.allowed(owner.tenant(), account, did, READ)) return false;
+    try {
+      return installationInstance(owner.tenant(), account, did)
+          .filter(instance::equals)
+          .isPresent();
+    } catch (AurigaException e) {
+      if (e.errorCode().equals(CommonErrors.FORBIDDEN)) return false;
+      throw e;
+    }
   }
 
   public Reader administrator(AurigaPrincipal principal, String permission) {
