@@ -92,7 +92,12 @@ export function createManagedNetwork(options) {
       return valid();
     },
     get sessionRevoked() {
-      return runtime?.broker.state.current()?.state === 'revoked';
+      // Keep denying while a previously loaded credential has been removed,
+      // replaced or expired, even after refresh detaches its user runtime.
+      return (
+        fileConnection?.stale === true ||
+        runtime?.broker.state.current()?.state === 'revoked'
+      );
     },
     get resourceSession() {
       return valid() ? runtime : undefined;

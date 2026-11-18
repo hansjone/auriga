@@ -1,8 +1,8 @@
-/* global Headers */
+/* global AbortSignal, Headers */
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer as httpsServer } from 'node:https';
-import { createServer } from 'node:http';
+import { createServer, get as httpGet } from 'node:http';
 import {
   randomUUID,
   randomBytes,
@@ -27,7 +27,12 @@ import {
   signedV2Announcement,
   signedReadyResult,
 } from './network/trust/keyset-fixtures.js';
-import { signIdentity } from './managed-helpers.js';
+import {
+  panelManifestBase,
+  signIdentity,
+  signPanelManifest,
+} from './managed-helpers.js';
+import { apply as attachObserver } from '../../../infra/agent/internal/renderer/resource_observer.mjs';
 import { decodeJson, encodeJson } from '../src/network/session/frames.js';
 
 test(
@@ -73,6 +78,11 @@ test(
       randomBytes(32).toString('base64url'),
     ].join('.');
     const signing = publicationFixture();
+    const panelManifest = signPanelManifest(
+      edge.privateKey,
+      'edge',
+      panelManifestBase(),
+    );
     const identity = {
       tenant: ids.tenantId,
       device: ids.deviceId,
@@ -182,6 +192,7 @@ test(
             protocol: { current: 1, minSupported: 1 },
             nextHeartbeatSeconds: 30,
           });
+        if (path === '/panel/manifest.json') return json(panelManifest);
         assert.equal(new Headers(req.headers).has('cookie'), false);
         assert.equal(
           req.headers.authorization,
@@ -317,7 +328,8 @@ test(
         ],
       }),
     );
-    await writeFile(instanceFile, randomBytes(32).toString('base64url'));
+    const instanceToken = randomBytes(32).toString('base64url');
+    await writeFile(instanceFile, instanceToken);
     for (const [name, value] of Object.entries({
       AURIGA_MODE: 'managed',
       AURIGA_INSTANCE_ID: ids.instanceId,
@@ -325,6 +337,7 @@ test(
       AURIGA_TENANT_ID: ids.tenantId,
       AURIGA_PLATFORM_URL: origin,
       AURIGA_IDENTITY_KEYS_FILE: keysFile,
+      AURIGA_PANEL_KEYS_FILE: keysFile,
       AURIGA_INSTANCE_TOKEN_FILE: instanceFile,
       AURIGA_DEVICE_CREDENTIAL_FILE: file,
       AURIGA_WORKSPACE_ROOT: dir,
@@ -414,6 +427,44 @@ test(
         port: server.address().port,
       },
     });
+    const policyFile = join(dir, 'observer-policy.json');
+    await writeFile(
+      policyFile,
+      JSON.stringify({ schemaVersion: 1, newSessionRequired: false }),
+    );
+    let observationPause;
+    await attachObserver(
+      {
+        ...ctx,
+        agentPresets: { acquireScope: async (key) => ({ key }) },
+        skills: {
+          async list() {
+            observationPause?.started.resolve();
+            await observationPause?.release.promise;
+            return [];
+          },
+          get: () => undefined,
+        },
+        pluginManager: { listBundles: () => [], listPlugins: () => [] },
+      },
+      { tokenFile: instanceFile, policyFile },
+    );
+    const observe = () =>
+      new Promise((resolve, reject) => {
+        const req = httpGet(
+          local + '/auriga-node-resource-catalog',
+          {
+            headers: { Authorization: 'Bearer ' + instanceToken },
+            signal: AbortSignal.timeout(5000),
+          },
+          (res) => {
+            res.resume();
+            res.once('end', () => resolve(res.statusCode));
+            res.once('error', reject);
+          },
+        );
+        req.once('error', reject);
+      });
     for (let i = 0; i < jobs.length; i++) await jobs[i];
     const request = (path, init = {}) =>
       globalThis.fetch(local + path, {
@@ -453,6 +504,22 @@ test(
       return body.network?.connected && body;
     });
     assert.equal(status.session.available, true);
+    assert.equal(await observe(), 200);
+    const panel = await request('/auriga/bootstrap');
+    assert.equal(panel.status, 200);
+    assert.equal((await panel.json()).manifest.version, panelManifest.version);
+    assert.equal(
+      (
+        await request('/auriga/bootstrap', {
+          headers: { origin: 'https://wrong.example.com' },
+        })
+      ).status,
+      403,
+    );
+    assert.equal(
+      (await (await fetch(local + '/_auriga/health')).json()).ready,
+      true,
+    );
     assert.equal(frames.length, 2);
     assert.equal(
       (await request('/auriga/resources/api/resource/v1/packages')).status,
@@ -475,7 +542,16 @@ test(
         calls.filter((call) => call.path === '/api/resource/v1/packages')
           .length === 2,
     );
+    observationPause = {
+      started: Promise.withResolvers(),
+      release: Promise.withResolvers(),
+    };
+    const pendingObservation = observe();
+    await observationPause.started.promise;
     await rm(file);
+    assert.equal(await observe(), 401);
+    observationPause.release.resolve();
+    assert.equal(await pendingObservation, 403);
     assert.equal(
       (await request('/auriga/resources/api/resource/v1/packages')).status,
       401,
@@ -483,5 +559,12 @@ test(
     // The native guard retires the old operation before a late platform response.
     release.resolve();
     assert.ok((await pending).status >= 400);
+    // The network refresh also detaches the old runtime. This must not reopen
+    // observation with the still-mounted instance token.
+    await delay(1250);
+    assert.equal(await observe(), 401);
+    const health = await fetch(local + '/_auriga/health');
+    assert.equal(health.status, 200);
+    assert.equal((await health.json()).ready, false);
   },
 );

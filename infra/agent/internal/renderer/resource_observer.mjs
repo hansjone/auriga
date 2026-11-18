@@ -2,6 +2,30 @@ import { readFileSync } from 'node:fs';
 import { timingSafeEqual } from 'node:crypto';
 import { governPlugins, observePlugins } from './resource_plugins.mjs';
 
+// Shared with the managed door by name, on the same instance HTTP server.
+// Never register a DSH route: only the node door can dispatch to this handler.
+const OBSERVER = Symbol.for('auriga.node-resource-observer.v1');
+
+function authorized(req, tokenFile) {
+  if (
+    req.method !== 'GET' ||
+    req.url !== '/auriga-node-resource-catalog' ||
+    typeof req.headers.authorization !== 'string' ||
+    req.headersDistinct?.authorization?.length !== 1
+  ) return false;
+  try {
+    const token = readFileSync(tokenFile, 'utf8').trim();
+    if (!token) return false;
+    const expected = Buffer.from('Bearer ' + token);
+    const supplied = Buffer.from(req.headers.authorization);
+    return expected.length === supplied.length && timingSafeEqual(expected, supplied);
+  } catch {
+    return false;
+  }
+}
+
+const empty = (res, status) => res.writeHead(status, { 'cache-control': 'no-store' }).end();
+
 export const name = 'auriga-node-resource-observer';
 export const inject = ['webServer', 'skills', 'sessionController', 'agentPresets', 'pluginManager'];
 export async function apply(ctx, config) {
@@ -27,10 +51,8 @@ export async function apply(ctx, config) {
     ctx.on('tools/execute', (exec, next) => { if (!permitted.has(exec.agent?.session?.id)) throw new Error('Private-only new session required'); return next(); });
   }
   if (typeof ctx.agentPresets?.acquireScope !== 'function' || typeof ctx.skills?.list !== 'function' || typeof ctx.skills?.get !== 'function') throw new Error('Native skill catalog unavailable');
-  ctx.effect(() => ctx.webServer.register({ kind: 'prefix', path: '/auriga-node-resource-catalog', async handler(req, res) {
-    const expected = Buffer.from('Bearer ' + readFileSync(config.tokenFile, 'utf8').trim());
-    const supplied = Buffer.from(typeof req.headers.authorization === 'string' ? req.headers.authorization : '');
-    if (req.method !== 'GET' || req.url !== '/auriga-node-resource-catalog' || expected.length !== supplied.length || !timingSafeEqual(expected, supplied)) { res.writeHead(403); res.end(); return; }
+  async function observe(req, res, canPublish) {
+    if (!authorized(req, config.tokenFile)) { empty(res, 403); return; }
     try {
       const skills = [];
       // Public standing preset scopes need no Agent or Session activation.
@@ -43,7 +65,19 @@ export async function apply(ctx, config) {
         } finally { await lease?.[Symbol.asyncDispose]?.(); }
       }
       const plugins = await observePlugins(ctx.pluginManager);
-      res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' }); res.end(JSON.stringify({ privateOnly: policy.newSessionRequired, skills, plugins }));
-    } catch { res.writeHead(503, { 'cache-control': 'no-store' }); res.end(); }
-  }}), 'auriga-node-resource-observer');
+      if (!canPublish() || !authorized(req, config.tokenFile)) { empty(res, 403); return; }
+      const body = JSON.stringify({ privateOnly: policy.newSessionRequired, skills, plugins });
+      res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' }); res.end(body);
+    } catch {
+      if (res.headersSent) res.destroy();
+      else empty(res, 503);
+    }
+  }
+  const server = ctx.webServer.server;
+  if (!server) throw new Error('Node resource observer requires the instance HTTP server');
+  ctx.effect(() => {
+    if (Object.hasOwn(server, OBSERVER)) throw new Error('Duplicate node resource observer');
+    Object.defineProperty(server, OBSERVER, { configurable: true, value: observe });
+    return () => { if (server[OBSERVER] === observe) delete server[OBSERVER]; };
+  }, 'auriga-node-resource-observer');
 }

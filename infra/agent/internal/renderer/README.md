@@ -32,6 +32,29 @@ by the current `clients/dsh-plugin/package.json`; the library export is
 The renderer change alone does not update an installed package or validate a
 managed image/deployment; the installed image must actually contain that package.
 
+When resource observation is enabled, the renderer embeds `resource_observer.mjs`
+in the agent binary and mounts it and its policy read-only. The observer binds a
+single handler to the instance HTTP server for the lifetime of its Cordis row. It
+does not register a DSH web route. The managed door dispatches only the exact raw
+`GET /auriga-node-resource-catalog` with the instance-file Bearer; the observer
+checks that Bearer again. Observation works before browser session readiness and
+stops on proven device revocation. The portal proxy strips incoming Authorization
+and sets Auriga-Identity, which this channel rejects.
+
+Build the agent (`deploy/nas/docker/Dockerfile.agent`) and the real DSH image
+(`deploy/compose/scripts/build-real-dsh.mjs`, using the pinned Node image) from
+the same reviewed source. The change to `src/network/managed-device.js` is covered
+by the broker source digest, so the existing incremental recipe rejects a base
+built before this change. Both artifacts must be updated; a missing observer
+binding fails closed. Neither lockfile changes.
+
+The isolated Loader probe can run from the repo root with the real DSH lockfile
+installed into `<runtime>`: `node infra/agent/internal/renderer/testdata/resource-observer-real.mjs <runtime> <evidence-dir>`.
+It boots a disposable real DSH profile on loopback and uses fixture skills. For
+the pre-fix control, supply a checkout of `115dbe0faf05c7f374070a7fe8f46479120a7e84`
+with its plugin dependencies available as the third argument and `baseline` as
+the fourth. Neither run uses a signed production image or contacts a platform.
+
 The opt-in `TestCordisRealDSHBrowserCollector` probes the actual locked DSH
 collector with a rendered row and the old-name control. Both managed Node
 entries activate; only the package-root row contributes `auriga-dsh` and its

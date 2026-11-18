@@ -14,6 +14,7 @@ import {
 } from '../managed/host-auth.js';
 import { createIdentityKeyCache } from '../managed/keys.js';
 import { createDoorLock, createReplayCache } from '../managed/door.js';
+import { createNodeResourceObservation } from '../managed/node-resource-observation.js';
 import {
   DEFAULT_WORKSPACE_ROOT,
   installManagedGuards,
@@ -572,13 +573,22 @@ export async function createManaged(options = {}) {
       );
 
       // Door is outermost: even forbidden native writes must authenticate first.
+      const revoked = () => network?.sessionRevoked === true;
       disposeHttpGuard = installNativePluginHttpGuard(server);
       disposeSession = installManagedSessionGuard(
         server,
         () => network?.sessionAvailable === true,
-        () => network?.sessionRevoked === true,
+        revoked,
       );
-      disposeDoor = door.install(server);
+      // Observation is needed before browser session readiness, but a proven
+      // revocation still closes it. No ordinary managed route sees this Bearer.
+      disposeDoor = door.install(
+        server,
+        createNodeResourceObservation(server, {
+          tokenFile: env.AURIGA_INSTANCE_TOKEN_FILE,
+          revoked,
+        }),
+      );
       disposeSettingsOwnership = installManagedSettingsOwnership(ctx);
 
       if (options.startHeartbeat !== false) heartbeat.start();
