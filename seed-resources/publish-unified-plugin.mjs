@@ -1,5 +1,6 @@
 import { readFile } from 'node:fs/promises';
 import { createHash, randomUUID } from 'node:crypto';
+import { isIP } from 'node:net';
 import { pathToFileURL } from 'node:url';
 import { validateArchive } from '../clients/dsh-plugin/src/resources/archive.js';
 import { parseStrictJson } from '../clients/dsh-plugin/src/resources/json.js';
@@ -7,6 +8,18 @@ import { schemaValid } from '../clients/dsh-plugin/src/resources/schema.js';
 
 const digest = (bytes) =>
   'sha256:' + createHash('sha256').update(bytes).digest('hex');
+const semver =
+  /^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:-(?:0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*))*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/;
+const validRange = (range) =>
+  range === '*' ||
+  range.split('||').every(
+    (branch) =>
+      branch.trim() &&
+      branch
+        .trim()
+        .split(/\s+/)
+        .every((term) => semver.test(term.replace(/^(>=|<=|>|<|=|\^|~)/, ''))),
+  );
 
 async function verifySeed(payload, rawManifest) {
   if (!rawManifest.length || rawManifest.length > 262144)
@@ -14,6 +27,13 @@ async function verifySeed(payload, rawManifest) {
   const manifest = parseStrictJson(rawManifest, true);
   if (!schemaValid('package', 'PluginManifest', manifest))
     throw new Error('Invalid plugin manifest');
+  if (
+    !validRange(manifest.plugin.dshVersionRange) ||
+    manifest.runtimes.some(({ versionRange }) => !validRange(versionRange))
+  )
+    throw new Error(
+      'Plugin manifest ranges must use full SemVer (e.g. >=22.0.0); rerun scripts/resource-seed/prepare.mjs',
+    );
   const [artifact] = manifest.artifacts;
   if (
     artifact.sizeBytes !== payload.length ||
@@ -27,6 +47,63 @@ async function verifySeed(payload, rawManifest) {
   return manifest;
 }
 
+const adminEntryError =
+  'Seed publishing requires the HTTPS admin origin in domain mode. In IP mode, use /resources/plugins in the browser admin console.';
+
+function domainOrigin(input) {
+  let origin;
+  try {
+    origin = new URL(input);
+  } catch {
+    throw new Error(adminEntryError);
+  }
+  if (
+    origin.protocol !== 'https:' ||
+    isIP(origin.hostname.replace(/^\[|\]$/g, '')) ||
+    origin.username ||
+    origin.password ||
+    origin.pathname !== '/' ||
+    origin.search ||
+    origin.hash
+  )
+    throw new Error(adminEntryError);
+  return origin;
+}
+
+async function checkAdminEntry(origin, publisherToken, send) {
+  const get = (path, headers) =>
+    send(new URL(path, origin), { method: 'GET', redirect: 'error', headers });
+  const page = await get('/resources/plugins');
+  if (
+    !page.ok ||
+    !/^text\/html(?:;|$)/i.test(page.headers.get('content-type') ?? '') ||
+    !/<meta name="auriga-access-mode" content="domain"\s*\/?>/.test(
+      await page.text(),
+    )
+  )
+    throw new Error(adminEntryError);
+
+  const published =
+    '/api/resource/v1/admin/catalog/published?kind=plugin&limit=1';
+  // The protected route returns 401 at the admin entry and 403 at the portal.
+  // Check it anonymously before sending a bearer to the configured origin.
+  const anonymous = await get(published);
+  if (anonymous.status !== 401) throw new Error(adminEntryError);
+  const authorized = await get(published, {
+    Authorization: 'Bearer ' + publisherToken,
+  });
+  if (
+    !authorized.ok ||
+    !/^application\/json(?:;|$)/i.test(
+      authorized.headers.get('content-type') ?? '',
+    ) ||
+    !Array.isArray((await authorized.json().catch(() => null))?.items)
+  )
+    throw new Error(
+      `Seed publisher preflight failed (${authorized.status}); use a current admin user access token with publish permission and recent step-up`,
+    );
+}
+
 // The server enforces distinct current identities, recent step-up and reviewer qualification.
 // Tokens are environment inputs only; errors and receipts never contain them.
 export async function publishPlugin(
@@ -37,6 +114,8 @@ export async function publishPlugin(
   send = globalThis.fetch,
 ) {
   const manifest = await verifySeed(payload, rawManifest);
+  origin = domainOrigin(origin);
+  await checkAdminEntry(origin, tokens.publisher, send);
   const manifestDigest = digest(rawManifest);
   const versionMetadata = {
     version: manifest.version,
@@ -161,16 +240,7 @@ async function main() {
     process.stdout.write(rawManifest);
     return;
   }
-  const origin = new URL(process.env.AURIGA_SEED_ORIGIN);
-  if (
-    !['http:', 'https:'].includes(origin.protocol) ||
-    origin.username ||
-    origin.password ||
-    origin.pathname !== '/' ||
-    origin.search ||
-    origin.hash
-  )
-    throw new Error('AURIGA_SEED_ORIGIN must be a plain HTTP(S) origin');
+  const origin = domainOrigin(process.env.AURIGA_SEED_ORIGIN);
   const tokens = Object.fromEntries(
     ['author', 'general', 'security', 'publisher'].map((role) => [
       role,

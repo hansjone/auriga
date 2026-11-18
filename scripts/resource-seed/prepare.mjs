@@ -295,7 +295,56 @@ export async function prepare(sourceArgument, outputArgument) {
     },
     dsh: original.dsh,
   };
+  const meta = {
+    name: 'clear-task-summary',
+    description: 'Summarize a task using supplied facts only',
+  };
+  const [pluginManifest, skillManifest] = [
+    ['plugin', pkg.name, pkg.version],
+    ['skill', meta.name, '1.0.0'],
+  ].map(([kind, name, version]) => ({
+    schemaVersion: 1,
+    name,
+    version,
+    description:
+      kind === 'plugin'
+        ? `Shared memory wiki with ${tools.length} MCP tools, including credential list/get/set/delete. Reads and writes the selected vault and credentials. Executes git, including push to user-configured remotes. Windows secrets use DPAPI; non-Windows secrets are stored as plaintext. Git remote hosts are user-configured and not enumerable.`
+        : meta.description,
+    author: {
+      displayName:
+        typeof original.author === 'string'
+          ? original.author
+          : (original.author?.name ?? `${original.name} maintainers`),
+    },
+    license: kind === 'plugin' ? original.license : 'MIT',
+    permissions: {
+      tools: kind === 'plugin' ? tools : [],
+      // The catalogue rejects wildcard hosts; git remotes are user-configured (see README).
+      outboundHosts: [],
+      dataAccess:
+        kind === 'plugin'
+          ? ['workspace_read', 'workspace_write', 'user_selected_files']
+          : [],
+    },
+    runtimes:
+      kind === 'plugin' ? [{ kind: 'node', versionRange: '>=22.0.0' }] : [],
+    artifacts: [],
+    signature: { mode: 'detached', algorithm: 'Ed25519' },
+    kind,
+    ...(kind === 'plugin'
+      ? { plugin: { packageName: name, dshVersionRange: '>=0.2.1-rc.3' } }
+      : {
+          skill: {
+            entry: 'SKILL.md',
+            contentProfile: 'text-only',
+            dshVersionRange: '>=0.2.1-rc.3',
+          },
+        }),
+  }));
   files.set('package/package.json', Buffer.from(json(pkg)));
+  // The admin console reads this metadata from the tgz and calculates the
+  // artifact fields from the selected file. The sidecar uses those same bytes.
+  files.set('package/auriga.manifest.json', Buffer.from(json(pluginManifest)));
   for (const [path, bytes] of files) {
     const destination = join(run, path);
     await mkdir(dirname(destination), { recursive: true });
@@ -314,10 +363,6 @@ export async function prepare(sourceArgument, outputArgument) {
   );
   const pluginBytes = packPlugin(files);
   await validateArchive(pluginBytes, { name: pkg.name, version: pkg.version });
-  const meta = {
-    name: 'clear-task-summary',
-    description: 'Summarize a task using supplied facts only',
-  };
   const skill = packSkill(
     {
       'SKILL.md': `---\nname: ${meta.name}\ndescription: "${meta.description}"\n---\n# Clear task summary\n\nUse when the user asks to summarize supplied task notes.\nState the result first. List completed work, evidence and remaining questions.\nUse only facts supplied in the conversation. Label uncertainty explicitly.\nDo not access files, call tools or external services, or include secrets.\n`,
@@ -326,59 +371,22 @@ export async function prepare(sourceArgument, outputArgument) {
   );
   unpackSkill(skill, meta);
   const summary = [];
-  for (const [kind, name, version, bytes] of [
-    ['plugin', pkg.name, pkg.version, pluginBytes],
-    ['skill', meta.name, '1.0.0', skill],
+  for (const [manifest, bytes] of [
+    [pluginManifest, pluginBytes],
+    [skillManifest, skill],
   ]) {
-    const manifest = {
-      schemaVersion: 1,
-      name,
-      version,
-      description:
-        kind === 'plugin'
-          ? `Shared memory wiki with ${tools.length} MCP tools, including credential list/get/set/delete. Reads and writes the selected vault and credentials. Executes git, including push to user-configured remotes. Windows secrets use DPAPI; non-Windows secrets are stored as plaintext. Git remote hosts are user-configured and not enumerable.`
-          : meta.description,
-      author: {
-        displayName:
-          typeof original.author === 'string'
-            ? original.author
-            : (original.author?.name ?? `${original.name} maintainers`),
+    const { kind, name, version } = manifest;
+    manifest.artifacts = [
+      {
+        id: 'payload',
+        role: 'payload',
+        digest: digest(bytes),
+        sizeBytes: bytes.length,
+        mediaType: 'application/gzip',
+        os: 'any',
+        arch: 'any',
       },
-      license: kind === 'plugin' ? original.license : 'MIT',
-      permissions: {
-        tools: kind === 'plugin' ? tools : [],
-        // The catalogue rejects wildcard hosts; git remotes are user-configured (see README).
-        outboundHosts: [],
-        dataAccess:
-          kind === 'plugin'
-            ? ['workspace_read', 'workspace_write', 'user_selected_files']
-            : [],
-      },
-      runtimes:
-        kind === 'plugin' ? [{ kind: 'node', versionRange: '>=22.0.0' }] : [],
-      artifacts: [
-        {
-          id: 'payload',
-          role: 'payload',
-          digest: digest(bytes),
-          sizeBytes: bytes.length,
-          mediaType: 'application/gzip',
-          os: 'any',
-          arch: 'any',
-        },
-      ],
-      signature: { mode: 'detached', algorithm: 'Ed25519' },
-      kind,
-      ...(kind === 'plugin'
-        ? { plugin: { packageName: name, dshVersionRange: '>=0.2.1-rc.3' } }
-        : {
-            skill: {
-              entry: 'SKILL.md',
-              contentProfile: 'text-only',
-              dshVersionRange: '>=0.2.1-rc.3',
-            },
-          }),
-    };
+    ];
     assert(
       schemaValid(
         'package',

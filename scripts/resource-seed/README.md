@@ -2,7 +2,7 @@
 
 执行 `node scripts/resource-seed/prepare.mjs <dsh-memwiki源码目录> [输出目录]`。默认产物位于工位 `seed-resources/`，入口从任意当前目录均可运行。需要 Node 22、npm 和锁定工作区依赖。
 
-每次在输出目录下创建独立 `build-*`，复制通用发行代码、包元数据及固定清单中的三个模板/技能文件，以 `npm ci --omit=dev --ignore-scripts --no-audit --no-fund` 安装锁定生产依赖。源码提交号、工作区改动和实际输入字节摘要一并记录。归档从显式文件映射构造，只收录四个 JS 入口、package.json、Cordis patch、许可证及固定资料文件。旧输出与隐藏附件不会进入映射。脚本只读源码，不访问用户记忆库、凭据或个人配置。
+每次在输出目录下创建独立 `build-*`，复制通用发行代码、包元数据及固定清单中的三个模板/技能文件，以 `npm ci --omit=dev --ignore-scripts --no-audit --no-fund` 安装锁定生产依赖。源码提交号、工作区改动和实际输入字节摘要一并记录。归档从显式文件映射构造，收录四个 JS 入口、package.json、供管理台预览的 `package/auriga.manifest.json`、Cordis patch、许可证及固定资料文件。旧输出与隐藏附件不会进入映射。脚本只读源码，不访问用户记忆库、凭据或个人配置。
 
 产物为两个 tgz、两份 `*.auriga-resource.json`、`checksums.json`、`build-source.json`。制品和现场证据留工位且被忽略。memwiki 将发行 JS 和生产依赖打成 Node ESM，去掉 lifecycle scripts 和外网安装依赖，保留 host/client/MCP CLI、通用模板和 skills；修正 bundle 后模板相对路径，并收集依赖许可证。示例 skill 仅根据用户提供的文字总结任务，无命令、外连和敏感内容。
 
@@ -19,7 +19,7 @@ Windows 凭据使用 DPAPI，非 Windows 实现采用明文凭据存储。该包
 ## 主控发布步骤
 
 1. 核实 `build-source.json` 的源码提交、锁文件和输入摘要、依赖版本及许可证。核对 `checksums.json` 中各自的 `manifestDigest`、`artifactDigest` 和实际文件。在隔离测试库验收 memwiki 设置及 MCP 读写，核对凭据存储差异和 Git 远端，并按供应链 A 级做完整安全审核。
-2. 按[统一插件种子发布说明](../../seed-resources/README.md)，用同一次准备生成的 `dsh-memwiki-<版本>.tgz` 和 `dsh-memwiki.auriga-resource.json` 预览。主控在授权环境使用这两个文件创建共享 plugin、multipart 上传原始清单和制品并送审。平台最低按 R2，须由两名不同的非作者通过普通及安全审核，再由有发布权限的非作者发布。
+2. 按[统一插件种子发布说明](../../seed-resources/README.md)，用同一次准备生成的 `dsh-memwiki-<版本>.tgz` 和 `dsh-memwiki.auriga-resource.json` 预览。IP 模式在浏览器管理台上传该 tgz 并送审，域名模式的 HTTPS 管理入口可使用发布 CLI。平台最低按 R2，须由两名不同的非作者通过普通及安全审核，再由有发布权限的非作者发布。
 3. 示例 skill 同样在统一目录创建共享包，通过 `POST /api/resource/v1/catalog/packages/{packageId}/versions` 的 multipart 请求上传对应原始清单和制品。按 `contracts/openapi/resource.yaml` 提交送审，由平台要求的非作者完成审核和发布。纯文本 skill 最低为 R1。
 4. 核对发布后的默认版本、启用与可见范围，从正常插件或技能市场入口验证可见性及安装。
 
