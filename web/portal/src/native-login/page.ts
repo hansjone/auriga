@@ -620,13 +620,7 @@ export function mountInstanceLogin(
       tx = undefined;
       show('preparing');
       if (placement) {
-        const opened = await placement.open(placementRequestKey(), signal);
-        if (!current(version)) return;
-        await exchangePlacement(opened, signal, {
-          fetch: options.fetch ?? globalThis.fetch,
-          navigate:
-            options.navigate ?? ((target) => win!.location.assign(target)),
-        });
+        await openPlacement(placement, placementRequestKey(), version, signal);
         return;
       }
       await observe((await workspace.open(signal)).instance, version, signal);
@@ -647,6 +641,49 @@ export function mountInstanceLogin(
         }
       } else fail(error);
     }
+  }
+
+  async function openPlacement(
+    api: ReturnType<typeof createPlacementApi>,
+    key: string,
+    version: number,
+    signal: AbortSignal,
+    retriedReady = false,
+  ) {
+    if (!current(version) || signal.aborted) return;
+    let opened;
+    try {
+      opened = await api.open(key, signal);
+    } catch (error) {
+      if (!current(version) || signal.aborted) return;
+      if (
+        retriedReady ||
+        !isApiError(error) ||
+        error.status !== 409 ||
+        error.problem.code !== 'common.conflict'
+      )
+        throw error;
+      const currentPlacement = await api.read(signal);
+      if (!current(version) || signal.aborted) return;
+      if (currentPlacement.state === 'ready') {
+        await openPlacement(api, key, version, signal, true);
+        return;
+      }
+      if (currentPlacement.state !== 'pending') throw error;
+      show('waiting');
+      pollTimer = setTimeout(() => {
+        void openPlacement(api, key, version, signal).catch((next) => {
+          if (current(version)) fail(next);
+        });
+      }, 2000);
+      return;
+    }
+    if (!current(version) || signal.aborted) return;
+    show('entering');
+    await exchangePlacement(opened, signal, {
+      fetch: options.fetch,
+      navigate: options.navigate ?? ((target) => win!.location.assign(target)),
+    });
   }
 
   async function observe(

@@ -18,12 +18,18 @@ it('handles a cross-origin manual opaqueredirect without following the instance 
   configure();
   const assign = vi.fn();
   vi.stubGlobal('location', { origin: 'https://portal.example.test', assign });
-  const fetch = vi.fn().mockResolvedValue({
-    type: 'opaqueredirect',
-    status: 0,
-    ok: false,
-    url: '',
-    headers: new Headers(),
+  const fetch = vi.fn(function (
+    this: typeof globalThis,
+    ..._args: Parameters<typeof globalThis.fetch>
+  ) {
+    expect(this).toBe(globalThis);
+    return Promise.resolve({
+      type: 'opaqueredirect',
+      status: 0,
+      ok: false,
+      url: '',
+      headers: new Headers(),
+    });
   });
   vi.stubGlobal('fetch', fetch);
   const ticket = crypto.randomUUID();

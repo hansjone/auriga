@@ -51,8 +51,7 @@ export function exchangeTarget(value: string) {
 export async function exchangePlacement(
   value: PlacementOpen,
   signal: AbortSignal,
-  browser: { fetch: typeof fetch; navigate: (url: string) => void } = {
-    fetch: globalThis.fetch,
+  browser: { fetch?: typeof fetch; navigate: (url: string) => void } = {
     navigate: (url) => location.assign(url),
   },
 ) {
@@ -63,8 +62,10 @@ export async function exchangePlacement(
   )
     throw new Error('shared.not_ready');
   const url = exchangeTarget(value.exchangeUrl);
+  const fetcher =
+    browser.fetch ?? ((input, init) => globalThis.fetch(input, init));
   // JSON POST only; no query string, storage, DOM input or logging of the ticket.
-  const response = await browser.fetch(url, {
+  const response = await fetcher(url, {
     method: 'POST',
     credentials: 'include',
     redirect: 'manual',
