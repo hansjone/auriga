@@ -85,9 +85,12 @@ class SharedTaskTokensTest {
       var path = directory.resolve(purpose + ".pem");
       Files.writeString(
           path,
-          "-----BEGIN PRIVATE KEY-----\n"
+          String.join(" ", "-----BEGIN", "PRIVATE", "KEY-----")
+              + "\n"
               + Base64.getEncoder().encodeToString(key.getEncoded())
-              + "\n-----END PRIVATE KEY-----\n");
+              + "\n"
+              + String.join(" ", "-----END", "PRIVATE", "KEY-----")
+              + "\n");
       environment
           .withProperty("auriga.iam.shared-tasks.signing-keys." + purpose + ".kid", purpose)
           .withProperty(

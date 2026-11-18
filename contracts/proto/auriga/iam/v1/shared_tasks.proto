@@ -18,6 +18,8 @@ service SharedTaskService {
   rpc ResolveSharedTask(ResolveSharedTaskRequest) returns (ResolveSharedTaskResponse);
   rpc AuthorizeSharedCapability(AuthorizeSharedCapabilityRequest) returns (AuthorizeSharedCapabilityResponse);
   rpc ReadSharedCredentials(ReadSharedCredentialsRequest) returns (ReadSharedCredentialsResponse);
+  // Agent-only, server-side delegation. No enterprise material leaves IAM.
+  rpc ExecuteSharedOutbound(ExecuteSharedOutboundRequest) returns (ExecuteSharedOutboundResponse);
 }
 
 message BeginSharedTaskRequest {
@@ -78,4 +80,17 @@ message ReadSharedCredentialsResponse {
   string token = 2;
   string updated_at = 3;
   int64 credential_version = 4;
+}
+message ExecuteSharedOutboundRequest {
+  auriga.node.v1.SharedDshCapability capability = 1;
+  string url = 2;
+  string method = 3;
+  map<string, string> headers = 4;
+  bytes body = 5;
+  int32 timeout_ms = 6;
+}
+message ExecuteSharedOutboundResponse {
+  int32 status_code = 1;
+  map<string, string> headers = 2;
+  string body = 3;
 }

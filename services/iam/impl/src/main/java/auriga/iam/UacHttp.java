@@ -1,5 +1,6 @@
 package auriga.iam;
 
+import io.grpc.Context;
 import java.io.IOException;
 import java.net.*;
 import java.util.*;
@@ -9,7 +10,7 @@ import org.apache.hc.client5.http.config.*;
 import org.apache.hc.client5.http.impl.classic.HttpClients;
 import org.apache.hc.client5.http.impl.io.PoolingHttpClientConnectionManagerBuilder;
 import org.apache.hc.core5.http.ContentType;
-import org.apache.hc.core5.http.io.entity.StringEntity;
+import org.apache.hc.core5.http.io.entity.ByteArrayEntity;
 import org.apache.hc.core5.util.Timeout;
 import tools.jackson.databind.JsonNode;
 
@@ -17,7 +18,11 @@ import tools.jackson.databind.JsonNode;
  * Destination and resolved addresses are checked at socket creation, including private networks.
  */
 final class UacHttp {
-  record Response(int status, byte[] body) {
+  record Response(int status, byte[] body, Map<String, List<String>> headers) {
+    Response(int status, byte[] body) {
+      this(status, body, Map.of());
+    }
+
     @Override
     public String toString() {
       return "UacResponse[status=" + status + "]";
@@ -70,8 +75,39 @@ final class UacHttp {
 
   Response post(URI uri, JsonNode body, Map<String, String> headers, int seconds)
       throws IOException {
+    var supplied = new HashMap<>(headers);
+    supplied.put("Content-Type", "application/json;charset=UTF-8");
+    return execute(
+        uri,
+        "POST",
+        body.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8),
+        supplied,
+        seconds * 1000,
+        UacTokenVerification.MAX_BODY,
+        Context.ROOT);
+  }
+
+  Response execute(
+      URI uri,
+      String method,
+      byte[] body,
+      Map<String, String> headers,
+      int timeoutMillis,
+      int maximum,
+      Context context)
+      throws IOException {
     validate(uri, false);
+    if (context.isCancelled()) throw new java.io.InterruptedIOException("UAC request cancelled");
     Set<String> allowed = destinations.get(origin(uri));
+    // A numeric HttpHost may bypass the DNS resolver in an HTTP transport.
+    // Apply the same pin before connecting in that case as well.
+    InetAddress literal = null;
+    try {
+      literal = InetAddress.ofLiteral(uri.getHost());
+    } catch (IllegalArgumentException ignored) {
+    }
+    if (literal != null && !allowed.contains(literal.getHostAddress()))
+      throw new UnknownHostException("UAC destination rejected");
     DnsResolver resolver =
         new DnsResolver() {
           public InetAddress[] resolve(String host) throws UnknownHostException {
@@ -86,7 +122,7 @@ final class UacHttp {
             return host;
           }
         };
-    Timeout timeout = Timeout.ofSeconds(seconds);
+    Timeout timeout = Timeout.ofMilliseconds(timeoutMillis);
     try (var manager =
             PoolingHttpClientConnectionManagerBuilder.create()
                 .setDnsResolver(resolver)
@@ -108,16 +144,18 @@ final class UacHttp {
                         .setConnectionRequestTimeout(timeout)
                         .build())
                 .build()) {
-      var request = new HttpUriRequestBase("POST", uri);
-      request.setEntity(new StringEntity(body.toString(), ContentType.APPLICATION_JSON));
+      var request = new HttpUriRequestBase(method, uri);
+      if (!Set.of("GET", "HEAD").contains(method))
+        request.setEntity(new ByteArrayEntity(body, ContentType.APPLICATION_OCTET_STREAM));
       headers.forEach(request::setHeader);
-      request.setHeader("Content-Type", "application/json;charset=UTF-8");
+      Context.CancellationListener cancellation = ignored -> request.cancel();
+      context.addListener(cancellation, Runnable::run);
       Thread deadline =
           Thread.ofVirtual()
               .start(
                   () -> {
                     try {
-                      Thread.sleep(seconds * 1000L);
+                      Thread.sleep(timeoutMillis);
                       request.cancel();
                     } catch (InterruptedException ignored) {
                       Thread.currentThread().interrupt();
@@ -127,23 +165,30 @@ final class UacHttp {
         return client.execute(
             request,
             response -> {
+              Map<String, List<String>> received = new HashMap<>();
+              for (var header : response.getHeaders())
+                received
+                    .computeIfAbsent(
+                        header.getName().toLowerCase(Locale.ROOT), ignored -> new ArrayList<>())
+                    .add(header.getValue());
               var entity = response.getEntity();
-              if (entity == null) return new Response(response.getCode(), new byte[0]);
-              if (entity.getContentLength() > UacTokenVerification.MAX_BODY) {
+              if (entity == null) return new Response(response.getCode(), new byte[0], received);
+              if (entity.getContentLength() > maximum) {
                 request.cancel();
                 throw new IOException("UAC response limit exceeded");
               }
               try (var input = entity.getContent()) {
-                byte[] bytes = input.readNBytes(UacTokenVerification.MAX_BODY + 1);
-                if (bytes.length > UacTokenVerification.MAX_BODY) {
+                byte[] bytes = input.readNBytes(maximum + 1);
+                if (bytes.length > maximum) {
                   request.cancel();
                   throw new IOException("UAC response limit exceeded");
                 }
-                return new Response(response.getCode(), bytes);
+                return new Response(response.getCode(), bytes, received);
               }
             });
       } finally {
         deadline.interrupt();
+        context.removeListener(cancellation);
       }
     }
   }

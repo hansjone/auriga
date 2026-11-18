@@ -728,6 +728,150 @@ func (x *ReadSharedCredentialsResponse) GetCredentialVersion() int64 {
 	return 0
 }
 
+type ExecuteSharedOutboundRequest struct {
+	state         protoimpl.MessageState  `protogen:"open.v1"`
+	Capability    *v1.SharedDshCapability `protobuf:"bytes,1,opt,name=capability,proto3" json:"capability,omitempty"`
+	Url           string                  `protobuf:"bytes,2,opt,name=url,proto3" json:"url,omitempty"`
+	Method        string                  `protobuf:"bytes,3,opt,name=method,proto3" json:"method,omitempty"`
+	Headers       map[string]string       `protobuf:"bytes,4,rep,name=headers,proto3" json:"headers,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	Body          []byte                  `protobuf:"bytes,5,opt,name=body,proto3" json:"body,omitempty"`
+	TimeoutMs     int32                   `protobuf:"varint,6,opt,name=timeout_ms,json=timeoutMs,proto3" json:"timeout_ms,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ExecuteSharedOutboundRequest) Reset() {
+	*x = ExecuteSharedOutboundRequest{}
+	mi := &file_auriga_iam_v1_shared_tasks_proto_msgTypes[12]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ExecuteSharedOutboundRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ExecuteSharedOutboundRequest) ProtoMessage() {}
+
+func (x *ExecuteSharedOutboundRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_auriga_iam_v1_shared_tasks_proto_msgTypes[12]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ExecuteSharedOutboundRequest.ProtoReflect.Descriptor instead.
+func (*ExecuteSharedOutboundRequest) Descriptor() ([]byte, []int) {
+	return file_auriga_iam_v1_shared_tasks_proto_rawDescGZIP(), []int{12}
+}
+
+func (x *ExecuteSharedOutboundRequest) GetCapability() *v1.SharedDshCapability {
+	if x != nil {
+		return x.Capability
+	}
+	return nil
+}
+
+func (x *ExecuteSharedOutboundRequest) GetUrl() string {
+	if x != nil {
+		return x.Url
+	}
+	return ""
+}
+
+func (x *ExecuteSharedOutboundRequest) GetMethod() string {
+	if x != nil {
+		return x.Method
+	}
+	return ""
+}
+
+func (x *ExecuteSharedOutboundRequest) GetHeaders() map[string]string {
+	if x != nil {
+		return x.Headers
+	}
+	return nil
+}
+
+func (x *ExecuteSharedOutboundRequest) GetBody() []byte {
+	if x != nil {
+		return x.Body
+	}
+	return nil
+}
+
+func (x *ExecuteSharedOutboundRequest) GetTimeoutMs() int32 {
+	if x != nil {
+		return x.TimeoutMs
+	}
+	return 0
+}
+
+type ExecuteSharedOutboundResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	StatusCode    int32                  `protobuf:"varint,1,opt,name=status_code,json=statusCode,proto3" json:"status_code,omitempty"`
+	Headers       map[string]string      `protobuf:"bytes,2,rep,name=headers,proto3" json:"headers,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	Body          string                 `protobuf:"bytes,3,opt,name=body,proto3" json:"body,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ExecuteSharedOutboundResponse) Reset() {
+	*x = ExecuteSharedOutboundResponse{}
+	mi := &file_auriga_iam_v1_shared_tasks_proto_msgTypes[13]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ExecuteSharedOutboundResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ExecuteSharedOutboundResponse) ProtoMessage() {}
+
+func (x *ExecuteSharedOutboundResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_auriga_iam_v1_shared_tasks_proto_msgTypes[13]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ExecuteSharedOutboundResponse.ProtoReflect.Descriptor instead.
+func (*ExecuteSharedOutboundResponse) Descriptor() ([]byte, []int) {
+	return file_auriga_iam_v1_shared_tasks_proto_rawDescGZIP(), []int{13}
+}
+
+func (x *ExecuteSharedOutboundResponse) GetStatusCode() int32 {
+	if x != nil {
+		return x.StatusCode
+	}
+	return 0
+}
+
+func (x *ExecuteSharedOutboundResponse) GetHeaders() map[string]string {
+	if x != nil {
+		return x.Headers
+	}
+	return nil
+}
+
+func (x *ExecuteSharedOutboundResponse) GetBody() string {
+	if x != nil {
+		return x.Body
+	}
+	return ""
+}
+
 var File_auriga_iam_v1_shared_tasks_proto protoreflect.FileDescriptor
 
 const file_auriga_iam_v1_shared_tasks_proto_rawDesc = "" +
@@ -788,14 +932,36 @@ const file_auriga_iam_v1_shared_tasks_proto_rawDesc = "" +
 	"\x05token\x18\x02 \x01(\tR\x05token\x12\x1d\n" +
 	"\n" +
 	"updated_at\x18\x03 \x01(\tR\tupdatedAt\x12-\n" +
-	"\x12credential_version\x18\x04 \x01(\x03R\x11credentialVersion2\xaa\x05\n" +
+	"\x12credential_version\x18\x04 \x01(\x03R\x11credentialVersion\"\xd0\x02\n" +
+	"\x1cExecuteSharedOutboundRequest\x12C\n" +
+	"\n" +
+	"capability\x18\x01 \x01(\v2#.auriga.node.v1.SharedDshCapabilityR\n" +
+	"capability\x12\x10\n" +
+	"\x03url\x18\x02 \x01(\tR\x03url\x12\x16\n" +
+	"\x06method\x18\x03 \x01(\tR\x06method\x12R\n" +
+	"\aheaders\x18\x04 \x03(\v28.auriga.iam.v1.ExecuteSharedOutboundRequest.HeadersEntryR\aheaders\x12\x12\n" +
+	"\x04body\x18\x05 \x01(\fR\x04body\x12\x1d\n" +
+	"\n" +
+	"timeout_ms\x18\x06 \x01(\x05R\ttimeoutMs\x1a:\n" +
+	"\fHeadersEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xe5\x01\n" +
+	"\x1dExecuteSharedOutboundResponse\x12\x1f\n" +
+	"\vstatus_code\x18\x01 \x01(\x05R\n" +
+	"statusCode\x12S\n" +
+	"\aheaders\x18\x02 \x03(\v29.auriga.iam.v1.ExecuteSharedOutboundResponse.HeadersEntryR\aheaders\x12\x12\n" +
+	"\x04body\x18\x03 \x01(\tR\x04body\x1a:\n" +
+	"\fHeadersEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x012\x9e\x06\n" +
 	"\x11SharedTaskService\x12`\n" +
 	"\x0fBeginSharedTask\x12%.auriga.iam.v1.BeginSharedTaskRequest\x1a&.auriga.iam.v1.BeginSharedTaskResponse\x12r\n" +
 	"\x15IssueSharedCapability\x12+.auriga.iam.v1.IssueSharedCapabilityRequest\x1a,.auriga.iam.v1.IssueSharedCapabilityResponse\x12c\n" +
 	"\x10FinishSharedTask\x12&.auriga.iam.v1.FinishSharedTaskRequest\x1a'.auriga.iam.v1.FinishSharedTaskResponse\x12f\n" +
 	"\x11ResolveSharedTask\x12'.auriga.iam.v1.ResolveSharedTaskRequest\x1a(.auriga.iam.v1.ResolveSharedTaskResponse\x12~\n" +
 	"\x19AuthorizeSharedCapability\x12/.auriga.iam.v1.AuthorizeSharedCapabilityRequest\x1a0.auriga.iam.v1.AuthorizeSharedCapabilityResponse\x12r\n" +
-	"\x15ReadSharedCredentials\x12+.auriga.iam.v1.ReadSharedCredentialsRequest\x1a,.auriga.iam.v1.ReadSharedCredentialsResponseBU\n" +
+	"\x15ReadSharedCredentials\x12+.auriga.iam.v1.ReadSharedCredentialsRequest\x1a,.auriga.iam.v1.ReadSharedCredentialsResponse\x12r\n" +
+	"\x15ExecuteSharedOutbound\x12+.auriga.iam.v1.ExecuteSharedOutboundRequest\x1a,.auriga.iam.v1.ExecuteSharedOutboundResponseBU\n" +
 	"\x17auriga.contracts.iam.v1P\x01Z8github.com/hansjone/auriga/infra/gen/auriga/iam/v1;iamv1b\x06proto3"
 
 var (
@@ -810,7 +976,7 @@ func file_auriga_iam_v1_shared_tasks_proto_rawDescGZIP() []byte {
 	return file_auriga_iam_v1_shared_tasks_proto_rawDescData
 }
 
-var file_auriga_iam_v1_shared_tasks_proto_msgTypes = make([]protoimpl.MessageInfo, 12)
+var file_auriga_iam_v1_shared_tasks_proto_msgTypes = make([]protoimpl.MessageInfo, 16)
 var file_auriga_iam_v1_shared_tasks_proto_goTypes = []any{
 	(*BeginSharedTaskRequest)(nil),            // 0: auriga.iam.v1.BeginSharedTaskRequest
 	(*BeginSharedTaskResponse)(nil),           // 1: auriga.iam.v1.BeginSharedTaskResponse
@@ -824,36 +990,45 @@ var file_auriga_iam_v1_shared_tasks_proto_goTypes = []any{
 	(*AuthorizeSharedCapabilityResponse)(nil), // 9: auriga.iam.v1.AuthorizeSharedCapabilityResponse
 	(*ReadSharedCredentialsRequest)(nil),      // 10: auriga.iam.v1.ReadSharedCredentialsRequest
 	(*ReadSharedCredentialsResponse)(nil),     // 11: auriga.iam.v1.ReadSharedCredentialsResponse
-	(*v1.SharedDshSessionBinding)(nil),        // 12: auriga.node.v1.SharedDshSessionBinding
-	(*v1.SharedDshCapability)(nil),            // 13: auriga.node.v1.SharedDshCapability
+	(*ExecuteSharedOutboundRequest)(nil),      // 12: auriga.iam.v1.ExecuteSharedOutboundRequest
+	(*ExecuteSharedOutboundResponse)(nil),     // 13: auriga.iam.v1.ExecuteSharedOutboundResponse
+	nil,                                       // 14: auriga.iam.v1.ExecuteSharedOutboundRequest.HeadersEntry
+	nil,                                       // 15: auriga.iam.v1.ExecuteSharedOutboundResponse.HeadersEntry
+	(*v1.SharedDshSessionBinding)(nil),        // 16: auriga.node.v1.SharedDshSessionBinding
+	(*v1.SharedDshCapability)(nil),            // 17: auriga.node.v1.SharedDshCapability
 }
 var file_auriga_iam_v1_shared_tasks_proto_depIdxs = []int32{
-	12, // 0: auriga.iam.v1.BeginSharedTaskRequest.binding:type_name -> auriga.node.v1.SharedDshSessionBinding
-	13, // 1: auriga.iam.v1.BeginSharedTaskResponse.capability:type_name -> auriga.node.v1.SharedDshCapability
-	12, // 2: auriga.iam.v1.IssueSharedCapabilityRequest.binding:type_name -> auriga.node.v1.SharedDshSessionBinding
-	13, // 3: auriga.iam.v1.IssueSharedCapabilityResponse.capability:type_name -> auriga.node.v1.SharedDshCapability
-	12, // 4: auriga.iam.v1.FinishSharedTaskRequest.binding:type_name -> auriga.node.v1.SharedDshSessionBinding
-	12, // 5: auriga.iam.v1.ResolveSharedTaskResponse.binding:type_name -> auriga.node.v1.SharedDshSessionBinding
-	13, // 6: auriga.iam.v1.AuthorizeSharedCapabilityRequest.capability:type_name -> auriga.node.v1.SharedDshCapability
-	12, // 7: auriga.iam.v1.AuthorizeSharedCapabilityResponse.binding:type_name -> auriga.node.v1.SharedDshSessionBinding
-	13, // 8: auriga.iam.v1.ReadSharedCredentialsRequest.capability:type_name -> auriga.node.v1.SharedDshCapability
-	0,  // 9: auriga.iam.v1.SharedTaskService.BeginSharedTask:input_type -> auriga.iam.v1.BeginSharedTaskRequest
-	2,  // 10: auriga.iam.v1.SharedTaskService.IssueSharedCapability:input_type -> auriga.iam.v1.IssueSharedCapabilityRequest
-	4,  // 11: auriga.iam.v1.SharedTaskService.FinishSharedTask:input_type -> auriga.iam.v1.FinishSharedTaskRequest
-	6,  // 12: auriga.iam.v1.SharedTaskService.ResolveSharedTask:input_type -> auriga.iam.v1.ResolveSharedTaskRequest
-	8,  // 13: auriga.iam.v1.SharedTaskService.AuthorizeSharedCapability:input_type -> auriga.iam.v1.AuthorizeSharedCapabilityRequest
-	10, // 14: auriga.iam.v1.SharedTaskService.ReadSharedCredentials:input_type -> auriga.iam.v1.ReadSharedCredentialsRequest
-	1,  // 15: auriga.iam.v1.SharedTaskService.BeginSharedTask:output_type -> auriga.iam.v1.BeginSharedTaskResponse
-	3,  // 16: auriga.iam.v1.SharedTaskService.IssueSharedCapability:output_type -> auriga.iam.v1.IssueSharedCapabilityResponse
-	5,  // 17: auriga.iam.v1.SharedTaskService.FinishSharedTask:output_type -> auriga.iam.v1.FinishSharedTaskResponse
-	7,  // 18: auriga.iam.v1.SharedTaskService.ResolveSharedTask:output_type -> auriga.iam.v1.ResolveSharedTaskResponse
-	9,  // 19: auriga.iam.v1.SharedTaskService.AuthorizeSharedCapability:output_type -> auriga.iam.v1.AuthorizeSharedCapabilityResponse
-	11, // 20: auriga.iam.v1.SharedTaskService.ReadSharedCredentials:output_type -> auriga.iam.v1.ReadSharedCredentialsResponse
-	15, // [15:21] is the sub-list for method output_type
-	9,  // [9:15] is the sub-list for method input_type
-	9,  // [9:9] is the sub-list for extension type_name
-	9,  // [9:9] is the sub-list for extension extendee
-	0,  // [0:9] is the sub-list for field type_name
+	16, // 0: auriga.iam.v1.BeginSharedTaskRequest.binding:type_name -> auriga.node.v1.SharedDshSessionBinding
+	17, // 1: auriga.iam.v1.BeginSharedTaskResponse.capability:type_name -> auriga.node.v1.SharedDshCapability
+	16, // 2: auriga.iam.v1.IssueSharedCapabilityRequest.binding:type_name -> auriga.node.v1.SharedDshSessionBinding
+	17, // 3: auriga.iam.v1.IssueSharedCapabilityResponse.capability:type_name -> auriga.node.v1.SharedDshCapability
+	16, // 4: auriga.iam.v1.FinishSharedTaskRequest.binding:type_name -> auriga.node.v1.SharedDshSessionBinding
+	16, // 5: auriga.iam.v1.ResolveSharedTaskResponse.binding:type_name -> auriga.node.v1.SharedDshSessionBinding
+	17, // 6: auriga.iam.v1.AuthorizeSharedCapabilityRequest.capability:type_name -> auriga.node.v1.SharedDshCapability
+	16, // 7: auriga.iam.v1.AuthorizeSharedCapabilityResponse.binding:type_name -> auriga.node.v1.SharedDshSessionBinding
+	17, // 8: auriga.iam.v1.ReadSharedCredentialsRequest.capability:type_name -> auriga.node.v1.SharedDshCapability
+	17, // 9: auriga.iam.v1.ExecuteSharedOutboundRequest.capability:type_name -> auriga.node.v1.SharedDshCapability
+	14, // 10: auriga.iam.v1.ExecuteSharedOutboundRequest.headers:type_name -> auriga.iam.v1.ExecuteSharedOutboundRequest.HeadersEntry
+	15, // 11: auriga.iam.v1.ExecuteSharedOutboundResponse.headers:type_name -> auriga.iam.v1.ExecuteSharedOutboundResponse.HeadersEntry
+	0,  // 12: auriga.iam.v1.SharedTaskService.BeginSharedTask:input_type -> auriga.iam.v1.BeginSharedTaskRequest
+	2,  // 13: auriga.iam.v1.SharedTaskService.IssueSharedCapability:input_type -> auriga.iam.v1.IssueSharedCapabilityRequest
+	4,  // 14: auriga.iam.v1.SharedTaskService.FinishSharedTask:input_type -> auriga.iam.v1.FinishSharedTaskRequest
+	6,  // 15: auriga.iam.v1.SharedTaskService.ResolveSharedTask:input_type -> auriga.iam.v1.ResolveSharedTaskRequest
+	8,  // 16: auriga.iam.v1.SharedTaskService.AuthorizeSharedCapability:input_type -> auriga.iam.v1.AuthorizeSharedCapabilityRequest
+	10, // 17: auriga.iam.v1.SharedTaskService.ReadSharedCredentials:input_type -> auriga.iam.v1.ReadSharedCredentialsRequest
+	12, // 18: auriga.iam.v1.SharedTaskService.ExecuteSharedOutbound:input_type -> auriga.iam.v1.ExecuteSharedOutboundRequest
+	1,  // 19: auriga.iam.v1.SharedTaskService.BeginSharedTask:output_type -> auriga.iam.v1.BeginSharedTaskResponse
+	3,  // 20: auriga.iam.v1.SharedTaskService.IssueSharedCapability:output_type -> auriga.iam.v1.IssueSharedCapabilityResponse
+	5,  // 21: auriga.iam.v1.SharedTaskService.FinishSharedTask:output_type -> auriga.iam.v1.FinishSharedTaskResponse
+	7,  // 22: auriga.iam.v1.SharedTaskService.ResolveSharedTask:output_type -> auriga.iam.v1.ResolveSharedTaskResponse
+	9,  // 23: auriga.iam.v1.SharedTaskService.AuthorizeSharedCapability:output_type -> auriga.iam.v1.AuthorizeSharedCapabilityResponse
+	11, // 24: auriga.iam.v1.SharedTaskService.ReadSharedCredentials:output_type -> auriga.iam.v1.ReadSharedCredentialsResponse
+	13, // 25: auriga.iam.v1.SharedTaskService.ExecuteSharedOutbound:output_type -> auriga.iam.v1.ExecuteSharedOutboundResponse
+	19, // [19:26] is the sub-list for method output_type
+	12, // [12:19] is the sub-list for method input_type
+	12, // [12:12] is the sub-list for extension type_name
+	12, // [12:12] is the sub-list for extension extendee
+	0,  // [0:12] is the sub-list for field type_name
 }
 
 func init() { file_auriga_iam_v1_shared_tasks_proto_init() }
@@ -867,7 +1042,7 @@ func file_auriga_iam_v1_shared_tasks_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_auriga_iam_v1_shared_tasks_proto_rawDesc), len(file_auriga_iam_v1_shared_tasks_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   12,
+			NumMessages:   16,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

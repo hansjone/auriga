@@ -181,7 +181,7 @@ class SharedTasksTest {
         });
   }
 
-  private static final class Fixture {
+  static final class Fixture {
     final UUID tenant = UUID.randomUUID();
     final String task = UUID.randomUUID().toString();
     final Clock clock = Clock.fixed(Instant.parse("2026-11-19T00:00:00Z"), ZoneOffset.UTC);
