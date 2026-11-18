@@ -20,9 +20,10 @@ it('handles a cross-origin manual opaqueredirect without following the instance 
   vi.stubGlobal('location', { origin: 'https://portal.example.test', assign });
   const fetch = vi.fn(function (
     this: typeof globalThis,
-    ..._args: Parameters<typeof globalThis.fetch>
+    ...args: Parameters<typeof globalThis.fetch>
   ) {
     expect(this).toBe(globalThis);
+    expect(args[1]?.method).toBe('POST');
     return Promise.resolve({
       type: 'opaqueredirect',
       status: 0,
