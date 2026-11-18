@@ -19,8 +19,12 @@ if [ "$1" = bootstrap-registry ]; then
   set -- up -d registry
 fi
 [ -f "$VAR/compose.env" ] && [ ! -L "$VAR/compose.env" ] || { echo 'missing compose installation env' >&2; exit 1; }
-PROJECT="$(go -C "$COMPOSE/bootstrap" run . -print-compose-project -out "$VAR")"
-[[ "$PROJECT" =~ ^[a-z0-9][a-z0-9_-]*$ ]] || exit 1
+BINDING="$(go -C "$COMPOSE/bootstrap" run . -print-compose-recipe -out "$VAR")"
+[[ "$BINDING" =~ ^([a-z0-9][a-z0-9_-]*)(\ managed-ca)?$ ]] || exit 1
+PROJECT=${BASH_REMATCH[1]}
+if [ -n "${BASH_REMATCH[2]}" ]; then
+  ARGS+=(-f "$VAR/managed-ca.yml")
+fi
 [ -z "$EXPECTED_PROJECT" ] || [ "$EXPECTED_PROJECT" = "$PROJECT" ] || { echo 'sealed Compose project differs from preflight' >&2; exit 1; }
 # Operations verifies the same sealed binding and rejects caller selectors itself.
 # Dispatch before the legacy recipe creates its trusted COMPOSE_* environment.

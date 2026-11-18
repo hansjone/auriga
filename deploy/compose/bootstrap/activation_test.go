@@ -62,9 +62,15 @@ func TestActivationRejectsLegacyNativeClient(t *testing.T) {
 type activationFixtureData struct {
 	binary, out, input, base, identity string
 	args                               []string
+	installArgs                        []string
 }
 
 func activationFixture(t *testing.T) activationFixtureData {
+	t.Helper()
+	return activationFixtureWithCA(t, false)
+}
+
+func activationFixtureWithCA(t *testing.T, managedCA bool) activationFixtureData {
 	t.Helper()
 	input, _ := collabFixture(t)
 	root, e := os.MkdirTemp("", "auriga-activation-")
@@ -93,6 +99,9 @@ func activationFixture(t *testing.T) activationFixtureData {
 	a.Listeners.Admin.Tls = true
 	a.InsecureHttpAcknowledged = false
 	a.Instances.AccessInstancesSubdomain.Scheme = "https"
+	if managedCA {
+		a.Listeners.Portal.Port = a.PortalOrigin.Port
+	}
 	write := func(name string, raw []byte) string {
 		t.Helper()
 		p := filepath.Join(root, name)
@@ -103,12 +112,16 @@ func activationFixture(t *testing.T) activationFixtureData {
 	}
 	raw, _ := json.Marshal(a)
 	access := write("access.json", raw)
-	ca, cert, _ := mustCA()
+	ca, cert, caPEM := mustCA()
 	chain, key := mustIssue(ca, cert, "browser", "auriga://test/browser", []string{a.PortalOrigin.Host, a.AdminOrigin.Host, "*." + a.Instances.AccessInstancesSubdomain.ParentDomain}, nil, []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth})
 	certFile, keyFile := write("browser.crt", chain), write("browser.key", key)
 	proofs, image := runtimeProofFixture(t, "real")
 	out := filepath.Join(root, "var")
-	if b, e := exec.Command(binary, "-out", out, "-access-file", access, "-edge-container", "public-test-edge", "-fixture", "real", "-image", image, "-runtime-proofs", proofs, "-real-dsh-metadata", realFixtureMetadata(t, image), "-https-cert-file", certFile, "-https-key-file", keyFile).CombinedOutput(); e != nil {
+	installArgs := []string{"-out", out, "-access-file", access, "-edge-container", "public-test-edge", "-fixture", "real", "-image", image, "-runtime-proofs", proofs, "-real-dsh-metadata", realFixtureMetadata(t, image), "-https-cert-file", certFile, "-https-key-file", keyFile}
+	if managedCA {
+		installArgs = append(installArgs, "-managed-ca-file", write("local-ca.pem", caPEM))
+	}
+	if b, e := exec.Command(binary, installArgs...).CombinedOutput(); e != nil {
 		t.Fatalf("base CLI: %v %s", e, b)
 	}
 	receipt, e := os.ReadFile(filepath.Join(out, "iam-installation", "bootstrap.receipt"))
@@ -120,6 +133,7 @@ func activationFixture(t *testing.T) activationFixtureData {
 		t.Fatal(e)
 	}
 	f := activationFixtureData{binary: binary, out: out, input: input, base: digestBytes(receipt), identity: digestBytes(identity)}
+	f.installArgs = installArgs
 	f.args = []string{"-activate-collab", "-out", out, "-network-collab-file", input, "-base-receipt-sha256", f.base, "-base-identity-sha256", f.identity}
 	return f
 }
@@ -228,7 +242,7 @@ func TestActivationSealAndReentry(t *testing.T) {
 	if runtime.GOOS != "linux" {
 		t.Skip("Linux activation only")
 	}
-	f := activationFixture(t)
+	f := activationFixtureWithCA(t, true)
 	before := originalBase(t, f.out)
 	if b, e := exec.Command(f.binary, f.args...).CombinedOutput(); e == nil || !strings.Contains(string(b), "stop platform") {
 		t.Fatalf("unstopped activation: %v %s", e, b)

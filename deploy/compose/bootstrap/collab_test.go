@@ -170,21 +170,25 @@ func TestCollabProjectionAndReceipt(t *testing.T) {
 	a.Listeners.Admin.Tls = true
 	a.InsecureHttpAcknowledged = false
 	a.Instances.AccessInstancesSubdomain.Scheme = "https"
+	a.Listeners.Portal.Port = a.PortalOrigin.Port
 	raw, _ := json.Marshal(a)
 	accessFile := filepath.Join(root, "access.json")
 	if err := os.WriteFile(accessFile, raw, 0600); err != nil {
 		t.Fatal(err)
 	}
-	ca, cert, _ := mustCA()
+	ca, cert, caPEM := mustCA()
 	browser, key := mustIssue(ca, cert, "browser", "auriga://test/browser", []string{a.PortalOrigin.Host, a.AdminOrigin.Host, "*." + a.Instances.AccessInstancesSubdomain.ParentDomain}, nil, []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth})
-	certFile, keyFile := filepath.Join(root, "browser.crt"), filepath.Join(root, "browser.key")
+	certFile, keyFile, caFile := filepath.Join(root, "browser.crt"), filepath.Join(root, "browser.key"), filepath.Join(root, "local-ca.pem")
 	if err := os.WriteFile(certFile, browser, 0644); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(keyFile, key, 0600); err != nil {
 		t.Fatal(err)
 	}
-	args := []string{"-out", out, "-access-file", accessFile, "-edge-container", "public-test-edge", "-image", image, "-fixture", "real", "-runtime-proofs", proofs, "-real-dsh-metadata", realFixtureMetadata(t, image), "-https-cert-file", certFile, "-https-key-file", keyFile, "-network-collab-file", file}
+	if err := os.WriteFile(caFile, caPEM, 0644); err != nil {
+		t.Fatal(err)
+	}
+	args := []string{"-out", out, "-access-file", accessFile, "-edge-container", "public-test-edge", "-image", image, "-fixture", "real", "-runtime-proofs", proofs, "-real-dsh-metadata", realFixtureMetadata(t, image), "-https-cert-file", certFile, "-https-key-file", keyFile, "-managed-ca-file", caFile, "-network-collab-file", file}
 	if runtime.GOOS != "linux" {
 		if b, e := exec.Command(binary, args...).CombinedOutput(); e == nil || !strings.Contains(string(b), "activation requires Linux") {
 			t.Fatalf("non-Linux activation accepted/wrong error: %v %s", e, b)

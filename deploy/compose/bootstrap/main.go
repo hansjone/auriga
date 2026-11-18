@@ -55,6 +55,7 @@ func main() {
 	accessFile := flag.String("access-file", "", "trusted deployment access JSON (default: disposable M2 domain recipe)")
 	httpsCert := flag.String("https-cert-file", "", "external direct HTTPS PEM certificate chain")
 	httpsKey := flag.String("https-key-file", "", "external direct HTTPS PEM private key")
+	managedCAPath := flag.String("managed-ca-file", "", "optional public CA bundle for the local direct HTTPS domain recipe")
 	collabFile := flag.String("network-collab-file", "", "explicit offline-approved standalone collab installation JSON")
 	activate := flag.Bool("activate-collab", false, "seal first N1 activation without changing base")
 	checkActivation := flag.Bool("check-collab-activation", false, "verify sealed activation and unchanged base")
@@ -62,17 +63,25 @@ func main() {
 	baseIdentity := flag.String("base-identity-sha256", "", "independently checked identity public file SHA256")
 	stopped := flag.Bool("stopped-confirmed", false, "operator confirms platform/edge/network stopped")
 	printProject := flag.Bool("print-compose-project", false, "print only the project from verified sealed installation access")
+	printRecipe := flag.Bool("print-compose-recipe", false, "print the sealed project and optional fixed managed CA recipe tag")
 	validateOnly := flag.Bool("validate-access", false, "validate access and Compose support without writing materials")
 	proofs := flag.String("runtime-proofs", "", "isolated collected raw OCI proof root (first installation only)")
 	observer := flag.Bool("heartbeat-observer", false, "route all combined APIs through the local authenticated heartbeat observer")
 	flag.Parse()
-	if *printProject && !*activate {
-		if *checkActivation || *validateOnly || *stopped || *collabFile != "" || *baseReceipt != "" || *baseIdentity != "" {
+	if *managedCAPath != "" && (*printProject || *printRecipe || *activate || *checkActivation) {
+		fatalf("managed CA is a base installation input")
+	}
+	if *printRecipe || (*printProject && !*activate) {
+		if (*printRecipe && (*printProject || *activate)) || *checkActivation || *validateOnly || *stopped || *collabFile != "" || *baseReceipt != "" || *baseIdentity != "" {
 			fatalf("invalid sealed Compose project arguments")
 		}
-		project, err := sealedComposeProject(*out)
+		project, useManagedCA, err := sealedComposeBinding(*out)
 		if err != nil {
 			fatalf("%v", err)
+		}
+		if *printRecipe && useManagedCA {
+			fmt.Printf("%s managed-ca\n", project)
+			return
 		}
 		fmt.Println(project)
 		return
@@ -113,6 +122,10 @@ func main() {
 		fatalf("%v", err)
 	}
 	defer browser.Clear()
+	managedCA, err := readManagedCA(*managedCAPath, access, browser.Certificate)
+	if err != nil {
+		fatalf("%v", err)
+	}
 	collab, err := readCollabInput(*collabFile, access)
 	if err != nil {
 		fatalf("%v", err)
@@ -135,6 +148,9 @@ func main() {
 	if collab != nil {
 		combinedInput := sha256.Sum256(append(input[:], []byte(collab.Digest())...))
 		inputDigest = hex.EncodeToString(combinedInput[:])
+	}
+	if managedCA != nil {
+		inputDigest = digestBytes([]byte(inputDigest + "\nmanaged-ca-v1\n" + digestBytes(managedCA)))
 	}
 	existing, err := preflightRuntimeInstallation(*out)
 	if err != nil {
@@ -162,6 +178,9 @@ func main() {
 		}
 		fmt.Printf("bootstrap ok out=%s ca_sha256=%s image=%s (existing installation)\n", *out, fp, *image)
 		return
+	}
+	if present, err := hasManagedCA(*out); err != nil || present {
+		fatalf("unreceipted managed CA files require a fresh installation directory")
 	}
 	if *fixture == "real" {
 		if *realDSHMetadata == "" {
@@ -196,6 +215,11 @@ func main() {
 	writeBifrost(*out)
 	if err := browser.Write(*out); err != nil {
 		fatalf("%v", err)
+	}
+	if managedCA != nil {
+		if err := writeManagedCA(*out, managedCA, access); err != nil {
+			fatalf("%v", err)
+		}
 	}
 	rpc := map[string]string{"Target": fmt.Sprintf("127.0.0.1:%d", iamRPCPort), "ServiceTokenFile": "/run/auriga-network-token/gateway/service.jwt", "CertFile": "/etc/auriga/pki/gateway.crt", "KeyFile": "/etc/auriga/pki/gateway.key", "CAFile": "/etc/auriga/pki/ca.crt", "ServerName": iamServerName}
 	if err := networkdeploy.Generate(filepath.Join(*out, "network"), networkdeploy.Options{PlatformDirectory: filepath.Join(*out, "network-platform"), Root: "/etc/auriga/network", SubmitListen: "172.29.240.1:18443", BrokerHost: "0.0.0.0", WebsocketHost: "0.0.0.0", BrokerURL: "tls://172.29.241.2:14224", BrokerPort: 14224, WebsocketPort: 18444, Audience: "auriga-network", IAM: rpc, Collab: rpc, ExportServiceToken: true}); err != nil { // gitleaks:allow disposable M2 network

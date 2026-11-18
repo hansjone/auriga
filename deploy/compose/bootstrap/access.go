@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/base64"
@@ -114,6 +115,20 @@ func composeMaterialSet(out string, requireTemplate bool) (materials.MaterialSet
 	if cfg.PortalOrigin().Scheme == "https" {
 		set.PublicFiles = append(set.PublicFiles, "browser-tls/browser.crt", "browser-tls/browser.key")
 	}
+	present, err := hasManagedCA(out)
+	if err != nil {
+		return set, err
+	}
+	if present {
+		if _, err := collabRead(filepath.Join(out, managedCAFile), managedCALimit, false); err != nil {
+			return set, fmt.Errorf("invalid managed CA source metadata")
+		}
+		recipe, err := collabRead(filepath.Join(out, managedCARecipe), 65536, false)
+		if err != nil || validateManagedCAAccess(cfg) != nil || !bytes.Equal(recipe, managedCACompose(cfg)) {
+			return set, fmt.Errorf("invalid managed CA Compose recipe")
+		}
+		set.PublicFiles = append(set.PublicFiles, managedCAFile, managedCARecipe)
+	}
 	if _, err := os.Lstat(filepath.Join(out, "collab-installation")); err == nil {
 		if !validateCollabSource(out) {
 			return set, fmt.Errorf("invalid managed collab source metadata")
@@ -160,6 +175,9 @@ func composeMaterialSet(out string, requireTemplate bool) (materials.MaterialSet
 	}
 	set.ManagedDirectories = append(set.ManagedDirectories, "runtime-proofs")
 	set.PublicFileLimits = map[string]int64{}
+	if present {
+		set.PublicFileLimits[managedCAFile] = managedCALimit
+	}
 	for _, name := range []string{"manifest.json", "config.json"} {
 		path := "runtime-proofs/" + leaf + "/" + name
 		set.PublicFiles = append(set.PublicFiles, path)

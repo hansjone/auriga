@@ -6,7 +6,7 @@ COMPOSE="$ROOT/deploy/compose"
 VAR="$COMPOSE/var"
 ACCESS_ARGS=()
 while [ "$#" -gt 0 ]; do
-  case "$1" in --access-file|--https-cert-file|--https-key-file|--network-collab-file) ;; *) echo 'unsupported prepare input' >&2; exit 1 ;; esac
+  case "$1" in --access-file|--https-cert-file|--https-key-file|--managed-ca-file|--network-collab-file) ;; *) echo 'unsupported prepare input' >&2; exit 1 ;; esac
   [ "$#" -ge 2 ] && [ -n "$2" ] || { echo 'missing prepare input' >&2; exit 1; }
   # Resolve once before changing directory; only the public Go loader parses it.
   ACCESS_DIR="$(cd -- "$(dirname -- "$2")" 2>/dev/null && pwd)" || { echo 'invalid prepare input' >&2; exit 1; }

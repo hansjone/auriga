@@ -39,6 +39,9 @@ type rotationCurrent struct {
 
 func (r *rotation) composeArgs() []string {
 	args := []string{"compose", "--project-name", r.project, "--project-directory", r.compose, "--env-file", filepath.Join(r.out, "compose.env"), "-f", filepath.Join(r.compose, "docker-compose.yml"), "--profile", "network-collab"}
+	if r.managedCA {
+		args = append(args, "-f", filepath.Join(r.out, managedCARecipe))
+	}
 	overlay := "collab-required.yml"
 	if r.source != r.out {
 		overlay = "collab-activation.yml"
@@ -131,9 +134,10 @@ func (r *rotation) checkRecipe(c rotationContainer) error {
 	created := c.Config.Labels["com.docker.compose.project.config_files"]
 	service := c.Config.Labels["com.docker.compose.service"]
 	// The operations overlay only changes collab/network. Compose can retain
-	// unchanged services with their exact original two-file creation labels.
+	// unchanged services with their exact original creation labels.
 	unchanged := service == "platform" || service == "edge" || service == "postgres"
-	if created == strings.Join(files, ",") || (unchanged && len(files) == 3 && created == strings.Join(files[:2], ",")) {
+	last := len(files) - 1
+	if created == strings.Join(files, ",") || (unchanged && files[last] == filepath.Join(r.root(), "current.yml") && created == strings.Join(files[:last], ",")) {
 		return nil
 	}
 	return fmt.Errorf("rotation running recipe differs")

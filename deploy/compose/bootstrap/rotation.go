@@ -59,6 +59,7 @@ type rotation struct {
 	compose, out, source, state, config, network, jar, project string
 	input                                                      rotationInput
 	sourceReceipt                                              string
+	managedCA                                                  bool
 	run                                                        func(string, ...string) ([]byte, error)
 }
 
@@ -234,6 +235,10 @@ func (r *rotation) binding() error {
 	if err != nil || digestBytes(identity) != r.input.Identity {
 		return fmt.Errorf("rotation identity checkpoint refused")
 	}
+	managedCA, err := hasManagedCA(r.out)
+	if err != nil {
+		return err
+	}
 	r.source, r.state, r.network = r.out, filepath.Join(r.out, "collab-runtime", "state", "state.json"), filepath.Join(r.out, "network")
 	r.config = filepath.Join(r.out, "collab-runtime", "config")
 	if _, err := os.Lstat(filepath.Join(r.out, activationDirectory)); err == nil {
@@ -259,6 +264,10 @@ func (r *rotation) binding() error {
 		}
 	}
 	r.sourceReceipt = digestBytes(receipt)
+	if present, err := hasManagedCA(r.out); err != nil || present != managedCA {
+		return fmt.Errorf("rotation managed CA selection changed")
+	}
+	r.managedCA = managedCA
 	keys, err := rotationRead(filepath.Join(r.out, "iam-installation", "compose.keys"))
 	if err != nil {
 		return err
