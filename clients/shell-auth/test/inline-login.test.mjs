@@ -6,7 +6,7 @@ import { valid } from '../schema.mjs';
 import { Broker } from '../broker.mjs';
 import { createPlatform, trustedConfig } from '../platform.mjs';
 
-function setup() {
+function setup({ teamAlongsideUac = false } = {}) {
   const providerId = randomUUID(),
     challengeId = randomUUID();
   let transactionId = randomUUID(),
@@ -33,6 +33,15 @@ function setup() {
       if (path.endsWith('/providers'))
         return Response.json({
           items: [
+            ...(teamAlongsideUac
+              ? [
+                  {
+                    id: randomUUID(),
+                    connectorType: 'team-account',
+                    displayName: { en: 'Team' },
+                  },
+                ]
+              : []),
             {
               id: providerId,
               connectorType: mode,
@@ -128,7 +137,7 @@ function setup() {
 }
 
 test('inline UAC waiting to scanned to success uses PKCE and isolated cookies without browser or user code', async () => {
-  const { f, calls, run, state } = setup();
+  const { f, calls, run, state } = setup({ teamAlongsideUac: true });
   await run('inline_login');
   assert.equal(f.broker.snapshot(OWNER).inlineLogin.step.status, 'waiting');
   assert.equal(f.broker.snapshot(OTHER).inlineLogin, undefined);
@@ -148,7 +157,7 @@ test('inline UAC waiting to scanned to success uses PKCE and isolated cookies wi
 });
 test('inline team and emergency submit their transaction form without returning credentials', async () => {
   for (const type of ['team-account', 'emergency']) {
-    const { f, run, mode } = setup();
+    const { f, run, mode, calls } = setup();
     mode(type);
     await run('inline_login');
     assert.equal(f.broker.snapshot(OWNER).inlineLogin.step.type, 'form');
@@ -158,6 +167,7 @@ test('inline team and emergency submit their transaction form without returning 
       values: { password: randomUUID() },
     });
     assert.equal(f.broker.state, 'authenticated');
+    assert.ok(calls.every(({ path }) => !path.includes('/login/uac/')));
     await f.broker.close();
   }
 });

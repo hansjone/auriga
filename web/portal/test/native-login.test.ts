@@ -160,6 +160,56 @@ afterEach(() => {
 });
 
 describe('native cloud sign-in', () => {
+  it('starts QR sign-in for an enabled UAC provider without a navigation proof', async () => {
+    const id = '01900000-0000-7000-8000-000000000009';
+    fetcher.mockImplementation(async (input, init) => {
+      const path = String(input);
+      if (path === '/api/iam/v1/me') return expired();
+      if (path.endsWith('/providers'))
+        return json({
+          items: [
+            provider,
+            { ...provider, id, connectorType: 'uac', primaryStep: 'qr' },
+          ],
+        });
+      if (path.endsWith('/challenges')) {
+        expect(JSON.parse(String(init?.body)).providerId).toBe(id);
+        return json({
+          id,
+          transactionId: txId,
+          qrContent: 'synthetic-qr-content',
+          expiresAt: '2099-01-01T00:00:00Z',
+          pollIntervalSeconds: 2,
+        });
+      }
+      if (path.endsWith('/challenges/' + id) && init?.method !== 'DELETE')
+        return json({ id, state: 'waiting' });
+      return new Response(null, { status: 204 });
+    });
+    render();
+    await flush();
+    expect(
+      root.querySelector('[data-uac-state]')?.getAttribute('data-uac-state'),
+    ).toBe('waiting');
+    expect(root.querySelector('[data-uac-state] svg')).toBeTruthy();
+    expect(fetcher.mock.calls.map(([path]) => path)).toEqual([
+      '/api/iam/v1/me',
+      '/api/iam/v1/login/providers',
+      '/api/iam/v1/login/uac/challenges',
+      '/api/iam/v1/login/uac/challenges/' + id,
+    ]);
+  });
+
+  it('offers the configured team sign-in when IAM does not offer UAC', async () => {
+    await anonymous();
+    expect(button('团队账号')).toBeDefined();
+    expect(root.querySelector('[data-uac-state]')).toBeNull();
+    expect(fetcher.mock.calls.map(([path]) => path)).toEqual([
+      '/api/iam/v1/me',
+      '/api/iam/v1/login/providers',
+    ]);
+  });
+
   it('opens the workspace without waiting for department information and updates the identity area later', async () => {
     let reads = 0;
     fetcher.mockImplementation(async (input) => {
