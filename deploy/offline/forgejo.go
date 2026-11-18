@@ -255,7 +255,12 @@ func forgejoReleaseBody(m distributionManifest, key string) (string, error) {
 		return "", err
 	}
 	var body strings.Builder
-	fmt.Fprintf(&body, "Auriga 离线安装包与开发套件。发行公钥指纹 SHA256(SPKI DER)：`%s`。从独立渠道核对后使用 `--trust-fingerprint %s` 或 `--verify-key`，参见 DEPLOY.md / MAINTAIN.md。\n\n", fp, fp)
+	if m.SourceOnly {
+		body.WriteString("Auriga 源码与开发套件。现场按 MAINTAIN.md 离线构建和签发自己的版本。")
+	} else {
+		body.WriteString("Auriga 离线安装包与开发套件。")
+	}
+	fmt.Fprintf(&body, "发行公钥指纹 SHA256(SPKI DER)：`%s`。从独立渠道核对后使用 `--trust-fingerprint %s` 或 `--verify-key`。\n\n", fp, fp)
 	if m.Windows != nil {
 		fmt.Fprintf(&body, "Windows 先用 Get-FileHash 核验源码和套件归档，再解包，核验引导 Node 后执行客户端命令。\n\n- `%s` SHA256 `%s`\n", windowsBuildNodePath, m.Windows.BuildNodeSHA)
 		for _, file := range m.Archives {

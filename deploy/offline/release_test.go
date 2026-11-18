@@ -7,6 +7,7 @@ import (
 	"encoding/pem"
 	"errors"
 	"fmt"
+	"net/http"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -344,6 +345,37 @@ exec "$GATE_COMMIT_REAL_GIT" "$@"
 	if parts, err := filepath.Glob(filepath.Join(opts.Out, "*.part*")); err != nil || len(parts) != 0 {
 		t.Fatal("whole release produced split files", parts, err)
 	}
+	t.Run("source-only", func(t *testing.T) {
+		sourceOnly := opts
+		sourceOnly.SourceOnly = true
+		sourceOnly.Out = filepath.Join(parent, "source-only")
+		gateRan := false
+		probe := builders
+		probe.Gate = func(request gateRequest) (buildGate, error) {
+			gateRan = true
+			return builders.Gate(request)
+		}
+		probe.Bundle = func(_ []string, _ string) error {
+			return errors.New("source-only release called the installation attachment builder")
+		}
+		if err := generateRelease(sourceOnly, probe); err != nil || !gateRan {
+			t.Fatalf("source-only release must pass the build gate: %v", err)
+		}
+		var distribution distributionManifest
+		if err := readJSON(filepath.Join(sourceOnly.Out, "release-manifest.json"), &distribution); err != nil || !distribution.SourceOnly {
+			t.Fatalf("source-only release lost its profile: %v", err)
+		}
+		if files, err := filepath.Glob(filepath.Join(sourceOnly.Out, "auriga-offline-*")); err != nil || len(files) != 0 {
+			t.Fatalf("source-only release shipped installation artifacts: %v %v", files, err)
+		}
+		guide, err := os.ReadFile(filepath.Join(sourceOnly.Out, "DOWNLOADS.txt"))
+		if err != nil || strings.Contains(string(guide), "auriga-offline-") || !strings.Contains(string(guide), filepath.Base(windowsArchive)) {
+			t.Fatalf("source-only guide must list Windows inputs and omit official installation packages: %v", err)
+		}
+		if err := uploadRelease(uploadOptions{Server: "https://forgejo.example.test", Repo: "owner/auriga", Dir: sourceOnly.Out, Key: public}, http.DefaultClient); err != nil {
+			t.Fatalf("source-only Forgejo dry run failed: %v", err)
+		}
+	})
 	failing := builders
 	failing.Gate = func(gateRequest) (buildGate, error) { return buildGate{}, errors.New("missing fixture dependency") }
 	opts.Out = filepath.Join(parent, "gate-failure")
