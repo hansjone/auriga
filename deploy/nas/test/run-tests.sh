@@ -76,6 +76,8 @@ if sh "$ROOT/test/image-readiness.sh"; then pass image_readiness_regressions
 else fail_msg image_readiness_regressions "local images or no-pull start failed"; fi
 if sh "$ROOT/test/runtime-upgrade.sh"; then pass runtime_upgrade_transaction
 else fail_msg runtime_upgrade_transaction "runtime activation or rollback failed"; fi
+if sh "$ROOT/test/resource-wiring.sh"; then pass resource_wiring_projection
+else fail_msg resource_wiring_projection 'NAS resource projection differs across supported entry points'; fi
 if sh "$ROOT/test/materials-upgrade.sh"; then pass materials_upgrade_boundary
 else fail_msg materials_upgrade_boundary "material activation arguments or failure handling failed"; fi
 if sh "$ROOT/test/upgrade-admin.sh"; then pass admin_database_upgrade_boundary

@@ -41,11 +41,15 @@ probe() (
 _runtime=$(runtime_directory)
 case "$_runtime" in "$AURIGA_DATA_ROOT/"*) ;; *) die 'invalid privileged runtime path' ;; esac
 _runtime=${_runtime#"$AURIGA_DATA_ROOT/"}
+set --
+if [ -n "${AURIGA_RESOURCE_DOWNGRADE_KID:-}" ]; then
+  set -- resource-downgrade:resource-downgrade:secrets/resource-downgrade
+fi
 probe platform 10001:10001 65532 \
   access:public:config/materials/access.json platform-config:public:config/materials/platform-access.yaml \
   healthcheck:public:config/materials/iam-healthcheck.sh installation:installation:config/materials/iam-installation \
   pki:platform-pki:config/materials/pki "templates:tree:$_runtime/templates" \
-  "runtime-keys:tree:$_runtime/runtime-keys" tokens:tokens:internal-tokens enrollment:dir:enrollment
+  "runtime-keys:tree:$_runtime/runtime-keys" tokens:tokens:internal-tokens enrollment:dir:enrollment "$@"
 probe edge 65532:65532 none \
   access:public:config/materials/access.json edge-config:public:config/materials/edge.config.json \
   identity-signing:secret:config/pki-edge/identity-signing-keys.json pki:edge-pki:config/pki-edge \
