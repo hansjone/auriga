@@ -321,8 +321,10 @@ public class ResourceRuntimeConfiguration {
       CatalogDelivery delivery,
       CatalogWorkflow catalog,
       ResourceDistributions distributions,
-      Clock clock) {
-    return new CatalogSharedResources(store, db, access, delivery, catalog, distributions, clock);
+      Clock clock,
+      ObjectProvider<auriga.resource.api.SharedResourceNodes> nodes) {
+    return new CatalogSharedResources(
+        store, db, access, delivery, catalog, distributions, clock, nodes::getIfAvailable);
   }
 
   @Bean

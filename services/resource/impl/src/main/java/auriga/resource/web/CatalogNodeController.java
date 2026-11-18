@@ -18,10 +18,13 @@ import org.springframework.web.bind.annotation.*;
 public class CatalogNodeController {
   private final CatalogDelivery delivery;
   private final ResourceDistributions identity;
+  private final CatalogSharedResources shared;
 
-  public CatalogNodeController(CatalogDelivery delivery, ResourceDistributions identity) {
+  public CatalogNodeController(
+      CatalogDelivery delivery, ResourceDistributions identity, CatalogSharedResources shared) {
     this.delivery = delivery;
     this.identity = identity;
+    this.shared = shared;
   }
 
   @GetMapping("/{id}/manifest")
@@ -44,6 +47,9 @@ public class CatalogNodeController {
             instanceof X509Certificate[] certificates))
       throw new AurigaException(CommonErrors.UNAUTHENTICATED);
     UUID node = identity.authenticate(certificates);
+    UUID tenant = identity.nodeTenant(node);
+    var sharedContent =
+        shared.nodeDownload(tenant, node, id, artifact, r.getHeader("Range") != null);
     return ResponseEntity.ok()
         .cacheControl(CacheControl.noStore())
         .contentType(
@@ -51,7 +57,9 @@ public class CatalogNodeController {
         .header("X-Content-Type-Options", "nosniff")
         .body(
             new InputStreamResource(
-                delivery.nodeDownload(
-                    identity.nodeTenant(node), node, id, artifact, r.getHeader("Range") != null)));
+                sharedContent.orElseGet(
+                    () ->
+                        delivery.nodeDownload(
+                            tenant, node, id, artifact, r.getHeader("Range") != null))));
   }
 }
