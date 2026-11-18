@@ -111,7 +111,8 @@ func (d *Docker) CheckHealth(ctx context.Context, id string) (st Status, err err
 	}
 	d.mu.Lock()
 	ep := d.endpoints[id]
-	st.Ready = ep.pending == nil && ep.url == endpoint && ep.process == process && sameExecution(ep.record, record) && sameBridges(ep.bridges, bridges)
+	st.Ready = ep.pending == nil && ep.url == endpoint && ep.process == process &&
+		sameExecution(ep.record, record) && sameBridges(ep.bridges, bridges) && ep.leaseError() == nil
 	d.mu.Unlock()
 	return st, nil
 }

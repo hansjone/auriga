@@ -22,6 +22,14 @@ type dockerEndpoint struct {
 	bridges     []trustedBridge
 	sharedMount bool
 	pending     *activationScope // private until this exact activation commits
+	checkLease  func() error     // read-only clock check bound to the observed active view
+}
+
+func (p dockerEndpoint) leaseError() error {
+	if p.checkLease == nil {
+		return nil
+	}
+	return p.checkLease()
 }
 
 func containerProcess(insp map[string]any) (processLifetime, error) {

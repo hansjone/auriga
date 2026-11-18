@@ -82,26 +82,34 @@ func (m *UnifiedManager) checkStartupView(scope *activationScope, s *unifiedNode
 
 // Publication after a definite intent commit is read-only. Recheck the view
 // and lease we verified; cleanup requiring Engine writes stays inside Observe.
-func (m *UnifiedManager) recheckStartupView(scope *activationScope, revision uint64, reusedProcess bool) error {
+// The returned check uses the verified lease and live clocks without loading
+// the ledger again. Public observation may already hold the resource lock.
+func (m *UnifiedManager) recheckStartupView(scope *activationScope, revision uint64, reusedProcess bool) (func() error, error) {
 	id := scope.spec.InstanceId
 	defer m.lock(id)()
 	s, _, _, err := m.load(id)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if s.Revision != revision {
-		return fmt.Errorf("resource ledger changed before endpoint publication")
+		return nil, fmt.Errorf("resource ledger changed before endpoint publication")
 	}
 	if err := m.checkStartupView(scope, s, reusedProcess); err != nil {
-		return err
+		return nil, err
 	}
 	if s.State != "active" {
-		return nil
+		return nil, nil
 	}
+	clock, expiresAt := s.Clock, s.LeaseExpiresAt
+	check := func() error { return m.checkLeaseClock(clock, expiresAt) }
+	return check, check()
+}
+
+func (m *UnifiedManager) checkLeaseClock(clock map[string]any, expiresAt string) error {
 	return m.Protocol.Evaluate("clock", map[string]any{
-		"clock": s.Clock, "bootId": m.BootID,
+		"clock": clock, "bootId": m.BootID,
 		"monotonicNowMillis": json.Number(fmt.Sprint(m.mono())),
-		"wallNow":            m.now().Format(time.RFC3339Nano), "leaseExpiresAt": s.LeaseExpiresAt,
+		"wallNow":            m.now().Format(time.RFC3339Nano), "leaseExpiresAt": expiresAt,
 	})
 }
 

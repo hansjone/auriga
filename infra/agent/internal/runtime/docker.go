@@ -514,6 +514,7 @@ func (d *Docker) start(ctx context.Context, id string, resources *UnifiedManager
 	var observed bool
 	var resourceRevision uint64
 	scope.finishStart = func(ctx context.Context, commit bool) error {
+		var checkLease func() error
 		if commit {
 			// A definite commit cannot vouch for the process or network
 			// while the disk write was in flight.
@@ -521,7 +522,9 @@ func (d *Docker) start(ctx context.Context, id string, resources *UnifiedManager
 				return err
 			}
 			if observed {
-				if err := resources.recheckStartupView(scope, resourceRevision, reusedProcess); err != nil {
+				var err error
+				checkLease, err = resources.recheckStartupView(scope, resourceRevision, reusedProcess)
+				if err != nil {
 					return err
 				}
 			}
@@ -544,6 +547,11 @@ func (d *Docker) start(ctx context.Context, id string, resources *UnifiedManager
 		}
 		if commit {
 			if err := ctx.Err(); err != nil {
+				return err
+			}
+			ep.checkLease = checkLease
+			// Docker inspection can outlast the lease. Check again at publication.
+			if err := ep.leaseError(); err != nil {
 				return err
 			}
 			ep.pending = nil
@@ -784,10 +792,19 @@ func (d *Docker) endpoint(ctx context.Context, id string) (Endpoint, error) {
 		return Endpoint{}, err
 	}
 	d.mu.Lock()
-	unchanged := d.endpoints[id].record == ep.record && d.endpoints[id].pending == nil
+	current := d.endpoints[id]
+	unchanged := current.record == ep.record && current.pending == nil
+	var leaseErr error
+	if unchanged {
+		leaseErr = current.leaseError()
+	}
 	d.mu.Unlock()
 	if !unchanged {
 		return Endpoint{}, fmt.Errorf("docker: endpoint proof was withdrawn")
+	}
+	if leaseErr != nil {
+		d.withdraw(id, true)
+		return Endpoint{}, leaseErr
 	}
 	return Endpoint{URL: ep.url}, nil
 }

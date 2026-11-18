@@ -54,6 +54,8 @@ type releaseEngine struct {
 	stopUnknown bool
 	stops       int
 	healthy     atomic.Bool
+
+	beforeInspect func(string)
 }
 
 func newReleaseEngine(t *testing.T) (*releaseEngine, *runtime.Docker, *dockerReleaseFixture) {
@@ -160,6 +162,9 @@ func (e *releaseEngine) serve(w http.ResponseWriter, r *http.Request) {
 		if body == nil {
 			http.NotFound(w, r)
 			return
+		}
+		if hook := e.beforeInspect; hook != nil {
+			e.runHookUnlocked(func() { hook(id) })
 		}
 		image := body["Image"]
 		if e.mode == "container-image" {

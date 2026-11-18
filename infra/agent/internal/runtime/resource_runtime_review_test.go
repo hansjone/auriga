@@ -9,6 +9,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -175,6 +177,156 @@ func TestSignedResourceRuntimeChecksEndpointBeforeReadyAndRestart(t *testing.T) 
 			assertResourceNotPublished(t, statuses, f.preparing, id, "committed runtime endpoint unavailable")
 		})
 	}
+}
+
+func TestSignedResourceRuntimeLeaseDuringCommittedInspect(t *testing.T) {
+	for _, expire := range []bool{false, true} {
+		t.Run(fmt.Sprintf("expire=%t", expire), func(t *testing.T) {
+			f := newResourceRuntimeFixture(t)
+			r, statuses := startResourceReconciler(t, f.release.store, f.preparing)
+			old := f.pendingRestart(t, r, statuses)
+			f.validCatalog()
+			id := f.required.InstanceId
+			elapse := f.controlLeaseClock(t, false)
+			entered := make(chan error, 1)
+			resume := make(chan struct{})
+			var unblocked sync.Once
+			unblock := func() { unblocked.Do(func() { close(resume) }) }
+			defer unblock()
+			var stopsBeforeCommit int
+			f.driver.Activation.Store = &resourceIntentFixtureStore{Store: f.release.store, beforeCommit: func(ctx context.Context) error {
+				if err := unpublishedResourceStart(ctx, f.release.store, f.preparing, id); err != nil {
+					return err
+				}
+				actual, err := f.release.store.GetExecution(id)
+				if err != nil || actual == nil {
+					return fmt.Errorf("missing started execution before commit: %v", err)
+				}
+				f.engine.mu.Lock()
+				stopsBeforeCommit = f.engine.stops
+				f.engine.beforeInspect = func(container string) {
+					if container != actual.ContainerID {
+						return
+					}
+					f.engine.mu.Lock()
+					f.engine.beforeInspect = nil
+					f.engine.mu.Unlock()
+					entered <- f.release.store.CheckReleaseExecution(actual.Candidate)
+					<-resume
+				}
+				f.engine.mu.Unlock()
+				return nil
+			}}
+			done := make(chan *nodev1.CommandResult, 1)
+			go func() { done <- resourceRestart(t, r, id) }()
+			select {
+			case err := <-entered:
+				if err != nil {
+					t.Fatalf("blocked inspect preceded the durable intent commit: %v", err)
+				}
+			case result := <-done:
+				t.Fatal("restart finished without the postcommit Engine read", result)
+			case <-time.After(5 * time.Second):
+				t.Fatal("postcommit Engine read did not start")
+			}
+			if expire {
+				elapse()
+			}
+			unblock()
+			result := <-done
+			if result.GetOk() == expire {
+				t.Fatalf("restart after committed inspect (expire=%t): %v", expire, result)
+			}
+			if expire {
+				assertResourceNotPublished(t, statuses, f.preparing, id, "lease_expired")
+			} else {
+				assertRequiredResourceReady(t, awaitResourceRuntime(t, statuses, nodev1.InstancePhase_INSTANCE_PHASE_RUNNING), f.preparing, f.release.store, f.required)
+			}
+			if err := f.release.store.CheckReleaseExecution(old.Candidate); err != nil {
+				t.Fatal("lease check changed the definite commit", err)
+			}
+			f.engine.mu.Lock()
+			stops := f.engine.stops
+			f.engine.mu.Unlock()
+			if stops != stopsBeforeCommit {
+				t.Fatal("postcommit lease check issued an Engine stop", stopsBeforeCommit, stops)
+			}
+		})
+	}
+}
+
+func TestSignedResourceRuntimeLeaseBeforeReadyAndRestart(t *testing.T) {
+	for _, afterReady := range []bool{false, true} {
+		for _, expire := range []bool{false, true} {
+			t.Run(fmt.Sprintf("after-ready=%t/expire=%t", afterReady, expire), func(t *testing.T) {
+				f := newResourceRuntimeFixture(t)
+				driver := &revokeResourceReadyDriver{Preparing: f.preparing}
+				r, statuses := startResourceReconciler(t, f.release.store, driver)
+				f.pendingRestart(t, r, statuses)
+				f.validCatalog()
+				elapse := f.controlLeaseClock(t, true)
+				hookReached := false
+				hook := func() {
+					hookReached = true
+					if expire {
+						elapse()
+					}
+				}
+				published := false
+				emit := r.Sink
+				r.Sink = func(status *nodev1.InstanceStatus) {
+					if status.GetObservedGeneration() == f.required.Generation && status.GetReady() {
+						published = true
+						if afterReady {
+							hook()
+						}
+					}
+					emit(status)
+				}
+				if !afterReady {
+					driver.afterApplied = hook
+				}
+				id := f.required.InstanceId
+				result := resourceRestart(t, r, id)
+				if !hookReached || result.GetOk() == expire || published != (afterReady || !expire) {
+					t.Fatalf("expired endpoint at readiness gate (hook=%t, published=%t): %v", hookReached, published, result)
+				}
+				if expire {
+					assertResourceNotPublished(t, statuses, f.preparing, id, "committed runtime endpoint unavailable")
+				} else {
+					assertRequiredResourceReady(t, awaitResourceRuntime(t, statuses, nodev1.InstancePhase_INSTANCE_PHASE_RUNNING), f.preparing, f.release.store, f.required)
+				}
+			})
+		}
+	}
+}
+
+// Advance exactly to the signed expiry on one clock, holding the other fixed.
+func (f *resourceRuntimeFixture) controlLeaseClock(t *testing.T, monotonic bool) func() {
+	t.Helper()
+	expires, err := time.Parse(time.RFC3339Nano, f.required.UnifiedResources[0].GetLease().GetExpiresAt())
+	if err != nil {
+		t.Fatal(err)
+	}
+	wall, mono := f.manager.Now(), f.manager.Mono()
+	var expired atomic.Bool
+	if monotonic {
+		deadline := mono + expires.Sub(wall).Milliseconds()
+		f.manager.Mono = func() int64 {
+			if expired.Load() {
+				return deadline
+			}
+			return mono
+		}
+	} else {
+		f.manager.Now = func() time.Time {
+			if expired.Load() {
+				return expires
+			}
+			return wall
+		}
+	}
+	return func() { expired.Store(true) }
 }
 
 func (f *resourceRuntimeFixture) validCatalog() {

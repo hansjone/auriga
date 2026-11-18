@@ -513,7 +513,7 @@ func (m *UnifiedManager) Guard(ctx context.Context, spec *nodev1.InstanceSpec) (
 	voluntaryDisable := false
 	if s.Tenant != spec.GetTenantId() || s.Owner != spec.GetOwnerId() {
 		reason = "identity_changed"
-	} else if err := m.Protocol.Evaluate("clock", map[string]any{"clock": s.Clock, "bootId": m.BootID, "monotonicNowMillis": json.Number(fmt.Sprint(m.mono())), "wallNow": m.now().Format(time.RFC3339Nano), "leaseExpiresAt": s.LeaseExpiresAt}); err != nil {
+	} else if err := m.checkLeaseClock(s.Clock, s.LeaseExpiresAt); err != nil {
 		reason = err.Error()
 		if reason != "lease_expired" && reason != "clock_rollback" {
 			reason = "verification_failed"
