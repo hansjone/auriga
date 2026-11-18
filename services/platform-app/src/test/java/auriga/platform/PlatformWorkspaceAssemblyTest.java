@@ -124,26 +124,24 @@ class PlatformWorkspaceAssemblyTest {
 
   @DynamicPropertySource
   static void properties(DynamicPropertyRegistry registry) throws Exception {
-    var iam =
-        PostgresExtension.serviceRole(PlatformWorkspaceAssemblyTest.class, "auriga_iam", "iam");
-    var org =
-        PostgresExtension.serviceRole(PlatformWorkspaceAssemblyTest.class, "auriga_org", "org");
+    workspaceProperties(registry, PlatformWorkspaceAssemblyTest.class, directory);
+  }
+
+  static void workspaceProperties(
+      DynamicPropertyRegistry registry, Class<?> testClass, Path directory) throws Exception {
+    var iam = PostgresExtension.serviceRole(testClass, "auriga_iam", "iam");
+    var org = PostgresExtension.serviceRole(testClass, "auriga_org", "org");
     registry.add("auriga.platform.iam.jdbc-url", iam::jdbcUrl);
     registry.add("auriga.platform.org.jdbc-url", org::jdbcUrl);
     var roles =
-        PostgresExtension.serviceRoles(
-            PlatformWorkspaceAssemblyTest.class, "workspace_owner", "workspace_app", "workspace");
+        PostgresExtension.serviceRoles(testClass, "workspace_owner", "workspace_app", "workspace");
     registry.add(
         "auriga.platform.workspace.jdbc-url",
-        () ->
-            PostgresExtension.database(PlatformWorkspaceAssemblyTest.class)
-                .jdbcUrl()
-                .split("\\?")[0]);
+        () -> PostgresExtension.database(testClass).jdbcUrl().split("\\?")[0]);
     registry.add("auriga.platform.workspace.username", () -> roles.runtime().role());
     registry.add("auriga.platform.workspace.migration-username", () -> roles.owner().role());
     var resource =
-        PostgresExtension.serviceRoles(
-            PlatformWorkspaceAssemblyTest.class, "resource_owner", "resource_app", "resource");
+        PostgresExtension.serviceRoles(testClass, "resource_owner", "resource_app", "resource");
     registry.add(
         "auriga.platform.resource.jdbc-url", () -> resource.runtime().jdbcUrl().split("\\?")[0]);
     registry.add("auriga.platform.resource.username", () -> resource.runtime().role());
