@@ -25,9 +25,9 @@ public final class IamGrpcSharedTasks extends SharedTaskServiceGrpc.SharedTaskSe
     var principal =
         AuthorizationRules.currentPrincipal()
             .orElseThrow(() -> new AurigaException(CommonErrors.UNAUTHENTICATED));
+    // InternalTokenVerifier checks the auriga.internal audience; it is not a permission claim.
     if (!principal.isInternalService()
         || !TenantContext.PLATFORM_TENANT.equals(principal.tenantId())
-        || !principal.hasPermission("auriga.internal")
         || !allowed.contains(principal.subject())
         || TenantContext.current().filter(installation::permits).isEmpty()
         || TenantContext.PLATFORM_TENANT.equals(TenantContext.require()))
