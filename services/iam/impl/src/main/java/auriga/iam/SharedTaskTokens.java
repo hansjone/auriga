@@ -146,11 +146,19 @@ final class SharedTaskTokens {
   }
 
   static ObjectNode bindingJson(SharedDshSessionBinding binding) {
-    return Json.MAPPER.valueToTree(binding(binding));
+    return persistedJson(binding(binding));
   }
 
   static ObjectNode claimsJson(SharedDshCapability capability) {
-    return Json.MAPPER.valueToTree(claims(capability));
+    return persistedJson(claims(capability));
+  }
+
+  private static ObjectNode persistedJson(SortedMap<String, Object> value) {
+    // valueToTree keeps protobuf long values as LongNode; readTree of jsonb
+    // text chooses IntNode for small integers. Use the same read boundary for
+    // reference trees so exact field/type equality also works after storage.
+    // Floating-point, string, missing and extra fields remain unequal.
+    return Json.read(Json.MAPPER.writeValueAsString(value));
   }
 
   static UUID uuid(String value) {

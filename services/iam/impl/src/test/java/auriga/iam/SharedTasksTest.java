@@ -181,6 +181,58 @@ class SharedTasksTest {
         });
   }
 
+  @Test
+  void serializedTaskAndClaimsSurviveReconstructionReissueAndCredentialRenewal() throws Exception {
+    var f = new Fixture();
+    f.run(
+        () -> {
+          var original = f.begin(ENTERPRISE, List.of("credentials", "outbound")).getCapability();
+          f.tasks = f.authority();
+          var repeated = f.begin(ENTERPRISE, List.of("credentials", "outbound")).getCapability();
+          assertEquals(original.getTaskId(), repeated.getTaskId());
+          assertNotEquals(original.getJti(), repeated.getJti());
+          assertTrue(f.authorize(original).getActive());
+          assertTrue(f.authorize(repeated).getActive());
+          assertEquals(
+              "synthetic-v1",
+              f.tasks
+                  .credentials(
+                      ReadSharedCredentialsRequest.newBuilder().setCapability(original).build())
+                  .getToken());
+          f.credential.put("version", 2);
+          f.material.put("credentialVersion", 2).put("token", "synthetic-v2");
+          assertFalse(f.authorize(original).getActive());
+          f.tasks = f.authority();
+          var refreshed =
+              f.tasks
+                  .issue(
+                      IssueSharedCapabilityRequest.newBuilder()
+                          .setBinding(f.binding)
+                          .setTaskId(f.task)
+                          .setAudience(ENTERPRISE)
+                          .addAllScopes(List.of("credentials", "outbound"))
+                          .build())
+                  .getCapability();
+          assertEquals(2, refreshed.getCredentialVersion());
+          assertTrue(f.authorize(refreshed).getActive());
+          var raw =
+              f.tasks.credentials(
+                  ReadSharedCredentialsRequest.newBuilder().setCapability(refreshed).build());
+          assertEquals("000042", raw.getEmpNo());
+          assertEquals("synthetic-v2", raw.getToken());
+          f.tasks = f.authority();
+          f.tasks.finish(
+              FinishSharedTaskRequest.newBuilder().setBinding(f.binding).setTaskId(f.task).build());
+          assertFalse(f.authorize(refreshed).getActive());
+          assertEquals(
+              "common.conflict",
+              assertThrows(AurigaException.class, () -> f.begin(ENTERPRISE, List.of("outbound")))
+                  .errorCode()
+                  .code());
+          return null;
+        });
+  }
+
   static final class Fixture {
     final UUID tenant = UUID.randomUUID();
     final String task = UUID.randomUUID().toString();
@@ -261,21 +313,23 @@ class SharedTasksTest {
           .thenAnswer(
               call -> {
                 var value = records.get(call.getArgument(0) + ":" + call.getArgument(1));
-                return value == null ? null : value.deepCopy();
+                return value == null ? null : Json.read(value.toString());
               });
       when(store.insert(anyString(), anyString(), any(), any()))
           .thenAnswer(
               call -> {
                 ObjectNode value = call.getArgument(2);
                 value.put("id", (String) call.getArgument(1));
-                records.put(call.getArgument(0) + ":" + call.getArgument(1), value.deepCopy());
+                records.put(
+                    call.getArgument(0) + ":" + call.getArgument(1), Json.read(value.toString()));
                 return value;
               });
       doAnswer(
               call -> {
                 ObjectNode value = call.getArgument(1);
                 records.put(
-                    call.getArgument(0) + ":" + value.path("id").asString(), value.deepCopy());
+                    call.getArgument(0) + ":" + value.path("id").asString(),
+                    Json.read(value.toString()));
                 return null;
               })
           .when(store)
