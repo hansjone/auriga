@@ -33,7 +33,7 @@ func dispatch(args []string) error {
 	}
 	if len(args) == 0 || args[0] == "--help" || args[0] == "help" {
 		fmt.Println("verify/unpack/install 必须 --verify-key <批准公钥> 或 --trust-fingerprint <独立核对SHA256(SPKI)>；缺签名默认拒绝。站点构建：keygen site --out <私密目录>；服务器 trust add-site-key <pem> --confirm-fingerprint <sha>；bundle --build --offline 必须 --sign-key <已登记站点私钥>。")
-		fmt.Println("浏览器下载Forgejo Release附件，现场无需Git/网络/语言工具链。\n校验附件：./auriga verify <文件或目录> [--verify-key <独立批准公钥>]\n自动解分卷：./auriga unpack <tar|part001|parts.json> --out <全新目录>\n校验源码依赖：./auriga devkit verify <套件目录> [--version <上游版本>]\n合并增量：./auriga devkit merge <增量tar或首卷> --kit <套件目录>\n现场补丁：./auriga changes export --out <补丁.tar> / changes apply <补丁.tar>\n维护者发行：./auriga release --tag <版本> --release <批准索引> --sign-key <私钥> --previous-devkit <上版目录>（首次 --new-baseline）")
+		fmt.Println("浏览器下载Forgejo Release附件，现场无需Git/网络/语言工具链。\n校验附件：./auriga verify <文件或目录> [--verify-key <独立批准公钥>]\n自动解分卷：./auriga unpack <tar|part001|parts.json> --out <全新目录>\n校验源码依赖：./auriga devkit verify <套件目录> [--version <上游版本>]\n合并增量：./auriga devkit merge <增量tar或首卷> --kit <套件目录>\n现场补丁：./auriga changes export --out <补丁.tar> / changes apply <补丁.tar>\n维护者发行：./auriga release --help；参数、Windows 与 DSH 输入及 Forgejo 发布顺序见 MAINTAIN.md。")
 		fmt.Println("Auriga 离线部署\n  ./auriga bundle --build --offline [--version 0.2.0-site.3] [--out 离线包.tar]\n  sudo ./auriga install --address 192.0.2.10 [--data /srv/auriga]\n  sudo ./auriga doctor|backup|status|stop|logs [--data /srv/auriga]\n  sudo ./auriga upgrade 新离线包.tar [--data /srv/auriga]\n维护者自行打包及发行见 MAINTAIN.md。")
 		fmt.Println("构建资源诊断：./auriga doctor --build；默认工具容器4096MiB/2CPU并保留1GiB。Linux bundle可加--install --data /srv/auriga复用先备份再upgrade。")
 		return nil

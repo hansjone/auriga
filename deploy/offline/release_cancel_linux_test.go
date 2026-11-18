@@ -35,6 +35,9 @@ func TestReleaseCancellationDuringExternalWork(t *testing.T) {
 				if err := os.WriteFile(filepath.Join(source, "go.mod"), []byte("module fixture\n"), 0644); err != nil {
 					t.Fatal(err)
 				}
+				key, _ := testSigningKeys(t)
+				dshSource := fixtureDSHReleaseInput(t, source)
+				windowsArchive, windowsSHA, _ := fixtureWindowsReleaseInput(t, source, t.TempDir(), key)
 				for _, args := range [][]string{{"init"}, {"config", "user.name", "fixture"}, {"config", "user.email", "fixture@example.com"}, {"add", "."}, {"commit", "-m", "fixture"}, {"tag", "1.0"}} {
 					if _, err := gitAt(source, args...); err != nil {
 						t.Fatal(err)
@@ -81,7 +84,6 @@ esac
 				previousTransport := http.DefaultTransport
 				http.DefaultTransport = server.Client().Transport
 				defer func() { http.DefaultTransport = previousTransport }()
-				key, _ := testSigningKeys(t)
 				r := kit.Release
 				r.NAS.SHA256, err = digest(filepath.Join(single, "cache", "nas.tar"))
 				if err != nil {
@@ -130,7 +132,7 @@ esac
 				if err := os.WriteFile(builders.Executable, []byte("fixture"), 0755); err != nil {
 					t.Fatal(err)
 				}
-				opts := releaseOptions{Source: source, Tag: "1.0", Index: index, Out: filepath.Join(root, "out"), Cache: filepath.Join(root, "cache"), Key: key, Limit: 1 << 20, NewBaseline: true}
+				opts := releaseOptions{Source: source, Tag: "1.0", Index: index, Out: filepath.Join(root, "out"), Cache: filepath.Join(root, "cache"), Key: key, Limit: 1 << 20, NewBaseline: true, WindowsClient: windowsArchive, WindowsSHA: windowsSHA, DSHSource: dshSource}
 				observed := make(chan os.Signal, 1)
 				if interrupted != nil {
 					signal.Notify(observed, interrupted)

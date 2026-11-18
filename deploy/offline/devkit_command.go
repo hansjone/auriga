@@ -70,15 +70,18 @@ func devkit(args []string) error {
 	if err != nil {
 		return err
 	}
-	if *delta == "" {
-		*delta = strings.TrimSuffix(*out, ".tar") + "-delta.tar"
-	}
-	if err := writeDevkitDelta(*previous, full, *delta, *key); err != nil {
-		return err
+	if *previous != "" && cat.Baseline != r.Version {
+		if *delta == "" {
+			*delta = strings.TrimSuffix(*out, ".tar") + "-delta.tar"
+		}
+		if err := writeDevkitDelta(*previous, full, *delta, *key); err != nil {
+			return err
+		}
+		fmt.Printf("增量 %s\n", *delta)
 	}
 	if err := pack(full, *out); err != nil {
 		return err
 	}
-	fmt.Printf("累积套件 %s；增量 %s；基线 %s，最新 %s，覆盖%d版\n", *out, *delta, cat.Baseline, cat.Latest, len(cat.Versions))
+	fmt.Printf("累积套件 %s；基线 %s，最新 %s，覆盖%d版\n", *out, cat.Baseline, cat.Latest, len(cat.Versions))
 	return nil
 }

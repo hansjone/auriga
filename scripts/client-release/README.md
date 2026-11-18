@@ -6,7 +6,7 @@
 
 Linux 累积 devkit 保持原 devkit-catalog.json、blobs 和增量流程。Windows 选简单的独立附件 auriga-client-windows-<锁SHA256>.tar，与同版源码归档分发；依赖未变可复用原附件。client-inputs-release.json 绑定目标、锁摘要、windows-client.json 摘要及引导 node.exe 摘要；windows-client.json 列出全部输入长度和 SHA256。SHA256SUMS 绑定两份元数据，沿用 #373 同一发行私钥对原字节 Ed25519 签名，.sig 为标准 base64。release-public.pem 只是公开副本，现场须 --verify-key 或独立批准的 --trust-fingerprint 核身份，不能自带钥自行证明身份。
 
-发行说明还须独立列出源码归档和 node.exe SHA256，供 Windows 在执行任何附件程序前用系统 Get-FileHash 引导核验。不要从未核验 JSON 临时推导批准值。薄壳要求 AURIGA_CLIENT_DEVKIT 与独立批准的 AURIGA_CLIENT_NODE_SHA256，先核 Node 再执行；无需安装 Git/Node/pnpm。
+从独立批准的发行说明取得源码归档、Windows 套件归档和 node.exe 的 SHA256。先用系统 Get-FileHash 核验两份归档，解包后再核验引导 Node。薄壳使用 AURIGA_CLIENT_DEVKIT 与独立批准的 AURIGA_CLIENT_NODE_SHA256，执行前也检查该 Node 的摘要。构建 Node 的版本由目标源码的 `scripts/client-release/build-node.json` 固定。
 
 联网 Windows x64 维护机、批准源码目录中串行准备：
 
@@ -16,7 +16,7 @@ node scripts/client-release/prepare.mjs D:\exports\client-kits
 node scripts/client-release/sign-inputs.mjs --devkit D:\exports\client-kits\auriga-client-windows-<锁SHA256> --key-file C:\secure\issuer\release-private.pem --version 0.2.0
 ```
 
-用系统 tar 归档该目录，按 #373 受信发行流程作为独立附件分发；sign-inputs 不上传。准备允许联网，只从 HTTPS curl、固定 npm 锁和完整性字段取得依赖，不运行上游安装脚本，不算离线证据。签名前完整复核输入、私钥权限及版本，拒绝覆盖已有签名材料。发行私钥不进入附件、源码、客户端或日志。
+用 Windows 系统 tar 保留套件顶层目录，输出 `auriga-client-windows-<锁SHA256>.tar`。通过批准的 Forgejo 转运将 tar 和独立核对的整包 SHA256 交给 Linux 维护者。`prepare-release.sh --windows-client ... --windows-client-sha256 ...` 使用同一发行钥核内部签名、目标锁和归档内容，再自动并入发行清单、下载说明和总签名。完整命令见根 [MAINTAIN.md](../../MAINTAIN.md#维护者准备和发布附件)。签名前复核全部输入、私钥权限及版本，已签目录须保留原签名。发行私钥始终由维护者保管。准备过程通过 HTTPS 读取固定锁的依赖，离线构建证据由现场构建另行生成。
 
 输入包括构建 Node22.19.0/npm10.9.3、根 packageManager 固定 pnpm、完整 Windows pnpm store（含 esbuild/rollup 可选二进制）、upstream.json 固定运行 Node/zip摘要、内置 pnpm/integrity、已提交 DSH npm lock 对应完整 Windows 生产闭包（含 DSH runtime/LibreOffice）及插件生产依赖。broker/helper、UI、插件由现场当前源码重建，不使用旧产物替代，不改上游 DSH；可选宿主 peer 不另装副本。
 
