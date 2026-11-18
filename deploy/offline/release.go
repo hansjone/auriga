@@ -53,6 +53,15 @@ type distributionManifest struct {
 	SourceOnly  bool                 `json:"sourceOnly,omitempty"`
 }
 
+func rejectPrebuiltDesktopInDevkit(cat devkitCatalog) error {
+	for _, entry := range cat.Versions {
+		if entry.Kit.Release.Desktop != nil || entry.Files["desktop.tar"] != "" {
+			return errors.New("累积开发套件含成品桌面安装程序，源码发行请使用 --new-baseline")
+		}
+	}
+	return nil
+}
+
 func releaseCommand(args []string) error {
 	if len(args) > 0 && args[0] == "upload" {
 		return uploadCommand(args[1:])
@@ -310,10 +319,8 @@ func generateRelease(o releaseOptions, builders releaseBuilders) error {
 			return err
 		}
 		if versionMajor(prior.Baseline) == versionMajor(o.Tag) {
-			for _, entry := range prior.Versions {
-				if entry.Kit.Release.Desktop != nil || entry.Files["desktop.tar"] != "" {
-					return errors.New("上版开发套件含成品桌面安装程序，源码发行请使用 --new-baseline")
-				}
+			if err := rejectPrebuiltDesktopInDevkit(prior); err != nil {
+				return err
 			}
 		}
 	}
@@ -376,6 +383,11 @@ func generateRelease(o releaseOptions, builders releaseBuilders) error {
 	cat, err := composeDevkitContext(ctx, o.Previous, single, o.Tag, commit, cumulative, o.Key, o.MaxBytes, o.NewBaseline)
 	if err != nil {
 		return err
+	}
+	if o.SourceOnly {
+		if err := rejectPrebuiltDesktopInDevkit(cat); err != nil {
+			return err
+		}
 	}
 	if err := packContext(ctx, cumulative, kitTarget); err != nil {
 		return err
