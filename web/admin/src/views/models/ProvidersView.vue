@@ -16,6 +16,7 @@ import {
 } from '../../admin/relayApi';
 import ActionConfirm from '../../admin/ActionConfirm.vue';
 import AdminDialog from '../../admin/AdminDialog.vue';
+import { browserUuid } from '../../admin/browserUuid';
 import { useRelayI18n } from './relayMessages';
 import { useRelayUi } from './relayUi';
 import { useRelayWriteIntent, type RelayWriteAction } from './relayWriteIntent';
@@ -157,7 +158,7 @@ const freshPool = (): RelayPool => ({
     currency: 'USD',
     inputMicrosPerMillionTokens: 0,
     outputMicrosPerMillionTokens: 0,
-    version: globalThis.crypto.randomUUID(),
+    version: browserUuid(),
     effectiveAt: new Date().toISOString(),
   },
 });
