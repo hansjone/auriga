@@ -20,6 +20,7 @@ type releaseOptions struct {
 	WindowsClient, WindowsSHA, DSHSource string
 	Limit                                int64
 	Build                                bool
+	SourceOnly                           bool
 	Previous                             string
 	NewBaseline                          bool
 	MaxBytes                             int64
@@ -49,6 +50,16 @@ type distributionManifest struct {
 	ResetReason string               `json:"resetReason,omitempty"`
 	Gate        buildGate            `json:"offlineBuildGate"`
 	Windows     *windowsReleaseInput `json:"windowsClient,omitempty"`
+	SourceOnly  bool                 `json:"sourceOnly,omitempty"`
+}
+
+func rejectPrebuiltDesktopInDevkit(cat devkitCatalog) error {
+	for _, entry := range cat.Versions {
+		if entry.Kit.Release.Desktop != nil || entry.Files["desktop.tar"] != "" {
+			return errors.New("累积开发套件含成品桌面安装程序，源码发行请使用 --new-baseline")
+		}
+	}
+	return nil
 }
 
 func releaseCommand(args []string) error {
@@ -67,6 +78,7 @@ func releaseCommand(args []string) error {
 	f.StringVar(&o.DSHSource, "dsh-source", "", "批准的 DSH 源码归档文件或 Forgejo HTTPS 附件 URL")
 	f.Int64Var(&o.Limit, "attachment-limit", 0, "附件分卷上限（字节）；0 发布完整归档，正数适用于受限传输介质")
 	f.BoolVar(&o.Build, "build", false, "")
+	f.BoolVar(&o.SourceOnly, "source-only", false, "只发布源码、开发套件和参考材料，安装包仅用于断网构建验证")
 	f.StringVar(&o.Previous, "previous-devkit", "", "")
 	f.BoolVar(&o.NewBaseline, "new-baseline", false, "")
 	f.Int64Var(&o.MaxBytes, "max-devkit-bytes", 64<<30, "")
@@ -241,6 +253,9 @@ func generateRelease(o releaseOptions, builders releaseBuilders) error {
 	if o.Key == "" || o.Out == "" || o.Cache == "" || o.Limit < 0 {
 		return errors.New("release 需要 --sign-key、输出目录、缓存目录和非负附件上限")
 	}
+	if o.SourceOnly && o.Build {
+		return errors.New("--source-only 不接受用于选择安装附件的 --build；断网构建验证自动运行")
+	}
 	if o.WindowsClient == "" || !hex64.MatchString(o.WindowsSHA) || o.DSHSource == "" {
 		return errors.New("release 需要 --windows-client、--windows-client-sha256 和 --dsh-source")
 	}
@@ -265,6 +280,9 @@ func generateRelease(o releaseOptions, builders releaseBuilders) error {
 	}
 	r.Version = o.Tag
 	r.Source = nil
+	if o.SourceOnly {
+		r.Desktop = nil
+	}
 	if r.Build == nil {
 		return errors.New("离线发行需要build依赖与Linux构建配方")
 	}
@@ -294,6 +312,17 @@ func generateRelease(o releaseOptions, builders releaseBuilders) error {
 	public := filepath.Join(scratch, "public.pem")
 	if err := signingPublic(o.Key, public); err != nil {
 		return err
+	}
+	if o.SourceOnly && o.Previous != "" && !o.NewBaseline {
+		prior, err := readCatalogContext(ctx, o.Previous, public)
+		if err != nil {
+			return err
+		}
+		if versionMajor(prior.Baseline) == versionMajor(o.Tag) {
+			if err := rejectPrebuiltDesktopInDevkit(prior); err != nil {
+				return err
+			}
+		}
 	}
 	windowsTar := filepath.Join(stage, filepath.Base(o.WindowsClient))
 	if err := noSymlinks(o.WindowsClient); err != nil {
@@ -355,6 +384,11 @@ func generateRelease(o releaseOptions, builders releaseBuilders) error {
 	if err != nil {
 		return err
 	}
+	if o.SourceOnly {
+		if err := rejectPrebuiltDesktopInDevkit(cat); err != nil {
+			return err
+		}
+	}
 	if err := packContext(ctx, cumulative, kitTarget); err != nil {
 		return err
 	}
@@ -370,7 +404,6 @@ func generateRelease(o releaseOptions, builders releaseBuilders) error {
 	if err != nil {
 		return err
 	}
-	offline := filepath.Join(stage, "auriga-offline-"+o.Tag+".tar")
 	gateOut := filepath.Join(scratch, "gate.tar")
 	kitSHA, err := digestContext(ctx, kitTarget)
 	if err != nil {
@@ -392,17 +425,20 @@ func generateRelease(o releaseOptions, builders releaseBuilders) error {
 	if !gate.Passed || gate.Commit != commit || gate.LockDigest != locks.Digest || gate.SourceSHA != sourceAsset.SHA256 || gate.CatalogSHA != catalogSHA || gate.DevkitSHA != kitSHA {
 		return errors.New("断网构建门禁未通过或来源不符")
 	}
-	if o.Build {
-		if err := copyFileContext(ctx, gateOut, offline, 0644); err != nil {
+	if !o.SourceOnly {
+		offline := filepath.Join(stage, "auriga-offline-"+o.Tag+".tar")
+		if o.Build {
+			if err := copyFileContext(ctx, gateOut, offline, 0644); err != nil {
+				return err
+			}
+		} else if err := builders.Bundle([]string{"--release", index, "--out", offline, "--sign-key", o.Key}, commit); err != nil {
 			return err
 		}
-	} else if err := builders.Bundle([]string{"--release", index, "--out", offline, "--sign-key", o.Key}, commit); err != nil {
-		return err
+		releaseArchives = append(releaseArchives, offline)
 	}
 	var assets []assetInfo
 	var archives []assetInfo
 	partLimit := effectivePartLimit(o.Limit)
-	releaseArchives = append(releaseArchives, offline)
 	for _, file := range releaseArchives {
 		original, err := describeAssetContext(ctx, file)
 		if err != nil {
@@ -453,7 +489,7 @@ func generateRelease(o releaseOptions, builders releaseBuilders) error {
 		return err
 	}
 	assets = append(assets, pubAsset)
-	manifest := distributionManifest{Schema: 1, Tag: o.Tag, Commit: commit, Locks: locks, Devkit: cached, Assets: assets, Archives: archives, Baseline: cat.Baseline, ResetReason: cat.ResetReason, Gate: gate, Windows: &windows}
+	manifest := distributionManifest{Schema: 1, Tag: o.Tag, Commit: commit, Locks: locks, Devkit: cached, Assets: assets, Archives: archives, Baseline: cat.Baseline, ResetReason: cat.ResetReason, Gate: gate, Windows: &windows, SourceOnly: o.SourceOnly}
 	if err := writeDownloads(stage, manifest, cat, assets); err != nil {
 		return err
 	}
