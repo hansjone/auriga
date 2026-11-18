@@ -27,9 +27,9 @@ test('native background skill capability reacquires current host context after o
     await new Promise((resolve) => server.close(resolve));
     await rm(directory, { recursive: true, force: true });
   });
-  const session = { id: randomUUID(), header: { id: randomUUID() } };
+  let session = { id: randomUUID(), header: { id: randomUUID() } };
   session.header.id = session.id;
-  const agent = { id: session.id, session };
+  let agent = { id: session.id, session };
   const ctx = {
     sessions: { get: (id) => (id === session.id ? session : undefined) },
     agents: { get: (id) => (id === session.id ? agent : undefined) },
@@ -58,12 +58,14 @@ test('native background skill capability reacquires current host context after o
       if (names.every((name) => ctx[name])) fn(ctx);
     },
   };
-  runtime = await createConnectRuntime({
-    directory,
-    ctx,
-    config: { platformOrigin: '' },
-    connection,
-  });
+  const start = () =>
+    createConnectRuntime({
+      directory,
+      ctx,
+      config: { platformOrigin: '' },
+      connection,
+    });
+  runtime = await start();
   const controller = new AbortController();
   const execution = {
     agent,
@@ -118,4 +120,39 @@ test('native background skill capability reacquires current host context after o
     },
   });
   assert.equal((await raw()).status, 401);
+
+  const original = {
+    memberId: connection.identity.memberId,
+    uacSessionBinding: {
+      ...connection.identity.uacSessionBinding,
+      authGeneration: 1,
+    },
+  };
+  async function restart(memberId) {
+    for (const dispose of effects.splice(0).reverse()) await dispose?.();
+    await runtime.close();
+    connection.transition('authenticated', { ...original, memberId });
+    session = { id: session.id, header: { ...session.header } };
+    agent = { id: session.id, session };
+    runtime = await start();
+    const next = {
+      agent,
+      callId: randomUUID(),
+      rootCallId: randomUUID(),
+      token: {},
+      signal: new AbortController().signal,
+    };
+    const result = await dispatchTool(next, () => contributor.resolve(next));
+    jobResult(next, {});
+    return result;
+  }
+  const wrongOwner = await restart(randomUUID());
+  assert.deepEqual(
+    [wrongOwner.DSH_AURIGA_ID, wrongOwner.DSH_AURIGA_TOKEN],
+    ['', ''],
+  );
+  connection.rotate();
+  const sameOwner = await restart(original.memberId);
+  assert.equal(sameOwner.DSH_AURIGA_ID, '00001');
+  assert.equal(sameOwner.DSH_AURIGA_TOKEN, connection.token());
 });

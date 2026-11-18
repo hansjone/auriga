@@ -205,7 +205,26 @@ export async function createConnectRuntime({
   if (principal) models.login();
   const identity = () =>
     broker.state.current()?.state === 'authenticated' ? principal : undefined;
-  contexts = createHostContexts({ broker, identity, ctx });
+  contexts = createHostContexts({
+    broker,
+    identity,
+    ctx,
+    async bindOwner(id, stamp) {
+      const sessionKey = createHash('sha256').update(id).digest('hex');
+      const ownerKey = createHash('sha256').update(stamp).digest('hex');
+      const existing = vault.snapshot().taskSessionOwners?.[sessionKey];
+      if (existing !== undefined) return existing === ownerKey;
+      let allowed = false;
+      await vault.update((state) => {
+        state.taskSessionOwners ??= {};
+        const current = state.taskSessionOwners[sessionKey];
+        if (current !== undefined && current !== ownerKey) return;
+        state.taskSessionOwners[sessionKey] = ownerKey;
+        allowed = true;
+      });
+      return allowed;
+    },
+  });
   const sessionContexts = contexts;
   const controlInstallation = createControlInstallation({
     config,

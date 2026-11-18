@@ -1,7 +1,7 @@
 /** Verified native execution -> K2 private context handles. No page/model/skill
  * input can register an owner or choose another host's session.
- * @param {{broker:any,identity:()=>any,ctx:any}} options */
-export function createHostContexts({ broker, identity, ctx }) {
+ * @param {{broker:any,identity:()=>any,ctx:any,bindOwner?:(id:string,stamp:string)=>Promise<boolean>}} options */
+export function createHostContexts({ broker, identity, ctx, bindOwner }) {
   /** @type {Map<string,{stamp:string,handle:any,native:any}>} */ const sessions =
     new Map();
   /** @type {Map<string,string>} */ const owners = new Map();
@@ -48,8 +48,20 @@ export function createHostContexts({ broker, identity, ctx }) {
       (owners.has(id) && owners.get(id) !== current)
     )
       return fail();
-    owners.set(id, current);
     const check = broker.state.fence();
+    if (!owners.has(id)) {
+      const allowed = !bindOwner || (await bindOwner(id, current));
+      check();
+      if (
+        !allowed ||
+        closed ||
+        g !== generation ||
+        current !== stamp() ||
+        ctx.sessions?.get(id) !== native
+      )
+        return fail();
+      owners.set(id, current);
+    }
     const row = sessions.get(id);
     if (
       row &&
