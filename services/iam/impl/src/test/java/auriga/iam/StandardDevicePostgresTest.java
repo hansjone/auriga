@@ -122,6 +122,10 @@ class StandardDevicePostgresTest {
     }
 
     ObjectNode issue() {
+      return issue(false);
+    }
+
+    ObjectNode issue(boolean attemptedUacNavigation) {
       var challenge =
           f.call(
               () ->
@@ -131,6 +135,21 @@ class StandardDevicePostgresTest {
                           "desktop-example",
                           "scope",
                           "auriga.connect openid offline_access")));
+      if (attemptedUacNavigation) {
+        f.call(
+            () ->
+                store.tx(
+                    () -> {
+                      var grant =
+                          store.get(
+                              "oauth_grant",
+                              Secrets.hash(challenge.path("device_code").asString()),
+                              true);
+                      grant.put("uacNavigationProviderId", UUID.randomUUID().toString());
+                      store.save("oauth_grant", grant);
+                      return null;
+                    }));
+      }
       f.call(
           () -> {
             oauth.decideDevice(challenge.path("user_code").asString(), sid, true);
@@ -185,6 +204,29 @@ class StandardDevicePostgresTest {
 
     public void close() {
       f.close();
+    }
+  }
+
+  @Test
+  void standardDeviceBindsTheActualPortalProviderAfterAnotherUacRouteWasTried() throws Exception {
+    try (var h = new Harness()) {
+      var challenge = h.issue(true);
+      h.f.call(
+          () ->
+              store.tx(
+                  () -> {
+                    var grant =
+                        store.get(
+                            "oauth_grant",
+                            Secrets.hash(challenge.path("device_code").asString()),
+                            false);
+                    assertNotEquals(
+                        grant.path("uacNavigationProviderId"), grant.path("providerId"));
+                    assertEquals(h.browser.session().path("providerId"), grant.path("providerId"));
+                    assertEquals(h.sid, grant.path("sessionId").asString());
+                    return null;
+                  }));
+      assertFalse(h.exchange(challenge).has("error"));
     }
   }
 
