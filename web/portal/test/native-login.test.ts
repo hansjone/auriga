@@ -195,6 +195,151 @@ describe('native cloud sign-in', () => {
     await flush();
     expect(button('团队账号').hidden).toBe(false);
   });
+  it('starts QR sign-in for an enabled UAC provider without a navigation proof', async () => {
+    const id = '01900000-0000-7000-8000-000000000009';
+    fetcher.mockImplementation(async (input, init) => {
+      const path = String(input);
+      if (path === '/api/iam/v1/me') return expired();
+      if (path.endsWith('/providers'))
+        return json({
+          items: [
+            provider,
+            { ...provider, id, connectorType: 'uac', primaryStep: 'qr' },
+          ],
+        });
+      if (path.endsWith('/challenges')) {
+        expect(JSON.parse(String(init?.body)).providerId).toBe(id);
+        return json({
+          id,
+          transactionId: txId,
+          qrContent: 'synthetic-qr-content',
+          expiresAt: '2099-01-01T00:00:00Z',
+          pollIntervalSeconds: 2,
+        });
+      }
+      if (path.endsWith('/challenges/' + id) && init?.method !== 'DELETE')
+        return json({ id, state: 'waiting' });
+      return new Response(null, { status: 204 });
+    });
+    render();
+    await flush();
+    expect(
+      root.querySelector('[data-uac-state]')?.getAttribute('data-uac-state'),
+    ).toBe('waiting');
+    expect(root.querySelector('[data-uac-state] svg')).toBeTruthy();
+    expect(fetcher.mock.calls.map(([path]) => path)).toEqual([
+      '/api/iam/v1/me',
+      '/api/iam/v1/login/providers',
+      '/api/iam/v1/login/uac/challenges',
+      '/api/iam/v1/login/uac/challenges/' + id,
+    ]);
+  });
+
+  it.each([
+    ['automatically after a wrong code', 'iam.invalid_credentials', false],
+    ['from the retry button', 'common.not_found', false],
+    ['after restoring the transaction by URL', 'iam.invalid_credentials', true],
+  ])(
+    'restarts UAC first MFA %s through a fresh QR challenge',
+    async (_, code, restored) => {
+      const id = '01900000-0000-7000-8000-000000000009';
+      const first = '01900000-0000-7000-8000-000000000010';
+      const second = '01900000-0000-7000-8000-000000000011';
+      const replacementTx = '01900000-0000-7000-8000-000000000012';
+      const uac = { ...provider, id, connectorType: 'uac', primaryStep: 'qr' };
+      const challenges = '/api/iam/v1/login/uac/challenges';
+      const transactions = '/api/iam/v1/login/transactions';
+      const firstTotp: ClientStep = {
+        type: 'form',
+        formId: 'first_totp',
+        fields: [{ name: 'otp', kind: 'otp', required: true }],
+      };
+      let created = 0;
+      fetcher.mockImplementation(async (input, init) => {
+        const path = String(input);
+        if (path === '/api/iam/v1/me') return expired();
+        if (path === '/api/iam/v1/login/providers')
+          return json({ items: [uac] });
+        if (path === challenges && init?.method === 'POST') {
+          expect(JSON.parse(String(init.body))).toMatchObject({
+            providerId: id,
+            purpose: 'login',
+          });
+          created++;
+          const initial = !restored && created === 1;
+          return json({
+            id: initial ? first : second,
+            transactionId: initial ? txId : replacementTx,
+            qrContent: 'synthetic-qr-' + created,
+            expiresAt: '2099-01-01T00:00:00Z',
+            pollIntervalSeconds: 2,
+          });
+        }
+        if (path === challenges + '/' + first)
+          return json({ id: first, state: 'verified' });
+        if (path === challenges + '/' + first + '/complete')
+          return json({
+            state: 'additional_step_required',
+            transactionId: txId,
+          });
+        if (path === transactions + '/' + txId)
+          return json({ ...transaction(firstTotp), provider: uac });
+        if (path === transactions + '/' + txId + '/advance') {
+          expect(JSON.parse(String(init?.body))).toEqual({
+            type: 'form',
+            formId: 'first_totp',
+            values: { otp: '000000' },
+          });
+          return json({
+            ...transaction({ type: 'fail', code, retryable: true }, 'failed'),
+            provider: uac,
+          });
+        }
+        if (path === challenges + '/' + second)
+          return init?.method === 'DELETE'
+            ? new Response(null, { status: 204 })
+            : json({ id: second, state: 'waiting' });
+        throw new Error('Unexpected login request: ' + path);
+      });
+      if (restored)
+        globalThis.history.replaceState(
+          null,
+          '',
+          '/instance-login.html?tx=' + txId,
+        );
+      render();
+      await flush();
+      field('otp', '000000');
+      submit();
+      await flush();
+      if (code !== 'iam.invalid_credentials') {
+        expect(created).toBe(1);
+        button('重新开始', '.card button').click();
+        await flush();
+      }
+      expect(created).toBe(restored ? 1 : 2);
+      expect(root.querySelector('input[name="otp"]')).toBeNull();
+      expect(
+        root.querySelector('[data-uac-state]')?.getAttribute('data-uac-state'),
+      ).toBe('waiting');
+      expect(root.querySelector('[data-uac-state] svg')).toBeTruthy();
+      expect(fetcher.mock.calls.some(([path]) => path === transactions)).toBe(
+        false,
+      );
+      expect(navigate).not.toHaveBeenCalled();
+    },
+  );
+
+  it('offers the configured team sign-in when IAM does not offer UAC', async () => {
+    await anonymous();
+    expect(button('团队账号')).toBeDefined();
+    expect(root.querySelector('[data-uac-state]')).toBeNull();
+    expect(fetcher.mock.calls.map(([path]) => path)).toEqual([
+      '/api/iam/v1/me',
+      '/api/iam/v1/login/providers',
+    ]);
+  });
+
   it('opens the workspace without waiting for department information and updates the identity area later', async () => {
     let reads = 0;
     fetcher.mockImplementation(async (input) => {

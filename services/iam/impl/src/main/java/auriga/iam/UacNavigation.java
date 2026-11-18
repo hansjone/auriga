@@ -538,7 +538,8 @@ final class UacNavigation {
           var result =
               login.finishUac(
                   tx.path("id").asString(),
-                  Json.object("subject", verified.path("credential").path("empNo")));
+                  Json.object("subject", verified.path("credential").path("empNo")),
+                  nav.path("providerRevision").asString());
           if (result.session() != null) {
             nav.put("issuedSessionId", result.session().session().path("sessionId").asString());
             store.save("uac_navigation", nav);
