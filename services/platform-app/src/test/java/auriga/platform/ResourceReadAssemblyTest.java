@@ -691,17 +691,35 @@ class ResourceReadAssemblyTest {
             catalogDelivery.resolve(marketResolve(grant).setSynchronizeAssignments(true).build()));
   }
 
-  private ResolveUnifiedResourcesRequest marketEvent(Grant grant) {
-    var event =
-        JSON.readTree(
+  private ResolveUnifiedResourcesRequest marketEvent(Grant grant, long expectedRevision) {
+    var envelope =
+        JSON.readValue(
             admin.queryForObject(
-                "SELECT (envelope->'data')::text FROM resource.outbox_event WHERE tenant_id=? AND subject_key=? AND event_type='resource.catalog_distribution_requested' ORDER BY id DESC LIMIT 1",
+                "SELECT envelope FROM resource.outbox_event WHERE tenant_id=? AND subject_key=? AND event_type='resource.catalog_distribution_requested' ORDER BY seq DESC LIMIT 1",
                 String.class,
                 T1,
-                grant.instance().toString()));
+                grant.instance().toString()),
+            EventEnvelope.class);
+    assertEquals(T1.toString(), envelope.tenantid());
+    assertEquals("auriga/resource", envelope.source());
+    assertEquals("resource.catalog_distribution_requested", envelope.type());
+    assertEquals(grant.instance().toString(), envelope.subject());
+    var event = envelope.data();
+    assertEquals(envelope.subject(), event.path("instanceId").asString());
+    assertEquals(ALICE.toString(), event.path("ownerId").asString());
+    long revision = event.path("selectionRevision").asLong();
+    assertEquals(expectedRevision, revision);
+    assertTrue(revision > marketWorkspace.spec(grant.instance()).getResourceSelectionRevision());
+    var selections = event.path("selections");
+    assertTrue(selections.isArray() && !selections.isEmpty());
     var request =
-        marketResolve(grant).setSelectionRevision(event.path("selectionRevision").asLong());
-    event.path("selections").forEach(s -> request.addSelections(CatalogProtocol.selection(s)));
+        ResolveUnifiedResourcesRequest.newBuilder()
+            .setTenantId(envelope.tenantid())
+            .setInstanceId(event.path("instanceId").asString())
+            .setOwnerId(event.path("ownerId").asString())
+            .setNodeId(marketWorkspace.node(grant.instance()).toString())
+            .setSelectionRevision(revision);
+    selections.forEach(s -> request.addSelections(CatalogProtocol.selection(s)));
     return request.build();
   }
 
@@ -742,7 +760,7 @@ class ResourceReadAssemblyTest {
     marketRule(a, defaultInstall, "default");
     var plan = marketPlan(a);
     assertEquals(2, plan.getSelectionsCount());
-    applyMarket(a, marketEvent(a), true);
+    applyMarket(a, marketEvent(a, plan.getSelectionRevision()), true);
     var spec = marketWorkspace.spec(a.instance());
     assertEquals("applying", marketItem(a, required).path("state").asString());
     marketWorkspace.report(
@@ -796,8 +814,7 @@ class ResourceReadAssemblyTest {
             "common.conflict");
       assertEquals("applying", marketItem(a, optional).path("state").asString());
       previous = selected.path("installationRevision").asLong();
-      var request = marketEvent(a);
-      assertEquals(a.instance().toString(), request.getInstanceId());
+      var request = marketEvent(a, selected.path("selectionRevision").asLong());
       applyMarket(a, request, false);
       var current = marketWorkspace.spec(a.instance());
       marketWorkspace.report(
@@ -816,16 +833,17 @@ class ResourceReadAssemblyTest {
         412,
         "common.precondition_failed");
     var defaultRow = marketItem(a, defaultInstall);
-    result(
-        marketSelect(
-            a,
-            a.device(),
-            defaultInstall,
-            "remove",
-            defaultRow.path("installationRevision").asLong(),
-            "remove-default"),
-        202);
-    applyMarket(a, marketEvent(a), false);
+    var removedDefault =
+        result(
+            marketSelect(
+                a,
+                a.device(),
+                defaultInstall,
+                "remove",
+                defaultRow.path("installationRevision").asLong(),
+                "remove-default"),
+            202);
+    applyMarket(a, marketEvent(a, removedDefault.path("selectionRevision").asLong()), false);
     assertEquals(0, marketPlan(a).getSelectionsCount());
     var beforeCollection = marketWorkspace.spec(a.instance());
     marketWorkspace.report(
@@ -860,16 +878,17 @@ class ResourceReadAssemblyTest {
     assertEquals(
         defaultRow.path("installationRevision").asLong() + 1,
         tombstone.path("installationRevision").asLong());
-    result(
-        marketSelect(
-            a,
-            a.device(),
-            defaultInstall,
-            "enable",
-            tombstone.path("installationRevision").asLong(),
-            "explicit-restore"),
-        202);
-    applyMarket(a, marketEvent(a), false);
+    var restored =
+        result(
+            marketSelect(
+                a,
+                a.device(),
+                defaultInstall,
+                "enable",
+                tombstone.path("installationRevision").asLong(),
+                "explicit-restore"),
+            202);
+    applyMarket(a, marketEvent(a, restored.path("selectionRevision").asLong()), false);
     assertEquals(
         0,
         admin.queryForObject("SELECT count(*) FROM resource.catalog_installation", Integer.class));
@@ -886,8 +905,9 @@ class ResourceReadAssemblyTest {
             Integer.class,
             b.instance()));
 
-    result(marketSelect(b, b.device(), optional, "install", 0, "pending-before-policy"), 202);
-    var superseded = marketEvent(b);
+    var pendingPolicy =
+        result(marketSelect(b, b.device(), optional, "install", 0, "pending-before-policy"), 202);
+    var superseded = marketEvent(b, pendingPolicy.path("selectionRevision").asLong());
     marketRule(b, required, "required");
     var rejected =
         assertThrows(
@@ -895,8 +915,10 @@ class ResourceReadAssemblyTest {
             () -> TenantContext.call(T1, () -> catalogDelivery.resolve(superseded)));
     assertEquals(auriga.common.error.CommonErrors.PRECONDITION_FAILED, rejected.errorCode());
     assertTrue(marketItem(b, optional).isMissingNode());
-    assertEquals(1, marketPlan(b).getSelectionsCount());
-    applyMarket(b, marketEvent(b), true);
+    var replacementPlan = marketPlan(b);
+    assertEquals(1, replacementPlan.getSelectionsCount());
+    assertTrue(replacementPlan.getSelectionRevision() > superseded.getSelectionRevision());
+    applyMarket(b, marketEvent(b, replacementPlan.getSelectionRevision()), true);
     assertTrue(marketItem(b, optional).isMissingNode());
     assertFalse(marketItem(b, required).isMissingNode());
     var bSpec = marketWorkspace.spec(b.instance());
@@ -915,9 +937,11 @@ class ResourceReadAssemblyTest {
             .asString());
     assertEquals("member", marketItem(desktop, optional).path("reportSource").asString());
 
-    result(
-        marketSelect(a, a.device(), optional, "install", previous, "queued-before-rotation"), 202);
-    var queuedBeforeRotation = marketEvent(a);
+    var pendingRotation =
+        result(
+            marketSelect(a, a.device(), optional, "install", previous, "queued-before-rotation"),
+            202);
+    var queuedBeforeRotation = marketEvent(a, pendingRotation.path("selectionRevision").asLong());
     var replacement = deviceCredentials.managed(T1, ALICE, a.instance(), 2);
     assertNotEquals(a.device(), replacement.device());
     deviceStatus(403, deviceRequest(MARKET + "?clientId=" + a.device(), a.token(), null));
