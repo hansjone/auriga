@@ -262,8 +262,11 @@ public class WorkspaceRuntimeConfiguration {
   }
 
   @Bean
-  NodeSessions workspaceNodeSessions(NodeEnrollment enrollment, WorkspaceService service) {
-    return new NodeSessions(enrollment, service);
+  NodeSessions workspaceNodeSessions(
+      NodeEnrollment enrollment,
+      WorkspaceService service,
+      ObjectProvider<SharedDshNodeRuntime> sharedRuntime) {
+    return new NodeSessions(enrollment, service, sharedRuntime.getIfAvailable());
   }
 
   @Bean

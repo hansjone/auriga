@@ -3,6 +3,7 @@ package auriga.workspace.config;
 import auriga.workspace.api.SharedDshAuthority.Inputs;
 import auriga.workspace.app.SharedDshAdmin;
 import auriga.workspace.app.SharedDshMaintenance;
+import auriga.workspace.app.SharedDshNodeRuntime;
 import auriga.workspace.app.SharedDshPlacements;
 import auriga.workspace.app.SharedDshTickets;
 import auriga.workspace.grpc.SharedDshGrpc;
@@ -19,6 +20,11 @@ import org.springframework.context.annotation.Configuration;
     "${auriga.services.workspace.enabled:true} && ('${auriga.service.schema:}' == 'workspace' || ${auriga.platform.combined:false})")
 @ConditionalOnProperty(name = "auriga.workspace.shared-dsh.enabled", havingValue = "true")
 public class WorkspaceSharedDshConfiguration {
+  @Bean
+  SharedDshNodeRuntime sharedDshNodeRuntime(WorkspaceStore store, SharedDshPlacements placements) {
+    return new SharedDshNodeRuntime(store, placements);
+  }
+
   @Bean
   SharedDshPlacements sharedDshPlacements(
       WorkspaceStore store, Inputs inputs, SharedDshPlacements.EntryProbe entry, Clock clock) {

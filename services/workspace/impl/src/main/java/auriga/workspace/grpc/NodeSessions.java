@@ -24,6 +24,7 @@ public final class NodeSessions implements AutoCloseable {
   public static final Context.Key<X509Certificate> PEER = Context.key("workspace-node-certificate");
   private final NodeEnrollment enrollment;
   private final WorkspaceService workspace;
+  private final SharedDshNodeRuntime sharedRuntime;
   private final Map<UUID, Session> sessions = new ConcurrentHashMap<>();
   private final ExecutorService notifications =
       Executors.newSingleThreadExecutor(
@@ -31,8 +32,14 @@ public final class NodeSessions implements AutoCloseable {
   private final AtomicBoolean dispatchPending = new AtomicBoolean();
 
   public NodeSessions(NodeEnrollment enrollment, WorkspaceService workspace) {
+    this(enrollment, workspace, null);
+  }
+
+  public NodeSessions(
+      NodeEnrollment enrollment, WorkspaceService workspace, SharedDshNodeRuntime sharedRuntime) {
     this.enrollment = enrollment;
     this.workspace = workspace;
+    this.sharedRuntime = sharedRuntime;
     // afterCommit still holds the caller's connection until cleanup. Never wait for another
     // connection there; one coalesced worker dispatches after the caller can return its connection.
     workspace.onChanged(
@@ -138,6 +145,9 @@ public final class NodeSessions implements AutoCloseable {
     final StreamObserver<SessionResponse> output;
     volatile Instant seen = workspace.clock.instant();
     boolean hello, inventory, closed;
+    boolean sharedPreparation;
+    final LinkedHashMap<UUID, SharedDshNodeRuntime.Delivery> sharedInFlight = new LinkedHashMap<>();
+    UUID sharedCursor;
     final UUID holder = auriga.common.persistence.UuidV7.next();
     final NodeSessionLease lease;
     final NodeOutput outbound;
@@ -219,6 +229,7 @@ public final class NodeSessions implements AutoCloseable {
                             tenant,
                             node));
                 hello = true;
+                sharedPreparation = SharedDshNodeRuntime.supports(h);
                 responses.add(
                     SessionResponse.newBuilder()
                         .setWelcome(
@@ -290,6 +301,15 @@ public final class NodeSessions implements AutoCloseable {
                     deliveries.result(node, holder, delivery, result);
                     inFlight.remove(id);
                   }
+                } else if (request.hasSharedDshRuntimeReceipt()
+                    && sharedRuntime != null
+                    && sharedPreparation) {
+                  for (var sent : List.copyOf(sharedInFlight.values())) {
+                    if (sharedRuntime.receipt(node, sent, request.getSharedDshRuntimeReceipt())) {
+                      sharedInFlight.remove(sent.id());
+                      break;
+                    }
+                  }
                 } else if (!request.hasLog())
                   throw new AurigaException(CommonErrors.VALIDATION_FAILED);
               }
@@ -358,6 +378,20 @@ public final class NodeSessions implements AutoCloseable {
                   for (var delivery : deliveries.claim(node, holder, inFlight.keySet())) {
                     inFlight.put(delivery.id(), delivery);
                     frames.add(delivery.message());
+                  }
+                  if (sharedRuntime != null && sharedPreparation) {
+                    var batch = sharedRuntime.pending(node, sharedCursor);
+                    sharedCursor = batch.next();
+                    for (var delivery : batch.deliveries()) {
+                      // Bound each stream's correlation state. Evicted commands remain in the
+                      // durable outbox and are retried on the next scan or reconnect.
+                      if (sharedInFlight.size() >= 100) sharedInFlight.pollFirstEntry();
+                      sharedInFlight.put(delivery.id(), delivery);
+                      frames.add(
+                          SessionResponse.newBuilder()
+                              .setSharedDshRuntimeIntent(delivery.intent())
+                              .build());
+                    }
                   }
                   return frames;
                 });

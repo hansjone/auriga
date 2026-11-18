@@ -218,6 +218,10 @@ func runAgent(args []string, logs io.Writer) error {
 
 	reg := ingress.NewMapRegistry()
 	targets := &observer.SliceTargets{}
+	shared, err := sharedPreparation(cfg, driverName)
+	if err != nil {
+		return err
+	}
 	sess := conn.New(conn.Config{
 		AgentDir:      cfg.AgentDir(),
 		AgentVersion:  cfg.AgentVersion,
@@ -228,6 +232,7 @@ func runAgent(args []string, logs io.Writer) error {
 		Store:         store,
 		AllowInsecure: cfg.AllowInsecure,
 		Capacity:      helloCapacity(cfg.DetectCapacity()),
+		SharedPools:   shared,
 	})
 	io, err := startIngressAndObserver(ctx, cfg, logger, *ingressListen, *ingressLocal, reg, targets, sess)
 	if err != nil {

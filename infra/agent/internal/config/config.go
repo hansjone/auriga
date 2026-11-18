@@ -32,6 +32,16 @@ type Config struct {
 	// Capacity is what this node offers to the scheduler (reported in Hello).
 	// Zero fields are filled from the host where possible (see DetectCapacity).
 	Capacity Capacity `json:"capacity"`
+	// SharedDshPreparation enables only durable member-directory preparation.
+	// Runtime profile, process lifecycle and member-session adapters are separate dependencies.
+	SharedDshPreparation *SharedDshPreparation `json:"sharedDshPreparation,omitempty"`
+}
+
+type SharedDshPreparation struct {
+	QuotaBinary  string `json:"quotaBinary"`
+	QuotaMount   string `json:"quotaMount"`
+	ProjectFirst uint32 `json:"projectFirst"`
+	ProjectLast  uint32 `json:"projectLast"`
 }
 
 // Capacity mirrors nodev1.Capacity. MaxInstances 0 means unlimited.

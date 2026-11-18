@@ -22,6 +22,7 @@ import (
 	"github.com/hansjone/auriga/infra/agent/internal/enroll"
 	"github.com/hansjone/auriga/infra/agent/internal/identity"
 	"github.com/hansjone/auriga/infra/agent/internal/reconciler"
+	agentruntime "github.com/hansjone/auriga/infra/agent/internal/runtime"
 	"github.com/hansjone/auriga/infra/agent/internal/state"
 	"github.com/hansjone/auriga/infra/agent/internal/telemetry"
 	"github.com/hansjone/auriga/infra/agent/internal/tlsutil"
@@ -44,6 +45,7 @@ type Config struct {
 	Reconciler    *reconciler.Reconciler
 	Store         *state.Store
 	AllowInsecure bool
+	SharedPools   *agentruntime.SharedPools
 
 	HeartbeatInterval time.Duration
 	MinBackoff        time.Duration
@@ -61,15 +63,16 @@ type Config struct {
 type Session struct {
 	cfg Config
 
-	mu          sync.Mutex
-	heartbeat   time.Duration
-	lastWelcome *nodev1.Welcome
-	welcomeAt   time.Time
-	connected   bool
-	statusCh    chan *nodev1.InstanceStatus
-	usageCh     chan *nodev1.NodeUsage
-	wakeCh      chan *nodev1.WakeSchedule
-	resultCh    chan *nodev1.CommandResult
+	mu              sync.Mutex
+	heartbeat       time.Duration
+	lastWelcome     *nodev1.Welcome
+	welcomeAt       time.Time
+	connected       bool
+	statusCh        chan *nodev1.InstanceStatus
+	usageCh         chan *nodev1.NodeUsage
+	wakeCh          chan *nodev1.WakeSchedule
+	resultCh        chan *nodev1.CommandResult
+	sharedReceiptCh chan *nodev1.SharedDshRuntimeReceipt
 }
 
 // New creates a session manager.
@@ -99,12 +102,13 @@ func New(cfg Config) *Session {
 		cfg.BootID = fmt.Sprintf("boot-%d", time.Now().UnixNano())
 	}
 	return &Session{
-		cfg:       cfg,
-		heartbeat: cfg.HeartbeatInterval,
-		statusCh:  make(chan *nodev1.InstanceStatus, 64),
-		usageCh:   make(chan *nodev1.NodeUsage, 8),
-		wakeCh:    make(chan *nodev1.WakeSchedule, 16),
-		resultCh:  make(chan *nodev1.CommandResult, 64),
+		cfg:             cfg,
+		heartbeat:       cfg.HeartbeatInterval,
+		statusCh:        make(chan *nodev1.InstanceStatus, 64),
+		usageCh:         make(chan *nodev1.NodeUsage, 8),
+		wakeCh:          make(chan *nodev1.WakeSchedule, 16),
+		resultCh:        make(chan *nodev1.CommandResult, 64),
+		sharedReceiptCh: make(chan *nodev1.SharedDshRuntimeReceipt, 64),
 	}
 }
 
@@ -278,6 +282,8 @@ func (s *Session) tryRenew(ctx context.Context) error {
 }
 
 func (s *Session) runOnce(ctx context.Context) error {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
 	mat, meta, tlsCert, err := s.loadCreds()
 	if err != nil {
 		return err
@@ -400,6 +406,12 @@ func (s *Session) runOnce(ctx context.Context) error {
 			if err := stream.Send(&nodev1.SessionRequest{Body: &nodev1.SessionRequest_Result{Result: result}}); err != nil {
 				return err
 			}
+		case receipt := <-s.sharedReceiptCh:
+			if err := stream.Send(&nodev1.SessionRequest{
+				Body: &nodev1.SessionRequest_SharedDshRuntimeReceipt{SharedDshRuntimeReceipt: receipt},
+			}); err != nil {
+				return err
+			}
 		}
 	}
 }
@@ -450,6 +462,10 @@ func (s *Session) sendHello(stream nodev1.NodeControlService_SessionClient, mat 
 	if len(drivers) == 0 {
 		drivers = []nodev1.RuntimeKind{nodev1.RuntimeKind_RUNTIME_KIND_UNSPECIFIED}
 	}
+	var labels map[string]string
+	if s.cfg.SharedPools != nil {
+		labels = map[string]string{"auriga.shared-dsh-runtime": "prepare-v1"}
+	}
 	return stream.Send(&nodev1.SessionRequest{
 		Body: &nodev1.SessionRequest_Hello{Hello: &nodev1.Hello{
 			NodeId:          mat.NodeID,
@@ -464,6 +480,7 @@ func (s *Session) sendHello(stream nodev1.NodeControlService_SessionClient, mat 
 			SealingKeyId:    identity.SealingKeyID(mat.SealingPublic),
 			IngressEndpoint: ingress,
 			Capacity:        capacity,
+			Labels:          labels,
 		}},
 	})
 }
@@ -549,6 +566,23 @@ func (s *Session) handleControl(ctx context.Context, msg *nodev1.SessionResponse
 		return nil
 	}
 	s.cfg.Logger.Info("control message received", "type", fmt.Sprintf("%T", msg.Body))
+	if body, ok := msg.Body.(*nodev1.SessionResponse_SharedDshRuntimeIntent); ok {
+		command := body.SharedDshRuntimeIntent
+		if s.cfg.SharedPools == nil || command == nil || command.Binding == nil ||
+			command.Action != "prepare-empty" || command.OperationId != command.Binding.PlacementId {
+			return fmt.Errorf("initial shared preparation unavailable")
+		}
+		receipt, err := s.cfg.SharedPools.Apply(ctx, command)
+		if err != nil {
+			return err
+		}
+		select {
+		case s.sharedReceiptCh <- receipt:
+			return nil
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
 	if s.cfg.Reconciler == nil {
 		return nil
 	}
