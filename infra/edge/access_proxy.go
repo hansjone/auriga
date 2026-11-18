@@ -344,7 +344,7 @@ func (g *Gateway) iamCookies(r *http.Request, e accessEntry, bootstrap, authenti
 	var names []string
 	if placementBrowserOperation(r) {
 		names = append(names, sessionCookieBase(e.role))
-		if isWriteMethod(r.Method) && !(g.Cfg.Access.Mode() == "ip" && e.role == "admin") {
+		if isWriteMethod(r.Method) && (g.Cfg.Access.Mode() != "ip" || e.role != "admin") {
 			names = append(names, csrfCookieBase())
 		}
 	}

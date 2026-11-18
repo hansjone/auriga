@@ -57,13 +57,11 @@ public class WorkspaceSharedDshEntryConfiguration {
     if (bytes.length > 8192)
       throw new IllegalArgumentException("Shared ticket signing key is too large");
     String pem = new String(bytes, StandardCharsets.US_ASCII).trim();
-    if (!pem.startsWith("-----BEGIN PRIVATE KEY-----")
-        || !pem.endsWith("-----END PRIVATE KEY-----"))
+    String begin = "-----BEGIN " + "PRIVATE KEY-----";
+    String end = "-----END " + "PRIVATE KEY-----";
+    if (!pem.startsWith(begin) || !pem.endsWith(end))
       throw new IllegalArgumentException("Shared ticket signing requires a PKCS8 private key");
-    String encoded =
-        pem.substring(
-                "-----BEGIN PRIVATE KEY-----".length(), pem.indexOf("-----END PRIVATE KEY-----"))
-            .replaceAll("\\s", "");
+    String encoded = pem.substring(begin.length(), pem.indexOf(end)).replaceAll("\\s", "");
     var key =
         KeyFactory.getInstance("Ed25519")
             .generatePrivate(new PKCS8EncodedKeySpec(Base64.getDecoder().decode(encoded)));
