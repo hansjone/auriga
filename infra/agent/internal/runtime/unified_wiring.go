@@ -16,6 +16,7 @@ import (
 	"encoding/json"
 	"github.com/hansjone/auriga/infra/agent/internal/identity"
 	"github.com/hansjone/auriga/infra/agent/internal/renderer"
+	"github.com/hansjone/auriga/infra/agent/internal/state"
 	"github.com/hansjone/auriga/infra/agent/internal/storage"
 	"github.com/hansjone/auriga/infra/agent/internal/telemetry"
 	nodev1 "github.com/hansjone/auriga/infra/gen/auriga/node/v1"
@@ -276,7 +277,27 @@ func (p *Preparing) ResourceState(id string) ([]*resourcev1.UnifiedInstallationR
 	if p.Unified == nil {
 		return nil, nil, nil
 	}
-	return p.Unified.Status(id)
+	reports, guardian, err := p.Unified.Status(id)
+	if docker, ok := p.Inner.(*Docker); ok && err == nil {
+		// Observation receipts can be written while Start still owns an
+		// intent. Do not make applied evidence visible through the cached path
+		// until its live, committed endpoint is available.
+		for _, report := range reports {
+			if report.GetState() == "applied" {
+				if _, err := docker.Endpoint(id); err != nil {
+					visible := reports[:0]
+					for _, report := range reports {
+						if report.GetState() != "applied" {
+							visible = append(visible, report)
+						}
+					}
+					reports = visible
+				}
+				break
+			}
+		}
+	}
+	return reports, guardian, err
 }
 func (p *Preparing) GuardResources(ctx context.Context, spec *nodev1.InstanceSpec) error {
 	if p.Unified == nil {
@@ -324,6 +345,60 @@ func (d *Docker) VerifyResourceView(ctx context.Context, id string) error {
 		return fmt.Errorf("resource runtime is not running")
 	}
 	return nil
+}
+
+// probeStartupResources never consults or returns a public readiness proof.
+// The synchronous callback owns the release intent throughout this probe.
+func (d *Docker) probeStartupResources(ctx context.Context, scope *activationScope, record *state.ExecutionRecord, endpoint string, process processLifetime, bridges []trustedBridge, generation int64, revision uint64) (Endpoint, error) {
+	id := record.InstanceID
+	active, err := requireActivation(ctx, id)
+	if err != nil {
+		return Endpoint{}, err
+	}
+	if active != scope || scope.coordinator != d.Activation || generation != scope.spec.Generation ||
+		(!scope.recovering && revision != scope.spec.GetResourceSelectionRevision()) {
+		return Endpoint{}, fmt.Errorf("resource view does not match startup activation")
+	}
+	actual, err := d.actualRecord(id)
+	if err != nil {
+		return Endpoint{}, err
+	}
+	if actual.Phase != "started" || !sameExecution(actual, record) || !sameExecution(actual, scope.record) {
+		return Endpoint{}, fmt.Errorf("resource view execution changed during startup")
+	}
+	insp, err := d.startContainerView(ctx, actual, bridges)
+	if err != nil {
+		return Endpoint{}, err
+	}
+	// startContainerView verifies the trusted mount for this label. Here a
+	// missing label must also fail, since this startup has resource state.
+	config, _ := insp["Config"].(map[string]any)
+	labels, _ := config["Labels"].(map[string]any)
+	if labels["auriga.shared-skills"] != "read-only" {
+		return Endpoint{}, fmt.Errorf("resource startup is missing its trusted read-only mount")
+	}
+	lifetime, err := containerProcess(insp)
+	if err != nil || lifetime != process {
+		return Endpoint{}, fmt.Errorf("resource view process changed during startup")
+	}
+	port, err := instancePort(insp)
+	if err != nil {
+		return Endpoint{}, err
+	}
+	url, err := instanceEndpoint(insp, networkName(id), port)
+	if err != nil || url != endpoint {
+		return Endpoint{}, fmt.Errorf("resource view endpoint changed during startup")
+	}
+	d.mu.Lock()
+	pending := d.endpoints[id].pending == scope
+	d.mu.Unlock()
+	if !pending {
+		return Endpoint{}, fmt.Errorf("resource startup endpoint was withdrawn")
+	}
+	if err := ctx.Err(); err != nil {
+		return Endpoint{}, err
+	}
+	return Endpoint{URL: endpoint}, nil
 }
 
 func (d *Docker) verifyUnifiedMount(inspection map[string]any, id string) error {

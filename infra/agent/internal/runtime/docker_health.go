@@ -17,7 +17,7 @@ func (d *Docker) CheckHealth(ctx context.Context, id string) (st Status, err err
 	st.InstanceID = id
 	defer func() {
 		if err != nil || !st.Ready {
-			d.revoke(id)
+			d.withdraw(id, true)
 		}
 	}()
 	record, err := d.observationRecord(id)
@@ -111,7 +111,7 @@ func (d *Docker) CheckHealth(ctx context.Context, id string) (st Status, err err
 	}
 	d.mu.Lock()
 	ep := d.endpoints[id]
-	st.Ready = ep.url == endpoint && ep.process == process
+	st.Ready = ep.pending == nil && ep.url == endpoint && ep.process == process
 	d.mu.Unlock()
 	return st, nil
 }

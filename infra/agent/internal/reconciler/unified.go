@@ -3,6 +3,7 @@ package reconciler
 import (
 	"context"
 	"errors"
+	"slices"
 
 	"github.com/hansjone/auriga/infra/agent/internal/runtime"
 	nodev1 "github.com/hansjone/auriga/infra/gen/auriga/node/v1"
@@ -56,6 +57,7 @@ func (r *Reconciler) enrichResources(ctx context.Context, status *nodev1.Instanc
 		status.Ready = false
 		status.Error = &nodev1.InstanceError{Code: "agent.ensure_failed", Message: "native resource observation unavailable", Retryable: true}
 	}
+	filterAppliedReports(status)
 }
 
 func (r *Reconciler) enrichPersistedResources(status *nodev1.InstanceStatus) {
@@ -67,4 +69,16 @@ func (r *Reconciler) enrichPersistedResources(status *nodev1.InstanceStatus) {
 			status.Error = &nodev1.InstanceError{Code: "agent.ensure_failed", Message: "trusted resource state unavailable", Retryable: true}
 		}
 	}
+	filterAppliedReports(status)
+}
+
+func filterAppliedReports(status *nodev1.InstanceStatus) {
+	guardian := status.GetUnifiedGuardian()
+	status.UnifiedResourceReports = slices.DeleteFunc(status.UnifiedResourceReports, func(report *resourcev1.UnifiedInstallationReport) bool {
+		return report.GetState() == "applied" && (!status.GetReady() || status.GetObservedGeneration() <= 0 ||
+			guardian.GetState() != "active" || guardian.GetGeneration() != uint64(status.GetObservedGeneration()) ||
+			report.GetObservedGeneration() != uint64(status.GetObservedGeneration()) ||
+			report.GetGeneration() != uint64(status.GetObservedGeneration()) ||
+			report.GetSelectionRevision() != guardian.GetSelectionRevision())
+	})
 }

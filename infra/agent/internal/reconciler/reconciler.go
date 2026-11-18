@@ -193,8 +193,9 @@ func (r *Reconciler) Inventory() ([]*nodev1.InstanceStatus, error) {
 			status := cloneStatus(rec.Status)
 			if status.Ready {
 				actual, inspectErr := r.Driver.Inspect(inspectionCtx, status.InstanceId)
-				status.Ready = inspectErr == nil && inspectionCtx.Err() == nil && actual.Running && actual.Ready
+				status.Ready = inspectErr == nil && inspectionCtx.Err() == nil && actual.Running && actual.Ready && actual.Generation == status.ObservedGeneration
 			}
+			filterAppliedReports(status)
 			out = append(out, status)
 		}
 	}

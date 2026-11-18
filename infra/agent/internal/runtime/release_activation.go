@@ -49,6 +49,8 @@ type activationScope struct {
 	engineImageID string
 	execution     *state.ReleaseExecution
 	record        *state.ExecutionRecord
+	recovering    bool
+	finishStart   func(commit bool) error
 	mu            sync.Mutex
 	active        bool
 }
@@ -111,11 +113,16 @@ func (a *ReleaseActivation) coordinate(ctx context.Context, spec *nodev1.Instanc
 	if err != nil {
 		return err
 	}
-	scope := &activationScope{coordinator: a, spec: spec, candidate: candidate, record: record, active: true}
+	scope := &activationScope{coordinator: a, spec: spec, candidate: candidate, record: record, recovering: record != nil, active: true}
 	if record != nil {
 		scope.engineImageID = record.EngineImageID
 	}
 	defer func() { scope.mu.Lock(); scope.active = false; scope.mu.Unlock() }()
+	defer func() {
+		if scope.finishStart != nil {
+			_ = scope.finishStart(false)
+		}
+	}()
 	// Cancellation while qualifying must still interrupt lock/artifact waits.
 	// Once authorization completes, cancel only the joined operation phase:
 	// WithReleaseExecution can then clear its own intent after definite actions,
@@ -133,7 +140,7 @@ func (a *ReleaseActivation) coordinate(ctx context.Context, spec *nodev1.Instanc
 		}
 	})
 	defer stopQualification()
-	return a.Store.WithReleaseExecution(qualification, candidate, func(ctx context.Context) error {
+	err = a.Store.WithReleaseExecution(qualification, candidate, func(ctx context.Context) error {
 		if err := scope.recheck(); err != nil {
 			return err
 		}
@@ -162,6 +169,13 @@ func (a *ReleaseActivation) coordinate(ctx context.Context, spec *nodev1.Instanc
 		}
 		return errors.Join(run(context.WithValue(parent, activationKey{}, scope)), parent.Err())
 	})
+	if err == nil && scope.finishStart != nil {
+		if err := parent.Err(); err != nil {
+			return err
+		}
+		return scope.finishStart(true)
+	}
+	return err
 }
 
 func (s *activationScope) recheck() error {
@@ -190,6 +204,13 @@ func (s *activationScope) recheck() error {
 func executionMatchesImage(r *state.ExecutionRecord, image releaseverify.VerifiedImage, c state.ReleaseCandidate) bool {
 	return r.Version == 2 && r.Candidate == c && r.ConfigID == image.ConfigID() && r.ProofDigest == image.ManifestDigest() &&
 		(r.EngineImageID == image.ConfigID() || r.EngineImageID == image.ManifestDigest())
+}
+
+func sameExecution(a, b *state.ExecutionRecord) bool {
+	return a != nil && b != nil && a.Version == b.Version && a.InstanceID == b.InstanceID &&
+		a.Generation == b.Generation && a.ContainerID == b.ContainerID && a.Candidate == b.Candidate &&
+		a.EngineImageID == b.EngineImageID && a.ConfigID == b.ConfigID && a.ProofDigest == b.ProofDigest &&
+		proto.Equal(a.DSH, b.DSH)
 }
 
 // pinEngineImage fixes the observed Engine target once. Even a switch between
@@ -224,8 +245,14 @@ func (d *Docker) SetEndpointRevoker(revoke func(string)) {
 }
 
 func (d *Docker) revoke(id string) {
+	d.withdraw(id, false)
+}
+
+func (d *Docker) withdraw(id string, keepPending bool) {
 	d.mu.Lock()
-	delete(d.endpoints, id)
+	if !keepPending || d.endpoints[id].pending == nil {
+		delete(d.endpoints, id)
+	}
 	revoke := d.endpointRevoker
 	d.mu.Unlock()
 	if revoke != nil {
@@ -261,7 +288,9 @@ func (d *Docker) observationRecord(id string) (*state.ExecutionRecord, error) {
 		err = d.Activation.Store.CheckReleaseExecution(candidate)
 	}
 	if err != nil {
-		d.revoke(id)
+		// An ordinary observer must withdraw public readiness on any intent,
+		// but a read finding this intent must not destroy a private start proof.
+		d.withdraw(id, errors.Is(err, state.ErrReleaseUnresolved))
 		return nil, err
 	}
 	return r, nil

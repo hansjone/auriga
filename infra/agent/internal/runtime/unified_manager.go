@@ -1096,6 +1096,12 @@ func (m *UnifiedManager) Isolate(ctx context.Context, id, reason string) error {
 }
 
 func (m *UnifiedManager) Observe(ctx context.Context, id string) (reports []*resourcev1.UnifiedInstallationReport, guardian *resourcev1.UnifiedGuardianState, failure error) {
+	return m.observe(ctx, id, nil)
+}
+
+// A startup probe is passed only by Docker.start inside its release execution.
+// Public observation must continue to use the committed runtime endpoint.
+func (m *UnifiedManager) observe(ctx context.Context, id string, startupProbe func(int64, uint64) (Endpoint, error)) (reports []*resourcev1.UnifiedInstallationReport, guardian *resourcev1.UnifiedGuardianState, failure error) {
 	defer m.lock(id)()
 	defer func() {
 		if failure != nil && m.Driver != nil {
@@ -1125,14 +1131,19 @@ func (m *UnifiedManager) Observe(ctx context.Context, id string) (reports []*res
 			guardian = unifiedGuardian(s)
 		}
 	}()
-	if verifier, ok := m.Driver.(interface {
-		VerifyResourceView(context.Context, string) error
-	}); ok {
-		if err := verifier.VerifyResourceView(ctx, id); err != nil {
-			return nil, guardian, err
+	var endpoint Endpoint
+	if startupProbe != nil {
+		endpoint, err = startupProbe(s.Generation, s.SelectionRevision)
+	} else {
+		if verifier, ok := m.Driver.(interface {
+			VerifyResourceView(context.Context, string) error
+		}); ok {
+			if err := verifier.VerifyResourceView(ctx, id); err != nil {
+				return nil, guardian, err
+			}
 		}
+		endpoint, err = m.Driver.Endpoint(id)
 	}
-	endpoint, err := m.Driver.Endpoint(id)
 	if err != nil {
 		return nil, guardian, err
 	}
@@ -1296,6 +1307,13 @@ func (m *UnifiedManager) Observe(ctx context.Context, id string) (reports []*res
 			return nil, guardian, err
 		}
 		if err := m.writeInstallationReceipts(root, s); err != nil {
+			return nil, guardian, err
+		}
+	}
+	// Both the catalog response and the durable receipt writes may outlive the
+	// process. Keep any receipts private until this final check and commit.
+	if startupProbe != nil {
+		if _, err := startupProbe(s.Generation, s.SelectionRevision); err != nil {
 			return nil, guardian, err
 		}
 	}

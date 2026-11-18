@@ -382,6 +382,10 @@ func (d *Docker) Ensure(ctx context.Context, s *Spec, r *Rendered) error {
 }
 
 func (d *Docker) Start(ctx context.Context, id string) error {
+	return d.start(ctx, id, nil)
+}
+
+func (d *Docker) start(ctx context.Context, id string, resources *UnifiedManager) error {
 	if err := storage.ValidateInstanceID(id); err != nil {
 		return err
 	}
@@ -397,8 +401,8 @@ func (d *Docker) Start(ctx context.Context, id string) error {
 	if err != nil {
 		return err
 	}
-	if record.Generation != scope.spec.Generation || !executionMatchesImage(record, scope.image, scope.candidate) {
-		return fmt.Errorf("docker actual execution generation mismatch")
+	if record.Generation != scope.spec.Generation || !sameExecution(record, scope.record) || !executionMatchesImage(record, scope.image, scope.candidate) {
+		return fmt.Errorf("docker actual execution does not match activation")
 	}
 	if err := scope.pinEngineImage(record.EngineImageID); err != nil {
 		return err
@@ -488,22 +492,9 @@ func (d *Docker) Start(ctx context.Context, id string) error {
 	}
 	// Durable saving may block. Do not publish a proof for a process that was
 	// replaced while that save completed, even inside the same container.
-	var published map[string]any
-	if d.EdgeContainer != "" {
-		var n *engineNetwork
-		var edgeID string
-		n, edgeID, published, err = d.inspectEdgeNetwork(ctx, id, record)
-		if err != nil {
-			return err
-		}
-		if _, connected := n.Containers[edgeID]; !connected || !n.bridgesReady() || !sameBridges(bridges, n.bridges) {
-			return fmt.Errorf("docker: trusted edge disappeared before endpoint publication")
-		}
-	} else {
-		published, err = d.verifyContainer(ctx, record)
-		if err != nil {
-			return err
-		}
+	published, err := d.startContainerView(ctx, record, bridges)
+	if err != nil {
+		return err
 	}
 	publishedProcess, err := containerProcess(published)
 	if err != nil {
@@ -519,9 +510,47 @@ func (d *Docker) Start(ctx context.Context, id string) error {
 		d.mu.Unlock()
 		return err
 	}
-	d.endpoints[id] = dockerEndpoint{url: endpoint, process: process}
+	d.endpoints[id] = dockerEndpoint{url: endpoint, process: process, pending: scope}
 	d.mu.Unlock()
+	scope.finishStart = func(commit bool) error {
+		d.mu.Lock()
+		defer d.mu.Unlock()
+		ep := d.endpoints[id]
+		if ep.pending != scope {
+			if commit {
+				return fmt.Errorf("docker: startup endpoint was withdrawn")
+			}
+			return nil
+		}
+		if commit {
+			ep.pending = nil
+			d.endpoints[id] = ep
+		} else {
+			delete(d.endpoints, id)
+		}
+		return nil
+	}
+	if resources != nil {
+		_, _, err := resources.observe(ctx, id, func(generation int64, revision uint64) (Endpoint, error) {
+			return d.probeStartupResources(ctx, scope, record, endpoint, process, bridges, generation, revision)
+		})
+		return err
+	}
 	return nil
+}
+
+func (d *Docker) startContainerView(ctx context.Context, record *state.ExecutionRecord, bridges []trustedBridge) (map[string]any, error) {
+	if d.EdgeContainer == "" {
+		return d.verifyContainer(ctx, record)
+	}
+	n, edgeID, view, err := d.inspectEdgeNetwork(ctx, record.InstanceID, record)
+	if err != nil {
+		return nil, err
+	}
+	if _, connected := n.Containers[edgeID]; !connected || !n.bridgesReady() || !sameBridges(bridges, n.bridges) {
+		return nil, fmt.Errorf("docker: trusted edge disappeared before endpoint publication")
+	}
+	return view, nil
 }
 
 // instanceEndpoint picks how the agent reaches the instance. Docker does not
@@ -737,7 +766,7 @@ func (d *Docker) endpoint(ctx context.Context, id string) (Endpoint, error) {
 		d.revoke(id)
 		return Endpoint{}, err
 	}
-	if ep.url == "" {
+	if ep.url == "" || ep.pending != nil {
 		return Endpoint{}, fmt.Errorf("docker: no endpoint for %s", id)
 	}
 	process, err := containerProcess(insp)

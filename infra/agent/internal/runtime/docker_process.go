@@ -16,6 +16,7 @@ type processLifetime struct {
 type dockerEndpoint struct {
 	url     string
 	process processLifetime
+	pending *activationScope // private until this exact activation commits
 }
 
 func containerProcess(insp map[string]any) (processLifetime, error) {
