@@ -7,7 +7,7 @@
 - **只部署**：未分卷时下载两个文件：`auriga-offline-<版本>.tar` 和 `SHA256SUMS`。
 - **要改代码**：再下载同版本 `auriga-source-<版本>.tar` 与 `auriga-devkit-<版本>.tar`，按 [MAINTAIN.md](MAINTAIN.md) 操作。源码归档自带版本清单、公钥与静态 CLI，不要求 Git、Go、Maven 或 Node。
 
-先看同页 `DOWNLOADS.txt`：列出每个附件的用途、精确大小、必下项和套件基线。附件超过站点上限或 4GiB 时会分卷；此时下载该包全部 `.part001…`、`.parts.json`、`.parts.json.sig`，并下载同页 Linux amd64 引导程序 `auriga`。只部署无需开发套件与增量包。发行附件只放 Forgejo Release。
+同页 `DOWNLOADS.txt` 列出每个附件的用途、精确大小、必下项和套件基线。Forgejo 默认提供完整归档。如果该次发行显式启用了分卷，下载该包全部 `.part001…`、`.parts.json`、`.parts.json.sig` 和同页 Linux amd64 引导程序 `auriga`。只部署无需开发套件与增量包。发行附件只放 Forgejo Release。
 
 ## 三步安装
 
