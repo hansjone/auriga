@@ -1176,16 +1176,23 @@ public final class CatalogDelivery implements UnifiedResourceResolution {
               || !snapshot.node().toString().equals(request.getNodeId())
               || snapshot.selectionRevision() != request.getSelectionRevision()) throw conflict();
           synchronize(snapshot);
-          var reader = access.target(TenantContext.require(), snapshot.owner());
           var pending =
               db.rows(
                   "SELECT * FROM resource.catalog_distribution WHERE tenant_id=:tenant AND instance_id=:instance AND selection_revision>:revision AND lifecycle='pending' ORDER BY selection_revision DESC LIMIT 1",
                   db.args("instance", instance, "revision", snapshot.selectionRevision()));
-          if (!pending.isEmpty() && !marketIntent(pending.getFirst()).isMissingNode()) {
-            var market = pending.getFirst();
-            if (marketCurrent(market, snapshot, reader))
+          var market =
+              !pending.isEmpty() && !marketIntent(pending.getFirst()).isMissingNode()
+                  ? pending.getFirst()
+                  : null;
+          var reader =
+              market != null && snapshot.owner().equals(market.get("owner_id"))
+                  ? access.targetForPendingMarket(TenantContext.require(), snapshot.owner())
+                  : access.target(TenantContext.require(), snapshot.owner());
+          if (market != null) {
+            if (reader != null && marketCurrent(market, snapshot, reader))
               return assignmentResolution(reader, market);
             supersedeMarket(market);
+            if (reader == null) return null;
             pending = List.of();
           }
           var policies = assignments.effective(reader, instance, true);
@@ -1898,8 +1905,11 @@ public final class CatalogDelivery implements UnifiedResourceResolution {
 
   @Override
   public ResolveUnifiedResourcesResponse resolve(ResolveUnifiedResourcesRequest request) {
-    if (request.getSynchronizeAssignments()) return reconcileAssignments(request);
-    var result = resolve(request, null);
+    var result =
+        request.getSynchronizeAssignments()
+            ? reconcileAssignments(request)
+            : resolve(request, null);
+    // Report a terminal rejection after the transaction commits the supersession.
     if (result == null) throw new AurigaException(CommonErrors.PRECONDITION_FAILED);
     return result;
   }
@@ -1939,11 +1949,14 @@ public final class CatalogDelivery implements UnifiedResourceResolution {
           if (!snapshot.owner().equals(row.get("owner_id")) || snapshot.node() == null)
             throw conflict();
           if (market && !snapshot.node().toString().equals(request.getNodeId())) throw missing();
-          var owner = access.target(tenant, (UUID) row.get("owner_id"));
-          if (market
-              && snapshot.selectionRevision() != request.getSelectionRevision()
-              && (row.get("lifecycle").equals("superseded")
-                  || !marketCurrent(row, snapshot, owner))) {
+          boolean uncommittedMarket =
+              market && snapshot.selectionRevision() != request.getSelectionRevision();
+          if (uncommittedMarket && row.get("lifecycle").equals("superseded")) return null;
+          var owner =
+              uncommittedMarket && row.get("lifecycle").equals("pending")
+                  ? access.targetForPendingMarket(tenant, snapshot.owner())
+                  : access.target(tenant, snapshot.owner());
+          if (uncommittedMarket && (owner == null || !marketCurrent(row, snapshot, owner))) {
             supersedeMarket(row);
             return null;
           }

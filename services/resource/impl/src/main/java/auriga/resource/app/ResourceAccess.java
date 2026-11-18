@@ -117,6 +117,15 @@ public final class ResourceAccess {
   }
 
   public Reader target(UUID tenant, UUID account, String permission) {
+    return target(tenant, account, permission, false);
+  }
+
+  /** Null means Org confirmed that this active market owner has lost read permission. */
+  Reader targetForPendingMarket(UUID tenant, UUID account) {
+    return target(tenant, account, READ, true);
+  }
+
+  private Reader target(UUID tenant, UUID account, String permission, boolean confirmReadLoss) {
     try {
       var member = member(tenant, account);
       var permissions = inputs.permissions(tenant, account);
@@ -124,11 +133,14 @@ public final class ResourceAccess {
           || !member.getAccountId().equals(account.toString())
           || member.getStatus() != MemberStatus.MEMBER_STATUS_ACTIVE
           || permissions.getStatus() != MemberStatus.MEMBER_STATUS_ACTIVE
-          || !permissions.getPermissionsList().contains(permission)
           || (member.getMemberType() != MemberType.MEMBER_TYPE_MEMBER
               && member.getMemberType() != MemberType.MEMBER_TYPE_EXTERNAL)
           || member.getMemberType() != permissions.getMemberType())
         throw new AurigaException(CommonErrors.FORBIDDEN);
+      if (!permissions.getPermissionsList().contains(permission)) {
+        if (confirmReadLoss) return null;
+        throw new AurigaException(CommonErrors.FORBIDDEN);
+      }
       return new Reader(
           tenant,
           account,

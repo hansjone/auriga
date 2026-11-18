@@ -147,8 +147,10 @@ public final class WorkspaceUnifiedResources implements EventHandler, AutoClosea
             return null;
           }
           var spec = WorkspaceService.spec(row);
+          long currentRevision = spec.getResourceSelectionRevision();
+          if (selectionRevision < currentRevision) return null;
           boolean contained =
-              spec.getResourceSelectionRevision() >= selectionRevision
+              currentRevision == selectionRevision
                   && selections.stream()
                       .allMatch(
                           selection ->
@@ -166,6 +168,8 @@ public final class WorkspaceUnifiedResources implements EventHandler, AutoClosea
                                                             throw new AurigaException(
                                                                 CommonErrors.VALIDATION_FAILED);
                                                       })));
+          if (currentRevision == selectionRevision && !contained)
+            throw new AurigaException(CommonErrors.CONFLICT);
           service.store.jdbc.update(
               "INSERT INTO unified_resource_intent(id,tenant_id,instance_id,owner_id,selection_revision,request,applied) VALUES(?,?,?,?,?,?,?)",
               UuidV7.next(service.clock),
@@ -204,14 +208,15 @@ public final class WorkspaceUnifiedResources implements EventHandler, AutoClosea
       boolean supersedingAssignment) {
     record(tenant, instance, owner, selectionRevision, selections);
     var before = snapshot(tenant, instance);
-    if (before.spec().getResourceSelectionRevision() >= selectionRevision) {
+    if (before.spec().getResourceSelectionRevision() > selectionRevision) return before;
+    if (before.spec().getResourceSelectionRevision() == selectionRevision) {
       boolean applied =
           service.store.in(
               tenant,
               () ->
                   Boolean.TRUE.equals(
                       service.store.jdbc.queryForObject(
-                          "SELECT applied FROM unified_resource_intent WHERE tenant_id=? AND instance_id=? AND selection_revision=?",
+                          "SELECT EXISTS(SELECT 1 FROM unified_resource_intent WHERE tenant_id=? AND instance_id=? AND selection_revision=? AND applied)",
                           Boolean.class,
                           tenant,
                           instance,
@@ -420,6 +425,31 @@ public final class WorkspaceUnifiedResources implements EventHandler, AutoClosea
       throw new AurigaException(CommonErrors.FORBIDDEN);
   }
 
+  private List<Map<String, Object>> pending(UUID tenant) {
+    return service.store.in(
+        tenant,
+        () -> {
+          service.store.lock();
+          var pending =
+              service.store.jdbc.queryForList(
+                  "SELECT p.*,i.spec FROM unified_resource_intent p JOIN instance i ON i.tenant_id=p.tenant_id AND i.id=p.instance_id WHERE p.tenant_id=? AND NOT p.applied ORDER BY p.instance_id,p.selection_revision LIMIT 200",
+                  tenant);
+          var current = new ArrayList<Map<String, Object>>();
+          for (var intent : pending) {
+            long revision = ((Number) intent.get("selection_revision")).longValue();
+            if (revision < WorkspaceService.spec(intent).getResourceSelectionRevision()) {
+              service.store.jdbc.update(
+                  "DELETE FROM unified_resource_intent WHERE tenant_id=? AND id=? AND NOT applied",
+                  tenant,
+                  intent.get("id"));
+            } else {
+              current.add(intent);
+            }
+          }
+          return current;
+        });
+  }
+
   public void reconcile() {
     List<UUID> tenants;
     try {
@@ -431,14 +461,7 @@ public final class WorkspaceUnifiedResources implements EventHandler, AutoClosea
     }
     for (UUID tenant : tenants) {
       try {
-        var pending =
-            service.store.in(
-                tenant,
-                () ->
-                    service.store.jdbc.queryForList(
-                        "SELECT * FROM unified_resource_intent WHERE tenant_id=? AND NOT applied ORDER BY instance_id,selection_revision ASC LIMIT 200",
-                        tenant));
-        for (var intent : pending) {
+        for (var intent : pending(tenant)) {
           try {
             var input = UnifiedDistributionInput.parseFrom((byte[]) intent.get("request"));
             apply(

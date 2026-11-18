@@ -3,6 +3,7 @@ package auriga.platform;
 import static org.junit.jupiter.api.Assertions.*;
 
 import auriga.common.context.TenantContext;
+import auriga.common.error.AurigaException;
 import auriga.common.error.CommonErrors;
 import auriga.common.events.*;
 import auriga.common.persistence.*;
@@ -14,6 +15,7 @@ import auriga.iam.ResourceDeviceFixture.Grant;
 import auriga.org.OrgService;
 import auriga.org.OrgStore;
 import auriga.resource.ResourceModuleConfiguration;
+import auriga.resource.api.ResourceAccessInputs;
 import auriga.resource.app.CatalogDelivery;
 import auriga.resource.app.CatalogProtocol;
 import auriga.testsupport.PostgresExtension;
@@ -47,6 +49,7 @@ import org.springframework.security.oauth2.jwt.*;
 import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
 
@@ -99,6 +102,7 @@ class ResourceReadAssemblyTest {
   @Autowired auriga.iam.ResourceDeviceFixture deviceCredentials;
   @Autowired MarketWorkspace marketWorkspace;
   @Autowired CatalogDelivery catalogDelivery;
+  @MockitoSpyBean ResourceAccessInputs resourceAccessInputs;
   JdbcTemplate admin;
   org.springframework.jdbc.datasource.SingleConnectionDataSource adminConnection;
   HttpClient http;
@@ -678,7 +682,7 @@ class ResourceReadAssemblyTest {
     return ResolveUnifiedResourcesRequest.newBuilder()
         .setTenantId(T1.toString())
         .setInstanceId(grant.instance().toString())
-        .setOwnerId(ALICE.toString())
+        .setOwnerId(marketWorkspace.spec(grant.instance()).getOwnerId())
         .setNodeId(marketWorkspace.node(grant.instance()).toString())
         .setSelectionRevision(
             marketWorkspace.spec(grant.instance()).getResourceSelectionRevision());
@@ -706,7 +710,8 @@ class ResourceReadAssemblyTest {
     assertEquals(grant.instance().toString(), envelope.subject());
     var event = envelope.data();
     assertEquals(envelope.subject(), event.path("instanceId").asString());
-    assertEquals(ALICE.toString(), event.path("ownerId").asString());
+    assertEquals(
+        marketWorkspace.spec(grant.instance()).getOwnerId(), event.path("ownerId").asString());
     long revision = event.path("selectionRevision").asLong();
     assertEquals(expectedRevision, revision);
     assertTrue(revision > marketWorkspace.spec(grant.instance()).getResourceSelectionRevision());
@@ -977,6 +982,131 @@ class ResourceReadAssemblyTest {
     assertEquals(
         1,
         admin.queryForObject("SELECT count(*) FROM resource.catalog_installation", Integer.class));
+  }
+
+  @org.junit.jupiter.params.ParameterizedTest
+  @org.junit.jupiter.params.provider.ValueSource(booleans = {false, true})
+  void pendingMarketSelectionIsCancelledOnlyAfterConfirmedReadLoss(boolean assignment)
+      throws Exception {
+    CATALOG_WRITES.set(true);
+    admin.update(
+        "UPDATE org.role SET permissions=ARRAY['auriga.connect','auriga.connect.collab.use','auriga.connect.resources.use','resource.packages.read'] WHERE id=?",
+        ROLE);
+    UUID controlRole = id(1580);
+    assertEquals(
+        1,
+        admin.update(
+            "INSERT INTO org.role(id,tenant_id,key,name_en,name_zh,permissions) SELECT ?,tenant_id,'market-control',name_en,name_zh,permissions FROM org.role WHERE id=?",
+            controlRole,
+            ROLE));
+    assertEquals(
+        1,
+        admin.update(
+            "UPDATE org.role_binding SET role_id=? WHERE tenant_id=? AND subject_id=? AND role_id=?",
+            controlRole,
+            T1,
+            BOB,
+            ROLE));
+    var revoked = deviceCredentials.managed(T1, ALICE, UUID.randomUUID(), 1);
+    var authorized = deviceCredentials.managed(T1, BOB, UUID.randomUUID(), 1);
+    marketWorkspace.seed(T1, ALICE, revoked.instance());
+    marketWorkspace.seed(T1, BOB, authorized.instance());
+    var identity = marketPackage(1590, 1, "market-read-loss");
+    var selected =
+        result(
+            marketSelect(revoked, revoked.device(), identity, "install", 0, "before-revocation"),
+            202);
+    var allowed =
+        result(
+            marketSelect(
+                authorized, authorized.device(), identity, "install", 0, "still-authorized"),
+            202);
+    var event = marketEvent(revoked, selected.path("selectionRevision").asLong());
+    var request =
+        assignment ? marketResolve(revoked).setSynchronizeAssignments(true).build() : event;
+
+    for (var error : List.of(CommonErrors.UNAVAILABLE, CommonErrors.FORBIDDEN)) {
+      // A failed permission lookup gives no permissions snapshot for the target.
+      org.mockito.Mockito.doThrow(new AurigaException(error))
+          .when(resourceAccessInputs)
+          .permissions(T1, ALICE);
+      try {
+        assertEquals(
+            error,
+            assertThrows(
+                    AurigaException.class,
+                    () -> TenantContext.call(T1, () -> catalogDelivery.resolve(request)))
+                .errorCode());
+      } finally {
+        org.mockito.Mockito.doCallRealMethod().when(resourceAccessInputs).permissions(T1, ALICE);
+      }
+      assertEquals("pending", marketLifecycle(selected));
+    }
+
+    admin.update(
+        "UPDATE org.role SET permissions=array_remove(permissions,'resource.packages.read') WHERE id=?",
+        ROLE);
+    assertThrows(
+        AurigaException.class,
+        () ->
+            TenantContext.call(
+                T1,
+                () ->
+                    catalogDelivery.resolve(
+                        request.toBuilder().setOwnerId(BOB.toString()).build())));
+    assertEquals("pending", marketLifecycle(selected));
+    assertEquals(
+        CommonErrors.PRECONDITION_FAILED,
+        assertThrows(
+                AurigaException.class,
+                () -> TenantContext.call(T1, () -> catalogDelivery.resolve(request)))
+            .errorCode());
+    assertEquals("superseded", marketLifecycle(selected));
+    assertEquals(
+        Boolean.TRUE,
+        admin.queryForObject(
+            "SELECT next_reconcile_at IS NULL FROM resource.catalog_distribution WHERE tenant_id=? AND id=?",
+            Boolean.class,
+            T1,
+            UUID.fromString(selected.path("distributionId").asString())));
+
+    var authorizedEvent = marketEvent(authorized, allowed.path("selectionRevision").asLong());
+    if (assignment)
+      assertEquals(
+          authorizedEvent.getSelectionRevision(), marketPlan(authorized).getSelectionRevision());
+    applyMarket(authorized, authorizedEvent, assignment);
+    assertEquals(1, marketWorkspace.spec(authorized.instance()).getUnifiedResourcesCount());
+
+    admin.update(
+        "UPDATE org.role SET permissions=array_append(permissions,'resource.packages.read') WHERE id=?",
+        ROLE);
+    assertEquals(
+        CommonErrors.PRECONDITION_FAILED,
+        assertThrows(
+                AurigaException.class,
+                () -> TenantContext.call(T1, () -> catalogDelivery.resolve(event)))
+            .errorCode());
+    assertEquals(0, marketPlan(revoked).getSelectionRevision());
+    assertTrue(marketItem(revoked, identity).isMissingNode());
+    assertEquals("superseded", marketLifecycle(selected));
+
+    var resubmitted =
+        result(
+            marketSelect(revoked, revoked.device(), identity, "install", 0, "after-restoration"),
+            202);
+    var newEvent = marketEvent(revoked, resubmitted.path("selectionRevision").asLong());
+    assertTrue(newEvent.getSelectionRevision() > event.getSelectionRevision());
+    assertEquals(newEvent.getSelectionRevision(), marketPlan(revoked).getSelectionRevision());
+    applyMarket(revoked, newEvent, true);
+    assertEquals(1, marketWorkspace.spec(revoked.instance()).getUnifiedResourcesCount());
+  }
+
+  private String marketLifecycle(JsonNode distribution) {
+    return admin.queryForObject(
+        "SELECT lifecycle FROM resource.catalog_distribution WHERE tenant_id=? AND id=?",
+        String.class,
+        T1,
+        UUID.fromString(distribution.path("distributionId").asString()));
   }
 
   @org.junit.jupiter.params.ParameterizedTest
