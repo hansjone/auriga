@@ -69,7 +69,7 @@ public class SharedDshGrpc extends SharedDshServiceGrpc.SharedDshServiceImplBase
   @AuthenticatedOnly
   public void getSharedDshPool(
       GetSharedDshPoolRequest r, StreamObserver<GetSharedDshPoolResponse> o) {
-    caller(Set.of("svc:edge"));
+    caller(Set.of("svc:edge", "svc:agent"));
     tenant(r.getTenantId());
     if (entry == null) throw new AurigaException(CommonErrors.UNAVAILABLE);
     o.onNext(entry.pool(UUID.fromString(r.getPhysicalInstanceId())));
@@ -96,7 +96,7 @@ public class SharedDshGrpc extends SharedDshServiceGrpc.SharedDshServiceImplBase
   @AuthenticatedOnly
   public void resolveSharedDsh(
       ResolveSharedDshRequest r, StreamObserver<ResolveSharedDshResponse> o) {
-    caller(Set.of("svc:edge", "svc:iam", "svc:ai-gateway", "svc:collab"));
+    caller(Set.of("svc:edge", "svc:agent", "svc:iam", "svc:ai-gateway", "svc:collab"));
     tenant(r.getTenantId());
     var p =
         authority.resolve(

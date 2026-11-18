@@ -8,6 +8,42 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// Production composition uses the signed package's public ports export before
+// the shared Host. A caller-supplied module is retained only for old fixtures.
+func ValidateProductionPoolProfile(raw []byte) error {
+	if err := ValidatePoolProfile(raw); err != nil {
+		return err
+	}
+	var rows []struct {
+		Name string `yaml:"name"`
+	}
+	if err := yaml.Unmarshal(raw, &rows); err != nil {
+		return err
+	}
+	ports, host := -1, -1
+	for i, row := range rows {
+		if row.Name == "file:///run/auriga/shared-ports.mjs" {
+			return fmt.Errorf("production requires signed shared-ports export")
+		}
+		if row.Name == "auriga-dsh/shared-ports" {
+			if ports >= 0 {
+				return fmt.Errorf("duplicate ports")
+			}
+			ports = i
+		}
+		if row.Name == "auriga-dsh/shared" {
+			if host >= 0 {
+				return fmt.Errorf("duplicate shared Host")
+			}
+			host = i
+		}
+	}
+	if ports < 0 || host < 0 || ports >= host {
+		return fmt.Errorf("shared-ports must load before shared Host")
+	}
+	return nil
+}
+
 // ValidatePoolProfile checks a complete, expanded, installation-owned profile.
 // It is NOT a patch over dsh-base/web-app: those bundles reintroduce controllers.
 // P must supply the expanded public-host profile and verify it in the real host.
@@ -31,7 +67,7 @@ func ValidatePoolProfile(raw []byte) error {
 	if e := d.Decode(&extra); e != io.EOF {
 		return fmt.Errorf("multiple pool profile documents")
 	}
-	allowed := map[string]bool{"auriga-dsh": true, "auriga-dsh/shared": true, "file:///run/auriga/shared-ports.mjs": true}
+	allowed := map[string]bool{"auriga-dsh": true, "auriga-dsh/shared": true, "auriga-dsh/shared-ports": true, "file:///run/auriga/shared-ports.mjs": true}
 	for _, name := range strings.Fields("agent agent-loop agent-instructions agent-preset agent-preset-registry agent-default-model tools tool-fs tool-fs-search tool-str-replace-editor tool-ask-user tool-present tool-todo tool-skill session session-reference session-format session-checkpoint-policy skill skill-filesystem workspace authorization llm web-frontend client-connection client-modules api-gateway api-remote-access api-session-controller host-webserver web-runtime system-prompt fs-local paths typert-registry") {
 		allowed["@deepseek-ai/dsh-"+name] = true
 	}

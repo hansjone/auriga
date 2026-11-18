@@ -53,6 +53,8 @@ type SharedDshRuntime struct {
 	TemplateFile    string `json:"templateFile"`
 	ProfileFile     string `json:"profileFile"`
 	PortsModuleFile string `json:"portsModuleFile"`
+	ServicesFile    string `json:"servicesFile"`
+	HostConfigFile  string `json:"hostConfigFile"`
 }
 
 // Capacity mirrors nodev1.Capacity. MaxInstances 0 means unlimited.

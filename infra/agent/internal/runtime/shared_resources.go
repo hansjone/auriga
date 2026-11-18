@@ -54,14 +54,16 @@ func CheckPoolViews(bindings []*nodev1.SharedDshBinding, views []*nodev1.SharedD
 			}
 			resources[r.ResourceId] = true
 		}
-		// Authorization digest alone cannot excuse differing content/leases.
+		// Each placement owns its lease ID and expiry. Equal authorization sets
+		// must select identical content; every individual lease is checked below
+		// and against its signed reference by PoolMaterializer.
 		if i > 0 {
 			a := views[0].Resources
 			if len(a) != len(v.Resources) {
 				return fmt.Errorf("%w: resource set mismatch", observer.ErrPoolSnapshotRejected)
 			}
 			for j := range a {
-				if !proto.Equal(a[j], v.Resources[j]) {
+				if a[j].ResourceId != v.Resources[j].ResourceId || a[j].Digest != v.Resources[j].Digest {
 					return fmt.Errorf("%w: resource set mismatch", observer.ErrPoolSnapshotRejected)
 				}
 			}

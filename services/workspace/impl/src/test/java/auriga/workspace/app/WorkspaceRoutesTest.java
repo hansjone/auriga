@@ -9,6 +9,28 @@ import org.junit.jupiter.api.Test;
 
 class WorkspaceRoutesTest {
   @Test
+  void projectsInitialAndReadyPoolsWithoutPersonalOwnerFallback() throws Exception {
+    var row = new HashMap<String, Object>();
+    for (var key : List.of("id", "tenant_id", "node_id")) row.put(key, UUID.randomUUID());
+    row.put("state", "pending");
+    row.put("ingress_endpoint", "https://node.example:7443");
+    row.put("node_seen", Timestamp.from(Instant.now()));
+    var pending = WorkspaceService.JSON.readTree(WorkspaceRoutes.encodePool(row));
+    assertEquals("running", pending.path("state").asText());
+    assertEquals(row.get("id").toString(), pending.path("ownerId").asText());
+    assertEquals(row.get("tenant_id").toString(), pending.path("tenantId").asText());
+    row.put("state", "ready");
+    assertNotNull(WorkspaceRoutes.encodePool(row));
+    row.put("node_revoked", true);
+    assertNull(WorkspaceRoutes.encodePool(row));
+    row.put("node_revoked", false);
+    row.put("state", "blocked");
+    assertNull(WorkspaceRoutes.encodePool(row));
+    row.put("state", "retired");
+    assertNull(WorkspaceRoutes.encodePool(row));
+  }
+
+  @Test
   void validatesOnlyIngressLocators() {
     for (var raw :
         List.of(

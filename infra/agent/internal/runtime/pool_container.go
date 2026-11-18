@@ -14,7 +14,7 @@ import (
 )
 
 type PoolContainer struct {
-	Volume, Device, Members, Skills, Meta, ProfileDigest string
+	Volume, Device, Members, Skills, Meta, Relay, ProfileDigest string
 }
 
 func (d *Docker) poolContainerPath(id string) (string, error) {
@@ -88,6 +88,9 @@ func (d *Docker) configurePool(ctx context.Context, spec *Spec, body map[string]
 	}
 	host["Mounts"] = append(mounts, member, map[string]any{"Type": "bind", "Source": p.Skills,
 		"Target": "/run/auriga/skills-active/current", "ReadOnly": true, "RW": false})
+	if p.Relay != "" {
+		host["Mounts"] = append(host["Mounts"].([]map[string]any), map[string]any{"Type": "bind", "Source": p.Relay, "Target": "/var/lib/auriga/pools/" + spec.InstanceID + "/control", "ReadOnly": true})
+	}
 	host["RestartPolicy"] = map[string]any{"Name": "no"}
 	body["Entrypoint"] = []string{"node", renderer.ContainerResourceSupervisor}
 	body["Cmd"] = []string{renderer.ContainerResourcePolicy, "node", "/run/auriga/pool-launcher.mjs"}
@@ -129,7 +132,11 @@ func (d *Docker) verifyPoolContainer(ctx context.Context, id string, inspect map
 		return fmt.Errorf("shared process profile identity mismatch")
 	}
 	mounts, _ := inspect["Mounts"].([]any)
-	if len(mounts) != 4 {
+	count := 4
+	if p.Relay != "" {
+		count++
+	}
+	if len(mounts) != count {
 		return fmt.Errorf("shared process mounts unavailable")
 	}
 	expected := map[string]struct {
@@ -140,6 +147,12 @@ func (d *Docker) verifyPoolContainer(ctx context.Context, id string, inspect map
 		"/var/lib/auriga/pools/" + id + "/members": {p.Members, "bind", true},
 		"/run/auriga":                       {p.Meta, "bind", false},
 		"/run/auriga/skills-active/current": {p.Skills, "bind", false},
+	}
+	if p.Relay != "" {
+		expected["/var/lib/auriga/pools/"+id+"/control"] = struct {
+			source, kind string
+			rw           bool
+		}{p.Relay, "bind", false}
 	}
 	if p.Volume != "" {
 		expected["/home/dsh"] = struct {

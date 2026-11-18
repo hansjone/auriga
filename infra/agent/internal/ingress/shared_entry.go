@@ -38,7 +38,7 @@ func (s *Server) sharedRequest(r *http.Request, id, path string) (*http.Request,
 		return nil, nil, err
 	}
 	b := c["binding"].(map[string]any)
-	if b["physicalInstanceId"] != id || b["mode"] != "shared" || c["method"] != r.Method || c["canonicalPath"] != path {
+	if b["physicalInstanceId"] != id || (b["mode"] != "shared" && b["mode"] != "dedicated") || c["method"] != r.Method || c["canonicalPath"] != path {
 		return nil, nil, errSharedInvalid
 	}
 	ctx, cancel := context.WithCancel(r.Context())

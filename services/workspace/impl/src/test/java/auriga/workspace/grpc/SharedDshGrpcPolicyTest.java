@@ -84,7 +84,7 @@ class SharedDshGrpcPolicyTest {
   }
 
   @Test
-  void poolReadIsEdgeOnlyAndSessionLookupIsAuthenticatedRuntimeOnly() {
+  void poolReadAllowsNodeAuthorityAndSessionLookupIsAuthenticatedRuntimeOnly() {
     var authority = mock(SharedDshAuthority.class);
     var queries = mock(SharedDshEntryQueries.class);
     var adapter = new SharedDshGrpc(authority, Set.of("svc:workspace", "svc:agent"), queries);
@@ -104,11 +104,15 @@ class SharedDshGrpcPolicyTest {
     TenantContext.run(tenant, () -> adapter.getSharedDshPool(request, mock(StreamObserver.class)));
     verify(queries).pool(pool);
     service("svc:agent");
+    TenantContext.run(tenant, () -> adapter.getSharedDshPool(request, mock(StreamObserver.class)));
+    verify(queries, times(2)).pool(pool);
+    service("svc:untrusted");
     assertThrows(
         AurigaException.class,
         () ->
             TenantContext.run(
                 tenant, () -> adapter.getSharedDshPool(request, mock(StreamObserver.class))));
+    service("svc:agent");
     var lookup =
         LookupSharedDshSessionRequest.newBuilder()
             .setTenantId(tenant.toString())

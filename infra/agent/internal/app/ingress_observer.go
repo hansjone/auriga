@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"encoding/pem"
 	"fmt"
+	"go.etcd.io/bbolt"
 	"log/slog"
 	"net"
 	"net/url"
@@ -17,6 +18,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/hansjone/auriga/infra/agent/internal/config"
 	"github.com/hansjone/auriga/infra/agent/internal/identity"
@@ -94,6 +96,25 @@ func startIngressAndObserver(
 		reporter = observer.LogReporter{Log: logger}
 	}
 
+	var sharedIngress *ingress.SharedIngress
+	closeShared := func() {}
+	if cfg.SharedDshRuntime != nil {
+		client, err := openSharedClient(cfg)
+		if err != nil {
+			return nil, err
+		}
+		db, err := bbolt.Open(filepath.Join(cfg.AgentDir(), "shared-ingress-replay.db"), 0600, &bbolt.Options{Timeout: time.Second})
+		if err != nil {
+			client.Close()
+			return nil, err
+		}
+		closeShared = func() { client.Close(); _ = db.Close() }
+		sharedIngress = &ingress.SharedIngress{Keys: loadEd25519Pubs(idPath, logger), Authority: client, Replay: &ingress.SharedIdentityReplayStore{DB: db}}
+		if len(sharedIngress.Keys) == 0 {
+			closeShared()
+			return nil, fmt.Errorf("shared ingress verification keys required")
+		}
+	}
 	srv := ingress.New(ingress.Config{
 		ListenAddr:   listenAddr,
 		LocalPath:    localPath,
@@ -103,10 +124,12 @@ func startIngressAndObserver(
 		Registry:     reg,
 		Tickets:      &ingress.TicketVerifier{Keys: loadEd25519Pubs(ticketPath, logger)},
 		IdentityKeys: ingress.IdentityKeys(loadEd25519Pubs(idPath, logger)),
+		Shared:       sharedIngress,
 		Logger:       logger,
 	})
 	if err := srv.Start(ctx); err != nil {
 		_ = srv.Close()
+		closeShared()
 		return nil, err
 	}
 	logger.Info("ingress started", "listen", listenAddr, "local", localPath)
@@ -114,6 +137,7 @@ func startIngressAndObserver(
 	endpoint, err := ingressEndpoint(listenAddr, localPath, cfg.IngressAdvertiseHost, srv.Addr().String())
 	if err != nil {
 		_ = srv.Close()
+		closeShared()
 		return nil, err
 	}
 
@@ -129,6 +153,7 @@ func startIngressAndObserver(
 		Stop: func() {
 			obs.Stop()
 			_ = srv.Close()
+			closeShared()
 		},
 		Endpoint: endpoint,
 		Registry: reg,

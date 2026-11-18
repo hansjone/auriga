@@ -201,10 +201,10 @@ func TestSharedPreparationRejectsUnavailableNonInitialAndInvalidIntents(t *testi
 	quota := &preparationQuota{}
 	session.cfg.SharedPools = &agentruntime.SharedPools{Layout: &storage.PoolLayout{Root: t.TempDir(), Quota: quota}}
 	for _, mutate := range []func(*nodev1.SharedDshRuntimeIntent){
-		func(c *nodev1.SharedDshRuntimeIntent) { c.Action = "stop-pool" },
+		func(c *nodev1.SharedDshRuntimeIntent) { c.Action = "unknown-action" },
 		func(c *nodev1.SharedDshRuntimeIntent) { c.OperationId = preparationIntent(4).OperationId },
 		func(c *nodev1.SharedDshRuntimeIntent) {
-			c.Binding.Mode = nodev1.DshInstanceMode_DSH_INSTANCE_MODE_DEDICATED
+			c.Binding.Mode = nodev1.DshInstanceMode_DSH_INSTANCE_MODE_UNSPECIFIED
 		},
 		func(c *nodev1.SharedDshRuntimeIntent) { c.CancelWaitSeconds = 1 },
 	} {

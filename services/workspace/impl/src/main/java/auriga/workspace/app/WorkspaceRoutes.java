@@ -73,8 +73,9 @@ public final class WorkspaceRoutes implements AutoCloseable {
                 tenant,
                 () ->
                     store.jdbc.queryForList(
-                        "SELECT id FROM instance WHERE tenant_id=? ORDER BY id",
+                        "SELECT id FROM instance WHERE tenant_id=? UNION SELECT id FROM shared_dsh_pool WHERE tenant_id=? ORDER BY id",
                         UUID.class,
+                        tenant,
                         tenant));
         // Read KV revisions BEFORE the fresh DB snapshot. A stale publisher cannot
         // overwrite any newer put/delete: CAS includes tombstone revisions as well.
@@ -92,6 +93,19 @@ public final class WorkspaceRoutes implements AutoCloseable {
           String id = row.get("id").toString();
           // Instances inserted after the ID scan are picked up by the next pass.
           if (observed.containsKey(id)) write(kv, id, encode(row), observed.get(id));
+        }
+        var pools =
+            store.in(
+                tenant,
+                () ->
+                    store.jdbc.queryForList(
+                        "SELECT p.*,b.node_id,n.ingress_endpoint,n.revoked AS node_revoked,n.last_seen_at AS node_seen"
+                            + " FROM shared_dsh_pool p LEFT JOIN shared_dsh_pool_node b ON b.tenant_id=p.tenant_id AND b.pool_id=p.id"
+                            + " LEFT JOIN node n ON n.tenant_id=b.tenant_id AND n.id=b.node_id WHERE p.tenant_id=? ORDER BY p.id",
+                        tenant));
+        for (var pool : pools) {
+          String id = pool.get("id").toString();
+          if (observed.containsKey(id)) write(kv, id, encodePool(pool), observed.get(id));
         }
       }
     } catch (Exception e) {
@@ -169,6 +183,22 @@ public final class WorkspaceRoutes implements AutoCloseable {
     route.put("generation", ((Number) row.get("generation")).longValue());
     route.put("updatedAt", WorkspaceStore.instant(row, "updated_at").toString());
     return WorkspaceService.JSON.writeValueAsString(route).getBytes(StandardCharsets.UTF_8);
+  }
+
+  static byte[] encodePool(Map<String, Object> row) throws Exception {
+    if (!Set.of("pending", "ready").contains(row.get("state"))) return null;
+    var projected = new HashMap<>(row);
+    // A pool has no personal owner. This managed route subject is never used
+    // for authorization: Edge/Node resolve the exact placement through W.
+    projected.put("owner_id", row.get("id"));
+    projected.put("generation", 1L);
+    projected.put("updated_at", row.get("node_seen"));
+    projected.put("phase", "running");
+    projected.put("ready", true);
+    // 'running' makes the read-only pending profile probe routable. Ordinary
+    // entry still requires W's ready placement; a missing process yields 404.
+    if (row.get("node_seen") == null) return null;
+    return encode(projected);
   }
 
   public static boolean validEndpoint(String raw) {
