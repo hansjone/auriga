@@ -106,8 +106,38 @@ func (r *Reconciler) guardReady(ctx context.Context, status *nodev1.InstanceStat
 	if !status.Ready || r.checkCommittedReady(ctx, status) == nil {
 		return
 	}
+	markEndpointUnavailable(status)
+}
+
+func markEndpointUnavailable(status *nodev1.InstanceStatus) {
 	status.Ready = false
 	status.Phase = nodev1.InstancePhase_INSTANCE_PHASE_FAILED
 	status.Error = &nodev1.InstanceError{Code: "agent.start_failed", Message: "committed runtime endpoint unavailable", Retryable: true}
 	filterAppliedReports(status)
+}
+
+func (r *Reconciler) commitStatus(ctx context.Context, st *nodev1.InstanceStatus, save func() error) error {
+	r.guardReady(ctx, st)
+	if err := save(); err != nil {
+		return err
+	}
+	durableReady := st.Ready
+	r.guardReady(ctx, st)
+	if r.SyncEndpoint != nil {
+		if accepted := r.SyncEndpoint(st); st.Ready && !accepted {
+			markEndpointUnavailable(st)
+		}
+		// Ingress synchronization may have waited on the Engine or bridge.
+		r.guardReady(ctx, st)
+	}
+	if durableReady && !st.Ready {
+		if err := save(); err != nil {
+			return err
+		}
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	r.emit(st)
+	return nil
 }

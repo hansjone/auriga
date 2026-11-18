@@ -28,10 +28,15 @@ type Reconciler struct {
 	Activation *runtime.ReleaseActivation
 	Log        *slog.Logger
 	Sink       StatusSink
+	// SyncEndpoint applies the local ingress update before a status is sent.
+	// It reports whether it accepted the endpoint for a READY status.
+	SyncEndpoint func(*nodev1.InstanceStatus) bool
 	// PrepareTimeout bounds Ensure (artifact fetch, image pull, render) and
 	// StartTimeout bounds Start, so a stuck download fails instead of hanging.
 	PrepareTimeout time.Duration
 	StartTimeout   time.Duration
+	writeActual    func(state.ActualRecord) error
+	writeRestart   func(string, state.RestartRecord) error
 
 	mu             sync.Mutex
 	workers        map[string]chan workItem
@@ -77,6 +82,8 @@ func New(store *state.Store, driver runtime.Driver, log *slog.Logger, maxConcurr
 	return &Reconciler{
 		Activation:     activation,
 		Store:          store,
+		writeActual:    store.PutActual,
+		writeRestart:   store.PutRestartCommand,
 		Driver:         driver,
 		Log:            log,
 		workers:        make(map[string]chan workItem),
@@ -597,13 +604,13 @@ func (r *Reconciler) fail(id string, generation int64, attempts uint32, code, ms
 
 func (r *Reconciler) persist(st *nodev1.InstanceStatus, attempts uint32) error {
 	r.enrichPersistedResources(st)
-	r.guardReady(context.Background(), st)
-	if err := r.Store.PutActual(state.ActualRecord{Status: st, Attempts: attempts}); err != nil {
+	err := r.commitStatus(context.Background(), st, func() error {
+		return r.writeActual(state.ActualRecord{Status: st, Attempts: attempts})
+	})
+	if err != nil {
 		r.Log.Warn("persist runtime status failed", "instance_id", st.InstanceId, "error", err)
-		return err
 	}
-	r.emit(st)
-	return nil
+	return err
 }
 
 func (r *Reconciler) emit(st *nodev1.InstanceStatus) {

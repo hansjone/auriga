@@ -240,11 +240,8 @@ func runAgent(args []string, logs io.Writer) error {
 	if docker, ok := inner.(*runtime.Docker); ok {
 		docker.SetEndpointRevoker(bridge.remove)
 	}
-	statusSink := sess.StatusSink()
-	rec.Sink = func(st *nodev1.InstanceStatus) {
-		bridge.Sync(st)
-		statusSink(st)
-	}
+	rec.SyncEndpoint = bridge.Sync
+	rec.Sink = sess.StatusSink()
 	rec.StartHealthChecks(ctx, 15*time.Second)
 
 	logger.Info("agent starting", "version", Version, "data_root", cfg.DataRoot, "driver", driverName)

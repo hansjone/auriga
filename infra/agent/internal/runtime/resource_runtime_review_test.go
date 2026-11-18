@@ -204,15 +204,16 @@ func TestSignedResourceRuntimeLeaseDuringCommittedInspect(t *testing.T) {
 				}
 				f.engine.mu.Lock()
 				stopsBeforeCommit = f.engine.stops
-				f.engine.beforeInspect = func(container string) {
+				f.engine.beforeInspect = func(container string) error {
 					if container != actual.ContainerID {
-						return
+						return nil
 					}
 					f.engine.mu.Lock()
 					f.engine.beforeInspect = nil
 					f.engine.mu.Unlock()
 					entered <- f.release.store.CheckReleaseExecution(actual.Candidate)
 					<-resume
+					return nil
 				}
 				f.engine.mu.Unlock()
 				return nil

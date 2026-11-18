@@ -100,20 +100,24 @@ func (r *Reconciler) cancelHealthLocked(id string) {
 // Publishing a stale observation can therefore never overwrite a newer command.
 func (r *Reconciler) persistHealth(ctx context.Context, epoch uint64, spec *nodev1.InstanceSpec, st *nodev1.InstanceStatus, attempts uint32) bool {
 	r.enrichResources(ctx, st)
-	r.guardReady(ctx, st)
-	r.mu.Lock()
-	latest, err := r.Store.GetDesired(st.InstanceId)
-	if err != nil || r.closed || ctx.Err() != nil || epoch != r.healthEpochs[st.InstanceId] || !proto.Equal(spec, latest) {
-		r.mu.Unlock()
-		return false
-	}
-	err = r.Store.PutActual(state.ActualRecord{Status: st, Attempts: attempts})
-	r.mu.Unlock()
+	err := r.commitStatus(ctx, st, func() error {
+		r.mu.Lock()
+		defer r.mu.Unlock()
+		latest, err := r.Store.GetDesired(st.InstanceId)
+		if err != nil {
+			return err
+		}
+		if r.closed || ctx.Err() != nil || epoch != r.healthEpochs[st.InstanceId] || !proto.Equal(spec, latest) {
+			return context.Canceled
+		}
+		return r.writeActual(state.ActualRecord{Status: st, Attempts: attempts})
+	})
 	if err != nil {
-		r.Log.Warn("persist runtime health failed", "instance_id", st.InstanceId, "error", err)
+		if !errors.Is(err, context.Canceled) {
+			r.Log.Warn("persist runtime health failed", "instance_id", st.InstanceId, "error", err)
+		}
 		return false
 	}
-	r.emit(st)
 	return true
 }
 

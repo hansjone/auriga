@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -24,6 +25,8 @@ const (
 	labelGeneration = "auriga.generation"
 	labelManaged    = "auriga.managed"
 )
+
+var errEndpointUnready = errors.New("docker: endpoint proof unavailable")
 
 // Docker implements Driver via the Docker Engine API (also works with Podman).
 type Docker struct {
@@ -691,17 +694,19 @@ func (d *Docker) Inspect(ctx context.Context, id string) (Status, error) {
 	if err := storage.ValidateInstanceID(id); err != nil {
 		return Status{}, err
 	}
+	proof := d.endpointProof(id)
 	if err := ctx.Err(); err != nil {
-		d.revoke(id)
+		d.withdrawObserved(id, proof)
 		return Status{InstanceID: id}, err
 	}
 	record, err := d.observationRecord(id)
 	if err != nil {
+		d.withdrawObserved(id, proof)
 		return Status{InstanceID: id}, err
 	}
 	insp, err := d.verifyContainer(ctx, record)
 	if err != nil {
-		d.revoke(id)
+		d.withdrawObserved(id, proof)
 		return Status{InstanceID: id}, err
 	}
 	if insp == nil {
@@ -710,9 +715,8 @@ func (d *Docker) Inspect(ctx context.Context, id string) (Status, error) {
 	st := Status{InstanceID: id}
 	if state, ok := insp["State"].(map[string]any); ok {
 		st.Running, _ = state["Running"].(bool)
-		_, endpointErr := d.endpoint(ctx, id)
+		_, endpointErr := d.endpointForProof(ctx, id, proof)
 		if err := ctx.Err(); err != nil {
-			d.revoke(id)
 			return Status{InstanceID: id}, err
 		}
 		st.Ready = st.Running && endpointErr == nil
@@ -730,7 +734,7 @@ func (d *Docker) Inspect(ctx context.Context, id string) (Status, error) {
 		}
 	}
 	if err := ctx.Err(); err != nil {
-		d.revoke(id)
+		d.withdrawObserved(id, proof)
 		return Status{InstanceID: id}, err
 	}
 	return st, nil
@@ -740,8 +744,10 @@ func (d *Docker) Stats(ctx context.Context, id string) (Usage, error) {
 	if err := storage.ValidateInstanceID(id); err != nil {
 		return Usage{}, err
 	}
+	proof := d.endpointProof(id)
 	record, err := d.observationRecord(id)
 	if err != nil {
+		d.withdrawObserved(id, proof)
 		return Usage{}, err
 	}
 	raw, err := d.Client.ContainerStats(ctx, record.ContainerID)
@@ -767,28 +773,31 @@ func (d *Docker) Endpoint(id string) (Endpoint, error) {
 }
 
 func (d *Docker) endpoint(ctx context.Context, id string) (Endpoint, error) {
+	return d.endpointForProof(ctx, id, d.endpointProof(id))
+}
+
+func (d *Docker) endpointForProof(ctx context.Context, id string, ep dockerEndpoint) (out Endpoint, err error) {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
+	defer func() {
+		if err != nil {
+			d.withdrawObserved(id, ep)
+		}
+	}()
 	if err := ctx.Err(); err != nil {
-		d.revoke(id)
 		return Endpoint{}, err
 	}
 	actual, err := d.observationRecord(id)
 	if err != nil {
 		return Endpoint{}, err
 	}
-	d.mu.Lock()
-	ep := d.endpoints[id]
-	d.mu.Unlock()
 	if ep.url == "" || ep.pending != nil {
 		if _, err := d.verifyContainer(ctx, actual); err != nil {
-			d.withdraw(id, true)
 			return Endpoint{}, err
 		}
-		return Endpoint{}, fmt.Errorf("docker: no endpoint for %s", id)
+		return Endpoint{}, fmt.Errorf("%w for %s", errEndpointUnready, id)
 	}
 	if err := d.checkCommittedEndpoint(ctx, actual, ep); err != nil {
-		d.withdraw(id, true)
 		return Endpoint{}, err
 	}
 	d.mu.Lock()
@@ -800,11 +809,10 @@ func (d *Docker) endpoint(ctx context.Context, id string) (Endpoint, error) {
 	}
 	d.mu.Unlock()
 	if !unchanged {
-		return Endpoint{}, fmt.Errorf("docker: endpoint proof was withdrawn")
+		return Endpoint{}, fmt.Errorf("%w: proof was withdrawn", errEndpointUnready)
 	}
 	if leaseErr != nil {
-		d.withdraw(id, true)
-		return Endpoint{}, leaseErr
+		return Endpoint{}, fmt.Errorf("%w: %w", errEndpointUnready, leaseErr)
 	}
 	return Endpoint{URL: ep.url}, nil
 }

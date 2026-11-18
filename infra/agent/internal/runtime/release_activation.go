@@ -241,7 +241,8 @@ func requireActivation(ctx context.Context, id string) (*activationScope, error)
 }
 
 // SetEndpointRevoker wires the installation's ingress/observer publication.
-// Revocation runs outside the driver mutex and never stops a process.
+// The callback only withdraws ingress/observer state. It must not call the
+// driver: withdrawal and its notification are serialized with publication.
 func (d *Docker) SetEndpointRevoker(revoke func(string)) {
 	d.mu.Lock()
 	d.endpointRevoker = revoke
@@ -249,18 +250,32 @@ func (d *Docker) SetEndpointRevoker(revoke func(string)) {
 }
 
 func (d *Docker) revoke(id string) {
-	d.withdraw(id, false)
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.withdrawLocked(id)
 }
 
-func (d *Docker) withdraw(id string, keepPending bool) {
+func (d *Docker) endpointProof(id string) dockerEndpoint {
 	d.mu.Lock()
-	if !keepPending || d.endpoints[id].pending == nil {
-		delete(d.endpoints, id)
+	defer d.mu.Unlock()
+	return d.endpoints[id]
+}
+
+func (d *Docker) withdrawObserved(id string, proof dockerEndpoint) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	// Each Start has a fresh record pointer, even if it recovers the same
+	// container. A late read must not remove the next committed proof.
+	current := d.endpoints[id]
+	if current.pending == nil && proof.pending == nil && current.record == proof.record {
+		d.withdrawLocked(id)
 	}
-	revoke := d.endpointRevoker
-	d.mu.Unlock()
-	if revoke != nil {
-		revoke(id)
+}
+
+func (d *Docker) withdrawLocked(id string) {
+	delete(d.endpoints, id)
+	if d.endpointRevoker != nil {
+		d.endpointRevoker(id)
 	}
 }
 
@@ -281,7 +296,6 @@ func (d *Docker) actualRecord(id string) (*state.ExecutionRecord, error) {
 func (d *Docker) observationRecord(id string) (*state.ExecutionRecord, error) {
 	r, err := d.actualRecord(id)
 	if err != nil {
-		d.revoke(id)
 		return nil, err
 	}
 	image, candidate, err := d.Activation.verify(r.DSH)
@@ -292,9 +306,6 @@ func (d *Docker) observationRecord(id string) (*state.ExecutionRecord, error) {
 		err = d.Activation.Store.CheckReleaseExecution(candidate)
 	}
 	if err != nil {
-		// An ordinary observer must withdraw public readiness on any intent,
-		// but a read finding this intent must not destroy a private start proof.
-		d.withdraw(id, errors.Is(err, state.ErrReleaseUnresolved))
 		return nil, err
 	}
 	return r, nil

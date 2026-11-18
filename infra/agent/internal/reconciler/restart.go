@@ -47,6 +47,12 @@ func (r *Reconciler) Command(ctx context.Context, command *nodev1.Command) *node
 	}
 	select {
 	case result := <-reply:
+		if result.GetOk() && r.Activation != nil {
+			record, err := r.Store.GetRestartCommand(command.CommandId)
+			if err != nil || record == nil || !record.Complete || !r.restartProofReady(ctx, command.InstanceId, record.Generation) {
+				return commandFailure(command, "agent.start_failed", true)
+			}
+		}
 		return result
 	case <-ctx.Done():
 		return commandFailure(command, "common.unavailable", true)
@@ -55,6 +61,12 @@ func (r *Reconciler) Command(ctx context.Context, command *nodev1.Command) *node
 
 func commandFailure(command *nodev1.Command, code string, retryable bool) *nodev1.CommandResult {
 	return &nodev1.CommandResult{CommandId: command.GetCommandId(), InstanceId: command.GetInstanceId(), Error: &nodev1.InstanceError{Code: code, Message: "Restart command could not be completed", Retryable: retryable}}
+}
+
+func (r *Reconciler) restartProofReady(ctx context.Context, id string, generation int64) bool {
+	actual, err := r.Store.GetActual(id)
+	return err == nil && actual.Status.GetReady() && actual.Status.GetObservedGeneration() == generation &&
+		r.checkCommittedReady(ctx, actual.Status) == nil
 }
 
 func (r *Reconciler) handleRestart(ctx context.Context, command *nodev1.Command) *nodev1.CommandResult {
@@ -80,6 +92,9 @@ func (r *Reconciler) handleRestart(ctx context.Context, command *nodev1.Command)
 	}
 	success := &nodev1.CommandResult{CommandId: command.CommandId, InstanceId: command.InstanceId, Ok: true}
 	if record != nil && record.Complete {
+		if r.Activation != nil && !r.restartProofReady(ctx, command.InstanceId, record.Generation) {
+			return failed()
+		}
 		return success
 	}
 	spec, err := r.Store.GetDesired(command.InstanceId)
@@ -98,7 +113,7 @@ func (r *Reconciler) handleRestart(ctx context.Context, command *nodev1.Command)
 		return denied()
 	}
 	record.Generation = spec.Generation
-	if err := r.Store.PutRestartCommand(command.CommandId, *record); err != nil {
+	if err := r.writeRestart(command.CommandId, *record); err != nil {
 		if errors.Is(err, state.ErrRestartConflict) {
 			return denied()
 		}
@@ -112,7 +127,7 @@ func (r *Reconciler) handleRestart(ctx context.Context, command *nodev1.Command)
 			return failed()
 		}
 		record.Stopped = true
-		if err := r.Store.PutRestartCommand(command.CommandId, *record); err != nil {
+		if err := r.writeRestart(command.CommandId, *record); err != nil {
 			return failed()
 		}
 	}
@@ -152,7 +167,13 @@ func (r *Reconciler) handleRestart(ctx context.Context, command *nodev1.Command)
 		return failed()
 	}
 	record.Complete = true
-	if err := r.Store.PutRestartCommand(command.CommandId, *record); err != nil {
+	if err := r.writeRestart(command.CommandId, *record); err != nil {
+		return failed()
+	}
+	// Completion is a durable action checkpoint. A successful reply still
+	// requires a live proof after that write, including on command replay.
+	if err := r.checkCommittedReady(ctx, actual.Status); err != nil {
+		r.fail(command.InstanceId, spec.Generation, actual.Attempts, "agent.start_failed", "committed runtime endpoint unavailable", true)
 		return failed()
 	}
 	return success

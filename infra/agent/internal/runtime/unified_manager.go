@@ -1117,8 +1117,9 @@ func (m *UnifiedManager) Observe(ctx context.Context, id string) (reports []*res
 // Public observation must continue to use the committed runtime endpoint.
 func (m *UnifiedManager) observe(ctx context.Context, id string, startupProbe func(*unifiedNodeState) (Endpoint, error)) (reports []*resourcev1.UnifiedInstallationReport, guardian *resourcev1.UnifiedGuardianState, failure error) {
 	defer m.lock(id)()
+	waitForProof := false
 	defer func() {
-		if failure != nil && m.Driver != nil {
+		if failure != nil && !waitForProof && m.Driver != nil {
 			stopCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
 			defer cancel()
 			if err := m.Driver.Stop(stopCtx, id, 5*time.Second); err != nil {
@@ -1135,7 +1136,7 @@ func (m *UnifiedManager) observe(ctx context.Context, id string, startupProbe fu
 		return reports, guardian, nil
 	}
 	defer func() {
-		if failure != nil {
+		if failure != nil && !waitForProof {
 			stopCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
 			defer cancel()
 			if err := m.isolate(stopCtx, s, root, current, "verification_failed"); err != nil {
@@ -1159,6 +1160,11 @@ func (m *UnifiedManager) observe(ctx context.Context, id string, startupProbe fu
 		endpoint, err = m.Driver.Endpoint(id)
 	}
 	if err != nil {
+		// Guard can renew the active view while the old endpoint still
+		// carries its former lease. Let health recovery reverify that live
+		// process. No catalog evidence has been consumed here.
+		waitForProof = startupProbe == nil && errors.Is(err, errEndpointUnready) &&
+			s.State == "active" && m.checkLeaseClock(s.Clock, s.LeaseExpiresAt) == nil
 		return nil, guardian, err
 	}
 	paths, err := m.Layout.For(id)
