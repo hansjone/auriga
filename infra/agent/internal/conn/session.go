@@ -46,6 +46,7 @@ type Config struct {
 	Store         *state.Store
 	AllowInsecure bool
 	SharedPools   *agentruntime.SharedPools
+	SharedRuntime *agentruntime.PersistentPools
 
 	HeartbeatInterval time.Duration
 	MinBackoff        time.Duration
@@ -73,6 +74,7 @@ type Session struct {
 	wakeCh          chan *nodev1.WakeSchedule
 	resultCh        chan *nodev1.CommandResult
 	sharedReceiptCh chan *nodev1.SharedDshRuntimeReceipt
+	sharedReportCh  chan *nodev1.SessionRequest
 }
 
 // New creates a session manager.
@@ -101,7 +103,7 @@ func New(cfg Config) *Session {
 	if cfg.BootID == "" {
 		cfg.BootID = fmt.Sprintf("boot-%d", time.Now().UnixNano())
 	}
-	return &Session{
+	session := &Session{
 		cfg:             cfg,
 		heartbeat:       cfg.HeartbeatInterval,
 		statusCh:        make(chan *nodev1.InstanceStatus, 64),
@@ -109,6 +111,22 @@ func New(cfg Config) *Session {
 		wakeCh:          make(chan *nodev1.WakeSchedule, 16),
 		resultCh:        make(chan *nodev1.CommandResult, 64),
 		sharedReceiptCh: make(chan *nodev1.SharedDshRuntimeReceipt, 64),
+		sharedReportCh:  make(chan *nodev1.SessionRequest, 128),
+	}
+	if cfg.SharedRuntime != nil {
+		cfg.SharedRuntime.Report = session.ReportShared
+	}
+	return session
+}
+
+func (s *Session) ReportShared(report *nodev1.SessionRequest) {
+	if report == nil || (report.GetSharedDshResourceReport() == nil && report.GetSharedDshGuardianImpact() == nil) {
+		return
+	}
+	select {
+	case s.sharedReportCh <- report:
+	default:
+		s.cfg.Logger.Warn("shared report queue full; durable guardian state will be retried")
 	}
 }
 
@@ -284,6 +302,9 @@ func (s *Session) tryRenew(ctx context.Context) error {
 func (s *Session) runOnce(ctx context.Context) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
+	if s.cfg.SharedRuntime != nil {
+		s.cfg.SharedRuntime.ResetViews()
+	}
 	mat, meta, tlsCert, err := s.loadCreds()
 	if err != nil {
 		return err
@@ -412,6 +433,10 @@ func (s *Session) runOnce(ctx context.Context) error {
 			}); err != nil {
 				return err
 			}
+		case report := <-s.sharedReportCh:
+			if err := stream.Send(report); err != nil {
+				return err
+			}
 		}
 	}
 }
@@ -465,6 +490,9 @@ func (s *Session) sendHello(stream nodev1.NodeControlService_SessionClient, mat 
 	var labels map[string]string
 	if s.cfg.SharedPools != nil {
 		labels = map[string]string{"auriga.shared-dsh-runtime": "prepare-v1"}
+		if s.cfg.SharedRuntime != nil {
+			labels["auriga.shared-dsh-process"] = "persistent-v1"
+		}
 	}
 	return stream.Send(&nodev1.SessionRequest{
 		Body: &nodev1.SessionRequest_Hello{Hello: &nodev1.Hello{
@@ -566,19 +594,31 @@ func (s *Session) handleControl(ctx context.Context, msg *nodev1.SessionResponse
 		return nil
 	}
 	s.cfg.Logger.Info("control message received", "type", fmt.Sprintf("%T", msg.Body))
+	if body, ok := msg.Body.(*nodev1.SessionResponse_SharedDshResourceView); ok {
+		if s.cfg.SharedRuntime == nil {
+			return fmt.Errorf("shared resource receiver unavailable")
+		}
+		return s.cfg.SharedRuntime.View(ctx, body.SharedDshResourceView)
+	}
 	if body, ok := msg.Body.(*nodev1.SessionResponse_SharedDshRuntimeIntent); ok {
 		command := body.SharedDshRuntimeIntent
 		if s.cfg.SharedPools == nil || command == nil || command.Binding == nil ||
 			command.Action != "prepare-empty" || command.OperationId != command.Binding.PlacementId {
 			return fmt.Errorf("initial shared preparation unavailable")
 		}
-		receipt, err := s.cfg.SharedPools.Apply(ctx, command)
-		if err != nil {
+		var receipt *nodev1.SharedDshRuntimeReceipt
+		var err error
+		if s.cfg.SharedRuntime != nil {
+			receipt, err = s.cfg.SharedRuntime.Prepare(ctx, command)
+		} else {
+			receipt, err = s.cfg.SharedPools.Apply(ctx, command)
+		}
+		if receipt == nil {
 			return err
 		}
 		select {
 		case s.sharedReceiptCh <- receipt:
-			return nil
+			return err
 		case <-ctx.Done():
 			return ctx.Err()
 		}

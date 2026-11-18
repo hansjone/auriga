@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"sync"
 	"time"
 
@@ -60,6 +61,22 @@ type SharedPools struct {
 	mu         sync.Mutex
 	inflight   map[string]bool
 	stopping   map[string]int
+}
+
+// Bindings reads the node-owned ledger for complete resource admission snapshots.
+func (m *SharedPools) Bindings(pool string) ([]*nodev1.SharedDshBinding, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	s, _, err := m.load(pool)
+	if err != nil {
+		return nil, err
+	}
+	var bindings []*nodev1.SharedDshBinding
+	for _, b := range s.Bindings {
+		bindings = append(bindings, proto.Clone(b).(*nodev1.SharedDshBinding))
+	}
+	sort.Slice(bindings, func(i, j int) bool { return bindings[i].MemberId < bindings[j].MemberId })
+	return bindings, nil
 }
 
 func (m *SharedPools) now() int64 {
