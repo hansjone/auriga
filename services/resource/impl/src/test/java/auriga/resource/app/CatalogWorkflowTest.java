@@ -60,7 +60,6 @@ class CatalogWorkflowTest {
   @TempDir Path objects;
   LocalObjectStore store;
   CatalogWorkflow catalog;
-  ResourceWorkflow legacy;
   ResourceAccess access;
   AtomicBoolean enabled = new AtomicBoolean(true);
   Set<UUID> security = new HashSet<>();
@@ -181,7 +180,7 @@ class CatalogWorkflowTest {
     var events =
         new OutboxEventPublisher(
             jdbc, "resource", "resource", new EventSchemas(), JSON, clock, () -> {});
-    legacy = new ResourceWorkflow(tx, db, access, () -> store, () -> signing, events, clock);
+    var operations = new ResourceOperations(tx, db, access, events, clock);
     var catalogEvents =
         new CatalogEvents(
             new OutboxEventPublisher(jdbc, "resource", "resource", null, JSON, clock, () -> {}));
@@ -190,7 +189,7 @@ class CatalogWorkflowTest {
             tx,
             db,
             access,
-            legacy,
+            operations,
             () -> store,
             () -> signing,
             enabled::get,
@@ -2966,7 +2965,7 @@ class CatalogWorkflowTest {
                             "pkg",
                             active.pkg,
                             "maximum",
-                            ResourceWorkflow.MAX)));
+                            ResourceOperations.MAX)));
             assertError(
                 CatalogStatePolicy.conflict().errorCode(),
                 () ->

@@ -112,6 +112,7 @@ class ResourceRecoveryTest {
             db,
             org.mockito.Mockito.mock(auriga.resource.app.ResourceAccess.class),
             org.mockito.Mockito.mock(auriga.resource.app.ResourceWorkflow.class),
+            org.mockito.Mockito.mock(auriga.resource.app.ResourceOperations.class),
             () -> workspace,
             () -> signing,
             () -> null,

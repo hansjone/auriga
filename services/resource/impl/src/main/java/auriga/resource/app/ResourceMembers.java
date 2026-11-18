@@ -21,7 +21,7 @@ public final class ResourceMembers {
   private final ResourceStore resources;
   private final ResourceWorkflowStore db;
   private final ResourceAccess access;
-  private final ResourceWorkflow workflow;
+  private final ResourceOperations operations;
   private final ResourceDistributions distributions;
   private final Supplier<ObjectStore> objects;
   private final Clock clock;
@@ -30,14 +30,14 @@ public final class ResourceMembers {
       ResourceStore resources,
       ResourceWorkflowStore db,
       ResourceAccess access,
-      ResourceWorkflow workflow,
+      ResourceOperations operations,
       ResourceDistributions distributions,
       Supplier<ObjectStore> objects,
       Clock clock) {
     this.resources = resources;
     this.db = db;
     this.access = access;
-    this.workflow = workflow;
+    this.operations = operations;
     this.distributions = distributions;
     this.objects = objects;
     this.clock = clock;
@@ -100,7 +100,7 @@ public final class ResourceMembers {
         pkg = uuid(body, "packageId"),
         version = uuid(body, "versionId");
     String digest = text(body, "digest", 71);
-    return workflow.operation(
+    return operations.operation(
         actor,
         ResourceAccess.READ,
         false,
@@ -123,7 +123,7 @@ public final class ResourceMembers {
                   "client",
                   client,
                   "hash",
-                  ResourceWorkflow.hash(ticket),
+                  ResourceOperations.hash(ticket),
                   "pkg",
                   pkg,
                   "version",
@@ -141,7 +141,7 @@ public final class ResourceMembers {
                   .put("expiresAt", ResourceSigning.time(expiry));
           result.set("resourceEnvelope", envelope);
           result.set("revocations", distributions.revocations());
-          workflow.recorded(r, "resource.member.ticket", version);
+          operations.recorded(r, "resource.member.ticket", version);
           return result;
         },
         false);
@@ -173,7 +173,7 @@ public final class ResourceMembers {
                           "client",
                           client,
                           "hash",
-                          ResourceWorkflow.hash(ticket)));
+                          ResourceOperations.hash(ticket)));
               if (row.get("consumed_at") != null) throw new AurigaException(CommonErrors.CONFLICT);
               if (!((java.sql.Timestamp) row.get("expires_at"))
                   .toInstant()
@@ -188,7 +188,7 @@ public final class ResourceMembers {
                   "UPDATE resource.resource_member_ticket SET consumed_at=:now WHERE tenant_id=:tenant AND ticket_hash=:hash",
                   db.args(
                       "hash",
-                      ResourceWorkflow.hash(ticket),
+                      ResourceOperations.hash(ticket),
                       "now",
                       OffsetDateTime.ofInstant(clock.instant(), ZoneOffset.UTC)));
               return new ObjectStore.ObjectInfo(
@@ -204,7 +204,7 @@ public final class ResourceMembers {
     String action = text(body, "action", 16), digest = text(body, "digest", 71);
     if (!Set.of("install", "enable", "disable", "remove").contains(action)) throw invalid();
     boolean enabling = Set.of("install", "enable").contains(action);
-    return workflow.operation(
+    return operations.operation(
         actor,
         ResourceAccess.READ,
         false,
@@ -223,7 +223,7 @@ public final class ResourceMembers {
                   "SELECT * FROM resource.resource_member_installation WHERE tenant_id=:tenant AND member_id=:member AND client_id=:client AND package_id=:pkg",
                   args(r, client, pkg));
           var old = rows.isEmpty() ? null : rows.getFirst();
-          ResourceWorkflow.match(etag, old == null ? 0 : number(old, "revision"));
+          ResourceOperations.match(etag, old == null ? 0 : number(old, "revision"));
           if (!enabling && old == null) throw new AurigaException(CommonErrors.NOT_FOUND);
           if (action.equals("enable")
               && (old == null
@@ -284,7 +284,7 @@ public final class ResourceMembers {
                   level,
                   "desired",
                   desired));
-          workflow.recorded(r, "resource.member." + action, version);
+          operations.recorded(r, "resource.member." + action, version);
           return view(installation(r, client, pkg));
         });
   }
@@ -296,7 +296,7 @@ public final class ResourceMembers {
     String digest = text(body, "digest", 71), state = text(body, "state", 16);
     long revision = counter(body, "installationRevision");
     if (!Set.of("applied", "failed").contains(state)) throw invalid();
-    return workflow.operation(
+    return operations.operation(
         actor,
         ResourceAccess.READ,
         false,
@@ -331,7 +331,7 @@ public final class ResourceMembers {
                   OffsetDateTime.ofInstant(clock.instant(), ZoneOffset.UTC),
                   "error",
                   state.equals("failed") ? "resource.apply_failed" : null));
-          workflow.recorded(r, "resource.member.report", version);
+          operations.recorded(r, "resource.member.report", version);
           return view(installation(r, client, pkg));
         });
   }
