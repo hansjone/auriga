@@ -31,6 +31,10 @@ export function createEnterpriseEnvironment({
       },
       DSH_TEAM_BASE: { description: 'Owned loopback enterprise endpoint.' },
       DSH_TEAM_HELPERS: { description: 'Packaged Python helper directory.' },
+      auriga_id: { description: 'Current UAC employee ID for this task.' },
+      auriga_token: {
+        description: 'Current UAC token; never print or persist.',
+      },
     },
     resolve(
       /** @type {any} */ execution,
@@ -41,6 +45,8 @@ export function createEnterpriseEnvironment({
         DSH_TEAM_TASK_CAPABILITY: '',
         DSH_TEAM_BASE: '',
         DSH_TEAM_HELPERS: helpers,
+        auriga_id: '',
+        auriga_token: '',
       };
       const sessionId = execution?.agent?.session?.header?.id;
       const port = Number(getServer()?.port);
@@ -78,7 +84,19 @@ export function createEnterpriseEnvironment({
     contributor.resolve = /** @type {any} */ (
       async (/** @type {any} */ execution) => {
         const context = await prepare(execution);
-        return resolve(execution, context);
+        const env = resolve(execution, context);
+        if (!context || !env.DSH_TEAM_TASK_CAPABILITY) return env;
+        try {
+          const key = execution.token ?? execution;
+          const row = issued.get(key);
+          const current = await auth.launchCredentials(row.sessionId, row.cap);
+          if (issued.get(key) !== row || execution.signal?.aborted) return env;
+          return { ...env, ...current() };
+        } catch {
+          // Absence of UAC, disallowed raw reads and expired tasks must not
+          // prevent ordinary local tools from starting; neither alias is set.
+          return env;
+        }
       }
     );
   }

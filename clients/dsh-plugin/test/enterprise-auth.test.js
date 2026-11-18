@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { createEnterpriseAuth } from '../src/local/enterprise.js';
 import { createEnterpriseEnvironment } from '../src/local/enterprise-environment.js';
 
-async function fixture(t) {
+async function fixture(t, { empNo = '00001', beforeCredentials } = {}) {
   let authGeneration = 1;
   let sent;
   const sending = new Promise((resolve) => {
@@ -41,7 +41,10 @@ async function fixture(t) {
         ? null
         : JSON.stringify([snapshot.shellEpoch, authGeneration]),
     getOwner: (id) => (id === 'session' ? 'member' : null),
-    credentials: async () => ({ empNo: '00001', token, updatedAt: null }),
+    credentials: async () => {
+      await beforeCredentials?.();
+      return { empNo, token, updatedAt: null };
+    },
     config: () => config,
     now: () => time,
     monotonic: () => ticks,
@@ -396,6 +399,80 @@ test('only a verified running native job retains enterprise context until its te
   event({ job: { id: 'job' }, type: 'settled' });
   assert.equal((await f.raw(headers)).status, 401);
 });
+
+test('verified task launch reads one current UAC pair, while a running task re-reads via its capability', async (t) => {
+  const f = await fixture(t, { empNo: '000AbC' });
+  const env = createEnterpriseEnvironment({
+    auth: f.auth,
+    getServer: () => ({ port: f.port }),
+    prepare: async (execution) =>
+      execution.agent.session.header.id === 'session'
+        ? 'trusted-tool'
+        : undefined,
+  });
+  t.after(() => env.dispose());
+  const task = (id = 'session') => ({
+    token: {},
+    agent: { session: { header: { id } } },
+    signal: new AbortController().signal,
+  });
+  const parent = [process.env.auriga_id, process.env.auriga_token];
+  const firstTask = task();
+  const first = await env.contributor.resolve(firstTask);
+  const firstHeaders = {
+    'X-Dsh-Team-Task-Capability': first.DSH_TEAM_TASK_CAPABILITY,
+  };
+  assert.equal(first.auriga_id, '000AbC');
+  assert.equal(first.auriga_token, f.initialToken);
+  f.rotate();
+  const current = await env.contributor.resolve(task());
+  assert.equal(current.auriga_id, '000AbC');
+  assert.equal(current.auriga_token, f.token());
+  assert.equal(first.auriga_token, f.initialToken);
+  assert.equal((await (await f.raw(firstHeaders)).json()).token, f.token());
+  const foreign = await env.contributor.resolve(task('other-session'));
+  assert.deepEqual([foreign.auriga_id, foreign.auriga_token], ['', '']);
+  f.disable();
+  const disabled = await env.contributor.resolve(task());
+  assert.deepEqual([disabled.auriga_id, disabled.auriga_token], ['', '']);
+  assert.ok(disabled.DSH_TEAM_TASK_CAPABILITY, 'outbound must stay available');
+  assert.equal((await f.raw(firstHeaders)).status, 403);
+  f.enable();
+  f.logout();
+  const signedOut = await env.contributor.resolve(task());
+  assert.deepEqual([signedOut.auriga_id, signedOut.auriga_token], ['', '']);
+  assert.equal((await f.raw(firstHeaders)).status, 401);
+  assert.deepEqual([process.env.auriga_id, process.env.auriga_token], parent);
+});
+
+test('discards the launch pair when an in-flight credential read outlives its task', async (t) => {
+  let finish, started;
+  const pending = new Promise((resolve) => (finish = resolve));
+  const reading = new Promise((resolve) => (started = resolve));
+  const f = await fixture(t, {
+    beforeCredentials: () => {
+      started();
+      return pending;
+    },
+  });
+  const env = createEnterpriseEnvironment({
+    auth: f.auth,
+    getServer: () => ({ port: f.port }),
+    prepare: async () => 'trusted-tool',
+  });
+  t.after(() => env.dispose());
+  const controller = new AbortController();
+  const launch = env.contributor.resolve({
+    agent: { session: { header: { id: 'session' } } },
+    signal: controller.signal,
+  });
+  await reading;
+  controller.abort();
+  finish();
+  const value = await launch;
+  assert.deepEqual([value.auriga_id, value.auriga_token], ['', '']);
+});
+
 test('failed native context retention revokes a promoted job capability immediately', async (t) => {
   const f = await fixture(t);
   const env = createEnterpriseEnvironment({

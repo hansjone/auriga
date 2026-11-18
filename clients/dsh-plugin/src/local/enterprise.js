@@ -143,7 +143,17 @@ export async function enterpriseRequest(url, options) {
  * now?:()=>number,monotonic?:()=>number,binding?:()=>string|null,ownerProof?:(id:string)=>()=>string|null}} options */
 export function createEnterpriseAuth(options) {
   const config = options.config ?? (() => ({}));
-  const raw = () => config().allowRawAgentToken !== false;
+  const raw = () => {
+    try {
+      const value = config();
+      if (!value || typeof value !== 'object' || Array.isArray(value))
+        return false;
+      const setting = value.allowRawAgentToken;
+      return setting === undefined || setting === true;
+    } catch {
+      return false;
+    }
+  };
   const now = options.now ?? Date.now;
   const monotonic = options.monotonic ?? (() => performance.now());
   const capabilities = new Map();
@@ -211,6 +221,13 @@ export function createEnterpriseAuth(options) {
       body.taskCapability,
       body.capability,
     ]);
+    return authorizeTask(sessionId, token, scope);
+  }
+  function authorizeTask(
+    /** @type {string} */ sessionId,
+    /** @type {string} */ token,
+    /** @type {string} */ scope,
+  ) {
     const cap = capabilities.get(token);
     const check = () => {
       const s = options.snapshot();
@@ -240,6 +257,40 @@ export function createEnterpriseAuth(options) {
       executionContextId: cap.executionContextId,
     };
   }
+  async function readMaterial(
+    /** @type {ReturnType<typeof authorizeTask>} */ task,
+    /** @type {'raw'|'outbound'} */ purpose,
+  ) {
+    const { check, sessionId, executionContextId, cap } = task;
+    let material;
+    try {
+      material = await options.credentials(
+        sessionId,
+        purpose,
+        executionContextId,
+        cap.execution,
+        cap.retained,
+      );
+      if (material?.executionContextId)
+        cap.executionContextId = material.executionContextId;
+    } catch {
+      check();
+      throw failure(503, 'no_skill_credentials');
+    }
+    check();
+    if (
+      typeof material?.empNo !== 'string' ||
+      !material.empNo ||
+      material.empNo.length > 128 ||
+      typeof material?.token !== 'string' ||
+      !material.token ||
+      material.token.length > 16384 ||
+      (material.updatedAt != null &&
+        !Number.isFinite(Date.parse(material.updatedAt)))
+    )
+      throw failure(503, 'no_skill_credentials');
+    return material;
+  }
   async function body(/** @type {any} */ req) {
     if (req.method === 'GET') return {};
     let length = 0;
@@ -260,6 +311,22 @@ export function createEnterpriseAuth(options) {
   }
   return {
     mint,
+    async launchCredentials(
+      /** @type {string} */ sessionId,
+      /** @type {string} */ token,
+    ) {
+      const task = authorizeTask(sessionId, token, 'credentials');
+      if (!task.executionContextId)
+        throw failure(401, 'caller_unauthenticated');
+      const { empNo, token: uacToken } = await readMaterial(task, 'raw');
+      // A subprocess env cannot carry NUL. Deliver the pair or neither.
+      if (empNo.includes('\0') || uacToken.includes('\0'))
+        throw failure(503, 'no_skill_credentials');
+      return () => {
+        task.check();
+        return { auriga_id: empNo, auriga_token: uacToken };
+      };
+    },
     retain(/** @type {string} */ token) {
       const cap = capabilities.get(token);
       if (cap) cap.retained = true;
@@ -284,38 +351,17 @@ export function createEnterpriseAuth(options) {
         if (!(credentials ? ['GET', 'POST'] : ['POST']).includes(req.method))
           throw failure(405, 'method_not_allowed');
         const input = await body(req);
-        const { check, sessionId, executionContextId, cap } = authorize(
+        const task = authorize(
           req,
           input,
           credentials ? 'credentials' : 'outbound',
         );
-        let material;
-        try {
-          material = await options.credentials(
-            sessionId,
-            credentials ? 'raw' : 'outbound',
-            executionContextId,
-            cap.execution,
-            cap.retained,
-          );
-          if (material?.executionContextId)
-            cap.executionContextId = material.executionContextId;
-        } catch {
-          check();
-          throw failure(503, 'no_skill_credentials');
-        }
+        const { check } = task;
+        const material = await readMaterial(
+          task,
+          credentials ? 'raw' : 'outbound',
+        );
         check();
-        if (
-          typeof material?.empNo !== 'string' ||
-          !material.empNo ||
-          material.empNo.length > 128 ||
-          typeof material?.token !== 'string' ||
-          !material.token ||
-          material.token.length > 16384 ||
-          (material.updatedAt != null &&
-            !Number.isFinite(Date.parse(material.updatedAt)))
-        )
-          throw failure(503, 'no_skill_credentials');
         if (credentials)
           return json(res, 200, {
             empNo: material.empNo,
