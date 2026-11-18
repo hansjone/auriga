@@ -99,6 +99,25 @@ public final class RequestIdentity {
     if (request.getHeader("Origin") != null) sameOrigin(request);
   }
 
+  /** Non-simple polling proof only for the explicitly acknowledged HTTP/IP deployment. */
+  void sameOriginUacPoll(HttpServletRequest request) {
+    // DeploymentAccess.load rejects any browser HTTP configuration without the explicit ACK.
+    Host entry = host(request);
+    boolean metadata =
+        Collections.list(request.getHeaderNames()).stream()
+            .anyMatch(name -> name.toLowerCase(Locale.ROOT).startsWith("sec-fetch-"));
+    if (metadata || entry.secure() || !access.mode().equals("ip")) {
+      sameOriginFetch(request);
+      return;
+    }
+    // A cross-origin script cannot send this header without a successful CORS preflight.
+    // This route grants no CORS permission; navigation, forms and no-cors cannot set it.
+    if (!"GET".equals(request.getMethod())
+        || !"same-origin".equals(single(request, "Auriga-UAC-Poll", CommonErrors.FORBIDDEN)))
+      throw new AurigaException(CommonErrors.FORBIDDEN);
+    if (request.getHeader("Origin") != null) sameOrigin(request);
+  }
+
   private void authenticateHop(HttpServletRequest request) {
     String peer = request.getRemoteAddr();
     if (!hop.peerAddresses().contains(peer)) throw new AurigaException(CommonErrors.FORBIDDEN);
