@@ -24,30 +24,37 @@ public final class CatalogManifest {
                               "classpath:auriga/contracts/"))
                   .schemaRegistryConfig(
                       SchemaRegistryConfig.builder().formatAssertionsEnabled(true).build()));
-  private static final Schema SKILL =
+  private static final Schema MANIFEST =
       REGISTRY.getSchema(
           SchemaLocation.of(
-              "classpath:auriga/contracts/resource/package.schema.json#/$defs/SkillManifest"));
+              "classpath:auriga/contracts/resource/package.schema.json#/$defs/UnifiedManifest"));
 
   private CatalogManifest() {}
 
   public static ObjectNode parse(byte[] raw, String name, String version, String expected) {
     var m = auriga.resource.web.ResourceBody.parse(raw, 262144, null, Set.of());
-    if (!SKILL.validate(m).isEmpty()
-        || !"skill".equals(m.path("kind").asString())
+    if (!MANIFEST.validate(m).isEmpty()
+        || !Set.of("plugin", "skill").contains(m.path("kind").asString())
         || !name.equals(m.path("name").asString())
         || !version.equals(m.path("version").asString())
         || !ResourceSemver.valid(version)
         || !digest(raw).equals(expected)) throw invalid();
     for (var host : m.path("permissions").path("outboundHosts")) host(host.asString());
+    boolean plugin = m.path("kind").asString().equals("plugin");
+    if (plugin) {
+      String packageName = m.path("plugin").path("packageName").asString();
+      if (packageName.equals("auriga-dsh") || packageName.startsWith("@deepseek-ai/"))
+        throw invalid();
+    }
+    for (var runtime : m.path("runtimes")) range(text(runtime, "versionRange", 128));
     for (var a : m.path("artifacts"))
       if (!a.path("role").asString().equals("payload")
           || !a.path("os").asString().equals("any")
           || !a.path("arch").asString().equals("any")
           || !a.path("mediaType").asString().equals("application/gzip")
-          || a.path("sizeBytes").asLong() > 5242880) throw invalid();
+          || a.path("sizeBytes").asLong() > (plugin ? 67108864 : 5242880)) throw invalid();
     // Validate npm-style bounded comparisons; no unresolved or arbitrary expressions.
-    range(text(m.path("skill"), "dshVersionRange", 128));
+    range(text(m.path(plugin ? "plugin" : "skill"), "dshVersionRange", 128));
     return m;
   }
 

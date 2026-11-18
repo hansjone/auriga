@@ -5,10 +5,8 @@ export const navigation = [
     key: 'governance',
     icon: 'resources',
     children: [
-      ['/resources', 'resourceCatalog'],
-      ['/resources/review', 'resourceReview'],
-      ['/resources/published', 'resourcePublished'],
-      ['/resources/distribution', 'resourceDistribution'],
+      ['/resources/plugins', 'resourcePlugins'],
+      ['/resources/skills', 'resourceSkills'],
       ['/resources/tools', 'resourceTools'],
     ],
   },

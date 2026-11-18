@@ -188,7 +188,13 @@ public class ResourceRuntimeConfiguration {
             java.nio.file.Path.of(env.getRequiredProperty("auriga.resource.release-key-file"))),
         env.getRequiredProperty("auriga.resource.revocation-kid"),
         ResourceSigning.load(
-            java.nio.file.Path.of(env.getRequiredProperty("auriga.resource.revocation-key-file"))));
+            java.nio.file.Path.of(env.getRequiredProperty("auriga.resource.revocation-key-file"))),
+        env.getProperty("auriga.resource.downgrade-kid"),
+        env.containsProperty("auriga.resource.downgrade-key-file")
+            ? ResourceSigning.load(
+                java.nio.file.Path.of(
+                    env.getRequiredProperty("auriga.resource.downgrade-key-file")))
+            : null);
   }
 
   @Bean
@@ -359,7 +365,7 @@ public class ResourceRuntimeConfiguration {
   @Bean
   jakarta.servlet.MultipartConfigElement resourceMultipart(
       auriga.resource.web.ResourceMultipartDirectory directory) {
-    return new jakarta.servlet.MultipartConfigElement(directory.location(), 67108864, 67239936, 0);
+    return new jakarta.servlet.MultipartConfigElement(directory.location(), 67108864, 67633152, 0);
   }
 
   @Bean

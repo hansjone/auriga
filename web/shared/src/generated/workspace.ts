@@ -924,6 +924,9 @@ export interface components {
        * @enum {string}
        */
       desiredState?: 'ENABLED' | 'DISABLED' | 'REMOVED';
+      /** @description Server-resolved scope policy. Omission means optional for earlier records. */
+      installationMode?: components['schemas']['UnifiedInstallationMode'];
+      downgradeAuthorization?: components['schemas']['UnifiedDowngradeAuthorization'];
     };
     UnifiedSelection: {
       identity: components['schemas']['UnifiedResourceIdentity'];
@@ -1400,7 +1403,7 @@ export interface components {
       /** Format: uuid */
       versionId: string;
       /** @enum {string} */
-      kind: 'skill' | 'tool';
+      kind: 'plugin' | 'skill' | 'tool';
       version: components['schemas']['Version'];
       manifestDigest: components['schemas']['Digest'];
     };
@@ -1455,6 +1458,34 @@ export interface components {
       /** Format: int64 */
       revocationRevision: number;
     };
+    /**
+     * @description required: automatically install and enable; members cannot disable or uninstall. default: automatically install initially; preserve member disable and uninstall choices. optional: marketplace choice only; no automatic installation.
+     * @enum {string}
+     */
+    UnifiedInstallationMode: 'required' | 'default' | 'optional';
+    /** Format: uuid */
+    ownerId: string;
+    UnifiedDowngradeAuthorization: {
+      /** @constant */
+      schemaVersion: 2;
+      /** Format: uuid */
+      authorizationId: string;
+      /** Format: uuid */
+      instanceId: string;
+      identity: components['schemas']['UnifiedResourceIdentity'];
+      /** Format: int64 */
+      fromReleaseSequence: number;
+      /** Format: int64 */
+      toReleaseSequence: number;
+      issuedAt: components['schemas']['Time'];
+      expiresAt: components['schemas']['Time'];
+      reason: string;
+      signature: components['schemas']['Signature'];
+      /** @constant */
+      purpose: 'downgrade';
+      /** Format: uuid */
+      ownerId?: string;
+    } & unknown;
   };
   responses: {
     /** @description 插件协议版本过旧（plugin.protocol_unsupported），params 里有 current 和 minSupported */

@@ -47,6 +47,11 @@ for spec; do
     postgres-data-phase) postgres_data_phase "$path" ;;
     public) public "$path" ;;
     secret) secret "$path" ;;
+    resource-downgrade)
+      directory "$path"
+      [ "$(stat -c '%u:%g:%a' "$path" 2>/dev/null)" = 10001:10001:700 ] || failure secret-directory-metadata
+      [ "$(stat -c '%u:%g:%a:%h' "$path/downgrade.pk8" 2>/dev/null)" = 10001:10001:600:1 ] || failure secret-metadata
+      secret "$path/downgrade.pk8" ;;
     tree) tree "$path" ;;
     platform-pki)
       directory "$path"

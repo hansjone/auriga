@@ -1,6 +1,8 @@
 import { readFileSync } from 'node:fs';
 import { spawn } from 'node:child_process';
 import { performance } from 'node:perf_hooks';
+import { dirname, join, resolve } from 'node:path';
+import { preparePlugins } from './resource_plugins.mjs';
 
 // This is the container entrypoint, outside Cordis and all uninstallable plugins.
 // PID 1 exiting terminates the entire container; Engine automatic restart is denied.
@@ -27,7 +29,24 @@ function stop() {
   setTimeout(() => { try { if (process.platform !== 'win32') process.kill(-child.pid, 'SIGKILL'); else child.kill('SIGKILL'); } catch {} process.exit(78); }, 5000).unref();
 }
 policy();
-child = spawn(command, args, { stdio: 'inherit', detached: process.platform !== 'win32', windowsHide: true });
-child.on('error', stop); child.on('exit', code => process.exit(stopping ? 78 : (code ?? 1)));
 for (const signal of ['SIGTERM', 'SIGINT']) process.on(signal, stop);
 setInterval(() => { try { policy(); } catch { stop(); } }, 250).unref();
+const initial = JSON.parse(readFileSync(policyFile, 'utf8'));
+if (initial.managedPluginNames?.length || initial.allowPersonalPlugins === false) {
+  // The image owns this installation root. Discover the public executable from package metadata.
+  const manifest = '/opt/dsh/node_modules/@deepseek-ai/dsh/package.json';
+  const bin = JSON.parse(readFileSync(manifest, 'utf8')).bin?.dsh;
+  if (typeof bin !== 'string' || !bin || bin.startsWith('/') || bin.split(/[\\/]/).includes('..')) throw new Error('Public DSH CLI unavailable');
+  let dependencies = {};
+  try { dependencies = JSON.parse(readFileSync(join(process.env.DSH_HOME, 'profiles/web/package.json'), 'utf8')).dependencies ?? {}; } catch (error) { if (error.code !== 'ENOENT') throw error; }
+  await preparePlugins(initial, async operation => {
+    await new Promise((accept, reject) => {
+      child = spawn(process.execPath, [resolve(dirname(manifest), bin), 'plugin', '--profile', 'web', ...operation], { stdio: 'inherit', detached: process.platform !== 'win32', windowsHide: true, env: { ...process.env, CI: 'true' } });
+      child.once('error', reject);
+      child.once('exit', code => code === 0 && !stopping ? accept() : reject(new Error('Public DSH plugin command failed')));
+    });
+  }, new Set(Object.keys(dependencies)));
+}
+policy();
+child = spawn(command, args, { stdio: 'inherit', detached: process.platform !== 'win32', windowsHide: true });
+child.on('error', stop); child.on('exit', code => process.exit(stopping ? 78 : (code ?? 1)));

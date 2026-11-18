@@ -104,6 +104,44 @@ public class CatalogDeliveryController {
     return response(delivery.installations(actor(), clientId, kind, limit, cursor), 200);
   }
 
+  @PostMapping("/admin/catalog/assignments")
+  @RequiresPermission("resource.distributions.manage")
+  @RequiresRecentStepUp
+  public ResponseEntity<JsonNode> assign(HttpServletRequest request) {
+    return response(
+        delivery.createAssignment(
+            actor(),
+            read(request, null, Set.of()),
+            header(request, "Idempotency-Key"),
+            header(request, "If-Match")),
+        201);
+  }
+
+  @DeleteMapping("/admin/catalog/assignments/{id}")
+  @RequiresPermission("resource.distributions.manage")
+  @RequiresRecentStepUp
+  public ResponseEntity<JsonNode> unassign(@PathVariable UUID id, HttpServletRequest request) {
+    return response(
+        delivery.removeAssignment(
+            actor(), id, header(request, "Idempotency-Key"), header(request, "If-Match")),
+        200);
+  }
+
+  @GetMapping("/admin/catalog/assignments/{id}")
+  @RequiresPermission("resource.distributions.manage")
+  @RequiresRecentStepUp
+  public ResponseEntity<JsonNode> assignment(@PathVariable UUID id) {
+    return response(delivery.assignment(actor(), id), 200);
+  }
+
+  @GetMapping("/admin/catalog/assignments")
+  @RequiresPermission("resource.distributions.manage")
+  @RequiresRecentStepUp
+  public ResponseEntity<JsonNode> assignments(
+      @RequestParam(defaultValue = "50") int limit, @RequestParam(required = false) String cursor) {
+    return response(delivery.assignments(actor(), limit, cursor), 200);
+  }
+
   @PostMapping("/admin/catalog/distributions")
   @RequiresPermission("resource.distributions.manage")
   @RequiresRecentStepUp

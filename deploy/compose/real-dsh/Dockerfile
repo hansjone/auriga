@@ -21,6 +21,10 @@ RUN ln -s /opt/auriga-dsh /opt/dsh/node_modules/auriga-dsh && node /opt/fixture/
 FROM ${NODE_IMAGE}
 COPY --from=build /opt /opt
 COPY deploy/compose/real-dsh/start.mjs /opt/fixture/start.mjs
+# Match the workspace's reviewed package-manager version. Corepack verifies its distribution.
+ENV COREPACK_HOME=/opt/corepack COREPACK_ENABLE_DOWNLOAD_PROMPT=0
+RUN corepack enable pnpm && corepack prepare pnpm@11.28.6 --activate
+ENV COREPACK_ENABLE_NETWORK=0
 ENV HOME=/home/dsh DSH_TELEMETRY_DISABLED=1 DSH_TELEMETRY_MODE=DISABLED
 WORKDIR /home/dsh
 # Agent overrides this with the allocated uid >= 200000; never depend on root.

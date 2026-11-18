@@ -2349,6 +2349,7 @@
         "kind": {
           "type": "string",
           "enum": [
+            "plugin",
             "skill",
             "tool"
           ]
@@ -2398,6 +2399,7 @@
         "kind": {
           "type": "string",
           "enum": [
+            "plugin",
             "skill",
             "tool"
           ]
@@ -2405,12 +2407,6 @@
         "ownerId": {
           "type": "string",
           "format": "uuid"
-        },
-        "level": {
-          "type": "string",
-          "enum": [
-            "l3"
-          ]
         },
         "visibility": {
           "type": "string",
@@ -2456,7 +2452,6 @@
         "name",
         "kind",
         "ownerId",
-        "level",
         "visibility",
         "groupIds",
         "revision",
@@ -2465,7 +2460,7 @@
         "defaultVersionId"
       ],
       "additionalProperties": false,
-      "description": "Shared L3 skill/tool. Plugin L0-L4/private views continue through legacy APIs, without catalog projection."
+      "description": "Shared unified resource. Installation mode is selected per scoped assignment; packages carry no governance level."
     },
     "ShellAuthOutput_UnifiedListResourcePackages": {
       "type": "object",
@@ -2524,6 +2519,7 @@
         "kind": {
           "type": "string",
           "enum": [
+            "plugin",
             "skill",
             "tool"
           ]
@@ -2552,7 +2548,7 @@
         "visibility"
       ],
       "additionalProperties": false,
-      "description": "Shared L3 skill/tool only. Server derives tenant, owner and level. Private skill stays local. Plugin CRUD uses legacy APIs; catalog rejects plugin kind/IDs."
+      "description": "Shared plugin/skill. Server derives tenant and owner. Installation mode belongs to scoped assignments. Tool delivery remains gated; legacy IDs are not catalog IDs."
     },
     "ShellAuthInput_UnifiedCreateResourcePackage": {
       "type": "object",
@@ -2737,6 +2733,12 @@
     "ShellAuthopenapi_resource_yaml_components_schemas_UnifiedVersion": {
       "type": "object",
       "properties": {
+        "reviewId": {
+          "type": "string",
+          "format": "uuid",
+          "readOnly": true,
+          "description": "Latest review record for this version. Load authorized review evidence and verify exact version identity, revision and digest before publication."
+        },
         "id": {
           "type": "string",
           "format": "uuid"
@@ -2790,6 +2792,7 @@
         "kind": {
           "type": "string",
           "enum": [
+            "plugin",
             "skill",
             "tool"
           ]
@@ -2928,13 +2931,253 @@
     "ShellAuthopenapi_resource_yaml_components_schemas_UnifiedManifest": {
       "oneOf": [
         {
+          "$ref": "#/$defs/ShellAuthresource_package_schema_json__defs_PluginManifest"
+        },
+        {
           "$ref": "#/$defs/ShellAuthresource_package_schema_json__defs_SkillManifest"
         },
         {
           "$ref": "#/$defs/ShellAuthresource_package_schema_json__defs_ToolManifest"
         }
       ],
-      "description": "Catalog manifest for skill/tool. PluginManifest remains in the package format for internal migration only; catalog APIs do not expose plugin projections."
+      "description": "Unified plugin/skill/tool manifest; plugin uses npm tgz and v2 detached signatures. Tool delivery remains gated."
+    },
+    "ShellAuthresource_package_schema_json__defs_PluginManifest": {
+      "type": "object",
+      "properties": {
+        "schemaVersion": {
+          "type": "integer",
+          "const": 1
+        },
+        "name": {
+          "$ref": "#/$defs/ShellAuthresource_package_schema_json__defs_Name"
+        },
+        "version": {
+          "$ref": "#/$defs/ShellAuthresource_package_schema_json__defs_Version"
+        },
+        "description": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024
+        },
+        "author": {
+          "type": "object",
+          "properties": {
+            "displayName": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          },
+          "required": [
+            "displayName"
+          ],
+          "additionalProperties": false
+        },
+        "license": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "permissions": {
+          "$ref": "#/$defs/ShellAuthresource_package_schema_json__defs_Permissions"
+        },
+        "runtimes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ShellAuthresource_package_schema_json__defs_Runtime"
+          },
+          "minItems": 0,
+          "maxItems": 8
+        },
+        "artifacts": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ShellAuthresource_package_schema_json__defs_PluginArtifact"
+          },
+          "minItems": 1,
+          "maxItems": 1
+        },
+        "signature": {
+          "type": "object",
+          "properties": {
+            "mode": {
+              "type": "string",
+              "const": "detached"
+            },
+            "algorithm": {
+              "type": "string",
+              "const": "Ed25519"
+            }
+          },
+          "required": [
+            "mode",
+            "algorithm"
+          ],
+          "additionalProperties": false
+        },
+        "kind": {
+          "type": "string",
+          "const": "plugin"
+        },
+        "plugin": {
+          "$ref": "#/$defs/ShellAuthresource_package_schema_json__defs_Plugin"
+        }
+      },
+      "required": [
+        "schemaVersion",
+        "name",
+        "version",
+        "description",
+        "author",
+        "license",
+        "permissions",
+        "runtimes",
+        "artifacts",
+        "signature",
+        "kind",
+        "plugin"
+      ],
+      "additionalProperties": false
+    },
+    "ShellAuthresource_package_schema_json__defs_Permissions": {
+      "type": "object",
+      "properties": {
+        "tools": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "minItems": 0,
+          "maxItems": 32,
+          "uniqueItems": true
+        },
+        "outboundHosts": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 253
+          },
+          "minItems": 0,
+          "maxItems": 32,
+          "uniqueItems": true
+        },
+        "dataAccess": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "workspace_read",
+              "workspace_write",
+              "user_selected_files"
+            ]
+          },
+          "minItems": 0,
+          "maxItems": 3,
+          "uniqueItems": true
+        }
+      },
+      "required": [
+        "tools",
+        "outboundHosts",
+        "dataAccess"
+      ],
+      "additionalProperties": false
+    },
+    "ShellAuthresource_package_schema_json__defs_Runtime": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": [
+            "node",
+            "python",
+            "java"
+          ]
+        },
+        "versionRange": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        }
+      },
+      "required": [
+        "kind",
+        "versionRange"
+      ],
+      "additionalProperties": false
+    },
+    "ShellAuthresource_package_schema_json__defs_PluginArtifact": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/ShellAuthresource_package_schema_json__defs_Name"
+        },
+        "role": {
+          "type": "string",
+          "const": "payload"
+        },
+        "digest": {
+          "$ref": "#/$defs/ShellAuthresource_signatures_schema_json__defs_Digest"
+        },
+        "sizeBytes": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 67108864
+        },
+        "mediaType": {
+          "type": "string",
+          "const": "application/gzip"
+        },
+        "os": {
+          "type": "string",
+          "const": "any"
+        },
+        "arch": {
+          "type": "string",
+          "const": "any"
+        }
+      },
+      "required": [
+        "id",
+        "role",
+        "digest",
+        "sizeBytes",
+        "mediaType",
+        "os",
+        "arch"
+      ],
+      "additionalProperties": false
+    },
+    "ShellAuthresource_package_schema_json__defs_Plugin": {
+      "type": "object",
+      "properties": {
+        "packageName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 214,
+          "pattern": "^(?:@[a-z0-9-][a-z0-9._-]*[/])?[a-z0-9-][a-z0-9._-]*$",
+          "not": {
+            "enum": [
+              "node_modules",
+              "favicon.ico"
+            ]
+          }
+        },
+        "dshVersionRange": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        }
+      },
+      "required": [
+        "packageName",
+        "dshVersionRange"
+      ],
+      "additionalProperties": false
     },
     "ShellAuthresource_package_schema_json__defs_SkillManifest": {
       "type": "object",
@@ -3031,76 +3274,6 @@
         "signature",
         "kind",
         "skill"
-      ],
-      "additionalProperties": false
-    },
-    "ShellAuthresource_package_schema_json__defs_Permissions": {
-      "type": "object",
-      "properties": {
-        "tools": {
-          "type": "array",
-          "items": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 128
-          },
-          "minItems": 0,
-          "maxItems": 32,
-          "uniqueItems": true
-        },
-        "outboundHosts": {
-          "type": "array",
-          "items": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 253
-          },
-          "minItems": 0,
-          "maxItems": 32,
-          "uniqueItems": true
-        },
-        "dataAccess": {
-          "type": "array",
-          "items": {
-            "type": "string",
-            "enum": [
-              "workspace_read",
-              "workspace_write",
-              "user_selected_files"
-            ]
-          },
-          "minItems": 0,
-          "maxItems": 3,
-          "uniqueItems": true
-        }
-      },
-      "required": [
-        "tools",
-        "outboundHosts",
-        "dataAccess"
-      ],
-      "additionalProperties": false
-    },
-    "ShellAuthresource_package_schema_json__defs_Runtime": {
-      "type": "object",
-      "properties": {
-        "kind": {
-          "type": "string",
-          "enum": [
-            "node",
-            "python",
-            "java"
-          ]
-        },
-        "versionRange": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 128
-        }
-      },
-      "required": [
-        "kind",
-        "versionRange"
       ],
       "additionalProperties": false
     },
@@ -3701,7 +3874,7 @@
             "r2",
             "r3"
           ],
-          "description": "Server-derived floor: command skill or any nonempty tools/outboundHosts/dataAccess is at least r2; tool at least r2, git r3. Server scans text too; declarations cannot downgrade command content."
+          "description": "Server-derived floor: plugin is at least r2; command skill or any nonempty tools/outboundHosts/dataAccess is at least r2; tool at least r2, git r3. Server scans text too; declarations cannot downgrade command content."
         },
         "level": {
           "type": "string",
@@ -4350,6 +4523,7 @@
         "kind": {
           "type": "string",
           "enum": [
+            "plugin",
             "skill",
             "tool"
           ]
@@ -4487,6 +4661,12 @@
             "REMOVED"
           ],
           "description": "Preferred desired state when present. If absent on legacy data, derive ENABLED/DISABLED from enabled. REMOVED is an uninstall tombstone carrying the new installationRevision, retained until a matching removed acknowledgement and retired in the next generation. Reject unknown or unspecified values."
+        },
+        "installationMode": {
+          "$ref": "#/$defs/ShellAuthresource_unified_schema_json__defs_UnifiedInstallationMode"
+        },
+        "downgradeAuthorization": {
+          "$ref": "#/$defs/ShellAuthresource_unified_schema_json__defs_UnifiedDowngradeAuthorization"
         }
       },
       "required": [
@@ -4558,6 +4738,111 @@
         "revocationRevision"
       ],
       "additionalProperties": false
+    },
+    "ShellAuthresource_unified_schema_json__defs_UnifiedInstallationMode": {
+      "type": "string",
+      "enum": [
+        "required",
+        "default",
+        "optional"
+      ],
+      "description": "required: automatically install and enable; members cannot disable or uninstall. default: automatically install initially; preserve member disable and uninstall choices. optional: marketplace choice only; no automatic installation."
+    },
+    "ShellAuthresource_unified_schema_json__defs_UnifiedDowngradeAuthorization": {
+      "type": "object",
+      "properties": {
+        "schemaVersion": {
+          "type": "integer",
+          "const": 2
+        },
+        "authorizationId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "instanceId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "identity": {
+          "$ref": "#/$defs/ShellAuthresource_unified_schema_json__defs_UnifiedResourceIdentity"
+        },
+        "fromReleaseSequence": {
+          "type": "integer",
+          "format": "int64",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "toReleaseSequence": {
+          "type": "integer",
+          "format": "int64",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "issuedAt": {
+          "$ref": "#/$defs/ShellAuthresource_signatures_schema_json__defs_Time"
+        },
+        "expiresAt": {
+          "$ref": "#/$defs/ShellAuthresource_signatures_schema_json__defs_Time"
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024
+        },
+        "signature": {
+          "$ref": "#/$defs/ShellAuthresource_signatures_schema_json__defs_Signature"
+        },
+        "purpose": {
+          "type": "string",
+          "const": "downgrade"
+        },
+        "ownerId": {
+          "type": "string",
+          "format": "uuid"
+        }
+      },
+      "required": [
+        "schemaVersion",
+        "authorizationId",
+        "instanceId",
+        "identity",
+        "fromReleaseSequence",
+        "toReleaseSequence",
+        "issuedAt",
+        "expiresAt",
+        "reason",
+        "signature",
+        "purpose"
+      ],
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "reason": {
+                "const": "revocation"
+              }
+            },
+            "required": [
+              "reason"
+            ]
+          },
+          "then": {
+            "required": [
+              "ownerId"
+            ],
+            "properties": {
+              "ownerId": {
+                "$ref": "#/$defs/ShellAuthresource_unified_schema_json__defs_UnifiedDowngradeAuthorization_properties_ownerId"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "ShellAuthresource_unified_schema_json__defs_UnifiedDowngradeAuthorization_properties_ownerId": {
+      "type": "string",
+      "format": "uuid"
     },
     "ShellAuthOutput_UnifiedCreateDownloadTicket": {
       "type": "object",
@@ -4756,6 +5041,7 @@
         "kind": {
           "type": "string",
           "enum": [
+            "plugin",
             "skill",
             "tool"
           ]
@@ -4791,6 +5077,17 @@
           "type": "string",
           "minLength": 1,
           "maxLength": 2048
+        },
+        "allowPersonalPlugins": {
+          "type": "boolean",
+          "description": "Current tenant permission for native personal plugin installation."
+        },
+        "assignmentFailures": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ShellAuthresource_unified_schema_json__defs_UnifiedAssignmentFailure"
+          },
+          "maxItems": 200
         }
       },
       "required": [
@@ -4970,6 +5267,30 @@
           }
         }
       ]
+    },
+    "ShellAuthresource_unified_schema_json__defs_UnifiedAssignmentFailure": {
+      "type": "object",
+      "properties": {
+        "packageId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "state": {
+          "type": "string",
+          "const": "failed"
+        },
+        "errorCode": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        }
+      },
+      "required": [
+        "packageId",
+        "state",
+        "errorCode"
+      ],
+      "additionalProperties": false
     },
     "ShellAuthOutput_UnifiedListInstallations": {
       "type": "object",

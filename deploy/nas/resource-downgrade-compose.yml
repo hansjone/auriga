@@ -1,0 +1,14 @@
+# Selected by the NAS launcher only when the installation opts in.
+services:
+  platform:
+    environment:
+      AURIGA_RESOURCE_DOWNGRADE_KID: ${AURIGA_RESOURCE_DOWNGRADE_KID:?configure the downgrade signing kid}
+      AURIGA_RESOURCE_DOWNGRADE_KEY_FILE: /run/auriga-resource-downgrade/downgrade.pk8
+    volumes:
+      # The signer checks the key's parent UID and mode as well as the file.
+      - type: bind
+        source: ${AURIGA_DATA_ROOT}/secrets/resource-downgrade
+        target: /run/auriga-resource-downgrade
+        read_only: true
+        bind:
+          create_host_path: false

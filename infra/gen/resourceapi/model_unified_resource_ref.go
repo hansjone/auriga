@@ -33,6 +33,9 @@ type UnifiedResourceRef struct {
 	InstallationRevision *int64 `json:"installationRevision,omitempty"`
 	// Preferred desired state when present. If absent on legacy data, derive ENABLED/DISABLED from enabled. REMOVED is an uninstall tombstone carrying the new installationRevision, retained until a matching removed acknowledgement and retired in the next generation. Reject unknown or unspecified values.
 	DesiredState *string `json:"desiredState,omitempty"`
+	// Server-resolved scope policy. Omission means optional for earlier records.
+	InstallationMode       *UnifiedInstallationMode       `json:"installationMode,omitempty"`
+	DowngradeAuthorization *UnifiedDowngradeAuthorization `json:"downgradeAuthorization,omitempty"`
 }
 
 type _UnifiedResourceRef UnifiedResourceRef
@@ -293,6 +296,70 @@ func (o *UnifiedResourceRef) SetDesiredState(v string) {
 	o.DesiredState = &v
 }
 
+// GetInstallationMode returns the InstallationMode field value if set, zero value otherwise.
+func (o *UnifiedResourceRef) GetInstallationMode() UnifiedInstallationMode {
+	if o == nil || IsNil(o.InstallationMode) {
+		var ret UnifiedInstallationMode
+		return ret
+	}
+	return *o.InstallationMode
+}
+
+// GetInstallationModeOk returns a tuple with the InstallationMode field value if set, nil otherwise
+// and a boolean to check if the value has been set.
+func (o *UnifiedResourceRef) GetInstallationModeOk() (*UnifiedInstallationMode, bool) {
+	if o == nil || IsNil(o.InstallationMode) {
+		return nil, false
+	}
+	return o.InstallationMode, true
+}
+
+// HasInstallationMode returns a boolean if a field has been set.
+func (o *UnifiedResourceRef) HasInstallationMode() bool {
+	if o != nil && !IsNil(o.InstallationMode) {
+		return true
+	}
+
+	return false
+}
+
+// SetInstallationMode gets a reference to the given UnifiedInstallationMode and assigns it to the InstallationMode field.
+func (o *UnifiedResourceRef) SetInstallationMode(v UnifiedInstallationMode) {
+	o.InstallationMode = &v
+}
+
+// GetDowngradeAuthorization returns the DowngradeAuthorization field value if set, zero value otherwise.
+func (o *UnifiedResourceRef) GetDowngradeAuthorization() UnifiedDowngradeAuthorization {
+	if o == nil || IsNil(o.DowngradeAuthorization) {
+		var ret UnifiedDowngradeAuthorization
+		return ret
+	}
+	return *o.DowngradeAuthorization
+}
+
+// GetDowngradeAuthorizationOk returns a tuple with the DowngradeAuthorization field value if set, nil otherwise
+// and a boolean to check if the value has been set.
+func (o *UnifiedResourceRef) GetDowngradeAuthorizationOk() (*UnifiedDowngradeAuthorization, bool) {
+	if o == nil || IsNil(o.DowngradeAuthorization) {
+		return nil, false
+	}
+	return o.DowngradeAuthorization, true
+}
+
+// HasDowngradeAuthorization returns a boolean if a field has been set.
+func (o *UnifiedResourceRef) HasDowngradeAuthorization() bool {
+	if o != nil && !IsNil(o.DowngradeAuthorization) {
+		return true
+	}
+
+	return false
+}
+
+// SetDowngradeAuthorization gets a reference to the given UnifiedDowngradeAuthorization and assigns it to the DowngradeAuthorization field.
+func (o *UnifiedResourceRef) SetDowngradeAuthorization(v UnifiedDowngradeAuthorization) {
+	o.DowngradeAuthorization = &v
+}
+
 func (o UnifiedResourceRef) MarshalJSON() ([]byte, error) {
 	toSerialize, err := o.ToMap()
 	if err != nil {
@@ -315,6 +382,12 @@ func (o UnifiedResourceRef) ToMap() (map[string]interface{}, error) {
 	}
 	if !IsNil(o.DesiredState) {
 		toSerialize["desiredState"] = o.DesiredState
+	}
+	if !IsNil(o.InstallationMode) {
+		toSerialize["installationMode"] = o.InstallationMode
+	}
+	if !IsNil(o.DowngradeAuthorization) {
+		toSerialize["downgradeAuthorization"] = o.DowngradeAuthorization
 	}
 	return toSerialize, nil
 }

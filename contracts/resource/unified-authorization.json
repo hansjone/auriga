@@ -4,9 +4,12 @@
   "rules": [
     {
       "kind": "plugin",
-      "delivery": "legacy",
-      "entry": "legacy-only",
-      "basePermission": "resource.packages.upload"
+      "delivery": "npm-tgz",
+      "entry": "unified",
+      "basePermission": "resource.packages.upload",
+      "minimumRisk": "r2",
+      "level": "l3",
+      "p1Enabled": true
     },
     {
       "kind": "skill",
@@ -72,10 +75,7 @@
     "clientRoleIsDeclarationOnly": true,
     "independentlyGrantable": true,
     "revocable": true,
-    "checkAt": [
-      "review-decision",
-      "publication"
-    ],
+    "checkAt": ["review-decision", "publication"],
     "requireSameTenant": true,
     "authorMayReview": false,
     "countDistinctBy": "tenantId+reviewerId",

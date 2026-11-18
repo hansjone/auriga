@@ -21,7 +21,7 @@ var _ MappedNullable = &UnifiedRiskAssessment{}
 
 // UnifiedRiskAssessment Read-only server assessment, recalculated on content/permission changes. Publication transaction checks the current assessment and review identities.
 type UnifiedRiskAssessment struct {
-	// Server-derived floor: command skill or any nonempty tools/outboundHosts/dataAccess is at least r2; tool at least r2, git r3. Server scans text too; declarations cannot downgrade command content.
+	// Server-derived floor: plugin is at least r2; command skill or any nonempty tools/outboundHosts/dataAccess is at least r2; tool at least r2, git r3. Server scans text too; declarations cannot downgrade command content.
 	MinimumLevel string `json:"minimumLevel"`
 	// Effective server risk. Authorized reviewers may raise it only; changes increment revision and invalidate earlier reviews.
 	Level string `json:"level"`

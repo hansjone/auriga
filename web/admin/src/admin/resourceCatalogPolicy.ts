@@ -4,18 +4,26 @@ const rank = { r1: 1, r2: 2, r3: 3 };
 export function riskOptions(review: CatalogReview) {
   const r = review.version.risk;
   return (['r1', 'r2', 'r3'] as const).filter(
-    (x) => rank[x] >= Math.max(rank[r.level], rank[r.minimumLevel]),
+    (x) =>
+      rank[x] >=
+      Math.max(
+        rank[r.level],
+        rank[r.minimumLevel],
+        review.version.kind === 'plugin' ? 2 : 1,
+      ),
   );
 }
 export function publicationReady(review: CatalogReview, memberId: string) {
+  return publicationBlockers(review, memberId).length === 0;
+}
+export function publicationBlockers(review: CatalogReview, memberId: string) {
   const v = review.version,
     r = v.risk;
-  if (
-    review.authorId === memberId ||
-    review.status !== 'approved' ||
-    v.state !== 'approved'
-  )
-    return false;
+  const issues: { code: string; actual?: number; required?: number }[] = [];
+  if (!memberId || review.authorId === memberId)
+    issues.push({ code: 'author' });
+  if (review.status !== 'approved' || v.state !== 'approved')
+    issues.push({ code: 'awaitingApproval' });
   const current = review.decisions.filter(
     (d) =>
       d.versionRevision === v.revision &&
@@ -26,13 +34,22 @@ export function publicationReady(review: CatalogReview, memberId: string) {
   const approvals = [...latest.values()].filter(
     (d) => d.decision === 'approve',
   );
-  const high = r.level !== 'r1' || r.minimumLevel !== 'r1';
-  return (
-    ![...latest.values()].some((d) => d.decision === 'reject') &&
-    approvals.length >= Math.max(r.requiredReviewers, high ? 2 : 1) &&
-    approvals.filter((d) => d.role === 'security').length >=
-      Math.max(r.requiredSecurityReviewers, high ? 1 : 0)
-  );
+  const high =
+    v.kind === 'plugin' || r.level !== 'r1' || r.minimumLevel !== 'r1';
+  const required = Math.max(r.requiredReviewers, high ? 2 : 1),
+    security = Math.max(r.requiredSecurityReviewers, high ? 1 : 0);
+  if ([...latest.values()].some((d) => d.decision === 'reject'))
+    issues.push({ code: 'hasRejection' });
+  if (approvals.length < required)
+    issues.push({
+      code: 'missingReviewers',
+      actual: approvals.length,
+      required,
+    });
+  const actual = approvals.filter((d) => d.role === 'security').length;
+  if (actual < security)
+    issues.push({ code: 'missingSecurity', actual, required: security });
+  return issues;
 }
 export function distributionApplied(d: CatalogDistribution) {
   return (

@@ -36,7 +36,7 @@ message UnifiedResourceIdentity {
   string tenant_id = 1;
   string package_id = 2;
   string version_id = 3;
-  // skill / tool
+  // plugin / skill / tool
   string kind = 4;
   string version = 5;
   string manifest_digest = 6;
@@ -78,6 +78,9 @@ message UnifiedResourceRef {
   // Prefer when present. Absent legacy values derive ENABLED/DISABLED from enabled.
   // Explicit UNSPECIFIED and unknown values are invalid. REMOVED carries the new revision.
   optional UnifiedResourceDesiredState desired_state = 9;
+  // required / default / optional, resolved by the resource service.
+  string installation_mode = 10;
+  UnifiedDowngradeAuthorization downgrade_authorization = 11;
 }
 
 message UnifiedSelection {
@@ -220,12 +223,17 @@ message ResolveUnifiedResourcesRequest {
   string node_id = 4;
   uint64 selection_revision = 5;
   repeated UnifiedSelection selections = 6;
+  bool synchronize_assignments = 7;
 }
 message ResolveUnifiedResourcesResponse {
   uint64 selection_revision = 1;
   // Every entry carries its own installation_revision and desired_state, including REMOVED tombstones.
   repeated UnifiedResourceRef resources = 2;
   ResourceRevocationList revocations = 3;
+  repeated UnifiedSelection selections = 4;
+  optional bool allow_personal_plugins = 5;
+  // Retry failed packages independently after releasing the whole-instance policy gate.
+  bool assignment_retry_required = 6;
 }
 
 // Independent downgrade-root signature over JCS. Exact identity and instance scope are mandatory.
@@ -241,6 +249,8 @@ message UnifiedDowngradeAuthorization {
   string reason = 9;
   ResourceSignature signature = 10;
   string purpose = 11;
+  // Required for revocation fallbacks; authenticated member, never a caller claim.
+  optional string owner_id = 12;
 }
 
 // Release-root signed immutable migration marker; activated_at is covered by its signature.

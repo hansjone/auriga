@@ -17,8 +17,11 @@ import {
 } from '../src/admin/resourceCatalogPolicy';
 import { tarText, boundedBytes } from '../src/admin/resourceSkillPreview';
 import * as preview from '../src/admin/resourceSkillPreview';
+import * as uploadHelpers from '../src/admin/resourceUploadParser';
+import * as stepUp from '../src/admin/stepUp';
 import Catalog from '../src/views/resources/ResourceCatalogView.vue';
 import Center from '../src/views/resources/ResourceCenterView.vue';
+import Unavailable from '../src/views/WorkflowUnavailableView.vue';
 
 const v: CatalogVersion = {
   id: 'v1',
@@ -98,9 +101,11 @@ const views: ReturnType<typeof mount>[] = [];
 function member(id = 'reviewer') {
   vi.spyOn(adminApi, 'membership').mockResolvedValue({
     member: { id },
+    tenant: { id: 'tenant' },
     permissions: [
       'resource.packages.read',
       'resource.packages.upload',
+      'resource.versions.submit',
       'resource.versions.review',
       'resource.versions.publish',
       'resource.distributions.manage',
@@ -113,6 +118,7 @@ function setup(
   memberId = 'reviewer',
 ) {
   member(memberId);
+  vi.spyOn(api, 'assignments').mockResolvedValue({ items: [] });
   vi.spyOn(api, 'reviews').mockResolvedValue({ items: [r] });
   vi.spyOn(api, 'review').mockResolvedValue({ data: r, etag: '"review-tag"' });
   vi.spyOn(api, 'version').mockResolvedValue({
@@ -260,7 +266,7 @@ it('blocks the publish control until the full quorum is available', async () => 
     'p1',
     'v1',
     'Publish',
-    '"version-tag"',
+    '"2"',
     expect.any(String),
   );
 });
@@ -330,12 +336,12 @@ it.each([false, true])(
       .spyOn(api, 'distribute')
       .mockResolvedValue({} as CatalogDistribution);
     await flushPromises();
-    const inputs = view.findAll('form input');
+    const inputs = view.findAll('[data-testid="catalog-distribute"] input');
     await inputs[0]!.setValue('instance');
     await inputs[1]!.setValue('p1');
     await inputs[2]!.setValue('v1');
     if (existing) await inputs[3]!.setValue('existing');
-    await view.get('form').trigger('submit');
+    await view.get('[data-testid="catalog-distribute"]').trigger('submit');
     await flushPromises();
     await view.get('[data-testid="confirm"]').trigger('click');
     await flushPromises();
@@ -410,7 +416,7 @@ it('requires matching node generation, selection revision and every resource rep
     }),
   ).toBe(false);
 });
-it('switches kind sources without synthesizing unified plugin objects', async () => {
+it('uses the unified source for both plugin and skill without legacy calls', async () => {
   member();
   const legacy = vi
     .spyOn(resourceApi, 'governance')
@@ -420,27 +426,26 @@ it('switches kind sources without synthesizing unified plugin objects', async ()
     history: createMemoryHistory(),
     routes: [
       {
-        path: '/resources/review',
+        path: '/resources/:kind(plugins|skills)/:phase?',
         component: Center,
-        props: { phase: 'review' },
       },
     ],
   });
-  await router.push('/resources/review');
+  await router.push('/resources/plugins/review');
   await router.isReady();
   const view = mount(Center, {
-    props: { phase: 'review' },
+    props: { kind: 'plugin', phase: 'review' },
     global: { plugins: [router, createAurigaI18n('en')], stubs },
   });
   views.push(view);
   await flushPromises();
-  expect(legacy).toHaveBeenCalledTimes(1);
-  expect(unified).not.toHaveBeenCalled();
-  await view.get('[aria-pressed="false"]').trigger('click');
+  expect(legacy).not.toHaveBeenCalled();
+  expect(unified).toHaveBeenCalledWith(undefined, 'plugin');
+  expect(view.findAll('[aria-current="page"]')).toHaveLength(1);
+  await view.setProps({ kind: 'skill', phase: 'review' });
   await flushPromises();
-  expect(unified).toHaveBeenCalledTimes(1);
-  expect(legacy).toHaveBeenCalledTimes(1);
-  expect(view.text()).toContain('Skills');
+  expect(unified).toHaveBeenLastCalledWith(undefined, 'skill');
+  expect(legacy).not.toHaveBeenCalled();
 });
 it('rejects preview traversal, links, invalid UTF-8 and oversized streams', async () => {
   const tar = (name: string, type = '0', byte = 65) => {
@@ -466,3 +471,313 @@ it('rejects preview traversal, links, invalid UTF-8 and oversized streams', asyn
     ),
   ).rejects.toThrow('Preview budget');
 });
+
+it('enforces plugin R2 and distinct security quorum even on a malformed lower server assessment', () => {
+  const pluginReview = {
+    ...r,
+    version: {
+      ...v,
+      kind: 'plugin' as const,
+      state: 'approved' as const,
+      risk: {
+        level: 'r1' as const,
+        minimumLevel: 'r1' as const,
+        requiredReviewers: 1,
+        requiredSecurityReviewers: 0,
+      },
+    },
+    status: 'approved' as const,
+    decisions: [record('a')],
+  };
+  expect(riskOptions(pluginReview)).toEqual(['r2', 'r3']);
+  expect(publicationReady(pluginReview, 'publisher')).toBe(false);
+  expect(
+    publicationReady(
+      { ...pluginReview, decisions: [record('a'), record('b', 'security')] },
+      'publisher',
+    ),
+  ).toBe(true);
+});
+it.each(['plugin', 'skill'] as const)(
+  'creates, uploads and submits a %s using parsed manifest metadata and actual ETags',
+  async (kind) => {
+    const pack: CatalogPackageForTest = {
+      id: 'p1',
+      tenantId: 'tenant',
+      kind,
+      name: v.manifest.name,
+      ownerId: 'author',
+      visibility: 'tenant',
+      groupIds: [],
+      revision: 1,
+      enabled: false,
+      defaultVersionId: null,
+      createdAt: v.createdAt,
+    };
+    const draft = { ...v, kind, state: 'draft' as const };
+    vi.spyOn(api, 'packages').mockResolvedValue({ items: [] });
+    vi.spyOn(api, 'versions').mockResolvedValue({ items: [] });
+    vi.spyOn(api, 'get').mockResolvedValue({
+      data: pack,
+      etag: '"package-tag"',
+    });
+    const create = vi.spyOn(api, 'create').mockResolvedValue(pack);
+    const upload = vi.spyOn(api, 'upload').mockResolvedValue(draft);
+    const submit = vi
+      .spyOn(api, 'submit')
+      .mockResolvedValue({ ...r, version: draft });
+    const file = new File(['{}'], 'auriga-resource.json'),
+      payload = new File(
+        ['tgz'],
+        kind === 'plugin' ? 'payload.tgz' : 'skill.tar.gz',
+      );
+    if (v.manifest.kind !== 'skill') throw new Error('Skill fixture');
+    const manifest =
+      kind === 'plugin'
+        ? {
+            ...v.manifest,
+            kind: 'plugin' as const,
+            plugin: { packageName: '@example/sample', dshVersionRange: '*' },
+          }
+        : v.manifest;
+    draft.manifest = manifest;
+    vi.spyOn(uploadHelpers, 'parseResourceSource').mockResolvedValue({
+      manifest,
+      payload,
+      embedded: false,
+    });
+    vi.spyOn(uploadHelpers, 'finalizeResourceUpload').mockResolvedValue({
+      manifest,
+      file,
+      artifacts: [payload],
+      metadata: { version: '1.0.0', expectedDigest: v.digest },
+    });
+    const view = setup('directory');
+    await view.setProps({ kind });
+    await flushPromises();
+    const input = view.get('[data-testid="catalog-artifacts"]');
+    Object.defineProperty(input.element, 'files', {
+      value: [payload],
+      configurable: true,
+    });
+    await input.trigger('change');
+    await flushPromises();
+    expect(
+      (view.get('[data-testid="upload-name"]').element as HTMLInputElement)
+        .value,
+    ).toBe(manifest.name);
+    expect(
+      (view.get('[data-testid="upload-version"]').element as HTMLInputElement)
+        .value,
+    ).toBe(manifest.version);
+    if (kind === 'plugin') expect(view.text()).toContain('@example/sample');
+    await view.get('[data-testid="permissions-confirm"]').setValue(true);
+    await view.get('[data-testid="catalog-upload"]').trigger('submit');
+    await flushPromises();
+    expect(create).toHaveBeenCalledWith(
+      { name: v.manifest.name, kind, visibility: 'tenant', groupIds: [] },
+      expect.any(String),
+    );
+    expect(upload).toHaveBeenCalledWith(
+      'p1',
+      { version: '1.0.0', expectedDigest: v.digest },
+      file,
+      [payload],
+      '"package-tag"',
+      expect.any(String),
+    );
+    expect(submit).toHaveBeenCalledWith(
+      'p1',
+      'v1',
+      expect.any(String),
+      '"2"',
+      expect.any(String),
+    );
+  },
+);
+it('automatically loads approved review evidence and blocks mismatched versions', async () => {
+  const view = setup('published');
+  vi.spyOn(api, 'published').mockResolvedValue({
+    items: [{ ...v, state: 'approved', reviewId: 'review-1' }],
+  });
+  const approved = {
+    ...r,
+    status: 'approved' as const,
+    version: { ...v, state: 'approved' as const },
+    decisions: [record('a'), record('b', 'security')],
+  };
+  vi.mocked(api.version).mockResolvedValue({
+    data: approved.version,
+    etag: '"v"',
+  });
+  vi.mocked(api.review).mockResolvedValue({ data: approved, etag: '"r"' });
+  await flushPromises();
+  await view.get('[data-testid="catalog-version"]').trigger('click');
+  await flushPromises();
+  expect(api.review).toHaveBeenCalledWith('review-1');
+  expect(view.find('[data-testid="catalog-review-id"]').exists()).toBe(false);
+  await view.get('[data-testid="catalog-reason"]').setValue('Publish');
+  expect(
+    view.get('[data-testid="catalog-publish"]').attributes('disabled'),
+  ).toBeUndefined();
+  vi.mocked(api.review).mockResolvedValue({
+    data: { ...approved, version: { ...v, id: 'another' } },
+    etag: '"r"',
+  });
+  await view.get('[data-testid="catalog-version"]').trigger('click');
+  await flushPromises();
+  expect(view.find('[data-testid="catalog-publish"]').exists()).toBe(false);
+});
+it('continues a definitely rejected submission from the saved version details with fresh evidence', async () => {
+  const pack: CatalogPackageForTest = {
+    id: 'p1',
+    tenantId: 'tenant',
+    kind: 'skill',
+    name: v.manifest.name,
+    ownerId: 'author',
+    visibility: 'tenant',
+    groupIds: [],
+    revision: 1,
+    enabled: true,
+    defaultVersionId: null,
+    createdAt: v.createdAt,
+  };
+  const draft = { ...v, state: 'draft' as const };
+  const file = new File(['payload'], 'skill.tar.gz');
+  vi.spyOn(api, 'packages').mockResolvedValue({ items: [pack] });
+  vi.spyOn(api, 'versions').mockResolvedValue({ items: [] });
+  vi.spyOn(api, 'get').mockResolvedValue({ data: pack, etag: '"1"' });
+  vi.spyOn(api, 'upload').mockResolvedValue(draft);
+  vi.spyOn(api, 'submit').mockRejectedValueOnce(
+    new ApiError({ status: 403, code: 'common.forbidden', title: 'Denied' }),
+  );
+  vi.spyOn(uploadHelpers, 'parseResourceSource').mockResolvedValue({
+    manifest: v.manifest,
+    payload: file,
+    embedded: false,
+  });
+  vi.spyOn(uploadHelpers, 'finalizeResourceUpload').mockResolvedValue({
+    manifest: v.manifest,
+    file,
+    artifacts: [file],
+    metadata: { version: v.version, expectedDigest: v.digest },
+  });
+  const view = setup('directory');
+  vi.mocked(api.version).mockResolvedValue({
+    data: draft,
+    etag: '"latest-draft"',
+  });
+  await flushPromises();
+  const input = view.get('[data-testid="catalog-folder"]');
+  Object.defineProperty(input.element, 'files', {
+    value: [file],
+    configurable: true,
+  });
+  await input.trigger('change');
+  await flushPromises();
+  await view.get('[data-testid="permissions-confirm"]').setValue(true);
+  await view.get('[data-testid="catalog-upload"]').trigger('submit');
+  await flushPromises();
+  await view.get('[data-testid="upload-open-draft"]').trigger('click');
+  await flushPromises();
+  expect(api.version).toHaveBeenCalledWith('p1', 'v1');
+  expect(view.find('[data-testid="catalog-reason"]').exists()).toBe(true);
+  expect(view.findAll('button').some((b) => b.text() === '送审')).toBe(true);
+  expect(api.upload).toHaveBeenCalledTimes(1);
+});
+it.each(['withdrawn', 'malicious'] as const)(
+  'sends %s with the version ETag, including revocation after withdrawal',
+  async (mode) => {
+    const view = setup('published');
+    const state = mode === 'malicious' ? 'withdrawn' : 'published';
+    vi.spyOn(api, 'published').mockResolvedValue({ items: [{ ...v, state }] });
+    vi.mocked(api.version).mockResolvedValue({
+      data: { ...v, state },
+      etag: '"published-tag"',
+    });
+    const withdraw = vi.spyOn(api, 'withdraw').mockResolvedValue(v);
+    await flushPromises();
+    await view.get('[data-testid="catalog-version"]').trigger('click');
+    await flushPromises();
+    await view.get('[data-testid="catalog-reason"]').setValue('Reason');
+    await view
+      .findAll('button')
+      .find((b) => b.text() === (mode === 'malicious' ? '紧急撤销' : '下架'))!
+      .trigger('click');
+    await view.get('[data-testid="confirm"]').trigger('click');
+    await flushPromises();
+    expect(withdraw).toHaveBeenCalledWith(
+      'p1',
+      'v1',
+      mode,
+      'Reason',
+      '"published-tag"',
+      expect.any(String),
+    );
+  },
+);
+it('continues the identical review decision after explicit step-up and supports security duty', async () => {
+  const view = setup();
+  const decide = vi
+    .spyOn(api, 'decide')
+    .mockRejectedValueOnce(
+      new ApiError({
+        title: 'Verify',
+        status: 403,
+        code: 'iam.step_up_required',
+      }),
+    )
+    .mockResolvedValue(r);
+  vi.spyOn(stepUp, 'requestStepUp').mockResolvedValue();
+  await flushPromises();
+  await view.get('[data-testid="catalog-review"]').trigger('click');
+  await flushPromises();
+  await view.get('[data-testid="catalog-role"]').setValue('security');
+  await view.get('[data-testid="catalog-reason"]').setValue('Security checked');
+  await view.get('[data-testid="catalog-approve"]').trigger('click');
+  await view.get('[data-testid="confirm"]').trigger('click');
+  await flushPromises();
+  await view
+    .findAll('button')
+    .find((b) => b.text() === '重新验证身份')!
+    .trigger('click');
+  await flushPromises();
+  await view
+    .findAll('button')
+    .find((b) => b.text() === '继续原请求')!
+    .trigger('click');
+  await view.get('[data-testid="confirm"]').trigger('click');
+  await flushPromises();
+  expect(decide.mock.calls[0]![1].role).toBe('security');
+  expect(decide.mock.calls[0]).toEqual(decide.mock.calls[1]);
+});
+it('reads reviewer evidence through the admin endpoint when member version reads reject unpublished versions', async () => {
+  const view = setup();
+  vi.mocked(api.version).mockRejectedValue(
+    new ApiError({ status: 404, title: 'Not found', code: 'common.not_found' }),
+  );
+  await flushPromises();
+  await view.get('[data-testid="catalog-review"]').trigger('click');
+  await flushPromises();
+  expect(view.find('[data-testid="catalog-approve"]').exists()).toBe(true);
+  expect(api.version).not.toHaveBeenCalled();
+});
+it.each(['zh-CN', 'en'] as const)(
+  'explains unavailable tools without losing existing navigation translations (%s)',
+  async (locale) => {
+    const router = createRouter({
+      history: createMemoryHistory(),
+      routes: [{ path: '/resources/tools', component: Unavailable }],
+    });
+    await router.push('/resources/tools');
+    const view = mount(Unavailable, {
+      global: { plugins: [router, createAurigaI18n(locale)] },
+    });
+    views.push(view);
+    expect(view.text()).toContain(
+      locale === 'en' ? 'Tools are not available yet' : '工具暂未开放',
+    );
+    expect(view.text()).not.toContain('navNotOpen');
+    expect(view.text()).not.toContain('resourceTools');
+  },
+);

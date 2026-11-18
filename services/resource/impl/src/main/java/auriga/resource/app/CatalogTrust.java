@@ -11,7 +11,7 @@ import java.util.*;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.node.ObjectNode;
 
-/** Independent verification of frozen cross-protocol proofs. P1 never enables plugin v2. */
+/** Independent signature verification; legacy proof helpers remain until legacy cleanup. */
 public final class CatalogTrust {
   private final JsonNode trust;
   private final SchemaRegistry schemas =
@@ -261,6 +261,8 @@ public final class CatalogTrust {
         var a = input.path("authorization");
         schema("unified", "UnifiedDowngradeAuthorization", a);
         require(signed(a, "downgrade"), "downgrade_signature");
+        if (a.path("reason").asString().equals("revocation") || a.has("ownerId"))
+          require(a.path("ownerId").equals(input.path("ownerId")), "downgrade_scope");
         require(
             same(a, input, "identity", "instanceId", "fromReleaseSequence", "toReleaseSequence")
                 && a.path("toReleaseSequence").asLong() < a.path("fromReleaseSequence").asLong(),

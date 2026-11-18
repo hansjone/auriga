@@ -553,6 +553,9 @@ services:
     # host network + docker.sock ⇒ effective host root; see docs/dev/nas.md (M7).
     restart: unless-stopped
     network_mode: host
+    # Keep the HTTPS certificate name while dialing the NAS loopback publish.
+    extra_hosts:
+      platform: '127.0.0.1'
     depends_on:
       platform:
         condition: service_healthy

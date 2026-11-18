@@ -20,18 +20,18 @@ var _ MappedNullable = &OfflineManifest{}
 
 // OfflineManifest struct for OfflineManifest
 type OfflineManifest struct {
-	SchemaVersion        int32                  `json:"schemaVersion"`
-	Name                 string                 `json:"name" validate:"regexp=^[a-z0-9]+(?:-[a-z0-9]+)*$"`
-	Version              string                 `json:"version" validate:"regexp=^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(?:-(?:0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*)(?:\\.(?:0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*))*)?(?:\\+[0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*)?$"`
-	Description          string                 `json:"description"`
-	Author               SkillManifestAuthor    `json:"author"`
-	License              string                 `json:"license"`
-	Permissions          Permissions            `json:"permissions"`
-	Runtimes             []Runtime              `json:"runtimes"`
-	Artifacts            []Artifact             `json:"artifacts"`
-	Signature            SkillManifestSignature `json:"signature"`
-	Kind                 string                 `json:"kind"`
-	Tool                 OfflineTool            `json:"tool"`
+	SchemaVersion        int32                   `json:"schemaVersion"`
+	Name                 string                  `json:"name" validate:"regexp=^[a-z0-9]+(?:-[a-z0-9]+)*$"`
+	Version              string                  `json:"version" validate:"regexp=^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(?:-(?:0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*)(?:\\.(?:0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*))*)?(?:\\+[0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*)?$"`
+	Description          string                  `json:"description"`
+	Author               PluginManifestAuthor    `json:"author"`
+	License              string                  `json:"license"`
+	Permissions          Permissions             `json:"permissions"`
+	Runtimes             []Runtime               `json:"runtimes"`
+	Artifacts            []Artifact              `json:"artifacts"`
+	Signature            PluginManifestSignature `json:"signature"`
+	Kind                 string                  `json:"kind"`
+	Tool                 OfflineTool             `json:"tool"`
 	AdditionalProperties map[string]interface{}
 }
 
@@ -41,7 +41,7 @@ type _OfflineManifest OfflineManifest
 // This constructor will assign default values to properties that have it defined,
 // and makes sure properties required by API are set, but the set of arguments
 // will change when the set of required properties is changed
-func NewOfflineManifest(schemaVersion int32, name string, version string, description string, author SkillManifestAuthor, license string, permissions Permissions, runtimes []Runtime, artifacts []Artifact, signature SkillManifestSignature, kind string, tool OfflineTool) *OfflineManifest {
+func NewOfflineManifest(schemaVersion int32, name string, version string, description string, author PluginManifestAuthor, license string, permissions Permissions, runtimes []Runtime, artifacts []Artifact, signature PluginManifestSignature, kind string, tool OfflineTool) *OfflineManifest {
 	this := OfflineManifest{}
 	this.SchemaVersion = schemaVersion
 	this.Name = name
@@ -163,9 +163,9 @@ func (o *OfflineManifest) SetDescription(v string) {
 }
 
 // GetAuthor returns the Author field value
-func (o *OfflineManifest) GetAuthor() SkillManifestAuthor {
+func (o *OfflineManifest) GetAuthor() PluginManifestAuthor {
 	if o == nil {
-		var ret SkillManifestAuthor
+		var ret PluginManifestAuthor
 		return ret
 	}
 
@@ -174,7 +174,7 @@ func (o *OfflineManifest) GetAuthor() SkillManifestAuthor {
 
 // GetAuthorOk returns a tuple with the Author field value
 // and a boolean to check if the value has been set.
-func (o *OfflineManifest) GetAuthorOk() (*SkillManifestAuthor, bool) {
+func (o *OfflineManifest) GetAuthorOk() (*PluginManifestAuthor, bool) {
 	if o == nil {
 		return nil, false
 	}
@@ -182,7 +182,7 @@ func (o *OfflineManifest) GetAuthorOk() (*SkillManifestAuthor, bool) {
 }
 
 // SetAuthor sets field value
-func (o *OfflineManifest) SetAuthor(v SkillManifestAuthor) {
+func (o *OfflineManifest) SetAuthor(v PluginManifestAuthor) {
 	o.Author = v
 }
 
@@ -283,9 +283,9 @@ func (o *OfflineManifest) SetArtifacts(v []Artifact) {
 }
 
 // GetSignature returns the Signature field value
-func (o *OfflineManifest) GetSignature() SkillManifestSignature {
+func (o *OfflineManifest) GetSignature() PluginManifestSignature {
 	if o == nil {
-		var ret SkillManifestSignature
+		var ret PluginManifestSignature
 		return ret
 	}
 
@@ -294,7 +294,7 @@ func (o *OfflineManifest) GetSignature() SkillManifestSignature {
 
 // GetSignatureOk returns a tuple with the Signature field value
 // and a boolean to check if the value has been set.
-func (o *OfflineManifest) GetSignatureOk() (*SkillManifestSignature, bool) {
+func (o *OfflineManifest) GetSignatureOk() (*PluginManifestSignature, bool) {
 	if o == nil {
 		return nil, false
 	}
@@ -302,7 +302,7 @@ func (o *OfflineManifest) GetSignatureOk() (*SkillManifestSignature, bool) {
 }
 
 // SetSignature sets field value
-func (o *OfflineManifest) SetSignature(v SkillManifestSignature) {
+func (o *OfflineManifest) SetSignature(v PluginManifestSignature) {
 	o.Signature = v
 }
 

@@ -16,9 +16,21 @@ public final class ResourceSigning {
   private static final JsonMapper JSON = JsonMapper.builder().build();
   private final String releaseKid, revocationKid;
   private final PrivateKey release, revocation;
+  private final String downgradeKid;
+  private final PrivateKey downgrade;
 
   public ResourceSigning(
       String releaseKid, PrivateKey release, String revocationKid, PrivateKey revocation) {
+    this(releaseKid, release, revocationKid, revocation, null, null);
+  }
+
+  public ResourceSigning(
+      String releaseKid,
+      PrivateKey release,
+      String revocationKid,
+      PrivateKey revocation,
+      String downgradeKid,
+      PrivateKey downgrade) {
     if (releaseKid == null
         || revocationKid == null
         || !releaseKid.matches("[A-Za-z0-9._-]{1,128}")
@@ -32,21 +44,40 @@ public final class ResourceSigning {
     this.revocationKid = revocationKid;
     this.release = release;
     this.revocation = revocation;
+    if ((downgradeKid == null) != (downgrade == null)
+        || downgrade != null
+            && (!downgradeKid.matches("[A-Za-z0-9._-]{1,128}")
+                || downgradeKid.equals(releaseKid)
+                || downgradeKid.equals(revocationKid)
+                || Arrays.equals(downgrade.getEncoded(), release.getEncoded())
+                || Arrays.equals(downgrade.getEncoded(), revocation.getEncoded())))
+      throw new IllegalArgumentException("Independent downgrade signing purpose required");
+    this.downgradeKid = downgradeKid;
+    this.downgrade = downgrade;
+  }
+
+  public ObjectNode signDowngrade(ObjectNode body) {
+    if (downgrade == null) throw new AurigaException(CommonErrors.UNAVAILABLE);
+    return sign(body, downgradeKid, downgrade);
   }
 
   public ObjectNode sign(ObjectNode body, boolean revoke) {
+    return sign(body, revoke ? revocationKid : releaseKid, revoke ? revocation : release);
+  }
+
+  private ObjectNode sign(ObjectNode body, String kid, PrivateKey key) {
     ObjectNode unsigned = body.deepCopy();
     unsigned.remove("signature");
     try {
       Signature signer = Signature.getInstance("Ed25519");
-      signer.initSign(revoke ? revocation : release);
+      signer.initSign(key);
       signer.update(canonical(unsigned).getBytes(StandardCharsets.UTF_8));
       ObjectNode out = unsigned.deepCopy();
       out.set(
           "signature",
           JSON.createObjectNode()
               .put("alg", "Ed25519")
-              .put("kid", revoke ? revocationKid : releaseKid)
+              .put("kid", kid)
               .put("value", Base64.getUrlEncoder().withoutPadding().encodeToString(signer.sign())));
       return out;
     } catch (GeneralSecurityException e) {

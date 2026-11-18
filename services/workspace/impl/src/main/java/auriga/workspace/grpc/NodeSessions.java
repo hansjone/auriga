@@ -343,8 +343,8 @@ public final class NodeSessions implements AutoCloseable {
                           specCursor,
                           specCursor);
                   for (var row : rows) {
-                    if (!workspace.dispatchable(row)) continue;
-                    var spec = WorkspaceService.spec(row);
+                    var spec = workspace.dispatchSpec(row);
+                    if (spec == null) continue;
                     String id = spec.getInstanceId();
                     if (!Objects.equals(sent.get(id), spec.getGeneration())) {
                       frames.add(

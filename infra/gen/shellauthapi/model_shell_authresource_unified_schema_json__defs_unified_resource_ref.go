@@ -32,7 +32,9 @@ type ShellAuthresourceUnifiedSchemaJsonDefsUnifiedResourceRef struct {
 	// Resource-assigned persisted per-installation CAS revision. Preserved by signature renewal and echoed by node/Desktop reports. Omission is transport-compatible only: never accept applied without a positive expected revision.
 	InstallationRevision *int64 `json:"installationRevision,omitempty"`
 	// Preferred desired state when present. If absent on legacy data, derive ENABLED/DISABLED from enabled. REMOVED is an uninstall tombstone carrying the new installationRevision, retained until a matching removed acknowledgement and retired in the next generation. Reject unknown or unspecified values.
-	DesiredState *string `json:"desiredState,omitempty"`
+	DesiredState           *string                                                              `json:"desiredState,omitempty"`
+	InstallationMode       *ShellAuthresourceUnifiedSchemaJsonDefsUnifiedInstallationMode       `json:"installationMode,omitempty"`
+	DowngradeAuthorization *ShellAuthresourceUnifiedSchemaJsonDefsUnifiedDowngradeAuthorization `json:"downgradeAuthorization,omitempty"`
 }
 
 type _ShellAuthresourceUnifiedSchemaJsonDefsUnifiedResourceRef ShellAuthresourceUnifiedSchemaJsonDefsUnifiedResourceRef
@@ -293,6 +295,70 @@ func (o *ShellAuthresourceUnifiedSchemaJsonDefsUnifiedResourceRef) SetDesiredSta
 	o.DesiredState = &v
 }
 
+// GetInstallationMode returns the InstallationMode field value if set, zero value otherwise.
+func (o *ShellAuthresourceUnifiedSchemaJsonDefsUnifiedResourceRef) GetInstallationMode() ShellAuthresourceUnifiedSchemaJsonDefsUnifiedInstallationMode {
+	if o == nil || IsNil(o.InstallationMode) {
+		var ret ShellAuthresourceUnifiedSchemaJsonDefsUnifiedInstallationMode
+		return ret
+	}
+	return *o.InstallationMode
+}
+
+// GetInstallationModeOk returns a tuple with the InstallationMode field value if set, nil otherwise
+// and a boolean to check if the value has been set.
+func (o *ShellAuthresourceUnifiedSchemaJsonDefsUnifiedResourceRef) GetInstallationModeOk() (*ShellAuthresourceUnifiedSchemaJsonDefsUnifiedInstallationMode, bool) {
+	if o == nil || IsNil(o.InstallationMode) {
+		return nil, false
+	}
+	return o.InstallationMode, true
+}
+
+// HasInstallationMode returns a boolean if a field has been set.
+func (o *ShellAuthresourceUnifiedSchemaJsonDefsUnifiedResourceRef) HasInstallationMode() bool {
+	if o != nil && !IsNil(o.InstallationMode) {
+		return true
+	}
+
+	return false
+}
+
+// SetInstallationMode gets a reference to the given ShellAuthresourceUnifiedSchemaJsonDefsUnifiedInstallationMode and assigns it to the InstallationMode field.
+func (o *ShellAuthresourceUnifiedSchemaJsonDefsUnifiedResourceRef) SetInstallationMode(v ShellAuthresourceUnifiedSchemaJsonDefsUnifiedInstallationMode) {
+	o.InstallationMode = &v
+}
+
+// GetDowngradeAuthorization returns the DowngradeAuthorization field value if set, zero value otherwise.
+func (o *ShellAuthresourceUnifiedSchemaJsonDefsUnifiedResourceRef) GetDowngradeAuthorization() ShellAuthresourceUnifiedSchemaJsonDefsUnifiedDowngradeAuthorization {
+	if o == nil || IsNil(o.DowngradeAuthorization) {
+		var ret ShellAuthresourceUnifiedSchemaJsonDefsUnifiedDowngradeAuthorization
+		return ret
+	}
+	return *o.DowngradeAuthorization
+}
+
+// GetDowngradeAuthorizationOk returns a tuple with the DowngradeAuthorization field value if set, nil otherwise
+// and a boolean to check if the value has been set.
+func (o *ShellAuthresourceUnifiedSchemaJsonDefsUnifiedResourceRef) GetDowngradeAuthorizationOk() (*ShellAuthresourceUnifiedSchemaJsonDefsUnifiedDowngradeAuthorization, bool) {
+	if o == nil || IsNil(o.DowngradeAuthorization) {
+		return nil, false
+	}
+	return o.DowngradeAuthorization, true
+}
+
+// HasDowngradeAuthorization returns a boolean if a field has been set.
+func (o *ShellAuthresourceUnifiedSchemaJsonDefsUnifiedResourceRef) HasDowngradeAuthorization() bool {
+	if o != nil && !IsNil(o.DowngradeAuthorization) {
+		return true
+	}
+
+	return false
+}
+
+// SetDowngradeAuthorization gets a reference to the given ShellAuthresourceUnifiedSchemaJsonDefsUnifiedDowngradeAuthorization and assigns it to the DowngradeAuthorization field.
+func (o *ShellAuthresourceUnifiedSchemaJsonDefsUnifiedResourceRef) SetDowngradeAuthorization(v ShellAuthresourceUnifiedSchemaJsonDefsUnifiedDowngradeAuthorization) {
+	o.DowngradeAuthorization = &v
+}
+
 func (o ShellAuthresourceUnifiedSchemaJsonDefsUnifiedResourceRef) MarshalJSON() ([]byte, error) {
 	toSerialize, err := o.ToMap()
 	if err != nil {
@@ -315,6 +381,12 @@ func (o ShellAuthresourceUnifiedSchemaJsonDefsUnifiedResourceRef) ToMap() (map[s
 	}
 	if !IsNil(o.DesiredState) {
 		toSerialize["desiredState"] = o.DesiredState
+	}
+	if !IsNil(o.InstallationMode) {
+		toSerialize["installationMode"] = o.InstallationMode
+	}
+	if !IsNil(o.DowngradeAuthorization) {
+		toSerialize["downgradeAuthorization"] = o.DowngradeAuthorization
 	}
 	return toSerialize, nil
 }

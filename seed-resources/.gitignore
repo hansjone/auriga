@@ -1,2 +1,5 @@
 *
 !.gitignore
+!README.md
+!publish-unified-plugin.mjs
+!publish-unified-plugin.test.mjs

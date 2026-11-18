@@ -1,64 +1,68 @@
 <script setup lang="ts">
-import { computed } from 'vue';
-import { useRoute, useRouter } from 'vue-router';
 import { useI18n } from 'vue-i18n';
-import ResourcesView from '../ResourcesView.vue';
-import ResourceGovernanceView from './ResourceGovernanceView.vue';
 import ResourceCatalogView from './ResourceCatalogView.vue';
 import { catalogMessages } from '../../admin/resourceCatalogMessages';
 const props = defineProps<{
+  kind: 'plugin' | 'skill';
   phase: 'directory' | 'review' | 'published' | 'distribution';
 }>();
-const route = useRoute(),
-  router = useRouter();
 const { t } = useI18n({ useScope: 'local', messages: catalogMessages });
-const kind = computed(() =>
-  route.query.kind === 'skill' ? 'skill' : 'plugin',
-);
+const phases = ['directory', 'review', 'published', 'distribution'] as const;
+const base = () =>
+  props.kind === 'skill' ? '/resources/skills' : '/resources/plugins';
 </script>
 <template>
   <div class="resource-center">
-    <nav class="market-tabs" :aria-label="t('kind')">
-      <button
-        v-for="k in ['plugin', 'skill']"
-        :key="k"
-        :aria-pressed="kind === k"
-        @click="router.replace({ query: { ...route.query, kind: k } })"
+    <header class="resource-intro">
+      <p>{{ t(props.kind === 'plugin' ? 'pluginIntro' : 'skillIntro') }}</p>
+      <p>{{ t(props.phase + 'Intro') }} {{ t('workflowIntro') }}</p>
+    </header>
+    <nav class="market-tabs" :aria-label="t(props.kind)">
+      <RouterLink
+        v-for="p in phases"
+        :key="p"
+        :to="p === 'directory' ? base() : base() + '/' + p"
+        :aria-current="props.phase === p ? 'page' : undefined"
       >
-        {{ t(k) }}
-      </button>
-      <span>{{ t('tool') }}</span>
+        {{ t(p) }}
+      </RouterLink>
     </nav>
     <ResourceCatalogView
-      v-if="kind === 'skill'"
-      :key="props.phase"
+      :key="props.phase + props.kind"
       :phase="props.phase"
+      :kind="props.kind"
     />
-    <ResourcesView v-else-if="props.phase === 'directory'" />
-    <ResourceGovernanceView v-else :phase="props.phase" />
   </div>
 </template>
 <style scoped>
 .resource-center > nav {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 24px;
   margin-bottom: 20px;
+  border-bottom: 1px solid var(--auriga-border);
 }
-.resource-center > nav button {
-  padding: 8px 20px;
-  border: 1px solid var(--auriga-border);
-  border-radius: 12px;
-  background: var(--auriga-surface);
-  color: var(--auriga-text);
-  cursor: pointer;
-}
-.resource-center > nav button[aria-pressed='true'] {
-  border-color: var(--auriga-accent);
-  background: var(--admin-blue-soft);
-}
-.resource-center > nav span {
-  margin-left: 12px;
+.resource-center > nav a {
+  padding: 12px 4px;
+  border-bottom: 2px solid transparent;
   color: var(--auriga-muted);
+  text-decoration: none;
+}
+.resource-center > nav a[aria-current='page'] {
+  border-bottom-color: var(--auriga-accent-line);
+  color: var(--auriga-text);
+}
+.resource-intro {
+  margin-bottom: 16px;
+  max-width: 80ch;
+}
+.resource-intro p {
+  line-height: 1.7;
+  margin: 0 0 8px;
+  color: var(--auriga-muted);
+}
+.resource-center > nav a:focus-visible {
+  outline: 2px solid var(--auriga-accent-line);
+  outline-offset: 3px;
 }
 </style>

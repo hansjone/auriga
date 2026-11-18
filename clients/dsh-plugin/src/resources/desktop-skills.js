@@ -199,7 +199,7 @@ export function desktopSkills({ home, time = hostTime }) {
     const file = join(root(who), 'cache', digest.slice(7), 'bytes');
     assertLocalPath(file);
     const stat = lstatSync(file);
-    if (!stat.isFile() || stat.size > 20971520)
+    if (!stat.isFile() || stat.size > 67108864)
       refuse('resource.storage_unavailable');
     const bytes = readFileSync(file);
     if (sha(bytes) !== digest) refuse('resource.digest_mismatch');
@@ -212,6 +212,7 @@ export function desktopSkills({ home, time = hostTime }) {
     const names = new Set();
     for (const row of rows.filter(
       (r) =>
+        r.resource.identity.kind === 'skill' &&
         desiredState(r.resource) === 'ENABLED' &&
         ['applying', 'applied', 'pending_restart', 'overridden'].includes(
           r.state,
@@ -683,12 +684,125 @@ export function desktopSkills({ home, time = hostTime }) {
         return { cleanupPending: false };
       });
     },
+    /** Read-only waiting never takes C's writer lock: E must be able to acquire it
+     * to authorize the prepared snapshot. This shortcut can only delay work;
+     * finish still rechecks the permit and bytes under the lock before activation.
+     * @param {any} who @param {any[]} rows */
+    awaitingGuardian(who, rows) {
+      const value = ledger(who);
+      if (!value || !rows.length || rows.length !== value.installations.length)
+        return false;
+      if (
+        !rows.every((r) =>
+          value.installations.some(
+            (/** @type {any} */ old) =>
+              old.installationRevision === r.installationRevision &&
+              old.selectionRevision === r.selectionRevision &&
+              old.generation === r.generation &&
+              canonicalize(old.resource) === canonicalize(r.resource),
+          ),
+        )
+      )
+        return false;
+      if (
+        !value.installations.some(
+          (/** @type {any} */ r) =>
+            r.state === 'applying' && desiredState(r.resource) === 'ENABLED',
+        )
+      )
+        return false;
+      const transactions = readdirSync(join(root(who), 'transactions'));
+      if (transactions.length > 8192) refuse('resource.storage_unavailable');
+      const prepared = transactions
+        .map((file) => {
+          const tx = record(
+            join(root(who), 'transactions', file),
+            'UnifiedTransactionFile',
+          );
+          return tx;
+        })
+        .find(
+          (tx) =>
+            tx.phase === 'prepared' &&
+            tx.operation === 'install' &&
+            tx.expectedLedgerRevision === value.revision &&
+            tx.selectionRevision === value.selectionRevision &&
+            tx.generation === value.generation,
+        );
+      if (!prepared) return false;
+      try {
+        for (const r of value.installations.filter(
+          (/** @type {any} */ r) => desiredState(r.resource) === 'ENABLED',
+        )) {
+          cached(who, r.resource.identity.manifestDigest);
+          for (const a of r.resource.artifacts) cached(who, a.digest);
+        }
+      } catch (error) {
+        if (
+          ['ENOENT', 'resource.digest_mismatch'].includes(
+            /** @type {any} */ (error).code,
+          )
+        )
+          return false;
+        throw error;
+      }
+      const stateFile = join(guardian, 'state.json');
+      const state = existsSync(stateFile)
+        ? record(stateFile, 'UnifiedGuardianStateFile')
+        : undefined;
+      const waiting =
+        !state ||
+        state.guardian.state === 'verifying' ||
+        (state.guardian.state === 'active' && !permitted(who, value, state));
+      const age = Date.now() - Date.parse(prepared.recordedAt);
+      if (waiting && (age >= 300000 || age < -120000))
+        throw Object.assign(new Error('guardian preparation wait expired'), {
+          code: 'resource.apply_failed',
+          guardianWaitExpired: true,
+        });
+      return waiting;
+    },
+    /** A timed out prepared snapshot cannot be activated by a late permit.
+     * @param {any} who @param {any[]} rows */
+    failGuardianWait(who, rows) {
+      return locked((lock) => {
+        try {
+          this.awaitingGuardian(who, rows);
+          return;
+        } catch (error) {
+          if (!(/** @type {any} */ (error).guardianWaitExpired)) throw error;
+        }
+        const value = ledger(who);
+        if (!value) return;
+        for (const row of value.installations)
+          if (
+            row.state === 'applying' &&
+            desiredState(row.resource) === 'ENABLED'
+          )
+            row.state = 'failed';
+        value.revision++;
+        save(who, value, lock);
+        for (const file of readdirSync(join(root(who), 'transactions'))) {
+          const path = join(root(who), 'transactions', file);
+          const tx = record(path, 'UnifiedTransactionFile');
+          if (
+            tx.phase === 'prepared' &&
+            tx.operation === 'install' &&
+            tx.expectedLedgerRevision === value.revision - 1 &&
+            tx.selectionRevision === value.selectionRevision &&
+            tx.generation === value.generation
+          ) {
+            lock.check();
+            durableJson(path, { ...tx, phase: 'rolled_back' });
+          }
+        }
+      });
+    },
     /** A changed metadata CAS invalidates a prepared permit; retry only the exact current selection.
      * @param {any} who @param {any[]} rows */
     needsPreparation(who, rows) {
       return locked((lock) => {
-        if (!rows.length || !rows.some((r) => r.state === 'applying'))
-          return false;
+        if (!rows.length) return false;
         recoverRecordTemps(who, lock);
         const value = ledger(who);
         if (!value) return true;
@@ -702,6 +816,7 @@ export function desktopSkills({ home, time = hostTime }) {
                   old.installationRevision === r.installationRevision &&
                   canonicalize(old.resource.identity) ===
                     canonicalize(r.resource.identity) &&
+                  canonicalize(old.resource) === canonicalize(r.resource) &&
                   desiredState(old.resource) === desiredState(r.resource),
               ),
           )
@@ -1086,6 +1201,94 @@ export function desktopSkills({ home, time = hostTime }) {
         recoverIdentity(who, lock);
         cleanup(who, lock);
         return ledger(who);
+      });
+    },
+    /** A guardian permit authorizes these exact cached plugin bytes, outside skill discovery.
+     * @param {any} who @param {any} row */
+    pluginBundle(who, row) {
+      return locked(() => {
+        const value = ledger(who);
+        const local = value?.installations.find(
+          (/** @type {any} */ i) =>
+            i.resource.identity.packageId === row.resource.identity.packageId,
+        );
+        if (
+          !local ||
+          row.resource.identity.kind !== 'plugin' ||
+          canonicalize(local.resource) !== canonicalize(row.resource) ||
+          local.installationRevision !== row.installationRevision ||
+          local.selectionRevision !== row.selectionRevision ||
+          local.generation !== row.generation ||
+          !['pending_restart', 'applied'].includes(local.state) ||
+          !permitted(
+            who,
+            value,
+            record(join(guardian, 'state.json'), 'UnifiedGuardianStateFile'),
+          )
+        )
+          return undefined;
+        const manifest = parseStrictJson(
+          cached(who, row.resource.identity.manifestDigest),
+        );
+        if (manifest.kind !== 'plugin' || manifest.artifacts.length !== 1)
+          refuse('resource.state_conflict');
+        const bytes = cached(who, manifest.artifacts[0].digest);
+        const directory = join(root(who), 'plugin-bundles');
+        assertLocalPath(directory);
+        mkdirSync(directory, { recursive: true });
+        const file = join(
+          directory,
+          manifest.artifacts[0].digest.slice(7) + '.tgz',
+        );
+        assertLocalPath(file);
+        if (existsSync(file)) {
+          if (
+            !lstatSync(file).isFile() ||
+            lstatSync(file).size !== bytes.length ||
+            sha(readFileSync(file)) !== manifest.artifacts[0].digest
+          )
+            refuse('resource.digest_mismatch');
+        } else {
+          const fd = openSync(file, 'wx', 0o600);
+          try {
+            writeFileSync(fd, bytes);
+            fsyncSync(fd);
+          } finally {
+            closeSync(fd);
+          }
+        }
+        return { manifest, file, bytes };
+      });
+    },
+    /** Every catalog plugin remains catalog-owned even when removed or expired.
+     * Read-only exemption lookup never installs or authorizes code.
+     * @param {any} who */
+    policyNames(who) {
+      const names = [];
+      const value = ledger(who);
+      for (const row of value?.installations ?? []) {
+        if (row.resource.identity.kind !== 'plugin') continue;
+        const manifest = parseStrictJson(
+          cached(who, row.resource.identity.manifestDigest),
+        );
+        if (
+          manifest.kind !== 'plugin' ||
+          typeof manifest.plugin?.packageName !== 'string'
+        )
+          refuse('resource.storage_unavailable');
+        names.push(manifest.plugin.packageName);
+      }
+      return names;
+    },
+    /** Read only a digest-bound manifest for a removal; expiry never prevents disabling.
+     * @param {any} who @param {any} row */
+    pluginName(who, row) {
+      return locked(() => {
+        const manifest = parseStrictJson(
+          cached(who, row.resource.identity.manifestDigest),
+        );
+        if (manifest.kind !== 'plugin') refuse('resource.state_conflict');
+        return manifest.plugin.packageName;
       });
     },
     /** Validate actual bytes again after public host observation; a path match alone is insufficient.

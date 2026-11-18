@@ -45,6 +45,7 @@ func TestUnifiedGeneratedDesiredSuccessReports(t *testing.T) {
 	} {
 		t.Run(test.report, func(t *testing.T) {
 			f := newUnifiedFixture(t)
+			f.ref.InstallationMode = "default"
 			f.ref.DesiredState = test.desired.Enum()
 			f.ref.Enabled = test.report == "applied"
 			f.catalogEmpty = !f.ref.Enabled

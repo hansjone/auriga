@@ -403,6 +403,9 @@ onBeforeUnmount(() => {
           @submit.prevent="askWorkspace"
         >
           <ElFormItem v-for="key in workspaceFields" :key="key" :label="t(key)">
+            <p v-if="key === 'allowPersonalPlugins'">
+              {{ t('personalPluginsNote') }}
+            </p>
             <ElCheckbox
               v-model="draft[key].enabled"
               :disabled="policyLocked"

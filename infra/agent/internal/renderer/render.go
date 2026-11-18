@@ -182,7 +182,7 @@ func Render(spec *nodev1.InstanceSpec, opt Options) (Result, error) {
 		if err := installResourceObserver(opt); err != nil {
 			return Result{}, err
 		}
-		digestPaths = append(digestPaths, opt.MetaDir+"/resource-observer.mjs", opt.MetaDir+"/resource-supervisor.mjs")
+		digestPaths = append(digestPaths, opt.MetaDir+"/resource-observer.mjs", opt.MetaDir+"/resource-supervisor.mjs", opt.MetaDir+"/resource_plugins.mjs")
 	}
 	caPath := filepath.Join(opt.MetaDir, "managed-ca.pem")
 	if len(managedCARaw) > 0 {

@@ -36,6 +36,66 @@ func TestNASManagedIdentityOverlayOwnershipClosesRecoveryLoop(t *testing.T) {
 	}
 }
 
+func TestNASResourceDowngradeOverlayOwnershipClosesRecoveryLoop(t *testing.T) {
+	const configFiles = "com.docker.compose.project.config_files"
+	const overlay = "resource-downgrade-compose.yml"
+	for _, mode := range []string{"host", "container"} {
+		for _, state := range []string{"enabled", "disabled"} {
+			t.Run(mode+"/"+state, func(t *testing.T) {
+				f := nasRotationTestFixture(t, "ip")
+				nasEnableActivationFixture(t, f)
+				r := f.r
+				parent := filepath.Dir(r.data)
+				base := filepath.Join(r.recipe, "docker-compose.yml")
+				composeDir := filepath.Join(parent, ".auriga-runtime-compose.fixture")
+				if mode == "container" {
+					composeDir = filepath.Join(parent, ".auriga-compose.fixture")
+					base += "," + filepath.Join(composeDir, "override.yml")
+				}
+				for id, c := range f.containers {
+					files := base + "," + filepath.Join(r.recipe, "collab-compose.yml")
+					switch c.Config.Labels["com.docker.compose.service"] {
+					case "postgres", "edge":
+						// These containers can outlive a runtime update or a change in stack.env.
+						files += "," + filepath.Join(r.recipe, overlay)
+					case "platform":
+						files += "," + filepath.Join(composeDir, "runtime.yml")
+						if state == "enabled" {
+							files += "," + filepath.Join(r.recipe, overlay)
+						}
+					}
+					c.Config.Labels[configFiles] = files
+					f.containers[id] = c
+				}
+				if _, err := r.engine.database(r); err != nil {
+					t.Fatalf("startup PG ownership: %v", err)
+				}
+				if err := r.engine.checkRecoveryEdge(r); err != nil {
+					t.Fatalf("message recovery edge ownership: %v", err)
+				}
+				for _, foreign := range []string{filepath.Join(parent, "foreign", overlay), r.recipe + "/../recipe/" + overlay, filepath.Join(r.recipe, overlay+".bak")} {
+					for _, c := range f.containers {
+						if c.Config.Labels["com.docker.compose.service"] != "edge" {
+							continue
+						}
+						original := c.Config.Labels[configFiles]
+						c.Config.Labels[configFiles] = original + "," + foreign
+						err := r.engine.checkRecoveryEdge(r)
+						c.Config.Labels[configFiles] = original
+						if err == nil || !strings.Contains(err.Error(), "foreign Compose file refused") {
+							t.Fatalf("unexpected decision for %s: %v", foreign, err)
+						}
+					}
+				}
+				// Rotation checks all four control services before stopping the two signers.
+				if err := r.engine.stop(r); err != nil || f.stops != 2 {
+					t.Fatalf("rotation did not stop its two owned signers: stops=%d err=%v", f.stops, err)
+				}
+			})
+		}
+	}
+}
+
 func TestNASRotationDockerOperatorScopeAndCleanup(t *testing.T) {
 	if os.Geteuid() != 0 {
 		t.Skip("protected helper plans require Linux root")

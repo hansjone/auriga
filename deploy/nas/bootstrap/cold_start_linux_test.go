@@ -178,12 +178,26 @@ esac
 	if err = os.WriteFile(filepath.Join(bin, "ss"), []byte("#!/bin/sh\nexit 0\n"), 0755); err != nil {
 		t.Fatal(err)
 	}
-	for _, scenario := range []string{"stop-start", "pg-stopped", "pg-slow", "renew-lock", "lock-clears", "lock-clears-no-policy", "source-check-fails", "budget-fails", "token-check-fails", "identity-projection-fails", "renew-flag-fails"} {
+	scenarios := []string{"stop-start", "pg-stopped", "pg-slow", "renew-lock", "lock-clears", "lock-clears-no-policy", "source-check-fails", "budget-fails", "token-check-fails", "identity-projection-fails", "renew-flag-fails"}
+	if baseline == "" {
+		scenarios = append(scenarios, "resource-downgrade", "foreign-resource-downgrade")
+	}
+	for _, scenario := range scenarios {
 		t.Run(scenario, func(t *testing.T) {
 			clears := strings.HasPrefix(scenario, "lock-clears")
 			locked := scenario == "renew-lock" || clears
 			injected := strings.HasSuffix(scenario, "-fails")
-			positive := scenario == "stop-start" || scenario == "pg-slow" || clears
+			foreignDowngrade := scenario == "foreign-resource-downgrade"
+			downgrade := strings.HasSuffix(scenario, "resource-downgrade") || (baseline == "" && scenario == "renew-lock")
+			positive := scenario == "stop-start" || scenario == "pg-slow" || scenario == "resource-downgrade" || clears
+			if downgrade {
+				original, err := os.ReadFile(stack)
+				if err != nil {
+					t.Fatal(err)
+				}
+				nasRotationTestWrite(t, stack, append(original, []byte("AURIGA_RESOURCE_DOWNGRADE_KID=test-only-downgrade\n")...))
+				t.Cleanup(func() { nasRotationTestWrite(t, stack, original) })
+			}
 			// An existing installation keeps its last checked projections during
 			// renewal. Removing them here would hide input == output regressions.
 			policy := filepath.Join(data, "config/network-policy/runtime.json")
@@ -244,6 +258,13 @@ esac
 				// The production startup-check must still accept its ownership.
 				pg.Config.Labels["com.docker.compose.project.config_files"] += "," + filepath.Join(recipe, "managed-identity-compose.yml")
 			}
+			if downgrade {
+				overlayDir := recipe
+				if foreignDowngrade {
+					overlayDir = filepath.Join(root, "foreign")
+				}
+				pg.Config.Labels["com.docker.compose.project.config_files"] += "," + filepath.Join(overlayDir, "resource-downgrade-compose.yml")
+			}
 			pg.State.Running = positive
 			pg.State.Health.Status = "starting"
 			pg.Mounts = append(pg.Mounts, struct {
@@ -260,7 +281,7 @@ esac
 					if _, err := os.Stat(coreUp); err != nil {
 						earlyReads.Add(1)
 					}
-					if !positive && !recovering.Load() && !injected && scenario != "pg-stopped" {
+					if !positive && !recovering.Load() && !injected && !foreignDowngrade && scenario != "pg-stopped" {
 						_, _ = w.Write([]byte("[]"))
 					} else {
 						_ = json.NewEncoder(w).Encode([]map[string]string{{"Id": pg.ID}})
@@ -422,6 +443,17 @@ touch /run/docker.sock; mount --bind "$1" /run/docker.sock; shift; exec sh -ec "
 			cliLog, err := os.ReadFile(logPath)
 			if err != nil || !strings.Contains(string(cliLog), " restart --no-deps agent") {
 				t.Fatalf("core agent recovery was skipped: %v: %s", err, cliLog)
+			}
+			if downgrade && !strings.Contains(string(cliLog), " -f "+filepath.Join(recipe, "resource-downgrade-compose.yml")+" ") {
+				t.Fatal("public start omitted the configured downgrade overlay")
+			}
+			if foreignDowngrade {
+				if !strings.Contains(string(output), "foreign Compose file refused") {
+					t.Fatalf("missing foreign recipe refusal: %s", output)
+				}
+				if _, err := os.Stat(messageUp); !os.IsNotExist(err) {
+					t.Fatalf("foreign recipe reached message startup: %v", err)
+				}
 			}
 			if injected {
 				identityExpected := scenario == "budget-fails" || scenario == "token-check-fails"

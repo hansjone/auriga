@@ -73,6 +73,69 @@ tenant、audience、客户端 IP、Cookie、CSRF、会话/设备归属与撤销�
 edge 的回环对端；换用其他网络时显式设置 `AURIGA_LINKS_BACKEND_PROXY_PEERS`。
 NAS 的后端对端始终由已有 `AURIGA_INTERNAL_EDGE_IP` 派生，不能填成前置代理 IP。
 
+## 云端资源下载和可选降级签发
+
+NAS 上的 agent 使用 host 网络。其容器内的 `platform` 别名解析到 `127.0.0.1`，
+以便通过 `https://platform:<AURIGA_HOST_PUBLISH_PLATFORM_HTTP>` 下载云端插件和技能。
+默认端口为 `18081`，映射到 platform 的 `8081` HTTPS 监听器。`17443` 默认映射
+NodeControl 的 `7443`。别名只加在 agent 容器内，TLS 仍核对 `platform` 证书名。
+
+资源信任由节点安装目录下的 `data/agent/agent/resource-trust.json` 提供。
+配方保留该文件和它的公钥、用途及有效期。已有明确批准的站点 origin 继续沿用。
+如果旧文件误把本机 NodeControl 端口当成资源来源，备份后只更新这个节点的
+`origin` 为 `https://platform:18081`（或使用安装实际配置的 HTTPS 发布端口），
+保留节点原有的文件所有者和私有访问权限。尚无信任文件的节点由安装方配置版本为 1
+的信任文件和本站批准的公钥，下载才会启用。
+
+平台 HTTPS 必须收到可信客户端证书。下载控制器从 TLS 连接获取证书，经节点注册记录
+核对 URI SAN、签发 CA、证书序列号与撤销状态，再按该节点和租户校验下载授权。
+对应实现为 [combined 监听器](../../services/platform-app/src/main/resources/application-combined.yaml)、
+[NAS 证书签发](../../deploy/nas/bootstrap/main.go)、
+[节点下载控制器](../../services/resource/impl/src/main/java/auriga/resource/web/CatalogNodeController.java)、
+[节点身份校验](../../services/workspace/impl/src/main/java/auriga/workspace/app/NodeEnrollment.java)
+和 [agent TLS](../../infra/agent/internal/runtime/unified_wiring.go)。
+
+已启用 release/revocation 签发的站点（例如一键安装）可另行启用撤销后自动降级签发。
+先准备独立的 Ed25519 PKCS#8 DER 私钥和对应的 `purpose=downgrade` 公钥，分发公钥
+给需要使用降级授权的节点或桌面。初始化后，在数据根已有的 `secrets/` 中建独立的
+`resource-downgrade/` 目录，目录内仅放单硬链接普通文件 `downgrade.pk8`。
+两者的所有者均为 `10001:10001`，目录权限为 `0700`，文件权限为 `0600`。
+然后在私有 `stack.env` 中持久设置 `AURIGA_RESOURCE_DOWNGRADE_KID`，例如
+`test-only-downgrade` 仅作占位。kid 和密钥均须与 release、revocation 各自独立。
+
+`start.sh` 与 `runtime-upgrade.sh` 通过同一个 Compose 入口读取该项。
+启用时只有 platform 只读挂载该私密目录，环境中只有 kid 和容器内的密钥路径
+`/run/auriga-resource-downgrade/downgrade.pk8`。
+NAS 脚本只从安装配置文件读取该项，忽略启动进程继承的同名环境变量。将 `stack.env` 中
+的项留空或删除后，下次应用 Compose 配置时会移除密钥挂载和两项 Spring 属性。
+预检按 platform 的实际 UID 检查目录与文件的权限和有效可读性，签发器启动时再次验证密钥。
+[Docker Compose bind 挂载](https://docs.docker.com/reference/compose-file/services/#volumes)
+
+升级已有开发栈时，在部署维护窗口核对并保留数据根、节点信任文件、安装密钥和现有
+`stack.env` 备份。换入同一审核提交的 NAS 配方，按现场需要迁移本机资源 origin 和配置降级根，
+再对原数据根执行 `preflight.sh` 和 `start.sh`。后者会应用新的 agent 容器别名并重启
+agent 读取节点信任文件。启用降级签发的配方需配套使用识别 `resource-downgrade-compose.yml`
+的 bootstrap，消息启动、恢复和轮换据此校验既有容器的完整 Compose 文件列表。
+需要另行更新签名运行时的场景，继续使用
+`runtime-upgrade.sh` 和独立批准的运行时制品。
+
+对已经定点移植接线的 R9 开发栈，在原受信配方目录中合入本次 `scripts/lib.sh` 的
+签发配置读取修复，保留站点 Compose 扩展和既有 `resource-downgrade-compose.yml`。
+用原发行包的 `versions.txt`、`SHA256SUMS` 和当前 bootstrap 摘要确认对应源码，
+将本次 `owned()` 的精确路径校验移植到该源码并构建 Linux amd64 bootstrap。
+核对新二进制摘要后，用 `0755` 权限替换 `bin/auriga-nas-bootstrap` 或该安装实际
+选用的同名二进制。容器模式也使用此二进制，并在安装 helper 中只读映射。
+启动后检查消息就绪，必要时用
+`start-collab-network.sh` 恢复。变更签发开关前后产生的容器标签可以并存。
+
+验收时先核对 agent 容器内 `platform` 解析到环回、平台监听器发布在配置的环回端口。
+用该节点已登记的证书和 CA 请求合成的不存在授权，通用 HTTP 404 只确认 TLS 到 HTTPS
+监听器可达。用可归因的响应或服务端请求追踪确认 `CatalogNodeController` 命中，再通过
+正式流程签发有效节点 grant，取得签名清单和制品，核对签名及制品摘要。
+最后从正常管理入口上架已签名插件和技能，由成员选择资源并启动真实 DSH 实例，
+核对安装状态、插件实际执行及技能实际可用。启用降级时另测撤销已安装的高版本后，
+命中下位 required/default 规则，验证授权签名、下位版本生效和重复消费被拒。
+
 ## 初始化、启动、停止
 
 ### 普通共享路径的容器初始化

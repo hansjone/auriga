@@ -288,6 +288,15 @@ export function verifyTrust(operation, input, trust) {
       fail('unknown_operation');
   }
 }
+/** Expiry/revocation forbids execution, but must not prevent removing the exact
+ * previously signed bundle. Never derive uninstall targets from unsigned metadata. */
+export function signedResourceEnvelope(envelope, trust) {
+  return Boolean(
+    trust &&
+    schemaValid('package', 'Envelope', envelope) &&
+    signed(envelope, trust, 'release'),
+  );
+}
 export function signedRevocations(list, tenantId, trust) {
   return (
     schemaValid('signatures', 'RevocationList', list) &&

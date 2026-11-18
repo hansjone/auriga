@@ -31,7 +31,8 @@ public class PlatformWorkspaceConfiguration {
   auriga.workspace.app.WorkspaceUnifiedResources workspaceUnifiedResources(
       auriga.workspace.app.WorkspaceService service,
       WorkspaceInputs inputs,
-      ObjectProvider<auriga.resource.api.UnifiedResourceResolution> resolver) {
+      ObjectProvider<auriga.resource.api.UnifiedResourceResolution> resolver,
+      Environment env) {
     return new auriga.workspace.app.WorkspaceUnifiedResources(
         service,
         inputs,
@@ -41,7 +42,8 @@ public class PlatformWorkspaceConfiguration {
             throw new auriga.common.error.AurigaException(
                 auriga.common.error.CommonErrors.UNAVAILABLE);
           return current.resolve(request);
-        });
+        },
+        env.getProperty("auriga.services.resource.enabled", Boolean.class, true));
   }
 
   @Bean

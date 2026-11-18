@@ -95,7 +95,7 @@ func (m *UnifiedManager) writeInstallationReceipts(root string, s *unifiedNodeSt
 			return err
 		}
 		id := ref.GetIdentity()
-		if id.GetTenantId() != s.Tenant || !uUUID.MatchString(id.GetPackageId()) || !uUUID.MatchString(id.GetVersionId()) || id.GetKind() != "skill" {
+		if id.GetTenantId() != s.Tenant || !uUUID.MatchString(id.GetPackageId()) || !uUUID.MatchString(id.GetVersionId()) || (id.GetKind() != "skill" && id.GetKind() != "plugin") {
 			return fmt.Errorf("invalid installation receipt identity")
 		}
 		identity, err := unifiedProto(id)
@@ -103,7 +103,7 @@ func (m *UnifiedManager) writeInstallationReceipts(root string, s *unifiedNodeSt
 			return err
 		}
 		receipt := map[string]any{"schemaVersion": 1, "tenantId": s.Tenant, "ownerId": s.Owner, "hostId": s.Host, "identity": identity, "installationRevision": record.InstallationRevision, "selectionRevision": s.SelectionRevision, "generation": s.Generation, "state": record.State, "desiredState": record.DesiredState, "recordedAt": m.now().Format(time.RFC3339Nano)}
-		file := filepath.Join(root, "installations", s.Tenant, s.Owner, s.Host, "skill", id.GetPackageId(), id.GetVersionId(), fmt.Sprint(record.InstallationRevision)+".json")
+		file := filepath.Join(root, "installations", s.Tenant, s.Owner, s.Host, id.GetKind(), id.GetPackageId(), id.GetVersionId(), fmt.Sprint(record.InstallationRevision)+".json")
 		if err := unifiedAtomic(file, receipt); err != nil {
 			return err
 		}

@@ -22,9 +22,11 @@ var _ MappedNullable = &UnifiedVersion{}
 
 // UnifiedVersion Draft version. Reviews bind manifest digest and version revision. Published manifests and artifacts are immutable.
 type UnifiedVersion struct {
-	Id        string `json:"id"`
-	PackageId string `json:"packageId"`
-	Version   string `json:"version"`
+	// Latest review record for this version. Load authorized review evidence and verify exact version identity, revision and digest before publication.
+	ReviewId  *string `json:"reviewId,omitempty"`
+	Id        string  `json:"id"`
+	PackageId string  `json:"packageId"`
+	Version   string  `json:"version"`
 	// SHA-256 of exact immutable auriga-resource.json UTF-8 bytes. Artifact digests are in the manifest. Legacy Version.digest still addresses plugin archive bytes.
 	Digest           string    `json:"digest" validate:"regexp=^sha256:[0-9a-f]{64}$"`
 	State            string    `json:"state"`
@@ -68,6 +70,38 @@ func NewUnifiedVersion(id string, packageId string, version string, digest strin
 func NewUnifiedVersionWithDefaults() *UnifiedVersion {
 	this := UnifiedVersion{}
 	return &this
+}
+
+// GetReviewId returns the ReviewId field value if set, zero value otherwise.
+func (o *UnifiedVersion) GetReviewId() string {
+	if o == nil || IsNil(o.ReviewId) {
+		var ret string
+		return ret
+	}
+	return *o.ReviewId
+}
+
+// GetReviewIdOk returns a tuple with the ReviewId field value if set, nil otherwise
+// and a boolean to check if the value has been set.
+func (o *UnifiedVersion) GetReviewIdOk() (*string, bool) {
+	if o == nil || IsNil(o.ReviewId) {
+		return nil, false
+	}
+	return o.ReviewId, true
+}
+
+// HasReviewId returns a boolean if a field has been set.
+func (o *UnifiedVersion) HasReviewId() bool {
+	if o != nil && !IsNil(o.ReviewId) {
+		return true
+	}
+
+	return false
+}
+
+// SetReviewId gets a reference to the given string and assigns it to the ReviewId field.
+func (o *UnifiedVersion) SetReviewId(v string) {
+	o.ReviewId = &v
 }
 
 // GetId returns the Id field value
@@ -408,6 +442,9 @@ func (o UnifiedVersion) MarshalJSON() ([]byte, error) {
 
 func (o UnifiedVersion) ToMap() (map[string]interface{}, error) {
 	toSerialize := map[string]interface{}{}
+	if !IsNil(o.ReviewId) {
+		toSerialize["reviewId"] = o.ReviewId
+	}
 	toSerialize["id"] = o.Id
 	toSerialize["packageId"] = o.PackageId
 	toSerialize["version"] = o.Version
