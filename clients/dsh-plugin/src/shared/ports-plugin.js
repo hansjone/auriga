@@ -31,6 +31,7 @@ const required = [
   'finishTask',
   'authorizeCapability',
   'readCredentials',
+  'enterpriseOutbound',
   'model',
   'send',
   'receive',

@@ -63,6 +63,89 @@ function checkBrokerCalls(source, operations, file) {
   }
 }
 
+// A finite local node relay is not a platform HTTP client. Validate its actual request shape
+// and trusted Linux provider together; a retained transport entry alone is insufficient.
+function checkSharedNodeRelay(files) {
+  const file = 'shared/node-transport.js',
+    provider = 'shared/ports-plugin.js';
+  const compact = (text) =>
+    withoutComments(text ?? '')
+      .replace(/\s+/g, '')
+      .replaceAll('"', "'");
+  const code = compact(files[file]),
+    source = compact(files[provider]);
+  const allowed = [
+    'health',
+    'resolve',
+    'register',
+    'lookup',
+    'resourceSnapshot',
+    'beginTask',
+    'issueCapability',
+    'finishTask',
+    'authorizeCapability',
+    'readCredentials',
+    'enterpriseOutbound',
+    'model',
+    'send',
+    'receive',
+  ];
+  const operations = /constoperations=newSet\(\[([^\]]*)\]\);/.exec(code);
+  if (
+    !operations ||
+    operations[1] !== allowed.map((name) => "'" + name + "',").join('') ||
+    !code.includes(
+      "if(!operations.has(operation))fail('common.validation_failed');",
+    ) ||
+    (code.match(/\brequest\b/g) ?? []).length !== 2 ||
+    (code.match(/'node:http'/g) ?? []).length !== 1 ||
+    (code.match(/\bsocketPath\b/g) ?? []).length !== 2 ||
+    !code.includes("import{request}from'node:http';") ||
+    !code.includes('exportfunctioncreateSharedNodeTransport(socketPath){') ||
+    !code.includes(
+      "constoutgoing=request({socketPath,path:'/_auriga/shared-rpc/'+operation,method:'POST',headers:{'content-type':'application/json','content-length':String(bytes.length),},signal,});",
+    )
+  )
+    throw new Error(
+      'shared node relay must remain a finite socket-only POST transport',
+    );
+  for (const guard of [
+    "process.platform!=='linux'",
+    'constinitial=read();',
+    'constroot=`/var/lib/auriga/pools/${value.physicalInstanceId}`;',
+    "config.configFile!==root+'/control/shared-host.json'",
+    "value.nodeSocket!==root+'/control/shared-node.sock'",
+    '!stat.isFile()||(stat.mode&0o022)!==0||stat.size>262144',
+    '!uuid.test(value.physicalInstanceId)',
+    'constuuid=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;',
+    "if(!lstatSync(initial.nodeSocket).isSocket())fail('common.unavailable');",
+    'constbridge=createSharedNodeTransport(initial.nodeSocket);',
+  ])
+    if (!source.includes(guard))
+      throw new Error(
+        'shared node relay lost trusted provider guard: ' + guard,
+      );
+  if ((source.match(/\bcreateSharedNodeTransport\b/g) ?? []).length !== 2)
+    throw new Error('shared node relay provider alias forbidden');
+  if (
+    /\b(?:initial|value)\.(?:nodeSocket|physicalInstanceId|tenantId)(?:\+=|\|\|=|\?\?=|=(?!=))/.test(
+      source,
+    )
+  )
+    throw new Error(
+      'shared node relay trusted identity/socket override forbidden',
+    );
+  for (const [name, text] of Object.entries(files))
+    if (
+      name !== file &&
+      name !== provider &&
+      /\bcreateSharedNodeTransport\b/.test(withoutComments(text))
+    )
+      throw new Error(
+        'shared node relay is callable only by its trusted provider: ' + name,
+      );
+}
+
 export function checkPlatformMigration(inventory, operations, sources) {
   if (!['legacy', 'broker'].includes(inventory.migrationState))
     throw new Error('invalid migrationState');
@@ -117,6 +200,18 @@ export function checkPlatformMigration(inventory, operations, sources) {
         throw new Error('direct transport: ' + file + ':' + transport);
     }
     checkBrokerCalls(source, operations, file);
+  }
+  if (files['shared/node-transport.js']) {
+    if (
+      channels.get('shared/node-transport.js')?.channel !==
+        'shared-unix-node-relay' ||
+      channels.get('shared/ports-plugin.js')?.channel !==
+        'shared-unix-node-provider'
+    )
+      throw new Error(
+        'shared node relay requires its exact documented channel pair',
+      );
+    checkSharedNodeRelay(files);
   }
 }
 

@@ -49,13 +49,17 @@ function fixture() {
     services,
     now: Math.floor(Date.now() / 1000),
     version: 1,
+    raw: true,
     live: true,
   };
   const settings = () => ({
     profile: SHARED_PROFILE,
     skillRoots: [],
     model: 'synthetic-model',
-    enterprise: { allowRawAgentToken: true, outboundAllowedHosts: [] },
+    enterprise: {
+      allowRawAgentToken: f.raw,
+      outboundAllowedHosts: ['app-one.invalid'],
+    },
   });
   const ctx = {
     registry,
@@ -109,7 +113,7 @@ function fixture() {
     );
   };
   const bridge = {
-    async call(operation, request) {
+    async call(operation, request, signal) {
       events.push(operation);
       if (operation === 'lookup') return { binding: { ...f.binding } };
       if (operation === 'resolve') {
@@ -149,9 +153,10 @@ function fixture() {
         return {
           active: f.live && activeTasks.has(request.capability.taskId),
           credentialVersion: f.version,
-          allowRawAgentToken: true,
+          allowRawAgentToken: f.raw,
         };
       if (operation === 'readCredentials') {
+        if (f.denyRead) assert.fail('outbound must never request raw material');
         const value = {
           empNo: '00001234',
           token: 'synthetic-material-' + f.version,
@@ -159,6 +164,15 @@ function fixture() {
         };
         f.afterRead?.();
         return value;
+      }
+      if (operation === 'enterpriseOutbound') {
+        f.lastOutbound = request;
+        if (f.outboundHandler) return f.outboundHandler(request, signal);
+        return {
+          statusCode: 200,
+          headers: { 'content-type': 'application/json' },
+          body: '{"ok":true,"token":"[REDACTED]"}',
+        };
       }
       throw new Error('Unexpected synthetic operation');
     },
@@ -329,6 +343,107 @@ test('abandoned begin response is compensated with the same trusted task id', as
   await f.ports.close();
   assert.equal(f.activeTasks.size, 0);
   f.runtime.close();
+});
+
+test('raw-disabled outbound delegates only the bound capability and original bytes to IAM', async () => {
+  const f = fixture();
+  f.state.raw = false;
+  f.state.denyRead = true;
+  const task = await openSharedTask({
+    ctx: f.ctx,
+    runtime: f.runtime,
+    ports: f.ports,
+    execution: { agent: f.agent, signal: new AbortController().signal },
+    raw: true,
+  });
+  const call = {
+    remoteAddress: '127.0.0.1',
+    body: {
+      sessionId: f.binding.sessionId,
+      taskCapability: task.token,
+      url: 'https://app-one.invalid/api',
+      method: 'POST',
+      body: { query: '你好' },
+      headers: { authorization: 'never-forward' },
+    },
+  };
+  try {
+    assert.equal(task.env.DSH_AURIGA_ID, '');
+    assert.equal(task.env.DSH_AURIGA_TOKEN, '');
+    await assert.rejects(f.enterprise.credentials(call), {
+      code: 'raw_token_disabled',
+    });
+    const result = await f.enterprise.outbound(call);
+    assert.equal(result.json.ok, true);
+    assert.equal(result.json.token, undefined);
+    const request = f.state.lastOutbound;
+    assert.equal(request.capability.binding.memberId, f.binding.memberId);
+    assert.deepEqual(request.capability.scopes, ['outbound']);
+    assert.equal(
+      Buffer.from(request.bodyBase64, 'base64').toString('utf8'),
+      '{"query":"你好"}',
+    );
+    assert.deepEqual(request.headers, { 'content-type': 'application/json' });
+    assert.equal(f.events.includes('readCredentials'), false);
+    call.body.method = 'GET';
+    await f.enterprise.outbound(call);
+    assert.equal(f.state.lastOutbound.bodyBase64, '');
+    f.state.outboundHandler = async () => {
+      f.state.version++;
+      return { statusCode: 200, headers: {}, body: 'late' };
+    };
+    await assert.rejects(f.enterprise.outbound(call));
+  } finally {
+    await task.close();
+    await f.ports.close();
+    f.runtime.close();
+  }
+});
+
+test('outbound carries actual execution and caller cancellation to the node relay', async () => {
+  const f = fixture();
+  const execution = new AbortController();
+  const task = await openSharedTask({
+    ctx: f.ctx,
+    runtime: f.runtime,
+    ports: f.ports,
+    execution: { agent: f.agent, signal: execution.signal },
+  });
+  try {
+    for (const useExecution of [false, true]) {
+      const caller = new AbortController();
+      let started;
+      const ready = new Promise((resolve) => {
+        started = resolve;
+      });
+      f.state.outboundHandler = async (_request, signal) =>
+        new Promise((_resolve, reject) => {
+          signal.addEventListener(
+            'abort',
+            () => reject(new Error('cancelled')),
+            { once: true },
+          );
+          started();
+        });
+      const pending = f.enterprise.outbound({
+        remoteAddress: '127.0.0.1',
+        signal: caller.signal,
+        body: {
+          sessionId: f.binding.sessionId,
+          taskCapability: task.token,
+          url: 'https://app-one.invalid/api',
+        },
+      });
+      await ready;
+      (useExecution ? execution : caller).abort();
+      await assert.rejects(pending, { code: 'outbound_failed' });
+    }
+    assert.equal(f.events.includes('readCredentials'), false);
+  } finally {
+    await task.close();
+    await f.ports.close();
+    f.runtime.close();
+  }
 });
 
 test('model task is derived from the live request event and is finished at idle', async () => {

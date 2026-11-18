@@ -5,7 +5,6 @@ import { installSharedHost } from './host.js';
 import { createSharedCarrier } from './carrier.js';
 import { createSharedDownstream } from './downstream.js';
 import { openSharedTask } from './task-context.js';
-import { createEnterpriseOutbound } from './enterprise-transport.js';
 import { createSharedProfileHandler } from './profile.js';
 
 // R selects this entry instead of the dedicated-owner plugin for shared pools.
@@ -26,12 +25,7 @@ export function apply(ctx) {
   const runtime = createSharedRuntime({ ...ports.options, ports });
   const enterprise = createEnterpriseAdapter({
     runtime,
-    ports: {
-      ...ports.enterprise,
-      outbound:
-        ports.enterprise.outbound ??
-        createEnterpriseOutbound({ config: ports.config }),
-    },
+    ports: ports.enterprise,
     config: ports.config,
   });
   let host;

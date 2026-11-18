@@ -241,6 +241,8 @@ C构建版本化broker制品，Desktop构建放入versions/<id>/auriga/shell-aut
 
 独立安装的分发位置、helper及打包归属按第3.2.1节执行，插件动作通过IPC请求broker拉起浏览器登录页。
 
+共享云端宿主另保留 `shared/node-transport.js` 与 `shared/ports-plugin.js` 这一对有限节点通道。它仅在 Linux 读取节点挂载的固定只读池配置，经 `/var/lib/auriga/pools/<UUID>/control/shared-node.sock` 发固定 `POST /_auriga/shared-rpc/<operation>`；不接收 TCP 主机、URL、代理、内部服务 token 或身份覆盖请求头。节点按真实会话和任务权威调用 W/IAM/N，企业 outbound 在 IAM 内取本人材料并脱敏返回，raw 关闭仍可代发。AUTH-K 同时核固定请求选项、闭集操作、无 request 别名及唯一受信 provider 的路径/权限/socket 检查；只登记保留通道不能绕过这组结构断言。该通道不改变 Desktop broker 的平台业务边界，也不赋予浏览器直接调用节点的权限。
+
 ## 4. ShellAuth 本地通道契约
 
 UacLoginInfo在contracts/auth/uac-login-info.schema.json中定义，Me.uacLoginInfo和ShellAuthSnapshot.uacLoginInfo通过同一引用提供可选只读资料。purpose固定login_info，status为pending/available/unavailable，department只在available时出现且同时有updatedAt。身份切换、注销及非authenticated快照清除该字段，禁止把部门展示状态解释为认证状态。

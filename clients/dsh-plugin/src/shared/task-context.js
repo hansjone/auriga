@@ -66,7 +66,7 @@ export async function openSharedTask({
       )
         fail();
       credentials.DSH_AURIGA_ID = material.empNo;
-      credentials.DSH_AURIGA_TOKEN = material.token;
+      credentials['DSH_AURIGA_TOKEN'] = material.token;
     }
     let env;
     if (ports.helperBase) {
