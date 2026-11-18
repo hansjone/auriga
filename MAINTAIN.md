@@ -181,6 +181,8 @@ publish_release --execute --publish
 unset FORGEJO_TOKEN
 ```
 
+发布命令在 Forgejo 回读同一个发行 ID、同一标签且确认已退出草稿后返回成功。写请求遇到重定向即报错。遇到写入失败或回读失败，先在 Forgejo 核对该标签的实际发行状态，再用同一发行目录和参数重试。若服务端已经发布，重试只逐字节核验现有附件。
+
 从正常 Forgejo Release 页面核对版本、附件、发行公钥指纹及 Windows 引导摘要，并下载后按 `DEPLOY.md` 安装。Windows 与 DSH 如有分卷，按 `.parts.json` 顺序以二进制拼接并核对 `DOWNLOADS.txt` 所列完整归档摘要，再按各自用途使用。安装后的正常页面登录、邀请、资源上传/发布和桌面安装由主控实测。
 
 ## 发行信任与站点构建签名
@@ -221,13 +223,29 @@ sudo ./auriga trust add-site-key /media/site-public.pem --confirm-fingerprint "$
 
 桌面客户端使用独立的 `scripts/client-release/auriga-client.cmd`，服务端 `./auriga` 仍只在 Linux 运行。当前客户端目标为 Windows x64；平台配方、引导程序布局和安装器命名集中于 `scripts/client-release/platform.mjs`，以后扩展 Linux 客户端时沿用来源与签名协议。
 
-浏览器下载同版签名源码包和 Windows 输入独立附件 `auriga-client-windows-<锁SHA256>.tar`。Windows 部分与 Linux 累积 devkit 分开，依赖未变可复用；包含 Node/npm/pnpm、store、Windows DSH 及其依赖，签名链沿用 #373 发行公钥。先用独立批准的发行说明核源码归档和引导 node.exe 的 SHA-256，再解包到本地固定磁盘。不能用未核验包内公钥或临时计算摘要冒充批准值。
+浏览器下载同版签名源码包和 Windows 输入独立附件 `auriga-client-windows-<锁SHA256>.tar`。Windows 套件包含 Node/npm/pnpm、store、Windows DSH 及其依赖，签名链沿用 #373 发行公钥。分卷先拼成完整归档。从独立批准的发行说明取两份完整归档与引导 `node.exe` 的 SHA-256。用 `Get-FileHash` 核对两份归档后解包到本地固定磁盘，再核对解包出来的 `node.exe`，通过后执行客户端命令。
 
 ```powershell
-Get-FileHash -Algorithm SHA256 D:\media\auriga-source-0.2.0.tar
-Get-FileHash -Algorithm SHA256 D:\client-kit\build-node\node.exe
-$env:AURIGA_CLIENT_DEVKIT = 'D:\client-kit'
-$env:AURIGA_CLIENT_NODE_SHA256 = '<独立批准的node.exe SHA256>'
+$sourceArchive = 'D:\media\auriga-source-0.2.0.tar'
+$kitArchive = 'D:\media\auriga-client-windows-<锁SHA256>.tar'
+$sourceSHA = '<独立批准的源码归档 SHA256>'
+$kitSHA = '<独立批准的 Windows 套件归档 SHA256>'
+$nodeSHA = '<独立批准的 node.exe SHA256>'
+if ((Get-FileHash -Algorithm SHA256 -LiteralPath $sourceArchive).Hash -ne $sourceSHA) { throw '源码归档摘要不符' }
+if ((Get-FileHash -Algorithm SHA256 -LiteralPath $kitArchive).Hash -ne $kitSHA) { throw 'Windows 套件归档摘要不符' }
+$sourceRoot = 'D:\auriga-source-0.2.0'
+$kitParent = 'D:\client-kits'
+New-Item -ItemType Directory -Path $sourceRoot, $kitParent -ErrorAction Stop
+tar.exe -xf $sourceArchive -C $sourceRoot
+if ($LASTEXITCODE -ne 0) { throw '源码解包失败' }
+tar.exe -xf $kitArchive -C $kitParent
+if ($LASTEXITCODE -ne 0) { throw 'Windows 套件解包失败' }
+$kitRoot = Join-Path $kitParent ([IO.Path]::GetFileNameWithoutExtension($kitArchive))
+$nodeFile = Join-Path $kitRoot 'build-node\node.exe'
+if ((Get-FileHash -Algorithm SHA256 -LiteralPath $nodeFile).Hash -ne $nodeSHA) { throw '引导 Node 摘要不符' }
+$env:AURIGA_CLIENT_DEVKIT = $kitRoot
+$env:AURIGA_CLIENT_NODE_SHA256 = $nodeSHA.ToLowerInvariant()
+Set-Location -LiteralPath $sourceRoot
 .\scripts\client-release\auriga-client.cmd --help
 ```
 

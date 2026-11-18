@@ -72,6 +72,7 @@ func fixtureDSHReleaseInput(t *testing.T, source string) string {
 
 func fixtureWindowsReleaseInput(t *testing.T, source, kitParent, key string) (string, string, string) {
 	t.Helper()
+	writeReleaseFixture(t, filepath.Join(source, "scripts/client-release/build-node.json"), []byte(`{"version":"22.19.0"}`))
 	for _, name := range []string{"package.json", "pnpm-workspace.yaml", ".npmrc", "web/pnpm-lock.yaml",
 		"clients/dsh-plugin/package.json", "clients/dsh-plugin/package-lock.json", "clients/installer/locks/python-win-x64.json"} {
 		writeReleaseFixture(t, filepath.Join(source, name), []byte("{}\n"))
@@ -172,7 +173,7 @@ func TestWindowsReleaseLocksMatchNode(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	command := exec.Command(node, "--input-type=module", "-e", `import {lockIdentity} from './scripts/client-release/inputs.mjs'; process.stdout.write(JSON.stringify(lockIdentity()));`)
+	command := exec.Command(node, "--input-type=module", "-e", `import {BUILD_NODE, lockIdentity} from './scripts/client-release/inputs.mjs'; process.stdout.write(JSON.stringify({...lockIdentity(), buildNode: BUILD_NODE}));`)
 	command.Dir = source
 	raw, err := command.CombinedOutput()
 	if err != nil {
@@ -182,13 +183,28 @@ func TestWindowsReleaseLocksMatchNode(t *testing.T) {
 	if err := json.Unmarshal(raw, &m); err != nil {
 		t.Fatal(err)
 	}
-	m.Schema, m.Platform, m.BuildNode = 1, "win-x64", "22.19.0"
+	m.Schema, m.Platform = 1, "win-x64"
 	release := windowsReleaseInput{Platform: "win-x64", LockSHA: m.LockSHA}
 	if len(m.Locks) != len(locks) {
 		t.Fatal("Node and Go lock inventory length differs")
 	}
 	if err := verifyWindowsClientManifest(t.Context(), source, release, m, nil, 0); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestWindowsReleaseRejectsChangedBuildNode(t *testing.T) {
+	source := t.TempDir()
+	fixtureDSHReleaseInput(t, source)
+	key, public := testSigningKeys(t)
+	archive, hash, _ := fixtureWindowsReleaseInput(t, source, t.TempDir(), key)
+	scratch := t.TempDir()
+	if _, err := verifyWindowsRelease(t.Context(), archive, hash, source, public, scratch); err != nil {
+		t.Fatal(err)
+	}
+	writeReleaseFixture(t, filepath.Join(source, "scripts/client-release/build-node.json"), []byte(`{"version":"22.20.0"}`))
+	if _, err := verifyWindowsRelease(t.Context(), archive, hash, source, public, scratch); err == nil || !strings.Contains(err.Error(), "引导 Node 版本") {
+		t.Fatal("accepted an old signed kit after changing only the build Node pin", err)
 	}
 }
 

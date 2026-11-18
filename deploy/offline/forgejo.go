@@ -26,9 +26,14 @@ type uploadOptions struct {
 }
 type forgejoRelease struct {
 	ID    int64  `json:"id"`
-	Draft bool   `json:"draft"`
+	Draft *bool  `json:"draft"`
 	Tag   string `json:"tag_name"`
 }
+
+func (r forgejoRelease) publishedAs(expected forgejoRelease) bool {
+	return r.ID == expected.ID && r.Tag == expected.Tag && r.Draft != nil && !*r.Draft
+}
+
 type forgejoAsset struct {
 	Name string `json:"name"`
 	Size int64  `json:"size"`
@@ -164,7 +169,7 @@ func (a *forgejoAPI) json(method, path string, input, output any, expected int) 
 	}
 	defer func() { _ = response.Body.Close() }()
 	if response.StatusCode != expected {
-		return fmt.Errorf("发布 Forgejo %s HTTP %d（保留草稿，处理后重跑）", method, response.StatusCode)
+		return fmt.Errorf("发布 Forgejo %s HTTP %d", method, response.StatusCode)
 	}
 	if output != nil {
 		return json.NewDecoder(io.LimitReader(response.Body, 4<<20)).Decode(output)
@@ -255,7 +260,7 @@ func forgejoReleaseBody(m distributionManifest, key string) (string, error) {
 	var body strings.Builder
 	fmt.Fprintf(&body, "Auriga 离线安装包与开发套件。发行公钥指纹 SHA256(SPKI DER)：`%s`。从独立渠道核对后使用 `--trust-fingerprint %s` 或 `--verify-key`，参见 DEPLOY.md / MAINTAIN.md。\n\n", fp, fp)
 	if m.Windows != nil {
-		fmt.Fprintf(&body, "Windows 执行前用 Get-FileHash 核验源码归档及引导 Node。\n\n- `%s` SHA256 `%s`\n", windowsBuildNodePath, m.Windows.BuildNodeSHA)
+		fmt.Fprintf(&body, "Windows 先用 Get-FileHash 核验源码和套件归档，再解包，核验引导 Node 后执行客户端命令。\n\n- `%s` SHA256 `%s`\n", windowsBuildNodePath, m.Windows.BuildNodeSHA)
 		for _, file := range m.Archives {
 			if file.Name == "auriga-source-"+m.Tag+".tar" || strings.HasPrefix(file.Name, windowsClientPrefix) {
 				fmt.Fprintf(&body, "- `%s` SHA256 `%s`\n", file.Name, file.SHA256)
@@ -347,6 +352,10 @@ func uploadRelease(o uploadOptions, client *http.Client) error {
 		scoped.Transport = transport
 	}
 	scoped.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+		// A 302 or 303 may have already rewritten req.Method to GET.
+		if via[0].Method != http.MethodGet && via[0].Method != http.MethodHead {
+			return errors.New("拒绝 Forgejo 写请求重定向")
+		}
 		if len(via) >= 5 || !sameForgejoOrigin(req.URL, origin) {
 			return errors.New("拒绝跨主机或降级重定向")
 		}
@@ -375,7 +384,8 @@ func uploadRelease(o uploadOptions, client *http.Client) error {
 		return errors.New("远端 Forgejo 标签提交与本地签名发行清单不符；先由主控同步精确标签")
 	}
 	var remote forgejoRelease
-	response, err := a.request("GET", a.base+repo+"/releases/tags/"+url.PathEscape(manifest.Tag), nil, "", -1)
+	tagReleasePath := repo + "/releases/tags/" + url.PathEscape(manifest.Tag)
+	response, err := a.request("GET", a.base+tagReleasePath, nil, "", -1)
 	if err != nil {
 		return err
 	}
@@ -398,6 +408,9 @@ func uploadRelease(o uploadOptions, client *http.Client) error {
 	if remote.ID <= 0 || remote.Tag != manifest.Tag {
 		return errors.New("远端 Forgejo 发行身份不符")
 	}
+	if remote.Draft == nil {
+		return errors.New("远端 Forgejo 发行缺少草稿状态")
+	}
 	releasePath := fmt.Sprintf("%s/releases/%d", repo, remote.ID)
 	assetsPath := releasePath + "/assets"
 	existing, err := a.assets(assetsPath)
@@ -417,7 +430,7 @@ func uploadRelease(o uploadOptions, client *http.Client) error {
 		if _, ok := existing[name]; ok {
 			continue
 		}
-		if !remote.Draft {
+		if !*remote.Draft {
 			return errors.New("已发布发行缺少附件，不直接修改已发布内容")
 		}
 		if err := a.upload(assetsPath, o.Dir, local[name]); err != nil {
@@ -436,11 +449,24 @@ func uploadRelease(o uploadOptions, client *http.Client) error {
 			return err
 		}
 	}
-	if o.Publish && remote.Draft {
-		if err := a.json("PATCH", releasePath, map[string]any{"draft": false, "body": releaseBody}, &remote, 200); err != nil {
-			return err
+	if o.Publish && *remote.Draft {
+		const retry = "请先核对 Forgejo 上该标签的实际发行状态，再使用同一发行目录和参数重试"
+		var published forgejoRelease
+		if err := a.json("PATCH", releasePath, map[string]any{"draft": false, "body": releaseBody}, &published, 200); err != nil {
+			return fmt.Errorf("%s: %w", retry, err)
 		}
+		if !published.publishedAs(remote) {
+			return fmt.Errorf("Forgejo 发布响应的发行身份或草稿状态不符，%s", retry)
+		}
+		var confirmed forgejoRelease
+		if err := a.json("GET", tagReleasePath, nil, &confirmed, 200); err != nil {
+			return fmt.Errorf("Forgejo 发布回读失败，%s: %w", retry, err)
+		}
+		if !confirmed.publishedAs(remote) {
+			return fmt.Errorf("Forgejo 发布回读的发行身份或草稿状态不符，%s", retry)
+		}
+		remote = confirmed
 	}
-	fmt.Printf("Forgejo Release 附件已逐字节校验，draft=%t\n", remote.Draft)
+	fmt.Printf("Forgejo Release 附件已逐字节校验，draft=%t\n", *remote.Draft)
 	return nil
 }

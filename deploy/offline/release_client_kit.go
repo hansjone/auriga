@@ -12,11 +12,15 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 )
 
 const windowsClientPrefix = "auriga-client-windows-"
 const windowsBuildNodePath = "build-node/node.exe"
+const windowsBuildNodePin = "scripts/client-release/build-node.json"
+
+var windowsBuildNodeVersion = regexp.MustCompile(`^[0-9]+\.[0-9]+\.[0-9]+$`)
 
 type windowsReleaseInput struct {
 	Schema       int    `json:"schemaVersion"`
@@ -225,6 +229,15 @@ func verifyWindowsClientManifest(ctx context.Context, source string, release win
 	if m.Schema != 1 || m.Platform != release.Platform || m.LockSHA != release.LockSHA || m.Bytes != size || len(m.Files) != len(payload) {
 		return errors.New("Windows 输入清单和归档不一致")
 	}
+	var buildNode struct {
+		Version string `json:"version"`
+	}
+	if err := readJSON(filepath.Join(source, windowsBuildNodePin), &buildNode); err != nil {
+		return fmt.Errorf("读取 Windows 目标源码的构建 Node 版本: %w", err)
+	}
+	if !windowsBuildNodeVersion.MatchString(buildNode.Version) || m.BuildNode != buildNode.Version {
+		return errors.New("Windows 输入引导 Node 版本与目标源码不匹配")
+	}
 	for _, row := range m.Files {
 		actual, ok := payload[row.Path]
 		if !ok || actual.Size != row.Size || actual.SHA256 != row.SHA {
@@ -245,7 +258,7 @@ func verifyWindowsClientManifest(ctx context.Context, source string, release win
 		Locks     map[string]string `json:"locks"`
 		Platform  string            `json:"platform"`
 		Schema    int               `json:"schema"`
-	}{m.BuildNode, locks, m.Platform, m.Schema})
+	}{buildNode.Version, locks, m.Platform, m.Schema})
 	if err != nil {
 		return err
 	}

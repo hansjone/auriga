@@ -179,7 +179,7 @@ func writeDownloads(root string, m distributionManifest, cat devkitCatalog, asse
 		b.WriteString("同一基线且已有精确上版套件，可下载本版 delta 代替完整 devkit。\n")
 	}
 	if m.Windows != nil {
-		b.WriteString("Windows 开发：下载签名源码与对应 Windows 输入套件。执行任何程序前，从核准的 Release 正文或组织文档核对源码归档与引导 Node 的 SHA256，然后用 Get-FileHash 校验。\n")
+		b.WriteString("Windows 开发：从核准的 Release 正文或组织文档取得源码、Windows 套件和引导 Node 的 SHA256。先用 Get-FileHash 校验两份完整归档，再解包，最后在执行前校验解包后的引导 Node。\n")
 		fmt.Fprintf(&b, "Windows 引导 Node SHA256 %s  %s\n", m.Windows.BuildNodeSHA, windowsBuildNodePath)
 	}
 	for _, archive := range m.Archives {

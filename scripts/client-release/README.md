@@ -6,7 +6,7 @@
 
 Linux 累积 devkit 保持原 devkit-catalog.json、blobs 和增量流程。Windows 选简单的独立附件 auriga-client-windows-<锁SHA256>.tar，与同版源码归档分发；依赖未变可复用原附件。client-inputs-release.json 绑定目标、锁摘要、windows-client.json 摘要及引导 node.exe 摘要；windows-client.json 列出全部输入长度和 SHA256。SHA256SUMS 绑定两份元数据，沿用 #373 同一发行私钥对原字节 Ed25519 签名，.sig 为标准 base64。release-public.pem 只是公开副本，现场须 --verify-key 或独立批准的 --trust-fingerprint 核身份，不能自带钥自行证明身份。
 
-发行说明还须独立列出源码归档和 node.exe SHA256，供 Windows 在执行任何附件程序前用系统 Get-FileHash 引导核验。不要从未核验 JSON 临时推导批准值。薄壳要求 AURIGA_CLIENT_DEVKIT 与独立批准的 AURIGA_CLIENT_NODE_SHA256，先核 Node 再执行；无需安装 Git/Node/pnpm。
+从独立批准的发行说明取得源码归档、Windows 套件归档和 node.exe 的 SHA256。先用系统 Get-FileHash 核验两份归档，解包后再核验引导 Node。薄壳使用 AURIGA_CLIENT_DEVKIT 与独立批准的 AURIGA_CLIENT_NODE_SHA256，执行前也检查该 Node 的摘要。构建 Node 的版本由目标源码的 `scripts/client-release/build-node.json` 固定。
 
 联网 Windows x64 维护机、批准源码目录中串行准备：
 
