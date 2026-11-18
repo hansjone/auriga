@@ -1,0 +1,16 @@
+# Explicit shared-runtime overlay. The agent mounts new file-backed filesystems
+# inside its container namespace. Docker mounts the same loop devices as volumes.
+services:
+  agent:
+    userns_mode: host
+    cap_add: [CHOWN, DAC_OVERRIDE, FOWNER, SYS_ADMIN]
+    security_opt: ['no-new-privileges:true', 'apparmor:unconfined']
+    device_cgroup_rules:
+      - 'b 7:* rwm'
+      - 'c 10:237 rwm'
+    environment:
+      AURIGA_AGENT_CONFIG_FILE: /etc/auriga/shared-runtime/agent.json
+      AURIGA_AGENT_RUNTIME_PROOFS_DIR: /etc/auriga/runtime-proofs
+    volumes:
+      - /dev:/dev
+      - ${AURIGA_DATA_ROOT}/config/materials/shared-runtime:/etc/auriga/shared-runtime:ro

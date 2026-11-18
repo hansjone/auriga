@@ -129,21 +129,6 @@ public class WorkspaceRuntimeConfiguration {
   }
 
   @Bean
-  @ConditionalOnProperty(name = "auriga.workspace.shared-dsh.enabled", havingValue = "true")
-  SharedDshAdmin sharedDshAdmin(
-      WorkspaceStore store,
-      SharedDshPlacements placements,
-      auriga.workspace.api.SharedDshAuthority.Inputs inputs,
-      Clock clock) {
-    return new SharedDshAdmin(
-        store,
-        placements,
-        new SharedDshMaintenance(store, placements, inputs, clock),
-        inputs,
-        clock);
-  }
-
-  @Bean
   WorkspaceCredentialControl workspaceCredentialControl(WorkspaceService service) {
     return new WorkspaceCredentialControl(service);
   }
@@ -277,8 +262,11 @@ public class WorkspaceRuntimeConfiguration {
   }
 
   @Bean
-  NodeSessions workspaceNodeSessions(NodeEnrollment enrollment, WorkspaceService service) {
-    return new NodeSessions(enrollment, service);
+  NodeSessions workspaceNodeSessions(
+      NodeEnrollment enrollment,
+      WorkspaceService service,
+      ObjectProvider<SharedDshNodeRuntime> sharedRuntime) {
+    return new NodeSessions(enrollment, service, sharedRuntime.getIfAvailable());
   }
 
   @Bean

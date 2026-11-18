@@ -1362,15 +1362,23 @@ public final class SharedDshPlacements implements SharedDshAuthority {
   }
 
   public List<Delivery> pending() {
+    return pending(false, null);
+  }
+
+  public List<Delivery> pendingRuntime(UUID after) {
+    return pending(true, after);
+  }
+
+  private List<Delivery> pending(boolean runtimeOnly, UUID after) {
+    String query =
+        runtimeOnly
+            ? "SELECT * FROM shared_dsh_outbox WHERE tenant_id=? AND NOT delivered AND kind='runtime'"
+                + " AND (?::uuid IS NULL OR id>?) ORDER BY id LIMIT 100"
+            : "SELECT * FROM shared_dsh_outbox WHERE tenant_id=? AND NOT delivered ORDER BY created_at,id LIMIT 100";
+    Object[] args = runtimeOnly ? new Object[] {tenant(), after, after} : new Object[] {tenant()};
     return store.tx(
         () ->
-            store
-                .jdbc
-                .queryForList(
-                    "SELECT * FROM shared_dsh_outbox WHERE tenant_id=? AND NOT delivered ORDER BY"
-                        + " created_at,id LIMIT 100",
-                    tenant())
-                .stream()
+            store.jdbc.queryForList(query, args).stream()
                 .map(
                     r ->
                         new Delivery(

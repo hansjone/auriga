@@ -31,8 +31,8 @@ func ValidatePoolProfile(raw []byte) error {
 	if e := d.Decode(&extra); e != io.EOF {
 		return fmt.Errorf("multiple pool profile documents")
 	}
-	allowed := map[string]bool{"auriga-dsh": true}
-	for _, name := range strings.Fields("agent agent-loop agent-instructions agent-preset agent-preset-registry agent-default-model tools tool-fs tool-fs-search tool-str-replace-editor tool-ask-user tool-present tool-todo tool-skill session session-reference session-format session-checkpoint-policy skill skill-filesystem workspace authorization llm web-frontend client-connection client-modules api-gateway api-remote-access api-session-controller") {
+	allowed := map[string]bool{"auriga-dsh": true, "auriga-dsh/shared": true, "file:///run/auriga/shared-ports.mjs": true}
+	for _, name := range strings.Fields("agent agent-loop agent-instructions agent-preset agent-preset-registry agent-default-model tools tool-fs tool-fs-search tool-str-replace-editor tool-ask-user tool-present tool-todo tool-skill session session-reference session-format session-checkpoint-policy skill skill-filesystem workspace authorization llm web-frontend client-connection client-modules api-gateway api-remote-access api-session-controller host-webserver web-runtime system-prompt fs-local paths typert-registry") {
 		allowed["@deepseek-ai/dsh-"+name] = true
 	}
 	ids := map[string]bool{}

@@ -218,6 +218,15 @@ func runAgent(args []string, logs io.Writer) error {
 
 	reg := ingress.NewMapRegistry()
 	targets := &observer.SliceTargets{}
+	shared, err := sharedPreparation(cfg, driverName)
+	if err != nil {
+		return err
+	}
+	docker, _ := inner.(*runtime.Docker)
+	poolRuntime, err := sharedRuntime(cfg, shared, docker, reg)
+	if err != nil {
+		return err
+	}
 	sess := conn.New(conn.Config{
 		AgentDir:      cfg.AgentDir(),
 		AgentVersion:  cfg.AgentVersion,
@@ -228,7 +237,23 @@ func runAgent(args []string, logs io.Writer) error {
 		Store:         store,
 		AllowInsecure: cfg.AllowInsecure,
 		Capacity:      helloCapacity(cfg.DetectCapacity()),
+		SharedPools:   shared,
+		SharedRuntime: poolRuntime,
 	})
+	if poolRuntime != nil {
+		go func() {
+			ticker := time.NewTicker(15 * time.Second)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case <-ticker.C:
+					poolRuntime.Watch(ctx)
+				}
+			}
+		}()
+	}
 	io, err := startIngressAndObserver(ctx, cfg, logger, *ingressListen, *ingressLocal, reg, targets, sess)
 	if err != nil {
 		return err

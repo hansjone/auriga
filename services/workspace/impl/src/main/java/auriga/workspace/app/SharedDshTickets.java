@@ -15,6 +15,14 @@ import tools.jackson.databind.json.JsonMapper;
 
 /** W signs only canonical OpenTicket claims, never protojson or browser supplied identity. */
 public final class SharedDshTickets {
+  /** Provisioned with the matching Edge verification key by the shared-entry assembly. */
+  public record SigningKey(String kid, PrivateKey key) {
+    @Override
+    public String toString() {
+      return "SigningKey[redacted]";
+    }
+  }
+
   public interface Entry {
     /** Trusted deployment mapping, including the IP instance prefix when needed. */
     URI exchangeUrl(SharedDshBinding binding);

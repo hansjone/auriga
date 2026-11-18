@@ -42,6 +42,13 @@ func (l *PoolLayout) Workspace(pool, tenant, member string, epoch int64) (string
 	return l.Path(pool, "members", tenant, member, strconv.FormatInt(epoch, 10), "workspace")
 }
 func (l *PoolLayout) Prepare(ctx context.Context, pool, tenant, member string, epoch int64) (string, error) {
+	if backend, ok := l.Quota.(interface {
+		MountPool(context.Context, string) (PoolMount, error)
+	}); ok {
+		if _, err := backend.MountPool(ctx, pool); err != nil {
+			return "", err
+		}
+	}
 	p, err := l.Workspace(pool, tenant, member, epoch)
 	if err != nil {
 		return "", err
