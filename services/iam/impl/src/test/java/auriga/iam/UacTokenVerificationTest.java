@@ -57,6 +57,7 @@ class UacTokenVerificationTest {
       var result = decide(200, success("001ab", token), account);
       assertTrue(result.success());
       assertEquals(token, result.replacementToken());
+      assertEquals(account.strip(), result.employee());
       assertFalse(result.toString().contains(token));
     }
     assertEquals("identity_mismatch", decide(200, success("1ab", token), "001Ab").failureClass());
@@ -94,6 +95,58 @@ class UacTokenVerificationTest {
         UacTokenVerification.request("001Ab", "synthetic-token", null, null)
             .path("systemCode")
             .asString());
+  }
+
+  @Test
+  void acceptsUnchangedOrRotatedPrimaryTokenWithoutAnEcho() {
+    for (String token : List.of("synthetic-old-token", "synthetic-new-token")) {
+      var result =
+          decide(
+              200,
+              payload("\"code\":\"0000\"", ",\"other\":{\"token\":\"" + token + "\"}"),
+              "001Ab");
+      assertTrue(result.success());
+      assertEquals(token, result.replacementToken());
+      assertEquals("001Ab", result.employee());
+    }
+  }
+
+  @Test
+  void onlyMissingFieldsPermitFallbackAndExplicitInvalidFieldsAreFaults() {
+    String legacy = "\"code\":\"0000\",\"user\":\"001AB\",\"token\":\"synthetic-legacy\"";
+    assertEquals(
+        "synthetic-legacy",
+        decide(200, payload(legacy, ",\"other\":{}"), "001Ab").replacementToken());
+    assertEquals(
+        "synthetic-primary",
+        decide(200, payload(legacy, ",\"other\":{\"token\":\"synthetic-primary\"}"), "001Ab")
+            .replacementToken());
+    for (String other :
+        List.of("null", "[]", "{\"token\":null}", "{\"token\":42}", "{\"token\":\"\"}")) {
+      var result = decide(200, payload(legacy, ",\"other\":" + other), "001Ab");
+      assertEquals("invalid_success_payload", result.faultReason());
+      assertFalse(result.rejected());
+    }
+    String primary = ",\"other\":{\"token\":\"synthetic-primary\"}";
+    for (String user : List.of("null", "42", "\"\"")) {
+      var result = decide(200, payload("\"code\":\"0000\",\"user\":" + user, primary), "001Ab");
+      assertEquals("invalid_success_payload", result.faultReason());
+      assertFalse(result.rejected());
+    }
+    assertEquals(
+        "invalid_success_payload",
+        decide(200, payload("\"code\":\"0000\"", ",\"other\":{}"), "001Ab").faultReason());
+    assertEquals(
+        "identity_mismatch",
+        decide(200, payload("\"code\":\"0000\",\"user\":\"002Ab\"", primary), "001Ab")
+            .failureClass());
+    assertEquals(
+        "business_rejected",
+        decide(200, payload("\"code\":\"REJECTED\"", primary), "001Ab").failureClass());
+  }
+
+  private static String payload(String bo, String extra) {
+    return "{\"code\":{\"code\":\"0000\"},\"bo\":{" + bo + "}" + extra + "}";
   }
 
   private static String success(String user, String token) {

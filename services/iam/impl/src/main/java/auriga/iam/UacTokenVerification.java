@@ -91,14 +91,19 @@ final class UacTokenVerification {
         || inner.asString().isBlank()) return fault("invalid_code");
     if (!outer.asString().equals("0000") || !inner.asString().equals("0000"))
       return new Decision("business_rejected", null, null, null);
-    JsonNode user = root.path("bo").path("user"), token = root.path("bo").path("token");
-    if (!user.isString()
-        || !validUser(user.asString())
+    // Only an absent field permits the legacy token location. A supplied echo
+    // must match the verified account; it never changes the stored spelling.
+    JsonNode bo = root.path("bo"), other = root.path("other");
+    if (!other.isMissingNode() && !other.isObject()) return fault("invalid_success_payload");
+    JsonNode user = bo.path("user"), token = other.path("token");
+    if (token.isMissingNode()) token = bo.path("token");
+    boolean echoed = !user.isMissingNode();
+    if ((echoed && (!user.isString() || !validUser(user.asString())))
         || !token.isString()
         || !validToken(token.asString())) return fault("invalid_success_payload");
-    if (!fold(user.asString()).equals(fold(verifiedAccount)))
+    if (echoed && !fold(user.asString()).equals(fold(verifiedAccount)))
       return new Decision("identity_mismatch", null, null, null);
-    return new Decision(null, null, token.asString(), user.asString().strip());
+    return new Decision(null, null, token.asString(), verifiedAccount.strip());
   }
 
   private static Decision fault(String reason) {

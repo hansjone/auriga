@@ -424,11 +424,19 @@ export function createUacAdapter(settings, provider, options = {}) {
       return fault('invalid_code');
     if (outer !== '0000' || inner !== '0000')
       return { success: false, failureClass: 'business_rejected' };
-    const user = root.bo?.user,
-      token = root.bo?.token;
-    if (!validUser(user) || !validToken(token))
+    // Only an absent field permits the legacy token location. A supplied echo
+    // must match the verified account; it never changes the stored spelling.
+    const other = root.other;
+    if (
+      other !== undefined &&
+      (!other || typeof other !== 'object' || Array.isArray(other))
+    )
       return fault('invalid_success_payload');
-    if (fold(user) !== fold(account))
+    const user = root.bo?.user,
+      token = other?.token === undefined ? root.bo?.token : other.token;
+    if ((user !== undefined && !validUser(user)) || !validToken(token))
+      return fault('invalid_success_payload');
+    if (user !== undefined && fold(user) !== fold(account))
       return {
         success: false,
         failureClass: 'identity_mismatch',
@@ -438,7 +446,7 @@ export function createUacAdapter(settings, provider, options = {}) {
       success: true,
       identityMatched: true,
       token: /** @type {string} */ (token),
-      empNo: strip(/** @type {string} */ (user)),
+      empNo: strip(account),
     };
   }
 
