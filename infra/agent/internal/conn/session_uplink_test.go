@@ -21,6 +21,11 @@ import (
 
 const uplinkInstance = "queued-uplink"
 
+var uplinkRelease = state.ReleaseCandidate{
+	Partition: state.ReleasePartition{Purpose: "dsh_runtime", Name: "dsh", OS: "linux", Arch: "amd64"},
+	Sequence:  1, BodyDigest: "sha256:" + strings.Repeat("c", 64),
+}
+
 // The controllable driver models Docker's lease-aware inspection. Session,
 // the Reconciler, command replay and both bbolt records run production code.
 type uplinkLeaseDriver struct {
@@ -28,9 +33,13 @@ type uplinkLeaseDriver struct {
 	store         *state.Store
 	now, deadline atomic.Int64
 	stops         atomic.Int32
-	blockID       string
-	inspecting    chan struct{}
-	resumeInspect chan struct{}
+	barrier       atomic.Pointer[uplinkInspectionBarrier]
+}
+
+type uplinkInspectionBarrier struct {
+	id      string
+	entered chan struct{}
+	resume  chan struct{}
 }
 
 func (d *uplinkLeaseDriver) Inspect(ctx context.Context, id string) (runtime.Status, error) {
@@ -38,12 +47,15 @@ func (d *uplinkLeaseDriver) Inspect(ctx context.Context, id string) (runtime.Sta
 	if err != nil || record == nil {
 		return runtime.Status{}, err
 	}
-	if id == d.blockID {
-		close(d.inspecting)
+	if err := d.store.CheckReleaseExecution(record.Candidate); err != nil {
+		return runtime.Status{}, err
+	}
+	if barrier := d.barrier.Load(); barrier != nil && id == barrier.id {
+		close(barrier.entered)
 		select {
 		case <-ctx.Done():
 			return runtime.Status{}, ctx.Err()
-		case <-d.resumeInspect:
+		case <-barrier.resume:
 		}
 	}
 	ready := func() bool { return id != uplinkInstance || d.now.Load() < d.deadline.Load() }
@@ -65,7 +77,8 @@ func uplinkFixture(t *testing.T) (*Session, *uplinkLeaseDriver, *nodev1.Instance
 	t.Cleanup(func() { _ = store.Close() })
 	driver := &uplinkLeaseDriver{Fake: runtime.NewFake(), store: store}
 	driver.deadline.Store(10)
-	putUplinkExecution(t, store, uplinkInstance, "a")
+	runUplinkRelease(t, store, uplinkRelease, false)
+	putUplinkExecution(t, store, uplinkInstance, "a", uplinkRelease)
 	status := &nodev1.InstanceStatus{
 		InstanceId: uplinkInstance, ObservedGeneration: 7, Phase: nodev1.InstancePhase_INSTANCE_PHASE_RUNNING,
 		UpdatedAt: timestamppb.New(time.Unix(100, 0)), Ready: true,
@@ -83,23 +96,40 @@ func uplinkFixture(t *testing.T) (*Session, *uplinkLeaseDriver, *nodev1.Instance
 	return New(Config{Store: store, Reconciler: rec}), driver, status
 }
 
-func putUplinkExecution(t *testing.T, store *state.Store, id, idDigit string) {
+func putUplinkExecution(t *testing.T, store *state.Store, id, idDigit string, release state.ReleaseCandidate) {
 	t.Helper()
-	digest := "sha256:" + strings.Repeat("c", 64)
 	envelope := &nodev1.RuntimeReleaseEnvelope{
-		Purpose: "dsh_runtime", Name: "dsh", Os: "linux", Arch: "amd64", ReleaseSequence: 1, ImageDigest: digest,
+		Purpose: release.Partition.Purpose, Name: release.Partition.Name, Os: release.Partition.OS, Arch: release.Partition.Arch,
+		ReleaseSequence: release.Sequence, ImageDigest: release.BodyDigest,
 	}
 	err := store.PutExecution(state.ExecutionRecord{
 		Version: 2, InstanceID: id, Generation: 7, Phase: "started",
-		ContainerID: strings.Repeat(idDigit, 64), ConfigID: digest, EngineImageID: digest, ProofDigest: digest,
-		DSH: &nodev1.DshRuntime{ReleaseEnvelope: envelope},
-		Candidate: state.ReleaseCandidate{
-			Partition: state.ReleasePartition{Purpose: envelope.Purpose, Name: envelope.Name, OS: envelope.Os, Arch: envelope.Arch},
-			Sequence:  envelope.ReleaseSequence, BodyDigest: digest,
-		},
+		ContainerID: strings.Repeat(idDigit, 64), ConfigID: release.BodyDigest, EngineImageID: release.BodyDigest, ProofDigest: release.BodyDigest,
+		DSH: &nodev1.DshRuntime{ReleaseEnvelope: envelope}, Candidate: release,
 	})
 	if err != nil {
 		t.Fatal(err)
+	}
+}
+
+func runUplinkRelease(t *testing.T, store *state.Store, release state.ReleaseCandidate, unresolved bool) {
+	t.Helper()
+	err := store.WithReleaseExecution(t.Context(), release, func(context.Context) error { return nil }, func(_ context.Context, execution *state.ReleaseExecution) error {
+		if !unresolved {
+			return nil
+		}
+		finish, err := execution.BeginAction()
+		if err != nil {
+			return err
+		}
+		finish(false)
+		return nil
+	})
+	if unresolved && errors.Is(err, state.ErrReleaseUnresolved) {
+		return
+	}
+	if unresolved || err != nil {
+		t.Fatalf("unexpected release execution result (unresolved=%t): %v", unresolved, err)
 	}
 }
 
@@ -169,10 +199,10 @@ func nextUplinkFrame(t *testing.T, frames <-chan *nodev1.SessionRequest) *nodev1
 
 func (d *uplinkLeaseDriver) blockInspection(t *testing.T, id string) func() {
 	t.Helper()
-	d.blockID = id
-	d.inspecting, d.resumeInspect = make(chan struct{}), make(chan struct{})
+	barrier := &uplinkInspectionBarrier{id: id, entered: make(chan struct{}), resume: make(chan struct{})}
+	d.barrier.Store(barrier)
 	var once sync.Once
-	resume := func() { once.Do(func() { close(d.resumeInspect) }) }
+	resume := func() { once.Do(func() { close(barrier.resume) }) }
 	t.Cleanup(resume)
 	return resume
 }
@@ -180,7 +210,7 @@ func (d *uplinkLeaseDriver) blockInspection(t *testing.T, id string) func() {
 func (d *uplinkLeaseDriver) waitForInspection(t *testing.T) {
 	t.Helper()
 	select {
-	case <-d.inspecting:
+	case <-d.barrier.Load().entered:
 	case <-time.After(3 * time.Second):
 		t.Fatal("uplink did not reach the blocked inspection")
 	}
@@ -188,17 +218,20 @@ func (d *uplinkLeaseDriver) waitForInspection(t *testing.T) {
 
 func TestSessionRechecksInventoryBeforeSend(t *testing.T) {
 	const later = "zz-uplink"
-	for _, scenario := range []string{"expired", "renewed", "same-generation-replacement", "already-replaced", "no-longer-applied"} {
+	for _, scenario := range []string{"expired", "renewed", "same-generation-replacement", "already-replaced", "no-longer-applied", "partition-intent", "partition-advanced"} {
 		t.Run(scenario, func(t *testing.T) {
 			s, driver, status := uplinkFixture(t)
-			putUplinkExecution(t, driver.store, later, "c")
+			otherRelease := uplinkRelease
+			otherRelease.Partition.Arch = "arm64"
+			runUplinkRelease(t, driver.store, otherRelease, false)
+			putUplinkExecution(t, driver.store, later, "c", otherRelease)
 			other := proto.Clone(status).(*nodev1.InstanceStatus)
 			other.InstanceId = later
 			if err := driver.store.PutActual(state.ActualRecord{Status: other}); err != nil {
 				t.Fatal(err)
 			}
 			if scenario == "already-replaced" {
-				putUplinkExecution(t, driver.store, uplinkInstance, "b")
+				putUplinkExecution(t, driver.store, uplinkInstance, "b", uplinkRelease)
 			}
 			resume := driver.blockInspection(t, later)
 			stream := &blockedUplinkStream{ctx: t.Context(), frames: make(chan *nodev1.SessionRequest, 1)}
@@ -216,7 +249,7 @@ func TestSessionRechecksInventoryBeforeSend(t *testing.T) {
 				}
 			}()
 			driver.waitForInspection(t)
-			s.nowAtDequeue(t, driver, scenario)
+			setUplinkScenario(t, driver, scenario)
 			if scenario == "no-longer-applied" || scenario == "same-generation-replacement" {
 				current := proto.Clone(status).(*nodev1.InstanceStatus)
 				if scenario == "no-longer-applied" {
@@ -243,7 +276,7 @@ func TestSessionRechecksInventoryBeforeSend(t *testing.T) {
 }
 
 func TestSessionReadsReportsAfterBlockedInspection(t *testing.T) {
-	for _, scenario := range []string{"unchanged", "applying", "same-generation-replacement"} {
+	for _, scenario := range []string{"unchanged", "applying", "same-generation-replacement", "partition-intent", "partition-advanced"} {
 		t.Run(scenario, func(t *testing.T) {
 			s, driver, status := uplinkFixture(t)
 			report := proto.Clone(status.GetUnifiedResourceReports()[0]).(*resourcev1.UnifiedInstallationReport)
@@ -264,7 +297,7 @@ func TestSessionReadsReportsAfterBlockedInspection(t *testing.T) {
 			if scenario == "applying" {
 				current.UnifiedResourceReports[0].State = "applying"
 			}
-			s.nowAtDequeue(t, driver, scenario)
+			setUplinkScenario(t, driver, scenario)
 			if err := driver.store.PutActual(state.ActualRecord{Status: current}); err != nil {
 				t.Fatal(err)
 			}
@@ -274,10 +307,11 @@ func TestSessionReadsReportsAfterBlockedInspection(t *testing.T) {
 			switch scenario {
 			case "applying":
 				want = want[1:]
-			case "same-generation-replacement":
+			case "same-generation-replacement", "partition-intent", "partition-advanced":
 				want = nil
 			}
-			if got == nil || got.GetReady() != (scenario != "same-generation-replacement") ||
+			wantReady := scenario == "unchanged" || scenario == "applying"
+			if got == nil || got.GetReady() != wantReady ||
 				!proto.Equal(got.GetUpdatedAt(), status.GetUpdatedAt()) || len(got.GetUnifiedResourceReports()) != len(want) {
 				t.Fatal("uplink did not bind READY and reports to the post-Docker snapshot", got)
 			}
@@ -299,7 +333,7 @@ func TestSessionRechecksQueuedReadyStatus(t *testing.T) {
 			if len(s.statusCh) != 1 {
 				t.Fatal("READY was not queued while the previous frame blocked")
 			}
-			s.nowAtDequeue(t, driver, scenario)
+			setUplinkScenario(t, driver, scenario)
 			var successor *nodev1.InstanceStatus
 			switch scenario {
 			case "same-generation-replacement":
@@ -341,7 +375,7 @@ func TestSessionRechecksQueuedReadyStatus(t *testing.T) {
 }
 
 func TestSessionRechecksQueuedRestartSuccess(t *testing.T) {
-	for _, scenario := range []string{"valid", "expired", "renewed", "same-generation-replacement"} {
+	for _, scenario := range []string{"valid", "expired", "renewed", "same-generation-replacement", "partition-intent", "partition-advanced"} {
 		t.Run(scenario, func(t *testing.T) {
 			s, driver, _ := uplinkFixture(t)
 			const commandID = "finished-restart"
@@ -361,10 +395,22 @@ func TestSessionRechecksQueuedRestartSuccess(t *testing.T) {
 			if err := testutil.WaitFor(3*time.Second, func() bool { return len(s.resultCh) == 1 }); err != nil {
 				t.Fatal("the original result was not queued", err)
 			}
-			s.nowAtDequeue(t, driver, scenario)
+			var resumeInspect func()
+			if scenario == "partition-intent" || scenario == "partition-advanced" {
+				// The replay has already checked readiness to queue the result.
+				// Block the separate inspection immediately before sending it.
+				resumeInspect = driver.blockInspection(t, uplinkInstance)
+			} else {
+				setUplinkScenario(t, driver, scenario)
+			}
 			resume()
 			if nextUplinkFrame(t, frames).GetUsage() == nil {
 				t.Fatal("the blocked frame did not go first")
+			}
+			if resumeInspect != nil {
+				driver.waitForInspection(t)
+				setUplinkScenario(t, driver, scenario)
+				resumeInspect()
 			}
 			got := nextUplinkFrame(t, frames).GetResult()
 			wantOK := scenario == "valid" || scenario == "renewed"
@@ -391,7 +437,7 @@ func TestSessionRechecksQueuedRestartSuccess(t *testing.T) {
 	}
 }
 
-func (s *Session) nowAtDequeue(t *testing.T, driver *uplinkLeaseDriver, scenario string) {
+func setUplinkScenario(t *testing.T, driver *uplinkLeaseDriver, scenario string) {
 	t.Helper()
 	switch scenario {
 	case "expired":
@@ -400,6 +446,20 @@ func (s *Session) nowAtDequeue(t *testing.T, driver *uplinkLeaseDriver, scenario
 		driver.deadline.Store(20)
 		driver.now.Store(10)
 	case "same-generation-replacement":
-		putUplinkExecution(t, s.cfg.Store, uplinkInstance, "b")
+		putUplinkExecution(t, driver.store, uplinkInstance, "b", uplinkRelease)
+	case "partition-intent":
+		// Keep the same high-water mark to isolate the effect of the new intent.
+		runUplinkRelease(t, driver.store, uplinkRelease, true)
+		if err := driver.store.CheckReleaseExecution(uplinkRelease); !errors.Is(err, state.ErrReleaseUnresolved) {
+			t.Fatalf("missing durable intent: %v", err)
+		}
+	case "partition-advanced":
+		next := uplinkRelease
+		next.Sequence++
+		next.BodyDigest = "sha256:" + strings.Repeat("d", 64)
+		runUplinkRelease(t, driver.store, next, false)
+		if err := driver.store.CheckReleaseExecution(uplinkRelease); !errors.Is(err, state.ErrReleaseRollback) {
+			t.Fatalf("missing durable high-water advance: %v", err)
+		}
 	}
 }

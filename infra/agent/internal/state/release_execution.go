@@ -210,28 +210,32 @@ func (s *Store) CheckReleaseExecution(c ReleaseCandidate) error {
 		return err
 	}
 	return s.db.View(func(tx *bbolt.Tx) error {
-		intent, err := readIntents(tx, c.Partition)
-		if err != nil {
-			return err
-		}
-		if intent != nil {
-			return ErrReleaseUnresolved
-		}
-		high, found, err := readReleaseActivation(tx, c.Partition)
-		if err != nil {
-			return err
-		}
-		if !found {
-			return ErrExecutionCorrupt
-		}
-		if c.Sequence < high.Sequence {
-			return ErrReleaseRollback
-		}
-		if c != high {
-			return ErrReleaseConflict
-		}
-		return nil
+		return checkReleaseExecution(tx, c)
 	})
+}
+
+func checkReleaseExecution(tx *bbolt.Tx, c ReleaseCandidate) error {
+	intent, err := readIntents(tx, c.Partition)
+	if err != nil {
+		return err
+	}
+	if intent != nil {
+		return ErrReleaseUnresolved
+	}
+	high, found, err := readReleaseActivation(tx, c.Partition)
+	if err != nil {
+		return err
+	}
+	if !found {
+		return ErrExecutionCorrupt
+	}
+	if c.Sequence < high.Sequence {
+		return ErrReleaseRollback
+	}
+	if c != high {
+		return ErrReleaseConflict
+	}
+	return nil
 }
 
 // ReleaseExecution exists only in the original synchronous qualification. A

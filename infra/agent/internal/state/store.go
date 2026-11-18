@@ -319,7 +319,10 @@ func (s *Store) PutActual(rec ActualRecord) error {
 		return fmt.Errorf("status requires instance_id")
 	}
 	return s.db.Update(func(tx *bbolt.Tx) error {
-		rec.ContainerID = actualContainer(tx, rec.Status)
+		rec.ContainerID = ""
+		if execution := actualExecution(tx, rec.Status); execution != nil {
+			rec.ContainerID = execution.ContainerID
+		}
 		raw, err := json.Marshal(rec)
 		if err != nil {
 			return err
@@ -331,21 +334,21 @@ func (s *Store) PutActual(rec ActualRecord) error {
 	})
 }
 
-func actualContainer(tx *bbolt.Tx, status *nodev1.InstanceStatus) string {
+func actualExecution(tx *bbolt.Tx, status *nodev1.InstanceStatus) *ExecutionRecord {
 	executions := tx.Bucket(bucketReleaseExecution)
 	if !status.GetReady() || executions == nil {
-		return ""
+		return nil
 	}
 	key := []byte(status.GetInstanceId())
 	record, err := decodeExecution(key, executions.Get(key))
 	if err == nil && record.Phase == "started" && record.Generation == status.GetObservedGeneration() {
-		return record.ContainerID
+		return &record
 	}
-	return ""
+	return nil
 }
 
-// ActualForUplink reads all requested observations in one snapshot. An older
-// observation may still exist after its execution has been replaced.
+// ActualForUplink reads observations and validates their execution and release
+// binding in the same snapshot. It clears the returned binding if it is stale.
 func (s *Store) ActualForUplink(ids []string) (map[string]ActualRecord, error) {
 	actual := make(map[string]ActualRecord, len(ids))
 	err := s.db.View(func(tx *bbolt.Tx) error {
@@ -359,7 +362,8 @@ func (s *Store) ActualForUplink(ids []string) (map[string]ActualRecord, error) {
 			if err := json.Unmarshal(raw, &rec); err != nil {
 				return err
 			}
-			if rec.ContainerID != actualContainer(tx, rec.Status) {
+			execution := actualExecution(tx, rec.Status)
+			if execution == nil || rec.ContainerID != execution.ContainerID || checkReleaseExecution(tx, execution.Candidate) != nil {
 				rec.ContainerID = ""
 			}
 			actual[id] = rec
