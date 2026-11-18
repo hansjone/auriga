@@ -443,13 +443,27 @@ export function mountInstanceLogin(
           throw error;
         });
       },
-      onRestart: ({ signal }) =>
-        mutation(
+      onRestart: async ({ signal }) => {
+        const id = providerId!;
+        if (
+          current(version) &&
+          !signal.aborted &&
+          ((tx?.provider.id === id && tx.provider.connectorType === 'uac') ||
+            providers.some(
+              (provider) =>
+                provider.id === id && provider.connectorType === 'uac',
+            ))
+        ) {
+          await selectProvider(id, true);
+          // The provider switch disposes this step view, so it ignores the return value.
+          return step;
+        }
+        return mutation(
           async () => {
             await cancelTransaction(tx);
             if (!current(version)) throw new Error('Inactive login');
             return iam.createLoginTransaction({
-              providerId: providerId!,
+              providerId: id,
               purpose: 'login',
               returnTo: entry,
             });
@@ -459,7 +473,8 @@ export function mountInstanceLogin(
         ).catch((error: unknown) => {
           if (current(version)) fail(error);
           throw error;
-        }),
+        });
+      },
       onComplete: () => {
         if (current(version) && tx?.status === 'completed' && !workBusy)
           void verifyAndOpen();
@@ -469,19 +484,36 @@ export function mountInstanceLogin(
     render();
   }
 
-  async function selectProvider(id: string) {
+  async function selectProvider(id: string, freshScan = false) {
     if (authBusy || workBusy || disposed) return;
     const previous = tx;
     invalidate();
     tx = undefined;
     providerId = id;
-    if (providers.find((p) => p.id === id)?.connectorType === 'uac') {
+    const selected =
+      providers.find((p) => p.id === id) ??
+      (previous?.provider.id === id ? previous.provider : undefined);
+    if (selected?.connectorType === 'uac') {
       const version = epoch;
-      const navigation = takeNavigationContext(doc, id);
+      if (freshScan && previous?.status === 'pending') {
+        authBusy = true;
+        render();
+        try {
+          await cancelTransaction(previous);
+        } catch (error) {
+          if (current(version)) fail(error);
+          return;
+        } finally {
+          authBusy = false;
+          render();
+        }
+        if (!current(version)) return;
+      }
+      const navigation = freshScan ? undefined : takeNavigationContext(doc, id);
       uacView = createUacLoginView(loginRoot, {
         api: iam,
         providerId: id,
-        targetName: providers.find((p) => p.id === id)?.displayName,
+        targetName: selected.displayName,
         locale,
         navigation,
         initialCorrelationId: navigationCorrelationId(doc),
@@ -551,11 +583,16 @@ export function mountInstanceLogin(
       throw new Error('Invalid login providers');
     providers = result.items;
     show(providers.length ? 'providers' : 'empty');
-    const preferred = providers.find(
-      (p) => p.connectorType === 'uac' && p.id === navigationProviderId(doc),
-    );
-    if (preferred && doc.getElementById('auriga-uac-navigation'))
-      void selectProvider(preferred.id);
+    const navigationProvider = doc.getElementById('auriga-uac-navigation')
+      ? navigationProviderId(doc)
+      : undefined;
+    const preferred =
+      providers.find(
+        (p) => p.connectorType === 'uac' && p.id === navigationProvider,
+      ) ?? providers.find((p) => p.connectorType === 'uac');
+    // The navigation proof controls SSO only. IAM's enabled providers also
+    // support anonymous QR sign-in when Edge cannot supply that proof.
+    if (preferred) void selectProvider(preferred.id);
   }
 
   async function verifyAndOpen() {
