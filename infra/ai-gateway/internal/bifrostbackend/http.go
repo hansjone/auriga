@@ -533,9 +533,10 @@ func (b *Backend) chat(w http.ResponseWriter, r *http.Request, tenant string, ke
 		reject(w, e)
 		return
 	}
+	dispatchCtx := withCompatibleChatDiagnostic(r.Context(), key.Source, routes, stream, fields)
 	var body []byte
 	started := false
-	result, runErr := Run(r.Context(), routes, raw, b.allowPrivate, func(chunk []byte) error {
+	result, runErr := Run(dispatchCtx, routes, raw, b.allowPrivate, func(chunk []byte) error {
 		if !stream {
 			body = bytes.Clone(chunk)
 			return nil

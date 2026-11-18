@@ -432,7 +432,10 @@ final class UacFlow {
           ObjectNode credential =
               uac.open(row.path("credential"), row.path("providerId").asString());
           LoginManager.Result result =
-              login.finishUac(transaction, Json.object("subject", credential.path("empNo")));
+              login.finishUac(
+                  transaction,
+                  Json.object("subject", credential.path("empNo")),
+                  row.path("providerRevision").asString());
           row.put("consumed", true);
           row.remove("credential");
           if (result.session() != null) {

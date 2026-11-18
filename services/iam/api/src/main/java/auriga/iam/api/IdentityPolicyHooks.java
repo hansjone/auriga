@@ -12,9 +12,25 @@ public interface IdentityPolicyHooks {
     return java.util.Optional.empty();
   }
 
-  /** Only administrator-verified employee mappings may resolve a UAC subject. */
+  /** Only verified employee mappings may resolve a UAC subject. */
   default java.util.Optional<UUID> resolveUacEmployee(UUID provider, String employee) {
     return java.util.Optional.empty();
+  }
+
+  /** Includes inactive preconfigured bindings so that linking cannot replace their owner. */
+  default java.util.Optional<UUID> knownUacEmployee(UUID provider, String employee) {
+    return resolveUacEmployee(provider, employee);
+  }
+
+  /** IAM calls this only after UAC and the login policy authenticate a new portal member. */
+  default boolean provisionVerifiedUacMember(
+      UUID provider, String employee, UUID account, String displayName) {
+    return false;
+  }
+
+  /** Only an active ordinary member created by UAC first login may resume enrollment. */
+  default boolean canResumeVerifiedUacMember(UUID provider, String employee, UUID account) {
+    return false;
   }
 
   /** Must bind the invitation's trusted employee to this exact verified subject, atomically. */

@@ -28,6 +28,7 @@ public final class ResourceDistributions {
   private final ResourceWorkflowStore db;
   private final ResourceAccess access;
   private final ResourceWorkflow workflow;
+  private final ResourceOperations operations;
   private final Supplier<ResourceWorkspace> workspace;
   private final Supplier<ResourceSigning> signing;
   private final Supplier<ObjectStore> objects;
@@ -41,6 +42,7 @@ public final class ResourceDistributions {
       ResourceWorkflowStore db,
       ResourceAccess access,
       ResourceWorkflow workflow,
+      ResourceOperations operations,
       Supplier<ResourceWorkspace> workspace,
       Supplier<ResourceSigning> signing,
       Supplier<ObjectStore> objects,
@@ -52,6 +54,7 @@ public final class ResourceDistributions {
     this.db = db;
     this.access = access;
     this.workflow = workflow;
+    this.operations = operations;
     this.workspace = workspace;
     this.signing = signing;
     this.objects = objects;
@@ -90,7 +93,7 @@ public final class ResourceDistributions {
               .contains(text(selection, "action", 16))) throw invalid();
       uuid(selection, "versionId");
     }
-    return workflow.operation(
+    return operations.operation(
         actor,
         MANAGE,
         false,
@@ -111,7 +114,7 @@ public final class ResourceDistributions {
                       db.args("instance", instance)),
                   "revision");
           long revision = Math.max(last, snapshot.selectionRevision()) + 1;
-          if (revision > ResourceWorkflow.MAX) throw new AurigaException(CommonErrors.CONFLICT);
+          if (revision > ResourceOperations.MAX) throw new AurigaException(CommonErrors.CONFLICT);
           UUID id = UuidV7.next();
           db.update(
               "INSERT INTO resource.resource_distribution(id,tenant_id,actor_id,instance_id,owner_id,administrator,selection_revision,selections,state,created_at) VALUES(:id,:tenant,:actor,:instance,:owner,:admin,:rev,CAST(:selections AS jsonb),'requested',:now)",
@@ -171,7 +174,7 @@ public final class ResourceDistributions {
           data.put("selectionRevision", revision);
           data.put("selections", JSON.convertValue(selections, List.class));
           events.publish("resource.distribution_requested", id.toString(), data, "1");
-          workflow.recorded(r, "resource.distribution.request", id);
+          operations.recorded(r, "resource.distribution.request", id);
           return db.distributionJson(db.distribution(id));
         });
   }
@@ -250,7 +253,7 @@ public final class ResourceDistributions {
         && Instant.parse(old.path("expiresAt").asString()).isAfter(now.plusSeconds(43200)))
       return old;
     long revision = old == null ? 1 : old.path("revision").asLong() + 1;
-    if (revision > ResourceWorkflow.MAX) throw new AurigaException(CommonErrors.CONFLICT);
+    if (revision > ResourceOperations.MAX) throw new AurigaException(CommonErrors.CONFLICT);
     var out =
         JSON.createObjectNode()
             .put("schemaVersion", 1)

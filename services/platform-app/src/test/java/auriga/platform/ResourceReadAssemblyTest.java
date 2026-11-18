@@ -1846,7 +1846,7 @@ class ResourceReadAssemblyTest {
         admin.queryForObject(
             "SELECT count(*) FROM resource.resource_member_ticket WHERE ticket_hash=?",
             Integer.class,
-            auriga.resource.app.ResourceWorkflow.hash(plaintext)));
+            auriga.resource.app.ResourceOperations.hash(plaintext)));
     assertEquals(version.toString(), ticket.path("resourceEnvelope").path("versionId").asString());
     assertTrue(
         Duration.between(Instant.now(), Instant.parse(ticket.path("expiresAt").asString()))

@@ -1,5 +1,7 @@
 package auriga.resource.config;
 
+import auriga.common.events.EventSchemas;
+import auriga.common.events.OutboxEventPublisher;
 import auriga.common.persistence.TenantTransactionManager;
 import auriga.common.security.*;
 import auriga.resource.api.ResourceAccessInputs;
@@ -197,26 +199,46 @@ public class ResourceRuntimeConfiguration {
             : null);
   }
 
+  private OutboxEventPublisher resourceEvents(ListableBeanFactory beans, Clock clock) {
+    return new OutboxEventPublisher(
+        new JdbcTemplate(resourceSource(beans)),
+        "resource",
+        "resource",
+        new EventSchemas(),
+        tools.jackson.databind.json.JsonMapper.builder().build(),
+        clock,
+        () -> {});
+  }
+
+  @Bean
+  ResourceOperations resourceOperations(
+      ResourceStore store,
+      ResourceWorkflowStore db,
+      ResourceAccess access,
+      ListableBeanFactory beans,
+      Clock clock) {
+    return new ResourceOperations(store, db, access, resourceEvents(beans, clock), clock);
+  }
+
   @Bean
   ResourceWorkflow resourceWorkflow(
       ResourceStore store,
       ResourceWorkflowStore db,
       ResourceAccess access,
+      ResourceOperations operations,
       ObjectProvider<ObjectStore> objects,
       ObjectProvider<ResourceSigning> signing,
       ListableBeanFactory beans,
       Clock clock) {
-    var events =
-        new auriga.common.events.OutboxEventPublisher(
-            new JdbcTemplate(resourceSource(beans)),
-            "resource",
-            "resource",
-            new auriga.common.events.EventSchemas(),
-            tools.jackson.databind.json.JsonMapper.builder().build(),
-            clock,
-            () -> {});
     return new ResourceWorkflow(
-        store, db, access, () -> required(objects), () -> required(signing), events, clock);
+        store,
+        db,
+        access,
+        operations,
+        () -> required(objects),
+        () -> required(signing),
+        resourceEvents(beans, clock),
+        clock);
   }
 
   @Bean
@@ -224,7 +246,7 @@ public class ResourceRuntimeConfiguration {
       ResourceStore store,
       ResourceWorkflowStore db,
       ResourceAccess access,
-      ResourceWorkflow workflow,
+      ResourceOperations operations,
       ObjectProvider<ObjectStore> objects,
       ObjectProvider<ResourceSigning> signing,
       Environment env,
@@ -247,7 +269,7 @@ public class ResourceRuntimeConfiguration {
         store,
         db,
         access,
-        workflow,
+        operations,
         () -> required(objects),
         () -> required(signing),
         () -> env.getProperty("auriga.resource.catalog-writes-enabled", Boolean.class, true),
@@ -296,12 +318,12 @@ public class ResourceRuntimeConfiguration {
       ResourceStore store,
       ResourceWorkflowStore db,
       ResourceAccess access,
-      ResourceWorkflow workflow,
+      ResourceOperations operations,
       ResourceDistributions distributions,
       ObjectProvider<ObjectStore> objects,
       Clock clock) {
     return new ResourceMembers(
-        store, db, access, workflow, distributions, () -> required(objects), clock);
+        store, db, access, operations, distributions, () -> required(objects), clock);
   }
 
   @Bean
@@ -319,6 +341,7 @@ public class ResourceRuntimeConfiguration {
       ResourceWorkflowStore db,
       ResourceAccess access,
       ResourceWorkflow workflow,
+      ResourceOperations operations,
       ObjectProvider<auriga.resource.api.ResourceWorkspace> workspace,
       ObjectProvider<ResourceSigning> signing,
       ObjectProvider<ObjectStore> objects,
@@ -326,26 +349,18 @@ public class ResourceRuntimeConfiguration {
       ResourceCursor cursors,
       ListableBeanFactory beans,
       Clock clock) {
-    var events =
-        new auriga.common.events.OutboxEventPublisher(
-            new JdbcTemplate(resourceSource(beans)),
-            "resource",
-            "resource",
-            new auriga.common.events.EventSchemas(),
-            tools.jackson.databind.json.JsonMapper.builder().build(),
-            clock,
-            () -> {});
     return new ResourceDistributions(
         store,
         db,
         access,
         workflow,
+        operations,
         workspace::getIfAvailable,
         () -> required(signing),
         () -> required(objects),
         () -> env.getRequiredProperty("auriga.resource.download-base-url"),
         cursors,
-        events,
+        resourceEvents(beans, clock),
         clock);
   }
 
