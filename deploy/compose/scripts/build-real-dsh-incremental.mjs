@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { spawnSync } from 'node:child_process';
+import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { parseArgs } from 'node:util';
@@ -39,6 +40,13 @@ await withRealDshContext(
       pathToFileURL(join(recipe, 'incremental.mjs')).href
     );
     assertIncrementalBaseImage(baseImage);
+    const { brokerSourceSha256 } = await import(
+      pathToFileURL(join(recipe, 'broker-inputs.mjs')).href
+    );
+    writeFileSync(
+      join(recipe, 'broker-source.sha256'),
+      brokerSourceSha256(payload) + '\n',
+    );
     const result = spawnSync(
       'docker',
       [

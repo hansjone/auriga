@@ -20,6 +20,10 @@ import { dirname, join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import * as runtime from '../../deploy/compose/real-dsh/runtime.mjs';
+import {
+  brokerInputs,
+  brokerSourceSha256,
+} from '../../deploy/compose/real-dsh/broker-inputs.mjs';
 import { normalizeSourceModes } from '../../deploy/compose/real-dsh/source-modes.mjs';
 
 const repository = fileURLToPath(new URL('../../', import.meta.url));
@@ -115,6 +119,12 @@ test('real DSH image contains every declared Auriga package entry and overlay', 
     assert.ok(files.includes('cordis.patch.yml'));
     assert.ok(files.includes('src/plugin.js'));
     assert.ok(files.includes('src/client.js'));
+    const { createManagedFileConnection } = await import(
+      pathToFileURL(join(image, 'src/managed/file-connection.js')).href
+    );
+    await assert.rejects(createManagedFileConnection({}), {
+      code: 'common.unavailable',
+    });
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }
@@ -247,6 +257,14 @@ function sourceFixture(t) {
   ])
     put(join(plugin, name), name);
   put(join(plugin, 'src/network/entry.js'), pluginBytes);
+  for (const path of brokerInputs) {
+    const destination = join(root, path);
+    if (existsSync(destination)) continue;
+    const original = join(repository, path);
+    if (lstatSync(original).isDirectory())
+      mkdirSync(destination, { recursive: true });
+    else put(destination, readFileSync(original));
+  }
   for (const path of [
     '.git/config',
     'var/install-material.txt',
@@ -294,6 +312,8 @@ const linkedInputs = {
     outside,
     replaceWithLink,
   }) => replaceWithLink(join(plugin, 'cordis.patch.yml'), outside, 'junction'),
+  'new broker schema directory': ({ root, outside, replaceWithLink }) =>
+    replaceWithLink(join(root, 'contracts/plugin'), outside, 'junction'),
   'direct input file symlink': ({ plugin, outside, replaceWithLink }) =>
     replaceWithLink(
       join(plugin, 'cordis.patch.yml'),
@@ -328,6 +348,13 @@ for (const incremental of [false, true]) {
             assert.ok(source.startsWith('real-dsh-inputs/'), source);
             assert.ok(fs.globSync(source, { cwd: context }).length > 0, source);
           }
+          assert.equal(
+            readFileSync(
+              join(payload, 'deploy/compose/real-dsh/broker-source.sha256'),
+              'utf8',
+            ),
+            brokerSourceSha256(payload) + '\n',
+          );
         }
         for (const path of [
           '.git',
@@ -336,7 +363,15 @@ for (const incremental of [false, true]) {
           'outside',
         ])
           assert.equal(existsSync(join(payload, path)), false, path);
-        assert.deepEqual(readdirSync(payload).sort(), ['clients', 'deploy']);
+        assert.deepEqual(readdirSync(payload).sort(), [
+          'clients',
+          'contracts',
+          'deploy',
+          'package.json',
+          'pnpm-workspace.yaml',
+          'tsconfig.base.json',
+          'web',
+        ]);
         assert.deepEqual(
           readFileSync(
             join(payload, 'clients/dsh-plugin/src/network/entry.js'),
@@ -400,6 +435,39 @@ test('incremental builder refuses a tag as the base before starting Docker', asy
     base: imageTag,
     error: /complete image digest/,
   });
+});
+
+test('broker source lock covers the bundled plugin sources and workspace lock', () => {
+  const fixture = mkdtempSync(join(tmpdir(), 'auriga-broker-lock-'));
+  try {
+    for (const path of brokerInputs) {
+      const input = join(repository, path);
+      const copy = join(fixture, path);
+      mkdirSync(dirname(copy), { recursive: true });
+      cpSync(input, copy, { recursive: lstatSync(input).isDirectory() });
+    }
+    const original = brokerSourceSha256(fixture);
+    writeFileSync(
+      join(fixture, 'clients/dsh-plugin/src/unbundled.js'),
+      '// ignored',
+    );
+    assert.equal(brokerSourceSha256(fixture), original);
+    const bundled = join(
+      fixture,
+      'clients/dsh-plugin/src/network/transport/nats-link.js',
+    );
+    fs.appendFileSync(bundled, '\n// changed');
+    assert.notEqual(brokerSourceSha256(fixture), original);
+    cpSync(
+      join(repository, 'clients/dsh-plugin/src/network/transport/nats-link.js'),
+      bundled,
+    );
+    assert.equal(brokerSourceSha256(fixture), original);
+    fs.appendFileSync(join(fixture, 'web/pnpm-lock.yaml'), '\n# changed');
+    assert.notEqual(brokerSourceSha256(fixture), original);
+  } finally {
+    rmSync(fixture, { recursive: true, force: true });
+  }
 });
 
 test('source permission normalization rejects links without changing their target', () => {

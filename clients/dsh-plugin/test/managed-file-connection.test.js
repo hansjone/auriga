@@ -6,14 +6,19 @@ import {
   generateKeyPairSync,
   sign,
 } from 'node:crypto';
-import { mkdtemp, writeFile, rm } from 'node:fs/promises';
+import { cp, mkdtemp, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { createManagedFileConnection } from '../src/managed/file-connection.js';
 import { createBroker } from '../src/local/broker.js';
+import { verifyBrokerPackage } from '../src/local/broker-package.js';
+import { packageBroker } from '../scripts/package-broker.mjs';
+import { buildBroker } from '../../shell-auth/build.mjs';
+import { managedBrokerChecks } from '../../../deploy/compose/real-dsh/runtime.mjs';
 import { testRoots } from './network/trust/keyset-fixtures.js';
 
-async function fixture(t, patch = {}) {
+async function fixture(t, patch = {}, connect = createManagedFileConnection) {
   const directory = await mkdtemp(join(tmpdir(), 'auriga-managed-fixed-'));
   const key = generateKeyPairSync('ec', { namedCurve: 'P-256' });
   const material = {
@@ -94,7 +99,7 @@ async function fixture(t, patch = {}) {
       },
     });
   });
-  const connection = await createManagedFileConnection({
+  const connection = await connect({
     file,
     modelFile,
     directory,
@@ -107,6 +112,41 @@ async function fixture(t, patch = {}) {
   });
   return { broker, connection, material, file, modelFile, calls };
 }
+
+test('verified managed-linux artifact runs the fixed executor from an isolated plugin layout', async (t) => {
+  const root = await mkdtemp(join(tmpdir(), 'auriga-managed-package-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const plugin = join(root, 'plugin');
+  await cp(new URL('../src', import.meta.url), join(plugin, 'src'), {
+    recursive: true,
+  });
+  await cp(
+    new URL('../package.json', import.meta.url),
+    join(plugin, 'package.json'),
+  );
+  const artifact = join(root, 'artifact');
+  const manifest = buildBroker(artifact, { managedLinux: true });
+  assert.equal(manifest.target, 'managed-linux');
+  await assert.rejects(verifyBrokerPackage(artifact), /manifest invalid/);
+  const packaged = join(plugin, 'shell-auth');
+  assert.deepEqual(
+    await packageBroker(artifact, packaged, 'managed-linux'),
+    manifest,
+  );
+  await managedBrokerChecks(plugin);
+
+  const { createManagedFileConnection: connect } = await import(
+    pathToFileURL(join(plugin, 'src/managed/file-connection.js')).href
+  );
+  const f = await fixture(t, {}, connect);
+  assert.equal(f.broker.state.current().state, 'authenticated');
+  assert.equal(
+    (await f.broker.call('profile_read', {})).body.memberId,
+    f.material.ownerId,
+  );
+  await writeFile(join(packaged, 'network-core.bundle.mjs'), 'changed');
+  await assert.rejects(connect({}), /digest mismatch/);
+});
 
 test('managed file authority validates both fixed DTO directions and rejects dynamic targets before HTTP', async (t) => {
   const f = await fixture(t);

@@ -4,7 +4,7 @@ import { lstatSync, readFileSync, readdirSync, rmSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { productionInputs } from './inputs.mjs';
-import { installedRuntime } from './runtime.mjs';
+import { installedRuntime, verifyManagedBroker } from './runtime.mjs';
 
 const hash = (bytes) => createHash('sha256').update(bytes).digest('hex');
 const json = (path) => JSON.parse(readFileSync(path, 'utf8'));
@@ -70,11 +70,31 @@ export function assertIncrementalBaseImage(baseImage) {
 }
 
 /** Verify all stable inputs before removing the previous plugin source snapshot. */
-export function prepareIncremental({ opt, expected, baseImage, toolchain }) {
+export async function prepareIncremental({
+  opt,
+  expected,
+  baseImage,
+  toolchain,
+}) {
   assertIncrementalBaseImage(baseImage);
   opt = resolve(opt);
   expected = resolve(expected);
   verifyManifest(opt);
+  const brokerKey = join(opt, 'fixture/broker-source.sha256');
+  if (
+    !lstatSync(brokerKey, { throwIfNoEntry: false })?.isFile() ||
+    !lstatSync(join(opt, 'auriga-dsh/shell-auth/broker-manifest.json'), {
+      throwIfNoEntry: false,
+    })?.isFile()
+  )
+    throw new Error(
+      'Incremental base lacks the managed broker; use full build',
+    );
+  same(
+    brokerKey,
+    join(expected, 'recipe/broker-source.sha256'),
+    'broker source/lock',
+  );
   for (const name of ['package.json', 'package-lock.json'])
     same(join(opt, 'dsh', name), join(expected, 'recipe', name), `dsh/${name}`);
   for (const name of [
@@ -120,6 +140,14 @@ export function prepareIncremental({ opt, expected, baseImage, toolchain }) {
         `Incremental installed plugin ${name} differs; use full build`,
       );
   installedRuntime(join(opt, 'dsh'), versions, production.pkg);
+  try {
+    await verifyManagedBroker(join(opt, 'auriga-dsh'));
+  } catch (cause) {
+    throw new Error(
+      'Incremental base managed broker is invalid; use full build',
+      { cause },
+    );
+  }
   // Docker COPY merges directories; explicitly removing this fixed image path
   // first ensures files deleted in the new source cannot survive from the base.
   const source = join(opt, 'auriga-dsh/src');
@@ -135,7 +163,7 @@ if (
 ) {
   if (process.argv.length !== 2)
     throw new Error('Incremental guard accepts no arguments');
-  prepareIncremental({
+  await prepareIncremental({
     opt: '/opt',
     expected: '/tmp/auriga-incremental',
     baseImage: process.env.BASE_RUNTIME_IMAGE,

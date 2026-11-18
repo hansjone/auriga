@@ -42,6 +42,32 @@ export function pluginPackageFiles(directory) {
   return [...files].sort();
 }
 
+export async function verifyManagedBroker(directory) {
+  const { verifyBrokerPackage } = await import(
+    pathToFileURL(join(directory, 'src/local/broker-package.js')).href
+  );
+  return verifyBrokerPackage(join(directory, 'shell-auth'), 'managed-linux');
+}
+
+// Load the real packaged managed entry on a read-only filesystem. The verified
+// artifact cannot contain the sentinel, and no credential or network is needed.
+export async function managedBrokerChecks(directory) {
+  await verifyManagedBroker(directory);
+  const { createManagedFileConnection } = await import(
+    pathToFileURL(join(directory, 'src/managed/file-connection.js')).href
+  );
+  const file = join(directory, 'shell-auth/.artifact-check-no-credential');
+  try {
+    await createManagedFileConnection({ file });
+  } catch (error) {
+    if (error.code === 'ENOENT' && error.path === file) return;
+    throw error;
+  }
+  throw new Error(
+    'Managed broker artifact check did not reject missing credential',
+  );
+}
+
 // This recipe pins the already selected public host minimum, not an upstream
 // "latest" range. A changed plugin minimum requires a newly reviewed host lock.
 export function runtimeInputs(pkg, lock, versions, plugin) {
@@ -144,6 +170,7 @@ if (
   const versions = json('/opt/fixture/versions.json');
   const plugin = json('/opt/auriga-dsh/package.json');
   const result = await runtimeChecks('/opt/dsh', versions, plugin);
+  await managedBrokerChecks('/opt/auriga-dsh');
   const manifest = json('/opt/fixture/manifest.json');
   if (
     manifest.dshVersion !== result.dshVersion ||

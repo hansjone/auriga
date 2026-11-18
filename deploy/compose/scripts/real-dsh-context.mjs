@@ -13,6 +13,7 @@ import { pathToFileURL } from 'node:url';
 const pluginSource = 'clients/dsh-plugin/src';
 export const recipePath = 'deploy/compose/real-dsh';
 const modeScript = `${recipePath}/source-modes.mjs`;
+const brokerScript = `${recipePath}/broker-inputs.mjs`;
 export const commonInputs = [
   `${recipePath}/package.json`,
   `${recipePath}/package-lock.json`,
@@ -69,7 +70,15 @@ function checkSourceTree(directory) {
 export async function withRealDshContext(root, inputs, build, prefix = '') {
   const modeModule = sourcePath(root, modeScript);
   const { normalizeSourceModes } = await import(pathToFileURL(modeModule).href);
-  const sources = inputs.map((relative) => {
+  const brokerModule = sourcePath(root, brokerScript);
+  const { brokerInputs } = await import(pathToFileURL(brokerModule).href);
+  // Broker trees are already covered by the checked plugin source snapshot.
+  const sources = [
+    ...new Set([
+      ...inputs,
+      ...brokerInputs.filter((path) => !path.startsWith(pluginSource + '/')),
+    ]),
+  ].map((relative) => {
     const directory = relative === pluginSource;
     const path = sourcePath(root, relative, directory);
     if (directory) checkSourceTree(path);

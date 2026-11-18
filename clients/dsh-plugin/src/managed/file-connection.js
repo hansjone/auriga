@@ -49,8 +49,10 @@ function readPrivate(file) {
 async function implementation() {
   const packaged = fileURLToPath(new URL('../../shell-auth/', import.meta.url));
   let base;
+  let coreFile;
   if (existsSync(join(packaged, 'broker-manifest.json'))) {
-    base = (await verifyBrokerPackage(packaged)).base;
+    base = (await verifyBrokerPackage(packaged, 'managed')).base;
+    coreFile = 'network-core.bundle.mjs';
   } else {
     base = fileURLToPath(new URL('../../../shell-auth/', import.meta.url));
     if (
@@ -58,6 +60,7 @@ async function implementation() {
       !existsSync(new URL('../../scripts/package-ui.mjs', import.meta.url))
     )
       throw fail('common.unavailable');
+    coreFile = 'network-core.mjs';
   }
   const module = (/** @type {string} */ name) =>
     import(pathToFileURL(join(base, name)).href);
@@ -66,11 +69,7 @@ async function implementation() {
     module('host.mjs'),
     module('platform.mjs'),
     module('schema.mjs'),
-    module(
-      existsSync(join(base, 'network-core.bundle.mjs'))
-        ? 'network-core.bundle.mjs'
-        : 'network-core.mjs',
-    ),
+    module(coreFile),
   ]);
   return { ...business, ...host, ...platform, ...schema, core };
 }

@@ -11,7 +11,7 @@ RUN if ! command -v corepack >/dev/null 2>&1 || ! command -v pnpm >/dev/null 2>&
     fi
 COPY real-dsh-inputs/deploy/compose/real-dsh/ /tmp/auriga-incremental/recipe/
 COPY real-dsh-inputs/clients/dsh-plugin/package*.json /tmp/auriga-incremental/plugin/
-# Refuse changed foundations and verify the existing manifest before deleting src.
+# Refuse changed foundations and verify the managed broker before deleting src.
 RUN node /tmp/auriga-incremental/recipe/incremental.mjs
 COPY real-dsh-inputs/clients/dsh-plugin/src /opt/auriga-dsh/src
 COPY real-dsh-inputs/clients/dsh-plugin/LICENSE /opt/auriga-dsh/LICENSE
@@ -24,5 +24,6 @@ RUN node /tmp/auriga-incremental/recipe/source-modes.mjs /opt/auriga-dsh/src \
 ENV HOME=/home/dsh DSH_TELEMETRY_DISABLED=1 DSH_TELEMETRY_MODE=DISABLED
 WORKDIR /home/dsh
 USER 200000:200000
+RUN --network=none node /opt/fixture/runtime.mjs
 EXPOSE 7860
 ENTRYPOINT ["node", "/opt/fixture/start.mjs"]
