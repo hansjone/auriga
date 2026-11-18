@@ -30,9 +30,10 @@ func TestSignedResourceRuntimeCommitRechecksVerifiedStart(t *testing.T) {
 			f.validCatalog()
 			id := f.required.InstanceId
 			expected := "endpoint process changed"
-			if tc == "original-proof" {
+			switch tc {
+			case "original-proof":
 				expected = "manifest.json"
-			} else if tc == "resource-lease" {
+			case "resource-lease":
 				expected = "lease_expired"
 			}
 			checked := false
