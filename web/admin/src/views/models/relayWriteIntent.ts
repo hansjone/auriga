@@ -1,5 +1,6 @@
 import { onBeforeUnmount, shallowRef, watch } from 'vue';
 import { isApiError } from '@auriga/shared';
+import { browserUuid } from '../../admin/browserUuid';
 import type { useRelayUi } from './relayUi';
 
 export type RelayWriteAction = {
@@ -41,7 +42,7 @@ export function useRelayWriteIntent(ui: ReturnType<typeof useRelayUi>) {
     saved: (result: T) => void,
     reload: () => Promise<void>,
   ): RelayWriteAction {
-    const key = globalThis.crypto.randomUUID();
+    const key = browserUuid();
     const created = epoch;
     const action: RelayWriteAction = {
       permission,

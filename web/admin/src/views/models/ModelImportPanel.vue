@@ -2,6 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { isApiError } from '@auriga/shared';
 import { adminApi } from '../../admin/api';
+import { browserUuid } from '../../admin/browserUuid';
 import {
   relayApi,
   type RelayPool,
@@ -198,7 +199,7 @@ function prepare() {
         output: limits.output,
         contextMode: 'inherit',
         outputMode: 'inherit',
-        key: globalThis.crypto.randomUUID(),
+        key: browserUuid(),
         status: 'pending',
         message: '',
       };
@@ -310,7 +311,7 @@ async function run() {
               currency: 'USD',
               inputMicrosPerMillionTokens: Number(inputPrice.value),
               outputMicrosPerMillionTokens: Number(outputPrice.value),
-              version: globalThis.crypto.randomUUID(),
+              version: browserUuid(),
               effectiveAt: new Date().toISOString(),
             },
           };

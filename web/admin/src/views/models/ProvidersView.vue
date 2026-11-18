@@ -16,6 +16,7 @@ import {
 } from '../../admin/relayApi';
 import ActionConfirm from '../../admin/ActionConfirm.vue';
 import AdminDialog from '../../admin/AdminDialog.vue';
+import { browserUuid } from '../../admin/browserUuid';
 import { useRelayI18n } from './relayMessages';
 import { useRelayUi } from './relayUi';
 import { useRelayWriteIntent, type RelayWriteAction } from './relayWriteIntent';
@@ -64,6 +65,61 @@ function canPrepare() {
   return true;
 }
 const catalogs = ref<Record<string, CatalogState>>({});
+// Keep confirmed availability across pool editors without carrying over the
+// per-editor loading state or refreshing another pool's capability snapshot.
+const successfulCatalogs = shallowRef(
+  new Map<
+    string,
+    { models: ReadonlySet<string>; unlistedSaved: ReadonlySet<string> }
+  >(),
+);
+const savedRouteModels = computed(() => {
+  const models = new Map<string, Set<string>>();
+  for (const { id } of providers.value) models.set(id, new Set());
+  for (const pool of pools.value)
+    for (const route of pool.routes)
+      if (route.model.trim())
+        models.get(route.providerId)?.add(route.model.trim());
+  return models;
+});
+const availableModels = computed(() => {
+  const models = new Map<string, ReadonlySet<string>>(savedRouteModels.value);
+  for (const [id, catalog] of successfulCatalogs.value)
+    models.set(id, catalog.models);
+  return models;
+});
+function forgetSuccessfulCatalog(providerId: string) {
+  if (!successfulCatalogs.value.has(providerId)) return;
+  const next = new Map(successfulCatalogs.value);
+  next.delete(providerId);
+  successfulCatalogs.value = next;
+}
+function isUnlistedHistoricalModel({
+  providerId,
+  model,
+}: RelayPool['routes'][number]) {
+  const catalog = successfulCatalogs.value.get(providerId);
+  const id = model.trim();
+  return (
+    !!catalog &&
+    !catalog.models.has(id) &&
+    (catalog.unlistedSaved.has(id) ||
+      savedRouteModels.value.get(providerId)?.has(id) === true)
+  );
+}
+const editedPool = computed(() =>
+  pools.value.find((row) => row.id === selected.value),
+);
+function isNewUnlistedRoute(route: RelayPool['routes'][number]) {
+  return (
+    isUnlistedHistoricalModel(route) &&
+    !editedPool.value?.routes.some(
+      (saved) =>
+        saved.providerId === route.providerId &&
+        saved.model.trim() === route.model.trim(),
+    )
+  );
+}
 const catalogLoading = computed(() =>
   Object.values(catalogs.value).some((catalog) => catalog.loading),
 );
@@ -91,6 +147,17 @@ async function fetchModels(providerId: string) {
   try {
     const result = await relayApi.providerModels(providerId, controller.signal);
     if (epoch !== catalogEpoch) return;
+    const models = new Set(result.items.map(({ id }) => id));
+    const unlistedSaved = new Set(
+      [
+        ...(successfulCatalogs.value.get(providerId)?.unlistedSaved ?? []),
+        ...(savedRouteModels.value.get(providerId) ?? []),
+      ].filter((model) => !models.has(model)),
+    );
+    successfulCatalogs.value = new Map(successfulCatalogs.value).set(
+      providerId,
+      { models, unlistedSaved },
+    );
     catalogs.value[providerId] = {
       items: result.items,
       loading: false,
@@ -157,7 +224,7 @@ const freshPool = (): RelayPool => ({
     currency: 'USD',
     inputMicrosPerMillionTokens: 0,
     outputMicrosPerMillionTokens: 0,
-    version: globalThis.crypto.randomUUID(),
+    version: browserUuid(),
     effectiveAt: new Date().toISOString(),
   },
 });
@@ -171,6 +238,18 @@ async function load() {
     Promise.all([relayApi.providers(ui.signal), relayApi.pools(ui.signal)]),
   );
   if (result) {
+    const nextProviders = new Map(result[0].items.map((row) => [row.id, row]));
+    for (const { id, configuration, hasCredential } of providers.value) {
+      const next = nextProviders.get(id);
+      if (
+        !next ||
+        next.configuration.baseUrl !== configuration.baseUrl ||
+        next.configuration.kind !== configuration.kind ||
+        next.configuration.enabled !== configuration.enabled ||
+        next.hasCredential !== hasCredential
+      )
+        forgetSuccessfulCatalog(id);
+    }
     providers.value = result[0].items;
     pools.value = result[1].items;
     poolsReady.value = true;
@@ -206,6 +285,7 @@ watch(
       poolsReady.value = false;
       providers.value = [];
       pools.value = [];
+      successfulCatalogs.value = new Map();
       close();
       pending.value = undefined;
     }
@@ -275,7 +355,10 @@ function askCredential() {
     'ai.credentials.rotate',
     t('confirmSecret', { name: provider.value.name }),
     (key) => relayApi.credential(id, value, key, ui.signal),
-    close,
+    () => {
+      forgetSuccessfulCatalog(id);
+      close();
+    },
     load,
   );
 }
@@ -292,6 +375,7 @@ function askPool() {
   body.routes.forEach((route) => {
     route.model = route.model.trim();
   });
+  if (body.routes.some(isNewUnlistedRoute)) return;
   if (body.capabilities) reconcileCapabilitySource(body);
   const routeIdentities = new Set<string>();
   const duplicate = body.routes.findIndex((route) => {
@@ -752,6 +836,7 @@ async function confirm() {
             v-model="draft"
             :providers="providers"
             :catalogs="catalogs"
+            :available-models="availableModels"
             @refresh="applyCapabilities"
           />
           <p v-if="capabilityNotice" class="relay-wide" role="status">
@@ -790,9 +875,11 @@ async function confirm() {
               />
               <datalist :id="'route-model-catalog-' + index">
                 <option
-                  v-for="model in catalogs[route.providerId]?.items ?? []"
-                  :key="model.id"
-                  :value="model.id"
+                  v-for="model in [
+                    ...(availableModels.get(route.providerId) ?? []),
+                  ]"
+                  :key="model"
+                  :value="model"
                 />
               </datalist>
             </label>
@@ -832,14 +919,25 @@ async function confirm() {
               </p>
             </div>
             <p class="relay-route-hint">{{ t('catalogHint') }}</p>
+            <p
+              v-if="isUnlistedHistoricalModel(route)"
+              :role="isNewUnlistedRoute(route) ? 'alert' : undefined"
+            >
+              {{
+                t(
+                  isNewUnlistedRoute(route)
+                    ? 'catalogHistoricalNew'
+                    : 'catalogHistoricalExisting',
+                )
+              }}
+            </p>
             <p v-if="catalogs[route.providerId]?.error" role="alert">
               {{ catalogs[route.providerId]?.error }}
             </p>
             <p
               v-else-if="
-                catalogs[route.providerId] &&
                 !catalogs[route.providerId]?.loading &&
-                !catalogs[route.providerId]?.items.length
+                successfulCatalogs.get(route.providerId)?.models.size === 0
               "
             >
               {{ t('catalogEmpty') }}
@@ -874,7 +972,7 @@ async function confirm() {
           <button
             type="submit"
             data-testid="save-pool"
-            :disabled="catalogLoading"
+            :disabled="catalogLoading || draft.routes.some(isNewUnlistedRoute)"
           >
             {{ t('save') }}</button
           ><button type="button" @click="close">{{ t('close') }}</button>
