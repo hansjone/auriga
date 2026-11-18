@@ -112,6 +112,10 @@ const zh = {
   fetchModels: '获取供应商模型',
   catalogHint: '可选择已有路由模型、获取供应商目录，或手动填写上游模型 ID。',
   catalogEmpty: '供应商没有返回可用模型，可继续手动填写。',
+  catalogHistoricalExisting:
+    '此历史模型未出现在供应商目录中。可编辑或移除已有路由。',
+  catalogHistoricalNew:
+    '此历史模型未出现在供应商目录中，不能新增该历史模型。请选择其他模型。',
   aliasNote:
     '上游真实模型 ID 用于调用供应商；对外公开 ID 可自定义，成员和外部 Key 使用公开 ID。',
   catalog_credential_missing: '请先为此供应商配置密钥。',
@@ -357,6 +361,10 @@ const en: Record<keyof typeof zh, string> = {
     'Choose a model from saved routes, fetch the catalog, or enter the upstream model ID.',
   catalogEmpty:
     'The provider returned no available models. You can enter an ID manually.',
+  catalogHistoricalExisting:
+    'This historical model is missing from the provider catalog. You can edit or remove the saved route.',
+  catalogHistoricalNew:
+    'This historical model is missing from the provider catalog and cannot be added. Choose another model.',
   aliasNote:
     'The upstream model ID selects the provider model. Members and external keys use your custom public model ID.',
   catalog_credential_missing: 'Configure a credential for this provider first.',

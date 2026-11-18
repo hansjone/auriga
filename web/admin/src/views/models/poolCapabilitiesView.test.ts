@@ -54,6 +54,14 @@ const legacy = (): RelayPool => ({
     outputMicrosPerMillionTokens: 1,
   },
 });
+const retiredPool = (): RelayPool => ({
+  ...legacy(),
+  id: 'legacy-retired',
+  routes: [
+    { providerId, model: 'retired', weight: 1 },
+    { providerId, model: 'large', weight: 1 },
+  ],
+});
 let persisted: RelayPool[];
 beforeEach(() => {
   persisted = [legacy()];
@@ -257,6 +265,7 @@ it.each([undefined, 0, 750000])(
   },
 );
 it('does not change manual policy or values after an upstream refresh failure', async () => {
+  persisted.push(retiredPool());
   vi.mocked(relayApi.providerModels).mockRejectedValue(
     new Error('synthetic network failure'),
   );
@@ -274,6 +283,20 @@ it('does not change manual policy or values after an upstream refresh failure', 
     ]);
     expect(value(w, 'recommendedContextWindow')).toBe('');
     expect(w.text()).toContain('刷新失败');
+    expect(w.text()).not.toContain('供应商没有返回可用模型');
+    expect(
+      w.find('#route-model-catalog-0 option[value="retired"]').exists(),
+    ).toBe(true);
+    expect(
+      w
+        .get('[name="capabilitySourceRoute"]')
+        .findAll('option')
+        .find(
+          (option) =>
+            option.element.value === JSON.stringify([providerId, 'retired']),
+        )
+        ?.text(),
+    ).toContain('添加路由');
     expect(w.get('[data-testid="context-upstream"]').text()).toContain(
       '尚未获取',
     );
@@ -555,6 +578,125 @@ it('binds real same-provider models from saved routes to the new pool without a 
       ],
       capabilities: { sourceProviderId: providerId, sourceModel: 'large' },
     });
+  } finally {
+    w.unmount();
+  }
+});
+
+it('keeps a historical model out of additions to other pools after a successful catalog fetch', async () => {
+  persisted.push(retiredPool());
+  vi.mocked(relayApi.providerModels).mockResolvedValue({
+    items: [{ id: 'large' }, { id: 'catalog-only' }],
+  });
+  const w = mount(ProvidersView, { global });
+  try {
+    await flushPromises();
+    await w
+      .get('[data-pool="legacy-retired"] [data-testid="edit-pool"]')
+      .trigger('click');
+    await w.get('[data-testid="fetch-provider-models-0"]').trigger('click');
+    await flushPromises();
+    expect(value(w, 'routeModel0')).toBe('retired');
+    expect(value(w, 'capabilitySourceRoute')).toBe(
+      JSON.stringify([providerId, 'retired']),
+    );
+    await w
+      .findAll('button')
+      .find((b) => b.text() === '关闭编辑')!
+      .trigger('click');
+    await openAuto(w);
+
+    const source = w.get('[name="capabilitySourceRoute"]');
+    const suggested = () =>
+      w
+        .findAll('#route-model-catalog-0 option')
+        .map((option) => (option.element as HTMLOptionElement).value);
+    expect(suggested()).toEqual(['large', 'catalog-only']);
+    expect(source.text()).not.toContain('retired');
+    expect(source.text()).toContain('catalog-only');
+
+    vi.mocked(relayApi.providerModels).mockRejectedValue(
+      new Error('synthetic network failure'),
+    );
+    await w.get('[data-testid="fetch-provider-models-0"]').trigger('click');
+    await flushPromises();
+    expect(w.text()).toContain('暂时无法获取供应商模型');
+    expect(suggested()).toEqual(['large', 'catalog-only']);
+
+    await w
+      .findAll('button')
+      .find((b) => b.text() === '添加池路由')!
+      .trigger('click');
+    await w.get('[name="routeProvider2"]').setValue(providerId);
+    const model = w.get('[name="routeModel2"]');
+    await model.setValue(' retired ');
+    expect(
+      w
+        .get('[data-testid="pool-form"] button[type="submit"]')
+        .attributes('disabled'),
+    ).toBeDefined();
+    await w.get('[data-testid="pool-form"]').trigger('submit');
+    expect(w.text()).toContain('不能新增该历史模型');
+    expect(w.find('[data-testid="confirm-action"]').exists()).toBe(false);
+    expect(relayApi.savePool).not.toHaveBeenCalled();
+    await model.setValue('');
+    await source.setValue(JSON.stringify([providerId, 'catalog-only']));
+    expect(value(w, 'routeModel2')).toBe('catalog-only');
+    await w.get('[data-testid="pool-form"]').trigger('submit');
+    await w.get('[data-testid="confirm-action"]').trigger('click');
+    await flushPromises();
+    expect(persisted[0].routes.map(({ model }) => model)).toEqual([
+      'small',
+      'large',
+      'catalog-only',
+    ]);
+  } finally {
+    w.unmount();
+  }
+});
+
+it('still saves changes to the pool with the historical route and allows removing it', async () => {
+  persisted = [retiredPool()];
+  vi.mocked(relayApi.providerModels).mockResolvedValue({ items: [] });
+  const w = mount(ProvidersView, { global });
+  const open = () =>
+    w
+      .get('[data-pool="legacy-retired"] [data-testid="edit-pool"]')
+      .trigger('click');
+  const save = async () => {
+    await w.get('[data-testid="pool-form"]').trigger('submit');
+    await w.get('[data-testid="confirm-action"]').trigger('click');
+    await flushPromises();
+  };
+  try {
+    await flushPromises();
+    await open();
+    await w.get('[data-testid="fetch-provider-models-0"]').trigger('click');
+    await flushPromises();
+    expect(w.text()).toContain('供应商没有返回可用模型');
+    expect(w.text()).toContain('此历史模型未出现在供应商目录中');
+    expect(value(w, 'capabilitySourceRoute')).toBe(
+      JSON.stringify([providerId, 'retired']),
+    );
+    await w.get('[name="routeWeight0"]').setValue('2');
+    await save();
+    expect(persisted[0].routes[0]).toEqual({
+      providerId,
+      model: 'retired',
+      weight: 2,
+    });
+    await open();
+    await w
+      .findAll('button')
+      .find((b) => b.text() === '移除路由')!
+      .trigger('click');
+    expect(value(w, 'capabilitySourceRoute')).toBe(
+      JSON.stringify([providerId, 'large']),
+    );
+    await save();
+    expect(persisted[0].routes).toEqual([
+      { providerId, model: 'large', weight: 1 },
+    ]);
   } finally {
     w.unmount();
   }
