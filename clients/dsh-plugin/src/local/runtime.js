@@ -426,10 +426,11 @@ export async function createConnectRuntime({
         typeof child.effect !== 'function'
       )
         return;
-      environment = createEnterpriseEnvironment({
+      const toolEnvironment = createEnterpriseEnvironment({
         auth: enterprise,
         getServer: () => child.webServer,
         retain: (id) => contexts.retain(id),
+        finishContext: (id) => void contexts.finish(id),
         async prepare(execution) {
           try {
             const tool = await contexts.tool(execution);
@@ -440,14 +441,20 @@ export async function createConnectRuntime({
           }
         },
       });
-      child.shellEnv.register(environment.contributor);
+      environment = toolEnvironment;
+      child.shellEnv.register(toolEnvironment.contributor);
+      child.on(
+        'tools/execute',
+        (/** @type {any} */ exec, /** @type {()=>any} */ next) =>
+          toolEnvironment.run(exec, next),
+      );
       child.on(
         'tools/result',
         (/** @type {any} */ exec, /** @type {any} */ result) =>
-          environment?.finish(exec, result, child.jobs),
+          toolEnvironment.finish(exec, result, child.jobs),
       );
       child.effect(
-        () => () => environment?.dispose(),
+        () => () => toolEnvironment.dispose(),
         'auriga: enterprise task lifetime',
       );
     });

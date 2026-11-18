@@ -324,7 +324,7 @@ export function createEnterpriseAuth(options) {
         throw failure(503, 'no_skill_credentials');
       return () => {
         task.check();
-        return { auriga_id: empNo, auriga_token: uacToken };
+        return { DSH_AURIGA_ID: empNo, DSH_AURIGA_TOKEN: uacToken };
       };
     },
     retain(/** @type {string} */ token) {

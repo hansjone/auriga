@@ -14,7 +14,7 @@ test('native background skill capability reacquires current host context after o
     join(tmpdir(), 'auriga-enterprise-recovery-'),
   );
   const connection = brokerFixture();
-  let runtime, contributor, jobResult;
+  let runtime, contributor, dispatchTool, jobResult;
   const effects = [];
   const server = createServer(
     (req, res) => void runtime.enterprise.handle(req, res),
@@ -47,6 +47,7 @@ test('native background skill capability reacquires current host context after o
       events: { subscribe: () => () => {} },
     },
     on(name, fn) {
+      if (name === 'tools/execute') dispatchTool = fn;
       if (name === 'tools/result') jobResult = fn;
       return () => {};
     },
@@ -71,7 +72,11 @@ test('native background skill capability reacquires current host context after o
     token: {},
     signal: controller.signal,
   };
-  const environment = await contributor.resolve(execution);
+  assert.equal(contributor.resolve(execution).DSH_AURIGA_TOKEN, '');
+  const environment = await dispatchTool(execution, () =>
+    contributor.resolve(execution),
+  );
+  assert.equal(environment.DSH_AURIGA_TOKEN, connection.token());
   const raw = () =>
     fetch(
       `http://127.0.0.1:${server.address().port}/dsh-team/agent-credentials`,
@@ -94,6 +99,18 @@ test('native background skill capability reacquires current host context after o
   const response = await raw();
   assert.equal(response.status, 200);
   assert.equal((await response.json()).token, connection.token());
+  const resumed = {
+    ...execution,
+    callId: randomUUID(),
+    token: {},
+    signal: new AbortController().signal,
+  };
+  const updated = await dispatchTool(resumed, () =>
+    contributor.resolve(resumed),
+  );
+  assert.equal(updated.DSH_AURIGA_TOKEN, connection.token());
+  assert.notEqual(environment.DSH_AURIGA_TOKEN, updated.DSH_AURIGA_TOKEN);
+  jobResult(resumed, {});
   connection.transition('authenticated', {
     uacSessionBinding: {
       ...connection.identity.uacSessionBinding,

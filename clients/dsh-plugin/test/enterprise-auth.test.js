@@ -8,6 +8,14 @@ import { fileURLToPath } from 'node:url';
 import { createEnterpriseAuth } from '../src/local/enterprise.js';
 import { createEnterpriseEnvironment } from '../src/local/enterprise-environment.js';
 
+function collectDuringDispatch(env, execution) {
+  return env.run(execution, () => {
+    const value = env.contributor.resolve(execution);
+    assert.equal(typeof value.then, 'undefined');
+    return value;
+  });
+}
+
 async function fixture(t, { empNo = '00001', beforeCredentials } = {}) {
   let authGeneration = 1;
   let sent;
@@ -312,7 +320,7 @@ test('shellEnv lifecycle and packaged unchanged Python request()/resolve() compa
     agent: { session: { header: { id: 'session' } } },
     signal: new AbortController().signal,
   };
-  const values = env.contributor.resolve(execution);
+  const values = await collectDuringDispatch(env, execution);
   assert.equal(values.DSH_TEAM_BASE, f.base);
   assert.ok(!JSON.stringify(values).includes(f.initialToken));
   const child = spawn(
@@ -376,7 +384,7 @@ test('only a verified running native job retains enterprise context until its te
     agent: { session: { header: { id: 'session' } } },
     signal: controller.signal,
   };
-  const values = await env.contributor.resolve(execution);
+  const values = await collectDuringDispatch(env, execution);
   env.finish(
     execution,
     { value: { kind: 'background', jobId: 'job' } },
@@ -400,8 +408,8 @@ test('only a verified running native job retains enterprise context until its te
   assert.equal((await f.raw(headers)).status, 401);
 });
 
-test('verified task launch reads one current UAC pair, while a running task re-reads via its capability', async (t) => {
-  const f = await fixture(t, { empNo: '000AbC' });
+test('an old session starts each tool with the current UAC pair and a running tool can refresh', async (t) => {
+  const f = await fixture(t, { empNo: '000123' });
   const env = createEnterpriseEnvironment({
     auth: f.auth,
     getServer: () => ({ port: f.port }),
@@ -416,33 +424,45 @@ test('verified task launch reads one current UAC pair, while a running task re-r
     agent: { session: { header: { id } } },
     signal: new AbortController().signal,
   });
-  const parent = [process.env.auriga_id, process.env.auriga_token];
+  const parent = [process.env.DSH_AURIGA_ID, process.env.DSH_AURIGA_TOKEN];
   const firstTask = task();
-  const first = await env.contributor.resolve(firstTask);
+  assert.equal(env.contributor.resolve(firstTask).DSH_AURIGA_TOKEN, '');
+  const first = await collectDuringDispatch(env, firstTask);
   const firstHeaders = {
     'X-Dsh-Team-Task-Capability': first.DSH_TEAM_TASK_CAPABILITY,
   };
-  assert.equal(first.auriga_id, '000AbC');
-  assert.equal(first.auriga_token, f.initialToken);
+  assert.equal(first.DSH_AURIGA_ID, '000123');
+  assert.equal(first.DSH_AURIGA_TOKEN, f.initialToken);
+  assert.equal(env.contributor.resolve(firstTask).DSH_AURIGA_TOKEN, '');
   f.rotate();
-  const current = await env.contributor.resolve(task());
-  assert.equal(current.auriga_id, '000AbC');
-  assert.equal(current.auriga_token, f.token());
-  assert.equal(first.auriga_token, f.initialToken);
+  const resumedTask = { ...task(), agent: firstTask.agent };
+  const current = await collectDuringDispatch(env, resumedTask);
+  assert.equal(current.DSH_AURIGA_ID, '000123');
+  assert.equal(current.DSH_AURIGA_TOKEN, f.token());
+  assert.equal(first.DSH_AURIGA_TOKEN, f.initialToken);
   assert.equal((await (await f.raw(firstHeaders)).json()).token, f.token());
-  const foreign = await env.contributor.resolve(task('other-session'));
-  assert.deepEqual([foreign.auriga_id, foreign.auriga_token], ['', '']);
+  const foreign = await collectDuringDispatch(env, task('other-session'));
+  assert.deepEqual([foreign.DSH_AURIGA_ID, foreign.DSH_AURIGA_TOKEN], ['', '']);
   f.disable();
-  const disabled = await env.contributor.resolve(task());
-  assert.deepEqual([disabled.auriga_id, disabled.auriga_token], ['', '']);
+  const disabled = await collectDuringDispatch(env, task());
+  assert.deepEqual(
+    [disabled.DSH_AURIGA_ID, disabled.DSH_AURIGA_TOKEN],
+    ['', ''],
+  );
   assert.ok(disabled.DSH_TEAM_TASK_CAPABILITY, 'outbound must stay available');
   assert.equal((await f.raw(firstHeaders)).status, 403);
   f.enable();
   f.logout();
-  const signedOut = await env.contributor.resolve(task());
-  assert.deepEqual([signedOut.auriga_id, signedOut.auriga_token], ['', '']);
+  const signedOut = await collectDuringDispatch(env, task());
+  assert.deepEqual(
+    [signedOut.DSH_AURIGA_ID, signedOut.DSH_AURIGA_TOKEN],
+    ['', ''],
+  );
   assert.equal((await f.raw(firstHeaders)).status, 401);
-  assert.deepEqual([process.env.auriga_id, process.env.auriga_token], parent);
+  assert.deepEqual(
+    [process.env.DSH_AURIGA_ID, process.env.DSH_AURIGA_TOKEN],
+    parent,
+  );
 });
 
 test('discards the launch pair when an in-flight credential read outlives its task', async (t) => {
@@ -462,7 +482,7 @@ test('discards the launch pair when an in-flight credential read outlives its ta
   });
   t.after(() => env.dispose());
   const controller = new AbortController();
-  const launch = env.contributor.resolve({
+  const launch = collectDuringDispatch(env, {
     agent: { session: { header: { id: 'session' } } },
     signal: controller.signal,
   });
@@ -470,7 +490,7 @@ test('discards the launch pair when an in-flight credential read outlives its ta
   controller.abort();
   finish();
   const value = await launch;
-  assert.deepEqual([value.auriga_id, value.auriga_token], ['', '']);
+  assert.deepEqual([value.DSH_AURIGA_ID, value.DSH_AURIGA_TOKEN], ['', '']);
 });
 
 test('failed native context retention revokes a promoted job capability immediately', async (t) => {
@@ -487,7 +507,7 @@ test('failed native context retention revokes a promoted job capability immediat
     agent: { session: { header: { id: 'session' } } },
     signal: new AbortController().signal,
   };
-  const values = await env.contributor.resolve(execution);
+  const values = await collectDuringDispatch(env, execution);
   env.finish(
     execution,
     { value: { kind: 'promoted', jobId: 'job' } },

@@ -1,18 +1,25 @@
 import { fileURLToPath } from 'node:url';
 
-/** Public shellEnv/tools-result/jobs adapter, matching the original host lifecycle.
- * resolve is called with a trusted tool execution, never a page/model payload.
- * @param {{auth:any,getServer:()=>any,prepare?:(execution:any)=>Promise<string|undefined>,retain?:(id:string)=>boolean}} options */
+/** Use the async tool dispatch hook before the host synchronously collects env.
+ * @param {{auth:any,getServer:()=>any,prepare?:(execution:any)=>Promise<string|undefined>,finishContext?:(id:string)=>void,retain?:(id:string)=>boolean}} options */
 export function createEnterpriseEnvironment({
   auth,
   getServer,
   prepare,
+  finishContext,
   retain,
 }) {
   /** @type {Map<any,any>} */ const issued = new Map();
   const helpers = fileURLToPath(
     new URL('../../skills/uds-skill-auth/scripts/', import.meta.url),
   );
+  const empty = {
+    DSH_TEAM_TASK_CAPABILITY: '',
+    DSH_TEAM_BASE: '',
+    DSH_TEAM_HELPERS: helpers,
+    DSH_AURIGA_ID: '',
+    DSH_AURIGA_TOKEN: '',
+  };
   function release(/** @type {any} */ execution) {
     const key = execution?.token ?? execution;
     const row = issued.get(key);
@@ -31,23 +38,30 @@ export function createEnterpriseEnvironment({
       },
       DSH_TEAM_BASE: { description: 'Owned loopback enterprise endpoint.' },
       DSH_TEAM_HELPERS: { description: 'Packaged Python helper directory.' },
-      auriga_id: { description: 'Current UAC employee ID for this task.' },
-      auriga_token: {
+      DSH_AURIGA_ID: { description: 'Current UAC employee ID for this task.' },
+      DSH_AURIGA_TOKEN: {
         description: 'Current UAC token; never print or persist.',
       },
     },
-    resolve(
-      /** @type {any} */ execution,
-      /** @type {string|undefined} */ contextId = undefined,
-    ) {
-      release(execution);
-      const empty = {
-        DSH_TEAM_TASK_CAPABILITY: '',
-        DSH_TEAM_BASE: '',
-        DSH_TEAM_HELPERS: helpers,
-        auriga_id: '',
-        auriga_token: '',
+    resolve(/** @type {any} */ execution) {
+      const row = issued.get(execution?.token ?? execution);
+      if (!row || execution.signal?.aborted) return { ...empty };
+      const env = {
+        ...empty,
+        DSH_TEAM_TASK_CAPABILITY: row.cap,
+        DSH_TEAM_BASE: `http://127.0.0.1:${row.port}/dsh-team`,
       };
+      try {
+        return { ...env, ...row.current?.() };
+      } catch {
+        return env;
+      }
+    },
+  };
+  return {
+    contributor,
+    release,
+    async run(/** @type {any} */ execution, /** @type {()=>any} */ next) {
       const sessionId = execution?.agent?.session?.header?.id;
       const port = Number(getServer()?.port);
       if (
@@ -57,52 +71,51 @@ export function createEnterpriseEnvironment({
         port < 1 ||
         port > 65535
       )
-        return empty;
+        return next();
+      const contextId = await prepare?.(execution);
+      if (prepare && !contextId) return next();
       const cap = auth.mint(sessionId, contextId, execution);
-      if (!cap) return empty;
+      if (!cap || execution.signal?.aborted) {
+        if (cap) auth.revoke(cap);
+        else if (contextId) finishContext?.(contextId);
+        return next();
+      }
+      const key = execution.token ?? execution;
+      release(execution);
       const row = {
         cap,
         contextId,
         sessionId,
+        port,
+        current: /** @type {undefined|(()=>object)} */ (undefined),
         signal: execution.signal,
         abort: () => release(execution),
         timer: setTimeout(() => release(execution), 600000),
         off: /** @type {any} */ (null),
       };
       row.timer.unref();
-      issued.set(execution.token ?? execution, row);
+      issued.set(key, row);
       row.signal?.addEventListener('abort', row.abort, { once: true });
-      return {
-        ...empty,
-        DSH_TEAM_TASK_CAPABILITY: cap,
-        DSH_TEAM_BASE: `http://127.0.0.1:${port}/dsh-team`,
-      };
-    },
-  };
-  if (prepare) {
-    const resolve = contributor.resolve;
-    contributor.resolve = /** @type {any} */ (
-      async (/** @type {any} */ execution) => {
-        const context = await prepare(execution);
-        const env = resolve(execution, context);
-        if (!context || !env.DSH_TEAM_TASK_CAPABILITY) return env;
+      if (contextId) {
         try {
-          const key = execution.token ?? execution;
-          const row = issued.get(key);
-          const current = await auth.launchCredentials(row.sessionId, row.cap);
-          if (issued.get(key) !== row || execution.signal?.aborted) return env;
-          return { ...env, ...current() };
+          const current = await auth.launchCredentials(sessionId, cap);
+          if (issued.get(key) === row && !execution.signal?.aborted)
+            row.current = current;
         } catch {
-          // Absence of UAC, disallowed raw reads and expired tasks must not
-          // prevent ordinary local tools from starting; neither alias is set.
-          return env;
+          // Tools can run without UAC or with raw credential access disabled.
         }
       }
-    );
-  }
-  return {
-    contributor,
-    release,
+      try {
+        return await next();
+      } catch (error) {
+        if (issued.get(key) === row) release(execution);
+        throw error;
+      } finally {
+        // The environment pair is only needed while the tool starts. The
+        // capability may remain live for a background job to refresh it.
+        row.current = undefined;
+      }
+    },
     finish(
       /** @type {any} */ execution,
       /** @type {any} */ result,
