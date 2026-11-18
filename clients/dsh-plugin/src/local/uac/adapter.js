@@ -117,20 +117,45 @@ function expand(template, values) {
 }
 
 /** @param {string} value */
-function strip(value) {
+function stripDepartmentText(value) {
   let start = 0;
   let end = value.length;
   while (start < end && value.charCodeAt(start) <= 0x20) start++;
   while (end > start && value.charCodeAt(end - 1) <= 0x20) end--;
   return value.slice(start, end);
 }
+// Same fixed set as IAM's UacTokenVerification: Unicode White_Space plus BOM
+// and the legacy Java separators, so formerly blank tokens stay invalid.
+const uacWhitespace = new Set([
+  0x0085, 0x00a0, 0x1680, 0x2028, 0x2029, 0x202f, 0x205f, 0x3000, 0xfeff,
+]);
+/** @param {number} code */
+function isWhitespace(code) {
+  return (
+    (code >= 0x0009 && code <= 0x000d) ||
+    (code >= 0x001c && code <= 0x0020) ||
+    (code >= 0x2000 && code <= 0x200a) ||
+    uacWhitespace.has(code)
+  );
+}
+/** @param {string} value */
+function stripWhitespace(value) {
+  let start = 0;
+  let end = value.length;
+  while (start < end && isWhitespace(value.charCodeAt(start))) start++;
+  while (end > start && isWhitespace(value.charCodeAt(end - 1))) end--;
+  return value.slice(start, end);
+}
 /** ASCII-only case fold, matching the platform identity comparison. @param {string} value */
 export const fold = (value) =>
-  strip(value).replace(/[A-Z]/g, (c) => c.toLowerCase());
-const validUser = (/** @type {unknown} */ v) =>
-  typeof v === 'string' && strip(v).length > 0 && strip(v).length <= 128;
+  stripWhitespace(value).replace(/[A-Z]/g, (c) => c.toLowerCase());
+const validUser = (/** @type {unknown} */ v) => {
+  if (typeof v !== 'string') return false;
+  const user = stripWhitespace(v);
+  return user.length > 0 && user.length <= 128;
+};
 const validToken = (/** @type {unknown} */ v) =>
-  typeof v === 'string' && v.trim().length > 0 && v.length <= 16384;
+  typeof v === 'string' && v.length <= 16384 && stripWhitespace(v).length > 0;
 
 /** Reject duplicate fields and malformed upstream payloads before interpreting status.
  * @param {Buffer} body */
@@ -365,7 +390,7 @@ export function createUacAdapter(settings, provider, options = {}) {
       return {
         state: 'verified',
         token: /** @type {string} */ (token),
-        empNo: strip(/** @type {string} */ (empNo)),
+        empNo: stripWhitespace(/** @type {string} */ (empNo)),
         clientIP,
       };
     } catch (error) {
@@ -378,9 +403,9 @@ export function createUacAdapter(settings, provider, options = {}) {
   /** Fixed token-verify request/decision, identical to the platform.
    * @param {{empNo:string,token:string,clientIP?:string}} credential */
   async function verify(credential) {
-    const account = credential.empNo;
-    if (!validUser(account) || !validToken(credential.token))
+    if (!validUser(credential.empNo) || !validToken(credential.token))
       return { success: false, failureClass: 'business_rejected' };
+    const account = stripWhitespace(credential.empNo);
     const ip = credential.clientIP ?? '';
     const body = {
       account,
@@ -446,7 +471,7 @@ export function createUacAdapter(settings, provider, options = {}) {
       success: true,
       identityMatched: true,
       token: /** @type {string} */ (token),
-      empNo: strip(user === undefined ? account : user),
+      empNo: stripWhitespace(user === undefined ? account : user),
     };
   }
 
@@ -499,8 +524,12 @@ export function createUacAdapter(settings, provider, options = {}) {
         };
       for (const pointer of mapping.departmentPointers ?? []) {
         const value = at(matches[0], pointer);
-        if (typeof value === 'string' && strip(value) && value.length <= 1024)
-          return { available: true, department: strip(value) };
+        if (
+          typeof value === 'string' &&
+          stripDepartmentText(value) &&
+          value.length <= 1024
+        )
+          return { available: true, department: stripDepartmentText(value) };
       }
       return { available: false, faultReason: 'missing_department' };
     } catch {

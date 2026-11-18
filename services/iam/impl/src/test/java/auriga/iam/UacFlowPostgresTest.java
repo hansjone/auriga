@@ -2111,29 +2111,30 @@ class UacFlowPostgresTest {
   void numericSsoAndQrShareOnlyTheExactEmployeeBinding(String echo, boolean accepted)
       throws Exception {
     try (var f = new Fixture("token-verify", 3)) {
-      String employee = "001234";
+      String employee = "001234", padded = "\u3000" + employee + "\u00a0";
+      String replacement = "\u00a0" + f.replacement + "\u3000";
       f.expectedVerifyAccount.set(employee);
-      f.scanEmployee.set(employee);
+      f.scanEmployee.set(padded);
       when(f.hooks.resolveUacEmployee(UUID.fromString(f.provider), employee))
           .thenReturn(Optional.of(f.account));
       boolean noEcho = "no_echo".equals(echo);
-      var bo = Json.object("code", "0000", "token", noEcho ? f.token : f.replacement);
+      var bo = Json.object("code", "0000", "token", noEcho ? f.token : replacement);
       if (!noEcho) {
         bo.put(
             "user",
             switch (echo) {
-              case "match" -> " 001234 ";
-              case "missing_zero" -> "01234";
-              case "mismatch" -> "001235";
+              case "match" -> padded;
+              case "missing_zero" -> "\u300001234\u00a0";
+              case "mismatch" -> "\u3000001235\u00a0";
               default -> throw new AssertionError(echo);
             });
       }
       var response = Json.object("code", Json.object("code", "0000"), "bo", bo);
-      if (noEcho) response.set("other", Json.object("token", f.replacement));
+      if (noEcho) response.set("other", Json.object("token", replacement));
       f.verifyBody.set(response);
       var cookies =
           Json.object(
-              "test_portal_token", List.of(f.token), "test_portal_account", List.of(employee));
+              "test_portal_token", List.of(f.token), "test_portal_account", List.of(padded));
       var nav = navigation(f, "true");
       var issued = f.call(() -> nav.issue(navigationInput(f, "portal"), false));
       var prepared = prepare(f, nav, issued, "auto", null, null);
@@ -2147,7 +2148,7 @@ class UacFlowPostgresTest {
         assertEquals(f.account.toString(), session.path("accountId").asString());
         var credential = f.read(session.path("sessionId").asString());
         assertEquals(employee, credential.path("empNo").asString());
-        assertEquals(f.replacement, credential.path("token").asString());
+        assertEquals(replacement, credential.path("token").asString());
       } else {
         assertTrue(f.call(() -> store.tx(() -> store.all("session").isEmpty())));
       }

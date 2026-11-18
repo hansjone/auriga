@@ -145,6 +145,59 @@ class UacTokenVerificationTest {
         decide(200, payload("\"code\":\"REJECTED\"", primary), "001Ab").failureClass());
   }
 
+  @Test
+  void verifiesPaddedNumericEmployeesAndPreservesTokensAcrossBothFields() {
+    String account = "001234", padded = "\u3000001234\u00a0";
+    String primary = "\u00a0synthetic-primary\u3000", legacy = "\u3000synthetic-legacy\u00a0";
+    var bo = Json.object("code", "0000", "user", padded, "token", legacy);
+    var response = Json.object("code", Json.object("code", "0000"), "bo", bo);
+    response.set("other", Json.object("token", primary));
+    var verified = decide(200, response.toString(), account);
+    assertTrue(verified.success());
+    assertEquals(account, verified.employee());
+    assertArrayEquals(
+        primary.getBytes(StandardCharsets.UTF_8),
+        verified.replacementToken().getBytes(StandardCharsets.UTF_8));
+
+    response.set("other", Json.object());
+    verified = decide(200, response.toString(), account);
+    assertTrue(verified.success());
+    assertEquals(account, verified.employee());
+    assertEquals(legacy, verified.replacementToken());
+
+    response.withObject("/bo").remove("user");
+    response.set("other", Json.object("token", primary));
+    assertEquals(account, decide(200, response.toString(), padded).employee());
+    var request = UacTokenVerification.request(padded, primary, "", "test-system");
+    assertEquals(account, request.path("account").asString());
+    assertEquals(primary, request.path("token").asString());
+    assertEquals(
+        UacTokenVerification.request(account, primary, "", "test-system").path("verifyCode"),
+        request.path("verifyCode"));
+
+    response.withObject("/bo").put("user", "\u300001234\u00a0");
+    assertEquals("identity_mismatch", decide(200, response.toString(), account).failureClass());
+  }
+
+  @Test
+  void whitespaceOnlyTokensAreFaultsAndNeverActivateLegacyFallback() {
+    for (String blank : List.of("\u3000", "\u00a0", "\u3000\u00a0\t", "\ufeff", "\u001f")) {
+      var bo = Json.object("code", "0000", "user", "001234", "token", "synthetic-legacy");
+      var response = Json.object("code", Json.object("code", "0000"), "bo", bo);
+      response.set("other", Json.object("token", blank));
+      var result = decide(200, response.toString(), "001234");
+      assertEquals("invalid_success_payload", result.faultReason());
+      assertFalse(result.rejected());
+      assertNull(result.replacementToken());
+
+      response.remove("other");
+      response.withObject("/bo").put("token", blank);
+      result = decide(200, response.toString(), "001234");
+      assertEquals("invalid_success_payload", result.faultReason());
+      assertFalse(result.rejected());
+    }
+  }
+
   private static String payload(String bo, String extra) {
     return "{\"code\":{\"code\":\"0000\"},\"bo\":{" + bo + "}" + extra + "}";
   }

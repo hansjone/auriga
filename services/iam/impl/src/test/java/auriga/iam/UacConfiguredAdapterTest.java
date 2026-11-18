@@ -253,7 +253,16 @@ class UacConfiguredAdapterTest {
       reply.set(Json.object("state", "success", "employee", "001Ab"));
       assertEquals(
           "missing_token", adapter.scan(config, coordinates).path("failureCode").asString());
-      assertEquals(7, requests.get());
+      String paddedToken = "\u00a0" + token + "\u3000";
+      reply.set(
+          Json.object("state", "success", "employee", "\u3000001234\u00a0", "token", paddedToken));
+      var numeric = adapter.scan(config, coordinates);
+      assertEquals("001234", numeric.path("empNo").asString());
+      assertEquals(paddedToken, numeric.path("token").asString());
+      reply.set(Json.object("state", "success", "employee", "001234", "token", "\u00a0"));
+      assertEquals(
+          "missing_token", adapter.scan(config, coordinates).path("failureCode").asString());
+      assertEquals(9, requests.get());
     } finally {
       server.stop(0);
     }
@@ -274,6 +283,23 @@ class UacConfiguredAdapterTest {
     cookies.set("test_portal_account", Json.MAPPER.valueToTree(List.of("portal-account")));
     assertEquals("portal-token", adapter.ssoCookies(cookies).path("token").asString());
     cookies.set("test_portal_token", Json.MAPPER.valueToTree(List.of("first", "second")));
+    assertTrue(adapter.ssoCookies(cookies).isEmpty());
+  }
+
+  @Test
+  void ssoNormalizesPaddedNumericEmployeeAndKeepsNonBlankTokenVerbatim() {
+    var adapter = new UacConfiguredAdapter(settings("https://idp.example.com"), false);
+    String token = "\u00a0synthetic-portal\u3000";
+    var cookies =
+        Json.object(
+            "test_portal_token", List.of(token),
+            "test_portal_account", List.of("\u3000001234\u00a0"),
+            "test_uds_token", List.of("synthetic-uds"),
+            "test_uds_account", List.of("001235"));
+    var pair = adapter.ssoCookies(cookies);
+    assertEquals("001234", pair.path("empNo").asString());
+    assertEquals(token, pair.path("token").asString());
+    cookies.set("test_portal_token", Json.MAPPER.valueToTree(List.of("\u00a0")));
     assertTrue(adapter.ssoCookies(cookies).isEmpty());
   }
 

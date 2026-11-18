@@ -44,6 +44,7 @@ final class UacTokenVerification {
 
   static ObjectNode request(String account, String token, String clientIP, String systemCode) {
     IamError.validate(validUser(account) && validToken(token));
+    String employee = stripWhitespace(account);
     String ip = clientIP == null ? "" : clientIP;
     String system = systemCode == null ? "" : systemCode;
     try {
@@ -51,10 +52,10 @@ final class UacTokenVerification {
           HexFormat.of()
               .formatHex(
                   MessageDigest.getInstance("MD5")
-                      .digest((account + token + ip + system).getBytes(StandardCharsets.UTF_8)));
+                      .digest((employee + token + ip + system).getBytes(StandardCharsets.UTF_8)));
       return Json.object(
           "account",
-          account,
+          employee,
           "token",
           token,
           "clientIP",
@@ -104,24 +105,47 @@ final class UacTokenVerification {
     if (echoed && !fold(user.asString()).equals(fold(verifiedAccount)))
       return new Decision("identity_mismatch", null, null, null);
     return new Decision(
-        null, null, token.asString(), (echoed ? user.asString() : verifiedAccount).strip());
+        null, null, token.asString(), stripWhitespace(echoed ? user.asString() : verifiedAccount));
   }
 
   private static Decision fault(String reason) {
     return new Decision("upstream_fault", reason, null, null);
   }
 
-  private static boolean validUser(String value) {
-    return value != null && !value.strip().isEmpty() && value.strip().length() <= 128;
+  // Same fixed set as the desktop UAC adapter: Unicode White_Space plus BOM
+  // and the legacy Java separators, so formerly blank tokens stay invalid.
+  private static boolean isWhitespace(char c) {
+    return c >= 0x0009 && c <= 0x000d
+        || c >= 0x001c && c <= 0x0020
+        || c >= 0x2000 && c <= 0x200a
+        || switch (c) {
+          case 0x0085, 0x00a0, 0x1680, 0x2028, 0x2029, 0x202f, 0x205f, 0x3000, 0xfeff -> true;
+          default -> false;
+        };
   }
 
-  private static boolean validToken(String value) {
-    return value != null && !value.isBlank() && value.length() <= 16384;
+  static String stripWhitespace(String value) {
+    int begin = 0, end = value.length();
+    while (begin < end && isWhitespace(value.charAt(begin))) begin++;
+    while (end > begin && isWhitespace(value.charAt(end - 1))) end--;
+    return value.substring(begin, end);
+  }
+
+  static boolean validUser(String value) {
+    if (value == null) return false;
+    String user = stripWhitespace(value);
+    return !user.isEmpty() && user.length() <= 128;
+  }
+
+  static boolean validToken(String value) {
+    return value != null && value.length() <= 16384 && !stripWhitespace(value).isEmpty();
   }
 
   private static String fold(String value) {
     StringBuilder out = new StringBuilder();
-    value.strip().chars().forEach(c -> out.append((char) (c >= 'A' && c <= 'Z' ? c + 32 : c)));
+    stripWhitespace(value)
+        .chars()
+        .forEach(c -> out.append((char) (c >= 'A' && c <= 'Z' ? c + 32 : c)));
     return out.toString();
   }
 
