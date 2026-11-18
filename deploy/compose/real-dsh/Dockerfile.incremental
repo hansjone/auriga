@@ -15,8 +15,11 @@ RUN node /tmp/auriga-incremental/recipe/incremental.mjs
 COPY clients/dsh-plugin/src /opt/auriga-dsh/src
 COPY clients/dsh-plugin/LICENSE /opt/auriga-dsh/LICENSE
 COPY clients/dsh-plugin/cordis.patch.yml /opt/auriga-dsh/cordis.patch.yml
-# Preserve original proof generation; skip only already-755 regular-file chmods.
-RUN node --import /tmp/auriga-incremental/recipe/incremental-fs.mjs /opt/fixture/build.mjs manifest && rm -rf /tmp/auriga-incremental
+# Normalize only the new public plugin inputs. Keep proof generation on the base toolchain.
+RUN node /tmp/auriga-incremental/recipe/source-modes.mjs /opt/auriga-dsh/src \
+      /opt/auriga-dsh/LICENSE /opt/auriga-dsh/cordis.patch.yml \
+    && node --import /tmp/auriga-incremental/recipe/incremental-fs.mjs /opt/fixture/build.mjs manifest \
+    && rm -rf /tmp/auriga-incremental
 ENV HOME=/home/dsh DSH_TELEMETRY_DISABLED=1 DSH_TELEMETRY_MODE=DISABLED
 WORKDIR /home/dsh
 USER 200000:200000

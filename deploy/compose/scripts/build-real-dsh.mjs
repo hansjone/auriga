@@ -14,6 +14,7 @@ import {
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { dirname, join, resolve } from 'node:path';
+import { normalizeSourceModes } from '../real-dsh/source-modes.mjs';
 import { buildArgs, selectRepoDigest } from './runtime-image-input.mjs';
 
 // prepare keeps metadata isolated until bootstrap has accepted the installation.
@@ -99,6 +100,9 @@ try {
     const destination = join(context, path);
     mkdirSync(dirname(destination), { recursive: true });
     cpSync(join(root, path), destination, { recursive: true });
+    // Recursive cp creates directories under the caller's umask; Docker COPY
+    // carries those checkout permissions into the image.
+    normalizeSourceModes(destination);
   }
   contextInputs = contextManifest(context);
   docker([
