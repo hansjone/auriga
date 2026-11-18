@@ -60,6 +60,9 @@ test(
     const manifest = JSON.parse(
       await readFile(join(output, 'dsh-memwiki.auriga-resource.json'), 'utf8'),
     );
+    assert.deepEqual(manifest.runtimes, [
+      { kind: 'node', versionRange: '>=22.0.0' },
+    ]);
     assert.ok(manifest.permissions.tools.includes('memwiki_secret_get'));
     assert.ok(manifest.permissions.tools.includes('memwiki_secret_delete'));
     assert.match(manifest.description, /push.*user-configured.*plaintext/);
