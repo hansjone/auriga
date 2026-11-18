@@ -72,6 +72,7 @@ export async function createConnectRuntime({
   /** @type {{displayName:string}|undefined} */ let memberProfile;
   /** @type {{reachable:boolean,lastSuccessAt:string}|undefined} */ let probeEvidence;
   /** @type {ReturnType<typeof createHostContexts>|undefined} */ let contexts;
+  /** @type {ReturnType<typeof createHostContexts>|undefined} */ let enterpriseContexts;
   /** @type {ReturnType<typeof createTeam>|undefined} */ let team;
   /** @type {Awaited<ReturnType<typeof createVault>>|undefined} */ let teamVault;
   /** @type {ReturnType<typeof createVault>|undefined} */ let openingTeamVault;
@@ -125,6 +126,7 @@ export async function createConnectRuntime({
       network?.logout();
       key = '';
       contexts?.invalidate();
+      enterpriseContexts?.invalidate();
       teamGeneration++;
       startingTeam?.close();
       void closeStorage(startingVault);
@@ -205,26 +207,16 @@ export async function createConnectRuntime({
   if (principal) models.login();
   const identity = () =>
     broker.state.current()?.state === 'authenticated' ? principal : undefined;
-  contexts = createHostContexts({
+  contexts = createHostContexts({ broker, identity, ctx });
+  // A native desktop session uses the current platform login for each new tool.
+  // Keep these handles separate from the existing Team and network sessions.
+  const taskContexts = createHostContexts({
     broker,
     identity,
     ctx,
-    async bindOwner(id, stamp) {
-      const sessionKey = createHash('sha256').update(id).digest('hex');
-      const ownerKey = createHash('sha256').update(stamp).digest('hex');
-      const existing = vault.snapshot().taskSessionOwners?.[sessionKey];
-      if (existing !== undefined) return existing === ownerKey;
-      let allowed = false;
-      await vault.update((state) => {
-        state.taskSessionOwners ??= {};
-        const current = state.taskSessionOwners[sessionKey];
-        if (current !== undefined && current !== ownerKey) return;
-        state.taskSessionOwners[sessionKey] = ownerKey;
-        allowed = true;
-      });
-      return allowed;
-    },
+    pinSessionOwner: !!expectedIdentity,
   });
+  enterpriseContexts = taskContexts;
   const sessionContexts = contexts;
   const controlInstallation = createControlInstallation({
     config,
@@ -382,8 +374,8 @@ export async function createConnectRuntime({
   enterprise = createEnterpriseAuth({
     snapshot: broker.state.current,
     binding: broker.state.authorization,
-    ownerProof: (id) => sessionContexts.ownerProof(id),
-    getOwner: (id) => contexts?.owner(id) ?? null,
+    ownerProof: (id) => taskContexts.ownerProof(id),
+    getOwner: (id) => taskContexts.owner(id),
     config:
       enterpriseConfig ??
       (() => {
@@ -401,15 +393,15 @@ export async function createConnectRuntime({
     async credentials(_id, purpose, executionContextId, execution, retained) {
       if (
         executionContextId &&
-        !contexts?.valid(executionContextId) &&
+        !taskContexts.valid(executionContextId) &&
         execution
       )
-        executionContextId = (await sessionContexts.tool(execution, retained))
+        executionContextId = (await taskContexts.tool(execution, retained))
           .executionContextId;
-      if (!executionContextId || !contexts?.valid(executionContextId))
+      if (!executionContextId || !taskContexts.valid(executionContextId))
         return refuse('common.unauthenticated');
       const result = await broker.credentials(executionContextId, purpose);
-      if (!contexts.valid(executionContextId))
+      if (!taskContexts.valid(executionContextId))
         return refuse('common.unauthenticated');
       const s = broker.state.current(),
         binding = result.binding;
@@ -433,8 +425,7 @@ export async function createConnectRuntime({
       return { ...result, executionContextId };
     },
     onRevoke(id) {
-      if (contexts) void contexts.finish(id);
-      else void broker.revoke(id).catch(() => {});
+      void taskContexts.finish(id);
     },
   });
   if (typeof ctx.inject === 'function')
@@ -448,11 +439,11 @@ export async function createConnectRuntime({
       const toolEnvironment = createEnterpriseEnvironment({
         auth: enterprise,
         getServer: () => child.webServer,
-        retain: (id) => contexts.retain(id),
-        finishContext: (id) => void contexts.finish(id),
+        retain: (id) => taskContexts.retain(id),
+        finishContext: (id) => void taskContexts.finish(id),
         async prepare(execution) {
           try {
-            const tool = await contexts.tool(execution);
+            const tool = await taskContexts.tool(execution);
             await team?.activateSession(tool.hostSessionId).catch(() => {});
             return tool.executionContextId;
           } catch {
@@ -802,6 +793,7 @@ export async function createConnectRuntime({
       closed = true;
       clearInterval(teamRetry);
       contexts?.close();
+      taskContexts.close();
       teamGeneration++;
       startingTeam?.close();
       team?.close();
@@ -829,9 +821,11 @@ export async function createConnectRuntime({
       (/** @type {any} */ native) => {
         if (typeof native.effect !== 'function') return;
         contexts.setHost(native);
+        taskContexts.setHost(native);
         native.effect(
           () => () => {
             contexts?.setHost(undefined);
+            taskContexts.setHost(undefined);
           },
           'auriga: native execution source',
         );

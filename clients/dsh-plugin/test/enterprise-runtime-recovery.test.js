@@ -128,13 +128,7 @@ test('native background skill capability reacquires current host context after o
       authGeneration: 1,
     },
   };
-  async function restart(memberId) {
-    for (const dispose of effects.splice(0).reverse()) await dispose?.();
-    await runtime.close();
-    connection.transition('authenticated', { ...original, memberId });
-    session = { id: session.id, header: { ...session.header } };
-    agent = { id: session.id, session };
-    runtime = await start();
+  function runResumedTool() {
     const next = {
       agent,
       callId: randomUUID(),
@@ -142,17 +136,38 @@ test('native background skill capability reacquires current host context after o
       token: {},
       signal: new AbortController().signal,
     };
-    const result = await dispatchTool(next, () => contributor.resolve(next));
-    jobResult(next, {});
-    return result;
+    return dispatchTool(next, () => contributor.resolve(next)).finally(() =>
+      jobResult(next, {}),
+    );
   }
-  const wrongOwner = await restart(randomUUID());
-  assert.deepEqual(
-    [wrongOwner.DSH_AURIGA_ID, wrongOwner.DSH_AURIGA_TOKEN],
-    ['', ''],
-  );
+  connection.transition('signed_out');
+  assert.equal((await raw()).status, 401);
   connection.rotate();
-  const sameOwner = await restart(original.memberId);
-  assert.equal(sameOwner.DSH_AURIGA_ID, '00001');
-  assert.equal(sameOwner.DSH_AURIGA_TOKEN, connection.token());
+  connection.transition('authenticated', original);
+  await setImmediate();
+  const relogged = await runResumedTool();
+  assert.equal(relogged.DSH_AURIGA_ID, '00001');
+  assert.equal(relogged.DSH_AURIGA_TOKEN, connection.token());
+  assert.equal((await raw()).status, 401);
+
+  async function restart(memberId) {
+    for (const dispose of effects.splice(0).reverse()) await dispose?.();
+    await runtime.close();
+    connection.transition('authenticated', { ...original, memberId });
+    session = { id: session.id, header: { ...session.header } };
+    agent = { id: session.id, session };
+    runtime = await start();
+    return runResumedTool();
+  }
+  connection.rotate();
+  const otherLogin = randomUUID();
+  connection.transition('authenticated', { ...original, memberId: otherLogin });
+  await setImmediate();
+  const switched = await runResumedTool();
+  assert.equal(switched.DSH_AURIGA_TOKEN, connection.token());
+  assert.notEqual(switched.DSH_AURIGA_TOKEN, relogged.DSH_AURIGA_TOKEN);
+  assert.equal((await raw()).status, 401);
+  const restored = await restart(otherLogin);
+  assert.equal(restored.DSH_AURIGA_ID, '00001');
+  assert.equal(restored.DSH_AURIGA_TOKEN, connection.token());
 });
