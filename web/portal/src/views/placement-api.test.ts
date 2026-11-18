@@ -64,6 +64,7 @@ it('handles a cross-origin manual opaqueredirect without following the instance 
 });
 it('only accepts exact runtime pool domains and canonical lowercase UUID paths', () => {
   configure();
+  vi.stubGlobal('location', { origin: 'https://portal.example.test' });
   expect(
     exchangeTarget('/i/' + id + '/_auriga/placement-ticket').pathname,
   ).toBe('/i/' + id + '/_auriga/placement-ticket');
@@ -88,6 +89,17 @@ it('only accepts exact runtime pool domains and canonical lowercase UUID paths',
       '.instances.example.test/_auriga/placement-ticket',
   ])
     expect(() => exchangeTarget(path)).toThrow();
+});
+it('accepts the configured portal port for pool domains and rejects other ports', () => {
+  configure();
+  vi.stubGlobal('location', { origin: 'https://portal.example.test:8443' });
+  expect(exchangeTarget(origin + ':8443/_auriga/placement-ticket').origin).toBe(
+    origin + ':8443',
+  );
+  expect(() => exchangeTarget(origin + '/_auriga/placement-ticket')).toThrow();
+  expect(() =>
+    exchangeTarget(origin + ':8444/_auriga/placement-ticket'),
+  ).toThrow();
 });
 it('rejects failed exchange and expired/nonready tickets without navigation', async () => {
   const assign = vi.fn();

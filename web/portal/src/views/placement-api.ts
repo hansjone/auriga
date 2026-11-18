@@ -28,12 +28,14 @@ const uuid = '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}';
 const exchangePath = new RegExp(`^/(?:i/${uuid}/)?_auriga/placement-ticket$`);
 export function exchangeTarget(value: string) {
   const url = new URL(value, location.origin);
+  const portal = new URL(location.origin);
   const { instanceParentDomain } = readPlacementConfig();
   const poolLabel = url.hostname.split('.')[0];
   const trustedPool =
     !!instanceParentDomain &&
     url.protocol === 'https:' &&
-    !url.port &&
+    url.protocol === portal.protocol &&
+    url.port === portal.port &&
     new RegExp(`^${uuid}$`).test(poolLabel) &&
     url.hostname === `${poolLabel}.${instanceParentDomain}` &&
     url.pathname === '/_auriga/placement-ticket';
