@@ -7,6 +7,7 @@ import (
 	"encoding/pem"
 	"errors"
 	"fmt"
+	"net/http"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -344,6 +345,90 @@ exec "$GATE_COMMIT_REAL_GIT" "$@"
 	if parts, err := filepath.Glob(filepath.Join(opts.Out, "*.part*")); err != nil || len(parts) != 0 {
 		t.Fatal("whole release produced split files", parts, err)
 	}
+	t.Run("source-only", func(t *testing.T) {
+		sourceOnly := opts
+		sourceOnly.SourceOnly = true
+		sourceOnly.Out = filepath.Join(parent, "source-only")
+		sourceOnly.Index = filepath.Join(t.TempDir(), "release-with-desktop.json")
+		desktop := filepath.Join(t.TempDir(), "desktop.tar")
+		if err := os.WriteFile(desktop, []byte("signed prebuilt desktop fixture"), 0644); err != nil {
+			t.Fatal(err)
+		}
+		desktopSHA, err := digest(desktop)
+		if err != nil {
+			t.Fatal(err)
+		}
+		withDesktop := r
+		withDesktop.Desktop = &artifact{URL: desktop, SHA256: desktopSHA}
+		if err := jsonFile(sourceOnly.Index, withDesktop, 0644); err != nil {
+			t.Fatal(err)
+		}
+		gateRan := false
+		probe := builders
+		probe.Gate = func(request gateRequest) (buildGate, error) {
+			gateRan = true
+			return builders.Gate(request)
+		}
+		probe.Bundle = func(_ []string, _ string) error {
+			return errors.New("source-only release called the installation attachment builder")
+		}
+		if err := generateRelease(sourceOnly, probe); err != nil || !gateRan {
+			t.Fatalf("source-only release must pass the build gate: %v", err)
+		}
+		var distribution distributionManifest
+		if err := readJSON(filepath.Join(sourceOnly.Out, "release-manifest.json"), &distribution); err != nil || !distribution.SourceOnly {
+			t.Fatalf("source-only release lost its profile: %v", err)
+		}
+		if files, err := filepath.Glob(filepath.Join(sourceOnly.Out, "auriga-offline-*")); err != nil || len(files) != 0 {
+			t.Fatalf("source-only release shipped installation artifacts: %v %v", files, err)
+		}
+		guide, err := os.ReadFile(filepath.Join(sourceOnly.Out, "DOWNLOADS.txt"))
+		if err != nil || strings.Contains(string(guide), "auriga-offline-") || !strings.Contains(string(guide), filepath.Base(windowsArchive)) {
+			t.Fatalf("source-only guide must list Windows inputs and omit official installation packages: %v", err)
+		}
+		if err := uploadRelease(uploadOptions{Server: "https://forgejo.example.test", Repo: "owner/auriga", Dir: sourceOnly.Out, Key: public}, http.DefaultClient); err != nil {
+			t.Fatalf("source-only Forgejo dry run failed: %v", err)
+		}
+		kitPath := filepath.Join(t.TempDir(), "devkit")
+		if err := extractVerified(filepath.Join(sourceOnly.Out, "auriga-devkit-1.1.tar"), kitPath, public); err != nil {
+			t.Fatal(err)
+		}
+		kit, err := readCatalog(kitPath, public)
+		if err != nil || kit.Versions["1.1"].Kit.Release.Desktop != nil || kit.Blobs[desktopSHA] != 0 {
+			t.Fatalf("source-only devkit retained a prebuilt desktop: %v", err)
+		}
+		prior := filepath.Join(t.TempDir(), "prior-with-desktop")
+		previousEntry := kit.Versions["1.0"]
+		previousSingle, err := materializeVersion(kitPath, previousEntry)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = os.RemoveAll(previousSingle) })
+		if err := jsonFile(filepath.Join(previousSingle, "devkit.json"), previousEntry.Kit, 0644); err != nil {
+			t.Fatal(err)
+		}
+		if err := signingPublic(key, filepath.Join(previousSingle, "release-public.pem")); err != nil {
+			t.Fatal(err)
+		}
+		if err := writeSums(previousSingle); err != nil {
+			t.Fatal(err)
+		}
+		if err := signSums(previousSingle, key); err != nil {
+			t.Fatal(err)
+		}
+		withDesktop.Version = "1.0"
+		if err := refreshReleaseInputs(previousSingle, withDesktop, key); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := composeDevkit("", previousSingle, "1.0", previousEntry.Commit, prior, key, 1<<30, true); err != nil {
+			t.Fatal(err)
+		}
+		sourceOnly.Previous = prior
+		sourceOnly.Out = filepath.Join(parent, "source-only-old-desktop")
+		if err := generateRelease(sourceOnly, probe); err == nil || !strings.Contains(err.Error(), "--new-baseline") {
+			t.Fatalf("source-only accepted a previous kit with an installer: %v", err)
+		}
+	})
 	failing := builders
 	failing.Gate = func(gateRequest) (buildGate, error) { return buildGate{}, errors.New("missing fixture dependency") }
 	opts.Out = filepath.Join(parent, "gate-failure")

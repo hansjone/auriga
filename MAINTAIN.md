@@ -36,8 +36,14 @@ chmod 0755 bin/auriga-cli
 ./bin/auriga-cli devkit verify /opt/auriga-kit
 ./bin/auriga-cli doctor --build
 ./bin/auriga-cli keygen site --out /secure/site-build-key
-# 把该公钥与独立核对的指纹送到服务器登记，具体见后面的信任流程。
 ./bin/auriga-cli bundle --build --offline --out /exports/auriga-site.tar --sign-key /secure/site-build-key/site-private.pem
+```
+
+全新现场先用现场构建公钥验签并安装自己的包。私钥留在构建机。已有部署在第一次升级前登记现场构建公钥，见后面的信任流程。
+
+```sh
+sudo ./bin/auriga-cli install --package /exports/auriga-site.tar \
+  --verify-key /secure/site-build-key/site-public.pem --address 192.0.2.10
 ```
 
 构建快照对已知 UTF-8 文本规范化 CRLF→LF、去除 shell BOM，并按签名清单恢复执行位；新增 .sh 按 0755。比较摘要不受纯换行变化影响；原始源码、签名清单不被改写，真实锁改动仍拒绝。UTF-16、单独 CR、大小写冲突、保留名、尾点/空格明确拒绝并指出文件。通用 .cmd/.bat/.ps1 文本副本保留其 CRLF，不代表支持在 Windows 运行 auriga。
@@ -143,14 +149,16 @@ TMPDIR=/build/auriga-tmp sh deploy/offline/prepare-release.sh \
   --tag 0.2.0 --release /secure/release.json --outdir /exports/0.2.0 \
   --cache-dir /exports/devkit-cache --sign-key /secure/release-private.pem \
   --windows-client "$WINDOWS_TAR" --windows-client-sha256 "$WINDOWS_SHA256" \
-  --dsh-source "$DSH_SOURCE" --new-baseline --build
+  --dsh-source "$DSH_SOURCE" --new-baseline --source-only
 ```
 
 先创建命令所用 `TMPDIR`，设定 `WINDOWS_TAR` 为转运到本地的归档路径，`WINDOWS_SHA256` 为 Windows 回执值，`DSH_SOURCE` 为绝对本地路径或上述 HTTPS 附件地址。私有输入按批准主机设置 `AURIGA_BUNDLE_AUTH_HOST`，在进程环境提供 `AURIGA_BUNDLE_TOKEN`。镜像仓库使用维护机 Docker 登录。
 
-Linux 在构建前流式核验 Windows tar、内部发行签名、依赖锁及每个输入，核对 DSH 提交归档与 npm 锁。发行命令一次生成 Linux 安装包、签名源码和 devkit、Windows 套件、DSH 源码及元数据，并用同一发行钥签全套摘要。Forgejo 默认发布完整归档，`--attachment-limit 0` 行为相同；发布前核对 Forgejo 和反向代理允许该次发行的最大附件。需要经 FAT32 等受限介质转运时，显式指定正数 `--attachment-limit`（字节），分卷上限为 4 GiB 减 1 字节。后续同基线发版，将 `--new-baseline` 换成 `--previous-devkit /exports/unpacked-devkit-0.2.0`。锁与批准输入未变可复用签名单版缓存。NAS 与可选材料按版刷新。
+Linux 在构建前流式核验 Windows 套件的归档、签名、依赖锁及各项输入，并核对 DSH 提交归档与 npm 锁。`--source-only` 生成签名源码、Linux 和 Windows 开发套件、DSH 源码和发行元数据。现场用这些材料自己构建并签发服务端和桌面版本。Forgejo 默认发布完整归档。需要经 FAT32 等受限介质转运时，显式指定正数 `--attachment-limit`（字节），分卷上限为 4 GiB 减 1 字节。后续同基线发版，将 `--new-baseline` 换成 `--previous-devkit /exports/unpacked-devkit-0.2.0`。锁与批准输入未变可复用签名单版缓存。NAS 与可选材料按版刷新。
 
-`unshare --net` 门禁使用空存储的独立 Docker 引擎，既有引擎的镜像缓存无法参与。门禁执行真正的 `bundle --build --offline`，工具容器使用 `--network none --pull never`。`release-manifest.json.offlineBuildGate` 记录精确提交、锁、源码/完整套件/清单/构建输出摘要及起止时间。`--build` 发行门禁构建出的安装包，省略该参数则发行批准的预建镜像包并仍执行完整门禁。
+若旧累积套件包含成品桌面安装程序，第一次发行源码和套件时用 `--new-baseline`，确保旧安装程序不会被重新打包。
+
+`unshare --net` 门禁使用空存储的独立 Docker 引擎，既有引擎的镜像缓存无法参与。门禁执行 `bundle --build --offline`，工具容器使用 `--network none --pull never`。`release-manifest.json.offlineBuildGate` 记录精确提交、锁、源码、完整套件、清单、构建输出摘要及起止时间。源码发行的验证包留在临时目录并随验证清理。历史安装包发行命令仍支持 `--build` 选择门禁构建的安装包。
 
 - QNAP 若在容器启动时报 `fchmodat2 AT_EMPTY_PATH`，先在本次维护环境验证受信且兼容宿主内核的 runc，或改用受支持的 Linux 维护机。R1 在私有 Docker 工具目录使用冻结 DinD 镜像的兼容 runc。保留工具摘要，NAS 主引擎继续使用其自身配置。
 - 若 GNU tar 报 `Bad address`，先做目录提取与 `cp -a` 探针。R1 使用冻结的 Debian Node 基底中 GNU tar 1.34、cp、loader 和库，构建工具镜像重新核定 digest 后进入签名 devkit。兼容层制作见 [Forgejo 冷建指南](docs/dev/forgejo-only-build.zh.md)。
@@ -183,7 +191,7 @@ unset FORGEJO_TOKEN
 
 发布命令在 Forgejo 回读同一个发行 ID、同一标签且确认已退出草稿后返回成功。写请求遇到重定向即报错。遇到写入失败或回读失败，先在 Forgejo 核对该标签的实际发行状态，再用同一发行目录和参数重试。若服务端已经发布，重试只逐字节核验现有附件。
 
-从正常 Forgejo Release 页面核对版本、附件、发行公钥指纹及 Windows 引导摘要，并下载后按 `DEPLOY.md` 安装。Windows 与 DSH 如有分卷，按 `.parts.json` 顺序以二进制拼接并核对 `DOWNLOADS.txt` 所列完整归档摘要，再按各自用途使用。安装后的正常页面登录、邀请、资源上传/发布和桌面安装由主控实测。
+从正常 Forgejo Release 页面核对版本、附件、发行公钥指纹及 Windows 引导摘要。下载后按本手册做现场构建、签发、安装和升级。Windows 与 DSH 如有分卷，按 `.parts.json` 顺序以二进制拼接并核对 `DOWNLOADS.txt` 所列完整归档摘要。现场构建后的登录、资源发布、安装和更新从正常入口验证。
 
 ## 发行信任与站点构建签名
 
