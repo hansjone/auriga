@@ -803,7 +803,7 @@ export function catalogService(options) {
           matches &&
           (cloud
             ? row.report?.reportSource === 'node' &&
-              row.report?.observedGeneration === row.generation
+              row.report?.state === 'applied'
             : local &&
               local.installationRevision === row.installationRevision &&
               ['pending_restart', 'applied'].includes(local.state) &&
@@ -816,6 +816,7 @@ export function catalogService(options) {
                 ? 'pending_restart'
                 : 'overridden'
             : 'pending_restart';
+        if (cloud) return { state, source: observed };
         const report = {
           clientId: who.hostId,
           identity: row.resource.identity,
@@ -828,7 +829,7 @@ export function catalogService(options) {
           observedAt: new Date().toISOString(),
         };
         await api.report(report);
-        if (!cloud) desktop?.acknowledge(who, report);
+        desktop?.acknowledge(who, report);
         return { state, source: observed };
       });
     },

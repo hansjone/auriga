@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.*;
 import auriga.common.context.TenantContext;
 import auriga.common.error.AurigaException;
 import auriga.common.events.*;
+import auriga.common.observability.EventMetrics;
 import auriga.common.persistence.*;
 import auriga.common.security.*;
 import auriga.contracts.node.v1.*;
@@ -25,6 +26,7 @@ import com.google.protobuf.ByteString;
 import io.grpc.*;
 import io.grpc.netty.shaded.io.grpc.netty.*;
 import io.grpc.stub.StreamObserver;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.io.ByteArrayInputStream;
 import java.nio.file.*;
 import java.security.KeyPair;
@@ -976,45 +978,174 @@ class WorkspaceIntegrationTest {
   }
 
   @Test
-  void unifiedOldUncontainedIntentIsDurableAndNeverSilentlyAcknowledged() throws Exception {
+  void unifiedInboxAcknowledgesLateIntentsAndReconciliationDrainsOldRows() throws Exception {
+    policy.maxConcurrentStarts(2);
     new RecoveryControl(tenant);
     UUID instance =
         TenantContext.call(tenant, () -> (UUID) service.open(owner).instance().get("id"));
+    UUID otherOwner = UuidV7.next();
+    UUID otherInstance =
+        TenantContext.call(tenant, () -> (UUID) service.open(otherOwner).instance().get("id"));
     var present = unifiedReviewRef("present", false);
     var absent = unifiedReviewRef("absent", false);
-    seedUnifiedReview(instance, 3, List.of(present));
+    var absentChoice =
+        UnifiedSelection.newBuilder()
+            .setIdentity(absent.getIdentity())
+            .setAction("install")
+            .build();
+    var presentChoice = absentChoice.toBuilder().setIdentity(present.getIdentity()).build();
+    var calls = new ArrayList<Long>();
     try (var resources =
         new WorkspaceUnifiedResources(
             service,
             inputs,
             request -> {
-              fail("old revision cannot be resolved as a new operation");
-              return null;
-            })) {
-      var missing =
-          UnifiedSelection.newBuilder()
-              .setIdentity(absent.getIdentity())
-              .setAction("install")
-              .build();
-      assertThrows(
-          AurigaException.class,
-          () -> resources.apply(tenant, instance, owner, 1, List.of(missing)));
-      boolean applied =
-          TenantContext.call(
+              boolean first = request.getInstanceId().equals(instance.toString());
+              var response =
+                  ResolveUnifiedResourcesResponse.newBuilder()
+                      .setSelectionRevision(request.getSelectionRevision())
+                      .setRevocations(unifiedReviewRevocations());
+              if (request.getSynchronizeAssignments()) {
+                if (first && request.getSelectionRevision() == 0)
+                  response.setSelectionRevision(3).addSelections(presentChoice);
+              } else {
+                calls.add(request.getSelectionRevision());
+                assertEquals(
+                    List.of(first ? presentChoice : absentChoice), request.getSelectionsList());
+                response.addResources(first ? present : absent);
+              }
+              return response.build();
+            },
+            true)) {
+      var inbox =
+          new InboxProcessor(
+              new TenantTransactionManager(store.jdbc.getDataSource()),
+              store.jdbc,
+              "workspace",
+              new EventMetrics(new SimpleMeterRegistry(), "workspace"),
+              clock,
+              3,
+              EventProducers.of(Map.of("resource.*", List.of("resource"))));
+      resources.reconcile();
+      var committed = resources.snapshot(tenant, instance).spec();
+      assertEquals(3, committed.getResourceSelectionRevision());
+      assertEquals(List.of(present), committed.getUnifiedResourcesList());
+
+      var late = unifiedDistributionEvent(instance, owner, 1, absentChoice);
+      var subject = EventEnvelope.natsSubject(late.type(), "resource");
+      assertEquals(
+          InboxProcessor.Outcome.PROCESSED,
+          inbox.process(
+              resources.name(),
+              resources,
+              subject,
+              WorkspaceService.JSON.writeValueAsBytes(late),
+              1));
+      assertEquals(
+          1L,
+          store.in(
               tenant,
               () ->
-                  store.tx(
-                      () ->
-                          store.jdbc.queryForObject(
-                              "SELECT applied FROM unified_resource_intent WHERE tenant_id=? AND instance_id=? AND selection_revision=1",
-                              Boolean.class,
-                              tenant,
-                              instance)));
-      assertFalse(applied, "unknown old intent must remain pending for reconciliation");
-      var included = missing.toBuilder().setIdentity(present.getIdentity()).build();
-      var before = resources.snapshot(tenant, instance).spec();
-      assertEquals(before, resources.apply(tenant, instance, owner, 2, List.of(included)).spec());
+                  store.jdbc.queryForObject(
+                      "SELECT count(*) FROM processed_event WHERE tenant_id=? AND event_id=? AND consumer=?",
+                      Long.class,
+                      tenant,
+                      UUID.fromString(late.id()),
+                      resources.name())));
+      assertEquals(0L, pendingUnifiedIntents(instance));
+
+      var conflicting = unifiedDistributionEvent(instance, owner, 3, absentChoice);
+      assertEquals(
+          InboxProcessor.Outcome.RETRY,
+          inbox.process(
+              resources.name(),
+              resources,
+              subject,
+              WorkspaceService.JSON.writeValueAsBytes(conflicting),
+              1));
+      assertEquals(0L, pendingUnifiedIntents(instance));
+
+      // Reproduce a row persisted by the old behavior after the newer revision had committed.
+      store.in(
+          tenant,
+          () ->
+              store.jdbc.update(
+                  "INSERT INTO unified_resource_intent(id,tenant_id,instance_id,owner_id,selection_revision,request) VALUES(?,?,?,?,?,?)",
+                  UuidV7.next(),
+                  tenant,
+                  instance,
+                  owner,
+                  2,
+                  UnifiedDistributionInput.newBuilder()
+                      .setInstanceId(instance.toString())
+                      .addSelections(absentChoice)
+                      .build()
+                      .toByteArray()));
+      assertEquals(1L, pendingUnifiedIntents(instance));
+      var next = unifiedDistributionEvent(otherInstance, otherOwner, 1, absentChoice);
+      assertEquals(
+          InboxProcessor.Outcome.PROCESSED,
+          inbox.process(
+              resources.name(),
+              resources,
+              subject,
+              WorkspaceService.JSON.writeValueAsBytes(next),
+              1));
+      resources.reconcile();
+      assertEquals(0L, pendingUnifiedIntents(instance));
+      assertEquals(0L, pendingUnifiedIntents(otherInstance));
+      assertEquals(List.of(3L, 1L), calls);
+      var firstSpec = resources.snapshot(tenant, instance).spec();
+      assertEquals(3, firstSpec.getResourceSelectionRevision());
+      assertEquals(committed.getUnifiedResourcesList(), firstSpec.getUnifiedResourcesList());
+      var secondSpec = resources.snapshot(tenant, otherInstance).spec();
+      assertEquals(1, secondSpec.getResourceSelectionRevision());
+      assertEquals(List.of(absent), secondSpec.getUnifiedResourcesList());
     }
+  }
+
+  private long pendingUnifiedIntents(UUID instance) {
+    return store.in(
+        tenant,
+        () ->
+            store.jdbc.queryForObject(
+                "SELECT count(*) FROM unified_resource_intent WHERE tenant_id=? AND instance_id=? AND NOT applied",
+                Long.class,
+                tenant,
+                instance));
+  }
+
+  private EventEnvelope unifiedDistributionEvent(
+      UUID instance, UUID account, long revision, UnifiedSelection selection) {
+    var data =
+        WorkspaceService.JSON
+            .createObjectNode()
+            .put("instanceId", instance.toString())
+            .put("ownerId", account.toString())
+            .put("selectionRevision", revision);
+    var identity = selection.getIdentity();
+    data.putArray("selections")
+        .addObject()
+        .put("action", selection.getAction())
+        .putObject("identity")
+        .put("tenantId", identity.getTenantId())
+        .put("packageId", identity.getPackageId())
+        .put("versionId", identity.getVersionId())
+        .put("kind", identity.getKind())
+        .put("version", identity.getVersion())
+        .put("manifestDigest", identity.getManifestDigest());
+    return new EventEnvelope(
+        "1.0",
+        UuidV7.next().toString(),
+        "auriga/resource",
+        "resource.catalog_distribution_requested",
+        clock.instant().toString(),
+        instance.toString(),
+        "application/json",
+        "1",
+        tenant.toString(),
+        null,
+        data);
   }
 
   @Test
