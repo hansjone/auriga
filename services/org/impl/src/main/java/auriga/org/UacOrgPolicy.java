@@ -68,6 +68,36 @@ final class UacOrgPolicy {
                 .findFirst());
   }
 
+  boolean canResumeVerifiedMember(UUID provider, String employee, UUID account) {
+    String subject = employee(employee);
+    return store.tx(
+        () ->
+            Boolean.TRUE.equals(
+                store
+                    .jdbc()
+                    .queryForObject(
+                        """
+                        SELECT EXISTS (
+                          SELECT 1 FROM uac_employee_binding b
+                          JOIN member m ON m.tenant_id=b.tenant_id AND m.id=b.account_id
+                          WHERE b.tenant_id=? AND b.provider_id=? AND b.employee=? AND b.account_id=?
+                            AND b.first_login AND m.status='active' AND m.member_type='member'
+                            AND NOT EXISTS (
+                              SELECT 1 FROM uac_employee_binding other
+                              WHERE other.tenant_id=b.tenant_id AND other.provider_id=b.provider_id
+                                AND other.employee<>b.employee
+                                AND translate(other.employee,'ABCDEFGHIJKLMNOPQRSTUVWXYZ','abcdefghijklmnopqrstuvwxyz')=?
+                            )
+                        )
+                        """,
+                        Boolean.class,
+                        store.tenantId(),
+                        provider,
+                        subject,
+                        account,
+                        auriga.iam.api.UacEmployee.asciiFold(subject))));
+  }
+
   boolean provisionVerifiedMember(
       UUID provider, String employee, UUID account, String displayName) {
     String subject = employee(employee);
@@ -94,7 +124,7 @@ final class UacOrgPolicy {
           store
               .jdbc()
               .update(
-                  "INSERT INTO uac_employee_binding(id,tenant_id,provider_id,employee,account_id,verified_by,verified_at) VALUES (?,?,?,?,?,?,?)",
+                  "INSERT INTO uac_employee_binding(id,tenant_id,provider_id,employee,account_id,verified_by,verified_at,first_login) VALUES (?,?,?,?,?,?,?,true)",
                   UuidV7.next(),
                   store.tenantId(),
                   provider,

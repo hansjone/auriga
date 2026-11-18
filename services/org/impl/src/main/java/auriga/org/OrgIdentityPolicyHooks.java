@@ -46,6 +46,11 @@ public final class OrgIdentityPolicyHooks implements IdentityPolicyHooks {
   }
 
   @Override
+  public boolean canResumeVerifiedUacMember(UUID provider, String employee, UUID account) {
+    return uac != null && uac.canResumeVerifiedMember(provider, employee, account);
+  }
+
+  @Override
   public boolean consumeUacInvitation(String code, UUID provider, String employee, UUID account) {
     return uac != null && uac.consume(code, provider, employee, account);
   }

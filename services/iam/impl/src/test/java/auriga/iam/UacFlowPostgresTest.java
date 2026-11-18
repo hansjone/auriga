@@ -1580,6 +1580,82 @@ class UacFlowPostgresTest {
     }
   }
 
+  @ParameterizedTest
+  @ValueSource(booleans = {false, true})
+  void firstTotpRejectsAnEnabledProviderRevisionChangedAfterQrOrSso(boolean sso) throws Exception {
+    try (var f = new Fixture("token-verify", 3)) {
+      f.call(
+          () ->
+              store.tx(
+                  () -> {
+                    store.delete("identity", f.provider + ":001Ab");
+                    store.delete("account", f.account.toString());
+                    var row = store.get("idp_provider", f.provider, true);
+                    row.withObject("/admission").put("mfa", "always");
+                    store.save("idp_provider", row);
+                    return null;
+                  }));
+      when(f.hooks.provisionVerifiedUacMember(any(), anyString(), any(), anyString()))
+          .thenReturn(true);
+      LoginManager.Result pending;
+      String binding;
+      if (sso) {
+        var nav = navigation(f, "true");
+        var issued = f.call(() -> nav.issue(navigationInput(f, "portal"), false));
+        binding = issued.path("transactionCookie").asString();
+        var prepared = prepare(f, nav, issued, "auto", null, null);
+        var verified = f.call(() -> nav.verify(prepared, ssoCookies(f)));
+        var completed = f.call(() -> nav.finish(prepared, verified, binding));
+        assertEquals("additional_step_required", completed.state());
+        pending = completed.result();
+      } else {
+        var challenge = f.begin();
+        f.run();
+        binding = challenge.binding();
+        pending = f.complete(challenge);
+      }
+      var tx = pending.transaction();
+      assertEquals("first_totp", tx.path("step").path("formId").asString());
+      String label = tx.path("step").path("fields").get(0).path("label").path("en").asString();
+      var input =
+          Json.object(
+              "type",
+              "form",
+              "formId",
+              "first_totp",
+              "values",
+              Json.object(
+                  "otp",
+                  Totp.code(
+                      label.substring(label.lastIndexOf(' ') + 1),
+                      f.time.instant().getEpochSecond() / 30)));
+      var config =
+          new UacProviderService(
+              store, f.uac.providers, f.uac.adapter, f.sessions, f.audit, f.time);
+      f.call(
+          () -> {
+            var etag = store.tx(() -> UacProviderService.etag(config.row(f.provider, false)));
+            return config.put(
+                f.provider,
+                Json.object("enabled", true, "baseUrl", f.origin, "systemCode", "replacement"),
+                etag);
+          });
+      var rejected = f.call(() -> f.login.advance(tx.path("id").asString(), binding, input, false));
+      assertNull(rejected.session());
+      assertEquals("failed", rejected.transaction().path("status").asString());
+      assertEquals("common.not_found", rejected.transaction().path("step").path("code").asString());
+      verify(f.hooks, never()).provisionVerifiedUacMember(any(), anyString(), any(), anyString());
+      f.call(
+          () ->
+              store.tx(
+                  () -> {
+                    for (String table : List.of("account", "identity", "team_totp", "session"))
+                      assertTrue(store.all(table).isEmpty(), table);
+                    return null;
+                  }));
+    }
+  }
+
   @Test
   void aCaseVariantCannotEnrollAroundAnExistingBindingAndAnInvalidInviteDoesNotAutoJoin()
       throws Exception {

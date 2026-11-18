@@ -41,13 +41,14 @@ public final class LoginManager {
     this.uacEstablished = callback;
   }
 
-  Result finishUac(String transactionId, JsonNode profile) {
+  Result finishUac(String transactionId, JsonNode profile, String verifiedRevision) {
     ObjectNode tx = store.get("login_tx", transactionId, true);
     IamError.validate(
         tx != null
             && tx.path("uacVerified").asBoolean()
             && "pending".equals(tx.path("status").asString()));
     tx.remove("uacPending");
+    tx.put("uacVerifiedRevision", verifiedRevision);
     return finish(tx, provider(tx.path("providerId").asString()), profile, false);
   }
 
@@ -184,7 +185,10 @@ public final class LoginManager {
               tx.path("status").asString().equals("pending"), "login_tx_finished", 409);
           return attempts(tx, provider(tx.path("providerId").asString()), input);
         },
-        work);
+        () -> {
+          lockUacFirstTotpProvider(id, binding, input);
+          return work.get();
+        });
   }
 
   public Result callbackResponse(
@@ -419,7 +423,11 @@ public final class LoginManager {
   }
 
   private ObjectNode transaction(String id, String binding) {
-    ObjectNode tx = store.get("login_tx", id, true);
+    return transaction(id, binding, true);
+  }
+
+  private ObjectNode transaction(String id, String binding, boolean lock) {
+    ObjectNode tx = store.get("login_tx", id, lock);
     IamError.require(
         tx != null
             && binding != null
@@ -427,6 +435,15 @@ public final class LoginManager {
         "not_found",
         404);
     return tx;
+  }
+
+  private void lockUacFirstTotpProvider(String id, String binding, JsonNode input) {
+    if (!input.path("formId").asString().equals("first_totp")) return;
+    ObjectNode tx = transaction(id, binding, false);
+    // UAC entry transactions carry this marker from creation. Follow the UAC
+    // configuration writer's order, including before the HTTP flow locks the login row.
+    if (tx.has("uacPendingAccountId"))
+      store.get("idp_provider", tx.path("providerId").asString(), true);
   }
 
   public ObjectNode checkEntry(String id, String binding, String audience, String origin) {
@@ -474,6 +491,7 @@ public final class LoginManager {
         400);
     return store.tx(
         () -> {
+          lockUacFirstTotpProvider(id, binding, input);
           ObjectNode tx = transaction(id, binding),
               provider = provider(tx.path("providerId").asString());
           IamError.require(
@@ -548,6 +566,11 @@ public final class LoginManager {
                           403);
                     }
                     if (uacEnrollment) {
+                      IamError.require(
+                          UacProviderService.etag(provider)
+                              .equals(tx.path("uacVerifiedRevision").asString()),
+                          "provider_unavailable",
+                          404);
                       String pid = provider.path("providerId").asString();
                       JsonNode profile =
                           Json.read(secrets.decrypt(tx.path("pendingProfile").asString(), aad(tx)));
@@ -560,10 +583,16 @@ public final class LoginManager {
                               && tx.path("uacVerified").asBoolean()
                               && tx.has("uacCredential")
                               && tx.path("newAccount").asBoolean()
-                              && account
-                                  .toString()
-                                  .equals(tx.path("uacPendingAccountId").asString())
-                              && store.get("identity", pid + ":" + subject, false) == null,
+                              && tx.path("invitationCode").asString("").isBlank()
+                              && store.get("identity", pid + ":" + subject, false) == null
+                              && store.get("account", account.toString(), false) == null
+                              && !store.hasUacCaseVariant(pid, subject)
+                              && (tx.path("uacResolved").asBoolean()
+                                  ? hooks.canResumeVerifiedUacMember(
+                                      UUID.fromString(pid), subject, account)
+                                  : account
+                                      .toString()
+                                      .equals(tx.path("uacPendingAccountId").asString())),
                           "invalid_credentials",
                           401);
                     } else if (tx.path("newAccount").asBoolean()) {
@@ -820,12 +849,12 @@ public final class LoginManager {
             hooks.resolveUacEmployee(UUID.fromString(pid), subject).map(UUID::toString).orElse("");
       if (uac && !accountId.isEmpty()) tx.put("uacResolved", true);
     }
-    boolean uacAutoJoin =
+    boolean uacPortalAdmission =
         uac
             && purpose.equals("login")
             && tx.path("audience").asString().equals("portal")
-            && tx.path("invitationCode").asString("").isBlank()
-            && !tx.path("uacResolved").asBoolean();
+            && tx.path("invitationCode").asString("").isBlank();
+    boolean uacAutoJoin = uacPortalAdmission && !tx.path("uacResolved").asBoolean();
     if (accountId.isEmpty()) {
       boolean admit =
           uacAutoJoin
@@ -849,6 +878,7 @@ public final class LoginManager {
       tx.put("newAccount", true);
     }
     ObjectNode account = store.get("account", accountId, true);
+    boolean iamAccountMissing = account == null;
     if (uac && account == null && tx.path("uacResolved").asBoolean()) tx.put("newAccount", true);
     if (account == null && tx.path("newAccount").asBoolean()) {
       account =
@@ -881,7 +911,17 @@ public final class LoginManager {
             || tx.has("nativeGrantHash") && !uac)) {
       tx.put("pendingAccount", accountId);
       tx.put("pendingProfile", secrets.encrypt(profile.toString(), aad(tx)));
-      boolean uacEnrollment = uacAutoJoin && tx.path("newAccount").asBoolean() && identity == null;
+      // Org can commit this member while IAM rolls back the account, identity
+      // and factor. Only a binding from that admission can resume enrollment.
+      boolean uacEnrollment =
+          uacPortalAdmission
+              && tx.path("newAccount").asBoolean()
+              && identity == null
+              && iamAccountMissing
+              && (uacAutoJoin
+                  || (!store.hasUacCaseVariant(pid, subject)
+                      && hooks.canResumeVerifiedUacMember(
+                          UUID.fromString(pid), subject, UUID.fromString(accountId))));
       if ((team || uacEnrollment) && !teamAccounts.hasMfa(UUID.fromString(accountId))) {
         if (team && tx.path("newAccount").asBoolean())
           teamAccounts.pendingRegistrationUntil(

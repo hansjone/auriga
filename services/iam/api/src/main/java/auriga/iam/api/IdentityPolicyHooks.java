@@ -28,6 +28,11 @@ public interface IdentityPolicyHooks {
     return false;
   }
 
+  /** Only an active ordinary member created by UAC first login may resume enrollment. */
+  default boolean canResumeVerifiedUacMember(UUID provider, String employee, UUID account) {
+    return false;
+  }
+
   /** Must bind the invitation's trusted employee to this exact verified subject, atomically. */
   default boolean consumeUacInvitation(String code, UUID provider, String employee, UUID account) {
     return false;
