@@ -10,6 +10,7 @@ import { cp, mkdtemp, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { setImmediate as nextTurn } from 'node:timers/promises';
 import { createManagedFileConnection } from '../src/managed/file-connection.js';
 import { createBroker } from '../src/local/broker.js';
 import { verifyBrokerPackage } from '../src/local/broker-package.js';
@@ -40,11 +41,22 @@ async function fixture(t, patch = {}, connect = createManagedFileConnection) {
   const modelFile = join(directory, 'model-credential.json');
   await writeFile(file, JSON.stringify(material), { mode: 0o600 });
   const calls = [];
+  let tokenStatus = 200;
+  let nextTokenReply;
   t.mock.method(globalThis, 'fetch', async (url, init = {}) => {
     calls.push({ path: new URL(url).pathname, init });
     assert.equal(init.redirect, 'error');
     assert.equal(init.credentials, 'omit');
     if (new URL(url).pathname === '/oauth2/token') {
+      const reply = nextTokenReply;
+      nextTokenReply = undefined;
+      const status = reply?.status ?? tokenStatus;
+      reply?.started.resolve();
+      await reply?.release.promise;
+      if (status === 'offline')
+        throw new TypeError('fixture network unavailable');
+      if (status !== 200)
+        return Response.json({ error: 'fixture' }, { status });
       const now = Math.floor(Date.now() / 1000);
       const header = Buffer.from(
         JSON.stringify({ alg: 'ES256', kid: 'fixture' }),
@@ -99,18 +111,46 @@ async function fixture(t, patch = {}, connect = createManagedFileConnection) {
       },
     });
   });
-  const connection = await connect({
+  const open = async () => {
+    const connection = await connect({
+      file,
+      modelFile,
+      directory,
+      ...material,
+    });
+    const broker = await createBroker(connection);
+    t.after(() => broker.close());
+    return { connection, broker };
+  };
+  const { connection, broker } = await open();
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  return {
+    broker,
+    connection,
+    material,
     file,
     modelFile,
-    directory,
-    ...material,
-  });
-  const broker = await createBroker(connection);
-  t.after(async () => {
-    broker.close();
-    await rm(directory, { recursive: true, force: true });
-  });
-  return { broker, connection, material, file, modelFile, calls };
+    calls,
+    tokenStatus(status) {
+      tokenStatus = status;
+    },
+    pauseToken(status) {
+      const reply = {
+        status,
+        started: Promise.withResolvers(),
+        release: Promise.withResolvers(),
+      };
+      nextTokenReply = reply;
+      t.after(() => reply.release.resolve());
+      return reply;
+    },
+    async replaceDevice() {
+      material.deviceId = randomUUID();
+      material.credential = randomBytes(32).toString('base64url');
+      await writeFile(file, JSON.stringify(material));
+      return open();
+    },
+  };
 }
 
 test('verified managed-linux artifact runs the fixed executor from an isolated plugin layout', async (t) => {
@@ -200,6 +240,92 @@ test('atomic credential replacement immediately fences previous handles before p
   assert.equal(f.connection.stale, true);
   assert.equal(f.broker.state.current().state, 'revoked');
 });
+
+for (const status of [401, 403, 503]) {
+  test(
+    'managed file refresh HTTP ' +
+      status +
+      ' keeps its meaning after the old access token expires',
+    async (t) => {
+      t.mock.timers.enable({ apis: ['Date', 'setInterval'] });
+      const f = await fixture(t);
+      assert.equal(f.broker.state.current().state, 'authenticated');
+      f.tokenStatus(status);
+      t.mock.timers.tick(121_000);
+      await nextTurn();
+      assert.equal(
+        f.calls.filter((call) => call.path === '/oauth2/token').length,
+        2,
+      );
+      assert.equal(
+        f.broker.state.current().state,
+        status === 503 ? 'authenticated' : 'revoked',
+      );
+      t.mock.timers.tick(60_000);
+      await nextTurn();
+      assert.equal(
+        f.broker.state.current().state,
+        status === 503 ? 'unreachable' : 'revoked',
+      );
+    },
+  );
+}
+
+for (const status of [401, 403, 503, 'offline']) {
+  test(
+    'managed file handles late ' +
+      status +
+      ' after the old JWT expires during renewal',
+    async (t) => {
+      t.mock.timers.enable({ apis: ['Date', 'setInterval'] });
+      const f = await fixture(t);
+      const reply = f.pauseToken(status);
+      t.mock.timers.tick(121_000);
+      await reply.started.promise;
+      assert.equal(f.broker.state.current().state, 'authenticated');
+      t.mock.timers.tick(60_000);
+      assert.equal(f.broker.state.current().state, 'unreachable');
+      assert.equal(f.connection.observationState, 'verified');
+      assert.equal(
+        f.calls.filter((call) => call.path === '/oauth2/token').length,
+        2,
+      );
+      reply.release.resolve();
+      await nextTurn();
+      assert.deepEqual(
+        [f.broker.state.current().state, f.connection.observationState],
+        status === 401 || status === 403
+          ? ['revoked', 'denied']
+          : ['unreachable', 'verified'],
+      );
+    },
+  );
+}
+
+for (const closeOld of [false, true]) {
+  test(
+    'late managed renewal denial leaves the new verified device usable after ' +
+      (closeOld ? 'old connection close' : 'file replacement'),
+    async (t) => {
+      t.mock.timers.enable({ apis: ['Date', 'setInterval'] });
+      const f = await fixture(t);
+      const previous = f.broker.state.current().identity.deviceId;
+      const reply = f.pauseToken(403);
+      t.mock.timers.tick(121_000);
+      await reply.started.promise;
+      t.mock.timers.tick(60_000);
+      assert.equal(f.broker.state.current().state, 'unreachable');
+      if (closeOld) f.broker.close();
+      const next = await f.replaceDevice();
+      assert.notEqual(next.broker.state.current().identity.deviceId, previous);
+      reply.release.resolve();
+      await nextTurn();
+      assert.equal(f.connection.observationState, 'denied');
+      assert.equal(next.connection.observationState, 'verified');
+      assert.equal(next.broker.state.current().state, 'authenticated');
+    },
+  );
+}
 
 test('model credential rotation fences buffered results while the device identity remains authenticated', async (t) => {
   const f = await fixture(t);

@@ -4,12 +4,15 @@ import { createManagedFileConnection } from '../managed/file-connection.js';
 /** Managed hosts use their private device file and the shared fixed executor.
  * An explicitly supplied native connection remains supported by composition.
  * @param {{directory:string,tenantId:string,ownerId:string,instanceId:string,ctx:any,
- * platformOrigin?:string,connection?:any,file?:string,modelFile?:string,authorizeLocal?:(context:any)=>Promise<boolean>}} options */
+ * platformOrigin?:string,connection?:any,file?:string,modelFile?:string,allowColdObservation?:(fileLoaded?:boolean)=>boolean,authorizeLocal?:(context:any)=>Promise<boolean>}} options */
 export function createManagedNetwork(options) {
   /** @type {Awaited<ReturnType<typeof createConnectRuntime>>|undefined} */ let runtime;
   /** @type {Promise<void>|undefined} */ let opening;
   let closed = false;
-  /** @type {any} */ let fileConnection;
+  /** @type {Awaited<ReturnType<typeof createManagedFileConnection>>|undefined} */ let fileConnection;
+  let requireVerifiedFile = false;
+  const coldAllowed = () =>
+    !requireVerifiedFile && options.allowColdObservation?.() !== false;
   /** @type {ReturnType<typeof setInterval>|undefined} */ let timer;
   const lifetime = new AbortController();
   const valid = () => {
@@ -23,6 +26,7 @@ export function createManagedNetwork(options) {
   function refresh() {
     if (closed || opening || (runtime && !fileConnection?.stale))
       return opening;
+    if (fileConnection) requireVerifiedFile = true;
     const work = (async () => {
       if (runtime) {
         const previous = runtime;
@@ -45,6 +49,7 @@ export function createManagedNetwork(options) {
               })
             : undefined);
         fileConnection = options.connection ? undefined : connection;
+        if (fileConnection) options.allowColdObservation?.(true);
         const candidate = await createConnectRuntime({
           directory: options.directory,
           config: connection?.config ?? {
@@ -92,7 +97,30 @@ export function createManagedNetwork(options) {
       return valid();
     },
     get sessionRevoked() {
-      return runtime?.broker.state.current()?.state === 'revoked';
+      // Keep denying while a previously loaded credential has been removed,
+      // replaced or expired, even after refresh detaches its user runtime.
+      return (
+        fileConnection?.stale === true ||
+        runtime?.broker.state.current()?.state === 'revoked'
+      );
+    },
+    // The connection identifies one exact credential file. Refreshing its
+    // access token preserves the scope, while replacing the file retires it.
+    observationScope() {
+      if (closed) return undefined;
+      if (fileConnection) {
+        const state = fileConnection.observationState;
+        if (state === 'denied') requireVerifiedFile = true;
+        return state === 'verified' || (state === 'pending' && coldAllowed())
+          ? fileConnection
+          : undefined;
+      }
+      if (
+        !coldAllowed() ||
+        runtime?.broker.state.current()?.state === 'revoked'
+      )
+        return undefined;
+      return (options.connection && runtime) || lifetime;
     },
     get resourceSession() {
       return valid() ? runtime : undefined;

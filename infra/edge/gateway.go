@@ -749,6 +749,17 @@ func (g *Gateway) instanceIDFromHost(host string) (string, bool) {
 	return id, true
 }
 
+func catalogWritePath(path string) bool {
+	const prefix = "/auriga/resources/catalog/"
+	// Match the literal write routes in clients/dsh-plugin/src/resources/catalog-routes.js.
+	switch path {
+	case prefix + "actions", prefix + "observe", prefix + "submission-targets", prefix + "submissions":
+		return true
+	default:
+		return false
+	}
+}
+
 func (g *Gateway) serveInstance(w http.ResponseWriter, r *http.Request, instanceID, pathSuffix, clientIP, rid string) {
 	instPath := r.URL.Path
 	if pathSuffix != "" {
@@ -865,6 +876,8 @@ func (g *Gateway) serveInstance(w http.ResponseWriter, r *http.Request, instance
 	}
 	tp := ensureTraceparent(r)
 	base := proxy.Rewrite
+	entry, _ := r.Context().Value(accessEntryKey{}).(accessEntry)
+	forwardCatalogWrite := entry.catalogWriteMarker && r.URL.RawQuery == "" && !r.URL.ForceQuery && catalogWritePath(identityPath)
 	proxy.Rewrite = func(pr *httputil.ProxyRequest) {
 		base(pr)
 		pr.Out.URL.Path = "/i/" + instanceID + instPath
@@ -875,6 +888,9 @@ func (g *Gateway) serveInstance(w http.ResponseWriter, r *http.Request, instance
 			pr.Out.URL.RawPath = "/i/" + instanceID + "/" + strings.TrimPrefix(r.URL.RawPath, target.Mount)
 		}
 		rewriteOutboundInstance(pr.Out, clientIP, token, rid, tp)
+		if forwardCatalogWrite {
+			pr.Out.Header.Set(catalogWriteHeader, "1")
+		}
 	}
 	proxy.ModifyResponse = func(resp *http.Response) error {
 		resp.Header.Del(instanceEntryHeader)
