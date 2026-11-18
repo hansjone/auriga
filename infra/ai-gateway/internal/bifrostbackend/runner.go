@@ -222,7 +222,19 @@ type ProviderFailure struct {
 func (e *ProviderFailure) Error() string { return e.Code }
 func loggedProviderFailure(ctx context.Context, failure *schemas.BifrostError) *ProviderFailure {
 	err := providerFailure(failure)
-	slog.WarnContext(ctx, "relay.provider_failure", "status", err.Status, "code", err.Code, "reason", err.Reason, "parameter", err.Parameter)
+	attrs := []slog.Attr{slog.Int("status", err.Status), slog.String("code", err.Code), slog.String("reason", err.Reason), slog.String("parameter", err.Parameter)}
+	if shape, ok := ctx.Value(compatibleChatDiagnosticKey{}).(compatibleChatDiagnostic); ok && err.Status == 400 && err.Code == "provider_rejected_request" {
+		attrs = append(attrs,
+			// The standalone relay binary uses the standard slog handler.
+			slog.String("request_trace_id", shape.traceID),
+			slog.String("route_protocol", "openai_compatible_chat"),
+			slog.Bool("bifrost_error", failure.IsBifrostError),
+			slog.Bool("stream", shape.stream),
+			slog.String("provider_error_type", compatibleProviderErrorType(failure)),
+			slog.GroupAttrs("relay_chat_fields", shape.fields...),
+		)
+	}
+	slog.LogAttrs(ctx, slog.LevelWarn, "relay.provider_failure", attrs...)
 	return err
 }
 func providerFailure(f *schemas.BifrostError) *ProviderFailure {
