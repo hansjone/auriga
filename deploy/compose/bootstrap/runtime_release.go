@@ -27,6 +27,21 @@ const maxProofBytes = 4 << 20
 var digestPattern = regexp.MustCompile(`^sha256:[a-f0-9]{64}$`)
 var fixtureImagePattern = regexp.MustCompile(`^127\.0\.0\.1:5000/auriga/(fake|real)-dsh@sha256:[a-f0-9]{64}$`)
 
+func validateRealDSHMetadata(path, image string) error {
+	raw, err := readProofFile(path)
+	if err != nil {
+		return fmt.Errorf("read real DSH build metadata: %w", err)
+	}
+	var metadata map[string]any
+	if err := strictProofJSON(raw, &metadata); err != nil {
+		return fmt.Errorf("read real DSH build metadata: %w", err)
+	}
+	if metadata["image"] != image || metadata["dshVersion"] != pinnedRealDSHVersion {
+		return fmt.Errorf("real DSH build metadata must match the selected image and pinned version %s", pinnedRealDSHVersion)
+	}
+	return nil
+}
+
 // Fixed ASCII field order and safe integers need no general JSON canonicalizer.
 // Strings retain their original Unicode scalars and use ECMAScript JSON escapes.
 func runtimeReleaseBody(e *nodev1.RuntimeReleaseEnvelope) ([]byte, error) {
