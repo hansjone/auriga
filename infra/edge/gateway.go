@@ -229,6 +229,9 @@ func NewGateway(cfg Config, sessions SessionStore, routes RouteStore, tickets Ti
 			}
 		}
 		g.portalStatic = newAccessSPAFileServer(cfg.Static.PortalRoot, cfg.Access.Mode(), staticCache)
+		if portal, ok := g.portalStatic.(*spaFileServer); ok && cfg.SharedDsh != nil {
+			portal.sharedPlacement = &sharedPortalPlacement{parentDomain: cfg.Access.InstanceParentDomain()}
+		}
 		g.adminStatic = newAccessSPAFileServer(cfg.Static.AdminRoot, cfg.Access.Mode(), staticCache)
 	}
 	return g, nil

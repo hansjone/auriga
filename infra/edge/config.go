@@ -15,6 +15,7 @@ import (
 
 // Config drives auriga-edge. Values may come from a JSON file and/or environment.
 type Config struct {
+	SharedDsh              *SharedDshConfig              `json:"sharedDsh,omitempty"`
 	UacProviderID          string                        `json:"uacProviderId,omitempty"`
 	UacSSOCookieNames      []string                      `json:"uacSsoCookieNames,omitempty"`
 	AccessConfigFile       string                        `json:"accessConfigFile"`

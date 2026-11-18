@@ -27,6 +27,11 @@ public final class SharedDshTickets {
     /** Trusted deployment mapping, including the IP instance prefix when needed. */
     URI exchangeUrl(SharedDshBinding binding);
 
+    /** Only an explicitly acknowledged same-origin IP installation may opt in. */
+    default boolean allowInsecureExchange(SharedDshBinding binding, URI url) {
+      return false;
+    }
+
     /** Live E replay authority; unavailable must throw, never return false as fallback. */
     boolean consumed(UUID jti);
   }
@@ -130,7 +135,8 @@ public final class SharedDshTickets {
           URI url = entry.exchangeUrl(b);
           valid(
               url != null
-                  && "https".equals(url.getScheme())
+                  && ("https".equals(url.getScheme())
+                      || ("http".equals(url.getScheme()) && entry.allowInsecureExchange(b, url)))
                   && url.getHost() != null
                   && url.getUserInfo() == null
                   && url.getQuery() == null
@@ -141,12 +147,22 @@ public final class SharedDshTickets {
   }
 
   public static String sign(String kid, SortedMap<String, Object> claims, PrivateKey key) {
+    return sign(kid, claims, key, "auriga-shared-ticket+jwt");
+  }
+
+  public static String signProfileProbe(
+      String kid, SortedMap<String, Object> claims, PrivateKey key) {
+    return sign(kid, claims, key, "auriga-shared-profile-probe+jwt");
+  }
+
+  private static String sign(
+      String kid, SortedMap<String, Object> claims, PrivateKey key, String purpose) {
     try {
       var json = JsonMapper.builder().build();
       var header = new TreeMap<String, Object>();
       header.put("alg", "EdDSA");
       header.put("kid", kid);
-      header.put("typ", "auriga-shared-ticket+jwt");
+      header.put("typ", purpose);
       var encoder = Base64.getUrlEncoder().withoutPadding();
       String input =
           encoder.encodeToString(json.writeValueAsBytes(header))

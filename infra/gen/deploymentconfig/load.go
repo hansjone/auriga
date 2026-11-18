@@ -46,6 +46,7 @@ type Config struct {
 func (c Config) Valid() bool                                       { return c.valid }
 func (c Config) TenantID() string                                  { return c.access.TenantId }
 func (c Config) Mode() string                                      { return c.access.Mode }
+func (c Config) InsecureHTTPAcknowledged() bool                    { return c.access.InsecureHttpAcknowledged }
 func (c Config) PortalOrigin() deployment.Origin                   { return c.access.PortalOrigin }
 func (c Config) AdminOrigin() deployment.Origin                    { return c.access.AdminOrigin }
 func (c Config) PortalURL() string                                 { return serializeOrigin(c.access.PortalOrigin) }

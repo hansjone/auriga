@@ -1,7 +1,9 @@
 package auriga.workspace.config;
 
 import auriga.workspace.api.SharedDshAuthority.Inputs;
+import auriga.workspace.api.SharedDshRuntimeResources;
 import auriga.workspace.app.SharedDshAdmin;
+import auriga.workspace.app.SharedDshEntryQueries;
 import auriga.workspace.app.SharedDshMaintenance;
 import auriga.workspace.app.SharedDshNodeRuntime;
 import auriga.workspace.app.SharedDshPlacements;
@@ -54,7 +56,20 @@ public class WorkspaceSharedDshConfiguration {
 
   /** The common internal gRPC server applies service-token verification before this adapter. */
   @Bean
-  SharedDshGrpc sharedDshGrpc(SharedDshPlacements placements) {
-    return new SharedDshGrpc(placements);
+  SharedDshEntryQueries sharedDshEntryQueries(
+      SharedDshPlacements placements, WorkspaceStore store) {
+    return new SharedDshEntryQueries(store, placements);
+  }
+
+  @Bean
+  SharedDshGrpc sharedDshGrpc(
+      SharedDshPlacements placements,
+      SharedDshEntryQueries entry,
+      org.springframework.beans.factory.ObjectProvider<SharedDshRuntimeResources> resources) {
+    return new SharedDshGrpc(
+        placements,
+        java.util.Set.of("svc:workspace", "svc:agent"),
+        entry,
+        resources.getIfAvailable());
   }
 }
