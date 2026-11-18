@@ -148,6 +148,7 @@ public final class NodeSessions implements AutoCloseable {
     boolean sharedPreparation;
     final LinkedHashMap<UUID, SharedDshNodeRuntime.Delivery> sharedInFlight = new LinkedHashMap<>();
     UUID sharedCursor;
+    UUID sharedViewCursor;
     final UUID holder = auriga.common.persistence.UuidV7.next();
     final NodeSessionLease lease;
     final NodeOutput outbound;
@@ -310,6 +311,14 @@ public final class NodeSessions implements AutoCloseable {
                       break;
                     }
                   }
+                } else if (request.hasSharedDshResourceReport()
+                    && sharedRuntime != null
+                    && sharedPreparation) {
+                  sharedRuntime.resourceReport(node, request.getSharedDshResourceReport());
+                } else if (request.hasSharedDshGuardianImpact()
+                    && sharedRuntime != null
+                    && sharedPreparation) {
+                  sharedRuntime.guardian(node, request.getSharedDshGuardianImpact());
                 } else if (!request.hasLog())
                   throw new AurigaException(CommonErrors.VALIDATION_FAILED);
               }
@@ -382,6 +391,11 @@ public final class NodeSessions implements AutoCloseable {
                   if (sharedRuntime != null && sharedPreparation) {
                     var batch = sharedRuntime.pending(node, sharedCursor);
                     sharedCursor = batch.next();
+                    var views = sharedRuntime.views(node, sharedViewCursor);
+                    sharedViewCursor = views.next();
+                    for (var view : views.views())
+                      frames.add(
+                          SessionResponse.newBuilder().setSharedDshResourceView(view).build());
                     for (var delivery : batch.deliveries()) {
                       // Bound each stream's correlation state. Evicted commands remain in the
                       // durable outbox and are retried on the next scan or reconnect.

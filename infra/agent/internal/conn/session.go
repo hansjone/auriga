@@ -73,8 +73,9 @@ type Session struct {
 	usageCh         chan *nodev1.NodeUsage
 	wakeCh          chan *nodev1.WakeSchedule
 	resultCh        chan *nodev1.CommandResult
-	sharedReceiptCh chan *nodev1.SharedDshRuntimeReceipt
+	sharedReceiptCh chan *sharedReceipt
 	sharedReportCh  chan *nodev1.SessionRequest
+	sharedWork      *sharedWorkQueue
 }
 
 // New creates a session manager.
@@ -110,9 +111,10 @@ func New(cfg Config) *Session {
 		usageCh:         make(chan *nodev1.NodeUsage, 8),
 		wakeCh:          make(chan *nodev1.WakeSchedule, 16),
 		resultCh:        make(chan *nodev1.CommandResult, 64),
-		sharedReceiptCh: make(chan *nodev1.SharedDshRuntimeReceipt, 64),
+		sharedReceiptCh: make(chan *sharedReceipt, 64),
 		sharedReportCh:  make(chan *nodev1.SessionRequest, 128),
 	}
+	session.sharedWork = newSharedWorkQueue(session)
 	if cfg.SharedRuntime != nil {
 		cfg.SharedRuntime.Report = session.ReportShared
 	}
@@ -199,6 +201,13 @@ func (s *Session) Connected() bool {
 
 // Run loops connect → session → backoff until ctx is done.
 func (s *Session) Run(ctx context.Context) error {
+	defer func() {
+		cleanup, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := s.sharedWork.wait(cleanup); err != nil {
+			s.cfg.Logger.Warn("shared worker shutdown", "error", err)
+		}
+	}()
 	renewCtx, cancelRenew := context.WithCancel(ctx)
 	renewDone := make(chan struct{})
 	go func() {
@@ -302,9 +311,8 @@ func (s *Session) tryRenew(ctx context.Context) error {
 func (s *Session) runOnce(ctx context.Context) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	if s.cfg.SharedRuntime != nil {
-		s.cfg.SharedRuntime.ResetViews()
-	}
+	// Reset and all storage work run on the same bounded worker, never Recv.
+	s.sharedWork.reset(ctx)
 	mat, meta, tlsCert, err := s.loadCreds()
 	if err != nil {
 		return err
@@ -428,8 +436,11 @@ func (s *Session) runOnce(ctx context.Context) error {
 				return err
 			}
 		case receipt := <-s.sharedReceiptCh:
+			if receipt.context.Err() != nil {
+				continue
+			}
 			if err := stream.Send(&nodev1.SessionRequest{
-				Body: &nodev1.SessionRequest_SharedDshRuntimeReceipt{SharedDshRuntimeReceipt: receipt},
+				Body: &nodev1.SessionRequest_SharedDshRuntimeReceipt{SharedDshRuntimeReceipt: receipt.SharedDshRuntimeReceipt},
 			}); err != nil {
 				return err
 			}
@@ -594,34 +605,18 @@ func (s *Session) handleControl(ctx context.Context, msg *nodev1.SessionResponse
 		return nil
 	}
 	s.cfg.Logger.Info("control message received", "type", fmt.Sprintf("%T", msg.Body))
-	if body, ok := msg.Body.(*nodev1.SessionResponse_SharedDshResourceView); ok {
+	if _, ok := msg.Body.(*nodev1.SessionResponse_SharedDshResourceView); ok {
 		if s.cfg.SharedRuntime == nil {
 			return fmt.Errorf("shared resource receiver unavailable")
 		}
-		return s.cfg.SharedRuntime.View(ctx, body.SharedDshResourceView)
+		return s.sharedWork.enqueue(ctx, msg)
 	}
 	if body, ok := msg.Body.(*nodev1.SessionResponse_SharedDshRuntimeIntent); ok {
 		command := body.SharedDshRuntimeIntent
-		if s.cfg.SharedPools == nil || command == nil || command.Binding == nil ||
-			command.Action != "prepare-empty" || command.OperationId != command.Binding.PlacementId {
+		if s.cfg.SharedPools == nil || !agentruntime.ValidPoolControlIntent(command) {
 			return fmt.Errorf("initial shared preparation unavailable")
 		}
-		var receipt *nodev1.SharedDshRuntimeReceipt
-		var err error
-		if s.cfg.SharedRuntime != nil {
-			receipt, err = s.cfg.SharedRuntime.Prepare(ctx, command)
-		} else {
-			receipt, err = s.cfg.SharedPools.Apply(ctx, command)
-		}
-		if receipt == nil {
-			return err
-		}
-		select {
-		case s.sharedReceiptCh <- receipt:
-			return err
-		case <-ctx.Done():
-			return ctx.Err()
-		}
+		return s.sharedWork.enqueue(ctx, msg)
 	}
 	if s.cfg.Reconciler == nil {
 		return nil

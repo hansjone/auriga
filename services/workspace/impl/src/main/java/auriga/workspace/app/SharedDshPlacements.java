@@ -1479,6 +1479,8 @@ public final class SharedDshPlacements implements SharedDshAuthority {
                   tenant(),
                   row.get("id"));
           matched(expected.get("view_id").toString().equals(report.getViewId()));
+          if (Arrays.equals(report.toByteArray(), (byte[]) expected.get("report")))
+            return number(row, "revision");
           if (report.getStatus().equals("ready")) {
             var live = inputs.resourceView(b);
             live(
@@ -1505,6 +1507,106 @@ public final class SharedDshPlacements implements SharedDshAuthority {
             requestStop(UuidV7.next(), b, reason);
           }
           return number(member(UUID.fromString(b.getMemberId())), "revision");
+        });
+  }
+
+  /** Node ownership is checked by SharedDshNodeRuntime inside the session fence. */
+  public void nodeGuardian(SharedDshGuardianImpact received) {
+    var ordered = received.toBuilder().clearAffected();
+    received.getAffectedList().stream()
+        .sorted(Comparator.comparing(SharedDshBinding::getPlacementId))
+        .forEach(ordered::addAffected);
+    final var impact = ordered.build();
+    locked(
+        () -> {
+          valid(
+              impact.getSchemaVersion() == 1
+                  && impact.getTenantId().equals(tenant().toString())
+                  && impact.getScope().equals("pool")
+                  && Set.of("stopping", "stopped", "blocked").contains(impact.getState())
+                  && impact.getObservedAt() >= 0
+                  && impact.getObservedAt() <= now()
+                  && auriga.workspace.domain.SharedDshPolicy.uuid(impact.getOperationId())
+                  && Set.of(
+                          "resource-expired",
+                          "resource-revoked",
+                          "credential-invalid",
+                          "credential-stop-unconfirmed",
+                          "cancel-timeout",
+                          "cleanup-unconfirmed",
+                          "crash")
+                      .contains(impact.getReason()));
+          UUID operation = UUID.fromString(impact.getOperationId());
+          UUID pool = UUID.fromString(impact.getPhysicalInstanceId());
+          var prior =
+              store.jdbc.queryForList(
+                  "SELECT payload FROM shared_dsh_node_guardian WHERE tenant_id=? AND operation_id=?",
+                  tenant(),
+                  operation);
+          if (!prior.isEmpty()) {
+            try {
+              var previous =
+                  SharedDshGuardianImpact.parseFrom((byte[]) prior.getFirst().get("payload"));
+              matched(
+                  previous.toBuilder()
+                          .clearState()
+                          .build()
+                          .equals(impact.toBuilder().clearState().build())
+                      && (previous.getState().equals(impact.getState())
+                          || !previous.getState().equals("stopped")));
+              if (!previous.equals(impact))
+                store.jdbc.update(
+                    "UPDATE shared_dsh_node_guardian SET payload=? WHERE tenant_id=? AND operation_id=?",
+                    impact.toByteArray(),
+                    tenant(),
+                    operation);
+            } catch (com.google.protobuf.InvalidProtocolBufferException e) {
+              throw new IllegalStateException(e);
+            }
+            return null;
+          }
+          var rows =
+              store.jdbc.queryForList(
+                  "SELECT * FROM shared_dsh_placement WHERE tenant_id=? AND pool_id=?",
+                  tenant(),
+                  pool);
+          matched(!rows.isEmpty() && rows.size() == impact.getAffectedCount());
+          var seen = new HashSet<String>();
+          for (var affected : impact.getAffectedList()) {
+            matched(
+                affected.getTenantId().equals(tenant().toString())
+                    && affected.getPhysicalInstanceId().equals(pool.toString())
+                    && seen.add(affected.getPlacementId()));
+            var row =
+                rows.stream()
+                    .filter(r -> r.get("id").toString().equals(affected.getPlacementId()))
+                    .findFirst()
+                    .orElseThrow(() -> new AurigaException(CommonErrors.NOT_FOUND));
+            if (!binding(row).equals(affected)) {
+              var saved =
+                  store.one(
+                      "SELECT payload FROM shared_dsh_resource_view WHERE tenant_id=? AND placement_id=?",
+                      tenant(),
+                      row.get("id"));
+              try {
+                matched(
+                    SharedDshResourceView.parseFrom((byte[]) saved.get("payload"))
+                        .getBinding()
+                        .equals(affected));
+              } catch (com.google.protobuf.InvalidProtocolBufferException e) {
+                throw new IllegalStateException(e);
+              }
+            }
+          }
+          store.jdbc.update(
+              "INSERT INTO shared_dsh_node_guardian(tenant_id,operation_id,pool_id,payload) VALUES(?,?,?,?)",
+              tenant(),
+              operation,
+              pool,
+              impact.toByteArray());
+          requestStop(operation, binding(rows.getFirst()), "credential-stop-unconfirmed");
+          emit("placement.node_guardian", impact);
+          return null;
         });
   }
 

@@ -142,6 +142,40 @@ func TestPersistentPoolTwoMembersAndRestartReuseOneSignedProcess(t *testing.T) {
 	}
 }
 
+func TestPersistentPoolDedicatedAndGuardianReplayWithoutFreshViews(t *testing.T) {
+	m, _, _ := persistentFixture(t)
+	ctx := context.Background()
+	command := persistentIntent(1)
+	command.Binding.Mode = nodev1.DshInstanceMode_DSH_INSTANCE_MODE_DEDICATED
+	if e := m.View(ctx, persistentView(command)); e != nil {
+		t.Fatal(e)
+	}
+	if receipt, e := m.Prepare(ctx, command); e != nil || receipt.Outcome != "confirmed" {
+		t.Fatal("dedicated start", e)
+	}
+	impact, e := m.Pools.Trip(ctx, command.Binding.PhysicalInstanceId, command.OperationId, "crash")
+	if e != nil || impact.State != "stopped" {
+		t.Fatal("guardian", e)
+	}
+	m.ResetViews()
+	reports := make(chan *nodev1.SessionRequest, 4)
+	m.Report = func(r *nodev1.SessionRequest) { reports <- r }
+	m.Watch(ctx)
+	select {
+	case r := <-reports:
+		if !proto.Equal(r.GetSharedDshGuardianImpact(), impact) {
+			t.Fatal("wrong durable impact")
+		}
+	default:
+		t.Fatal("blocked pool did not replay after reconnect")
+	}
+	stop := proto.Clone(command).(*nodev1.SharedDshRuntimeIntent)
+	stop.Action = "stop-pool"
+	if receipt, e := m.Prepare(ctx, stop); e != nil || receipt.Outcome != "confirmed" {
+		t.Fatal("operation action scope conflicts with initial prepare", e)
+	}
+}
+
 func TestPersistentPoolQuotaSnapshotReleaseAndProfileGates(t *testing.T) {
 	for _, gate := range []string{"quota", "snapshot", "personal", "profile", "release", "resource"} {
 		t.Run(gate, func(t *testing.T) {

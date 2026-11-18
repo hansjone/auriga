@@ -27,7 +27,7 @@ func (v *EmptyPoolResources) Verify(_ context.Context, pool string, views []*nod
 			return fmt.Errorf("shared resource materializer is required")
 		}
 	}
-	root, err := (&storage.PoolLayout{Root: v.Root}).Path(pool, "control", "skills")
+	root, err := (&storage.PoolLayout{Root: v.Root}).Path(pool, "host", "platform-skills", "active")
 	if err != nil {
 		return err
 	}
@@ -57,8 +57,10 @@ type PersistentPools struct {
 	Publish        func(string, Endpoint)
 	Unpublish      func(string)
 	Report         func(*nodev1.SessionRequest)
+	ConfigureHost  func(context.Context, *nodev1.SharedDshBinding, int) (string, error)
 	mu             sync.Mutex
 	views          map[string]*nodev1.SharedDshResourceView
+	active         map[string]bool
 }
 
 type poolProcess struct {
@@ -71,6 +73,7 @@ func (m *PersistentPools) ResetViews() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.views = map[string]*nodev1.SharedDshResourceView{}
+	m.active = map[string]bool{}
 }
 
 func (m *PersistentPools) View(ctx context.Context, view *nodev1.SharedDshResourceView) error {
@@ -86,6 +89,12 @@ func (m *PersistentPools) View(ctx context.Context, view *nodev1.SharedDshResour
 	if m.views == nil {
 		m.views = map[string]*nodev1.SharedDshResourceView{}
 	}
+	// W deliberately resends stable views. Do not repeat all downloads and
+	// Engine probes for each identical member frame; Watch still revalidates
+	// signatures/leases independently, and reconnect clears this admission cache.
+	if check == nil && m.active[view.Binding.PhysicalInstanceId] && proto.Equal(m.views[view.Binding.PlacementId], view) {
+		return nil
+	}
 	m.views[view.Binding.PlacementId] = proto.Clone(view).(*nodev1.SharedDshResourceView)
 	bindings, err := m.Pools.Bindings(view.Binding.PhysicalInstanceId)
 	if err != nil || len(bindings) == 0 {
@@ -99,6 +108,7 @@ func (m *PersistentPools) View(ctx context.Context, view *nodev1.SharedDshResour
 		watch := observer.PoolWatch{Pools: m.Pools, Verifier: m.Resources, Validate: CheckPoolViews}
 		reports, impact, err := watch.Check(ctx, view.ViewId, bindings, views, time.Now())
 		if m.Unpublish != nil {
+			delete(m.active, view.Binding.PhysicalInstanceId)
 			m.Unpublish(view.Binding.PhysicalInstanceId)
 		}
 		for _, report := range reports {
@@ -119,6 +129,13 @@ func (m *PersistentPools) Prepare(ctx context.Context, command *nodev1.SharedDsh
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	receipt, err := m.Pools.Apply(ctx, command)
+	if command.Action == "stop-pool" {
+		delete(m.active, command.Binding.PhysicalInstanceId)
+		if m.Unpublish != nil {
+			m.Unpublish(command.Binding.PhysicalInstanceId)
+		}
+		return receipt, err
+	}
 	if err != nil || receipt.Outcome != "confirmed" {
 		return receipt, err
 	}
@@ -148,8 +165,11 @@ func (m *PersistentPools) snapshot(pool string) ([]*nodev1.SharedDshBinding, []*
 
 func (m *PersistentPools) ensure(ctx context.Context, binding *nodev1.SharedDshBinding) (result error) {
 	defer func() {
-		if result != nil && m.Unpublish != nil {
-			m.Unpublish(binding.PhysicalInstanceId)
+		if result != nil {
+			delete(m.active, binding.PhysicalInstanceId)
+			if m.Unpublish != nil {
+				m.Unpublish(binding.PhysicalInstanceId)
+			}
 		}
 	}()
 	if m.Driver == nil || m.Driver.Activation == nil || m.UIDs == nil || m.Template == nil || m.Resources == nil {
@@ -161,7 +181,7 @@ func (m *PersistentPools) ensure(ctx context.Context, binding *nodev1.SharedDshB
 	if err != nil {
 		return err
 	}
-	skills, err := layout.Path(pool, "control", "skills")
+	skills, err := layout.Path(pool, "host", "platform-skills", "active")
 	if err != nil {
 		return err
 	}
@@ -178,6 +198,13 @@ func (m *PersistentPools) ensure(ctx context.Context, binding *nodev1.SharedDshB
 	uid, err := m.UIDs.Allocate(pool)
 	if err != nil {
 		return err
+	}
+	var relay string
+	if m.ConfigureHost != nil {
+		relay, err = m.ConfigureHost(ctx, binding, uid)
+		if err != nil {
+			return err
+		}
 	}
 	members, err := layout.Path(pool, "members")
 	if err != nil {
@@ -211,11 +238,15 @@ func (m *PersistentPools) ensure(ctx context.Context, binding *nodev1.SharedDshB
 	if port == 0 {
 		port = 7860
 	}
-	digest, err := renderer.RenderPool(m.Profile, m.Ports, pool, binding.TenantId, meta, port)
+	mode := "shared"
+	if binding.Mode == nodev1.DshInstanceMode_DSH_INSTANCE_MODE_DEDICATED {
+		mode = "dedicated"
+	}
+	digest, err := renderer.RenderPoolMode(m.Profile, m.Ports, pool, binding.TenantId, mode, meta, port)
 	if err != nil {
 		return err
 	}
-	container := &PoolContainer{Members: members, Skills: skills, Meta: meta, ProfileDigest: digest}
+	container := &PoolContainer{Members: members, Skills: skills, Meta: meta, Relay: relay, ProfileDigest: digest}
 	if backend, ok := layout.Quota.(interface {
 		MountPool(context.Context, string) (storage.PoolMount, error)
 	}); ok {
@@ -241,8 +272,12 @@ func (m *PersistentPools) ensure(ctx context.Context, binding *nodev1.SharedDshB
 	} else {
 		return err
 	}
+	trustedNow := time.Now().UTC()
+	if clock, ok := m.Resources.(interface{ Now() time.Time }); ok {
+		trustedNow = clock.Now()
+	}
 	policy := map[string]any{"schemaVersion": 1, "sharedPool": true, "newSessionRequired": false,
-		"allowPersonalPlugins": false, "trustedTime": time.Now().UTC().Format(time.RFC3339Nano)}
+		"allowPersonalPlugins": false, "trustedTime": trustedNow.Format(time.RFC3339Nano)}
 	var expires int64
 	for _, view := range views {
 		for _, resource := range view.Resources {
@@ -275,7 +310,7 @@ func (m *PersistentPools) ensure(ctx context.Context, binding *nodev1.SharedDshB
 			spec := &Spec{Full: full, InstanceID: pool, Generation: full.Generation, Image: full.Dsh.Image,
 				CPUMillis: full.GetResources().GetCpuMillis(), MemoryMB: full.GetResources().GetMemoryMb(), PIDs: full.GetResources().GetPids(),
 				HostUID: uid, HomeBind: members, MetaBind: meta, ListenPort: port, Pool: container,
-				Env: map[string]string{"AURIGA_MODE": "shared", "AURIGA_INSTANCE_ID": pool, "AURIGA_TENANT_ID": binding.TenantId,
+				Env: map[string]string{"AURIGA_MODE": mode, "AURIGA_INSTANCE_ID": pool, "AURIGA_TENANT_ID": binding.TenantId,
 					"HOME": "/home/dsh/.host", "DSH_HOME": "/home/dsh/.host/.dsh", "DSH_TELEMETRY_DISABLED": "1", "DSH_TELEMETRY_MODE": "DISABLED"}}
 			if err := m.Driver.Ensure(ctx, spec, &Rendered{Digest: digest}); err != nil {
 				return err
@@ -335,6 +370,10 @@ func (m *PersistentPools) ensure(ctx context.Context, binding *nodev1.SharedDshB
 	if m.Publish != nil {
 		m.Publish(pool, endpoint)
 	}
+	if m.active == nil {
+		m.active = map[string]bool{}
+	}
+	m.active[pool] = true
 	return nil
 }
 
@@ -363,6 +402,14 @@ func (m *PersistentPools) Watch(ctx context.Context) {
 		if !entry.IsDir() || !poolUUID.MatchString(pool) {
 			continue
 		}
+		// Blocked pools no longer receive resource views. Their durable guardian
+		// receipts must still replay after a disconnect or process restart.
+		impacts, impactErr := m.Pools.GuardianImpacts(pool)
+		if impactErr == nil {
+			for _, impact := range impacts {
+				m.report(&nodev1.SessionRequest{Body: &nodev1.SessionRequest_SharedDshGuardianImpact{SharedDshGuardianImpact: impact}})
+			}
+		}
 		bindings, views, err := m.snapshot(pool)
 		if err != nil || len(bindings) == 0 {
 			continue
@@ -370,6 +417,7 @@ func (m *PersistentPools) Watch(ctx context.Context) {
 		operation := views[0].ViewId
 		reports, impact, checkErr := watch.Check(ctx, operation, bindings, views, time.Now())
 		if checkErr != nil && m.Unpublish != nil {
+			delete(m.active, pool)
 			m.Unpublish(pool)
 		}
 		for _, report := range reports {
@@ -380,6 +428,7 @@ func (m *PersistentPools) Watch(ctx context.Context) {
 		}
 		actual, err := m.Driver.CheckHealth(ctx, pool)
 		if err != nil || !actual.Ready {
+			delete(m.active, pool)
 			if m.Unpublish != nil {
 				m.Unpublish(pool)
 			}
@@ -388,12 +437,6 @@ func (m *PersistentPools) Watch(ctx context.Context) {
 				if err == nil {
 					m.report(&nodev1.SessionRequest{Body: &nodev1.SessionRequest_SharedDshGuardianImpact{SharedDshGuardianImpact: impact}})
 				}
-			}
-		}
-		impacts, err := m.Pools.GuardianImpacts(pool)
-		if err == nil {
-			for _, impact := range impacts {
-				m.report(&nodev1.SessionRequest{Body: &nodev1.SessionRequest_SharedDshGuardianImpact{SharedDshGuardianImpact: impact}})
 			}
 		}
 	}

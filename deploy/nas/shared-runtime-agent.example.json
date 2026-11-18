@@ -10,6 +10,7 @@
   "sharedDshRuntime": {
     "templateFile": "/etc/auriga/shared-runtime/runtime.json",
     "profileFile": "/etc/auriga/shared-runtime/profile.yml",
-    "portsModuleFile": "/etc/auriga/shared-runtime/ports.mjs"
+    "servicesFile": "/etc/auriga/shared-runtime/services.json",
+    "hostConfigFile": "/etc/auriga/shared-runtime/host.json"
   }
 }

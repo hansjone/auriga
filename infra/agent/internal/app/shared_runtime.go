@@ -1,21 +1,25 @@
 package app
 
 import (
+	"context"
+	"encoding/json"
 	"fmt"
 	"net/url"
 	"os"
 	"path/filepath"
+	"sync"
 
 	"github.com/hansjone/auriga/infra/agent/internal/config"
 	"github.com/hansjone/auriga/infra/agent/internal/ingress"
 	"github.com/hansjone/auriga/infra/agent/internal/renderer"
 	"github.com/hansjone/auriga/infra/agent/internal/runtime"
+	"github.com/hansjone/auriga/infra/agent/internal/sharednode"
 	"github.com/hansjone/auriga/infra/agent/internal/storage"
 	nodev1 "github.com/hansjone/auriga/infra/gen/auriga/node/v1"
 	"google.golang.org/protobuf/encoding/protojson"
 )
 
-func sharedRuntime(cfg config.Config, pools *runtime.SharedPools, docker *runtime.Docker, registry *ingress.MapRegistry) (*runtime.PersistentPools, error) {
+func sharedRuntime(ctx context.Context, cfg config.Config, pools *runtime.SharedPools, docker *runtime.Docker, registry *ingress.MapRegistry) (*runtime.PersistentPools, error) {
 	settings := cfg.SharedDshRuntime
 	if settings == nil {
 		return nil, nil
@@ -34,7 +38,7 @@ func sharedRuntime(cfg config.Config, pools *runtime.SharedPools, docker *runtim
 		if err != nil {
 			return nil, err
 		}
-		if !info.Mode().IsRegular() || info.Size() > 4*1024*1024 {
+		if !info.Mode().IsRegular() || info.Mode().Perm()&0022 != 0 || info.Size() > 4*1024*1024 {
 			return nil, fmt.Errorf("invalid shared installation file")
 		}
 		return os.ReadFile(path)
@@ -51,17 +55,91 @@ func sharedRuntime(cfg config.Config, pools *runtime.SharedPools, docker *runtim
 	if err != nil {
 		return nil, err
 	}
-	if err = renderer.ValidatePoolProfile(profile); err != nil {
+	if err = renderer.ValidateProductionPoolProfile(profile); err != nil {
 		return nil, err
 	}
-	ports, err := read(settings.PortsModuleFile)
+	// Production uses the reviewed, signed package export, not a handwritten
+	// mutable module installed outside the runtime image.
+	if settings.PortsModuleFile != "" {
+		return nil, fmt.Errorf("use auriga-dsh/shared-ports in the signed profile")
+	}
+	var ports []byte
+	client, err := openSharedClient(cfg)
 	if err != nil {
 		return nil, err
+	}
+	go func() { <-ctx.Done(); client.Close() }()
+	hostRaw, err := read(settings.HostConfigFile)
+	if err != nil {
+		return nil, err
+	}
+	var hostTemplate map[string]any
+	if err = json.Unmarshal(hostRaw, &hostTemplate); err != nil {
+		return nil, err
+	}
+	for _, field := range []string{"identityKeys", "capabilityKeys", "model", "enterprise"} {
+		if hostTemplate[field] == nil {
+			return nil, fmt.Errorf("shared host installation missing %s", field)
+		}
+	}
+	for key := range hostTemplate {
+		if key != "identityKeys" && key != "capabilityKeys" && key != "model" && key != "enterprise" {
+			return nil, fmt.Errorf("unexpected shared Host template field %q", key)
+		}
+	}
+	var hostMu sync.Mutex
+	started := map[string]string{}
+	configure := func(_ context.Context, b *nodev1.SharedDshBinding, uid int) (string, error) {
+		hostMu.Lock()
+		defer hostMu.Unlock()
+		if b.TenantId != client.Settings.TenantID {
+			return "", fmt.Errorf("shared tenant mismatch")
+		}
+		if directory := started[b.PhysicalInstanceId]; directory != "" {
+			return directory, nil
+		}
+		directory, err := pools.Layout.Path(b.PhysicalInstanceId, "control", "host-relay")
+		if err != nil {
+			return "", err
+		}
+		if err = os.MkdirAll(directory, 0755); err != nil {
+			return "", err
+		}
+		var config map[string]any
+		if err = json.Unmarshal(hostRaw, &config); err != nil {
+			return "", err
+		}
+		target := "/var/lib/auriga/pools/" + b.PhysicalInstanceId + "/control"
+		config["schemaVersion"], config["tenantId"], config["physicalInstanceId"] = 1, b.TenantId, b.PhysicalInstanceId
+		config["nodeSocket"], config["skillRoots"] = target+"/shared-node.sock", []string{"/run/auriga/skills-active/current"}
+		raw, err := json.Marshal(config)
+		if err != nil || len(raw) > 256*1024 {
+			return "", fmt.Errorf("invalid shared host configuration")
+		}
+		path := filepath.Join(directory, "shared-host.json")
+		if old, e := os.ReadFile(path); e == nil {
+			if string(old) != string(raw) {
+				return "", fmt.Errorf("pool host configuration requires maintenance")
+			}
+		} else if os.IsNotExist(e) {
+			if e = os.WriteFile(path, raw, 0444); e != nil {
+				return "", e
+			}
+		} else {
+			return "", e
+		}
+		relay := sharednode.NewRelay(client, b.PhysicalInstanceId)
+		if _, err = relay.Start(ctx, filepath.Join(directory, "shared-node.sock"), uid); err != nil {
+			return "", err
+		}
+		started[b.PhysicalInstanceId] = directory
+		return directory, nil
 	}
 	pools.Supervisor = docker
 	return &runtime.PersistentPools{Pools: pools, Driver: docker,
 		UIDs: storage.NewUIDTable(cfg.AgentDir()), Template: template, Profile: profile, Ports: ports,
-		Resources: &runtime.EmptyPoolResources{Root: pools.Layout.Root},
+		Resources:     &runtime.PoolMaterializer{Layout: pools.Layout, Source: client, Unified: runtime.NewUnifiedManager(&storage.Layout{InstancesDir: cfg.InstancesDir()}, docker, nil, cfg.AgentDir())},
+		ConfigureHost: configure,
 		Publish: func(pool string, endpoint runtime.Endpoint) {
 			upstream, err := url.Parse(endpoint.URL)
 			if err == nil {

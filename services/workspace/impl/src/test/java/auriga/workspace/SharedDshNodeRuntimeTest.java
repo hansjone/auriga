@@ -29,6 +29,39 @@ import org.springframework.jdbc.core.JdbcTemplate;
 /** Real session, certificate, lease and placement code with a synthetic SQL boundary. */
 class SharedDshNodeRuntimeTest {
   @Test
+  void directoryOnlyNodeCannotClaimAProductionPool() {
+    var hello =
+        Hello.newBuilder()
+            .setOs("linux")
+            .addDrivers(RuntimeKind.RUNTIME_KIND_DOCKER)
+            .putLabels(SharedDshNodeRuntime.CAPABILITY, SharedDshNodeRuntime.PREPARATION);
+    assertFalse(SharedDshNodeRuntime.supports(hello.build()));
+    hello.putLabels(SharedDshNodeRuntime.PROCESS_CAPABILITY, SharedDshNodeRuntime.PROCESS);
+    assertTrue(SharedDshNodeRuntime.supports(hello.build()));
+  }
+
+  @Test
+  void explicitDedicatedUsesTheSameFencedPlacementPreparation() throws Exception {
+    try (var f = new Fixture()) {
+      var row = f.members.values().iterator().next();
+      f.members.clear();
+      row.put("mode", "dedicated");
+      f.members.put((UUID) row.get("id"), row);
+      f.outbox.clear();
+      f.queue(intent(row.get("id").toString(), SharedDshPlacements.binding(row), "prepare-empty"));
+      var peer = f.connect(f.node, true);
+      assertEquals(1, peer.commands().size());
+      assertEquals(
+          DshInstanceMode.DSH_INSTANCE_MODE_DEDICATED,
+          peer.commands().getFirst().getBinding().getMode());
+      when(f.entry.ready(any())).thenReturn(true);
+      peer.input.onNext(receipt(peer.commands().getFirst(), f.clock));
+      assertEquals(0, f.pending());
+      assertEquals("ready", row.get("state"));
+    }
+  }
+
+  @Test
   void initialPreparationSurvivesReconnectAndAcknowledgesOnlyAfterTheEntryProbe() throws Exception {
     try (var f = new Fixture()) {
       var first = f.connect(f.node, true);
@@ -359,7 +392,9 @@ class SharedDshNodeRuntimeTest {
               .setSealingKeyId(
                   HexFormat.of().formatHex(WorkspaceCrypto.hash(new byte[32])).substring(0, 16));
       if (capable)
-        hello.putLabels(SharedDshNodeRuntime.CAPABILITY, SharedDshNodeRuntime.PREPARATION);
+        hello
+            .putLabels(SharedDshNodeRuntime.CAPABILITY, SharedDshNodeRuntime.PREPARATION)
+            .putLabels(SharedDshNodeRuntime.PROCESS_CAPABILITY, SharedDshNodeRuntime.PROCESS);
       peer.input.onNext(SessionRequest.newBuilder().setHello(hello).build());
       peer.input.onNext(
           SessionRequest.newBuilder().setInventory(Inventory.getDefaultInstance()).build());

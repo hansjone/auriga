@@ -164,8 +164,12 @@ func TestSharedPoolDirectoriesArchiveAndRestart(t *testing.T) {
 	}
 	changed := proto.Clone(archive).(*nodev1.SharedDshRuntimeIntent)
 	changed.Action = "stop-pool"
+	if receipt, e := restarted.Apply(ctx, changed); e != nil || receipt.Outcome != "confirmed" {
+		t.Fatal("W's next action under the same operation was rejected", e)
+	}
+	changed.Binding.MemberId = poolID("bob")
 	if _, e = restarted.Apply(ctx, changed); e == nil {
-		t.Fatal("operation reused")
+		t.Fatal("operation/action binding reused")
 	}
 	restarted.Now = func() time.Time { return time.Unix(r.ArchiveExpiresAt, 0) }
 	if e = restarted.SweepArchives(ctx, poolID("pool")); e != nil {

@@ -7,7 +7,7 @@ import { join } from 'node:path';
 const require = createRequire('/opt/dsh/package.json');
 const { boot } = await import(pathToFileURL(require.resolve('@deepseek-ai/dsh-app-boot')).href);
 const binding = JSON.parse(readFileSync('/run/auriga/pool-binding.json', 'utf8'));
-if (process.env.AURIGA_MODE !== 'shared' || binding.physicalInstanceId !== process.env.AURIGA_INSTANCE_ID)
+if (!['shared','dedicated'].includes(binding.mode) || process.env.AURIGA_MODE !== binding.mode || binding.physicalInstanceId !== process.env.AURIGA_INSTANCE_ID)
   throw new Error('Shared pool installation mismatch');
 for (const key of Object.keys(process.env)) {
   if (/^(AURIGA_OWNER_ID|AURIGA_.*(?:TOKEN|CREDENTIAL).*|DSH_TEAM_.*|DSH_SESSION_ID)$/.test(key))

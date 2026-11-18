@@ -1,0 +1,20 @@
+{
+  "tenantId": "00000000-0000-4000-8000-000000000001",
+  "workspace": {
+    "address": "https://workspace-rpc.example.invalid:7443",
+    "caFile": "/etc/auriga/shared-runtime/internal-ca.crt"
+  },
+  "iam": {
+    "address": "https://iam-rpc.example.invalid:7443",
+    "caFile": "/etc/auriga/shared-runtime/internal-ca.crt"
+  },
+  "serviceTokenFile": "/etc/auriga/shared-runtime/agent-service.jwt",
+  "sharedModel": {
+    "address": "https://shared-model.example.invalid:9443",
+    "caFile": "/etc/auriga/shared-runtime/model-ca.crt"
+  },
+  "sharedResources": {
+    "address": "https://shared-resources.example.invalid:9443",
+    "caFile": "/etc/auriga/shared-runtime/resource-ca.crt"
+  }
+}

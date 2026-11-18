@@ -53,6 +53,8 @@ func RunCLI(args []string, out, logs io.Writer) error {
 		return runAgent(args[1:], logs)
 	case "recover-runtime":
 		return recoverRuntime(args[1:], out, logs)
+	case "render-shared-host-config":
+		return renderSharedHostConfig(args[1:], out, logs)
 	default:
 		return fmt.Errorf("unknown command %q (want join|run|recover-runtime|--version)", args[0])
 	}
@@ -223,7 +225,7 @@ func runAgent(args []string, logs io.Writer) error {
 		return err
 	}
 	docker, _ := inner.(*runtime.Docker)
-	poolRuntime, err := sharedRuntime(cfg, shared, docker, reg)
+	poolRuntime, err := sharedRuntime(ctx, cfg, shared, docker, reg)
 	if err != nil {
 		return err
 	}
@@ -239,6 +241,13 @@ func runAgent(args []string, logs io.Writer) error {
 		Capacity:      helloCapacity(cfg.DetectCapacity()),
 		SharedPools:   shared,
 		SharedRuntime: poolRuntime,
+		OnWelcome: func(welcome *nodev1.Welcome) {
+			if poolRuntime != nil && welcome.ServerTime != nil && welcome.ServerTime.CheckValid() == nil {
+				if resources, ok := poolRuntime.Resources.(*runtime.PoolMaterializer); ok {
+					resources.TrustServerTime(welcome.ServerTime.AsTime())
+				}
+			}
+		},
 	})
 	if poolRuntime != nil {
 		go func() {

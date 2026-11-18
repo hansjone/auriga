@@ -48,3 +48,28 @@ func TestPoolRenderKeepsExpandedProfileAndImmutableSharedEntry(t *testing.T) {
 		}
 	}
 }
+
+func TestPoolProductionPortsAndDedicatedModeAreImmutable(t *testing.T) {
+	profile := strings.Replace(runnablePoolProfile, "- id: auriga-dsh\n  name: auriga-dsh/shared\n- id: ports\n  name: file:///run/auriga/shared-ports.mjs", "- id: ports\n  name: auriga-dsh/shared-ports\n- id: auriga-dsh\n  name: auriga-dsh/shared", 1)
+	if e := ValidateProductionPoolProfile([]byte(profile)); e != nil {
+		t.Fatal(e)
+	}
+	if ValidateProductionPoolProfile([]byte(runnablePoolProfile)) == nil {
+		t.Fatal("external handwritten ports accepted")
+	}
+	meta := t.TempDir()
+	if _, e := RenderPoolMode([]byte(profile), nil, "pool", "tenant", "dedicated", meta, 7860); e != nil {
+		t.Fatal(e)
+	}
+	raw, e := os.ReadFile(filepath.Join(meta, "pool-binding.json"))
+	if e != nil || !strings.Contains(string(raw), `"mode":"dedicated"`) {
+		t.Fatal("mode not recorded", e)
+	}
+	if _, e = RenderPoolMode([]byte(profile), nil, "pool", "tenant", "shared", meta, 7860); e == nil {
+		t.Fatal("running mode mapping changed")
+	}
+	raw, e = os.ReadFile(filepath.Join(meta, "pool-profile.yml"))
+	if e != nil || !strings.Contains(string(raw), "/var/lib/auriga/pools/pool/control/shared-host.json") {
+		t.Fatal("Host config not wired", e)
+	}
+}

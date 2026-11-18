@@ -18,6 +18,13 @@ var poolLauncher []byte
 // RenderPool installs a complete, immutable shared-host configuration. The ports
 // module is a separately reviewed installation input supplied by host composition.
 func RenderPool(profile, ports []byte, pool, tenant, meta string, port uint32) (string, error) {
+	return RenderPoolMode(profile, ports, pool, tenant, "shared", meta, port)
+}
+
+func RenderPoolMode(profile, ports []byte, pool, tenant, mode, meta string, port uint32) (string, error) {
+	if mode != "shared" && mode != "dedicated" {
+		return "", fmt.Errorf("invalid pool mode")
+	}
 	if err := ValidatePoolProfile(profile); err != nil {
 		return "", err
 	}
@@ -40,6 +47,9 @@ func RenderPool(profile, ports []byte, pool, tenant, meta string, port uint32) (
 			shared = true
 		case "file:///run/auriga/shared-ports.mjs":
 			bridge = true
+		case "auriga-dsh/shared-ports":
+			bridge = true
+			cfg["configFile"] = "/var/lib/auriga/pools/" + pool + "/control/shared-host.json"
 		case "@deepseek-ai/dsh-tools":
 			if cfg["mode"] != "native" {
 				return "", fmt.Errorf("shared tools require native presentation")
@@ -54,14 +64,14 @@ func RenderPool(profile, ports []byte, pool, tenant, meta string, port uint32) (
 			web = true
 		}
 	}
-	if !shared || !tools || !web || !bridge || len(ports) == 0 {
+	if !shared || !tools || !web || !bridge {
 		return "", fmt.Errorf("incomplete shared host composition")
 	}
 	raw, err := yaml.Marshal(rows)
 	if err != nil {
 		return "", err
 	}
-	binding, err := json.Marshal(map[string]any{"schemaVersion": 1, "physicalInstanceId": pool, "tenantId": tenant})
+	binding, err := json.Marshal(map[string]any{"schemaVersion": 1, "physicalInstanceId": pool, "tenantId": tenant, "mode": mode})
 	if err != nil {
 		return "", err
 	}
