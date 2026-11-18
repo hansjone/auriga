@@ -3,6 +3,8 @@ import { verify as cryptoVerify } from 'node:crypto';
 import { sendProblem } from './problem.js';
 import { PROTOCOL_VERSION } from './protocol.js';
 import { rawRequestPath } from './raw-path.js';
+import { NODE_RESOURCE_PATH } from './node-resource-observation.js';
+import { installServerEmitGuard } from './server-emit.js';
 
 const CLOCK_SKEW_SEC = 5;
 const UNAUTH = 'common.unauthenticated';
@@ -180,6 +182,9 @@ export function createDoorLock(cfg) {
    */
   async function check(req, upgrade = false) {
     try {
+      // This target has no browser identity or upgrade path through the door.
+      if (req.url === NODE_RESOURCE_PATH)
+        return { ok: false, code: UNAUTH, reason: 'node_resource_target' };
       const path = rawRequestPath(req.url);
       const method = String(req.method || 'GET').toUpperCase();
       if (
@@ -231,21 +236,28 @@ export function createDoorLock(cfg) {
 
   /**
    * @param {import('node:http').Server} server
+   * @param {(req: import('node:http').IncomingMessage, res: import('node:http').ServerResponse) => Promise<void>} [observeNode]
    */
-  function install(server) {
+  function install(server, observeNode) {
     if (!server || typeof server.emit !== 'function') {
       throw new Error(
         'auriga-dsh: door lock requires http.Server (ctx.webServer.server)',
       );
     }
-    const original = server.emit.bind(server);
-    server.emit = function guardedEmit(event, ...args) {
+    let installed = true;
+    function guardedEmit(original, event, ...args) {
       if (event === 'request') {
         const req = args[0];
         const res = args[1];
+        if (observeNode && req.url === NODE_RESOURCE_PATH) {
+          // Dispatch only to the dedicated observer. Never admit this request
+          // to the session/router, DSH connection fence, or interaction clock.
+          void observeNode(req, res).catch(() => res.destroy());
+          return false;
+        }
         void check(req)
           .then((result) => {
-            if (result.ok) {
+            if (installed && result.ok) {
               admit(req, result);
               original(event, ...args);
               return;
@@ -266,7 +278,7 @@ export function createDoorLock(cfg) {
         const socket = args[1];
         void check(req, true)
           .then((result) => {
-            if (result.ok) {
+            if (installed && result.ok) {
               admit(req, result);
               original(event, ...args);
               return;
@@ -315,9 +327,11 @@ export function createDoorLock(cfg) {
         return false;
       }
       return original(event, ...args);
-    };
+    }
+    const uninstall = installServerEmitGuard(server, guardedEmit);
     return () => {
-      server.emit = original;
+      installed = false;
+      uninstall();
     };
   }
 

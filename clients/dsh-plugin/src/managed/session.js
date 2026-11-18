@@ -1,4 +1,5 @@
 import { sendProblem } from './problem.js';
+import { installServerEmitGuard } from './server-emit.js';
 
 /** Installed inside the signed identity door: a live browser identity alone must
  * not keep a revoked/expired managed device usable. Message readiness is separate.
@@ -11,7 +12,6 @@ export function installManagedSessionGuard(
   available,
   revoked = () => false,
 ) {
-  const original = server.emit;
   /** @type {Set<import('node:net').Socket>} */
   const sockets = new Set();
   const message = (/** @type {any} */ req) => {
@@ -24,10 +24,7 @@ export function installManagedSessionGuard(
         : 'Instance session has expired. Re-enter from the portal.';
     return chinese ? '连接中断，正在重试' : 'Connection interrupted. Retrying.';
   };
-  const guarded = function (
-    /** @type {string|symbol} */ event,
-    /** @type {any[]} */ ...args
-  ) {
+  const unguard = installServerEmitGuard(server, (next, event, ...args) => {
     if (event === 'request') {
       const [req, res] = args;
       const path = req.url?.split('?')[0];
@@ -62,16 +59,15 @@ export function installManagedSessionGuard(
       sockets.add(socket);
       socket.once('close', () => sockets.delete(socket));
     }
-    return Reflect.apply(original, server, [event, ...args]);
-  };
-  server.emit = guarded;
+    return next(event, ...args);
+  });
   const timer = setInterval(() => {
     if (!available()) for (const socket of sockets) socket.destroy();
   }, 1000);
   timer.unref?.();
   return () => {
     clearInterval(timer);
-    if (server.emit === guarded) server.emit = original;
+    unguard();
     sockets.clear();
   };
 }

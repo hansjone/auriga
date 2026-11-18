@@ -65,7 +65,7 @@ func releaseCommand(args []string) error {
 	f.StringVar(&o.WindowsClient, "windows-client", "", "Windows 签名客户端输入 tar")
 	f.StringVar(&o.WindowsSHA, "windows-client-sha256", "", "Windows 侧确认的完整 tar SHA256")
 	f.StringVar(&o.DSHSource, "dsh-source", "", "批准的 DSH 源码归档文件或 Forgejo HTTPS 附件 URL")
-	f.Int64Var(&o.Limit, "attachment-limit", (4<<30)-1, "")
+	f.Int64Var(&o.Limit, "attachment-limit", 0, "附件分卷上限（字节）；0 发布完整归档，正数适用于受限传输介质")
 	f.BoolVar(&o.Build, "build", false, "")
 	f.StringVar(&o.Previous, "previous-devkit", "", "")
 	f.BoolVar(&o.NewBaseline, "new-baseline", false, "")
@@ -238,8 +238,8 @@ func generateRelease(o releaseOptions, builders releaseBuilders) error {
 	if builders.Bundle == nil {
 		builders.Bundle = func(args []string, commit string) error { return bundleExpectedContext(ctx, args, commit) }
 	}
-	if o.Key == "" || o.Out == "" || o.Cache == "" || o.Limit <= 0 {
-		return errors.New("release 需要 --sign-key、输出目录、缓存目录和正数附件上限")
+	if o.Key == "" || o.Out == "" || o.Cache == "" || o.Limit < 0 {
+		return errors.New("release 需要 --sign-key、输出目录、缓存目录和非负附件上限")
 	}
 	if o.WindowsClient == "" || !hex64.MatchString(o.WindowsSHA) || o.DSHSource == "" {
 		return errors.New("release 需要 --windows-client、--windows-client-sha256 和 --dsh-source")
@@ -401,6 +401,7 @@ func generateRelease(o releaseOptions, builders releaseBuilders) error {
 	}
 	var assets []assetInfo
 	var archives []assetInfo
+	partLimit := effectivePartLimit(o.Limit)
 	releaseArchives = append(releaseArchives, offline)
 	for _, file := range releaseArchives {
 		original, err := describeAssetContext(ctx, file)
@@ -408,16 +409,20 @@ func generateRelease(o releaseOptions, builders releaseBuilders) error {
 			return err
 		}
 		archives = append(archives, original)
-		names, err := splitAssetContext(ctx, file, o.Limit, o.Key)
-		if err != nil {
-			return err
-		}
-		for _, name := range names {
-			info, err := describeAssetContext(ctx, filepath.Join(stage, name))
+		if partLimit == 0 || original.Size <= partLimit {
+			assets = append(assets, original)
+		} else {
+			names, err := splitAssetContext(ctx, file, partLimit, o.Key)
 			if err != nil {
 				return err
 			}
-			assets = append(assets, info)
+			for _, name := range names {
+				info, err := describeAssetContext(ctx, filepath.Join(stage, name))
+				if err != nil {
+					return err
+				}
+				assets = append(assets, info)
+			}
 		}
 		// Legacy bundle/devkit write a detached hash for human copy verification.
 		// Distribution uses the single signed SHA256SUMS for all release assets.
@@ -466,17 +471,19 @@ func generateRelease(o releaseOptions, builders releaseBuilders) error {
 	if err := finalizeDistribution(ctx, stage, manifest, cat, o.Key); err != nil {
 		return err
 	}
-	names, err := regularFilesContext(ctx, stage)
-	if err != nil {
-		return err
-	}
-	for _, name := range names {
-		info, err := os.Stat(filepath.Join(stage, name))
+	if partLimit > 0 {
+		names, err := regularFilesContext(ctx, stage)
 		if err != nil {
 			return err
 		}
-		if info.Size() > effectivePartLimit(o.Limit) {
-			return fmt.Errorf("附件上限太小，元数据或引导程序 %s 超限，请增大 --attachment-limit", name)
+		for _, name := range names {
+			info, err := os.Stat(filepath.Join(stage, name))
+			if err != nil {
+				return err
+			}
+			if info.Size() > partLimit {
+				return fmt.Errorf("附件上限太小，元数据或引导程序 %s 超限，请增大 --attachment-limit", name)
+			}
 		}
 	}
 	// Refuse a checkout or lock edit made during a long release build.

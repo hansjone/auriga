@@ -315,6 +315,7 @@ exec "$GATE_COMMIT_REAL_GIT" "$@"
 	opts.Out = filepath.Join(parent, "v2")
 	opts.Previous = previous
 	opts.NewBaseline = false
+	opts.Limit = 0
 	if err := generateRelease(opts, builders); err != nil {
 		t.Fatal(err)
 	}
@@ -323,6 +324,22 @@ exec "$GATE_COMMIT_REAL_GIT" "$@"
 	}
 	if _, err := os.Stat(filepath.Join(opts.Out, "auriga-devkit-1.1-delta.tar")); err != nil {
 		t.Fatal("same baseline did not ship a delta", err)
+	}
+	if err := verifySignature(opts.Out, public); err != nil {
+		t.Fatal(err)
+	}
+	var whole distributionManifest
+	if err := readJSON(filepath.Join(opts.Out, "release-manifest.json"), &whole); err != nil {
+		t.Fatal(err)
+	}
+	if err := validateBuildGate(opts.Out, whole); err != nil {
+		t.Fatal(err)
+	}
+	if err := extractVerified(filepath.Join(opts.Out, "auriga-offline-1.1.tar"), filepath.Join(parent, "whole"), public); err != nil {
+		t.Fatal(err)
+	}
+	if parts, err := filepath.Glob(filepath.Join(opts.Out, "*.part*")); err != nil || len(parts) != 0 {
+		t.Fatal("whole release produced split files", parts, err)
 	}
 	failing := builders
 	failing.Gate = func(gateRequest) (buildGate, error) { return buildGate{}, errors.New("missing fixture dependency") }
