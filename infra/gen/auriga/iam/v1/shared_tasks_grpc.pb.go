@@ -25,6 +25,7 @@ const (
 	SharedTaskService_ResolveSharedTask_FullMethodName         = "/auriga.iam.v1.SharedTaskService/ResolveSharedTask"
 	SharedTaskService_AuthorizeSharedCapability_FullMethodName = "/auriga.iam.v1.SharedTaskService/AuthorizeSharedCapability"
 	SharedTaskService_ReadSharedCredentials_FullMethodName     = "/auriga.iam.v1.SharedTaskService/ReadSharedCredentials"
+	SharedTaskService_ExecuteSharedOutbound_FullMethodName     = "/auriga.iam.v1.SharedTaskService/ExecuteSharedOutbound"
 )
 
 // SharedTaskServiceClient is the client API for SharedTaskService service.
@@ -41,6 +42,8 @@ type SharedTaskServiceClient interface {
 	ResolveSharedTask(ctx context.Context, in *ResolveSharedTaskRequest, opts ...grpc.CallOption) (*ResolveSharedTaskResponse, error)
 	AuthorizeSharedCapability(ctx context.Context, in *AuthorizeSharedCapabilityRequest, opts ...grpc.CallOption) (*AuthorizeSharedCapabilityResponse, error)
 	ReadSharedCredentials(ctx context.Context, in *ReadSharedCredentialsRequest, opts ...grpc.CallOption) (*ReadSharedCredentialsResponse, error)
+	// Agent-only, server-side delegation. No enterprise material leaves IAM.
+	ExecuteSharedOutbound(ctx context.Context, in *ExecuteSharedOutboundRequest, opts ...grpc.CallOption) (*ExecuteSharedOutboundResponse, error)
 }
 
 type sharedTaskServiceClient struct {
@@ -111,6 +114,16 @@ func (c *sharedTaskServiceClient) ReadSharedCredentials(ctx context.Context, in 
 	return out, nil
 }
 
+func (c *sharedTaskServiceClient) ExecuteSharedOutbound(ctx context.Context, in *ExecuteSharedOutboundRequest, opts ...grpc.CallOption) (*ExecuteSharedOutboundResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ExecuteSharedOutboundResponse)
+	err := c.cc.Invoke(ctx, SharedTaskService_ExecuteSharedOutbound_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // SharedTaskServiceServer is the server API for SharedTaskService service.
 // All implementations must embed UnimplementedSharedTaskServiceServer
 // for forward compatibility.
@@ -125,6 +138,8 @@ type SharedTaskServiceServer interface {
 	ResolveSharedTask(context.Context, *ResolveSharedTaskRequest) (*ResolveSharedTaskResponse, error)
 	AuthorizeSharedCapability(context.Context, *AuthorizeSharedCapabilityRequest) (*AuthorizeSharedCapabilityResponse, error)
 	ReadSharedCredentials(context.Context, *ReadSharedCredentialsRequest) (*ReadSharedCredentialsResponse, error)
+	// Agent-only, server-side delegation. No enterprise material leaves IAM.
+	ExecuteSharedOutbound(context.Context, *ExecuteSharedOutboundRequest) (*ExecuteSharedOutboundResponse, error)
 	mustEmbedUnimplementedSharedTaskServiceServer()
 }
 
@@ -152,6 +167,9 @@ func (UnimplementedSharedTaskServiceServer) AuthorizeSharedCapability(context.Co
 }
 func (UnimplementedSharedTaskServiceServer) ReadSharedCredentials(context.Context, *ReadSharedCredentialsRequest) (*ReadSharedCredentialsResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ReadSharedCredentials not implemented")
+}
+func (UnimplementedSharedTaskServiceServer) ExecuteSharedOutbound(context.Context, *ExecuteSharedOutboundRequest) (*ExecuteSharedOutboundResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ExecuteSharedOutbound not implemented")
 }
 func (UnimplementedSharedTaskServiceServer) mustEmbedUnimplementedSharedTaskServiceServer() {}
 func (UnimplementedSharedTaskServiceServer) testEmbeddedByValue()                           {}
@@ -282,6 +300,24 @@ func _SharedTaskService_ReadSharedCredentials_Handler(srv interface{}, ctx conte
 	return interceptor(ctx, in, info, handler)
 }
 
+func _SharedTaskService_ExecuteSharedOutbound_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ExecuteSharedOutboundRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(SharedTaskServiceServer).ExecuteSharedOutbound(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: SharedTaskService_ExecuteSharedOutbound_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(SharedTaskServiceServer).ExecuteSharedOutbound(ctx, req.(*ExecuteSharedOutboundRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // SharedTaskService_ServiceDesc is the grpc.ServiceDesc for SharedTaskService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -312,6 +348,10 @@ var SharedTaskService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ReadSharedCredentials",
 			Handler:    _SharedTaskService_ReadSharedCredentials_Handler,
+		},
+		{
+			MethodName: "ExecuteSharedOutbound",
+			Handler:    _SharedTaskService_ExecuteSharedOutbound_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

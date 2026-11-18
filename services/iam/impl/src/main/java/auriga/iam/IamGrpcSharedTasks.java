@@ -15,10 +15,13 @@ public final class IamGrpcSharedTasks extends SharedTaskServiceGrpc.SharedTaskSe
   private static final Set<String> READERS = Set.of("svc:agent", "svc:ai-gateway", "svc:collab");
   private final SharedTasks tasks;
   private final CredentialInstallationScope installation;
+  private final SharedOutbound outbound;
 
-  IamGrpcSharedTasks(SharedTasks tasks, CredentialInstallationScope installation) {
+  IamGrpcSharedTasks(
+      SharedTasks tasks, CredentialInstallationScope installation, SharedOutbound outbound) {
     this.tasks = tasks;
     this.installation = installation;
+    this.outbound = outbound;
   }
 
   private void caller(Set<String> allowed) {
@@ -89,6 +92,16 @@ public final class IamGrpcSharedTasks extends SharedTaskServiceGrpc.SharedTaskSe
       StreamObserver<ReadSharedCredentialsResponse> response) {
     caller(HOST_RELAYS);
     response.onNext(tasks.credentials(request));
+    response.onCompleted();
+  }
+
+  @Override
+  @AuthenticatedOnly
+  public void executeSharedOutbound(
+      ExecuteSharedOutboundRequest request,
+      StreamObserver<ExecuteSharedOutboundResponse> response) {
+    caller(HOST_RELAYS);
+    response.onNext(outbound.execute(request));
     response.onCompleted();
   }
 }

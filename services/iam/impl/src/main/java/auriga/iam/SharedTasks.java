@@ -224,6 +224,37 @@ final class SharedTasks {
         });
   }
 
+  /** Internal-only material for a server-side delegated operation; never an RPC response. */
+  ObjectNode outboundMaterial(SharedDshCapability capability) {
+    validate(capability);
+    if (!ENTERPRISE.equals(capability.getAudience())
+        || !capability.getScopesList().contains("outbound"))
+      throw new AurigaException(CommonErrors.FORBIDDEN);
+    return withOwnership(
+        capability.getBinding(),
+        () -> {
+          if (!snapshot(capability).getActive()) throw new AurigaException(CommonErrors.FORBIDDEN);
+          var binding = capability.getBinding();
+          var material =
+              uac.sharedCredentials(binding.getMemberId(), binding.getPlatformSessionId());
+          if (material.path("credentialVersion").asLong() != capability.getCredentialVersion())
+            throw new AurigaException(CommonErrors.UNAUTHENTICATED);
+          return material;
+        });
+  }
+
+  void checkOutbound(SharedDshCapability capability) {
+    if (!ENTERPRISE.equals(capability.getAudience())
+        || !capability.getScopesList().contains("outbound")
+        || !authorize(
+                AuthorizeSharedCapabilityRequest.newBuilder().setCapability(capability).build())
+            .getActive()) throw new AurigaException(CommonErrors.FORBIDDEN);
+  }
+
+  void requireNoTransaction() {
+    store.requireTransactionReleased();
+  }
+
   private SharedDshCapability issue(
       ObjectNode task,
       ObjectNode session,

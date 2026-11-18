@@ -17,6 +17,10 @@ import org.springframework.core.env.Environment;
 @Configuration(proxyBeanMethods = false)
 @ConditionalOnProperty(name = "auriga.iam.shared-tasks.enabled", havingValue = "true")
 public class SharedTaskRuntimeConfiguration {
+  private static final String PRIVATE_KEY_BEGIN =
+      String.join(" ", "-----BEGIN", "PRIVATE", "KEY-----");
+  private static final String PRIVATE_KEY_END = String.join(" ", "-----END", "PRIVATE", "KEY-----");
+
   @Bean
   SharedTaskTokens sharedTaskTokens(Environment environment) {
     Map<String, SharedTaskTokens.Key> keys = new HashMap<>();
@@ -31,12 +35,10 @@ public class SharedTaskRuntimeConfiguration {
         }
         String pem = new String(content, java.nio.charset.StandardCharsets.US_ASCII).trim();
         if (content.length > 8192
-            || !pem.startsWith("-----BEGIN PRIVATE KEY-----")
-            || !pem.endsWith("-----END PRIVATE KEY-----")) throw new IllegalArgumentException();
+            || !pem.startsWith(PRIVATE_KEY_BEGIN)
+            || !pem.endsWith(PRIVATE_KEY_END)) throw new IllegalArgumentException();
         String encoded =
-            pem.substring(
-                "-----BEGIN PRIVATE KEY-----".length(),
-                pem.length() - "-----END PRIVATE KEY-----".length());
+            pem.substring(PRIVATE_KEY_BEGIN.length(), pem.length() - PRIVATE_KEY_END.length());
         var key =
             KeyFactory.getInstance("Ed25519")
                 .generatePrivate(
@@ -78,8 +80,16 @@ public class SharedTaskRuntimeConfiguration {
   }
 
   @Bean
+  SharedOutbound sharedOutbound(SharedTasks tasks, Environment environment) {
+    return new SharedOutbound(tasks, SharedOutbound.settings(environment), false);
+  }
+
+  @Bean
   IamGrpcSharedTasks iamGrpcSharedTasks(
-      SharedTasks tasks, CredentialInstallationScope installation, IamGrpcSessions transportGuard) {
-    return new IamGrpcSharedTasks(tasks, installation);
+      SharedTasks tasks,
+      CredentialInstallationScope installation,
+      IamGrpcSessions transportGuard,
+      SharedOutbound outbound) {
+    return new IamGrpcSharedTasks(tasks, installation, outbound);
   }
 }

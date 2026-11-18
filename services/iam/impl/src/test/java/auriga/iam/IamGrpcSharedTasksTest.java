@@ -23,8 +23,9 @@ import org.junit.jupiter.api.Test;
 class IamGrpcSharedTasksTest {
   private final UUID tenant = UUID.randomUUID();
   private final SharedTasks tasks = mock(SharedTasks.class);
+  private final SharedOutbound outbound = mock(SharedOutbound.class);
   private final IamGrpcSharedTasks rpc =
-      new IamGrpcSharedTasks(tasks, new CredentialInstallationScope(tenant));
+      new IamGrpcSharedTasks(tasks, new CredentialInstallationScope(tenant), outbound);
 
   @Test
   void onlyRuntimeRelayMayIssueFinishOrReadRawMaterial() {
@@ -38,7 +39,10 @@ class IamGrpcSharedTasksTest {
                 rpc.finishSharedTask(FinishSharedTaskRequest.getDefaultInstance(), new Capture<>()),
             () ->
                 rpc.readSharedCredentials(
-                    ReadSharedCredentialsRequest.getDefaultInstance(), new Capture<>()));
+                    ReadSharedCredentialsRequest.getDefaultInstance(), new Capture<>()),
+            () ->
+                rpc.executeSharedOutbound(
+                    ExecuteSharedOutboundRequest.getDefaultInstance(), new Capture<>()));
     for (String caller : List.of("svc:edge", "svc:ai-gateway", "svc:collab", "member"))
       as(
           caller,
@@ -56,6 +60,7 @@ class IamGrpcSharedTasksTest {
         Set.of("auriga.internal"),
         () -> calls.forEach(call -> assertThrows(AurigaException.class, call::run)));
     verifyNoInteractions(tasks);
+    verifyNoInteractions(outbound);
   }
 
   @Test
@@ -87,6 +92,7 @@ class IamGrpcSharedTasksTest {
     when(tasks.begin(any())).thenReturn(BeginSharedTaskResponse.getDefaultInstance());
     when(tasks.issue(any())).thenReturn(IssueSharedCapabilityResponse.getDefaultInstance());
     when(tasks.credentials(any())).thenReturn(ReadSharedCredentialsResponse.getDefaultInstance());
+    when(outbound.execute(any())).thenReturn(ExecuteSharedOutboundResponse.getDefaultInstance());
     RequestContext.start("shared-test", null)
         .withPrincipal(principal)
         .run(
@@ -102,12 +108,16 @@ class IamGrpcSharedTasksTest {
                           FinishSharedTaskRequest.getDefaultInstance(), new Capture<>());
                       rpc.readSharedCredentials(
                           ReadSharedCredentialsRequest.getDefaultInstance(), new Capture<>());
+                      rpc.executeSharedOutbound(
+                          ExecuteSharedOutboundRequest.getDefaultInstance(), new Capture<>());
                     }));
     verify(tasks).begin(any());
     verify(tasks).issue(any());
     verify(tasks).finish(any());
     verify(tasks).credentials(any());
     verifyNoMoreInteractions(tasks);
+    verify(outbound).execute(any());
+    verifyNoMoreInteractions(outbound);
   }
 
   @Test
@@ -128,10 +138,16 @@ class IamGrpcSharedTasksTest {
                 () ->
                     rpc.readSharedCredentials(
                         ReadSharedCredentialsRequest.getDefaultInstance(), new Capture<>()));
+            assertThrows(
+                AurigaException.class,
+                () ->
+                    rpc.executeSharedOutbound(
+                        ExecuteSharedOutboundRequest.getDefaultInstance(), new Capture<>()));
           });
     verify(tasks, times(2)).resolve(any());
     verify(tasks, times(2)).authorize(any());
     verifyNoMoreInteractions(tasks);
+    verifyNoInteractions(outbound);
   }
 
   private void as(String subject, UUID delegated, Set<String> permissions, Runnable work) {
