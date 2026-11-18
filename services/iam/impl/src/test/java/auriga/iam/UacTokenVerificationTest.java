@@ -54,10 +54,10 @@ class UacTokenVerificationTest {
   void validatesSuccessfulPayloadBeforeCheckingIdentityAndKeepsLeadingZeroes() {
     String token = Secrets.random();
     for (String account : List.of("001aB", " 001Ab ", "001AB")) {
-      var result = decide(200, success("001ab", token), account);
+      var result = decide(200, success(" 001AB ", token), account);
       assertTrue(result.success());
       assertEquals(token, result.replacementToken());
-      assertEquals(account.strip(), result.employee());
+      assertEquals("001AB", result.employee());
       assertFalse(result.toString().contains(token));
     }
     assertEquals("identity_mismatch", decide(200, success("1ab", token), "001Ab").failureClass());

@@ -91,8 +91,8 @@ final class UacTokenVerification {
         || inner.asString().isBlank()) return fault("invalid_code");
     if (!outer.asString().equals("0000") || !inner.asString().equals("0000"))
       return new Decision("business_rejected", null, null, null);
-    // Only an absent field permits the legacy token location. A supplied echo
-    // must match the verified account; it never changes the stored spelling.
+    // Only an absent field permits the legacy token location. Use a validated
+    // echo's spelling for the same identity that QR login would bind.
     JsonNode bo = root.path("bo"), other = root.path("other");
     if (!other.isMissingNode() && !other.isObject()) return fault("invalid_success_payload");
     JsonNode user = bo.path("user"), token = other.path("token");
@@ -103,7 +103,8 @@ final class UacTokenVerification {
         || !validToken(token.asString())) return fault("invalid_success_payload");
     if (echoed && !fold(user.asString()).equals(fold(verifiedAccount)))
       return new Decision("identity_mismatch", null, null, null);
-    return new Decision(null, null, token.asString(), verifiedAccount.strip());
+    return new Decision(
+        null, null, token.asString(), (echoed ? user.asString() : verifiedAccount).strip());
   }
 
   private static Decision fault(String reason) {

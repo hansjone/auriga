@@ -424,8 +424,8 @@ export function createUacAdapter(settings, provider, options = {}) {
       return fault('invalid_code');
     if (outer !== '0000' || inner !== '0000')
       return { success: false, failureClass: 'business_rejected' };
-    // Only an absent field permits the legacy token location. A supplied echo
-    // must match the verified account; it never changes the stored spelling.
+    // Only an absent field permits the legacy token location. Use a validated
+    // echo's spelling for a new binding; the session keeps its existing owner.
     const other = root.other;
     if (
       other !== undefined &&
@@ -446,7 +446,7 @@ export function createUacAdapter(settings, provider, options = {}) {
       success: true,
       identityMatched: true,
       token: /** @type {string} */ (token),
-      empNo: strip(account),
+      empNo: strip(user === undefined ? account : user),
     };
   }
 

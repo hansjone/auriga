@@ -290,7 +290,7 @@ test('local UAC: distinguishes missing and invalid verify fields before legacy f
   const valid = await verify(legacy, { other: {} });
   assert.equal(valid.success, true);
   assert.equal(valid.token, 'legacy-token');
-  assert.equal(valid.empNo, '001Ab');
+  assert.equal(valid.empNo, '001AB');
   assert.equal(
     (await verify(legacy, { other: { token: 'primary-token' } })).token,
     'primary-token',
@@ -328,6 +328,29 @@ test('local UAC: distinguishes missing and invalid verify fields before legacy f
     { other: { token: 'primary-token' } },
   );
   assert.equal(rejected.failureClass, 'business_rejected');
+});
+
+test('local UAC: binds an exact numeric employee and rejects a shorter numeric echo on revalidation', async (t) => {
+  const env = await setup(t);
+  const employee = '001234';
+  env.upstream.script.scan = [
+    { body: { state: 'verified', token: 'scan-token', employee } },
+  ];
+  env.upstream.script.verify = [ok(' 001234 '), ok('01234')];
+  const challenge = await env.identity.start();
+  await env.time.advance(2000);
+  assert.equal(
+    (await env.identity.poll(challenge.id)).challenge.state,
+    'authenticated',
+  );
+  assert.equal(env.identity.status().empNo, employee);
+  await env.time.advance(600_000);
+  assert.notEqual(env.identity.status().state, 'authenticated');
+  const verifies = env.upstream.calls.filter((call) => call.path === '/verify');
+  assert.deepEqual(
+    verifies.map((call) => call.body.account),
+    [employee, employee],
+  );
 });
 
 test('local UAC: expired, denied and token-rejected branches never create a session', async (t) => {
