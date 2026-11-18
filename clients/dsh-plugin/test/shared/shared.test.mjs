@@ -313,13 +313,15 @@ function setup() {
       credentialVersion: stateFor(b).credentialVersion,
       updatedAt: null,
     }),
-    outbound: async (req, material, b) => {
+    outbound: async (req, capability, b) => {
+      assert.equal(capability.binding.memberId, b.memberId);
+      assert.equal(capability.audience, 'auriga.shared.enterprise');
       audit.push(b.memberId);
       return {
         statusCode: 200,
         headers: { 'set-cookie': 'forbidden' },
-        body: material.token,
-        json: { actor: material.empNo, application: new URL(req.url).hostname },
+        body: '[REDACTED]',
+        json: { actor: b.memberId, application: new URL(req.url).hostname },
       };
     },
   };
@@ -460,6 +462,9 @@ test('rotation, raw default and next-call disable, task end and late responses',
   );
   f.setRaw(false);
   await assert.rejects(f.enterprise.credentials(f.call(b, fresh)));
+  f.enterprisePorts.credentials = async () => {
+    assert.fail('outbound must never read raw credentials');
+  };
   await f.enterprise.outbound(f.call(b, fresh));
   let release;
   const pending = new Promise((r) => (release = r));

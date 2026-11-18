@@ -14,6 +14,8 @@ broker 要求 calls 清空。扫描所有非 generated 的 JS/TS：可识别的�
 
 ## broker 固定接缝和已知局限
 
+共享云端 Node Unix 通道是额外受限的保留对：`shared/node-transport.js` 的 HTTP import 必须同时通过固定 socket-only POST 对象、闭集操作、禁止请求别名和新增调用的检查；`shared/ports-plugin.js` 必须保持 Linux、固定只读池配置、UUID、真实 socket 和唯一调用点检查。其它文件即使导入工厂别名也拒绝。TCP/动态URL、认证或身份覆盖请求头、放宽 operation、删除 provider 路径校验都有独立拒例。这是明确形态的源码结构门禁，不宣称具备完整 JS 数据流证明；运行时实际节点身份与任务能力仍需行为验证和独审。
+
 协议约定后端业务代理的固定接缝变量名为 `broker`，调用形式为 `broker.call('固定operation', input)`；操作必须存在于固定业务清单。禁止将这个接缝改名、解构或用动态 operation。扫描拒绝常见 `const bridge=broker`、`import {broker as bridge}`、`const {call}=broker`；规范调用和这些负例均有测试。
 
 这里没有编译器 AST、导入来源/类型追踪或完整别名分析，不能把无来源信息的 `other.call(...)` 断言为 broker。D 的实际适配器必须遵守固定接缝约定，独审核对从 IPC 适配器到它的真实绑定，不得用改名绕过。未知调用形态/动态代码、重命名的注入传输以及保留文件中的动态目标仍需实现测试与独审；broker 运行时继续按 schema/固定操作清单拒绝未知操作。扫描结果只作这道结构门禁的证据。

@@ -95,6 +95,7 @@ export function installSharedHost(ctx, { runtime, enterprise, ports }) {
             try {
               return await enterprise.outbound({
                 remoteAddress: '127.0.0.1',
+                signal: execution.signal,
                 body: { ...args, dshSessionId: id, taskCapability: task.token },
               });
             } finally {

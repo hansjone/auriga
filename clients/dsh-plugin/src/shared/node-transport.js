@@ -15,6 +15,7 @@ const operations = new Set([
   'finishTask',
   'authorizeCapability',
   'readCredentials',
+  'enterpriseOutbound',
   'model',
   'send',
   'receive',

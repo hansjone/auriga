@@ -10,6 +10,7 @@ import auriga.common.error.AurigaException;
 import auriga.common.error.CommonErrors;
 import auriga.contracts.node.v1.DshInstanceMode;
 import auriga.contracts.node.v1.SharedDshBinding;
+import auriga.resource.api.SharedResourceNodes;
 import auriga.resource.persistence.ResourceStore;
 import auriga.resource.persistence.ResourceWorkflowStore;
 import java.nio.charset.StandardCharsets;
@@ -24,6 +25,161 @@ import org.junit.jupiter.api.Test;
 import tools.jackson.databind.node.ObjectNode;
 
 class CatalogSharedResourcesTest {
+  @Test
+  void sharedIntentHistoryDoesNotAdvanceForRenewalAndNeverResetsAfterRemoval() {
+    var f = new Fixture();
+    f.run(
+        () -> {
+          var history = new CatalogSharedInstallations(f.db);
+          UUID placement = UUID.fromString(f.binding.getPlacementId());
+          var first = Map.of(f.pack, f.selection("required"));
+          assertEquals(1L, history.reconcile(placement, first).get(f.pack));
+          assertEquals(
+              1L, new CatalogSharedInstallations(f.db).reconcile(placement, first).get(f.pack));
+          var changedMode = Map.of(f.pack, f.selection("default"));
+          assertEquals(2L, history.reconcile(placement, changedMode).get(f.pack));
+          assertTrue(history.reconcile(placement, Map.of()).isEmpty());
+          assertTrue(history.reconcile(placement, Map.of()).isEmpty());
+          assertEquals(4L, history.reconcile(placement, changedMode).get(f.pack));
+          var nextIdentity = f.selection.identity().deepCopy();
+          ((ObjectNode) nextIdentity).put("versionId", UUID.randomUUID().toString());
+          var next = Map.of(f.pack, new CatalogAssignments.Effective(nextIdentity, "default", 2));
+          assertEquals(5L, history.reconcile(placement, next).get(f.pack));
+          assertTrue(history.reconcile(placement, Map.of()).isEmpty());
+          assertThrows(AurigaException.class, () -> history.reconcile(placement, first));
+          var conflictIdentity = nextIdentity.deepCopy();
+          ((ObjectNode) conflictIdentity).put("versionId", UUID.randomUUID().toString());
+          assertThrows(
+              AurigaException.class,
+              () ->
+                  history.reconcile(
+                      placement,
+                      Map.of(
+                          f.pack,
+                          new CatalogAssignments.Effective(conflictIdentity, "default", 2))));
+          return null;
+        });
+  }
+
+  @Test
+  void artifactOpenRequiresTheSignedReferenceDigestAndSizeBeforeImmutableObjectAccess() {
+    var f = new Fixture();
+    var objects = mock(auriga.resource.objectstore.ObjectStore.class);
+    var workflow =
+        new CatalogWorkflow(null, f.db, null, null, () -> objects, null, null, null, null, null);
+    var version = Map.<String, Object>of("package_id", f.pack, "id", f.version);
+    String digest = "sha256:" + "b".repeat(64);
+    when(f.db.row(startsWith("SELECT * FROM resource.catalog_artifact"), anyMap()))
+        .thenReturn(Map.of("digest", digest, "size_bytes", 7L));
+    when(objects.open(f.tenant, new auriga.resource.objectstore.ObjectStore.ObjectInfo(digest, 7L)))
+        .thenReturn(new java.io.ByteArrayInputStream("payload".getBytes(StandardCharsets.UTF_8)));
+    f.run(
+        () -> {
+          try (var content = workflow.nodeArtifact(f.reader, version, "payload", digest, 7L)) {
+            assertEquals("payload", new String(content.readAllBytes(), StandardCharsets.UTF_8));
+          } catch (java.io.IOException e) {
+            throw new AssertionError(e);
+          }
+          assertThrows(
+              AurigaException.class,
+              () -> workflow.nodeArtifact(f.reader, version, "payload", digest, 8L));
+          assertThrows(
+              AurigaException.class,
+              () ->
+                  workflow.nodeArtifact(
+                      f.reader, version, "payload", "sha256:" + "c".repeat(64), 7L));
+          verify(objects, times(1)).open(any(), any());
+          return null;
+        });
+  }
+
+  @Test
+  void equalMaterialForTwoMembersKeepsIndependentLeasesAndActualNodeLocators() {
+    var f = new Fixture();
+    UUID other = UUID.randomUUID();
+    var reader = new ResourceAccess.Reader(f.tenant, other, false, Set.of(), false);
+    when(f.access.target(f.tenant, other)).thenReturn(reader);
+    when(f.delivery.sharedSelections(eq(reader), nullable(UUID.class)))
+        .thenAnswer(c -> f.selections());
+    when(f.delivery.sharedRef(eq(reader), any())).thenAnswer(c -> f.reference());
+    when(f.catalog.ver(reader, f.pack, f.version, false)).thenReturn(Map.of("state", "published"));
+    f.run(
+        () -> {
+          var first = f.service.snapshot(f.binding);
+          var binding =
+              f.binding.toBuilder()
+                  .setMemberId(other.toString())
+                  .setPlacementId(UUID.randomUUID().toString())
+                  .build();
+          var second = f.service.snapshot(binding);
+          assertEquals(
+              first.view().getAuthorizationSetDigest(), second.view().getAuthorizationSetDigest());
+          assertEquals(
+              first.resources().getFirst().getIdentity(),
+              second.resources().getFirst().getIdentity());
+          assertEquals(
+              first.view().getResources(0).getResourceId(),
+              second.view().getResources(0).getResourceId());
+          assertEquals(
+              first.view().getResources(0).getDigest(), second.view().getResources(0).getDigest());
+          assertNotEquals(first.view().getViewId(), second.view().getViewId());
+          assertNotEquals(
+              first.view().getResources(0).getLeaseId(),
+              second.view().getResources(0).getLeaseId());
+          for (var snapshot : List.of(first, second))
+            assertEquals(
+                "/internal/resource/v1/catalog/downloads/"
+                    + snapshot.view().getResources(0).getLeaseId()
+                    + "/manifest",
+                snapshot.resources().getFirst().getManifestDownloadPath());
+          assertThrows(
+              AurigaException.class,
+              () ->
+                  f.service.artifact(
+                      binding, UUID.fromString(first.view().getResources(0).getLeaseId()), null));
+          return null;
+        });
+  }
+
+  @Test
+  void nodeDownloadUsesPersistedBindingAndCurrentNodeAuthorityAndRejectsStaleOrCorruptBytes() {
+    var f = new Fixture();
+    f.run(
+        () -> {
+          var snapshot = f.service.snapshot(f.binding);
+          UUID lease = UUID.fromString(snapshot.view().getResources(0).getLeaseId());
+          try (var in =
+              f.service.nodeDownload(f.tenant, f.node, lease, null, false).orElseThrow()) {
+            assertEquals("manifest", new String(in.readAllBytes(), StandardCharsets.UTF_8));
+          } catch (java.io.IOException e) {
+            throw new AssertionError(e);
+          }
+          verify(f.nodes).requireCurrent(f.tenant, f.node, f.binding);
+          assertThrows(
+              AurigaException.class,
+              () -> f.service.nodeDownload(f.tenant, UUID.randomUUID(), lease, null, false));
+          assertThrows(
+              AurigaException.class,
+              () -> f.service.nodeDownload(f.tenant, f.node, lease, null, true));
+          when(f.catalog.ver(f.reader, f.pack, f.version, false))
+              .thenReturn(
+                  Map.of(
+                      "state",
+                      "published",
+                      "manifest_bytes",
+                      "corrupt".getBytes(StandardCharsets.UTF_8)));
+          assertThrows(
+              AurigaException.class,
+              () -> f.service.nodeDownload(f.tenant, f.node, lease, null, false));
+          f.revocations = f.revocations(2);
+          assertThrows(
+              AurigaException.class,
+              () -> f.service.nodeDownload(f.tenant, f.node, lease, null, false));
+          return null;
+        });
+    assertTrue(f.service.nodeDownload(f.tenant, f.node, UUID.randomUUID(), null, false).isEmpty());
+  }
+
   @Test
   void canonicalAuthorizationUsesIdentityVersionModeAndTenantWithStableOrdering() {
     var f = new Fixture();
@@ -52,6 +208,11 @@ class CatalogSharedResourcesTest {
           var next = f.service.snapshot(f.binding);
           assertEquals(first, next);
           assertEquals(1, first.view().getResourcesCount());
+          assertEquals(1, first.resources().getFirst().getInstallationRevision());
+          assertEquals(
+              auriga.contracts.resource.v1.UnifiedResourceDesiredState
+                  .UNIFIED_RESOURCE_DESIRED_STATE_ENABLED,
+              first.resources().getFirst().getDesiredState());
           assertEquals(
               first.resources().getFirst().getIdentity().getPackageId(),
               first.view().getResources(0).getResourceId());
@@ -84,6 +245,9 @@ class CatalogSharedResourcesTest {
               assertThrows(AurigaException.class, () -> f.service.artifact(f.binding, lease, null))
                   .errorCode()
                   .code());
+          assertEquals(
+              first.resources().getFirst().getInstallationRevision(),
+              changed.resources().getFirst().getInstallationRevision());
           return null;
         });
   }
@@ -184,7 +348,10 @@ class CatalogSharedResourcesTest {
             .setRevision(1)
             .build();
     final CatalogSharedResources service;
-    Map<String, Object> stored;
+    final Map<UUID, Map<String, Object>> stored = new HashMap<>();
+    final Map<String, Map<String, Object>> history = new HashMap<>();
+    final SharedResourceNodes nodes = mock(SharedResourceNodes.class);
+    final UUID node = UUID.randomUUID();
     CatalogAssignments.Effective selection;
     ObjectNode revocations;
 
@@ -208,7 +375,15 @@ class CatalogSharedResourcesTest {
           .thenAnswer(c -> selections());
       when(delivery.sharedRef(eq(reader), any())).thenAnswer(c -> reference());
       when(catalog.ver(eq(reader), eq(pack), eq(version), eq(false)))
-          .thenReturn(Map.of("state", "published"));
+          .thenReturn(
+              Map.of(
+                  "state",
+                  "published",
+                  "manifest_bytes",
+                  "manifest".getBytes(StandardCharsets.UTF_8)));
+      when(catalog.pkg(reader, pack, false)).thenReturn(Map.of("enabled", true));
+      when(nodes.requireCurrent(eq(tenant), eq(node), any()))
+          .thenAnswer(c -> CatalogSharedResources.digest(tenant, selections()));
       when(releases.revocations()).thenAnswer(c -> revocations);
       when(db.args(any(Object[].class)))
           .thenAnswer(
@@ -220,12 +395,34 @@ class CatalogSharedResourcesTest {
                 return args;
               });
       when(db.rows(anyString(), anyMap()))
-          .thenAnswer(c -> stored == null ? List.of() : List.of(stored));
+          .thenAnswer(
+              c -> {
+                Map<String, Object> args = c.getArgument(1);
+                if (c.<String>getArgument(0).contains("catalog_shared_installation"))
+                  return history.values().stream()
+                      .filter(row -> row.get("placement").equals(args.get("placement")))
+                      .toList();
+                if (args.containsKey("lease")) {
+                  String lease =
+                      JSON.readTree(args.get("lease").toString()).get(0).path("leaseId").asString();
+                  return stored.values().stream()
+                      .filter(row -> row.get("document").toString().contains(lease))
+                      .toList();
+                }
+                var row = stored.get(args.get("placement"));
+                return row == null ? List.of() : List.of(row);
+              });
       when(db.update(anyString(), anyMap()))
           .thenAnswer(
               c -> {
                 Map<String, Object> args = c.getArgument(1);
-                stored =
+                if (c.<String>getArgument(0).contains("catalog_shared_installation")) {
+                  var row = new HashMap<>(args);
+                  row.put("package_id", args.get("package"));
+                  history.put(args.get("placement") + "/" + args.get("package"), row);
+                  return 1;
+                }
+                Map<String, Object> row =
                     new HashMap<>(
                         Map.of(
                             "member_id",
@@ -248,9 +445,13 @@ class CatalogSharedResourcesTest {
                             args.get("expires"),
                             "document",
                             args.get("document")));
+                row.put("placement_id", args.get("placement"));
+                stored.put((UUID) args.get("placement"), row);
                 return 1;
               });
-      service = new CatalogSharedResources(tx, db, access, delivery, catalog, releases, clock);
+      service =
+          new CatalogSharedResources(
+              tx, db, access, delivery, catalog, releases, clock, () -> nodes);
     }
 
     <T> T run(Supplier<T> action) {

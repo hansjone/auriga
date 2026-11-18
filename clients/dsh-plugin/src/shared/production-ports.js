@@ -1,5 +1,6 @@
 // @ts-nocheck
 import { randomUUID } from 'node:crypto';
+import { Buffer } from 'node:buffer';
 import { executionSession } from './task-context.js';
 import { placementBinding } from './runtime.js';
 import { assertSharedProfile } from './profile-state.js';
@@ -247,6 +248,66 @@ export function createProductionSharedPorts(
       },
       credentials: (_binding, capability) =>
         call('readCredentials', { capability }),
+      async outbound(request, capability, binding, token) {
+        const task = capabilities.get(token);
+        if (
+          !task ||
+          task.id !== capability.taskId ||
+          task.execution.signal?.aborted
+        )
+          fail();
+        same(task.binding, binding);
+        same(capability.binding, binding);
+        let body = request.body;
+        const headers = { ...request.headers };
+        if (body !== undefined && body !== null && typeof body !== 'string') {
+          body = JSON.stringify(body);
+          if (!headers['content-type'])
+            headers['content-type'] = 'application/json';
+        }
+        const response = await call(
+          'enterpriseOutbound',
+          {
+            capability,
+            url: request.url,
+            method: request.method,
+            headers,
+            bodyBase64: Buffer.from(
+              ['GET', 'HEAD'].includes(request.method) ? '' : (body ?? ''),
+            ).toString('base64'),
+            timeoutMs: request.timeoutMs,
+          },
+          globalThis.AbortSignal.any(
+            [
+              task.execution.signal,
+              request.signal,
+              globalThis.AbortSignal.timeout(request.timeoutMs),
+            ].filter(Boolean),
+          ),
+        );
+        if (
+          !Number.isInteger(response.statusCode) ||
+          response.statusCode < 200 ||
+          response.statusCode > 599 ||
+          typeof response.body !== 'string' ||
+          !response.headers ||
+          typeof response.headers !== 'object' ||
+          Array.isArray(response.headers)
+        )
+          fail('common.unavailable');
+        let json = null;
+        try {
+          json = JSON.parse(response.body);
+        } catch {
+          /* Plain business text is valid. */
+        }
+        return {
+          statusCode: response.statusCode,
+          headers: response.headers,
+          body: response.body,
+          json,
+        };
+      },
       async refreshCapability(token, sessionId, scope) {
         const task = capabilities.get(token);
         if (

@@ -12,6 +12,7 @@ import auriga.contracts.node.v1.DshInstanceMode;
 import auriga.contracts.node.v1.SharedDshBinding;
 import auriga.contracts.node.v1.SharedDshResource;
 import auriga.contracts.node.v1.SharedDshResourceView;
+import auriga.resource.api.SharedResourceNodes;
 import auriga.resource.api.SharedResourceResolution;
 import auriga.resource.persistence.ResourceStore;
 import auriga.resource.persistence.ResourceWorkflowStore;
@@ -23,7 +24,9 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
+import java.util.function.Supplier;
 import tools.jackson.databind.JsonNode;
 
 /** The unified catalog remains the only source of shared resource identity and signed leases. */
@@ -35,6 +38,8 @@ public final class CatalogSharedResources implements SharedResourceResolution {
   private final CatalogWorkflow catalog;
   private final ResourceDistributions releases;
   private final Clock clock;
+  private final Supplier<SharedResourceNodes> nodes;
+  private final CatalogSharedInstallations installations;
 
   public CatalogSharedResources(
       ResourceStore tx,
@@ -43,7 +48,8 @@ public final class CatalogSharedResources implements SharedResourceResolution {
       CatalogDelivery delivery,
       CatalogWorkflow catalog,
       ResourceDistributions releases,
-      Clock clock) {
+      Clock clock,
+      Supplier<SharedResourceNodes> nodes) {
     this.tx = tx;
     this.db = db;
     this.access = access;
@@ -51,6 +57,8 @@ public final class CatalogSharedResources implements SharedResourceResolution {
     this.catalog = catalog;
     this.releases = releases;
     this.clock = clock;
+    this.nodes = nodes;
+    this.installations = new CatalogSharedInstallations(db);
   }
 
   private void tenant(UUID tenant) {
@@ -143,6 +151,7 @@ public final class CatalogSharedResources implements SharedResourceResolution {
               db.rows(
                   "SELECT * FROM resource.catalog_shared_view WHERE tenant_id=:tenant AND placement_id=:placement FOR UPDATE",
                   db.args("placement", placement));
+          Map<UUID, Long> revisions;
           if (!rows.isEmpty()) {
             var row = rows.getFirst();
             if (!row.get("member_id").equals(member)
@@ -165,7 +174,9 @@ public final class CatalogSharedResources implements SharedResourceResolution {
                                     .getEpochSecond()
                                 > now);
             if (future) throw new AurigaException(CommonErrors.UNAVAILABLE);
+            revisions = installations.reconcile(placement, selections);
             if (row.get("pool_id").equals(pool)
+                && document.path("schemaVersion").asInt() == 2
                 && row.get("mode").equals(mode(binding))
                 && number(row, "epoch") == binding.getEpoch()
                 && number(row, "revision") == binding.getRevision()
@@ -173,8 +184,8 @@ public final class CatalogSharedResources implements SharedResourceResolution {
                 && number(row, "revocation_revision") == revocations.path("revision").asLong()
                 && number(row, "expires_at") > now + 300)
               return snapshot(binding, (UUID) row.get("view_id"), digest, document);
-          }
-          var document = JSON.createObjectNode();
+          } else revisions = installations.reconcile(placement, selections);
+          var document = JSON.createObjectNode().put("schemaVersion", 2);
           document.set("revocations", revocations);
           var resources = document.putArray("resources");
           long expires = Instant.parse(revocations.path("expiresAt").asString()).getEpochSecond();
@@ -189,10 +200,16 @@ public final class CatalogSharedResources implements SharedResourceResolution {
                 Instant.parse(ref.path("lease").path("expiresAt").asString()).getEpochSecond();
             if (end <= clock.instant().getEpochSecond())
               throw new AurigaException(CommonErrors.UNAVAILABLE);
-            resources.add(
-                JSON.createObjectNode()
-                    .put("leaseId", UuidV7.next().toString())
-                    .set("resource", ref));
+            String leaseId = UuidV7.next().toString();
+            String download = "/internal/resource/v1/catalog/downloads/" + leaseId;
+            ref.put("manifestDownloadPath", download + "/manifest");
+            for (var artifact : ref.path("artifacts"))
+              ((tools.jackson.databind.node.ObjectNode) artifact)
+                  .put(
+                      "downloadPath",
+                      download + "/artifacts/" + artifact.path("artifactId").asString());
+            CatalogStatePolicy.dispatch(ref, revisions.get(selection.getKey()), "ENABLED");
+            resources.add(JSON.createObjectNode().put("leaseId", leaseId).set("resource", ref));
             expires = Math.min(expires, end);
           }
           if (expires <= clock.instant().getEpochSecond())
@@ -263,6 +280,17 @@ public final class CatalogSharedResources implements SharedResourceResolution {
             UUID.fromString(binding.getTenantId()), UUID.fromString(binding.getMemberId()));
     return tx.write(
         () -> {
+          db.lock("catalog-assignments");
+          if (!digest(
+                  UUID.fromString(binding.getTenantId()),
+                  delivery.sharedSelections(
+                      reader, UUID.fromString(binding.getPhysicalInstanceId())))
+              .equals(current.view().getAuthorizationSetDigest()))
+            throw new AurigaException(CommonErrors.NOT_FOUND);
+          if (!Boolean.TRUE.equals(
+              catalog
+                  .pkg(reader, UUID.fromString(reference.getIdentity().getPackageId()), false)
+                  .get("enabled"))) throw new AurigaException(CommonErrors.NOT_FOUND);
           var version =
               catalog.ver(
                   reader,
@@ -271,9 +299,63 @@ public final class CatalogSharedResources implements SharedResourceResolution {
                   false);
           if (!version.get("state").equals("published") || catalog.revoked(version))
             throw new AurigaException(CommonErrors.NOT_FOUND);
-          if (artifactId == null)
-            return new ByteArrayInputStream((byte[]) version.get("manifest_bytes"));
-          return catalog.nodeArtifact(reader, version, artifactId);
+          if (artifactId == null) {
+            byte[] manifest = (byte[]) version.get("manifest_bytes");
+            if (!CatalogManifest.digest(manifest)
+                .equals(reference.getIdentity().getManifestDigest()))
+              throw new AurigaException(CommonErrors.NOT_FOUND);
+            return new ByteArrayInputStream(manifest);
+          }
+          var artifact =
+              reference.getArtifactsList().stream()
+                  .filter(a -> a.getArtifactId().equals(artifactId))
+                  .findFirst()
+                  .orElseThrow(() -> new AurigaException(CommonErrors.NOT_FOUND));
+          return catalog.nodeArtifact(
+              reader, version, artifactId, artifact.getDigest(), artifact.getSizeBytes());
+        });
+  }
+
+  /** Same finite mTLS node locator as ordinary catalog delivery, with independent member leases. */
+  public Optional<InputStream> nodeDownload(
+      UUID tenant, UUID node, UUID lease, String artifact, boolean range) {
+    if (range) throw new AurigaException(CommonErrors.VALIDATION_FAILED);
+    return TenantContext.call(
+        tenant,
+        () -> {
+          var rows =
+              tx.write(
+                  () ->
+                      db.rows(
+                          "SELECT * FROM resource.catalog_shared_view WHERE tenant_id=:tenant AND document->'resources' @> CAST(:lease AS jsonb)",
+                          db.args(
+                              "lease",
+                              JSON.createArrayNode()
+                                  .add(JSON.createObjectNode().put("leaseId", lease.toString()))
+                                  .toString())));
+          if (rows.isEmpty()) return Optional.empty();
+          if (rows.size() != 1) throw new AurigaException(CommonErrors.NOT_FOUND);
+          var row = rows.getFirst();
+          var binding =
+              SharedDshBinding.newBuilder()
+                  .setTenantId(tenant.toString())
+                  .setMemberId(row.get("member_id").toString())
+                  .setPlacementId(row.get("placement_id").toString())
+                  .setPhysicalInstanceId(row.get("pool_id").toString())
+                  .setMode(
+                      row.get("mode").equals("shared")
+                          ? DshInstanceMode.DSH_INSTANCE_MODE_SHARED
+                          : DshInstanceMode.DSH_INSTANCE_MODE_DEDICATED)
+                  .setEpoch(number(row, "epoch"))
+                  .setRevision(number(row, "revision"))
+                  .build();
+          var authority = nodes.get();
+          if (authority == null) throw new AurigaException(CommonErrors.UNAVAILABLE);
+          String expected = authority.requireCurrent(tenant, node, binding);
+          var current = snapshot(binding);
+          if (!current.view().getAuthorizationSetDigest().equals(expected))
+            throw new AurigaException(CommonErrors.NOT_FOUND);
+          return Optional.of(artifact(binding, lease, artifact));
         });
   }
 }
