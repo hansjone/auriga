@@ -70,7 +70,7 @@ func activationFixture(t *testing.T) activationFixtureData {
 	return activationFixtureWithCA(t, false)
 }
 
-func activationFixtureWithCA(t *testing.T, managedCA bool) activationFixtureData {
+func activationFixtureWithCA(t *testing.T, managedCA bool, extraInstallArgs ...string) activationFixtureData {
 	t.Helper()
 	input, _ := collabFixture(t)
 	root, e := os.MkdirTemp("", "auriga-activation-")
@@ -121,6 +121,7 @@ func activationFixtureWithCA(t *testing.T, managedCA bool) activationFixtureData
 	if managedCA {
 		installArgs = append(installArgs, "-managed-ca-file", write("local-ca.pem", caPEM))
 	}
+	installArgs = append(installArgs, extraInstallArgs...)
 	if b, e := exec.Command(binary, installArgs...).CombinedOutput(); e != nil {
 		t.Fatalf("base CLI: %v %s", e, b)
 	}
@@ -242,7 +243,7 @@ func TestActivationSealAndReentry(t *testing.T) {
 	if runtime.GOOS != "linux" {
 		t.Skip("Linux activation only")
 	}
-	f := activationFixtureWithCA(t, true)
+	f := activationFixtureWithCA(t, true, "-dev-resource-route")
 	before := originalBase(t, f.out)
 	if b, e := exec.Command(f.binary, f.args...).CombinedOutput(); e == nil || !strings.Contains(string(b), "stop platform") {
 		t.Fatalf("unstopped activation: %v %s", e, b)
@@ -261,11 +262,22 @@ func TestActivationSealAndReentry(t *testing.T) {
 	if e := os.Remove(pending); e != nil {
 		t.Fatal(e)
 	}
+	activation := filepath.Join(f.out, activationDirectory)
+	var activationSeal string
 	for i := 0; i < 2; i++ {
 		if b, e := exec.Command(f.binary, append(f.args, "-stopped-confirmed")...).CombinedOutput(); e != nil {
 			t.Fatalf("activate/reenter: %v %s", e, b)
 		}
 		assertBase(t, f.out, before)
+		edge := readResourceRouteConfig(t, activation)
+		if edge.Upstreams["resource"] != resourcePlatformOrigin || edge.Upstreams["collab"] == "" {
+			t.Fatal("activation must keep the resource route alongside collab")
+		}
+		seal, e := activationDigest(activation)
+		if e != nil || (i > 0 && seal != activationSeal) {
+			t.Fatalf("same-input activation changed the sealed projection: %v", e)
+		}
+		activationSeal = seal
 	}
 	check := func() error {
 		b, e := exec.Command(f.binary, "-check-collab-activation", "-out", f.out).CombinedOutput()
@@ -295,8 +307,7 @@ func TestActivationSealAndReentry(t *testing.T) {
 		t.Fatal(e)
 	}
 	assertBase(t, f.out, before)
-	activation := filepath.Join(f.out, activationDirectory)
-	for _, name := range []string{"network/protocol.key", "network-platform/platform.properties", "collab-installation/state.json", "activation.receipt"} {
+	for _, name := range []string{"edge.config.json", "network/protocol.key", "network-platform/platform.properties", "collab-installation/state.json", "activation.receipt"} {
 		t.Run(name, func(t *testing.T) {
 			path := filepath.Join(activation, filepath.FromSlash(name))
 			raw, e := os.ReadFile(path)
