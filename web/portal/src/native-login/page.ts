@@ -550,12 +550,14 @@ export function mountInstanceLogin(
     )
       throw new Error('Invalid login providers');
     providers = result.items;
-    show(providers.length ? 'providers' : 'empty');
     const preferred = providers.find(
       (p) => p.connectorType === 'uac' && p.id === navigationProviderId(doc),
     );
-    if (preferred && doc.getElementById('auriga-uac-navigation'))
-      void selectProvider(preferred.id);
+    const uac =
+      (doc.getElementById('auriga-uac-navigation') ? preferred : undefined) ??
+      providers.find((p) => p.connectorType === 'uac');
+    if (uac) void selectProvider(uac.id);
+    else show(providers.length ? 'providers' : 'empty');
   }
 
   async function verifyAndOpen() {

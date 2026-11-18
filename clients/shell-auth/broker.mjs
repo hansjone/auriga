@@ -565,7 +565,11 @@ export class Broker extends EventEmitter {
           complete.searchParams.get('user_code') !== grant.user_code)
       )
         throw new Error('untrusted complete verification page');
-      complete.searchParams.set('user_code', grant.user_code);
+      const browserCode = grant.user_code.replaceAll('-', '').toUpperCase();
+      if (!/^[BCDFGHJKLMNPQRSTVWXZ]{8}$/.test(browserCode))
+        throw new Error('invalid device user code');
+      complete.pathname = '/device/' + browserCode;
+      complete.search = '';
       const until = this.mono() + grant.expires_in * 1000;
       let interval = Math.max(
         5,

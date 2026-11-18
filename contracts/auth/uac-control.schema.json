@@ -742,7 +742,7 @@
         "fetchMetadata",
         "userCode"
       ],
-      "description": "仅svc:edge使用。IAM在受委派tenant内规范化userCode（去连字符、大写），解析唯一、未过期且未消费的权威设备事务，核对provider和来源绑定；失败统一404。解析和导航证明绑定原子完成，不向浏览器返回grant ID。autoEligible恒false。"
+      "description": "仅svc:edge使用。IAM在受委派tenant内规范化userCode（去连字符、大写），解析唯一、未过期且未消费的权威设备事务，核对provider和来源绑定；失败统一404。解析和导航证明绑定原子完成，不向浏览器返回grant ID。受信的顶层导航可自动验证浏览器SSO，设备批准仍需要本人核码及既有验证。"
     }
   }
 }
