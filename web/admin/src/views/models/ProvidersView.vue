@@ -65,6 +65,18 @@ function canPrepare() {
   return true;
 }
 const catalogs = ref<Record<string, CatalogState>>({});
+// Provider records have no model directory. Reuse actual route models from the
+// saved pools (never their public aliases), and supplement them with the catalog.
+const availableModels = computed(() => {
+  const models = new Map<string, Set<string>>();
+  for (const { id } of providers.value) models.set(id, new Set());
+  for (const pool of pools.value)
+    for (const route of pool.routes)
+      if (route.model) models.get(route.providerId)?.add(route.model);
+  for (const [id, catalog] of Object.entries(catalogs.value))
+    for (const model of catalog.items) models.get(id)?.add(model.id);
+  return models;
+});
 const catalogLoading = computed(() =>
   Object.values(catalogs.value).some((catalog) => catalog.loading),
 );
@@ -753,6 +765,7 @@ async function confirm() {
             v-model="draft"
             :providers="providers"
             :catalogs="catalogs"
+            :available-models="availableModels"
             @refresh="applyCapabilities"
           />
           <p v-if="capabilityNotice" class="relay-wide" role="status">
@@ -791,9 +804,11 @@ async function confirm() {
               />
               <datalist :id="'route-model-catalog-' + index">
                 <option
-                  v-for="model in catalogs[route.providerId]?.items ?? []"
-                  :key="model.id"
-                  :value="model.id"
+                  v-for="model in [
+                    ...(availableModels.get(route.providerId) ?? []),
+                  ]"
+                  :key="model"
+                  :value="model"
                 />
               </datalist>
             </label>
@@ -840,7 +855,7 @@ async function confirm() {
               v-else-if="
                 catalogs[route.providerId] &&
                 !catalogs[route.providerId]?.loading &&
-                !catalogs[route.providerId]?.items.length
+                !availableModels.get(route.providerId)?.size
               "
             >
               {{ t('catalogEmpty') }}

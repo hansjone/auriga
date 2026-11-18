@@ -496,6 +496,9 @@ it('new model selection inherits known values without taking a later fallback mi
   const w = mount(ProvidersView, { global });
   await flushPromises();
   await w.get('[data-testid="add-pool"]').trigger('click');
+  expect(w.get('[name="capabilitySourceRoute"]').text()).toBe(
+    '先添加真实模型路由',
+  );
   const add = () =>
     w.findAll('button').find((button) => button.text() === '添加池路由')!;
   await add().trigger('click');
@@ -514,6 +517,47 @@ it('new model selection inherits known values without taking a later fallback mi
   await w.get('[name="routeWeight1"]').setValue('0');
   expect(value(w, 'contextWindow')).toBe('2000000');
   w.unmount();
+});
+
+it('binds real same-provider models from saved routes to the new pool without a catalog call', async () => {
+  const w = mount(ProvidersView, { global });
+  try {
+    await flushPromises();
+    await w.get('[data-testid="add-pool"]').trigger('click');
+    const source = w.get('[name="capabilitySourceRoute"]');
+    const small = JSON.stringify([providerId, 'small']);
+    const large = JSON.stringify([providerId, 'large']);
+    expect(
+      source
+        .findAll('option')
+        .slice(1)
+        .map((o) => o.element.value),
+    ).toEqual([small, large]);
+    await source.setValue(large);
+    expect(value(w, 'routeProvider0')).toBe(providerId);
+    expect(value(w, 'routeModel0')).toBe('large');
+    await source.setValue(small);
+    expect(value(w, 'routeModel1')).toBe('small');
+    await source.setValue(large);
+    expect(w.find('[name="routeModel2"]').exists()).toBe(false);
+    expect(relayApi.providerModels).not.toHaveBeenCalled();
+    await w.get('[name="poolId"]').setValue('new-pool');
+    await w.get('[name="inputPrice"]').setValue('1');
+    await w.get('[name="outputPrice"]').setValue('1');
+    await w.get('[data-testid="pool-form"]').trigger('submit');
+    await w.get('[data-testid="confirm-action"]').trigger('click');
+    await flushPromises();
+    expect(persisted[0]).toMatchObject({
+      id: 'new-pool',
+      routes: [
+        { providerId, model: 'large', weight: 1 },
+        { providerId, model: 'small', weight: 1 },
+      ],
+      capabilities: { sourceProviderId: providerId, sourceModel: 'large' },
+    });
+  } finally {
+    w.unmount();
+  }
 });
 
 it('treats a cleared max output as unknown and explains how to fill it', async () => {
