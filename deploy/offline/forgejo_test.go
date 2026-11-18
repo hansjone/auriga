@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"strings"
@@ -224,7 +225,8 @@ func TestForgejoRedirectAndWrongTagNeverWrite(t *testing.T) {
 }
 
 func TestForgejoInternalHTTPRequiresExplicitPrivateRoute(t *testing.T) {
-	for _, site := range []string{"http://127.0.0.1:3000", "http://10.20.30.40:3000"} {
+	privateIP := netip.AddrFrom4([4]byte{10, 20, 30, 40})
+	for _, site := range []string{"http://127.0.0.1:3000", "http://" + privateIP.String() + ":3000"} {
 		t.Run(site, func(t *testing.T) {
 			err := uploadCommand([]string{"--server", "https://forgejo.example.com", "--internal-http", site, "--repo", "owner/repo"})
 			if err == nil || !strings.Contains(err.Error(), "--verify-key") {

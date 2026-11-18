@@ -160,7 +160,7 @@ Linux 在构建前流式核验 Windows tar、内部发行签名、依赖锁及�
 
 ### 4. Forgejo 草稿、核验与发布
 
-默认使用公开 HTTPS，私有 CA 可通过 Linux 发布进程的 `SSL_CERT_FILE` 使用独立批准的 CA 文件。若 NAS 无法通过公开 HTTPS 路由到同一 Forgejo，可加 `--internal-http http://10.20.30.40:3000` 指向批准的私有或回环 IP。此选项仅用于受控直连网络，HTTP 上的令牌以明文传输，发布程序会绕开代理。两种路径均使用公开 `--server` 标识站点，附件回读拒绝跨站跳转。
+默认使用公开 HTTPS，私有 CA 可通过 Linux 发布进程的 `SSL_CERT_FILE` 使用独立批准的 CA 文件。若 NAS 无法通过公开 HTTPS 路由到同一 Forgejo，将 `FORGEJO_INTERNAL_URL` 设置为批准的内网 HTTP 地址（私有或回环 IP，带端口），再加 `--internal-http "$FORGEJO_INTERNAL_URL"`。此选项仅用于受控直连网络，HTTP 上的令牌以明文传输，发布程序会绕开代理。两种路径均使用公开 `--server` 标识站点，附件回读拒绝跨站跳转。
 
 ```sh
 publish_release() {
