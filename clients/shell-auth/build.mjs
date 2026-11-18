@@ -13,32 +13,45 @@ import { createRequire } from 'node:module';
 import { safePath } from './vault.mjs';
 import { buildHelper } from './windows/build.mjs';
 const source = dirname(fileURLToPath(import.meta.url));
-export function buildBroker(output) {
+export function buildBroker(output, { managedLinux = false } = {}) {
   output = resolve(output);
   safePath(output);
   if (output === source || (existsSync(output) && readdirSync(output).length))
     throw new Error('empty broker output directory required');
   mkdirSync(output, { recursive: true });
-  const files = readdirSync(source).filter(
-    (f) =>
-      f.endsWith('.mjs') &&
-      ![
-        'build.mjs',
-        'eslint.config.mjs',
-        'network-core.mjs',
-        'device-provider.mjs',
-      ].includes(f),
-  );
-  for (const part of ['public', 'windows']) {
-    mkdirSync(join(output, part), { recursive: true });
-    for (const file of readdirSync(join(source, part)))
-      if (part === 'public') files.push(part + '/' + file);
+  const files = managedLinux
+    ? [
+        'business.mjs',
+        'host.mjs',
+        'network.mjs',
+        'platform.mjs',
+        'schema.mjs',
+        'streams.mjs',
+        'team.mjs',
+        'vault.mjs',
+      ]
+    : readdirSync(source).filter(
+        (f) =>
+          f.endsWith('.mjs') &&
+          ![
+            'build.mjs',
+            'eslint.config.mjs',
+            'network-core.mjs',
+            'device-provider.mjs',
+          ].includes(f),
+      );
+  if (!managedLinux) {
+    mkdirSync(join(output, 'public'), { recursive: true });
+    for (const file of readdirSync(join(source, 'public')))
+      files.push('public/' + file);
   }
   for (const file of files)
     copyFileSync(join(source, file), join(output, file));
-  const helper = 'windows/shell-helper.exe';
-  buildHelper(join(output, helper));
-  files.push(helper);
+  if (!managedLinux) {
+    const helper = 'windows/shell-helper.exe';
+    buildHelper(join(output, helper));
+    files.push(helper);
+  }
   const rootLoader = createRequire(
     new URL('../../package.json', import.meta.url),
   );
@@ -153,6 +166,7 @@ export function buildBroker(output) {
 
   const manifest = {
     version: 1,
+    ...(managedLinux ? { target: 'managed-linux' } : {}),
     files: files.sort().map((path) => ({
       path,
       sha256: createHash('sha256')
@@ -169,5 +183,13 @@ export function buildBroker(output) {
 if (
   process.argv[1] &&
   resolve(process.argv[1]) === fileURLToPath(import.meta.url)
-)
-  buildBroker(process.argv[2]);
+) {
+  const [output, target, ...extra] = process.argv.slice(2);
+  if (
+    !output ||
+    (target !== undefined && target !== '--managed-linux') ||
+    extra.length
+  )
+    throw new Error('usage: build.mjs <output> [--managed-linux]');
+  buildBroker(output, { managedLinux: target === '--managed-linux' });
+}

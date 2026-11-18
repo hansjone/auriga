@@ -15,6 +15,7 @@ import { dirname, join, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { productionInputs } from './inputs.mjs';
 import { prepareIncremental } from './incremental.mjs';
+import { brokerInputs } from './broker-inputs.mjs';
 
 const hash = (bytes) => createHash('sha256').update(bytes).digest('hex');
 const repository = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
@@ -47,6 +48,7 @@ function fixture(t) {
   const pkg = {
     name: 'auriga-dsh',
     version: '0.1.0',
+    type: 'module',
     engines: { dsh: '>=0.2.1-rc.3' },
     dependencies: { fixture: '1.0.0' },
     devDependencies: { test: '1.0.0' },
@@ -127,6 +129,51 @@ function fixture(t) {
   });
   put(join(opt, 'auriga-dsh/src/removed.js'), 'old removed source');
   put(join(opt, 'auriga-dsh/src/entry.js'), 'old source');
+  put(
+    join(expected, 'recipe/broker-source.sha256'),
+    hash('broker sources') + '\n',
+  );
+  put(join(opt, 'fixture/broker-source.sha256'), hash('broker sources') + '\n');
+  put(
+    join(opt, 'auriga-dsh/src/local/broker-package.js'),
+    readFileSync(
+      join(repository, 'clients/dsh-plugin/src/local/broker-package.js'),
+      'utf8',
+    ),
+  );
+  const broker = join(opt, 'auriga-dsh/shell-auth');
+  const brokerFiles = [
+    ...[
+      'business',
+      'host',
+      'network',
+      'platform',
+      'schema',
+      'streams',
+      'team',
+      'vault',
+      'network-core.bundle',
+    ].map((name) => name + '.mjs'),
+    'vendor-ajv.cjs',
+    ...brokerInputs
+      .filter((name) => name.startsWith('contracts/'))
+      .map((name) => name.replace('contracts/', 'schemas/')),
+    ...[
+      'ajv',
+      'fast-deep-equal',
+      'fast-uri',
+      'json-schema-traverse',
+      'require-from-string',
+    ].map((name) => 'licenses/' + name + '.txt'),
+  ];
+  put(join(broker, 'broker-manifest.json'), {
+    version: 1,
+    target: 'managed-linux',
+    files: brokerFiles.map((path) => {
+      put(join(broker, path), 'fixture bytes');
+      return { path, sha256: hash('fixture bytes') };
+    }),
+  });
   put(join(opt, 'dsh/node_modules/@deepseek-ai/dsh/package.json'), {
     name: '@deepseek-ai/dsh',
     version: '0.2.1-rc.3',
@@ -160,9 +207,9 @@ function fixture(t) {
   };
 }
 
-test('pinned unchanged base is accepted and all old plugin source is removed', (t) => {
+test('pinned unchanged base is accepted and all old plugin source is removed', async (t) => {
   const f = fixture(t);
-  f.run();
+  await f.run();
   assert.ok(!existsSync(join(f.opt, 'auriga-dsh/src')));
   assert.ok(
     existsSync(join(f.opt, 'auriga-dsh/node_modules/fixture/package.json')),
@@ -182,11 +229,14 @@ for (const image of [
   'runtime@sha256:' + 'a'.repeat(63),
   'https://registry.example.com/runtime@sha256:' + 'a'.repeat(64),
 ])
-  test('unpinned or invalid base is refused: ' + image.slice(0, 20), (t) => {
-    const f = fixture(t);
-    assert.throws(() => f.run(image), /digest/);
-    assert.ok(existsSync(join(f.opt, 'auriga-dsh/src/entry.js')));
-  });
+  test(
+    'unpinned or invalid base is refused: ' + image.slice(0, 20),
+    async (t) => {
+      const f = fixture(t);
+      await assert.rejects(f.run(image), /digest/);
+      assert.ok(existsSync(join(f.opt, 'auriga-dsh/src/entry.js')));
+    },
+  );
 
 for (const path of [
   'recipe/package.json',
@@ -199,30 +249,30 @@ for (const path of [
   'plugin/package.json',
   'plugin/package-lock.json',
 ])
-  test('changed foundation input refuses reuse: ' + path, (t) => {
+  test('changed foundation input refuses reuse: ' + path, async (t) => {
     const f = fixture(t);
     writeFileSync(
       join(f.expected, path),
       readFileSync(join(f.expected, path), 'utf8') + ' ',
     );
-    assert.throws(() => f.run(), /differs|mismatch/);
+    await assert.rejects(f.run(), /differs|mismatch/);
     assert.ok(existsSync(join(f.opt, 'auriga-dsh/src/entry.js')));
   });
 
-test('base manifest rejects tampered bytes and unlisted files before deleting source', (t) => {
+test('base manifest rejects tampered bytes and unlisted files before deleting source', async (t) => {
   const f = fixture(t);
   f.put(join(f.opt, 'auriga-dsh/node_modules/fixture/package.json'), {
     name: 'fixture',
     version: '9.0.0',
   });
-  assert.throws(() => f.run(), /manifest/);
+  await assert.rejects(f.run(), /manifest/);
   f.seal();
   f.put(join(f.opt, 'fixture/unlisted.js'), 'unexpected');
-  assert.throws(() => f.run(), /manifest/);
+  await assert.rejects(f.run(), /manifest/);
   assert.ok(existsSync(join(f.opt, 'auriga-dsh/src/entry.js')));
 });
 
-test('resealed production lock drift and installed host drift refuse reuse', (t) => {
+test('resealed production lock drift and installed host drift refuse reuse', async (t) => {
   for (const path of [
     'auriga-dsh/package-lock.json',
     'dsh/node_modules/@deepseek-ai/dsh/package.json',
@@ -230,17 +280,47 @@ test('resealed production lock drift and installed host drift refuse reuse', (t)
     const f = fixture(t);
     f.put(join(f.opt, path), { name: 'unexpected', version: '9.0.0' });
     f.seal();
-    assert.throws(() => f.run(), /differs|Installed DSH/);
+    await assert.rejects(f.run(), /differs|Installed DSH/);
     assert.ok(existsSync(join(f.opt, 'auriga-dsh/src/entry.js')));
   }
 });
 
-test('actual toolchain mismatch refuses reuse', (t) => {
+test('actual toolchain mismatch refuses reuse', async (t) => {
   const f = fixture(t);
-  assert.throws(
-    () => f.run(baseImage, { ...toolchain, nodeVersion: '24.0.0' }),
+  await assert.rejects(
+    f.run(baseImage, { ...toolchain, nodeVersion: '24.0.0' }),
     /toolchain/,
   );
+});
+
+test('pre-broker base, changed source lock and resealed bad broker all require a full build', async (t) => {
+  const old = fixture(t);
+  rmSync(join(old.opt, 'fixture/broker-source.sha256'));
+  rmSync(join(old.opt, 'auriga-dsh/shell-auth/broker-manifest.json'));
+  old.seal();
+  await assert.rejects(old.run(), /lacks the managed broker; use full build/);
+
+  const drift = fixture(t);
+  drift.put(
+    join(drift.expected, 'recipe/broker-source.sha256'),
+    hash('new source') + '\n',
+  );
+  await assert.rejects(drift.run(), /broker source\/lock; use full build/);
+
+  const tampered = fixture(t);
+  tampered.put(
+    join(tampered.opt, 'auriga-dsh/shell-auth/network-core.bundle.mjs'),
+    'new bytes',
+  );
+  tampered.seal();
+  await assert.rejects(
+    tampered.run(),
+    (error) =>
+      /managed broker is invalid; use full build/.test(error.message) &&
+      error.cause?.message === 'broker digest mismatch',
+  );
+  for (const f of [old, drift, tampered])
+    assert.ok(existsSync(join(f.opt, 'auriga-dsh/src/entry.js')));
 });
 
 test('Docker recipe checks before mutation and regenerates original manifest', () => {
@@ -259,6 +339,10 @@ test('Docker recipe checks before mutation and regenerates original manifest', (
     /node --import \S+incremental-fs.mjs \/opt\/fixture\/build.mjs manifest/,
   );
   assert.match(recipe, /USER 200000:200000/);
+  assert.match(
+    recipe,
+    /USER 200000:200000\s+RUN --network=none node \/opt\/fixture\/runtime.mjs/,
+  );
   assert.match(recipe, /ENTRYPOINT \["node", "\/opt\/fixture\/start.mjs"\]/);
 });
 

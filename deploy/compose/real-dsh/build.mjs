@@ -12,6 +12,7 @@ import { productionInputs } from './inputs.mjs';
 import {
   runtimeInputs,
   runtimeChecks,
+  managedBrokerChecks,
   pluginPackageFiles,
 } from './runtime.mjs';
 
@@ -55,6 +56,7 @@ if (action === 'check') {
   writeFileSync('package-lock.json', JSON.stringify(lock, null, 2) + '\n');
 } else if (action === 'manifest') {
   const pluginFiles = pluginPackageFiles('/opt/auriga-dsh');
+  await managedBrokerChecks('/opt/auriga-dsh');
   const runtime = await runtimeChecks(
     '/opt/dsh',
     versions,

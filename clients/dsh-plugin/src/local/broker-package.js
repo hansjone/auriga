@@ -17,8 +17,9 @@ import { resolve, relative, isAbsolute, join } from 'node:path';
 import { pathToFileURL, fileURLToPath } from 'node:url';
 
 /** Verify all artifact bytes before importing executable code or starting helper.
- * @param {string} directory */
-export async function verifyBrokerPackage(directory) {
+ * @param {string} directory
+ * @param {'desktop'|'managed'|'managed-linux'} target */
+export async function verifyBrokerPackage(directory, target = 'desktop') {
   if ((await lstat(directory)).isSymbolicLink())
     throw new Error('broker linked path rejected');
   const base = await realpath(directory);
@@ -27,8 +28,12 @@ export async function verifyBrokerPackage(directory) {
   const manifest = JSON.parse(
     await readFile(join(base, 'broker-manifest.json'), 'utf8'),
   );
+  const managedLinux = manifest.target === 'managed-linux';
   if (
     manifest.version !== 1 ||
+    (manifest.target !== undefined && !managedLinux) ||
+    (target === 'desktop' && managedLinux) ||
+    (target === 'managed-linux' && !managedLinux) ||
     !Array.isArray(manifest.files) ||
     manifest.files.length > 10000
   )
@@ -74,7 +79,52 @@ export async function verifyBrokerPackage(directory) {
     }
   }
   await walk(base);
-  for (const name of ['ipc.mjs', 'schema.mjs', 'windows/shell-helper.exe'])
+  const required = ['schema.mjs'];
+  if (!managedLinux) required.push('ipc.mjs', 'windows/shell-helper.exe');
+  else if ([...seen].some((name) => name.startsWith('windows/')))
+    throw new Error('broker managed-linux contains desktop helper files');
+  if (target !== 'desktop')
+    required.push(
+      'business.mjs',
+      'host.mjs',
+      'network.mjs',
+      'platform.mjs',
+      'streams.mjs',
+      'team.mjs',
+      'vault.mjs',
+      'network-core.bundle.mjs',
+      'vendor-ajv.cjs',
+      ...[
+        'identity/steps',
+        'auth/uac-login-info',
+        'auth/uac-session-binding',
+        'auth/uac-control',
+        'auth/standard-device',
+        'plugin/shell-auth',
+        'plugin/shell-auth-control',
+        'plugin/shell-business',
+        'plugin/local-login',
+        'plugin/managed-device',
+        'plugin/managed-model',
+        'network/register-result',
+        'network/address',
+        'network/envelope',
+        'network/source-control',
+        'network/protocol',
+        'network/keyset',
+        'network/auto-renewal-v2',
+        'network/send',
+      ].map((name) => 'schemas/' + name + '.schema.json'),
+      'schemas/plugin/shell-business-operations.json',
+      ...[
+        'ajv',
+        'fast-deep-equal',
+        'fast-uri',
+        'json-schema-traverse',
+        'require-from-string',
+      ].map((name) => 'licenses/' + name + '.txt'),
+    );
+  for (const name of required)
     if (!seen.has(name)) throw new Error('broker incomplete');
   return { base, manifest };
 }
