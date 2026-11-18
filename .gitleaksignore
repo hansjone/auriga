@@ -36,3 +36,7 @@ b5aeaf0e1109dcdb5073d1fef69f1c5a0662d753:e2e/phase1/cloud-desk.test.mjs:private-
 83b206938e761ad5900acebfc7d33961f51f5d35:services/org/impl/src/test/java/auriga/org/EgressPolicyValidationTest.java:private-ipv4:15
 # Installer secret-scanner self-test sample bearer string; synthetic, not a credential.
 2ff1ff6181844b6252597730dfd085687fb82dbb:clients/installer/test/package.test.mjs:generic-api-key:52
+
+# PR392 historical synthetic addresses in the release guide and Forgejo route test.
+8a7a2af2d8557dd10241c40a60c8cdae3061a3ad:MAINTAIN.md:private-ipv4:163
+8a7a2af2d8557dd10241c40a60c8cdae3061a3ad:deploy/offline/forgejo_test.go:private-ipv4:227
