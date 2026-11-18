@@ -652,7 +652,7 @@ func TestRotationWrapperPreservesSealedProjectGateWithoutInjectingSelectors(t *t
 [ "$#" -ge 4 ] && [ "$1" = -C ] && [ -d "$2" ] && [ "$3" = run ] && [ "$4" = . ] || exit 2
 shift 4
 case "$1" in
-  -print-compose-project) exec "$AURIGA_ROTATION_WRAPPER_BOOTSTRAP" "$@" ;;
+  -print-compose-recipe) exec "$AURIGA_ROTATION_WRAPPER_BOOTSTRAP" "$@" ;;
   key-rotation)
     printf 'OPS|project=%s|file=%s|profiles=%s|disable=%s|args=%s\n' "${COMPOSE_PROJECT_NAME:-}" "${COMPOSE_FILE:-}" "${COMPOSE_PROFILES:-}" "${COMPOSE_DISABLE_ENV_FILE:-}" "$*" >> "$AURIGA_ROTATION_WRAPPER_LOG"
     if [ "$AURIGA_ROTATION_WRAPPER_REJECT" = 1 ]; then exec "$AURIGA_ROTATION_WRAPPER_BOOTSTRAP" "$@"; fi

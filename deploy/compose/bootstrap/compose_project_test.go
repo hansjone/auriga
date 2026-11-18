@@ -66,7 +66,12 @@ func TestSealedComposeProject(t *testing.T) {
 // projection and the write/check activation operations are fake; project lookup
 // and the initial checkpoint/input preflight execute the real fixture binary.
 func TestActivationComposeProjectBinding(t *testing.T) {
-	f := activationFixture(t)
+	t.Run("default", func(t *testing.T) { testActivationComposeProjectBinding(t, false) })
+	t.Run("managed-ca", func(t *testing.T) { testActivationComposeProjectBinding(t, true) })
+}
+
+func testActivationComposeProjectBinding(t *testing.T, managedCA bool) {
+	f := activationFixtureWithCA(t, managedCA)
 	root := filepath.Dir(f.out)
 	scripts, bin := filepath.Join(root, "scripts"), filepath.Join(root, "bin")
 	for _, dir := range []string{scripts, bin} {
@@ -160,6 +165,12 @@ if [ "$ps" = true ] && [ "$AURIGA_TEST_RUNNING" = 1 ] && [ "$project" = public-t
 				found = true
 				if !strings.HasPrefix(line, "DOCKER|project=public-test|env=public-test|file=|envfiles=|") || strings.Contains(line, "foreign") {
 					t.Fatalf("unbound Compose selection: %s", line)
+				}
+				if strings.Contains(line, "/var/managed-ca.yml") != managedCA {
+					t.Fatalf("wrong managed CA recipe: %s", line)
+				}
+				if managedCA && strings.Contains(line, "collab-activation.yml") && strings.Index(line, "/var/managed-ca.yml") > strings.Index(line, "collab-activation.yml") {
+					t.Fatalf("managed CA recipe must precede activation: %s", line)
 				}
 			}
 		}
