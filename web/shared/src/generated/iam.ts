@@ -153,7 +153,7 @@ export interface paths {
     put?: never;
     /**
      * 门户服务端尝试SSO免扫码登录草案
-     * @description 仅portal/login用途。门户顶层导航服务端签发120秒一次性navigationProof，绑定浏览器事务cookie、完整Origin、tenant/provider和导航资格；POST精确Origin、CSRF和CAS消费验证。auto须再次检查导航资格及退出抑制，continue仅由可信页面明确按钮触发，不接受link/stepup或客户端UAC凭据。Cookie只由门户服务端读取，私有映射选Portal完整配对优先、其次UDS，禁止跨体系混配；前端不读取或转发Cookie。未开启、无Cookie、退出抑制或上游验证不通过返回scan_required；安全围栏失败403。成功保存bo.token，执行既有准入/MFA，轮换会话ID，SSO/扫码共用信息查询与复验。既有有效会话不被该接口静默切换；响应不含上游原文或token，Cache-Control no-store。导航签发与抑制细则见docs/design/auth-shell.zh.md第3.1.1节。 设备确认及其登录续接禁止auto，即使导航证明与Cookie齐全也须由用户点击继续并核码，发起设备与用户码取服务端权威事务。按用户决定支持单IP单域名部署，SSO按既有开关与Cookie可用性生效，同域Cookie可读风险已由用户接受。
+     * @description 仅portal/login用途。门户顶层导航服务端签发120秒一次性navigationProof，绑定浏览器事务cookie、完整Origin、tenant/provider和导航资格；POST精确Origin、CSRF和CAS消费验证。auto须再次检查导航资格及退出抑制，continue仅由可信页面明确按钮触发，不接受link/stepup或客户端UAC凭据。Cookie只由门户服务端读取，私有映射选Portal完整配对优先、其次UDS，禁止跨体系混配；前端不读取或转发Cookie。未开启、无Cookie、退出抑制或上游验证不通过返回scan_required；安全围栏失败403。成功保存验证返回的令牌（优先 other.token，仅字段缺失时读取 bo.token；显式非法字段不回退），执行既有准入/MFA，轮换会话ID，SSO/扫码共用信息查询与复验。既有有效会话不被该接口静默切换；响应不含上游原文或token，Cache-Control no-store。导航签发与抑制细则见docs/design/auth-shell.zh.md第3.1.1节。 设备确认及其登录续接禁止auto，即使导航证明与Cookie齐全也须由用户点击继续并核码，发起设备与用户码取服务端权威事务。按用户决定支持单IP单域名部署，SSO按既有开关与Cookie可用性生效，同域Cookie可读风险已由用户接受。
      */
     post: operations['loginUacSso'];
     delete?: never;

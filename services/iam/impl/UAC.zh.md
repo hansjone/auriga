@@ -52,7 +52,7 @@ SSO 退出抑制使用 host-only 会话 Cookie；HTTPS 带 `__Host-`、Secure、
 
 部署 JSON 的 `constants` 最多 32 个字符串，操作 `derived` 最多 16 项，仅允许 md5/sha256 与模板拼接，无脚本求值；不能覆盖系统坐标/凭据变量，未知模板拒绝启用。`headers` 可在 qr/department 中配置私有静态或模板头，不从浏览器透传任何 header；代码不会自动附加我方内部身份/追踪头，部署方也不得在私有映射中配置这些内部凭据。Cookie 项支持 `urlEncoded`、JSON `pointer`；UDS 可配置独立 `clientIP` Cookie 项，缺失时使用服务器固定 IP 或空串。IP 必须为合法数字地址，不查 DNS。`diagnostics.originSystemCodeEmpty` 只声明布尔能力；未声明则导出 null，不导出私有常量原值。自定义适配器 `diagnosticCapabilities()` 同样仅允许固定布尔能力。
 
-允许列表同时核对 origin 和 socket 实际 DNS 地址；地址集合变化时必须显式更新私有配置。生产仅允许 HTTPS，禁止重定向、自动重试和自动 Cookie jar。连接/响应/整体超时及响应体大小有界。token-verify 使用固定请求规范与响应判定：合法完整响应的明确业务/身份拒绝才失效，HTTP/解析/协议异常按持久预算重试；新 token 以凭据版本 CAS 原子替换。MD5 仅用于既有企业协议的请求校验。
+允许列表同时核对 origin 和 socket 实际 DNS 地址；地址集合变化时必须显式更新私有配置。生产仅允许 HTTPS，禁止重定向、自动重试和自动 Cookie jar。连接/响应/整体超时及响应体大小有界。token-verify 使用固定请求规范与响应判定：合法完整响应的明确业务/身份拒绝才失效，HTTP/解析/协议异常按持久预算重试。只有 code.code 与 bo.code 均为字符串 0000 才判候选成功。优先使用 other.token，仅字段缺失才读 bo.token；显式非法字段不回退。可选 bo.user 若存在须匹配已验证工号；SSO 使用匹配回显的原有写法来走与扫码一致的绑定，缺回显才用已验证的请求工号。会话复验不改写既有绑定。新令牌允许与旧令牌相同，以凭据版本 CAS 原子替换。MD5 仅用于既有企业协议的请求校验。
 
 ## 密钥轮换
 

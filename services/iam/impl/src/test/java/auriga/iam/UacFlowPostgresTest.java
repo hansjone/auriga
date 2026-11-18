@@ -2095,12 +2095,66 @@ class UacFlowPostgresTest {
                       issued.path("transactionCookie").asString()));
       String sid = result.result().session().session().path("sessionId").asString();
       assertEquals("001AB", f.read(sid).path("empNo").asString());
+      assertEquals(
+          f.account.toString(), result.result().session().session().path("accountId").asString());
       f.scanEmployee.set(" 001AB ");
       var qr = f.login();
       assertEquals(f.account.toString(), qr.session().session().path("accountId").asString());
       assertEquals(
           "001AB",
           f.read(qr.session().session().path("sessionId").asString()).path("empNo").asString());
+    }
+  }
+
+  @ParameterizedTest
+  @CsvSource({"no_echo, true", "match, true", "missing_zero, false", "mismatch, false"})
+  void numericSsoAndQrShareOnlyTheExactEmployeeBinding(String echo, boolean accepted)
+      throws Exception {
+    try (var f = new Fixture("token-verify", 3)) {
+      String employee = "001234", padded = "\u3000" + employee + "\u00a0";
+      String replacement = "\u00a0" + f.replacement + "\u3000";
+      f.expectedVerifyAccount.set(employee);
+      f.scanEmployee.set(padded);
+      when(f.hooks.resolveUacEmployee(UUID.fromString(f.provider), employee))
+          .thenReturn(Optional.of(f.account));
+      boolean noEcho = "no_echo".equals(echo);
+      var bo = Json.object("code", "0000", "token", noEcho ? f.token : replacement);
+      if (!noEcho) {
+        bo.put(
+            "user",
+            switch (echo) {
+              case "match" -> padded;
+              case "missing_zero" -> "\u300001234\u00a0";
+              case "mismatch" -> "\u3000001235\u00a0";
+              default -> throw new AssertionError(echo);
+            });
+      }
+      var response = Json.object("code", Json.object("code", "0000"), "bo", bo);
+      if (noEcho) response.set("other", Json.object("token", replacement));
+      f.verifyBody.set(response);
+      var cookies =
+          Json.object(
+              "test_portal_token", List.of(f.token), "test_portal_account", List.of(padded));
+      var nav = navigation(f, "true");
+      var issued = f.call(() -> nav.issue(navigationInput(f, "portal"), false));
+      var prepared = prepare(f, nav, issued, "auto", null, null);
+      var verified = f.call(() -> nav.verify(prepared, cookies));
+      var result =
+          f.call(() -> nav.finish(prepared, verified, issued.path("transactionCookie").asString()));
+      assertEquals(accepted, verified.path("success").asBoolean());
+      assertEquals(accepted ? "authenticated" : "scan_required", result.state());
+      if (accepted) {
+        var session = result.result().session().session();
+        assertEquals(f.account.toString(), session.path("accountId").asString());
+        var credential = f.read(session.path("sessionId").asString());
+        assertEquals(employee, credential.path("empNo").asString());
+        assertEquals(replacement, credential.path("token").asString());
+      } else {
+        assertTrue(f.call(() -> store.tx(() -> store.all("session").isEmpty())));
+      }
+      var qr = f.login().session().session();
+      assertEquals(f.account.toString(), qr.path("accountId").asString());
+      assertEquals(employee, f.read(qr.path("sessionId").asString()).path("empNo").asString());
     }
   }
 
