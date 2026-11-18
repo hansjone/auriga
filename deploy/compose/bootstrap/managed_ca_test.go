@@ -31,28 +31,45 @@ func TestManagedCAValidation(t *testing.T) {
 		t.Fatal(err)
 	}
 	key, ca, root := mustCA()
-	intermediateKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	if err != nil {
-		t.Fatal(err)
+	issueCA := func(serial int64, name string, parent *x509.Certificate, parentKey *ecdsa.PrivateKey) (*ecdsa.PrivateKey, *x509.Certificate, []byte) {
+		t.Helper()
+		private, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+		if err != nil {
+			t.Fatal(err)
+		}
+		tmpl := *ca
+		tmpl.SerialNumber = big.NewInt(serial)
+		tmpl.Subject.CommonName = name
+		tmpl.RawSubject = nil
+		tmpl.SubjectKeyId = nil
+		der, err := x509.CreateCertificate(rand.Reader, &tmpl, parent, &private.PublicKey, parentKey)
+		if err != nil {
+			t.Fatal(err)
+		}
+		cert, err := x509.ParseCertificate(der)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return private, cert, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})
 	}
-	tmpl := *ca
-	tmpl.SerialNumber = big.NewInt(2)
-	tmpl.Subject.CommonName = "local test intermediate"
-	tmpl.RawSubject = nil
-	tmpl.SubjectKeyId = nil
-	intermediateDER, err := x509.CreateCertificate(rand.Reader, &tmpl, ca, &intermediateKey.PublicKey, key)
-	if err != nil {
-		t.Fatal(err)
-	}
-	intermediate, err := x509.ParseCertificate(intermediateDER)
-	if err != nil {
-		t.Fatal(err)
-	}
-	intermediatePEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: intermediateDER})
+	upperKey, upper, upperPEM := issueCA(2, "upper intermediate", ca, key)
+	intermediateKey, intermediate, intermediatePEM := issueCA(3, "leaf issuer", upper, upperKey)
+	_, _, unrelatedIntermediate := issueCA(4, "unrelated intermediate", ca, key)
+	_, _, wrongIssuerKey := issueCA(5, "leaf issuer", upper, upperKey)
 	hosts := []string{a.PortalOrigin.Host, a.AdminOrigin.Host, "*." + a.Instances.AccessInstancesSubdomain.ParentDomain}
 	leaf, privateKey := mustIssue(intermediateKey, intermediate, "local HTTPS", "auriga://test/browser", hosts, nil, []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth})
-	serverChain := bytes.Join([][]byte{leaf, intermediatePEM}, nil)
+	serverChain := bytes.Join([][]byte{leaf, intermediatePEM, upperPEM}, nil)
+	rootCRLF := bytes.ReplaceAll(root, []byte("\n"), []byte("\r\n"))
 	_, _, unrelated := mustCA()
+	// A re-issued certificate with the same subject and key still has to be
+	// the actual chain member. A cross-signed alternate has different DER.
+	cross := *intermediate
+	cross.SerialNumber = big.NewInt(6)
+	crossDER, err := x509.CreateCertificate(rand.Reader, &cross, ca, &intermediateKey.PublicKey, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	crossPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: crossDER})
 	expired := *ca
 	expired.NotBefore = time.Now().Add(-2 * time.Hour)
 	expired.NotAfter = time.Now().Add(-time.Hour)
@@ -66,16 +83,29 @@ func TestManagedCAValidation(t *testing.T) {
 		raw  []byte
 		want string
 	}{
-		{"valid", root, ""},
-		{"valid-bundle", bytes.Join([][]byte{unrelated, root}, []byte("\r\n")), ""},
+		{"root-only", root, ""},
+		{"valid-bundle", bytes.Join([][]byte{rootCRLF, intermediatePEM, upperPEM}, []byte(" \t\r\n")), ""},
+		{"leading-blank-line", append([]byte(" \t\r\n"), root...), ""},
+		{"end-at-eof", bytes.TrimSuffix(root, []byte("\n")), ""},
 		{"intermediate-only", intermediatePEM, "requires a self-signed root"},
 		{"empty", nil, "invalid public managed CA bundle"},
 		{"oversized", bytes.Repeat([]byte("x"), managedCALimit+1), "invalid public managed CA bundle"},
 		{"leaf", leaf, "invalid public managed CA bundle"},
 		{"private-key", bytes.Join([][]byte{root, privateKey}, nil), "invalid public managed CA bundle"},
+		{"indented-begin", append([]byte(" "), root...), "invalid public managed CA bundle"},
+		{"indented-second-begin", bytes.Join([][]byte{root, intermediatePEM}, []byte("\t")), "invalid public managed CA bundle"},
+		{"indented-begin-before-valid", bytes.Join([][]byte{[]byte(" "), intermediatePEM, root}, nil), "invalid public managed CA bundle"},
 		{"nested-malformed", bytes.Join([][]byte{[]byte("-----BEGIN CERTIFICATE-----\nbad\n"), root}, nil), "invalid public managed CA bundle"},
+		{"malformed-body-before-valid", bytes.Join([][]byte{[]byte("-----BEGIN CERTIFICATE-----\n!\n-----END CERTIFICATE-----\n"), root}, nil), "invalid public managed CA bundle"},
+		{"malformed-end-before-valid", bytes.Join([][]byte{bytes.TrimSuffix(intermediatePEM, []byte("\n")), root}, []byte(" junk\n")), "invalid public managed CA bundle"},
 		{"expired", expiredPEM, "invalid public managed CA bundle"},
 		{"unrelated", unrelated, "browser HTTPS chain does not verify"},
+		{"extra-root", bytes.Join([][]byte{unrelated, root}, nil), "exactly one self-signed root"},
+		{"extra-intermediate", bytes.Join([][]byte{root, unrelatedIntermediate}, nil), "outside the verified browser HTTPS chain"},
+		{"same-name-wrong-key", bytes.Join([][]byte{root, wrongIssuerKey}, nil), "outside the verified browser HTTPS chain"},
+		{"cross-signed-alternate", bytes.Join([][]byte{root, crossPEM}, nil), "outside the verified browser HTTPS chain"},
+		{"duplicate-root", bytes.Join([][]byte{root, rootCRLF}, nil), "duplicate certificate"},
+		{"duplicate-intermediate", bytes.Join([][]byte{root, intermediatePEM, intermediatePEM}, nil), "duplicate certificate"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			path := filepath.Join(t.TempDir(), "test-ca.pem")
@@ -92,6 +122,27 @@ func TestManagedCAValidation(t *testing.T) {
 			}
 		})
 	}
+	t.Run("forged-issuer-in-server-chain", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "test-ca.pem")
+		if err := os.WriteFile(path, bytes.Join([][]byte{root, wrongIssuerKey}, nil), 0600); err != nil {
+			t.Fatal(err)
+		}
+		forgedChain := bytes.Join([][]byte{leaf, wrongIssuerKey, upperPEM}, nil)
+		if _, err := readManagedCA(path, access, forgedChain); err == nil || !strings.Contains(err.Error(), "browser HTTPS chain does not verify") {
+			t.Fatalf("same-name issuer with the wrong signing key accepted: %v", err)
+		}
+	})
+	t.Run("cross-signed-issuer-in-selected-chain", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "test-ca.pem")
+		bundle := bytes.Join([][]byte{crossPEM, root}, nil)
+		if err := os.WriteFile(path, bundle, 0600); err != nil {
+			t.Fatal(err)
+		}
+		selected := bytes.Join([][]byte{leaf, crossPEM}, nil)
+		if got, err := readManagedCA(path, access, selected); err != nil || !bytes.Equal(got, bundle) {
+			t.Fatalf("selected cross-signed path refused or changed: %v", err)
+		}
+	})
 	_, httpAccess, err := marshalAccess(customAccess("domain"))
 	if err != nil {
 		t.Fatal(err)

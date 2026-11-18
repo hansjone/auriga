@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+	"unicode"
 
 	"github.com/hansjone/auriga/infra/gen/deploymentconfig"
 )
@@ -30,37 +31,12 @@ func readManagedCA(path string, access deploymentconfig.Config, browserChain []b
 	if err != nil {
 		return nil, invalid
 	}
-	const begin, end = "-----BEGIN CERTIFICATE-----", "-----END CERTIFICATE-----"
 	now := time.Now()
-	roots := x509.NewCertPool()
-	hasRoot := false
-	for rest := bytes.TrimSpace(raw); len(rest) > 0; {
-		body, ok := bytes.CutPrefix(rest, []byte(begin))
-		encoded, tail, closed := bytes.Cut(body, []byte(end))
-		// Decode one block at a time. pem.Decode can otherwise skip malformed
-		// or embedded input before a well-formed block of the same type.
-		if !ok || !closed || bytes.ContainsRune(encoded, '-') {
-			return nil, invalid
-		}
-		block, trailing := pem.Decode(rest[:len(rest)-len(tail)])
-		if block == nil || block.Type != "CERTIFICATE" || len(block.Headers) != 0 || len(trailing) != 0 {
-			return nil, invalid
-		}
-		ca, err := x509.ParseCertificate(block.Bytes)
-		if err != nil || !ca.IsCA || !ca.BasicConstraintsValid || now.Before(ca.NotBefore) || !now.Before(ca.NotAfter) || (ca.KeyUsage != 0 && ca.KeyUsage&x509.KeyUsageCertSign == 0) {
-			return nil, invalid
-		}
-		// Node's default TLS verification requires a complete chain to a
-		// self-signed root. Go would also accept an intermediate as an anchor.
-		if bytes.Equal(ca.RawIssuer, ca.RawSubject) && ca.CheckSignatureFrom(ca) == nil {
-			roots.AddCert(ca)
-			hasRoot = true
-		}
-		rest = bytes.TrimSpace(tail)
+	root, bundle, err := parseManagedCAs(raw, now)
+	if err != nil {
+		return nil, err
 	}
-	if !hasRoot {
-		return nil, fmt.Errorf("public managed CA bundle requires a self-signed root")
-	}
+
 	// ReadBrowserTLS has already checked the key, SANs and every chain member.
 	block, rest := pem.Decode(browserChain)
 	if block == nil {
@@ -70,14 +46,77 @@ func readManagedCA(path string, access deploymentconfig.Config, browserChain []b
 	if err != nil {
 		return nil, invalid
 	}
-	chain := x509.NewCertPool()
-	chain.AppendCertsFromPEM(rest)
+	untrusted := fmt.Errorf("browser HTTPS chain does not verify with the managed CA bundle")
 	for _, host := range []string{access.PortalOrigin().Host, access.AdminOrigin().Host, "instance." + access.InstanceParentDomain()} {
-		if _, err := leaf.Verify(x509.VerifyOptions{Roots: roots, Intermediates: chain, DNSName: host, CurrentTime: now}); err != nil {
-			return nil, fmt.Errorf("browser HTTPS chain does not verify with the managed CA bundle")
+		if err := leaf.VerifyHostname(host); err != nil {
+			return nil, untrusted
 		}
 	}
-	return raw, nil
+	roots := x509.NewCertPool()
+	roots.AddCert(root)
+	chain := x509.NewCertPool()
+	chain.AppendCertsFromPEM(rest)
+	verified, err := leaf.Verify(x509.VerifyOptions{Roots: roots, Intermediates: chain, CurrentTime: now})
+	if err != nil {
+		return nil, untrusted
+	}
+	for _, path := range verified {
+		// All bundle members must belong to the same verified path. Keep the
+		// intermediates in the supplied server chain out of the root pool.
+		matched := 0
+		for _, ca := range path[1:] {
+			if _, ok := bundle[string(ca.Raw)]; ok {
+				matched++
+			}
+		}
+		if matched == len(bundle) {
+			return raw, nil
+		}
+	}
+	return nil, fmt.Errorf("managed CA bundle contains a certificate outside the verified browser HTTPS chain")
+}
+
+func parseManagedCAs(raw []byte, now time.Time) (*x509.Certificate, map[string]struct{}, error) {
+	const begin, end = "-----BEGIN CERTIFICATE-----", "-----END CERTIFICATE-----"
+	invalid := fmt.Errorf("invalid public managed CA bundle")
+	bundle := make(map[string]struct{})
+	var root *x509.Certificate
+	for rest := raw; len(bytes.TrimSpace(rest)) > 0; {
+		body, ok := bytes.CutPrefix(bytes.TrimLeftFunc(rest, unicode.IsSpace), []byte(begin))
+		encoded, endLine, closed := bytes.Cut(body, []byte(end))
+		if !ok || !closed || bytes.ContainsRune(encoded, '-') {
+			return nil, nil, invalid
+		}
+		// Decode the original bytes through the complete END line. This keeps
+		// the renderer's line boundaries and prevents skipping a malformed block.
+		_, tail, _ := bytes.Cut(endLine, []byte("\n"))
+		block, trailing := pem.Decode(rest[:len(rest)-len(tail)])
+		if block == nil || block.Type != "CERTIFICATE" || len(block.Headers) != 0 || len(trailing) != 0 {
+			return nil, nil, invalid
+		}
+		ca, err := x509.ParseCertificate(block.Bytes)
+		if err != nil || !ca.IsCA || !ca.BasicConstraintsValid || now.Before(ca.NotBefore) || !now.Before(ca.NotAfter) || (ca.KeyUsage != 0 && ca.KeyUsage&x509.KeyUsageCertSign == 0) {
+			return nil, nil, invalid
+		}
+		der := string(ca.Raw)
+		if _, exists := bundle[der]; exists {
+			return nil, nil, fmt.Errorf("duplicate certificate in managed CA bundle")
+		}
+		bundle[der] = struct{}{}
+		// Node's default TLS verification requires a complete chain to a
+		// self-signed root. Go would also accept an intermediate as an anchor.
+		if bytes.Equal(ca.RawIssuer, ca.RawSubject) && ca.CheckSignatureFrom(ca) == nil {
+			if root != nil {
+				return nil, nil, fmt.Errorf("managed CA bundle must contain exactly one self-signed root")
+			}
+			root = ca
+		}
+		rest = tail
+	}
+	if root == nil {
+		return nil, nil, fmt.Errorf("public managed CA bundle requires a self-signed root")
+	}
+	return root, bundle, nil
 }
 
 func validateManagedCAAccess(access deploymentconfig.Config) error {

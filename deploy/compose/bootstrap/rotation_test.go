@@ -333,6 +333,51 @@ func TestRotationUnchangedServicesKeepOriginalCreationRecipe(t *testing.T) {
 	}
 }
 
+func TestRotationManagedCARecipeLabels(t *testing.T) {
+	r, _ := rotationFake(t)
+	r.managedCA = true
+	if err := os.MkdirAll(r.root(), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := rotationWriteJSON(filepath.Join(r.root(), "current.json"), rotationCurrent{"8", strings.Repeat("a", 64)}); err != nil {
+		t.Fatal(err)
+	}
+	base, ca, current := filepath.Join(r.compose, "docker-compose.yml"), filepath.Join(r.out, managedCARecipe), filepath.Join(r.root(), "current.yml")
+	for _, overlay := range []string{"collab-activation.yml", "collab-required.yml"} {
+		t.Run(overlay, func(t *testing.T) {
+			if overlay == "collab-required.yml" {
+				r.source = r.out
+			}
+			n1 := filepath.Join(r.compose, "scripts", overlay)
+			for _, tc := range []struct {
+				name, service string
+				files         []string
+				want          bool
+			}{
+				{"full", "collab", []string{base, ca, n1, current}, true},
+				{"retained-platform", "platform", []string{base, ca, n1}, true},
+				{"retained-edge", "edge", []string{base, ca, n1}, true},
+				{"retained-postgres", "postgres", []string{base, ca, n1}, true},
+				{"missing-ca-full", "collab", []string{base, n1, current}, false},
+				{"missing-ca-retained", "platform", []string{base, n1}, false},
+				{"missing-current-changed-service", "network", []string{base, ca, n1}, false},
+				{"misordered-ca", "platform", []string{base, n1, ca, current}, false},
+			} {
+				t.Run(tc.name, func(t *testing.T) {
+					var c rotationContainer
+					c.Config.Labels = map[string]string{
+						"com.docker.compose.service":              tc.service,
+						"com.docker.compose.project.config_files": strings.Join(tc.files, ","),
+					}
+					if err := r.checkRecipe(c); (err == nil) != tc.want {
+						t.Fatalf("unexpected recipe result: %v", err)
+					}
+				})
+			}
+		})
+	}
+}
+
 type rotationPGFixture struct {
 	container  *rotationContainer
 	volume     *rotationPGVolume
