@@ -78,6 +78,64 @@ class SharedTasksPostgresTest {
                 }));
     TenantContext.run(
         f.tenant,
+        () -> {
+          var rebuilt = f.authority();
+          assertTrue(
+              rebuilt
+                  .authorize(
+                      AuthorizeSharedCapabilityRequest.newBuilder()
+                          .setCapability(first.getCapability())
+                          .build())
+                  .getActive());
+          assertTrue(
+              rebuilt
+                  .authorize(
+                      AuthorizeSharedCapabilityRequest.newBuilder()
+                          .setCapability(second.getCapability())
+                          .build())
+                  .getActive());
+          var current =
+              rebuilt.resolve(
+                  ResolveSharedTaskRequest.newBuilder()
+                      .setTenantId(f.tenant.toString())
+                      .setSessionId(f.binding.getSessionId())
+                      .setTaskId(f.task)
+                      .setAudience(MODEL)
+                      .setJti(first.getCapability().getJti())
+                      .build());
+          assertTrue(current.getActive());
+          assertEquals(f.binding, current.getBinding());
+          var renewed =
+              rebuilt.issue(
+                  IssueSharedCapabilityRequest.newBuilder()
+                      .setBinding(f.binding)
+                      .setTaskId(f.task)
+                      .setAudience(MODEL)
+                      .addScopes("model.invoke")
+                      .build());
+          assertTrue(
+              f.authority()
+                  .authorize(
+                      AuthorizeSharedCapabilityRequest.newBuilder()
+                          .setCapability(renewed.getCapability())
+                          .build())
+                  .getActive());
+          var other = f.binding.toBuilder().setMemberId(UUID.randomUUID().toString()).build();
+          assertEquals(
+              "common.not_found",
+              assertThrows(
+                      auriga.common.error.AurigaException.class,
+                      () ->
+                          rebuilt.finish(
+                              FinishSharedTaskRequest.newBuilder()
+                                  .setBinding(other)
+                                  .setTaskId(f.task)
+                                  .build()))
+                  .errorCode()
+                  .code());
+        });
+    TenantContext.run(
+        f.tenant,
         () ->
             f.authority()
                 .finish(
@@ -157,6 +215,100 @@ class SharedTasksPostgresTest {
                 }));
   }
 
+  @Test
+  void enterpriseReadAndCredentialRenewalSurvivePersistentClaimsAndReconstruction()
+      throws Exception {
+    var f = new Fixture();
+    String credential = f.enableEnterprise();
+    TenantContext.run(
+        f.tenant,
+        () -> {
+          var first =
+              f.authority()
+                  .begin(
+                      f.request().toBuilder()
+                          .setAudience(ENTERPRISE)
+                          .clearScopes()
+                          .addAllScopes(List.of("credentials", "outbound"))
+                          .build());
+          assertTrue(
+              f.authority()
+                  .authorize(
+                      AuthorizeSharedCapabilityRequest.newBuilder()
+                          .setCapability(first.getCapability())
+                          .build())
+                  .getActive());
+          var raw =
+              f.authority()
+                  .credentials(
+                      ReadSharedCredentialsRequest.newBuilder()
+                          .setCapability(first.getCapability())
+                          .build());
+          assertEquals("000042", raw.getEmpNo());
+          assertEquals("synthetic-v1", raw.getToken());
+          store.tx(
+              () -> {
+                var record = store.byId("uac_credential", credential, true);
+                record.put("version", 2);
+                store.save("uac_credential", record);
+                return null;
+              });
+          assertFalse(
+              f.authority()
+                  .authorize(
+                      AuthorizeSharedCapabilityRequest.newBuilder()
+                          .setCapability(first.getCapability())
+                          .build())
+                  .getActive());
+          var refreshed =
+              f.authority()
+                  .issue(
+                      IssueSharedCapabilityRequest.newBuilder()
+                          .setBinding(f.binding)
+                          .setTaskId(f.task)
+                          .setAudience(ENTERPRISE)
+                          .addAllScopes(List.of("credentials", "outbound"))
+                          .build());
+          assertEquals(2, refreshed.getCapability().getCredentialVersion());
+          assertTrue(
+              f.authority()
+                  .authorize(
+                      AuthorizeSharedCapabilityRequest.newBuilder()
+                          .setCapability(refreshed.getCapability())
+                          .build())
+                  .getActive());
+          raw =
+              f.authority()
+                  .credentials(
+                      ReadSharedCredentialsRequest.newBuilder()
+                          .setCapability(refreshed.getCapability())
+                          .build());
+          assertEquals("000042", raw.getEmpNo());
+          assertEquals("synthetic-v2", raw.getToken());
+          f.authority()
+              .finish(
+                  FinishSharedTaskRequest.newBuilder()
+                      .setBinding(f.binding)
+                      .setTaskId(f.task)
+                      .build());
+          assertFalse(
+              f.authority()
+                  .authorize(
+                      AuthorizeSharedCapabilityRequest.newBuilder()
+                          .setCapability(refreshed.getCapability())
+                          .build())
+                  .getActive());
+          assertThrows(
+              auriga.common.error.AurigaException.class,
+              () ->
+                  f.authority()
+                      .credentials(
+                          ReadSharedCredentialsRequest.newBuilder()
+                              .setCapability(refreshed.getCapability())
+                              .build()));
+        });
+  }
+
   private static final class Fixture {
     final UUID tenant = UUID.randomUUID();
     final String task = UUID.randomUUID().toString();
@@ -222,6 +374,63 @@ class SharedTasksPostgresTest {
 
     SharedTasks authority() {
       return authority(tokens);
+    }
+
+    String enableEnterprise() {
+      String credential = UUID.randomUUID().toString();
+      TenantContext.run(
+          tenant,
+          () ->
+              store.tx(
+                  () -> {
+                    var session = store.byId("session", binding.getPlatformSessionId(), true);
+                    String provider = session.path("providerId").asString();
+                    store.insert(
+                        "uac_credential",
+                        credential,
+                        Json.object(
+                            "kind",
+                            "credential",
+                            "accountId",
+                            binding.getMemberId(),
+                            "providerId",
+                            provider,
+                            "version",
+                            1,
+                            "invalid",
+                            false,
+                            "updatedAt",
+                            CLOCK.instant().toString()),
+                        null);
+                    session.put("uacCredentialId", credential);
+                    session.set(
+                        "uacSessionBinding",
+                        Json.object(
+                            "authGeneration",
+                            1,
+                            "sourceSessionId",
+                            binding.getPlatformSessionId(),
+                            "providerId",
+                            provider));
+                    store.save("session", session);
+                    return null;
+                  }));
+      when(uac.sharedCredentials(binding.getMemberId(), binding.getPlatformSessionId()))
+          .thenAnswer(
+              call -> {
+                long version =
+                    store.byId("uac_credential", credential, false).path("version").asLong();
+                return Json.object(
+                    "empNo",
+                    "000042",
+                    "token",
+                    "synthetic-v" + version,
+                    "updatedAt",
+                    CLOCK.instant().toString(),
+                    "credentialVersion",
+                    version);
+              });
+      return credential;
     }
 
     SharedTasks authority(SharedTaskTokens signing) {

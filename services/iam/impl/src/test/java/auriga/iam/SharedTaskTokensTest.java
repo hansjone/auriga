@@ -132,4 +132,37 @@ class SharedTaskTokensTest {
         .setExpiresAt(1600)
         .build();
   }
+
+  @Test
+  void persistenceReferenceTreesMatchReadTreeWithoutWeakeningExactTypesOrFields() {
+    var source = capability();
+    var capability =
+        source.toBuilder()
+            .setBinding(
+                source.getBinding().toBuilder()
+                    .setRevision((long) Integer.MAX_VALUE + 1)
+                    .setAuthGeneration(MAX_SAFE_INTEGER))
+            .build();
+    var mapped =
+        Json.MAPPER.<tools.jackson.databind.node.ObjectNode>valueToTree(
+            binding(capability.getBinding()));
+    var stored = Json.read(mapped.toString());
+    // valueToTree preserves protobuf's Long while PostgreSQL JSON text reads
+    // the same small number as Int. Their JSON is equal but nodes are not.
+    assertInstanceOf(tools.jackson.databind.node.LongNode.class, mapped.path("epoch"));
+    assertInstanceOf(tools.jackson.databind.node.IntNode.class, stored.path("epoch"));
+    assertEquals(mapped.toString(), stored.toString());
+    assertNotEquals(mapped, stored);
+    var expected = bindingJson(capability.getBinding());
+    assertEquals(expected, stored);
+    assertEquals(claimsJson(capability), Json.read(claimsJson(capability).toString()));
+    assertEquals(MAX_SAFE_INTEGER, expected.path("authGeneration").asLong());
+    assertNotEquals(expected, stored.deepCopy().put("epoch", 1.0));
+    assertNotEquals(expected, stored.deepCopy().put("epoch", "1"));
+    assertNotEquals(expected, stored.deepCopy().put("extra", "untrusted"));
+    var missing = stored.deepCopy();
+    missing.remove("revision");
+    assertNotEquals(expected, missing);
+    assertNotEquals(expected, stored.deepCopy().put("memberId", UUID.randomUUID().toString()));
+  }
 }
