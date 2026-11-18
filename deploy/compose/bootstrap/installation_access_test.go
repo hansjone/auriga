@@ -27,6 +27,7 @@ func TestPublicAccessCLI(t *testing.T) {
 		t.Fatalf("build: %v: %s", err, output)
 	}
 	proofRoot, image := runtimeProofFixture(t, "real")
+	metadata := realFixtureMetadata(t, image)
 	for _, mode := range []string{"domain", "ip"} {
 		t.Run(mode, func(t *testing.T) {
 			a := customAccess(mode)
@@ -39,7 +40,7 @@ func TestPublicAccessCLI(t *testing.T) {
 				t.Fatal(err)
 			}
 			args := []string{"-access-file", input, "-edge-container", "public-test-edge", "-image", image, "-out", out, "-fixture", "real", "-runtime-proofs", proofRoot, "-heartbeat-observer"}
-			if output, err := exec.Command(binary, args...).CombinedOutput(); err != nil {
+			if output, err := exec.Command(binary, append(args, "-real-dsh-metadata", metadata)...).CombinedOutput(); err != nil {
 				t.Fatalf("bootstrap: %v: %s", err, output)
 			}
 			got, err := os.ReadFile(filepath.Join(out, "access.json"))
@@ -78,7 +79,7 @@ func TestPublicAccessCLI(t *testing.T) {
 			}
 			wholeBefore := installationSnapshot(t, out)
 			if output, err := exec.Command(binary, args...).CombinedOutput(); err != nil {
-				t.Fatalf("repeat: %v: %s", err, output)
+				t.Fatalf("repeat without first-install metadata: %v: %s", err, output)
 			}
 			after, err := os.ReadFile(filepath.Join(out, "iam-installation", "edge.secret"))
 			if err != nil || !bytes.Equal(before, after) {
