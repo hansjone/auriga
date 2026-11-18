@@ -7,8 +7,9 @@ import (
 
 // The supervisor owns these paths even if the isolated child is force-killed.
 type gateWorkspace struct {
-	root    string
-	runtime string
+	root     string
+	runtime  string
+	retained bool
 }
 
 func newGateWorkspace() (*gateWorkspace, error) {
@@ -24,5 +25,8 @@ func newGateWorkspace() (*gateWorkspace, error) {
 }
 
 func (w *gateWorkspace) close() error {
+	if w.retained {
+		return nil
+	}
 	return errors.Join(os.RemoveAll(w.runtime), os.RemoveAll(w.root))
 }

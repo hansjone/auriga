@@ -37,6 +37,10 @@ func unmountGatePaths(roots ...string) error {
 	if err != nil {
 		return err
 	}
+	return unmountGateMountInfo(raw, roots...)
+}
+
+func unmountGateMountInfo(raw []byte, roots ...string) error {
 	decode := strings.NewReplacer(`\040`, " ", `\011`, "\t", `\012`, "\n", `\134`, `\`)
 	var paths []string
 	for _, line := range strings.Split(string(raw), "\n") {

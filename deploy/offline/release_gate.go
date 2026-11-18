@@ -50,7 +50,7 @@ func offlineBuildGate(o gateRequest) (proof buildGate, gateErr error) {
 	defer stop()
 	ctx, cancel := context.WithTimeout(interrupted, gateBuildTimeout)
 	defer cancel()
-	if err := verifyCumulative(o.Kit, o.Source, o.Tag, ""); err != nil {
+	if err := verifyCumulativeContext(ctx, o.Kit, o.Source, o.Tag, ""); err != nil {
 		return proof, err
 	}
 	if err := ctx.Err(); err != nil {
@@ -67,15 +67,13 @@ func offlineBuildGate(o gateRequest) (proof buildGate, gateErr error) {
 			proof.Passed = false
 		}
 	}()
-	cmd := exec.CommandContext(ctx, "unshare", "--net", "--mount", "--propagation", "private", "--pid", "--fork", "--mount-proc", "--kill-child=KILL", o.Executable, "internal-offline-build", "--source", o.Source, "--version", o.Tag, "--out", o.Out, "--sign-key", o.Key, "--workdir", workspace.root, "--runtime-dir", workspace.runtime)
+	cmd := exec.CommandContext(ctx, "unshare", "--net", "--mount", "--propagation", "private", "--mount-proc", o.Executable, "internal-offline-build", "--source", o.Source, "--version", o.Tag, "--out", o.Out, "--sign-key", o.Key, "--workdir", workspace.root, "--runtime-dir", workspace.runtime, "--supervised")
 	cmd.Dir = o.Source
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
-	setGateProcessGroup(cmd)
-	cmd.WaitDelay = 45 * time.Second
-	if err := cmd.Run(); err != nil {
+	if err := runGateProcess(ctx, cmd, workspace, o.Executable); err != nil {
 		if ctx.Err() != nil {
-			return proof, fmt.Errorf("断网构建门禁已取消（完整构建时限 %s）: %w", gateBuildTimeout, ctx.Err())
+			return proof, fmt.Errorf("断网构建门禁已取消（完整构建时限 %s）: %w", gateBuildTimeout, errors.Join(err, ctx.Err()))
 		}
 		return proof, fmt.Errorf("必须具有Linux unshare网络命名空间权限且所有依赖齐备（无在线回退）: %w", err)
 	}
@@ -110,7 +108,11 @@ func offlineBuildGate(o gateRequest) (proof buildGate, gateErr error) {
 // Dependency-only cache keys exclude versioned deployment files and optional
 // release payloads. Refresh those from the current approved index on cache reuse.
 func refreshReleaseInputs(root string, r release, key string) error {
-	kit, err := readDevkit(root)
+	return refreshReleaseInputsContext(context.Background(), root, r, key)
+}
+
+func refreshReleaseInputsContext(ctx context.Context, root string, r release, key string) error {
+	kit, err := readDevkitContext(ctx, root)
 	if err != nil {
 		return err
 	}
@@ -132,12 +134,12 @@ func refreshReleaseInputs(root string, r release, key string) error {
 			continue
 		}
 		cached := filepath.Join(root, "cache", name+".tar")
-		hash, _ := digest(cached)
+		hash, _ := digestContext(ctx, cached)
 		if hash != current.SHA256 {
 			if err := os.Remove(cached); err != nil && !os.IsNotExist(err) {
 				return err
 			}
-			if err := fetch(*current, cached); err != nil {
+			if err := fetchContext(ctx, *current, cached); err != nil {
 				return fmt.Errorf("刷新发行依赖 %s: %w", name, err)
 			}
 		}
@@ -156,7 +158,7 @@ func refreshReleaseInputs(root string, r release, key string) error {
 	if err := signingPublic(key, filepath.Join(root, "release-public.pem")); err != nil {
 		return err
 	}
-	if err := writeSums(root); err != nil {
+	if err := writeSumsContext(ctx, root); err != nil {
 		return err
 	}
 	return signSums(root, key)

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
@@ -59,8 +60,15 @@ func sourcePathAllowed(name string) bool {
 }
 
 func archiveSourceNames(root string) ([]string, error) {
+	return archiveSourceNamesContext(context.Background(), root)
+}
+
+func archiveSourceNamesContext(ctx context.Context, root string) ([]string, error) {
 	var names []string
 	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		if cancelled := ctx.Err(); cancelled != nil {
+			return cancelled
+		}
 		if err != nil {
 			return err
 		}
@@ -91,13 +99,13 @@ func archiveSourceNames(root string) ([]string, error) {
 	return names, err
 }
 
-func sourceNames(root string) ([]string, error) {
+func sourceNamesContext(ctx context.Context, root string) ([]string, error) {
 	if _, err := os.Lstat(filepath.Join(root, "auriga-source.json")); err == nil {
-		names, err := archiveSourceNames(root)
+		names, err := archiveSourceNamesContext(ctx, root)
 		if err != nil {
 			return nil, err
 		}
-		manifest, err := readSourceManifest(root)
+		manifest, err := readSourceManifestContext(ctx, root)
 		if err != nil {
 			return nil, err
 		}
@@ -113,11 +121,15 @@ func sourceNames(root string) ([]string, error) {
 		sort.Strings(names)
 		return names, nil
 	}
-	raw, err := gitFiles(root, "ls-files", "--cached", "--others", "--exclude-standard", "-z")
+	raw, err := gitFilesContext(ctx, root, "ls-files", "--cached", "--others", "--exclude-standard", "-z")
 	return strings.Split(raw, "\x00"), err
 }
 
 func fileInventory(root string, names []string, baseline map[string]sourceFile) (map[string]sourceFile, string, error) {
+	return fileInventoryContext(context.Background(), root, names, baseline)
+}
+
+func fileInventoryContext(ctx context.Context, root string, names []string, baseline map[string]sourceFile) (map[string]sourceFile, string, error) {
 	if err := portablePaths(names); err != nil {
 		return nil, "", err
 	}
@@ -149,7 +161,7 @@ func fileInventory(root string, names []string, baseline map[string]sourceFile) 
 		if previous, ok := baseline[name]; ok {
 			mode = previous.Mode
 		}
-		hash, err := sourceDigest(path, name, baseline[name].SHA256)
+		hash, err := sourceDigestContext(ctx, path, name, baseline[name].SHA256)
 		if err != nil {
 			return nil, "", err
 		}
@@ -160,6 +172,10 @@ func fileInventory(root string, names []string, baseline map[string]sourceFile) 
 }
 
 func readSourceManifest(root string) (sourceManifest, error) {
+	return readSourceManifestContext(context.Background(), root)
+}
+
+func readSourceManifestContext(ctx context.Context, root string) (sourceManifest, error) {
 	var m sourceManifest
 	for _, name := range []string{"auriga-source.json", "SHA256SUMS", "SHA256SUMS.sig", "release-public.pem"} {
 		if err := noSymlinks(filepath.Join(root, name)); err != nil {
@@ -169,7 +185,7 @@ func readSourceManifest(root string) (sourceManifest, error) {
 	if err := verifySignature(root, ""); err != nil {
 		return m, err
 	}
-	if err := verifyInventoryFile(root, "auriga-source.json"); err != nil {
+	if err := verifyInventoryFileContext(ctx, root, "auriga-source.json"); err != nil {
 		return m, err
 	}
 	if err := readJSON(filepath.Join(root, "auriga-source.json"), &m); err != nil {
@@ -188,8 +204,8 @@ func readSourceManifest(root string) (sourceManifest, error) {
 
 // Verify immutable metadata against the signed original inventory without
 // rejecting deliberate edits to ordinary source files.
-func verifyInventoryFile(root, name string) error {
-	raw, err := smallFile(filepath.Join(root, "SHA256SUMS"), 4<<20)
+func verifyInventoryFileContext(ctx context.Context, root, name string) error {
+	raw, err := smallFileContext(ctx, filepath.Join(root, "SHA256SUMS"), 4<<20)
 	if err != nil {
 		return err
 	}
@@ -202,7 +218,7 @@ func verifyInventoryFile(root, name string) error {
 			expected = line[:64]
 		}
 	}
-	hash, err := digest(filepath.Join(root, name))
+	hash, err := digestContext(ctx, filepath.Join(root, name))
 	if err != nil {
 		return err
 	}
@@ -213,15 +229,19 @@ func verifyInventoryFile(root, name string) error {
 }
 
 func writeSourceManifest(root string, info provenance, tree string, r release) error {
-	names, err := archiveSourceNames(root)
+	return writeSourceManifestContext(context.Background(), root, info, tree, r)
+}
+
+func writeSourceManifestContext(ctx context.Context, root string, info provenance, tree string, r release) error {
+	names, err := archiveSourceNamesContext(ctx, root)
 	if err != nil {
 		return err
 	}
-	files, hash, err := fileInventory(root, names, nil)
+	files, hash, err := fileInventoryContext(ctx, root, names, nil)
 	if err != nil {
 		return err
 	}
-	locks, err := locksFromNames(root, r, names)
+	locks, err := locksFromNamesContext(ctx, root, r, names)
 	if err != nil {
 		return err
 	}
@@ -237,12 +257,12 @@ func writeSourceManifest(root string, info provenance, tree string, r release) e
 	return jsonFile(filepath.Join(root, "auriga-source.json"), sourceManifest{Schema: 1, Source: info, Tree: tree, Files: files, Locks: locks}, 0644)
 }
 
-func snapshotArchiveSource(root, target string, excluded ...string) (*provenance, error) {
-	m, err := readSourceManifest(root)
+func snapshotArchiveSourceContext(ctx context.Context, root, target string, excluded ...string) (*provenance, error) {
+	m, err := readSourceManifestContext(ctx, root)
 	if err != nil {
 		return nil, err
 	}
-	names, err := archiveSourceNames(root)
+	names, err := archiveSourceNamesContext(ctx, root)
 	if err != nil {
 		return nil, err
 	}
@@ -271,7 +291,7 @@ func snapshotArchiveSource(root, target string, excluded ...string) (*provenance
 			filtered = append(filtered, name)
 		}
 	}
-	files, hash, err := fileInventory(root, filtered, m.Files)
+	files, hash, err := fileInventoryContext(ctx, root, filtered, m.Files)
 	if err != nil {
 		return nil, err
 	}
@@ -279,11 +299,11 @@ func snapshotArchiveSource(root, target string, excluded ...string) (*provenance
 		return nil, err
 	}
 	for name, file := range files {
-		if err := copySourceFile(filepath.Join(root, name), filepath.Join(target, name), name, fs.FileMode(file.Mode)); err != nil {
+		if err := copySourceFileContext(ctx, filepath.Join(root, name), filepath.Join(target, name), name, fs.FileMode(file.Mode)); err != nil {
 			return nil, err
 		}
 	}
-	_, copiedHash, err := fileInventory(target, names, m.Files)
+	_, copiedHash, err := fileInventoryContext(ctx, target, names, m.Files)
 	if err != nil {
 		return nil, err
 	}
@@ -300,27 +320,31 @@ func snapshotArchiveSource(root, target string, excluded ...string) (*provenance
 }
 
 func sourceVersionName(root string) string {
+	return sourceVersionNameContext(context.Background(), root)
+}
+
+func sourceVersionNameContext(ctx context.Context, root string) string {
 	if _, err := os.Lstat(filepath.Join(root, "auriga-source.json")); err == nil {
-		m, err := readSourceManifest(root)
+		m, err := readSourceManifestContext(ctx, root)
 		if err == nil {
 			return m.Source.UpstreamVersion
 		}
 		return ""
 	}
-	tag, _ := gitAt(root, "describe", "--tags", "--abbrev=0")
+	tag, _ := gitAtContext(ctx, root, "describe", "--tags", "--abbrev=0")
 	return tag
 }
 
-func sourceTree(root string) (string, error) {
+func sourceTreeContext(ctx context.Context, root string) (string, error) {
 	if _, err := os.Lstat(filepath.Join(root, "auriga-source.json")); err == nil {
-		m, err := readSourceManifest(root)
+		m, err := readSourceManifestContext(ctx, root)
 		return m.Tree, err
 	}
-	return gitAt(root, "rev-parse", "HEAD^{tree}")
+	return gitAtContext(ctx, root, "rev-parse", "HEAD^{tree}")
 }
 
-func prepareSourceArchive(source, target string, r release, key, exe string) error {
-	info, err := snapshotSource(source, target, key)
+func prepareSourceArchiveContext(ctx context.Context, source, target string, r release, key, exe string) error {
+	info, err := snapshotSourceContext(ctx, source, target, key)
 	if err != nil {
 		return err
 	}
@@ -330,14 +354,14 @@ func prepareSourceArchive(source, target string, r release, key, exe string) err
 	if err := sourceVersion(info, r, r.Version, false); err != nil {
 		return err
 	}
-	tree, err := sourceTree(source)
+	tree, err := sourceTreeContext(ctx, source)
 	if err != nil {
 		return err
 	}
-	if err := writeSourceManifest(target, *info, tree, r); err != nil {
+	if err := writeSourceManifestContext(ctx, target, *info, tree, r); err != nil {
 		return err
 	}
-	if err := copyFile(exe, filepath.Join(target, "bin/auriga-cli"), 0755); err != nil {
+	if err := copyFileContext(ctx, exe, filepath.Join(target, "bin/auriga-cli"), 0755); err != nil {
 		return err
 	}
 	if key != "" {
@@ -345,7 +369,7 @@ func prepareSourceArchive(source, target string, r release, key, exe string) err
 			return err
 		}
 	}
-	if err := writeSums(target); err != nil {
+	if err := writeSumsContext(ctx, target); err != nil {
 		return err
 	}
 	if key != "" {

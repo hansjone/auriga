@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
@@ -63,8 +64,8 @@ func sourceText(name string) bool {
 	return false
 }
 
-func canonicalSource(path, name string) ([]byte, error) {
-	raw, err := smallFile(path, 64<<20)
+func canonicalSourceContext(ctx context.Context, path, name string) ([]byte, error) {
+	raw, err := smallFileContext(ctx, path, 64<<20)
 	if err != nil {
 		return nil, err
 	}
@@ -84,10 +85,14 @@ func canonicalSource(path, name string) ([]byte, error) {
 func bytesDigest(raw []byte) string { sum := sha256.Sum256(raw); return hex.EncodeToString(sum[:]) }
 
 func sourceDigest(path, name, expected string) (string, error) {
+	return sourceDigestContext(context.Background(), path, name, expected)
+}
+
+func sourceDigestContext(ctx context.Context, path, name, expected string) (string, error) {
 	if !sourceText(name) {
-		return digest(path)
+		return digestContext(ctx, path)
 	}
-	raw, err := canonicalSource(path, name)
+	raw, err := canonicalSourceContext(ctx, path, name)
 	if err != nil {
 		return "", err
 	}
@@ -101,7 +106,11 @@ func sourceDigest(path, name, expected string) (string, error) {
 }
 
 func copySourceFile(source, target, name string, mode fs.FileMode) error {
-	return copySourceText(source, target, name, mode, true)
+	return copySourceFileContext(context.Background(), source, target, name, mode)
+}
+
+func copySourceFileContext(ctx context.Context, source, target, name string, mode fs.FileMode) error {
+	return copySourceTextContext(ctx, source, target, name, mode, true)
 }
 
 // Content-addressed patch blobs use canonical bytes; materialized Windows
@@ -119,15 +128,22 @@ func windowsScript(name string) bool {
 }
 
 func copySourceText(source, target, name string, mode fs.FileMode, materialize bool) error {
+	return copySourceTextContext(context.Background(), source, target, name, mode, materialize)
+}
+
+func copySourceTextContext(ctx context.Context, source, target, name string, mode fs.FileMode, materialize bool) error {
 	if !sourceText(name) {
-		return copyFile(source, target, mode)
+		return copyFileContext(ctx, source, target, mode)
 	}
-	raw, err := canonicalSource(source, name)
+	raw, err := canonicalSourceContext(ctx, source, name)
 	if err != nil {
 		return err
 	}
 	if materialize && windowsScript(name) {
 		raw = bytes.ReplaceAll(raw, []byte("\n"), []byte("\r\n"))
+	}
+	if err := ctx.Err(); err != nil {
+		return err
 	}
 	if err := os.MkdirAll(filepath.Dir(target), 0755); err != nil {
 		return err
@@ -137,5 +153,5 @@ func copySourceText(source, target, name string, mode fs.FileMode, materialize b
 		return err
 	}
 	_, writeErr := out.Write(raw)
-	return errors.Join(writeErr, out.Close())
+	return errors.Join(writeErr, out.Close(), ctx.Err())
 }

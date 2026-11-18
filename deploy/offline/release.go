@@ -79,23 +79,27 @@ func releaseCommand(args []string) error {
 	if o.Out == "" {
 		o.Out = filepath.Join(".offline-releases", o.Tag)
 	}
-	return generateRelease(o, releaseBuilders{Bundle: bundleExpected, Devkit: devkitSingle, Gate: offlineBuildGate})
+	return generateRelease(o, releaseBuilders{Gate: offlineBuildGate})
 }
 
 func releaseIdentity(source, tag string) (string, error) {
+	return releaseIdentityContext(context.Background(), source, tag)
+}
+
+func releaseIdentityContext(ctx context.Context, source, tag string) (string, error) {
 	if !regexpVersion.MatchString(tag) {
 		return "", errors.New("需要明确且有效的 --tag")
 	}
 	if _, err := os.Lstat(filepath.Join(source, "auriga-source.json")); err == nil {
-		m, err := readSourceManifest(source)
+		m, err := readSourceManifestContext(ctx, source)
 		if err != nil {
 			return "", err
 		}
-		names, err := archiveSourceNames(source)
+		names, err := archiveSourceNamesContext(ctx, source)
 		if err != nil {
 			return "", err
 		}
-		_, hash, err := fileInventory(source, names, m.Files)
+		_, hash, err := fileInventoryContext(ctx, source, names, m.Files)
 		if err != nil {
 			return "", err
 		}
@@ -104,18 +108,18 @@ func releaseIdentity(source, tag string) (string, error) {
 		}
 		return m.Source.Commit, nil
 	}
-	head, err := gitAt(source, "rev-parse", "HEAD")
+	head, err := gitAtContext(ctx, source, "rev-parse", "HEAD")
 	if err != nil {
 		return "", err
 	}
-	target, err := gitAt(source, "rev-parse", "refs/tags/"+tag+"^{commit}")
+	target, err := gitAtContext(ctx, source, "rev-parse", "refs/tags/"+tag+"^{commit}")
 	if err != nil {
-		return "", errors.New("发行标签不存在")
+		return "", errors.Join(errors.New("发行标签不存在"), ctx.Err())
 	}
 	if target != head {
 		return "", errors.New("HEAD 必须精确对应发行标签，不自动切分支")
 	}
-	status, err := gitAt(source, "status", "--porcelain", "--untracked-files=all")
+	status, err := gitAtContext(ctx, source, "status", "--porcelain", "--untracked-files=all")
 	if err != nil {
 		return "", err
 	}
@@ -149,7 +153,7 @@ func signingPublic(privatePath, target string) error {
 	return os.WriteFile(target, pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: der}), 0644)
 }
 
-func devkitByLocks(o releaseOptions, locks lockInventory, commit, index, public string, build func([]string) error) (string, cachedKit, error) {
+func devkitByLocksContext(ctx context.Context, o releaseOptions, locks lockInventory, commit, index, public string, build func([]string) error) (string, cachedKit, error) {
 	pubBytes, err := os.ReadFile(public)
 	if err != nil {
 		return "", cachedKit{}, err
@@ -175,7 +179,7 @@ func devkitByLocks(o releaseOptions, locks lockInventory, commit, index, public 
 		if err := noSymlinks(file); err != nil {
 			return "", cached, err
 		}
-		actual, err := describeAsset(file)
+		actual, err := describeAssetContext(ctx, file)
 		if err != nil {
 			return "", cached, err
 		}
@@ -199,7 +203,7 @@ func devkitByLocks(o releaseOptions, locks lockInventory, commit, index, public 
 	if err := build([]string{"--release", index, "--out", file, "--sign-key", o.Key}); err != nil {
 		return "", cached, err
 	}
-	asset, err := describeAsset(file)
+	asset, err := describeAssetContext(ctx, file)
 	if err != nil {
 		return "", cached, err
 	}
@@ -211,6 +215,9 @@ func devkitByLocks(o releaseOptions, locks lockInventory, commit, index, public 
 	if err := signFile(record, o.Key); err != nil {
 		return "", cached, err
 	}
+	if err := ctx.Err(); err != nil {
+		return "", cached, err
+	}
 	if err := os.Rename(stage, cache); err != nil {
 		return "", cached, err
 	}
@@ -220,6 +227,12 @@ func devkitByLocks(o releaseOptions, locks lockInventory, commit, index, public 
 func generateRelease(o releaseOptions, builders releaseBuilders) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	if builders.Devkit == nil {
+		builders.Devkit = func(args []string) error { return devkitSingleContext(ctx, args) }
+	}
+	if builders.Bundle == nil {
+		builders.Bundle = func(args []string, commit string) error { return bundleExpectedContext(ctx, args, commit) }
+	}
 	if o.Key == "" || o.Out == "" || o.Cache == "" || o.Limit <= 0 {
 		return errors.New("release 需要 --sign-key、输出目录、缓存目录和正数附件上限")
 	}
@@ -234,7 +247,7 @@ func generateRelease(o releaseOptions, builders releaseBuilders) error {
 	if pathErr != nil {
 		return pathErr
 	}
-	commit, err := releaseIdentity(o.Source, o.Tag)
+	commit, err := releaseIdentityContext(ctx, o.Source, o.Tag)
 	if err != nil {
 		return err
 	}
@@ -247,7 +260,7 @@ func generateRelease(o releaseOptions, builders releaseBuilders) error {
 	if r.Build == nil {
 		return errors.New("离线发行需要build依赖与Linux构建配方")
 	}
-	locks, err := dependencyLocks(o.Source, r)
+	locks, err := dependencyLocksContext(ctx, o.Source, r)
 	if err != nil {
 		return err
 	}
@@ -285,54 +298,54 @@ func generateRelease(o releaseOptions, builders releaseBuilders) error {
 		exe = builders.Executable
 	}
 	sourceRoot := filepath.Join(scratch, "source")
-	if err := prepareSourceArchive(o.Source, sourceRoot, r, o.Key, exe); err != nil {
+	if err := prepareSourceArchiveContext(ctx, o.Source, sourceRoot, r, o.Key, exe); err != nil {
 		return err
 	}
-	kit, cached, err := devkitByLocks(o, locks, commit, index, public, builders.Devkit)
+	kit, cached, err := devkitByLocksContext(ctx, o, locks, commit, index, public, builders.Devkit)
 	if err != nil {
 		return err
 	}
 	kitTarget := filepath.Join(stage, "auriga-devkit-"+o.Tag+".tar")
 	single := filepath.Join(scratch, "single")
-	if err := extractVerified(kit, single, public); err != nil {
+	if err := extractWithTrustContext(ctx, kit, single, trustOptions{Key: public}, false); err != nil {
 		return err
 	}
-	if err := refreshReleaseInputs(single, r, o.Key); err != nil {
+	if err := refreshReleaseInputsContext(ctx, single, r, o.Key); err != nil {
 		return err
 	}
-	if err := writeSums(sourceRoot); err != nil {
+	if err := writeSumsContext(ctx, sourceRoot); err != nil {
 		return err
 	}
 	if err := signSums(sourceRoot, o.Key); err != nil {
 		return err
 	}
 	sourceTar := filepath.Join(stage, "auriga-source-"+o.Tag+".tar")
-	if err := pack(sourceRoot, sourceTar); err != nil {
+	if err := packContext(ctx, sourceRoot, sourceTar); err != nil {
 		return err
 	}
-	sourceAsset, err := describeAsset(sourceTar)
+	sourceAsset, err := describeAssetContext(ctx, sourceTar)
 	if err != nil {
 		return err
 	}
 	cumulative := filepath.Join(scratch, "cumulative")
-	cat, err := composeDevkit(o.Previous, single, o.Tag, commit, cumulative, o.Key, o.MaxBytes, o.NewBaseline)
+	cat, err := composeDevkitContext(ctx, o.Previous, single, o.Tag, commit, cumulative, o.Key, o.MaxBytes, o.NewBaseline)
 	if err != nil {
 		return err
 	}
-	if err := pack(cumulative, kitTarget); err != nil {
+	if err := packContext(ctx, cumulative, kitTarget); err != nil {
 		return err
 	}
 	deltaTarget := filepath.Join(stage, "auriga-devkit-"+o.Tag+"-delta.tar")
-	if err := writeDevkitDelta(o.Previous, cumulative, deltaTarget, o.Key); err != nil {
+	if err := writeDevkitDeltaContext(ctx, o.Previous, cumulative, deltaTarget, o.Key); err != nil {
 		return err
 	}
-	catalogSHA, err := digest(filepath.Join(cumulative, "devkit-catalog.json"))
+	catalogSHA, err := digestContext(ctx, filepath.Join(cumulative, "devkit-catalog.json"))
 	if err != nil {
 		return err
 	}
 	offline := filepath.Join(stage, "auriga-offline-"+o.Tag+".tar")
 	gateOut := filepath.Join(scratch, "gate.tar")
-	kitSHA, err := digest(kitTarget)
+	kitSHA, err := digestContext(ctx, kitTarget)
 	if err != nil {
 		return err
 	}
@@ -416,7 +429,7 @@ func generateRelease(o releaseOptions, builders releaseBuilders) error {
 	if err := finalizeDistribution(ctx, stage, manifest, cat, o.Key); err != nil {
 		return err
 	}
-	names, err := regularFiles(stage)
+	names, err := regularFilesContext(ctx, stage)
 	if err != nil {
 		return err
 	}
@@ -430,10 +443,10 @@ func generateRelease(o releaseOptions, builders releaseBuilders) error {
 		}
 	}
 	// Refuse a checkout or lock edit made during a long release build.
-	if head, err := releaseIdentity(o.Source, o.Tag); err != nil || head != commit {
-		return errors.New("发行期间源码发生变化，拒绝发布输出")
+	if head, err := releaseIdentityContext(ctx, o.Source, o.Tag); err != nil || head != commit {
+		return errors.Join(errors.New("发行期间源码发生变化，拒绝发布输出"), ctx.Err())
 	}
-	finalLocks, err := dependencyLocks(o.Source, r)
+	finalLocks, err := dependencyLocksContext(ctx, o.Source, r)
 	if err != nil {
 		return err
 	}

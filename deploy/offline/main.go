@@ -50,6 +50,9 @@ func dispatch(args []string) error {
 	if args[0] == "internal-offline-build" {
 		return isolatedGateBuild(args[1:])
 	}
+	if args[0] == "internal-offline-cleanup" {
+		return gateNamespaceCleanup(args[1:])
+	}
 	if args[0] == "devkit" {
 		return devkit(args[1:])
 	}
@@ -169,32 +172,53 @@ func noSymlinks(path string) error {
 }
 
 func command(input io.Reader, output io.Writer, env []string, name string, args ...string) error {
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Minute)
+	return commandContext(context.Background(), input, output, env, name, args...)
+}
+
+func commandContext(parent context.Context, input io.Reader, output io.Writer, env []string, name string, args ...string) error {
+	ctx, cancel := context.WithTimeout(parent, 60*time.Minute)
 	defer cancel()
 	c := exec.CommandContext(ctx, name, args...)
 	c.Stdin, c.Stdout, c.Stderr = input, output, os.Stderr
 	c.Env = append(os.Environ(), env...)
 	c.WaitDelay = 3 * time.Second
-	if err := c.Run(); err != nil {
-		return fmt.Errorf("%s 执行失败 %w", name, err)
+	if parent.Done() != nil {
+		setGateProcessGroup(c)
+		c.WaitDelay = 3 * time.Second
+		defer func() {
+			if ctx.Err() != nil && c.Process != nil {
+				stopGateProcessGroup(c, true)
+			}
+		}()
 	}
-	return nil
+	if err := c.Run(); err != nil {
+		return fmt.Errorf("%s 执行失败 %w", name, errors.Join(err, ctx.Err()))
+	}
+	return ctx.Err()
 }
 
 func capture(name string, args ...string) (string, error) {
+	return captureContext(context.Background(), name, args...)
+}
+
+func captureContext(ctx context.Context, name string, args ...string) (string, error) {
 	var b bytes.Buffer
-	err := command(nil, &b, nil, name, args...)
+	err := commandContext(ctx, nil, &b, nil, name, args...)
 	return strings.TrimSpace(b.String()), err
 }
 
 func dockerReady() error {
+	return dockerReadyContext(context.Background())
+}
+
+func dockerReadyContext(ctx context.Context) error {
 	if _, err := exec.LookPath("docker"); err != nil {
 		return errors.New("缺少 Docker Engine 和 Compose 插件，请用受信离线安装介质预装 Docker，随后重试")
 	}
 	endpoint := os.Getenv("DOCKER_HOST")
 	if endpoint == "" || os.Getenv("DOCKER_CONTEXT") != "" {
 		var err error
-		endpoint, err = capture("docker", "context", "inspect", "--format", "{{.Endpoints.docker.Host}}")
+		endpoint, err = captureContext(ctx, "docker", "context", "inspect", "--format", "{{.Endpoints.docker.Host}}")
 		if err != nil {
 			return err
 		}
@@ -202,12 +226,12 @@ func dockerReady() error {
 	if err := localDockerEndpoint(endpoint); err != nil {
 		return err
 	}
-	if _, err := capture("docker", "info", "--format", "{{.ServerVersion}}"); err != nil {
-		return errors.New("本机 Docker Engine 不可用，检查 docker 服务和 socket 权限")
+	if _, err := captureContext(ctx, "docker", "info", "--format", "{{.ServerVersion}}"); err != nil {
+		return errors.Join(errors.New("本机 Docker Engine 不可用，检查 docker 服务和 socket 权限"), ctx.Err())
 	}
-	v, err := capture("docker", "compose", "version", "--short")
+	v, err := captureContext(ctx, "docker", "compose", "version", "--short")
 	if err != nil {
-		return errors.New("缺少 Docker Compose 插件，需要 2.29+ ")
+		return errors.Join(errors.New("缺少 Docker Compose 插件，需要 2.29+ "), ctx.Err())
 	}
 	var major, minor int
 	if _, err := fmt.Sscanf(strings.TrimPrefix(v, "v"), "%d.%d", &major, &minor); err != nil || major < 2 || major == 2 && minor < 29 {

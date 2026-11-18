@@ -241,7 +241,11 @@ func unpackReader(input io.Reader, destination string) error {
 }
 
 func pack(root, archive string) error {
-	names, err := regularFiles(root)
+	return packContext(context.Background(), root, archive)
+}
+
+func packContext(ctx context.Context, root, archive string) error {
+	names, err := regularFilesContext(ctx, root)
 	if err != nil {
 		return err
 	}
@@ -276,7 +280,7 @@ func pack(root, archive string) error {
 			_ = f.Close()
 			return err
 		}
-		_, err = io.Copy(tw, in)
+		_, err = io.Copy(tw, cancellationReader(ctx, in))
 		_ = in.Close()
 		if err != nil {
 			_ = tw.Close()

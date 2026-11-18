@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -82,11 +83,15 @@ func validateCatalog(c devkitCatalog) error {
 }
 
 func readCatalog(root, key string) (devkitCatalog, error) {
+	return readCatalogContext(context.Background(), root, key)
+}
+
+func readCatalogContext(ctx context.Context, root, key string) (devkitCatalog, error) {
 	var cat devkitCatalog
 	if err := verifySignature(root, key); err != nil {
 		return cat, err
 	}
-	if err := verifyInventoryFile(root, "devkit-catalog.json"); err != nil {
+	if err := verifyInventoryFileContext(ctx, root, "devkit-catalog.json"); err != nil {
 		return cat, err
 	}
 	if err := readJSON(filepath.Join(root, "devkit-catalog.json"), &cat); err != nil {
@@ -105,7 +110,7 @@ func readCatalog(root, key string) (devkitCatalog, error) {
 			}
 		}
 		sort.Strings(uses)
-		info, err := describeAsset(filepath.Join(root, "blobs", hash))
+		info, err := describeAssetContext(ctx, filepath.Join(root, "blobs", hash))
 		if err != nil {
 			return cat, fmt.Errorf("缺少离线依赖 %s（块 %s）: %w", strings.Join(uses, ", "), hash, err)
 		}
@@ -113,7 +118,7 @@ func readCatalog(root, key string) (devkitCatalog, error) {
 			return cat, fmt.Errorf("离线依赖摘要不符 %s（块 %s）", strings.Join(uses, ", "), hash)
 		}
 	}
-	if err := verifySums(root); err != nil {
+	if err := verifySumsContext(ctx, root); err != nil {
 		return cat, err
 	}
 	return cat, nil
@@ -131,12 +136,16 @@ func versionMajor(version string) string {
 }
 
 func composeDevkit(previous, single, version, commit, target, key string, maxBytes int64, newBaseline bool) (devkitCatalog, error) {
+	return composeDevkitContext(context.Background(), previous, single, version, commit, target, key, maxBytes, newBaseline)
+}
+
+func composeDevkitContext(ctx context.Context, previous, single, version, commit, target, key string, maxBytes int64, newBaseline bool) (devkitCatalog, error) {
 	cat := devkitCatalog{Schema: 1, Baseline: version, Latest: version, Versions: map[string]devkitVersion{}, Blobs: map[string]int64{}}
 	if !regexpVersion.MatchString(version) || maxBytes <= 0 {
 		return cat, errors.New("devkit版本或大小阈值无效")
 	}
 	if previous != "" {
-		prior, err := readCatalog(previous, "")
+		prior, err := readCatalogContext(ctx, previous, "")
 		if err != nil {
 			return cat, err
 		}
@@ -148,14 +157,14 @@ func composeDevkit(previous, single, version, commit, target, key string, maxByt
 			cat.ResetReason = "新基线或跨大版本"
 		}
 	}
-	kit, err := readDevkit(single)
+	kit, err := readDevkitContext(ctx, single)
 	if err != nil {
 		return cat, err
 	}
 	if kit.Locks == nil {
 		return cat, errors.New("单版本套件缺少锁清单")
 	}
-	names, err := regularFiles(filepath.Join(single, "cache"))
+	names, err := regularFilesContext(ctx, filepath.Join(single, "cache"))
 	if err != nil {
 		return cat, err
 	}
@@ -163,7 +172,7 @@ func composeDevkit(previous, single, version, commit, target, key string, maxByt
 	currentBlobs := map[string]string{}
 	for _, name := range names {
 		path := filepath.Join(single, "cache", name)
-		info, err := describeAsset(path)
+		info, err := describeAssetContext(ctx, path)
 		if err != nil {
 			return cat, err
 		}
@@ -185,7 +194,7 @@ func composeDevkit(previous, single, version, commit, target, key string, maxByt
 	}
 	if total > maxBytes {
 		if previous != "" && len(cat.Versions) > 1 {
-			rebuilt, err := composeDevkit("", single, version, commit, target, key, maxBytes, true)
+			rebuilt, err := composeDevkitContext(ctx, "", single, version, commit, target, key, maxBytes, true)
 			if err != nil {
 				return rebuilt, err
 			}
@@ -193,7 +202,7 @@ func composeDevkit(previous, single, version, commit, target, key string, maxByt
 			if err := jsonFile(filepath.Join(target, "devkit-catalog.json"), rebuilt, 0644); err != nil {
 				return rebuilt, err
 			}
-			if err := writeSums(target); err != nil {
+			if err := writeSumsContext(ctx, target); err != nil {
 				return rebuilt, err
 			}
 			if err := signSums(target, key); err != nil {
@@ -214,7 +223,7 @@ func composeDevkit(previous, single, version, commit, target, key string, maxByt
 		if !ok {
 			path = filepath.Join(previous, "blobs", hash)
 		}
-		if err := copyFile(path, filepath.Join(target, "blobs", hash), 0644); err != nil {
+		if err := copyFileContext(ctx, path, filepath.Join(target, "blobs", hash), 0644); err != nil {
 			return cat, err
 		}
 	}
@@ -226,7 +235,7 @@ func composeDevkit(previous, single, version, commit, target, key string, maxByt
 			return cat, err
 		}
 	}
-	if err := writeSums(target); err != nil {
+	if err := writeSumsContext(ctx, target); err != nil {
 		return cat, err
 	}
 	if key != "" {
@@ -238,22 +247,26 @@ func composeDevkit(previous, single, version, commit, target, key string, maxByt
 }
 
 func writeDevkitDelta(previous, target, out, key string) error {
-	cat, err := readCatalog(target, "")
+	return writeDevkitDeltaContext(context.Background(), previous, target, out, key)
+}
+
+func writeDevkitDeltaContext(ctx context.Context, previous, target, out, key string) error {
+	cat, err := readCatalogContext(ctx, target, "")
 	if err != nil {
 		return err
 	}
 	delta := devkitDelta{Schema: 1, Baseline: cat.Baseline, Reset: previous == ""}
-	delta.TargetSHA256, err = digest(filepath.Join(target, "devkit-catalog.json"))
+	delta.TargetSHA256, err = digestContext(ctx, filepath.Join(target, "devkit-catalog.json"))
 	if err != nil {
 		return err
 	}
 	old := devkitCatalog{Blobs: map[string]int64{}}
 	if previous != "" {
-		old, err = readCatalog(previous, "")
+		old, err = readCatalogContext(ctx, previous, "")
 		if err != nil {
 			return err
 		}
-		delta.BaseSHA256, err = digest(filepath.Join(previous, "devkit-catalog.json"))
+		delta.BaseSHA256, err = digestContext(ctx, filepath.Join(previous, "devkit-catalog.json"))
 		if err != nil {
 			return err
 		}
@@ -268,27 +281,27 @@ func writeDevkitDelta(previous, target, out, key string) error {
 		if _, ok := old.Blobs[hash]; ok && !delta.Reset {
 			continue
 		}
-		if err := copyFile(filepath.Join(target, "blobs", hash), filepath.Join(stage, "blobs", hash), 0644); err != nil {
+		if err := copyFileContext(ctx, filepath.Join(target, "blobs", hash), filepath.Join(stage, "blobs", hash), 0644); err != nil {
 			return err
 		}
 		delta.Added = append(delta.Added, hash)
 	}
 	sort.Strings(delta.Added)
 	for source, dest := range map[string]string{"devkit-catalog.json": "devkit-catalog.json", "SHA256SUMS": "TARGET-SHA256SUMS", "SHA256SUMS.sig": "TARGET-SHA256SUMS.sig", "release-public.pem": "release-public.pem"} {
-		if err := copyFile(filepath.Join(target, source), filepath.Join(stage, dest), 0644); err != nil {
+		if err := copyFileContext(ctx, filepath.Join(target, source), filepath.Join(stage, dest), 0644); err != nil {
 			return err
 		}
 	}
 	if err := jsonFile(filepath.Join(stage, "delta.json"), delta, 0644); err != nil {
 		return err
 	}
-	if err := writeSums(stage); err != nil {
+	if err := writeSumsContext(ctx, stage); err != nil {
 		return err
 	}
 	if err := signSums(stage, key); err != nil {
 		return err
 	}
-	return pack(stage, out)
+	return packContext(ctx, stage, out)
 }
 
 func mergeDevkit(root, archive, key string) error {
@@ -446,6 +459,10 @@ func locateCumulative(source, root string) (string, *devkitManifest, error) {
 	return stage, &kit, nil
 }
 func verifyCumulative(root, source, version, key string) error {
+	return verifyCumulativeContext(context.Background(), root, source, version, key)
+}
+
+func verifyCumulativeContext(ctx context.Context, root, source, version, key string) error {
 	if key == "" {
 		var err error
 		key, err = sourceVerificationKey(source)
@@ -453,24 +470,24 @@ func verifyCumulative(root, source, version, key string) error {
 			return err
 		}
 	}
-	cat, err := readCatalog(root, key)
+	cat, err := readCatalogContext(ctx, root, key)
 	if err != nil {
 		return err
 	}
 	if version == "" {
-		version = sourceVersionName(source)
+		version = sourceVersionNameContext(ctx, source)
 	}
 	entry, err := catalogVersion(cat, version)
 	if err != nil {
 		return err
 	}
-	if sourceVersionName(source) == version {
-		if err := checkKitLocks(source, entry.Kit); err != nil {
+	if sourceVersionNameContext(ctx, source) == version {
+		if err := checkKitLocksContext(ctx, source, entry.Kit); err != nil {
 			return err
 		}
 		baseline := provenance{Version: version, UpstreamVersion: version, Commit: entry.Commit}
 		if _, err := os.Stat(filepath.Join(source, "auriga-source.json")); err == nil {
-			m, err := readSourceManifest(source)
+			m, err := readSourceManifestContext(ctx, source)
 			if err != nil {
 				return err
 			}

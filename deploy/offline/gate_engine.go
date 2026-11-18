@@ -43,6 +43,7 @@ func isolatedGateBuild(args []string) (result error) {
 	key := f.String("sign-key", "", "")
 	workdir := f.String("workdir", "", "")
 	runtimeDir := f.String("runtime-dir", "", "")
+	supervised := f.Bool("supervised", false, "")
 	if err := f.Parse(args); err != nil {
 		return err
 	}
@@ -95,6 +96,11 @@ func isolatedGateBuild(args []string) (result error) {
 	defer stop()
 	ctx, cancel := context.WithTimeout(interrupted, gateBuildTimeout)
 	defer cancel()
+	if *supervised {
+		if err := awaitGateSupervisor(ctx, root); err != nil {
+			return err
+		}
+	}
 	socket := filepath.Join(runtimeRoot, "docker.sock")
 	env := append(gateDockerEnv(socket), "TMPDIR="+buildTemp)
 	// Keep the daemon alive until task containers have been stopped, including
