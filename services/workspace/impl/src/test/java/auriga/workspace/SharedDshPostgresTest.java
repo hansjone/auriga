@@ -447,7 +447,21 @@ class SharedDshPostgresTest {
       if (pool == null) pool = p.binding().getPhysicalInstanceId();
       else assertEquals(pool, p.binding().getPhysicalInstanceId());
     }
-    assertNotEquals(pool, allocate(UUID.randomUUID()).binding().getPhysicalInstanceId());
+    assertEquals(
+        "common.conflict",
+        assertThrows(auriga.common.error.AurigaException.class, () -> allocate(UUID.randomUUID()))
+            .errorCode()
+            .code());
+    assertEquals(
+        1,
+        run(
+            () ->
+                store.tx(
+                    () ->
+                        store.jdbc.queryForObject(
+                            "SELECT count(*) FROM shared_dsh_pool WHERE tenant_id=? AND mode='shared'",
+                            Long.class,
+                            tenant))));
     for (int n = 0; n < 4; n++) {
       UUID m = members.get(n);
       run(
@@ -718,9 +732,9 @@ class SharedDshPostgresTest {
     UUID a = UUID.randomUUID(), b = UUID.randomUUID();
     var first = ready(a);
     digests.put(b, "sha256:" + "b".repeat(64));
-    var other = ready(b);
-    assertNotEquals(
-        first.binding().getPhysicalInstanceId(), other.binding().getPhysicalInstanceId());
+    assertEquals(
+        "shared.binding_mismatch",
+        assertThrows(auriga.common.error.AurigaException.class, () -> ready(b)).errorCode().code());
     run(
         () -> {
           service.memory(UUID.fromString(first.binding().getPhysicalInstanceId()), 80);
@@ -734,9 +748,21 @@ class SharedDshPostgresTest {
                   service.admit(a, session, UUID.randomUUID());
                   return null;
                 }));
-    var expanded = allocate(UUID.randomUUID());
-    assertNotEquals(
-        first.binding().getPhysicalInstanceId(), expanded.binding().getPhysicalInstanceId());
+    assertEquals(
+        "common.conflict",
+        assertThrows(auriga.common.error.AurigaException.class, () -> allocate(UUID.randomUUID()))
+            .errorCode()
+            .code());
+    assertEquals(
+        1,
+        run(
+            () ->
+                store.tx(
+                    () ->
+                        store.jdbc.queryForObject(
+                            "SELECT count(*) FROM shared_dsh_pool WHERE tenant_id=? AND mode='shared'",
+                            Long.class,
+                            tenant))));
     assertEquals(first.binding(), run(() -> service.current(a, session)).binding());
     digests.put(a, "sha256:" + "c".repeat(64));
     assertThrows(

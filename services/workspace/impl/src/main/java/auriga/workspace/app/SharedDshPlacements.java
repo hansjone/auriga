@@ -166,21 +166,39 @@ public final class SharedDshPlacements implements SharedDshAuthority {
     String digest = inputs.authorizationSetDigest(tenant(), member);
     valid(digest != null && digest.matches("sha256:[a-f0-9]{64}"));
     if (mode.equals("shared")) {
-      var candidates =
+      var pools =
           store.jdbc.queryForList(
-              "SELECT p.id FROM shared_dsh_pool p WHERE p.tenant_id=? AND p.mode='shared' AND"
-                  + " p.authorization_digest=? AND p.state IN ('pending','ready') AND"
-                  + " p.memory_percent<80 AND (SELECT count(*) FROM shared_dsh_placement x WHERE"
-                  + " x.tenant_id=p.tenant_id AND x.pool_id=p.id)+(SELECT count(*) FROM"
-                  + " shared_dsh_operation o WHERE o.tenant_id=p.tenant_id AND o.target_pool=p.id"
-                  + " AND o.state NOT IN ('succeeded','failed'))+(SELECT count(*) FROM"
-                  + " shared_dsh_operation r WHERE r.tenant_id=p.tenant_id AND r.rollback_pool=p.id"
-                  + " AND r.recovery_pending AND r.placement_id NOT IN (SELECT x.id FROM"
-                  + " shared_dsh_placement x WHERE x.tenant_id=p.tenant_id AND x.pool_id=p.id))<20"
-                  + " ORDER BY p.id LIMIT 1",
-              tenant(),
-              digest);
-      if (!candidates.isEmpty()) return (UUID) candidates.getFirst().get("id");
+              "SELECT p.* FROM shared_dsh_pool p WHERE p.tenant_id=? AND p.mode='shared'"
+                  + " ORDER BY p.id LIMIT 2 FOR UPDATE",
+              tenant());
+      // The tenant lock also serializes the first pool reservation. Preserve existing pool
+      // identity when authority changes, capacity fills or runtime recovery is pending.
+      conflict(pools.size() <= 1);
+      if (!pools.isEmpty()) {
+        var pool = pools.getFirst();
+        matched(pool.get("authorization_digest").equals(digest));
+        if (!Set.of("pending", "ready").contains(pool.get("state")))
+          throw new AurigaException(CommonErrors.UNAVAILABLE);
+        conflict(number(pool, "memory_percent") < 80);
+        long reserved =
+            store.jdbc.queryForObject(
+                "SELECT (SELECT count(*) FROM shared_dsh_placement x WHERE"
+                    + " x.tenant_id=? AND x.pool_id=?)+(SELECT count(*) FROM"
+                    + " shared_dsh_operation o WHERE o.tenant_id=? AND o.target_pool=?"
+                    + " AND o.state NOT IN ('succeeded','failed'))+(SELECT count(*) FROM"
+                    + " shared_dsh_operation r WHERE r.tenant_id=? AND r.rollback_pool=?"
+                    + " AND r.recovery_pending AND r.placement_id NOT IN (SELECT x.id FROM"
+                    + " shared_dsh_placement x WHERE x.tenant_id=r.tenant_id AND x.pool_id=r.rollback_pool))",
+                Long.class,
+                tenant(),
+                pool.get("id"),
+                tenant(),
+                pool.get("id"),
+                tenant(),
+                pool.get("id"));
+        conflict(reserved < 20);
+        return (UUID) pool.get("id");
+      }
     }
     UUID pool = UuidV7.next();
     store.jdbc.update(
