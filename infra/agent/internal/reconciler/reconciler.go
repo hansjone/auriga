@@ -193,26 +193,33 @@ func (r *Reconciler) Inventory() ([]*nodev1.InstanceStatus, error) {
 		return nil, err
 	}
 	out := make([]*nodev1.InstanceStatus, 0, len(recs))
+	have := make(map[string]bool, len(recs))
+	var checks []inventoryCheck
 	inspectionCtx, cancel := context.WithTimeout(context.Background(), r.StartTimeout)
 	defer cancel()
 	for _, rec := range recs {
-		if rec.Status != nil {
-			status := cloneStatus(rec.Status)
+		status := rec.Status
+		if status == nil {
+			continue
+		}
+		if status.Ready && r.Activation != nil {
+			execution := UplinkExecution{instanceID: status.InstanceId, containerID: rec.ContainerID, generation: status.ObservedGeneration}
+			checks = append(checks, inventoryCheck{
+				index: len(out), execution: execution, live: r.inspectUplink(inspectionCtx, status.InstanceId, execution),
+			})
+		} else {
 			if status.Ready {
 				actual, inspectErr := r.Driver.Inspect(inspectionCtx, status.InstanceId)
 				status.Ready = inspectErr == nil && inspectionCtx.Err() == nil && actual.Running && actual.Ready && actual.Generation == status.ObservedGeneration
 			}
 			filterAppliedReports(status)
-			out = append(out, status)
 		}
+		out = append(out, status)
+		have[status.InstanceId] = true
 	}
 	ids, err := r.Store.ListDesiredIDs()
 	if err != nil {
 		return nil, err
-	}
-	have := map[string]bool{}
-	for _, st := range out {
-		have[st.InstanceId] = true
 	}
 	for _, id := range ids {
 		if have[id] {
@@ -223,6 +230,9 @@ func (r *Reconciler) Inventory() ([]*nodev1.InstanceStatus, error) {
 			Phase:      nodev1.InstancePhase_INSTANCE_PHASE_ABSENT,
 			UpdatedAt:  timestamppb.Now(),
 		})
+	}
+	if len(checks) > 0 {
+		r.finishInventory(inspectionCtx, out, checks)
 	}
 	return out, nil
 }

@@ -720,6 +720,9 @@ func (d *Docker) Inspect(ctx context.Context, id string) (Status, error) {
 			return Status{InstanceID: id}, err
 		}
 		st.Ready = st.Running && endpointErr == nil
+		if st.Ready && ctx.Value(readOnlyInspectionKey{}) != nil {
+			st.RecheckReady = func() bool { return d.inspectedEndpointReady(id, proof) }
+		}
 		if !st.Running {
 			if errMsg, _ := state["Error"].(string); errMsg != "" {
 				st.Error = errMsg
@@ -821,6 +824,21 @@ func (d *Docker) withdrawInspected(ctx context.Context, id string, proof dockerE
 	if ctx.Value(readOnlyInspectionKey{}) == nil {
 		d.withdrawObserved(id, proof)
 	}
+}
+
+func (d *Docker) inspectedEndpointReady(id string, proof dockerEndpoint) bool {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	current := d.endpoints[id]
+	if current.url != proof.url || current.pending != nil || current.process != proof.process ||
+		current.sharedMount != proof.sharedMount || (current.checkLease == nil) != (proof.checkLease == nil) {
+		return false
+	}
+	// Recovery can renew the lease for the same verified process and network.
+	if current.record != proof.record && (!sameExecution(current.record, proof.record) || !sameBridges(current.bridges, proof.bridges)) {
+		return false
+	}
+	return current.leaseError() == nil
 }
 
 func (d *Docker) checkCommittedEndpoint(ctx context.Context, actual *state.ExecutionRecord, proof dockerEndpoint) error {

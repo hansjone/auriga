@@ -28,15 +28,27 @@ type uplinkLeaseDriver struct {
 	store         *state.Store
 	now, deadline atomic.Int64
 	stops         atomic.Int32
+	blockID       string
+	inspecting    chan struct{}
+	resumeInspect chan struct{}
 }
 
-func (d *uplinkLeaseDriver) Inspect(_ context.Context, id string) (runtime.Status, error) {
+func (d *uplinkLeaseDriver) Inspect(ctx context.Context, id string) (runtime.Status, error) {
 	record, err := d.store.GetExecution(id)
 	if err != nil || record == nil {
 		return runtime.Status{}, err
 	}
+	if id == d.blockID {
+		close(d.inspecting)
+		select {
+		case <-ctx.Done():
+			return runtime.Status{}, ctx.Err()
+		case <-d.resumeInspect:
+		}
+	}
+	ready := func() bool { return id != uplinkInstance || d.now.Load() < d.deadline.Load() }
 	return runtime.Status{InstanceID: id, ContainerID: record.ContainerID, Generation: record.Generation,
-		Running: true, Ready: d.now.Load() < d.deadline.Load()}, nil
+		Running: true, Ready: ready(), RecheckReady: ready}, nil
 }
 
 func (d *uplinkLeaseDriver) Stop(ctx context.Context, id string, grace time.Duration) error {
@@ -53,7 +65,7 @@ func uplinkFixture(t *testing.T) (*Session, *uplinkLeaseDriver, *nodev1.Instance
 	t.Cleanup(func() { _ = store.Close() })
 	driver := &uplinkLeaseDriver{Fake: runtime.NewFake(), store: store}
 	driver.deadline.Store(10)
-	putUplinkExecution(t, store, "a")
+	putUplinkExecution(t, store, uplinkInstance, "a")
 	status := &nodev1.InstanceStatus{
 		InstanceId: uplinkInstance, ObservedGeneration: 7, Phase: nodev1.InstancePhase_INSTANCE_PHASE_RUNNING,
 		UpdatedAt: timestamppb.New(time.Unix(100, 0)), Ready: true,
@@ -71,14 +83,14 @@ func uplinkFixture(t *testing.T) (*Session, *uplinkLeaseDriver, *nodev1.Instance
 	return New(Config{Store: store, Reconciler: rec}), driver, status
 }
 
-func putUplinkExecution(t *testing.T, store *state.Store, idDigit string) {
+func putUplinkExecution(t *testing.T, store *state.Store, id, idDigit string) {
 	t.Helper()
 	digest := "sha256:" + strings.Repeat("c", 64)
 	envelope := &nodev1.RuntimeReleaseEnvelope{
 		Purpose: "dsh_runtime", Name: "dsh", Os: "linux", Arch: "amd64", ReleaseSequence: 1, ImageDigest: digest,
 	}
 	err := store.PutExecution(state.ExecutionRecord{
-		Version: 2, InstanceID: uplinkInstance, Generation: 7, Phase: "started",
+		Version: 2, InstanceID: id, Generation: 7, Phase: "started",
 		ContainerID: strings.Repeat(idDigit, 64), ConfigID: digest, EngineImageID: digest, ProofDigest: digest,
 		DSH: &nodev1.DshRuntime{ReleaseEnvelope: envelope},
 		Candidate: state.ReleaseCandidate{
@@ -152,6 +164,129 @@ func nextUplinkFrame(t *testing.T, frames <-chan *nodev1.SessionRequest) *nodev1
 	case <-time.After(3 * time.Second):
 		t.Fatal("missing uplink frame")
 		return nil
+	}
+}
+
+func (d *uplinkLeaseDriver) blockInspection(t *testing.T, id string) func() {
+	t.Helper()
+	d.blockID = id
+	d.inspecting, d.resumeInspect = make(chan struct{}), make(chan struct{})
+	var once sync.Once
+	resume := func() { once.Do(func() { close(d.resumeInspect) }) }
+	t.Cleanup(resume)
+	return resume
+}
+
+func (d *uplinkLeaseDriver) waitForInspection(t *testing.T) {
+	t.Helper()
+	select {
+	case <-d.inspecting:
+	case <-time.After(3 * time.Second):
+		t.Fatal("uplink did not reach the blocked inspection")
+	}
+}
+
+func TestSessionRechecksInventoryBeforeSend(t *testing.T) {
+	const later = "zz-uplink"
+	for _, scenario := range []string{"expired", "renewed", "same-generation-replacement", "already-replaced", "no-longer-applied"} {
+		t.Run(scenario, func(t *testing.T) {
+			s, driver, status := uplinkFixture(t)
+			putUplinkExecution(t, driver.store, later, "c")
+			other := proto.Clone(status).(*nodev1.InstanceStatus)
+			other.InstanceId = later
+			if err := driver.store.PutActual(state.ActualRecord{Status: other}); err != nil {
+				t.Fatal(err)
+			}
+			if scenario == "already-replaced" {
+				putUplinkExecution(t, driver.store, uplinkInstance, "b")
+			}
+			resume := driver.blockInspection(t, later)
+			stream := &blockedUplinkStream{ctx: t.Context(), frames: make(chan *nodev1.SessionRequest, 1)}
+			done := make(chan error, 1)
+			go func() { done <- s.sendInventory(stream) }()
+			defer func() {
+				resume()
+				select {
+				case err := <-done:
+					if err != nil {
+						t.Error(err)
+					}
+				case <-time.After(3 * time.Second):
+					t.Error("inventory send did not finish")
+				}
+			}()
+			driver.waitForInspection(t)
+			s.nowAtDequeue(t, driver, scenario)
+			if scenario == "no-longer-applied" || scenario == "same-generation-replacement" {
+				current := proto.Clone(status).(*nodev1.InstanceStatus)
+				if scenario == "no-longer-applied" {
+					current.UnifiedResourceReports[0].State = "applying"
+				}
+				if err := driver.store.PutActual(state.ActualRecord{Status: current}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			resume()
+			list := nextUplinkFrame(t, stream.frames).GetInventory().GetInstances()
+			if len(list) != 2 || list[0].GetInstanceId() != uplinkInstance || !proto.Equal(list[1], other) {
+				t.Fatal("inventory lost the other verified instance", list)
+			}
+			wantReady := scenario == "renewed" || scenario == "no-longer-applied"
+			wantApplied := scenario == "renewed"
+			got := list[0]
+			if got.GetReady() != wantReady || (len(got.GetUnifiedResourceReports()) == 1) != wantApplied ||
+				!proto.Equal(got.GetUpdatedAt(), status.GetUpdatedAt()) || got.GetObservedGeneration() != status.GetObservedGeneration() {
+				t.Fatal("inventory did not recheck the first instance before sending", got)
+			}
+		})
+	}
+}
+
+func TestSessionReadsReportsAfterBlockedInspection(t *testing.T) {
+	for _, scenario := range []string{"unchanged", "applying", "same-generation-replacement"} {
+		t.Run(scenario, func(t *testing.T) {
+			s, driver, status := uplinkFixture(t)
+			report := proto.Clone(status.GetUnifiedResourceReports()[0]).(*resourcev1.UnifiedInstallationReport)
+			report.Identity = &resourcev1.UnifiedResourceIdentity{PackageId: "another-plugin"}
+			status.UnifiedResourceReports = append(status.UnifiedResourceReports, report)
+			if err := driver.store.PutActual(state.ActualRecord{Status: status}); err != nil {
+				t.Fatal(err)
+			}
+			resumeInspect := driver.blockInspection(t, uplinkInstance)
+			frames, resume := startBlockedUplink(t, s)
+			s.StatusSink()(status)
+			resume()
+			if nextUplinkFrame(t, frames).GetUsage() == nil {
+				t.Fatal("the blocked frame did not go first")
+			}
+			driver.waitForInspection(t)
+			current := proto.Clone(status).(*nodev1.InstanceStatus)
+			if scenario == "applying" {
+				current.UnifiedResourceReports[0].State = "applying"
+			}
+			s.nowAtDequeue(t, driver, scenario)
+			if err := driver.store.PutActual(state.ActualRecord{Status: current}); err != nil {
+				t.Fatal(err)
+			}
+			resumeInspect()
+			got := nextUplinkFrame(t, frames).GetStatus()
+			want := status.GetUnifiedResourceReports()
+			switch scenario {
+			case "applying":
+				want = want[1:]
+			case "same-generation-replacement":
+				want = nil
+			}
+			if got == nil || got.GetReady() != (scenario != "same-generation-replacement") ||
+				!proto.Equal(got.GetUpdatedAt(), status.GetUpdatedAt()) || len(got.GetUnifiedResourceReports()) != len(want) {
+				t.Fatal("uplink did not bind READY and reports to the post-Docker snapshot", got)
+			}
+			for i, report := range want {
+				if !proto.Equal(got.GetUnifiedResourceReports()[i], report) {
+					t.Fatal("uplink dropped a current report", got)
+				}
+			}
+		})
 	}
 }
 
@@ -265,6 +400,6 @@ func (s *Session) nowAtDequeue(t *testing.T, driver *uplinkLeaseDriver, scenario
 		driver.deadline.Store(20)
 		driver.now.Store(10)
 	case "same-generation-replacement":
-		putUplinkExecution(t, s.cfg.Store, "b")
+		putUplinkExecution(t, s.cfg.Store, uplinkInstance, "b")
 	}
 }

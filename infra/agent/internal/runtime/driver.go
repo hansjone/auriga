@@ -49,6 +49,9 @@ type Status struct {
 	Ready       bool
 	Generation  int64
 	Error       string
+	// RecheckReady, when provided by a read-only inspection, checks the
+	// inspected endpoint against current in-memory proof and clocks.
+	RecheckReady func() bool
 }
 
 type readOnlyInspectionKey struct{}
@@ -57,6 +60,11 @@ type readOnlyInspectionKey struct{}
 // message may refer to an older execution than the one being inspected.
 func InspectReadOnly(ctx context.Context, driver Driver, id string) (Status, error) {
 	return driver.Inspect(context.WithValue(ctx, readOnlyInspectionKey{}, struct{}{}), id)
+}
+
+// StillReady checks an inspection again after other work has delayed its use.
+func (s Status) StillReady() bool {
+	return s.Ready && (s.RecheckReady == nil || s.RecheckReady())
 }
 
 // HealthChecker revalidates the current execution, control network and public

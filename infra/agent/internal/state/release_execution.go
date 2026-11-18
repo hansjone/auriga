@@ -75,18 +75,26 @@ func readExecutions(tx *bbolt.Tx) ([]ExecutionRecord, error) {
 		return out, nil
 	}
 	err := b.ForEach(func(k, v []byte) error {
-		var r ExecutionRecord
-		if v == nil || json.Unmarshal(v, &r) != nil || r.validate() != nil || string(k) != r.InstanceID {
-			return ErrExecutionCorrupt
-		}
-		raw, err := json.Marshal(r)
-		if err != nil || !bytes.Equal(raw, v) {
-			return ErrExecutionCorrupt
+		r, err := decodeExecution(k, v)
+		if err != nil {
+			return err
 		}
 		out = append(out, r)
 		return nil
 	})
 	return out, err
+}
+
+func decodeExecution(k, v []byte) (ExecutionRecord, error) {
+	var r ExecutionRecord
+	if v == nil || json.Unmarshal(v, &r) != nil || r.validate() != nil || string(k) != r.InstanceID {
+		return ExecutionRecord{}, ErrExecutionCorrupt
+	}
+	raw, err := json.Marshal(r)
+	if err != nil || !bytes.Equal(raw, v) {
+		return ExecutionRecord{}, ErrExecutionCorrupt
+	}
+	return r, nil
 }
 
 func (s *Store) ListExecutions() ([]ExecutionRecord, error) {
