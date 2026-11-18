@@ -185,4 +185,94 @@ class DeviceResourcePermissionsTest {
           verifyNoInteractions(org);
         });
   }
+
+  @Test
+  void installationTargetRequiresTheCurrentManagedLineageOrProvenDesktop() {
+    var tenant = UUID.randomUUID();
+    String account = UUID.randomUUID().toString(), device = UUID.randomUUID().toString();
+    String instance = UUID.randomUUID().toString(), sessionId = UUID.randomUUID().toString();
+    String expiry = java.time.Instant.now().plusSeconds(300).toString();
+    var store = mock(IamStore.class);
+    var sessions = mock(SessionManager.class);
+    when(store.tx(any()))
+        .thenAnswer(call -> call.<java.util.function.Supplier<?>>getArgument(0).get());
+    var session =
+        Json.object(
+            "sessionId",
+            sessionId,
+            "accountId",
+            account,
+            "audience",
+            "portal",
+            "kind",
+            "managed_device",
+            "managedInstance",
+            instance,
+            "managedVersion",
+            1,
+            "expiresAt",
+            expiry,
+            "idleExpiresAt",
+            expiry);
+    var row =
+        Json.object(
+            "accountId",
+            account,
+            "sessionId",
+            sessionId,
+            "scope",
+            "auriga.connect",
+            "deviceId",
+            device,
+            "deviceType",
+            "managed",
+            "managedInstance",
+            instance,
+            "managedVersion",
+            1);
+    var lineage =
+        Json.object("owner", account, "device", device, "version", 1, "expiresAt", expiry);
+    when(store.get(eq("device"), eq(device), anyBoolean())).thenReturn(row);
+    when(store.byId("session", sessionId, false)).thenReturn(session);
+    when(sessions.activeById(sessionId)).thenReturn(session);
+    when(store.get("managed_device", instance, false)).thenReturn(lineage);
+    var authority = new DeviceAccessAuthority(store, sessions, null);
+    TenantContext.run(
+        tenant,
+        () -> {
+          assertEquals(
+              Optional.of(UUID.fromString(instance)),
+              authority.installationInstance(tenant.toString(), account, device));
+          lineage.put("version", 2);
+          assertEquals(
+              CommonErrors.FORBIDDEN,
+              assertThrows(
+                      AurigaException.class,
+                      () -> authority.installationInstance(tenant.toString(), account, device))
+                  .errorCode());
+          lineage.put("version", 1).put("revoked", true);
+          assertEquals(
+              CommonErrors.FORBIDDEN,
+              assertThrows(
+                      AurigaException.class,
+                      () -> authority.installationInstance(tenant.toString(), account, device))
+                  .errorCode());
+          row.remove(List.of("deviceType", "managedInstance", "managedVersion"));
+          assertEquals(
+              CommonErrors.FORBIDDEN,
+              assertThrows(
+                      AurigaException.class,
+                      () -> authority.installationInstance(tenant.toString(), account, device))
+                  .errorCode());
+          session.remove(List.of("kind", "managedInstance", "managedVersion"));
+          assertTrue(authority.installationInstance(tenant.toString(), account, device).isEmpty());
+          when(sessions.activeById(sessionId)).thenReturn(null);
+          assertEquals(
+              CommonErrors.FORBIDDEN,
+              assertThrows(
+                      AurigaException.class,
+                      () -> authority.installationInstance(tenant.toString(), account, device))
+                  .errorCode());
+        });
+  }
 }

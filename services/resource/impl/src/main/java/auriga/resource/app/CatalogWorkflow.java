@@ -25,7 +25,7 @@ public final class CatalogWorkflow {
   private final ResourceStore tx;
   private final ResourceWorkflowStore db;
   private final ResourceAccess access;
-  private final ResourceWorkflow operations;
+  private final ResourceOperations operations;
   private final Supplier<ObjectStore> objects;
   private final Supplier<ResourceSigning> signing;
   private final BooleanSupplier writes;
@@ -37,7 +37,7 @@ public final class CatalogWorkflow {
       ResourceStore tx,
       ResourceWorkflowStore db,
       ResourceAccess access,
-      ResourceWorkflow operations,
+      ResourceOperations operations,
       Supplier<ObjectStore> objects,
       Supplier<ResourceSigning> signing,
       BooleanSupplier writes,
@@ -87,7 +87,7 @@ public final class CatalogWorkflow {
   }
 
   private static void match(String etag, long rev) {
-    ResourceWorkflow.match(etag, rev);
+    ResourceOperations.match(etag, rev);
   }
 
   private static AurigaException missing() {
@@ -749,7 +749,7 @@ public final class CatalogWorkflow {
                     "resource.review_required", 409, io.grpc.Status.Code.FAILED_PRECONDITION));
           if (revoked(v)) throw forbidden();
           long seq = number(pack, "release_high_water") + 1;
-          if (seq > ResourceWorkflow.MAX) throw conflict();
+          if (seq > ResourceOperations.MAX) throw conflict();
           var env = envelope(r, v, seq);
           db.update(
               "UPDATE resource.catalog_version SET state='published',revision=revision+1,release_sequence=:seq,envelope=CAST(:env AS jsonb) WHERE tenant_id=:tenant AND id=:id",
@@ -870,7 +870,7 @@ public final class CatalogWorkflow {
   private void resignRevocations() {
     var old = db.revocations();
     long revision = old == null ? 1 : old.path("revision").asLong() + 1;
-    if (revision > ResourceWorkflow.MAX) throw conflict();
+    if (revision > ResourceOperations.MAX) throw conflict();
     var now = clock.instant();
     var list =
         JSON.createObjectNode()

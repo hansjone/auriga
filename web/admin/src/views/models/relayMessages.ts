@@ -67,6 +67,8 @@ const zh = {
     '已切换的字段采用上游优先；上游缺失时已将原手动值保为管理员推荐兜底，后续上游提供时优先采用上游。保存后发布。',
   capabilitySourceRoute: '能力来源模型 / 路由',
   capabilityChooseRoute: '先添加真实模型路由',
+  capabilityChooseKnownRoute: '选择模型以添加路由并绑定来源',
+  capabilityAddKnownRoute: '添加路由',
   capabilityInherit: '继承上游（缺失时用推荐值）',
   capabilityManual: '手动覆盖',
   capabilityRecommendedContext: '推荐上下文（上游缺失时使用）',
@@ -108,8 +110,12 @@ const zh = {
 
   relay: '中转站',
   fetchModels: '获取供应商模型',
-  catalogHint: '获取后可在输入框搜索并选择，也可手动填写上游模型 ID。',
+  catalogHint: '可选择已有路由模型、获取供应商目录，或手动填写上游模型 ID。',
   catalogEmpty: '供应商没有返回可用模型，可继续手动填写。',
+  catalogHistoricalExisting:
+    '此历史模型未出现在供应商目录中。可编辑或移除已有路由。',
+  catalogHistoricalNew:
+    '此历史模型未出现在供应商目录中，不能新增该历史模型。请选择其他模型。',
   aliasNote:
     '上游真实模型 ID 用于调用供应商；对外公开 ID 可自定义，成员和外部 Key 使用公开 ID。',
   catalog_credential_missing: '请先为此供应商配置密钥。',
@@ -301,6 +307,9 @@ const en: Record<keyof typeof zh, string> = {
     'Switched fields use upstream first. Previous manual values for omitted fields were retained as administrator recommendations; future upstream values take priority. Save to publish.',
   capabilitySourceRoute: 'Capability source model / route',
   capabilityChooseRoute: 'Add an upstream model route first',
+  capabilityChooseKnownRoute:
+    'Choose a model to add its route and set the source',
+  capabilityAddKnownRoute: 'Add route',
   capabilityInherit: 'Inherit upstream, then recommended values',
   capabilityManual: 'Manual override',
   capabilityRecommendedContext: 'Recommended context when upstream omits it',
@@ -349,9 +358,13 @@ const en: Record<keyof typeof zh, string> = {
   relay: 'Relay',
   fetchModels: 'Fetch provider models',
   catalogHint:
-    'After fetching, search and select in the model input, or enter an upstream ID manually.',
+    'Choose a model from saved routes, fetch the catalog, or enter the upstream model ID.',
   catalogEmpty:
     'The provider returned no available models. You can enter an ID manually.',
+  catalogHistoricalExisting:
+    'This historical model is missing from the provider catalog. You can edit or remove the saved route.',
+  catalogHistoricalNew:
+    'This historical model is missing from the provider catalog and cannot be added. Choose another model.',
   aliasNote:
     'The upstream model ID selects the provider model. Members and external keys use your custom public model ID.',
   catalog_credential_missing: 'Configure a credential for this provider first.',

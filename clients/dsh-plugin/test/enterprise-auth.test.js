@@ -8,7 +8,15 @@ import { fileURLToPath } from 'node:url';
 import { createEnterpriseAuth } from '../src/local/enterprise.js';
 import { createEnterpriseEnvironment } from '../src/local/enterprise-environment.js';
 
-async function fixture(t) {
+function collectDuringDispatch(env, execution) {
+  return env.run(execution, () => {
+    const value = env.contributor.resolve(execution);
+    assert.equal(typeof value.then, 'undefined');
+    return value;
+  });
+}
+
+async function fixture(t, { empNo = '00001', beforeCredentials } = {}) {
   let authGeneration = 1;
   let sent;
   const sending = new Promise((resolve) => {
@@ -41,7 +49,10 @@ async function fixture(t) {
         ? null
         : JSON.stringify([snapshot.shellEpoch, authGeneration]),
     getOwner: (id) => (id === 'session' ? 'member' : null),
-    credentials: async () => ({ empNo: '00001', token, updatedAt: null }),
+    credentials: async () => {
+      await beforeCredentials?.();
+      return { empNo, token, updatedAt: null };
+    },
     config: () => config,
     now: () => time,
     monotonic: () => ticks,
@@ -309,7 +320,7 @@ test('shellEnv lifecycle and packaged unchanged Python request()/resolve() compa
     agent: { session: { header: { id: 'session' } } },
     signal: new AbortController().signal,
   };
-  const values = env.contributor.resolve(execution);
+  const values = await collectDuringDispatch(env, execution);
   assert.equal(values.DSH_TEAM_BASE, f.base);
   assert.ok(!JSON.stringify(values).includes(f.initialToken));
   const child = spawn(
@@ -373,7 +384,7 @@ test('only a verified running native job retains enterprise context until its te
     agent: { session: { header: { id: 'session' } } },
     signal: controller.signal,
   };
-  const values = await env.contributor.resolve(execution);
+  const values = await collectDuringDispatch(env, execution);
   env.finish(
     execution,
     { value: { kind: 'background', jobId: 'job' } },
@@ -396,6 +407,92 @@ test('only a verified running native job retains enterprise context until its te
   event({ job: { id: 'job' }, type: 'settled' });
   assert.equal((await f.raw(headers)).status, 401);
 });
+
+test('an old session starts each tool with the current UAC pair and a running tool can refresh', async (t) => {
+  const f = await fixture(t, { empNo: '000123' });
+  const env = createEnterpriseEnvironment({
+    auth: f.auth,
+    getServer: () => ({ port: f.port }),
+    prepare: async (execution) =>
+      execution.agent.session.header.id === 'session'
+        ? 'trusted-tool'
+        : undefined,
+  });
+  t.after(() => env.dispose());
+  const task = (id = 'session') => ({
+    token: {},
+    agent: { session: { header: { id } } },
+    signal: new AbortController().signal,
+  });
+  const parent = [process.env.DSH_AURIGA_ID, process.env.DSH_AURIGA_TOKEN];
+  const firstTask = task();
+  assert.equal(env.contributor.resolve(firstTask).DSH_AURIGA_TOKEN, '');
+  const first = await collectDuringDispatch(env, firstTask);
+  const firstHeaders = {
+    'X-Dsh-Team-Task-Capability': first.DSH_TEAM_TASK_CAPABILITY,
+  };
+  assert.equal(first.DSH_AURIGA_ID, '000123');
+  assert.equal(first.DSH_AURIGA_TOKEN, f.initialToken);
+  assert.equal(env.contributor.resolve(firstTask).DSH_AURIGA_TOKEN, '');
+  f.rotate();
+  const resumedTask = { ...task(), agent: firstTask.agent };
+  const current = await collectDuringDispatch(env, resumedTask);
+  assert.equal(current.DSH_AURIGA_ID, '000123');
+  assert.equal(current.DSH_AURIGA_TOKEN, f.token());
+  assert.equal(first.DSH_AURIGA_TOKEN, f.initialToken);
+  assert.equal((await (await f.raw(firstHeaders)).json()).token, f.token());
+  const foreign = await collectDuringDispatch(env, task('other-session'));
+  assert.deepEqual([foreign.DSH_AURIGA_ID, foreign.DSH_AURIGA_TOKEN], ['', '']);
+  f.disable();
+  const disabled = await collectDuringDispatch(env, task());
+  assert.deepEqual(
+    [disabled.DSH_AURIGA_ID, disabled.DSH_AURIGA_TOKEN],
+    ['', ''],
+  );
+  assert.ok(disabled.DSH_TEAM_TASK_CAPABILITY, 'outbound must stay available');
+  assert.equal((await f.raw(firstHeaders)).status, 403);
+  f.enable();
+  f.logout();
+  const signedOut = await collectDuringDispatch(env, task());
+  assert.deepEqual(
+    [signedOut.DSH_AURIGA_ID, signedOut.DSH_AURIGA_TOKEN],
+    ['', ''],
+  );
+  assert.equal((await f.raw(firstHeaders)).status, 401);
+  assert.deepEqual(
+    [process.env.DSH_AURIGA_ID, process.env.DSH_AURIGA_TOKEN],
+    parent,
+  );
+});
+
+test('discards the launch pair when an in-flight credential read outlives its task', async (t) => {
+  let finish, started;
+  const pending = new Promise((resolve) => (finish = resolve));
+  const reading = new Promise((resolve) => (started = resolve));
+  const f = await fixture(t, {
+    beforeCredentials: () => {
+      started();
+      return pending;
+    },
+  });
+  const env = createEnterpriseEnvironment({
+    auth: f.auth,
+    getServer: () => ({ port: f.port }),
+    prepare: async () => 'trusted-tool',
+  });
+  t.after(() => env.dispose());
+  const controller = new AbortController();
+  const launch = collectDuringDispatch(env, {
+    agent: { session: { header: { id: 'session' } } },
+    signal: controller.signal,
+  });
+  await reading;
+  controller.abort();
+  finish();
+  const value = await launch;
+  assert.deepEqual([value.DSH_AURIGA_ID, value.DSH_AURIGA_TOKEN], ['', '']);
+});
+
 test('failed native context retention revokes a promoted job capability immediately', async (t) => {
   const f = await fixture(t);
   const env = createEnterpriseEnvironment({
@@ -410,7 +507,7 @@ test('failed native context retention revokes a promoted job capability immediat
     agent: { session: { header: { id: 'session' } } },
     signal: new AbortController().signal,
   };
-  const values = await env.contributor.resolve(execution);
+  const values = await collectDuringDispatch(env, execution);
   env.finish(
     execution,
     { value: { kind: 'promoted', jobId: 'job' } },

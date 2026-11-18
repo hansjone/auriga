@@ -56,12 +56,14 @@ func TestUACK2DeviceNavigationAndCSRF(t *testing.T) {
 		w.Header().Set(uacCorrelationHeader, correlation)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(201)
-		_ = json.NewEncoder(w).Encode(map[string]any{"context": uacNavigationContext{NavigationProof: proof, ExpiresAt: time.Now().Add(120 * time.Second), TransactionID: correlation, Purpose: "device", AutoEligible: false, AutoSuppressed: true}, "transactionCookie": tx, "csrfCookie": csrf, "ttlSeconds": 120})
+		meta, _ := received["fetchMetadata"].(map[string]any)
+		_ = json.NewEncoder(w).Encode(map[string]any{"context": uacNavigationContext{NavigationProof: proof, ExpiresAt: time.Now().Add(120 * time.Second), TransactionID: correlation, Purpose: "device", AutoEligible: meta["site"] == "none", AutoSuppressed: true}, "transactionCookie": tx, "csrfCookie": csrf, "ttlSeconds": 120})
 	}))
 	request := httptest.NewRequest("GET", g.Cfg.Access.PortalURL()+"/device/BCDF-GHJK?deviceGrantId=forged", nil)
 	request.Header.Set("Cookie", "auriga_portal_sso_suppression="+suppression+"; auriga_csrf="+csrf)
 	request.Header.Set("Sec-Fetch-Dest", "document")
 	request.Header.Set("Sec-Fetch-Mode", "navigate")
+	request.Header.Set("Sec-Fetch-Site", "none")
 	request.Header.Set("X-Auriga-Correlation-Id", "forged")
 	rec := httptest.NewRecorder()
 	if !g.serveUacNavigation(rec, request) || rec.Code != 200 {
@@ -73,12 +75,16 @@ func TestUACK2DeviceNavigationAndCSRF(t *testing.T) {
 	if rec.Header().Get(uacCorrelationHeader) != correlation || !strings.Contains(rec.Body.String(), correlation) || strings.Contains(rec.Body.String(), csrf) || strings.Contains(rec.Body.String(), tx) || strings.Contains(rec.Body.String(), suppression) {
 		t.Fatal("unsafe navigation projection")
 	}
+	if !strings.Contains(rec.Body.String(), `"autoEligible":true`) {
+		t.Fatal("browser handoff without an in-browser activation did not enable SSO")
+	}
 	// Reuse preserves the value and renews its lifetime for the new proof.
 	cookies := rec.Result().Cookies()
 	if len(cookies) != 2 || cookies[1].Value != csrf || cookies[1].MaxAge < 120 || !cookies[0].HttpOnly || cookies[0].Secure || cookies[0].Domain != "" {
 		t.Fatal("cookie reuse regressed")
 	}
 	request.Header.Del("Cookie")
+	request.URL.RawQuery = "mode=manual"
 	rec = httptest.NewRecorder()
 	g.serveUacNavigation(rec, request)
 	cookies = rec.Result().Cookies()
@@ -87,6 +93,9 @@ func TestUACK2DeviceNavigationAndCSRF(t *testing.T) {
 	}
 	if rec.Header().Get("X-Frame-Options") != "DENY" || rec.Header().Get("Cache-Control") != "no-store" {
 		t.Fatal("authentication document is embeddable/cacheable")
+	}
+	if strings.Contains(rec.Body.String(), `"autoEligible":true`) {
+		t.Fatal("manual desktop restart still permits automatic SSO")
 	}
 }
 

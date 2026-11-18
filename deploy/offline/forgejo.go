@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"mime/multipart"
 	"net/http"
 	"net/netip"
 	"net/url"
@@ -234,14 +233,12 @@ func (a *forgejoAPI) upload(path, root string, info assetInfo) error {
 		return err
 	}
 	defer func() { _ = in.Close() }()
-	var header bytes.Buffer
-	writer := multipart.NewWriter(&header)
-	if _, err := writer.CreateFormFile("attachment", info.Name); err != nil {
-		return err
+	var body io.Reader = in
+	if info.Size == 0 {
+		body = http.NoBody
 	}
-	footer := "\r\n--" + writer.Boundary() + "--\r\n"
-	body := io.MultiReader(bytes.NewReader(header.Bytes()), in, strings.NewReader(footer))
-	response, err := a.request("POST", a.base+path+"?name="+url.QueryEscape(info.Name), body, writer.FormDataContentType(), int64(header.Len())+info.Size+int64(len(footer)))
+	// Forgejo can stream the request body directly to attachment storage.
+	response, err := a.request("POST", a.base+path+"?name="+url.QueryEscape(info.Name), body, "application/octet-stream", info.Size)
 	if err != nil {
 		return err
 	}
@@ -258,7 +255,12 @@ func forgejoReleaseBody(m distributionManifest, key string) (string, error) {
 		return "", err
 	}
 	var body strings.Builder
-	fmt.Fprintf(&body, "Auriga 离线安装包与开发套件。发行公钥指纹 SHA256(SPKI DER)：`%s`。从独立渠道核对后使用 `--trust-fingerprint %s` 或 `--verify-key`，参见 DEPLOY.md / MAINTAIN.md。\n\n", fp, fp)
+	if m.SourceOnly {
+		body.WriteString("Auriga 源码与开发套件。现场按 MAINTAIN.md 离线构建和签发自己的版本。")
+	} else {
+		body.WriteString("Auriga 离线安装包与开发套件。")
+	}
+	fmt.Fprintf(&body, "发行公钥指纹 SHA256(SPKI DER)：`%s`。从独立渠道核对后使用 `--trust-fingerprint %s` 或 `--verify-key`。\n\n", fp, fp)
 	if m.Windows != nil {
 		fmt.Fprintf(&body, "Windows 先用 Get-FileHash 核验源码和套件归档，再解包，核验引导 Node 后执行客户端命令。\n\n- `%s` SHA256 `%s`\n", windowsBuildNodePath, m.Windows.BuildNodeSHA)
 		for _, file := range m.Archives {

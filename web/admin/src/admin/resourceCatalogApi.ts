@@ -2,6 +2,7 @@ import type { components } from '../../../shared/src/generated/resource';
 import { ApiError } from '@auriga/shared';
 import { apiClient, readResource } from '../api';
 import type { CatalogKind } from './resourceCatalogUpload';
+export { browserUuid as catalogKey } from './browserUuid';
 
 export type CatalogVersion = components['schemas']['UnifiedVersion'];
 export type CatalogReview = components['schemas']['UnifiedReview'];
@@ -22,16 +23,6 @@ const base = '/api/resource/v1/catalog/packages';
 const admin = '/api/resource/v1/admin/catalog';
 const id = encodeURIComponent;
 const path = (p: string, v: string) => `${base}/${id(p)}/versions/${id(v)}`;
-// getRandomValues is available on supported HTTP origins too.
-export function catalogKey() {
-  const bytes = globalThis.crypto.getRandomValues(new Uint8Array(16));
-  bytes[6] = (bytes[6]! & 15) | 64;
-  bytes[8] = (bytes[8]! & 63) | 128;
-  const hex = Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join(
-    '',
-  );
-  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
-}
 const headers = (etag: string, key: string) => ({
   'If-Match': etag,
   'Idempotency-Key': key,

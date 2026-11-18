@@ -90,7 +90,7 @@ export interface paths {
     put?: never;
     /**
      * edge向IAM签发并登记SSO导航事务
-     * @description 仅内部受认证传输：svc:edge的auriga.internal服务JWT（ptyp=internal_service、ctx=service）和auriga-tenant-id受委派tenant，分离部署必须mTLS，禁止公网或浏览器调用。B从真实门户导航读取完整Origin和Fetch Metadata，A核对受信门户入口/tenant/provider，自己计算autoEligible，原子登记120秒一次性proof哈希及事务cookie绑定；GET门户不建session。返回context由B放入no-store HTML，transactionCookie仅由B设置HttpOnly同入口cookie，不交脚本。本端点仅portal续接，拒绝deviceGrantId；设备用途仅调用device-navigation-proofs并传userCode，autoEligible恒false。缺证据显示扫码/显式继续。SSO POST由A核精确Origin/CSRF/cookie并CAS消费证明。requestId重放冲突；丢失响应由新页面签发新事务并作废旧证明。
+     * @description 仅内部受认证传输：svc:edge的auriga.internal服务JWT（ptyp=internal_service、ctx=service）和auriga-tenant-id受委派tenant，分离部署必须mTLS，禁止公网或浏览器调用。B从真实门户导航读取完整Origin和Fetch Metadata，A核对受信门户入口/tenant/provider，自己计算autoEligible，原子登记120秒一次性proof哈希及事务cookie绑定；GET门户不建session。返回context由B放入no-store HTML，transactionCookie仅由B设置HttpOnly同入口cookie，不交脚本。本端点仅portal续接，拒绝deviceGrantId。设备用途仅调用device-navigation-proofs并传userCode。缺证据显示扫码。SSO POST由A核精确Origin/CSRF/cookie并CAS消费证明。requestId重放冲突；丢失响应由新页面签发新事务并作废旧证明。
      */
     post: operations['issueUacNavigationProof'];
     delete?: never;
@@ -153,7 +153,7 @@ export interface paths {
     put?: never;
     /**
      * 门户服务端尝试SSO免扫码登录草案
-     * @description 仅portal/login用途。门户顶层导航服务端签发120秒一次性navigationProof，绑定浏览器事务cookie、完整Origin、tenant/provider和导航资格；POST精确Origin、CSRF和CAS消费验证。auto须再次检查导航资格及退出抑制，continue仅由可信页面明确按钮触发，不接受link/stepup或客户端UAC凭据。Cookie只由门户服务端读取，私有映射选Portal完整配对优先、其次UDS，禁止跨体系混配；前端不读取或转发Cookie。未开启、无Cookie、退出抑制或上游验证不通过返回scan_required；安全围栏失败403。成功保存bo.token，执行既有准入/MFA，轮换会话ID，SSO/扫码共用信息查询与复验。既有有效会话不被该接口静默切换；响应不含上游原文或token，Cache-Control no-store。导航签发与抑制细则见docs/design/auth-shell.zh.md第3.1.1节。 设备确认及其登录续接禁止auto，即使导航证明与Cookie齐全也须由用户点击继续并核码，发起设备与用户码取服务端权威事务。按用户决定支持单IP单域名部署，SSO按既有开关与Cookie可用性生效，同域Cookie可读风险已由用户接受。
+     * @description 仅portal/login用途。门户顶层导航服务端签发120秒一次性navigationProof，绑定浏览器事务cookie、完整Origin、tenant/provider和导航资格；POST精确Origin、CSRF和CAS消费验证。auto须再次检查导航资格及退出抑制，continue仅由旧版可信页面明确按钮触发，不接受link/stepup或客户端UAC凭据。Cookie只由门户服务端读取，私有映射选Portal完整配对优先、其次UDS，禁止跨体系混配；前端不读取或转发Cookie。未开启、无Cookie、退出抑制或上游验证不通过返回scan_required；安全围栏失败403。成功保存验证返回的令牌（优先 other.token，仅字段缺失时读取 bo.token；显式非法字段不回退），执行既有准入/MFA，轮换会话ID，SSO/扫码共用信息查询与复验。既有有效会话不被该接口静默切换；响应不含上游原文或token，Cache-Control no-store。合法待批准设备的顶层浏览器导航可自动完成门户SSO，批准设备仍需要本人核码与既有验证。按用户决定支持单IP单域名部署，SSO按既有开关与Cookie可用性生效。
      */
     post: operations['loginUacSso'];
     delete?: never;
@@ -1449,7 +1449,7 @@ export interface components {
       | 'identity_mismatch'
       | 'upstream_fault'
       | 'retry_exhausted';
-    /** @description 仅svc:edge使用。IAM在受委派tenant内规范化userCode（去连字符、大写），解析唯一、未过期且未消费的权威设备事务，核对provider和来源绑定；失败统一404。解析和导航证明绑定原子完成，不向浏览器返回grant ID。autoEligible恒false。 */
+    /** @description 仅svc:edge使用。IAM在受委派tenant内规范化userCode（去连字符、大写），解析唯一、未过期且未消费的权威设备事务，核对provider和来源绑定；失败统一404。解析和导航证明绑定原子完成，不向浏览器返回grant ID。受信的顶层导航可自动验证浏览器SSO，设备批准仍需要本人核码及既有验证。 */
     UacDeviceNavigationIssueRequest: {
       /** Format: uuid */
       requestId: string;

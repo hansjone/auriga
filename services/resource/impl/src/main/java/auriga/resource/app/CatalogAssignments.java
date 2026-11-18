@@ -183,7 +183,7 @@ final class CatalogAssignments {
     db.lock("catalog-assignments");
     var row = row(id);
     catalog.pkg(r, (UUID) row.get("package_id"), false);
-    ResourceWorkflow.match(etag, number(row, "revision"));
+    ResourceOperations.match(etag, number(row, "revision"));
     int changed =
         db.update(
             "UPDATE resource.catalog_assignment SET active=false,revision=revision+1 WHERE tenant_id=:tenant AND id=:id AND active",

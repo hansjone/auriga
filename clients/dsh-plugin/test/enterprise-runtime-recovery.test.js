@@ -14,7 +14,7 @@ test('native background skill capability reacquires current host context after o
     join(tmpdir(), 'auriga-enterprise-recovery-'),
   );
   const connection = brokerFixture();
-  let runtime, contributor, jobResult;
+  let runtime, contributor, dispatchTool, jobResult, waitForAgent;
   const effects = [];
   const server = createServer(
     (req, res) => void runtime.enterprise.handle(req, res),
@@ -27,15 +27,20 @@ test('native background skill capability reacquires current host context after o
     await new Promise((resolve) => server.close(resolve));
     await rm(directory, { recursive: true, force: true });
   });
-  const session = { id: randomUUID(), header: { id: randomUUID() } };
+  let session = { id: randomUUID(), header: { id: randomUUID() } };
   session.header.id = session.id;
-  const agent = { id: session.id, session };
+  let agent = { id: session.id, session };
   const ctx = {
     sessions: { get: (id) => (id === session.id ? session : undefined) },
     agents: { get: (id) => (id === session.id ? agent : undefined) },
     workspaceRegistry: { archivedSessionIds: [] },
     sessionPersistence: {},
-    sessionController: { resolveAgent: async () => ({ agent }) },
+    sessionController: {
+      async resolveAgent() {
+        await waitForAgent?.();
+        return { agent };
+      },
+    },
     webServer: { server, port: server.address().port },
     shellEnv: {
       register(value) {
@@ -47,6 +52,7 @@ test('native background skill capability reacquires current host context after o
       events: { subscribe: () => () => {} },
     },
     on(name, fn) {
+      if (name === 'tools/execute') dispatchTool = fn;
       if (name === 'tools/result') jobResult = fn;
       return () => {};
     },
@@ -57,12 +63,14 @@ test('native background skill capability reacquires current host context after o
       if (names.every((name) => ctx[name])) fn(ctx);
     },
   };
-  runtime = await createConnectRuntime({
-    directory,
-    ctx,
-    config: { platformOrigin: '' },
-    connection,
-  });
+  const start = () =>
+    createConnectRuntime({
+      directory,
+      ctx,
+      config: { platformOrigin: '' },
+      connection,
+    });
+  runtime = await start();
   const controller = new AbortController();
   const execution = {
     agent,
@@ -71,7 +79,11 @@ test('native background skill capability reacquires current host context after o
     token: {},
     signal: controller.signal,
   };
-  const environment = await contributor.resolve(execution);
+  assert.equal(contributor.resolve(execution).DSH_AURIGA_TOKEN, '');
+  const environment = await dispatchTool(execution, () =>
+    contributor.resolve(execution),
+  );
+  assert.equal(environment.DSH_AURIGA_TOKEN, connection.token());
   const raw = () =>
     fetch(
       `http://127.0.0.1:${server.address().port}/dsh-team/agent-credentials`,
@@ -94,6 +106,18 @@ test('native background skill capability reacquires current host context after o
   const response = await raw();
   assert.equal(response.status, 200);
   assert.equal((await response.json()).token, connection.token());
+  const resumed = {
+    ...execution,
+    callId: randomUUID(),
+    token: {},
+    signal: new AbortController().signal,
+  };
+  const updated = await dispatchTool(resumed, () =>
+    contributor.resolve(resumed),
+  );
+  assert.equal(updated.DSH_AURIGA_TOKEN, connection.token());
+  assert.notEqual(environment.DSH_AURIGA_TOKEN, updated.DSH_AURIGA_TOKEN);
+  jobResult(resumed, {});
   connection.transition('authenticated', {
     uacSessionBinding: {
       ...connection.identity.uacSessionBinding,
@@ -101,4 +125,76 @@ test('native background skill capability reacquires current host context after o
     },
   });
   assert.equal((await raw()).status, 401);
+
+  const original = {
+    memberId: connection.identity.memberId,
+    uacSessionBinding: {
+      ...connection.identity.uacSessionBinding,
+      authGeneration: 1,
+    },
+  };
+  function runResumedTool() {
+    const next = {
+      agent,
+      callId: randomUUID(),
+      rootCallId: randomUUID(),
+      token: {},
+      signal: new AbortController().signal,
+    };
+    return dispatchTool(next, () => contributor.resolve(next)).finally(() =>
+      jobResult(next, {}),
+    );
+  }
+  connection.transition('signed_out');
+  assert.equal((await raw()).status, 401);
+  connection.rotate();
+  connection.transition('authenticated', original);
+  await setImmediate();
+  const relogged = await runResumedTool();
+  assert.equal(relogged.DSH_AURIGA_ID, '00001');
+  assert.equal(relogged.DSH_AURIGA_TOKEN, connection.token());
+  assert.equal((await raw()).status, 401);
+
+  async function restart(memberId) {
+    for (const dispose of effects.splice(0).reverse()) await dispose?.();
+    await runtime.close();
+    connection.transition('authenticated', { ...original, memberId });
+    session = { id: session.id, header: { ...session.header } };
+    agent = { id: session.id, session };
+    runtime = await start();
+    return runResumedTool();
+  }
+  connection.rotate();
+  const otherLogin = randomUUID();
+  connection.transition('authenticated', { ...original, memberId: otherLogin });
+  await setImmediate();
+  const switched = await runResumedTool();
+  assert.equal(switched.DSH_AURIGA_TOKEN, connection.token());
+  assert.notEqual(switched.DSH_AURIGA_TOKEN, relogged.DSH_AURIGA_TOKEN);
+  assert.equal((await raw()).status, 401);
+  const restored = await restart(otherLogin);
+  assert.equal(restored.DSH_AURIGA_ID, '00001');
+  assert.equal(restored.DSH_AURIGA_TOKEN, connection.token());
+
+  let entered, release;
+  const enteredAgent = new Promise((resolve) => (entered = resolve));
+  const agentGate = new Promise((resolve) => (release = resolve));
+  waitForAgent = () => {
+    entered();
+    return agentGate;
+  };
+  const inFlight = runResumedTool();
+  await enteredAgent;
+  waitForAgent = undefined;
+  connection.transition('signed_out');
+  connection.rotate();
+  connection.transition('authenticated', original);
+  await setImmediate();
+  release();
+  const interrupted = await inFlight;
+  assert.equal(interrupted.DSH_TEAM_TASK_CAPABILITY, '');
+  assert.equal(interrupted.DSH_AURIGA_ID, '');
+  assert.equal(interrupted.DSH_AURIGA_TOKEN, '');
+  const after = await runResumedTool();
+  assert.equal(after.DSH_AURIGA_TOKEN, connection.token());
 });

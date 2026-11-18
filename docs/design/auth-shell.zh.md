@@ -10,7 +10,7 @@
 
 ### 1.1 现场协议与公开文档边界
 
-登录页服务端优先检查浏览器SSO Cookie并验证，缺失或验证不通过则显示扫码。设备确认页先要求用户显式继续。扫码取得token和工号即完成UAC登录。两种方式登录成功后，均执行一次purpose=login_info的部门查询用于展示，失败只记WARN。到期的purpose=revalidate按部署策略执行：默认token-verify验证token，department部门查询保留为可切换备用策略。本设计保留用户最终规则，验收使用替身与日志断言。
+登录页服务端优先检查浏览器SSO Cookie并验证，缺失或验证不通过则显示扫码。桌面系统浏览器也优先复用公司登录态。设备批准仍须本人核码确认。扫码取得token和工号即完成UAC登录。两种方式登录成功后，均执行一次purpose=login_info的部门查询用于展示，失败只记WARN。到期的purpose=revalidate按部署策略执行：默认token-verify验证token，department部门查询保留为可切换备用策略。本设计保留用户最终规则，验收使用替身与日志断言。
 
 真实接口主机、完整路径和系统标识只存部署或企业适配器私有配置，扫码与部门查询的报文编解码细节也保留在私有适配器。公开仓库的地址只使用 `<qrVerifyPath>`、`<userSearchUrl>`、`<tokenVerifyUrl>` 占位符；token-verify按第2.4.3节公开通用字段名、请求头及摘要算法，不包含真实地址、注册编码或凭据。适配器将本稿Uac挑战与上游报文互转，返回waiting/scanned、token、empNo和部门信息。来源文件、逐字段核对及原型与新规则差异记入未提交执行报告，企业专用细节不复制到公共契约。
 
@@ -131,11 +131,13 @@ token-verify按以下顺序分类，先检查HTTP与响应结构，不能只凭�
 
 - 明确业务失败：只有HTTP 200、合法JSON且code.code和bo.code两层返回码齐全（均为非空字符串），其中任一不是成功码"0000"，才立即判失效并撤销，reason=revalidation_rejected、failureClass=business_rejected。不硬编码某个特定失败码。
 - 上游故障：HTTP 3xx、4xx（包括401/403/429）、5xx、超时、网络错误、非JSON/畸形JSON、超大响应、缺少任一层返回码或码类型非法，一律不立即判失效，failureClass=upstream_fault，进入下述同一有界重试预算。非200即使body带失败码也属于上游故障；禁止跟随重定向，不无限遵从Retry-After。
-- 成功候选：HTTP 200、合法JSON且 `code.code == "0000"`、`bo.code == "0000"`同时成立后，再校验bo.user和bo.token。bo.user必须为字符串、去首尾空白后非空且不超过128字符，bo.token必须为非空字符串且不超过16384字符；缺失、空值、非法类型或超长均为上游响应故障，进入同一预算，不能以不完整成功报文续期或覆盖旧token。bo.orgId为可选资料，不授予成员权限。
+- 成功候选：HTTP 200、合法JSON且 `code.code == "0000"`、`bo.code == "0000"`同时成立后，再校验令牌与可选身份回显。令牌优先取 other.token，仅字段缺失才回退 bo.token；令牌必须为非空字符串且不超过16384字符。other 存在时必须为对象，bo.user 存在时必须是去首尾空白后非空且不超过128字符的字符串；显式 null、非法类型、超长或两处都无令牌属于上游响应故障。回显缺失时使用请求中已验证工号。bo.orgId为可选资料，不授予成员权限。
 
-成功候选中的bo.user与已验证account均去首尾空白，并按与语言环境无关的ASCII大小写折叠进行比对（仅A–Z转a–z），允许工号大小写及首尾空白差异。保留前导零，不转数字，不猜测长短工号或其他格式映射，也不改写第2.3节持久化身份主键。两个非空有效标识归一化后仍不一致，视为明确身份失败并立即撤销，reason=revalidation_rejected、failureClass=identity_mismatch；此项是完整成功码响应的额外主体校验，不将缺失用户字段当作明确失败。日志记录比对规则版本、匹配结果和工号，字段原文仍遵守第9节脱敏。
+IAM 与桌面适配器使用同一套空白字符：Unicode White_Space（含不换行空格 U+00A0 和全角空格 U+3000），外加兼容既有判空行为的 U+001C–U+001F 与 U+FEFF。扫码、SSO Cookie 和令牌验证只去掉工号两端的这些字符。令牌只用这套字符判空；只含空白的令牌非法，非空令牌的字节原样参与请求摘要、验证和保存。
 
-成功原子加密保存bo.token替换旧token（允许新旧相同），递增credentialVersion，写lastRevalidatedAt并推进nextRevalidateAt，清除重试记录；bo.orgId不写日志，也不替代登录时部门展示。IAM持久化凭据记录及session引用，同一tenant/provider/account及同一来源token的会话共享该凭据版本。每个凭据记录用数据库租约串行验证，HTTP前读取版本、提交时CAS校验版本和认证代次，旧响应不能覆盖新token。只推进本轮已到期会话的复验时间；未来到期会话仅引用新的凭据版本，不提前作判定性复验。不同tenant/provider不合并。登录信息查询若读取旧版本晚返回，仅可补同代会话展示，其失败仍不撤销、不覆盖token。
+成功候选中的bo.user与已验证account去首尾空白后，按与语言环境无关的ASCII大小写折叠进行比对（仅A–Z转a–z）。SSO 使用匹配回显的工号走与扫码一致的绑定，缺回显使用已验证的请求工号；保留所选工号的大小写和前导零。会话复验只更新令牌，不改写既有绑定。工号不转数字，不猜测长短工号或其他格式映射，也不改写第2.3节持久化身份主键。两个非空有效标识比对后仍不一致，视为明确身份失败，复验时立即撤销，reason=revalidation_rejected、failureClass=identity_mismatch；此项是完整成功码响应的额外主体校验，不将缺失用户字段当作明确失败。日志记录比对规则版本、匹配结果和工号，字段原文仍遵守第9节脱敏。
+
+成功原子加密保存验证返回的令牌替换旧token（允许新旧相同），递增credentialVersion，写lastRevalidatedAt并推进nextRevalidateAt，清除重试记录；bo.orgId不写日志，也不替代登录时部门展示。IAM持久化凭据记录及session引用，同一tenant/provider/account及同一来源token的会话共享该凭据版本。每个凭据记录用数据库租约串行验证，HTTP前读取版本、提交时CAS校验版本和认证代次，旧响应不能覆盖新token。只推进本轮已到期会话的复验时间；未来到期会话仅引用新的凭据版本，不提前作判定性复验。不同tenant/provider不合并。登录信息查询若读取旧版本晚返回，仅可补同代会话展示，其失败仍不撤销、不覆盖token。
 
 上述所有上游故障均不立即判失效：记录WARN及retry_pending，保持原会话/设备绑定有效，不发送revoked，也不预写nextRevalidateAt。首次故障同事务持久化attempt、retryAt、retryDeadline、strategy/configRevision与凭据版本，retryDeadline=首次故障时间+间隔乘最大重试数+一次请求超时。此后按配置间隔重试，最多max-retries次；达到次数或截止时间仍未成功则撤销，reason=revalidation_unreachable。max-retries=0表示首次上游故障立即耗尽。重启、租约接管、排队及配置切换不得重置次数/截止；截止后恢复的工作者直接处理耗尽，不重新获得宽限。始终优先服从会话自身过期、用户退出和管理员停用。
 
@@ -147,7 +149,7 @@ token-verify按以下顺序分类，先检查HTTP与响应结构，不能只凭�
 
 测试使用随机回环端口的协议替身，由测试显式注入transport，使用合成token和工号，结束关闭服务。登录替身覆盖waiting/scanned/success/denied/expired、成功码缺token或工号、错误业务码、HTTP错误、畸形及超大响应、并发complete、响应丢失、停用与到期晚响应。成功扫码后立即建立会话。验收“登录时部门查询成功并记录”和“登录时部门查询失败仍登录成功且nextRevalidateAt不变”，包括空部门、HTTP/业务错误、超时、网络失败、畸形响应及资料写入失败。正常完整登录流程purpose=login_info调用恰好1次，重复complete不增加次数，失败仅写WARN且不发session_revoke。
 
-采用可控时钟验证登录信息查询恰好1次、初次周期内purpose=revalidate调用为0、nextRevalidateAt持久化，重启仅领取到期复验会话，到期边界、批次抖动、多副本租约、成功复验后推进期限和失败后撤销。复验替身覆盖唯一匹配部门、工号不符/多条、空部门、HTTP/业务错误、超时、网络失败及畸形响应。备用department策略purpose=revalidate的上述失败立即撤销，部门查询不重试。token-verify替身覆盖双层成功码及任一非成功码、未知失败码、clientIP大小写、UTF-8无分隔MD5小写摘要、前端编码不能覆盖后端、bo.user大小写/首尾空白差异仍匹配、有效标识归一化后仍不匹配立即撤销、bo.user/bo.token缺失进入故障预算及原子替换。验证默认token-verify；网络失败/超时、3xx/4xx/5xx（包括代理401/403及429，即使body有失败码）、HTTP200非JSON、缺任一层码、非法码类型和不完整成功字段均不立即失效且设备仍可刷新、后续成功清预算、新token相同/不同、明确失败立即撤销、次数/时间上限耗尽撤销、重启不重置预算及并发/晚响应不能覆盖新token。MD5夹具只用合成值，验收是后续A实现要求，本PR不冒充已实现。日志断言核对两条链的purpose、级别、动作和关联，真实UDS联调不作为设计及后续迁移实现的验收门禁。
+采用可控时钟验证登录信息查询恰好1次、初次周期内purpose=revalidate调用为0、nextRevalidateAt持久化，重启仅领取到期复验会话，到期边界、批次抖动、多副本租约、成功复验后推进期限和失败后撤销。复验替身覆盖唯一匹配部门、工号不符/多条、空部门、HTTP/业务错误、超时、网络失败及畸形响应。备用department策略purpose=revalidate的上述失败立即撤销，部门查询不重试。token-verify替身覆盖双层成功码及任一非成功码、未知失败码、clientIP大小写、UTF-8无分隔MD5小写摘要、前端编码不能覆盖后端、bo.user大小写/首尾空白差异仍匹配、有效标识归一化后仍不匹配立即撤销、other.token 缺失时仅回退合法 bo.token、显式非法字段进入故障预算及令牌原子替换。验证默认token-verify；网络失败/超时、3xx/4xx/5xx（包括代理401/403及429，即使body有失败码）、HTTP200非JSON、缺任一层码、非法码类型和不完整成功字段均不立即失效且设备仍可刷新、后续成功清预算、新token相同/不同、明确失败立即撤销、次数/时间上限耗尽撤销、重启不重置预算及并发/晚响应不能覆盖新token。MD5夹具只用合成值，验收是后续A实现要求，本PR不冒充已实现。日志断言核对两条链的purpose、级别、动作和关联，真实UDS联调不作为设计及后续迁移实现的验收门禁。
 
 现场部署后重点观察以下项目，用户回传脱敏诊断包后据事实调整。
 
@@ -177,13 +179,13 @@ domain 与纯 IP 部署均沿现有入口契约。IP 同源实例保留已知弱
 
 部署配置 `auriga.iam.uac.sso-cookie.enabled`默认true、只接受布尔值，非法值拒绝启动；运维关闭即直接扫码，不改变UAC provider的enabled。只有门户部署于公司域名体系且Cookie的Domain/Path/Secure实际覆盖门户登录链，浏览器才会带来SSO Cookie；host-only或Path不覆盖也可能收不到。公司域外、纯IP及仅HTTP等不满足Cookie条件的部署自然走扫码，不弹故障，不通过复制Cookie或放宽域绕过浏览器限制。现场按单IP、单域名部署，SSO开关按配置正常启用，企业Cookie的Domain/Path/Secure决定浏览器是否附带Cookie。B/A在部署说明写清TLS/代理、私有Cookie映射与开关位置，E展示生效值。
 
-用户主动打开门户登录页时先检查现有我方会话：已有有效会话继续原目的；无会话才尝试SSO。设备确认及其登录续接始终禁止自动SSO，页面展示发起设备信息与用户码，由用户点击“用公司账号继续”后提交mode=continue并核码。mode=auto在设备确认用途返回scan_required，不调用上游验证。普通门户自动尝试仅限顶层、非预取导航，服务端验证Sec-Fetch-Dest=document、Sec-Fetch-Mode=navigate、Sec-Fetch-Site为none或same-origin及Sec-Fetch-User=?1，禁止iframe、跨站和缺证据请求自动登录；证据不足仍显示扫码及“用公司账号继续”。导航响应只设置我方HttpOnly事务cookie并返回120秒一次性navigationProof（32字节随机base64url，存哈希，绑定入口完整Origin、tenant/provider、portal audience、login用途和浏览器事务）；GET不建会话。可信页面自动或按钮触发同源 `POST /api/iam/v1/login/uac/sso`，同时验证精确Origin、现有CSRF规则、事务cookie及navigationProof，CAS单次消费。mode=auto仍须权威检查非设备确认目的、导航资格与退出抑制，不能由body自行宣称用户操作。mode=continue由本页明确按钮触发，同样校验事务与CSRF。门户会话失效时以location.assign等整页导航回规范登录页，B同步处理HTTP401、会话读取失效及权威撤销，整页导航重新取得Fetch Metadata与导航证明。脚本跳转缺少用户手势证明时显示显式继续/扫码。自动尝试每事务最多一次，不因页面轮询无限重发；UacSsoLoginResult.transactionId指向既有LoginTransaction，必要MFA沿原GET/advance继续；scan_required后创建扫码挑战替换当前导航事务。丢失响应只读取/恢复原登录事务，不再次验证旧token。
+用户主动打开门户登录页时先检查现有我方会话：已有有效会话继续原目的；无会话才尝试SSO。桌面设备页在有效待批准设备的规范入口上优先做浏览器SSO。浏览器登录只建立门户身份。设备批准继续独立展示设备和权限，并要求用户亲自核对并输入用户码。普通门户自动尝试仅限顶层、非预取导航，服务端验证Sec-Fetch-Dest=document、Sec-Fetch-Mode=navigate、Sec-Fetch-Site为none或same-origin及Sec-Fetch-User=?1，禁止iframe、跨站和缺证据请求自动登录；普通门户导航证据不足时直接进入扫码，并提供团队账号切换。有效待批准设备的规范入口沿标准设备绑定验证浏览器导航，保留人工核码和批准。导航响应只设置我方HttpOnly事务cookie并返回120秒一次性navigationProof（32字节随机base64url，存哈希，绑定入口完整Origin、tenant/provider、portal audience、login用途和浏览器事务）；GET不建会话。可信页面自动触发同源 `POST /api/iam/v1/login/uac/sso`，同时验证精确Origin、现有CSRF规则、事务cookie及navigationProof，CAS单次消费。mode=auto按普通门户或已绑定设备入口核验导航资格与退出抑制，不能由body自行宣称用户操作。现有mode=continue兼容接口同样校验事务与CSRF，正常登录页直接使用自动SSO及扫码回落。门户会话失效时以location.assign等整页导航回规范登录页，B同步处理HTTP401、会话读取失效及权威撤销，整页导航重新取得Fetch Metadata与导航证明。普通门户脚本跳转缺少用户手势证明时回落扫码；有效设备码入口继续按设备导航绑定规则核验。自动尝试每事务最多一次，不因页面轮询无限重发；UacSsoLoginResult.transactionId指向既有LoginTransaction，必要MFA沿原GET/advance继续；scan_required后创建扫码挑战替换当前导航事务。丢失响应只读取/恢复原登录事务，不再次验证旧token。
 
 IAM按内部资料映射选择完整token/account对：Portal体系优先，缺完整配对再取UDS体系，均无则fallback扫码；不把不同体系的token与工号交叉拼接。两体系同时存在时只验证优先的完整配对，该配对验证失败直接扫码，避免静默切到另一个账号。语言按Portal、UDS、默认简体中文；客户端IP按私有UDS资料映射取值，仅视为上游校验所需的非可信资料，校验长度和IP字面量格式，不做解析访问、不将其用于我方授权或审计客户端地址。缺失时用第2.4.3节部署值。版本等非必要字段不外发，序列号不采集。缺字段、重复同名Cookie、格式非法均安全回落扫码，不向浏览器暴露具体Cookie名或原文。
 
-后端计算verifyCode，调用第2.4.3节token验证接口，双层成功码、归一化工号及新token均通过才执行成员/邀请准入和必要MFA，保存验证返回的bo.token，不能保存未验证Cookie旧token。首次SSO验证任意明确拒绝、上游故障或资料不完整都回落扫码，不为尚未成立的会话启动复验重试，也不撤销浏览器里其他账号会话。成员准入拒绝仍按既有策略提示申请邀请，不能用扫码绕过；MFA未完成仍是additional_step_required。成功后轮换我方session ID、清事务证明，并与扫码共用一次login_info作业、nextRevalidateAt、设备绑定、撤销及日志。SSO用于login，不自动执行link/stepup，也不从普通业务GET建立新会话。
+后端计算verifyCode，调用第2.4.3节token验证接口，双层成功码、归一化工号及新token均通过才执行成员/邀请准入和必要MFA，保存验证返回的令牌，不能保存未验证Cookie旧token。首次SSO验证任意明确拒绝、上游故障或资料不完整都回落扫码，不为尚未成立的会话启动复验重试，也不撤销浏览器里其他账号会话。首次经本租户入口验证、符合现有 MFA 策略且未提供邀请的主体默认加入为普通成员；其他准入拒绝不能用扫码绕过；MFA未完成仍是additional_step_required。成功后轮换我方session ID、清事务证明，并与扫码共用一次login_info作业、nextRevalidateAt、设备绑定、撤销及日志。SSO用于login，不自动执行link/stepup，也不从普通业务GET建立新会话。
 
-退出的同源受保护POST在清会话前，将“本次浏览器会话禁止自动SSO”的标记写入服务端浏览器会话记录，配套独立host-only、HttpOnly、SameSite=Lax的会话cookie（HTTPS用__Host-前缀，无Domain/Expires/Max-Age，不含UAC材料）。该标记与平台session分离、跨标签页共享，登出与浏览器返回登录页不会清掉。普通重载、重定向、会话轮换及现存企业Cookie都不能绕过标记；同一浏览器会话内仅显示“用公司账号继续”和扫码，不再自动尝试。显式继续仅为本事务授权一次，不清抑制标记，不退出公司其他应用。浏览器恢复会话可能保留session cookie，届时继续抑制属安全降级。标记存储不可用时禁止自动SSO、保留显式继续/扫码。登录/退出响应no-store，页面frame-ancestors 'none'，外部returnTo严格受信相对路径允许列表，防CSRF与登录固定。
+退出的同源受保护POST在清会话前，将“本次浏览器会话禁止自动SSO”的标记写入服务端浏览器会话记录，配套独立host-only、HttpOnly、SameSite=Lax的会话cookie（HTTPS用__Host-前缀，无Domain/Expires/Max-Age，不含UAC材料）。该标记与平台session分离、跨标签页共享，登出与浏览器返回登录页不会清掉。普通重载、重定向、会话轮换及现存企业Cookie都不能绕过标记；同一浏览器会话内直接显示扫码或允许切换团队账号，不再自动尝试。显式继续仅为本事务授权一次，不清抑制标记，不退出公司其他应用。浏览器恢复会话可能保留session cookie，届时继续抑制属安全降级。标记存储不可用时禁止自动SSO、保留显式继续/扫码。登录/退出响应no-store，页面frame-ancestors 'none'，外部returnTo严格受信相对路径允许列表，防CSRF与登录固定。
 
 ### 3.1.2 向DSH提供企业登录信息
 
@@ -196,9 +198,9 @@ IAM按内部资料映射选择完整token/account对：Portal体系优先，缺�
 
 两接口按真实socket对端检查仅本机调用，沿原型核对任务能力的audience、有效期、撤销状态和DSH会话owner。skill发送 `X-DSH-Session-Id: <DSH_SESSION_ID>` 与 `X-Dsh-Team-Task-Capability: <DSH_TEAM_TASK_CAPABILITY>`，兼容原型body的sessionId/dshSessionId和taskCapability/capability字段。原始读取要求本次任务credentials scope，代发要求outbound scope，按各自所需权限校验。调用者身份和会话归属从已验证任务及宿主会话取值，body.empNo不参与授权。
 
-插件部署配置保留 `allowRawAgentToken`，默认true，用户接受该风险，部署配置可关。沿原型使用实时配置读取，开关关闭后下一次原始读取即拒绝。默认shellEnv任务能力包含outbound和credentials，部署方关闭raw后只注入outbound。shellEnv原样提供 `DSH_TEAM_TASK_CAPABILITY` 和 `DSH_TEAM_BASE`，后者为当前宿主回环地址加/dsh-team。宿主既有 `DSH_SESSION_ID` 仍表示本次agent会话，helper保留 `DSH_WEB_URL` 加/dsh-team的地址回退和 `DSH_TEAM_HELPERS` 的模块定位用法。任务能力沿原型600秒期限，执行结束/撤销时清理，后台任务沿已有jobs生命周期释放。UAC原始token由handler即时读取，环境注入只承载上述既有任务调用信息。
+插件部署配置保留 `allowRawAgentToken`，默认true，用户接受该风险，部署配置可关。沿原型使用实时配置读取，开关关闭后下一次原始读取即拒绝。默认shellEnv任务能力包含outbound和credentials，部署方关闭raw后只注入outbound。shellEnv原样提供 `DSH_TEAM_TASK_CAPABILITY` 和 `DSH_TEAM_BASE`，后者为当前宿主回环地址加/dsh-team。宿主既有 `DSH_SESSION_ID` 仍表示本次agent会话，helper保留 `DSH_WEB_URL` 加/dsh-team的地址回退和 `DSH_TEAM_HELPERS` 的模块定位用法。任务能力沿原型600秒期限，执行结束/撤销时清理，后台任务沿已有jobs生命周期释放。当前已认证的本人 Desktop 工具启动经相同权限即时把工号和令牌投影为 auriga_id、auriga_token；运行中的工具通过既有 handler 按需读新值，不能刷新运行中的进程环境。
 
-插件内部继续使用当前平台会话或已绑定设备凭据调用 `POST /api/iam/v1/me/uac/credentials`，请求空对象，取UacEnterpriseCredentials的empNo、最新token、updatedAt及必要的可选cookies。该IAM接口供handler读取权威当前值，现场skill仍调用上述兼容路径。复验换发并提交bo.token后，两handler下一次调用使用新值。退出、会话撤销/到期、成员或身份源停用后拒绝。复用既有认证代次检查处理并发账号切换，凭据始终归当前已认证用户自己的DSH会话。交给skill的凭据副本不写静态配置、文件、日志、stdout/stderr或会话记录，日志只留token哈希前缀，skill给AI的工具结果仅含业务结果或安全状态。IAM权威材料按第2.4节加密保存。
+插件内部继续使用当前平台会话或已绑定设备凭据调用 `POST /api/iam/v1/me/uac/credentials`，请求空对象，取UacEnterpriseCredentials的empNo、最新token、updatedAt及必要的可选cookies。该IAM接口供handler读取权威当前值，现场skill仍调用上述兼容路径。复验换发并提交新令牌后，两handler下一次调用使用新值。退出、会话撤销/到期、成员或身份源停用后拒绝。复用既有认证代次检查处理并发账号切换，凭据始终归当前已认证用户自己的DSH会话。交给skill的凭据副本不写静态配置、文件、日志、stdout/stderr或会话记录，日志只留token哈希前缀，skill给AI的工具结果仅含业务结果或安全状态。IAM权威材料按第2.4节加密保存。
 
 A负责IAM读取接线，C负责Desktop现有broker读取与退出状态衔接，D负责将原型两handler及shellEnv预留迁入插件并保持接口兼容。D用原型示例skill的request()与resolve()调用方式，不改业务代码做替身验收，覆盖默认raw开启且outbound可用、raw开启且credentials权限齐全时可读、权限不符/非本机/跨会话拒绝、目标主机清单、轮换后新值及退出后不可读。来源核对细节记入执行报告。
 
@@ -216,7 +218,7 @@ A负责IAM读取接线，C负责Desktop现有broker读取与退出状态衔接�
 
 loopback认证不使用cookie、localStorage或sessionStorage。浏览器cookie跨127.0.0.1端口共享，Path和随机名字也不能给其他本机服务建立可靠隔离。内存令牌从不附加到DSH或其他Origin请求，broker禁止把它转发到IAM。浏览器刷新需重新拉起登录页，UI提供清晰恢复动作。未认证原生HTTP不能凭伪造Origin放行，原生插件后端使用下一节的OS IPC。
 
-broker先用已登记第一方client向既有标准设备授权端点申请device_code/user_code，device_code只在broker内，随后以系统浏览器打开经过HTTPS目的地允许列表校验的verification_uri，默认不使用verification_uri_complete自动填码。Desktop同步显示user_code、有效期和“只在自己刚发起的设备确认页输入或核对”的提示。设备确认页在任何SSO尝试前醒目显示发起设备名称、发起时间、客户端类型、scope与用户码，并提示“若不是你本人刚在Auriga Desktop发起请拒绝”；设备信息来自IAM权威请求，不从URL信任。确认页及其登录续接不自动SSO，用户点击“用公司账号继续”才用SSO；没有Cookie或验证不通过则扫码/团队账号。已有我方会话也不自动批准，仍展示同一确认内容。用户仍须手动输入或逐字核对user_code、发起端与scope，要求现有10分钟内step-up；SSO不替代设备批准和MFA。IAM按第2.4.1节绑定来源会话/认证代次，broker有界轮询标准token端点，以自己的device_code兑换device-only凭据；页面不返回平台令牌，完成页仅提示可关闭。默认浏览器设备流沿现有RFC8628公开client绑定与轮询边界，不冒称该流有PKCE；已有nativeConnect的S256契约保留但不再作为Desktop默认路径。该设备确认是Desktop的额外一步，门户直接进入实例的路径没有该设备确认。
+broker先用已登记第一方client向既有标准设备授权端点申请device_code/user_code，device_code只在broker内，随后以系统浏览器打开经过HTTPS目的地允许列表校验的verification_uri，返回地址及用户码与当次授权一致后，浏览器打开规范的设备地址。Desktop同步显示user_code、有效期和“只在自己刚发起的设备确认页输入或核对”的提示。设备批准页醒目显示发起设备名称、发起时间、客户端类型、scope与用户码，并提示“若不是你本人刚在Auriga Desktop发起请拒绝”；设备信息来自IAM权威请求，不从URL信任。合法的设备顶层导航默认尝试浏览器SSO。没有Cookie或验证不通过时直接显示扫码，也可切换团队账号。已有我方会话也不自动批准，仍展示同一确认内容。用户仍须手动输入或逐字核对user_code、发起端与scope，要求现有10分钟内step-up；SSO不替代设备批准和MFA。IAM按第2.4.1节绑定来源会话/认证代次，broker有界轮询标准token端点，以自己的device_code兑换device-only凭据；页面不返回平台令牌，完成页仅提示可关闭。默认浏览器设备流沿现有RFC8628公开client绑定与轮询边界，不冒称该流有PKCE；已有nativeConnect的S256契约保留但不再作为Desktop默认路径。该设备确认是Desktop的额外一步，门户直接进入实例的路径没有该设备确认。
 
 设备授权延续只允许服务端生成的待批准请求，不能用任意外来设备码绑定登录事务。门户登录续接目的只允许服务器登记的本次设备确认页面，不接受任意returnTo、loopback回调或token URL参数；默认Desktop路径不调用workspace instance/open、不创建云实例。关闭页面、取消、超时或broker epoch变化后停止轮询并作废本次设备请求，晚到凭据丢弃/撤销，不能替换新身份。浏览器来源会话在批准后保留供绑定复验，broker不持有其cookie jar。Desktop本地退出立即停权并撤销旧设备，持久化manual-login-required；下次拉起门户指定只减少自动行为的manual模式，即使浏览器已有来源会话仍先显示继续/核码，不自动批准设备。门户自身退出按第3.1.1节抑制本浏览器自动SSO。
 
@@ -358,7 +360,7 @@ SSO免扫码按第3.1.1节进入第一期且默认开启，支持现场单IP、�
 
 既有产品决定及本轮用户确认的单域部署取舍如下。
 
-1. 首次成员关联仅允许管理员核实员工号、双认证绑定或有效邀请，默认关闭自动入团队注册，避免自填员工号接管既有账号。
+1. 配置 UAC 的租户，首次通过门户扫码或 SSO 完成企业验证与已有 MFA 后，缺省创建普通成员，不赋予额外角色或组。保留管理员核实、双认证绑定与明确提供有效邀请的接缝。禁止按自填工号、姓名或邮箱合并、改绑或恢复停用／离职成员。仅本机桌面扫码不创建团队成员。
 2. Desktop首期默认系统浏览器打开云端门户，通过SSO或扫码/团队账号完成身份认证，再沿现有RFC8628人工核码取得device-only凭据；本机页只控制状态/取消/跳过，平台不可达时本地DSH仍可使用。
 3. 门户第一期默认先检查SSO Cookie并验证，无Cookie或验证失败回落扫码。扫码取得token和工号即完成UAC登录，两种成功方式随后一次purpose=login_info部门查询只补充展示，失败仅WARN，不影响登录或nextRevalidateAt。复验周期默认7200秒，可通过第2.4节部署配置调整。每个会话持久化nextRevalidateAt，到期后按部署策略执行purpose=revalidate，默认token-verify（扫码token兼容性已由用户确认），上游故障按有界预算重试，完整响应中的明确业务/身份失败或预算耗尽撤销；department保留为备用，单次查不到部门立即撤销。服务重启仅处理已到期复验会话，日志分别记录网络与业务原因，本地DSH能力保持可用。
 4. 已激活共享内容的退出/跨身份切换采用受控停止、隔离和新会话，避免旧身份内容残留在上下文。普通补登录通过快照推送生效。
@@ -421,7 +423,7 @@ Desktop诊断包保存到用户指定目录，服务器诊断包通过已认证�
 
 ### 9.5 日志与诊断包验收
 
-A/B/C/E交付前用同一替身分别测试SSO、扫码、到期复验及撤销链。SSO必须覆盖Portal/UDS优先级及禁止混配、Cookie存在且验证通过、验证失败/上游故障回落扫码、无Cookie、域外部署、单IP单域名部署、开关关闭、退出后跨标签页/刷新不自动登录、显式继续、登录session ID轮换、会话失效整页导航、跨站/iframe/预取/导航证明重放拒绝。Desktop以正式启动器验收系统浏览器已有SSO免扫码、无Cookie扫码、设备确认页auto不调用上游、显式点击后才验证、两端用户码一致、设备人工核码/step-up、取消及晚结果丢弃、不创建云实例、平台不可达跳过；不能用单纯broker内部API冒充完成。登录信息查询成功时，断言记录部门及更新时间，当前会话的界面投影status=available且正常登录链purpose=login_info调用恰好1次。登录信息查询失败时，断言登录仍成功、展示status=unavailable、分类WARN、无撤销，nextRevalidateAt与登录事务提交值严格相等，调用也恰好1次。重复complete和资料读取不增加调用，过期会话或旧身份的晚响应不写入新身份。
+A/B/C/E交付前用同一替身分别测试SSO、扫码、到期复验及撤销链。SSO必须覆盖Portal/UDS优先级及禁止混配、Cookie存在且验证通过、验证失败/上游故障回落扫码、无Cookie、域外部署、单IP单域名部署、开关关闭、退出后跨标签页/刷新不自动登录、显式继续、登录session ID轮换、会话失效整页导航、跨站/iframe/预取/导航证明重放拒绝。Desktop以正式启动器验收系统浏览器已有SSO免扫码、无Cookie扫码、合法设备顶层导航auto可验证浏览器Cookie、跨站或显式手动模式不自动验证、两端用户码一致、设备人工核码/step-up、取消及晚结果丢弃、不创建云实例、平台不可达跳过；不能用单纯broker内部API冒充完成。登录信息查询成功时，断言记录部门及更新时间，当前会话的界面投影status=available且正常登录链purpose=login_info调用恰好1次。登录信息查询失败时，断言登录仍成功、展示status=unavailable、分类WARN、无撤销，nextRevalidateAt与登录事务提交值严格相等，调用也恰好1次。重复complete和资料读取不增加调用，过期会话或旧身份的晚响应不写入新身份。
 
 使用可控时钟断言周期内purpose=revalidate调用为0。重启仅领取已到期复验会话，未来到期会话保留原时间，独立信息查询作业按其持久状态恢复。到期后才出现purpose=revalidate的session_revalidate及按strategy选择的department_lookup/token_verify；department成功推进期限，单次失败撤销。token-verify成功原子替换token并推进期限，上游故障不推进期限也不撤销，完整响应中的明确业务/身份失败或预算耗尽撤销。复验使用独立correlationId，通过parentCorrelationId与原登录关联，部门查询不复用登录pollId。两种purpose各自断言HTTP/UDS码、分类、级别、审计action及脱敏诊断包计数。
 

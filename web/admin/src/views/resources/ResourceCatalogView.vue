@@ -32,7 +32,7 @@ import type { CatalogKind } from '../../admin/resourceCatalogUpload';
 import ResourceUploadPanel from './ResourceUploadPanel.vue';
 import ResourceAssignments from './ResourceAssignments.vue';
 import { catalogMessages } from '../../admin/resourceCatalogMessages';
-import { strongEtag } from '../../admin/resourceApi';
+import { strongEtag } from '../../admin/etag';
 import { requestStepUp } from '../../admin/stepUp';
 import ActionConfirm from '../../admin/ActionConfirm.vue';
 import '../../admin/resources.css';

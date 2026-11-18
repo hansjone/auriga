@@ -4,6 +4,7 @@ import static auriga.resource.web.ResourceBody.*;
 
 import auriga.common.error.*;
 import auriga.contracts.resource.v1.*;
+import auriga.resource.api.UnifiedResourceWorkspace.Snapshot;
 import com.networknt.schema.*;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.node.ObjectNode;
@@ -34,7 +35,7 @@ public final class CatalogStatePolicy {
 
   public static long advance(long persisted, long expected) {
     if (persisted != expected) throw new AurigaException(CommonErrors.PRECONDITION_FAILED);
-    if (persisted < 0 || persisted >= ResourceWorkflow.MAX) throw conflict();
+    if (persisted < 0 || persisted >= ResourceOperations.MAX) throw conflict();
     return persisted + 1;
   }
 
@@ -81,7 +82,7 @@ public final class CatalogStatePolicy {
   }
 
   public static ObjectNode assign(ObjectNode resource, long revision, String state) {
-    if (revision < 1 || revision > ResourceWorkflow.MAX) throw invalid();
+    if (revision < 1 || revision > ResourceOperations.MAX) throw invalid();
     success(state);
     resource
         .put("installationRevision", revision)
@@ -127,6 +128,34 @@ public final class CatalogStatePolicy {
         && generation == report.getObservedGeneration()
         && channel.equals(report.getReportSource())
         && success(desired(resource)).equals(report.getState());
+  }
+
+  /** Workspace has checked the authenticated node and filtered the effective execution spec. */
+  static boolean currentNodeReport(
+      UnifiedResourceRef resource, Snapshot snapshot, UnifiedInstallationReport report) {
+    return snapshot.observedGeneration() == snapshot.generation()
+        && snapshot.instance().toString().equals(report.getClientId())
+        && "node".equals(report.getReportSource())
+        && resource.getIdentity().equals(report.getIdentity())
+        && resource.getInstallationRevision() > 0
+        && resource.getInstallationRevision() == report.getInstallationRevision()
+        && snapshot.selectionRevision() == report.getSelectionRevision()
+        && snapshot.generation() == report.getGeneration()
+        && snapshot.generation() == report.getObservedGeneration()
+        && switch (report.getState()) {
+          case "applied" -> snapshot.ready() && desired(resource).equals("ENABLED");
+          case "disabled" -> desired(resource).equals("DISABLED");
+          case "removed" -> desired(resource).equals("REMOVED");
+          case "applying",
+              "failed",
+              "pending_restart",
+              "superseded",
+              "overridden",
+              "expired",
+              "revoked" ->
+              true;
+          default -> false;
+        };
   }
 
   public static boolean removal(

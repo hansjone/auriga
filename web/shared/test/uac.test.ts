@@ -171,7 +171,7 @@ describe('UAC native login', () => {
     expect(ctx.root.classList.contains('auriga-uac')).toBe(false);
   });
   it.each([
-    { purpose: 'device' as const, autoSuppressed: false },
+    { purpose: 'device' as const, autoSuppressed: true },
     { purpose: 'portal' as const, autoSuppressed: true },
   ])('does not automatically invoke SSO for %j', async (binding) => {
     const ctx = setup();
@@ -331,34 +331,54 @@ describe('SSO and terminal page states', () => {
     expect(serialized).not.toContain(challenge.qrContent);
     await view.dispose();
   });
-  it('does not consume a suppressed or device proof before an explicit continue click', async () => {
-    for (const purpose of ['portal', 'device'] as const) {
+  it.each([
+    { autoEligible: false, autoSuppressed: false },
+    { autoEligible: true, autoSuppressed: true },
+  ])(
+    'falls back directly to QR when portal SSO is unavailable (%o)',
+    async (state) => {
       const ctx = setup();
-      ctx.fetch.mockImplementation(
-        async () =>
-          new Response(
-            JSON.stringify({
-              state: 'authenticated',
-              transactionId: challenge.transactionId,
-            }),
-            { headers: { 'Content-Type': 'application/json' } },
-          ),
-      );
       const view = createUacLoginView(ctx.root, {
         ...ctx,
         providerId: 'provider',
-        navigation: { ...navigation, purpose, autoSuppressed: true },
+        navigation: { ...navigation, ...state },
       });
-      await tick();
-      expect(ctx.fetch).not.toHaveBeenCalled();
-      expect(ctx.root.dataset.uacState).toBe('continue_required');
-      action(ctx.root, '继续企业登录').click();
-      await vi.waitFor(() => expect(ctx.onComplete).toHaveBeenCalledOnce());
-      expect(JSON.parse(String(ctx.fetch.mock.calls[0]?.[1]?.body)).mode).toBe(
-        'continue',
-      );
+      await vi.waitFor(() => expect(ctx.root.dataset.uacState).toBe('waiting'));
+      expect(String(ctx.fetch.mock.calls[0]?.[0])).toMatch(/\/challenges$/);
+      expect(
+        ctx.fetch.mock.calls.some(([path]) => String(path).endsWith('/sso')),
+      ).toBe(false);
+      expect(
+        [...ctx.root.querySelectorAll('button')].map(
+          (button) => button.textContent,
+        ),
+      ).not.toContain('继续登录');
       await view.dispose();
-    }
+    },
+  );
+  it('uses the browser session automatically for eligible device sign-in', async () => {
+    const ctx = setup();
+    ctx.fetch.mockImplementation(
+      async () =>
+        new Response(
+          JSON.stringify({
+            state: 'authenticated',
+            transactionId: challenge.transactionId,
+          }),
+          { headers: { 'Content-Type': 'application/json' } },
+        ),
+    );
+    const view = createUacLoginView(ctx.root, {
+      ...ctx,
+      providerId: 'provider',
+      navigation: { ...navigation, purpose: 'device' },
+    });
+    await tick();
+    await vi.waitFor(() => expect(ctx.onComplete).toHaveBeenCalledOnce());
+    expect(JSON.parse(String(ctx.fetch.mock.calls[0]?.[1]?.body)).mode).toBe(
+      'auto',
+    );
+    await view.dispose();
   });
   it('does not retry a security rejection and never displays error detail', async () => {
     const ctx = setup();

@@ -131,6 +131,43 @@ class UacOrgPolicyPostgresTest {
   }
 
   @Test
+  void verifiedSelfProvisioningDoesNotReuseAnAccountOrRestoreInactiveBindings() {
+    UUID candidate = UuidV7.next();
+    store.tenant(
+        tenant,
+        () -> {
+          assertTrue(policy.provisionVerifiedMember(provider, "009Xy", candidate, "Test member"));
+          assertTrue(policy.provisionVerifiedMember(provider, "009Xy", candidate, "Test member"));
+          assertEquals(candidate, policy.resolve(provider, "009Xy").orElseThrow());
+          assertEquals("member", store.member(candidate).orElseThrow().memberType());
+          assertTrue(org.memberJson(candidate).path("roleKeys").isEmpty());
+          assertTrue(policy.canResumeVerifiedMember(provider, "009Xy", candidate));
+          assertFalse(policy.canResumeVerifiedMember(provider, "009XY", candidate));
+          assertFalse(policy.canResumeVerifiedMember(provider, "009Xy", UuidV7.next()));
+          assertFalse(policy.canResumeVerifiedMember(UUID.randomUUID(), "009Xy", candidate));
+          assertFalse(policy.provisionVerifiedMember(provider, "009XY", UuidV7.next(), "Other"));
+          assertFalse(policy.provisionVerifiedMember(provider, "009Xy", UuidV7.next(), "Other"));
+          assertFalse(policy.provisionVerifiedMember(provider, "001Z", candidate, "Other"));
+          for (String status : List.of("disabled", "offboarded")) {
+            store
+                .jdbc()
+                .update(
+                    "UPDATE member SET status=? WHERE tenant_id=? AND id=?",
+                    status,
+                    tenant,
+                    candidate);
+            assertEquals(candidate, policy.known(provider, "009Xy").orElseThrow());
+            assertTrue(policy.resolve(provider, "009Xy").isEmpty());
+            assertFalse(policy.canResumeVerifiedMember(provider, "009Xy", candidate));
+            assertFalse(
+                policy.provisionVerifiedMember(provider, "009Xy", candidate, "Test member"));
+            assertFalse(policy.provisionVerifiedMember(provider, "009Xy", UuidV7.next(), "Other"));
+          }
+          return null;
+        });
+  }
+
+  @Test
   void verifiedMappingRequiresExactProviderTenantAndActiveMemberAndPreservesZeroes()
       throws Exception {
     UUID account = member("active");
@@ -158,6 +195,27 @@ class UacOrgPolicyPostgresTest {
         });
     assertTrue(store.tenant(tenant, () -> policy.resolve(provider, "001Ab")).isEmpty());
     assertTrue(store.tenant(tenant, () -> policy.member(account)).isEmpty());
+  }
+
+  @Test
+  void aManuallyVerifiedOrdinaryMemberIsNotFirstLoginRecovery() throws Exception {
+    UUID account = member("active");
+    store.tenant(
+        tenant,
+        () -> {
+          store
+              .jdbc()
+              .update(
+                  "UPDATE member SET member_type='member' WHERE tenant_id=? AND id=?",
+                  tenant,
+                  account);
+          return null;
+        });
+    provision(record().put("accountId", account.toString()));
+    assertEquals(
+        account, store.tenant(tenant, () -> policy.resolve(provider, "001Ab")).orElseThrow());
+    assertFalse(
+        store.tenant(tenant, () -> policy.canResumeVerifiedMember(provider, "001Ab", account)));
   }
 
   @Test

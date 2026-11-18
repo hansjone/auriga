@@ -147,7 +147,7 @@ public final class TeamAccounts {
     return hasTotp(accountId) || passkeyCount(accountId) > 0;
   }
 
-  /** Only the password-verified, browser-bound login transaction may bootstrap a first factor. */
+  /** A verified, session-bound IAM transaction must authorize bootstrap of a first factor. */
   void enrollFirstTotp(UUID accountId, String secret, String code) {
     store.lock("team-totp-enroll:" + accountId);
     IamError.requireAbsentCredential(hasMfa(accountId));

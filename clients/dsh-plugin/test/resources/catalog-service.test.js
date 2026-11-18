@@ -48,6 +48,7 @@ test('Desktop writes frozen prepared files, waits outside the lock for E, then s
     s = service(f);
   const accepted = await s.apply(action(f));
   assert.equal(accepted.accepted, true);
+  assert.equal(accepted.installation.reportSource, 'member');
   assert.equal(existsSync(f.active), false);
   const ledger = requireSchema(
     'UnifiedLedgerFile',
@@ -148,8 +149,9 @@ test('cloud selection never calls roots, Desktop writer, manifest or artifact do
   f.runtime.resourceIdentity = {
     tenantId: f.who.tenantId,
     ownerId: f.who.ownerId,
-    instanceId: f.who.hostId,
+    instanceId: '019a0000-0000-7000-8000-000000000021',
   };
+  f.setRow({ ...f.getRow(), reportSource: 'node' });
   const options = {
     ...f,
     roots: async () => {
@@ -164,8 +166,11 @@ test('cloud selection never calls roots, Desktop writer, manifest or artifact do
     },
   });
   const s = catalogService(options);
-  assert.equal((await s.apply(action(f))).cloud, true);
-  await s.list();
+  const accepted = await s.apply(action(f));
+  assert.equal(accepted.cloud, true);
+  assert.equal(accepted.installation.clientId, f.who.hostId);
+  assert.equal(accepted.installation.reportSource, 'node');
+  assert.deepEqual((await s.list()).items, [accepted.installation]);
   assert.equal(
     f.requests.some((r) => /download|manifest/.test(r.path)),
     false,

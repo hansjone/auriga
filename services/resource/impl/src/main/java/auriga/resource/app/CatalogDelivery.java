@@ -90,7 +90,7 @@ public final class CatalogDelivery implements UnifiedResourceResolution {
   }
 
   private static void match(String etag, long rev) {
-    ResourceWorkflow.match(etag, rev);
+    ResourceOperations.match(etag, rev);
   }
 
   private UnifiedResourceWorkspace workspace() {
@@ -267,6 +267,8 @@ public final class CatalogDelivery implements UnifiedResourceResolution {
   public JsonNode select(AurigaPrincipal actor, ObjectNode body, String key, String etag) {
     validate("UnifiedInstallationInput", body);
     UUID c = client(actor, body);
+    var instance = access.installationInstance(actor);
+    if (instance.isPresent()) return selectCloud(actor, c, instance.get(), body, key, etag);
     var selection = body.path("selection");
     var id = selection.path("identity");
     UUID p = uuid(id, "packageId");
@@ -435,7 +437,7 @@ public final class CatalogDelivery implements UnifiedResourceResolution {
             "rev",
             doc.path("installationRevision").asLong(),
             "hash",
-            ResourceWorkflow.hash(ticket),
+            ResourceOperations.hash(ticket),
             "expiry",
             Timestamp.from(expiry)));
     var n =
@@ -466,7 +468,7 @@ public final class CatalogDelivery implements UnifiedResourceResolution {
                       "c",
                       c,
                       "hash",
-                      ResourceWorkflow.hash(body.path("ticket").asString())));
+                      ResourceOperations.hash(body.path("ticket").asString())));
           if (!((Timestamp) ticket.get("expires_at")).toInstant().isAfter(clock.instant()))
             throw missing();
           catalog.pkg(r, (UUID) ticket.get("package_id"), false);
@@ -597,6 +599,9 @@ public final class CatalogDelivery implements UnifiedResourceResolution {
     var b = JSON.createObjectNode().put("clientId", c.toString());
     client(actor, b);
     var r = access.member(actor);
+    var instance = access.installationInstance(actor);
+    if (instance.isPresent())
+      return cloudInstallations(actor, c, instance.get(), kind, limit, cursor);
     reconcileMember(r, c);
     var result =
         (ObjectNode)
@@ -610,16 +615,19 @@ public final class CatalogDelivery implements UnifiedResourceResolution {
                 db.args("owner", r.account(), "client", c),
                 kind,
                 false);
+    return tx.read(() -> installationFailures(result, r, c, kind, "member"));
+  }
+
+  private ObjectNode installationFailures(
+      ObjectNode result, ResourceAccess.Reader r, UUID target, String kind, String scope) {
     result.put("allowPersonalPlugins", r.personalPlugins());
     var failures = result.putArray("assignmentFailures");
-    tx.read(
-            () ->
-                db.rows(
-                    "SELECT f.package_id,f.error_code FROM resource.catalog_assignment_failure f JOIN resource.catalog_package p ON p.tenant_id=f.tenant_id AND p.id=f.package_id WHERE f.tenant_id=:tenant AND f.owner_id=:owner AND f.target_id=:client AND f.scope='member'"
-                        + catalog.visible(r)
-                        + (kind == null ? "" : " AND p.kind=:kind")
-                        + " ORDER BY f.package_id LIMIT 200",
-                    catalog.args(r, "owner", r.account(), "client", c, "kind", kind)))
+    db.rows(
+            "SELECT f.package_id,f.error_code FROM resource.catalog_assignment_failure f JOIN resource.catalog_package p ON p.tenant_id=f.tenant_id AND p.id=f.package_id WHERE f.tenant_id=:tenant AND f.owner_id=:owner AND f.target_id=:target AND f.scope=:scope"
+                + catalog.visible(r)
+                + (kind == null ? "" : " AND p.kind=:kind")
+                + " ORDER BY f.package_id LIMIT 200",
+            catalog.args(r, "owner", r.account(), "target", target, "kind", kind, "scope", scope))
         .forEach(
             failure ->
                 failures.add(
@@ -628,6 +636,263 @@ public final class CatalogDelivery implements UnifiedResourceResolution {
                         .put("state", "failed")
                         .put("errorCode", failure.get("error_code").toString())));
     return result;
+  }
+
+  private UnifiedResourceWorkspace.Snapshot marketSnapshot(
+      AurigaPrincipal actor, ResourceAccess.Reader reader, UUID instance) {
+    if (access.installationInstance(actor).filter(instance::equals).isEmpty()) throw missing();
+    var snapshot = workspace().snapshot(reader.tenant(), instance);
+    if (!instance.equals(snapshot.instance()) || !reader.account().equals(snapshot.owner()))
+      throw missing();
+    if (snapshot.node() == null) throw new AurigaException(CommonErrors.UNAVAILABLE);
+    return snapshot;
+  }
+
+  private String marketPolicies(ResourceAccess.Reader reader, UUID instance) {
+    var rules = JSON.createObjectNode();
+    assignments
+        .effective(reader, instance, true)
+        .forEach(
+            (pkg, policy) ->
+                rules
+                    .putObject(pkg.toString())
+                    .put("mode", policy.mode())
+                    .set("identity", policy.identity()));
+    return ResourceOperations.hash(ResourceSigning.canonical(rules));
+  }
+
+  private Map<String, Object> marketPending(UnifiedResourceWorkspace.Snapshot snapshot) {
+    var rows =
+        db.rows(
+            "SELECT * FROM resource.catalog_distribution WHERE tenant_id=:tenant AND instance_id=:instance AND selection_revision>:selection AND lifecycle='pending' ORDER BY selection_revision DESC LIMIT 1",
+            db.args("instance", snapshot.instance(), "selection", snapshot.selectionRevision()));
+    return rows.isEmpty() ? null : rows.getFirst();
+  }
+
+  private boolean marketCurrent(
+      Map<String, Object> row,
+      UnifiedResourceWorkspace.Snapshot snapshot,
+      ResourceAccess.Reader owner) {
+    var intent = marketIntent(row);
+    return snapshot.owner().equals(row.get("owner_id"))
+        && Objects.equals(snapshot.node(), row.get("node_id"))
+        && snapshot.selectionRevision() == intent.path("baseSelection").asLong(-1)
+        && access.currentInstallationDevice(owner, uuid(intent, "deviceId"), snapshot.instance())
+        && intent.path("policies").asString().equals(marketPolicies(owner, snapshot.instance()));
+  }
+
+  private JsonNode marketIntent(Map<String, Object> row) {
+    return json(row, "resolution").path("marketIntent");
+  }
+
+  private JsonNode selectCloud(
+      AurigaPrincipal actor, UUID did, UUID instance, ObjectNode body, String key, String etag) {
+    var selection = body.path("selection");
+    var identity = selection.path("identity");
+    var pkg = uuid(identity, "packageId");
+    var action = selection.path("action").asString();
+    if (!Set.of("install", "enable", "disable", "remove").contains(action)
+        || !Set.of("plugin", "skill").contains(identity.path("kind").asString())) throw invalid();
+    return catalog.mutate(
+        actor,
+        ResourceAccess.READ,
+        false,
+        "market/" + instance + "/" + did + "/" + pkg,
+        key,
+        etag,
+        body,
+        r -> {
+          db.lock("catalog-assignments");
+          db.lock("catalog-distribution/" + instance);
+          var snapshot = marketSnapshot(actor, r, instance);
+          var version = admit(r, identity, Set.of("install", "enable").contains(action));
+          CatalogAssignments.check(
+              assignments.effective(r, snapshot.instance(), true).get(pkg),
+              identity,
+              number(version, "release_sequence"),
+              action);
+        },
+        r -> {
+          var snapshot = marketSnapshot(actor, r, instance);
+          synchronize(snapshot);
+          var pending = marketPending(snapshot);
+          if (pending != null
+              && (marketIntent(pending).isMissingNode() || marketCurrent(pending, snapshot, r)))
+            throw conflict();
+
+          var row = cloudRow(instance, pkg);
+          if (row != null && !r.account().equals(row.get("owner_id"))) throw missing();
+          match(etag, row == null ? 0 : number(row, "revision"));
+          if (!action.equals("install")) {
+            if (row == null || !json(row, "resource").path("identity").equals(identity))
+              throw missing();
+            boolean collected = row.get("collected_generation") != null;
+            if (collected
+                ? !action.equals("enable")
+                : number(row, "selection_revision") != snapshot.selectionRevision())
+              throw missing();
+          }
+
+          var input = JSON.createObjectNode().put("instanceId", instance.toString());
+          input.putArray("selections").add(selection);
+          var intent =
+              JSON.createObjectNode()
+                  .put("packageId", pkg.toString())
+                  .put("deviceId", did.toString())
+                  .put("nodeId", snapshot.node().toString())
+                  .put("baseSelection", snapshot.selectionRevision())
+                  .put("policies", marketPolicies(r, instance));
+          var doc =
+              createDistribution(
+                  r, input, "\"" + snapshot.selectionRevision() + "\"", true, intent);
+          var distribution =
+              db.row(
+                  "SELECT resolution FROM resource.catalog_distribution WHERE tenant_id=:tenant AND id=:id",
+                  db.args("id", uuid(doc, "distributionId")));
+          return marketRow(
+              did,
+              distributedResource(distribution, pkg),
+              doc.path("selectionRevision").asLong(),
+              doc.path("generation").asLong(),
+              "applying");
+        });
+  }
+
+  private JsonNode distributedResource(Map<String, Object> row, UUID pkg) {
+    for (var item : json(row, "resolution").path("resources"))
+      if (uuid(item.path("identity"), "packageId").equals(pkg)) return item;
+    throw conflict();
+  }
+
+  private ObjectNode marketRow(
+      UUID did, JsonNode resource, long selection, long generation, String state) {
+    return JSON.createObjectNode()
+        .put("clientId", did.toString())
+        .put("installationRevision", resource.path("installationRevision").asLong())
+        .put("selectionRevision", selection)
+        .put("generation", generation)
+        .put("state", state)
+        .put("reportSource", "node")
+        .set("resource", resource);
+  }
+
+  private JsonNode observedMarketRow(
+      UUID did, Map<String, Object> row, UnifiedResourceWorkspace.Snapshot snapshot) {
+    var resource = json(row, "resource");
+    if (row.get("collected_generation") != null) {
+      // The durable CAS tombstone represents a completed removal, not a current node report.
+      if (!CatalogStatePolicy.desired(resource).equals("REMOVED")
+          || snapshot.resources().stream()
+              .anyMatch(
+                  ref ->
+                      ref.getIdentity()
+                          .getPackageId()
+                          .equals(resource.path("identity").path("packageId").asString())))
+        return null;
+      return marketRow(
+          did,
+          resource,
+          number(row, "selection_revision"),
+          number(row, "collected_generation"),
+          "removed");
+    }
+    var expected =
+        snapshot.resources().stream().filter(ref -> sameInstallation(resource, ref)).findFirst();
+    if (expected.isEmpty()) return null;
+    var result =
+        marketRow(did, resource, snapshot.selectionRevision(), snapshot.generation(), "applying");
+    for (var report : snapshot.reports()) {
+      if (!CatalogStatePolicy.currentNodeReport(expected.get(), snapshot, report)) continue;
+      result
+          .put("state", report.getState())
+          .set("report", nodeReport(report, resource.path("identity")));
+      break;
+    }
+    return result;
+  }
+
+  private JsonNode cloudInstallations(
+      AurigaPrincipal actor, UUID did, UUID instance, String kind, int limit, String cursor) {
+    if (limit < 1
+        || limit > 200
+        || kind != null && !Set.of("plugin", "skill", "tool").contains(kind)) throw invalid();
+    return tx.write(
+        () -> {
+          db.lock("catalog-assignments");
+          db.lock("catalog-distribution/" + instance);
+          var reader = access.member(actor);
+          var snapshot = marketSnapshot(actor, reader, instance);
+          synchronize(snapshot);
+          var pending = marketPending(snapshot);
+          UUID pendingPkg =
+              pending != null
+                      && !marketIntent(pending).isMissingNode()
+                      && marketCurrent(pending, snapshot, reader)
+                  ? uuid(marketIntent(pending), "packageId")
+                  : null;
+          String where =
+              " FROM resource.catalog_package p LEFT JOIN resource.catalog_instance_installation i ON i.tenant_id=p.tenant_id AND i.package_id=p.id AND i.instance_id=:instance AND i.owner_id=:owner WHERE p.tenant_id=:tenant AND (p.id=CAST(:pending AS uuid) OR (i.selection_revision=:selection AND i.collected_generation IS NULL) OR i.collected_generation<=:generation)"
+                  + catalog.visible(reader)
+                  + (kind == null ? "" : " AND p.kind=:kind");
+          var args =
+              catalog.args(
+                  reader,
+                  "instance",
+                  instance,
+                  "owner",
+                  reader.account(),
+                  "pending",
+                  pendingPkg,
+                  "selection",
+                  snapshot.selectionRevision(),
+                  "generation",
+                  snapshot.generation(),
+                  "kind",
+                  kind);
+          String scope = "catalog/market/" + instance + "/" + did + "/" + kind;
+          var position = cursors.decode(cursor, reader, scope, limit);
+          if (position == null) {
+            var top = db.rows("SELECT p.id" + where + " ORDER BY p.id DESC LIMIT 1", args);
+            position =
+                cursors.initial(top.isEmpty() ? new UUID(0, 0) : (UUID) top.getFirst().get("id"));
+          }
+          args.put("after", position.after());
+          args.put("ceiling", position.ceiling());
+          args.put("limit", limit + 1);
+          var rows =
+              db.rows(
+                  "SELECT p.id AS market_package,i.*"
+                      + where
+                      + " AND p.id>:after AND p.id<=:ceiling ORDER BY p.id LIMIT :limit",
+                  args);
+          var result = JSON.createObjectNode();
+          var items = result.putArray("items");
+          for (var row : rows.subList(0, Math.min(rows.size(), limit))) {
+            var pkg = (UUID) row.get("market_package");
+            var item =
+                pkg.equals(pendingPkg)
+                    ? marketRow(
+                        did,
+                        distributedResource(pending, pkg),
+                        number(pending, "selection_revision"),
+                        json(pending, "document").path("generation").asLong(),
+                        "applying")
+                    : observedMarketRow(did, row, snapshot);
+            if (item != null) items.add(item);
+          }
+          if (rows.size() > limit)
+            result.put(
+                "nextCursor",
+                cursors.encode(
+                    reader,
+                    scope,
+                    limit,
+                    new ResourceCursor.Position(
+                        (UUID) rows.get(limit - 1).get("market_package"),
+                        position.ceiling(),
+                        position.expires())));
+          return installationFailures(result, reader, instance, kind, "instance");
+        });
   }
 
   public JsonNode createAssignment(
@@ -911,11 +1176,25 @@ public final class CatalogDelivery implements UnifiedResourceResolution {
               || !snapshot.node().toString().equals(request.getNodeId())
               || snapshot.selectionRevision() != request.getSelectionRevision()) throw conflict();
           synchronize(snapshot);
-          var reader = access.target(TenantContext.require(), snapshot.owner());
           var pending =
               db.rows(
                   "SELECT * FROM resource.catalog_distribution WHERE tenant_id=:tenant AND instance_id=:instance AND selection_revision>:revision AND lifecycle='pending' ORDER BY selection_revision DESC LIMIT 1",
                   db.args("instance", instance, "revision", snapshot.selectionRevision()));
+          var market =
+              !pending.isEmpty() && !marketIntent(pending.getFirst()).isMissingNode()
+                  ? pending.getFirst()
+                  : null;
+          var reader =
+              market != null && snapshot.owner().equals(market.get("owner_id"))
+                  ? access.targetForPendingMarket(TenantContext.require(), snapshot.owner())
+                  : access.target(TenantContext.require(), snapshot.owner());
+          if (market != null) {
+            if (reader != null && marketCurrent(market, snapshot, reader))
+              return assignmentResolution(reader, market);
+            supersedeMarket(market);
+            if (reader == null) return null;
+            pending = List.of();
+          }
           var policies = assignments.effective(reader, instance, true);
           var previous = new LinkedHashMap<UUID, UnifiedResourceRef>();
           snapshot
@@ -1196,7 +1475,7 @@ public final class CatalogDelivery implements UnifiedResourceResolution {
     var rows =
         db.rows(
             "INSERT INTO resource.catalog_instance_counter(tenant_id,instance_id,package_id,revision) VALUES(:tenant,:instance,:pkg,1) ON CONFLICT(tenant_id,instance_id,package_id) DO UPDATE SET revision=catalog_instance_counter.revision+1 WHERE catalog_instance_counter.revision<:maximum RETURNING revision",
-            db.args("instance", instance, "pkg", pkg, "maximum", ResourceWorkflow.MAX));
+            db.args("instance", instance, "pkg", pkg, "maximum", ResourceOperations.MAX));
     if (rows.isEmpty()) throw CatalogStatePolicy.conflict();
     return number(rows.getFirst(), "revision");
   }
@@ -1262,6 +1541,11 @@ public final class CatalogDelivery implements UnifiedResourceResolution {
 
   private JsonNode createDistribution(
       ResourceAccess.Reader r, ObjectNode body, String etag, boolean manual) {
+    return createDistribution(r, body, etag, manual, null);
+  }
+
+  private ObjectNode createDistribution(
+      ResourceAccess.Reader r, ObjectNode body, String etag, boolean manual, ObjectNode market) {
     db.lock("catalog-assignments");
     body = body.deepCopy();
     UUID instance = uuid(body, "instanceId");
@@ -1269,6 +1553,9 @@ public final class CatalogDelivery implements UnifiedResourceResolution {
     var snapshot = workspace().snapshot(r.tenant(), instance);
     match(etag, snapshot.selectionRevision());
     if (snapshot.node() == null) throw new AurigaException(CommonErrors.UNAVAILABLE);
+    if (market != null
+        && (!r.account().equals(snapshot.owner())
+            || !uuid(market, "nodeId").equals(snapshot.node()))) throw missing();
     var owner = access.target(r.tenant(), snapshot.owner());
     synchronize(snapshot);
     var policies = assignments.effective(owner, instance, true);
@@ -1281,9 +1568,12 @@ public final class CatalogDelivery implements UnifiedResourceResolution {
                         db.args("instance", instance)),
                     "revision"))
             + 1;
-    if (revision > ResourceWorkflow.MAX) throw conflict();
+    if (revision > ResourceOperations.MAX) throw conflict();
     UUID id = UuidV7.next();
     var resolution = JSON.createObjectNode().put("selectionRevision", revision);
+    // Private resolution metadata survives retries. The distribution document and event stay
+    // unchanged.
+    if (market != null) resolution.set("marketIntent", market);
     var resources = resolution.putArray("resources");
     var retained = cloudResources(instance, snapshot.owner(), snapshot.selectionRevision());
     policies.replaceAll(
@@ -1467,7 +1757,7 @@ public final class CatalogDelivery implements UnifiedResourceResolution {
             "rev",
             revision,
             "fp",
-            ResourceWorkflow.hash(ResourceSigning.canonical(body)),
+            ResourceOperations.hash(ResourceSigning.canonical(body)),
             "doc",
             doc.toString(),
             "resolution",
@@ -1561,19 +1851,7 @@ public final class CatalogDelivery implements UnifiedResourceResolution {
           continue;
         }
         var x = report.get();
-        var n =
-            JSON.createObjectNode()
-                .put("clientId", x.getClientId())
-                .put("installationRevision", x.getInstallationRevision())
-                .put("selectionRevision", x.getSelectionRevision())
-                .put("generation", x.getGeneration())
-                .put("observedGeneration", x.getObservedGeneration())
-                .put("state", x.getState())
-                .put("reportSource", "node")
-                .put("observedAt", x.getObservedAt());
-        n.set("identity", s.path("identity"));
-        if (!x.getErrorCode().isEmpty()) n.put("errorCode", x.getErrorCode());
-        reports.add(n);
+        reports.add(nodeReport(x, s.path("identity")));
         successes.add(x.getState());
       }
       doc.put(
@@ -1581,6 +1859,22 @@ public final class CatalogDelivery implements UnifiedResourceResolution {
           applied ? (successes.size() == 1 ? successes.iterator().next() : "applied") : "applying");
     }
     return doc;
+  }
+
+  private ObjectNode nodeReport(UnifiedInstallationReport report, JsonNode identity) {
+    var result =
+        JSON.createObjectNode()
+            .put("clientId", report.getClientId())
+            .put("installationRevision", report.getInstallationRevision())
+            .put("selectionRevision", report.getSelectionRevision())
+            .put("generation", report.getGeneration())
+            .put("observedGeneration", report.getObservedGeneration())
+            .put("state", report.getState())
+            .put("reportSource", "node")
+            .put("observedAt", report.getObservedAt());
+    result.set("identity", identity);
+    if (!report.getErrorCode().isEmpty()) result.put("errorCode", report.getErrorCode());
+    return result;
   }
 
   public JsonNode distributions(
@@ -1611,8 +1905,19 @@ public final class CatalogDelivery implements UnifiedResourceResolution {
 
   @Override
   public ResolveUnifiedResourcesResponse resolve(ResolveUnifiedResourcesRequest request) {
-    if (request.getSynchronizeAssignments()) return reconcileAssignments(request);
-    return resolve(request, null);
+    var result =
+        request.getSynchronizeAssignments()
+            ? reconcileAssignments(request)
+            : resolve(request, null);
+    // Report a terminal rejection after the transaction commits the supersession.
+    if (result == null) throw new AurigaException(CommonErrors.PRECONDITION_FAILED);
+    return result;
+  }
+
+  private void supersedeMarket(Map<String, Object> row) {
+    db.update(
+        "UPDATE resource.catalog_distribution SET lifecycle='superseded',next_reconcile_at=NULL WHERE tenant_id=:tenant AND id=:id AND lifecycle='pending'",
+        db.args("id", row.get("id")));
   }
 
   private ResolveUnifiedResourcesResponse resolve(
@@ -1621,6 +1926,7 @@ public final class CatalogDelivery implements UnifiedResourceResolution {
     if (!tenant.toString().equals(request.getTenantId())) throw missing();
     return tx.write(
         () -> {
+          db.lock("catalog-assignments");
           db.lock("catalog-distribution/" + request.getInstanceId());
           var row =
               db.row(
@@ -1630,21 +1936,35 @@ public final class CatalogDelivery implements UnifiedResourceResolution {
                       UUID.fromString(request.getInstanceId()),
                       "rev",
                       request.getSelectionRevision()));
-          if (!row.get("owner_id").toString().equals(request.getOwnerId())
-              || !row.get("node_id").toString().equals(request.getNodeId())) throw missing();
+          if (!row.get("owner_id").toString().equals(request.getOwnerId())) throw missing();
+          boolean market = !marketIntent(row).isMissingNode();
+          if (!market && !row.get("node_id").toString().equals(request.getNodeId()))
+            throw missing();
           var selections = json(row, "document").path("selections");
           var expected = new ArrayList<UnifiedSelection>();
           selections.forEach(s -> expected.add(CatalogProtocol.selection(s)));
           if (!expected.equals(request.getSelectionsList())) throw conflict();
           var snapshot =
               actual == null ? workspace().snapshot(tenant, (UUID) row.get("instance_id")) : actual;
-          if (snapshot.selectionRevision() > request.getSelectionRevision()
-              || !snapshot.owner().equals(row.get("owner_id"))
-              || !Objects.equals(snapshot.node(), row.get("node_id"))) throw conflict();
+          if (!snapshot.owner().equals(row.get("owner_id")) || snapshot.node() == null)
+            throw conflict();
+          if (market && !snapshot.node().toString().equals(request.getNodeId())) throw missing();
+          boolean uncommittedMarket =
+              market && snapshot.selectionRevision() != request.getSelectionRevision();
+          if (uncommittedMarket && row.get("lifecycle").equals("superseded")) return null;
+          var owner =
+              uncommittedMarket && row.get("lifecycle").equals("pending")
+                  ? access.targetForPendingMarket(tenant, snapshot.owner())
+                  : access.target(tenant, snapshot.owner());
+          if (uncommittedMarket && (owner == null || !marketCurrent(row, snapshot, owner))) {
+            supersedeMarket(row);
+            return null;
+          }
+          if (!Objects.equals(snapshot.node(), row.get("node_id"))
+              || snapshot.selectionRevision() > request.getSelectionRevision()) throw conflict();
           synchronize(snapshot);
           if (snapshot.selectionRevision() != request.getSelectionRevision()
               && row.get("lifecycle").equals("superseded")) throw conflict();
-          var owner = access.target(tenant, (UUID) row.get("owner_id"));
           var resolution = hydrateExpectations(row);
           var out =
               ResolveUnifiedResourcesResponse.newBuilder()
@@ -1975,6 +2295,7 @@ public final class CatalogDelivery implements UnifiedResourceResolution {
                   tx.write(
                       () -> {
                         UUID instance = (UUID) queued.get("instance_id");
+                        db.lock("catalog-assignments");
                         db.lock("catalog-distribution/" + instance);
                         var snapshot = workspace().snapshot(tenant, instance);
                         synchronize(snapshot);

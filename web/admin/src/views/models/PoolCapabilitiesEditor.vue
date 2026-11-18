@@ -16,10 +16,39 @@ const pool = defineModel<RelayPool>({ required: true });
 const props = defineProps<{
   providers: RelayProvider[];
   catalogs: Record<string, CatalogState>;
+  availableModels: ReadonlyMap<string, ReadonlySet<string>>;
 }>();
 const emit = defineEmits<{ refresh: [] }>();
 const { t } = useRelayI18n();
 const policy = computed(() => pool.value.capabilities!);
+const sourceRoutes = computed(() => {
+  const choices = new Map<
+    string,
+    { key: string; providerId: string; model: string; index?: number }
+  >();
+  pool.value.routes.forEach(({ providerId, model }, index) => {
+    if (!providerId || !model.trim()) return;
+    const key = sourceKey(providerId, model);
+    if (!choices.has(key)) choices.set(key, { key, providerId, model, index });
+  });
+  for (const provider of props.providers) {
+    if (!provider.configuration.enabled || !provider.hasCredential) continue;
+    const providerId = provider.id;
+    for (const model of props.availableModels.get(providerId) ?? []) {
+      const key = sourceKey(providerId, model);
+      if (!choices.has(key)) choices.set(key, { key, providerId, model });
+    }
+  }
+  return choices;
+});
+function emptyRoute(providerId: string) {
+  return pool.value.routes.find(
+    (r) => !r.model.trim() && (!r.providerId || r.providerId === providerId),
+  );
+}
+function canAddSource(providerId: string) {
+  return pool.value.routes.length < 8 || !!emptyRoute(providerId);
+}
 const adoptionNotice = ref('');
 const contextMode = computed({
   get: () => policy.value.contextWindowMode,
@@ -67,7 +96,15 @@ function effectiveText(dimension: 'context' | 'output') {
 const selectedSource = computed({
   get: () => sourceKey(policy.value.sourceProviderId, policy.value.sourceModel),
   set(value: string) {
-    const [providerId, model] = JSON.parse(value) as [string, string];
+    const choice = sourceRoutes.value.get(value);
+    if (!choice) return;
+    const { providerId, model, index } = choice;
+    if (index === undefined) {
+      if (!canAddSource(providerId)) return;
+      const blank = emptyRoute(providerId);
+      if (blank) Object.assign(blank, { providerId, model });
+      else pool.value.routes.push({ providerId, model, weight: 1 });
+    }
     policy.value.sourceProviderId = providerId;
     policy.value.sourceModel = model;
     delete policy.value.upstream;
@@ -100,15 +137,28 @@ watch(
       >{{ t('capabilitySourceRoute') }}
       <select v-model="selectedSource" name="capabilitySourceRoute">
         <option v-if="!policy.sourceModel" disabled :value="selectedSource">
-          {{ t('capabilityChooseRoute') }}
+          {{
+            t(
+              sourceRoutes.size
+                ? 'capabilityChooseKnownRoute'
+                : 'capabilityChooseRoute',
+            )
+          }}
         </option>
         <option
-          v-for="(route, index) in pool.routes"
-          :key="sourceKey(route.providerId, route.model)"
-          :value="sourceKey(route.providerId, route.model)"
-          :disabled="!route.providerId || !route.model"
+          v-for="route in sourceRoutes.values()"
+          :key="route.key"
+          :value="route.key"
+          :disabled="
+            route.index === undefined && !canAddSource(route.providerId)
+          "
         >
-          {{ t('routeNumber', { number: index + 1 }) }} ·
+          {{
+            route.index === undefined
+              ? t('capabilityAddKnownRoute')
+              : t('routeNumber', { number: route.index + 1 })
+          }}
+          ·
           {{
             providers.find((p) => p.id === route.providerId)?.configuration.name
           }}

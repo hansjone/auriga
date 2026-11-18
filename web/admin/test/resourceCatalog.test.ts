@@ -3,7 +3,6 @@ import { afterEach, expect, it, vi } from 'vitest';
 import { createMemoryHistory, createRouter } from 'vue-router';
 import { createAurigaI18n, ApiError } from '@auriga/shared';
 import { adminApi } from '../src/admin/api';
-import { resourceApi } from '../src/admin/resourceApi';
 import {
   resourceCatalogApi as api,
   type CatalogVersion,
@@ -20,7 +19,6 @@ import * as preview from '../src/admin/resourceSkillPreview';
 import * as uploadHelpers from '../src/admin/resourceUploadParser';
 import * as stepUp from '../src/admin/stepUp';
 import Catalog from '../src/views/resources/ResourceCatalogView.vue';
-import Center from '../src/views/resources/ResourceCenterView.vue';
 import Unavailable from '../src/views/WorkflowUnavailableView.vue';
 
 const v: CatalogVersion = {
@@ -415,37 +413,6 @@ it('requires matching node generation, selection revision and every resource rep
       reports: [{ ...report, reportSource: 'member' }],
     }),
   ).toBe(false);
-});
-it('uses the unified source for both plugin and skill without legacy calls', async () => {
-  member();
-  const legacy = vi
-    .spyOn(resourceApi, 'governance')
-    .mockResolvedValue({ items: [] });
-  const unified = vi.spyOn(api, 'reviews').mockResolvedValue({ items: [] });
-  const router = createRouter({
-    history: createMemoryHistory(),
-    routes: [
-      {
-        path: '/resources/:kind(plugins|skills)/:phase?',
-        component: Center,
-      },
-    ],
-  });
-  await router.push('/resources/plugins/review');
-  await router.isReady();
-  const view = mount(Center, {
-    props: { kind: 'plugin', phase: 'review' },
-    global: { plugins: [router, createAurigaI18n('en')], stubs },
-  });
-  views.push(view);
-  await flushPromises();
-  expect(legacy).not.toHaveBeenCalled();
-  expect(unified).toHaveBeenCalledWith(undefined, 'plugin');
-  expect(view.findAll('[aria-current="page"]')).toHaveLength(1);
-  await view.setProps({ kind: 'skill', phase: 'review' });
-  await flushPromises();
-  expect(unified).toHaveBeenLastCalledWith(undefined, 'skill');
-  expect(legacy).not.toHaveBeenCalled();
 });
 it('rejects preview traversal, links, invalid UTF-8 and oversized streams', async () => {
   const tar = (name: string, type = '0', byte = 65) => {

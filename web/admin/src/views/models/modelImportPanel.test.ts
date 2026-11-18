@@ -241,6 +241,37 @@ async function prepare(w: ReturnType<typeof make>) {
   await w.get('[name="importOutputPrice"]').setValue('1000000');
   await w.get('[name="importConfirmed"]').setValue(true);
 }
+it('previews and imports on HTTP without crypto.randomUUID, and requires fresh confirmation', async () => {
+  vi.stubGlobal('crypto', {
+    getRandomValues: globalThis.crypto.getRandomValues.bind(globalThis.crypto),
+  });
+  const w = make();
+  try {
+    await prepare(w);
+    await w.get('[name="importOutput0"]').setValue('4096');
+    const submit = w.get('[data-testid="import-run"]');
+    expect(submit.attributes('disabled')).toBeDefined();
+    await submit.trigger('click');
+    expect(relayApi.createPool).not.toHaveBeenCalled();
+    await w.get('[name="importConfirmed"]').setValue(true);
+    expect(submit.attributes('disabled')).toBeUndefined();
+    await submit.trigger('click');
+    await flushPromises();
+    const writes = vi.mocked(relayApi.createPool).mock.calls;
+    expect(writes).toHaveLength(2);
+    const uuid =
+      /^[\da-f]{8}-[\da-f]{4}-4[\da-f]{3}-[89ab][\da-f]{3}-[\da-f]{12}$/;
+    expect(writes[0][1]).toMatch(uuid);
+    expect(writes[1][1]).toMatch(uuid);
+    expect(writes[0][1]).not.toBe(writes[1][1]);
+    expect(saved[0].price.version).toMatch(uuid);
+    expect(saved[0].maxOutputTokens).toBe(4096);
+    expect(w.text()).toContain('已保存 2 / 2');
+  } finally {
+    w.unmount();
+    vi.unstubAllGlobals();
+  }
+});
 it('previews independent public aliases, inherits known capabilities and leaves unknown values uncapped with positive pricing', async () => {
   const w = make();
   await flushPromises();

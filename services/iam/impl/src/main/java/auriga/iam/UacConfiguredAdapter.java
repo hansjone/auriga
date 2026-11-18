@@ -244,18 +244,17 @@ final class UacConfiguredAdapter implements UacEnterpriseAdapter {
         return failure("denied", "upstream_rejected");
       JsonNode token = root.at(mapping.path("tokenPointer").asString()),
           empNo = root.at(mapping.path("empNoPointer").asString());
-      if (!token.isString() || token.asString().isBlank() || token.asString().length() > 16384)
+      if (!token.isString() || !UacTokenVerification.validToken(token.asString()))
         return failure("failed", "missing_token");
-      if (!empNo.isString()
-          || empNo.asString().strip().isEmpty()
-          || empNo.asString().strip().length() > 128) return failure("failed", "missing_emp_no");
+      if (!empNo.isString() || !UacTokenVerification.validUser(empNo.asString()))
+        return failure("failed", "missing_emp_no");
       return Json.object(
           "state",
           "verified",
           "token",
           token.asString(),
           "empNo",
-          empNo.asString().strip(),
+          UacTokenVerification.stripWhitespace(empNo.asString()),
           "clientIP",
           settings.path("clientIP").asString(""));
     } catch (java.io.IOException e) {
@@ -333,15 +332,17 @@ final class UacConfiguredAdapter implements UacEnterpriseAdapter {
   @Override
   public JsonNode verify(JsonNode config, JsonNode credential) {
     try {
-      String account = credential.path("empNo").asString();
+      ObjectNode request =
+          UacTokenVerification.request(
+              credential.path("empNo").asString(),
+              credential.path("token").asString(),
+              credential.path("clientIP").asString(""),
+              config.path("systemCode").asString());
+      String account = request.path("account").asString();
       var response =
           http.post(
               URI.create(settings.path("tokenVerifyUrl").asString()),
-              UacTokenVerification.request(
-                  account,
-                  credential.path("token").asString(),
-                  credential.path("clientIP").asString(""),
-                  config.path("systemCode").asString()),
+              request,
               Map.of("X-Emp-No", account),
               3);
       UacTelemetry.capture(response.status(), response.body());
@@ -426,19 +427,21 @@ final class UacConfiguredAdapter implements UacEnterpriseAdapter {
       JsonNode roles = settings.path("cookies").path(system);
       String token = cookieValue(cookies, roles.path("token")),
           account = cookieValue(cookies, roles.path("account"));
-      if (token != null && (token.isBlank() || token.length() > 16384)
-          || account != null && (account.strip().isEmpty() || account.strip().length() > 128))
-        return Json.object();
+      if (token != null && !UacTokenVerification.validToken(token)
+          || account != null && !UacTokenVerification.validUser(account)) return Json.object();
       if (token == null || account == null) continue;
-      if (token.isBlank()
-          || token.length() > 16384
-          || account.strip().isEmpty()
-          || account.strip().length() > 128) return Json.object();
       String ip = cookieValue(cookies, settings.path("cookies").path("uds").path("clientIP"));
       if (ip == null) ip = settings.path("clientIP").asString("");
       literalIp(ip);
       return Json.object(
-          "empNo", account.strip(), "token", token, "clientIP", ip, "cookieFamily", system);
+          "empNo",
+          UacTokenVerification.stripWhitespace(account),
+          "token",
+          token,
+          "clientIP",
+          ip,
+          "cookieFamily",
+          system);
     }
     return Json.object();
   }

@@ -73,7 +73,11 @@ const normalize = (value: string) =>
   value.trim().toUpperCase().replaceAll('-', '');
 function openCode() {
   if (valid(normalize(entered.value)))
-    globalThis.location.assign('/device/' + normalize(entered.value));
+    globalThis.location.assign(
+      '/device/' +
+        normalize(entered.value) +
+        (route.query.mode === 'manual' ? '?mode=manual' : ''),
+    );
 }
 const valid = (value: string) => /^[BCDFGHJKLMNPQRSTVWXZ]{8}$/.test(value);
 const code = normalize(
