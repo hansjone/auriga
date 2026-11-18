@@ -1,6 +1,6 @@
 # 开发环境的独立降级根与云端更新
 
-统一资源的自动回落使用独立 `purpose=downgrade` 根。发行、撤销、降级和 runtime 镜像发行各有独立信任用途。本指南用于已有开发栈的增量配置，执行者为部署主控。开始前记录源码与配方版本、当前模板及序号高水位、目标实例和资源规则，并备份两端配置。现场收据与正常页面结果由主控提供。
+统一资源的自动回落使用独立 `purpose=downgrade` 根。发行、撤销、降级和 runtime 镜像发行各有独立信任用途。本指南用于已有开发栈的增量配置，执行者为部署主控。当前公开 NAS 配方的安装、启停签发、旧栈升级和资源 HTTPS origin 统一沿用公开流程。开始前记录源码与配方版本、当前模板及序号高水位、目标实例和资源规则，并备份两端配置。现场收据与正常页面结果由主控提供。[NAS 资源下载与可选降级签发](nas.md#云端资源下载和可选降级签发)
 
 ## 准备新根
 
@@ -54,7 +54,7 @@ const publicKey = raw.toString('base64');
 
 NAS 节点使用宿主网络。平台资源下载入口位于 HTTPS `8081` 监听器，宿主发布端口为 `AURIGA_HOST_PUBLISH_PLATFORM_HTTP`。NodeControl 使用独立的 `7443` 监听器和 `AURIGA_HOST_PUBLISH_NODECONTROL` 发布端口。平台 HTTPS 证书的 DNS SAN 为 `platform`。主控须核实实际证书链、监听端口和发布映射。[NAS 配方](../../deploy/nas/docker-compose.yml)、[平台 TLS 配置](../../services/platform-app/src/main/resources/application-combined.yaml)、[PKI 生成](../../deploy/nas/bootstrap/main.go)包含对应事实。
 
-在这套证书与宿主回环发布方式下，下载 `origin` 的候选形式为 `https://platform:<AURIGA_HOST_PUBLISH_PLATFORM_HTTP>`。实际值须经核准。节点容器中的 `platform` 必须稳定解析到该宿主发布入口。在这个 host-network 布局中，主控可在受审固定配方的 `agent.extra_hosts` 接入 `platform:127.0.0.1`，重建后核对节点容器内解析结果和下载端口。宿主网络节点的可达性须从节点自身验证。当前公开配方缺少下载专用的 `platform` 解析接线，主控须补齐并在重建后复验。
+在这套证书与宿主回环发布方式下，下载 `origin` 使用经核准的 `https://platform:<AURIGA_HOST_PUBLISH_PLATFORM_HTTP>`。当前公开 NAS 配方已在 agent 容器的 `extra_hosts` 中将 `platform` 接到 `127.0.0.1`，默认资源 HTTPS 发布端口为 `18081`。已有明确批准的站点 origin 继续沿用。旧文件误用 NodeControl 端口时，先备份再按实际 HTTPS 发布端口更新该节点的 origin，保留已有公钥、用途、有效窗和文件属主权限。采用新配方后执行原安装实例的公开升级/启动流程，重建 agent 并核对容器内名称解析及下载端口。宿主网络节点的可达性须从节点自身验证。[NAS origin 迁移与旧栈升级](nas.md#云端资源下载和可选降级签发)
 
 节点使用自身已登记的 `node.crt`、`node.key` 和 `ca.crt` 建立 TLS 1.3 mTLS，服务端验证节点身份、租户、调度绑定及下载授权。TLS 名称验证必须开启。节点拒绝重定向，只接受授权 locator 的 HTTP `200` 完整响应、可解析的 `Date` 以及预算内字节。[下载控制器](../../services/resource/impl/src/main/java/auriga/resource/web/CatalogNodeController.java)、[节点下载实现](../../infra/agent/internal/runtime/unified_manager.go)定义了该入口。
 
@@ -79,28 +79,49 @@ printf 'GET %s HTTP/1.1\r\nHost: platform:%s\r\nConnection: close\r\n\r\n' \
 
 ## 再启用平台签发
 
-### 当前 NAS 的持久接线缺口
+### 当前公开 NAS 配方
 
-Java 平台已读取 `auriga.resource.downgrade-kid` 与 `auriga.resource.downgrade-key-file`。基础 NAS Compose 当前缺少 `/run/secrets/auriga-resource` 挂载和这两个属性的透传。一键路径的固定 `oneclick-compose.yml` 将 `${AURIGA_DATA_ROOT}/resource-keys/platform` 只读挂载到 `/run/auriga-resource`，其中仅绑定 release/revocation 的 kid 和文件属性。`render.sh` 会重新生成 `config/platform.env`，`run_compose` 显式选择固定配方与受控覆盖层。
+已启用 release/revocation 签发的站点可选择启用独立降级签发。一键安装已有发行/撤销接线，其他站点先核实这两项签发及实际节点下载、验签、应用均可用。配方中的 `resource-downgrade-compose.yml` 提供独立可选覆盖层，`lib.sh` 从原安装的 `stack.env` 读取 `AURIGA_RESOURCE_DOWNGRADE_KID` 后选择该覆盖层。默认留空时降级签发关闭。安装者启动进程继承的同名环境变量会被清除，须修改原安装配置文件。[NAS 公开启用流程](nas.md#云端资源下载和可选降级签发)
 
-因此，通用公开 NAS 配方目前需要主控补齐持久接线。最小接线涉及固定 Compose 的秘密目录挂载与配置入口，以及所有渲染/启动/升级路径的一致消费。主控须提交受审配方或提供已有开发配方的精确版本和收据，确认 `start.sh`、`runtime-upgrade.sh` 后仍生效，再继续本节。直接修改生成的 `config/platform.env` 会被后续渲染覆盖。[固定 Compose 选择](../../deploy/nas/scripts/lib.sh)、[平台环境生成](../../deploy/nas/scripts/render.sh)、[一键覆盖层](../../deploy/nas/oneclick-compose.yml)可用于核对缺口。
+在初始化后的 `${AURIGA_DATA_ROOT}/secrets/resource-downgrade` 中安装本批独立 Ed25519 PKCS#8 DER 私钥，目录内仅放单硬链接普通文件 `downgrade.pk8`。目录与文件均归 `10001:10001`，目录精确为 `0700`，文件精确为 `0600`。路径与祖先使用普通真实规范路径，加载器逐层拒绝符号链接。预检以平台实际身份检查有效访问，签发器启动时再次验证密钥。确认节点已加载本批有效公钥后，在原安装的私有 `stack.env` 中设置匹配的 kid。
 
-### 配方接线完成后的启用与验证
+```dotenv
+AURIGA_RESOURCE_DOWNGRADE_KID=development-resource-unique-batch-downgrade
+```
 
-确认节点公钥、mTLS 下载和实际应用通过后，由主控将新私钥安装到平台专用秘密目录。NAS 平台运行身份为 `10001:10001`，密钥的直接父目录须归该用户所有且精确为 `0700`。私钥也须归该用户所有，采用 `0600` 或 `0400`。路径与祖先使用普通真实路径，加载器逐层拒绝符号链接，并核对规范路径。目录整体只读挂载，保持容器内直接父目录的权限。[平台配置装配](../../services/resource/impl/src/main/java/auriga/resource/config/ResourceRuntimeConfiguration.java)、[密钥加载器](../../services/resource/impl/src/main/java/auriga/resource/app/ResourceSigning.java)执行这些检查。
+应用后只有 platform 将该目录只读挂载到 `/run/auriga-resource-downgrade`，Spring 环境使用上述 kid 和固定文件路径 `/run/auriga-resource-downgrade/downgrade.pk8`。覆盖层禁止自动创建缺失的宿主目录。`start.sh` 与 `runtime-upgrade.sh` 经同一个固定 Compose 入口消费配置，后续渲染继续沿用安装配置。核对具体实现时使用[降级覆盖层](../../deploy/nas/resource-downgrade-compose.yml)、[固定 Compose 选择](../../deploy/nas/scripts/lib.sh)、[挂载权限预检](../../deploy/nas/scripts/mount-access-entry.sh)、[平台配置装配](../../services/resource/impl/src/main/java/auriga/resource/config/ResourceRuntimeConfiguration.java)和[密钥加载器](../../services/resource/impl/src/main/java/auriga/resource/app/ResourceSigning.java)。
 
-若主控核准的固定配方使用 `/run/secrets/auriga-resource`，其平台配置应包含以下属性。
+### 已有栈升级与应用配置
+
+在部署维护窗口备份原 `stack.env`、节点信任文件、安装密钥和材料，保留原数据根与运行历史。换入同一审核提交的 NAS 配方及配套 bootstrap，后者须识别 `resource-downgrade-compose.yml`，用于消息启动、恢复及轮换时校验完整 Compose 文件列表。核对安装实际使用的 bootstrap 路径和摘要，避免继续使用显式固定的旧工具。已定点移植的开发站点沿公开流程保留站点扩展并匹配原发行包和 bootstrap，具体迁移入口见 [NAS 旧栈升级说明](nas.md#云端资源下载和可选降级签发)。
+
+按站点批准的配置迁移 origin、分发公钥并准备私钥后，将 `NAS_ROOT` 和 `AURIGA_DATA_ROOT` 预先设为该安装采用的配方目录与原数据根，在 NAS 部署锁内应用配置。
+
+```sh
+set -eu
+: "${NAS_ROOT:?set the installed recipe directory}"
+: "${AURIGA_DATA_ROOT:?set the original instance data directory}"
+export NAS_ROOT AURIGA_DATA_ROOT
+sh "$NAS_ROOT/scripts/preflight.sh"
+sh "$NAS_ROOT/scripts/start.sh"
+```
+
+核对新容器的降级覆盖层、只读挂载、固定路径和预期 kid，确认 agent 名称解析与信任文件加载，再按现场验收验证真实授权和应用。停用时将原 `stack.env` 中的 `AURIGA_RESOURCE_DOWNGRADE_KID` 留空或删除，按同一流程应用配置，核对平台新配置已移除该独立挂载及两项降级 Spring 属性，并验证签发停止。需要更新签名 runtime 时仍走独立的标准发行和激活流程。只改固定挂载中的文件内容时，继续执行下文的显式平台重建。
+
+### 尚未采用新配方的站点
+
+以下 `resource.properties` 方案仅针对尚未采用新配方的站点，由主控维护该站点的受审固定接线。先核对现场配方已有只读秘密目录挂载及配置导入，直接修改生成的 `config/platform.env` 会被后续渲染覆盖。若固定配方使用 `/run/secrets/auriga-resource`，其配置可包含以下属性。
 
 ```properties
 auriga.resource.downgrade-kid=development-resource-unique-batch-downgrade
 auriga.resource.downgrade-key-file=/run/secrets/auriga-resource/downgrade.pk8
 ```
 
-这两项由现有 Spring 配置机制读取。采用独立 `resource.properties` 时，固定配方须只读挂载其目录，并将该文件追加到既有 `SPRING_CONFIG_IMPORT` 列表，同时保留原有安装、网络及 UAC 配置导入。主控也可在固定 Compose 的平台 `environment` 中显式设置 `AURIGA_RESOURCE_DOWNGRADE_KID`、`AURIGA_RESOURCE_DOWNGRADE_KEY_FILE`，文件路径须与真实只读挂载一致。以上是配方接线要求，当前通用脚本尚未提供对应的完整部署入口。
+这两项由现有 Spring 配置机制读取。采用独立 `resource.properties` 时，固定配方须只读挂载其目录，并将该文件追加到既有 `SPRING_CONFIG_IMPORT` 列表，同时保留原有安装、网络及 UAC 配置导入。平台运行身份为 `10001:10001`，密钥的直接父目录须归该身份且精确为 `0700`，私钥归该身份且采用 `0600` 或 `0400`，路径须通过加载器的规范路径和非符号链接检查。目录整体只读挂载。主控记录实际配方摘要、绑定路径与权限，并确认全部渲染/启动/升级路径消费该配置。迁移到上文新版配方时，先按现场恢复顺序撤回旧的降级导入和挂载，再启用新版配置，核对实际生效的唯一 kid 和文件路径。
 
 ### 属性变更后的平台显式重建
 
-固定只读挂载中的 `resource.properties` 内容改变后，Compose 声明可能保持相同。普通 `start.sh` 执行 `up -d`，仅显式重启 `agent`，平台旧进程可能继续保留原属性。启用、轮换、恢复和无降级根负例都须由主控在属性落盘后显式重建 `platform`，再确认新进程加载结果。
+固定只读挂载中的 `resource.properties` 或密钥文件内容改变后，Compose 声明可能保持相同。普通 `start.sh` 执行 `up -d`，仅显式重启 `agent`，平台旧进程可能继续保留原属性。旧站点方案的启用、轮换、恢复和无降级根负例都须由主控在属性落盘后显式重建 `platform`，再确认新进程加载结果。新版配方若仅更新同一路径的密钥内容，也须显式重建以重新加载。
 
 主控持有 NAS 部署锁，预先将 `NAS_ROOT` 设为原安装实例实际采用的受审配方目录，将 `AURIGA_DATA_ROOT` 设为原数据根。下面使用该配方已有的 `lib.sh` 和 `run_compose`，保留固定项目、原安装模式及受控覆盖层的选择。
 
@@ -123,7 +144,7 @@ docker inspect --format '{{.Id}}|{{.State.StartedAt}}|{{.State.Health.Status}}' 
 
 记录重建前后的容器 ID、`StartedAt`、退出码、健康状态及属性文件摘要。核对新容器实际配置导入、挂载目标及 `RW=false`、父目录与私钥的 UID/GID/权限、kid 与公钥对应关系。新进程健康后，通过下文的签名授权及节点消费核实新 kid 生效，停用签发时核实回落失败且安全停用继续执行。证据仅保留所需非秘密字段。随后执行 `start.sh` 或标准 runtime 升级时复核这些项目，属性再次变化则重复显式重建步骤。[普通启动流程](../../deploy/nas/scripts/start.sh)、[固定 Compose 入口](../../deploy/nas/scripts/lib.sh)、[启动时配置装配](../../services/resource/impl/src/main/java/auriga/resource/config/ResourceRuntimeConfiguration.java)支持上述操作。
 
-平台签发端独立读取密钥，未读取节点根的有效窗。主控须在到期前复核窗口与节点时钟。在窗口失效或根撤回时，先停止降级签发并按上述步骤显式重建平台，再按受审信任更新流程处理节点文件。降级根的撤回通过受信配置移除该根，资源撤销清单的 `revokedKids` 按发行签名用途检查。获批轮换使用独立新密钥和新 kid，先分发有效公钥、验证节点加载与受信下载，再切换平台属性、显式重建并核实新进程加载，随后完成新 kid 授权消费实测。旧根退役须覆盖仍有效授权和全部目标节点，历史授权消费记录与高水位持续保留。
+平台签发端独立读取密钥，未读取节点根的有效窗。主控须在到期前复核窗口与节点时钟。在窗口失效或根撤回时，先沿所用配方停止降级签发并核实新平台进程已加载，再按受审信任更新流程处理节点文件。降级根的撤回通过受信配置移除该根，资源撤销清单的 `revokedKids` 按发行签名用途检查。获批轮换使用独立新密钥和新 kid，先分发有效公钥、验证节点加载与受信下载，再替换平台私钥并更新原 `stack.env` 的 kid、应用配置和核实新进程加载。旧站点按其属性入口切换并显式重建。随后完成新 kid 授权消费实测。旧根退役须覆盖仍有效授权和全部目标节点，历史授权消费记录与高水位持续保留。
 
 ## 完整 runtime 与已有实例切换
 
@@ -140,7 +161,7 @@ runtime 脚本提交模板后，管理员须在点启动或重启之前，将目
 
 ### 两端配置恢复
 
-主控先通过同一持久配置入口停止降级签发，撤回 `downgrade-kid` 和 `downgrade-key-file` 两项，按[显式重建步骤](#属性变更后的平台显式重建)重建平台，核实新进程已停止降级签发且发行/撤销签发仍可用。等待已有短期降级授权结束，或明确接受受影响安装失败关闭后，再恢复节点信任备份、重启代理并复验。原来没有信任文件时，主控先停止该批共享分发并确认受影响内容已停用，再撤回本次新增信任文件、重启代理，核验文件缺失时共享激活关闭的影响。私钥备份按原秘密保护方式保存。
+主控先通过同一持久配置入口停止降级签发。新版配方将原 `stack.env` 的 `AURIGA_RESOURCE_DOWNGRADE_KID` 留空或删除并按公开流程应用配置。旧站点撤回 `downgrade-kid` 和 `downgrade-key-file` 两项，按[显式重建步骤](#属性变更后的平台显式重建)重建平台。核实新进程已停止降级签发且发行/撤销签发仍可用。等待已有短期降级授权结束，或明确接受受影响安装失败关闭后，再恢复节点信任备份、重启代理并复验。原来没有信任文件时，主控先停止该批共享分发并确认受影响内容已停用，再撤回本次新增信任文件、重启代理，核验文件缺失时共享激活关闭的影响。私钥备份按原秘密保护方式保存。
 
 恢复节点信任时保留该节点之后已批准的其他根变更，核对旧根有效窗。节点 ledger、`UsedAuthorizations`、最高高水位以及已安装资源的授权绑定持续保留。先撤回签发再恢复节点信任，避免平台继续发出节点已经撤回信任的新授权。[节点信任加载](../../infra/agent/internal/runtime/unified_wiring.go)、[防重放协议](../../contracts/resource/unified-protocol.md)说明了恢复边界。
 
@@ -158,8 +179,8 @@ runtime 脚本提交模板后，管理员须在点启动或重启之前，将目
 2. H 实际生效后，另行审核并发布第三个独立制品的默认版本 D，例如 L/H/D 分别采用 `1.0.0`、`1.2.0`、`1.3.0`。三个版本使用可明确区分的清单与制品摘要。发布 D 会将包的 `defaultVersionId` 设为 D 并保持 `enabled=true`。保留 D 的已发布、未撤销和默认版本回执，核实实例仍实际加载 H。
 3. 在目标实例作用域设置指向 L 精确 identity 的有效 `required` 或 `default` 规则，核对 scope、targetId、规则修订和安装方式。撤销前再次确认 H 仍在实例实际生效、包默认仍为独立已发布的 D、包仍 `enabled=true`，以及 L 对该实例主人仍可见、可选并符合规则分发准入。`optional` 规则不满足自动回落条件。此顺序参照 `CatalogWorkflowTest.mandatoryRulesRecoverAfterUnavailableHighVersion`，其先安装高版本，再额外发布默认版本，设置低版本规则后执行撤销。
 4. 对 H 执行“恶意撤销”，观察已签撤销事实及规则对账，复核包仍启用、默认仍为 D、L 仍满足候选条件。撤销当前默认版本会清空包默认并禁用整包，导致低版本失去可用性。任一默认保活前提失败时应修复测试准备后重做该组。普通下架 `withdrawn`、卸载和仅降低规则版本均不自动签发此类授权。恶意制品摘要复用会使相关版本一并被撤销，因此 D 和 L 都须与 H 的制品独立。
-5. 无降级根的负例中，主控在该隔离环境的持久配置中同时停用两项降级签发配置，按显式重建步骤确认新平台进程已加载停用配置，再完成共同前提和撤销。通过条件为 H 实际停用并有节点报告，回落保持可重试失败，L 未被当作已授权安装。记录正常页面、宿主加载状态及失败原因，并确认包仍启用、默认 D 和候选 L 仍可用，排除整包禁用导致的失败。
-6. 有降级根的用例中，主控先恢复经核准的签发属性、显式重建平台并核实新进程加载，再按相同的三版本共同前提让 H 实际生效并执行恶意撤销。确认 `UnifiedResourceRef.downgradeAuthorization` 包含 `purpose=downgrade`、`reason=revocation`、匹配的 ownerId、instanceId、L 的精确 identity、from/toReleaseSequence，以及不超过10分钟的有效期，签名 kid 为已分发的独立降级根。对负例中保留的合法回落重试时，也须重新核对包仍启用、默认 D 与候选 L 可用，并记录与原撤销的关联。
+5. 无降级根的负例中，主控按两端配置恢复流程停用隔离环境的降级签发。新版清空或移除原 `stack.env` 的 kid 并应用配置，旧站点同时停用两项属性并显式重建。确认新平台进程已加载停用配置，再完成共同前提和撤销。通过条件为 H 实际停用并有节点报告，回落保持可重试失败，L 未被当作已授权安装。记录正常页面、宿主加载状态及失败原因，并确认包仍启用、默认 D 和候选 L 仍可用，排除整包禁用导致的失败。
+6. 有降级根的用例中，主控先恢复经核准的签发配置。新版恢复原 `stack.env` 的 kid 并应用配置，旧站点恢复属性并显式重建。核实新进程加载后，再按相同的三版本共同前提让 H 实际生效并执行恶意撤销。确认 `UnifiedResourceRef.downgradeAuthorization` 包含 `purpose=downgrade`、`reason=revocation`、匹配的 ownerId、instanceId、L 的精确 identity、from/toReleaseSequence，以及不超过10分钟的有效期，签名 kid 为已分发的独立降级根。对负例中保留的合法回落重试时，也须重新核对包仍启用、默认 D 与候选 L 可用，并记录与原撤销的关联。
 7. 成功判据为低版本已由真实宿主加载，节点安装回报四元组 identity/installationRevision/selectionRevision/generation 与当前期望完全匹配，observedGeneration 等于 generation，并确认来源为节点。高版本停用、低版本 `applied`、正常页面和实例运行状态须有一致证据。`required` 的关闭/卸载在统一目录继续被拒绝，`default` 可从资源市场卸载，原生入口对受管插件的关闭/卸载须拒绝且实例继续运行。
 8. 对同一安装修订进行重试及节点重启，核对 `node-state.json` 中安装绑定的 `AuthorizationID`、`UsedAuthorizations` 与 `Watermarks`。同一已绑定安装可延续，已消费 ID 仅保留一份且最高高水位仍为原高版本。服务续签可刷新同一授权的时间和签名，并保留 authorizationId。通过受控验证检查已消费授权被用于新 installationRevision 时会被拒绝，或使用另一个经核验的新授权完成合法变更。保存逐次修订与消费记录，确认同一授权没有被用于新修订重装。
 
