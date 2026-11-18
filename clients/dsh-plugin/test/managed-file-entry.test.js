@@ -592,26 +592,75 @@ test(
     let advance = 125_000;
     t.mock.method(Date, 'now', () => realNow() + advance);
     const outage = pause();
-    outage.release.resolve();
+    cleanup.unshift(() => outage.release.resolve());
     exchange = { ...renewed, status: 503, pause: outage };
     await outage.started.promise;
     advance += 60_000;
     assert.equal((await request('/auriga/bootstrap')).status, 401);
+    const beforeOutageReply = (observationPause = pause());
+    cleanup.unshift(() => beforeOutageReply.release.resolve());
+    const duringOutage = observe();
+    await beforeOutageReply.started.promise;
+    observationPause = undefined;
+    outage.release.resolve();
+    beforeOutageReply.release.resolve();
+    assert.equal(await duringOutage, 200);
     assert.equal(await observe(), 200);
 
-    const denial = pause();
-    denial.release.resolve();
-    exchange = { ...renewed, status: 403, pause: denial };
-    // Allow the exponential retry window to elapse on the fixture clock.
+    exchange = renewed;
     advance += 30_000;
-    await denial.started.promise;
-    await until(async () => (await observe()) === 401);
-    assert.equal((await request('/auriga/bootstrap')).status, 401);
+    await until(async () => (await request('/auriga/bootstrap')).ok);
+    let current = renewed;
+    for (const status of [401, 403]) {
+      const buffered = (observationPause = pause());
+      cleanup.unshift(() => buffered.release.resolve());
+      const oldObservation = observe();
+      await buffered.started.promise;
+      observationPause = undefined;
+
+      const denial = pause();
+      cleanup.unshift(() => denial.release.resolve());
+      exchange = { ...current, status, pause: denial };
+      advance += 125_000;
+      await denial.started.promise;
+      advance += 60_000;
+      assert.equal((await request('/auriga/bootstrap')).status, 401);
+      assert.equal(await observe(), 200);
+
+      // Deliver one denial. Another renewal must not mask whether this one
+      // was accepted after the old JWT expired.
+      exchange = { ...current, status: 503 };
+      denial.release.resolve();
+      const deadline = realNow() + 1000;
+      let afterDenial;
+      do {
+        afterDenial = await observe();
+        if (afterDenial === 401) break;
+        await delay(20);
+      } while (realNow() < deadline);
+      buffered.release.resolve();
+      assert.deepEqual(
+        [afterDenial, await oldObservation],
+        [401, 403],
+        'late HTTP ' + status,
+      );
+
+      if (status === 401) {
+        current = {
+          ...current,
+          credential: randomBytes(32).toString('base64url'),
+        };
+        exchange = current;
+        await writeFile(file, JSON.stringify(current));
+        await until(async () => (await request('/auriga/bootstrap')).ok);
+        assert.equal(await observe(), 200);
+      }
+    }
 
     await unmount();
     const reload = pause();
     cleanup.unshift(() => reload.release.resolve());
-    exchange = { ...renewed, status: 403, pause: reload };
+    exchange = { ...current, status: 403, pause: reload };
     await mount();
     await reload.started.promise;
     assert.equal(
@@ -622,7 +671,7 @@ test(
     reload.release.resolve();
 
     const nextFile = {
-      ...renewed,
+      ...current,
       deviceId: randomUUID(),
       credential: randomBytes(32).toString('base64url'),
     };

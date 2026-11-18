@@ -307,6 +307,7 @@ export async function createManagedFileConnection(options) {
       if (verified && verified.until - Date.now() > 60000) return;
       if (Date.now() < retryAt) return;
       const expected = generation;
+      const verifiedAtStart = verified;
       const controller = new AbortController();
       controllers.add(controller);
       try {
@@ -352,13 +353,19 @@ export async function createManagedFileConnection(options) {
         retryAt = failures = 0;
         publish('authenticated');
       } catch (error) {
-        if (closed || expected !== generation) return;
+        if (closed || rejected || !currentMaterial()) return;
         const status = /** @type {any} */ (error)?.status;
         if ([401, 403].includes(status)) {
+          // Access-token expiry invalidates business operations during this
+          // exchange. A denial still applies to the same local device file
+          // and the same last verified credential.
+          if (verified !== verifiedAtStart) return;
           rejected = true;
           publish('revoked');
-        } else if (!verified || verified.until <= Date.now())
-          publish('unreachable');
+        } else {
+          if (expected !== generation) return;
+          if (!verified || verified.until <= Date.now()) publish('unreachable');
+        }
         retryAt =
           Date.now() + Math.min(30000, 1000 * 2 ** Math.min(failures++, 5));
       } finally {
