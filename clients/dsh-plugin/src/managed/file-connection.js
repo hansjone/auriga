@@ -137,15 +137,17 @@ export async function createManagedFileConnection(options) {
     tokenUntil: { get: () => verified?.until ?? 0 },
     sourceUntil: { get: () => Date.parse(material.expiresAt) },
   });
+  let materialLost = false;
   const currentMaterial = () => {
+    if (materialLost) return false;
     try {
-      return (
-        readPrivate(options.file) === raw &&
-        Date.parse(material.expiresAt) > Date.now()
-      );
+      materialLost =
+        readPrivate(options.file) !== raw ||
+        Date.parse(material.expiresAt) <= Date.now();
     } catch {
-      return false;
+      materialLost = true;
     }
+    return !materialLost;
   };
   const publish = (/** @type {string} */ next, force = false) => {
     if (state === next && !force) return;
@@ -158,7 +160,7 @@ export async function createManagedFileConnection(options) {
     callbacks.onChange?.(snapshot());
   };
   const snapshot = () => {
-    if (!closed && !currentMaterial()) publish('revoked');
+    if (!closed && (rejected || !currentMaterial())) publish('revoked');
     else if (
       !closed &&
       verified &&
@@ -305,6 +307,7 @@ export async function createManagedFileConnection(options) {
       if (verified && verified.until - Date.now() > 60000) return;
       if (Date.now() < retryAt) return;
       const expected = generation;
+      const verifiedAtStart = verified;
       const controller = new AbortController();
       controllers.add(controller);
       try {
@@ -350,13 +353,19 @@ export async function createManagedFileConnection(options) {
         retryAt = failures = 0;
         publish('authenticated');
       } catch (error) {
-        if (closed || expected !== generation) return;
+        if (closed || rejected || !currentMaterial()) return;
         const status = /** @type {any} */ (error)?.status;
         if ([401, 403].includes(status)) {
+          // Access-token expiry invalidates business operations during this
+          // exchange. A denial still applies to the same local device file
+          // and the same last verified credential.
+          if (verified !== verifiedAtStart) return;
           rejected = true;
           publish('revoked');
-        } else if (!verified || verified.until <= Date.now())
-          publish('unreachable');
+        } else {
+          if (expected !== generation) return;
+          if (!verified || verified.until <= Date.now()) publish('unreachable');
+        }
         retryAt =
           Date.now() + Math.min(30000, 1000 * 2 ** Math.min(failures++, 5));
       } finally {
@@ -408,6 +417,10 @@ export async function createManagedFileConnection(options) {
     get stale() {
       return !currentMaterial();
     },
+    get observationState() {
+      if (closed || rejected || !currentMaterial()) return 'denied';
+      return verified ? 'verified' : 'pending';
+    },
     stateFactory(/** @type {any} */ options) {
       callbacks = options;
       return {
@@ -422,6 +435,7 @@ export async function createManagedFileConnection(options) {
         },
         async connect() {
           await refresh();
+          if (closed) return;
           callbacks.onChange?.(snapshot());
           timer = setInterval(() => {
             snapshot();
@@ -435,7 +449,7 @@ export async function createManagedFileConnection(options) {
           publish('revoked');
         },
         disconnect() {
-          publish('unreachable');
+          publish(rejected ? 'revoked' : 'unreachable');
         },
         close: () => ipc.close(),
       };

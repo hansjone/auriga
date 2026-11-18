@@ -1,8 +1,8 @@
-/* global Headers */
+/* global AbortSignal, Headers */
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer as httpsServer } from 'node:https';
-import { createServer } from 'node:http';
+import { createServer, get as httpGet } from 'node:http';
 import {
   randomUUID,
   randomBytes,
@@ -27,7 +27,12 @@ import {
   signedV2Announcement,
   signedReadyResult,
 } from './network/trust/keyset-fixtures.js';
-import { signIdentity } from './managed-helpers.js';
+import {
+  panelManifestBase,
+  signIdentity,
+  signPanelManifest,
+} from './managed-helpers.js';
+import { apply as attachObserver } from '../../../infra/agent/internal/renderer/resource_observer.mjs';
 import { decodeJson, encodeJson } from '../src/network/session/frames.js';
 
 test(
@@ -73,6 +78,11 @@ test(
       randomBytes(32).toString('base64url'),
     ].join('.');
     const signing = publicationFixture();
+    const panelManifest = signPanelManifest(
+      edge.privateKey,
+      'edge',
+      panelManifestBase(),
+    );
     const identity = {
       tenant: ids.tenantId,
       device: ids.deviceId,
@@ -95,6 +105,13 @@ test(
       token,
       origin,
       hold;
+    const pause = () => ({
+      started: Promise.withResolvers(),
+      release: Promise.withResolvers(),
+    });
+    const firstExchange = pause();
+    let exchange = { credential, deviceId: ids.deviceId, pause: firstExchange };
+    cleanup.unshift(() => firstExchange.release.resolve());
     peer.subscribe('auriga.net.up.*.*', {
       callback(error, msg) {
         assert.ifError(error);
@@ -129,11 +146,16 @@ test(
         };
         if (path === '/oauth2/token') {
           const form = new URLSearchParams(body);
-          assert.equal(form.get('credential'), credential);
+          const material = exchange;
+          assert.ok(form.get('credential') === material.credential);
           assert.equal(
             form.get('grant_type'),
             'urn:auriga:params:oauth:grant-type:managed-device',
           );
+          material.pause?.started.resolve();
+          await material.pause?.release.promise;
+          if (material.status)
+            return json({ error: 'fixture' }, material.status);
           const now = Math.floor(Date.now() / 1000);
           const input = [
             { alg: 'ES256', kid: 'managed-jwk', typ: 'at+jwt' },
@@ -145,7 +167,7 @@ test(
               scope: 'auriga.connect',
               tid: ids.tenantId,
               sub: ids.ownerId,
-              did: ids.deviceId,
+              did: material.deviceId,
               iat: now,
               exp: now + 180,
             },
@@ -182,6 +204,7 @@ test(
             protocol: { current: 1, minSupported: 1 },
             nextHeartbeatSeconds: 30,
           });
+        if (path === '/panel/manifest.json') return json(panelManifest);
         assert.equal(new Headers(req.headers).has('cookie'), false);
         assert.equal(
           req.headers.authorization,
@@ -317,7 +340,8 @@ test(
         ],
       }),
     );
-    await writeFile(instanceFile, randomBytes(32).toString('base64url'));
+    const instanceToken = randomBytes(32).toString('base64url');
+    await writeFile(instanceFile, instanceToken);
     for (const [name, value] of Object.entries({
       AURIGA_MODE: 'managed',
       AURIGA_INSTANCE_ID: ids.instanceId,
@@ -325,6 +349,7 @@ test(
       AURIGA_TENANT_ID: ids.tenantId,
       AURIGA_PLATFORM_URL: origin,
       AURIGA_IDENTITY_KEYS_FILE: keysFile,
+      AURIGA_PANEL_KEYS_FILE: keysFile,
       AURIGA_INSTANCE_TOKEN_FILE: instanceFile,
       AURIGA_DEVICE_CREDENTIAL_FILE: file,
       AURIGA_WORKSPACE_ROOT: dir,
@@ -404,16 +429,61 @@ test(
           jobs.push(Promise.resolve().then(() => fn(ctx)));
       },
     };
-    cleanup.push(async () => {
-      for (const dispose of effects.reverse()) await dispose?.();
-    });
-    await apply(ctx, {
-      browserOrigin: {
-        scheme: 'http',
-        host: '127.0.0.1',
-        port: server.address().port,
+    const unmount = async () => {
+      for (const dispose of effects.splice(0).reverse()) await dispose?.();
+      routes.length = 0;
+    };
+    cleanup.push(unmount);
+    const mount = () =>
+      apply(ctx, {
+        browserOrigin: {
+          scheme: 'http',
+          host: '127.0.0.1',
+          port: server.address().port,
+        },
+      });
+    await mount();
+    const policyFile = join(dir, 'observer-policy.json');
+    await writeFile(
+      policyFile,
+      JSON.stringify({ schemaVersion: 1, newSessionRequired: false }),
+    );
+    let observationPause;
+    await attachObserver(
+      {
+        ...ctx,
+        effect(fn) {
+          cleanup.push(fn());
+        },
+        agentPresets: { acquireScope: async (key) => ({ key }) },
+        skills: {
+          async list() {
+            observationPause?.started.resolve();
+            await observationPause?.release.promise;
+            return [];
+          },
+          get: () => undefined,
+        },
+        pluginManager: { listBundles: () => [], listPlugins: () => [] },
       },
-    });
+      { tokenFile: instanceFile, policyFile },
+    );
+    const observe = () =>
+      new Promise((resolve, reject) => {
+        const req = httpGet(
+          local + '/auriga-node-resource-catalog',
+          {
+            headers: { Authorization: 'Bearer ' + instanceToken },
+            signal: AbortSignal.timeout(5000),
+          },
+          (res) => {
+            res.resume();
+            res.once('end', () => resolve(res.statusCode));
+            res.once('error', reject);
+          },
+        );
+        req.once('error', reject);
+      });
     for (let i = 0; i < jobs.length; i++) await jobs[i];
     const request = (path, init = {}) =>
       globalThis.fetch(local + path, {
@@ -445,6 +515,14 @@ test(
       }
     };
     let lastStatus;
+    await firstExchange.started.promise;
+    assert.equal(
+      await observe(),
+      200,
+      'initial observation does not wait for device login',
+    );
+    assert.equal((await request('/auriga/bootstrap')).status, 401);
+    firstExchange.release.resolve();
     const status = await until(async () => {
       const response = await request('/auriga/shell/status');
       if (!response.ok) return;
@@ -453,6 +531,22 @@ test(
       return body.network?.connected && body;
     });
     assert.equal(status.session.available, true);
+    assert.equal(await observe(), 200);
+    const panel = await request('/auriga/bootstrap');
+    assert.equal(panel.status, 200);
+    assert.equal((await panel.json()).manifest.version, panelManifest.version);
+    assert.equal(
+      (
+        await request('/auriga/bootstrap', {
+          headers: { origin: 'https://wrong.example.com' },
+        })
+      ).status,
+      403,
+    );
+    assert.equal(
+      (await (await fetch(local + '/_auriga/health')).json()).ready,
+      true,
+    );
     assert.equal(frames.length, 2);
     assert.equal(
       (await request('/auriga/resources/api/resource/v1/packages')).status,
@@ -467,6 +561,130 @@ test(
       ),
     );
     assert.equal((await request('/auriga/settings/state')).status, 200);
+
+    const prior = (observationPause = pause());
+    cleanup.unshift(() => prior.release.resolve());
+    const underOldCredential = observe();
+    await prior.started.promise;
+    observationPause = undefined;
+    const renewal = pause();
+    cleanup.unshift(() => renewal.release.resolve());
+    const renewed = {
+      ...material,
+      credential: randomBytes(32).toString('base64url'),
+    };
+    exchange = { ...renewed, pause: renewal };
+    await writeFile(file, JSON.stringify(renewed));
+    await renewal.started.promise;
+    // Wait for successful JWT verification and the browser identity to be restored.
+    const whileRenewing = await observe();
+    renewal.release.resolve();
+    await until(async () => (await request('/auriga/bootstrap')).ok);
+    prior.release.resolve();
+    assert.deepEqual(
+      [whileRenewing, await underOldCredential, await observe()],
+      [401, 403, 200],
+    );
+
+    // Only the node observes through a temporary outage. The panel still
+    // waits for device access, and a confirmed rejection closes both paths.
+    const realNow = Date.now;
+    let advance = 125_000;
+    t.mock.method(Date, 'now', () => realNow() + advance);
+    const outage = pause();
+    cleanup.unshift(() => outage.release.resolve());
+    exchange = { ...renewed, status: 503, pause: outage };
+    await outage.started.promise;
+    advance += 60_000;
+    assert.equal((await request('/auriga/bootstrap')).status, 401);
+    const beforeOutageReply = (observationPause = pause());
+    cleanup.unshift(() => beforeOutageReply.release.resolve());
+    const duringOutage = observe();
+    await beforeOutageReply.started.promise;
+    observationPause = undefined;
+    outage.release.resolve();
+    beforeOutageReply.release.resolve();
+    assert.equal(await duringOutage, 200);
+    assert.equal(await observe(), 200);
+
+    exchange = renewed;
+    advance += 30_000;
+    await until(async () => (await request('/auriga/bootstrap')).ok);
+    let current = renewed;
+    for (const status of [401, 403]) {
+      const buffered = (observationPause = pause());
+      cleanup.unshift(() => buffered.release.resolve());
+      const oldObservation = observe();
+      await buffered.started.promise;
+      observationPause = undefined;
+
+      const denial = pause();
+      cleanup.unshift(() => denial.release.resolve());
+      exchange = { ...current, status, pause: denial };
+      advance += 125_000;
+      await denial.started.promise;
+      advance += 60_000;
+      assert.equal((await request('/auriga/bootstrap')).status, 401);
+      assert.equal(await observe(), 200);
+
+      // Deliver one denial. Another renewal must not mask whether this one
+      // was accepted after the old JWT expired.
+      exchange = { ...current, status: 503 };
+      denial.release.resolve();
+      const deadline = realNow() + 1000;
+      let afterDenial;
+      do {
+        afterDenial = await observe();
+        if (afterDenial === 401) break;
+        await delay(20);
+      } while (realNow() < deadline);
+      buffered.release.resolve();
+      assert.deepEqual(
+        [afterDenial, await oldObservation],
+        [401, 403],
+        'late HTTP ' + status,
+      );
+
+      if (status === 401) {
+        current = {
+          ...current,
+          credential: randomBytes(32).toString('base64url'),
+        };
+        exchange = current;
+        await writeFile(file, JSON.stringify(current));
+        await until(async () => (await request('/auriga/bootstrap')).ok);
+        assert.equal(await observe(), 200);
+      }
+    }
+
+    await unmount();
+    const reload = pause();
+    cleanup.unshift(() => reload.release.resolve());
+    exchange = { ...current, status: 403, pause: reload };
+    await mount();
+    await reload.started.promise;
+    assert.equal(
+      await observe(),
+      401,
+      'same server reload does not grant a second cold start',
+    );
+    reload.release.resolve();
+
+    const nextFile = {
+      ...current,
+      deviceId: randomUUID(),
+      credential: randomBytes(32).toString('base64url'),
+    };
+    const nextExchange = pause();
+    cleanup.unshift(() => nextExchange.release.resolve());
+    exchange = { ...nextFile, pause: nextExchange };
+    await writeFile(file, JSON.stringify(nextFile));
+    await nextExchange.started.promise;
+    assert.equal(await observe(), 401);
+    nextExchange.release.resolve();
+    await until(async () => (await request('/auriga/bootstrap')).ok);
+    assert.equal(await observe(), 200);
+
     const release = Promise.withResolvers();
     hold = release.promise;
     const pending = request('/auriga/resources/api/resource/v1/packages');
@@ -475,7 +693,16 @@ test(
         calls.filter((call) => call.path === '/api/resource/v1/packages')
           .length === 2,
     );
+    observationPause = {
+      started: Promise.withResolvers(),
+      release: Promise.withResolvers(),
+    };
+    const pendingObservation = observe();
+    await observationPause.started.promise;
     await rm(file);
+    assert.equal(await observe(), 401);
+    observationPause.release.resolve();
+    assert.equal(await pendingObservation, 403);
     assert.equal(
       (await request('/auriga/resources/api/resource/v1/packages')).status,
       401,
@@ -483,5 +710,12 @@ test(
     // The native guard retires the old operation before a late platform response.
     release.resolve();
     assert.ok((await pending).status >= 400);
+    // The network refresh also detaches the old runtime. This must not reopen
+    // observation with the still-mounted instance token.
+    await delay(1250);
+    assert.equal(await observe(), 401);
+    const health = await fetch(local + '/_auriga/health');
+    assert.equal(health.status, 200);
+    assert.equal((await health.json()).ready, false);
   },
 );

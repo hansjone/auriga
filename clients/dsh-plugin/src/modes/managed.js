@@ -14,6 +14,7 @@ import {
 } from '../managed/host-auth.js';
 import { createIdentityKeyCache } from '../managed/keys.js';
 import { createDoorLock, createReplayCache } from '../managed/door.js';
+import { createNodeResourceObservation } from '../managed/node-resource-observation.js';
 import {
   DEFAULT_WORKSPACE_ROOT,
   installManagedGuards,
@@ -39,6 +40,10 @@ import {
   protocolInfo,
   userAgent,
 } from '../managed/protocol.js';
+
+// Only the first file-backed device on this server can observe during startup
+// without device verification. Replacing the managed entry must not reset it.
+const serversWithDeviceMaterial = new WeakSet();
 
 function readPkgVersion() {
   try {
@@ -252,15 +257,15 @@ export async function createManaged(options = {}) {
     }),
   });
 
-  /** @type {(() => void) | undefined} */
-  let disposeActivity;
-  let disposeHostAuth;
-  let disposeDoor;
-  let disposeHttpGuard;
-  let disposeSession;
-  let disposeSettingsOwnership;
+  let disposeEntry;
   let network;
-  let detachModels;
+  const closeBase = () => {
+    heartbeat.stop();
+    host.ctx = null;
+    host.getBrowsers = undefined;
+    keyCache.close();
+    panelKeyCache?.close();
+  };
 
   return {
     mode: /** @type {const} */ ('managed'),
@@ -307,6 +312,35 @@ export async function createManaged(options = {}) {
           'auriga-dsh: managed mode requires ctx.webServer.server to install the identity door; refusing to start without a door lock',
         );
       }
+
+      let active = true;
+      let profileScope = {};
+      let observerNetwork, observerNetworkScope;
+      let disposeActivity, disposeHostAuth, disposeDoor, disposeHttpGuard;
+      let disposeSession, disposeSettingsOwnership, stopping;
+      // Count browser transports via upgrade. The door gates the event first.
+      const onUpgrade = (_req, socket) => {
+        browserSockets.add(socket);
+        socket.once('close', () => browserSockets.delete(socket));
+      };
+      const dispose = () => {
+        if (!active) return stopping;
+        active = false;
+        const owned = observerNetwork;
+        if (network === owned) network = undefined;
+        stopping = owned?.close();
+        disposeActivity?.();
+        disposeDoor?.();
+        disposeSettingsOwnership?.();
+        disposeSession?.();
+        disposeHttpGuard?.();
+        disposeHostAuth?.();
+        server.off('upgrade', onUpgrade);
+        browserSockets.clear();
+        closeBase();
+        return stopping;
+      };
+      disposeEntry = dispose;
 
       host.ctx = ctx;
       disposeHostAuth = installHostAuthentication(ctx.connection, door, {
@@ -359,15 +393,35 @@ export async function createManaged(options = {}) {
       // Profile storage is only durable partitioning; it is not an isolation claim.
       if (typeof ctx.inject === 'function') {
         ctx.inject(['profileContext'], (profileCtx) => {
+          if (!active) return;
           const directory = profileCtx.profileContext?.dir;
           if (!directory)
             throw new Error(
               'managed network requires a host profile directory',
             );
+          const scope = {};
+          profileScope = scope;
+          profileCtx.effect(
+            () => () => {
+              if (profileScope === scope) profileScope = undefined;
+            },
+            'auriga-dsh: node observation profile lifetime',
+          );
           profileCtx.inject(
             ['tools', 'sessions', 'sessionController'],
             (networkCtx) => {
+              if (!active || profileScope !== scope) return;
+              let ownsColdObservation = false;
               const owned = createManagedNetwork({
+                allowColdObservation(fileLoaded) {
+                  if (ownsColdObservation) return true;
+                  if (serversWithDeviceMaterial.has(server)) return false;
+                  if (fileLoaded) {
+                    serversWithDeviceMaterial.add(server);
+                    ownsColdObservation = true;
+                  }
+                  return true;
+                },
                 file:
                   options.deviceCredentialFile ??
                   env.AURIGA_DEVICE_CREDENTIAL_FILE,
@@ -393,6 +447,8 @@ export async function createManaged(options = {}) {
                   door.isAuthenticated(req) &&
                   browserFenceOk(req, browserOrigin),
               });
+              observerNetwork = owned;
+              observerNetworkScope = scope;
               network = owned;
               void owned.start().catch(() => {});
               networkCtx.inject(['llm'], (modelCtx) => {
@@ -531,13 +587,6 @@ export async function createManaged(options = {}) {
         );
       }
 
-      // Count browser transports via upgrade (same idea as oclaw hub-member).
-      // We do not filter by identity here: the door already gates HTTP; raw
-      // TCP keepalives do not emit `upgrade`.
-      const onUpgrade = (_req, socket) => {
-        browserSockets.add(socket);
-        socket.once('close', () => browserSockets.delete(socket));
-      };
       server.on('upgrade', onUpgrade);
 
       disposeActivity = installActivityBridge(ctx, activity, {
@@ -572,52 +621,42 @@ export async function createManaged(options = {}) {
       );
 
       // Door is outermost: even forbidden native writes must authenticate first.
+      const revoked = () => network?.sessionRevoked === true;
       disposeHttpGuard = installNativePluginHttpGuard(server);
       disposeSession = installManagedSessionGuard(
         server,
         () => network?.sessionAvailable === true,
-        () => network?.sessionRevoked === true,
+        revoked,
       );
-      disposeDoor = door.install(server);
+      // Observation is needed before browser session readiness, but a proven
+      // revocation still closes it. No ordinary managed route sees this Bearer.
+      disposeDoor = door.install(
+        server,
+        createNodeResourceObservation(server, {
+          tokenFile: env.AURIGA_INSTANCE_TOKEN_FILE,
+          observationScope() {
+            if (!active || !profileScope) return undefined;
+            if (!observerNetwork)
+              return serversWithDeviceMaterial.has(server)
+                ? undefined
+                : profileScope;
+            if (observerNetworkScope !== profileScope) return undefined;
+            return observerNetwork.observationScope();
+          },
+        }),
+      );
       disposeSettingsOwnership = installManagedSettingsOwnership(ctx);
 
       if (options.startHeartbeat !== false) heartbeat.start();
 
-      return () => {
-        detachModels?.();
-        const stopping = network?.close();
-        heartbeat.stop();
-        disposeActivity?.();
-        disposeDoor?.();
-        disposeSettingsOwnership?.();
-        disposeSession?.();
-        disposeHttpGuard?.();
-        disposeHostAuth?.();
-        server.off('upgrade', onUpgrade);
-        browserSockets.clear();
-        host.ctx = null;
-        host.getBrowsers = undefined;
-        keyCache.close();
-        panelKeyCache?.close();
-        return stopping;
-      };
+      return dispose;
     },
     guardPluginManager,
     guardWorkspaceRegistry: (registry) =>
       guardWorkspaceRegistry(registry, workspaceRoot),
     getManifest,
     close() {
-      disposeSettingsOwnership?.();
-      disposeSession?.();
-      detachModels?.();
-      const stopping = network?.close();
-      heartbeat.stop();
-      disposeActivity?.();
-      disposeHostAuth?.();
-      host.ctx = null;
-      keyCache.close();
-      panelKeyCache?.close();
-      return stopping;
+      return disposeEntry ? disposeEntry() : closeBase();
     },
   };
 }
