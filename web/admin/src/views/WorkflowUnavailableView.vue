@@ -3,7 +3,12 @@ import { computed } from 'vue';
 import { useRoute } from 'vue-router';
 import { navigation } from '../admin/navigation';
 import { useAdminI18n } from '../admin/messages';
-const { t } = useAdminI18n();
+import { catalogMessages } from '../admin/resourceCatalogMessages';
+const { t, mergeLocaleMessage } = useAdminI18n();
+for (const locale of ['zh-CN', 'en'] as const) {
+  const { toolIntro, workflowIntro } = catalogMessages[locale];
+  mergeLocaleMessage(locale, { toolIntro, workflowIntro });
+}
 const route = useRoute();
 const title = computed(
   () =>
@@ -26,9 +31,20 @@ const explanation = computed(() =>
     <header class="resource-head">
       <h1>{{ t(title) }}</h1>
     </header>
-    <p class="resource-notice">{{ t('navNotOpen') }}</p>
-    <p>{{ t(explanation) }}</p>
-    <p v-if="$route.path.startsWith('/resources')">
+    <template v-if="$route.path === '/resources/tools'">
+      <p>{{ t('toolIntro') }}</p>
+      <p>{{ t('workflowIntro') }}</p>
+    </template>
+    <template v-else
+      ><p class="resource-notice">{{ t('navNotOpen') }}</p>
+      <p>{{ t(explanation) }}</p></template
+    >
+    <p
+      v-if="
+        $route.path.startsWith('/resources') &&
+        $route.path !== '/resources/tools'
+      "
+    >
       {{ t('resourceBoundary') }}
     </p>
     <RouterLink v-if="$route.path === '/overview'" to="/runtime/headquarters"

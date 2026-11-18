@@ -118,11 +118,13 @@ func (e *nasRotationEngine) owned(r *nasRotation, c nasRotationContainer) error 
 	files := strings.Split(labels["com.docker.compose.project.config_files"], ",")
 	main := false
 	for _, f := range files {
-		if f == filepath.Join(r.recipe, "docker-compose.yml") {
+		switch f {
+		case filepath.Join(r.recipe, "docker-compose.yml"):
 			main = true
 			continue
-		}
-		if f == filepath.Join(r.recipe, "collab-compose.yml") || f == filepath.Join(r.recipe, "managed-identity-compose.yml") {
+		case filepath.Join(r.recipe, "collab-compose.yml"),
+			filepath.Join(r.recipe, "managed-identity-compose.yml"),
+			filepath.Join(r.recipe, "resource-downgrade-compose.yml"):
 			continue
 		}
 		if nasBifrostComposeOverlay(r.data, f) {

@@ -119,6 +119,8 @@ test(
       JSON.stringify({ shortcuts: [], registryKey: 'AurigaDesktop-tray-test' }),
     );
     const journal = join(base, 'journal.log');
+    const opened = join(base, 'opened.log');
+    const env = { ...process.env, AURIGA_TEST_OPEN_LOG: opened };
     // Stand-in for runtime/cli.mjs: status, and a launcher speaking the control protocol.
     writeFileSync(
       join(version, 'auriga', 'runtime', 'cli.mjs'),
@@ -149,7 +151,7 @@ if (command === 'status') {
     );
     const journalText = () =>
       existsSync(journal) ? readFileSync(journal, 'utf8') : '';
-    const first = spawn(tray, [], { stdio: 'ignore' });
+    const first = spawn(tray, [], { stdio: 'ignore', env });
     t.after(() => {
       if (alive(first.pid))
         spawnSync('taskkill', ['/PID', String(first.pid), '/T', '/F']);
@@ -165,7 +167,7 @@ if (command === 'status') {
     await delay(500);
     assert.doesNotMatch(journalText(), /command login/);
     // A second start reopens DSH without asking the launcher for browser login.
-    const second = spawnSync(tray, [], { timeout: 20000 });
+    const second = spawnSync(tray, [], { timeout: 20000, env });
     assert.equal(second.status, 0);
     assert.doesNotMatch(journalText(), /command login/);
     assert.equal(
@@ -180,5 +182,10 @@ if (command === 'status') {
     await until(() => !alive(launcherPid), 10000);
     assert.match(journalText(), /command stop\nstopped/);
     assert.equal(signal(key(root) + '-exit'), 'missing');
+    // Both starts hand DSH to the browser, recorded instead of really opened.
+    assert.match(
+      readFileSync(opened, 'utf8'),
+      /^http:\/\/127\.0\.0\.1:1\/\?token=abcdefgh/m,
+    );
   },
 );

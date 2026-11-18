@@ -1,5 +1,122 @@
 export const catalogMessages = {
   'zh-CN': {
+    preview_nameInvalid:
+      '读取到的目录名称需要调整：请使用不超过 64 个字符的小写字母、数字和连字符。',
+    preview_versionInvalid:
+      '读取到的版本号不符合完整版本格式；插件请重新打包，技能可在下方修改。',
+    preview_metadataInvalid:
+      '读取到的介绍、作者或许可证为空或超长，请在下方修改后上传（介绍最多 1024 字符，作者和许可证最多 128 字符）。',
+    preview_metadataAdjusted:
+      '部分包信息使用了旧格式，已转换为可编辑文字，请核对作者、许可证和其他预览字段。',
+    preview_rangeDefaulted:
+      '读取到的 DSH 兼容范围写法不受支持，已回退当前锁定版本的兼容范围，请在下方核对。若包内 engines.dsh 本身不合法，需要重新打包。',
+    preview_rangeInvalid:
+      '包内配置的 DSH 兼容范围不合法，请在下方修改为完整版本范围后上传。',
+    parse_reservedPlugin:
+      'auriga-dsh 和 @deepseek-ai/* 是核心或上游插件，由客户端和部署维护，不能通过共享目录发布。',
+    draftSubmissionRejected: '草稿已保存，送审未完成。请打开版本详情继续送审。',
+    openSavedDraft: '查看草稿并继续送审',
+    nameUnavailable: '同名资源已存在但你无权查看，请换名或联系管理员。',
+    pluginIntro:
+      '插件是供 DSH 使用的 npm 插件包（.tgz）。上传后由两名非作者审核，其中至少一名负责安全审核。',
+    skillIntro:
+      '技能是包含 SKILL.md 的文件夹，用文字说明 DSH 应如何完成任务。工具暂未开放。',
+    toolIntro: '工具暂未开放。插件和技能可从各自目录上传。',
+    workflowIntro: '上传 → 审核 → 发布 → 分发（必装 / 默认装 / 可选装）。',
+    directoryIntro: '在这里上传新资源或更新已有资源，确认内容与权限后送审。',
+    reviewIntro:
+      '检查作者提交的内容和权限，记录审核意见；插件需两名非作者审核，含一名安全审核。',
+    publishedIntro: '在这里发布已通过审核的版本，或下架、撤销已有版本。',
+    distributionIntro:
+      '将已发布的版本分配给成员、组或实例，并查看实际应用结果。',
+    emptyPlugin: '还没有插件，上传一个 .tgz 开始。',
+    emptySkill: '还没有技能，选择含 SKILL.md 的文件夹开始。',
+    emptyReview: '暂无待审核内容。作者上传并送审后会出现在这里。',
+    emptyPublished: '暂无已发布内容。审核通过后，在这里完成发布。',
+    emptyDistribution:
+      '暂无分发记录。发布资源后，可在这里设置必装、默认装或可选装。',
+    listTitle: '资源列表',
+    advanced: '详情 / 高级',
+    uploadTitle: '上传{kind}',
+    uploadPluginHint:
+      '选择插件包，自动读取名称、版本和介绍；确认权限后即可上传。',
+    uploadSkillHint:
+      '选择技能文件夹，自动读取 SKILL.md；也可选择符合现有限制的 .tgz 或 .tar.gz。',
+    choosePlugin: '选择 .tgz',
+    chooseArchive: '选择压缩包',
+    dropPlugin: '或将 .tgz 拖到这里',
+    skillFilesHint: '文件夹根目录需要 SKILL.md，仅支持文本资料。',
+    description: '介绍',
+    authorName: '作者',
+    license: '许可证',
+    dshRange: '兼容的 DSH 版本',
+    visibilityHint: '已有同名资源沿用原可见范围；此项仅在首次创建时生效。',
+    pluginVersionHint: '版本来自包内 package.json；更新版本请重新打包。',
+    permissionsHint:
+      '默认无权限。需要工具、网络或文件访问时，请按实际用途声明。',
+    permissionTools: '工具名称（逗号分隔）',
+    permissionHosts: '访问域名（逗号分隔）',
+    none: '无',
+    workspace_read: '读取工作区',
+    workspace_write: '写入工作区',
+    user_selected_files: '访问用户选择的文件',
+    permissionConfirm: '我已确认以上权限声明（含无权限）',
+    embeddedHint: '已采用包内的高级配置，上传内容摘要会按实际文件重新计算。',
+    snapshotHint:
+      '上传会规范 SKILL.md 顶部格式（包括换行和引号），名称与介绍按预览同步；高级配置、版本、作者和许可证信息单独保存。',
+    uploadAndSubmit: '上传并送审',
+    saveDraft: '保存草稿',
+    uploadReviewReason: '作者确认内容与权限后提交审核',
+    uploadSubmitted: '已上传并送审，请到审核页查看。',
+    uploadSaved: '草稿已保存，可在目录详情中继续送审。',
+    draftSavedRetry: '草稿已保存，送审尚未确认。',
+    uploadConflict: '同名资源、版本或状态发生冲突。请先核对目录中的最新状态。',
+    versionExists: '版本 {version} 已存在，请修改版本号后重试。',
+    parse_missingPackage:
+      '缺少 package/package.json，请上传完整的 npm 插件包。',
+    parse_missingSkill: '缺少根目录 SKILL.md，请选择正确的技能文件夹或压缩包。',
+    parse_npmNameInvalid: 'package.json 中的 npm 名称不合法。',
+    parse_nameInvalid: '名称须为小写字母、数字和连字符，长度不超过 64。',
+    parse_versionInvalid: '版本须使用完整版本号，如 1.0.0。',
+    parse_metadataInvalid: '请填写介绍、作者和许可证，并检查字段长度。',
+    parse_manifestInvalid:
+      '包内高级配置不符合当前资源规范，请核对类型和必填字段。',
+    parse_jsonInvalid: 'JSON 内容无效：{path}',
+    parse_textInvalid: '文件须为有效的 UTF-8 文本，不能含二进制内容：{path}',
+    parse_frontmatterInvalid:
+      'SKILL.md 顶部说明格式无效或包含不支持的字段：{path}。名称和介绍支持普通、引号或多行文字。',
+    parse_pathUnsafe: '文件路径不安全或包含系统文件：{path}',
+    parse_pathCollision: '存在重名文件或文件与目录冲突：{path}',
+    parse_systemFile: '请移除系统文件后重新选择：{path}',
+    parse_skillFileInvalid:
+      '技能仅允许 SKILL.md 和 references/assets 下的 md/txt/json/yaml/yml 文本文件：{path}',
+    parse_sizeLimit:
+      '文件超过上传大小限制：{path}（插件 64 MiB，技能压缩包 5 MiB，正文 256 KiB，附件 2 MiB）。',
+    parse_expandedLimit: '解压内容过大或压缩比超过 100，请缩小内容后重试。',
+    parse_entryLimit: '文件数量超限（插件最多 4096 项，技能最多 512 项）。',
+    parse_metadataLimit: '插件内 package.json 元数据超限：{path}',
+    parse_archiveFormat:
+      '只支持 POSIX ustar 格式的 gzip 压缩包，不支持 zip、PAX 或 GNU 扩展。',
+    parse_archiveUnsafe:
+      '压缩包含链接、特殊文件或可执行的技能文件，请重新打包。',
+    parse_archiveInvalid: '压缩包损坏、校验失败或内容不完整，请重新打包。',
+    parse_folderInvalid: '文件夹结构不完整，请重新选择整个技能文件夹。',
+    parse_selectOne: '请一次选择一个压缩包。',
+    parse_pluginScripts: '插件包不能含安装或构建脚本：{path}',
+    parse_pluginBuild: '插件包不能含本地构建声明：{path}',
+    parse_pluginDependencies:
+      '插件依赖必须完整打包，外部依赖只允许 DSH：{path}',
+    parse_pluginPatch: '插件未包含声明的 DSH 入口文件：{path}',
+    parse_rangeInvalid:
+      'DSH 兼容范围无效，请使用完整版本比较范围，如 ^0.2.1-rc.3。',
+    parse_rangeMismatch: 'DSH 兼容范围须与包内 engines.dsh 一致。',
+    parse_pluginMismatch:
+      '插件名称与版本须与包内 package.json 一致，请重新打包。',
+    parse_permissionsInvalid:
+      '权限声明无效，请核对工具名称、域名及文件访问选项。',
+    parse_groupsInvalid: '请填写至少一个有效的组 ID（逗号分隔）。',
+    parse_skillSnapshotInvalid:
+      '技能快照不符合文件数量、文本、路径或压缩限制，请缩小或整理文件后重试。',
     folderManifest:
       '文件夹已冻结为上传快照。使用清单填写名称、版本及权限；制品摘要和大小按本次打包结果生成，送审以预览清单为准。',
     distributionRevision: '选择修订 / 应用代次',
@@ -16,7 +133,7 @@ export const catalogMessages = {
     uploadInvalid:
       '上传校验失败：请核对类型、名称、制品大小与 SHA-256；技能文件夹根须有 SKILL.md，仅允许 references/assets 文本附件。',
     signature: '发行签名',
-    unsigned: '尚未签发',
+    unsigned: '未签发（发布时由平台签名）',
     signed: '已签发（安装时仍须验签）',
     awaitingApproval: '审核或版本状态尚未通过，不能发布',
     hasRejection: '当前修订仍有驳回意见，不能发布',
@@ -134,6 +251,143 @@ export const catalogMessages = {
     expired: '请求已过期，请刷新',
   },
   en: {
+    preview_nameInvalid:
+      'Adjust the catalog name below: use lowercase letters, numbers and hyphens, up to 64 characters.',
+    preview_versionInvalid:
+      'The version is not a complete semantic version. Repack plugins; edit skill versions below.',
+    preview_metadataInvalid:
+      'The description, author or license is empty or too long. Edit below before uploading (description: 1024 characters; author and license: 128 each).',
+    preview_metadataAdjusted:
+      'Legacy package metadata was converted to editable text. Check the author, license and other preview fields.',
+    preview_rangeDefaulted:
+      'The derived DSH compatibility range is unsupported. The locked-version default is shown for editing. If engines.dsh itself is invalid, repack the plugin.',
+    preview_rangeInvalid:
+      'The embedded DSH range is invalid. Edit it to use complete versions before uploading.',
+    parse_reservedPlugin:
+      'auriga-dsh and @deepseek-ai/* are core or upstream plugins maintained by the client and deployment. They cannot be published through the shared catalog.',
+    draftSubmissionRejected:
+      'Draft saved; submission did not complete. Open version details to continue submission.',
+    openSavedDraft: 'Open draft and continue submission',
+    nameUnavailable:
+      'A package with this name already exists but is not visible to you. Choose another name or contact an administrator.',
+    pluginIntro:
+      'Plugins are DSH npm packages (.tgz). They require two non-author reviewers, including a security reviewer.',
+    skillIntro:
+      'Skills are folders containing SKILL.md that describe how DSH should perform a task. Tools are not available yet.',
+    toolIntro:
+      'Tools are not available yet. Upload plugins and skills from their catalogs.',
+    workflowIntro:
+      'Upload ? Review ? Publish ? Distribute (required / default / optional).',
+    directoryIntro:
+      'Upload a new resource or update an existing one, check its content and permissions, then submit for review.',
+    reviewIntro:
+      'Inspect submitted content and permissions. Plugins require two non-author reviewers, including a security reviewer.',
+    publishedIntro:
+      'Publish approved versions here, or withdraw and revoke existing versions.',
+    distributionIntro:
+      'Assign published versions to members, groups or instances and check actual application results.',
+    emptyPlugin: 'No plugins yet. Upload a .tgz to get started.',
+    emptySkill:
+      'No skills yet. Choose a folder containing SKILL.md to get started.',
+    emptyReview: 'Nothing awaiting review. Submitted uploads will appear here.',
+    emptyPublished:
+      'No published resources yet. Publish approved versions here.',
+    emptyDistribution:
+      'No distributions yet. Publish a resource, then choose required, default or optional installation.',
+    listTitle: 'Resources',
+    advanced: 'Details / Advanced',
+    uploadTitle: 'Upload {kind}',
+    uploadPluginHint:
+      'Choose a plugin package to read its name, version and description, then confirm its permissions.',
+    uploadSkillHint:
+      'Choose a skill folder or a supported .tgz / .tar.gz archive to read SKILL.md.',
+    choosePlugin: 'Choose .tgz',
+    chooseArchive: 'Choose archive',
+    dropPlugin: 'or drop a .tgz here',
+    skillFilesHint:
+      'The folder needs a root SKILL.md and text attachments only.',
+    description: 'Description',
+    authorName: 'Author',
+    license: 'License',
+    dshRange: 'Compatible DSH versions',
+    visibilityHint:
+      'Existing packages keep their visibility. This choice applies only to new packages.',
+    pluginVersionHint:
+      'Version comes from package.json. Repack the plugin to change it.',
+    permissionsHint:
+      'None by default. Declare the tools, hosts and file access this resource actually needs.',
+    permissionTools: 'Tool names (comma separated)',
+    permissionHosts: 'Outbound hosts (comma separated)',
+    none: 'None',
+    workspace_read: 'Read workspace',
+    workspace_write: 'Write workspace',
+    user_selected_files: 'Access user-selected files',
+    permissionConfirm: 'I confirm these permissions (including none)',
+    embeddedHint:
+      'Embedded advanced settings are used; content hashes are recalculated from actual files.',
+    snapshotHint:
+      'Uploading normalizes the SKILL.md frontmatter format, including line endings and quoting. Name and description follow this preview; advanced settings, version, author and license are stored separately.',
+    uploadAndSubmit: 'Upload and submit',
+    saveDraft: 'Save draft',
+    uploadReviewReason: 'Author confirmed content and permissions for review',
+    uploadSubmitted: 'Uploaded and submitted. Check the review page.',
+    uploadSaved: 'Draft saved. Continue submission from catalog details.',
+    draftSavedRetry: 'Draft saved; submission is not yet confirmed.',
+    uploadConflict:
+      'A package, version or state conflict occurred. Check the latest catalog state.',
+    versionExists: 'Version {version} already exists. Choose a new version.',
+    parse_missingPackage:
+      'Missing package/package.json. Upload a complete npm package.',
+    parse_missingSkill:
+      'Missing root SKILL.md. Choose the correct folder or archive.',
+    parse_npmNameInvalid: 'Invalid npm name in package.json.',
+    parse_nameInvalid:
+      'Use lowercase letters, numbers and hyphens, up to 64 characters.',
+    parse_versionInvalid: 'Use a complete semantic version, such as 1.0.0.',
+    parse_metadataInvalid:
+      'Provide a description, author and license within their length limits.',
+    parse_manifestInvalid:
+      'Embedded advanced settings do not match the resource specification.',
+    parse_jsonInvalid: 'Invalid JSON: {path}',
+    parse_textInvalid: 'Expected UTF-8 text without binary content: {path}',
+    parse_frontmatterInvalid:
+      'Unsupported SKILL.md frontmatter: {path}. Name and description support plain, quoted or block text.',
+    parse_pathUnsafe: 'Unsafe path or system file: {path}',
+    parse_pathCollision: 'Duplicate or conflicting path: {path}',
+    parse_systemFile: 'Remove this system file: {path}',
+    parse_skillFileInvalid:
+      'Only SKILL.md and md/txt/json/yaml/yml files under references/assets are allowed: {path}',
+    parse_sizeLimit:
+      'Upload size exceeded: {path} (plugin 64 MiB, skill archive 5 MiB, body 256 KiB, attachment 2 MiB).',
+    parse_expandedLimit:
+      'Expanded content exceeds the size limit or 100:1 compression ratio.',
+    parse_entryLimit: 'Too many entries (4096 for plugins; 512 for skills).',
+    parse_metadataLimit: 'Plugin package.json metadata budget exceeded: {path}',
+    parse_archiveFormat:
+      'Only POSIX ustar gzip archives are supported. ZIP, PAX and GNU extensions are not supported.',
+    parse_archiveUnsafe:
+      'Archive contains links, special files or executable skill files.',
+    parse_archiveInvalid:
+      'Archive is corrupt, truncated or failed checksum validation.',
+    parse_folderInvalid: 'Choose the complete skill folder again.',
+    parse_selectOne: 'Choose one archive at a time.',
+    parse_pluginScripts:
+      'Installation or build scripts are not allowed: {path}',
+    parse_pluginBuild: 'Native build declarations are not allowed: {path}',
+    parse_pluginDependencies:
+      'Bundle dependencies. Only DSH peers are allowed: {path}',
+    parse_pluginPatch: 'Missing declared DSH entry file: {path}',
+    parse_rangeInvalid:
+      'Use a bounded DSH range with complete versions, such as ^0.2.1-rc.3.',
+    parse_rangeMismatch: 'DSH range must match engines.dsh in the package.',
+    parse_pluginMismatch:
+      'Plugin name and version must match package.json. Repack to change them.',
+    parse_permissionsInvalid:
+      'Check tool names, hostnames and file access options.',
+    parse_groupsInvalid:
+      'Provide at least one valid group ID, comma separated.',
+    parse_skillSnapshotInvalid:
+      'Skill snapshot exceeds text, path, entry or compression limits. Reduce or reorganize the files.',
     folderManifest:
       'The folder is frozen as an upload snapshot. The manifest supplies name, version and permissions; artifact digest and size are generated from this archive. Review uses the previewed manifest.',
     distributionRevision: 'Selection revision / generation',
@@ -150,7 +404,7 @@ export const catalogMessages = {
     uploadInvalid:
       'Upload validation failed. Check kind, name, artifact size and SHA-256. Skill folders require root SKILL.md and text attachments under references/assets.',
     signature: 'Release signature',
-    unsigned: 'Not issued',
+    unsigned: 'Not issued (the platform signs on publication)',
     signed: 'Issued (installation still requires verification)',
     awaitingApproval:
       'Review and version must both be approved before publication',
