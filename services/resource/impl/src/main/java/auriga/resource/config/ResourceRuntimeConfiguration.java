@@ -314,6 +314,18 @@ public class ResourceRuntimeConfiguration {
   }
 
   @Bean
+  CatalogSharedResources catalogSharedResources(
+      ResourceStore store,
+      ResourceWorkflowStore db,
+      ResourceAccess access,
+      CatalogDelivery delivery,
+      CatalogWorkflow catalog,
+      ResourceDistributions distributions,
+      Clock clock) {
+    return new CatalogSharedResources(store, db, access, delivery, catalog, distributions, clock);
+  }
+
+  @Bean
   ResourceMembers resourceMembers(
       ResourceStore store,
       ResourceWorkflowStore db,

@@ -363,9 +363,18 @@ class PlatformSharedDshConfigurationTest {
       doAnswer(call -> members.get(call.<UUID>getArgument(2)))
           .when(store)
           .one(startsWith("SELECT * FROM shared_dsh_placement"), eq(tenant), any(UUID.class));
-      when(jdbc.queryForList(
-              startsWith("SELECT p.id FROM shared_dsh_pool"), eq(tenant), eq(DIGEST)))
+      when(jdbc.queryForList(startsWith("SELECT p.* FROM shared_dsh_pool"), eq(tenant)))
           .thenReturn(pools);
+      when(jdbc.queryForObject(
+              startsWith("SELECT (SELECT count(*) FROM shared_dsh_placement"),
+              eq(Long.class),
+              eq(tenant),
+              any(UUID.class),
+              eq(tenant),
+              any(UUID.class),
+              eq(tenant),
+              any(UUID.class)))
+          .thenAnswer(call -> (long) members.size());
       when(jdbc.update(
               startsWith("INSERT INTO shared_dsh_pool"),
               any(UUID.class),
@@ -374,7 +383,16 @@ class PlatformSharedDshConfigurationTest {
               eq(DIGEST)))
           .thenAnswer(
               call -> {
-                pools.add(Map.of("id", call.getArgument(1)));
+                pools.add(
+                    Map.of(
+                        "id",
+                        call.getArgument(1),
+                        "state",
+                        "pending",
+                        "authorization_digest",
+                        DIGEST,
+                        "memory_percent",
+                        0L));
                 return 1;
               });
       when(jdbc.update(

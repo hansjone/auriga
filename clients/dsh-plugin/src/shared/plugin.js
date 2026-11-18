@@ -6,6 +6,7 @@ import { createSharedCarrier } from './carrier.js';
 import { createSharedDownstream } from './downstream.js';
 import { openSharedTask } from './task-context.js';
 import { createEnterpriseOutbound } from './enterprise-transport.js';
+import { createSharedProfileHandler } from './profile.js';
 
 // R selects this entry instead of the dedicated-owner plugin for shared pools.
 // Missing trusted composition never falls back to the owner adapter.
@@ -61,20 +62,27 @@ export function apply(ctx) {
     openTask: (execution) =>
       openSharedTask({ ctx, runtime, ports, execution, raw: true }),
   });
-  let detach;
+  let detach, detachProfile;
   try {
     detach = ctx.webServer.register({
       kind: 'prefix',
       path: '/auriga/shared',
       handler: createSharedCarrier({ host, runtime }),
     });
+    detachProfile = ctx.webServer.register({
+      kind: 'prefix',
+      path: '/_auriga/shared-profile',
+      handler: createSharedProfileHandler(ports),
+    });
   } catch (error) {
+    detach?.();
     detachModels();
     downstream.close();
     host.close();
     throw error;
   }
   ctx.effect(() => detach, 'auriga-dsh: shared carrier');
+  ctx.effect(() => detachProfile, 'auriga-dsh: shared runtime profile');
   ctx.effect(
     () => () => {
       detachModels();

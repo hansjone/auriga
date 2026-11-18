@@ -191,6 +191,17 @@ public final class CatalogDelivery implements UnifiedResourceResolution {
     return n;
   }
 
+  Map<UUID, CatalogAssignments.Effective> sharedSelections(
+      ResourceAccess.Reader reader, UUID pool) {
+    return assignments.effective(reader, pool, pool != null);
+  }
+
+  ObjectNode sharedRef(ResourceAccess.Reader reader, CatalogAssignments.Effective selection) {
+    var value = ref(reader, admit(reader, selection.identity(), true));
+    value.put("installationMode", selection.mode());
+    return value;
+  }
+
   private void saveInstallation(Map<String, Object> row, ObjectNode document, long revision) {
     db.update(
         "UPDATE resource.catalog_installation SET document=CAST(:doc AS jsonb),revision=:rev,version_id=:v,collected_generation=NULL WHERE tenant_id=:tenant AND id=:id",
