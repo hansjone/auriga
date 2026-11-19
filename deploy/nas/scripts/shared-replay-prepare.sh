@@ -6,6 +6,7 @@ set -eu
 load_stack_env
 shared_present || die 'install and commit the shared source first'
 require_cmd docker
+shared_source_committed
 # Shutdown does not depend on accepting the source about to be replaced.
 run_compose --env-file "$AURIGA_DATA_ROOT/stack.env" stop edge
 shared_replay_action stage >/dev/null

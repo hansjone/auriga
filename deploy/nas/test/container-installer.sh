@@ -143,6 +143,9 @@ for operation in shared-replay-provision shared-replay-verify-final; do
   else printf 'FAIL replay_network_boundary\n'; fail=1; fi
 done
 check reject_replay_extra_endpoint 1 sh "$NAS_ROOT/scripts/installer.sh" shared-replay-provision nats://outside:4222
+check committed_shared_source_uses_offline_helper 0 sh "$NAS_ROOT/scripts/installer.sh" shared-source-check
+if grep -q -- '--network none --user 0:0 --cap-drop ALL' "$INSTALL_LOG" && ! grep -q docker.sock "$INSTALL_LOG"; then printf 'PASS source_check_has_no_network_or_socket\n'
+else printf 'FAIL source_check_boundary\n'; fail=1; fi
 ln -s "$TMP/access.json" "$TMP/access-link.json"
 sed -i "s|^AURIGA_ACCESS_FILE=.*|AURIGA_ACCESS_FILE=$TMP/access-link.json|" "$AURIGA_DATA_ROOT/stack.env"
 check reject_input_symlink 1 sh "$NAS_ROOT/scripts/installer.sh" init

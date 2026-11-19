@@ -408,6 +408,19 @@ managed_identity_available() (
   cmp -s "$_identity_source/network-platform/managed-network.json" "$_identity_file"
 )
 
+shared_present() {
+  [ -e "$AURIGA_DATA_ROOT/config/shared-source" ] || [ -L "$AURIGA_DATA_ROOT/config/shared-source" ]
+}
+
+shared_source_committed() (
+  if [ "${AURIGA_INSTALL_MODE:-host}" = container ] && [ "${NAS_INSTALLER_ACTIVE:-}" != 1 ]; then
+    sh "$NAS_ROOT/scripts/installer.sh" shared-source-check
+  else
+    "$(bootstrap_binary)" shared-runtime -base "$AURIGA_DATA_ROOT/config/materials" \
+      -out "$AURIGA_DATA_ROOT/config/shared-source" -action check
+  fi
+)
+
 shared_replay_action() (
   _shared_action=$1
   case "$_shared_action" in stage|prepare-path|final-path|check|close) ;; *) die 'unsupported offline replay action' ;; esac
