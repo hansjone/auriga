@@ -49,6 +49,8 @@ export function assertSharedProfile(ctx, expected, skillRoots) {
       const config = fibers[0].config;
       if (
         config?.includeDefaultRoots !== false ||
+        config.providerName !== 'auriga-shared' ||
+        config.bundledSkillDir !== undefined ||
         !Array.isArray(config.customSkillDirs) ||
         canonical([...config.customSkillDirs].sort()) !==
           canonical([...skillRoots].sort())

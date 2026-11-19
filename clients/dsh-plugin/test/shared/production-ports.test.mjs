@@ -220,7 +220,11 @@ test('public registry configuration attests native tools, fixed skill roots and 
     fibers: [
       {
         uid: 2,
-        config: { includeDefaultRoots: false, customSkillDirs: ['/fixed'] },
+        config: {
+          providerName: 'auriga-shared',
+          includeDefaultRoots: false,
+          customSkillDirs: ['/fixed'],
+        },
       },
     ],
   });

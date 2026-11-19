@@ -3,6 +3,7 @@ import { fail, SHARED_RISK } from './protocol.js';
 import { executionSession, openSharedTask } from './task-context.js';
 import { memberFilePath, memberWorkspace } from './member-files.js';
 import { installSharedMessageTool } from './message-tool.js';
+import { installSharedSkillGate } from './skill-policy.js';
 
 export const SHARED_PROFILE = Object.freeze({
   shell: false,
@@ -20,6 +21,7 @@ const finiteTools = new Set([
   'auriga_enterprise_request',
   'auriga_shared_resources',
   'auriga_send_message',
+  'skill',
 ]);
 
 /** Explicit composition entry for R's restricted profile; never patch host internals.
@@ -80,8 +82,17 @@ export function installSharedHost(
   try {
     disposers.push(
       ctx.tools.guard((call) =>
-        finiteTools.has(call.name) ? undefined : 'shared-mode-disabled',
+        finiteTools.has(call.name) &&
+        (call.name !== 'skill' || ports.assertProfile(SHARED_PROFILE) === true)
+          ? undefined
+          : 'shared-mode-disabled',
       ),
+    );
+    disposers.push(
+      installSharedSkillGate(ctx, {
+        runtime,
+        assertProfile: () => ports.assertProfile(SHARED_PROFILE),
+      }),
     );
     disposers.push(
       ctx.remoteAccess.registerPolicy('auriga-shared-member', {
