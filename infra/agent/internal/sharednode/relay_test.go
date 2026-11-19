@@ -19,6 +19,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -32,11 +33,14 @@ const testTask = "00000000-0000-4000-8000-000000000004"
 type testAuthority struct {
 	workspacev1.UnimplementedSharedDshServiceServer
 	iamv1.UnimplementedSharedTaskServiceServer
-	t        *testing.T
-	binding  *nodev1.SharedDshSessionBinding
-	version  atomic.Int64
-	finished atomic.Bool
-	outbound chan *iamv1.ExecuteSharedOutboundRequest
+	t               *testing.T
+	binding         *nodev1.SharedDshSessionBinding
+	version         atomic.Int64
+	stopped         sync.Map
+	ordinaryVersion atomic.Int64
+	credentialState atomic.Int32
+	invalidSession  atomic.Bool
+	outbound        chan *iamv1.ExecuteSharedOutboundRequest
 }
 
 func (a *testAuthority) ExecuteSharedOutbound(ctx context.Context, in *iamv1.ExecuteSharedOutboundRequest) (*iamv1.ExecuteSharedOutboundResponse, error) {
@@ -101,6 +105,9 @@ func (a *testAuthority) check(ctx context.Context) {
 }
 func (a *testAuthority) LookupSharedDshSession(ctx context.Context, in *workspacev1.LookupSharedDshSessionRequest) (*workspacev1.LookupSharedDshSessionResponse, error) {
 	a.check(ctx)
+	if a.invalidSession.Load() {
+		return &workspacev1.LookupSharedDshSessionResponse{}, nil
+	}
 	return &workspacev1.LookupSharedDshSessionResponse{Binding: a.binding}, nil
 }
 
@@ -116,10 +123,18 @@ func (a *testAuthority) GetSharedDshPool(ctx context.Context, in *workspacev1.Ge
 }
 func (a *testAuthority) BeginSharedTask(ctx context.Context, in *iamv1.BeginSharedTaskRequest) (*iamv1.BeginSharedTaskResponse, error) {
 	a.check(ctx)
-	return &iamv1.BeginSharedTaskResponse{Token: "synthetic-capability-1", Capability: a.cap(in.TaskId, in.Audience, in.Scopes)}, nil
+	token := "synthetic-capability-1"
+	if in.TaskId != testTask {
+		token = "synthetic-capability-" + in.TaskId
+	}
+	return &iamv1.BeginSharedTaskResponse{Token: token, Capability: a.cap(in.TaskId, in.Audience, in.Scopes)}, nil
 }
 func (a *testAuthority) cap(id, audience string, scopes []string) *nodev1.SharedDshCapability {
-	return &nodev1.SharedDshCapability{SchemaVersion: 1, Binding: a.binding, TaskId: id, Audience: audience, Scopes: scopes, CredentialVersion: a.version.Load(), IssuedAt: time.Now().Unix(), ExpiresAt: time.Now().Unix() + 60, Jti: testTask}
+	version := a.version.Load()
+	if has(scopes, "task.execute") {
+		version = a.ordinaryVersion.Load()
+	}
+	return &nodev1.SharedDshCapability{SchemaVersion: 1, Binding: a.binding, TaskId: id, Audience: audience, Scopes: scopes, CredentialVersion: version, IssuedAt: time.Now().Unix(), ExpiresAt: time.Now().Unix() + 60, Jti: id}
 }
 func (a *testAuthority) IssueSharedCapability(ctx context.Context, in *iamv1.IssueSharedCapabilityRequest) (*iamv1.IssueSharedCapabilityResponse, error) {
 	a.check(ctx)
@@ -127,11 +142,24 @@ func (a *testAuthority) IssueSharedCapability(ctx context.Context, in *iamv1.Iss
 }
 func (a *testAuthority) AuthorizeSharedCapability(ctx context.Context, in *iamv1.AuthorizeSharedCapabilityRequest) (*iamv1.AuthorizeSharedCapabilityResponse, error) {
 	a.check(ctx)
-	return &iamv1.AuthorizeSharedCapabilityResponse{Active: !a.finished.Load(), CredentialVersion: a.version.Load(), Binding: a.binding, Scopes: in.Capability.Scopes}, nil
+	_, stopped := a.stopped.Load(in.Capability.TaskId)
+	state := iamv1.SharedEnterpriseCredentialState_SHARED_ENTERPRISE_CREDENTIAL_STATE_UNSPECIFIED
+	if in.Capability.Audience == "auriga.shared.enterprise" {
+		state = iamv1.SharedEnterpriseCredentialState(a.credentialState.Load())
+	}
+	version := a.version.Load()
+	if has(in.Capability.Scopes, "task.execute") {
+		version = a.ordinaryVersion.Load()
+	}
+	scopes := in.Capability.Scopes
+	if in.Capability.Audience == "auriga.shared.enterprise" {
+		scopes = []string{"task.execute", "credentials", "outbound"}
+	}
+	return &iamv1.AuthorizeSharedCapabilityResponse{Active: !stopped, CredentialVersion: version, Binding: a.binding, Scopes: scopes, EnterpriseCredentialState: state}, nil
 }
 func (a *testAuthority) FinishSharedTask(ctx context.Context, in *iamv1.FinishSharedTaskRequest) (*iamv1.FinishSharedTaskResponse, error) {
 	a.check(ctx)
-	a.finished.Store(true)
+	a.stopped.Store(in.TaskId, true)
 	return &iamv1.FinishSharedTaskResponse{}, nil
 }
 func fixture(t *testing.T) (*Relay, *testAuthority) {
@@ -139,6 +167,8 @@ func fixture(t *testing.T) (*Relay, *testAuthority) {
 	b := &nodev1.SharedDshSessionBinding{TenantId: testTenant, MemberId: testSession, PlacementId: testSession, PhysicalInstanceId: testPool, SessionId: testSession, PlatformSessionId: testSession, Mode: nodev1.DshInstanceMode_DSH_INSTANCE_MODE_DEDICATED, Epoch: 1, Revision: 1, AuthGeneration: 1}
 	authority := &testAuthority{t: t, binding: b}
 	authority.version.Store(1)
+	authority.ordinaryVersion.Store(1)
+	authority.credentialState.Store(int32(iamv1.SharedEnterpriseCredentialState_SHARED_ENTERPRISE_CREDENTIAL_STATE_AVAILABLE))
 	listener := bufconn.Listen(1024 * 1024)
 	server := grpc.NewServer()
 	workspacev1.RegisterSharedDshServiceServer(server, authority)

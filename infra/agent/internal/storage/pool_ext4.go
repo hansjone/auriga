@@ -15,6 +15,12 @@ type PoolMount struct {
 	Root   string
 }
 
+func ext4FormatArgs(image string) []string {
+	return []string{"-q", "-F", "-t", "ext4", "-b", "4096", "-m", "0",
+		"-O", "quota,project,^orphan_file,^metadata_csum_seed",
+		"-E", "lazy_itable_init=0,lazy_journal_init=0,quotatype=prjquota", image}
+}
+
 // Ext4Images keeps each pool on a preallocated file, with kernel project quotas.
 // The backing NAS filesystem needs regular files and loop-device support.
 type Ext4Images struct {
