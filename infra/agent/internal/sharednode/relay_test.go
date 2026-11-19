@@ -40,6 +40,7 @@ type testAuthority struct {
 	ordinaryVersion atomic.Int64
 	credentialState atomic.Int32
 	invalidSession  atomic.Bool
+	lookupFailures  sync.Map
 	outbound        chan *iamv1.ExecuteSharedOutboundRequest
 }
 
@@ -105,6 +106,9 @@ func (a *testAuthority) check(ctx context.Context) {
 }
 func (a *testAuthority) LookupSharedDshSession(ctx context.Context, in *workspacev1.LookupSharedDshSessionRequest) (*workspacev1.LookupSharedDshSessionResponse, error) {
 	a.check(ctx)
+	if failure, ok := a.lookupFailures.Load(in.SessionId); ok {
+		return nil, failure.(error)
+	}
 	if a.invalidSession.Load() {
 		return &workspacev1.LookupSharedDshSessionResponse{}, nil
 	}
