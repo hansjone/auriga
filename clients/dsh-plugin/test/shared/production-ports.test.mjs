@@ -149,7 +149,11 @@ function fixture({ profileValidator } = {}) {
       }
       if (operation === 'finishTask') {
         activeTasks.delete(request.taskId);
-        return {};
+        return {
+          fenced: true,
+          binding: request.binding,
+          taskId: request.taskId,
+        };
       }
       if (operation === 'authorizeCapability')
         return {
@@ -283,8 +287,18 @@ test('profile factory injection is internal, synchronous and strict; shared defa
 
 test('a late capability renewal cannot resurrect a finished native execution', async () => {
   const f = fixture(),
-    execution = { agent: f.agent, signal: new AbortController().signal };
-  const token = await f.ports.issueTask(f.binding, execution, ['outbound']);
+    execution = {
+      agent: f.agent,
+      token: Symbol('native-fixture'),
+      signal: new AbortController().signal,
+    };
+  const parent = await f.ports.acquireExecution(f.binding, execution);
+  const token = await f.ports.issueTask(
+    f.binding,
+    execution,
+    ['outbound'],
+    parent,
+  );
   f.state.afterIssue = () => f.ports.finishTask(f.binding, execution);
   await assert.rejects(
     f.ports.enterprise.refreshCapability(
@@ -293,7 +307,7 @@ test('a late capability renewal cannot resurrect a finished native execution', a
       'outbound',
     ),
   );
-  assert.equal(f.activeTasks.size, 0);
+  assert.equal(f.activeTasks.size, 1);
   await assert.rejects(
     f.ports.enterprise.refreshCapability(
       token,
@@ -301,13 +315,19 @@ test('a late capability renewal cannot resurrect a finished native execution', a
       'outbound',
     ),
   );
+  await parent.close();
+  assert.equal(f.activeTasks.size, 0);
   await f.ports.close();
   f.runtime.close();
 });
 
 test('task-local uppercase variables preserve leading zeroes and a running helper renews its own material', async () => {
   const f = fixture();
-  const execution = { agent: f.agent, signal: new AbortController().signal };
+  const execution = {
+    agent: f.agent,
+    token: Symbol('native-fixture'),
+    signal: new AbortController().signal,
+  };
   const inherited = Object.hasOwn(process.env, 'DSH_AURIGA_TOKEN');
   const task = await openSharedTask({
     ctx: f.ctx,
@@ -361,7 +381,11 @@ test('task-local uppercase variables preserve leading zeroes and a running helpe
 
 test('late material is discarded after rotation, logout, or a different account binding', async () => {
   const f = fixture();
-  const execution = { agent: f.agent, signal: new AbortController().signal };
+  const execution = {
+    agent: f.agent,
+    token: Symbol('native-fixture'),
+    signal: new AbortController().signal,
+  };
   const task = await openSharedTask({
     ctx: f.ctx,
     runtime: f.runtime,
@@ -400,20 +424,24 @@ test('late material is discarded after rotation, logout, or a different account 
 test('abandoned begin response is compensated with the same trusted task id', async () => {
   const f = fixture();
   const controller = new AbortController();
-  const execution = { agent: f.agent, signal: controller.signal };
+  const execution = {
+    agent: f.agent,
+    token: Symbol('native-fixture'),
+    signal: controller.signal,
+  };
   f.state.beforeBegin = async () => controller.abort();
-  await assert.rejects(f.ports.issueTask(f.binding, execution, ['outbound']));
+  await assert.rejects(f.ports.issueExecution(f.binding, execution));
   assert.equal(f.activeTasks.size, 0);
   assert.ok(f.events.includes('finishTask'));
   await assert.rejects(
     f.ports.issueTask(f.binding, { agent: { ...f.agent } }, ['outbound']),
   );
   f.state.beforeBegin = undefined;
-  await f.ports.issueTask(
-    f.binding,
-    { agent: f.agent, signal: new AbortController().signal },
-    ['outbound'],
-  );
+  await f.ports.issueExecution(f.binding, {
+    agent: f.agent,
+    token: Symbol('native-fixture'),
+    signal: new AbortController().signal,
+  });
   assert.equal(f.activeTasks.size, 1);
   await f.ports.close();
   assert.equal(f.activeTasks.size, 0);
@@ -428,7 +456,11 @@ test('raw-disabled outbound delegates only the bound capability and original byt
     ctx: f.ctx,
     runtime: f.runtime,
     ports: f.ports,
-    execution: { agent: f.agent, signal: new AbortController().signal },
+    execution: {
+      agent: f.agent,
+      token: Symbol('native-fixture'),
+      signal: new AbortController().signal,
+    },
     raw: true,
   });
   const call = {
@@ -482,7 +514,11 @@ test('outbound carries actual execution and caller cancellation to the node rela
     ctx: f.ctx,
     runtime: f.runtime,
     ports: f.ports,
-    execution: { agent: f.agent, signal: execution.signal },
+    execution: {
+      agent: f.agent,
+      token: Symbol('native-fixture'),
+      signal: execution.signal,
+    },
   });
   try {
     for (const useExecution of [false, true]) {
@@ -524,7 +560,11 @@ test('outbound carries actual execution and caller cancellation to the node rela
 test('model task is derived from the live request event and is finished at idle', async () => {
   const f = fixture();
   const signal = new AbortController().signal;
-  const purpose = { audience: 'auriga.shared.model', scope: 'model.invoke' };
+  const purpose = {
+    audience: 'auriga.shared.model',
+    scope: 'model.invoke',
+    nativeSignal: signal,
+  };
   try {
     await assert.rejects(
       f.ports.downstream.taskForSession(f.binding, signal, purpose),
@@ -543,8 +583,11 @@ test('model task is derived from the live request event and is finished at idle'
       signal,
       purpose,
     );
-    assert.deepEqual(first, again);
-    assert.equal(f.activeTasks.size, 1);
+    assert.equal(first.taskId, again.taskId);
+    assert.equal(first.callId, again.callId);
+    assert.equal(f.activeTasks.size, 2);
+    await first.close();
+    await again.close();
     f.listeners.get('agent/status')({ agent: f.agent, status: 'idle' });
     await new Promise((resolve) => setImmediate(resolve));
     assert.equal(f.activeTasks.size, 0);
