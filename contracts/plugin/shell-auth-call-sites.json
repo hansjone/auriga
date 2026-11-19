@@ -199,6 +199,22 @@
   "checkPolicy": "legacy按文件+规范化字面路由特征比较，允许删除与格式变化；不证明动态拼接/同路径新方法已迁移。broker只放行retainedChannels中精确文件的指定传输与路由；broker固定接缝命名及静态扫描局限见shell-auth-migration.md。D迁移完成后清空calls并切broker，保留通道变更须独审。",
   "retainedChannels": [
     {
+      "file": "shared/node-transport.js",
+      "channel": "shared-unix-node-relay",
+      "transports": ["import:node:http"],
+      "routePatterns": [],
+      "reason": "Finite operation POST over the trusted Linux pool Unix socket only. AUTH-K checks the complete request option shape, operation set, no request aliases/identity headers, and the paired trusted provider; no TCP target or platform HTTP broker bypass.",
+      "design": "docs/design/auth-shell.zh.md section 3.3; shared Unix node relay"
+    },
+    {
+      "file": "shared/ports-plugin.js",
+      "channel": "shared-unix-node-provider",
+      "transports": [],
+      "routePatterns": [],
+      "reason": "The only production caller of the shared node socket transport. Fixed read-only pool config, Linux-only path and actual socket checks are mandatory AUTH-K source invariants.",
+      "design": "docs/design/auth-shell.zh.md section 3.3; shared Unix node relay"
+    },
+    {
       "file": "client.js",
       "channel": "local-browser-bridge",
       "transports": ["call:fetch"],

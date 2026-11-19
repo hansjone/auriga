@@ -935,10 +935,21 @@ public final class CatalogWorkflow {
 
   InputStream nodeArtifact(
       ResourceAccess.Reader reader, Map<String, Object> version, String artifact) {
+    return nodeArtifact(reader, version, artifact, null, 0);
+  }
+
+  InputStream nodeArtifact(
+      ResourceAccess.Reader reader,
+      Map<String, Object> version,
+      String artifact,
+      String digest,
+      long size) {
     var a =
         db.row(
             "SELECT * FROM resource.catalog_artifact WHERE tenant_id=:tenant AND package_id=:p AND version_id=:v AND artifact_id=:a",
             db.args("p", version.get("package_id"), "v", version.get("id"), "a", artifact));
+    if (digest != null && (!digest.equals(a.get("digest")) || size != number(a, "size_bytes")))
+      throw missing();
     return objects
         .get()
         .open(

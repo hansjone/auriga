@@ -53,6 +53,8 @@ func RunCLI(args []string, out, logs io.Writer) error {
 		return runAgent(args[1:], logs)
 	case "recover-runtime":
 		return recoverRuntime(args[1:], out, logs)
+	case "render-shared-host-config":
+		return renderSharedHostConfig(args[1:], out, logs)
 	default:
 		return fmt.Errorf("unknown command %q (want join|run|recover-runtime|--version)", args[0])
 	}
@@ -218,6 +220,15 @@ func runAgent(args []string, logs io.Writer) error {
 
 	reg := ingress.NewMapRegistry()
 	targets := &observer.SliceTargets{}
+	shared, err := sharedPreparation(cfg, driverName)
+	if err != nil {
+		return err
+	}
+	docker, _ := inner.(*runtime.Docker)
+	poolRuntime, err := sharedRuntime(ctx, cfg, shared, docker, reg)
+	if err != nil {
+		return err
+	}
 	sess := conn.New(conn.Config{
 		AgentDir:      cfg.AgentDir(),
 		AgentVersion:  cfg.AgentVersion,
@@ -228,7 +239,30 @@ func runAgent(args []string, logs io.Writer) error {
 		Store:         store,
 		AllowInsecure: cfg.AllowInsecure,
 		Capacity:      helloCapacity(cfg.DetectCapacity()),
+		SharedPools:   shared,
+		SharedRuntime: poolRuntime,
+		OnWelcome: func(welcome *nodev1.Welcome) {
+			if poolRuntime != nil && welcome.ServerTime != nil && welcome.ServerTime.CheckValid() == nil {
+				if resources, ok := poolRuntime.Resources.(*runtime.PoolMaterializer); ok {
+					resources.TrustServerTime(welcome.ServerTime.AsTime())
+				}
+			}
+		},
 	})
+	if poolRuntime != nil {
+		go func() {
+			ticker := time.NewTicker(15 * time.Second)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case <-ticker.C:
+					poolRuntime.Watch(ctx)
+				}
+			}
+		}()
+	}
 	io, err := startIngressAndObserver(ctx, cfg, logger, *ingressListen, *ingressLocal, reg, targets, sess)
 	if err != nil {
 		return err

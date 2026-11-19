@@ -1,0 +1,7 @@
+{
+  "name": "auriga-runtime-pnpm",
+  "private": true,
+  "dependencies": {
+    "pnpm": "11.28.5"
+  }
+}

@@ -701,6 +701,7 @@ final class IamNetworkSources {
 
   static void connection(NetworkAuthorityConnection c) {
     unknown(c);
+    check(c.getSharedContextId().isEmpty(), FORBIDDEN);
     check(
         c.getTenantId().equals(TenantContext.require().toString())
             && !TenantContext.PLATFORM_TENANT.toString().equals(c.getTenantId()),

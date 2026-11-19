@@ -25,9 +25,18 @@ const copy = (v) => JSON.parse(JSON.stringify(v));
 const immutable = (b) => Object.freeze(copy(b));
 export const ALLOWED_ACTIONS = Object.freeze([
   'session/page',
+  'session/follow',
+  'session/projections',
+  'session/list',
+  'session/control',
   'session/prompt',
   'session/cancel',
   'event:changed',
+  'event:api-session/activity',
+  'event:api-session/added',
+  'event:api-session/error',
+  'event:api-session/removed',
+  'event:api-session/status',
   'workspaceFiles/read',
   'workspaceFiles/stat',
   'workspaceFiles/readBytes',
@@ -43,8 +52,11 @@ export function createSharedRuntime({
   identityKeys,
   capabilityKeys,
   physicalInstanceId,
+  expectedMode = 'shared',
   now = () => Math.floor(Date.now() / 1000),
 }) {
+  if (!['shared', 'dedicated'].includes(expectedMode))
+    fail('common.validation_failed');
   const ownership = new Map(),
     peers = new WeakMap(),
     replay = new Map();
@@ -60,7 +72,7 @@ export function createSharedRuntime({
         b.authGeneration < f.authGeneration)
     )
       fail();
-    if (b.mode !== 'shared' || b.physicalInstanceId !== physicalInstanceId)
+    if (b.mode !== expectedMode || b.physicalInstanceId !== physicalInstanceId)
       fail('shared.binding_mismatch');
   };
   async function current(b) {
@@ -87,7 +99,8 @@ export function createSharedRuntime({
     let b;
     try {
       b = await ports.lookup(id);
-    } catch {
+    } catch (error) {
+      if (error?.code === 'common.not_found') fail('common.not_found');
       fail('common.unavailable');
     }
     validate('SessionBinding', b);
@@ -183,7 +196,7 @@ export function createSharedRuntime({
     const b = await session(id);
     same(c.binding, b);
     const allowed = {
-      'auriga.shared.enterprise': ['credentials', 'outbound'],
+      'auriga.shared.enterprise': ['credentials', 'outbound', 'task.execute'],
       'auriga.shared.model': ['model.invoke'],
       'auriga.shared.message': ['message.send', 'message.receive'],
     }[audience];
@@ -192,6 +205,7 @@ export function createSharedRuntime({
       c.audience !== audience ||
       !c.scopes.includes(scope) ||
       c.scopes.some((s) => !allowed.includes(s)) ||
+      (c.scopes.includes('task.execute') && c.scopes.length !== 1) ||
       c.taskId !== taskId
     )
       fail();
@@ -240,7 +254,12 @@ export function createSharedRuntime({
   // remoteAccess bindings are synchronous projections, never the authorization truth.
   function bindings(p) {
     if (closed || p.kind !== 'auriga-shared-member') return [];
-    return [...ownership.values()]
+    try {
+      fence(p);
+    } catch {
+      return [];
+    }
+    const sessions = [...ownership.values()]
       .filter((b) => {
         try {
           fence(b);
@@ -258,9 +277,28 @@ export function createSharedRuntime({
           actions: [...ALLOWED_ACTIONS],
         },
       }));
+    // rc.3 routes only these two public read controllers through GLOBAL,
+    // then filters every returned session/baseline/event by its session role.
+    // Creation remains the trusted Host create flow, never the owner API.
+    return [
+      {
+        resource: { kind: 'global' },
+        role: {
+          name: 'auriga-shared-native-read',
+          resource: 'global',
+          actions: ['session/list', 'session/control'],
+        },
+      },
+      ...sessions,
+    ];
   }
   return {
     admit,
+    async refresh(peer) {
+      const principal = peers.get(peer);
+      if (!principal) fail();
+      await current(principal);
+    },
     create,
     session,
     authorize,

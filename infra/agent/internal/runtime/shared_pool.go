@@ -9,6 +9,8 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -62,6 +64,22 @@ type SharedPools struct {
 	stopping   map[string]int
 }
 
+// Bindings reads the node-owned ledger for complete resource admission snapshots.
+func (m *SharedPools) Bindings(pool string) ([]*nodev1.SharedDshBinding, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	s, _, err := m.load(pool)
+	if err != nil {
+		return nil, err
+	}
+	var bindings []*nodev1.SharedDshBinding
+	for _, b := range s.Bindings {
+		bindings = append(bindings, proto.Clone(b).(*nodev1.SharedDshBinding))
+	}
+	sort.Slice(bindings, func(i, j int) bool { return bindings[i].MemberId < bindings[j].MemberId })
+	return bindings, nil
+}
+
 func (m *SharedPools) now() int64 {
 	if m.Now != nil {
 		return m.Now().Unix()
@@ -89,6 +107,18 @@ func (m *SharedPools) load(pool string) (*poolState, string, error) {
 	}
 	if s.Bindings == nil || s.Operations == nil {
 		return nil, "", fmt.Errorf("corrupt pool state")
+	}
+	// Older ledgers used operation ID alone, although W reuses that ID for
+	// successive actions. Preserve existing receipts while adding action scope.
+	for key, operation := range s.Operations {
+		if poolUUID.MatchString(key) {
+			next := key + "/" + operation.Action
+			if s.Operations[next] != nil {
+				return nil, "", fmt.Errorf("conflicting operation ledger")
+			}
+			s.Operations[next] = operation
+			delete(s.Operations, key)
+		}
 	}
 	if s.Quiesced == nil {
 		s.Quiesced = map[string]*nodev1.SharedDshBinding{}
@@ -136,7 +166,27 @@ func savePool(p string, s *poolState) error {
 var poolUUID = regexp.MustCompile(`(?i)^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
 
 func validPoolBinding(b *nodev1.SharedDshBinding) bool {
-	return b != nil && len(b.ProtoReflect().GetUnknown()) == 0 && b.Mode == nodev1.DshInstanceMode_DSH_INSTANCE_MODE_SHARED && b.Epoch > 0 && b.Epoch <= 9007199254740991 && b.Revision > 0 && b.Revision <= 9007199254740991 && poolUUID.MatchString(b.TenantId) && poolUUID.MatchString(b.MemberId) && poolUUID.MatchString(b.PlacementId) && poolUUID.MatchString(b.PhysicalInstanceId)
+	return b != nil && len(b.ProtoReflect().GetUnknown()) == 0 && (b.Mode == nodev1.DshInstanceMode_DSH_INSTANCE_MODE_SHARED || b.Mode == nodev1.DshInstanceMode_DSH_INSTANCE_MODE_DEDICATED) && b.Epoch > 0 && b.Epoch <= 9007199254740991 && b.Revision > 0 && b.Revision <= 9007199254740991 && poolUUID.MatchString(b.TenantId) && poolUUID.MatchString(b.MemberId) && poolUUID.MatchString(b.PlacementId) && poolUUID.MatchString(b.PhysicalInstanceId)
+}
+
+// ValidInitialPoolIntent performs only pure wire validation on the Recv loop.
+func ValidInitialPoolIntent(in *nodev1.SharedDshRuntimeIntent) bool {
+	return in != nil && len(in.ProtoReflect().GetUnknown()) == 0 && in.SchemaVersion == 1 && validPoolBinding(in.Binding) && poolUUID.MatchString(in.OperationId) && in.Action == "prepare-empty" && in.OperationId == in.Binding.PlacementId && in.CancelWaitSeconds == 30 && in.ArchiveRetentionSeconds == 2592000 && in.WorkspacePolicy == "empty" && in.SessionPolicy == "discard"
+}
+
+func ValidPoolControlIntent(in *nodev1.SharedDshRuntimeIntent) bool {
+	if in == nil || in.Binding == nil || !poolUUID.MatchString(in.OperationId) {
+		return false
+	}
+	if in.Action == "prepare-empty" {
+		return ValidInitialPoolIntent(in)
+	}
+	if in.Action != "stop-pool" {
+		return false
+	}
+	copy := proto.Clone(in).(*nodev1.SharedDshRuntimeIntent)
+	copy.Action, copy.OperationId = "prepare-empty", copy.Binding.PlacementId
+	return ValidInitialPoolIntent(copy)
 }
 func (m *SharedPools) stopped(ctx context.Context, pool string) bool {
 	if m.Supervisor == nil {
@@ -184,7 +234,8 @@ func (m *SharedPools) Apply(ctx context.Context, in *nodev1.SharedDshRuntimeInte
 	wire, _ := proto.MarshalOptions{Deterministic: true}.Marshal(in)
 	sum := sha256.Sum256(wire)
 	fingerprint := hex.EncodeToString(sum[:])
-	if op := s.Operations[in.OperationId]; op != nil {
+	operationKey := in.OperationId + "/" + in.Action
+	if op := s.Operations[operationKey]; op != nil {
 		if op.Fingerprint != fingerprint {
 			return nil, fmt.Errorf("operation fingerprint conflict")
 		}
@@ -208,10 +259,10 @@ func (m *SharedPools) Apply(ctx context.Context, in *nodev1.SharedDshRuntimeInte
 	}
 	s.Tenant = b.TenantId
 	s.Bindings[b.MemberId] = proto.Clone(b).(*nodev1.SharedDshBinding)
-	op := s.Operations[in.OperationId]
+	op := s.Operations[operationKey]
 	if op == nil {
 		op = &poolOperation{Fingerprint: fingerprint, Action: in.Action, Binding: b}
-		s.Operations[in.OperationId] = op
+		s.Operations[operationKey] = op
 	}
 	op.Pending = true
 	if in.Action == "archive-reset" && op.Expires == 0 {
@@ -239,7 +290,7 @@ func (m *SharedPools) Apply(ctx context.Context, in *nodev1.SharedDshRuntimeInte
 	if e != nil {
 		return nil, e
 	}
-	op = s.Operations[in.OperationId]
+	op = s.Operations[operationKey]
 	if op == nil || op.Fingerprint != fingerprint {
 		return nil, fmt.Errorf("operation superseded")
 	}
@@ -336,12 +387,19 @@ func (m *SharedPools) Trip(ctx context.Context, pool, operation, reason string) 
 		return nil, fmt.Errorf("unknown pool")
 	}
 	key := pool + "/guardian/" + operation
+	if old := s.Impacts[operation]; old != nil && old.State == "stopped" {
+		return proto.Clone(old).(*nodev1.SharedDshGuardianImpact), nil
+	}
 	if m.inflight[key] {
 		return proto.Clone(s.Impacts[operation]).(*nodev1.SharedDshGuardianImpact), nil
 	}
 	s.Contaminated = true
 	s.Fence++
 	r := poolImpact(s, pool, operation, reason, m.now())
+	if old := s.Impacts[operation]; old != nil {
+		r = proto.Clone(old).(*nodev1.SharedDshGuardianImpact)
+		r.State = "stopping"
+	}
 	s.Impacts[operation] = r
 	if e = savePool(p, s); e != nil {
 		return nil, e
@@ -382,6 +440,7 @@ func poolImpact(s *poolState, pool, operation, reason string, now int64) *nodev1
 	for _, b := range s.Bindings {
 		r.Affected = append(r.Affected, proto.Clone(b).(*nodev1.SharedDshBinding))
 	}
+	sort.Slice(r.Affected, func(i, j int) bool { return r.Affected[i].PlacementId < r.Affected[j].PlacementId })
 	return r
 }
 
@@ -410,7 +469,7 @@ func (m *SharedPools) SweepArchives(ctx context.Context, pool string) error {
 	}
 	for id, op := range s.Operations {
 		if op.Expires > 0 && m.now() >= op.Expires {
-			if e = m.Layout.DeleteArchive(ctx, pool, id); e != nil {
+			if e = m.Layout.DeleteArchive(ctx, pool, strings.SplitN(id, "/", 2)[0]); e != nil {
 				return e
 			}
 			op.Expires = 0

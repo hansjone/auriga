@@ -19,11 +19,16 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	SharedDshService_ResolveSharedDsh_FullMethodName         = "/auriga.workspace.v1.SharedDshService/ResolveSharedDsh"
-	SharedDshService_RegisterSharedDshSession_FullMethodName = "/auriga.workspace.v1.SharedDshService/RegisterSharedDshSession"
-	SharedDshService_RevokeSharedDsh_FullMethodName          = "/auriga.workspace.v1.SharedDshService/RevokeSharedDsh"
-	SharedDshService_GetSharedDshResourceView_FullMethodName = "/auriga.workspace.v1.SharedDshService/GetSharedDshResourceView"
-	SharedDshService_ReportSharedDshResource_FullMethodName  = "/auriga.workspace.v1.SharedDshService/ReportSharedDshResource"
+	SharedDshService_GetSharedDshPool_FullMethodName             = "/auriga.workspace.v1.SharedDshService/GetSharedDshPool"
+	SharedDshService_LookupSharedDshSession_FullMethodName       = "/auriga.workspace.v1.SharedDshService/LookupSharedDshSession"
+	SharedDshService_ResolveSharedDsh_FullMethodName             = "/auriga.workspace.v1.SharedDshService/ResolveSharedDsh"
+	SharedDshService_RegisterSharedDshSession_FullMethodName     = "/auriga.workspace.v1.SharedDshService/RegisterSharedDshSession"
+	SharedDshService_RevokeSharedDsh_FullMethodName              = "/auriga.workspace.v1.SharedDshService/RevokeSharedDsh"
+	SharedDshService_GetSharedDshResourceView_FullMethodName     = "/auriga.workspace.v1.SharedDshService/GetSharedDshResourceView"
+	SharedDshService_GetSharedDshResourceSnapshot_FullMethodName = "/auriga.workspace.v1.SharedDshService/GetSharedDshResourceSnapshot"
+	SharedDshService_ReportSharedDshResource_FullMethodName      = "/auriga.workspace.v1.SharedDshService/ReportSharedDshResource"
+	SharedDshService_AdmitSharedDshTask_FullMethodName           = "/auriga.workspace.v1.SharedDshService/AdmitSharedDshTask"
+	SharedDshService_ReleaseSharedDshTask_FullMethodName         = "/auriga.workspace.v1.SharedDshService/ReleaseSharedDshTask"
 )
 
 // SharedDshServiceClient is the client API for SharedDshService service.
@@ -33,11 +38,22 @@ const (
 // Workspace authority. Internal service authentication and delegated tenant are mandatory.
 // Implementations enforce README.md semantics; proto alone is not validation.
 type SharedDshServiceClient interface {
+	// Physical mode is authoritative even while preparation is pending. An absent
+	// registration denotes a legacy instance, never an unavailable authority.
+	GetSharedDshPool(ctx context.Context, in *GetSharedDshPoolRequest, opts ...grpc.CallOption) (*GetSharedDshPoolResponse, error)
+	// Runtime relay only. Revalidates the stored session against live placement
+	// and IAM state before returning its binding.
+	LookupSharedDshSession(ctx context.Context, in *LookupSharedDshSessionRequest, opts ...grpc.CallOption) (*LookupSharedDshSessionResponse, error)
 	ResolveSharedDsh(ctx context.Context, in *ResolveSharedDshRequest, opts ...grpc.CallOption) (*ResolveSharedDshResponse, error)
 	RegisterSharedDshSession(ctx context.Context, in *RegisterSharedDshSessionRequest, opts ...grpc.CallOption) (*RegisterSharedDshSessionResponse, error)
 	RevokeSharedDsh(ctx context.Context, in *RevokeSharedDshRequest, opts ...grpc.CallOption) (*RevokeSharedDshResponse, error)
 	GetSharedDshResourceView(ctx context.Context, in *GetSharedDshResourceViewRequest, opts ...grpc.CallOption) (*GetSharedDshResourceViewResponse, error)
+	GetSharedDshResourceSnapshot(ctx context.Context, in *GetSharedDshResourceSnapshotRequest, opts ...grpc.CallOption) (*GetSharedDshResourceSnapshotResponse, error)
 	ReportSharedDshResource(ctx context.Context, in *ReportSharedDshResourceRequest, opts ...grpc.CallOption) (*ReportSharedDshResourceResponse, error)
+	// Node mTLS listener only, fenced by the current NodeControl session lease.
+	// The internal service-JWT listener intentionally does not implement these writes.
+	AdmitSharedDshTask(ctx context.Context, in *AdmitSharedDshTaskRequest, opts ...grpc.CallOption) (*AdmitSharedDshTaskResponse, error)
+	ReleaseSharedDshTask(ctx context.Context, in *ReleaseSharedDshTaskRequest, opts ...grpc.CallOption) (*ReleaseSharedDshTaskResponse, error)
 }
 
 type sharedDshServiceClient struct {
@@ -46,6 +62,26 @@ type sharedDshServiceClient struct {
 
 func NewSharedDshServiceClient(cc grpc.ClientConnInterface) SharedDshServiceClient {
 	return &sharedDshServiceClient{cc}
+}
+
+func (c *sharedDshServiceClient) GetSharedDshPool(ctx context.Context, in *GetSharedDshPoolRequest, opts ...grpc.CallOption) (*GetSharedDshPoolResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetSharedDshPoolResponse)
+	err := c.cc.Invoke(ctx, SharedDshService_GetSharedDshPool_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *sharedDshServiceClient) LookupSharedDshSession(ctx context.Context, in *LookupSharedDshSessionRequest, opts ...grpc.CallOption) (*LookupSharedDshSessionResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(LookupSharedDshSessionResponse)
+	err := c.cc.Invoke(ctx, SharedDshService_LookupSharedDshSession_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 func (c *sharedDshServiceClient) ResolveSharedDsh(ctx context.Context, in *ResolveSharedDshRequest, opts ...grpc.CallOption) (*ResolveSharedDshResponse, error) {
@@ -88,10 +124,40 @@ func (c *sharedDshServiceClient) GetSharedDshResourceView(ctx context.Context, i
 	return out, nil
 }
 
+func (c *sharedDshServiceClient) GetSharedDshResourceSnapshot(ctx context.Context, in *GetSharedDshResourceSnapshotRequest, opts ...grpc.CallOption) (*GetSharedDshResourceSnapshotResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetSharedDshResourceSnapshotResponse)
+	err := c.cc.Invoke(ctx, SharedDshService_GetSharedDshResourceSnapshot_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *sharedDshServiceClient) ReportSharedDshResource(ctx context.Context, in *ReportSharedDshResourceRequest, opts ...grpc.CallOption) (*ReportSharedDshResourceResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(ReportSharedDshResourceResponse)
 	err := c.cc.Invoke(ctx, SharedDshService_ReportSharedDshResource_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *sharedDshServiceClient) AdmitSharedDshTask(ctx context.Context, in *AdmitSharedDshTaskRequest, opts ...grpc.CallOption) (*AdmitSharedDshTaskResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(AdmitSharedDshTaskResponse)
+	err := c.cc.Invoke(ctx, SharedDshService_AdmitSharedDshTask_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *sharedDshServiceClient) ReleaseSharedDshTask(ctx context.Context, in *ReleaseSharedDshTaskRequest, opts ...grpc.CallOption) (*ReleaseSharedDshTaskResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ReleaseSharedDshTaskResponse)
+	err := c.cc.Invoke(ctx, SharedDshService_ReleaseSharedDshTask_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -105,11 +171,22 @@ func (c *sharedDshServiceClient) ReportSharedDshResource(ctx context.Context, in
 // Workspace authority. Internal service authentication and delegated tenant are mandatory.
 // Implementations enforce README.md semantics; proto alone is not validation.
 type SharedDshServiceServer interface {
+	// Physical mode is authoritative even while preparation is pending. An absent
+	// registration denotes a legacy instance, never an unavailable authority.
+	GetSharedDshPool(context.Context, *GetSharedDshPoolRequest) (*GetSharedDshPoolResponse, error)
+	// Runtime relay only. Revalidates the stored session against live placement
+	// and IAM state before returning its binding.
+	LookupSharedDshSession(context.Context, *LookupSharedDshSessionRequest) (*LookupSharedDshSessionResponse, error)
 	ResolveSharedDsh(context.Context, *ResolveSharedDshRequest) (*ResolveSharedDshResponse, error)
 	RegisterSharedDshSession(context.Context, *RegisterSharedDshSessionRequest) (*RegisterSharedDshSessionResponse, error)
 	RevokeSharedDsh(context.Context, *RevokeSharedDshRequest) (*RevokeSharedDshResponse, error)
 	GetSharedDshResourceView(context.Context, *GetSharedDshResourceViewRequest) (*GetSharedDshResourceViewResponse, error)
+	GetSharedDshResourceSnapshot(context.Context, *GetSharedDshResourceSnapshotRequest) (*GetSharedDshResourceSnapshotResponse, error)
 	ReportSharedDshResource(context.Context, *ReportSharedDshResourceRequest) (*ReportSharedDshResourceResponse, error)
+	// Node mTLS listener only, fenced by the current NodeControl session lease.
+	// The internal service-JWT listener intentionally does not implement these writes.
+	AdmitSharedDshTask(context.Context, *AdmitSharedDshTaskRequest) (*AdmitSharedDshTaskResponse, error)
+	ReleaseSharedDshTask(context.Context, *ReleaseSharedDshTaskRequest) (*ReleaseSharedDshTaskResponse, error)
 	mustEmbedUnimplementedSharedDshServiceServer()
 }
 
@@ -120,6 +197,12 @@ type SharedDshServiceServer interface {
 // pointer dereference when methods are called.
 type UnimplementedSharedDshServiceServer struct{}
 
+func (UnimplementedSharedDshServiceServer) GetSharedDshPool(context.Context, *GetSharedDshPoolRequest) (*GetSharedDshPoolResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetSharedDshPool not implemented")
+}
+func (UnimplementedSharedDshServiceServer) LookupSharedDshSession(context.Context, *LookupSharedDshSessionRequest) (*LookupSharedDshSessionResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method LookupSharedDshSession not implemented")
+}
 func (UnimplementedSharedDshServiceServer) ResolveSharedDsh(context.Context, *ResolveSharedDshRequest) (*ResolveSharedDshResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ResolveSharedDsh not implemented")
 }
@@ -132,8 +215,17 @@ func (UnimplementedSharedDshServiceServer) RevokeSharedDsh(context.Context, *Rev
 func (UnimplementedSharedDshServiceServer) GetSharedDshResourceView(context.Context, *GetSharedDshResourceViewRequest) (*GetSharedDshResourceViewResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetSharedDshResourceView not implemented")
 }
+func (UnimplementedSharedDshServiceServer) GetSharedDshResourceSnapshot(context.Context, *GetSharedDshResourceSnapshotRequest) (*GetSharedDshResourceSnapshotResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetSharedDshResourceSnapshot not implemented")
+}
 func (UnimplementedSharedDshServiceServer) ReportSharedDshResource(context.Context, *ReportSharedDshResourceRequest) (*ReportSharedDshResourceResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ReportSharedDshResource not implemented")
+}
+func (UnimplementedSharedDshServiceServer) AdmitSharedDshTask(context.Context, *AdmitSharedDshTaskRequest) (*AdmitSharedDshTaskResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method AdmitSharedDshTask not implemented")
+}
+func (UnimplementedSharedDshServiceServer) ReleaseSharedDshTask(context.Context, *ReleaseSharedDshTaskRequest) (*ReleaseSharedDshTaskResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ReleaseSharedDshTask not implemented")
 }
 func (UnimplementedSharedDshServiceServer) mustEmbedUnimplementedSharedDshServiceServer() {}
 func (UnimplementedSharedDshServiceServer) testEmbeddedByValue()                          {}
@@ -154,6 +246,42 @@ func RegisterSharedDshServiceServer(s grpc.ServiceRegistrar, srv SharedDshServic
 		t.testEmbeddedByValue()
 	}
 	s.RegisterService(&SharedDshService_ServiceDesc, srv)
+}
+
+func _SharedDshService_GetSharedDshPool_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetSharedDshPoolRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(SharedDshServiceServer).GetSharedDshPool(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: SharedDshService_GetSharedDshPool_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(SharedDshServiceServer).GetSharedDshPool(ctx, req.(*GetSharedDshPoolRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _SharedDshService_LookupSharedDshSession_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(LookupSharedDshSessionRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(SharedDshServiceServer).LookupSharedDshSession(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: SharedDshService_LookupSharedDshSession_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(SharedDshServiceServer).LookupSharedDshSession(ctx, req.(*LookupSharedDshSessionRequest))
+	}
+	return interceptor(ctx, in, info, handler)
 }
 
 func _SharedDshService_ResolveSharedDsh_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
@@ -228,6 +356,24 @@ func _SharedDshService_GetSharedDshResourceView_Handler(srv interface{}, ctx con
 	return interceptor(ctx, in, info, handler)
 }
 
+func _SharedDshService_GetSharedDshResourceSnapshot_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetSharedDshResourceSnapshotRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(SharedDshServiceServer).GetSharedDshResourceSnapshot(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: SharedDshService_GetSharedDshResourceSnapshot_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(SharedDshServiceServer).GetSharedDshResourceSnapshot(ctx, req.(*GetSharedDshResourceSnapshotRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _SharedDshService_ReportSharedDshResource_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(ReportSharedDshResourceRequest)
 	if err := dec(in); err != nil {
@@ -246,6 +392,42 @@ func _SharedDshService_ReportSharedDshResource_Handler(srv interface{}, ctx cont
 	return interceptor(ctx, in, info, handler)
 }
 
+func _SharedDshService_AdmitSharedDshTask_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AdmitSharedDshTaskRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(SharedDshServiceServer).AdmitSharedDshTask(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: SharedDshService_AdmitSharedDshTask_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(SharedDshServiceServer).AdmitSharedDshTask(ctx, req.(*AdmitSharedDshTaskRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _SharedDshService_ReleaseSharedDshTask_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ReleaseSharedDshTaskRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(SharedDshServiceServer).ReleaseSharedDshTask(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: SharedDshService_ReleaseSharedDshTask_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(SharedDshServiceServer).ReleaseSharedDshTask(ctx, req.(*ReleaseSharedDshTaskRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // SharedDshService_ServiceDesc is the grpc.ServiceDesc for SharedDshService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -253,6 +435,14 @@ var SharedDshService_ServiceDesc = grpc.ServiceDesc{
 	ServiceName: "auriga.workspace.v1.SharedDshService",
 	HandlerType: (*SharedDshServiceServer)(nil),
 	Methods: []grpc.MethodDesc{
+		{
+			MethodName: "GetSharedDshPool",
+			Handler:    _SharedDshService_GetSharedDshPool_Handler,
+		},
+		{
+			MethodName: "LookupSharedDshSession",
+			Handler:    _SharedDshService_LookupSharedDshSession_Handler,
+		},
 		{
 			MethodName: "ResolveSharedDsh",
 			Handler:    _SharedDshService_ResolveSharedDsh_Handler,
@@ -270,8 +460,20 @@ var SharedDshService_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _SharedDshService_GetSharedDshResourceView_Handler,
 		},
 		{
+			MethodName: "GetSharedDshResourceSnapshot",
+			Handler:    _SharedDshService_GetSharedDshResourceSnapshot_Handler,
+		},
+		{
 			MethodName: "ReportSharedDshResource",
 			Handler:    _SharedDshService_ReportSharedDshResource_Handler,
+		},
+		{
+			MethodName: "AdmitSharedDshTask",
+			Handler:    _SharedDshService_AdmitSharedDshTask_Handler,
+		},
+		{
+			MethodName: "ReleaseSharedDshTask",
+			Handler:    _SharedDshService_ReleaseSharedDshTask_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

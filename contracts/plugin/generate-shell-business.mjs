@@ -150,6 +150,21 @@ for (const file of [
     for (const method of ['get', 'post', 'patch']) {
       const op = item[method];
       if (!op) continue;
+      if (Object.hasOwn(op, 'x-auth-context')) {
+        const contexts = op['x-auth-context'];
+        if (
+          !Array.isArray(contexts) ||
+          contexts.length === 0 ||
+          contexts.some(
+            (context) =>
+              !['portal', 'admin', 'device', 'service'].includes(context),
+          ) ||
+          new Set(contexts).size !== contexts.length
+        )
+          throw Error('Invalid x-auth-context: ' + op.operationId);
+        // Portal session authority cannot be synthesized from a device/broker identity.
+        if (!contexts.includes('device')) continue;
+      }
       const operation = op.operationId;
       const properties = {},
         required = [];

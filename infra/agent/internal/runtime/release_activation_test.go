@@ -39,6 +39,7 @@ type releaseEngine struct {
 	// test request: newReleaseEngine has already started the HTTP server.
 	mu          sync.Mutex
 	containers  map[string]map[string]any
+	volumes     map[string]map[string]any
 	names       map[string]string
 	starts      []string
 	creates     int
@@ -56,6 +57,8 @@ type releaseEngine struct {
 	healthy     atomic.Bool
 
 	beforeInspect func(string) error
+	memoryStats   map[string]any
+	beforeStats   func()
 }
 
 func newReleaseEngine(t *testing.T) (*releaseEngine, *runtime.Docker, *dockerReleaseFixture) {
@@ -98,6 +101,26 @@ func (e *releaseEngine) serve(w http.ResponseWriter, r *http.Request) {
 	defer e.mu.Unlock()
 	path := r.URL.Path
 	switch {
+	case path == "/volumes/create":
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			http.Error(w, err.Error(), 400)
+			return
+		}
+		if e.volumes == nil {
+			e.volumes = map[string]map[string]any{}
+		}
+		name, _ := body["Name"].(string)
+		e.volumes[name] = map[string]any{"Name": name, "Driver": body["Driver"], "Options": body["DriverOpts"], "Labels": body["Labels"]}
+		w.WriteHeader(http.StatusCreated)
+		_ = json.NewEncoder(w).Encode(e.volumes[name])
+	case strings.HasPrefix(path, "/volumes/"):
+		volume := e.volumes[strings.TrimPrefix(path, "/volumes/")]
+		if volume == nil {
+			http.NotFound(w, r)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(volume)
 	case strings.HasPrefix(path, "/images/"):
 		image := strings.TrimSuffix(strings.TrimPrefix(path, "/images/"), "/json")
 		if e.imageID == testDigest(fixtureManifest) && image == fixtureConfigID {
@@ -153,6 +176,22 @@ func (e *releaseEngine) serve(w http.ResponseWriter, r *http.Request) {
 			list = append(list, map[string]any{"Id": id, "Labels": body["Labels"], "State": status})
 		}
 		_ = json.NewEncoder(w).Encode(list)
+	case strings.HasSuffix(path, "/stats") && strings.HasPrefix(path, "/containers/"):
+		id := strings.TrimSuffix(strings.TrimPrefix(path, "/containers/"), "/stats")
+		body := e.containers[id]
+		if body == nil {
+			http.NotFound(w, r)
+			return
+		}
+		if hook := e.beforeStats; hook != nil {
+			e.runHookUnlocked(hook)
+		}
+		stats := e.memoryStats
+		if stats == nil {
+			limit := body["HostConfig"].(map[string]any)["Memory"].(float64)
+			stats = map[string]any{"read": time.Now().UTC().Format(time.RFC3339Nano), "memory_stats": map[string]any{"usage": int64(limit) * 79 / 100, "limit": limit}}
+		}
+		_ = json.NewEncoder(w).Encode(stats)
 	case strings.HasSuffix(path, "/json") && strings.HasPrefix(path, "/containers/"):
 		id := strings.TrimSuffix(strings.TrimPrefix(path, "/containers/"), "/json")
 		if named := e.names[id]; named != "" {
@@ -179,18 +218,27 @@ func (e *releaseEngine) serve(w http.ResponseWriter, r *http.Request) {
 		if e.mode == "container-id" {
 			actualID = strings.Repeat("f", 64)
 		}
-		host := body["HostConfig"].(map[string]any)
-		var mounts []map[string]any
-		hostMounts, _ := host["Mounts"].([]any)
-		for _, value := range hostMounts {
-			m := value.(map[string]any)
-			mounts = append(mounts, map[string]any{"Type": m["Type"], "Source": m["Source"], "Destination": m["Target"], "RW": m["RW"]})
-		}
 		pid := 42
-		if body["replaced-process"] == true {
+		if e.mode == "process-lifetime" || body["replaced-process"] == true {
 			pid = 43
 		}
-		_ = json.NewEncoder(w).Encode(map[string]any{"Id": actualID, "Image": image, "State": map[string]any{"Running": body["running"] == true, "StartedAt": "2026-01-01T01:02:03Z", "Pid": pid}, "Config": map[string]any{"Labels": body["Labels"], "Entrypoint": body["Entrypoint"], "Cmd": body["Cmd"]}, "HostConfig": host, "Mounts": mounts, "NetworkSettings": map[string]any{"Ports": map[string]any{"7860/tcp": []any{map[string]string{"HostPort": e.port}}}}})
+		var mounts []map[string]any
+		if host, ok := body["HostConfig"].(map[string]any); ok {
+			if configured, ok := host["Mounts"].([]any); ok {
+				for _, value := range configured {
+					mount := value.(map[string]any)
+					actualMount := map[string]any{"Type": mount["Type"], "Source": mount["Source"], "Destination": mount["Target"], "RW": mount["ReadOnly"] != true}
+					if configuredRW, ok := mount["RW"].(bool); ok {
+						actualMount["RW"] = configuredRW
+					}
+					if mount["Type"] == "volume" {
+						actualMount["Name"] = mount["Source"]
+					}
+					mounts = append(mounts, actualMount)
+				}
+			}
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"Id": actualID, "Image": image, "State": map[string]any{"Running": body["running"] == true, "StartedAt": "2026-01-01T01:02:03Z", "Pid": pid}, "Config": map[string]any{"Labels": body["Labels"], "Entrypoint": body["Entrypoint"], "Cmd": body["Cmd"]}, "HostConfig": body["HostConfig"], "Mounts": mounts, "NetworkSettings": map[string]any{"Ports": map[string]any{"7860/tcp": []any{map[string]string{"HostPort": e.port}}}}})
 	case strings.HasSuffix(path, "/start"):
 		id := strings.TrimSuffix(strings.TrimPrefix(path, "/containers/"), "/start")
 		body := e.containers[id]

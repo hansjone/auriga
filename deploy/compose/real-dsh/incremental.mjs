@@ -5,6 +5,7 @@ import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { productionInputs } from './inputs.mjs';
 import { installedRuntime, verifyManagedBroker } from './runtime.mjs';
+import { installedTooling } from './tooling.mjs';
 
 const hash = (bytes) => createHash('sha256').update(bytes).digest('hex');
 const json = (path) => JSON.parse(readFileSync(path, 'utf8'));
@@ -24,7 +25,9 @@ function verifyManifest(opt) {
   for (const entry of manifest.files) {
     if (
       typeof entry.path !== 'string' ||
-      !/^(?:dsh|auriga-dsh|fixture)\/(?:[^/\\]+\/)*[^/\\]+$/.test(entry.path) ||
+      !/^(?:dsh|auriga-dsh|auriga-tools|fixture)\/(?:[^/\\]+\/)*[^/\\]+$/.test(
+        entry.path,
+      ) ||
       entry.path.split('/').some((part) => part === '.' || part === '..') ||
       entry.path === 'fixture/manifest.json' ||
       !/^[a-f0-9]{64}$/.test(entry.sha256 ?? '') ||
@@ -49,7 +52,7 @@ function verifyManifest(opt) {
       expected.delete(relative);
     }
   }
-  for (const name of ['dsh', 'auriga-dsh', 'fixture']) {
+  for (const name of ['dsh', 'auriga-dsh', 'auriga-tools', 'fixture']) {
     const directory = join(opt, name);
     const stat = lstatSync(directory);
     if (!stat.isDirectory() || stat.isSymbolicLink())
@@ -103,8 +106,31 @@ export async function prepareIncremental({
     'inputs.mjs',
     'runtime.mjs',
     'start.mjs',
+    'tooling.mjs',
   ])
     same(join(opt, 'fixture', name), join(expected, 'recipe', name), name);
+  same(
+    join(opt, 'fixture/runtime-pins.json'),
+    join(expected, 'runtime-pins.json'),
+    'runtime tool pin',
+  );
+  for (const name of ['package.json', 'package-lock.json'])
+    same(
+      join(opt, 'auriga-tools/pnpm', name),
+      join(expected, 'recipe/tooling', name),
+      `tooling/${name}`,
+    );
+  try {
+    installedTooling(
+      join(opt, 'auriga-tools/pnpm'),
+      json(join(opt, 'fixture/runtime-pins.json')),
+    );
+  } catch (cause) {
+    throw new Error(
+      'Incremental base runtime tooling is invalid; use full build',
+      { cause },
+    );
+  }
   same(
     join(opt, 'fixture/plugin-package.json'),
     join(expected, 'plugin/package.json'),

@@ -84,3 +84,33 @@ test('supervisor cleans command-line personal dependencies even without managed 
     await rm(root, { recursive: true, force: true });
   }
 });
+
+test('shared supervisor starts the fixed host without the personal plugin CLI', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'auriga-shared-supervisor-'));
+  const policy = join(root, 'policy.json');
+  const marker = join(root, 'started');
+  const supervisor = fileURLToPath(new URL('./resource_supervisor.mjs', import.meta.url));
+  try {
+    for (const allowPersonalPlugins of [false, true]) {
+      await writeFile(policy, JSON.stringify({ schemaVersion: 1, sharedPool: true,
+        newSessionRequired: false, allowPersonalPlugins }));
+      const child = spawn(process.execPath, [supervisor, policy, process.execPath, '-e',
+        `require('node:fs').writeFileSync(${JSON.stringify(marker)},'shared')`],
+      { env: { ...process.env, DSH_HOME: root }, windowsHide: true, stdio: 'pipe' });
+      let stderr = '';
+      child.stderr.on('data', data => { stderr += data; });
+      const code = await new Promise((accept, reject) => {
+        child.once('error', reject); child.once('exit', accept);
+      });
+      assert.equal(code === 0, !allowPersonalPlugins, stderr);
+      if (!allowPersonalPlugins) {
+        assert.equal(await readFile(marker, 'utf8'), 'shared');
+        await rm(marker);
+      } else {
+        await assert.rejects(readFile(marker), { code: 'ENOENT' });
+      }
+    }
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});

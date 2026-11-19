@@ -12,6 +12,7 @@ let child, stopping = false, maxObserved = 0, lastMono = performance.now(), dead
 function policy() {
   const value = JSON.parse(readFileSync(policyFile, 'utf8'));
   if (value.schemaVersion !== 1 || typeof value.newSessionRequired !== 'boolean') throw new Error('Invalid guardian policy');
+  if (value.sharedPool === true && value.allowPersonalPlugins !== false) throw new Error('Invalid shared plugin policy');
   const wall = Date.now(), mono = performance.now();
   if (wall < maxObserved - 120000 || mono < lastMono) throw new Error('Guardian clock rollback');
   maxObserved = Math.max(wall, maxObserved + mono - lastMono); lastMono = mono;
@@ -32,7 +33,7 @@ policy();
 for (const signal of ['SIGTERM', 'SIGINT']) process.on(signal, stop);
 setInterval(() => { try { policy(); } catch { stop(); } }, 250).unref();
 const initial = JSON.parse(readFileSync(policyFile, 'utf8'));
-if (initial.managedPluginNames?.length || initial.allowPersonalPlugins === false) {
+if (initial.sharedPool !== true && (initial.managedPluginNames?.length || initial.allowPersonalPlugins === false)) {
   // The image owns this installation root. Discover the public executable from package metadata.
   const manifest = '/opt/dsh/node_modules/@deepseek-ai/dsh/package.json';
   const bin = JSON.parse(readFileSync(manifest, 'utf8')).bin?.dsh;

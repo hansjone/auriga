@@ -64,7 +64,7 @@ final class UacWorker
     store.tx(
         () -> {
           retireUnused();
-          return store.cleanUac(uac.clock.instant());
+          return store.cleanUac(uac.clock.instant()) + store.cleanSharedTasks(uac.clock.instant());
         });
     new UacKeyRotation(store, uac.cipher).rotateBatch(50);
     store.tx(

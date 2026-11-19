@@ -367,6 +367,14 @@ func (d *Docker) Ensure(ctx context.Context, s *Spec, r *Rendered) error {
 		body["Cmd"] = append([]string{renderer.ContainerResourcePolicy}, command...)
 		host["RestartPolicy"] = map[string]any{"Name": "no"}
 	}
+	if s.Pool != nil {
+		if s.SharedBind != "" {
+			return fmt.Errorf("shared pool has a personal resource overlay")
+		}
+		if err := d.configurePool(ctx, s, body); err != nil {
+			return err
+		}
+	}
 	containerID, err := d.Client.ContainerCreate(ctx, name, body, scope.candidate.Partition.OS+"/"+scope.candidate.Partition.Arch)
 	if err != nil {
 		return err

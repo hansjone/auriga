@@ -286,6 +286,12 @@ func (g *Gateway) uacPageHTML(r *http.Request) ([]byte, error) {
 			return nil, err
 		}
 	}
+	if g.Cfg.SharedDsh != nil {
+		html, err = injectSharedPlacementMetadata(html, g.Cfg.Access.InstanceParentDomain())
+		if err != nil {
+			return nil, err
+		}
+	}
 	return injectLoginPreference(html, g.Cfg.LoginPreference)
 }
 

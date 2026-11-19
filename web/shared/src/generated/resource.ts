@@ -996,6 +996,30 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  '/api/resource/v1/catalog/placements/{placementId}/installations': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Read the current member placement market and verified node state
+     * @description Only a USER portal session. W rechecks the current member/placement/session binding before and after reads. Applied states require the exact current resource-view receipt and actual entry-profile probe. Device and historical owner tickets are rejected.
+     */
+    get: operations['UnifiedListPlacementInstallations'];
+    put?: never;
+    /**
+     * Select a plugin or skill for an authorized dedicated placement
+     * @description The server derives tenant/member/pool from the current portal sid and W placement. A shared placement returns resource.shared_requires_dedicated; requesting a resource never grants dedicated mode. First selection in an epoch uses If-Match: "0"; later requests use selectionRevision. The idempotent 202 response is applying until current signed resources are loaded and acknowledged by the current Node.
+     */
+    post: operations['UnifiedSelectPlacementInstallations'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -2415,8 +2439,87 @@ export interface components {
       state: 'failed';
       errorCode: string;
     };
+    PlacementInstallation: {
+      /** Format: uuid */
+      placementId: string;
+      identity: components['schemas']['UnifiedResourceIdentity'];
+      /** Format: int64 */
+      selectionRevision: number;
+      /** Format: int64 */
+      installationRevision: number;
+      /** @enum {string} */
+      desiredState: 'ENABLED' | 'DISABLED' | 'REMOVED';
+      /** @enum {string} */
+      installationMode: 'optional' | 'default' | 'required';
+      /** @enum {string} */
+      state:
+        | 'available'
+        | 'applying'
+        | 'applied'
+        | 'disabled'
+        | 'removed'
+        | 'overridden';
+      policyOverride: boolean;
+      /** Format: uuid */
+      viewId?: string;
+    };
+    PlacementInstallationPage: {
+      /** Format: uuid */
+      placementId: string;
+      /** @enum {string} */
+      mode: 'shared' | 'dedicated';
+      /** Format: int64 */
+      epoch: number;
+      /** Format: int64 */
+      revision: number;
+      /** Format: uuid */
+      viewId: string;
+      nodeObserved: boolean;
+      items: components['schemas']['PlacementInstallation'][];
+      nextCursor?: string;
+    };
+    PlacementInstallationInput: {
+      selection: components['schemas']['UnifiedSelection'];
+    };
   };
-  responses: never;
+  responses: {
+    /** @description 没有登录或凭据无效（common.unauthenticated）。 */
+    Unauthenticated: {
+      headers: {
+        [name: string]: unknown;
+      };
+      content: {
+        'application/problem+json': components['schemas']['Problem'];
+      };
+    };
+    /** @description 没有权限（common.forbidden 或更具体的码）。 */
+    Forbidden: {
+      headers: {
+        [name: string]: unknown;
+      };
+      content: {
+        'application/problem+json': components['schemas']['Problem'];
+      };
+    };
+    /** @description 资源不存在（common.not_found）。 */
+    NotFound: {
+      headers: {
+        [name: string]: unknown;
+      };
+      content: {
+        'application/problem+json': components['schemas']['Problem'];
+      };
+    };
+    /** @description 状态冲突（common.conflict 等）。 */
+    Conflict: {
+      headers: {
+        [name: string]: unknown;
+      };
+      content: {
+        'application/problem+json': components['schemas']['Problem'];
+      };
+    };
+  };
   parameters: {
     Limit: number;
     /** @description 上一页响应里的 nextCursor。 */
@@ -10075,6 +10178,124 @@ export interface operations {
         };
         content: {
           'application/json': components['schemas']['DesktopReleasePreflight'];
+        };
+      };
+    };
+  };
+  UnifiedListPlacementInstallations: {
+    parameters: {
+      query?: {
+        kind?: 'plugin' | 'skill';
+        limit?: number;
+        cursor?: string;
+      };
+      header?: never;
+      path: {
+        placementId: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Live placement installation page */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['PlacementInstallationPage'];
+        };
+      };
+      /** @description common.validation_failed */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      401: components['responses']['Unauthenticated'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+      409: components['responses']['Conflict'];
+      /** @description common.precondition_failed */
+      412: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+    };
+  };
+  UnifiedSelectPlacementInstallations: {
+    parameters: {
+      query?: never;
+      header: {
+        'Idempotency-Key': string;
+        'If-Match': string;
+      };
+      path: {
+        placementId: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['PlacementInstallationInput'];
+      };
+    };
+    responses: {
+      /** @description Selection recorded; not an applied receipt */
+      202: {
+        headers: {
+          ETag?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': components['schemas']['PlacementInstallation'];
+        };
+      };
+      /** @description common.validation_failed */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      401: components['responses']['Unauthenticated'];
+      403: components['responses']['Forbidden'];
+      404: components['responses']['NotFound'];
+      409: components['responses']['Conflict'];
+      /** @description common.precondition_failed */
+      412: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
         };
       };
     };

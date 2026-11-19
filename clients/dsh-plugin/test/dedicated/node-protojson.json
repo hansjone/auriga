@@ -1,0 +1,23 @@
+{
+  "schemaVersion": "1",
+  "binding": {
+    "tenantId": "019a0000-0000-7000-8000-000000000001",
+    "memberId": "019a0000-0000-7000-8000-000000000002",
+    "placementId": "019a0000-0000-7000-8000-000000000003",
+    "physicalInstanceId": "019a0000-0000-7000-8000-000000000004",
+    "mode": "DSH_INSTANCE_MODE_DEDICATED",
+    "epoch": "7",
+    "revision": "11"
+  },
+  "viewId": "019a0000-0000-7000-8000-000000000005",
+  "authorizationSetDigest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "source": "platform",
+  "resources": [
+    {
+      "resourceId": "019a0000-0000-7000-8000-000000000006",
+      "digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "leaseId": "019a0000-0000-7000-8000-000000000007",
+      "expiresAt": "2000000000"
+    }
+  ]
+}

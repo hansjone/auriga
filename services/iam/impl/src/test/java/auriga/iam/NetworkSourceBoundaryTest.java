@@ -116,6 +116,8 @@ class NetworkSourceBoundaryTest {
     var r = request();
     var c = r.getConnection();
     for (var field : c.getDescriptorForType().getFields()) {
+      // Ordinary connections leave this shared-only context empty; it is not a required field.
+      if (field.getName().equals("shared_context_id")) continue;
       reject(
           r.toBuilder().setConnection(c.toBuilder().clearField(field)).build(),
           field.getName().equals("tenant_id") ? "common.forbidden" : "common.validation_failed");
@@ -133,6 +135,26 @@ class NetworkSourceBoundaryTest {
     reject(
         r.toBuilder().setConnection(c.toBuilder().setClientId("00")).build(),
         "common.validation_failed");
+  }
+
+  @Test
+  void ordinaryConnectionsAcceptEmptySharedContextButForbidEveryNonEmptyValue() {
+    var r = request();
+    var c = r.getConnection();
+    assertEquals("", c.getSharedContextId());
+    TenantContext.run(
+        tenant,
+        () -> {
+          assertDoesNotThrow(() -> IamNetworkSources.validate(r));
+          assertDoesNotThrow(
+              () ->
+                  IamNetworkSources.validate(
+                      r.toBuilder().setConnection(c.toBuilder().setSharedContextId("")).build()));
+        });
+    for (String context : List.of(UUID.randomUUID().toString(), "not-a-shared-context"))
+      reject(
+          r.toBuilder().setConnection(c.toBuilder().setSharedContextId(context)).build(),
+          "common.forbidden");
   }
 
   @Test

@@ -20,6 +20,7 @@ type spaFileServer struct {
 	fs              http.Handler
 	accessMode      string
 	gzipCache       *staticGzipCache
+	sharedPlacement *sharedPortalPlacement
 }
 
 func newAccessSPAFileServer(root, mode string, caches ...*staticGzipCache) http.Handler {
@@ -86,6 +87,9 @@ func (s *spaFileServer) serveAccessIndex(w http.ResponseWriter, r *http.Request,
 	raw, err := os.ReadFile(filename)
 	if err == nil {
 		raw, err = injectAccessMode(raw, s.accessMode)
+	}
+	if err == nil && s.sharedPlacement != nil {
+		raw, err = injectSharedPlacementMetadata(raw, s.sharedPlacement.parentDomain)
 	}
 	if err == nil {
 		raw, err = injectLoginPreference(raw, s.loginPreference)

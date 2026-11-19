@@ -433,6 +433,34 @@ public final class IamNetworkAuthority implements NetworkAuthority {
     return permitted(request, limits());
   }
 
+  /** Shared HTTP identities are checked by SharedMessages, never disguised as device nodes. */
+  boolean sharedMessagePolicy(
+      auriga.contracts.iam.v1.CheckNetworkRequest r, Map<Limit, Long> limits) {
+    var op = r.getOperation();
+    if (!validNumber(r.getRealm(), false)
+        || !validNumber(r.getSourceNode(), false)
+        || !validNumber(r.getLocal(), true)
+        || r.getSender()
+            != auriga.contracts.iam.v1.NetworkAuthoritySender.NETWORK_AUTHORITY_SENDER_AGENT
+        || !Set.of(
+                auriga.contracts.iam.v1.NetworkAuthorityOperation
+                    .NETWORK_AUTHORITY_OPERATION_CONNECT,
+                auriga.contracts.iam.v1.NetworkAuthorityOperation.NETWORK_AUTHORITY_OPERATION_SEND,
+                auriga.contracts.iam.v1.NetworkAuthorityOperation
+                    .NETWORK_AUTHORITY_OPERATION_RECEIVE)
+            .contains(op)
+        || r.getBodyBytes() < 0
+        || r.getBodyBytes() > limits.get(Limit.BODY_BYTES)
+        || !config().path("enabled").asBoolean(true)) return false;
+    if (op == auriga.contracts.iam.v1.NetworkAuthorityOperation.NETWORK_AUTHORITY_OPERATION_CONNECT)
+      return r.getTargetNodes() <= 1 && r.getTargetLocals() <= 1;
+    if (!validNumber(r.getTargetNode(), false)
+        || r.getTargetNodes() != 1
+        || r.getTargetLocals() != 1) return false;
+    var policy = store.get("network_policy", r.getSourceNode() + ":" + r.getTargetNode(), false);
+    return policy == null || policy.path("allowed").asBoolean();
+  }
+
   record TargetBinding(
       String realm,
       String node,

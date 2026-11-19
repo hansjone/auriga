@@ -28,6 +28,8 @@ type bifrostConfig struct {
 	MemberPolicy       bifrost.MemberPolicy `json:"memberPolicy"`
 	IAM                team.RPCConfig       `json:"iam"`
 	Org                team.RPCConfig       `json:"org"`
+	SharedModel        *sharedModelConfig   `json:"sharedModel,omitempty"`
+	SharedMessages     *sharedMessageConfig `json:"sharedMessages,omitempty"`
 }
 
 func serveBifrost(path string) error {
@@ -77,15 +79,36 @@ func serveBifrost(path string) error {
 		return err
 	}
 	defer handler.Close()
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	shared, err := prepareSharedModel(ctx, c.SharedModel, iam.NewSharedTaskServiceClient(ic), c.Origin, c.MemberPasswordFile, c.MemberPolicy)
+	if err != nil {
+		return err
+	}
+	if shared != nil {
+		defer shared.Close()
+	}
+	messages, err := prepareSharedMessages(ctx, c.SharedMessages, iam.NewSharedTaskServiceClient(ic))
+	if err != nil {
+		return err
+	}
+	if messages != nil {
+		defer messages.Close()
+	}
 	listener, err := net.Listen("tcp", c.Listen)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = listener.Close() }()
-	server := &http.Server{Handler: handler, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 30 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 32768}
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
-	done := make(chan error, 1)
+	server := &http.Server{Handler: handler, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 30 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 32768, BaseContext: func(net.Listener) context.Context { return ctx }}
+	servers := []*http.Server{server}
+	if shared != nil {
+		servers = append(servers, shared.server)
+	}
+	if messages != nil {
+		servers = append(servers, messages.server)
+	}
+	done := make(chan error, len(servers))
 	go func() {
 		if c.TLSCertFile != "" {
 			done <- server.ServeTLS(listener, c.TLSCertFile, c.TLSKeyFile)
@@ -93,26 +116,39 @@ func serveBifrost(path string) error {
 			done <- server.Serve(listener)
 		}
 	}()
+	if shared != nil {
+		go func() { done <- shared.server.ServeTLS(shared.listener, "", "") }()
+	}
+	if messages != nil {
+		go func() { done <- messages.server.ServeTLS(messages.listener, "", "") }()
+	}
+	remaining := len(servers)
 	select {
 	case err = <-done:
-		if errors.Is(err, http.ErrServerClosed) {
-			return nil
-		}
-		return err
+		remaining--
 	case <-ctx.Done():
-		shutdown, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		err = server.Shutdown(shutdown)
-		if err != nil {
-			_ = server.Close()
+	}
+	// Cancel active streams first; SharedProvider keeps a separate settlement
+	// context. Do not close the database until the HTTP handlers have ended.
+	stop()
+	shutdown, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	for _, active := range servers {
+		if closeErr := active.Shutdown(shutdown); closeErr != nil {
+			_ = active.Close()
+			if err == nil || errors.Is(err, http.ErrServerClosed) {
+				err = closeErr
+			}
 		}
+	}
+	for ; remaining > 0; remaining-- {
 		serveErr := <-done
-		if err != nil {
-			return err
+		if serveErr != nil && !errors.Is(serveErr, http.ErrServerClosed) && (err == nil || errors.Is(err, http.ErrServerClosed)) {
+			err = serveErr
 		}
-		if serveErr != nil && !errors.Is(serveErr, http.ErrServerClosed) {
-			return serveErr
-		}
+	}
+	if errors.Is(err, http.ErrServerClosed) {
 		return nil
 	}
+	return err
 }

@@ -34,6 +34,7 @@ type Spec struct {
 	ListenPort uint32
 	Env        map[string]string
 	Labels     map[string]string
+	Pool       *PoolContainer
 }
 
 // Rendered is config render output.

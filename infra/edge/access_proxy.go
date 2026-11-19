@@ -16,6 +16,18 @@ var loginTransactionPath = regexp.MustCompile(`^/api/iam/v1/login/transactions/[
 var loginCallbackPath = regexp.MustCompile(`^/api/iam/v1/login/callback/[0-9a-fA-F-]+$`)
 var invitationPreviewPath = regexp.MustCompile(`^/api/org/v1/invitations/preview/[^/]+$`)
 var uacAdminProviderPath = regexp.MustCompile(`^/api/iam/v1/admin/providers/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/uac(?:/diagnostics)?$`)
+var placementSwitchCreatePath = regexp.MustCompile(`^/api/workspace/v1/admin/members/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/placement-switches$`)
+var placementSwitchReadPath = regexp.MustCompile(`^/api/workspace/v1/admin/placement-switches/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
+
+// Only these W endpoints revalidate the actual browser cookie and trusted
+// entry metadata. Other component proxies retain their ordinary JWT boundary.
+func placementBrowserOperation(r *http.Request) bool {
+	if r.URL.EscapedPath() != r.URL.Path || r.URL.RawQuery != "" || r.URL.ForceQuery {
+		return false
+	}
+	return r.Method == http.MethodGet && (r.URL.Path == "/api/workspace/v1/me/placement" || placementSwitchReadPath.MatchString(r.URL.Path)) ||
+		r.Method == http.MethodPost && (r.URL.Path == "/api/workspace/v1/me/placement/open" || placementSwitchCreatePath.MatchString(r.URL.Path))
+}
 
 func uacAdminBrowserOperation(r *http.Request) bool {
 	if r.URL.EscapedPath() != r.URL.Path {
@@ -95,6 +107,7 @@ func (g *Gateway) proxyAccessAPI(w http.ResponseWriter, r *http.Request, target 
 		return
 	}
 	iam := target == g.iamURL
+	placement := target == g.workspaceURL && placementBrowserOperation(r)
 	if r.URL.Path == "/api/iam/v1/login/uac/sso" && audience != "portal" {
 		fail(403, "common.forbidden")
 		return
@@ -300,7 +313,7 @@ func (g *Gateway) proxyAccessAPI(w http.ResponseWriter, r *http.Request, target 
 			}
 		}
 		pr.Out.Header.Del("Cookie")
-		if iam {
+		if iam || placement {
 			pr.Out.Host = r.Host
 			if role, _ := r.Context().Value(accessRoleKey{}).(string); role == "managed" {
 				// IAM authenticates the canonical portal hop. The approved managed
@@ -329,6 +342,12 @@ func (g *Gateway) proxyAccessAPI(w http.ResponseWriter, r *http.Request, target 
 
 func (g *Gateway) iamCookies(r *http.Request, e accessEntry, bootstrap, authenticatedIAMBrowser bool) (string, error) {
 	var names []string
+	if placementBrowserOperation(r) {
+		names = append(names, sessionCookieBase(e.role))
+		if isWriteMethod(r.Method) && (g.Cfg.Access.Mode() != "ip" || e.role != "admin") {
+			names = append(names, csrfCookieBase())
+		}
+	}
 	// These endpoints revalidate the admin browser session in IAM, and recheck
 	// CSRF for writes. Forward only the cookies needed by those exact routes.
 	if authenticatedIAMBrowser && e.role == "admin" && uacAdminBrowserOperation(r) {

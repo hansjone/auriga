@@ -7,10 +7,12 @@ import PortalEntry from './views/PortalEntry.vue';
 import AccountSecurityLayout from './views/account/AccountSecurityLayout.vue';
 import SecurityView from './views/account/SecurityView.vue';
 import DeviceView from './views/DeviceView.vue';
+import ResourceMarketView from './views/ResourceMarketView.vue';
 
 export const router = createRouter({
   history: createWebHistory(),
   routes: [
+    { path: '/resources', component: ResourceMarketView },
     { path: '/login', component: LoginView, meta: { public: true } },
     {
       path: '/device/:userCode?',
@@ -47,8 +49,10 @@ router.afterEach((to) => {
       ? '设备确认 / Device confirmation'
       : to.path === '/login'
         ? '登录 / Sign in'
-        : to.path === '/account/security'
-          ? '账号安全 / Account security'
-          : '门户 / Portal';
+        : to.path === '/resources'
+          ? '我的 DSH 资源 / My DSH resources'
+          : to.path === '/account/security'
+            ? '账号安全 / Account security'
+            : '门户 / Portal';
   document.title = `${BRAND_NAME} · ${page}`;
 });

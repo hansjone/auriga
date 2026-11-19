@@ -1,6 +1,6 @@
 # N：共享 DSH 模型与消息适配
 
-契约沿 main `f6001a02` 的 `contracts/shared-dsh` v1，续做已合并 main `f432efdc`，包含共享入口 E 与 IAM 授权改动。本批实现短时能力、持久调用账本、Bifrost 成员 relay 及 msgnet-v2 适配，W/P 的在线会话权威与 typed-local 关联以替身独立验收，真实权威和正常页面在联合阶段接入。
+契约沿 `contracts/shared-dsh` v1。模型入口已接到 `--bifrost-config` 主程序，使用 IAM SharedTaskService 在线任务权威、用途能力验签、持久调用账本和既有 Bifrost 成员 relay。消息的 typed-local 目录与真实收发、正常门户对话仍待联合接线和部署验收。纯 fixture 与源码装配不能代替正常页面可用证明。
 
 ## 能力与模型
 
@@ -17,6 +17,64 @@
 两个表均强制租户RLS。并发Begin仅原子提交成功的首次调用获得派发权，提交不确定时拒绝派发。unknown以及重启后dispatching记录均阻止再次执行，结合原预算记录对账。Finish对同一终态幂等，迟到或冲突结果拒绝覆盖已知计量。金额预算及计费由现有relay预算账本承担。
 
 `bifrost.SharedRelay` 每次按binding的tenant/member调用既有MemberKey。模型请求经原参数允许表过滤，服务端设置归属元数据，流式请求要求usage。普通JSON与SSE均提取确认用量，断流或未知计数保存不确定结果。Idempotency-Key与调用账本共用稳定的tenant/member/callId身份，HTTP POST禁用请求体重放。上游模型密钥保存在既有relay。
+
+## 模型生产传输
+
+在现有 `auriga-ai-gateway --bifrost-config <path>` 配置中增加可选 `sharedModel`，该对象存在时启动同一进程的独立 mTLS listener。原成员入口仍沿原地址，公开成员请求不能进入内部模型入口。示例中的 UUID 和密钥路径须替换为部署值：
+
+```json
+{
+  "listen": "127.0.0.1:8086",
+  "origin": "http://bifrost:8080",
+  "memberPasswordFile": "/run/secrets/relay-member-password",
+  "iam": {
+    "target": "platform:9090",
+    "serviceTokenFile": "/run/secrets/ai-gateway-service-token",
+    "certFile": "/run/secrets/ai-gateway-cert.pem",
+    "keyFile": "/run/secrets/ai-gateway-key.pem",
+    "caFile": "/run/secrets/platform-ca.pem",
+    "serverName": "platform"
+  },
+  "org": {
+    "target": "platform:9090",
+    "serviceTokenFile": "/run/secrets/ai-gateway-service-token",
+    "certFile": "/run/secrets/ai-gateway-cert.pem",
+    "keyFile": "/run/secrets/ai-gateway-key.pem",
+    "caFile": "/run/secrets/platform-ca.pem",
+    "serverName": "platform"
+  },
+  "sharedModel": {
+    "listen": "0.0.0.0:8087",
+    "tenantId": "<deployment-tenant-uuid>",
+    "allowedNodeIds": ["<node-uuid>"],
+    "tlsCertFile": "/run/secrets/ai-gateway-server-cert.pem",
+    "tlsKeyFile": "/run/secrets/ai-gateway-server-key.pem",
+    "clientCAFile": "/run/secrets/node-client-ca.pem",
+    "modelPublicKeys": {"<iam-model-kid>": "/run/secrets/shared-model-public.pem"}
+  }
+}
+```
+
+`tenantId` 为固定部署租户，不能是全零平台租户；监听器不从请求头或未验签 capability 选择租户。Node 使用现有客户端证书和私钥，其唯一 Node URI SAN 必须精确为 `auriga://node/<allowedNodeId>`，证书链由配置的 Node client CA 验证。即使回环也必须 mTLS，Edge/普通客户端证书、其他 Node 和未验证证书均拒绝。监听器与每次请求均检查证书和精确 Node 身份。部署仅向获准 Node 开放该地址。
+
+`modelPublicKeys` 仅装 IAM 的 model 用途 Ed25519 SPKI `PUBLIC KEY` PEM，每个路径须绝对路径，每份最多8192字节，kid 与 IAM 模型签发配置相同。支持同时安装多个轮换公钥；不装 enterprise/message 私钥或公钥。IAM 签名和任务配置见 [共享任务权威](../../services/iam/impl/SHARED-TASKS.zh.md)。新能力只由受信宿主通过 IAM 签发，这个 listener 不提供 Issue。
+
+启用时，N 从 `AURIGA_AI_PG_DSN` 读取现有 AI 运行时连接、从 `AURIGA_AI_MIGRATION_PG_DSN` 读取迁移连接；沿 `store.Open` 完成原迁移和运行时角色/RLS检查，构造真实 `NewSharedRuntime`。迁移和运行时角色必须分开，不能使用超级用户。配置、CA、公钥或数据库不完整时启动失败，不退回内存账本。IAM/Org 使用原 `team.DialRPC` 的 mTLS 与轮换服务令牌文件，服务令牌不交共享 DSH 进程。
+
+Node 请求为 `POST /internal/shared/model/invoke`，无 query，`Content-Type: application/json`，body 是原 OpenAI chat JSON，最大4MiB。下列头各只能出现一次：
+
+- `Auriga-Shared-Capability`：原样 K 签名串，audience=`auriga.shared.model`、scope=`model.invoke`。
+- `Auriga-Shared-Session-Id`：可信宿主登记的共享会话 UUID。
+- `Auriga-Shared-Task-Id`：原活主任务 UUID。
+- `Idempotency-Key`：可信宿主生成并固定的模型 call UUID。
+
+这些值必须来自 Node 已核对的宿主登记对象；浏览器和模型参数不能声明归属。N 验签后通过 IAM Resolve 精确核完整 binding、当前任务/权限/版本和 JTI，再由现有 provider 原子预留持久调用围栏。不能把成员平台 JWT 或内部服务 JWT 放进 capability 头。raw chat 中的 user/metadata 继续由原 relay 用真实归属覆盖。
+
+`stream=true` 返回标准 `text/event-stream`，每个原 JSON chunk 编码成 `data: <json>\n\n`，最终在线复验及账本结算成功后才发 `data: [DONE]\n\n`。失败流发 `data: {"error":{"code":"<existing-code>","message":"<existing-code>"}}\n\n` 并结束，不发 DONE。Node 必须把 error 或缺 DONE 的 EOF 视为失败/结果不确定。非流回复会缓冲到最终复验和结算成功才返回 JSON，失败不泄露已缓冲正文。
+
+尚未发出流 chunk 时，错误使用 HTTP 400/403/409/413/503 和同型 error JSON；只输出既有 shared/common 错误码，不包含上游正文、密钥或原错误详情。同 call 同 body 重复返回409，改变原绑定或请求摘要拒绝。超时和不确定派发不能自动重放，也不缓存旧回复冒充本次成功。
+
+HTTP 断连、Node取消和进程停止沿原 context 取消供应商请求。模型最大运行150秒、独立结算最长10秒；server 另外允许30秒读请求，写期限195秒，Node总超时应覆盖这个窗口并禁止自动重试。停止时先取消活请求，再等待最多15秒关闭 HTTP handlers，随后释放 relay 与数据库。金额预算和实际供应商清理仍由原 Bifrost 链承担。
 
 ## 消息
 
@@ -36,10 +94,10 @@ Receive 核对接收能力与精确目标绑定，并再核发送方和现有消
 
 ## 联合接线清单（W→IAM→E→R→N→P→U→V）
 
-1. W/P：Authority.Resolve 必须按 tenant+sessionId 查询已登记完整归属，核对 ready placement、成员及平台登录、task 存活、撤销 JTI、authGeneration 和 audience credentialVersion。K 当前 ResolveSharedDsh RPC 只查 placement，无 session 查询或 task/JTI 查询接口；需要主控交 K 冻结新增端口，或由 P 已登记会话权威与 W/IAM 组合实现。不得在 N 自建归属真源。
+1. W/IAM：`sharedauth.NewRPCGate` 已接 IAM SharedTaskService.ResolveSharedTask；IAM 组合生产 Workspace SharedDshSessions 和 IAM本人portal session/任务/JTI/权限权威，完整核 binding、ready、authGeneration 和 credentialVersion。部署必须启用该真实组合，不能提供替身或在 N 自建归属表。
 2. IAM/模型权限：沿既有 IAM/org 生命周期核成员和模型调用权限；企业 audience 不由本层签发。模型/消息 credentialVersion 变化立即拒绝旧能力。Authority 无法核实则拒绝。
-3. E/R：只允许受信内部认证调用 Issue 和 Invoke，可信 tenant 来自 transport，不能从未验签 claims 选租户。撤销连接、停池收据和目录处置仍归 E/R/W。
-4. N 的生产账本和 relay 已组装，主控部署时执行新增迁移并注入在线 gate、数据库、既有 relay 地址及认证文件。补真实 PG 的并发、重启、RLS 和计量验收。
+3. Node：宿主到 Node 的 Unix relay 尚需与上述 mTLS Invoke 完成联合接线，保留稳定 task/call映射、取消、错误和流完成语义。撤销连接、停池收据和目录处置仍归 E/R/W。
+4. N 主程序已安装模型生产账本、RPC gate和relay；主控部署时设置用途公钥、Node mTLS配置、数据库与既有relay认证文件。补真实 PG 的并发、重启、RLS 和计量验收。
 5. N 的 msgnet-v2 发送已通过真实客户端到 gRPC 测试服务验证，复用来源连接和完整协议结果。联合时将 directory 接 P 的服务器会话登记与 W/IAM 的实时授权，补真实 collab/桌面、P 签名帧分发与接收收据验收。
 6. P：自有 provider/helper 必须给出服务器登记 sessionId 和 taskId，不接受浏览器自报 owner/member。服务端内部注册这些对象后再签能力；后台任务同样不得缺省回落 owner。
 7. U/V：主控串行部署后补正常门户两成员并发、真实账本计量、真实 NATS/桌面双向消息、切换积压及撤销验收。当前产物不包含页面和部署。
