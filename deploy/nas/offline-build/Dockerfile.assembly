@@ -9,7 +9,8 @@ RUN --mount=type=bind,source=system,target=/inputs,readonly \
     cd /inputs && sha256sum -c SHA256SUMS \
     && set -- /inputs/packages/*.deb \
     && if [ -f "$1" ]; then dpkg --unpack "$@" && dpkg --configure --pending; fi \
-    && test "$(dpkg-query -W -f='${db:Status-Status}' ca-certificates)" = installed \
+    && test "$(dpkg-query -W -f='${db:Status-Status}\n' ca-certificates e2fsprogs util-linux)" = "$(printf 'installed\ninstalled\ninstalled')" \
+    && test -x /usr/sbin/mkfs.ext4 && test -x /usr/sbin/losetup \
     && rm -rf /var/lib/apt/lists/* \
     && useradd --system --uid 10001 --create-home auriga
 COPY --chmod=0755 go/auriga-agent /usr/local/bin/auriga-agent
