@@ -7,7 +7,9 @@ import auriga.common.persistence.*;
 import auriga.contracts.node.v1.*;
 import auriga.testsupport.PostgresExtension;
 import auriga.workspace.api.SharedDshAuthority;
+import auriga.workspace.app.SharedDshNodeRuntime;
 import auriga.workspace.app.SharedDshPlacements;
+import auriga.workspace.app.SharedDshResourceMarketQueries;
 import java.time.*;
 import java.util.*;
 import org.flywaydb.core.Flyway;
@@ -24,6 +26,7 @@ class SharedDshPostgresTest {
   boolean authorityAvailable = true, probe = true, expiredResources = false;
   final Set<UUID> disabled = new HashSet<>();
   final Map<UUID, String> digests = new HashMap<>();
+  final Map<String, String> resourceViewIds = new HashMap<>();
   final Clock clock =
       new Clock() {
         public ZoneId getZone() {
@@ -59,7 +62,7 @@ class SharedDshPostgresTest {
           return SharedDshResourceView.newBuilder()
               .setSchemaVersion(1)
               .setBinding(b)
-              .setViewId(b.getPlacementId())
+              .setViewId(resourceViewIds.getOrDefault(b.getPlacementId(), b.getPlacementId()))
               .setAuthorizationSetDigest(
                   authorizationSetDigest(
                       UUID.fromString(b.getTenantId()), UUID.fromString(b.getMemberId())))
@@ -135,6 +138,165 @@ class SharedDshPostgresTest {
         .setAction(i.getAction())
         .setOutcome("confirmed")
         .setObservedAt(seconds);
+  }
+
+  record ResourceMarketFixture(
+      UUID member, UUID node, SharedDshResourceView view, SharedDshResourceReport report) {}
+
+  ResourceMarketFixture preparedResourceMarket() {
+    UUID member = UUID.randomUUID(), node = UUID.randomUUID();
+    run(
+        () ->
+            store.tx(
+                () ->
+                    store.jdbc.update(
+                        "INSERT INTO node(id,tenant_id,name,hostname,os,arch,agent_version,sealing_key,certificate_serial,certificate_expires_at,joined_at) VALUES(?,?,'test','example.com','linux','amd64','test',?,'market-node',now()+interval '1 day',now())",
+                        node,
+                        tenant,
+                        new byte[32])));
+    var pending = allocate(member);
+    var runtime = new SharedDshNodeRuntime(store, service);
+    var sent =
+        run(
+            () ->
+                store.tx(
+                    () -> {
+                      store.lock();
+                      return runtime.pending(node, null).deliveries().stream()
+                          .filter(d -> d.intent().getBinding().equals(pending.binding()))
+                          .findFirst()
+                          .orElseThrow();
+                    }));
+    assertTrue(
+        run(
+            () ->
+                store.tx(
+                    () -> {
+                      store.lock();
+                      return runtime.receipt(
+                          node, sent, ack(sent.intent()).setWorkspaceEmpty(true).build());
+                    })));
+    var view = run(() -> service.resourceView(pending.binding()));
+    var report = resourceMarketReport(view);
+    assertTrue(run(() -> resourceMarketQueries().report(view)).isEmpty());
+    run(
+        () ->
+            store.tx(
+                () -> {
+                  store.lock();
+                  runtime.resourceReport(node, report);
+                  return null;
+                }));
+    return new ResourceMarketFixture(member, node, view, report);
+  }
+
+  SharedDshResourceMarketQueries resourceMarketQueries() {
+    return new SharedDshResourceMarketQueries(store, service, b -> probe, clock);
+  }
+
+  SharedDshResourceReport resourceMarketReport(SharedDshResourceView view) {
+    return SharedDshResourceReport.newBuilder()
+        .setSchemaVersion(1)
+        .setBinding(view.getBinding())
+        .setViewId(view.getViewId())
+        .setStatus("ready")
+        .setReason("verified")
+        .setObservedAt(seconds)
+        .build();
+  }
+
+  @Test
+  void resourceMarketReadsOnlyTheExactCurrentViewForItsPreparedNodeAndMember() {
+    var f = preparedResourceMarket();
+    var queries = resourceMarketQueries();
+    UUID placement = UUID.fromString(f.view().getBinding().getPlacementId());
+    assertEquals(
+        f.view().getBinding(), run(() -> queries.resolve(f.member(), placement, session)));
+    assertEquals(Optional.of(f.report()), run(() -> queries.report(f.view())));
+    resourceViewIds.put(placement.toString(), UUID.randomUUID().toString());
+    var view = run(() -> service.resourceView(f.view().getBinding()));
+    assertNotEquals(f.view().getViewId(), view.getViewId());
+    assertTrue(run(() -> queries.report(f.view())).isEmpty());
+    assertTrue(run(() -> queries.report(view)).isEmpty());
+    var report = resourceMarketReport(view);
+    run(() -> service.reportResource(report));
+    assertEquals(Optional.of(report), run(() -> queries.report(view)));
+    assertTrue(run(() -> queries.report(f.view())).isEmpty());
+    var differentPayload =
+        view.toBuilder().setAuthorizationSetDigest("sha256:" + "b".repeat(64)).build();
+    assertTrue(run(() -> queries.report(differentPayload)).isEmpty());
+    UUID other = UUID.randomUUID();
+    ready(other);
+    assertThrows(
+        auriga.common.error.AurigaException.class,
+        () -> run(() -> queries.resolve(other, placement, session)));
+    var otherMember =
+        view.toBuilder()
+            .setBinding(view.getBinding().toBuilder().setMemberId(other.toString()))
+            .build();
+    assertTrue(run(() -> queries.report(otherMember)).isEmpty());
+    probe = false;
+    assertTrue(run(() -> queries.report(view)).isEmpty());
+    probe = true;
+    assertEquals(Optional.of(report), run(() -> queries.report(view)));
+    assertEquals(
+        1,
+        run(
+            () ->
+                store.tx(
+                    () ->
+                        store.jdbc.update(
+                            "DELETE FROM shared_dsh_pool_node WHERE tenant_id=? AND node_id=?",
+                            tenant,
+                            f.node()))));
+    // Placement and receipt remain ready; losing the prepared-node relation alone denies applied.
+    assertEquals(
+        f.view().getBinding(), run(() -> queries.resolve(f.member(), placement, session)));
+    assertTrue(run(() -> queries.report(view)).isEmpty());
+  }
+
+  @Test
+  void resourceMarketRejectsDurableOldEpochReceiptsAndRevokedNodesInRealPostgres() {
+    var f = preparedResourceMarket();
+    var queries = resourceMarketQueries();
+    var oldBinding = f.view().getBinding();
+    UUID placement = UUID.fromString(oldBinding.getPlacementId());
+    assertEquals(Optional.of(f.report()), run(() -> queries.report(f.view())));
+    revokeMember(f.member(), "logout");
+    var current = run(() -> queries.resolve(f.member(), placement, session));
+    assertTrue(current.getEpoch() > oldBinding.getEpoch());
+    // The old ready receipt is still durable, so the current binding comparison must reject it.
+    assertArrayEquals(
+        f.report().toByteArray(),
+        run(
+            () ->
+                store.tx(
+                    () ->
+                        (byte[])
+                            store
+                                .one(
+                                    "SELECT report FROM shared_dsh_resource_view WHERE tenant_id=? AND placement_id=?",
+                                    tenant,
+                                    placement)
+                                .get("report"))));
+    assertTrue(run(() -> queries.report(f.view())).isEmpty());
+    var view = run(() -> service.resourceView(current));
+    assertTrue(run(() -> queries.report(view)).isEmpty());
+    var report = resourceMarketReport(view);
+    run(() -> service.reportResource(report));
+    assertEquals(Optional.of(report), run(() -> queries.report(view)));
+    assertTrue(run(() -> queries.report(f.view())).isEmpty());
+    assertEquals(
+        1,
+        run(
+            () ->
+                store.tx(
+                    () ->
+                        store.jdbc.update(
+                            "UPDATE node SET revoked=true,schedulable=false WHERE tenant_id=? AND id=?",
+                            tenant,
+                            f.node()))));
+    assertTrue(run(() -> queries.report(view)).isEmpty());
   }
 
   SharedDshRuntimeIntent command(UUID operation) {
