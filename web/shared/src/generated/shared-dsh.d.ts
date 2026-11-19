@@ -118,6 +118,7 @@ export interface Capability {
     (
       | 'credentials'
       | 'outbound'
+      | 'task.execute'
       | 'model.invoke'
       | 'message.send'
       | 'message.receive'
@@ -125,6 +126,7 @@ export interface Capability {
     ...(
       | 'credentials'
       | 'outbound'
+      | 'task.execute'
       | 'model.invoke'
       | 'message.send'
       | 'message.receive'
