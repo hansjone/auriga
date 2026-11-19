@@ -1,0 +1,255 @@
+# Complete Linux dedicated profile. Node validates, normalizes SDK public exports,
+# then applies only verified resource bundle/user layers. No stock base or !!js.
+- id: fs
+  name: '@deepseek-ai/dsh-fs-sandbox'
+  config:
+    cwd: /home/dsh/.host/workspace
+- id: llm
+  name: '@deepseek-ai/dsh-llm'
+- id: system-prompt
+  name: '@deepseek-ai/dsh-system-prompt'
+- id: sessions
+  name: '@deepseek-ai/dsh-session'
+- id: session-projections
+  name: '@deepseek-ai/dsh-session-projection'
+- id: session-persistence
+  name: '@deepseek-ai/dsh-session-persistence-jsonl'
+  config:
+    root: /home/dsh/.host/.dsh/sessions
+    compression: none
+- id: session-query
+  name: '@deepseek-ai/dsh-session-query'
+- id: storage
+  name: '@deepseek-ai/dsh-storage'
+- id: storage-json
+  name: '@deepseek-ai/dsh-storage-json'
+  config:
+    root: /home/dsh/.host/.dsh/storages
+- id: storage-domain
+  name: '@deepseek-ai/dsh-storage-domain'
+  config:
+    backend: json
+- id: projection-cache
+  name: '@deepseek-ai/dsh-session-projection-cache'
+  config:
+    writeEveryEvents: 200
+    writeIntervalMs: 5000
+- id: working-directory
+  name: '@deepseek-ai/dsh-working-directory'
+  config:
+    defaultDirectory: /home/dsh/.host/workspace
+- id: agents
+  name: '@deepseek-ai/dsh-agent'
+- id: tools
+  name: '@deepseek-ai/dsh-tools'
+  config:
+    mode: native
+    maxParallelSubCalls: 1
+- id: agent-loop
+  name: '@deepseek-ai/dsh-agent-loop'
+  config:
+    agents: []
+    maxParallelToolCalls: 1
+- id: agent-presets
+  name: '@deepseek-ai/dsh-agent-preset-registry'
+  config:
+    default: auriga-dedicated
+- id: dedicated-preset
+  name: '@deepseek-ai/dsh-agent-preset'
+  config:
+    id: auriga-dedicated
+    name: Auriga 专用
+    plugins: []
+- id: default-model
+  name: '@deepseek-ai/dsh-agent-default-model'
+  config:
+    provider: auriga-shared
+    model: gpt-6.1-sol
+- id: skills
+  name: '@deepseek-ai/dsh-skill'
+- id: private-skills
+  name: '@deepseek-ai/dsh-skill-filesystem'
+  config:
+    providerName: auriga-dedicated-local
+    includeDefaultRoots: true
+    dshHome: /home/dsh/.host/.dsh
+    agentsHome: /home/dsh/.host/.agents
+    customSkillDirs: []
+    watch: true
+    watchFollowSymlinks: false
+- id: tool-skill
+  name: '@deepseek-ai/dsh-tool-skill'
+- id: shell-env
+  name: '@deepseek-ai/dsh-shell-env'
+- id: commands
+  name: '@deepseek-ai/dsh-commands'
+- id: connection-credentials
+  name: '@deepseek-ai/dsh-credentials-local'
+  config:
+    path: /home/dsh/.host/.dsh/dedicated-host-credentials.yaml
+    watch: false
+- id: connection
+  name: '@deepseek-ai/dsh-client-connection'
+  config:
+    trustedHosts: []
+- id: attachments
+  name: '@deepseek-ai/dsh-attachment-local'
+  config:
+    dshHome: /home/dsh/.host/.dsh
+- id: file-upload
+  name: '@deepseek-ai/dsh-client-file-upload'
+- id: file-references
+  name: '@deepseek-ai/dsh-file-reference-local'
+- id: workspace
+  name: '@deepseek-ai/dsh-workspace'
+- id: directory-picker
+  name: '@deepseek-ai/dsh-host-directory-picker-browse'
+- id: remote-access
+  name: '@deepseek-ai/dsh-api-remote-access'
+- id: typert
+  name: '@deepseek-ai/dsh-typert-registry'
+- id: typert-loader
+  name: '@deepseek-ai/dsh-typert-loader'
+- id: session-controller
+  name: '@deepseek-ai/dsh-api-session-controller'
+- id: workspace-controller
+  name: '@deepseek-ai/dsh-api-workspace-controller'
+- id: gateway
+  name: '@deepseek-ai/dsh-api-gateway'
+- id: webserver
+  name: '@deepseek-ai/dsh-host-webserver'
+  config:
+    host: 127.0.0.1
+    port: 7860
+- id: modules
+  name: '@deepseek-ai/dsh-client-modules'
+- id: api-remotes
+  name: '@deepseek-ai/dsh-api-remotes'
+- id: ui-renderer
+  name: '@deepseek-ai/dsh-client-ui-renderer'
+- id: locale
+  name: '@deepseek-ai/dsh-client-locale'
+- id: shortcuts
+  name: '@deepseek-ai/dsh-client-shortcuts'
+- id: ui-theme
+  name: '@deepseek-ai/dsh-client-ui-theme'
+- id: ui-settings
+  name: '@deepseek-ai/dsh-client-ui-settings'
+- id: ui-session
+  name: '@deepseek-ai/dsh-client-ui-session'
+- id: ui-layout
+  name: '@deepseek-ai/dsh-client-ui-layout'
+- id: resources
+  name: '@deepseek-ai/dsh-client-resources'
+- id: ui-sidebar
+  name: '@deepseek-ai/dsh-client-ui-sidebar'
+- id: ui-sidebar-right
+  name: '@deepseek-ai/dsh-client-ui-sidebar-right'
+- id: ui-workspace
+  name: '@deepseek-ai/dsh-client-ui-workspace'
+- id: ui-conversation
+  name: '@deepseek-ai/dsh-client-ui-conversation'
+- id: ui-input-trigger
+  name: '@deepseek-ai/dsh-client-ui-input-trigger'
+- id: ui-chat
+  name: '@deepseek-ai/dsh-client-ui-chat'
+- id: ui-tool
+  name: '@deepseek-ai/dsh-client-ui-tool'
+- id: ui-trajectory
+  name: '@deepseek-ai/dsh-client-ui-trajectory'
+- id: ui-attachment
+  name: '@deepseek-ai/dsh-client-ui-attachment'
+- id: plugin-manager
+  name: '@deepseek-ai/dsh-plugin-manager'
+  config:
+    fallbackRegistries: []
+- id: subprocess
+  name: '@deepseek-ai/dsh-subprocess-local'
+- id: sandbox
+  name: '@deepseek-ai/dsh-sandbox-local'
+  config:
+    runnerCommand: []
+    runnerFailureSignatures: []
+    probeTimeoutMs: 5000
+- id: sandbox-policy
+  name: '@deepseek-ai/dsh-sandbox-policy'
+  config:
+    mode: workspace-write
+    workspaceRoot: /home/dsh/.host/workspace
+- id: shell
+  name: '@deepseek-ai/dsh-bash-sandbox'
+  config:
+    cwd: /home/dsh/.host/workspace
+    timeoutMs: 60000
+    maxTimeoutMs: 600000
+- id: approval
+  name: '@deepseek-ai/dsh-user-approval'
+  config:
+    policy: ask
+- id: permission-presets
+  name: '@deepseek-ai/dsh-permission-presets'
+  config:
+    presets:
+      read-only:
+        sandbox: read-only
+        approval: ask
+      workspace-write:
+        sandbox: workspace-write
+        approval: ask
+      danger-full-access:
+        sandbox: danger-full-access
+        approval: never
+- id: user-questions
+  name: '@deepseek-ai/dsh-user-questions'
+- id: jobs
+  name: '@deepseek-ai/dsh-jobs-local'
+  config:
+    maxConcurrentJobsPerOwner: 4
+- id: tool-bash
+  name: '@deepseek-ai/dsh-tool-bash'
+  config:
+    enableRunInBackground: true
+    promoteOnTimeout: true
+- id: tool-jobs
+  name: '@deepseek-ai/dsh-tool-jobs'
+- id: tool-fs
+  name: '@deepseek-ai/dsh-tool-fs'
+- id: tool-fs-search
+  name: '@deepseek-ai/dsh-tool-fs-search'
+  config:
+    sampleOverCapGlobResults: false
+- id: tool-working-directory
+  name: '@deepseek-ai/dsh-tool-working-directory'
+- id: job-controller
+  name: '@deepseek-ai/dsh-api-job-controller'
+- id: ui-commands
+  name: '@deepseek-ai/dsh-client-ui-commands'
+- id: ui-approval
+  name: '@deepseek-ai/dsh-client-ui-approval'
+- id: ui-user-questions
+  name: '@deepseek-ai/dsh-client-ui-user-questions'
+- id: ui-jobs
+  name: '@deepseek-ai/dsh-client-ui-jobs'
+- id: ui-skill
+  name: '@deepseek-ai/dsh-client-ui-skill'
+- id: ui-plugin-manager
+  name: '@deepseek-ai/dsh-client-ui-plugin-manager'
+  config:
+    registryProbeEnabled: false
+- id: ui-settings-plugins
+  name: '@deepseek-ai/dsh-client-ui-settings-plugins'
+- id: ui-settings-shell
+  name: '@deepseek-ai/dsh-client-ui-settings-shell'
+- id: ui-permission-presets
+  name: '@deepseek-ai/dsh-client-ui-permission-presets'
+- id: ui-agent-preset
+  name: '@deepseek-ai/dsh-client-ui-agent-preset'
+- id: frontend-static
+  name: '@deepseek-ai/dsh-host-frontend-static'
+  config:
+    distIndex: /opt/dsh/node_modules/@deepseek-ai/dsh-web-frontend/dist/index.html
+- id: auriga-dsh
+  name: file:///opt/auriga-dsh/src/dedicated/plugin.js
+  config:
+    configFile: /var/lib/auriga/pools/00000000-0000-4000-8000-000000000001/control/dedicated-host.json
+    distIndex: /opt/dsh/node_modules/@deepseek-ai/dsh-web-frontend/dist/index.html
