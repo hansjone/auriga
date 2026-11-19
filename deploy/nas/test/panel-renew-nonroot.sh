@@ -29,7 +29,12 @@ printf '0\n' >"$temp/export/managed.identity.enabled"
 : >"$temp/export/collab.rotation.path"
 printf '1\n' >"$temp/export/collab.rotation.available"
 printf '%s\n' "$temp/operator/auriga-data/config/materials" >"$temp/export/runtime.path"
-tar -C "$temp/export" -cf "$temp/export.tar" platform.env edge.env agent.env collab.enabled managed.identity.enabled collab.rotation.path collab.rotation.available runtime.path bifrost.enabled
+# Use the production privileged decision producer; do not invent an old helper
+# archive that omits newly required fail-closed fields.
+NAS_ROOT="$temp/package" AURIGA_DATA_ROOT="$temp/operator/auriga-data" \
+  sh -c '. "$NAS_ROOT/scripts/lib.sh"; shared_export_decision "$1"' sh "$temp/export"
+[ ! -s "$temp/export/shared.path" ] && [ "$(cat "$temp/export/shared.ready")" = 1 ]
+tar -C "$temp/export" -cf "$temp/export.tar" platform.env edge.env agent.env collab.enabled managed.identity.enabled collab.rotation.path collab.rotation.available runtime.path bifrost.enabled shared.path shared.ready
 for script in preflight network-preflight render; do printf '#!/bin/sh\nexit 0\n' >"$temp/package/scripts/$script.sh"; done
 cat >"$temp/package/scripts/installer.sh" <<'EOF'
 #!/bin/sh

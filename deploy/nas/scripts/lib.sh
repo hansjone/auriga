@@ -47,6 +47,24 @@ shared_source_committed() (
   fi
 )
 
+# The privileged helper always exports both decisions, including a deployment
+# that has never enabled shared mode. A missing field is never an absent source.
+shared_export_decision() (
+  _shared_export=$1
+  _shared_path=
+  _shared_ready=1
+  if shared_present; then
+    _shared_ready=2
+    if _shared_path=$(shared_action project); then
+      _shared_ready=0
+      if shared_replay_action check >&2; then _shared_ready=1; fi
+    fi
+  fi
+  printf '%s' "$_shared_path" >"$_shared_export/shared.path"
+  printf '%s' "$_shared_ready" >"$_shared_export/shared.ready"
+  chmod 0600 "$_shared_export/shared.path" "$_shared_export/shared.ready"
+)
+
 shared_replay_action() (
   _shared_action=$1
   case "$_shared_action" in stage|prepare-path|final-path|check|close) ;; *) die 'unsupported offline replay action' ;; esac

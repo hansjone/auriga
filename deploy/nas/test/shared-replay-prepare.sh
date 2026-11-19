@@ -32,8 +32,9 @@ set -eu
 root=$SHARED_REPLAY_TEST_ROOT
 [ "$#" = 7 ] && [ "$1" = shared-runtime ] && [ "$2" = -base ] \
   && [ "$3" = "$root/data/config/materials" ] && [ "$4" = -out ] \
-  && [ "$5" = "$root/data/config/shared-source" ] && [ "$6" = -action ] && [ "$7" = check ] || exit 91
-printf 'source check\n' >>"$root/sequence"
+  && [ "$5" = "$root/data/config/shared-source" ] && [ "$6" = -action ] || exit 91
+case "$7" in check|project) ;; *) exit 91 ;; esac
+printf 'source %s\n' "$7" >>"$root/sequence"
 [ -d "$root/data/config/shared-source" ] && [ "$(cat "$root/source-state")" = committed ] || exit 59
 EOF
 cat >"$TMP/scripts/installer.sh" <<'EOF'
@@ -123,3 +124,20 @@ mkdir "$TMP/data/config/shared-source"
 printf 'staged\n' >"$TMP/source-state"
 run_case uncommitted_source_refused_by_production_check_before_stop 59 0
 [ "$(cat "$TMP/sequence")" = 'source check' ]
+
+# The privileged export and both old non-shared public fixtures share the real
+# producer. Missing material emits an explicit decision; activation artifacts
+# without their committed source remain rejected, rather than becoming legacy.
+mkdir "$TMP/export"
+rmdir "$TMP/data/config/shared-source"
+sh -c '. "$1"; shared_export_decision "$2"' sh "$TMP/scripts/lib.sh" "$TMP/export"
+[ ! -s "$TMP/export/shared.path" ] && [ "$(cat "$TMP/export/shared.ready")" = 1 ]
+for evidence in config/shared-runtime config/shared-replay-source agent-tokens; do
+  mkdir -p "$TMP/data/$evidence"
+  : >"$TMP/sequence"
+  sh -c '. "$1"; shared_export_decision "$2"' sh "$TMP/scripts/lib.sh" "$TMP/export"
+  [ ! -s "$TMP/export/shared.path" ] && [ "$(cat "$TMP/export/shared.ready")" = 2 ]
+  [ "$(cat "$TMP/sequence")" = 'source project' ]
+  rmdir "$TMP/data/$evidence"
+done
+printf 'PASS real_export_emits_absent_decision_and_rejects_lost_sources\n'

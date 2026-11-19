@@ -5,7 +5,7 @@ root=$(CDPATH= cd -P -- "$(dirname -- "$0")/.." && pwd)
 temp=$(mktemp -d)
 trap 'rm -rf -- "$temp"' EXIT HUP INT TERM
 mkdir -p "$temp/scripts" "$temp/data"
-cp "$root/scripts/runtime-upgrade.sh" "$temp/scripts/"
+cp "${AURIGA_TEST_RUNTIME_UPGRADE_SCRIPT:-$root/scripts/runtime-upgrade.sh}" "$temp/scripts/runtime-upgrade.sh"
 touch "$temp/data/marker"
 export TEST_RUNTIME_ROOT="$temp"
 cat >"$temp/scripts/lib.sh" <<'EOF'
@@ -34,6 +34,19 @@ cat >"$temp/bootstrap" <<'EOF'
 set -eu
 [ "$1" = runtime-upgrade ] && [ "$2" = -action ]
 echo "$3" >>"$TEST_RUNTIME_ROOT/actions"
+state=$TEST_RUNTIME_ROOT/runtime-state
+case "$3" in
+  stage)
+    if [ ! -f "$state" ] || [ "$(cat "$state")" != committed ]; then printf 'pending\n' >"$state"; fi ;;
+  commit)
+    printf 'committed\n' >"$state"
+    [ ! -f "$TEST_RUNTIME_ROOT/commit-returns-error" ] || exit 79 ;;
+  rollback)
+    if [ "$(cat "$state")" = committed ] || [ -f "$TEST_RUNTIME_ROOT/rollback-refused" ]; then
+      printf 'only pending activation can roll back\n' >&2; exit 78
+    fi
+    printf 'base\n' >"$state" ;;
+esac
 EOF
 printf '#!/bin/sh\nexit 0\n' >"$temp/scripts/preflight.sh"
 chmod 0755 "$temp/bootstrap"
@@ -44,6 +57,7 @@ echo 'PASS runtime_upgrade_commits_after_consumer_readiness'
 : >"$temp/actions"
 : >"$temp/compose.log"
 touch "$temp/fail-once"
+printf 'base\n' >"$temp/runtime-state"
 if sh "$temp/scripts/runtime-upgrade.sh" /approved/bundle registry.example.com/dsh@sha256:fixture; then
   echo 'activation failure accepted' >&2; exit 1
 else [ "$?" = 73 ]; fi
@@ -52,6 +66,40 @@ cmp "$temp/actions" "$temp/expected"
 [ "$(wc -l <"$temp/compose.log")" = 2 ]
 grep -q -- '--wait --wait-timeout 120 --no-build --pull never platform agent' "$temp/compose.log"
 echo 'PASS runtime_upgrade_rolls_back_and_recovers_previous_consumers'
+
+: >"$temp/actions"; : >"$temp/compose.log"
+printf 'committed\n' >"$temp/runtime-state"
+touch "$temp/fail-once"
+if sh "$temp/scripts/runtime-upgrade.sh" /approved/bundle registry.example.com/dsh@sha256:fixture >"$temp/retry-partial-error" 2>&1; then exit 1
+else [ "$?" = 73 ]; fi
+printf 'stage\nrollback\n' >"$temp/expected"
+cmp "$temp/actions" "$temp/expected"
+[ "$(cat "$temp/runtime-state")" = committed ]
+[ "$(wc -l <"$temp/compose.log")" = 2 ]
+tail -n 1 "$temp/compose.log" | grep -q ' stop agent$'
+printf 'PASS already_committed_retry_partial_up_stops_agent_when_real_state_refuses_rollback\n'
+
+: >"$temp/actions"; : >"$temp/compose.log"
+printf 'base\n' >"$temp/runtime-state"
+touch "$temp/commit-returns-error"
+if sh "$temp/scripts/runtime-upgrade.sh" /approved/bundle registry.example.com/dsh@sha256:fixture >"$temp/commit-durable-error" 2>&1; then exit 1
+else [ "$?" = 79 ]; fi
+rm "$temp/commit-returns-error"
+printf 'stage\ncommit\nrollback\n' >"$temp/expected"
+cmp "$temp/actions" "$temp/expected"
+[ "$(cat "$temp/runtime-state")" = committed ]
+tail -n 1 "$temp/compose.log" | grep -q ' stop agent$'
+printf 'PASS commit_durable_but_returned_error_stops_agent_after_rollback_refusal\n'
+
+: >"$temp/actions"; : >"$temp/compose.log"
+printf 'base\n' >"$temp/runtime-state"
+touch "$temp/fail-once" "$temp/rollback-refused"
+if sh "$temp/scripts/runtime-upgrade.sh" /approved/bundle registry.example.com/dsh@sha256:fixture >"$temp/rollback-refused-error" 2>&1; then exit 1
+else [ "$?" = 73 ]; fi
+rm "$temp/rollback-refused"
+[ "$(cat "$temp/runtime-state")" = pending ]
+tail -n 1 "$temp/compose.log" | grep -q ' stop agent$'
+printf 'PASS other_rollback_refusal_stops_agent_and_preserves_pending_state\n'
 
 : >"$temp/actions"
 : >"$temp/compose.log"
