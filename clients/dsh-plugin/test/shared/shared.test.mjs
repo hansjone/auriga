@@ -1137,7 +1137,11 @@ test('N model/message ports bind concurrent members, preserve call IDs and disca
       sessionId: request.sessionId,
     }),
   };
-  const downstream = createSharedDownstream({ runtime, ports });
+  const downstream = createSharedDownstream({
+    runtime,
+    ports,
+    sdk: { LlmAdapter: class {} },
+  });
   try {
     const collect = async (binding) => {
       const output = [];
