@@ -889,6 +889,61 @@ test('native browser admission preserves signed member/current/replay gates and 
   }
 });
 
+test('native list/control grant is global read entry plus exact own-session filtering; revoke clears both', async () => {
+  const f = setup(),
+    a = await f.peer(0),
+    b = await f.peer(1);
+  const own = await f.runtime.create(a, f.host),
+    other = await f.runtime.create(b, f.host);
+  const projected = f.runtime.bindings(a.principal);
+  assert.deepEqual(
+    projected.find((entry) => entry.resource.kind === 'global'),
+    {
+      resource: { kind: 'global' },
+      role: {
+        name: 'auriga-shared-native-read',
+        resource: 'global',
+        actions: ['session/list', 'session/control'],
+      },
+    },
+  );
+  const ownRole = projected.find(
+    (entry) => entry.resource.kind === 'session',
+  ).role;
+  assert.ok(ownRole.actions.includes('session/list'));
+  assert.ok(ownRole.actions.includes('session/control'));
+  assert.equal(
+    projected.some((entry) => entry.resource.id === other.sessionId),
+    false,
+  );
+  for (const denied of [
+    'session/create',
+    'session/modelCatalog',
+    'credentials/read',
+    'mcp/list',
+    'event:owner',
+    'event:credentials',
+  ])
+    assert.equal(
+      projected.some((entry) => entry.role.actions.includes(denied)),
+      false,
+    );
+  assert.deepEqual(f.runtime.bindings({ kind: 'owner' }), []);
+  f.runtime.revoke({
+    schemaVersion: 1,
+    tenantId: own.tenantId,
+    memberId: own.memberId,
+    placementId: own.placementId,
+    epoch: 2,
+    revision: 2,
+    authGeneration: 2,
+    reason: 'logout',
+    revokedAt: 1000,
+  });
+  assert.deepEqual(f.runtime.bindings(a.principal), []);
+  f.runtime.close();
+});
+
 test('original Python helper resolve/request runs with task-local variables and no parent env mutation', async () => {
   const f = setup(),
     binding = await f.runtime.create(await f.peer(0), f.host);

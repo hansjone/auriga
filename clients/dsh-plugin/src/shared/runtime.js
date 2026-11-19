@@ -27,6 +27,8 @@ export const ALLOWED_ACTIONS = Object.freeze([
   'session/page',
   'session/follow',
   'session/projections',
+  'session/list',
+  'session/control',
   'session/prompt',
   'session/cancel',
   'event:changed',
@@ -249,7 +251,12 @@ export function createSharedRuntime({
   // remoteAccess bindings are synchronous projections, never the authorization truth.
   function bindings(p) {
     if (closed || p.kind !== 'auriga-shared-member') return [];
-    return [...ownership.values()]
+    try {
+      fence(p);
+    } catch {
+      return [];
+    }
+    const sessions = [...ownership.values()]
       .filter((b) => {
         try {
           fence(b);
@@ -267,6 +274,20 @@ export function createSharedRuntime({
           actions: [...ALLOWED_ACTIONS],
         },
       }));
+    // rc.3 routes only these two public read controllers through GLOBAL,
+    // then filters every returned session/baseline/event by its session role.
+    // Creation remains the trusted Host create flow, never the owner API.
+    return [
+      {
+        resource: { kind: 'global' },
+        role: {
+          name: 'auriga-shared-native-read',
+          resource: 'global',
+          actions: ['session/list', 'session/control'],
+        },
+      },
+      ...sessions,
+    ];
   }
   return {
     admit,
