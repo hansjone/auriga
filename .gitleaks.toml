@@ -2,6 +2,16 @@ title = "Auriga public repository"
 [extend]
 useDefault = true
 
+# This exact opaque token is returned only by the relay's in-process fake IAM.
+# It is not a signed capability and cannot authorize production requests.
+[[allowlists]]
+description = "Exact synthetic relay capability in its unit fixture"
+targetRules = ["generic-api-key"]
+condition = "AND"
+paths = ['''(^|[/\\])infra/agent/internal/sharednode/relay_test\.go$''']
+regexTarget = "secret"
+regexes = ['''^synthetic-capability-1$''']
+
 [[allowlists]]
 description = "Local build products and dispatch metadata (never published)"
 paths = [
