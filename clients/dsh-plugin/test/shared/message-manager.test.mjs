@@ -157,7 +157,7 @@ test('provider rejection remains visible and cannot be presented as durable acce
   );
 });
 
-test('an ended background task reopens through fresh K authorization without changing address or losing the inbox', async (t) => {
+test('each finite background task reopens through fresh K authorization without changing address or losing the inbox', async (t) => {
   let failOnce = true;
   const f = setup(t, {
     beforeReceive(frame) {
@@ -175,11 +175,64 @@ test('an ended background task reopens through fresh K authorization without cha
   assert.equal(f.active.size, 0);
   await f.manager.pump();
   assert.equal((await f.manager.status(f.binding)).address, before.address);
-  assert.equal(f.active.size, 1);
+  assert.equal(
+    f.active.size,
+    0,
+    'each completed background operation releases its ordinary parent and message child',
+  );
   assert.equal(f.calls.filter(([name]) => name === 'prompt').length, 1);
   assert.equal(f.store.snapshot().state.durable.resumeCursor, '1');
   assert.equal(
     f.requests.filter((frame) => frame.type === 'receive_set').length,
     1,
   );
+});
+
+test('the finite background ordinary parent stays live through native durable prompt and pending signed receipt, then releases', async (t) => {
+  let entered, release;
+  const ready = new Promise((resolve) => {
+    entered = resolve;
+  });
+  const held = new Promise((resolve) => {
+    release = resolve;
+  });
+  const f = setup(t, {
+    beforeReceive: async (frame) => {
+      if (frame.type === 'receipt') {
+        entered();
+        await held;
+      }
+    },
+  });
+  await f.manager.setReceive(f.binding, true);
+  assert.equal(
+    f.active.size,
+    0,
+    'the persisted receive preference is not a permanent admission',
+  );
+  f.deliveries.push(f.delivery());
+  const pending = f.manager.pump();
+  try {
+    await ready;
+    const active = [...f.active.values()];
+    assert.equal(
+      active.filter((row) => row.scopes.includes('task.execute')).length,
+      1,
+    );
+    assert.equal(
+      active.filter((row) => row.scopes.includes('message.receive')).length,
+      1,
+    );
+    assert.equal(f.calls.filter(([name]) => name === 'prompt').length, 1);
+    assert.ok(
+      Object.values(f.store.snapshot().state.durable.inbound).some(
+        (row) => row.stage === 'accepted',
+      ),
+    );
+  } finally {
+    release();
+  }
+  await pending;
+  assert.equal(f.active.size, 0);
+  assert.equal(f.store.snapshot().state.durable.resumeCursor, '1');
 });

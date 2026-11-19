@@ -13,6 +13,7 @@ export function fixture() {
   const keys = new Map([['test', key.publicKey]]);
   const listeners = new Map();
   const active = new Map();
+  const issuedTokens = new Map();
   const events = [];
   f.ctx.on = (name, listener) => {
     const previous = listeners.get(name);
@@ -48,11 +49,12 @@ export function fixture() {
     ]
       .map((value) => Buffer.from(canonical(value)).toString('base64url'))
       .join('.');
-    return (
+    const value =
       text +
       '.' +
-      sign(null, Buffer.from(text), key.privateKey).toString('base64url')
-    );
+      sign(null, Buffer.from(text), key.privateKey).toString('base64url');
+    issuedTokens.set(value, request);
+    return value;
   };
   const seal = (value, requestId) => {
     const business = value.type === 'delivery';
@@ -103,6 +105,16 @@ export function fixture() {
           },
         };
       if (operation === 'beginTask') {
+        if (body.scopes.includes('task.execute'))
+          assert.equal(body.parentCapability, undefined);
+        else {
+          const parent = issuedTokens.get(body.parentCapability);
+          assert.ok(
+            parent && active.has(parent.taskId),
+            'message child requires the actual live ordinary parent',
+          );
+          assert.deepEqual(parent.scopes, ['task.execute']);
+        }
         await f.state.beforeBegin?.();
         active.set(body.taskId, body);
         return { token: token(body) };
@@ -115,7 +127,7 @@ export function fixture() {
       }
       if (operation === 'finishTask') {
         active.delete(body.taskId);
-        return {};
+        return { fenced: true, binding: body.binding, taskId: body.taskId };
       }
       if (operation === 'messageContext') {
         latest = await f.call(operation, body, signal);
@@ -189,20 +201,35 @@ export function fixture() {
       tenantId: f.binding.tenantId,
       physicalInstanceId: f.binding.physicalInstanceId,
       identityKeys: keys,
-      capabilityKeys: { 'auriga.shared.message': keys },
+      capabilityKeys: {
+        'auriga.shared.message': keys,
+        'auriga.shared.enterprise': keys,
+      },
       messageTrustStore: f.store,
     },
   });
+  let requestReady,
+    turn = 1;
   const open = async (scope = 'message.send') => {
-    if (!events.some((event) => event.operation === 'lookup'))
-      await listeners.get('agent/request')(
-        { agent: f.agent, turn: 1, step: 1, signal: f.controller.signal },
-        async () => {},
-      );
+    requestReady ??= listeners.get('agent/request')(
+      { agent: f.agent, turn, step: 1, signal: f.controller.signal },
+      async () => {},
+    );
+    try {
+      await requestReady;
+    } catch (error) {
+      requestReady = undefined;
+      turn++;
+      throw error;
+    }
     const task = await ports.downstream.taskForSession(
       f.binding,
       f.controller.signal,
-      { audience: 'auriga.shared.message', scope },
+      {
+        audience: 'auriga.shared.message',
+        scope,
+        nativeSignal: f.controller.signal,
+      },
     );
     const capability = await ports.downstream.issue(
       f.binding,
@@ -211,6 +238,7 @@ export function fixture() {
       [scope],
       f.controller.signal,
     );
+    await task.close();
     return {
       tenantId: f.binding.tenantId,
       sessionId: f.binding.sessionId,
@@ -229,6 +257,7 @@ export function fixture() {
     seal,
     latest: () => latest,
     async close() {
+      await listeners.get('agent/status')({ agent: f.agent, status: 'idle' });
       await ports.close();
       await f.contexts.close();
     },

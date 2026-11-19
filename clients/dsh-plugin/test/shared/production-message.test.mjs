@@ -47,10 +47,10 @@ test('send and receive have separate live K tasks without widening the first tas
     const send = await f.open();
     const receive = await f.open('message.receive');
     assert.notEqual(send.taskId, receive.taskId);
-    assert.equal(f.active.size, 2);
+    assert.equal(f.active.size, 3);
     assert.deepEqual(
       [...f.active.values()].map((value) => value.scopes),
-      [['message.send'], ['message.receive']],
+      [['task.execute'], ['message.send'], ['message.receive']],
     );
     await f.ports.downstream.send({
       ...send,
@@ -287,7 +287,7 @@ test('concurrent consumers join the same pending Begin ACK before issuing messag
     assert.equal(values[0].taskId, values[1].taskId);
     assert.equal(
       f.events.filter((entry) => entry.operation === 'beginTask').length,
-      1,
+      2,
     );
   } finally {
     release();
@@ -303,7 +303,7 @@ test('idle during a delayed Begin compensates a late committed task and never re
     await assert.rejects(f.open());
     assert.equal(f.active.size, 0);
     assert.ok(
-      f.events.filter((entry) => entry.operation === 'finishTask').length >= 2,
+      f.events.filter((entry) => entry.operation === 'finishTask').length >= 1,
     );
   } finally {
     await f.close();
@@ -327,10 +327,10 @@ test('a failed Begin is not retried implicitly and a later explicit call can pre
     );
     const next = await f.open();
     assert.ok(next.taskId);
-    assert.equal(f.active.size, 1);
+    assert.equal(f.active.size, 2);
     assert.equal(
       f.events.filter((entry) => entry.operation === 'beginTask').length,
-      2,
+      3,
     );
   } finally {
     await f.close();
