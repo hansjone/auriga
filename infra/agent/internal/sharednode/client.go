@@ -37,13 +37,13 @@ type Settings struct {
 	IAM              Endpoint  `json:"iam"`
 	ServiceTokenFile string    `json:"serviceTokenFile"`
 	SharedModel      *Endpoint `json:"sharedModel,omitempty"`
-	SharedResources  *Endpoint `json:"sharedResources,omitempty"`
+	SharedMessages   *Endpoint `json:"sharedMessages,omitempty"`
 }
 type Client struct {
 	Settings       Settings
 	Workspace, IAM *grpc.ClientConn
 	Model          *http.Client
-	Resources      *http.Client
+	Messages       *http.Client
 }
 
 func roots(path string) (*x509.CertPool, error) {
@@ -88,31 +88,24 @@ func Open(s Settings, certificate tls.Certificate) (*Client, error) {
 		c.Close()
 		return nil, err
 	}
-	if s.SharedModel != nil {
-		u, e := url.Parse(s.SharedModel.Address)
+	for _, service := range []struct {
+		endpoint *Endpoint
+		client   **http.Client
+	}{{s.SharedModel, &c.Model}, {s.SharedMessages, &c.Messages}} {
+		if service.endpoint == nil {
+			continue
+		}
+		u, e := url.Parse(service.endpoint.Address)
 		if e != nil || u.Scheme != "https" || u.Host == "" || u.User != nil || u.Path != "" || u.RawQuery != "" || u.Fragment != "" {
 			c.Close()
-			return nil, errors.New("HTTPS model origin required")
+			return nil, errors.New("HTTPS shared service origin required")
 		}
-		p, e := roots(s.SharedModel.CAFile)
+		p, e := roots(service.endpoint.CAFile)
 		if e != nil {
 			c.Close()
 			return nil, e
 		}
-		c.Model = &http.Client{Transport: &http.Transport{Proxy: nil, TLSClientConfig: &tls.Config{MinVersion: tls.VersionTLS13, RootCAs: p, Certificates: []tls.Certificate{certificate}}, ResponseHeaderTimeout: 10 * time.Second}, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
-	}
-	if s.SharedResources != nil {
-		u, e := url.Parse(s.SharedResources.Address)
-		if e != nil || u.Scheme != "https" || u.Host == "" || u.User != nil || u.Path != "" || u.RawQuery != "" || u.Fragment != "" {
-			c.Close()
-			return nil, errors.New("HTTPS resource origin required")
-		}
-		p, e := roots(s.SharedResources.CAFile)
-		if e != nil {
-			c.Close()
-			return nil, e
-		}
-		c.Resources = &http.Client{Transport: &http.Transport{Proxy: nil, TLSClientConfig: &tls.Config{MinVersion: tls.VersionTLS13, RootCAs: p, Certificates: []tls.Certificate{certificate}}, ResponseHeaderTimeout: 10 * time.Second}, Timeout: 30 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+		*service.client = &http.Client{Transport: &http.Transport{Proxy: nil, TLSClientConfig: &tls.Config{MinVersion: tls.VersionTLS13, RootCAs: p, Certificates: []tls.Certificate{certificate}}, ResponseHeaderTimeout: 10 * time.Second}, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 	}
 	return c, nil
 }
@@ -126,11 +119,15 @@ func (c *Client) Close() {
 	if c.Model != nil {
 		c.Model.CloseIdleConnections()
 	}
-	if c.Resources != nil {
-		c.Resources.CloseIdleConnections()
+	if c.Messages != nil {
+		c.Messages.CloseIdleConnections()
 	}
 }
 func (c *Client) call(ctx context.Context, iam bool, method string, in, out proto.Message) error {
+	return c.callTimeout(ctx, iam, method, in, out, 10*time.Second)
+}
+
+func (c *Client) callTimeout(ctx context.Context, iam bool, method string, in, out proto.Message, timeout time.Duration) error {
 	b, err := readToken(c.Settings.ServiceTokenFile)
 	if err != nil {
 		return errors.New("common.unavailable")
@@ -139,7 +136,7 @@ func (c *Client) call(ctx context.Context, iam bool, method string, in, out prot
 	if token == "" || strings.ContainsAny(token, "\r\n\t ") {
 		return errors.New("common.unavailable")
 	}
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	ctx = metadata.NewOutgoingContext(ctx, metadata.Pairs("authorization", "Bearer "+token, "auriga-tenant-id", c.Settings.TenantID))
 	conn, prefix := c.Workspace, "/auriga.workspace.v1.SharedDshService/"

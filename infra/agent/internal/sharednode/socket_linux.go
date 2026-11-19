@@ -10,6 +10,8 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 )
@@ -18,6 +20,9 @@ import (
 func (r *Relay) Start(ctx context.Context, path string, uid int) (func(), error) {
 	if !filepath.IsAbs(path) || filepath.Base(path) != "shared-node.sock" || uid <= 0 {
 		return nil, fmt.Errorf("invalid pool socket")
+	}
+	if r.VerifyPeer == nil {
+		return nil, fmt.Errorf("signed pool process verifier required")
 	}
 	if info, e := os.Lstat(path); e == nil {
 		if info.Mode()&os.ModeSocket == 0 {
@@ -44,13 +49,28 @@ func (r *Relay) Start(ctx context.Context, path string, uid int) (func(), error)
 	}
 	srv := &http.Server{ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 30 * time.Second, IdleTimeout: 30 * time.Second,
 		ConnContext: func(ctx context.Context, conn net.Conn) context.Context {
-			return context.WithValue(ctx, peerKey{}, peerUID(conn) == uint32(uid))
+			return context.WithValue(ctx, peerKey{}, socketPeer(conn))
 		}}
 	srv.Handler = http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-		if req.Context().Value(peerKey{}) != true {
+		peer, ok := req.Context().Value(peerKey{}).(poolPeer)
+		if !ok || peer.uid != uint32(uid) || peer.pid <= 0 || peer.start == "" {
 			replyError(w, "common.forbidden")
 			return
 		}
+		identity, err := r.VerifyPeer(req.Context(), peer.pid, peer.start)
+		if err != nil || identity == "" {
+			replyError(w, "shared.revoked")
+			return
+		}
+		req = req.WithContext(context.WithValue(req.Context(), executionPeerKey{}, identity))
+		callContext := req.Context()
+		req = req.WithContext(context.WithValue(callContext, executionFenceKey{}, func() error {
+			current, err := r.VerifyPeer(callContext, peer.pid, peer.start)
+			if err != nil || current != identity {
+				return fmt.Errorf("shared.revoked")
+			}
+			return nil
+		}))
 		r.ServeHTTP(w, req)
 	})
 	var once sync.Once
@@ -91,19 +111,49 @@ func listenPoolSocket(path string) (*net.UnixListener, *os.File, error) {
 
 type peerKey struct{}
 
+type poolPeer struct {
+	uid   uint32
+	pid   int
+	start string
+}
+
+func socketPeer(conn net.Conn) poolPeer {
+	cred := peerCredentials(conn)
+	if cred == nil {
+		return poolPeer{uid: ^uint32(0)}
+	}
+	p := poolPeer{uid: cred.Uid, pid: int(cred.Pid)}
+	if raw, err := os.ReadFile(fmt.Sprintf("/proc/%d/stat", p.pid)); err == nil {
+		fields := strings.Fields(string(raw)[strings.LastIndex(string(raw), ")")+1:])
+		if len(fields) > 19 {
+			if _, err := strconv.ParseUint(fields[19], 10, 64); err == nil {
+				p.start = fields[19]
+			}
+		}
+	}
+	return p
+}
+
 func peerUID(conn net.Conn) uint32 {
+	if cred := peerCredentials(conn); cred != nil {
+		return cred.Uid
+	}
+	return ^uint32(0)
+}
+
+func peerCredentials(conn net.Conn) *unix.Ucred {
 	c, ok := conn.(*net.UnixConn)
 	if !ok {
-		return ^uint32(0)
+		return nil
 	}
 	raw, e := c.SyscallConn()
 	if e != nil {
-		return ^uint32(0)
+		return nil
 	}
 	var cred *unix.Ucred
 	var err error
 	if e = raw.Control(func(fd uintptr) { cred, err = unix.GetsockoptUcred(int(fd), unix.SOL_SOCKET, unix.SO_PEERCRED) }); e != nil || err != nil || cred == nil {
-		return ^uint32(0)
+		return nil
 	}
-	return cred.Uid
+	return cred
 }

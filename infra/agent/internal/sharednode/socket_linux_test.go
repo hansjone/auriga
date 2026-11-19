@@ -20,8 +20,8 @@ func TestPoolSocketLongNASDataRootKeepsRealSocketInode(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	defer directory.Close()
-	defer listener.Close()
+	defer func() { _ = directory.Close() }()
+	defer func() { _ = listener.Close() }()
 	info, e := os.Lstat(path)
 	if e != nil || info.Mode()&os.ModeSocket == 0 {
 		t.Fatal("real socket missing", e)
@@ -30,12 +30,12 @@ func TestPoolSocketLongNASDataRootKeepsRealSocketInode(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	defer connection.Close()
+	defer func() { _ = connection.Close() }()
 	accepted, e := listener.Accept()
 	if e != nil {
 		t.Fatal(e)
 	}
-	defer accepted.Close()
+	defer func() { _ = accepted.Close() }()
 	if peerUID(accepted) != uint32(os.Geteuid()) {
 		t.Fatal("SO_PEERCRED did not identify the actual socket peer")
 	}

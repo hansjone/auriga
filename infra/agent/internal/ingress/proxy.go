@@ -135,7 +135,7 @@ func (s *Server) serveSharedProfile(w http.ResponseWriter, r *http.Request, inst
 		writeProblem(w, 502, CodeInternal, "Unavailable", "profile unavailable")
 		return
 	}
-	defer response.Body.Close()
+	defer func() { _ = response.Body.Close() }()
 	data, err := io.ReadAll(io.LimitReader(response.Body, 16385))
 	if err != nil || len(data) > 16384 || response.StatusCode != 200 || strings.Split(response.Header.Get("Content-Type"), ";")[0] != "application/json" || response.Header.Get("Set-Cookie") != "" || response.Header.Get("Location") != "" || !json.Valid(data) {
 		writeProblem(w, 502, CodeInternal, "Unavailable", "profile unavailable")

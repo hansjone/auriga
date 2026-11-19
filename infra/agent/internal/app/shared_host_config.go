@@ -24,6 +24,7 @@ func renderSharedHostConfig(args []string, out, logs io.Writer) error {
 	modelKeys := fs.String("model-keys", "", "IAM model public JWKS file")
 	messageKeys := fs.String("message-keys", "", "IAM message public JWKS file")
 	policy := fs.String("enterprise-config", "", "public enterprise policy JSON file")
+	messageTrust := fs.String("message-trust", "", "optional approved public message realm/roots JSON file")
 	model := fs.String("model", "", "authorized public model ID")
 	output := fs.String("output", "", "new absolute Host template file")
 	if e := fs.Parse(args); e != nil {
@@ -87,12 +88,42 @@ func renderSharedHostConfig(args []string, out, logs io.Writer) error {
 	if e = json.Unmarshal(raw, &enterprisePolicy); e != nil || len(enterprisePolicy.OutboundAllowedHosts) == 0 || enterprisePolicy.EmpNoHeader == "" || enterprisePolicy.AuthValueHeader == "" {
 		return fmt.Errorf("complete public enterprise policy required")
 	}
-	body, e := json.MarshalIndent(map[string]any{"identityKeys": ids, "capabilityKeys": purposes, "model": *model, "enterprise": enterprisePolicy}, "", "  ")
+	configuration := map[string]any{"identityKeys": ids, "capabilityKeys": purposes, "model": *model, "enterprise": enterprisePolicy}
+	if *messageTrust != "" {
+		raw, e := readPublicInstallation(*messageTrust)
+		if e != nil {
+			return e
+		}
+		var trust struct {
+			Realm string `json:"realm"`
+			Roots []struct {
+				Kid string `json:"kid"`
+				Key string `json:"public_key_spki"`
+			} `json:"roots"`
+		}
+		if e = json.Unmarshal(raw, &trust); e != nil || trust.Realm == "" || len(trust.Roots) == 0 {
+			return fmt.Errorf("approved message realm and roots required")
+		}
+		seen := map[string]bool{}
+		for _, root := range trust.Roots {
+			der, e := base64.RawURLEncoding.Strict().DecodeString(root.Key)
+			if e != nil || root.Kid == "" || seen[root.Kid] {
+				return fmt.Errorf("invalid message root")
+			}
+			key, e := x509.ParsePKIXPublicKey(der)
+			if _, ok := key.(ed25519.PublicKey); e != nil || !ok {
+				return fmt.Errorf("public Ed25519 message root required")
+			}
+			seen[root.Kid] = true
+		}
+		configuration["messageTrust"] = trust
+	}
+	body, e := json.MarshalIndent(configuration, "", "  ")
 	if e != nil {
 		return e
 	}
 	if len(body) > 256*1024 {
-		return fmt.Errorf("Host configuration too large")
+		return fmt.Errorf("host configuration too large")
 	}
 	file, e := os.OpenFile(*output, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0444)
 	if e != nil {

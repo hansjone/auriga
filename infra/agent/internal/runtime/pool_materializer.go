@@ -1,6 +1,7 @@
 package runtime
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -17,6 +18,7 @@ import (
 	"github.com/hansjone/auriga/infra/agent/internal/observer"
 	"github.com/hansjone/auriga/infra/agent/internal/storage"
 	nodev1 "github.com/hansjone/auriga/infra/gen/auriga/node/v1"
+	resourcev1 "github.com/hansjone/auriga/infra/gen/auriga/resource/v1"
 	workspacev1 "github.com/hansjone/auriga/infra/gen/auriga/workspace/v1"
 	"google.golang.org/protobuf/proto"
 	"gopkg.in/yaml.v3"
@@ -24,7 +26,6 @@ import (
 
 type PoolResourceSource interface {
 	Snapshot(context.Context, *nodev1.SharedDshBinding) (*workspacev1.GetSharedDshResourceSnapshotResponse, error)
-	Artifact(context.Context, *nodev1.SharedDshBinding, string, string, int64) ([]byte, time.Time, error)
 }
 type PoolMaterializer struct {
 	Layout      *storage.PoolLayout
@@ -72,6 +73,8 @@ type poolResourceState struct {
 	ObservedAt                             int64
 	Watermarks                             map[string]map[string]any
 	Revisions                              map[string]uint64
+	Intents                                map[string][]byte
+	Present                                map[string]bool
 	RevocationRevision                     uint64
 	RevocationDigest                       string
 }
@@ -108,6 +111,9 @@ func (m *PoolMaterializer) Verify(ctx context.Context, pool string, views []*nod
 	if state.SchemaVersion != 1 || state.Pool != pool || state.Pending != "" || state.Watermarks == nil || state.Revisions == nil {
 		return fmt.Errorf("incomplete pool resource transaction")
 	}
+	if len(state.Revisions) > 0 && (state.Intents == nil || state.Present == nil) {
+		return fmt.Errorf("pool resource installation locks require explicit maintenance")
+	}
 	if state.Tree != "" {
 		tree, e := poolSkillTree(active)
 		if e != nil || tree != state.Tree {
@@ -119,6 +125,17 @@ func (m *PoolMaterializer) Verify(ctx context.Context, pool string, views []*nod
 		return fmt.Errorf("pool resource clock rollback")
 	}
 	next := state
+	next.Intents = map[string][]byte{}
+	for k, v := range state.Intents {
+		next.Intents[k] = v
+	}
+	next.Present = map[string]bool{}
+	for k := range state.Revisions {
+		next.Present[k] = true
+	}
+	for k, v := range state.Present {
+		next.Present[k] = v
+	}
 	next.RevocationRevision, next.RevocationDigest = 0, ""
 	next.Watermarks = map[string]map[string]any{}
 	for k, v := range state.Watermarks {
@@ -176,6 +193,11 @@ func (m *PoolMaterializer) Verify(ctx context.Context, pool string, views []*nod
 			refs[r.ResourceId] = r
 		}
 		memberSet := map[string]string{}
+		for key := range next.Present {
+			if strings.HasPrefix(key, view.Binding.PlacementId+"/") {
+				next.Present[key] = false
+			}
+		}
 		for _, ref := range snapshot.Resources {
 			id := ref.GetIdentity()
 			descriptor := refs[id.GetPackageId()]
@@ -191,12 +213,29 @@ func (m *PoolMaterializer) Verify(ctx context.Context, pool string, views []*nod
 			if installation < state.Revisions[key] {
 				return fmt.Errorf("pool installation rollback")
 			}
+			intent, e := unifiedSelectionBytes(ref)
+			if e != nil {
+				return e
+			}
+			if installation == state.Revisions[key] {
+				if previous := state.Intents[key]; previous != nil && !bytes.Equal(previous, intent) {
+					return fmt.Errorf("pool installation intent changed under the same revision")
+				}
+				if present, known := state.Present[key]; known && !present {
+					return fmt.Errorf("collected pool installation replay")
+				}
+			}
+			next.Intents[key], next.Present[key] = intent, true
 			next.Revisions[key] = installation
 			end, e := time.Parse(time.RFC3339Nano, ref.GetLease().GetExpiresAt())
 			if e != nil || end.Unix() != descriptor.ExpiresAt || !end.After(now) {
 				return fmt.Errorf("pool lease expired/mismatched")
 			}
-			manifest, online, e := m.cachedArtifact(ctx, root, view.Binding, descriptor.LeaseId, "", id.ManifestDigest, "manifest.json", 256*1024)
+			base := "/internal/resource/v1/catalog/downloads/" + descriptor.LeaseId
+			if ref.ManifestDownloadPath != base+"/manifest" || ref.Artifacts[0].DownloadPath != base+"/artifacts/"+ref.Artifacts[0].ArtifactId {
+				return fmt.Errorf("pool locator does not belong to the member lease")
+			}
+			manifest, online, e := m.cachedArtifact(ctx, root, ref.ManifestDownloadPath, id.ManifestDigest, "manifest.json", 256*1024)
 			if e != nil {
 				return e
 			}
@@ -210,7 +249,7 @@ func (m *PoolMaterializer) Verify(ctx context.Context, pool string, views []*nod
 			if !uDigest.MatchString(artifact.Digest) {
 				return fmt.Errorf("invalid pool payload digest")
 			}
-			payload, online, e := m.cachedArtifact(ctx, root, view.Binding, descriptor.LeaseId, artifact.ArtifactId, artifact.Digest, "payload.tgz", 5*1024*1024)
+			payload, online, e := m.cachedArtifact(ctx, root, artifact.DownloadPath, artifact.Digest, "payload.tgz", 5*1024*1024)
 			if e != nil {
 				return e
 			}
@@ -247,7 +286,19 @@ func (m *PoolMaterializer) Verify(ctx context.Context, pool string, views []*nod
 				return fmt.Errorf("pool skill name conflict")
 			}
 			names[name] = id.PackageId
-			selected := id.VersionId + "/" + id.ManifestDigest + "/" + artifact.Digest
+			// Common materialization compares the immutable selection projection,
+			// excluding only the independent member installation revision. Never
+			// change the original ref or manufacture a shared revision for dispatch.
+			var common resourcev1.UnifiedResourceRef
+			if e = proto.Unmarshal(intent, &common); e != nil {
+				return e
+			}
+			common.InstallationRevision = 0
+			commonBytes, e := proto.MarshalOptions{Deterministic: true}.Marshal(&common)
+			if e != nil {
+				return e
+			}
+			selected := udigest(commonBytes)
 			if prior := selection[id.PackageId]; prior != "" && prior != selected {
 				return fmt.Errorf("members have different resource releases")
 			}
@@ -316,14 +367,14 @@ func (m *PoolMaterializer) Verify(ctx context.Context, pool string, views []*nod
 	return unifiedAtomic(filepath.Join(root, "state.json"), next)
 }
 
-func (m *PoolMaterializer) cachedArtifact(ctx context.Context, root string, binding *nodev1.SharedDshBinding, lease, artifact, digest, name string, maximum int64) ([]byte, time.Time, error) {
+func (m *PoolMaterializer) cachedArtifact(ctx context.Context, root, locator, digest, name string, maximum int64) ([]byte, time.Time, error) {
 	path := filepath.Join(root, "cache", strings.TrimPrefix(digest, "sha256:"), name)
 	if info, e := os.Lstat(path); e == nil && info.Mode().IsRegular() && info.Size() <= maximum {
 		if raw, e := os.ReadFile(path); e == nil && udigest(raw) == digest {
 			return raw, m.Now(), nil
 		}
 	}
-	raw, trusted, e := m.Source.Artifact(ctx, binding, lease, artifact, maximum)
+	raw, trusted, e := m.Unified.download(ctx, locator, maximum)
 	if e == nil {
 		m.TrustServerTime(trusted)
 	}

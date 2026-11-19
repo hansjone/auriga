@@ -36,6 +36,60 @@ type testAuthority struct {
 	binding  *nodev1.SharedDshSessionBinding
 	version  atomic.Int64
 	finished atomic.Bool
+	outbound chan *iamv1.ExecuteSharedOutboundRequest
+}
+
+func (a *testAuthority) ExecuteSharedOutbound(ctx context.Context, in *iamv1.ExecuteSharedOutboundRequest) (*iamv1.ExecuteSharedOutboundResponse, error) {
+	a.check(ctx)
+	if a.outbound != nil {
+		a.outbound <- in
+	}
+	if in.Url == "https://business.example.com/cancel" {
+		<-ctx.Done()
+		return nil, ctx.Err()
+	}
+	return &iamv1.ExecuteSharedOutboundResponse{StatusCode: 201, Headers: map[string]string{"content-type": "application/json"}, Body: `{"ok":true}`}, nil
+}
+
+func TestEnterpriseOutboundBoundClaimsAndCancellation(t *testing.T) {
+	r, a := fixture(t)
+	begin(t, r, a, "auriga.shared.enterprise", []string{"outbound"})
+	a.outbound = make(chan *iamv1.ExecuteSharedOutboundRequest, 4)
+	claims, _ := wire(r.tokens["synthetic-capability-1"])
+	in := map[string]any{"capability": claims, "url": "https://business.example.com/path", "method": "POST", "headers": map[string]string{"content-type": "application/json"}, "bodyBase64": "e30=", "timeoutMs": 60000}
+	raw, _ := json.Marshal(in)
+	value, e := r.invoke(context.Background(), "enterpriseOutbound", raw)
+	if e != nil {
+		t.Fatal("seventh RPC not wired", e)
+	}
+	if value.(map[string]any)["statusCode"] != float64(201) {
+		t.Fatal(value)
+	}
+	request := <-a.outbound
+	if string(request.Body) != "{}" || request.TimeoutMs != 60000 {
+		t.Fatal("base64/timeout lost")
+	}
+	in["bodyBase64"] = "e3\n0="
+	raw, _ = json.Marshal(in)
+	if _, e = r.invoke(context.Background(), "enterpriseOutbound", raw); e == nil {
+		t.Fatal("noncanonical base64 accepted")
+	}
+	in["bodyBase64"] = ""
+	in["url"] = "https://business.example.com/cancel"
+	raw, _ = json.Marshal(in)
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { _, err := r.invoke(ctx, "enterpriseOutbound", raw); done <- err }()
+	<-a.outbound
+	cancel()
+	select {
+	case e = <-done:
+		if e == nil {
+			t.Fatal("canceled outbound succeeded")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("cancel not propagated to IAM")
+	}
 }
 
 func (a *testAuthority) check(ctx context.Context) {
@@ -89,13 +143,13 @@ func fixture(t *testing.T) (*Relay, *testAuthority) {
 	server := grpc.NewServer()
 	workspacev1.RegisterSharedDshServiceServer(server, authority)
 	iamv1.RegisterSharedTaskServiceServer(server, authority)
-	go server.Serve(listener)
+	go func() { _ = server.Serve(listener) }()
 	t.Cleanup(server.Stop)
 	conn, e := grpc.NewClient("passthrough:///synthetic", grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithContextDialer(func(context.Context, string) (net.Conn, error) { return listener.Dial() }))
 	if e != nil {
 		t.Fatal(e)
 	}
-	t.Cleanup(func() { conn.Close() })
+	t.Cleanup(func() { _ = conn.Close() })
 	token := filepath.Join(t.TempDir(), "service-token")
 	if e = os.WriteFile(token, []byte("synthetic-service-token"), 0600); e != nil {
 		t.Fatal(e)
@@ -115,7 +169,7 @@ func TestRelayActualRPCRefreshRemainsBoundToLiveExecution(t *testing.T) {
 	if registered, e := r.Client.IsShared(context.Background(), testPool); e != nil || !registered {
 		t.Fatal("node registration authority not installed", e)
 	}
-	begin(t, r, a, "auriga.shared.enterprise", []string{"enterprise.credentials"})
+	begin(t, r, a, "auriga.shared.enterprise", []string{"credentials"})
 	if _, e := r.capability(context.Background(), "synthetic-capability-1"); e != nil {
 		t.Fatal(e)
 	}
@@ -124,7 +178,7 @@ func TestRelayActualRPCRefreshRemainsBoundToLiveExecution(t *testing.T) {
 		t.Fatal("stale direct authorization accepted")
 	}
 	binding, _ := wire(a.binding)
-	raw, _ := json.Marshal(map[string]any{"binding": binding, "taskId": testTask, "audience": "auriga.shared.enterprise", "scopes": []string{"enterprise.credentials"}})
+	raw, _ := json.Marshal(map[string]any{"binding": binding, "taskId": testTask, "audience": "auriga.shared.enterprise", "scopes": []string{"credentials"}})
 	if _, e := r.invoke(context.Background(), "issueCapability", raw); e != nil {
 		t.Fatal("same running task refresh", e)
 	}
@@ -259,6 +313,30 @@ func TestSSEResponseRejectsTruncationAndPreservesToolArguments(t *testing.T) {
 		t.Fatal("tool fragments lost", chunks)
 	}
 }
+
+func TestModelJSONCompletionBecomesPublicNDJSON(t *testing.T) {
+	r, a := fixture(t)
+	begin(t, r, a, "auriga.shared.model", []string{"model.invoke"})
+	var calls atomic.Int32
+	n := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		calls.Add(1)
+		if req.Header.Get("Idempotency-Key") != testTask {
+			t.Error("call identity lost")
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"id":"c","object":"chat.completion","model":"synthetic-model","choices":[{"index":0,"message":{"role":"assistant","content":"hello","tool_calls":[{"id":"tool1","type":"function","function":{"name":"lookup","arguments":"{\"n\":1}"}}]},"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":2,"completion_tokens":1,"total_tokens":3}}`)
+	}))
+	defer n.Close()
+	r.Client.Model, r.Client.Settings.SharedModel = n.Client(), &Endpoint{Address: n.URL}
+	raw, _ := json.Marshal(map[string]any{"tenantId": testTenant, "sessionId": testSession, "taskId": testTask, "callId": testTask, "capability": "synthetic-capability-1", "body": map[string]any{"model": "synthetic-model", "messages": []any{map[string]any{"role": "user", "content": []any{map[string]any{"type": "text", "text": "synthetic"}}}}}})
+	w := httptest.NewRecorder()
+	if err := r.model(context.Background(), w, raw); err != nil {
+		t.Fatal("JSON completion not connected", err)
+	}
+	if calls.Load() != 1 || !strings.Contains(w.Body.String(), `"kind":"tool-calls"`) || !strings.Contains(w.Body.String(), `"totalTokens":3`) || !strings.Contains(w.Body.String(), `"arguments":"{\"n\":1}"`) {
+		t.Fatal("completion/tool/usage lost", w.Body.String())
+	}
+}
 func TestRelayRejectsOtherPoolAndServiceHeaders(t *testing.T) {
 	r, a := fixture(t)
 	wrong := proto.Clone(a.binding).(*nodev1.SharedDshSessionBinding)
@@ -273,5 +351,29 @@ func TestRelayRejectsOtherPoolAndServiceHeaders(t *testing.T) {
 	r.ServeHTTP(w, req)
 	if w.Code == 200 {
 		t.Fatal("service credential carrier accepted")
+	}
+}
+
+func TestHostClaimsCarrierStaysOnOriginalProcessExecution(t *testing.T) {
+	r, a := fixture(t)
+	peerContext := context.WithValue(context.Background(), executionPeerKey{}, "signed-container/host-pid/start")
+	b, _ := wire(a.binding)
+	raw, _ := json.Marshal(map[string]any{"binding": b, "taskId": testTask, "audience": "auriga.shared.enterprise", "scopes": []string{"outbound"}})
+	if _, err := r.invoke(peerContext, "beginTask", raw); err != nil {
+		t.Fatal(err)
+	}
+	claims, _ := wire(r.tokens["synthetic-capability-1"])
+	raw, _ = json.Marshal(map[string]any{"capability": claims})
+	if _, err := r.invoke(peerContext, "authorizeCapability", raw); err != nil {
+		t.Fatal("actual Host claims object rejected", err)
+	}
+	other := context.WithValue(context.Background(), executionPeerKey{}, "signed-container/other-pid/start")
+	if _, err := r.invoke(other, "authorizeCapability", raw); err == nil {
+		t.Fatal("another process borrowed task capability")
+	}
+	claims.(map[string]any)["taskId"] = testPool
+	raw, _ = json.Marshal(map[string]any{"capability": claims})
+	if _, err := r.invoke(peerContext, "authorizeCapability", raw); err == nil {
+		t.Fatal("forged claims accepted")
 	}
 }

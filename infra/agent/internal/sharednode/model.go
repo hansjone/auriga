@@ -48,7 +48,7 @@ func (r *Relay) model(ctx context.Context, w http.ResponseWriter, raw []byte) er
 		return e
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Accept", "text/event-stream")
+	req.Header.Set("Accept", "text/event-stream, application/json")
 	req.Header.Set("Auriga-Shared-Capability", in.Capability)
 	req.Header.Set("Auriga-Shared-Session-Id", in.SessionID)
 	req.Header.Set("Auriga-Shared-Task-Id", in.TaskID)
@@ -60,8 +60,9 @@ func (r *Relay) model(ctx context.Context, w http.ResponseWriter, raw []byte) er
 	if e != nil {
 		return e
 	}
-	defer response.Body.Close()
-	if response.StatusCode != 200 || strings.Split(response.Header.Get("Content-Type"), ";")[0] != "text/event-stream" {
+	defer func() { _ = response.Body.Close() }()
+	format := strings.TrimSpace(strings.Split(response.Header.Get("Content-Type"), ";")[0])
+	if response.StatusCode != 200 || !has([]string{"text/event-stream", "application/json"}, format) {
 		return errors.New("common.unavailable")
 	}
 	w.Header().Set("Content-Type", "application/x-ndjson")
@@ -75,7 +76,7 @@ func (r *Relay) model(ctx context.Context, w http.ResponseWriter, raw []byte) er
 		return http.NewResponseController(w).Flush()
 	}
 	state := newResponseState(fmt.Sprint(body["model"]), emit)
-	e = readSSE(&streamActivity{reader: response.Body, timer: idle}, func(data string) error {
+	accept := func(data string) error {
 		idle.Reset(30 * time.Second)
 		if ctx.Err() != nil {
 			return ctx.Err()
@@ -84,7 +85,23 @@ func (r *Relay) model(ctx context.Context, w http.ResponseWriter, raw []byte) er
 			return e
 		}
 		return state.accept([]byte(data))
-	})
+	}
+	activity := &streamActivity{reader: response.Body, timer: idle}
+	if format == "application/json" {
+		var completion []byte
+		completion, e = io.ReadAll(io.LimitReader(activity, maximum+1))
+		if e == nil && len(completion) <= maximum {
+			var chunk []byte
+			chunk, e = completionChunk(completion)
+			if e == nil {
+				e = accept(string(chunk))
+			}
+		} else if e == nil {
+			e = errors.New("oversize completion")
+		}
+	} else {
+		e = readSSE(activity, accept)
+	}
 	if e == nil {
 		e = state.complete()
 	}
@@ -92,6 +109,38 @@ func (r *Relay) model(ctx context.Context, w http.ResponseWriter, raw []byte) er
 		_ = emit(map[string]any{"type": "finish", "reason": map[string]any{"kind": "error", "failure": map[string]string{"code": "SERVER", "message": "Shared model stream unavailable"}}})
 	}
 	return nil
+}
+
+// A non-streaming OpenAI response uses the same validated public state machine
+// as SSE. No synthetic DONE is created; an actual terminal choice is required.
+func completionChunk(raw []byte) ([]byte, error) {
+	var event map[string]json.RawMessage
+	if json.Unmarshal(raw, &event) != nil || string(event["object"]) != `"chat.completion"` {
+		return nil, errors.New("invalid completion")
+	}
+	var choices []map[string]json.RawMessage
+	if json.Unmarshal(event["choices"], &choices) != nil || len(choices) != 1 {
+		return nil, errors.New("invalid completion choice")
+	}
+	var message map[string]json.RawMessage
+	if json.Unmarshal(choices[0]["message"], &message) != nil || string(message["role"]) != `"assistant"` || len(choices[0]["finish_reason"]) == 0 || string(choices[0]["finish_reason"]) == "null" {
+		return nil, errors.New("incomplete completion")
+	}
+	if toolsRaw, ok := message["tool_calls"]; ok {
+		var tools []map[string]json.RawMessage
+		if json.Unmarshal(toolsRaw, &tools) != nil || len(tools) > 128 {
+			return nil, errors.New("invalid completion tools")
+		}
+		for i, tool := range tools {
+			tool["index"], _ = json.Marshal(i)
+		}
+		message["tool_calls"], _ = json.Marshal(tools)
+	}
+	choices[0]["delta"], _ = json.Marshal(message)
+	delete(choices[0], "message")
+	event["object"] = json.RawMessage(`"chat.completion.chunk"`)
+	event["choices"], _ = json.Marshal(choices)
+	return json.Marshal(event)
 }
 
 type streamActivity struct {
@@ -226,7 +275,7 @@ func openAI(input map[string]any) (map[string]any, error) {
 		result["tools"] = out
 	}
 	b, _ := json.Marshal(result)
-	if len(b) > maximum {
+	if len(b) > 4*1024*1024 {
 		return nil, fail
 	}
 	return result, nil

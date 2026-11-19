@@ -35,7 +35,13 @@ func TestSharedHostConfigCommandUsesOnlyPurposePublicMaterial(t *testing.T) {
 		t.Fatal(e)
 	}
 	output := filepath.Join(dir, "host.json")
-	args = append(args, "--model", "synthetic-model", "--enterprise-config", policy, "--output", output)
+	trustFile := filepath.Join(dir, "message-trust.json")
+	der, _ := x509.MarshalPKIXPublicKey(original["message"])
+	trust, _ := json.Marshal(map[string]any{"realm": "1", "roots": []any{map[string]string{"kid": "fixture-root", "public_key_spki": base64.RawURLEncoding.EncodeToString(der)}}})
+	if e := os.WriteFile(trustFile, trust, 0444); e != nil {
+		t.Fatal(e)
+	}
+	args = append(args, "--model", "synthetic-model", "--enterprise-config", policy, "--message-trust", trustFile, "--output", output)
 	var log bytes.Buffer
 	if e := RunCLI(args, &log, &log); e != nil {
 		t.Fatal(e)
@@ -48,6 +54,10 @@ func TestSharedHostConfigCommandUsesOnlyPurposePublicMaterial(t *testing.T) {
 		IdentityKeys   map[string]string
 		CapabilityKeys map[string]map[string]string
 		Model          string
+		MessageTrust   struct {
+			Realm string
+			Roots []any
+		}
 	}
 	if e = json.Unmarshal(raw, &doc); e != nil {
 		t.Fatal(e)
@@ -62,6 +72,9 @@ func TestSharedHostConfigCommandUsesOnlyPurposePublicMaterial(t *testing.T) {
 	}
 	if len(doc.CapabilityKeys) != 3 || doc.Model != "synthetic-model" || bytes.Contains(raw, []byte("PRIVATE KEY")) {
 		t.Fatal("invalid public config")
+	}
+	if doc.MessageTrust.Realm != "1" || len(doc.MessageTrust.Roots) != 1 {
+		t.Fatal("approved message roots not rendered")
 	}
 	if e = RunCLI(args, &log, &log); e == nil {
 		t.Fatal("existing Host config overwritten")

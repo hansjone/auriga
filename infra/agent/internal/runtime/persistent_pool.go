@@ -58,9 +58,12 @@ type PersistentPools struct {
 	Unpublish      func(string)
 	Report         func(*nodev1.SessionRequest)
 	ConfigureHost  func(context.Context, *nodev1.SharedDshBinding, int) (string, error)
-	mu             sync.Mutex
-	views          map[string]*nodev1.SharedDshResourceView
-	active         map[string]bool
+	// Ownership boundary, like storage.Layout.Chown. Production defaults to
+	// strict Lchown; synthetic non-root Engine fixtures record this operation.
+	Chown  func(string, int, int) error
+	mu     sync.Mutex
+	views  map[string]*nodev1.SharedDshResourceView
+	active map[string]bool
 }
 
 type poolProcess struct {
@@ -215,7 +218,7 @@ func (m *PersistentPools) ensure(ctx context.Context, binding *nodev1.SharedDshB
 		if err != nil {
 			return err
 		}
-		if err = sharePoolDirectory(path, members, uid); err != nil {
+		if err = m.sharePoolDirectory(path, members, uid); err != nil {
 			return err
 		}
 	}
@@ -226,7 +229,20 @@ func (m *PersistentPools) ensure(ctx context.Context, binding *nodev1.SharedDshB
 	if err = layout.Quota.Ensure(ctx, home, storage.MemberBytes, storage.MemberInodes); err != nil {
 		return err
 	}
-	if err = storage.Lchown(home, uid, uid); err != nil {
+	if err = m.chown(home, uid, uid); err != nil {
+		return err
+	}
+	// A separate durable, quota-enforced Host trust ledger. The third mount of
+	// this same filesystem exposes only public message cache at its fixed path;
+	// control and private node ledgers remain outside the filesystem.
+	trust := filepath.Join(members, "message-trust")
+	if err = os.MkdirAll(trust, 0700); err != nil {
+		return err
+	}
+	if err = layout.Quota.Ensure(ctx, trust, storage.MemberBytes, storage.MemberInodes); err != nil {
+		return err
+	}
+	if err = m.chown(trust, uid, uid); err != nil {
 		return err
 	}
 	full := proto.Clone(m.Template).(*nodev1.InstanceSpec)
@@ -377,7 +393,14 @@ func (m *PersistentPools) ensure(ctx context.Context, binding *nodev1.SharedDshB
 	return nil
 }
 
-func sharePoolDirectory(path, root string, uid int) error {
+func (m *PersistentPools) chown(path string, uid, gid int) error {
+	if m.Chown != nil {
+		return m.Chown(path, uid, gid)
+	}
+	return storage.Lchown(path, uid, gid)
+}
+
+func (m *PersistentPools) sharePoolDirectory(path, root string, uid int) error {
 	if err := storage.AssertUnderRoot(root, path); err != nil {
 		return err
 	}
@@ -386,7 +409,7 @@ func sharePoolDirectory(path, root string, uid int) error {
 			return err
 		}
 	}
-	return storage.Lchown(path, uid, uid)
+	return m.chown(path, uid, uid)
 }
 
 func (m *PersistentPools) Watch(ctx context.Context) {

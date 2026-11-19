@@ -166,7 +166,10 @@ func TestSharedPreparationMTLSRoundTripAndReconnectReplaysDurableReceipts(t *tes
 		}
 		disconnect()
 		select {
-		case <-done:
+		case err := <-done:
+			if err == nil {
+				t.Fatal("disconnected session returned no error")
+			}
 		case <-ctx.Done():
 			t.Fatal("session did not stop")
 		}
