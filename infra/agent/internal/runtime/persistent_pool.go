@@ -48,18 +48,19 @@ func (v *EmptyPoolResources) Cleanup(ctx context.Context, pool string) error {
 // PersistentPools joins real directory receipts, authoritative platform views,
 // signed runtime activation, immutable configuration and a single actual process.
 type PersistentPools struct {
-	Pools          *SharedPools
-	Driver         *Docker
-	UIDs           *storage.UIDTable
-	Template       *nodev1.InstanceSpec
-	Profile, Ports []byte
-	Resources      PoolResourceVerifier
-	Publish        func(string, Endpoint)
-	Unpublish      func(string)
-	Report         func(*nodev1.SessionRequest)
-	Memory         func(context.Context, string) (*nodev1.SharedDshPoolMemorySample, error)
-	TaskAdmission  *PoolTaskAdmission
-	ConfigureHost  func(context.Context, *nodev1.SharedDshBinding, int) (string, error)
+	Pools            *SharedPools
+	Driver           *Docker
+	UIDs             *storage.UIDTable
+	Template         *nodev1.InstanceSpec
+	Profile, Ports   []byte
+	DedicatedProfile []byte
+	Resources        PoolResourceVerifier
+	Publish          func(string, Endpoint)
+	Unpublish        func(string)
+	Report           func(*nodev1.SessionRequest)
+	Memory           func(context.Context, string) (*nodev1.SharedDshPoolMemorySample, error)
+	TaskAdmission    *PoolTaskAdmission
+	ConfigureHost    func(context.Context, *nodev1.SharedDshBinding, int) (string, error)
 	// Ownership boundary, like storage.Layout.Chown. Production defaults to
 	// strict Lchown; synthetic non-root Engine fixtures record this operation.
 	Chown  func(string, int, int) error
@@ -169,6 +170,10 @@ func (m *PersistentPools) snapshot(pool string) ([]*nodev1.SharedDshBinding, []*
 }
 
 func (m *PersistentPools) ensure(ctx context.Context, binding *nodev1.SharedDshBinding) (result error) {
+	return m.ensureMode(ctx, binding, nil)
+}
+
+func (m *PersistentPools) ensureMode(ctx context.Context, binding *nodev1.SharedDshBinding, restart *dedicatedReceipt) (result error) {
 	defer func() {
 		if result != nil {
 			delete(m.active, binding.PhysicalInstanceId)
@@ -276,7 +281,7 @@ func (m *PersistentPools) ensure(ctx context.Context, binding *nodev1.SharedDshB
 	}
 	mode := "shared"
 	if binding.Mode == nodev1.DshInstanceMode_DSH_INSTANCE_MODE_DEDICATED {
-		mode = "dedicated"
+		return m.ensureDedicated(ctx, binding, full, uid, members, skills, relay, port, restart)
 	}
 	digest, err := renderer.RenderPoolMode(m.Profile, m.Ports, pool, binding.TenantId, mode, meta, port)
 	if err != nil {

@@ -8,12 +8,13 @@
 
 按以下配方所用的镜像标签准备 Linux amd64 基镜像。每个实际下载的标签要与发布索引里的审核摘要一致，并输出 Docker 归档、来源摘要和文件 SHA-256。
 
-~~~sh
+```sh
 bash deploy/nas/offline-build/export-base.sh golang:1.27.3 /outputs/go-linux-amd64.tar.gz
-~~~
+```
 
 - 在 golang:1.27.3 中执行 go-inputs.sh prepare /outputs/go。输入由 NAS 的实际 Go 构建目标解析，包含 Go workspace 与独立 bootstrap 模块的公共代理文件、源码锁哈希和逐文件哈希。
 - 在 node:22-bookworm 中执行 web-inputs.sh prepare /outputs/web。脚本保存钉定版本的 Corepack 工具包、pnpm store 和 workspace 锁文件哈希。
+- DSH 运行镜像使用另一份同锁封装：在已核 Node22.19.0/npm10.9.3 镜像内用 `dsh-inputs.sh prepare /outputs/runtime-dependencies`，复用上述 Web 的 corepack/store/policy 原件，只补 rc.3 与插件生产锁的 npm `_cacache`。设置 `AURIGA_DSH_WEB_INPUTS_DIR` 和已核 `AURIGA_DSH_NODE_IMAGE_CONFIG`；可用带独立 SHA256 的原 npm cache 续做。输入、四项 artifact 和公开完整离线构建入口详见 [real-dsh 配方](../../compose/real-dsh/README.md)。它不读取 system/agent 的 deb 输入冒 SDK，也不携旧项目 broker。
 - 在具有 curl 的 node:22-bookworm 中执行 java-tools.sh /outputs/java-tools。它从 Maven Wrapper 配置和契约工具的 POM 读取版本，校验 Maven 发行 ZIP、Wrapper JAR，以及 Linux amd64 Node 发行包。这个工具包可单独下载和校验。
 - 在 eclipse-temurin:25-jdk 中执行 java-inputs.sh prepare /outputs/java。它按生产的 Maven reactor 构建，保留 Wrapper 发行缓存、公共 Maven 依赖和契约工具的 npm 内容缓存。在线生成的应用 JAR 不进入输入包。已冻结的 Maven 发布索引、源码锁覆盖及整栈验收范围见[Forgejo 构建说明](../../../docs/dev/forgejo-only-build.zh.md)。
 - 在对应的运行基镜像中执行 system-inputs.sh SERVICE /outputs/system/SERVICE。agent 用 debian:bookworm-slim，platform 用 eclipse-temurin:25-jre，bifrost 用官方 Dockerfile 固定的 alpine:3.22 摘要，operator 用 python:3.13.8-slim-bookworm。edge 直接使用 gcr.io/distroless/static-debian12:nonroot。
@@ -26,7 +27,7 @@ Java 采集需要中断后续做时，可将专用可写目录挂进容器，用
 
 从发布索引取得构建输入。核对外层 SHA-256，解包到独立目录，加载索引中同一版本的工具链镜像和运行基镜像。以本地下载目录 release-inputs 为例，文件名以发布索引为准。使用本地 Docker Engine 的默认 BuildKit。设置外网访问限制时保留 Forgejo 和已配置的内网访问规则。
 
-~~~sh
+```sh
 source_dir=$(pwd)
 inputs="$source_dir/release-inputs"
 artifacts="$source_dir/rebuild-output"
@@ -36,7 +37,7 @@ docker run --rm --pull never --network none --platform linux/amd64 \
   -v "$source_dir:/source:ro" -v "$inputs/go:/inputs:ro" -v "$artifacts/go:/output" \
   -e AURIGA_GO_PROXY_DIR=/inputs golang:1.27.3 \
   sh /source/deploy/nas/offline-build/go-inputs.sh build /output
-~~~
+```
 
 Web 与 Java 分别改用 node:22-bookworm 和 eclipse-temurin:25-jdk，并将各自输入目录绑定到 /inputs、输出目录绑定到 /output。Web 设置 AURIGA_WEB_INPUTS_DIR=/inputs 后调用 web-inputs.sh build /output，Java 设置 AURIGA_JAVA_INPUTS_DIR=/inputs 后调用 java-inputs.sh build /output。三个脚本均校验归档内清单与当前源码锁，并要求空输出目录。
 
@@ -44,12 +45,12 @@ Java 重建会将已核验的官方 Node Linux 发行包解开到临时构建目
 
 把系统输入放进 rebuild-output/system/SERVICE，再从已校验的本地基镜像装配。Go 脚本默认编译全部目标，也可在 build /output 后追加程序名，例如 auriga-agent。
 
-~~~sh
+```sh
 sh deploy/nas/offline-build/assemble-image.sh agent auriga/agent:site-rebuild \
   debian:bookworm-slim "$artifacts"
 docker run --rm --pull never --network none \
   --entrypoint /usr/local/bin/auriga-agent auriga/agent:site-rebuild --version
-~~~
+```
 
 edge 需要 Go 与 Web 输出，platform 需要 Java 与 system/platform，agent 和 bifrost 需要各自的 Go 和系统包，operator 需要 system/operator。两个 Go 辅助程序 auriga-nas-bootstrap 和 runtime-release 与其他 Go 程序一起生成，按公开 NAS 打包配方装入发行目录。
 

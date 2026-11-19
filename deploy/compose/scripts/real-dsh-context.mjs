@@ -24,9 +24,11 @@ export const commonInputs = [
   `${recipePath}/runtime.mjs`,
   `${recipePath}/start.mjs`,
   `${recipePath}/tooling.mjs`,
+  `${recipePath}/dependencies.mjs`,
   `${recipePath}/tooling/package.json`,
   `${recipePath}/tooling/package-lock.json`,
   'clients/installer/upstream.json',
+  '.npmrc',
   'clients/dsh-plugin/package.json',
   'clients/dsh-plugin/package-lock.json',
   'clients/dsh-plugin/LICENSE',
@@ -130,6 +132,18 @@ export async function withRealDshContext(root, inputs, build, prefix = '') {
       cpSync(source, destination);
       normalizeSourceModes(destination);
       verifyToolingTarball(destination, pin);
+      const { stageDependencies, verifyDependencies, hashDependencyFile } =
+        await import(
+          pathToFileURL(sourcePath(root, `${recipePath}/dependencies.mjs`)).href
+        );
+      const closure = join(payload, 'runtime-dependencies');
+      stageDependencies(root, closure);
+      normalizeSourceModes(closure);
+      verifyDependencies(
+        payload,
+        closure,
+        hashDependencyFile(join(closure, 'runtime-dependencies.json')),
+      );
     }
     return await build(context, payload);
   } finally {

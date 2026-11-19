@@ -59,6 +59,9 @@ type releaseEngine struct {
 	beforeInspect func(string) error
 	memoryStats   map[string]any
 	beforeStats   func()
+	preparation   func(map[string]any) error
+	dedicatedHost http.HandlerFunc
+	apiVersion    string
 }
 
 func newReleaseEngine(t *testing.T) (*releaseEngine, *runtime.Docker, *dockerReleaseFixture) {
@@ -66,6 +69,15 @@ func newReleaseEngine(t *testing.T) (*releaseEngine, *runtime.Docker, *dockerRel
 	e := &releaseEngine{containers: map[string]map[string]any{}, names: map[string]string{}}
 	e.healthy.Store(true)
 	health := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/_auriga/dedicated-") {
+			e.mu.Lock()
+			handler := e.dedicatedHost
+			e.mu.Unlock()
+			if handler != nil {
+				handler(w, r)
+				return
+			}
+		}
 		if r.URL.Path == "/auriga-node-resource-catalog" {
 			e.mu.Lock()
 			handler := e.catalog
@@ -101,6 +113,12 @@ func (e *releaseEngine) serve(w http.ResponseWriter, r *http.Request) {
 	defer e.mu.Unlock()
 	path := r.URL.Path
 	switch {
+	case path == "/version":
+		version := e.apiVersion
+		if version == "" {
+			version = "1.45"
+		}
+		_ = json.NewEncoder(w).Encode(map[string]string{"ApiVersion": version})
 	case path == "/volumes/create":
 		var body map[string]any
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
@@ -238,7 +256,21 @@ func (e *releaseEngine) serve(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 		}
-		_ = json.NewEncoder(w).Encode(map[string]any{"Id": actualID, "Image": image, "State": map[string]any{"Running": body["running"] == true, "StartedAt": "2026-01-01T01:02:03Z", "Pid": pid}, "Config": map[string]any{"Labels": body["Labels"], "Entrypoint": body["Entrypoint"], "Cmd": body["Cmd"]}, "HostConfig": body["HostConfig"], "Mounts": mounts, "NetworkSettings": map[string]any{"Ports": map[string]any{"7860/tcp": []any{map[string]string{"HostPort": e.port}}}}})
+		live := map[string]any{"Running": body["running"] == true, "StartedAt": "2026-01-01T01:02:03Z", "Pid": pid}
+		if labels, _ := body["Labels"].(map[string]any); labels["auriga.dedicated-preparation"] != nil && body["running"] != true && body["helper-exited"] != true {
+			live["Status"], live["Pid"], live["StartedAt"] = "created", 0, "0001-01-01T00:00:00Z"
+		}
+		if body["helper-exited"] == true {
+			live["Status"], live["ExitCode"], live["Pid"], live["FinishedAt"] = "exited", 0, 0, "2026-01-01T01:02:04Z"
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"Id": actualID, "Image": image, "State": live, "Config": map[string]any{"Labels": body["Labels"], "Entrypoint": body["Entrypoint"], "Cmd": body["Cmd"], "User": body["User"], "WorkingDir": body["WorkingDir"], "Env": body["Env"]}, "HostConfig": body["HostConfig"], "Mounts": mounts, "NetworkSettings": map[string]any{"Ports": map[string]any{"7860/tcp": []any{map[string]string{"HostPort": e.port}}}}})
+	case strings.HasSuffix(path, "/wait"):
+		id := strings.TrimSuffix(strings.TrimPrefix(path, "/containers/"), "/wait")
+		if e.containers[id] == nil || e.containers[id]["helper-exited"] != true {
+			http.Error(w, "helper exit unknown", http.StatusServiceUnavailable)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]int{"StatusCode": 0})
 	case strings.HasSuffix(path, "/start"):
 		id := strings.TrimSuffix(strings.TrimPrefix(path, "/containers/"), "/start")
 		body := e.containers[id]
@@ -252,6 +284,16 @@ func (e *releaseEngine) serve(w http.ResponseWriter, r *http.Request) {
 		}
 		body["running"] = true
 		e.starts = append(e.starts, id)
+		labels, _ := body["Labels"].(map[string]any)
+		if labels["auriga.dedicated-preparation"] != nil && e.preparation != nil {
+			var err error
+			e.runHookUnlocked(func() { err = e.preparation(body) })
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusServiceUnavailable)
+				return
+			}
+			body["running"], body["helper-exited"] = false, true
+		}
 		afterStart := e.afterStart
 		if afterStart != nil {
 			e.runHookUnlocked(afterStart)

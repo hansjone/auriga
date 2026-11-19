@@ -244,7 +244,7 @@ func (m *SharedPools) AdmitTask(ctx context.Context, b *nodev1.SharedDshBinding,
 	if s.Active == nil {
 		s.Active = map[string]string{}
 	}
-	if memberOperationBlocked(s, b) || s.Contaminated || m.inflight[b.PhysicalInstanceId+"/"+b.MemberId] || proto.Equal(s.Quiesced[b.MemberId], b) || !proto.Equal(s.Bindings[b.MemberId], b) {
+	if memberOperationBlocked(s, b) || s.Contaminated || s.DedicatedMaintenance != nil || m.inflight[b.PhysicalInstanceId+"/"+b.MemberId] || proto.Equal(s.Quiesced[b.MemberId], b) || !proto.Equal(s.Bindings[b.MemberId], b) {
 		return fmt.Errorf("pool binding unavailable")
 	}
 	if old := s.Active[b.MemberId]; old != "" {

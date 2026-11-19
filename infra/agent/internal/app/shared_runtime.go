@@ -17,6 +17,7 @@ import (
 	"github.com/hansjone/auriga/infra/agent/internal/storage"
 	nodev1 "github.com/hansjone/auriga/infra/gen/auriga/node/v1"
 	"google.golang.org/protobuf/encoding/protojson"
+	"google.golang.org/protobuf/proto"
 )
 
 func sharedRuntime(ctx context.Context, cfg config.Config, pools *runtime.SharedPools, docker *runtime.Docker, registry *ingress.MapRegistry) (*runtime.PersistentPools, error) {
@@ -58,6 +59,16 @@ func sharedRuntime(ctx context.Context, cfg config.Config, pools *runtime.Shared
 	if err = renderer.ValidateProductionPoolProfile(profile); err != nil {
 		return nil, err
 	}
+	var dedicatedProfile []byte
+	if settings.DedicatedProfileFile != "" {
+		dedicatedProfile, err = read(settings.DedicatedProfileFile)
+		if err != nil {
+			return nil, err
+		}
+		if err = renderer.ValidateDedicatedPoolProfile(dedicatedProfile); err != nil {
+			return nil, err
+		}
+	}
 	// Production uses the reviewed, signed package export, not a handwritten
 	// mutable module installed outside the runtime image.
 	if settings.PortsModuleFile != "" {
@@ -96,6 +107,7 @@ func sharedRuntime(ctx context.Context, cfg config.Config, pools *runtime.Shared
 		}
 	}
 	started := map[string]string{}
+	startedBindings := map[string]*nodev1.SharedDshBinding{}
 	configure := func(_ context.Context, b *nodev1.SharedDshBinding, uid int) (string, error) {
 		hostMu.Lock()
 		defer hostMu.Unlock()
@@ -103,6 +115,10 @@ func sharedRuntime(ctx context.Context, cfg config.Config, pools *runtime.Shared
 			return "", fmt.Errorf("shared tenant mismatch")
 		}
 		if directory := started[b.PhysicalInstanceId]; directory != "" {
+			old := startedBindings[b.PhysicalInstanceId]
+			if old == nil || old.Mode != b.Mode || (b.Mode == nodev1.DshInstanceMode_DSH_INSTANCE_MODE_DEDICATED && !proto.Equal(old, b)) {
+				return "", fmt.Errorf("dedicated Host binding requires explicit rebuild")
+			}
 			return directory, nil
 		}
 		directory, err := pools.Layout.Path(b.PhysicalInstanceId, "control", "host-relay")
@@ -119,11 +135,25 @@ func sharedRuntime(ctx context.Context, cfg config.Config, pools *runtime.Shared
 		target := "/var/lib/auriga/pools/" + b.PhysicalInstanceId + "/control"
 		config["schemaVersion"], config["tenantId"], config["physicalInstanceId"] = 1, b.TenantId, b.PhysicalInstanceId
 		config["nodeSocket"], config["skillRoots"] = target+"/shared-node.sock", []string{"/run/auriga/skills-active/current"}
+		name := "shared-host.json"
+		if b.Mode == nodev1.DshInstanceMode_DSH_INSTANCE_MODE_DEDICATED {
+			if len(dedicatedProfile) == 0 {
+				return "", fmt.Errorf("dedicated native installation missing")
+			}
+			value, err := sharednode.HostValue(b)
+			if err != nil {
+				return "", err
+			}
+			config["binding"] = value
+			config["skillRoots"] = []string{}
+			delete(config, "messageTrust")
+			name = "dedicated-host.json"
+		}
 		raw, err := json.Marshal(config)
 		if err != nil || len(raw) > 256*1024 {
 			return "", fmt.Errorf("invalid shared host configuration")
 		}
-		path := filepath.Join(directory, "shared-host.json")
+		path := filepath.Join(directory, name)
 		if old, e := os.ReadFile(path); e == nil {
 			if string(old) != string(raw) {
 				return "", fmt.Errorf("pool host configuration requires maintenance")
@@ -144,12 +174,14 @@ func sharedRuntime(ctx context.Context, cfg config.Config, pools *runtime.Shared
 			return "", err
 		}
 		started[b.PhysicalInstanceId] = directory
+		startedBindings[b.PhysicalInstanceId] = proto.Clone(b).(*nodev1.SharedDshBinding)
 		return directory, nil
 	}
 	pools.Supervisor = docker
 	manager = &runtime.PersistentPools{Pools: pools, Driver: docker,
-		TaskAdmission: admission,
-		UIDs:          storage.NewUIDTable(cfg.AgentDir()), Template: template, Profile: profile, Ports: ports,
+		TaskAdmission:    admission,
+		DedicatedProfile: dedicatedProfile,
+		UIDs:             storage.NewUIDTable(cfg.AgentDir()), Template: template, Profile: profile, Ports: ports,
 		Resources:     &runtime.PoolMaterializer{Layout: pools.Layout, Source: client, Unified: runtime.NewUnifiedManager(&storage.Layout{InstancesDir: cfg.InstancesDir()}, docker, nil, cfg.AgentDir())},
 		ConfigureHost: configure,
 		Publish: func(pool string, endpoint runtime.Endpoint) {

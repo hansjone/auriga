@@ -123,6 +123,14 @@ test('matching standalone and cumulative source+kit bindings locate the pinned o
     findToolingTarball(dirname(source)),
     join(f.root, 'kit/blobs', sha),
   );
+  f.put('source/.auriga-devkit.json', {
+    root: join(f.root, 'kit'),
+    baseline: { version: '0.2.0-site.1', upstreamVersion: '0.2.0' },
+  });
+  assert.equal(
+    findToolingTarball(dirname(source)),
+    join(f.root, 'kit/blobs', sha),
+  );
   f.put('kit/blobs/' + sha, 'tampered');
   assert.throws(() => findToolingTarball(dirname(source)), /bytes differ/);
   f.put('source/.auriga-devkit.json', {

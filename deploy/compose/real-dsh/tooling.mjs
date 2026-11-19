@@ -85,7 +85,10 @@ export function findToolingTarball(root, explicit) {
   let file, expected;
   try {
     const catalog = json(join(kit, 'devkit-catalog.json'));
-    const entry = catalog.versions?.[binding.baseline?.version];
+    const entry =
+      catalog.versions?.[
+        binding.baseline?.upstreamVersion || binding.baseline?.version
+      ];
     expected = entry?.files?.['runtime-tooling.tgz'];
     if (
       !/^[a-f0-9]{64}$/.test(expected ?? '') ||

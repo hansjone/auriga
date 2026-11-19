@@ -38,16 +38,17 @@ type poolOperation struct {
 	Pending     bool
 }
 type poolState struct {
-	Tenant       string
-	Bindings     map[string]*nodev1.SharedDshBinding
-	Operations   map[string]*poolOperation
-	Active       map[string]string
-	Impacts      map[string]*nodev1.SharedDshGuardianImpact
-	Contaminated bool
-	Fence        uint64
-	Quiesced     map[string]*nodev1.SharedDshBinding
-	Released     map[string]*nodev1.SharedDshRevocation
-	Retiring     map[string]*nodev1.SharedDshBinding
+	Tenant               string
+	Bindings             map[string]*nodev1.SharedDshBinding
+	Operations           map[string]*poolOperation
+	Active               map[string]string
+	Impacts              map[string]*nodev1.SharedDshGuardianImpact
+	Contaminated         bool
+	Fence                uint64
+	Quiesced             map[string]*nodev1.SharedDshBinding
+	Released             map[string]*nodev1.SharedDshRevocation
+	Retiring             map[string]*nodev1.SharedDshBinding
+	DedicatedMaintenance *nodev1.SharedDshBinding
 }
 
 // SharedPools durably serializes state, with member execution outside the lock.

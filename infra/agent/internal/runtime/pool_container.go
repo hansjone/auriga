@@ -15,6 +15,7 @@ import (
 
 type PoolContainer struct {
 	Volume, Device, Members, Skills, Meta, Relay, ProfileDigest string
+	Mode, DedicatedPrepared, DedicatedCache                     string
 }
 
 func (d *Docker) poolContainerPath(id string) (string, error) {
@@ -96,11 +97,35 @@ func (d *Docker) configurePool(ctx context.Context, spec *Spec, body map[string]
 	if p.Relay != "" {
 		host["Mounts"] = append(host["Mounts"].([]map[string]any), map[string]any{"Type": "bind", "Source": p.Relay, "Target": "/var/lib/auriga/pools/" + spec.InstanceID + "/control", "ReadOnly": true})
 	}
+	launcher := "/run/auriga/pool-launcher.mjs"
+	if p.Mode == "dedicated" {
+		if !filepath.IsAbs(p.DedicatedPrepared) || !filepath.IsAbs(p.DedicatedCache) || p.Relay == "" {
+			return fmt.Errorf("dedicated prepared output and verified cache required")
+		}
+		host["Mounts"] = append(host["Mounts"].([]map[string]any),
+			map[string]any{"Type": "bind", "Source": p.DedicatedPrepared, "Target": "/run/auriga/dedicated-prepared", "ReadOnly": true},
+			map[string]any{"Type": "bind", "Source": p.DedicatedCache, "Target": "/run/auriga/dedicated-resources", "ReadOnly": true})
+		launcher = "/run/auriga/dedicated-launcher.mjs"
+		// Ensure has already verified and removed the exact old stopped
+		// container using its OLD expectations. Only now replace this record.
+		path, err := d.poolContainerPath(spec.InstanceID)
+		if err != nil {
+			return err
+		}
+		if err = unifiedAtomic(path, p); err != nil {
+			return err
+		}
+	} else if p.Mode != "" && p.Mode != "shared" || p.DedicatedPrepared != "" || p.DedicatedCache != "" {
+		return fmt.Errorf("invalid pool mode mounts")
+	}
 	host["RestartPolicy"] = map[string]any{"Name": "no"}
 	body["Entrypoint"] = []string{"node", renderer.ContainerResourceSupervisor}
-	body["Cmd"] = []string{renderer.ContainerResourcePolicy, "node", "/run/auriga/pool-launcher.mjs"}
+	body["Cmd"] = []string{renderer.ContainerResourcePolicy, "node", launcher}
 	labels := body["Labels"].(map[string]string)
 	labels["auriga.shared-pool"], labels["auriga.shared-profile"] = "true", p.ProfileDigest
+	if p.Mode == "dedicated" {
+		labels["auriga.pool-mode"] = "dedicated"
+	}
 	return nil
 }
 
@@ -123,6 +148,15 @@ func (d *Docker) verifyPoolContainer(ctx context.Context, id string, inspect map
 	if err := json.Unmarshal(raw, &p); err != nil {
 		return err
 	}
+	launcher := "/run/auriga/pool-launcher.mjs"
+	if p.Mode == "dedicated" {
+		if labels["auriga.pool-mode"] != "dedicated" || !filepath.IsAbs(p.DedicatedPrepared) || !filepath.IsAbs(p.DedicatedCache) {
+			return fmt.Errorf("dedicated runtime identity mismatch")
+		}
+		launcher = "/run/auriga/dedicated-launcher.mjs"
+	} else if p.DedicatedPrepared != "" || p.DedicatedCache != "" || labels["auriga.pool-mode"] != nil {
+		return fmt.Errorf("shared runtime has dedicated output")
+	}
 	host, _ := inspect["HostConfig"].(map[string]any)
 	capAdd, capShape := host["CapAdd"].([]any)
 	if host["CapAdd"] != nil && !capShape {
@@ -133,13 +167,16 @@ func (d *Docker) verifyPoolContainer(ctx context.Context, id string, inspect map
 		host["ReadonlyRootfs"] != true || host["Privileged"] != false || len(capAdd) != 0 ||
 		!containsString(host["CapDrop"], "ALL") || !containsString(host["SecurityOpt"], "no-new-privileges:true") ||
 		!sameStrings(cfg["Entrypoint"], []string{"node", renderer.ContainerResourceSupervisor}) ||
-		!sameStrings(cfg["Cmd"], []string{renderer.ContainerResourcePolicy, "node", "/run/auriga/pool-launcher.mjs"}) {
+		!sameStrings(cfg["Cmd"], []string{renderer.ContainerResourcePolicy, "node", launcher}) {
 		return fmt.Errorf("shared process profile identity mismatch")
 	}
 	mounts, _ := inspect["Mounts"].([]any)
 	count := 5
 	if p.Relay != "" {
 		count++
+	}
+	if p.Mode == "dedicated" {
+		count += 2
 	}
 	if len(mounts) != count {
 		return fmt.Errorf("shared process mounts unavailable")
@@ -159,6 +196,16 @@ func (d *Docker) verifyPoolContainer(ctx context.Context, id string, inspect map
 			source, kind string
 			rw           bool
 		}{p.Relay, "bind", false}
+	}
+	if p.Mode == "dedicated" {
+		expected["/run/auriga/dedicated-prepared"] = struct {
+			source, kind string
+			rw           bool
+		}{p.DedicatedPrepared, "bind", false}
+		expected["/run/auriga/dedicated-resources"] = struct {
+			source, kind string
+			rw           bool
+		}{p.DedicatedCache, "bind", false}
 	}
 	if p.Volume != "" {
 		expected["/home/dsh"] = struct {

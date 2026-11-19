@@ -8,6 +8,8 @@
 
 包含 dedicated 运行配方的新 Linux devkit 还必须携带 `build.runtimeTooling` 指定的原始 pnpm 11.28.5 TGZ，存入 `cache/runtime-tooling.tgz` 或对应累积 blob。它复用 installer 的同一固定版本/SHA512，并另以发行索引 SHA256、套件签名和依赖锁键登记；缺失或篡改明确失败。现场仍先运行 `./auriga devkit verify`，real-dsh checked context 会从对应版本自动定位此输入，按固定配方离线安装至只读 `/opt/auriga-tools/pnpm`。维护者输入准备、原始 TGZ 校验与镜像命令见 [real-dsh 配方](../compose/real-dsh/README.md)。旧已签套件不修改，使用与新源码锁匹配的新套件。
 
+完整 DSH 冷构建还使用 `build.runtimeDependencies` 的四项固定 artifact（manifest/corepack/webCache/npmCache）及 `build.tools.runtime` 固定 Node 工具镜像。它们沿既有 devkit 签名、依赖 identity 和累积 blob 收录；缓存缺失或源码锁不符时不在线补包。DSH 权威入口仍是公开 `build-real-dsh.mjs`，默认从匹配已签套件离线构建，项目 broker 按当前源码重新生成；具体准备和使用见上述配方。原 source-only 的签名、版本选择和服务端五镜像装配流程不变。
+
 已核验的发行引导程序可直接 `sudo ./auriga install --package <tar或part001> --address 192.0.2.10 --verify-key /secure/release-public.pem`。升级同样接受分卷并沿用固定公钥；其他维护命令请在解包安装目录使用。
 
 1. 从独立受信渠道取得外层 tar 的 SHA-256，核对后解包到 root 管理的物理目录。包内 `SHA256SUMS` 覆盖全部文件。必须独立核准发行方 Ed25519 SPKI PEM 公钥或 SHA256(SPKI DER) 指纹。

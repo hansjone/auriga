@@ -174,17 +174,14 @@ func (m *PersistentPools) watchDedicated(ctx context.Context, bindings []*nodev1
 				observeErr = pathErr
 			}
 		}
+		if observeErr == nil && receipt.Status == "restart-required" {
+			// The durable admission gate closes before checking empty ordinary
+			// roots; unknown Finish/Jobs cannot be cleared by a health timeout.
+			observeErr = m.ensureMode(ctx, bindings[0], &receipt)
+		}
 		if observeErr == nil && receipt.Status == "ready" {
-			endpoint, endpointErr := m.Driver.Endpoint(pool)
-			if endpointErr == nil {
-				if m.Publish != nil {
-					m.Publish(pool, endpoint)
-				}
-				if m.active == nil {
-					m.active = map[string]bool{}
-				}
-				m.active[pool] = true
-				status, reason = "ready", "verified"
+			if m.publishDedicatedReady(ctx, views[0], receipt, now) == nil {
+				return
 			}
 		}
 	}
@@ -194,6 +191,67 @@ func (m *PersistentPools) watchDedicated(ctx context.Context, bindings []*nodev1
 	for _, view := range views {
 		m.report(&nodev1.SessionRequest{Body: &nodev1.SessionRequest_SharedDshResourceReport{SharedDshResourceReport: &nodev1.SharedDshResourceReport{SchemaVersion: 1, Binding: view.Binding, ViewId: view.ViewId, Status: status, Reason: reason, ObservedAt: now.Unix()}}})
 	}
+}
+
+// Ready publication and its actual report share both the guardian process
+// barrier and binding ledger boundary. A Stop/revoke or endpoint withdrawal
+// cannot overtake a probe and then be overwritten by a late registry Put.
+func (m *PersistentPools) publishDedicatedReady(ctx context.Context, view *nodev1.SharedDshResourceView, receipt dedicatedReceipt, now time.Time) error {
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	pool := view.Binding.PhysicalInstanceId
+	unlock, err := m.Driver.lockPoolProcess(ctx, pool)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	fresh, err := m.dedicatedObservation(ctx, view)
+	if err != nil || fresh.Status != "ready" || fresh.HostInstanceID != receipt.HostInstanceID {
+		return fmt.Errorf("dedicated ready observation changed")
+	}
+	path, err := m.dedicatedLaunchPath(pool)
+	if err != nil {
+		return err
+	}
+	var launch dedicatedLaunchState
+	if unifiedRead(path, &launch) != nil || launch.Phase != "running" || !proto.Equal(launch.Binding, view.Binding) || launch.PreviousHost == fresh.HostInstanceID {
+		return fmt.Errorf("dedicated ready lacks new launch identity")
+	}
+	proof := m.Driver.endpointProof(pool)
+	endpoint, err := m.Driver.Endpoint(pool)
+	if err != nil {
+		return err
+	}
+	m.Pools.mu.Lock()
+	defer m.Pools.mu.Unlock()
+	s, file, err := m.Pools.load(pool)
+	if err != nil {
+		return err
+	}
+	if s.Contaminated || poolStopPending(s) || m.Pools.stopping[pool] > 0 || len(s.Bindings) != 1 || !proto.Equal(s.Bindings[view.Binding.MemberId], view.Binding) || memberOperationBlocked(s, view.Binding) || proto.Equal(s.Quiesced[view.Binding.MemberId], view.Binding) || (s.DedicatedMaintenance != nil && (!proto.Equal(s.DedicatedMaintenance, view.Binding) || len(s.Active) != 0 || m.Pools.inflight[pool+"/"+view.Binding.MemberId])) {
+		return fmt.Errorf("dedicated ready admission fence changed")
+	}
+	m.Driver.mu.Lock()
+	defer m.Driver.mu.Unlock()
+	current := m.Driver.endpoints[pool]
+	if ctx.Err() != nil || current.record == nil || current.record != proof.record || current.pending != nil || current.url != endpoint.URL || current.process != proof.process || current.leaseError() != nil {
+		return fmt.Errorf("dedicated ready process proof withdrawn")
+	}
+	if s.DedicatedMaintenance != nil {
+		s.DedicatedMaintenance = nil
+		if err = savePool(file, s); err != nil {
+			return err
+		}
+	}
+	if m.Publish != nil {
+		m.Publish(pool, endpoint)
+	}
+	if m.active == nil {
+		m.active = map[string]bool{}
+	}
+	m.active[pool] = true
+	m.report(&nodev1.SessionRequest{Body: &nodev1.SessionRequest_SharedDshResourceReport{SharedDshResourceReport: &nodev1.SharedDshResourceReport{SchemaVersion: 1, Binding: view.Binding, ViewId: view.ViewId, Status: "ready", Reason: "verified", ObservedAt: now.Unix()}}})
+	return nil
 }
 
 func dedicatedGet(ctx context.Context, endpoint, path string) ([]byte, int, error) {

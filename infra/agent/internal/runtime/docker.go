@@ -44,6 +44,7 @@ type Docker struct {
 	mu              sync.Mutex
 	endpoints       map[string]dockerEndpoint
 	endpointRevoker func(string)
+	poolControls    map[string]*poolProcessControl
 }
 
 // DockerConfig configures the Docker driver.
@@ -625,6 +626,23 @@ func (d *Docker) Stop(ctx context.Context, id string, grace time.Duration) error
 	if err := storage.ValidateInstanceID(id); err != nil {
 		return err
 	}
+	// Withdrawal is immediate even if the existing control deadline expires
+	// while waiting for a prepare/start operation to settle.
+	d.revoke(id)
+	unlock, err := d.lockPoolProcess(ctx, id)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	helperErr := d.stopDedicatedHelper(ctx, id)
+	mainErr := d.stopMain(ctx, id, grace)
+	return errors.Join(helperErr, mainErr)
+}
+
+func (d *Docker) stopMain(ctx context.Context, id string, grace time.Duration) error {
+	if err := storage.ValidateInstanceID(id); err != nil {
+		return err
+	}
 	sec := int(grace.Seconds())
 	if sec < 1 {
 		sec = 5
@@ -641,6 +659,22 @@ func (d *Docker) Stop(ctx context.Context, id string, grace time.Duration) error
 }
 
 func (d *Docker) Remove(ctx context.Context, id string) error {
+	if err := storage.ValidateInstanceID(id); err != nil {
+		return err
+	}
+	d.revoke(id)
+	unlock, err := d.lockPoolProcess(ctx, id)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	if err = d.stopDedicatedHelper(ctx, id); err != nil {
+		return err
+	}
+	return d.removeMain(ctx, id)
+}
+
+func (d *Docker) removeMain(ctx context.Context, id string) error {
 	if err := storage.ValidateInstanceID(id); err != nil {
 		return err
 	}

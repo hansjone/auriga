@@ -35,3 +35,28 @@ SDK root 环境变量只供测试定位已批准包，生产 launcher 无此配�
 测试的 boot 是参数观察边界，仅提供 launcher 原有的 `profileContext`/`appReady`
 元数据；它不是 DSH Loader 的实际启动或原生页面验收。SDK 模块和 client metadata
 解析使用真实公开实现。完整服务构造、Linux 进程和正常浏览器仍由主控串行验证。
+
+Dedicated 的独立准备夹具同样不 boot 完整 DSH。它运行生产嵌入的 helper，真实读取
+rc.3 持久 profile/bundle/user/home 层，比较 TGZ 与安装树，执行公开 normalizer 与
+resolution；launcher 的 boot 仅观察参数，但实际接入公开 PluginPackages。
+Linux 地址只由测试 builtin seam 映射到本地合成目录，不进入生产环境或配置。
+
+```powershell
+$env:AURIGA_DEDICATED_PREPARATION_FIXTURE=Join-Path (Get-Location) 'target/dedicated-prepare-fixture'
+$env:AURIGA_DEDICATED_FIXTURE_OUTPUT=Join-Path (Get-Location) 'target/dedicated-public-resources'
+Push-Location infra/agent
+go test -p 1 ./internal/renderer -run '^TestDedicatedRendererExportsClosedPreparation$' -count=1
+go test -p 1 ./internal/runtime -run '^TestDedicatedMaterializerAcceptsSignedOptionalSkillAndPlugin$' -count=1
+Pop-Location
+node --max-old-space-size=512 infra/agent/internal/renderer/dedicated_prepare.test.mjs '<批准rc.3套件>/payload/upstream/app' target/dedicated-prepare-fixture target/dedicated-public-resources/plugin.json
+$env:AURIGA_DEDICATED_PUBLIC_PREPARED=Join-Path (Get-Location) 'target/dedicated-prepare-fixture'
+Push-Location infra/agent
+go test -p 1 ./internal/runtime -run '^TestDedicatedPreparedOutputHasClosedAuthority$' -count=1 -v
+Pop-Location
+```
+
+首个 Go 命令使用与前文相同的 Go1.27.3、2 CPU、512MiB 和 target 缓存设置。
+三个 SDK 子测试包括空 profile 的保持、当前选装包与 user/home 叠层、实际可写
+profileContext、第五锚与空 patches，以及包/基线/工具漂移反例。最终 Go 命令再核
+SDK 真产物的完整身份、config SHA、精确封存基线与封闭文件集合。没有启动真实
+pnpm 安装、容器或供应商进程；实际 Linux 安装/挂载与正常市场页面仍需主控门禁。

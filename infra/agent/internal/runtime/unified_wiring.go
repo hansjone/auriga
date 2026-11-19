@@ -313,6 +313,18 @@ func (p *Preparing) GuardResources(ctx context.Context, spec *nodev1.InstanceSpe
 // ResourceProcessStopped checks actual Engine state without requiring a still
 // valid runtime release signature, so revoked runtime keys cannot prevent cleanup.
 func (d *Docker) ResourceProcessStopped(ctx context.Context, id string) (bool, error) {
+	unlock, err := d.lockPoolProcess(ctx, id)
+	if err != nil {
+		return false, err
+	}
+	defer unlock()
+	if err = d.dedicatedHelperStopped(ctx, id); err != nil {
+		return false, err
+	}
+	return d.mainProcessStopped(ctx, id)
+}
+
+func (d *Docker) mainProcessStopped(ctx context.Context, id string) (bool, error) {
 	name, err := d.cleanupContainer(ctx, id)
 	if err != nil {
 		return false, err
