@@ -1030,6 +1030,11 @@ window.__ModuleLoader__.load({
     return {
       inject: ['slots', 'locale', 'theme'],
       apply(ctx) {
+        globalThis.__AURIGA_SHARED_BROWSER__?.installMessaging(
+          ctx,
+          React,
+          primitives,
+        );
         const listInstalled = async () => {
           try {
             const result = await ctx.get?.('remote')?.pluginInventory?.list();
