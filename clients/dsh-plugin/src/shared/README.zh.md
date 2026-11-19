@@ -68,7 +68,9 @@ SourceGet、FETCH 页及各项、attempt/admit/receipt 等结果按原网络信�
 
 rc.3 原生 `session/list`、`session/control` 先按 `{kind:'global'}` 进入公共读控制器，再逐个会话和增量按本人 session role 过滤。共享策略只对这两个 action 同时给最小 global 入口与本人 session 权限；不包含原生 create、全宿主 modelCatalog、credential、MCP 或全局事件。会话创建始终经可信 Host 的登记后发布流程。正常浏览器模块仍须逐调用和流输出前后核归属与代次，不能把同步 policy 投影代替在线权威。
 
-显式意图原子保存在 `/var/lib/auriga/pools/<pool>/host/message-preferences`，收件账本保存在同目录的 `message-inboxes/<contextId>`。后台仅处理已明确开启、且原生 agent 仍在内存中的会话，不自动恢复冷会话。新账本只在平台证明邮箱从未开启且无历史（`false/1/0/0`）时初始化；已有邮箱丢失本地账本明确拒绝。平台实际 typed-local 注册、native resolver 和来源权威保持不变，这份账本只为原 `DurableInbox` 提供收件投影，不是 owner 或地址分配账本。
+显式意图原子保存在 `/var/lib/auriga/pools/<pool>/host/.host/message-preferences`，收件账本保存在同目录的 `message-inboxes/<contextId>`，复用 Node 已施加的 `.host` 硬配额，不新增预算。正式信任缓存仍在已有单独硬配额的 `host/message-trust`。后台仅处理已明确开启、且原生 agent 仍在内存中的会话，不自动恢复冷会话。新账本只在平台证明邮箱从未开启且无历史（`false/1/0/0`）时初始化；已有邮箱丢失本地账本明确拒绝。平台实际 typed-local 注册、native resolver 和来源权威保持不变，这份账本只为原 `DurableInbox` 提供收件投影，不是 owner 或地址分配账本。
+
+串行升级时，Host 自动锁住旧 `host/message-preferences` 或 `host/message-inboxes/<contextId>` 账本，将完整内容以新文件原子写入 `.host` 配额目录，保留旧原件和摘要，不移动可能带旧 project-id 的 inode。新账本后续写入保留该摘要；发现旧写者仍活跃、旧本后来分叉、缓存损坏或配额写入失败均明确拒绝消息，不清除收据、游标或高水位。升级应先停止旧 Host；新版本运行期间保留旧锁，避免旧版本并发回写。
 
 真实后台顺序为签名页与逐项验证、持久接入、原尝试/执行准入、公开 `NativeHostPort.prompt`、会话和 provider 的持久 flush、持久 `accepted`，最后提交原收据。丢失收据回包后从原账本重试相同操作，不再次 prompt。禁用先同步隔离正在拉取的接收者，再持久意图和远端确认；未确认的禁用不能继续执行消息。写入结果不确定时停止该写者，不能用旧内存覆盖磁盘或假报成功。
 

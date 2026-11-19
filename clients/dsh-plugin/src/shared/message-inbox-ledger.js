@@ -1,5 +1,5 @@
 // @ts-nocheck
-import { createFileLedgerStore } from '../network/host/store.js';
+import { createSharedMessageStore } from './message-storage.js';
 import { checkDurable, fenceDurable } from '../network/durable/state.js';
 import { canonical, fail, validate } from './protocol.js';
 import { assertRegistration, u64 } from '../network/source-control/frames.js';
@@ -72,9 +72,11 @@ export async function openSharedInboxLedger({
   });
   const handle = await (
     store ??
-    createFileLedgerStore({
-      dir: `/var/lib/auriga/pools/${binding.physicalInstanceId}/host/message-inboxes/${context.contextId}`,
-    })
+    createSharedMessageStore(
+      binding.physicalInstanceId,
+      'inboxes',
+      context.contextId,
+    )
   ).open();
   let closed = false,
     failed = false;
