@@ -15,9 +15,13 @@ import io.grpc.stub.StreamObserver;
 import java.security.cert.X509Certificate;
 import java.time.Instant;
 import java.util.*;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /** Node authentication is exclusively mTLS; intentionally separate from internal JWT gRPC. */
@@ -130,6 +134,8 @@ public final class NodeSessions implements AutoCloseable {
           if (!request.getUnknownFields().asMap().isEmpty())
             throw new AurigaException(CommonErrors.VALIDATION_FAILED);
           currentTaskCall(
+              request.getBinding(),
+              request.getTaskId(),
               session -> {
                 sharedRuntime.admit(
                     session.node, session.holder, request.getBinding(), request.getTaskId());
@@ -155,6 +161,8 @@ public final class NodeSessions implements AutoCloseable {
           if (!request.getUnknownFields().asMap().isEmpty())
             throw new AurigaException(CommonErrors.VALIDATION_FAILED);
           currentTaskCall(
+              null,
+              null,
               session -> {
                 sharedRuntime.release(session.node, request.getBinding(), request.getTaskId());
                 return null;
@@ -173,27 +181,94 @@ public final class NodeSessions implements AutoCloseable {
     };
   }
 
-  private <T> T currentTaskCall(java.util.function.Function<Session, T> work) {
+  private record MemoryWaiter(String pool, CompletableFuture<Void> ready) {}
+
+  private <T> T currentTaskCall(
+      SharedDshSessionBinding binding, String task, java.util.function.Function<Session, T> work) {
+    Context request = Context.current();
+    long until = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
     var leaf = PEER.get();
     if (leaf == null) throw new AurigaException(CommonErrors.UNAUTHENTICATED);
     UUID node = enrollment.identity(leaf);
     var session = sessions.get(node);
     if (session == null || sharedRuntime == null)
       throw new AurigaException(CommonErrors.UNAVAILABLE);
-    synchronized (session) {
-      if (session.closed
-          || !session.hello
-          || !session.inventory
-          || !session.sharedPreparation
-          || !session.leaf.equals(leaf)
-          || session.connection == null
-          || !session.connection.same(CONNECTION.get())
-          || sessions.get(node) != session) throw new AurigaException(CommonErrors.UNAVAILABLE);
-      var result = session.lease.guard(() -> work.apply(session));
+    Connection connection = CONNECTION.get();
+    boolean checked = false;
+    for (; ; ) {
+      remaining(request, until);
       if (session.closed || sessions.get(node) != session)
         throw new AurigaException(CommonErrors.UNAVAILABLE);
-      return result;
+      MemoryWaiter waiter;
+      synchronized (session) {
+        requireTaskSession(session, leaf, connection);
+        if (binding != null
+            && session.memoryCommittedUntil.getOrDefault(binding.getPhysicalInstanceId(), 0L)
+                <= workspace.clock.instant().getEpochSecond()) {
+          if (!checked) {
+            session.lease.guard(
+                () -> {
+                  sharedRuntime.validateAdmission(session.node, binding, task);
+                  return null;
+                });
+            checked = true;
+          }
+          waiter = new MemoryWaiter(binding.getPhysicalInstanceId(), new CompletableFuture<>());
+          session.memoryWaiters.add(waiter);
+        } else {
+          remaining(request, until);
+          var result =
+              session.lease.guard(
+                  () -> {
+                    remaining(request, until);
+                    return work.apply(session);
+                  });
+          remaining(request, until);
+          requireTaskSession(session, leaf, connection);
+          return result;
+        }
+      }
+      // No Session monitor or database transaction is held while awaiting stream commit.
+      Context.CancellationListener cancelled = ignored -> waiter.ready().complete(null);
+      request.addListener(cancelled, Runnable::run);
+      try {
+        waiter.ready().get(remaining(request, until), TimeUnit.NANOSECONDS);
+      } catch (TimeoutException error) {
+        throw Status.DEADLINE_EXCEEDED.asRuntimeException();
+      } catch (InterruptedException error) {
+        Thread.currentThread().interrupt();
+        throw Status.CANCELLED.asRuntimeException();
+      } catch (ExecutionException error) {
+        throw new AurigaException(CommonErrors.UNAVAILABLE);
+      } finally {
+        request.removeListener(cancelled);
+        session.memoryWaiters.remove(waiter);
+      }
     }
+  }
+
+  private static long remaining(Context request, long until) {
+    if (request.isCancelled()) {
+      var status = Contexts.statusFromCancelled(request);
+      throw (status == null ? Status.CANCELLED : status).asRuntimeException();
+    }
+    long left = until - System.nanoTime();
+    if (request.getDeadline() != null)
+      left = Math.min(left, request.getDeadline().timeRemaining(TimeUnit.NANOSECONDS));
+    if (left <= 0) throw Status.DEADLINE_EXCEEDED.asRuntimeException();
+    return left;
+  }
+
+  private void requireTaskSession(Session session, X509Certificate leaf, Connection connection) {
+    if (session.closed
+        || !session.hello
+        || !session.inventory
+        || !session.sharedPreparation
+        || !session.leaf.equals(leaf)
+        || session.connection == null
+        || !session.connection.same(connection)
+        || sessions.get(session.node) != session)
+      throw new AurigaException(CommonErrors.UNAVAILABLE);
   }
 
   private static StreamObserver<SessionRequest> ignored() {
@@ -236,7 +311,10 @@ public final class NodeSessions implements AutoCloseable {
     final Connection connection = CONNECTION.get();
     final StreamObserver<SessionResponse> output;
     volatile Instant seen = workspace.clock.instant();
-    boolean hello, inventory, closed;
+    boolean hello, inventory;
+    volatile boolean closed;
+    final Map<String, Long> memoryCommittedUntil = new HashMap<>();
+    final Set<MemoryWaiter> memoryWaiters = ConcurrentHashMap.newKeySet();
     boolean sharedPreparation;
     final LinkedHashMap<UUID, SharedDshNodeRuntime.Delivery> sharedInFlight = new LinkedHashMap<>();
     UUID sharedCursor;
@@ -423,6 +501,16 @@ public final class NodeSessions implements AutoCloseable {
               seen = workspace.clock.instant();
               return null;
             });
+        if (request.hasSharedDshPoolMemorySample() && sessions.get(node) == this) {
+          // lease.guard has returned: validation and the surrounding transaction committed.
+          var sample = request.getSharedDshPoolMemorySample();
+          memoryCommittedUntil.put(sample.getPhysicalInstanceId(), sample.getValidUntil());
+          for (var waiter : memoryWaiters)
+            if (waiter.pool().equals(sample.getPhysicalInstanceId())) {
+              memoryWaiters.remove(waiter);
+              waiter.ready().complete(null);
+            }
+        }
         for (var response : responses) if (!outbound.send(response)) return;
         if (request.hasInventory()) dispatch();
       } catch (RuntimeException e) {
@@ -523,6 +611,7 @@ public final class NodeSessions implements AutoCloseable {
       org.slf4j.LoggerFactory.getLogger(getClass())
           .info("node {}: session closed ({})", node, error.toString());
       closed = true;
+      wakeMemoryWaiters();
       sessions.remove(node, this);
       release();
       if (outbound != null) outbound.terminate(NodeGrpcServer.status(error));
@@ -532,6 +621,7 @@ public final class NodeSessions implements AutoCloseable {
     public synchronized void onError(Throwable error) {
       if (closed) return;
       closed = true;
+      wakeMemoryWaiters();
       sessions.remove(node, this);
       release();
       outbound.terminate(null);
@@ -541,9 +631,15 @@ public final class NodeSessions implements AutoCloseable {
     public synchronized void onCompleted() {
       if (closed) return;
       closed = true;
+      wakeMemoryWaiters();
       sessions.remove(node, this);
       release();
       outbound.terminate(null);
+    }
+
+    private void wakeMemoryWaiters() {
+      for (var waiter : memoryWaiters) waiter.ready().complete(null);
+      memoryWaiters.clear();
     }
   }
 }
