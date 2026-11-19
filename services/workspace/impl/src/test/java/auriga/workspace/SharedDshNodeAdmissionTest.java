@@ -46,7 +46,7 @@ class SharedDshNodeAdmissionTest {
           new auriga.workspace.grpc.NodeGrpcServer(
               "127.0.0.1", 0, cert.toFile(), key.toFile(), f.enrollment, f.sessions);
       server.start();
-      io.grpc.ManagedChannel channel = null, anonymous = null;
+      io.grpc.ManagedChannel channel = null, anonymous = null, anotherSocket = null;
       try {
         channel = nodeChannel(server.port(), f, true);
         var stream =
@@ -89,6 +89,29 @@ class SharedDshNodeAdmissionTest {
             SharedDshServiceGrpc.newBlockingStub(channel)
                 .withDeadlineAfter(10, java.util.concurrent.TimeUnit.SECONDS);
         assertTrue(rpc.admitSharedDshTask(request).getAdmitted());
+        anotherSocket = nodeChannel(server.port(), f, true);
+        var anotherSocketRpc =
+            SharedDshServiceGrpc.newBlockingStub(anotherSocket)
+                .withDeadlineAfter(10, java.util.concurrent.TimeUnit.SECONDS);
+        assertEquals(
+            io.grpc.Status.Code.UNAVAILABLE,
+            assertThrows(
+                    io.grpc.StatusRuntimeException.class,
+                    () -> anotherSocketRpc.admitSharedDshTask(request))
+                .getStatus()
+                .getCode());
+        assertEquals(
+            io.grpc.Status.Code.UNAVAILABLE,
+            assertThrows(
+                    io.grpc.StatusRuntimeException.class,
+                    () ->
+                        anotherSocketRpc.releaseSharedDshTask(
+                            ReleaseSharedDshTaskRequest.newBuilder()
+                                .setBinding(request.getBinding())
+                                .setTaskId(request.getTaskId())
+                                .build()))
+                .getStatus()
+                .getCode());
         assertTrue(
             rpc.releaseSharedDshTask(
                     ReleaseSharedDshTaskRequest.newBuilder()
@@ -122,6 +145,8 @@ class SharedDshNodeAdmissionTest {
           channel.shutdownNow().awaitTermination(5, java.util.concurrent.TimeUnit.SECONDS);
         if (anonymous != null)
           anonymous.shutdownNow().awaitTermination(5, java.util.concurrent.TimeUnit.SECONDS);
+        if (anotherSocket != null)
+          anotherSocket.shutdownNow().awaitTermination(5, java.util.concurrent.TimeUnit.SECONDS);
         server.close();
       }
     }
@@ -170,16 +195,36 @@ class SharedDshNodeAdmissionTest {
       context.run(() -> service.admitSharedDshTask(request, noStream));
       assertNotNull(noStream.error);
       var peer = f.connect(f.node, true);
+      var currentContext =
+          Context.current()
+              .withValues(
+                  NodeSessions.PEER,
+                  f.certificates.get(f.node),
+                  NodeSessions.CONNECTION,
+                  peer.connection);
       var admitted = new Reply<AdmitSharedDshTaskResponse>();
-      context.run(() -> service.admitSharedDshTask(request, admitted));
+      currentContext.run(() -> service.admitSharedDshTask(request, admitted));
       assertNull(admitted.error);
       assertTrue(admitted.result.getAdmitted());
       assertEquals(request.getBinding(), admitted.result.getBinding());
       assertEquals(request.getTaskId(), admitted.result.getTaskId());
       UUID firstHolder = f.holders.get(f.node);
       verify(runtime).admit(f.node, firstHolder, request.getBinding(), request.getTaskId());
+      // Even an identical/resumed SSLSession must not authorize a different live socket.
+      var resumed =
+          new NodeSessions.Connection(
+              peer.connection.tls(), new java.net.InetSocketAddress("127.0.0.1", 1));
+      var resumedReply = new Reply<AdmitSharedDshTaskResponse>();
+      Context.current()
+          .withValues(
+              NodeSessions.PEER, f.certificates.get(f.node), NodeSessions.CONNECTION, resumed)
+          .run(() -> service.admitSharedDshTask(request, resumedReply));
+      assertEquals(
+          io.grpc.Status.Code.UNAVAILABLE,
+          io.grpc.Status.fromThrowable(resumedReply.error).getCode());
+      verify(runtime, times(1)).admit(any(), any(), any(), anyString());
       var released = new Reply<ReleaseSharedDshTaskResponse>();
-      context.run(
+      currentContext.run(
           () ->
               service.releaseSharedDshTask(
                   ReleaseSharedDshTaskRequest.newBuilder()
@@ -192,7 +237,7 @@ class SharedDshNodeAdmissionTest {
       verify(runtime).release(f.node, request.getBinding(), request.getTaskId());
       f.holders.put(f.node, UUID.randomUUID());
       var stale = new Reply<AdmitSharedDshTaskResponse>();
-      context.run(() -> service.admitSharedDshTask(request, stale));
+      currentContext.run(() -> service.admitSharedDshTask(request, stale));
       assertNotNull(stale.error);
       verify(runtime, times(1)).admit(any(), any(), any(), anyString());
       peer.input.onCompleted();

@@ -23,6 +23,20 @@ import java.util.concurrent.atomic.AtomicBoolean;
 /** Node authentication is exclusively mTLS; intentionally separate from internal JWT gRPC. */
 public final class NodeSessions implements AutoCloseable {
   public static final Context.Key<X509Certificate> PEER = Context.key("workspace-node-certificate");
+  public static final Context.Key<Connection> CONNECTION = Context.key("workspace-node-connection");
+
+  /** Set exclusively from gRPC transport attributes by the node TLS listener. */
+  public record Connection(javax.net.ssl.SSLSession tls, java.net.SocketAddress remote) {
+    boolean same(Connection other) {
+      // TLS resumption must not let a different live socket borrow this observer's lease.
+      return other != null
+          && tls != null
+          && remote != null
+          && tls == other.tls
+          && remote.equals(other.remote);
+    }
+  }
+
   private final NodeEnrollment enrollment;
   private final WorkspaceService workspace;
   private final SharedDshNodeRuntime sharedRuntime;
@@ -172,6 +186,8 @@ public final class NodeSessions implements AutoCloseable {
           || !session.inventory
           || !session.sharedPreparation
           || !session.leaf.equals(leaf)
+          || session.connection == null
+          || !session.connection.same(CONNECTION.get())
           || sessions.get(node) != session) throw new AurigaException(CommonErrors.UNAVAILABLE);
       var result = session.lease.guard(() -> work.apply(session));
       if (session.closed || sessions.get(node) != session)
@@ -217,6 +233,7 @@ public final class NodeSessions implements AutoCloseable {
   private final class Session implements StreamObserver<SessionRequest> {
     final UUID node, tenant;
     final X509Certificate leaf;
+    final Connection connection = CONNECTION.get();
     final StreamObserver<SessionResponse> output;
     volatile Instant seen = workspace.clock.instant();
     boolean hello, inventory, closed;

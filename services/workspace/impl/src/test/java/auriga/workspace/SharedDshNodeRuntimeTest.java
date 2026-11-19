@@ -223,6 +223,9 @@ class SharedDshNodeRuntimeTest {
   }
 
   static final class Peer implements StreamObserver<SessionResponse> {
+    final NodeSessions.Connection connection =
+        new NodeSessions.Connection(
+            mock(javax.net.ssl.SSLSession.class), new java.net.InetSocketAddress("127.0.0.1", 0));
     final List<SessionResponse> frames = new ArrayList<>();
     StreamObserver<SessionRequest> input;
     Throwable error;
@@ -399,7 +402,13 @@ class SharedDshNodeRuntimeTest {
 
     Peer connect(UUID id, boolean capable) {
       var peer = new Peer();
-      var context = Context.current().withValue(NodeSessions.PEER, certificates.get(id));
+      var context =
+          Context.current()
+              .withValues(
+                  NodeSessions.PEER,
+                  certificates.get(id),
+                  NodeSessions.CONNECTION,
+                  peer.connection);
       context.run(() -> peer.input = sessions.session(peer));
       var hello =
           Hello.newBuilder()

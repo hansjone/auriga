@@ -104,7 +104,17 @@ public final class NodeGrpcServer implements SmartLifecycle, AutoCloseable {
                 X509Certificate leaf = (X509Certificate) tlsSession.getPeerCertificates()[0];
                 enrollment.identity(leaf);
                 return Contexts.interceptCall(
-                    Context.current().withValue(NodeSessions.PEER, leaf), call, headers, next);
+                    Context.current()
+                        .withValues(
+                            NodeSessions.PEER,
+                            leaf,
+                            NodeSessions.CONNECTION,
+                            new NodeSessions.Connection(
+                                tlsSession,
+                                call.getAttributes().get(Grpc.TRANSPORT_ATTR_REMOTE_ADDR))),
+                    call,
+                    headers,
+                    next);
               } catch (javax.net.ssl.SSLPeerUnverifiedException | ClassCastException e) {
                 var status = GrpcErrors.toStatus(new AurigaException(CommonErrors.UNAUTHENTICATED));
                 call.close(status.getStatus(), status.getTrailers());
