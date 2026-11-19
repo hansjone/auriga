@@ -78,6 +78,8 @@ rc.3 原生 `session/list`、`session/control` 先按 `{kind:'global'}` 进入�
 
 普通受控任务只申请独立 `task.execute`，不以公司 UAC 材料为前置，也不增加 Shell、终端或任意插件权限。IAM 明确返回 `SHARED_ENTERPRISE_CREDENTIAL_STATE_ABSENT` 时，团队登录用户仍能执行已有普通任务，任务环境中的 `DSH_AURIGA_ID`、`DSH_AURIGA_TOKEN` 为空。`AVAILABLE` 才为同一真实 execution 另开独立企业任务，按现有策略传递凭据；两任务分别关闭。未知状态、失效平台登录、撤销或他人材料仍拒绝，不能将认证异常降为“无材料”。环境只属于当前任务，刷新后下次任务重取材料，不修改共享进程全局环境。
 
+共享入口实际安装公开 `tools/execute` 钩子和被动 `shellEnv` 注册表贡献者：按真正原生 execution 准备任务，再由同步 `shellEnv.collect(execution)` 取本次环境，结束前在同任务刷新并核当前归属，最后清除材料及结束两类 handle。保留的 `DSH_SESSION_ID` 由宿主注册表自身提供，贡献者只声明自己的材料和 helper 变量。原企业工具复用钩子内的企业子任务，`aurigaShared.openTask` 只借当前原生调用，不另分配或提前 Finish。退出、取消、agent dispose 和晚回包不能恢复旧材料或已结束任务。长运行 helper 沿原回环能力刷新当前材料；已启动进程的环境快照不会被全局改写。安装侧须提供 `@deepseek-ai/dsh-shell-env` 被动服务，并且同一模式只装一个环境发布者；这不启用共享 Shell 或新增通用脚本执行端。
+
 根目录执行 `node --test clients/dsh-plugin/test/shared/shared.test.mjs`，已纳入插件 test 脚本。测试密钥均运行时生成。schema 快照与 K 原文件逐对象比对。签名及 schema 覆盖使用的七种冻结消息。
 
 公开组件的 rc.3 package.json/package-lock.json 固定在 `clients/dsh-plugin/test/public-host`，来源为 SPIKE 提交7e7ea403。根目录执行 `npm ci --ignore-scripts --prefix clients/dsh-plugin/test/public-host`，将 AURIGA_DSH_PUBLIC_PACKAGE_ROOT 指向该绝对目录，再执行 `node --test clients/dsh-plugin/test/shared/public-host.test.mjs`。Plugin CI 的 Windows/Linux 两个任务均安装并设置该路径，同时设置 AURIGA_REQUIRE_PUBLIC_HOST=1，缺少路径时测试直接失败。其他工作流未提供宿主路径时，两项测试跳过并打印由 Plugin 工作流承担验证的原因。测试组合公开 API，验证 pre-execute 放行后的 guard 拒绝及原生 owner/文件访问反例。
