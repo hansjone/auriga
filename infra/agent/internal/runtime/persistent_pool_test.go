@@ -15,20 +15,6 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
-const persistentProfile = `- id: auriga-dsh
-  name: auriga-dsh/shared
-- id: ports
-  name: file:///run/auriga/shared-ports.mjs
-- id: webserver
-  name: '@deepseek-ai/dsh-host-webserver'
-- id: tools
-  name: '@deepseek-ai/dsh-tools'
-  config: {mode: native}
-- id: skills
-  name: '@deepseek-ai/dsh-skill-filesystem'
-  config: {providerName: auriga-shared, includeDefaultRoots: false, customSkillDirs: [/run/auriga/skills-active/current]}
-`
-
 type persistentQuota struct{ fail bool }
 
 func (q *persistentQuota) Ensure(_ context.Context, _ string, bytes, inodes int64) error {
@@ -62,6 +48,10 @@ func persistentFixture(t *testing.T) (*runtime.PersistentPools, *releaseEngine, 
 	quota := &persistentQuota{}
 	layout := &storage.PoolLayout{Root: filepath.Join(docker.DataRoot, "pools"), Quota: quota}
 	pools := &runtime.SharedPools{Layout: layout, Supervisor: docker}
+	profile, err := os.ReadFile(filepath.Join("..", "..", "..", "..", "deploy", "nas", "shared-runtime-profile.example.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
 	return &runtime.PersistentPools{Pools: pools, Driver: docker, UIDs: storage.NewUIDTable(release.dir),
 		Chown: func(path string, uid, gid int) error {
 			if uid != 200000 || gid != uid {
@@ -72,8 +62,8 @@ func persistentFixture(t *testing.T) (*runtime.PersistentPools, *releaseEngine, 
 			}
 			return nil
 		},
-		Template: &nodev1.InstanceSpec{Generation: 1, Dsh: release.dsh, Resources: &nodev1.Resources{MemoryMb: 512, CpuMillis: 500, Pids: 128}},
-		Profile:  []byte(persistentProfile), Ports: []byte("// Synthetic installation module; host is a fixture, no DSH process is executed.\n"),
+		Template:  &nodev1.InstanceSpec{Generation: 1, Dsh: release.dsh, Resources: &nodev1.Resources{MemoryMb: 512, CpuMillis: 500, Pids: 128}},
+		Profile:   profile,
 		Resources: &runtime.EmptyPoolResources{Root: layout.Root}}, engine, quota
 }
 
@@ -192,16 +182,15 @@ func TestPersistentPoolTwoMembersAndRestartReuseOneSignedProcess(t *testing.T) {
 	}
 }
 
-func TestPersistentPoolDedicatedAndGuardianReplayWithoutFreshViews(t *testing.T) {
+func TestPersistentPoolGuardianReplayWithoutFreshViews(t *testing.T) {
 	m, _, _ := persistentFixture(t)
 	ctx := context.Background()
 	command := persistentIntent(1)
-	command.Binding.Mode = nodev1.DshInstanceMode_DSH_INSTANCE_MODE_DEDICATED
 	if e := m.View(ctx, persistentView(command)); e != nil {
 		t.Fatal(e)
 	}
 	if receipt, e := m.Prepare(ctx, command); e != nil || receipt.Outcome != "confirmed" {
-		t.Fatal("dedicated start", e)
+		t.Fatal("shared start", e)
 	}
 	impact, e := m.Pools.Trip(ctx, command.Binding.PhysicalInstanceId, command.OperationId, "crash")
 	if e != nil || impact.State != "stopped" {
@@ -226,6 +215,23 @@ func TestPersistentPoolDedicatedAndGuardianReplayWithoutFreshViews(t *testing.T)
 	}
 }
 
+func TestPersistentDedicatedCannotBorrowSharedLauncher(t *testing.T) {
+	m, engine, _ := persistentFixture(t)
+	command := persistentIntent(1)
+	command.Binding.Mode = nodev1.DshInstanceMode_DSH_INSTANCE_MODE_DEDICATED
+	if err := m.View(t.Context(), persistentView(command)); err != nil {
+		t.Fatal(err)
+	}
+	if receipt, err := m.Prepare(t.Context(), command); err == nil || receipt == nil || receipt.Outcome != "unconfirmed" {
+		t.Fatal("dedicated borrowed the readonly shared launcher")
+	}
+	engine.mu.Lock()
+	defer engine.mu.Unlock()
+	if engine.creates != 0 || len(engine.starts) != 0 {
+		t.Fatal("dedicated reached shared Engine startup")
+	}
+}
+
 func TestPersistentPoolQuotaSnapshotReleaseAndProfileGates(t *testing.T) {
 	for _, gate := range []string{"quota", "snapshot", "personal", "profile", "release", "resource", "ownership"} {
 		t.Run(gate, func(t *testing.T) {
@@ -242,7 +248,7 @@ func TestPersistentPoolQuotaSnapshotReleaseAndProfileGates(t *testing.T) {
 				m.Template.Secrets = &nodev1.Secrets{}
 			}
 			if gate == "profile" {
-				m.Profile = []byte(strings.Replace(persistentProfile, "auriga-dsh/shared", "auriga-dsh", 1))
+				m.Profile = []byte(strings.Replace(string(m.Profile), "name: auriga-dsh/shared\n", "name: auriga-dsh\n", 1))
 			}
 			if gate == "release" {
 				m.Template.Dsh.ReleaseEnvelope.Signature.Value = "invalid"
