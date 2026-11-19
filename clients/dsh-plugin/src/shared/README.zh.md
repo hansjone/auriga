@@ -23,6 +23,8 @@ R 的共享 profile 选择包入口 `auriga-dsh/shared`，不得同时加载默�
 
 工具行使用公开配置 `mode: native`，对应 SHARED_PROFILE.toolPresentation。该配置让有限工具可被模型直接调用。R 的 profile 核验同时检查这一配置，公开 ToolRuntime 测试也按此配置装配。
 
+共享技能根是容器内唯一固定只读挂载 `/run/auriga/skills-active/current`，与 Agent 正式 writer、renderer 和 Docker mount 一致；Host 不接受宿主机 PoolLayout 路径、子路径或额外根。`skill-filesystem` 必须关闭默认根、不设置 bundled 根，provider 为 `auriga-shared`。原生 `skill` 工具沿公开 `tools/execute` 继续调用原 Registry/Filesystem；Host 前后核真实会话代次，并要求实际定义的 provider、source、完整路径和资源目录属于平台视图，返回正文与已核定义一致。私有目录、运行时同名覆盖及链接逃逸不能借这个工具加载；Shell、插件安装及其余非白名单工具仍拒绝。
+
 - `disconnect(revocation)`：主动断开匹配 placement 的自有连接；W/节点撤销事件调用 `ctx.aurigaShared.revoke(event)`，清本地归属投影并使 remoteAccess 缓存失效。进程重启后的围栏仍由 W/IAM 持久化保证。
 - `issueTask(binding,execution,['outbound'])`：沿 IAM 既有授权接缝签发 K 能力；从真实 tools execution 获取任务，不接受模型指定成员、会话、taskId。有限企业工具不领取 credentials scope。
 - `finishTask(binding,execution,token)` 在任务结束时撤销该任务能力。有限企业工具在 finally 释放能力。受信 helper 使用 `ctx.aurigaShared.openTask(execution)` 返回的上下文，结束时调用 close()。该上下文提供 DSH_SESSION_ID、DSH_TEAM_TASK_CAPABILITY、DSH_TEAM_BASE、DSH_WEB_URL 和 DSH_TEAM_HELPERS，helperBase 由宿主设置为回环 `/dsh-team` 地址。变量只交给对应任务的受控 helper。

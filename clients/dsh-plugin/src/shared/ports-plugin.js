@@ -5,6 +5,7 @@ import { SHARED_PROFILE } from './host.js';
 import { createSharedNodeTransport } from './node-transport.js';
 import { createProductionSharedPorts } from './production-ports.js';
 import { canonical, fail } from './protocol.js';
+import { isPlatformSkillRoots } from './skill-policy.js';
 
 export const name = 'auriga-dsh-shared-ports';
 export const provide = 'aurigaSharedPorts';
@@ -71,13 +72,7 @@ export async function apply(ctx, config) {
     if (
       config.configFile !== root + '/control/shared-host.json' ||
       value.nodeSocket !== root + '/control/shared-node.sock' ||
-      !Array.isArray(value.skillRoots) ||
-      value.skillRoots.some(
-        (path) =>
-          typeof path !== 'string' ||
-          !path.startsWith(root + '/host/platform-skills/') ||
-          path.split('/').some((part) => part === '.' || part === '..'),
-      ) ||
+      !isPlatformSkillRoots(value.skillRoots) ||
       typeof value.model !== 'string' ||
       !value.model ||
       !value.enterprise ||

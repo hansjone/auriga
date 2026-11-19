@@ -16,6 +16,8 @@ export const inject = [
   'connection',
   'remoteAccess',
   'tools',
+  'skills',
+  'workingDirectory',
   'sessions',
   'sessionPersistence',
   'agents',
