@@ -191,7 +191,9 @@ class SharedDshPostgresTest {
   }
 
   SharedDshResourceMarketQueries resourceMarketQueries() {
-    return new SharedDshResourceMarketQueries(store, service, b -> probe, clock);
+    var entry = new auriga.workspace.app.SharedDshEntryTransportFixture(store, clock, tenant);
+    entry.responseStatus = () -> probe ? 200 : 503;
+    return new SharedDshResourceMarketQueries(store, service, entry.transport, clock);
   }
 
   SharedDshResourceReport resourceMarketReport(SharedDshResourceView view) {
@@ -210,8 +212,7 @@ class SharedDshPostgresTest {
     var f = preparedResourceMarket();
     var queries = resourceMarketQueries();
     UUID placement = UUID.fromString(f.view().getBinding().getPlacementId());
-    assertEquals(
-        f.view().getBinding(), run(() -> queries.resolve(f.member(), placement, session)));
+    assertEquals(f.view().getBinding(), run(() -> queries.resolve(f.member(), placement, session)));
     assertEquals(Optional.of(f.report()), run(() -> queries.report(f.view())));
     resourceViewIds.put(placement.toString(), UUID.randomUUID().toString());
     var view = run(() -> service.resourceView(f.view().getBinding()));
@@ -250,8 +251,7 @@ class SharedDshPostgresTest {
                             tenant,
                             f.node()))));
     // Placement and receipt remain ready; losing the prepared-node relation alone denies applied.
-    assertEquals(
-        f.view().getBinding(), run(() -> queries.resolve(f.member(), placement, session)));
+    assertEquals(f.view().getBinding(), run(() -> queries.resolve(f.member(), placement, session)));
     assertTrue(run(() -> queries.report(view)).isEmpty());
   }
 

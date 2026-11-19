@@ -3,6 +3,7 @@ package auriga.workspace.app;
 import auriga.common.error.AurigaException;
 import auriga.common.error.CommonErrors;
 import auriga.contracts.deploymentconfig.DeploymentAccess;
+import auriga.contracts.node.v1.DshInstanceMode;
 import auriga.contracts.node.v1.SharedDshBinding;
 import auriga.workspace.persistence.WorkspaceStore;
 import io.nats.client.Connection;
@@ -18,9 +19,12 @@ import java.util.TreeMap;
 import java.util.UUID;
 import tools.jackson.databind.json.JsonMapper;
 
-/** Production replay readback and initial host-profile observation. */
+/** Production replay readback and distinct initial-admission/ready host-profile observations. */
 public final class SharedDshEntryTransport
-    implements SharedDshTickets.Entry, SharedDshPlacements.EntryProbe, AutoCloseable {
+    implements SharedDshTickets.Entry,
+        SharedDshPlacements.EntryProbe,
+        SharedDshResourceMarketQueries.ReadyEntryProbe,
+        AutoCloseable {
   public static final String PROFILE_PATH = "/_auriga/shared-profile";
   public static final String PROFILE_HEADER = "Auriga-Shared-Profile-Probe";
   private static final Map<String, Object> PROFILE =
@@ -129,7 +133,36 @@ public final class SharedDshEntryTransport
                           UUID.fromString(binding.getPlacementId()))
                       == 0;
             });
-    if (!initial) return false;
+    return initial && profile(binding);
+  }
+
+  @Override
+  public boolean observed(SharedDshBinding binding) {
+    // A restricted shared profile is not evidence for a dedicated runtime's broader surface.
+    if (binding.getMode() != DshInstanceMode.DSH_INSTANCE_MODE_SHARED) return false;
+    return currentReady(binding) && profile(binding) && currentReady(binding);
+  }
+
+  private boolean currentReady(SharedDshBinding binding) {
+    return store.tx(
+        () -> {
+          if (!binding.getTenantId().equals(store.tenant().toString())
+              || !binding.getUnknownFields().asMap().isEmpty()) return false;
+          store.lock();
+          var rows =
+              store.jdbc.queryForList(
+                  "SELECT x.* FROM shared_dsh_placement x"
+                      + " JOIN shared_dsh_pool p ON p.tenant_id=x.tenant_id AND p.id=x.pool_id AND p.mode=x.mode"
+                      + " JOIN shared_dsh_pool_node pn ON pn.tenant_id=p.tenant_id AND pn.pool_id=p.id"
+                      + " JOIN node n ON n.tenant_id=pn.tenant_id AND n.id=pn.node_id AND NOT n.revoked"
+                      + " WHERE x.tenant_id=? AND x.id=? AND x.state='ready' AND p.state='ready'",
+                  store.tenant(),
+                  UUID.fromString(binding.getPlacementId()));
+          return rows.size() == 1 && SharedDshPlacements.binding(rows.getFirst()).equals(binding);
+        });
+  }
+
+  private boolean profile(SharedDshBinding binding) {
     long now = clock.instant().getEpochSecond();
     var claims = new TreeMap<String, Object>();
     claims.put("schemaVersion", 1);

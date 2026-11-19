@@ -13,16 +13,18 @@ import java.util.*;
 
 /** W owns placement, prepared-node and resource receipts; Resource never reads these tables. */
 public final class SharedDshResourceMarketQueries implements SharedDshResourceMarket {
+  /** Observe an already-ready normal entry; initial placement admission is a separate port. */
+  public interface ReadyEntryProbe {
+    boolean observed(SharedDshBinding binding);
+  }
+
   private final WorkspaceStore store;
   private final SharedDshAuthority authority;
-  private final SharedDshPlacements.EntryProbe entry;
+  private final ReadyEntryProbe entry;
   private final Clock clock;
 
   public SharedDshResourceMarketQueries(
-      WorkspaceStore store,
-      SharedDshAuthority authority,
-      SharedDshPlacements.EntryProbe entry,
-      Clock clock) {
+      WorkspaceStore store, SharedDshAuthority authority, ReadyEntryProbe entry, Clock clock) {
     this.store = store;
     this.authority = authority;
     this.entry = entry;
@@ -45,7 +47,7 @@ public final class SharedDshResourceMarketQueries implements SharedDshResourceMa
   @Override
   public Optional<SharedDshResourceReport> report(SharedDshResourceView expected) {
     var before = stored(expected);
-    if (before.isEmpty() || !entry.ready(expected.getBinding())) return Optional.empty();
+    if (before.isEmpty() || !entry.observed(expected.getBinding())) return Optional.empty();
     // The HTTP profile probe runs outside W's transaction, then the exact durable receipt is
     // fenced.
     var after = stored(expected);
