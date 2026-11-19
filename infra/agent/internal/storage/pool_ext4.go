@@ -24,12 +24,22 @@ type Ext4Images struct {
 	mu                              sync.Mutex
 	mount                           func(context.Context, string, string, int64) (string, error)
 	quota                           func(string, string, uint32, int64, int64) error
+	clearQuota                      func(string, uint32) error
+}
+
+// Retained data stays on the mounted image, avoiding EXDEV. This root is owned
+// by the Node UID with mode 0700, outside all member workspace roots.
+func (s *Ext4Images) ArchivePath(ctx context.Context, pool, operation string) (string, error) {
+	if _, err := s.MountPool(ctx, pool); err != nil {
+		return "", err
+	}
+	return (&PoolLayout{Root: s.Root}).Path(pool, "members", "node-archives", operation)
 }
 
 func (s *Ext4Images) MountPool(ctx context.Context, pool string) (PoolMount, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if !filepath.IsAbs(s.Root) || s.ImageBytes < 21*MemberBytes || s.ImageBytes%4096 != 0 || s.IDs == nil {
+	if !filepath.IsAbs(s.Root) || s.ImageBytes < 22*MemberBytes || s.ImageBytes%4096 != 0 || s.IDs == nil {
 		return PoolMount{}, fmt.Errorf("invalid ext4 pool storage provisioning")
 	}
 	layout := &PoolLayout{Root: s.Root}
@@ -84,4 +94,30 @@ func (s *Ext4Images) Ensure(ctx context.Context, path string, bytes, inodes int6
 		quota = setExt4ProjectQuota
 	}
 	return s.IDs.Use(path, func(id uint32) error { return quota(fs.Device, path, id, bytes, inodes) })
+}
+
+func (s *Ext4Images) Release(ctx context.Context, path string) error {
+	if s.IDs == nil {
+		return fmt.Errorf("project ledger required")
+	}
+	if err := CheckNoSymlink(s.Root, path); err != nil {
+		return err
+	}
+	rel, err := filepath.Rel(s.Root, path)
+	if err != nil {
+		return err
+	}
+	parts := strings.Split(rel, string(filepath.Separator))
+	if len(parts) < 3 || parts[1] != "members" {
+		return fmt.Errorf("ext4 quota path is outside pool mount")
+	}
+	fs, err := s.MountPool(ctx, parts[0])
+	if err != nil {
+		return err
+	}
+	clear := s.clearQuota
+	if clear == nil {
+		clear = clearExt4ProjectQuota
+	}
+	return s.IDs.Release(path, func(id uint32) error { return clear(fs.Device, id) })
 }

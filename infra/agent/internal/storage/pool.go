@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"path/filepath"
 	"regexp"
 	"strconv"
 )
@@ -70,55 +69,6 @@ func (l *PoolLayout) Prepare(ctx context.Context, pool, tenant, member string, e
 		return "", fmt.Errorf("workspace is not empty")
 	}
 	return p, nil
-}
-
-// ArchiveReset is retriable after either rename or quota failure. archive is
-// node-private, never an input to a new session. Caller first confirms only this member is quiescent.
-func (l *PoolLayout) ArchiveReset(ctx context.Context, pool, tenant, member string, epoch int64, operation string) (string, error) {
-	p, err := l.Workspace(pool, tenant, member, epoch)
-	if err != nil {
-		return "", err
-	}
-	a, err := l.Path(pool, "control", "archives", operation)
-	if err != nil {
-		return "", err
-	}
-	if err = os.MkdirAll(filepath.Dir(a), 0700); err != nil {
-		return "", err
-	}
-	if _, err = os.Lstat(a); os.IsNotExist(err) {
-		if err = os.Rename(p, a); err != nil {
-			return "", err
-		}
-	} else if err != nil {
-		return "", err
-	}
-	// Give the retained archive its own project before reusing the active quota.
-	if l.Quota == nil {
-		return "", fmt.Errorf("hard quota unavailable")
-	}
-	if err = l.Quota.Ensure(ctx, a, MemberBytes, MemberInodes); err != nil {
-		return "", err
-	}
-	_, err = l.Prepare(ctx, pool, tenant, member, epoch)
-	return a, err
-}
-
-// DeleteArchive accepts identifiers, never caller-supplied absolute paths.
-func (l *PoolLayout) DeleteArchive(ctx context.Context, pool, operation string) error {
-	p, err := l.Path(pool, "control", "archives", operation)
-	if err != nil {
-		return err
-	}
-	if err = os.RemoveAll(p); err != nil {
-		return err
-	}
-	if quota, ok := l.Quota.(interface {
-		Release(context.Context, string) error
-	}); ok {
-		return quota.Release(ctx, p)
-	}
-	return nil
 }
 
 // RetireWorkspace never recursively deletes member data: W must first archive

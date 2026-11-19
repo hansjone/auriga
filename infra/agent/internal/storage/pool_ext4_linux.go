@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/binary"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
@@ -47,7 +48,7 @@ func mountExt4Image(ctx context.Context, image, root string, size int64, mkfs, l
 			return "", err
 		}
 		tmp := file.Name()
-		defer os.Remove(tmp)
+		defer func() { _ = os.Remove(tmp) }()
 		if err = file.Chmod(0600); err == nil {
 			err = unix.Fallocate(int(file.Fd()), 0, 0, size)
 		}
@@ -163,7 +164,7 @@ func verifyExt4Image(path string, size int64) error {
 	if err != nil {
 		return err
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 	var super [1024]byte
 	if _, err = file.ReadAt(super[:], 1024); err != nil {
 		return err
@@ -233,6 +234,37 @@ func quotaCall(device string, operation uint32, project uint32, value *diskQuota
 	return nil
 }
 
+func clearExt4ProjectQuota(device string, project uint32) error {
+	if !loopDevice.MatchString(device) || project == 0 {
+		return fmt.Errorf("invalid pool quota identity")
+	}
+	var before diskQuota
+	if err := quotaCall(device, 0x800007, project, &before); err != nil {
+		if errors.Is(err, unix.ESRCH) {
+			return nil
+		}
+		return err
+	}
+	if before.Space != 0 || before.Inodes != 0 {
+		return fmt.Errorf("archive still has live quota usage or open inodes")
+	}
+	clear := diskQuota{Valid: 1 | 4}
+	if err := quotaCall(device, 0x800008, project, &clear); err != nil {
+		return err
+	}
+	var after diskQuota
+	if err := quotaCall(device, 0x800007, project, &after); err != nil {
+		if errors.Is(err, unix.ESRCH) {
+			return nil
+		}
+		return err
+	}
+	if after.Space != 0 || after.Inodes != 0 || after.BlockHard != 0 || after.BlockSoft != 0 || after.InodeHard != 0 || after.InodeSoft != 0 {
+		return fmt.Errorf("quota recycle readback failed")
+	}
+	return nil
+}
+
 func setExt4ProjectQuota(device, path string, project uint32, bytes, inodes int64) error {
 	if !loopDevice.MatchString(device) {
 		return fmt.Errorf("invalid pool device")
@@ -259,7 +291,7 @@ func setExt4ProjectQuota(device, path string, project uint32, bytes, inodes int6
 		if err != nil {
 			return err
 		}
-		defer unix.Close(fd)
+		defer func() { _ = unix.Close(fd) }()
 		var actual projectAttributes
 		if _, _, e := unix.Syscall(unix.SYS_IOCTL, uintptr(fd), 0x801c581f, uintptr(unsafe.Pointer(&actual))); e != 0 {
 			return e
