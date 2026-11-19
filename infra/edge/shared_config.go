@@ -237,7 +237,7 @@ func sharedNATSAuthentication(shared *SharedDshConfig) (nats.Option, error) {
 		if err != nil {
 			return nil, fmt.Errorf("shared replay seed unavailable")
 		}
-		defer file.Close()
+		defer func() { _ = file.Close() }()
 		opened, err := file.Stat()
 		if err != nil || !os.SameFile(info, opened) || !sharedSeedMetadata(opened) {
 			return nil, fmt.Errorf("shared replay seed changed")
