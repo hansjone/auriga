@@ -2,6 +2,7 @@
 import { fail, SHARED_RISK } from './protocol.js';
 import { executionSession, openSharedTask } from './task-context.js';
 import { memberFilePath, memberWorkspace } from './member-files.js';
+import { installSharedMessageTool } from './message-tool.js';
 
 export const SHARED_PROFILE = Object.freeze({
   shell: false,
@@ -18,6 +19,7 @@ export const SHARED_PROFILE = Object.freeze({
 const finiteTools = new Set([
   'auriga_enterprise_request',
   'auriga_shared_resources',
+  'auriga_send_message',
 ]);
 
 /** Explicit composition entry for R's restricted profile; never patch host internals.
@@ -53,7 +55,10 @@ export function installSharedHost(ctx, { runtime, enterprise, ports }) {
         handler: enterprise.handler,
       }),
     );
-    for (const name of finiteTools) {
+    for (const name of [
+      'auriga_enterprise_request',
+      'auriga_shared_resources',
+    ]) {
       disposers.push(
         ctx.tools.register({
           name,
@@ -105,6 +110,11 @@ export function installSharedHost(ctx, { runtime, enterprise, ports }) {
         }),
       );
     }
+    disposers.push(
+      installSharedMessageTool(ctx, {
+        settings: () => ({ messageTrust: ports.messageTrustConfig?.() }),
+      }),
+    );
   } catch (e) {
     for (const d of disposers.reverse()) d?.();
     throw e;

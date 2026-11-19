@@ -16,6 +16,7 @@ const operations = new Set([
   'authorizeCapability',
   'readCredentials',
   'enterpriseOutbound',
+  'messageContext',
   'model',
   'send',
   'receive',

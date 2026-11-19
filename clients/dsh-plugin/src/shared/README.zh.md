@@ -54,6 +54,14 @@ Python helper 从 oclaw `0321a05b0db3797fdb5320aacabe5244436972f6` 的两处 `ud
 
 ## 验证与界限
 
+共享消息的生产 Host 从真实当前 agent/session、工作目录及公开持久化 provider 生成进程内见证，经固定 Node socket 的 `messageContext` 在当前 K 能力下取得实际 typed-local 注册。首调用只物化关联，不发送、不拉取、不默认开启接收。回包后 Host 使用原生 resolver 核活体与 local，再生成新的见证供业务调用；不从模型参数或进程 owner 推导成员身份。操作 ID 对同会话、原生绑定与 Host boot 稳定，不随短任务或令牌 JTI 改变。
+
+`shared-host.json.messageTrust` 配置为 `{realm,roots:[{kid,public_key_spki}]}`，根来自获准的正式网络安装材料。Host 延迟打开固定的 `host/message-trust` 原子缓存，按现 `openV2TrustStore` 验证并持久保存原 control、publication、announcement 与首发/版本高水位。`messageContext` 随带的三个公开签名对象只能用于沿已安装根刷新，不能自行成为信任根。缺配置、过期、撤销或换根只拒消息能力，不阻模型服务装配。Node 必须保证该 Host UID 可以写固定缓存且保留跨重启。
+
+SourceGet、FETCH 页及各项、attempt/admit/receipt 等结果按原网络信封验证实际签名、受众、连接 epoch、channel nonce 和原请求 ID。SUBMIT 保留既有无签名 HTTP SendResult，使用从原契约生成的校验器及本次实际 from/to 校验，不伪造服务器签名。拉取不等于原生持久接收，原生接收前不得回报收据。后台 receive 仅允许 fetch、attemptBegin、executionAdmit、receipt、receiveSet 五个固定操作，不向模型注册 receive 工具。
+
+有限 `auriga_send_message` 工具只接收 aur1 目标地址和既有 body 结构，按实际宿主会话与公开 `execution.callId` 生成稳定幂等键；不接受模型自报发送者、owner 或任务。服务端仍核目标的真实 typed-local 类别与当前权限。模型结果沿原工具的统一提交投影，不返回私有投递和线程标识。独立/桌面网络路径未改变。
+
 根目录执行 `node --test clients/dsh-plugin/test/shared/shared.test.mjs`，已纳入插件 test 脚本。测试密钥均运行时生成。schema 快照与 K 原文件逐对象比对。签名及 schema 覆盖使用的七种冻结消息。
 
 公开组件的 rc.3 package.json/package-lock.json 固定在 `clients/dsh-plugin/test/public-host`，来源为 SPIKE 提交7e7ea403。根目录执行 `npm ci --ignore-scripts --prefix clients/dsh-plugin/test/public-host`，将 AURIGA_DSH_PUBLIC_PACKAGE_ROOT 指向该绝对目录，再执行 `node --test clients/dsh-plugin/test/shared/public-host.test.mjs`。Plugin CI 的 Windows/Linux 两个任务均安装并设置该路径，同时设置 AURIGA_REQUIRE_PUBLIC_HOST=1，缺少路径时测试直接失败。其他工作流未提供宿主路径时，两项测试跳过并打印由 Plugin 工作流承担验证的原因。测试组合公开 API，验证 pre-execute 放行后的 guard 拒绝及原生 owner/文件访问反例。
