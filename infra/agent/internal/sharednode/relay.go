@@ -30,6 +30,7 @@ type execution struct {
 	peer                               string
 	serial                             uint64
 	parent                             string
+	parentSerial                       uint64
 	ordinary, reserved, closing, begun bool
 	uncertainBegin                     bool
 	started                            chan struct{}
@@ -164,6 +165,10 @@ func (r *Relay) task(ctx context.Context, b *nodev1.SharedDshSessionBinding, id,
 func (r *Relay) capability(ctx context.Context, token string) (*nodev1.SharedDshCapability, error) {
 	r.mu.Lock()
 	cap := r.tokens[token]
+	var serial uint64
+	if cap != nil {
+		serial = r.tasks[cap.TaskId].serial
+	}
 	r.mu.Unlock()
 	if cap == nil || cap.ExpiresAt <= time.Now().Unix() {
 		return nil, errors.New("shared.expired")
@@ -176,6 +181,18 @@ func (r *Relay) capability(ctx context.Context, token string) (*nodev1.SharedDsh
 		return nil, e
 	}
 	if err := checkAuthorization(cap, out); err != nil {
+		return nil, err
+	}
+	// A valid remote response can arrive after local Finish. It cannot revive
+	// this handle or authorize a different execution with the same task UUID.
+	r.mu.Lock()
+	current, exists := r.tasks[cap.TaskId]
+	live := exists && current.serial == serial && !current.closing && r.tokens[token] == cap
+	r.mu.Unlock()
+	if !live {
+		return nil, errors.New("shared.revoked")
+	}
+	if err := r.task(ctx, cap.Binding, cap.TaskId, cap.Audience, cap.Scopes); err != nil {
 		return nil, err
 	}
 	return cap, nil
