@@ -15,15 +15,18 @@ import (
 //go:embed pool_launcher.mjs
 var poolLauncher []byte
 
-// RenderPool installs a complete, immutable shared-host configuration. The ports
-// module is a separately reviewed installation input supplied by host composition.
+// RenderPool installs the complete immutable shared profile and launcher. Ports
+// come only from the approved runtime export; caller-supplied module bytes fail.
 func RenderPool(profile, ports []byte, pool, tenant, meta string, port uint32) (string, error) {
 	return RenderPoolMode(profile, ports, pool, tenant, "shared", meta, port)
 }
 
 func RenderPoolMode(profile, ports []byte, pool, tenant, mode, meta string, port uint32) (string, error) {
-	if mode != "shared" && mode != "dedicated" {
-		return "", fmt.Errorf("invalid pool mode")
+	if mode != "shared" {
+		return "", fmt.Errorf("dedicated requires its separate native launcher and profile")
+	}
+	if len(ports) != 0 || port < 1 || port > 65535 || !poolHostConfig.MatchString("/var/lib/auriga/pools/"+pool+"/control/shared-host.json") {
+		return "", fmt.Errorf("fixed shared ports, pool ID and listener required")
 	}
 	if err := ValidatePoolProfile(profile); err != nil {
 		return "", err
@@ -41,7 +44,7 @@ func RenderPoolMode(profile, ports []byte, pool, tenant, mode, meta string, port
 			row["config"] = cfg
 		}
 		switch name {
-		case "auriga-dsh/shared-browser":
+		case SharedBrowserModule:
 			if mode != "shared" {
 				return "", fmt.Errorf("shared browser cannot load in dedicated mode")
 			}
@@ -49,8 +52,6 @@ func RenderPoolMode(profile, ports []byte, pool, tenant, mode, meta string, port
 			return "", fmt.Errorf("shared profile contains the owner entry")
 		case "auriga-dsh/shared":
 			shared = true
-		case "file:///run/auriga/shared-ports.mjs":
-			bridge = true
 		case "auriga-dsh/shared-ports":
 			bridge = true
 			cfg["configFile"] = "/var/lib/auriga/pools/" + pool + "/control/shared-host.json"
@@ -64,7 +65,9 @@ func RenderPoolMode(profile, ports []byte, pool, tenant, mode, meta string, port
 				return "", fmt.Errorf("duplicate shared listener")
 			}
 			cfg["port"] = port
-			cfg["host"] = jsExpr(`(() => { const net = process.getBuiltinModule('node:net'); const addresses = [...new Set(Object.values(process.getBuiltinModule('node:os').networkInterfaces()).flatMap(entries => (entries ?? []).filter(entry => entry.internal === false && entry.family === 'IPv4' && net.isIPv4(entry.address) && !entry.address.startsWith('127.')).map(entry => entry.address)))]; if (addresses.length !== 1) throw new Error('Shared host requires one isolated IPv4 address'); return addresses[0]; })()`)
+			// The launcher selects the same single private interface from trusted
+			// OS data before normalization. YAML stays literal, never executable.
+			cfg["host"] = "127.0.0.1"
 			web = true
 		}
 	}
@@ -83,7 +86,7 @@ func RenderPoolMode(profile, ports []byte, pool, tenant, mode, meta string, port
 		name string
 		body []byte
 	}{
-		{"pool-profile.yml", raw}, {"shared-ports.mjs", ports}, {"pool-binding.json", binding},
+		{"pool-profile.yml", raw}, {"pool-entry.yml", []byte("[]\n")}, {"pool-binding.json", binding},
 		{"pool-launcher.mjs", poolLauncher}, {"resource-supervisor.mjs", resourceSupervisor},
 		{"resource_plugins.mjs", resourcePlugins},
 	}

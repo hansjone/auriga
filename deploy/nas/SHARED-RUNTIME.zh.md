@@ -8,7 +8,7 @@
 2. 在 N 原 `--bifrost-config` 配置中添加 [模型独立 listener](../../infra/ai-gateway/SHARED-DSH.zh.md)。同时整合 N 消息作者的 `sharedMessages` listener：固定 `listen,tenantId,allowedNodeIds,tlsCertFile,tlsKeyFile,clientCAFile,messagePublicKeys,collab`，`collab` 沿原 `team.RPCConfig` 的 mTLS/轮换服务 JWT。模型和消息使用独立监听地址；Node 配置各自固定 origin/CA，不能把成员入口当内部入口。证书必须具有唯一 `auriga://node/<Node UUID>` URI SAN，N 的专用 CA 和精确 allowlist 必须认可该 Node。N 使用原迁移、真实调用账本和 collab 邮箱，不另启内存实现。
 3. 启动 platform 原服务，再启动 N：`auriga-ai-gateway --bifrost-config /etc/auriga/shared-runtime/bifrost.json`。服务监听端口只向授权 Node 开放。普通 keyset 暂时过期时保留已安装消息 handler，调用真实失败；不移除 handler 令 Host/model 启动失败。
 4. 将 [Agent 公开样例](shared-runtime-agent.example.json) 与既有 node enrollment 配置合并，安装到 `config/materials/shared-runtime/agent.json`；将 [服务样例](shared-runtime-services.example.json) 填为部署 tenant、真实固定 origins 和各 CA 的绝对路径。服务 token 文件只给 Agent，Unix 0600；各 CA/公开配置禁止组/其他人写入。已 enroll 的 `agent/node.crt`、私钥和 CA 沿既有存储加载，不重新生成身份。
-5. 将批准的完整 `InstanceSpec`（`dsh` 内有原签名发行信封）装入 `runtime.json`，原始 M/C 证明装入 `runtime-proofs`。运行时必须导出 `auriga-dsh/shared-ports`；`profile.yml` 使用生产 profile（`auriga-dsh/shared`、`auriga-dsh/shared-ports`、webserver、native tools、仅平台 filesystem skills）。禁止凭空填写发行摘要、跳过发行校验或临时挂可变 ports 模块。Agent 渲染 launcher 并启动唯一常驻 Host，不手工另起第二个 DSH。
+5. 将批准的完整 `InstanceSpec`（`dsh` 内有原签名发行信封）装入 `runtime.json`，原始 M/C 证明装入 `runtime-proofs`。运行时必须导出 `auriga-dsh/shared-ports`；`profile.yml` 使用[冻结的完整 60 行 shared 配方](shared-runtime-profile.example.yml)，包含 57 个 rc.3 公开 SDK 根和 ports、Host、browser 三个 Auriga 角色。Node 逐行核完整集合、唯一标识及精确 config，拒绝部分配方、额外字段、嵌套插件、任意导入和可执行 YAML。禁止凭空填写发行摘要、跳过发行校验或临时挂可变 ports 模块。Agent 渲染 launcher 并启动唯一常驻 Host，不手工另起第二个 DSH。
 6. Resource 复用既有 `agent/resource-trust.json` 的 `schemaVersion:1,origin,keys`、Node 客户端证书和 CA。origin 指向 Resource 直接 HTTPS 服务。每成员的 signed ref 仅直接 GET `/internal/resource/v1/catalog/downloads/<lease>/manifest` 和 `/artifacts/<artifactId>`；不再配置 `sharedResources`，不使用旧 POST 或成员 API。release/revocation/downgrade 用途公钥必须独立，沿原安装信任包与轮换流程更新。
 7. 用原批准 Edge identity、IAM 三用途公开 JWKS 和企业公开策略渲染 Host 公开配置。`message-trust.json` 只含批准的 `{realm,roots:[{kid,public_key_spki}]}`，SPKI 为 Ed25519 DER 的无 padding base64url；不能从 context 回包复制任意公钥为根：
 
@@ -56,11 +56,21 @@ Node 的受信 UDS `beginTask` 在 IAM Begin 前，从当前签名执行记录�
 
 内存采样同时经原 NodeControl 字段12上报；15秒 Watch 周期与新准入均采样，发送前重采样，跨重连、过期、旧代次或倒退数据丢弃。W 仍须按节点 mTLS/当前代次与新鲜样本处理容量、准入和释放；此候选不会把本地门禁当作 W 权威。
 
-**联合安装仍待闭**：现有 W `SharedDshService` 尚无 Admit/Release RPC，Host 的 tools/execute 以及 model/message 当前私有 row 尚须提供上述可信父关联；IAM 还须补不存在任务的持久 Finish tombstone 和受认证确认，当前缺此证据的未知 Begin 不自动解锁。Node 缺父就拒绝；未整合对应 W/Host/IAM 合同前不能把此候选安装为完整可用服务，也不能把合成 HTTP/gRPC 测试报作真实 native 生命周期或最终 READY。完整 rc.3 profile 由原 Host 作者提供闭包后另批接 Node 装配。
+**联合安装仍待闭**：现有 W `SharedDshService` 尚无 Admit/Release RPC，Host 的 tools/execute 以及 model/message 当前私有 row 尚须提供上述可信父关联；IAM 还须补不存在任务的持久 Finish tombstone 和受认证确认，当前缺此证据的未知 Begin 不自动解锁。Node 缺父就拒绝；未整合对应 W/Host/IAM 合同前不能把此候选安装为完整可用服务，也不能把合成 HTTP/gRPC 测试报作真实 native 生命周期或最终 READY。本批已消费冻结完整 rc.3 配方和 normalizer，接入下节的只读 launcher；F3 权威闭环仍按后续冻结合同独立接回。
+
+## 完整 shared 只读 loader
+
+运行时只从固定 `/opt/dsh/package.json` 解析已批准 rc.3 SDK，从 `/opt/auriga-dsh` 读取同一只读 Auriga 包。launcher 启动前核 app-boot 的真实路径、`0.2.1-rc.3` 版本和公开根 export，以及 Auriga 的三个精确 export；SDK 解析不得逃出只读安装树。逻辑 profile 只允许冻结的 SDK 包名，唯一 file URL 例外为 `file:///opt/auriga-dsh/src/shared-browser/plugin.js`。browser 与 frontend-static 的 `distIndex` 均固定为 `/opt/dsh/node_modules/@deepseek-ai/dsh-web-frontend/dist/index.html`。
+
+Node 将逻辑 `pool-profile.yml`、空数组 `pool-entry.yml`、绑定和 launcher 一并写入原不可变摘要、以只读 `/run/auriga` 挂载。launcher 只从受信 OS 接口选择唯一非 loopback IPv4，把 YAML 的固定 listener 占位值替换为字面地址，再真实调用冻结的 `resolveSharedRuntimeProfile(rows)`。该 normalizer 将 57 个 SDK 根转换为同一只读 SDK 的公开入口，保留三 Auriga 角色和 client metadata。
+
+rc.3 的真实 `boot` 第二参数是配置路径。launcher 使用公开调用 `boot('auriga-shared', '/run/auriga/pool-entry.yml', [{insert: normalizedRows}], prepare, 'file:///opt/dsh/package.json')`，以公开 insert 补丁将完整转换结果装入只读空根。`prepare` 仅提供既有 `profileContext`、`appReady` 元数据；服务由真实插件构造。没有可变 `/run/node_modules` 投影、环境 loader 或上游补丁。启动异常或缺 Host 权威端口不发布 health。
+
+共享配置不加载 Shell、terminal、jobs、subagent、MCP、plugin-manager、私有 skill 或 owner 主入口。`shell-env` 仅为被动注册表，`credentials-local` 仅存内部 Connection 传输材料。dedicated 使用另一个入口及可写 native profile/bundle，不能借用本只读 shared launcher。可复核的真实渲染产物和公开 SDK 纯组合命令见[夹具说明](../../infra/agent/internal/renderer/testdata/README.md)；该检查不启动 DSH，不替代主控真实页面验收。
 
 ## 正常 shared 原生浏览器装配
 
-须整合原生 browser 作者已冻结的 `auriga-dsh/shared-browser` export 及 Host 的 `admitBrowser/refresh/authorize/create/messagingSessions/messagingSettings` 实现后，才可安装该 profile。Node 不复制另一作者未提交源码，也不以现有 JSON carrier 当成聊天页面。在完整 shared Cordis profile 的 `auriga-dsh/shared` 行之后显式加入固定 `auriga-dsh/shared-browser` 行；config 只允许 `distIndex`，其值必须为已批准 runtime 中与原 frontend-static 相同的真实绝对 `index.html` 路径，不是 URL、Node 文件或可变 JS 表达式。该行进入原不可变配置摘要，不在运行中覆盖配置。
+须整合原生 browser 作者已冻结的 `auriga-dsh/shared-browser` export 及 Host 的 `admitBrowser/refresh/authorize/create/messagingSessions/messagingSettings` 实现后，才可安装该 profile。Node 不复制另一作者未提交源码，也不以现有 JSON carrier 当成聊天页面。在完整 shared Cordis profile 的 `auriga-dsh/shared` 行之后使用上节唯一固定 browser file URL；config 只允许固定 `distIndex`。该行进入原不可变配置摘要，不在运行中覆盖配置。
 
 shared 正常 Open URL 是实例根 `/`（或 `/index.html`）。浏览器使用同源 POST `/auriga/shared/browser/rpc` 与 `/auriga/shared/browser/stream` 的有限原生操作和 NDJSON，消息设置 POST `/auriga/shared/messages` 同样经过当前身份。每次请求由 Edge 签当前完整 E 的精确方法/路径，Node 保留 W 当前归属、单次 JTI 与撤销 watcher，并剥除到 shared Host 的 Cookie/Authorization。
 
