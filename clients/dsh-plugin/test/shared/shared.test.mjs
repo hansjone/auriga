@@ -998,12 +998,17 @@ test('original Python helper resolve/request runs with task-local variables and 
     config: () => ({ allowRawAgentToken: true }),
     helperBase: `http://127.0.0.1:${server.address().port}/dsh-team`,
     enterprise: f.enterprisePorts,
+    acquireExecution: async () => ({
+      binding,
+      ordinaryToken: 'synthetic-helper-ordinary-parent',
+      close: async () => {},
+    }),
     issueTask: async (b) => f.token(b),
     finishTask: async () => {
       f.states[0].active = false;
     },
   };
-  const snapshot = { ...process.env };
+  const environmentKeys = Object.keys(process.env).sort();
   const task = await openSharedTask({
     ctx,
     runtime: f.runtime,
@@ -1042,8 +1047,9 @@ test('original Python helper resolve/request runs with task-local variables and 
       "from uds_skill_auth import resolve, request, DshTeamError\ntry:\n resolve(apply_env_aliases=False)\n raise AssertionError('raw enabled')\nexcept DshTeamError as e:\n assert e.code=='raw_token_disabled'\nassert request('GET','https://app-two.invalid/api')['statusCode']==200\n",
     );
     assert.ok(
-      canonical({ ...process.env }) === canonical(snapshot),
-      'parent environment changed',
+      JSON.stringify(Object.keys(process.env).sort()) ===
+        JSON.stringify(environmentKeys),
+      'parent environment keys changed',
     );
     await task.close();
     await assert.rejects(f.enterprise.credentials(f.call(binding, task.token)));

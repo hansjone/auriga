@@ -28,12 +28,14 @@ public final class SharedDshPlacements implements SharedDshAuthority {
   private final Inputs inputs;
   private final EntryProbe entry;
   private final Clock clock;
+  private final SharedDshTaskAdmission tasks;
 
   public SharedDshPlacements(WorkspaceStore store, Inputs inputs, EntryProbe entry, Clock clock) {
     this.store = store;
     this.inputs = inputs;
     this.entry = entry;
     this.clock = clock;
+    this.tasks = new SharedDshTaskAdmission(store, this, clock);
   }
 
   private long now() {
@@ -1317,6 +1319,19 @@ public final class SharedDshPlacements implements SharedDshAuthority {
           audit(operation(id), "succeeded", null);
           return true;
         });
+  }
+
+  /** Only the current authenticated NodeControl holder may call these adapters. */
+  public void admit(UUID node, UUID holder, SharedDshSessionBinding binding, String task) {
+    tasks.admit(node, holder, binding, task);
+  }
+
+  public void release(UUID node, SharedDshSessionBinding binding, String task) {
+    tasks.release(node, binding, task);
+  }
+
+  public void memory(UUID node, UUID holder, long connectedAt, SharedDshPoolMemorySample sample) {
+    tasks.memory(node, holder, connectedAt, sample);
   }
 
   public void admit(UUID member, UUID platformSession, UUID task) {

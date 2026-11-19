@@ -71,6 +71,7 @@ export function installSharedMessageTool(ctx, { settings }) {
           body: input.body,
         },
         execution.signal,
+        execution,
       );
       if (
         execution.signal?.aborted ||

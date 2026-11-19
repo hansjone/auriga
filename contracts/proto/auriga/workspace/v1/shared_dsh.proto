@@ -25,6 +25,10 @@ service SharedDshService {
   rpc GetSharedDshResourceView(GetSharedDshResourceViewRequest) returns (GetSharedDshResourceViewResponse);
   rpc GetSharedDshResourceSnapshot(GetSharedDshResourceSnapshotRequest) returns (GetSharedDshResourceSnapshotResponse);
   rpc ReportSharedDshResource(ReportSharedDshResourceRequest) returns (ReportSharedDshResourceResponse);
+  // Node mTLS listener only, fenced by the current NodeControl session lease.
+  // The internal service-JWT listener intentionally does not implement these writes.
+  rpc AdmitSharedDshTask(AdmitSharedDshTaskRequest) returns (AdmitSharedDshTaskResponse);
+  rpc ReleaseSharedDshTask(ReleaseSharedDshTaskRequest) returns (ReleaseSharedDshTaskResponse);
 }
 
 message GetSharedDshPoolRequest {
@@ -92,4 +96,24 @@ message ReportSharedDshResourceRequest {
 }
 message ReportSharedDshResourceResponse {
   int64 revision = 1;
+}
+
+message AdmitSharedDshTaskRequest {
+  auriga.node.v1.SharedDshSessionBinding binding = 1;
+  string task_id = 2;
+}
+message AdmitSharedDshTaskResponse {
+  bool admitted = 1;
+  auriga.node.v1.SharedDshSessionBinding binding = 2;
+  string task_id = 3;
+}
+message ReleaseSharedDshTaskRequest {
+  auriga.node.v1.SharedDshSessionBinding binding = 1;
+  string task_id = 2;
+}
+message ReleaseSharedDshTaskResponse {
+  // Durable barrier against a delayed admission of this exact binding/task.
+  bool fenced = 1;
+  auriga.node.v1.SharedDshSessionBinding binding = 2;
+  string task_id = 3;
 }

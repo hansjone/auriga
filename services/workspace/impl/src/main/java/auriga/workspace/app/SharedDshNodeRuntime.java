@@ -160,4 +160,16 @@ public final class SharedDshNodeRuntime {
     for (var binding : impact.getAffectedList()) requireOwner(node, binding);
     placements.nodeGuardian(impact);
   }
+
+  public void memory(UUID node, UUID holder, long connectedAt, SharedDshPoolMemorySample sample) {
+    placements.memory(node, holder, connectedAt, sample);
+  }
+
+  public void admit(UUID node, UUID holder, SharedDshSessionBinding binding, String task) {
+    placements.admit(node, holder, binding, task);
+  }
+
+  public void release(UUID node, SharedDshSessionBinding binding, String task) {
+    placements.release(node, binding, task);
+  }
 }

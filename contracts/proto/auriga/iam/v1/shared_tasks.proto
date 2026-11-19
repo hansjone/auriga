@@ -48,7 +48,12 @@ message FinishSharedTaskRequest {
   auriga.node.v1.SharedDshSessionBinding binding = 1;
   string task_id = 2;
 }
-message FinishSharedTaskResponse {}
+message FinishSharedTaskResponse {
+  // True only after a durable barrier also excludes a delayed Begin of an absent task.
+  bool fenced = 1;
+  auriga.node.v1.SharedDshSessionBinding binding = 2;
+  string task_id = 3;
+}
 message ResolveSharedTaskRequest {
   string tenant_id = 1;
   string session_id = 2;

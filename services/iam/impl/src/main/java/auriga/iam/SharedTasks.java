@@ -57,6 +57,8 @@ final class SharedTasks {
         () -> {
           var session = session(binding);
           store.lock("shared-task:" + request.getTaskId());
+          if (store.get("shared_task_end", endKey(binding, request.getTaskId()), false) != null)
+            throw new AurigaException(CommonErrors.CONFLICT);
           var task = store.get("shared_task", request.getTaskId(), true);
           if (task == null) {
             task =
@@ -104,25 +106,44 @@ final class SharedTasks {
         });
   }
 
-  void finish(FinishSharedTaskRequest request) {
+  FinishSharedTaskResponse finish(FinishSharedTaskRequest request) {
     var binding = request.getBinding();
     requireTenant(binding);
     validate(binding);
     uuid(request.getTaskId());
-    store.tx(
+    return store.tx(
         () -> {
           store.lock("shared-task:" + request.getTaskId());
           var task = store.get("shared_task", request.getTaskId(), true);
-          if (task == null) return null;
-          if (!task.path("binding").equals(bindingJson(binding)))
+          if (task != null && !task.path("binding").equals(bindingJson(binding)))
             throw new AurigaException(CommonErrors.NOT_FOUND);
-          if (!task.path("ended").asBoolean()) {
+          String endKey = endKey(binding, request.getTaskId());
+          if (store.get("shared_task_end", endKey, true) == null)
+            store.insert(
+                "shared_task_end",
+                endKey,
+                Json.object(
+                    "tenantId", binding.getTenantId(),
+                    "taskId", request.getTaskId(),
+                    "binding", bindingJson(binding),
+                    "ended", true,
+                    "endedAt", clock.instant().toString()),
+                null);
+          if (task != null && !task.path("ended").asBoolean()) {
             task.put("ended", true);
             task.put("endedAt", clock.instant().toString());
             store.save("shared_task", task);
           }
-          return null;
+          return FinishSharedTaskResponse.newBuilder()
+              .setFenced(true)
+              .setBinding(binding)
+              .setTaskId(request.getTaskId())
+              .build();
         });
+  }
+
+  private static String endKey(SharedDshSessionBinding binding, String task) {
+    return task + ":" + Secrets.hash(Base64.getEncoder().encodeToString(binding.toByteArray()));
   }
 
   AuthorizeSharedCapabilityResponse authorize(AuthorizeSharedCapabilityRequest request) {

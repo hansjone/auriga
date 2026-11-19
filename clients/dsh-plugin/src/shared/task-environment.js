@@ -51,18 +51,26 @@ export function installSharedExecutionEnvironment(ctx, { runtime, ports }) {
     )
       fail();
   };
-  const closeRow = (row) => {
+  const closeRow = (row, settled = false) => {
+    if (settled) {
+      row.running = false;
+      row.settle?.();
+    }
     if (row.closing) return row.closing;
     row.active = false;
     row.controller.abort();
     if (rows.get(key(row.execution)) === row) rows.delete(key(row.execution));
-    row.execution.signal?.removeEventListener('abort', row.abort);
+    row.signal?.removeEventListener('abort', row.abort);
     row.closing = (async () => {
       try {
         await row.ready;
       } catch {
         /* Failed opening still owns its own compensation. */
       } finally {
+        if (row.running)
+          await new Promise((resolve) => {
+            row.settle = resolve;
+          });
         await row.task?.close();
       }
     })();
@@ -102,6 +110,8 @@ export function installSharedExecutionEnvironment(ctx, { runtime, ports }) {
       controller,
       active: true,
       serial,
+      signal: exec.signal,
+      running: true,
     };
     row.abort = () => {
       void closeRow(row).catch(() => {});
@@ -114,12 +124,7 @@ export function installSharedExecutionEnvironment(ctx, { runtime, ports }) {
           runtime,
           ports,
           raw: true,
-          execution: {
-            agent: exec.agent,
-            signal: globalThis.AbortSignal.any(
-              [exec.signal, controller.signal].filter(Boolean),
-            ),
-          },
+          execution: exec,
         }),
       )
       .then((task) => {
@@ -132,13 +137,17 @@ export function installSharedExecutionEnvironment(ctx, { runtime, ports }) {
     try {
       await row.ready;
       check(row, exec);
+      exec.signal = globalThis.AbortSignal.any(
+        [row.signal, controller.signal, row.task.signal].filter(Boolean),
+      );
       const result = await next();
       check(row, exec);
       await row.task.refresh();
       check(row, exec);
       return result;
     } finally {
-      await closeRow(row);
+      exec.signal = row.signal;
+      await closeRow(row, true);
     }
   });
   const detachDisposed = ctx.on('agent/disposed', ({ agent }) => {
