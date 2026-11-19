@@ -45,6 +45,133 @@ class SharedTasksPostgresTest {
   }
 
   @Test
+  void sharedMessageAllocationIsConcurrentDurableAndIndependentOfTheAuthorizingTask()
+      throws Exception {
+    var f = new Fixture();
+    var authority =
+        new SharedMessages(store, f.authority(), mock(IamNetworkAuthority.class), CLOCK);
+    var cap =
+        TenantContext.call(
+            f.tenant,
+            () ->
+                f.authority()
+                    .begin(
+                        BeginSharedTaskRequest.newBuilder()
+                            .setBinding(f.binding)
+                            .setTaskId(f.task)
+                            .setAudience(MESSAGE)
+                            .addScopes("message.send")
+                            .build())
+                    .getCapability());
+    String op = UUID.randomUUID().toString();
+    var request =
+        OpenSharedMessageContextRequest.newBuilder()
+            .setCapability(cap)
+            .setOperationId(op)
+            .setAuthenticatedNodeId(UUID.randomUUID().toString())
+            .setBootId(UUID.randomUUID().toString())
+            .setNativeBindingId(UUID.randomUUID().toString())
+            .setNativeBindingRevision("1")
+            .build();
+    SharedMessageContext a, b;
+    try (var pool = Executors.newVirtualThreadPerTaskExecutor()) {
+      var first = pool.submit(() -> TenantContext.call(f.tenant, () -> authority.open(request)));
+      var second = pool.submit(() -> TenantContext.call(f.tenant, () -> authority.open(request)));
+      a = first.get(15, TimeUnit.SECONDS);
+      b = second.get(15, TimeUnit.SECONDS);
+    }
+    assertEquals(a, b);
+    TenantContext.run(
+        f.tenant,
+        () -> {
+          assertEquals(
+              a,
+              authority.read(
+                  ReadSharedMessageContextRequest.newBuilder().setContextId(op).build()));
+          f.authority()
+              .finish(
+                  FinishSharedTaskRequest.newBuilder()
+                      .setBinding(f.binding)
+                      .setTaskId(f.task)
+                      .build());
+          assertThrows(auriga.common.error.AurigaException.class, () -> authority.open(request));
+          assertEquals(
+              a,
+              authority.read(
+                  ReadSharedMessageContextRequest.newBuilder().setContextId(op).build()));
+          var next =
+              f.authority()
+                  .begin(
+                      BeginSharedTaskRequest.newBuilder()
+                          .setBinding(f.binding)
+                          .setTaskId(UUID.randomUUID().toString())
+                          .setAudience(MESSAGE)
+                          .addScopes("message.send")
+                          .build());
+          assertEquals(
+              a, authority.open(request.toBuilder().setCapability(next.getCapability()).build()));
+          assertThrows(
+              auriga.common.error.AurigaException.class,
+              () ->
+                  authority.open(
+                      request.toBuilder()
+                          .setCapability(next.getCapability())
+                          .setNativeBindingRevision("2")
+                          .build()));
+          store.tx(
+              () -> {
+                assertEquals(
+                    1,
+                    jdbc.queryForObject(
+                        "SELECT count(*) FROM iam.shared_message_context WHERE tenant_id=? AND id=?",
+                        Integer.class,
+                        f.tenant,
+                        UUID.fromString(op)));
+                assertEquals(
+                    0,
+                    jdbc.queryForObject(
+                        "SELECT count(*) FROM iam.network_node WHERE tenant_id=?",
+                        Integer.class,
+                        f.tenant));
+                return null;
+              });
+          var newer =
+              request.toBuilder()
+                  .setCapability(next.getCapability())
+                  .setOperationId(UUID.randomUUID().toString())
+                  .setBootId(UUID.randomUUID().toString())
+                  .setNativeBindingId(UUID.randomUUID().toString())
+                  .build();
+          var replacement = authority.open(newer);
+          assertEquals(a.getRealm(), replacement.getRealm());
+          assertNotEquals(a.getNode(), replacement.getNode());
+          assertThrows(
+              auriga.common.error.AurigaException.class,
+              () ->
+                  authority.read(
+                      ReadSharedMessageContextRequest.newBuilder().setContextId(op).build()));
+          assertThrows(
+              auriga.common.error.AurigaException.class,
+              () ->
+                  authority.open(request.toBuilder().setCapability(next.getCapability()).build()));
+          assertThrows(
+              auriga.common.error.AurigaException.class,
+              () ->
+                  authority.open(
+                      request.toBuilder()
+                          .setCapability(next.getCapability())
+                          .setOperationId(UUID.randomUUID().toString())
+                          .build()));
+          assertEquals(
+              replacement,
+              authority.read(
+                  ReadSharedMessageContextRequest.newBuilder()
+                      .setContextId(newer.getOperationId())
+                      .build()));
+        });
+  }
+
+  @Test
   void concurrentBeginCreatesOneDurableTaskAndFinishSurvivesReconstruction() throws Exception {
     var f = new Fixture();
     BeginSharedTaskResponse first;
@@ -438,7 +565,7 @@ class SharedTasksPostgresTest {
           store,
           sessions,
           uac,
-          (tenant, account, context) -> Set.of("ai.models.invoke"),
+          (tenant, account, context) -> Set.of("ai.models.invoke", "collab.messages.use"),
           (pool, session) -> binding,
           signing,
           CLOCK,

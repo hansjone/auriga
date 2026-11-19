@@ -23,6 +23,72 @@ import tools.jackson.databind.node.ObjectNode;
 /** Transaction/storage doubles isolate task policy; actual PG migration and RLS run in CI. */
 class SharedTasksTest {
   @Test
+  void teamOrdinaryTaskDoesNotRequireCompanyMaterialAndCannotUseEnterpriseCapabilities()
+      throws Exception {
+    var f = new Fixture();
+    f.session.remove("uacCredentialId");
+    f.run(
+        () -> {
+          var generic = f.begin(ENTERPRISE, List.of("task.execute")).getCapability();
+          var state = f.authorize(generic);
+          assertTrue(state.getActive());
+          assertEquals(
+              SharedEnterpriseCredentialState.SHARED_ENTERPRISE_CREDENTIAL_STATE_ABSENT,
+              state.getEnterpriseCredentialState());
+          assertThrows(AurigaException.class, () -> f.begin(ENTERPRISE, List.of("outbound")));
+          assertThrows(AurigaException.class, () -> f.begin(ENTERPRISE, List.of("credentials")));
+          assertThrows(
+              AurigaException.class,
+              () -> f.begin(ENTERPRISE, List.of("task.execute", "outbound")));
+          assertThrows(
+              AurigaException.class,
+              () ->
+                  f.tasks.credentials(
+                      ReadSharedCredentialsRequest.newBuilder().setCapability(generic).build()));
+          assertThrows(AurigaException.class, () -> f.tasks.outboundMaterial(generic));
+          assertTrue(
+              f.authorize(f.begin(MODEL, List.of("model.invoke")).getCapability()).getActive());
+          f.tasks.finish(
+              FinishSharedTaskRequest.newBuilder().setBinding(f.binding).setTaskId(f.task).build());
+          assertFalse(f.authorize(generic).getActive());
+          return null;
+        });
+  }
+
+  @Test
+  void ordinaryTaskVersionDoesNotFollowCompanyTokenButInvalidOrForeignReferencesAreNeverAbsent()
+      throws Exception {
+    var f = new Fixture();
+    f.run(
+        () -> {
+          var generic = f.begin(ENTERPRISE, List.of("task.execute")).getCapability();
+          assertEquals(
+              SharedEnterpriseCredentialState.SHARED_ENTERPRISE_CREDENTIAL_STATE_AVAILABLE,
+              f.authorize(generic).getEnterpriseCredentialState());
+          f.credential.put("version", 2);
+          assertTrue(f.authorize(generic).getActive());
+          assertEquals(generic.getCredentialVersion(), f.authorize(generic).getCredentialVersion());
+          f.credential.put("invalid", true);
+          assertFalse(f.authorize(generic).getActive());
+          assertEquals(
+              SharedEnterpriseCredentialState.SHARED_ENTERPRISE_CREDENTIAL_STATE_UNSPECIFIED,
+              f.authorize(generic).getEnterpriseCredentialState());
+          f.credential.put("invalid", false).put("accountId", UUID.randomUUID().toString());
+          assertFalse(f.authorize(generic).getActive());
+          assertEquals(
+              SharedEnterpriseCredentialState.SHARED_ENTERPRISE_CREDENTIAL_STATE_UNSPECIFIED,
+              f.authorize(generic).getEnterpriseCredentialState());
+          f.credential.put("accountId", f.binding.getMemberId());
+          f.active.set(false);
+          assertFalse(f.authorize(generic).getActive());
+          assertEquals(
+              SharedEnterpriseCredentialState.SHARED_ENTERPRISE_CREDENTIAL_STATE_UNSPECIFIED,
+              f.authorize(generic).getEnterpriseCredentialState());
+          return null;
+        });
+  }
+
+  @Test
   void readsCurrentEmployeeCredentialAndRejectsOldVersionWithoutChangingTaskOwner()
       throws Exception {
     var f = new Fixture();

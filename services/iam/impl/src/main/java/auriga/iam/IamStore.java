@@ -44,7 +44,8 @@ public final class IamStore {
           "uac_suppression",
           "uac_diagnostics",
           "shared_task",
-          "shared_capability");
+          "shared_capability",
+          "shared_message_context");
   private final JdbcTemplate jdbc;
   private final TransactionTemplate transactions;
   private final ScopedValue<Set<String>> responseProjections = ScopedValue.newInstance();

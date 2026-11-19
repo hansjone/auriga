@@ -85,6 +85,10 @@ message NetworkAuthorityConnection {
   string server_id = 5;
   string client_id = 6;
   string client_account = 7;
+  // Mutually exclusive identity class, used ONLY by the shared HTTP adapter.
+  // When present all four legacy NATS fields above MUST be empty. Ordinary
+  // ResolveNetworkTarget still rejects it; it cannot redeem as a device owner.
+  string shared_context_id = 8;
 }
 
 message ResolveNetworkTargetRequest {

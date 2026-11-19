@@ -29,6 +29,7 @@ type bifrostConfig struct {
 	IAM                team.RPCConfig       `json:"iam"`
 	Org                team.RPCConfig       `json:"org"`
 	SharedModel        *sharedModelConfig   `json:"sharedModel,omitempty"`
+	SharedMessages     *sharedMessageConfig `json:"sharedMessages,omitempty"`
 }
 
 func serveBifrost(path string) error {
@@ -87,6 +88,13 @@ func serveBifrost(path string) error {
 	if shared != nil {
 		defer shared.Close()
 	}
+	messages, err := prepareSharedMessages(ctx, c.SharedMessages, iam.NewSharedTaskServiceClient(ic))
+	if err != nil {
+		return err
+	}
+	if messages != nil {
+		defer messages.Close()
+	}
 	listener, err := net.Listen("tcp", c.Listen)
 	if err != nil {
 		return err
@@ -96,6 +104,9 @@ func serveBifrost(path string) error {
 	servers := []*http.Server{server}
 	if shared != nil {
 		servers = append(servers, shared.server)
+	}
+	if messages != nil {
+		servers = append(servers, messages.server)
 	}
 	done := make(chan error, len(servers))
 	go func() {
@@ -107,6 +118,9 @@ func serveBifrost(path string) error {
 	}()
 	if shared != nil {
 		go func() { done <- shared.server.ServeTLS(shared.listener, "", "") }()
+	}
+	if messages != nil {
+		go func() { done <- messages.server.ServeTLS(messages.listener, "", "") }()
 	}
 	remaining := len(servers)
 	select {
