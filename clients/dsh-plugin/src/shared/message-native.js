@@ -13,7 +13,7 @@ import { canonical, fail, validate } from './protocol.js';
  */
 export function createSharedMessageNative(ctx, { now = Date.now } = {}) {
   const bootId = randomUUID();
-  /** @type {Map<string, {binding:string,token:ReturnType<typeof registrationSession>,bindingId:string,operationId:string,local:string|null,failed:boolean}>} */
+  /** @type {Map<string, {agent:import('../network/host/native/types.js').Agent,binding:string,token:ReturnType<typeof registrationSession>,bindingId:string,operationId:string,local:string|null,failed:boolean}>} */
   const rows = new Map();
   let closed = false;
   let highClock = -Infinity;
@@ -38,6 +38,7 @@ export function createSharedMessageNative(ctx, { now = Date.now } = {}) {
       let row = rows.get(binding.sessionId);
       if (!row) {
         row = {
+          agent: execution.agent,
           binding: identity,
           token: registrationSession(ctx, execution),
           bindingId: randomUUID(),
@@ -139,6 +140,16 @@ export function createSharedMessageNative(ctx, { now = Date.now } = {}) {
           return resolveLocal(local, check);
         },
       });
+    },
+    /** Explicit public host disposal fences old proofs; it does not silently
+     * rebind a changed agent or a model-provided session object.
+     * @param {import('../network/host/native/types.js').Agent} agent */
+    retire(agent) {
+      const row = rows.get(agent.session.id);
+      if (row?.agent === agent) {
+        row.failed = true;
+        rows.delete(agent.session.id);
+      }
     },
     close() {
       closed = true;

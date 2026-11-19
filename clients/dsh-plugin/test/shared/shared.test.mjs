@@ -747,6 +747,148 @@ test('self-owned carrier rejects unknown methods and arbitrary create paths', as
   }
 });
 
+test('message settings are exact, member-owned and reauthorize after mutations; native warming never exposes another member', async () => {
+  const f = setup(),
+    a = await f.peer(0),
+    b = await f.peer(1);
+  const own = await f.runtime.create(a, f.host),
+    other = await f.runtime.create(b, f.host);
+  let changes = 0;
+  const ctx = {
+    tools: { guard: () => () => {}, register: () => () => {} },
+    remoteAccess: { registerPolicy: () => () => {} },
+    webServer: { register: () => () => {} },
+    sessionPersistence: {
+      list: async () =>
+        [...f.rows.values()].map((row) => ({ header: { id: row.sessionId } })),
+    },
+    sessions: {
+      list: () => [...f.rows.values()].map((row) => ({ id: row.sessionId })),
+    },
+  };
+  const host = installSharedHost(ctx, {
+    runtime: f.runtime,
+    enterprise: f.enterprise,
+    ports: { createPeer() {}, assertProfile: () => true },
+    messaging: {
+      status: async (binding) => ({
+        sessionId: binding.sessionId,
+        receiveEnabled: false,
+      }),
+      setReceive: async (binding, enabled) => {
+        changes++;
+        return { sessionId: binding.sessionId, receiveEnabled: enabled };
+      },
+    },
+  });
+  try {
+    assert.deepEqual(await host.messagingSessions(a), [
+      { sessionId: own.sessionId, label: '会话 1' },
+    ]);
+    assert.deepEqual(await host.refresh(a), [own.sessionId]);
+    ctx.sessions.list = () => [];
+    assert.deepEqual(
+      await host.refresh(a),
+      [own.sessionId],
+      'public persistence preserves cold member history without attaching it',
+    );
+    const unknown = randomUUID(),
+      lookup = f.ports.lookup;
+    f.ports.lookup = async (id) => {
+      if (id === unknown)
+        throw Object.assign(new Error(), { code: 'common.not_found' });
+      return lookup(id);
+    };
+    const persistentList = ctx.sessionPersistence.list;
+    ctx.sessionPersistence.list = async () => [
+      ...(await persistentList()),
+      { header: { id: unknown } },
+      { header: { id: 'legacy-owner' } },
+    ];
+    assert.deepEqual(await host.refresh(a), [own.sessionId]);
+    await host.authorize(a, 'session/follow', own.sessionId);
+    await host.authorize(a, 'session/projections', own.sessionId);
+    await assert.rejects(host.authorize(a, 'session/follow', other.sessionId));
+    await assert.rejects(
+      host.messagingSettings(a, { sessionId: other.sessionId, enabled: true }),
+    );
+    for (const input of [
+      { sessionId: own.sessionId, enabled: 1 },
+      { sessionId: own.sessionId, ownerId: 'arbitrary' },
+      { sessionId: own.sessionId, enabled: undefined },
+    ])
+      await assert.rejects(host.messagingSettings(a, input));
+    assert.equal(changes, 0);
+    assert.equal(
+      (await host.messagingSettings(a, { sessionId: own.sessionId }))
+        .receiveEnabled,
+      false,
+    );
+    assert.equal(
+      (
+        await host.messagingSettings(a, {
+          sessionId: own.sessionId,
+          enabled: true,
+        })
+      ).receiveEnabled,
+      true,
+    );
+    assert.equal(changes, 1);
+    f.states[0].active = false;
+    await assert.rejects(host.refresh(a));
+    await assert.rejects(host.messagingSessions(a));
+  } finally {
+    host.close();
+  }
+});
+
+test('native browser admission preserves signed member/current/replay gates and keeps carrier interactions none', async () => {
+  const f = setup();
+  const host = installSharedHost(
+    {
+      tools: { guard: () => () => {}, register: () => () => {} },
+      remoteAccess: { registerPolicy: () => () => {} },
+      webServer: { register: () => () => {} },
+    },
+    {
+      runtime: f.runtime,
+      enterprise: f.enterprise,
+      ports: {
+        assertProfile: () => true,
+        createPeer: (options) => ({ ...options }),
+      },
+    },
+  );
+  const request = { method: 'GET', canonicalPath: '/@api/ws' };
+  const token = () =>
+    f.signed(
+      {
+        schemaVersion: 2,
+        issuer: 'auriga.edge',
+        audience: 'auriga.shared.ingress',
+        binding: f.states[0].binding,
+        platformSessionId: f.states[0].platformSessionId,
+        ...request,
+        issuedAt: 1000,
+        expiresAt: 1060,
+        jti: randomUUID(),
+      },
+      'identity',
+    );
+  try {
+    const once = token(),
+      browser = await host.admitBrowser(once, request);
+    assert.equal(browser.interactions, 'answer');
+    assert.equal(browser.principal.kind, 'auriga-shared-member');
+    await assert.rejects(host.admitBrowser(once, request));
+    assert.equal((await host.admit(token(), request)).interactions, 'none');
+    f.states[0].active = false;
+    await assert.rejects(host.admitBrowser(token(), request));
+  } finally {
+    host.close();
+  }
+});
+
 test('original Python helper resolve/request runs with task-local variables and no parent env mutation', async () => {
   const f = setup(),
     binding = await f.runtime.create(await f.peer(0), f.host);

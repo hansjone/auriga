@@ -25,9 +25,16 @@ const copy = (v) => JSON.parse(JSON.stringify(v));
 const immutable = (b) => Object.freeze(copy(b));
 export const ALLOWED_ACTIONS = Object.freeze([
   'session/page',
+  'session/follow',
+  'session/projections',
   'session/prompt',
   'session/cancel',
   'event:changed',
+  'event:api-session/activity',
+  'event:api-session/added',
+  'event:api-session/error',
+  'event:api-session/removed',
+  'event:api-session/status',
   'workspaceFiles/read',
   'workspaceFiles/stat',
   'workspaceFiles/readBytes',
@@ -87,7 +94,8 @@ export function createSharedRuntime({
     let b;
     try {
       b = await ports.lookup(id);
-    } catch {
+    } catch (error) {
+      if (error?.code === 'common.not_found') fail('common.not_found');
       fail('common.unavailable');
     }
     validate('SessionBinding', b);
@@ -183,7 +191,7 @@ export function createSharedRuntime({
     const b = await session(id);
     same(c.binding, b);
     const allowed = {
-      'auriga.shared.enterprise': ['credentials', 'outbound'],
+      'auriga.shared.enterprise': ['credentials', 'outbound', 'task.execute'],
       'auriga.shared.model': ['model.invoke'],
       'auriga.shared.message': ['message.send', 'message.receive'],
     }[audience];
@@ -192,6 +200,7 @@ export function createSharedRuntime({
       c.audience !== audience ||
       !c.scopes.includes(scope) ||
       c.scopes.some((s) => !allowed.includes(s)) ||
+      (c.scopes.includes('task.execute') && c.scopes.length !== 1) ||
       c.taskId !== taskId
     )
       fail();
@@ -261,6 +270,11 @@ export function createSharedRuntime({
   }
   return {
     admit,
+    async refresh(peer) {
+      const principal = peers.get(peer);
+      if (!principal) fail();
+      await current(principal);
+    },
     create,
     session,
     authorize,

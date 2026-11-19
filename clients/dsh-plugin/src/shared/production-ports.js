@@ -9,7 +9,9 @@ import { createSharedMessageTrust } from './message-trust.js';
 import { assertSharedSendResult } from './message-result.js';
 import { decodeJson, encodeJson } from '../network/session/frames.js';
 import { u64 } from '../network/source-control/frames.js';
-import { fail, same, validate, verifyToken } from './protocol.js';
+import { registrationSession } from '../network/host/native/host-port.js';
+import { MailboxError } from '../network/durable/client.js';
+import { canonical, fail, same, validate, verifyToken } from './protocol.js';
 
 /** Compose the documented DSH Host APIs with the node-owned W/IAM/N relay. */
 export function createProductionSharedPorts(
@@ -39,7 +41,7 @@ export function createProductionSharedPorts(
     call,
     trust: messageTrust,
   });
-  async function message(operation, request) {
+  async function message(operation, request, acceptContext) {
     const receive = {
       fetch: ['fetch', 'fetch_result'],
       attemptBegin: ['attempt_begin', 'attempt_result'],
@@ -111,6 +113,7 @@ export function createProductionSharedPorts(
     await resolve(placementBinding(current), current.platformSessionId);
     context.check();
     check();
+    acceptContext?.(context);
     if (
       frame &&
       ((frame.epoch ?? frame.connection_epoch) !== context.connection.epoch ||
@@ -213,7 +216,7 @@ export function createProductionSharedPorts(
         },
         execution.signal,
       );
-      if (execution.signal?.aborted) fail();
+      if (execution.signal?.aborted || tasks.get(execution) !== task) fail();
       const claims = verifyToken(
         result.token,
         'Capability',
@@ -226,15 +229,16 @@ export function createProductionSharedPorts(
       return result.token;
     } catch (error) {
       // A canceled response can still have committed a task at IAM.
-      await finish(binding, execution).catch(() => {});
+      await finish(binding, execution, task).catch(() => {});
       throw error;
     }
   }
-  async function finish(binding, execution) {
-    const task = tasks.get(execution);
+  async function finish(binding, execution, knownTask) {
+    const current = tasks.get(execution);
+    const task = knownTask ?? current;
     if (!task) return;
     same(task.binding, binding);
-    tasks.delete(execution);
+    if (current === task) tasks.delete(execution);
     for (const token of task.tokens) capabilities.delete(token);
     await call('finishTask', { binding, taskId: task.id });
   }
@@ -271,6 +275,7 @@ export function createProductionSharedPorts(
       if (status === 'idle') void removeRequest(agent).catch(() => {});
     }),
     ctx.on('agent/disposed', ({ agent }) => {
+      messageContexts.retire(agent);
       void removeRequest(agent).catch(() => {});
     }),
   ];
@@ -278,6 +283,148 @@ export function createProductionSharedPorts(
     options,
     config: () => settings().enterprise,
     messageTrustConfig: () => settings().messageTrust,
+    async openMessageInbox(binding, signal) {
+      const agent = ctx.agents.get(binding.sessionId);
+      const native = registrationSession(ctx, { agent });
+      const controller = new AbortController();
+      const execution = {
+        agent,
+        signal: globalThis.AbortSignal.any(
+          [signal, controller.signal].filter(Boolean),
+        ),
+      };
+      const current = await lookup(binding.sessionId);
+      same(current, binding);
+      await resolve(placementBinding(current), current.platformSessionId);
+      let token = await begin(
+        binding,
+        execution,
+        ['message.receive'],
+        'auriga.shared.message',
+      );
+      const task = tasks.get(execution);
+      let expected,
+        latest,
+        stopped = false;
+      const guard = () => {
+        if (
+          stopped ||
+          execution.signal.aborted ||
+          tasks.get(execution) !== task
+        )
+          fail();
+        native.check();
+        if (executionSession(ctx, execution) !== binding.sessionId) fail();
+      };
+      const accept = (context) => {
+        guard();
+        const stable = canonical({
+          contextId: context.contextId,
+          binding: context.binding,
+          registration: context.registration,
+          nativeBinding: context.nativeBinding,
+          producerEpoch: context.producerEpoch,
+          connection: Object.fromEntries(
+            [
+              'realm',
+              'node',
+              'incarnation',
+              'epoch',
+              'bootId',
+              'channelNonce',
+            ].map((key) => [key, context.connection[key]]),
+          ),
+        });
+        if (expected !== undefined && stable !== expected)
+          fail('shared.binding_mismatch');
+        expected ??= stable;
+        latest = context;
+        return context;
+      };
+      const refresh = async (initial = false) => {
+        guard();
+        if (!initial) {
+          const next = await ports.downstream.issue(
+            binding,
+            task.id,
+            'auriga.shared.message',
+            ['message.receive'],
+            execution.signal,
+          );
+          // This private background execution has one serialized request lane.
+          // Retain only its current token, without pruning live helper anchors.
+          if (capabilities.get(token) === task) capabilities.delete(token);
+          task.tokens.delete(token);
+          token = next;
+        }
+        return accept(
+          await messageContexts.prepare(
+            {
+              tenantId: binding.tenantId,
+              sessionId: binding.sessionId,
+              taskId: task.id,
+              capability: token,
+            },
+            task,
+            execution.signal,
+          ),
+        );
+      };
+      const close = async () => {
+        if (stopped) return;
+        stopped = true;
+        controller.abort();
+        await finish(binding, execution, task);
+      };
+      try {
+        await refresh(true);
+        const trust = await messageTrust.open();
+        return {
+          get context() {
+            return latest;
+          },
+          trust,
+          refresh: () => refresh(false),
+          assertCurrent() {
+            guard();
+            latest.check();
+          },
+          async request(frame, expectedType, callerSignal) {
+            guard();
+            const operation = {
+              fetch: 'fetch',
+              attempt_begin: 'attemptBegin',
+              execution_admit: 'executionAdmit',
+              receipt: 'receipt',
+              receive_set: 'receiveSet',
+            }[frame.type];
+            if (!operation) fail('common.validation_failed');
+            const result = await message(
+              'receive',
+              {
+                tenantId: binding.tenantId,
+                sessionId: binding.sessionId,
+                taskId: task.id,
+                capability: token,
+                operation,
+                frame,
+                signal: globalThis.AbortSignal.any(
+                  [execution.signal, callerSignal].filter(Boolean),
+                ),
+              },
+              accept,
+            );
+            if (result.type === 'error') throw new MailboxError(result, 1);
+            if (result.type !== expectedType) fail('common.validation_failed');
+            return result;
+          },
+          close,
+        };
+      } catch (error) {
+        await close().catch(() => {});
+        throw error;
+      }
+    },
     get helperBase() {
       const port = Number(ctx.webServer.port);
       if (!Number.isInteger(port) || port < 1 || port > 65535)
@@ -377,6 +524,8 @@ export function createProductionSharedPorts(
     },
     issueTask: (binding, execution, scopes) =>
       begin(binding, execution, scopes, 'auriga.shared.enterprise'),
+    issueExecution: (binding, execution) =>
+      begin(binding, execution, ['task.execute'], 'auriga.shared.enterprise'),
     finishTask: (binding, execution) => finish(binding, execution),
     enterprise: {
       taskId(token) {
@@ -510,11 +659,35 @@ export function createProductionSharedPorts(
         same(current.binding, binding);
         const purposeKey = purpose.audience + ':' + purpose.scope;
         let execution = current.tasks.get(purposeKey);
+        if (execution?.signal?.aborted) {
+          current.tasks.delete(purposeKey);
+          await finish(binding, execution);
+          execution = undefined;
+        }
         if (!execution) {
           execution = { agent, signal: current.signal };
           current.tasks.set(purposeKey, execution);
-          await begin(binding, execution, [purpose.scope], purpose.audience);
+          execution.ready = begin(
+            binding,
+            execution,
+            [purpose.scope],
+            purpose.audience,
+          );
         }
+        try {
+          await execution.ready;
+        } catch (error) {
+          if (current.tasks.get(purposeKey) === execution)
+            current.tasks.delete(purposeKey);
+          throw error;
+        }
+        if (
+          requests.get(agent) !== current ||
+          current.tasks.get(purposeKey) !== execution ||
+          execution.signal?.aborted ||
+          !tasks.has(execution)
+        )
+          fail();
         return { taskId: tasks.get(execution).id, callId: current.callId };
       },
       async issue(binding, taskId, audience, scopes, signal) {

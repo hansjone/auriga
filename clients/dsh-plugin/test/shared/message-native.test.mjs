@@ -189,3 +189,19 @@ test('concurrent platform responses cannot bind one native source to two locals'
   assert.equal((await first).local, '1');
   f.native.close();
 });
+
+test('only explicit real-agent disposal retires a source; late old disposal cannot retire its replacement', async () => {
+  const f = setup();
+  const before = await f.native.capture(f.execution, f.binding);
+  f.native.retire({ ...f.agent });
+  before.check();
+  f.native.retire(f.agent);
+  assert.throws(before.check);
+  const replacement = f.attach(f.binding.sessionId);
+  const next = await f.native.capture({ agent: replacement }, f.binding);
+  assert.notEqual(next.operationId, before.operationId);
+  assert.notEqual(next.witness.binding_id, before.witness.binding_id);
+  f.native.retire(f.agent);
+  next.check();
+  f.native.close();
+});

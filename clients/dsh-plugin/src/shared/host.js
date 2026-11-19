@@ -26,7 +26,10 @@ const finiteTools = new Set([
  * assertProfile must attest actual unloaded controllers and fixed platform skill roots.
  * invoke is the self-owned carrier; native owner remains a disclosed bypass.
  */
-export function installSharedHost(ctx, { runtime, enterprise, ports }) {
+export function installSharedHost(
+  ctx,
+  { runtime, enterprise, ports, messaging },
+) {
   if (
     !ctx.remoteAccess?.registerPolicy ||
     !ctx.tools?.guard ||
@@ -37,6 +40,43 @@ export function installSharedHost(ctx, { runtime, enterprise, ports }) {
     fail('common.unavailable');
   if (ports.assertProfile(SHARED_PROFILE) !== true) fail('common.unavailable');
   const disposers = [];
+  async function memberSessionIds(peer) {
+    await runtime.refresh(peer);
+    if (
+      typeof ctx.sessions.list !== 'function' ||
+      typeof ctx.sessionPersistence?.list !== 'function'
+    )
+      fail('common.unavailable');
+    const stored = await ctx.sessionPersistence.list();
+    if (!Array.isArray(stored)) fail('common.unavailable');
+    const candidates = new Set([
+      ...ctx.sessions.list().map((session) => session.id),
+      ...stored.map((snapshot) => snapshot?.header?.id),
+    ]);
+    const result = [];
+    for (const id of candidates) {
+      // K session IDs are UUIDs. Owner/native legacy IDs never become a
+      // guessed W binding and are not attached/resumed merely to enumerate.
+      if (
+        typeof id !== 'string' ||
+        !/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(
+          id,
+        )
+      )
+        continue;
+      try {
+        await runtime.authorize(peer, 'session/page', id);
+        result.push(id);
+      } catch (error) {
+        if (
+          !['shared.binding_mismatch', 'common.not_found'].includes(error.code)
+        )
+          throw error;
+      }
+    }
+    await runtime.refresh(peer);
+    return result;
+  }
   try {
     disposers.push(
       ctx.tools.guard((call) =>
@@ -125,7 +165,49 @@ export function installSharedHost(ctx, { runtime, enterprise, ports }) {
       runtime.admit(token, request, (p) =>
         ports.createPeer({ principal: p, interactions: 'none' }),
       ),
+    // Internal native-browser composition only. Its fixed finite gateway
+    // rejects interaction results and owner waterfall handlers; answer enables
+    // the public rc.3 event stream without manufacturing a new principal.
+    admitBrowser: (token, request) =>
+      runtime.admit(token, request, (principal) =>
+        ports.createPeer({ principal, interactions: 'answer' }),
+      ),
     create: (peer, input) => runtime.create(peer, ports.sessions, input),
+    authorize: (peer, action, sessionId) =>
+      runtime.authorize(peer, action, sessionId),
+    async refresh(peer) {
+      return memberSessionIds(peer);
+    },
+    async messagingSettings(peer, input) {
+      if (!messaging) fail('common.unavailable');
+      if (
+        !input ||
+        typeof input !== 'object' ||
+        Array.isArray(input) ||
+        Object.keys(input).some(
+          (key) => !['sessionId', 'enabled'].includes(key),
+        ) ||
+        typeof input.sessionId !== 'string' ||
+        (Object.hasOwn(input, 'enabled') && typeof input.enabled !== 'boolean')
+      )
+        fail('common.validation_failed');
+      const binding = await runtime.authorize(
+        peer,
+        'session/page',
+        input.sessionId,
+      );
+      const result = Object.hasOwn(input, 'enabled')
+        ? await messaging.setReceive(binding, input.enabled)
+        : await messaging.status(binding);
+      await runtime.authorize(peer, 'session/page', input.sessionId);
+      return result;
+    },
+    async messagingSessions(peer) {
+      return (await memberSessionIds(peer)).map((sessionId, index) => ({
+        sessionId,
+        label: `会话 ${index + 1}`,
+      }));
+    },
     async invoke(peer, action, sessionId, args) {
       const b = await runtime.authorize(peer, action, sessionId);
       if (!args || typeof args !== 'object' || Array.isArray(args))
@@ -165,6 +247,7 @@ export function installSharedHost(ctx, { runtime, enterprise, ports }) {
       return result;
     },
     revoke(event) {
+      messaging?.revoke(event);
       runtime.revoke(event);
       ctx.remoteAccess.invalidate();
       ports.disconnect(event);

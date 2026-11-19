@@ -15,7 +15,13 @@ export function createSharedCarrier({ host, runtime }) {
           '/auriga/shared/invoke',
           '/auriga/shared/resources',
           '/auriga/shared/status',
+          '/auriga/shared/messages',
         ].includes(canonicalPath)
+      )
+        fail('common.validation_failed');
+      if (
+        canonicalPath === '/auriga/shared/messages' &&
+        (req.url ?? '').includes('?')
       )
         fail('common.validation_failed');
       peer = await host.admit(req.headers['auriga-identity'], {
@@ -58,6 +64,8 @@ export function createSharedCarrier({ host, runtime }) {
           fail('common.validation_failed');
         await runtime.authorize(peer, 'session/page', body.sessionId);
         result = await runtime.resources(body.sessionId);
+      } else if (canonicalPath.endsWith('/messages')) {
+        result = await host.messagingSettings(peer, body);
       } else {
         if (Object.keys(body).length) fail('common.validation_failed');
         result = {

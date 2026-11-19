@@ -49,6 +49,7 @@ export function setup() {
   };
   const state = { now: Math.floor(Date.now() / 1000) * 1000, calls: [] };
   const key = generateKeyPairSync('ed25519');
+  const deliveryKey = generateKeyPairSync('ed25519');
   const root = generateKeyPairSync('ed25519');
   const signer = createV2Signer(root, 'test-root');
   const payload = {
@@ -66,6 +67,17 @@ export function setup() {
         not_before: iso(state.now - 60_000),
         not_after: iso(state.now + 7 * 86_400_000),
         public_key_spki: key.publicKey
+          .export({ type: 'spki', format: 'der' })
+          .toString('base64url'),
+      },
+      {
+        kid: 'fixture-delivery',
+        alg: 'Ed25519',
+        purpose: 'business_delivery',
+        state: 'active',
+        not_before: iso(state.now - 60_000),
+        not_after: iso(state.now + 7 * 86_400_000),
+        public_key_spki: deliveryKey.publicKey
           .export({ type: 'spki', format: 'der' })
           .toString('base64url'),
       },
@@ -153,6 +165,12 @@ export function setup() {
       registration: { realm: '2', node: '64', ...registration },
       sourceGet,
       messageTrust: material,
+      mailbox: {
+        receiveEnabled: false,
+        receiveVersion: '1',
+        headSeq: '0',
+        committedCursor: '0',
+      },
     };
   }
   const call = async (operation, body, signal) => {
@@ -197,6 +215,7 @@ export function setup() {
     material,
     root,
     key,
+    deliveryKey,
     store,
   };
 }
