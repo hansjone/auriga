@@ -21,6 +21,8 @@ R 的共享 profile 选择包入口 `auriga-dsh/shared`，不得同时加载默�
 - `invoke(action,binding,args)`：有限 action 的公开宿主调用。P 调用前后都重核本人归属；不得将未经检查的 sessionId/cwd 从 args 再次传入宿主，以覆盖已核 binding。
 - `assertProfile(expected)`：同步核对实际加载配置，只有全部已卸载的能力与固定平台 skill 根符合预期才返回 true。执行工具、terminal、jobs、subagent、stdio MCP、动态安装、个人 Key、私有 skill 均关闭；includeDefaultRoots=false，customSkillDirs 只能是 R 的平台活跃根。返回 false、Promise 或缺失均拒绝启动。该接口不是 P 已实际卸载控制器的证明，真实 profile 验收留联合接线。
 
+内部安装工厂可为独立实例复用底层授权：`createSharedRuntime({expectedMode})` 缺省 `shared`，只接受精确 `shared` 或 `dedicated`，每次绑定均必须匹配安装侧指定模式。`createProductionSharedPorts(ctx,{profileValidator})` 缺省保留共享 profile 校验；只有内部代码可提供同步 `(ctx,expectedProfile,skillRoots)=>true` 验证函数，Promise 或其他值都不能授予 profile。这两个参数不从浏览器或 YAML 读取，不放宽共享 guard，也不将共享消息原生来源扩到 dedicated。
+
 工具行使用公开配置 `mode: native`，对应 SHARED_PROFILE.toolPresentation。该配置让有限工具可被模型直接调用。R 的 profile 核验同时检查这一配置，公开 ToolRuntime 测试也按此配置装配。
 
 共享技能根是容器内唯一固定只读挂载 `/run/auriga/skills-active/current`，与 Agent 正式 writer、renderer 和 Docker mount 一致；Host 不接受宿主机 PoolLayout 路径、子路径或额外根。`skill-filesystem` 必须关闭默认根、不设置 bundled 根，provider 为 `auriga-shared`。原生 `skill` 工具沿公开 `tools/execute` 继续调用原 Registry/Filesystem；Host 前后核真实会话代次，并要求实际定义的 provider、source、完整路径和资源目录属于平台视图，返回正文与已核定义一致。私有目录、运行时同名覆盖及链接逃逸不能借这个工具加载；Shell、插件安装及其余非白名单工具仍拒绝。
@@ -68,7 +70,9 @@ SourceGet、FETCH 页及各项、attempt/admit/receipt 等结果按原网络信�
 
 rc.3 原生 `session/list`、`session/control` 先按 `{kind:'global'}` 进入公共读控制器，再逐个会话和增量按本人 session role 过滤。共享策略只对这两个 action 同时给最小 global 入口与本人 session 权限；不包含原生 create、全宿主 modelCatalog、credential、MCP 或全局事件。会话创建始终经可信 Host 的登记后发布流程。正常浏览器模块仍须逐调用和流输出前后核归属与代次，不能把同步 policy 投影代替在线权威。
 
-显式意图原子保存在 `/var/lib/auriga/pools/<pool>/host/message-preferences`，收件账本保存在同目录的 `message-inboxes/<contextId>`。后台仅处理已明确开启、且原生 agent 仍在内存中的会话，不自动恢复冷会话。新账本只在平台证明邮箱从未开启且无历史（`false/1/0/0`）时初始化；已有邮箱丢失本地账本明确拒绝。平台实际 typed-local 注册、native resolver 和来源权威保持不变，这份账本只为原 `DurableInbox` 提供收件投影，不是 owner 或地址分配账本。
+显式意图原子保存在 `/var/lib/auriga/pools/<pool>/host/.host/message-preferences`，收件账本保存在同目录的 `message-inboxes/<contextId>`，复用 Node 已施加的 `.host` 硬配额，不新增预算。正式信任缓存仍在已有单独硬配额的 `host/message-trust`。后台仅处理已明确开启、且原生 agent 仍在内存中的会话，不自动恢复冷会话。新账本只在平台证明邮箱从未开启且无历史（`false/1/0/0`）时初始化；已有邮箱丢失本地账本明确拒绝。平台实际 typed-local 注册、native resolver 和来源权威保持不变，这份账本只为原 `DurableInbox` 提供收件投影，不是 owner 或地址分配账本。
+
+串行升级时，Host 自动锁住旧 `host/message-preferences` 或 `host/message-inboxes/<contextId>` 账本，将完整内容以新文件原子写入 `.host` 配额目录，保留旧原件和摘要，不移动可能带旧 project-id 的 inode。新账本后续写入保留该摘要；发现旧写者仍活跃、旧本后来分叉、缓存损坏或配额写入失败均明确拒绝消息，不清除收据、游标或高水位。升级应先停止旧 Host；新版本运行期间保留旧锁，避免旧版本并发回写。
 
 真实后台顺序为签名页与逐项验证、持久接入、原尝试/执行准入、公开 `NativeHostPort.prompt`、会话和 provider 的持久 flush、持久 `accepted`，最后提交原收据。丢失收据回包后从原账本重试相同操作，不再次 prompt。禁用先同步隔离正在拉取的接收者，再持久意图和远端确认；未确认的禁用不能继续执行消息。写入结果不确定时停止该写者，不能用旧内存覆盖磁盘或假报成功。
 

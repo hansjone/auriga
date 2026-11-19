@@ -180,7 +180,7 @@ test('enterprise HTTPS transport injects private headers and cancels timed-out r
   );
 });
 
-function setup() {
+function setup({ expectedMode, mode = 'shared' } = {}) {
   const key = generateKeyPairSync('ed25519'),
     keys = new Map([['test', key.publicKey]]);
   const physicalInstanceId = randomUUID(),
@@ -190,7 +190,7 @@ function setup() {
     physicalInstanceId,
     memberId: randomUUID(),
     placementId: randomUUID(),
-    mode: 'shared',
+    mode,
     epoch: 1,
     revision: 1,
   }));
@@ -256,6 +256,7 @@ function setup() {
     identityKeys: keys,
     capabilityKeys: keys,
     physicalInstanceId,
+    expectedMode,
     now: () => clock,
   });
   async function peer(i) {
@@ -942,6 +943,44 @@ test('native list/control grant is global read entry plus exact own-session filt
   });
   assert.deepEqual(f.runtime.bindings(a.principal), []);
   f.runtime.close();
+});
+
+test('only the installation factory chooses exact shared/dedicated mode; default shared never admits dedicated or browser mode changes', async () => {
+  for (const expectedMode of [null, 'SHARED', '', {}, true, 1])
+    assert.throws(() => setup({ expectedMode }));
+  for (const options of [
+    { mode: 'dedicated' },
+    { expectedMode: 'shared', mode: 'dedicated' },
+    { expectedMode: 'dedicated', mode: 'shared' },
+  ]) {
+    const f = setup(options);
+    try {
+      await assert.rejects(f.peer(0));
+    } finally {
+      f.runtime.close();
+    }
+  }
+  for (const expectedMode of ['shared', 'dedicated']) {
+    const f = setup({ expectedMode, mode: expectedMode });
+    try {
+      const peer = await f.peer(0),
+        binding = await f.runtime.create(peer, f.host);
+      assert.equal(binding.mode, expectedMode);
+      await f.runtime.authorize(peer, 'session/page', binding.sessionId);
+      await assert.rejects(
+        f.runtime.create(peer, f.host, {
+          mode: expectedMode === 'shared' ? 'dedicated' : 'shared',
+        }),
+      );
+      f.rows.set(binding.sessionId, {
+        ...binding,
+        mode: expectedMode === 'shared' ? 'dedicated' : 'shared',
+      });
+      await assert.rejects(f.runtime.session(binding.sessionId));
+    } finally {
+      f.runtime.close();
+    }
+  }
 });
 
 test('original Python helper resolve/request runs with task-local variables and no parent env mutation', async () => {

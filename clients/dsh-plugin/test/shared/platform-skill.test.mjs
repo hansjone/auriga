@@ -20,10 +20,7 @@ const skip =
 test('actual Host loader accepts production-rendered read-only container skill root and rejects host/private/multiple roots', () => {
   const child = spawnSync(
     process.execPath,
-    [
-      '--experimental-vm-modules',
-      fileURLToPath(new URL('./skill-loader-worker.mjs', import.meta.url)),
-    ],
+    [fileURLToPath(new URL('./skill-loader-worker.mjs', import.meta.url))],
     { encoding: 'utf8', windowsHide: true },
   );
   assert.equal(child.status, 0, child.stderr || child.stdout);
