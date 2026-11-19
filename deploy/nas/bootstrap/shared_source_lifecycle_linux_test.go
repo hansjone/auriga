@@ -16,6 +16,9 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/hansjone/auriga/infra/agent/runtimebundle"
+	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 // Fixture-only entry for running a cross-compiled ELF with a separately built
@@ -172,6 +175,10 @@ func testNASSharedSourceVariant(t *testing.T, parent, binary, input string, team
 		}
 		return strings.TrimSpace(string(output))
 	}
+	runtimeAction := testNASSharedSignedUpgrade(t, data, base, binary, r)
+	runtimeAction("stage", true)
+	run("stage", false, stageArgs...) // initial shared source must never accept a pending candidate
+	runtimeAction("rollback", true)
 	run("stage", true, stageArgs...)
 	generation := filepath.Join(out, sharedInstallationGeneration)
 	stat, err := os.Stat(filepath.Join(generation, "public/host.json"))
@@ -256,4 +263,131 @@ func testNASSharedSourceVariant(t *testing.T, parent, binary, input string, team
 	}
 	run("check", true)
 	t.Log("actual sealed bootstrap + signed runtime + enrolled public Node + umask077 stage/resume/commit/check completed without services")
+	testNASSharedRoleAndReplayPreparation(t, data, base, binary, run, runtimeAction)
+}
+
+func testNASSharedRoleAndReplayPreparation(t *testing.T, data, base, binary string, run func(string, bool, ...string) string, runtimeAction func(string, bool)) {
+	t.Helper()
+	natsDir := filepath.Join(data, "config/nats")
+	if err := os.Mkdir(natsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(natsDir, "nats.conf"), sharedRenderedNATSFixture(t), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chown(filepath.Join(natsDir, "nats.conf"), 65532, 65532); err != nil {
+		t.Fatal(err)
+	}
+	projected := run("project", true)
+	if !strings.HasPrefix(projected, filepath.Join(data, "config/shared-runtime/g-")) {
+		t.Fatal("unexpected immutable role projection")
+	}
+	for name, uid := range map[string]uint32{"platform/platform.properties": 10001, "edge/edge.config.json": 65532, "gateway/bifrost-runtime.json": 10001, "agent/agent.json": 0, "nats/nats.conf": 65532} {
+		if _, err := sharedRoleReadLeaf(filepath.Join(projected, name), uid, 0600, 4<<20); err != nil {
+			t.Fatal(name, err)
+		}
+	}
+	if run("project", true) != projected {
+		t.Fatal("same installation changed immutable role generation")
+	}
+	replay := func(action string, success bool) string {
+		t.Helper()
+		command := exec.Command("/bin/sh", "-c", `umask 077; exec "$@"`, "sh", binary, "shared-replay-prepare", "-base", base, "-action", action)
+		output, err := command.CombinedOutput()
+		if (err == nil) != success {
+			t.Fatalf("replay %s success=%v: %v %s", action, success, err, output)
+		}
+		return strings.TrimSpace(string(output))
+	}
+	prepare := replay("stage", true)
+	if replay("prepare-path", true) != prepare {
+		t.Fatal("prepare path drift")
+	}
+	root := filepath.Join(data, "config/shared-replay-source")
+	installer, err := os.ReadFile(filepath.Join(root, "source/installer.nkey"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	final, err := os.ReadFile(filepath.Join(projected, "nats/nats.conf"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	prepared, err := os.ReadFile(filepath.Join(prepare, "nats.conf"))
+	if err != nil || bytes.Contains(final, installer) || !bytes.Contains(prepared, installer) || bytes.Contains(final, []byte("$JS.API.STREAM.CREATE.KV_auriga-shared-entry")) {
+		t.Fatal("temporary installer leaked into final config")
+	}
+	replay("check", false) // file-only stage is never proof of network provisioning/revocation
+	before := nasSnapshot(t, filepath.Join(root, "source"))
+	if replay("stage", true) != prepare || nasSnapshot(t, filepath.Join(root, "source")) != before {
+		t.Fatal("prepare retry replaced installer identity")
+	}
+	replay("close", true)
+	replay("check", false)
+	seed := filepath.Join(root, "source/installer.seed")
+	if err := os.Chmod(seed, 0640); err != nil {
+		t.Fatal(err)
+	}
+	replay("stage", false)
+	if err := os.Chmod(seed, 0600); err != nil {
+		t.Fatal(err)
+	}
+	bad := []byte("changed immutable private role projection")
+	leaf := filepath.Join(projected, "edge/replay.seed")
+	original, err := os.ReadFile(leaf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(leaf, bad, 0600); err != nil {
+		t.Fatal(err)
+	}
+	run("project", false)
+	if err := os.WriteFile(leaf, original, 0600); err != nil {
+		t.Fatal(err)
+	}
+	run("project", true)
+	runtimeAction("stage", true)
+	if run("project", true) != projected {
+		t.Fatal("pending runtime candidate replaced committed shared predecessor")
+	}
+	runtimeAction("rollback", true)
+	if run("project", true) != projected {
+		t.Fatal("original rollback changed shared predecessor")
+	}
+	runtimeAction("stage", true)
+	runtimeAction("commit", true)
+	newProjection := run("project", true)
+	if newProjection == projected {
+		t.Fatal("committed runtime did not switch actual shared Host projection")
+	}
+	if run("project", true) != newProjection {
+		t.Fatal("committed shared projection not stable")
+	}
+	runtimeAction("rollback", false) // original contract: no implicit rollback after commit
+	t.Log("actual role projection and temporary replay source/config stage passed with umask077; readiness remained closed without real NATS provisioning/revocation")
+}
+
+func testNASSharedSignedUpgrade(t *testing.T, data, base, binary string, r runtimeInputs) func(string, bool) {
+	t.Helper()
+	dir := filepath.Dir(r.bundle)
+	bundle := filepath.Join(dir, "shared-release8")
+	_, err := runtimebundle.Sign(runtimebundle.SignOptions{Image: r.image, ArtifactID: "dsh-test-linux-amd64", Version: "1.2.8", OS: "linux", Arch: "amd64", Sequence: 8, IssuedAt: timestamppb.New(time.Now().Add(-time.Minute)), RootPath: r.root, PrivateKeyPath: filepath.Join(dir, "publisher.pem"), ManifestPath: filepath.Join(dir, "manifest.json"), ConfigPath: filepath.Join(dir, "config.json"), OutputDir: bundle})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(bundle, 0755); err != nil {
+		t.Fatal(err)
+	}
+	// Explicit public fixture metadata, never a global umask change or repair of
+	// existing source. All actual upgrade validation/mutations use the real CLI.
+	out := filepath.Join(data, "config/runtime-source")
+	if err := os.Mkdir(out, 0755); err != nil {
+		t.Fatal(err)
+	}
+	return func(action string, success bool) {
+		t.Helper()
+		output, err := exec.Command(binary, "runtime-upgrade", "-base", base, "-out", out, "-action", action, "-bundle", bundle, "-image", r.image).CombinedOutput()
+		if (err == nil) != success {
+			t.Fatalf("original runtime %s success=%v: %v %s", action, success, err, output)
+		}
+	}
 }

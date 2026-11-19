@@ -19,6 +19,164 @@ nas_scripts_dir() {
 
 NAS_ROOT=$(nas_scripts_dir)
 export NAS_ROOT
+shared_present() {
+  # A lost source after activation must fail validation, never look like a
+  # deployment that has never enabled shared mode. Keep every old artifact.
+  for _shared_evidence in config/shared-source config/shared-runtime config/shared-replay-source agent-tokens; do
+    if [ -e "$AURIGA_DATA_ROOT/$_shared_evidence" ] || [ -L "$AURIGA_DATA_ROOT/$_shared_evidence" ]; then return 0; fi
+  done
+  return 1
+}
+
+shared_action() (
+  _shared_action=$1
+  case "$_shared_action" in project|check|path|status) ;; *) die 'unsupported shared projection action' ;; esac
+  if [ "${AURIGA_INSTALL_MODE:-host}" = container ] && [ "${NAS_INSTALLER_ACTIVE:-}" != 1 ]; then
+    sh "$NAS_ROOT/scripts/installer.sh" "shared-$_shared_action"
+  else
+    "$(bootstrap_binary)" shared-runtime -base "$AURIGA_DATA_ROOT/config/materials" -out "$AURIGA_DATA_ROOT/config/shared-source" -action "$_shared_action"
+  fi
+)
+
+shared_source_committed() (
+  if [ "${AURIGA_INSTALL_MODE:-host}" = container ] && [ "${NAS_INSTALLER_ACTIVE:-}" != 1 ]; then
+    sh "$NAS_ROOT/scripts/installer.sh" shared-source-check
+  else
+    "$(bootstrap_binary)" shared-runtime -base "$AURIGA_DATA_ROOT/config/materials" \
+      -out "$AURIGA_DATA_ROOT/config/shared-source" -action check
+  fi
+)
+
+shared_replay_action() (
+  _shared_action=$1
+  case "$_shared_action" in stage|prepare-path|final-path|check|close) ;; *) die 'unsupported offline replay action' ;; esac
+  if [ "${AURIGA_INSTALL_MODE:-host}" = container ] && [ "${NAS_INSTALLER_ACTIVE:-}" != 1 ]; then
+    sh "$NAS_ROOT/scripts/installer.sh" "shared-replay-$_shared_action"
+  else
+    "$(bootstrap_binary)" shared-replay-prepare -base "$AURIGA_DATA_ROOT/config/materials" -action "$_shared_action"
+  fi
+)
+
+# Only the command position matters; a service named stop after up cannot bypass
+# readiness. Unknown commands/options require readiness rather than falling back.
+shared_compose_command() {
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      -f|--file|-p|--project-name|--env-file|--profile|--project-directory|--ansi|--parallel|--progress)
+        [ "$#" -ge 2 ] || return 1; shift 2 ;;
+      --compatibility|--all-resources|--dry-run) shift ;;
+      --file=*|--project-name=*|--env-file=*|--profile=*|--project-directory=*|--ansi=*|--parallel=*|--progress=*) shift ;;
+      up|start|restart|run|exec|create|config|ps|logs|stop|down|kill|rm|images|ls|version) printf '%s' "$1"; return ;;
+      *) return 1 ;;
+    esac
+  done
+  return 1
+}
+
+shared_compose_stopping() {
+  _shared_command=$(shared_compose_command "$@") || return 1
+  case "$_shared_command" in stop|down|kill|rm|ps|logs|images|ls|version) return 0 ;; *) return 1 ;; esac
+}
+
+shared_compose_needs_ready() {
+  _shared_command=$(shared_compose_command "$@") || return 0
+  case "$_shared_command" in config|ps|logs|stop|down|kill|rm|images|ls|version) return 1 ;; *) return 0 ;; esac
+}
+
+write_shared_override() {
+  _shared_path=$1
+  _shared_prepare=${2:-}
+  [ -n "$_shared_path" ] || return 0
+  _shared_generation=${_shared_path##*/}
+  case "$_shared_generation" in g-*) ;; *) die 'invalid privileged shared projection' ;; esac
+  _shared_digest=${_shared_generation#g-}
+  [ "${#_shared_digest}" = 64 ] || die 'invalid shared projection digest'
+  case "$_shared_digest" in *[!a-f0-9]*) die 'invalid shared projection digest' ;; esac
+  [ "$_shared_path" = "$AURIGA_DATA_ROOT/config/shared-runtime/$_shared_generation" ] || die 'invalid privileged shared projection path'
+  _shared_nats="$_shared_path/nats"
+  if [ -n "$_shared_prepare" ]; then
+    _shared_generation=${_shared_prepare##*/}
+    _shared_digest=${_shared_generation#g-}
+    [ "${#_shared_digest}" = 64 ] || die 'invalid replay prepare digest'
+    case "$_shared_digest" in *[!a-f0-9]*) die 'invalid replay prepare digest' ;; esac
+    [ "$_shared_prepare" = "$AURIGA_DATA_ROOT/config/shared-replay-runtime/g-$_shared_digest" ] || die 'invalid privileged replay prepare path'
+    _shared_nats=$_shared_prepare
+  fi
+  _shared_yaml=$(printf '%s' "$_shared_path" | sed -e "s/'/''/g" -e 's/\$/$$/g')
+  _shared_nats_yaml=$(printf '%s' "$_shared_nats" | sed -e "s/'/''/g" -e 's/\$/$$/g')
+  _shared_tokens_yaml=$(printf '%s' "$AURIGA_DATA_ROOT/agent-tokens" | sed -e "s/'/''/g" -e 's/\$/$$/g')
+  cat <<EOF
+services:
+  platform:
+    environment:
+      AURIGA_GRPC_SERVER_TENANT_DELEGATES: svc:edge,svc:ai-gateway,svc:agent
+      SPRING_CONFIG_IMPORT: file:/run/auriga-installation/internal.properties,file:/etc/auriga/network/platform.properties,optional:file:/etc/auriga/uac/uac.properties,file:/etc/auriga/shared/platform.properties
+    ports:
+      - '127.0.0.1:19091:9091'
+    volumes:
+      - '$_shared_yaml/platform:/etc/auriga/shared:ro'
+      - '$_shared_tokens_yaml:/run/auriga-agent-token'
+  edge:
+    volumes:
+      - '$_shared_yaml/edge/edge.config.json:/etc/auriga/edge.config.json:ro'
+      - '$_shared_yaml/edge:/etc/auriga/shared:ro'
+  ai-relay:
+    ports:
+      - '127.0.0.1:18087:18887'
+    networks: [internal, publish]
+    volumes:
+      - '$_shared_yaml/gateway/bifrost-runtime.json:/etc/auriga/bifrost-runtime.json:ro'
+      - '$_shared_yaml/gateway:/etc/auriga/shared:ro'
+  nats:
+    volumes:
+      - '$_shared_nats_yaml/nats.conf:/etc/nats/nats.conf:ro'
+  agent:
+    extra_hosts:
+      ai-relay: '127.0.0.1'
+    volumes:
+      - '$_shared_yaml/agent:/etc/auriga/shared-runtime:ro'
+      - '$_shared_tokens_yaml:/run/auriga-agent-token:ro'
+EOF
+}
+
+# Cleanup is independent of rejected source material. Targets are fixed labels.
+shared_emergency_stop() {
+  for _shared_service in edge nats; do
+    _shared_ids=$(docker ps -q --no-trunc --filter "label=com.docker.compose.project=$AURIGA_NAS_PROJECT" --filter "label=com.docker.compose.service=$_shared_service") || return 1
+    for _shared_id in $_shared_ids; do
+      [ "${#_shared_id}" = 64 ] || return 1
+      case "$_shared_id" in *[!a-f0-9]*) return 1 ;; esac
+      docker stop --time 10 "$_shared_id" >/dev/null || return 1
+    done
+    _shared_ids=$(docker ps -q --no-trunc --filter "label=com.docker.compose.project=$AURIGA_NAS_PROJECT" --filter "label=com.docker.compose.service=$_shared_service") || return 1
+    [ -z "$_shared_ids" ] || return 1
+  done
+}
+
+shared_nats_container() (
+  _shared_ids=$(docker ps -aq --no-trunc --filter "label=com.docker.compose.project=$AURIGA_NAS_PROJECT" --filter label=com.docker.compose.service=nats) || return 1
+  [ -n "$_shared_ids" ] || return 0
+  [ "${#_shared_ids}" = 64 ] || return 1
+  case "$_shared_ids" in *[!a-f0-9]*) return 1 ;; esac
+  [ "$(docker inspect -f '{{index .Config.Labels "com.docker.compose.project"}}/{{index .Config.Labels "com.docker.compose.service"}}' "$_shared_ids")" = "$AURIGA_NAS_PROJECT/nats" ] || return 1
+  printf '%s' "$_shared_ids"
+)
+
+shared_confirm_nats_replaced() (
+  _shared_old=$1
+  _shared_new=$(shared_nats_container) || return 1
+  [ -n "$_shared_new" ] && [ "$_shared_old" != "$_shared_new" ] || return 1
+  [ "$(docker inspect -f '{{.State.Running}}' "$_shared_new")" = true ] || return 1
+  if [ -n "$_shared_old" ]; then
+    # A successful daemon query proves removal/stopped process; a timeout does not.
+    _shared_old_exists=$(docker ps -aq --no-trunc --filter "id=$_shared_old") || return 1
+    if [ -n "$_shared_old_exists" ]; then
+      [ "$_shared_old_exists" = "$_shared_old" ] || return 1
+      [ "$(docker inspect -f '{{.State.Running}}' "$_shared_old")" = false ] || return 1
+    fi
+  fi
+)
+
 
 die() {
   printf '%s\n' "$*" >&2
@@ -408,87 +566,13 @@ managed_identity_available() (
   cmp -s "$_identity_source/network-platform/managed-network.json" "$_identity_file"
 )
 
-shared_present() {
-  [ -e "$AURIGA_DATA_ROOT/config/shared-source" ] || [ -L "$AURIGA_DATA_ROOT/config/shared-source" ]
-}
-
-shared_source_committed() (
-  if [ "${AURIGA_INSTALL_MODE:-host}" = container ] && [ "${NAS_INSTALLER_ACTIVE:-}" != 1 ]; then
-    sh "$NAS_ROOT/scripts/installer.sh" shared-source-check
-  else
-    "$(bootstrap_binary)" shared-runtime -base "$AURIGA_DATA_ROOT/config/materials" \
-      -out "$AURIGA_DATA_ROOT/config/shared-source" -action check
-  fi
-)
-
-shared_replay_action() (
-  _shared_action=$1
-  case "$_shared_action" in stage|prepare-path|final-path|check|close) ;; *) die 'unsupported offline replay action' ;; esac
-  if [ "${AURIGA_INSTALL_MODE:-host}" = container ] && [ "${NAS_INSTALLER_ACTIVE:-}" != 1 ]; then
-    sh "$NAS_ROOT/scripts/installer.sh" "shared-replay-$_shared_action"
-  else
-    "$(bootstrap_binary)" shared-replay-prepare -base "$AURIGA_DATA_ROOT/config/materials" -action "$_shared_action"
-  fi
-)
-
-# Cleanup is independent of rejected source material. Targets are fixed labels.
-shared_emergency_stop() {
-  for _shared_service in edge nats; do
-    _shared_ids=$(docker ps -q --no-trunc --filter "label=com.docker.compose.project=$AURIGA_NAS_PROJECT" --filter "label=com.docker.compose.service=$_shared_service") || return 1
-    for _shared_id in $_shared_ids; do
-      [ "${#_shared_id}" = 64 ] || return 1
-      case "$_shared_id" in *[!a-f0-9]*) return 1 ;; esac
-      docker stop --time 10 "$_shared_id" >/dev/null || return 1
-    done
-    _shared_ids=$(docker ps -q --no-trunc --filter "label=com.docker.compose.project=$AURIGA_NAS_PROJECT" --filter "label=com.docker.compose.service=$_shared_service") || return 1
-    [ -z "$_shared_ids" ] || return 1
-  done
-}
-
-shared_nats_container() (
-  _shared_ids=$(docker ps -aq --no-trunc --filter "label=com.docker.compose.project=$AURIGA_NAS_PROJECT" --filter label=com.docker.compose.service=nats) || return 1
-  [ -n "$_shared_ids" ] || return 0
-  [ "${#_shared_ids}" = 64 ] || return 1
-  case "$_shared_ids" in *[!a-f0-9]*) return 1 ;; esac
-  [ "$(docker inspect -f '{{index .Config.Labels "com.docker.compose.project"}}/{{index .Config.Labels "com.docker.compose.service"}}' "$_shared_ids")" = "$AURIGA_NAS_PROJECT/nats" ] || return 1
-  printf '%s' "$_shared_ids"
-)
-
-shared_confirm_nats_replaced() (
-  _shared_old=$1
-  _shared_new=$(shared_nats_container) || return 1
-  [ -n "$_shared_new" ] && [ "$_shared_old" != "$_shared_new" ] || return 1
-  [ "$(docker inspect -f '{{.State.Running}}' "$_shared_new")" = true ] || return 1
-  if [ -n "$_shared_old" ]; then
-    # A successful daemon query proves removal/stopped process; a timeout does not.
-    _shared_old_exists=$(docker ps -aq --no-trunc --filter "id=$_shared_old") || return 1
-    if [ -n "$_shared_old_exists" ]; then
-      [ "$_shared_old_exists" = "$_shared_old" ] || return 1
-      [ "$(docker inspect -f '{{.State.Running}}' "$_shared_old")" = false ] || return 1
-    fi
-  fi
-)
-
-shared_replay_compose() (
-  _phase=$1
-  case "$_phase" in prepare|final) ;; *) die 'unsupported fixed replay phase' ;; esac
-  _source=$(shared_replay_action "$_phase-path")
-  _digest=${_source##*/g-}
-  [ "${#_digest}" = 64 ] || die 'invalid checked replay configuration digest'
-  case "$_digest" in *[!a-f0-9]*) die 'invalid replay configuration digest' ;; esac
-  [ "$_source" = "$AURIGA_DATA_ROOT/config/shared-replay-runtime/g-$_digest" ] || die 'invalid checked replay configuration path'
-  _private=$(installer_private_dir replay-compose)
-  trap 'rm -rf -- "$_private"' EXIT
-  _yaml=$(printf '%s' "$_source" | sed -e "s/'/''/g" -e 's/\$/$$/g')
-  printf "services:\n  nats:\n    volumes:\n      - '%s/nats.conf:/etc/nats/nats.conf:ro'\n" "$_yaml" >"$_private/nats.yml"
-  run_compose -f "$_private/nats.yml" --env-file "$AURIGA_DATA_ROOT/stack.env" up -d --no-deps --no-build --pull never --force-recreate --wait --wait-timeout 120 nats
-)
-
 run_compose() (
+  _shared_phase=
   case "${1:-}" in
     __shared_replay_nats_prepare|__shared_replay_nats_final)
       [ "$#" = 1 ] || die 'fixed replay Compose operation accepts no arguments'
-      shared_replay_compose "${1##*_}"; return ;;
+      _shared_phase=$1
+      set -- --env-file "$AURIGA_DATA_ROOT/stack.env" up -d --no-deps --no-build --pull never --force-recreate --wait --wait-timeout 120 nats ;;
   esac
 	case "${AURIGA_ONECLICK_PUBLISH:-false}" in
 	  true) set -- -f "$NAS_ROOT/oneclick-compose.yml" "$@" ;;
@@ -499,12 +583,24 @@ run_compose() (
     set -- -f "$NAS_ROOT/resource-downgrade-compose.yml" "$@"
   fi
   if [ "${AURIGA_INSTALL_MODE:-host}" = container ]; then
-    container_compose "$@"
+    NAS_SHARED_COMPOSE_PHASE=$_shared_phase container_compose "$@"
     return
   fi
   _cc=$(compose_cmd)
   _runtime_private=$(installer_private_dir runtime-compose)
   trap 'rm -rf -- "$_runtime_private"' EXIT
+  if shared_present && ! shared_compose_stopping "$@"; then
+    _shared_path=$(shared_action project)
+    _shared_prepare=
+    case "$_shared_phase" in
+      __shared_replay_nats_prepare) _shared_prepare=$(shared_replay_action prepare-path) ;;
+      __shared_replay_nats_final) ;;
+      '') if shared_compose_needs_ready "$@"; then shared_replay_action check; fi ;;
+      *) die 'invalid shared Compose phase' ;;
+    esac
+    write_shared_override "$_shared_path" "$_shared_prepare" >"$_runtime_private/shared.yml"
+    set -- -f "$NAS_ROOT/shared-runtime-compose.yml" -f "$_runtime_private/shared.yml" "$@"
+  elif [ -n "$_shared_phase" ]; then die 'shared installation absent'; fi
   if [ -e "$AURIGA_DATA_ROOT/config/materials-upgrades" ] || [ -L "$AURIGA_DATA_ROOT/config/materials-upgrades" ]; then
     materials_upgrade check
     write_bifrost_override 1 >"$_runtime_private/bifrost.yml"
@@ -582,6 +678,24 @@ services:
         required: true
 EOF
   _cc=$(compose_cmd)
+  _shared_path=$(cat "$_private/shared.path")
+  _shared_ready=$(cat "$_private/shared.ready")
+  case "$_shared_ready" in
+    0|1) ;;
+    2) shared_compose_stopping "$@" || die 'shared installation rejected; refusing a personal-pool fallback' ;;
+    *) die 'invalid privileged shared readiness decision' ;;
+  esac
+  if [ -n "$_shared_path" ] && ! shared_compose_stopping "$@"; then
+    _shared_prepare=
+    case "${NAS_SHARED_COMPOSE_PHASE:-}" in
+      __shared_replay_nats_prepare) _shared_prepare=$(sh "$NAS_ROOT/scripts/installer.sh" shared-replay-prepare-path) ;;
+      __shared_replay_nats_final) ;;
+      '') if shared_compose_needs_ready "$@"; then [ "$_shared_ready" = 1 ] || die 'shared replay preparation or final revocation incomplete'; fi ;;
+      *) die 'invalid shared Compose phase' ;;
+    esac
+    write_shared_override "$_shared_path" "$_shared_prepare" >"$_private/shared.yml"
+    set -- -f "$NAS_ROOT/shared-runtime-compose.yml" -f "$_private/shared.yml" "$@"
+  elif [ -n "${NAS_SHARED_COMPOSE_PHASE:-}" ]; then die 'shared installation absent'; fi
   write_bifrost_override "$(cat "$_private/bifrost.enabled")" >"$_private/bifrost.yml"
   if [ -s "$_private/bifrost.yml" ]; then set -- -f "$_private/bifrost.yml" "$@"; fi
   _runtime=$(cat "$_private/runtime.path")

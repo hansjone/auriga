@@ -53,11 +53,13 @@ func nasSharedReplay(args []string, stdout io.Writer) error {
 	default:
 		return fmt.Errorf("unsupported shared replay installation operation")
 	}
-	var checked bytes.Buffer
-	if err := nasSharedRuntime([]string{"-base", *base, "-out", filepath.Join(filepath.Dir(*base), "shared-source"), "-action", "path"}, &checked); err != nil {
+	// Project verifies the committed source and the original complete runtime
+	// chain, permitting only its verified predecessor during a runtime upgrade.
+	// Initial shared stage itself still refuses any pending runtime candidate.
+	if err := nasSharedRuntime([]string{"-base", *base, "-out", filepath.Join(filepath.Dir(*base), "shared-source"), "-action", "project"}, io.Discard); err != nil {
 		return err
 	}
-	sourcePath := checked.String()
+	sourcePath := filepath.Join(filepath.Dir(*base), "shared-source", sharedInstallationGeneration)
 	baseSHA, err := verifyNASCollabBase(*base)
 	if err != nil {
 		return err

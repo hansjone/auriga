@@ -1,6 +1,6 @@
 # 默认共享 DSH 的独立材料源
 
-当前 `shared-runtime` CLI 负责安装材料源和批准事件，尚未自动装配服务；持久 Compose、标准 start/render/runtime-upgrade 的接线另批完成。在该接线完成前，CLI 成功不表示门户已启用 shared。
+`shared-runtime` CLI 负责安装材料源和批准事件，`project` 将受信材料装配为各服务独立的不可变投影。标准 render/start/runtime-upgrade 持久选择已提交的共享配置。CLI 或文件投影成功仍不表示正常门户已验收；实际部署须完成下面的 NATS 预建、撤权和正常页面检查。
 
 新现场和旧 sealed base 都复用原安装的 `config/materials`、原入网 Node 身份以及已提交 runtime 快照。先按原公开流程初始化、入网、安装批准的 runtime，再执行以下同一流程。不要向 sealed base 添加文件、重新入网、删除状态库或重建发行分区。
 
@@ -41,8 +41,25 @@
 
 消息侧另需既有批准msgnet材料、原collab IAM通道/服务票据、真实standalone shared-message Bean和公开root投影；本批Host尚未投影messageTrust，不称消息功能可用。普通team用户的模型和受控普通工具不应依赖公司UAC登录或消息可用性。
 
-## 固定 replay 桶安装小批
+## 公开安装与持久启动
 
-在原shared-source已commit、标准render已使用当前NATS模板后，执行 `sh deploy/nas/scripts/shared-replay-prepare.sh`。host与container模式均支持；两个真实网络操作必须使用原本地immutable installer镜像，只连固定auriga-nas-test_internal网络的nats服务，没有socket/任意endpoint/通用argv。脚本停止Edge，产生root0700独立临时NKey，只在prepare配置出现。受控helper只可AccountInfo、固定桶INFO/CREATE；已有同名桶只核固定subjects/无Sources与Mirror/文件存储/history1/TTL至少12h/DiscardNew/无限聚合容量，拒绝改删或丢失receipt后的重建。
+统一入口同时支持原host模式和container安装helper；输入为独立批准的原件与摘要，不要求现场手写密钥或服务JWT：
 
-随后强制重建固定project/service的NATS为无installer配置，确认旧进程停止/移除与新进程运行；installer明确Authorization拒绝且Edge成功读取同一Created的桶后才开本地gate。断网/超时不算撤权；失败恢复常驻配置，无法恢复则停固定Edge/NATS。五个旧password用户不放权，W原四读不增加，Edge常驻无CREATE/UPDATE。此小批成功后仍保持Edge停止；完整shared role/start/render/upgrade接线属于下一批，不能将本命令成功称门户已启用。公开复核入口为 `shared-replay-prepare -base 固定materials -action check`；stage/prepare-path/final-path均为离线材料操作，provision/verify-final只能通过固定网络helper。
+```sh
+sh deploy/nas/scripts/shared-install.sh \
+  --expected-base-sha256 "$BASE_SHA256" \
+  --profile-file "$APPROVED_PROFILE" --profile-sha256 "$PROFILE_SHA256" \
+  --adapter-file "$APPROVED_ADAPTER" --adapter-sha256 "$ADAPTER_SHA256" \
+  --model gpt-6.1-sol
+sh deploy/nas/scripts/start.sh
+```
+
+明确无任何公司身份配置的新装才把两个adapter选项替换为 `--team-only`。NAS团队登录优先继续来自原部署配置；共享装配保留原Edge登录设置及私有UAC字节，不修改产品SSO默认策略。
+
+`render` 重新验证原source/Node/runtime/proofs，创建 `config/shared-runtime/g-<digest>`。Platform只收到本服务签名与agent exporter输入，Edge只收到本服务identity/replay seed，Gateway只收到模型公钥，Agent只收到原完整runtime/profile/公开Host材料及svc:agent JWT只读目录；Host没有安装secret、服务JWT或签名私钥挂载。原Edge/Gateway exporter权限不变。Agent JWT由原IAM受信签发器自动续签并0600原子替换目录内文件。仅共享安装的原tenant-delegates追加既定svc:agent；原edge/gateway保留，无新增issuer或audience。新的RPC/model只发布到NAS loopback19091/18087，平台9091与共享模型18887仍有原mTLS、既定服务主体/Node UUID核验。
+
+`start` 先停止公开Edge，沿公开 `shared-replay-prepare.sh` 生成独立临时安装NKey（root0700私有源），启动只有本阶段才含该身份的NATS配置。短命helper只连接固定项目内部网络的 `nats:4222`，没有Docker socket、任意endpoint或通用命令转发。它只可AccountInfo、固定桶INFO/CREATE；已有同名桶必须符合固定subjects、无Sources/Mirror/transform、文件存储、history1、TTL至少12小时、DiscardNew及无限聚合count/bytes，拒绝自动改桶/删桶/清墓碑。安装receipt记实际StreamInfo.Created，之后丢桶/换桶拒绝重建。
+
+预建后强制重建NATS为无安装身份的常驻配置；核固定project/service、旧容器确已停止或移除、新容器运行，再确认临时身份收到明确Authorization拒绝、Edge身份成功读取同一桶，才开启本地readiness gate。超时/断网不能当撤权成功。常驻Edge没有CREATE/UPDATE，W仍只有原四项读取权限，五个旧password用户不加权。失败恢复常驻配置；恢复失败则停固定项目Edge/NATS，保留材料与桶。没有完成此流程时，普通Compose up/restart拒绝且不会回个人池；stop/检查仍可执行。这里只是原部署状态记录，不是新的签名信任或proof。
+
+runtime升级pending期间，共享投影只使用原完整校验链中已提交的predecessor；初装拒pending。原commit后再投影current并重建Agent，保旧代文件和原proof/sequence。commit之前失败沿原rollback；commit之后新投影/Agent重建失败时，原事务已经禁止回滚，保留新committed pointer/sequence/proofs，停止Agent但保既有DSH进程，错误明确提示使用相同bundle/image重跑公开upgrade完成激活；不得暗降代次或手改active.json。

@@ -16,6 +16,7 @@ AURIGA_NAS_PROJECT=fixture
 die() { echo "$*" >&2; exit 1; }
 info() { :; }
 load_stack_env() { :; }
+shared_present() { return 1; }
 require_cmd() { :; }
 marker_path() { echo "$AURIGA_DATA_ROOT/marker"; }
 prepare_socket_parent() { :; }

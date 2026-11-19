@@ -34,7 +34,7 @@ root=$SHARED_REPLAY_TEST_ROOT
   && [ "$3" = "$root/data/config/materials" ] && [ "$4" = -out ] \
   && [ "$5" = "$root/data/config/shared-source" ] && [ "$6" = -action ] && [ "$7" = check ] || exit 91
 printf 'source check\n' >>"$root/sequence"
-[ "$(cat "$root/source-state")" = committed ] || exit 59
+[ -d "$root/data/config/shared-source" ] && [ "$(cat "$root/source-state")" = committed ] || exit 59
 EOF
 cat >"$TMP/scripts/installer.sh" <<'EOF'
 #!/bin/sh
@@ -113,6 +113,12 @@ unset SHARED_TEST_FINAL_FAIL
 rmdir "$TMP/data/config/shared-source"
 run_case absent_source_refused_by_production_definition_before_stop 1 0
 [ ! -s "$TMP/sequence" ]
+for evidence in config/shared-runtime config/shared-replay-source agent-tokens; do
+  mkdir -p "$TMP/data/$evidence"
+  run_case "lost_source_with_${evidence##*/}_refuses_fallback_before_stop" 59 0
+  [ "$(cat "$TMP/sequence")" = 'source check' ]
+  rmdir "$TMP/data/$evidence"
+done
 mkdir "$TMP/data/config/shared-source"
 printf 'staged\n' >"$TMP/source-state"
 run_case uncommitted_source_refused_by_production_check_before_stop 59 0

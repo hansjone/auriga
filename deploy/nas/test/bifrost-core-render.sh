@@ -25,6 +25,7 @@ AURIGA_NAS_PORTAL_URL=$AURIGA_NAS_ISSUER
 AURIGA_NAS_PORTAL_HOST=portal.example.com
 AURIGA_NAS_PROJECT=fixture
 load_stack_env() { :; }
+shared_present() { return 1; }
 require_cmd() { :; }
 rand_alnum() { printf fixture-password-0123456789012345; }
 marker_path() { echo "$AURIGA_DATA_ROOT/marker"; }

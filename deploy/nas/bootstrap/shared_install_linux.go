@@ -26,7 +26,7 @@ func nasSharedRuntime(args []string, stdout io.Writer) error {
 	f := flag.NewFlagSet("shared-runtime", flag.ContinueOnError)
 	base := f.String("base", "", "original sealed NAS materials")
 	out := f.String("out", "", "fixed config/shared-source sibling")
-	action := f.String("action", "status", "stage, commit, rollback, check, path or status")
+	action := f.String("action", "status", "stage, commit, rollback, check, path, project or status")
 	expected := f.String("expected-base-sha256", "", "independently approved original receipt SHA256")
 	adapter := f.String("adapter-file", "", "approved private UAC adapter containing sharedOutbound")
 	adapterSHA := f.String("adapter-sha256", "", "independently approved private adapter SHA256")
@@ -41,7 +41,7 @@ func nasSharedRuntime(args []string, stdout io.Writer) error {
 		return fmt.Errorf("shared installation requires root and canonical fixed sibling paths")
 	}
 	mutating := *action == "stage" || *action == "commit" || *action == "rollback"
-	if !mutating && *action != "status" && *action != "check" && *action != "path" {
+	if !mutating && *action != "status" && *action != "check" && *action != "path" && *action != "project" {
 		return fmt.Errorf("unsupported shared installation operation")
 	}
 	if *teamOnly && (*adapter != "" || *adapterSHA != "") {
@@ -146,9 +146,17 @@ func nasSharedRuntime(args []string, stdout io.Writer) error {
 		_, err = fmt.Fprintf(stdout, "state=%s version=1 records=%d\n", state, len(eventNames)+1)
 		return err
 	}
-	if *action == "check" || *action == "path" {
+	if *action == "check" || *action == "path" || *action == "project" {
 		if state != "committed" {
 			return fmt.Errorf("shared installation is not committed; ingress remains disabled")
+		}
+		if *action == "project" {
+			projected, err := projectSharedInstallation(*base, receipt, files)
+			if err != nil {
+				return err
+			}
+			_, err = fmt.Fprint(stdout, projected)
+			return err
 		}
 		if err := checkSharedInstallationEnvironment(*base, receipt); err != nil {
 			return err
@@ -226,7 +234,7 @@ func sharedBasePublic(base, name string) ([]byte, error) {
 }
 
 func sharedBaseLeaf(base, name string) ([]byte, error) {
-	if name != "access.json" && name != "identity-keys.json" && name != "pki/ca.crt" && name != "templates/real-dsh.pb" {
+	if name != "access.json" && name != "identity-keys.json" && name != "pki/ca.crt" && name != "templates/real-dsh.pb" && name != "bifrost-runtime.json" {
 		if name != "uac/adapter.json" {
 			return nil, fmt.Errorf("unsupported fixed shared base leaf")
 		}
@@ -380,6 +388,10 @@ func sharedApprovedFile(path, expected string, private bool) ([]byte, error) {
 }
 
 func sharedCommittedRuntime(base string) ([]byte, error) {
+	return sharedRuntimeSnapshot(base, false)
+}
+
+func sharedRuntimeSnapshot(base string, allowVerifiedPredecessor bool) ([]byte, error) {
 	out := filepath.Join(filepath.Dir(base), "runtime-source")
 	var resolved bytes.Buffer
 	if err := nasRuntimeUpgrade([]string{"-base", base, "-out", out, "-action", "path"}, &resolved); err != nil {
@@ -406,7 +418,7 @@ func sharedCommittedRuntime(base string) ([]byte, error) {
 		return nil, err
 	}
 	var active runtimeActivation
-	if sharedUniqueJSON(activeRaw) != nil || runtimeDecode(activeRaw, &active) != nil || active.Pending || active.Previous != "" || active.Current != filepath.Base(path) {
+	if sharedUniqueJSON(activeRaw) != nil || runtimeDecode(activeRaw, &active) != nil || active.Current != filepath.Base(path) || (!active.Pending && active.Previous != "") || (active.Pending && (!allowVerifiedPredecessor || active.Previous == active.Current)) {
 		return nil, fmt.Errorf("runtime must be committed and stable before shared installation")
 	}
 	baseHash, err := verifyNASCollabBase(base)
@@ -425,6 +437,27 @@ func sharedCommittedRuntime(base string) ([]byte, error) {
 	}
 	if !found {
 		return nil, fmt.Errorf("committed runtime source absent")
+	}
+	if active.Pending {
+		// The public upgrader's pending pointer retains exactly its previously
+		// committed source. Never project the candidate before original commit.
+		if active.Previous == "" {
+			raw, err := sharedBasePublic(base, "templates/real-dsh.pb")
+			if err != nil {
+				return nil, err
+			}
+			return sharedRuntimeSpecJSON(raw)
+		}
+		found = false
+		for _, generation := range generations {
+			if generation.name == active.Previous {
+				found = true
+			}
+		}
+		if !found {
+			return nil, fmt.Errorf("verified committed runtime predecessor absent")
+		}
+		path = filepath.Join(out, active.Previous)
 	}
 	raw, err := runtimeReadLeaf(filepath.Join(path, "templates/real-dsh.pb"), 0644, 4<<20)
 	if err != nil {

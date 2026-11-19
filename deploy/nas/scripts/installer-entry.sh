@@ -19,6 +19,22 @@ case "${1:-}" in
   shared-source-check)
     exec "$(bootstrap_binary)" shared-runtime -base "$AURIGA_DATA_ROOT/config/materials" \
       -out "$AURIGA_DATA_ROOT/config/shared-source" -action check ;;
+  shared-stage|shared-commit)
+    _action=${1#shared-}
+    set -- -base "$AURIGA_DATA_ROOT/config/materials" -out "$AURIGA_DATA_ROOT/config/shared-source" \
+      -action "$_action" -expected-base-sha256 "${NAS_SHARED_EXPECTED_BASE:?}"
+    if [ "$_action" = stage ]; then
+      set -- "$@" -profile-file "${NAS_SHARED_PROFILE:?}" -profile-sha256 "${NAS_SHARED_PROFILE_SHA:?}" -model "${NAS_SHARED_MODEL:?}"
+      case "${NAS_SHARED_TEAM:-}" in
+        true) set -- "$@" -team-only ;;
+        false) set -- "$@" -adapter-file "${NAS_SHARED_ADAPTER:?}" -adapter-sha256 "${NAS_SHARED_ADAPTER_SHA:?}" ;;
+        *) die 'invalid explicit team-only decision' ;;
+      esac
+    fi
+    exec "$(bootstrap_binary)" shared-runtime "$@" ;;
+  shared-project|shared-check|shared-path|shared-status)
+    exec "$(bootstrap_binary)" shared-runtime -base "$AURIGA_DATA_ROOT/config/materials" \
+      -out "$AURIGA_DATA_ROOT/config/shared-source" -action "${1#shared-}" ;;
   shared-replay-stage|shared-replay-prepare-path|shared-replay-final-path|shared-replay-provision|shared-replay-verify-final|shared-replay-close|shared-replay-check)
     exec "$(bootstrap_binary)" shared-replay-prepare -base "$AURIGA_DATA_ROOT/config/materials" -action "${1#shared-replay-}" ;;
   materials-stage|materials-commit|materials-rollback|materials-status|materials-check|materials-path|materials-project|materials-project-core)
@@ -90,6 +106,18 @@ case "${1:-}" in
     fi
     _export=$(mktemp -d)
     trap 'rm -rf -- "$_export"' EXIT
+    _shared_path=
+    _shared_ready=1
+    if shared_present; then
+      _shared_ready=2
+      if _shared_path=$(shared_action project); then
+        _shared_ready=0
+        if shared_replay_action check >&2; then _shared_ready=1; fi
+      fi
+    fi
+    printf '%s' "$_shared_path" >"$_export/shared.path"
+    printf '%s' "$_shared_ready" >"$_export/shared.ready"
+    chmod 0600 "$_export/shared.path" "$_export/shared.ready"
     printf '%s\n' "$_collab" >"$_export/collab.enabled"
     printf '%s\n' "$_managed_identity" >"$_export/managed.identity.enabled"
     runtime_directory >"$_export/runtime.path"
@@ -105,6 +133,6 @@ case "${1:-}" in
     printf '%s' "$_rotation_available" >"$_export/collab.rotation.available"
     chmod 0600 "$_export/collab.rotation.path" "$_export/collab.rotation.available"
     tar -C "$AURIGA_DATA_ROOT/config" -cf - platform.env edge.env agent.env audit-db.env bifrost-audit.env \
-      -C "$_export" collab.enabled managed.identity.enabled collab.rotation.path collab.rotation.available runtime.path bifrost.enabled ;;
+      -C "$_export" collab.enabled managed.identity.enabled collab.rotation.path collab.rotation.available runtime.path bifrost.enabled shared.path shared.ready ;;
   *) die 'unsupported installer operation' ;;
 esac

@@ -20,10 +20,17 @@ runtime_action() {
 }
 sh "$NAS_ROOT/scripts/preflight.sh"
 runtime_action stage
+_runtime_committed=0
 rollback() {
   _exit=$?
   trap - EXIT
   if [ "$_exit" != 0 ]; then
+    if [ "$_runtime_committed" = 1 ]; then
+      run_compose --env-file "$AURIGA_DATA_ROOT/stack.env" stop agent \
+        || info 'Agent stop failed; inspect the fixed project before retry' >&2
+      info 'runtime committed; shared projection/restart failed. The new pointer, sequence and proofs remain. Existing DSH processes are retained; retry this public upgrade command with the same bundle/image to finish activation.' >&2
+      exit "$_exit"
+    fi
     info 'runtime activation failed; restoring previous pointer (sequence high water retained)' >&2
     if runtime_action rollback; then
       run_compose --env-file "$AURIGA_DATA_ROOT/stack.env" up -d --wait --wait-timeout 120 --no-build --pull never platform agent \
@@ -40,5 +47,12 @@ trap 'exit 143' TERM
 # Recreate only control consumers. Existing instance volumes and collab stay put.
 run_compose --env-file "$AURIGA_DATA_ROOT/stack.env" up -d --wait --wait-timeout 120 --no-build --pull never platform agent
 runtime_action commit
+_runtime_committed=1
+# Pending projection above retained only the verified committed predecessor.
+# Switch Agent's Host inputs to the newly committed original runtime now.
+if shared_present; then
+  shared_action project >/dev/null
+  run_compose --env-file "$AURIGA_DATA_ROOT/stack.env" up -d --wait --wait-timeout 120 --no-build --pull never platform agent
+fi
 trap - EXIT INT TERM
 info 'runtime activation committed; upgrade existing instances through the workspace API and verify them separately'
