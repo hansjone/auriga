@@ -29,6 +29,7 @@ import { installDedicatedEnvironment } from './task-environment.js';
 import { createDedicatedHost } from './host.js';
 import { createDedicatedBrowser } from './browser.js';
 import { createDedicatedNodeBridge } from './node-bridge.js';
+import { createDedicatedEnterprisePorts } from './enterprise-ports.js';
 
 export const name = 'auriga-dsh-dedicated';
 export const inject = [
@@ -219,12 +220,13 @@ export async function apply(ctx, config) {
       runtime,
       resources,
       activeExecutions,
+      resolveTaskId: (token) => ports.enterprise.taskId(token),
       openTask: (execution) =>
         openSharedExecution({ ctx, runtime, ports, execution, raw: true }),
     });
     const enterprise = createEnterpriseAdapter({
       runtime,
-      ports: ports.enterprise,
+      ports: createDedicatedEnterprisePorts(ports.enterprise, environment),
       config: ports.config,
     });
     disposers.push(
