@@ -6,6 +6,7 @@ import (
 	"fmt"
 	goruntime "runtime"
 	"sync"
+	"time"
 
 	"github.com/hansjone/auriga/infra/agent/internal/artifacts"
 	"github.com/hansjone/auriga/infra/agent/internal/policy"
@@ -31,7 +32,7 @@ type ReleaseActivation struct {
 // the real trust store, partition lock and bbolt high-water commit.
 type ReleaseState interface {
 	GetReleaseTrust() (releasetrust.Ring, error)
-	WithReleaseExecution(context.Context, state.ReleaseCandidate, func(context.Context) error, func(context.Context, *state.ReleaseExecution) error) error
+	WithReleaseExecution(context.Context, state.ReleaseCandidate, func(context.Context) error, func(context.Context, *state.ReleaseExecution) error, ...func() error) error
 	GetExecution(string) (*state.ExecutionRecord, error)
 	PutExecution(state.ExecutionRecord) error
 	DeleteExecution(string, string) error
@@ -49,6 +50,8 @@ type activationScope struct {
 	engineImageID string
 	execution     *state.ReleaseExecution
 	record        *state.ExecutionRecord
+	recovering    bool
+	finishStart   func(context.Context, bool) error
 	mu            sync.Mutex
 	active        bool
 }
@@ -111,11 +114,16 @@ func (a *ReleaseActivation) coordinate(ctx context.Context, spec *nodev1.Instanc
 	if err != nil {
 		return err
 	}
-	scope := &activationScope{coordinator: a, spec: spec, candidate: candidate, record: record, active: true}
+	scope := &activationScope{coordinator: a, spec: spec, candidate: candidate, record: record, recovering: record != nil, active: true}
 	if record != nil {
 		scope.engineImageID = record.EngineImageID
 	}
 	defer func() { scope.mu.Lock(); scope.active = false; scope.mu.Unlock() }()
+	defer func() {
+		if scope.finishStart != nil {
+			_ = scope.finishStart(ctx, false)
+		}
+	}()
 	// Cancellation while qualifying must still interrupt lock/artifact waits.
 	// Once authorization completes, cancel only the joined operation phase:
 	// WithReleaseExecution can then clear its own intent after definite actions,
@@ -161,6 +169,16 @@ func (a *ReleaseActivation) coordinate(ctx context.Context, spec *nodev1.Instanc
 			return err
 		}
 		return errors.Join(run(context.WithValue(parent, activationKey{}, scope)), parent.Err())
+	}, func() error {
+		if scope.finishStart == nil {
+			return nil
+		}
+		if err := parent.Err(); err != nil {
+			return err
+		}
+		publishCtx, cancel := context.WithTimeout(parent, 5*time.Second)
+		defer cancel()
+		return scope.finishStart(publishCtx, true)
 	})
 }
 
@@ -192,6 +210,13 @@ func executionMatchesImage(r *state.ExecutionRecord, image releaseverify.Verifie
 		(r.EngineImageID == image.ConfigID() || r.EngineImageID == image.ManifestDigest())
 }
 
+func sameExecution(a, b *state.ExecutionRecord) bool {
+	return a != nil && b != nil && a.Version == b.Version && a.InstanceID == b.InstanceID &&
+		a.Generation == b.Generation && a.ContainerID == b.ContainerID && a.Candidate == b.Candidate &&
+		a.EngineImageID == b.EngineImageID && a.ConfigID == b.ConfigID && a.ProofDigest == b.ProofDigest &&
+		proto.Equal(a.DSH, b.DSH)
+}
+
 // pinEngineImage fixes the observed Engine target once. Even a switch between
 // the two individually valid digest forms cannot change an existing scope.
 func (s *activationScope) pinEngineImage(id string) error {
@@ -216,7 +241,8 @@ func requireActivation(ctx context.Context, id string) (*activationScope, error)
 }
 
 // SetEndpointRevoker wires the installation's ingress/observer publication.
-// Revocation runs outside the driver mutex and never stops a process.
+// The callback only withdraws ingress/observer state. It must not call the
+// driver: withdrawal and its notification are serialized with publication.
 func (d *Docker) SetEndpointRevoker(revoke func(string)) {
 	d.mu.Lock()
 	d.endpointRevoker = revoke
@@ -225,11 +251,31 @@ func (d *Docker) SetEndpointRevoker(revoke func(string)) {
 
 func (d *Docker) revoke(id string) {
 	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.withdrawLocked(id)
+}
+
+func (d *Docker) endpointProof(id string) dockerEndpoint {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.endpoints[id]
+}
+
+func (d *Docker) withdrawObserved(id string, proof dockerEndpoint) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	// Each Start has a fresh record pointer, even if it recovers the same
+	// container. A late read must not remove the next committed proof.
+	current := d.endpoints[id]
+	if current.pending == nil && proof.pending == nil && current.record == proof.record {
+		d.withdrawLocked(id)
+	}
+}
+
+func (d *Docker) withdrawLocked(id string) {
 	delete(d.endpoints, id)
-	revoke := d.endpointRevoker
-	d.mu.Unlock()
-	if revoke != nil {
-		revoke(id)
+	if d.endpointRevoker != nil {
+		d.endpointRevoker(id)
 	}
 }
 
@@ -250,7 +296,6 @@ func (d *Docker) actualRecord(id string) (*state.ExecutionRecord, error) {
 func (d *Docker) observationRecord(id string) (*state.ExecutionRecord, error) {
 	r, err := d.actualRecord(id)
 	if err != nil {
-		d.revoke(id)
 		return nil, err
 	}
 	image, candidate, err := d.Activation.verify(r.DSH)
@@ -261,7 +306,6 @@ func (d *Docker) observationRecord(id string) (*state.ExecutionRecord, error) {
 		err = d.Activation.Store.CheckReleaseExecution(candidate)
 	}
 	if err != nil {
-		d.revoke(id)
 		return nil, err
 	}
 	return r, nil

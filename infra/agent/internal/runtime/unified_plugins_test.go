@@ -17,6 +17,7 @@ import (
 	"testing"
 	"time"
 
+	nodev1 "github.com/hansjone/auriga/infra/gen/auriga/node/v1"
 	resourcev1 "github.com/hansjone/auriga/infra/gen/auriga/resource/v1"
 	"google.golang.org/protobuf/encoding/protojson"
 )
@@ -57,6 +58,17 @@ func newUnifiedPluginFixture(t *testing.T) *unifiedFixture {
 		t.Fatal(err)
 	}
 	return f
+}
+
+func NewUnifiedRequiredPluginFixture(t *testing.T) (*UnifiedManager, *nodev1.InstanceSpec, func(*nodev1.InstanceSpec)) {
+	t.Helper()
+	f := newUnifiedPluginFixture(t)
+	f.ref.InstallationMode = "required"
+	f.source.spec.AllowPersonalPlugins = new(bool)
+	return f.manager, f.source.spec, func(spec *nodev1.InstanceSpec) {
+		renewFixtureResource(t, f, spec.UnifiedResources[0], spec.ResourceRevocations[0])
+		spec.Generation++
+	}
 }
 
 func TestUnifiedPluginNativeGovernanceDoesNotIsolate(t *testing.T) {

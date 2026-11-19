@@ -38,13 +38,13 @@ func newInstanceBridge(cfg config.Config, driver runtime.Driver, reg *ingress.Ma
 	}
 }
 
-func (b *instanceBridge) Sync(st *nodev1.InstanceStatus) {
+func (b *instanceBridge) Sync(st *nodev1.InstanceStatus) bool {
 	if b == nil || st == nil || st.InstanceId == "" {
-		return
+		return false
 	}
 	id := st.InstanceId
 	if storage.ValidateInstanceID(id) != nil {
-		return
+		return false
 	}
 	switch st.Phase {
 	case nodev1.InstancePhase_INSTANCE_PHASE_RUNNING,
@@ -55,7 +55,7 @@ func (b *instanceBridge) Sync(st *nodev1.InstanceStatus) {
 		if st.StartedAt != nil && st.StartedAt.IsValid() {
 			startedAt = st.StartedAt.AsTime()
 		}
-		b.publish(id, running, startedAt)
+		return b.publish(id, running, startedAt)
 	case nodev1.InstancePhase_INSTANCE_PHASE_STOPPED:
 		b.mu.Lock()
 		b.publicationEpoch[id]++
@@ -70,9 +70,10 @@ func (b *instanceBridge) Sync(st *nodev1.InstanceStatus) {
 	default:
 		// preparing / migrating: no upstream yet
 	}
+	return false
 }
 
-func (b *instanceBridge) publish(id string, running bool, startedAt time.Time) {
+func (b *instanceBridge) publish(id string, running bool, startedAt time.Time) bool {
 	b.mu.Lock()
 	epoch := b.publicationEpoch[id]
 	b.mu.Unlock()
@@ -80,18 +81,18 @@ func (b *instanceBridge) publish(id string, running bool, startedAt time.Time) {
 	// bridge mutex across this call; compare its original epoch afterwards.
 	ep, err := b.driver.Endpoint(id)
 	if err != nil || ep.URL == "" {
-		return
+		return false
 	}
 	u, err := url.Parse(ep.URL)
 	if err != nil || u.Scheme == "" {
-		return
+		return false
 	}
 	home := filepath.Join(b.cfg.InstancesDir(), id, "home")
 	logPath := filepath.Join(b.cfg.InstancesDir(), id, "meta", "instance.log")
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	if b.publicationEpoch[id] != epoch {
-		return
+		return false
 	}
 	b.registry.Put(&ingress.Instance{
 		ID:       id,
@@ -111,6 +112,7 @@ func (b *instanceBridge) publish(id string, running bool, startedAt time.Time) {
 		ProcessStartedAt: startedAt,
 	}
 	b.flushLocked()
+	return true
 }
 
 func (b *instanceBridge) remove(id string) {

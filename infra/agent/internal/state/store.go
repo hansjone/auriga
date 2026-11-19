@@ -308,25 +308,69 @@ func (s *Store) ListDesiredIDs() ([]string, error) {
 
 // ActualRecord is persisted observed status.
 type ActualRecord struct {
-	Status   *nodev1.InstanceStatus `json:"status"`
-	Attempts uint32                 `json:"attempts"`
+	Status      *nodev1.InstanceStatus `json:"status"`
+	Attempts    uint32                 `json:"attempts"`
+	ContainerID string                 `json:"containerId,omitempty"`
 }
 
-// PutActual stores observed status.
+// PutActual stores observed status and binds READY to the current execution.
 func (s *Store) PutActual(rec ActualRecord) error {
 	if rec.Status == nil || rec.Status.InstanceId == "" {
 		return fmt.Errorf("status requires instance_id")
 	}
-	raw, err := json.Marshal(rec)
-	if err != nil {
-		return err
-	}
 	return s.db.Update(func(tx *bbolt.Tx) error {
+		rec.ContainerID = ""
+		if execution := actualExecution(tx, rec.Status); execution != nil {
+			rec.ContainerID = execution.ContainerID
+		}
+		raw, err := json.Marshal(rec)
+		if err != nil {
+			return err
+		}
 		if err := s.completeStartup(tx, rec.Status); err != nil {
 			return err
 		}
 		return tx.Bucket(bucketActual).Put([]byte(rec.Status.InstanceId), raw)
 	})
+}
+
+func actualExecution(tx *bbolt.Tx, status *nodev1.InstanceStatus) *ExecutionRecord {
+	executions := tx.Bucket(bucketReleaseExecution)
+	if !status.GetReady() || executions == nil {
+		return nil
+	}
+	key := []byte(status.GetInstanceId())
+	record, err := decodeExecution(key, executions.Get(key))
+	if err == nil && record.Phase == "started" && record.Generation == status.GetObservedGeneration() {
+		return &record
+	}
+	return nil
+}
+
+// ActualForUplink reads observations and validates their execution and release
+// binding in the same snapshot. It clears the returned binding if it is stale.
+func (s *Store) ActualForUplink(ids []string) (map[string]ActualRecord, error) {
+	actual := make(map[string]ActualRecord, len(ids))
+	err := s.db.View(func(tx *bbolt.Tx) error {
+		b := tx.Bucket(bucketActual)
+		for _, id := range ids {
+			raw := b.Get([]byte(id))
+			if raw == nil {
+				continue
+			}
+			var rec ActualRecord
+			if err := json.Unmarshal(raw, &rec); err != nil {
+				return err
+			}
+			execution := actualExecution(tx, rec.Status)
+			if execution == nil || rec.ContainerID != execution.ContainerID || checkReleaseExecution(tx, execution.Candidate) != nil {
+				rec.ContainerID = ""
+			}
+			actual[id] = rec
+		}
+		return nil
+	})
+	return actual, err
 }
 
 // GetActual loads observed status.
