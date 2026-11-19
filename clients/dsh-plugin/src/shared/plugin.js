@@ -55,7 +55,11 @@ export function apply(ctx) {
   let downstream, detachModels;
   try {
     if (!ports.downstream) throw new Error('common.unavailable');
-    downstream = createSharedDownstream({ runtime, ports: ports.downstream });
+    downstream = createSharedDownstream({
+      runtime,
+      ports: ports.downstream,
+      sdk: ports.sdk,
+    });
     detachModels = ctx.llm.registerAdapter(
       ['auriga-shared'],
       downstream.adapter,

@@ -23,6 +23,8 @@ R 的共享 profile 选择包入口 `auriga-dsh/shared`，不得同时加载默�
 
 内部安装工厂可为独立实例复用底层授权：`createSharedRuntime({expectedMode})` 缺省 `shared`，只接受精确 `shared` 或 `dedicated`，每次绑定均必须匹配安装侧指定模式。`createProductionSharedPorts(ctx,{profileValidator})` 缺省保留共享 profile 校验；只有内部代码可提供同步 `(ctx,expectedProfile,skillRoots)=>true` 验证函数，Promise 或其他值都不能授予 profile。这两个参数不从浏览器或 YAML 读取，不放宽共享 guard，也不将共享消息原生来源扩到 dedicated。
 
+容器内 DSH SDK 与 Auriga 插件分别安装在只读 `/opt/dsh`、`/opt/auriga-dsh`。`host-sdk.js` 的生产 `loadHostSdk()` 只沿固定 `/opt/dsh/package.json` 解析公开导出，返回同一 SDK 的 `{Peer,LlmAdapter}`；使用 `profile-resolution.js` 的真实路径、包归属和公开 export 校验，不从配置、环境变量或浏览器选择模块，也不回退旧开发依赖。ports 插件装配 `createProductionSharedPorts(ctx,{Peer:sdk.Peer,sdk,...})`，Host 使用 `createSharedDownstream({runtime,ports:ports.downstream,sdk:ports.sdk})`。两个工厂的 SDK 参数仅内部代码传递，Peer 与 sdk.Peer 不同即拒；缺 SDK 明确失败。独立实例模块复用相同内部 shape。普通纯单测可显式注入合成类；锁定 rc.3 组合测试验证真实 Peer、LlmAdapter 及公开 LlmRuntime 的类身份和登记。
+
 工具行使用公开配置 `mode: native`，对应 SHARED_PROFILE.toolPresentation。该配置让有限工具可被模型直接调用。R 的 profile 核验同时检查这一配置，公开 ToolRuntime 测试也按此配置装配。
 
 共享技能根是容器内唯一固定只读挂载 `/run/auriga/skills-active/current`，与 Agent 正式 writer、renderer 和 Docker mount 一致；Host 不接受宿主机 PoolLayout 路径、子路径或额外根。`skill-filesystem` 必须关闭默认根、不设置 bundled 根，provider 为 `auriga-shared`。原生 `skill` 工具沿公开 `tools/execute` 继续调用原 Registry/Filesystem；Host 前后核真实会话代次，并要求实际定义的 provider、source、完整路径和资源目录属于平台视图，返回正文与已核定义一致。私有目录、运行时同名覆盖及链接逃逸不能借这个工具加载；Shell、插件安装及其余非白名单工具仍拒绝。

@@ -13,7 +13,7 @@
 
 Auriga browser 行使用唯一精确的 `file:///opt/auriga-dsh/src/shared-browser/plugin.js`。rc.3 的客户端登记器不会把裸子路径 `auriga-dsh/shared-browser` 当包根；固定文件 URL 经同一公开 Loader 解析并寻找最近 manifest，才能同时登记 Auriga 的 `./client`。这不授权任意 `file:` 插件。Agent 应只接受这个固定只读 URL，并沿原 browser 行的顺序、唯一性和配置检查。`id: auriga-dsh` 对应 Host 的 `name: auriga-dsh/shared`，不能把行 ID 当成旧 owner 根入口。
 
-`shared-ports` 内部使用的 Peer 和模型适配器也必须来自 `/opt/dsh/package.json`，不能依赖 Auriga 开发依赖中的旧 SDK。它们的固定锚解析修复与本配方分别交付；未接通前不应宣称真实完整 Host 已启动。
+`shared-ports` 内部使用的 Peer 和模型适配器也必须来自 `/opt/dsh/package.json`，不能依赖 Auriga 开发依赖中的旧 SDK。`src/shared/host-sdk.js` 的 `loadHostSdk()` 使用同一固定锚校验后导入真实公开类；ports 将这个 SDK 对象交给 Host 的模型适配器工厂。缺包、公开类缺失或不一致明确失败，不从旧开发依赖补齐。
 
 ## 服务闭包与权限
 

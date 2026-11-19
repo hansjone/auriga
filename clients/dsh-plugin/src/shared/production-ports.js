@@ -16,8 +16,20 @@ import { canonical, fail, same, validate, verifyToken } from './protocol.js';
 /** Compose the documented DSH Host APIs with the node-owned W/IAM/N relay. */
 export function createProductionSharedPorts(
   ctx,
-  { settings, bridge, Peer, options, profileValidator = assertSharedProfile },
+  {
+    settings,
+    bridge,
+    Peer,
+    sdk,
+    options,
+    profileValidator = assertSharedProfile,
+  },
 ) {
+  if (
+    sdk !== undefined &&
+    (!sdk || sdk.Peer !== Peer || typeof sdk.LlmAdapter !== 'function')
+  )
+    fail('common.validation_failed');
   if (typeof profileValidator !== 'function') fail('common.validation_failed');
   const handles = new Map();
   const peers = new Map();
@@ -290,6 +302,7 @@ export function createProductionSharedPorts(
     }),
   ];
   const ports = {
+    sdk,
     options,
     config: () => settings().enterprise,
     messageTrustConfig: () => settings().messageTrust,

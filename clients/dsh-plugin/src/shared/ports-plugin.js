@@ -6,6 +6,7 @@ import { createSharedNodeTransport } from './node-transport.js';
 import { createProductionSharedPorts } from './production-ports.js';
 import { canonical, fail } from './protocol.js';
 import { isPlatformSkillRoots } from './skill-policy.js';
+import { loadHostSdk } from './host-sdk.js';
 
 export const name = 'auriga-dsh-shared-ports';
 export const provide = 'aurigaSharedPorts';
@@ -118,11 +119,12 @@ export async function apply(ctx, config) {
       required.some((operation) => !healthy.operations.includes(operation))
     )
       fail('common.unavailable');
-    const { Peer } = await import('@deepseek-ai/dsh-client-connection');
+    const sdk = await loadHostSdk();
     ports = createProductionSharedPorts(ctx, {
       settings,
       bridge,
-      Peer,
+      Peer: sdk.Peer,
+      sdk,
       options,
     });
     ctx.provide('aurigaSharedPorts', ports);

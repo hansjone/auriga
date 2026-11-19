@@ -75,6 +75,9 @@ async function load(skillRoots) {
     },
     './host.js': { SHARED_PROFILE },
     './skill-policy.js': { isPlatformSkillRoots },
+    './host-sdk.js': {
+      loadHostSdk: () => assert.fail('health failure must not load SDK'),
+    },
     './node-transport.js': {
       createSharedNodeTransport: () => ({
         async call() {

@@ -1,9 +1,9 @@
 // @ts-nocheck
-import { LlmAdapter } from '@deepseek-ai/dsh-llm';
 import { fail } from './protocol.js';
 
 /** P side of N's K capability ports. N owns metering, transport dedup and targets. */
-export function createSharedDownstream({ runtime, ports }) {
+export function createSharedDownstream({ runtime, ports, sdk }) {
+  if (typeof sdk?.LlmAdapter !== 'function') fail('common.unavailable');
   let closed = false;
   const active = new Set();
   async function authorize(sessionId, scope, signal) {
@@ -38,7 +38,7 @@ export function createSharedDownstream({ runtime, ports }) {
     await check();
     return { binding, task, capability, check };
   }
-  class SharedModelAdapter extends LlmAdapter {
+  class SharedModelAdapter extends sdk.LlmAdapter {
     async *stream(options) {
       const controller = new AbortController();
       const abort = () => controller.abort();
