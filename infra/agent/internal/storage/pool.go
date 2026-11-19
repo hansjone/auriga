@@ -11,6 +11,10 @@ import (
 const MemberBytes int64 = 5368709120
 const MemberInodes int64 = 100000
 
+// Twenty member workspaces, one persistent Host home and one message trust
+// ledger. Message preferences and inboxes share the Host home's quota.
+const PoolMinimumBytes int64 = 22 * MemberBytes
+
 // HardQuota must install and verify a kernel-enforced quota before publication.
 // Directory size scans are not an implementation of this interface.
 type HardQuota interface {

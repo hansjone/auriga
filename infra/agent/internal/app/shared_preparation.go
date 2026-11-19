@@ -30,7 +30,7 @@ func sharedPreparation(cfg config.Config, driver string) (*agentruntime.SharedPo
 	var quota storage.HardQuota
 	switch provision.Backend {
 	case "ext4-image":
-		if !filepath.IsAbs(provision.MkfsBinary) || !filepath.IsAbs(provision.LosetupBinary) || provision.ImageBytes < 24*storage.MemberBytes {
+		if !filepath.IsAbs(provision.MkfsBinary) || !filepath.IsAbs(provision.LosetupBinary) || provision.ImageBytes < storage.PoolMinimumBytes {
 			return nil, fmt.Errorf("ext4 image size and absolute storage tools required")
 		}
 		quota = &storage.Ext4Images{Root: root, IDs: ids, ImageBytes: provision.ImageBytes,
