@@ -452,7 +452,15 @@ test('new receiver without durable native session cannot publish a binding or AC
   }
 });
 
-test('fast reply before open response defers unknown mapping, then reaches the original source on retry', async () => {
+test('fast reply before open response defers unknown mapping, then reaches the original source on retry', async (t) => {
+  // Each pull below is an awaited delivery/ACK barrier, so do not race it
+  // against the production interval's in-flight pull.
+  t.mock.timers.enable({ apis: ['setInterval'] });
+  syncBuiltinESMExports();
+  t.after(() => {
+    t.mock.timers.reset();
+    syncBuiltinESMExports();
+  });
   const run = await conversation(),
     entered = Promise.withResolvers(),
     release = Promise.withResolvers();
