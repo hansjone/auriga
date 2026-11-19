@@ -30,7 +30,7 @@ const finiteTools = new Set([
  */
 export function installSharedHost(
   ctx,
-  { runtime, enterprise, ports, messaging },
+  { runtime, enterprise, ports, messaging, taskEnvironment },
 ) {
   if (
     !ctx.remoteAccess?.registerPolicy ||
@@ -142,12 +142,17 @@ export function installSharedHost(
             if (name === 'auriga_shared_resources')
               return runtime.resources(id);
             // Capability issuer derives task identity from the live host execution.
-            const task = await openSharedTask({
-              ctx,
-              runtime,
-              ports,
-              execution,
-            });
+            const borrowed = taskEnvironment?.borrow(execution);
+            if (taskEnvironment && (!borrowed || !borrowed.company))
+              fail('common.forbidden');
+            const task =
+              borrowed ??
+              (await openSharedTask({
+                ctx,
+                runtime,
+                ports,
+                execution,
+              }));
             try {
               return await enterprise.outbound({
                 remoteAddress: '127.0.0.1',
@@ -155,7 +160,7 @@ export function installSharedHost(
                 body: { ...args, dshSessionId: id, taskCapability: task.token },
               });
             } finally {
-              await task.close();
+              if (!borrowed) await task.close();
             }
           },
         }),
@@ -258,6 +263,7 @@ export function installSharedHost(
       return result;
     },
     revoke(event) {
+      taskEnvironment?.revoke(event);
       messaging?.revoke(event);
       runtime.revoke(event);
       ctx.remoteAccess.invalidate();
