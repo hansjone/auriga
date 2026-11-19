@@ -83,7 +83,7 @@ func sharedRuntime(ctx context.Context, cfg config.Config, pools *runtime.Shared
 		}
 	}
 	for key := range hostTemplate {
-		if key != "identityKeys" && key != "capabilityKeys" && key != "model" && key != "enterprise" {
+		if key != "identityKeys" && key != "capabilityKeys" && key != "model" && key != "enterprise" && key != "messageTrust" {
 			return nil, fmt.Errorf("unexpected shared Host template field %q", key)
 		}
 	}
@@ -129,6 +129,9 @@ func sharedRuntime(ctx context.Context, cfg config.Config, pools *runtime.Shared
 			return "", e
 		}
 		relay := sharednode.NewRelay(client, b.PhysicalInstanceId)
+		relay.VerifyPeer = func(call context.Context, pid int, start string) (string, error) {
+			return docker.VerifyPoolPeer(call, b.PhysicalInstanceId, pid, start)
+		}
 		if _, err = relay.Start(ctx, filepath.Join(directory, "shared-node.sock"), uid); err != nil {
 			return "", err
 		}

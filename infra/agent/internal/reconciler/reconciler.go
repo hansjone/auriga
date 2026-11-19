@@ -28,10 +28,15 @@ type Reconciler struct {
 	Activation *runtime.ReleaseActivation
 	Log        *slog.Logger
 	Sink       StatusSink
+	// SyncEndpoint applies the local ingress update before a status is sent.
+	// It reports whether it accepted the endpoint for a READY status.
+	SyncEndpoint func(*nodev1.InstanceStatus) bool
 	// PrepareTimeout bounds Ensure (artifact fetch, image pull, render) and
 	// StartTimeout bounds Start, so a stuck download fails instead of hanging.
 	PrepareTimeout time.Duration
 	StartTimeout   time.Duration
+	writeActual    func(state.ActualRecord) error
+	writeRestart   func(string, state.RestartRecord) error
 
 	mu             sync.Mutex
 	workers        map[string]chan workItem
@@ -54,7 +59,7 @@ type workItem struct {
 	spec          *nodev1.InstanceSpec
 	del           *nodev1.DeleteInstance
 	command       *nodev1.Command
-	result        chan *nodev1.CommandResult
+	result        chan commandReply
 	parent        string
 	healthContext context.Context
 	healthEpoch   uint64
@@ -77,6 +82,8 @@ func New(store *state.Store, driver runtime.Driver, log *slog.Logger, maxConcurr
 	return &Reconciler{
 		Activation:     activation,
 		Store:          store,
+		writeActual:    store.PutActual,
+		writeRestart:   store.PutRestartCommand,
 		Driver:         driver,
 		Log:            log,
 		workers:        make(map[string]chan workItem),
@@ -186,25 +193,33 @@ func (r *Reconciler) Inventory() ([]*nodev1.InstanceStatus, error) {
 		return nil, err
 	}
 	out := make([]*nodev1.InstanceStatus, 0, len(recs))
+	have := make(map[string]bool, len(recs))
+	var checks []inventoryCheck
 	inspectionCtx, cancel := context.WithTimeout(context.Background(), r.StartTimeout)
 	defer cancel()
 	for _, rec := range recs {
-		if rec.Status != nil {
-			status := cloneStatus(rec.Status)
+		status := rec.Status
+		if status == nil {
+			continue
+		}
+		if status.Ready && r.Activation != nil {
+			execution := UplinkExecution{instanceID: status.InstanceId, containerID: rec.ContainerID, generation: status.ObservedGeneration}
+			checks = append(checks, inventoryCheck{
+				index: len(out), execution: execution, live: r.inspectUplink(inspectionCtx, status.InstanceId, execution),
+			})
+		} else {
 			if status.Ready {
 				actual, inspectErr := r.Driver.Inspect(inspectionCtx, status.InstanceId)
-				status.Ready = inspectErr == nil && inspectionCtx.Err() == nil && actual.Running && actual.Ready
+				status.Ready = inspectErr == nil && inspectionCtx.Err() == nil && actual.Running && actual.Ready && actual.Generation == status.ObservedGeneration
 			}
-			out = append(out, status)
+			filterAppliedReports(status)
 		}
+		out = append(out, status)
+		have[status.InstanceId] = true
 	}
 	ids, err := r.Store.ListDesiredIDs()
 	if err != nil {
 		return nil, err
-	}
-	have := map[string]bool{}
-	for _, st := range out {
-		have[st.InstanceId] = true
 	}
 	for _, id := range ids {
 		if have[id] {
@@ -215,6 +230,9 @@ func (r *Reconciler) Inventory() ([]*nodev1.InstanceStatus, error) {
 			Phase:      nodev1.InstancePhase_INSTANCE_PHASE_ABSENT,
 			UpdatedAt:  timestamppb.Now(),
 		})
+	}
+	if len(checks) > 0 {
+		r.finishInventory(inspectionCtx, out, checks)
 	}
 	return out, nil
 }
@@ -266,7 +284,7 @@ func (r *Reconciler) loop(id string, ch chan workItem) {
 		case "health":
 			r.handleHealth(id, item.healthContext, item.healthEpoch)
 		case "restart":
-			item.result <- r.handleRestart(ctx, item.command)
+			item.result <- r.restartReply(ctx, item.command)
 		case "delete":
 			r.handleDelete(ctx, id, item.del)
 		default:
@@ -471,7 +489,7 @@ func (r *Reconciler) applySpec(ctx context.Context, id string, spec *nodev1.Inst
 		st.ObservedGeneration = spec.Generation
 		st.StartedAt = timestamppb.Now()
 		st.UpdatedAt = timestamppb.Now()
-		if r.persist(st, 0) == nil {
+		if r.persist(st, 0) == nil && st.Ready {
 			telemetry.Stage(ctx, "ready")
 		}
 	case nodev1.DesiredState_DESIRED_STATE_STOPPED:
@@ -530,7 +548,7 @@ func (r *Reconciler) recoverRunning(ctx context.Context, rec state.ActualRecord,
 	st.Ready = true
 	st.UpdatedAt = timestamppb.Now()
 	// Start may merely rediscover an existing container. Preserve its start time.
-	if r.persist(st, 0) == nil {
+	if r.persist(st, 0) == nil && st.Ready {
 		telemetry.Stage(ctx, "ready")
 	}
 }
@@ -596,12 +614,13 @@ func (r *Reconciler) fail(id string, generation int64, attempts uint32, code, ms
 
 func (r *Reconciler) persist(st *nodev1.InstanceStatus, attempts uint32) error {
 	r.enrichPersistedResources(st)
-	if err := r.Store.PutActual(state.ActualRecord{Status: st, Attempts: attempts}); err != nil {
+	err := r.commitStatus(context.Background(), st, func() error {
+		return r.writeActual(state.ActualRecord{Status: st, Attempts: attempts})
+	})
+	if err != nil {
 		r.Log.Warn("persist runtime status failed", "instance_id", st.InstanceId, "error", err)
-		return err
 	}
-	r.emit(st)
-	return nil
+	return err
 }
 
 func (r *Reconciler) emit(st *nodev1.InstanceStatus) {

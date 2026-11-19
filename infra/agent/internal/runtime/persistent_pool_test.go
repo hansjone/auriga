@@ -63,6 +63,15 @@ func persistentFixture(t *testing.T) (*runtime.PersistentPools, *releaseEngine, 
 	layout := &storage.PoolLayout{Root: filepath.Join(docker.DataRoot, "pools"), Quota: quota}
 	pools := &runtime.SharedPools{Layout: layout, Supervisor: docker}
 	return &runtime.PersistentPools{Pools: pools, Driver: docker, UIDs: storage.NewUIDTable(release.dir),
+		Chown: func(path string, uid, gid int) error {
+			if uid != 200000 || gid != uid {
+				t.Fatalf("incorrect pool ownership %d:%d", uid, gid)
+			}
+			if _, err := os.Stat(path); err != nil {
+				t.Fatal(err)
+			}
+			return nil
+		},
 		Template: &nodev1.InstanceSpec{Generation: 1, Dsh: release.dsh, Resources: &nodev1.Resources{MemoryMb: 512, CpuMillis: 500, Pids: 128}},
 		Profile:  []byte(persistentProfile), Ports: []byte("// Synthetic installation module; host is a fixture, no DSH process is executed.\n"),
 		Resources: &runtime.EmptyPoolResources{Root: layout.Root}}, engine, quota
@@ -91,6 +100,10 @@ func TestPersistentPoolTwoMembersAndRestartReuseOneSignedProcess(t *testing.T) {
 	if creates != 1 || starts != 1 {
 		t.Fatalf("created=%d started=%d", creates, starts)
 	}
+	cache := filepath.Join(m.Pools.Layout.Root, first.Binding.PhysicalInstanceId, "members", "message-trust", "ledger.json")
+	if err := os.WriteFile(cache, []byte(`{"synthetic":"anti-rollback"}`), 0600); err != nil {
+		t.Fatal(err)
+	}
 	record, err := m.Driver.Activation.Store.GetExecution(first.Binding.PhysicalInstanceId)
 	if err != nil {
 		t.Fatal(err)
@@ -107,7 +120,7 @@ func TestPersistentPoolTwoMembersAndRestartReuseOneSignedProcess(t *testing.T) {
 	recoveredDriver := runtime.NewDockerWithClient(m.Driver.Client, m.Driver.DataRoot)
 	recoveredDriver.Policy, recoveredDriver.Activation = m.Driver.Policy, m.Driver.Activation
 	reconnected := &runtime.PersistentPools{Pools: &runtime.SharedPools{Layout: m.Pools.Layout, Supervisor: recoveredDriver},
-		Driver: recoveredDriver, UIDs: storage.NewUIDTable(filepath.Dir(m.UIDs.Path)), Template: m.Template, Profile: m.Profile, Ports: m.Ports, Resources: m.Resources}
+		Driver: recoveredDriver, UIDs: storage.NewUIDTable(filepath.Dir(m.UIDs.Path)), Template: m.Template, Profile: m.Profile, Ports: m.Ports, Resources: m.Resources, Chown: m.Chown}
 	if receipt, err := reconnected.Prepare(ctx, first); err == nil || receipt == nil || receipt.Outcome != "unconfirmed" {
 		t.Fatal("reconnect accepted stale resource snapshots")
 	}
@@ -121,6 +134,9 @@ func TestPersistentPoolTwoMembersAndRestartReuseOneSignedProcess(t *testing.T) {
 		t.Fatal(err)
 	}
 	reconnected.Watch(ctx)
+	if raw, err := os.ReadFile(cache); err != nil || string(raw) != `{"synthetic":"anti-rollback"}` {
+		t.Fatal("message trust ledger lost across restart", err)
+	}
 	after, err := m.Driver.Activation.Store.GetExecution(first.Binding.PhysicalInstanceId)
 	if err != nil || after.ContainerID != before {
 		t.Fatal("reconnect replaced execution")
@@ -177,13 +193,16 @@ func TestPersistentPoolDedicatedAndGuardianReplayWithoutFreshViews(t *testing.T)
 }
 
 func TestPersistentPoolQuotaSnapshotReleaseAndProfileGates(t *testing.T) {
-	for _, gate := range []string{"quota", "snapshot", "personal", "profile", "release", "resource"} {
+	for _, gate := range []string{"quota", "snapshot", "personal", "profile", "release", "resource", "ownership"} {
 		t.Run(gate, func(t *testing.T) {
 			m, engine, quota := persistentFixture(t)
 			command := persistentIntent(1)
 			view := persistentView(command)
 			if gate == "quota" {
 				quota.fail = true
+			}
+			if gate == "ownership" {
+				m.Chown = func(string, int, int) error { return errors.New("synthetic EPERM") }
 			}
 			if gate == "personal" {
 				m.Template.Secrets = &nodev1.Secrets{}

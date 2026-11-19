@@ -604,6 +604,36 @@ func TestRevocationFencesAlreadyCapturedEndpointPublication(t *testing.T) {
 	}
 }
 
+func TestBridgeRejectionPreventsReadyUplink(t *testing.T) {
+	for _, reject := range []bool{false, true} {
+		t.Run(fmt.Sprintf("reject=%t", reject), func(t *testing.T) {
+			f := newRecoveryFixture(t)
+			f.healthy.Store(true)
+			f.rec.Sink = func(st *nodev1.InstanceStatus) { f.statuses <- st }
+			f.rec.SyncEndpoint = func(st *nodev1.InstanceStatus) bool {
+				// The reconciler already persisted READY before entering the
+				// bridge. Make its subsequent Engine read fail.
+				if st.GetReady() && reject {
+					f.inspectError.Store(true)
+				}
+				return f.bridge.Sync(st)
+			}
+			if err := f.rec.ReconcileAll(t.Context()); err != nil {
+				t.Fatal(err)
+			}
+			if st := f.next(t); st.GetPhase() != nodev1.InstancePhase_INSTANCE_PHASE_STARTING {
+				t.Fatal(st)
+			}
+			out := f.next(t)
+			saved, err := f.rec.Store.GetActual(out.InstanceId)
+			_, routed := f.registry.Lookup(out.InstanceId)
+			if err != nil || out.GetReady() == reject || saved.Status.GetReady() == reject || routed == reject {
+				t.Fatal("bridge, durable state and uplink disagreed", routed, saved.Status, out, err)
+			}
+		})
+	}
+}
+
 func TestStoppedStatusFencesAlreadyCapturedEndpointPublication(t *testing.T) {
 	f := newRecoveryFixture(t)
 	f.healthy.Store(true)

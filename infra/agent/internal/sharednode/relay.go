@@ -25,6 +25,7 @@ type execution struct {
 	binding  *nodev1.SharedDshSessionBinding
 	scopes   []string
 	audience string
+	peer     string
 }
 type Relay struct {
 	Client *Client
@@ -34,10 +35,18 @@ type Relay struct {
 	tokens map[string]*nodev1.SharedDshCapability
 	// Set only for a real installed broker transport, never advertised otherwise.
 	Message func(context.Context, string, json.RawMessage) (any, error)
+	// Production joins SO_PEERCRED to the signed Engine execution on every call.
+	VerifyPeer func(context.Context, int, string) (string, error)
+	sources    map[string]messageSource
+	boots      map[string]string
 }
 
 func NewRelay(c *Client, pool string) *Relay {
-	return &Relay{Client: c, Pool: pool, tasks: map[string]execution{}, tokens: map[string]*nodev1.SharedDshCapability{}}
+	r := &Relay{Client: c, Pool: pool, tasks: map[string]execution{}, tokens: map[string]*nodev1.SharedDshCapability{}, sources: map[string]messageSource{}, boots: map[string]string{}}
+	if c.Messages != nil && c.Settings.SharedMessages != nil {
+		r.Message = c.message
+	}
+	return r
 }
 func (r *Relay) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	if req.Method != "POST" || req.URL.RawQuery != "" || req.URL.RawPath != "" || req.Header.Get("Content-Type") != "application/json" || req.Header.Get("Authorization") != "" || req.Header.Get("Cookie") != "" || req.Header.Get("Upgrade") != "" {
@@ -62,6 +71,14 @@ func (r *Relay) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	}
 	value, e := r.invoke(req.Context(), op, raw)
 	if e != nil {
+		var upstream *messageHTTPError
+		if errors.As(e, &upstream) {
+			w.Header().Set("Content-Type", "application/json")
+			w.Header().Set("Cache-Control", "no-store")
+			w.WriteHeader(upstream.status)
+			_, _ = w.Write(upstream.body)
+			return
+		}
 		code := e.Error()
 		if !strings.HasPrefix(code, "shared.") && !strings.HasPrefix(code, "common.") {
 			code = "common.unavailable"
@@ -104,10 +121,15 @@ func (r *Relay) binding(b *nodev1.SharedDshBinding) error {
 	return nil
 }
 func (r *Relay) task(ctx context.Context, b *nodev1.SharedDshSessionBinding, id, audience string, scopes []string) error {
+	if check, ok := ctx.Value(executionFenceKey{}).(func() error); ok {
+		if err := check(); err != nil {
+			return err
+		}
+	}
 	r.mu.Lock()
 	t, ok := r.tasks[id]
 	r.mu.Unlock()
-	if !ok || !proto.Equal(t.binding, b) || t.audience != audience {
+	if !ok || !proto.Equal(t.binding, b) || t.audience != audience || t.peer != executionPeer(ctx) {
 		return errors.New("shared.revoked")
 	}
 	for _, s := range scopes {
@@ -146,12 +168,12 @@ func (r *Relay) invoke(ctx context.Context, op string, raw []byte) (any, error) 
 		if !validRequest(raw, "health") {
 			return nil, errors.New("common.validation_failed")
 		}
-		ops := []string{"health", "resolve", "register", "lookup", "resourceSnapshot", "beginTask", "issueCapability", "finishTask", "authorizeCapability", "readCredentials"}
+		ops := []string{"health", "resolve", "register", "lookup", "resourceSnapshot", "beginTask", "issueCapability", "finishTask", "authorizeCapability", "readCredentials", "enterpriseOutbound"}
 		if r.Client.Model != nil {
 			ops = append(ops, "model")
 		}
 		if r.Message != nil {
-			ops = append(ops, "send", "receive")
+			ops = append(ops, "messageContext", "send", "receive")
 		}
 		return map[string]any{"protocol": "auriga.shared.node.v1", "tenantId": r.Client.Settings.TenantID, "physicalInstanceId": r.Pool, "operations": ops}, nil
 	case "resolve":
@@ -175,6 +197,8 @@ func (r *Relay) invoke(ctx context.Context, op string, raw []byte) (any, error) 
 			return nil, errors.New("shared.revoked")
 		}
 		return wire(out)
+	case "enterpriseOutbound":
+		return r.enterpriseOutbound(ctx, raw)
 	case "register":
 		in := new(workspacev1.RegisterSharedDshSessionRequest)
 		if decode(raw, in) != nil || in.Binding == nil || in.Binding.TenantId != r.Client.Settings.TenantID || in.Binding.PhysicalInstanceId != r.Pool {
@@ -222,25 +246,25 @@ func (r *Relay) invoke(ctx context.Context, op string, raw []byte) (any, error) 
 			r.mu.Unlock()
 			return nil, errors.New("common.unavailable")
 		}
-		if exists && (!proto.Equal(old.binding, in.Binding) || old.audience != in.Audience || !sameStrings(old.scopes, in.Scopes)) {
+		if exists && (!proto.Equal(old.binding, in.Binding) || old.audience != in.Audience || !sameStrings(old.scopes, in.Scopes) || old.peer != executionPeer(ctx)) {
 			r.mu.Unlock()
 			return nil, errors.New("common.conflict")
 		}
 		// The execution is reserved before Begin. Cancellation compensation uses
 		// this exact binding even if the response is lost.
-		r.tasks[in.TaskId] = execution{proto.Clone(in.Binding).(*nodev1.SharedDshSessionBinding), append([]string{}, in.Scopes...), in.Audience}
+		r.tasks[in.TaskId] = execution{proto.Clone(in.Binding).(*nodev1.SharedDshSessionBinding), append([]string{}, in.Scopes...), in.Audience, executionPeer(ctx)}
 		r.mu.Unlock()
 		out := new(iamv1.BeginSharedTaskResponse)
 		if e := r.Client.call(ctx, true, "BeginSharedTask", in, out); e != nil {
-			r.finish(in.Binding, in.TaskId)
+			_ = r.finish(in.Binding, in.TaskId)
 			return nil, e
 		}
 		if ctx.Err() != nil {
-			r.finish(in.Binding, in.TaskId)
+			_ = r.finish(in.Binding, in.TaskId)
 			return nil, ctx.Err()
 		}
 		if e := r.remember(in.Binding, in.TaskId, out.Token, out.Capability); e != nil {
-			r.finish(in.Binding, in.TaskId)
+			_ = r.finish(in.Binding, in.TaskId)
 			return nil, e
 		}
 		return wire(out)
@@ -268,23 +292,30 @@ func (r *Relay) invoke(ctx context.Context, op string, raw []byte) (any, error) 
 		r.mu.Lock()
 		t, ok := r.tasks[in.TaskId]
 		r.mu.Unlock()
-		if !ok || !proto.Equal(t.binding, in.Binding) {
+		if !ok || !proto.Equal(t.binding, in.Binding) || t.peer != executionPeer(ctx) {
 			return nil, errors.New("shared.binding_mismatch")
 		}
 		e := r.finish(in.Binding, in.TaskId)
 		return map[string]any{}, e
 	case "authorizeCapability", "readCredentials":
-		var in struct{ Capability string }
+		var in struct{ Capability json.RawMessage }
 		if json.Unmarshal(raw, &in) != nil {
 			return nil, errors.New("common.validation_failed")
 		}
-		cap, e := r.capability(ctx, in.Capability)
+		token, e := r.localCapability(in.Capability)
+		if e != nil {
+			return nil, e
+		}
+		cap, e := r.capability(ctx, token)
 		if e != nil {
 			return nil, e
 		}
 		if op == "readCredentials" {
 			out := new(iamv1.ReadSharedCredentialsResponse)
 			if e = r.Client.call(ctx, true, "ReadSharedCredentials", &iamv1.ReadSharedCredentialsRequest{Capability: cap}, out); e != nil {
+				return nil, e
+			}
+			if _, e = r.capability(ctx, token); e != nil {
 				return nil, e
 			}
 			return wire(out)
@@ -294,25 +325,8 @@ func (r *Relay) invoke(ctx context.Context, op string, raw []byte) (any, error) 
 			return nil, e
 		}
 		return wire(out)
-	case "send", "receive":
-		if r.Message != nil {
-			var in struct {
-				TenantId, SessionId, TaskId, Capability, MessageId string
-				Body                                               json.RawMessage
-			}
-			if json.Unmarshal(raw, &in) != nil || !uuid.MatchString(in.MessageId) || len(in.Body) == 0 || len(in.Body) > 65536 {
-				return nil, errors.New("common.validation_failed")
-			}
-			cap, e := r.capability(ctx, in.Capability)
-			if e != nil {
-				return nil, e
-			}
-			scope := "message." + op
-			if cap.Binding.TenantId != in.TenantId || cap.Binding.SessionId != in.SessionId || cap.TaskId != in.TaskId || cap.Audience != "auriga.shared.message" || !has(cap.Scopes, scope) {
-				return nil, errors.New("shared.binding_mismatch")
-			}
-			return r.Message(ctx, op, raw)
-		}
+	case "messageContext", "send", "receive":
+		return r.message(ctx, op, raw)
 	}
 	return nil, errors.New("common.unavailable")
 }
@@ -362,6 +376,7 @@ func (r *Relay) finish(b *nodev1.SharedDshSessionBinding, id string) error {
 	if err == nil {
 		r.mu.Lock()
 		delete(r.tasks, id)
+		delete(r.sources, id)
 		for t, c := range r.tokens {
 			if c.TaskId == id {
 				delete(r.tokens, t)

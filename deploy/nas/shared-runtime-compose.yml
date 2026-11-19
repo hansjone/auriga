@@ -3,6 +3,8 @@
 services:
   agent:
     userns_mode: host
+    # Kernel SO_PEERCRED PIDs must be visible for signed pool ancestry checks.
+    pid: host
     cap_add: [CHOWN, DAC_OVERRIDE, FOWNER, SYS_ADMIN]
     security_opt: ['no-new-privileges:true', 'apparmor:unconfined']
     device_cgroup_rules:

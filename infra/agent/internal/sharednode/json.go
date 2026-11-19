@@ -70,9 +70,13 @@ func validRequest(raw []byte, op string) bool {
 		return false
 	}
 	fields := map[string][]string{
-		"health": {}, "resolve": {"binding", "platformSessionId"}, "register": {"binding", "parentSessionId"}, "lookup": {"tenantId", "physicalInstanceId", "sessionId"}, "resourceSnapshot": {"binding"},
+		"enterpriseOutbound": {"capability", "url", "method", "headers", "bodyBase64", "timeoutMs"},
+		"health":             {}, "resolve": {"binding", "platformSessionId"}, "register": {"binding", "parentSessionId"}, "lookup": {"tenantId", "physicalInstanceId", "sessionId"}, "resourceSnapshot": {"binding"},
 		"beginTask": {"binding", "taskId", "scopes", "audience"}, "issueCapability": {"binding", "taskId", "scopes", "audience"}, "finishTask": {"binding", "taskId"}, "authorizeCapability": {"capability"}, "readCredentials": {"capability"},
-		"model": {"tenantId", "sessionId", "taskId", "callId", "capability", "body"}, "send": {"tenantId", "sessionId", "taskId", "capability", "messageId", "target", "body"}, "receive": {"tenantId", "sessionId", "taskId", "capability", "messageId", "target", "body"},
+		"model":          {"tenantId", "sessionId", "taskId", "callId", "capability", "body"},
+		"messageContext": {"tenantId", "sessionId", "taskId", "capability", "operationId", "bootId", "nativeWitness"},
+		"send":           {"tenantId", "sessionId", "taskId", "capability", "messageId", "target", "body", "contextId", "bootId", "nativeWitness"},
+		"receive":        {"tenantId", "sessionId", "taskId", "capability", "contextId", "bootId", "nativeWitness", "operation", "frame"},
 	}
 	allowed, ok := fields[op]
 	if !ok {

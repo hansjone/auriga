@@ -88,6 +88,11 @@ func (d *Docker) configurePool(ctx context.Context, spec *Spec, body map[string]
 	}
 	host["Mounts"] = append(mounts, member, map[string]any{"Type": "bind", "Source": p.Skills,
 		"Target": "/run/auriga/skills-active/current", "ReadOnly": true, "RW": false})
+	cacheMount := map[string]any{"Type": member["Type"], "Source": member["Source"], "Target": "/var/lib/auriga/pools/" + spec.InstanceID + "/host", "ReadOnly": false}
+	if p.Volume != "" {
+		cacheMount["VolumeOptions"] = map[string]any{"NoCopy": true}
+	}
+	host["Mounts"] = append(host["Mounts"].([]map[string]any), cacheMount)
 	if p.Relay != "" {
 		host["Mounts"] = append(host["Mounts"].([]map[string]any), map[string]any{"Type": "bind", "Source": p.Relay, "Target": "/var/lib/auriga/pools/" + spec.InstanceID + "/control", "ReadOnly": true})
 	}
@@ -132,7 +137,7 @@ func (d *Docker) verifyPoolContainer(ctx context.Context, id string, inspect map
 		return fmt.Errorf("shared process profile identity mismatch")
 	}
 	mounts, _ := inspect["Mounts"].([]any)
-	count := 4
+	count := 5
 	if p.Relay != "" {
 		count++
 	}
@@ -145,8 +150,9 @@ func (d *Docker) verifyPoolContainer(ctx context.Context, id string, inspect map
 	}{
 		"/home/dsh": {p.Members, "bind", true},
 		"/var/lib/auriga/pools/" + id + "/members": {p.Members, "bind", true},
-		"/run/auriga":                       {p.Meta, "bind", false},
-		"/run/auriga/skills-active/current": {p.Skills, "bind", false},
+		"/var/lib/auriga/pools/" + id + "/host":    {p.Members, "bind", true},
+		"/run/auriga":                              {p.Meta, "bind", false},
+		"/run/auriga/skills-active/current":        {p.Skills, "bind", false},
 	}
 	if p.Relay != "" {
 		expected["/var/lib/auriga/pools/"+id+"/control"] = struct {
@@ -160,6 +166,10 @@ func (d *Docker) verifyPoolContainer(ctx context.Context, id string, inspect map
 			rw           bool
 		}{p.Volume, "volume", true}
 		expected["/var/lib/auriga/pools/"+id+"/members"] = struct {
+			source, kind string
+			rw           bool
+		}{p.Volume, "volume", true}
+		expected["/var/lib/auriga/pools/"+id+"/host"] = struct {
 			source, kind string
 			rw           bool
 		}{p.Volume, "volume", true}

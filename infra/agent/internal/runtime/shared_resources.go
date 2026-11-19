@@ -31,6 +31,7 @@ func CheckPoolViews(bindings []*nodev1.SharedDshBinding, views []*nodev1.SharedD
 	}
 	seen := map[string]bool{}
 	digest := ""
+	content := map[string]string{}
 	tenant, pool := bindings[0].GetTenantId(), bindings[0].GetPhysicalInstanceId()
 	for i, b := range bindings {
 		if !validPoolBinding(b) || b.TenantId != tenant || b.PhysicalInstanceId != pool || seen[b.MemberId] {
@@ -53,6 +54,11 @@ func CheckPoolViews(bindings []*nodev1.SharedDshBinding, views []*nodev1.SharedD
 				return fmt.Errorf("%w: expired or invalid resource", observer.ErrPoolSnapshotRejected)
 			}
 			resources[r.ResourceId] = true
+			if i == 0 {
+				content[r.ResourceId] = r.Digest
+			} else if content[r.ResourceId] != r.Digest {
+				return fmt.Errorf("%w: resource set mismatch", observer.ErrPoolSnapshotRejected)
+			}
 		}
 		// Each placement owns its lease ID and expiry. Equal authorization sets
 		// must select identical content; every individual lease is checked below
@@ -61,11 +67,6 @@ func CheckPoolViews(bindings []*nodev1.SharedDshBinding, views []*nodev1.SharedD
 			a := views[0].Resources
 			if len(a) != len(v.Resources) {
 				return fmt.Errorf("%w: resource set mismatch", observer.ErrPoolSnapshotRejected)
-			}
-			for j := range a {
-				if a[j].ResourceId != v.Resources[j].ResourceId || a[j].Digest != v.Resources[j].Digest {
-					return fmt.Errorf("%w: resource set mismatch", observer.ErrPoolSnapshotRejected)
-				}
 			}
 		}
 	}

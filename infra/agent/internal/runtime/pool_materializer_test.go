@@ -2,40 +2,40 @@ package runtime
 
 import (
 	"context"
+	"crypto/tls"
 	"fmt"
 	"github.com/hansjone/auriga/infra/agent/internal/storage"
 	nodev1 "github.com/hansjone/auriga/infra/gen/auriga/node/v1"
 	resourcev1 "github.com/hansjone/auriga/infra/gen/auriga/resource/v1"
 	workspacev1 "github.com/hansjone/auriga/infra/gen/auriga/workspace/v1"
 	"google.golang.org/protobuf/proto"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
 
 type poolSignedSource struct {
-	f     *unifiedFixture
-	views map[string]*nodev1.SharedDshResourceView
-	bad   bool
+	f         *unifiedFixture
+	views     map[string]*nodev1.SharedDshResourceView
+	bad       bool
+	refs      map[string]*resourcev1.UnifiedResourceRef
+	downloads atomic.Int32
 }
 
 func (s *poolSignedSource) Snapshot(_ context.Context, b *nodev1.SharedDshBinding) (*workspacev1.GetSharedDshResourceSnapshotResponse, error) {
-	return &workspacev1.GetSharedDshResourceSnapshotResponse{View: s.views[b.PlacementId], Resources: []*resourcev1.UnifiedResourceRef{s.f.ref}, Revocations: s.f.list}, nil
-}
-func (s *poolSignedSource) Artifact(_ context.Context, b *nodev1.SharedDshBinding, lease, artifact string, _ int64) ([]byte, time.Time, error) {
-	view := s.views[b.PlacementId]
-	if view == nil || view.Resources[0].LeaseId != lease {
-		return nil, time.Time{}, fmt.Errorf("lease mismatch")
+	ref := proto.Clone(s.f.ref).(*resourcev1.UnifiedResourceRef)
+	if selected := s.refs[b.PlacementId]; selected != nil {
+		ref = proto.Clone(selected).(*resourcev1.UnifiedResourceRef)
 	}
-	if s.bad {
-		return []byte("tampered"), s.f.now, nil
-	}
-	if artifact == "" {
-		return s.f.manifest, s.f.now, nil
-	}
-	return s.f.payload, s.f.now, nil
+	lease := s.views[b.PlacementId].Resources[0].LeaseId
+	ref.ManifestDownloadPath = "/internal/resource/v1/catalog/downloads/" + lease + "/manifest"
+	ref.Artifacts[0].DownloadPath = "/internal/resource/v1/catalog/downloads/" + lease + "/artifacts/" + ref.Artifacts[0].ArtifactId
+	return &workspacev1.GetSharedDshResourceSnapshotResponse{View: s.views[b.PlacementId], Resources: []*resourcev1.UnifiedResourceRef{ref}, Revocations: s.f.list}, nil
 }
 func poolSignedFixture(t *testing.T) (*PoolMaterializer, *poolSignedSource, []*nodev1.SharedDshResourceView) {
 	f := newUnifiedFixture(t)
@@ -49,7 +49,71 @@ func poolSignedFixture(t *testing.T) (*PoolMaterializer, *poolSignedSource, []*n
 		source.views[id] = view
 		views = append(views, view)
 	}
+	server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		source.downloads.Add(1)
+		if r.TLS == nil || len(r.TLS.PeerCertificates) == 0 || r.Method != "GET" || r.Header.Get("Authorization") != "" || r.URL.RawQuery != "" {
+			t.Error("shared download must use direct Node mTLS GET without bearer")
+			w.WriteHeader(403)
+			return
+		}
+		w.Header().Set("Date", f.now.Format(http.TimeFormat))
+		for _, view := range source.views {
+			base := "/internal/resource/v1/catalog/downloads/" + view.Resources[0].LeaseId
+			if r.URL.Path == base+"/manifest" {
+				if source.bad {
+					_, _ = w.Write([]byte("tampered"))
+				} else {
+					_, _ = w.Write(f.manifest)
+				}
+				return
+			}
+			if r.URL.Path == base+"/artifacts/payload" {
+				_, _ = w.Write(f.payload)
+				return
+			}
+		}
+		w.WriteHeader(403)
+	}))
+	server.TLS = &tls.Config{MinVersion: tls.VersionTLS13, ClientAuth: tls.RequireAnyClientCert}
+	server.StartTLS()
+	t.Cleanup(server.Close)
+	f.manager.Origin = server.URL
+	f.manager.Client = server.Client()
+	f.manager.Client.Transport.(*http.Transport).TLSClientConfig.Certificates = server.TLS.Certificates
 	return m, source, views
+}
+
+func TestSharedArtifactTransportUsesRealMTLSAndFullLeaseBinding(t *testing.T) {
+	m, s, views := poolSignedFixture(t)
+	if e := m.Verify(context.Background(), views[0].Binding.PhysicalInstanceId, views); e != nil {
+		t.Fatal(e)
+	}
+	if s.downloads.Load() != 2 {
+		t.Fatal("must download original manifest and payload using real mTLS locators", s.downloads.Load())
+	}
+}
+
+func TestPoolMaterializerMemberIntents(t *testing.T) {
+	for _, differentIntent := range []bool{false, true} {
+		t.Run(fmt.Sprint(differentIntent), func(t *testing.T) {
+			m, s, views := poolSignedFixture(t)
+			other := proto.Clone(s.f.ref).(*resourcev1.UnifiedResourceRef)
+			other.InstallationRevision = 7
+			s.f.ref.InstallationMode = "default"
+			other.InstallationMode = "default"
+			if differentIntent {
+				other.InstallationMode = "required"
+			}
+			s.refs = map[string]*resourcev1.UnifiedResourceRef{views[1].Binding.PlacementId: other}
+			err := m.Verify(context.Background(), views[0].Binding.PhysicalInstanceId, views)
+			if differentIntent && err == nil {
+				t.Fatal("different shared materialization intent accepted")
+			}
+			if !differentIntent && err != nil {
+				t.Fatal("independent installation revisions rejected", err)
+			}
+		})
+	}
 }
 func TestPoolMaterializerSignedMembersRenewAndDetectMutation(t *testing.T) {
 	m, s, views := poolSignedFixture(t)

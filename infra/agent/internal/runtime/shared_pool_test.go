@@ -215,6 +215,24 @@ func TestSharedPoolRejectsCrossTenantEpochAndQuota(t *testing.T) {
 func poolView(b *nodev1.SharedDshBinding) *nodev1.SharedDshResourceView {
 	return &nodev1.SharedDshResourceView{SchemaVersion: 1, Binding: b, ViewId: poolID("view-" + b.MemberId), Source: "platform", AuthorizationSetDigest: "sha256:" + strings.Repeat("a", 64), Resources: []*nodev1.SharedDshResource{{ResourceId: poolID("skill"), LeaseId: poolID("lease"), Digest: "sha256:" + strings.Repeat("b", 64), ExpiresAt: 2000}}}
 }
+
+func TestPoolViewsIndependentOrderedLeases(t *testing.T) {
+	a := poolIntent("prepare-empty", "a", "alice").Binding
+	b := poolIntent("prepare-empty", "b", "bob").Binding
+	first, second := poolView(a), poolView(b)
+	extra := proto.Clone(first.Resources[0]).(*nodev1.SharedDshResource)
+	extra.ResourceId = poolID("other-resource")
+	extra.LeaseId = poolID("other-lease")
+	first.Resources = append(first.Resources, extra)
+	second.Resources = []*nodev1.SharedDshResource{proto.Clone(extra).(*nodev1.SharedDshResource), proto.Clone(first.Resources[0]).(*nodev1.SharedDshResource)}
+	for _, r := range second.Resources {
+		r.LeaseId = poolID(r.ResourceId + "/bob")
+		r.ExpiresAt = 1900
+	}
+	if e := CheckPoolViews([]*nodev1.SharedDshBinding{a, b}, []*nodev1.SharedDshResourceView{first, second}, 1000); e != nil {
+		t.Fatal("content set and independent member leases rejected", e)
+	}
+}
 func TestSharedPoolGuardianAffectsAllAndBlocksRecovery(t *testing.T) {
 	ctx := context.Background()
 	m, s, _ := newPoolTest(t)

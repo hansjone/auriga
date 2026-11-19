@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -24,6 +25,8 @@ const (
 	labelGeneration = "auriga.generation"
 	labelManaged    = "auriga.managed"
 )
+
+var errEndpointUnready = errors.New("docker: endpoint proof unavailable")
 
 // Docker implements Driver via the Docker Engine API (also works with Podman).
 type Docker struct {
@@ -390,6 +393,10 @@ func (d *Docker) Ensure(ctx context.Context, s *Spec, r *Rendered) error {
 }
 
 func (d *Docker) Start(ctx context.Context, id string) error {
+	return d.start(ctx, id, nil)
+}
+
+func (d *Docker) start(ctx context.Context, id string, resources *UnifiedManager) error {
 	if err := storage.ValidateInstanceID(id); err != nil {
 		return err
 	}
@@ -405,8 +412,8 @@ func (d *Docker) Start(ctx context.Context, id string) error {
 	if err != nil {
 		return err
 	}
-	if record.Generation != scope.spec.Generation || !executionMatchesImage(record, scope.image, scope.candidate) {
-		return fmt.Errorf("docker actual execution generation mismatch")
+	if record.Generation != scope.spec.Generation || !sameExecution(record, scope.record) || !executionMatchesImage(record, scope.image, scope.candidate) {
+		return fmt.Errorf("docker actual execution does not match activation")
 	}
 	if err := scope.pinEngineImage(record.EngineImageID); err != nil {
 		return err
@@ -414,6 +421,13 @@ func (d *Docker) Start(ctx context.Context, id string) error {
 	before, err := d.verifyContainer(ctx, record)
 	if err != nil {
 		return err
+	}
+	liveState, _ := before["State"].(map[string]any)
+	reusedProcess := record.Phase == "started" && liveState["Running"] == true
+	if resources != nil && scope.recovering && !reusedProcess {
+		if err := resources.checkStoppedRecovery(id, record.Generation); err != nil {
+			return err
+		}
 	}
 	// A replacement edge loses its endpoints on existing instance networks.
 	// Restore the trusted bridge before starting or publishing the instance.
@@ -432,7 +446,6 @@ func (d *Docker) Start(ctx context.Context, id string) error {
 		return err
 	}
 	name := record.ContainerID
-	liveState, _ := before["State"].(map[string]any)
 	var original processLifetime
 	if liveState["Running"] == true {
 		original, err = containerProcess(before)
@@ -496,29 +509,9 @@ func (d *Docker) Start(ctx context.Context, id string) error {
 	}
 	// Durable saving may block. Do not publish a proof for a process that was
 	// replaced while that save completed, even inside the same container.
-	var published map[string]any
-	if d.EdgeContainer != "" {
-		var n *engineNetwork
-		var edgeID string
-		n, edgeID, published, err = d.inspectEdgeNetwork(ctx, id, record)
-		if err != nil {
-			return err
-		}
-		if _, connected := n.Containers[edgeID]; !connected || !n.bridgesReady() || !sameBridges(bridges, n.bridges) {
-			return fmt.Errorf("docker: trusted edge disappeared before endpoint publication")
-		}
-	} else {
-		published, err = d.verifyContainer(ctx, record)
-		if err != nil {
-			return err
-		}
-	}
-	publishedProcess, err := containerProcess(published)
-	if err != nil {
+	proof := dockerEndpoint{url: endpoint, process: process, record: record, bridges: bridges, sharedMount: hasSharedResourceMount(before), pending: scope}
+	if _, err := d.checkEndpointView(ctx, record, proof); err != nil {
 		return err
-	}
-	if publishedProcess != process {
-		return fmt.Errorf("docker: process changed before endpoint publication")
 	}
 	d.mu.Lock()
 	// Saving the execution is synchronous and may outlive the Start deadline.
@@ -527,9 +520,86 @@ func (d *Docker) Start(ctx context.Context, id string) error {
 		d.mu.Unlock()
 		return err
 	}
-	d.endpoints[id] = dockerEndpoint{url: endpoint, process: process}
+	d.endpoints[id] = proof
 	d.mu.Unlock()
+	var observed bool
+	var resourceRevision uint64
+	scope.finishStart = func(ctx context.Context, commit bool) error {
+		var checkLease func() error
+		if commit {
+			// A definite commit cannot vouch for the process or network
+			// while the disk write was in flight.
+			if err := scope.recheck(); err != nil {
+				return err
+			}
+			if observed {
+				var err error
+				checkLease, err = resources.recheckStartupView(scope, resourceRevision, reusedProcess)
+				if err != nil {
+					return err
+				}
+			}
+			actual, err := d.observationRecord(id)
+			if err != nil {
+				return err
+			}
+			if err := d.checkCommittedEndpoint(ctx, actual, proof); err != nil {
+				return err
+			}
+		}
+		d.mu.Lock()
+		defer d.mu.Unlock()
+		ep := d.endpoints[id]
+		if ep.pending != scope {
+			if commit {
+				return fmt.Errorf("docker: startup endpoint was withdrawn")
+			}
+			return nil
+		}
+		if commit {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			ep.checkLease = checkLease
+			// Docker inspection can outlast the lease. Check again at publication.
+			if err := ep.leaseError(); err != nil {
+				return err
+			}
+			ep.pending = nil
+			d.endpoints[id] = ep
+		} else {
+			delete(d.endpoints, id)
+		}
+		return nil
+	}
+	if resources != nil {
+		_, _, err := resources.observe(ctx, id, func(s *unifiedNodeState) (Endpoint, error) {
+			if err := resources.checkStartupView(scope, s, reusedProcess); err != nil {
+				return Endpoint{}, err
+			}
+			ep, err := d.probeStartupResources(ctx, scope, proof)
+			if err == nil {
+				observed, resourceRevision = true, s.Revision
+			}
+			return ep, err
+		})
+		return err
+	}
 	return nil
+}
+
+func (d *Docker) startContainerView(ctx context.Context, record *state.ExecutionRecord, bridges []trustedBridge) (map[string]any, error) {
+	if d.EdgeContainer == "" {
+		return d.verifyContainer(ctx, record)
+	}
+	n, edgeID, view, err := d.inspectEdgeNetwork(ctx, record.InstanceID, record)
+	if err != nil {
+		return nil, err
+	}
+	if _, connected := n.Containers[edgeID]; !connected || !n.bridgesReady() || !sameBridges(bridges, n.bridges) {
+		return nil, fmt.Errorf("docker: trusted edge disappeared before endpoint publication")
+	}
+	return view, nil
 }
 
 // instanceEndpoint picks how the agent reaches the instance. Docker does not
@@ -632,31 +702,35 @@ func (d *Docker) Inspect(ctx context.Context, id string) (Status, error) {
 	if err := storage.ValidateInstanceID(id); err != nil {
 		return Status{}, err
 	}
+	proof := d.endpointProof(id)
 	if err := ctx.Err(); err != nil {
-		d.revoke(id)
+		d.withdrawInspected(ctx, id, proof)
 		return Status{InstanceID: id}, err
 	}
 	record, err := d.observationRecord(id)
 	if err != nil {
+		d.withdrawInspected(ctx, id, proof)
 		return Status{InstanceID: id}, err
 	}
 	insp, err := d.verifyContainer(ctx, record)
 	if err != nil {
-		d.revoke(id)
+		d.withdrawInspected(ctx, id, proof)
 		return Status{InstanceID: id}, err
 	}
 	if insp == nil {
 		return Status{InstanceID: id}, nil
 	}
-	st := Status{InstanceID: id}
+	st := Status{InstanceID: id, ContainerID: record.ContainerID}
 	if state, ok := insp["State"].(map[string]any); ok {
 		st.Running, _ = state["Running"].(bool)
-		_, endpointErr := d.endpoint(ctx, id)
+		_, endpointErr := d.endpointForProof(ctx, id, proof)
 		if err := ctx.Err(); err != nil {
-			d.revoke(id)
 			return Status{InstanceID: id}, err
 		}
 		st.Ready = st.Running && endpointErr == nil
+		if st.Ready && ctx.Value(readOnlyInspectionKey{}) != nil {
+			st.RecheckReady = func() bool { return d.inspectedEndpointReady(id, proof) }
+		}
 		if !st.Running {
 			if errMsg, _ := state["Error"].(string); errMsg != "" {
 				st.Error = errMsg
@@ -671,7 +745,7 @@ func (d *Docker) Inspect(ctx context.Context, id string) (Status, error) {
 		}
 	}
 	if err := ctx.Err(); err != nil {
-		d.revoke(id)
+		d.withdrawInspected(ctx, id, proof)
 		return Status{InstanceID: id}, err
 	}
 	return st, nil
@@ -681,8 +755,10 @@ func (d *Docker) Stats(ctx context.Context, id string) (Usage, error) {
 	if err := storage.ValidateInstanceID(id); err != nil {
 		return Usage{}, err
 	}
+	proof := d.endpointProof(id)
 	record, err := d.observationRecord(id)
 	if err != nil {
+		d.withdrawObserved(id, proof)
 		return Usage{}, err
 	}
 	raw, err := d.Client.ContainerStats(ctx, record.ContainerID)
@@ -708,52 +784,109 @@ func (d *Docker) Endpoint(id string) (Endpoint, error) {
 }
 
 func (d *Docker) endpoint(ctx context.Context, id string) (Endpoint, error) {
+	return d.endpointForProof(ctx, id, d.endpointProof(id))
+}
+
+func (d *Docker) endpointForProof(ctx context.Context, id string, ep dockerEndpoint) (out Endpoint, err error) {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
+	defer func() {
+		if err != nil {
+			d.withdrawInspected(ctx, id, ep)
+		}
+	}()
 	if err := ctx.Err(); err != nil {
-		d.revoke(id)
 		return Endpoint{}, err
 	}
-	if _, err := d.observationRecord(id); err != nil {
-		return Endpoint{}, err
-	}
-	record, err := d.actualRecord(id)
+	actual, err := d.observationRecord(id)
 	if err != nil {
 		return Endpoint{}, err
 	}
-	insp, err := d.verifyContainer(ctx, record)
-	if err != nil {
-		d.revoke(id)
-		return Endpoint{}, err
+	if ep.url == "" || ep.pending != nil {
+		if _, err := d.verifyContainer(ctx, actual); err != nil {
+			return Endpoint{}, err
+		}
+		return Endpoint{}, fmt.Errorf("%w for %s", errEndpointUnready, id)
 	}
-	live, _ := insp["State"].(map[string]any)
-	if live["Running"] != true {
-		d.revoke(id)
-		return Endpoint{}, fmt.Errorf("docker: actual container is not running")
-	}
-	if _, err := d.observationRecord(id); err != nil {
-		return Endpoint{}, err
-	}
-	if err := ctx.Err(); err != nil {
-		d.revoke(id)
+	if err := d.checkCommittedEndpoint(ctx, actual, ep); err != nil {
 		return Endpoint{}, err
 	}
 	d.mu.Lock()
-	ep := d.endpoints[id]
+	current := d.endpoints[id]
+	unchanged := current.record == ep.record && current.pending == nil
+	var leaseErr error
+	if unchanged {
+		leaseErr = current.leaseError()
+	}
 	d.mu.Unlock()
-	if err := ctx.Err(); err != nil {
-		d.revoke(id)
-		return Endpoint{}, err
+	if !unchanged {
+		return Endpoint{}, fmt.Errorf("%w: proof was withdrawn", errEndpointUnready)
 	}
-	if ep.url == "" {
-		return Endpoint{}, fmt.Errorf("docker: no endpoint for %s", id)
-	}
-	process, err := containerProcess(insp)
-	if err != nil || process != ep.process {
-		d.revoke(id)
-		return Endpoint{}, fmt.Errorf("docker: endpoint process lifetime changed")
+	if leaseErr != nil {
+		return Endpoint{}, fmt.Errorf("%w: %w", errEndpointUnready, leaseErr)
 	}
 	return Endpoint{URL: ep.url}, nil
+}
+
+func (d *Docker) withdrawInspected(ctx context.Context, id string, proof dockerEndpoint) {
+	if ctx.Value(readOnlyInspectionKey{}) == nil {
+		d.withdrawObserved(id, proof)
+	}
+}
+
+func (d *Docker) inspectedEndpointReady(id string, proof dockerEndpoint) bool {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	current := d.endpoints[id]
+	if current.url != proof.url || current.pending != nil || current.process != proof.process ||
+		current.sharedMount != proof.sharedMount || (current.checkLease == nil) != (proof.checkLease == nil) {
+		return false
+	}
+	// Recovery can renew the lease for the same verified process and network.
+	if current.record != proof.record && (!sameExecution(current.record, proof.record) || !sameBridges(current.bridges, proof.bridges)) {
+		return false
+	}
+	return current.leaseError() == nil
+}
+
+func (d *Docker) checkCommittedEndpoint(ctx context.Context, actual *state.ExecutionRecord, proof dockerEndpoint) error {
+	if _, err := d.checkEndpointView(ctx, actual, proof); err != nil {
+		return err
+	}
+	current, err := d.observationRecord(actual.InstanceID)
+	if err != nil {
+		return err
+	}
+	if current.Phase != "started" || !sameExecution(current, proof.record) {
+		return fmt.Errorf("docker: endpoint execution changed")
+	}
+	return ctx.Err()
+}
+
+func (d *Docker) checkEndpointView(ctx context.Context, actual *state.ExecutionRecord, proof dockerEndpoint) (map[string]any, error) {
+	if actual.Phase != "started" || !sameExecution(actual, proof.record) {
+		return nil, fmt.Errorf("docker: endpoint execution changed")
+	}
+	insp, err := d.startContainerView(ctx, actual, proof.bridges)
+	if err != nil {
+		return nil, err
+	}
+	if proof.sharedMount && !hasSharedResourceMount(insp) {
+		return nil, fmt.Errorf("docker: endpoint lost its trusted read-only resource mount")
+	}
+	process, err := containerProcess(insp)
+	if err != nil || process != proof.process {
+		return nil, fmt.Errorf("docker: endpoint process changed")
+	}
+	port, err := instancePort(insp)
+	if err != nil {
+		return nil, err
+	}
+	url, err := instanceEndpoint(insp, networkName(actual.InstanceID), port)
+	if err != nil || url != proof.url {
+		return nil, fmt.Errorf("docker: endpoint address changed")
+	}
+	return insp, ctx.Err()
 }
 
 func (d *Docker) List(ctx context.Context) ([]Status, error) {

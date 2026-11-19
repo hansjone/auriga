@@ -41,7 +41,11 @@ func TestSharedWorkDoesNotBlockOrdinaryApplyDeleteCommand(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	defer store.Close()
+	defer func() {
+		if err := store.Close(); err != nil {
+			t.Error(err)
+		}
+	}()
 	rec := reconciler.New(store, runtime.NewFake(), slog.New(slog.NewTextHandler(io.Discard, nil)), 1)
 	defer rec.Close()
 	absent := make(chan struct{}, 1)
@@ -95,7 +99,10 @@ func TestSharedWorkDoesNotBlockOrdinaryApplyDeleteCommand(t *testing.T) {
 	stream.frames <- &nodev1.SessionResponse{Body: &nodev1.SessionResponse_Command{Command: &nodev1.Command{CommandId: "00000000-0000-4000-8000-000000000099", InstanceId: "ordinary"}}}
 	close(stream.frames)
 	select {
-	case <-done:
+	case err := <-done:
+		if err == nil || err.Error() != "session closed by server" {
+			t.Fatalf("unexpected closed stream: %v", err)
+		}
 	case <-time.After(time.Second):
 		t.Fatal("ordinary control frames blocked by quota")
 	}
