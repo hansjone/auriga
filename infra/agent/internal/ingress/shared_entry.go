@@ -5,6 +5,7 @@ import (
 	"crypto/ed25519"
 	"errors"
 	"net/http"
+	"net/url"
 	"strings"
 )
 
@@ -41,6 +42,9 @@ func (s *Server) sharedRequest(r *http.Request, id, path string) (*http.Request,
 	if b["physicalInstanceId"] != id || (b["mode"] != "shared" && b["mode"] != "dedicated") || c["method"] != r.Method || c["canonicalPath"] != path {
 		return nil, nil, errSharedInvalid
 	}
+	if b["mode"] == "shared" && !sharedBrowserRequest(r, path) {
+		return nil, nil, errSharedInvalid
+	}
 	ctx, cancel := context.WithCancel(r.Context())
 	stop, err := e.Authority.Watch(ctx, b, sharedString(c["platformSessionId"]), cancel)
 	if err != nil || stop == nil {
@@ -59,5 +63,37 @@ func (s *Server) sharedRequest(r *http.Request, id, path string) (*http.Request,
 		cleanup()
 		return nil, nil, err
 	}
-	return r.WithContext(ctx), cleanup, nil
+	checked := r.WithContext(ctx)
+	if b["mode"] == "shared" {
+		checked.Header = r.Header.Clone()
+		// Browser/platform cookies and owner credentials never authorize the
+		// shared Host. Its finite browser bridge admits only the current E.
+		for key := range checked.Header {
+			if strings.EqualFold(key, "Cookie") || strings.EqualFold(key, "Authorization") {
+				delete(checked.Header, key)
+			}
+		}
+	}
+	return checked, cleanup, nil
+}
+
+func sharedBrowserRequest(r *http.Request, canonical string) bool {
+	decoded, err := url.PathUnescape(canonical)
+	if err != nil {
+		return false
+	}
+	path := strings.ToLower(decoded)
+	// Native Connection upgrade admission is owner based and has no public
+	// override. The approved shared browser uses HTTP RPC/NDJSON instead.
+	if strings.HasPrefix(path, "/api") || strings.HasPrefix(path, "/connect") || r.Header.Get("Upgrade") != "" {
+		return false
+	}
+	for _, line := range r.Header.Values("Connection") {
+		for _, token := range strings.Split(line, ",") {
+			if strings.EqualFold(strings.TrimSpace(token), "upgrade") {
+				return false
+			}
+		}
+	}
+	return true
 }

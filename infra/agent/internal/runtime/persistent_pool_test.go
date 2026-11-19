@@ -104,6 +104,12 @@ func TestPersistentPoolTwoMembersAndRestartReuseOneSignedProcess(t *testing.T) {
 	if err := os.WriteFile(cache, []byte(`{"synthetic":"anti-rollback"}`), 0600); err != nil {
 		t.Fatal(err)
 	}
+	for _, dir := range []string{"message-preferences", "message-inboxes"} {
+		file := filepath.Join(m.Pools.Layout.Root, first.Binding.PhysicalInstanceId, "members", dir, "retained")
+		if err := os.WriteFile(file, []byte("synthetic durable message state"), 0600); err != nil {
+			t.Fatal("Host message directory not provisioned", dir, err)
+		}
+	}
 	record, err := m.Driver.Activation.Store.GetExecution(first.Binding.PhysicalInstanceId)
 	if err != nil {
 		t.Fatal(err)
@@ -136,6 +142,12 @@ func TestPersistentPoolTwoMembersAndRestartReuseOneSignedProcess(t *testing.T) {
 	reconnected.Watch(ctx)
 	if raw, err := os.ReadFile(cache); err != nil || string(raw) != `{"synthetic":"anti-rollback"}` {
 		t.Fatal("message trust ledger lost across restart", err)
+	}
+	for _, dir := range []string{"message-preferences", "message-inboxes"} {
+		file := filepath.Join(m.Pools.Layout.Root, first.Binding.PhysicalInstanceId, "members", dir, "retained")
+		if raw, err := os.ReadFile(file); err != nil || string(raw) != "synthetic durable message state" {
+			t.Fatal("message state discarded across restart", dir, err)
+		}
 	}
 	after, err := m.Driver.Activation.Store.GetExecution(first.Binding.PhysicalInstanceId)
 	if err != nil || after.ContainerID != before {

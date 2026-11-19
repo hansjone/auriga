@@ -73,3 +73,28 @@ func TestPoolProductionPortsAndDedicatedModeAreImmutable(t *testing.T) {
 		t.Fatal("Host config not wired", e)
 	}
 }
+
+func TestProductionBrowserProfileUsesFixedModuleAndMode(t *testing.T) {
+	profile := strings.Replace(runnablePoolProfile, "- id: auriga-dsh\n  name: auriga-dsh/shared\n- id: ports\n  name: file:///run/auriga/shared-ports.mjs", "- id: ports\n  name: auriga-dsh/shared-ports\n- id: auriga-dsh\n  name: auriga-dsh/shared", 1)
+	browser := "- id: shared-browser\n  name: auriga-dsh/shared-browser\n  config: {distIndex: /opt/dsh/public/index.html}\n"
+	profile += browser
+	if err := ValidateProductionPoolProfile([]byte(profile)); err != nil {
+		t.Fatal("fixed native browser export rejected", err)
+	}
+	meta := t.TempDir()
+	if _, err := RenderPoolMode([]byte(profile), nil, "pool", "tenant", "shared", meta, 7860); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(filepath.Join(meta, "pool-profile.yml"))
+	if err != nil || !strings.Contains(string(raw), "auriga-dsh/shared-browser") || !strings.Contains(string(raw), "/opt/dsh/public/index.html") {
+		t.Fatal("native browser not materialized", err)
+	}
+	if _, err := RenderPoolMode([]byte(profile), nil, "pool", "tenant", "dedicated", t.TempDir(), 7860); err == nil {
+		t.Fatal("dedicated loaded shared browser")
+	}
+	for _, invalid := range []string{strings.Replace(profile, "/opt/dsh/public/index.html", "../index.html", 1), strings.Replace(profile, "/opt/dsh/public/index.html", "https://example.com/index.html", 1), profile + browser, strings.Replace(profile, "distIndex: /opt/dsh/public/index.html", "distIndex: /opt/dsh/public/index.html, owner: true", 1)} {
+		if err := ValidateProductionPoolProfile([]byte(invalid)); err == nil {
+			t.Fatal("unapproved browser profile accepted")
+		}
+	}
+}

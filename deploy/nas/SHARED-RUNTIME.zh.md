@@ -41,11 +41,20 @@ NAS 原 ext4 不要求 project quota，也不重格式化。`ext4-image` 在 Nod
 
 Agent overlay 明确要求 root、host user/PID namespace、loop 设备、CHOWN/DAC_OVERRIDE/FOWNER/SYS_ADMIN；Host 自身仍是私有 PID namespace、非 root、只读根、无 capabilities。host PID namespace 仅用于将 UDS SO_PEERCRED 的 PID/启动 tick 沿 `/proc` 父链绑定到已验签的真实容器进程；每次调用和结果前复核，不能用 body 的 boot/task/member 绕过。Docker endpoint 必须是同机 daemon。
 
-20 成员各 5GiB/10万 inode，Host home 和消息账本各另占一份同等硬配额；镜像最低 22×5GiB，样例 128GiB 只是起点。30天归档同样占镜像实际容量，须另加保留数据、文件系统元数据及余量，不能据配额总和声称容量充足。空间或项目号耗尽保持 blocked，不能清除活跃账本或挪动在途成员。
+20 成员各 5GiB/10万 inode，Host home、message-trust、message-preferences、message-inboxes 各另占一份同等硬配额；镜像最低 24×5GiB，样例 128GiB 只是起点。30天归档同样占镜像实际容量，须另加保留数据、文件系统元数据及余量，不能据配额总和声称容量充足。空间或项目号耗尽保持 blocked，不能清除活跃账本或挪动在途成员。
 
 归档位于镜像内 `members/node-archives/<operation>`，父目录 Node UID 0700，Host UID 不可读取；control journal 在镜像外、未挂入 Host。重试以持久的原 pool/member/epoch/operation 恢复 rename、归档配额、新空工作区，不跨设备移动、不覆盖原数据、不把已删除操作重跑。保留期删除先落墓碑，再删目录，确认内核已无使用/open inode 并清配额读回后才回收项目号。
 
 Host 的固定 `/var/lib/auriga/pools/<pool>/host/message-trust/ledger.json` 映射到同一持久镜像内的 `members/message-trust/ledger.json`，独立硬配额并归属池 UID。重连、重启不重建或删账本，不借此绕过签名链防退。
+Host 新增的同根 `host/message-preferences`、`host/message-inboxes` 同样映射到 members 下对应 Node 预备目录，Node 先安装并读回各硬配额、严格交给池 UID 才启动 Host；不把当前目录缺失当成清空旧邮箱的理由。
+
+## 正常 shared 原生浏览器装配
+
+须整合原生 browser 作者已冻结的 `auriga-dsh/shared-browser` export 及 Host 的 `admitBrowser/refresh/authorize/create/messagingSessions/messagingSettings` 实现后，才可安装该 profile。Node 不复制另一作者未提交源码，也不以现有 JSON carrier 当成聊天页面。在完整 shared Cordis profile 的 `auriga-dsh/shared` 行之后显式加入固定 `auriga-dsh/shared-browser` 行；config 只允许 `distIndex`，其值必须为已批准 runtime 中与原 frontend-static 相同的真实绝对 `index.html` 路径，不是 URL、Node 文件或可变 JS 表达式。该行进入原不可变配置摘要，不在运行中覆盖配置。
+
+shared 正常 Open URL 是实例根 `/`（或 `/index.html`）。浏览器使用同源 POST `/auriga/shared/browser/rpc` 与 `/auriga/shared/browser/stream` 的有限原生操作和 NDJSON，消息设置 POST `/auriga/shared/messages` 同样经过当前身份。每次请求由 Edge 签当前完整 E 的精确方法/路径，Node 保留 W 当前归属、单次 JTI 与撤销 watcher，并剥除到 shared Host 的 Cookie/Authorization。
+
+Node 对 shared 明确拒绝旧 `/api`、`/connect` 命名空间（包括转义别名）和所有 Upgrade；不能把原 `/api/remote.mux` owner WebSocket 加个 E 头就放行。Edge 也须同样拒绝，Host 监听地址只允许 Node 私有转发访问。dedicated 不加载 shared-browser，此批不将其既有 E/W 门锁降为 owner 票。仅 HTML、health 或 profile JSON 返回200都不足以证明可聊天，主控须用正常入口完成真实页面/会话/消息设置验收。
 
 ## 可回读验收
 

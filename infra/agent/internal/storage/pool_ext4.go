@@ -45,7 +45,7 @@ func (s *Ext4Images) ArchivePath(ctx context.Context, pool, operation string) (s
 func (s *Ext4Images) MountPool(ctx context.Context, pool string) (PoolMount, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if !filepath.IsAbs(s.Root) || s.ImageBytes < 22*MemberBytes || s.ImageBytes%4096 != 0 || s.IDs == nil {
+	if !filepath.IsAbs(s.Root) || s.ImageBytes < 24*MemberBytes || s.ImageBytes%4096 != 0 || s.IDs == nil {
 		return PoolMount{}, fmt.Errorf("invalid ext4 pool storage provisioning")
 	}
 	layout := &PoolLayout{Root: s.Root}

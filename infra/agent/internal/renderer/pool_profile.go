@@ -3,6 +3,7 @@ package renderer
 import (
 	"fmt"
 	"io"
+	"path"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -20,7 +21,7 @@ func ValidateProductionPoolProfile(raw []byte) error {
 	if err := yaml.Unmarshal(raw, &rows); err != nil {
 		return err
 	}
-	ports, host := -1, -1
+	ports, host, browser := -1, -1, -1
 	for i, row := range rows {
 		if row.Name == "file:///run/auriga/shared-ports.mjs" {
 			return fmt.Errorf("production requires signed shared-ports export")
@@ -37,9 +38,18 @@ func ValidateProductionPoolProfile(raw []byte) error {
 			}
 			host = i
 		}
+		if row.Name == "auriga-dsh/shared-browser" {
+			if browser >= 0 {
+				return fmt.Errorf("duplicate shared browser")
+			}
+			browser = i
+		}
 	}
 	if ports < 0 || host < 0 || ports >= host {
 		return fmt.Errorf("shared-ports must load before shared Host")
+	}
+	if browser >= 0 && browser <= host {
+		return fmt.Errorf("shared browser must load after shared Host")
 	}
 	return nil
 }
@@ -67,7 +77,7 @@ func ValidatePoolProfile(raw []byte) error {
 	if e := d.Decode(&extra); e != io.EOF {
 		return fmt.Errorf("multiple pool profile documents")
 	}
-	allowed := map[string]bool{"auriga-dsh": true, "auriga-dsh/shared": true, "auriga-dsh/shared-ports": true, "file:///run/auriga/shared-ports.mjs": true}
+	allowed := map[string]bool{"auriga-dsh": true, "auriga-dsh/shared": true, "auriga-dsh/shared-ports": true, "auriga-dsh/shared-browser": true, "file:///run/auriga/shared-ports.mjs": true}
 	for _, name := range strings.Fields("agent agent-loop agent-instructions agent-preset agent-preset-registry agent-default-model tools tool-fs tool-fs-search tool-str-replace-editor tool-ask-user tool-present tool-todo tool-skill session session-reference session-format session-checkpoint-policy skill skill-filesystem workspace authorization llm web-frontend client-connection client-modules api-gateway api-remote-access api-session-controller host-webserver web-runtime system-prompt fs-local paths typert-registry") {
 		allowed["@deepseek-ai/dsh-"+name] = true
 	}
@@ -80,6 +90,12 @@ func ValidatePoolProfile(raw []byte) error {
 		ids[r.ID] = true
 		if containsLoaderExpression(r.Config) {
 			return fmt.Errorf("pool profile executable config rejected")
+		}
+		if r.Name == "auriga-dsh/shared-browser" {
+			index, ok := r.Config["distIndex"].(string)
+			if !ok || len(r.Config) != 1 || !path.IsAbs(index) || path.Clean(index) != index || path.Base(index) != "index.html" || strings.ContainsAny(index, "\x00\r\n?#\\") {
+				return fmt.Errorf("shared browser requires its approved absolute frontend index")
+			}
 		}
 		if r.Name == "@deepseek-ai/dsh-skill-filesystem" {
 			dirs, ok := r.Config["customSkillDirs"].([]any)
