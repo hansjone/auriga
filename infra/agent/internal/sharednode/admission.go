@@ -37,7 +37,7 @@ func (r *Relay) checkAdmission(t execution, id string) error {
 		r.mu.Lock()
 		parent, ok := r.tasks[t.parent]
 		r.mu.Unlock()
-		if !ok || !parent.ordinary || parent.closing || parent.peer != t.peer || !proto.Equal(parent.binding, t.binding) {
+		if !ok || parent.serial != t.parentSerial || !parent.ordinary || parent.closing || parent.peer != t.peer || !proto.Equal(parent.binding, t.binding) {
 			return errors.New("shared.revoked")
 		}
 		t, id = parent, t.parent
@@ -87,11 +87,17 @@ func (r *Relay) beginTask(ctx context.Context, raw []byte) (any, error) {
 	}
 	ordinary := in.Audience == "auriga.shared.enterprise" && sameStrings(in.Scopes, []string{"task.execute"})
 	parentID := ""
+	var parentSerial uint64
 	if ordinary {
 		if parentToken != "" {
 			return nil, errors.New("common.forbidden")
 		}
 	} else {
+		r.mu.Lock()
+		if cap := r.tokens[parentToken]; cap != nil {
+			parentSerial = r.tasks[cap.TaskId].serial
+		}
+		r.mu.Unlock()
 		parent, err := r.capability(ctx, parentToken)
 		if err != nil || parent.Audience != "auriga.shared.enterprise" || !sameStrings(parent.Scopes, []string{"task.execute"}) || !proto.Equal(parent.Binding, in.Binding) {
 			return nil, errors.New("shared.revoked")
@@ -99,8 +105,21 @@ func (r *Relay) beginTask(ctx context.Context, raw []byte) (any, error) {
 		parentID = parent.TaskId
 	}
 	r.mu.Lock()
+	if _, ended := r.ended[in.TaskId]; ended {
+		r.mu.Unlock()
+		return nil, errors.New("common.conflict")
+	}
+	// Child registration and parent Finish's closing transition share this
+	// boundary. A delayed authorization is not evidence the parent is live.
+	if !ordinary {
+		parent, exists := r.tasks[parentID]
+		if !exists || parent.serial != parentSerial || parent.closing || !parent.ordinary || !parent.reserved || parent.peer != executionPeer(ctx) || !proto.Equal(parent.binding, in.Binding) {
+			r.mu.Unlock()
+			return nil, errors.New("shared.revoked")
+		}
+	}
 	if old, exists := r.tasks[in.TaskId]; exists {
-		if old.closing || old.parent != parentID || !proto.Equal(old.binding, in.Binding) || old.audience != in.Audience || !sameStrings(old.scopes, in.Scopes) || old.peer != executionPeer(ctx) {
+		if old.closing || old.parent != parentID || old.parentSerial != parentSerial || !proto.Equal(old.binding, in.Binding) || old.audience != in.Audience || !sameStrings(old.scopes, in.Scopes) || old.peer != executionPeer(ctx) {
 			r.mu.Unlock()
 			return nil, errors.New("common.conflict")
 		}
@@ -124,7 +143,7 @@ func (r *Relay) beginTask(ctx context.Context, raw []byte) (any, error) {
 	}
 	r.serial++
 	t := execution{binding: proto.Clone(in.Binding).(*nodev1.SharedDshSessionBinding), scopes: append([]string{}, in.Scopes...), audience: in.Audience,
-		peer: executionPeer(ctx), serial: r.serial, ordinary: ordinary, parent: parentID, started: make(chan struct{})}
+		peer: executionPeer(ctx), serial: r.serial, ordinary: ordinary, parent: parentID, parentSerial: parentSerial, started: make(chan struct{})}
 	r.tasks[in.TaskId] = t
 	r.mu.Unlock()
 	out := new(iamv1.BeginSharedTaskResponse)
@@ -246,20 +265,21 @@ func (r *Relay) finishExecution(id string, serial uint64) error {
 			err = childErr
 		}
 	}
-	if err == nil && t.begun {
-		err = r.Client.call(ctx, true, "FinishSharedTask", &iamv1.FinishSharedTaskRequest{Binding: t.binding, TaskId: id}, new(iamv1.FinishSharedTaskResponse))
-	}
-	if err == nil && t.uncertainBegin {
-		// The current IAM Finish returns an empty success for an absent task,
-		// rather than persisting an absent-task tombstone. An unknown Begin may
-		// still commit there later. A child also keeps its parent's slot blocked.
-		err = errors.New("common.unavailable")
+	if err == nil && (t.begun || t.reserved) {
+		out := new(iamv1.FinishSharedTaskResponse)
+		err = r.Client.call(ctx, true, "FinishSharedTask", &iamv1.FinishSharedTaskRequest{Binding: t.binding, TaskId: id}, out)
+		if err == nil && (!out.Fenced || out.TaskId != id || !proto.Equal(out.Binding, t.binding) || ctx.Err() != nil) {
+			err = errors.New("common.unavailable")
+		}
 	}
 	if err == nil && t.reserved {
 		err = r.Admission.Complete(t.binding, id)
 	}
 	r.mu.Lock()
 	if err == nil {
+		if t.begun || t.reserved {
+			r.rememberFinished(id, t)
+		}
 		delete(r.tasks, id)
 	} else {
 		t.finishErr = err

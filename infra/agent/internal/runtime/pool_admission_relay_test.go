@@ -28,6 +28,7 @@ import (
 	"google.golang.org/grpc/status"
 	"google.golang.org/grpc/test/bufconn"
 	"google.golang.org/protobuf/encoding/protojson"
+	"google.golang.org/protobuf/proto"
 )
 
 type admissionAuthority struct {
@@ -38,6 +39,8 @@ type admissionAuthority struct {
 	stopped                                      sync.Map
 	beginCount                                   atomic.Int32
 	failBegin, failFinish, invalid, unknownBegin atomic.Bool
+	emptyFinish                                  atomic.Bool
+	running                                      sync.Map
 }
 
 func (a *admissionAuthority) check(ctx context.Context) {
@@ -69,6 +72,7 @@ func (a *admissionAuthority) BeginSharedTask(ctx context.Context, in *iamv1.Begi
 	}
 	cap := &nodev1.SharedDshCapability{SchemaVersion: 1, Binding: in.Binding, TaskId: in.TaskId, Audience: in.Audience, Scopes: in.Scopes,
 		CredentialVersion: 1, IssuedAt: time.Now().Unix(), ExpiresAt: time.Now().Unix() + 60, Jti: in.TaskId}
+	a.running.Store(in.TaskId, proto.Clone(in.Binding))
 	return &iamv1.BeginSharedTaskResponse{Token: "synthetic-" + in.TaskId, Capability: cap}, nil
 }
 func (a *admissionAuthority) FinishSharedTask(ctx context.Context, in *iamv1.FinishSharedTaskRequest) (*iamv1.FinishSharedTaskResponse, error) {
@@ -76,8 +80,12 @@ func (a *admissionAuthority) FinishSharedTask(ctx context.Context, in *iamv1.Fin
 	if a.failFinish.Load() {
 		return nil, status.Error(codes.Unavailable, "fixture-private-finish")
 	}
+	if a.emptyFinish.Load() {
+		return &iamv1.FinishSharedTaskResponse{}, nil
+	}
 	a.stopped.Store(in.TaskId, true)
-	return &iamv1.FinishSharedTaskResponse{}, nil
+	a.running.Delete(in.TaskId)
+	return &iamv1.FinishSharedTaskResponse{Fenced: true, Binding: in.Binding, TaskId: in.TaskId}, nil
 }
 func (a *admissionAuthority) AuthorizeSharedCapability(ctx context.Context, in *iamv1.AuthorizeSharedCapabilityRequest) (*iamv1.AuthorizeSharedCapabilityResponse, error) {
 	a.check(ctx)
@@ -157,6 +165,7 @@ func TestRelayProductionAdmissionUsesPersistentBudgetAndEngine(t *testing.T) {
 	client := &sharednode.Client{Settings: sharednode.Settings{TenantID: bindings[0].TenantId, ServiceTokenFile: tokenFile}, Workspace: conn, IAM: conn}
 	samples := make(chan *nodev1.SharedDshPoolMemorySample, 32)
 	controller := &agentruntime.PoolTaskAdmission{Pools: m.Pools, Driver: m.Driver, TenantID: bindings[0].TenantId, Report: func(v *nodev1.SharedDshPoolMemorySample) { samples <- v }}
+	control := startPoolTaskControl(t, m, controller, a)
 	relay := sharednode.NewRelay(client, bindings[0].PhysicalInstanceId)
 	relay.Admission = controller
 	httpServer := httptest.NewServer(relay)
@@ -170,7 +179,27 @@ func TestRelayProductionAdmissionUsesPersistentBudgetAndEngine(t *testing.T) {
 		return admissionCall(t, httpServer.URL, "beginTask", input)
 	}
 	finish := func(member, task int) int {
-		code, _ := admissionCall(t, httpServer.URL, "finishTask", map[string]any{"binding": admissionBinding(t, bindings[member]), "taskId": taskID(task)})
+		code, value := admissionCall(t, httpServer.URL, "finishTask", map[string]any{"binding": admissionBinding(t, bindings[member]), "taskId": taskID(task)})
+		if code == 200 {
+			echo, ok := value["binding"].(map[string]any)
+			if len(value) != 3 || value["fenced"] != true || value["taskId"] != taskID(task) || !ok || echo["mode"] != "shared" {
+				t.Fatal("HTTP Finish did not emit the exact fenced contract", value)
+			}
+			for _, key := range []string{"epoch", "revision", "authGeneration"} {
+				if _, ok := echo[key].(float64); !ok {
+					t.Fatal("HTTP Finish binding did not use public numeric integers", key)
+				}
+			}
+			echo["mode"] = "DSH_INSTANCE_MODE_SHARED"
+			raw, err := json.Marshal(echo)
+			if err != nil {
+				t.Fatal(err)
+			}
+			decoded := new(nodev1.SharedDshSessionBinding)
+			if err = protojson.Unmarshal(raw, decoded); err != nil || !proto.Equal(decoded, bindings[member]) {
+				t.Fatal("HTTP Finish binding echo changed", err)
+			}
+		}
 		return code
 	}
 	ordinary := []string{"task.execute"}
@@ -239,8 +268,11 @@ func TestRelayProductionAdmissionUsesPersistentBudgetAndEngine(t *testing.T) {
 	if code, _ := begin(0, 22, "", ordinary); code != 200 {
 		t.Fatal("confirmed Finish still leaked its slot")
 	}
-	if finish(0, 21) == 200 {
-		t.Fatal("late Finish unexpectedly matched the replacement handle")
+	if finish(0, 21) != 200 {
+		t.Fatal("confirmed old Finish ACK was not replayable")
+	}
+	if code, _ := begin(0, 23, "", ordinary); code == 200 {
+		t.Fatal("old Finish ACK released replacement root")
 	}
 	// New Node adapter/Relay cannot adopt persisted tasks, even using the same UUID.
 	restarted := sharednode.NewRelay(client, bindings[0].PhysicalInstanceId)
@@ -276,6 +308,7 @@ func TestRelayProductionAdmissionUsesPersistentBudgetAndEngine(t *testing.T) {
 		t.Fatal("revoked platform identity became an admissible task")
 	}
 	a.invalid.Store(false)
+	a.emptyFinish.Store(true)
 	a.unknownBegin.Store(true)
 	if code, _ := begin(0, 30, finalRoot["token"].(string), []string{"outbound"}); code == 200 {
 		t.Fatal("unknown child Begin returned success")
@@ -284,11 +317,14 @@ func TestRelayProductionAdmissionUsesPersistentBudgetAndEngine(t *testing.T) {
 	if finish(0, 25) == 200 {
 		t.Fatal("unknown child outcome released its parent's slot")
 	}
+	a.emptyFinish.Store(false)
+	relay.RetryFinishes()
 	for i := 1; i < 4; i++ {
 		if finish(i, i) != 200 {
 			t.Fatal("cleanup Finish failed")
 		}
 	}
+	a.emptyFinish.Store(true)
 	a.unknownBegin.Store(true)
 	if code, _ := begin(4, 27, "", ordinary); code == 200 {
 		t.Fatal("unknown remote Begin returned success")
@@ -297,5 +333,63 @@ func TestRelayProductionAdmissionUsesPersistentBudgetAndEngine(t *testing.T) {
 	relay.RetryFinishes()
 	if code, _ := begin(4, 28, "", ordinary); code == 200 {
 		t.Fatal("empty IAM Finish response proved an absent-task tombstone")
+	}
+	a.emptyFinish.Store(false)
+	relay.RetryFinishes()
+	if code, value := begin(4, 29, "", ordinary); code != 200 {
+		t.Fatal("confirmed IAM tombstone/W Release did not restore member", value)
+	}
+	if finish(4, 29) != 200 {
+		t.Fatal("typed final Finish failed")
+	}
+	if control.admits.Load() == 0 || control.releases.Load() == 0 || control.samples.Load() == 0 {
+		t.Fatal("production caller omitted actual NodeControl field12/Admit/Release")
+	}
+	for mode := int32(1); mode <= 5; mode++ {
+		t.Run(fmt.Sprintf("unconfirmed-W-Admit-%d", mode), func(t *testing.T) {
+			control.admitMode.Store(mode)
+			control.releaseMode.Store(1)
+			before := a.beginCount.Load()
+			id := 100 + int(mode)
+			if code, _ := begin(0, id, "", ordinary); code == 200 {
+				t.Fatal("unconfirmed W Admit returned handle")
+			}
+			if a.beginCount.Load() != before {
+				t.Fatal("IAM Begin preceded W admission confirmation")
+			}
+			if code, _ := begin(0, id+50, "", ordinary); code == 200 {
+				t.Fatal("unknown W reservation did not retain local slot")
+			}
+			if finish(0, id) == 200 {
+				t.Fatal("empty W Release produced fenced UDS echo")
+			}
+			control.admitMode.Store(0)
+			control.releaseMode.Store(0)
+			relay.RetryFinishes()
+			if finish(0, id) != 200 {
+				t.Fatal("confirmed W tombstone was not echoed")
+			}
+			if code, _ := begin(0, id, "", ordinary); code == 200 {
+				t.Fatal("ended W Admit UUID resurrected")
+			}
+		})
+		t.Run(fmt.Sprintf("unconfirmed-W-Release-%d", mode), func(t *testing.T) {
+			id := 200 + int(mode)
+			if code, value := begin(0, id, "", ordinary); code != 200 {
+				t.Fatal("next root rejected after exact W Release", value)
+			}
+			control.releaseMode.Store(mode)
+			if finish(0, id) == 200 {
+				t.Fatal("unconfirmed W Release produced UDS success")
+			}
+			if code, _ := begin(0, id+50, "", ordinary); code == 200 {
+				t.Fatal("unknown Release freed local member")
+			}
+			control.releaseMode.Store(0)
+			relay.RetryFinishes()
+			if finish(0, id) != 200 {
+				t.Fatal("confirmed Release retry did not complete")
+			}
+		})
 	}
 }

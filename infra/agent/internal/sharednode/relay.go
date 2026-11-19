@@ -30,6 +30,7 @@ type execution struct {
 	peer                               string
 	serial                             uint64
 	parent                             string
+	parentSerial                       uint64
 	ordinary, reserved, closing, begun bool
 	uncertainBegin                     bool
 	started                            chan struct{}
@@ -50,6 +51,14 @@ type Relay struct {
 	boots      map[string]string
 	Admission  TaskAdmission
 	serial     uint64
+	ended      map[string]endedExecution
+	endedOrder []string
+	endedNext  int
+}
+
+type endedExecution struct {
+	binding *nodev1.SharedDshSessionBinding
+	peer    string
 }
 
 func NewRelay(c *Client, pool string) *Relay {
@@ -164,6 +173,10 @@ func (r *Relay) task(ctx context.Context, b *nodev1.SharedDshSessionBinding, id,
 func (r *Relay) capability(ctx context.Context, token string) (*nodev1.SharedDshCapability, error) {
 	r.mu.Lock()
 	cap := r.tokens[token]
+	var serial uint64
+	if cap != nil {
+		serial = r.tasks[cap.TaskId].serial
+	}
 	r.mu.Unlock()
 	if cap == nil || cap.ExpiresAt <= time.Now().Unix() {
 		return nil, errors.New("shared.expired")
@@ -176,6 +189,18 @@ func (r *Relay) capability(ctx context.Context, token string) (*nodev1.SharedDsh
 		return nil, e
 	}
 	if err := checkAuthorization(cap, out); err != nil {
+		return nil, err
+	}
+	// A valid remote response can arrive after local Finish. It cannot revive
+	// this handle or authorize a different execution with the same task UUID.
+	r.mu.Lock()
+	current, exists := r.tasks[cap.TaskId]
+	live := exists && current.serial == serial && !current.closing && r.tokens[token] == cap
+	r.mu.Unlock()
+	if !live {
+		return nil, errors.New("shared.revoked")
+	}
+	if err := r.task(ctx, cap.Binding, cap.TaskId, cap.Audience, cap.Scopes); err != nil {
 		return nil, err
 	}
 	return cap, nil
@@ -282,11 +307,16 @@ func (r *Relay) invoke(ctx context.Context, op string, raw []byte) (any, error) 
 		r.mu.Lock()
 		t, ok := r.tasks[in.TaskId]
 		r.mu.Unlock()
-		if !ok || !proto.Equal(t.binding, in.Binding) || t.peer != executionPeer(ctx) {
+		if !ok {
+			return r.finishedReply(ctx, in.Binding, in.TaskId)
+		}
+		if !proto.Equal(t.binding, in.Binding) || t.peer != executionPeer(ctx) {
 			return nil, errors.New("shared.binding_mismatch")
 		}
-		e := r.finish(in.Binding, in.TaskId)
-		return map[string]any{}, e
+		if e := r.finish(in.Binding, in.TaskId); e != nil {
+			return nil, e
+		}
+		return r.finishedReply(ctx, in.Binding, in.TaskId)
 	case "authorizeCapability", "readCredentials":
 		var in struct{ Capability json.RawMessage }
 		if json.Unmarshal(raw, &in) != nil {
@@ -320,6 +350,9 @@ func (r *Relay) invoke(ctx context.Context, op string, raw []byte) (any, error) 
 		if e = checkAuthorization(cap, out); e != nil {
 			return nil, e
 		}
+		if e = r.task(ctx, cap.Binding, cap.TaskId, cap.Audience, cap.Scopes); e != nil {
+			return nil, e
+		}
 		return wire(out)
 	case "messageContext", "send", "receive":
 		return r.message(ctx, op, raw)
@@ -336,6 +369,35 @@ func sameStrings(a, b []string) bool {
 		}
 	}
 	return true
+}
+
+// This bounded replay cache carries acknowledgments only, never permissions or
+// slots. Durable ended authority remains in IAM/W. A restart/evicted entry is
+// unknown, not a fabricated success; only the exact original socket peer can
+// replay a confirmed response after a lost UDS reply.
+func (r *Relay) rememberFinished(id string, t execution) {
+	const maximumEnded = 16384
+	if r.ended == nil {
+		r.ended = map[string]endedExecution{}
+	}
+	if len(r.endedOrder) < maximumEnded {
+		r.endedOrder = append(r.endedOrder, id)
+	} else {
+		delete(r.ended, r.endedOrder[r.endedNext])
+		r.endedOrder[r.endedNext] = id
+		r.endedNext = (r.endedNext + 1) % maximumEnded
+	}
+	r.ended[id] = endedExecution{binding: t.binding, peer: t.peer}
+}
+
+func (r *Relay) finishedReply(ctx context.Context, b *nodev1.SharedDshSessionBinding, id string) (any, error) {
+	r.mu.Lock()
+	done, ok := r.ended[id]
+	r.mu.Unlock()
+	if !ok || !proto.Equal(done.binding, b) || done.peer != executionPeer(ctx) {
+		return nil, errors.New("shared.binding_mismatch")
+	}
+	return wire(&iamv1.FinishSharedTaskResponse{Fenced: true, Binding: b, TaskId: id})
 }
 func (r *Relay) remember(b *nodev1.SharedDshSessionBinding, id, token string, cap *nodev1.SharedDshCapability, serial uint64) error {
 	if token == "" || cap == nil || cap.TaskId != id || !proto.Equal(b, cap.Binding) {

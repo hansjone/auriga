@@ -27,6 +27,7 @@ import (
 	"github.com/hansjone/auriga/infra/agent/internal/telemetry"
 	"github.com/hansjone/auriga/infra/agent/internal/tlsutil"
 	nodev1 "github.com/hansjone/auriga/infra/gen/auriga/node/v1"
+	"google.golang.org/grpc"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
@@ -79,6 +80,9 @@ type Session struct {
 	poolMemoryCh    chan queuedPoolMemory
 	connectionEpoch uint64
 	lastPoolMemory  map[string]*nodev1.SharedDshPoolMemorySample
+	controlConn     *grpc.ClientConn
+	controlContext  context.Context
+	controlTasks    map[string]controlTask
 }
 
 type queuedStatus struct {
@@ -131,6 +135,9 @@ func New(cfg Config) *Session {
 	session.sharedWork = newSharedWorkQueue(session)
 	if cfg.SharedRuntime != nil {
 		cfg.SharedRuntime.Report = session.ReportShared
+		if cfg.SharedRuntime.TaskAdmission != nil {
+			cfg.SharedRuntime.TaskAdmission.Control = session
+		}
 	}
 	return session
 }
@@ -367,6 +374,14 @@ func (s *Session) runOnce(ctx context.Context) error {
 		return fmt.Errorf("dial control: %w", err)
 	}
 	defer func() { _ = conn.Close() }()
+	defer func() {
+		s.mu.Lock()
+		if s.controlConn == conn {
+			s.controlConn, s.controlContext = nil, nil
+			s.connected = false
+		}
+		s.mu.Unlock()
+	}()
 
 	client := nodev1.NewNodeControlServiceClient(conn)
 	stream, err := client.Session(ctx)
@@ -397,6 +412,9 @@ func (s *Session) runOnce(ctx context.Context) error {
 	s.cfg.Logger.Info("welcome received; session established")
 	s.mu.Lock()
 	s.connected = true
+	if !s.cfg.AllowInsecure {
+		s.controlConn, s.controlContext = conn, ctx
+	}
 	s.lastWelcome = welcome
 	s.welcomeAt = time.Now()
 	if iv := welcome.GetHeartbeatInterval(); iv != nil {
@@ -496,9 +514,12 @@ func (s *Session) sendLoop(ctx context.Context, stream nodev1.NodeControlService
 		case queued := <-s.poolMemoryCh:
 			sample := s.poolMemoryForSend(ctx, queued)
 			if sample == nil {
+				queued.complete(fmt.Errorf("pool memory no longer current"))
 				continue
 			}
-			if err := stream.Send(&nodev1.SessionRequest{Body: &nodev1.SessionRequest_SharedDshPoolMemorySample{SharedDshPoolMemorySample: sample}}); err != nil {
+			err := stream.Send(&nodev1.SessionRequest{Body: &nodev1.SessionRequest_SharedDshPoolMemorySample{SharedDshPoolMemorySample: sample}})
+			queued.complete(err)
+			if err != nil {
 				return err
 			}
 		}
