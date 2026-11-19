@@ -14,7 +14,9 @@ Node 校验签名、ACL、租约和高水位后，将原 Resource view 与逐项
 
 `GET /_auriga/dedicated-resources` 返回精确 binding/view/intentDigest/hostInstanceId 的实际 `ready`、`applying`、`restart-required` 或 `failed` 回执。没有 HMR 时必须由 Node 受控排空并重启。旧进程不会把磁盘已修改视为加载完成；新进程须观察批准 plugin 的实际 active 行才可 ready。回执中的失败不会自动冒充成功，未知提交结果也不会盲目重放。
 
-`tools/execute` 和同步 `shellEnv.collect` 通过原生 opaque execution token 关联。每次任务分别持有 generic 任务与可选企业子任务，注入 `DSH_AURIGA_ID`、`DSH_AURIGA_TOKEN` 和现有 helper 变量，保留原生 `DSH_SESSION_ID`。凭据刷新沿同一个任务 handle 续期，退出、撤销或资源变更会隔离环境并 Finish。真实后台任务保留 handle 到原生 Jobs registry 的停止或结束事件。已经启动的 OS 子进程环境不会被改写，长任务应使用会续期的回环 helper。
+`tools/execute` 和同步 `shellEnv.collect` 通过原生 opaque execution token 关联。真实调用借用本回合普通父 lease，并按 typed 状态持有可选企业子任务，注入 `DSH_AURIGA_ID`、`DSH_AURIGA_TOKEN` 和现有 helper 变量，保留原生 `DSH_SESSION_ID`。凭据刷新沿同一个任务 handle 续期，退出、撤销或资源变更先隔离环境，实际工作排空后才确认 Finish。后台 handle 保留到原生 Jobs registry 的真正终态。已经启动的 OS 子进程环境不会被改写，长任务应使用会续期的回环 helper。
+
+当前普通任务复用真实 turn 的唯一父 lease。只有安装方已经实际加载 LocalJobRegistry 和正式 job controller，专用模块才会接力后台任务；本模块不自行安装 Jobs 或 Shell，也不代表 NAS 已有该能力。接力在原生注册当场交叉核对 SessionStore 的 `job/registered` 日志、真实 registry 的 registered/get/list、当前异步工具执行与 callId/rootCallId；结果 JSON 或旧同成员 jobId 不能授权 retain。正常 turn/end 后仅此已有 lease 可续期，下一回合等待它结束。stopping/kill 先撤销环境及 helper 权限，但预算和资源屏障保留到所有真实 job settled、企业子及普通父 Finish 均确认。helper 依真实 capability→taskId 映射前后核私有活动 row，并向外呼传播该 row 的取消信号。
 
 Node launcher 需使用公开 app-boot profile 层组合，专用可写目录固定为 `/home/dsh/.host/.dsh/profiles/auriga-dedicated`，name 为 `auriga-dedicated`、installAnchor 为 `/opt/dsh/package.json`。本人选装更新 Resource view，不能修改 W placement binding digest。Node、W 与 Edge 的正式接线和正常页面部署由主控另行集成验收；本目录的纯模块测试不代表 NAS 已部署。专用实例消息接收尚未接通，不能安装 shared 收件器代替。
 
