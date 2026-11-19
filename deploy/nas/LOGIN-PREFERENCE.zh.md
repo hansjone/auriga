@@ -23,7 +23,26 @@ python3 /path/to/login-preference.py \
   --stack-env /existing/data/stack.env --preference team
 ```
 
-工具只接受本批已核的公开 `8be9394`、`de13e8f8` 两种 Compose 完整前像 SHA256（或已加精确偏好单行的同一前像），并检查唯一 edge/environment 结构。它仅新增一条 environment 映射、在 stack.env 写入偏好；不会传入 Docker socket、运行 Docker、修改镜像、轮换材料或调用认证接口。其他版本、重复项、内容漂移、符号链接和多硬链接输入均拒绝。原始文件逐字节备份为同目录 `.login-preference-<原SHA256前16位>.bak`，先校验两个输入再原子替换。可重复执行。
+工具默认只接受本批已核的公开 `8be9394`、`de13e8f8` 两种 Compose 完整前像 SHA256（或已加精确偏好单行的同一前像）。默认白名单先将一致的 CRLF 转为 LF，并只移除本工具唯一精确偏好行后核完整文件；不忽略任何其他内容。混合换行拒绝。
+
+现场已有经过批准的挂载或资源配置，导致完整文件不在公开白名单时，操作者须先完整审查当前 Compose，再显式提供 `--reviewed-compose-sha256`。该 pin 是**当前文件全部原始字节**的 SHA256：不规范化 CRLF、不移除已经存在的偏好行、不忽略其他差异；64位十六进制大小写均可。指定 pin 后必须精确匹配，错误值不会回退公开白名单。不要把现场配方或其私有 pin 提交公开仓库。
+
+```sh
+# 完整审查此文件后计算一次，并在 check / 实际执行之间保持同一个 pin。
+reviewed_sha=$(sha256sum /existing/recipe/docker-compose.yml | awk '{print $1}')
+python3 /path/to/login-preference.py \
+  --compose /existing/recipe/docker-compose.yml \
+  --stack-env /existing/data/stack.env --preference team \
+  --reviewed-compose-sha256 "$reviewed_sha" --check
+python3 /path/to/login-preference.py \
+  --compose /existing/recipe/docker-compose.yml \
+  --stack-env /existing/data/stack.env --preference team \
+  --reviewed-compose-sha256 "$reviewed_sha"
+```
+
+显式 pin 只替代版本白名单，不替代结构检查。工具只支持唯一的普通 `services` / `edge` / `environment` 映射，Edge environment 必须是键唯一的平面普通标量映射；不支持该位置的复杂键、合并或多行值。未知格式、重复项、内容变化、符号链接、多硬链接和混合换行仍拒绝。它仅新增一条 environment 映射、在 stack.env 写入偏好；不会传入 Docker socket、运行 Docker、修改镜像、轮换材料或调用认证接口。原始文件逐字节备份为同目录 `.login-preference-<原SHA256前16位>.bak`，先校验两个输入再原子替换，写入前再次核对文件未改变。
+
+首次插入映射后，文件的原始 SHA256 会改变，旧的显式 pin 应拒绝。先核对实际 diff 只新增预期映射，再计算新的当前完整 pin，用于重复执行或改为 company；已包含唯一精确映射时 Compose 不再改写。同一份未变的已加映射文件可以复用其新 pin。默认公开白名单方式继续可直接重复执行。
 
 按已批准的镜像升级流程在同一个 stack.env 更新 `AURIGA_IMAGE_EDGE`，使用原公开 start/Compose 流程重建 Edge（只需 Edge 镜像，不需 platform/agent 升级）。标准 start 会依次读取同一个 stack.env 并 render；偏好从 Compose environment 传入，旧 render 覆盖 edge.env 不影响它。不要只执行容器 restart，因为环境变更需要 recreate。
 

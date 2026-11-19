@@ -17,11 +17,18 @@ SUPPORTED = {
 }
 
 
-def compose_projection(raw):
+def compose_projection(raw, reviewed_sha256=None):
+    if reviewed_sha256 is not None:
+        if not re.fullmatch(r"[0-9a-fA-F]{64}", reviewed_sha256):
+            raise ValueError("reviewed Compose SHA256 must contain exactly 64 hexadecimal digits")
+        if hashlib.sha256(raw).hexdigest() != reviewed_sha256.lower():
+            raise ValueError("reviewed Compose SHA256 does not match the complete current file")
     if b"\r\n" in raw and b"\n" in raw.replace(b"\r\n", b""):
         raise ValueError("mixed recipe line endings require review")
     text = raw.decode("utf-8").replace("\r\n", "\n")
-    if text.count("\n  edge:\n") != 1 or text.count("\nservices:\n") != 1:
+    services = re.findall(r"^(?:services|'services'|\"services\")[ \t]*:", text, re.MULTILINE)
+    edges = re.findall(r"^  (?:edge|'edge'|\"edge\")[ \t]*:", text, re.MULTILINE)
+    if len(services) != 1 or len(edges) != 1 or text.count("\n  edge:\n") != 1 or text.count("\nservices:\n") != 1:
         raise ValueError("expected one public services/edge mapping")
     start = text.index("\n  edge:\n")
     # Search after the edge service name, not at its own header.
@@ -29,13 +36,27 @@ def compose_projection(raw):
     following = re.search(r"\n  [A-Za-z0-9_-]+:\n|\n[^ #\n][^\n]*:\n", text[body_start:])
     end = body_start + following.start() if following else len(text)
     block = text[start:end]
-    if block.count("\n    environment:\n") != 1:
+    environments = re.findall(r"^    (?:environment|'environment'|\"environment\")[ \t]*:", block, re.MULTILINE)
+    if len(environments) != 1 or block.count("\n    environment:\n") != 1:
         raise ValueError("expected one edge environment mapping")
-    existing = [line for line in text.splitlines(True) if re.match(r"\s*" + KEY + r"\s*:", line)]
+    environment = block.split("\n    environment:\n", 1)[1]
+    keys = set()
+    for line in environment.splitlines():
+        if not line.strip() or line.lstrip().startswith("#"):
+            continue
+        if len(line) - len(line.lstrip(" ")) <= 4:
+            break
+        entry = re.fullmatch(r"      ([A-Za-z_][A-Za-z0-9_]*):(?:[ \t](.*))?", line)
+        if not entry or entry[1] in keys:
+            raise ValueError("edge environment must contain unique plain scalar keys")
+        if (entry[2] or "").lstrip().startswith(("{", "[", "|", ">", "&", "*", "!")):
+            raise ValueError("unsupported complex edge environment value")
+        keys.add(entry[1])
+    existing = [line for line in text.splitlines(True) if re.match(r"\s*(?:" + KEY + "|'" + KEY + "'|\"" + KEY + r"\")\s*:", line)]
     if existing and (existing != [MAPPING] or MAPPING not in block):
         raise ValueError("ambiguous or customized login preference mapping")
     original = text.replace(MAPPING, "")
-    if hashlib.sha256(original.encode()).hexdigest() not in SUPPORTED:
+    if reviewed_sha256 is None and hashlib.sha256(original.encode()).hexdigest() not in SUPPORTED:
         raise ValueError("unsupported recipe content; review its public recipe upgrade first")
     anchor = "\n    environment:\n"
     patched = block if existing else block.replace(anchor, anchor + MAPPING, 1)
@@ -107,13 +128,14 @@ def main():
     parser.add_argument("--compose", required=True)
     parser.add_argument("--stack-env", required=True)
     parser.add_argument("--preference", choices=["company", "team"], required=True)
+    parser.add_argument("--reviewed-compose-sha256", help="exact SHA256 of the fully reviewed current Compose bytes; all structure checks still apply")
     parser.add_argument("--check", action="store_true", help="validate and show whether a change is needed")
     args = parser.parse_args()
     compose, compose_info, compose_raw = regular(args.compose)
     stack, stack_info, stack_raw = regular(args.stack_env)
     if compose == stack:
         raise ValueError("compose and stack.env must be different files")
-    compose_new = compose_projection(compose_raw)
+    compose_new = compose_projection(compose_raw, args.reviewed_compose_sha256)
     stack_new = stack_projection(stack_raw, args.preference)
     if args.check:
         print("valid; " + ("change required" if (compose_new, stack_new) != (compose_raw, stack_raw) else "already configured"))
