@@ -31,8 +31,11 @@ afterEach(async () => {
   view = undefined;
   await flushPromises();
   vi.restoreAllMocks();
+  document
+    .querySelectorAll('meta[name="auriga-login-preference"]')
+    .forEach((node) => node.remove());
 });
-async function setup(items = providers) {
+async function setup(items = providers, deviceContinuation = false) {
   const calls: {
     path: string;
     method: string;
@@ -139,7 +142,7 @@ async function setup(items = providers) {
     '/login?returnTo=%2Faccount%2Fsecurity&invitation=synthetic',
   );
   view = mount(LoginView, {
-    props: { authApi: api },
+    props: { authApi: api, deviceContinuation },
     global: { plugins: [router, createAurigaI18n('zh-CN')] },
   });
   await flushPromises();
@@ -159,6 +162,33 @@ it('默认 UAC，无列表；当前图标重复点击不重复创建挑战', asy
   await flushPromises();
   expect(calls.filter((c) => c.path.endsWith('/challenges'))).toHaveLength(1);
 });
+it.each([false, true])(
+  '部署team默认进团队表单且仍能切公司扫码，设备续登=%s',
+  async (deviceContinuation) => {
+    document.head.insertAdjacentHTML(
+      'beforeend',
+      '<meta name="auriga-login-preference" content="team">',
+    );
+    const { calls } = await setup(providers, deviceContinuation);
+    expect(view!.find('input[name=username]').exists()).toBe(true);
+    expect(
+      calls.some(
+        (c) => c.path.endsWith('/challenges') || c.path.endsWith('/sso'),
+      ),
+    ).toBe(false);
+    expect(
+      view!.findAll('[data-provider-id]')[0].attributes('data-provider-id'),
+    ).toBe('team');
+    await view!.get('[data-provider-id=scan]').trigger('click');
+    await flushPromises();
+    expect(calls.filter((c) => c.path.endsWith('/challenges'))).toHaveLength(1);
+    expect(
+      calls.find(
+        (c) => c.method === 'DELETE' && c.path.includes('/transactions/'),
+      ),
+    ).toBeDefined();
+  },
+);
 it.each(['scan', 'team', 'emergency'])(
   '单一方式 %s 自动进入且隐藏图标行',
   async (id) => {

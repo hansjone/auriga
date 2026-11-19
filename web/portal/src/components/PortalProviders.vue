@@ -2,6 +2,7 @@
 import { computed } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { pickLocalized, type LoginProvider } from '@auriga/shared';
+import { orderLoginProviders } from '../../../shared/src/login-preference';
 const props = defineProps<{
   providers: LoginProvider[];
   selectedId?: string;
@@ -9,13 +10,7 @@ const props = defineProps<{
 }>();
 const emit = defineEmits<{ select: [provider: LoginProvider] }>();
 const { locale } = useI18n();
-const methods = computed(() =>
-  props.providers.slice().sort((a, b) => {
-    const rank = (p: LoginProvider) =>
-      p.connectorType === 'uac' ? 0 : p.connectorType === 'emergency' ? 2 : 1;
-    return rank(a) - rank(b) || a.order - b.order;
-  }),
-);
+const methods = computed(() => orderLoginProviders(props.providers, document));
 function label(p: LoginProvider) {
   const en = locale.value === 'en';
   if (p.connectorType === 'uac') return en ? 'Scan' : 'UAC 扫码';

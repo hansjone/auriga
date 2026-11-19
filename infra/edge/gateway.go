@@ -230,6 +230,11 @@ func NewGateway(cfg Config, sessions SessionStore, routes RouteStore, tickets Ti
 		}
 		g.portalStatic = newAccessSPAFileServer(cfg.Static.PortalRoot, cfg.Access.Mode(), staticCache)
 		g.adminStatic = newAccessSPAFileServer(cfg.Static.AdminRoot, cfg.Access.Mode(), staticCache)
+		for _, handler := range []http.Handler{g.portalStatic, g.adminStatic} {
+			if site, ok := handler.(*spaFileServer); ok {
+				site.loginPreference = cfg.LoginPreference
+			}
+		}
 	}
 	return g, nil
 }

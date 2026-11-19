@@ -19,12 +19,15 @@ import { iamApi as portalIamApi } from '../api';
 import type { IamApi } from '@auriga/shared';
 import {
   navigationCorrelationId,
-  navigationProviderId,
   takeNavigationContext,
 } from '../../../shared/src/api/correlation';
 import PortalProviders from '../components/PortalProviders.vue';
 import { pickLocalized } from '@auriga/shared';
 import { loginReturnTo } from '../login-return';
+import {
+  loginPreference,
+  preferredLoginProvider,
+} from '../../../shared/src/login-preference';
 
 const { t, locale } = useI18n();
 const props = defineProps<{ deviceContinuation?: boolean; authApi?: IamApi }>();
@@ -103,15 +106,8 @@ onMounted(async () => {
     const res = await iamApi.listLoginProviders();
     if (!current(version)) return;
     providers.value = res.items;
-    const preferred = res.items.find(
-      (p) =>
-        p.connectorType === 'uac' && p.id === navigationProviderId(document),
-    );
     const initial =
-      (preferred && document.getElementById('auriga-uac-navigation')
-        ? preferred
-        : undefined) ??
-      res.items.find((p) => p.connectorType === 'uac') ??
+      preferredLoginProvider(res.items, document) ??
       res.items.find((p) => p.connectorType !== 'emergency') ??
       res.items[0];
     if (initial) await selectProvider(initial);
@@ -150,7 +146,9 @@ async function selectProvider(provider: LoginProvider, restart = false) {
     if (provider.connectorType === 'uac' && uacRoot.value) {
       uacContinuation = true;
       uacActive.value = true;
-      const navigation = takeNavigationContext(document, provider.id);
+      const context = takeNavigationContext(document, provider.id);
+      const navigation =
+        loginPreference(document) === 'company' ? context : undefined;
       uacView = createUacLoginView(uacRoot.value, {
         api: iamApi,
         providerId: provider.id,
