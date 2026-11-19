@@ -48,3 +48,11 @@ bad79d3f273f252c8ba146658cf829268ed70d22:services/workspace/impl/src/main/java/a
 bad79d3f273f252c8ba146658cf829268ed70d22:services/workspace/impl/src/test/java/auriga/workspace/config/WorkspaceSharedDshEntryConfigurationTest.java:private-key:22
 0a3b4edeab92be3848c4dd442f938c4a6f9c418d:services/iam/impl/src/main/java/auriga/iam/SharedTaskRuntimeConfiguration.java:private-key:34
 0a3b4edeab92be3848c4dd442f938c4a6f9c418d:services/iam/impl/src/test/java/auriga/iam/SharedTaskTokensTest.java:private-key:88
+
+# Shared-runtime mTLS fixtures serialize newly generated test keys; these exact
+# historical matches are Java PEM delimiter/encoder expressions, not key bytes.
+5885c555bff02b08583b04ebf72d1975c7a114a4:services/workspace/impl/src/test/java/auriga/workspace/SharedDshNodeAdmissionTest.java:private-key:131
+d7f1f57c1a3f42d60efd7e873717f04fc0748843:services/workspace/impl/src/test/java/auriga/workspace/SharedDshMemoryCommitTest.java:private-key:371
+# Two exact historical occurrences of the local fake IAM capability token.
+4c5f2d48146bdb932f530133b20a437e35cf853d:infra/agent/internal/sharednode/relay_test.go:generic-api-key:65
+b4f55e0619e8310d357c6235e05feede188dd879:infra/agent/internal/sharednode/relay_test.go:generic-api-key:126
