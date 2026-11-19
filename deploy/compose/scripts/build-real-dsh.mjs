@@ -16,8 +16,7 @@ import {
 } from './real-dsh-context.mjs';
 import { buildArgs, selectRepoDigest } from './runtime-image-input.mjs';
 import {
-  runtimeBaseInput,
-  assertRuntimeBase,
+  prepareRuntimeBase,
   hashDependencyFile,
 } from '../real-dsh/dependencies.mjs';
 
@@ -72,16 +71,7 @@ const contextInputs = await withRealDshContext(
         'utf8',
       ),
     );
-    const base = runtimeBaseInput(root, dependencies);
-    let actual;
-    try {
-      actual = JSON.parse(docker(['image', 'inspect', base.from], true))[0];
-    } catch (cause) {
-      if (!base.archive) throw cause;
-      docker(['load', '-i', base.archive]);
-      actual = JSON.parse(docker(['image', 'inspect', base.from], true))[0];
-    }
-    assertRuntimeBase(actual, base);
+    const base = prepareRuntimeBase(root, dependencies, docker);
     const inputs = contextManifest(context);
     docker([
       'build',

@@ -1,4 +1,4 @@
-import { Buffer } from 'node:buffer';
+import { Buffer, isUtf8 } from 'node:buffer';
 import { createHash, createPublicKey, verify } from 'node:crypto';
 import {
   closeSync,
@@ -11,7 +11,7 @@ import {
   readdirSync,
   writeFileSync,
 } from 'node:fs';
-import { dirname, isAbsolute, join, resolve } from 'node:path';
+import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 export const dependencyFiles = Object.freeze({
@@ -339,9 +339,52 @@ export function stageDependencies(
 export function runtimeBaseInput(
   root,
   metadata,
-  { nodeImage = process.env.NODE_IMAGE, verifyKey } = {},
+  {
+    nodeImage = process.env.NODE_IMAGE,
+    verifyKey,
+    nodeArchive = process.env.AURIGA_REAL_DSH_NODE_ARCHIVE,
+    nodeArchiveSha256 = process.env.AURIGA_REAL_DSH_NODE_ARCHIVE_SHA256,
+    dependenciesDirectory = process.env.AURIGA_REAL_DSH_DEPENDENCIES_DIR,
+    dependenciesSha256 = process.env.AURIGA_REAL_DSH_DEPENDENCIES_SHA256,
+  } = {},
 ) {
   const manifest = metadata.nodeImage.ref.split('@')[1];
+  if (nodeArchive || nodeArchiveSha256) {
+    if (
+      nodeImage ||
+      !isAbsolute(nodeArchive ?? '') ||
+      !hex.test(nodeArchiveSha256 ?? '') ||
+      !isAbsolute(dependenciesDirectory ?? '') ||
+      !hex.test(dependenciesSha256 ?? '')
+    )
+      throw new Error(
+        'Explicit maintenance Node archive requires independent archive and dependency approvals, without NODE_IMAGE',
+      );
+    const current = verifyDependencies(
+      root,
+      dependenciesDirectory,
+      dependenciesSha256,
+    );
+    if (JSON.stringify(current) !== JSON.stringify(metadata))
+      throw new Error('Maintenance Node archive dependency envelope differs');
+    const pin =
+      /^node:([0-9]+\.[0-9]+\.[0-9]+)-bookworm-slim@sha256:([a-f0-9]{64})$/.exec(
+        current.nodeImage.ref,
+      );
+    if (
+      !pin ||
+      pin[1] !== current.nodeVersion ||
+      basename(nodeArchive) !==
+        `node-runtime-${pin[1]}-${pin[2].slice(0, 8)}.tar`
+    )
+      throw new Error('Maintenance Node archive source pin or path differs');
+    const archive = physical(nodeArchive),
+      from = `auriga-input/node-runtime:${pin[1]}-${pin[2].slice(0, 8)}`;
+    if (hashDependencyFile(archive) !== nodeArchiveSha256)
+      throw new Error('Maintenance Node archive SHA256 differs');
+    assertRuntimeImageArchive(archive, current.nodeImage.config, from);
+    return { from, config: current.nodeImage.config, manifest, archive };
+  }
   if (nodeImage) {
     if (nodeImage !== metadata.nodeImage.ref)
       throw new Error('NODE_IMAGE differs from the pinned runtime source');
@@ -368,6 +411,82 @@ export function runtimeBaseInput(
     manifest,
     archive,
   };
+}
+
+/** Installer-only Docker adapter; callers supply code, never a YAML command. */
+export function prepareRuntimeBase(root, metadata, docker, options) {
+  const base = runtimeBaseInput(root, metadata, options);
+  let actual;
+  try {
+    actual = JSON.parse(docker(['image', 'inspect', base.from], true))[0];
+  } catch (cause) {
+    if (!base.archive) throw cause;
+    docker(['load', '-i', base.archive]);
+    actual = JSON.parse(docker(['image', 'inspect', base.from], true))[0];
+  }
+  assertRuntimeBase(actual, base);
+  return base;
+}
+
+function archiveMetadata(bytes) {
+  if (!isUtf8(bytes)) throw new Error('Runtime image metadata UTF-8 rejected');
+  const text = bytes.toString('utf8'),
+    parsed = JSON.parse(text);
+  let index = 0,
+    count = 0;
+  const ws = () => {
+    while (/\s/.test(text[index] ?? '') && index < text.length) index++;
+  };
+  const string = () => {
+    const start = index++;
+    while (index < text.length) {
+      if (text[index] === '\\') {
+        index += 2;
+        continue;
+      }
+      if (text[index++] === '"') break;
+    }
+    return JSON.parse(text.slice(start, index));
+  };
+  const scan = (depth) => {
+    if (depth > 64 || ++count > 200000)
+      throw new Error('Runtime image metadata structure rejected');
+    ws();
+    const open = text[index];
+    if (open === '"') {
+      string();
+      return;
+    }
+    if (open === '{' || open === '[') {
+      const end = open === '{' ? '}' : ']',
+        keys = new Set();
+      index++;
+      ws();
+      while (text[index] !== end) {
+        if (open === '{') {
+          const key = string();
+          if (keys.has(key))
+            throw new Error('Runtime image metadata duplicate key rejected');
+          keys.add(key);
+          ws();
+          index++;
+        }
+        scan(depth + 1);
+        ws();
+        if (text[index] === end) break;
+        index++;
+        ws();
+      }
+      index++;
+      return;
+    }
+    while (index < text.length && !/[\s,}\]]/.test(text[index])) index++;
+  };
+  scan(0);
+  ws();
+  if (index !== text.length)
+    throw new Error('Runtime image metadata trailing content rejected');
+  return parsed;
 }
 
 // Inspect only Docker save metadata; never extract an image or execute its tools.
@@ -438,16 +557,18 @@ export function assertRuntimeImageArchive(path, expectedConfig, expectedTag) {
         throw new Error('Runtime image metadata truncated');
       return bytes;
     };
-    const manifests = JSON.parse(read('manifest.json'));
+    const manifests = archiveMetadata(read('manifest.json'));
     if (
       !Array.isArray(manifests) ||
       manifests.length !== 1 ||
-      !manifests[0].RepoTags?.includes(expectedTag) ||
+      !Array.isArray(manifests[0].RepoTags) ||
+      manifests[0].RepoTags.length !== 1 ||
+      manifests[0].RepoTags[0] !== expectedTag ||
       !safeRelative(manifests[0].Config)
     )
       throw new Error('Runtime image archive tag/config mapping rejected');
     const bytes = read(manifests[0].Config),
-      config = JSON.parse(bytes);
+      config = archiveMetadata(bytes);
     if (
       'sha256:' + sha(bytes) !== expectedConfig ||
       config.os !== 'linux' ||

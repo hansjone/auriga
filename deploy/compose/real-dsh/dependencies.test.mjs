@@ -22,6 +22,7 @@ import {
   dependencyFiles,
   dependencySources,
   hashDependencyFile,
+  prepareRuntimeBase,
   runtimeBaseInput,
   sealDependencies,
   stageDependencies,
@@ -89,18 +90,19 @@ function signedRoot(directory, privateKey) {
     sign(null, Buffer.from(sums), privateKey).toString('base64') + '\n',
   );
 }
-function imageTar(tag) {
+function imageTar(tag, { manifestText, configValue = configBytes } = {}) {
   const chunks = [];
   for (const [name, bytes] of [
     [
       'manifest.json',
       Buffer.from(
-        JSON.stringify([
-          { Config: 'config.json', RepoTags: [tag], Layers: [] },
-        ]),
+        manifestText ??
+          JSON.stringify([
+            { Config: 'config.json', RepoTags: [tag], Layers: [] },
+          ]),
       ),
     ],
-    ['config.json', configBytes],
+    ['config.json', configValue],
   ]) {
     const header = Buffer.alloc(512);
     header.write(name);
@@ -346,6 +348,189 @@ test('classic config and containerd manifest identities remain distinct and only
       /approved manifest\/config/,
     );
 });
+function maintenanceInput(f, data) {
+  const pin = f.metadata.nodeImage.ref.split('@sha256:')[1],
+    version = f.metadata.nodeVersion;
+  const tag = `auriga-input/node-runtime:${version}-${pin.slice(0, 8)}`;
+  const archive = f.put(
+    `node-runtime-${version}-${pin.slice(0, 8)}.tar`,
+    data ?? imageTar(tag),
+  );
+  return {
+    tag,
+    options: {
+      nodeImage: null,
+      nodeArchive: archive,
+      nodeArchiveSha256: hashDependencyFile(archive),
+      dependenciesDirectory: f.inputs,
+      dependenciesSha256: f.sha,
+    },
+  };
+}
+test('explicit maintenance archive binds approvals, source basename, exact tag and config without altering canonical selection', (t) => {
+  const f = fixture(t),
+    m = maintenanceInput(f);
+  const base = runtimeBaseInput(f.root, f.metadata, m.options);
+  assert.equal(base.from, m.tag);
+  assert.equal(base.archive, m.options.nodeArchive);
+  assert.equal(
+    runtimeBaseInput(f.root, f.metadata, {
+      nodeImage: f.metadata.nodeImage.ref,
+      nodeArchive: null,
+      nodeArchiveSha256: null,
+    }).from,
+    f.metadata.nodeImage.ref,
+  );
+  for (const patch of [
+    { nodeArchiveSha256: 'f'.repeat(64) },
+    { dependenciesSha256: null },
+    { dependenciesDirectory: null },
+    { nodeArchive: 'relative.tar' },
+    { nodeImage: f.metadata.nodeImage.ref },
+  ])
+    assert.throws(
+      () => runtimeBaseInput(f.root, f.metadata, { ...m.options, ...patch }),
+      /approval|SHA256|without NODE_IMAGE/,
+    );
+  const alias = f.put('wrong-name.tar', readFileSync(m.options.nodeArchive));
+  assert.throws(
+    () =>
+      runtimeBaseInput(f.root, f.metadata, {
+        ...m.options,
+        nodeArchive: alias,
+      }),
+    /pin or path/,
+  );
+  const changed = globalThis.structuredClone(f.metadata);
+  changed.nodeImage.config = 'sha256:' + 'f'.repeat(64);
+  assert.throws(
+    () => runtimeBaseInput(f.root, changed, m.options),
+    /envelope differs/,
+  );
+});
+test('maintenance archive rejects wrong role, config, duplicate keys, duplicate tags and duplicate tar metadata even with its supplied SHA', (t) => {
+  const f = fixture(t),
+    m = maintenanceInput(f),
+    good = imageTar(m.tag);
+  const duplicate = JSON.stringify([
+    { Config: 'config.json', RepoTags: [m.tag], Layers: [] },
+  ]).replace(
+    '"Config":"config.json"',
+    '"Config":"config.json","Config":"config.json"',
+  );
+  const cases = [
+    imageTar('unexpected:role'),
+    imageTar(m.tag, {
+      configValue: Buffer.from('{"os":"linux","architecture":"arm64"}'),
+    }),
+    imageTar(m.tag, { manifestText: duplicate }),
+    imageTar(m.tag, {
+      manifestText: JSON.stringify([
+        { Config: 'config.json', RepoTags: [m.tag, m.tag], Layers: [] },
+      ]),
+    }),
+    Buffer.concat([
+      good.subarray(0, -1024),
+      good.subarray(0, 1024),
+      Buffer.alloc(1024),
+    ]),
+  ];
+  for (const data of cases) {
+    writeFileSync(m.options.nodeArchive, data);
+    assert.throws(
+      () =>
+        runtimeBaseInput(f.root, f.metadata, {
+          ...m.options,
+          nodeArchiveSha256: hash(data),
+        }),
+      /tag\/config|config differs|duplicate|tar member/,
+    );
+  }
+});
+test('public caller base assembly loads only the verified maintenance archive and verifies the resulting fixed tag', (t) => {
+  const f = fixture(t),
+    m = maintenanceInput(f),
+    calls = [];
+  let loaded = false;
+  const run = (args, capture) => {
+    calls.push({ args, capture });
+    if (args[0] === 'load') {
+      loaded = true;
+      return 'loaded';
+    }
+    if (args[0] === 'image' && args[1] === 'inspect') {
+      if (!loaded) throw new Error('absent');
+      return JSON.stringify([
+        { Id: config, Os: 'linux', Architecture: 'amd64' },
+      ]);
+    }
+    throw new Error('unexpected Docker operation');
+  };
+  const result = prepareRuntimeBase(f.root, f.metadata, run, m.options);
+  assert.equal(result.from, m.tag);
+  assert.deepEqual(
+    calls.map((x) => x.args),
+    [
+      ['image', 'inspect', m.tag],
+      ['load', '-i', m.options.nodeArchive],
+      ['image', 'inspect', m.tag],
+    ],
+  );
+  assert.throws(
+    () =>
+      prepareRuntimeBase(
+        f.root,
+        f.metadata,
+        () =>
+          JSON.stringify([
+            {
+              Id: 'sha256:' + 'f'.repeat(64),
+              Os: 'linux',
+              Architecture: 'amd64',
+            },
+          ]),
+        m.options,
+      ),
+    /approved manifest\/config/,
+  );
+});
+test('approved original 79MB Node archive is accepted by maintenance assembly with its independent SHA and actual config', (t) => {
+  const real = process.env.AURIGA_RUNTIME_REAL_NODE_ARCHIVE;
+  if (!real)
+    return t.skip(
+      'set the approved original Node archive for the file-only integration check',
+    );
+  const f = fixture(t),
+    realConfig =
+      'sha256:daa74c183f7d8c1ba55ed79c76e912f50be8782ca9d2da640645f906dce474b8';
+  rmSync(join(f.inputs, dependencyFiles.manifest));
+  f.metadata = sealDependencies(f.root, f.inputs, realConfig, 'a'.repeat(64));
+  f.sha = hashDependencyFile(join(f.inputs, dependencyFiles.manifest));
+  const options = {
+    nodeImage: null,
+    nodeArchive: real,
+    nodeArchiveSha256:
+      '4dcd214a743ef522699ebbb0c7a41051fb08d4fd9158e86ed21b48dc48a4aee0',
+    dependenciesDirectory: f.inputs,
+    dependenciesSha256: f.sha,
+  };
+  const calls = [];
+  const base = prepareRuntimeBase(
+    f.root,
+    f.metadata,
+    (args) => {
+      calls.push(args);
+      return JSON.stringify([
+        { Id: realConfig, Os: 'linux', Architecture: 'amd64' },
+      ]);
+    },
+    options,
+  );
+  assert.equal(base.config, realConfig);
+  assert.equal(base.from, 'auriga-input/node-runtime:22.19.0-cff78eb5');
+  assert.equal(calls.length, 1);
+  assert.equal(base.archive, resolve(real));
+});
 test('the actual image archive metadata reader rejects changed config, tag and tar checksums without extracting', (t) => {
   const f = fixture(t),
     file = f.put('image.tar', imageTar('fixture:reviewed'));
@@ -443,8 +628,5 @@ test('full recipe and public caller have no network install fallback and always 
   );
   assert.match(caller, /'--network=none'/);
   assert.match(caller, /'--pull=false'/);
-  assert.match(
-    caller,
-    /assertRuntimeBase\(actual,base\)|assertRuntimeBase\(actual, base\)/,
-  );
+  assert.match(caller, /prepareRuntimeBase\(root, dependencies, docker\)/);
 });

@@ -35,6 +35,8 @@ node deploy/compose/scripts/build-real-dsh.mjs --local-only --image-tag 127.0.0.
 
 维护者尚未打出已签 devkit 时，可显式使用 `AURIGA_REAL_DSH_DEPENDENCIES_DIR=<上述目录>`、`AURIGA_REAL_DSH_DEPENDENCIES_SHA256=<独立批准的manifest SHA>`、原固定 `NODE_IMAGE=<versions.json中的原manifest引用>` 和下一节的 runtime TGZ 输入。缺独立摘要不接受目录自证。context 只复制这四个固定文件，复制前后均验证，文件摘要流式读取；临时目录需要足够空间，可用现有 `TMPDIR` 指向专用 SSD 工作目录。
 
+已核原始 Node Docker-save 归档但本地 daemon 未保留 canonical RepoDigest 时，维护阶段可改用显式 `AURIGA_REAL_DSH_NODE_ARCHIVE=<绝对路径/node-runtime-22.19.0-cff78eb5.tar>` 与 `AURIGA_REAL_DSH_NODE_ARCHIVE_SHA256=<独立批准的原件SHA256>`，并取消 `NODE_IMAGE`；仍必须同时提供上述显式依赖目录及其独立 manifest SHA。该入口先重核同一 envelope、源码固定 manifest/config，再核原件 SHA、文件名、唯一 Docker-save manifest/Config/RepoTag、实际 config 字节和平台；重复 tar 成员、重复 JSON 键或重复 tag 均拒。FROM 只能是按固定源码版本和原 manifest 前8位派生的 `auriga-input/node-runtime:22.19.0-cff78eb5`，加载后再次检查实际 config/manifest 身份。不能传任意 tag、用两种 base 输入并用或借此覆盖默认已签套件路径；它只是有独立摘要的开发输入，不是签名套件。本批原件为78,974,976B、SHA256 `4dcd214a743ef522699ebbb0c7a41051fb08d4fd9158e86ed21b48dc48a4aee0`，对应 config `daa74…`，没有修改原 source manifest `cff78…`。
+
 完整配方用原 corepack cache-only 恢复构建 pnpm；broker 只从原 store/policy-cache 执行 offline frozen install，两次生产 npm ci 只从独立临时 `_cacache` 离线恢复。临时 cache 不进入最终镜像；保留缓存 envelope 进入 `/opt/fixture` 与运行镜像 manifest，绑定实际构建输入。没有更改任何依赖版本，也不在 source-only 发行增加我方预制安装包。
 
 ## 固定运行 pnpm 输入
