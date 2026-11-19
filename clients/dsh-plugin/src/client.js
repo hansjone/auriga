@@ -183,7 +183,7 @@ window.__ModuleLoader__.load({
       platform_degraded: '已登录，通信未就绪',
       platformHint_managed: '连接由系统提供，无法在此修改。',
       platformHint_unconfigured: '在“设置”中填写团队平台地址后即可登录平台。',
-      platformHint_authenticating: '请完成扫码或账号登录。',
+      platformHint_authenticating: '请完成当前登录和设备确认。',
       platformHint_unreachable: '本机 DSH 照常可用；网络恢复后可重新连接。',
       platformHint_reauth: '请重新登录平台；本机 DSH 和已有任务不受影响。',
       platformHint_signedOut: '登录平台后可使用资源市场、Team 工具和云端互通。',
@@ -195,13 +195,14 @@ window.__ModuleLoader__.load({
         '本机暂未连上平台认证服务。可先使用本机 DSH，再重新连接。',
       platformHint_accessDisabled:
         '平台已停用此登录来源或成员。请联系团队管理员。',
-      loginBrowserHint:
-        '门户默认 UAC 扫码；不能扫码时在门户选择团队账号或应急账号。',
+      loginBrowserHint: '请在系统浏览器完成本站登录，并核对当前设备的用户码。',
       loginCompare: '请核对门户预填的确认码与此处一致，仅确认自己发起的登录：',
       loginRejected: '平台拒绝了登录请求，请联系管理员检查客户端配置。',
       loginBadCredentials: '口令或验证码错误，请重试。',
-      loginMethods: '默认使用 UAC 扫码，也可选择团队账号或应急账号。',
+      loginMethods: '默认在系统浏览器登录，也可在此扫码或使用团队账号。',
       platformLogin: '登录平台',
+      platformBrowserLogin: '系统浏览器登录',
+      platformInlineLogin: '扫码或团队账号',
       configurePlatform: '配置平台地址',
       reconnect: '重新连接',
       loginDone: '平台登录成功。',
@@ -391,7 +392,8 @@ window.__ModuleLoader__.load({
       platformHint_managed: 'The system supplies this connection.',
       platformHint_unconfigured:
         'Enter your team platform address in Settings, then sign in.',
-      platformHint_authenticating: 'Complete scan or account sign-in.',
+      platformHint_authenticating:
+        'Complete this sign-in and device confirmation.',
       platformHint_unreachable:
         'Local DSH keeps working. Reconnect when the network returns.',
       platformHint_reauth:
@@ -409,7 +411,7 @@ window.__ModuleLoader__.load({
       platformHint_accessDisabled:
         'The platform disabled this member or sign-in method. Contact your team administrator.',
       loginBrowserHint:
-        'The portal defaults to UAC scan. If you cannot scan, choose team account or emergency account there.',
+        'Finish sign-in in your system browser and compare the code for this device.',
       loginCompare:
         'Check that the portal confirmation code matches. Only approve a login you started:',
       loginRejected:
@@ -417,8 +419,10 @@ window.__ModuleLoader__.load({
       loginBadCredentials:
         'Incorrect password or verification code. Try again.',
       loginMethods:
-        'Use UAC scan, or choose a team account or emergency account.',
+        'Sign in with your system browser, or scan a code or use a team account here.',
       platformLogin: 'Sign in to platform',
+      platformBrowserLogin: 'Sign in with system browser',
+      platformInlineLogin: 'Scan or team account',
       configurePlatform: 'Configure platform',
       reconnect: 'Reconnect',
       loginDone: 'Signed in to the platform.',
@@ -2504,9 +2508,10 @@ window.__ModuleLoader__.load({
             )
               return;
             attempted.current = true;
-            if (shell.inlineLogin) return;
+            if (shell.inlineLogin || shell.platform === 'authenticating')
+              return;
             postLocal('auriga/shell/command', shell.csrf, {
-              action: 'inline_login',
+              action: 'open_login',
             })
               .catch(() => {})
               .finally(reloadShell);
@@ -2934,12 +2939,21 @@ window.__ModuleLoader__.load({
                     primary: true,
                     disabled: busy || !shell?.csrf,
                     onClick: modal
-                      ? () => command('inline_login')
+                      ? () => command('open_login')
                       : loginOverlayAvailable
                         ? openPlatformLogin
-                        : () => command('inline_login'),
+                        : () => command('open_login'),
                   },
-                  t('platformLogin'),
+                  t('platformBrowserLogin'),
+                ),
+              ['signedOut', 'reauth'].includes(view.kind) &&
+                h(
+                  Action,
+                  {
+                    disabled: busy || !shell?.csrf,
+                    onClick: () => command('inline_login'),
+                  },
+                  t('platformInlineLogin'),
                 ),
               view.kind === 'authenticating' &&
                 h(

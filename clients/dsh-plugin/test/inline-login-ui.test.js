@@ -3,7 +3,10 @@ import { test } from 'node:test';
 import { readFile } from 'node:fs/promises';
 import vm from 'node:vm';
 import { setImmediate } from 'node:timers';
+import { Readable } from 'node:stream';
 import { JSDOM } from 'jsdom';
+import { createConnectRoutes } from '../src/local/routes.js';
+import { producerRuntime } from './shell-producer-peer.js';
 
 // A React hook/element harness: tests actual registered component handlers.
 // It does not pretend to implement native ModuleLoader resolution or rendering.
@@ -66,7 +69,8 @@ async function fixture(http, options = {}) {
     },
   };
   vm.runInNewContext(
-    await readFile(new URL('../src/client.js', import.meta.url), 'utf8'),
+    options.source ??
+      (await readFile(new URL('../src/client.js', import.meta.url), 'utf8')),
     {
       window: dom.window,
       document: dom.window.document,
@@ -227,6 +231,173 @@ function all(tree) {
 const text = (tree) =>
   typeof tree === 'string' ? tree : (tree?.children ?? []).map(text).join(' ');
 
+// Actual local routes/runtime/shell consumer and Broker producer; only IAM and
+// the owner-authenticated IPC/browser boundaries are synthetic, never OS SSO.
+function producerHttp(peer) {
+  const pending = new Set();
+  const owner = { principal: { kind: 'owner' } };
+  const actions = [];
+  const routes = createConnectRoutes({
+    runtime: peer.runtime,
+    admission: {
+      nativeAuth: { requestRejection: () => undefined },
+      sameOrigin: (req) =>
+        req.method === 'GET' || req.headers.origin === 'http://127.0.0.1:12345',
+    },
+  });
+  return {
+    actions,
+    http(url, init = {}) {
+      const operation = (async () => {
+        const req = Readable.from(init.body ? [Buffer.from(init.body)] : []);
+        req.method = init.method ?? 'GET';
+        req.url = new URL(url).pathname;
+        req.headers = Object.fromEntries(
+          Object.entries(init.headers ?? {}).map(([name, value]) => [
+            name.toLowerCase(),
+            value,
+          ]),
+        );
+        if (req.method !== 'GET') {
+          req.headers.origin = 'http://127.0.0.1:12345';
+          actions.push(JSON.parse(init.body));
+        }
+        peer.runtime.bindNativeRequest(owner, req);
+        let status, body;
+        await routes(req, {
+          writeHead(code) {
+            status = code;
+          },
+          end(value) {
+            body = value;
+          },
+        });
+        return {
+          ok: status >= 200 && status < 300,
+          status,
+          json: async () => JSON.parse(body),
+        };
+      })();
+      pending.add(operation);
+      operation.then(
+        () => pending.delete(operation),
+        () => pending.delete(operation),
+      );
+      return operation;
+    },
+    async drain() {
+      while (pending.size) await Promise.all([...pending]);
+      await Promise.allSettled([...peer.source.broker.inflight]);
+    },
+  };
+}
+
+for (const platform of ['signed_out', 'reauth_required'])
+  test(`default browser primary action for ${platform}`, async () => {
+    const calls = [];
+    const f = await fixture(async (_url, init = {}) => {
+      if (init.body) calls.push(JSON.parse(init.body));
+      return { ok: true, json: async () => ({}) };
+    });
+    try {
+      const tree = await f.render({
+        configured: true,
+        brokerAvailable: true,
+        loggedIn: false,
+        platform,
+        csrf: 'csrf',
+      });
+      const primary = all(tree).find(
+        (node) => node.type?.name === 'Action' && node.props.primary,
+      );
+      assert.match(text(primary), /系统浏览器/);
+      primary.props.onClick();
+      await new Promise((resolve) => setImmediate(resolve));
+      assert.deepEqual(calls, [{ action: 'open_login' }]);
+    } finally {
+      f.close();
+    }
+  });
+
+test('existing browser device attempt is displayed without starting another login', async () => {
+  const calls = [];
+  const f = await fixture(async (_url, init = {}) => {
+    if (init.body) calls.push(JSON.parse(init.body));
+    return {
+      ok: true,
+      json: async () => ({
+        configured: true,
+        brokerAvailable: true,
+        loggedIn: false,
+        platform: 'authenticating',
+        csrf: 'csrf',
+        deviceAttempt: { userCode: 'BCDF-GHJK' },
+      }),
+    };
+  });
+  try {
+    const tree = await f.renderLogin();
+    const card = all(tree).find((node) => node.type?.name === 'PlatformCard');
+    assert.equal(card.props.shell.deviceAttempt.userCode, 'BCDF-GHJK');
+    assert.deepEqual(calls, []);
+  } finally {
+    f.close();
+  }
+});
+
+test('browser default UI reaches real routes, shell state and Broker device login on first sign-in and same-account relogin', async (t) => {
+  const peer = await producerRuntime(t, {
+    config: { platformOrigin: 'https://example.com' },
+  });
+  let deviceStarts = 0;
+  const begin = peer.source.platform.begin;
+  peer.source.platform.begin = async (signal) => {
+    deviceStarts++;
+    return begin(signal);
+  };
+  const bridge = producerHttp(peer);
+  const f = await fixture(bridge.http, { hash: '#auriga=platform-login' });
+  try {
+    await f.renderLogin();
+    await bridge.drain();
+    assert.equal(deviceStarts, 1);
+    assert.equal(peer.source.opened.length, 1);
+    const first = new URL(peer.source.opened[0]);
+    assert.equal(first.origin, 'https://example.com');
+    assert.match(first.pathname, /^\/device\/[BCDFGHJKLMNPQRSTVWXZ]{8}$/);
+    assert.equal(first.searchParams.has('provider'), false);
+    assert.equal(peer.runtime.status(peer.request).loggedIn, true);
+    const member = peer.runtime.resolve(peer.request).ownerId;
+    assert.equal(member, peer.source.identity.memberId);
+    assert.ok(bridge.actions.every((value) => value.action === 'open_login'));
+    assert.ok(
+      !JSON.stringify(bridge.actions).includes(peer.source.tokens.access_token),
+    );
+    const pendingUi = await f.renderLogin();
+    all(pendingUi)
+      .find((node) => node.type?.name === 'PlatformCard')
+      ?.props.reloadShell();
+    await bridge.drain();
+    assert.equal(await f.renderLogin(), null);
+    await peer.runtime.command(peer.request, 'logout');
+    assert.equal(peer.runtime.status(peer.request).loggedIn, false);
+    f.manual(peer.runtime.prepare(peer.request).body);
+    await f.renderLogin();
+    await bridge.drain();
+    assert.equal(deviceStarts, 2);
+    assert.equal(peer.source.opened.length, 2);
+    assert.equal(
+      new URL(peer.source.opened[1]).searchParams.get('mode'),
+      'manual',
+    );
+    assert.notEqual(new URL(peer.source.opened[1]).pathname, first.pathname);
+    assert.equal(peer.runtime.resolve(peer.request).ownerId, member);
+    assert.equal(peer.source.broker.record.manualLoginRequired, false);
+  } finally {
+    f.close();
+  }
+});
+
 test('native modal QR/form controls submit inline commands', async () => {
   const calls = [];
   const f = await fixture(async (url, init = {}) => {
@@ -243,7 +414,7 @@ test('native modal QR/form controls submit inline commands', async () => {
     };
     let tree = await f.render(status);
     all(tree)
-      .find((n) => n.type?.name === 'Action' && text(n) === '登录平台')
+      .find((n) => n.type?.name === 'Action' && text(n) === '扫码或团队账号')
       .props.onClick();
     await new Promise((resolve) => setImmediate(resolve));
     assert.equal(calls[0].action, 'inline_login');
@@ -345,7 +516,7 @@ test('business denial and wrong credentials show retry feedback separately from 
   }
 });
 
-test('global native modal starts login, skips for the session, reopens and closes on success', async () => {
+test('global native modal starts browser login, skips for the session, reopens and closes on success', async () => {
   let status = {
     configured: true,
     brokerAvailable: true,
@@ -364,20 +535,20 @@ test('global native modal starts login, skips for the session, reopens and close
     assert.ok(
       all(tree).some((n) => n.props?.className === 'auriga-login-footer'),
     );
-    assert.equal(calls.filter((c) => c.action === 'inline_login').length, 1);
+    assert.equal(calls.filter((c) => c.action === 'open_login').length, 1);
     tree.props.onClose();
     assert.equal(await f.renderLogin(), null);
     assert.equal(calls.at(-1).action, 'cancel_login');
     f.manual(status);
     tree = await f.renderLogin();
     assert.equal(tree.type.name, 'Modal');
-    assert.equal(calls.filter((c) => c.action === 'inline_login').length, 2);
+    assert.equal(calls.filter((c) => c.action === 'open_login').length, 2);
     status = { ...status, loggedIn: true, platform: 'authenticated' };
     const card = all(tree).find((n) => n.type?.name === 'PlatformCard');
     card.props.reloadShell();
     assert.equal(await f.renderLogin(), null);
     assert.equal(f.intervals.size, 0);
-    assert.ok(calls.every((c) => c.action !== 'open_login'));
+    assert.ok(calls.every((c) => c.action !== 'inline_login'));
   } finally {
     f.close();
   }
@@ -435,7 +606,7 @@ test('tray fragment is consumed and cannot bypass skip after a remount', async (
     f.remount();
     assert.equal(await f.renderLogin(), null);
     assert.equal(f.hash(), '');
-    assert.equal(calls.filter((c) => c.action === 'inline_login').length, 1);
+    assert.equal(calls.filter((c) => c.action === 'open_login').length, 1);
     assert.equal(f.intervals.size, 0);
   } finally {
     f.close();
@@ -484,7 +655,7 @@ test('only one tab owns login while the other waits without sending commands', a
   try {
     await fixtures[0].renderLogin();
     const waiting = await fixtures[1].renderLogin();
-    assert.equal(calls[0].filter((c) => c.action === 'inline_login').length, 1);
+    assert.equal(calls[0].filter((c) => c.action === 'open_login').length, 1);
     assert.equal(calls[1].length, 0);
     assert.ok(!all(waiting).some((n) => n.type?.name === 'PlatformCard'));
     assert.match(text(waiting), /\u5176\u4ed6\u7a97\u53e3/);
@@ -521,7 +692,7 @@ test('overview never duplicates modal QR rendering and a busy broker is not repo
     await new Promise((resolve) => setImmediate(resolve));
     const result = await f.render(signedOut);
     assert.doesNotMatch(text(result), /\u5e73\u53f0\u4e0d\u53ef\u8fbe/);
-    assert.equal(calls.at(-1).action, 'inline_login');
+    assert.equal(calls.at(-1).action, 'open_login');
   } finally {
     f.close();
   }
