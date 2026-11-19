@@ -16,6 +16,7 @@
     "./shared": "./src/shared/plugin.js",
     "./shared-ports": "./src/shared/ports-plugin.js",
     "./shared-browser": "./src/shared-browser/plugin.js",
+    "./dedicated": "./src/dedicated/plugin.js",
     "./client": "./src/client.js",
     "./cordis.patch.yml": "./cordis.patch.yml",
     "./package.json": "./package.json"
