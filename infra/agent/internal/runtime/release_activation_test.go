@@ -50,14 +50,30 @@ type releaseEngine struct {
 	beforeStart func(string)
 	afterStart  func()
 	afterCreate func()
+	catalog     http.HandlerFunc
+	stopUnknown bool
+	stops       int
 	healthy     atomic.Bool
+
+	beforeInspect func(string) error
 }
 
 func newReleaseEngine(t *testing.T) (*releaseEngine, *runtime.Docker, *dockerReleaseFixture) {
 	t.Helper()
 	e := &releaseEngine{containers: map[string]map[string]any{}, names: map[string]string{}}
 	e.healthy.Store(true)
-	health := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	health := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/auriga-node-resource-catalog" {
+			e.mu.Lock()
+			handler := e.catalog
+			e.mu.Unlock()
+			if handler != nil {
+				handler(w, r)
+			} else {
+				http.NotFound(w, r)
+			}
+			return
+		}
 		if e.healthy.Load() {
 			_, _ = io.WriteString(w, readyBody)
 		} else {
@@ -105,7 +121,7 @@ func (e *releaseEngine) serve(w http.ResponseWriter, r *http.Request) {
 		if e.mode == "annotation-only" {
 			id, annotation = annotation, fixtureConfigID
 		}
-		_ = json.NewEncoder(w).Encode(map[string]any{"Id": id, "Os": osName, "Architecture": arch, "RepoDigests": []string{ref}, "Descriptor": map[string]any{"annotations": map[string]string{"config.digest": annotation}}})
+		_ = json.NewEncoder(w).Encode(map[string]any{"Id": id, "Os": osName, "Architecture": arch, "RepoDigests": []string{ref}, "Config": map[string]any{"Cmd": []string{"fixture-dsh"}}, "Descriptor": map[string]any{"annotations": map[string]string{"config.digest": annotation}}})
 	case path == "/networks/create":
 		e.networks++
 		w.WriteHeader(http.StatusCreated)
@@ -127,6 +143,16 @@ func (e *releaseEngine) serve(w http.ResponseWriter, r *http.Request) {
 		}
 		w.WriteHeader(http.StatusCreated)
 		_ = json.NewEncoder(w).Encode(map[string]string{"Id": id})
+	case path == "/containers/json":
+		list := make([]map[string]any, 0, len(e.containers))
+		for id, body := range e.containers {
+			status := "exited"
+			if body["running"] == true {
+				status = "running"
+			}
+			list = append(list, map[string]any{"Id": id, "Labels": body["Labels"], "State": status})
+		}
+		_ = json.NewEncoder(w).Encode(list)
 	case strings.HasSuffix(path, "/json") && strings.HasPrefix(path, "/containers/"):
 		id := strings.TrimSuffix(strings.TrimPrefix(path, "/containers/"), "/json")
 		if named := e.names[id]; named != "" {
@@ -137,6 +163,14 @@ func (e *releaseEngine) serve(w http.ResponseWriter, r *http.Request) {
 			http.NotFound(w, r)
 			return
 		}
+		if hook := e.beforeInspect; hook != nil {
+			var err error
+			e.runHookUnlocked(func() { err = hook(id) })
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusServiceUnavailable)
+				return
+			}
+		}
 		image := body["Image"]
 		if e.mode == "container-image" {
 			image = "sha256:" + strings.Repeat("0", 64)
@@ -145,7 +179,18 @@ func (e *releaseEngine) serve(w http.ResponseWriter, r *http.Request) {
 		if e.mode == "container-id" {
 			actualID = strings.Repeat("f", 64)
 		}
-		_ = json.NewEncoder(w).Encode(map[string]any{"Id": actualID, "Image": image, "State": map[string]any{"Running": body["running"] == true, "StartedAt": "2026-01-01T01:02:03Z", "Pid": 42}, "Config": map[string]any{"Labels": body["Labels"]}, "HostConfig": body["HostConfig"], "NetworkSettings": map[string]any{"Ports": map[string]any{"7860/tcp": []any{map[string]string{"HostPort": e.port}}}}})
+		host := body["HostConfig"].(map[string]any)
+		var mounts []map[string]any
+		hostMounts, _ := host["Mounts"].([]any)
+		for _, value := range hostMounts {
+			m := value.(map[string]any)
+			mounts = append(mounts, map[string]any{"Type": m["Type"], "Source": m["Source"], "Destination": m["Target"], "RW": m["RW"]})
+		}
+		pid := 42
+		if body["replaced-process"] == true {
+			pid = 43
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"Id": actualID, "Image": image, "State": map[string]any{"Running": body["running"] == true, "StartedAt": "2026-01-01T01:02:03Z", "Pid": pid}, "Config": map[string]any{"Labels": body["Labels"], "Entrypoint": body["Entrypoint"], "Cmd": body["Cmd"]}, "HostConfig": host, "Mounts": mounts, "NetworkSettings": map[string]any{"Ports": map[string]any{"7860/tcp": []any{map[string]string{"HostPort": e.port}}}}})
 	case strings.HasSuffix(path, "/start"):
 		id := strings.TrimSuffix(strings.TrimPrefix(path, "/containers/"), "/start")
 		body := e.containers[id]
@@ -169,9 +214,15 @@ func (e *releaseEngine) serve(w http.ResponseWriter, r *http.Request) {
 		}
 		w.WriteHeader(http.StatusNoContent)
 	case strings.HasSuffix(path, "/stop"):
+		e.stops++
 		id := strings.TrimSuffix(strings.TrimPrefix(path, "/containers/"), "/stop")
 		if body := e.containers[id]; body != nil {
 			body["running"] = false
+		}
+		if e.stopUnknown {
+			e.stopUnknown = false
+			http.Error(w, "stop response is uncertain", http.StatusInternalServerError)
+			return
 		}
 		w.WriteHeader(http.StatusNoContent)
 	case strings.HasPrefix(path, "/containers/") && r.Method == http.MethodDelete:

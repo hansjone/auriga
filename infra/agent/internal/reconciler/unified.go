@@ -3,6 +3,8 @@ package reconciler
 import (
 	"context"
 	"errors"
+	"slices"
+	"time"
 
 	"github.com/hansjone/auriga/infra/agent/internal/runtime"
 	nodev1 "github.com/hansjone/auriga/infra/gen/auriga/node/v1"
@@ -56,6 +58,7 @@ func (r *Reconciler) enrichResources(ctx context.Context, status *nodev1.Instanc
 		status.Ready = false
 		status.Error = &nodev1.InstanceError{Code: "agent.ensure_failed", Message: "native resource observation unavailable", Retryable: true}
 	}
+	filterAppliedReports(status)
 }
 
 func (r *Reconciler) enrichPersistedResources(status *nodev1.InstanceStatus) {
@@ -67,4 +70,74 @@ func (r *Reconciler) enrichPersistedResources(status *nodev1.InstanceStatus) {
 			status.Error = &nodev1.InstanceError{Code: "agent.ensure_failed", Message: "trusted resource state unavailable", Retryable: true}
 		}
 	}
+	filterAppliedReports(status)
+}
+
+func filterAppliedReports(status *nodev1.InstanceStatus) {
+	guardian := status.GetUnifiedGuardian()
+	status.UnifiedResourceReports = slices.DeleteFunc(status.UnifiedResourceReports, func(report *resourcev1.UnifiedInstallationReport) bool {
+		return report.GetState() == "applied" && (!status.GetReady() || status.GetObservedGeneration() <= 0 ||
+			guardian.GetState() != "active" || guardian.GetGeneration() != uint64(status.GetObservedGeneration()) ||
+			report.GetObservedGeneration() != uint64(status.GetObservedGeneration()) ||
+			report.GetGeneration() != uint64(status.GetObservedGeneration()) ||
+			report.GetSelectionRevision() != guardian.GetSelectionRevision())
+	})
+}
+
+// READY for a signed runtime needs the current committed endpoint, not just
+// a successful Start or a cached resource observation.
+func (r *Reconciler) checkCommittedReady(ctx context.Context, status *nodev1.InstanceStatus) error {
+	if r.Activation == nil {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	actual, err := r.Driver.Inspect(ctx, status.InstanceId)
+	if err != nil {
+		return err
+	}
+	if !actual.Running || !actual.Ready || actual.Generation != status.ObservedGeneration {
+		return errors.New("committed runtime endpoint unavailable")
+	}
+	return ctx.Err()
+}
+
+func (r *Reconciler) guardReady(ctx context.Context, status *nodev1.InstanceStatus) {
+	if !status.Ready || r.checkCommittedReady(ctx, status) == nil {
+		return
+	}
+	markEndpointUnavailable(status)
+}
+
+func markEndpointUnavailable(status *nodev1.InstanceStatus) {
+	status.Ready = false
+	status.Phase = nodev1.InstancePhase_INSTANCE_PHASE_FAILED
+	status.Error = &nodev1.InstanceError{Code: "agent.start_failed", Message: "committed runtime endpoint unavailable", Retryable: true}
+	filterAppliedReports(status)
+}
+
+func (r *Reconciler) commitStatus(ctx context.Context, st *nodev1.InstanceStatus, save func() error) error {
+	r.guardReady(ctx, st)
+	if err := save(); err != nil {
+		return err
+	}
+	durableReady := st.Ready
+	r.guardReady(ctx, st)
+	if r.SyncEndpoint != nil {
+		if accepted := r.SyncEndpoint(st); st.Ready && !accepted {
+			markEndpointUnavailable(st)
+		}
+		// Ingress synchronization may have waited on the Engine or bridge.
+		r.guardReady(ctx, st)
+	}
+	if durableReady && !st.Ready {
+		if err := save(); err != nil {
+			return err
+		}
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	r.emit(st)
+	return nil
 }

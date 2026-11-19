@@ -18,42 +18,7 @@ func TestUnifiedRenewalExtendsRunningDeadlineWithoutResettingCAS(t *testing.T) {
 		t.Fatal(err)
 	}
 	stops := f.driver.stops
-	f.now = f.now.Add(10 * time.Minute)
-	f.mono = 600000
-	end := f.now.Add(2 * time.Hour).Format(time.RFC3339Nano)
-	envelope, err := unifiedProto(f.ref.Envelope)
-	if err != nil {
-		t.Fatal(err)
-	}
-	delete(envelope, "signature")
-	envelope["notAfter"] = end
-	unifiedSign(t, envelope, f.releasePrivate, "release")
-	raw, err := json.Marshal(envelope)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := protojson.Unmarshal(raw, f.ref.Envelope); err != nil {
-		t.Fatal(err)
-	}
-	list, err := unifiedProto(f.list)
-	if err != nil {
-		t.Fatal(err)
-	}
-	delete(list, "signature")
-	list["revision"] = json.Number("2")
-	list["expiresAt"] = end
-	unifiedSign(t, list, f.revPrivate, "revocation")
-	raw, err = json.Marshal(list)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := protojson.Unmarshal(raw, f.list); err != nil {
-		t.Fatal(err)
-	}
-	f.ref.Lease.ExpiresAt = end
-	f.ref.Lease.EnvelopeNotAfter = end
-	f.ref.Lease.RevocationsExpiresAt = end
-	f.ref.Lease.RevocationRevision = 2
+	end := renewFixtureResource(t, f, f.ref, f.list)
 	f.source.spec.Generation++
 	f.ref.ManifestDownloadPath = "/internal/resource/v1/catalog/downloads/renewed/manifest"
 	f.ref.Artifacts[0].DownloadPath = "/internal/resource/v1/catalog/downloads/renewed/artifacts/payload"
@@ -87,6 +52,47 @@ func TestUnifiedRenewalExtendsRunningDeadlineWithoutResettingCAS(t *testing.T) {
 	if err != nil || len(receipts) != 1 {
 		t.Fatal("installation receipt missing", err)
 	}
+}
+
+func renewFixtureResource(t *testing.T, f *unifiedFixture, ref *resourcev1.UnifiedResourceRef, revocations *resourcev1.ResourceRevocationList) string {
+	t.Helper()
+	f.now = f.now.Add(10 * time.Minute)
+	f.mono = 600000
+	end := f.now.Add(2 * time.Hour).Format(time.RFC3339Nano)
+	envelope, err := unifiedProto(ref.Envelope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	delete(envelope, "signature")
+	envelope["notAfter"] = end
+	unifiedSign(t, envelope, f.releasePrivate, "release")
+	raw, err := json.Marshal(envelope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := protojson.Unmarshal(raw, ref.Envelope); err != nil {
+		t.Fatal(err)
+	}
+	list, err := unifiedProto(revocations)
+	if err != nil {
+		t.Fatal(err)
+	}
+	delete(list, "signature")
+	list["revision"] = json.Number("2")
+	list["expiresAt"] = end
+	unifiedSign(t, list, f.revPrivate, "revocation")
+	raw, err = json.Marshal(list)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := protojson.Unmarshal(raw, revocations); err != nil {
+		t.Fatal(err)
+	}
+	ref.Lease.ExpiresAt = end
+	ref.Lease.EnvelopeNotAfter = end
+	ref.Lease.RevocationsExpiresAt = end
+	ref.Lease.RevocationRevision = 2
+	return end
 }
 
 func TestUnifiedCorruptLedgerStopsExistingProcess(t *testing.T) {

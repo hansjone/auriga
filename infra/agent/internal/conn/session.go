@@ -66,10 +66,20 @@ type Session struct {
 	lastWelcome *nodev1.Welcome
 	welcomeAt   time.Time
 	connected   bool
-	statusCh    chan *nodev1.InstanceStatus
+	statusCh    chan queuedStatus
 	usageCh     chan *nodev1.NodeUsage
 	wakeCh      chan *nodev1.WakeSchedule
-	resultCh    chan *nodev1.CommandResult
+	resultCh    chan queuedResult
+}
+
+type queuedStatus struct {
+	*nodev1.InstanceStatus
+	execution reconciler.UplinkExecution
+}
+
+type queuedResult struct {
+	result    *nodev1.CommandResult
+	execution reconciler.UplinkExecution
 }
 
 // New creates a session manager.
@@ -101,18 +111,22 @@ func New(cfg Config) *Session {
 	return &Session{
 		cfg:       cfg,
 		heartbeat: cfg.HeartbeatInterval,
-		statusCh:  make(chan *nodev1.InstanceStatus, 64),
+		statusCh:  make(chan queuedStatus, 64),
 		usageCh:   make(chan *nodev1.NodeUsage, 8),
 		wakeCh:    make(chan *nodev1.WakeSchedule, 16),
-		resultCh:  make(chan *nodev1.CommandResult, 64),
+		resultCh:  make(chan queuedResult, 64),
 	}
 }
 
 // StatusSink returns a sink that queues status for uplink.
 func (s *Session) StatusSink() reconciler.StatusSink {
 	return func(st *nodev1.InstanceStatus) {
+		msg := queuedStatus{InstanceStatus: st}
+		if st.GetReady() && s.cfg.Reconciler != nil {
+			msg.execution = s.cfg.Reconciler.CaptureUplinkExecution(st.GetInstanceId(), st.GetObservedGeneration())
+		}
 		select {
-		case s.statusCh <- st:
+		case s.statusCh <- msg:
 		default:
 			s.cfg.Logger.Warn("status channel full", "instance_id", st.GetInstanceId())
 		}
@@ -356,6 +370,10 @@ func (s *Session) runOnce(ctx context.Context) error {
 		errCh <- s.recvLoop(ctx, stream)
 	}()
 
+	return s.sendLoop(ctx, stream, hb, errCh)
+}
+
+func (s *Session) sendLoop(ctx context.Context, stream nodev1.NodeControlService_SessionClient, hb time.Duration, errCh <-chan error) error {
 	ticker := time.NewTicker(hb)
 	defer ticker.Stop()
 	for {
@@ -390,13 +408,27 @@ func (s *Session) runOnce(ctx context.Context) error {
 			}); err != nil {
 				return err
 			}
-		case st := <-s.statusCh:
+		case msg := <-s.statusCh:
+			st := msg.InstanceStatus
+			if r := s.cfg.Reconciler; r != nil {
+				st = r.StatusForUplink(ctx, st, msg.execution)
+			}
+			if err := ctx.Err(); err != nil {
+				return err
+			}
 			if err := stream.Send(&nodev1.SessionRequest{
 				Body: &nodev1.SessionRequest_Status{Status: st},
 			}); err != nil {
 				return err
 			}
-		case result := <-s.resultCh:
+		case msg := <-s.resultCh:
+			result := msg.result
+			if r := s.cfg.Reconciler; r != nil {
+				result = r.ResultForUplink(ctx, result, msg.execution)
+			}
+			if err := ctx.Err(); err != nil {
+				return err
+			}
 			if err := stream.Send(&nodev1.SessionRequest{Body: &nodev1.SessionRequest_Result{Result: result}}); err != nil {
 				return err
 			}
@@ -559,9 +591,9 @@ func (s *Session) handleControl(ctx context.Context, msg *nodev1.SessionResponse
 		}
 		command := body.Command
 		go func() {
-			result := s.cfg.Reconciler.Command(ctx, command)
+			result, execution := s.cfg.Reconciler.CommandForUplink(ctx, command)
 			select {
-			case s.resultCh <- result:
+			case s.resultCh <- queuedResult{result: result, execution: execution}:
 			case <-ctx.Done():
 			}
 		}()

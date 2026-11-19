@@ -167,6 +167,7 @@ func (m *UnifiedManager) prepareWithoutHostClock(ctx context.Context, spec *node
 	}
 	s.Tenant, s.Owner, s.Host = spec.GetTenantId(), spec.GetOwnerId(), spec.GetInstanceId()
 	s.Generation, s.SelectionRevision = spec.GetGeneration(), spec.GetResourceSelectionRevision()
+	s.ViewGeneration = 0
 	s.Reason = "verification_failed"
 	if err := m.save(root, s); err != nil {
 		return "", err
@@ -228,6 +229,7 @@ func (m *UnifiedManager) privateFallback(spec *nodev1.InstanceSpec) (string, err
 		}
 	}
 	s.Generation, s.SelectionRevision = spec.GetGeneration(), spec.GetResourceSelectionRevision()
+	s.ViewGeneration = 0
 	if err := m.save(root, s); err != nil {
 		return "", err
 	}
@@ -259,7 +261,7 @@ func (m *UnifiedManager) Status(id string) ([]*resourcev1.UnifiedInstallationRep
 			if proto.Unmarshal(record.Ref, &ref) != nil {
 				return nil, state, fmt.Errorf("invalid cached resource observation")
 			}
-			reports = append(reports, &resourcev1.UnifiedInstallationReport{ClientId: id, Identity: ref.GetIdentity(), InstallationRevision: record.InstallationRevision, SelectionRevision: s.SelectionRevision, Generation: uint64(s.Generation), ObservedGeneration: uint64(s.Generation), State: record.State, ReportSource: "node", ObservedAt: s.ObservedAt})
+			reports = append(reports, &resourcev1.UnifiedInstallationReport{ClientId: id, Identity: ref.GetIdentity(), InstallationRevision: record.InstallationRevision, SelectionRevision: s.SelectionRevision, Generation: s.observedGeneration(), ObservedGeneration: s.observedGeneration(), State: record.State, ReportSource: "node", ObservedAt: s.ObservedAt})
 		}
 	}
 	return reports, state, nil
@@ -276,7 +278,27 @@ func (p *Preparing) ResourceState(id string) ([]*resourcev1.UnifiedInstallationR
 	if p.Unified == nil {
 		return nil, nil, nil
 	}
-	return p.Unified.Status(id)
+	reports, guardian, err := p.Unified.Status(id)
+	if docker, ok := p.Inner.(*Docker); ok && err == nil {
+		// Observation receipts can be written while Start still owns an
+		// intent. Do not make applied evidence visible through the cached path
+		// until its live, committed endpoint is available.
+		for _, report := range reports {
+			if report.GetState() == "applied" {
+				if _, err := docker.Endpoint(id); err != nil {
+					visible := reports[:0]
+					for _, report := range reports {
+						if report.GetState() != "applied" {
+							visible = append(visible, report)
+						}
+					}
+					reports = visible
+				}
+				break
+			}
+		}
+	}
+	return reports, guardian, err
 }
 func (p *Preparing) GuardResources(ctx context.Context, spec *nodev1.InstanceSpec) error {
 	if p.Unified == nil {
@@ -324,6 +346,51 @@ func (d *Docker) VerifyResourceView(ctx context.Context, id string) error {
 		return fmt.Errorf("resource runtime is not running")
 	}
 	return nil
+}
+
+// probeStartupResources never consults or returns a public readiness proof.
+// The synchronous callback owns the release intent throughout this probe.
+func (d *Docker) probeStartupResources(ctx context.Context, scope *activationScope, proof dockerEndpoint) (Endpoint, error) {
+	id := proof.record.InstanceID
+	active, err := requireActivation(ctx, id)
+	if err != nil {
+		return Endpoint{}, err
+	}
+	if active != scope || scope.coordinator != d.Activation {
+		return Endpoint{}, fmt.Errorf("resource view does not match startup activation")
+	}
+	actual, err := d.actualRecord(id)
+	if err != nil {
+		return Endpoint{}, err
+	}
+	if !sameExecution(actual, scope.record) {
+		return Endpoint{}, fmt.Errorf("resource view execution changed during startup")
+	}
+	insp, err := d.checkEndpointView(ctx, actual, proof)
+	if err != nil {
+		return Endpoint{}, err
+	}
+	// startContainerView verifies the trusted mount for this label. Here a
+	// missing label must also fail, since this startup has resource state.
+	if !hasSharedResourceMount(insp) {
+		return Endpoint{}, fmt.Errorf("resource startup is missing its trusted read-only mount")
+	}
+	d.mu.Lock()
+	pending := d.endpoints[id].pending == scope
+	d.mu.Unlock()
+	if !pending {
+		return Endpoint{}, fmt.Errorf("resource startup endpoint was withdrawn")
+	}
+	if err := ctx.Err(); err != nil {
+		return Endpoint{}, err
+	}
+	return Endpoint{URL: proof.url}, nil
+}
+
+func hasSharedResourceMount(insp map[string]any) bool {
+	config, _ := insp["Config"].(map[string]any)
+	labels, _ := config["Labels"].(map[string]any)
+	return labels["auriga.shared-skills"] == "read-only"
 }
 
 func (d *Docker) verifyUnifiedMount(inspection map[string]any, id string) error {

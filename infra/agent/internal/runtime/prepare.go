@@ -434,6 +434,12 @@ func (p *Preparing) Start(ctx context.Context, id string) error {
 		if err := p.Unified.AuthorizeStart(ctx, id); err != nil {
 			return err
 		}
+		if docker, ok := p.Inner.(*Docker); ok {
+			if p.Unified.Driver != docker {
+				return fmt.Errorf("resource observer does not match the startup driver")
+			}
+			return docker.start(ctx, id, p.Unified)
+		}
 	}
 	if err := p.Inner.Start(ctx, id); err != nil {
 		return err

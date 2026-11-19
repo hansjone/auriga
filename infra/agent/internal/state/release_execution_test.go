@@ -320,6 +320,9 @@ func TestIntentClearCommitFailureKeepsPartitionBlocked(t *testing.T) {
 		}
 		s.db, err = bbolt.Open(filepath.Join(dir, "state.db"), 0600, &bbolt.Options{ReadOnly: true})
 		return err
+	}, func() error {
+		t.Fatal("failed intent deletion ran the commit callback")
+		return nil
 	})
 	if !errors.Is(err, bbolterrors.ErrDatabaseReadOnly) {
 		t.Fatal("clear commit failure lost", err)
