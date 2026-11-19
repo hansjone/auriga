@@ -6,6 +6,7 @@ import { createSharedRuntime, placementBinding } from '../shared/runtime.js';
 import { createProductionSharedPorts } from '../shared/production-ports.js';
 import { createSharedNodeTransport } from '../shared/node-transport.js';
 import { createSharedDownstream } from '../shared/downstream.js';
+import { loadHostSdk } from '../shared/host-sdk.js';
 import { createEnterpriseAdapter } from '../shared/enterprise.js';
 import {
   openSharedExecution,
@@ -166,11 +167,12 @@ export async function apply(ctx, config) {
       required.some((operation) => !healthy.operations.includes(operation))
     )
       fail('common.unavailable');
-    const { Peer } = await import('@deepseek-ai/dsh-client-connection');
+    const sdk = await loadHostSdk();
     ports = createProductionSharedPorts(ctx, {
       settings,
       bridge,
-      Peer,
+      Peer: sdk.Peer,
+      sdk,
       options,
       profileValidator: (context, expected) =>
         assertDedicatedProfile(context, expected, resources),
@@ -278,7 +280,11 @@ export async function apply(ctx, config) {
         return result;
       }),
     );
-    downstream = createSharedDownstream({ runtime, ports: ports.downstream });
+    downstream = createSharedDownstream({
+      runtime,
+      ports: ports.downstream,
+      sdk,
+    });
     disposers.push(
       ctx.llm.registerAdapter(['auriga-shared'], downstream.adapter),
     );
