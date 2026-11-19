@@ -21,6 +21,8 @@ R 的共享 profile 选择包入口 `auriga-dsh/shared`，不得同时加载默�
 - `invoke(action,binding,args)`：有限 action 的公开宿主调用。P 调用前后都重核本人归属；不得将未经检查的 sessionId/cwd 从 args 再次传入宿主，以覆盖已核 binding。
 - `assertProfile(expected)`：同步核对实际加载配置，只有全部已卸载的能力与固定平台 skill 根符合预期才返回 true。执行工具、terminal、jobs、subagent、stdio MCP、动态安装、个人 Key、私有 skill 均关闭；includeDefaultRoots=false，customSkillDirs 只能是 R 的平台活跃根。返回 false、Promise 或缺失均拒绝启动。该接口不是 P 已实际卸载控制器的证明，真实 profile 验收留联合接线。
 
+内部安装工厂可为独立实例复用底层授权：`createSharedRuntime({expectedMode})` 缺省 `shared`，只接受精确 `shared` 或 `dedicated`，每次绑定均必须匹配安装侧指定模式。`createProductionSharedPorts(ctx,{profileValidator})` 缺省保留共享 profile 校验；只有内部代码可提供同步 `(ctx,expectedProfile,skillRoots)=>true` 验证函数，Promise 或其他值都不能授予 profile。这两个参数不从浏览器或 YAML 读取，不放宽共享 guard，也不将共享消息原生来源扩到 dedicated。
+
 工具行使用公开配置 `mode: native`，对应 SHARED_PROFILE.toolPresentation。该配置让有限工具可被模型直接调用。R 的 profile 核验同时检查这一配置，公开 ToolRuntime 测试也按此配置装配。
 
 共享技能根是容器内唯一固定只读挂载 `/run/auriga/skills-active/current`，与 Agent 正式 writer、renderer 和 Docker mount 一致；Host 不接受宿主机 PoolLayout 路径、子路径或额外根。`skill-filesystem` 必须关闭默认根、不设置 bundled 根，provider 为 `auriga-shared`。原生 `skill` 工具沿公开 `tools/execute` 继续调用原 Registry/Filesystem；Host 前后核真实会话代次，并要求实际定义的 provider、source、完整路径和资源目录属于平台视图，返回正文与已核定义一致。私有目录、运行时同名覆盖及链接逃逸不能借这个工具加载；Shell、插件安装及其余非白名单工具仍拒绝。

@@ -16,8 +16,9 @@ import { canonical, fail, same, validate, verifyToken } from './protocol.js';
 /** Compose the documented DSH Host APIs with the node-owned W/IAM/N relay. */
 export function createProductionSharedPorts(
   ctx,
-  { settings, bridge, Peer, options },
+  { settings, bridge, Peer, options, profileValidator = assertSharedProfile },
 ) {
+  if (typeof profileValidator !== 'function') fail('common.validation_failed');
   const handles = new Map();
   const peers = new Map();
   const prepared = new WeakSet();
@@ -25,8 +26,17 @@ export function createProductionSharedPorts(
   const capabilities = new Map();
   const requests = new Map();
   let closed = false;
-  const checkProfile = (expected) =>
-    !closed && assertSharedProfile(ctx, expected, settings().skillRoots);
+  const checkProfile = (expected) => {
+    if (closed) return false;
+    const result = profileValidator(ctx, expected, settings().skillRoots);
+    if (typeof result?.then === 'function') {
+      // A supplied async validator never grants a profile. Drain rejection
+      // only; it remains a denial, not an authentication fallback.
+      void Promise.resolve(result).catch(() => {});
+      return false;
+    }
+    return result === true;
+  };
   const call = (operation, body, signal) => {
     if (closed) fail('common.unavailable');
     return bridge.call(operation, body, signal);

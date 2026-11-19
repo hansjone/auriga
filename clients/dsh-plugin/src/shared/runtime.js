@@ -52,8 +52,11 @@ export function createSharedRuntime({
   identityKeys,
   capabilityKeys,
   physicalInstanceId,
+  expectedMode = 'shared',
   now = () => Math.floor(Date.now() / 1000),
 }) {
+  if (!['shared', 'dedicated'].includes(expectedMode))
+    fail('common.validation_failed');
   const ownership = new Map(),
     peers = new WeakMap(),
     replay = new Map();
@@ -69,7 +72,7 @@ export function createSharedRuntime({
         b.authGeneration < f.authGeneration)
     )
       fail();
-    if (b.mode !== 'shared' || b.physicalInstanceId !== physicalInstanceId)
+    if (b.mode !== expectedMode || b.physicalInstanceId !== physicalInstanceId)
       fail('shared.binding_mismatch');
   };
   async function current(b) {
