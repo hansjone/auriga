@@ -16,6 +16,8 @@ if [ -e "$(marker_path)" ] || [ "${1:-}" != init ]; then
   done
 fi
 case "${1:-}" in
+  shared-replay-stage|shared-replay-prepare-path|shared-replay-final-path|shared-replay-provision|shared-replay-verify-final|shared-replay-close|shared-replay-check)
+    exec "$(bootstrap_binary)" shared-replay-prepare -base "$AURIGA_DATA_ROOT/config/materials" -action "${1#shared-replay-}" ;;
   materials-stage|materials-commit|materials-rollback|materials-status|materials-check|materials-path|materials-project|materials-project-core)
     _action=${1#materials-}
     set -- -action "$_action" -base "$AURIGA_DATA_ROOT/config/materials" -out "$AURIGA_DATA_ROOT/config/materials-upgrades" -access-file "$AURIGA_ACCESS_FILE"

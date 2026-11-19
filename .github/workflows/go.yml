@@ -103,7 +103,9 @@ jobs:
           exec > >(tee "$RUNNER_TEMP/auriga-nas-pure.log") 2>&1
           test -z "$(gofmt -l .)"
           go vet ./...
-          go test -count=1 -run '^(TestSharedMaterialsExistingKeyEncodingsAndPurposeSeparation|TestSharedMaterialsRejectMissingExtraDriftAndCrossPurposeReuse|TestSharedReplayNATSUserHasNoGlobalOrForeignPermissions|TestSharedEnterpriseProjectionUsesOnlyApprovedPublicFields|TestSharedRuntimeProjectionPreservesFullSpecAndRejectsSealedOrUnknown|TestSharedInstallationReceiptHistoryRejectsBrokenAndCommittedRollback|TestSharedInstallationClosedSourceDigestIncludesAllPrivateAndPublicLeaves)$' -json .
+          go test -count=1 -run '^(TestSharedMaterialsExistingKeyEncodingsAndPurposeSeparation|TestSharedMaterialsRejectMissingExtraDriftAndCrossPurposeReuse|TestSharedReplayNATSUserHasNoGlobalOrForeignPermissions|TestSharedEnterpriseProjectionUsesOnlyApprovedPublicFields|TestSharedRuntimeProjectionPreservesFullSpecAndRejectsSealedOrUnknown|TestSharedInstallationReceiptHistoryRejectsBrokenAndCommittedRollback|TestSharedInstallationClosedSourceDigestIncludesAllPrivateAndPublicLeaves|TestSharedNATSProjectionPreservesPasswordUsersAndAddsOnlyTheDedicatedAuthority|TestSharedReplayPrepareCreatesOnlyTheMissingFixedBucketAndPreservesItsIdentity|TestSharedReplayPrepareAuthorityExistsOnlyInTheSeparateConfiguration|TestSharedMissingOutboundPolicyDeniesAllDestinationsAndPreservesApprovedAdapter|TestSharedEmptyAdapterCannotShadowLegacyUACIdentitySources)$' -json .
+          AURIGA_SHARED_NATS_FIXTURE="$RUNNER_TEMP/auriga-shared-nats-fixture" go test -count=1 -run '^TestSharedNATSProjectionPreservesPasswordUsersAndAddsOnlyTheDedicatedAuthority$' .
+          (cd ../../../infra/edge && GOWORK="$GITHUB_WORKSPACE/infra/go.work" AURIGA_SHARED_NATS_FIXTURE="$RUNNER_TEMP/auriga-shared-nats-fixture" go test -count=1 -run '^TestSharedReplayNATSServerConfigUsesOnlyDedicatedUserAndBucket$' -v .)
           go build -o "$RUNNER_TEMP/auriga-nas-bootstrap" .
           go test -c -o "$RUNNER_TEMP/auriga-nas-shared.test" .
       - name: Verify NAS private metadata as root

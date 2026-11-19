@@ -200,6 +200,14 @@ func TestSharedReplayNATSServerConfigUsesOnlyDedicatedUserAndBucket(t *testing.T
 	}
 	path := filepath.Join(t.TempDir(), "nats.conf")
 	config := []byte("port: -1\njetstream: {store_dir: '/unused-fixture-store'}\naccounts {\nAURIGA: {\njetstream: enabled\nusers: [\n" + string(user) + "\n]\n}\n}\n")
+	fullFixture := os.Getenv("AURIGA_SHARED_NATS_FIXTURE")
+	if fullFixture != "" {
+		var err error
+		config, err = os.ReadFile(filepath.Join(fullFixture, "nats.conf"))
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
 	if err := os.WriteFile(path, config, 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -207,8 +215,105 @@ func TestSharedReplayNATSServerConfigUsesOnlyDedicatedUserAndBucket(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(options.Nkeys) != 1 || len(options.Users) != 0 {
+	legacyUsers := 0
+	if fullFixture != "" {
+		legacyUsers = 5
+	} // SYS sys plus four original AURIGA password users.
+	if len(options.Nkeys) != 1 || len(options.Users) != legacyUsers {
 		t.Fatal("replay config did not define one dedicated NKey user")
+	}
+	if fullFixture != "" {
+		platformFound := false
+		for _, legacy := range options.Users {
+			if legacy.Password != "synthetic-password-not-a-real-credential" {
+				t.Fatal("legacy password changed by shared projection")
+			}
+			if legacy.Username != "platform" {
+				continue
+			}
+			platformFound = true
+			if legacy.Permissions == nil || legacy.Permissions.Publish == nil {
+				t.Fatal("platform read permissions missing")
+			}
+			readSubjects := map[string]bool{}
+			for _, subject := range legacy.Permissions.Publish.Allow {
+				if !strings.Contains(subject, "auriga-shared-entry") {
+					continue
+				}
+				if subject != "$JS.API.STREAM.INFO.KV_auriga-shared-entry" && subject != "$JS.API.STREAM.MSG.GET.KV_auriga-shared-entry" && subject != "$JS.API.DIRECT.GET.KV_auriga-shared-entry" && subject != "$JS.API.DIRECT.GET.KV_auriga-shared-entry.>" {
+					t.Fatal("platform received shared write or management authority")
+				}
+				readSubjects[subject] = true
+			}
+			if len(readSubjects) != 4 {
+				t.Fatal("platform dedicated read permission set changed")
+			}
+		}
+		if !platformFound {
+			t.Fatal("legacy platform user absent")
+		}
+		prepareOptions, err := server.ProcessConfigFile(filepath.Join(fullFixture, "prepare.nats.conf"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		installerPublic, err := os.ReadFile(filepath.Join(fullFixture, "installer.nkey"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(prepareOptions.Nkeys) != 2 || len(prepareOptions.Users) != len(options.Users) {
+			t.Fatal("prepare configuration changed resident accounts")
+		}
+		installerFound := false
+		for _, key := range prepareOptions.Nkeys {
+			if key.Nkey != string(installerPublic) {
+				continue
+			}
+			installerFound = true
+			p := key.Permissions
+			if p == nil || p.Publish == nil || p.Subscribe == nil || len(p.Subscribe.Allow) != 1 || p.Subscribe.Allow[0] != "_INBOX_auriga_shared_install.>" || len(p.Publish.Allow) != 3 {
+				t.Fatal("installer permissions changed")
+			}
+			allow := map[string]bool{"$JS.API.INFO": true, "$JS.API.STREAM.INFO.KV_auriga-shared-entry": true, "$JS.API.STREAM.CREATE.KV_auriga-shared-entry": true}
+			for _, subject := range p.Publish.Allow {
+				if !allow[subject] {
+					t.Fatal("installer has foreign/read/update authority")
+				}
+				delete(allow, subject)
+			}
+			if len(allow) != 0 {
+				t.Fatal("installer exact permission set differs")
+			}
+		}
+		if !installerFound {
+			t.Fatal("prepare configuration lacks independent installer")
+		}
+		for _, key := range options.Nkeys {
+			if key.Nkey == string(installerPublic) {
+				t.Fatal("installer remains in final server configuration")
+			}
+		}
+		public, err := os.ReadFile(filepath.Join(fullFixture, "replay.nkey"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		option, err := sharedNATSAuthentication(&SharedDshConfig{NATSSeedFile: filepath.Join(fullFixture, "replay.seed")})
+		if err != nil {
+			t.Fatal(err)
+		}
+		client := nats.GetDefaultOptions()
+		if err := option(&client); err != nil || client.Nkey != string(public) {
+			t.Fatal("consumer seed does not identify projected server user", err)
+		}
+		verifier, err := nkeys.FromPublicKey(string(public))
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer verifier.Wipe()
+		nonce := []byte("synthetic-full-NAS-nonce")
+		signature, err := client.SignatureCB(nonce)
+		if err != nil || verifier.Verify(nonce, signature) != nil {
+			t.Fatal("actual fresh seed file did not sign projected user nonce")
+		}
 	}
 	permissions := options.Nkeys[0].Permissions
 	if permissions == nil || permissions.Publish == nil || permissions.Subscribe == nil {

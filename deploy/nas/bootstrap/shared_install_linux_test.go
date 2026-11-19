@@ -22,6 +22,7 @@ func TestSharedInstallationLinuxMetadataRejectsLinksOwnersModesAndUnknownLeaves(
 	if os.Geteuid() != 0 {
 		t.Fatal("this pure metadata fixture requires root; no installation service is contacted")
 	}
+	testSharedReplayPrivateSourceMetadata(t)
 	root := t.TempDir()
 	if err := os.Chmod(root, 0700); err != nil {
 		t.Fatal(err)

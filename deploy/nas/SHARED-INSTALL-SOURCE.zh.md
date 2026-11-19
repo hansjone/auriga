@@ -40,3 +40,9 @@
 尚未commit的stage可以用同一base批准摘要执行 `-action rollback`；重复rollback幂等。再次用原stage参数重试会沿追加receipt链恢复staged，复用全部原密钥。commit之后禁止材料rollback或隐式轮换。已部署后的故障维护应先通过原标准命令停止公开Edge入口并保留现有Agent/池/配额home，修复配置后重新核验；不得通过删除本源、池账本、执行分区或高水位伪装新安装。此CLI本身不启动、停止或重建任何服务。
 
 消息侧另需既有批准msgnet材料、原collab IAM通道/服务票据、真实standalone shared-message Bean和公开root投影；本批Host尚未投影messageTrust，不称消息功能可用。普通team用户的模型和受控普通工具不应依赖公司UAC登录或消息可用性。
+
+## 固定 replay 桶安装小批
+
+在原shared-source已commit、标准render已使用当前NATS模板后，执行 `sh deploy/nas/scripts/shared-replay-prepare.sh`。host与container模式均支持；两个真实网络操作必须使用原本地immutable installer镜像，只连固定auriga-nas-test_internal网络的nats服务，没有socket/任意endpoint/通用argv。脚本停止Edge，产生root0700独立临时NKey，只在prepare配置出现。受控helper只可AccountInfo、固定桶INFO/CREATE；已有同名桶只核固定subjects/无Sources与Mirror/文件存储/history1/TTL至少12h/DiscardNew/无限聚合容量，拒绝改删或丢失receipt后的重建。
+
+随后强制重建固定project/service的NATS为无installer配置，确认旧进程停止/移除与新进程运行；installer明确Authorization拒绝且Edge成功读取同一Created的桶后才开本地gate。断网/超时不算撤权；失败恢复常驻配置，无法恢复则停固定Edge/NATS。五个旧password用户不放权，W原四读不增加，Edge常驻无CREATE/UPDATE。此小批成功后仍保持Edge停止；完整shared role/start/render/upgrade接线属于下一批，不能将本命令成功称门户已启用。公开复核入口为 `shared-replay-prepare -base 固定materials -action check`；stage/prepare-path/final-path均为离线材料操作，provision/verify-final只能通过固定网络helper。

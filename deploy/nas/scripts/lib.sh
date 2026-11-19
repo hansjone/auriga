@@ -408,7 +408,75 @@ managed_identity_available() (
   cmp -s "$_identity_source/network-platform/managed-network.json" "$_identity_file"
 )
 
+shared_replay_action() (
+  _shared_action=$1
+  case "$_shared_action" in stage|prepare-path|final-path|check|close) ;; *) die 'unsupported offline replay action' ;; esac
+  if [ "${AURIGA_INSTALL_MODE:-host}" = container ] && [ "${NAS_INSTALLER_ACTIVE:-}" != 1 ]; then
+    sh "$NAS_ROOT/scripts/installer.sh" "shared-replay-$_shared_action"
+  else
+    "$(bootstrap_binary)" shared-replay-prepare -base "$AURIGA_DATA_ROOT/config/materials" -action "$_shared_action"
+  fi
+)
+
+# Cleanup is independent of rejected source material. Targets are fixed labels.
+shared_emergency_stop() {
+  for _shared_service in edge nats; do
+    _shared_ids=$(docker ps -q --no-trunc --filter "label=com.docker.compose.project=$AURIGA_NAS_PROJECT" --filter "label=com.docker.compose.service=$_shared_service") || return 1
+    for _shared_id in $_shared_ids; do
+      [ "${#_shared_id}" = 64 ] || return 1
+      case "$_shared_id" in *[!a-f0-9]*) return 1 ;; esac
+      docker stop --time 10 "$_shared_id" >/dev/null || return 1
+    done
+    _shared_ids=$(docker ps -q --no-trunc --filter "label=com.docker.compose.project=$AURIGA_NAS_PROJECT" --filter "label=com.docker.compose.service=$_shared_service") || return 1
+    [ -z "$_shared_ids" ] || return 1
+  done
+}
+
+shared_nats_container() (
+  _shared_ids=$(docker ps -aq --no-trunc --filter "label=com.docker.compose.project=$AURIGA_NAS_PROJECT" --filter label=com.docker.compose.service=nats) || return 1
+  [ -n "$_shared_ids" ] || return 0
+  [ "${#_shared_ids}" = 64 ] || return 1
+  case "$_shared_ids" in *[!a-f0-9]*) return 1 ;; esac
+  [ "$(docker inspect -f '{{index .Config.Labels "com.docker.compose.project"}}/{{index .Config.Labels "com.docker.compose.service"}}' "$_shared_ids")" = "$AURIGA_NAS_PROJECT/nats" ] || return 1
+  printf '%s' "$_shared_ids"
+)
+
+shared_confirm_nats_replaced() (
+  _shared_old=$1
+  _shared_new=$(shared_nats_container) || return 1
+  [ -n "$_shared_new" ] && [ "$_shared_old" != "$_shared_new" ] || return 1
+  [ "$(docker inspect -f '{{.State.Running}}' "$_shared_new")" = true ] || return 1
+  if [ -n "$_shared_old" ]; then
+    # A successful daemon query proves removal/stopped process; a timeout does not.
+    _shared_old_exists=$(docker ps -aq --no-trunc --filter "id=$_shared_old") || return 1
+    if [ -n "$_shared_old_exists" ]; then
+      [ "$_shared_old_exists" = "$_shared_old" ] || return 1
+      [ "$(docker inspect -f '{{.State.Running}}' "$_shared_old")" = false ] || return 1
+    fi
+  fi
+)
+
+shared_replay_compose() (
+  _phase=$1
+  case "$_phase" in prepare|final) ;; *) die 'unsupported fixed replay phase' ;; esac
+  _source=$(shared_replay_action "$_phase-path")
+  _digest=${_source##*/g-}
+  [ "${#_digest}" = 64 ] || die 'invalid checked replay configuration digest'
+  case "$_digest" in *[!a-f0-9]*) die 'invalid replay configuration digest' ;; esac
+  [ "$_source" = "$AURIGA_DATA_ROOT/config/shared-replay-runtime/g-$_digest" ] || die 'invalid checked replay configuration path'
+  _private=$(installer_private_dir replay-compose)
+  trap 'rm -rf -- "$_private"' EXIT
+  _yaml=$(printf '%s' "$_source" | sed -e "s/'/''/g" -e 's/\$/$$/g')
+  printf "services:\n  nats:\n    volumes:\n      - '%s/nats.conf:/etc/nats/nats.conf:ro'\n" "$_yaml" >"$_private/nats.yml"
+  run_compose -f "$_private/nats.yml" --env-file "$AURIGA_DATA_ROOT/stack.env" up -d --no-deps --no-build --pull never --force-recreate --wait --wait-timeout 120 nats
+)
+
 run_compose() (
+  case "${1:-}" in
+    __shared_replay_nats_prepare|__shared_replay_nats_final)
+      [ "$#" = 1 ] || die 'fixed replay Compose operation accepts no arguments'
+      shared_replay_compose "${1##*_}"; return ;;
+  esac
 	case "${AURIGA_ONECLICK_PUBLISH:-false}" in
 	  true) set -- -f "$NAS_ROOT/oneclick-compose.yml" "$@" ;;
 	  false) ;;

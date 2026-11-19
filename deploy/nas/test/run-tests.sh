@@ -88,6 +88,8 @@ if sh "$ROOT/test/device-presence.sh"; then pass device_presence_upgrade
 else fail_msg device_presence_upgrade "old optional identity blocked init/render"; fi
 if sh "$ROOT/test/container-installer.sh"; then pass container_installer_regressions
 else fail_msg container_installer_regressions "container installer boundary failed"; fi
+if sh "$ROOT/test/shared-replay-prepare.sh"; then pass shared_replay_fixed_sequence
+else fail_msg shared_replay_fixed_sequence "shared replay preparation/revocation sequence failed"; fi
 
 try_validate() {
   # validate_data_root calls die on failure — isolate in subshell

@@ -137,6 +137,12 @@ tar -C "$TMP/export" -cf "$TMP/export.tar" platform.env edge.env agent.env audit
 check reject_invalid_overlay_decision 1 sh -c '. "$NAS_ROOT/scripts/lib.sh"; load_stack_env; run_compose config --quiet'
 tar -C "$TMP/export" -cf "$TMP/export.tar" platform.env edge.env agent.env
 check reject_missing_overlay_decision 1 sh -c '. "$NAS_ROOT/scripts/lib.sh"; load_stack_env; run_compose config --quiet'
+for operation in shared-replay-provision shared-replay-verify-final; do
+  check "fixed_replay_network_$operation" 0 sh "$NAS_ROOT/scripts/installer.sh" "$operation"
+  if grep -q -- '--network auriga-nas-test_internal --user 0:0 --cap-drop ALL' "$INSTALL_LOG" && ! grep -q docker.sock "$INSTALL_LOG"; then printf 'PASS replay_network_has_no_socket\n'
+  else printf 'FAIL replay_network_boundary\n'; fail=1; fi
+done
+check reject_replay_extra_endpoint 1 sh "$NAS_ROOT/scripts/installer.sh" shared-replay-provision nats://outside:4222
 ln -s "$TMP/access.json" "$TMP/access-link.json"
 sed -i "s|^AURIGA_ACCESS_FILE=.*|AURIGA_ACCESS_FILE=$TMP/access-link.json|" "$AURIGA_DATA_ROOT/stack.env"
 check reject_input_symlink 1 sh "$NAS_ROOT/scripts/installer.sh" init

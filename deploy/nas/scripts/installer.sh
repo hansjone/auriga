@@ -4,6 +4,7 @@ set -eu
 . "$(CDPATH= cd -P -- "$(dirname -- "$0")" && pwd)/lib.sh"
 case "${1:-}" in
   init|render|render-core|render-collab|check|prepare-socket|export-env|activate-collab|runtime-path|runtime-stage|runtime-commit|runtime-rollback|collab-publish|collab-install|collab-status|collab-history-check|collab-history-check-pg|collab-startup-check|collab-path|collab-check|collab-stop|collab-prepare|collab-renew|collab-prepare-recovery|collab-recover-expired|collab-queue-prepare|collab-queue-export|collab-queue-import|collab-recover-pending|collab-pause|collab-resume|materials-stage|materials-commit|materials-rollback|materials-status|materials-check|materials-path|materials-project|materials-project-core) operation=$1 ;;
+  shared-replay-stage|shared-replay-prepare-path|shared-replay-final-path|shared-replay-provision|shared-replay-verify-final|shared-replay-close|shared-replay-check) operation=$1 ;;
   *) die 'Usage: sh installer.sh init|render|check|prepare-socket|export-env|activate-collab' ;;
 esac
 upgrade_bundle=
@@ -23,7 +24,10 @@ case "$operation" in
   *) [ "$#" = 1 ] || die 'installer accepts exactly one operation' ;;
 esac
 load_stack_env >&2
-[ "${AURIGA_INSTALL_MODE:-host}" = container ] || die 'set AURIGA_INSTALL_MODE=container explicitly'
+case "$operation" in
+  shared-replay-provision|shared-replay-verify-final) ;;
+  *) [ "${AURIGA_INSTALL_MODE:-host}" = container ] || die 'set AURIGA_INSTALL_MODE=container explicitly' ;;
+esac
 require_cmd docker readlink stat mktemp
 validate_input_path() {
   _input=$1
@@ -87,6 +91,8 @@ esac
 # A bootstrap located inside the writable root was already rejected above.
 # Only explicit collab operations receive the local socket. Normal offline
 # installation/render helpers still receive neither a socket nor a network.
+_installer_network=none
+case "$operation" in shared-replay-provision|shared-replay-verify-final) _installer_network=auriga-nas-test_internal ;; esac
 (
   umask 077
   _run_tmp=$(installer_private_dir installer)
@@ -104,7 +110,7 @@ esac
   trap 'exit 130' INT
   trap 'exit 143' TERM
   docker run --rm --pull never --cidfile "$_run_tmp/cid" \
-    --network none --user 0:0 --cap-drop ALL \
+    --network "$_installer_network" --user 0:0 --cap-drop ALL \
     --cap-add CHOWN --cap-add DAC_OVERRIDE --cap-add FOWNER --cap-add SETUID --cap-add SETGID \
     --security-opt no-new-privileges:true --read-only --tmpfs /tmp:mode=1777,exec \
     "$@" --env "NAS_ROOT=$NAS_ROOT" --env "AURIGA_DATA_ROOT=$AURIGA_DATA_ROOT" \
