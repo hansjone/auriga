@@ -6,12 +6,15 @@ require (
 	github.com/hansjone/auriga/deploy/bootstrap v0.0.0
 	github.com/hansjone/auriga/infra/agent v0.0.0
 	github.com/hansjone/auriga/infra/gen v0.0.0
+	github.com/nats-io/nats.go v1.49.0
 	github.com/nats-io/nkeys v0.4.15
 	golang.org/x/sys v0.48.0
 	google.golang.org/protobuf v1.36.11
 )
 
 require (
+	github.com/klauspost/compress v1.18.7 // indirect
+	github.com/nats-io/nuid v1.0.1 // indirect
 	github.com/robfig/cron/v3 v3.0.1 // indirect
 	github.com/santhosh-tekuri/jsonschema/v6 v6.0.3 // indirect
 	go.etcd.io/bbolt v1.4.3 // indirect

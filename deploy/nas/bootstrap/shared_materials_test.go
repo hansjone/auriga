@@ -163,7 +163,7 @@ func TestSharedReplayNATSUserHasNoGlobalOrForeignPermissions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, forbidden := range []string{`"$JS.API.>"`, `"$KV.>"`, `"_INBOX.>"`, `KV_auriga-sessions`, `KV_auriga-routes`, `STREAM.DELETE`, `CONSUMER.`} {
+	for _, forbidden := range []string{`"$JS.API.>"`, `"$KV.>"`, `"_INBOX.>"`, `KV_auriga-sessions`, `KV_auriga-routes`, `STREAM.CREATE`, `STREAM.UPDATE`, `STREAM.DELETE`, `CONSUMER.`} {
 		if strings.Contains(config, forbidden) {
 			t.Fatal("replay identity has unrelated access")
 		}

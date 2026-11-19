@@ -129,6 +129,12 @@ func renderSharedHostConfig(args []string, out, logs io.Writer) error {
 	if e != nil {
 		return e
 	}
+	// The installer consumes this public output with an exact 0444 contract.
+	// O_EXCL's creation mode is masked by umask; pin it on the same owned fd.
+	if e = file.Chmod(0444); e != nil {
+		_ = file.Close()
+		return e
+	}
 	_, writeErr := file.Write(append(body, '\n'))
 	syncErr := file.Sync()
 	closeErr := file.Close()

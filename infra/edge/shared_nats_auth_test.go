@@ -217,14 +217,14 @@ func TestSharedReplayNATSServerConfigUsesOnlyDedicatedUserAndBucket(t *testing.T
 	if len(permissions.Subscribe.Allow) != 1 || permissions.Subscribe.Allow[0] != "_INBOX_auriga_shared_entry.>" {
 		t.Fatal("foreign inbox subscription granted")
 	}
-	if len(permissions.Publish.Allow) != 7 {
+	if len(permissions.Publish.Allow) != 5 {
 		t.Fatal("replay publish allowlist changed without contract review")
 	}
 	for _, subject := range permissions.Publish.Allow {
 		if subject == "$KV.auriga-shared-entry.ticket.*" {
 			continue
 		}
-		if !strings.HasPrefix(subject, "$JS.API.") || !strings.Contains(subject, ".KV_auriga-shared-entry") || strings.Contains(subject, "DELETE") || strings.Contains(subject, "CONSUMER") {
+		if !strings.HasPrefix(subject, "$JS.API.") || !strings.Contains(subject, ".KV_auriga-shared-entry") || strings.Contains(subject, "CREATE") || strings.Contains(subject, "UPDATE") || strings.Contains(subject, "DELETE") || strings.Contains(subject, "CONSUMER") {
 			t.Fatal("replay identity has foreign/global authority")
 		}
 	}

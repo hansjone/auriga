@@ -6,7 +6,6 @@ import (
 	"crypto/ed25519"
 	"encoding/base64"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net/url"
@@ -170,22 +169,10 @@ func openSharedEntry(cfg Config, routes RouteStore, ownerSigner IdentitySigner) 
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	kv, err := js.KeyValue(ctx, sharedEntryBucket)
-	if errors.Is(err, jetstream.ErrBucketNotFound) {
-		// The installer explicitly grants this identity only the dedicated
-		// bucket. Creating it never broadens browser or user access.
-		kv, err = js.CreateKeyValue(ctx, jetstream.KeyValueConfig{
-			Bucket: sharedEntryBucket, TTL: 12 * time.Hour, Storage: jetstream.FileStorage,
-		})
-	}
+	kv, err := bindSharedReplayBucket(ctx, js)
 	if err != nil {
 		close()
-		return nil, nil, fmt.Errorf("shared replay ledger unavailable")
-	}
-	status, err := kv.Status(ctx)
-	if err != nil || status.Config().Storage != jetstream.FileStorage || status.TTL() > 0 && status.TTL() < 12*time.Hour {
-		close()
-		return nil, nil, fmt.Errorf("shared replay ledger retention is shorter than browser bindings")
+		return nil, nil, err
 	}
 	return &SharedEntry{
 		Authority: &sharedWorkspaceAuthority{rpc: rpc, client: workspacev1.NewSharedDshServiceClient(rpc.conn), routes: routes, tenant: cfg.Access.TenantID()},
