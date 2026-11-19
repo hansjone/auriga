@@ -25,8 +25,11 @@ func main() {
 }
 
 func run(args []string, stdout, stderr io.Writer) error {
+	if len(args) > 0 && args[0] == "publisher-root" {
+		return publisherRootCommand(args[1:], stdout, stderr)
+	}
 	if len(args) == 0 || (args[0] != "sign" && args[0] != "verify" && args[0] != "stage-layout" && args[0] != "import-layout") {
-		return fmt.Errorf("usage: runtime-release sign|verify|stage-layout|import-layout --help")
+		return fmt.Errorf("usage: runtime-release publisher-root|sign|verify|stage-layout|import-layout --help")
 	}
 	if args[0] == "stage-layout" || args[0] == "import-layout" {
 		seen := map[string]bool{}
