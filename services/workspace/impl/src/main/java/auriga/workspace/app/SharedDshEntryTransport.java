@@ -26,6 +26,7 @@ public final class SharedDshEntryTransport
         SharedDshResourceMarketQueries.ReadyEntryProbe,
         AutoCloseable {
   public static final String PROFILE_PATH = "/_auriga/shared-profile";
+  public static final String DEDICATED_PROFILE_PATH = "/_auriga/dedicated-profile";
   public static final String PROFILE_HEADER = "Auriga-Shared-Profile-Probe";
   private static final Map<String, Object> PROFILE =
       Map.ofEntries(
@@ -39,6 +40,16 @@ public final class SharedDshEntryTransport
           Map.entry("personalKeys", false),
           Map.entry("includeDefaultRoots", false),
           Map.entry("toolPresentation", "native"));
+  private static final Map<String, Object> DEDICATED_PROFILE =
+      Map.of(
+          "pluginInstall",
+          true,
+          "privateSkills",
+          true,
+          "includeDefaultRoots",
+          true,
+          "toolPresentation",
+          "native");
   private final DeploymentAccess access;
   private final Connection nats;
   private final WorkspaceStore store;
@@ -138,9 +149,16 @@ public final class SharedDshEntryTransport
 
   @Override
   public boolean observed(SharedDshBinding binding) {
-    // A restricted shared profile is not evidence for a dedicated runtime's broader surface.
-    if (binding.getMode() != DshInstanceMode.DSH_INSTANCE_MODE_SHARED) return false;
+    if (profilePath(binding) == null) return false;
     return currentReady(binding) && profile(binding) && currentReady(binding);
+  }
+
+  private static String profilePath(SharedDshBinding binding) {
+    return switch (binding.getMode()) {
+      case DSH_INSTANCE_MODE_SHARED -> PROFILE_PATH;
+      case DSH_INSTANCE_MODE_DEDICATED -> DEDICATED_PROFILE_PATH;
+      default -> null;
+    };
   }
 
   private boolean currentReady(SharedDshBinding binding) {
@@ -163,6 +181,9 @@ public final class SharedDshEntryTransport
   }
 
   private boolean profile(SharedDshBinding binding) {
+    String path = profilePath(binding);
+    if (path == null) return false;
+    boolean dedicated = binding.getMode() == DshInstanceMode.DSH_INSTANCE_MODE_DEDICATED;
     long now = clock.instant().getEpochSecond();
     var claims = new TreeMap<String, Object>();
     claims.put("schemaVersion", 1);
@@ -174,7 +195,7 @@ public final class SharedDshEntryTransport
     String proof = SharedDshTickets.signProfileProbe(signer.kid(), claims, signer.key());
     try {
       var request =
-          HttpRequest.newBuilder(URI.create(root(binding) + PROFILE_PATH))
+          HttpRequest.newBuilder(URI.create(root(binding) + path))
               .timeout(Duration.ofSeconds(5))
               .header(PROFILE_HEADER, proof)
               .header("Accept", "application/json")
@@ -199,10 +220,15 @@ public final class SharedDshEntryTransport
       return profile.isObject()
           && profile.size() == 4
           && profile.path("schemaVersion").isIntegralNumber()
-          && profile.path("schemaVersion").asInt() == 1
+          && profile.path("schemaVersion").bigIntegerValue().equals(java.math.BigInteger.ONE)
           && profile.path("physicalInstanceId").asString().equals(binding.getPhysicalInstanceId())
-          && profile.path("profile").asString().equals("auriga.shared.v1")
-          && profile.path("capabilities").equals(json.valueToTree(PROFILE));
+          && profile
+              .path("profile")
+              .asString()
+              .equals(dedicated ? "auriga.dedicated.v1" : "auriga.shared.v1")
+          && profile
+              .path("capabilities")
+              .equals(json.valueToTree(dedicated ? DEDICATED_PROFILE : PROFILE));
     } catch (InterruptedException interrupted) {
       Thread.currentThread().interrupt();
       return false;

@@ -92,7 +92,7 @@ func (g *Gateway) serveShared(w http.ResponseWriter, r *http.Request, id, path, 
 	e := g.Shared
 	// The exchange path is reserved even before W wiring, so it cannot fall through to owner auth.
 	exchange := path == "/_auriga/placement-ticket"
-	profile := path == sharedProfilePath
+	profile := profileMode(path) != ""
 	if e == nil {
 		if exchange || profile {
 			sharedError(w, r, nil)
@@ -121,7 +121,7 @@ func (g *Gateway) serveShared(w http.ResponseWriter, r *http.Request, id, path, 
 		return true
 	}
 	if profile {
-		g.serveSharedProfile(w, r, id)
+		g.serveSharedProfile(w, r, id, path)
 		return true
 	}
 	target := g.instanceTarget(r, id)

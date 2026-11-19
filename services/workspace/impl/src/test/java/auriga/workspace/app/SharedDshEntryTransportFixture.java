@@ -71,27 +71,41 @@ public final class SharedDshEntryTransportFixture {
                 assertEquals(
                     clock.instant().getEpochSecond() + 10, claims.path("expiresAt").asLong());
                 String pool = claims.path("binding").path("physicalInstanceId").asString();
+                boolean dedicated =
+                    claims.path("binding").path("mode").asString().equals("dedicated");
                 assertEquals(
                     URI.create(
-                        access.portalUrl() + "/i/" + pool + SharedDshEntryTransport.PROFILE_PATH),
+                        access.portalUrl()
+                            + "/i/"
+                            + pool
+                            + (dedicated
+                                ? SharedDshEntryTransport.DEDICATED_PROFILE_PATH
+                                : SharedDshEntryTransport.PROFILE_PATH)),
                     request.uri());
                 var body =
                     json.createObjectNode()
                         .put("schemaVersion", 1)
                         .put("physicalInstanceId", pool)
-                        .put("profile", "auriga.shared.v1");
+                        .put("profile", dedicated ? "auriga.dedicated.v1" : "auriga.shared.v1");
                 var capabilities = body.putObject("capabilities").put("toolPresentation", "native");
-                for (var name :
-                    List.of(
-                        "shell",
-                        "terminal",
-                        "jobs",
-                        "subagent",
-                        "stdioMcp",
-                        "pluginInstall",
-                        "privateSkills",
-                        "personalKeys",
-                        "includeDefaultRoots")) capabilities.put(name, false);
+                if (dedicated) {
+                  capabilities
+                      .put("pluginInstall", true)
+                      .put("privateSkills", true)
+                      .put("includeDefaultRoots", true);
+                } else {
+                  for (var name :
+                      List.of(
+                          "shell",
+                          "terminal",
+                          "jobs",
+                          "subagent",
+                          "stdioMcp",
+                          "pluginInstall",
+                          "privateSkills",
+                          "personalKeys",
+                          "includeDefaultRoots")) capabilities.put(name, false);
+                }
                 HttpResponse<byte[]> response = mock(HttpResponse.class);
                 when(response.statusCode()).thenReturn(responseStatus.getAsInt());
                 when(response.headers()).thenReturn(HttpHeaders.of(headers, (name, value) -> true));

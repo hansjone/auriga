@@ -11,25 +11,38 @@ import (
 )
 
 const sharedProfilePath = "/_auriga/shared-profile"
+const dedicatedProfilePath = "/_auriga/dedicated-profile"
 const sharedProfileHeader = "Auriga-Shared-Profile-Probe"
 
-var sharedProfileMount = regexp.MustCompile(`^/i/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/_auriga/shared-profile$`)
+var sharedProfileMount = regexp.MustCompile(`^/i/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/_auriga/(?:shared|dedicated)-profile$`)
+
+func profileMode(path string) string {
+	switch path {
+	case sharedProfilePath:
+		return "shared"
+	case dedicatedProfilePath:
+		return "dedicated"
+	default:
+		return ""
+	}
+}
 
 func (g *Gateway) sharedProfileRequest(r *http.Request) bool {
 	if r.Method != http.MethodGet || r.URL.EscapedPath() != r.URL.Path || r.URL.RawQuery != "" || r.URL.ForceQuery {
 		return false
 	}
 	if _, ok := g.instanceIDFromHost(requestHost(r)); ok {
-		return r.URL.Path == sharedProfilePath
+		return profileMode(r.URL.Path) != ""
 	}
 	return sharedProfileMount.MatchString(r.URL.Path)
 }
 
 // This proof authorizes one bounded static profile read. It is a distinct
 // purpose from K's normal-page mode-switch challenge and from member tickets.
-func (g *Gateway) serveSharedProfile(w http.ResponseWriter, r *http.Request, id string) {
+func (g *Gateway) serveSharedProfile(w http.ResponseWriter, r *http.Request, id, path string) {
 	fail := func(err error) { sharedError(w, r, err) }
-	if r.Method != http.MethodGet || r.URL.RawQuery != "" || r.URL.ForceQuery || isUpgradeRequest(r) ||
+	mode := profileMode(path)
+	if mode == "" || r.Method != http.MethodGet || r.URL.EscapedPath() != r.URL.Path || r.URL.RawQuery != "" || r.URL.ForceQuery || isUpgradeRequest(r) ||
 		r.Header.Get("Cookie") != "" || r.Header.Get("Authorization") != "" || len(r.Header.Values(sharedProfileHeader)) != 1 {
 		fail(errors.New("shared.binding_mismatch"))
 		return
@@ -47,7 +60,7 @@ func (g *Gateway) serveSharedProfile(w http.ResponseWriter, r *http.Request, id 
 		return
 	}
 	binding, ok := claims["binding"].(map[string]any)
-	if !ok || !sharedBinding(binding) || binding["physicalInstanceId"] != id {
+	if !ok || !sharedBinding(binding) || binding["physicalInstanceId"] != id || binding["mode"] != mode {
 		fail(errors.New("shared.binding_mismatch"))
 		return
 	}
@@ -68,7 +81,7 @@ func (g *Gateway) serveSharedProfile(w http.ResponseWriter, r *http.Request, id 
 	}
 	ctx, cancel := context.WithDeadline(r.Context(), time.Unix(expires, 0))
 	defer cancel()
-	upstream.Path = "/i/" + id + sharedProfilePath
+	upstream.Path = "/i/" + id + path
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, upstream.String(), nil)
 	if err != nil {
 		fail(nil)
@@ -96,7 +109,7 @@ func (g *Gateway) serveSharedProfile(w http.ResponseWriter, r *http.Request, id 
 		return
 	}
 	profile, err := sharedDecode(body)
-	if err != nil || !validSharedProfile(profile, id) {
+	if err != nil || !validRuntimeProfile(profile, id, mode) {
 		fail(nil)
 		return
 	}
@@ -105,14 +118,19 @@ func (g *Gateway) serveSharedProfile(w http.ResponseWriter, r *http.Request, id 
 	_, _ = w.Write(body)
 }
 
-func validSharedProfile(profile map[string]any, id string) bool {
+func validRuntimeProfile(profile map[string]any, id, mode string) bool {
 	if _, ok := sharedObject(profile, "schemaVersion physicalInstanceId profile capabilities"); !ok ||
-		sharedInt(profile["schemaVersion"]) != 1 || profile["physicalInstanceId"] != id || profile["profile"] != "auriga.shared.v1" {
+		!sharedNumber(profile["schemaVersion"], 1) || sharedInt(profile["schemaVersion"]) != 1 || profile["physicalInstanceId"] != id ||
+		(mode != "shared" && mode != "dedicated") || profile["profile"] != "auriga."+mode+".v1" {
 		return false
 	}
 	capabilities, ok := profile["capabilities"].(map[string]any)
 	if !ok {
 		return false
+	}
+	if mode == "dedicated" {
+		_, exact := sharedObject(capabilities, "pluginInstall privateSkills includeDefaultRoots toolPresentation")
+		return exact && capabilities["pluginInstall"] == true && capabilities["privateSkills"] == true && capabilities["includeDefaultRoots"] == true && capabilities["toolPresentation"] == "native"
 	}
 	if _, ok := sharedObject(capabilities, "shell terminal jobs subagent stdioMcp pluginInstall privateSkills personalKeys includeDefaultRoots toolPresentation"); !ok || capabilities["toolPresentation"] != "native" {
 		return false
