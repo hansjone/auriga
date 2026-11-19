@@ -57,6 +57,8 @@ type releaseEngine struct {
 	healthy     atomic.Bool
 
 	beforeInspect func(string) error
+	memoryStats   map[string]any
+	beforeStats   func()
 }
 
 func newReleaseEngine(t *testing.T) (*releaseEngine, *runtime.Docker, *dockerReleaseFixture) {
@@ -174,6 +176,22 @@ func (e *releaseEngine) serve(w http.ResponseWriter, r *http.Request) {
 			list = append(list, map[string]any{"Id": id, "Labels": body["Labels"], "State": status})
 		}
 		_ = json.NewEncoder(w).Encode(list)
+	case strings.HasSuffix(path, "/stats") && strings.HasPrefix(path, "/containers/"):
+		id := strings.TrimSuffix(strings.TrimPrefix(path, "/containers/"), "/stats")
+		body := e.containers[id]
+		if body == nil {
+			http.NotFound(w, r)
+			return
+		}
+		if hook := e.beforeStats; hook != nil {
+			e.runHookUnlocked(hook)
+		}
+		stats := e.memoryStats
+		if stats == nil {
+			limit := body["HostConfig"].(map[string]any)["Memory"].(float64)
+			stats = map[string]any{"read": time.Now().UTC().Format(time.RFC3339Nano), "memory_stats": map[string]any{"usage": int64(limit) * 79 / 100, "limit": limit}}
+		}
+		_ = json.NewEncoder(w).Encode(stats)
 	case strings.HasSuffix(path, "/json") && strings.HasPrefix(path, "/containers/"):
 		id := strings.TrimSuffix(strings.TrimPrefix(path, "/containers/"), "/json")
 		if named := e.names[id]; named != "" {

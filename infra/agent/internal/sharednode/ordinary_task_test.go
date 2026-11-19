@@ -70,7 +70,7 @@ func TestOrdinaryAndEnterpriseTasksKeepSeparateHandles(t *testing.T) {
 	r, a := fixture(t)
 	begin(t, r, a, "auriga.shared.enterprise", []string{"task.execute"})
 	binding, _ := wire(a.binding)
-	raw, _ := json.Marshal(map[string]any{"binding": binding, "taskId": testPool, "audience": "auriga.shared.enterprise", "scopes": []string{"outbound"}})
+	raw, _ := json.Marshal(map[string]any{"binding": binding, "taskId": testPool, "audience": "auriga.shared.enterprise", "scopes": []string{"outbound"}, "parentCapability": "synthetic-capability-1"})
 	if _, err := r.invoke(t.Context(), "beginTask", raw); err != nil {
 		t.Fatal("independent enterprise child not admitted", err)
 	}

@@ -24,10 +24,17 @@ const maximum = 16 * 1024 * 1024
 var uuid = regexp.MustCompile(`(?i)^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
 
 type execution struct {
-	binding  *nodev1.SharedDshSessionBinding
-	scopes   []string
-	audience string
-	peer     string
+	binding                            *nodev1.SharedDshSessionBinding
+	scopes                             []string
+	audience                           string
+	peer                               string
+	serial                             uint64
+	parent                             string
+	ordinary, reserved, closing, begun bool
+	uncertainBegin                     bool
+	started                            chan struct{}
+	finishing                          chan struct{}
+	finishErr                          error
 }
 type Relay struct {
 	Client *Client
@@ -41,6 +48,8 @@ type Relay struct {
 	VerifyPeer func(context.Context, int, string) (string, error)
 	sources    map[string]messageSource
 	boots      map[string]string
+	Admission  TaskAdmission
+	serial     uint64
 }
 
 func NewRelay(c *Client, pool string) *Relay {
@@ -135,8 +144,11 @@ func (r *Relay) task(ctx context.Context, b *nodev1.SharedDshSessionBinding, id,
 	r.mu.Lock()
 	t, ok := r.tasks[id]
 	r.mu.Unlock()
-	if !ok || !proto.Equal(t.binding, b) || t.audience != audience || t.peer != executionPeer(ctx) {
+	if !ok || t.closing || !proto.Equal(t.binding, b) || t.audience != audience || t.peer != executionPeer(ctx) {
 		return errors.New("shared.revoked")
+	}
+	if e := r.checkAdmission(t, id); e != nil {
+		return e
 	}
 	for _, s := range scopes {
 		found := false
@@ -236,47 +248,7 @@ func (r *Relay) invoke(ctx context.Context, op string, raw []byte) (any, error) 
 		}
 		return wire(out)
 	case "beginTask":
-		in := new(iamv1.BeginSharedTaskRequest)
-		if decode(raw, in) != nil || !uuid.MatchString(in.TaskId) {
-			return nil, errors.New("common.validation_failed")
-		}
-		if e := r.session(ctx, in.Binding); e != nil {
-			return nil, e
-		}
-		if in.Audience == "" {
-			in.Audience = "auriga.shared.enterprise"
-		}
-		if !validTaskScopes(in.Audience, in.Scopes) {
-			return nil, errors.New("common.forbidden")
-		}
-		r.mu.Lock()
-		old, exists := r.tasks[in.TaskId]
-		if len(r.tasks) >= 4096 && !exists {
-			r.mu.Unlock()
-			return nil, errors.New("common.unavailable")
-		}
-		if exists && (!proto.Equal(old.binding, in.Binding) || old.audience != in.Audience || !sameStrings(old.scopes, in.Scopes) || old.peer != executionPeer(ctx)) {
-			r.mu.Unlock()
-			return nil, errors.New("common.conflict")
-		}
-		// The execution is reserved before Begin. Cancellation compensation uses
-		// this exact binding even if the response is lost.
-		r.tasks[in.TaskId] = execution{proto.Clone(in.Binding).(*nodev1.SharedDshSessionBinding), append([]string{}, in.Scopes...), in.Audience, executionPeer(ctx)}
-		r.mu.Unlock()
-		out := new(iamv1.BeginSharedTaskResponse)
-		if e := r.Client.call(ctx, true, "BeginSharedTask", in, out); e != nil {
-			_ = r.finish(in.Binding, in.TaskId)
-			return nil, e
-		}
-		if ctx.Err() != nil {
-			_ = r.finish(in.Binding, in.TaskId)
-			return nil, ctx.Err()
-		}
-		if e := r.remember(in.Binding, in.TaskId, out.Token, out.Capability); e != nil {
-			_ = r.finish(in.Binding, in.TaskId)
-			return nil, e
-		}
-		return wire(out)
+		return r.beginTask(ctx, raw)
 	case "issueCapability":
 		in := new(iamv1.IssueSharedCapabilityRequest)
 		if decode(raw, in) != nil {
@@ -285,6 +257,9 @@ func (r *Relay) invoke(ctx context.Context, op string, raw []byte) (any, error) 
 		if !validTaskScopes(in.Audience, in.Scopes) {
 			return nil, errors.New("common.forbidden")
 		}
+		r.mu.Lock()
+		expected := r.tasks[in.TaskId].serial
+		r.mu.Unlock()
 		if e := r.task(ctx, in.Binding, in.TaskId, in.Audience, in.Scopes); e != nil {
 			return nil, e
 		}
@@ -292,7 +267,10 @@ func (r *Relay) invoke(ctx context.Context, op string, raw []byte) (any, error) 
 		if e := r.Client.call(ctx, true, "IssueSharedCapability", in, out); e != nil {
 			return nil, e
 		}
-		if e := r.remember(in.Binding, in.TaskId, out.Token, out.Capability); e != nil {
+		if e := r.task(ctx, in.Binding, in.TaskId, in.Audience, in.Scopes); e != nil {
+			return nil, e
+		}
+		if e := r.remember(in.Binding, in.TaskId, out.Token, out.Capability, expected); e != nil {
 			return nil, e
 		}
 		return wire(out)
@@ -359,14 +337,14 @@ func sameStrings(a, b []string) bool {
 	}
 	return true
 }
-func (r *Relay) remember(b *nodev1.SharedDshSessionBinding, id, token string, cap *nodev1.SharedDshCapability) error {
+func (r *Relay) remember(b *nodev1.SharedDshSessionBinding, id, token string, cap *nodev1.SharedDshCapability, serial uint64) error {
 	if token == "" || cap == nil || cap.TaskId != id || !proto.Equal(b, cap.Binding) {
 		return errors.New("shared.binding_mismatch")
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	task, ok := r.tasks[id]
-	if !ok || cap.SchemaVersion != 1 || cap.Audience != task.audience || !validTaskScopes(cap.Audience, cap.Scopes) {
+	if !ok || task.closing || task.serial != serial || cap.SchemaVersion != 1 || cap.Audience != task.audience || !validTaskScopes(cap.Audience, cap.Scopes) {
 		return errors.New("shared.binding_mismatch")
 	}
 	for _, scope := range cap.Scopes {
@@ -386,21 +364,11 @@ func (r *Relay) remember(b *nodev1.SharedDshSessionBinding, id, token string, ca
 	return nil
 }
 func (r *Relay) finish(b *nodev1.SharedDshSessionBinding, id string) error {
-	// Finish is a tombstone and deliberately survives a canceled Host call.
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	out := new(iamv1.FinishSharedTaskResponse)
-	err := r.Client.call(ctx, true, "FinishSharedTask", &iamv1.FinishSharedTaskRequest{Binding: b, TaskId: id}, out)
-	if err == nil {
-		r.mu.Lock()
-		delete(r.tasks, id)
-		delete(r.sources, id)
-		for t, c := range r.tokens {
-			if c.TaskId == id {
-				delete(r.tokens, t)
-			}
-		}
-		r.mu.Unlock()
+	r.mu.Lock()
+	t, ok := r.tasks[id]
+	r.mu.Unlock()
+	if !ok || !proto.Equal(t.binding, b) {
+		return errors.New("shared.binding_mismatch")
 	}
-	return err
+	return r.finishExecution(id, t.serial)
 }

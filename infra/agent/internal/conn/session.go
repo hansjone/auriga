@@ -76,6 +76,9 @@ type Session struct {
 	sharedReceiptCh chan *sharedReceipt
 	sharedReportCh  chan *nodev1.SessionRequest
 	sharedWork      *sharedWorkQueue
+	poolMemoryCh    chan queuedPoolMemory
+	connectionEpoch uint64
+	lastPoolMemory  map[string]*nodev1.SharedDshPoolMemorySample
 }
 
 type queuedStatus struct {
@@ -123,6 +126,7 @@ func New(cfg Config) *Session {
 		resultCh:        make(chan queuedResult, 64),
 		sharedReceiptCh: make(chan *sharedReceipt, 64),
 		sharedReportCh:  make(chan *nodev1.SessionRequest, 128),
+		poolMemoryCh:    make(chan queuedPoolMemory, 128),
 	}
 	session.sharedWork = newSharedWorkQueue(session)
 	if cfg.SharedRuntime != nil {
@@ -132,6 +136,10 @@ func New(cfg Config) *Session {
 }
 
 func (s *Session) ReportShared(report *nodev1.SessionRequest) {
+	if report != nil && report.GetSharedDshPoolMemorySample() != nil {
+		s.reportPoolMemory(report.GetSharedDshPoolMemorySample())
+		return
+	}
 	if report == nil || (report.GetSharedDshResourceReport() == nil && report.GetSharedDshGuardianImpact() == nil) {
 		return
 	}
@@ -325,6 +333,11 @@ func (s *Session) tryRenew(ctx context.Context) error {
 func (s *Session) runOnce(ctx context.Context) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
+	s.mu.Lock()
+	s.connectionEpoch++
+	s.connected = false
+	s.lastPoolMemory = nil
+	s.mu.Unlock()
 	// Reset and all storage work run on the same bounded worker, never Recv.
 	s.sharedWork.reset(ctx)
 	mat, meta, tlsCert, err := s.loadCreds()
@@ -478,6 +491,14 @@ func (s *Session) sendLoop(ctx context.Context, stream nodev1.NodeControlService
 			}
 		case report := <-s.sharedReportCh:
 			if err := stream.Send(report); err != nil {
+				return err
+			}
+		case queued := <-s.poolMemoryCh:
+			sample := s.poolMemoryForSend(ctx, queued)
+			if sample == nil {
+				continue
+			}
+			if err := stream.Send(&nodev1.SessionRequest{Body: &nodev1.SessionRequest_SharedDshPoolMemorySample{SharedDshPoolMemorySample: sample}}); err != nil {
 				return err
 			}
 		}

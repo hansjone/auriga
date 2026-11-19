@@ -21,8 +21,8 @@ func (r *Relay) Start(ctx context.Context, path string, uid int) (func(), error)
 	if !filepath.IsAbs(path) || filepath.Base(path) != "shared-node.sock" || uid <= 0 {
 		return nil, fmt.Errorf("invalid pool socket")
 	}
-	if r.VerifyPeer == nil {
-		return nil, fmt.Errorf("signed pool process verifier required")
+	if r.VerifyPeer == nil || r.Admission == nil {
+		return nil, fmt.Errorf("signed pool process verifier and task admission required")
 	}
 	if info, e := os.Lstat(path); e == nil {
 		if info.Mode()&os.ModeSocket == 0 {
@@ -92,6 +92,18 @@ func (r *Relay) Start(ctx context.Context, path string, uid int) (func(), error)
 	}
 	go func() { _ = srv.Serve(listener) }()
 	go func() { <-ctx.Done(); stop() }()
+	go func() {
+		ticker := time.NewTicker(5 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				r.RetryFinishes()
+			}
+		}
+	}()
 	return stop, nil
 }
 

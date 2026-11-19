@@ -57,6 +57,7 @@ type PersistentPools struct {
 	Publish        func(string, Endpoint)
 	Unpublish      func(string)
 	Report         func(*nodev1.SessionRequest)
+	Memory         func(context.Context, string) (*nodev1.SharedDshPoolMemorySample, error)
 	ConfigureHost  func(context.Context, *nodev1.SharedDshBinding, int) (string, error)
 	// Ownership boundary, like storage.Layout.Chown. Production defaults to
 	// strict Lchown; synthetic non-root Engine fixtures record this operation.
@@ -456,6 +457,11 @@ func (m *PersistentPools) Watch(ctx context.Context) {
 			continue
 		}
 		operation := views[0].ViewId
+		if m.Memory != nil {
+			if sample, err := m.Memory(ctx, pool); err == nil {
+				m.report(&nodev1.SessionRequest{Body: &nodev1.SessionRequest_SharedDshPoolMemorySample{SharedDshPoolMemorySample: sample}})
+			}
+		}
 		reports, impact, checkErr := watch.Check(ctx, operation, bindings, views, time.Now())
 		if checkErr != nil && m.Unpublish != nil {
 			delete(m.active, pool)

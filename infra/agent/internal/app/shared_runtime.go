@@ -88,6 +88,13 @@ func sharedRuntime(ctx context.Context, cfg config.Config, pools *runtime.Shared
 		}
 	}
 	var hostMu sync.Mutex
+	var manager *runtime.PersistentPools
+	admission := &runtime.PoolTaskAdmission{Pools: pools, Driver: docker, TenantID: client.Settings.TenantID}
+	admission.Report = func(sample *nodev1.SharedDshPoolMemorySample) {
+		if manager != nil && manager.Report != nil {
+			manager.Report(&nodev1.SessionRequest{Body: &nodev1.SessionRequest_SharedDshPoolMemorySample{SharedDshPoolMemorySample: sample}})
+		}
+	}
 	started := map[string]string{}
 	configure := func(_ context.Context, b *nodev1.SharedDshBinding, uid int) (string, error) {
 		hostMu.Lock()
@@ -129,6 +136,7 @@ func sharedRuntime(ctx context.Context, cfg config.Config, pools *runtime.Shared
 			return "", e
 		}
 		relay := sharednode.NewRelay(client, b.PhysicalInstanceId)
+		relay.Admission = admission
 		relay.VerifyPeer = func(call context.Context, pid int, start string) (string, error) {
 			return docker.VerifyPoolPeer(call, b.PhysicalInstanceId, pid, start)
 		}
@@ -139,7 +147,7 @@ func sharedRuntime(ctx context.Context, cfg config.Config, pools *runtime.Shared
 		return directory, nil
 	}
 	pools.Supervisor = docker
-	return &runtime.PersistentPools{Pools: pools, Driver: docker,
+	manager = &runtime.PersistentPools{Pools: pools, Driver: docker,
 		UIDs: storage.NewUIDTable(cfg.AgentDir()), Template: template, Profile: profile, Ports: ports,
 		Resources:     &runtime.PoolMaterializer{Layout: pools.Layout, Source: client, Unified: runtime.NewUnifiedManager(&storage.Layout{InstancesDir: cfg.InstancesDir()}, docker, nil, cfg.AgentDir())},
 		ConfigureHost: configure,
@@ -150,5 +158,13 @@ func sharedRuntime(ctx context.Context, cfg config.Config, pools *runtime.Shared
 			}
 		},
 		Unpublish: registry.Delete,
-	}, nil
+	}
+	manager.Memory = func(ctx context.Context, pool string) (*nodev1.SharedDshPoolMemorySample, error) {
+		sample, err := docker.PoolMemory(ctx, pool)
+		if err == nil {
+			sample.TenantId = client.Settings.TenantID
+		}
+		return sample, err
+	}
+	return manager, nil
 }
