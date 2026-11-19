@@ -1,0 +1,177 @@
+# Complete rc.3 entry list, not a patch over dsh-base or dsh-web-app.
+# The trusted renderer replaces the listener and shared-ports configFile.
+# See shared-runtime-profile.zh.md for the immutable installation anchors.
+- id: fs
+  name: '@deepseek-ai/dsh-fs-local'
+  config:
+    cwd: /home/dsh/.host
+- id: llm
+  name: '@deepseek-ai/dsh-llm'
+- id: system-prompt
+  name: '@deepseek-ai/dsh-system-prompt'
+- id: sessions
+  name: '@deepseek-ai/dsh-session'
+- id: session-projections
+  name: '@deepseek-ai/dsh-session-projection'
+- id: session-persistence
+  name: '@deepseek-ai/dsh-session-persistence-jsonl'
+  config:
+    root: /home/dsh/.host/.dsh/sessions
+    compression: none
+- id: session-query
+  name: '@deepseek-ai/dsh-session-query'
+- id: storage
+  name: '@deepseek-ai/dsh-storage'
+- id: storage-json
+  name: '@deepseek-ai/dsh-storage-json'
+  config:
+    root: /home/dsh/.host/.dsh/storages
+- id: storage-domain
+  name: '@deepseek-ai/dsh-storage-domain'
+  config:
+    backend: json
+- id: projection-cache
+  name: '@deepseek-ai/dsh-session-projection-cache'
+  config:
+    writeEveryEvents: 200
+    writeIntervalMs: 5000
+- id: working-directory
+  name: '@deepseek-ai/dsh-working-directory'
+  config:
+    defaultDirectory: /home/dsh/.host
+- id: agents
+  name: '@deepseek-ai/dsh-agent'
+- id: tools
+  name: '@deepseek-ai/dsh-tools'
+  config:
+    mode: native
+    maxParallelSubCalls: 1
+- id: agent-loop
+  name: '@deepseek-ai/dsh-agent-loop'
+  config:
+    agents: []
+    maxParallelToolCalls: 1
+- id: agent-presets
+  name: '@deepseek-ai/dsh-agent-preset-registry'
+  config:
+    default: auriga-shared
+- id: shared-preset
+  name: '@deepseek-ai/dsh-agent-preset'
+  config:
+    id: auriga-shared
+    name: Auriga 共享
+    plugins: []
+- id: default-model
+  name: '@deepseek-ai/dsh-agent-default-model'
+  config:
+    provider: auriga-shared
+    model: gpt-6.1-sol
+- id: skills
+  name: '@deepseek-ai/dsh-skill'
+- id: platform-skills
+  name: '@deepseek-ai/dsh-skill-filesystem'
+  config:
+    providerName: auriga-shared
+    includeDefaultRoots: false
+    customSkillDirs: [/run/auriga/skills-active/current]
+- id: tool-skill
+  name: '@deepseek-ai/dsh-tool-skill'
+# Passive registry for per-execution environment contributors; no Shell tool.
+- id: shell-env
+  name: '@deepseek-ai/dsh-shell-env'
+- id: commands
+  name: '@deepseek-ai/dsh-commands'
+# Internal Connection transport keys, not member credentials or personal keys.
+- id: connection-credentials
+  name: '@deepseek-ai/dsh-credentials-local'
+  config:
+    path: /home/dsh/.host/.dsh/shared-host-credentials.yaml
+    watch: false
+- id: connection
+  name: '@deepseek-ai/dsh-client-connection'
+  config:
+    trustedHosts: []
+- id: attachments
+  name: '@deepseek-ai/dsh-attachment-local'
+  config:
+    dshHome: /home/dsh/.host/.dsh
+- id: file-upload
+  name: '@deepseek-ai/dsh-client-file-upload'
+- id: file-references
+  name: '@deepseek-ai/dsh-file-reference-local'
+- id: workspace
+  name: '@deepseek-ai/dsh-workspace'
+# Required by WorkspaceController's public child plugin; member RPC stays fenced.
+- id: directory-picker
+  name: '@deepseek-ai/dsh-host-directory-picker-browse'
+- id: remote-access
+  name: '@deepseek-ai/dsh-api-remote-access'
+- id: typert
+  name: '@deepseek-ai/dsh-typert-registry'
+- id: typert-loader
+  name: '@deepseek-ai/dsh-typert-loader'
+- id: session-controller
+  name: '@deepseek-ai/dsh-api-session-controller'
+- id: workspace-controller
+  name: '@deepseek-ai/dsh-api-workspace-controller'
+- id: gateway
+  name: '@deepseek-ai/dsh-api-gateway'
+- id: webserver
+  name: '@deepseek-ai/dsh-host-webserver'
+  config:
+    host: 127.0.0.1
+    port: 7860
+- id: modules
+  name: '@deepseek-ai/dsh-client-modules'
+- id: api-remotes
+  name: '@deepseek-ai/dsh-api-remotes'
+# Browser packages have passive Host halves; the client inject closure is explicit.
+- id: ui-renderer
+  name: '@deepseek-ai/dsh-client-ui-renderer'
+- id: locale
+  name: '@deepseek-ai/dsh-client-locale'
+- id: shortcuts
+  name: '@deepseek-ai/dsh-client-shortcuts'
+- id: ui-theme
+  name: '@deepseek-ai/dsh-client-ui-theme'
+- id: ui-settings
+  name: '@deepseek-ai/dsh-client-ui-settings'
+- id: ui-session
+  name: '@deepseek-ai/dsh-client-ui-session'
+- id: ui-layout
+  name: '@deepseek-ai/dsh-client-ui-layout'
+- id: resources
+  name: '@deepseek-ai/dsh-client-resources'
+- id: ui-sidebar
+  name: '@deepseek-ai/dsh-client-ui-sidebar'
+- id: ui-sidebar-right
+  name: '@deepseek-ai/dsh-client-ui-sidebar-right'
+- id: ui-workspace
+  name: '@deepseek-ai/dsh-client-ui-workspace'
+- id: ui-conversation
+  name: '@deepseek-ai/dsh-client-ui-conversation'
+- id: ui-input-trigger
+  name: '@deepseek-ai/dsh-client-ui-input-trigger'
+- id: ui-chat
+  name: '@deepseek-ai/dsh-client-ui-chat'
+- id: ui-tool
+  name: '@deepseek-ai/dsh-client-ui-tool'
+- id: ui-trajectory
+  name: '@deepseek-ai/dsh-client-ui-trajectory'
+- id: ui-attachment
+  name: '@deepseek-ai/dsh-client-ui-attachment'
+- id: frontend-static
+  name: '@deepseek-ai/dsh-host-frontend-static'
+  config:
+    distIndex: /opt/dsh/node_modules/@deepseek-ai/dsh-web-frontend/dist/index.html
+- id: auriga-shared-ports
+  name: auriga-dsh/shared-ports
+  config:
+    configFile: /var/lib/auriga/pools/00000000-0000-4000-8000-000000000001/control/shared-host.json
+- id: auriga-dsh
+  name: auriga-dsh/shared
+# Exact read-only public-export target: also discovers this package's ./client.
+- id: auriga-shared-browser
+  name: file:///opt/auriga-dsh/src/shared-browser/plugin.js
+  config:
+    distIndex: /opt/dsh/node_modules/@deepseek-ai/dsh-web-frontend/dist/index.html
