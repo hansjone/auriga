@@ -42,7 +42,7 @@ func (s *Server) sharedRequest(r *http.Request, id, path string) (*http.Request,
 	if b["physicalInstanceId"] != id || (b["mode"] != "shared" && b["mode"] != "dedicated") || c["method"] != r.Method || c["canonicalPath"] != path {
 		return nil, nil, errSharedInvalid
 	}
-	if b["mode"] == "shared" && !sharedBrowserRequest(r, path) {
+	if !sharedBrowserRequest(r, path) || (b["mode"] == "dedicated" && strings.HasPrefix(path, "/auriga/shared/")) || (b["mode"] == "shared" && strings.HasPrefix(path, "/auriga/dedicated/")) {
 		return nil, nil, errSharedInvalid
 	}
 	ctx, cancel := context.WithCancel(r.Context())
@@ -64,14 +64,11 @@ func (s *Server) sharedRequest(r *http.Request, id, path string) (*http.Request,
 		return nil, nil, err
 	}
 	checked := r.WithContext(ctx)
-	if b["mode"] == "shared" {
-		checked.Header = r.Header.Clone()
-		// Browser/platform cookies and owner credentials never authorize the
-		// shared Host. Its finite browser bridge admits only the current E.
-		for key := range checked.Header {
-			if strings.EqualFold(key, "Cookie") || strings.EqualFold(key, "Authorization") {
-				delete(checked.Header, key)
-			}
+	checked.Header = r.Header.Clone()
+	// Both managed modes use the current E/W binding, never owner credentials.
+	for key := range checked.Header {
+		if strings.EqualFold(key, "Cookie") || strings.EqualFold(key, "Authorization") {
+			delete(checked.Header, key)
 		}
 	}
 	return checked, cleanup, nil
@@ -84,7 +81,7 @@ func sharedBrowserRequest(r *http.Request, canonical string) bool {
 	}
 	path := strings.ToLower(decoded)
 	// Native Connection upgrade admission is owner based and has no public
-	// override. The approved shared browser uses HTTP RPC/NDJSON instead.
+	// override. Managed browsers use their explicit HTTP RPC/NDJSON carriers.
 	if strings.HasPrefix(path, "/api") || strings.HasPrefix(path, "/connect") || r.Header.Get("Upgrade") != "" {
 		return false
 	}

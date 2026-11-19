@@ -95,8 +95,8 @@ func TestSharedBrowserForwardsNativeHTTPAndFencesOwnerChannels(t *testing.T) {
 				if r.Header.Get(identityHeader) == "" {
 					t.Error("identity was not preserved")
 				}
-				if mode == "shared" && (r.Header.Get("Cookie") != "" || r.Header.Get("Authorization") != "") {
-					t.Error("shared borrowed an owner credential")
+				if r.Header.Get("Cookie") != "" || r.Header.Get("Authorization") != "" {
+					t.Error("managed mode borrowed an owner credential")
 				}
 				if r.Method == "POST" {
 					body, _ := io.ReadAll(r.Body)
@@ -136,6 +136,12 @@ func TestSharedBrowserForwardsNativeHTTPAndFencesOwnerChannels(t *testing.T) {
 				return w.Code
 			}
 			for _, route := range []struct{ path, method string }{{"/", "GET"}, {"/index.html", "GET"}, {"/assets/native.js", "GET"}, {"/auriga/shared/browser/rpc", "POST"}, {"/auriga/shared/browser/stream", "POST"}, {"/auriga/shared/messages", "POST"}} {
+				if mode == "dedicated" {
+					if route.path == "/auriga/shared/messages" {
+						continue
+					}
+					route.path = strings.Replace(route.path, "/auriga/shared/", "/auriga/dedicated/", 1)
+				}
 				if status := request(route.path, route.method, false); status != 204 {
 					t.Fatal("approved HTTP not forwarded", route, status)
 				}
@@ -143,20 +149,17 @@ func TestSharedBrowserForwardsNativeHTTPAndFencesOwnerChannels(t *testing.T) {
 			before := calls
 			for _, path := range []string{"/api", "/api/remote.mux", "/connect", "/connect/", "/%61pi/remote.mux", "/c%6fnnect"} {
 				status := request(path, "GET", false)
-				if mode == "shared" && status != 403 {
-					t.Fatal("shared reached native owner channel", path, status)
-				}
-				if mode == "dedicated" && status != 204 {
-					t.Fatal("dedicated E/W-gated route changed", path, status)
+				if status != 403 {
+					t.Fatal("managed mode reached native owner channel", path, status)
 				}
 			}
-			if mode == "shared" && calls != before {
+			if calls != before {
 				t.Fatal("rejected shared owner route reached upstream")
 			}
-			if status := request("/api/remote.mux", "GET", true); mode == "shared" && status != 403 {
+			if status := request("/api/remote.mux", "GET", true); status != 403 {
 				t.Fatal("owner websocket reached shared Host", status)
 			}
-			if status := request("/auriga/shared/browser/stream", "GET", true); mode == "shared" && status != 403 {
+			if status := request("/auriga/"+mode+"/browser/stream", "GET", true); status != 403 {
 				t.Fatal("shared arbitrary upgrade accepted", status)
 			}
 			a.mu.Lock()

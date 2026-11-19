@@ -28,6 +28,9 @@ type poolSignedSource struct {
 }
 
 func (s *poolSignedSource) Snapshot(_ context.Context, b *nodev1.SharedDshBinding) (*workspacev1.GetSharedDshResourceSnapshotResponse, error) {
+	if len(s.views[b.PlacementId].Resources) == 0 {
+		return &workspacev1.GetSharedDshResourceSnapshotResponse{View: s.views[b.PlacementId], Resources: []*resourcev1.UnifiedResourceRef{}, Revocations: s.f.list}, nil
+	}
 	ref := proto.Clone(s.f.ref).(*resourcev1.UnifiedResourceRef)
 	if selected := s.refs[b.PlacementId]; selected != nil {
 		ref = proto.Clone(selected).(*resourcev1.UnifiedResourceRef)
@@ -38,7 +41,9 @@ func (s *poolSignedSource) Snapshot(_ context.Context, b *nodev1.SharedDshBindin
 	return &workspacev1.GetSharedDshResourceSnapshotResponse{View: s.views[b.PlacementId], Resources: []*resourcev1.UnifiedResourceRef{ref}, Revocations: s.f.list}, nil
 }
 func poolSignedFixture(t *testing.T) (*PoolMaterializer, *poolSignedSource, []*nodev1.SharedDshResourceView) {
-	f := newUnifiedFixture(t)
+	return poolSignedFixtureWith(t, newUnifiedFixture(t))
+}
+func poolSignedFixtureWith(t *testing.T, f *unifiedFixture) (*PoolMaterializer, *poolSignedSource, []*nodev1.SharedDshResourceView) {
 	source := &poolSignedSource{f: f, views: map[string]*nodev1.SharedDshResourceView{}}
 	m := &PoolMaterializer{Layout: &storage.PoolLayout{Root: filepath.Join(t.TempDir(), "pools")}, Source: source, Unified: f.manager}
 	views := []*nodev1.SharedDshResourceView{}
@@ -58,6 +63,9 @@ func poolSignedFixture(t *testing.T) (*PoolMaterializer, *poolSignedSource, []*n
 		}
 		w.Header().Set("Date", f.now.Format(http.TimeFormat))
 		for _, view := range source.views {
+			if len(view.Resources) == 0 {
+				continue
+			}
 			base := "/internal/resource/v1/catalog/downloads/" + view.Resources[0].LeaseId
 			if r.URL.Path == base+"/manifest" {
 				if source.bad {

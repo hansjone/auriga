@@ -77,6 +77,8 @@ type poolResourceState struct {
 	Present                                map[string]bool
 	RevocationRevision                     uint64
 	RevocationDigest                       string
+	Dedicated                              *nodev1.SharedDshBinding
+	DedicatedIntent                        string
 }
 
 func (m *PoolMaterializer) paths(pool string) (root, active string, err error) {
@@ -96,6 +98,15 @@ func (m *PoolMaterializer) Verify(ctx context.Context, pool string, views []*nod
 	if !uUUID.MatchString(m.Unified.BootID) || m.Unified.mono() < 0 {
 		return fmt.Errorf("pool resource host clock unavailable")
 	}
+	dedicated := len(views) == 1 && views[0].GetBinding().GetMode() == nodev1.DshInstanceMode_DSH_INSTANCE_MODE_DEDICATED
+	if dedicated && len(views[0].Resources) > 256 {
+		return fmt.Errorf("dedicated resource count exceeded")
+	}
+	for _, view := range views {
+		if view.GetBinding().GetMode() != nodev1.DshInstanceMode_DSH_INSTANCE_MODE_SHARED && !dedicated {
+			return fmt.Errorf("dedicated requires one exact current binding")
+		}
+	}
 	root, active, err := m.paths(pool)
 	if err != nil {
 		return err
@@ -108,8 +119,15 @@ func (m *PoolMaterializer) Verify(ctx context.Context, pool string, views []*nod
 	if err != nil && !os.IsNotExist(err) {
 		return err
 	}
-	if state.SchemaVersion != 1 || state.Pool != pool || state.Pending != "" || state.Watermarks == nil || state.Revisions == nil {
+	if state.SchemaVersion != 1 || state.Pool != pool || (state.Pending != "" && !dedicated) || state.Watermarks == nil || state.Revisions == nil {
 		return fmt.Errorf("incomplete pool resource transaction")
+	}
+	if state.Dedicated != nil {
+		if !dedicated || !proto.Equal(state.Dedicated, views[0].Binding) {
+			return fmt.Errorf("dedicated resource binding changed; rebuild required")
+		}
+	} else if dedicated && (state.Tree != "" || len(state.Revisions) > 0) {
+		return fmt.Errorf("shared resource state cannot become dedicated")
 	}
 	if len(state.Revisions) > 0 && (state.Intents == nil || state.Present == nil) {
 		return fmt.Errorf("pool resource installation locks require explicit maintenance")
@@ -149,6 +167,7 @@ func (m *PoolMaterializer) Verify(ctx context.Context, pool string, views []*nod
 	selection := map[string]string{}
 	names := map[string]string{}
 	var expectedSet string
+	dedicatedResources := []dedicatedResource{}
 	for _, view := range views {
 		if view == nil || view.Binding == nil || view.Binding.PhysicalInstanceId != pool {
 			return fmt.Errorf("invalid pool resource binding")
@@ -201,12 +220,12 @@ func (m *PoolMaterializer) Verify(ctx context.Context, pool string, views []*nod
 		for _, ref := range snapshot.Resources {
 			id := ref.GetIdentity()
 			descriptor := refs[id.GetPackageId()]
-			if descriptor == nil || id.GetTenantId() != view.Binding.TenantId || id.GetKind() != "skill" || descriptor.Digest != id.GetManifestDigest() || len(ref.Artifacts) != 1 || !uDigest.MatchString(id.GetManifestDigest()) || !uUUID.MatchString(id.GetPackageId()) || !uUUID.MatchString(id.GetVersionId()) {
+			if descriptor == nil || id.GetTenantId() != view.Binding.TenantId || (id.GetKind() != "skill" && (!dedicated || id.GetKind() != "plugin")) || descriptor.Digest != id.GetManifestDigest() || len(ref.Artifacts) != 1 || !uDigest.MatchString(id.GetManifestDigest()) || !uUUID.MatchString(id.GetPackageId()) || !uUUID.MatchString(id.GetVersionId()) {
 				return fmt.Errorf("pool signed reference mismatch")
 			}
 			delete(refs, id.PackageId)
 			installation, stateName, e := ReadUnifiedIntent(ref)
-			if e != nil || stateName != "ENABLED" || ref.InstallationMode == "optional" {
+			if e != nil || stateName != "ENABLED" || (!dedicated && ref.InstallationMode == "optional") {
 				return fmt.Errorf("invalid pool resource distribution")
 			}
 			key := view.Binding.PlacementId + "/" + id.PackageId
@@ -249,7 +268,11 @@ func (m *PoolMaterializer) Verify(ctx context.Context, pool string, views []*nod
 			if !uDigest.MatchString(artifact.Digest) {
 				return fmt.Errorf("invalid pool payload digest")
 			}
-			payload, online, e := m.cachedArtifact(ctx, root, artifact.DownloadPath, artifact.Digest, "payload.tgz", 5*1024*1024)
+			maximum := int64(5 * 1024 * 1024)
+			if dedicated && id.Kind == "plugin" {
+				maximum = 64 * 1024 * 1024
+			}
+			payload, online, e := m.cachedArtifact(ctx, root, artifact.DownloadPath, artifact.Digest, "payload.tgz", maximum)
 			if e != nil {
 				return e
 			}
@@ -279,13 +302,30 @@ func (m *PoolMaterializer) Verify(ctx context.Context, pool string, views []*nod
 			}
 			next.Watermarks[id.PackageId] = map[string]any{"tenantId": id.TenantId, "packageId": id.PackageId, "versionId": id.VersionId, "releaseSequence": json.Number(fmt.Sprint(ref.ReleaseSequence)), "verifiedDigestAliases": []any{id.ManifestDigest}}
 			name := ref.GetEnvelope().GetStatement().GetName()
-			if !uName.MatchString(name) || len(name) > 64 {
+			definition, e := DecodeUnifiedJSON(manifest)
+			if e != nil {
+				return e
+			}
+			description, _ := definition["description"].(string)
+			if dedicated && id.Kind == "plugin" {
+				plugin, _ := definition["plugin"].(map[string]any)
+				name, _ = plugin["packageName"].(string)
+				if !unifiedPluginName(name) {
+					return fmt.Errorf("protected or invalid dedicated plugin package")
+				}
+			} else if !uName.MatchString(name) || len(name) > 64 {
 				return fmt.Errorf("invalid pool skill name")
 			}
 			if prior := names[name]; prior != "" && prior != id.PackageId {
 				return fmt.Errorf("pool skill name conflict")
 			}
 			names[name] = id.PackageId
+			if dedicated {
+				if e = m.exposeDedicatedResource(pool, root, id.Kind, name, description, id.ManifestDigest, artifact.Digest, manifest, payload); e != nil {
+					return e
+				}
+				dedicatedResources = append(dedicatedResources, dedicatedResource{ResourceID: id.PackageId, ManifestDigest: id.ManifestDigest, ArtifactDigest: artifact.Digest, ArtifactBytes: uint64(len(payload)), InstallationRevision: installation})
+			}
 			// Common materialization compares the immutable selection projection,
 			// excluding only the independent member installation revision. Never
 			// change the original ref or manufacture a shared revision for dispatch.
@@ -302,7 +342,10 @@ func (m *PoolMaterializer) Verify(ctx context.Context, pool string, views []*nod
 			if prior := selection[id.PackageId]; prior != "" && prior != selected {
 				return fmt.Errorf("members have different resource releases")
 			}
-			selection[id.PackageId], memberSet[id.PackageId], payloads[name] = selected, selected, payload
+			selection[id.PackageId], memberSet[id.PackageId] = selected, selected
+			if !dedicated {
+				payloads[name] = payload
+			}
 		}
 		bytes, _ := json.Marshal(memberSet)
 		set := udigest(bytes)
@@ -315,6 +358,10 @@ func (m *PoolMaterializer) Verify(ctx context.Context, pool string, views []*nod
 	next.Selection = udigest(bytes)
 	next.ObservedAt = now.Unix()
 	m.TrustServerTime(now)
+	if dedicated {
+		next.Dedicated = proto.Clone(views[0].Binding).(*nodev1.SharedDshBinding)
+		return m.publishDedicatedIntent(ctx, pool, root, state, next, views[0], dedicatedResources)
+	}
 	if state.Tree != "" {
 		tree, e := poolSkillTree(active)
 		if e != nil || tree != state.Tree {
@@ -411,6 +458,9 @@ func (m *PoolMaterializer) Cleanup(ctx context.Context, pool string) error {
 		return err
 	}
 	state.Tree, state.Selection, state.Pending = "", "", ""
+	if state.Dedicated != nil {
+		state.DedicatedIntent = ""
+	}
 	return unifiedAtomic(filepath.Join(root, "state.json"), state)
 }
 func poolSkillTree(root string) (string, error) {
