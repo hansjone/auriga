@@ -333,3 +333,119 @@ exit 29
 		t.Fatal("init did not consume exactly the same runtime snapshot or start ran early", string(raw))
 	}
 }
+
+func TestInstallRuntimeUnsignedRequestCannotDowngradeConcurrentSignedInstallProtocolFixture(t *testing.T) {
+	for _, tc := range []struct {
+		name                                   string
+		runtime, outerUnsigned, storedUnsigned bool
+		wantReject                             bool
+	}{
+		{name: "unsigned-request-sees-new-runtime", runtime: true, outerUnsigned: true, wantReject: true},
+		{name: "signed-request-sees-unsigned-stored-package", runtime: true, storedUnsigned: true, wantReject: true},
+		{name: "legacy-keeps-explicit-unsigned-exception", outerUnsigned: true},
+		{name: "signed-runtime-allows-flag-without-missing-signature", runtime: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			pkg, runtimeOptions := runtimeInstallProtocolFixture(t)
+			data := runtimeOptions.Data
+			lateCalls := filepath.Join(filepath.Dir(data), "late-calls")
+			t.Setenv("AURIGA_TEST_RUNTIME_LATE_CALLS", lateCalls)
+			for _, name := range []string{"init.sh", "start.sh"} {
+				path := filepath.Join(pkg, "deploy-nas/scripts", name)
+				if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(path, []byte("#!/bin/sh\nprintf '%s\\n' called >>\"$AURIGA_TEST_RUNTIME_LATE_CALLS\"\nexit 31\n"), 0755); err != nil {
+					t.Fatal(err)
+				}
+			}
+			issuer, public := testSigningKeys(t)
+			signTestRoot(t, pkg, issuer)
+			s := state{Data: data, Package: pkg, ResourceReady: true}
+			if tc.runtime {
+				s = pinRuntimeProtocolFixture(t, pkg, runtimeOptions)
+				s.ResourceReady = true
+			} else {
+				for _, path := range []string{data, data + ".oneclick"} {
+					if err := os.Mkdir(path, 0755); err != nil {
+						t.Fatal(err)
+					}
+				}
+				if err := os.WriteFile(filepath.Join(data, "stack.env"), []byte("AURIGA_PLATFORM_SEED=false\n"), 0600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := pinInitialTrust(&s, public); err != nil {
+				t.Fatal(err)
+			}
+			if err := saveState(s); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(data, ".auriga-initialized"), []byte("fixture"), 0644); err != nil {
+				t.Fatal(err)
+			}
+			stateBefore, err := os.ReadFile(filepath.Join(data+".oneclick", "state.json"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			incoming := pkg
+			if tc.outerUnsigned {
+				incoming = t.TempDir()
+				if err := os.WriteFile(filepath.Join(incoming, "payload"), []byte("explicit unsigned outer package fixture"), 0644); err != nil {
+					t.Fatal(err)
+				}
+				if err := writeSums(incoming); err != nil {
+					t.Fatal(err)
+				}
+			}
+			archive := filepath.Join(t.TempDir(), "incoming.tar")
+			if err := pack(incoming, archive); err != nil {
+				t.Fatal(err)
+			}
+			if tc.storedUnsigned {
+				if err := os.Remove(filepath.Join(pkg, "SHA256SUMS.sig")); err != nil {
+					t.Fatal(err)
+				}
+			}
+			// Hide B's signed installation while A verifies its incoming request.
+			// The fake dockerReady info call restores it before withLock reads state.
+			for _, path := range []string{data, data + ".oneclick"} {
+				if err := os.Rename(path, path+".before-lock"); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if _, err := readState(data); err == nil {
+				t.Fatal("A unexpectedly sees B's installation before the controlled boundary")
+			}
+			bin := t.TempDir()
+			docker := "#!/bin/sh\nset -eu\ncase \"$1\" in\ninfo) mv \"$AURIGA_TEST_RUNTIME_RACE_DATA.before-lock\" \"$AURIGA_TEST_RUNTIME_RACE_DATA\"; mv \"$AURIGA_TEST_RUNTIME_RACE_DATA.oneclick.before-lock\" \"$AURIGA_TEST_RUNTIME_RACE_DATA.oneclick\"; echo 28.5.2;;\ncompose) echo 2.29.0;;\nesac\n"
+			if err := os.WriteFile(filepath.Join(bin, "docker"), []byte(docker), 0755); err != nil {
+				t.Fatal(err)
+			}
+			t.Setenv("PATH", bin+":"+os.Getenv("PATH"))
+			t.Setenv("DOCKER_HOST", "unix:///not-a-real-docker-fixture.sock")
+			t.Setenv("DOCKER_CONTEXT", "")
+			t.Setenv("AURIGA_TEST_RUNTIME_RACE_DATA", data)
+			opts := installOptions{Data: data, Package: archive, Address: "192.0.2.10", AllowUnsigned: true}
+			if !tc.outerUnsigned {
+				opts.PublicKey = public
+			}
+			err = install(opts)
+			after, readErr := readState(data)
+			if readErr != nil {
+				t.Fatal(readErr)
+			}
+			if tc.wantReject {
+				stateAfter, readErr := os.ReadFile(filepath.Join(data+".oneclick", "state.json"))
+				if err == nil || !strings.Contains(err.Error(), "--allow-unsigned") || readErr != nil || !bytes.Equal(stateBefore, stateAfter) || after.AllowUnsigned {
+					t.Fatalf("unsigned request altered concurrent signed runtime state or was not rejected: err=%v readErr=%v unsigned=%v", err, readErr, after.AllowUnsigned)
+				}
+				if _, err := os.Lstat(lateCalls); !os.IsNotExist(err) {
+					t.Fatal("rejected unsigned request reached init/start", err)
+				}
+			} else if err == nil || !strings.Contains(err.Error(), "exit status 31") || after.AllowUnsigned != tc.outerUnsigned {
+				t.Fatalf("legitimate explicit exception/signature behavior changed: err=%v unsigned=%v", err, after.AllowUnsigned)
+			}
+		})
+	}
+}

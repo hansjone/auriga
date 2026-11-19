@@ -208,6 +208,9 @@ func install(o installOptions) error {
 			if err != nil {
 				return err
 			}
+			if s.Runtime != nil && (unsigned || storedUnsigned) {
+				return errors.New("runtime 首装或恢复需要已验签的外层安装包，不能使用 --allow-unsigned 缺签名例外")
+			}
 			if err := resumeInstallRuntime(s, o.Runtime, prepared); err != nil {
 				return err
 			}
