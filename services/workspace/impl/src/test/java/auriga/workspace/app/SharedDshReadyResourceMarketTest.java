@@ -15,10 +15,9 @@ class SharedDshReadyResourceMarketTest {
   static final class Fixture {
     final SharedDshResourceMarketQueriesTest.Fixture state =
         new SharedDshResourceMarketQueriesTest.Fixture();
-    final SharedDshBinding binding =
-        state.binding.toBuilder().setMode(DshInstanceMode.DSH_INSTANCE_MODE_SHARED).build();
-    final SharedDshResourceView view = state.view.toBuilder().setBinding(binding).build();
-    final SharedDshResourceReport report = state.report.toBuilder().setBinding(binding).build();
+    final SharedDshBinding binding;
+    final SharedDshResourceView view;
+    final SharedDshResourceReport report;
     final SharedDshEntryTransportFixture entry;
     final SharedDshResourceMarketQueries queries;
     boolean current = true;
@@ -26,7 +25,20 @@ class SharedDshReadyResourceMarketTest {
     long operations;
 
     Fixture() {
-      state.row.put("mode", "shared");
+      this(false);
+    }
+
+    Fixture(boolean dedicated) {
+      binding =
+          state.binding.toBuilder()
+              .setMode(
+                  dedicated
+                      ? DshInstanceMode.DSH_INSTANCE_MODE_DEDICATED
+                      : DshInstanceMode.DSH_INSTANCE_MODE_SHARED)
+              .build();
+      view = state.view.toBuilder().setBinding(binding).build();
+      report = state.report.toBuilder().setBinding(binding).build();
+      state.row.put("mode", dedicated ? "dedicated" : "shared");
       state.row.put("payload", view.toByteArray());
       state.row.put("report", report.toByteArray());
       when(state.jdbc.queryForList(anyString(), eq(state.tenant), eq(state.placement)))
@@ -145,11 +157,25 @@ class SharedDshReadyResourceMarketTest {
   }
 
   @Test
-  void aRestrictedSharedProfileIsNeverEvidenceForDedicatedMode() {
-    var f = new Fixture();
-    var dedicated =
-        f.binding.toBuilder().setMode(DshInstanceMode.DSH_INSTANCE_MODE_DEDICATED).build();
-    assertFalse(f.state.run(() -> f.entry.transport.observed(dedicated)));
-    assertEquals(0, f.entry.requests);
+  void dedicatedRequiresItsOwnExactProfileAndCannotAddUnobservedControllers() {
+    var f = new Fixture(true);
+    assertEquals(Optional.of(f.report), f.state.run(() -> f.queries.report(f.view)));
+    f.entry.profile = body -> body.put("profile", "auriga.shared.v1");
+    assertTrue(f.state.run(() -> f.queries.report(f.view)).isEmpty());
+    f.entry.profile =
+        body -> {
+          ((tools.jackson.databind.node.ObjectNode) body.path("capabilities")).put("shell", true);
+          return body;
+        };
+    assertTrue(f.state.run(() -> f.queries.report(f.view)).isEmpty());
+    f.entry.profile =
+        body -> {
+          ((tools.jackson.databind.node.ObjectNode) body.path("capabilities"))
+              .put("pluginInstall", false);
+          return body;
+        };
+    assertTrue(f.state.run(() -> f.queries.report(f.view)).isEmpty());
+    f.entry.profile = body -> body.put("schemaVersion", 4294967297L);
+    assertTrue(f.state.run(() -> f.queries.report(f.view)).isEmpty());
   }
 }
