@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	nodev1 "github.com/hansjone/auriga/infra/gen/auriga/node/v1"
-	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 	"io"
 	"net/http"
@@ -203,33 +202,17 @@ func (r *Relay) message(ctx context.Context, op string, raw []byte) (any, error)
 		if err != nil {
 			return nil, err
 		}
-		var out struct {
-			Binding           json.RawMessage
-			TaskId, ContextId string
-			Connection        struct{ BootId, RequestId string }
-		}
-		b := new(nodev1.SharedDshSessionBinding)
-		if json.Unmarshal(result, &out) != nil {
-			return nil, errors.New("shared.binding_mismatch")
-		}
-		// N/collab uses the public K mode and safe numbers; accept documented
-		// protobuf JSON too, while always comparing the complete typed binding.
-		if protojson.Unmarshal(out.Binding, b) != nil {
-			b.Reset()
-			if decode(out.Binding, b) != nil {
-				return nil, errors.New("shared.binding_mismatch")
-			}
-		}
-		if !proto.Equal(b, cap.Binding) || out.TaskId != in.TaskId || !uuid.MatchString(out.ContextId) || out.Connection.BootId != in.BootId || out.Connection.RequestId != w.WitnessID {
-			return nil, errors.New("shared.binding_mismatch")
+		contextID, err := checkMessageContext(result, cap.Binding, in.TaskId, in.BootId, w.WitnessID, w.BindingID, w.Revision, until)
+		if err != nil {
+			return nil, err
 		}
 		r.mu.Lock()
 		defer r.mu.Unlock()
 		current, ok := r.sources[in.TaskId]
-		if !ok || current.context != "" && current.context != out.ContextId {
+		if !ok || current.context != "" && current.context != contextID {
 			return nil, errors.New("shared.revoked")
 		}
-		current.context = out.ContextId
+		current.context = contextID
 		r.sources[in.TaskId] = current
 	}
 	return value, nil

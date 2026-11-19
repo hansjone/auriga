@@ -6,8 +6,25 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 )
+
+func TestExt4FormatterQuotaOption(t *testing.T) {
+	image := filepath.Join(t.TempDir(), "members-ext4")
+	args := ext4FormatArgs(image)
+	for i, arg := range args {
+		if arg == "-Q" {
+			t.Fatal("mke2fs does not implement -Q; project quota must use extended quotatype")
+		}
+		if arg == "-E" && (i+1 >= len(args) || args[i+1] != "lazy_itable_init=0,lazy_journal_init=0,quotatype=prjquota") {
+			t.Fatal("incorrect project-quota extended options")
+		}
+	}
+	if !strings.Contains(strings.Join(args, " "), "quota,project,^orphan_file,^metadata_csum_seed") || args[len(args)-1] != image {
+		t.Fatal("filesystem features or exact target changed")
+	}
+}
 
 func TestExt4PoolPreparesBeforePublicationAndRetainsQuotaReservation(t *testing.T) {
 	root := t.TempDir()

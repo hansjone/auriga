@@ -157,8 +157,8 @@ func (r *Relay) capability(ctx context.Context, token string) (*nodev1.SharedDsh
 	if e := r.Client.call(ctx, true, "AuthorizeSharedCapability", &iamv1.AuthorizeSharedCapabilityRequest{Capability: cap}, out); e != nil {
 		return nil, e
 	}
-	if !out.Active || !proto.Equal(cap.Binding, out.Binding) || cap.CredentialVersion != out.CredentialVersion {
-		return nil, errors.New("shared.revoked")
+	if err := checkAuthorization(cap, out); err != nil {
+		return nil, err
 	}
 	return cap, nil
 }
@@ -240,6 +240,9 @@ func (r *Relay) invoke(ctx context.Context, op string, raw []byte) (any, error) 
 		if in.Audience == "" {
 			in.Audience = "auriga.shared.enterprise"
 		}
+		if !validTaskScopes(in.Audience, in.Scopes) {
+			return nil, errors.New("common.forbidden")
+		}
 		r.mu.Lock()
 		old, exists := r.tasks[in.TaskId]
 		if len(r.tasks) >= 4096 && !exists {
@@ -272,6 +275,9 @@ func (r *Relay) invoke(ctx context.Context, op string, raw []byte) (any, error) 
 		in := new(iamv1.IssueSharedCapabilityRequest)
 		if decode(raw, in) != nil {
 			return nil, errors.New("common.validation_failed")
+		}
+		if !validTaskScopes(in.Audience, in.Scopes) {
+			return nil, errors.New("common.forbidden")
 		}
 		if e := r.task(ctx, in.Binding, in.TaskId, in.Audience, in.Scopes); e != nil {
 			return nil, e
@@ -311,6 +317,9 @@ func (r *Relay) invoke(ctx context.Context, op string, raw []byte) (any, error) 
 			return nil, e
 		}
 		if op == "readCredentials" {
+			if cap.Audience != "auriga.shared.enterprise" || !has(cap.Scopes, "credentials") {
+				return nil, errors.New("common.forbidden")
+			}
 			out := new(iamv1.ReadSharedCredentialsResponse)
 			if e = r.Client.call(ctx, true, "ReadSharedCredentials", &iamv1.ReadSharedCredentialsRequest{Capability: cap}, out); e != nil {
 				return nil, e
@@ -322,6 +331,9 @@ func (r *Relay) invoke(ctx context.Context, op string, raw []byte) (any, error) 
 		}
 		out := new(iamv1.AuthorizeSharedCapabilityResponse)
 		if e = r.Client.call(ctx, true, "AuthorizeSharedCapability", &iamv1.AuthorizeSharedCapabilityRequest{Capability: cap}, out); e != nil {
+			return nil, e
+		}
+		if e = checkAuthorization(cap, out); e != nil {
 			return nil, e
 		}
 		return wire(out)
@@ -348,7 +360,7 @@ func (r *Relay) remember(b *nodev1.SharedDshSessionBinding, id, token string, ca
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	task, ok := r.tasks[id]
-	if !ok || cap.SchemaVersion != 1 || cap.Audience != task.audience {
+	if !ok || cap.SchemaVersion != 1 || cap.Audience != task.audience || !validTaskScopes(cap.Audience, cap.Scopes) {
 		return errors.New("shared.binding_mismatch")
 	}
 	for _, scope := range cap.Scopes {

@@ -27,13 +27,43 @@ func storageCommand(ctx context.Context, binary string, args ...string) ([]byte,
 	if !filepath.IsAbs(binary) {
 		return nil, fmt.Errorf("absolute storage tool path required")
 	}
+	switch filepath.Base(binary) {
+	case "mkfs.ext4", "mke2fs", "losetup":
+	default:
+		return nil, fmt.Errorf("unsupported pool storage tool")
+	}
 	cmd := exec.CommandContext(ctx, binary, args...)
 	cmd.Env = []string{"PATH=/usr/sbin:/usr/bin:/sbin:/bin", "LC_ALL=C"}
+	stderr := new(storageStderr)
+	cmd.Stderr = stderr
 	output, err := cmd.Output()
 	if err != nil {
-		return nil, fmt.Errorf("pool storage tool %s failed: %w", filepath.Base(binary), err)
+		diagnostic := strconv.QuoteToASCII(strings.TrimSpace(string(stderr.data)))
+		if stderr.truncated {
+			diagnostic += " (truncated)"
+		}
+		// These tools receive only node-owned storage paths/options; their
+		// environment contains no service JWT or enterprise material. Quote
+		// bounded stderr/argv to prevent multi-line/control-sequence injection.
+		return nil, fmt.Errorf("pool storage tool %s args=%q failed: %w; stderr=%s", filepath.Base(binary), args, err, diagnostic)
 	}
 	return output, nil
+}
+
+type storageStderr struct {
+	data      []byte
+	truncated bool
+}
+
+func (b *storageStderr) Write(p []byte) (int, error) {
+	count := len(p)
+	remaining := 8192 - len(b.data)
+	if len(p) > remaining {
+		b.truncated = true
+		p = p[:remaining]
+	}
+	b.data = append(b.data, p...)
+	return count, nil
 }
 
 func mountExt4Image(ctx context.Context, image, root string, size int64, mkfs, losetup string) (string, error) {
@@ -62,12 +92,7 @@ func mountExt4Image(ctx context.Context, image, root string, size int64, mkfs, l
 		if closeErr != nil {
 			return "", closeErr
 		}
-		if _, err = storageCommand(ctx, mkfs, "-q", "-F", "-t", "ext4", "-b", "4096", "-m", "0",
-			"-O", "quota,project,^orphan_file,^metadata_csum_seed", "-Q", "prjquota",
-			"-E", "lazy_itable_init=0,lazy_journal_init=0", tmp); err != nil {
-			return "", err
-		}
-		if err = verifyExt4Image(tmp, size); err != nil {
+		if err = formatExt4Image(ctx, mkfs, tmp, size); err != nil {
 			return "", err
 		}
 		formatted, err := os.OpenFile(tmp, os.O_RDWR, 0)
@@ -157,6 +182,13 @@ func mountExt4Image(ctx context.Context, image, root string, size int64, mkfs, l
 		return "", err
 	}
 	return device, nil
+}
+
+func formatExt4Image(ctx context.Context, mkfs, image string, size int64) error {
+	if _, err := storageCommand(ctx, mkfs, ext4FormatArgs(image)...); err != nil {
+		return err
+	}
+	return verifyExt4Image(image, size)
 }
 
 func verifyExt4Image(path string, size int64) error {

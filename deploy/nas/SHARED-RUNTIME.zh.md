@@ -49,6 +49,20 @@ Host 的固定 `/var/lib/auriga/pools/<pool>/host/message-trust/ledger.json` 映
 
 ## 可回读验收
 
+格式化参数使用 mke2fs 的 `-E lazy_itable_init=0,lazy_journal_init=0,quotatype=prjquota`，不使用其不支持的 `-Q`。固定 mkfs.ext4/mke2fs/losetup 失败时保留原错误链、参数及最多8KiB且已转义的 stderr，工具环境不含服务令牌。公开 CI/本机 Linux 可先执行只创建临时普通文件的真实工具回归：
+
+```sh
+cd infra/agent
+GOMAXPROCS=2 go test -p 1 ./internal/storage \
+  -run '^Test(Ext4FormatWithRealMke2fs|StorageCommandDiagnostics)' -count=1 -v
+```
+
+需已安装真实 e2fsprogs（Agent 镜像已包含）；测试以非 root 即可调用生产格式化函数并读回真实64MiB文件的 superblock/精确大小/特性，不连接 loop、不挂载或修改已有磁盘。工具缺失明确失败，不以 fake 录参通过代替。格式化通过仅证明 CLI/文件格式，不证明 NAS 的 project quota、继承、写满、重挂或整机恢复已验收；这些由主控另跑真实内核探针。
+
+普通受控任务沿 enterprise 目的的独立 `task.execute`，不与 credentials/outbound 混发，不能在原 handle 上升级。Authorize 返回生成 enum 的正式字符串 enterpriseCredentialState：ABSENT 只在有效平台会话确无公司材料时可继续普通工具，AVAILABLE 才由 Host 同一真实 execution 开独立企业任务；0/未知状态拒绝。公司 token 轮换不改变普通任务版本，平台登录本身失效仍拒绝。该能力不增加 shared 的工具或插件白名单。
+
+最终 messageContext 保留 mailbox 的 receiveEnabled/receiveVersion/headSeq/committedCursor 和原 messageTrust 三签名对象；Node 核当前完整 K、task/context、connection/boot/native/witness 与 canonical uint64，不初始化 Host inbox。只有 Host 原耐久账本规则允许时才首次建空收件箱，不能以 false 或丢账本清空历史。
+
 主控先串行做纯合成 W/IAM/N/Node/Host 组合与非 root Linux CI，再按授权小批现场验收。Node 的真实安装 health 包含 enterpriseOutbound，以及按配置安装的 model/messageContext/send/receive。公开模型固定 call UUID，原 JSON/SSE 转 Host NDJSON；取消、断流和 unknown 不重放，不伪造 DONE。
 
 消息 context bootstrap 只登记真实来源；send 的 platform_stored/pending 不等于投递/执行成功。receive 仅可信后台 `receiveSet/fetch/attemptBegin/executionAdmit/receipt`，初始不自动开启接收，Host 真正持久接收后才收据。当前 N 首批只承诺 shared↔shared，ordinary desktop 交叉明确拒绝。正常门户、实际供应商、真实磁盘配额与崩溃恢复仍须主控验收，不能以本工位 fixture 的通过替代。
