@@ -38,6 +38,46 @@ function taskEnvironment(ports, sessionId, token, credentials) {
   });
 }
 
+async function acquireOrdinary(ports, binding, execution) {
+  if (typeof ports.acquireExecution === 'function')
+    return ports.acquireExecution(binding, execution);
+  // Pure port compositions still own one ordinary handle explicitly. The
+  // production ports always use the native turn authority above.
+  let token = await ports.issueExecution(binding, execution);
+  let closed = false,
+    closing;
+  return {
+    binding,
+    signal: execution.signal,
+    get ordinaryToken() {
+      return closed ? '' : token;
+    },
+    check() {
+      if (closed || execution.signal?.aborted) fail();
+    },
+    async refresh() {
+      if (closed) fail();
+      const next = await ports.enterprise.refreshCapability(
+        token,
+        binding.sessionId,
+        'task.execute',
+      );
+      if (closed) fail();
+      token = next;
+      return token;
+    },
+    close() {
+      if (!closing) {
+        closed = true;
+        closing = Promise.resolve().then(() =>
+          ports.finishTask(binding, execution, token),
+        );
+      }
+      return closing;
+    },
+  };
+}
+
 /** A valid ordinary task is independent of optional company credentials. */
 export async function openSharedExecution({
   ctx,
@@ -53,11 +93,17 @@ export async function openSharedExecution({
     fail('common.unavailable');
   const sessionId = executionSession(ctx, execution);
   const binding = await runtime.session(sessionId);
-  let token = await ports.issueExecution(binding, execution);
+  const ordinary = await acquireOrdinary(ports, binding, execution);
+  let token = ordinary.ordinaryToken;
   let enterprise;
-  let closed = false;
+  let closed = false,
+    closing;
+  let closeRequested = false,
+    retained = 0,
+    settleWaiting;
   let env;
   const check = () => {
+    ordinary.check?.();
     if (
       closed ||
       execution.signal?.aborted ||
@@ -65,16 +111,24 @@ export async function openSharedExecution({
     )
       fail();
   };
-  const close = async () => {
-    if (closed) return;
-    closed = true;
-    env = undefined;
-    const result = await Promise.allSettled([
-      enterprise?.close(),
-      ports.finishTask(binding, execution, token),
-    ]);
-    const error = result.find((entry) => entry.status === 'rejected');
-    if (error) throw error.reason;
+  const close = () => {
+    if (!closing) {
+      closeRequested = true;
+      closing = (async () => {
+        if (retained)
+          await new Promise((resolve) => {
+            settleWaiting = resolve;
+          });
+        closed = true;
+        env = undefined;
+        try {
+          await enterprise?.close();
+        } finally {
+          await ordinary.close();
+        }
+      })();
+    }
+    return closing;
   };
   try {
     const taskId = await ports.enterprise.taskId(token);
@@ -93,7 +147,13 @@ export async function openSharedExecution({
         runtime,
         ports,
         raw,
-        execution: { agent: execution.agent, signal: execution.signal },
+        ordinary,
+        execution: {
+          agent: execution.agent,
+          signal: globalThis.AbortSignal.any(
+            [execution.signal, ordinary.signal].filter(Boolean),
+          ),
+        },
       });
       await runtime.capability(token, sessionId, taskId, 'task.execute');
     }
@@ -111,21 +171,39 @@ export async function openSharedExecution({
     return Object.freeze({
       binding,
       company: !!enterprise,
+      signal: ordinary.signal,
+      get ordinaryToken() {
+        return closed ? '' : ordinary.ordinaryToken;
+      },
       get token() {
-        return closed ? '' : (enterprise?.token ?? token);
+        return closed || !ordinary.ordinaryToken
+          ? ''
+          : (enterprise?.token ?? token);
       },
       get env() {
-        return closed ? undefined : (enterprise?.env ?? env);
+        return closed || !ordinary.ordinaryToken
+          ? undefined
+          : (enterprise?.env ?? env);
+      },
+      retain() {
+        check();
+        if (closeRequested || typeof ordinary.retain !== 'function') fail();
+        const settle = ordinary.retain();
+        retained++;
+        let ended = false;
+        return async () => {
+          if (ended) return;
+          ended = true;
+          await settle();
+          retained--;
+          if (retained === 0) settleWaiting?.();
+        };
       },
       async refresh() {
         check();
         if (typeof ports.enterprise.refreshCapability !== 'function')
           fail('common.unavailable');
-        const refreshed = await ports.enterprise.refreshCapability(
-          token,
-          sessionId,
-          'task.execute',
-        );
+        const refreshed = await ordinary.refresh();
         check();
         token = refreshed;
         const current = await runtime.capability(
@@ -163,6 +241,7 @@ export async function openSharedTask({
   ports,
   execution,
   raw = false,
+  ordinary: suppliedOrdinary,
 }) {
   if (typeof ports.finishTask !== 'function') fail('common.unavailable');
   const sessionId = executionSession(ctx, execution);
@@ -177,10 +256,14 @@ export async function openSharedTask({
     raw && settings.allowRawAgentToken !== false
       ? ['outbound', 'credentials']
       : ['outbound'];
-  let token = await ports.issueTask(binding, execution, scopes);
+  const ordinary =
+    suppliedOrdinary ?? (await acquireOrdinary(ports, binding, execution));
+  let token;
   let env;
-  let closed = false;
+  let closed = false,
+    closing;
   const check = () => {
+    ordinary.check?.();
     if (
       closed ||
       execution.signal?.aborted ||
@@ -188,11 +271,19 @@ export async function openSharedTask({
     )
       fail();
   };
-  const close = async () => {
-    if (closed) return;
-    closed = true;
-    env = undefined;
-    await ports.finishTask(binding, execution, token);
+  const close = () => {
+    if (!closing) {
+      closed = true;
+      env = undefined;
+      closing = (async () => {
+        try {
+          await ports.finishTask(binding, execution, token);
+        } finally {
+          if (!suppliedOrdinary) await ordinary.close();
+        }
+      })();
+    }
+    return closing;
   };
   const load = async (taskId) => {
     check();
@@ -228,6 +319,7 @@ export async function openSharedTask({
     return env;
   };
   try {
+    token = await ports.issueTask(binding, execution, scopes, ordinary);
     const taskId = await ports.enterprise.taskId(token);
     await load(taskId);
     return Object.freeze({

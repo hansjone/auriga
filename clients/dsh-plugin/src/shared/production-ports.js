@@ -12,6 +12,7 @@ import { u64 } from '../network/source-control/frames.js';
 import { registrationSession } from '../network/host/native/host-port.js';
 import { MailboxError } from '../network/durable/client.js';
 import { canonical, fail, same, validate, verifyToken } from './protocol.js';
+import { createTurnAdmission } from './turn-admission.js';
 
 /** Compose the documented DSH Host APIs with the node-owned W/IAM/N relay. */
 export function createProductionSharedPorts(
@@ -37,6 +38,7 @@ export function createProductionSharedPorts(
   const tasks = new WeakMap();
   const capabilities = new Map();
   const requests = new Map();
+  const toolRequests = new WeakMap();
   let closed = false;
   const checkProfile = (expected) => {
     if (closed) return false;
@@ -215,17 +217,37 @@ export function createProductionSharedPorts(
       authorizationSetDigest: snapshot.view.authorizationSetDigest,
     };
   }
-  async function begin(binding, execution, scopes, audience) {
+  async function begin(binding, execution, scopes, audience, parent) {
     if (
       execution.signal?.aborted ||
       executionSession(ctx, execution) !== binding.sessionId
     )
       fail();
+    const ordinary =
+      audience === 'auriga.shared.enterprise' &&
+      scopes.length === 1 &&
+      scopes[0] === 'task.execute';
+    if (ordinary && parent) fail();
+    const authority = ordinary
+      ? undefined
+      : await turns.parent(parent, binding);
+    const parentTask = authority && tasks.get(authority.execution);
+    if (!ordinary && (!parentTask || parentTask.closing)) fail();
     let task = tasks.get(execution);
     if (!task) {
-      task = { id: randomUUID(), binding, execution, tokens: new Set() };
+      task = {
+        id: randomUUID(),
+        binding,
+        execution,
+        tokens: new Set(),
+        children: new Set(),
+        parent: parentTask,
+        parentLeases: new Set(parent ? [parent] : []),
+      };
       tasks.set(execution, task);
+      parentTask?.children.add(task);
     }
+    if (task.closing || task.parent !== parentTask) fail();
     same(task.binding, binding);
     try {
       const result = await call(
@@ -235,10 +257,18 @@ export function createProductionSharedPorts(
           taskId: task.id,
           scopes,
           audience,
+          ...(authority ? { parentCapability: authority.token } : {}),
         },
-        execution.signal,
+        globalThis.AbortSignal.any(
+          [execution.signal, authority?.execution.signal].filter(Boolean),
+        ),
       );
-      if (execution.signal?.aborted || tasks.get(execution) !== task) fail();
+      if (
+        task.closing ||
+        execution.signal?.aborted ||
+        tasks.get(execution) !== task
+      )
+        fail();
       const claims = verifyToken(
         result.token,
         'Capability',
@@ -251,28 +281,67 @@ export function createProductionSharedPorts(
       return result.token;
     } catch (error) {
       // A canceled response can still have committed a task at IAM.
-      await finish(binding, execution, task).catch(() => {});
+      await finish(binding, execution, task);
       throw error;
     }
+  }
+  function fenceTask(task) {
+    if (!task) return;
+    task.closing = true;
+    for (const token of task.tokens) capabilities.delete(token);
+    for (const child of task.children) fenceTask(child);
   }
   async function finish(binding, execution, knownTask) {
     const current = tasks.get(execution);
     const task = knownTask ?? current;
     if (!task) return;
     same(task.binding, binding);
-    if (current === task) tasks.delete(execution);
-    for (const token of task.tokens) capabilities.delete(token);
-    await call('finishTask', { binding, taskId: task.id });
+    if (task.finished) return task.finished;
+    fenceTask(task);
+    task.finished = (async () => {
+      const children = await Promise.allSettled(
+        [...task.children].map((child) =>
+          finish(child.binding, child.execution, child),
+        ),
+      );
+      const error = children.find((entry) => entry.status === 'rejected');
+      if (error) throw error.reason;
+      const result = await call('finishTask', { binding, taskId: task.id });
+      if (!result || result.fenced !== true || result.taskId !== task.id)
+        fail('common.unavailable');
+      try {
+        validate('SessionBinding', result.binding);
+      } catch {
+        fail('common.unavailable');
+      }
+      same(result.binding, binding);
+      if (tasks.get(execution) === task) tasks.delete(execution);
+      task.parent?.children.delete(task);
+    })().catch((error) => {
+      if (task.parent) turns.invalidate(task.parent.execution);
+      throw error;
+    });
+    return task.finished;
   }
+  const turns = createTurnAdmission(ctx, {
+    lookup,
+    begin: (binding, execution) =>
+      begin(binding, execution, ['task.execute'], 'auriga.shared.enterprise'),
+    refresh: (token, sessionId) =>
+      ports.enterprise.refreshCapability(token, sessionId, 'task.execute'),
+    fence: (execution) => fenceTask(tasks.get(execution)),
+    fenceForeground: (execution) => {
+      for (const child of tasks.get(execution)?.children ?? [])
+        if (![...child.parentLeases].some((value) => turns.retained(value)))
+          fenceTask(child);
+    },
+    finish,
+  });
   const removeRequest = async (agent) => {
+    turns.idle(agent);
     const request = requests.get(agent);
     if (!request) return;
     requests.delete(agent);
-    await Promise.allSettled(
-      [...request.tasks.values()].map((execution) =>
-        finish(request.binding, execution),
-      ),
-    );
   };
   const disposers = [
     ctx.on('agent/request', async (payload, next) => {
@@ -282,10 +351,13 @@ export function createProductionSharedPorts(
         ctx.sessions.get(agent.session.id) !== agent.session
       )
         fail();
-      const prior = requests.get(agent);
-      if (prior?.turn !== turn) await removeRequest(agent);
-      const binding = await lookup(agent.session.id);
-      const row = requests.get(agent) ?? { binding, turn, tasks: new Map() };
+      const root = await turns.request(payload);
+      const binding = root.binding;
+      const previous = requests.get(agent);
+      const row =
+        previous?.turn === turn
+          ? previous
+          : { binding, turn, tasks: new Map() };
       same(row.binding, binding);
       row.step = step;
       row.signal = signal;
@@ -293,11 +365,21 @@ export function createProductionSharedPorts(
       requests.set(agent, row);
       return next();
     }),
+    ctx.on('session/event', (session, event) => {
+      turns.end(session, event);
+      const agent = ctx.agents.get(session.id);
+      if (
+        event.type === 'turn/end' &&
+        requests.get(agent)?.turn === event.data.turn
+      )
+        requests.delete(agent);
+    }),
     ctx.on('agent/status', ({ agent, status }) => {
       if (status === 'idle') void removeRequest(agent).catch(() => {});
     }),
     ctx.on('agent/disposed', ({ agent }) => {
       messageContexts.retire(agent);
+      turns.retire(agent);
       void removeRequest(agent).catch(() => {});
     }),
   ];
@@ -310,34 +392,31 @@ export function createProductionSharedPorts(
       const agent = ctx.agents.get(binding.sessionId);
       const native = registrationSession(ctx, { agent });
       const controller = new AbortController();
-      const execution = {
-        agent,
-        signal: globalThis.AbortSignal.any(
-          [signal, controller.signal].filter(Boolean),
-        ),
-      };
+      const operationSignal = globalThis.AbortSignal.any(
+        [signal, controller.signal].filter(Boolean),
+      );
       const current = await lookup(binding.sessionId);
       same(current, binding);
       await resolve(placementBinding(current), current.platformSessionId);
-      let token = await begin(
-        binding,
-        execution,
-        ['message.receive'],
-        'auriga.shared.message',
-      );
-      const task = tasks.get(execution);
+      let active;
+      let blocked;
+      let lane = Promise.resolve();
       let expected,
         latest,
         stopped = false;
       const guard = () => {
         if (
           stopped ||
-          execution.signal.aborted ||
-          tasks.get(execution) !== task
+          operationSignal.aborted ||
+          !active ||
+          tasks.get(active.execution) !== active.task ||
+          active.task.closing
         )
           fail();
         native.check();
-        if (executionSession(ctx, execution) !== binding.sessionId) fail();
+        active.parent.check();
+        if (executionSession(ctx, active.execution) !== binding.sessionId)
+          fail();
       };
       const accept = (context) => {
         guard();
@@ -366,6 +445,7 @@ export function createProductionSharedPorts(
       };
       const refresh = async (initial = false) => {
         guard();
+        const { task, execution } = active;
         if (!initial) {
           const next = await ports.downstream.issue(
             binding,
@@ -376,9 +456,10 @@ export function createProductionSharedPorts(
           );
           // This private background execution has one serialized request lane.
           // Retain only its current token, without pruning live helper anchors.
-          if (capabilities.get(token) === task) capabilities.delete(token);
-          task.tokens.delete(token);
-          token = next;
+          if (capabilities.get(active.token) === task)
+            capabilities.delete(active.token);
+          task.tokens.delete(active.token);
+          active.token = next;
         }
         return accept(
           await messageContexts.prepare(
@@ -386,27 +467,88 @@ export function createProductionSharedPorts(
               tenantId: binding.tenantId,
               sessionId: binding.sessionId,
               taskId: task.id,
-              capability: token,
+              capability: active.token,
             },
             task,
             execution.signal,
           ),
         );
       };
-      const close = async () => {
-        if (stopped) return;
+      const endOperation = async () => {
+        const prior = active;
+        if (!prior) return;
+        // Keep a failed close as the lane's barrier. Never open a replacement
+        // ordinary task while this operation lacks explicit Finish echoes.
+        try {
+          try {
+            await finish(binding, prior.execution, prior.task);
+          } finally {
+            await prior.parent.close();
+          }
+        } catch (error) {
+          blocked = error;
+          throw error;
+        }
+        if (active === prior) active = undefined;
+      };
+      const startOperation = async () => {
+        if (stopped || operationSignal.aborted) fail();
+        native.check();
+        const parent = await turns.operation(binding, agent, operationSignal);
+        const execution = { agent, signal: parent.signal };
+        try {
+          const token = await begin(
+            binding,
+            execution,
+            ['message.receive'],
+            'auriga.shared.message',
+            parent,
+          );
+          active = { parent, execution, task: tasks.get(execution), token };
+          await refresh(true);
+        } catch (error) {
+          try {
+            if (tasks.has(execution)) await finish(binding, execution);
+          } finally {
+            await parent.close();
+          }
+          throw error;
+        }
+      };
+      const run = (operation) => {
+        const next = lane.then(async () => {
+          if (!active) await startOperation();
+          try {
+            guard();
+            return await operation();
+          } finally {
+            await endOperation();
+          }
+        });
+        lane = next.then(
+          () => undefined,
+          () => {
+            if (blocked) throw blocked;
+          },
+        );
+        void lane.catch(() => {});
+        return next;
+      };
+      const close = () => {
         stopped = true;
         controller.abort();
-        await finish(binding, execution, task);
+        return lane.then(endOperation);
       };
       try {
-        await refresh(true);
+        // Bootstrap stays inside the first finite receiver-open operation.
+        await startOperation();
         const trust = await messageTrust.open();
         return {
           get context() {
             return latest;
           },
           trust,
+          run,
           refresh: () => refresh(false),
           assertCurrent() {
             guard();
@@ -427,12 +569,12 @@ export function createProductionSharedPorts(
               {
                 tenantId: binding.tenantId,
                 sessionId: binding.sessionId,
-                taskId: task.id,
-                capability: token,
+                taskId: active.task.id,
+                capability: active.token,
                 operation,
                 frame,
                 signal: globalThis.AbortSignal.any(
-                  [execution.signal, callerSignal].filter(Boolean),
+                  [active.execution.signal, callerSignal].filter(Boolean),
                 ),
               },
               accept,
@@ -545,8 +687,9 @@ export function createProductionSharedPorts(
         await peer.dispose();
       }
     },
-    issueTask: (binding, execution, scopes) =>
-      begin(binding, execution, scopes, 'auriga.shared.enterprise'),
+    acquireExecution: (binding, execution) => turns.acquire(binding, execution),
+    issueTask: (binding, execution, scopes, parent) =>
+      begin(binding, execution, scopes, 'auriga.shared.enterprise', parent),
     issueExecution: (binding, execution) =>
       begin(binding, execution, ['task.execute'], 'auriga.shared.enterprise'),
     finishTask: (binding, execution) => finish(binding, execution),
@@ -624,6 +767,7 @@ export function createProductionSharedPorts(
           if (
             closed ||
             !task ||
+            task.closing ||
             tasks.get(task.execution) !== task ||
             capabilities.get(token) !== task ||
             task.execution.signal?.aborted ||
@@ -632,6 +776,10 @@ export function createProductionSharedPorts(
             fail();
         };
         check();
+        if (task.parent) {
+          await turns.refreshParent(task.parent.execution, task.parentLeases);
+          check();
+        }
         if (
           !task ||
           task.execution.signal?.aborted ||
@@ -685,48 +833,89 @@ export function createProductionSharedPorts(
     downstream: {
       async taskForSession(binding, signal, purpose) {
         const agent = ctx.agents.currentInitiator();
-        const current = requests.get(agent);
-        if (
-          !current ||
-          signal?.aborted ||
-          current.signal.aborted ||
-          ctx.agents.get(agent.id) !== agent ||
-          executionSession(ctx, { agent }) !== binding.sessionId
-        )
-          fail();
-        same(current.binding, binding);
-        const purposeKey = purpose.audience + ':' + purpose.scope;
-        let execution = current.tasks.get(purposeKey);
-        if (execution?.signal?.aborted) {
-          current.tasks.delete(purposeKey);
-          await finish(binding, execution);
-          execution = undefined;
-        }
-        if (!execution) {
-          execution = { agent, signal: current.signal };
-          current.tasks.set(purposeKey, execution);
-          execution.ready = begin(
-            binding,
-            execution,
-            [purpose.scope],
-            purpose.audience,
-          );
-        }
+        let current = requests.get(agent);
+        const parent = purpose.execution
+          ? turns.executionLease(purpose.execution)
+          : await turns.requestLease(agent, purpose.nativeSignal);
         try {
-          await execution.ready;
-        } catch (error) {
-          if (current.tasks.get(purposeKey) === execution)
+          current ??= requests.get(agent);
+          if (!current && purpose.execution) {
+            current = toolRequests.get(purpose.execution);
+            if (!current) {
+              current = {
+                binding,
+                signal: parent.signal,
+                callId: purpose.execution.callId,
+                tasks: new Map(),
+              };
+              toolRequests.set(purpose.execution, current);
+            }
+          }
+          if (
+            !current ||
+            signal?.aborted ||
+            current.signal.aborted ||
+            ctx.agents.get(agent.id) !== agent ||
+            executionSession(ctx, { agent }) !== binding.sessionId
+          )
+            fail();
+          same(current.binding, binding);
+          const purposeKey = purpose.audience + ':' + purpose.scope;
+          let execution = current.tasks.get(purposeKey);
+          if (execution?.signal?.aborted) {
             current.tasks.delete(purposeKey);
+            await finish(binding, execution);
+            execution = undefined;
+          }
+          if (!execution) {
+            execution = {
+              agent,
+              signal: globalThis.AbortSignal.any([
+                current.signal,
+                parent.signal,
+              ]),
+            };
+            current.tasks.set(purposeKey, execution);
+            execution.ready = begin(
+              binding,
+              execution,
+              [purpose.scope],
+              purpose.audience,
+              parent,
+            );
+          }
+          try {
+            await execution.ready;
+          } catch (error) {
+            if (current.tasks.get(purposeKey) === execution)
+              current.tasks.delete(purposeKey);
+            throw error;
+          }
+          if (
+            (purpose.execution
+              ? requests.get(agent) !== current &&
+                toolRequests.get(purpose.execution) !== current
+              : requests.get(agent) !== current) ||
+            current.tasks.get(purposeKey) !== execution ||
+            execution.signal?.aborted ||
+            !tasks.has(execution)
+          )
+            fail();
+          const parentLeases = tasks.get(execution).parentLeases;
+          for (const value of parentLeases)
+            if (!turns.active(value)) parentLeases.delete(value);
+          parentLeases.add(parent);
+          return {
+            taskId: tasks.get(execution).id,
+            callId: current.callId,
+            signal: parent.signal,
+            check: () => parent.check(),
+            close: () => parent.close(),
+          };
+        } catch (error) {
+          await parent.close();
           throw error;
         }
-        if (
-          requests.get(agent) !== current ||
-          current.tasks.get(purposeKey) !== execution ||
-          execution.signal?.aborted ||
-          !tasks.has(execution)
-        )
-          fail();
-        return { taskId: tasks.get(execution).id, callId: current.callId };
       },
       async issue(binding, taskId, audience, scopes, signal) {
         const task = [...new Set(capabilities.values())].find(
@@ -734,11 +923,14 @@ export function createProductionSharedPorts(
         );
         if (
           !task ||
+          task.closing ||
           task.execution.signal?.aborted ||
           executionSession(ctx, task.execution) !== binding.sessionId
         )
           fail();
         same(task.binding, binding);
+        if (task.parent)
+          await turns.refreshParent(task.parent.execution, task.parentLeases);
         const result = await call(
           'issueCapability',
           { binding, taskId, audience, scopes },
@@ -772,6 +964,7 @@ export function createProductionSharedPorts(
       receive: (request) => message('receive', request),
     },
     disconnect(revocation) {
+      turns.revoke(revocation);
       for (const [peer, binding] of peers)
         if (binding.placementId === revocation.placementId)
           void peer.dispose().catch(() => {});
@@ -784,6 +977,7 @@ export function createProductionSharedPorts(
     async close() {
       if (closed) return;
       try {
+        await turns.close();
         await Promise.allSettled([...requests.keys()].map(removeRequest));
         await Promise.allSettled(
           [...new Set(capabilities.values())].map((task) =>
