@@ -143,7 +143,9 @@ function fixture({ profileValidator } = {}) {
       if (operation === 'issueCapability') {
         if (!f.live || !activeTasks.has(request.taskId))
           throw new Error('shared.revoked');
-        return { token: token(request) };
+        const result = { token: token(request) };
+        await f.afterIssue?.();
+        return result;
       }
       if (operation === 'finishTask') {
         activeTasks.delete(request.taskId);
@@ -277,6 +279,30 @@ test('profile factory injection is internal, synchronous and strict; shared defa
       f.runtime.close();
     }
   }
+});
+
+test('a late capability renewal cannot resurrect a finished native execution', async () => {
+  const f = fixture(),
+    execution = { agent: f.agent, signal: new AbortController().signal };
+  const token = await f.ports.issueTask(f.binding, execution, ['outbound']);
+  f.state.afterIssue = () => f.ports.finishTask(f.binding, execution);
+  await assert.rejects(
+    f.ports.enterprise.refreshCapability(
+      token,
+      f.binding.sessionId,
+      'outbound',
+    ),
+  );
+  assert.equal(f.activeTasks.size, 0);
+  await assert.rejects(
+    f.ports.enterprise.refreshCapability(
+      token,
+      f.binding.sessionId,
+      'outbound',
+    ),
+  );
+  await f.ports.close();
+  f.runtime.close();
 });
 
 test('task-local uppercase variables preserve leading zeroes and a running helper renews its own material', async () => {

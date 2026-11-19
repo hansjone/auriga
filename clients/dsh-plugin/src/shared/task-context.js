@@ -53,12 +53,22 @@ export async function openSharedExecution({
     fail('common.unavailable');
   const sessionId = executionSession(ctx, execution);
   const binding = await runtime.session(sessionId);
-  const token = await ports.issueExecution(binding, execution);
+  let token = await ports.issueExecution(binding, execution);
   let enterprise;
   let closed = false;
+  let env;
+  const check = () => {
+    if (
+      closed ||
+      execution.signal?.aborted ||
+      executionSession(ctx, execution) !== sessionId
+    )
+      fail();
+  };
   const close = async () => {
     if (closed) return;
     closed = true;
+    env = undefined;
     const result = await Promise.allSettled([
       enterprise?.close(),
       ports.finishTask(binding, execution, token),
@@ -86,22 +96,58 @@ export async function openSharedExecution({
         execution: { agent: execution.agent, signal: execution.signal },
       });
       await runtime.capability(token, sessionId, taskId, 'task.execute');
-      return Object.freeze({ ...enterprise, close });
     }
-    if (state !== 'SHARED_ENTERPRISE_CREDENTIAL_STATE_ABSENT')
+    if (!enterprise && state !== 'SHARED_ENTERPRISE_CREDENTIAL_STATE_ABSENT')
       fail('common.unavailable');
     if (
       execution.signal?.aborted ||
       executionSession(ctx, execution) !== sessionId
     )
       fail();
+    env = taskEnvironment(ports, sessionId, token, {
+      DSH_AURIGA_ID: '',
+      DSH_AURIGA_TOKEN: '',
+    });
     return Object.freeze({
       binding,
-      token,
-      env: taskEnvironment(ports, sessionId, token, {
-        DSH_AURIGA_ID: '',
-        DSH_AURIGA_TOKEN: '',
-      }),
+      company: !!enterprise,
+      get token() {
+        return closed ? '' : (enterprise?.token ?? token);
+      },
+      get env() {
+        return closed ? undefined : (enterprise?.env ?? env);
+      },
+      async refresh() {
+        check();
+        if (typeof ports.enterprise.refreshCapability !== 'function')
+          fail('common.unavailable');
+        const refreshed = await ports.enterprise.refreshCapability(
+          token,
+          sessionId,
+          'task.execute',
+        );
+        check();
+        token = refreshed;
+        const current = await runtime.capability(
+          token,
+          sessionId,
+          taskId,
+          'task.execute',
+        );
+        check();
+        if (current.state.enterpriseCredentialState !== state)
+          fail('shared.revoked');
+        if (enterprise) await enterprise.refresh();
+        else
+          env = taskEnvironment(ports, sessionId, token, {
+            DSH_AURIGA_ID: '',
+            DSH_AURIGA_TOKEN: '',
+          });
+        check();
+        await runtime.capability(token, sessionId, taskId, 'task.execute');
+        check();
+        return enterprise?.env ?? env;
+      },
       close,
     });
   } catch (error) {
@@ -131,16 +177,27 @@ export async function openSharedTask({
     raw && settings.allowRawAgentToken !== false
       ? ['outbound', 'credentials']
       : ['outbound'];
-  const token = await ports.issueTask(binding, execution, scopes);
+  let token = await ports.issueTask(binding, execution, scopes);
+  let env;
   let closed = false;
+  const check = () => {
+    if (
+      closed ||
+      execution.signal?.aborted ||
+      executionSession(ctx, execution) !== sessionId
+    )
+      fail();
+  };
   const close = async () => {
     if (closed) return;
     closed = true;
+    env = undefined;
     await ports.finishTask(binding, execution, token);
   };
-  try {
-    const taskId = await ports.enterprise.taskId(token);
+  const load = async (taskId) => {
+    check();
     await runtime.capability(token, sessionId, taskId, 'outbound');
+    check();
     const credentials = { DSH_AURIGA_ID: '', DSH_AURIGA_TOKEN: '' };
     if (scopes.includes('credentials')) {
       const authorized = await runtime.capability(
@@ -153,7 +210,9 @@ export async function openSharedTask({
         binding,
         authorized.claims,
       );
+      check();
       await runtime.capability(token, sessionId, taskId, 'credentials');
+      check();
       if (
         material?.credentialVersion !== authorized.claims.credentialVersion ||
         typeof material.empNo !== 'string' ||
@@ -165,8 +224,35 @@ export async function openSharedTask({
       credentials.DSH_AURIGA_ID = material.empNo;
       credentials['DSH_AURIGA_TOKEN'] = material.token;
     }
-    const env = taskEnvironment(ports, sessionId, token, credentials);
-    return Object.freeze({ binding, token, env, close });
+    env = taskEnvironment(ports, sessionId, token, credentials);
+    return env;
+  };
+  try {
+    const taskId = await ports.enterprise.taskId(token);
+    await load(taskId);
+    return Object.freeze({
+      binding,
+      get token() {
+        return closed ? '' : token;
+      },
+      get env() {
+        return closed ? undefined : env;
+      },
+      async refresh() {
+        check();
+        if (typeof ports.enterprise.refreshCapability !== 'function')
+          fail('common.unavailable');
+        const refreshed = await ports.enterprise.refreshCapability(
+          token,
+          sessionId,
+          'outbound',
+        );
+        check();
+        token = refreshed;
+        return load(taskId);
+      },
+      close,
+    });
   } catch (error) {
     await close();
     throw error;

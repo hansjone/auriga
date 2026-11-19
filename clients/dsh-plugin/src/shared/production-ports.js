@@ -607,6 +607,18 @@ export function createProductionSharedPorts(
       },
       async refreshCapability(token, sessionId, scope) {
         const task = capabilities.get(token);
+        const check = () => {
+          if (
+            closed ||
+            !task ||
+            tasks.get(task.execution) !== task ||
+            capabilities.get(token) !== task ||
+            task.execution.signal?.aborted ||
+            executionSession(ctx, task.execution) !== sessionId
+          )
+            fail();
+        };
+        check();
         if (
           !task ||
           task.execution.signal?.aborted ||
@@ -626,8 +638,10 @@ export function createProductionSharedPorts(
         )
           fail();
         const current = await lookup(sessionId);
+        check();
         same(current, task.binding);
         await resolve(placementBinding(current), current.platformSessionId);
+        check();
         const result = await call(
           'issueCapability',
           {
@@ -643,6 +657,7 @@ export function createProductionSharedPorts(
           'Capability',
           options.capabilityKeys[claims.audience],
         );
+        check();
         same(refreshed.binding, task.binding);
         if (
           refreshed.taskId !== task.id ||

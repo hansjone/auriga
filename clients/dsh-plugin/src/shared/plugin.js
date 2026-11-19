@@ -4,7 +4,7 @@ import { createEnterpriseAdapter } from './enterprise.js';
 import { installSharedHost } from './host.js';
 import { createSharedCarrier } from './carrier.js';
 import { createSharedDownstream } from './downstream.js';
-import { openSharedExecution } from './task-context.js';
+import { installSharedExecutionEnvironment } from './task-environment.js';
 import { createSharedProfileHandler } from './profile.js';
 import { createSharedMessageManager } from './message-manager.js';
 
@@ -18,6 +18,7 @@ export const inject = [
   'tools',
   'skills',
   'workingDirectory',
+  'shellEnv',
   'sessions',
   'sessionPersistence',
   'agents',
@@ -33,10 +34,21 @@ export function apply(ctx) {
     config: ports.config,
   });
   const messaging = createSharedMessageManager(ctx, { runtime, ports });
+  const taskEnvironment = installSharedExecutionEnvironment(ctx, {
+    runtime,
+    ports,
+  });
   let host;
   try {
-    host = installSharedHost(ctx, { runtime, enterprise, ports, messaging });
+    host = installSharedHost(ctx, {
+      runtime,
+      enterprise,
+      ports,
+      messaging,
+      taskEnvironment,
+    });
   } catch (e) {
+    void taskEnvironment.close();
     runtime.close();
     throw e;
   }
@@ -51,6 +63,7 @@ export function apply(ctx) {
     if (typeof detachModels !== 'function')
       throw new Error('common.unavailable');
   } catch (error) {
+    void taskEnvironment.close();
     downstream?.close();
     host.close();
     throw error;
@@ -59,8 +72,7 @@ export function apply(ctx) {
     ...host,
     downstream,
     messaging,
-    openTask: (execution) =>
-      openSharedExecution({ ctx, runtime, ports, execution, raw: true }),
+    openTask: (execution) => taskEnvironment.open(execution),
   });
   // Message trust/cache outages degrade messages only. They cannot prevent
   // the model adapter or existing controlled tools from starting.
@@ -85,6 +97,7 @@ export function apply(ctx) {
       handler: createSharedProfileHandler(ports),
     });
   } catch (error) {
+    void taskEnvironment.close();
     detach?.();
     detachModels();
     downstream.close();
@@ -99,6 +112,7 @@ export function apply(ctx) {
     () => async () => {
       detachDisposed?.();
       await messaging.close();
+      await taskEnvironment.close();
       detachModels();
       downstream.close();
       host.close();
