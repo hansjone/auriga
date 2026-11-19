@@ -27,7 +27,8 @@ class SharedDshResourceMarketQueriesTest {
             new WorkspaceStore(
                 jdbc, mock(auriga.common.persistence.TenantTransactionManager.class)));
     final SharedDshAuthority authority = mock(SharedDshAuthority.class);
-    final SharedDshPlacements.EntryProbe entry = mock(SharedDshPlacements.EntryProbe.class);
+    final SharedDshResourceMarketQueries.ReadyEntryProbe entry =
+        mock(SharedDshResourceMarketQueries.ReadyEntryProbe.class);
     final Clock clock = Clock.fixed(Instant.parse("2026-11-19T00:00:00Z"), ZoneOffset.UTC);
     final SharedDshBinding binding =
         SharedDshBinding.newBuilder()
@@ -64,7 +65,7 @@ class SharedDshResourceMarketQueriesTest {
       doNothing().when(store).lock();
       when(authority.resolve(member, placement, session))
           .thenReturn(new SharedDshAuthority.Placement(binding, "ready", 4));
-      when(entry.ready(binding)).thenReturn(true);
+      when(entry.observed(binding)).thenReturn(true);
       row.put("tenant_id", tenant);
       row.put("member_id", member);
       row.put("id", placement);
@@ -117,7 +118,7 @@ class SharedDshResourceMarketQueriesTest {
         f.report.toBuilder().setViewId(UUID.randomUUID().toString()).build().toByteArray());
     assertTrue(f.run(() -> f.queries.report(f.view)).isEmpty());
     f.row.put("report", f.report.toByteArray());
-    when(f.entry.ready(f.binding)).thenReturn(false);
+    when(f.entry.observed(f.binding)).thenReturn(false);
     assertTrue(f.run(() -> f.queries.report(f.view)).isEmpty());
   }
 
@@ -127,7 +128,7 @@ class SharedDshResourceMarketQueriesTest {
     f.row.put("revision", 4L);
     assertTrue(f.run(() -> f.queries.report(f.view)).isEmpty());
     f.row.put("revision", 3L);
-    when(f.entry.ready(f.binding))
+    when(f.entry.observed(f.binding))
         .thenAnswer(
             c -> {
               f.row.put("report", null);

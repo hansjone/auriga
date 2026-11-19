@@ -19,7 +19,7 @@ public class WorkspaceResourceMarketConfiguration {
   SharedDshResourceMarket sharedDshResourceMarket(
       WorkspaceStore store,
       SharedDshPlacements placements,
-      SharedDshPlacements.EntryProbe entry,
+      SharedDshResourceMarketQueries.ReadyEntryProbe entry,
       Clock clock) {
     return new SharedDshResourceMarketQueries(store, placements, entry, clock);
   }
