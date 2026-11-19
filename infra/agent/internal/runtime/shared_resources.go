@@ -33,8 +33,12 @@ func CheckPoolViews(bindings []*nodev1.SharedDshBinding, views []*nodev1.SharedD
 	digest := ""
 	content := map[string]string{}
 	tenant, pool := bindings[0].GetTenantId(), bindings[0].GetPhysicalInstanceId()
+	mode := bindings[0].GetMode()
+	if mode == nodev1.DshInstanceMode_DSH_INSTANCE_MODE_DEDICATED && len(bindings) != 1 {
+		return fmt.Errorf("%w: dedicated requires one placement", observer.ErrPoolSnapshotRejected)
+	}
 	for i, b := range bindings {
-		if !validPoolBinding(b) || b.TenantId != tenant || b.PhysicalInstanceId != pool || seen[b.MemberId] {
+		if !validPoolBinding(b) || b.Mode != mode || b.TenantId != tenant || b.PhysicalInstanceId != pool || seen[b.MemberId] {
 			return fmt.Errorf("%w: shared.binding_mismatch", observer.ErrPoolSnapshotRejected)
 		}
 		seen[b.MemberId] = true

@@ -1,13 +1,34 @@
 package ingress
 
 import (
+	"context"
 	"crypto/tls"
 	"crypto/x509"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"sync"
 	"testing"
 )
+
+type profileModeAuthority struct {
+	mu   sync.Mutex
+	mode string
+}
+
+func (a *profileModeAuthority) PoolMode(context.Context, string) (string, error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.mode, nil
+}
+func (a *profileModeAuthority) setMode(mode string) { a.mu.Lock(); defer a.mu.Unlock(); a.mode = mode }
+func (*profileModeAuthority) Check(context.Context, map[string]any, string) error {
+	return fmt.Errorf("common.unavailable")
+}
+func (*profileModeAuthority) Watch(context.Context, map[string]any, string, context.CancelFunc) (func(), error) {
+	return nil, fmt.Errorf("common.unavailable")
+}
 
 func TestSharedInitialProfileUsesOnlyEdgeMTLSAndActualRegisteredHost(t *testing.T) {
 	calls := 0
@@ -21,7 +42,7 @@ func TestSharedInitialProfileUsesOnlyEdgeMTLSAndActualRegisteredHost(t *testing.
 	}))
 	defer host.Close()
 	up, _ := url.Parse(host.URL)
-	s := New(Config{Shared: &SharedIngress{}, Registry: NewMapRegistry(&Instance{ID: sharedTestID, Shared: true, Upstream: up})})
+	s := New(Config{Shared: &SharedIngress{Authority: &profileModeAuthority{mode: "shared"}}, Registry: NewMapRegistry(&Instance{ID: sharedTestID, Shared: true, Upstream: up})})
 	edge, _ := url.Parse("auriga://edge/fixture")
 	request := func(path, method, header string, peer bool) int {
 		r := httptest.NewRequest(method, "https://node/i/"+sharedTestID+path, nil)

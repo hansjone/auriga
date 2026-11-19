@@ -166,6 +166,11 @@ func readToken(path string) ([]byte, error) {
 
 // Host JSON uses safe numeric int64s and exact public enum names, unlike
 // protojson. Conversion is driven by descriptors, never field-name guessing.
+func HostValue(message proto.Message) (any, error) { return wire(message) }
+
+// DecodeHostValue consumes the same finite public enum and safe integer wire.
+func DecodeHostValue(raw []byte, message proto.Message) error { return decode(raw, message) }
+
 func wire(message proto.Message) (any, error) {
 	raw, err := protojson.MarshalOptions{EmitUnpopulated: true}.Marshal(message)
 	if err != nil {
@@ -309,26 +314,33 @@ func (c *Client) Check(ctx context.Context, b map[string]any, session string) er
 }
 
 func (c *Client) IsShared(ctx context.Context, id string) (bool, error) {
+	mode, err := c.PoolMode(ctx, id)
+	return mode != "", err
+}
+
+// PoolMode is always read from W; a locally registered managed endpoint does
+// not authorize probing a different mode or falling back to an owner route.
+func (c *Client) PoolMode(ctx context.Context, id string) (string, error) {
 	if !uuid.MatchString(id) {
-		return false, errors.New("shared.binding_mismatch")
+		return "", errors.New("shared.binding_mismatch")
 	}
 	out := new(workspacev1.GetSharedDshPoolResponse)
 	if e := c.call(ctx, false, "GetSharedDshPool", &workspacev1.GetSharedDshPoolRequest{TenantId: c.Settings.TenantID, PhysicalInstanceId: id}, out); e != nil {
-		return false, errors.New("common.unavailable")
+		return "", errors.New("common.unavailable")
 	}
 	if out.TenantId != c.Settings.TenantID || out.PhysicalInstanceId != id {
-		return false, errors.New("common.unavailable")
+		return "", errors.New("common.unavailable")
 	}
 	if !out.Registered {
 		if out.Mode != "" || out.State != "" {
-			return false, errors.New("common.unavailable")
+			return "", errors.New("common.unavailable")
 		}
-		return false, nil
+		return "", nil
 	}
 	if !has([]string{"shared", "dedicated"}, out.Mode) || !has([]string{"pending", "ready", "blocked"}, out.State) {
-		return false, errors.New("common.unavailable")
+		return "", errors.New("common.unavailable")
 	}
-	return true, nil
+	return out.Mode, nil
 }
 func (c *Client) Watch(ctx context.Context, b map[string]any, session string, cancel context.CancelFunc) (func(), error) {
 	if err := c.Check(ctx, b, session); err != nil {

@@ -453,8 +453,11 @@ func (m *PersistentPools) Watch(ctx context.Context) {
 				m.report(&nodev1.SessionRequest{Body: &nodev1.SessionRequest_SharedDshGuardianImpact{SharedDshGuardianImpact: impact}})
 			}
 		}
-		bindings, views, err := m.snapshot(pool)
+		bindings, views, err := m.refreshPoolSnapshot(ctx, pool)
 		if err != nil || len(bindings) == 0 {
+			if err != nil {
+				m.closePoolIngress(pool)
+			}
 			continue
 		}
 		operation := views[0].ViewId
@@ -462,6 +465,10 @@ func (m *PersistentPools) Watch(ctx context.Context) {
 			if sample, err := m.Memory(ctx, pool); err == nil {
 				m.report(&nodev1.SessionRequest{Body: &nodev1.SessionRequest_SharedDshPoolMemorySample{SharedDshPoolMemorySample: sample}})
 			}
+		}
+		if bindings[0].Mode == nodev1.DshInstanceMode_DSH_INSTANCE_MODE_DEDICATED {
+			m.watchDedicated(ctx, bindings, views)
+			continue
 		}
 		reports, impact, checkErr := watch.Check(ctx, operation, bindings, views, time.Now())
 		if checkErr != nil && m.Unpublish != nil {

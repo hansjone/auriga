@@ -84,7 +84,7 @@ func (s *Server) serveInstanceProxy(w http.ResponseWriter, r *http.Request, inst
 		canonical = "/"
 	}
 	if inst.Shared {
-		if canonical == "/_auriga/shared-profile" {
+		if canonical == "/_auriga/shared-profile" || canonical == "/_auriga/dedicated-profile" {
 			s.serveSharedProfile(w, r, inst)
 			return
 		}
@@ -115,14 +115,35 @@ func (s *Server) serveInstanceProxy(w http.ResponseWriter, r *http.Request, inst
 // placement is pending, but only after the ordinary Edge mTLS peer gate and
 // only for the registered actual pool Host. It cannot proxy user credentials.
 func (s *Server) serveSharedProfile(w http.ResponseWriter, r *http.Request, inst *Instance) {
-	if r.TLS == nil || !requireEdgePeer(r) || r.Method != "GET" || r.URL.RawQuery != "" || r.URL.ForceQuery || r.URL.RawPath != "" || r.Header.Get("Cookie") != "" || r.Header.Get("Authorization") != "" || r.Header.Get("Upgrade") != "" || r.ContentLength != 0 || len(r.TransferEncoding) != 0 {
+	if r.TLS == nil || !requireEdgePeer(r) || r.Method != "GET" || r.URL.RawQuery != "" || r.URL.ForceQuery || r.URL.RawPath != "" || r.Header.Get("Cookie") != "" || r.Header.Get("Authorization") != "" || !sharedBrowserRequest(r, "/_auriga/profile") || r.ContentLength != 0 || len(r.TransferEncoding) != 0 {
 		writeProblem(w, 403, CodeUnauthorized, "Forbidden", "invalid profile probe")
+		return
+	}
+	if s.cfg.Shared == nil {
+		writeProblem(w, 503, "common.unavailable", "Unavailable", "profile mode authority required")
+		return
+	}
+	path := strings.TrimPrefix(r.URL.EscapedPath(), "/i/"+inst.ID)
+	expectedMode := "shared"
+	if path == "/_auriga/dedicated-profile" {
+		expectedMode = "dedicated"
+	}
+	authority, ok := s.cfg.Shared.Authority.(interface {
+		PoolMode(context.Context, string) (string, error)
+	})
+	if !ok {
+		writeProblem(w, 503, "common.unavailable", "Unavailable", "profile mode authority required")
+		return
+	}
+	mode, err := authority.PoolMode(r.Context(), inst.ID)
+	if err != nil || mode != expectedMode {
+		writeProblem(w, 503, "common.unavailable", "Unavailable", "profile mode mismatch")
 		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 	defer cancel()
 	target := *inst.Upstream
-	target.Path, target.RawPath, target.RawQuery, target.Fragment = "/_auriga/shared-profile", "", "", ""
+	target.Path, target.RawPath, target.RawQuery, target.Fragment = path, "", "", ""
 	request, err := http.NewRequestWithContext(ctx, "GET", target.String(), nil)
 	if err != nil {
 		writeProblem(w, 502, CodeInternal, "Unavailable", "profile unavailable")
@@ -141,9 +162,30 @@ func (s *Server) serveSharedProfile(w http.ResponseWriter, r *http.Request, inst
 		writeProblem(w, 502, CodeInternal, "Unavailable", "profile unavailable")
 		return
 	}
+	if expectedMode == "dedicated" && !dedicatedProfileValid(data, inst.ID) {
+		writeProblem(w, 502, CodeInternal, "Unavailable", "dedicated profile unavailable")
+		return
+	}
+	mode, err = authority.PoolMode(r.Context(), inst.ID)
+	if err != nil || mode != expectedMode || ctx.Err() != nil {
+		writeProblem(w, 503, "common.unavailable", "Unavailable", "profile mode changed")
+		return
+	}
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-store")
 	_, _ = w.Write(data)
+}
+
+func dedicatedProfileValid(raw []byte, id string) bool {
+	m, err := sharedDecode(raw)
+	if err != nil {
+		return false
+	}
+	if _, ok := sharedObject(m, "schemaVersion physicalInstanceId profile capabilities"); !ok || !sharedNumber(m["schemaVersion"], 1) || sharedInt(m["schemaVersion"]) != 1 || m["physicalInstanceId"] != id || m["profile"] != "auriga.dedicated.v1" {
+		return false
+	}
+	c, ok := sharedObject(m["capabilities"], "pluginInstall privateSkills includeDefaultRoots toolPresentation")
+	return ok && c["pluginInstall"] == true && c["privateSkills"] == true && c["includeDefaultRoots"] == true && c["toolPresentation"] == "native"
 }
 
 func newProxyTransport() *http.Transport {
