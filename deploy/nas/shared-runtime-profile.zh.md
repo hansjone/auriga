@@ -7,7 +7,9 @@
 - DSH SDK 固定安装在只读 `/opt/dsh`，包版本为 `0.2.1-rc.3`。
 - Auriga 固定安装在只读 `/opt/auriga-dsh`；`/opt/dsh/node_modules/auriga-dsh` 指向该受信安装。安装校验必须确认 manifest 的 `exports["./shared-browser"]` 精确为 `./src/shared-browser/plugin.js`，并确认文件来自同一已验证制品。
 - `boot` 的第五参数 `bareModuleBaseUrl` 应为 `file:///opt/dsh/package.json`。配置文件位于 `/run/auriga`；其路径本身不提供 SDK 依赖解析。
-- 真实 `ClientModuleRegistry` 还独立使用 entry 所属树的 `baseUrl` 解析客户端包；第五参数只改变 Include 的导入。因此运行容器必须同时提供从 `/run/auriga` 到同一只读 SDK 的受信解析路径。该投影必须由 Agent 安装实现并验证，不能由成员写目录、环境变量或模型参数选择。仅传第五参数不足以证明客户端 roster 已装入。
+- 真实 `ClientModuleRegistry` 还独立使用 entry 所属树的 `baseUrl` 解析客户端包；第五参数只改变 Include 的导入。因此 launcher 必须先用 `src/shared/profile-resolution.js` 的 `resolveSharedRuntimeProfile(rows)` 规范化已经过 Node 封闭允许表检查的逻辑行：只将批准的 SDK 包名转换成同一只读 SDK 内、公开根 export 对应的实际文件 URL，再把所得 entry-list 交给公开 `boot`。不能直接启动未规范化的逻辑输入，也不新增 `/run/node_modules`、挂载或环境搜索路径。
+
+规范化器的 SDK 锚固定为 `/opt/dsh/package.json`。它检查解析结果真实路径在该安装根内、最近的 manifest 包名与逻辑包名一致、文件正是 manifest 的公开根 export。锁定 rc.3 的根 export 均只有 `types/default` 条件；新增不一致的 import/require 条件、别名、包外 symlink、未知包及任意文件 URL均拒绝，防止加载另一份 CJS 类。安装侧仍须保证此 SDK 根只读且来自已验证制品。
 
 Auriga browser 行使用唯一精确的 `file:///opt/auriga-dsh/src/shared-browser/plugin.js`。rc.3 的客户端登记器不会把裸子路径 `auriga-dsh/shared-browser` 当包根；固定文件 URL 经同一公开 Loader 解析并寻找最近 manifest，才能同时登记 Auriga 的 `./client`。这不授权任意 `file:` 插件。Agent 应只接受这个固定只读 URL，并沿原 browser 行的顺序、唯一性和配置检查。`id: auriga-dsh` 对应 Host 的 `name: auriga-dsh/shared`，不能把行 ID 当成旧 owner 根入口。
 
@@ -31,6 +33,6 @@ Auriga browser 行使用唯一精确的 `file:///opt/auriga-dsh/src/shared-brows
 
 ## 验证范围
 
-`clients/dsh-plugin/test/shared/profile-packages.test.mjs` 只做无服务启动的公开包验证：真实根 export/版本、配置 schema、必需 inject 服务、原生 client 依赖和 bundle、真实 frontend 资源，以及真实 ClientModuleRegistry 对固定 browser URL 的识别。可设置 `AURIGA_DSH_PUBLIC_PACKAGE_ROOT` 指向锁定套件的 `payload/upstream/app`，并设置 `AURIGA_PROFILE_AURIGA_PACKAGE_ROOT` 指向已整合 browser 的 Auriga 包，使用 Node `--expose-internals` 运行。
+`clients/dsh-plugin/test/shared/profile-packages.test.mjs` 只做无服务启动的公开包验证：真实根 export/版本、配置 schema、必需 inject 服务、原生 client 依赖和 bundle、真实 frontend 资源，以及真实 ClientModuleRegistry 对固定 browser URL 的识别。它同时保留未规范化 `/run` 输入丢失客户端登记的反例，并检查规范化结果与直接公开导入的模块和类身份相同，真实 client 登记恢复。可设置 `AURIGA_DSH_PUBLIC_PACKAGE_ROOT` 指向锁定套件的 `payload/upstream/app`，并设置 `AURIGA_PROFILE_AURIGA_PACKAGE_ROOT` 指向已整合 browser 的 Auriga 包，使用 Node `--expose-internals` 运行。
 
-这些纯验证不替代真实 Loader 的构造与启动审计，也不替代正常成员页面验收。Agent 的封闭包允许表、只读解析投影和固定 browser URL 例外需先接通；由主控串行完成完整 DSH 与正常浏览器测试后再部署。
+这些纯验证不替代真实 Loader 的构造与启动审计，也不替代正常成员页面验收。Agent 的封闭包允许表、launcher 规范化器调用和固定 browser URL 例外需先接通；由主控串行完成完整 DSH 与正常浏览器测试后再部署。

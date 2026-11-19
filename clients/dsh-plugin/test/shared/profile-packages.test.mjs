@@ -6,6 +6,13 @@ import { createRequire } from 'node:module';
 import { dirname, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { parseAllDocuments, visit, isAlias } from 'yaml';
+import {
+  SDK_INSTALLATION_ANCHOR,
+  SHARED_SDK_PACKAGES,
+  createInstalledSdkResolver,
+  createSharedProfileResolver,
+} from '../../src/shared/profile-resolution.js';
+import { realpathSync } from 'node:fs';
 
 const profileUrl = new URL(
   '../../../../deploy/nas/shared-runtime-profile.example.yml',
@@ -87,6 +94,13 @@ test('complete profile is a literal entry list with a single restricted Host and
   });
   assertBoundary(rows);
   assert.equal(new Set(rows.map((row) => row.name)).size, rows.length);
+  assert.deepEqual(
+    rows
+      .filter((row) => row.name.startsWith('@deepseek-ai/'))
+      .map((row) => row.name)
+      .sort(),
+    [...SHARED_SDK_PACKAGES].sort(),
+  );
 });
 
 test('profile boundary rejects owner root, mutable browser modules, private skill roots and nested preset tools', () => {
@@ -294,7 +308,7 @@ test(
 );
 
 test(
-  'real ClientModuleRegistry needs an SDK resolution projection beside the /run profile as well as the boot import anchor',
+  'the unnormalized /run profile loses SDK client discovery despite a boot import anchor',
   { skip },
   async () => {
     const { ClientModuleRegistry } = await load(pkg('client-modules'));
@@ -314,6 +328,123 @@ test(
       registry.resolveMeta(pkg('client-modules'), withSdkResolution)
         .packageName,
       pkg('client-modules'),
+    );
+  },
+);
+
+function installedResolver(overrides = {}) {
+  return createInstalledSdkResolver({
+    requireFrom(anchor) {
+      assert.equal(anchor, SDK_INSTALLATION_ANCHOR);
+      return hostRequire;
+    },
+    realpath(path) {
+      return path === dirname(SDK_INSTALLATION_ANCHOR)
+        ? realpathSync(root)
+        : realpathSync(path);
+    },
+    ...overrides,
+  });
+}
+
+test('SDK normalization rejects unknown modules, aliased packages, escaping realpaths and divergent conditional exports', () => {
+  const sdk = resolve('/fixture/sdk');
+  const candidate = join(sdk, 'node_modules/@deepseek-ai/dsh-llm/lib/index.js');
+  const standard = {
+    name: pkg('llm'),
+    exports: {
+      '.': { types: './lib/types/index.d.ts', default: './lib/index.js' },
+    },
+  };
+  let calls = 0;
+  const make = (manifest, path = candidate) =>
+    createInstalledSdkResolver({
+      requireFrom(anchor) {
+        assert.equal(anchor, SDK_INSTALLATION_ANCHOR);
+        calls++;
+        return { resolve: () => path };
+      },
+      realpath: (value) =>
+        value === dirname(SDK_INSTALLATION_ANCHOR) ? sdk : value,
+      readFile(path) {
+        if (path.endsWith(join('lib', 'package.json')))
+          throw Object.assign(new Error('missing'), { code: 'ENOENT' });
+        return JSON.stringify(manifest);
+      },
+    });
+  assert.throws(() => make(standard)('file:///tmp/malicious.js'), /rejected/);
+  assert.throws(() => make(standard)(pkg('shell')), /rejected/);
+  assert.equal(calls, 0);
+  assert.throws(
+    () => make({ ...standard, name: pkg('shell') })(pkg('llm')),
+    /rejected/,
+  );
+  assert.throws(
+    () => make(standard, resolve('/outside/index.js'))(pkg('llm')),
+    /rejected/,
+  );
+  assert.throws(
+    () =>
+      make({
+        ...standard,
+        exports: { '.': { require: './lib/index.js', import: './other.js' } },
+      })(pkg('llm')),
+    /rejected/,
+  );
+  assert.throws(
+    () => make({ ...standard, exports: { '.': '../outside.js' } })(pkg('llm')),
+    /rejected/,
+  );
+  assert.throws(
+    () => make({ ...standard, exports: { '.': './other.js' } })(pkg('llm')),
+    /rejected/,
+  );
+  const normalize = createSharedProfileResolver({
+    resolveModule: () => assert.fail('unknown row must never resolve'),
+  });
+  assert.throws(() => normalize([{ id: 'x', name: pkg('shell') }]), /rejected/);
+});
+
+test(
+  'normalized public SDK files retain actual module class identity and client discovery from the /run tree',
+  { skip },
+  async () => {
+    const normalize = createSharedProfileResolver({
+      resolveModule: installedResolver(),
+    });
+    const normalized = normalize(rows);
+    const { ClientModuleRegistry } = await load(pkg('client-modules'));
+    const { ModuleLoader } = await load('@deepseek-ai/cordis-plugin-loader');
+    const internal = ModuleLoader.fromInternal();
+    assert.ok(internal?.resolveSync);
+    const registry = Object.create(ClientModuleRegistry.prototype);
+    registry.ctx = { loader: { internal } };
+    registry.pkgMeta = new Map();
+    for (const [index, row] of rows.entries()) {
+      if (!row.name.startsWith('@deepseek-ai/')) {
+        assert.equal(normalized[index].name, row.name);
+        continue;
+      }
+      assert.ok(normalized[index].name.startsWith('file:'));
+      assert.equal(
+        await import(normalized[index].name),
+        await load(row.name),
+        row.name,
+      );
+      const fromInstalled = registry.resolveMeta(
+        row.name,
+        pathToFileURL(join(root, 'package.json')).href,
+      );
+      const fromRun = registry.resolveMeta(
+        normalized[index].name,
+        'file:///run/auriga/pool-profile.yml',
+      );
+      assert.deepEqual(fromRun, fromInstalled, row.name);
+    }
+    assert.equal(
+      rows[0].name,
+      pkg('fs-local'),
+      'the installation-owned logical input is unchanged',
     );
   },
 );
