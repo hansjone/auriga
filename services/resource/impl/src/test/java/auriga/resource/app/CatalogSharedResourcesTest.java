@@ -253,6 +253,58 @@ class CatalogSharedResourcesTest {
   }
 
   @Test
+  void dedicatedPersonalOptionalPluginUsesRealSignedLeasesAndDisableInvalidatesOldMaterial() {
+    var f = new Fixture();
+    f.selection = f.selection("optional");
+    f.selection.identity().put("kind", "plugin");
+    var binding =
+        f.binding.toBuilder().setMode(DshInstanceMode.DSH_INSTANCE_MODE_DEDICATED).build();
+    var choice = new HashMap<String, Object>();
+    choice.put("package_id", f.pack);
+    choice.put("owner_id", f.member);
+    choice.put("epoch", 1L);
+    choice.put("revision", 1L);
+    choice.put("desired_state", "ENABLED");
+    choice.put("release_sequence", 1L);
+    choice.put("identity", f.selection.identity().toString());
+    f.choices.put(f.pack, choice);
+    f.run(
+        () -> {
+          var first = f.service.snapshot(binding);
+          assertEquals(1, first.resources().size());
+          var ref = first.resources().getFirst();
+          assertEquals("plugin", ref.getIdentity().getKind());
+          assertEquals("optional", ref.getInstallationMode());
+          assertEquals(1, ref.getInstallationRevision());
+          assertFalse(ref.getEnvelope().getSignature().getValue().isEmpty());
+          assertTrue(
+              ref.getManifestDownloadPath().startsWith("/internal/resource/v1/catalog/downloads/"));
+          UUID oldLease = UUID.fromString(first.view().getResources(0).getLeaseId());
+          choice.put("revision", 2L);
+          choice.put("desired_state", "DISABLED");
+          var disabled = f.service.snapshot(binding);
+          assertTrue(disabled.resources().isEmpty());
+          assertNotEquals(first.view().getViewId(), disabled.view().getViewId());
+          assertThrows(AurigaException.class, () -> f.service.artifact(binding, oldLease, null));
+          choice.put("revision", 3L);
+          choice.put("desired_state", "ENABLED");
+          assertEquals(
+              3, f.service.snapshot(binding).resources().getFirst().getInstallationRevision());
+          return null;
+        });
+  }
+
+  @Test
+  void unsupportedSharedPluginPolicyHasAnExplicitDedicatedErrorAndNeverBuildsMaterial() {
+    var f = new Fixture();
+    f.selection.identity().put("kind", "plugin");
+    var error =
+        assertThrows(AurigaException.class, () -> f.run(() -> f.service.snapshot(f.binding)));
+    assertEquals("resource.shared_requires_dedicated", error.errorCode().code());
+    verify(f.delivery, never()).sharedRef(any(), any());
+  }
+
+  @Test
   void optionalAssignmentsAffectAuthorizationButNeverLoadIntoTheCommonProcess() {
     var f = new Fixture();
     f.selection = f.selection("optional");
@@ -350,6 +402,7 @@ class CatalogSharedResourcesTest {
     final CatalogSharedResources service;
     final Map<UUID, Map<String, Object>> stored = new HashMap<>();
     final Map<String, Map<String, Object>> history = new HashMap<>();
+    final Map<UUID, Map<String, Object>> choices = new HashMap<>();
     final SharedResourceNodes nodes = mock(SharedResourceNodes.class);
     final UUID node = UUID.randomUUID();
     CatalogAssignments.Effective selection;
@@ -398,6 +451,8 @@ class CatalogSharedResourcesTest {
           .thenAnswer(
               c -> {
                 Map<String, Object> args = c.getArgument(1);
+                if (c.<String>getArgument(0).contains("catalog_placement_selection"))
+                  return List.copyOf(choices.values());
                 if (c.<String>getArgument(0).contains("catalog_shared_installation"))
                   return history.values().stream()
                       .filter(row -> row.get("placement").equals(args.get("placement")))
@@ -503,7 +558,7 @@ class CatalogSharedResourcesTest {
           envelope
               .putObject("statement")
               .put("purpose", "resource")
-              .put("kind", "skill")
+              .put("kind", selection.identity().path("kind").asString())
               .put("name", "shared-test")
               .put("version", "1.0.0")
               .put("manifestDigest", selection.identity().path("manifestDigest").asString())

@@ -40,6 +40,7 @@ public final class CatalogSharedResources implements SharedResourceResolution {
   private final Clock clock;
   private final Supplier<SharedResourceNodes> nodes;
   private final CatalogSharedInstallations installations;
+  private final CatalogPlacementSelections choices;
 
   public CatalogSharedResources(
       ResourceStore tx,
@@ -59,6 +60,7 @@ public final class CatalogSharedResources implements SharedResourceResolution {
     this.clock = clock;
     this.nodes = nodes;
     this.installations = new CatalogSharedInstallations(db);
+    this.choices = new CatalogPlacementSelections(db);
   }
 
   private void tenant(UUID tenant) {
@@ -122,10 +124,19 @@ public final class CatalogSharedResources implements SharedResourceResolution {
         () -> {
           db.lock("catalog-assignments");
           db.lock("shared-view/" + placement);
-          var selections = delivery.sharedSelections(reader, null);
-          String digest = digest(tenant, selections);
+          var policies = delivery.sharedSelections(reader, null);
+          String digest = digest(tenant, policies);
           if (!digest.equals(digest(tenant, delivery.sharedSelections(reader, pool))))
             throw new AurigaException(CommonErrors.CONFLICT);
+          boolean dedicated = binding.getMode() == DshInstanceMode.DSH_INSTANCE_MODE_DEDICATED;
+          var selected =
+              dedicated ? choices.rows(binding) : java.util.List.<Map<String, Object>>of();
+          var selections = CatalogPlacementSelections.material(binding, policies, selected);
+          if (!dedicated
+              && selections.values().stream()
+                  .anyMatch(value -> !value.identity().path("kind").asString().equals("skill")))
+            throw CatalogPlacementMarket.requiresDedicated();
+          String selectionDigest = CatalogPlacementSelections.fingerprint(binding, selected);
           // Match catalog delivery's package/version-before-revocations lock order, including
           // a view that can otherwise reuse its persisted signed material.
           for (var selection :
@@ -174,9 +185,10 @@ public final class CatalogSharedResources implements SharedResourceResolution {
                                     .getEpochSecond()
                                 > now);
             if (future) throw new AurigaException(CommonErrors.UNAVAILABLE);
-            revisions = installations.reconcile(placement, selections);
+            revisions = installations.reconcile(placement, selections, dedicated);
             if (row.get("pool_id").equals(pool)
-                && document.path("schemaVersion").asInt() == 2
+                && document.path("schemaVersion").asInt() == 3
+                && document.path("selectionDigest").asString().equals(selectionDigest)
                 && row.get("mode").equals(mode(binding))
                 && number(row, "epoch") == binding.getEpoch()
                 && number(row, "revision") == binding.getRevision()
@@ -184,8 +196,11 @@ public final class CatalogSharedResources implements SharedResourceResolution {
                 && number(row, "revocation_revision") == revocations.path("revision").asLong()
                 && number(row, "expires_at") > now + 300)
               return snapshot(binding, (UUID) row.get("view_id"), digest, document);
-          } else revisions = installations.reconcile(placement, selections);
-          var document = JSON.createObjectNode().put("schemaVersion", 2);
+          } else revisions = installations.reconcile(placement, selections, dedicated);
+          var document =
+              JSON.createObjectNode()
+                  .put("schemaVersion", 3)
+                  .put("selectionDigest", selectionDigest);
           document.set("revocations", revocations);
           var resources = document.putArray("resources");
           long expires = Instant.parse(revocations.path("expiresAt").asString()).getEpochSecond();
@@ -193,8 +208,7 @@ public final class CatalogSharedResources implements SharedResourceResolution {
               selections.entrySet().stream()
                   .sorted(Map.Entry.comparingByKey(Comparator.comparing(UUID::toString)))
                   .toList()) {
-            // Optional choices are authorized metadata, never installed into the common process.
-            if (selection.getValue().mode().equals("optional")) continue;
+            // Personal choices enter only a separately authorized dedicated process.
             var ref = delivery.sharedRef(reader, selection.getValue());
             long end =
                 Instant.parse(ref.path("lease").path("expiresAt").asString()).getEpochSecond();

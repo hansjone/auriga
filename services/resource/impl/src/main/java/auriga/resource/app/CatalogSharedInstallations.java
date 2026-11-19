@@ -15,6 +15,11 @@ final class CatalogSharedInstallations {
   }
 
   Map<UUID, Long> reconcile(UUID placement, Map<UUID, CatalogAssignments.Effective> choices) {
+    return reconcile(placement, choices, false);
+  }
+
+  Map<UUID, Long> reconcile(
+      UUID placement, Map<UUID, CatalogAssignments.Effective> choices, boolean dedicated) {
     var before = new HashMap<UUID, Map<String, Object>>();
     for (var row :
         db.rows(
@@ -27,7 +32,7 @@ final class CatalogSharedInstallations {
     for (var pack : packages) {
       var old = before.get(pack);
       var choice = choices.get(pack);
-      boolean active = choice != null && !choice.mode().equals("optional");
+      boolean active = choice != null && (dedicated || !choice.mode().equals("optional"));
       if (!active && (old == null || !Boolean.TRUE.equals(old.get("active")))) continue;
       var selection =
           active

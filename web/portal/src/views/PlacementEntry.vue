@@ -89,6 +89,9 @@ onBeforeUnmount(() => {
     <ElButton :disabled="busy || expired" @click="run()">{{
       t('refresh')
     }}</ElButton>
+    <p v-if="placement?.state === 'ready'">
+      <a href="/resources">{{ t('market') }}</a>
+    </p>
     <p>{{ t('resource') }}</p>
     <p>{{ t('risk') }}</p>
     <p>{{ t('policy') }}</p>

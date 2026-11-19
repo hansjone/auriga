@@ -196,6 +196,17 @@ public final class CatalogDelivery implements UnifiedResourceResolution {
     return assignments.effective(reader, pool, pool != null);
   }
 
+  Map<String, Object> placementVersion(
+      ResourceAccess.Reader reader, JsonNode identity, boolean active, boolean latest) {
+    var version = admit(reader, identity, active);
+    if (latest) fresh(reader, version);
+    return version;
+  }
+
+  void placementSelection(ObjectNode input) {
+    validate("UnifiedSelection", input);
+  }
+
   ObjectNode sharedRef(ResourceAccess.Reader reader, CatalogAssignments.Effective selection) {
     var value = ref(reader, admit(reader, selection.identity(), true));
     value.put("installationMode", selection.mode());
