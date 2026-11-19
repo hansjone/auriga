@@ -62,6 +62,14 @@ SourceGet、FETCH 页及各项、attempt/admit/receipt 等结果按原网络信�
 
 有限 `auriga_send_message` 工具只接收 aur1 目标地址和既有 body 结构，按实际宿主会话与公开 `execution.callId` 生成稳定幂等键；不接受模型自报发送者、owner 或任务。服务端仍核目标的真实 typed-local 类别与当前权限。模型结果沿原工具的统一提交投影，不返回私有投递和线程标识。独立/桌面网络路径未改变。
 
+接收通过本人会话的显式开关管理，默认关闭。`ctx.aurigaShared.messagingSettings(peer,{sessionId,enabled?})` 省略 `enabled` 时读本人真实地址与接收状态，传布尔值时调用原 `receiveSet`；前后均重核本人会话权限。`messagingSessions(peer)` 仅列公开宿主中本人可访问的会话。正常原生浏览器模块消费这两个受信接口；受限 JSON 载体也支持无 query 的 `POST /auriga/shared/messages`，body 仅允许 `sessionId` 与可选布尔 `enabled`，沿既有新鲜 E 身份。状态区分实际开关、持久意图、待确认及不可用，不把点击或 RPC 受理当作收件成功。
+
+显式意图原子保存在 `/var/lib/auriga/pools/<pool>/host/message-preferences`，收件账本保存在同目录的 `message-inboxes/<contextId>`。后台仅处理已明确开启、且原生 agent 仍在内存中的会话，不自动恢复冷会话。新账本只在平台证明邮箱从未开启且无历史（`false/1/0/0`）时初始化；已有邮箱丢失本地账本明确拒绝。平台实际 typed-local 注册、native resolver 和来源权威保持不变，这份账本只为原 `DurableInbox` 提供收件投影，不是 owner 或地址分配账本。
+
+真实后台顺序为签名页与逐项验证、持久接入、原尝试/执行准入、公开 `NativeHostPort.prompt`、会话和 provider 的持久 flush、持久 `accepted`，最后提交原收据。丢失收据回包后从原账本重试相同操作，不再次 prompt。禁用先同步隔离正在拉取的接收者，再持久意图和远端确认；未确认的禁用不能继续执行消息。写入结果不确定时停止该写者，不能用旧内存覆盖磁盘或假报成功。
+
+普通受控任务只申请独立 `task.execute`，不以公司 UAC 材料为前置，也不增加 Shell、终端或任意插件权限。IAM 明确返回 `SHARED_ENTERPRISE_CREDENTIAL_STATE_ABSENT` 时，团队登录用户仍能执行已有普通任务，任务环境中的 `DSH_AURIGA_ID`、`DSH_AURIGA_TOKEN` 为空。`AVAILABLE` 才为同一真实 execution 另开独立企业任务，按现有策略传递凭据；两任务分别关闭。未知状态、失效平台登录、撤销或他人材料仍拒绝，不能将认证异常降为“无材料”。环境只属于当前任务，刷新后下次任务重取材料，不修改共享进程全局环境。
+
 根目录执行 `node --test clients/dsh-plugin/test/shared/shared.test.mjs`，已纳入插件 test 脚本。测试密钥均运行时生成。schema 快照与 K 原文件逐对象比对。签名及 schema 覆盖使用的七种冻结消息。
 
 公开组件的 rc.3 package.json/package-lock.json 固定在 `clients/dsh-plugin/test/public-host`，来源为 SPIKE 提交7e7ea403。根目录执行 `npm ci --ignore-scripts --prefix clients/dsh-plugin/test/public-host`，将 AURIGA_DSH_PUBLIC_PACKAGE_ROOT 指向该绝对目录，再执行 `node --test clients/dsh-plugin/test/shared/public-host.test.mjs`。Plugin CI 的 Windows/Linux 两个任务均安装并设置该路径，同时设置 AURIGA_REQUIRE_PUBLIC_HOST=1，缺少路径时测试直接失败。其他工作流未提供宿主路径时，两项测试跳过并打印由 Plugin 工作流承担验证的原因。测试组合公开 API，验证 pre-execute 放行后的 guard 拒绝及原生 owner/文件访问反例。

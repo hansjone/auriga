@@ -154,7 +154,7 @@ export function createSharedMessageContext(
         response.messageTrust,
         check,
       );
-      await proof.bindLocal(registration.local);
+      const nativeBinding = await proof.bindLocal(registration.local);
       check();
       // Bootstrap is a K-session observation only. Actual business requests
       // receive a NEW witness produced after the real typed-local resolver.
@@ -197,6 +197,14 @@ export function createSharedMessageContext(
       observations.set(proof.operationId, observation);
       return Object.freeze({
         contextId: response.contextId,
+        binding: Object.freeze(JSON.parse(canonical(binding))),
+        registration: Object.freeze(JSON.parse(canonical(registration))),
+        nativeBinding,
+        producerEpoch: response.producerEpoch,
+        mailbox:
+          response.mailbox === undefined
+            ? undefined
+            : Object.freeze(JSON.parse(canonical(response.mailbox))),
         bootId: proof.bootId,
         nativeWitness: businessProof.witness,
         connection: Object.freeze({ ...connection }),
@@ -231,6 +239,7 @@ export function createSharedMessageContext(
         },
       });
     },
+    retire: (agent) => native.retire(agent),
     async close() {
       closed = true;
       native.close();
