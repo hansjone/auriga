@@ -95,6 +95,8 @@ export function createSharedDownstream({ runtime, ports }) {
       messageId: input.messageId,
       target: input.target,
       body: input.body,
+      operation: input.operation,
+      frame: input.frame,
       signal,
     };
     const result = await (scope === 'message.send'

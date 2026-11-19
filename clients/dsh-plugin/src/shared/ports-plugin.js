@@ -32,6 +32,7 @@ const required = [
   'authorizeCapability',
   'readCredentials',
   'enterpriseOutbound',
+  'messageContext',
   'model',
   'send',
   'receive',

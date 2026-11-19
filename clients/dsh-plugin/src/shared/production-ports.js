@@ -4,6 +4,11 @@ import { Buffer } from 'node:buffer';
 import { executionSession } from './task-context.js';
 import { placementBinding } from './runtime.js';
 import { assertSharedProfile } from './profile-state.js';
+import { createSharedMessageContext } from './message-context.js';
+import { createSharedMessageTrust } from './message-trust.js';
+import { assertSharedSendResult } from './message-result.js';
+import { decodeJson, encodeJson } from '../network/session/frames.js';
+import { u64 } from '../network/source-control/frames.js';
 import { fail, same, validate, verifyToken } from './protocol.js';
 
 /** Compose the documented DSH Host APIs with the node-owned W/IAM/N relay. */
@@ -24,6 +29,138 @@ export function createProductionSharedPorts(
     if (closed) fail('common.unavailable');
     return bridge.call(operation, body, signal);
   };
+  const messageTrust = createSharedMessageTrust({
+    settings,
+    tenantId: options.tenantId,
+    physicalInstanceId: options.physicalInstanceId,
+    store: options.messageTrustStore,
+  });
+  const messageContexts = createSharedMessageContext(ctx, {
+    call,
+    trust: messageTrust,
+  });
+  async function message(operation, request) {
+    const receive = {
+      fetch: ['fetch', 'fetch_result'],
+      attemptBegin: ['attempt_begin', 'attempt_result'],
+      executionAdmit: ['execution_admit', 'admit_result'],
+      receipt: ['receipt', 'receipt_committed'],
+      receiveSet: ['receive_set', 'receive_set_result'],
+    };
+    let frame;
+    if (operation === 'send') {
+      if (
+        !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(
+          request.messageId,
+        ) ||
+        !request.target ||
+        Object.keys(request.target).sort().join(',') !== 'local,node,realm' ||
+        !['realm', 'node', 'local'].every((key) => u64(request.target[key])) ||
+        !request.body ||
+        Buffer.byteLength(JSON.stringify(request.body)) > 16384
+      )
+        fail('common.validation_failed');
+    } else {
+      if (!Object.hasOwn(receive, request.operation))
+        fail('common.validation_failed');
+      frame = decodeJson(encodeJson(request.frame));
+      if (
+        frame.type !== receive[request.operation][0] ||
+        typeof frame.request_id !== 'string'
+      )
+        fail('common.validation_failed');
+    }
+    const task = capabilities.get(request.capability);
+    const scope = 'message.' + operation;
+    const check = () => {
+      if (
+        !task ||
+        closed ||
+        request.signal?.aborted ||
+        task.execution.signal?.aborted ||
+        capabilities.get(request.capability) !== task ||
+        task.id !== request.taskId ||
+        executionSession(ctx, task.execution) !== request.sessionId
+      )
+        fail();
+      same(task.binding, {
+        tenantId: request.tenantId,
+        sessionId: request.sessionId,
+      });
+      const claims = verifyToken(
+        request.capability,
+        'Capability',
+        options.capabilityKeys['auriga.shared.message'],
+      );
+      same(claims.binding, task.binding);
+      if (
+        claims.taskId !== task.id ||
+        claims.audience !== 'auriga.shared.message' ||
+        !claims.scopes.includes(scope)
+      )
+        fail('shared.binding_mismatch');
+    };
+    check();
+    const signal = globalThis.AbortSignal.any(
+      [request.signal, task.execution.signal].filter(Boolean),
+    );
+    const context = await messageContexts.prepare(request, task, signal);
+    check();
+    const current = await lookup(request.sessionId);
+    same(current, task.binding);
+    await resolve(placementBinding(current), current.platformSessionId);
+    context.check();
+    check();
+    if (
+      frame &&
+      ((frame.epoch ?? frame.connection_epoch) !== context.connection.epoch ||
+        (frame.boot_id !== undefined && frame.boot_id !== context.bootId))
+    )
+      fail('shared.binding_mismatch');
+    const result = await call(
+      operation,
+      {
+        tenantId: task.binding.tenantId,
+        sessionId: task.binding.sessionId,
+        taskId: task.id,
+        capability: request.capability,
+        ...(operation === 'send'
+          ? {
+              messageId: request.messageId,
+              target: request.target,
+              body: request.body,
+            }
+          : { operation: request.operation, frame }),
+        contextId: context.contextId,
+        bootId: context.bootId,
+        nativeWitness: context.nativeWitness,
+      },
+      signal,
+    );
+    context.check();
+    check();
+    if (operation === 'send')
+      assertSharedSendResult(result, context.address, request.target);
+    else {
+      if (
+        result?.type !== receive[request.operation][1] &&
+        result?.type !== 'error'
+      )
+        fail('common.validation_failed');
+      await messageTrust.verify(
+        result,
+        context.connection,
+        frame.request_id,
+        undefined,
+        () => {
+          context.check();
+          check();
+        },
+        frame.max_bytes,
+      );
+    }
+    return result;
+  }
   async function lookup(sessionId) {
     const result = await call('lookup', {
       tenantId: options.tenantId,
@@ -140,6 +277,7 @@ export function createProductionSharedPorts(
   const ports = {
     options,
     config: () => settings().enterprise,
+    messageTrustConfig: () => settings().messageTrust,
     get helperBase() {
       const port = Number(ctx.webServer.port);
       if (!Number.isInteger(port) || port < 1 || port > 65535)
@@ -370,25 +508,57 @@ export function createProductionSharedPorts(
         )
           fail();
         same(current.binding, binding);
-        let execution = current.tasks.get(purpose.audience);
+        const purposeKey = purpose.audience + ':' + purpose.scope;
+        let execution = current.tasks.get(purposeKey);
         if (!execution) {
           execution = { agent, signal: current.signal };
-          current.tasks.set(purpose.audience, execution);
+          current.tasks.set(purposeKey, execution);
           await begin(binding, execution, [purpose.scope], purpose.audience);
         }
         return { taskId: tasks.get(execution).id, callId: current.callId };
       },
       async issue(binding, taskId, audience, scopes, signal) {
+        const task = [...new Set(capabilities.values())].find(
+          (value) => value.id === taskId,
+        );
+        if (
+          !task ||
+          task.execution.signal?.aborted ||
+          executionSession(ctx, task.execution) !== binding.sessionId
+        )
+          fail();
+        same(task.binding, binding);
         const result = await call(
           'issueCapability',
           { binding, taskId, audience, scopes },
           signal,
         );
+        const claims = verifyToken(
+          result.token,
+          'Capability',
+          options.capabilityKeys[audience],
+        );
+        same(claims.binding, task.binding);
+        if (
+          claims.taskId !== task.id ||
+          claims.audience !== audience ||
+          claims.scopes.length !== scopes.length ||
+          scopes.some((scope) => !claims.scopes.includes(scope))
+        )
+          fail();
+        if (
+          tasks.get(task.execution) !== task ||
+          task.execution.signal?.aborted ||
+          signal?.aborted
+        )
+          fail();
+        capabilities.set(result.token, task);
+        task.tokens.add(result.token);
         return result.token;
       },
       model: ({ signal, ...body }) => bridge.stream('model', body, signal),
-      send: ({ signal, ...body }) => call('send', body, signal),
-      receive: ({ signal, ...body }) => call('receive', body, signal),
+      send: (request) => message('send', request),
+      receive: (request) => message('receive', request),
     },
     disconnect(revocation) {
       for (const [peer, binding] of peers)
@@ -411,6 +581,7 @@ export function createProductionSharedPorts(
         );
       } finally {
         closed = true;
+        await messageContexts.close();
         for (const dispose of disposers) dispose();
         await Promise.allSettled([
           ...[...peers.keys()].map((peer) => peer.dispose()),

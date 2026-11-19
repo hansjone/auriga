@@ -86,6 +86,7 @@ function checkSharedNodeRelay(files) {
     'authorizeCapability',
     'readCredentials',
     'enterpriseOutbound',
+    'messageContext',
     'model',
     'send',
     'receive',
