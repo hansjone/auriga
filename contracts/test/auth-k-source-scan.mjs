@@ -66,7 +66,7 @@ function checkBrokerCalls(source, operations, file) {
 
 // A finite local node relay is not a platform HTTP client. Validate its actual request shape
 // and trusted Linux provider together; a retained transport entry alone is insufficient.
-function checkSharedNodeRelay(files) {
+function checkSharedNodeRelay(files, dedicatedBrowser = false) {
   const file = 'shared/node-transport.js',
     provider = 'shared/ports-plugin.js';
   const compact = (text) =>
@@ -141,6 +141,7 @@ function checkSharedNodeRelay(files) {
     if (
       name !== file &&
       name !== provider &&
+      !(dedicatedBrowser && name === 'dedicated/plugin.js') &&
       /\bcreateSharedNodeTransport\b/.test(withoutComments(text))
     )
       throw new Error(
@@ -251,6 +252,157 @@ function checkSharedBrowserCarrier(files) {
   return true;
 }
 
+// A dedicated native owner is derived only inside the admitted, unique E/W
+// binding. This exception does not grant a browser any owner cookie, identity
+// material, URL selector, or a second way to call the local Node transport.
+function checkDedicatedBrowserCarrier(files) {
+  const file = 'dedicated/bootstrap.js';
+  if (!Object.hasOwn(files, file)) return false;
+  const compact = (source) =>
+    withoutComments(source ?? '')
+      .replace(/\s+/g, '')
+      .replaceAll('"', "'");
+  const visible = withoutComments(files[file]);
+  const code = compact(files[file]);
+  const browser = compact(files['dedicated/browser.js']);
+  const host = compact(files['dedicated/host.js']);
+  const provider = compact(files['dedicated/plugin.js']);
+  const binding = compact(files['dedicated/intent.js']);
+  const bridge = compact(files['dedicated/node-bridge.js']);
+  const profile = compact(files['dedicated/profile.js']);
+  const count = (source, pattern) => [...source.matchAll(pattern)].length;
+  const reject = () => {
+    throw new Error(
+      'dedicated browser must remain a same-origin unique-binding native carrier',
+    );
+  };
+  const request =
+    "constresponse=awaitfetcher(newURL(`auriga/dedicated/browser/${kind}`,base),{method:'POST',credentials:'same-origin',cache:'no-store',headers:{'content-type':'application/json'},body:JSON.stringify({channel,endpoint,payload}),signal,},);";
+  if (
+    !code.includes("constbase=newURL('./',document.baseURI);") ||
+    !code.includes('constfetcher=globalThis.fetch.bind(globalThis);') ||
+    !code.includes(
+      'asyncfunctionsend(kind,channel,endpoint,payload,signal){',
+    ) ||
+    !/if\(channel!=='\/api'\)thrownewError\('[^']*'\);/.test(code) ||
+    !code.includes(request) ||
+    !code.includes(
+      "constresult=await(awaitsend('rpc',channel,endpoint,payload,signal)).json();",
+    ) ||
+    !code.includes(
+      "constresponse=awaitsend('stream',channel,endpoint,payload,signal,);",
+    ) ||
+    !code.includes('globalThis.__DSH_TRANSPORT__={ownsHost:true,rpc:{') ||
+    count(visible, /\bfetcher\b/g) !== 2 ||
+    count(visible, /\bfetch\b/g) !== 1 ||
+    count(visible, /\bbase\b/g) !== 2 ||
+    count(visible, /\bkind\b/g) !== 3 ||
+    count(visible, /\bsend\b/g) !== 3 ||
+    count(visible, /\brpc\b/g) !== 2 ||
+    count(code, /\bnewURL\(/g) !== 2 ||
+    transportFeatures(files[file]).join(',') !== 'call:fetcher' ||
+    /\b(?:token|identity|bearer|authorization|cookie|access_token|refresh_token|serviceJwt|import|require)\b/i.test(
+      visible,
+    )
+  )
+    reject();
+  for (const shape of [
+    "['/auriga/dedicated/browser/rpc','/auriga/dedicated/browser/stream',].includes(path)",
+    "typeofreq.headers['auriga-identity']!=='string'",
+    "constrow=awaithost.admit(req.headers['auriga-identity'],{method:req.method,canonicalPath:path,});",
+    'constsignal=globalThis.AbortSignal.any([abort.signal,row.abort.signal,row.native.signal,]);',
+    'awaithost.check(row);signal.throwIfAborted();if(index)',
+    'constresult=awaithost.call(row,input,signal);',
+    'constsource=awaithost.open(row,input,signal);',
+    'awaitdelay(1000,undefined,{signal});awaithost.check(row);',
+    "forawait(constvalueofsource){awaithost.check(row);awaitwrite(res,{type:'item',value},signal);}",
+  ])
+    if (!browser.includes(shape)) reject();
+  for (const shape of [
+    "constforbidden=newSet(['tenantId','memberId','placementId','physicalInstanceId','platformSessionId','authGeneration','credentialVersion',]);",
+    "asyncfunctioncheck(member){if(closed||member.signal?.aborted)fail('shared.revoked');sameBinding(placementBinding(member.principal),binding);awaitruntime.refresh(member);awaitresources.verify();awaitruntime.refresh(member);}",
+    "constmember=awaitruntime.admit(token,request,(principal)=>ports.createPeer({principal,interactions:'none'}),);",
+    'constkey=canonical(member.principal);letrow=records.get(key);',
+    "native:ports.createPeer({principal:Object.freeze({kind:'owner'}),interactions:'answer',}),",
+    "awaitruntime.authorize(member,'session/page',id);",
+    "Object.keys(input).sort().join(',')!=='channel,endpoint,payload'",
+    "input.channel!=='/api'",
+    "if(mutations.has(endpoint))fail('common.forbidden');",
+    '!ctx.typertGateway.claimsEndpoint(endpoint)',
+    'awaitcheckArguments(row.member,input.payload.args);',
+    'awaitprepare(row,input,false);signal.throwIfAborted();',
+    'awaitprepare(row,input,true);signal.throwIfAborted();',
+    'constcreated=awaitruntime.create(row.member,ports.sessions,{});',
+    'forawait(letframeofsource){awaitcheck(row.member);signal.throwIfAborted();',
+    'awaitcheck(row.member);signal.throwIfAborted();yieldframe;',
+  ])
+    if (!host.includes(shape)) reject();
+  // The installation provider must pin the entire dedicated binding and its
+  // Unix socket before it can use the retained local relay factory.
+  for (const shape of [
+    "process.platform!=='linux'",
+    'readOwnedFile(config.configFile,262144)',
+    'value.binding=normalizeBinding(value.binding);',
+    "config.configFile!==root+'/control/dedicated-host.json'",
+    "value.nodeSocket!==root+'/control/shared-node.sock'",
+    'constinitial=read(),binding=initial.binding;',
+    'sameBinding(value.binding,binding);',
+    "if(!lstatSync(initial.nodeSocket).isSocket())fail('common.unavailable');",
+    'consttransport=createSharedNodeTransport(initial.nodeSocket);',
+    'constbridge=createDedicatedNodeBridge({transport,settings,binding});',
+    'profileValidator:(context,expected)=>assertDedicatedProfile(context,expected,resources),',
+    'sameBinding(placementBinding(result),binding);',
+    'sameBinding(current,binding);',
+    'sameBinding(result.binding,binding);',
+    "runtime=createSharedRuntime({...options,ports,expectedMode:'dedicated',});",
+    'resources=createDedicatedResources(ctx,{binding,',
+    'host=createDedicatedHost(ctx,{runtime,ports,binding,resources});',
+    "ctx.on('connection/request',(_req,res)=>{res.writeHead(403,{'cache-control':'no-store'});res.end();})",
+  ])
+    if (!provider.includes(shape)) reject();
+  for (const shape of [
+    "exact(binding,['tenantId','memberId','placementId','physicalInstanceId','mode','epoch','revision',]);",
+    "if(binding.mode!=='dedicated')fail('shared.binding_mismatch');",
+    "validate('Binding',left);validate('Binding',right);",
+    "left.mode!=='dedicated'||right.mode!=='dedicated'||canonical(left)!==canonical(right)",
+  ])
+    if (!binding.includes(shape)) reject();
+  for (const shape of [
+    'if(body?.binding)sameBinding(placementBinding(body.binding),binding);',
+    "if(operation!=='finishTask')settings();",
+    'constresult=awaittransport.call(operation,body,signal);',
+    'if(result?.binding)sameBinding(placementBinding(result.binding),binding);',
+  ])
+    if (!bridge.includes(shape)) reject();
+  for (const shape of [
+    "exportconstDEDICATED_PROFILE_DIR='/home/dsh/.host/.dsh/profiles/auriga-dedicated';",
+    'canonical(expected)!==canonical(DEDICATED_PROFILE)||!resources?.isCurrent()',
+    "profile?.name!=='auriga-dedicated'||profile.dir!==DEDICATED_PROFILE_DIR",
+    "['auriga-dsh','auriga-dsh-shared','auriga-dsh-shared-ports','auriga-dsh-shared-browser',].includes(name)",
+  ])
+    if (!profile.includes(shape)) reject();
+  if (
+    count(provider, /\bcreateSharedNodeTransport\b/g) !== 2 ||
+    count(host, /ports\.createPeer\(/g) !== 2 ||
+    count(browser, /host\.admit\(/g) !== 1 ||
+    count(bridge, /if\(operation!=='finishTask'\)settings\(\);/g) !== 2 ||
+    /\b(?:authorizeIndex|authenticatedUrl|admitConnection|browserPeer|cookie|authorization|bearer)\b/i.test(
+      browser + host + provider,
+    )
+  )
+    reject();
+  // Supplement, never replace, the request/binding/current-fence semantics
+  // above with the two reviewed f90a4ca9 dispatch implementations.
+  if (
+    createHash('sha256').update(browser).digest('hex') !==
+      '87a5622f605746335a8f6ddcfb183cfd1334ecd30efb7fe61b881d9ad1558ddf' ||
+    createHash('sha256').update(host).digest('hex') !==
+      '81fc4149551219b5dc4534ba2859410b679c960e4121d50711e25dc4ce8aac9d'
+  )
+    reject();
+  return true;
+}
+
 export function checkPlatformMigration(inventory, operations, sources) {
   if (!['legacy', 'broker'].includes(inventory.migrationState))
     throw new Error('invalid migrationState');
@@ -271,6 +423,7 @@ export function checkPlatformMigration(inventory, operations, sources) {
   if (inventory.calls.length)
     throw new Error('broker migration retains legacy inventory');
   const sharedBrowser = checkSharedBrowserCarrier(files);
+  const dedicatedBrowser = checkDedicatedBrowserCarrier(files);
   const channels = new Map();
   for (const channel of inventory.retainedChannels ?? []) {
     if (
@@ -308,6 +461,11 @@ export function checkPlatformMigration(inventory, operations, sources) {
           sharedBrowser &&
           file === 'shared-browser/bootstrap.js' &&
           transport === 'call:fetcher'
+        ) &&
+        !(
+          dedicatedBrowser &&
+          file === 'dedicated/bootstrap.js' &&
+          transport === 'call:fetcher'
         )
       )
         throw new Error('direct transport: ' + file + ':' + transport);
@@ -324,7 +482,7 @@ export function checkPlatformMigration(inventory, operations, sources) {
       throw new Error(
         'shared node relay requires its exact documented channel pair',
       );
-    checkSharedNodeRelay(files);
+    checkSharedNodeRelay(files, dedicatedBrowser);
   }
 }
 
