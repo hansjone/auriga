@@ -265,9 +265,13 @@ func resumeInstallRuntime(s state, requested installRuntimeOptions, prepared *pr
 	}
 	want := installRuntimeEnv(s)
 	for _, line := range strings.Split(string(raw), "\n") {
-		key, value, ok := strings.Cut(strings.TrimSpace(line), "=")
-		if !ok || (key != "AURIGA_RUNTIME_BUNDLE" && key != "AURIGA_RUNTIME_ROOT" && key != "AURIGA_RUNTIME_IMAGE") {
+		key, value, ok := strings.Cut(line, "=")
+		runtimeKey := strings.TrimSpace(key)
+		if !ok || (runtimeKey != "AURIGA_RUNTIME_BUNDLE" && runtimeKey != "AURIGA_RUNTIME_ROOT" && runtimeKey != "AURIGA_RUNTIME_IMAGE") {
 			continue
+		}
+		if key != runtimeKey {
+			return errors.New("stack.env runtime 键含额外空白")
 		}
 		if expected, ok := want[key]; !ok || value != expected {
 			return errors.New("stack.env runtime 输入与固定 state 不符或重复")

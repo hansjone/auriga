@@ -147,10 +147,15 @@ func TestInstallRuntimeResumeRejectsChangedEnvProtocolFixture(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	rootLine := "AURIGA_RUNTIME_ROOT=" + installRuntimeEnv(s)["AURIGA_RUNTIME_ROOT"]
 	for name, raw := range map[string][]byte{
-		"missing":   []byte("AURIGA_RUNTIME_IMAGE=" + o.Runtime.Image + "\n"),
-		"duplicate": append(append([]byte{}, before...), []byte("AURIGA_RUNTIME_ROOT=/other/root.pb\n")...),
-		"changed":   bytes.ReplaceAll(before, []byte(o.Runtime.Image), []byte("other@sha256:"+strings.Repeat("a", 64))),
+		"missing":                   []byte("AURIGA_RUNTIME_IMAGE=" + o.Runtime.Image + "\n"),
+		"duplicate":                 append(append([]byte{}, before...), []byte("AURIGA_RUNTIME_ROOT=/other/root.pb\n")...),
+		"changed":                   bytes.ReplaceAll(before, []byte(o.Runtime.Image), []byte("other@sha256:"+strings.Repeat("a", 64))),
+		"leading-key-whitespace":    bytes.ReplaceAll(before, []byte(rootLine), []byte(" \t"+rootLine)),
+		"trailing-value-whitespace": bytes.ReplaceAll(before, []byte(rootLine), []byte(rootLine+" \t")),
+		"whitespace-before-equals":  bytes.ReplaceAll(before, []byte("AURIGA_RUNTIME_ROOT="), []byte("AURIGA_RUNTIME_ROOT =")),
+		"extra-indented-alias":      append(append([]byte{}, before...), []byte(" "+rootLine+"\n")...),
 	} {
 		t.Run(name, func(t *testing.T) {
 			if err := os.WriteFile(path, raw, 0600); err != nil {
