@@ -167,7 +167,7 @@ func TestMessageContextFinalMailboxAndStableTasks(t *testing.T) {
 			// A fresh current task reuses the same full K-session/native/operation
 			// context. Task and capability identities must not allocate another address.
 			binding, _ := wire(a.binding)
-			beginRaw, _ := json.Marshal(map[string]any{"binding": binding, "taskId": testPool, "audience": "auriga.shared.message", "scopes": []string{"message.send"}})
+			beginRaw, _ := json.Marshal(map[string]any{"binding": binding, "taskId": testPool, "audience": "auriga.shared.message", "scopes": []string{"message.send"}, "parentCapability": "synthetic-capability-" + testOrdinary})
 			if _, err = r.invoke(t.Context(), "beginTask", beginRaw); err != nil {
 				t.Fatal(err)
 			}

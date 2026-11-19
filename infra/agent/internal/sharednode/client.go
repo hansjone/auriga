@@ -127,14 +127,18 @@ func (c *Client) call(ctx context.Context, iam bool, method string, in, out prot
 	return c.callTimeout(ctx, iam, method, in, out, 10*time.Second)
 }
 
+type notDispatchedError struct{}
+
+func (*notDispatchedError) Error() string { return "common.unavailable" }
+
 func (c *Client) callTimeout(ctx context.Context, iam bool, method string, in, out proto.Message, timeout time.Duration) error {
 	b, err := readToken(c.Settings.ServiceTokenFile)
 	if err != nil {
-		return errors.New("common.unavailable")
+		return &notDispatchedError{}
 	}
 	token := strings.TrimSpace(string(b))
 	if token == "" || strings.ContainsAny(token, "\r\n\t ") {
-		return errors.New("common.unavailable")
+		return &notDispatchedError{}
 	}
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
@@ -142,6 +146,9 @@ func (c *Client) callTimeout(ctx context.Context, iam bool, method string, in, o
 	conn, prefix := c.Workspace, "/auriga.workspace.v1.SharedDshService/"
 	if iam {
 		conn, prefix = c.IAM, "/auriga.iam.v1.SharedTaskService/"
+	}
+	if ctx.Err() != nil || conn == nil {
+		return &notDispatchedError{}
 	}
 	return conn.Invoke(ctx, prefix+method, in, out)
 }

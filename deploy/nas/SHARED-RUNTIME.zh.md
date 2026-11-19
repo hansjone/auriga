@@ -41,12 +41,22 @@ NAS 原 ext4 不要求 project quota，也不重格式化。`ext4-image` 在 Nod
 
 Agent overlay 明确要求 root、host user/PID namespace、loop 设备、CHOWN/DAC_OVERRIDE/FOWNER/SYS_ADMIN；Host 自身仍是私有 PID namespace、非 root、只读根、无 capabilities。host PID namespace 仅用于将 UDS SO_PEERCRED 的 PID/启动 tick 沿 `/proc` 父链绑定到已验签的真实容器进程；每次调用和结果前复核，不能用 body 的 boot/task/member 绕过。Docker endpoint 必须是同机 daemon。
 
-20 成员各 5GiB/10万 inode，Host home、message-trust、message-preferences、message-inboxes 各另占一份同等硬配额；镜像最低 24×5GiB，样例 128GiB 只是起点。30天归档同样占镜像实际容量，须另加保留数据、文件系统元数据及余量，不能据配额总和声称容量充足。空间或项目号耗尽保持 blocked，不能清除活跃账本或挪动在途成员。
+20 成员各 5GiB/10万 inode，Host home 与 message-trust 各另占一份同等硬配额，共沿用 22 份预算；消息偏好与收件账本共享 Host home 配额。镜像最低 22×5GiB，样例 128GiB 只是起点。30天归档同样占镜像实际容量，须另加保留数据、文件系统元数据及余量，不能据配额总和声称容量充足。空间或项目号耗尽保持 blocked，不能清除活跃账本或挪动在途成员。
 
 归档位于镜像内 `members/node-archives/<operation>`，父目录 Node UID 0700，Host UID 不可读取；control journal 在镜像外、未挂入 Host。重试以持久的原 pool/member/epoch/operation 恢复 rename、归档配额、新空工作区，不跨设备移动、不覆盖原数据、不把已删除操作重跑。保留期删除先落墓碑，再删目录，确认内核已无使用/open inode 并清配额读回后才回收项目号。
 
 Host 的固定 `/var/lib/auriga/pools/<pool>/host/message-trust/ledger.json` 映射到同一持久镜像内的 `members/message-trust/ledger.json`，独立硬配额并归属池 UID。重连、重启不重建或删账本，不借此绕过签名链防退。
-Host 新增的同根 `host/message-preferences`、`host/message-inboxes` 同样映射到 members 下对应 Node 预备目录，Node 先安装并读回各硬配额、严格交给池 UID 才启动 Host；不把当前目录缺失当成清空旧邮箱的理由。
+Host 固定 `host/.host/message-preferences`、`host/.host/message-inboxes/<contextId>` 映射到 `members/.host` 下对应目录。Node 先安装并读回既有 `.host` 硬配额，再建子目录并赋予池 UID，不新增子项目。旧直属消息目录按 Host 冻结协议持旧锁、原子复制重写到配额目录并保留原件，不能 rename 旧 inode 携原 project ID 绕过祖先配额；不删除旧 receipts/highWater，也不把当前目录缺失当成清空旧邮箱的理由。
+
+## Ordinary 任务准入候选及联合安装门槛
+
+Node 的受信 UDS `beginTask` 在 IAM Begin 前，从当前签名执行记录、Engine 实际 `memory_stats.usage/limit/read` 与只读回验的容器硬限额采样，核持久进程 PID/启动时间及运行代次。缺计数、无硬限额、旧/未来样本、进程变化或达到整数 80% 边界均拒绝，不用 MB、节点总内存或模型提交值估计。普通任务消费既有持久 20/4/1 门禁，失败补偿、结束和取消走精确 Finish；未知 Finish 留 closing/阻塞槽，由 Node 每5秒重试结束补偿，不重放业务。已派发 Begin 的超时/取消/未知结果也保持阻塞，直到有可信结束围栏或按原维护协议清理，不能凭当前 IAM 的空 Finish 响应认定未存在任务已有 tombstone。
+
+企业、model、message 子 handle 的 `beginTask` 必须携 `parentCapability`：当前真实 native 私有执行持有的 Node ordinary `task.execute` opaque token。Node 核活父、同 socket peer、当前完整绑定及 IAM 授权；父与子保持独立 audience/scope，子不另占普通槽，父 Finish 先封闭全部子。不能拿浏览器 body 的 member/taskId 或同会话现有任务猜测父。Node 重启不认领持久在途槽；按原合作取消/必要停树和维护恢复协议处理。
+
+内存采样同时经原 NodeControl 字段12上报；15秒 Watch 周期与新准入均采样，发送前重采样，跨重连、过期、旧代次或倒退数据丢弃。W 仍须按节点 mTLS/当前代次与新鲜样本处理容量、准入和释放；此候选不会把本地门禁当作 W 权威。
+
+**联合安装仍待闭**：现有 W `SharedDshService` 尚无 Admit/Release RPC，Host 的 tools/execute 以及 model/message 当前私有 row 尚须提供上述可信父关联；IAM 还须补不存在任务的持久 Finish tombstone 和受认证确认，当前缺此证据的未知 Begin 不自动解锁。Node 缺父就拒绝；未整合对应 W/Host/IAM 合同前不能把此候选安装为完整可用服务，也不能把合成 HTTP/gRPC 测试报作真实 native 生命周期或最终 READY。完整 rc.3 profile 由原 Host 作者提供闭包后另批接 Node 装配。
 
 ## 正常 shared 原生浏览器装配
 

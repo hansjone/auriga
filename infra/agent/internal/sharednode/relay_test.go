@@ -29,6 +29,17 @@ const testTenant = "00000000-0000-4000-8000-000000000001"
 const testPool = "00000000-0000-4000-8000-000000000002"
 const testSession = "00000000-0000-4000-8000-000000000003"
 const testTask = "00000000-0000-4000-8000-000000000004"
+const testOrdinary = "00000000-0000-4000-8000-000000000099"
+
+// Unrelated capability/transport unit tests isolate the admission boundary.
+// Production budget and Engine sampling are exercised by the runtime relay tests.
+type unitAdmission struct{}
+
+func (*unitAdmission) Admit(context.Context, *nodev1.SharedDshSessionBinding, string) (bool, error) {
+	return true, nil
+}
+func (*unitAdmission) Check(*nodev1.SharedDshSessionBinding, string) error    { return nil }
+func (*unitAdmission) Complete(*nodev1.SharedDshSessionBinding, string) error { return nil }
 
 type testAuthority struct {
 	workspacev1.UnimplementedSharedDshServiceServer
@@ -41,6 +52,10 @@ type testAuthority struct {
 	credentialState atomic.Int32
 	invalidSession  atomic.Bool
 	lookupFailures  sync.Map
+	beginStarted    chan struct{}
+	beginResume     chan struct{}
+	issueStarted    chan struct{}
+	issueResume     chan struct{}
 	outbound        chan *iamv1.ExecuteSharedOutboundRequest
 }
 
@@ -127,6 +142,10 @@ func (a *testAuthority) GetSharedDshPool(ctx context.Context, in *workspacev1.Ge
 }
 func (a *testAuthority) BeginSharedTask(ctx context.Context, in *iamv1.BeginSharedTaskRequest) (*iamv1.BeginSharedTaskResponse, error) {
 	a.check(ctx)
+	if a.beginStarted != nil {
+		a.beginStarted <- struct{}{}
+		<-a.beginResume
+	}
 	token := "synthetic-capability-1"
 	if in.TaskId != testTask {
 		token = "synthetic-capability-" + in.TaskId
@@ -142,6 +161,10 @@ func (a *testAuthority) cap(id, audience string, scopes []string) *nodev1.Shared
 }
 func (a *testAuthority) IssueSharedCapability(ctx context.Context, in *iamv1.IssueSharedCapabilityRequest) (*iamv1.IssueSharedCapabilityResponse, error) {
 	a.check(ctx)
+	if a.issueStarted != nil {
+		a.issueStarted <- struct{}{}
+		<-a.issueResume
+	}
 	return &iamv1.IssueSharedCapabilityResponse{Token: "synthetic-capability-refreshed", Capability: a.cap(in.TaskId, in.Audience, in.Scopes)}, nil
 }
 func (a *testAuthority) AuthorizeSharedCapability(ctx context.Context, in *iamv1.AuthorizeSharedCapabilityRequest) (*iamv1.AuthorizeSharedCapabilityResponse, error) {
@@ -188,12 +211,22 @@ func fixture(t *testing.T) (*Relay, *testAuthority) {
 	if e = os.WriteFile(token, []byte("synthetic-service-token"), 0600); e != nil {
 		t.Fatal(e)
 	}
-	return NewRelay(&Client{Settings: Settings{TenantID: testTenant, ServiceTokenFile: token}, Workspace: conn, IAM: conn}, testPool), authority
+	relay := NewRelay(&Client{Settings: Settings{TenantID: testTenant, ServiceTokenFile: token}, Workspace: conn, IAM: conn}, testPool)
+	relay.Admission = &unitAdmission{}
+	return relay, authority
 }
 func begin(t *testing.T, r *Relay, a *testAuthority, audience string, scopes []string) {
 	t.Helper()
 	b, _ := wire(a.binding)
-	raw, _ := json.Marshal(map[string]any{"binding": b, "taskId": testTask, "audience": audience, "scopes": scopes})
+	in := map[string]any{"binding": b, "taskId": testTask, "audience": audience, "scopes": scopes}
+	if audience != "auriga.shared.enterprise" || !sameStrings(scopes, []string{"task.execute"}) {
+		root, _ := json.Marshal(map[string]any{"binding": b, "taskId": testOrdinary, "audience": "auriga.shared.enterprise", "scopes": []string{"task.execute"}})
+		if _, err := r.invoke(context.Background(), "beginTask", root); err != nil {
+			t.Fatal(err)
+		}
+		in["parentCapability"] = "synthetic-capability-" + testOrdinary
+	}
+	raw, _ := json.Marshal(in)
 	if _, e := r.invoke(context.Background(), "beginTask", raw); e != nil {
 		t.Fatal(e)
 	}
@@ -392,7 +425,11 @@ func TestHostClaimsCarrierStaysOnOriginalProcessExecution(t *testing.T) {
 	r, a := fixture(t)
 	peerContext := context.WithValue(context.Background(), executionPeerKey{}, "signed-container/host-pid/start")
 	b, _ := wire(a.binding)
-	raw, _ := json.Marshal(map[string]any{"binding": b, "taskId": testTask, "audience": "auriga.shared.enterprise", "scopes": []string{"outbound"}})
+	root, _ := json.Marshal(map[string]any{"binding": b, "taskId": testOrdinary, "audience": "auriga.shared.enterprise", "scopes": []string{"task.execute"}})
+	if _, err := r.invoke(peerContext, "beginTask", root); err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := json.Marshal(map[string]any{"binding": b, "taskId": testTask, "audience": "auriga.shared.enterprise", "scopes": []string{"outbound"}, "parentCapability": "synthetic-capability-" + testOrdinary})
 	if _, err := r.invoke(peerContext, "beginTask", raw); err != nil {
 		t.Fatal(err)
 	}
