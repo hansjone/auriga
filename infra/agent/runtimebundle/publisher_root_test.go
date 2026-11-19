@@ -133,6 +133,62 @@ func TestWritePublisherRootRejectsNonPublicOrAmbiguousSPKI(t *testing.T) {
 	}
 }
 
+func TestWritePublisherRootRejectsDiscardedPEMObjects(t *testing.T) {
+	o, _, first := publisherRootFixture(t)
+	_, laterPublic, later := publisherRootFixture(t)
+	end := bytes.Index(first, []byte("-----END PUBLIC KEY-----"))
+	if end < 0 {
+		t.Fatal("fixture lacks its END marker")
+	}
+	inputs := map[string][]byte{
+		"truncated-first-key-then-complete-later-key": append(bytes.Clone(first[:end]), later...),
+		"repeated-begin-before-complete-later-key":    append([]byte("-----BEGIN PUBLIC KEY-----\n"), later...),
+	}
+	for name, input := range inputs {
+		t.Run(name, func(t *testing.T) {
+			bad := o
+			bad.PublicKeyPath = filepath.Join(t.TempDir(), "ambiguous-public.pem")
+			bad.OutputPath = filepath.Join(t.TempDir(), "root.pb")
+			put(t, bad.PublicKeyPath, input)
+			raw, err := WritePublisherRoot(bad)
+			if err == nil {
+				var key nodev1.ArtifactSigningKey
+				if err := proto.Unmarshal(raw, &key); err != nil {
+					t.Fatal(err)
+				}
+				t.Fatalf("ambiguous PEM accepted; prepared root contains the later public key: %t", bytes.Equal(key.PublicKey, laterPublic))
+			}
+			invalid(t, err)
+			if _, err := os.Lstat(bad.OutputPath); !os.IsNotExist(err) {
+				t.Fatal("ambiguous PEM created an output")
+			}
+		})
+	}
+}
+
+func TestWritePublisherRootAcceptsSinglePEMLineEndingsAndTrailingWhitespace(t *testing.T) {
+	o, expected, original := publisherRootFixture(t)
+	for name, input := range map[string][]byte{
+		"CRLF":                bytes.ReplaceAll(original, []byte("\n"), []byte("\r\n")),
+		"trailing-whitespace": append(bytes.Clone(original), []byte(" \t\r\n")...),
+	} {
+		t.Run(name, func(t *testing.T) {
+			good := o
+			good.PublicKeyPath = filepath.Join(t.TempDir(), "single-public.pem")
+			good.OutputPath = filepath.Join(t.TempDir(), "root.pb")
+			put(t, good.PublicKeyPath, input)
+			raw, err := WritePublisherRoot(good)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var key nodev1.ArtifactSigningKey
+			if err := proto.Unmarshal(raw, &key); err != nil || !bytes.Equal(key.PublicKey, expected) {
+				t.Fatal("single PEM did not preserve the public key")
+			}
+		})
+	}
+}
+
 func TestWritePublisherRootNeverReplacesExistingOutput(t *testing.T) {
 	o, _, _ := publisherRootFixture(t)
 	put(t, o.OutputPath, []byte("original-file-must-stay"))

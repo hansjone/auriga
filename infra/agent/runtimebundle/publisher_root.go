@@ -132,6 +132,12 @@ func publisherPublicKey(path string) (ed25519.PublicKey, error) {
 	if err != nil {
 		return nil, err
 	}
+	// Decode can skip an incomplete object and select a later BEGIN. Check the
+	// complete input first so no discarded prefix can select a different key.
+	if !bytes.HasPrefix(raw, []byte("-----BEGIN PUBLIC KEY-----")) ||
+		bytes.Count(raw, []byte("-----BEGIN ")) != 1 || bytes.Count(raw, []byte("-----END ")) != 1 {
+		return nil, fmt.Errorf("expected exactly one unencrypted PUBLIC KEY SPKI PEM object")
+	}
 	block, rest := pem.Decode(raw)
 	if block == nil || block.Type != "PUBLIC KEY" || len(block.Headers) != 0 || len(bytes.TrimSpace(rest)) != 0 {
 		return nil, fmt.Errorf("expected exactly one unencrypted PUBLIC KEY SPKI PEM object")
