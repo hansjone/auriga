@@ -26,6 +26,7 @@ export function installSharedExecutionEnvironment(ctx, { runtime, ports }) {
   )
     fail('common.unavailable');
   const rows = new Map();
+  const pending = new Set();
   const revocations = new Map();
   let serial = 0;
   let closed = false,
@@ -72,6 +73,7 @@ export function installSharedExecutionEnvironment(ctx, { runtime, ports }) {
             row.settle = resolve;
           });
         await row.task?.close();
+        pending.delete(row);
       }
     })();
     return row.closing;
@@ -117,6 +119,7 @@ export function installSharedExecutionEnvironment(ctx, { runtime, ports }) {
       void closeRow(row).catch(() => {});
     };
     rows.set(key(exec), row);
+    pending.add(row);
     row.ready = Promise.resolve()
       .then(() =>
         openSharedExecution({
@@ -191,12 +194,14 @@ export function installSharedExecutionEnvironment(ctx, { runtime, ports }) {
       detachHook();
       detachDisposed();
       detachEnv();
-      closing = Promise.allSettled([...rows.values()].map(closeRow)).then(
-        (results) => {
-          const failure = results.find((entry) => entry.status === 'rejected');
-          if (failure) throw failure.reason;
-        },
-      );
+      // Cancelled rows leave the active map immediately but still own drain.
+      // Keep map's index out of closeRow's explicit `settled` parameter.
+      closing = Promise.allSettled(
+        [...pending].map((row) => closeRow(row)),
+      ).then((results) => {
+        const failure = results.find((entry) => entry.status === 'rejected');
+        if (failure) throw failure.reason;
+      });
       return closing;
     },
   };
