@@ -11278,6 +11278,264 @@
           }
         ]
       }
+    },
+    "/api/resource/v1/catalog/placements/{placementId}/installations": {
+      "get": {
+        "tags": [
+          "catalog"
+        ],
+        "x-permission": "resource.packages.read",
+        "x-auth-context": [
+          "portal"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "placementId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "kind",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "plugin",
+                "skill"
+              ]
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 200,
+              "default": 50
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "maxLength": 2048
+            }
+          }
+        ],
+        "operationId": "UnifiedListPlacementInstallations",
+        "summary": "Read the current member placement market and verified node state",
+        "description": "Only a USER portal session. W rechecks the current member/placement/session binding before and after reads. Applied states require the exact current resource-view receipt and actual entry-profile probe. Device and historical owner tickets are rejected.",
+        "responses": {
+          "200": {
+            "description": "Live placement installation page",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../resource/unified.schema.json#/$defs/PlacementInstallationPage"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "./common.yaml#/components/responses/Unauthenticated"
+          },
+          "403": {
+            "$ref": "./common.yaml#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "./common.yaml#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "./common.yaml#/components/responses/Conflict"
+          },
+          "400": {
+            "description": "common.validation_failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "412": {
+            "description": "common.precondition_failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "common.unavailable",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "x-auriga-contract-stage": "frozen",
+        "x-error-codes": [
+          "common.unauthenticated",
+          "common.forbidden",
+          "common.validation_failed",
+          "common.not_found",
+          "common.conflict",
+          "common.precondition_failed",
+          "common.unavailable",
+          "resource.shared_requires_dedicated"
+        ],
+        "x-events": []
+      },
+      "post": {
+        "tags": [
+          "catalog"
+        ],
+        "x-permission": "resource.packages.read",
+        "x-auth-context": [
+          "portal"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "placementId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          }
+        ],
+        "operationId": "UnifiedSelectPlacementInstallations",
+        "summary": "Select a plugin or skill for an authorized dedicated placement",
+        "description": "The server derives tenant/member/pool from the current portal sid and W placement. A shared placement returns resource.shared_requires_dedicated; requesting a resource never grants dedicated mode. First selection in an epoch uses If-Match: \"0\"; later requests use selectionRevision. The idempotent 202 response is applying until current signed resources are loaded and acknowledged by the current Node.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "../resource/unified.schema.json#/$defs/PlacementInstallationInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Selection recorded; not an applied receipt",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "../resource/unified.schema.json#/$defs/PlacementInstallation"
+                }
+              }
+            },
+            "headers": {
+              "ETag": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "common.validation_failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "./common.yaml#/components/responses/Unauthenticated"
+          },
+          "403": {
+            "$ref": "./common.yaml#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "./common.yaml#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "./common.yaml#/components/responses/Conflict"
+          },
+          "412": {
+            "description": "common.precondition_failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "common.unavailable",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "x-auriga-contract-stage": "frozen",
+        "x-error-codes": [
+          "common.unauthenticated",
+          "common.forbidden",
+          "common.validation_failed",
+          "common.not_found",
+          "common.conflict",
+          "common.precondition_failed",
+          "common.unavailable",
+          "resource.shared_requires_dedicated",
+          "resource.installation_required",
+          "resource.distribution_locked"
+        ],
+        "x-events": []
+      }
     }
   },
   "components": {
