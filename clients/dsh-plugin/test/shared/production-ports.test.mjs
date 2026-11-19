@@ -14,7 +14,7 @@ import { openSharedTask } from '../../src/shared/task-context.js';
 import { createEnterpriseAdapter } from '../../src/shared/enterprise.js';
 import { canonical } from '../../src/shared/protocol.js';
 
-function fixture() {
+function fixture({ profileValidator } = {}) {
   const key = generateKeyPairSync('ed25519');
   const keys = new Map([['test', key.publicKey]]);
   const binding = {
@@ -195,6 +195,7 @@ function fixture() {
     bridge,
     Peer,
     options,
+    profileValidator,
   });
   const runtime = createSharedRuntime({ ...options, ports, now: () => f.now });
   const enterprise = createEnterpriseAdapter({
@@ -232,6 +233,50 @@ test('public registry configuration attests native tools, fixed skill roots and 
   assert.equal(assertSharedProfile(f.ctx, SHARED_PROFILE, ['/other']), false);
   await f.ports.close();
   f.runtime.close();
+});
+
+test('profile factory injection is internal, synchronous and strict; shared default remains unchanged', async () => {
+  const dedicated = Object.freeze({ mode: 'dedicated' }),
+    plain = fixture();
+  try {
+    assert.equal(plain.ports.assertProfile(SHARED_PROFILE), true);
+    assert.equal(plain.ports.assertProfile(dedicated), false);
+  } finally {
+    await plain.ports.close();
+    plain.runtime.close();
+  }
+  const calls = [],
+    custom = fixture({
+      profileValidator: (ctx, expected, roots) => {
+        calls.push({ ctx, expected, roots });
+        return expected === dedicated;
+      },
+    });
+  try {
+    assert.equal(custom.ports.assertProfile(dedicated), true);
+    assert.equal(custom.ports.assertProfile(SHARED_PROFILE), false);
+    assert.equal(calls[0].ctx, custom.ctx);
+    assert.deepEqual(calls[0].roots, []);
+  } finally {
+    await custom.ports.close();
+    custom.runtime.close();
+  }
+  for (const value of [null, true, {}, 'validator-from-yaml'])
+    assert.throws(() => fixture({ profileValidator: value }));
+  for (const value of [
+    () => Promise.resolve(true),
+    () => Promise.reject(new Error('async rejected')),
+    () => 1,
+    () => ({ valid: true }),
+  ]) {
+    const f = fixture({ profileValidator: value });
+    try {
+      assert.equal(f.ports.assertProfile(dedicated), false);
+    } finally {
+      await f.ports.close();
+      f.runtime.close();
+    }
+  }
 });
 
 test('task-local uppercase variables preserve leading zeroes and a running helper renews its own material', async () => {
