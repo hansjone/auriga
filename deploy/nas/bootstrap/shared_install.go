@@ -5,23 +5,26 @@ import (
 	"encoding/hex"
 	"fmt"
 	"sort"
+
+	"github.com/hansjone/auriga/infra/agent/installation"
 )
 
 const sharedInstallationGeneration = "v-00000000000000000001"
 const sharedTeamOnlyAdapter = "{}"
 
 type sharedInstallationReceipt struct {
-	Version        int    `json:"version"`
-	Base           string `json:"base"`
-	Tenant         string `json:"tenant"`
-	Node           string `json:"node"`
-	CA             string `json:"ca"`
-	Adapter        string `json:"adapter"`
-	Profile        string `json:"profile"`
-	InitialRuntime string `json:"initialRuntime"`
-	Model          string `json:"model"`
-	Files          string `json:"files"`
-	TeamOnly       bool   `json:"teamOnly,omitempty"`
+	Version          int    `json:"version"`
+	Base             string `json:"base"`
+	Tenant           string `json:"tenant"`
+	Node             string `json:"node"`
+	CA               string `json:"ca"`
+	Adapter          string `json:"adapter"`
+	Profile          string `json:"profile"`
+	DedicatedProfile string `json:"dedicatedProfile,omitempty"`
+	InitialRuntime   string `json:"initialRuntime"`
+	Model            string `json:"model"`
+	Files            string `json:"files"`
+	TeamOnly         bool   `json:"teamOnly,omitempty"`
 }
 
 type sharedInstallationEvent struct {
@@ -62,6 +65,32 @@ func sharedSourceLeaves() []string {
 	return leaves
 }
 
+func sharedInstallationLeaves(dedicated bool) []string {
+	leaves := sharedSourceLeaves()
+	if dedicated {
+		leaves = append(leaves, "public/dedicated-profile.yml")
+		sort.Strings(leaves)
+	}
+	return leaves
+}
+
+func sharedDedicatedProfile(files map[string][]byte, approved string) ([]byte, error) {
+	raw, present := files["public/dedicated-profile.yml"]
+	if approved == "" {
+		if present {
+			return nil, fmt.Errorf("dedicated profile lacks installation approval")
+		}
+		return nil, nil
+	}
+	if !present || approved != sharedSHA(raw) {
+		return nil, fmt.Errorf("dedicated profile differs from installation approval")
+	}
+	if err := installation.ValidateDedicatedProfile(raw); err != nil {
+		return nil, fmt.Errorf("approved dedicated profile violates production policy: %w", err)
+	}
+	return raw, nil
+}
+
 // The committed source is not a runtime ledger: stopping a member or disabling
 // ingress must never reset runtime sequence, quota allocation or pool identity.
 // As with the existing materials upgrade, committed rollback is refused.
@@ -79,7 +108,8 @@ func sharedInstallationNextState(state, action string) (string, error) {
 }
 
 func sharedSourceDigest(files map[string][]byte) (string, error) {
-	leaves := sharedSourceLeaves()
+	_, dedicated := files["public/dedicated-profile.yml"]
+	leaves := sharedInstallationLeaves(dedicated)
 	if len(files) != len(leaves) {
 		return "", fmt.Errorf("shared source leaf set differs")
 	}

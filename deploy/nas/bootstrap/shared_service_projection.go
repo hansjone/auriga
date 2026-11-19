@@ -24,6 +24,10 @@ func sharedServiceProjection(in sharedProjectionInputs) (map[string]sharedProjec
 	if in.Receipt == nil || in.Receipt.Tenant == "" || in.Receipt.Node == "" || len(in.RuntimeJSON) == 0 || len(in.InternalCA) == 0 {
 		return nil, fmt.Errorf("complete verified shared projection inputs required")
 	}
+	dedicated, err := sharedDedicatedProfile(in.Source, in.Receipt.DedicatedProfile)
+	if err != nil {
+		return nil, err
+	}
 	files := map[string]sharedProjectedFile{}
 	put := func(name string, raw []byte, uid uint32, mode os.FileMode) {
 		files[name] = sharedProjectedFile{Body: bytes.Clone(raw), UID: uid, Mode: mode}
@@ -108,6 +112,10 @@ func sharedServiceProjection(in sharedProjectionInputs) (map[string]sharedProjec
 		return nil, err
 	}
 	agent := map[string]any{"sharedDshPreparation": map[string]any{"backend": "ext4-image", "imageBytes": int64(137438953472), "mkfsBinary": "/usr/sbin/mkfs.ext4", "losetupBinary": "/usr/sbin/losetup", "projectFirst": 10000, "projectLast": 199999}, "sharedDshRuntime": map[string]string{"templateFile": "/etc/auriga/shared-runtime/runtime.json", "profileFile": "/etc/auriga/shared-runtime/profile.yml", "servicesFile": "/etc/auriga/shared-runtime/services.json", "hostConfigFile": "/etc/auriga/shared-runtime/host.json"}}
+	if dedicated != nil {
+		agent["sharedDshRuntime"].(map[string]string)["dedicatedProfileFile"] = "/etc/auriga/shared-runtime/dedicated-profile.yml"
+		put("agent/dedicated-profile.yml", dedicated, 0, 0444)
+	}
 	if err := jsonFile("agent/agent.json", agent, 0); err != nil {
 		return nil, err
 	}

@@ -74,3 +74,39 @@ func TestSharedInstallationClosedSourceDigestIncludesAllPrivateAndPublicLeaves(t
 		t.Fatal("unknown secret source accepted")
 	}
 }
+
+func TestSharedOnlyReceiptKeepsOriginalVersionOneBytes(t *testing.T) {
+	raw, err := json.Marshal(sharedInstallationReceipt{Version: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `{"version":1,"base":"","tenant":"","node":"","ca":"","adapter":"","profile":"","initialRuntime":"","model":"","files":""}`
+	if string(raw) != want {
+		t.Fatal("shared-only receipt identity changed without an installation upgrade")
+	}
+}
+
+func TestSharedSourceDigestIncludesOptionalDedicatedProfile(t *testing.T) {
+	files := map[string][]byte{}
+	for _, name := range sharedSourceLeaves() {
+		files[name] = []byte("synthetic-" + name)
+	}
+	original, err := sharedSourceDigest(files)
+	if err != nil {
+		t.Fatal(err)
+	}
+	files["public/dedicated-profile.yml"] = []byte("synthetic-dedicated-checksum-only")
+	withDedicated, err := sharedSourceDigest(files)
+	if err != nil || withDedicated == original {
+		t.Fatal("closed source digest omitted optional dedicated leaf", err)
+	}
+	files["public/dedicated-profile.yml"] = append(files["public/dedicated-profile.yml"], 'x')
+	changed, err := sharedSourceDigest(files)
+	if err != nil || changed == withDedicated {
+		t.Fatal("closed source digest ignored changed dedicated bytes", err)
+	}
+	files["unapproved.yml"] = []byte("synthetic")
+	if _, err := sharedSourceDigest(files); err == nil {
+		t.Fatal("optional profile widened the closed source leaf set")
+	}
+}

@@ -8,6 +8,7 @@ import (
 	"crypto/x509"
 	"encoding/json"
 	"encoding/pem"
+	"fmt"
 	"math/big"
 	"net/url"
 	"os"
@@ -54,11 +55,12 @@ func testNASSharedSourceLifecycle(t *testing.T, parent, binary, input string) {
 		if teamOnly {
 			name = "team-only-no-adapter"
 		}
-		t.Run(name, func(t *testing.T) { testNASSharedSourceVariant(t, parent, binary, input, teamOnly) })
+		t.Run(name, func(t *testing.T) { testNASSharedSourceVariant(t, parent, binary, input, teamOnly, false) })
 	}
+	t.Run("team-only-with-approved-dedicated-profile", func(t *testing.T) { testNASSharedSourceVariant(t, parent, binary, input, true, true) })
 }
 
-func testNASSharedSourceVariant(t *testing.T, parent, binary, input string, teamOnly bool) {
+func testNASSharedSourceVariant(t *testing.T, parent, binary, input string, teamOnly, dedicated bool) {
 	t.Helper()
 	if os.Geteuid() != 0 {
 		t.Fatal("existing NAS root fixture must invoke shared source lifecycle")
@@ -67,6 +69,9 @@ func testNASSharedSourceVariant(t *testing.T, parent, binary, input string, team
 	name := "shared-data-company"
 	if teamOnly {
 		name = "shared-data-team"
+	}
+	if dedicated {
+		name += "-dedicated"
 	}
 	data := filepath.Join(parent, name)
 	for _, path := range []string{data, filepath.Join(data, "config")} {
@@ -158,6 +163,18 @@ func testNASSharedSourceVariant(t *testing.T, parent, binary, input string, team
 	if teamOnly {
 		stageArgs = []string{"-team-only", "-profile-file", profile, "-profile-sha256", sharedSHA(profileRaw), "-model", "gpt-6.1-sol"}
 	}
+	var dedicatedRaw []byte
+	dedicatedPath := filepath.Join(parent, "approved-dedicated-profile.yml")
+	if dedicated {
+		dedicatedRaw, err = os.ReadFile("../dedicated-runtime-profile.example.yml")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(dedicatedPath, dedicatedRaw, 0644); err != nil {
+			t.Fatal(err)
+		}
+		stageArgs = append(stageArgs, "-dedicated-profile-file", dedicatedPath, "-dedicated-profile-sha256", sharedSHA(dedicatedRaw))
+	}
 	run := func(action string, success bool, extra ...string) string {
 		t.Helper()
 		arguments := []string{"shared-runtime", "-action", action, "-base", base, "-out", out}
@@ -179,6 +196,38 @@ func testNASSharedSourceVariant(t *testing.T, parent, binary, input string, team
 	runtimeAction("stage", true)
 	run("stage", false, stageArgs...) // initial shared source must never accept a pending candidate
 	runtimeAction("rollback", true)
+	if dedicated {
+		withoutDedicated := stageArgs[:len(stageArgs)-4]
+		run("stage", false, append(append([]string{}, withoutDedicated...), "-dedicated-profile-file", dedicatedPath)...)
+		run("stage", false, append(append([]string{}, withoutDedicated...), "-dedicated-profile-sha256", sharedSHA(dedicatedRaw))...)
+		run("stage", false, append(append([]string{}, withoutDedicated...), "-dedicated-profile-file", dedicatedPath, "-dedicated-profile-sha256", strings.Repeat("0", 64))...)
+		if err := os.Chmod(dedicatedPath, 0664); err != nil {
+			t.Fatal(err)
+		}
+		run("stage", false, stageArgs...)
+		if err := os.Chmod(dedicatedPath, 0644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chown(dedicatedPath, 10001, 10001); err != nil {
+			t.Fatal(err)
+		}
+		run("stage", false, stageArgs...)
+		if err := os.Chown(dedicatedPath, 0, 0); err != nil {
+			t.Fatal(err)
+		}
+		link := filepath.Join(parent, "dedicated-symlink.yml")
+		if err := os.Symlink(dedicatedPath, link); err != nil {
+			t.Fatal(err)
+		}
+		run("stage", false, append(append([]string{}, withoutDedicated...), "-dedicated-profile-file", link, "-dedicated-profile-sha256", sharedSHA(dedicatedRaw))...)
+		for i, invalid := range [][]byte{[]byte("[]"), profileRaw, bytes.Repeat([]byte(" "), (1<<20)+1)} {
+			path := filepath.Join(parent, fmt.Sprintf("invalid-dedicated-%d.yml", i))
+			if err := os.WriteFile(path, invalid, 0644); err != nil {
+				t.Fatal(err)
+			}
+			run("stage", false, append(append([]string{}, withoutDedicated...), "-dedicated-profile-file", path, "-dedicated-profile-sha256", sharedSHA(invalid))...)
+		}
+	}
 	run("stage", true, stageArgs...)
 	generation := filepath.Join(out, sharedInstallationGeneration)
 	stat, err := os.Stat(filepath.Join(generation, "public/host.json"))
@@ -187,6 +236,20 @@ func testNASSharedSourceVariant(t *testing.T, parent, binary, input string, team
 	}
 	if _, err := os.Stat(filepath.Join(out, ".pending")); !os.IsNotExist(err) {
 		t.Fatal("successful full stage left interrupted evidence")
+	}
+	if dedicated {
+		got, err := runtimeReadLeaf(filepath.Join(generation, "public/dedicated-profile.yml"), 0600, 2<<20)
+		if err != nil || !bytes.Equal(got, dedicatedRaw) {
+			t.Fatal("approved dedicated bytes were not staged with exact source metadata", err)
+		}
+		raw, err := runtimeReadLeaf(filepath.Join(generation, "installation.receipt"), 0600, 65536)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var receipt sharedInstallationReceipt
+		if json.Unmarshal(raw, &receipt) != nil || receipt.Version != 1 || receipt.Profile != sharedSHA(profileRaw) || receipt.DedicatedProfile != sharedSHA(dedicatedRaw) {
+			t.Fatal("independent shared and dedicated approvals were not recorded together")
+		}
 	}
 	if teamOnly {
 		raw, err := os.ReadFile(filepath.Join(generation, "public/host.json"))
@@ -221,6 +284,25 @@ func testNASSharedSourceVariant(t *testing.T, parent, binary, input string, team
 	run("stage", true, stageArgs...)
 	run("commit", true)
 	run("check", true)
+	if dedicated {
+		leaf := filepath.Join(generation, "public/dedicated-profile.yml")
+		if err := os.WriteFile(leaf, append(bytes.Clone(dedicatedRaw), []byte("\n# tampered stored profile\n")...), 0600); err != nil {
+			t.Fatal(err)
+		}
+		run("check", false)
+		if err := os.WriteFile(leaf, dedicatedRaw, 0600); err != nil {
+			t.Fatal(err)
+		}
+		run("check", true) // a fresh CLI process re-reads the approved receipt/bytes
+		if err := os.Rename(dedicatedPath, dedicatedPath+".offline"); err != nil {
+			t.Fatal(err)
+		}
+		run("check", true) // recovery uses the immutable source, not a transient approval path
+		if err := os.Rename(dedicatedPath+".offline", dedicatedPath); err != nil {
+			t.Fatal(err)
+		}
+		run("stage", false, stageArgs[:len(stageArgs)-4]...) // cannot downgrade a committed approval
+	}
 	if run("path", true) != generation {
 		t.Fatal("committed source path differs")
 	}
@@ -282,6 +364,39 @@ func testNASSharedRoleAndReplayPreparation(t *testing.T, data, base, binary stri
 	if !strings.HasPrefix(projected, filepath.Join(data, "config/shared-runtime/g-")) {
 		t.Fatal("unexpected immutable role projection")
 	}
+	checkDedicated := func(path string) {
+		t.Helper()
+		configRaw, err := sharedRoleReadLeaf(filepath.Join(path, "agent/agent.json"), 0, 0600, 4<<20)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var config struct {
+			Runtime struct {
+				Dedicated string `json:"dedicatedProfileFile"`
+			} `json:"sharedDshRuntime"`
+		}
+		if err := json.Unmarshal(configRaw, &config); err != nil {
+			t.Fatal(err)
+		}
+		source, err := os.ReadFile(filepath.Join(data, "config/shared-source", sharedInstallationGeneration, "public/dedicated-profile.yml"))
+		if os.IsNotExist(err) {
+			if config.Runtime.Dedicated != "" {
+				t.Fatal("shared-only receipt silently enabled dedicated")
+			}
+			if _, err := os.Lstat(filepath.Join(path, "agent/dedicated-profile.yml")); !os.IsNotExist(err) {
+				t.Fatal("shared-only projection invented a dedicated file")
+			}
+			return
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		got, err := sharedRoleReadLeaf(filepath.Join(path, "agent/dedicated-profile.yml"), 0, 0444, 2<<20)
+		if err != nil || !bytes.Equal(got, source) || config.Runtime.Dedicated != "/etc/auriga/shared-runtime/dedicated-profile.yml" {
+			t.Fatal("actual Agent role lost its approved dedicated bytes/UID/mode/config field", err)
+		}
+	}
+	checkDedicated(projected)
 	for name, uid := range map[string]uint32{"platform/platform.properties": 10001, "edge/edge.config.json": 65532, "gateway/bifrost-runtime.json": 10001, "agent/agent.json": 0, "nats/nats.conf": 65532} {
 		if _, err := sharedRoleReadLeaf(filepath.Join(projected, name), uid, 0600, 4<<20); err != nil {
 			t.Fatal(name, err)
@@ -289,6 +404,30 @@ func testNASSharedRoleAndReplayPreparation(t *testing.T, data, base, binary stri
 	}
 	if run("project", true) != projected {
 		t.Fatal("same installation changed immutable role generation")
+	}
+	if _, err := os.Lstat(filepath.Join(projected, "agent/dedicated-profile.yml")); err == nil {
+		leaf := filepath.Join(projected, "agent/dedicated-profile.yml")
+		original, err := os.ReadFile(leaf)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chmod(leaf, 0644); err != nil {
+			t.Fatal(err)
+		}
+		run("project", false)
+		if err := os.Chmod(leaf, 0444); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(leaf, append(bytes.Clone(original), []byte("\n# changed role projection\n")...), 0444); err != nil {
+			t.Fatal(err)
+		}
+		run("project", false)
+		if err := os.WriteFile(leaf, original, 0444); err != nil {
+			t.Fatal(err)
+		}
+		if run("project", true) != projected {
+			t.Fatal("restored immutable dedicated projection changed generation")
+		}
 	}
 	replay := func(action string, success bool) string {
 		t.Helper()
@@ -362,6 +501,7 @@ func testNASSharedRoleAndReplayPreparation(t *testing.T, data, base, binary stri
 	if run("project", true) != newProjection {
 		t.Fatal("committed shared projection not stable")
 	}
+	checkDedicated(newProjection)    // signed runtime upgrade keeps the same approved profile
 	runtimeAction("rollback", false) // original contract: no implicit rollback after commit
 	t.Log("actual role projection and temporary replay source/config stage passed with umask077; readiness remained closed without real NATS provisioning/revocation")
 }
