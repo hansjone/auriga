@@ -245,6 +245,21 @@ func (m *PersistentPools) ensure(ctx context.Context, binding *nodev1.SharedDshB
 	if err = m.chown(trust, uid, uid); err != nil {
 		return err
 	}
+	for _, name := range []string{"message-preferences", "message-inboxes"} {
+		path, err := layout.Path(pool, "members", name)
+		if err != nil {
+			return err
+		}
+		if err = os.MkdirAll(path, 0700); err != nil {
+			return err
+		}
+		if err = layout.Quota.Ensure(ctx, path, storage.MemberBytes, storage.MemberInodes); err != nil {
+			return err
+		}
+		if err = m.chown(path, uid, uid); err != nil {
+			return err
+		}
+	}
 	full := proto.Clone(m.Template).(*nodev1.InstanceSpec)
 	if full.Dsh == nil || full.Generation <= 0 || full.Secrets != nil || full.OwnerId != "" || len(full.Plugins) != 0 || len(full.UnifiedResources) != 0 || len(full.GetProfile().GetEnv()) != 0 || len(full.GetProfile().GetPatches()) != 0 {
 		return fmt.Errorf("shared runtime template contains personal state or lacks signed runtime")

@@ -41,6 +41,10 @@ func RenderPoolMode(profile, ports []byte, pool, tenant, mode, meta string, port
 			row["config"] = cfg
 		}
 		switch name {
+		case "auriga-dsh/shared-browser":
+			if mode != "shared" {
+				return "", fmt.Errorf("shared browser cannot load in dedicated mode")
+			}
 		case "auriga-dsh":
 			return "", fmt.Errorf("shared profile contains the owner entry")
 		case "auriga-dsh/shared":
