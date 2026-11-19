@@ -9,7 +9,6 @@ import {
 import type { components } from '../../../shared/src/generated/iam';
 import {
   navigationCorrelationId,
-  navigationProviderId,
   takeNavigationContext,
 } from '../../../shared/src/api/correlation';
 import {
@@ -27,6 +26,11 @@ import {
   type LoginTransaction,
 } from '../../../shared/src/api/iam';
 import { isApiError } from '../../../shared/src/api/problem';
+import {
+  loginPreference,
+  orderLoginProviders,
+  preferredLoginProvider,
+} from '../../../shared/src/login-preference';
 import { createWorkspaceApi, instanceEntry, type Instance } from '../workspace';
 
 const entry = '/instance-login.html';
@@ -509,7 +513,9 @@ export function mountInstanceLogin(
         }
         if (!current(version)) return;
       }
-      const navigation = freshScan ? undefined : takeNavigationContext(doc, id);
+      const context = freshScan ? undefined : takeNavigationContext(doc, id);
+      const navigation =
+        loginPreference(doc) === 'company' ? context : undefined;
       uacView = createUacLoginView(loginRoot, {
         api: iam,
         providerId: id,
@@ -581,14 +587,9 @@ export function mountInstanceLogin(
       )
     )
       throw new Error('Invalid login providers');
-    providers = result.items;
-    const preferred = providers.find(
-      (p) => p.connectorType === 'uac' && p.id === navigationProviderId(doc),
-    );
-    const uac =
-      (doc.getElementById('auriga-uac-navigation') ? preferred : undefined) ??
-      providers.find((p) => p.connectorType === 'uac');
-    if (uac) void selectProvider(uac.id);
+    providers = orderLoginProviders(result.items, doc);
+    const initial = preferredLoginProvider(providers, doc);
+    if (initial) void selectProvider(initial.id);
     else show(providers.length ? 'providers' : 'empty');
   }
 

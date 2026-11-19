@@ -1,5 +1,7 @@
 # Auriga NAS isolated test pack
 
+站点默认登录方式及旧配方的最小持久升级见[登录偏好配置](LOGIN-PREFERENCE.zh.md)。产品缺省仍优先公司登录，可仅对某个部署设置团队账号优先。
+
 公网预算、时钟容差、断线工具行为与 join 日志定位见 [网络运维说明](../../docs/operations/network-timing.zh.md)。
 
 ## 首次安装：装 → 看应急账号 → 登录管理台 → 邀请成员

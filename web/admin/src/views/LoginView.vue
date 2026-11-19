@@ -14,6 +14,7 @@ import {
   mapProblemMessage,
 } from '@auriga/shared';
 import { iamApi } from '../api';
+import { loginPreference } from '../../../shared/src/login-preference';
 
 const { t } = useI18n();
 const route = useRoute();
@@ -28,6 +29,12 @@ onMounted(async () => {
   try {
     const res = await iamApi.listLoginProviders();
     providers.value = res.items;
+    if (loginPreference(document) === 'team') {
+      const team = res.items.find(
+        (provider) => provider.connectorType === 'team-account',
+      );
+      if (team) await selectProvider(team);
+    }
   } catch (e) {
     error.value = isApiError(e)
       ? mapProblemMessage(e.problem, t)

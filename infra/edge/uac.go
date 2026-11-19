@@ -56,6 +56,11 @@ type uacNavigationContext struct {
 
 // Only an actual portal document GET can issue a navigation transaction.
 func (g *Gateway) serveUacNavigation(w http.ResponseWriter, r *http.Request) bool {
+	// A team-first deployment does not need an automatic company transaction.
+	// Explicit company selection still creates its usual fresh UAC challenge.
+	if g.Cfg.LoginPreference == "team" {
+		return false
+	}
 	device := uacDevicePage.FindStringSubmatch(r.URL.Path)
 	if g.Cfg.UacProviderID == "" || !g.Cfg.Access.Valid() || r.Method != http.MethodGet || (r.URL.Path != "/login" && r.URL.Path != "/instance-login.html" && device == nil) {
 		return false
@@ -276,9 +281,12 @@ func (g *Gateway) uacPageHTML(r *http.Request) ([]byte, error) {
 		return nil, fmt.Errorf("invalid portal document")
 	}
 	if file == "index.html" {
-		return injectAccessMode(html, g.Cfg.Access.Mode())
+		html, err = injectAccessMode(html, g.Cfg.Access.Mode())
+		if err != nil {
+			return nil, err
+		}
 	}
-	return html, nil
+	return injectLoginPreference(html, g.Cfg.LoginPreference)
 }
 
 func navigationRequestID() (string, error) {

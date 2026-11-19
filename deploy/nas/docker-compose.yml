@@ -427,6 +427,7 @@ services:
         required: true
     environment:
       AURIGA_EDGE_ALLOW_LOCAL_INGRESS: 'true'
+      AURIGA_EDGE_LOGIN_PREFERENCE: ${AURIGA_EDGE_LOGIN_PREFERENCE:-company}
       AURIGA_EDGE_MANAGED_ORIGIN: ${AURIGA_MANAGED_PLATFORM_ORIGIN:-}
       AURIGA_EDGE_MANAGED_CERT_FILE: /etc/auriga/managed/server.crt
       AURIGA_EDGE_MANAGED_KEY_FILE: /etc/auriga/managed/server.key
