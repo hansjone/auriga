@@ -3,7 +3,9 @@ package main
 import (
 	"bytes"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -45,6 +47,74 @@ func runtimeInstallProtocolFixture(t *testing.T) (string, installOptions) {
 		t.Fatal(err)
 	}
 	return pkg, installOptions{Data: filepath.Join(base, "auriga-data"), Runtime: installRuntimeOptions{Bundle: bundle, Root: root, Image: "127.0.0.1:15000/auriga/dsh@sha256:" + strings.Repeat("a", 64)}}
+}
+
+// These install-flow tests already replace Docker and NAS with protocol
+// fixtures. Model only the root-owner fact for the exact DATA ancestor chain;
+// all other stat requests and every os.Stat mode check remain real. This does
+// not prove numeric root ownership, which has separate privileged tests.
+func runtimeInstallRootParentProtocolFixture(t *testing.T, bin, data string) {
+	t.Helper()
+	realStat, err := exec.LookPath("stat")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var ancestors []string
+	for p := filepath.Dir(data); ; p = filepath.Dir(p) {
+		ancestors = append(ancestors, p)
+		if p == filepath.Dir(p) {
+			break
+		}
+	}
+	parents := filepath.Join(bin, "root-parent-owner-facts")
+	if err := os.WriteFile(parents, []byte(strings.Join(ancestors, "\n")+"\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	stat := `#!/bin/sh
+set -eu
+if [ "$#" = 3 ] && [ "$1" = -c ] && [ "$2" = %u ] && grep -Fqx -- "$3" "$AURIGA_TEST_RUNTIME_ROOT_PARENTS"; then
+  printf '0\n'
+  exit 0
+fi
+exec "$AURIGA_TEST_RUNTIME_REAL_STAT" "$@"
+`
+	if err := os.WriteFile(filepath.Join(bin, "stat"), []byte(stat), 0755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("AURIGA_TEST_RUNTIME_REAL_STAT", realStat)
+	t.Setenv("AURIGA_TEST_RUNTIME_ROOT_PARENTS", parents)
+}
+
+func TestInstallRuntimeRootParentProtocolFixtureIsScoped(t *testing.T) {
+	parent, bin := t.TempDir(), t.TempDir()
+	if os.Geteuid() != 0 {
+		if err := trustedParent(parent); err == nil {
+			t.Fatal("the real production guard accepted a non-root-owned test parent")
+		}
+	}
+	runtimeInstallRootParentProtocolFixture(t, bin, filepath.Join(parent, "data"))
+	t.Setenv("PATH", bin+":"+os.Getenv("PATH"))
+	if err := trustedParent(parent); err != nil {
+		t.Fatal("exact protocol owner facts did not reach the real mode check", err)
+	}
+	probe := filepath.Join(parent, "probe")
+	if err := os.WriteFile(probe, []byte("public fixture"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := capture("stat", "-c", "%u", probe); err != nil || got != strconv.Itoa(os.Geteuid()) {
+		t.Fatal("a path outside the ancestor allowlist did not use real stat", got, err)
+	}
+	if got, err := capture("stat", "-c", "%s", probe); err != nil || got != "14" {
+		t.Fatal("a format outside the owner protocol did not use real stat", got, err)
+	}
+	if err := os.Chmod(parent, 0777); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(parent, 0700) })
+	if err := trustedParent(parent); err == nil {
+		t.Fatal("protocol owner facts bypassed the real group/other-write guard")
+	}
+	t.Logf("protocol root-owner facts only; actual test euid=%d", os.Geteuid())
 }
 
 func pinRuntimeProtocolFixture(t *testing.T, pkg string, o installOptions) state {
@@ -298,6 +368,7 @@ exit 29
 	if err := os.WriteFile(filepath.Join(bin, "docker"), []byte("#!/bin/sh\ncase \"$1\" in compose) echo 2.29.0;; info) echo 28.5.2;; esac\n"), 0755); err != nil {
 		t.Fatal(err)
 	}
+	runtimeInstallRootParentProtocolFixture(t, bin, o.Data)
 	t.Setenv("PATH", bin+":"+os.Getenv("PATH"))
 	t.Setenv("DOCKER_HOST", "unix:///not-a-real-docker-fixture.sock")
 	t.Setenv("DOCKER_CONTEXT", "")
@@ -427,6 +498,7 @@ func TestInstallRuntimeUnsignedRequestCannotDowngradeConcurrentSignedInstallProt
 			if err := os.WriteFile(filepath.Join(bin, "docker"), []byte(docker), 0755); err != nil {
 				t.Fatal(err)
 			}
+			runtimeInstallRootParentProtocolFixture(t, bin, data)
 			t.Setenv("PATH", bin+":"+os.Getenv("PATH"))
 			t.Setenv("DOCKER_HOST", "unix:///not-a-real-docker-fixture.sock")
 			t.Setenv("DOCKER_CONTEXT", "")
