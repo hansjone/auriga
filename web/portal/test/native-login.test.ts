@@ -153,6 +153,9 @@ beforeEach(() => {
   document.body.append(root);
 });
 afterEach(() => {
+  document
+    .querySelectorAll('meta[name="auriga-login-preference"]')
+    .forEach((node) => node.remove());
   page?.dispose();
   document
     .querySelector('meta[name="auriga-shared-placement-enabled"]')
@@ -163,6 +166,42 @@ afterEach(() => {
 });
 
 describe('native cloud sign-in', () => {
+  it('uses the deployed team preference before UAC while retaining the company choice', async () => {
+    document.head.insertAdjacentHTML(
+      'beforeend',
+      '<meta name="auriga-login-preference" content="team">',
+    );
+    const uac = {
+      ...provider,
+      id: txId,
+      connectorType: 'uac',
+      displayName: { en: 'Company', 'zh-CN': '公司' },
+    };
+    fetcher.mockImplementation(async (input, init) => {
+      const path = String(input);
+      if (path.endsWith('/me')) return expired();
+      if (path.endsWith('/providers'))
+        return json({
+          items: [uac, { ...provider, connectorType: 'team-account' }],
+        });
+      if (path.endsWith('/transactions') && init?.method === 'POST')
+        return json(transaction(password));
+      if (init?.method === 'DELETE') return new Response(null, { status: 204 });
+      throw new Error('Unexpected request');
+    });
+    render();
+    await flush();
+    expect(root.querySelector('input[name=username]')).not.toBeNull();
+    expect(
+      fetcher.mock.calls.some(
+        ([path]) =>
+          String(path).endsWith('/sso') || String(path).endsWith('/challenges'),
+      ),
+    ).toBe(false);
+    button('更换登录方式').click();
+    await flush();
+    expect(button('公司').hidden).toBe(false);
+  });
   it('defaults to scanning when browser sign-in evidence is unavailable and offers a team account', async () => {
     const uac = {
       ...provider,

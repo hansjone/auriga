@@ -16,6 +16,7 @@ import (
 // Config drives auriga-edge. Values may come from a JSON file and/or environment.
 type Config struct {
 	SharedDsh              *SharedDshConfig              `json:"sharedDsh,omitempty"`
+	LoginPreference        string                        `json:"loginPreference,omitempty"`
 	UacProviderID          string                        `json:"uacProviderId,omitempty"`
 	UacSSOCookieNames      []string                      `json:"uacSsoCookieNames,omitempty"`
 	AccessConfigFile       string                        `json:"accessConfigFile"`
@@ -139,6 +140,9 @@ func loadConfigWithAccess(path, accessPath string) (Config, error) {
 }
 
 func applyEnv(cfg *Config) {
+	if value, present := os.LookupEnv("AURIGA_EDGE_LOGIN_PREFERENCE"); present {
+		cfg.LoginPreference = value
+	}
 	if value := os.Getenv("AURIGA_EDGE_LINKS_ALLOWED_ORIGINS"); value != "" {
 		cfg.LinkOrigins = splitCSV(value)
 	}
@@ -265,6 +269,9 @@ func applyEnv(cfg *Config) {
 }
 
 func (c Config) validate() error {
+	if c.LoginPreference != "" && c.LoginPreference != "company" && c.LoginPreference != "team" {
+		return fmt.Errorf("loginPreference must be company or team")
+	}
 	if err := c.validateUacCookieNames(); err != nil {
 		return err
 	}

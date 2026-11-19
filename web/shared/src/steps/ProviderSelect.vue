@@ -2,8 +2,15 @@
 import { useI18n } from 'vue-i18n';
 import type { LoginProvider } from '../api/iam';
 import { pickLocalized } from '../locale';
+import { computed } from 'vue';
+import { loginPreference, orderLoginProviders } from '../login-preference';
 
-defineProps<{ providers: LoginProvider[] }>();
+const props = defineProps<{ providers: LoginProvider[] }>();
+const methods = computed(() =>
+  loginPreference(document) === 'team'
+    ? orderLoginProviders(props.providers, document)
+    : props.providers,
+);
 const emit = defineEmits<{ select: [provider: LoginProvider] }>();
 const { t, locale } = useI18n();
 </script>
@@ -12,7 +19,7 @@ const { t, locale } = useI18n();
   <div class="provider-select" data-testid="provider-select">
     <h2 class="title">{{ t('login.chooseProvider') }}</h2>
     <button
-      v-for="p in providers"
+      v-for="p in methods"
       :key="p.id"
       type="button"
       class="provider"

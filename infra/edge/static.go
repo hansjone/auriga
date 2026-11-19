@@ -15,6 +15,7 @@ import (
 // spaFileServer serves a directory with index.html fallback for non-API GETs.
 // It refuses to serve paths that look like secrets (service-roles, keys).
 type spaFileServer struct {
+	loginPreference string
 	root            http.Dir
 	fs              http.Handler
 	accessMode      string
@@ -59,7 +60,7 @@ func (s *spaFileServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	full := filepath.Join(string(s.root), filepath.FromSlash(upath))
 	fi, err := os.Stat(full)
 	if err == nil && !fi.IsDir() {
-		if s.accessMode != "" && (upath == "/index.html" || s.sharedPlacement != nil && upath == "/instance-login.html") {
+		if s.accessMode != "" && (upath == "/index.html" || upath == "/instance-login.html") {
 			s.serveAccessIndex(w, r, full)
 			return
 		}
@@ -89,6 +90,9 @@ func (s *spaFileServer) serveAccessIndex(w http.ResponseWriter, r *http.Request,
 	}
 	if err == nil && s.sharedPlacement != nil {
 		raw, err = injectSharedPlacementMetadata(raw, s.sharedPlacement.parentDomain)
+	}
+	if err == nil {
+		raw, err = injectLoginPreference(raw, s.loginPreference)
 	}
 	if err != nil {
 		writeProblem(w, problem(503, "common.unavailable", "Service Unavailable", "SPA access configuration unavailable", requestID(r)))

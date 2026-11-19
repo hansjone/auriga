@@ -233,6 +233,11 @@ func NewGateway(cfg Config, sessions SessionStore, routes RouteStore, tickets Ti
 			portal.sharedPlacement = &sharedPortalPlacement{parentDomain: cfg.Access.InstanceParentDomain()}
 		}
 		g.adminStatic = newAccessSPAFileServer(cfg.Static.AdminRoot, cfg.Access.Mode(), staticCache)
+		for _, handler := range []http.Handler{g.portalStatic, g.adminStatic} {
+			if site, ok := handler.(*spaFileServer); ok {
+				site.loginPreference = cfg.LoginPreference
+			}
+		}
 	}
 	return g, nil
 }
