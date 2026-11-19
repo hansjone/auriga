@@ -14,6 +14,8 @@ import (
 	iamv1 "github.com/hansjone/auriga/infra/gen/auriga/iam/v1"
 	nodev1 "github.com/hansjone/auriga/infra/gen/auriga/node/v1"
 	workspacev1 "github.com/hansjone/auriga/infra/gen/auriga/workspace/v1"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -80,7 +82,11 @@ func (r *Relay) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 			return
 		}
 		code := e.Error()
-		if !strings.HasPrefix(code, "shared.") && !strings.HasPrefix(code, "common.") {
+		if status.Code(e) == codes.NotFound {
+			// Historical sessions can disappear from W while their Host snapshots
+			// remain. Preserve the typed absence without exposing RPC details.
+			code = "common.not_found"
+		} else if !strings.HasPrefix(code, "shared.") && !strings.HasPrefix(code, "common.") {
 			code = "common.unavailable"
 		}
 		replyError(w, code)
