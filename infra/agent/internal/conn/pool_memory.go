@@ -11,12 +11,19 @@ import (
 type queuedPoolMemory struct {
 	sample *nodev1.SharedDshPoolMemorySample
 	epoch  uint64
+	sent   chan error
+}
+
+func (q queuedPoolMemory) complete(err error) {
+	if q.sent != nil {
+		q.sent <- err
+	}
 }
 
 func validPoolMemory(v *nodev1.SharedDshPoolMemorySample) bool {
 	const safe = 9007199254740991
 	now := time.Now().Unix()
-	return v != nil && v.SchemaVersion == 1 && v.TenantId != "" && v.PhysicalInstanceId != "" &&
+	return v != nil && len(v.ProtoReflect().GetUnknown()) == 0 && v.SchemaVersion == 1 && v.TenantId != "" && v.PhysicalInstanceId != "" &&
 		v.ObservedGeneration > 0 && v.ObservedGeneration <= safe && v.ObservedAt >= 0 && v.ObservedAt <= now &&
 		v.ValidUntil > now && v.ValidUntil-v.ObservedAt <= 30 && v.MemoryUsedBytes >= 0 && v.MemoryUsedBytes <= safe &&
 		v.MemoryLimitBytes > 0 && v.MemoryLimitBytes <= safe

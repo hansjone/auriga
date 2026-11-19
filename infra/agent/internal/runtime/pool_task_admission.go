@@ -17,7 +17,16 @@ type PoolTaskAdmission struct {
 	Pools    *SharedPools
 	Driver   *Docker
 	Report   func(*nodev1.SharedDshPoolMemorySample)
+	Control  PoolTaskControl
 	mu       sync.Mutex
+}
+
+// PoolTaskControl is implemented by the actual NodeControl session, never the
+// service-JWT Workspace client. Responses are verified at that transport seam.
+type PoolTaskControl interface {
+	AdmitSharedTask(context.Context, *nodev1.SharedDshSessionBinding, string, *nodev1.SharedDshPoolMemorySample) error
+	CheckSharedTask(*nodev1.SharedDshSessionBinding, string) error
+	ReleaseSharedTask(context.Context, *nodev1.SharedDshSessionBinding, string) error
 }
 
 func placementOf(b *nodev1.SharedDshSessionBinding) *nodev1.SharedDshBinding {
@@ -31,7 +40,7 @@ func placementOf(b *nodev1.SharedDshSessionBinding) *nodev1.SharedDshBinding {
 // The bool says this call may own a reservation and must compensate on failure.
 // Pre-existing slots, including the same UUID after Node restart, are never adopted.
 func (a *PoolTaskAdmission) Admit(ctx context.Context, b *nodev1.SharedDshSessionBinding, task string) (bool, error) {
-	if a.Pools == nil || a.Driver == nil || b == nil || a.TenantID == "" || b.TenantId != a.TenantID {
+	if a.Pools == nil || a.Driver == nil || a.Control == nil || b == nil || a.TenantID == "" || b.TenantId != a.TenantID {
 		return false, fmt.Errorf("pool admission unavailable")
 	}
 	sample, err := a.Driver.PoolMemory(ctx, b.PhysicalInstanceId)
@@ -58,12 +67,17 @@ func (a *PoolTaskAdmission) Admit(ctx context.Context, b *nodev1.SharedDshSessio
 		active, readErr := a.Pools.activeTask(placementOf(b), false)
 		return readErr != nil || active == task, err
 	}
-	return true, nil
+	// An unknown W Admit still owns the durable local slot. Exact Release must
+	// confirm its tombstone before compensation can clear that slot.
+	return true, a.Control.AdmitSharedTask(ctx, b, task, sample)
 }
 
 func (a *PoolTaskAdmission) Check(b *nodev1.SharedDshSessionBinding, task string) error {
-	if a.Pools == nil {
+	if a.Pools == nil || a.Control == nil {
 		return fmt.Errorf("pool admission unavailable")
+	}
+	if err := a.Control.CheckSharedTask(b, task); err != nil {
+		return err
 	}
 	active, err := a.Pools.activeTask(placementOf(b), true)
 	if err != nil || active != task {
@@ -75,6 +89,14 @@ func (a *PoolTaskAdmission) Check(b *nodev1.SharedDshSessionBinding, task string
 func (a *PoolTaskAdmission) Complete(b *nodev1.SharedDshSessionBinding, task string) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
+	if a.Pools == nil || a.Control == nil {
+		return fmt.Errorf("pool control unavailable")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := a.Control.ReleaseSharedTask(ctx, b, task); err != nil {
+		return err
+	}
 	active, err := a.Pools.activeTask(placementOf(b), false)
 	if err != nil {
 		return err

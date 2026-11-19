@@ -8,8 +8,10 @@ import (
 	nodev1 "github.com/hansjone/auriga/infra/gen/auriga/node/v1"
 	workspacev1 "github.com/hansjone/auriga/infra/gen/auriga/workspace/v1"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/status"
 	"google.golang.org/grpc/test/bufconn"
 	"google.golang.org/protobuf/proto"
 	"io"
@@ -54,8 +56,10 @@ type testAuthority struct {
 	lookupFailures  sync.Map
 	beginStarted    chan struct{}
 	beginResume     chan struct{}
+	beginEnded      chan struct{}
 	issueStarted    chan struct{}
 	issueResume     chan struct{}
+	finishMode      atomic.Int32
 	outbound        chan *iamv1.ExecuteSharedOutboundRequest
 }
 
@@ -146,6 +150,12 @@ func (a *testAuthority) BeginSharedTask(ctx context.Context, in *iamv1.BeginShar
 		a.beginStarted <- struct{}{}
 		<-a.beginResume
 	}
+	if _, ended := a.stopped.Load(in.TaskId); ended {
+		if a.beginEnded != nil {
+			close(a.beginEnded)
+		}
+		return nil, status.Error(codes.AlreadyExists, "synthetic-ended-task")
+	}
 	token := "synthetic-capability-1"
 	if in.TaskId != testTask {
 		token = "synthetic-capability-" + in.TaskId
@@ -186,8 +196,21 @@ func (a *testAuthority) AuthorizeSharedCapability(ctx context.Context, in *iamv1
 }
 func (a *testAuthority) FinishSharedTask(ctx context.Context, in *iamv1.FinishSharedTaskRequest) (*iamv1.FinishSharedTaskResponse, error) {
 	a.check(ctx)
+	out := &iamv1.FinishSharedTaskResponse{Fenced: true, Binding: proto.Clone(in.Binding).(*nodev1.SharedDshSessionBinding), TaskId: in.TaskId}
+	switch a.finishMode.Load() {
+	case 1:
+		return &iamv1.FinishSharedTaskResponse{}, nil
+	case 2:
+		out.Fenced = false
+	case 3:
+		out.TaskId = testSession
+	case 4:
+		out.Binding.AuthGeneration++
+	case 5:
+		return nil, status.Error(codes.Unavailable, "synthetic-finish-unknown")
+	}
 	a.stopped.Store(in.TaskId, true)
-	return &iamv1.FinishSharedTaskResponse{}, nil
+	return out, nil
 }
 func fixture(t *testing.T) (*Relay, *testAuthority) {
 	t.Helper()

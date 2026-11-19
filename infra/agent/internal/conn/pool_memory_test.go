@@ -53,7 +53,7 @@ func TestPoolMemoryProductionSendLoopCarriesFieldTwelve(t *testing.T) {
 }
 
 func TestPoolMemoryConnectionGenerationAndFreshnessFences(t *testing.T) {
-	for _, scenario := range []string{"disconnected", "reconnect", "stale-queue", "stale-source", "old-generation", "foreign-tenant", "foreign-pool", "time-reversed", "source-failure", "source-absent", "canceled", "backward-highwater"} {
+	for _, scenario := range []string{"disconnected", "reconnect", "stale-queue", "stale-source", "old-generation", "foreign-tenant", "foreign-pool", "time-reversed", "source-failure", "source-absent", "canceled", "backward-highwater", "unknown-source-fields"} {
 		t.Run(scenario, func(t *testing.T) {
 			initial := poolSample()
 			fresh := proto.Clone(initial).(*nodev1.SharedDshPoolMemorySample)
@@ -95,6 +95,8 @@ func TestPoolMemoryConnectionGenerationAndFreshnessFences(t *testing.T) {
 				fresh.ObservedAt--
 			case "source-absent":
 				s.cfg.SharedRuntime.Memory = nil
+			case "unknown-source-fields":
+				fresh.ProtoReflect().SetUnknown([]byte{0xa0, 0x06, 0x01})
 			case "canceled":
 				cancel()
 			case "backward-highwater":

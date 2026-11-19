@@ -58,6 +58,7 @@ type PersistentPools struct {
 	Unpublish      func(string)
 	Report         func(*nodev1.SessionRequest)
 	Memory         func(context.Context, string) (*nodev1.SharedDshPoolMemorySample, error)
+	TaskAdmission  *PoolTaskAdmission
 	ConfigureHost  func(context.Context, *nodev1.SharedDshBinding, int) (string, error)
 	// Ownership boundary, like storage.Layout.Chown. Production defaults to
 	// strict Lchown; synthetic non-root Engine fixtures record this operation.

@@ -103,6 +103,9 @@ func TestBeginFinishAndCancellationCannotPublishLateHandle(t *testing.T) {
 			r, a := fixture(t)
 			gate := &lifecycleAdmission{}
 			r.Admission = gate
+			if scenario == "cancel" {
+				a.finishMode.Store(1)
+			}
 			a.beginStarted, a.beginResume = make(chan struct{}, 1), make(chan struct{})
 			t.Cleanup(func() {
 				select {
@@ -190,7 +193,7 @@ func TestBeginFinishAndCancellationCannotPublishLateHandle(t *testing.T) {
 	}
 }
 
-func TestNotDispatchedBeginReleasesWithoutRemoteFinish(t *testing.T) {
+func TestNotDispatchedBeginKeepsReservationUntilAbsentTaskFence(t *testing.T) {
 	r, a := fixture(t)
 	gate := &lifecycleAdmission{onAdmit: func() {
 		if err := os.WriteFile(r.Client.Settings.ServiceTokenFile, nil, 0600); err != nil {
@@ -203,11 +206,21 @@ func TestNotDispatchedBeginReleasesWithoutRemoteFinish(t *testing.T) {
 	if _, err := r.invoke(t.Context(), "beginTask", raw); err == nil {
 		t.Fatal("missing service identity dispatched a task")
 	}
-	if len(r.tasks) != 0 || len(gate.active) != 0 || gate.completed != 1 {
-		t.Fatal("local pre-dispatch failure leaked a slot")
+	if len(r.tasks) != 1 || len(gate.active) != 1 || gate.completed != 0 {
+		t.Fatal("reserved root released without authenticated absent-task fence")
 	}
 	if _, stopped := a.stopped.Load(testTask); stopped {
-		t.Fatal("undispatched task unnecessarily called Finish")
+		t.Fatal("missing service identity produced an IAM confirmation")
+	}
+	if err := os.WriteFile(r.Client.Settings.ServiceTokenFile, []byte("synthetic-service-token"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	r.RetryFinishes()
+	if len(r.tasks) != 0 || len(gate.active) != 0 || gate.completed != 1 {
+		t.Fatal("confirmed absent-task fence did not drain reservation")
+	}
+	if _, stopped := a.stopped.Load(testTask); !stopped {
+		t.Fatal("reserved root lacks IAM tombstone")
 	}
 }
 

@@ -50,13 +50,19 @@ Host 固定 `host/.host/message-preferences`、`host/.host/message-inboxes/<cont
 
 ## Ordinary 任务准入候选及联合安装门槛
 
-Node 的受信 UDS `beginTask` 在 IAM Begin 前，从当前签名执行记录、Engine 实际 `memory_stats.usage/limit/read` 与只读回验的容器硬限额采样，核持久进程 PID/启动时间及运行代次。缺计数、无硬限额、旧/未来样本、进程变化或达到整数 80% 边界均拒绝，不用 MB、节点总内存或模型提交值估计。普通任务消费既有持久 20/4/1 门禁，失败补偿、结束和取消走精确 Finish；未知 Finish 留 closing/阻塞槽，由 Node 每5秒重试结束补偿，不重放业务。已派发 Begin 的超时/取消/未知结果也保持阻塞，直到有可信结束围栏或按原维护协议清理，不能凭当前 IAM 的空 Finish 响应认定未存在任务已有 tombstone。
+Node 的受信 UDS `beginTask` 在 IAM Begin 前，从当前签名执行记录、Engine 实际 `memory_stats.usage/limit/read` 与只读回验的容器硬限额采样，核持久进程 PID/启动时间及运行代次。缺计数、无硬限额、旧/未来样本、进程变化或达到整数 80% 边界均拒绝，不用 MB、节点总内存或模型提交值估计。普通任务先保留既有持久 20/4/1 槽，再沿当前 NodeControl 流实际发送 field12，发送前重新采样；发送完成仅证明流已发送，仍须 W `AdmitSharedDshTask` 的 `admitted:true` 和完整 binding/task echo 才能派发 IAM Begin。
 
-企业、model、message 子 handle 的 `beginTask` 必须携 `parentCapability`：当前真实 native 私有执行持有的 Node ordinary `task.execute` opaque token。Node 核活父、同 socket peer、当前完整绑定及 IAM 授权；父与子保持独立 audience/scope，子不另占普通槽，父 Finish 先封闭全部子。不能拿浏览器 body 的 member/taskId 或同会话现有任务猜测父。Node 重启不认领持久在途槽；按原合作取消/必要停树和维护恢复协议处理。
+W 准入与释放使用收到 Welcome 的 NodeControl **同一实际 mTLS ClientConn**，不走带服务 JWT 的 Workspace 连接，也不另建同证书连接。缺当前会话或流代次变化即拒；W 仍实际核其 holder/lease、当前归属、20/4/1 与新鲜可信内存。准入未知或回包不完整保持本地 closing/阻塞，由 Node 每5秒仅重试精确结束补偿，不重放 Begin 或业务。
+
+企业、model、message 子 handle 的 `beginTask` 必须携 `parentCapability`：当前真实 native 私有执行持有的 Node ordinary `task.execute` opaque token。Node 核活父、同 socket peer、当前完整绑定及 IAM 授权；父与子保持独立 audience/scope，子不另占普通槽，父 Finish 先封闭全部子。父授权发出前记录本地 execution serial，授权晚回再次核当前性，子登记与父 closing 共用锁内边界，不能在已结束/替换父上登记未知子。不能拿浏览器 body 的 member/taskId 或同会话现有任务猜测父。Node 重启不认领持久在途槽；按原合作取消/必要停树和维护恢复协议处理。
+
+结束先同步失权并清 token，等待在途 Begin 收束。子 Finish 只确认本子 IAM 墓碑并保留 ordinary 槽；根 Finish 必须确认所有 IAM 子/根 `FinishSharedTask` 的 `fenced:true`、完整 binding/task echo。已保留槽但尚未派发 IAM Begin 的根也须取得 absent-task 墓碑。之后确认 W `ReleaseSharedDshTask` 的同样完整 fenced echo，最后才清本地精确 UUID 槽；空成功、false、错绑定/任务、迟到或未知均不算确认。取消与平台会话失效不妨碍受认证的精确清理；连接丢失立即使旧任务失权，重连只可补偿结束，不认领旧 holder 权限。
+
+UDS `finishTask` 只在上述确认后返回精确 `{fenced:true,binding,taskId}`。当前 Node 进程保留最多16384条同完整绑定/原 socket peer 的已确认回执缓存，用于丢失 UDS 响应后的幂等重取；它不提供权限或预算，持久结束权威仍是 IAM/W。重启或缓存淘汰后的未知回执不伪造成功，按原维护流程处理。
 
 内存采样同时经原 NodeControl 字段12上报；15秒 Watch 周期与新准入均采样，发送前重采样，跨重连、过期、旧代次或倒退数据丢弃。W 仍须按节点 mTLS/当前代次与新鲜样本处理容量、准入和释放；此候选不会把本地门禁当作 W 权威。
 
-**联合安装仍待闭**：现有 W `SharedDshService` 尚无 Admit/Release RPC，Host 的 tools/execute 以及 model/message 当前私有 row 尚须提供上述可信父关联；IAM 还须补不存在任务的持久 Finish tombstone 和受认证确认，当前缺此证据的未知 Begin 不自动解锁。Node 缺父就拒绝；未整合对应 W/Host/IAM 合同前不能把此候选安装为完整可用服务，也不能把合成 HTTP/gRPC 测试报作真实 native 生命周期或最终 READY。本批已消费冻结完整 rc.3 配方和 normalizer，接入下节的只读 launcher；F3 权威闭环仍按后续冻结合同独立接回。
+本候选已消费冻结 W/IAM typed 权威实现、Host 整 turn ordinary 父接口和完整 rc.3 loader。普通 turn 的模型/工具/消息共父、后台有限 retain 与真实终点由 Host 私有原生生命周期提供；Node 不按 session 猜根。仍须合入原 Host 作者独立收口的生命周期修复，再由主控串行做完整组合与正常页面验收；不能把本工位合成 HTTP/gRPC/真实 loopback TLS 测试报作真实 DSH、数据库或最终 READY。
 
 ## 完整 shared 只读 loader
 

@@ -105,6 +105,10 @@ func (r *Relay) beginTask(ctx context.Context, raw []byte) (any, error) {
 		parentID = parent.TaskId
 	}
 	r.mu.Lock()
+	if _, ended := r.ended[in.TaskId]; ended {
+		r.mu.Unlock()
+		return nil, errors.New("common.conflict")
+	}
 	// Child registration and parent Finish's closing transition share this
 	// boundary. A delayed authorization is not evidence the parent is live.
 	if !ordinary {
@@ -261,20 +265,21 @@ func (r *Relay) finishExecution(id string, serial uint64) error {
 			err = childErr
 		}
 	}
-	if err == nil && t.begun {
-		err = r.Client.call(ctx, true, "FinishSharedTask", &iamv1.FinishSharedTaskRequest{Binding: t.binding, TaskId: id}, new(iamv1.FinishSharedTaskResponse))
-	}
-	if err == nil && t.uncertainBegin {
-		// The current IAM Finish returns an empty success for an absent task,
-		// rather than persisting an absent-task tombstone. An unknown Begin may
-		// still commit there later. A child also keeps its parent's slot blocked.
-		err = errors.New("common.unavailable")
+	if err == nil && (t.begun || t.reserved) {
+		out := new(iamv1.FinishSharedTaskResponse)
+		err = r.Client.call(ctx, true, "FinishSharedTask", &iamv1.FinishSharedTaskRequest{Binding: t.binding, TaskId: id}, out)
+		if err == nil && (!out.Fenced || out.TaskId != id || !proto.Equal(out.Binding, t.binding) || ctx.Err() != nil) {
+			err = errors.New("common.unavailable")
+		}
 	}
 	if err == nil && t.reserved {
 		err = r.Admission.Complete(t.binding, id)
 	}
 	r.mu.Lock()
 	if err == nil {
+		if t.begun || t.reserved {
+			r.rememberFinished(id, t)
+		}
 		delete(r.tasks, id)
 	} else {
 		t.finishErr = err

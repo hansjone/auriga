@@ -148,7 +148,8 @@ func sharedRuntime(ctx context.Context, cfg config.Config, pools *runtime.Shared
 	}
 	pools.Supervisor = docker
 	manager = &runtime.PersistentPools{Pools: pools, Driver: docker,
-		UIDs: storage.NewUIDTable(cfg.AgentDir()), Template: template, Profile: profile, Ports: ports,
+		TaskAdmission: admission,
+		UIDs:          storage.NewUIDTable(cfg.AgentDir()), Template: template, Profile: profile, Ports: ports,
 		Resources:     &runtime.PoolMaterializer{Layout: pools.Layout, Source: client, Unified: runtime.NewUnifiedManager(&storage.Layout{InstancesDir: cfg.InstancesDir()}, docker, nil, cfg.AgentDir())},
 		ConfigureHost: configure,
 		Publish: func(pool string, endpoint runtime.Endpoint) {
