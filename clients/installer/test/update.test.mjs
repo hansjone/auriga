@@ -13,6 +13,7 @@ import {
 } from 'node:fs';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
+import { clearTimeout } from 'node:timers';
 import { rmSync } from 'node:fs';
 import {
   changeUpdateState,
@@ -1164,6 +1165,15 @@ for (const lockTarget of ['scratch', 'launcher']) {
           { windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] },
         );
         const exited = once(child, 'exit');
+        let releaseTimer;
+        let releaseRequested = false;
+        const releaseLock = () => {
+          clearTimeout(releaseTimer);
+          releaseTimer = undefined;
+          if (releaseRequested || child.exitCode !== null) return;
+          releaseRequested = true;
+          child.stdin.end('\n');
+        };
         try {
           await once(child.stdout, 'data');
           assert.throws(
@@ -1188,13 +1198,13 @@ for (const lockTarget of ['scratch', 'launcher']) {
             );
             assert.ok(existsSync(join(f.root, 'desktop-pending/desktop.exe')));
             assert.equal(readState(f.root).current, f.old.id);
-          } else setTimeout(() => child.stdin.end('\n'), 400);
-          if (persistent) child.stdin.end('\n');
+          } else releaseTimer = setTimeout(releaseLock, 400);
+          if (persistent) releaseLock();
           if (persistent) await exited;
           await applyPending(f.root, options);
           assert.equal(readState(f.root).current, f.next.id);
         } finally {
-          if (child.exitCode === null) child.stdin.end('\n');
+          releaseLock();
           await exited;
           rmSync(script, { force: true });
         }
