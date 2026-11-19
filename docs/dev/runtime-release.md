@@ -1,8 +1,8 @@
 # Docker 正式发行材料签发与严格导入
 
-`infra/agent/cmd/runtime-release` 为发布者签发 Docker-only 的正式发行材料，并为装配者严格导入公开材料。
+`infra/agent/cmd/runtime-release` 为发布者准备公开根元数据、签发 Docker-only 的正式发行材料，并为装配者严格导入公开材料。
 它直接调用生产 `releasetrust.Merge`、`releaseverify.Verify` 和 `VerifyOCI`，签名正文仅调用生产
-`CanonicalReleaseBody`。本工具没有另一套签名格式、JCS 或 OCI 解析器，不生成任何身份、根或部署配置。
+`CanonicalReleaseBody`。本工具没有另一套签名格式、JCS 或 OCI 解析器。`publisher-root` 只编码已存在的公钥与明确批准的元数据，不生成密钥、身份或部署配置。
 规范见 [RT0](../../contracts/runtime/README.md)，生产启用流程见 [agent](agent.md)。
 
 `sign` 交付声明、公开根及单平台原始 manifest/config；`stage-layout` 可另行验证并复制完整离线 OCI 载体，**仍不是完整可部署发行包**。Linux 上的 `import-layout` 从同一输入新建严格快照，随后复制到批准的本地 registry 并逐对象读回。
@@ -49,6 +49,38 @@ node deploy/compose/scripts/collect-runtime-proofs.mjs `
 离线层载体可使用下文 `stage-layout`；Linux 本地 registry 的受限运输可使用 `import-layout`。
 
 ## 发布者输入
+
+### 从既有发行公钥准备外部根
+
+使用已从独立渠道核准的现有 Ed25519 SPKI `PUBLIC KEY` PEM，例如正式发行流程导出的
+`release-public.pem`。发布者明确批准 kid 和原始 `not_after`；不采用 fixture 的 key、kid 或期限。
+在已有的受保护父目录下选择一个不存在的新文件：
+
+```powershell
+./runtime-release.exe publisher-root `
+  --public-key ./issuer/release-public.pem `
+  --kid '<发布者明确批准的kid>' `
+  --not-after '<明确批准的UTC时间，例如2030-11-20T00:00:00Z>' `
+  --out ./operator-approved/root.pb
+```
+
+四个参数均须显式提供，不接受重复、位置参数或其他动词的参数；`--private-key`、`--root`、
+`--sequence`、OS/arch 均不适用。时间须为当前仍有效的 UTC `Z` RFC3339 唯一表示，
+非零小数保留最短必要的1..9位；kid 和有效性沿生产 Trust 检查，没有自动值。
+仅接受一个无 PEM headers 的 Ed25519 `PUBLIC KEY` SPKI 对象，拒绝私钥标记、其他算法、
+前导文字、额外对象、尾随非空白内容、链接和非普通文件。
+
+输出是原 `nodev1.ArtifactSigningKey` 的确定性 protobuf：相同 issuer 的32字节公钥、明确的 kid
+和期限，无 parent/endorsement。命令只输出准备完成的公开元数据及文件 SHA-256；不签名，
+不读取私钥，不分配发行序号，不登记或激活信任。输出须是全新文件，父目录必须存在；
+已有文件、目录或链接均拒绝覆盖。后续 I/O 失败保留新 partial 供诊断，不能当作成功重用。
+
+operator 仍须经独立可信渠道核对 issuer 身份、公钥与这份元数据，将批准根固定在候选包外，
+再交原 `sign/verify/stage-layout/import-layout`。空白独立现场可以按批准的现有 issuer 首装；
+本命令不能为既有安装替根、延长期限、清高水位或重新 Join。同 kid 的原始期限和公钥
+仍受原信任历史约束。它不是根轮换、安装或授权入口。
+
+### 签发所需材料
 
 由发布者在受保护的发布环境准备：
 
