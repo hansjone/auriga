@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -12,6 +13,10 @@ import (
 // protected metadata. Explicit no-adapter first installation cannot shadow UAC
 // properties/members either; the operator must approve the real source instead.
 func sharedPreserveUACSource(base string, approved []byte, teamOnly bool) error {
+	var adapter map[string]json.RawMessage
+	if sharedUniqueJSON(approved) != nil || json.Unmarshal(approved, &adapter) != nil || adapter == nil {
+		return fmt.Errorf("approved company adapter must be a strict JSON object")
+	}
 	if _, err := os.Lstat(filepath.Join(base, "uac/adapter.json")); err == nil {
 		current, err := sharedBaseLeaf(base, "uac/adapter.json")
 		if err != nil {
@@ -24,7 +29,7 @@ func sharedPreserveUACSource(base string, approved []byte, teamOnly bool) error 
 	} else if !os.IsNotExist(err) {
 		return err
 	}
-	if teamOnly || bytes.Equal(approved, []byte(sharedTeamOnlyAdapter)) {
+	if teamOnly || len(adapter) == 0 {
 		for _, leaf := range []string{"uac/uac.properties", "uac/members.json"} {
 			if _, err := os.Lstat(filepath.Join(base, leaf)); err == nil {
 				return fmt.Errorf("no-adapter first installation cannot override an existing UAC identity source")
