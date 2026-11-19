@@ -195,6 +195,9 @@ func TestInstallRuntimeLegacyStateCannotAcquireRootProtocolFixture(t *testing.T)
 	if _, err := prepareInstallRuntime(pkg, o, false); err == nil {
 		t.Fatal("legacy installation gained a new root through install")
 	}
+	if err := resumeInstallRuntime(s, o.Runtime, &preparedInstallRuntime{identity: installRuntime{Source: o.Runtime}}); err == nil {
+		t.Fatal("state created by another installer before the lock silently ignored the new runtime request")
+	}
 	o.Runtime = installRuntimeOptions{}
 	if p, err := prepareInstallRuntime(pkg, o, false); err != nil || p != nil {
 		t.Fatal("legacy no-runtime reinstall compatibility lost", err)
