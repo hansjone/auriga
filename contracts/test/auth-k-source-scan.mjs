@@ -2,6 +2,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { createHash } from 'node:crypto';
 const base = fileURLToPath(
   new URL('../../clients/dsh-plugin/src/', import.meta.url),
 );
@@ -147,6 +148,109 @@ function checkSharedNodeRelay(files) {
       );
 }
 
+// This is a native browser carrier, not another platform credential client.
+// Permit one exact same-origin POST call only when its two callers and the
+// actual finite, signed-member server composition are present together.
+function checkSharedBrowserCarrier(files) {
+  const file = 'shared-browser/bootstrap.js';
+  if (!Object.hasOwn(files, file)) return false;
+  const compact = (source) =>
+    withoutComments(source ?? '')
+      .replace(/\s+/g, '')
+      .replaceAll('"', "'");
+  const visible = withoutComments(files[file]);
+  const code = compact(files[file]);
+  const native = compact(files['shared-browser/native.js']);
+  const handler = compact(files['shared-browser/plugin.js']);
+  const reject = () => {
+    throw new Error(
+      'shared browser must remain a finite same-origin signed-member carrier',
+    );
+  };
+  const count = (source, pattern) => [...source.matchAll(pattern)].length;
+  const request =
+    "constresponse=awaitfetcher(newURL(`auriga/shared/browser/${kind}`,base),{method:'POST',credentials:'same-origin',cache:'no-store',headers:{'content-type':'application/json'},body:JSON.stringify({channel,endpoint,payload}),signal,},);";
+  if (
+    !code.includes("constbase=newURL('./',document.baseURI);") ||
+    !code.includes('constfetcher=globalThis.fetch.bind(globalThis);') ||
+    !code.includes(
+      'asyncfunctionsend(kind,channel,endpoint,payload,signal){',
+    ) ||
+    !/if\(channel!=='\/api'\)thrownewError\('[^']*'\);/.test(code) ||
+    !code.includes(request) ||
+    !code.includes(
+      "constresponse=awaitsend('rpc',channel,endpoint,payload,signal);",
+    ) ||
+    !code.includes(
+      "constresponse=awaitsend('stream',channel,endpoint,payload,signal);",
+    ) ||
+    !code.includes(
+      "constresult=awaitrpc.call('/api',`aurigaShared/${endpoint}`,{args:request===undefined?{}:{request}},signal,);",
+    ) ||
+    !code.includes('globalThis.__DSH_TRANSPORT__={rpc,ownsHost:false};') ||
+    count(visible, /\bfetcher\b/g) !== 2 ||
+    count(visible, /\bfetch\b/g) !== 1 ||
+    count(visible, /\bbase\b/g) !== 2 ||
+    count(visible, /\bkind\b/g) !== 3 ||
+    count(visible, /\bsend\b/g) !== 3 ||
+    count(code, /rpc\.call\(/g) !== 1 ||
+    count(visible, /\bread\s*\(/g) !== 4 ||
+    [...visible.matchAll(/\bread\s*\(\s*(['"])([^'"]+)\1/g)]
+      .map((match) => match[2])
+      .join(',') !== 'messagingSessions,messagingSettings,messagingSettings' ||
+    count(code, /\bnewURL\(/g) !== 2 ||
+    transportFeatures(files[file]).join(',') !== 'call:fetcher' ||
+    /\b(?:token|identity|bearer|authorization|cookie|access_token|refresh_token|serviceJwt)\b|\b(?:import|require)\b/i.test(
+      visible,
+    )
+  )
+    reject();
+
+  // The endpoint is wire data for the original DSH client. It is NOT a URL
+  // or a member selector. Keep the actual server dispatch table finite, and
+  // keep each call bound to the Peer admitted by the Host's signed identity.
+  for (const shape of [
+    "constunary=newMap([['session/page','session/page'],['session/prompt','session/prompt'],['session/cancel','session/cancel'],['session/projections','session/projections'],]);",
+    "conststreams=newMap([['session/follow','session/follow']]);",
+    "constglobal=stream?['$events','remoteAccess/follow','session/control']:['session/list','session/modelCatalog','session/canOpenWorkspacePath',];",
+    "exact(envelope,['channel','endpoint','payload']);",
+    "if(endpoint==='$events/result')fail('shared.revoked');",
+    'constselected=awaitprepare(peer,envelope,false);',
+    'constselected=awaitprepare(peer,envelope,true);',
+    'constbinding=awaithost.create(peer,{});',
+  ])
+    if (!native.includes(shape)) reject();
+  for (const shape of [
+    "constprefix='/auriga/shared/browser';",
+    "[prefix+'/rpc',prefix+'/stream'].includes(path)",
+    "consttoken=req.headers['auriga-identity'];",
+    'peer=awaithost.admitBrowser(token,{method:req.method,canonicalPath:path,});',
+    "if(peer.principal.kind==='owner')fail('shared.revoked');",
+    'constenvelope=awaitjsonBody(req);',
+    'native.call(peer,envelope,signal)',
+    'native.open(peer,envelope,signal)',
+  ])
+    if (!handler.includes(shape)) reject();
+  if (
+    count(handler, /host\.admitBrowser\(/g) !== 1 ||
+    count(handler, /native\.call\(/g) !== 1 ||
+    count(handler, /native\.open\(/g) !== 1 ||
+    /\b(?:authorizeIndex|authenticatedUrl|admitConnection|cookie|authorization|bearer)\b/i.test(
+      handler,
+    )
+  )
+    reject();
+  // Supplement the semantic checks with the reviewed c498b824 dispatcher
+  // shape. Adding a new branch requires an explicit guard review; changing
+  // this fingerprint alone never permits a different URL/header/transport.
+  if (
+    createHash('sha256').update(native).digest('hex') !==
+    '1ac896aa6a781fb0d9e0ebacd9604ec65d7c7a70f9389d239d2c85f0adcc64fd'
+  )
+    reject();
+  return true;
+}
+
 export function checkPlatformMigration(inventory, operations, sources) {
   if (!['legacy', 'broker'].includes(inventory.migrationState))
     throw new Error('invalid migrationState');
@@ -166,6 +270,7 @@ export function checkPlatformMigration(inventory, operations, sources) {
   }
   if (inventory.calls.length)
     throw new Error('broker migration retains legacy inventory');
+  const sharedBrowser = checkSharedBrowserCarrier(files);
   const channels = new Map();
   for (const channel of inventory.retainedChannels ?? []) {
     if (
@@ -197,7 +302,14 @@ export function checkPlatformMigration(inventory, operations, sources) {
         throw new Error('direct platform route: ' + file + ':' + route);
     }
     for (const transport of transportFeatures(source)) {
-      if (!channel?.transports.includes(transport))
+      if (
+        !channel?.transports.includes(transport) &&
+        !(
+          sharedBrowser &&
+          file === 'shared-browser/bootstrap.js' &&
+          transport === 'call:fetcher'
+        )
+      )
         throw new Error('direct transport: ' + file + ':' + transport);
     }
     checkBrokerCalls(source, operations, file);
