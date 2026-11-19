@@ -1,6 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { setImmediate } from 'node:timers';
+import { syncBuiltinESMExports } from 'node:module';
+import { performance } from 'node:perf_hooks';
 import {
   openNetworkRuntime,
   ticketCredentials,
@@ -20,6 +22,36 @@ import {
 } from './trust/keyset-fixtures.js';
 import { encodeJson, decodeJson } from '../../src/network/session/frames.js';
 import { digest } from '../../src/network/trust/verifier.js';
+
+function deferred() {
+  let resolve;
+  const promise = new Promise((done) => {
+    resolve = done;
+  });
+  return { promise, resolve };
+}
+
+function controlledConsentClock(t) {
+  let monotonic = 0;
+  t.mock.method(performance, 'now', () => monotonic);
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  syncBuiltinESMExports();
+  t.after(() => {
+    t.mock.timers.reset();
+    syncBuiltinESMExports();
+  });
+  return {
+    elapse(ms) {
+      monotonic += ms;
+    },
+    respond() {
+      // Keep the fixture's original 20ms response window, 10ms action and 5ms
+      // callback limits. Advance only after the real consent work has settled.
+      monotonic += 20;
+      t.mock.timers.tick(20);
+    },
+  };
+}
 
 async function fixture(t, overrides = {}, runtimeOptions = {}) {
   const signer = runtimeOptions.signer ?? (await signingFixture());
@@ -373,20 +405,70 @@ test('invalid signatures never reach consent or host', async (t) => {
 });
 
 test('signed delivery runs ATTEMPT then consent then host inbox then RECEIPT_COMMITTED', async (t) => {
-  const { runtime, frames } = await fixture(t, {
-    deliveries: (signer) => [signer.delivery('assembled')],
-    organization: async () => ({
-      available: true,
-      revision: '1',
-      sameOrganization: true,
-      conversation: 'allow',
-      execution: 'allow',
-    }),
-  });
+  const clock = controlledConsentClock(t);
+  const entered = deferred();
+  const release = deferred();
+  const storage = Object.fromEntries(
+    ['ledger', 'consent', 'trust', 'outbound', 'intake'].map((name) => [
+      name,
+      createMemoryLedgerStore({
+        async beforeCommit(state) {
+          if (
+            name === 'ledger' &&
+            Object.values(state.recipients).some(
+              (recipient) => recipient.state === 'INBOX_ACCEPTED',
+            )
+          ) {
+            entered.resolve();
+            await release.promise;
+          }
+        },
+      }),
+    ]),
+  );
+  const { runtime, frames } = await fixture(
+    t,
+    {
+      deliveries: (signer) => [signer.delivery('assembled')],
+      organization: async () => ({
+        available: true,
+        revision: '1',
+        sameOrganization: true,
+        conversation: 'allow',
+        execution: 'allow',
+      }),
+    },
+    { storage },
+  );
   await runtime
     .consentUI('authenticated')
     .setDefault('conversation', 'same_org');
-  await runtime.start();
+  let started = false;
+  const starting = runtime.start().then(() => {
+    started = true;
+  });
+  try {
+    await entered.promise;
+    assert.equal(started, false);
+    assert.deepEqual(
+      frames.map((f) => f.type),
+      ['ready', 'fetch', 'attempt_begin'],
+    );
+    assert.equal(runtime.session.resumeCursor, '0');
+  } finally {
+    release.resolve();
+    try {
+      // This real query queues behind authorization, including its awaited
+      // host inbox commit. No guessed event-loop turns or fabricated receipt.
+      await runtime.consent.getRequest('authenticated', {
+        layer: 'conversation',
+        requestId: 'msg-assembled',
+      });
+    } finally {
+      clock.respond();
+      await starting;
+    }
+  }
   assert.deepEqual(
     frames.map((f) => f.type),
     ['ready', 'fetch', 'attempt_begin', 'receipt'],
@@ -395,6 +477,54 @@ test('signed delivery runs ATTEMPT then consent then host inbox then RECEIPT_COM
   assert.equal(frames.at(-1).results[0].execution_status, 'not_applicable');
   assert.equal(runtime.session.resumeCursor, '10');
   assert.equal(runtime.diagnostics.pending.intake, 0);
+  const recipients = Object.values(storage.ledger.snapshot().recipients);
+  assert.equal(recipients.length, 1);
+  assert.equal(recipients[0].platformCommitted, true);
+});
+
+test('signed delivery beyond its consent response window stays pending without a receipt or host commit', async (t) => {
+  const clock = controlledConsentClock(t);
+  const entered = deferred();
+  const { runtime, frames, storage, ports } = await fixture(t, {
+    deliveries: (signer) => [signer.delivery('expired-window')],
+    organization: async () => {
+      // Synchronous work may consume monotonic time before timer callbacks run.
+      clock.elapse(21);
+      entered.resolve();
+      return {
+        available: true,
+        revision: '1',
+        sameOrganization: true,
+        conversation: 'allow',
+        execution: 'allow',
+      };
+    },
+  });
+  await runtime
+    .consentUI('authenticated')
+    .setDefault('conversation', 'same_org');
+  const starting = runtime.start();
+  try {
+    await entered.promise;
+    const row = await runtime.consent.getRequest('authenticated', {
+      layer: 'conversation',
+      requestId: 'msg-expired-window',
+    });
+    assert.equal(row.status, 'allowed');
+    assert.equal(row.usedAt, undefined);
+  } finally {
+    clock.respond();
+    await starting;
+  }
+  assert.deepEqual(
+    frames.map((f) => f.type),
+    ['ready', 'fetch', 'attempt_begin'],
+  );
+  assert.equal(runtime.session.resumeCursor, '0');
+  assert.equal(runtime.diagnostics.pending.intake, 1);
+  assert.equal(runtime.diagnostics.runtime.contact_pending, 1);
+  assert.deepEqual(storage.ledger.snapshot().recipients, {});
+  assert.equal(ports.host.counts.prompt, 0);
 });
 
 test('ask-each first contact is retained for local consent and never becomes host acceptance', async (t) => {
