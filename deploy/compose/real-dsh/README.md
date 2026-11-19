@@ -4,6 +4,8 @@
 
 连接外网只发生在维护者准备固定输入时。现场缺缓存、签名、对应源码锁或实际镜像时明确失败，不回退到在线 npm/Corepack。运行镜像不带入 broker 构建目录、编译依赖或 npm/pnpm 内容缓存。Corepack 的 pnpm 11.28.6 保留既有 workspace 构建用途，不作为 dedicated 运行工具的路径或版本权威。
 
+固定 Node22.19.0 内的 Corepack0.34.0 使用 `install -g --cache-only` 时只导入缓存，不设置默认版本。toolchain 导入已验归档后，再用 `corepack install -g pnpm@11.28.6` 从该缓存激活精确构建版本，随后启用 shim 并核 `pnpm --version`。这一步保持 `COREPACK_ENABLE_NETWORK=0` 和 RUN 断网；缺缓存仍失败，不查询或采用 latest。仅导入缓存会让无项目目录下的裸 pnpm 命令尝试查询默认版本，不能据此判断归档未导入。
+
 ## 完整镜像的同锁开发输入
 
 现有 `deploy/offline/build.go` 负责 platform/edge/agent/bifrost/operator，DSH 上游源码附件供只读参考；它没有另一个 DSH 冷构建实现。DSH 的权威入口仍是本目录 Dockerfile 与公开 `build-real-dsh.mjs`（compose prepare 也调用它），本批不更改服务端发布、签发或版本选择。

@@ -21,10 +21,11 @@ const root = fs.realpathSync(resolve(rendered));
 const aurigaRoot = fs.realpathSync(resolve('clients/dsh-plugin'));
 const require = createRequire(join(sdkRoot, 'package.json'));
 assert.equal(require('yaml/package.json').version, '2.9.1');
+const yamlUrl = pathToFileURL(require.resolve('yaml')).href;
 registerHooks({
   resolve(specifier, context, next) {
     return specifier === 'yaml'
-      ? { url: pathToFileURL(require.resolve('yaml')).href, shortCircuit: true }
+      ? { url: yamlUrl, shortCircuit: true }
       : next(specifier, context);
   },
 });

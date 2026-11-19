@@ -619,6 +619,19 @@ test('full recipe and public caller have no network install fallback and always 
     assert.match(line, /^RUN --network=none /);
   assert.doesNotMatch(docker, /corepack prepare|--registry=https:/);
   assert.match(docker, /corepack install -g --cache-only/);
+  const imported = docker.indexOf(
+    'corepack install -g --cache-only /offline/corepack.tgz',
+  );
+  const activated = docker.indexOf('corepack install -g pnpm@11.28.6');
+  const enabled = docker.indexOf('corepack enable pnpm');
+  const checked = docker.indexOf('test "$(pnpm --version)" = 11.28.6');
+  assert.ok(imported >= 0 && imported < activated);
+  assert.ok(activated < enabled && enabled < checked);
+  assert.match(docker, /COREPACK_ENABLE_NETWORK=0/);
+  assert.equal(
+    JSON.parse(readFileSync(join(repository, 'package.json'))).packageManager,
+    'pnpm@11.28.6',
+  );
   assert.match(docker, /install --offline --frozen-lockfile --ignore-scripts/);
   assert.equal((docker.match(/npm ci --offline/g) ?? []).length, 3);
   assert.match(docker, /node clients\/shell-auth\/build.mjs/);

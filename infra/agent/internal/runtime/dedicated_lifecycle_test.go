@@ -68,6 +68,53 @@ func (a *dedicatedLifecycleAuthority) DedicatedIntent(_ string, v *nodev1.Shared
 	return a.cache, a.digest, nil
 }
 
+// The Chown stub keeps ownership with the non-root test user. Preserve the
+// production seal through every assertion, then make only this captured output
+// directory writable before testing.TempDir's earlier-registered cleanup runs.
+func cleanupDedicatedTestOutput(t *testing.T, tempRoot, preparations, output string) {
+	t.Helper()
+	relative, err := filepath.Rel(preparations, output)
+	parts := strings.Split(relative, string(filepath.Separator))
+	if err != nil || len(parts) != 2 || parts[0] == "." || parts[0] == ".." || parts[1] != "output" || filepath.Clean(output) != output {
+		t.Fatalf("unexpected dedicated fixture output %q", output)
+	}
+	if err := storage.CheckNoSymlink(tempRoot, output); err != nil {
+		t.Fatalf("unsafe dedicated fixture output: %v", err)
+	}
+	t.Cleanup(func() {
+		if root, err := os.Lstat(tempRoot); err != nil || !root.IsDir() || root.Mode()&os.ModeSymlink != 0 {
+			t.Errorf("unsafe dedicated fixture TempDir: %v", err)
+			return
+		}
+		if err := storage.CheckNoSymlink(tempRoot, output); err != nil {
+			t.Errorf("unsafe dedicated fixture cleanup: %v", err)
+			return
+		}
+		directory, err := os.Lstat(output)
+		if err != nil || !directory.IsDir() {
+			t.Errorf("dedicated fixture output unavailable: %v", err)
+			return
+		}
+		if directory.Mode().Perm() != 0555 {
+			t.Errorf("dedicated output seal changed before cleanup: %v", directory.Mode())
+		}
+		for _, name := range []string{"config.json", "manifest.json"} {
+			file := filepath.Join(output, name)
+			if err := storage.CheckNoSymlink(tempRoot, file); err != nil {
+				t.Errorf("unsafe dedicated fixture file: %v", err)
+				return
+			}
+			info, err := os.Lstat(file)
+			if err != nil || !info.Mode().IsRegular() || info.Mode().Perm() != 0444 {
+				t.Errorf("dedicated file seal changed before cleanup: %s (%v)", name, err)
+			}
+		}
+		if err := os.Chmod(output, 0700); err != nil {
+			t.Errorf("restore fixture output for TempDir cleanup: %v", err)
+		}
+	})
+}
+
 func dedicatedLifecycleFixture(t *testing.T) (*agentruntime.PersistentPools, *releaseEngine, *dedicatedLifecycleAuthority, *nodev1.SharedDshRuntimeIntent) {
 	t.Helper()
 	m, engine, _ := persistentFixture(t)
@@ -76,15 +123,19 @@ func dedicatedLifecycleFixture(t *testing.T) (*agentruntime.PersistentPools, *re
 		t.Fatal(err)
 	}
 	m.DedicatedProfile = profile
+	command := persistentIntent(1)
+	command.Binding.Mode = nodev1.DshInstanceMode_DSH_INSTANCE_MODE_DEDICATED
+	preparations := filepath.Join(m.Pools.Layout.Root, command.Binding.PhysicalInstanceId, "control", "dedicated-preparations")
 	m.Chown = func(path string, uid, gid int) error {
 		if uid != gid || (uid != 0 && uid != 200000) {
 			t.Fatal("unexpected uid", uid, gid)
 		}
-		_, err := os.Stat(path)
+		info, err := os.Stat(path)
+		if err == nil && uid == 0 && info.IsDir() {
+			cleanupDedicatedTestOutput(t, m.Driver.DataRoot, preparations, path)
+		}
 		return err
 	}
-	command := persistentIntent(1)
-	command.Binding.Mode = nodev1.DshInstanceMode_DSH_INSTANCE_MODE_DEDICATED
 	root := filepath.Join(m.Pools.Layout.Root, command.Binding.PhysicalInstanceId, "control")
 	a := &dedicatedLifecycleAuthority{view: persistentView(command), cache: filepath.Join(root, "dedicated-artifacts"), relay: filepath.Join(root, "host-relay")}
 	for _, dir := range []string{a.cache, a.relay} {

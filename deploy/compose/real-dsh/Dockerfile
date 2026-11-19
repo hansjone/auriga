@@ -6,6 +6,7 @@ FROM ${NODE_IMAGE} AS toolchain
 ENV COREPACK_HOME=/opt/corepack COREPACK_ENABLE_DOWNLOAD_PROMPT=0 COREPACK_ENABLE_NETWORK=0
 RUN --network=none --mount=type=bind,source=runtime-dependencies,target=/offline \
     corepack install -g --cache-only /offline/corepack.tgz \
+    && corepack install -g pnpm@11.28.6 \
     && corepack enable pnpm && test "$(pnpm --version)" = 11.28.6
 
 FROM ${NODE_IMAGE} AS runtime-tooling

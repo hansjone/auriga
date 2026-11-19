@@ -1,4 +1,5 @@
 import { test } from 'node:test';
+import { Buffer } from 'node:buffer';
 import assert from 'node:assert/strict';
 import childProcess from 'node:child_process';
 import fs, {
@@ -25,6 +26,12 @@ import {
   brokerSourceSha256,
 } from '../../deploy/compose/real-dsh/broker-inputs.mjs';
 import { normalizeSourceModes } from '../../deploy/compose/real-dsh/source-modes.mjs';
+import { commonInputs } from '../../deploy/compose/scripts/real-dsh-context.mjs';
+import {
+  hashDependencyFile,
+  verifyDependencies,
+} from '../../deploy/compose/real-dsh/dependencies.mjs';
+import { matchingOfflineRuntimeInputs } from './runtime-build-fixture.mjs';
 
 const repository = fileURLToPath(new URL('../../', import.meta.url));
 const dockerfile = readFileSync(
@@ -45,17 +52,59 @@ const imageTag = 'registry.example.com/auriga/real-dsh:plugin-update';
 async function inspectBuildContext(
   t,
   inspect,
-  { root = repository, incremental = false, error, base = baseImage } = {},
+  {
+    root = repository,
+    offline,
+    incremental = false,
+    error,
+    base = baseImage,
+  } = {},
 ) {
+  if (root === repository) {
+    const fixture = sourceFixture(t, { actualPlugin: true });
+    root = fixture.root;
+    offline = fixture.offline;
+  }
   const stop = new Error('Stop at the Docker build boundary');
   const spawn = t.mock.method(childProcess, 'spawnSync', (command, args) => {
     assert.equal(command, 'docker');
+    if (!incremental && args[0] === 'image') {
+      assert.deepEqual(args, ['image', 'inspect', nodeImage]);
+      return {
+        status: 0,
+        stdout: JSON.stringify([
+          { Id: offline.config, Os: 'linux', Architecture: 'amd64' },
+        ]),
+      };
+    }
     assert.equal(args[0], 'build');
+    if (!incremental) {
+      const context = args.at(-1);
+      const closure = join(context, 'runtime-dependencies');
+      assert.deepEqual(
+        verifyDependencies(context, closure, offline.sha256),
+        offline.metadata,
+      );
+      assert.equal(
+        hashDependencyFile(join(context, 'runtime-tooling/pnpm.tgz')),
+        hashDependencyFile(offline.tarball),
+      );
+    }
     inspect(args.at(-1), args);
     throw stop;
   });
   syncBuiltinESMExports();
-  const previousImage = process.env.NODE_IMAGE;
+  const environment = {
+    NODE_IMAGE: nodeImage,
+    AURIGA_REAL_DSH_TOOLING_TARBALL: offline.tarball,
+    AURIGA_REAL_DSH_DEPENDENCIES_DIR: offline.inputs,
+    AURIGA_REAL_DSH_DEPENDENCIES_SHA256: offline.sha256,
+    AURIGA_REAL_DSH_NODE_ARCHIVE: undefined,
+    AURIGA_REAL_DSH_NODE_ARCHIVE_SHA256: undefined,
+  };
+  const previous = new Map(
+    Object.keys(environment).map((key) => [key, process.env[key]]),
+  );
   const previousArgv = process.argv;
   const entry = join(
     root,
@@ -65,16 +114,21 @@ async function inspectBuildContext(
   process.argv = [process.execPath, entry];
   if (incremental)
     process.argv.push('--base-runtime-image', base, '--image-tag', imageTag);
-  process.env.NODE_IMAGE = nodeImage;
   try {
+    for (const [key, value] of Object.entries(environment)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
     const script = pathToFileURL(entry);
     script.searchParams.set('test', t.name);
     await assert.rejects(import(script), error ?? ((err) => err === stop));
-    assert.equal(spawn.mock.callCount(), error ? 0 : 1);
+    assert.equal(spawn.mock.callCount(), error ? 0 : incremental ? 1 : 2);
   } finally {
     process.argv = previousArgv;
-    if (previousImage === undefined) delete process.env.NODE_IMAGE;
-    else process.env.NODE_IMAGE = previousImage;
+    for (const [key, value] of previous) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
     spawn.mock.restore();
     syncBuiltinESMExports();
   }
@@ -216,7 +270,7 @@ test('incremental recipe normalizes newly copied plugin inputs before generating
   assert.ok(copy >= 0 && copy < normalize && normalize < manifest);
 });
 
-function sourceFixture(t) {
+function sourceFixture(t, { actualPlugin = false } = {}) {
   const directory = mkdtempSync(join(tmpdir(), 'auriga-checkout-fixture-'));
   t.after(() => rmSync(directory, { recursive: true, force: true }));
   const root = join(directory, 'checkout');
@@ -247,6 +301,10 @@ function sourceFixture(t) {
     put(join(root, relative), readFileSync(join(repository, relative)));
   }
   const plugin = join(root, 'clients/dsh-plugin');
+  for (const path of commonInputs) {
+    if (!path.startsWith('clients/dsh-plugin/'))
+      put(join(root, path), readFileSync(join(repository, path)));
+  }
   const marker = 'synthetic data outside the build allowlist';
   const pluginBytes = Buffer.from([0x00, 0xff, 0x0a]);
   for (const name of [
@@ -255,8 +313,17 @@ function sourceFixture(t) {
     'LICENSE',
     'cordis.patch.yml',
   ])
-    put(join(plugin, name), name);
-  put(join(plugin, 'src/network/entry.js'), pluginBytes);
+    put(
+      join(plugin, name),
+      actualPlugin
+        ? readFileSync(join(repository, 'clients/dsh-plugin', name))
+        : name,
+    );
+  if (actualPlugin)
+    cpSync(join(repository, 'clients/dsh-plugin/src'), join(plugin, 'src'), {
+      recursive: true,
+    });
+  else put(join(plugin, 'src/network/entry.js'), pluginBytes);
   for (const path of brokerInputs) {
     const destination = join(root, path);
     if (existsSync(destination)) continue;
@@ -265,6 +332,10 @@ function sourceFixture(t) {
       mkdirSync(destination, { recursive: true });
     else put(destination, readFileSync(original));
   }
+  const offline = matchingOfflineRuntimeInputs(
+    root,
+    join(directory, 'matching-offline-inputs'),
+  );
   for (const path of [
     '.git/config',
     'var/install-material.txt',
@@ -291,6 +362,7 @@ function sourceFixture(t) {
     outside,
     marker,
     pluginBytes,
+    offline,
     replaceWithLink,
   };
 }
@@ -364,11 +436,13 @@ for (const incremental of [false, true]) {
         ])
           assert.equal(existsSync(join(payload, path)), false, path);
         assert.deepEqual(readdirSync(payload).sort(), [
+          '.npmrc',
           'clients',
           'contracts',
           'deploy',
           'package.json',
           'pnpm-workspace.yaml',
+          ...(!incremental ? ['runtime-dependencies', 'runtime-tooling'] : []),
           'tsconfig.base.json',
           'web',
         ]);
@@ -391,7 +465,7 @@ for (const incremental of [false, true]) {
             );
         }
       },
-      { root: fixture.root, incremental },
+      { root: fixture.root, offline: fixture.offline, incremental },
     );
     assert.equal(existsSync(temp), false);
   });
@@ -417,6 +491,7 @@ for (const incremental of [false, true]) {
       try {
         await inspectBuildContext(t, undefined, {
           root,
+          offline: fixture.offline,
           incremental,
           error: /Build source link refused/,
         });

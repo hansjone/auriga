@@ -16,6 +16,7 @@ type SharedDshConfig struct {
 	RPC                  IAMRPCConfig `json:"rpc"`
 	Hop                  IAMHopConfig `json:"hop"`
 	NATSCredsFile        string       `json:"natsCredsFile"`
+	NATSSeedFile         string       `json:"natsSeedFile,omitempty"`
 	TicketPublicKeysFile string       `json:"ticketPublicKeysFile"`
 	IdentityKeysFile     string       `json:"identityKeysFile"`
 }

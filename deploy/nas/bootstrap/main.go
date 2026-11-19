@@ -31,6 +31,12 @@ import (
 )
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "shared-runtime" {
+		if err := nasSharedRuntime(os.Args[2:], os.Stdout); err != nil {
+			fatalf("%v", err)
+		}
+		return
+	}
 	if len(os.Args) > 1 && os.Args[1] == "image-extra-resolve" {
 		if err := extraImageCommand(context.Background(), os.Args[2:], os.Stdout); err != nil {
 			fatalf("%v", err)
