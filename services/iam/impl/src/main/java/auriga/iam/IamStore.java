@@ -44,6 +44,7 @@ public final class IamStore {
           "uac_suppression",
           "uac_diagnostics",
           "shared_task",
+          "shared_task_end",
           "shared_capability",
           "shared_message_context");
   private final JdbcTemplate jdbc;

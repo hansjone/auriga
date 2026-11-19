@@ -45,6 +45,194 @@ class SharedTasksPostgresTest {
   }
 
   @Test
+  void absentFinishFencesABeginAlreadyWaitingOnExternalOwnership() throws Exception {
+    var f = new Fixture();
+    var entered = new CountDownLatch(1);
+    var resume = new CountDownLatch(1);
+    var delayed =
+        new SharedTasks(
+            store,
+            f.sessions,
+            f.uac,
+            (tenant, account, context) -> Set.of("ai.models.invoke"),
+            (pool, session) -> {
+              entered.countDown();
+              try {
+                if (!resume.await(15, TimeUnit.SECONDS))
+                  throw new IllegalStateException("test timeout");
+              } catch (InterruptedException error) {
+                Thread.currentThread().interrupt();
+                throw new IllegalStateException(error);
+              }
+              return f.binding;
+            },
+            f.tokens,
+            CLOCK,
+            () -> false);
+    try (var workers = Executors.newVirtualThreadPerTaskExecutor()) {
+      var pending =
+          workers.submit(() -> TenantContext.call(f.tenant, () -> delayed.begin(f.request())));
+      try {
+        assertTrue(entered.await(15, TimeUnit.SECONDS));
+        var finished =
+            TenantContext.call(
+                f.tenant,
+                () ->
+                    f.authority()
+                        .finish(
+                            FinishSharedTaskRequest.newBuilder()
+                                .setBinding(f.binding)
+                                .setTaskId(f.task)
+                                .build()));
+        assertTrue(finished.getFenced());
+        assertEquals(f.binding, finished.getBinding());
+        assertEquals(f.task, finished.getTaskId());
+      } finally {
+        resume.countDown();
+      }
+      var error = assertThrows(ExecutionException.class, () -> pending.get(15, TimeUnit.SECONDS));
+      assertEquals(
+          "common.conflict",
+          ((auriga.common.error.AurigaException) error.getCause()).errorCode().code());
+    }
+    TenantContext.run(
+        f.tenant,
+        () ->
+            store.tx(
+                () -> {
+                  assertNull(store.get("shared_task", f.task, false));
+                  assertEquals(
+                      1,
+                      jdbc.queryForObject(
+                          "SELECT count(*) FROM iam.shared_task_end WHERE tenant_id=?",
+                          Integer.class,
+                          f.tenant));
+                  return null;
+                }));
+    assertThrows(auriga.common.error.AurigaException.class, f::begin);
+  }
+
+  @Test
+  void concurrentFinishAndBeginCommitOnlyOneTerminalHistory() throws Exception {
+    var f = new Fixture();
+    var start = new CountDownLatch(1);
+    try (var workers = Executors.newVirtualThreadPerTaskExecutor()) {
+      var begin =
+          workers.submit(
+              () -> {
+                assertTrue(start.await(15, TimeUnit.SECONDS));
+                try {
+                  f.begin();
+                  return true;
+                } catch (auriga.common.error.AurigaException error) {
+                  assertEquals("common.conflict", error.errorCode().code());
+                  return false;
+                }
+              });
+      var finish =
+          workers.submit(
+              () -> {
+                assertTrue(start.await(15, TimeUnit.SECONDS));
+                return TenantContext.call(
+                    f.tenant,
+                    () ->
+                        f.authority()
+                            .finish(
+                                FinishSharedTaskRequest.newBuilder()
+                                    .setBinding(f.binding)
+                                    .setTaskId(f.task)
+                                    .build()));
+              });
+      start.countDown();
+      begin.get(15, TimeUnit.SECONDS);
+      assertTrue(finish.get(15, TimeUnit.SECONDS).getFenced());
+    }
+    assertThrows(auriga.common.error.AurigaException.class, f::begin);
+    TenantContext.run(
+        f.tenant,
+        () ->
+            store.tx(
+                () -> {
+                  var task = store.get("shared_task", f.task, false);
+                  assertTrue(task == null || task.path("ended").asBoolean());
+                  assertEquals(
+                      1,
+                      jdbc.queryForObject(
+                          "SELECT count(*) FROM iam.shared_task_end WHERE tenant_id=?",
+                          Integer.class,
+                          f.tenant));
+                  return null;
+                }));
+  }
+
+  @Test
+  void absentFinishIsBindingScopedAndSurvivesSessionDeletion() throws Exception {
+    var f = new Fixture();
+    var other = f.binding.toBuilder().setSessionId(UUID.randomUUID().toString()).build();
+    TenantContext.run(
+        f.tenant,
+        () -> {
+          assertTrue(
+              f.authority()
+                  .finish(
+                      FinishSharedTaskRequest.newBuilder()
+                          .setBinding(other)
+                          .setTaskId(f.task)
+                          .build())
+                  .getFenced());
+        });
+    assertNotNull(f.begin());
+    TenantContext.run(
+        f.tenant,
+        () -> {
+          assertTrue(
+              f.authority()
+                  .finish(
+                      FinishSharedTaskRequest.newBuilder()
+                          .setBinding(f.binding)
+                          .setTaskId(f.task)
+                          .build())
+                  .getFenced());
+          store.tx(
+              () -> {
+                jdbc.update("DELETE FROM iam.shared_capability WHERE tenant_id=?", f.tenant);
+                jdbc.update("DELETE FROM iam.shared_task WHERE tenant_id=?", f.tenant);
+                store.delete("session", f.binding.getPlatformSessionId());
+                return null;
+              });
+          assertTrue(
+              f.authority()
+                  .finish(
+                      FinishSharedTaskRequest.newBuilder()
+                          .setBinding(f.binding)
+                          .setTaskId(f.task)
+                          .build())
+                  .getFenced());
+          store.tx(
+              () -> {
+                assertEquals(
+                    2,
+                    jdbc.queryForObject(
+                        "SELECT count(*) FROM iam.shared_task_end WHERE tenant_id=?",
+                        Integer.class,
+                        f.tenant));
+                return null;
+              });
+        });
+    TenantContext.run(
+        UUID.randomUUID(),
+        () ->
+            store.tx(
+                () -> {
+                  assertEquals(
+                      0,
+                      jdbc.queryForObject(
+                          "SELECT count(*) FROM iam.shared_task_end", Integer.class));
+                  return null;
+                }));
+  }
+
+  @Test
   void sharedMessageAllocationIsConcurrentDurableAndIndependentOfTheAuthorizingTask()
       throws Exception {
     var f = new Fixture();

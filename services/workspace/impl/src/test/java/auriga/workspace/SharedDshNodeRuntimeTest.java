@@ -246,11 +246,12 @@ class SharedDshNodeRuntimeTest {
   }
 
   static final class Fixture implements AutoCloseable {
-    final Clock clock = Clock.fixed(Instant.parse("2026-11-01T00:00:00Z"), ZoneOffset.UTC);
+    final Clock clock;
     final UUID tenant = UUID.randomUUID(), pool = UUID.randomUUID();
     final UUID node = UUID.randomUUID(), otherNode = UUID.randomUUID();
     final Map<UUID, Map<String, Object>> nodes = new HashMap<>();
     final Map<UUID, X509Certificate> certificates = new HashMap<>();
+    final Map<UUID, java.security.KeyPair> certificateKeys = new HashMap<>();
     final Map<UUID, UUID> holders = new HashMap<>(), owners = new HashMap<>();
     final Map<UUID, Map<String, Object>> members = new LinkedHashMap<>();
     final List<Map<String, Object>> outbox = new ArrayList<>();
@@ -259,12 +260,23 @@ class SharedDshNodeRuntimeTest {
         spy(new WorkspaceStore(jdbc, mock(TenantTransactionManager.class)));
     final SharedDshPlacements.EntryProbe entry = mock(SharedDshPlacements.EntryProbe.class);
     final NodeCa ca;
+    final java.security.KeyPair caKey;
+    final NodeEnrollment enrollment;
     final NodeSessions sessions;
     final Map<String, Object> poolRow;
 
     Fixture() throws Exception {
-      var key = TestPki.key();
-      ca = new NodeCa(TestPki.ca(key, clock.instant()), key.getPrivate(), clock);
+      this(null);
+    }
+
+    Fixture(SharedDshNodeRuntime runtimeOverride) throws Exception {
+      this(runtimeOverride, Clock.fixed(Instant.parse("2026-11-01T00:00:00Z"), ZoneOffset.UTC));
+    }
+
+    Fixture(SharedDshNodeRuntime runtimeOverride, Clock clock) throws Exception {
+      this.clock = clock;
+      caKey = TestPki.key();
+      ca = new NodeCa(TestPki.ca(caKey, clock.instant()), caKey.getPrivate(), clock);
       doAnswer(c -> c.<Supplier<?>>getArgument(0).get()).when(store).tx(any());
       doAnswer(
               c ->
@@ -331,15 +343,21 @@ class SharedDshNodeRuntimeTest {
               mock(WorkspaceCrypto.class),
               mock(EventPublisher.class),
               clock);
+      enrollment =
+          new NodeEnrollment(store, ca, clock, "https://workspace.invalid:7443", List.of());
       sessions =
           new NodeSessions(
-              new NodeEnrollment(store, ca, clock, "https://workspace.invalid:7443", List.of()),
+              enrollment,
               workspace,
-              new SharedDshNodeRuntime(store, placements));
+              runtimeOverride == null
+                  ? new SharedDshNodeRuntime(store, placements)
+                  : runtimeOverride);
     }
 
     void addNode(UUID id, UUID tid) throws Exception {
-      var cert = ca.issue(TestPki.csr(TestPki.key()), id);
+      var key = TestPki.key();
+      certificateKeys.put(id, key);
+      var cert = ca.issue(TestPki.csr(key), id);
       certificates.put(id, cert);
       nodes.put(
           id,

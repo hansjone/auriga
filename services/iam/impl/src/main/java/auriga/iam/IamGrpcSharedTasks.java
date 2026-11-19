@@ -61,8 +61,7 @@ public final class IamGrpcSharedTasks extends SharedTaskServiceGrpc.SharedTaskSe
   public void finishSharedTask(
       FinishSharedTaskRequest request, StreamObserver<FinishSharedTaskResponse> response) {
     caller(HOST_RELAYS);
-    tasks.finish(request);
-    response.onNext(FinishSharedTaskResponse.getDefaultInstance());
+    response.onNext(tasks.finish(request));
     response.onCompleted();
   }
 
