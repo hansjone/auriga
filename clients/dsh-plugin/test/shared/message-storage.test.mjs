@@ -58,7 +58,12 @@ test('all writable message ledgers use existing hard quota roots without adding 
     ),
     'utf8',
   );
-  assert.match(source, /home := filepath.Join\(members, "\.host"\)/);
+  // The installer may use its checked SafeJoin form. In either case the
+  // existing member quota must be applied to this exact .host ancestor.
+  assert.match(
+    source,
+    /home(?:, err)? := (?:storage\.SafeJoin|filepath\.Join)\(members, "\.host"\)/,
+  );
   assert.match(
     source,
     /layout.Quota.Ensure\(ctx, home, storage.MemberBytes, storage.MemberInodes\)/,
