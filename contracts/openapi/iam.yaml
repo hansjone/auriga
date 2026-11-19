@@ -760,7 +760,15 @@ paths:
       security:
         - {}
         - bearerAuth: []
-      description: 需要正确登录事务 cookie、受信 Host 与同源 Fetch Metadata，存在 Origin 时校验精确值。GET 仅读状态，上游轮询由 IAM 调度。未知或绑定失败统一404。响应 Cache-Control no-store。 purpose=login可匿名。purpose=link需要当前已认证入口会话且最近10分钟内完成认证，绑定已有账号的sessionId和认证代次，缺失401、过期或主体变化拒绝，禁止降级为匿名login。扫码所得另一身份必须新鲜，重复绑定遵循现有唯一约束。
+      description: 需要正确登录事务 cookie、受信 Host 与同源 Fetch Metadata，存在 Origin 时校验精确值。仅安装时已明确确认 insecureHttpAcknowledged 的 IP+HTTP 部署，在全部 Sec-Fetch-* 缺失时可用单值 Auriga-UAC-Poll:same-origin 作为非简单请求证明；该路由不授予 CORS，跨域预检拒绝。HTTPS、域名部署或存在任意 Fetch Metadata 时仍严格要求同源 Metadata，兼容头不覆盖它。客户端同时使用 fetch mode=same-origin。GET 仅读状态，上游轮询由 IAM 调度。未知或绑定失败统一404。响应 Cache-Control no-store。 purpose=login可匿名。purpose=link需要当前已认证入口会话且最近10分钟内完成认证，绑定已有账号的sessionId和认证代次，缺失401、过期或主体变化拒绝，禁止降级为匿名login。扫码所得另一身份必须新鲜，重复绑定遵循现有唯一约束。
+      parameters:
+        - name: Auriga-UAC-Poll
+          in: header
+          required: false
+          description: 浏览器同源 UAC 轮询标记；只在已确认 IP+HTTP 且无 Fetch Metadata 的部署作兼容证明，不替代 cookie、Origin 或入口绑定。
+          schema:
+            type: string
+            enum: [same-origin]
       responses:
         "200":
           headers:

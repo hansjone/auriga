@@ -120,7 +120,11 @@ export function createIamApi(client: ApiClient) {
     getUacChallenge(id: string) {
       return client.get<components['schemas']['UacChallengeStatus']>(
         `${IAM}/login/uac/challenges/${encodeURIComponent(id)}`,
-        { cache: 'no-store' },
+        {
+          cache: 'no-store',
+          mode: 'same-origin',
+          headers: { 'Auriga-UAC-Poll': 'same-origin' },
+        },
       );
     },
     cancelUacChallenge(id: string) {
