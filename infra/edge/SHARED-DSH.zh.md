@@ -1,8 +1,8 @@
 # 共享 DSH 入口接线说明（E 线）
 
-基线：`f6001a02`，权威协议为 `contracts/shared-dsh/README.md`、schema 与 `shared-dsh-edge.yaml`。本线不修改契约，也不修改原生 browserPeer。
+基线：`f6001a02`，权威协议为 `contracts/shared-dsh/README.md`、schema 与 `shared-dsh-edge.yaml`。兼容 RPC 增量集中在 workspace shared_dsh.proto；不修改原生 browserPeer。
 
-当前产物是可独立测试的 E 数据面与接线接口；尚未在 main 启用共享运行时。不能仅配置一个共享池的 owner 路由就上线。
+当前产物包含 E 数据面、Workspace 入场权威和可选生产启动装配；启用方法见下文。真实节点接线、共享宿主和正常门户仍须联合验收。不能仅配置一个共享池的 owner 路由就上线。
 
 ## 联合接线
 
@@ -26,8 +26,47 @@
 
 ## 实例模式缓存失效
 
-`Gateway.Shared` 按物理实例 UUID 缓存成功的 `IsShared` 结果，查询失败不入缓存。缓存仅选择入口认证流程，共享成员的 Binding、epoch、revision 和平台会话仍逐请求查权威。已缓存的独立实例在分配服务故障时沿旧实例认证流程继续服务，未知实例查询失败返回503。
+生产装配设置 `LiveModes=true`，每次从 Workspace 查询真实物理池模式，不缓存旧 owner 决策。以下缓存策略仅适用于未启用 LiveModes 的旧接线适配器。`Gateway.Shared` 按物理实例 UUID 缓存成功的 `IsShared` 结果，查询失败不入缓存。缓存仅选择入口认证流程，共享成员的 Binding、epoch、revision 和平台会话仍逐请求查权威。已缓存的独立实例在分配服务故障时沿旧实例认证流程继续服务，未知实例查询失败返回503。
 
 缓存以控制面事件失效，不设按时间自动过期。联合接线时，控制面应在 W 权威状态提交后、发布新路由及节点配置并放行入口前，在每个 edge 副本调用 `SharedEntry.InvalidateInstanceMode(id)`。失效与正在进行的模式查询交错时，旧查询返回503并丢弃结果。删除事件同时释放缓存项，重启或更换 SharedEntry 时缓存为空。成员在共享与独立模式之间切换若分配新物理 UUID，首次请求自然重新查询。多副本需先完成全部失效，再放行新入口和节点注册。
 
 独审低项②的 bbolt 写锁与过期记录扫描吞吐，留给 V 线按真实静态资源负载压测。
+
+## 生产入口装配
+
+`sharedDsh` 将受管 placement 入口接入现有 Edge 主程序。Workspace 按租户保存物理池、成员分配和会话，Edge 逐次读取当前权威。已登记的 `shared` 与 `dedicated` 都沿 placement 票据进入相应物理池。
+
+```json
+{
+  "sharedDsh": {
+    "rpc": {
+      "address": "platform.internal.example.test:7443",
+      "serverName": "platform.internal.example.test",
+      "serviceTokenFile": "/run/auriga/edge-service-token",
+      "timeoutMillis": 2000
+    },
+    "hop": {
+      "certFile": "/run/auriga/edge-client.pem",
+      "keyFile": "/run/auriga/edge-client-key.pem",
+      "caFile": "/run/auriga/platform-ca.pem"
+    },
+    "natsCredsFile": "/run/auriga/shared-entry.creds",
+    "ticketPublicKeysFile": "/run/auriga/shared-ticket-public.json",
+    "identityKeysFile": "/run/auriga/shared-ingress-identity.json"
+  }
+}
+```
+
+内部 RPC 使用受信 mTLS 目标和 `svc:edge` 服务身份。服务令牌文件每次调用重读。`ticketPublicKeysFile` 是专用于 W 入场票据的公开 JWK 集合，单钥字段为 `kty=OKP`、`crv=Ed25519`、`alg=EdDSA`、`use=placement-ticket`、`kid` 和无 padding base64url 的 `x`。该文件只包含公钥。`identityKeysFile` 沿既有 CURRENT Ed25519 JWK 私钥文件格式，使用另一组入口签名密钥。共享入口签名、W 票据和原独立 owner 身份使用不同的密钥材料。
+
+Edge 的配置 `natsUrl` 指向已批准的安装方 NATS。专用凭据只授予 `auriga-shared-entry` 桶所需权限。首次启用会创建文件存储桶，保留期12小时；已有桶须使用文件存储且保留期至少12小时，或无 TTL。票据消费与浏览器绑定用同一个原子 KV Create 保存，重启和多 Edge 副本共享该账本。Workspace 使用其受信 NATS 连接在线回读同一个桶。
+
+生产 `Watch` 在建流前在线核验，之后每秒重读 Workspace 权威；显式撤销、失联和核验超时都会关闭在途连接。请求发出前仍执行最终 `Check`。没有可用的权威响应时，不延长已缓存授权。
+
+Workspace 同时设置 `auriga.workspace.shared-dsh.enabled=true`、`auriga.workspace.shared-dsh.ticket-key-id` 和 `auriga.workspace.shared-dsh.ticket-private-key-file`。私钥是固定绝对路径的 Ed25519 PKCS8 PEM，其公钥和 kid 必须与 Edge 的票据 JWK 对应。平台的成员、IAM 会话、资源权威和节点适配器也必须完成装配。
+
+票据交换 URL 从已验证的 `DeploymentAccess` 生成，包含准确的部署源、端口及物理池路径。HTTPS 是通常的入口。纯 IP 的同源 HTTP 只在既有部署配置 `mode=ip`、`insecureHttpAcknowledged=true` 且门户源本身为 HTTP 时启用，沿既有 [ADR0020](../../docs/adr/0020-instance-origin-isolation.md) 与 [ADR0022](../../docs/adr/0022-ip-access-boundaries.md) 的访问模式。任意 HTTP 地址、其他端口、跨源地址和其他池路径均不能取得该例外。
+
+首次分配使用独立的十秒 profile 读取。W 向普通池 URL 的 `/_auriga/shared-profile` 发单值 `Auriga-Shared-Profile-Probe`，JWS typ 为 `auriga-shared-profile-probe+jwt`，audience 为 `auriga.shared.profile-probe`。Edge 验 W 签名、租户和物理池后，通过现有节点 mTLS 只读取该固定路径。返回必须来自实际受管宿主的有限 profile。此时成员分配可以仍为 pending，观察成功才允许初次准备推进。W 同时要求分配仍是当前的 pending 且没有模式切换操作。
+
+该初始化观察和模式切换的正常页面协议分别使用各自的签名用途。模式切换与恢复继续遵守 [K 候选分配探测](../../contracts/shared-dsh/PROBE.md) 的挑战、正常 HTML 页面及宿主回执要求。启用后的普通成员页面、WebSocket、两成员同一 PID、退出及空闲保持常驻，仍需按实际部署验收。

@@ -157,6 +157,9 @@ afterEach(() => {
     .querySelectorAll('meta[name="auriga-login-preference"]')
     .forEach((node) => node.remove());
   page?.dispose();
+  document
+    .querySelector('meta[name="auriga-shared-placement-enabled"]')
+    ?.remove();
   page = undefined;
   root.remove();
   vi.useRealTimers();
@@ -379,6 +382,92 @@ describe('native cloud sign-in', () => {
     ]);
   });
 
+  it.each(['ready', 'pending', 'ready-after-conflict'])(
+    'opens the configured shared placement through its ticket from %s',
+    async (initialState) => {
+      document.head.insertAdjacentHTML(
+        'beforeend',
+        '<meta name="auriga-shared-placement-enabled" content="true">',
+      );
+      const pool = '01900000-0000-7000-8000-000000000012';
+      const exchangeUrl = `/i/${pool}/_auriga/placement-ticket`;
+      const keys: (string | null)[] = [];
+      fetcher.mockImplementation(async (input, init) => {
+        const path = String(input);
+        if (path.endsWith('/me')) return json(me);
+        if (path.endsWith('/me/placement')) {
+          return json({
+            mode: 'shared',
+            state: initialState === 'pending' ? 'pending' : 'ready',
+          });
+        }
+        if (path.endsWith('/me/placement/open')) {
+          expect(init?.method).toBe('POST');
+          const key = new Headers(init?.headers).get('Idempotency-Key');
+          expect(key).toMatch(/^[a-f0-9]{32}$/);
+          keys.push(key);
+          if (initialState !== 'ready' && keys.length === 1) {
+            return json({ status: 409, code: 'common.conflict' }, 409);
+          }
+          return json({
+            placement: { mode: 'shared', state: 'ready' },
+            exchangeUrl,
+            ticket: 'test-placement-proof',
+            expiresAt: Date.now() / 1000 + 60,
+          });
+        }
+        if (path.endsWith(exchangeUrl)) {
+          expect(init?.redirect).toBe('manual');
+          expect(JSON.parse(String(init?.body))).toEqual({
+            ticket: 'test-placement-proof',
+          });
+          const response = new Response();
+          Object.defineProperty(response, 'type', { value: 'opaqueredirect' });
+          return response;
+        }
+        throw new Error('Unexpected cloud request');
+      });
+      render();
+      await flush();
+      if (initialState === 'pending') {
+        expect(root.textContent).toContain('正在等待 DSH 就绪');
+        expect(navigate).not.toHaveBeenCalled();
+        await vi.advanceTimersByTimeAsync(2000);
+      }
+      expect(keys).toHaveLength(initialState === 'ready' ? 1 : 2);
+      expect(new Set(keys).size).toBe(1);
+      expect(navigate).toHaveBeenCalledOnce();
+      expect(navigate).toHaveBeenCalledWith(
+        new URL(`/i/${pool}/`, location.origin).href,
+      );
+      expect(
+        fetcher.mock.calls.some(([path]) =>
+          String(path).endsWith('/me/instance/open'),
+        ),
+      ).toBe(false);
+    },
+  );
+  it('stops on an allocation conflict that is not pending and does not open a personal instance', async () => {
+    document.head.insertAdjacentHTML(
+      'beforeend',
+      '<meta name="auriga-shared-placement-enabled" content="true">',
+    );
+    fetcher
+      .mockResolvedValueOnce(json(me))
+      .mockResolvedValueOnce(
+        json({ status: 409, code: 'common.conflict' }, 409),
+      )
+      .mockResolvedValueOnce(json({ mode: 'shared', state: 'unavailable' }));
+    render();
+    await flush();
+    await vi.advanceTimersByTimeAsync(6000);
+    expect(fetcher.mock.calls.map(([path]) => path)).toEqual([
+      '/api/iam/v1/me',
+      '/api/workspace/v1/me/placement/open',
+      '/api/workspace/v1/me/placement',
+    ]);
+    expect(navigate).not.toHaveBeenCalled();
+  });
   it('opens the workspace without waiting for department information and updates the identity area later', async () => {
     let reads = 0;
     fetcher.mockImplementation(async (input) => {

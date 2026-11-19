@@ -69,19 +69,21 @@ export function createEnterpriseAdapter({ runtime, ports, config }) {
       call.body?.dshSessionId,
       call.headers?.['x-dsh-session-id'],
     );
-    const token = alias(
+    let token = alias(
       call.body?.taskCapability,
       call.body?.capability,
       call.headers?.['x-dsh-team-task-capability'],
     );
+    if (scope === 'credentials' && settings().allowRawAgentToken === false)
+      fail('raw_token_disabled');
+    if (ports.refreshCapability)
+      token = await ports.refreshCapability(token, sessionId, scope);
     let taskId;
     try {
       taskId = await ports.taskId(token);
     } catch {
       fail('shared.revoked');
     }
-    if (scope === 'credentials' && settings().allowRawAgentToken === false)
-      fail('raw_token_disabled');
     return {
       sessionId,
       token,
@@ -146,10 +148,7 @@ export function createEnterpriseAdapter({ runtime, ports, config }) {
       if (/[\r\n]/.test(v)) fail('common.validation_failed');
       if (requestHeaders.has(k.toLowerCase())) headers[k.toLowerCase()] = v;
     }
-    // Private IAM adapter injects enterprise headers; browser values cannot override them.
-    const material = await readMaterial(c);
     await recheck(c, 'outbound');
-    if (material.credentialVersion !== c.claims.credentialVersion) fail();
     let result;
     try {
       result = await ports.outbound(
@@ -160,9 +159,11 @@ export function createEnterpriseAdapter({ runtime, ports, config }) {
           body: body.body,
           timeoutMs: Math.min(requestedTimeout, 60000),
           redirect: 'error',
+          signal: call.signal,
         },
-        material,
+        c.claims,
         c.binding,
+        c.token,
       );
     } catch {
       fail('outbound_failed');
@@ -174,13 +175,8 @@ export function createEnterpriseAdapter({ runtime, ports, config }) {
         responseHeaders.has(k.toLowerCase()),
       ),
     );
-    const secrets = [
-      material.token,
-      ...Object.values(material.cookies ?? {}),
-    ].filter((v) => typeof v === 'string' && v);
+    // IAM owns material-aware redaction. Host never obtains raw material for outbound.
     const redact = (value) => {
-      if (typeof value === 'string')
-        return secrets.reduce((s, k) => s.split(k).join('[REDACTED]'), value);
       if (Array.isArray(value)) return value.map(redact);
       if (value && typeof value === 'object')
         return Object.fromEntries(
@@ -205,6 +201,13 @@ export function createEnterpriseAdapter({ runtime, ports, config }) {
       return;
     }
     const raw = path.endsWith('/agent-credentials');
+    const cancellation = new AbortController();
+    const abort = () => cancellation.abort();
+    const disconnect = () => {
+      if (!res.writableEnded) abort();
+    };
+    req.once('aborted', abort);
+    res.once('close', disconnect);
     try {
       if (!loopback(req.socket.remoteAddress)) fail('local_only');
       const requestMethod = (req.method ?? 'GET').toUpperCase();
@@ -231,6 +234,7 @@ export function createEnterpriseAdapter({ runtime, ports, config }) {
         remoteAddress: req.socket.remoteAddress,
         headers: req.headers,
         body,
+        signal: cancellation.signal,
       };
       const result = await (raw ? credentials(call) : outbound(call));
       res.writeHead(raw ? 200 : result.statusCode, {
@@ -266,6 +270,10 @@ export function createEnterpriseAdapter({ runtime, ports, config }) {
         'cache-control': 'no-store',
       });
       res.end(JSON.stringify({ error: code, message: code }));
+    } finally {
+      req.off('aborted', abort);
+      res.off('close', disconnect);
+      cancellation.abort();
     }
   }
   return { credentials, outbound, handler };

@@ -5,18 +5,8 @@ import (
 	"testing"
 )
 
-const validPoolProfile = `- id: auriga-dsh
-  name: auriga-dsh
-  config: {}
-- id: skills
-  name: '@deepseek-ai/dsh-skill-filesystem'
-  config:
-    providerName: auriga-shared
-    includeDefaultRoots: false
-    customSkillDirs: [/run/auriga/skills-active/current]
-`
-
 func TestPoolProfileAllowlist(t *testing.T) {
+	validPoolProfile := string(completePoolProfile(t))
 	if e := ValidatePoolProfile([]byte(validPoolProfile)); e != nil {
 		t.Fatal(e)
 	}
@@ -26,7 +16,7 @@ func TestPoolProfileAllowlist(t *testing.T) {
 			t.Fatal(name)
 		}
 	}
-	for _, raw := range []string{strings.Replace(validPoolProfile, "includeDefaultRoots: false", "includeDefaultRoots: true", 1), strings.Replace(validPoolProfile, "/run/auriga/skills-active/current", "/home/private", 1), validPoolProfile + "---\n[]\n", strings.Replace(validPoolProfile, "config: {}", "config: {value: {__jsExpr: evil}}", 1)} {
+	for _, raw := range []string{strings.Replace(validPoolProfile, "includeDefaultRoots: false", "includeDefaultRoots: true", 1), strings.Replace(validPoolProfile, "/run/auriga/skills-active/current", "/home/private", 1), validPoolProfile + "---\n[]\n", strings.Replace(validPoolProfile, "cwd: /home/dsh/.host", "cwd: !!js evil", 1)} {
 		if e := ValidatePoolProfile([]byte(raw)); e == nil {
 			t.Fatal("bad profile accepted")
 		}

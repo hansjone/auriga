@@ -3,6 +3,8 @@ syntax = "proto3";
 package auriga.workspace.v1;
 
 import "auriga/node/v1/shared_dsh_contract.proto";
+import "auriga/resource/v1/unified.proto";
+import "auriga/resource/v1/trust.proto";
 
 option go_package = "github.com/hansjone/auriga/infra/gen/auriga/workspace/v1;workspacev1";
 option java_multiple_files = true;
@@ -11,11 +13,44 @@ option java_package = "auriga.contracts.workspace.v1";
 // Workspace authority. Internal service authentication and delegated tenant are mandatory.
 // Implementations enforce README.md semantics; proto alone is not validation.
 service SharedDshService {
+  // Physical mode is authoritative even while preparation is pending. An absent
+  // registration denotes a legacy instance, never an unavailable authority.
+  rpc GetSharedDshPool(GetSharedDshPoolRequest) returns (GetSharedDshPoolResponse);
+  // Runtime relay only. Revalidates the stored session against live placement
+  // and IAM state before returning its binding.
+  rpc LookupSharedDshSession(LookupSharedDshSessionRequest) returns (LookupSharedDshSessionResponse);
   rpc ResolveSharedDsh(ResolveSharedDshRequest) returns (ResolveSharedDshResponse);
   rpc RegisterSharedDshSession(RegisterSharedDshSessionRequest) returns (RegisterSharedDshSessionResponse);
   rpc RevokeSharedDsh(RevokeSharedDshRequest) returns (RevokeSharedDshResponse);
   rpc GetSharedDshResourceView(GetSharedDshResourceViewRequest) returns (GetSharedDshResourceViewResponse);
+  rpc GetSharedDshResourceSnapshot(GetSharedDshResourceSnapshotRequest) returns (GetSharedDshResourceSnapshotResponse);
   rpc ReportSharedDshResource(ReportSharedDshResourceRequest) returns (ReportSharedDshResourceResponse);
+  // Node mTLS listener only, fenced by the current NodeControl session lease.
+  // The internal service-JWT listener intentionally does not implement these writes.
+  rpc AdmitSharedDshTask(AdmitSharedDshTaskRequest) returns (AdmitSharedDshTaskResponse);
+  rpc ReleaseSharedDshTask(ReleaseSharedDshTaskRequest) returns (ReleaseSharedDshTaskResponse);
+}
+
+message GetSharedDshPoolRequest {
+  string tenant_id = 1;
+  string physical_instance_id = 2;
+}
+message GetSharedDshPoolResponse {
+  string tenant_id = 1;
+  string physical_instance_id = 2;
+  bool registered = 3;
+  // "shared" or "dedicated" for a registered physical pool, otherwise empty.
+  string mode = 4;
+  // "pending", "ready" or "blocked" for a registered physical pool.
+  string state = 5;
+}
+message LookupSharedDshSessionRequest {
+  string tenant_id = 1;
+  string physical_instance_id = 2;
+  string session_id = 3;
+}
+message LookupSharedDshSessionResponse {
+  auriga.node.v1.SharedDshSessionBinding binding = 1;
 }
 
 message ResolveSharedDshRequest {
@@ -48,9 +83,37 @@ message GetSharedDshResourceViewRequest {
 message GetSharedDshResourceViewResponse {
   auriga.node.v1.SharedDshResourceView view = 1;
 }
+message GetSharedDshResourceSnapshotRequest {
+  auriga.node.v1.SharedDshBinding binding = 1;
+}
+message GetSharedDshResourceSnapshotResponse {
+  auriga.node.v1.SharedDshResourceView view = 1;
+  repeated auriga.resource.v1.UnifiedResourceRef resources = 2;
+  auriga.resource.v1.ResourceRevocationList revocations = 3;
+}
 message ReportSharedDshResourceRequest {
   auriga.node.v1.SharedDshResourceReport report = 1;
 }
 message ReportSharedDshResourceResponse {
   int64 revision = 1;
+}
+
+message AdmitSharedDshTaskRequest {
+  auriga.node.v1.SharedDshSessionBinding binding = 1;
+  string task_id = 2;
+}
+message AdmitSharedDshTaskResponse {
+  bool admitted = 1;
+  auriga.node.v1.SharedDshSessionBinding binding = 2;
+  string task_id = 3;
+}
+message ReleaseSharedDshTaskRequest {
+  auriga.node.v1.SharedDshSessionBinding binding = 1;
+  string task_id = 2;
+}
+message ReleaseSharedDshTaskResponse {
+  // Durable barrier against a delayed admission of this exact binding/task.
+  bool fenced = 1;
+  auriga.node.v1.SharedDshSessionBinding binding = 2;
+  string task_id = 3;
 }

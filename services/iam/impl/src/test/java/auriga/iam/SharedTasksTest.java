@@ -1,0 +1,503 @@
+package auriga.iam;
+
+import static auriga.iam.SharedTaskTokens.*;
+import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.ArgumentMatchers.*;
+import static org.mockito.Mockito.*;
+
+import auriga.common.context.TenantContext;
+import auriga.common.error.AurigaException;
+import auriga.common.error.CommonErrors;
+import auriga.contracts.iam.v1.*;
+import auriga.contracts.node.v1.*;
+import auriga.iam.api.PermissionResolver;
+import auriga.workspace.api.SharedDshSessions;
+import java.security.KeyPairGenerator;
+import java.time.*;
+import java.util.*;
+import java.util.concurrent.atomic.*;
+import java.util.function.Supplier;
+import org.junit.jupiter.api.Test;
+import tools.jackson.databind.node.ObjectNode;
+
+/** Transaction/storage doubles isolate task policy; actual PG migration and RLS run in CI. */
+class SharedTasksTest {
+  @Test
+  void absentFinishPersistsAnExactBarrierAndAcknowledgesItAfterRevocation() throws Exception {
+    var f = new Fixture();
+    f.run(
+        () -> {
+          var finish =
+              FinishSharedTaskRequest.newBuilder().setBinding(f.binding).setTaskId(f.task).build();
+          var result = f.tasks.finish(finish);
+          assertTrue(result.getFenced());
+          assertEquals(f.binding, result.getBinding());
+          assertEquals(f.task, result.getTaskId());
+          f.tasks = f.authority();
+          assertEquals(result, f.tasks.finish(finish));
+          assertEquals(
+              "common.conflict",
+              assertThrows(
+                      AurigaException.class, () -> f.begin(ENTERPRISE, List.of("task.execute")))
+                  .errorCode()
+                  .code());
+          f.active.set(false);
+          assertEquals(result, f.tasks.finish(finish));
+          return null;
+        });
+  }
+
+  @Test
+  void absentWrongBindingFinishCannotPoisonTheRealBindingWithTheSameUuid() throws Exception {
+    var f = new Fixture();
+    f.run(
+        () -> {
+          var other = f.binding.toBuilder().setSessionId(UUID.randomUUID().toString()).build();
+          assertTrue(
+              f.tasks
+                  .finish(
+                      FinishSharedTaskRequest.newBuilder()
+                          .setBinding(other)
+                          .setTaskId(f.task)
+                          .build())
+                  .getFenced());
+          assertTrue(
+              f.authorize(f.begin(ENTERPRISE, List.of("task.execute")).getCapability())
+                  .getActive());
+          assertEquals(
+              "common.not_found",
+              assertThrows(
+                      AurigaException.class,
+                      () ->
+                          f.tasks.finish(
+                              FinishSharedTaskRequest.newBuilder()
+                                  .setBinding(other)
+                                  .setTaskId(f.task)
+                                  .build()))
+                  .errorCode()
+                  .code());
+          assertTrue(
+              f.authorize(f.begin(ENTERPRISE, List.of("task.execute")).getCapability())
+                  .getActive());
+          return null;
+        });
+  }
+
+  @Test
+  void teamOrdinaryTaskDoesNotRequireCompanyMaterialAndCannotUseEnterpriseCapabilities()
+      throws Exception {
+    var f = new Fixture();
+    f.session.remove("uacCredentialId");
+    f.run(
+        () -> {
+          var generic = f.begin(ENTERPRISE, List.of("task.execute")).getCapability();
+          var state = f.authorize(generic);
+          assertTrue(state.getActive());
+          assertEquals(
+              SharedEnterpriseCredentialState.SHARED_ENTERPRISE_CREDENTIAL_STATE_ABSENT,
+              state.getEnterpriseCredentialState());
+          assertThrows(AurigaException.class, () -> f.begin(ENTERPRISE, List.of("outbound")));
+          assertThrows(AurigaException.class, () -> f.begin(ENTERPRISE, List.of("credentials")));
+          assertThrows(
+              AurigaException.class,
+              () -> f.begin(ENTERPRISE, List.of("task.execute", "outbound")));
+          assertThrows(
+              AurigaException.class,
+              () ->
+                  f.tasks.credentials(
+                      ReadSharedCredentialsRequest.newBuilder().setCapability(generic).build()));
+          assertThrows(AurigaException.class, () -> f.tasks.outboundMaterial(generic));
+          assertTrue(
+              f.authorize(f.begin(MODEL, List.of("model.invoke")).getCapability()).getActive());
+          f.tasks.finish(
+              FinishSharedTaskRequest.newBuilder().setBinding(f.binding).setTaskId(f.task).build());
+          assertFalse(f.authorize(generic).getActive());
+          return null;
+        });
+  }
+
+  @Test
+  void ordinaryTaskVersionDoesNotFollowCompanyTokenButInvalidOrForeignReferencesAreNeverAbsent()
+      throws Exception {
+    var f = new Fixture();
+    f.run(
+        () -> {
+          var generic = f.begin(ENTERPRISE, List.of("task.execute")).getCapability();
+          assertEquals(
+              SharedEnterpriseCredentialState.SHARED_ENTERPRISE_CREDENTIAL_STATE_AVAILABLE,
+              f.authorize(generic).getEnterpriseCredentialState());
+          f.credential.put("version", 2);
+          assertTrue(f.authorize(generic).getActive());
+          assertEquals(generic.getCredentialVersion(), f.authorize(generic).getCredentialVersion());
+          f.credential.put("invalid", true);
+          assertFalse(f.authorize(generic).getActive());
+          assertEquals(
+              SharedEnterpriseCredentialState.SHARED_ENTERPRISE_CREDENTIAL_STATE_UNSPECIFIED,
+              f.authorize(generic).getEnterpriseCredentialState());
+          f.credential.put("invalid", false).put("accountId", UUID.randomUUID().toString());
+          assertFalse(f.authorize(generic).getActive());
+          assertEquals(
+              SharedEnterpriseCredentialState.SHARED_ENTERPRISE_CREDENTIAL_STATE_UNSPECIFIED,
+              f.authorize(generic).getEnterpriseCredentialState());
+          f.credential.put("accountId", f.binding.getMemberId());
+          f.active.set(false);
+          assertFalse(f.authorize(generic).getActive());
+          assertEquals(
+              SharedEnterpriseCredentialState.SHARED_ENTERPRISE_CREDENTIAL_STATE_UNSPECIFIED,
+              f.authorize(generic).getEnterpriseCredentialState());
+          return null;
+        });
+  }
+
+  @Test
+  void readsCurrentEmployeeCredentialAndRejectsOldVersionWithoutChangingTaskOwner()
+      throws Exception {
+    var f = new Fixture();
+    f.run(
+        () -> {
+          var first = f.begin(ENTERPRISE, List.of("credentials", "outbound"));
+          var raw =
+              f.tasks.credentials(
+                  ReadSharedCredentialsRequest.newBuilder()
+                      .setCapability(first.getCapability())
+                      .build());
+          assertEquals("000042", raw.getEmpNo());
+          assertEquals("synthetic-v1", raw.getToken());
+          f.credential.put("version", 2);
+          f.material.put("credentialVersion", 2).put("token", "synthetic-v2");
+          assertFalse(f.authorize(first.getCapability()).getActive());
+          var updated = f.begin(ENTERPRISE, List.of("credentials", "outbound"));
+          assertEquals(2, updated.getCapability().getCredentialVersion());
+          assertEquals(
+              "synthetic-v2",
+              f.tasks
+                  .credentials(
+                      ReadSharedCredentialsRequest.newBuilder()
+                          .setCapability(updated.getCapability())
+                          .build())
+                  .getToken());
+          var switched = f.binding.toBuilder().setMemberId(UUID.randomUUID().toString()).build();
+          f.currentOwnership.set(switched);
+          assertFalse(f.authorize(updated.getCapability()).getActive());
+          return null;
+        });
+  }
+
+  @Test
+  void endingTaskPersistsAcrossAuthorityRecreationAndCannotBeReopened() throws Exception {
+    var f = new Fixture();
+    f.run(
+        () -> {
+          var issued = f.begin(ENTERPRISE, List.of("outbound"));
+          var finish =
+              FinishSharedTaskRequest.newBuilder().setBinding(f.binding).setTaskId(f.task).build();
+          f.tasks.finish(finish);
+          f.tasks = f.authority();
+          f.tasks.finish(finish);
+          assertFalse(f.authorize(issued.getCapability()).getActive());
+          assertThrows(AurigaException.class, () -> f.begin(ENTERPRISE, List.of("outbound")));
+          return null;
+        });
+  }
+
+  @Test
+  void rawSwitchStopsRawReadsWhileExistingOutboundCapabilityRemainsActive() throws Exception {
+    var f = new Fixture();
+    f.run(
+        () -> {
+          var issued = f.begin(ENTERPRISE, List.of("credentials", "outbound"));
+          f.raw.set(false);
+          var state = f.authorize(issued.getCapability());
+          assertTrue(state.getActive());
+          assertFalse(state.getAllowRawAgentToken());
+          assertThrows(
+              AurigaException.class,
+              () ->
+                  f.tasks.credentials(
+                      ReadSharedCredentialsRequest.newBuilder()
+                          .setCapability(issued.getCapability())
+                          .build()));
+          assertTrue(
+              f.authorize(f.begin(ENTERPRISE, List.of("outbound")).getCapability()).getActive());
+          assertThrows(AurigaException.class, () -> f.begin(ENTERPRISE, List.of("credentials")));
+          return null;
+        });
+  }
+
+  @Test
+  void modelTaskWorksWithoutEnterpriseCredentialsAndPermissionChangesFenceOldCapabilities()
+      throws Exception {
+    var f = new Fixture();
+    f.session.remove("uacCredentialId");
+    f.run(
+        () -> {
+          var issued = f.begin(MODEL, List.of("model.invoke"));
+          assertTrue(f.authorize(issued.getCapability()).getActive());
+          f.permissions.set(Set.of());
+          assertFalse(f.authorize(issued.getCapability()).getActive());
+          f.permissions.set(Set.of("ai.models.invoke"));
+          assertFalse(f.authorize(issued.getCapability()).getActive());
+          var replacement =
+              f.tasks.issue(
+                  IssueSharedCapabilityRequest.newBuilder()
+                      .setBinding(f.binding)
+                      .setTaskId(f.task)
+                      .setAudience(MODEL)
+                      .addScopes("model.invoke")
+                      .build());
+          assertTrue(
+              replacement.getCapability().getCredentialVersion()
+                  > issued.getCapability().getCredentialVersion());
+          assertTrue(f.authorize(replacement.getCapability()).getActive());
+          var lookup =
+              ResolveSharedTaskRequest.newBuilder()
+                  .setTenantId(f.tenant.toString())
+                  .setSessionId(f.binding.getSessionId())
+                  .setTaskId(f.task)
+                  .setAudience(MODEL)
+                  .setJti(replacement.getCapability().getJti())
+                  .build();
+          assertTrue(f.tasks.resolve(lookup).getActive());
+          assertFalse(
+              f.tasks
+                  .resolve(lookup.toBuilder().setJti(UUID.randomUUID().toString()).build())
+                  .getActive());
+          return null;
+        });
+  }
+
+  @Test
+  void rejectsInventedJtiChangedClaimsAndRevokedPlatformSession() throws Exception {
+    var f = new Fixture();
+    f.run(
+        () -> {
+          var issued = f.begin(ENTERPRISE, List.of("outbound"));
+          assertFalse(
+              f.authorize(
+                      issued.getCapability().toBuilder()
+                          .setJti(UUID.randomUUID().toString())
+                          .build())
+                  .getActive());
+          assertFalse(
+              f.authorize(issued.getCapability().toBuilder().addScopes("credentials").build())
+                  .getActive());
+          f.active.set(false);
+          assertFalse(f.authorize(issued.getCapability()).getActive());
+          assertThrows(
+              AurigaException.class,
+              () ->
+                  f.tasks.credentials(
+                      ReadSharedCredentialsRequest.newBuilder()
+                          .setCapability(issued.getCapability())
+                          .build()));
+          return null;
+        });
+  }
+
+  @Test
+  void authorityFailureNeverFallsBackToPreviouslyIssuedCapability() throws Exception {
+    var f = new Fixture();
+    f.run(
+        () -> {
+          var issued = f.begin(ENTERPRISE, List.of("outbound"));
+          f.unavailable.set(true);
+          var error =
+              assertThrows(AurigaException.class, () -> f.authorize(issued.getCapability()));
+          assertEquals("common.unavailable", error.errorCode().code());
+          return null;
+        });
+  }
+
+  @Test
+  void serializedTaskAndClaimsSurviveReconstructionReissueAndCredentialRenewal() throws Exception {
+    var f = new Fixture();
+    f.run(
+        () -> {
+          var original = f.begin(ENTERPRISE, List.of("credentials", "outbound")).getCapability();
+          f.tasks = f.authority();
+          var repeated = f.begin(ENTERPRISE, List.of("credentials", "outbound")).getCapability();
+          assertEquals(original.getTaskId(), repeated.getTaskId());
+          assertNotEquals(original.getJti(), repeated.getJti());
+          assertTrue(f.authorize(original).getActive());
+          assertTrue(f.authorize(repeated).getActive());
+          assertEquals(
+              "synthetic-v1",
+              f.tasks
+                  .credentials(
+                      ReadSharedCredentialsRequest.newBuilder().setCapability(original).build())
+                  .getToken());
+          f.credential.put("version", 2);
+          f.material.put("credentialVersion", 2).put("token", "synthetic-v2");
+          assertFalse(f.authorize(original).getActive());
+          f.tasks = f.authority();
+          var refreshed =
+              f.tasks
+                  .issue(
+                      IssueSharedCapabilityRequest.newBuilder()
+                          .setBinding(f.binding)
+                          .setTaskId(f.task)
+                          .setAudience(ENTERPRISE)
+                          .addAllScopes(List.of("credentials", "outbound"))
+                          .build())
+                  .getCapability();
+          assertEquals(2, refreshed.getCredentialVersion());
+          assertTrue(f.authorize(refreshed).getActive());
+          var raw =
+              f.tasks.credentials(
+                  ReadSharedCredentialsRequest.newBuilder().setCapability(refreshed).build());
+          assertEquals("000042", raw.getEmpNo());
+          assertEquals("synthetic-v2", raw.getToken());
+          f.tasks = f.authority();
+          f.tasks.finish(
+              FinishSharedTaskRequest.newBuilder().setBinding(f.binding).setTaskId(f.task).build());
+          assertFalse(f.authorize(refreshed).getActive());
+          assertEquals(
+              "common.conflict",
+              assertThrows(AurigaException.class, () -> f.begin(ENTERPRISE, List.of("outbound")))
+                  .errorCode()
+                  .code());
+          return null;
+        });
+  }
+
+  static final class Fixture {
+    final UUID tenant = UUID.randomUUID();
+    final String task = UUID.randomUUID().toString();
+    final Clock clock = Clock.fixed(Instant.parse("2026-11-19T00:00:00Z"), ZoneOffset.UTC);
+    final SharedDshSessionBinding binding =
+        SharedDshSessionBinding.newBuilder()
+            .setTenantId(tenant.toString())
+            .setMemberId(UUID.randomUUID().toString())
+            .setPlacementId(UUID.randomUUID().toString())
+            .setPhysicalInstanceId(UUID.randomUUID().toString())
+            .setMode(DshInstanceMode.DSH_INSTANCE_MODE_SHARED)
+            .setEpoch(1)
+            .setRevision(1)
+            .setSessionId(UUID.randomUUID().toString())
+            .setPlatformSessionId(UUID.randomUUID().toString())
+            .setAuthGeneration(1)
+            .build();
+    final IamStore store = mock(IamStore.class);
+    final SessionManager sessions = mock(SessionManager.class);
+    final UacSessions uac = mock(UacSessions.class);
+    final Map<String, ObjectNode> records = new HashMap<>();
+    final AtomicBoolean active = new AtomicBoolean(true);
+    final AtomicBoolean raw = new AtomicBoolean(true);
+    final AtomicBoolean unavailable = new AtomicBoolean();
+    final AtomicReference<Set<String>> permissions =
+        new AtomicReference<>(Set.of("ai.models.invoke", "collab.messages.use"));
+    final AtomicReference<SharedDshSessionBinding> currentOwnership =
+        new AtomicReference<>(binding);
+    final ObjectNode session =
+        Json.object(
+            "tenantId",
+            tenant.toString(),
+            "accountId",
+            binding.getMemberId(),
+            "audience",
+            "portal",
+            "authGeneration",
+            1,
+            "providerId",
+            UUID.randomUUID().toString(),
+            "uacCredentialId",
+            UUID.randomUUID().toString(),
+            "expiresAt",
+            clock.instant().plusSeconds(3600).toString());
+    final ObjectNode credential =
+        Json.object(
+            "accountId",
+            binding.getMemberId(),
+            "providerId",
+            session.path("providerId"),
+            "version",
+            1,
+            "invalid",
+            false);
+    final ObjectNode material =
+        Json.object(
+            "empNo",
+            "000042",
+            "token",
+            "synthetic-v1",
+            "updatedAt",
+            clock.instant().toString(),
+            "credentialVersion",
+            1);
+    final SharedTaskTokens tokens;
+    SharedTasks tasks;
+
+    Fixture() throws Exception {
+      var keys = new HashMap<String, SharedTaskTokens.Key>();
+      for (var audience : List.of(ENTERPRISE, MODEL, MESSAGE))
+        keys.put(
+            audience,
+            new SharedTaskTokens.Key(
+                "test", KeyPairGenerator.getInstance("Ed25519").generateKeyPair().getPrivate()));
+      tokens = new SharedTaskTokens(keys);
+      when(store.tx(any())).thenAnswer(call -> ((Supplier<?>) call.getArgument(0)).get());
+      when(store.get(anyString(), anyString(), anyBoolean()))
+          .thenAnswer(
+              call -> {
+                var value = records.get(call.getArgument(0) + ":" + call.getArgument(1));
+                return value == null ? null : Json.read(value.toString());
+              });
+      when(store.insert(anyString(), anyString(), any(), any()))
+          .thenAnswer(
+              call -> {
+                ObjectNode value = call.getArgument(2);
+                value.put("id", (String) call.getArgument(1));
+                records.put(
+                    call.getArgument(0) + ":" + call.getArgument(1), Json.read(value.toString()));
+                return value;
+              });
+      doAnswer(
+              call -> {
+                ObjectNode value = call.getArgument(1);
+                records.put(
+                    call.getArgument(0) + ":" + value.path("id").asString(),
+                    Json.read(value.toString()));
+                return null;
+              })
+          .when(store)
+          .save(anyString(), any());
+      when(sessions.activeById(binding.getPlatformSessionId()))
+          .thenAnswer(call -> active.get() ? session.deepCopy() : null);
+      when(store.byId(eq("uac_credential"), anyString(), eq(false)))
+          .thenAnswer(call -> credential.deepCopy());
+      when(uac.sharedCredentials(binding.getMemberId(), binding.getPlatformSessionId()))
+          .thenAnswer(call -> material.deepCopy());
+      tasks = authority();
+    }
+
+    SharedTasks authority() {
+      SharedDshSessions ownership =
+          (pool, session) -> {
+            if (unavailable.get()) throw new AurigaException(CommonErrors.UNAVAILABLE);
+            return currentOwnership.get();
+          };
+      PermissionResolver permissionResolver = (tenant, account, context) -> permissions.get();
+      return new SharedTasks(
+          store, sessions, uac, permissionResolver, ownership, tokens, clock, raw::get);
+    }
+
+    BeginSharedTaskResponse begin(String audience, List<String> requested) {
+      return tasks.begin(
+          BeginSharedTaskRequest.newBuilder()
+              .setBinding(binding)
+              .setTaskId(task)
+              .setAudience(audience)
+              .addAllScopes(requested)
+              .build());
+    }
+
+    AuthorizeSharedCapabilityResponse authorize(SharedDshCapability capability) {
+      return tasks.authorize(
+          AuthorizeSharedCapabilityRequest.newBuilder().setCapability(capability).build());
+    }
+
+    <T> T run(Supplier<T> work) {
+      return TenantContext.call(tenant, work::get);
+    }
+  }
+}

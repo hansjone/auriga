@@ -30,6 +30,9 @@ if [ -f /etc/auriga/identity-keys.json ]; then
 fi
 
 set -- run --data-root "$DATA_ROOT"
+if [ -n "${AURIGA_AGENT_CONFIG_FILE:-}" ]; then
+  set -- "$@" --config "$AURIGA_AGENT_CONFIG_FILE"
+fi
 if [ "${AURIGA_AGENT_ALLOW_INSECURE:-}" = "true" ]; then
   set -- "$@" --allow-insecure
 fi

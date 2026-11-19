@@ -34,4 +34,11 @@ public interface SharedDshAuthority {
     /** Recheck live IAM admin session, permission and strict 600-second step-up. */
     void requirePlacementWrite(UUID tenant, UUID actor, UUID adminSession, long now);
   }
+
+  /** Resource-owned, live authorization for a shared pool and its individual placements. */
+  interface ResourceInputs {
+    String authorizationSetDigest(UUID tenant, UUID member);
+
+    SharedDshResourceView resourceView(SharedDshBinding binding);
+  }
 }

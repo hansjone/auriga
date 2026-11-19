@@ -62,6 +62,38 @@ class IamGrpcNetworkAuthorityTest {
   }
 
   @Test
+  void sharedHttpIdentityCannotEnterTheLegacyNatsOwnerAuthority() {
+    collab(
+        () -> {
+          var mixed =
+              connection().toBuilder().setSharedContextId(UUID.randomUUID().toString()).build();
+          error(
+              "common.forbidden",
+              () ->
+                  service.resolveNetworkTarget(
+                      ResolveNetworkTargetRequest.newBuilder()
+                          .setConnection(mixed)
+                          .setLocal("0")
+                          .build(),
+                      new IamGrpcDevicesSpringTest.Capture<>()));
+          error(
+              "common.forbidden",
+              () ->
+                  service.authorizeNetworkDelivery(
+                      AuthorizeNetworkDeliveryRequest.newBuilder().setConnection(mixed).build(),
+                      new IamGrpcDevicesSpringTest.Capture<>()));
+          error("common.forbidden", () -> IamNetworkSources.connection(mixed));
+          var anchor =
+              NetworkConnectionAnchor.newBuilder()
+                  .setAnchorId(auriga.common.persistence.UuidV7.next().toString())
+                  .setConnection(mixed)
+                  .build();
+          error("common.forbidden", () -> IamNetworkConnectionAnchors.validate(anchor));
+          verifyNoInteractions(authority, sources);
+        });
+  }
+
+  @Test
   void allMethodsRejectOtherCallersAndMissingBusinessDelegationBeforeWork() {
     List<Runnable> calls =
         List.of(

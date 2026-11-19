@@ -42,7 +42,11 @@ public final class IamStore {
           "uac_job",
           "uac_navigation",
           "uac_suppression",
-          "uac_diagnostics");
+          "uac_diagnostics",
+          "shared_task",
+          "shared_task_end",
+          "shared_capability",
+          "shared_message_context");
   private final JdbcTemplate jdbc;
   private final TransactionTemplate transactions;
   private final ScopedValue<Set<String>> responseProjections = ScopedValue.newInstance();
@@ -191,6 +195,28 @@ public final class IamStore {
     jdbc.update(
         "INSERT INTO iam.uac_work_tenant(tenant_id) VALUES (?) ON CONFLICT DO NOTHING",
         TenantContext.require());
+  }
+
+  int cleanSharedTasks(Instant now) {
+    var timestamp = java.sql.Timestamp.from(now);
+    int deleted =
+        jdbc.update(
+            "WITH batch AS MATERIALIZED (SELECT id FROM iam.shared_capability WHERE tenant_id=?"
+                + " AND expires_at<=? ORDER BY expires_at,id LIMIT 50 FOR UPDATE SKIP LOCKED)"
+                + " DELETE FROM iam.shared_capability c USING batch WHERE c.tenant_id=? AND c.id=batch.id",
+            TenantContext.require(),
+            timestamp,
+            TenantContext.require());
+    return deleted
+        + jdbc.update(
+            "WITH batch AS MATERIALIZED (SELECT t.id FROM iam.shared_task t WHERE t.tenant_id=?"
+                + " AND t.expires_at<=? AND NOT EXISTS(SELECT 1 FROM iam.shared_capability c"
+                + " WHERE c.tenant_id=t.tenant_id AND c.task_id=t.id)"
+                + " ORDER BY t.expires_at,t.id LIMIT 50 FOR UPDATE SKIP LOCKED)"
+                + " DELETE FROM iam.shared_task t USING batch WHERE t.tenant_id=? AND t.id=batch.id",
+            TenantContext.require(),
+            timestamp,
+            TenantContext.require());
   }
 
   List<UUID> uacTenants(UUID after) {

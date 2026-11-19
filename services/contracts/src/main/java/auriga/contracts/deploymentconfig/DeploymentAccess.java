@@ -80,6 +80,10 @@ public final class DeploymentAccess {
     return access.getMode().getValue();
   }
 
+  public boolean insecureHttpAcknowledged() {
+    return access.getInsecureHttpAcknowledged();
+  }
+
   public String portalUrl() {
     return originUrl(access.getPortalOrigin());
   }

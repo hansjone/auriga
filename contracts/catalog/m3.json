@@ -596,6 +596,14 @@
         "zh-CN": "此资源版本已由分发策略锁定",
         "en": "The version is fixed by distribution policy"
       }
+    },
+    "resource.shared_requires_dedicated": {
+      "http": 409,
+      "grpc": "FAILED_PRECONDITION",
+      "message": {
+        "zh-CN": "共享模式只允许平台受控企业技能；插件或个人选装请由管理员授权并切换独立实例",
+        "en": "Shared mode supports controlled enterprise skills only; ask an administrator to authorize and switch to a dedicated instance for plugins or personal selections"
+      }
     }
   },
   "events": {

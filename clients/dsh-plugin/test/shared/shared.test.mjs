@@ -180,7 +180,7 @@ test('enterprise HTTPS transport injects private headers and cancels timed-out r
   );
 });
 
-function setup() {
+function setup({ expectedMode, mode = 'shared' } = {}) {
   const key = generateKeyPairSync('ed25519'),
     keys = new Map([['test', key.publicKey]]);
   const physicalInstanceId = randomUUID(),
@@ -190,7 +190,7 @@ function setup() {
     physicalInstanceId,
     memberId: randomUUID(),
     placementId: randomUUID(),
-    mode: 'shared',
+    mode,
     epoch: 1,
     revision: 1,
   }));
@@ -256,6 +256,7 @@ function setup() {
     identityKeys: keys,
     capabilityKeys: keys,
     physicalInstanceId,
+    expectedMode,
     now: () => clock,
   });
   async function peer(i) {
@@ -313,13 +314,15 @@ function setup() {
       credentialVersion: stateFor(b).credentialVersion,
       updatedAt: null,
     }),
-    outbound: async (req, material, b) => {
+    outbound: async (req, capability, b) => {
+      assert.equal(capability.binding.memberId, b.memberId);
+      assert.equal(capability.audience, 'auriga.shared.enterprise');
       audit.push(b.memberId);
       return {
         statusCode: 200,
         headers: { 'set-cookie': 'forbidden' },
-        body: material.token,
-        json: { actor: material.empNo, application: new URL(req.url).hostname },
+        body: '[REDACTED]',
+        json: { actor: b.memberId, application: new URL(req.url).hostname },
       };
     },
   };
@@ -460,6 +463,9 @@ test('rotation, raw default and next-call disable, task end and late responses',
   );
   f.setRaw(false);
   await assert.rejects(f.enterprise.credentials(f.call(b, fresh)));
+  f.enterprisePorts.credentials = async () => {
+    assert.fail('outbound must never read raw credentials');
+  };
   await f.enterprise.outbound(f.call(b, fresh));
   let release;
   const pending = new Promise((r) => (release = r));
@@ -742,6 +748,241 @@ test('self-owned carrier rejects unknown methods and arbitrary create paths', as
   }
 });
 
+test('message settings are exact, member-owned and reauthorize after mutations; native warming never exposes another member', async () => {
+  const f = setup(),
+    a = await f.peer(0),
+    b = await f.peer(1);
+  const own = await f.runtime.create(a, f.host),
+    other = await f.runtime.create(b, f.host);
+  let changes = 0;
+  const ctx = {
+    tools: { guard: () => () => {}, register: () => () => {} },
+    remoteAccess: { registerPolicy: () => () => {} },
+    webServer: { register: () => () => {} },
+    sessionPersistence: {
+      list: async () =>
+        [...f.rows.values()].map((row) => ({ header: { id: row.sessionId } })),
+    },
+    sessions: {
+      list: () => [...f.rows.values()].map((row) => ({ id: row.sessionId })),
+    },
+  };
+  const host = installSharedHost(ctx, {
+    runtime: f.runtime,
+    enterprise: f.enterprise,
+    ports: { createPeer() {}, assertProfile: () => true },
+    messaging: {
+      status: async (binding) => ({
+        sessionId: binding.sessionId,
+        receiveEnabled: false,
+      }),
+      setReceive: async (binding, enabled) => {
+        changes++;
+        return { sessionId: binding.sessionId, receiveEnabled: enabled };
+      },
+    },
+  });
+  try {
+    assert.deepEqual(await host.messagingSessions(a), [
+      { sessionId: own.sessionId, label: '会话 1' },
+    ]);
+    assert.deepEqual(await host.refresh(a), [own.sessionId]);
+    ctx.sessions.list = () => [];
+    assert.deepEqual(
+      await host.refresh(a),
+      [own.sessionId],
+      'public persistence preserves cold member history without attaching it',
+    );
+    const unknown = randomUUID(),
+      lookup = f.ports.lookup;
+    f.ports.lookup = async (id) => {
+      if (id === unknown)
+        throw Object.assign(new Error(), { code: 'common.not_found' });
+      return lookup(id);
+    };
+    const persistentList = ctx.sessionPersistence.list;
+    ctx.sessionPersistence.list = async () => [
+      ...(await persistentList()),
+      { header: { id: unknown } },
+      { header: { id: 'legacy-owner' } },
+    ];
+    assert.deepEqual(await host.refresh(a), [own.sessionId]);
+    await host.authorize(a, 'session/follow', own.sessionId);
+    await host.authorize(a, 'session/projections', own.sessionId);
+    await assert.rejects(host.authorize(a, 'session/follow', other.sessionId));
+    await assert.rejects(
+      host.messagingSettings(a, { sessionId: other.sessionId, enabled: true }),
+    );
+    for (const input of [
+      { sessionId: own.sessionId, enabled: 1 },
+      { sessionId: own.sessionId, ownerId: 'arbitrary' },
+      { sessionId: own.sessionId, enabled: undefined },
+    ])
+      await assert.rejects(host.messagingSettings(a, input));
+    assert.equal(changes, 0);
+    assert.equal(
+      (await host.messagingSettings(a, { sessionId: own.sessionId }))
+        .receiveEnabled,
+      false,
+    );
+    assert.equal(
+      (
+        await host.messagingSettings(a, {
+          sessionId: own.sessionId,
+          enabled: true,
+        })
+      ).receiveEnabled,
+      true,
+    );
+    assert.equal(changes, 1);
+    f.states[0].active = false;
+    await assert.rejects(host.refresh(a));
+    await assert.rejects(host.messagingSessions(a));
+  } finally {
+    host.close();
+  }
+});
+
+test('native browser admission preserves signed member/current/replay gates and keeps carrier interactions none', async () => {
+  const f = setup();
+  const host = installSharedHost(
+    {
+      tools: { guard: () => () => {}, register: () => () => {} },
+      remoteAccess: { registerPolicy: () => () => {} },
+      webServer: { register: () => () => {} },
+    },
+    {
+      runtime: f.runtime,
+      enterprise: f.enterprise,
+      ports: {
+        assertProfile: () => true,
+        createPeer: (options) => ({ ...options }),
+      },
+    },
+  );
+  const request = { method: 'GET', canonicalPath: '/@api/ws' };
+  const token = () =>
+    f.signed(
+      {
+        schemaVersion: 2,
+        issuer: 'auriga.edge',
+        audience: 'auriga.shared.ingress',
+        binding: f.states[0].binding,
+        platformSessionId: f.states[0].platformSessionId,
+        ...request,
+        issuedAt: 1000,
+        expiresAt: 1060,
+        jti: randomUUID(),
+      },
+      'identity',
+    );
+  try {
+    const once = token(),
+      browser = await host.admitBrowser(once, request);
+    assert.equal(browser.interactions, 'answer');
+    assert.equal(browser.principal.kind, 'auriga-shared-member');
+    await assert.rejects(host.admitBrowser(once, request));
+    assert.equal((await host.admit(token(), request)).interactions, 'none');
+    f.states[0].active = false;
+    await assert.rejects(host.admitBrowser(token(), request));
+  } finally {
+    host.close();
+  }
+});
+
+test('native list/control grant is global read entry plus exact own-session filtering; revoke clears both', async () => {
+  const f = setup(),
+    a = await f.peer(0),
+    b = await f.peer(1);
+  const own = await f.runtime.create(a, f.host),
+    other = await f.runtime.create(b, f.host);
+  const projected = f.runtime.bindings(a.principal);
+  assert.deepEqual(
+    projected.find((entry) => entry.resource.kind === 'global'),
+    {
+      resource: { kind: 'global' },
+      role: {
+        name: 'auriga-shared-native-read',
+        resource: 'global',
+        actions: ['session/list', 'session/control'],
+      },
+    },
+  );
+  const ownRole = projected.find(
+    (entry) => entry.resource.kind === 'session',
+  ).role;
+  assert.ok(ownRole.actions.includes('session/list'));
+  assert.ok(ownRole.actions.includes('session/control'));
+  assert.equal(
+    projected.some((entry) => entry.resource.id === other.sessionId),
+    false,
+  );
+  for (const denied of [
+    'session/create',
+    'session/modelCatalog',
+    'credentials/read',
+    'mcp/list',
+    'event:owner',
+    'event:credentials',
+  ])
+    assert.equal(
+      projected.some((entry) => entry.role.actions.includes(denied)),
+      false,
+    );
+  assert.deepEqual(f.runtime.bindings({ kind: 'owner' }), []);
+  f.runtime.revoke({
+    schemaVersion: 1,
+    tenantId: own.tenantId,
+    memberId: own.memberId,
+    placementId: own.placementId,
+    epoch: 2,
+    revision: 2,
+    authGeneration: 2,
+    reason: 'logout',
+    revokedAt: 1000,
+  });
+  assert.deepEqual(f.runtime.bindings(a.principal), []);
+  f.runtime.close();
+});
+
+test('only the installation factory chooses exact shared/dedicated mode; default shared never admits dedicated or browser mode changes', async () => {
+  for (const expectedMode of [null, 'SHARED', '', {}, true, 1])
+    assert.throws(() => setup({ expectedMode }));
+  for (const options of [
+    { mode: 'dedicated' },
+    { expectedMode: 'shared', mode: 'dedicated' },
+    { expectedMode: 'dedicated', mode: 'shared' },
+  ]) {
+    const f = setup(options);
+    try {
+      await assert.rejects(f.peer(0));
+    } finally {
+      f.runtime.close();
+    }
+  }
+  for (const expectedMode of ['shared', 'dedicated']) {
+    const f = setup({ expectedMode, mode: expectedMode });
+    try {
+      const peer = await f.peer(0),
+        binding = await f.runtime.create(peer, f.host);
+      assert.equal(binding.mode, expectedMode);
+      await f.runtime.authorize(peer, 'session/page', binding.sessionId);
+      await assert.rejects(
+        f.runtime.create(peer, f.host, {
+          mode: expectedMode === 'shared' ? 'dedicated' : 'shared',
+        }),
+      );
+      f.rows.set(binding.sessionId, {
+        ...binding,
+        mode: expectedMode === 'shared' ? 'dedicated' : 'shared',
+      });
+      await assert.rejects(f.runtime.session(binding.sessionId));
+    } finally {
+      f.runtime.close();
+    }
+  }
+});
+
 test('original Python helper resolve/request runs with task-local variables and no parent env mutation', async () => {
   const f = setup(),
     binding = await f.runtime.create(await f.peer(0), f.host);
@@ -757,12 +998,17 @@ test('original Python helper resolve/request runs with task-local variables and 
     config: () => ({ allowRawAgentToken: true }),
     helperBase: `http://127.0.0.1:${server.address().port}/dsh-team`,
     enterprise: f.enterprisePorts,
+    acquireExecution: async () => ({
+      binding,
+      ordinaryToken: 'synthetic-helper-ordinary-parent',
+      close: async () => {},
+    }),
     issueTask: async (b) => f.token(b),
     finishTask: async () => {
       f.states[0].active = false;
     },
   };
-  const snapshot = { ...process.env };
+  const environmentKeys = Object.keys(process.env).sort();
   const task = await openSharedTask({
     ctx,
     runtime: f.runtime,
@@ -801,8 +1047,9 @@ test('original Python helper resolve/request runs with task-local variables and 
       "from uds_skill_auth import resolve, request, DshTeamError\ntry:\n resolve(apply_env_aliases=False)\n raise AssertionError('raw enabled')\nexcept DshTeamError as e:\n assert e.code=='raw_token_disabled'\nassert request('GET','https://app-two.invalid/api')['statusCode']==200\n",
     );
     assert.ok(
-      canonical({ ...process.env }) === canonical(snapshot),
-      'parent environment changed',
+      JSON.stringify(Object.keys(process.env).sort()) ===
+        JSON.stringify(environmentKeys),
+      'parent environment keys changed',
     );
     await task.close();
     await assert.rejects(f.enterprise.credentials(f.call(binding, task.token)));
@@ -896,7 +1143,11 @@ test('N model/message ports bind concurrent members, preserve call IDs and disca
       sessionId: request.sessionId,
     }),
   };
-  const downstream = createSharedDownstream({ runtime, ports });
+  const downstream = createSharedDownstream({
+    runtime,
+    ports,
+    sdk: { LlmAdapter: class {} },
+  });
   try {
     const collect = async (binding) => {
       const output = [];

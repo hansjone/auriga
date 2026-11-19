@@ -41,6 +41,7 @@ import org.springframework.web.servlet.mvc.method.annotation.RequestMappingHandl
   ResourceController.class,
   auriga.resource.web.CatalogController.class,
   auriga.resource.web.CatalogDeliveryController.class,
+  auriga.resource.web.CatalogPlacementController.class,
   auriga.resource.web.CatalogNodeController.class,
   ResourceMetadataController.class,
   ResourceAdministrationController.class,
@@ -311,6 +312,34 @@ public class ResourceRuntimeConfiguration {
         clock,
         cursors,
         tenants::getIfAvailable);
+  }
+
+  @Bean
+  CatalogSharedResources catalogSharedResources(
+      ResourceStore store,
+      ResourceWorkflowStore db,
+      ResourceAccess access,
+      CatalogDelivery delivery,
+      CatalogWorkflow catalog,
+      ResourceDistributions distributions,
+      Clock clock,
+      ObjectProvider<auriga.resource.api.SharedResourceNodes> nodes) {
+    return new CatalogSharedResources(
+        store, db, access, delivery, catalog, distributions, clock, nodes::getIfAvailable);
+  }
+
+  @Bean
+  CatalogPlacementMarket catalogPlacementMarket(
+      ResourceStore store,
+      ResourceWorkflowStore db,
+      ResourceAccess access,
+      CatalogWorkflow catalog,
+      CatalogDelivery delivery,
+      CatalogSharedResources resources,
+      ObjectProvider<auriga.resource.api.SharedResourcePlacements> placements,
+      ResourceCursor cursors) {
+    return new CatalogPlacementMarket(
+        store, db, access, catalog, delivery, resources, placements::getIfAvailable, cursors);
   }
 
   @Bean

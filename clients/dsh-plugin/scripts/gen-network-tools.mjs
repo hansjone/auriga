@@ -58,19 +58,23 @@ const ajv = new Ajv({
   code: { source: true, esm: true },
   messages: false,
 });
-const validate = ajv.compile(inputSchema);
-let validator = standalone(ajv, validate);
-// Inline the sole Ajv helper so the published plugin needs no Ajv package.
-const helper =
-  /require\("(?:@redocly\/)?ajv\/dist\/runtime\/ucs2length"\)\.default/g;
-validator = validator.replace(
-  helper,
-  () => `(${require('ajv/dist/runtime/ucs2length.js').default.toString()})`,
-);
-if (/\brequire\(/.test(validator))
-  throw new Error(
-    `unexpected generated runtime dependency: ${validator.match(/require\([^)]*\)/g)}`,
+function validatorSource(schema) {
+  const validate = ajv.compile(schema);
+  let validator = standalone(ajv, validate);
+  // Inline the sole Ajv helper so the published plugin needs no Ajv package.
+  const helper =
+    /require\("(?:@redocly\/)?ajv\/dist\/runtime\/ucs2length"\)\.default/g;
+  validator = validator.replace(
+    helper,
+    () => `(${require('ajv/dist/runtime/ucs2length.js').default.toString()})`,
   );
+  if (/\brequire\(/.test(validator))
+    throw new Error(
+      `unexpected generated runtime dependency: ${validator.match(/require\([^)]*\)/g)}`,
+    );
+  return validator;
+}
+const validator = validatorSource(inputSchema);
 const banner =
   '// Generated from contracts/network by scripts/gen-network-tools.mjs. Do not edit.\n';
 const artifacts = new Map([
@@ -87,6 +91,13 @@ const artifacts = new Map([
       `export const inputSchema = ${JSON.stringify(inputSchema)};\nexport const encoding = ${JSON.stringify(limits.encoding)};\nexport const opaqueIdPattern = ${JSON.stringify(envelope.$defs.OpaqueId.pattern)};\n`,
   ],
 ]);
+artifacts.set(
+  'validate-result.js',
+  '// @ts-nocheck\n' +
+    banner +
+    `/* Inlined Ajv runtime helper license:\n${license}\n*/\n` +
+    validatorSource(resolve(send.$defs.SendResult)),
+);
 for (const name of ['AgentSendToolInput', 'SubmitRequest', 'SendResult']) {
   // Compile each root separately to preserve the contract's exported names.
   const types = await compile(

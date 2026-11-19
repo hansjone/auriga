@@ -39,10 +39,11 @@ type release struct {
 }
 
 type buildSpec struct {
-	Inputs  artifact          `json:"inputs"`
-	Recipes artifact          `json:"recipes"`
-	Bases   map[string]string `json:"bases"`
-	Tools   map[string]string `json:"tools"`
+	Inputs         artifact          `json:"inputs"`
+	Recipes        artifact          `json:"recipes"`
+	Bases          map[string]string `json:"bases"`
+	Tools          map[string]string `json:"tools"`
+	RuntimeTooling *artifact         `json:"runtimeTooling,omitempty"`
 }
 
 func readJSON(path string, output any) error {

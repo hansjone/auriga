@@ -43,6 +43,7 @@ const lifetime = { issuedAt: time, expiresAt: time, jti: id };
 const scope = enumeration(
   'credentials',
   'outbound',
+  'task.execute',
   'model.invoke',
   'message.send',
   'message.receive',

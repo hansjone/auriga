@@ -7,6 +7,19 @@ ENV COREPACK_HOME=/opt/corepack COREPACK_ENABLE_DOWNLOAD_PROMPT=0
 RUN corepack enable pnpm && corepack prepare pnpm@11.28.6 --activate
 ENV COREPACK_ENABLE_NETWORK=0
 
+FROM ${NODE_IMAGE} AS runtime-tooling
+WORKDIR /opt/auriga-tools/pnpm
+COPY deploy/compose/real-dsh/tooling/package*.json ./
+COPY deploy/compose/real-dsh/tooling.mjs /opt/fixture/tooling.mjs
+COPY clients/installer/upstream.json /opt/fixture/runtime-pins.json
+COPY runtime-tooling/pnpm.tgz /opt/runtime-input/pnpm.tgz
+# The original approved tarball is supplied by the matching offline devkit.
+# No Corepack/PATH lookup, registry fallback or lifecycle scripts install tools.
+RUN --network=none node /opt/fixture/tooling.mjs input /opt/runtime-input/pnpm.tgz \
+    && npm cache add /opt/runtime-input/pnpm.tgz --offline --ignore-scripts --cache /tmp/runtime-tool-cache \
+    && npm ci --offline --ignore-scripts --bin-links=false --no-audit --no-fund --cache /tmp/runtime-tool-cache \
+    && node /opt/fixture/tooling.mjs installed
+
 FROM toolchain AS broker
 WORKDIR /build
 COPY package.json pnpm-workspace.yaml ./
@@ -23,7 +36,9 @@ FROM ${NODE_IMAGE} AS build
 WORKDIR /opt/dsh
 COPY deploy/compose/real-dsh/package*.json ./
 COPY deploy/compose/real-dsh/versions.json /opt/fixture/versions.json
-COPY deploy/compose/real-dsh/build.mjs deploy/compose/real-dsh/inputs.mjs deploy/compose/real-dsh/runtime.mjs deploy/compose/real-dsh/start.mjs /opt/fixture/
+COPY deploy/compose/real-dsh/build.mjs deploy/compose/real-dsh/inputs.mjs deploy/compose/real-dsh/runtime.mjs deploy/compose/real-dsh/start.mjs deploy/compose/real-dsh/tooling.mjs /opt/fixture/
+COPY clients/installer/upstream.json /opt/fixture/runtime-pins.json
+COPY --from=runtime-tooling /opt/auriga-tools /opt/auriga-tools
 COPY clients/dsh-plugin/package.json /opt/fixture/plugin-package.json
 RUN node /opt/fixture/build.mjs check
 RUN npm ci --omit=dev --include=optional --ignore-scripts --bin-links=false --no-audit --no-fund --registry=https://registry.npmjs.org --os=linux --cpu=x64 --libc=glibc

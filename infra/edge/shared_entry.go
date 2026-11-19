@@ -43,7 +43,10 @@ type SharedEntry struct {
 	TicketKeys  map[string]ed25519.PublicKey
 	IdentityKey ed25519.PrivateKey
 	IdentityKid string
-	modes       sharedModeCache
+	// Production performs live mode reads, so a new pool can never reuse a
+	// previously cached legacy-owner authentication decision.
+	LiveModes bool
+	modes     sharedModeCache
 }
 
 func sharedJTI() string {
@@ -89,8 +92,9 @@ func (g *Gateway) serveShared(w http.ResponseWriter, r *http.Request, id, path, 
 	e := g.Shared
 	// The exchange path is reserved even before W wiring, so it cannot fall through to owner auth.
 	exchange := path == "/_auriga/placement-ticket"
+	profile := profileMode(path) != ""
 	if e == nil {
-		if exchange {
+		if exchange || profile {
 			sharedError(w, r, nil)
 			return true
 		}
@@ -106,7 +110,7 @@ func (g *Gateway) serveShared(w http.ResponseWriter, r *http.Request, id, path, 
 		return true
 	}
 	if !shared {
-		if exchange {
+		if exchange || profile {
 			sharedError(w, r, errors.New("shared.binding_mismatch"))
 			return true
 		}
@@ -114,6 +118,10 @@ func (g *Gateway) serveShared(w http.ResponseWriter, r *http.Request, id, path, 
 	}
 	if e.Store == nil || len(e.TicketKeys) == 0 || len(e.IdentityKey) != ed25519.PrivateKeySize {
 		sharedError(w, r, nil)
+		return true
+	}
+	if profile {
+		g.serveSharedProfile(w, r, id, path)
 		return true
 	}
 	target := g.instanceTarget(r, id)
@@ -282,7 +290,7 @@ func (e *SharedEntry) exchange(w http.ResponseWriter, r *http.Request, id string
 		return
 	}
 	b := c["binding"].(map[string]any)
-	if b["physicalInstanceId"] != id || b["mode"] != "shared" {
+	if b["physicalInstanceId"] != id || (b["mode"] != "shared" && b["mode"] != "dedicated") {
 		fail("shared.binding_mismatch")
 		return
 	}

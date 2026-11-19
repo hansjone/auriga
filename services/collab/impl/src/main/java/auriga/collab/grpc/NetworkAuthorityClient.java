@@ -385,6 +385,19 @@ public class NetworkAuthorityClient implements NetworkAuthority {
       if (!id.matches("[1-9][0-9]{0,19}") || new java.math.BigInteger(id).bitLength() > 64)
         throw new AurigaException(NetworkErrors.UNAUTHORIZED);
     }
+    if (!connection.getSharedContextId().isEmpty()) {
+      try {
+        java.util.UUID.fromString(connection.getSharedContextId());
+      } catch (IllegalArgumentException failure) {
+        throw new AurigaException(NetworkErrors.UNAUTHORIZED);
+      }
+      if (!connection.getIngress().isEmpty()
+          || !connection.getServerId().isEmpty()
+          || !connection.getClientId().isEmpty()
+          || !connection.getClientAccount().isEmpty())
+        throw new AurigaException(NetworkErrors.UNAUTHORIZED);
+      return;
+    }
     for (String id :
         List.of(
             connection.getIngress(),

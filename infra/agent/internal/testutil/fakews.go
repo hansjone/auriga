@@ -59,6 +59,8 @@ type FakeWorkspace struct {
 
 // FakeWorkspaceOpts configures the fake platform.
 type FakeWorkspaceOpts struct {
+	// RegisterServices adds synthetic authorities on this same real TLS server.
+	RegisterServices func(grpc.ServiceRegistrar)
 	// SessionInterceptor observes real stream traffic without changing the agent.
 	SessionInterceptor  grpc.StreamServerInterceptor
 	TLS                 bool
@@ -122,6 +124,9 @@ func StartFakeWorkspace(opts FakeWorkspaceOpts) (*FakeWorkspace, error) {
 	fw.server = grpc.NewServer(serverOpts...)
 	nodev1.RegisterNodeEnrollmentServiceServer(fw.server, fw)
 	nodev1.RegisterNodeControlServiceServer(fw.server, fw)
+	if opts.RegisterServices != nil {
+		opts.RegisterServices(fw.server)
+	}
 
 	lis, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {

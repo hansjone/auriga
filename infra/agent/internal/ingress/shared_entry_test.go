@@ -40,6 +40,7 @@ func TestSharedIngressBoundary(t *testing.T) {
 	pub, priv, _ := ed25519.GenerateKey(rand.Reader)
 	now := time.Now()
 	c := sharedTestClaims(true, now.Unix())
+	c["canonicalPath"] = "/"
 	token := sharedTestSign(c, priv, true)
 	verified, err := sharedVerify(token, map[string]ed25519.PublicKey{"test": pub}, true, now.Unix())
 	if err != nil {
@@ -49,7 +50,7 @@ func TestSharedIngressBoundary(t *testing.T) {
 	calls := 0
 	up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls++
-		if r.Header.Get(identityHeader) == "" || r.URL.Path != "/api" {
+		if r.Header.Get(identityHeader) == "" || r.URL.Path != "/" {
 			t.Error("forwarding")
 		}
 		w.WriteHeader(204)
@@ -73,30 +74,31 @@ func TestSharedIngressBoundary(t *testing.T) {
 		s.route(w, r)
 		return w.Code
 	}
-	if got := req("/api", "GET", []string{token, token}); got != 403 {
+	if got := req("/", "GET", []string{token, token}); got != 403 {
 		t.Fatal(got)
 	}
-	if got := req("/api", "POST", []string{token}); got != 403 {
+	if got := req("/", "POST", []string{token}); got != 403 {
 		t.Fatal(got)
 	}
 	if got := req("/other", "GET", []string{token}); got != 403 {
 		t.Fatal(got)
 	}
-	if got := req("/api", "GET", []string{token}); got != 204 {
+	if got := req("/", "GET", []string{token}); got != 204 {
 		t.Fatal(got)
 	}
-	if got := req("/api", "GET", []string{token}); got != 403 {
+	if got := req("/", "GET", []string{token}); got != 403 {
 		t.Fatal("replay", got)
 	}
 	for _, field := range []string{"tenantId", "memberId", "epoch", "revision"} {
 		copyClaims := sharedTestClaims(true, now.Unix())
+		copyClaims["canonicalPath"] = "/"
 		b := copyClaims["binding"].(map[string]any)
 		if field == "epoch" || field == "revision" {
 			b[field] = 2
 		} else {
 			b[field] = "019a0000-0000-7000-8000-000000000002"
 		}
-		if got := req("/api", "GET", []string{sharedTestSign(copyClaims, priv, true)}); got != 403 {
+		if got := req("/", "GET", []string{sharedTestSign(copyClaims, priv, true)}); got != 403 {
 			t.Fatal(field, got)
 		}
 	}
@@ -112,16 +114,16 @@ func TestSharedIngressBoundary(t *testing.T) {
 		t.Fatal("unexpected upstream requests", calls)
 	}
 	// Watch is established before the second authority check; cancellation reaches active requests.
-	checked, cleanup, err := s.sharedRequest(httptest.NewRequest("GET", "http://node/api", nil), sharedTestID, "/api")
+	checked, cleanup, err := s.sharedRequest(httptest.NewRequest("GET", "http://node/", nil), sharedTestID, "/")
 	_ = checked
 	_ = cleanup
 	if err == nil {
 		t.Fatal("missing identity accepted")
 	}
 	c["jti"] = "019a0000-0000-7000-8000-000000000002"
-	r := httptest.NewRequest("GET", "http://node/api", nil)
+	r := httptest.NewRequest("GET", "http://node/", nil)
 	r.Header.Set(identityHeader, sharedTestSign(c, priv, true))
-	checked, cleanup, err = s.sharedRequest(r, sharedTestID, "/api")
+	checked, cleanup, err = s.sharedRequest(r, sharedTestID, "/")
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -80,7 +80,11 @@ func locksFromNamesContext(ctx context.Context, source string, r release, names 
 		Inputs, Recipes string
 		Tools, Bases    map[string]string
 		Images          map[string]string
+		RuntimeTooling  string `json:",omitempty"`
 	}{Inputs: r.Build.Inputs.SHA256, Recipes: r.Build.Recipes.SHA256, Tools: r.Build.Tools, Bases: r.Build.Bases, Images: map[string]string{}}
+	if r.Build.RuntimeTooling != nil {
+		pins.RuntimeTooling = r.Build.RuntimeTooling.SHA256
+	}
 	for name, entry := range r.Images {
 		pins.Images[name] = entry.Ref
 	}
