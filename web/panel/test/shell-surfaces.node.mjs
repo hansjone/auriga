@@ -91,7 +91,7 @@ test('desktop update polling refreshes the native banner and releases its interv
 });
 
 for (const locale of ['zh-CN', 'en'])
-  test(`settings sign-in opens the inline login in the Overview tab: ${locale}`, async () => {
+  test(`settings sign-in starts browser login and opens the Overview tab: ${locale}`, async () => {
     const commands = [];
     let authenticating = false;
     const localBoot = {
@@ -126,6 +126,7 @@ for (const locale of ['zh-CN', 'en'])
             csrf: 'settings-login-csrf',
             ...(authenticating
               ? {
+                  // Retain coverage of an explicit inline form projection.
                   inlineLogin: {
                     providerId: '11111111-2222-4333-8444-555555555555',
                     providers: [
@@ -184,7 +185,7 @@ for (const locale of ['zh-CN', 'en'])
       await flush();
       assert.equal(commands.length, 1);
       assert.deepEqual(JSON.parse(commands[0].body), {
-        action: 'inline_login',
+        action: 'open_login',
       });
       assert.equal(commands[0].headers['x-auriga-csrf'], 'settings-login-csrf');
       assert.equal(
