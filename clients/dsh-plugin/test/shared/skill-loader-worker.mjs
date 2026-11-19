@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { generateKeyPairSync, randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
-import { SourceTextModule, SyntheticModule, createContext } from 'node:vm';
+import { Script, createContext } from 'node:vm';
 import { SHARED_PROFILE } from '../../src/shared/host.js';
 import { canonical, fail } from '../../src/shared/protocol.js';
 import {
@@ -62,7 +62,6 @@ async function load(skillRoots) {
       ].map((name) => [name, keys]),
     ),
   };
-  const context = createContext({ process: { platform: 'linux' } });
   const dependencies = {
     'node:crypto': await import('node:crypto'),
     'node:fs': {
@@ -94,26 +93,34 @@ async function load(skillRoots) {
     },
     './protocol.js': { canonical, fail },
   };
-  const module = new SourceTextModule(source, { context });
-  await module.link((name) => {
-    const values = dependencies[name];
-    assert.ok(values, 'unexpected production dependency ' + name);
-    return new SyntheticModule(
-      Object.keys(values),
-      function () {
-        for (const [key, value] of Object.entries(values))
-          this.setExport(key, value);
+  // Exercise the unchanged production apply body in a Linux platform seam.
+  // Only static ESM declarations are adapted; ordinary VM Script avoids the
+  // experimental vm-module native crash seen on Windows Node.
+  let linked = 0;
+  const script = source
+    .replace(
+      /^import\s+\{([^}]+)\}\s+from\s+(['"])([^'"]+)\2;/gm,
+      (_match, names, _quote, name) => {
+        assert.ok(
+          dependencies[name],
+          'unexpected production dependency ' + name,
+        );
+        linked++;
+        return `const {${names.replace(/\s+as\s+/g, ':')}}=dependencies[${JSON.stringify(name)}];`;
       },
-      { context },
-    );
+    )
+    .replace(/^export (?=(?:const|async function|function)\b)/gm, '');
+  assert.equal(linked, Object.keys(dependencies).length);
+  const context = createContext({
+    process: { platform: 'linux' },
+    dependencies,
   });
-  await module.evaluate();
+  const module = new Script(script + '\n;({apply});', {
+    filename: 'actual-shared-ports-loader.js',
+  }).runInContext(context);
   let code;
   try {
-    await module.namespace.apply(
-      {},
-      { configFile: root + '/control/shared-host.json' },
-    );
+    await module.apply({}, { configFile: root + '/control/shared-host.json' });
   } catch (error) {
     code = error.code;
   }
