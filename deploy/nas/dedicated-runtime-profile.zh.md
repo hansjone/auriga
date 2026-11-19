@@ -4,6 +4,24 @@
 
 公开解析代码位于 [profile-resolution.js](../../clients/dsh-plugin/src/dedicated/profile-resolution.js)。Node C 消费批准包内这个固定文件，无需新增 package export，也不能从 YAML 传 resolver。
 
+## 源码安装时供入批准配方
+
+新安装沿原 `scripts/shared-install.sh` 同时供应两份分别批准的完整 profile：
+
+```sh
+sh deploy/nas/scripts/shared-install.sh \
+  --profile-file /approved/shared.yml --profile-sha256 "$SHARED_PROFILE_SHA256" \
+  --dedicated-profile-file /approved/dedicated.yml --dedicated-profile-sha256 "$DEDICATED_PROFILE_SHA256" \
+  --model gpt-6.1-sol --expected-base-sha256 "$ORIGINAL_RECEIPT_SHA256" \
+  --team-only
+```
+
+已有公司 adapter 的安装仍沿原 `--adapter-file/--adapter-sha256`，与 `--team-only` 互斥。DED 两参数必须成对，来源为 root-owned 普通单链接0644文件、可信父目录且 SHA256 匹配；安装端调用与 Agent 启动同一完整 DED validator，拒共享 profile、残缺基线、任意加载器或超限输入。不要把文件放入原 sealed materials，也不要直接编辑 Agent 配置。
+
+原 stage 将批准字节存为 `public/dedicated-profile.yml`，其摘要同时纳入 Version1 receipt 的可选 `dedicatedProfile` 与原闭合 `files` 摘要；commit 后保持同一不可变 generation。原 role projection 仅向 Agent 投影 UID0/GID0、0444 的 `agent/dedicated-profile.yml`，并给原 `sharedDshRuntime.dedicatedProfileFile` 设置 `/etc/auriga/shared-runtime/dedicated-profile.yml`。正常恢复、重新 render 和签名 runtime 升级均重读同一批准来源；Host 不挂 source、平台私钥或 Agent 安装秘密。
+
+未供应这对参数时，原 shared-only Version1 receipt 字节和投影不变，DED 仍明确不可用。已 committed 的 shared-only 安装不能通过再次 stage、删除收据或手改 sealed 文件隐式增加 DED；本入口不实现安装授权升级，也不重置 pool、凭据或 runtime 高水位。本次面向同时批准两份配方的新安装。配方默认模型须与安装批准的模型路由一致；本安装成功不等于真实 Host、资源市场或正常页面验收通过。
+
 ## 固定文件和持久目录
 
 - `/opt/dsh/package.json`：只读 SDK 安装锚，对应正式套件 `payload/upstream/app`。

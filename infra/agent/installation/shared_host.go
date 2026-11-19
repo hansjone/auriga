@@ -29,6 +29,12 @@ func ValidateSharedProfile(profile []byte) error {
 	return renderer.ValidateProductionPoolProfile(profile)
 }
 
+// ValidateDedicatedProfile delegates to the separate complete dedicated policy
+// used by Agent startup; it never substitutes the restricted shared allowlist.
+func ValidateDedicatedProfile(profile []byte) error {
+	return renderer.ValidateDedicatedPoolProfile(profile)
+}
+
 // RenderSharedHostConfig invokes the existing renderer using a fixed command
 // and named flags. Values are passed as separate arguments, never shell text.
 func RenderSharedHostConfig(in SharedHostInputs) error {

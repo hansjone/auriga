@@ -91,6 +91,25 @@ func TestSharedInstallationProfileUsesTheProductionPoolValidator(t *testing.T) {
 	}
 }
 
+func TestDedicatedInstallationProfileUsesItsSeparateProductionValidator(t *testing.T) {
+	profile, err := os.ReadFile("../../../deploy/nas/dedicated-runtime-profile.example.yml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ValidateDedicatedProfile(profile); err != nil {
+		t.Fatal(err)
+	}
+	shared, err := os.ReadFile("../../../deploy/nas/shared-runtime-profile.example.yml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, invalid := range [][]byte{nil, []byte("[]"), shared, append(bytes.Clone(profile), []byte("\n- id: unapproved\n  name: 'auriga-dsh'\n")...), bytes.Repeat([]byte(" "), (1<<20)+1)} {
+		if err := ValidateDedicatedProfile(invalid); err == nil {
+			t.Fatal("incomplete, cross-mode, unapproved or oversized dedicated profile accepted")
+		}
+	}
+}
+
 func TestSharedHostExplicitEmptyOutboundPolicyDoesNotInventCompanyDestinations(t *testing.T) {
 	dir := t.TempDir()
 	in := SharedHostInputs{Model: "synthetic-model", EnterprisePolicyFile: filepath.Join(dir, "policy.json")}

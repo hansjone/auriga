@@ -25,6 +25,9 @@ case "${1:-}" in
       -action "$_action" -expected-base-sha256 "${NAS_SHARED_EXPECTED_BASE:?}"
     if [ "$_action" = stage ]; then
       set -- "$@" -profile-file "${NAS_SHARED_PROFILE:?}" -profile-sha256 "${NAS_SHARED_PROFILE_SHA:?}" -model "${NAS_SHARED_MODEL:?}"
+      if [ -n "${NAS_SHARED_DEDICATED_PROFILE:-}${NAS_SHARED_DEDICATED_PROFILE_SHA:-}" ]; then
+        set -- "$@" -dedicated-profile-file "${NAS_SHARED_DEDICATED_PROFILE:?}" -dedicated-profile-sha256 "${NAS_SHARED_DEDICATED_PROFILE_SHA:?}"
+      fi
       case "${NAS_SHARED_TEAM:-}" in
         true) set -- "$@" -team-only ;;
         false) set -- "$@" -adapter-file "${NAS_SHARED_ADAPTER:?}" -adapter-sha256 "${NAS_SHARED_ADAPTER_SHA:?}" ;;

@@ -13,11 +13,16 @@ materials_expected=
 rotation_input=
 shared_base=; shared_profile=; shared_profile_sha=; shared_model=
 shared_adapter=; shared_adapter_sha=; shared_team=false
+shared_dedicated=; shared_dedicated_sha=
 case "$operation" in
   shared-stage)
-    [ "$#" = 8 ] || die 'shared stage requires seven fixed approval inputs'
+    case "$#" in 8|10) ;; *) die 'shared stage requires seven fixed approval inputs and an optional dedicated pair' ;; esac
     shared_base=$2; shared_profile=$3; shared_profile_sha=$4; shared_model=$5
-    shared_adapter=$6; shared_adapter_sha=$7; shared_team=$8 ;;
+    shared_adapter=$6; shared_adapter_sha=$7; shared_team=$8
+    if [ "$#" = 10 ]; then shared_dedicated=$9; shared_dedicated_sha=${10}; fi
+    if [ -n "$shared_dedicated$shared_dedicated_sha" ]; then
+      [ -n "$shared_dedicated" ] && [ -n "$shared_dedicated_sha" ] || die 'dedicated profile and SHA256 must be supplied together'
+    fi ;;
   shared-commit) [ "$#" = 2 ] || die 'shared commit requires approved base hash'; shared_base=$2 ;;
   collab-publish|collab-install|collab-recover-expired|collab-queue-import)
     [ "$#" = 2 ] || die 'collab rotation requires an approved directory'
@@ -81,6 +86,10 @@ fi
 if [ "$operation" = shared-stage ]; then
   validate_input_path "$shared_profile"
   set -- "$@" --mount "type=bind,src=$shared_profile,dst=$shared_profile,readonly"
+  if [ -n "$shared_dedicated" ]; then
+    validate_input_path "$shared_dedicated"
+    set -- "$@" --mount "type=bind,src=$shared_dedicated,dst=$shared_dedicated,readonly"
+  fi
   case "$shared_team" in
     true) [ -z "$shared_adapter$shared_adapter_sha" ] || die 'team-only and adapter inputs are mutually exclusive' ;;
     false)
@@ -142,6 +151,7 @@ esac
     --env "NAS_COLLAB_ROTATION_INPUT=$rotation_input" \
     --env "NAS_SHARED_EXPECTED_BASE=$shared_base" --env "NAS_SHARED_PROFILE=$shared_profile" \
     --env "NAS_SHARED_PROFILE_SHA=$shared_profile_sha" --env "NAS_SHARED_MODEL=$shared_model" \
+    --env "NAS_SHARED_DEDICATED_PROFILE=$shared_dedicated" --env "NAS_SHARED_DEDICATED_PROFILE_SHA=$shared_dedicated_sha" \
     --env "NAS_SHARED_ADAPTER=$shared_adapter" --env "NAS_SHARED_ADAPTER_SHA=$shared_adapter_sha" --env "NAS_SHARED_TEAM=$shared_team" \
     --env "NAS_COLLAB_CONFIG_DEGRADED=${NAS_COLLAB_CONFIG_DEGRADED:-0}" \
     --entrypoint /bin/sh "$_image" "$NAS_ROOT/scripts/installer-entry.sh" "$operation"
