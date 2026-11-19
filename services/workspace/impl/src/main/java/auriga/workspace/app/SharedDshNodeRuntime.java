@@ -169,6 +169,28 @@ public final class SharedDshNodeRuntime {
     placements.admit(node, holder, binding, task);
   }
 
+  /** Read-only authority check before a cold connection waits; Admit rechecks it atomically. */
+  public void validateAdmission(UUID node, SharedDshSessionBinding binding, String task) {
+    auriga.workspace.domain.SharedDshPolicy.valid(
+        binding.getUnknownFields().asMap().isEmpty()
+            && auriga.workspace.domain.SharedDshPolicy.uuid(task)
+            && auriga.workspace.domain.SharedDshPolicy.uuid(binding.getPhysicalInstanceId())
+            && auriga.workspace.domain.SharedDshPolicy.uuid(binding.getSessionId()));
+    var registered =
+        new SharedDshEntryQueries(store, placements)
+            .lookup(
+                UUID.fromString(binding.getPhysicalInstanceId()),
+                UUID.fromString(binding.getSessionId()));
+    if (!registered.equals(binding))
+      throw new auriga.common.error.AurigaException(auriga.common.error.CommonErrors.NOT_FOUND);
+    requireOwner(
+        node,
+        SharedDshBinding.newBuilder()
+            .setTenantId(binding.getTenantId())
+            .setPhysicalInstanceId(binding.getPhysicalInstanceId())
+            .build());
+  }
+
   public void release(UUID node, SharedDshSessionBinding binding, String task) {
     placements.release(node, binding, task);
   }

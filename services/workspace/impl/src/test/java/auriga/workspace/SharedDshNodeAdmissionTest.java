@@ -80,6 +80,7 @@ class SharedDshNodeAdmissionTest {
         stream.onNext(
             SessionRequest.newBuilder().setInventory(Inventory.getDefaultInstance()).build());
         assertTrue(inventoryReady.await(10, java.util.concurrent.TimeUnit.SECONDS));
+        stream.onNext(SessionRequest.newBuilder().setSharedDshPoolMemorySample(memory(f)).build());
         var request =
             AdmitSharedDshTaskRequest.newBuilder()
                 .setBinding(binding(f))
@@ -195,6 +196,8 @@ class SharedDshNodeAdmissionTest {
       context.run(() -> service.admitSharedDshTask(request, noStream));
       assertNotNull(noStream.error);
       var peer = f.connect(f.node, true);
+      peer.input.onNext(
+          SessionRequest.newBuilder().setSharedDshPoolMemorySample(memory(f)).build());
       var currentContext =
           Context.current()
               .withValues(
@@ -305,6 +308,20 @@ class SharedDshNodeAdmissionTest {
     return SharedDshSessionBinding.newBuilder()
         .setTenantId(f.tenant.toString())
         .setPhysicalInstanceId(f.pool.toString())
+        .build();
+  }
+
+  private static SharedDshPoolMemorySample memory(SharedDshNodeRuntimeTest.Fixture f) {
+    long now = f.clock.instant().getEpochSecond();
+    return SharedDshPoolMemorySample.newBuilder()
+        .setSchemaVersion(1)
+        .setTenantId(f.tenant.toString())
+        .setPhysicalInstanceId(f.pool.toString())
+        .setObservedGeneration(1)
+        .setObservedAt(now)
+        .setValidUntil(now + 30)
+        .setMemoryUsedBytes(79)
+        .setMemoryLimitBytes(100)
         .build();
   }
 
