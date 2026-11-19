@@ -16,6 +16,28 @@ import org.junit.jupiter.api.*;
 import org.springframework.security.core.context.SecurityContextHolder;
 
 class SharedDshGrpcPolicyTest {
+  @Test
+  void internalJwtListenerDoesNotImplementNodeTaskWrites() {
+    var authority = mock(SharedDshAuthority.class);
+    var adapter = new SharedDshGrpc(authority);
+    var admit = mock(StreamObserver.class);
+    var release = mock(StreamObserver.class);
+    service("svc:agent");
+    TenantContext.run(
+        UUID.randomUUID(),
+        () -> {
+          adapter.admitSharedDshTask(AdmitSharedDshTaskRequest.getDefaultInstance(), admit);
+          adapter.releaseSharedDshTask(ReleaseSharedDshTaskRequest.getDefaultInstance(), release);
+        });
+    var errors = org.mockito.ArgumentCaptor.forClass(Throwable.class);
+    verify(admit).onError(errors.capture());
+    verify(release).onError(errors.capture());
+    for (var error : errors.getAllValues())
+      assertEquals(
+          io.grpc.Status.Code.UNIMPLEMENTED, io.grpc.Status.fromThrowable(error).getCode());
+    verifyNoInteractions(authority);
+  }
+
   @AfterEach
   void clear() {
     SecurityContextHolder.clearContext();

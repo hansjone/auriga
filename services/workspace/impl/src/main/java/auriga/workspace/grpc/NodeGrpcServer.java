@@ -149,6 +149,7 @@ public final class NodeGrpcServer implements SmartLifecycle, AutoCloseable {
               .maxInboundMessageSize(1024 * 1024)
               .addService(ServerInterceptors.intercept(join, auth))
               .addService(ServerInterceptors.intercept(sessions.service(), auth))
+              .addService(ServerInterceptors.intercept(sessions.admissionService(), auth))
               .build()
               .start();
     } catch (Exception e) {

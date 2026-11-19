@@ -113,6 +113,299 @@ class SharedDshPostgresTest {
     service = new SharedDshPlacements(store, inputs, b -> probe, clock);
   }
 
+  record AdmissionFixture(
+      UUID node,
+      UUID holder,
+      auriga.workspace.persistence.NodeSessionLease lease,
+      SharedDshSessionBinding binding) {}
+
+  SharedDshSessionBinding admissionBinding(UUID member) {
+    var current = run(() -> service.current(member, session));
+    var b = current.binding();
+    return run(
+        () ->
+            service.register(
+                SharedDshSessionBinding.newBuilder()
+                    .setTenantId(b.getTenantId())
+                    .setMemberId(b.getMemberId())
+                    .setPlacementId(b.getPlacementId())
+                    .setPhysicalInstanceId(b.getPhysicalInstanceId())
+                    .setMode(b.getMode())
+                    .setEpoch(b.getEpoch())
+                    .setRevision(b.getRevision())
+                    .setAuthGeneration(current.authGeneration())
+                    .setSessionId(UuidV7.next().toString())
+                    .setPlatformSessionId(session.toString())
+                    .build(),
+                ""));
+  }
+
+  AdmissionFixture admissionFixture() {
+    var p = preparedResourceMarket(false);
+    UUID holder = UuidV7.next();
+    var lease = new auriga.workspace.persistence.NodeSessionLease(store, tenant, p.node(), holder);
+    lease.acquire();
+    return new AdmissionFixture(p.node(), holder, lease, admissionBinding(p.member()));
+  }
+
+  SharedDshPoolMemorySample admissionSample(SharedDshSessionBinding b) {
+    return SharedDshPoolMemorySample.newBuilder()
+        .setSchemaVersion(1)
+        .setTenantId(tenant.toString())
+        .setPhysicalInstanceId(b.getPhysicalInstanceId())
+        .setObservedGeneration(1)
+        .setObservedAt(seconds)
+        .setValidUntil(seconds + 30)
+        .setMemoryUsedBytes(79)
+        .setMemoryLimitBytes(100)
+        .build();
+  }
+
+  void admissionMemory(AdmissionFixture f, SharedDshPoolMemorySample sample) {
+    f.lease()
+        .guard(
+            () -> {
+              service.memory(f.node(), f.holder(), 0, sample);
+              return null;
+            });
+  }
+
+  void admissionBegin(AdmissionFixture f, SharedDshSessionBinding b, String task) {
+    f.lease()
+        .guard(
+            () -> {
+              service.admit(f.node(), f.holder(), b, task);
+              return null;
+            });
+  }
+
+  void admissionEnd(AdmissionFixture f, SharedDshSessionBinding b, String task) {
+    f.lease()
+        .guard(
+            () -> {
+              service.release(f.node(), b, task);
+              return null;
+            });
+  }
+
+  @Test
+  void taskAdmissionRequiresFreshOwnerMemoryAndRejectsRollbackAcrossReconnects() {
+    var f = admissionFixture();
+    try {
+      String task = UuidV7.next().toString();
+      assertThrows(
+          auriga.common.error.AurigaException.class, () -> admissionBegin(f, f.binding(), task));
+      var good = admissionSample(f.binding());
+      admissionMemory(f, good);
+      admissionBegin(f, f.binding(), task);
+      admissionEnd(f, f.binding(), task);
+      admissionMemory(f, good.toBuilder().setObservedGeneration(2).build());
+      assertEquals(
+          "common.conflict",
+          assertThrows(auriga.common.error.AurigaException.class, () -> admissionMemory(f, good))
+              .errorCode()
+              .code());
+      f.lease().release();
+      UUID holder = UuidV7.next();
+      var lease =
+          new auriga.workspace.persistence.NodeSessionLease(store, tenant, f.node(), holder);
+      lease.acquire();
+      var reconnected = new AdmissionFixture(f.node(), holder, lease, f.binding());
+      try {
+        assertThrows(
+            auriga.common.error.AurigaException.class,
+            () -> admissionBegin(f, f.binding(), UuidV7.next().toString()));
+        assertEquals(
+            "common.unavailable",
+            assertThrows(
+                    auriga.common.error.AurigaException.class,
+                    () -> admissionBegin(reconnected, f.binding(), UuidV7.next().toString()))
+                .errorCode()
+                .code());
+        admissionMemory(reconnected, good.toBuilder().setObservedGeneration(2).build());
+        seconds += 30;
+        assertEquals(
+            "common.unavailable",
+            assertThrows(
+                    auriga.common.error.AurigaException.class,
+                    () -> admissionBegin(reconnected, f.binding(), UuidV7.next().toString()))
+                .errorCode()
+                .code());
+        admissionMemory(
+            reconnected,
+            admissionSample(f.binding()).toBuilder()
+                .setObservedGeneration(2)
+                .setMemoryUsedBytes(80)
+                .build());
+        assertEquals(
+            "common.conflict",
+            assertThrows(
+                    auriga.common.error.AurigaException.class,
+                    () -> admissionBegin(reconnected, f.binding(), UuidV7.next().toString()))
+                .errorCode()
+                .code());
+      } finally {
+        lease.release();
+      }
+    } finally {
+      f.lease().release();
+    }
+  }
+
+  @Test
+  void taskAdmissionReleaseFencesAbsentTasksAndOldCompletionCannotReleaseANewTask() {
+    var f = admissionFixture();
+    try {
+      admissionMemory(f, admissionSample(f.binding()));
+      String old = UuidV7.next().toString();
+      admissionEnd(f, f.binding(), old);
+      assertEquals(
+          "common.conflict",
+          assertThrows(
+                  auriga.common.error.AurigaException.class,
+                  () -> admissionBegin(f, f.binding(), old))
+              .errorCode()
+              .code());
+      String next = UuidV7.next().toString();
+      admissionBegin(f, f.binding(), next);
+      admissionBegin(f, f.binding(), next);
+      var wrong = f.binding().toBuilder().setSessionId(UuidV7.next().toString()).build();
+      assertEquals(
+          "common.not_found",
+          assertThrows(
+                  auriga.common.error.AurigaException.class, () -> admissionEnd(f, wrong, next))
+              .errorCode()
+              .code());
+      admissionEnd(f, f.binding(), old);
+      run(
+          () ->
+              store.tx(
+                  () -> {
+                    assertEquals(
+                        UUID.fromString(next),
+                        store.jdbc.queryForObject(
+                            "SELECT task_id FROM shared_dsh_active WHERE tenant_id=? AND member_id=?",
+                            UUID.class,
+                            tenant,
+                            UUID.fromString(f.binding().getMemberId())));
+                    return null;
+                  }));
+      disabled.add(UUID.fromString(f.binding().getMemberId()));
+      admissionEnd(f, f.binding(), next);
+      admissionEnd(f, f.binding(), next);
+      run(
+          () ->
+              store.tx(
+                  () -> {
+                    assertEquals(
+                        0,
+                        store.jdbc.queryForObject(
+                            "SELECT count(*) FROM shared_dsh_active WHERE tenant_id=?",
+                            Integer.class,
+                            tenant));
+                    return null;
+                  }));
+    } finally {
+      f.lease().release();
+    }
+  }
+
+  @Test
+  void taskAdmissionConcurrentFiveMembersReserveExactlyFourAndOnePerMember() throws Exception {
+    var f = admissionFixture();
+    try {
+      admissionMemory(f, admissionSample(f.binding()));
+      var bindings = new ArrayList<SharedDshSessionBinding>();
+      bindings.add(f.binding());
+      for (int i = 0; i < 4; i++) {
+        UUID member = UuidV7.next();
+        ready(member);
+        bindings.add(admissionBinding(member));
+      }
+      var start = new java.util.concurrent.CountDownLatch(1);
+      int accepted = 0;
+      try (var workers = java.util.concurrent.Executors.newVirtualThreadPerTaskExecutor()) {
+        var pending = new ArrayList<java.util.concurrent.Future<Boolean>>();
+        for (var binding : bindings)
+          pending.add(
+              workers.submit(
+                  () -> {
+                    assertTrue(start.await(15, java.util.concurrent.TimeUnit.SECONDS));
+                    try {
+                      admissionBegin(f, binding, UuidV7.next().toString());
+                      return true;
+                    } catch (auriga.common.error.AurigaException error) {
+                      assertEquals("common.conflict", error.errorCode().code());
+                      return false;
+                    }
+                  }));
+        start.countDown();
+        for (var pendingTask : pending)
+          if (pendingTask.get(15, java.util.concurrent.TimeUnit.SECONDS)) accepted++;
+      }
+      assertEquals(4, accepted);
+      run(
+          () ->
+              store.tx(
+                  () -> {
+                    assertEquals(
+                        4,
+                        store.jdbc.queryForObject(
+                            "SELECT count(*) FROM shared_dsh_active WHERE tenant_id=?",
+                            Integer.class,
+                            tenant));
+                    return null;
+                  }));
+      assertEquals(
+          "common.conflict",
+          assertThrows(
+                  auriga.common.error.AurigaException.class,
+                  () -> admissionBegin(f, f.binding(), UuidV7.next().toString()))
+              .errorCode()
+              .code());
+    } finally {
+      f.lease().release();
+    }
+  }
+
+  @Test
+  void taskAdmissionReleaseOfAnotherAbsentBindingDoesNotPoisonCurrentTask() {
+    var f = admissionFixture();
+    try {
+      admissionMemory(f, admissionSample(f.binding()));
+      String task = UuidV7.next().toString();
+      var other = f.binding().toBuilder().setPlatformSessionId(UuidV7.next().toString()).build();
+      admissionEnd(f, other, task);
+      admissionBegin(f, f.binding(), task);
+      admissionEnd(f, f.binding(), task);
+      run(
+          () ->
+              store.tx(
+                  () -> {
+                    assertEquals(
+                        2,
+                        store.jdbc.queryForObject(
+                            "SELECT count(*) FROM shared_dsh_task_end WHERE tenant_id=?",
+                            Integer.class,
+                            tenant));
+                    return null;
+                  }));
+      TenantContext.run(
+          UUID.randomUUID(),
+          () ->
+              store.tx(
+                  () -> {
+                    assertEquals(
+                        0,
+                        store.jdbc.queryForObject(
+                            "SELECT count(*) FROM shared_dsh_task_end", Integer.class));
+                    return null;
+                  }));
+    } finally {
+      f.lease().release();
+    }
+  }
+
   <T> T run(java.util.function.Supplier<T> work) {
     return TenantContext.call(tenant, work::get);
   }

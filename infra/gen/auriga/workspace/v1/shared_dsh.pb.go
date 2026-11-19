@@ -849,6 +849,231 @@ func (x *ReportSharedDshResourceResponse) GetRevision() int64 {
 	return 0
 }
 
+type AdmitSharedDshTaskRequest struct {
+	state         protoimpl.MessageState      `protogen:"open.v1"`
+	Binding       *v1.SharedDshSessionBinding `protobuf:"bytes,1,opt,name=binding,proto3" json:"binding,omitempty"`
+	TaskId        string                      `protobuf:"bytes,2,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AdmitSharedDshTaskRequest) Reset() {
+	*x = AdmitSharedDshTaskRequest{}
+	mi := &file_auriga_workspace_v1_shared_dsh_proto_msgTypes[16]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AdmitSharedDshTaskRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AdmitSharedDshTaskRequest) ProtoMessage() {}
+
+func (x *AdmitSharedDshTaskRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_auriga_workspace_v1_shared_dsh_proto_msgTypes[16]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AdmitSharedDshTaskRequest.ProtoReflect.Descriptor instead.
+func (*AdmitSharedDshTaskRequest) Descriptor() ([]byte, []int) {
+	return file_auriga_workspace_v1_shared_dsh_proto_rawDescGZIP(), []int{16}
+}
+
+func (x *AdmitSharedDshTaskRequest) GetBinding() *v1.SharedDshSessionBinding {
+	if x != nil {
+		return x.Binding
+	}
+	return nil
+}
+
+func (x *AdmitSharedDshTaskRequest) GetTaskId() string {
+	if x != nil {
+		return x.TaskId
+	}
+	return ""
+}
+
+type AdmitSharedDshTaskResponse struct {
+	state         protoimpl.MessageState      `protogen:"open.v1"`
+	Admitted      bool                        `protobuf:"varint,1,opt,name=admitted,proto3" json:"admitted,omitempty"`
+	Binding       *v1.SharedDshSessionBinding `protobuf:"bytes,2,opt,name=binding,proto3" json:"binding,omitempty"`
+	TaskId        string                      `protobuf:"bytes,3,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AdmitSharedDshTaskResponse) Reset() {
+	*x = AdmitSharedDshTaskResponse{}
+	mi := &file_auriga_workspace_v1_shared_dsh_proto_msgTypes[17]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AdmitSharedDshTaskResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AdmitSharedDshTaskResponse) ProtoMessage() {}
+
+func (x *AdmitSharedDshTaskResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_auriga_workspace_v1_shared_dsh_proto_msgTypes[17]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AdmitSharedDshTaskResponse.ProtoReflect.Descriptor instead.
+func (*AdmitSharedDshTaskResponse) Descriptor() ([]byte, []int) {
+	return file_auriga_workspace_v1_shared_dsh_proto_rawDescGZIP(), []int{17}
+}
+
+func (x *AdmitSharedDshTaskResponse) GetAdmitted() bool {
+	if x != nil {
+		return x.Admitted
+	}
+	return false
+}
+
+func (x *AdmitSharedDshTaskResponse) GetBinding() *v1.SharedDshSessionBinding {
+	if x != nil {
+		return x.Binding
+	}
+	return nil
+}
+
+func (x *AdmitSharedDshTaskResponse) GetTaskId() string {
+	if x != nil {
+		return x.TaskId
+	}
+	return ""
+}
+
+type ReleaseSharedDshTaskRequest struct {
+	state         protoimpl.MessageState      `protogen:"open.v1"`
+	Binding       *v1.SharedDshSessionBinding `protobuf:"bytes,1,opt,name=binding,proto3" json:"binding,omitempty"`
+	TaskId        string                      `protobuf:"bytes,2,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ReleaseSharedDshTaskRequest) Reset() {
+	*x = ReleaseSharedDshTaskRequest{}
+	mi := &file_auriga_workspace_v1_shared_dsh_proto_msgTypes[18]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ReleaseSharedDshTaskRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ReleaseSharedDshTaskRequest) ProtoMessage() {}
+
+func (x *ReleaseSharedDshTaskRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_auriga_workspace_v1_shared_dsh_proto_msgTypes[18]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ReleaseSharedDshTaskRequest.ProtoReflect.Descriptor instead.
+func (*ReleaseSharedDshTaskRequest) Descriptor() ([]byte, []int) {
+	return file_auriga_workspace_v1_shared_dsh_proto_rawDescGZIP(), []int{18}
+}
+
+func (x *ReleaseSharedDshTaskRequest) GetBinding() *v1.SharedDshSessionBinding {
+	if x != nil {
+		return x.Binding
+	}
+	return nil
+}
+
+func (x *ReleaseSharedDshTaskRequest) GetTaskId() string {
+	if x != nil {
+		return x.TaskId
+	}
+	return ""
+}
+
+type ReleaseSharedDshTaskResponse struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Durable barrier against a delayed admission of this exact binding/task.
+	Fenced        bool                        `protobuf:"varint,1,opt,name=fenced,proto3" json:"fenced,omitempty"`
+	Binding       *v1.SharedDshSessionBinding `protobuf:"bytes,2,opt,name=binding,proto3" json:"binding,omitempty"`
+	TaskId        string                      `protobuf:"bytes,3,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ReleaseSharedDshTaskResponse) Reset() {
+	*x = ReleaseSharedDshTaskResponse{}
+	mi := &file_auriga_workspace_v1_shared_dsh_proto_msgTypes[19]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ReleaseSharedDshTaskResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ReleaseSharedDshTaskResponse) ProtoMessage() {}
+
+func (x *ReleaseSharedDshTaskResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_auriga_workspace_v1_shared_dsh_proto_msgTypes[19]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ReleaseSharedDshTaskResponse.ProtoReflect.Descriptor instead.
+func (*ReleaseSharedDshTaskResponse) Descriptor() ([]byte, []int) {
+	return file_auriga_workspace_v1_shared_dsh_proto_rawDescGZIP(), []int{19}
+}
+
+func (x *ReleaseSharedDshTaskResponse) GetFenced() bool {
+	if x != nil {
+		return x.Fenced
+	}
+	return false
+}
+
+func (x *ReleaseSharedDshTaskResponse) GetBinding() *v1.SharedDshSessionBinding {
+	if x != nil {
+		return x.Binding
+	}
+	return nil
+}
+
+func (x *ReleaseSharedDshTaskResponse) GetTaskId() string {
+	if x != nil {
+		return x.TaskId
+	}
+	return ""
+}
+
 var File_auriga_workspace_v1_shared_dsh_proto protoreflect.FileDescriptor
 
 const file_auriga_workspace_v1_shared_dsh_proto_rawDesc = "" +
@@ -905,7 +1130,22 @@ const file_auriga_workspace_v1_shared_dsh_proto_rawDesc = "" +
 	"\x1eReportSharedDshResourceRequest\x12?\n" +
 	"\x06report\x18\x01 \x01(\v2'.auriga.node.v1.SharedDshResourceReportR\x06report\"=\n" +
 	"\x1fReportSharedDshResourceResponse\x12\x1a\n" +
-	"\brevision\x18\x01 \x01(\x03R\brevision2\x97\b\n" +
+	"\brevision\x18\x01 \x01(\x03R\brevision\"w\n" +
+	"\x19AdmitSharedDshTaskRequest\x12A\n" +
+	"\abinding\x18\x01 \x01(\v2'.auriga.node.v1.SharedDshSessionBindingR\abinding\x12\x17\n" +
+	"\atask_id\x18\x02 \x01(\tR\x06taskId\"\x94\x01\n" +
+	"\x1aAdmitSharedDshTaskResponse\x12\x1a\n" +
+	"\badmitted\x18\x01 \x01(\bR\badmitted\x12A\n" +
+	"\abinding\x18\x02 \x01(\v2'.auriga.node.v1.SharedDshSessionBindingR\abinding\x12\x17\n" +
+	"\atask_id\x18\x03 \x01(\tR\x06taskId\"y\n" +
+	"\x1bReleaseSharedDshTaskRequest\x12A\n" +
+	"\abinding\x18\x01 \x01(\v2'.auriga.node.v1.SharedDshSessionBindingR\abinding\x12\x17\n" +
+	"\atask_id\x18\x02 \x01(\tR\x06taskId\"\x92\x01\n" +
+	"\x1cReleaseSharedDshTaskResponse\x12\x16\n" +
+	"\x06fenced\x18\x01 \x01(\bR\x06fenced\x12A\n" +
+	"\abinding\x18\x02 \x01(\v2'.auriga.node.v1.SharedDshSessionBindingR\abinding\x12\x17\n" +
+	"\atask_id\x18\x03 \x01(\tR\x06taskId2\x8b\n" +
+	"\n" +
 	"\x10SharedDshService\x12o\n" +
 	"\x10GetSharedDshPool\x12,.auriga.workspace.v1.GetSharedDshPoolRequest\x1a-.auriga.workspace.v1.GetSharedDshPoolResponse\x12\x81\x01\n" +
 	"\x16LookupSharedDshSession\x122.auriga.workspace.v1.LookupSharedDshSessionRequest\x1a3.auriga.workspace.v1.LookupSharedDshSessionResponse\x12o\n" +
@@ -914,7 +1154,9 @@ const file_auriga_workspace_v1_shared_dsh_proto_rawDesc = "" +
 	"\x0fRevokeSharedDsh\x12+.auriga.workspace.v1.RevokeSharedDshRequest\x1a,.auriga.workspace.v1.RevokeSharedDshResponse\x12\x87\x01\n" +
 	"\x18GetSharedDshResourceView\x124.auriga.workspace.v1.GetSharedDshResourceViewRequest\x1a5.auriga.workspace.v1.GetSharedDshResourceViewResponse\x12\x93\x01\n" +
 	"\x1cGetSharedDshResourceSnapshot\x128.auriga.workspace.v1.GetSharedDshResourceSnapshotRequest\x1a9.auriga.workspace.v1.GetSharedDshResourceSnapshotResponse\x12\x84\x01\n" +
-	"\x17ReportSharedDshResource\x123.auriga.workspace.v1.ReportSharedDshResourceRequest\x1a4.auriga.workspace.v1.ReportSharedDshResourceResponseBg\n" +
+	"\x17ReportSharedDshResource\x123.auriga.workspace.v1.ReportSharedDshResourceRequest\x1a4.auriga.workspace.v1.ReportSharedDshResourceResponse\x12u\n" +
+	"\x12AdmitSharedDshTask\x12..auriga.workspace.v1.AdmitSharedDshTaskRequest\x1a/.auriga.workspace.v1.AdmitSharedDshTaskResponse\x12{\n" +
+	"\x14ReleaseSharedDshTask\x120.auriga.workspace.v1.ReleaseSharedDshTaskRequest\x1a1.auriga.workspace.v1.ReleaseSharedDshTaskResponseBg\n" +
 	"\x1dauriga.contracts.workspace.v1P\x01ZDgithub.com/hansjone/auriga/infra/gen/auriga/workspace/v1;workspacev1b\x06proto3"
 
 var (
@@ -929,7 +1171,7 @@ func file_auriga_workspace_v1_shared_dsh_proto_rawDescGZIP() []byte {
 	return file_auriga_workspace_v1_shared_dsh_proto_rawDescData
 }
 
-var file_auriga_workspace_v1_shared_dsh_proto_msgTypes = make([]protoimpl.MessageInfo, 16)
+var file_auriga_workspace_v1_shared_dsh_proto_msgTypes = make([]protoimpl.MessageInfo, 20)
 var file_auriga_workspace_v1_shared_dsh_proto_goTypes = []any{
 	(*GetSharedDshPoolRequest)(nil),              // 0: auriga.workspace.v1.GetSharedDshPoolRequest
 	(*GetSharedDshPoolResponse)(nil),             // 1: auriga.workspace.v1.GetSharedDshPoolResponse
@@ -947,48 +1189,60 @@ var file_auriga_workspace_v1_shared_dsh_proto_goTypes = []any{
 	(*GetSharedDshResourceSnapshotResponse)(nil), // 13: auriga.workspace.v1.GetSharedDshResourceSnapshotResponse
 	(*ReportSharedDshResourceRequest)(nil),       // 14: auriga.workspace.v1.ReportSharedDshResourceRequest
 	(*ReportSharedDshResourceResponse)(nil),      // 15: auriga.workspace.v1.ReportSharedDshResourceResponse
-	(*v1.SharedDshSessionBinding)(nil),           // 16: auriga.node.v1.SharedDshSessionBinding
-	(*v1.SharedDshBinding)(nil),                  // 17: auriga.node.v1.SharedDshBinding
-	(*v1.SharedDshRevocation)(nil),               // 18: auriga.node.v1.SharedDshRevocation
-	(*v1.SharedDshResourceView)(nil),             // 19: auriga.node.v1.SharedDshResourceView
-	(*v11.UnifiedResourceRef)(nil),               // 20: auriga.resource.v1.UnifiedResourceRef
-	(*v11.ResourceRevocationList)(nil),           // 21: auriga.resource.v1.ResourceRevocationList
-	(*v1.SharedDshResourceReport)(nil),           // 22: auriga.node.v1.SharedDshResourceReport
+	(*AdmitSharedDshTaskRequest)(nil),            // 16: auriga.workspace.v1.AdmitSharedDshTaskRequest
+	(*AdmitSharedDshTaskResponse)(nil),           // 17: auriga.workspace.v1.AdmitSharedDshTaskResponse
+	(*ReleaseSharedDshTaskRequest)(nil),          // 18: auriga.workspace.v1.ReleaseSharedDshTaskRequest
+	(*ReleaseSharedDshTaskResponse)(nil),         // 19: auriga.workspace.v1.ReleaseSharedDshTaskResponse
+	(*v1.SharedDshSessionBinding)(nil),           // 20: auriga.node.v1.SharedDshSessionBinding
+	(*v1.SharedDshBinding)(nil),                  // 21: auriga.node.v1.SharedDshBinding
+	(*v1.SharedDshRevocation)(nil),               // 22: auriga.node.v1.SharedDshRevocation
+	(*v1.SharedDshResourceView)(nil),             // 23: auriga.node.v1.SharedDshResourceView
+	(*v11.UnifiedResourceRef)(nil),               // 24: auriga.resource.v1.UnifiedResourceRef
+	(*v11.ResourceRevocationList)(nil),           // 25: auriga.resource.v1.ResourceRevocationList
+	(*v1.SharedDshResourceReport)(nil),           // 26: auriga.node.v1.SharedDshResourceReport
 }
 var file_auriga_workspace_v1_shared_dsh_proto_depIdxs = []int32{
-	16, // 0: auriga.workspace.v1.LookupSharedDshSessionResponse.binding:type_name -> auriga.node.v1.SharedDshSessionBinding
-	17, // 1: auriga.workspace.v1.ResolveSharedDshResponse.binding:type_name -> auriga.node.v1.SharedDshBinding
-	16, // 2: auriga.workspace.v1.RegisterSharedDshSessionRequest.binding:type_name -> auriga.node.v1.SharedDshSessionBinding
-	16, // 3: auriga.workspace.v1.RegisterSharedDshSessionResponse.binding:type_name -> auriga.node.v1.SharedDshSessionBinding
-	18, // 4: auriga.workspace.v1.RevokeSharedDshRequest.revocation:type_name -> auriga.node.v1.SharedDshRevocation
-	17, // 5: auriga.workspace.v1.GetSharedDshResourceViewRequest.binding:type_name -> auriga.node.v1.SharedDshBinding
-	19, // 6: auriga.workspace.v1.GetSharedDshResourceViewResponse.view:type_name -> auriga.node.v1.SharedDshResourceView
-	17, // 7: auriga.workspace.v1.GetSharedDshResourceSnapshotRequest.binding:type_name -> auriga.node.v1.SharedDshBinding
-	19, // 8: auriga.workspace.v1.GetSharedDshResourceSnapshotResponse.view:type_name -> auriga.node.v1.SharedDshResourceView
-	20, // 9: auriga.workspace.v1.GetSharedDshResourceSnapshotResponse.resources:type_name -> auriga.resource.v1.UnifiedResourceRef
-	21, // 10: auriga.workspace.v1.GetSharedDshResourceSnapshotResponse.revocations:type_name -> auriga.resource.v1.ResourceRevocationList
-	22, // 11: auriga.workspace.v1.ReportSharedDshResourceRequest.report:type_name -> auriga.node.v1.SharedDshResourceReport
-	0,  // 12: auriga.workspace.v1.SharedDshService.GetSharedDshPool:input_type -> auriga.workspace.v1.GetSharedDshPoolRequest
-	2,  // 13: auriga.workspace.v1.SharedDshService.LookupSharedDshSession:input_type -> auriga.workspace.v1.LookupSharedDshSessionRequest
-	4,  // 14: auriga.workspace.v1.SharedDshService.ResolveSharedDsh:input_type -> auriga.workspace.v1.ResolveSharedDshRequest
-	6,  // 15: auriga.workspace.v1.SharedDshService.RegisterSharedDshSession:input_type -> auriga.workspace.v1.RegisterSharedDshSessionRequest
-	8,  // 16: auriga.workspace.v1.SharedDshService.RevokeSharedDsh:input_type -> auriga.workspace.v1.RevokeSharedDshRequest
-	10, // 17: auriga.workspace.v1.SharedDshService.GetSharedDshResourceView:input_type -> auriga.workspace.v1.GetSharedDshResourceViewRequest
-	12, // 18: auriga.workspace.v1.SharedDshService.GetSharedDshResourceSnapshot:input_type -> auriga.workspace.v1.GetSharedDshResourceSnapshotRequest
-	14, // 19: auriga.workspace.v1.SharedDshService.ReportSharedDshResource:input_type -> auriga.workspace.v1.ReportSharedDshResourceRequest
-	1,  // 20: auriga.workspace.v1.SharedDshService.GetSharedDshPool:output_type -> auriga.workspace.v1.GetSharedDshPoolResponse
-	3,  // 21: auriga.workspace.v1.SharedDshService.LookupSharedDshSession:output_type -> auriga.workspace.v1.LookupSharedDshSessionResponse
-	5,  // 22: auriga.workspace.v1.SharedDshService.ResolveSharedDsh:output_type -> auriga.workspace.v1.ResolveSharedDshResponse
-	7,  // 23: auriga.workspace.v1.SharedDshService.RegisterSharedDshSession:output_type -> auriga.workspace.v1.RegisterSharedDshSessionResponse
-	9,  // 24: auriga.workspace.v1.SharedDshService.RevokeSharedDsh:output_type -> auriga.workspace.v1.RevokeSharedDshResponse
-	11, // 25: auriga.workspace.v1.SharedDshService.GetSharedDshResourceView:output_type -> auriga.workspace.v1.GetSharedDshResourceViewResponse
-	13, // 26: auriga.workspace.v1.SharedDshService.GetSharedDshResourceSnapshot:output_type -> auriga.workspace.v1.GetSharedDshResourceSnapshotResponse
-	15, // 27: auriga.workspace.v1.SharedDshService.ReportSharedDshResource:output_type -> auriga.workspace.v1.ReportSharedDshResourceResponse
-	20, // [20:28] is the sub-list for method output_type
-	12, // [12:20] is the sub-list for method input_type
-	12, // [12:12] is the sub-list for extension type_name
-	12, // [12:12] is the sub-list for extension extendee
-	0,  // [0:12] is the sub-list for field type_name
+	20, // 0: auriga.workspace.v1.LookupSharedDshSessionResponse.binding:type_name -> auriga.node.v1.SharedDshSessionBinding
+	21, // 1: auriga.workspace.v1.ResolveSharedDshResponse.binding:type_name -> auriga.node.v1.SharedDshBinding
+	20, // 2: auriga.workspace.v1.RegisterSharedDshSessionRequest.binding:type_name -> auriga.node.v1.SharedDshSessionBinding
+	20, // 3: auriga.workspace.v1.RegisterSharedDshSessionResponse.binding:type_name -> auriga.node.v1.SharedDshSessionBinding
+	22, // 4: auriga.workspace.v1.RevokeSharedDshRequest.revocation:type_name -> auriga.node.v1.SharedDshRevocation
+	21, // 5: auriga.workspace.v1.GetSharedDshResourceViewRequest.binding:type_name -> auriga.node.v1.SharedDshBinding
+	23, // 6: auriga.workspace.v1.GetSharedDshResourceViewResponse.view:type_name -> auriga.node.v1.SharedDshResourceView
+	21, // 7: auriga.workspace.v1.GetSharedDshResourceSnapshotRequest.binding:type_name -> auriga.node.v1.SharedDshBinding
+	23, // 8: auriga.workspace.v1.GetSharedDshResourceSnapshotResponse.view:type_name -> auriga.node.v1.SharedDshResourceView
+	24, // 9: auriga.workspace.v1.GetSharedDshResourceSnapshotResponse.resources:type_name -> auriga.resource.v1.UnifiedResourceRef
+	25, // 10: auriga.workspace.v1.GetSharedDshResourceSnapshotResponse.revocations:type_name -> auriga.resource.v1.ResourceRevocationList
+	26, // 11: auriga.workspace.v1.ReportSharedDshResourceRequest.report:type_name -> auriga.node.v1.SharedDshResourceReport
+	20, // 12: auriga.workspace.v1.AdmitSharedDshTaskRequest.binding:type_name -> auriga.node.v1.SharedDshSessionBinding
+	20, // 13: auriga.workspace.v1.AdmitSharedDshTaskResponse.binding:type_name -> auriga.node.v1.SharedDshSessionBinding
+	20, // 14: auriga.workspace.v1.ReleaseSharedDshTaskRequest.binding:type_name -> auriga.node.v1.SharedDshSessionBinding
+	20, // 15: auriga.workspace.v1.ReleaseSharedDshTaskResponse.binding:type_name -> auriga.node.v1.SharedDshSessionBinding
+	0,  // 16: auriga.workspace.v1.SharedDshService.GetSharedDshPool:input_type -> auriga.workspace.v1.GetSharedDshPoolRequest
+	2,  // 17: auriga.workspace.v1.SharedDshService.LookupSharedDshSession:input_type -> auriga.workspace.v1.LookupSharedDshSessionRequest
+	4,  // 18: auriga.workspace.v1.SharedDshService.ResolveSharedDsh:input_type -> auriga.workspace.v1.ResolveSharedDshRequest
+	6,  // 19: auriga.workspace.v1.SharedDshService.RegisterSharedDshSession:input_type -> auriga.workspace.v1.RegisterSharedDshSessionRequest
+	8,  // 20: auriga.workspace.v1.SharedDshService.RevokeSharedDsh:input_type -> auriga.workspace.v1.RevokeSharedDshRequest
+	10, // 21: auriga.workspace.v1.SharedDshService.GetSharedDshResourceView:input_type -> auriga.workspace.v1.GetSharedDshResourceViewRequest
+	12, // 22: auriga.workspace.v1.SharedDshService.GetSharedDshResourceSnapshot:input_type -> auriga.workspace.v1.GetSharedDshResourceSnapshotRequest
+	14, // 23: auriga.workspace.v1.SharedDshService.ReportSharedDshResource:input_type -> auriga.workspace.v1.ReportSharedDshResourceRequest
+	16, // 24: auriga.workspace.v1.SharedDshService.AdmitSharedDshTask:input_type -> auriga.workspace.v1.AdmitSharedDshTaskRequest
+	18, // 25: auriga.workspace.v1.SharedDshService.ReleaseSharedDshTask:input_type -> auriga.workspace.v1.ReleaseSharedDshTaskRequest
+	1,  // 26: auriga.workspace.v1.SharedDshService.GetSharedDshPool:output_type -> auriga.workspace.v1.GetSharedDshPoolResponse
+	3,  // 27: auriga.workspace.v1.SharedDshService.LookupSharedDshSession:output_type -> auriga.workspace.v1.LookupSharedDshSessionResponse
+	5,  // 28: auriga.workspace.v1.SharedDshService.ResolveSharedDsh:output_type -> auriga.workspace.v1.ResolveSharedDshResponse
+	7,  // 29: auriga.workspace.v1.SharedDshService.RegisterSharedDshSession:output_type -> auriga.workspace.v1.RegisterSharedDshSessionResponse
+	9,  // 30: auriga.workspace.v1.SharedDshService.RevokeSharedDsh:output_type -> auriga.workspace.v1.RevokeSharedDshResponse
+	11, // 31: auriga.workspace.v1.SharedDshService.GetSharedDshResourceView:output_type -> auriga.workspace.v1.GetSharedDshResourceViewResponse
+	13, // 32: auriga.workspace.v1.SharedDshService.GetSharedDshResourceSnapshot:output_type -> auriga.workspace.v1.GetSharedDshResourceSnapshotResponse
+	15, // 33: auriga.workspace.v1.SharedDshService.ReportSharedDshResource:output_type -> auriga.workspace.v1.ReportSharedDshResourceResponse
+	17, // 34: auriga.workspace.v1.SharedDshService.AdmitSharedDshTask:output_type -> auriga.workspace.v1.AdmitSharedDshTaskResponse
+	19, // 35: auriga.workspace.v1.SharedDshService.ReleaseSharedDshTask:output_type -> auriga.workspace.v1.ReleaseSharedDshTaskResponse
+	26, // [26:36] is the sub-list for method output_type
+	16, // [16:26] is the sub-list for method input_type
+	16, // [16:16] is the sub-list for extension type_name
+	16, // [16:16] is the sub-list for extension extendee
+	0,  // [0:16] is the sub-list for field type_name
 }
 
 func init() { file_auriga_workspace_v1_shared_dsh_proto_init() }
@@ -1002,7 +1256,7 @@ func file_auriga_workspace_v1_shared_dsh_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_auriga_workspace_v1_shared_dsh_proto_rawDesc), len(file_auriga_workspace_v1_shared_dsh_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   16,
+			NumMessages:   20,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

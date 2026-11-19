@@ -23,6 +23,67 @@ import tools.jackson.databind.node.ObjectNode;
 /** Transaction/storage doubles isolate task policy; actual PG migration and RLS run in CI. */
 class SharedTasksTest {
   @Test
+  void absentFinishPersistsAnExactBarrierAndAcknowledgesItAfterRevocation() throws Exception {
+    var f = new Fixture();
+    f.run(
+        () -> {
+          var finish =
+              FinishSharedTaskRequest.newBuilder().setBinding(f.binding).setTaskId(f.task).build();
+          var result = f.tasks.finish(finish);
+          assertTrue(result.getFenced());
+          assertEquals(f.binding, result.getBinding());
+          assertEquals(f.task, result.getTaskId());
+          f.tasks = f.authority();
+          assertEquals(result, f.tasks.finish(finish));
+          assertEquals(
+              "common.conflict",
+              assertThrows(
+                      AurigaException.class, () -> f.begin(ENTERPRISE, List.of("task.execute")))
+                  .errorCode()
+                  .code());
+          f.active.set(false);
+          assertEquals(result, f.tasks.finish(finish));
+          return null;
+        });
+  }
+
+  @Test
+  void absentWrongBindingFinishCannotPoisonTheRealBindingWithTheSameUuid() throws Exception {
+    var f = new Fixture();
+    f.run(
+        () -> {
+          var other = f.binding.toBuilder().setSessionId(UUID.randomUUID().toString()).build();
+          assertTrue(
+              f.tasks
+                  .finish(
+                      FinishSharedTaskRequest.newBuilder()
+                          .setBinding(other)
+                          .setTaskId(f.task)
+                          .build())
+                  .getFenced());
+          assertTrue(
+              f.authorize(f.begin(ENTERPRISE, List.of("task.execute")).getCapability())
+                  .getActive());
+          assertEquals(
+              "common.not_found",
+              assertThrows(
+                      AurigaException.class,
+                      () ->
+                          f.tasks.finish(
+                              FinishSharedTaskRequest.newBuilder()
+                                  .setBinding(other)
+                                  .setTaskId(f.task)
+                                  .build()))
+                  .errorCode()
+                  .code());
+          assertTrue(
+              f.authorize(f.begin(ENTERPRISE, List.of("task.execute")).getCapability())
+                  .getActive());
+          return null;
+        });
+  }
+
+  @Test
   void teamOrdinaryTaskDoesNotRequireCompanyMaterialAndCannotUseEnterpriseCapabilities()
       throws Exception {
     var f = new Fixture();

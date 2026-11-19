@@ -5,6 +5,7 @@ import static auriga.workspace.persistence.WorkspaceStore.*;
 import auriga.common.error.*;
 import auriga.common.grpc.GrpcErrors;
 import auriga.contracts.node.v1.*;
+import auriga.contracts.workspace.v1.*;
 import auriga.workspace.app.*;
 import auriga.workspace.domain.WorkspaceCrypto;
 import auriga.workspace.persistence.NodeSessionLease;
@@ -105,6 +106,80 @@ public final class NodeSessions implements AutoCloseable {
     };
   }
 
+  /** Node mTLS listener only. Never publish as a bean on the service-JWT listener. */
+  public BindableService admissionService() {
+    return new SharedDshServiceGrpc.SharedDshServiceImplBase() {
+      @Override
+      public void admitSharedDshTask(
+          AdmitSharedDshTaskRequest request, StreamObserver<AdmitSharedDshTaskResponse> output) {
+        try {
+          if (!request.getUnknownFields().asMap().isEmpty())
+            throw new AurigaException(CommonErrors.VALIDATION_FAILED);
+          currentTaskCall(
+              session -> {
+                sharedRuntime.admit(
+                    session.node, session.holder, request.getBinding(), request.getTaskId());
+                return null;
+              });
+          output.onNext(
+              AdmitSharedDshTaskResponse.newBuilder()
+                  .setAdmitted(true)
+                  .setBinding(request.getBinding())
+                  .setTaskId(request.getTaskId())
+                  .build());
+          output.onCompleted();
+        } catch (RuntimeException error) {
+          output.onError(NodeGrpcServer.status(error));
+        }
+      }
+
+      @Override
+      public void releaseSharedDshTask(
+          ReleaseSharedDshTaskRequest request,
+          StreamObserver<ReleaseSharedDshTaskResponse> output) {
+        try {
+          if (!request.getUnknownFields().asMap().isEmpty())
+            throw new AurigaException(CommonErrors.VALIDATION_FAILED);
+          currentTaskCall(
+              session -> {
+                sharedRuntime.release(session.node, request.getBinding(), request.getTaskId());
+                return null;
+              });
+          output.onNext(
+              ReleaseSharedDshTaskResponse.newBuilder()
+                  .setFenced(true)
+                  .setBinding(request.getBinding())
+                  .setTaskId(request.getTaskId())
+                  .build());
+          output.onCompleted();
+        } catch (RuntimeException error) {
+          output.onError(NodeGrpcServer.status(error));
+        }
+      }
+    };
+  }
+
+  private <T> T currentTaskCall(java.util.function.Function<Session, T> work) {
+    var leaf = PEER.get();
+    if (leaf == null) throw new AurigaException(CommonErrors.UNAUTHENTICATED);
+    UUID node = enrollment.identity(leaf);
+    var session = sessions.get(node);
+    if (session == null || sharedRuntime == null)
+      throw new AurigaException(CommonErrors.UNAVAILABLE);
+    synchronized (session) {
+      if (session.closed
+          || !session.hello
+          || !session.inventory
+          || !session.sharedPreparation
+          || !session.leaf.equals(leaf)
+          || sessions.get(node) != session) throw new AurigaException(CommonErrors.UNAVAILABLE);
+      var result = session.lease.guard(() -> work.apply(session));
+      if (session.closed || sessions.get(node) != session)
+        throw new AurigaException(CommonErrors.UNAVAILABLE);
+      return result;
+    }
+  }
+
   private static StreamObserver<SessionRequest> ignored() {
     return new StreamObserver<>() {
       public void onNext(SessionRequest ignored) {}
@@ -150,6 +225,7 @@ public final class NodeSessions implements AutoCloseable {
     UUID sharedCursor;
     UUID sharedViewCursor;
     final UUID holder = auriga.common.persistence.UuidV7.next();
+    final long connectedAt = workspace.clock.instant().getEpochSecond();
     final NodeSessionLease lease;
     final NodeOutput outbound;
     final NodeDeliveries deliveries =
@@ -319,6 +395,11 @@ public final class NodeSessions implements AutoCloseable {
                     && sharedRuntime != null
                     && sharedPreparation) {
                   sharedRuntime.guardian(node, request.getSharedDshGuardianImpact());
+                } else if (request.hasSharedDshPoolMemorySample()
+                    && sharedRuntime != null
+                    && sharedPreparation) {
+                  sharedRuntime.memory(
+                      node, holder, connectedAt, request.getSharedDshPoolMemorySample());
                 } else if (!request.hasLog())
                   throw new AurigaException(CommonErrors.VALIDATION_FAILED);
               }
