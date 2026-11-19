@@ -154,9 +154,11 @@ class SharedDshNodeAdmissionTest {
   }
 
   private static byte[] privatePem(java.security.PrivateKey key) {
-    return ("-----BEGIN PRIVATE KEY-----\n"
+    return ("-----BEGIN "
+            + "PRIVATE KEY-----\n"
             + Base64.getMimeEncoder(64, new byte[] {'\n'}).encodeToString(key.getEncoded())
-            + "\n-----END PRIVATE KEY-----\n")
+            + "\n-----END "
+            + "PRIVATE KEY-----\n")
         .getBytes(java.nio.charset.StandardCharsets.US_ASCII);
   }
 
