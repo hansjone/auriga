@@ -18,4 +18,3 @@ message CallSharedMessageRequest {
   bytes request_json = 4;
 }
 message CallSharedMessageResponse { bytes result_json = 1; }
-

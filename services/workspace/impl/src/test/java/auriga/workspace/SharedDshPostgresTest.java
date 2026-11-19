@@ -15,6 +15,8 @@ import java.util.*;
 import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.*;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.jdbc.core.JdbcTemplate;
 
 /** Real temporary PostgreSQL, non-owner RLS role; external IAM/E/R ports use controlled doubles. */
@@ -143,7 +145,7 @@ class SharedDshPostgresTest {
   record ResourceMarketFixture(
       UUID member, UUID node, SharedDshResourceView view, SharedDshResourceReport report) {}
 
-  ResourceMarketFixture preparedResourceMarket() {
+  ResourceMarketFixture preparedResourceMarket(boolean dedicated) {
     UUID member = UUID.randomUUID(), node = UUID.randomUUID();
     run(
         () ->
@@ -176,7 +178,23 @@ class SharedDshPostgresTest {
                       return runtime.receipt(
                           node, sent, ack(sent.intent()).setWorkspaceEmpty(true).build());
                     })));
-    var view = run(() -> service.resourceView(pending.binding()));
+    final SharedDshBinding binding;
+    if (dedicated) {
+      finish(change(member, "dedicated", "resource-market-dedicated"));
+      binding = run(() -> service.current(member, session)).binding();
+      // The existing switch fixture acknowledges target preparation; its authenticated node
+      // relation is real fixture data, never a matcher standing in for the market JOIN.
+      run(
+          () ->
+              store.tx(
+                  () ->
+                      store.jdbc.update(
+                          "INSERT INTO shared_dsh_pool_node(tenant_id,pool_id,node_id) VALUES(?,?,?)",
+                          tenant,
+                          UUID.fromString(binding.getPhysicalInstanceId()),
+                          node)));
+    } else binding = pending.binding();
+    var view = run(() -> service.resourceView(binding));
     var report = resourceMarketReport(view);
     assertTrue(run(() -> resourceMarketQueries().report(view)).isEmpty());
     run(
@@ -191,7 +209,9 @@ class SharedDshPostgresTest {
   }
 
   SharedDshResourceMarketQueries resourceMarketQueries() {
-    return new SharedDshResourceMarketQueries(store, service, b -> probe, clock);
+    var entry = new auriga.workspace.app.SharedDshEntryTransportFixture(store, clock, tenant);
+    entry.responseStatus = () -> probe ? 200 : 503;
+    return new SharedDshResourceMarketQueries(store, service, entry.transport, clock);
   }
 
   SharedDshResourceReport resourceMarketReport(SharedDshResourceView view) {
@@ -205,13 +225,13 @@ class SharedDshPostgresTest {
         .build();
   }
 
-  @Test
-  void resourceMarketReadsOnlyTheExactCurrentViewForItsPreparedNodeAndMember() {
-    var f = preparedResourceMarket();
+  @ParameterizedTest
+  @ValueSource(booleans = {false, true})
+  void resourceMarketReadsOnlyTheExactCurrentViewForItsPreparedNodeAndMember(boolean dedicated) {
+    var f = preparedResourceMarket(dedicated);
     var queries = resourceMarketQueries();
     UUID placement = UUID.fromString(f.view().getBinding().getPlacementId());
-    assertEquals(
-        f.view().getBinding(), run(() -> queries.resolve(f.member(), placement, session)));
+    assertEquals(f.view().getBinding(), run(() -> queries.resolve(f.member(), placement, session)));
     assertEquals(Optional.of(f.report()), run(() -> queries.report(f.view())));
     resourceViewIds.put(placement.toString(), UUID.randomUUID().toString());
     var view = run(() -> service.resourceView(f.view().getBinding()));
@@ -246,18 +266,20 @@ class SharedDshPostgresTest {
                 store.tx(
                     () ->
                         store.jdbc.update(
-                            "DELETE FROM shared_dsh_pool_node WHERE tenant_id=? AND node_id=?",
+                            "DELETE FROM shared_dsh_pool_node WHERE tenant_id=? AND pool_id=? AND node_id=?",
                             tenant,
+                            UUID.fromString(view.getBinding().getPhysicalInstanceId()),
                             f.node()))));
     // Placement and receipt remain ready; losing the prepared-node relation alone denies applied.
-    assertEquals(
-        f.view().getBinding(), run(() -> queries.resolve(f.member(), placement, session)));
+    assertEquals(f.view().getBinding(), run(() -> queries.resolve(f.member(), placement, session)));
     assertTrue(run(() -> queries.report(view)).isEmpty());
   }
 
-  @Test
-  void resourceMarketRejectsDurableOldEpochReceiptsAndRevokedNodesInRealPostgres() {
-    var f = preparedResourceMarket();
+  @ParameterizedTest
+  @ValueSource(booleans = {false, true})
+  void resourceMarketRejectsDurableOldEpochReceiptsAndRevokedNodesInRealPostgres(
+      boolean dedicated) {
+    var f = preparedResourceMarket(dedicated);
     var queries = resourceMarketQueries();
     var oldBinding = f.view().getBinding();
     UUID placement = UUID.fromString(oldBinding.getPlacementId());

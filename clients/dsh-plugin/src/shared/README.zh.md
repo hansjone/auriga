@@ -21,6 +21,10 @@ R 的共享 profile 选择包入口 `auriga-dsh/shared`，不得同时加载默�
 - `invoke(action,binding,args)`：有限 action 的公开宿主调用。P 调用前后都重核本人归属；不得将未经检查的 sessionId/cwd 从 args 再次传入宿主，以覆盖已核 binding。
 - `assertProfile(expected)`：同步核对实际加载配置，只有全部已卸载的能力与固定平台 skill 根符合预期才返回 true。执行工具、terminal、jobs、subagent、stdio MCP、动态安装、个人 Key、私有 skill 均关闭；includeDefaultRoots=false，customSkillDirs 只能是 R 的平台活跃根。返回 false、Promise 或缺失均拒绝启动。该接口不是 P 已实际卸载控制器的证明，真实 profile 验收留联合接线。
 
+内部安装工厂可为独立实例复用底层授权：`createSharedRuntime({expectedMode})` 缺省 `shared`，只接受精确 `shared` 或 `dedicated`，每次绑定均必须匹配安装侧指定模式。`createProductionSharedPorts(ctx,{profileValidator})` 缺省保留共享 profile 校验；只有内部代码可提供同步 `(ctx,expectedProfile,skillRoots)=>true` 验证函数，Promise 或其他值都不能授予 profile。这两个参数不从浏览器或 YAML 读取，不放宽共享 guard，也不将共享消息原生来源扩到 dedicated。
+
+容器内 DSH SDK 与 Auriga 插件分别安装在只读 `/opt/dsh`、`/opt/auriga-dsh`。`host-sdk.js` 的生产 `loadHostSdk()` 只沿固定 `/opt/dsh/package.json` 解析公开导出，返回同一 SDK 的 `{Peer,LlmAdapter}`；使用 `profile-resolution.js` 的真实路径、包归属和公开 export 校验，不从配置、环境变量或浏览器选择模块，也不回退旧开发依赖。ports 插件装配 `createProductionSharedPorts(ctx,{Peer:sdk.Peer,sdk,...})`，Host 使用 `createSharedDownstream({runtime,ports:ports.downstream,sdk:ports.sdk})`。两个工厂的 SDK 参数仅内部代码传递，Peer 与 sdk.Peer 不同即拒；缺 SDK 明确失败。独立实例模块复用相同内部 shape。普通纯单测可显式注入合成类；锁定 rc.3 组合测试验证真实 Peer、LlmAdapter 及公开 LlmRuntime 的类身份和登记。
+
 工具行使用公开配置 `mode: native`，对应 SHARED_PROFILE.toolPresentation。该配置让有限工具可被模型直接调用。R 的 profile 核验同时检查这一配置，公开 ToolRuntime 测试也按此配置装配。
 
 共享技能根是容器内唯一固定只读挂载 `/run/auriga/skills-active/current`，与 Agent 正式 writer、renderer 和 Docker mount 一致；Host 不接受宿主机 PoolLayout 路径、子路径或额外根。`skill-filesystem` 必须关闭默认根、不设置 bundled 根，provider 为 `auriga-shared`。原生 `skill` 工具沿公开 `tools/execute` 继续调用原 Registry/Filesystem；Host 前后核真实会话代次，并要求实际定义的 provider、source、完整路径和资源目录属于平台视图，返回正文与已核定义一致。私有目录、运行时同名覆盖及链接逃逸不能借这个工具加载；Shell、插件安装及其余非白名单工具仍拒绝。
@@ -68,11 +72,15 @@ SourceGet、FETCH 页及各项、attempt/admit/receipt 等结果按原网络信�
 
 rc.3 原生 `session/list`、`session/control` 先按 `{kind:'global'}` 进入公共读控制器，再逐个会话和增量按本人 session role 过滤。共享策略只对这两个 action 同时给最小 global 入口与本人 session 权限；不包含原生 create、全宿主 modelCatalog、credential、MCP 或全局事件。会话创建始终经可信 Host 的登记后发布流程。正常浏览器模块仍须逐调用和流输出前后核归属与代次，不能把同步 policy 投影代替在线权威。
 
-显式意图原子保存在 `/var/lib/auriga/pools/<pool>/host/message-preferences`，收件账本保存在同目录的 `message-inboxes/<contextId>`。后台仅处理已明确开启、且原生 agent 仍在内存中的会话，不自动恢复冷会话。新账本只在平台证明邮箱从未开启且无历史（`false/1/0/0`）时初始化；已有邮箱丢失本地账本明确拒绝。平台实际 typed-local 注册、native resolver 和来源权威保持不变，这份账本只为原 `DurableInbox` 提供收件投影，不是 owner 或地址分配账本。
+显式意图原子保存在 `/var/lib/auriga/pools/<pool>/host/.host/message-preferences`，收件账本保存在同目录的 `message-inboxes/<contextId>`，复用 Node 已施加的 `.host` 硬配额，不新增预算。正式信任缓存仍在已有单独硬配额的 `host/message-trust`。后台仅处理已明确开启、且原生 agent 仍在内存中的会话，不自动恢复冷会话。新账本只在平台证明邮箱从未开启且无历史（`false/1/0/0`）时初始化；已有邮箱丢失本地账本明确拒绝。平台实际 typed-local 注册、native resolver 和来源权威保持不变，这份账本只为原 `DurableInbox` 提供收件投影，不是 owner 或地址分配账本。
+
+串行升级时，Host 自动锁住旧 `host/message-preferences` 或 `host/message-inboxes/<contextId>` 账本，将完整内容以新文件原子写入 `.host` 配额目录，保留旧原件和摘要，不移动可能带旧 project-id 的 inode。新账本后续写入保留该摘要；发现旧写者仍活跃、旧本后来分叉、缓存损坏或配额写入失败均明确拒绝消息，不清除收据、游标或高水位。升级应先停止旧 Host；新版本运行期间保留旧锁，避免旧版本并发回写。
 
 真实后台顺序为签名页与逐项验证、持久接入、原尝试/执行准入、公开 `NativeHostPort.prompt`、会话和 provider 的持久 flush、持久 `accepted`，最后提交原收据。丢失收据回包后从原账本重试相同操作，不再次 prompt。禁用先同步隔离正在拉取的接收者，再持久意图和远端确认；未确认的禁用不能继续执行消息。写入结果不确定时停止该写者，不能用旧内存覆盖磁盘或假报成功。
 
 普通受控任务只申请独立 `task.execute`，不以公司 UAC 材料为前置，也不增加 Shell、终端或任意插件权限。IAM 明确返回 `SHARED_ENTERPRISE_CREDENTIAL_STATE_ABSENT` 时，团队登录用户仍能执行已有普通任务，任务环境中的 `DSH_AURIGA_ID`、`DSH_AURIGA_TOKEN` 为空。`AVAILABLE` 才为同一真实 execution 另开独立企业任务，按现有策略传递凭据；两任务分别关闭。未知状态、失效平台登录、撤销或他人材料仍拒绝，不能将认证异常降为“无材料”。环境只属于当前任务，刷新后下次任务重取材料，不修改共享进程全局环境。
+
+共享入口实际安装公开 `tools/execute` 钩子和被动 `shellEnv` 注册表贡献者：按真正原生 execution 准备任务，再由同步 `shellEnv.collect(execution)` 取本次环境，结束前在同任务刷新并核当前归属，最后清除材料及结束两类 handle。保留的 `DSH_SESSION_ID` 由宿主注册表自身提供，贡献者只声明自己的材料和 helper 变量。原企业工具复用钩子内的企业子任务，`aurigaShared.openTask` 只借当前原生调用，不另分配或提前 Finish。退出、取消、agent dispose 和晚回包不能恢复旧材料或已结束任务。长运行 helper 沿原回环能力刷新当前材料；已启动进程的环境快照不会被全局改写。安装侧须提供 `@deepseek-ai/dsh-shell-env` 被动服务，并且同一模式只装一个环境发布者；这不启用共享 Shell 或新增通用脚本执行端。
 
 根目录执行 `node --test clients/dsh-plugin/test/shared/shared.test.mjs`，已纳入插件 test 脚本。测试密钥均运行时生成。schema 快照与 K 原文件逐对象比对。签名及 schema 覆盖使用的七种冻结消息。
 

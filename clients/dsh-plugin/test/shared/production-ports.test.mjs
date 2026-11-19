@@ -14,7 +14,7 @@ import { openSharedTask } from '../../src/shared/task-context.js';
 import { createEnterpriseAdapter } from '../../src/shared/enterprise.js';
 import { canonical } from '../../src/shared/protocol.js';
 
-function fixture() {
+function fixture({ profileValidator } = {}) {
   const key = generateKeyPairSync('ed25519');
   const keys = new Map([['test', key.publicKey]]);
   const binding = {
@@ -143,7 +143,9 @@ function fixture() {
       if (operation === 'issueCapability') {
         if (!f.live || !activeTasks.has(request.taskId))
           throw new Error('shared.revoked');
-        return { token: token(request) };
+        const result = { token: token(request) };
+        await f.afterIssue?.();
+        return result;
       }
       if (operation === 'finishTask') {
         activeTasks.delete(request.taskId);
@@ -195,6 +197,7 @@ function fixture() {
     bridge,
     Peer,
     options,
+    profileValidator,
   });
   const runtime = createSharedRuntime({ ...options, ports, now: () => f.now });
   const enterprise = createEnterpriseAdapter({
@@ -230,6 +233,74 @@ test('public registry configuration attests native tools, fixed skill roots and 
   });
   assert.equal(assertSharedProfile(f.ctx, SHARED_PROFILE, ['/fixed']), true);
   assert.equal(assertSharedProfile(f.ctx, SHARED_PROFILE, ['/other']), false);
+  await f.ports.close();
+  f.runtime.close();
+});
+
+test('profile factory injection is internal, synchronous and strict; shared default remains unchanged', async () => {
+  const dedicated = Object.freeze({ mode: 'dedicated' }),
+    plain = fixture();
+  try {
+    assert.equal(plain.ports.assertProfile(SHARED_PROFILE), true);
+    assert.equal(plain.ports.assertProfile(dedicated), false);
+  } finally {
+    await plain.ports.close();
+    plain.runtime.close();
+  }
+  const calls = [],
+    custom = fixture({
+      profileValidator: (ctx, expected, roots) => {
+        calls.push({ ctx, expected, roots });
+        return expected === dedicated;
+      },
+    });
+  try {
+    assert.equal(custom.ports.assertProfile(dedicated), true);
+    assert.equal(custom.ports.assertProfile(SHARED_PROFILE), false);
+    assert.equal(calls[0].ctx, custom.ctx);
+    assert.deepEqual(calls[0].roots, []);
+  } finally {
+    await custom.ports.close();
+    custom.runtime.close();
+  }
+  for (const value of [null, true, {}, 'validator-from-yaml'])
+    assert.throws(() => fixture({ profileValidator: value }));
+  for (const value of [
+    () => Promise.resolve(true),
+    () => Promise.reject(new Error('async rejected')),
+    () => 1,
+    () => ({ valid: true }),
+  ]) {
+    const f = fixture({ profileValidator: value });
+    try {
+      assert.equal(f.ports.assertProfile(dedicated), false);
+    } finally {
+      await f.ports.close();
+      f.runtime.close();
+    }
+  }
+});
+
+test('a late capability renewal cannot resurrect a finished native execution', async () => {
+  const f = fixture(),
+    execution = { agent: f.agent, signal: new AbortController().signal };
+  const token = await f.ports.issueTask(f.binding, execution, ['outbound']);
+  f.state.afterIssue = () => f.ports.finishTask(f.binding, execution);
+  await assert.rejects(
+    f.ports.enterprise.refreshCapability(
+      token,
+      f.binding.sessionId,
+      'outbound',
+    ),
+  );
+  assert.equal(f.activeTasks.size, 0);
+  await assert.rejects(
+    f.ports.enterprise.refreshCapability(
+      token,
+      f.binding.sessionId,
+      'outbound',
+    ),
+  );
   await f.ports.close();
   f.runtime.close();
 });

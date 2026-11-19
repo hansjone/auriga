@@ -53,4 +53,3 @@ message CheckSharedMessageNodesResponse {
   bool allowed = 1;
   map<string, uint64> limits = 2;
 }
-

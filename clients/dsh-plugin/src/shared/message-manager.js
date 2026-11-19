@@ -1,5 +1,5 @@
 // @ts-nocheck
-import { createFileLedgerStore } from '../network/host/store.js';
+import { createSharedMessageStore } from './message-storage.js';
 import { openSharedMessageReceiver } from './message-receiver.js';
 import { canonical, fail, validate } from './protocol.js';
 import { formatAddress } from '../network/host/address.js';
@@ -10,10 +10,9 @@ export function createSharedMessageManager(
   ctx,
   { runtime, ports, preferenceStore, inboxStore, intervalMs = 1000 },
 ) {
-  const root = `/var/lib/auriga/pools/${ports.options.physicalInstanceId}/host`;
   const store =
     preferenceStore ??
-    createFileLedgerStore({ dir: root + '/message-preferences' });
+    createSharedMessageStore(ports.options.physicalInstanceId, 'preferences');
   const entries = new Map();
   const floors = new Map();
   let closed = false,
