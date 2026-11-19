@@ -45,6 +45,7 @@ func TestNASFixedInstallerAndReceipt(t *testing.T) {
 	if err := os.WriteFile(input, raw, 0o600); err != nil {
 		t.Fatal(err)
 	}
+	t.Run("shared-source", func(t *testing.T) { testNASSharedSourceLifecycle(t, root, binary, input) })
 	t.Run("memory-budget-and-receipt", func(t *testing.T) {
 		testNASMemoryBudgetAndReceipt(t, root, binary, input, raw)
 	})

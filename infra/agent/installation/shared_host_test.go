@@ -75,3 +75,70 @@ func TestSharedHostInstallationUsesOriginalRendererAndExclusiveOutput(t *testing
 		t.Fatal("rejected renderer created output")
 	}
 }
+
+func TestSharedInstallationProfileUsesTheProductionPoolValidator(t *testing.T) {
+	profile, err := os.ReadFile("../../../deploy/nas/shared-runtime-profile.example.yml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ValidateSharedProfile(profile); err != nil {
+		t.Fatal(err)
+	}
+	for _, invalid := range [][]byte{nil, []byte("[]"), append(append([]byte{}, profile...), []byte("\n- id: arbitrary-shell\n  name: '@deepseek-ai/dsh-tool-shell'\n")...)} {
+		if err := ValidateSharedProfile(invalid); err == nil {
+			t.Fatal("non-production profile accepted by installation facade")
+		}
+	}
+}
+
+func TestSharedHostExplicitEmptyOutboundPolicyDoesNotInventCompanyDestinations(t *testing.T) {
+	dir := t.TempDir()
+	in := SharedHostInputs{Model: "synthetic-model", EnterprisePolicyFile: filepath.Join(dir, "policy.json")}
+	for name, target := range map[string]*string{"identity": &in.IdentityKeysFile, "enterprise": &in.EnterpriseKeysFile, "model": &in.ModelKeysFile, "message": &in.MessageKeysFile} {
+		public, _, err := ed25519.GenerateKey(rand.Reader)
+		if err != nil {
+			t.Fatal(err)
+		}
+		raw, _ := json.Marshal(map[string]any{"keys": []any{map[string]string{"kty": "OKP", "crv": "Ed25519", "kid": name, "x": base64.RawURLEncoding.EncodeToString(public)}}})
+		*target = filepath.Join(dir, name+".json")
+		if err := os.WriteFile(*target, raw, 0444); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for name, policy := range map[string]string{
+		"deny-all":                       `{"allowRawAgentToken":true,"outboundAllowedHosts":[]}`,
+		"missing-host-list":              `{"allowRawAgentToken":true}`,
+		"null-host-list":                 `{"allowRawAgentToken":true,"outboundAllowedHosts":null}`,
+		"half-headers":                   `{"allowRawAgentToken":true,"outboundAllowedHosts":["fixture.example.invalid"],"empNoHeader":"X-Fixture-Emp"}`,
+		"invented-headers-without-hosts": `{"allowRawAgentToken":true,"outboundAllowedHosts":[],"empNoHeader":"X-Fixture-Emp","authValueHeader":"X-Fixture-Token"}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			if err := os.WriteFile(in.EnterprisePolicyFile, []byte(policy), 0600); err != nil {
+				t.Fatal(err)
+			}
+			in.OutputFile = filepath.Join(dir, name+"-host.json")
+			err := RenderSharedHostConfig(in)
+			if name != "deny-all" {
+				if err == nil {
+					t.Fatal("ambiguous or incomplete enterprise policy accepted")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			raw, err := os.ReadFile(in.OutputFile)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var host map[string]json.RawMessage
+			if json.Unmarshal(raw, &host) != nil || len(host["model"]) == 0 || len(host["capabilityKeys"]) == 0 {
+				t.Fatal("ordinary/model public material disappeared")
+			}
+			var settings map[string]json.RawMessage
+			if json.Unmarshal(host["enterprise"], &settings) != nil || len(settings) != 2 || string(settings["allowRawAgentToken"]) != "true" || string(settings["outboundAllowedHosts"]) != "[]" {
+				t.Fatal("renderer invented enterprise access or disabled member credentials")
+			}
+		})
+	}
+}

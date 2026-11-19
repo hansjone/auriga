@@ -33,6 +33,7 @@ func nasSharedRuntime(args []string, stdout io.Writer) error {
 	profile := f.String("profile-file", "", "approved complete shared runtime profile")
 	profileSHA := f.String("profile-sha256", "", "independently approved profile SHA256")
 	model := f.String("model", "", "approved public model ID")
+	teamOnly := f.Bool("team-only", false, "explicit first installation without an existing company adapter")
 	if err := f.Parse(args); err != nil {
 		return err
 	}
@@ -43,7 +44,10 @@ func nasSharedRuntime(args []string, stdout io.Writer) error {
 	if !mutating && *action != "status" && *action != "check" && *action != "path" {
 		return fmt.Errorf("unsupported shared installation operation")
 	}
-	if *action != "stage" && (*adapter != "" || *adapterSHA != "" || *profile != "" || *profileSHA != "" || *model != "") {
+	if *teamOnly && (*adapter != "" || *adapterSHA != "") {
+		return fmt.Errorf("team-only and approved adapter inputs are mutually exclusive")
+	}
+	if *action != "stage" && (*adapter != "" || *adapterSHA != "" || *profile != "" || *profileSHA != "" || *model != "" || *teamOnly) {
 		return fmt.Errorf("staging inputs are only accepted by stage")
 	}
 	baseHash, err := verifyNASCollabBase(*base)
@@ -103,7 +107,7 @@ func nasSharedRuntime(args []string, stdout io.Writer) error {
 		if len(eventNames) != 0 || *action != "stage" {
 			return fmt.Errorf("shared generation absent; activation refused")
 		}
-		if err := stageSharedInstallation(*base, *out, baseHash, *adapter, *adapterSHA, *profile, *profileSHA, *model); err != nil {
+		if err := stageSharedInstallation(*base, *out, baseHash, *adapter, *adapterSHA, *profile, *profileSHA, *model, *teamOnly); err != nil {
 			return err
 		}
 	}
@@ -113,7 +117,11 @@ func nasSharedRuntime(args []string, stdout io.Writer) error {
 	}
 	defer sharedClear(files)
 	if *action == "stage" {
-		if receipt.Adapter != *adapterSHA || receipt.Profile != *profileSHA || receipt.Model != *model {
+		approvedAdapter := *adapterSHA
+		if *teamOnly {
+			approvedAdapter = sharedSHA([]byte(sharedTeamOnlyAdapter))
+		}
+		if receipt.Adapter != approvedAdapter || receipt.TeamOnly != *teamOnly || receipt.Profile != *profileSHA || receipt.Model != *model {
 			return fmt.Errorf("shared staging approval differs; implicit identity or policy rotation refused")
 		}
 	}
@@ -425,13 +433,16 @@ func sharedCommittedRuntime(base string) ([]byte, error) {
 	return sharedRuntimeSpecJSON(raw)
 }
 
-func stageSharedInstallation(base, out, baseHash, adapter, adapterSHA, profile, profileSHA, model string) error {
+func stageSharedInstallation(base, out, baseHash, adapter, adapterSHA, profile, profileSHA, model string, teamOnly bool) error {
 	if model == "" || len(model) > 128 || strings.TrimSpace(model) != model || strings.ContainsAny(model, "\r\n") {
 		return fmt.Errorf("approved public model ID required")
 	}
 	var adapterRaw []byte
 	var err error
-	if adapter == filepath.Join(base, "uac/adapter.json") && sharedCanonicalSHA(adapterSHA) {
+	if teamOnly {
+		adapterRaw = []byte(sharedTeamOnlyAdapter)
+		adapterSHA = sharedSHA(adapterRaw)
+	} else if adapter == filepath.Join(base, "uac/adapter.json") && sharedCanonicalSHA(adapterSHA) {
 		adapterRaw, err = sharedBaseLeaf(base, "uac/adapter.json")
 		if err == nil && sharedSHA(adapterRaw) != adapterSHA {
 			clear(adapterRaw)
@@ -444,6 +455,9 @@ func stageSharedInstallation(base, out, baseHash, adapter, adapterSHA, profile, 
 		return err
 	}
 	defer clear(adapterRaw)
+	if err := sharedPreserveUACSource(base, adapterRaw, teamOnly); err != nil {
+		return err
+	}
 	policy, err := sharedEnterprisePolicy(adapterRaw)
 	if err != nil {
 		return err
@@ -451,6 +465,9 @@ func stageSharedInstallation(base, out, baseHash, adapter, adapterSHA, profile, 
 	profileRaw, err := sharedApprovedFile(profile, profileSHA, false)
 	if err != nil {
 		return err
+	}
+	if err := installation.ValidateSharedProfile(profileRaw); err != nil {
+		return fmt.Errorf("approved shared profile violates production policy: %w", err)
 	}
 	runtimeJSON, err := sharedCommittedRuntime(base)
 	if err != nil {
@@ -512,7 +529,7 @@ func stageSharedInstallation(base, out, baseHash, adapter, adapterSHA, profile, 
 	if err != nil {
 		return err
 	}
-	receipt := sharedInstallationReceipt{Version: 1, Base: baseHash, Tenant: access.TenantID(), Node: node, CA: ca, Adapter: adapterSHA, Profile: profileSHA, InitialRuntime: sharedSHA(runtimeJSON), Model: model, Files: digest}
+	receipt := sharedInstallationReceipt{Version: 1, Base: baseHash, Tenant: access.TenantID(), Node: node, CA: ca, Adapter: adapterSHA, Profile: profileSHA, InitialRuntime: sharedSHA(runtimeJSON), Model: model, Files: digest, TeamOnly: teamOnly}
 	raw, err := json.Marshal(receipt)
 	if err != nil {
 		return err
@@ -582,6 +599,12 @@ func readSharedInstallation(base, generation, baseHash string) (*sharedInstallat
 	if err != nil || receipt.Version != 1 || receipt.Base != baseHash || receipt.Files != digest || receipt.Adapter != sharedSHA(files["platform/uac-adapter.json"]) || receipt.Profile != sharedSHA(files["public/profile.yml"]) || receipt.InitialRuntime != sharedSHA(files["public/initial-runtime.json"]) {
 		return nil, nil, fmt.Errorf("shared source receipt or installation binding changed")
 	}
+	if receipt.TeamOnly && !bytes.Equal(files["platform/uac-adapter.json"], []byte(sharedTeamOnlyAdapter)) {
+		return nil, nil, fmt.Errorf("team-only source cannot replace an existing identity adapter")
+	}
+	if err := sharedPreserveUACSource(base, files["platform/uac-adapter.json"], receipt.TeamOnly); err != nil {
+		return nil, nil, err
+	}
 	legacy, err := sharedLegacyPublic(base)
 	if err != nil {
 		return nil, nil, err
@@ -596,6 +619,9 @@ func readSharedInstallation(base, generation, baseHash string) (*sharedInstallat
 	policy, err := sharedEnterprisePolicy(files["platform/uac-adapter.json"])
 	if err != nil || !bytes.Equal(policy, files["public/enterprise-policy.json"]) {
 		return nil, nil, fmt.Errorf("shared public policy differs from approved private adapter")
+	}
+	if err := installation.ValidateSharedProfile(files["public/profile.yml"]); err != nil {
+		return nil, nil, fmt.Errorf("stored shared profile violates production policy: %w", err)
 	}
 	accessRaw, err := sharedBasePublic(base, "access.json")
 	if err != nil {

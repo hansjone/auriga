@@ -8,6 +8,7 @@ import (
 )
 
 const sharedInstallationGeneration = "v-00000000000000000001"
+const sharedTeamOnlyAdapter = "{}"
 
 type sharedInstallationReceipt struct {
 	Version        int    `json:"version"`
@@ -20,6 +21,7 @@ type sharedInstallationReceipt struct {
 	InitialRuntime string `json:"initialRuntime"`
 	Model          string `json:"model"`
 	Files          string `json:"files"`
+	TeamOnly       bool   `json:"teamOnly,omitempty"`
 }
 
 type sharedInstallationEvent struct {

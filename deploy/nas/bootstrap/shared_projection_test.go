@@ -29,7 +29,7 @@ func TestSharedEnterpriseProjectionUsesOnlyApprovedPublicFields(t *testing.T) {
 		}
 	}
 	for name, input := range map[string]string{
-		"missing":           `{}`,
+		"null-outbound":     `{"sharedOutbound":null}`,
 		"empty":             `{"sharedOutbound":{}}`,
 		"unknown":           strings.Replace(sharedApprovedAdapterFixture, `"empNoHeader":`, `"unknown":true,"empNoHeader":`, 1),
 		"duplicate-public":  strings.Replace(sharedApprovedAdapterFixture, `"empNoHeader":`, `"empNoHeader":"X-Other","empNoHeader":`, 1),

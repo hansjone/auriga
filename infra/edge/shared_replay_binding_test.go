@@ -12,7 +12,7 @@ import (
 )
 
 func sharedReplayNormalStream() jetstream.StreamConfig {
-	return jetstream.StreamConfig{Name: "KV_" + sharedEntryBucket, Subjects: []string{"$KV." + sharedEntryBucket + ".>"}, Storage: jetstream.FileStorage, Retention: jetstream.LimitsPolicy, MaxMsgsPerSubject: 1, Replicas: 1, MaxAge: 12 * time.Hour, AllowDirect: true}
+	return jetstream.StreamConfig{Name: "KV_" + sharedEntryBucket, Subjects: []string{"$KV." + sharedEntryBucket + ".>"}, Storage: jetstream.FileStorage, Retention: jetstream.LimitsPolicy, Discard: jetstream.DiscardNew, MaxMsgs: -1, MaxBytes: -1, MaxMsgSize: -1, MaxConsumers: -1, MaxMsgsPerSubject: 1, Replicas: 1, MaxAge: 12 * time.Hour, AllowDirect: true, AllowRollup: true, DenyDelete: true, Duplicates: 2 * time.Minute}
 }
 
 type sharedReplayFixtureStatus struct {
@@ -94,6 +94,9 @@ func TestSharedReplayBindingRejectsSameNameSourcesPayloadAndForeignStreamShape(t
 		"per-message-ttl": func(c *jetstream.StreamConfig) { c.AllowMsgTTL = true },
 		"memory":          func(c *jetstream.StreamConfig) { c.Storage = jetstream.MemoryStorage },
 		"wrong-name":      func(c *jetstream.StreamConfig) { c.Name = "KV_auriga-sessions" },
+		"evict-old":       func(c *jetstream.StreamConfig) { c.Discard = jetstream.DiscardOld },
+		"limited-count":   func(c *jetstream.StreamConfig) { c.MaxMsgs = 1 },
+		"limited-bytes":   func(c *jetstream.StreamConfig) { c.MaxBytes = 1024 },
 	} {
 		t.Run(name, func(t *testing.T) {
 			candidate := valid
@@ -107,13 +110,17 @@ func TestSharedReplayBindingRejectsSameNameSourcesPayloadAndForeignStreamShape(t
 	}
 	// Reproduce the reported raw CREATE/UPDATE JSON payload, rather than only
 	// looking for a foreign name in an authorization subject string.
-	payload := []byte(`{"name":"KV_auriga-shared-entry","subjects":["$KV.auriga-shared-entry.>"],"storage":"file","retention":"limits","max_msgs_per_subject":1,"num_replicas":1,"max_age":43200000000000,"sources":[{"name":"KV_auriga-sessions"}]}`)
+	payload := []byte(`{"name":"KV_auriga-shared-entry","subjects":["$KV.auriga-shared-entry.>"],"storage":"file","retention":"limits","discard":"new","max_msgs":-1,"max_bytes":-1,"max_msgs_per_subject":1,"num_replicas":1,"max_age":43200000000000,"sources":[{"name":"KV_auriga-sessions"}]}`)
 	var imported jetstream.StreamConfig
 	if err := json.Unmarshal(payload, &imported); err != nil {
 		t.Fatal(err)
 	}
 	if err := validateSharedReplayStream(imported); err == nil {
 		t.Fatal("Sources payload bypassed dedicated bucket boundary")
+	}
+	imported.Sources = nil
+	if err := validateSharedReplayStream(imported); err != nil {
+		t.Fatal("Sources counterexample failed for an unrelated configuration field", err)
 	}
 	missing := &sharedReplayFixtureReader{err: jetstream.ErrBucketNotFound}
 	if _, err := bindSharedReplayBucket(context.Background(), missing); err == nil || !strings.Contains(err.Error(), "shared-replay-prepare") {

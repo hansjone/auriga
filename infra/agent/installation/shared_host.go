@@ -6,6 +6,7 @@ import (
 	"io"
 
 	"github.com/hansjone/auriga/infra/agent/internal/app"
+	"github.com/hansjone/auriga/infra/agent/internal/renderer"
 )
 
 // SharedHostInputs contains only the original renderer's public installation
@@ -20,6 +21,12 @@ type SharedHostInputs struct {
 	MessageTrustFile     string
 	Model                string
 	OutputFile           string
+}
+
+// ValidateSharedProfile uses the same production pool policy as Agent startup.
+// Installation must reject an invalid full profile before committing materials.
+func ValidateSharedProfile(profile []byte) error {
+	return renderer.ValidateProductionPoolProfile(profile)
 }
 
 // RenderSharedHostConfig invokes the existing renderer using a fixed command

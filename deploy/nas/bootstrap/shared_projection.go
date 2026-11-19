@@ -21,8 +21,8 @@ import (
 type sharedPublicEnterprisePolicy struct {
 	AllowRawAgentToken   bool     `json:"allowRawAgentToken"`
 	OutboundAllowedHosts []string `json:"outboundAllowedHosts"`
-	EmpNoHeader          string   `json:"empNoHeader"`
-	AuthValueHeader      string   `json:"authValueHeader"`
+	EmpNoHeader          string   `json:"empNoHeader,omitempty"`
+	AuthValueHeader      string   `json:"authValueHeader,omitempty"`
 }
 
 // sharedEnterprisePolicy projects only public fields from the exact private
@@ -39,6 +39,12 @@ func sharedEnterprisePolicy(adapter []byte) ([]byte, error) {
 	var document map[string]json.RawMessage
 	if json.Unmarshal(adapter, &document) != nil || document == nil {
 		return invalid()
+	}
+	if _, configured := document["sharedOutbound"]; !configured {
+		// Keep all other approved UAC mappings. The original IAM missing-node
+		// path disables only enterprise outbound; Host independently denies all
+		// targets. Raw credentials still require current member/task authority.
+		return json.Marshal(sharedPublicEnterprisePolicy{AllowRawAgentToken: true, OutboundAllowedHosts: []string{}})
 	}
 	var policy struct {
 		EmpNoHeader         string `json:"empNoHeader"`

@@ -45,7 +45,9 @@ func bindSharedReplayBucket(ctx context.Context, reader sharedReplayBucketReader
 }
 
 func validateSharedReplayStream(config jetstream.StreamConfig) error {
-	if config.Name != "KV_"+sharedEntryBucket || len(config.Subjects) != 1 || config.Subjects[0] != "$KV."+sharedEntryBucket+".>" || len(config.Sources) != 0 || config.Mirror != nil || config.MirrorDirect || config.SubjectTransform != nil || config.RePublish != nil || config.AllowMsgTTL || config.Storage != jetstream.FileStorage || config.Retention != jetstream.LimitsPolicy || config.MaxMsgsPerSubject != 1 || config.Replicas != 1 || config.NoAck || config.Sealed || config.MaxAge < 0 || config.MaxAge > 0 && config.MaxAge < 12*time.Hour {
+	// Match the pinned CreateKeyValue configuration. Capacity pressure must
+	// reject a new ticket, never evict an earlier replay tombstone before TTL.
+	if config.Name != "KV_"+sharedEntryBucket || len(config.Subjects) != 1 || config.Subjects[0] != "$KV."+sharedEntryBucket+".>" || len(config.Sources) != 0 || config.Mirror != nil || config.MirrorDirect || config.SubjectTransform != nil || config.RePublish != nil || config.AllowMsgTTL || config.Storage != jetstream.FileStorage || config.Retention != jetstream.LimitsPolicy || config.Discard != jetstream.DiscardNew || config.MaxMsgs != -1 || config.MaxBytes != -1 || config.MaxMsgsPerSubject != 1 || config.Replicas != 1 || config.NoAck || config.Sealed || config.MaxAge < 0 || config.MaxAge > 0 && config.MaxAge < 12*time.Hour {
 		return fmt.Errorf("installed shared replay stream is not the isolated file-backed replay bucket")
 	}
 	return nil

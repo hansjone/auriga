@@ -4,7 +4,7 @@
 
 新现场和旧 sealed base 都复用原安装的 `config/materials`、原入网 Node 身份以及已提交 runtime 快照。先按原公开流程初始化、入网、安装批准的 runtime，再执行以下同一流程。不要向 sealed base 添加文件、重新入网、删除状态库或重建发行分区。
 
-`BOOTSTRAP` 指向从当前源码构建的可信 NAS bootstrap；`DATA` 是原数据根的规范绝对路径。`BASE_SHA256` 必须来自独立核对的原 bootstrap receipt。私有 adapter 必须包含原 IAM 实际消费的完整 `sharedOutbound`，摘要由操作者独立批准；可以直接指向原 `config/materials/uac/adapter.json`（保原10001:10001/0640），也可提供独立root:root/0600私有文件。公开 profile 必须为批准的完整共享 profile，root:root/0644，不能提供差量或临时 shell 插件。
+`BOOTSTRAP` 指向从当前源码构建的可信 NAS bootstrap；`DATA` 是原数据根的规范绝对路径。`BASE_SHA256` 必须来自独立核对的原 bootstrap receipt。现有私有 adapter 的全部原字节与公司身份映射必须保留，摘要由操作者独立批准；可以直接指向原 `config/materials/uac/adapter.json`（保原10001:10001/0640），也可提供独立root:root/0600私有文件。原固定adapter存在时两者必须逐字相同。存在有效 `sharedOutbound` 才派生批准的主机/身份头；仅缺失此段则公开策略为空白名单，IAM沿原missing-node路径拒企业出站，不影响普通team模型/受控工具及有真实凭据时的本人raw注入。公开 profile 必须为批准的完整共享 profile，root:root/0644，并由Agent原生产profile验证器提前核验。
 
 ```sh
 "$BOOTSTRAP" shared-runtime -action stage \
@@ -16,6 +16,8 @@
 "$BOOTSTRAP" shared-runtime -action status \
   -base "$DATA/config/materials" -out "$DATA/config/shared-source"
 ```
+
+只有明确没有公司adapter或其他UAC身份配置的新安装，可把上面两个adapter参数替换为 `-team-only`。安装器生成私有 `{}`，公开策略明确 `outboundAllowedHosts: []` 且没有伪造headers，raw本人策略仍true；当前没有公司凭据不会制造公司工号/token或把team token当公司token。此选项与adapter参数互斥，既有adapter/uac.properties/members存在时拒绝使用；公司登录源不会因为NAS的team优先被清空。模式和完整原件摘要绑定receipt，旧committed源不能暗切模式。
 
 安装器产生固定且独立的Agent installation secret/hash、五用途Ed25519密钥、公钥JWKS/SPKI、独立NKey user seed及公开Host配置，不接受操作者手写JWT或签名证明。Host公开策略仅派生原批准的白名单主机和身份头，raw本人任务凭据策略为true；Cookie、token和私有地址pin不会进入公开Host配置。IAM仍消费完整原私有origin/IP pin策略，不以公开Host白名单替代。
 

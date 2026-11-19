@@ -82,10 +82,10 @@ func renderSharedHostConfig(args []string, out, logs io.Writer) error {
 	var enterprisePolicy struct {
 		AllowRawAgentToken   bool     `json:"allowRawAgentToken"`
 		OutboundAllowedHosts []string `json:"outboundAllowedHosts"`
-		EmpNoHeader          string   `json:"empNoHeader"`
-		AuthValueHeader      string   `json:"authValueHeader"`
+		EmpNoHeader          string   `json:"empNoHeader,omitempty"`
+		AuthValueHeader      string   `json:"authValueHeader,omitempty"`
 	}
-	if e = json.Unmarshal(raw, &enterprisePolicy); e != nil || len(enterprisePolicy.OutboundAllowedHosts) == 0 || enterprisePolicy.EmpNoHeader == "" || enterprisePolicy.AuthValueHeader == "" {
+	if e = json.Unmarshal(raw, &enterprisePolicy); e != nil || enterprisePolicy.OutboundAllowedHosts == nil || (len(enterprisePolicy.OutboundAllowedHosts) > 0 && (enterprisePolicy.EmpNoHeader == "" || enterprisePolicy.AuthValueHeader == "")) || (len(enterprisePolicy.OutboundAllowedHosts) == 0 && (enterprisePolicy.EmpNoHeader != "" || enterprisePolicy.AuthValueHeader != "")) {
 		return fmt.Errorf("complete public enterprise policy required")
 	}
 	configuration := map[string]any{"identityKeys": ids, "capabilityKeys": purposes, "model": *model, "enterprise": enterprisePolicy}
