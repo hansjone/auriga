@@ -104,11 +104,26 @@ func TestPersistentPoolTwoMembersAndRestartReuseOneSignedProcess(t *testing.T) {
 	if err := os.WriteFile(cache, []byte(`{"synthetic":"anti-rollback"}`), 0600); err != nil {
 		t.Fatal(err)
 	}
+	legacyFiles := map[string]os.FileInfo{}
 	for _, dir := range []string{"message-preferences", "message-inboxes"} {
-		file := filepath.Join(m.Pools.Layout.Root, first.Binding.PhysicalInstanceId, "members", dir, "retained")
+		file := filepath.Join(m.Pools.Layout.Root, first.Binding.PhysicalInstanceId, "members", ".host", dir, "retained")
 		if err := os.WriteFile(file, []byte("synthetic durable message state"), 0600); err != nil {
 			t.Fatal("Host message directory not provisioned", dir, err)
 		}
+		// Host owns atomic migration. Node must preserve the old complete ledger
+		// and its high-water values rather than moving or removing its inode.
+		legacy := filepath.Join(m.Pools.Layout.Root, first.Binding.PhysicalInstanceId, "members", dir)
+		if err := os.MkdirAll(legacy, 0700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(legacy, "legacy.json"), []byte(`{"receipt":"retained","highWater":"11"}`), 0600); err != nil {
+			t.Fatal(err)
+		}
+		info, err := os.Stat(filepath.Join(legacy, "legacy.json"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		legacyFiles[dir] = info
 	}
 	record, err := m.Driver.Activation.Store.GetExecution(first.Binding.PhysicalInstanceId)
 	if err != nil {
@@ -144,9 +159,16 @@ func TestPersistentPoolTwoMembersAndRestartReuseOneSignedProcess(t *testing.T) {
 		t.Fatal("message trust ledger lost across restart", err)
 	}
 	for _, dir := range []string{"message-preferences", "message-inboxes"} {
-		file := filepath.Join(m.Pools.Layout.Root, first.Binding.PhysicalInstanceId, "members", dir, "retained")
+		file := filepath.Join(m.Pools.Layout.Root, first.Binding.PhysicalInstanceId, "members", ".host", dir, "retained")
 		if raw, err := os.ReadFile(file); err != nil || string(raw) != "synthetic durable message state" {
 			t.Fatal("message state discarded across restart", dir, err)
+		}
+		legacy := filepath.Join(m.Pools.Layout.Root, first.Binding.PhysicalInstanceId, "members", dir, "legacy.json")
+		if raw, err := os.ReadFile(legacy); err != nil || string(raw) != `{"receipt":"retained","highWater":"11"}` {
+			t.Fatal("legacy receipts/highWater changed across restart", dir, err)
+		}
+		if info, err := os.Stat(legacy); err != nil || !os.SameFile(legacyFiles[dir], info) {
+			t.Fatal("Node replaced the original legacy ledger inode", dir, err)
 		}
 	}
 	after, err := m.Driver.Activation.Store.GetExecution(first.Binding.PhysicalInstanceId)

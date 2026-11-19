@@ -39,4 +39,34 @@ func TestSharedPreparationDefaultsAndProvisioning(t *testing.T) {
 		t.Fatal("missing real XFS quota adapter")
 	}
 	// Constructing the adapter neither invokes XFS nor creates a member workspace.
+	for _, sample := range []struct {
+		name string
+		size int64
+		want bool
+	}{
+		{"exact-22", 22 * storage.MemberBytes, true},
+		{"larger-existing", 24 * storage.MemberBytes, true},
+		{"below-22", 22*storage.MemberBytes - 4096, false},
+	} {
+		t.Run(sample.name, func(t *testing.T) {
+			cfg.SharedDshPreparation.Backend = "ext4-image"
+			cfg.SharedDshPreparation.MkfsBinary = "/usr/sbin/mkfs.ext4"
+			cfg.SharedDshPreparation.LosetupBinary = "/usr/sbin/losetup"
+			cfg.SharedDshPreparation.ImageBytes = sample.size
+			pools, err := sharedPreparation(cfg, "docker")
+			if !sample.want {
+				if err == nil {
+					t.Fatal("undersized pool accepted")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal("existing 22-share budget rejected", err)
+			}
+			images, ok := pools.Layout.Quota.(*storage.Ext4Images)
+			if !ok || images.ImageBytes != sample.size {
+				t.Fatal("existing image size or backend changed")
+			}
+		})
+	}
 }

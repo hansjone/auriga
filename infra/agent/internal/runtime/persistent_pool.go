@@ -222,7 +222,10 @@ func (m *PersistentPools) ensure(ctx context.Context, binding *nodev1.SharedDshB
 			return err
 		}
 	}
-	home := filepath.Join(members, ".host")
+	home, err := storage.SafeJoin(members, ".host")
+	if err != nil {
+		return err
+	}
 	if err = os.MkdirAll(home, 0700); err != nil {
 		return err
 	}
@@ -245,15 +248,15 @@ func (m *PersistentPools) ensure(ctx context.Context, binding *nodev1.SharedDshB
 	if err = m.chown(trust, uid, uid); err != nil {
 		return err
 	}
+	// New files inherit the already confirmed Host home project quota. Host
+	// atomically copies legacy ledgers here while retaining the original files;
+	// never allocate another project or move an old inode across this boundary.
 	for _, name := range []string{"message-preferences", "message-inboxes"} {
-		path, err := layout.Path(pool, "members", name)
+		path, err := storage.SafeJoin(members, ".host", name)
 		if err != nil {
 			return err
 		}
 		if err = os.MkdirAll(path, 0700); err != nil {
-			return err
-		}
-		if err = layout.Quota.Ensure(ctx, path, storage.MemberBytes, storage.MemberInodes); err != nil {
 			return err
 		}
 		if err = m.chown(path, uid, uid); err != nil {
