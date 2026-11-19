@@ -527,7 +527,7 @@ for (const locale of ['zh', 'en'])
       });
 
 for (const locale of ['zh', 'en'])
-  test(`settings sign-in starts inline and opens Overview with CSRF: ${locale}`, async (t) => {
+  test(`settings sign-in starts browser login and opens Overview with CSRF: ${locale}`, async (t) => {
     const calls = [];
     let overviewCount = 0;
     const fixture = harness(
@@ -559,12 +559,12 @@ for (const locale of ['zh', 'en'])
     assert.equal(calls[0].method, 'POST');
     assert.equal(calls[0].headers['x-auriga-csrf'], 'test-csrf');
     assert.equal(calls[0].credentials, 'same-origin');
-    assert.deepEqual(JSON.parse(calls[0].body), { action: 'inline_login' });
+    assert.deepEqual(JSON.parse(calls[0].body), { action: 'open_login' });
     assert.equal(overviewCount, 1);
     assert.equal(fixture.navigated, undefined);
   });
 
-test('failed settings inline sign-in shows its error before any Overview transition', async (t) => {
+test('failed settings browser sign-in shows its error before any Overview transition', async (t) => {
   let overviewCount = 0;
   const fixture = harness(
     async (url) => {

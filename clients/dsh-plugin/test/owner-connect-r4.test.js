@@ -81,7 +81,7 @@ test('R4 closing a native RPC discards the result without issuing a shared cance
     release = Promise.withResolvers();
   const call = f.connection.ipc.call;
   f.connection.ipc.call = async (message) => {
-    if (message.action === 'inline_login') {
+    if (message.action === 'open_login') {
       entered.resolve();
       await release.promise;
     }
