@@ -255,6 +255,23 @@ final class SharedTasks {
     store.requireTransactionReleased();
   }
 
+  /**
+   * Stable native message identity follows the current member login, never a finished tool task.
+   */
+  Instant messageBinding(SharedDshSessionBinding binding, String scope) {
+    validate(binding);
+    if (!Set.of("message.send", "message.receive").contains(scope))
+      throw new AurigaException(CommonErrors.FORBIDDEN);
+    return withOwnership(
+        binding,
+        () -> {
+          var session = session(binding);
+          if (!allowedScopes(binding, MESSAGE).contains(scope))
+            throw new AurigaException(CommonErrors.FORBIDDEN);
+          return Instant.parse(session.path("expiresAt").asString());
+        });
+  }
+
   private SharedDshCapability issue(
       ObjectNode task,
       ObjectNode session,
@@ -265,7 +282,8 @@ final class SharedTasks {
     if (!allowed.containsAll(requested)
         || (requested.contains("credentials") && !allowRaw.getAsBoolean()))
       throw new AurigaException(CommonErrors.FORBIDDEN);
-    long version = credentialVersion(task, session, audience, allowed);
+    long version =
+        credentialVersion(task, session, audience, allowed, requested.contains("task.execute"));
     long now = clock.instant().getEpochSecond();
     long expiry =
         Math.min(now + 600, Instant.parse(task.path("expiresAt").asString()).getEpochSecond());
@@ -304,7 +322,13 @@ final class SharedTasks {
     if (recorded == null || !recorded.path("claims").equals(claimsJson(capability)))
       return AuthorizeSharedCapabilityResponse.getDefaultInstance();
     var allowed = allowedScopes(binding, capability.getAudience());
-    long version = credentialVersion(task, session, capability.getAudience(), allowed);
+    long version =
+        credentialVersion(
+            task,
+            session,
+            capability.getAudience(),
+            allowed,
+            capability.getScopesList().contains("task.execute"));
     return AuthorizeSharedCapabilityResponse.newBuilder()
         .setActive(
             version == capability.getCredentialVersion()
@@ -313,12 +337,16 @@ final class SharedTasks {
         .setAllowRawAgentToken(allowRaw.getAsBoolean())
         .addAllScopes(allowed)
         .setBinding(binding)
+        .setEnterpriseCredentialState(
+            ENTERPRISE.equals(capability.getAudience())
+                ? enterpriseState(session)
+                : SharedEnterpriseCredentialState.SHARED_ENTERPRISE_CREDENTIAL_STATE_UNSPECIFIED)
         .build();
   }
 
   private List<String> allowedScopes(SharedDshSessionBinding binding, String audience) {
     return switch (audience) {
-      case ENTERPRISE -> List.of("credentials", "outbound");
+      case ENTERPRISE -> List.of("credentials", "outbound", "task.execute");
       case MODEL ->
           permissions
                   .resolve(TenantContext.require(), binding.getMemberId(), "portal")
@@ -337,27 +365,48 @@ final class SharedTasks {
 
   private long credentialVersion(
       ObjectNode task, ObjectNode session, String audience, List<String> allowed) {
-    if (ENTERPRISE.equals(audience)) {
-      if (!session.has("uacCredentialId")) throw new AurigaException(CommonErrors.UNAUTHENTICATED);
-      var credential =
-          store.byId("uac_credential", session.path("uacCredentialId").asString(), false);
-      if (credential == null
-          || credential.path("invalid").asBoolean()
-          || !credential.path("accountId").equals(session.path("accountId"))
-          || !credential.path("providerId").equals(session.path("providerId")))
-        throw new AurigaException(CommonErrors.UNAUTHENTICATED);
-      long version = credential.path("version").asLong();
-      positive(version);
-      return version;
+    return credentialVersion(task, session, audience, allowed, false);
+  }
+
+  private SharedEnterpriseCredentialState enterpriseState(ObjectNode session) {
+    if (!session.has("uacCredentialId")) {
+      if (session.has("uacSessionBinding")) throw new AurigaException(CommonErrors.UNAUTHENTICATED);
+      return SharedEnterpriseCredentialState.SHARED_ENTERPRISE_CREDENTIAL_STATE_ABSENT;
     }
+    enterpriseVersion(session);
+    return SharedEnterpriseCredentialState.SHARED_ENTERPRISE_CREDENTIAL_STATE_AVAILABLE;
+  }
+
+  private long enterpriseVersion(ObjectNode session) {
+    if (!session.has("uacCredentialId")) throw new AurigaException(CommonErrors.UNAUTHENTICATED);
+    var credential =
+        store.byId("uac_credential", session.path("uacCredentialId").asString(), false);
+    if (credential == null
+        || credential.path("invalid").asBoolean()
+        || !credential.path("accountId").equals(session.path("accountId"))
+        || !credential.path("providerId").equals(session.path("providerId")))
+      throw new AurigaException(CommonErrors.UNAUTHENTICATED);
+    long version = credential.path("version").asLong();
+    positive(version);
+    return version;
+  }
+
+  private long credentialVersion(
+      ObjectNode task,
+      ObjectNode session,
+      String audience,
+      List<String> allowed,
+      boolean executionOnly) {
+    if (ENTERPRISE.equals(audience) && !executionOnly) return enterpriseVersion(session);
     var versions = task.withObject("/audienceVersions");
-    var current = versions.path(audience);
+    String versionKey = executionOnly ? audience + ":task.execute" : audience;
+    var current = versions.path(versionKey);
     String fingerprint = Secrets.hash(String.join("\n", allowed));
     long version = current.path("version").asLong(0);
     if (!fingerprint.equals(current.path("fingerprint").asString())) {
       version++;
       positive(version);
-      versions.set(audience, Json.object("fingerprint", fingerprint, "version", version));
+      versions.set(versionKey, Json.object("fingerprint", fingerprint, "version", version));
       store.save("shared_task", task);
     }
     positive(version);

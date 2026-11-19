@@ -102,7 +102,7 @@ final class SharedTaskTokens {
   static List<String> scopes(String audience, List<String> requested) {
     Set<String> allowed =
         switch (audience) {
-          case ENTERPRISE -> Set.of("outbound", "credentials");
+          case ENTERPRISE -> Set.of("outbound", "credentials", "task.execute");
           case MODEL -> Set.of("model.invoke");
           case MESSAGE -> Set.of("message.send", "message.receive");
           default -> throw new AurigaException(CommonErrors.VALIDATION_FAILED);
@@ -111,6 +111,8 @@ final class SharedTaskTokens {
         !requested.isEmpty()
             && requested.size() == new HashSet<>(requested).size()
             && allowed.containsAll(requested));
+    // Ordinary tool execution and company-material capabilities are separate handles.
+    valid(!requested.contains("task.execute") || requested.size() == 1);
     return requested.stream().sorted().toList();
   }
 

@@ -37,13 +37,14 @@ export function authorizeCapability(claims, expected, context) {
   sameBinding(claims.binding, expected, 'SessionBinding');
   lifetime(claims, context.now, 600);
   const allowed = {
-    'auriga.shared.enterprise': ['credentials', 'outbound'],
+    'auriga.shared.enterprise': ['credentials', 'outbound', 'task.execute'],
     'auriga.shared.model': ['model.invoke'],
     'auriga.shared.message': ['message.send', 'message.receive'],
   };
   if (
     claims.audience !== context.audience ||
     !claims.scopes.includes(context.scope) ||
+    (claims.scopes.includes('task.execute') && claims.scopes.length !== 1) ||
     claims.scopes.some((s) => !allowed[claims.audience].includes(s)) ||
     context.revoked.has(claims.jti) ||
     claims.taskId !== context.taskId ||

@@ -1,0 +1,56 @@
+syntax = "proto3";
+package auriga.iam.v1;
+import "auriga/node/v1/shared_dsh_contract.proto";
+import "auriga/iam/v1/network_authority.proto";
+option go_package = "github.com/hansjone/auriga/infra/gen/auriga/iam/v1;iamv1";
+option java_multiple_files = true;
+option java_package = "auriga.contracts.iam.v1";
+
+// Only svc:collab, authenticated internal transport and delegated business tenant.
+// A shared HTTP connection is first-class and never a NATS/device redeem tuple.
+service SharedMessageAuthorityService {
+  rpc OpenSharedMessageContext(OpenSharedMessageContextRequest) returns (OpenSharedMessageContextResponse);
+  rpc ReadSharedMessageContext(ReadSharedMessageContextRequest) returns (ReadSharedMessageContextResponse);
+  rpc CheckSharedMessageNodes(CheckSharedMessageNodesRequest) returns (CheckSharedMessageNodesResponse);
+}
+message OpenSharedMessageContextRequest {
+  auriga.node.v1.SharedDshCapability capability = 1;
+  string authenticated_node_id = 2;
+  string operation_id = 3;
+  string boot_id = 4;
+  string native_binding_id = 5;
+  string native_binding_revision = 6;
+}
+message SharedMessageContext {
+  auriga.node.v1.SharedDshSessionBinding binding = 1;
+  string context_id = 2;
+  string authenticated_node_id = 3;
+  string operation_id = 4;
+  string boot_id = 5;
+  string native_binding_id = 6;
+  string native_binding_revision = 7;
+  string realm = 8;
+  string node = 9;
+  string incarnation = 10;
+  string channel_nonce = 11;
+  string not_before = 12;
+  string expires_at = 13;
+  // Saved identity is independent of the short-lived task currently authorizing a call.
+  string source_binding = 14;
+  uint64 source_revision = 15;
+  uint64 policy_revision = 16;
+}
+message OpenSharedMessageContextResponse { SharedMessageContext context = 1; }
+message ReadSharedMessageContextRequest {
+  // Exactly one lookup form: context_id OR canonical realm+node.
+  string context_id = 1;
+  string realm = 2;
+  string node = 3;
+}
+message ReadSharedMessageContextResponse { SharedMessageContext context = 1; }
+message CheckSharedMessageNodesRequest { CheckNetworkRequest check = 1; }
+message CheckSharedMessageNodesResponse {
+  bool allowed = 1;
+  map<string, uint64> limits = 2;
+}
+

@@ -478,8 +478,12 @@ type NetworkAuthorityConnection struct {
 	ServerId      string `protobuf:"bytes,5,opt,name=server_id,json=serverId,proto3" json:"server_id,omitempty"`
 	ClientId      string `protobuf:"bytes,6,opt,name=client_id,json=clientId,proto3" json:"client_id,omitempty"`
 	ClientAccount string `protobuf:"bytes,7,opt,name=client_account,json=clientAccount,proto3" json:"client_account,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	// Mutually exclusive identity class, used ONLY by the shared HTTP adapter.
+	// When present all four legacy NATS fields above MUST be empty. Ordinary
+	// ResolveNetworkTarget still rejects it; it cannot redeem as a device owner.
+	SharedContextId string `protobuf:"bytes,8,opt,name=shared_context_id,json=sharedContextId,proto3" json:"shared_context_id,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
 }
 
 func (x *NetworkAuthorityConnection) Reset() {
@@ -557,6 +561,13 @@ func (x *NetworkAuthorityConnection) GetClientId() string {
 func (x *NetworkAuthorityConnection) GetClientAccount() string {
 	if x != nil {
 		return x.ClientAccount
+	}
+	return ""
+}
+
+func (x *NetworkAuthorityConnection) GetSharedContextId() string {
+	if x != nil {
+		return x.SharedContextId
 	}
 	return ""
 }
@@ -1012,7 +1023,7 @@ const file_auriga_iam_v1_network_authority_proto_rawDesc = "" +
 	"\x06limits\x18\x01 \x03(\v20.auriga.iam.v1.NetworkLimitsResponse.LimitsEntryR\x06limits\x1a9\n" +
 	"\vLimitsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\x04R\x05value:\x028\x01\"\xde\x01\n" +
+	"\x05value\x18\x02 \x01(\x04R\x05value:\x028\x01\"\x8a\x02\n" +
 	"\x1aNetworkAuthorityConnection\x12\x1b\n" +
 	"\ttenant_id\x18\x01 \x01(\tR\btenantId\x12\x14\n" +
 	"\x05realm\x18\x02 \x01(\tR\x05realm\x12\x12\n" +
@@ -1020,7 +1031,8 @@ const file_auriga_iam_v1_network_authority_proto_rawDesc = "" +
 	"\aingress\x18\x04 \x01(\tR\aingress\x12\x1b\n" +
 	"\tserver_id\x18\x05 \x01(\tR\bserverId\x12\x1b\n" +
 	"\tclient_id\x18\x06 \x01(\tR\bclientId\x12%\n" +
-	"\x0eclient_account\x18\a \x01(\tR\rclientAccount\"~\n" +
+	"\x0eclient_account\x18\a \x01(\tR\rclientAccount\x12*\n" +
+	"\x11shared_context_id\x18\b \x01(\tR\x0fsharedContextId\"~\n" +
 	"\x1bResolveNetworkTargetRequest\x12I\n" +
 	"\n" +
 	"connection\x18\x01 \x01(\v2).auriga.iam.v1.NetworkAuthorityConnectionR\n" +

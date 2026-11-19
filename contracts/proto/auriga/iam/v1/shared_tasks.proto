@@ -71,6 +71,16 @@ message AuthorizeSharedCapabilityResponse {
   bool allow_raw_agent_token = 3;
   repeated string scopes = 4;
   auriga.node.v1.SharedDshSessionBinding binding = 5;
+  // Explicit optional company-material state, only for enterprise audience.
+  // ABSENT is possible only for a valid platform session without either UAC
+  // reference. Invalid/revoked/foreign/expired identities remain authentication
+  // failures. No catch-all authentication fallback is authorized by this field.
+  SharedEnterpriseCredentialState enterprise_credential_state = 6;
+}
+enum SharedEnterpriseCredentialState {
+  SHARED_ENTERPRISE_CREDENTIAL_STATE_UNSPECIFIED = 0;
+  SHARED_ENTERPRISE_CREDENTIAL_STATE_ABSENT = 1;
+  SHARED_ENTERPRISE_CREDENTIAL_STATE_AVAILABLE = 2;
 }
 message ReadSharedCredentialsRequest {
   auriga.node.v1.SharedDshCapability capability = 1;

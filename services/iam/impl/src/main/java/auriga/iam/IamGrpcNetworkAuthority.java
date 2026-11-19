@@ -215,7 +215,8 @@ public class IamGrpcNetworkAuthority
   }
 
   private static void tenant(NetworkAuthorityConnection connection) {
-    if (!TenantContext.require().toString().equals(connection.getTenantId()))
+    if (!connection.getSharedContextId().isEmpty()
+        || !TenantContext.require().toString().equals(connection.getTenantId()))
       throw new AurigaException(CommonErrors.FORBIDDEN);
   }
 

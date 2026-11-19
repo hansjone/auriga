@@ -1243,7 +1243,15 @@ public class NetworkMailboxWireService {
     return NetworkJson.object().put("app_version", "1.0").put("type", type);
   }
 
-  private static String bindingJson(NetworkAuthorityConnection c) {
+  static String bindingJson(NetworkAuthorityConnection c) {
+    if (!c.getSharedContextId().isEmpty())
+      return NetworkJson.canonical(
+          NetworkJson.object()
+              .put("transport", "shared_node_http")
+              .put("tenant", c.getTenantId())
+              .put("realm", c.getRealm())
+              .put("node", c.getNode())
+              .put("context_id", c.getSharedContextId()));
     return NetworkJson.canonical(
         NetworkJson.object()
             .put("tenant", c.getTenantId())

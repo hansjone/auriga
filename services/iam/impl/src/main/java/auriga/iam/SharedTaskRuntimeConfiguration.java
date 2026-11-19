@@ -85,6 +85,18 @@ public class SharedTaskRuntimeConfiguration {
   }
 
   @Bean
+  SharedMessages sharedMessages(
+      IamStore store, SharedTasks tasks, IamNetworkAuthority network, Clock clock) {
+    return new SharedMessages(store, tasks, network, clock);
+  }
+
+  @Bean
+  IamGrpcSharedMessages iamGrpcSharedMessages(
+      SharedMessages messages, CredentialInstallationScope installation) {
+    return new IamGrpcSharedMessages(messages, installation);
+  }
+
+  @Bean
   IamGrpcSharedTasks iamGrpcSharedTasks(
       SharedTasks tasks,
       CredentialInstallationScope installation,
