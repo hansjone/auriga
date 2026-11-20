@@ -190,8 +190,21 @@ func sharedRuntimeSpecJSON(raw []byte) ([]byte, error) {
 		return nil, fmt.Errorf("signed Docker runtime template required")
 	}
 	secrets := spec.GetSecrets()
-	if secrets.GetInstanceToken() != nil || secrets.GetAiGatewayToken() != nil || secrets.GetDeviceCredential() != nil || secrets.GetModelCredential() != nil {
+	if proto.Size(secrets) != 0 {
 		return nil, fmt.Errorf("personal sealed credentials are not shared public inputs")
+	}
+	if spec.OwnerId != "" || len(spec.Plugins) != 0 || len(spec.UnifiedResources) != 0 || len(spec.GetProfile().GetEnv()) != 0 || spec.Generation < 0 {
+		return nil, fmt.Errorf("personal runtime state is not a shared template")
+	}
+	// A classic installation supplies an unassigned template. Shared pools own
+	// their initial operation and replace classic entry patches with the
+	// independently approved complete shared or dedicated profile.
+	if spec.Generation == 0 {
+		spec.Generation = 1
+	}
+	spec.Secrets = nil
+	if spec.Profile != nil {
+		spec.Profile.Patches = nil
 	}
 	body, err := (protojson.MarshalOptions{Indent: "  "}).Marshal(spec)
 	if err != nil {
