@@ -1,8 +1,23 @@
 /** Sequential, local-only Windows build, using exactly the existing CI recipes. */
 import { spawnSync } from 'node:child_process';
 import { Buffer } from 'node:buffer';
-import { cpSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { dirname, join, resolve } from 'node:path';
+import {
+  cpSync,
+  copyFileSync,
+  realpathSync,
+  mkdirSync,
+  readFileSync,
+  writeFileSync,
+} from 'node:fs';
+import {
+  basename,
+  dirname,
+  join,
+  relative,
+  isAbsolute,
+  resolve,
+  sep,
+} from 'node:path';
 import { ROOT, BUILD_NODE, verifyInputs, physical } from './inputs.mjs';
 import {
   canonical,
@@ -25,8 +40,60 @@ const inputTrust = (o) => ({
   verifyKey: o['verify-key'],
   trustFingerprint: o['trust-fingerprint'],
 });
+// 联网派生的现场套件没有发行签名，由派生时刚算出的清单摘要校验；
+// 源码身份仍按 inputTrust 验签。
+const kitTrust = (o) => (o['site-derived'] ? {} : inputTrust(o));
+/** 路径 child 是否等于 parent 或位于其内（Windows 不区分大小写）。 */
+export function canonicalPath(path) {
+  // 对已存在的最近祖先取真实路径（展开 8.3 短名、junction），再接回不存在的部分。
+  const rest = [];
+  let current = resolve(path);
+  for (;;) {
+    try {
+      const real = join(realpathSync.native(current), ...rest.reverse());
+      return process.platform === 'win32' ? real.toLowerCase() : real;
+    } catch {
+      const parent = dirname(current);
+      if (parent === current) {
+        const plain = resolve(path);
+        return process.platform === 'win32' ? plain.toLowerCase() : plain;
+      }
+      rest.push(basename(current));
+      current = parent;
+    }
+  }
+}
+export function isInside(child, parent) {
+  const rel = relative(canonicalPath(parent), canonicalPath(child));
+  return (
+    rel === '' ||
+    (rel !== '..' && !rel.startsWith('..' + sep) && !isAbsolute(rel))
+  );
+}
 export function validateBuildOptions(o) {
-  if (o.offline !== true) throw new Error('现场构建必须显式指定 --offline');
+  if (o.online === true && o.offline === true)
+    throw new Error('--online 与 --offline 互斥，只能二选一');
+  if (o.online !== true && o.offline !== true)
+    throw new Error(
+      '现场构建必须显式指定 --offline（套件锁与源码一致）或 --online（联网补依赖）',
+    );
+  if (o.online === true) {
+    if (!o['verify-key'] && !o['trust-fingerprint'])
+      throw new Error(
+        '--online 的基础套件必须是发行签名的，需要 --verify-key 或 --trust-fingerprint',
+      );
+    if (o['devkit-sha256'])
+      throw new Error(
+        '--online 不接受 --devkit-sha256，基础套件必须验发行签名',
+      );
+    if (typeof o['site-devkit'] !== 'string' || !o['site-devkit'])
+      throw new Error(
+        '缺少 --site-devkit（用于存放联网派生出的现场套件的新目录）',
+      );
+  } else if (o['site-devkit'])
+    throw new Error('--site-devkit 只能与 --online 同用');
+  if (o.online !== true && o['base-pnpm-lock'])
+    throw new Error('--base-pnpm-lock 只能与 --online 同用');
   for (const key of [
     'devkit',
     'out',
@@ -36,6 +103,21 @@ export function validateBuildOptions(o) {
     'sequence',
   ])
     if (typeof o[key] !== 'string' || !o[key]) throw new Error(`缺少 --${key}`);
+  if (o.online === true) {
+    const site = resolve(o['site-devkit']);
+    const base = resolve(o.devkit);
+    const out = resolve(o.out);
+    if (
+      isInside(site, base) ||
+      isInside(base, site) ||
+      isInside(site, out) ||
+      isInside(out, site)
+    )
+      throw new Error(
+        '--site-devkit 必须是全新目录，且不能与基础套件或 --out 互相包含',
+      );
+    if (isInside(out, base)) throw new Error('构建输出不得位于只读 devkit 内');
+  }
   parseVersion(o.version);
   const target = clientPlatform(o.target);
   const unsigned = {
@@ -90,16 +172,23 @@ export function validateBuildOptions(o) {
   );
   return unsigned;
 }
-export function startOfflineBuild(options) {
+export function resolveBuildPaths(options) {
   options = { ...options };
   for (const key of [
     'devkit',
+    'site-devkit',
+    'base-pnpm-lock',
     'out',
     'release-public-key',
     'resource-trust-json',
     'verify-key',
   ])
     if (options[key]) options[key] = resolve(options[key]);
+  return options;
+}
+export function startOfflineBuild(options, hooks = {}) {
+  options = resolveBuildPaths(options);
+  if (options.online === true) throw new Error('--online 请走联网派生入口');
   validateBuildOptions(options);
   sourceIdentity(ROOT, inputTrust(options), { forBuild: true });
   const kit = verifyInputs(
@@ -108,6 +197,15 @@ export function startOfflineBuild(options) {
     ROOT,
     inputTrust(options),
   );
+  launchOfflineBuild(options, kit, hooks);
+}
+/**
+ * 已校验的套件 kit 上的断网构建：--offline 与 --online 派生套件共用，
+ * 输出目录、环境过滤、网络守卫完全一致。
+ * hooks.spawn 供测试注入；hooks.siteDependencies 是要复制进输出目录的审阅清单路径。
+ */
+export function launchOfflineBuild(options, kit, hooks = {}) {
+  const spawn = hooks.spawn ?? spawnSync;
   const out = resolve(options.out);
   physical(dirname(out));
   if (
@@ -117,9 +215,24 @@ export function startOfflineBuild(options) {
     throw new Error('构建输出不得位于只读 devkit 内');
   mkdirSync(out); // No overwrite/reuse of old release or review material.
   const optionsFile = join(out, 'site-options.json');
+  if (hooks.siteDependencies)
+    copyFileSync(hooks.siteDependencies, join(out, 'site-dependencies.json'));
+  // 工作进程只需要“用这个已校验套件做断网构建”；联网相关选项不进入工作进程。
+  const worker = { ...options };
+  delete worker.online;
+  delete worker['site-devkit'];
+  delete worker['base-pnpm-lock'];
   writeFileSync(
     optionsFile,
-    JSON.stringify({ ...options, out, devkit: kit.directory }),
+    JSON.stringify({
+      ...worker,
+      offline: true,
+      out,
+      devkit: kit.directory,
+      ...(options.online === true
+        ? { 'site-derived': true, 'devkit-sha256': kit.manifestSha256 }
+        : {}),
+    }),
   );
   const env = Object.fromEntries(
     Object.entries(process.env).filter(
@@ -143,7 +256,7 @@ export function startOfflineBuild(options) {
     DESKTOP_SOURCE_ON_MAIN: '',
   });
   writeFileSync(env.AURIGA_CLIENT_NETWORK_LOG, '');
-  const result = spawnSync(
+  const result = spawn(
     join(kit.directory, clientPlatform().buildNode),
     [
       join(ROOT, 'scripts/client-release/cli.mjs'),
@@ -156,6 +269,7 @@ export function startOfflineBuild(options) {
     throw new Error(
       `Windows 离线构建失败（退出码 ${result.status}），保留输出目录供排查`,
     );
+  return { out };
 }
 export async function buildWorker(optionsFile) {
   if (
@@ -166,7 +280,7 @@ export async function buildWorker(optionsFile) {
     throw new Error('必须从受控离线入口构建');
   const o = JSON.parse(readFileSync(optionsFile, 'utf8'));
   const policy = validateBuildOptions(o);
-  const kit = verifyInputs(o.devkit, o['devkit-sha256'], ROOT, inputTrust(o));
+  const kit = verifyInputs(o.devkit, o['devkit-sha256'], ROOT, kitTrust(o));
   const source = sourceIdentity(ROOT, inputTrust(o), { forBuild: true });
   const pnpm = join(kit.directory, 'build-pnpm/node_modules/pnpm/bin/pnpm.cjs');
   const store = join(o.out, 'pnpm-store');

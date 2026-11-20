@@ -15,6 +15,7 @@ import { physical } from './platform.mjs';
 import { sha256File } from '../../clients/installer/runtime/verify.mjs';
 import { canonical } from '../../clients/installer/runtime/release.mjs';
 import { verifySignedInventory } from './trust.mjs';
+import { checkRequires, stampRequires } from './compat.mjs';
 
 export const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 function readBuildNode(root) {
@@ -100,6 +101,8 @@ export function inventory(root, prefix = '') {
         'SHA256SUMS',
         'SHA256SUMS.sig',
         'release-public.pem',
+        // 现场联网派生套件的审阅清单：含派生后的清单摘要，只能在封存之后写入。
+        'site-dependencies.json',
       ].includes(path)
     )
       rows.push({
@@ -113,33 +116,48 @@ export function inventory(root, prefix = '') {
 export function sealInputs(directory, tools, root = ROOT) {
   const identity = lockIdentity(root);
   const files = inventory(directory);
-  const manifest = {
+  const manifest = stampRequires('windows-client.json', {
     schema: 1,
     platform: CLIENT_TARGET,
     ...identity,
     tools,
     files,
     bytes: files.reduce((n, f) => n + f.bytes, 0),
-  };
+  });
   const bytes = JSON.stringify(manifest, null, 2) + '\n';
   writeFileSync(join(directory, 'windows-client.json'), bytes, { flag: 'wx' });
   return { ...manifest, manifestSha256: digest(bytes) };
 }
+const LOCK_HINT = (message) =>
+  `${message}。仅前端 pnpm / dsh-plugin npm 依赖变化时，可改用 build --online 联网补依赖；其他变化需维护方出新套件`;
 export function verifyInputs(
   directory,
   expected,
   root = ROOT,
-  { checkTools = true, verifyKey, trustFingerprint } = {},
+  {
+    checkTools = true,
+    verifyKey,
+    trustFingerprint,
+    // 'skip'：联网派生的基础套件。只跳过“依赖锁必须与当前源码一致”，
+    // 其余签名、摘要、逐文件和系统工具校验不变；锁与构建 Node 由调用方比对。
+    lockPolicy = 'strict',
+  } = {},
 ) {
+  if (lockPolicy !== 'strict' && lockPolicy !== 'skip')
+    throw new Error('lockPolicy 无效');
+  if (lockPolicy === 'skip' && !verifyKey && !trustFingerprint)
+    throw new Error('跳过依赖锁一致性的前提是套件经过发行签名校验');
   physical(directory);
   const file = join(directory, 'windows-client.json');
   const identity = lockIdentity(root);
+  let signedLockSha256;
   if (verifyKey || trustFingerprint) {
     const signed = verifySignedInventory(directory, {
       verifyKey,
       trustFingerprint,
     });
     const release = signed.verifyMetadata('client-inputs-release.json');
+    checkRequires('client-inputs-release.json', release);
     if (
       release.schemaVersion !== 1 ||
       release.platform !== CLIENT_TARGET ||
@@ -150,22 +168,47 @@ export function verifyInputs(
     if (expected && expected !== release.manifestSha256)
       throw new Error('批准摘要与签名输入发行不符');
     expected = release.manifestSha256;
-    if (release.lockSha256 !== identity.lockSha256)
-      throw new Error('签名输入发行依赖锁不匹配');
+    signedLockSha256 = release.lockSha256;
+    if (lockPolicy === 'strict' && release.lockSha256 !== identity.lockSha256)
+      throw new Error(LOCK_HINT('签名输入发行依赖锁不匹配'));
   }
   if (!lstatSync(file).isFile()) throw new Error('离线清单必须为普通文件');
   const manifestBytes = readFileSync(file);
   if (!HASH.test(expected ?? '') || digest(manifestBytes) !== expected)
     throw new Error('Windows devkit 清单缺少独立批准摘要或摘要不符');
   const manifest = JSON.parse(manifestBytes);
-  if (
+  checkRequires('windows-client.json', manifest);
+  if (lockPolicy === 'skip') {
+    if (manifest.schema !== 1 || manifest.platform !== CLIENT_TARGET)
+      throw new Error('Windows devkit 清单格式无效');
+    // 基础套件自洽：清单记录的锁必须与其 lockSha256 对应，再与签名元数据一致。
+    const own = digest(
+      canonical({
+        schema: 1,
+        platform: CLIENT_TARGET,
+        buildNode: manifest.buildNode,
+        locks: manifest.locks,
+      }),
+    );
+    if (
+      typeof manifest.buildNode !== 'string' ||
+      !manifest.locks ||
+      typeof manifest.locks !== 'object' ||
+      manifest.lockSha256 !== own ||
+      manifest.lockSha256 !== signedLockSha256 ||
+      Object.values(manifest.locks).some((v) => !HASH.test(v))
+    )
+      throw new Error('Windows devkit 清单记录的依赖锁与其摘要不符');
+  } else if (
     manifest.schema !== 1 ||
     manifest.platform !== CLIENT_TARGET ||
     manifest.buildNode !== identity.buildNode ||
     manifest.lockSha256 !== identity.lockSha256 ||
     canonical(manifest.locks) !== canonical(identity.locks)
   )
-    throw new Error('Windows devkit 依赖锁不匹配，请准备对应锁摘要套件');
+    throw new Error(
+      LOCK_HINT('Windows devkit 依赖锁不匹配，请准备对应锁摘要套件'),
+    );
   if (!Array.isArray(manifest.files) || !manifest.files.length)
     throw new Error('Windows devkit 输入清单为空');
   const actual = inventory(directory);

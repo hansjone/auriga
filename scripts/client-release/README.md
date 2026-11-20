@@ -50,6 +50,25 @@ Go→Node 互操作在 deploy/offline/desktop_source_test.go 检查。凭据、�
 
 构建先核全部输入，把 store 复制到新输出目录，以 --offline --frozen-lockfile --ignore-scripts 恢复独立工作区依赖；清空代理，Node 子进程继承拒绝 TCP/TLS/HTTP/fetch/DNS（含 Resolver）/UDP 的 preload。原生子程序为本地csc、tar、esbuild及固定Python（以 `-I -S -B` 运行stdlib wheel解包器和compileall）；生产闭包只复制本地输入，不用npm view/联网解析。成功保留offline-evidence.json和空network-denials.log，出现拒绝请求则失败。它不是恶意源码/原生程序的OS沙箱，严格断网仍建议专用Windows VM；不改系统网络/防火墙、不操作用户桌面、不启动常驻项目服务。
 
+## 联网补依赖（build --online）
+
+现场只改了前端 / workspace 的 pnpm 依赖，或 dsh-plugin 的 npm 依赖，而发行套件里没有这些新包时，`--offline` 会因“依赖锁不匹配”拒绝。联网构建机可以改用：
+
+```powershell
+.\scripts\client-release\auriga-client.cmd build --online --devkit $env:AURIGA_CLIENT_DEVKIT --verify-key D:\approved\release-public.pem --site-devkit D:\exports\site-kit-102 --version 1.0.2-site.1 --sequence 102 --release-public-key C:\secure\site-desktop\desktop-public.pem --resource-trust-json D:\site\resource-roots.json --out D:\exports\desktop-102
+```
+
+- 与 `--offline` 互斥；必须有 `--verify-key` 或 `--trust-fingerprint`（基础套件必须是发行签名的）和 `--site-devkit`（全新目录，本机固定磁盘，不能在基础套件或输出目录内，也不能包含它们）。参数错误在任何联网、拷贝前报出。
+- 先按发行公钥完整校验基础套件（签名、元数据、摘要、逐文件、系统工具），只跳过“锁必须与当前源码一致”；源码身份校验不变。
+- 范围：允许变化的只有 `web/pnpm-lock.yaml`、`pnpm-workspace.yaml`、`web/*/package.json`、`clients/*/package.json`、根 `package.json`（`packageManager` 不能变）、`clients/dsh-plugin/package-lock.json`。构建 Node、`.npmrc`、`clients/installer/upstream.json`、Python 锁、DSH 锁、`packageManager` 变化一律报错并列出文件：Java/Python/DSH/Node 版本变化仍需维护方出新套件。锁与套件完全一致时同样报错，提示直接用 `--offline`。
+- 派生：把基础套件（只读）复制到 `--site-devkit`，不复制 `SHA256SUMS`、`SHA256SUMS.sig`、`client-inputs-release.json`、`release-public.pem`、`windows-client.json`；再只重做变化的部分。pnpm 相关锁变了：用套件自带 build-node/build-pnpm 在临时 workspace 里 `pnpm fetch --frozen-lockfile --ignore-scripts`，旧 store 作起点只下新增；插件锁变了：删 `plugin-deps` 旧依赖后用套件自带 npm `npm ci --omit=dev --omit=peer`。完整性由 pnpm-lock / package-lock 的 integrity 保证。透传已设置的 `HTTPS_PROXY`/`HTTP_PROXY`/`NO_PROXY` 与 `npm_config_registry`，其余 `npm_config_*`/`pnpm_config_*` 去掉；不设置就不传。失败时清理半成品派生目录，基础套件从不被修改。
+- 派生套件按与 `sealInputs` 相同的格式写新的 `windows-client.json`，并写 `site-dependencies.json`（基础/新的清单与锁摘要、变化的锁文件、新增包的名称/版本/integrity、“不再需要”的数量；取不到旧 `web/pnpm-lock.yaml` 时数量为 null 并带警告）。旧锁来源：源码基线的 Git 提交（`git show`），或 `--base-pnpm-lock <原始 web/pnpm-lock.yaml>`，摘要必须与基础套件记录一致，路径读不到或摘要不符直接报错（不静默降级），该参数只能与 `--online` 同用。
+- 构建：派生套件以刚算出的清单摘要为期望摘要，走与 `--offline` 完全相同的断网构建（网络守卫、环境过滤一致）。`site-dependencies.json` 同时复制到输出目录并在构建结束时打印；不向 `desktop-build.json` / 发布清单加字段。复制完成后、联网前会把派生目录与已校验的基础套件清单逐项复核（路径、大小、SHA-256）。只改了 `web/*/package.json` 或 `clients/*/package.json` 的 scripts、version 等不影响依赖的字段时，锁文件本来就不变：照常派生套件并重封清单，但不联网下载，打印“依赖锁未变，仅 package.json 变化，未联网下载”。若改的是依赖声明却没更新锁，离线构建里的 `pnpm install --frozen-lockfile` 会报错，请先在联网机运行 `pnpm install --lockfile-only` 更新锁再重试。dsh-plugin 的 `package.json` 在插件锁未变时，只允许 scripts、version 等非依赖字段变化；`dependencies`、`optionalDependencies`、`peerDependencies`、`bundleDependencies`/`bundledDependencies` 与基础套件不同会在复制和联网前报错，请先在 `clients/dsh-plugin` 运行 `npm install --package-lock-only` 更新插件锁。`sign --review-only` 在输出目录有 `site-dependencies.json` 时会提示“含现场联网依赖：N 项”：这类输出的输入摘要来自现场派生套件，不在维护方的发行签名之内，签名者须人工审阅该清单。
+
+## 套件清单格式兼容（requires）
+
+规则与服务端 `deploy/offline/devkit_compat.go` 一致，实现见 `compat.mjs`。`client-inputs-release.json` 与 `windows-client.json` 的顶层字段在 `FIELD_REGISTRY` 登记为基线、说明性或能力名；写出时只有出现非基线字段才带 `requires`，现在写出的内容与此前逐字节相同。读到带 `requires` 的清单：有当前脚本不认识的能力、`requires` 类型错误或大小写变体键就拒绝，提示“套件需要更新的客户端发行脚本，请使用该套件发行页对应版本的源码”；说明性字段忽略；没有 `requires` 的旧清单照常。以后加能力字段要同时改 `compat.mjs` 的登记表（测试会检查漏登记）和 Go 的 `deploy/offline/release_client_kit.go`（它对 `client-inputs-release.json` 严格解码；`windows-client.json` 虽为非严格解码，会默默忽略 `requires`，同样要同步）。
+
 ## Linux 公钥配置及发布
 
 Linux install 加 --desktop-public-key <独立Ed25519 SPKI PEM>、--desktop-publisher-tenant <实际发行租户UUID> 和 --desktop-confirm-fingerprint <独立核对的64位小写SPKI-SHA256>，三者一并提供。指纹与 Windows keygen 输出 publicKeyFingerprint 独立核对，公钥不符拒绝登记，成功打印已登记指纹。现有安装锁内写原 state 的 desktopPublicKeyFingerprint/desktopPublisherTenant，保留 #373 TrustedKeys、AllowUnsigned、资源初始化及冷备份/回滚。重复安装省略三项时复核 state 中的固定指纹；显式提供公钥仍须确认指纹，拒绝自动换钥或租户；升级保存 operator settings 和 state。

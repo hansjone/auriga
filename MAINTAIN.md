@@ -270,6 +270,8 @@ python -m pip check
 
 --verify-key 为独立批准的 #373 套件发行公钥，也可用 --trust-fingerprint <独立批准SPKI-SHA256>，同时核源码和 Windows 附件。它与现场桌面发行钥不同。输出须新目录；UNC、设备路径、网络映射盘、junction、缺失输入、摘要/依赖锁变化会拒绝。可用 --platform-origin 预置成员入口，IP/HTTP 沿 installer 既有显式确认参数。
 
+**依赖锁与发行套件不一致**：只改了前端 / workspace 的 pnpm 依赖或 dsh-plugin 的 npm 依赖时，联网构建机可用 `auriga-client build --online --devkit <发行签名套件目录> --verify-key <发行公钥> --site-devkit <新目录> ...`（其余参数同 `--offline`，二者互斥）联网只补变化的依赖，派生现场套件后断网构建，新增依赖清单写入输出目录的 `site-dependencies.json` 供签名前审阅。Java/Python/DSH/Node 版本、`.npmrc`、`packageManager`、上游 pin 变化仍需维护方出新套件。详见[客户端发行说明](scripts/client-release/README.md#联网补依赖build---online)与[常见报错](docs/site/troubleshooting.zh.md)。
+
 每次从全新源码目录构建；源码树中预置 node_modules、dist、.pnpm-store 或未列入基线的 clients/dsh-plugin/ui 会在启动构建前拒绝，并提示 PowerShell 清理命令。构建用 --offline --frozen-lockfile --ignore-scripts 恢复独立依赖，Node 子进程继承网络拒绝守卫；生产依赖只复制本地输入。输出 exe、诊断 zip、构建记录、未签清单、SHA-256 和网络证据。把目录带到离线签名机，审阅来源/现场改动、公钥/资源根、包摘要、版本/序号/最低版本/渠道等；Git 来源会显示未通过发行者签名清单认证的醒目警告，须独立核对。再人工确认摘要：
 
 ```powershell
