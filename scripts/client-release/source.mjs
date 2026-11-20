@@ -1,7 +1,15 @@
 /** Source provenance compatible with deploy/offline/source_archive.go. */
 import { Buffer, isUtf8 } from 'node:buffer';
-import { existsSync, readFileSync, readdirSync, lstatSync } from 'node:fs';
-import { join, basename, extname } from 'node:path';
+import {
+  existsSync,
+  readFileSync,
+  readdirSync,
+  lstatSync,
+  mkdirSync,
+  copyFileSync,
+  rmSync,
+} from 'node:fs';
+import { join, basename, extname, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { ROOT, digest, physical } from './inputs.mjs';
 import { verifySignedInventory } from './trust.mjs';
@@ -130,9 +138,10 @@ export function assertBuildSourceClean(root, baselinePaths = []) {
         ['node_modules', 'dist', '.pnpm-store'].includes(lower) ||
         (!baselineUI && name.toLowerCase() === 'clients/dsh-plugin/ui')
       ) {
-        const path = join(root, name).replaceAll("'", "''");
+        const ui = name.toLowerCase() === 'clients/dsh-plugin/ui';
+        const quoted = resolve(root).replaceAll("'", "''");
         throw new Error(
-          `构建前发现预置生成内容：${name}；请核对后在 PowerShell 清理：Remove-Item -LiteralPath '${path}' -Recurse -Force；或重新解压源码到全新目录`,
+          `构建前发现预置生成内容：${name}；构建不再向源码树写入，这多半是旧版本构建的残留。请运行一键清理（支持超长路径，只删已知生成目录）：.\\scripts\\client-release\\auriga-client.cmd clean-source '${quoted}'${ui ? ' --include-ui' : ''}；或重新解压源码到全新目录。路径：${join(root, name)}`,
         );
       }
       if (!sourcePathAllowed(name)) continue;
@@ -142,6 +151,95 @@ export function assertBuildSourceClean(root, baselinePaths = []) {
     }
   };
   walk();
+}
+/** 构建会生成的目录名（含历史版本在源码树里留下的残留）。 */
+const GENERATED_DIRS = new Set(['node_modules', 'dist', '.pnpm-store']);
+const UI_DIR = 'clients/dsh-plugin/ui';
+/**
+ * 清理源码树里已知的构建生成物：任意层级的 node_modules、dist、.pnpm-store，
+ * 以及（指定 includeUi 时）clients/dsh-plugin/ui。不进入 .git，也不删其他任何文件；
+ * 用 Node 的 fs.rmSync 删除，超长路径（如 element-plus 在 .pnpm 下）同样可删。
+ * 链接只删链接本身，不跟随到目标目录。
+ */
+export function cleanSource(root, { includeUi = false } = {}) {
+  root = resolve(root);
+  physical(root);
+  if (!existsSync(join(root, 'scripts/client-release/build-node.json')))
+    throw new Error(
+      '不是 Auriga 源码目录（缺少 scripts/client-release/build-node.json），拒绝清理',
+    );
+  const removed = [];
+  const remove = (name) => {
+    try {
+      rmSync(join(root, name), {
+        recursive: true,
+        force: true,
+        maxRetries: 3,
+        retryDelay: 200,
+      });
+    } catch (error) {
+      throw new Error(`无法删除 ${name}：${error.message}`);
+    }
+    removed.push(name);
+  };
+  const walk = (prefix = '') => {
+    for (const entry of readdirSync(join(root, prefix), {
+      withFileTypes: true,
+    })) {
+      const name = prefix ? `${prefix}/${entry.name}` : entry.name;
+      const lower = entry.name.toLowerCase();
+      if (lower === '.git') continue;
+      const generated =
+        GENERATED_DIRS.has(lower) ||
+        (includeUi && name.toLowerCase() === UI_DIR);
+      if (generated && (entry.isDirectory() || entry.isSymbolicLink()))
+        remove(name);
+      else if (entry.isDirectory()) walk(name);
+    }
+  };
+  walk();
+  return { root, removed };
+}
+const COPY_SKIP = new Set([...EXCLUDED]);
+/**
+ * 把源码复制到独立构建目录：排除 node_modules、.git 等（见 EXCLUDED）及 bin、data、
+ * deploy/compose/var；遇到链接/特殊文件即拒绝。逐文件复制后比对字节，保证副本与源码一致。
+ * dest 必须是不存在的新目录；若位于源码内则自动跳过它。
+ */
+export function copyBuildSource(root, dest) {
+  root = resolve(root);
+  dest = resolve(dest);
+  const key = (p) => (process.platform === 'win32' ? p.toLowerCase() : p);
+  mkdirSync(dest);
+  let count = 0;
+  const walk = (prefix = '') => {
+    mkdirSync(join(dest, prefix), { recursive: true });
+    for (const entry of readdirSync(join(root, prefix), {
+      withFileTypes: true,
+    })) {
+      const name = prefix ? `${prefix}/${entry.name}` : entry.name;
+      const lower = name.toLowerCase();
+      const from = join(root, name);
+      if (
+        COPY_SKIP.has(entry.name.toLowerCase()) ||
+        /^(bin|data)$/.test(lower) ||
+        lower === 'deploy/compose/var' ||
+        key(from) === key(dest)
+      )
+        continue;
+      const stat = lstatSync(from);
+      if (stat.isSymbolicLink()) throw new Error(`源码含链接：${name}`);
+      if (stat.isDirectory()) walk(name);
+      else if (stat.isFile()) {
+        copyFileSync(from, join(dest, name));
+        if (!readFileSync(from).equals(readFileSync(join(dest, name))))
+          throw new Error(`复制到构建目录后内容不一致：${name}`);
+        count++;
+      } else throw new Error(`源码含特殊文件：${name}`);
+    }
+  };
+  walk();
+  return count;
 }
 function treeDigest(files) {
   return digest(

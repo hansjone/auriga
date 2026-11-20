@@ -66,6 +66,12 @@ import {
 import { signInputs } from '../../../scripts/client-release/sign-inputs.mjs';
 import { verifyRelease } from '../runtime/release.mjs';
 import { nodeRuntime } from '../scripts/build.mjs';
+import {
+  assertBuildSourceClean,
+  cleanSource,
+  copyBuildSource,
+} from '../../../scripts/client-release/source.mjs';
+import { main as clientMain } from '../../../scripts/client-release/cli.mjs';
 
 function temporary(t) {
   const directory = mkdtempSync(
@@ -1852,4 +1858,184 @@ test('plugin package.json-only changes: dependency declarations must match the b
     ),
     true,
   );
+});
+
+// ---- 源码树只读构建 / clean-source ----
+const snapshotTree = (root) => {
+  const found = [];
+  const walk = (prefix = '') => {
+    for (const entry of readdirSync(join(root, prefix), {
+      withFileTypes: true,
+    })) {
+      const name = prefix ? `${prefix}/${entry.name}` : entry.name;
+      if (entry.isDirectory()) walk(name);
+      else found.push(`${name}:${readFileSync(join(root, name), 'utf8')}`);
+    }
+  };
+  walk();
+  return found.sort();
+};
+function makeSourceTree(t) {
+  const root = temporary(t);
+  const write = (path, text) => {
+    mkdirSync(dirname(join(root, path)), { recursive: true });
+    writeFileSync(join(root, path), text);
+  };
+  write('scripts/client-release/build-node.json', '{"version":"22.19.0"}\n');
+  write('scripts/client-release/cli.mjs', '// worker\n');
+  write('scripts/client-release/offline-guard.cjs', '// guard\n');
+  write('package.json', '{"name":"fixture"}\n');
+  write('web/web/src/main.ts', 'export {};\n');
+  write('notes/dist-report.txt', '用户文件，名字像生成物但不是目录\n');
+  write('docs/node_modules.md', '用户文档\n');
+  return root;
+}
+// 假 runner：像真实 worker 一样在“自己所在的源码副本”里装依赖、产出 dist 和 ui。
+function fakeWorker(seen) {
+  return (command, args, options) => {
+    const copy = options.cwd;
+    seen.push({ copy, args });
+    assert.equal(args[0], join(copy, 'scripts/client-release/cli.mjs'));
+    assert.match(options.env.NODE_OPTIONS, /build-src/);
+    assert.equal(existsSync(join(copy, 'web/web/node_modules')), false);
+    for (const generated of [
+      'node_modules/pnpm/x.js',
+      'web/web/node_modules/vue/index.js',
+      'clients/dsh-plugin/node_modules/a/b.js',
+      'web/web/dist/index.html',
+      'clients/dsh-plugin/ui/panel.js',
+    ]) {
+      mkdirSync(dirname(join(copy, generated)), { recursive: true });
+      writeFileSync(join(copy, generated), 'generated');
+    }
+    return { status: 0 };
+  };
+}
+
+test('build never writes into the source tree: twice in a row both pass, copy is removed, user files untouched', (t) => {
+  const source = makeSourceTree(t);
+  const before = snapshotTree(source);
+  const base = makeRoot(t);
+  const { dir, sealed } = makeBaseKit(t, base, { signed: false });
+  const kit = { directory: dir, manifestSha256: sealed.manifestSha256 };
+  const parent = temporary(t);
+  for (const name of ['out1', 'out2']) {
+    const seen = [];
+    const out = join(parent, name);
+    launchOfflineBuild(
+      { ...onlineOptions(t), online: true, devkit: dir, out },
+      kit,
+      { root: source, spawn: fakeWorker(seen) },
+    );
+    assert.equal(seen.length, 1);
+    assert.equal(seen[0].copy, join(out, 'build-src'));
+    assert.equal(existsSync(join(out, 'build-src')), false);
+    assert.equal(
+      JSON.parse(readFileSync(join(out, 'site-options.json')))['source-root'],
+      source,
+    );
+    // 源码树没有新增任何文件，第二次构建前的源码门禁照样通过。
+    assert.deepEqual(snapshotTree(source), before);
+    assert.doesNotThrow(() => assertBuildSourceClean(source));
+  }
+  // 失败的构建同样不留副本、不动源码。
+  const failed = join(parent, 'out3');
+  assert.throws(
+    () =>
+      launchOfflineBuild(
+        { ...onlineOptions(t), online: true, devkit: dir, out: failed },
+        kit,
+        {
+          root: source,
+          spawn: (c, a, o) => {
+            fakeWorker([])(c, a, o);
+            return { status: 7 };
+          },
+        },
+      ),
+    /退出码 7/,
+  );
+  assert.equal(existsSync(join(failed, 'build-src')), false);
+  assert.deepEqual(snapshotTree(source), before);
+});
+
+test('copyBuildSource skips node_modules/.git/target, rejects links and its copy passes the clean-source gate', (t) => {
+  const source = makeSourceTree(t);
+  mkdirSync(join(source, '.git'));
+  writeFileSync(join(source, '.git/HEAD'), 'ref');
+  mkdirSync(join(source, 'target'));
+  writeFileSync(join(source, 'target/x'), 'x');
+  mkdirSync(join(source, 'web/web/node_modules/stale'), { recursive: true });
+  writeFileSync(join(source, 'web/web/node_modules/stale/index.js'), 'old');
+  const dest = join(temporary(t), 'copy');
+  copyBuildSource(source, dest);
+  assert.equal(existsSync(join(dest, '.git')), false);
+  assert.equal(existsSync(join(dest, 'target')), false);
+  assert.equal(existsSync(join(dest, 'web/web/node_modules')), false);
+  assert.equal(
+    readFileSync(join(dest, 'web/web/src/main.ts'), 'utf8'),
+    'export {};\n',
+  );
+  assert.equal(existsSync(join(dest, 'notes/dist-report.txt')), true);
+  assert.doesNotThrow(() => assertBuildSourceClean(dest));
+  assert.throws(() => assertBuildSourceClean(source), /clean-source/);
+  const linked = makeSourceTree(t);
+  try {
+    symlinkSync(join(linked, 'package.json'), join(linked, 'link.json'));
+  } catch {
+    return; // 无符号链接权限的环境跳过这一小段。
+  }
+  assert.throws(() => copyBuildSource(linked, join(temporary(t), 'c')), /链接/);
+});
+
+test('clean-source removes only known generated directories, handles very long paths, refuses non-source dirs', async (t) => {
+  const source = makeSourceTree(t);
+  const user = [
+    'notes/dist-report.txt',
+    'docs/node_modules.md',
+    'web/web/src/main.ts',
+    'package.json',
+  ];
+  mkdirSync(join(source, 'web/web/node_modules/stale'), { recursive: true });
+  // 超过 260 字符的深层路径（element-plus 在 .pnpm 下的情形）。
+  let deep = join(source, 'node_modules/.pnpm');
+  for (let i = 0; i < 12; i++)
+    deep = join(deep, 'element-plus-very-long-name-' + i);
+  mkdirSync(deep, { recursive: true });
+  writeFileSync(join(deep, 'index.js'), 'x');
+  mkdirSync(join(source, 'clients/dsh-plugin/dist'), { recursive: true });
+  mkdirSync(join(source, 'clients/dsh-plugin/ui'), { recursive: true });
+  writeFileSync(join(source, 'clients/dsh-plugin/ui/panel.js'), 'ui');
+  mkdirSync(join(source, '.git/node_modules'), { recursive: true });
+  const outside = temporary(t);
+  writeFileSync(join(outside, 'keep.txt'), 'outside');
+  assert.ok(deep.length > 300);
+  const result = await clientMain(['clean-source', source]);
+  assert.deepEqual(result.removed.sort(), [
+    'clients/dsh-plugin/dist',
+    'node_modules',
+    'web/web/node_modules',
+  ]);
+  assert.equal(existsSync(join(source, 'node_modules')), false);
+  assert.equal(existsSync(join(source, 'clients/dsh-plugin/dist')), false);
+  // ui 默认保留；.git 内不碰。
+  assert.equal(
+    existsSync(join(source, 'clients/dsh-plugin/ui/panel.js')),
+    true,
+  );
+  assert.equal(existsSync(join(source, '.git/node_modules')), true);
+  for (const file of user) assert.equal(existsSync(join(source, file)), true);
+  assert.equal(
+    cleanSource(source, { includeUi: true }).removed[0],
+    'clients/dsh-plugin/ui',
+  );
+  assert.equal(existsSync(join(source, 'clients/dsh-plugin/ui')), false);
+  assert.equal(readFileSync(join(outside, 'keep.txt'), 'utf8'), 'outside');
+  assert.doesNotThrow(() => assertBuildSourceClean(source));
+  // 目录里没有 Auriga 构建标记就拒绝，避免误删别处的 node_modules。
+  const foreign = temporary(t);
+  mkdirSync(join(foreign, 'node_modules'));
+  assert.throws(() => cleanSource(foreign), /不是 Auriga 源码目录/);
+  assert.equal(existsSync(join(foreign, 'node_modules')), true);
+  await assert.rejects(() => clientMain(['clean-source']), /用法/);
 });

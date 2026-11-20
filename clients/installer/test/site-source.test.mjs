@@ -240,8 +240,7 @@ test('build preflight refuses unrecorded UI, node_modules and dist even when pro
     assert.throws(
       () => assertBuildSourceClean(f.root),
       (error) =>
-        error.message.includes(path) &&
-        /Remove-Item -LiteralPath/.test(error.message),
+        error.message.includes(path) && /clean-source/.test(error.message),
     );
   }
 });

@@ -8,6 +8,7 @@ import {
   mkdirSync,
   readFileSync,
   writeFileSync,
+  rmSync,
 } from 'node:fs';
 import {
   basename,
@@ -34,7 +35,7 @@ import { makeRelease } from '../../clients/installer/scripts/make-release.mjs';
 import { fingerprint } from './keys.mjs';
 
 export { sourceIdentity } from './source.mjs';
-import { sourceIdentity } from './source.mjs';
+import { sourceIdentity, copyBuildSource } from './source.mjs';
 import { clientPlatform } from './platform.mjs';
 const inputTrust = (o) => ({
   verifyKey: o['verify-key'],
@@ -202,7 +203,10 @@ export function startOfflineBuild(options, hooks = {}) {
 /**
  * 已校验的套件 kit 上的断网构建：--offline 与 --online 派生套件共用，
  * 输出目录、环境过滤、网络守卫完全一致。
- * hooks.spawn 供测试注入；hooks.siteDependencies 是要复制进输出目录的审阅清单路径。
+ * hooks.spawn 供测试注入；hooks.siteDependencies 是要复制进输出目录的审阅清单路径；
+ * hooks.root 是源码目录（默认本脚本所在源码树）。
+ * 源码树只读：把源码（不含 node_modules/.git 等）复制到 <out>/build-src，工作进程在副本里
+ * 安装依赖并构建，结束后（成功或失败）删除副本。源码身份仍按用户给的源码目录校验。
  */
 export function launchOfflineBuild(options, kit, hooks = {}) {
   const spawn = hooks.spawn ?? spawnSync;
@@ -213,7 +217,9 @@ export function launchOfflineBuild(options, kit, hooks = {}) {
     out === kit.directory
   )
     throw new Error('构建输出不得位于只读 devkit 内');
+  const sourceRoot = resolve(hooks.root ?? ROOT);
   mkdirSync(out); // No overwrite/reuse of old release or review material.
+  const buildRoot = join(out, 'build-src');
   const optionsFile = join(out, 'site-options.json');
   if (hooks.siteDependencies)
     copyFileSync(hooks.siteDependencies, join(out, 'site-dependencies.json'));
@@ -226,6 +232,7 @@ export function launchOfflineBuild(options, kit, hooks = {}) {
     optionsFile,
     JSON.stringify({
       ...worker,
+      'source-root': sourceRoot,
       offline: true,
       out,
       devkit: kit.directory,
@@ -240,7 +247,7 @@ export function launchOfflineBuild(options, kit, hooks = {}) {
     ),
   );
   Object.assign(env, {
-    NODE_OPTIONS: `--max-old-space-size=1024 --require="${join(ROOT, 'scripts/client-release/offline-guard.cjs').replaceAll('\\', '/')}"`,
+    NODE_OPTIONS: `--max-old-space-size=1024 --require="${join(buildRoot, 'scripts/client-release/offline-guard.cjs').replaceAll('\\', '/')}"`,
     AURIGA_CLIENT_NETWORK_LOG: join(out, 'network-denials.log'),
     npm_config_offline: 'true',
     npm_config_ignore_scripts: 'true',
@@ -256,15 +263,33 @@ export function launchOfflineBuild(options, kit, hooks = {}) {
     DESKTOP_SOURCE_ON_MAIN: '',
   });
   writeFileSync(env.AURIGA_CLIENT_NETWORK_LOG, '');
-  const result = spawn(
-    join(kit.directory, clientPlatform().buildNode),
-    [
-      join(ROOT, 'scripts/client-release/cli.mjs'),
-      '_build-worker',
-      optionsFile,
-    ],
-    { cwd: ROOT, env, stdio: 'inherit', windowsHide: true },
-  );
+  let result;
+  try {
+    copyBuildSource(sourceRoot, buildRoot);
+    result = spawn(
+      join(kit.directory, clientPlatform().buildNode),
+      [
+        join(buildRoot, 'scripts/client-release/cli.mjs'),
+        '_build-worker',
+        optionsFile,
+      ],
+      { cwd: buildRoot, env, stdio: 'inherit', windowsHide: true },
+    );
+  } finally {
+    // 副本里有 pnpm 装出的超长路径 node_modules，用 Node 的 rmSync 删除。
+    try {
+      rmSync(buildRoot, {
+        recursive: true,
+        force: true,
+        maxRetries: 3,
+        retryDelay: 200,
+      });
+    } catch (error) {
+      console.warn(
+        `警告：无法删除临时构建目录 ${buildRoot}（${error.message}）；请稍后用 Node 删除：node -e "require('fs').rmSync(process.argv[1],{recursive:true,force:true})" "${buildRoot}"`,
+      );
+    }
+  }
   if (result.status !== 0)
     throw new Error(
       `Windows 离线构建失败（退出码 ${result.status}），保留输出目录供排查`,
@@ -281,7 +306,9 @@ export async function buildWorker(optionsFile) {
   const o = JSON.parse(readFileSync(optionsFile, 'utf8'));
   const policy = validateBuildOptions(o);
   const kit = verifyInputs(o.devkit, o['devkit-sha256'], ROOT, kitTrust(o));
-  const source = sourceIdentity(ROOT, inputTrust(o), { forBuild: true });
+  // ROOT 是 <out>/build-src 里的副本；源码身份与“构建期间未变化”都按用户的源码目录。
+  const sourceRoot = o['source-root'] ?? ROOT;
+  const source = sourceIdentity(sourceRoot, inputTrust(o), { forBuild: true });
   const pnpm = join(kit.directory, 'build-pnpm/node_modules/pnpm/bin/pnpm.cjs');
   const store = join(o.out, 'pnpm-store');
   cpSync(join(kit.directory, 'pnpm-store'), store, { recursive: true });
@@ -338,7 +365,7 @@ export async function buildWorker(optionsFile) {
       : {}),
   });
   if (
-    sourceIdentity(ROOT, inputTrust(o)).sourceTreeSha256 !==
+    sourceIdentity(sourceRoot, inputTrust(o)).sourceTreeSha256 !==
     source.sourceTreeSha256
   )
     throw new Error('源码在构建期间发生变化，请从新目录重建');

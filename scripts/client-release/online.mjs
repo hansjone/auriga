@@ -544,6 +544,7 @@ export function startOnlineBuild(options, io = {}) {
   (io.launch ?? launchOfflineBuild)(o, kit, {
     siteDependencies: join(site, 'site-dependencies.json'),
     spawn: io.spawn,
+    root,
   });
   log(formatSiteReport(report));
   return {
