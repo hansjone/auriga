@@ -144,7 +144,7 @@ func testState(t *testing.T) state {
 
 func TestInstallSummaryAndCustodyList(t *testing.T) {
 	s := testState(t)
-	secret := "SECRET-TOTP-123456"
+	secret := "SECRET-TOTP-123456" // gitleaks:allow synthetic test fixture
 	if err := os.MkdirAll(filepath.Join(s.Data, "resource-keys/offline"), 0700); err != nil {
 		t.Fatal(err)
 	}
