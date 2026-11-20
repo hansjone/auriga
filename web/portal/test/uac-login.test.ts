@@ -87,20 +87,20 @@ describe('portal UAC normal entry', () => {
     expect(JSON.stringify(warn.mock.calls)).not.toContain('SECRET-UPSTREAM');
     wrapper.unmount();
   });
-  it('uses server navigation context for SSO, falls back to QR, and cancels before returning to providers', async () => {
+  it('uses server navigation context for SSO, falls back to QR, and cancels when switching method', async () => {
     context();
     const calls: string[] = [];
+    const deletes: string[] = [];
+    const other = { ...provider, id: globalThis.crypto.randomUUID() };
     vi.stubGlobal(
       'fetch',
       vi.fn<typeof fetch>(async (input, init) => {
         const path = String(input);
         calls.push(path);
+        if (init?.method === 'DELETE') deletes.push(path);
         if (path.endsWith('/providers'))
           return json({
-            items: [
-              { ...provider, id: globalThis.crypto.randomUUID() },
-              provider,
-            ],
+            items: [other, provider],
           });
         if (path.endsWith('/sso'))
           return json({ state: 'scan_required', transactionId: id });
@@ -121,7 +121,8 @@ describe('portal UAC normal entry', () => {
     expect(wrapper.get('.qr-heading h1').text()).toBe('扫码登录');
     expect(wrapper.find('.auriga-login-head').exists()).toBe(false);
     expect(wrapper.find('.home-link').exists()).toBe(false);
-    expect(wrapper.get('button.auriga-login-back').text()).toBe('取消');
+    expect(wrapper.find('button.auriga-login-back').exists()).toBe(false);
+    expect(wrapper.get('.auriga-login-topbar .back').text()).toBe('返回');
     expect(document.getElementById('auriga-uac-navigation')).toBeNull();
     expect(calls.slice(0, 3)).toEqual([
       '/api/iam/v1/login/providers',
@@ -133,12 +134,10 @@ describe('portal UAC normal entry', () => {
         .providerId,
     ).toBe(id);
     expect(wrapper.emitted('authEvent')?.length).toBeGreaterThan(0);
-    await wrapper.get('button.auriga-login-back').trigger('click');
-    await flushPromises();
-    expect(calls.at(-1)).toBe('/api/iam/v1/login/uac/challenges/' + id);
     expect(wrapper.find('[data-testid=login-methods]').exists()).toBe(true);
-    expect(wrapper.get('.restart').text()).toBe('继续登录');
-    expect(wrapper.get('.home-link').attributes('href')).toBe('/');
+    await wrapper.get(`[data-provider-id="${other.id}"]`).trigger('click');
+    await flushPromises();
+    expect(deletes).toContain('/api/iam/v1/login/uac/challenges/' + id);
     wrapper.unmount();
   });
   it.each([

@@ -1,8 +1,9 @@
-﻿<script setup lang="ts">
+<script setup lang="ts">
 import { computed } from 'vue';
 import { useI18n } from 'vue-i18n';
-import { pickLocalized, type LoginProvider } from '@auriga/shared';
-import { orderLoginProviders } from '../../../shared/src/login-preference';
+import { pickLocalized } from './locale';
+import { orderLoginProviders } from './login-preference';
+import type { LoginProvider } from './api/iam';
 const props = defineProps<{
   providers: LoginProvider[];
   selectedId?: string;
@@ -41,17 +42,16 @@ function icon(p: LoginProvider) {
       :key="p.id"
       type="button"
       :data-provider-id="p.id"
-      :aria-label="pickLocalized(p.displayName, locale)"
-      :title="pickLocalized(p.displayName, locale)"
+      :aria-label="label(p)"
+      :title="label(p)"
       :aria-pressed="p.id === selectedId"
       :disabled="disabled"
-      :class="{ emergency: p.connectorType === 'emergency' }"
       @click="emit('select', p)"
     >
       <svg
         viewBox="0 0 24 24"
-        width="20"
-        height="20"
+        width="22"
+        height="22"
         fill="none"
         stroke="currentColor"
         stroke-width="1.5"
@@ -59,61 +59,53 @@ function icon(p: LoginProvider) {
         stroke-linejoin="round"
         aria-hidden="true"
       >
-        <path :d="icon(p)" /></svg
-      ><span>{{ label(p) }}</span>
+        <path :d="icon(p)" />
+      </svg>
     </button>
   </div>
 </template>
 <style scoped>
 .login-methods {
   display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
+  justify-content: center;
+  gap: 28px;
   width: 100%;
-  margin-top: 24px;
-  padding: 4px;
-  box-sizing: border-box;
-  border: 1px solid var(--auriga-border);
-  border-radius: 16px;
-  background: #07142166;
+  margin-top: 28px;
 }
 button {
-  display: flex;
-  flex: 1 1 56px;
-  min-width: 0;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  padding: 8px 4px;
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  padding: 0;
   border: 0;
-  border-radius: 12px;
+  border-radius: 50%;
   background: transparent;
   color: var(--auriga-muted);
-  font: inherit;
-  font-size: 11px;
-  line-height: 16px;
+  opacity: 0.7;
   cursor: pointer;
+  transition:
+    color 0.15s,
+    opacity 0.15s;
 }
-span {
-  max-width: 100%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
+button:hover,
 button[aria-pressed='true'] {
   color: var(--auriga-text);
-  background: #8fb9d61a;
+  opacity: 1;
 }
-button.emergency:not([aria-pressed='true']) {
-  opacity: 0.7;
-}
-button:hover {
-  color: var(--auriga-text);
+button[aria-pressed='true']::after {
+  content: '';
+  position: absolute;
+  bottom: -4px;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: currentColor;
 }
 button:disabled {
   cursor: default;
-  opacity: 0.5;
+  opacity: 0.4;
 }
 button:focus-visible {
   outline: 2px solid var(--auriga-accent-line);

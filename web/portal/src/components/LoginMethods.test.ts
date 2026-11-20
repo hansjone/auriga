@@ -1,7 +1,7 @@
 ﻿import { mount } from '@vue/test-utils';
 import { expect, it } from 'vitest';
 import { createAurigaI18n, type LoginProvider } from '@auriga/shared';
-import PortalProviders from './PortalProviders.vue';
+import LoginMethods from '../../../shared/src/LoginMethods.vue';
 const provider = (connectorType: string): LoginProvider => ({
   id: connectorType,
   connectorType,
@@ -13,7 +13,7 @@ it('只显示部署方式，UAC 优先，应急图标最后且不折叠，当前
   const providers = ['team-account', 'emergency', 'oidc', 'uac', 'remote'].map(
     provider,
   );
-  const view = mount(PortalProviders, {
+  const view = mount(LoginMethods, {
     props: { providers, selectedId: 'uac' },
     global: { plugins: [createAurigaI18n('zh-CN')] },
   });
@@ -38,7 +38,7 @@ it('只显示部署方式，UAC 优先，应急图标最后且不折叠，当前
 it.each([{ providers: [] }, { providers: [provider('emergency')] }])(
   '只有零/一种方式时不显示图标行',
   ({ providers }) => {
-    const view = mount(PortalProviders, {
+    const view = mount(LoginMethods, {
       props: { providers },
       global: { plugins: [createAurigaI18n('en')] },
     });
