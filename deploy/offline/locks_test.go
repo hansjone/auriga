@@ -99,6 +99,10 @@ func TestDevkitVerifyBindsNewTagAndExplainsMismatch(t *testing.T) {
 	if _, _, err := locateDevkit(source); err == nil || !strings.Contains(err.Error(), "go.mod") || !strings.Contains(err.Error(), "auriga-devkit-1.1.tar") {
 		t.Fatal("no actionable mismatch", err)
 	}
+	// --online 跳过锁一致性检查，但签名与缓存校验仍在。
+	if _, skipped, err := locateDevkitLocks(source, true); err != nil || skipped.Locks == nil || skipped.Locks.Digest != locks.Digest {
+		t.Fatal("online locate failed", err)
+	}
 	kit.Locks = nil
 	if err := checkKitLocks(source, kit); err == nil {
 		t.Fatal("legacy devkit falsely matched locks")

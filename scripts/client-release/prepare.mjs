@@ -26,7 +26,7 @@ import {
   readPythonLock,
 } from '../../clients/installer/scripts/python-runtime.mjs';
 
-function run(command, args, cwd, env = process.env) {
+export function run(command, args, cwd, env = process.env) {
   const result = spawnSync(command, args, {
     cwd,
     env,
@@ -73,6 +73,63 @@ export function removeProjectReferences(store) {
       throw new Error('不认识的 pnpm projects 内容，保留供人工核验');
     unlinkSync(path); // Remove the junction itself, never its target.
   }
+}
+/** npm 安装的公共参数：联网准备与现场联网派生共用，保证两处行为一致。 */
+export const NPM_FLAGS = [
+  '--ignore-scripts',
+  '--no-audit',
+  '--no-fund',
+  '--os=win32',
+  '--cpu=x64',
+];
+/** 把依赖锁与各 workspace 的 package.json 摆进临时 workspace，供 pnpm fetch 使用。 */
+export function stageWorkspaceLocks(root, locks, workspace) {
+  mkdirSync(workspace, { recursive: true });
+  for (const path of Object.keys(locks)) {
+    const dest = join(workspace, path);
+    mkdirSync(dirname(dest), { recursive: true });
+    cpSync(join(root, path), dest);
+  }
+}
+/**
+ * 用套件自带的 build-node 与 build-pnpm 取回 pnpm store（已有内容作为起点，只下新增），
+ * 完成后去掉机器相关的项目引用。
+ */
+export function fetchPnpmStore(kit, workspace, store, env, runner = run) {
+  runner(
+    join(kit, 'build-node/node.exe'),
+    [
+      join(kit, 'build-pnpm/node_modules/pnpm/bin/pnpm.cjs'),
+      'fetch',
+      '--frozen-lockfile',
+      '--ignore-scripts',
+      '--store-dir',
+      store,
+    ],
+    workspace,
+    env,
+  );
+  removeProjectReferences(store);
+}
+/** 重建 plugin-deps：旧依赖整个删除，复制源码里的 package.json/lock 后 npm ci。 */
+export function installPluginDeps(kit, root, env, runner = run) {
+  const plugin = join(kit, 'plugin-deps');
+  rmSync(plugin, { recursive: true, force: true });
+  mkdirSync(plugin);
+  for (const file of ['package.json', 'package-lock.json'])
+    cpSync(join(root, 'clients/dsh-plugin', file), join(plugin, file));
+  runner(
+    join(kit, 'build-node/node.exe'),
+    [
+      join(kit, 'build-node/node_modules/npm/bin/npm-cli.js'),
+      'ci',
+      '--omit=dev',
+      '--omit=peer',
+      ...NPM_FLAGS,
+    ],
+    plugin,
+    env,
+  );
 }
 export async function prepareInputs(parent) {
   const tools = systemTools();
@@ -129,13 +186,7 @@ export async function prepareInputs(parent) {
     npm_config_cache: join(work, 'npm-cache'),
     npm_config_update_notifier: 'false',
   };
-  const flags = [
-    '--ignore-scripts',
-    '--no-audit',
-    '--no-fund',
-    '--os=win32',
-    '--cpu=x64',
-  ];
+  const flags = NPM_FLAGS;
   for (const [name, version, integrity] of [
     ['build-pnpm', pnpmBuildVersion, null],
     ['payload-pnpm', runtime.pnpm, runtime.pnpmIntegrity],
@@ -178,33 +229,10 @@ export async function prepareInputs(parent) {
   if (dsh.version !== runtime.dsh || dsh.integrity !== runtime.dshIntegrity)
     throw new Error('DSH pin 与锁不符');
   run(node, [npm, 'ci', '--omit=dev', ...flags], app, env);
-  const plugin = join(kit, 'plugin-deps');
-  mkdirSync(plugin);
-  for (const file of ['package.json', 'package-lock.json'])
-    cpSync(join(ROOT, 'clients/dsh-plugin', file), join(plugin, file));
-  run(node, [npm, 'ci', '--omit=dev', '--omit=peer', ...flags], plugin, env);
+  installPluginDeps(kit, ROOT, env);
   const workspace = join(work, 'workspace');
-  mkdirSync(workspace);
-  for (const path of Object.keys(locks)) {
-    const dest = join(workspace, path);
-    mkdirSync(dirname(dest), { recursive: true });
-    cpSync(join(ROOT, path), dest);
-  }
-  const store = join(kit, 'pnpm-store');
-  run(
-    node,
-    [
-      join(kit, 'build-pnpm/node_modules/pnpm/bin/pnpm.cjs'),
-      'fetch',
-      '--frozen-lockfile',
-      '--ignore-scripts',
-      '--store-dir',
-      store,
-    ],
-    workspace,
-    env,
-  );
-  removeProjectReferences(store);
+  stageWorkspaceLocks(ROOT, locks, workspace);
+  fetchPnpmStore(kit, workspace, join(kit, 'pnpm-store'), env);
   // Every recursive removal is a new directory inside this exclusively reserved kit.
   if (!work.startsWith(kit + '\\') && !work.startsWith(kit + '/'))
     throw new Error('非法准备工作路径');

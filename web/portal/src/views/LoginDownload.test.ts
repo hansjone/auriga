@@ -45,7 +45,7 @@ it('公共产品首页显示公开版本与下载入口', async () => {
   view.unmount();
 });
 
-it('登录页仅提供登录与返回首页，不请求下载信息', async () => {
+it('登录页带首页顶栏与返回，不请求下载信息', async () => {
   api.get.mockClear();
   api.listLoginProviders.mockResolvedValue({ items: [] });
   const router = createRouter({
@@ -61,5 +61,7 @@ it('登录页仅提供登录与返回首页，不请求下载信息', async () =
   expect(view.text()).not.toContain('下载 Windows');
   expect(api.get).not.toHaveBeenCalled();
   expect(view.get('a').attributes('href')).toBe('/');
+  expect(view.get('.auriga-login-topbar .back').text()).toBe('返回');
+  expect(view.text()).not.toContain('返回首页');
   view.unmount();
 });

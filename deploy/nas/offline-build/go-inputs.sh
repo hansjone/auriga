@@ -2,7 +2,7 @@
 set -eu
 
 if [ "$#" -lt 2 ] || [ "$#" -gt 3 ]; then
-    echo "usage: $0 prepare|build ABSOLUTE_EMPTY_OUTPUT_DIRECTORY [PROGRAM]" >&2
+    echo "usage: $0 prepare|build|locks ABSOLUTE_EMPTY_OUTPUT_DIRECTORY [PROGRAM]" >&2
     exit 2
 fi
 mode=$1
@@ -25,7 +25,13 @@ case "$mode" in
             *) echo "unknown NAS Go program: $program" >&2; exit 2 ;;
         esac
         ;;
-    *) echo "choose prepare or build" >&2; exit 2 ;;
+    locks)
+        if [ "$program" != all ]; then
+            echo "locks takes no program" >&2
+            exit 2
+        fi
+        ;;
+    *) echo "choose prepare, build or locks" >&2; exit 2 ;;
 esac
 mkdir -p "$out"
 if [ -n "$(ls -A "$out")" ]; then
@@ -50,6 +56,13 @@ snapshot() (
         -print | LC_ALL=C sort | xargs sha256sum
 )
 
+# locks: print the source-lock inventory a prepare run would record, nothing else.
+# Lets callers decide offline whether the dependency inputs are still current.
+if [ "$mode" = locks ]; then
+    snapshot >"$out/source-locks.sha256"
+    exit 0
+fi
+
 record_run() (
     directory=$1
     workspace=$2
@@ -69,10 +82,13 @@ record_run() (
 
 if [ "$mode" = prepare ]; then
     export GOPRIVATE= GONOPROXY=none GONOSUMDB=none GOINSECURE=none
-    export GOPROXY=https://proxy.golang.org GOSUMDB=sum.golang.org
+    # AURIGA_GO_PREPARE_PROXY lets a site use a mirror; the checksum database
+    # (GOSUMDB) is never relaxed and go.sum still decides what is accepted.
+    upstream_proxy=${AURIGA_GO_PREPARE_PROXY:-https://proxy.golang.org}
+    export GOPROXY="$upstream_proxy" GOSUMDB=sum.golang.org
     if [ -n "${AURIGA_GO_PREPARE_CACHE:-}" ]; then
         prepare_cache=$(CDPATH='' cd -- "$AURIGA_GO_PREPARE_CACHE" && pwd)
-        GOPROXY="file://$prepare_cache,https://proxy.golang.org"
+        GOPROXY="file://$prepare_cache,$upstream_proxy"
     fi
 else
     case "${AURIGA_GO_PROXY_DIR:-}" in

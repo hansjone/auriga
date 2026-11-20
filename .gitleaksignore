@@ -56,3 +56,4 @@ d7f1f57c1a3f42d60efd7e873717f04fc0748843:services/workspace/impl/src/test/java/a
 # Two exact historical occurrences of the local fake IAM capability token.
 4c5f2d48146bdb932f530133b20a437e35cf853d:infra/agent/internal/sharednode/relay_test.go:generic-api-key:65
 b4f55e0619e8310d357c6235e05feede188dd879:infra/agent/internal/sharednode/relay_test.go:generic-api-key:126
+dcb55146c33a4dd6669f011ede57d92229368ba7:deploy/offline/help_test.go:generic-api-key:147

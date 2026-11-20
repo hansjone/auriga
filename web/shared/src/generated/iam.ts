@@ -2051,6 +2051,11 @@ export interface components {
       createdAt: string;
       /** Format: date-time */
       lastLoginAt?: string;
+      /**
+       * Format: uri
+       * @description 仅 UAC 登录信息查询返回的 HTTPS 头像地址；缺省时前端显示姓名首字
+       */
+      readonly avatarUrl?: string;
     };
     AccountDetail: {
       account: components['schemas']['Account'];

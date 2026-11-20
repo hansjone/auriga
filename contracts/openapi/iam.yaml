@@ -2689,6 +2689,12 @@ components:
         status: { type: string, enum: [active, disabled] }
         createdAt: { type: string, format: date-time }
         lastLoginAt: { type: string, format: date-time }
+        avatarUrl:
+          type: string
+          format: uri
+          maxLength: 1024
+          readOnly: true
+          description: 仅 UAC 登录信息查询返回的 HTTPS 头像地址；缺省时前端显示姓名首字
       required: [id, tenantId, displayName, status, createdAt]
     AccountDetail:
       type: object

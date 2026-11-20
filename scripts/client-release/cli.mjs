@@ -2,7 +2,8 @@ import { parseArgs } from 'node:util';
 import { existsSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { startOfflineBuild, buildWorker } from './build.mjs';
+import { buildWorker } from './build.mjs';
+import { startBuild } from './online.mjs';
 import { generateDesktopKeys, assertPrivateKey } from './keys.mjs';
 import { publish } from './publish.mjs';
 import { physical } from './inputs.mjs';
@@ -16,6 +17,10 @@ import { parse as parseVersion } from '../../clients/installer/runtime/semver-li
 const HELP = `独立客户端发行（auriga-client.cmd / Node cli.mjs）
   auriga-client keygen --out <新密钥目录>
   auriga-client build --offline --devkit <Windows套件目录> --verify-key <独立批准发行公钥> --release-public-key <公钥.pem> --resource-trust-json <resource-roots.json> --version <SemVer> --sequence <递增整数> --out <新输出目录>
+  auriga-client build --online --devkit <发行签名套件目录> (--verify-key <公钥> | --trust-fingerprint <指纹>) --site-devkit <新现场套件目录> [--base-pnpm-lock <原始web/pnpm-lock.yaml>] ...其余参数同 --offline
+    --online：现场依赖锁（前端 pnpm、dsh-plugin 的 npm）与发行套件不一致时，联网只补变化的依赖，
+    把基础套件（只读）派生为 --site-devkit，再按 --offline 同样的断网方式构建。Node/Python/DSH/Java 版本变化仍需维护方出新套件。
+    联网步骤透传已设置的 HTTPS_PROXY/HTTP_PROXY/NO_PROXY 与 npm_config_registry；与 --offline 互斥。
   auriga-client sign --dir <构建输出目录> --review-only
   auriga-client sign --dir <构建输出目录> --key-file <私钥.pem> --confirm-sha256 <审阅摘要>
   auriga-client publish --dir <构建输出目录> --public-key <现场公钥.pem> --admin-origin <管理入口origin> --portal-origin <门户origin>
@@ -47,6 +52,18 @@ export function signCommand(o) {
   const checkpoint = join(dir, 'desktop-release.review.json');
   if (existsSync(output)) throw new Error('已签清单已存在，禁止覆盖');
   const review = reviewRelease(options).summary;
+  // 派生套件（build --online）构建的输出目录带 site-dependencies.json：
+  // 只在审阅输出里提示，不改签名格式和 desktop-build.json。
+  const siteFile = join(dir, 'site-dependencies.json');
+  if (existsSync(siteFile)) {
+    const site = JSON.parse(readFileSync(siteFile, 'utf8'));
+    review.siteDependencies = {
+      count: Array.isArray(site.added) ? site.added.length : null,
+      removedCount: site.removedCount ?? null,
+      warnings: site.warnings ?? [],
+      notice: `含现场联网依赖：${Array.isArray(site.added) ? site.added.length : '未知'} 项（见 site-dependencies.json）。输入摘要来自现场派生套件，不在维护方的发行签名之内，签名前请人工审阅该清单。`,
+    };
+  }
   if (o['review-only']) {
     writeFileSync(
       checkpoint,
@@ -104,9 +121,14 @@ export async function main(argv) {
         'platform-origin',
         'platform-access-mode',
         'confirm-platform-origin',
+        'site-devkit',
+        'base-pnpm-lock',
       ]
         .map((name) => [name, 'string'])
-        .concat([['offline', 'boolean']]),
+        .concat([
+          ['offline', 'boolean'],
+          ['online', 'boolean'],
+        ]),
     ),
     sign: {
       dir: 'string',
@@ -135,7 +157,7 @@ export async function main(argv) {
     if (!o.out) throw new Error('缺少 --out');
     return generateDesktopKeys(o.out);
   }
-  if (command === 'build') return startOfflineBuild(o);
+  if (command === 'build') return startBuild(o);
   if (command === 'sign') return signCommand(o);
   for (const name of ['dir', 'public-key', 'admin-origin', 'portal-origin'])
     if (!o[name]) throw new Error(`缺少 --${name}`);

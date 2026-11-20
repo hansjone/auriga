@@ -1,6 +1,6 @@
 # Auriga DSH
 
-> *Auriga* — Latin for "the charioteer".
+> _Auriga_ — Latin for "the charioteer".
 
 Auriga DSH is a self-hosted platform that gives every member of a team their own
 [DeepSeek Harness (DSH)](https://www.npmjs.com/package/@deepseek-ai/dsh) workspace,
@@ -19,16 +19,29 @@ environment used to validate that process. Domain access and LAN access by IP
 alone are both first-class requirements. Full login and instance WebSocket access
 without a domain have not yet passed acceptance.
 
+## Where to start
+
+The deployment and maintenance guides are written in Chinese.
+
+| You are                                                             | Start here                                                           |
+| ------------------------------------------------------------------- | -------------------------------------------------------------------- |
+| Deploying only, no code changes                                     | [DEPLOY.md](DEPLOY.md)                                               |
+| Changing code on Linux and building, signing and upgrading yourself | [MAINTAIN.md](MAINTAIN.md)                                           |
+| On Windows only, running backend and frontend together locally      | [docs/dev/windows-local-dev.zh.md](docs/dev/windows-local-dev.zh.md) |
+| Publishing the desktop client                                       | [MAINTAIN.md, client release](MAINTAIN.md#客户端发布windows-开发机)  |
+
+Whichever path you take, read [required inputs and what to keep](docs/site/keep-list.zh.md) first, and use [build and deployment troubleshooting](docs/site/troubleshooting.zh.md) when something fails.
+
 ## Architecture at a glance
 
-| Layer | Technology |
-|---|---|
+| Layer                                                                                            | Technology                                                                                              |
+| ------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------- |
 | Business services (`iam`, `org`, `workspace`, `resource`, `knowledge`, `collab`, `audit`, `ops`) | Java 25, Spring Boot, MyBatis-Plus, Flyway — one process for small installs, separate services at scale |
-| Edge gateway, node agent, AI gateway, egress proxy, `ctl` | Go |
-| Portal, admin console, team panel | Vue 3 + TypeScript |
-| DSH plugin (`auriga-dsh` on npm) | Node.js |
-| Data | PostgreSQL (bundled or external), NATS JetStream |
-| Deployment | Windows installer, Linux tarball, Docker Compose, Kubernetes (later) |
+| Edge gateway, node agent, AI gateway, egress proxy, `ctl`                                        | Go                                                                                                      |
+| Portal, admin console, team panel                                                                | Vue 3 + TypeScript                                                                                      |
+| DSH plugin (`auriga-dsh` on npm)                                                                 | Node.js                                                                                                 |
+| Data                                                                                             | PostgreSQL (bundled or external), NATS JetStream                                                        |
+| Deployment                                                                                       | Windows installer, Linux tarball, Docker Compose, Kubernetes (later)                                    |
 
 Design documents (Chinese): [platform](docs/architecture/platform.zh.md) ·
 [node agent](docs/architecture/node-agent.zh.md) · [identity sources](docs/architecture/identity.zh.md) ·

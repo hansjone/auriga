@@ -13,11 +13,18 @@ import (
 )
 
 type buildOptions struct {
-	Context       context.Context
-	Budget        buildBudget
-	Offline       bool
-	Cache, Source string
-	Info          *provenance
+	Context context.Context
+	Budget  buildBudget
+	Offline bool
+	// Online 表示 bundle --online：基础仍取自套件（Offline 同为 true），但锁变化的
+	// 语言生态会联网重新收集依赖；LockDigest 是当前源码的依赖锁摘要。
+	Online           bool
+	LockDigest       string
+	ChangedLockFiles []string
+	// BaselineCommit 是套件基线源码提交，用于取旧 pnpm-lock.yaml 对比新增 Web 依赖。
+	BaselineCommit string
+	Cache, Source  string
+	Info           *provenance
 }
 
 func (o buildOptions) context() context.Context {
@@ -34,12 +41,13 @@ type kitImage struct {
 	File string `json:"file"`
 }
 type devkitManifest struct {
-	cleanup func()
-	Locks   *lockInventory `json:"locks,omitempty"`
-	Schema  int            `json:"schemaVersion"`
-	Release release        `json:"release"`
-	Images  []kitImage     `json:"images"`
-	Source  *provenance    `json:"source"`
+	cleanup  func()
+	Locks    *lockInventory `json:"locks,omitempty"`
+	Requires *[]string      `json:"requires,omitempty"`
+	Schema   int            `json:"schemaVersion"`
+	Release  release        `json:"release"`
+	Images   []kitImage     `json:"images"`
+	Source   *provenance    `json:"source"`
 }
 
 func buildImageRefs(r release) (map[string]string, error) {
@@ -213,6 +221,12 @@ func verifyDevkitCacheContext(ctx context.Context, root string) error {
 }
 
 func locateDevkit(source string) (string, *devkitManifest, error) {
+	return locateDevkitLocks(source, false)
+}
+
+// skipLocks 仅供 bundle --online：跳过“源码锁必须与套件一致”的检查，其余签名、
+// 缓存摘要、源码基线校验不变；锁差异由在线收集依赖后重新校验。
+func locateDevkitLocks(source string, skipLocks bool) (string, *devkitManifest, error) {
 	root := filepath.Dir(source)
 	var binding devkitBinding
 	bound := false
@@ -224,7 +238,7 @@ func locateDevkit(source string) (string, *devkitManifest, error) {
 		bound = true
 	}
 	if _, err := os.Lstat(filepath.Join(root, "devkit-catalog.json")); err == nil {
-		return locateCumulative(source, root)
+		return locateCumulative(source, root, skipLocks)
 	}
 	key, err := sourceVerificationKey(source)
 	if err != nil {
@@ -237,13 +251,16 @@ func locateDevkit(source string) (string, *devkitManifest, error) {
 		return "", nil, err
 	}
 	var kit devkitManifest
-	if err := readJSON(filepath.Join(root, "devkit.json"), &kit); err != nil {
+	if err := readDevkitJSON(filepath.Join(root, "devkit.json"), &kit); err != nil {
 		return "", nil, err
 	}
 	if err := validateDevkit(kit); err != nil {
 		return "", nil, err
 	}
-	if kit.Locks != nil {
+	if skipLocks && kit.Locks == nil {
+		return "", nil, errors.New("旧 devkit 未记录锁摘要，无法判断依赖变化")
+	}
+	if kit.Locks != nil && !skipLocks {
 		if err := checkKitLocks(source, kit); err != nil {
 			return "", nil, err
 		}
@@ -266,7 +283,7 @@ func devkitSingleContext(ctx context.Context, args []string) error {
 	if len(args) > 0 && args[0] == "verify" {
 		return devkitVerify(args[1:])
 	}
-	f := flags("devkit")
+	f := flags("devkit-single")
 	index := f.String("release", "auriga-release.json", "")
 	out := f.String("out", "", "")
 	verify := f.String("verify", "", "")
@@ -432,7 +449,7 @@ func devkitSingleContext(ctx context.Context, args []string) error {
 			return err
 		}
 	}
-	if err := jsonFile(filepath.Join(root, "devkit.json"), kit, 0644); err != nil {
+	if err := writeDevkitManifest(filepath.Join(root, "devkit.json"), kit); err != nil {
 		return err
 	}
 	if err := writeSumsContext(ctx, root); err != nil {

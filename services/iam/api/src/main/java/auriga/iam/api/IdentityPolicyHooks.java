@@ -28,6 +28,14 @@ public interface IdentityPolicyHooks {
     return false;
   }
 
+  /**
+   * Replaces a UAC member's placeholder display name with "name employee" (or the employee number
+   * when no name is known). Returns the new display name, or empty when nothing changed.
+   */
+  default java.util.Optional<String> uacDisplayName(UUID account, String employee, String name) {
+    return java.util.Optional.empty();
+  }
+
   /** Only an active ordinary member created by UAC first login may resume enrollment. */
   default boolean canResumeVerifiedUacMember(UUID provider, String employee, UUID account) {
     return false;

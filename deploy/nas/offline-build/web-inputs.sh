@@ -2,14 +2,14 @@
 set -eu
 
 if [ "$#" -ne 2 ]; then
-    echo "usage: $0 prepare|build ABSOLUTE_EMPTY_OUTPUT_DIRECTORY" >&2
+    echo "usage: $0 prepare|build|locks ABSOLUTE_EMPTY_OUTPUT_DIRECTORY" >&2
     exit 2
 fi
 mode=$1
 out=$2
 case "$mode" in
-    prepare|build) ;;
-    *) echo "choose prepare or build" >&2; exit 2 ;;
+    prepare|build|locks) ;;
+    *) echo "choose prepare, build or locks" >&2; exit 2 ;;
 esac
 case "$out" in
     /*) ;;
@@ -40,6 +40,11 @@ cd "$workspace"
 find web clients -name package.json -type f -print |
     LC_ALL=C sort | xargs sha256sum >"$scratch/source-locks"
 sha256sum package.json pnpm-workspace.yaml .npmrc web/pnpm-lock.yaml >>"$scratch/source-locks"
+# locks: print the source-lock inventory a prepare run would record, nothing else.
+if [ "$mode" = locks ]; then
+    cp -- "$scratch/source-locks" "$out/source-locks.sha256"
+    exit 0
+fi
 manager=$(node -p 'require("./package.json").packageManager')
 case "$manager" in
     pnpm@*) ;;
@@ -49,8 +54,12 @@ store="$scratch/store"
 if [ "$mode" = prepare ]; then
     corepack pack "$manager" -o "$out/corepack.tgz"
     if [ -n "${AURIGA_WEB_PREPARE_STORE_TAR:-}" ]; then
-        tar -xzf "$AURIGA_WEB_PREPARE_STORE_TAR" -C "$scratch" store source-locks.sha256
-        cmp "$scratch/source-locks" "$scratch/source-locks.sha256"
+        # The previous inputs' web-cache.tar.gz seeds the content store so only new
+        # packages are downloaded. Its lock inventory may differ from the current
+        # one; pnpm still verifies every package against the current lockfile.
+        tar -xzf "$AURIGA_WEB_PREPARE_STORE_TAR" -C "$scratch" store
+        # pnpm also needs its release-age metadata cache; older archives may lack it.
+        tar -xzf "$AURIGA_WEB_PREPARE_STORE_TAR" -C "$scratch" policy-cache/pnpm 2>/dev/null || true
     fi
 else
     case "${AURIGA_WEB_INPUTS_DIR:-}" in

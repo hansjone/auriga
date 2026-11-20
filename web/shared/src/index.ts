@@ -2,6 +2,8 @@ export { BRAND_NAME } from './brand';
 export { createAurigaI18n, messages, type Locale } from './i18n';
 export { default as Placeholder } from './Placeholder.vue';
 export { default as BrandMark } from './BrandMark.vue';
+export { default as LoginMethods } from './LoginMethods.vue';
+export { default as LoginTopBar } from './LoginTopBar.vue';
 export { pickLocalized } from './locale';
 
 export {
