@@ -35,7 +35,11 @@ import { makeRelease } from '../../clients/installer/scripts/make-release.mjs';
 import { fingerprint } from './keys.mjs';
 
 export { sourceIdentity } from './source.mjs';
-import { sourceIdentity, copyBuildSource } from './source.mjs';
+import {
+  sourceIdentity,
+  copyBuildSource,
+  assertBuildCopyMatches,
+} from './source.mjs';
 import { clientPlatform } from './platform.mjs';
 const inputTrust = (o) => ({
   verifyKey: o['verify-key'],
@@ -296,7 +300,8 @@ export function launchOfflineBuild(options, kit, hooks = {}) {
     );
   return { out };
 }
-export async function buildWorker(optionsFile) {
+export async function buildWorker(optionsFile, hooks = {}) {
+  const root = hooks.root ?? ROOT;
   if (
     process.version !== `v${BUILD_NODE}` ||
     !process.env.AURIGA_CLIENT_NETWORK_LOG ||
@@ -305,16 +310,22 @@ export async function buildWorker(optionsFile) {
     throw new Error('必须从受控离线入口构建');
   const o = JSON.parse(readFileSync(optionsFile, 'utf8'));
   const policy = validateBuildOptions(o);
-  const kit = verifyInputs(o.devkit, o['devkit-sha256'], ROOT, kitTrust(o));
+  const kit = verifyInputs(o.devkit, o['devkit-sha256'], root, {
+    ...kitTrust(o),
+    ...(hooks.checkTools === false ? { checkTools: false } : {}),
+  });
   // ROOT 是 <out>/build-src 里的副本；源码身份与“构建期间未变化”都按用户的源码目录。
-  const sourceRoot = o['source-root'] ?? ROOT;
+  const sourceRoot = o['source-root'] ?? root;
   const source = sourceIdentity(sourceRoot, inputTrust(o), { forBuild: true });
+  // 复制与校验之间源码可能被改动：副本必须与刚校验的源码身份一致，才允许装依赖和构建。
+  if (o['source-root'])
+    assertBuildCopyMatches(root, sourceRoot, inputTrust(o), source);
   const pnpm = join(kit.directory, 'build-pnpm/node_modules/pnpm/bin/pnpm.cjs');
   const store = join(o.out, 'pnpm-store');
   cpSync(join(kit.directory, 'pnpm-store'), store, { recursive: true });
   const run = (args) => {
     const result = spawnSync(process.execPath, args, {
-      cwd: ROOT,
+      cwd: root,
       stdio: 'inherit',
       windowsHide: true,
     });
@@ -331,13 +342,13 @@ export async function buildWorker(optionsFile) {
     store,
   ]);
   const broker = join(o.out, 'broker');
-  run([join(ROOT, 'clients/shell-auth/build.mjs'), broker]);
+  run([join(root, 'clients/shell-auth/build.mjs'), broker]);
   const pluginVersion = JSON.parse(
-    readFileSync(join(ROOT, 'clients/dsh-plugin/package.json')),
+    readFileSync(join(root, 'clients/dsh-plugin/package.json')),
   ).version;
   const pluginOut = join(o.out, 'plugin');
   run([
-    join(ROOT, 'scripts/plugin/package.mjs'),
+    join(root, 'scripts/plugin/package.mjs'),
     '--version',
     pluginVersion,
     '--broker-artifact',

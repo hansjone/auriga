@@ -17,6 +17,7 @@ import { generateKeyPairSync, sign } from 'node:crypto';
 import { createServer } from 'node:http';
 import {
   ROOT,
+  BUILD_NODE,
   lockIdentity,
   sealInputs,
   verifyInputs,
@@ -72,6 +73,7 @@ import {
   copyBuildSource,
 } from '../../../scripts/client-release/source.mjs';
 import { main as clientMain } from '../../../scripts/client-release/cli.mjs';
+import { buildWorker } from '../../../scripts/client-release/build.mjs';
 
 function temporary(t) {
   const directory = mkdtempSync(
@@ -1868,7 +1870,8 @@ const snapshotTree = (root) => {
       withFileTypes: true,
     })) {
       const name = prefix ? `${prefix}/${entry.name}` : entry.name;
-      if (entry.isDirectory()) walk(name);
+      if (entry.isSymbolicLink()) found.push(`${name}:link`);
+      else if (entry.isDirectory()) walk(name);
       else found.push(`${name}:${readFileSync(join(root, name), 'utf8')}`);
     }
   };
@@ -2038,4 +2041,244 @@ test('clean-source removes only known generated directories, handles very long p
   assert.throws(() => cleanSource(foreign), /不是 Auriga 源码目录/);
   assert.equal(existsSync(join(foreign, 'node_modules')), true);
   await assert.rejects(() => clientMain(['clean-source']), /用法/);
+});
+
+function gitFixture(t, mutate) {
+  const root = makeRoot(t, mutate);
+  const git = (...args) =>
+    assert.equal(
+      spawnSync(
+        'git',
+        [
+          '-c',
+          'user.name=Fixture',
+          '-c',
+          'user.email=fixture@example.test',
+          '-c',
+          'commit.gpgsign=false',
+          ...args,
+        ],
+        { cwd: root, windowsHide: true },
+      ).status,
+      0,
+    );
+  git('init', '-q');
+  git('add', '-A');
+  git('commit', '-q', '-m', 'fixture');
+  return root;
+}
+
+test('copyBuildSource uses the same file rules as source identity: no secrets, archives, binaries or runtime data in the copy', (t) => {
+  const source = makeSourceTree(t);
+  const write = (path, text) => {
+    mkdirSync(dirname(join(source, path)), { recursive: true });
+    writeFileSync(join(source, path), text);
+  };
+  for (const secret of [
+    '.env',
+    '.env.production',
+    'web/web/.env.local',
+    'keys/release.pem',
+    'keys/private.key',
+    'tools/helper.exe',
+    'auriga-offline-1.0.tar',
+    'auriga-devkit-1.0.tar.sha256',
+    'bin/auriga',
+    'data/db/file',
+    'deploy/compose/var/dist/x',
+    '.dev/cache/x',
+    '.agents/notes.md',
+  ])
+    write(secret, 'secret');
+  for (const meta of ['auriga-source.json', 'SHA256SUMS', 'release-public.pem'])
+    write(meta, 'meta');
+  write('.env.example', 'kept');
+  const dest = join(temporary(t), 'copy');
+  copyBuildSource(source, dest);
+  const copied = [];
+  const walk = (prefix = '') => {
+    for (const entry of readdirSync(join(dest, prefix), {
+      withFileTypes: true,
+    })) {
+      const name = prefix ? `${prefix}/${entry.name}` : entry.name;
+      if (entry.isDirectory()) walk(name);
+      else copied.push(name);
+    }
+  };
+  walk();
+  assert.deepEqual(
+    copied.sort(),
+    [
+      '.env.example',
+      'SHA256SUMS',
+      'auriga-source.json',
+      'docs/node_modules.md',
+      'notes/dist-report.txt',
+      'package.json',
+      'release-public.pem',
+      'scripts/client-release/build-node.json',
+      'scripts/client-release/cli.mjs',
+      'scripts/client-release/offline-guard.cjs',
+      'web/web/src/main.ts',
+    ].sort(),
+  );
+});
+
+test('a failing copy (source contains a link) still removes the temporary build directory and leaves the source untouched', (t) => {
+  const source = makeSourceTree(t);
+  const outside = temporary(t);
+  symlinkSync(outside, join(source, 'linkdir'), 'junction');
+  const before = snapshotTree(source);
+  const { dir, sealed } = makeBaseKit(t, makeRoot(t), { signed: false });
+  const out = join(temporary(t), 'out');
+  assert.throws(
+    () =>
+      launchOfflineBuild(
+        { ...onlineOptions(t), online: true, devkit: dir, out },
+        { directory: dir, manifestSha256: sealed.manifestSha256 },
+        { root: source, spawn: () => assert.fail('不应启动 worker') },
+      ),
+    /链接/,
+  );
+  assert.equal(existsSync(join(out, 'build-src')), false);
+  assert.deepEqual(snapshotTree(source), before);
+});
+
+test('real buildWorker with source-root refuses a build copy that differs from the verified source, and accepts an identical one', async (t) => {
+  if (process.version !== `v${BUILD_NODE}`)
+    return t.skip('需要固定的构建 Node');
+  const source = gitFixture(t, (root) => {
+    mkdirSync(join(root, 'src'));
+    writeFileSync(join(root, 'src/app.js'), 'original');
+  });
+  const { dir } = makeBaseKit(t, source, { signed: false });
+  rmSync(join(dir, 'windows-client.json'));
+  const sealed = sealInputs(dir, [], source);
+  const saved = {
+    AURIGA_CLIENT_NETWORK_LOG: process.env.AURIGA_CLIENT_NETWORK_LOG,
+    NODE_OPTIONS: process.env.NODE_OPTIONS,
+  };
+  process.env.AURIGA_CLIENT_NETWORK_LOG = join(temporary(t), 'denials.log');
+  process.env.NODE_OPTIONS = '--require=offline-guard.cjs';
+  t.after(() => {
+    for (const [name, value] of Object.entries(saved))
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+  });
+  const run = async (mutateCopy) => {
+    const copy = join(temporary(t), 'copy');
+    copyBuildSource(source, copy);
+    mutateCopy?.(copy);
+    const out = join(temporary(t), 'out');
+    mkdirSync(out);
+    const options = onlineOptions(t);
+    delete options.online;
+    delete options['site-devkit'];
+    const file = join(out, 'site-options.json');
+    writeFileSync(
+      file,
+      JSON.stringify({
+        ...options,
+        offline: true,
+        'site-derived': true,
+        'devkit-sha256': sealed.manifestSha256,
+        devkit: dir,
+        out,
+        'source-root': source,
+      }),
+    );
+    return buildWorker(file, { root: copy, checkTools: false });
+  };
+  // 与源码一致：越过副本校验，停在（假的）pnpm 安装步骤。
+  await assert.rejects(() => run(), /离线构建步骤失败/);
+  // 副本被篡改（改内容、删文件）：在装依赖前拒绝。
+  await assert.rejects(
+    () => run((copy) => writeFileSync(join(copy, 'src/app.js'), 'tampered')),
+    /构建副本与源码身份不一致/,
+  );
+  await assert.rejects(
+    () => run((copy) => rmSync(join(copy, 'src/app.js'))),
+    /构建副本与源码身份不一致/,
+  );
+});
+
+test('clean-source never follows junctions out of the tree', (t) => {
+  const source = makeSourceTree(t);
+  const outsideA = temporary(t);
+  const outsideB = temporary(t);
+  writeFileSync(join(outsideA, 'keep.txt'), 'A');
+  mkdirSync(join(outsideB, 'inner'));
+  writeFileSync(join(outsideB, 'inner/keep.txt'), 'B');
+  symlinkSync(outsideA, join(source, 'node_modules'), 'junction');
+  symlinkSync(outsideB, join(source, 'web/web/dist'), 'junction');
+  // 非生成物名字的 junction 不进入也不删除。
+  symlinkSync(outsideA, join(source, 'docs/shared'), 'junction');
+  const result = cleanSource(source);
+  assert.deepEqual(result.removed.sort(), ['node_modules', 'web/web/dist']);
+  assert.equal(existsSync(join(source, 'node_modules')), false);
+  assert.equal(existsSync(join(source, 'web/web/dist')), false);
+  assert.equal(readFileSync(join(outsideA, 'keep.txt'), 'utf8'), 'A');
+  assert.equal(readFileSync(join(outsideB, 'inner/keep.txt'), 'utf8'), 'B');
+  assert.equal(existsSync(join(source, 'docs/shared')), true);
+});
+
+test('clean-source walks exactly like the build gate: ignored runtime directories are never entered', (t) => {
+  const source = makeSourceTree(t);
+  const survivors = [
+    'bin/x/node_modules/a.js',
+    'data/y/dist/a.js',
+    'target/node_modules/a.js',
+    'deploy/compose/var/volume/dist/a.js',
+    '.dev/node_modules/a.js',
+    '.agents/dist/a.js',
+    '.git/node_modules/a.js',
+  ];
+  for (const path of [...survivors, 'web/web/dist/a.js']) {
+    mkdirSync(dirname(join(source, path)), { recursive: true });
+    writeFileSync(join(source, path), 'x');
+  }
+  // 门禁只会报 web/web/dist：先删掉它，门禁立即通过，说明 clean-source 与门禁范围一致。
+  assert.throws(() => assertBuildSourceClean(source), /web\/web\/dist/);
+  assert.deepEqual(cleanSource(source).removed, ['web/web/dist']);
+  assert.doesNotThrow(() => assertBuildSourceClean(source));
+  for (const path of survivors)
+    assert.equal(existsSync(join(source, path)), true, path);
+});
+
+test('clean-source --include-ui refuses when ui belongs to the signed baseline or is tracked by Git', (t) => {
+  const tracked = gitFixture(t, (root) => {
+    mkdirSync(join(root, 'clients/dsh-plugin/ui'), { recursive: true });
+    writeFileSync(join(root, 'clients/dsh-plugin/ui/panel.js'), 'source');
+  });
+  assert.throws(
+    () => cleanSource(tracked, { includeUi: true }),
+    /属于签名源码基线或已被 Git 跟踪/,
+  );
+  assert.equal(
+    existsSync(join(tracked, 'clients/dsh-plugin/ui/panel.js')),
+    true,
+  );
+  // 未跟踪的生成物：允许。
+  const generated = gitFixture(t);
+  mkdirSync(join(generated, 'clients/dsh-plugin/ui'), { recursive: true });
+  writeFileSync(join(generated, 'clients/dsh-plugin/ui/panel.js'), 'gen');
+  assert.deepEqual(cleanSource(generated, { includeUi: true }).removed, [
+    'clients/dsh-plugin/ui',
+  ]);
+  // 签名基线含 ui：拒绝。
+  const signed = makeSourceTree(t);
+  mkdirSync(join(signed, 'clients/dsh-plugin/ui'), { recursive: true });
+  writeFileSync(join(signed, 'clients/dsh-plugin/ui/panel.js'), 'source');
+  writeFileSync(
+    join(signed, 'auriga-source.json'),
+    JSON.stringify({ files: { 'clients/dsh-plugin/ui/panel.js': {} } }),
+  );
+  assert.throws(
+    () => cleanSource(signed, { includeUi: true }),
+    /属于签名源码基线/,
+  );
+  assert.equal(
+    existsSync(join(signed, 'clients/dsh-plugin/ui/panel.js')),
+    true,
+  );
 });
