@@ -58,9 +58,11 @@ function literalAddress(value) {
 export function createUacHttp(settings, options = {}) {
   /** @type {Map<string,Set<string>>} */
   const destinations = new Map();
-  const entries = settings?.allowedDestinations;
-  if (!Array.isArray(entries) || !entries.length || entries.length > 16)
+  const entries = settings?.allowedDestinations ?? [];
+  if (!Array.isArray(entries) || entries.length > 16)
     throw new Error('invalid UAC destination allowlist');
+  // Empty allowlist: any HTTPS origin, resolved address not checked.
+  const unrestricted = entries.length === 0;
   for (const entry of entries) {
     if (!entry || typeof entry.origin !== 'string')
       throw new Error('invalid UAC destination allowlist');
@@ -93,7 +95,7 @@ export function createUacHttp(settings, options = {}) {
       url.password ||
       url.hash ||
       (base && url.search) ||
-      !destinations.has(originKey(url))
+      (!unrestricted && !destinations.has(originKey(url)))
     )
       throw new Error('UAC destination rejected');
   }
@@ -107,9 +109,7 @@ export function createUacHttp(settings, options = {}) {
     url = new URL(url);
     validate(url);
     const signal = AbortSignal.timeout(seconds * 1000);
-    const allowed = /** @type {Set<string>} */ (
-      destinations.get(originKey(url))
-    );
+    const allowed = destinations.get(originKey(url));
     const host = url.hostname.replace(/^\[|\]$/g, '');
     const literal = parseIpAddress(host);
     /** @type {{address:string,family:number}[]} */
@@ -124,7 +124,7 @@ export function createUacHttp(settings, options = {}) {
         });
     const checked = resolved.map(({ address, family }) => {
       const ip = parseIpAddress(address);
-      if (!ip || ip.family !== family || !allowed.has(ip.address))
+      if (!ip || ip.family !== family || (allowed && !allowed.has(ip.address)))
         throw new Error('UAC destination rejected');
       return ip;
     });

@@ -905,7 +905,10 @@ public final class LoginManager {
             || profile.path("mfaPerformed").asBoolean()
                 && (team || policy.path("trustExternalMfa").asBoolean(false));
     boolean teamNeedsPlatformTotp = team && teamAccounts.hasTotp(UUID.fromString(accountId));
+    // UAC scan login is sufficient on its own: no first-authenticator enrollment or platform TOTP.
+    boolean uacScanLogin = uac && purpose.equals("login") && tx.path("uacVerified").asBoolean();
     if (!mfa
+        && !uacScanLogin
         && (!policy.path("mfa").asString("new_device").equals("never")
             || purpose.equals("stepup")
             || tx.has("nativeGrantHash") && !uac)) {
@@ -1064,9 +1067,7 @@ public final class LoginManager {
       IamError.require(
           issued != null
               && (mfa && (coreMfa || tx.path("step").path("formId").asString().equals("totp"))
-                  || uac
-                      && tx.path("uacVerified").asBoolean()
-                      && policy.path("mfa").asString("new_device").equals("never")),
+                  || uacScanLogin),
           "mfa_required",
           403);
       nativeDevices.approveNative(tx, issued.session());
