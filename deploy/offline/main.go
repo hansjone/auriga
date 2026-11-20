@@ -177,7 +177,11 @@ func command(input io.Reader, output io.Writer, env []string, name string, args 
 }
 
 func commandContext(parent context.Context, input io.Reader, output io.Writer, env []string, name string, args ...string) error {
-	ctx, cancel := context.WithTimeout(parent, 60*time.Minute)
+	return commandContextLimit(parent, 60*time.Minute, input, output, env, name, args...)
+}
+
+func commandContextLimit(parent context.Context, limit time.Duration, input io.Reader, output io.Writer, env []string, name string, args ...string) error {
+	ctx, cancel := context.WithTimeout(parent, limit)
 	defer cancel()
 	c := exec.CommandContext(ctx, name, args...)
 	c.Stdin, c.Stdout, c.Stderr = input, output, os.Stderr
