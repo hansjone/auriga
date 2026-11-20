@@ -276,8 +276,14 @@ public class IamRuntimeConfiguration {
       name = "enabled",
       havingValue = "true",
       matchIfMissing = true)
-  UacWorker iamUacWorker(UacSessions uac, AuditLogger audit, UacTelemetry telemetry) {
-    return new UacWorker(uac, audit);
+  UacWorker iamUacWorker(
+      UacSessions uac,
+      AuditLogger audit,
+      UacTelemetry telemetry,
+      org.springframework.beans.factory.ObjectProvider<IdentityPolicyHooks> hooks) {
+    UacWorker worker = new UacWorker(uac, audit);
+    worker.hooks(hooks::getIfAvailable);
+    return worker;
   }
 
   @Bean

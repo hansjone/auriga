@@ -264,6 +264,36 @@ final class UacConfiguredAdapter implements UacEnterpriseAdapter {
     }
   }
 
+  /** Common employee-name fields; deployments can override with department.namePointers. */
+  private static final List<String> DEFAULT_NAME_POINTERS =
+      List.of(
+          "/empName",
+          "/employeeName",
+          "/userName",
+          "/name",
+          "/empNameCn",
+          "/employeeNameCn",
+          "/userNameCn",
+          "/chineseName",
+          "/cnName",
+          "/lastName");
+
+  private static String employeeName(JsonNode mapping, JsonNode entry) {
+    List<String> pointers = new ArrayList<>();
+    if (mapping.path("namePointers").isArray())
+      for (JsonNode pointer : mapping.path("namePointers")) pointers.add(pointer.asString());
+    else pointers.addAll(DEFAULT_NAME_POINTERS);
+    for (String pointer : pointers) {
+      if (!pointer.startsWith("/")) continue;
+      JsonNode value = entry.at(pointer);
+      if (value.isString()) {
+        String name = value.asString().strip();
+        if (!name.isEmpty() && name.length() <= 64 && !name.matches(".*\\p{Cntrl}.*")) return name;
+      }
+    }
+    return null;
+  }
+
   @Override
   public JsonNode department(JsonNode config, JsonNode credential, String purpose) {
     IamError.validate(Set.of("login_info", "revalidate").contains(purpose));
@@ -303,25 +333,32 @@ final class UacConfiguredAdapter implements UacEnterpriseAdapter {
             "identity_mismatch",
             "matchingCount",
             matches.size());
+      String name = employeeName(mapping, matches.getFirst());
       int branch = 0;
       for (JsonNode pointer : mapping.path("departmentPointers")) {
         branch++;
         JsonNode department = matches.getFirst().at(pointer.asString());
         if (department.isString()
             && !department.asString().strip().isEmpty()
-            && department.asString().length() <= 1024)
-          return Json.object(
-              "available",
-              true,
-              "department",
-              department.asString().strip(),
-              "matchingCount",
-              1,
-              "fieldBranch",
-              branch == 1 ? "primary" : "fallback");
+            && department.asString().length() <= 1024) {
+          ObjectNode found =
+              Json.object(
+                  "available",
+                  true,
+                  "department",
+                  department.asString().strip(),
+                  "matchingCount",
+                  1,
+                  "fieldBranch",
+                  branch == 1 ? "primary" : "fallback");
+          if (name != null) found.put("employeeName", name);
+          return found;
+        }
       }
-      return Json.object(
-          "available", false, "faultReason", "missing_department", "matchingCount", 1);
+      ObjectNode missing =
+          Json.object("available", false, "faultReason", "missing_department", "matchingCount", 1);
+      if (name != null) missing.put("employeeName", name);
+      return missing;
     } catch (java.io.IOException e) {
       return Json.object("available", false, "faultReason", "transport_error");
     } catch (RuntimeException e) {

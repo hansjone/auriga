@@ -120,7 +120,9 @@ final class UacOrgPolicy {
                 && subject.equals(bindings.getFirst().get("employee"))
                 && account.equals(bindings.getFirst().get("account_id"))
                 && member(account).filter(m -> "member".equals(m.memberType())).isPresent();
-          if (!org.createVerifiedUacMember(account, displayName)) return false;
+          if (!org.createVerifiedUacMember(
+              account, displayName == null || displayName.isBlank() ? subject : displayName))
+            return false;
           store
               .jdbc()
               .update(
