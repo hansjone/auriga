@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue';
+import { nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useRoute, useRouter } from 'vue-router';
 import {
@@ -15,8 +15,9 @@ import {
 } from '@auriga/shared';
 import { iamApi } from '../api';
 import { loginPreference } from '../../../shared/src/login-preference';
+import { createUacLoginView } from '../../../shared/src/native-login/uac';
 
-const { t } = useI18n();
+const { t, locale } = useI18n();
 const route = useRoute();
 const router = useRouter();
 
@@ -24,6 +25,24 @@ const providers = ref<LoginProvider[]>([]);
 const tx = ref<LoginTransaction | null>(null);
 const error = ref('');
 const loading = ref(true);
+const uacRoot = ref<globalThis.HTMLElement>();
+const uacActive = ref(false);
+let uacView: ReturnType<typeof createUacLoginView> | undefined;
+watch(locale, (value) => uacView?.setLocale(value));
+onUnmounted(() => void uacView?.dispose());
+
+function returnTo() {
+  return typeof route.query.returnTo === 'string'
+    ? route.query.returnTo
+    : '/overview';
+}
+
+async function stopUac() {
+  const view = uacView;
+  uacView = undefined;
+  uacActive.value = false;
+  await view?.dispose();
+}
 
 onMounted(async () => {
   try {
@@ -46,16 +65,47 @@ onMounted(async () => {
 
 async function selectProvider(provider: LoginProvider) {
   error.value = '';
+  await stopUac();
+  if (provider.connectorType === 'uac') {
+    // UAC scan uses the dedicated challenge API; the generic login
+    // transaction endpoint rejects UAC with validation_failed.
+    tx.value = null;
+    uacActive.value = true;
+    loading.value = false;
+    await nextTick();
+    if (!uacRoot.value) return;
+    uacView = createUacLoginView(uacRoot.value, {
+      api: iamApi,
+      providerId: provider.id,
+      targetName: provider.displayName,
+      locale: locale.value,
+      onComplete: (result) => {
+        if (result.state === 'authenticated') {
+          void stopUac();
+          void router.replace(returnTo());
+        } else if (result.state === 'additional_step_required') {
+          void iamApi
+            .getLoginTransaction(result.transactionId)
+            .then(async (value) => {
+              await stopUac();
+              tx.value = value;
+            })
+            .catch((e) => {
+              error.value = isApiError(e)
+                ? mapProblemMessage(e.problem, t)
+                : t('errors.unknown');
+            });
+        }
+      },
+    });
+    return;
+  }
   loading.value = true;
   try {
-    const returnTo =
-      typeof route.query.returnTo === 'string'
-        ? route.query.returnTo
-        : '/overview';
     tx.value = await iamApi.createLoginTransaction({
       providerId: provider.id,
       purpose: 'login',
-      returnTo,
+      returnTo: returnTo(),
     });
   } catch (e) {
     error.value = isApiError(e)
@@ -94,6 +144,7 @@ function onComplete(redirectTo: string) {
 function backToProviders() {
   error.value = '';
   tx.value = null;
+  void stopUac();
 }
 
 const step = (): ClientStep | null =>
@@ -115,6 +166,17 @@ const step = (): ClientStep | null =>
     <p v-if="loading" class="auriga-login-status" role="status">
       {{ t('login.loading') }}
     </p>
+    <template v-else-if="uacActive">
+      <div ref="uacRoot" />
+      <button
+        v-if="providers.length > 1"
+        type="button"
+        class="auriga-login-back"
+        @click="backToProviders"
+      >
+        {{ t('login.back') }}
+      </button>
+    </template>
     <ProviderSelect
       v-else-if="!tx"
       :providers="providers"
