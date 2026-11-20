@@ -137,7 +137,7 @@ func checkKitLocksContext(ctx context.Context, source string, kit devkitManifest
 	if !regexpVersion.MatchString(version) {
 		version = "<当前上游版本>"
 	}
-	return fmt.Errorf("devkit 与当前源码依赖不匹配:\n%s\n请下载 Forgejo Release %s 的 auriga-devkit-%s.tar（或全部分卷）；自改依赖需维护者重新生成 devkit。", lockDifferences(*kit.Locks, current), version, version)
+	return fmt.Errorf("devkit 与当前源码依赖不匹配:\n%s\n请下载 Forgejo Release %s 的 auriga-devkit-%s.tar（或全部分卷）；自改 Go/Web/Java 依赖且构建机可联网时，可改用 bundle --build --online --sign-key ...；其余自改依赖需维护者重新生成 devkit。", lockDifferences(*kit.Locks, current), version, version)
 }
 
 func readDevkit(root string) (devkitManifest, error) {
@@ -149,7 +149,7 @@ func readDevkitContext(ctx context.Context, root string) (devkitManifest, error)
 	if err := verifyDevkitCacheContext(ctx, root); err != nil {
 		return kit, err
 	}
-	if err := readJSON(filepath.Join(root, "devkit.json"), &kit); err != nil {
+	if err := readDevkitJSON(filepath.Join(root, "devkit.json"), &kit); err != nil {
 		return kit, err
 	}
 	return kit, validateDevkit(kit)

@@ -54,3 +54,9 @@ docker run --rm --pull never --network none \
 edge 需要 Go 与 Web 输出，platform 需要 Java 与 system/platform，agent 和 bifrost 需要各自的 Go 和系统包，operator 需要 system/operator。两个 Go 辅助程序 auriga-nas-bootstrap 和 runtime-release 与其他 Go 程序一起生成，按公开 NAS 打包配方装入发行目录。
 
 Docker build 的 --network=none 限制 Dockerfile 的运行步骤。验收整台机器的访问范围时，需在目标网络中限制 Docker daemon 的出站，再照发布索引安装和重建。公开 [NAS 装配文档](../README.md) 的安装、启动和运行时验签门禁仍适用。
+
+## 现场在线收集（bundle --online）用到的脚本接口
+
+三个输入脚本除 prepare 和 build 外还有 `locks` 模式：只把当前源码锁清单写入空输出目录的 source-locks.sha256，不需要网络。`auriga bundle --build --online` 用它与套件输入里的同名文件比较，判断哪个生态的依赖变了。
+
+prepare 的可选环境变量：go-inputs.sh 读 AURIGA_GO_PREPARE_PROXY（上游代理，默认 proxy.golang.org，GOSUMDB 不可关闭）和 AURIGA_GO_PREPARE_CACHE（旧 download 目录）；web-inputs.sh 的 AURIGA_WEB_PREPARE_STORE_TAR 指向旧 web-cache.tar.gz，只解出其中的 store 和 policy-cache/pnpm 作种子，不再要求锁相同；java-inputs.sh 的 prepare 一律带 -C，并可用 AURIGA_MAVEN_MIRROR_URL（仅 https）生成 central 镜像。Maven 的 -C 只核对 Central 或镜像自己提供的校验和，不能防镜像篡改，镜像可信性由现场负责。

@@ -198,7 +198,7 @@ func printTopHelp(w io.Writer) {
   devkit verify   校验源码依赖套件是否覆盖当前源码
   devkit merge    把增量套件合并进已解包的累积套件
   changes export  把现场源码改动导出为补丁（changes apply 应用补丁）
-  bundle          bundle --build --offline 在现场断网构建离线包（必须 --sign-key）
+  bundle          bundle --build --offline 在现场断网构建离线包；--online 则对变化的语言依赖联网收集（均须 --sign-key）
   keygen site     生成站点构建密钥对（私钥只留在受控开发机）
   trust add-site-key|remove-site-key   在服务器登记或移除站点构建公钥（需要 root）
 
@@ -280,16 +280,22 @@ func init() {
 		docs:    buildDocs,
 	}
 	helpSpecs["bundle"] = helpSpec{
-		usage:   "./auriga bundle --build --offline --sign-key <站点构建私钥> [参数]",
-		summary: "在源码目录用已解包的开发套件断网构建现场离线包。离线构建必须 --sign-key（先 keygen site，并在服务器 trust add-site-key 登记）。",
+		usage:   "./auriga bundle --build (--offline | --online) --sign-key <站点构建私钥> [参数]",
+		summary: "在源码目录用已解包的开发套件构建现场离线包。--offline 完全断网，源码依赖锁须与套件一致；--online 在改了 Go/Web/Java 依赖锁后，只对变化的生态联网收集新增依赖（在套件固定 digest 的工具镜像里运行，源码只读，Go 仍由 go.sum 与 GOSUMDB 校验，Web 由 pnpm-lock integrity 校验），再断网构建，并打印/写入新增依赖清单（安装包 site-dependencies.json，含 SHA-256），doctor 会标注含现场依赖。构建必须 --sign-key（先 keygen site，并在服务器 trust add-site-key 登记）。",
+		notes: []string{
+			"--online 一期不支持系统包与 Dockerfile 基础镜像变化（会明确报错，请联系维护方）；--online 与 --offline 互斥。",
+			"联网收集会透传已设置的 HTTP_PROXY/HTTPS_PROXY/NO_PROXY、GOPROXY、npm_config_registry、AURIGA_MAVEN_MIRROR_URL（Maven 镜像地址）；未设置则不传。",
+			"Java 依赖没有锁哈希钉定：Maven 只校验 Central 或镜像自己提供的校验和，不能防镜像篡改，镜像可信性由现场负责；AURIGA_MAVEN_MIRROR_URL 只接受 https 地址。请用 site-dependencies.json 里的 SHA-256 与 Maven Central 人工核对新增构件。",
+		},
 		docs: merge(buildDocs, map[string]string{
 			"release":  "发行索引 JSON 路径",
 			"out":      "输出离线包 tar 路径；留空时为 auriga-offline-<版本>.tar",
-			"build":    "从源码构建（--offline 必须与它同用）",
-			"offline":  "断网构建，须与 --build 同用",
+			"build":    "从源码构建（--offline 或 --online 必须与它同用）",
+			"offline":  "完全断网构建，须与 --build 同用，与 --online 互斥",
+			"online":   "套件基础上对改了依赖锁的语言生态联网收集依赖后构建，须与 --build、--sign-key 同用，与 --offline 互斥",
 			"version":  "离线包版本号，例如 0.2.0-site.3",
-			"sign-key": "已登记的站点构建私钥（离线构建必填）；私钥须妥善保管，丢失后需重新生成并登记",
-			"install":  "构建后先备份再 upgrade 到本机（仅 Linux，需 --build --offline，且需 root）",
+			"sign-key": "已登记的站点构建私钥（--offline/--online 构建必填）；私钥须妥善保管，丢失后需重新生成并登记",
+			"install":  "构建后先备份再 upgrade 到本机（仅 Linux，需 --build 加 --offline 或 --online，且需 root）",
 			"data":     dataDoc["data"] + "；仅 --install 使用",
 		}),
 	}

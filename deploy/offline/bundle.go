@@ -139,6 +139,7 @@ func bundleExpectedContext(ctx context.Context, args []string, expectedCommit st
 	out := f.String("out", "", "")
 	build := f.Bool("build", false, "")
 	offline := f.Bool("offline", false, "")
+	online := f.Bool("online", false, "")
 	version := f.String("version", "", "")
 	sign := f.String("sign-key", "", "")
 	memory := f.Int("memory-mib", 4096, "")
@@ -148,11 +149,16 @@ func bundleExpectedContext(ctx context.Context, args []string, expectedCommit st
 	if err := f.Parse(args); err != nil {
 		return err
 	}
+	if err := validateOnlineFlags(*online, *offline, *build, *sign); err != nil {
+		return err
+	}
 	if f.NArg() != 0 || *offline && !*build {
 		return errors.New("--offline 须与 --build 同用，bundle 不接受多余参数")
 	}
-	if *installAfter && (!*offline || !*build) {
-		return errors.New("--install 只支持 bundle --build --offline，先备份再upgrade")
+	// kitMode：基础材料取自已绑定的开发套件（--offline 全离线；--online 仅锁变化的语言依赖联网）。
+	kitMode := *offline || *online
+	if *installAfter && (!kitMode || !*build) {
+		return errors.New("--install 只支持 bundle --build --offline 或 --online，先备份再upgrade")
 	}
 	if *build && *offline && *sign == "" {
 		return errors.New("离线现场构建必须 --sign-key <已登记站点构建私钥>；先运行 keygen site 并在服务器 trust add-site-key")
@@ -162,7 +168,7 @@ func bundleExpectedContext(ctx context.Context, args []string, expectedCommit st
 	if err != nil {
 		return err
 	}
-	options := buildOptions{Context: ctx, Offline: *offline, Source: source, Budget: buildBudget{MemoryMiB: *memory, CPUs: *cpus}}
+	options := buildOptions{Context: ctx, Offline: kitMode, Online: *online, Source: source, Budget: buildBudget{MemoryMiB: *memory, CPUs: *cpus}}
 	if *build {
 		if err := buildEnvironmentContext(ctx, options.Budget); err != nil {
 			return err
@@ -170,13 +176,26 @@ func bundleExpectedContext(ctx context.Context, args []string, expectedCommit st
 	}
 	var kit *devkitManifest
 	kitRoot := ""
-	if *offline {
-		kitRoot, kit, err = locateDevkit(source)
+	if kitMode {
+		kitRoot, kit, err = locateDevkitLocks(source, *online)
 		if err != nil {
 			return err
 		}
 		if kit.cleanup != nil {
 			defer kit.cleanup()
+		}
+		if *online {
+			current, err := dependencyLocksContext(ctx, source, kit.Release)
+			if err != nil {
+				return err
+			}
+			if err := checkOnlineScope(*kit.Locks, current); err != nil {
+				return err
+			}
+			options.LockDigest, options.ChangedLockFiles = current.Digest, changedLockFiles(*kit.Locks, current)
+			if kit.Source != nil {
+				options.BaselineCommit = kit.Source.Commit
+			}
 		}
 		r = kit.Release
 		options.Cache = filepath.Join(kitRoot, "cache")
@@ -252,7 +271,7 @@ func bundleExpectedContext(ctx context.Context, args []string, expectedCommit st
 	if err := commandContext(ctx, nil, os.Stdout, nil, boot, "image-check", root); err != nil {
 		return err
 	}
-	if *offline {
+	if kitMode {
 		r, err = loadDevkitImagesContext(ctx, kitRoot, *kit, boot)
 		if err != nil {
 			return err
@@ -291,7 +310,7 @@ func bundleExpectedContext(ctx context.Context, args []string, expectedCommit st
 		}
 		entry.Tag = "auriga/offline-" + name + ":" + r.Version
 		entry.Archive = "extra-images/" + name + ".tar"
-		if !*offline && strings.Contains(entry.Ref, "@sha256:") {
+		if !kitMode && strings.Contains(entry.Ref, "@sha256:") {
 			if err := commandContext(ctx, nil, os.Stdout, nil, "docker", "pull", "--platform", "linux/amd64", entry.Ref); err != nil {
 				return err
 			}

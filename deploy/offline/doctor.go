@@ -80,6 +80,9 @@ func doctor(s state) error {
 	var installed release
 	if err := readJSON(filepath.Join(s.Package, "offline-release.json"), &installed); err == nil {
 		fmt.Println(printProvenance(installed.Source))
+		if line := siteDependenciesInfo(s.Package); line != "" {
+			fmt.Println(line)
+		}
 	}
 	failures := 0
 	check := func(name, repair string, test func() error) {

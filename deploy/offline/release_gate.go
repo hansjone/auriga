@@ -152,7 +152,7 @@ func refreshReleaseInputsContext(ctx context.Context, root string, r release, ke
 		}
 	}
 	kit.Release.Version = r.Version
-	if err := jsonFile(filepath.Join(root, "devkit.json"), kit, 0644); err != nil {
+	if err := writeDevkitManifest(filepath.Join(root, "devkit.json"), kit); err != nil {
 		return err
 	}
 	if err := signingPublic(key, filepath.Join(root, "release-public.pem")); err != nil {
