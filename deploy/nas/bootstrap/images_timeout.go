@@ -62,17 +62,25 @@ func loadImageTimeouts(lookup func(string) (string, bool)) (imageTimeouts, error
 }
 
 // stallReader 只在阻塞读取期间计时：读到数据即解除，下一次读取重新开始计时。
+// 第一个字节出来之前不计无进展：经典存储下 Docker 先把各层导出到临时目录再开始输出，
+// 这段时间只受总上限约束。
 type stallReader struct {
 	r       io.Reader
 	timer   *time.Timer
 	stall   time.Duration
 	stalled *atomic.Bool
+	flowing bool
 }
 
 func (s *stallReader) Read(p []byte) (int, error) {
-	s.timer.Reset(s.stall)
+	if s.flowing {
+		s.timer.Reset(s.stall)
+	}
 	n, err := s.r.Read(p)
 	s.timer.Stop()
+	if n > 0 {
+		s.flowing = true
+	}
 	return n, err
 }
 

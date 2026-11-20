@@ -385,7 +385,7 @@ func devkitSingleContext(ctx context.Context, args []string) error {
 		if err := commandContext(ctx, nil, os.Stdout, nil, "docker", "save", "--platform", "linux/amd64", "-o", filepath.Join(cache, file), tag); err != nil {
 			return err
 		}
-		if _, err := captureContext(ctx, boot, "image-extra-resolve", filepath.Join(cache, file), tag); err != nil {
+		if _, err := captureImageResolve(ctx, boot, filepath.Join(cache, file), tag); err != nil {
 			return err
 		}
 		kit.Images = append(kit.Images, kitImage{Role: role, Ref: ref, Tag: tag, File: file})
@@ -441,7 +441,7 @@ func loadDevkitImagesContext(ctx context.Context, root string, kit devkitManifes
 		if err := commandContext(ctx, nil, os.Stdout, nil, "docker", "load", "-i", file); err != nil {
 			return r, err
 		}
-		id, err := captureContext(ctx, boot, "image-extra-resolve", file, entry.Tag)
+		id, err := captureImageResolve(ctx, boot, file, entry.Tag)
 		if err != nil {
 			return r, err
 		}

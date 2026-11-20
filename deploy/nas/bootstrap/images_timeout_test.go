@@ -98,3 +98,18 @@ func TestLoadImageTimeouts(t *testing.T) {
 		}
 	}
 }
+
+func TestImageSaveSlowFirstByteNotStall(t *testing.T) {
+	skipNoSh(t)
+	// 第一个字节前等待 1 秒（超过 0.3 秒无进展阈值）：模拟 Docker 先导出到临时目录，不应判为无进展。
+	err := runImageSave(context.Background(), shellSave("sleep 1; printf xy"), func(r io.Reader) error {
+		b, err := io.ReadAll(r)
+		if err == nil && string(b) != "xy" {
+			return errors.New("输出不符")
+		}
+		return err
+	}, 300*time.Millisecond, time.Minute)
+	if err != nil {
+		t.Fatalf("首字节前慢不应判无进展: %v", err)
+	}
+}

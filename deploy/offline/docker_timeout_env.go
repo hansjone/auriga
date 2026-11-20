@@ -1,7 +1,12 @@
 package main
 
 import (
+	"bytes"
+	"context"
+	"errors"
 	"fmt"
+	"os"
+	"strings"
 	"time"
 )
 
@@ -28,4 +33,32 @@ func validateDockerImageTimeoutEnv(lookup func(string) (string, bool)) error {
 		}
 	}
 	return nil
+}
+
+// imageResolveLimit 是调用引导程序 image-extra-resolve（检查 + 重导出一个镜像）的外层上限：
+// 引导程序自己的检查上限 + 导出总上限 + 余量，保证引导程序先按自己的时限给出中文报错。
+func imageResolveLimit(lookup func(string) (string, bool)) time.Duration {
+	limit := 10*time.Minute + 2*time.Hour
+	if v, ok := lookup("AURIGA_DOCKER_INSPECT_TIMEOUT"); ok && v != "" {
+		if d, err := time.ParseDuration(v); err == nil {
+			limit += d - 10*time.Minute
+		}
+	}
+	if v, ok := lookup("AURIGA_DOCKER_IMAGE_SAVE_MAX"); ok && v != "" {
+		if d, err := time.ParseDuration(v); err == nil {
+			limit += d - 2*time.Hour
+		}
+	}
+	return limit + 10*time.Minute
+}
+
+// captureImageResolve 用 imageResolveLimit 作外层上限调用引导程序重导出镜像。
+func captureImageResolve(ctx context.Context, boot string, args ...string) (string, error) {
+	var b bytes.Buffer
+	limit := imageResolveLimit(os.LookupEnv)
+	err := commandContextLimit(ctx, limit, nil, &b, nil, boot, append([]string{"image-extra-resolve"}, args...)...)
+	if err != nil && ctx.Err() == nil && errors.Is(err, context.DeadlineExceeded) {
+		err = fmt.Errorf("重导出镜像超过外层上限 %s；现场负载高或磁盘慢时可调大 AURIGA_DOCKER_IMAGE_SAVE_MAX: %w", limit, err)
+	}
+	return strings.TrimSpace(b.String()), err
 }
