@@ -295,6 +295,14 @@ func (g *Gateway) proxyAccessAPI(w http.ResponseWriter, r *http.Request, target 
 		transport = g.devicesTransport(transport)
 	}
 	proxy := newReverseProxy(target, transport, true)
+	if placement {
+		proxy.ModifyResponse = func(resp *http.Response) error {
+			// These opaque ETags are also write preconditions. An outer encoder
+			// must not replace them with representation-specific suffixes.
+			resp.Header.Set("Cache-Control", "no-store, no-transform")
+			return nil
+		}
+	}
 	if target == g.collabURL {
 		proxy.ModifyResponse = func(resp *http.Response) error {
 			if g.Log != nil {
