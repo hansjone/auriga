@@ -19,14 +19,37 @@ var uacAdminProviderPath = regexp.MustCompile(`^/api/iam/v1/admin/providers/[0-9
 var placementSwitchCreatePath = regexp.MustCompile(`^/api/workspace/v1/admin/members/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/placement-switches$`)
 var placementSwitchReadPath = regexp.MustCompile(`^/api/workspace/v1/admin/placement-switches/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
 
+const placementUUID = `[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}`
+
+var placementMemberReadPath = regexp.MustCompile(`^/api/workspace/v1/admin/members/` + placementUUID + `/placement$`)
+var placementEntitlementPath = regexp.MustCompile(`^/api/workspace/v1/admin/members/` + placementUUID + `/dedicated-entitlement$`)
+var placementSwitchLookupPath = regexp.MustCompile(`^/api/workspace/v1/admin/members/` + placementUUID + `/placement-switches/lookup$`)
+var placementRebuildReadPath = regexp.MustCompile(`^/api/workspace/v1/admin/placement-rebuild-plans/` + placementUUID + `$`)
+var placementRebuildStartPath = regexp.MustCompile(`^/api/workspace/v1/admin/placement-rebuild-plans/` + placementUUID + `/start$`)
+var placementRebuildProgressPath = regexp.MustCompile(`^/api/workspace/v1/admin/placement-rebuild-plans/` + placementUUID + `/progress$`)
+
 // Only these W endpoints revalidate the actual browser cookie and trusted
 // entry metadata. Other component proxies retain their ordinary JWT boundary.
 func placementBrowserOperation(r *http.Request) bool {
 	if r.URL.EscapedPath() != r.URL.Path || r.URL.RawQuery != "" || r.URL.ForceQuery {
 		return false
 	}
-	return r.Method == http.MethodGet && (r.URL.Path == "/api/workspace/v1/me/placement" || placementSwitchReadPath.MatchString(r.URL.Path)) ||
-		r.Method == http.MethodPost && (r.URL.Path == "/api/workspace/v1/me/placement/open" || placementSwitchCreatePath.MatchString(r.URL.Path))
+	switch r.Method {
+	case http.MethodGet:
+		return r.URL.Path == "/api/workspace/v1/me/placement" ||
+			r.URL.Path == "/api/workspace/v1/admin/placement-capacity" ||
+			placementSwitchReadPath.MatchString(r.URL.Path) || placementMemberReadPath.MatchString(r.URL.Path) ||
+			placementSwitchLookupPath.MatchString(r.URL.Path) || placementRebuildReadPath.MatchString(r.URL.Path) ||
+			placementRebuildProgressPath.MatchString(r.URL.Path)
+	case http.MethodPost:
+		return r.URL.Path == "/api/workspace/v1/me/placement/open" ||
+			r.URL.Path == "/api/workspace/v1/admin/placement-rebuild-plans" ||
+			placementSwitchCreatePath.MatchString(r.URL.Path) || placementRebuildStartPath.MatchString(r.URL.Path)
+	case http.MethodPut:
+		return placementEntitlementPath.MatchString(r.URL.Path) || placementRebuildReadPath.MatchString(r.URL.Path)
+	default:
+		return false
+	}
 }
 
 func uacAdminBrowserOperation(r *http.Request) bool {
