@@ -7,6 +7,7 @@ import { startBuild } from './online.mjs';
 import { generateDesktopKeys, assertPrivateKey } from './keys.mjs';
 import { publish } from './publish.mjs';
 import { physical } from './inputs.mjs';
+import { cleanSource } from './source.mjs';
 import { clientPlatform } from './platform.mjs';
 import {
   reviewRelease,
@@ -21,6 +22,8 @@ const HELP = `独立客户端发行（auriga-client.cmd / Node cli.mjs）
     --online：现场依赖锁（前端 pnpm、dsh-plugin 的 npm）与发行套件不一致时，联网只补变化的依赖，
     把基础套件（只读）派生为 --site-devkit，再按 --offline 同样的断网方式构建。Node/Python/DSH/Java 版本变化仍需维护方出新套件。
     联网步骤透传已设置的 HTTPS_PROXY/HTTP_PROXY/NO_PROXY 与 npm_config_registry；与 --offline 互斥。
+  auriga-client clean-source <源码目录> [--include-ui]
+    构建不再向源码树写入；本命令清理旧版本构建留下的 node_modules、dist、.pnpm-store（--include-ui 另含 clients/dsh-plugin/ui），支持超长路径，不删其他文件。
   auriga-client sign --dir <构建输出目录> --review-only
   auriga-client sign --dir <构建输出目录> --key-file <私钥.pem> --confirm-sha256 <审阅摘要>
   auriga-client publish --dir <构建输出目录> --public-key <现场公钥.pem> --admin-origin <管理入口origin> --portal-origin <门户origin>
@@ -145,6 +148,18 @@ export async function main(argv) {
       'confirm-portal-http-origin': 'string',
     },
   };
+  if (command === 'clean-source') {
+    const { values, positionals } = parseArgs({
+      args: argv.slice(1),
+      options: { 'include-ui': { type: 'boolean' } },
+      allowPositionals: true,
+    });
+    if (positionals.length !== 1)
+      throw new Error(
+        '用法：auriga-client clean-source <源码目录> [--include-ui]',
+      );
+    return cleanSource(positionals[0], { includeUi: values['include-ui'] });
+  }
   if (!allowed[command])
     throw new Error('未知客户端命令，运行 auriga-client --help');
   const { values: o } = parseArgs({

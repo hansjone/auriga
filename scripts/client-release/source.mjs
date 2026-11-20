@@ -1,7 +1,15 @@
 /** Source provenance compatible with deploy/offline/source_archive.go. */
 import { Buffer, isUtf8 } from 'node:buffer';
-import { existsSync, readFileSync, readdirSync, lstatSync } from 'node:fs';
-import { join, basename, extname } from 'node:path';
+import {
+  existsSync,
+  readFileSync,
+  readdirSync,
+  lstatSync,
+  mkdirSync,
+  copyFileSync,
+  rmSync,
+} from 'node:fs';
+import { join, basename, extname, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { ROOT, digest, physical } from './inputs.mjs';
 import { verifySignedInventory } from './trust.mjs';
@@ -130,9 +138,10 @@ export function assertBuildSourceClean(root, baselinePaths = []) {
         ['node_modules', 'dist', '.pnpm-store'].includes(lower) ||
         (!baselineUI && name.toLowerCase() === 'clients/dsh-plugin/ui')
       ) {
-        const path = join(root, name).replaceAll("'", "''");
+        const ui = name.toLowerCase() === 'clients/dsh-plugin/ui';
+        const quoted = resolve(root).replaceAll("'", "''");
         throw new Error(
-          `构建前发现预置生成内容：${name}；请核对后在 PowerShell 清理：Remove-Item -LiteralPath '${path}' -Recurse -Force；或重新解压源码到全新目录`,
+          `构建前发现预置生成内容：${name}；构建不再向源码树写入，这多半是旧版本构建的残留。请运行一键清理（支持超长路径，只删已知生成目录）：.\\scripts\\client-release\\auriga-client.cmd clean-source '${quoted}'${ui ? ' --include-ui' : ''}；或重新解压源码到全新目录。路径：${join(root, name)}`,
         );
       }
       if (!sourcePathAllowed(name)) continue;
@@ -142,6 +151,128 @@ export function assertBuildSourceClean(root, baselinePaths = []) {
     }
   };
   walk();
+}
+/** 构建会生成的目录名（含历史版本在源码树里留下的残留）。 */
+const GENERATED_DIRS = new Set(['node_modules', 'dist', '.pnpm-store']);
+const UI_DIR = 'clients/dsh-plugin/ui';
+/**
+ * 清理源码树里已知的构建生成物：任意层级的 node_modules、dist、.pnpm-store，
+ * 以及（指定 includeUi 时）clients/dsh-plugin/ui。不进入 .git，也不删其他任何文件；
+ * 用 Node 的 fs.rmSync 删除，超长路径（如 element-plus 在 .pnpm 下）同样可删。
+ * 链接只删链接本身，不跟随到目标目录。
+ */
+export function cleanSource(root, { includeUi = false } = {}) {
+  root = resolve(root);
+  physical(root);
+  if (!existsSync(join(root, 'scripts/client-release/build-node.json')))
+    throw new Error(
+      '不是 Auriga 源码目录（缺少 scripts/client-release/build-node.json），拒绝清理',
+    );
+  const removed = [];
+  const remove = (name) => {
+    try {
+      rmSync(join(root, name), {
+        recursive: true,
+        force: true,
+        maxRetries: 3,
+        retryDelay: 200,
+      });
+    } catch (error) {
+      throw new Error(`无法删除 ${name}：${error.message}`);
+    }
+    removed.push(name);
+  };
+  if (includeUi && uiIsSource(root))
+    throw new Error(
+      `${UI_DIR} 属于签名源码基线或已被 Git 跟踪，是源码而不是生成物，拒绝清理；去掉 --include-ui`,
+    );
+  // 遍历规则与 assertBuildSourceClean 完全一致：不进入 sourcePathAllowed 为假的目录
+  // （.git、bin、data、target、deploy/compose/var、.dev 等），不跟随链接。
+  const walk = (prefix = '') => {
+    for (const entry of readdirSync(join(root, prefix), {
+      withFileTypes: true,
+    })) {
+      const name = prefix ? `${prefix}/${entry.name}` : entry.name;
+      const lower = entry.name.toLowerCase();
+      const generated =
+        GENERATED_DIRS.has(lower) ||
+        (includeUi && name.toLowerCase() === UI_DIR);
+      if (generated) {
+        if (entry.isDirectory() || entry.isSymbolicLink()) remove(name);
+        continue;
+      }
+      if (!sourcePathAllowed(name)) continue;
+      if (entry.isDirectory()) walk(name);
+    }
+  };
+  walk();
+  return { root, removed };
+}
+/** clients/dsh-plugin/ui 是否属于源码：签名基线含它，或 Git 正在跟踪它。 */
+function uiIsSource(root) {
+  const manifest = join(root, 'auriga-source.json');
+  if (existsSync(manifest)) {
+    try {
+      const files = JSON.parse(readFileSync(manifest, 'utf8')).files ?? {};
+      if (Object.keys(files).some((p) => p.startsWith(`${UI_DIR}/`)))
+        return true;
+    } catch {
+      return true; // 清单读不懂时保守拒绝。
+    }
+  }
+  if (existsSync(join(root, '.git'))) {
+    const r = spawnSync('git', ['ls-files', '-z', '--', UI_DIR], {
+      cwd: root,
+      encoding: 'utf8',
+      windowsHide: true,
+    });
+    return r.status !== 0 || r.stdout.length > 0;
+  }
+  return false;
+}
+// 签名源码包的元数据不计入身份，但副本里要有它们才能复核签名与摘要。
+const SIGNED_METADATA = new Set([
+  'auriga-source.json',
+  'sha256sums',
+  'sha256sums.sig',
+  'release-public.pem',
+]);
+/**
+ * 把源码复制到独立构建目录。文件集合与源码身份一致：只复制 sourcePathAllowed 允许的路径
+ * （因此没有 node_modules、.git、.env*、*.pem/*.key/*.exe、顶层归档等），外加顶层的签名源码元数据；
+ * 遇到链接/特殊文件即拒绝。副本是否与身份一致由 assertBuildCopyMatches 整体复核。
+ * dest 必须是不存在的新目录；若位于源码内则自动跳过它。
+ */
+export function copyBuildSource(root, dest) {
+  root = resolve(root);
+  dest = resolve(dest);
+  const key = (p) => (process.platform === 'win32' ? p.toLowerCase() : p);
+  mkdirSync(dest);
+  let count = 0;
+  const walk = (prefix = '') => {
+    mkdirSync(join(dest, prefix), { recursive: true });
+    for (const entry of readdirSync(join(root, prefix), {
+      withFileTypes: true,
+    })) {
+      const name = prefix ? `${prefix}/${entry.name}` : entry.name;
+      const from = join(root, name);
+      if (key(from) === key(dest)) continue;
+      if (
+        !sourcePathAllowed(name) &&
+        !(!prefix && SIGNED_METADATA.has(entry.name.toLowerCase()))
+      )
+        continue;
+      const stat = lstatSync(from);
+      if (stat.isSymbolicLink()) throw new Error(`源码含链接：${name}`);
+      if (stat.isDirectory()) walk(name);
+      else if (stat.isFile()) {
+        copyFileSync(from, join(dest, name));
+        count++;
+      } else throw new Error(`源码含特殊文件：${name}`);
+    }
+  };
+  walk();
+  return count;
 }
 function treeDigest(files) {
   return digest(
@@ -202,6 +333,55 @@ export function snapshotInventory(root, baseline = {}) {
   checkPaths(Object.keys(files));
   return { files, sha256: treeDigest(files) };
 }
+function gitOutput(root, args) {
+  const r = spawnSync('git', args, {
+    cwd: root,
+    encoding: 'utf8',
+    windowsHide: true,
+  });
+  if (r.status !== 0) throw new Error('Git 源码来源不可用');
+  return r.stdout;
+}
+function gitSourcePaths(root) {
+  return [
+    ...new Set(
+      gitOutput(root, [
+        'ls-files',
+        '--cached',
+        '--others',
+        '--exclude-standard',
+        '-z',
+      ])
+        .split('\0')
+        .filter(Boolean),
+    ),
+  ].sort();
+}
+/**
+ * 构建副本必须与已校验的源码身份一致，否则拒绝构建（复制与校验之间源码或副本被改动）。
+ * 签名源码包：副本里带着签名元数据，按同一套规则重新验签并算摘要；
+ * Git 来源：副本没有 .git，按源码目录的同一份文件列表对副本逐文件算摘要
+ * （身份已计入、副本里没有的文件按缺失处理，因而不一致）。
+ */
+export function assertBuildCopyMatches(copyRoot, sourceRoot, trust, source) {
+  const actual =
+    source.sourceType === 'signed-archive'
+      ? sourceIdentity(copyRoot, trust).sourceTreeSha256
+      : digest(
+          canonical(
+            gitSourcePaths(sourceRoot).map((p) => [
+              p,
+              existsSync(join(copyRoot, p))
+                ? digest(readFileSync(join(copyRoot, p)))
+                : null,
+            ]),
+          ),
+        );
+  if (actual !== source.sourceTreeSha256)
+    throw new Error(
+      '构建副本与源码身份不一致（复制后源码或副本被改动，或副本缺少身份已计入的文件），拒绝构建；请从新目录重建',
+    );
+}
 export function sourceIdentity(
   root = ROOT,
   trust = {},
@@ -252,22 +432,8 @@ export function sourceIdentity(
   }
   if (!existsSync(join(root, '.git')))
     throw new Error('缺少已签 auriga-source.json 或 Git 源码来源');
-  const git = (args) => {
-    const r = spawnSync('git', args, {
-      cwd: root,
-      encoding: 'utf8',
-      windowsHide: true,
-    });
-    if (r.status !== 0) throw new Error('Git 源码来源不可用');
-    return r.stdout;
-  };
-  const paths = [
-    ...new Set(
-      git(['ls-files', '--cached', '--others', '--exclude-standard', '-z'])
-        .split('\0')
-        .filter(Boolean),
-    ),
-  ].sort();
+  const git = (args) => gitOutput(root, args);
+  const paths = gitSourcePaths(root);
   if (forBuild) {
     const tracked = git(['ls-files', '--cached', '-z'])
       .split('\0')
