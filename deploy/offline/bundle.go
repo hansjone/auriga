@@ -149,6 +149,11 @@ func bundleExpectedContext(ctx context.Context, args []string, expectedCommit st
 	if err := f.Parse(args); err != nil {
 		return err
 	}
+	if *build {
+		if err := validateDockerImageTimeoutEnv(os.LookupEnv); err != nil {
+			return err
+		}
+	}
 	if err := validateOnlineFlags(*online, *offline, *build, *sign); err != nil {
 		return err
 	}
