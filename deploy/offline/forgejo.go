@@ -39,11 +39,12 @@ type forgejoAsset struct {
 	URL  string `json:"browser_download_url"`
 }
 type forgejoAPI struct {
-	base   string
-	origin *url.URL
-	public *url.URL
-	client *http.Client
-	token  string
+	base           string
+	origin         *url.URL
+	public         *url.URL
+	client         *http.Client
+	token          string
+	downloadPrefix string
 }
 
 var repoPart = regexp.MustCompile(`^[a-zA-Z0-9_.-]+$`)
@@ -108,22 +109,39 @@ func sameForgejoOrigin(u, origin *url.URL) bool {
 	return u.Scheme == origin.Scheme && u.Host == origin.Host && u.User == nil
 }
 
-// Only remap Forgejo's own attachment route when its canonical HTTPS address
-// is different from the approved internal transport.
-func (a *forgejoAPI) attachmentAddress(address string) (string, error) {
+// The release prefix comes from the approved repo and signed manifest tag;
+// name is the local signed asset, never a remotely supplied allowlist.
+// Only explicit internal transport remaps either approved attachment route.
+func (a *forgejoAPI) attachmentAddress(address, name string) (string, error) {
 	u, err := url.Parse(address)
 	if err != nil {
 		return "", errors.New("无效 Forgejo 附件地址")
 	}
-	if a.public == nil {
-		return address, nil
-	}
-	if u.RawQuery == "" && !u.ForceQuery && u.Fragment == "" && u.RawPath == "" {
+	if u.String() == address && u.RawQuery == "" && !u.ForceQuery && u.Fragment == "" && u.Opaque == "" && u.User == nil && !strings.Contains(address, "#") && safeRelative(name) && filepath.Base(name) == name {
 		for _, origin := range []*url.URL{a.public, a.origin} {
-			route, ok := strings.CutPrefix(u.Path, strings.TrimSuffix(origin.Path, "/"))
-			if ok && sameForgejoOrigin(u, origin) && attachmentRoute.MatchString(route) {
-				return a.base + route, nil
+			if origin == nil {
+				continue
 			}
+			route, ok := strings.CutPrefix(u.Path, strings.TrimSuffix(origin.Path, "/"))
+			if !ok || !sameForgejoOrigin(u, origin) {
+				continue
+			}
+			var canonicalRoute string
+			if attachmentRoute.MatchString(route) {
+				canonicalRoute = route
+			} else if a.downloadPrefix != "" && route == a.downloadPrefix+name {
+				canonicalRoute = a.downloadPrefix + url.PathEscape(name)
+			} else {
+				continue
+			}
+			canonicalBase := (&url.URL{Path: strings.TrimSuffix(origin.Path, "/")}).EscapedPath()
+			if u.EscapedPath() != canonicalBase+canonicalRoute {
+				continue // Reject encoded aliases, separators and escape variants.
+			}
+			if a.public != nil {
+				return a.base + canonicalRoute, nil
+			}
+			return address, nil
 		}
 	}
 	return "", errors.New("拒绝跨站点或非 Forgejo 附件地址")
@@ -196,7 +214,7 @@ func (a *forgejoAPI) verifyAsset(remote forgejoAsset, local assetInfo) error {
 	if remote.Name != local.Name || remote.Size != local.Size {
 		return fmt.Errorf("远端附件冲突 %s，不覆盖或删除", local.Name)
 	}
-	address, err := a.attachmentAddress(remote.URL)
+	address, err := a.attachmentAddress(remote.URL, local.Name)
 	if err != nil {
 		return err
 	}
@@ -363,7 +381,14 @@ func uploadRelease(o uploadOptions, client *http.Client) error {
 		}
 		return nil
 	}
-	a := forgejoAPI{base: strings.TrimSuffix(origin.String(), "/"), origin: origin, public: public, client: &scoped, token: token}
+	a := forgejoAPI{
+		base:           strings.TrimSuffix(origin.String(), "/"),
+		origin:         origin,
+		public:         public,
+		client:         &scoped,
+		token:          token,
+		downloadPrefix: "/" + o.Repo + "/releases/download/" + manifest.Tag + "/",
+	}
 	var version struct {
 		Version string `json:"version"`
 	}
