@@ -11,6 +11,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"time"
 )
 
 var regexpVersion = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._-]{0,95}$`)
@@ -321,18 +322,17 @@ func finishInstall(s state) error {
 			return err
 		}
 	}
-	var access struct {
-		AdminOrigin struct {
-			Scheme, Host string
-			Port         int
-		}
-	}
+	var access accessSummary
 	if err := readJSONLoose(s.Access, &access); err != nil {
 		return err
 	}
 	fmt.Printf("核心服务已启动。管理台 %s://%s:%d/\n应急材料仅在私密 TTY 显示。\n", access.AdminOrigin.Scheme, access.AdminOrigin.Host, access.AdminOrigin.Port)
 	fmt.Printf("资源公钥根 %s\n降级私钥请导出至受控离线介质 %s\n", filepath.Join(s.Data, "resource-keys/resource-roots.json"), filepath.Join(s.Data, "resource-keys/offline/downgrade.pk8"))
 	fmt.Printf("服务器站点构建私钥（仅root）%s；独立Linux构建机另行 keygen site，公钥通过 trust add-site-key 登记。\n", filepath.Join(s.Data+".oneclick", "site-build-key/site-private.pem"))
+	if err := writeInstallSummary(s, access, time.Now()); err != nil {
+		fmt.Fprintf(os.Stderr, "警告：安装摘要未能写入 %s：%v\n", filepath.Join(s.Data, installSummaryName), err)
+	}
+	printCustody(os.Stdout, s)
 	return nil
 }
 

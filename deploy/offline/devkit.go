@@ -250,7 +250,7 @@ func devkitSingleContext(ctx context.Context, args []string) error {
 	if len(args) > 0 && args[0] == "verify" {
 		return devkitVerify(args[1:])
 	}
-	f := flags("devkit")
+	f := flags("devkit-single")
 	index := f.String("release", "auriga-release.json", "")
 	out := f.String("out", "", "")
 	verify := f.String("verify", "", "")
