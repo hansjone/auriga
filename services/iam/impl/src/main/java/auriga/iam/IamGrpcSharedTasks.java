@@ -10,7 +10,7 @@ import io.grpc.stub.StreamObserver;
 import java.util.Set;
 
 /** Runtime relays carry internal service JWTs over the existing authenticated gRPC server. */
-public final class IamGrpcSharedTasks extends SharedTaskServiceGrpc.SharedTaskServiceImplBase {
+public class IamGrpcSharedTasks extends SharedTaskServiceGrpc.SharedTaskServiceImplBase {
   private static final Set<String> HOST_RELAYS = Set.of("svc:agent");
   private static final Set<String> READERS = Set.of("svc:agent", "svc:ai-gateway", "svc:collab");
   private final SharedTasks tasks;

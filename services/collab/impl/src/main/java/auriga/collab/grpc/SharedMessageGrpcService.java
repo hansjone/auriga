@@ -9,7 +9,7 @@ import com.google.protobuf.ByteString;
 import io.grpc.stub.StreamObserver;
 
 /** The gateway supplies verified node mTLS identity and exact K claims. */
-public final class SharedMessageGrpcService
+public class SharedMessageGrpcService
     extends SharedMessageServiceGrpc.SharedMessageServiceImplBase {
   private final SharedMessageService service;
 

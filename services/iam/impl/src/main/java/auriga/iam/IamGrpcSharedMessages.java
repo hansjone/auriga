@@ -8,7 +8,7 @@ import auriga.iam.api.CredentialInstallationScope;
 import io.grpc.stub.StreamObserver;
 
 /** Exact collab-only internal authority, separate from the ordinary device owner path. */
-public final class IamGrpcSharedMessages
+public class IamGrpcSharedMessages
     extends SharedMessageAuthorityServiceGrpc.SharedMessageAuthorityServiceImplBase {
   private final SharedMessages messages;
   private final CredentialInstallationScope installation;
