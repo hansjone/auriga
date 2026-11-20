@@ -177,7 +177,8 @@ func sharedUniqueJSON(raw []byte) error {
 
 // This is conversion, not verification or approval. The Linux controller must
 // resolve and validate the committed runtime source before calling it. The full
-// InstanceSpec, including the signed envelope and resources, roundtrips intact.
+// signed envelope and resources are retained; personal-only template fields are
+// excluded before the resulting shared snapshot is checked by the controller.
 func sharedRuntimeSpecJSON(raw []byte) ([]byte, error) {
 	if len(raw) == 0 || len(raw) > 4<<20 {
 		return nil, fmt.Errorf("bounded runtime template required")
@@ -190,7 +191,8 @@ func sharedRuntimeSpecJSON(raw []byte) ([]byte, error) {
 		return nil, fmt.Errorf("signed Docker runtime template required")
 	}
 	secrets := spec.GetSecrets()
-	if proto.Size(secrets) != 0 {
+	if proto.Size(secrets.GetInstanceToken()) != 0 || proto.Size(secrets.GetAiGatewayToken()) != 0 ||
+		proto.Size(secrets.GetDeviceCredential()) != 0 || proto.Size(secrets.GetModelCredential()) != 0 {
 		return nil, fmt.Errorf("personal sealed credentials are not shared public inputs")
 	}
 	if spec.OwnerId != "" || len(spec.Plugins) != 0 || len(spec.UnifiedResources) != 0 || len(spec.GetProfile().GetEnv()) != 0 || spec.Generation < 0 {
@@ -202,6 +204,9 @@ func sharedRuntimeSpecJSON(raw []byte) ([]byte, error) {
 	if spec.Generation == 0 {
 		spec.Generation = 1
 	}
+	// Classic templates carry only public edge identity verification keys here.
+	// Shared operation uses the separately approved purpose keys, never this
+	// classic Secrets wrapper. The sealed credential fields above remain denied.
 	spec.Secrets = nil
 	if spec.Profile != nil {
 		spec.Profile.Patches = nil
