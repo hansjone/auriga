@@ -294,6 +294,36 @@ final class UacConfiguredAdapter implements UacEnterpriseAdapter {
     return null;
   }
 
+  /** Avatar URL from the same lookup; deployments can override with department.avatarPointers. */
+  private static String employeeAvatar(JsonNode mapping, JsonNode entry) {
+    List<String> pointers = new ArrayList<>();
+    if (mapping.path("avatarPointers").isArray())
+      for (JsonNode pointer : mapping.path("avatarPointers")) pointers.add(pointer.asString());
+    else pointers.addAll(List.of("/headIcon", "/avatar", "/avatarUrl", "/photoUrl"));
+    for (String pointer : pointers) {
+      if (!pointer.startsWith("/")) continue;
+      JsonNode value = entry.at(pointer);
+      if (!value.isString()) continue;
+      String url = value.asString().strip();
+      if (url.isEmpty() || url.length() > 1024 || url.matches(".*[\\s\\p{Cntrl}\"'<>\\\\].*"))
+        continue;
+      try {
+        URI uri = URI.create(url);
+        if ("https".equalsIgnoreCase(uri.getScheme())
+            && uri.getHost() != null
+            && uri.getRawUserInfo() == null) return uri.toString();
+      } catch (IllegalArgumentException ignored) {
+        // Not a usable URL; try the next pointer.
+      }
+    }
+    return null;
+  }
+
+  private static void addProfile(ObjectNode result, String name, String avatar) {
+    if (name != null) result.put("employeeName", name);
+    if (avatar != null) result.put("avatarUrl", avatar);
+  }
+
   @Override
   public JsonNode department(JsonNode config, JsonNode credential, String purpose) {
     IamError.validate(Set.of("login_info", "revalidate").contains(purpose));
@@ -334,6 +364,7 @@ final class UacConfiguredAdapter implements UacEnterpriseAdapter {
             "matchingCount",
             matches.size());
       String name = employeeName(mapping, matches.getFirst());
+      String avatar = employeeAvatar(mapping, matches.getFirst());
       int branch = 0;
       for (JsonNode pointer : mapping.path("departmentPointers")) {
         branch++;
@@ -351,13 +382,13 @@ final class UacConfiguredAdapter implements UacEnterpriseAdapter {
                   1,
                   "fieldBranch",
                   branch == 1 ? "primary" : "fallback");
-          if (name != null) found.put("employeeName", name);
+          addProfile(found, name, avatar);
           return found;
         }
       }
       ObjectNode missing =
           Json.object("available", false, "faultReason", "missing_department", "matchingCount", 1);
-      if (name != null) missing.put("employeeName", name);
+      addProfile(missing, name, avatar);
       return missing;
     } catch (java.io.IOException e) {
       return Json.object("available", false, "faultReason", "transport_error");

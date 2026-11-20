@@ -44,24 +44,33 @@ final class UacWorker
   private void applyDisplayName(JsonNode snapshot, JsonNode input, JsonNode result) {
     try {
       var policy = hooks.get();
-      if (policy == null) return;
       String sessionId = snapshot.path("sessionId").asString("");
       String employee = input.path("credential").path("empNo").asString("");
       if (sessionId.isEmpty() || employee.isBlank()) return;
       ObjectNode session = store.tx(() -> store.byId("session", sessionId, false));
       if (session == null || session.path("accountId").asString("").isEmpty()) return;
       String accountId = session.path("accountId").asString();
-      var renamed =
-          policy.uacDisplayName(
-              UUID.fromString(accountId), employee, result.path("employeeName").asString(null));
-      if (renamed.isEmpty()) return;
+      Optional<String> renamed =
+          policy == null
+              ? Optional.empty()
+              : policy.uacDisplayName(
+                  UUID.fromString(accountId), employee, result.path("employeeName").asString(null));
+      String avatar = result.path("avatarUrl").asString(null);
+      if (renamed.isEmpty() && avatar == null) return;
       store.tx(
           () -> {
             ObjectNode account = store.get("account", accountId, true);
-            if (account != null) {
+            if (account == null) return null;
+            boolean changed = false;
+            if (renamed.isPresent()) {
               account.put("displayName", renamed.get());
-              store.save("account", account);
+              changed = true;
             }
+            if (avatar != null && !avatar.equals(account.path("avatarUrl").asString(null))) {
+              account.put("avatarUrl", avatar);
+              changed = true;
+            }
+            if (changed) store.save("account", account);
             return null;
           });
     } catch (RuntimeException e) {
