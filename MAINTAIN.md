@@ -45,7 +45,7 @@ cd /opt/auriga-source-0.2.0
 
 分卷时把 tar 输入替换为首卷；源码本身分卷时先用发行引导程序 `unpack`。归档无 `.git`，现场命令读取发行清单，不调用 Git。发行公钥指纹从独立批准的 Release 正文/组织文档核对，设置 `$ISSUER_FP`。verify/unpack/install 必须传 `--trust-fingerprint` 或 `--verify-key /secure/release-public.pem`；只用包内公钥打印指纹和“仅完整性，未核验发行身份”并非零退出。源码整体 `verify` 在修改前执行，修改后用补丁、快照和 `devkit verify` 检查。
 
-`devkit verify` 在源码根写 `.auriga-devkit.json` 绑定套件路径。移动套件后重新运行。指定版本检查覆盖：`./auriga devkit verify /opt/auriga-devkit --version 0.2.0`；当前源码版本还校验每个依赖锁和上游提交。锁不匹配列出新增、缺失或不同文件及应下载版本；缺依赖绝不静默联网。
+`devkit verify` 在源码根写 `.auriga-devkit.json` 绑定套件路径。移动套件后重新运行。指定版本检查覆盖：`./auriga devkit verify /opt/auriga-devkit --version 0.2.0`；当前源码版本还校验每个依赖锁和上游提交。锁不匹配列出新增、缺失或不同文件及应下载版本；缺依赖绝不静默联网。套件相关命令（`devkit verify`/`merge`、`bundle`）以**该套件发行页附带的 `auriga`** 为准：一份套件会覆盖之后一段时间的源码，源码里自带的旧 CLI 可能读不懂新套件，此时会提示换用发行页的 `auriga`（更早版本的 auriga 只会报 `unknown field "requires"`，处理方法相同）。
 
 ## 修改、导出与离线构建
 

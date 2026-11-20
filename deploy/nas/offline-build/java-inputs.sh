@@ -2,14 +2,14 @@
 set -eu
 
 if [ "$#" -ne 2 ]; then
-    echo "usage: $0 prepare|build ABSOLUTE_EMPTY_OUTPUT_DIRECTORY" >&2
+    echo "usage: $0 prepare|build|locks ABSOLUTE_EMPTY_OUTPUT_DIRECTORY" >&2
     exit 2
 fi
 mode=$1
 out=$2
 case "$mode" in
-    prepare|build) ;;
-    *) echo "choose prepare or build" >&2; exit 2 ;;
+    prepare|build|locks) ;;
+    *) echo "choose prepare, build or locks" >&2; exit 2 ;;
 esac
 case "$out" in
     /*) ;;
@@ -40,6 +40,11 @@ find services -name pom.xml -type f -print |
 sha256sum pom.xml mvnw .mvn/wrapper/maven-wrapper.properties \
     .mvn/wrapper/maven-wrapper.jar services/contracts/package.json \
     services/contracts/package-lock.json >>"$scratch/source-locks"
+# locks: print the source-lock inventory a prepare run would record, nothing else.
+if [ "$mode" = locks ]; then
+    cp -- "$scratch/source-locks" "$out/source-locks.sha256"
+    exit 0
+fi
 
 cache="$scratch"
 if [ "$mode" = prepare ] && [ -n "${AURIGA_JAVA_PREP_CACHE_DIR:-}" ]; then
@@ -84,7 +89,42 @@ if [ "$mode" = prepare ]; then
         ln -s "$cache/npm-cache" "$npm_cache"
     fi
     sh .mvn/wrapper/bootstrap.sh
-    sh mvnw -B "-Dmaven.repo.local=$repo" -pl services/platform-app -am -DskipTests package
+    # -C makes Maven fail on a checksum mismatch instead of warning. It only
+    # compares against checksums served by the same Central or mirror, so it does
+    # NOT protect against a malicious or compromised mirror: pom.xml pins no
+    # artifact hashes. Mirror trust is the site's responsibility. Build mode is
+    # unchanged.
+    if [ -n "${AURIGA_MAVEN_MIRROR_URL:-}" ]; then
+        # https only, strict character whitelist (no newline, quote, angle
+        # bracket, ampersand or whitespace), checked in the C locale.
+        if ! ( LC_ALL=C; export LC_ALL
+               case "$AURIGA_MAVEN_MIRROR_URL" in
+                   *[!A-Za-z0-9._~:/?%+=,-]*) exit 1 ;;
+                   https://?*) exit 0 ;;
+                   *) exit 1 ;;
+               esac ); then
+            echo "AURIGA_MAVEN_MIRROR_URL must be an https URL of letters, digits and ._~:/?%+=,-" >&2
+            exit 2
+        fi
+        xml_url=$(printf '%s' "$AURIGA_MAVEN_MIRROR_URL" | sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g')
+        # The mirror id must be "central": the local repository records the
+        # repository id of every downloaded artifact (_remote.repositories), and
+        # the offline build resolves them as "central" without any settings file.
+        cat >"$scratch/settings.xml" <<SETTINGS
+<settings>
+  <mirrors>
+    <mirror>
+      <id>central</id>
+      <mirrorOf>central</mirrorOf>
+      <url>$xml_url</url>
+    </mirror>
+  </mirrors>
+</settings>
+SETTINGS
+        sh mvnw -B -C -s "$scratch/settings.xml" "-Dmaven.repo.local=$repo" -pl services/platform-app -am -DskipTests package
+    else
+        sh mvnw -B -C "-Dmaven.repo.local=$repo" -pl services/platform-app -am -DskipTests package
+    fi
     mkdir "$out/wrapper"
     cp -a -- "$MAVEN_USER_HOME/wrapper/dists" "$out/wrapper/dists"
     cp -a -- "$repo" "$out/repository"

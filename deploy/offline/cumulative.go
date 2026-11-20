@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"reflect"
 	"sort"
 	"strings"
 )
@@ -18,6 +17,7 @@ type devkitVersion struct {
 }
 type devkitCatalog struct {
 	Schema      int                      `json:"schemaVersion"`
+	Requires    *[]string                `json:"requires,omitempty"`
 	Baseline    string                   `json:"baseline"`
 	Latest      string                   `json:"latest"`
 	ResetReason string                   `json:"resetReason,omitempty"`
@@ -25,12 +25,13 @@ type devkitCatalog struct {
 	Blobs       map[string]int64         `json:"blobs"`
 }
 type devkitDelta struct {
-	Schema       int      `json:"schemaVersion"`
-	Baseline     string   `json:"baseline"`
-	BaseSHA256   string   `json:"baseSha256"`
-	TargetSHA256 string   `json:"targetSha256"`
-	Reset        bool     `json:"reset"`
-	Added        []string `json:"added"`
+	Schema       int       `json:"schemaVersion"`
+	Requires     *[]string `json:"requires,omitempty"`
+	Baseline     string    `json:"baseline"`
+	BaseSHA256   string    `json:"baseSha256"`
+	TargetSHA256 string    `json:"targetSha256"`
+	Reset        bool      `json:"reset"`
+	Added        []string  `json:"added"`
 }
 
 func validateCatalog(c devkitCatalog) error {
@@ -94,7 +95,7 @@ func readCatalogContext(ctx context.Context, root, key string) (devkitCatalog, e
 	if err := verifyInventoryFileContext(ctx, root, "devkit-catalog.json"); err != nil {
 		return cat, err
 	}
-	if err := readJSON(filepath.Join(root, "devkit-catalog.json"), &cat); err != nil {
+	if err := readDevkitJSON(filepath.Join(root, "devkit-catalog.json"), &cat); err != nil {
 		return cat, err
 	}
 	if err := validateCatalog(cat); err != nil {
@@ -168,7 +169,7 @@ func composeDevkitContext(ctx context.Context, previous, single, version, commit
 	if err != nil {
 		return cat, err
 	}
-	entry := devkitVersion{Commit: commit, Kit: kit, Files: map[string]string{}}
+	entry := normalizeDevkitVersion(devkitVersion{Commit: commit, Kit: kit, Files: map[string]string{}})
 	currentBlobs := map[string]string{}
 	for _, name := range names {
 		path := filepath.Join(single, "cache", name)
@@ -180,7 +181,7 @@ func composeDevkitContext(ctx context.Context, previous, single, version, commit
 		currentBlobs[info.SHA256] = path
 		cat.Blobs[info.SHA256] = info.Size
 	}
-	if old, ok := cat.Versions[version]; ok && !reflect.DeepEqual(old, entry) {
+	if old, ok := cat.Versions[version]; ok && !sameDevkitVersion(old, entry) {
 		return cat, errors.New("同版本devkit不能替换已有源码或锁")
 	}
 	cat.Versions[version] = entry
@@ -199,7 +200,7 @@ func composeDevkitContext(ctx context.Context, previous, single, version, commit
 				return rebuilt, err
 			}
 			rebuilt.ResetReason = "超过累计大小阈值"
-			if err := jsonFile(filepath.Join(target, "devkit-catalog.json"), rebuilt, 0644); err != nil {
+			if err := writeDevkitCatalog(filepath.Join(target, "devkit-catalog.json"), rebuilt); err != nil {
 				return rebuilt, err
 			}
 			if err := writeSumsContext(ctx, target); err != nil {
@@ -227,7 +228,7 @@ func composeDevkitContext(ctx context.Context, previous, single, version, commit
 			return cat, err
 		}
 	}
-	if err := jsonFile(filepath.Join(target, "devkit-catalog.json"), cat, 0644); err != nil {
+	if err := writeDevkitCatalog(filepath.Join(target, "devkit-catalog.json"), cat); err != nil {
 		return cat, err
 	}
 	if key != "" {
@@ -292,7 +293,7 @@ func writeDevkitDeltaContext(ctx context.Context, previous, target, out, key str
 			return err
 		}
 	}
-	if err := jsonFile(filepath.Join(stage, "delta.json"), delta, 0644); err != nil {
+	if err := writeDeltaManifest(filepath.Join(stage, "delta.json"), delta, cat); err != nil {
 		return err
 	}
 	if err := writeSumsContext(ctx, stage); err != nil {
@@ -335,7 +336,7 @@ func mergeDevkit(root, archive, key string) error {
 		return err
 	}
 	var delta devkitDelta
-	if err := readJSON(filepath.Join(deltaRoot, "delta.json"), &delta); err != nil {
+	if err := readDevkitJSON(filepath.Join(deltaRoot, "delta.json"), &delta); err != nil {
 		return err
 	}
 	current, err := digest(filepath.Join(root, "devkit-catalog.json"))
@@ -363,7 +364,7 @@ func mergeDevkit(root, archive, key string) error {
 		return errors.New("增量目标清单摘要不符")
 	}
 	var cat devkitCatalog
-	if err := readJSON(filepath.Join(deltaRoot, "devkit-catalog.json"), &cat); err != nil {
+	if err := readDevkitJSON(filepath.Join(deltaRoot, "devkit-catalog.json"), &cat); err != nil {
 		return err
 	}
 	if err := validateCatalog(cat); err != nil {
@@ -371,7 +372,7 @@ func mergeDevkit(root, archive, key string) error {
 	}
 	for version, entry := range old.Versions {
 		next, ok := cat.Versions[version]
-		if !ok || !reflect.DeepEqual(next, entry) {
+		if !ok || !sameDevkitVersion(next, entry) {
 			return errors.New("增量不能删除或替换旧版本")
 		}
 	}
@@ -420,7 +421,7 @@ func materializeVersion(root string, entry devkitVersion) (string, error) {
 	}
 	return stage, nil
 }
-func locateCumulative(source, root string) (string, *devkitManifest, error) {
+func locateCumulative(source, root string, skipLocks bool) (string, *devkitManifest, error) {
 	key, err := sourceVerificationKey(source)
 	if err != nil {
 		return "", nil, err
@@ -436,8 +437,10 @@ func locateCumulative(source, root string) (string, *devkitManifest, error) {
 	}
 	kit := entry.Kit
 	kit.Release.Version = version
-	if err := checkKitLocks(source, kit); err != nil {
-		return "", nil, err
+	if !skipLocks {
+		if err := checkKitLocks(source, kit); err != nil {
+			return "", nil, err
+		}
 	}
 	if _, err := os.Stat(filepath.Join(source, "auriga-source.json")); err == nil {
 		m, err := readSourceManifest(source)

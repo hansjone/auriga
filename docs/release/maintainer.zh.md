@@ -54,6 +54,17 @@ Linux 在构建前流式核验 Windows 套件的归档、签名、依赖锁及�
 - 门禁运行状态在短路径 `/run/auriga-gate-*`，大数据留在 `TMPDIR`。若仍报告 Unix socket 路径过长，检查兼容运行时是否另用长目录，以及独立容器各层是否都能看到对应绝对路径。
 - Ctrl+C 与 SIGTERM 触发进程、容器和私有挂载的有界清理。若报清理失败，按错误中的目录查 daemon 日志，核实本次进程与挂载是否退出再处理。最终发行目录在门禁和清理全部结束后才出现。
 
+### 套件清单格式兼容
+
+一份套件会覆盖之后一段时间的源码，因此会出现“旧 auriga 读新套件”。`devkit.json`、`devkit-catalog.json`、`delta.json` 按以下规则演进（实现见 `deploy/offline/devkit_compat.go`）：
+
+- 每个字段都要在 `devkitFieldFeature` 登记，`TestDevkitFieldsClassified` 会拦下漏登记的字段。登记分三类：本机制之前已有的基线字段；之后新增、旧 auriga 可以忽略的说明性字段（`devkitInfo`）；会改变校验或构建行为的字段，登记一个能力名。能力字段的零值必须等于旧行为。非基线字段必须带 `omitempty`，结构体用指针，保证零值时整个键不出现在清单里（门禁会检查）。
+- 清单里出现说明性新字段或能力字段时，写出时才在顶层带 `requires`（列出用到的能力，可以为空数组）。不认识其中能力的 auriga 会拒绝，并提示改用套件发行页附带的 `auriga`。没用到新字段的清单与旧格式逐字节相同，旧 auriga 照常读取。
+- 本机制之前的 auriga 读带 `requires` 的套件会报 `unknown field "requires"`。新增能力字段前，要确认目标现场使用的发行页 `auriga` 已包含本机制。
+- 格式只增不删：删字段或改变字段含义，必须换新基线（`--new-baseline`），出整套新套件。
+- 维护机生成套件用的 auriga 不能比上一版套件旧，否则重写清单时会丢掉不认识的说明性字段。
+- 发行页始终附带与套件同版本的 `auriga` 引导程序，现场的套件命令以它为准。
+
 ## 4. Forgejo 草稿、核验与发布
 
 默认使用公开 HTTPS，私有 CA 可通过 Linux 发布进程的 `SSL_CERT_FILE` 使用独立批准的 CA 文件。若 NAS 无法通过公开 HTTPS 路由到同一 Forgejo，将 `FORGEJO_INTERNAL_URL` 设置为批准的内网 HTTP 地址（私有或回环 IP，带端口），再加 `--internal-http "$FORGEJO_INTERNAL_URL"`。此选项仅用于受控直连网络，HTTP 上的令牌以明文传输，发布程序会绕开代理。两种路径均使用公开 `--server` 标识站点，附件回读拒绝跨站跳转。
