@@ -14,6 +14,8 @@ import (
 	"testing"
 )
 
+const fixtureDownloadPrefix = "/owner/repo/releases/download/1.0/"
+
 func fixtureDistribution(t *testing.T, root string) distributionManifest {
 	t.Helper()
 	m := distributionManifest{Schema: 1, Tag: "1.0", Commit: strings.Repeat("a", 40), Locks: lockInventory{Digest: strings.Repeat("b", 64)}}
@@ -89,7 +91,7 @@ func TestForgejoUploadDraftRetryAndConflict(t *testing.T) {
 			// The release attachment endpoint does not paginate its response.
 			assets := []map[string]any{}
 			for name, body := range files {
-				assets = append(assets, map[string]any{"name": name, "size": len(body), "browser_download_url": base + "/download/" + name})
+				assets = append(assets, map[string]any{"name": name, "size": len(body), "browser_download_url": base + fixtureDownloadPrefix + name})
 			}
 			_ = json.NewEncoder(w).Encode(assets)
 		case strings.HasSuffix(endpoint, "/assets") && r.Method == "POST":
@@ -107,9 +109,9 @@ func TestForgejoUploadDraftRetryAndConflict(t *testing.T) {
 			files[name] = body
 			mutations++
 			w.WriteHeader(201)
-			_ = json.NewEncoder(w).Encode(map[string]any{"name": name, "size": len(body), "browser_download_url": base + "/download/" + name})
-		case strings.HasPrefix(endpoint, "/download/"):
-			_, _ = w.Write(files[strings.TrimPrefix(endpoint, "/download/")])
+			_ = json.NewEncoder(w).Encode(map[string]any{"name": name, "size": len(body), "browser_download_url": base + fixtureDownloadPrefix + name})
+		case strings.HasPrefix(endpoint, fixtureDownloadPrefix):
+			_, _ = w.Write(files[strings.TrimPrefix(endpoint, fixtureDownloadPrefix)])
 		case strings.HasSuffix(endpoint, "/releases/7") && r.Method == "PATCH":
 			var body struct {
 				Body string `json:"body"`
@@ -251,12 +253,12 @@ func TestForgejoPublishRequiresConfirmedRelease(t *testing.T) {
 					assets := []forgejoAsset{}
 					if tc.name != "upload-redirect" {
 						for name, body := range files {
-							assets = append(assets, forgejoAsset{Name: name, Size: int64(len(body)), URL: "https://" + r.Host + "/download/" + name})
+							assets = append(assets, forgejoAsset{Name: name, Size: int64(len(body)), URL: "https://" + r.Host + fixtureDownloadPrefix + name})
 						}
 					}
 					_ = json.NewEncoder(w).Encode(assets)
-				case strings.HasPrefix(r.URL.Path, "/download/"):
-					http.Redirect(w, r, "/bytes/"+strings.TrimPrefix(r.URL.Path, "/download/"), http.StatusFound)
+				case strings.HasPrefix(r.URL.Path, fixtureDownloadPrefix):
+					http.Redirect(w, r, "/bytes/"+strings.TrimPrefix(r.URL.Path, fixtureDownloadPrefix), http.StatusFound)
 				case strings.HasPrefix(r.URL.Path, "/bytes/"):
 					_, _ = w.Write(files[strings.TrimPrefix(r.URL.Path, "/bytes/")])
 				case r.URL.Path == repo+"/releases/7" && r.Method == http.MethodPatch:
