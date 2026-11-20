@@ -1533,7 +1533,7 @@ class UacFlowPostgresTest {
               store.tx(
                   () -> {
                     var provider = store.get("idp_provider", f.provider, true);
-                    ((ObjectNode) provider.path("admission")).put("mfa", "new_device");
+                    ((ObjectNode) provider.path("admission")).put("mfa", "always");
                     store.save("idp_provider", provider);
                     return null;
                   }));

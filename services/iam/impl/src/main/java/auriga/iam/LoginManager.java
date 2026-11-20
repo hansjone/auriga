@@ -905,8 +905,13 @@ public final class LoginManager {
             || profile.path("mfaPerformed").asBoolean()
                 && (team || policy.path("trustExternalMfa").asBoolean(false));
     boolean teamNeedsPlatformTotp = team && teamAccounts.hasTotp(UUID.fromString(accountId));
-    // UAC scan login is sufficient on its own: no first-authenticator enrollment or platform TOTP.
-    boolean uacScanLogin = uac && purpose.equals("login") && tx.path("uacVerified").asBoolean();
+    // UAC scan login is sufficient on its own (no first-authenticator enrollment or platform
+    // TOTP) unless the provider explicitly demands MFA with admission.mfa=always.
+    boolean uacScanLogin =
+        uac
+            && purpose.equals("login")
+            && tx.path("uacVerified").asBoolean()
+            && !policy.path("mfa").asString("new_device").equals("always");
     if (!mfa
         && !uacScanLogin
         && (!policy.path("mfa").asString("new_device").equals("never")
