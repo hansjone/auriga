@@ -16,7 +16,7 @@ node scripts/client-release/prepare.mjs D:\exports\client-kits
 node scripts/client-release/sign-inputs.mjs --devkit D:\exports\client-kits\auriga-client-windows-<锁SHA256> --key-file C:\secure\issuer\release-private.pem --version 0.2.0
 ```
 
-用 Windows 系统 tar 保留套件顶层目录，输出 `auriga-client-windows-<锁SHA256>.tar`。通过批准的 Forgejo 转运将 tar 和独立核对的整包 SHA256 交给 Linux 维护者。`prepare-release.sh --windows-client ... --windows-client-sha256 ...` 使用同一发行钥核内部签名、目标锁和归档内容，再自动并入发行清单、下载说明和总签名。完整命令见根 [MAINTAIN.md](../../MAINTAIN.md#维护者准备和发布附件)。签名前复核全部输入、私钥权限及版本，已签目录须保留原签名。发行私钥始终由维护者保管。准备过程通过 HTTPS 读取固定锁的依赖，离线构建证据由现场构建另行生成。
+用 Windows 系统 tar 保留套件顶层目录，输出 `auriga-client-windows-<锁SHA256>.tar`。通过批准的 Forgejo 转运将 tar 和独立核对的整包 SHA256 交给 Linux 维护者。`prepare-release.sh --windows-client ... --windows-client-sha256 ...` 使用同一发行钥核内部签名、目标锁和归档内容，再自动并入发行清单、下载说明和总签名。完整命令见根 [MAINTAIN.md](../../docs/release/maintainer.zh.md)。签名前复核全部输入、私钥权限及版本，已签目录须保留原签名。发行私钥始终由维护者保管。准备过程通过 HTTPS 读取固定锁的依赖，离线构建证据由现场构建另行生成。
 
 输入包括构建 Node22.19.0/npm10.9.3、根 packageManager 固定 pnpm、完整 Windows pnpm store（含 esbuild/rollup 可选二进制）、upstream.json 固定运行 Node/zip摘要、内置 pnpm/integrity、已提交 DSH npm lock 对应完整 Windows 生产闭包（含 DSH runtime/LibreOffice）及插件生产依赖。broker/helper、UI、插件由现场当前源码重建，不使用旧产物替代，不改上游 DSH；可选宿主 peer 不另装副本。
 

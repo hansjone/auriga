@@ -4,6 +4,28 @@
 
 只有 Windows 电脑、想在本机把后端、edge 和管理台/门户一起跑起来边改边调时，见 [Windows 单机前后端联调](docs/dev/windows-local-dev.zh.md)。它只用于开发自测；构建、签名和安装交付仍按本页在 Linux 上进行。
 
+## 现场开发三步速览
+
+以下 `0.2.0` 是占位版本，路径按实际调整。`$ISSUER_FP` 是独立核对的发行公钥指纹（来源见[必备参数与保管清单](docs/site/keep-list.zh.md)）。第一次使用先生成并登记站点构建密钥，见[发行信任与站点构建签名](#发行信任与站点构建签名)。
+
+1. **校验、解包并绑定套件**：先按下一节完成源码包 `verify`、套件 `unpack`，然后在源码根绑定套件。
+
+   ```sh
+   cd /opt/auriga-source-0.2.0 && ./auriga devkit verify /opt/auriga-devkit
+   ```
+
+2. **改代码、测试**：按各模块规范测试（[Java](docs/dev/java.md)、[Go](docs/dev/go.md)、[Web](docs/dev/web.md)）。没有统一的 `auriga` 测试命令。改动前后可随时导出现场补丁作备份：`./auriga changes export --out /exports/auriga-changes-0.2.0-site.1.tar`。
+3. **构建离线包，再升级**：构建机和服务器不是同一台时，把产物和摘要拷到服务器再升级。
+
+   ```sh
+   ./auriga bundle --build --offline --out /exports/auriga-site.tar --sign-key /secure/site-build-key/site-private.pem
+   sudo ./auriga upgrade /exports/auriga-site.tar --data /srv/auriga
+   ```
+
+> **⚠ 保管提醒**：站点构建私钥、现场补丁、上一版安装包和 `auriga-backups` 丢失后无法重新生成。必须保管的材料、位置和丢失后果见[必备参数与保管清单](docs/site/keep-list.zh.md)。
+>
+> **构建报错**：先查[构建与部署常见报错](docs/site/troubleshooting.zh.md)。部署后异常用 `sudo ./auriga doctor`。
+
 ## 浏览器下载后离线开发
 
 联网电脑只用浏览器，在批准标签的 Forgejo Release 下载 `DOWNLOADS.txt`、`SHA256SUMS`、源码归档 `auriga-source-<版本>.tar`、覆盖该版本的完整 `auriga-devkit-<版本>.tar`。分卷时下载该前缀全部分卷及清单/签名，再下载同页 `auriga` 引导程序。后续步骤可在无 Git、无外网、无 Forgejo 连接的现场完成。
@@ -40,6 +62,8 @@ chmod 0755 bin/auriga-cli
 ./bin/auriga-cli keygen site --out /secure/site-build-key
 ./bin/auriga-cli bundle --build --offline --out /exports/auriga-site.tar --sign-key /secure/site-build-key/site-private.pem
 ```
+
+> **⚠ 生成站点构建密钥后、安装完成后，立即按[保管清单](docs/site/keep-list.zh.md)备份私钥、应急账号材料、资源公钥根和离线降级私钥。** 这些材料丢失后大多无法恢复。
 
 全新现场先用现场构建公钥验签并安装自己的包。私钥留在构建机。已有部署在第一次升级前登记现场构建公钥，见后面的信任流程。
 
@@ -114,92 +138,17 @@ Git 仅用于回退和审查；构建仍以 `auriga-source.json` 为上游基线
 
 默认累计阈值为 64GiB（唯一依赖总字节）。跨大版本、超阈值或显式收拢时开新基线，下载新完整套件到新目录。每次新开基线只发布完整套件，同基线后续版本才有增量。单版超过阈值时须调整阈值。旧基线仍可从原 Forgejo Release 下载。
 
-## 维护者：准备和发布附件
+## 维护者发版
 
-### 1. 固定标签与输入
-
-主控在批准的 Windows x64 与 Linux amd64 维护机上使用同一干净、独审通过的标签。先同步精确标签到 Forgejo。取得目标提交对应的 NAS tar、Forgejo 构建输入、当前配方和 digest 固定的镜像。索引格式见 `deploy/offline/release.example.json`。把实际索引、Ed25519 PKCS8 PEM 发行私钥及制品放在源码外。`build.recipes` / `build.inputs` 沿用 `deploy/nas/offline-build` 的配方及锁定的语言输入。
-
-DSH 源码使用 `deploy/offline/dsh-source-pin.json` 固定的官方标签提交归档。先将原始归档放入批准的 Forgejo 制品区，Linux 从该区下载到本地，或将该 HTTPS 附件 URL 直接交给 `--dsh-source`。当前归档可用，发布其原字节并附带原始 LICENSE 和来源清单。更新 DSH 时同步复核 npm 锁、官方标签提交与归档 SHA256。若上游无法提供对应提交归档，先审批新材料方案，保留 npm 锁对应闭包的原始 tarball、许可证与完整性证据。
-
-### 2. Windows 先准备、签名并转运
-
-联网 Windows x64 维护机在标签根目录使用 Node 22.19.0 准备输入。以下 `$kitName` 取 `prepare.mjs` 输出的目录名。通过受控密钥介质在 Windows 签名，使其公钥与 Linux 发版公钥相同。传输材料只有 tar 和独立核对的整包 SHA256。
-
-```powershell
-$kitParent = 'D:\exports\client-kits'
-New-Item -ItemType Directory -Force -Path $kitParent
-node scripts/client-release/prepare.mjs $kitParent
-$kitName = 'auriga-client-windows-<prepare 输出的锁 SHA256>'
-$kit = Join-Path $kitParent $kitName
-node scripts/client-release/sign-inputs.mjs --devkit $kit --key-file C:\secure\issuer\release-private.pem --version 0.2.0
-$archive = "$kit.tar"
-tar.exe -cf $archive -C $kitParent $kitName
-(Get-FileHash -Algorithm SHA256 -LiteralPath $archive).Hash.ToLowerInvariant()
-```
-
-通过批准的 Forgejo 大文件转运把该 tar 放入 Linux 本地制品目录，保留文件名，核对接收回执中的长度与 SHA256。签发版本随 Windows 输入保留。若复用旧套件，当前标签的 Windows 锁与旧套件签名公钥均须匹配。
-
-### 3. Linux 生成发行目录
-
-在新标签 checkout 中使用 Go 1.27.3，或设置 `AURIGA_GO_IMAGE` 为已批准的 Forgejo Go 工具镜像完整 digest。复用 checkout 时先重编 `bin/auriga-cli`，避免加载上一版的缓存二进制。Docker 需支持 `save --platform`（API 1.48+）。门禁需 Linux root、`dockerd`、`unshare` 及 `nsenter`，以及私有网络、mount 和 PID 命名空间权限。
-
-```sh
-git status --short
-git rev-parse HEAD 'refs/tags/0.2.0^{commit}'
-TMPDIR=/build/auriga-tmp sh deploy/offline/prepare-release.sh \
-  --tag 0.2.0 --release /secure/release.json --outdir /exports/0.2.0 \
-  --cache-dir /exports/devkit-cache --sign-key /secure/release-private.pem \
-  --windows-client "$WINDOWS_TAR" --windows-client-sha256 "$WINDOWS_SHA256" \
-  --dsh-source "$DSH_SOURCE" --new-baseline --source-only
-```
-
-先创建命令所用 `TMPDIR`，设定 `WINDOWS_TAR` 为转运到本地的归档路径，`WINDOWS_SHA256` 为 Windows 回执值，`DSH_SOURCE` 为绝对本地路径或上述 HTTPS 附件地址。私有输入按批准主机设置 `AURIGA_BUNDLE_AUTH_HOST`，在进程环境提供 `AURIGA_BUNDLE_TOKEN`。镜像仓库使用维护机 Docker 登录。
-
-Linux 在构建前流式核验 Windows 套件的归档、签名、依赖锁及各项输入，并核对 DSH 提交归档与 npm 锁。`--source-only` 生成签名源码、Linux 和 Windows 开发套件、DSH 源码和发行元数据。现场用这些材料自己构建并签发服务端和桌面版本。Forgejo 默认发布完整归档。需要经 FAT32 等受限介质转运时，显式指定正数 `--attachment-limit`（字节），分卷上限为 4 GiB 减 1 字节。后续同基线发版，将 `--new-baseline` 换成 `--previous-devkit /exports/unpacked-devkit-0.2.0`。锁与批准输入未变可复用签名单版缓存。NAS 与可选材料按版刷新。
-
-若旧累积套件包含成品桌面安装程序，第一次发行源码和套件时用 `--new-baseline`，确保旧安装程序不会被重新打包。
-
-`unshare --net` 门禁使用空存储的独立 Docker 引擎，既有引擎的镜像缓存无法参与。门禁执行 `bundle --build --offline`，工具容器使用 `--network none --pull never`。`release-manifest.json.offlineBuildGate` 记录精确提交、锁、源码、完整套件、清单、构建输出摘要及起止时间。源码发行的验证包留在临时目录并随验证清理。历史安装包发行命令仍支持 `--build` 选择门禁构建的安装包。
-
-- QNAP 若在容器启动时报 `fchmodat2 AT_EMPTY_PATH`，先在本次维护环境验证受信且兼容宿主内核的 runc，或改用受支持的 Linux 维护机。R1 在私有 Docker 工具目录使用冻结 DinD 镜像的兼容 runc。保留工具摘要，NAS 主引擎继续使用其自身配置。
-- 若 GNU tar 报 `Bad address`，先做目录提取与 `cp -a` 探针。R1 使用冻结的 Debian Node 基底中 GNU tar 1.34、cp、loader 和库，构建工具镜像重新核定 digest 后进入签名 devkit。兼容层制作见 [Forgejo 冷建指南](docs/dev/forgejo-only-build.zh.md)。
-- 独立引擎就绪限 30 秒，单次探针限 2 秒。Docker 元数据读取限 2 分钟，重新导出核 config 与层摘要限 3 分钟，完整断网门禁限 2 小时。VFS 在慢盘容易超时。用足够空间的快盘作为 `TMPDIR`，预留展开套件、镜像和编译空间，先确认最大工具镜像导入和重新导出耗时。
-- 门禁运行状态在短路径 `/run/auriga-gate-*`，大数据留在 `TMPDIR`。若仍报告 Unix socket 路径过长，检查兼容运行时是否另用长目录，以及独立容器各层是否都能看到对应绝对路径。
-- Ctrl+C 与 SIGTERM 触发进程、容器和私有挂载的有界清理。若报清理失败，按错误中的目录查 daemon 日志，核实本次进程与挂载是否退出再处理。最终发行目录在门禁和清理全部结束后才出现。
-
-### 4. Forgejo 草稿、核验与发布
-
-默认使用公开 HTTPS，私有 CA 可通过 Linux 发布进程的 `SSL_CERT_FILE` 使用独立批准的 CA 文件。若 NAS 无法通过公开 HTTPS 路由到同一 Forgejo，将 `FORGEJO_INTERNAL_URL` 设置为批准的内网 HTTP 地址（私有或回环 IP，带端口），再加 `--internal-http "$FORGEJO_INTERNAL_URL"`。此选项仅用于受控直连网络，HTTP 上的令牌以明文传输，发布程序会绕开代理。两种路径均使用公开 `--server` 标识站点，附件回读拒绝跨站跳转。
-
-```sh
-publish_release() {
-  sh deploy/offline/publish-forgejo.sh \
-    --server https://forgejo.example.com --repo owner/auriga \
-    --dir /exports/0.2.0 --verify-key /secure/release-public.pem "$@"
-}
-# HTTPS 预演只检查本地产物
-publish_release
-# 主控从批准的密钥渠道将 FORGEJO_TOKEN 注入进程环境后，上传草稿
-publish_release --execute
-```
-
-令牌只由进程环境读取。维护终端关闭命令跟踪，通过密钥管理器或受控的标准输入读入环境，避免把令牌写进命令行、容器配置、文件或日志。内网方式在每次执行追加相同的 `--internal-http` 参数。上传前核签名、附件、断网门禁及 Forgejo 精确标签，重跑复用同名同字节附件，遇冲突停止。草稿回读校验全部附件后再执行以下发布命令。
-
-```sh
-publish_release --execute --publish
-unset FORGEJO_TOKEN
-```
-
-发布命令在 Forgejo 回读同一个发行 ID、同一标签且确认已退出草稿后返回成功。写请求遇到重定向即报错。遇到写入失败或回读失败，先在 Forgejo 核对该标签的实际发行状态，再用同一发行目录和参数重试。若服务端已经发布，重试只逐字节核验现有附件。
-
-从正常 Forgejo Release 页面核对版本、附件、发行公钥指纹及 Windows 引导摘要。下载后按本手册做现场构建、签发、安装和升级。Windows 与 DSH 如有分卷，按 `.parts.json` 顺序以二进制拼接并核对 `DOWNLOADS.txt` 所列完整归档摘要。现场构建后的登录、资源发布、安装和更新从正常入口验证。
+主控准备和发布 Forgejo Release 附件（固定标签、Windows 客户端输入、断网门禁、Forgejo 草稿与发布）的流程，已移到 [维护者：准备和发布附件](docs/release/maintainer.zh.md)。现场开发者不需要。
 
 ## 发行信任与站点构建签名
 
 发行源码、devkit（包括 `.auriga-devkit.json` 指向的目录）必须保留完整签名和公钥；剥掉签名不再降级为通过。devkit 的发行公钥必须与已验证的源码发行公钥匹配。移动套件只修改绑定路径不能改变信任根。发行换根须独立批准新版源码/完整套件。
 
 首次 install 用 `--verify-key` 或从独立渠道核对的 `--trust-fingerprint` 固定发行公钥；公钥复制到 `<数据目录>.oneclick/trusted-keys/`，state 保存发行和站点公钥集合。upgrade、doctor、bundle --install 强制使用该集合，不能通过新包里的 release-public.pem 换根。发行流程将 SPKI DER SHA256 指纹同时写入 Forgejo Release 正文和 DOWNLOADS.txt；必须核对正文/组织记录，不能把待验证包自己显示的指纹当作独立批准。
+
+> **⚠ 站点构建私钥是现场签发能力的唯一凭据，必须离线备份**，位置和丢失后果见[保管清单](docs/site/keep-list.zh.md)。
 
 首次安装还生成本服务器专用站点构建钥：`<数据目录>.oneclick/site-build-key/{site-private.pem,site-public.pem}`，目录0700、私钥0600，仅root持有（不挂给业务服务），公钥自动登记。本机服务器构建使用该私钥并 `--install`，仍先冷备份。所有 `bundle --build --offline` 必须传 `--sign-key`；这也适用于发行断网构建门禁（由发行私钥签名）。
 

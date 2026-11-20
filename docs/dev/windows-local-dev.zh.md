@@ -25,6 +25,34 @@
 
 `beta-ui.ps1` 会一次生成全部材料，并同时启动 platform、edge 和配套服务，浏览器走的就是“前端 → edge → platform”的真实路径。不要再自己拼这些环境变量。
 
+## 一键方式
+
+已装好下面“准备工具”里的 JDK、Go、Node.js 和 PostgreSQL 后，可以用一个脚本完成初始化、构建和启动。脚本只是依次调用 `beta-ui.ps1`，做的事和后面的手动步骤完全一样。
+
+```powershell
+Set-ExecutionPolicy -Scope Process Bypass
+.\scripts\beta-ui\quickstart.ps1 -StateDir 'D:\auriga-local\beta-ui' -Psql 'C:\Program Files\PostgreSQL\16\bin\psql.exe'
+```
+
+| 参数         | 说明                                                             |
+| ------------ | ---------------------------------------------------------------- |
+| `-StateDir`  | 必填。状态目录，必须在源码目录之外，目录不必预先存在             |
+| `-Psql`      | `psql.exe` 的路径。默认 `psql.exe`，要求它在 PATH 中             |
+| `-PgPort`    | 本机 PostgreSQL 端口，默认 5432                                  |
+| `-CheckOnly` | 只检查工具和状态目录，不做任何修改。建议第一次先加这个开关跑一遍 |
+
+脚本依次做这些事，出错即停：
+
+1. 检查 `java`（需要 25）、`go`（1.27.x）、`node`（22.12 及以上）、`pnpm`（没有时提示执行 `corepack enable`）和 `psql.exe`，缺什么用中文说明。
+2. 状态目录没有初始化就执行 `init`。
+3. 数据库没有就绪就提示输入 `postgres` 用户的密码，写入受保护的 pgpass 文件（口令不出现在命令行），再执行 `init-db`。
+4. 环境变量 `AURIGA_PNPM_STORE` 没设置时，本次使用与状态目录同级的 `pnpm-store` 目录，并提示。想固定到别处，先在当前窗口设置它。
+5. 执行 `build`、`start`、`status`，最后打印管理台和门户地址。
+
+登录账号在 `StateDir\enrollment.json`，脚本不会打印口令，见下文“首次登录”。某一步失败时脚本会指向 `StateDir\logs`，排错见下文。已经初始化过的状态目录再运行脚本，会跳过 `init` 和 `init-db`，直接构建并启动。
+
+不想用脚本，或想了解每一步，继续看下面的手动步骤。
+
 ## 一、准备工具
 
 | 工具       | 版本                                             | 说明                                                                                      |

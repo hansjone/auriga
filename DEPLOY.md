@@ -26,6 +26,7 @@
    ```
 
    摘要输出须包含安装 tar 的 `OK`。分卷改用下载的引导程序：`chmod 0755 auriga`，然后 `./auriga unpack auriga-offline-0.2.0.tar.part001 --out /srv/auriga-offline-0.2.0 --trust-fingerprint "$ISSUER_FP"`，再进入该目录。程序指出缺失或损坏的具体卷，逐卷校验并读取，无须手工拼大 tar。`./auriga verify <tar或首卷或目录>` 也可直接校验。verify/unpack/install 必须核验发行身份：加 `--trust-fingerprint "$ISSUER_FP"`，或提供已独立批准的 `--verify-key /secure/release-public.pem`。缺签名/公钥默认拒绝。
+
 3. 在私密交互 TTY 安装，打开输出的正常管理台入口实测：
 
    ```sh
@@ -33,11 +34,13 @@
    sudo ./auriga doctor
    ```
 
+   > **⚠ 安装完成后立即按[保管清单](docs/site/keep-list.zh.md)导出并离线保管以下材料**：应急账号口令和 TOTP（只在私密终端显示）、资源公钥根 `resource-roots.json`、离线降级私钥 `downgrade.pk8`、站点构建私钥，以及 `sudo ./auriga backup` 的备份。丢失后大多无法恢复。安装前需要自己准备的输入（发行公钥指纹、IPv4 或域名、数据目录等）也列在该页。
+
    以应急密码和 TOTP 登录、邀请成员、上传/审核/发布资源，并用固定本现场资源公钥根的桌面包安装资源。默认数据目录 `/srv/auriga/auriga-data`，自定义父目录用 `--data /srv/auriga`。域名用 `--domain example.com`，已有受信代理用 `--proxy /secure/access.json`。也可用发行引导程序直接执行 `sudo ./auriga install --package <tar或首卷> --address 192.0.2.10 --trust-fingerprint "$ISSUER_FP"`。
 
 ## 出问题先诊断
 
-`sudo ./auriga doctor` 逐项输出 PASS/FAIL 和修复建议，可直接贴给现场 AI。健康检查不能替代正常页面登录和资源安装操作。资源公钥根与离线降级私钥导出位置由安装器输出；把资源公钥根送回可信桌面构建机，以 `--resource-trust-json` 固定后再把桌面包拷回。详细说明随安装包的 `README-OFFLINE.md`。
+`sudo ./auriga doctor` 逐项输出 PASS/FAIL 和修复建议，可直接贴给现场 AI。常见报错的原因和处理见[构建与部署常见报错](docs/site/troubleshooting.zh.md)。健康检查不能替代正常页面登录和资源安装操作。资源公钥根与离线降级私钥导出位置由安装器输出；把资源公钥根送回可信桌面构建机，以 `--resource-trust-json` 固定后再把桌面包拷回。详细说明随安装包的 `README-OFFLINE.md`。
 
 ```sh
 sudo ./auriga backup
