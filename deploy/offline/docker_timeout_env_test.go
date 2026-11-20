@@ -33,4 +33,9 @@ func TestImageResolveLimitCoversBootstrapLimits(t *testing.T) {
 	if got := imageResolveLimit(lookup); got != 5*time.Hour+40*time.Minute {
 		t.Fatalf("调大后外层上限: %s", got)
 	}
+	env["AURIGA_DOCKER_IMAGE_SAVE_MAX"] = "-5h"
+	env["AURIGA_DOCKER_INSPECT_TIMEOUT"] = "48h"
+	if got := imageResolveLimit(lookup); got != 2*time.Hour+20*time.Minute {
+		t.Fatalf("超范围值应按默认: %s", got)
+	}
 }

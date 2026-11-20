@@ -40,12 +40,14 @@ func validateDockerImageTimeoutEnv(lookup func(string) (string, bool)) error {
 func imageResolveLimit(lookup func(string) (string, bool)) time.Duration {
 	limit := 10*time.Minute + 2*time.Hour
 	if v, ok := lookup("AURIGA_DOCKER_INSPECT_TIMEOUT"); ok && v != "" {
-		if d, err := time.ParseDuration(v); err == nil {
+		// 非法或超范围的值按默认算，由引导程序自己报“环境变量非法”。
+		if d, err := time.ParseDuration(v); err == nil && d >= time.Minute && d <= 24*time.Hour {
 			limit += d - 10*time.Minute
 		}
 	}
 	if v, ok := lookup("AURIGA_DOCKER_IMAGE_SAVE_MAX"); ok && v != "" {
-		if d, err := time.ParseDuration(v); err == nil {
+		// 非法或超范围的值按默认算，由引导程序自己报“环境变量非法”。
+		if d, err := time.ParseDuration(v); err == nil && d >= time.Minute && d <= 24*time.Hour {
 			limit += d - 2*time.Hour
 		}
 	}
