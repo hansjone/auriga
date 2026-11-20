@@ -2367,7 +2367,10 @@ window.__ModuleLoader__.load({
         ].includes(window.location.hash);
         let loginOverlayAvailable = false;
         const loginRequests = new Set();
-        const openPlatformLogin = () => loginRequests.forEach((open) => open());
+        const openPlatformLogin = (action) =>
+          loginRequests.forEach((open) =>
+            open(action === 'inline_login' ? 'inline_login' : 'open_login'),
+          );
         function PlatformLogin() {
           const local = ['127.0.0.1', '[::1]', 'localhost'].includes(
             window.location.hostname,
@@ -2377,6 +2380,7 @@ window.__ModuleLoader__.load({
           const [ownsLogin, setOwnsLogin] = React.useState(false);
           const [request, setRequest] = React.useState(0);
           const attempted = React.useRef(false);
+          const loginAction = React.useRef('open_login');
           const manual = React.useRef(false);
           const cancellation = React.useRef(null);
           const [shell, reloadShell, setShell] = useLocalStatus(
@@ -2384,7 +2388,8 @@ window.__ModuleLoader__.load({
             open && ownsLogin ? 2000 : 15000,
             local && (!settled || (open && ownsLogin)),
           );
-          const show = () => {
+          const show = (action) => {
+            loginAction.current = action;
             manual.current = true;
             setSettled(false);
             setRequest((n) => n + 1);
@@ -2511,7 +2516,7 @@ window.__ModuleLoader__.load({
             if (shell.inlineLogin || shell.platform === 'authenticating')
               return;
             postLocal('auriga/shell/command', shell.csrf, {
-              action: 'open_login',
+              action: loginAction.current,
             })
               .catch(() => {})
               .finally(reloadShell);
@@ -2951,7 +2956,10 @@ window.__ModuleLoader__.load({
                   Action,
                   {
                     disabled: busy || !shell?.csrf,
-                    onClick: () => command('inline_login'),
+                    onClick:
+                      !modal && loginOverlayAvailable
+                        ? () => openPlatformLogin('inline_login')
+                        : () => command('inline_login'),
                   },
                   t('platformInlineLogin'),
                 ),
