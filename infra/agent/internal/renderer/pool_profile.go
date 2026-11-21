@@ -53,7 +53,6 @@ var allowedNestedPresetPlugins = map[string]bool{
 	"@deepseek-ai/dsh-persona":                       true,
 	"@deepseek-ai/dsh-agent-instructions":            true,
 	"@deepseek-ai/dsh-time-context":                  true,
-	"@deepseek-ai/dsh-skill-filesystem":              true,
 	"@deepseek-ai/dsh-tool-skill":                    true,
 	"@deepseek-ai/dsh-command-goal":                  true,
 	"@deepseek-ai/dsh-tool-goal":                     true,

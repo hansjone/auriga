@@ -79,8 +79,6 @@
           maxBytes: 65536
       - id: time-context
         name: '@deepseek-ai/dsh-time-context'
-      - id: skill-filesystem
-        name: '@deepseek-ai/dsh-skill-filesystem'
       - id: tool-skill
         name: '@deepseek-ai/dsh-tool-skill'
       - id: command-goal
@@ -142,8 +140,6 @@
           maxBytes: 65536
       - id: time-context
         name: '@deepseek-ai/dsh-time-context'
-      - id: skill-filesystem
-        name: '@deepseek-ai/dsh-skill-filesystem'
       - id: tool-skill
         name: '@deepseek-ai/dsh-tool-skill'
       - id: command-goal
@@ -274,8 +270,6 @@
         config:
           fetch: true
           searchTimeoutMs: 60000
-      - id: skill-filesystem
-        name: '@deepseek-ai/dsh-skill-filesystem'
       - id: tool-skill
         name: '@deepseek-ai/dsh-tool-skill'
 - id: default-model
