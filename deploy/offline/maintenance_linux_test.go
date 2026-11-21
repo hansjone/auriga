@@ -73,7 +73,7 @@ func TestReviewSiteSignedUpgradeAndHealthyArchiveWarning(t *testing.T) {
 		t.Fatal(err)
 	}
 	next := filepath.Join(t.TempDir(), "next")
-	makeRelease(next, "1.0-site.1", true)
+	makeRelease(next, "1.0-site.1", false)
 	signTestRoot(t, next, filepath.Join(keydir, "site-private.pem"))
 	archive := filepath.Join(t.TempDir(), "site.tar")
 	if err := pack(next, archive); err != nil {
@@ -92,16 +92,30 @@ func TestReviewSiteSignedUpgradeAndHealthyArchiveWarning(t *testing.T) {
 	if err := upgrade(data, archive); err != nil {
 		t.Fatal("site-signed upgrade failed or archive warning caused rollback", err)
 	}
-	raw, err := os.ReadFile(filepath.Join(s.Package, "offline-release.json"))
+	// 新布局：旧安装包登记为 r1（install，留在原处），新包写到 auriga-releases/2 并记为 r2。
+	upgraded, err := readState(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if upgraded.Current != 2 || upgraded.Package != releaseDir(data, 2) || upgraded.source() != sourceSignedPackage {
+		t.Fatalf("upgrade 后 state 不对：%+v", upgraded)
+	}
+	if r1, r2 := upgraded.record(1), upgraded.record(2); r1 == nil || r1.Kind != recordKindInstall || r1.Release != s.Package || r2 == nil || r2.Kind != recordKindUpgrade || r2.Status != recordOK {
+		t.Fatalf("upgrade 历史不对：%+v", upgraded.History)
+	}
+	if err := checkReleaseDir(data, upgraded.record(1)); err != nil {
+		t.Fatal("旧安装包应保留并可作为回滚目标", err)
+	}
+	if err := checkReleaseDir(data, upgraded.record(2)); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(filepath.Join(upgraded.Package, "offline-release.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	var r release
 	if err := json.Unmarshal(raw, &r); err != nil || r.Version != "1.0-site.1" {
 		t.Fatal(r, err)
-	}
-	if _, err := os.Stat(s.Package + ".retained"); err != nil {
-		t.Fatal("old release not retained after simulated archive failure", err)
 	}
 	backups, err := filepath.Glob(filepath.Join(base, "auriga-backups/backup-*.tar"))
 	if err != nil || len(backups) != 1 {
@@ -112,7 +126,7 @@ func TestReviewSiteSignedUpgradeAndHealthyArchiveWarning(t *testing.T) {
 	}
 	// An exception for the installed old release must also remain visible after
 	// a correctly signed replacement is activated.
-	if err := os.Remove(filepath.Join(s.Package, "SHA256SUMS.sig")); err != nil {
+	if err := os.Remove(filepath.Join(upgraded.Package, "SHA256SUMS.sig")); err != nil {
 		t.Fatal(err)
 	}
 	second := filepath.Join(t.TempDir(), "second")
@@ -134,6 +148,36 @@ func TestReviewSiteSignedUpgradeAndHealthyArchiveWarning(t *testing.T) {
 	}
 	if !saved.AllowUnsigned || trustHealth(saved) == nil {
 		t.Fatal("old-release exception lost its persistent doctor alarm")
+	}
+	if saved.Current != 3 || saved.record(3) == nil || saved.record(3).Kind != recordKindUpgrade {
+		t.Fatalf("第二次 upgrade 应占用 r3：%+v", saved.History)
+	}
+	// 新包启动失败：从冷备份恢复（语义不变），删除本次写入的 auriga-releases/4，state 仍指向 r3。
+	third := filepath.Join(t.TempDir(), "third")
+	makeRelease(third, "1.0-site.3", false)
+	if err := os.WriteFile(filepath.Join(third, "deploy-nas/scripts/start.sh"), []byte("#!/bin/sh\nexit 1\n"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	signTestRoot(t, third, filepath.Join(keydir, "site-private.pem"))
+	thirdArchive := filepath.Join(t.TempDir(), "third.tar")
+	if err := pack(third, thirdArchive); err != nil {
+		t.Fatal(err)
+	}
+	if err := upgradeAllowed(data, thirdArchive, true); err == nil || !strings.Contains(err.Error(), "已恢复原版") {
+		t.Fatalf("新包启动失败应从冷备份恢复：%v", err)
+	}
+	restored, err := readState(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if restored.Current != 3 || restored.record(4) != nil || restored.Package != releaseDir(data, 3) {
+		t.Fatalf("恢复后 state 应回到 r3：%+v", restored)
+	}
+	if _, err := os.Stat(releaseDir(data, 4)); !os.IsNotExist(err) {
+		t.Fatal("失败升级的发行目录应删除")
+	}
+	if _, err := os.Stat(data + ".upgrade.json"); !os.IsNotExist(err) {
+		t.Fatal("恢复完成后不应留下升级记录")
 	}
 }
 

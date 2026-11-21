@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -107,15 +108,27 @@ func backup(s state) (string, error) {
 	return path, waitHealthy(s)
 }
 
+// pendingUpgrade 是升级恢复记录：冷备份、升级前 state，以及本次写入的发行目录（恢复冷备份后
+// 删除，恢复后的 state 不引用它）。
 type pendingUpgrade struct {
-	Backup string `json:"backup"`
-	State  state  `json:"state"`
+	Backup  string `json:"backup"`
+	State   state  `json:"state"`
+	Release string `json:"release,omitempty"`
 }
 
 func upgrade(data, archive string) error {
 	return upgradeAllowed(data, archive, false)
 }
 
+// upgradeOps 是 upgrade 激活新发行用到的站点动作（测试注入）。
+var upgradeOps = siteOps{nas: nas, health: waitHealthyFor}
+
+// 签名包 upgrade（设计 D10 接入新布局）：
+//   - 来源为 signed-package 或 local-deploy 的站点都可以接收签名包；adopted 属 2e。
+//   - state 没有钉定任何公钥（deploy 首装未钉定）时先要求 trust add-release-key / add-site-key。
+//   - 旧布局的签名包安装（没有历史）先把当前安装包登记为基线历史（kind=install）。
+//   - 包内发行写到 auriga-releases/<序号>/（占用新序号，产生一条 kind=upgrade 的历史），镜像
+//     打 :r<序号>，切换 current；冷备份语义不变：先冷备份，失败从冷备份恢复并删除本次发行目录。
 func upgradeAllowed(data, archive string, allow bool) error {
 	journal := data + ".upgrade.json"
 	if _, err := os.Lstat(journal); err == nil {
@@ -129,14 +142,20 @@ func upgradeAllowed(data, archive string, allow bool) error {
 		if err := rollback(pending); err != nil {
 			return err
 		}
+		removeFailedUpgradeRelease(pending)
 		return os.Remove(journal)
 	}
 	s, err := readState(data)
 	if err != nil {
 		return err
 	}
-	if s.source() != sourceSignedPackage {
-		return fmt.Errorf("当前安装来源为 %s：签名包 upgrade 接入 deploy 的发行目录布局属统一现场部署 2a（下），暂不支持；本机更新请用 auriga deploy", s.source())
+	switch s.source() {
+	case sourceSignedPackage, sourceLocalDeploy:
+	default:
+		return fmt.Errorf("当前安装来源为 %s：签名包 upgrade 只接收签名包安装或 deploy 建立的站点（adopted 站点属统一现场部署 2e）", s.source())
+	}
+	if len(s.TrustedKeys) == 0 && s.PublicKey == "" {
+		return errors.New("state 没有钉定任何发行/站点公钥（本机构建首装未钉定发行钥）：第一次签名包 upgrade 前请先 trust add-release-key <公钥.pem> --confirm-fingerprint <指纹>，或 trust add-site-key 登记站点构建公钥")
 	}
 	if err := verifySums(s.Package); err != nil {
 		return err
@@ -144,6 +163,9 @@ func upgradeAllowed(data, archive string, allow bool) error {
 	oldUnsigned, err := verifyStatePackage(s, s.Package, "", allow)
 	if err != nil {
 		return err
+	}
+	if s.record(s.Current) == nil && (s.source() != sourceSignedPackage || len(s.History) != 0) {
+		return fmt.Errorf("state 缺少当前发行 r%d 的历史记录，拒绝升级", s.Current)
 	}
 	stage, err := os.MkdirTemp(filepath.Dir(data), ".auriga-upgrade-")
 	if err != nil {
@@ -160,25 +182,38 @@ func upgradeAllowed(data, archive string, allow bool) error {
 	if err != nil {
 		return err
 	}
+	sums, err := digest(filepath.Join(stage, "SHA256SUMS"))
+	if err != nil {
+		return err
+	}
 	images, err := loadImages(stage)
 	if err != nil {
 		return err
 	}
+	ctx := context.Background()
+	if s.record(s.Current) == nil {
+		// 旧布局的签名包安装：先把当前安装包登记为基线历史，之后可以 rollback 回它。
+		if _, err := packageBaseline(ctx, &s, true); err != nil {
+			return err
+		}
+	}
+	seq := nextSeq(s)
 	path, err := coldBackup(s)
 	if err != nil {
 		return errors.Join(err, nas(s, "start", "--network-offline"))
 	}
-	pending := pendingUpgrade{Backup: path, State: s}
+	pending := pendingUpgrade{Backup: path, State: s, Release: releaseDir(data, seq)}
 	if err := jsonFile(journal, pending, 0600); err != nil {
 		return errors.Join(err, nas(s, "start", "--network-offline"))
 	}
 	s.AllowUnsigned = s.AllowUnsigned || oldUnsigned || unsigned
-	activateErr := activateUpgrade(s, stage, images)
+	activateErr := activateUpgrade(ctx, &s, stage, images, seq, sums, archive)
 	if activateErr != nil {
 		fmt.Println("升级失败，恢复升级前冷备份与原发行。")
 		if err := rollback(pending); err != nil {
 			return errors.Join(activateErr, fmt.Errorf("自动回滚未完成，请保留升级记录与备份 %w", err))
 		}
+		removeFailedUpgradeRelease(pending)
 		if err := os.Remove(journal); err != nil {
 			return err
 		}
@@ -187,21 +222,39 @@ func upgradeAllowed(data, archive string, allow bool) error {
 	if err := os.Remove(journal); err != nil {
 		return err
 	}
-	fmt.Println("升级完成，数据和原密钥已保留，升级前冷备份已保留。")
+	if pruned, err := pruneReleases(ctx, &s, siteKeepHistory(), os.Stdout); err != nil {
+		fmt.Fprintf(os.Stderr, "警告：%v\n", err)
+	} else if len(pruned) > 0 {
+		if err := saveState(s); err != nil {
+			fmt.Fprintf(os.Stderr, "警告：淘汰历史后保存 state 失败：%v\n", err)
+		}
+	}
+	fmt.Printf("升级完成：当前 r%d（%s），数据和原密钥已保留，升级前冷备份已保留；auriga rollback 可退回保留的历史。\n", seq, s.Package)
 	return nil
 }
 
-func activateUpgrade(s state, stage string, images map[string]string) error {
-	previous := s.Package + ".previous"
-	if _, err := os.Lstat(previous); !os.IsNotExist(err) {
-		return errors.New("上次发行归档目录已存在，请保留并移到受控备份位置后重试")
-	}
-	if err := os.Rename(s.Package, previous); err != nil {
+// activateUpgrade 把已核验的包移到 auriga-releases/<序号>/，记一条 upgrade 历史并切换：
+// stack.env 只改镜像与 seed，render → preflight → start → 等待健康，成功后记录迁移与格式版本。
+func activateUpgrade(ctx context.Context, s *state, stage string, images map[string]string, seq int, sums, archive string) error {
+	root := releasesRoot(s.Data)
+	if err := os.MkdirAll(root, 0755); err != nil {
 		return err
 	}
-	if err := os.Rename(stage, s.Package); err != nil {
+	if err := depsTrustedSourceCheck("发行根目录 ", root); err != nil {
 		return err
 	}
+	release := releaseDir(s.Data, seq)
+	if _, err := os.Lstat(release); !os.IsNotExist(err) {
+		return fmt.Errorf("发行目录 %s 已存在，拒绝覆盖", release)
+	}
+	if err := os.Rename(stage, release); err != nil {
+		return err
+	}
+	if err := tagImages(ctx, images, func(svc string) string { return imageTag(svc, seq) }); err != nil {
+		return err
+	}
+	rec := deployRecord{Seq: seq, Kind: recordKindUpgrade, Status: recordFailed, At: nowRFC3339(), Source: packageSource(release, archive), Release: release, ReleaseSums: sums, Images: cloneImages(images)}
+	s.History = append(s.History, rec)
 	// Preserve every operator setting. Only exact image references and seed state
 	// change, using the same parser-safe KEY=VALUE format as the existing scripts.
 	raw, err := os.ReadFile(filepath.Join(s.Data, "stack.env"))
@@ -221,34 +274,57 @@ func activateUpgrade(s state, stage string, images map[string]string) error {
 			}
 		}
 	}
-	if err := os.WriteFile(filepath.Join(s.Data, "stack.env"), []byte(strings.Join(lines, "\n")), 0600); err != nil {
+	if err := writeFileAtomic(filepath.Join(s.Data, "stack.env"), []byte(strings.Join(lines, "\n")), 0600); err != nil {
 		return err
 	}
-	s.Images = images
-	if err := saveState(s); err != nil {
+	s.Images, s.Package, s.Current, s.Source = images, release, seq, sourceSignedPackage
+	if err := saveState(*s); err != nil {
 		return err
 	}
-	if err := nas(s, "render"); err != nil {
+	for _, step := range [][]string{{"render"}, {"preflight"}, {"start", "--network-offline"}} {
+		if err := upgradeOps.nas(*s, step[0], step[1:]...); err != nil {
+			return err
+		}
+	}
+	if err := upgradeOps.health(*s, 5*time.Minute); err != nil {
 		return err
 	}
-	if err := nas(s, "preflight"); err != nil {
+	cur := s.record(seq)
+	cur.Status = recordOK
+	if v := readDataVersions(*s); v.ok() {
+		cur.Migrations, cur.Formats = v.Migrations, v.Formats
+	}
+	if err := saveState(*s); err != nil {
 		return err
 	}
-	if err := nas(s, "start", "--network-offline"); err != nil {
-		return err
-	}
-	if err := waitHealthy(s); err != nil {
-		return err
-	}
-	// Keep previous code with the cold backup, outside the next backup's tree.
-	archivePreviousRelease(previous, filepath.Join(filepath.Dir(s.Data), "auriga-backups", "release-"+time.Now().UTC().Format("20060102T150405.000000000")))
+	_ = tagImages(ctx, images, func(svc string) string { return "auriga/" + svc + ":nas" })
 	return nil
 }
 
-func archivePreviousRelease(previous, target string) {
-	if err := os.Rename(previous, target); err != nil {
-		fmt.Fprintf(os.Stderr, "警告：新发行已健康，旧发行归档移动失败；保留 %s，请人工归档后再升级：%v\n", previous, err)
+// removeFailedUpgradeRelease：从冷备份恢复后删除本次升级写入的发行目录（恢复后的 state 不引用
+// 它；序号不复用，nextSeq 会跳过已用过的序号）。
+func removeFailedUpgradeRelease(p pendingUpgrade) {
+	if p.Release == "" || filepath.Dir(p.Release) != releasesRoot(p.State.Data) {
+		return
 	}
+	for _, r := range p.State.History {
+		if r.Release == p.Release {
+			return
+		}
+	}
+	if err := os.RemoveAll(p.Release); err != nil {
+		fmt.Fprintf(os.Stderr, "警告：删除失败升级的发行目录 %s 失败：%v\n", p.Release, err)
+	}
+}
+
+// siteKeepHistory：有 site.json 时取 server.keepHistory，否则保留 3 份。
+func siteKeepHistory() int {
+	if _, err := os.Lstat(defaultSiteConfigPath()); err == nil {
+		if cfg, _, err := loadSiteConfig("", siteInvocation{Root: true}); err == nil && cfg.Server != nil && cfg.Server.KeepHistory != nil {
+			return *cfg.Server.KeepHistory
+		}
+	}
+	return 3
 }
 
 func rollback(p pendingUpgrade) error {

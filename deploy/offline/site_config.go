@@ -80,6 +80,9 @@ type siteServer struct {
 	HealthTimeout *string      `json:"healthTimeout"`
 	Smoke         *bool        `json:"smoke"`
 	KeepHistory   *int         `json:"keepHistory"`
+	// Runner 是工作流运行器账户名（设计 D12、遗留 P3）：经 sudo 调用且调用者是该账户时，
+	// 一律按受限调用执行参数白名单，不能用 --operator 跳过。
+	Runner *string `json:"runner"`
 }
 
 type siteInstall struct {
@@ -109,16 +112,18 @@ type siteLogs struct {
 }
 
 // siteInvocation 描述调用方式：经 sudo（环境里有 SUDO_UID）或 root 直接运行。
+// SudoUID 是 sudo 记录的调用者 uid，用来核对是否为登记的运行器账户（privilege.go）。
 type siteInvocation struct {
-	Sudo bool
-	Root bool
+	Sudo    bool
+	Root    bool
+	SudoUID string
 }
 
 var lookupSudoUID = os.LookupEnv
 
 func currentInvocation() siteInvocation {
-	_, sudo := lookupSudoUID("SUDO_UID")
-	return siteInvocation{Sudo: sudo, Root: os.Geteuid() == 0}
+	uid, sudo := lookupSudoUID("SUDO_UID")
+	return siteInvocation{Sudo: sudo, Root: os.Geteuid() == 0, SudoUID: uid}
 }
 
 func defaultSiteConfigPath() string {
@@ -395,8 +400,9 @@ var (
 	registryPattern = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)*(?::([0-9]{1,5}))?$`)
 	// 不允许 “,” 与 “|”：GOPROXY 把它们当列表分隔符，混进 direct/off 或公网源会绕过
 	// allowPublic=false。
-	urlCharPattern = regexp.MustCompile(`^[A-Za-z0-9._~:/%+=@-]+$`)
-	windowsAbsPath = regexp.MustCompile(`^(?:[A-Za-z]:\\|\\\\[^\\/:*?"<>|\r\n]+\\)[^*?"<>|\r\n]*$`)
+	urlCharPattern    = regexp.MustCompile(`^[A-Za-z0-9._~:/%+=@-]+$`)
+	runnerNamePattern = regexp.MustCompile(`^[a-z_][a-z0-9_-]{0,31}$`)
+	windowsAbsPath    = regexp.MustCompile(`^(?:[A-Za-z]:\\|\\\\[^\\/:*?"<>|\r\n]+\\)[^*?"<>|\r\n]*$`)
 )
 
 func (c *siteConfig) validate() error {
@@ -642,6 +648,11 @@ func (s *siteServer) validate() error {
 	}
 	if s.KeepHistory != nil && (*s.KeepHistory < 1 || *s.KeepHistory > 100) {
 		return fmt.Errorf("server.keepHistory 需要 1 到 100（当前 %d）", *s.KeepHistory)
+	}
+	if s.Runner != nil {
+		if !runnerNamePattern.MatchString(*s.Runner) || *s.Runner == "root" {
+			return fmt.Errorf("server.runner 需要运行器的本机账户名（小写字母、数字、_、-，以字母或 _ 开头，不超过 32 位，不能是 root），当前 %q", *s.Runner)
+		}
 	}
 	if s.Install == nil {
 		return nil

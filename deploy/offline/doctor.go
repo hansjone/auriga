@@ -100,30 +100,14 @@ func doctor(s state) error {
 			fmt.Printf("PASS %s\n", name)
 		}
 	}
+	fmt.Printf("安装来源 %s\n", s.source())
+	if s.TrustUnpinned {
+		fmt.Println("INFO 发行钥未钉定（本机构建首装没有带 trustFingerprint 的套件）：第一次签名包 upgrade 前须先 trust add-release-key 或 add-site-key")
+	}
 	check("Docker/Compose版本", "离线预装 Docker Engine 与 Compose 2.29+，检查本机 socket。", dockerReady)
-	check("发行信任状态", "从批准公钥重新建立受信安装；无签名历史标记不会自动清除。", func() error {
-		return trustHealth(s)
-	})
-	check("离线包完整性", "从受信原包恢复发行文件。", func() error {
-		if err := verifySums(s.Package); err != nil {
-			return err
-		}
-		_, err := verifyStatePackage(s, s.Package, "", false)
-		return err
-	})
-	check("镜像摘要与层", "重拷离线包并由 install/upgrade 重新 load，勿直接替换镜像。", func() error {
-		var r release
-		if err := readJSON(filepath.Join(s.Package, "offline-release.json"), &r); err != nil {
-			return err
-		}
-		for name, id := range s.Images {
-			platform, err := capture("docker", "image", "inspect", "--format", "{{.Os}}/{{.Architecture}}", id)
-			if err != nil || platform != "linux/amd64" {
-				return fmt.Errorf("%s 镜像缺失或架构错误", name)
-			}
-		}
-		return checkLoadedImages(s, r)
-	})
+	for _, c := range releaseChecks(s) {
+		check(c.name, c.repair, c.test)
+	}
 	check("配置及原有安全门禁", "按诊断修复原配置，保留密钥与材料回执。", func() error { return nas(s, "preflight") })
 	check("资源私钥权限", "从原备份恢复 UID10001、0700目录、0600私钥。", func() error {
 		root := filepath.Join(s.Data, "resource-keys/platform")
@@ -201,6 +185,60 @@ func readJSONLoose(path string, value any) error {
 
 func objectWrite(s state) error {
 	return command(nil, io.Discard, nil, "docker", "run", "--rm", "--pull", "never", "--network", "none", "--log-driver", "none", "--user", "10001:10001", "--read-only", "--cap-drop", "ALL", "--security-opt", "no-new-privileges:true", "--mount", "type=bind,src="+filepath.Join(s.Data, "resource-objects")+",dst=/objects", "--entrypoint", "sh", s.Images["POSTGRES"], "-ec", "umask 077; f=$(mktemp /objects/.doctor.XXXXXXXX); trap 'rm -f \"$f\"' EXIT; printf test >\"$f\"; test -s \"$f\"")
+}
+
+type doctorCheck struct {
+	name, repair string
+	test         func() error
+}
+
+// releaseChecks 是 doctor 里与发行信任、完整性、镜像相关的三项（local-deploy 来源按本地清单
+// 与 releaseSums 核对，不要求签名）。
+func releaseChecks(s state) []doctorCheck {
+	return []doctorCheck{
+		{"发行信任状态", "从批准公钥重新建立受信安装；无签名历史标记不会自动清除。", func() error {
+			return trustHealth(s)
+		}},
+		{"离线包完整性", "从受信原包恢复发行文件；本机构建的发行用 deploy 重新构建或 rollback。", func() error {
+			if err := verifySums(s.Package); err != nil {
+				return err
+			}
+			_, err := verifyStatePackage(s, s.Package, "", false)
+			return err
+		}},
+		{"镜像摘要与层", "重拷离线包并由 install/upgrade 重新 load，勿直接替换镜像；本机构建的发行用 deploy 重新构建或 rollback。", func() error {
+			if s.source() == sourceLocalDeploy {
+				return checkLocalDeployImages(s)
+			}
+			var r release
+			if err := readJSON(filepath.Join(s.Package, "offline-release.json"), &r); err != nil {
+				return err
+			}
+			for name, id := range s.Images {
+				platform, err := capture("docker", "image", "inspect", "--format", "{{.Os}}/{{.Architecture}}", id)
+				if err != nil || platform != "linux/amd64" {
+					return fmt.Errorf("%s 镜像缺失或架构错误", name)
+				}
+			}
+			return checkLoadedImages(s, r)
+		}},
+	}
+}
+
+// checkLocalDeployImages（local-deploy 来源）：state 里每个镜像都在本机且是 linux/amd64，
+// 当前发行的 auriga/<svc>:r<序号> 标签仍指向历史记录的镜像。
+func checkLocalDeployImages(s state) error {
+	r := s.record(s.Current)
+	if r == nil {
+		return fmt.Errorf("state 缺少当前发行 r%d 的历史记录", s.Current)
+	}
+	ctx := context.Background()
+	for name, id := range s.Images {
+		if _, platform, ok := localImage(ctx, id); !ok || platform != "linux/amd64" {
+			return fmt.Errorf("%s 镜像缺失或架构错误", name)
+		}
+	}
+	return checkTaggedImages(ctx, r)
 }
 
 func checkLoadedImages(s state, r release) error {

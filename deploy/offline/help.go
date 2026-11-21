@@ -212,7 +212,7 @@ func printTopHelp(w io.Writer) {
 
 部署（需要 sudo/root）
   install   首次安装；重复执行会复核配置并继续启动，同时刷新安装摘要
-  upgrade   用新离线包升级（先自动备份，只信任安装时固定的公钥）
+  upgrade   用新离线包升级（先自动备份，只信任 state 固定的公钥；新发行写入 auriga-releases/<序号>/ 并记入历史）
   doctor    部署体检；doctor --build 检查本机离线构建资源（无需 root）
   status    查看服务状态
   logs      查看最近 100 行服务日志
@@ -230,12 +230,16 @@ func printTopHelp(w io.Writer) {
   bundle          bundle --build --offline 在现场断网构建离线包；--online 则对变化的语言依赖联网收集（均须 --sign-key）
   keygen site     生成站点构建密钥对（私钥只留在受控开发机）
   trust add-site-key|remove-site-key   在服务器登记或移除站点构建公钥（需要 root）
+  trust add-release-key               为发行钥未钉定的站点（deploy 首装）钉定发行公钥（需要 root）
 
 站点构建（需要 root，读 /etc/auriga/site.json）
   deps status|fetch|import   依赖缓存：看缺什么、按配置的依赖源补 Go/Web 依赖、导入手工缓存或套件
   deploy [<提交号>]          本机全量构建并部署（无 state 时首次安装）；失败且数据未被触碰时自动回滚
-  rollback [--to <序号>]     退回保留的历史发行（数据须与目标运行时相同；跨迁移回滚交人工）
+  rollback [--to <序号>]     退回保留的历史发行（deploy 与 upgrade 产生的都可以；数据须与目标运行时相同）
   history                    列出部署历史与当前发行
+  经 sudo 调用（工作流）：运行器账户（site.json 的 server.runner）只能 deploy <提交号>、rollback、status、
+  history 且参数受白名单限制，deploy 只允许快进；其他管理员经 sudo 运行 deploy/rollback 需加 --operator；
+  有 site.json 时经 sudo 的 status 不收参数（数据目录取 server.data）
   status 会同时显示安装来源与当前发行；deploy/rollback 每次写 <logs.dir>/<时间>-<命令>.log 与 .json 收据，
   退出码 0 成功、1 未切换就失败、2 已自动回滚、3 需人工
 
@@ -292,7 +296,13 @@ func init() {
 	}
 	helpSpecs["upgrade"] = helpSpec{
 		usage:   "./auriga upgrade <新离线包.tar> [参数]",
-		summary: "用新离线包升级已安装的服务（先自动备份；只信任安装时固定的公钥）。需要 sudo/root。新离线包路径必填，放在参数之前。",
+		summary: "用新离线包升级已安装的服务（先自动备份；只信任 state 固定的公钥）。需要 sudo/root。新离线包路径必填，放在参数之前。",
+		notes: []string{
+			"签名包安装与 deploy 建立的站点都可以 upgrade：新发行写入 auriga-releases/<序号>/（占用新序号，记一条 upgrade 历史），镜像加打 auriga/<服务>:r<序号>，切换当前发行；之后 deploy 与 rollback 都能接着用。",
+			"旧布局的签名包安装第一次 upgrade 前，当前安装包会先登记为一条 install 历史（之后可以 rollback 回它）。",
+			"冷备份语义不变：先冷备份整站，失败从冷备份恢复并删除本次写入的发行目录。",
+			"deploy 首装没有钉定发行钥的站点（status 显示“发行钥未钉定”），第一次 upgrade 前先 trust add-release-key 或 trust add-site-key。",
+		},
 		docs: map[string]string{
 			"data":           dataDoc["data"],
 			"allow-unsigned": "允许缺少签名的升级包（仅限受控演练，会持续报警）",
@@ -377,11 +387,11 @@ func init() {
 		docs:    map[string]string{"out": "输出目录，必须是全新目录；私钥保存在其中，请保管好"},
 	}
 	helpSpecs["trust"] = helpSpec{
-		usage:   "./auriga trust add-site-key <公钥.pem> --confirm-fingerprint <指纹> [--data <目录>]\n      ./auriga trust remove-site-key <指纹> [--data <目录>]",
-		summary: "登记或移除站点构建公钥（需要 sudo/root）。不能移除安装时固定的发行公钥。",
+		usage:   "./auriga trust add-site-key <公钥.pem> --confirm-fingerprint <指纹> [--data <目录>]\n      ./auriga trust remove-site-key <指纹> [--data <目录>]\n      ./auriga trust add-release-key <发行公钥.pem> --confirm-fingerprint <指纹> [--data <目录>]",
+		summary: "登记或移除站点构建公钥（需要 sudo/root）。不能移除安装时固定的发行公钥。add-release-key 只用于发行钥未钉定的站点（deploy 首装没有带 trustFingerprint 的套件），已钉定的不能替换。",
 		docs: map[string]string{
 			"data":                dataDoc["data"],
-			"confirm-fingerprint": "add-site-key 必填：站点公钥的 SHA256(SPKI DER) 64 位小写指纹，须与 keygen site 输出核对",
+			"confirm-fingerprint": "add-site-key、add-release-key 必填：公钥的 SHA256(SPKI DER) 64 位小写指纹，须从独立渠道（keygen site 输出或发行说明）核对",
 		},
 	}
 	depsConfig := "站点配置路径；只允许 root 直接运行时使用，经 sudo 调用时拒绝（默认读 /etc/auriga/site.json）"
@@ -422,14 +432,17 @@ func init() {
 	}
 	helpSpecs["deploy"] = helpSpec{
 		usage:   "./auriga deploy [<40 位提交号>] [--full | --services a,b] [--dry-run] [--json] [参数]",
-		summary: "在本机用源码快照构建并部署（设计 docs/dev/site-deploy.zh.md D10）。需要 root 直接运行；经 sudo 调用与参数白名单在下一步开放。",
+		summary: "在本机用源码快照构建并部署（设计 docs/dev/site-deploy.zh.md D10）。需要 root：root 直接运行，或经 sudo 的受限调用（工作流）。",
 		notes: []string{
+			"经 sudo 调用（环境里有 SUDO_UID）：调用者是 site.json 登记的运行器账户 server.runner 时一律受限，不能用 --operator；其他账户（含 sudo -i 的管理员）默认也受限，显式 --operator 才按人工 root 处理（要求已登记 server.runner）。受限时只接受一个 40 位小写十六进制提交号与 --full、--services、--dry-run、--json、--backup-db，其余参数（含 --config、--source、--allow-downgrade、--operator）一律拒绝。",
+			"快进：受限调用只允许部署当前运行提交的后代（在 root 自己 fetch 的仓库里 merge-base --is-ancestor，同一提交可重新部署）；首装不限。root 人工部署非后代提交须 --allow-downgrade，先做与 rollback 相同的数据检查（数据未被比目标更新的版本触碰才允许，否则退出码 3）。",
 			"源码：给了提交号就从 source.git 远端 fetch 到数据目录同级的 auriga-source.git，提交必须在某个 allowedRefs 上，git archive 导出（不读 root 的系统/全局 git 配置）；否则用 source.dir 或 --source（都须 root 所有、组和其他用户不可写）。",
-			"配置了 source.git.requireSignedCommits 或 trustedSigners 时本版本直接拒绝（退出码 1）：提交签名校验在统一现场部署 2a（下）实现。",
+			"签名：source.git.requireSignedCommits=true 时，导出前用 trustedSigners（root 所有的公钥文件：PGP 公钥块或 ssh 公钥行）在隔离环境里校验该提交的 gpg 或 ssh 签名，未签名、签名者不受信、x509 签名一律拒绝（退出码 1）；此时源码目录模式也拒绝。",
+			"签名包安装的站点也可以 deploy：第一次 deploy 前当前安装包登记为一条 install 历史，切换失败时可自动回滚到它。",
 			"配方：一律用源码快照里的 deploy/nas/offline-build（deploy-recipe.json 声明暂存清单、固定 digest 与 CLI 能力版本，能力版本不符时先升级 CLI）；Dockerfile 拒绝 syntax/escape 解析器指令（含 BOM、// 与 JSON 变体），FROM 只能是固定 digest、${<SVC>_BASE} 或已声明阶段，拒绝 ADD <URL> 与引用外部镜像的 --from；构建前比较源码锁清单与依赖输入。",
 			"没有 state 时执行首次安装（复用 install 步骤，访问方式取 server.install）；有带 trustFingerprint 的套件就钉定发行钥，否则标记未钉定。",
 			"再次部署：全量构建，装配摘要与当前一致的镜像跳过切换，然后完整启动（render → preflight → start）；新发行写入 auriga-releases/<序号>/，镜像加打 auriga/<服务>:r<序号>，保留 server.keepHistory 份（默认 3）。",
-			"切换失败时：先停掉新版本会写数据的服务（platform、collab、edge 等），再读迁移与数据目录格式版本，与切换前相同且上一版是成功记录才自动回滚（退出码 2），否则退出码 3 交人工；首装失败退出码 1 并保留现场。",
+			"切换失败时：先停掉新版本会写数据的服务（platform、collab、edge 等），再读迁移与数据目录格式版本，与切换前相同、上一版是成功记录且其发行目录与 state 锚定的 releaseSums 一致才自动回滚（退出码 2），否则退出码 3 交人工；首装失败退出码 1 并保留现场。",
 			"每次写 <logs.dir>/<时间>-deploy.log 与同名 .json 收据（脱敏），--json 时标准输出只打印收据。",
 		},
 		docs: merge(buildDocs, map[string]string{
@@ -439,27 +452,31 @@ func init() {
 			"json":            "标准输出只打印收据 JSON（进度写标准错误）",
 			"backup-db":       "部署前 pg_dump 各库（统一现场部署 2b 实现，本版本会拒绝）",
 			"config":          "站点配置路径；只允许 root 直接运行时使用（默认 /etc/auriga/site.json）",
-			"source":          "人工源码目录（root 直接运行时使用，不能与提交号同用）；默认用 source.dir 或 source.git",
+			"source":          "人工源码目录（root 人工部署时使用，受限调用拒绝，不能与提交号同用）；默认用 source.dir 或 source.git",
+			"operator":        "经 sudo 的人工 root 显式跳过参数白名单（运行器账户不可用，需 site.json 登记 server.runner）；不经 sudo 时无作用",
+			"allow-downgrade": "root 人工向不是当前运行提交后代的提交部署（先做与 rollback 相同的数据检查，不通过退出码 3）；受限调用拒绝",
 			"accept-new-deps": "本次允许按依赖源补新增依赖（等同 deps.acceptNewDeps=true，仅限 Go、Web）",
 		}),
 	}
 	helpSpecs["rollback"] = helpSpec{
 		usage:   "./auriga rollback [--to <序号>] [--json] [--config <site.json>]",
-		summary: "把站点切回保留的历史发行（默认上一份成功的部署），完整启动并等待健康。需要 root 直接运行。",
+		summary: "把站点切回保留的历史发行（默认上一份成功的部署；deploy、upgrade 与签名包基线产生的历史都可以），完整启动并等待健康。需要 root：root 直接运行，或经 sudo 的受限调用。",
 		notes: []string{
+			"经 sudo 调用时与 deploy 同样判定受限：受限时只接受 --to <序号> 与 --json；非运行器账户加 --operator 按人工 root 处理。",
 			"只有当前迁移与数据目录格式版本与目标运行时记录相同才执行；否则需要目标声明 schemaCompatFloor 与格式上限（统一现场部署 2b 生成），本版本一律交人工，退出码 3。",
 			"这是 2b 之前的临时规则，有风险：迁移版本没变不等于数据没变，新版本运行期间可能写入了旧代码不认识的行数据或取值，回滚后旧代码可能读错或报错。新版本运行越久风险越大，执行前请先备份并确认这段时间的业务改动。",
 			"回滚失败不重试，退出码 3。每次写日志与收据。",
 		},
 		docs: map[string]string{
-			"to":     "目标序号（auriga history 查看）；默认当前之前最近一份成功的部署",
-			"json":   "标准输出只打印收据 JSON",
-			"config": "站点配置路径；只允许 root 直接运行时使用（默认 /etc/auriga/site.json）",
+			"to":       "目标序号（auriga history 查看）；默认当前之前最近一份成功的部署",
+			"json":     "标准输出只打印收据 JSON",
+			"config":   "站点配置路径；只允许 root 直接运行时使用（默认 /etc/auriga/site.json）",
+			"operator": "经 sudo 的人工 root 显式跳过参数白名单（运行器账户不可用，需 site.json 登记 server.runner）；不经 sudo 时无作用",
 		},
 	}
 	helpSpecs["history"] = helpSpec{
 		usage:   "./auriga history [--json] [--config <site.json>]",
-		summary: "列出保留的部署历史：序号、状态、源码提交与快照摘要、是否声明 floor，* 标出当前发行。需要 root。",
+		summary: "列出保留的部署历史：序号、种类（deploy/upgrade/install）、状态、源码提交与快照摘要、是否声明 floor，* 标出当前发行。需要 root；经 sudo 的运行器只能加 --json。",
 		docs: map[string]string{
 			"json":   "输出机器可读 JSON",
 			"config": "站点配置路径；只允许 root 直接运行时使用（默认 /etc/auriga/site.json）",
