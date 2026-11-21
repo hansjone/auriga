@@ -79,10 +79,10 @@ func TestSharedRuntimeProjectionPreservesFullSpecAndRejectsSealedOrUnknown(t *te
 		t.Fatal("complete spec or original input changed")
 	}
 	for name, secrets := range map[string]*nodev1.Secrets{
-		"instance": {InstanceToken: &nodev1.SealedSecret{}},
-		"gateway":  {AiGatewayToken: &nodev1.SealedSecret{}},
-		"device":   {DeviceCredential: &nodev1.SealedSecret{}},
-		"model":    {ModelCredential: &nodev1.SealedSecret{}},
+		"instance": {InstanceToken: &nodev1.SealedSecret{Ciphertext: []byte{1}}},
+		"gateway":  {AiGatewayToken: &nodev1.SealedSecret{Ciphertext: []byte{1}}},
+		"device":   {DeviceCredential: &nodev1.SealedSecret{Ciphertext: []byte{1}}},
+		"model":    {ModelCredential: &nodev1.SealedSecret{Ciphertext: []byte{1}}},
 	} {
 		t.Run("private-"+name, func(t *testing.T) {
 			altered := proto.Clone(spec).(*nodev1.InstanceSpec)
@@ -97,7 +97,7 @@ func TestSharedRuntimeProjectionPreservesFullSpecAndRejectsSealedOrUnknown(t *te
 		case "missing-envelope":
 			altered.Dsh.ReleaseEnvelope = nil
 		case "sealed":
-			altered.Secrets = &nodev1.Secrets{InstanceToken: &nodev1.SealedSecret{}}
+			altered.Secrets = &nodev1.Secrets{InstanceToken: &nodev1.SealedSecret{Ciphertext: []byte{1}}}
 		case "nested-unknown":
 			altered.Dsh.ProtoReflect().SetUnknown(protowire.AppendVarint(protowire.AppendTag(nil, 50000, protowire.VarintType), 1))
 		case "top-unknown":
