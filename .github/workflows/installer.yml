@@ -88,11 +88,11 @@ jobs:
           pnpm exec eslint scripts/client-release
           pnpm exec prettier --check scripts/client-release/*.mjs scripts/client-release/*.cjs
           pnpm --filter @auriga/installer lint && pnpm --filter @auriga/installer test
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: auth-broker
           path: dist/broker
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: auriga-dsh
           path: dist/plugin
