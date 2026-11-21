@@ -191,6 +191,9 @@ type prepareRun struct {
 	Cache      string // 旧套件输入（或其可写副本），挂载到 /prepare-cache；空则不用缓存
 	CacheRW    bool   // 仅 Java 需要可写（脚本向缓存写 maven/npm 内容）
 	Budget     buildBudget
+	// Extra 插在工具镜像之前的附加 docker 参数（deps fetch 用于只读挂载 caFile、
+	// file:// 依赖源，以及 allowPublic=false 时屏蔽公网 Go 代理与校验库）。
+	Extra []string
 }
 
 var proxyEnvNames = []string{"HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "http_proxy", "https_proxy", "no_proxy"}
@@ -232,6 +235,7 @@ func prepareDockerArgs(run prepareRun, lookup func(string) (string, bool)) (args
 			args = append(args, "--env", "AURIGA_JAVA_PREP_CACHE_DIR="+onlineCacheDir)
 		}
 	}
+	args = append(args, run.Extra...)
 	args = append(args, run.Tool, "sh", onlineScriptDir+run.Kind+"-inputs.sh", "prepare", "/output")
 	return args, env
 }

@@ -12,6 +12,7 @@
 
 - **构建机能联网，改的是 Go / Web / Java 依赖**：用 `./auriga bundle --build --online --sign-key <站点构建私钥> --out <安装包.tar>`。它只对锁变化的生态联网收集新增依赖，再断网构建，并打印、写入新增依赖清单（安装包里的 `site-dependencies.json`）。详见 `./auriga bundle --help`。
 - **构建机不能联网，或改了系统包、Dockerfile 基础镜像**：目前仍需把变更发给维护方，由维护方出包含新依赖的套件（现场自制套件在后续版本提供）。
+- **用站点配置管理依赖缓存**：服务器上的 `/etc/auriga/site.json` 与 `sudo ./auriga deps status|fetch|import` 见离线包 `README-OFFLINE.md` 的“站点配置与依赖缓存”一节。
 
 被算作依赖锁的文件按文件名判定，包括：`go.mod`、`go.sum`、`go.work`、`go.work.sum`、`pom.xml`、`package.json`、`package-lock.json`、`pnpm-lock.yaml`、`pnpm-workspace.yaml`、`yarn.lock`、`bun.lock`、`uv.lock`、`poetry.lock`、`pyproject.toml`、`requirements.txt`、`*-requirements.txt`、`.npmrc`、`.nvmrc`、`.node-version`、`maven-wrapper.properties`、`maven.config`、`jvm.config`，以及名字以 `Dockerfile` 开头的文件。
 

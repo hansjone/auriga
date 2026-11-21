@@ -246,7 +246,12 @@ func readDevkitJSON(path string, output any) error {
 	if err != nil {
 		return err
 	}
-	name := filepath.Base(path)
+	return decodeDevkitJSON(filepath.Base(path), raw, output)
+}
+
+// decodeDevkitJSON 按 readDevkitJSON 的规则解析已读入内存的清单字节（调用方可先核对
+// 这份字节的摘要，再用同一份字节解析）。
+func decodeDevkitJSON(name string, raw []byte, output any) error {
 	if len(raw) > devkitJSONLimit {
 		return fmt.Errorf("%s 超过 %d 字节上限", name, devkitJSONLimit)
 	}
