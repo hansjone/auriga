@@ -425,11 +425,7 @@ button[aria-label="添加工作区"],button[aria-label="Add workspace"]{display:
               style: { minWidth: 0, maxWidth: '180px' },
             },
             ...options.map((row) =>
-              h(
-                'option',
-                { key: row.id, value: row.id },
-                row.name || row.id,
-              ),
+              h('option', { key: row.id, value: row.id }, row.name || row.id),
             ),
           ),
           error && h('span', { role: 'alert' }, error),

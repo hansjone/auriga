@@ -12,7 +12,7 @@ class SharedDshControllerExchangeUrlTest {
   void pathMountedExchangeIsReturnedRelativeToTheBrowserOrigin() {
     assertThat(
             SharedDshController.browserExchangeUrl(
-                URI.create("http://10.0.0.133:8080/i/" + POOL + "/_auriga/placement-ticket")))
+                URI.create("http://192.0.2.133:8080/i/" + POOL + "/_auriga/placement-ticket")))
         .isEqualTo("/i/" + POOL + "/_auriga/placement-ticket");
   }
 

@@ -9,9 +9,9 @@ import (
 
 func TestTrustedPathAliasOriginOnlyForVerifiedAliasAndPathMount(t *testing.T) {
 	g := &Gateway{}
-	path := InstanceTarget{Origin: "http://10.0.0.133:8080", Mount: "/i/" + sharedTestID + "/"}
+	path := InstanceTarget{Origin: "http://192.0.2.133:8080", Mount: "/i/" + sharedTestID + "/"}
 	request := func(alias string, origins ...string) *http.Request {
-		r := httptest.NewRequest("POST", "http://10.0.0.133:8080"+path.Mount+"_auriga/placement-ticket", nil)
+		r := httptest.NewRequest("POST", "http://192.0.2.133:8080"+path.Mount+"_auriga/placement-ticket", nil)
 		for _, o := range origins {
 			r.Header.Add("Origin", o)
 		}

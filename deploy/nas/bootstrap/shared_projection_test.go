@@ -60,7 +60,7 @@ func TestSharedEnterpriseProjectionUsesOnlyApprovedPublicFields(t *testing.T) {
 
 func TestSharedRuntimeProjectionPreservesFullSpecAndRejectsSealedOrUnknown(t *testing.T) {
 	// This is synthetic data for conversion only, never a verified runtime proof.
-	spec := &nodev1.InstanceSpec{TenantId: "fixture-tenant", OwnerId: "fixture-owner", Generation: 37, Runtime: nodev1.RuntimeKind_RUNTIME_KIND_DOCKER, Dsh: &nodev1.DshRuntime{Version: "fixture", Image: "fixture.invalid/dsh@sha256:" + strings.Repeat("a", 64), ReleaseEnvelope: &nodev1.RuntimeReleaseEnvelope{ReleaseSequence: 29, ArchiveDigest: "fixture-digest"}}, Labels: map[string]string{"fixture": "preserved"}, ResourceSelectionRevision: 42}
+	spec := &nodev1.InstanceSpec{TenantId: "fixture-tenant", Generation: 37, Runtime: nodev1.RuntimeKind_RUNTIME_KIND_DOCKER, Dsh: &nodev1.DshRuntime{Version: "fixture", Image: "fixture.invalid/dsh@sha256:" + strings.Repeat("a", 64), ReleaseEnvelope: &nodev1.RuntimeReleaseEnvelope{ReleaseSequence: 29, ArchiveDigest: "fixture-digest"}}, Labels: map[string]string{"fixture": "preserved"}, ResourceSelectionRevision: 42}
 	spec.Resources = &nodev1.Resources{CpuMillis: 250, MemoryMb: 384, DiskGb: 17, Pids: 91}
 	encode := func(s *nodev1.InstanceSpec) []byte {
 		raw, err := proto.Marshal(s)
@@ -92,7 +92,7 @@ func TestSharedRuntimeProjectionPreservesFullSpecAndRejectsSealedOrUnknown(t *te
 			}
 		})
 	}
-	for name, altered := range map[string]*nodev1.InstanceSpec{"missing-envelope": proto.Clone(spec).(*nodev1.InstanceSpec), "sealed": proto.Clone(spec).(*nodev1.InstanceSpec), "nested-unknown": proto.Clone(spec).(*nodev1.InstanceSpec), "top-unknown": proto.Clone(spec).(*nodev1.InstanceSpec)} {
+	for name, altered := range map[string]*nodev1.InstanceSpec{"missing-envelope": proto.Clone(spec).(*nodev1.InstanceSpec), "sealed": proto.Clone(spec).(*nodev1.InstanceSpec), "nested-unknown": proto.Clone(spec).(*nodev1.InstanceSpec), "top-unknown": proto.Clone(spec).(*nodev1.InstanceSpec), "personal-owner": proto.Clone(spec).(*nodev1.InstanceSpec)} {
 		switch name {
 		case "missing-envelope":
 			altered.Dsh.ReleaseEnvelope = nil
@@ -102,6 +102,9 @@ func TestSharedRuntimeProjectionPreservesFullSpecAndRejectsSealedOrUnknown(t *te
 			altered.Dsh.ProtoReflect().SetUnknown(protowire.AppendVarint(protowire.AppendTag(nil, 50000, protowire.VarintType), 1))
 		case "top-unknown":
 			altered.ProtoReflect().SetUnknown(protowire.AppendVarint(protowire.AppendTag(nil, 50001, protowire.VarintType), 1))
+		case "personal-owner":
+			// A shared template has no owner; personal runtime state is refused.
+			altered.OwnerId = "fixture-owner"
 		}
 		t.Run(name, func(t *testing.T) {
 			out, err := sharedRuntimeSpecJSON(encode(altered))
