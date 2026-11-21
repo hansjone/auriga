@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/ed25519"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/url"
 	"strings"
@@ -32,14 +33,17 @@ func (s *Server) sharedRequest(r *http.Request, id, path string) (*http.Request,
 		}
 	}
 	if len(values) != 1 {
+		s.cfg.Logger.Warn("shared identity step failed", "step", "header-count", "count", len(values))
 		return nil, nil, errSharedInvalid
 	}
 	c, err := sharedVerify(values[0], e.Keys, true, s.cfg.Now().Unix())
 	if err != nil {
+		s.cfg.Logger.Warn("shared identity step failed", "step", "verify", "reason", err.Error())
 		return nil, nil, err
 	}
 	b := c["binding"].(map[string]any)
 	if b["physicalInstanceId"] != id || (b["mode"] != "shared" && b["mode"] != "dedicated") || c["method"] != r.Method || c["canonicalPath"] != path {
+		s.cfg.Logger.Warn("shared identity step failed", "step", "binding", "instance", b["physicalInstanceId"] == id, "method", c["method"] == r.Method, "path", c["canonicalPath"] == path)
 		return nil, nil, errSharedInvalid
 	}
 	if !sharedBrowserRequest(r, path) || (b["mode"] == "dedicated" && strings.HasPrefix(path, "/auriga/shared/")) || (b["mode"] == "shared" && strings.HasPrefix(path, "/auriga/dedicated/")) {
@@ -53,6 +57,7 @@ func (s *Server) sharedRequest(r *http.Request, id, path string) (*http.Request,
 	}
 	cleanup := func() { stop(); cancel() }
 	if err = e.Authority.Check(ctx, b, sharedString(c["platformSessionId"])); err != nil || ctx.Err() != nil {
+		s.cfg.Logger.Warn("shared identity step failed", "step", "authority", "error", fmt.Sprint(err))
 		cleanup()
 		if err != nil {
 			return nil, nil, err

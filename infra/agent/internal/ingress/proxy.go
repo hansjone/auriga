@@ -96,6 +96,8 @@ func (s *Server) serveInstanceProxy(w http.ResponseWriter, r *http.Request, inst
 				status = 503
 				code = "common.unavailable"
 			}
+			// Only the stable reason code: never the identity header or claims.
+			s.cfg.Logger.Warn("shared identity rejected", "instance", instanceID, "reason", err.Error())
 			writeProblem(w, status, code, http.StatusText(status), "shared identity rejected")
 			return
 		}
