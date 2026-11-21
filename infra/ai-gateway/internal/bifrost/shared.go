@@ -241,9 +241,9 @@ func captureSharedUsage(raw []byte, usage *sharedmodel.SharedUsage) error {
 	var response struct {
 		Error json.RawMessage `json:"error"`
 		Usage *struct {
-			Input  *int64 `json:"prompt_tokens"`
-			Output *int64 `json:"completion_tokens"`
-			Total  *int64 `json:"total_tokens"`
+			Input             *int64 `json:"prompt_tokens"`
+			Output            *int64 `json:"completion_tokens"`
+			Total             *int64 `json:"total_tokens"`
 			CompletionDetails *struct {
 				Reasoning *int64 `json:"reasoning_tokens"`
 			} `json:"completion_tokens_details"`

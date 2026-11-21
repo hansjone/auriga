@@ -137,7 +137,13 @@ func (a *sharedWorkspaceAuthority) Check(ctx context.Context, binding map[string
 		return errors.New("shared.revoked")
 	}
 	a.resolveMu.Lock()
-	a.resolveCache[key] = sharedResolveHit{at: time.Now(), response: proto.Clone(result).(*workspacev1.ResolveSharedDshResponse)}
+	stored := time.Now()
+	for k, hit := range a.resolveCache {
+		if stored.Sub(hit.at) > sharedResolveReuse {
+			delete(a.resolveCache, k)
+		}
+	}
+	a.resolveCache[key] = sharedResolveHit{at: stored, response: proto.Clone(result).(*workspacev1.ResolveSharedDshResponse)}
 	a.resolveMu.Unlock()
 	return nil
 }

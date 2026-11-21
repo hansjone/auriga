@@ -372,10 +372,11 @@ type responseState struct {
 func newResponseState(model string, emit func(any) error) *responseState {
 	return &responseState{model: model, textIndex: -1, tools: map[int]*responseTool{}, emit: emit}
 }
+
 var (
-	errInvalidDelta   = errors.New("invalid_delta")
-	errUsageMismatch  = errors.New("usage_mismatch")
-	errInvalidStream  = errors.New("invalid completion stream")
+	errInvalidDelta  = errors.New("invalid_delta")
+	errUsageMismatch = errors.New("usage_mismatch")
+	errInvalidStream = errors.New("invalid completion stream")
 )
 
 func modelAcceptStage(err error) string {
@@ -414,9 +415,9 @@ func (s *responseState) accept(raw []byte) error {
 			Finish *string `json:"finish_reason"`
 		} `json:"choices"`
 		Usage *struct {
-			Input  int64 `json:"prompt_tokens"`
-			Output int64 `json:"completion_tokens"`
-			Total  int64 `json:"total_tokens"`
+			Input             int64 `json:"prompt_tokens"`
+			Output            int64 `json:"completion_tokens"`
+			Total             int64 `json:"total_tokens"`
 			CompletionDetails *struct {
 				Reasoning *int64 `json:"reasoning_tokens"`
 			} `json:"completion_tokens_details"`

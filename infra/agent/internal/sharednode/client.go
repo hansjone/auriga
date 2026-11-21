@@ -40,6 +40,7 @@ type Settings struct {
 	SharedModel      *Endpoint `json:"sharedModel,omitempty"`
 	SharedMessages   *Endpoint `json:"sharedMessages,omitempty"`
 }
+
 // Same-generation Resolve reuse (plugin AUTHORITY_REUSE_MS). Watch ticks once
 // per second; ≤1s coalesce cuts ResolveSharedDsh without delaying revoke.
 const resolveReuse = time.Second
@@ -345,7 +346,13 @@ func (c *Client) Check(ctx context.Context, b map[string]any, session string) er
 		return errors.New("shared.revoked")
 	}
 	c.resolveMu.Lock()
-	c.resolveCache[key] = resolveHit{at: time.Now(), response: proto.Clone(out).(*workspacev1.ResolveSharedDshResponse)}
+	stored := time.Now()
+	for k, hit := range c.resolveCache {
+		if stored.Sub(hit.at) > resolveReuse {
+			delete(c.resolveCache, k)
+		}
+	}
+	c.resolveCache[key] = resolveHit{at: stored, response: proto.Clone(out).(*workspacev1.ResolveSharedDshResponse)}
 	c.resolveMu.Unlock()
 	return nil
 }
