@@ -147,7 +147,10 @@ func nasSharedRuntime(args []string, stdout io.Writer) error {
 		}
 		rotationKind = kind
 	}
-	receipt, files, err := readSharedInstallation(*base, generation, baseHash)
+	// set-profile replaces the stored profile: integrity (receipt, digests,
+	// events, modes) is still verified, but the outgoing profile is not held
+	// to the newer production policy that only its replacement must satisfy.
+	receipt, files, err := readSharedInstallationPolicy(*base, generation, baseHash, *action == "set-profile" && !hasRotation)
 	if err != nil {
 		return err
 	}
@@ -927,6 +930,10 @@ func stageSharedInstallation(base, out, baseHash, adapter, adapterSHA, profile, 
 }
 
 func readSharedInstallation(base, generation, baseHash string) (*sharedInstallationReceipt, map[string][]byte, error) {
+	return readSharedInstallationPolicy(base, generation, baseHash, false)
+}
+
+func readSharedInstallationPolicy(base, generation, baseHash string, replacingProfile bool) (*sharedInstallationReceipt, map[string][]byte, error) {
 	raw, err := runtimeReadLeaf(filepath.Join(generation, "installation.receipt"), 0600, 65536)
 	if err != nil {
 		return nil, nil, err
@@ -1001,7 +1008,7 @@ func readSharedInstallation(base, generation, baseHash string) (*sharedInstallat
 	if err != nil || !bytes.Equal(policy, files["public/enterprise-policy.json"]) {
 		return nil, nil, fmt.Errorf("shared public policy differs from approved private adapter")
 	}
-	if err := installation.ValidateSharedProfile(files["public/profile.yml"]); err != nil {
+	if err := installation.ValidateSharedProfile(files["public/profile.yml"]); err != nil && !replacingProfile {
 		return nil, nil, fmt.Errorf("stored shared profile violates production policy: %w", err)
 	}
 	if err := sharedApprovedModelID(receipt.Model); err != nil {
