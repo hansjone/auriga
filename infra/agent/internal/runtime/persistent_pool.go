@@ -225,6 +225,15 @@ func (m *PersistentPools) ensureMode(ctx context.Context, binding *nodev1.Shared
 	if err != nil {
 		return err
 	}
+	// A restarted Agent has a fresh mount namespace. Attach the node-owned pool
+	// filesystem before touching any member path; mounting is idempotent.
+	if backend, ok := layout.Quota.(interface {
+		MountPool(context.Context, string) (storage.PoolMount, error)
+	}); ok {
+		if _, err = backend.MountPool(ctx, pool); err != nil {
+			return err
+		}
+	}
 	for _, member := range bindings {
 		path, err := layout.Workspace(pool, member.TenantId, member.MemberId, member.Epoch)
 		if err != nil {

@@ -384,3 +384,49 @@ func TestPersistentPoolExpiredAuthorityProducesActualStopReceipt(t *testing.T) {
 		}
 	}
 }
+
+// restartedFilesystem models a new Agent mount namespace: member paths are
+// absent until the node mounts the pool filesystem again.
+type restartedFilesystem struct {
+	*persistentFilesystem
+	hidden string
+}
+
+func (s *restartedFilesystem) MountPool(ctx context.Context, pool string) (storage.PoolMount, error) {
+	if s.hidden != "" {
+		if err := os.Rename(s.hidden, filepath.Join(s.root, pool, "members")); err != nil {
+			return storage.PoolMount{}, err
+		}
+		s.hidden = ""
+	}
+	return s.persistentFilesystem.MountPool(ctx, pool)
+}
+
+func TestPersistentPoolRemountsMembersBeforeTouchingWorkspacesAfterRestart(t *testing.T) {
+	m, _, quota := persistentFixture(t)
+	fs := &restartedFilesystem{persistentFilesystem: &persistentFilesystem{persistentQuota: quota, root: m.Pools.Layout.Root}}
+	m.Pools.Layout.Quota = fs
+	command := persistentIntent(1)
+	ctx := context.Background()
+	if err := m.View(ctx, persistentView(command)); err != nil {
+		t.Fatal(err)
+	}
+	if receipt, err := m.Prepare(ctx, command); err != nil || receipt.Outcome != "confirmed" {
+		t.Fatalf("first start: %v", err)
+	}
+	members := filepath.Join(m.Pools.Layout.Root, command.Binding.PhysicalInstanceId, "members")
+	fs.hidden = members + ".unmounted"
+	if err := os.Rename(members, fs.hidden); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(members, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(members); err != nil {
+		t.Fatal(err)
+	}
+	m.ResetViews()
+	if err := m.View(ctx, persistentView(command)); err != nil {
+		t.Fatalf("reconnect touched member paths before remounting the pool: %v", err)
+	}
+}
