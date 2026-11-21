@@ -117,7 +117,7 @@ export function createSharedPoolLauncher({
     });
     if (readFile(entryRoot, 'utf8').trim() !== '[]')
       throw new Error('Shared boot root must be immutable and empty');
-    if (!Array.isArray(rows) || rows.length !== 60)
+    if (!Array.isArray(rows) || rows.length !== 65)
       throw new Error('Complete shared profile required');
     const listeners = rows.filter(
       (row) => row.name === '@deepseek-ai/dsh-host-webserver',

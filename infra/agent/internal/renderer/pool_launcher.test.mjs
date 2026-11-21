@@ -188,7 +188,7 @@ test('renderer -> fixed normalizer -> public rc.3 insert composition is the actu
     bootSdk.composeEntries([observed.args[2]]),
     observed.normalized,
   );
-  assert.equal(observed.normalized.length, 60);
+  assert.equal(observed.normalized.length, 65);
   assert.equal(
     observed.normalized.filter((row) => row.name.startsWith('@deepseek-ai/'))
       .length,
