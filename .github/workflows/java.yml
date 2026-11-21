@@ -2,7 +2,9 @@ name: Java
 on:
   push:
     branches: [main]
+    paths-ignore: ['docs/**', '*.md', 'LICENSE', 'LICENSING.md', 'CLA.md']
   pull_request:
+    paths-ignore: ['docs/**', '*.md', 'LICENSE', 'LICENSING.md', 'CLA.md']
   workflow_dispatch:
 permissions:
   contents: read
