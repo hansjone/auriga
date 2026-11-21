@@ -2,9 +2,11 @@ package storage
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 )
@@ -126,4 +128,35 @@ func (s *Ext4Images) Release(ctx context.Context, path string) error {
 		clear = clearExt4ProjectQuota
 	}
 	return s.IDs.Release(path, func(id uint32) error { return clear(fs.Device, id) })
+}
+
+// loopAttachment is one losetup --json row identified by backing inode and
+// device. The kernel's backing-file path string depends on the reader's mount
+// namespace (a restarted Agent sees a detached prefix), so it is not identity.
+type loopAttachment struct {
+	Name     string          `json:"name"`
+	BackIno  json.RawMessage `json:"back-ino"`
+	BackDevi string          `json:"back-maj:min"`
+}
+
+// selectPoolLoop returns the single attached loop whose backing file is the
+// image inode, "" when none is attached, or an error for any ambiguity.
+func selectPoolLoop(devices []loopAttachment, ino uint64, major, minor uint32) (string, error) {
+	want := fmt.Sprintf("%d:%d", major, minor)
+	found := ""
+	for _, d := range devices {
+		raw := strings.Trim(string(d.BackIno), `"`)
+		n, err := strconv.ParseUint(raw, 10, 64)
+		if err != nil || strings.TrimSpace(d.BackDevi) == "" {
+			return "", fmt.Errorf("ambiguous pool loop device")
+		}
+		if n != ino || strings.TrimSpace(d.BackDevi) != want {
+			return "", fmt.Errorf("ambiguous pool loop device")
+		}
+		if found != "" {
+			return "", fmt.Errorf("ambiguous pool loop device")
+		}
+		found = d.Name
+	}
+	return found, nil
 }

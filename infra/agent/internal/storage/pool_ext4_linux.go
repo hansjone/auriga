@@ -124,39 +124,51 @@ func mountExt4Image(ctx context.Context, image, root string, size int64, mkfs, l
 	if err := verifyExt4Image(image, size); err != nil {
 		return "", err
 	}
-	output, err := storageCommand(ctx, losetup, "--json", "--list", "--associated", image, "--output", "NAME,BACK-FILE")
+	var imageStat unix.Stat_t
+	if err := unix.Stat(image, &imageStat); err != nil {
+		return "", err
+	}
+	backIno, backMajor, backMinor := uint64(imageStat.Ino), unix.Major(uint64(imageStat.Dev)), unix.Minor(uint64(imageStat.Dev))
+	attached := func(args ...string) ([]loopAttachment, error) {
+		output, err := storageCommand(ctx, losetup, append([]string{"--json", "--list"}, append(args, "--output", "NAME,BACK-INO,BACK-MAJ:MIN")...)...)
+		if err != nil {
+			return nil, err
+		}
+		var loops struct {
+			Devices []loopAttachment `json:"loopdevices"`
+		}
+		if len(strings.TrimSpace(string(output))) == 0 {
+			return nil, nil
+		}
+		if err = json.Unmarshal(output, &loops); err != nil {
+			return nil, err
+		}
+		return loops.Devices, nil
+	}
+	devices, err := attached("--associated", image)
 	if err != nil {
 		return "", err
 	}
-	var loops struct {
-		Devices []struct {
-			Name     string `json:"name"`
-			BackFile string `json:"back-file"`
-		} `json:"loopdevices"`
-	}
-	if err = json.Unmarshal(output, &loops); err != nil {
+	device, err := selectPoolLoop(devices, backIno, backMajor, backMinor)
+	if err != nil {
 		return "", err
 	}
-	device := ""
-	if len(loops.Devices) == 0 {
-		output, err = storageCommand(ctx, losetup, "--find", "--show", "--nooverlap", image)
+	if device == "" {
+		output, err := storageCommand(ctx, losetup, "--find", "--show", "--nooverlap", image)
 		if err != nil {
 			return "", err
 		}
 		device = strings.TrimSpace(string(output))
-	} else if len(loops.Devices) == 1 && filepath.Clean(loops.Devices[0].BackFile) == image {
-		device = loops.Devices[0].Name
 	}
 	if !loopDevice.MatchString(device) {
 		return "", fmt.Errorf("ambiguous pool loop device")
 	}
 	// Read back the actual kernel attachment after both allocation and recovery.
-	output, err = storageCommand(ctx, losetup, "--json", "--list", device, "--output", "NAME,BACK-FILE")
+	devices, err = attached(device)
 	if err != nil {
 		return "", err
 	}
-	loops.Devices = nil
-	if err = json.Unmarshal(output, &loops); err != nil || len(loops.Devices) != 1 || loops.Devices[0].Name != device || filepath.Clean(loops.Devices[0].BackFile) != image {
+	if readback, err := selectPoolLoop(devices, backIno, backMajor, backMinor); err != nil || readback != device {
 		return "", fmt.Errorf("pool loop backing file readback mismatch")
 	}
 	var source, target unix.Stat_t
