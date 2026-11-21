@@ -528,3 +528,48 @@ func TestHostClaimsCarrierStaysOnOriginalProcessExecution(t *testing.T) {
 		t.Fatal("forged claims accepted")
 	}
 }
+
+func TestResponseStateAggregatorTerminalVariants(t *testing.T) {
+	ev := func(choice string, usage string) []byte {
+		u := ""
+		if usage != "" {
+			u = `,"usage":` + usage
+		}
+		return []byte(`{"id":"c","object":"chat.completion.chunk","model":"auto","choices":[` + choice + `]` + u + `}`)
+	}
+	state := newResponseState("auto", func(any) error { return nil })
+	for _, raw := range [][]byte{
+		ev(`{"index":0,"delta":{"role":"assistant","content":"hi"},"finish_reason":""}`, ""),
+		ev(`{"index":0,"delta":{},"finish_reason":"stop"}`, ""),
+		ev(`{"index":0,"delta":{"content":""},"finish_reason":"stop"}`, `{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}`),
+	} {
+		if e := state.accept(raw); e != nil {
+			t.Fatal(string(raw), e)
+		}
+	}
+	if e := state.complete(); e != nil || state.usage["totalTokens"] != int64(2) {
+		t.Fatal(e, state.usage)
+	}
+	for name, tail := range map[string][]byte{
+		"text after finish": ev(`{"index":0,"delta":{"content":"x"},"finish_reason":null}`, ""),
+		"other finish":      ev(`{"index":0,"delta":{},"finish_reason":"length"}`, ""),
+		"tool after finish": ev(`{"index":0,"delta":{"tool_calls":[{"index":0,"id":"t","function":{"name":"f"}}]}}`, ""),
+	} {
+		s := newResponseState("auto", func(any) error { return nil })
+		if e := s.accept(ev(`{"index":0,"delta":{"content":"a"},"finish_reason":"stop"}`, "")); e != nil {
+			t.Fatal(e)
+		}
+		e := s.accept(tail)
+		if !errors.Is(e, errInvalidDelta) || !strings.Contains(e.Error(), "after_finish") {
+			t.Fatal(name, e)
+		}
+	}
+	s := newResponseState("auto", func(any) error { return nil })
+	if e := s.accept(ev(`{"index":0,"delta":{},"finish_reason":"Weird Value!"}`, "")); !errors.Is(e, errInvalidDelta) || !strings.HasSuffix(e.Error(), "finish_reason=other") {
+		t.Fatal(e)
+	}
+	s = newResponseState("auto", func(any) error { return nil })
+	if e := s.accept(ev(`{"index":0,"delta":{},"finish_reason":"eos"}`, "")); e == nil || !strings.HasSuffix(e.Error(), "finish_reason=eos") {
+		t.Fatal(e)
+	}
+}

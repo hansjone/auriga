@@ -186,6 +186,8 @@ test('agentPresets list is global and select authorizes the named session', asyn
   );
   assert.equal(listed.ok, true);
   assert.deepEqual(dispatched[0][0], 'agentPresets/list');
+  // Gateway rejects a list call without the plain {args} envelope.
+  assert.deepEqual(dispatched[0][1], { args: {} });
   const selected = await native.call(
     f.peer,
     request('agentPresets/select', {

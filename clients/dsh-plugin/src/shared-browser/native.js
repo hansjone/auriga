@@ -156,7 +156,12 @@ export function createNativeBrowser({
     }
     if (!stream && endpoint === 'agentPresets/list') {
       exact(args, []);
-      return { endpoint, check: () => host.refresh(peer) };
+      // Gateway requires the {args} envelope even for an empty list request.
+      return {
+        endpoint,
+        payload: envelope.payload,
+        check: () => host.refresh(peer),
+      };
     }
     if (!stream && endpoint === 'agentPresets/select') {
       // Wire: Agent parameter projects to agentId; preset id is agentPreset.

@@ -262,9 +262,12 @@ function checkSharedBrowserCarrier(files) {
   // agentPreset string; adds agentPresets/list + agentPresets/select (select
   // authorizes agentId as own session). Empty create still uses host.create
   // (peer,{}). No URL/header/transport/identity source change.
+  // 2026-11-21 review (SHARED-AUTO-PRESET): agentPresets/list now forwards the
+  // already-validated empty {args} envelope (Gateway rejects a missing one);
+  // same endpoint, no new URL/header/transport/identity source.
   if (
     createHash('sha256').update(native).digest('hex') !==
-    '92527f0d407170165242820f19552bf989887aad8d180585c7b8cc39921fbe1d'
+    '844744b3433eba894b47ce147190b9e0f7bbdd63718c88cf327104c16a39d4b0'
   )
     reject();
   return true;

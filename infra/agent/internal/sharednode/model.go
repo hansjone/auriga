@@ -128,7 +128,11 @@ func (r *Relay) model(ctx context.Context, w http.ResponseWriter, raw []byte) er
 		}
 	}
 	if e != nil && callerContext.Err() == nil {
-		slog.WarnContext(callerContext, "shared model stream failed", "stage", stage)
+		detail := ""
+		if errors.Is(e, errInvalidDelta) {
+			detail = strings.TrimPrefix(e.Error(), errInvalidDelta.Error()+": ")
+		}
+		slog.WarnContext(callerContext, "shared model stream failed", "stage", stage, "detail", detail)
 		_ = emit(map[string]any{"type": "finish", "reason": map[string]any{"kind": "error", "failure": map[string]string{"code": "SERVER", "message": "Shared model stream unavailable"}}})
 	}
 	return nil
@@ -428,15 +432,31 @@ func (s *responseState) accept(raw []byte) error {
 	}
 	s.id = event.ID
 	for _, c := range event.Choices {
-		if c.Index != 0 || s.finish != "" || c.Delta.Role != "" && c.Delta.Role != "assistant" {
-			return errInvalidDelta
+		if c.Finish != nil && *c.Finish == "" {
+			// Some OpenAI-compatible aggregators send "" instead of null mid-stream.
+			c.Finish = nil
+		}
+		if c.Index != 0 {
+			return deltaFail("choice_index")
+		}
+		if c.Delta.Role != "" && c.Delta.Role != "assistant" {
+			return deltaFail("role")
 		}
 		// Safely discard reasoning parts; DSH Response has no reasoning block.
 		_ = c.Delta.ReasoningContent
 		_ = c.Delta.Reasoning
 		text, err := deltaText(c.Delta.Content)
 		if err != nil {
-			return errInvalidDelta
+			return deltaFail("content_type")
+		}
+		if s.finish != "" {
+			// Aggregators may repeat an empty terminal choice next to the usage
+			// chunk. Anything carrying content, tools or a different reason is
+			// still a protocol violation.
+			if text != "" || len(c.Delta.Tools) > 0 || c.Finish != nil && *c.Finish != s.finish {
+				return deltaFail("after_finish")
+			}
+			continue
 		}
 		if text != "" {
 			if s.textIndex < 0 {
@@ -448,7 +468,7 @@ func (s *responseState) accept(raw []byte) error {
 			}
 			s.text += text
 			if len(s.text) > maximum {
-				return errInvalidDelta
+				return deltaFail("text_size")
 			}
 			if e := s.emit(map[string]any{"type": "text-delta", "index": s.textIndex, "text": text}); e != nil {
 				return e
@@ -456,12 +476,12 @@ func (s *responseState) accept(raw []byte) error {
 		}
 		for _, call := range c.Delta.Tools {
 			if call.Index < 0 || call.Index >= 128 || call.Type != "" && call.Type != "function" {
-				return errInvalidDelta
+				return deltaFail("tool_index_type")
 			}
 			t := s.tools[call.Index]
 			if t == nil {
 				if call.ID == "" {
-					return errInvalidDelta
+					return deltaFail("tool_missing_id")
 				}
 				t = &responseTool{index: s.next, id: call.ID}
 				s.next++
@@ -470,12 +490,12 @@ func (s *responseState) accept(raw []byte) error {
 					return e
 				}
 			} else if call.ID != "" && call.ID != t.id {
-				return errInvalidDelta
+				return deltaFail("tool_id_changed")
 			}
 			t.name += call.Function.Name
 			t.args += call.Function.Arguments
 			if len(t.name) > 64 || len(t.args) > 262144 {
-				return errInvalidDelta
+				return deltaFail("tool_size")
 			}
 			chunk := map[string]any{"type": "tool-call-delta", "index": t.index, "id": t.id, "argumentsDelta": call.Function.Arguments}
 			if call.Function.Name != "" {
@@ -487,7 +507,7 @@ func (s *responseState) accept(raw []byte) error {
 		}
 		if c.Finish != nil {
 			if !has([]string{"stop", "length", "tool_calls", "content_filter"}, *c.Finish) {
-				return errInvalidDelta
+				return deltaFail("finish_reason=" + diagnosticToken(*c.Finish))
 			}
 			s.finish = *c.Finish
 		}
@@ -511,6 +531,24 @@ func (s *responseState) accept(raw []byte) error {
 		s.usage = map[string]any{"inputTokens": input, "outputTokens": output, "totalTokens": total}
 	}
 	return nil
+}
+
+// deltaFail keeps the error class for callers while carrying a fixed,
+// content-free reason for the operator log.
+func deltaFail(reason string) error { return fmt.Errorf("%w: %s", errInvalidDelta, reason) }
+
+// diagnosticToken logs upstream enum values only when they are short
+// lowercase identifiers; anything else is reported as "other".
+func diagnosticToken(value string) string {
+	if len(value) == 0 || len(value) > 32 {
+		return "other"
+	}
+	for _, r := range value {
+		if (r < 'a' || r > 'z') && r != '_' {
+			return "other"
+		}
+	}
+	return value
 }
 
 func deltaText(raw json.RawMessage) (string, error) {
