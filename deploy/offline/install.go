@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -39,6 +40,27 @@ type state struct {
 	DesktopPublicKeyFingerprint string            `json:"desktopPublicKeyFingerprint,omitempty"`
 	DesktopPublisherTenant      string            `json:"desktopPublisherTenant,omitempty"`
 	Runtime                     *installRuntime   `json:"runtime,omitempty"`
+	// Source 是安装来源（设计 D10）：signed-package（签名包 install，旧 state 缺省即此值）、
+	// local-deploy（auriga deploy 本机构建）、adopted（2e）。
+	Source string `json:"source,omitempty"`
+	// TrustUnpinned：首装没有可钉定的发行钥（D10），之后第一次签名包 upgrade 前须 trust add-*。
+	TrustUnpinned bool `json:"trustUnpinned,omitempty"`
+	// Current 是当前运行的发行序号，History 是保留的部署历史（local-deploy）。
+	Current int            `json:"current,omitempty"`
+	History []deployRecord `json:"history,omitempty"`
+}
+
+const (
+	sourceSignedPackage = "signed-package"
+	sourceLocalDeploy   = "local-deploy"
+	sourceAdopted       = "adopted"
+)
+
+func (s state) source() string {
+	if s.Source == "" {
+		return sourceSignedPackage
+	}
+	return s.Source
 }
 
 func parseInstall(args []string) (installOptions, error) {
@@ -125,12 +147,43 @@ func readState(data string) (state, error) {
 	return s, nil
 }
 
+// saveState 原子写 state：先写 state.json.new 并 fsync，再 rename，最后 fsync 目录。
+// current 指针随 state 一起切换，崩溃后要么是旧 state，要么是新 state。
 func saveState(s state) error {
 	path := filepath.Join(s.Data+".oneclick", "state.json")
-	if err := jsonFile(path+".new", s, 0600); err != nil {
+	raw, err := json.MarshalIndent(s, "", "  ")
+	if err != nil {
 		return err
 	}
-	return os.Rename(path+".new", path)
+	return writeFileAtomic(path, append(raw, '\n'), 0600)
+}
+
+func writeFileAtomic(path string, raw []byte, mode os.FileMode) error {
+	tmp := path + ".new"
+	_ = os.Remove(tmp)
+	f, err := openNoFollow(tmp, os.O_CREATE|os.O_EXCL|os.O_WRONLY, mode)
+	if err != nil {
+		return err
+	}
+	_, err = f.Write(raw)
+	if err == nil {
+		err = f.Sync()
+	}
+	if closeErr := f.Close(); err == nil {
+		err = closeErr
+	}
+	if err != nil {
+		_ = os.Remove(tmp)
+		return err
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		return err
+	}
+	if dir, err := os.Open(filepath.Dir(path)); err == nil {
+		_ = dir.Sync()
+		_ = dir.Close()
+	}
+	return nil
 }
 
 func nas(s state, operation string, args ...string) error {
@@ -197,11 +250,14 @@ func install(o installOptions) error {
 	if err := dockerReady(); err != nil {
 		return err
 	}
-	return withLock(o.Data, func() error {
+	return withLock(o.Data, "install", func() error {
 		if _, err := os.Lstat(o.Data + ".upgrade.json"); err == nil {
 			return errors.New("存在中断的升级，请先重新运行 upgrade 恢复")
 		}
 		if s, err := readState(o.Data); err == nil {
+			if s.source() != sourceSignedPackage {
+				return fmt.Errorf("当前安装来源为 %s，不能用 install 复核或接管；本机更新请用 auriga deploy", s.source())
+			}
 			if err := verifySums(s.Package); err != nil {
 				return err
 			}
@@ -275,71 +331,85 @@ func install(o installOptions) error {
 				return err
 			}
 		}
-		if err := generateSiteKey(filepath.Join(meta, "site-build-key")); err != nil {
-			return err
-		}
-		if key != "" {
-			// Local server builds use the same explicit registration mechanism.
-			pub := filepath.Join(meta, "site-build-key/site-public.pem")
-			fp, err := publicFingerprint(pub)
-			if err != nil {
-				return err
-			}
-			if err := registerSiteKey(&s, pub, fp); err != nil {
-				return err
-			}
-		}
-		if err := makeAccess(o, s); err != nil {
-			return err
-		}
-		images, err := loadImages(s.Package)
-		if err != nil {
-			return err
-		}
-		s.Images = images
-		if err := createLAN(); err != nil {
-			return err
-		}
-		if err := os.MkdirAll(o.Data, 0755); err != nil {
-			return err
-		}
-		if err := pinInstallRuntime(&s, prepared); err != nil {
-			return err
-		}
-		if err := makeEnv(s); err != nil {
-			return err
-		}
-		if err := saveState(s); err != nil {
-			return err
-		}
-		if err := nas(s, "init"); err != nil {
-			return err
-		}
-		if err := provisionResource(s); err != nil {
-			return err
-		}
-		s.ResourceReady = true
-		if err := saveState(s); err != nil {
-			return err
-		}
-		if err := configureDesktop(&s, o.DesktopPublicKey, o.DesktopPublisherTenant, o.DesktopConfirmFingerprint); err != nil {
-			return err
-		}
-		if err := saveState(s); err != nil {
-			return err
-		}
-		if err := nas(s, "preflight"); err != nil {
-			return err
-		}
-		if err := nas(s, "start", "--network-offline"); err != nil {
-			return err
-		}
-		return finishInstall(s)
+		return installSteps(&s, o, key != "", prepared, func(s state) (map[string]string, error) { return loadImages(s.Package) }, 5*time.Minute)
 	})
 }
 
+// installSteps 是首次安装的公共步骤，install 与 deploy 首装共用（设计 D10）：站点构建钥
+// 登记、访问配置、镜像、网络、stack.env、init、资源密钥、桌面配置、preflight、start，
+// 最后 finishInstall（首启 seed 翻转与二次 start）。调用前 s.Package 已是完整发行目录，
+// 信任已按各自规则钉定；register 表示已钉定发行钥、同时登记本机站点构建公钥。
+// images 给出本次安装使用的全部镜像（install 从包里载入，deploy 用本机构建结果）。
+func installSteps(s *state, o installOptions, register bool, prepared *preparedInstallRuntime, images func(state) (map[string]string, error), timeout time.Duration) error {
+	meta := s.Data + ".oneclick"
+	if err := generateSiteKey(filepath.Join(meta, "site-build-key")); err != nil {
+		return err
+	}
+	if register {
+		// Local server builds use the same explicit registration mechanism.
+		pub := filepath.Join(meta, "site-build-key/site-public.pem")
+		fp, err := publicFingerprint(pub)
+		if err != nil {
+			return err
+		}
+		if err := registerSiteKey(s, pub, fp); err != nil {
+			return err
+		}
+	}
+	if err := makeAccess(o, *s); err != nil {
+		return err
+	}
+	loaded, err := images(*s)
+	if err != nil {
+		return err
+	}
+	s.Images = loaded
+	if err := createLAN(); err != nil {
+		return err
+	}
+	if err := os.MkdirAll(o.Data, 0755); err != nil {
+		return err
+	}
+	if err := pinInstallRuntime(s, prepared); err != nil {
+		return err
+	}
+	if err := makeEnv(*s); err != nil {
+		return err
+	}
+	if err := saveState(*s); err != nil {
+		return err
+	}
+	if err := nas(*s, "init"); err != nil {
+		return err
+	}
+	if err := provisionResource(*s); err != nil {
+		return err
+	}
+	s.ResourceReady = true
+	if err := saveState(*s); err != nil {
+		return err
+	}
+	if err := configureDesktop(s, o.DesktopPublicKey, o.DesktopPublisherTenant, o.DesktopConfirmFingerprint); err != nil {
+		return err
+	}
+	if err := saveState(*s); err != nil {
+		return err
+	}
+	if err := nas(*s, "preflight"); err != nil {
+		return err
+	}
+	if err := nas(*s, "start", "--network-offline"); err != nil {
+		return err
+	}
+	return finishInstallFor(*s, timeout)
+}
+
 func finishInstall(s state) error {
-	if err := waitHealthy(s); err != nil {
+	return finishInstallFor(s, 5*time.Minute)
+}
+
+func finishInstallFor(s state, timeout time.Duration) error {
+	if err := waitHealthyFor(s, timeout); err != nil {
 		return err
 	}
 	envFile := filepath.Join(s.Data, "stack.env")
@@ -355,7 +425,7 @@ func finishInstall(s state) error {
 		if err := nas(s, "start", "--network-offline"); err != nil {
 			return err
 		}
-		if err := waitHealthy(s); err != nil {
+		if err := waitHealthyFor(s, timeout); err != nil {
 			return err
 		}
 	}

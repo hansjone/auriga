@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -176,10 +177,48 @@ func snapshotGitSourceContext(ctx context.Context, root, target string, excluded
 		if err != nil {
 			return nil, err
 		}
-		_, _ = fmt.Fprintf(hash, "%o %s %s\n", mode, sum, name)
+		writeSnapshotLine(hash, mode, sum, name)
 	}
 	info.SnapshotSHA256 = hex.EncodeToString(hash.Sum(nil))
 	return info, nil
+}
+
+// writeSnapshotLine 写 SnapshotSHA256 的逐文件记录：“mode sha256 路径”，mode 只有
+// 0644 与 0755 两种。snapshotGitSourceContext 与 directorySnapshotSHA256 共用。
+func writeSnapshotLine(w io.Writer, mode os.FileMode, sum, name string) {
+	_, _ = fmt.Fprintf(w, "%o %s %s\n", mode, sum, name)
+}
+
+// directorySnapshotSHA256 直接对一个已导出的源码目录（例如 git archive 的结果，没有
+// .git）计算 SnapshotSHA256：逐个普通文件按路径字节序记录 mode、sha256、路径。任何
+// 执行位都记为 0755，否则 0644；遇到符号链接或特殊文件拒绝。在 snapshotGitSourceContext
+// 写出的目录上，结果与该函数返回的 SnapshotSHA256 相同。
+func directorySnapshotSHA256(ctx context.Context, dir string) (string, error) {
+	if err := noSymlinks(dir); err != nil {
+		return "", err
+	}
+	names, err := regularFilesContext(ctx, dir)
+	if err != nil {
+		return "", err
+	}
+	hash := sha256.New()
+	for _, name := range names {
+		path := filepath.Join(dir, filepath.FromSlash(name))
+		st, err := os.Lstat(path)
+		if err != nil {
+			return "", err
+		}
+		mode := os.FileMode(0644)
+		if st.Mode().Perm()&0111 != 0 {
+			mode = 0755
+		}
+		sum, err := digestContext(ctx, path)
+		if err != nil {
+			return "", err
+		}
+		writeSnapshotLine(hash, mode, sum, name)
+	}
+	return hex.EncodeToString(hash.Sum(nil)), nil
 }
 
 func sourceVersion(info *provenance, r release, version string, build bool) error {

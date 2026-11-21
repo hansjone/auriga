@@ -313,7 +313,7 @@ func trustCommand(args []string) error {
 	if err != nil {
 		return err
 	}
-	return withLock(root, func() error {
+	return withLock(root, "trust", func() error {
 		s, err := readState(root)
 		if err != nil {
 			return err

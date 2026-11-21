@@ -1,0 +1,62 @@
+{
+  "schemaVersion": 1,
+  "cliCapability": 1,
+  "images": {
+    "tool-go": "golang:1.27.3@sha256:2920bb124f1a2e12a1d39f0cab756ae0068441ee1da7655dec7f5e374944095b",
+    "tool-web": "node:22-bookworm@sha256:e13726ca604184d7a91fcacab1fc09eefd642dc28e79ac34e85540dd93b78cfb",
+    "tool-java": "eclipse-temurin:25-jdk@sha256:b8705e936964c228dfce359e63dbf08f6c69cb380ed1d576b1f6b1064f15567d",
+    "base-agent": "debian:bookworm-slim@sha256:734a72b3d6142a71993b4bc580ca01d8ca687f77a2c422d96a961d3376b179bc",
+    "base-bifrost": "alpine:3.22@sha256:2e0b81d60597f449baa56dc25d355367869d2dca4cd57e866f1e2b52af3eb55f",
+    "base-edge": "gcr.io/distroless/static-debian12:nonroot@sha256:afa5c872c891853ca7fcf1f12c3edb23f7eeef36189728842dd51042ff57f7ab",
+    "base-platform": "eclipse-temurin:25-jre@sha256:a640968ae55027b322cedd5f8228b01a84baff0b9e9360e47601c6a111ba1699",
+    "base-operator": "python:3.13.8-slim-bookworm@sha256:61169c2bdb8e6bb44a8dfad33f569d324d52f079fded9a204b322a6fb9c9f799",
+    "service-postgres": "postgres:17@sha256:a63c1ea3f6a3a5a1621f97d2aba3b30faecfab4224c1b0000cc85ced57bb1939",
+    "service-nats": "nats:2.10-alpine@sha256:b83efabe3e7def1e0a4a31ec6e078999bb17c80363f881df35edc70fcb6bb927",
+    "service-registry": "registry:2@sha256:a3d8aaa63ed8681a604f1dea0aa03f100d5895b6a58ace528858a7b332415373"
+  },
+  "services": {
+    "agent": {
+      "stage": [
+        { "kind": "go", "files": ["auriga-agent"] },
+        { "kind": "system" },
+        { "kind": "source", "sources": { "agent-entrypoint.sh": "deploy/nas/docker/agent-entrypoint.sh" } }
+      ]
+    },
+    "bifrost": {
+      "stage": [
+        { "kind": "go", "files": ["bifrost"] },
+        { "kind": "system" },
+        {
+          "kind": "source",
+          "sources": {
+            "LICENSE": "third_party/bifrost/LICENSE",
+            "THIRD_PARTY_NOTICES.md": "third_party/bifrost/THIRD_PARTY_NOTICES.md",
+            "config.json": "deploy/nas/bifrost/config.json"
+          }
+        }
+      ]
+    },
+    "edge": {
+      "stage": [
+        {
+          "kind": "go",
+          "files": ["auriga-edge", "auriga-ai-gateway", "auriga-egress", "auriga-network-broker", "auriga-network-probe", "auriga-panel"]
+        },
+        { "kind": "web", "dirs": ["panel", "portal", "admin"] },
+        { "kind": "dirs", "dirs": ["directories/policies", "directories/reports"] }
+      ]
+    },
+    "platform": {
+      "stage": [
+        { "kind": "java", "files": ["platform.jar"] },
+        { "kind": "system" }
+      ]
+    },
+    "operator": {
+      "stage": [
+        { "kind": "system", "checkSourceLocks": true },
+        { "kind": "source", "sources": { "requirements.txt": "deploy/nas/test/admin-bootstrap-requirements.txt" } }
+      ]
+    }
+  }
+}

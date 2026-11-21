@@ -135,6 +135,9 @@ func upgradeAllowed(data, archive string, allow bool) error {
 	if err != nil {
 		return err
 	}
+	if s.source() != sourceSignedPackage {
+		return fmt.Errorf("当前安装来源为 %s：签名包 upgrade 接入 deploy 的发行目录布局属统一现场部署 2a（下），暂不支持；本机更新请用 auriga deploy", s.source())
+	}
 	if err := verifySums(s.Package); err != nil {
 		return err
 	}

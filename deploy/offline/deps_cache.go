@@ -642,7 +642,13 @@ func (r *depsResolver) toolImage(eco, stage string) (imageHit, error) {
 	if len(same) > 1 {
 		return imageHit{}, fmt.Errorf("%s 中有多个 %s 镜像（%s），无法确定用哪一个；请只保留一个", first, role, strings.Join(same, "、"))
 	}
-	hit := hits[0]
+	return stageImageHit(hits[0], stage)
+}
+
+// stageImageHit：来自套件且带归档的镜像先复制到 stage，在副本上核对签名清单摘要并
+// 算出镜像 ID；缓存里的镜像原样返回。
+func stageImageHit(hit imageHit, stage string) (imageHit, error) {
+	role := hit.Image.Role
 	if hit.kit == nil || hit.Tar == "" {
 		return hit, nil
 	}

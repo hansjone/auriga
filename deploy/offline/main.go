@@ -25,11 +25,15 @@ func main() {
 		if errors.Is(err, flag.ErrHelp) {
 			return
 		}
-		fmt.Fprintln(os.Stderr, "失败", err)
-		if flagFailure != "" {
-			fmt.Fprintf(os.Stderr, "运行 ./auriga %s --help 查看参数\n", flagFailure)
+		// 已写进日志与收据的错误（deploy/rollback）不再重复打印，只按退出码退出。
+		var reported *reportedError
+		if !errors.As(err, &reported) {
+			fmt.Fprintln(os.Stderr, "失败", err)
+			if flagFailure != "" {
+				fmt.Fprintf(os.Stderr, "运行 ./auriga %s --help 查看参数\n", flagFailure)
+			}
 		}
-		os.Exit(1)
+		os.Exit(exitCodeOf(err))
 	}
 }
 
@@ -79,6 +83,15 @@ func dispatch(args []string) error {
 	if args[0] == "deps" {
 		return depsCommand(args[1:])
 	}
+	if args[0] == "deploy" {
+		return deployCommand(args[1:], currentInvocation())
+	}
+	if args[0] == "rollback" {
+		return rollbackCommand(args[1:], currentInvocation())
+	}
+	if args[0] == "history" {
+		return historyCommand(args[1:], currentInvocation(), os.Stdout)
+	}
 	if args[0] == "install" {
 		o, err := parseInstall(args[1:])
 		if err != nil {
@@ -101,7 +114,7 @@ func dispatch(args []string) error {
 		if err != nil {
 			return err
 		}
-		return withLock(data, func() error { return upgradeAllowed(data, args[1], *allow) })
+		return withLock(data, "upgrade", func() error { return upgradeAllowed(data, args[1], *allow) })
 	}
 	data, err := dataArgs(args[0], args[1:])
 	if err != nil {
@@ -115,13 +128,14 @@ func dispatch(args []string) error {
 	case "doctor":
 		return doctor(s)
 	case "backup":
-		return withLock(data, func() error { _, err := backup(s); return err })
+		return withLock(data, "backup", func() error { _, err := backup(s); return err })
 	case "status":
+		printDeploySummary(os.Stdout, s)
 		return nas(s, args[0])
 	case "logs":
 		return compose(s, nil, "logs", "--tail", "100", "--timestamps")
 	case "stop":
-		return withLock(data, func() error { return nas(s, "stop") })
+		return withLock(data, "stop", func() error { return nas(s, "stop") })
 	default:
 		return errors.New("未知命令，运行 ./auriga --help")
 	}
@@ -184,11 +198,16 @@ func commandContext(parent context.Context, input io.Reader, output io.Writer, e
 }
 
 func commandContextLimit(parent context.Context, limit time.Duration, input io.Reader, output io.Writer, env []string, name string, args ...string) error {
+	return commandEnvLimit(parent, limit, input, output, append(os.Environ(), env...), name, args...)
+}
+
+// commandEnvLimit 同 commandContextLimit，但 fullEnv 是子进程的完整环境（不再追加继承的环境）。
+func commandEnvLimit(parent context.Context, limit time.Duration, input io.Reader, output io.Writer, fullEnv []string, name string, args ...string) error {
 	ctx, cancel := context.WithTimeout(parent, limit)
 	defer cancel()
 	c := exec.CommandContext(ctx, name, args...)
 	c.Stdin, c.Stdout, c.Stderr = input, output, os.Stderr
-	c.Env = append(os.Environ(), env...)
+	c.Env = fullEnv
 	c.WaitDelay = 3 * time.Second
 	if parent.Done() != nil {
 		setGateProcessGroup(c)
@@ -256,20 +275,25 @@ func packageRoot() (string, error) {
 	return filepath.Dir(filepath.Dir(exe)), nil
 }
 
-func withLock(data string, work func() error) error {
+// withLock 在统一站点锁（flock，见 acquireSiteLock）内执行 work；op 是写进锁文件的
+// 操作名，第二个任务据此说明正在进行的操作。
+func withLock(data, op string, work func() error) error {
 	if err := os.MkdirAll(filepath.Dir(data), 0755); err != nil {
 		return err
 	}
 	if err := trustedParent(filepath.Dir(data)); err != nil {
 		return err
 	}
-	lock := data + ".oneclick-lock"
-	if err := os.Mkdir(lock, 0700); err != nil {
-		return fmt.Errorf("已有操作或未清理的锁 %s，确认原进程已停止后处理 %w", lock, err)
+	release, err := siteLock(data+".oneclick-lock", op)
+	if err != nil {
+		return err
 	}
-	defer func() { _ = os.Remove(lock) }()
+	defer release()
 	return work()
 }
+
+// siteLock 是可注入点（跨平台单测替换）。
+var siteLock = acquireSiteLock
 
 func trustedParent(parent string) error {
 	if err := noSymlinks(parent); err != nil {
