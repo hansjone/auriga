@@ -75,6 +75,25 @@ func TestCLIExecutable(t *testing.T) {
 		}
 		return string(raw)
 	}
+	publicDER, err := x509.MarshalPKIXPublicKey(pub)
+	if err != nil {
+		t.Fatal(err)
+	}
+	publicPath := put("issuer-public.pem", pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: publicDER}))
+	var expectedRoot nodev1.ArtifactSigningKey
+	if err := proto.Unmarshal(rootRaw, &expectedRoot); err != nil {
+		t.Fatal(err)
+	}
+	metadataPath := filepath.Join(dir, "publisher-root.pb")
+	metadataArgs := []string{"publisher-root", "--public-key", publicPath, "--kid", expectedRoot.Kid, "--not-after", expectedRoot.NotAfter.AsTime().Format(time.RFC3339Nano), "--out", metadataPath}
+	if !strings.Contains(invoke(true, metadataArgs...), "prepared publisher-root") {
+		t.Fatal("missing public metadata preparation result")
+	}
+	metadataRaw, err := os.ReadFile(metadataPath)
+	if err != nil || !bytes.Equal(metadataRaw, rootRaw) {
+		t.Fatal("publisher-root executable differs from the root consumed by original sign/verify")
+	}
+	invoke(false, metadataArgs...)
 	if !strings.Contains(invoke(true, signArgs...), "verified body=sha256:") {
 		t.Fatal("missing verification result")
 	}

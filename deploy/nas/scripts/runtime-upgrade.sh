@@ -20,16 +20,30 @@ runtime_action() {
 }
 sh "$NAS_ROOT/scripts/preflight.sh"
 runtime_action stage
+_runtime_committed=0
+stop_failed_agent() {
+  run_compose --env-file "$AURIGA_DATA_ROOT/stack.env" stop agent \
+    || info 'Agent stop failed; inspect the fixed project before retry' >&2
+}
 rollback() {
   _exit=$?
   trap - EXIT
   if [ "$_exit" != 0 ]; then
+    if [ "$_runtime_committed" = 1 ]; then
+      stop_failed_agent
+      info 'runtime committed; shared projection/restart failed. The new pointer, sequence and proofs remain. Existing DSH processes are retained; retry this public upgrade command with the same bundle/image to finish activation.' >&2
+      exit "$_exit"
+    fi
     info 'runtime activation failed; restoring previous pointer (sequence high water retained)' >&2
     if runtime_action rollback; then
       run_compose --env-file "$AURIGA_DATA_ROOT/stack.env" up -d --wait --wait-timeout 120 --no-build --pull never platform agent \
         || info 'previous control services failed to recover; inspect status before retry' >&2
     else
-      info 'rollback refused; inspect activation state before further operations' >&2
+      # stage may have idempotently reused an already committed candidate, or
+      # commit may have renamed active.json before its directory fsync failed.
+      # The current process flag cannot distinguish these durable states.
+      stop_failed_agent
+      info 'rollback refused; Agent stop requested, pointer/sequence/proofs retained. Inspect activation state and retry the same approved bundle/image.' >&2
     fi
   fi
   exit "$_exit"
@@ -40,5 +54,12 @@ trap 'exit 143' TERM
 # Recreate only control consumers. Existing instance volumes and collab stay put.
 run_compose --env-file "$AURIGA_DATA_ROOT/stack.env" up -d --wait --wait-timeout 120 --no-build --pull never platform agent
 runtime_action commit
+_runtime_committed=1
+# Pending projection above retained only the verified committed predecessor.
+# Switch Agent's Host inputs to the newly committed original runtime now.
+if shared_present; then
+  shared_action project >/dev/null
+  run_compose --env-file "$AURIGA_DATA_ROOT/stack.env" up -d --wait --wait-timeout 120 --no-build --pull never platform agent
+fi
 trap - EXIT INT TERM
 info 'runtime activation committed; upgrade existing instances through the workspace API and verify them separately'

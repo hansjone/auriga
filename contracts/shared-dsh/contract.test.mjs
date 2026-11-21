@@ -60,6 +60,35 @@ const context = {
   allowRawAgentToken: true,
 };
 
+test('K: task.execute独立围栏不授企业材料且raw关闭不阻普通任务', () => {
+  const generic = { ...capability, scopes: ['task.execute'] };
+  const execution = {
+    ...context,
+    scope: 'task.execute',
+    allowRawAgentToken: false,
+  };
+  authorizeCapability(generic, session, execution);
+  for (const scope of ['credentials', 'outbound']) {
+    assert.throws(() =>
+      authorizeCapability(generic, session, { ...execution, scope }),
+    );
+    assert.throws(() =>
+      authorizeCapability(
+        { ...generic, scopes: ['task.execute', scope] },
+        session,
+        execution,
+      ),
+    );
+  }
+  assert.throws(() =>
+    authorizeCapability(
+      generic,
+      { ...session, authGeneration: session.authGeneration + 1 },
+      execution,
+    ),
+  );
+});
+
 test('K: shared schema正例与未知模式/字段/零代次负例', () => {
   validate('Binding', binding);
   for (const patch of [

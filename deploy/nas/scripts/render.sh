@@ -316,5 +316,7 @@ chmod 0600 "$CONFIG/agent.env"
 printf '%s' "$PG_BOOT" >"$SECRETS/pg_bootstrap_password"
 chmod 0600 "$SECRETS/pg_bootstrap_password"
 
+if shared_present; then shared_action project >/dev/null; fi
+
 info "render complete (configs under $CONFIG; secrets not printed)"
 info "note: platform.env embeds DB/NATS secrets as env vars — visible to anyone with docker inspect (M5)"

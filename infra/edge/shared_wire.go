@@ -123,6 +123,22 @@ func sharedDecode(raw []byte) (map[string]any, error) {
 	return m, nil
 }
 func sharedVerify(token string, keys map[string]ed25519.PublicKey, identity bool, now int64) (map[string]any, error) {
+	typ := "auriga-shared-ticket+jwt"
+	if identity {
+		typ = "auriga-shared-identity+jwt"
+	}
+	m, err := sharedVerifyPayload(token, keys, typ)
+	if err != nil || !sharedClaims(m, identity) {
+		return nil, errSharedInvalid
+	}
+	iat, exp := sharedInt(m["issuedAt"]), sharedInt(m["expiresAt"])
+	if iat > now || exp <= now || exp <= iat || exp-iat > 60 {
+		return nil, errors.New("shared.expired")
+	}
+	return m, nil
+}
+
+func sharedVerifyPayload(token string, keys map[string]ed25519.PublicKey, typ string) (map[string]any, error) {
 	if len(token) > 16384 {
 		return nil, errSharedInvalid
 	}
@@ -145,24 +161,12 @@ func sharedVerify(token string, keys map[string]ed25519.PublicKey, identity bool
 	if _, ok := sharedObject(h, "alg kid typ"); !ok {
 		return nil, errSharedInvalid
 	}
-	typ := "auriga-shared-ticket+jwt"
-	if identity {
-		typ = "auriga-shared-identity+jwt"
-	}
 	kid := sharedString(h["kid"])
 	key := keys[kid]
 	if h["alg"] != "EdDSA" || h["typ"] != typ || len(kid) == 0 || len(kid) > 128 || len(key) != ed25519.PublicKeySize || !ed25519.Verify(key, []byte(p[0]+"."+p[1]), parts[2]) {
 		return nil, errSharedInvalid
 	}
-	m, e := sharedDecode(parts[1])
-	if e != nil || !sharedClaims(m, identity) {
-		return nil, errSharedInvalid
-	}
-	iat, exp := sharedInt(m["issuedAt"]), sharedInt(m["expiresAt"])
-	if iat > now || exp <= now || exp <= iat || exp-iat > 60 {
-		return nil, errors.New("shared.expired")
-	}
-	return m, nil
+	return sharedDecode(parts[1])
 }
 func sharedSign(m map[string]any, kid string, key ed25519.PrivateKey) (string, error) {
 	// Normalize numbers to the same representation used by the verifier.

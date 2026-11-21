@@ -308,19 +308,7 @@ final class UacSessions {
             && !principal.context().name().equalsIgnoreCase(session.path("audience").asString())
         || !session.path("accountId").asString().equals(principal.subject())
         || !session.has("uacCredentialId")) throw new AurigaException(CommonErrors.UNAUTHENTICATED);
-    ObjectNode credential =
-        store.byId("uac_credential", session.path("uacCredentialId").asString(), false);
-    ObjectNode secret = open(credential.path("envelope"), session.path("providerId").asString());
-    ObjectNode result =
-        Json.object(
-            "empNo",
-            secret.path("empNo"),
-            "token",
-            secret.path("token"),
-            "updatedAt",
-            credential.path("updatedAt"),
-            "credentialVersion",
-            credential.path("version"));
+    ObjectNode result = material(session);
     // A browser user has no device identity. Only the authenticated device consumer
     // receives the complete frozen UacCredentialBinding; never invent a device ID.
     if (principal.type() == PrincipalType.DEVICE) {
@@ -339,12 +327,39 @@ final class UacSessions {
       binding.put("memberId", session.path("accountId").asString());
       binding.put("deviceId", principal.deviceId());
       binding.put("expiresAt", expiry.toString());
-      binding.set("credentialVersion", credential.path("version"));
+      binding.set("credentialVersion", result.path("credentialVersion"));
       result.set("binding", binding);
       new ContractSchemas()
           .validate(
               "plugin/shell-auth-control.schema.json#/$defs/ShellAuthHostCredentials", result);
     }
     return result;
+  }
+
+  /** Only the shared task authority calls this after live Workspace and task checks. */
+  ObjectNode sharedCredentials(String account, String platformSession) {
+    ObjectNode session = sessions.activeById(platformSession);
+    if (session == null
+        || !"portal".equals(session.path("audience").asString())
+        || session.has("managedInstance")
+        || !account.equals(session.path("accountId").asString())
+        || !session.has("uacCredentialId")) throw new AurigaException(CommonErrors.UNAUTHENTICATED);
+    return material(session);
+  }
+
+  private ObjectNode material(ObjectNode session) {
+    ObjectNode credential =
+        store.byId("uac_credential", session.path("uacCredentialId").asString(), false);
+    if (credential == null
+        || credential.path("invalid").asBoolean()
+        || !credential.path("accountId").equals(session.path("accountId"))
+        || !credential.path("providerId").equals(session.path("providerId")))
+      throw new AurigaException(CommonErrors.UNAUTHENTICATED);
+    ObjectNode secret = open(credential.path("envelope"), session.path("providerId").asString());
+    return Json.object(
+        "empNo", secret.path("empNo"),
+        "token", secret.path("token"),
+        "updatedAt", credential.path("updatedAt"),
+        "credentialVersion", credential.path("version"));
   }
 }

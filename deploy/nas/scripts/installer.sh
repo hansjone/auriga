@@ -4,13 +4,32 @@ set -eu
 . "$(CDPATH= cd -P -- "$(dirname -- "$0")" && pwd)/lib.sh"
 case "${1:-}" in
   init|render|render-core|render-collab|check|prepare-socket|export-env|activate-collab|runtime-path|runtime-stage|runtime-commit|runtime-rollback|collab-publish|collab-install|collab-status|collab-history-check|collab-history-check-pg|collab-startup-check|collab-path|collab-check|collab-stop|collab-prepare|collab-renew|collab-prepare-recovery|collab-recover-expired|collab-queue-prepare|collab-queue-export|collab-queue-import|collab-recover-pending|collab-pause|collab-resume|materials-stage|materials-commit|materials-rollback|materials-status|materials-check|materials-path|materials-project|materials-project-core) operation=$1 ;;
+  shared-source-check|shared-stage|shared-set-model|shared-set-profile|shared-commit|shared-project|shared-check|shared-path|shared-status|shared-replay-stage|shared-replay-prepare-path|shared-replay-final-path|shared-replay-provision|shared-replay-verify-final|shared-replay-close|shared-replay-check|shared-replay-rebind) operation=$1 ;;
   *) die 'Usage: sh installer.sh init|render|check|prepare-socket|export-env|activate-collab' ;;
 esac
 upgrade_bundle=
 upgrade_image=
 materials_expected=
 rotation_input=
+shared_base=; shared_profile=; shared_profile_sha=; shared_model=
+shared_adapter=; shared_adapter_sha=; shared_team=false
+shared_dedicated=; shared_dedicated_sha=
 case "$operation" in
+  shared-stage)
+    case "$#" in 8|10) ;; *) die 'shared stage requires seven fixed approval inputs and an optional dedicated pair' ;; esac
+    shared_base=$2; shared_profile=$3; shared_profile_sha=$4; shared_model=$5
+    shared_adapter=$6; shared_adapter_sha=$7; shared_team=$8
+    if [ "$#" = 10 ]; then shared_dedicated=$9; shared_dedicated_sha=${10}; fi
+    if [ -n "$shared_dedicated$shared_dedicated_sha" ]; then
+      [ -n "$shared_dedicated" ] && [ -n "$shared_dedicated_sha" ] || die 'dedicated profile and SHA256 must be supplied together'
+    fi ;;
+  shared-set-model)
+    [ "$#" = 3 ] || die 'shared set-model requires approved base hash and model ID'
+    shared_base=$2; shared_model=$3 ;;
+  shared-set-profile)
+    [ "$#" = 4 ] || die 'shared set-profile requires approved base hash, profile file and profile SHA256'
+    shared_base=$2; shared_profile=$3; shared_profile_sha=$4 ;;
+  shared-commit) [ "$#" = 2 ] || die 'shared commit requires approved base hash'; shared_base=$2 ;;
   collab-publish|collab-install|collab-recover-expired|collab-queue-import)
     [ "$#" = 2 ] || die 'collab rotation requires an approved directory'
     rotation_input=$2 ;;
@@ -23,7 +42,10 @@ case "$operation" in
   *) [ "$#" = 1 ] || die 'installer accepts exactly one operation' ;;
 esac
 load_stack_env >&2
-[ "${AURIGA_INSTALL_MODE:-host}" = container ] || die 'set AURIGA_INSTALL_MODE=container explicitly'
+case "$operation" in
+  shared-replay-provision|shared-replay-verify-final) ;;
+  *) [ "${AURIGA_INSTALL_MODE:-host}" = container ] || die 'set AURIGA_INSTALL_MODE=container explicitly' ;;
+esac
 require_cmd docker readlink stat mktemp
 validate_input_path() {
   _input=$1
@@ -67,6 +89,25 @@ if [ -n "$upgrade_bundle" ]; then
   validate_input_path "$upgrade_bundle"
   set -- "$@" --mount "type=bind,src=$upgrade_bundle,dst=$upgrade_bundle,readonly"
 fi
+if [ "$operation" = shared-stage ] || [ "$operation" = shared-set-profile ]; then
+  validate_input_path "$shared_profile"
+  set -- "$@" --mount "type=bind,src=$shared_profile,dst=$shared_profile,readonly"
+fi
+if [ "$operation" = shared-stage ]; then
+  if [ -n "$shared_dedicated" ]; then
+    validate_input_path "$shared_dedicated"
+    set -- "$@" --mount "type=bind,src=$shared_dedicated,dst=$shared_dedicated,readonly"
+  fi
+  case "$shared_team" in
+    true) [ -z "$shared_adapter$shared_adapter_sha" ] || die 'team-only and adapter inputs are mutually exclusive' ;;
+    false)
+      case "$shared_adapter" in
+        "$AURIGA_DATA_ROOT/config/materials/uac/adapter.json") ;; # original protected source already in the fixed data mount
+        *) validate_input_path "$shared_adapter"; set -- "$@" --mount "type=bind,src=$shared_adapter,dst=$shared_adapter,readonly" ;;
+      esac ;;
+    *) die 'invalid explicit team-only decision' ;;
+  esac
+fi
 if [ -n "$rotation_input" ]; then
   case "$rotation_input" in
     "$AURIGA_DATA_ROOT/config/collab-operations/requests/"*)
@@ -87,6 +128,10 @@ esac
 # A bootstrap located inside the writable root was already rejected above.
 # Only explicit collab operations receive the local socket. Normal offline
 # installation/render helpers still receive neither a socket nor a network.
+_installer_network=none
+case "$operation" in
+  shared-replay-provision|shared-replay-verify-final) _installer_network=auriga-nas-test_internal ;;
+esac
 (
   umask 077
   _run_tmp=$(installer_private_dir installer)
@@ -104,7 +149,7 @@ esac
   trap 'exit 130' INT
   trap 'exit 143' TERM
   docker run --rm --pull never --cidfile "$_run_tmp/cid" \
-    --network none --user 0:0 --cap-drop ALL \
+    --network "$_installer_network" --user 0:0 --cap-drop ALL \
     --cap-add CHOWN --cap-add DAC_OVERRIDE --cap-add FOWNER --cap-add SETUID --cap-add SETGID \
     --security-opt no-new-privileges:true --read-only --tmpfs /tmp:mode=1777,exec \
     "$@" --env "NAS_ROOT=$NAS_ROOT" --env "AURIGA_DATA_ROOT=$AURIGA_DATA_ROOT" \
@@ -112,6 +157,10 @@ esac
     --env "NAS_RUNTIME_UPGRADE_BUNDLE=$upgrade_bundle" --env "NAS_RUNTIME_UPGRADE_IMAGE=$upgrade_image" \
     --env "NAS_MATERIALS_EXPECTED_BASE=$materials_expected" \
     --env "NAS_COLLAB_ROTATION_INPUT=$rotation_input" \
+    --env "NAS_SHARED_EXPECTED_BASE=$shared_base" --env "NAS_SHARED_PROFILE=$shared_profile" \
+    --env "NAS_SHARED_PROFILE_SHA=$shared_profile_sha" --env "NAS_SHARED_MODEL=$shared_model" \
+    --env "NAS_SHARED_DEDICATED_PROFILE=$shared_dedicated" --env "NAS_SHARED_DEDICATED_PROFILE_SHA=$shared_dedicated_sha" \
+    --env "NAS_SHARED_ADAPTER=$shared_adapter" --env "NAS_SHARED_ADAPTER_SHA=$shared_adapter_sha" --env "NAS_SHARED_TEAM=$shared_team" \
     --env "NAS_COLLAB_CONFIG_DEGRADED=${NAS_COLLAB_CONFIG_DEGRADED:-0}" \
     --entrypoint /bin/sh "$_image" "$NAS_ROOT/scripts/installer-entry.sh" "$operation"
 )

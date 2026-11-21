@@ -1,6 +1,5 @@
 #!/usr/bin/env node
 import { spawnSync } from 'node:child_process';
-import { createHash } from 'node:crypto';
 import {
   mkdirSync,
   readFileSync,
@@ -16,6 +15,10 @@ import {
   withRealDshContext,
 } from './real-dsh-context.mjs';
 import { buildArgs, selectRepoDigest } from './runtime-image-input.mjs';
+import {
+  prepareRuntimeBase,
+  hashDependencyFile,
+} from '../real-dsh/dependencies.mjs';
 
 // prepare keeps metadata isolated until bootstrap has accepted the installation.
 const commandArgs = process.argv.slice(2);
@@ -24,13 +27,7 @@ if (commandArgs.filter((arg) => arg === '--local-only').length > 1)
 const localOnly = commandArgs.includes('--local-only');
 const args = buildArgs(commandArgs.filter((arg) => arg !== '--local-only'));
 const root = checkoutFromEntry(process.argv[1]);
-const nodeImage = process.env.NODE_IMAGE || '';
 const tag = `${args.image.fullRepository}:${args.image.tag}`;
-if (!/^node:22\.19\.0-bookworm-slim@sha256:[a-f0-9]{64}$/.test(nodeImage)) {
-  throw new Error(
-    'Set NODE_IMAGE=node:22.19.0-bookworm-slim@sha256:<reviewed manifest digest>',
-  );
-}
 function docker(args, capture = false) {
   const result = spawnSync('docker', args, {
     cwd: root,
@@ -55,7 +52,7 @@ function contextManifest(directory, prefix = '') {
         path: rel,
         mode: st.mode & 0o777,
         bytes: st.size,
-        sha256: createHash('sha256').update(readFileSync(path)).digest('hex'),
+        sha256: hashDependencyFile(path),
       });
     else
       throw new Error('Build context must contain only regular source files');
@@ -68,27 +65,23 @@ const contextInputs = await withRealDshContext(
   [`${recipePath}/Dockerfile`, ...commonInputs],
   (context) => {
     // Bind to the reviewed versions.json from the same snapshot Docker will use.
-    const pinned = JSON.parse(
-      readFileSync(join(context, recipePath, 'versions.json'), 'utf8'),
-    ).nodeImage;
-    if (!pinned) {
-      throw new Error(
-        'real-dsh/versions.json nodeImage is empty: record the base image digest and provenance first',
-      );
-    }
-    if (nodeImage !== pinned) {
-      throw new Error(
-        'NODE_IMAGE does not match the pinned real-dsh/versions.json nodeImage',
-      );
-    }
+    const dependencies = JSON.parse(
+      readFileSync(
+        join(context, 'runtime-dependencies/runtime-dependencies.json'),
+        'utf8',
+      ),
+    );
+    const base = prepareRuntimeBase(root, dependencies, docker);
     const inputs = contextManifest(context);
     docker([
       'build',
       '--platform=linux/amd64',
+      '--network=none',
+      '--pull=false',
       '--provenance=false',
       '--sbom=false',
       '--build-arg',
-      `NODE_IMAGE=${nodeImage}`,
+      `NODE_IMAGE=${base.from}`,
       '-f',
       join(context, recipePath, 'Dockerfile'),
       '-t',
@@ -145,10 +138,7 @@ const metadata = args.metadataOut
 mkdirSync(dirname(metadata), { recursive: true });
 writeFileSync(
   metadata,
-  JSON.stringify(
-    { image, localOnly, nodeImage, contextInputs, ...manifest },
-    null,
-    2,
-  ) + '\n',
+  JSON.stringify({ image, localOnly, contextInputs, ...manifest }, null, 2) +
+    '\n',
 );
 console.log(`Real DSH built: ${image}\nMetadata: ${metadata}`);

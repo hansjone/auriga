@@ -82,6 +82,20 @@ public class NetworkMailboxService {
   private final AuditLogger audit;
   private static final ScopedValue<TargetDecision> TARGET_DECISION = ScopedValue.newInstance();
 
+  private record SharedProducer(UUID context, UUID key, String digest) {}
+
+  private static final ScopedValue<SharedProducer> SHARED_PRODUCER = ScopedValue.newInstance();
+
+  /** Atomic producer receipt around the SAME store transaction and mailbox engine. */
+  StoreResult storeShared(StoreRequest request, String fields, UUID context, UUID key) {
+    String digest =
+        NetworkJson.digest(
+            NetworkJson.JSON.valueToTree(
+                Map.of("request", request, "fields", NetworkJson.parse(fields))));
+    return ScopedValue.where(SHARED_PRODUCER, new SharedProducer(context, key, digest))
+        .call(() -> store(request, fields));
+  }
+
   /**
    * A short-lived, in-request decision minted only by this service outside database transactions.
    */
@@ -441,6 +455,28 @@ public class NetworkMailboxService {
     return run(
         request.tenantId(),
         () -> {
+          if (SHARED_PRODUCER.isBound()) {
+            var producer = SHARED_PRODUCER.get();
+            jdbc.queryForList(
+                "SELECT pg_advisory_xact_lock(hashtextextended(?,0))",
+                request.tenantId() + ":shared-submit:" + producer.context() + ":" + producer.key());
+            var saved =
+                jdbc.queryForList(
+                    "SELECT request_digest,result_json FROM collab.network_shared_submit WHERE tenant_id=? AND context_id=? AND producer_key=?",
+                    request.tenantId(),
+                    producer.context(),
+                    producer.key());
+            if (!saved.isEmpty()) {
+              require(
+                  producer.digest().equals(saved.getFirst().get("request_digest")),
+                  NetworkErrors.CONFLICT);
+              return new StoreOutcome(
+                  NetworkJson.JSON.treeToValue(
+                      NetworkJson.parse(saved.getFirst().get("result_json").toString()),
+                      StoreResult.class),
+                  null);
+            }
+          }
           var source = prepared.source();
           var dispatch = prepared.dispatch();
           var firstTarget = request.targets().getFirst();
@@ -677,6 +713,16 @@ public class NetworkMailboxService {
             budget.complete(request.tenantId(), reservation.id(), result, null);
           }
           recordSubmission(auditContext, null);
+          if (SHARED_PRODUCER.isBound()) {
+            var producer = SHARED_PRODUCER.get();
+            jdbc.update(
+                "INSERT INTO collab.network_shared_submit(tenant_id,context_id,producer_key,request_digest,result_json) VALUES (?,?,?,?,?)",
+                request.tenantId(),
+                producer.context(),
+                producer.key(),
+                producer.digest(),
+                NetworkJson.canonical(NetworkJson.JSON.valueToTree(result)));
+          }
           return new StoreOutcome(result, null);
         });
   }

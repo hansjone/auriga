@@ -72,6 +72,20 @@ sudo ./bin/auriga-cli install --package /exports/auriga-site.tar \
   --verify-key /secure/site-build-key/site-public.pem --address 192.0.2.10
 ```
 
+全新现场需要同时启用 Docker DSH 模板时，把已经沿[运行时发行流程](docs/dev/runtime-release.md)签发、验签并导入批准 registry 的材料一并交给原安装命令：
+
+```sh
+sudo ./bin/auriga-cli install --package /exports/auriga-site.tar \
+  --verify-key /secure/site-build-key/site-public.pem --address 192.0.2.10 \
+  --runtime-bundle /media/runtime/release-1 \
+  --runtime-root /secure/operator-approved/runtime-root.pb \
+  --runtime-image '127.0.0.1:15000/auriga/dsh@sha256:<原manifest的64位小写摘要>'
+```
+
+三个 runtime 参数必须完整提供。根 protobuf 必须由维护者独立批准，不能自动信任 bundle 自带根；`--runtime-image` 是批准的完整仓库与 manifest 摘要，不是 Docker Config ID。安装器先核外层发行信任，再调用包内原 `runtime-release verify`；此路径不接受外层缺签名的 `--allow-unsigned` 例外。公开材料固定为 `<数据目录>.oneclick/runtime-inputs` 中的独立快照，原 `init` 验证同一快照后继续原资源密钥和对象目录装配。安装不替代 registry 导入、Node 入网、共享池启用或正常页面验收。
+
+中断后沿原参数重跑 `install`；可省略三个 runtime 参数并复用已固定快照，无须重新挂载原介质。若显式提供，只接受原路径、image 和相同材料字节；不同请求、快照或环境配置漂移均拒绝且保留现场。原 `init` 若因残缺目录拒绝，保留目录诊断，不覆盖材料。原本没有 runtime 首装记录的安装不能借此参数添加根或模板；已有现场仍走原受保护运行时升级流程，不删除 state、sealed base 或 Agent 账本重装。
+
 构建快照对已知 UTF-8 文本规范化 CRLF→LF、去除 shell BOM，并按签名清单恢复执行位；新增 .sh 按 0755。比较摘要不受纯换行变化影响；原始源码、签名清单不被改写，真实锁改动仍拒绝。UTF-16、单独 CR、大小写冲突、保留名、尾点/空格明确拒绝并指出文件。通用 .cmd/.bat/.ps1 文本副本保留其 CRLF，不代表支持在 Windows 运行 auriga。
 
 `devkit verify` 仅检查签名、依赖和源码匹配，不要求 Docker 可用或内存足够；`doctor --build` 单独检查 Linux Docker/Compose、cgroup 配额及内存。实际构建保留强制门禁：默认每个工具容器 4096MiB/2CPU，并预留 1024MiB 给运行服务，实际 MemAvailable 不足 5120MiB 时拒绝；用 `--memory-mib`/`--cpus` 显式调整。镜像层装配复用 Engine 的 BuildKit，不等于整个 Engine 的总 cgroup 隔离，严格总资源要求请用独立 Linux 构建机。

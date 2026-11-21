@@ -1,0 +1,111 @@
+syntax = "proto3";
+
+package auriga.iam.v1;
+
+import "auriga/node/v1/shared_dsh_contract.proto";
+
+option go_package = "github.com/hansjone/auriga/infra/gen/auriga/iam/v1;iamv1";
+option java_multiple_files = true;
+option java_package = "auriga.contracts.iam.v1";
+
+// Internal runtime relays authenticate the service, delegate the installation
+// tenant, and bind every request to their trusted host execution. Browser or
+// model input cannot choose the binding or task identifier.
+service SharedTaskService {
+  rpc BeginSharedTask(BeginSharedTaskRequest) returns (BeginSharedTaskResponse);
+  rpc IssueSharedCapability(IssueSharedCapabilityRequest) returns (IssueSharedCapabilityResponse);
+  rpc FinishSharedTask(FinishSharedTaskRequest) returns (FinishSharedTaskResponse);
+  rpc ResolveSharedTask(ResolveSharedTaskRequest) returns (ResolveSharedTaskResponse);
+  rpc AuthorizeSharedCapability(AuthorizeSharedCapabilityRequest) returns (AuthorizeSharedCapabilityResponse);
+  rpc ReadSharedCredentials(ReadSharedCredentialsRequest) returns (ReadSharedCredentialsResponse);
+  // Agent-only, server-side delegation. No enterprise material leaves IAM.
+  rpc ExecuteSharedOutbound(ExecuteSharedOutboundRequest) returns (ExecuteSharedOutboundResponse);
+}
+
+message BeginSharedTaskRequest {
+  auriga.node.v1.SharedDshSessionBinding binding = 1;
+  string task_id = 2;
+  repeated string scopes = 3;
+  // Empty preserves the enterprise helper default. Model/message host tasks
+  // supply their dedicated audience and require no enterprise credential.
+  string audience = 4;
+}
+message BeginSharedTaskResponse {
+  string token = 1;
+  auriga.node.v1.SharedDshCapability capability = 2;
+}
+message IssueSharedCapabilityRequest {
+  auriga.node.v1.SharedDshSessionBinding binding = 1;
+  string task_id = 2;
+  string audience = 3;
+  repeated string scopes = 4;
+}
+message IssueSharedCapabilityResponse {
+  string token = 1;
+  auriga.node.v1.SharedDshCapability capability = 2;
+}
+message FinishSharedTaskRequest {
+  auriga.node.v1.SharedDshSessionBinding binding = 1;
+  string task_id = 2;
+}
+message FinishSharedTaskResponse {
+  // True only after a durable barrier also excludes a delayed Begin of an absent task.
+  bool fenced = 1;
+  auriga.node.v1.SharedDshSessionBinding binding = 2;
+  string task_id = 3;
+}
+message ResolveSharedTaskRequest {
+  string tenant_id = 1;
+  string session_id = 2;
+  string task_id = 3;
+  string audience = 4;
+  string jti = 5;
+}
+message ResolveSharedTaskResponse {
+  bool active = 1;
+  int64 credential_version = 2;
+  repeated string scopes = 3;
+  auriga.node.v1.SharedDshSessionBinding binding = 4;
+}
+message AuthorizeSharedCapabilityRequest {
+  auriga.node.v1.SharedDshCapability capability = 1;
+}
+message AuthorizeSharedCapabilityResponse {
+  bool active = 1;
+  int64 credential_version = 2;
+  bool allow_raw_agent_token = 3;
+  repeated string scopes = 4;
+  auriga.node.v1.SharedDshSessionBinding binding = 5;
+  // Explicit optional company-material state, only for enterprise audience.
+  // ABSENT is possible only for a valid platform session without either UAC
+  // reference. Invalid/revoked/foreign/expired identities remain authentication
+  // failures. No catch-all authentication fallback is authorized by this field.
+  SharedEnterpriseCredentialState enterprise_credential_state = 6;
+}
+enum SharedEnterpriseCredentialState {
+  SHARED_ENTERPRISE_CREDENTIAL_STATE_UNSPECIFIED = 0;
+  SHARED_ENTERPRISE_CREDENTIAL_STATE_ABSENT = 1;
+  SHARED_ENTERPRISE_CREDENTIAL_STATE_AVAILABLE = 2;
+}
+message ReadSharedCredentialsRequest {
+  auriga.node.v1.SharedDshCapability capability = 1;
+}
+message ReadSharedCredentialsResponse {
+  string emp_no = 1;
+  string token = 2;
+  string updated_at = 3;
+  int64 credential_version = 4;
+}
+message ExecuteSharedOutboundRequest {
+  auriga.node.v1.SharedDshCapability capability = 1;
+  string url = 2;
+  string method = 3;
+  map<string, string> headers = 4;
+  bytes body = 5;
+  int32 timeout_ms = 6;
+}
+message ExecuteSharedOutboundResponse {
+  int32 status_code = 1;
+  map<string, string> headers = 2;
+  string body = 3;
+}

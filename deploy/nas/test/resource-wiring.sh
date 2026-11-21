@@ -47,9 +47,12 @@ case "$1 ${2:-}" in
   'run '*)
     case " $* " in
       *' export-env '*)
+        # Exercise the real shared decision producer for this non-shared stack.
+        . "$NAS_ROOT/scripts/lib.sh"
+        shared_export_decision "$AURIGA_DATA_ROOT"
         tar -C "$AURIGA_DATA_ROOT/config" -cf - platform.env edge.env agent.env audit-db.env bifrost-audit.env \
           -C "$AURIGA_DATA_ROOT" runtime.path bifrost.enabled collab.enabled managed.identity.enabled \
-          collab.rotation.path collab.rotation.available ;;
+          collab.rotation.path collab.rotation.available shared.path shared.ready ;;
       *' runtime-path '*|*' runtime-stage '*|*' runtime-commit '*)
         for operation; do :; done
         "$NAS_ROOT/bin/auriga-nas-bootstrap" runtime-upgrade -action "${operation#runtime-}" ;;

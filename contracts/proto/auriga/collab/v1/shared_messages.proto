@@ -1,0 +1,20 @@
+syntax = "proto3";
+package auriga.collab.v1;
+import "auriga/node/v1/shared_dsh_contract.proto";
+option go_package = "github.com/hansjone/auriga/infra/gen/auriga/collab/v1;collabv1";
+option java_multiple_files = true;
+option java_package = "auriga.contracts.collab.v1";
+
+// Only svc:ai-gateway over existing authenticated internal transport. Gateway
+// authenticates node mTLS and the message K audience, then sends exact claims.
+service SharedMessageService {
+  rpc CallSharedMessage(CallSharedMessageRequest) returns (CallSharedMessageResponse);
+}
+message CallSharedMessageRequest {
+  auriga.node.v1.SharedDshCapability capability = 1;
+  string authenticated_node_id = 2;
+  // Closed set: context, send, receive. request_json is the frozen Node mapping.
+  string operation = 3;
+  bytes request_json = 4;
+}
+message CallSharedMessageResponse { bytes result_json = 1; }

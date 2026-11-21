@@ -1,0 +1,13 @@
+{
+  nkey: %s
+  permissions: {
+    publish: { allow: [
+      "$JS.API.STREAM.INFO.KV_auriga-shared-entry",
+      "$JS.API.STREAM.MSG.GET.KV_auriga-shared-entry",
+      "$JS.API.DIRECT.GET.KV_auriga-shared-entry",
+      "$JS.API.DIRECT.GET.KV_auriga-shared-entry.>",
+      "$KV.auriga-shared-entry.ticket.*"
+    ] }
+    subscribe: { allow: ["_INBOX_auriga_shared_entry.>"] }
+  }
+}

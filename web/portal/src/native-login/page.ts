@@ -21,6 +21,12 @@ import type {
 } from '../../../shared/src/generated/steps';
 import { createApiClient } from '../../../shared/src/api/client';
 import {
+  createPlacementApi,
+  exchangePlacement,
+  placementRequestKey,
+} from '../views/placement-api';
+import { readPlacementConfig } from '../views/placement-config';
+import {
   createIamApi,
   type LoginProvider,
   type LoginTransaction,
@@ -208,6 +214,9 @@ export function mountInstanceLogin(
   });
   const iam = createIamApi(client);
   const workspace = createWorkspaceApi(client);
+  const placement = readPlacementConfig(doc).sharedPlacementEnabled
+    ? createPlacementApi(client)
+    : undefined;
   const current = (version: number) => !disposed && version === epoch;
   const words = () => messages[locale];
 
@@ -645,6 +654,10 @@ export function mountInstanceLogin(
       });
       tx = undefined;
       show('preparing');
+      if (placement) {
+        await openPlacement(placement, placementRequestKey(), version, signal);
+        return;
+      }
       await observe((await workspace.open(signal)).instance, version, signal);
     } catch (error) {
       if (!current(version)) return;
@@ -663,6 +676,49 @@ export function mountInstanceLogin(
         }
       } else fail(error);
     }
+  }
+
+  async function openPlacement(
+    api: ReturnType<typeof createPlacementApi>,
+    key: string,
+    version: number,
+    signal: AbortSignal,
+    retriedReady = false,
+  ) {
+    if (!current(version) || signal.aborted) return;
+    let opened;
+    try {
+      opened = await api.open(key, signal);
+    } catch (error) {
+      if (!current(version) || signal.aborted) return;
+      if (
+        retriedReady ||
+        !isApiError(error) ||
+        error.status !== 409 ||
+        error.problem.code !== 'common.conflict'
+      )
+        throw error;
+      const currentPlacement = await api.read(signal);
+      if (!current(version) || signal.aborted) return;
+      if (currentPlacement.state === 'ready') {
+        await openPlacement(api, key, version, signal, true);
+        return;
+      }
+      if (currentPlacement.state !== 'pending') throw error;
+      show('waiting');
+      pollTimer = setTimeout(() => {
+        void openPlacement(api, key, version, signal).catch((next) => {
+          if (current(version)) fail(next);
+        });
+      }, 2000);
+      return;
+    }
+    if (!current(version) || signal.aborted) return;
+    show('entering');
+    await exchangePlacement(opened, signal, {
+      fetch: options.fetch,
+      navigate: options.navigate ?? ((target) => win!.location.assign(target)),
+    });
   }
 
   async function observe(

@@ -22,7 +22,7 @@ PowerShell 的 store 参数可用 `$env:AURIGA_PNPM_STORE`（未设置时用 `$(
 
 ## CI 与发布
 
-`.github/workflows/plugin-release.yml` 在相关 PR 测试并上传 artifact；只有推送 `plugin-v<SemVer>` tag 才创建 GitHub Release 并附三份资产，预发布版标为 prerelease。package job 构建两次并比较 tgz、校验摘要；release job 单独持 contents:write。无 npm publish 或部署。本任务不创建或推送 tag。
+`.github/workflows/plugin-release.yml` 在相关 PR 调用共享认证制品工作流，测试并上传 artifact，使用 contents:read。`.github/workflows/plugin-tag-release.yml` 由 `plugin-v<SemVer>` 标签推送触发，先运行同一 package 检查，再创建 GitHub Release 并附三份资产，预发布版标为 prerelease。共享检查保留全部打包和认证测试、两次打包字节比较与摘要校验，contents:write 仅授予标签工作流的 release job。
 
 维护者先完成正常审查和精确 HEAD CI 门禁，再创建对应版本 tag。成员用 Release 包，不用仓库根目录的 GitHub 安装 spec。
 

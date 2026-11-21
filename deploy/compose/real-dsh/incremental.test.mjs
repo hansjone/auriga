@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { createHash } from 'node:crypto';
-import { execFileSync, spawnSync } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
 import {
   existsSync,
   mkdirSync,
@@ -16,6 +16,7 @@ import { fileURLToPath } from 'node:url';
 import { productionInputs } from './inputs.mjs';
 import { prepareIncremental } from './incremental.mjs';
 import { brokerInputs } from './broker-inputs.mjs';
+import { runtimePnpmEntry } from './tooling.mjs';
 
 const hash = (bytes) => createHash('sha256').update(bytes).digest('hex');
 const repository = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
@@ -94,7 +95,13 @@ function fixture(t) {
     lockSha256: hash(readFileSync(join(expected, 'recipe/package-lock.json'))),
   };
   put(join(expected, 'recipe/versions.json'), versions);
-  for (const name of ['build.mjs', 'inputs.mjs', 'runtime.mjs', 'start.mjs'])
+  for (const name of [
+    'build.mjs',
+    'inputs.mjs',
+    'runtime.mjs',
+    'start.mjs',
+    'tooling.mjs',
+  ])
     put(join(expected, 'recipe', name), '// unchanged foundation ' + name);
   for (const name of ['package.json', 'package-lock.json'])
     put(
@@ -107,6 +114,7 @@ function fixture(t) {
     'inputs.mjs',
     'runtime.mjs',
     'start.mjs',
+    'tooling.mjs',
   ])
     put(
       join(opt, 'fixture', name),
@@ -119,6 +127,28 @@ function fixture(t) {
   put(
     join(opt, 'fixture/plugin-source-lock.sha256'),
     hash(readFileSync(join(expected, 'plugin/package-lock.json'))),
+  );
+  const toolingRoot = join(opt, 'auriga-tools/pnpm');
+  const runtimePins = JSON.parse(
+    readFileSync(join(repository, 'clients/installer/upstream.json')),
+  );
+  put(join(expected, 'runtime-pins.json'), runtimePins);
+  put(join(opt, 'fixture/runtime-pins.json'), runtimePins);
+  for (const name of ['package.json', 'package-lock.json']) {
+    const content = readFileSync(
+      join(repository, 'deploy/compose/real-dsh/tooling', name),
+      'utf8',
+    );
+    put(join(expected, 'recipe/tooling', name), content);
+    put(join(toolingRoot, name), content);
+  }
+  put(join(toolingRoot, 'node_modules/pnpm/package.json'), {
+    name: 'pnpm',
+    version: runtimePins.pnpm,
+  });
+  put(
+    join(toolingRoot, runtimePnpmEntry),
+    `process.stdout.write(${JSON.stringify(runtimePins.pnpm)});`,
   );
   const production = productionInputs(pkg, lock);
   put(join(opt, 'auriga-dsh/package.json'), production.pkg);
@@ -246,6 +276,10 @@ for (const path of [
   'recipe/inputs.mjs',
   'recipe/runtime.mjs',
   'recipe/start.mjs',
+  'recipe/tooling.mjs',
+  'recipe/tooling/package.json',
+  'recipe/tooling/package-lock.json',
+  'runtime-pins.json',
   'plugin/package.json',
   'plugin/package-lock.json',
 ])
@@ -346,57 +380,37 @@ test('Docker recipe checks before mutation and regenerates original manifest', (
   assert.match(recipe, /ENTRYPOINT \["node", "\/opt\/fixture\/start.mjs"\]/);
 });
 
-test('incremental Docker tool guard rejects absent or unusable package managers with a full rebuild hint', (t) => {
-  const f = fixture(t);
+test('incremental Docker guard uses the fixed Node/tool before mutation, never global Corepack', () => {
   const recipe = readFileSync(
     new URL('./Dockerfile.incremental', import.meta.url),
     'utf8',
   );
-  const guard = recipe
-    .match(/^RUN (if ! command -v corepack[\s\S]*?\n\s+fi)$/m)?.[1]
-    ?.replaceAll(/\\\r?\n/g, '\n');
-  assert(guard, 'incremental tool guard missing');
-  const shell =
-    process.platform === 'win32'
-      ? join(process.env.ProgramFiles, 'Git/usr/bin/bash.exe')
-      : '/bin/sh';
-  const bin = join(f.opt, 'tools');
-  mkdirSync(bin);
-  const path =
-    process.platform === 'win32'
-      ? bin
-          .replaceAll('\\', '/')
-          .replace(/^([A-Za-z]):/, (_, drive) => '/' + drive.toLowerCase())
-      : bin;
-  const run = () =>
-    spawnSync(shell, ['-c', guard], {
-      env: { ...process.env, PATH: path },
-      encoding: 'utf8',
-      windowsHide: true,
-    });
-  for (const state of [
-    'missing-corepack',
-    'missing-pnpm',
-    'broken-pnpm',
-    'ready',
-  ]) {
-    if (state !== 'missing-corepack')
-      writeFileSync(join(bin, 'corepack'), '#!/bin/sh\nexit 0\n', {
-        mode: 0o755,
+  assert.match(recipe, /RUN if ! node \/opt\/fixture\/tooling.mjs installed/);
+  assert.match(recipe, /rebuild the full real-dsh image/);
+  assert.doesNotMatch(recipe, /command -v|corepack|pnpm --version/);
+  assert(
+    recipe.indexOf('tooling.mjs installed') <
+      recipe.indexOf('RUN node /tmp/auriga-incremental/recipe/incremental.mjs'),
+  );
+});
+
+test('missing, resealed wrong, or broken runtime tooling rejects reuse before source deletion', async (t) => {
+  for (const state of ['absent', 'wrong-version', 'broken-entry']) {
+    const f = fixture(t);
+    if (state === 'absent')
+      rmSync(join(f.opt, 'auriga-tools/pnpm'), { recursive: true });
+    if (state === 'wrong-version')
+      f.put(join(f.opt, 'auriga-tools/pnpm/node_modules/pnpm/package.json'), {
+        name: 'pnpm',
+        version: '11.28.6',
       });
-    if (state === 'broken-pnpm')
-      writeFileSync(join(bin, 'pnpm'), '#!/bin/sh\nexit 7\n', { mode: 0o755 });
-    if (state === 'ready')
-      writeFileSync(
-        join(bin, 'pnpm'),
-        '#!/bin/sh\ntest "$COREPACK_ENABLE_NETWORK" = 0 || exit 1\necho 11.28.6\n',
-        { mode: 0o755 },
+    if (state === 'broken-entry')
+      f.put(
+        join(f.opt, 'auriga-tools/pnpm', runtimePnpmEntry),
+        'process.exit(7)',
       );
-    const result = run();
-    assert.ifError(result.error);
-    assert.equal(result.status, state === 'ready' ? 0 : 1);
-    if (state !== 'ready')
-      assert.match(result.stderr, /rebuild the full real-dsh image/);
+    f.seal();
+    await assert.rejects(f.run(), /runtime tooling|ENOENT|foundation/);
     assert(existsSync(join(f.opt, 'auriga-dsh/src')));
   }
 });

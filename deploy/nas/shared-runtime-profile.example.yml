@@ -1,0 +1,391 @@
+# Complete rc.3 entry list, not a patch over dsh-base or dsh-web-app.
+# The trusted renderer replaces the listener and shared-ports configFile.
+# See shared-runtime-profile.zh.md for the immutable installation anchors.
+- id: fs
+  name: '@deepseek-ai/dsh-fs-local'
+  config:
+    cwd: /home/dsh/.host
+- id: llm
+  name: '@deepseek-ai/dsh-llm'
+- id: system-prompt
+  name: '@deepseek-ai/dsh-system-prompt'
+- id: sessions
+  name: '@deepseek-ai/dsh-session'
+- id: session-projections
+  name: '@deepseek-ai/dsh-session-projection'
+- id: session-persistence
+  name: '@deepseek-ai/dsh-session-persistence-jsonl'
+  config:
+    root: /home/dsh/.host/.dsh/sessions
+    compression: none
+- id: session-query
+  name: '@deepseek-ai/dsh-session-query'
+- id: storage
+  name: '@deepseek-ai/dsh-storage'
+- id: storage-json
+  name: '@deepseek-ai/dsh-storage-json'
+  config:
+    root: /home/dsh/.host/.dsh/storages
+- id: storage-domain
+  name: '@deepseek-ai/dsh-storage-domain'
+  config:
+    backend: json
+- id: projection-cache
+  name: '@deepseek-ai/dsh-session-projection-cache'
+  config:
+    writeEveryEvents: 200
+    writeIntervalMs: 5000
+- id: working-directory
+  name: '@deepseek-ai/dsh-working-directory'
+  config:
+    defaultDirectory: /home/dsh/.host
+- id: agents
+  name: '@deepseek-ai/dsh-agent'
+- id: tools
+  name: '@deepseek-ai/dsh-tools'
+  config:
+    mode: native
+    maxParallelSubCalls: 1
+- id: agent-loop
+  name: '@deepseek-ai/dsh-agent-loop'
+  config:
+    agents: []
+    maxParallelToolCalls: 1
+- id: agent-presets
+  name: '@deepseek-ai/dsh-agent-preset-registry'
+  config:
+    default: auriga-shared
+- id: shared-preset
+  name: '@deepseek-ai/dsh-agent-preset'
+  config:
+    id: auriga-shared
+    name: 共享助手
+    plugins: []
+# Shell-stripped native presets (same ids/order/persona). No bash/pwsh/terminal/
+# jobs/subagent/workflow/cordis/fs tools: shared hosts hold every member tree.
+- id: preset-standard
+  name: '@deepseek-ai/dsh-agent-preset'
+  config:
+    id: standard
+    order: 1
+    plugins:
+      - id: persona
+        name: '@deepseek-ai/dsh-persona'
+        config:
+          prefix: You are a coding agent powered by the {{model}} model.
+      - id: agent-instructions
+        name: '@deepseek-ai/dsh-agent-instructions'
+        config:
+          maxBytes: 65536
+      - id: time-context
+        name: '@deepseek-ai/dsh-time-context'
+      - id: tool-skill
+        name: '@deepseek-ai/dsh-tool-skill'
+      - id: command-goal
+        name: '@deepseek-ai/dsh-command-goal'
+      - id: tool-goal
+        name: '@deepseek-ai/dsh-tool-goal'
+      - id: planning
+        name: cordis:group
+        group: true
+        isolate:
+          planMode: true
+        config:
+          - id: plan-mode
+            name: '@deepseek-ai/dsh-plan-mode'
+            config:
+              section: |
+                You are in plan mode. Stay in plan mode until the user approves your plan through exit_plan_mode. Explore with non-mutating reads only; do not edit files or run mutating tools. Call exit_plan_mode with the complete plan markdown when ready.
+      - id: compaction
+        name: cordis:group
+        group: true
+        isolate:
+          compaction: true
+          toolResultPruner: true
+        config:
+          - id: compaction-basic
+            name: '@deepseek-ai/dsh-compaction-basic'
+          - id: command-compact
+            name: '@deepseek-ai/dsh-command-compact'
+          - id: tool-result-pruner
+            name: '@deepseek-ai/dsh-compaction-tool-result-pruner'
+            config:
+              thresholdChars: 8192
+              headChars: 4096
+              tailChars: 1024
+      - id: tool-ask-user
+        name: '@deepseek-ai/dsh-tool-ask-user'
+      - id: tool-todo
+        name: '@deepseek-ai/dsh-tool-todo'
+        config:
+          allowParallelInProgress: true
+      - id: tool-web
+        name: '@deepseek-ai/dsh-tool-web'
+        config:
+          fetch: true
+          searchTimeoutMs: 60000
+- id: preset-ptc
+  name: '@deepseek-ai/dsh-agent-preset'
+  config:
+    id: ptc
+    order: 2
+    plugins:
+      - id: persona
+        name: '@deepseek-ai/dsh-persona'
+        config:
+          prefix: You are a coding agent powered by the {{model}} model.
+      - id: agent-instructions
+        name: '@deepseek-ai/dsh-agent-instructions'
+        config:
+          maxBytes: 65536
+      - id: time-context
+        name: '@deepseek-ai/dsh-time-context'
+      - id: tool-skill
+        name: '@deepseek-ai/dsh-tool-skill'
+      - id: command-goal
+        name: '@deepseek-ai/dsh-command-goal'
+      - id: tool-goal
+        name: '@deepseek-ai/dsh-tool-goal'
+      - id: planning
+        name: cordis:group
+        group: true
+        isolate:
+          planMode: true
+        config:
+          - id: plan-mode
+            name: '@deepseek-ai/dsh-plan-mode'
+            config:
+              section: |
+                You are in plan mode. Stay in plan mode until the user approves your plan through exit_plan_mode. Explore with non-mutating reads only; do not edit files or run mutating tools. Call exit_plan_mode with the complete plan markdown when ready.
+      - id: compaction
+        name: cordis:group
+        group: true
+        isolate:
+          compaction: true
+          toolResultPruner: true
+        config:
+          - id: compaction-basic
+            name: '@deepseek-ai/dsh-compaction-basic'
+          - id: command-compact
+            name: '@deepseek-ai/dsh-command-compact'
+          - id: tool-result-pruner
+            name: '@deepseek-ai/dsh-compaction-tool-result-pruner'
+            config:
+              thresholdChars: 8192
+              headChars: 4096
+              tailChars: 1024
+      - id: tool-ask-user
+        name: '@deepseek-ai/dsh-tool-ask-user'
+      - id: tool-todo
+        name: '@deepseek-ai/dsh-tool-todo'
+        config:
+          allowParallelInProgress: true
+      - id: tool-web
+        name: '@deepseek-ai/dsh-tool-web'
+        config:
+          fetch: true
+          searchTimeoutMs: 60000
+      - id: tool-presentation
+        name: '@deepseek-ai/dsh-agent-tool-presentation'
+        config:
+          mode: ptc
+- id: preset-minimal
+  name: '@deepseek-ai/dsh-agent-preset'
+  config:
+    id: minimal
+    order: 3
+    plugins:
+      - id: persona
+        name: '@deepseek-ai/dsh-persona'
+        config:
+          prefix: You are a helpful software engineer assistant.
+          complete: true
+          includeRuntimeContext: false
+      - id: compaction
+        name: cordis:group
+        group: true
+        isolate:
+          compaction: true
+        config:
+          - id: compaction-basic
+            name: '@deepseek-ai/dsh-compaction-basic'
+          - id: command-compact
+            name: '@deepseek-ai/dsh-command-compact'
+- id: preset-cordis
+  name: '@deepseek-ai/dsh-agent-preset'
+  config:
+    id: cordis
+    order: 4
+    plugins:
+      - id: persona
+        name: '@deepseek-ai/dsh-persona'
+        config:
+          prefix: You are a coding agent powered by the {{model}} model.
+      - id: agent-instructions
+        name: '@deepseek-ai/dsh-agent-instructions'
+        config:
+          maxBytes: 65536
+      - id: time-context
+        name: '@deepseek-ai/dsh-time-context'
+      - id: command-goal
+        name: '@deepseek-ai/dsh-command-goal'
+      - id: tool-goal
+        name: '@deepseek-ai/dsh-tool-goal'
+      - id: planning
+        name: cordis:group
+        group: true
+        isolate:
+          planMode: true
+        config:
+          - id: plan-mode
+            name: '@deepseek-ai/dsh-plan-mode'
+            config:
+              section: |
+                You are in plan mode. Stay in plan mode until the user approves your plan through exit_plan_mode. Explore with non-mutating reads only; do not edit files or run mutating tools. Call exit_plan_mode with the complete plan markdown when ready.
+      - id: compaction
+        name: cordis:group
+        group: true
+        isolate:
+          compaction: true
+          toolResultPruner: true
+        config:
+          - id: compaction-basic
+            name: '@deepseek-ai/dsh-compaction-basic'
+          - id: command-compact
+            name: '@deepseek-ai/dsh-command-compact'
+          - id: tool-result-pruner
+            name: '@deepseek-ai/dsh-compaction-tool-result-pruner'
+            config:
+              thresholdChars: 8192
+              headChars: 4096
+              tailChars: 1024
+      - id: tool-ask-user
+        name: '@deepseek-ai/dsh-tool-ask-user'
+      - id: tool-todo
+        name: '@deepseek-ai/dsh-tool-todo'
+        config:
+          allowParallelInProgress: true
+      - id: tool-web
+        name: '@deepseek-ai/dsh-tool-web'
+        config:
+          fetch: true
+          searchTimeoutMs: 60000
+      - id: tool-skill
+        name: '@deepseek-ai/dsh-tool-skill'
+- id: default-model
+  name: '@deepseek-ai/dsh-agent-default-model'
+  config:
+    provider: auriga-shared
+    model: auto
+- id: skills
+  name: '@deepseek-ai/dsh-skill'
+- id: platform-skills
+  name: '@deepseek-ai/dsh-skill-filesystem'
+  config:
+    providerName: auriga-shared
+    includeDefaultRoots: false
+    customSkillDirs: [/run/auriga/skills-active/current]
+- id: tool-skill
+  name: '@deepseek-ai/dsh-tool-skill'
+# Passive registry for per-execution environment contributors; no Shell tool.
+- id: shell-env
+  name: '@deepseek-ai/dsh-shell-env'
+- id: commands
+  name: '@deepseek-ai/dsh-commands'
+# Internal Connection transport keys, not member credentials or personal keys.
+- id: connection-credentials
+  name: '@deepseek-ai/dsh-credentials-local'
+  config:
+    path: /home/dsh/.host/.dsh/shared-host-credentials.yaml
+    watch: false
+- id: connection
+  name: '@deepseek-ai/dsh-client-connection'
+  config:
+    trustedHosts: []
+- id: attachments
+  name: '@deepseek-ai/dsh-attachment-local'
+  config:
+    dshHome: /home/dsh/.host/.dsh
+- id: file-upload
+  name: '@deepseek-ai/dsh-client-file-upload'
+- id: file-references
+  name: '@deepseek-ai/dsh-file-reference-local'
+- id: workspace
+  name: '@deepseek-ai/dsh-workspace'
+# Required by WorkspaceController's public child plugin; member RPC stays fenced.
+- id: directory-picker
+  name: '@deepseek-ai/dsh-host-directory-picker-browse'
+- id: remote-access
+  name: '@deepseek-ai/dsh-api-remote-access'
+- id: typert
+  name: '@deepseek-ai/dsh-typert-registry'
+- id: typert-loader
+  name: '@deepseek-ai/dsh-typert-loader'
+- id: session-controller
+  name: '@deepseek-ai/dsh-api-session-controller'
+- id: workspace-controller
+  name: '@deepseek-ai/dsh-api-workspace-controller'
+- id: gateway
+  name: '@deepseek-ai/dsh-api-gateway'
+- id: webserver
+  name: '@deepseek-ai/dsh-host-webserver'
+  config:
+    host: 127.0.0.1
+    port: 7860
+- id: modules
+  name: '@deepseek-ai/dsh-client-modules'
+- id: api-remotes
+  name: '@deepseek-ai/dsh-api-remotes'
+# Browser packages have passive Host halves; the client inject closure is explicit.
+- id: ui-renderer
+  name: '@deepseek-ai/dsh-client-ui-renderer'
+- id: locale
+  name: '@deepseek-ai/dsh-client-locale'
+- id: shortcuts
+  name: '@deepseek-ai/dsh-client-shortcuts'
+- id: ui-theme
+  name: '@deepseek-ai/dsh-client-ui-theme'
+- id: ui-settings
+  name: '@deepseek-ai/dsh-client-ui-settings'
+- id: ui-session
+  name: '@deepseek-ai/dsh-client-ui-session'
+- id: ui-layout
+  name: '@deepseek-ai/dsh-client-ui-layout'
+- id: resources
+  name: '@deepseek-ai/dsh-client-resources'
+- id: ui-sidebar
+  name: '@deepseek-ai/dsh-client-ui-sidebar'
+- id: ui-sidebar-right
+  name: '@deepseek-ai/dsh-client-ui-sidebar-right'
+- id: ui-workspace
+  name: '@deepseek-ai/dsh-client-ui-workspace'
+- id: ui-conversation
+  name: '@deepseek-ai/dsh-client-ui-conversation'
+- id: ui-input-trigger
+  name: '@deepseek-ai/dsh-client-ui-input-trigger'
+- id: ui-chat
+  name: '@deepseek-ai/dsh-client-ui-chat'
+- id: ui-tool
+  name: '@deepseek-ai/dsh-client-ui-tool'
+- id: ui-trajectory
+  name: '@deepseek-ai/dsh-client-ui-trajectory'
+- id: ui-attachment
+  name: '@deepseek-ai/dsh-client-ui-attachment'
+# Agent preset chip on the new-session hero; selection uses agentPresets/select.
+- id: ui-agent-preset
+  name: '@deepseek-ai/dsh-client-ui-agent-preset'
+- id: frontend-static
+  name: '@deepseek-ai/dsh-host-frontend-static'
+  config:
+    distIndex: /opt/dsh/node_modules/@deepseek-ai/dsh-web-frontend/dist/index.html
+- id: auriga-shared-ports
+  name: auriga-dsh/shared-ports
+  config:
+    configFile: /var/lib/auriga/pools/00000000-0000-4000-8000-000000000001/control/shared-host.json
+- id: auriga-dsh
+  name: auriga-dsh/shared
+# Exact read-only public-export target: also discovers this package's ./client.
+- id: auriga-shared-browser
+  name: file:///opt/auriga-dsh/src/shared-browser/plugin.js
+  config:
+    distIndex: /opt/dsh/node_modules/@deepseek-ai/dsh-web-frontend/dist/index.html

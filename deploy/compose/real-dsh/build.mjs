@@ -15,6 +15,7 @@ import {
   managedBrokerChecks,
   pluginPackageFiles,
 } from './runtime.mjs';
+import { installedTooling } from './tooling.mjs';
 
 const hash = (value) => createHash('sha256').update(value).digest('hex');
 const json = (path) => JSON.parse(readFileSync(path, 'utf8'));
@@ -62,6 +63,10 @@ if (action === 'check') {
     versions,
     json('/opt/auriga-dsh/package.json'),
   );
+  const runtimeTooling = installedTooling(
+    '/opt/auriga-tools/pnpm',
+    json('/opt/fixture/runtime-pins.json'),
+  );
   const files = [];
   function walk(dir) {
     for (const name of readdirSync(dir).sort()) {
@@ -87,6 +92,7 @@ if (action === 'check') {
   }
   walk('/opt/dsh');
   walk('/opt/auriga-dsh');
+  walk('/opt/auriga-tools');
   walk('/opt/fixture');
   for (const path of pluginFiles) {
     if (!files.some((file) => file.path === `auriga-dsh/${path}`))
@@ -104,6 +110,7 @@ if (action === 'check') {
         publicCLI: runtime.publicCLI,
         admissionMethods: runtime.admissionMethods,
         nativeModules: runtime.nativeModules,
+        runtimeTooling,
         pluginVersion: json('/opt/auriga-dsh/package.json').version,
         pluginSourceLockSha256: readFileSync(
           '/opt/fixture/plugin-source-lock.sha256',

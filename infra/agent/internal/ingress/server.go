@@ -108,6 +108,24 @@ func (s *Server) route(w http.ResponseWriter, r *http.Request) {
 				writeProblem(w, 403, CodeUnauthorized, "Forbidden", "shared file/log routes disabled")
 				return
 			}
+			if s.cfg.Shared != nil {
+				registration, ok := s.cfg.Shared.Authority.(interface {
+					IsShared(context.Context, string) (bool, error)
+				})
+				if !ok {
+					writeProblem(w, 503, "common.unavailable", "Unavailable", "pool registration authority required")
+					return
+				}
+				registered, err := registration.IsShared(r.Context(), parts[2])
+				if err != nil {
+					writeProblem(w, 503, "common.unavailable", "Unavailable", "pool registration unavailable")
+					return
+				}
+				if registered {
+					writeProblem(w, 403, CodeUnauthorized, "Forbidden", "shared file/log routes disabled")
+					return
+				}
+			}
 		}
 	}
 	switch {

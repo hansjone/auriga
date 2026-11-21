@@ -77,6 +77,12 @@ func run(args []string, out, logs io.Writer) error {
 	if err != nil {
 		return err
 	}
+	shared, closeShared, err := openSharedEntry(cfg, routes, signer)
+	if err != nil {
+		return err
+	}
+	defer closeShared()
+	gw.Shared = shared
 
 	defer gw.Ingress.Close()
 	if transport, ok := gw.IAMTransport.(interface{ CloseIdleConnections() }); ok {

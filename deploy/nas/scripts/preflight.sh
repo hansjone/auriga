@@ -44,10 +44,12 @@ if [ -d "$_parent" ]; then
 fi
 
 busy=0
-  for port in \
+  set -- \
     "${AURIGA_HOST_PUBLISH_NODECONTROL:?}" \
     "${AURIGA_HOST_PUBLISH_REGISTRY:?}" \
     "${AURIGA_HOST_PUBLISH_PLATFORM_HTTP:?}"
+  if shared_present; then set -- "$@" 19091 18087; fi
+  for port
   do
     case "$port" in ''|*[!0-9]*) die "invalid host publish port" ;; esac
     [ "$port" -ge 1024 ] && [ "$port" -le 65535 ] || die "host publish port out of range: $port"

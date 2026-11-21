@@ -4,6 +4,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readdirSync,
+  readFileSync,
   rmSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -22,6 +23,12 @@ export const commonInputs = [
   `${recipePath}/inputs.mjs`,
   `${recipePath}/runtime.mjs`,
   `${recipePath}/start.mjs`,
+  `${recipePath}/tooling.mjs`,
+  `${recipePath}/dependencies.mjs`,
+  `${recipePath}/tooling/package.json`,
+  `${recipePath}/tooling/package-lock.json`,
+  'clients/installer/upstream.json',
+  '.npmrc',
   'clients/dsh-plugin/package.json',
   'clients/dsh-plugin/package-lock.json',
   'clients/dsh-plugin/LICENSE',
@@ -94,6 +101,49 @@ export async function withRealDshContext(root, inputs, build, prefix = '') {
       cpSync(path, destination, { recursive: directory });
       // Docker COPY carries permission bits from the staged public inputs.
       normalizeSourceModes(destination);
+    }
+    if (inputs.includes(`${recipePath}/Dockerfile`)) {
+      const { findToolingTarball, toolingInputs, verifyToolingTarball } =
+        await import(
+          pathToFileURL(sourcePath(root, `${recipePath}/tooling.mjs`)).href
+        );
+      const json = (path) =>
+        JSON.parse(readFileSync(join(payload, path), 'utf8'));
+      const pin = toolingInputs(
+        json(`${recipePath}/tooling/package.json`),
+        json(`${recipePath}/tooling/package-lock.json`),
+        json('clients/installer/upstream.json'),
+      );
+      let source;
+      try {
+        source = findToolingTarball(
+          root,
+          process.env.AURIGA_REAL_DSH_TOOLING_TARBALL,
+        );
+        verifyToolingTarball(source, pin);
+      } catch (cause) {
+        throw new Error(
+          'Matching offline runtime pnpm input is required; use the current devkit or AURIGA_REAL_DSH_TOOLING_TARBALL',
+          { cause },
+        );
+      }
+      const destination = join(payload, 'runtime-tooling/pnpm.tgz');
+      mkdirSync(dirname(destination), { recursive: true });
+      cpSync(source, destination);
+      normalizeSourceModes(destination);
+      verifyToolingTarball(destination, pin);
+      const { stageDependencies, verifyDependencies, hashDependencyFile } =
+        await import(
+          pathToFileURL(sourcePath(root, `${recipePath}/dependencies.mjs`)).href
+        );
+      const closure = join(payload, 'runtime-dependencies');
+      stageDependencies(root, closure);
+      normalizeSourceModes(closure);
+      verifyDependencies(
+        payload,
+        closure,
+        hashDependencyFile(join(closure, 'runtime-dependencies.json')),
+      );
     }
     return await build(context, payload);
   } finally {

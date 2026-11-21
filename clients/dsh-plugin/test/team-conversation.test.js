@@ -12,6 +12,7 @@ import {
 } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+import { syncBuiltinESMExports } from 'node:module';
 import { createPlatform } from '../../shell-auth/platform.mjs';
 import { createVault } from '../src/local/vault.js';
 import { createTeam } from './team-broker-peer.js';
@@ -451,7 +452,15 @@ test('new receiver without durable native session cannot publish a binding or AC
   }
 });
 
-test('fast reply before open response defers unknown mapping, then reaches the original source on retry', async () => {
+test('fast reply before open response defers unknown mapping, then reaches the original source on retry', async (t) => {
+  // Each pull below is an awaited delivery/ACK barrier, so do not race it
+  // against the production interval's in-flight pull.
+  t.mock.timers.enable({ apis: ['setInterval'] });
+  syncBuiltinESMExports();
+  t.after(() => {
+    t.mock.timers.reset();
+    syncBuiltinESMExports();
+  });
   const run = await conversation(),
     entered = Promise.withResolvers(),
     release = Promise.withResolvers();
@@ -567,7 +576,15 @@ test('lost open response persists source intent across restart and same-key retr
   }
 });
 
-test('aborted or abandoned open and a new-key retry do not block first messages from the same peer or a third peer', async () => {
+test('aborted or abandoned open and a new-key retry do not block first messages from the same peer or a third peer', async (t) => {
+  // This case pulls explicitly; a concurrent interval pull makes poll() return
+  // before that in-flight delivery/ACK finishes. Keep its scheduler controlled.
+  t.mock.timers.enable({ apis: ['setInterval'] });
+  syncBuiltinESMExports();
+  t.after(() => {
+    t.mock.timers.reset();
+    syncBuiltinESMExports();
+  });
   const run = await conversation();
   try {
     const a = await run.node('A'),

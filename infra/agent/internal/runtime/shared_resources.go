@@ -31,9 +31,14 @@ func CheckPoolViews(bindings []*nodev1.SharedDshBinding, views []*nodev1.SharedD
 	}
 	seen := map[string]bool{}
 	digest := ""
+	content := map[string]string{}
 	tenant, pool := bindings[0].GetTenantId(), bindings[0].GetPhysicalInstanceId()
+	mode := bindings[0].GetMode()
+	if mode == nodev1.DshInstanceMode_DSH_INSTANCE_MODE_DEDICATED && len(bindings) != 1 {
+		return fmt.Errorf("%w: dedicated requires one placement", observer.ErrPoolSnapshotRejected)
+	}
 	for i, b := range bindings {
-		if !validPoolBinding(b) || b.TenantId != tenant || b.PhysicalInstanceId != pool || seen[b.MemberId] {
+		if !validPoolBinding(b) || b.Mode != mode || b.TenantId != tenant || b.PhysicalInstanceId != pool || seen[b.MemberId] {
 			return fmt.Errorf("%w: shared.binding_mismatch", observer.ErrPoolSnapshotRejected)
 		}
 		seen[b.MemberId] = true
@@ -53,17 +58,19 @@ func CheckPoolViews(bindings []*nodev1.SharedDshBinding, views []*nodev1.SharedD
 				return fmt.Errorf("%w: expired or invalid resource", observer.ErrPoolSnapshotRejected)
 			}
 			resources[r.ResourceId] = true
+			if i == 0 {
+				content[r.ResourceId] = r.Digest
+			} else if content[r.ResourceId] != r.Digest {
+				return fmt.Errorf("%w: resource set mismatch", observer.ErrPoolSnapshotRejected)
+			}
 		}
-		// Authorization digest alone cannot excuse differing content/leases.
+		// Each placement owns its lease ID and expiry. Equal authorization sets
+		// must select identical content; every individual lease is checked below
+		// and against its signed reference by PoolMaterializer.
 		if i > 0 {
 			a := views[0].Resources
 			if len(a) != len(v.Resources) {
 				return fmt.Errorf("%w: resource set mismatch", observer.ErrPoolSnapshotRejected)
-			}
-			for j := range a {
-				if !proto.Equal(a[j], v.Resources[j]) {
-					return fmt.Errorf("%w: resource set mismatch", observer.ErrPoolSnapshotRejected)
-				}
 			}
 		}
 	}
@@ -237,7 +244,7 @@ func (m *SharedPools) AdmitTask(ctx context.Context, b *nodev1.SharedDshBinding,
 	if s.Active == nil {
 		s.Active = map[string]string{}
 	}
-	if memberOperationBlocked(s, b) || s.Contaminated || m.inflight[b.PhysicalInstanceId+"/"+b.MemberId] || proto.Equal(s.Quiesced[b.MemberId], b) || !proto.Equal(s.Bindings[b.MemberId], b) {
+	if memberOperationBlocked(s, b) || s.Contaminated || s.DedicatedMaintenance != nil || m.inflight[b.PhysicalInstanceId+"/"+b.MemberId] || proto.Equal(s.Quiesced[b.MemberId], b) || !proto.Equal(s.Bindings[b.MemberId], b) {
 		return fmt.Errorf("pool binding unavailable")
 	}
 	if old := s.Active[b.MemberId]; old != "" {

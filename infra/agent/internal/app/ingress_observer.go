@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"encoding/pem"
 	"fmt"
+	"go.etcd.io/bbolt"
 	"log/slog"
 	"net"
 	"net/url"
@@ -17,6 +18,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/hansjone/auriga/infra/agent/internal/config"
 	"github.com/hansjone/auriga/infra/agent/internal/identity"
@@ -94,6 +96,33 @@ func startIngressAndObserver(
 		reporter = observer.LogReporter{Log: logger}
 	}
 
+	var sharedIngress *ingress.SharedIngress
+	closeShared := func() {}
+	if cfg.SharedDshRuntime != nil {
+		client, err := openSharedClient(cfg)
+		if err != nil {
+			return nil, err
+		}
+		db, err := bbolt.Open(filepath.Join(cfg.AgentDir(), "shared-ingress-replay.db"), 0600, &bbolt.Options{Timeout: time.Second})
+		if err != nil {
+			client.Close()
+			return nil, err
+		}
+		closeShared = func() { client.Close(); _ = db.Close() }
+		// Edge signs shared browser identity with the separate shared-install
+		// identity purpose key, published in the shared Host installation; the
+		// legacy owner identity key is deliberately never accepted here.
+		sharedKeys, keyErr := loadSharedHostIdentityKeys(cfg.SharedDshRuntime.HostConfigFile)
+		if keyErr != nil {
+			closeShared()
+			return nil, keyErr
+		}
+		sharedIngress = &ingress.SharedIngress{Keys: sharedKeys, Authority: client, Replay: &ingress.SharedIdentityReplayStore{DB: db}}
+		if len(sharedIngress.Keys) == 0 {
+			closeShared()
+			return nil, fmt.Errorf("shared ingress verification keys required")
+		}
+	}
 	srv := ingress.New(ingress.Config{
 		ListenAddr:   listenAddr,
 		LocalPath:    localPath,
@@ -103,10 +132,12 @@ func startIngressAndObserver(
 		Registry:     reg,
 		Tickets:      &ingress.TicketVerifier{Keys: loadEd25519Pubs(ticketPath, logger)},
 		IdentityKeys: ingress.IdentityKeys(loadEd25519Pubs(idPath, logger)),
+		Shared:       sharedIngress,
 		Logger:       logger,
 	})
 	if err := srv.Start(ctx); err != nil {
 		_ = srv.Close()
+		closeShared()
 		return nil, err
 	}
 	logger.Info("ingress started", "listen", listenAddr, "local", localPath)
@@ -114,6 +145,7 @@ func startIngressAndObserver(
 	endpoint, err := ingressEndpoint(listenAddr, localPath, cfg.IngressAdvertiseHost, srv.Addr().String())
 	if err != nil {
 		_ = srv.Close()
+		closeShared()
 		return nil, err
 	}
 
@@ -129,6 +161,7 @@ func startIngressAndObserver(
 		Stop: func() {
 			obs.Stop()
 			_ = srv.Close()
+			closeShared()
 		},
 		Endpoint: endpoint,
 		Registry: reg,
@@ -170,6 +203,38 @@ func marshalECDSAKeyPEM(key *ecdsa.PrivateKey) ([]byte, error) {
 		return nil, err
 	}
 	return pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: der}), nil
+}
+
+// loadSharedHostIdentityKeys reads the shared Host installation identityKeys
+// (kid -> Ed25519 SPKI PEM), the same verification keys the DSH plugin uses.
+func loadSharedHostIdentityKeys(path string) (map[string]ed25519.PublicKey, error) {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	var host struct {
+		IdentityKeys map[string]string `json:"identityKeys"`
+	}
+	if err := json.Unmarshal(raw, &host); err != nil {
+		return nil, fmt.Errorf("shared host identity keys: %w", err)
+	}
+	out := map[string]ed25519.PublicKey{}
+	for kid, text := range host.IdentityKeys {
+		block, rest := pem.Decode([]byte(text))
+		if kid == "" || len(kid) > 128 || block == nil || block.Type != "PUBLIC KEY" || len(strings.TrimSpace(string(rest))) != 0 {
+			return nil, fmt.Errorf("shared host identity key refused")
+		}
+		parsed, err := x509.ParsePKIXPublicKey(block.Bytes)
+		key, ok := parsed.(ed25519.PublicKey)
+		if err != nil || !ok {
+			return nil, fmt.Errorf("shared host identity key refused")
+		}
+		out[kid] = key
+	}
+	if len(out) == 0 {
+		return nil, fmt.Errorf("shared ingress verification keys required")
+	}
+	return out, nil
 }
 
 func loadEd25519Pubs(path string, logger *slog.Logger) map[string]ed25519.PublicKey {

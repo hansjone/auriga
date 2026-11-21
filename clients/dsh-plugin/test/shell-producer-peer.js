@@ -14,7 +14,7 @@ export async function producerRuntime(t, options = {}) {
   const directory = await mkdtemp(join(tmpdir(), 'auriga-producer-consumer-'));
   let unsubscribe;
   const runtime = await createConnectRuntime({
-    config: { platformOrigin: '' },
+    config: options.config ?? { platformOrigin: '' },
     directory,
     ctx: {},
     connection: {

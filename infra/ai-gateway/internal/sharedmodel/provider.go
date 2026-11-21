@@ -49,6 +49,9 @@ type SharedProvider struct {
 // TTL. A caller's shorter deadline and cooperative cancellation still win.
 const MaxCallDuration = 150 * time.Second
 
+// MaxRequestBytes is the admission bound shared by provider and HTTP transport.
+const MaxRequestBytes = 4 * 1024 * 1024
+
 func NewSharedProvider(g *sharedauth.Gate, r SharedRelay, l SharedLedger) (*SharedProvider, error) {
 	if g == nil || r == nil || l == nil {
 		return nil, sharedauth.ErrInvalid
@@ -56,7 +59,7 @@ func NewSharedProvider(g *sharedauth.Gate, r SharedRelay, l SharedLedger) (*Shar
 	return &SharedProvider{g, r, l}, nil
 }
 func (p *SharedProvider) Invoke(ctx context.Context, q SharedRequest, emit func([]byte) error) error {
-	if !sharedauth.UUID(q.CallID) || len(q.Body) == 0 || len(q.Body) > 4*1024*1024 || emit == nil {
+	if !sharedauth.UUID(q.CallID) || len(q.Body) == 0 || len(q.Body) > MaxRequestBytes || emit == nil {
 		return sharedauth.ErrInvalid
 	}
 	c, e := p.gate.Verify(ctx, q.Capability, q.TenantID, q.SessionID, q.TaskID, sharedauth.Model, "model.invoke")

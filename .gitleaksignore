@@ -57,3 +57,14 @@ d7f1f57c1a3f42d60efd7e873717f04fc0748843:services/workspace/impl/src/test/java/a
 4c5f2d48146bdb932f530133b20a437e35cf853d:infra/agent/internal/sharednode/relay_test.go:generic-api-key:65
 b4f55e0619e8310d357c6235e05feede188dd879:infra/agent/internal/sharednode/relay_test.go:generic-api-key:126
 dcb55146c33a4dd6669f011ede57d92229368ba7:deploy/offline/help_test.go:generic-api-key:147
+# 9a03361e used the NAS LAN address in two origin-normalisation test fixtures;
+# the working tree now uses RFC 5737 192.0.2.133. History lines are recorded
+# here instead of rewriting published commits. Scanning stays fully enabled.
+9a03361e3b9368f72b950fdf2bf6e8350135f6c2:infra/edge/shared_alias_origin_test.go:private-ipv4:12
+9a03361e3b9368f72b950fdf2bf6e8350135f6c2:infra/edge/shared_alias_origin_test.go:private-ipv4:14
+9a03361e3b9368f72b950fdf2bf6e8350135f6c2:services/workspace/impl/src/test/java/auriga/workspace/web/SharedDshControllerExchangeUrlTest.java:private-ipv4:15
+# Historical test-only false positives: a fixed 12-hex audit hash-prefix
+# literal, and PEM header strings around keys generated at test runtime.
+b139cbd16d6004efdf5f4ca8899186c8cdf04598:services/common/src/test/java/auriga/common/audit/AuditDataTest.java:generic-api-key:25
+475c38ad738c26ea11447835c31a86aa715d9424:services/platform-app/src/test/java/auriga/platform/StandaloneWorkspaceAssemblyTest.java:private-key:85
+768943a333085df4194dbe041d260fa38038e32f:services/platform-app/src/test/java/auriga/platform/PlatformWorkspaceAssemblyTest.java:private-key:111

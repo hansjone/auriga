@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"flag"
 	"fmt"
 	"net"
 	"os"
@@ -24,6 +25,7 @@ type installOptions struct {
 	DesktopConfirmFingerprint                        string
 	Fingerprint                                      string
 	AllowUnsigned                                    bool
+	Runtime                                          installRuntimeOptions
 }
 type state struct {
 	Data                        string            `json:"data"`
@@ -36,6 +38,7 @@ type state struct {
 	ResourceReady               bool              `json:"resourceReady"`
 	DesktopPublicKeyFingerprint string            `json:"desktopPublicKeyFingerprint,omitempty"`
 	DesktopPublisherTenant      string            `json:"desktopPublisherTenant,omitempty"`
+	Runtime                     *installRuntime   `json:"runtime,omitempty"`
 }
 
 func parseInstall(args []string) (installOptions, error) {
@@ -52,11 +55,29 @@ func parseInstall(args []string) (installOptions, error) {
 	f.StringVar(&o.DesktopPublicKey, "desktop-public-key", "", "")
 	f.StringVar(&o.DesktopPublisherTenant, "desktop-publisher-tenant", "", "")
 	f.StringVar(&o.DesktopConfirmFingerprint, "desktop-confirm-fingerprint", "", "")
+	f.StringVar(&o.Runtime.Bundle, "runtime-bundle", "", "approved signed runtime bundle directory")
+	f.StringVar(&o.Runtime.Root, "runtime-root", "", "independently approved external runtime root protobuf")
+	f.StringVar(&o.Runtime.Image, "runtime-image", "", "approved exact runtime repo@sha256 locator")
+	if err := uniqueRuntimeFlags(args); err != nil {
+		return o, err
+	}
 	if err := f.Parse(args); err != nil {
 		return o, err
 	}
 	if f.NArg() != 0 {
 		return o, errors.New("多余安装参数")
+	}
+	if err := o.Runtime.validate(); err != nil {
+		return o, err
+	}
+	runtimeFlags := 0
+	f.Visit(func(item *flag.Flag) {
+		if strings.HasPrefix(item.Name, "runtime-") {
+			runtimeFlags++
+		}
+	})
+	if runtimeFlags > 0 && !o.Runtime.enabled() {
+		return o, errors.New("runtime 首装参数不得显式留空")
 	}
 	count := 0
 	if (o.DesktopPublicKey == "") != (o.DesktopPublisherTenant == "") || (o.DesktopPublicKey == "") != (o.DesktopConfirmFingerprint == "") {
@@ -166,6 +187,13 @@ func install(o installOptions) error {
 			}
 		}
 	}
+	prepared, err := prepareInstallRuntime(root, o, unsigned)
+	if err != nil {
+		return err
+	}
+	if prepared != nil {
+		defer func() { _ = os.RemoveAll(prepared.directory) }()
+	}
 	if err := dockerReady(); err != nil {
 		return err
 	}
@@ -179,6 +207,12 @@ func install(o installOptions) error {
 			}
 			storedUnsigned, err := verifyStatePackage(s, s.Package, "", o.AllowUnsigned)
 			if err != nil {
+				return err
+			}
+			if s.Runtime != nil && (unsigned || storedUnsigned) {
+				return errors.New("runtime 首装或恢复需要已验签的外层安装包，不能使用 --allow-unsigned 缺签名例外")
+			}
+			if err := resumeInstallRuntime(s, o.Runtime, prepared); err != nil {
 				return err
 			}
 			if unsigned || storedUnsigned {
@@ -267,6 +301,9 @@ func install(o installOptions) error {
 			return err
 		}
 		if err := os.MkdirAll(o.Data, 0755); err != nil {
+			return err
+		}
+		if err := pinInstallRuntime(&s, prepared); err != nil {
 			return err
 		}
 		if err := makeEnv(s); err != nil {
@@ -466,6 +503,9 @@ func makeEnv(s state) error {
 		"AURIGA_LAN_NETWORK": "auriga-offline-lan", "AURIGA_LAN_SUBNET": "192.0.2.0/26", "AURIGA_EDGE_LAN_IP": "192.0.2.10",
 		"AURIGA_INTERNAL_SUBNET": "192.0.2.128/26", "AURIGA_INTERNAL_EDGE_IP": "192.0.2.138", "AURIGA_INTERNAL_DYNAMIC_RANGE": "192.0.2.160/27",
 		"AURIGA_ONECLICK_PUBLISH": "true",
+	}
+	for key, value := range installRuntimeEnv(s) {
+		values[key] = value
 	}
 	for key, value := range s.Images {
 		values["AURIGA_IMAGE_"+key] = value

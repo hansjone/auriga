@@ -1,0 +1,370 @@
+//go:build linux
+
+package storage
+
+import (
+	"context"
+	"encoding/binary"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io/fs"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"regexp"
+	"runtime"
+	"strconv"
+	"strings"
+	"unsafe"
+
+	"golang.org/x/sys/unix"
+)
+
+var loopDevice = regexp.MustCompile(`^/dev/loop[0-9]+$`)
+
+func storageCommand(ctx context.Context, binary string, args ...string) ([]byte, error) {
+	if !filepath.IsAbs(binary) {
+		return nil, fmt.Errorf("absolute storage tool path required")
+	}
+	switch filepath.Base(binary) {
+	case "mkfs.ext4", "mke2fs", "losetup":
+	default:
+		return nil, fmt.Errorf("unsupported pool storage tool")
+	}
+	cmd := exec.CommandContext(ctx, binary, args...)
+	cmd.Env = []string{"PATH=/usr/sbin:/usr/bin:/sbin:/bin", "LC_ALL=C"}
+	stderr := new(storageStderr)
+	cmd.Stderr = stderr
+	output, err := cmd.Output()
+	if err != nil {
+		diagnostic := strconv.QuoteToASCII(strings.TrimSpace(string(stderr.data)))
+		if stderr.truncated {
+			diagnostic += " (truncated)"
+		}
+		// These tools receive only node-owned storage paths/options; their
+		// environment contains no service JWT or enterprise material. Quote
+		// bounded stderr/argv to prevent multi-line/control-sequence injection.
+		return nil, fmt.Errorf("pool storage tool %s args=%q failed: %w; stderr=%s", filepath.Base(binary), args, err, diagnostic)
+	}
+	return output, nil
+}
+
+type storageStderr struct {
+	data      []byte
+	truncated bool
+}
+
+func (b *storageStderr) Write(p []byte) (int, error) {
+	count := len(p)
+	remaining := 8192 - len(b.data)
+	if len(p) > remaining {
+		b.truncated = true
+		p = p[:remaining]
+	}
+	b.data = append(b.data, p...)
+	return count, nil
+}
+
+func mountExt4Image(ctx context.Context, image, root string, size int64, mkfs, losetup string) (string, error) {
+	info, err := os.Lstat(image)
+	if os.IsNotExist(err) {
+		entries, readErr := os.ReadDir(root)
+		if readErr != nil || len(entries) != 0 {
+			return "", fmt.Errorf("existing pool files require explicit storage migration")
+		}
+		file, err := os.CreateTemp(filepath.Dir(image), ".members-ext4-")
+		if err != nil {
+			return "", err
+		}
+		tmp := file.Name()
+		defer func() { _ = os.Remove(tmp) }()
+		if err = file.Chmod(0600); err == nil {
+			err = unix.Fallocate(int(file.Fd()), 0, 0, size)
+		}
+		if err == nil {
+			err = file.Sync()
+		}
+		closeErr := file.Close()
+		if err != nil {
+			return "", err
+		}
+		if closeErr != nil {
+			return "", closeErr
+		}
+		if err = formatExt4Image(ctx, mkfs, tmp, size); err != nil {
+			return "", err
+		}
+		formatted, err := os.OpenFile(tmp, os.O_RDWR, 0)
+		if err != nil {
+			return "", err
+		}
+		err = formatted.Sync()
+		_ = formatted.Close()
+		if err != nil {
+			return "", err
+		}
+		if err = os.Rename(tmp, image); err != nil {
+			return "", err
+		}
+		dir, err := os.Open(filepath.Dir(image))
+		if err != nil {
+			return "", err
+		}
+		err = dir.Sync()
+		_ = dir.Close()
+		if err != nil {
+			return "", err
+		}
+	} else if err != nil {
+		return "", err
+	} else if !info.Mode().IsRegular() || info.Size() != size {
+		return "", fmt.Errorf("pool backing image identity or size mismatch")
+	}
+	if err := verifyExt4Image(image, size); err != nil {
+		return "", err
+	}
+	var imageStat unix.Stat_t
+	if err := unix.Stat(image, &imageStat); err != nil {
+		return "", err
+	}
+	backIno, backMajor, backMinor := uint64(imageStat.Ino), unix.Major(uint64(imageStat.Dev)), unix.Minor(uint64(imageStat.Dev))
+	attached := func(args ...string) ([]loopAttachment, error) {
+		output, err := storageCommand(ctx, losetup, append([]string{"--json", "--list"}, append(args, "--output", "NAME,BACK-INO,BACK-MAJ:MIN")...)...)
+		if err != nil {
+			return nil, err
+		}
+		var loops struct {
+			Devices []loopAttachment `json:"loopdevices"`
+		}
+		if len(strings.TrimSpace(string(output))) == 0 {
+			return nil, nil
+		}
+		if err = json.Unmarshal(output, &loops); err != nil {
+			return nil, err
+		}
+		return loops.Devices, nil
+	}
+	devices, err := attached("--associated", image)
+	if err != nil {
+		return "", err
+	}
+	device, err := selectPoolLoop(devices, backIno, backMajor, backMinor)
+	if err != nil {
+		return "", err
+	}
+	if device == "" {
+		output, err := storageCommand(ctx, losetup, "--find", "--show", "--nooverlap", image)
+		if err != nil {
+			return "", err
+		}
+		device = strings.TrimSpace(string(output))
+	}
+	if !loopDevice.MatchString(device) {
+		return "", fmt.Errorf("ambiguous pool loop device")
+	}
+	// Read back the actual kernel attachment after both allocation and recovery.
+	devices, err = attached(device)
+	if err != nil {
+		return "", err
+	}
+	if readback, err := selectPoolLoop(devices, backIno, backMajor, backMinor); err != nil || readback != device {
+		return "", fmt.Errorf("pool loop backing file readback mismatch")
+	}
+	var source, target unix.Stat_t
+	if err = unix.Stat(device, &source); err != nil {
+		return "", err
+	}
+	if source.Mode&unix.S_IFMT != unix.S_IFBLK {
+		return "", fmt.Errorf("pool loop is not a block device")
+	}
+	if err = unix.Stat(root, &target); err != nil {
+		return "", err
+	}
+	if target.Dev != source.Rdev {
+		entries, err := os.ReadDir(root)
+		if err != nil || len(entries) != 0 {
+			return "", fmt.Errorf("pool mount target is occupied")
+		}
+		if err = unix.Mount(device, root, "ext4", unix.MS_NODEV|unix.MS_NOSUID, "prjquota"); err != nil {
+			return "", err
+		}
+	}
+	if err = verifyProjectMount(device, root); err != nil {
+		return "", err
+	}
+	return device, nil
+}
+
+func formatExt4Image(ctx context.Context, mkfs, image string, size int64) error {
+	if _, err := storageCommand(ctx, mkfs, ext4FormatArgs(image)...); err != nil {
+		return err
+	}
+	return verifyExt4Image(image, size)
+}
+
+func verifyExt4Image(path string, size int64) error {
+	file, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = file.Close() }()
+	var super [1024]byte
+	if _, err = file.ReadAt(super[:], 1024); err != nil {
+		return err
+	}
+	read := binary.LittleEndian.Uint32
+	blocks := uint64(read(super[4:])) | uint64(read(super[0x150:]))<<32
+	if binary.LittleEndian.Uint16(super[0x38:]) != 0xef53 || read(super[0x18:]) != 2 || blocks*4096 != uint64(size) || read(super[0x64:])&0x2100 != 0x2100 {
+		return fmt.Errorf("pool image lacks the exact ext4 size and project-quota features")
+	}
+	return nil
+}
+
+func verifyProjectMount(device, root string) error {
+	var block, dir unix.Stat_t
+	var stat unix.Statfs_t
+	if err := unix.Stat(device, &block); err != nil {
+		return err
+	}
+	if err := unix.Stat(root, &dir); err != nil {
+		return err
+	}
+	if err := unix.Statfs(root, &stat); err != nil {
+		return err
+	}
+	if dir.Dev != block.Rdev || stat.Type != unix.EXT4_SUPER_MAGIC {
+		return fmt.Errorf("pool filesystem device mismatch")
+	}
+	raw, err := os.ReadFile("/proc/self/mountinfo")
+	if err != nil {
+		return err
+	}
+	for _, row := range strings.Split(string(raw), "\n") {
+		fields := strings.Fields(row)
+		if len(fields) < 10 || fields[4] != root {
+			continue
+		}
+		for i := 6; i+3 < len(fields); i++ {
+			if fields[i] == "-" && fields[i+1] == "ext4" && strings.Contains(","+fields[i+3]+",", ",prjquota,") {
+				return nil
+			}
+		}
+	}
+	return fmt.Errorf("ext4 project quota enforcement is unavailable")
+}
+
+type projectAttributes struct {
+	Flags, Extsize, Nextents, Project, Cowextsize uint32
+	Pad                                           [8]byte
+}
+type diskQuota struct {
+	BlockHard, BlockSoft, Space, InodeHard, InodeSoft, Inodes, BlockTime, InodeTime uint64
+	Valid                                                                           uint32
+	Pad                                                                             uint32
+}
+
+func quotaCall(device string, operation uint32, project uint32, value *diskQuota) error {
+	source, err := unix.BytePtrFromString(device)
+	if err != nil {
+		return err
+	}
+	_, _, errno := unix.Syscall6(unix.SYS_QUOTACTL, uintptr(operation<<8|2), uintptr(unsafe.Pointer(source)), uintptr(project), uintptr(unsafe.Pointer(value)), 0, 0)
+	runtime.KeepAlive(source)
+	runtime.KeepAlive(value)
+	if errno != 0 {
+		return errno
+	}
+	return nil
+}
+
+func clearExt4ProjectQuota(device string, project uint32) error {
+	if !loopDevice.MatchString(device) || project == 0 {
+		return fmt.Errorf("invalid pool quota identity")
+	}
+	var before diskQuota
+	if err := quotaCall(device, 0x800007, project, &before); err != nil {
+		if errors.Is(err, unix.ESRCH) {
+			return nil
+		}
+		return err
+	}
+	if before.Space != 0 || before.Inodes != 0 {
+		return fmt.Errorf("archive still has live quota usage or open inodes")
+	}
+	clear := diskQuota{Valid: 1 | 4}
+	if err := quotaCall(device, 0x800008, project, &clear); err != nil {
+		return err
+	}
+	var after diskQuota
+	if err := quotaCall(device, 0x800007, project, &after); err != nil {
+		if errors.Is(err, unix.ESRCH) {
+			return nil
+		}
+		return err
+	}
+	if after.Space != 0 || after.Inodes != 0 || after.BlockHard != 0 || after.BlockSoft != 0 || after.InodeHard != 0 || after.InodeSoft != 0 {
+		return fmt.Errorf("quota recycle readback failed")
+	}
+	return nil
+}
+
+func setExt4ProjectQuota(device, path string, project uint32, bytes, inodes int64) error {
+	if !loopDevice.MatchString(device) {
+		return fmt.Errorf("invalid pool device")
+	}
+	var block, dir unix.Stat_t
+	if err := unix.Stat(device, &block); err != nil {
+		return err
+	}
+	if err := unix.Stat(path, &dir); err != nil {
+		return err
+	}
+	if dir.Dev != block.Rdev {
+		return fmt.Errorf("member is outside pool filesystem")
+	}
+	limits := diskQuota{BlockHard: uint64(bytes / 1024), InodeHard: uint64(inodes), Valid: 1 | 4}
+	if err := quotaCall(device, 0x800008, project, &limits); err != nil {
+		return err
+	}
+	err := filepath.WalkDir(path, func(entry string, info fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		fd, err := unix.Open(entry, unix.O_RDONLY|unix.O_NOFOLLOW|unix.O_NONBLOCK|unix.O_CLOEXEC, 0)
+		if err != nil {
+			return err
+		}
+		defer func() { _ = unix.Close(fd) }()
+		var actual projectAttributes
+		if _, _, e := unix.Syscall(unix.SYS_IOCTL, uintptr(fd), 0x801c581f, uintptr(unsafe.Pointer(&actual))); e != 0 {
+			return e
+		}
+		actual.Project = project
+		if info.IsDir() {
+			actual.Flags |= 0x200
+		}
+		if _, _, e := unix.Syscall(unix.SYS_IOCTL, uintptr(fd), 0x401c5820, uintptr(unsafe.Pointer(&actual))); e != 0 {
+			return e
+		}
+		var check projectAttributes
+		if _, _, e := unix.Syscall(unix.SYS_IOCTL, uintptr(fd), 0x801c581f, uintptr(unsafe.Pointer(&check))); e != 0 {
+			return e
+		}
+		if check.Project != project || info.IsDir() && check.Flags&0x200 == 0 {
+			return fmt.Errorf("project inheritance readback failed")
+		}
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+	var readback diskQuota
+	if err := quotaCall(device, 0x800007, project, &readback); err != nil {
+		return err
+	}
+	if readback.BlockHard != limits.BlockHard || readback.InodeHard != limits.InodeHard {
+		return fmt.Errorf("member quota readback failed for project %s", strconv.FormatUint(uint64(project), 10))
+	}
+	return nil
+}

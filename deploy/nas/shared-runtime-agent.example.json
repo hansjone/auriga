@@ -1,0 +1,16 @@
+{
+  "sharedDshPreparation": {
+    "backend": "ext4-image",
+    "imageBytes": 137438953472,
+    "mkfsBinary": "/usr/sbin/mkfs.ext4",
+    "losetupBinary": "/usr/sbin/losetup",
+    "projectFirst": 10000,
+    "projectLast": 199999
+  },
+  "sharedDshRuntime": {
+    "templateFile": "/etc/auriga/shared-runtime/runtime.json",
+    "profileFile": "/etc/auriga/shared-runtime/profile.yml",
+    "servicesFile": "/etc/auriga/shared-runtime/services.json",
+    "hostConfigFile": "/etc/auriga/shared-runtime/host.json"
+  }
+}

@@ -69,6 +69,21 @@ func validateCatalog(c devkitCatalog) error {
 		if entry.Kit.Release.Seeds != nil {
 			needed = append(needed, entry.Kit.Release.Seeds.URL)
 		}
+		if entry.Kit.Release.Build.RuntimeTooling != nil {
+			tool := entry.Kit.Release.Build.RuntimeTooling
+			if entry.Files[tool.URL] != tool.SHA256 {
+				return errors.New("累积devkit运行工具与批准摘要不一致")
+			}
+			needed = append(needed, tool.URL)
+		}
+		if dependencies := entry.Kit.Release.Build.RuntimeDependencies; dependencies != nil {
+			for _, a := range dependencies.artifacts() {
+				if entry.Files[a.URL] != a.SHA256 {
+					return errors.New("累积devkit的DSH冷构建输入与批准摘要不一致")
+				}
+				needed = append(needed, a.URL)
+			}
+		}
 		for _, name := range needed {
 			if entry.Files[name] == "" {
 				return fmt.Errorf("版本 %s 缺少依赖 %s", version, name)

@@ -18,7 +18,12 @@ public class ServiceTokenFilePublisher implements SmartLifecycle, AutoCloseable 
   private static final Set<PosixFilePermission> DIRECTORY =
       PosixFilePermissions.fromString("rwxr-x---");
   private static final Set<PosixFilePermission> FILE = PosixFilePermissions.fromString("rw-r-----");
+  private static final Set<PosixFilePermission> PRIVATE_DIRECTORY =
+      PosixFilePermissions.fromString("rwx------");
+  private static final Set<PosixFilePermission> PRIVATE_FILE =
+      PosixFilePermissions.fromString("rw-------");
   private final String service;
+  private final boolean privateAgent;
   private final InternalTokenIssuer issuer;
   private final Path secretFile;
   private final Path tokenFile;
@@ -37,12 +42,13 @@ public class ServiceTokenFilePublisher implements SmartLifecycle, AutoCloseable 
       Path tokenFile,
       int readerGroup,
       int installationOwner) {
-    if (!Set.of("edge", "ai-gateway").contains(service)) throw invalid();
+    if (!Set.of("edge", "ai-gateway", "agent").contains(service)) throw invalid();
     this.service = service;
+    this.privateAgent = service.equals("agent");
     this.issuer = Objects.requireNonNull(issuer);
     this.secretFile = absolute(secretFile);
     this.tokenFile = absolute(tokenFile);
-    if (readerGroup < 0) throw invalid();
+    if (privateAgent ? readerGroup != -1 : readerGroup < 0) throw invalid();
     this.readerGroup = readerGroup;
     if (installationOwner < -1) throw invalid();
     this.installationOwner = installationOwner;
@@ -74,6 +80,10 @@ public class ServiceTokenFilePublisher implements SmartLifecycle, AutoCloseable 
   @Override
   public synchronized void start() {
     if (running) return;
+    // Server Agent export has a fixed POSIX 0600 consumer. It does not invent a
+    // Windows reader identity or weaken the existing edge/gateway ACL path.
+    if (privateAgent && !tokenFile.getFileSystem().supportedFileAttributeViews().contains("posix"))
+      throw invalid();
     try {
       if (tokenFile.getFileSystem().supportedFileAttributeViews().contains("acl")
           && System.getProperty("os.name").startsWith("Windows")) {
@@ -83,10 +93,11 @@ public class ServiceTokenFilePublisher implements SmartLifecycle, AutoCloseable 
         checkAncestors(tokenFile.getParent().getParent());
         if (!Files.exists(tokenFile.getParent(), LinkOption.NOFOLLOW_LINKS)) {
           Files.createDirectory(
-              tokenFile.getParent(), PosixFilePermissions.asFileAttribute(DIRECTORY));
-          Files.setAttribute(
-              tokenFile.getParent(), "unix:gid", readerGroup, LinkOption.NOFOLLOW_LINKS);
-          Files.setPosixFilePermissions(tokenFile.getParent(), DIRECTORY);
+              tokenFile.getParent(), PosixFilePermissions.asFileAttribute(outputDirectory()));
+          if (!privateAgent)
+            Files.setAttribute(
+                tokenFile.getParent(), "unix:gid", readerGroup, LinkOption.NOFOLLOW_LINKS);
+          Files.setPosixFilePermissions(tokenFile.getParent(), outputDirectory());
         }
         checkDirectory(tokenFile.getParent(), false);
         checkOutputGroup();
@@ -157,7 +168,7 @@ public class ServiceTokenFilePublisher implements SmartLifecycle, AutoCloseable 
                       StandardOpenOption.CREATE_NEW,
                       StandardOpenOption.WRITE,
                       LinkOption.NOFOLLOW_LINKS),
-                  PosixFilePermissions.asFileAttribute(FILE))) {
+                  PosixFilePermissions.asFileAttribute(outputFile()))) {
             byte[] encoded = jwt.getBytes(java.nio.charset.StandardCharsets.US_ASCII);
             try {
               var bytes = ByteBuffer.wrap(encoded);
@@ -167,12 +178,13 @@ public class ServiceTokenFilePublisher implements SmartLifecycle, AutoCloseable 
               Arrays.fill(encoded, (byte) 0);
             }
           }
-          Files.setAttribute(
-              tokenFile.getParent().resolve(temporary),
-              "unix:gid",
-              readerGroup,
-              LinkOption.NOFOLLOW_LINKS);
-          Files.setPosixFilePermissions(tokenFile.getParent().resolve(temporary), FILE);
+          if (!privateAgent)
+            Files.setAttribute(
+                tokenFile.getParent().resolve(temporary),
+                "unix:gid",
+                readerGroup,
+                LinkOption.NOFOLLOW_LINKS);
+          Files.setPosixFilePermissions(tokenFile.getParent().resolve(temporary), outputFile());
           checkFile(output, tokenFile.getParent().resolve(temporary), false, 16 * 1024);
           checkDirectory(tokenFile.getParent(), false);
           checkOutputGroup();
@@ -570,8 +582,7 @@ public class ServiceTokenFilePublisher implements SmartLifecycle, AutoCloseable 
   private void checkDirectory(Path directory, boolean secret) throws IOException {
     checkAncestors(directory.getParent());
     var a = Files.readAttributes(directory, PosixFileAttributes.class, LinkOption.NOFOLLOW_LINKS);
-    Set<PosixFilePermission> allowed =
-        secret ? PosixFilePermissions.fromString("rwx------") : DIRECTORY;
+    Set<PosixFilePermission> allowed = secret ? PRIVATE_DIRECTORY : outputDirectory();
     if (!a.isDirectory()
         || !allowed.containsAll(a.permissions())
         || !a.permissions().containsAll(PosixFilePermissions.fromString("rwx------")))
@@ -589,12 +600,21 @@ public class ServiceTokenFilePublisher implements SmartLifecycle, AutoCloseable 
         Files.readAttributes(
             tokenFile.getParent(), PosixFileAttributes.class, LinkOption.NOFOLLOW_LINKS);
     if (!a.owner().equals(processOwner)
-        || !a.permissions().equals(DIRECTORY)
-        || !Files.getAttribute(tokenFile.getParent(), "unix:gid", LinkOption.NOFOLLOW_LINKS)
-            .equals(readerGroup)) throw invalid();
+        || !a.permissions().equals(outputDirectory())
+        || (!privateAgent
+            && !Files.getAttribute(tokenFile.getParent(), "unix:gid", LinkOption.NOFOLLOW_LINKS)
+                .equals(readerGroup))) throw invalid();
   }
 
-  private static void checkFile(
+  private Set<PosixFilePermission> outputDirectory() {
+    return privateAgent ? PRIVATE_DIRECTORY : DIRECTORY;
+  }
+
+  private Set<PosixFilePermission> outputFile() {
+    return privateAgent ? PRIVATE_FILE : FILE;
+  }
+
+  private void checkFile(
       SecureDirectoryStream<Path> directory, Path path, boolean required, int limit)
       throws IOException {
     Path file = path.getFileName();
@@ -609,7 +629,7 @@ public class ServiceTokenFilePublisher implements SmartLifecycle, AutoCloseable 
       return;
     }
     var parent = directory.getFileAttributeView(PosixFileAttributeView.class).readAttributes();
-    var allowed = required ? PosixFilePermissions.fromString("rw-------") : FILE;
+    var allowed = required ? PRIVATE_FILE : outputFile();
     if (!a.isRegularFile()
         || a.size() < 1
         || a.size() > limit
@@ -632,6 +652,9 @@ public class ServiceTokenFilePublisher implements SmartLifecycle, AutoCloseable 
       scheduler.shutdownNow();
       scheduler = null;
     }
+    // Disabling/stopping Agent export stops renewal. Keep the immutable old JWT
+    // at its existing expiry; late responses are fenced by generation above.
+    if (privateAgent) return;
     if (windows != null) {
       try {
         windows.checkPrivate(tokenFile.getParent(), true);

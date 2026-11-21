@@ -909,7 +909,7 @@ export function createSettingsView(
     };
     const enter = () =>
       run(async () => {
-        await shellCommand('inline_login');
+        await shellCommand('open_login');
         gotoOverview?.();
       });
     const action = statusError

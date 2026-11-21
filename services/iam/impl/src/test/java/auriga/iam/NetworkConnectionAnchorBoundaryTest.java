@@ -47,8 +47,18 @@ class NetworkConnectionAnchorBoundaryTest {
           for (String id : List.of("", "bad", java.util.UUID.randomUUID().toString()))
             malformed.add(a.toBuilder().setAnchorId(id).build());
           for (var field : NetworkAuthorityConnection.getDescriptor().getFields())
-            malformed.add(
-                a.toBuilder().setConnection(f.connection().toBuilder().clearField(field)).build());
+            if (!"shared_context_id".equals(field.getName()))
+              malformed.add(
+                  a.toBuilder()
+                      .setConnection(f.connection().toBuilder().clearField(field))
+                      .build());
+          // The new optional identity class MUST remain empty in the legacy owner path.
+          malformed.add(
+              a.toBuilder()
+                  .setConnection(
+                      f.connection().toBuilder()
+                          .setSharedContextId(java.util.UUID.randomUUID().toString()))
+                  .build());
           malformed.add(
               a.toBuilder()
                   .setConnection(f.connection().toBuilder().setUnknownFields(UNKNOWN))

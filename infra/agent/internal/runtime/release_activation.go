@@ -326,6 +326,9 @@ func (d *Docker) verifyContainer(ctx context.Context, r *state.ExecutionRecord) 
 			return nil, err
 		}
 	}
+	if err := d.verifyPoolContainer(ctx, r.InstanceID, insp); err != nil {
+		return nil, err
+	}
 	return insp, nil
 }
 

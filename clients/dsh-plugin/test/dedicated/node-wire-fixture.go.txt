@@ -1,0 +1,28 @@
+package sharednode
+
+import (
+ "encoding/json"
+ "os"
+ "path/filepath"
+ "testing"
+ nodev1 "github.com/hansjone/auriga/infra/gen/auriga/node/v1"
+ "google.golang.org/protobuf/encoding/protojson"
+)
+
+// Executed by a go -overlay pure test against the actual Node wire function.
+// It starts no Agent, runtime, socket, PG or service.
+func TestDedicatedWireFixture(t *testing.T) {
+ view := &nodev1.SharedDshResourceView{
+  SchemaVersion: 1,
+  Binding: &nodev1.SharedDshBinding{TenantId: "019a0000-0000-7000-8000-000000000001", MemberId: "019a0000-0000-7000-8000-000000000002", PlacementId: "019a0000-0000-7000-8000-000000000003", PhysicalInstanceId: "019a0000-0000-7000-8000-000000000004", Mode: nodev1.DshInstanceMode_DSH_INSTANCE_MODE_DEDICATED, Epoch: 7, Revision: 11},
+  ViewId: "019a0000-0000-7000-8000-000000000005", AuthorizationSetDigest: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", Source: "platform",
+  Resources: []*nodev1.SharedDshResource{{ResourceId: "019a0000-0000-7000-8000-000000000006", Digest: "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", LeaseId: "019a0000-0000-7000-8000-000000000007", ExpiresAt: 2000000000}},
+ }
+ dir := os.Getenv("AURIGA_DEDICATED_FIXTURE_DIR")
+ if dir == "" { t.Fatal("explicit fixture output required") }
+ value, err := wire(view); if err != nil { t.Fatal(err) }
+ bytes, err := json.Marshal(value); if err != nil { t.Fatal(err) }
+ if err := os.WriteFile(filepath.Join(dir, "node-wire.json"), bytes, 0600); err != nil { t.Fatal(err) }
+ bytes, err = (protojson.MarshalOptions{EmitUnpopulated:true}).Marshal(view); if err != nil { t.Fatal(err) }
+ if err := os.WriteFile(filepath.Join(dir, "node-protojson.json"), bytes, 0600); err != nil { t.Fatal(err) }
+}

@@ -99,6 +99,22 @@ func validateDevkit(kit devkitManifest) error {
 	if kit.Schema != 1 || kit.Source == nil {
 		return errors.New("离线开发套件缺少版本来源")
 	}
+	if kit.Release.Build != nil && kit.Release.Build.RuntimeTooling != nil {
+		a := kit.Release.Build.RuntimeTooling
+		if a.URL != "runtime-tooling.tgz" || !hex64.MatchString(a.SHA256) {
+			return errors.New("开发套件运行工具固定路径或摘要无效")
+		}
+	}
+	if kit.Release.Build != nil && kit.Release.Build.RuntimeDependencies != nil {
+		if !immutable.MatchString(kit.Release.Build.Tools["runtime"]) {
+			return errors.New("开发套件缺少固定DSH运行构建镜像")
+		}
+		for name, a := range kit.Release.Build.RuntimeDependencies.artifacts() {
+			if a.URL != "runtime-dependencies/"+name || !hex64.MatchString(a.SHA256) {
+				return errors.New("开发套件DSH冷构建输入路径或摘要无效")
+			}
+		}
+	}
 	refs, err := buildImageRefs(kit.Release)
 	if err != nil {
 		return err
@@ -316,6 +332,12 @@ func devkitSingleContext(ctx context.Context, args []string) error {
 	if err != nil {
 		return err
 	}
+	if _, err := os.Stat(filepath.Join(source, "deploy/compose/real-dsh/tooling/package-lock.json")); err == nil && r.Build.RuntimeTooling == nil {
+		return errors.New("当前 real-dsh 配方需要 build.runtimeTooling 固定 pnpm 原始 TGZ 输入")
+	}
+	if _, err := os.Stat(filepath.Join(source, "deploy/compose/real-dsh/dependencies.mjs")); err == nil && (r.Build.RuntimeDependencies == nil || !immutable.MatchString(r.Build.Tools["runtime"])) {
+		return errors.New("当前DSH配方需要build.runtimeDependencies及固定build.tools.runtime镜像")
+	}
 	snapshot := filepath.Join(stage, "snapshot")
 	info, err := snapshotSourceContext(ctx, source, snapshot, *sign)
 	if err != nil {
@@ -339,6 +361,31 @@ func devkitSingleContext(ctx context.Context, args []string) error {
 			return fmt.Errorf("devkit 依赖 %s %w", name, err)
 		}
 		a.URL = file
+	}
+	if a := kit.Release.Build.RuntimeTooling; a != nil {
+		file := filepath.Join(cache, "runtime-tooling.tgz")
+		if err := fetchContext(ctx, *a, file); err != nil {
+			return err
+		}
+		if err := verifyRuntimeToolingInput(ctx, source, file); err != nil {
+			return err
+		}
+		a.URL = "runtime-tooling.tgz"
+	}
+	if dependencies := kit.Release.Build.RuntimeDependencies; dependencies != nil {
+		directory := filepath.Join(cache, "runtime-dependencies")
+		if err := os.Mkdir(directory, 0755); err != nil {
+			return err
+		}
+		for name, a := range dependencies.artifacts() {
+			if err := fetchContext(ctx, *a, filepath.Join(directory, name)); err != nil {
+				return err
+			}
+			a.URL = "runtime-dependencies/" + name
+		}
+		if err := verifyRuntimeDependenciesInput(ctx, source, directory, dependencies, kit.Release.Build.Tools["runtime"]); err != nil {
+			return err
+		}
 	}
 	checkout := filepath.Join(root, "source")
 	if err := copyTreeContext(ctx, snapshot, checkout); err != nil {

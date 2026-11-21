@@ -290,6 +290,7 @@ final class IamNetworkConnectionAnchors {
   private static void validate(NetworkAuthorityConnection c) {
     check(
         c.getUnknownFields().asMap().isEmpty()
+            && c.getSharedContextId().isEmpty()
             && TenantContext.require().toString().equals(c.getTenantId())
             && !TenantContext.PLATFORM_TENANT.equals(TenantContext.require())
             && IamNetworkAuthority.validNumber(c.getRealm(), false)

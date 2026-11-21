@@ -5,12 +5,13 @@ ARG BASE_RUNTIME_IMAGE
 FROM ${BASE_RUNTIME_IMAGE}
 ARG BASE_RUNTIME_IMAGE
 USER 0:0
-# The public DSH plugin CLI requires the complete image's offline package manager.
-RUN if ! command -v corepack >/dev/null 2>&1 || ! command -v pnpm >/dev/null 2>&1 || ! COREPACK_ENABLE_NETWORK=0 pnpm --version; then \
-      echo "Incremental base lacks working pnpm/corepack; rebuild the full real-dsh image." >&2; exit 1; \
+# Require the fixed offline runtime tool before touching the old source.
+RUN if ! node /opt/fixture/tooling.mjs installed; then \
+      echo "Incremental base lacks fixed runtime pnpm; rebuild the full real-dsh image." >&2; exit 1; \
     fi
 COPY real-dsh-inputs/deploy/compose/real-dsh/ /tmp/auriga-incremental/recipe/
 COPY real-dsh-inputs/clients/dsh-plugin/package*.json /tmp/auriga-incremental/plugin/
+COPY real-dsh-inputs/clients/installer/upstream.json /tmp/auriga-incremental/runtime-pins.json
 # Refuse changed foundations and verify the managed broker before deleting src.
 RUN node /tmp/auriga-incremental/recipe/incremental.mjs
 COPY real-dsh-inputs/clients/dsh-plugin/src /opt/auriga-dsh/src

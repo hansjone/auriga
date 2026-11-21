@@ -27,6 +27,10 @@ K 当前没有完整成员列表或快照版本端口，不能把部分 Resource
 
 每成员 5368709120 字节/100000 inode，设置后整树与内核限额读回，不能降级软配额。archive 使用独立 ID，避免占用新空目录预算。封存到期由 `SweepArchives` 删除后回收 project；仍有路径、清理失败或内核仍记录用量时不回收，告警和重试由 observer 调用方负责。archive-reset 用旧 binding，随后准备新 epoch；封存标识为 operationId，保留 2592000 秒，不自动挂到新会话。
 
+活动池沿用 22 份预算：20 个成员 workspace、持久 Host `.host` 和 `message-trust` 各一份。ext4 镜像最低 `22 * 5368709120` 字节（110 GiB），仍须按 4096 字节对齐；既有更大镜像不缩小。文件系统元数据及保留封存的容量须由安装方另留余量。
+
+Node 先确认 `members/.host` 的 5 GiB/100000 inode 硬配额，再以池 UID 创建其下的 `message-preferences`、`message-inboxes`，不分配额外子项目。Host 看到的路径为 `/var/lib/auriga/pools/<pool>/host/.host/message-preferences` 及 `.../message-inboxes/<contextId>`；`members/message-trust` 的独立硬配额保持。新池不创建旧的直属消息目录；已有旧目录及账本不删除、不改名、不重置。Host 按已冻结的迁移协议持旧锁、原子复制重写到 `.host` 并保留原件，避免旧 inode 携带旧 project ID 越过配额祖先。Node 不代替 Host 迁移或删除 receipts/highWater。
+
 ## 资源与 profile 接线
 
 `PoolResourceVerifier` 必须接已有统一资源的签名、租约、撤销和只读挂载。`CheckPoolViews` 只做结构、绑定、共同授权摘要、有序资源集合和期限验证，不能代替验签。启动以最新 W 数据调用 `AuthorizePoolStart`。observer 使用 `PoolWatch{Pools,Verifier,Validate:runtime.CheckPoolViews}` 周期核验：不完整快照、错绑定或授权集合、不可用 verifier 只拒绝候选准入，分别回报 authorization-mismatch/cleanup-unconfirmed，不假报撤销并停全池。实际到期或撤销须返回 `observer.ErrPoolResourceExpired/Revoked`（可包装），触发全池 Trip；传输错误不得标 revoked。

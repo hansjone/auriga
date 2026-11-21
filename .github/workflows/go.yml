@@ -91,6 +91,46 @@ jobs:
       - name: Verify shared DSH cross-language signatures
         working-directory: infra/edge
         run: go test -count=1 -run '^TestSharedKOracleInterop$' -v .
+      - name: Verify standalone NAS installation materials
+        working-directory: deploy/nas/bootstrap
+        env:
+          GOWORK: 'off'
+          GOMAXPROCS: '2'
+          GOMEMLIMIT: 512MiB
+          GOFLAGS: '-mod=readonly -p=1'
+        run: |
+          set -euo pipefail
+          exec > >(tee "$RUNNER_TEMP/auriga-nas-pure.log") 2>&1
+          test -z "$(gofmt -l .)"
+          go vet ./...
+          go test -count=1 -run '^(TestSharedMaterialsExistingKeyEncodingsAndPurposeSeparation|TestSharedMaterialsRejectMissingExtraDriftAndCrossPurposeReuse|TestSharedReplayNATSUserHasNoGlobalOrForeignPermissions|TestSharedEnterpriseProjectionUsesOnlyApprovedPublicFields|TestSharedRuntimeProjectionPreservesFullSpecAndRejectsSealedOrUnknown|TestSharedInstallationReceiptHistoryRejectsBrokenAndCommittedRollback|TestSharedInstallationClosedSourceDigestIncludesAllPrivateAndPublicLeaves|TestSharedNATSProjectionPreservesPasswordUsersAndAddsOnlyTheDedicatedAuthority|TestSharedReplayPrepareCreatesOnlyTheMissingFixedBucketAndPreservesItsIdentity|TestSharedReplayPrepareAuthorityExistsOnlyInTheSeparateConfiguration|TestSharedServiceProjectionKeepsCredentialsInTheirRequiredRoles|TestSharedMissingOutboundPolicyDeniesAllDestinationsAndPreservesApprovedAdapter|TestSharedEmptyAdapterCannotShadowLegacyUACIdentitySources)$' -json .
+          AURIGA_SHARED_NATS_FIXTURE="$RUNNER_TEMP/auriga-shared-nats-fixture" go test -count=1 -run '^TestSharedNATSProjectionPreservesPasswordUsersAndAddsOnlyTheDedicatedAuthority$' .
+          (cd ../../../infra/edge && GOWORK="$GITHUB_WORKSPACE/infra/go.work" AURIGA_SHARED_NATS_FIXTURE="$RUNNER_TEMP/auriga-shared-nats-fixture" go test -count=1 -run '^TestSharedReplayNATSServerConfigUsesOnlyDedicatedUserAndBucket$' -v .)
+          go build -o "$RUNNER_TEMP/auriga-nas-bootstrap" .
+          go test -c -o "$RUNNER_TEMP/auriga-nas-shared.test" .
+      - name: Verify NAS private metadata as root
+        working-directory: deploy/nas/bootstrap
+        run: |
+          set -euo pipefail
+          exec > >(tee "$RUNNER_TEMP/auriga-nas-root.log") 2>&1
+          root_fixture=$(sudo mktemp -d /tmp/auriga-nas-root.XXXXXX)
+          case "$root_fixture" in /tmp/auriga-nas-root.*) ;; *) exit 1 ;; esac
+          trap 'sudo rm -rf -- "$root_fixture"' EXIT
+          sudo install -d -m 0700 -o root -g root "$root_fixture/home" "$root_fixture/tmp"
+          sudo env -i PATH=/usr/bin:/bin HOME="$root_fixture/home" TMPDIR="$root_fixture/tmp" \
+            GOMAXPROCS=2 GOMEMLIMIT=512MiB "$RUNNER_TEMP/auriga-nas-shared.test" \
+            '-test.run=^(TestSharedInstallationLinuxMetadataRejectsLinksOwnersModesAndUnknownLeaves|TestSharedInstallationEnrolledNodeBindingSurvivesRenewalAndRejectsWrongAuthority)$' \
+            -test.v -test.parallel=1 -test.timeout=2m
+      - name: Upload NAS installation failure logs
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: nas-installation-failure-logs
+          path: |
+            ${{ runner.temp }}/auriga-nas-pure.log
+            ${{ runner.temp }}/auriga-nas-root.log
+          if-no-files-found: ignore
+          retention-days: 7
       - name: Vet, test, and build every workspace module
         run: |
           for module in gen edge ai-gateway egress agent ctl; do

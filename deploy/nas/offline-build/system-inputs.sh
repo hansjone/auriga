@@ -41,7 +41,7 @@ collect_debs() {
 }
 
 case "$service" in
-    agent) collect_debs ca-certificates ;;
+    agent) collect_debs ca-certificates e2fsprogs util-linux ;;
     platform) collect_debs curl openssl ;;
     bifrost)
         apk update

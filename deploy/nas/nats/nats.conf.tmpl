@@ -18,6 +18,7 @@ accounts {
   AURIGA: {
     jetstream: enabled
     users: [
+      # __AURIGA_SHARED_USER__
       {
         # Audit publication and its private ACK replies only; no other inbox or KV reads.
         user: bifrost_audit
@@ -33,6 +34,7 @@ accounts {
         password: "__NATS_PLATFORM_PASSWORD__"
         permissions: {
           publish: { allow: [
+            # __AURIGA_SHARED_PLATFORM_PERMISSIONS__
             "auriga.evt.>",
             "auriga.audit.>",
             "$JS.API.STREAM.CREATE.AURIGA_EVENTS",

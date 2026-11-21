@@ -8,6 +8,7 @@ import { apiClient } from '../api';
 import {
   createPlacementApi,
   exchangePlacement,
+  placementRequestKey,
   type Placement,
 } from './placement-api';
 const { t } = useI18n({ useScope: 'local', messages: placementMessages });
@@ -28,13 +29,7 @@ async function run(open = false) {
   error.value = '';
   try {
     if (open) {
-      const result = await api.open(
-        Array.from(
-          globalThis.crypto.getRandomValues(new Uint8Array(16)),
-          (byte) => byte.toString(16).padStart(2, '0'),
-        ).join(''),
-        abort.signal,
-      );
+      const result = await api.open(placementRequestKey(), abort.signal);
       if (version !== generation) return;
       placement.value = result.placement;
       await exchangePlacement(result, abort.signal);
@@ -94,6 +89,9 @@ onBeforeUnmount(() => {
     <ElButton :disabled="busy || expired" @click="run()">{{
       t('refresh')
     }}</ElButton>
+    <p v-if="placement?.state === 'ready'">
+      <a href="/resources">{{ t('market') }}</a>
+    </p>
     <p>{{ t('resource') }}</p>
     <p>{{ t('risk') }}</p>
     <p>{{ t('policy') }}</p>

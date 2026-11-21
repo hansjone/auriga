@@ -74,12 +74,12 @@ test('R2 platform identity is shared by all DSH owners and logout leaves no plat
   assert.equal(runtime.resetEmergency, undefined);
 });
 
-test('R2 native login starts inline without accepting provider or form selectors', async (t) => {
+test('R2 native login starts browser sign-in without accepting provider or form selectors', async (t) => {
   const { rpc, connection, runtime } = await shellRuntimePeer(t);
   connection.logout();
   const result = await rpc('aurigaAuth/login');
   assert.equal(result.ok, true);
-  assert.equal(connection.calls.at(-1).action, 'inline_login');
+  assert.equal(connection.calls.at(-1).action, 'open_login');
   assert.equal(result.value.loggedIn, false);
   for (const name of [
     'login',

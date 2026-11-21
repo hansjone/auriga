@@ -1,0 +1,23 @@
+{
+  "authorizationSetDigest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "binding": {
+    "epoch": 7,
+    "memberId": "019a0000-0000-7000-8000-000000000002",
+    "mode": "dedicated",
+    "physicalInstanceId": "019a0000-0000-7000-8000-000000000004",
+    "placementId": "019a0000-0000-7000-8000-000000000003",
+    "revision": 11,
+    "tenantId": "019a0000-0000-7000-8000-000000000001"
+  },
+  "resources": [
+    {
+      "digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "expiresAt": 2000000000,
+      "leaseId": "019a0000-0000-7000-8000-000000000007",
+      "resourceId": "019a0000-0000-7000-8000-000000000006"
+    }
+  ],
+  "schemaVersion": 1,
+  "source": "platform",
+  "viewId": "019a0000-0000-7000-8000-000000000005"
+}

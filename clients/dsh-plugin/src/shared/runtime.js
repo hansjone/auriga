@@ -25,16 +25,33 @@ const copy = (v) => JSON.parse(JSON.stringify(v));
 const immutable = (b) => Object.freeze(copy(b));
 export const ALLOWED_ACTIONS = Object.freeze([
   'session/page',
+  'session/follow',
+  'session/projections',
+  'session/list',
+  'session/control',
   'session/prompt',
   'session/cancel',
+  'agentPresets/select',
   'event:changed',
+  'event:api-session/activity',
+  'event:api-session/added',
+  'event:api-session/error',
+  'event:api-session/removed',
+  'event:api-session/status',
   'workspaceFiles/read',
   'workspaceFiles/stat',
   'workspaceFiles/readBytes',
 ]);
 
+/** current() coalesces by key: single-flight + reuse ≤1s. session() lookup is
+ * concurrent single-flight only (no TTL) so W binding rewrites stay immediate.
+ * revoke / close invalidate immediately; cache hits still re-fence locally.
+ */
+const AUTHORITY_REUSE_MS = 1000;
+
 /** All ports are trusted server services, never request body properties.
- * resolve(binding, platformSessionId) MUST query W/IAM on every invocation.
+ * resolve(binding, platformSessionId) MUST query W/IAM on every invocation
+ * (except the documented ≤1s coalesce above).
  * register(binding,parentSessionId) MUST durably register before publication.
  * lookup(sessionId) MUST return W's authoritative SessionBinding after restart.
  */
@@ -43,13 +60,29 @@ export function createSharedRuntime({
   identityKeys,
   capabilityKeys,
   physicalInstanceId,
+  expectedMode = 'shared',
   now = () => Math.floor(Date.now() / 1000),
+  clockMs = () => Date.now(),
 }) {
+  if (!['shared', 'dedicated'].includes(expectedMode))
+    fail('common.validation_failed');
   const ownership = new Map(),
     peers = new WeakMap(),
     replay = new Map();
   let closed = false;
   const floors = new Map();
+  /** @type {Map<string, {at:number, value?:any, inflight?:Promise<any>}>} */
+  const currentReuse = new Map();
+  /** @type {Map<string, {at:number, value?:any, inflight?:Promise<any>}>} */
+  const sessionReuse = new Map();
+  const currentKey = (b) =>
+    [b.placementId, b.platformSessionId, b.epoch, b.authGeneration ?? ''].join(
+      '\0',
+    );
+  const dropAuthority = () => {
+    currentReuse.clear();
+    sessionReuse.clear();
+  };
   const fence = (b) => {
     if (closed) fail();
     const f = floors.get(b.placementId);
@@ -60,17 +93,10 @@ export function createSharedRuntime({
         b.authGeneration < f.authGeneration)
     )
       fail();
-    if (b.mode !== 'shared' || b.physicalInstanceId !== physicalInstanceId)
+    if (b.mode !== expectedMode || b.physicalInstanceId !== physicalInstanceId)
       fail('shared.binding_mismatch');
   };
-  async function current(b) {
-    fence(b);
-    let state;
-    try {
-      state = await ports.resolve(placementBinding(b), b.platformSessionId);
-    } catch {
-      fail('common.unavailable');
-    }
+  function acceptCurrent(b, state) {
     fence(b);
     if (!state?.active) fail();
     validate('Binding', state.binding);
@@ -83,12 +109,57 @@ export function createSharedRuntime({
       fail();
     return state;
   }
-  async function session(id) {
-    let b;
+  async function current(b) {
+    fence(b);
+    const key = currentKey(b);
+    const hit = currentReuse.get(key);
+    const t = clockMs();
+    if (hit?.value !== undefined && t - hit.at <= AUTHORITY_REUSE_MS)
+      return acceptCurrent(b, hit.value);
+    if (hit?.inflight) return acceptCurrent(b, await hit.inflight);
+    const inflight = (async () => {
+      try {
+        return await ports.resolve(placementBinding(b), b.platformSessionId);
+      } catch {
+        fail('common.unavailable');
+      }
+    })();
+    currentReuse.set(key, { at: t, inflight });
     try {
-      b = await ports.lookup(id);
-    } catch {
-      fail('common.unavailable');
+      const state = await inflight;
+      if (currentReuse.get(key)?.inflight === inflight)
+        currentReuse.set(key, { at: clockMs(), value: state });
+      return acceptCurrent(b, state);
+    } catch (error) {
+      if (currentReuse.get(key)?.inflight === inflight)
+        currentReuse.delete(key);
+      throw error;
+    }
+  }
+  async function session(id) {
+    // Lookup coalesces concurrent callers only. Completed results are not
+    // TTL-cached so a W binding rewrite (mode/member) is visible immediately;
+    // current() still supplies the ≤1s resolve reuse the flood needs.
+    const hit = sessionReuse.get(id);
+    let b;
+    if (hit?.inflight) {
+      b = await hit.inflight;
+    } else {
+      const inflight = (async () => {
+        try {
+          return await ports.lookup(id);
+        } catch (error) {
+          if (error?.code === 'common.not_found') fail('common.not_found');
+          fail('common.unavailable');
+        }
+      })();
+      sessionReuse.set(id, { at: clockMs(), inflight });
+      try {
+        b = await inflight;
+      } finally {
+        if (sessionReuse.get(id)?.inflight === inflight)
+          sessionReuse.delete(id);
+      }
     }
     validate('SessionBinding', b);
     same(b, { sessionId: id });
@@ -130,7 +201,16 @@ export function createSharedRuntime({
     return peer;
   }
   async function create(peer, host, input = {}) {
-    if (Object.keys(input).some((k) => k !== 'parentSessionId'))
+    if (
+      Object.keys(input).some(
+        (k) => k !== 'parentSessionId' && k !== 'agentPreset',
+      )
+    )
+      fail('common.validation_failed');
+    if (
+      input.agentPreset !== undefined &&
+      (typeof input.agentPreset !== 'string' || !input.agentPreset)
+    )
       fail('common.validation_failed');
     const p = peers.get(peer);
     if (!p) fail();
@@ -143,7 +223,15 @@ export function createSharedRuntime({
     validate('SessionBinding', b);
     const cwd = memberWorkspace(b);
     // prepare is unpublished. No sessions.enter/agent publication before Register ACK.
-    const prepared = await host.prepare(b.sessionId, { meta: { cwd } });
+    // agentPreset is resolved by the Host publish setup against the live roster.
+    const prepared = await host.prepare(b.sessionId, {
+      meta: {
+        cwd,
+        ...(input.agentPreset === undefined
+          ? {}
+          : { agentPreset: input.agentPreset }),
+      },
+    });
     try {
       const ack = await ports.register(copy(b), input.parentSessionId ?? null);
       validate('SessionBinding', ack);
@@ -183,7 +271,7 @@ export function createSharedRuntime({
     const b = await session(id);
     same(c.binding, b);
     const allowed = {
-      'auriga.shared.enterprise': ['credentials', 'outbound'],
+      'auriga.shared.enterprise': ['credentials', 'outbound', 'task.execute'],
       'auriga.shared.model': ['model.invoke'],
       'auriga.shared.message': ['message.send', 'message.receive'],
     }[audience];
@@ -192,6 +280,7 @@ export function createSharedRuntime({
       c.audience !== audience ||
       !c.scopes.includes(scope) ||
       c.scopes.some((s) => !allowed.includes(s)) ||
+      (c.scopes.includes('task.execute') && c.scopes.length !== 1) ||
       c.taskId !== taskId
     )
       fail();
@@ -219,6 +308,8 @@ export function createSharedRuntime({
       revision: Math.max(f?.revision ?? 0, event.revision),
       authGeneration: Math.max(f?.authGeneration ?? 0, event.authGeneration),
     });
+    // Raised fence must not keep a stale resolve/lookup hit.
+    dropAuthority();
     for (const [id, b] of ownership)
       if (b.placementId === event.placementId) ownership.delete(id);
   }
@@ -240,7 +331,12 @@ export function createSharedRuntime({
   // remoteAccess bindings are synchronous projections, never the authorization truth.
   function bindings(p) {
     if (closed || p.kind !== 'auriga-shared-member') return [];
-    return [...ownership.values()]
+    try {
+      fence(p);
+    } catch {
+      return [];
+    }
+    const sessions = [...ownership.values()]
       .filter((b) => {
         try {
           fence(b);
@@ -258,9 +354,28 @@ export function createSharedRuntime({
           actions: [...ALLOWED_ACTIONS],
         },
       }));
+    // rc.3 routes only these two public read controllers through GLOBAL,
+    // then filters every returned session/baseline/event by its session role.
+    // Creation remains the trusted Host create flow, never the owner API.
+    return [
+      {
+        resource: { kind: 'global' },
+        role: {
+          name: 'auriga-shared-native-read',
+          resource: 'global',
+          actions: ['session/list', 'session/control', 'agentPresets/list'],
+        },
+      },
+      ...sessions,
+    ];
   }
   return {
     admit,
+    async refresh(peer) {
+      const principal = peers.get(peer);
+      if (!principal) fail();
+      await current(principal);
+    },
     create,
     session,
     authorize,
@@ -272,6 +387,7 @@ export function createSharedRuntime({
       closed = true;
       ownership.clear();
       replay.clear();
+      dropAuthority();
     },
   };
 }

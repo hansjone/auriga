@@ -39,10 +39,23 @@ type release struct {
 }
 
 type buildSpec struct {
-	Inputs  artifact          `json:"inputs"`
-	Recipes artifact          `json:"recipes"`
-	Bases   map[string]string `json:"bases"`
-	Tools   map[string]string `json:"tools"`
+	Inputs              artifact                 `json:"inputs"`
+	Recipes             artifact                 `json:"recipes"`
+	Bases               map[string]string        `json:"bases"`
+	Tools               map[string]string        `json:"tools"`
+	RuntimeTooling      *artifact                `json:"runtimeTooling,omitempty"`
+	RuntimeDependencies *runtimeDependencyInputs `json:"runtimeDependencies,omitempty"`
+}
+
+type runtimeDependencyInputs struct {
+	Manifest artifact `json:"manifest"`
+	Corepack artifact `json:"corepack"`
+	WebCache artifact `json:"webCache"`
+	NpmCache artifact `json:"npmCache"`
+}
+
+func (r *runtimeDependencyInputs) artifacts() map[string]*artifact {
+	return map[string]*artifact{"runtime-dependencies.json": &r.Manifest, "corepack.tgz": &r.Corepack, "web-cache.tar.gz": &r.WebCache, "npm-cache.tar.gz": &r.NpmCache}
 }
 
 func readJSON(path string, output any) error {

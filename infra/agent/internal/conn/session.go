@@ -22,10 +22,12 @@ import (
 	"github.com/hansjone/auriga/infra/agent/internal/enroll"
 	"github.com/hansjone/auriga/infra/agent/internal/identity"
 	"github.com/hansjone/auriga/infra/agent/internal/reconciler"
+	agentruntime "github.com/hansjone/auriga/infra/agent/internal/runtime"
 	"github.com/hansjone/auriga/infra/agent/internal/state"
 	"github.com/hansjone/auriga/infra/agent/internal/telemetry"
 	"github.com/hansjone/auriga/infra/agent/internal/tlsutil"
 	nodev1 "github.com/hansjone/auriga/infra/gen/auriga/node/v1"
+	"google.golang.org/grpc"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
@@ -44,6 +46,8 @@ type Config struct {
 	Reconciler    *reconciler.Reconciler
 	Store         *state.Store
 	AllowInsecure bool
+	SharedPools   *agentruntime.SharedPools
+	SharedRuntime *agentruntime.PersistentPools
 
 	HeartbeatInterval time.Duration
 	MinBackoff        time.Duration
@@ -61,15 +65,24 @@ type Config struct {
 type Session struct {
 	cfg Config
 
-	mu          sync.Mutex
-	heartbeat   time.Duration
-	lastWelcome *nodev1.Welcome
-	welcomeAt   time.Time
-	connected   bool
-	statusCh    chan queuedStatus
-	usageCh     chan *nodev1.NodeUsage
-	wakeCh      chan *nodev1.WakeSchedule
-	resultCh    chan queuedResult
+	mu              sync.Mutex
+	heartbeat       time.Duration
+	lastWelcome     *nodev1.Welcome
+	welcomeAt       time.Time
+	connected       bool
+	statusCh        chan queuedStatus
+	usageCh         chan *nodev1.NodeUsage
+	wakeCh          chan *nodev1.WakeSchedule
+	resultCh        chan queuedResult
+	sharedReceiptCh chan *sharedReceipt
+	sharedReportCh  chan *nodev1.SessionRequest
+	sharedWork      *sharedWorkQueue
+	poolMemoryCh    chan queuedPoolMemory
+	connectionEpoch uint64
+	lastPoolMemory  map[string]*nodev1.SharedDshPoolMemorySample
+	controlConn     *grpc.ClientConn
+	controlContext  context.Context
+	controlTasks    map[string]controlTask
 }
 
 type queuedStatus struct {
@@ -108,13 +121,39 @@ func New(cfg Config) *Session {
 	if cfg.BootID == "" {
 		cfg.BootID = fmt.Sprintf("boot-%d", time.Now().UnixNano())
 	}
-	return &Session{
-		cfg:       cfg,
-		heartbeat: cfg.HeartbeatInterval,
-		statusCh:  make(chan queuedStatus, 64),
-		usageCh:   make(chan *nodev1.NodeUsage, 8),
-		wakeCh:    make(chan *nodev1.WakeSchedule, 16),
-		resultCh:  make(chan queuedResult, 64),
+	session := &Session{
+		cfg:             cfg,
+		heartbeat:       cfg.HeartbeatInterval,
+		statusCh:        make(chan queuedStatus, 64),
+		usageCh:         make(chan *nodev1.NodeUsage, 8),
+		wakeCh:          make(chan *nodev1.WakeSchedule, 16),
+		resultCh:        make(chan queuedResult, 64),
+		sharedReceiptCh: make(chan *sharedReceipt, 64),
+		sharedReportCh:  make(chan *nodev1.SessionRequest, 128),
+		poolMemoryCh:    make(chan queuedPoolMemory, 128),
+	}
+	session.sharedWork = newSharedWorkQueue(session)
+	if cfg.SharedRuntime != nil {
+		cfg.SharedRuntime.Report = session.ReportShared
+		if cfg.SharedRuntime.TaskAdmission != nil {
+			cfg.SharedRuntime.TaskAdmission.Control = session
+		}
+	}
+	return session
+}
+
+func (s *Session) ReportShared(report *nodev1.SessionRequest) {
+	if report != nil && report.GetSharedDshPoolMemorySample() != nil {
+		s.reportPoolMemory(report.GetSharedDshPoolMemorySample())
+		return
+	}
+	if report == nil || (report.GetSharedDshResourceReport() == nil && report.GetSharedDshGuardianImpact() == nil) {
+		return
+	}
+	select {
+	case s.sharedReportCh <- report:
+	default:
+		s.cfg.Logger.Warn("shared report queue full; durable guardian state will be retried")
 	}
 }
 
@@ -191,6 +230,13 @@ func (s *Session) Connected() bool {
 
 // Run loops connect → session → backoff until ctx is done.
 func (s *Session) Run(ctx context.Context) error {
+	defer func() {
+		cleanup, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := s.sharedWork.wait(cleanup); err != nil {
+			s.cfg.Logger.Warn("shared worker shutdown", "error", err)
+		}
+	}()
 	renewCtx, cancelRenew := context.WithCancel(ctx)
 	renewDone := make(chan struct{})
 	go func() {
@@ -292,6 +338,15 @@ func (s *Session) tryRenew(ctx context.Context) error {
 }
 
 func (s *Session) runOnce(ctx context.Context) error {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	s.mu.Lock()
+	s.connectionEpoch++
+	s.connected = false
+	s.lastPoolMemory = nil
+	s.mu.Unlock()
+	// Reset and all storage work run on the same bounded worker, never Recv.
+	s.sharedWork.reset(ctx)
 	mat, meta, tlsCert, err := s.loadCreds()
 	if err != nil {
 		return err
@@ -319,6 +374,14 @@ func (s *Session) runOnce(ctx context.Context) error {
 		return fmt.Errorf("dial control: %w", err)
 	}
 	defer func() { _ = conn.Close() }()
+	defer func() {
+		s.mu.Lock()
+		if s.controlConn == conn {
+			s.controlConn, s.controlContext = nil, nil
+			s.connected = false
+		}
+		s.mu.Unlock()
+	}()
 
 	client := nodev1.NewNodeControlServiceClient(conn)
 	stream, err := client.Session(ctx)
@@ -349,6 +412,9 @@ func (s *Session) runOnce(ctx context.Context) error {
 	s.cfg.Logger.Info("welcome received; session established")
 	s.mu.Lock()
 	s.connected = true
+	if !s.cfg.AllowInsecure {
+		s.controlConn, s.controlContext = conn, ctx
+	}
 	s.lastWelcome = welcome
 	s.welcomeAt = time.Now()
 	if iv := welcome.GetHeartbeatInterval(); iv != nil {
@@ -432,6 +498,30 @@ func (s *Session) sendLoop(ctx context.Context, stream nodev1.NodeControlService
 			if err := stream.Send(&nodev1.SessionRequest{Body: &nodev1.SessionRequest_Result{Result: result}}); err != nil {
 				return err
 			}
+		case receipt := <-s.sharedReceiptCh:
+			if receipt.context.Err() != nil {
+				continue
+			}
+			if err := stream.Send(&nodev1.SessionRequest{
+				Body: &nodev1.SessionRequest_SharedDshRuntimeReceipt{SharedDshRuntimeReceipt: receipt.SharedDshRuntimeReceipt},
+			}); err != nil {
+				return err
+			}
+		case report := <-s.sharedReportCh:
+			if err := stream.Send(report); err != nil {
+				return err
+			}
+		case queued := <-s.poolMemoryCh:
+			sample := s.poolMemoryForSend(ctx, queued)
+			if sample == nil {
+				queued.complete(fmt.Errorf("pool memory no longer current"))
+				continue
+			}
+			err := stream.Send(&nodev1.SessionRequest{Body: &nodev1.SessionRequest_SharedDshPoolMemorySample{SharedDshPoolMemorySample: sample}})
+			queued.complete(err)
+			if err != nil {
+				return err
+			}
 		}
 	}
 }
@@ -482,6 +572,13 @@ func (s *Session) sendHello(stream nodev1.NodeControlService_SessionClient, mat 
 	if len(drivers) == 0 {
 		drivers = []nodev1.RuntimeKind{nodev1.RuntimeKind_RUNTIME_KIND_UNSPECIFIED}
 	}
+	var labels map[string]string
+	if s.cfg.SharedPools != nil {
+		labels = map[string]string{"auriga.shared-dsh-runtime": "prepare-v1"}
+		if s.cfg.SharedRuntime != nil {
+			labels["auriga.shared-dsh-process"] = "persistent-v1"
+		}
+	}
 	return stream.Send(&nodev1.SessionRequest{
 		Body: &nodev1.SessionRequest_Hello{Hello: &nodev1.Hello{
 			NodeId:          mat.NodeID,
@@ -496,6 +593,7 @@ func (s *Session) sendHello(stream nodev1.NodeControlService_SessionClient, mat 
 			SealingKeyId:    identity.SealingKeyID(mat.SealingPublic),
 			IngressEndpoint: ingress,
 			Capacity:        capacity,
+			Labels:          labels,
 		}},
 	})
 }
@@ -581,6 +679,19 @@ func (s *Session) handleControl(ctx context.Context, msg *nodev1.SessionResponse
 		return nil
 	}
 	s.cfg.Logger.Info("control message received", "type", fmt.Sprintf("%T", msg.Body))
+	if _, ok := msg.Body.(*nodev1.SessionResponse_SharedDshResourceView); ok {
+		if s.cfg.SharedRuntime == nil {
+			return fmt.Errorf("shared resource receiver unavailable")
+		}
+		return s.sharedWork.enqueue(ctx, msg)
+	}
+	if body, ok := msg.Body.(*nodev1.SessionResponse_SharedDshRuntimeIntent); ok {
+		command := body.SharedDshRuntimeIntent
+		if s.cfg.SharedPools == nil || !agentruntime.ValidPoolControlIntent(command) {
+			return fmt.Errorf("initial shared preparation unavailable")
+		}
+		return s.sharedWork.enqueue(ctx, msg)
+	}
 	if s.cfg.Reconciler == nil {
 		return nil
 	}

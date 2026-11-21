@@ -3,6 +3,7 @@ import { readFileSync, realpathSync, statSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { isAbsolute, join, relative, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { installedTooling } from './tooling.mjs';
 
 const json = (path) => JSON.parse(readFileSync(path, 'utf8'));
 const hash = (bytes) => createHash('sha256').update(bytes).digest('hex');
@@ -155,7 +156,8 @@ export async function runtimeChecks(directory, versions, plugin) {
     await import(pathToFileURL(require.resolve(name)).href);
     nativeModules.push(name);
   }
-  const { bin, ...metadata } = runtime;
+  const metadata = { ...runtime };
+  delete metadata.bin;
   return {
     ...metadata,
     nativeModules,
@@ -172,9 +174,15 @@ if (
   const result = await runtimeChecks('/opt/dsh', versions, plugin);
   await managedBrokerChecks('/opt/auriga-dsh');
   const manifest = json('/opt/fixture/manifest.json');
+  const tooling = installedTooling(
+    '/opt/auriga-tools/pnpm',
+    json('/opt/fixture/runtime-pins.json'),
+  );
   if (
     manifest.dshVersion !== result.dshVersion ||
-    JSON.stringify(manifest.runtimePackages) !== JSON.stringify(result.packages)
+    JSON.stringify(manifest.runtimePackages) !==
+      JSON.stringify(result.packages) ||
+    JSON.stringify(manifest.runtimeTooling) !== JSON.stringify(tooling)
   )
     throw new Error(
       'Runtime manifest differs from installed DSH package group',

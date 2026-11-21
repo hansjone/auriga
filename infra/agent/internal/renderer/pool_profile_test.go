@@ -5,18 +5,8 @@ import (
 	"testing"
 )
 
-const validPoolProfile = `- id: auriga-dsh
-  name: auriga-dsh
-  config: {}
-- id: skills
-  name: '@deepseek-ai/dsh-skill-filesystem'
-  config:
-    providerName: auriga-shared
-    includeDefaultRoots: false
-    customSkillDirs: [/run/auriga/skills-active/current]
-`
-
 func TestPoolProfileAllowlist(t *testing.T) {
+	validPoolProfile := string(completePoolProfile(t))
 	if e := ValidatePoolProfile([]byte(validPoolProfile)); e != nil {
 		t.Fatal(e)
 	}
@@ -26,9 +16,26 @@ func TestPoolProfileAllowlist(t *testing.T) {
 			t.Fatal(name)
 		}
 	}
-	for _, raw := range []string{strings.Replace(validPoolProfile, "includeDefaultRoots: false", "includeDefaultRoots: true", 1), strings.Replace(validPoolProfile, "/run/auriga/skills-active/current", "/home/private", 1), validPoolProfile + "---\n[]\n", strings.Replace(validPoolProfile, "config: {}", "config: {value: {__jsExpr: evil}}", 1)} {
+	for _, raw := range []string{strings.Replace(validPoolProfile, "includeDefaultRoots: false", "includeDefaultRoots: true", 1), strings.Replace(validPoolProfile, "/run/auriga/skills-active/current", "/home/private", 1), validPoolProfile + "---\n[]\n", strings.Replace(validPoolProfile, "cwd: /home/dsh/.host", "cwd: !!js evil", 1)} {
 		if e := ValidatePoolProfile([]byte(raw)); e == nil {
 			t.Fatal("bad profile accepted")
+		}
+	}
+}
+
+// Nested preset tools that can read or execute outside the member directory, or
+// a second skill provider that breaks the single fixed skill root,
+// must never ride a shared preset (fs-local accepts absolute paths).
+func TestPoolProfileRejectsEscapingPresetTools(t *testing.T) {
+	valid := string(completePoolProfile(t))
+	anchor := "      - id: tool-skill\n        name: '@deepseek-ai/dsh-tool-skill'\n"
+	if !strings.Contains(valid, anchor) {
+		t.Fatal("preset anchor missing from complete profile")
+	}
+	for _, name := range []string{"tool-present", "skill-filesystem", "tool-fs", "tool-fs-search", "tool-bash", "tool-pwsh", "terminal-bash", "tool-bash-persistent", "tool-jobs", "tool-schedule", "tool-subagent", "workflow-ptc", "tool-workflow", "tool-cordis"} {
+		raw := strings.Replace(valid, anchor, anchor+"      - id: escape\n        name: '@deepseek-ai/dsh-"+name+"'\n", 1)
+		if e := ValidatePoolProfile([]byte(raw)); e == nil {
+			t.Fatal(name)
 		}
 	}
 }

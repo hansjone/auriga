@@ -143,7 +143,7 @@ func strictOrigin(r *http.Request, e accessEntry) bool {
 func stripUntrustedEntryHeaders(h http.Header) {
 	for name := range h {
 		n := strings.ToLower(name)
-		if n == "forwarded" || strings.HasPrefix(n, "x-forwarded-") || strings.HasPrefix(n, "x-auriga-") && n != "x-auriga-csrf" && n != "x-auriga-csrf-bootstrap" || n == "auriga-identity" || n == "x-real-ip" || n == "auriga-tenant-id" || n == "x-tenant-id" || n == "x-audience" {
+		if n == "forwarded" || strings.HasPrefix(n, "x-forwarded-") || strings.HasPrefix(n, "x-auriga-") && n != "x-auriga-csrf" && n != "x-auriga-csrf-bootstrap" || n == "auriga-identity" || n == "x-real-ip" || n == "auriga-tenant-id" || n == "x-tenant-id" || n == "x-audience" || n == "auriga-shared-profile-probe" || n == "auriga-placement-probe" || n == "auriga-placement-probe-receipt" {
 			delete(h, name)
 		}
 	}
@@ -220,7 +220,14 @@ func (g *Gateway) accessHandler(next http.Handler) http.Handler {
 				!httpguts.HeaderValuesContainsToken(connection, catalogWriteHeader) &&
 				!httpguts.HeaderValuesContainsToken(connection, "Sec-Fetch-Site")
 		}
+		var profileProof []string
+		if g.sharedProfileRequest(r) {
+			profileProof = append(profileProof, r.Header.Values(sharedProfileHeader)...)
+		}
 		stripUntrustedEntryHeaders(r.Header)
+		if len(profileProof) != 0 {
+			r.Header[http.CanonicalHeaderKey(sharedProfileHeader)] = profileProof
+		}
 		if role == "managed" {
 			e.role = "portal"
 		}

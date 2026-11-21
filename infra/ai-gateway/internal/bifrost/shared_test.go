@@ -120,3 +120,66 @@ func TestSharedRelayRejectsRoutingAndInvalidUsage(t *testing.T) {
 		}
 	}
 }
+
+func TestCaptureSharedUsageFoldsReasoningTokens(t *testing.T) {
+	var usage sharedmodel.SharedUsage
+	raw := `{"usage":{"prompt_tokens":10,"completion_tokens":5,"total_tokens":20,"completion_tokens_details":{"reasoning_tokens":5}}}`
+	if err := captureSharedUsage([]byte(raw), &usage); err != nil || !usage.Known || usage.InputTokens != 10 || usage.OutputTokens != 10 {
+		t.Fatalf("usage=%+v err=%v", usage, err)
+	}
+}
+
+func TestRewriteSharedModelKeepsPublicId(t *testing.T) {
+	raw := []byte(`{"id":"c","object":"chat.completion.chunk","model":"MiniMax-M2.7","choices":[]}`)
+	out, err := rewriteSharedModel(raw, "auto")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var fields map[string]json.RawMessage
+	if json.Unmarshal(out, &fields) != nil || string(fields["model"]) != `"auto"` {
+		t.Fatal(string(out))
+	}
+}
+
+func TestSharedRelayRewritesAutoModelAndAcceptsReasoningUsage(t *testing.T) {
+	var entropy [32]byte
+	rand.Read(entropy[:])
+	password := hex.EncodeToString(entropy[:])
+	path := filepath.Join(t.TempDir(), "password")
+	if err := os.WriteFile(path, []byte(password), 0600); err != nil {
+		t.Fatal(err)
+	}
+	tenant := uuid.NewString()
+	call := sharedmodel.SharedCall{
+		Binding: sharedauth.Binding{TenantID: tenant, MemberID: uuid.NewString(), PlacementID: uuid.NewString(), PhysicalInstanceID: uuid.NewString(), Mode: "shared", Epoch: 1, Revision: 1, SessionID: uuid.NewString(), PlatformSessionID: uuid.NewString(), AuthGeneration: 1},
+		TaskID:  uuid.NewString(), CallID: uuid.NewString(),
+		Body: []byte(`{"model":"auto","messages":[{"role":"user","content":"hello"}],"stream":true}`),
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/internal/members/ensure" {
+			var input api.RelayMemberEnsure
+			_ = json.NewDecoder(r.Body).Decode(&input)
+			_ = json.NewEncoder(w).Encode(api.RelayKeyIssued{Key: api.RelayKey{Id: input.AccountId, AccountId: input.AccountId, Name: memberName(tenant, input.AccountId), Source: "member", Active: true}, Secret: "sk-bf-" + input.AccountId})
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = fmt.Fprint(w, "data: {\"id\":\"c\",\"object\":\"chat.completion.chunk\",\"model\":\"deepseek-v4-flash\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"ok\"},\"finish_reason\":null}]}\n\ndata: {\"id\":\"c\",\"object\":\"chat.completion.chunk\",\"model\":\"deepseek-v4-flash\",\"choices\":[],\"usage\":{\"prompt_tokens\":2,\"completion_tokens\":1,\"total_tokens\":5,\"completion_tokens_details\":{\"reasoning_tokens\":2}}}\n\ndata: [DONE]\n\n")
+	}))
+	defer server.Close()
+	relay, err := NewSharedRelay(server.URL, path, MemberPolicy{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer relay.Close()
+	var chunks []string
+	usage, err := relay.Stream(context.Background(), call, func(b []byte) error {
+		chunks = append(chunks, string(b))
+		return nil
+	})
+	if err != nil || !usage.Known || usage.InputTokens != 2 || usage.OutputTokens != 3 || len(chunks) != 2 {
+		t.Fatalf("usage=%+v chunks=%d err=%v", usage, len(chunks), err)
+	}
+	if !strings.Contains(chunks[0], `"model":"auto"`) || strings.Contains(chunks[0], "deepseek-v4-flash") {
+		t.Fatal(chunks[0])
+	}
+}

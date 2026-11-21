@@ -17,6 +17,52 @@ const check = (file, name, value) =>
     new URL(`resource/${file}.schema.json`, root).href + '#/$defs/' + name,
   )(value);
 
+test('placement market binds only the path and portal session, never submitted member identities', () => {
+  const identity = read('resource/unified-vectors.json').cases.find(
+    (value) => value.operation === 'dispatch' && value.input?.identity,
+  )?.input.identity ?? {
+    tenantId: '019a0000-0000-7000-8000-000000000001',
+    packageId: '019a0000-0000-7000-8000-000000000002',
+    versionId: '019a0000-0000-7000-8000-000000000004',
+    kind: 'skill',
+    version: '1.0.0',
+    manifestDigest: 'sha256:' + 'a'.repeat(64),
+  };
+  const input = { selection: { identity, action: 'install' } };
+  assert(check('unified', 'PlacementInstallationInput', input));
+  for (const name of [
+    'tenantId',
+    'memberId',
+    'ownerId',
+    'deviceId',
+    'poolId',
+    'platformSessionId',
+  ])
+    assert(
+      !check('unified', 'PlacementInstallationInput', {
+        ...input,
+        [name]: identity.tenantId,
+      }),
+    );
+  const spec = read('openapi/resource.yaml');
+  const methods =
+    spec.paths[
+      '/api/resource/v1/catalog/placements/{placementId}/installations'
+    ];
+  for (const operation of Object.values(methods)) {
+    assert.deepEqual(operation['x-auth-context'], ['portal']);
+    assert(
+      operation['x-error-codes'].includes('resource.shared_requires_dedicated'),
+    );
+  }
+  for (const name of ['Idempotency-Key', 'If-Match'])
+    assert(
+      methods.post.parameters.some(
+        (p) => p.in === 'header' && p.name === name && p.required === true,
+      ),
+    );
+});
+
 test('revocation fallback grants survive transport, ledger and transaction validation', () => {
   const authorization = read('resource/unified-vectors.json').cases.find(
     (v) => v.operation === 'downgrade' && v.expect.decision === 'accept',

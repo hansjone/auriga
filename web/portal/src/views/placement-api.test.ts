@@ -18,12 +18,19 @@ it('handles a cross-origin manual opaqueredirect without following the instance 
   configure();
   const assign = vi.fn();
   vi.stubGlobal('location', { origin: 'https://portal.example.test', assign });
-  const fetch = vi.fn().mockResolvedValue({
-    type: 'opaqueredirect',
-    status: 0,
-    ok: false,
-    url: '',
-    headers: new Headers(),
+  const fetch = vi.fn(function (
+    this: typeof globalThis,
+    ...args: Parameters<typeof globalThis.fetch>
+  ) {
+    expect(this).toBe(globalThis);
+    expect(args[1]?.method).toBe('POST');
+    return Promise.resolve({
+      type: 'opaqueredirect',
+      status: 0,
+      ok: false,
+      url: '',
+      headers: new Headers(),
+    });
   });
   vi.stubGlobal('fetch', fetch);
   const ticket = crypto.randomUUID();
@@ -57,6 +64,7 @@ it('handles a cross-origin manual opaqueredirect without following the instance 
 });
 it('only accepts exact runtime pool domains and canonical lowercase UUID paths', () => {
   configure();
+  vi.stubGlobal('location', { origin: 'https://portal.example.test' });
   expect(
     exchangeTarget('/i/' + id + '/_auriga/placement-ticket').pathname,
   ).toBe('/i/' + id + '/_auriga/placement-ticket');
@@ -81,6 +89,17 @@ it('only accepts exact runtime pool domains and canonical lowercase UUID paths',
       '.instances.example.test/_auriga/placement-ticket',
   ])
     expect(() => exchangeTarget(path)).toThrow();
+});
+it('accepts the configured portal port for pool domains and rejects other ports', () => {
+  configure();
+  vi.stubGlobal('location', { origin: 'https://portal.example.test:8443' });
+  expect(exchangeTarget(origin + ':8443/_auriga/placement-ticket').origin).toBe(
+    origin + ':8443',
+  );
+  expect(() => exchangeTarget(origin + '/_auriga/placement-ticket')).toThrow();
+  expect(() =>
+    exchangeTarget(origin + ':8444/_auriga/placement-ticket'),
+  ).toThrow();
 });
 it('rejects failed exchange and expired/nonready tickets without navigation', async () => {
   const assign = vi.fn();
