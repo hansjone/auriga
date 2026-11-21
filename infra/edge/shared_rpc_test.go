@@ -105,11 +105,36 @@ func TestSharedProductionResolveComparesEveryBindingAndCurrentAuthority(t *testi
 		func(r *workspacev1.ResolveSharedDshResponse) { r.State = "pending" },
 		func(r *workspacev1.ResolveSharedDshResponse) { r.AuthGeneration = 0 },
 	} {
+		// Expire the ≤1s same-generation reuse so each mutation hits live W.
+		time.Sleep(sharedResolveReuse + 10*time.Millisecond)
 		response = &workspacev1.ResolveSharedDshResponse{Binding: proto.Clone(expected).(*nodev1.SharedDshBinding), State: "ready", AuthGeneration: 1}
 		mutation(response)
 		if err := authority.Check(t.Context(), binding, sharedTestID); err == nil {
 			t.Fatal("changed live binding or authority was accepted")
 		}
+	}
+}
+
+func TestSharedResolveReusesSameGenerationWithinOneSecond(t *testing.T) {
+	client := &sharedRPCFixture{}
+	authority, binding := sharedAuthorityFixture(t, client)
+	expected, err := sharedProtoBinding(binding)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var calls atomic.Int32
+	client.resolve = func(context.Context, *workspacev1.ResolveSharedDshRequest) (*workspacev1.ResolveSharedDshResponse, error) {
+		calls.Add(1)
+		return &workspacev1.ResolveSharedDshResponse{Binding: expected, State: "ready", AuthGeneration: 1}, nil
+	}
+	if err := authority.Check(t.Context(), binding, sharedTestID); err != nil {
+		t.Fatal(err)
+	}
+	if err := authority.Check(t.Context(), binding, sharedTestID); err != nil {
+		t.Fatal(err)
+	}
+	if calls.Load() != 1 {
+		t.Fatalf("expected one Resolve within reuse window, got %d", calls.Load())
 	}
 }
 

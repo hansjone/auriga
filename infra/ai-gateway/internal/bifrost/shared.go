@@ -5,7 +5,9 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
+	"log/slog"
 	"mime"
 	"net/http"
 	"strings"
@@ -91,19 +93,24 @@ func (r *SharedRelay) Stream(ctx context.Context, call sharedmodel.SharedCall, e
 	if err != nil || emit == nil {
 		return usage, sharedauth.ErrInvalid
 	}
+	publicModel := sharedRequestModel(body)
+	failStage := func(stage string) (sharedmodel.SharedUsage, error) {
+		slog.WarnContext(ctx, "shared model relay failed", "stage", stage)
+		return usage, sharedauth.ErrUnavailable
+	}
 	member, err := r.client.MemberKey(ctx, call.Binding.TenantID, call.Binding.MemberID)
 	if err != nil {
 		return usage, err
 	}
 	password, err := r.client.password()
 	if err != nil {
-		return usage, sharedauth.ErrUnavailable
+		return failStage("relay_password")
 	}
 	target := *r.client.target
 	target.Path = "/v1/chat/completions"
 	request, err := http.NewRequestWithContext(ctx, http.MethodPost, target.String(), bytes.NewReader(body))
 	if err != nil {
-		return usage, sharedauth.ErrUnavailable
+		return failStage("relay_request")
 	}
 	// A lost response is reconciled using the durable call record. Disabling
 	// GetBody prevents transport retries of a request that might have executed.
@@ -115,32 +122,45 @@ func (r *SharedRelay) Stream(ctx context.Context, call sharedmodel.SharedCall, e
 	request.Header.Set("traceparent", observability.Parent(ctx))
 	response, err := r.http.Do(request)
 	if err != nil {
-		return usage, sharedauth.ErrUnavailable
+		return failStage("upstream_transport")
 	}
 	defer func() { _ = response.Body.Close() }()
 	if response.StatusCode != http.StatusOK {
 		// Upstream errors may include keys or prompt material.
-		return usage, sharedauth.ErrUnavailable
+		return failStage("upstream_status")
 	}
 	mediaType, _, err := mime.ParseMediaType(response.Header.Get("Content-Type"))
 	if err != nil {
-		return usage, sharedauth.ErrUnavailable
+		return failStage("content_type")
+	}
+	rewrite := func(raw []byte) ([]byte, error) {
+		out, err := rewriteSharedModel(raw, publicModel)
+		if err != nil {
+			return nil, err
+		}
+		return out, nil
 	}
 	if !streaming {
 		if mediaType != "application/json" {
-			return usage, sharedauth.ErrUnavailable
+			return failStage("non_stream_media")
 		}
 		raw, err := io.ReadAll(io.LimitReader(response.Body, relaylimits.ChatBodyBytes+1))
 		if err != nil || int64(len(raw)) > relaylimits.ChatBodyBytes {
+			return failStage("non_stream_body")
+		}
+		raw, err = rewrite(raw)
+		if err != nil {
+			slog.WarnContext(ctx, "shared model relay failed", "stage", "model_rewrite")
 			return usage, sharedauth.ErrUnavailable
 		}
 		if err := captureSharedUsage(raw, &usage); err != nil {
-			return usage, err
+			slog.WarnContext(ctx, "shared model relay failed", "stage", usageFailureStage(err))
+			return usage, mapUsageError(err)
 		}
 		return usage, emit(raw)
 	}
 	if mediaType != "text/event-stream" {
-		return usage, sharedauth.ErrUnavailable
+		return failStage("stream_media")
 	}
 	scanner := bufio.NewScanner(response.Body)
 	scanner.Buffer(make([]byte, 4096), int(relaylimits.ChatBodyBytes))
@@ -154,10 +174,16 @@ func (r *SharedRelay) Stream(ctx context.Context, call sharedmodel.SharedCall, e
 			if string(event) == "[DONE]" {
 				return usage, nil
 			}
-			if err := captureSharedUsage(event, &usage); err != nil {
-				return usage, err
+			rewritten, err := rewrite(event)
+			if err != nil {
+				slog.WarnContext(ctx, "shared model relay failed", "stage", "model_rewrite")
+				return usage, sharedauth.ErrUnavailable
 			}
-			if err := emit(append([]byte(nil), event...)); err != nil {
+			if err := captureSharedUsage(rewritten, &usage); err != nil {
+				slog.WarnContext(ctx, "shared model relay failed", "stage", usageFailureStage(err))
+				return usage, mapUsageError(err)
+			}
+			if err := emit(append([]byte(nil), rewritten...)); err != nil {
 				return usage, err
 			}
 			event = nil
@@ -169,13 +195,47 @@ func (r *SharedRelay) Stream(ctx context.Context, call sharedmodel.SharedCall, e
 			}
 			event = append(event, strings.TrimPrefix(strings.TrimPrefix(line, "data:"), " ")...)
 			if int64(len(event)) > relaylimits.ChatBodyBytes {
-				return usage, sharedauth.ErrUnavailable
+				return failStage("oversize_event")
 			}
 		}
 	}
 	// EOF without DONE is an uncertain stream, even when some tokens arrived.
-	return usage, sharedauth.ErrUnavailable
+	return failStage("missing_done")
 }
+
+func sharedRequestModel(body []byte) string {
+	var fields struct {
+		Model string `json:"model"`
+	}
+	_ = json.Unmarshal(body, &fields)
+	return fields.Model
+}
+
+// rewriteSharedModel keeps the caller-authorized public model id on every
+// chunk. Auto pools route to upstream ids (MiniMax/DeepSeek); agent validates
+// against the requested model string.
+func rewriteSharedModel(raw []byte, publicModel string) ([]byte, error) {
+	if publicModel == "" {
+		return raw, nil
+	}
+	var fields map[string]json.RawMessage
+	if json.Unmarshal(raw, &fields) != nil || fields == nil {
+		return nil, sharedauth.ErrUnavailable
+	}
+	if _, ok := fields["model"]; ok {
+		fields["model"], _ = json.Marshal(publicModel)
+	}
+	return json.Marshal(fields)
+}
+
+func usageFailureStage(err error) string {
+	if errors.Is(err, errUsageMismatch) {
+		return "usage_mismatch"
+	}
+	return "usage_invalid"
+}
+
+var errUsageMismatch = errors.New("usage_mismatch")
 
 func captureSharedUsage(raw []byte, usage *sharedmodel.SharedUsage) error {
 	var response struct {
@@ -184,6 +244,9 @@ func captureSharedUsage(raw []byte, usage *sharedmodel.SharedUsage) error {
 			Input  *int64 `json:"prompt_tokens"`
 			Output *int64 `json:"completion_tokens"`
 			Total  *int64 `json:"total_tokens"`
+			CompletionDetails *struct {
+				Reasoning *int64 `json:"reasoning_tokens"`
+			} `json:"completion_tokens_details"`
 		} `json:"usage"`
 	}
 	if json.Unmarshal(raw, &response) != nil || len(response.Error) > 0 && string(response.Error) != "null" {
@@ -194,9 +257,30 @@ func captureSharedUsage(raw []byte, usage *sharedmodel.SharedUsage) error {
 	}
 	u := response.Usage
 	const maxTokens = 9007199254740991
-	if u.Input == nil || u.Output == nil || u.Total == nil || *u.Input < 0 || *u.Output < 0 || *u.Total < 0 || *u.Input > maxTokens || *u.Output > maxTokens || *u.Total > maxTokens || *u.Input+*u.Output != *u.Total {
+	if u.Input == nil || u.Output == nil || u.Total == nil || *u.Input < 0 || *u.Output < 0 || *u.Total < 0 || *u.Input > maxTokens || *u.Output > maxTokens || *u.Total > maxTokens {
 		return sharedauth.ErrUnavailable
 	}
-	*usage = sharedmodel.SharedUsage{InputTokens: *u.Input, OutputTokens: *u.Output, Known: true}
+	input, output, total := *u.Input, *u.Output, *u.Total
+	// Reasoning models often put reasoning tokens into total without counting
+	// them in completion_tokens. Bill by upstream total: fold the gap into
+	// output so Input+Output remains the durable accounting identity.
+	if input+output != total {
+		var reasoning int64
+		if u.CompletionDetails != nil && u.CompletionDetails.Reasoning != nil {
+			reasoning = *u.CompletionDetails.Reasoning
+		}
+		if reasoning < 0 || reasoning > maxTokens || input+output+reasoning != total {
+			return errUsageMismatch
+		}
+		output += reasoning
+	}
+	*usage = sharedmodel.SharedUsage{InputTokens: input, OutputTokens: output, Known: true}
 	return nil
+}
+
+func mapUsageError(err error) error {
+	if errors.Is(err, errUsageMismatch) {
+		return sharedauth.ErrUnavailable
+	}
+	return err
 }

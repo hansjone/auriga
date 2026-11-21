@@ -322,15 +322,127 @@ button[aria-label="添加工作区"],button[aria-label="Add workspace"]{display:
           ),
         ),
       );
-      // Show every shared preset (incl. ptc/minimal) without a Developer tools gate.
-      // Edge Identity has no admin role this round; hide preset create/edit affordances.
-      try {
-        ctx.inject?.(['configForms'], (scope) => {
-          void scope.configForms?.developerTools?.setEnabled?.(true);
-        });
-      } catch {
-        // Preference write is best-effort; seat still lists non-gated presets.
+      // Shared profile forbids api-settings-controller, so upstream
+      // client-ui-agent-preset (needs remote.settings) never mounts. Provide the
+      // hero chip here from the live agentPresets/list; do not hardcode ids.
+      // priority -1 shadows any later native registration (lowest wins).
+      const stagedPreset = { id: '' };
+      async function presetList(signal) {
+        const result = await rpc.call(
+          '/api',
+          'agentPresets/list',
+          { args: {} },
+          signal,
+        );
+        if (!result.ok) throw new Error('预设列表暂不可用');
+        return result.value;
       }
+      async function presetSelect(agentId, agentPreset, signal) {
+        const result = await rpc.call(
+          '/api',
+          'agentPresets/select',
+          { args: { agentId, agentPreset } },
+          signal,
+        );
+        if (!result.ok) throw new Error('预设切换失败');
+        return result.value;
+      }
+      function SharedPresetSeat({ sessionId }) {
+        const [options, setOptions] = React.useState([]);
+        const [current, setCurrent] = React.useState(stagedPreset.id);
+        const [error, setError] = React.useState('');
+        const [busy, setBusy] = React.useState(false);
+        React.useEffect(() => {
+          const abort = new AbortController();
+          presetList(abort.signal)
+            .then((roster) => {
+              if (abort.signal.aborted) return;
+              const rows = (roster?.presets ?? []).filter(
+                (row) =>
+                  row && typeof row.id === 'string' && row.id && !row.broken,
+              );
+              setOptions(rows);
+              const fallback =
+                stagedPreset.id ||
+                rows.find((row) => row.isDefault)?.id ||
+                rows[0]?.id ||
+                '';
+              setCurrent(fallback);
+            })
+            .catch(() => {
+              if (!abort.signal.aborted) setError('无法加载预设');
+            });
+          return () => abort.abort();
+        }, [sessionId]);
+        React.useEffect(() => {
+          if (!sessionId || !stagedPreset.id) return;
+          const abort = new AbortController();
+          presetSelect(sessionId, stagedPreset.id, abort.signal)
+            .then(() => {
+              if (!abort.signal.aborted) setCurrent(stagedPreset.id);
+            })
+            .catch(() => {});
+          return () => abort.abort();
+        }, [sessionId]);
+        async function onChange(event) {
+          const id = event.target.value;
+          if (!id || busy) return;
+          setBusy(true);
+          setError('');
+          try {
+            if (sessionId) await presetSelect(sessionId, id);
+            else stagedPreset.id = id;
+            setCurrent(id);
+          } catch {
+            setError('预设未切换，请重试');
+          } finally {
+            setBusy(false);
+          }
+        }
+        if (options.length === 0) return null;
+        return h(
+          'label',
+          {
+            'data-auriga-shared-preset': '',
+            style: {
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '6px',
+              minWidth: 0,
+              maxWidth: '240px',
+              fontSize: '13px',
+            },
+          },
+          h('span', { style: { flex: 'none' } }, '预设'),
+          h(
+            'select',
+            {
+              value: current,
+              disabled: busy,
+              onChange,
+              title: error || '选择共享 Agent 预设',
+              'aria-label': '选择 Agent 预设',
+              style: { minWidth: 0, maxWidth: '180px' },
+            },
+            ...options.map((row) =>
+              h(
+                'option',
+                { key: row.id, value: row.id },
+                row.name || row.id,
+              ),
+            ),
+          ),
+          error && h('span', { role: 'alert' }, error),
+        );
+      }
+      registrations.push(
+        add('conversation.hero.agentPreset', () =>
+          ctx.slots.register(
+            { name: 'conversation.hero.agentPreset', priority: -1 },
+            SharedPresetSeat,
+          ),
+        ),
+      );
       ctx.effect(
         () => () => {
           revisionCleanup();

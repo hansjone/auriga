@@ -188,13 +188,26 @@ function checkSharedBrowserCarrier(files) {
     !code.includes(
       "constresult=awaitrpc.call('/api',`aurigaShared/${endpoint}`,{args:request===undefined?{}:{request}},signal,);",
     ) ||
+    // 2026-11-21 review (SHARED-AUTO-PRESET): shared profile forbids
+    // api-settings-controller, so native ui-agent-preset never mounts. Hero
+    // chip uses the same same-origin rpc carrier for agentPresets/list+select
+    // only (roster from Host; no hardcoded ids). No new URL/header/identity.
+    !code.includes(
+      "constresult=awaitrpc.call('/api','agentPresets/list',{args:{}},signal,);",
+    ) ||
+    !code.includes(
+      "constresult=awaitrpc.call('/api','agentPresets/select',{args:{agentId,agentPreset}},signal,);",
+    ) ||
+    !code.includes(
+      "name:'conversation.hero.agentPreset',priority:-1",
+    ) ||
     !code.includes('globalThis.__DSH_TRANSPORT__={rpc,ownsHost:false};') ||
     count(visible, /\bfetcher\b/g) !== 2 ||
     count(visible, /\bfetch\b/g) !== 1 ||
     count(visible, /\bbase\b/g) !== 2 ||
     count(visible, /\bkind\b/g) !== 3 ||
     count(visible, /\bsend\b/g) !== 3 ||
-    count(code, /rpc\.call\(/g) !== 1 ||
+    count(code, /rpc\.call\(/g) !== 3 ||
     count(visible, /\bread\s*\(/g) !== 4 ||
     [...visible.matchAll(/\bread\s*\(\s*(['"])([^'"]+)\1/g)]
       .map((match) => match[2])

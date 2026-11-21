@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/tls"
 	"encoding/json"
+	"errors"
 	iamv1 "github.com/hansjone/auriga/infra/gen/auriga/iam/v1"
 	nodev1 "github.com/hansjone/auriga/infra/gen/auriga/node/v1"
 	workspacev1 "github.com/hansjone/auriga/infra/gen/auriga/workspace/v1"
@@ -401,6 +402,62 @@ func TestSSEResponseRejectsTruncationAndPreservesToolArguments(t *testing.T) {
 	}
 	if chunks[2]["argumentsDelta"] != "1}" || chunks[3]["block"].(map[string]any)["arguments"] != `{"x":1}` {
 		t.Fatal("tool fragments lost", chunks)
+	}
+}
+
+func TestResponseStateAcceptsReasoningVariants(t *testing.T) {
+	chunks := []map[string]any{}
+	state := newResponseState("auto", func(v any) error { chunks = append(chunks, v.(map[string]any)); return nil })
+	events := []string{
+		`{"id":"c","object":"chat.completion.chunk","model":"auto","choices":[{"index":0,"delta":{"role":"assistant","content":null,"reasoning_content":"think"},"finish_reason":null}]}`,
+		`{"id":"c","object":"chat.completion.chunk","model":"auto","choices":[{"index":0,"delta":{"content":"hi"},"finish_reason":null}]}`,
+		`{"id":"c","object":"chat.completion.chunk","model":"auto","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`,
+		`{"id":"c","object":"chat.completion.chunk","model":"auto","choices":[],"usage":{"prompt_tokens":3,"completion_tokens":1,"total_tokens":8,"completion_tokens_details":{"reasoning_tokens":4}}}`,
+	}
+	for _, v := range events {
+		if e := state.accept([]byte(v)); e != nil {
+			t.Fatal(e)
+		}
+	}
+	if e := state.complete(); e != nil {
+		t.Fatal(e)
+	}
+	if state.usage["outputTokens"] != int64(5) || state.usage["totalTokens"] != int64(8) {
+		t.Fatal(state.usage)
+	}
+	joined := ""
+	for _, c := range chunks {
+		if c["type"] == "text-delta" {
+			joined += c["text"].(string)
+		}
+	}
+	if joined != "hi" {
+		t.Fatal("reasoning leaked or content lost", joined, chunks)
+	}
+}
+
+func TestResponseStateRejectsUsageMismatchWithoutReasoning(t *testing.T) {
+	state := newResponseState("m", func(any) error { return nil })
+	if e := state.accept([]byte(`{"id":"c","object":"chat.completion.chunk","model":"m","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`)); e != nil {
+		t.Fatal(e)
+	}
+	if e := state.accept([]byte(`{"id":"c","object":"chat.completion.chunk","model":"m","choices":[],"usage":{"prompt_tokens":2,"completion_tokens":1,"total_tokens":9}}`)); !errors.Is(e, errUsageMismatch) {
+		t.Fatal(e)
+	}
+}
+
+func TestCompletionChunkAllowsNullContentWithReasoning(t *testing.T) {
+	raw := []byte(`{"id":"c","object":"chat.completion","model":"auto","choices":[{"index":0,"message":{"role":"assistant","content":null,"reasoning_content":"x"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}`)
+	chunk, err := completionChunk(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(chunk), "reasoning_content") {
+		t.Fatal(string(chunk))
+	}
+	state := newResponseState("auto", func(any) error { return nil })
+	if e := state.accept(chunk); e != nil {
+		t.Fatal(e)
 	}
 }
 
