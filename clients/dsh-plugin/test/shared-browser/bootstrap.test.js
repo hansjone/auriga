@@ -198,12 +198,13 @@ test(
       ),
       'shared mode must hide model selector',
     );
-    assert.equal(
+    assert.ok(
       registrations.some(
-        (entry) => entry.descriptor.name === 'conversation.input.permission',
+        (entry) =>
+          entry.descriptor.name === 'conversation.input.permission' &&
+          entry.descriptor.priority === -1,
       ),
-      false,
-      'permission seat stays native; shared chrome must not replace it',
+      'shared mode must hide permission seat (shell banned)',
     );
     const Main = registrations.find(
       (entry) => entry.descriptor.name === 'main',

@@ -904,7 +904,7 @@ test('native list/control grant is global read entry plus exact own-session filt
       role: {
         name: 'auriga-shared-native-read',
         resource: 'global',
-        actions: ['session/list', 'session/control'],
+        actions: ['session/list', 'session/control', 'agentPresets/list'],
       },
     },
   );

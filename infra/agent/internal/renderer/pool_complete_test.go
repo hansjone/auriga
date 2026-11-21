@@ -22,7 +22,7 @@ func TestCompleteProfileRejectsConfigExtensionsForEveryProvider(t *testing.T) {
 	if err := yaml.Unmarshal(completePoolProfile(t), &baseline); err != nil {
 		t.Fatal(err)
 	}
-	if len(baseline) != 60 {
+	if len(baseline) != 65 {
 		t.Fatal("frozen profile drift")
 	}
 	for i := range baseline {
@@ -114,6 +114,6 @@ func TestCompleteProfileRejectsMissingRolesAndUnsafeNestedValues(t *testing.T) {
 
 func TestCompleteFrozenSharedProfilePassesProductionValidation(t *testing.T) {
 	if err := ValidateProductionPoolProfile(completePoolProfile(t)); err != nil {
-		t.Fatal("frozen 60-row shared rc.3 closure rejected", err)
+		t.Fatal("frozen 65-row shared rc.3 closure rejected", err)
 	}
 }

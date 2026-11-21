@@ -43,8 +43,15 @@ export const ALLOWED_ACTIONS = Object.freeze([
   'workspaceFiles/readBytes',
 ]);
 
+/** current() coalesces by key: single-flight + reuse ≤1s. session() lookup is
+ * concurrent single-flight only (no TTL) so W binding rewrites stay immediate.
+ * revoke / close invalidate immediately; cache hits still re-fence locally.
+ */
+const AUTHORITY_REUSE_MS = 1000;
+
 /** All ports are trusted server services, never request body properties.
- * resolve(binding, platformSessionId) MUST query W/IAM on every invocation.
+ * resolve(binding, platformSessionId) MUST query W/IAM on every invocation
+ * (except the documented ≤1s coalesce above).
  * register(binding,parentSessionId) MUST durably register before publication.
  * lookup(sessionId) MUST return W's authoritative SessionBinding after restart.
  */
@@ -55,6 +62,7 @@ export function createSharedRuntime({
   physicalInstanceId,
   expectedMode = 'shared',
   now = () => Math.floor(Date.now() / 1000),
+  clockMs = () => Date.now(),
 }) {
   if (!['shared', 'dedicated'].includes(expectedMode))
     fail('common.validation_failed');
@@ -63,6 +71,18 @@ export function createSharedRuntime({
     replay = new Map();
   let closed = false;
   const floors = new Map();
+  /** @type {Map<string, {at:number, value?:any, inflight?:Promise<any>}>} */
+  const currentReuse = new Map();
+  /** @type {Map<string, {at:number, value?:any, inflight?:Promise<any>}>} */
+  const sessionReuse = new Map();
+  const currentKey = (b) =>
+    [b.placementId, b.platformSessionId, b.epoch, b.authGeneration ?? ''].join(
+      '\0',
+    );
+  const dropAuthority = () => {
+    currentReuse.clear();
+    sessionReuse.clear();
+  };
   const fence = (b) => {
     if (closed) fail();
     const f = floors.get(b.placementId);
@@ -76,14 +96,7 @@ export function createSharedRuntime({
     if (b.mode !== expectedMode || b.physicalInstanceId !== physicalInstanceId)
       fail('shared.binding_mismatch');
   };
-  async function current(b) {
-    fence(b);
-    let state;
-    try {
-      state = await ports.resolve(placementBinding(b), b.platformSessionId);
-    } catch {
-      fail('common.unavailable');
-    }
+  function acceptCurrent(b, state) {
     fence(b);
     if (!state?.active) fail();
     validate('Binding', state.binding);
@@ -96,13 +109,57 @@ export function createSharedRuntime({
       fail();
     return state;
   }
-  async function session(id) {
-    let b;
+  async function current(b) {
+    fence(b);
+    const key = currentKey(b);
+    const hit = currentReuse.get(key);
+    const t = clockMs();
+    if (hit?.value !== undefined && t - hit.at <= AUTHORITY_REUSE_MS)
+      return acceptCurrent(b, hit.value);
+    if (hit?.inflight) return acceptCurrent(b, await hit.inflight);
+    const inflight = (async () => {
+      try {
+        return await ports.resolve(placementBinding(b), b.platformSessionId);
+      } catch {
+        fail('common.unavailable');
+      }
+    })();
+    currentReuse.set(key, { at: t, inflight });
     try {
-      b = await ports.lookup(id);
+      const state = await inflight;
+      if (currentReuse.get(key)?.inflight === inflight)
+        currentReuse.set(key, { at: clockMs(), value: state });
+      return acceptCurrent(b, state);
     } catch (error) {
-      if (error?.code === 'common.not_found') fail('common.not_found');
-      fail('common.unavailable');
+      if (currentReuse.get(key)?.inflight === inflight)
+        currentReuse.delete(key);
+      throw error;
+    }
+  }
+  async function session(id) {
+    // Lookup coalesces concurrent callers only. Completed results are not
+    // TTL-cached so a W binding rewrite (mode/member) is visible immediately;
+    // current() still supplies the ≤1s resolve reuse the flood needs.
+    const hit = sessionReuse.get(id);
+    let b;
+    if (hit?.inflight) {
+      b = await hit.inflight;
+    } else {
+      const inflight = (async () => {
+        try {
+          return await ports.lookup(id);
+        } catch (error) {
+          if (error?.code === 'common.not_found') fail('common.not_found');
+          fail('common.unavailable');
+        }
+      })();
+      sessionReuse.set(id, { at: clockMs(), inflight });
+      try {
+        b = await inflight;
+      } finally {
+        if (sessionReuse.get(id)?.inflight === inflight)
+          sessionReuse.delete(id);
+      }
     }
     validate('SessionBinding', b);
     same(b, { sessionId: id });
@@ -251,6 +308,8 @@ export function createSharedRuntime({
       revision: Math.max(f?.revision ?? 0, event.revision),
       authGeneration: Math.max(f?.authGeneration ?? 0, event.authGeneration),
     });
+    // Raised fence must not keep a stale resolve/lookup hit.
+    dropAuthority();
     for (const [id, b] of ownership)
       if (b.placementId === event.placementId) ownership.delete(id);
   }
@@ -328,6 +387,7 @@ export function createSharedRuntime({
       closed = true;
       ownership.clear();
       replay.clear();
+      dropAuthority();
     },
   };
 }

@@ -27,7 +27,10 @@ client-ui-renderer client-locale client-shortcuts client-ui-theme client-ui-sett
 client-ui-session client-ui-layout client-resources client-ui-sidebar
 client-ui-sidebar-right client-ui-workspace client-ui-conversation
 client-ui-input-trigger client-ui-chat client-ui-tool client-ui-trajectory
-client-ui-attachment host-frontend-static`
+client-ui-attachment client-ui-agent-preset host-frontend-static`
+
+// Five agent-preset rows: empty default + four shell-stripped native ids.
+const approvedSharedAgentPresets = 5
 
 type poolProfileRow struct {
 	ID     string         `yaml:"id"`
@@ -37,6 +40,36 @@ type poolProfileRow struct {
 
 var poolRowID = regexp.MustCompile(`^[a-z][a-z0-9-]{0,63}$`)
 var poolHostConfig = regexp.MustCompile(`^/var/lib/auriga/pools/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/control/shared-host\.json$`)
+
+var approvedAgentPresetIDs = map[string]int{
+	"auriga-shared": 0,
+	"standard":      1,
+	"ptc":           2,
+	"minimal":       3,
+	"cordis":        4,
+}
+
+var allowedNestedPresetPlugins = map[string]bool{
+	"@deepseek-ai/dsh-persona":                         true,
+	"@deepseek-ai/dsh-agent-instructions":              true,
+	"@deepseek-ai/dsh-time-context":                    true,
+	"@deepseek-ai/dsh-skill-filesystem":                true,
+	"@deepseek-ai/dsh-tool-skill":                      true,
+	"@deepseek-ai/dsh-command-goal":                    true,
+	"@deepseek-ai/dsh-tool-goal":                       true,
+	"@deepseek-ai/dsh-plan-mode":                       true,
+	"@deepseek-ai/dsh-compaction-basic":                true,
+	"@deepseek-ai/dsh-command-compact":                 true,
+	"@deepseek-ai/dsh-compaction-tool-result-pruner":   true,
+	"@deepseek-ai/dsh-tool-ask-user":                   true,
+	"@deepseek-ai/dsh-tool-todo":                       true,
+	"@deepseek-ai/dsh-tool-web":                        true,
+	"@deepseek-ai/dsh-tool-present":                    true,
+	"@deepseek-ai/dsh-agent-tool-presentation":         true,
+	"cordis:group":                                     true,
+}
+
+var forbiddenNestedPreset = regexp.MustCompile(`(?i)(?:^|/)(?:shell|terminal|tool-bash|tool-pwsh|tool-fs|tool-jobs|tool-schedule|tool-subagent|workflow|tool-workflow|tool-cordis|tool-ralph|plugin-manager|plugin-market|persistent)`)
 
 func ValidateProductionPoolProfile(raw []byte) error { return ValidatePoolProfile(raw) }
 
@@ -84,17 +117,25 @@ func ValidatePoolProfile(raw []byte) error {
 	for _, name := range strings.Fields(sharedSDKNames) {
 		allowed["@deepseek-ai/dsh-"+name] = true
 	}
-	if len(rows) != len(allowed) {
-		return fmt.Errorf("complete shared profile requires all %d approved rows", len(allowed))
+	// Unique package names plus four extra agent-preset rows.
+	if len(rows) != len(allowed)+approvedSharedAgentPresets-1 {
+		return fmt.Errorf("complete shared profile requires all %d approved rows", len(allowed)+approvedSharedAgentPresets-1)
 	}
 	ids, names := map[string]bool{}, map[string]bool{}
-	ports, host, browser := -1, -1, -1
+	presetIDs := map[string]bool{}
+	ports, host, browser, presets := -1, -1, -1, 0
 	for i, row := range rows {
-		if !poolRowID.MatchString(row.ID) || ids[row.ID] || names[row.Name] || !allowed[row.Name] {
+		multiPreset := row.Name == "@deepseek-ai/dsh-agent-preset"
+		if !poolRowID.MatchString(row.ID) || ids[row.ID] || (!multiPreset && names[row.Name]) || !allowed[row.Name] {
 			return fmt.Errorf("untrusted or duplicate pool profile row %q", row.ID)
 		}
 		ids[row.ID], names[row.Name] = true, true
-		if err := validatePoolConfig(row); err != nil {
+		if multiPreset {
+			presets++
+			if err := validateAgentPresetConfig(row.Config, presetIDs); err != nil {
+				return err
+			}
+		} else if err := validatePoolConfig(row); err != nil {
 			return err
 		}
 		switch row.Name {
@@ -115,10 +156,133 @@ func ValidatePoolProfile(raw []byte) error {
 			}
 		}
 	}
+	if presets != approvedSharedAgentPresets {
+		return fmt.Errorf("shared profile requires %d approved agent-preset rows", approvedSharedAgentPresets)
+	}
+	if len(presetIDs) != approvedSharedAgentPresets {
+		return fmt.Errorf("shared profile requires every approved agent-preset id")
+	}
 	if ports < 0 || host < 0 || browser < 0 || ports >= host || host >= browser {
 		return fmt.Errorf("shared ports/Host/browser order required")
 	}
 	return nil
+}
+
+func validateAgentPresetConfig(cfg map[string]any, seen map[string]bool) error {
+	if cfg == nil {
+		return fmt.Errorf("agent-preset config required")
+	}
+	id, _ := cfg["id"].(string)
+	expectedOrder, ok := approvedAgentPresetIDs[id]
+	if !ok || seen[id] {
+		return fmt.Errorf("unapproved or duplicate agent preset %q", id)
+	}
+	seen[id] = true
+	for key := range cfg {
+		switch key {
+		case "id", "name", "order", "plugins", "description":
+		default:
+			return fmt.Errorf("unapproved agent-preset field %q", key)
+		}
+	}
+	plugins, ok := cfg["plugins"].([]any)
+	if !ok {
+		return fmt.Errorf("agent-preset plugins required")
+	}
+	if id == "auriga-shared" {
+		name, _ := cfg["name"].(string)
+		if name != "共享助手" && name != "Auriga 共享" {
+			return fmt.Errorf("default shared preset display name required")
+		}
+		if len(plugins) != 0 {
+			return fmt.Errorf("default shared preset must stay tool-empty")
+		}
+		return nil
+	}
+	order, ok := asInt(cfg["order"])
+	if !ok || order != expectedOrder {
+		return fmt.Errorf("agent preset %q order required", id)
+	}
+	return walkApprovedPresetPlugins(plugins)
+}
+
+func walkApprovedPresetPlugins(plugins []any) error {
+	for _, entry := range plugins {
+		row, ok := entry.(map[string]any)
+		if !ok {
+			return fmt.Errorf("agent-preset plugin must be a map")
+		}
+		name, _ := row["name"].(string)
+		if name == "" || !allowedNestedPresetPlugins[name] || forbiddenNestedPreset.MatchString(name) {
+			return fmt.Errorf("unapproved nested agent-preset plugin %q", name)
+		}
+		for key := range row {
+			switch key {
+			case "id", "name", "config", "group", "isolate", "disabled":
+			default:
+				return fmt.Errorf("unapproved nested agent-preset field %q", key)
+			}
+		}
+		if nested, ok := row["config"].([]any); ok {
+			if err := walkApprovedPresetPlugins(nested); err != nil {
+				return err
+			}
+			continue
+		}
+		if cfg, ok := row["config"].(map[string]any); ok {
+			if err := walkPresetPluginConfig(cfg); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func walkPresetPluginConfig(cfg map[string]any) error {
+	for key, value := range cfg {
+		switch typed := value.(type) {
+		case map[string]any:
+			if err := walkPresetPluginConfig(typed); err != nil {
+				return err
+			}
+		case []any:
+			for _, child := range typed {
+				if childMap, ok := child.(map[string]any); ok {
+					if name, _ := childMap["name"].(string); name != "" {
+						if err := walkApprovedPresetPlugins([]any{childMap}); err != nil {
+							return err
+						}
+						continue
+					}
+					if err := walkPresetPluginConfig(childMap); err != nil {
+						return err
+					}
+				}
+			}
+		case string:
+			if forbiddenNestedPreset.MatchString(typed) && strings.Contains(typed, "@deepseek-ai/dsh-") {
+				return fmt.Errorf("unapproved nested agent-preset reference %q", typed)
+			}
+		}
+		_ = key
+	}
+	return nil
+}
+
+func asInt(value any) (int, bool) {
+	switch typed := value.(type) {
+	case int:
+		return typed, true
+	case int64:
+		return int(typed), true
+	case uint64:
+		return int(typed), true
+	case float64:
+		if typed == float64(int(typed)) {
+			return int(typed), true
+		}
+	}
+	return 0, false
 }
 
 func validatePoolConfig(row poolProfileRow) error {
@@ -134,8 +298,7 @@ func validatePoolConfig(row poolProfileRow) error {
 		"tools":                     {"mode": "native", "maxParallelSubCalls": 1},
 		"agent-loop":                {"agents": []any{}, "maxParallelToolCalls": 1},
 		"agent-preset-registry":     {"default": "auriga-shared"},
-		"agent-preset":              {"id": "auriga-shared", "name": "Auriga 共享", "plugins": []any{}},
-		"agent-default-model":       {"provider": "auriga-shared", "model": "gpt-6.1-sol"},
+		"agent-default-model":       {"provider": "auriga-shared", "model": "auto"},
 		"skill-filesystem":          {"providerName": "auriga-shared", "includeDefaultRoots": false, "customSkillDirs": []any{"/run/auriga/skills-active/current"}},
 		"credentials-local":         {"path": "/home/dsh/.host/.dsh/shared-host-credentials.yaml", "watch": false},
 		"client-connection":         {"trustedHosts": []any{}},

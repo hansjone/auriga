@@ -81,9 +81,29 @@ function assertBoundary(input) {
     includeDefaultRoots: false,
     customSkillDirs: ['/run/auriga/skills-active/current'],
   });
-  assert.deepEqual(named(pkg('agent-preset'))[0].config.plugins, []);
+  const presets = named(pkg('agent-preset'));
+  assert.equal(presets.length, 5);
+  const byPreset = Object.fromEntries(
+    presets.map((row) => [row.config.id, row.config]),
+  );
+  assert.deepEqual(byPreset['auriga-shared'].plugins, []);
+  assert.ok(
+    ['共享助手', 'Auriga 共享'].includes(byPreset['auriga-shared'].name),
+  );
+  for (const id of ['standard', 'ptc', 'minimal', 'cordis']) {
+    assert.ok(byPreset[id], id);
+    const blob = JSON.stringify(byPreset[id].plugins);
+    assert.equal(
+      /\b(?:tool-bash|tool-pwsh|terminal|tool-fs|tool-jobs|tool-subagent|workflow-ptc|tool-cordis|plugin-manager)\b/.test(
+        blob,
+      ),
+      false,
+      id,
+    );
+  }
   assert.deepEqual(named(pkg('agent-loop'))[0].config.agents, []);
   assert.equal(named(pkg('tools'))[0].config.mode, 'native');
+  assert.equal(named(pkg('agent-default-model'))[0].config.model, 'auto');
 }
 
 test('complete profile is a literal entry list with a single restricted Host and immutable browser export', () => {
@@ -93,12 +113,15 @@ test('complete profile is a literal entry list with a single restricted Host and
     assert.notEqual(node?.tag, 'tag:yaml.org,2002:merge');
   });
   assertBoundary(rows);
-  assert.equal(new Set(rows.map((row) => row.name)).size, rows.length);
+  assert.equal(rows.length, SHARED_SDK_PACKAGES.length + 3 + 4);
   assert.deepEqual(
-    rows
-      .filter((row) => row.name.startsWith('@deepseek-ai/'))
-      .map((row) => row.name)
-      .sort(),
+    [
+      ...new Set(
+        rows
+          .filter((row) => row.name.startsWith('@deepseek-ai/'))
+          .map((row) => row.name),
+      ),
+    ].sort(),
     [...SHARED_SDK_PACKAGES].sort(),
   );
 });
@@ -115,10 +138,21 @@ test('profile boundary rejects owner root, mutable browser modules, private skil
         .config.customSkillDirs.push('/home/dsh/.agents/skills'),
     (copy) =>
       copy
-        .find((row) => row.name === pkg('agent-preset'))
+        .find(
+          (row) =>
+            row.name === pkg('agent-preset') &&
+            row.config.id === 'auriga-shared',
+        )
         .config.plugins.push({
           id: 'shell',
           name: pkg('shell'),
+        }),
+    (copy) =>
+      copy
+        .find((row) => row.config?.id === 'standard')
+        .config.plugins.push({
+          id: 'tool-bash',
+          name: pkg('tool-bash'),
         }),
   ];
   for (const mutate of mutations) {

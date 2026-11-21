@@ -92,7 +92,8 @@ export function installBrowserTransport() {
   } catch {
     // Persistence is best-effort; AutoBind below still opens the fixed Workspace.
   }
-  // Hide the hero workspace chip and model selector; keep agent preset / permission.
+  // Hide workspace chrome, model selector, permission seat, and preset editors.
+  // Agent preset chip stays visible; permission needs shell and stays banned.
   try {
     const style = document.createElement('style');
     style.setAttribute('data-auriga-shared-chrome', '');
@@ -101,6 +102,8 @@ button[aria-label="选择工作区"],button[aria-label="Choose workspace"]{displ
 button[aria-label="添加工作区"],button[aria-label="Add workspace"]{display:none!important}
 [data-row-key^="workspace:"]{display:none!important}
 [data-slot="conversation.input.model"]{display:none!important}
+[data-slot="conversation.input.permission"]{display:none!important}
+[data-slot="settings.agentPreset"] button[aria-label*="创建"],[data-slot="settings.agentPreset"] button[aria-label*="Create"],[data-slot="settings.agentPreset"] button[aria-label*="创造"]{display:none!important}
 `;
     document.documentElement.appendChild(style);
   } catch {
@@ -310,6 +313,24 @@ button[aria-label="添加工作区"],button[aria-label="Add workspace"]{display:
           ),
         ),
       );
+      // Permission presets inject shell+approval; shared profile forbids shell.
+      registrations.push(
+        add('conversation.input.permission', () =>
+          ctx.slots.register(
+            { name: 'conversation.input.permission', priority: -1 },
+            () => null,
+          ),
+        ),
+      );
+      // Show every shared preset (incl. ptc/minimal) without a Developer tools gate.
+      // Edge Identity has no admin role this round; hide preset create/edit affordances.
+      try {
+        ctx.inject?.(['configForms'], (scope) => {
+          void scope.configForms?.developerTools?.setEnabled?.(true);
+        });
+      } catch {
+        // Preference write is best-effort; seat still lists non-gated presets.
+      }
       ctx.effect(
         () => () => {
           revisionCleanup();

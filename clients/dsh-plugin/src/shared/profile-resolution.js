@@ -112,16 +112,19 @@ export function createSharedProfileResolver({
     if (!Array.isArray(rows) || rows.length === 0) denied();
     const names = new Set();
     const ids = new Set();
+    let agentPresets = 0;
     const normalized = rows.map((row) => {
+      const multiPreset = row?.name === '@deepseek-ai/dsh-agent-preset';
       if (
         !row ||
         typeof row.id !== 'string' ||
         row.id === '' ||
         ids.has(row.id) ||
-        names.has(row.name) ||
+        (!multiPreset && names.has(row.name)) ||
         (!sdkNames.has(row.name) && !aurigaNames.has(row.name))
       )
         denied();
+      if (multiPreset) agentPresets++;
       names.add(row.name);
       ids.add(row.id);
       return {
@@ -129,7 +132,10 @@ export function createSharedProfileResolver({
         name: sdkNames.has(row.name) ? resolveModule(row.name) : row.name,
       };
     });
+    // One empty default plus the four shell-stripped native ids.
+    if (agentPresets !== 5) denied();
     for (const name of aurigaNames) if (!names.has(name)) denied();
+    for (const name of sdkNames) if (!names.has(name)) denied();
     const ports = rows.findIndex(
       (row) => row.name === 'auriga-dsh/shared-ports',
     );
