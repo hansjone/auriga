@@ -97,9 +97,9 @@ public class SharedDshController {
   }
 
   /**
-   * A path-mounted instance shares the portal origin. Return only its path so the
-   * browser resolves it against the origin it actually uses (a proxied domain or the
-   * site IP); subdomain instances keep their absolute HTTPS origin.
+   * A path-mounted instance shares the portal origin. Return only its path so the browser resolves
+   * it against the origin it actually uses (a proxied domain or the site IP); subdomain instances
+   * keep their absolute HTTPS origin.
    */
   static String browserExchangeUrl(java.net.URI url) {
     String path = url.getRawPath();
