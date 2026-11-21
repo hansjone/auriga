@@ -41,7 +41,7 @@ type sharedReplayActivation struct {
 func nasSharedReplay(args []string, stdout io.Writer) error {
 	f := flag.NewFlagSet("shared-replay-prepare", flag.ContinueOnError)
 	base := f.String("base", "", "original sealed NAS materials")
-	action := f.String("action", "check", "stage, prepare-path, final-path, provision, verify-final, close or check")
+	action := f.String("action", "check", "stage, prepare-path, final-path, provision, verify-final, close, check or rebind")
 	if err := f.Parse(args); err != nil {
 		return err
 	}
@@ -49,7 +49,7 @@ func nasSharedReplay(args []string, stdout io.Writer) error {
 		return fmt.Errorf("shared replay installation requires root and canonical fixed base")
 	}
 	switch *action {
-	case "stage", "prepare-path", "final-path", "provision", "verify-final", "close", "check":
+	case "stage", "prepare-path", "final-path", "provision", "verify-final", "close", "check", "rebind":
 	default:
 		return fmt.Errorf("unsupported shared replay installation operation")
 	}
@@ -64,18 +64,23 @@ func nasSharedReplay(args []string, stdout io.Writer) error {
 	if err != nil {
 		return err
 	}
-	_, source, err := readSharedInstallation(*base, sourcePath, baseSHA)
+	installed, source, err := readSharedInstallation(*base, sourcePath, baseSHA)
 	if err != nil {
 		return err
 	}
 	defer sharedClear(source)
-	installation, err := runtimeReadLeaf(filepath.Join(sourcePath, "installation.receipt"), 0600, 65536)
+	// The replay installer identity is bound to the installation identity, not
+	// to explicitly rotatable model/profile/file digests (set-model/set-profile).
+	sourceSHA, err := sharedReplayBinding(installed)
 	if err != nil {
 		return err
 	}
-	sourceSHA := sharedSHA(installation)
 	root := filepath.Join(filepath.Dir(*base), "shared-replay-source")
-	if _, err := os.Lstat(root); os.IsNotExist(err) && *action == "stage" {
+	if _, err := os.Lstat(root); os.IsNotExist(err) && *action == "rebind" {
+		// Nothing installed yet; the first start stages on the current binding.
+		_, err = fmt.Fprintln(stdout, "replay not installed")
+		return err
+	} else if os.IsNotExist(err) && *action == "stage" {
 		if err := os.Mkdir(root, 0700); err != nil {
 			return err
 		}
@@ -94,6 +99,9 @@ func nasSharedReplay(args []string, stdout io.Writer) error {
 		if err := stageSharedReplaySource(root, sourceSHA, string(source["public/replay.nkey"])); err != nil {
 			return err
 		}
+	}
+	if *action == "rebind" {
+		return rebindSharedReplaySource(root, sourceSHA, string(source["public/replay.nkey"]), stdout)
 	}
 	receipt, err := readSharedReplaySource(root, sourceSHA, string(source["public/replay.nkey"]))
 	if err != nil {
@@ -410,4 +418,125 @@ func sharedReplayConnect(seed string, installer bool) (*nats.Conn, error) {
 		inbox = "_INBOX_auriga_shared_install"
 	}
 	return nats.Connect("nats://nats:4222", option, nats.NoReconnect(), nats.Timeout(5*time.Second), nats.CustomInboxPrefix(inbox))
+}
+
+// sharedReplayBinding is the installation identity: every receipt field except
+// the explicitly rotatable model, shared profile and file digests.
+func sharedReplayBinding(receipt *sharedInstallationReceipt) (string, error) {
+	if receipt == nil {
+		return "", fmt.Errorf("shared installation receipt required")
+	}
+	identity := *receipt
+	identity.Model, identity.Profile, identity.Files = "", "", ""
+	raw, err := json.Marshal(identity)
+	if err != nil {
+		return "", err
+	}
+	return sharedSHA(raw), nil
+}
+
+// rebindSharedReplaySource moves an intact replay installation (same installer
+// key pair, same bucket creation time, same final projection digest) onto the
+// current installation binding. Keys, bucket and activation state are kept;
+// only the binding field is rewritten. Idempotent.
+func rebindSharedReplaySource(root, binding, edgePublic string, stdout io.Writer) error {
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		return err
+	}
+	for _, entry := range entries {
+		switch entry.Name() {
+		case ".lock", "source", "bucket.receipt", "activation.receipt":
+		default:
+			return fmt.Errorf("unknown or pending replay installation material")
+		}
+	}
+	dir := filepath.Join(root, "source")
+	if err := materialsPrivateDirectory(dir); err != nil {
+		return err
+	}
+	raw, err := runtimeReadLeaf(filepath.Join(dir, "source.receipt"), 0600, 65536)
+	if err != nil {
+		return err
+	}
+	var source sharedReplaySourceReceipt
+	if sharedDecodeJSON(raw, &source) != nil || source.Version != 1 || !sharedCanonicalSHA(source.Source) || !nkeys.IsValidPublicUserKey(source.Public) || source.Public == edgePublic {
+		return fmt.Errorf("replay installer source receipt invalid")
+	}
+	public, err := runtimeReadLeaf(filepath.Join(dir, "installer.nkey"), 0600, 65536)
+	if err != nil || string(public) != source.Public {
+		return fmt.Errorf("replay installer public key differs")
+	}
+	seed, err := runtimeReadLeaf(filepath.Join(dir, "installer.seed"), 0600, 65536)
+	if err != nil {
+		return err
+	}
+	user, err := nkeys.FromSeed(seed)
+	clear(seed)
+	if err != nil {
+		return fmt.Errorf("replay installer seed invalid")
+	}
+	derived, err := user.PublicKey()
+	user.Wipe()
+	if err != nil || derived != source.Public {
+		return fmt.Errorf("replay installer seed differs from public key")
+	}
+	previous := source.Source
+	if previous == binding {
+		_, err = fmt.Fprintln(stdout, "replay binding current")
+		return err
+	}
+	var bucket *sharedReplayBucketReceipt
+	if raw, err := runtimeReadLeaf(filepath.Join(root, "bucket.receipt"), 0600, 65536); err == nil {
+		bucket = new(sharedReplayBucketReceipt)
+		if sharedDecodeJSON(raw, bucket) != nil || bucket.Version != 1 || (bucket.Source != previous && bucket.Source != binding) || bucket.Created.IsZero() {
+			return fmt.Errorf("replay bucket installation receipt differs")
+		}
+	} else if !os.IsNotExist(err) {
+		return err
+	}
+	var activation *sharedReplayActivation
+	if raw, err := runtimeReadLeaf(filepath.Join(root, "activation.receipt"), 0600, 65536); err == nil {
+		activation = new(sharedReplayActivation)
+		if sharedDecodeJSON(raw, activation) != nil || activation.Version != 1 || (activation.Source != previous && activation.Source != binding) || !sharedCanonicalSHA(activation.Final) {
+			return fmt.Errorf("replay activation receipt differs")
+		}
+	} else if !os.IsNotExist(err) {
+		return err
+	}
+	write := func(path string, value any) error {
+		body, err := json.Marshal(value)
+		if err != nil {
+			return err
+		}
+		tmp := filepath.Join(filepath.Dir(path), ".rebind.pending")
+		if err := materialsCreate(tmp, body); err != nil {
+			return err
+		}
+		if err := os.Rename(tmp, path); err != nil {
+			return err
+		}
+		return runtimeSyncDir(filepath.Dir(path))
+	}
+	// Dependent receipts first, source last: an interruption leaves the source
+	// on the previous binding, and a retry still sees every receipt as either
+	// previous or current.
+	if bucket != nil {
+		bucket.Source = binding
+		if err := write(filepath.Join(root, "bucket.receipt"), bucket); err != nil {
+			return err
+		}
+	}
+	if activation != nil {
+		activation.Source = binding
+		if err := write(filepath.Join(root, "activation.receipt"), activation); err != nil {
+			return err
+		}
+	}
+	source.Source = binding
+	if err := write(filepath.Join(dir, "source.receipt"), source); err != nil {
+		return err
+	}
+	_, err = fmt.Fprintf(stdout, "replay binding moved previous=%s current=%s\n", previous, binding)
+	return err
 }

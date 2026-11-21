@@ -42,6 +42,15 @@ done
 if [ -n "$_shared_set_model" ] && [ "$_shared_set_profile" = true ]; then
   die 'set-model and set-profile are mutually exclusive in one invocation; run them sequentially'
 fi
+_shared_replay_rebind() {
+  # Model/profile rotation keeps the installation identity; move the replay
+  # installer receipts onto it (keys, bucket and activation state unchanged).
+  if [ "${AURIGA_INSTALL_MODE:-host}" = container ]; then
+    sh "$NAS_ROOT/scripts/installer.sh" shared-replay-rebind
+  else
+    "$(bootstrap_binary)" shared-replay-prepare -base "$AURIGA_DATA_ROOT/config/materials" -action rebind
+  fi
+}
 if [ -n "$_shared_set_model" ]; then
   [ -n "$_shared_base_sha" ] || die 'set-model requires --expected-base-sha256'
   [ -z "$_shared_profile$_shared_profile_sha$_shared_model$_shared_adapter$_shared_adapter_sha$_shared_dedicated$_shared_dedicated_sha" ] && [ "$_shared_team" = false ] \
@@ -55,6 +64,7 @@ if [ -n "$_shared_set_model" ]; then
     "$(bootstrap_binary)" shared-runtime -base "$AURIGA_DATA_ROOT/config/materials" -out "$AURIGA_DATA_ROOT/config/shared-source" \
       -action commit -expected-base-sha256 "$_shared_base_sha"
   fi
+  _shared_replay_rebind
   sh "$NAS_ROOT/scripts/render.sh" --core-only
   info 'shared model committed and role files re-rendered; run start.sh so Agent reloads host.json (clear shared pool only if members still bind the old model)'
   exit 0
@@ -72,6 +82,7 @@ if [ "$_shared_set_profile" = true ]; then
     "$(bootstrap_binary)" shared-runtime -base "$AURIGA_DATA_ROOT/config/materials" -out "$AURIGA_DATA_ROOT/config/shared-source" \
       -action commit -expected-base-sha256 "$_shared_base_sha"
   fi
+  _shared_replay_rebind
   sh "$NAS_ROOT/scripts/render.sh" --core-only
   info 'shared profile committed and role files re-rendered; run start.sh so Agent reloads the shared profile'
   exit 0

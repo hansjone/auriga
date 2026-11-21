@@ -44,7 +44,7 @@ case "${1:-}" in
   shared-project|shared-check|shared-path|shared-status)
     exec "$(bootstrap_binary)" shared-runtime -base "$AURIGA_DATA_ROOT/config/materials" \
       -out "$AURIGA_DATA_ROOT/config/shared-source" -action "${1#shared-}" ;;
-  shared-replay-stage|shared-replay-prepare-path|shared-replay-final-path|shared-replay-provision|shared-replay-verify-final|shared-replay-close|shared-replay-check)
+  shared-replay-stage|shared-replay-prepare-path|shared-replay-final-path|shared-replay-provision|shared-replay-verify-final|shared-replay-close|shared-replay-check|shared-replay-rebind)
     exec "$(bootstrap_binary)" shared-replay-prepare -base "$AURIGA_DATA_ROOT/config/materials" -action "${1#shared-replay-}" ;;
   materials-stage|materials-commit|materials-rollback|materials-status|materials-check|materials-path|materials-project|materials-project-core)
     _action=${1#materials-}
