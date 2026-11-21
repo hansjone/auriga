@@ -50,26 +50,25 @@ var approvedAgentPresetIDs = map[string]int{
 }
 
 var allowedNestedPresetPlugins = map[string]bool{
-	"@deepseek-ai/dsh-persona":                         true,
-	"@deepseek-ai/dsh-agent-instructions":              true,
-	"@deepseek-ai/dsh-time-context":                    true,
-	"@deepseek-ai/dsh-skill-filesystem":                true,
-	"@deepseek-ai/dsh-tool-skill":                      true,
-	"@deepseek-ai/dsh-command-goal":                    true,
-	"@deepseek-ai/dsh-tool-goal":                       true,
-	"@deepseek-ai/dsh-plan-mode":                       true,
-	"@deepseek-ai/dsh-compaction-basic":                true,
-	"@deepseek-ai/dsh-command-compact":                 true,
-	"@deepseek-ai/dsh-compaction-tool-result-pruner":   true,
-	"@deepseek-ai/dsh-tool-ask-user":                   true,
-	"@deepseek-ai/dsh-tool-todo":                       true,
-	"@deepseek-ai/dsh-tool-web":                        true,
-	"@deepseek-ai/dsh-tool-present":                    true,
-	"@deepseek-ai/dsh-agent-tool-presentation":         true,
-	"cordis:group":                                     true,
+	"@deepseek-ai/dsh-persona":                       true,
+	"@deepseek-ai/dsh-agent-instructions":            true,
+	"@deepseek-ai/dsh-time-context":                  true,
+	"@deepseek-ai/dsh-skill-filesystem":              true,
+	"@deepseek-ai/dsh-tool-skill":                    true,
+	"@deepseek-ai/dsh-command-goal":                  true,
+	"@deepseek-ai/dsh-tool-goal":                     true,
+	"@deepseek-ai/dsh-plan-mode":                     true,
+	"@deepseek-ai/dsh-compaction-basic":              true,
+	"@deepseek-ai/dsh-command-compact":               true,
+	"@deepseek-ai/dsh-compaction-tool-result-pruner": true,
+	"@deepseek-ai/dsh-tool-ask-user":                 true,
+	"@deepseek-ai/dsh-tool-todo":                     true,
+	"@deepseek-ai/dsh-tool-web":                      true,
+	"@deepseek-ai/dsh-agent-tool-presentation":       true,
+	"cordis:group":                                   true,
 }
 
-var forbiddenNestedPreset = regexp.MustCompile(`(?i)(?:^|/)(?:shell|terminal|tool-bash|tool-pwsh|tool-fs|tool-jobs|tool-schedule|tool-subagent|workflow|tool-workflow|tool-cordis|tool-ralph|plugin-manager|plugin-market|persistent)`)
+var forbiddenNestedPreset = regexp.MustCompile(`(?i)(?:^|/)(?:shell|terminal|tool-bash|tool-pwsh|tool-fs|tool-jobs|tool-schedule|tool-subagent|tool-present$|workflow|tool-workflow|tool-cordis|tool-ralph|plugin-manager|plugin-market|persistent)`)
 
 func ValidateProductionPoolProfile(raw []byte) error { return ValidatePoolProfile(raw) }
 

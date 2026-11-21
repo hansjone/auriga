@@ -22,3 +22,19 @@ func TestPoolProfileAllowlist(t *testing.T) {
 		}
 	}
 }
+
+// Nested preset tools that can read or execute outside the member directory
+// must never ride a shared preset (fs-local accepts absolute paths).
+func TestPoolProfileRejectsEscapingPresetTools(t *testing.T) {
+	valid := string(completePoolProfile(t))
+	anchor := "      - id: tool-skill\n        name: '@deepseek-ai/dsh-tool-skill'\n"
+	if !strings.Contains(valid, anchor) {
+		t.Fatal("preset anchor missing from complete profile")
+	}
+	for _, name := range []string{"tool-present", "tool-fs", "tool-fs-search", "tool-bash", "tool-pwsh", "terminal-bash", "tool-bash-persistent", "tool-jobs", "tool-schedule", "tool-subagent", "workflow-ptc", "tool-workflow", "tool-cordis"} {
+		raw := strings.Replace(valid, anchor, anchor+"      - id: escape\n        name: '@deepseek-ai/dsh-"+name+"'\n", 1)
+		if e := ValidatePoolProfile([]byte(raw)); e == nil {
+			t.Fatal(name)
+		}
+	}
+}

@@ -126,8 +126,6 @@
         config:
           fetch: true
           searchTimeoutMs: 60000
-      - id: present
-        name: '@deepseek-ai/dsh-tool-present'
 - id: preset-ptc
   name: '@deepseek-ai/dsh-agent-preset'
   config:
@@ -195,8 +193,6 @@
         name: '@deepseek-ai/dsh-agent-tool-presentation'
         config:
           mode: ptc
-      - id: present
-        name: '@deepseek-ai/dsh-tool-present'
 - id: preset-minimal
   name: '@deepseek-ai/dsh-agent-preset'
   config:
@@ -282,8 +278,6 @@
         name: '@deepseek-ai/dsh-skill-filesystem'
       - id: tool-skill
         name: '@deepseek-ai/dsh-tool-skill'
-      - id: present
-        name: '@deepseek-ai/dsh-tool-present'
 - id: default-model
   name: '@deepseek-ai/dsh-agent-default-model'
   config:
