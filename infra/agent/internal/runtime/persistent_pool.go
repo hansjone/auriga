@@ -198,6 +198,11 @@ func (m *PersistentPools) ensureMode(ctx context.Context, binding *nodev1.Shared
 	if err = os.MkdirAll(skills, 0755); err != nil {
 		return err
 	}
+	// The read-only /run/auriga meta bind carries the nested platform-skills
+	// mountpoint. runc cannot create it inside a read-only parent at start.
+	if err = os.MkdirAll(filepath.Join(meta, "skills-active", "current"), 0755); err != nil {
+		return err
+	}
 	bindings, views, err := m.snapshot(pool)
 	if err != nil {
 		return err

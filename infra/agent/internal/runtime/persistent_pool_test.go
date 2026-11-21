@@ -78,6 +78,13 @@ func TestPersistentPoolTwoMembersAndRestartReuseOneSignedProcess(t *testing.T) {
 	if receipt, err := m.Prepare(ctx, first); err != nil || receipt.Outcome != "confirmed" {
 		t.Fatalf("first start: %v", err)
 	}
+	mountpoint, err := m.Pools.Layout.Path(first.Binding.PhysicalInstanceId, "control", "meta", "skills-active", "current")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info, err := os.Stat(mountpoint); err != nil || !info.IsDir() {
+		t.Fatalf("nested read-only skills mountpoint missing before start: %v", err)
+	}
 	if err := m.View(ctx, persistentView(second)); err != nil {
 		t.Fatal(err)
 	}
