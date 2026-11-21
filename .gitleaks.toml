@@ -77,4 +77,4 @@ description = "site-deploy design example address in its first commit"
 targetRules = ["private-ipv4"]
 condition = "AND"
 commits = ["b723942aaea01f855e99dba26255b3594a54de89"]
-paths = ['''(^|[/\])docs/dev/site-deploy\.zh\.md$''']
+paths = ['''(^|/)docs/dev/site-deploy.zh.md$''']
