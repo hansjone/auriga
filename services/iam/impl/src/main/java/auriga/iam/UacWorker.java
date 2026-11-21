@@ -33,6 +33,52 @@ final class UacWorker
     this.audit = audit;
   }
 
+  private volatile java.util.function.Supplier<auriga.iam.api.IdentityPolicyHooks> hooks =
+      () -> null;
+
+  /** Org hooks used to turn a placeholder member name into "name employee" after login. */
+  void hooks(java.util.function.Supplier<auriga.iam.api.IdentityPolicyHooks> hooks) {
+    this.hooks = hooks;
+  }
+
+  private void applyDisplayName(JsonNode snapshot, JsonNode input, JsonNode result) {
+    try {
+      var policy = hooks.get();
+      String sessionId = snapshot.path("sessionId").asString("");
+      String employee = input.path("credential").path("empNo").asString("");
+      if (sessionId.isEmpty() || employee.isBlank()) return;
+      ObjectNode session = store.tx(() -> store.byId("session", sessionId, false));
+      if (session == null || session.path("accountId").asString("").isEmpty()) return;
+      String accountId = session.path("accountId").asString();
+      Optional<String> renamed =
+          policy == null
+              ? Optional.empty()
+              : policy.uacDisplayName(
+                  UUID.fromString(accountId), employee, result.path("employeeName").asString(null));
+      String avatar = result.path("avatarUrl").asString(null);
+      if (renamed.isEmpty() && avatar == null) return;
+      store.tx(
+          () -> {
+            ObjectNode account = store.get("account", accountId, true);
+            if (account == null) return null;
+            boolean changed = false;
+            if (renamed.isPresent()) {
+              account.put("displayName", renamed.get());
+              changed = true;
+            }
+            if (avatar != null && !avatar.equals(account.path("avatarUrl").asString(null))) {
+              account.put("avatarUrl", avatar);
+              changed = true;
+            }
+            if (changed) store.save("account", account);
+            return null;
+          });
+    } catch (RuntimeException e) {
+      System.getLogger(UacWorker.class.getName())
+          .log(System.Logger.Level.WARNING, "UAC display name update skipped", e);
+    }
+  }
+
   void start() {
     if (!started.compareAndSet(false, true)) return;
     executor.scheduleWithFixedDelay(
@@ -465,6 +511,8 @@ final class UacWorker
                 }
                 return null;
               });
+      if (kind.equals("info") && !"skipped".equals(applied))
+        applyDisplayName(snapshot, input, result);
       if (round != null) {
         ObjectNode current =
             store.tx(

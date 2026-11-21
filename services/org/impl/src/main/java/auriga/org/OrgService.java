@@ -1799,7 +1799,7 @@ public final class OrgService {
     var member =
         new OrgStore.MemberRow(
             accountId,
-            displayName == null || displayName.isBlank() ? "UAC member" : displayName,
+            displayName == null || displayName.isBlank() ? UAC_PLACEHOLDER : displayName,
             null,
             "member",
             "active",
@@ -1810,6 +1810,40 @@ public final class OrgService {
     store.insertMember(member);
     userEvents.created(toMemberJson(member), "auto_provision", null, null);
     return true;
+  }
+
+  static final String UAC_PLACEHOLDER = "UAC member";
+
+  /**
+   * Upgrades a UAC member still carrying a placeholder name (legacy "UAC member" or the bare
+   * employee number) to "name employee". Names an administrator set are left untouched.
+   */
+  Optional<String> renameUacMember(UUID accountId, String employee, String name) {
+    if (employee == null || employee.isBlank()) return Optional.empty();
+    String clean = name == null ? "" : name.strip();
+    if (clean.length() > 64) clean = clean.substring(0, 64);
+    String target = clean.isEmpty() ? employee : clean + " " + employee;
+    return store.tx(
+        () -> {
+          var m = store.member(accountId).orElse(null);
+          if (m == null
+              || !(UAC_PLACEHOLDER.equals(m.displayName()) || employee.equals(m.displayName()))
+              || target.equals(m.displayName())) return Optional.<String>empty();
+          var updated =
+              new OrgStore.MemberRow(
+                  m.id(),
+                  target,
+                  m.email(),
+                  m.memberType(),
+                  m.status(),
+                  m.version() + 1,
+                  m.createdAt(),
+                  m.disabledAt(),
+                  m.offboardedAt());
+          store.saveMember(updated);
+          userEvents.updated(toMemberJson(updated), List.of("displayName"), null);
+          return Optional.of(target);
+        });
   }
 
   private void requireInvitationTargets(List<UUID> roleIds, List<UUID> groupIds) {

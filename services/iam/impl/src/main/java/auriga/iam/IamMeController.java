@@ -396,6 +396,8 @@ public class IamMeController {
             account.path("createdAt").asString());
     if (account.has("email")) v.put("email", account.path("email").asString());
     if (account.has("lastLoginAt")) v.put("lastLoginAt", account.path("lastLoginAt").asString());
+    if (account.path("avatarUrl").isString())
+      v.put("avatarUrl", account.path("avatarUrl").asString());
     return v;
   }
 

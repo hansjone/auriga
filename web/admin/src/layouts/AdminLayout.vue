@@ -69,6 +69,11 @@ const displayName = computed(() => me.value?.account.displayName || '');
 const initial = computed(() =>
   displayName.value ? displayName.value.trim().charAt(0).toUpperCase() : '',
 );
+const avatarFailed = ref(false);
+const avatarUrl = computed(() => {
+  const url = me.value?.account.avatarUrl;
+  return !avatarFailed.value && url && url.startsWith('https://') ? url : '';
+});
 async function logout() {
   apiClient.invalidatePendingRequests();
   logoutError.value = '';
@@ -188,7 +193,16 @@ async function logout() {
             </svg>
           </button>
           <div v-if="displayName" class="admin-user">
-            <span class="admin-avatar" aria-hidden="true">{{ initial }}</span
+            <img
+              v-if="avatarUrl"
+              class="admin-avatar"
+              :src="avatarUrl"
+              alt=""
+              referrerpolicy="no-referrer"
+              @error="avatarFailed = true"
+            /><span v-else class="admin-avatar" aria-hidden="true">{{
+              initial
+            }}</span
             ><span>{{ displayName }}</span>
           </div>
         </div>

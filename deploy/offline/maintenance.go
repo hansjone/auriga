@@ -54,7 +54,7 @@ func coldBackup(s state) (string, error) {
 	if err := stopped(s); err != nil {
 		return "", err
 	}
-	dir := filepath.Join(filepath.Dir(s.Data), "auriga-backups")
+	dir := backupDir(s)
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		return "", err
 	}

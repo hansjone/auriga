@@ -16,6 +16,8 @@
 
 中断重跑可以省略三个参数复用固定快照；显式重传必须是相同路径、image 和字节。不同请求或固定配置漂移拒绝，不换根或清现场。原 `init` 因残缺目录拒绝时保留诊断，不覆盖材料。旧无 runtime 首装记录的安装不能通过此参数补根；升级仍用原受保护流程。此安装接线不代表镜像已导入、Node 已入网、共享 DSH 或资源市场已通过正常入口验收。
 
+> **⚠ 安装完成后立即按源码归档里的 `docs/site/keep-list.zh.md`（必备参数与保管清单）导出并离线保管：应急口令和 TOTP、资源公钥根、离线降级私钥、站点构建私钥和备份。** 该文档也列出安装前必须自己准备的输入。常见报错见 `docs/site/troubleshooting.zh.md`。
+
 1. 从独立受信渠道取得外层 tar 的 SHA-256，核对后解包到 root 管理的物理目录。包内 `SHA256SUMS` 覆盖全部文件。必须独立核准发行方 Ed25519 SPKI PEM 公钥或 SHA256(SPKI DER) 指纹。
 2. 在私密交互 TTY 执行 `sudo ./auriga install --address 192.0.2.10 --verify-key /secure/release-public.pem`。数据默认放 `/srv/auriga/auriga-data`。自定义父目录加 `--data /srv/auriga`。必须加 `--verify-key /secure/release-public.pem`，或从独立批准的Release正文核对的 `--trust-fingerprint <64位指纹>`。全程无下载、无构建。
 3. 打开输出的管理台地址，导入 TOTP，用应急账号登录后邀请成员。应急凭据仅向 TTY 显示，重定向时按提示到私密 TTY 查看。

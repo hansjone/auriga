@@ -35,6 +35,18 @@ func buildRelease(root, stage string, r release, options buildOptions) error {
 			return err
 		}
 	}
+	if options.Online {
+		report, err := collectOnlineInputs(ctx, stage, r, options)
+		if err != nil {
+			return err
+		}
+		if report != nil {
+			report.LockDigest, report.ChangedLockFiles = options.LockDigest, options.ChangedLockFiles
+			if err := jsonFile(filepath.Join(root, "site-dependencies.json"), report, 0644); err != nil {
+				return err
+			}
+		}
+	}
 	recipeTarget := filepath.Join(source, "deploy/nas/offline-build")
 	if err := os.RemoveAll(recipeTarget); err != nil {
 		return err

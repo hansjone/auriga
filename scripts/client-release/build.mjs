@@ -1,8 +1,24 @@
 /** Sequential, local-only Windows build, using exactly the existing CI recipes. */
 import { spawnSync } from 'node:child_process';
 import { Buffer } from 'node:buffer';
-import { cpSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { dirname, join, resolve } from 'node:path';
+import {
+  cpSync,
+  copyFileSync,
+  realpathSync,
+  mkdirSync,
+  readFileSync,
+  writeFileSync,
+  rmSync,
+} from 'node:fs';
+import {
+  basename,
+  dirname,
+  join,
+  relative,
+  isAbsolute,
+  resolve,
+  sep,
+} from 'node:path';
 import { ROOT, BUILD_NODE, verifyInputs, physical } from './inputs.mjs';
 import {
   canonical,
@@ -19,14 +35,70 @@ import { makeRelease } from '../../clients/installer/scripts/make-release.mjs';
 import { fingerprint } from './keys.mjs';
 
 export { sourceIdentity } from './source.mjs';
-import { sourceIdentity } from './source.mjs';
+import {
+  sourceIdentity,
+  copyBuildSource,
+  assertBuildCopyMatches,
+} from './source.mjs';
 import { clientPlatform } from './platform.mjs';
 const inputTrust = (o) => ({
   verifyKey: o['verify-key'],
   trustFingerprint: o['trust-fingerprint'],
 });
+// 联网派生的现场套件没有发行签名，由派生时刚算出的清单摘要校验；
+// 源码身份仍按 inputTrust 验签。
+const kitTrust = (o) => (o['site-derived'] ? {} : inputTrust(o));
+/** 路径 child 是否等于 parent 或位于其内（Windows 不区分大小写）。 */
+export function canonicalPath(path) {
+  // 对已存在的最近祖先取真实路径（展开 8.3 短名、junction），再接回不存在的部分。
+  const rest = [];
+  let current = resolve(path);
+  for (;;) {
+    try {
+      const real = join(realpathSync.native(current), ...rest.reverse());
+      return process.platform === 'win32' ? real.toLowerCase() : real;
+    } catch {
+      const parent = dirname(current);
+      if (parent === current) {
+        const plain = resolve(path);
+        return process.platform === 'win32' ? plain.toLowerCase() : plain;
+      }
+      rest.push(basename(current));
+      current = parent;
+    }
+  }
+}
+export function isInside(child, parent) {
+  const rel = relative(canonicalPath(parent), canonicalPath(child));
+  return (
+    rel === '' ||
+    (rel !== '..' && !rel.startsWith('..' + sep) && !isAbsolute(rel))
+  );
+}
 export function validateBuildOptions(o) {
-  if (o.offline !== true) throw new Error('现场构建必须显式指定 --offline');
+  if (o.online === true && o.offline === true)
+    throw new Error('--online 与 --offline 互斥，只能二选一');
+  if (o.online !== true && o.offline !== true)
+    throw new Error(
+      '现场构建必须显式指定 --offline（套件锁与源码一致）或 --online（联网补依赖）',
+    );
+  if (o.online === true) {
+    if (!o['verify-key'] && !o['trust-fingerprint'])
+      throw new Error(
+        '--online 的基础套件必须是发行签名的，需要 --verify-key 或 --trust-fingerprint',
+      );
+    if (o['devkit-sha256'])
+      throw new Error(
+        '--online 不接受 --devkit-sha256，基础套件必须验发行签名',
+      );
+    if (typeof o['site-devkit'] !== 'string' || !o['site-devkit'])
+      throw new Error(
+        '缺少 --site-devkit（用于存放联网派生出的现场套件的新目录）',
+      );
+  } else if (o['site-devkit'])
+    throw new Error('--site-devkit 只能与 --online 同用');
+  if (o.online !== true && o['base-pnpm-lock'])
+    throw new Error('--base-pnpm-lock 只能与 --online 同用');
   for (const key of [
     'devkit',
     'out',
@@ -36,6 +108,21 @@ export function validateBuildOptions(o) {
     'sequence',
   ])
     if (typeof o[key] !== 'string' || !o[key]) throw new Error(`缺少 --${key}`);
+  if (o.online === true) {
+    const site = resolve(o['site-devkit']);
+    const base = resolve(o.devkit);
+    const out = resolve(o.out);
+    if (
+      isInside(site, base) ||
+      isInside(base, site) ||
+      isInside(site, out) ||
+      isInside(out, site)
+    )
+      throw new Error(
+        '--site-devkit 必须是全新目录，且不能与基础套件或 --out 互相包含',
+      );
+    if (isInside(out, base)) throw new Error('构建输出不得位于只读 devkit 内');
+  }
   parseVersion(o.version);
   const target = clientPlatform(o.target);
   const unsigned = {
@@ -90,16 +177,23 @@ export function validateBuildOptions(o) {
   );
   return unsigned;
 }
-export function startOfflineBuild(options) {
+export function resolveBuildPaths(options) {
   options = { ...options };
   for (const key of [
     'devkit',
+    'site-devkit',
+    'base-pnpm-lock',
     'out',
     'release-public-key',
     'resource-trust-json',
     'verify-key',
   ])
     if (options[key]) options[key] = resolve(options[key]);
+  return options;
+}
+export function startOfflineBuild(options, hooks = {}) {
+  options = resolveBuildPaths(options);
+  if (options.online === true) throw new Error('--online 请走联网派生入口');
   validateBuildOptions(options);
   sourceIdentity(ROOT, inputTrust(options), { forBuild: true });
   const kit = verifyInputs(
@@ -108,6 +202,18 @@ export function startOfflineBuild(options) {
     ROOT,
     inputTrust(options),
   );
+  launchOfflineBuild(options, kit, hooks);
+}
+/**
+ * 已校验的套件 kit 上的断网构建：--offline 与 --online 派生套件共用，
+ * 输出目录、环境过滤、网络守卫完全一致。
+ * hooks.spawn 供测试注入；hooks.siteDependencies 是要复制进输出目录的审阅清单路径；
+ * hooks.root 是源码目录（默认本脚本所在源码树）。
+ * 源码树只读：把源码（不含 node_modules/.git 等）复制到 <out>/build-src，工作进程在副本里
+ * 安装依赖并构建，结束后（成功或失败）删除副本。源码身份仍按用户给的源码目录校验。
+ */
+export function launchOfflineBuild(options, kit, hooks = {}) {
+  const spawn = hooks.spawn ?? spawnSync;
   const out = resolve(options.out);
   physical(dirname(out));
   if (
@@ -115,11 +221,29 @@ export function startOfflineBuild(options) {
     out === kit.directory
   )
     throw new Error('构建输出不得位于只读 devkit 内');
+  const sourceRoot = resolve(hooks.root ?? ROOT);
   mkdirSync(out); // No overwrite/reuse of old release or review material.
+  const buildRoot = join(out, 'build-src');
   const optionsFile = join(out, 'site-options.json');
+  if (hooks.siteDependencies)
+    copyFileSync(hooks.siteDependencies, join(out, 'site-dependencies.json'));
+  // 工作进程只需要“用这个已校验套件做断网构建”；联网相关选项不进入工作进程。
+  const worker = { ...options };
+  delete worker.online;
+  delete worker['site-devkit'];
+  delete worker['base-pnpm-lock'];
   writeFileSync(
     optionsFile,
-    JSON.stringify({ ...options, out, devkit: kit.directory }),
+    JSON.stringify({
+      ...worker,
+      'source-root': sourceRoot,
+      offline: true,
+      out,
+      devkit: kit.directory,
+      ...(options.online === true
+        ? { 'site-derived': true, 'devkit-sha256': kit.manifestSha256 }
+        : {}),
+    }),
   );
   const env = Object.fromEntries(
     Object.entries(process.env).filter(
@@ -127,7 +251,7 @@ export function startOfflineBuild(options) {
     ),
   );
   Object.assign(env, {
-    NODE_OPTIONS: `--max-old-space-size=1024 --require="${join(ROOT, 'scripts/client-release/offline-guard.cjs').replaceAll('\\', '/')}"`,
+    NODE_OPTIONS: `--max-old-space-size=1024 --require="${join(buildRoot, 'scripts/client-release/offline-guard.cjs').replaceAll('\\', '/')}"`,
     AURIGA_CLIENT_NETWORK_LOG: join(out, 'network-denials.log'),
     npm_config_offline: 'true',
     npm_config_ignore_scripts: 'true',
@@ -143,21 +267,41 @@ export function startOfflineBuild(options) {
     DESKTOP_SOURCE_ON_MAIN: '',
   });
   writeFileSync(env.AURIGA_CLIENT_NETWORK_LOG, '');
-  const result = spawnSync(
-    join(kit.directory, clientPlatform().buildNode),
-    [
-      join(ROOT, 'scripts/client-release/cli.mjs'),
-      '_build-worker',
-      optionsFile,
-    ],
-    { cwd: ROOT, env, stdio: 'inherit', windowsHide: true },
-  );
+  let result;
+  try {
+    copyBuildSource(sourceRoot, buildRoot);
+    result = spawn(
+      join(kit.directory, clientPlatform().buildNode),
+      [
+        join(buildRoot, 'scripts/client-release/cli.mjs'),
+        '_build-worker',
+        optionsFile,
+      ],
+      { cwd: buildRoot, env, stdio: 'inherit', windowsHide: true },
+    );
+  } finally {
+    // 副本里有 pnpm 装出的超长路径 node_modules，用 Node 的 rmSync 删除。
+    try {
+      rmSync(buildRoot, {
+        recursive: true,
+        force: true,
+        maxRetries: 3,
+        retryDelay: 200,
+      });
+    } catch (error) {
+      console.warn(
+        `警告：无法删除临时构建目录 ${buildRoot}（${error.message}）；请稍后用 Node 删除：node -e "require('fs').rmSync(process.argv[1],{recursive:true,force:true})" "${buildRoot}"`,
+      );
+    }
+  }
   if (result.status !== 0)
     throw new Error(
       `Windows 离线构建失败（退出码 ${result.status}），保留输出目录供排查`,
     );
+  return { out };
 }
-export async function buildWorker(optionsFile) {
+export async function buildWorker(optionsFile, hooks = {}) {
+  const root = hooks.root ?? ROOT;
   if (
     process.version !== `v${BUILD_NODE}` ||
     !process.env.AURIGA_CLIENT_NETWORK_LOG ||
@@ -166,14 +310,22 @@ export async function buildWorker(optionsFile) {
     throw new Error('必须从受控离线入口构建');
   const o = JSON.parse(readFileSync(optionsFile, 'utf8'));
   const policy = validateBuildOptions(o);
-  const kit = verifyInputs(o.devkit, o['devkit-sha256'], ROOT, inputTrust(o));
-  const source = sourceIdentity(ROOT, inputTrust(o), { forBuild: true });
+  const kit = verifyInputs(o.devkit, o['devkit-sha256'], root, {
+    ...kitTrust(o),
+    ...(hooks.checkTools === false ? { checkTools: false } : {}),
+  });
+  // ROOT 是 <out>/build-src 里的副本；源码身份与“构建期间未变化”都按用户的源码目录。
+  const sourceRoot = o['source-root'] ?? root;
+  const source = sourceIdentity(sourceRoot, inputTrust(o), { forBuild: true });
+  // 复制与校验之间源码可能被改动：副本必须与刚校验的源码身份一致，才允许装依赖和构建。
+  if (o['source-root'])
+    assertBuildCopyMatches(root, sourceRoot, inputTrust(o), source);
   const pnpm = join(kit.directory, 'build-pnpm/node_modules/pnpm/bin/pnpm.cjs');
   const store = join(o.out, 'pnpm-store');
   cpSync(join(kit.directory, 'pnpm-store'), store, { recursive: true });
   const run = (args) => {
     const result = spawnSync(process.execPath, args, {
-      cwd: ROOT,
+      cwd: root,
       stdio: 'inherit',
       windowsHide: true,
     });
@@ -190,13 +342,13 @@ export async function buildWorker(optionsFile) {
     store,
   ]);
   const broker = join(o.out, 'broker');
-  run([join(ROOT, 'clients/shell-auth/build.mjs'), broker]);
+  run([join(root, 'clients/shell-auth/build.mjs'), broker]);
   const pluginVersion = JSON.parse(
-    readFileSync(join(ROOT, 'clients/dsh-plugin/package.json')),
+    readFileSync(join(root, 'clients/dsh-plugin/package.json')),
   ).version;
   const pluginOut = join(o.out, 'plugin');
   run([
-    join(ROOT, 'scripts/plugin/package.mjs'),
+    join(root, 'scripts/plugin/package.mjs'),
     '--version',
     pluginVersion,
     '--broker-artifact',
@@ -224,7 +376,7 @@ export async function buildWorker(optionsFile) {
       : {}),
   });
   if (
-    sourceIdentity(ROOT, inputTrust(o)).sourceTreeSha256 !==
+    sourceIdentity(sourceRoot, inputTrust(o)).sourceTreeSha256 !==
     source.sourceTreeSha256
   )
     throw new Error('源码在构建期间发生变化，请从新目录重建');

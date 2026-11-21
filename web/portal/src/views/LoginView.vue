@@ -21,7 +21,8 @@ import {
   navigationCorrelationId,
   takeNavigationContext,
 } from '../../../shared/src/api/correlation';
-import PortalProviders from '../components/PortalProviders.vue';
+import LoginMethods from '../../../shared/src/LoginMethods.vue';
+import LoginTopBar from '../../../shared/src/LoginTopBar.vue';
 import { pickLocalized } from '@auriga/shared';
 import { loginReturnTo } from '../login-return';
 import {
@@ -258,33 +259,12 @@ function finishLogin() {
       loginReturnTo(route.query.returnTo) ?? '/instance-login.html',
     );
 }
-async function backToProviders() {
-  if (!alive || busy.value) return;
-  const version = ++generation,
-    previous = tx.value,
-    view = uacView;
-  tx.value = null;
-  uacContinuation = false;
-  uacView = undefined;
-  error.value = '';
-  busy.value = true;
-  try {
-    await view?.dispose();
-    await cancelTx(previous);
-  } catch (e) {
-    if (current(version)) error.value = describe(e);
-  } finally {
-    if (current(version)) {
-      uacActive.value = false;
-      busy.value = false;
-    }
-  }
-}
 const step = (): ClientStep | null =>
   (tx.value?.step as ClientStep | undefined) ?? null;
 </script>
 
 <template>
+  <LoginTopBar v-if="!deviceContinuation" />
   <section
     class="auriga-login login-panel"
     :class="{ 'auriga-qr-login': uacActive }"
@@ -327,24 +307,12 @@ const step = (): ClientStep | null =>
         </p>
       </div>
     </div>
-    <PortalProviders
+    <LoginMethods
       :providers="providers"
       :selected-id="selectedProvider?.id"
       :disabled="busy || loading"
       @select="selectProvider"
     />
-    <button
-      v-if="uacActive"
-      type="button"
-      class="auriga-login-back"
-      :disabled="busy"
-      @click="backToProviders"
-    >
-      {{ locale === 'en' ? 'Cancel' : '取消' }}
-    </button>
-    <a v-if="!deviceContinuation && !uacActive" class="home-link" href="/">{{
-      locale === 'en' ? 'Back to home' : '返回首页'
-    }}</a>
   </section>
 </template>
 <style scoped>
@@ -379,16 +347,6 @@ const step = (): ClientStep | null =>
 .auriga-qr-login :deep([data-testid='uac-target']),
 .auriga-qr-login :deep(.uac-cancel) {
   display: none;
-}
-.auriga-login-back,
-.home-link {
-  display: block;
-  margin: 16px 0 0;
-  padding: 8px;
-  line-height: 16px;
-  font-size: 12px;
-  color: var(--auriga-muted);
-  text-decoration: none;
 }
 .auriga-login-step {
   border: 0;

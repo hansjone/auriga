@@ -30,6 +30,10 @@ final class UacHttp {
   }
 
   private final Map<String, Set<String>> destinations;
+
+  /** Empty or missing allowedDestinations: any HTTPS origin, resolved address not checked. */
+  private final boolean unrestricted;
+
   private final boolean testLoopback;
 
   UacHttp(JsonNode settings, boolean testLoopback) {
@@ -51,6 +55,7 @@ final class UacHttp {
       entries.put(origin(origin), Set.copyOf(addresses));
     }
     destinations = Map.copyOf(entries);
+    unrestricted = destinations.isEmpty();
   }
 
   void validate(URI uri, boolean base) {
@@ -62,7 +67,7 @@ final class UacHttp {
             && uri.getRawUserInfo() == null
             && uri.getRawFragment() == null
             && (!base || uri.getRawQuery() == null)
-            && destinations.containsKey(origin(uri)));
+            && (unrestricted || destinations.containsKey(origin(uri))));
   }
 
   private static String origin(URI uri) {
@@ -112,9 +117,10 @@ final class UacHttp {
         new DnsResolver() {
           public InetAddress[] resolve(String host) throws UnknownHostException {
             InetAddress[] resolved = InetAddress.getAllByName(host);
-            for (InetAddress address : resolved)
-              if (!allowed.contains(address.getHostAddress()))
-                throw new UnknownHostException("UAC destination rejected");
+            if (allowed != null)
+              for (InetAddress address : resolved)
+                if (!allowed.contains(address.getHostAddress()))
+                  throw new UnknownHostException("UAC destination rejected");
             return resolved;
           }
 

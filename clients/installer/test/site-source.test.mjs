@@ -24,6 +24,8 @@ import {
   sourceIdentity,
   snapshotInventory,
   assertBuildSourceClean,
+  assertBuildCopyMatches,
+  copyBuildSource,
 } from '../../../scripts/client-release/source.mjs';
 import { verifySignedInventory } from '../../../scripts/client-release/trust.mjs';
 import { parseMetadataJson } from '../../../scripts/client-release/trust.mjs';
@@ -240,8 +242,7 @@ test('build preflight refuses unrecorded UI, node_modules and dist even when pro
     assert.throws(
       () => assertBuildSourceClean(f.root),
       (error) =>
-        error.message.includes(path) &&
-        /Remove-Item -LiteralPath/.test(error.message),
+        error.message.includes(path) && /clean-source/.test(error.message),
     );
   }
 });
@@ -331,5 +332,30 @@ test('SHA256SUMS verifier follows PR373 base64 Ed25519 signature and binds metad
   assert.throws(
     () => verifySignedInventory(f.root, { verifyKey: f.publicKey }),
     /签名/,
+  );
+});
+
+test('signed archive: the build copy must carry the same identity as the verified source', (t) => {
+  const f = fixture(t);
+  const trust = { verifyKey: f.publicKey };
+  const source = sourceIdentity(f.root, trust, { forBuild: true });
+  const copy = join(f.root, '..', `copy-${Date.now()}`);
+  t.after(() => rmSync(copy, { recursive: true, force: true }));
+  copyBuildSource(f.root, copy);
+  assert.doesNotThrow(() =>
+    assertBuildCopyMatches(copy, f.root, trust, source),
+  );
+  // 副本里文件内容被改：身份摘要变化，拒绝。
+  writeFileSync(join(copy, 'main.go'), 'package tampered\n');
+  assert.throws(
+    () => assertBuildCopyMatches(copy, f.root, trust, source),
+    /构建副本与源码身份不一致/,
+  );
+  // 副本里新增被身份计入的文件，同样拒绝。
+  writeFileSync(join(copy, 'main.go'), 'package example\n');
+  writeFileSync(join(copy, 'extra.go'), 'package extra\n');
+  assert.throws(
+    () => assertBuildCopyMatches(copy, f.root, trust, source),
+    /构建副本与源码身份不一致/,
   );
 });

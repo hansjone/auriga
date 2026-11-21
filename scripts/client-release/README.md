@@ -16,7 +16,7 @@ node scripts/client-release/prepare.mjs D:\exports\client-kits
 node scripts/client-release/sign-inputs.mjs --devkit D:\exports\client-kits\auriga-client-windows-<锁SHA256> --key-file C:\secure\issuer\release-private.pem --version 0.2.0
 ```
 
-用 Windows 系统 tar 保留套件顶层目录，输出 `auriga-client-windows-<锁SHA256>.tar`。通过批准的 Forgejo 转运将 tar 和独立核对的整包 SHA256 交给 Linux 维护者。`prepare-release.sh --windows-client ... --windows-client-sha256 ...` 使用同一发行钥核内部签名、目标锁和归档内容，再自动并入发行清单、下载说明和总签名。完整命令见根 [MAINTAIN.md](../../MAINTAIN.md#维护者准备和发布附件)。签名前复核全部输入、私钥权限及版本，已签目录须保留原签名。发行私钥始终由维护者保管。准备过程通过 HTTPS 读取固定锁的依赖，离线构建证据由现场构建另行生成。
+用 Windows 系统 tar 保留套件顶层目录，输出 `auriga-client-windows-<锁SHA256>.tar`。通过批准的 Forgejo 转运将 tar 和独立核对的整包 SHA256 交给 Linux 维护者。`prepare-release.sh --windows-client ... --windows-client-sha256 ...` 使用同一发行钥核内部签名、目标锁和归档内容，再自动并入发行清单、下载说明和总签名。完整命令见根 [MAINTAIN.md](../../docs/release/maintainer.zh.md)。签名前复核全部输入、私钥权限及版本，已签目录须保留原签名。发行私钥始终由维护者保管。准备过程通过 HTTPS 读取固定锁的依赖，离线构建证据由现场构建另行生成。
 
 输入包括构建 Node22.19.0/npm10.9.3、根 packageManager 固定 pnpm、完整 Windows pnpm store（含 esbuild/rollup 可选二进制）、upstream.json 固定运行 Node/zip摘要、内置 pnpm/integrity、已提交 DSH npm lock 对应完整 Windows 生产闭包（含 DSH runtime/LibreOffice）及插件生产依赖。broker/helper、UI、插件由现场当前源码重建，不使用旧产物替代，不改上游 DSH；可选宿主 peer 不另装副本。
 
@@ -40,7 +40,7 @@ Windows 自带 PowerShell5.1、System32 tar、.NET Framework4.x Framework64/v4.0
 
 保留 #373 源码包的 auriga-source.json、SHA256SUMS、SHA256SUMS.sig 和 release-public.pem。清单优先，即使现场后建 .git 也不替换基线。验发行身份、元数据摘要、文件表与基线快照，再按 Go 同格式 mode/sha256/path 换行计算当前源码摘要。已知文本 CRLF、shell BOM、执行模式沿 #373 规范；支持普通源码新增/修改/删除。固定上游 commit，记录当前/基线摘要、发行者指纹和 dirty/siteChanges。缺失、篡改或没有独立信任拒绝；无清单时仍支持原 Git checkout，两者都无则拒绝。
 
-Go→Node 互操作在 deploy/offline/desktop_source_test.go 检查。凭据、数据、bin、node_modules、target/dist、元数据等按 #373 规则排除；客户端生成的 clients/dsh-plugin/ui 在签名基线未含它时也排除，避免构建输出变成源码改动。为防止未记录内容参与构建，启动 worker 前和 worker 内恢复依赖前均拒绝源码树中的 node_modules、dist、.pnpm-store，以及基线未含的 clients/dsh-plugin/ui，并给出对应 PowerShell 清理命令。建议每次把源码解压到全新目录；重复构建须先核对并清理上次生成内容。依赖变更仍由 Windows 锁门禁拒绝。来源记录用于审阅追溯，不代替独立批准；其他额外产物放源码之外。
+Go→Node 互操作在 deploy/offline/desktop_source_test.go 检查。凭据、数据、bin、node_modules、target/dist、元数据等按 #373 规则排除；客户端生成的 clients/dsh-plugin/ui 在签名基线未含它时也排除，避免构建输出变成源码改动。为防止未记录内容参与构建，构建前拒绝源码树中的 node_modules、dist、.pnpm-store，以及基线未含的 clients/dsh-plugin/ui。构建本身不再向源码树写入：先把源码复制到 `<out>\build-src`（文件集合与源码身份相同，按 sourcePathAllowed 过滤：没有 node_modules、.git、`.env*`、`*.pem`、`*.key`、`*.exe`、顶层归档等；签名源码包另带四个签名元数据文件），worker 在装依赖前先要求副本摘要等于已校验的源码身份（sourceTreeSha256），不等即拒绝构建；随后在副本里恢复依赖、打包 UI 和插件，结束后无论成败都删除副本（Node `fs.rmSync`，超长路径可用）。“构建期间未变化”仍按用户给的源码目录复核，因此同一份源码可连续构建。旧版本残留可用 `auriga-client clean-source <源码目录> [--include-ui]` 一键清理：遍历规则与上述构建前门禁完全一致（不进入 .git、bin、data、target、deploy/compose/var、.dev 等），仅删任意层级的 node_modules、dist、.pnpm-store（`--include-ui` 另含 clients/dsh-plugin/ui，但该目录属于签名基线或已被 Git 跟踪时拒绝），链接只删链接不跟随，目录无 scripts/client-release/build-node.json 时拒绝。--online 与 --offline 同此行为。依赖变更仍由 Windows 锁门禁拒绝。来源记录用于审阅追溯，不代替独立批准；其他额外产物放源码之外。
 
 ```powershell
 .\scripts\client-release\auriga-client.cmd build --offline --devkit $env:AURIGA_CLIENT_DEVKIT --verify-key D:\approved\release-public.pem --version 1.0.2-site.1 --sequence 102 --release-public-key C:\secure\site-desktop\desktop-public.pem --resource-trust-json D:\site\resource-roots.json --out D:\exports\desktop-102
@@ -49,6 +49,25 @@ Go→Node 互操作在 deploy/offline/desktop_source_test.go 检查。凭据、�
 --devkit-sha256 仅保留给有独立批准摘要的旧 Git 输入；正式无 Git 路径用同一发行钥核签名源码与 Windows 附件，不能用此参数跳过源码验签。本机固定磁盘输入/公钥根/签名目录/输出父目录要求，拒绝 UNC、设备路径、映射网络盘和 junction。离线介质先复制到本地，输出目录须全新，单一源码目录不并发构建。
 
 构建先核全部输入，把 store 复制到新输出目录，以 --offline --frozen-lockfile --ignore-scripts 恢复独立工作区依赖；清空代理，Node 子进程继承拒绝 TCP/TLS/HTTP/fetch/DNS（含 Resolver）/UDP 的 preload。原生子程序为本地csc、tar、esbuild及固定Python（以 `-I -S -B` 运行stdlib wheel解包器和compileall）；生产闭包只复制本地输入，不用npm view/联网解析。成功保留offline-evidence.json和空network-denials.log，出现拒绝请求则失败。它不是恶意源码/原生程序的OS沙箱，严格断网仍建议专用Windows VM；不改系统网络/防火墙、不操作用户桌面、不启动常驻项目服务。
+
+## 联网补依赖（build --online）
+
+现场只改了前端 / workspace 的 pnpm 依赖，或 dsh-plugin 的 npm 依赖，而发行套件里没有这些新包时，`--offline` 会因“依赖锁不匹配”拒绝。联网构建机可以改用：
+
+```powershell
+.\scripts\client-release\auriga-client.cmd build --online --devkit $env:AURIGA_CLIENT_DEVKIT --verify-key D:\approved\release-public.pem --site-devkit D:\exports\site-kit-102 --version 1.0.2-site.1 --sequence 102 --release-public-key C:\secure\site-desktop\desktop-public.pem --resource-trust-json D:\site\resource-roots.json --out D:\exports\desktop-102
+```
+
+- 与 `--offline` 互斥；必须有 `--verify-key` 或 `--trust-fingerprint`（基础套件必须是发行签名的）和 `--site-devkit`（全新目录，本机固定磁盘，不能在基础套件或输出目录内，也不能包含它们）。参数错误在任何联网、拷贝前报出。
+- 先按发行公钥完整校验基础套件（签名、元数据、摘要、逐文件、系统工具），只跳过“锁必须与当前源码一致”；源码身份校验不变。
+- 范围：允许变化的只有 `web/pnpm-lock.yaml`、`pnpm-workspace.yaml`、`web/*/package.json`、`clients/*/package.json`、根 `package.json`（`packageManager` 不能变）、`clients/dsh-plugin/package-lock.json`。构建 Node、`.npmrc`、`clients/installer/upstream.json`、Python 锁、DSH 锁、`packageManager` 变化一律报错并列出文件：Java/Python/DSH/Node 版本变化仍需维护方出新套件。锁与套件完全一致时同样报错，提示直接用 `--offline`。
+- 派生：把基础套件（只读）复制到 `--site-devkit`，不复制 `SHA256SUMS`、`SHA256SUMS.sig`、`client-inputs-release.json`、`release-public.pem`、`windows-client.json`；再只重做变化的部分。pnpm 相关锁变了：用套件自带 build-node/build-pnpm 在临时 workspace 里 `pnpm fetch --frozen-lockfile --ignore-scripts`，旧 store 作起点只下新增；插件锁变了：删 `plugin-deps` 旧依赖后用套件自带 npm `npm ci --omit=dev --omit=peer`。完整性由 pnpm-lock / package-lock 的 integrity 保证。透传已设置的 `HTTPS_PROXY`/`HTTP_PROXY`/`NO_PROXY` 与 `npm_config_registry`，其余 `npm_config_*`/`pnpm_config_*` 去掉；不设置就不传。失败时清理半成品派生目录，基础套件从不被修改。
+- 派生套件按与 `sealInputs` 相同的格式写新的 `windows-client.json`，并写 `site-dependencies.json`（基础/新的清单与锁摘要、变化的锁文件、新增包的名称/版本/integrity、“不再需要”的数量；取不到旧 `web/pnpm-lock.yaml` 时数量为 null 并带警告）。旧锁来源：源码基线的 Git 提交（`git show`），或 `--base-pnpm-lock <原始 web/pnpm-lock.yaml>`，摘要必须与基础套件记录一致，路径读不到或摘要不符直接报错（不静默降级），该参数只能与 `--online` 同用。
+- 构建：派生套件以刚算出的清单摘要为期望摘要，走与 `--offline` 完全相同的断网构建（网络守卫、环境过滤一致）。`site-dependencies.json` 同时复制到输出目录并在构建结束时打印；不向 `desktop-build.json` / 发布清单加字段。复制完成后、联网前会把派生目录与已校验的基础套件清单逐项复核（路径、大小、SHA-256）。只改了 `web/*/package.json` 或 `clients/*/package.json` 的 scripts、version 等不影响依赖的字段时，锁文件本来就不变：照常派生套件并重封清单，但不联网下载，打印“依赖锁未变，仅 package.json 变化，未联网下载”。若改的是依赖声明却没更新锁，离线构建里的 `pnpm install --frozen-lockfile` 会报错，请先在联网机运行 `pnpm install --lockfile-only` 更新锁再重试。dsh-plugin 的 `package.json` 在插件锁未变时，只允许 scripts、version 等非依赖字段变化；`dependencies`、`optionalDependencies`、`peerDependencies`、`bundleDependencies`/`bundledDependencies` 与基础套件不同会在复制和联网前报错，请先在 `clients/dsh-plugin` 运行 `npm install --package-lock-only` 更新插件锁。`sign --review-only` 在输出目录有 `site-dependencies.json` 时会提示“含现场联网依赖：N 项”：这类输出的输入摘要来自现场派生套件，不在维护方的发行签名之内，签名者须人工审阅该清单。
+
+## 套件清单格式兼容（requires）
+
+规则与服务端 `deploy/offline/devkit_compat.go` 一致，实现见 `compat.mjs`。`client-inputs-release.json` 与 `windows-client.json` 的顶层字段在 `FIELD_REGISTRY` 登记为基线、说明性或能力名；写出时只有出现非基线字段才带 `requires`，现在写出的内容与此前逐字节相同。读到带 `requires` 的清单：有当前脚本不认识的能力、`requires` 类型错误或大小写变体键就拒绝，提示“套件需要更新的客户端发行脚本，请使用该套件发行页对应版本的源码”；说明性字段忽略；没有 `requires` 的旧清单照常。以后加能力字段要同时改 `compat.mjs` 的登记表（测试会检查漏登记）和 Go 的 `deploy/offline/release_client_kit.go`（它对 `client-inputs-release.json` 严格解码；`windows-client.json` 虽为非严格解码，会默默忽略 `requires`，同样要同步）。
 
 ## Linux 公钥配置及发布
 

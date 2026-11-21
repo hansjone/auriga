@@ -51,7 +51,8 @@ it.each([false, true])('管理登录团队优先=%s，仍保留其他方式', as
   expect(api.createLoginTransaction).toHaveBeenCalledTimes(team ? 1 : 0);
   if (team) {
     expect(view.find('input[name=username]').exists()).toBe(true);
-    await view.get('.auriga-login-back').trigger('click');
+    expect(view.find('.auriga-login-back').exists()).toBe(false);
+    expect(view.get('.auriga-login-topbar .back').text()).toBe('返回');
     expect(
       view
         .findAll('[data-provider-id]')

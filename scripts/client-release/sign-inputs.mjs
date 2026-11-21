@@ -8,6 +8,7 @@ import { parseArgs } from 'node:util';
 import { assertPrivateKey } from './keys.mjs';
 import { CLIENT_TARGET, clientPlatform } from './platform.mjs';
 import { digest, verifyInputs, ROOT } from './inputs.mjs';
+import { stampRequires } from './compat.mjs';
 import { sha256File } from '../../clients/installer/runtime/verify.mjs';
 
 export function signInputs(
@@ -33,14 +34,14 @@ export function signInputs(
   if (key.asymmetricKeyType !== 'ed25519')
     throw new Error('发行私钥必须为 Ed25519');
   const publicKey = createPublicKey(key);
-  const metadata = {
+  const metadata = stampRequires('client-inputs-release.json', {
     schemaVersion: 1,
     version,
     platform: CLIENT_TARGET,
     lockSha256: kit.lockSha256,
     manifestSha256,
     buildNodeSha256: sha256File(join(directory, clientPlatform().buildNode)),
-  };
+  });
   const bytes = JSON.stringify(metadata, null, 2) + '\n';
   const sums = `${digest(bytes)}  client-inputs-release.json\n${manifestSha256}  windows-client.json\n`;
   for (const [name, content] of [

@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -80,6 +81,9 @@ func doctor(s state) error {
 	var installed release
 	if err := readJSON(filepath.Join(s.Package, "offline-release.json"), &installed); err == nil {
 		fmt.Println(printProvenance(installed.Source))
+		if line := siteDependenciesInfo(s.Package); line != "" {
+			fmt.Println(line)
+		}
 	}
 	failures := 0
 	check := func(name, repair string, test func() error) {
@@ -196,7 +200,7 @@ func objectWrite(s state) error {
 func checkLoadedImages(s state, r release) error {
 	boot := filepath.Join(s.Package, "deploy-nas/bin/auriga-nas-bootstrap")
 	for _, name := range []string{"platform", "edge", "agent", "bifrost", "operator"} {
-		id, err := capture(boot, "image-extra-resolve", filepath.Join(s.Package, "images", name+".tar"), "auriga/"+name+":nas", s.Images[strings.ToUpper(name)])
+		id, err := captureImageResolve(context.Background(), boot, filepath.Join(s.Package, "images", name+".tar"), "auriga/"+name+":nas", s.Images[strings.ToUpper(name)])
 		if err != nil {
 			return err
 		}
@@ -205,7 +209,7 @@ func checkLoadedImages(s state, r release) error {
 		}
 	}
 	for name, entry := range r.Images {
-		id, err := capture(boot, "image-extra-resolve", filepath.Join(s.Package, entry.Archive), entry.Tag, s.Images[strings.ToUpper(strings.ReplaceAll(name, "-", "_"))])
+		id, err := captureImageResolve(context.Background(), boot, filepath.Join(s.Package, entry.Archive), entry.Tag, s.Images[strings.ToUpper(strings.ReplaceAll(name, "-", "_"))])
 		if err != nil {
 			return err
 		}

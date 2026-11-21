@@ -68,6 +68,10 @@ body {
     radial-gradient(70% 55% at 50% 0%, #0d2438 0%, rgba(13, 36, 56, 0) 70%),
     linear-gradient(180deg, #071421 0%, var(--auriga-bg) 100%);
 }
+/* Login pages carry the landing top bar; keep the panel clear of it. */
+.auriga-stage:has(.auriga-login-topbar) {
+  padding-top: 96px;
+}
 .auriga-login {
   width: min(400px, 100%);
   box-sizing: border-box;

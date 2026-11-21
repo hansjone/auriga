@@ -36,6 +36,9 @@ func extraImageCommand(ctx context.Context, args []string, stdout io.Writer) err
 	if (len(args) != 2 && len(args) != 3) || args[1] == "" || strings.HasPrefix(args[1], "-") {
 		return errors.New("usage: image-extra-resolve ARCHIVE EXACT_TAG [IMMUTABLE_LOCAL_ID]")
 	}
+	if _, err := loadImageTimeouts(imageEnvLookup); err != nil {
+		return err
+	}
 	selector := args[1]
 	if len(args) == 3 {
 		if !imageDigest.MatchString(args[2]) {
@@ -115,7 +118,16 @@ func imageCommand(ctx context.Context, args []string, stdout io.Writer) error {
 	if len(args) != 2 {
 		return errors.New("usage: auriga-nas-bootstrap image-{metadata|check|resolve} DIRECTORY")
 	}
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Minute)
+	timeouts, err := loadImageTimeouts(imageEnvLookup)
+	if err != nil {
+		return err
+	}
+	// 本地读档与校验 10 分钟足够；image-resolve 要逐个重导出镜像，总上限按各步上限累计。
+	outer := 10 * time.Minute
+	if args[0] == "image-resolve" {
+		outer = time.Duration(len(imageNames)) * (timeouts.SaveMax + timeouts.Inspect)
+	}
+	ctx, cancel := context.WithTimeout(ctx, outer)
 	defer cancel()
 	if args[0] == "image-metadata" {
 		proofs, err := imageArchives(ctx, args[1], defaultImageLimits)
@@ -833,8 +845,18 @@ func equalImageLayers(a, b []string) bool {
 // Docker receives literal argv only. The immutable ID returned by inspect is
 // the sole save selector: a concurrent mutable tag change cannot redirect it.
 func inspectDockerImage(ctx context.Context, tag string) (imageInspection, error) {
+	t, err := loadImageTimeouts(imageEnvLookup)
+	if err != nil {
+		return imageInspection{}, err
+	}
+	return inspectDockerImageWith(ctx, tag, t.Inspect)
+}
+
+func inspectDockerImageWith(ctx context.Context, tag string, limit time.Duration) (imageInspection, error) {
 	var actual imageInspection
-	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	started := time.Now()
+	parent := ctx
+	ctx, cancel := context.WithTimeout(ctx, limit)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "docker", "image", "inspect", "--format", `{"Id":{{json .Id}},"Os":{{json .Os}},"Architecture":{{json .Architecture}}}`, tag)
 	var out imageLimitedBuffer
@@ -844,9 +866,12 @@ func inspectDockerImage(ctx context.Context, tag string) (imageInspection, error
 	cmd.WaitDelay = 2 * time.Second
 	if err := cmd.Run(); err != nil {
 		if ctx.Err() != nil {
-			return actual, fmt.Errorf("docker image inspect interrupted: %w", ctx.Err())
+			if parent.Err() == nil {
+				return actual, fmt.Errorf("检查镜像（docker image inspect）超时：已用时 %s，超过上限 %s；现场负载高或磁盘慢时可调大 %s: %w", time.Since(started).Round(time.Second), limit, imageInspectEnv, ctx.Err())
+			}
+			return actual, fmt.Errorf("检查镜像（docker image inspect）被中断: %w", ctx.Err())
 		}
-		return actual, fmt.Errorf("docker image inspect failed: %w", err)
+		return actual, fmt.Errorf("检查镜像（docker image inspect）失败: %w", err)
 	}
 	var record struct {
 		ID   string `json:"Id"`
@@ -872,34 +897,11 @@ func (b *imageLimitedBuffer) Write(p []byte) (int, error) {
 }
 
 func exportDockerImage(ctx context.Context, id string, verify func(io.Reader) error) error {
-	ctx, cancel := context.WithTimeout(ctx, 3*time.Minute)
-	defer cancel()
-	cmd := exec.CommandContext(ctx, "docker", "image", "save", id)
-	cmd.Stderr = io.Discard
-	cmd.WaitDelay = 2 * time.Second
-	pipe, err := cmd.StdoutPipe()
+	t, err := loadImageTimeouts(imageEnvLookup)
 	if err != nil {
 		return err
 	}
-	if err := cmd.Start(); err != nil {
-		_ = pipe.Close()
-		return err
-	}
-	err = verify(pipe)
-	contextErr := ctx.Err()
-	if err != nil {
-		cancel()
-	}
-	_ = pipe.Close()
-	waitErr := cmd.Wait()
-	if contextErr != nil {
-		return fmt.Errorf("docker image save interrupted: %w", contextErr)
-	}
-	if err != nil {
-		return err
-	}
-	if waitErr != nil {
-		return fmt.Errorf("docker image save failed: %w", waitErr)
-	}
-	return nil
+	return runImageSave(ctx, func(c context.Context) *exec.Cmd {
+		return exec.CommandContext(c, "docker", "image", "save", id)
+	}, verify, t.Stall, t.SaveMax)
 }
