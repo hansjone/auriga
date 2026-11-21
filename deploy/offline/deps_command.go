@@ -849,6 +849,11 @@ func depsImport(ctx context.Context, cfg *siteConfig, src string, o depsImportOp
 	if err := depsTrustedSourceCheck("导入源 ", abs); err != nil {
 		return fmt.Errorf("%w%s", err, depsTrustedSourceHint)
 	}
+	if !info.IsDir() {
+		if err := checkImportParts(abs); err != nil {
+			return fmt.Errorf("%w%s", err, depsTrustedSourceHint)
+		}
+	}
 	if _, err := ensureDepsCache(cfg.Deps.Cache, true); err != nil {
 		return err
 	}
@@ -949,6 +954,34 @@ func depsImport(ctx context.Context, cfg *siteConfig, src string, o depsImportOp
 		fmt.Fprintln(w, "注意：Java（Maven）依赖没有锁哈希钉定，请人工核对导入构件（Maven 锁文件见设计第 8 步）。")
 	}
 	fmt.Fprintf(w, "导入完成：新增 %d 个条目，跳过 %d 个；来源 %s\n", imported, skipped, from)
+	return nil
+}
+
+// checkImportParts：分卷导入时，分卷清单与清单列出的每个分卷都必须 root 所有、组和其他
+// 用户不可写（第 1 步审查 N1）；不是分卷归档时什么也不做。
+func checkImportParts(archive string) error {
+	index := archiveIndex(archive)
+	if index == "" {
+		return nil
+	}
+	if err := noSymlinks(index); err != nil {
+		return err
+	}
+	if err := depsTrustedSourceCheck("分卷清单 ", index); err != nil {
+		return err
+	}
+	var manifest partsManifest
+	if err := readJSON(index, &manifest); err != nil {
+		return fmt.Errorf("分卷清单无效：%w", err)
+	}
+	for _, p := range manifest.Parts {
+		if !safeRelative(p.Name) || filepath.Base(p.Name) != p.Name {
+			return fmt.Errorf("分卷名无效 %q", p.Name)
+		}
+		if err := depsTrustedSourceCheck("分卷 ", filepath.Join(filepath.Dir(index), p.Name)); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 

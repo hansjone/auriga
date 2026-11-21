@@ -15,13 +15,19 @@ import (
 )
 
 func waitHealthy(s state) error {
-	deadline := time.Now().Add(5 * time.Minute)
+	return waitHealthyFor(s, 5*time.Minute)
+}
+
+// waitHealthyFor 等待全部服务健康，超时返回最后一次的不健康原因（deploy 用 server.healthTimeout，默认 10 分钟）。
+func waitHealthyFor(s state, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
 	for {
-		if err := health(s); err == nil {
+		err := health(s)
+		if err == nil {
 			return nil
 		}
 		if time.Now().After(deadline) {
-			return errors.New("服务健康等待超过五分钟，运行 ./auriga doctor 检查")
+			return fmt.Errorf("服务健康等待超过 %s（%v），运行 ./auriga doctor 检查", timeout, err)
 		}
 		time.Sleep(2 * time.Second)
 	}

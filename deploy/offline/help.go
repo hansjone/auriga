@@ -159,6 +159,12 @@ func tryHelp(args []string) (done bool, err error) {
 		err = keygenCommand([]string{"site", "--help"})
 	case "trust":
 		err = trustCommand([]string{"add-site-key", "x", "--help"})
+	case "deploy":
+		_, err = parseDeploy(h)
+	case "rollback":
+		err = rollbackCommand(h, siteInvocation{})
+	case "history":
+		err = historyCommand(h, siteInvocation{}, helpOut)
 	case "deps":
 		switch sub {
 		case "status", "fetch":
@@ -225,8 +231,13 @@ func printTopHelp(w io.Writer) {
   keygen site     生成站点构建密钥对（私钥只留在受控开发机）
   trust add-site-key|remove-site-key   在服务器登记或移除站点构建公钥（需要 root）
 
-站点构建（需要 sudo/root，读 /etc/auriga/site.json）
+站点构建（需要 root，读 /etc/auriga/site.json）
   deps status|fetch|import   依赖缓存：看缺什么、按配置的依赖源补 Go/Web 依赖、导入手工缓存或套件
+  deploy [<提交号>]          本机全量构建并部署（无 state 时首次安装）；失败且数据未被触碰时自动回滚
+  rollback [--to <序号>]     退回保留的历史发行（数据须与目标运行时相同；跨迁移回滚交人工）
+  history                    列出部署历史与当前发行
+  status 会同时显示安装来源与当前发行；deploy/rollback 每次写 <logs.dir>/<时间>-<命令>.log 与 .json 收据，
+  退出码 0 成功、1 未切换就失败、2 已自动回滚、3 需人工
 
 维护者
   release         生成发行附件（标签、签名、Windows 与 DSH 输入见 docs/release/maintainer.zh.md）
@@ -290,7 +301,7 @@ func init() {
 	for _, c := range []struct{ name, summary string }{
 		{"doctor", "部署体检：检查服务、管理台与资源密钥状态。需要 sudo/root。另有 doctor --build 检查构建资源。"},
 		{"backup", "停止服务并做一致性备份，写入数据目录同级的 auriga-backups。需要 sudo/root。"},
-		{"status", "查看服务状态。需要 sudo/root。"},
+		{"status", "查看服务状态（deploy 安装的站点同时显示安装来源与当前发行）。需要 sudo/root。"},
 		{"logs", "查看最近 100 行服务日志（带时间戳）。需要 sudo/root。"},
 		{"stop", "停止服务。需要 sudo/root。"},
 	} {
@@ -407,6 +418,51 @@ func init() {
 			"source":            "源码目录（只有导入发行开发套件时用来算锁摘要）；只允许 root 直接运行时使用，经 sudo 调用时拒绝（默认用配置的 source.dir）",
 			"trust-fingerprint": "独立核对过的签名公钥指纹（SHA256:<64 位小写十六进制> 或裸十六进制）；给出时必须签名有效且指纹匹配",
 			"trust-state":       "用 state 已钉定的发行/站点公钥核验签名（需要配置 server.data）；与 --trust-fingerprint 二选一",
+		},
+	}
+	helpSpecs["deploy"] = helpSpec{
+		usage:   "./auriga deploy [<40 位提交号>] [--full | --services a,b] [--dry-run] [--json] [参数]",
+		summary: "在本机用源码快照构建并部署（设计 docs/dev/site-deploy.zh.md D10）。需要 root 直接运行；经 sudo 调用与参数白名单在下一步开放。",
+		notes: []string{
+			"源码：给了提交号就从 source.git 远端 fetch 到数据目录同级的 auriga-source.git，提交必须在某个 allowedRefs 上，git archive 导出（不读 root 的系统/全局 git 配置）；否则用 source.dir 或 --source（都须 root 所有、组和其他用户不可写）。",
+			"配置了 source.git.requireSignedCommits 或 trustedSigners 时本版本直接拒绝（退出码 1）：提交签名校验在统一现场部署 2a（下）实现。",
+			"配方：一律用源码快照里的 deploy/nas/offline-build（deploy-recipe.json 声明暂存清单、固定 digest 与 CLI 能力版本，能力版本不符时先升级 CLI）；Dockerfile 拒绝 syntax/escape 解析器指令（含 BOM、// 与 JSON 变体），FROM 只能是固定 digest、${<SVC>_BASE} 或已声明阶段，拒绝 ADD <URL> 与引用外部镜像的 --from；构建前比较源码锁清单与依赖输入。",
+			"没有 state 时执行首次安装（复用 install 步骤，访问方式取 server.install）；有带 trustFingerprint 的套件就钉定发行钥，否则标记未钉定。",
+			"再次部署：全量构建，装配摘要与当前一致的镜像跳过切换，然后完整启动（render → preflight → start）；新发行写入 auriga-releases/<序号>/，镜像加打 auriga/<服务>:r<序号>，保留 server.keepHistory 份（默认 3）。",
+			"切换失败时：先停掉新版本会写数据的服务（platform、collab、edge 等），再读迁移与数据目录格式版本，与切换前相同且上一版是成功记录才自动回滚（退出码 2），否则退出码 3 交人工；首装失败退出码 1 并保留现场。",
+			"每次写 <logs.dir>/<时间>-deploy.log 与同名 .json 收据（脱敏），--json 时标准输出只打印收据。",
+		},
+		docs: merge(buildDocs, map[string]string{
+			"full":            "强制重建全部镜像（不按装配摘要跳过），与 --services 互斥",
+			"services":        "只构建这些镜像（逗号分隔：platform,edge,agent,bifrost,operator），其余沿用当前；切换仍完整启动；首次安装不可用",
+			"dry-run":         "只打印计划：会构建哪些镜像、切换方式、要补的依赖、镜像来源、迁移与格式版本；不构建、不切换",
+			"json":            "标准输出只打印收据 JSON（进度写标准错误）",
+			"backup-db":       "部署前 pg_dump 各库（统一现场部署 2b 实现，本版本会拒绝）",
+			"config":          "站点配置路径；只允许 root 直接运行时使用（默认 /etc/auriga/site.json）",
+			"source":          "人工源码目录（root 直接运行时使用，不能与提交号同用）；默认用 source.dir 或 source.git",
+			"accept-new-deps": "本次允许按依赖源补新增依赖（等同 deps.acceptNewDeps=true，仅限 Go、Web）",
+		}),
+	}
+	helpSpecs["rollback"] = helpSpec{
+		usage:   "./auriga rollback [--to <序号>] [--json] [--config <site.json>]",
+		summary: "把站点切回保留的历史发行（默认上一份成功的部署），完整启动并等待健康。需要 root 直接运行。",
+		notes: []string{
+			"只有当前迁移与数据目录格式版本与目标运行时记录相同才执行；否则需要目标声明 schemaCompatFloor 与格式上限（统一现场部署 2b 生成），本版本一律交人工，退出码 3。",
+			"这是 2b 之前的临时规则，有风险：迁移版本没变不等于数据没变，新版本运行期间可能写入了旧代码不认识的行数据或取值，回滚后旧代码可能读错或报错。新版本运行越久风险越大，执行前请先备份并确认这段时间的业务改动。",
+			"回滚失败不重试，退出码 3。每次写日志与收据。",
+		},
+		docs: map[string]string{
+			"to":     "目标序号（auriga history 查看）；默认当前之前最近一份成功的部署",
+			"json":   "标准输出只打印收据 JSON",
+			"config": "站点配置路径；只允许 root 直接运行时使用（默认 /etc/auriga/site.json）",
+		},
+	}
+	helpSpecs["history"] = helpSpec{
+		usage:   "./auriga history [--json] [--config <site.json>]",
+		summary: "列出保留的部署历史：序号、状态、源码提交与快照摘要、是否声明 floor，* 标出当前发行。需要 root。",
+		docs: map[string]string{
+			"json":   "输出机器可读 JSON",
+			"config": "站点配置路径；只允许 root 直接运行时使用（默认 /etc/auriga/site.json）",
 		},
 	}
 	helpSpecs["verify"] = helpSpec{
