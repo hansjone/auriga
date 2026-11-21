@@ -26,7 +26,7 @@ func nasSharedRuntime(args []string, stdout io.Writer) error {
 	f := flag.NewFlagSet("shared-runtime", flag.ContinueOnError)
 	base := f.String("base", "", "original sealed NAS materials")
 	out := f.String("out", "", "fixed config/shared-source sibling")
-	action := f.String("action", "status", "stage, commit, rollback, check, path, project or status")
+	action := f.String("action", "status", "stage, set-model, commit, rollback, check, path, project or status")
 	expected := f.String("expected-base-sha256", "", "independently approved original receipt SHA256")
 	adapter := f.String("adapter-file", "", "approved private UAC adapter containing sharedOutbound")
 	adapterSHA := f.String("adapter-sha256", "", "independently approved private adapter SHA256")
@@ -42,7 +42,7 @@ func nasSharedRuntime(args []string, stdout io.Writer) error {
 	if f.NArg() != 0 || os.Geteuid() != 0 || !sharedCanonicalPath(*base) || *out != filepath.Join(filepath.Dir(*base), "shared-source") {
 		return fmt.Errorf("shared installation requires root and canonical fixed sibling paths")
 	}
-	mutating := *action == "stage" || *action == "commit" || *action == "rollback"
+	mutating := *action == "stage" || *action == "set-model" || *action == "commit" || *action == "rollback"
 	if !mutating && *action != "status" && *action != "check" && *action != "path" && *action != "project" {
 		return fmt.Errorf("unsupported shared installation operation")
 	}
@@ -52,8 +52,19 @@ func nasSharedRuntime(args []string, stdout io.Writer) error {
 	if (*dedicatedProfile == "") != (*dedicatedSHA == "") {
 		return fmt.Errorf("dedicated profile file and approval SHA256 must be supplied together")
 	}
-	if *action != "stage" && (*adapter != "" || *adapterSHA != "" || *profile != "" || *profileSHA != "" || *dedicatedProfile != "" || *dedicatedSHA != "" || *model != "" || *teamOnly) {
-		return fmt.Errorf("staging inputs are only accepted by stage")
+	switch *action {
+	case "set-model":
+		if *adapter != "" || *adapterSHA != "" || *profile != "" || *profileSHA != "" || *dedicatedProfile != "" || *dedicatedSHA != "" || *teamOnly {
+			return fmt.Errorf("set-model only accepts model and original base approval")
+		}
+		if err := sharedApprovedModelID(*model); err != nil {
+			return err
+		}
+	case "stage":
+	default:
+		if *adapter != "" || *adapterSHA != "" || *profile != "" || *profileSHA != "" || *dedicatedProfile != "" || *dedicatedSHA != "" || *model != "" || *teamOnly {
+			return fmt.Errorf("staging inputs are only accepted by stage")
+		}
 	}
 	baseHash, err := verifyNASCollabBase(*base)
 	if err != nil {
@@ -94,6 +105,7 @@ func nasSharedRuntime(args []string, stdout io.Writer) error {
 	}
 	var eventNames []string
 	hasGeneration := false
+	hasModelRotation := false
 	for _, entry := range entries {
 		name := entry.Name()
 		if name == ".lock" {
@@ -103,13 +115,17 @@ func nasSharedRuntime(args []string, stdout io.Writer) error {
 			hasGeneration = true
 			continue
 		}
+		if name == sharedModelRotationDir {
+			hasModelRotation = true
+			continue
+		}
 		if !regexp.MustCompile(`^e-[0-9]{20}\.json$`).MatchString(name) {
 			return fmt.Errorf("unknown or interrupted shared installation; preserve source for inspection")
 		}
 		eventNames = append(eventNames, name)
 	}
 	if !hasGeneration {
-		if len(eventNames) != 0 || *action != "stage" {
+		if hasModelRotation || len(eventNames) != 0 || *action != "stage" {
 			return fmt.Errorf("shared generation absent; activation refused")
 		}
 		if err := stageSharedInstallation(*base, *out, baseHash, *adapter, *adapterSHA, *profile, *profileSHA, *dedicatedProfile, *dedicatedSHA, *model, *teamOnly); err != nil {
@@ -151,6 +167,9 @@ func nasSharedRuntime(args []string, stdout io.Writer) error {
 		_, err = fmt.Fprintf(stdout, "state=%s version=1 records=%d\n", state, len(eventNames)+1)
 		return err
 	}
+	if *action == "set-model" {
+		return stageSharedModelRotation(*base, *out, generation, baseHash, receipt, files, state, hasModelRotation, eventNames, *model)
+	}
 	if *action == "check" || *action == "path" || *action == "project" {
 		if state != "committed" {
 			return fmt.Errorf("shared installation is not committed; ingress remains disabled")
@@ -171,6 +190,12 @@ func nasSharedRuntime(args []string, stdout io.Writer) error {
 		}
 		return err
 	}
+	if *action == "rollback" && hasModelRotation {
+		if state != "staged" {
+			return fmt.Errorf("model rotation rollback requires a staged set-model generation")
+		}
+		return restoreSharedModelRotation(*out, generation)
+	}
 	eventAction := *action
 	if eventAction == "stage" {
 		if state == "staged" || state == "committed" {
@@ -178,7 +203,16 @@ func nasSharedRuntime(args []string, stdout io.Writer) error {
 		}
 		eventAction = "resume"
 	}
-	if eventAction == "commit" && state == "committed" || eventAction == "rollback" && state == "rolled-back" {
+	if eventAction == "commit" && state == "committed" {
+		if hasModelRotation {
+			if err := os.RemoveAll(filepath.Join(*out, sharedModelRotationDir)); err != nil {
+				return err
+			}
+			return runtimeSyncDir(*out)
+		}
+		return nil
+	}
+	if eventAction == "rollback" && state == "rolled-back" {
 		return nil
 	}
 	if _, err := sharedInstallationNextState(state, eventAction); err != nil {
@@ -197,7 +231,16 @@ func nasSharedRuntime(args []string, stdout io.Writer) error {
 	if err != nil {
 		return err
 	}
-	return materialsAppend(*out, fmt.Sprintf("e-%020d.json", event.Sequence), raw)
+	if err := materialsAppend(*out, fmt.Sprintf("e-%020d.json", event.Sequence), raw); err != nil {
+		return err
+	}
+	if eventAction == "commit" && hasModelRotation {
+		if err := os.RemoveAll(filepath.Join(*out, sharedModelRotationDir)); err != nil {
+			return err
+		}
+		return runtimeSyncDir(*out)
+	}
+	return nil
 }
 
 func sharedCanonicalPath(path string) bool {
@@ -471,9 +514,165 @@ func sharedRuntimeSnapshot(base string, allowVerifiedPredecessor bool) ([]byte, 
 	return sharedRuntimeSpecJSON(raw)
 }
 
+func stageSharedModelRotation(base, out, generation, baseHash string, receipt *sharedInstallationReceipt, files map[string][]byte, state string, hasModelRotation bool, eventNames []string, model string) error {
+	if err := sharedApprovedModelID(model); err != nil {
+		return err
+	}
+	switch state {
+	case "committed":
+		if receipt.Model == model {
+			return nil
+		}
+		if hasModelRotation {
+			return fmt.Errorf("interrupted model rotation; preserve source for inspection")
+		}
+		return replaceSharedModel(base, out, generation, baseHash, receipt, files, eventNames, model)
+	case "staged":
+		if !hasModelRotation {
+			return fmt.Errorf("initial shared staging is not a model rotation; use stage with the approved model")
+		}
+		if receipt.Model == model {
+			return nil
+		}
+		return fmt.Errorf("shared model rotation differs; concurrent or conflicting set-model refused")
+	case "rolled-back":
+		return fmt.Errorf("rolled-back installation cannot set-model; resume or reinstall explicitly")
+	default:
+		return fmt.Errorf("shared model rotation refused in state %s", state)
+	}
+}
+
+func replaceSharedModel(base, out, generation, baseHash string, receipt *sharedInstallationReceipt, files map[string][]byte, eventNames []string, model string) error {
+	if err := checkSharedInstallationEnvironment(base, receipt); err != nil {
+		return err
+	}
+	stage := filepath.Join(out, ".pending")
+	if err := os.Mkdir(stage, 0700); err != nil {
+		return fmt.Errorf("shared staging exists; inspect preserved incomplete evidence")
+	}
+	for _, name := range []string{"platform", "platform/agent-secret", "edge", "public"} {
+		if err := os.Mkdir(filepath.Join(stage, name), 0700); err != nil {
+			return err
+		}
+	}
+	leaves := sharedInstallationLeaves(receipt.DedicatedProfile != "")
+	for _, name := range leaves {
+		if name == "public/host.json" {
+			continue
+		}
+		raw, ok := files[name]
+		if !ok {
+			return fmt.Errorf("shared source incomplete")
+		}
+		if err := materialsCreate(filepath.Join(stage, filepath.FromSlash(name)), raw); err != nil {
+			return err
+		}
+	}
+	if err := installation.RenderSharedHostConfig(installation.SharedHostInputs{
+		IdentityKeysFile:     filepath.Join(stage, "public/identity.jwks.json"),
+		EnterpriseKeysFile:   filepath.Join(stage, "public/enterprise.jwks.json"),
+		ModelKeysFile:        filepath.Join(stage, "public/model.jwks.json"),
+		MessageKeysFile:      filepath.Join(stage, "public/message.jwks.json"),
+		EnterprisePolicyFile: filepath.Join(stage, "public/enterprise-policy.json"),
+		Model:                model,
+		OutputFile:           filepath.Join(stage, "public/host.json"),
+	}); err != nil {
+		return err
+	}
+	host, err := runtimeReadLeaf(filepath.Join(stage, "public/host.json"), 0444, 256<<10)
+	if err != nil {
+		return err
+	}
+	stagedFiles := map[string][]byte{}
+	for _, name := range leaves {
+		if name == "public/host.json" {
+			stagedFiles[name] = host
+			continue
+		}
+		stagedFiles[name] = files[name]
+	}
+	digest, err := sharedSourceDigest(stagedFiles)
+	if err != nil {
+		return err
+	}
+	next := *receipt
+	next.Model = model
+	next.Files = digest
+	raw, err := json.Marshal(next)
+	if err != nil {
+		return err
+	}
+	if err := materialsCreate(filepath.Join(stage, "installation.receipt"), raw); err != nil {
+		return err
+	}
+	if fresh, err := verifyNASCollabBase(base); err != nil || fresh != baseHash {
+		return fmt.Errorf("sealed base changed during shared model rotation")
+	}
+	if err := runtimeSyncTree(stage); err != nil {
+		return err
+	}
+	rotation := filepath.Join(out, sharedModelRotationDir)
+	if err := os.Mkdir(rotation, 0700); err != nil {
+		return fmt.Errorf("model rotation exists; inspect preserved incomplete evidence")
+	}
+	if err := os.Rename(generation, filepath.Join(rotation, "generation")); err != nil {
+		return err
+	}
+	for _, name := range eventNames {
+		if err := os.Rename(filepath.Join(out, name), filepath.Join(rotation, name)); err != nil {
+			return err
+		}
+	}
+	if err := os.Rename(stage, generation); err != nil {
+		return err
+	}
+	return runtimeSyncDir(out)
+}
+
+func restoreSharedModelRotation(out, generation string) error {
+	rotation := filepath.Join(out, sharedModelRotationDir)
+	if err := materialsPrivateDirectory(rotation); err != nil {
+		return err
+	}
+	previous := filepath.Join(rotation, "generation")
+	if err := materialsPrivateDirectory(previous); err != nil {
+		return err
+	}
+	entries, err := os.ReadDir(rotation)
+	if err != nil {
+		return err
+	}
+	var eventNames []string
+	for _, entry := range entries {
+		name := entry.Name()
+		if name == "generation" {
+			continue
+		}
+		if !regexp.MustCompile(`^e-[0-9]{20}\.json$`).MatchString(name) {
+			return fmt.Errorf("unknown or interrupted model rotation; preserve source for inspection")
+		}
+		eventNames = append(eventNames, name)
+	}
+	if err := os.RemoveAll(generation); err != nil {
+		return err
+	}
+	if err := os.Rename(previous, generation); err != nil {
+		return err
+	}
+	for _, name := range eventNames {
+		if err := os.Rename(filepath.Join(rotation, name), filepath.Join(out, name)); err != nil {
+			return err
+		}
+	}
+	if err := os.Remove(rotation); err != nil {
+		return err
+	}
+	return runtimeSyncDir(out)
+}
+
 func stageSharedInstallation(base, out, baseHash, adapter, adapterSHA, profile, profileSHA, dedicatedProfile, dedicatedSHA, model string, teamOnly bool) error {
-	if model == "" || len(model) > 128 || strings.TrimSpace(model) != model || strings.ContainsAny(model, "\r\n") {
-		return fmt.Errorf("approved public model ID required")
+	if err := sharedApprovedModelID(model); err != nil {
+		return err
 	}
 	var adapterRaw []byte
 	var err error
@@ -677,6 +876,15 @@ func readSharedInstallation(base, generation, baseHash string) (*sharedInstallat
 	}
 	if err := installation.ValidateSharedProfile(files["public/profile.yml"]); err != nil {
 		return nil, nil, fmt.Errorf("stored shared profile violates production policy: %w", err)
+	}
+	if err := sharedApprovedModelID(receipt.Model); err != nil {
+		return nil, nil, err
+	}
+	var host struct {
+		Model string `json:"model"`
+	}
+	if json.Unmarshal(files["public/host.json"], &host) != nil || host.Model != receipt.Model {
+		return nil, nil, fmt.Errorf("shared host model differs from installation receipt")
 	}
 	accessRaw, err := sharedBasePublic(base, "access.json")
 	if err != nil {

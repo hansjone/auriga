@@ -58,6 +58,37 @@ sh deploy/nas/scripts/start.sh
 
 `render` 重新验证原source/Node/runtime/proofs，创建 `config/shared-runtime/g-<digest>`。Platform只收到本服务签名与agent exporter输入，Edge只收到本服务identity/replay seed，Gateway只收到模型公钥，Agent只收到原完整runtime/profile/公开Host材料及svc:agent JWT只读目录；Host没有安装secret、服务JWT或签名私钥挂载。原Edge/Gateway exporter权限不变。Agent JWT由原IAM受信签发器自动续签并0600原子替换目录内文件。仅共享安装的原tenant-delegates追加既定svc:agent；原edge/gateway保留，无新增issuer或audience。新的RPC/model只发布到NAS loopback19091/18087，平台9091与共享模型18887仍有原mTLS、既定服务主体/Node UUID核验。
 
+## 显式更换共享模型
+
+已 committed 的共享源不能通过再次 `stage` 隐式改 `--model`（会报 `shared staging approval differs; implicit identity or policy rotation refused`）。正式更换只走显式动作，且只改模型，不轮换身份/密钥/adapter/profile/Node/CA：
+
+```sh
+# 仅 stage 新模型（可 rollback）；须提供与初装相同的独立 base 摘要
+"$BOOTSTRAP" shared-runtime -action set-model \
+  -base "$DATA/config/materials" -out "$DATA/config/shared-source" \
+  -expected-base-sha256 "$BASE_SHA256" -model auto
+"$BOOTSTRAP" shared-runtime -action status \
+  -base "$DATA/config/materials" -out "$DATA/config/shared-source"
+# 生效
+"$BOOTSTRAP" shared-runtime -action commit \
+  -base "$DATA/config/materials" -out "$DATA/config/shared-source" \
+  -expected-base-sha256 "$BASE_SHA256"
+# 或在 commit 前回退到上一已提交代
+"$BOOTSTRAP" shared-runtime -action rollback \
+  -base "$DATA/config/materials" -out "$DATA/config/shared-source" \
+  -expected-base-sha256 "$BASE_SHA256"
+```
+
+公开脚本一次完成 set-model、commit 与 core render：
+
+```sh
+sh deploy/nas/scripts/shared-install.sh \
+  --set-model auto --expected-base-sha256 "$BASE_SHA256"
+sh deploy/nas/scripts/start.sh
+```
+
+`set-model` 会重渲染 `public/host.json`、更新 `installation.receipt` 的 model/files 摘要并重置事件链；上一 committed 代暂存于 `.model-rotation`，commit 后删除，rollback 则原样恢复。同参数重入幂等；不同模型的并发/冲突 stage 拒绝。模型 ID 规则与初装相同（非空、≤128、无空白/换行）；安装器不查询中转站是否存在该 ID。commit 与 render 之后必须再跑 `start.sh`，使 Agent 加载新 host.json；一般无需清共享池，若成员会话仍绑定旧模型名再按运维窗口处理。
+
 `start` 先停止公开Edge，沿公开 `shared-replay-prepare.sh` 生成独立临时安装NKey（root0700私有源），启动只有本阶段才含该身份的NATS配置。短命helper只连接固定项目内部网络的 `nats:4222`，没有Docker socket、任意endpoint或通用命令转发。它只可AccountInfo、固定桶INFO/CREATE；已有同名桶必须符合固定subjects、无Sources/Mirror/transform、文件存储、history1、TTL至少12小时、DiscardNew及无限聚合count/bytes，拒绝自动改桶/删桶/清墓碑。安装receipt记实际StreamInfo.Created，之后丢桶/换桶拒绝重建。
 
 预建后强制重建NATS为无安装身份的常驻配置；核固定project/service、旧容器确已停止或移除、新容器运行，再确认临时身份收到明确Authorization拒绝、Edge身份成功读取同一桶，才开启本地readiness gate。超时/断网不能当撤权成功。常驻Edge没有CREATE/UPDATE，W仍只有原四项读取权限，五个旧password用户不加权。失败恢复常驻配置；恢复失败则停固定项目Edge/NATS，保留材料与桶。没有完成此流程时，普通Compose up/restart拒绝且不会回个人池；stop/检查仍可执行。这里只是原部署状态记录，不是新的签名信任或proof。

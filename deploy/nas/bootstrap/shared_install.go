@@ -5,12 +5,21 @@ import (
 	"encoding/hex"
 	"fmt"
 	"sort"
+	"strings"
 
 	"github.com/hansjone/auriga/infra/agent/installation"
 )
 
 const sharedInstallationGeneration = "v-00000000000000000001"
+const sharedModelRotationDir = ".model-rotation"
 const sharedTeamOnlyAdapter = "{}"
+
+func sharedApprovedModelID(model string) error {
+	if model == "" || len(model) > 128 || strings.TrimSpace(model) != model || strings.ContainsAny(model, "\r\n") {
+		return fmt.Errorf("approved public model ID required")
+	}
+	return nil
+}
 
 type sharedInstallationReceipt struct {
 	Version          int    `json:"version"`

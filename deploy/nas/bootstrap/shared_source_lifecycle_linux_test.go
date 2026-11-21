@@ -178,7 +178,7 @@ func testNASSharedSourceVariant(t *testing.T, parent, binary, input string, team
 	run := func(action string, success bool, extra ...string) string {
 		t.Helper()
 		arguments := []string{"shared-runtime", "-action", action, "-base", base, "-out", out}
-		if action == "stage" || action == "commit" || action == "rollback" {
+		if action == "stage" || action == "set-model" || action == "commit" || action == "rollback" {
 			arguments = append(arguments, "-expected-base-sha256", baseSHA)
 		}
 		arguments = append(arguments, extra...)
@@ -344,8 +344,102 @@ func testNASSharedSourceVariant(t *testing.T, parent, binary, input string, team
 		t.Fatal(err)
 	}
 	run("check", true)
+	if !dedicated {
+		testNASSharedExplicitModelRotation(t, base, out, generation, baseBefore, staged, stageArgs, run)
+	}
 	t.Log("actual sealed bootstrap + signed runtime + enrolled public Node + umask077 stage/resume/commit/check completed without services")
 	testNASSharedRoleAndReplayPreparation(t, data, base, binary, run, runtimeAction)
+}
+
+func testNASSharedExplicitModelRotation(t *testing.T, base, out, generation, baseBefore, committedSnapshot string, stageArgs []string, run func(string, bool, ...string) string) {
+	t.Helper()
+	secretBefore, err := runtimeReadLeaf(filepath.Join(generation, "platform/agent-secret/installation.secret"), 0600, 1<<20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	adapterBefore, err := runtimeReadLeaf(filepath.Join(generation, "platform/uac-adapter.json"), 0600, 1<<20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	profileBefore, err := runtimeReadLeaf(filepath.Join(generation, "public/profile.yml"), 0600, 2<<20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	receiptBefore, err := runtimeReadLeaf(filepath.Join(generation, "installation.receipt"), 0600, 65536)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var oldReceipt sharedInstallationReceipt
+	if json.Unmarshal(receiptBefore, &oldReceipt) != nil || oldReceipt.Model != "gpt-6.1-sol" {
+		t.Fatal("committed receipt model changed before explicit rotation")
+	}
+	run("stage", false, append(append([]string{}, stageArgs[:len(stageArgs)-2]...), "-model", "auto")...) // implicit stage still refused
+	run("set-model", false, "-model", " auto")
+	run("set-model", false, "-model", "auto\n")
+	run("set-model", false, "-model", "")
+	run("set-model", true, "-model", "auto")
+	if !strings.Contains(run("status", true), "state=staged") {
+		t.Fatal("set-model did not leave a staged generation")
+	}
+	run("check", false)
+	run("set-model", true, "-model", "auto") // same-parameter reentry
+	run("set-model", false, "-model", "other-model")
+	if _, err := os.Stat(filepath.Join(out, sharedModelRotationDir)); err != nil {
+		t.Fatal("staged set-model must retain previous committed generation for rollback", err)
+	}
+	hostRaw, err := os.ReadFile(filepath.Join(generation, "public/host.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var host struct {
+		Model string `json:"model"`
+	}
+	if json.Unmarshal(hostRaw, &host) != nil || host.Model != "auto" {
+		t.Fatal("set-model did not re-render host.json model")
+	}
+	receiptRaw, err := runtimeReadLeaf(filepath.Join(generation, "installation.receipt"), 0600, 65536)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var rotated sharedInstallationReceipt
+	if json.Unmarshal(receiptRaw, &rotated) != nil || rotated.Model != "auto" || rotated.Adapter != oldReceipt.Adapter || rotated.Profile != oldReceipt.Profile || rotated.Node != oldReceipt.Node || rotated.CA != oldReceipt.CA || rotated.Tenant != oldReceipt.Tenant || rotated.InitialRuntime != oldReceipt.InitialRuntime || rotated.TeamOnly != oldReceipt.TeamOnly || rotated.DedicatedProfile != oldReceipt.DedicatedProfile || rotated.Files == oldReceipt.Files {
+		t.Fatal("set-model changed non-model receipt fields or left files digest unchanged", rotated)
+	}
+	secretAfter, err := runtimeReadLeaf(filepath.Join(generation, "platform/agent-secret/installation.secret"), 0600, 1<<20)
+	if err != nil || !bytes.Equal(secretAfter, secretBefore) {
+		t.Fatal("set-model rotated installation secret")
+	}
+	adapterAfter, err := runtimeReadLeaf(filepath.Join(generation, "platform/uac-adapter.json"), 0600, 1<<20)
+	if err != nil || !bytes.Equal(adapterAfter, adapterBefore) {
+		t.Fatal("set-model changed adapter bytes")
+	}
+	profileAfter, err := runtimeReadLeaf(filepath.Join(generation, "public/profile.yml"), 0600, 2<<20)
+	if err != nil || !bytes.Equal(profileAfter, profileBefore) {
+		t.Fatal("set-model changed profile bytes")
+	}
+	run("rollback", true)
+	if nasSnapshot(t, generation) != committedSnapshot {
+		t.Fatal("model rotation rollback did not restore the previous committed generation")
+	}
+	if _, err := os.Stat(filepath.Join(out, sharedModelRotationDir)); !os.IsNotExist(err) {
+		t.Fatal("rollback left model-rotation evidence")
+	}
+	if !strings.Contains(run("status", true), "state=committed") {
+		t.Fatal("rollback did not restore committed state")
+	}
+	run("check", true)
+	run("set-model", true, "-model", "auto")
+	run("commit", true)
+	run("check", true)
+	if _, err := os.Stat(filepath.Join(out, sharedModelRotationDir)); !os.IsNotExist(err) {
+		t.Fatal("commit left model-rotation evidence")
+	}
+	run("set-model", true, "-model", "auto") // committed same-model idempotent
+	run("rollback", false)                   // committed rollback still refused
+	run("stage", false, append(append([]string{}, stageArgs[:len(stageArgs)-2]...), "-model", "gpt-6.1-sol")...)
+	if nasSnapshot(t, base) != baseBefore {
+		t.Fatal("explicit model rotation changed sealed base")
+	}
 }
 
 func testNASSharedRoleAndReplayPreparation(t *testing.T, data, base, binary string, run func(string, bool, ...string) string, runtimeAction func(string, bool)) {

@@ -19,7 +19,7 @@ case "${1:-}" in
   shared-source-check)
     exec "$(bootstrap_binary)" shared-runtime -base "$AURIGA_DATA_ROOT/config/materials" \
       -out "$AURIGA_DATA_ROOT/config/shared-source" -action check ;;
-  shared-stage|shared-commit)
+  shared-stage|shared-set-model|shared-commit)
     _action=${1#shared-}
     set -- -base "$AURIGA_DATA_ROOT/config/materials" -out "$AURIGA_DATA_ROOT/config/shared-source" \
       -action "$_action" -expected-base-sha256 "${NAS_SHARED_EXPECTED_BASE:?}"
@@ -33,6 +33,9 @@ case "${1:-}" in
         false) set -- "$@" -adapter-file "${NAS_SHARED_ADAPTER:?}" -adapter-sha256 "${NAS_SHARED_ADAPTER_SHA:?}" ;;
         *) die 'invalid explicit team-only decision' ;;
       esac
+    fi
+    if [ "$_action" = set-model ]; then
+      set -- "$@" -model "${NAS_SHARED_MODEL:?}"
     fi
     exec "$(bootstrap_binary)" shared-runtime "$@" ;;
   shared-project|shared-check|shared-path|shared-status)
