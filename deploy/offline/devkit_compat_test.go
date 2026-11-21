@@ -255,3 +255,47 @@ func TestReadDevkitJSONRejectsOddRequiresAndOversize(t *testing.T) {
 		t.Fatalf("超限应明确报错: %v", err)
 	}
 }
+
+// 0.2.0 预发布套件已带 runtimeTooling/runtimeDependencies 但没有 requires：
+// 新 CLI 必须按旧格式严格读出；重写时只多出顶层 requires，其余字节不变。
+func TestDevkitLegacyRuntimeFieldsReadAndRewrite(t *testing.T) {
+	sum := strings.Repeat("a", 64)
+	kit := devkitManifest{Schema: 1, Source: &provenance{}, Release: release{Schema: 1, Version: "0.2.0", Build: &buildSpec{
+		RuntimeTooling: &artifact{URL: "runtime-tooling.tgz", SHA256: sum},
+		RuntimeDependencies: &runtimeDependencyInputs{
+			Manifest: artifact{URL: "runtime-dependencies/runtime-dependencies.json", SHA256: sum},
+			Corepack: artifact{URL: "runtime-dependencies/corepack.tgz", SHA256: sum},
+			WebCache: artifact{URL: "runtime-dependencies/web-cache.tar.gz", SHA256: sum},
+			NpmCache: artifact{URL: "runtime-dependencies/npm-cache.tar.gz", SHA256: sum},
+		},
+	}}}
+	dir := t.TempDir()
+	legacy := filepath.Join(dir, "legacy", "devkit.json")
+	if err := os.MkdirAll(filepath.Dir(legacy), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := jsonFile(legacy, kit, 0644); err != nil { // 不经过 stamp，等同旧版写出
+		t.Fatal(err)
+	}
+	var read devkitManifest
+	if err := readDevkitJSON(legacy, &read); err != nil {
+		t.Fatalf("无 requires 的预发布清单应按旧格式读通: %v", err)
+	}
+	if got := devkitRequires(read); !reflect.DeepEqual(got, []string{"runtime-dependencies", "runtime-tooling"}) {
+		t.Fatalf("能力检出不对: %v", got)
+	}
+	rewritten := filepath.Join(dir, "devkit.json")
+	if err := writeDevkitManifest(rewritten, read); err != nil {
+		t.Fatal(err)
+	}
+	before, _ := os.ReadFile(legacy)
+	after, _ := os.ReadFile(rewritten)
+	block := "  \"requires\": [\n    \"runtime-dependencies\",\n    \"runtime-tooling\"\n  ],\n"
+	if !strings.Contains(string(after), block) || strings.Replace(string(after), block, "", 1) != string(before) {
+		t.Fatalf("重写应只多出顶层 requires:\n%s", after)
+	}
+	// 重写结果本 CLI 仍应能读通（requires 里的能力都已登记）。
+	if err := readDevkitJSON(rewritten, &devkitManifest{}); err != nil {
+		t.Fatalf("新 CLI 应能读重写结果: %v", err)
+	}
+}
