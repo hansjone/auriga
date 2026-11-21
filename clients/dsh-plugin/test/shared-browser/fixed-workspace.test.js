@@ -35,7 +35,7 @@ function fixture(ids = []) {
     remoteAccess: { invalidate() {} },
     workspaceRecheckMs: 5,
   });
-  return { native, state, peer: { principal } };
+  return { native, state, host, peer: { principal } };
 }
 
 test('a shared member gets exactly one fixed workspace at their own directory', async () => {
@@ -83,6 +83,7 @@ test('session create accepts only the member fixed workspace and never a cwd', a
     signal,
   );
   assert.equal(ok.ok, true);
+  assert.deepEqual(f.state.created, [{}]);
   await assert.rejects(
     f.native.call(
       f.peer,
@@ -108,4 +109,105 @@ test('session create accepts only the member fixed workspace and never a cwd', a
       f.native.call(f.peer, request(endpoint, { request: {} }), signal),
       (error) => error.code === 'shared.revoked',
     );
+});
+
+test('session create may omit workspaceId and may pass a published agentPreset', async () => {
+  const f = fixture([]);
+  const signal = new AbortController().signal;
+  const blank = await f.native.call(
+    f.peer,
+    request('session/create', { request: {} }),
+    signal,
+  );
+  assert.equal(blank.ok, true);
+  assert.deepEqual(f.state.created.at(-1), {});
+  const withPreset = await f.native.call(
+    f.peer,
+    request('session/create', { request: { agentPreset: 'auriga-shared' } }),
+    signal,
+  );
+  assert.equal(withPreset.ok, true);
+  assert.deepEqual(f.state.created.at(-1), { agentPreset: 'auriga-shared' });
+  await assert.rejects(
+    f.native.call(
+      f.peer,
+      request('session/create', { request: { agentPreset: '' } }),
+      signal,
+    ),
+    (error) => error.code === 'common.validation_failed',
+  );
+  await assert.rejects(
+    f.native.call(
+      f.peer,
+      request('session/create', {
+        request: {
+          agentPreset: 'auriga-shared',
+          cwd: memberWorkspace(principal),
+        },
+      }),
+      signal,
+    ),
+    (error) => error.code === 'common.validation_failed',
+  );
+  await assert.rejects(
+    f.native.call(
+      f.peer,
+      request('session/create', {
+        request: { workspaceId: `auriga-member-${principal.memberId}-x` },
+      }),
+      signal,
+    ),
+    (error) => error.code === 'shared.binding_mismatch',
+  );
+});
+
+test('agentPresets list is global and select authorizes the named session', async () => {
+  const authorized = [];
+  const dispatched = [];
+  const f = fixture(['a0000000-0000-4000-8000-000000000001']);
+  f.host.authorize = async (_peer, action, id) => {
+    authorized.push([action, id]);
+  };
+  const native = createNativeBrowser({
+    host: f.host,
+    gateway: {
+      dispatchRpc: async (endpoint, payload) => {
+        dispatched.push([endpoint, payload]);
+        return { ok: true, value: { presets: [{ id: 'auriga-shared' }] } };
+      },
+    },
+    remoteAccess: { invalidate() {} },
+  });
+  const signal = new AbortController().signal;
+  const listed = await native.call(
+    f.peer,
+    request('agentPresets/list', {}),
+    signal,
+  );
+  assert.equal(listed.ok, true);
+  assert.deepEqual(dispatched[0][0], 'agentPresets/list');
+  const selected = await native.call(
+    f.peer,
+    request('agentPresets/select', {
+      agentId: 'a0000000-0000-4000-8000-000000000001',
+      agentPreset: 'auriga-shared',
+    }),
+    signal,
+  );
+  assert.equal(selected.ok, true);
+  assert.deepEqual(authorized.at(-1), [
+    'session/page',
+    'a0000000-0000-4000-8000-000000000001',
+  ]);
+  await assert.rejects(
+    native.call(
+      f.peer,
+      request('agentPresets/select', {
+        agentId: 'a0000000-0000-4000-8000-000000000001',
+        agentPreset: '',
+      }),
+      signal,
+    ),
+    (error) => error.code === 'common.validation_failed',
+  );
 });

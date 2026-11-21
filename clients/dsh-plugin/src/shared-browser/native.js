@@ -126,17 +126,51 @@ export function createNativeBrowser({
       exact(args, ['request']);
       // Native blank-session reuse is optional. It must never select an
       // arbitrary id or cwd; the trusted Host mints and registers the new id.
-      // The only Workspace a member may name is their own fixed one.
-      exact(args.request, ['sessionId', 'workspaceId']);
+      // workspaceId is optional: omitted means the member's fixed Workspace.
+      // agentPreset is optional and must be a published preset id only.
+      exact(args.request, ['sessionId', 'workspaceId', 'agentPreset']);
       if (
         args.request.workspaceId !== undefined &&
         args.request.workspaceId !== fixedWorkspaceId(peer.principal)
       )
         fail('shared.binding_mismatch');
+      if (
+        args.request.agentPreset !== undefined &&
+        (typeof args.request.agentPreset !== 'string' ||
+          !args.request.agentPreset)
+      )
+        fail('common.validation_failed');
       if (args.request.sessionId !== undefined)
         await host.authorize(peer, 'session/page', args.request.sessionId);
       await host.refresh(peer);
-      return { endpoint, create: true, check: () => host.refresh(peer) };
+      const createInput =
+        args.request.agentPreset === undefined
+          ? {}
+          : { agentPreset: args.request.agentPreset };
+      return {
+        endpoint,
+        create: true,
+        createInput,
+        check: () => host.refresh(peer),
+      };
+    }
+    if (!stream && endpoint === 'agentPresets/list') {
+      exact(args, []);
+      return { endpoint, check: () => host.refresh(peer) };
+    }
+    if (!stream && endpoint === 'agentPresets/select') {
+      // Wire: Agent parameter projects to agentId; preset id is agentPreset.
+      exact(args, ['agentId', 'agentPreset']);
+      if (
+        typeof args.agentId !== 'string' ||
+        !args.agentId ||
+        typeof args.agentPreset !== 'string' ||
+        !args.agentPreset
+      )
+        fail('common.validation_failed');
+      const check = () => host.authorize(peer, 'session/page', args.agentId);
+      await check();
+      return { endpoint, payload: envelope.payload, check };
     }
     if (!stream && endpoint === 'aurigaShared/messagingSessions') {
       exact(args, []);
@@ -164,9 +198,17 @@ export function createNativeBrowser({
       signal.throwIfAborted();
       let result;
       if (selected.create) {
-        const binding = await host.create(peer, {});
-        remoteAccess.invalidate(peer.principal);
-        result = { ok: true, value: { sessionId: binding.sessionId } };
+        // Keep the empty-object create path literal for AUTH-K shape review;
+        // only a validated agentPreset may ride createInput.
+        if (Object.keys(selected.createInput).length === 0) {
+          const binding = await host.create(peer, {});
+          remoteAccess.invalidate(peer.principal);
+          result = { ok: true, value: { sessionId: binding.sessionId } };
+        } else {
+          const binding = await host.create(peer, selected.createInput);
+          remoteAccess.invalidate(peer.principal);
+          result = { ok: true, value: { sessionId: binding.sessionId } };
+        }
       } else if (selected.messages) {
         result = { ok: true, value: await host.messagingSessions(peer) };
       } else if (selected.settings) {

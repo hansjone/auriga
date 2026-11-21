@@ -182,6 +182,29 @@ test(
         (entry) => entry.descriptor.name === 'sidebar.panellist',
       ),
     );
+    assert.ok(
+      registrations.some(
+        (entry) =>
+          entry.descriptor.name === 'conversation.hero.workspace' &&
+          entry.descriptor.priority === -1,
+      ),
+      'shared mode must shadow workspace picker',
+    );
+    assert.ok(
+      registrations.some(
+        (entry) =>
+          entry.descriptor.name === 'conversation.input.model' &&
+          entry.descriptor.priority === -1,
+      ),
+      'shared mode must hide model selector',
+    );
+    assert.equal(
+      registrations.some(
+        (entry) => entry.descriptor.name === 'conversation.input.permission',
+      ),
+      false,
+      'permission seat stays native; shared chrome must not replace it',
+    );
     const Main = registrations.find(
       (entry) => entry.descriptor.name === 'main',
     ).component;

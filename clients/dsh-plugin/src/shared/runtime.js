@@ -31,6 +31,7 @@ export const ALLOWED_ACTIONS = Object.freeze([
   'session/control',
   'session/prompt',
   'session/cancel',
+  'agentPresets/select',
   'event:changed',
   'event:api-session/activity',
   'event:api-session/added',
@@ -143,7 +144,16 @@ export function createSharedRuntime({
     return peer;
   }
   async function create(peer, host, input = {}) {
-    if (Object.keys(input).some((k) => k !== 'parentSessionId'))
+    if (
+      Object.keys(input).some(
+        (k) => k !== 'parentSessionId' && k !== 'agentPreset',
+      )
+    )
+      fail('common.validation_failed');
+    if (
+      input.agentPreset !== undefined &&
+      (typeof input.agentPreset !== 'string' || !input.agentPreset)
+    )
       fail('common.validation_failed');
     const p = peers.get(peer);
     if (!p) fail();
@@ -156,7 +166,15 @@ export function createSharedRuntime({
     validate('SessionBinding', b);
     const cwd = memberWorkspace(b);
     // prepare is unpublished. No sessions.enter/agent publication before Register ACK.
-    const prepared = await host.prepare(b.sessionId, { meta: { cwd } });
+    // agentPreset is resolved by the Host publish setup against the live roster.
+    const prepared = await host.prepare(b.sessionId, {
+      meta: {
+        cwd,
+        ...(input.agentPreset === undefined
+          ? {}
+          : { agentPreset: input.agentPreset }),
+      },
+    });
     try {
       const ack = await ports.register(copy(b), input.parentSessionId ?? null);
       validate('SessionBinding', ack);
@@ -286,7 +304,7 @@ export function createSharedRuntime({
         role: {
           name: 'auriga-shared-native-read',
           resource: 'global',
-          actions: ['session/list', 'session/control'],
+          actions: ['session/list', 'session/control', 'agentPresets/list'],
         },
       },
       ...sessions,

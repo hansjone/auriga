@@ -21,7 +21,7 @@ client-ui-renderer client-locale client-shortcuts client-ui-theme client-ui-sett
 client-ui-session client-ui-layout client-resources client-ui-sidebar
 client-ui-sidebar-right client-ui-workspace client-ui-conversation
 client-ui-input-trigger client-ui-chat client-ui-tool client-ui-trajectory
-client-ui-attachment host-frontend-static`
+client-ui-attachment client-ui-agent-preset host-frontend-static`
     .split(/\s+/)
     .map((name) => '@deepseek-ai/dsh-' + name),
 );

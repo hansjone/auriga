@@ -160,6 +160,9 @@
   name: '@deepseek-ai/dsh-client-ui-trajectory'
 - id: ui-attachment
   name: '@deepseek-ai/dsh-client-ui-attachment'
+# Agent preset chip on the new-session hero; selection uses agentPresets/select.
+- id: ui-agent-preset
+  name: '@deepseek-ai/dsh-client-ui-agent-preset'
 - id: frontend-static
   name: '@deepseek-ai/dsh-host-frontend-static'
   config:

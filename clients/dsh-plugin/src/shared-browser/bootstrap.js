@@ -73,6 +73,39 @@ export function installBrowserTransport() {
   // Connection's documented composition input; Gateway uses rpc.open instead
   // of its default owner-cookie WebSocket mux.
   globalThis.__DSH_TRANSPORT__ = { rpc, ownsHost: false };
+  // Shared members have one fixed Workspace: force the sidebar into the flat
+  // session list so "工作区" grouping chrome never appears.
+  try {
+    const key = 'dsh.workspace.view.v5';
+    const raw = globalThis.localStorage?.getItem(key);
+    const view =
+      raw === undefined || raw === null
+        ? {
+            groupBy: 'flat',
+            orderBy: 'updated',
+            groupExpansion: {},
+            sessionOrderByAccount: {},
+            archivedFilter: 'default',
+          }
+        : { ...JSON.parse(raw), groupBy: 'flat' };
+    globalThis.localStorage?.setItem(key, JSON.stringify(view));
+  } catch {
+    // Persistence is best-effort; AutoBind below still opens the fixed Workspace.
+  }
+  // Hide the hero workspace chip and model selector; keep agent preset / permission.
+  try {
+    const style = document.createElement('style');
+    style.setAttribute('data-auriga-shared-chrome', '');
+    style.textContent = `
+button[aria-label="选择工作区"],button[aria-label="Choose workspace"]{display:none!important}
+button[aria-label="添加工作区"],button[aria-label="Add workspace"]{display:none!important}
+[data-row-key^="workspace:"]{display:none!important}
+[data-slot="conversation.input.model"]{display:none!important}
+`;
+    document.documentElement.appendChild(style);
+  } catch {
+    // Style injection is best-effort in non-DOM fixtures.
+  }
   globalThis.__AURIGA_SHARED_BROWSER__ = {
     rpc,
     installMessaging(ctx, React, primitives) {
@@ -241,6 +274,40 @@ export function installBrowserTransport() {
       registrations.push(
         add('main', () =>
           ctx.slots.register({ name: 'main', key: id }, Messages),
+        ),
+      );
+      // Auto-pick the sole fixed Workspace so the hero input is never inert;
+      // the shipped WorkspacePicker is shadowed (priority -1). Shared-only.
+      function AutoBindWorkspace({ open, onPick, useWorkspaces }) {
+        const items = useWorkspaces((state) => state.items);
+        const picked = React.useRef(false);
+        React.useEffect(() => {
+          if (picked.current || items.length === 0) return;
+          picked.current = true;
+          onPick(items[0].workspaceId);
+        }, [items, onPick]);
+        React.useEffect(() => {
+          if (picked.current || !open || items.length === 0) return;
+          picked.current = true;
+          onPick(items[0].workspaceId);
+        }, [open, items, onPick]);
+        return null;
+      }
+      registrations.push(
+        add('conversation.hero.workspace', () =>
+          ctx.slots.register(
+            { name: 'conversation.hero.workspace', priority: -1 },
+            AutoBindWorkspace,
+          ),
+        ),
+      );
+      // Model is fixed to auto by install-side rotate; hide the composer control.
+      registrations.push(
+        add('conversation.input.model', () =>
+          ctx.slots.register(
+            { name: 'conversation.input.model', priority: -1 },
+            () => null,
+          ),
         ),
       );
       ctx.effect(

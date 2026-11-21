@@ -645,10 +645,17 @@ export function createProductionSharedPorts(
           sessionId: value.id,
           meta: value.meta,
           agentOptions: { provider: 'auriga-shared', model: settings().model },
-          setup: async () => {
+          setup: async (agentCtx) => {
             const current = await lookup(value.id);
             same(current, binding);
             await resolve(placementBinding(current), current.platformSessionId);
+            // Only a Host-validated published preset may be mounted; unknown
+            // ids fail here before publication, never via client-chosen cwd.
+            if (
+              value.meta.agentPreset !== undefined &&
+              typeof ctx.agentPresets?.mount === 'function'
+            )
+              await ctx.agentPresets.mount(agentCtx, value.meta.agentPreset);
             return {
               commit() {
                 if (closed || !checkProfile(settings().profile))

@@ -268,7 +268,8 @@ test(
       { cwd: '/' },
       { memberId: b.principal.memberId },
       { sessionId: foreign.sessionId },
-      { agentPreset: 'shell' },
+      { agentPreset: '' },
+      { agentPreset: 'shell', cwd: '/' },
     ])
       await assert.rejects(
         f.browser.call(
