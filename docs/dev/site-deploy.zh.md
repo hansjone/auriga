@@ -175,7 +175,7 @@
   "server": {
     "data": "/srv/auriga/data",
     "install": {
-      "address": "10.0.0.10", "domain": "auriga.example", "proxy": null,
+      "address": "192.0.2.10", "domain": "auriga.example", "proxy": null,
       "desktopPublicKey": null, "desktopPublisherTenant": null, "desktopConfirmFingerprint": null
     },
     "healthTimeout": "10m",

@@ -69,3 +69,12 @@ condition = "AND"
 paths = ['''(^|[/\\])contracts/network/fixtures/auto-renewal-v2-vectors\.json$''']
 regexTarget = "match"
 regexes = ['''^key_spki": "MCowBQYDK2VwAyEAbBrclrVbweIjvxVGo6354YSKpTo7UvCpQN3egoigjck"$''']
+
+# 设计文档首版的配置示例用了 10.0.0.10，已在后续提交改为文档保留地址 192.0.2.10。
+# 历史扫描仍会读到该提交，这里只对这一个提交、这一个文件、private-ipv4 规则放行。
+[[allowlists]]
+description = "site-deploy design example address in its first commit"
+targetRules = ["private-ipv4"]
+condition = "AND"
+commits = ["b723942aaea01f855e99dba26255b3594a54de89"]
+paths = ['''(^|[/\])docs/dev/site-deploy\.zh\.md$''']
