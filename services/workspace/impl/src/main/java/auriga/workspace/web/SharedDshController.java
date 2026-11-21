@@ -92,8 +92,23 @@ public class SharedDshController {
             new DshPlacementOpen(
                 view(new Placement(result.binding(), "ready", 0)),
                 result.ticket(),
-                result.exchangeUrl().toString(),
+                browserExchangeUrl(result.exchangeUrl()),
                 result.expiresAt()));
+  }
+
+  /**
+   * A path-mounted instance shares the portal origin. Return only its path so the
+   * browser resolves it against the origin it actually uses (a proxied domain or the
+   * site IP); subdomain instances keep their absolute HTTPS origin.
+   */
+  static String browserExchangeUrl(java.net.URI url) {
+    String path = url.getRawPath();
+    return path != null
+            && path.matches("/i/[0-9a-f-]{36}/_auriga/placement-ticket")
+            && url.getRawQuery() == null
+            && url.getRawFragment() == null
+        ? path
+        : url.toString();
   }
 
   @GetMapping("/me/placement")

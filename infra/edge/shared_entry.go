@@ -149,7 +149,9 @@ func (g *Gateway) serveShared(w http.ResponseWriter, r *http.Request, id, path, 
 			o := g.Cfg.Access.PortalOrigin()
 			portal = o.Scheme + "://" + originAuthority(o)
 		}
-		if origin := r.Header.Get("Origin"); origin != "" && origin != target.Origin {
+		// A path-mode instance shares the portal origin, including the public alias
+		// verified by the trusted link proxy (for example a domain in front of an IP site).
+		if origin := r.Header.Get("Origin"); origin != "" && origin != target.Origin && !g.trustedPathAliasOrigin(r, target) {
 			if len(r.Header.Values("Origin")) != 1 || origin != portal {
 				sharedError(w, r, errors.New("shared.binding_mismatch"))
 				return true

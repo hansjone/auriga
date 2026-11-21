@@ -1003,12 +1003,21 @@ func (g *Gateway) checkUpgradeOriginAPI(r *http.Request, audience string) error 
 	return errString("upgrade Origin not allowed")
 }
 
+// trustedPathAliasOrigin accepts the single Origin equal to the public alias
+// that linkOrigin already verified through the trusted proxy, only for
+// path-mounted instances which share the portal origin.
+func (g *Gateway) trustedPathAliasOrigin(r *http.Request, target InstanceTarget) bool {
+	alias, _ := r.Context().Value(linkOriginKey{}).(string)
+	values := r.Header.Values("Origin")
+	return alias != "" && target.Mount != "" && target.Mount != "/" && len(values) == 1 && values[0] == alias
+}
+
 func (g *Gateway) checkUpgradeOriginInstance(r *http.Request, instanceID string) error {
 	if !isUpgradeRequest(r) {
 		return nil
 	}
 	if entry, ok := r.Context().Value(accessEntryKey{}).(accessEntry); ok {
-		if strictOrigin(r, entry) {
+		if strictOrigin(r, entry) || g.trustedPathAliasOrigin(r, g.instanceTarget(r, instanceID)) {
 			return nil
 		}
 		return errString("upgrade Origin not allowed")
