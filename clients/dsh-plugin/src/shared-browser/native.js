@@ -1,6 +1,30 @@
 // @ts-nocheck
 import { fail } from '../shared/protocol.js';
+import { setTimeout as delay } from 'node:timers/promises';
 import { memberWorkspace } from '../shared/member-files.js';
+
+// A shared member has exactly one fixed Workspace: their own member directory.
+// It is synthesized here; native Workspace create/rename/delete stay denied.
+function fixedWorkspaceId(principal) {
+  return `auriga-member-${principal.memberId}`;
+}
+const fixedCreatedAt = new Date().toISOString();
+function fixedWorkspaceState(principal, sessionIds) {
+  return {
+    items: [
+      {
+        workspaceId: fixedWorkspaceId(principal),
+        path: memberWorkspace(principal),
+        title: '我的目录',
+        sessionIds: [...sessionIds],
+        createdAt: fixedCreatedAt,
+        updatedAt: fixedCreatedAt,
+      },
+    ],
+    archivedSessionIds: [],
+    pinnedSessionIds: [],
+  };
+}
 
 const unary = new Map([
   ['session/page', 'session/page'],
@@ -33,7 +57,12 @@ function exact(value, keys) {
 
 /** The transport is finite. The native Gateway remains responsible for codecs,
  * resource decisions, parameter validation, streaming and actual execution. */
-export function createNativeBrowser({ host, gateway, remoteAccess }) {
+export function createNativeBrowser({
+  host,
+  gateway,
+  remoteAccess,
+  workspaceRecheckMs = 5000,
+}) {
   async function prepare(peer, envelope, stream) {
     exact(envelope, ['channel', 'endpoint', 'payload']);
     if (envelope.channel !== '/api' || typeof envelope.endpoint !== 'string')
@@ -77,11 +106,33 @@ export function createNativeBrowser({ host, gateway, remoteAccess }) {
       await check();
       return { endpoint, payload: envelope.payload, check };
     }
+    if (!stream && endpoint === 'workspace/initializeDefault') {
+      exact(args, []);
+      return {
+        endpoint,
+        workspaceDefault: true,
+        check: () => host.refresh(peer),
+      };
+    }
+    if (stream && endpoint === 'workspace/follow') {
+      exact(args, []);
+      return {
+        endpoint,
+        workspaceFollow: true,
+        check: () => host.refresh(peer),
+      };
+    }
     if (!stream && endpoint === 'session/create') {
       exact(args, ['request']);
       // Native blank-session reuse is optional. It must never select an
       // arbitrary id or cwd; the trusted Host mints and registers the new id.
-      exact(args.request, ['sessionId']);
+      // The only Workspace a member may name is their own fixed one.
+      exact(args.request, ['sessionId', 'workspaceId']);
+      if (
+        args.request.workspaceId !== undefined &&
+        args.request.workspaceId !== fixedWorkspaceId(peer.principal)
+      )
+        fail('shared.binding_mismatch');
       if (args.request.sessionId !== undefined)
         await host.authorize(peer, 'session/page', args.request.sessionId);
       await host.refresh(peer);
@@ -123,6 +174,12 @@ export function createNativeBrowser({ host, gateway, remoteAccess }) {
           ok: true,
           value: await host.messagingSettings(peer, selected.settings),
         };
+      } else if (selected.workspaceDefault) {
+        const ids = await host.refresh(peer);
+        result = {
+          ok: true,
+          value: fixedWorkspaceState(peer.principal, ids).items[0],
+        };
       } else if (selected.endpoint === 'session/canOpenWorkspacePath') {
         // A shared remote process has no user's desktop to open a path in.
         result = { ok: true, value: false };
@@ -140,6 +197,27 @@ export function createNativeBrowser({ host, gateway, remoteAccess }) {
     },
     async open(peer, envelope, signal) {
       const selected = await prepare(peer, envelope, true);
+      if (selected.workspaceFollow) {
+        async function* fixed() {
+          let last = await host.refresh(peer);
+          yield {
+            type: 'baseline',
+            value: fixedWorkspaceState(peer.principal, last),
+          };
+          while (!signal?.aborted) {
+            await delay(workspaceRecheckMs, undefined, { signal });
+            const ids = await host.refresh(peer);
+            if (ids.join(',') !== last.join(',')) {
+              last = ids;
+              yield {
+                type: 'replace',
+                value: fixedWorkspaceState(peer.principal, ids),
+              };
+            }
+          }
+        }
+        return { source: fixed(), check: selected.check };
+      }
       const source = await gateway.wireStream.open(
         selected.endpoint,
         selected.payload,

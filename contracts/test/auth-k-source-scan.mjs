@@ -244,9 +244,12 @@ function checkSharedBrowserCarrier(files) {
   // Supplement the semantic checks with the reviewed c498b824 dispatcher
   // shape. Adding a new branch requires an explicit guard review; changing
   // this fingerprint alone never permits a different URL/header/transport.
+  // 2026-11-21 review: adds only the synthesized fixed member Workspace
+  // (workspace/initializeDefault, workspace/follow) and restricts
+  // session/create workspaceId to that Workspace; no URL/header/transport.
   if (
     createHash('sha256').update(native).digest('hex') !==
-    '1ac896aa6a781fb0d9e0ebacd9604ec65d7c7a70f9389d239d2c85f0adcc64fd'
+    'b87fe1ee402ccd1bd226b6ad16698609d7944807697dbf1f46f500326106c86f'
   )
     reject();
   return true;
