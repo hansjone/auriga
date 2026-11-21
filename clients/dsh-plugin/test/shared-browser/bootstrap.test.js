@@ -21,6 +21,17 @@ function page(fetcher) {
   return dom;
 }
 
+test('shared bootstrap shadows hero.agentPreset and lists via agentPresets RPC', () => {
+  assert.match(
+    browserBootstrap,
+    /conversation\.hero\.agentPreset[\s\S]*priority:\s*-1/,
+  );
+  assert.match(browserBootstrap, /agentPresets\/list/);
+  assert.match(browserBootstrap, /agentPresets\/select/);
+  assert.match(browserBootstrap, /data-auriga-shared-preset/);
+  assert.doesNotMatch(browserBootstrap, /ownsHost:\s*true/);
+});
+
 test('native composition uses same-origin trusted POST, decodes split stream frames and cancels reader', async () => {
   const seen = [];
   let cancelled = false;
@@ -117,8 +128,28 @@ test(
   async (t) => {
     const require = createRequire(join(root, 'package.json'));
     const React = require('react');
+    const calls = [];
+    const presetCalls = [];
+    let enabled = false;
     const dom = page(async (_url, options) => {
       const envelope = JSON.parse(options.body);
+      if (envelope.endpoint === 'agentPresets/list') {
+        presetCalls.push(envelope.endpoint);
+        return Response.json({
+          ok: true,
+          value: {
+            presets: [
+              { id: 'auriga-shared', isDefault: true, name: '共享' },
+              { id: 'ptc', isDefault: false, name: 'PTC' },
+              { id: 'minimal', isDefault: false, name: '极简' },
+            ],
+          },
+        });
+      }
+      if (envelope.endpoint === 'agentPresets/select') {
+        presetCalls.push(envelope.endpoint);
+        return Response.json({ ok: true, value: {} });
+      }
       if (envelope.endpoint === 'aurigaShared/messagingSessions')
         return Response.json({
           ok: true,
@@ -139,8 +170,6 @@ test(
         },
       });
     });
-    const calls = [];
-    let enabled = false;
     const before = {
       window: globalThis.window,
       document: globalThis.document,
@@ -206,6 +235,37 @@ test(
       ),
       'shared mode must hide permission seat (shell banned)',
     );
+    assert.ok(
+      registrations.some(
+        (entry) =>
+          entry.descriptor.name === 'conversation.hero.agentPreset' &&
+          entry.descriptor.priority === -1,
+      ),
+      'shared mode must mount hero preset seat (settings controller banned)',
+    );
+    const Preset = registrations.find(
+      (entry) => entry.descriptor.name === 'conversation.hero.agentPreset',
+    ).component;
+    const presetHost = dom.window.document.createElement('div');
+    dom.window.document.body.appendChild(presetHost);
+    const presetRoot = createRoot(presetHost);
+    await act(async () => {
+      presetRoot.render(React.createElement(Preset, {}));
+    });
+    assert.deepEqual(presetCalls, ['agentPresets/list']);
+    const select = presetHost.querySelector(
+      '[data-auriga-shared-preset] select',
+    );
+    assert.ok(select, 'preset seat must render from live list');
+    assert.equal(select.options.length, 3);
+    assert.equal(
+      [...select.options].map((o) => o.value).join(','),
+      'auriga-shared,ptc,minimal',
+    );
+    await act(async () => {
+      presetRoot.unmount();
+    });
+    presetHost.remove();
     const Main = registrations.find(
       (entry) => entry.descriptor.name === 'main',
     ).component;

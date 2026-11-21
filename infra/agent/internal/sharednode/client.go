@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"time"
 
 	nodev1 "github.com/hansjone/auriga/infra/gen/auriga/node/v1"
@@ -39,11 +40,24 @@ type Settings struct {
 	SharedModel      *Endpoint `json:"sharedModel,omitempty"`
 	SharedMessages   *Endpoint `json:"sharedMessages,omitempty"`
 }
+
+// Same-generation Resolve reuse (plugin AUTHORITY_REUSE_MS). Watch ticks once
+// per second; ≤1s coalesce cuts ResolveSharedDsh without delaying revoke.
+const resolveReuse = time.Second
+
+type resolveHit struct {
+	at       time.Time
+	response *workspacev1.ResolveSharedDshResponse
+}
+
 type Client struct {
 	Settings       Settings
 	Workspace, IAM *grpc.ClientConn
 	Model          *http.Client
 	Messages       *http.Client
+
+	resolveMu    sync.Mutex
+	resolveCache map[string]resolveHit
 }
 
 func roots(path string) (*x509.CertPool, error) {
@@ -303,13 +317,43 @@ func (c *Client) Check(ctx context.Context, b map[string]any, session string) er
 	if decode(raw, expected) != nil || expected.TenantId != c.Settings.TenantID {
 		return errors.New("shared.binding_mismatch")
 	}
+	key := expected.TenantId + "\x00" + expected.MemberId + "\x00" + expected.PlacementId + "\x00" + session
+	now := time.Now()
+	c.resolveMu.Lock()
+	if c.resolveCache == nil {
+		c.resolveCache = map[string]resolveHit{}
+	}
+	if hit, ok := c.resolveCache[key]; ok && now.Sub(hit.at) <= resolveReuse {
+		out := hit.response
+		c.resolveMu.Unlock()
+		if out == nil || out.State != "ready" || out.AuthGeneration < 1 || !proto.Equal(expected, out.Binding) {
+			return errors.New("shared.revoked")
+		}
+		return nil
+	}
+	c.resolveMu.Unlock()
 	out := new(workspacev1.ResolveSharedDshResponse)
 	if err := c.call(ctx, false, "ResolveSharedDsh", &workspacev1.ResolveSharedDshRequest{TenantId: expected.TenantId, MemberId: expected.MemberId, PlacementId: expected.PlacementId, PlatformSessionId: session}, out); err != nil {
+		c.resolveMu.Lock()
+		delete(c.resolveCache, key)
+		c.resolveMu.Unlock()
 		return errors.New("common.unavailable")
 	}
 	if out.State != "ready" || out.AuthGeneration < 1 || !proto.Equal(expected, out.Binding) {
+		c.resolveMu.Lock()
+		delete(c.resolveCache, key)
+		c.resolveMu.Unlock()
 		return errors.New("shared.revoked")
 	}
+	c.resolveMu.Lock()
+	stored := time.Now()
+	for k, hit := range c.resolveCache {
+		if stored.Sub(hit.at) > resolveReuse {
+			delete(c.resolveCache, k)
+		}
+	}
+	c.resolveCache[key] = resolveHit{at: stored, response: proto.Clone(out).(*workspacev1.ResolveSharedDshResponse)}
+	c.resolveMu.Unlock()
 	return nil
 }
 

@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"sort"
 	"strings"
@@ -76,15 +77,21 @@ func (r *Relay) model(ctx context.Context, w http.ResponseWriter, raw []byte) er
 		return http.NewResponseController(w).Flush()
 	}
 	state := newResponseState(fmt.Sprint(body["model"]), emit)
+	stage := "init"
 	accept := func(data string) error {
 		idle.Reset(30 * time.Second)
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
 		if _, e := r.capability(ctx, in.Capability); e != nil {
+			stage = "capability"
 			return e
 		}
-		return state.accept([]byte(data))
+		if e := state.accept([]byte(data)); e != nil {
+			stage = modelAcceptStage(e)
+			return e
+		}
+		return nil
 	}
 	activity := &streamActivity{reader: response.Body, timer: idle}
 	if format == "application/json" {
@@ -93,19 +100,35 @@ func (r *Relay) model(ctx context.Context, w http.ResponseWriter, raw []byte) er
 		if e == nil && len(completion) <= maximum {
 			var chunk []byte
 			chunk, e = completionChunk(completion)
-			if e == nil {
+			if e != nil {
+				stage = "invalid_completion"
+			} else {
 				e = accept(string(chunk))
 			}
 		} else if e == nil {
+			stage = "oversize_completion"
 			e = errors.New("oversize completion")
+		} else {
+			stage = "completion_read"
 		}
 	} else {
 		e = readSSE(activity, accept)
+		if e != nil && stage == "init" {
+			if errors.Is(e, io.ErrUnexpectedEOF) {
+				stage = "missing_done"
+			} else {
+				stage = "sse_read"
+			}
+		}
 	}
 	if e == nil {
 		e = state.complete()
+		if e != nil {
+			stage = "incomplete_stream"
+		}
 	}
 	if e != nil && callerContext.Err() == nil {
+		slog.WarnContext(callerContext, "shared model stream failed", "stage", stage)
 		_ = emit(map[string]any{"type": "finish", "reason": map[string]any{"kind": "error", "failure": map[string]string{"code": "SERVER", "message": "Shared model stream unavailable"}}})
 	}
 	return nil
@@ -126,6 +149,14 @@ func completionChunk(raw []byte) ([]byte, error) {
 	if json.Unmarshal(choices[0]["message"], &message) != nil || string(message["role"]) != `"assistant"` || len(choices[0]["finish_reason"]) == 0 || string(choices[0]["finish_reason"]) == "null" {
 		return nil, errors.New("incomplete completion")
 	}
+	// Reasoning models may send null content with reasoning_content. Drop
+	// reasoning parts (DSH public Response state has no reasoning block) and
+	// keep a string/empty content so the stream state machine stays valid.
+	if content, ok := message["content"]; ok && (len(content) == 0 || string(content) == "null") {
+		message["content"] = json.RawMessage(`""`)
+	}
+	delete(message, "reasoning_content")
+	delete(message, "reasoning")
 	if toolsRaw, ok := message["tool_calls"]; ok {
 		var tools []map[string]json.RawMessage
 		if json.Unmarshal(toolsRaw, &tools) != nil || len(tools) > 128 {
@@ -341,6 +372,24 @@ type responseState struct {
 func newResponseState(model string, emit func(any) error) *responseState {
 	return &responseState{model: model, textIndex: -1, tools: map[int]*responseTool{}, emit: emit}
 }
+
+var (
+	errInvalidDelta  = errors.New("invalid_delta")
+	errUsageMismatch = errors.New("usage_mismatch")
+	errInvalidStream = errors.New("invalid completion stream")
+)
+
+func modelAcceptStage(err error) string {
+	switch {
+	case errors.Is(err, errUsageMismatch):
+		return "usage_mismatch"
+	case errors.Is(err, errInvalidDelta):
+		return "invalid_delta"
+	default:
+		return "invalid_stream"
+	}
+}
+
 func (s *responseState) accept(raw []byte) error {
 	var event struct {
 		ID      string `json:"id"`
@@ -349,9 +398,11 @@ func (s *responseState) accept(raw []byte) error {
 		Choices []struct {
 			Index int `json:"index"`
 			Delta struct {
-				Role    string `json:"role"`
-				Content string `json:"content"`
-				Tools   []struct {
+				Role             string          `json:"role"`
+				Content          json.RawMessage `json:"content"`
+				ReasoningContent json.RawMessage `json:"reasoning_content"`
+				Reasoning        json.RawMessage `json:"reasoning"`
+				Tools            []struct {
 					Index    int    `json:"index"`
 					ID       string `json:"id"`
 					Type     string `json:"type"`
@@ -364,21 +415,30 @@ func (s *responseState) accept(raw []byte) error {
 			Finish *string `json:"finish_reason"`
 		} `json:"choices"`
 		Usage *struct {
-			Input  int64 `json:"prompt_tokens"`
-			Output int64 `json:"completion_tokens"`
-			Total  int64 `json:"total_tokens"`
+			Input             int64 `json:"prompt_tokens"`
+			Output            int64 `json:"completion_tokens"`
+			Total             int64 `json:"total_tokens"`
+			CompletionDetails *struct {
+				Reasoning *int64 `json:"reasoning_tokens"`
+			} `json:"completion_tokens_details"`
 		} `json:"usage"`
 	}
-	fail := errors.New("invalid completion stream")
 	if json.Unmarshal(raw, &event) != nil || event.Object != "chat.completion.chunk" || event.Model != s.model || event.ID == "" || s.id != "" && s.id != event.ID || len(event.Choices) > 1 {
-		return fail
+		return errInvalidStream
 	}
 	s.id = event.ID
 	for _, c := range event.Choices {
 		if c.Index != 0 || s.finish != "" || c.Delta.Role != "" && c.Delta.Role != "assistant" {
-			return fail
+			return errInvalidDelta
 		}
-		if c.Delta.Content != "" {
+		// Safely discard reasoning parts; DSH Response has no reasoning block.
+		_ = c.Delta.ReasoningContent
+		_ = c.Delta.Reasoning
+		text, err := deltaText(c.Delta.Content)
+		if err != nil {
+			return errInvalidDelta
+		}
+		if text != "" {
 			if s.textIndex < 0 {
 				s.textIndex = s.next
 				s.next++
@@ -386,22 +446,22 @@ func (s *responseState) accept(raw []byte) error {
 					return e
 				}
 			}
-			s.text += c.Delta.Content
+			s.text += text
 			if len(s.text) > maximum {
-				return fail
+				return errInvalidDelta
 			}
-			if e := s.emit(map[string]any{"type": "text-delta", "index": s.textIndex, "text": c.Delta.Content}); e != nil {
+			if e := s.emit(map[string]any{"type": "text-delta", "index": s.textIndex, "text": text}); e != nil {
 				return e
 			}
 		}
 		for _, call := range c.Delta.Tools {
 			if call.Index < 0 || call.Index >= 128 || call.Type != "" && call.Type != "function" {
-				return fail
+				return errInvalidDelta
 			}
 			t := s.tools[call.Index]
 			if t == nil {
 				if call.ID == "" {
-					return fail
+					return errInvalidDelta
 				}
 				t = &responseTool{index: s.next, id: call.ID}
 				s.next++
@@ -410,12 +470,12 @@ func (s *responseState) accept(raw []byte) error {
 					return e
 				}
 			} else if call.ID != "" && call.ID != t.id {
-				return fail
+				return errInvalidDelta
 			}
 			t.name += call.Function.Name
 			t.args += call.Function.Arguments
 			if len(t.name) > 64 || len(t.args) > 262144 {
-				return fail
+				return errInvalidDelta
 			}
 			chunk := map[string]any{"type": "tool-call-delta", "index": t.index, "id": t.id, "argumentsDelta": call.Function.Arguments}
 			if call.Function.Name != "" {
@@ -427,19 +487,41 @@ func (s *responseState) accept(raw []byte) error {
 		}
 		if c.Finish != nil {
 			if !has([]string{"stop", "length", "tool_calls", "content_filter"}, *c.Finish) {
-				return fail
+				return errInvalidDelta
 			}
 			s.finish = *c.Finish
 		}
 	}
 	if event.Usage != nil {
 		u := event.Usage
-		if s.finish == "" || s.usage != nil || u.Input < 0 || u.Output < 0 || u.Total < 0 || u.Input > 9007199254740991-u.Output || u.Input+u.Output != u.Total {
-			return fail
+		if s.finish == "" || s.usage != nil || u.Input < 0 || u.Output < 0 || u.Total < 0 || u.Input > 9007199254740991 || u.Output > 9007199254740991 || u.Total > 9007199254740991 {
+			return errUsageMismatch
 		}
-		s.usage = map[string]any{"inputTokens": u.Input, "outputTokens": u.Output, "totalTokens": u.Total}
+		input, output, total := u.Input, u.Output, u.Total
+		if input+output != total {
+			var reasoning int64
+			if u.CompletionDetails != nil && u.CompletionDetails.Reasoning != nil {
+				reasoning = *u.CompletionDetails.Reasoning
+			}
+			if reasoning < 0 || input > 9007199254740991-output-reasoning || input+output+reasoning != total {
+				return errUsageMismatch
+			}
+			output += reasoning
+		}
+		s.usage = map[string]any{"inputTokens": input, "outputTokens": output, "totalTokens": total}
 	}
 	return nil
+}
+
+func deltaText(raw json.RawMessage) (string, error) {
+	if len(raw) == 0 || string(raw) == "null" {
+		return "", nil
+	}
+	var text string
+	if json.Unmarshal(raw, &text) != nil {
+		return "", errInvalidDelta
+	}
+	return text, nil
 }
 func (s *responseState) complete() error {
 	if s.finish == "" || (s.finish != "content_filter" && (s.finish == "tool_calls") != (len(s.tools) > 0)) {

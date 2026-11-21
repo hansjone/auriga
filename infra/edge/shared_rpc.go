@@ -3,12 +3,17 @@ package main
 import (
 	"context"
 	"errors"
+	"sync"
 	"time"
 
 	nodev1 "github.com/hansjone/auriga/infra/gen/auriga/node/v1"
 	workspacev1 "github.com/hansjone/auriga/infra/gen/auriga/workspace/v1"
 	"google.golang.org/protobuf/proto"
 )
+
+// Same-generation Resolve reuse window. Matches plugin AUTHORITY_REUSE_MS:
+// Watch ticks every second; coalescing ≤1s cuts RPC without delaying revoke.
+const sharedResolveReuse = time.Second
 
 // SharedDshConfig is an explicit installation adapter. No browser can choose its
 // endpoint, credentials, trust roots, signing keys, or replay ledger.
@@ -26,6 +31,14 @@ type sharedWorkspaceAuthority struct {
 	client workspacev1.SharedDshServiceClient
 	routes RouteStore
 	tenant string
+
+	resolveMu    sync.Mutex
+	resolveCache map[string]sharedResolveHit
+}
+
+type sharedResolveHit struct {
+	at       time.Time
+	response *workspacev1.ResolveSharedDshResponse
 }
 
 func (a *sharedWorkspaceAuthority) IsShared(ctx context.Context, id string) (bool, error) {
@@ -78,11 +91,30 @@ func sharedProtoBinding(binding map[string]any) (*nodev1.SharedDshBinding, error
 	}, nil
 }
 
+func sharedResolveKey(expected *nodev1.SharedDshBinding, session string) string {
+	return expected.TenantId + "\x00" + expected.MemberId + "\x00" + expected.PlacementId + "\x00" + session
+}
+
 func (a *sharedWorkspaceAuthority) Check(ctx context.Context, binding map[string]any, session string) error {
 	expected, err := sharedProtoBinding(binding)
 	if err != nil || expected.TenantId != a.tenant || !sharedUUID.MatchString(session) {
 		return errors.New("shared.binding_mismatch")
 	}
+	key := sharedResolveKey(expected, session)
+	now := time.Now()
+	a.resolveMu.Lock()
+	if a.resolveCache == nil {
+		a.resolveCache = map[string]sharedResolveHit{}
+	}
+	if hit, ok := a.resolveCache[key]; ok && now.Sub(hit.at) <= sharedResolveReuse {
+		result := hit.response
+		a.resolveMu.Unlock()
+		if result == nil || result.State != "ready" || result.AuthGeneration < 1 || !proto.Equal(result.Binding, expected) {
+			return errors.New("shared.revoked")
+		}
+		return nil
+	}
+	a.resolveMu.Unlock()
 	ctx, cancel, err := a.rpc.sessionContext(ctx, expected.TenantId)
 	if err != nil {
 		return errors.New("common.unavailable")
@@ -93,11 +125,26 @@ func (a *sharedWorkspaceAuthority) Check(ctx context.Context, binding map[string
 		PlacementId: expected.PlacementId, PlatformSessionId: session,
 	})
 	if err != nil {
+		a.resolveMu.Lock()
+		delete(a.resolveCache, key)
+		a.resolveMu.Unlock()
 		return errors.New("common.unavailable")
 	}
 	if result == nil || result.State != "ready" || result.AuthGeneration < 1 || !proto.Equal(result.Binding, expected) {
+		a.resolveMu.Lock()
+		delete(a.resolveCache, key)
+		a.resolveMu.Unlock()
 		return errors.New("shared.revoked")
 	}
+	a.resolveMu.Lock()
+	stored := time.Now()
+	for k, hit := range a.resolveCache {
+		if stored.Sub(hit.at) > sharedResolveReuse {
+			delete(a.resolveCache, k)
+		}
+	}
+	a.resolveCache[key] = sharedResolveHit{at: stored, response: proto.Clone(result).(*workspacev1.ResolveSharedDshResponse)}
+	a.resolveMu.Unlock()
 	return nil
 }
 
