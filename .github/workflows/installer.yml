@@ -154,13 +154,13 @@ jobs:
         working-directory: clients/installer
         shell: pwsh
         run: node scripts/e2e.mjs --old $env:INSTALLER_EXE --sandbox (Join-Path $env:RUNNER_TEMP 'sandbox') --disposable-windows-user true
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: failure()
         with:
           name: desktop-e2e-diagnostics-${{ github.run_attempt }}
           path: ${{ runner.temp }}/sandbox/result.json
           if-no-files-found: ignore
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: github.event_name != 'pull_request'
         with:
           name: desktop-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
