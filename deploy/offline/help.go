@@ -159,6 +159,15 @@ func tryHelp(args []string) (done bool, err error) {
 		err = keygenCommand([]string{"site", "--help"})
 	case "trust":
 		err = trustCommand([]string{"add-site-key", "x", "--help"})
+	case "deps":
+		switch sub {
+		case "status", "fetch":
+			err = depsCommandWith([]string{sub, "--help"}, siteInvocation{}, helpOut)
+		case "import":
+			err = depsCommandWith([]string{"import", "x", "--help"}, siteInvocation{}, helpOut)
+		default:
+			fmt.Fprint(helpOut, depsHelp)
+		}
 	default:
 		return false, nil
 	}
@@ -174,6 +183,20 @@ const changesHelp = `用法：./auriga changes export --out <补丁.tar>
   export  把现场对源码的改动导出为补丁归档（--out 必填，必须在源码目录之外）；
           用 ./auriga changes export --help 查看参数。
   apply   把补丁归档应用到当前源码目录（补丁基线与当前源码版本须匹配）。
+`
+
+const depsHelp = `用法：./auriga deps status [--json] [--source <目录>] [--config <site.json>]
+      ./auriga deps fetch [--accept-new-deps] [--source <目录>] [--config <site.json>]
+      ./auriga deps import <目录或归档> [--trust-fingerprint <指纹> | --trust-state] [--source <目录>] [--config <site.json>]
+站点依赖缓存（需要 sudo/root）。配置固定读 /etc/auriga/site.json（root 所有、0600 或 0644）。
+依赖输入按生态（go、web、java、system）的锁摘要整套选取：可写缓存 deps.cache → deps.kits 套件 → 依赖源。
+  status  逐生态比较当前源码的锁摘要，列出命中位置（缓存或哪个套件）或缺失及补法。
+  fetch   按规则准备缺失且允许自动补的生态（只有 Go、Web；Java、系统包、Python、镜像只能 import 或套件）；
+          acceptNewDeps=false 时只打印清单并以退出码 1 结束。
+  import  校验目录或归档（inputs/<生态>/<锁摘要>/、images/<用途>/<digest>/ 布局，或解包后的发行开发套件）后导入缓存并记录来源。
+deps.kits 与 import 都直接接受解包后的发行开发套件（devkit.json 或累积 devkit-catalog.json），按当前锁摘要在各版本里取输入。
+deps.kits 套件目录、import 的源目录或归档、deps.caFile 都必须 root 所有、组和其他用户不可写（同 deps.cache）。
+经 sudo 调用时拒绝 --config 与 --source；root 直接运行时可用。各子命令用 --help 查看参数。
 `
 
 func printTopHelp(w io.Writer) {
@@ -201,6 +224,9 @@ func printTopHelp(w io.Writer) {
   bundle          bundle --build --offline 在现场断网构建离线包；--online 则对变化的语言依赖联网收集（均须 --sign-key）
   keygen site     生成站点构建密钥对（私钥只留在受控开发机）
   trust add-site-key|remove-site-key   在服务器登记或移除站点构建公钥（需要 root）
+
+站点构建（需要 sudo/root，读 /etc/auriga/site.json）
+  deps status|fetch|import   依赖缓存：看缺什么、按配置的依赖源补 Go/Web 依赖、导入手工缓存或套件
 
 维护者
   release         生成发行附件（标签、签名、Windows 与 DSH 输入见 docs/release/maintainer.zh.md）
@@ -345,6 +371,42 @@ func init() {
 		docs: map[string]string{
 			"data":                dataDoc["data"],
 			"confirm-fingerprint": "add-site-key 必填：站点公钥的 SHA256(SPKI DER) 64 位小写指纹，须与 keygen site 输出核对",
+		},
+	}
+	depsConfig := "站点配置路径；只允许 root 直接运行时使用，经 sudo 调用时拒绝（默认读 /etc/auriga/site.json）"
+	depsSource := "源码目录；只允许 root 直接运行时使用，经 sudo 调用时拒绝（默认用配置的 source.dir）"
+	helpSpecs["deps status"] = helpSpec{
+		usage:   "./auriga deps status [--json] [--source <目录>] [--config <site.json>]",
+		summary: "逐生态（go、web、java、system）比较当前源码锁摘要，列出命中位置（缓存或哪个套件）或缺失及可用补法，并列出工具镜像、基础镜像。需要 sudo/root。",
+		docs:    map[string]string{"config": depsConfig, "source": depsSource, "json": "只输出机器可读 JSON"},
+	}
+	helpSpecs["deps fetch"] = helpSpec{
+		usage:   "./auriga deps fetch [--accept-new-deps] [--source <目录>] [--config <site.json>]",
+		summary: "按配置的依赖源准备缺失且允许自动补的生态（Go、Web），在固定 digest 的工具镜像里运行源码中的 <生态>-inputs.sh prepare，写回可写缓存并记录来源与 SHA-256。需要 sudo/root。",
+		notes: []string{
+			"allowPublic=false 时 Go 不回落 proxy.golang.org，校验库只经配置的代理，取不到就失败；Web 拒绝没有 integrity 的 lock 条目。",
+			"Java（Maven）、系统包、Python（operator）、基础镜像与工具镜像只能 deps import 或套件提供。",
+			"acceptNewDeps=false（且未加 --accept-new-deps）时只打印新增依赖清单并以退出码 1 结束。deps.caFile 会只读挂进准备容器。",
+		},
+		docs: merge(buildDocs, map[string]string{
+			"config":          depsConfig,
+			"source":          depsSource,
+			"accept-new-deps": "本次允许拉取新增依赖（等同配置 deps.acceptNewDeps=true，仅限可自动补的生态）",
+		}),
+	}
+	helpSpecs["deps import"] = helpSpec{
+		usage:   "./auriga deps import <目录或归档> [--trust-fingerprint <指纹> | --trust-state] [--source <目录>] [--config <site.json>]",
+		summary: "校验目录或 tar 归档后按锁摘要导入可写缓存并记录来源。缓存布局：根 SHA256SUMS（覆盖全部文件，可带 SHA256SUMS.sig 与 release-public.pem）、inputs/<生态>/<锁摘要>/、images/<用途>/<digest>/image.json。也直接接受解包后的发行开发套件（devkit.json 或累积 devkit-catalog.json）。路径必填，放在参数之前。需要 sudo/root。",
+		notes: []string{
+			"导入源（目录或归档文件）必须 root 所有、组和其他用户不可写；U 盘等介质请先复制到这样的目录。",
+			"缓存布局不加 --trust-fingerprint/--trust-state 时按人工导入处理：只校验完整性并打印条目供人工审核。",
+			"发行开发套件必须用 --trust-fingerprint 或 --trust-state 核验发行签名（拒绝未签名与套件自带公钥自证）；按当前源码各生态锁摘要在套件各版本里取输入，写入 inputs/<生态>/<锁摘要>/，并导入最新版本的镜像（带归档与镜像 ID）。",
+		},
+		docs: map[string]string{
+			"config":            depsConfig,
+			"source":            "源码目录（只有导入发行开发套件时用来算锁摘要）；只允许 root 直接运行时使用，经 sudo 调用时拒绝（默认用配置的 source.dir）",
+			"trust-fingerprint": "独立核对过的签名公钥指纹（SHA256:<64 位小写十六进制> 或裸十六进制）；给出时必须签名有效且指纹匹配",
+			"trust-state":       "用 state 已钉定的发行/站点公钥核验签名（需要配置 server.data）；与 --trust-fingerprint 二选一",
 		},
 	}
 	helpSpecs["verify"] = helpSpec{

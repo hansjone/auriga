@@ -44,3 +44,26 @@ sudo ./auriga doctor
 默认 Docker 内部网段沿用配方的 `192.0.2.0/26` 与 `192.0.2.128/26`。冲突时保留错误与已有配置，交部署维护者选择不重叠网段并走原有手工路径。安装器不改宿主路由、DNS或防火墙。
 
 verify/unpack/install 只用包内公钥时打印指纹与“仅完整性，未核验发行身份”并非零退出。缺签名/公钥默认拒绝，只有显式 --allow-unsigned 应急例外会警告并记入安装state、doctor持续FAIL；未知签名者/错误签名不得绕过。服务器固定发行与已登记站点公钥，升级不接受包内公钥替换。站点构建必须签名，keygen site / trust add-site-key 与轮换流程见MAINTAIN.md。
+
+## 站点配置与依赖缓存
+
+统一现场部署（设计见源码 `docs/dev/site-deploy.zh.md`）的第一步提供站点配置和依赖缓存；`deploy`、`rollback` 等命令在后续版本提供。
+
+- **站点配置** 固定读 `/etc/auriga/site.json`，字段按设计 D9，`schemaVersion` 为 1，未知字段、重复键直接报错。文件必须 root 所有、权限 0600 或 0644，祖先目录不可被组或其他用户写。经 sudo 调用时不接受 `--config` 与 `--source`；root 直接运行时可用 `--config` 指向同样满足权限要求的文件。依赖源只允许 `https://` 与 `file://`，不能内嵌凭据，不能带查询、片段，也不能含 `,` 或 `|`（GOPROXY 列表分隔符，多个 Go 源写成数组元素）；只有 `deps.sources.go` 是数组，`npm`、`maven`、`files` 各一个地址；`deps.registry` 只写主机名[:端口]。
+- **依赖缓存** `deps.cache` 必须 root 所有、组和其他用户不可写。布局为 `inputs/<生态>/<锁摘要>/`（生态 go、web、java、system；锁摘要是目录内 `source-locks.sha256` 的 SHA-256）和 `images/<用途>/<digest>/image.json`（可带 `image.tar`）。依赖输入按锁摘要整套选取：可写缓存 → `deps.kits` → 依赖源。
+- **套件** 有两种布局，都直接可用、不需要转换：
+  - 解包后的**发行开发套件**（单版本 `devkit.json`，或累积 `devkit-catalog.json`）。CLI 按当前源码各生态的锁摘要，在套件各版本的 `inputs.tar` 里找 `<生态>/source-locks.sha256` 匹配的输入；system 的锁清单由该版本 `recipes.tar` 里的 `system-inputs.sh` 和版本锁清单记录的 `admin-bootstrap-requirements.txt` 摘要合成。工具镜像、基础镜像取最新版本的镜像记录。
+  - 与缓存相同的布局，根目录另有覆盖全部文件的 `SHA256SUMS` 与 `SHA256SUMS.sig`。
+  - 每项必须恰好带一种独立信任：`trustFingerprint`（独立核对过的发行公钥指纹，`SHA256:<64 位十六进制>`），或 `"trustState": true`（只用已安装站点 state 里钉定的发行/站点公钥验签，需要配置 `server.data`）。两者都没有、或两者都写，配置校验时就拒绝。套件自带的 `release-public.pem` 只是公钥载体，不能自证。
+  - `trustState` 是本 CLI 新增的字段，设计 D9 只写了“或引用 state 已钉定的发行钥”。
+  - 套件目录与 `deps.cache` 同为保护边界：必须 root 所有、组和其他用户不可写，祖先目录同样受信，否则该套件不可用。
+  - 清单文件和用到的数据文件都必须受已验签的 `SHA256SUMS` 覆盖。签名清单、公钥和套件清单只读一次到内存，核验与解析用同一份字节；`inputs.tar`、`recipes.tar` 整档核对摘要后才取锁清单（所以打开发行开发套件会顺序读完各版本的 `inputs.tar`）；`deps fetch` 用套件里的镜像归档时先复制到缓存暂存目录，在副本上核对后再 `docker load`。
+- **导入发行开发套件**：`deps import <套件目录或归档> --trust-fingerprint …`（或 `--trust-state`）。发行开发套件必须带独立信任，不接受人工未签名导入。CLI 按当前源码（`source.dir`，或 root 直接运行时的 `--source`）的锁摘要取出各生态输入，读的同时核对归档摘要，写进 `inputs/<生态>/<锁摘要>/`，再导入最新版本的镜像（`image.tar` 加镜像 ID）。每个条目的 `auriga-origin.json` 记录套件路径、版本和签名指纹。导入源（目录或归档文件）同样必须 root 所有、组和其他用户不可写；U 盘等介质请先复制到这样的目录再导入。
+- **补依赖规则**：只有 Go、Web 能用 `sudo ./auriga deps fetch` 从配置的依赖源自动准备。`allowPublic=false` 时 Go 不回落 `proxy.golang.org`，校验库只经配置的代理，取不到就失败；Web 拒绝没有 `integrity` 的 lock 条目。Java、系统包、Python、基础镜像与工具镜像只能 `sudo ./auriga deps import <目录或归档>` 或套件提供。`acceptNewDeps=false`（且未加 `--accept-new-deps`）时 `deps fetch` 只打印新增依赖清单并以退出码 1 结束。新拉的依赖写回缓存，条目内 `site-dependencies.json` 列出新增项及 SHA-256，`auriga-origin.json` 记录来源。`deps.caFile` 必须 root 所有、组和其他用户不可写，只读挂进准备依赖的容器。
+
+```sh
+sudo ./auriga deps status            # 逐生态列出命中位置（缓存/哪个套件）或缺失及补法；--json 输出机器可读结果
+sudo ./auriga deps fetch             # 按规则准备缺失且允许自动补的生态
+sudo ./auriga deps import /media/auriga-deps.tar --trust-fingerprint SHA256:<64位指纹>
+sudo ./auriga deps import /srv/auriga/kits/auriga-devkit-0.2.0 --trust-state   # 直接导入解包后的发行开发套件
+```
