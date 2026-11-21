@@ -135,7 +135,6 @@ func validatePoolConfig(row poolProfileRow) error {
 		"agent-loop":                {"agents": []any{}, "maxParallelToolCalls": 1},
 		"agent-preset-registry":     {"default": "auriga-shared"},
 		"agent-preset":              {"id": "auriga-shared", "name": "Auriga 共享", "plugins": []any{}},
-		"agent-default-model":       {"provider": "auriga-shared", "model": "gpt-6.1-sol"},
 		"skill-filesystem":          {"providerName": "auriga-shared", "includeDefaultRoots": false, "customSkillDirs": []any{"/run/auriga/skills-active/current"}},
 		"credentials-local":         {"path": "/home/dsh/.host/.dsh/shared-host-credentials.yaml", "watch": false},
 		"client-connection":         {"trustedHosts": []any{}},
@@ -156,6 +155,14 @@ func validatePoolConfig(row poolProfileRow) error {
 		port, ok := row.Config["port"].(int)
 		if !ok || port < 1 || port > 65535 || row.Config["host"] != "127.0.0.1" || len(row.Config) != 2 {
 			return fmt.Errorf("fixed shared listener placeholder and port required")
+		}
+		return nil
+	case "@deepseek-ai/dsh-agent-default-model":
+		// Shared installs may keep the historical gpt-6.1-sol pin or rotate to the
+		// product public model auto via explicit set-profile; both stay provider-fixed.
+		model, _ := row.Config["model"].(string)
+		if row.Config["provider"] != "auriga-shared" || (model != "gpt-6.1-sol" && model != "auto") || len(row.Config) != 2 {
+			return fmt.Errorf("unapproved config for %s", row.Name)
 		}
 		return nil
 	default:

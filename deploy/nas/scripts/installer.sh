@@ -4,7 +4,7 @@ set -eu
 . "$(CDPATH= cd -P -- "$(dirname -- "$0")" && pwd)/lib.sh"
 case "${1:-}" in
   init|render|render-core|render-collab|check|prepare-socket|export-env|activate-collab|runtime-path|runtime-stage|runtime-commit|runtime-rollback|collab-publish|collab-install|collab-status|collab-history-check|collab-history-check-pg|collab-startup-check|collab-path|collab-check|collab-stop|collab-prepare|collab-renew|collab-prepare-recovery|collab-recover-expired|collab-queue-prepare|collab-queue-export|collab-queue-import|collab-recover-pending|collab-pause|collab-resume|materials-stage|materials-commit|materials-rollback|materials-status|materials-check|materials-path|materials-project|materials-project-core) operation=$1 ;;
-  shared-source-check|shared-stage|shared-set-model|shared-commit|shared-project|shared-check|shared-path|shared-status|shared-replay-stage|shared-replay-prepare-path|shared-replay-final-path|shared-replay-provision|shared-replay-verify-final|shared-replay-close|shared-replay-check) operation=$1 ;;
+  shared-source-check|shared-stage|shared-set-model|shared-set-profile|shared-commit|shared-project|shared-check|shared-path|shared-status|shared-replay-stage|shared-replay-prepare-path|shared-replay-final-path|shared-replay-provision|shared-replay-verify-final|shared-replay-close|shared-replay-check) operation=$1 ;;
   *) die 'Usage: sh installer.sh init|render|check|prepare-socket|export-env|activate-collab' ;;
 esac
 upgrade_bundle=
@@ -26,6 +26,9 @@ case "$operation" in
   shared-set-model)
     [ "$#" = 3 ] || die 'shared set-model requires approved base hash and model ID'
     shared_base=$2; shared_model=$3 ;;
+  shared-set-profile)
+    [ "$#" = 4 ] || die 'shared set-profile requires approved base hash, profile file and profile SHA256'
+    shared_base=$2; shared_profile=$3; shared_profile_sha=$4 ;;
   shared-commit) [ "$#" = 2 ] || die 'shared commit requires approved base hash'; shared_base=$2 ;;
   collab-publish|collab-install|collab-recover-expired|collab-queue-import)
     [ "$#" = 2 ] || die 'collab rotation requires an approved directory'
@@ -86,9 +89,11 @@ if [ -n "$upgrade_bundle" ]; then
   validate_input_path "$upgrade_bundle"
   set -- "$@" --mount "type=bind,src=$upgrade_bundle,dst=$upgrade_bundle,readonly"
 fi
-if [ "$operation" = shared-stage ]; then
+if [ "$operation" = shared-stage ] || [ "$operation" = shared-set-profile ]; then
   validate_input_path "$shared_profile"
   set -- "$@" --mount "type=bind,src=$shared_profile,dst=$shared_profile,readonly"
+fi
+if [ "$operation" = shared-stage ]; then
   if [ -n "$shared_dedicated" ]; then
     validate_input_path "$shared_dedicated"
     set -- "$@" --mount "type=bind,src=$shared_dedicated,dst=$shared_dedicated,readonly"

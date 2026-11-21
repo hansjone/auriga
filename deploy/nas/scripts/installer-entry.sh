@@ -19,7 +19,7 @@ case "${1:-}" in
   shared-source-check)
     exec "$(bootstrap_binary)" shared-runtime -base "$AURIGA_DATA_ROOT/config/materials" \
       -out "$AURIGA_DATA_ROOT/config/shared-source" -action check ;;
-  shared-stage|shared-set-model|shared-commit)
+  shared-stage|shared-set-model|shared-set-profile|shared-commit)
     _action=${1#shared-}
     set -- -base "$AURIGA_DATA_ROOT/config/materials" -out "$AURIGA_DATA_ROOT/config/shared-source" \
       -action "$_action" -expected-base-sha256 "${NAS_SHARED_EXPECTED_BASE:?}"
@@ -36,6 +36,9 @@ case "${1:-}" in
     fi
     if [ "$_action" = set-model ]; then
       set -- "$@" -model "${NAS_SHARED_MODEL:?}"
+    fi
+    if [ "$_action" = set-profile ]; then
+      set -- "$@" -profile-file "${NAS_SHARED_PROFILE:?}" -profile-sha256 "${NAS_SHARED_PROFILE_SHA:?}"
     fi
     exec "$(bootstrap_binary)" shared-runtime "$@" ;;
   shared-project|shared-check|shared-path|shared-status)

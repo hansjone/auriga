@@ -260,11 +260,18 @@ func materialsPrivateDirectory(path string) error {
 }
 
 func materialsCreate(path string, raw []byte) error {
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
+	return materialsCreateMode(path, raw, 0600)
+}
+
+func materialsCreateMode(path string, raw []byte, mode os.FileMode) error {
+	if mode&0777 != mode {
+		return fmt.Errorf("materials create mode refused")
+	}
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, mode)
 	if err != nil {
 		return err
 	}
-	if err = f.Chmod(0600); err == nil {
+	if err = f.Chmod(mode); err == nil {
 		_, err = f.Write(raw)
 	}
 	if err == nil {

@@ -11,7 +11,9 @@ import (
 )
 
 const sharedInstallationGeneration = "v-00000000000000000001"
-const sharedModelRotationDir = ".model-rotation"
+const sharedRotationDir = ".rotation"
+const sharedRotationKindModel = "model"
+const sharedRotationKindProfile = "profile"
 const sharedTeamOnlyAdapter = "{}"
 
 func sharedApprovedModelID(model string) error {
@@ -19,6 +21,11 @@ func sharedApprovedModelID(model string) error {
 		return fmt.Errorf("approved public model ID required")
 	}
 	return nil
+}
+
+type sharedRotationMeta struct {
+	Version int    `json:"version"`
+	Kind    string `json:"kind"`
 }
 
 type sharedInstallationReceipt struct {
