@@ -60,7 +60,6 @@ const required = [
   'authorizeCapability',
   'readCredentials',
   'enterpriseOutbound',
-  'model',
 ];
 function keyMap(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value))
@@ -175,6 +174,7 @@ export async function apply(ctx, config) {
       Peer: sdk.Peer,
       sdk,
       options,
+      available: healthy.operations,
       profileValidator: (context, expected) =>
         assertDedicatedProfile(context, expected, resources),
     });

@@ -34,10 +34,6 @@ const required = [
   'authorizeCapability',
   'readCredentials',
   'enterpriseOutbound',
-  'messageContext',
-  'model',
-  'send',
-  'receive',
 ];
 
 function keyMap(value) {
@@ -126,6 +122,7 @@ export async function apply(ctx, config) {
       Peer: sdk.Peer,
       sdk,
       options,
+      available: healthy.operations,
     });
     ctx.provide('aurigaSharedPorts', ports);
     ctx.effect(

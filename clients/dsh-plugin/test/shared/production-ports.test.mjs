@@ -14,7 +14,7 @@ import { openSharedTask } from '../../src/shared/task-context.js';
 import { createEnterpriseAdapter } from '../../src/shared/enterprise.js';
 import { canonical } from '../../src/shared/protocol.js';
 
-function fixture({ profileValidator } = {}) {
+function fixture({ profileValidator, available } = {}) {
   const key = generateKeyPairSync('ed25519');
   const keys = new Map([['test', key.publicKey]]);
   const binding = {
@@ -202,6 +202,7 @@ function fixture({ profileValidator } = {}) {
     Peer,
     options,
     profileValidator,
+    available,
   });
   const runtime = createSharedRuntime({ ...options, ports, now: () => f.now });
   const enterprise = createEnterpriseAdapter({
@@ -211,6 +212,39 @@ function fixture({ profileValidator } = {}) {
   });
   return { ...f, state: f, ctx, ports, runtime, enterprise, listeners };
 }
+
+test('missing optional model and message relays stay local unavailable without blocking core ports', async () => {
+  const core = [
+    'health',
+    'resolve',
+    'register',
+    'lookup',
+    'resourceSnapshot',
+    'beginTask',
+    'issueCapability',
+    'finishTask',
+    'authorizeCapability',
+    'readCredentials',
+    'enterpriseOutbound',
+  ];
+  const f = fixture({ available: core });
+  try {
+    const before = f.events.length;
+    assert.throws(() => f.ports.downstream.model({}), /common\.unavailable/);
+    await assert.rejects(
+      f.ports.downstream.send({ messageId: randomUUID() }),
+      /common\.unavailable/,
+    );
+    assert.deepEqual(f.events.slice(before), []);
+    assert.equal(
+      (await f.ports.lookup(f.binding.sessionId)).tenantId,
+      f.binding.tenantId,
+    );
+    assert.deepEqual(f.events.slice(before), ['lookup']);
+  } finally {
+    await f.ports.close();
+  }
+});
 
 test('public registry configuration attests native tools, fixed skill roots and unloaded controllers', async () => {
   const f = fixture();

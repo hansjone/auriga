@@ -24,6 +24,7 @@ export function createProductionSharedPorts(
     sdk,
     options,
     profileValidator = assertSharedProfile,
+    available,
   },
 ) {
   if (
@@ -51,8 +52,13 @@ export function createProductionSharedPorts(
     }
     return result === true;
   };
+  // Model and message relays are optional node services. DSH stays usable
+  // without them; only the missing capability reports unavailable on use.
+  const offered =
+    available === undefined ? undefined : new Set(Array.from(available));
+  const supported = (operation) => !offered || offered.has(operation);
   const call = (operation, body, signal) => {
-    if (closed) fail('common.unavailable');
+    if (closed || !supported(operation)) fail('common.unavailable');
     return bridge.call(operation, body, signal);
   };
   const messageTrust = createSharedMessageTrust({
@@ -959,9 +965,18 @@ export function createProductionSharedPorts(
         task.tokens.add(result.token);
         return result.token;
       },
-      model: ({ signal, ...body }) => bridge.stream('model', body, signal),
-      send: (request) => message('send', request),
-      receive: (request) => message('receive', request),
+      model: ({ signal, ...body }) => {
+        if (closed || !supported('model')) fail('common.unavailable');
+        return bridge.stream('model', body, signal);
+      },
+      send: async (request) => {
+        if (!supported('send')) fail('common.unavailable');
+        return message('send', request);
+      },
+      receive: async (request) => {
+        if (!supported('receive')) fail('common.unavailable');
+        return message('receive', request);
+      },
     },
     disconnect(revocation) {
       turns.revoke(revocation);
