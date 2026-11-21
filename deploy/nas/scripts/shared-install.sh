@@ -1,17 +1,31 @@
 #!/bin/sh
 # Approved source installation; start.sh owns live replay preparation/startup.
+# Explicit rotations:
+#   --set-model ID --expected-base-sha256 SHA
+#   --set-profile FILE --profile-sha256 SHA --expected-base-sha256 SHA
 set -eu
 . "$(CDPATH= cd -P -- "$(dirname -- "$0")" && pwd)/lib.sh"
 load_stack_env
 _shared_profile=; _shared_profile_sha=; _shared_model=; _shared_base_sha=
 _shared_adapter=; _shared_adapter_sha=; _shared_team=false
 _shared_dedicated=; _shared_dedicated_sha=
+_shared_set_model=
+_shared_set_profile=false
+_usage='Usage: shared-install.sh --profile-file /approved/profile.yml --profile-sha256 SHA --model ID --expected-base-sha256 SHA [--dedicated-profile-file /approved/dedicated.yml --dedicated-profile-sha256 SHA] [--team-only | --adapter-file /approved/adapter.json --adapter-sha256 SHA]
+   or: shared-install.sh --set-model ID --expected-base-sha256 SHA
+   or: shared-install.sh --set-profile /approved/profile.yml --profile-sha256 SHA --expected-base-sha256 SHA'
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --team-only) [ "$_shared_team" = false ] || die 'duplicate team-only'; _shared_team=true; shift ;;
-    --profile-file|--profile-sha256|--dedicated-profile-file|--dedicated-profile-sha256|--model|--expected-base-sha256|--adapter-file|--adapter-sha256)
+    --set-model|--set-profile|--profile-file|--profile-sha256|--dedicated-profile-file|--dedicated-profile-sha256|--model|--expected-base-sha256|--adapter-file|--adapter-sha256)
       [ "$#" -ge 2 ] && [ -n "$2" ] || die 'shared installation flag requires a value'
       case "$1" in
+        --set-model) [ -z "$_shared_set_model" ] || die 'duplicate set-model'; _shared_set_model=$2 ;;
+        --set-profile)
+          [ "$_shared_set_profile" = false ] || die 'duplicate set-profile'
+          [ -z "$_shared_profile" ] || die 'duplicate profile'
+          _shared_set_profile=true
+          _shared_profile=$2 ;;
         --profile-file) [ -z "$_shared_profile" ] || die 'duplicate profile'; _shared_profile=$2 ;;
         --profile-sha256) [ -z "$_shared_profile_sha" ] || die 'duplicate profile hash'; _shared_profile_sha=$2 ;;
         --dedicated-profile-file) [ -z "$_shared_dedicated" ] || die 'duplicate dedicated profile'; _shared_dedicated=$2 ;;
@@ -22,9 +36,46 @@ while [ "$#" -gt 0 ]; do
         --adapter-sha256) [ -z "$_shared_adapter_sha" ] || die 'duplicate adapter hash'; _shared_adapter_sha=$2 ;;
       esac
       shift 2 ;;
-    *) die 'Usage: shared-install.sh --profile-file /approved/profile.yml --profile-sha256 SHA --model ID --expected-base-sha256 SHA [--dedicated-profile-file /approved/dedicated.yml --dedicated-profile-sha256 SHA] [--team-only | --adapter-file /approved/adapter.json --adapter-sha256 SHA]' ;;
+    *) die "$_usage" ;;
   esac
 done
+if [ -n "$_shared_set_model" ] && [ "$_shared_set_profile" = true ]; then
+  die 'set-model and set-profile are mutually exclusive in one invocation; run them sequentially'
+fi
+if [ -n "$_shared_set_model" ]; then
+  [ -n "$_shared_base_sha" ] || die 'set-model requires --expected-base-sha256'
+  [ -z "$_shared_profile$_shared_profile_sha$_shared_model$_shared_adapter$_shared_adapter_sha$_shared_dedicated$_shared_dedicated_sha" ] && [ "$_shared_team" = false ] \
+    || die 'set-model only accepts --set-model and --expected-base-sha256'
+  if [ "${AURIGA_INSTALL_MODE:-host}" = container ]; then
+    sh "$NAS_ROOT/scripts/installer.sh" shared-set-model "$_shared_base_sha" "$_shared_set_model"
+    sh "$NAS_ROOT/scripts/installer.sh" shared-commit "$_shared_base_sha"
+  else
+    "$(bootstrap_binary)" shared-runtime -base "$AURIGA_DATA_ROOT/config/materials" -out "$AURIGA_DATA_ROOT/config/shared-source" \
+      -action set-model -expected-base-sha256 "$_shared_base_sha" -model "$_shared_set_model"
+    "$(bootstrap_binary)" shared-runtime -base "$AURIGA_DATA_ROOT/config/materials" -out "$AURIGA_DATA_ROOT/config/shared-source" \
+      -action commit -expected-base-sha256 "$_shared_base_sha"
+  fi
+  sh "$NAS_ROOT/scripts/render.sh" --core-only
+  info 'shared model committed and role files re-rendered; run start.sh so Agent reloads host.json (clear shared pool only if members still bind the old model)'
+  exit 0
+fi
+if [ "$_shared_set_profile" = true ]; then
+  [ -n "$_shared_profile" ] && [ -n "$_shared_profile_sha" ] && [ -n "$_shared_base_sha" ] || die 'set-profile requires --set-profile FILE --profile-sha256 SHA --expected-base-sha256 SHA'
+  [ -z "$_shared_model$_shared_adapter$_shared_adapter_sha$_shared_dedicated$_shared_dedicated_sha" ] && [ "$_shared_team" = false ] \
+    || die 'set-profile only accepts profile file, profile hash and base approval'
+  if [ "${AURIGA_INSTALL_MODE:-host}" = container ]; then
+    sh "$NAS_ROOT/scripts/installer.sh" shared-set-profile "$_shared_base_sha" "$_shared_profile" "$_shared_profile_sha"
+    sh "$NAS_ROOT/scripts/installer.sh" shared-commit "$_shared_base_sha"
+  else
+    "$(bootstrap_binary)" shared-runtime -base "$AURIGA_DATA_ROOT/config/materials" -out "$AURIGA_DATA_ROOT/config/shared-source" \
+      -action set-profile -expected-base-sha256 "$_shared_base_sha" -profile-file "$_shared_profile" -profile-sha256 "$_shared_profile_sha"
+    "$(bootstrap_binary)" shared-runtime -base "$AURIGA_DATA_ROOT/config/materials" -out "$AURIGA_DATA_ROOT/config/shared-source" \
+      -action commit -expected-base-sha256 "$_shared_base_sha"
+  fi
+  sh "$NAS_ROOT/scripts/render.sh" --core-only
+  info 'shared profile committed and role files re-rendered; run start.sh so Agent reloads the shared profile'
+  exit 0
+fi
 [ -n "$_shared_profile" ] && [ -n "$_shared_profile_sha" ] && [ -n "$_shared_model" ] && [ -n "$_shared_base_sha" ] || die 'complete independently approved profile/model/base inputs required'
 if [ -n "$_shared_dedicated$_shared_dedicated_sha" ]; then
   [ -n "$_shared_dedicated" ] && [ -n "$_shared_dedicated_sha" ] || die 'dedicated profile and independent SHA256 must be supplied together'

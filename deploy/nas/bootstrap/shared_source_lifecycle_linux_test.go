@@ -178,7 +178,7 @@ func testNASSharedSourceVariant(t *testing.T, parent, binary, input string, team
 	run := func(action string, success bool, extra ...string) string {
 		t.Helper()
 		arguments := []string{"shared-runtime", "-action", action, "-base", base, "-out", out}
-		if action == "stage" || action == "commit" || action == "rollback" {
+		if action == "stage" || action == "set-model" || action == "set-profile" || action == "commit" || action == "rollback" {
 			arguments = append(arguments, "-expected-base-sha256", baseSHA)
 		}
 		arguments = append(arguments, extra...)
@@ -344,8 +344,182 @@ func testNASSharedSourceVariant(t *testing.T, parent, binary, input string, team
 		t.Fatal(err)
 	}
 	run("check", true)
+	if !dedicated {
+		testNASSharedExplicitRotations(t, parent, base, out, generation, baseBefore, staged, stageArgs, profile, profileRaw, run)
+	}
 	t.Log("actual sealed bootstrap + signed runtime + enrolled public Node + umask077 stage/resume/commit/check completed without services")
 	testNASSharedRoleAndReplayPreparation(t, data, base, binary, run, runtimeAction)
+}
+
+func testNASSharedExplicitRotations(t *testing.T, parent, base, out, generation, baseBefore, committedSnapshot string, stageArgs []string, profilePath string, profileRaw []byte, run func(string, bool, ...string) string) {
+	t.Helper()
+	secretBefore, err := runtimeReadLeaf(filepath.Join(generation, "platform/agent-secret/installation.secret"), 0600, 1<<20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	adapterBefore, err := runtimeReadLeaf(filepath.Join(generation, "platform/uac-adapter.json"), 0600, 1<<20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	profileBefore, err := runtimeReadLeaf(filepath.Join(generation, "public/profile.yml"), 0600, 2<<20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hostBefore, err := runtimeReadLeaf(filepath.Join(generation, "public/host.json"), 0444, 256<<10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	receiptBefore, err := runtimeReadLeaf(filepath.Join(generation, "installation.receipt"), 0600, 65536)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var oldReceipt sharedInstallationReceipt
+	if json.Unmarshal(receiptBefore, &oldReceipt) != nil || oldReceipt.Model != "gpt-6.1-sol" {
+		t.Fatal("committed receipt model changed before explicit rotation")
+	}
+	// A different but policy-valid profile: the approved alternate default display name.
+	newProfileRaw := bytes.Replace(profileRaw, []byte("name: 共享助手"), []byte("name: Auriga 共享"), 1)
+	if bytes.Equal(newProfileRaw, profileRaw) {
+		t.Fatal("profile fixture did not change")
+	}
+	newProfile := filepath.Join(parent, "approved-profile-auto.yml")
+	if err := os.WriteFile(newProfile, newProfileRaw, 0644); err != nil {
+		t.Fatal(err)
+	}
+	newProfileSHA := sharedSHA(newProfileRaw)
+	invalidProfile := filepath.Join(parent, "approved-profile-invalid.yml")
+	if err := os.WriteFile(invalidProfile, bytes.Replace(profileRaw, []byte("model: auto"), []byte("model: not-approved"), 1), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	run("stage", false, append(append([]string{}, stageArgs[:len(stageArgs)-2]...), "-model", "auto")...) // implicit stage still refused
+	run("set-model", false, "-model", " auto")
+	run("set-model", false, "-model", "auto\n")
+	run("set-model", false, "-model", "")
+	run("set-model", true, "-model", "auto")
+	if !strings.Contains(run("status", true), "state=staged") {
+		t.Fatal("set-model did not leave a staged generation")
+	}
+	run("check", false)
+	run("set-model", true, "-model", "auto") // same-parameter reentry
+	run("set-model", false, "-model", "other-model")
+	run("set-profile", false, "-profile-file", newProfile, "-profile-sha256", newProfileSHA) // overlap refused
+	if kind, err := readSharedRotationKind(out); err != nil || kind != sharedRotationKindModel {
+		t.Fatal("staged set-model must record model rotation kind", err, kind)
+	}
+	hostRaw, err := os.ReadFile(filepath.Join(generation, "public/host.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var host struct {
+		Model string `json:"model"`
+	}
+	if json.Unmarshal(hostRaw, &host) != nil || host.Model != "auto" {
+		t.Fatal("set-model did not re-render host.json model")
+	}
+	receiptRaw, err := runtimeReadLeaf(filepath.Join(generation, "installation.receipt"), 0600, 65536)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var rotated sharedInstallationReceipt
+	if json.Unmarshal(receiptRaw, &rotated) != nil || rotated.Model != "auto" || rotated.Adapter != oldReceipt.Adapter || rotated.Profile != oldReceipt.Profile || rotated.Node != oldReceipt.Node || rotated.CA != oldReceipt.CA || rotated.Tenant != oldReceipt.Tenant || rotated.InitialRuntime != oldReceipt.InitialRuntime || rotated.TeamOnly != oldReceipt.TeamOnly || rotated.DedicatedProfile != oldReceipt.DedicatedProfile || rotated.Files == oldReceipt.Files {
+		t.Fatal("set-model changed non-model receipt fields or left files digest unchanged", rotated)
+	}
+	secretAfter, err := runtimeReadLeaf(filepath.Join(generation, "platform/agent-secret/installation.secret"), 0600, 1<<20)
+	if err != nil || !bytes.Equal(secretAfter, secretBefore) {
+		t.Fatal("set-model rotated installation secret")
+	}
+	adapterAfter, err := runtimeReadLeaf(filepath.Join(generation, "platform/uac-adapter.json"), 0600, 1<<20)
+	if err != nil || !bytes.Equal(adapterAfter, adapterBefore) {
+		t.Fatal("set-model changed adapter bytes")
+	}
+	profileAfter, err := runtimeReadLeaf(filepath.Join(generation, "public/profile.yml"), 0600, 2<<20)
+	if err != nil || !bytes.Equal(profileAfter, profileBefore) {
+		t.Fatal("set-model changed profile bytes")
+	}
+	run("rollback", true)
+	if nasSnapshot(t, generation) != committedSnapshot {
+		t.Fatal("model rotation rollback did not restore the previous committed generation")
+	}
+	if _, err := os.Stat(filepath.Join(out, sharedRotationDir)); !os.IsNotExist(err) {
+		t.Fatal("rollback left rotation evidence")
+	}
+	if !strings.Contains(run("status", true), "state=committed") {
+		t.Fatal("rollback did not restore committed state")
+	}
+	run("check", true)
+	run("set-model", true, "-model", "auto")
+	run("commit", true)
+	run("check", true)
+	if _, err := os.Stat(filepath.Join(out, sharedRotationDir)); !os.IsNotExist(err) {
+		t.Fatal("commit left rotation evidence")
+	}
+	run("set-model", true, "-model", "auto") // committed same-model idempotent
+	run("rollback", false)                   // committed rollback still refused
+	run("stage", false, append(append([]string{}, stageArgs[:len(stageArgs)-2]...), "-model", "gpt-6.1-sol")...)
+
+	modelCommitted := nasSnapshot(t, generation)
+	run("set-profile", false, "-profile-file", newProfile, "-profile-sha256", strings.Repeat("0", 64))
+	run("set-profile", false, "-profile-file", invalidProfile, "-profile-sha256", sharedSHA(mustRead(t, invalidProfile)))
+	run("set-profile", false, "-profile-file", profilePath, "-profile-sha256", newProfileSHA) // bytes/sha mismatch
+	run("set-profile", true, "-profile-file", newProfile, "-profile-sha256", newProfileSHA)
+	if !strings.Contains(run("status", true), "state=staged") {
+		t.Fatal("set-profile did not leave a staged generation")
+	}
+	run("set-profile", true, "-profile-file", newProfile, "-profile-sha256", newProfileSHA)
+	run("set-profile", false, "-profile-file", profilePath, "-profile-sha256", sharedSHA(profileRaw))
+	run("set-model", false, "-model", "other-model") // overlap refused while profile staged
+	if kind, err := readSharedRotationKind(out); err != nil || kind != sharedRotationKindProfile {
+		t.Fatal("staged set-profile must record profile rotation kind", err, kind)
+	}
+	gotProfile, err := runtimeReadLeaf(filepath.Join(generation, "public/profile.yml"), 0600, 2<<20)
+	if err != nil || !bytes.Equal(gotProfile, newProfileRaw) {
+		t.Fatal("set-profile did not install approved profile bytes")
+	}
+	gotHost, err := runtimeReadLeaf(filepath.Join(generation, "public/host.json"), 0444, 256<<10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if json.Unmarshal(gotHost, &host) != nil || host.Model != "auto" {
+		t.Fatal("set-profile must preserve the committed host model")
+	}
+	if bytes.Equal(gotHost, hostBefore) {
+		t.Fatal("expected prior set-model commit to have changed host.json before set-profile")
+	}
+	receiptRaw, err = runtimeReadLeaf(filepath.Join(generation, "installation.receipt"), 0600, 65536)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var profileRotated sharedInstallationReceipt
+	if json.Unmarshal(receiptRaw, &profileRotated) != nil || profileRotated.Profile != newProfileSHA || profileRotated.Model != "auto" || profileRotated.Adapter != oldReceipt.Adapter || profileRotated.Node != oldReceipt.Node || profileRotated.CA != oldReceipt.CA || profileRotated.Tenant != oldReceipt.Tenant || profileRotated.InitialRuntime != oldReceipt.InitialRuntime || profileRotated.TeamOnly != oldReceipt.TeamOnly || profileRotated.DedicatedProfile != oldReceipt.DedicatedProfile || profileRotated.Files == rotated.Files {
+		t.Fatal("set-profile changed non-profile receipt fields or left files digest unchanged", profileRotated)
+	}
+	secretAfter, err = runtimeReadLeaf(filepath.Join(generation, "platform/agent-secret/installation.secret"), 0600, 1<<20)
+	if err != nil || !bytes.Equal(secretAfter, secretBefore) {
+		t.Fatal("set-profile rotated installation secret")
+	}
+	run("rollback", true)
+	if nasSnapshot(t, generation) != modelCommitted {
+		t.Fatal("profile rotation rollback did not restore the previous committed generation")
+	}
+	run("check", true)
+	run("set-profile", true, "-profile-file", newProfile, "-profile-sha256", newProfileSHA)
+	run("commit", true)
+	run("check", true)
+	run("set-profile", true, "-profile-file", newProfile, "-profile-sha256", newProfileSHA) // committed same-profile idempotent
+	run("set-model", true, "-model", "auto")                                                // alternate after profile commit
+	if nasSnapshot(t, base) != baseBefore {
+		t.Fatal("explicit rotations changed sealed base")
+	}
+}
+
+func mustRead(t *testing.T, path string) []byte {
+	t.Helper()
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return raw
 }
 
 func testNASSharedRoleAndReplayPreparation(t *testing.T, data, base, binary string, run func(string, bool, ...string) string, runtimeAction func(string, bool)) {

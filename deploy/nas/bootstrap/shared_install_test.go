@@ -7,6 +7,20 @@ import (
 	"testing"
 )
 
+func TestSharedApprovedModelID(t *testing.T) {
+	if err := sharedApprovedModelID("auto"); err != nil {
+		t.Fatal(err)
+	}
+	if err := sharedApprovedModelID("gpt-6.1-sol"); err != nil {
+		t.Fatal(err)
+	}
+	for _, bad := range []string{"", " leading", "trail ", "a\nb", "a\rb", string(make([]byte, 129))} {
+		if err := sharedApprovedModelID(bad); err == nil {
+			t.Fatalf("invalid model accepted: %q", bad)
+		}
+	}
+}
+
 func TestSharedInstallationReceiptHistoryRejectsBrokenAndCommittedRollback(t *testing.T) {
 	generation := sharedSHA([]byte("synthetic-receipt"))
 	appendEvent := func(records []sharedInstallationRecord, action string) []sharedInstallationRecord {

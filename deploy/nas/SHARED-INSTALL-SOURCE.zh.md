@@ -58,6 +58,47 @@ sh deploy/nas/scripts/start.sh
 
 `render` 重新验证原source/Node/runtime/proofs，创建 `config/shared-runtime/g-<digest>`。Platform只收到本服务签名与agent exporter输入，Edge只收到本服务identity/replay seed，Gateway只收到模型公钥，Agent只收到原完整runtime/profile/公开Host材料及svc:agent JWT只读目录；Host没有安装secret、服务JWT或签名私钥挂载。原Edge/Gateway exporter权限不变。Agent JWT由原IAM受信签发器自动续签并0600原子替换目录内文件。仅共享安装的原tenant-delegates追加既定svc:agent；原edge/gateway保留，无新增issuer或audience。新的RPC/model只发布到NAS loopback19091/18087，平台9091与共享模型18887仍有原mTLS、既定服务主体/Node UUID核验。
 
+## 显式更换共享模型或共享 profile
+
+已 committed 的共享源不能通过再次 `stage` 隐式改 `--model` 或 `--profile-*`（会报 `shared staging approval differs; implicit identity or policy rotation refused`）。正式更换只走显式动作；同一时刻只允许一种轮换，暂存目录为 `.rotation`（含 `rotation.json` 记录 `model` 或 `profile`）。
+
+```sh
+# 更换模型（只重渲染 public/host.json；不改 profile/身份/密钥）
+"$BOOTSTRAP" shared-runtime -action set-model \
+  -base "$DATA/config/materials" -out "$DATA/config/shared-source" \
+  -expected-base-sha256 "$BASE_SHA256" -model auto
+"$BOOTSTRAP" shared-runtime -action commit \
+  -base "$DATA/config/materials" -out "$DATA/config/shared-source" \
+  -expected-base-sha256 "$BASE_SHA256"
+
+# 更换共享 profile（只替换 public/profile.yml；不改 model/身份/密钥/adapter/dedicated）
+"$BOOTSTRAP" shared-runtime -action set-profile \
+  -base "$DATA/config/materials" -out "$DATA/config/shared-source" \
+  -expected-base-sha256 "$BASE_SHA256" \
+  -profile-file "$NEW_PROFILE" -profile-sha256 "$NEW_PROFILE_SHA"
+"$BOOTSTRAP" shared-runtime -action commit \
+  -base "$DATA/config/materials" -out "$DATA/config/shared-source" \
+  -expected-base-sha256 "$BASE_SHA256"
+
+# commit 前可用 rollback 恢复上一 committed 代
+"$BOOTSTRAP" shared-runtime -action rollback \
+  -base "$DATA/config/materials" -out "$DATA/config/shared-source" \
+  -expected-base-sha256 "$BASE_SHA256"
+```
+
+公开脚本（各自一次完成 stage+commit+core render；不要在同一调用里混用）：
+
+```sh
+sh deploy/nas/scripts/shared-install.sh \
+  --set-model auto --expected-base-sha256 "$BASE_SHA256"
+sh deploy/nas/scripts/shared-install.sh \
+  --set-profile "$NEW_PROFILE" --profile-sha256 "$NEW_PROFILE_SHA" \
+  --expected-base-sha256 "$BASE_SHA256"
+sh deploy/nas/scripts/start.sh
+```
+
+一次维护窗口若两者都要做，推荐顺序：先 `set-profile` 新 profile 并 commit，再 `set-model auto` 并 commit，最后 `render`/`start.sh`。新版生产策略不接受旧 profile，`set-profile` 起始时只对即将被替换的旧 profile 免检生产策略（回执、摘要、事件、权限照常校验），而 `set-model` 读当前代时要求 profile 已符合新策略，所以必须先换 profile。二者不能交叠（一种仍 staged 时另一种会拒绝）。同参数重入幂等；不同参数冲突拒绝；profile 须字节与独立 SHA 一致且通过生产 `ValidateSharedProfile`（`agent-default-model` 固定为 `auto`）。commit 与 render 之后必须再跑 `start.sh`；一般无需清共享池。
+
 `start` 先停止公开Edge，沿公开 `shared-replay-prepare.sh` 生成独立临时安装NKey（root0700私有源），启动只有本阶段才含该身份的NATS配置。短命helper只连接固定项目内部网络的 `nats:4222`，没有Docker socket、任意endpoint或通用命令转发。它只可AccountInfo、固定桶INFO/CREATE；已有同名桶必须符合固定subjects、无Sources/Mirror/transform、文件存储、history1、TTL至少12小时、DiscardNew及无限聚合count/bytes，拒绝自动改桶/删桶/清墓碑。安装receipt记实际StreamInfo.Created，之后丢桶/换桶拒绝重建。
 
 预建后强制重建NATS为无安装身份的常驻配置；核固定project/service、旧容器确已停止或移除、新容器运行，再确认临时身份收到明确Authorization拒绝、Edge身份成功读取同一桶，才开启本地readiness gate。超时/断网不能当撤权成功。常驻Edge没有CREATE/UPDATE，W仍只有原四项读取权限，五个旧password用户不加权。失败恢复常驻配置；恢复失败则停固定项目Edge/NATS，保留材料与桶。没有完成此流程时，普通Compose up/restart拒绝且不会回个人池；stop/检查仍可执行。这里只是原部署状态记录，不是新的签名信任或proof。
