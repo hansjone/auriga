@@ -49,11 +49,12 @@ case "$service" in
         (cd "$out/packages" && find . -type f -name '*.apk' -print | LC_ALL=C sort) >"$out/packages.txt"
         ;;
     operator)
+        # operator 的 pip 包改由 python-inputs.sh 准备（第 8 步）；此处保留兼容入口，须 --require-hashes。
         requirements=deploy/nas/test/admin-bootstrap-requirements.txt
         cd "$src"
         sha256sum "$requirements" >"$out/source-locks.sha256"
         python -m pip download --disable-pip-version-check --no-cache-dir --only-binary=:all: \
-            --dest "$out/packages" -r "$requirements"
+            --require-hashes --dest "$out/packages" -r "$requirements"
         (cd "$out/packages" && find . -type f -name '*.whl' -print | LC_ALL=C sort) >"$out/packages.txt"
         ;;
     *) echo "unknown NAS service" >&2; exit 2 ;;

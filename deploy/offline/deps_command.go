@@ -47,8 +47,9 @@ var ensureDepsImage = func(ctx context.Context, img imageHit) (string, error) {
 	return ref, checkOnlineTool(ctx, ref)
 }
 
-// autoFetchRule 是设计 D5 的按生态补依赖规则（第一版）。
-func autoFetchRule(eco string, d *siteDeps) (bool, string) {
+// autoFetchRule 是设计 D5 的按生态补依赖规则（第 8 步后：Java/Python 在锁/哈希就绪时可自动补）。
+// source 是源码根；为空时只按配置源判断（测试用），Java/Python 仍要求调用方另行确认锁/哈希。
+func autoFetchRule(eco string, d *siteDeps, source string) (bool, string) {
 	switch eco {
 	case "go":
 		if len(d.Sources.Go) > 0 || d.AllowPublic {
@@ -61,11 +62,35 @@ func autoFetchRule(eco string, d *siteDeps) (bool, string) {
 		}
 		return false, "未配置 deps.sources.npm 且 allowPublic=false，Web 依赖无处可取"
 	case "java":
-		return false, "Java（Maven）依赖在锁文件 services/maven-deps.sha256 就绪前不能自动补，只能 deps import 并人工审核"
+		if source != "" {
+			ok, err := mavenLockNonEmpty(source)
+			if err != nil {
+				return false, "读取 " + mavenDepsLockRel + " 失败：" + err.Error()
+			}
+			if !ok {
+				return false, "Java（Maven）依赖在锁文件 " + mavenDepsLockRel + " 就绪前不能自动补，只能 deps import 并人工审核"
+			}
+		}
+		if d.Sources.Maven != nil || d.AllowPublic {
+			return true, ""
+		}
+		return false, "未配置 deps.sources.maven 且 allowPublic=false，Java 依赖无处可取"
 	case "python":
-		return false, "Python（operator）依赖在 requirements 改为 --require-hashes 前不能自动补，只能 deps import"
+		if source != "" {
+			ok, err := pythonRequirementsHashed(source)
+			if err != nil {
+				return false, "读取 " + pythonRequirementsRel + " 失败：" + err.Error()
+			}
+			if !ok {
+				return false, "Python（operator）依赖在 requirements 全部钉版本并带 --hash=sha256 前不能自动补，只能 deps import"
+			}
+		}
+		if d.Sources.PyPI != nil || d.AllowPublic {
+			return true, ""
+		}
+		return false, "未配置 deps.sources.pypi 且 allowPublic=false，Python 依赖无处可取"
 	case "system":
-		return false, "系统包与 Python（operator）依赖由基础镜像和固定 digest 决定，只能 deps import 或套件"
+		return false, "系统包由基础镜像和固定 digest 决定，只能 deps import 或套件"
 	}
 	return false, "未知生态 " + eco
 }
@@ -84,6 +109,10 @@ func depsSourceLabel(d *siteDeps, eco string) string {
 		if d.Sources.Maven != nil {
 			return *d.Sources.Maven
 		}
+	case "python":
+		if d.Sources.PyPI != nil {
+			return *d.Sources.PyPI
+		}
 	}
 	if d.AllowPublic {
 		return "公网默认源（allowPublic=true）"
@@ -95,9 +124,10 @@ func depsSourceLabel(d *siteDeps, eco string) string {
 // 并加进 NO_PROXY，保证即使脚本回落（例如 Go 校验库代理不支持时直连
 // sum.golang.org）也取不到，直接失败。
 var depsPublicHosts = map[string][]string{
-	"go":   {"proxy.golang.org", "sum.golang.org"},
-	"web":  {"registry.npmjs.org"},
-	"java": {"repo.maven.apache.org", "repo1.maven.org"},
+	"go":     {"proxy.golang.org", "sum.golang.org"},
+	"web":    {"registry.npmjs.org"},
+	"java":   {"repo.maven.apache.org", "repo1.maven.org"},
+	"python": {"pypi.org", "files.pythonhosted.org"},
 }
 
 const depsCAMount = "/etc/auriga-deps-ca"
@@ -199,6 +229,15 @@ func depsPrepareSettings(d *siteDeps, eco string, host func(string) (string, boo
 				return nil, nil, errors.New("deps.sources.maven " + strings.TrimPrefix(err.Error(), "AURIGA_MAVEN_MIRROR_URL "))
 			}
 			values["AURIGA_MAVEN_MIRROR_URL"] = v
+		}
+	case "python":
+		v, err := single("pypi", d.Sources.PyPI)
+		if err != nil {
+			return nil, nil, err
+		}
+		if v != "" {
+			values["PIP_INDEX_URL"] = v
+			values["AURIGA_PIP_INDEX_URL"] = v
 		}
 	default:
 		return nil, nil, fmt.Errorf("%s 不能自动准备", eco)
@@ -344,7 +383,7 @@ func computeDepsStatus(cfg *siteConfig, cfgPath, source string) (*depsStatusRepo
 	}
 	for _, lock := range locks {
 		st := depsEcoStatus{Ecosystem: lock.Ecosystem, LockDigest: lock.Digest}
-		auto, reason := autoFetchRule(lock.Ecosystem, cfg.Deps)
+		auto, reason := autoFetchRule(lock.Ecosystem, cfg.Deps, source)
 		if auto && lock.Ecosystem == "web" {
 			if err := checkWebIntegrity(source); err != nil {
 				auto, reason = false, err.Error()
@@ -566,6 +605,24 @@ func fetchEcosystem(ctx context.Context, cfg *siteConfig, r *depsResolver, sourc
 			return err
 		}
 	}
+	if eco == "java" {
+		ok, err := mavenLockNonEmpty(source)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			return fmt.Errorf("缺少非空锁文件 %s", mavenDepsLockRel)
+		}
+	}
+	if eco == "python" {
+		ok, err := pythonRequirementsHashed(source)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			return errors.New("requirements 未全部钉版本并带 --hash=sha256")
+		}
+	}
 	lookup, extra, err := depsPrepareSettings(cfg.Deps, eco, lookupOnlineEnv)
 	if err != nil {
 		return err
@@ -613,6 +670,12 @@ func fetchEcosystem(ctx context.Context, cfg *siteConfig, r *depsResolver, sourc
 	}
 	if err := verifyInputEntry(out, eco, lock.Digest); err != nil {
 		return err
+	}
+	// 脚本在容器里已核对过锁文件；入缓存前 CLI 再按源码锁文件独立核对一次。
+	if eco == "java" {
+		if err := verifyImportedJavaAgainstLock(source, out); err != nil {
+			return err
+		}
 	}
 	report, err := fetchReport(ctx, eco, lock, seed, out, source)
 	if err != nil {
@@ -702,6 +765,24 @@ func fetchReport(ctx context.Context, eco string, lock ecosystemLock, seed, out,
 			return nil, err
 		}
 		current = pnpmLockPackages(raw)
+	case "java":
+		if seed != "" {
+			if old, err = listMavenArtifacts(ctx, filepath.Join(seed, "repository")); err != nil {
+				return nil, err
+			}
+		}
+		if current, err = listMavenArtifacts(ctx, filepath.Join(out, "repository")); err != nil {
+			return nil, err
+		}
+	case "python":
+		if seed != "" {
+			if old, err = listPythonWheels(ctx, filepath.Join(seed, "packages")); err != nil {
+				return nil, err
+			}
+		}
+		if current, err = listPythonWheels(ctx, filepath.Join(out, "packages")); err != nil {
+			return nil, err
+		}
 	}
 	added, removed := diffDeps(old, current)
 	for i := range added {
@@ -830,6 +911,47 @@ func (o depsImportOptions) trust() siteKit {
 	return siteKit{TrustFingerprint: o.Fingerprint, TrustState: o.TrustState}
 }
 
+// checkImportedJavaEntries 对导入的 java 条目：锁摘要须等于当前源码的 java 锁摘要（于是条目准备时
+// 用的 services/maven-deps.sha256 就是当前这份），repository/ 须与锁文件逐个一致；否则拒绝。
+// 缓存里已有的同名条目不会被导入（下面的循环会跳过），这里也不核对。
+func checkImportedJavaEntries(cache string, entries []importEntry, root string, o depsImportOptions) error {
+	var source, current string
+	for _, e := range entries {
+		if e.Image || e.Ecosystem != "java" {
+			continue
+		}
+		if _, err := os.Lstat(filepath.Join(cache, filepath.FromSlash(e.Rel))); err == nil {
+			continue
+		}
+		if source == "" {
+			if o.Source == nil {
+				return fmt.Errorf("导入 Java 依赖需要当前源码以核对 %s", mavenDepsLockRel)
+			}
+			src, err := o.Source()
+			if err != nil {
+				return fmt.Errorf("导入 Java 依赖需要当前源码以核对 %s：%w", mavenDepsLockRel, err)
+			}
+			locks, err := sourceEcosystemLocks(src)
+			if err != nil {
+				return err
+			}
+			for _, l := range locks {
+				if l.Ecosystem == "java" {
+					current = l.Digest
+				}
+			}
+			source = src
+		}
+		if e.LockDigest != current {
+			return fmt.Errorf("%s：条目的锁摘要与当前源码的 Java 锁摘要 %s 不同，无法按 %s 核对，拒绝导入；请在对应源码版本下导入", e.Rel, current, mavenDepsLockRel)
+		}
+		if err := verifyImportedJavaAgainstLock(source, filepath.Join(root, filepath.FromSlash(e.Rel))); err != nil {
+			return fmt.Errorf("%s：%w", e.Rel, err)
+		}
+	}
+	return nil
+}
+
 // depsImport 校验目录或归档后按锁摘要导入缓存，记录来源。先复制/解包到缓存内的
 // 暂存目录再校验，避免校验后源目录被改动。
 func depsImport(ctx context.Context, cfg *siteConfig, src string, o depsImportOptions) error {
@@ -909,7 +1031,11 @@ func depsImport(ctx context.Context, cfg *siteConfig, src string, o depsImportOp
 	} else {
 		fmt.Fprintln(w, "警告：未用 --trust-fingerprint 或 --trust-state 核验签名，按人工导入处理；请人工审核下列条目（SHA-256 记录在各条目 auriga-origin.json）。")
 	}
-	imported, skipped, java := 0, 0, false
+	// Java 条目先全部按源码锁文件核对，再开始写缓存：任何一条不符都整体拒绝，不留半截导入。
+	if err := checkImportedJavaEntries(cfg.Deps.Cache, entries, root, o); err != nil {
+		return err
+	}
+	imported, skipped := 0, 0
 	for _, e := range entries {
 		target := filepath.Join(cfg.Deps.Cache, filepath.FromSlash(e.Rel))
 		srcDir := filepath.Join(root, filepath.FromSlash(e.Rel))
@@ -946,12 +1072,6 @@ func depsImport(ctx context.Context, cfg *siteConfig, src string, o depsImportOp
 		sum, _ := digest(filepath.Join(target, sumsFile))
 		fmt.Fprintf(w, "  + %s（%s sha256 %s）\n", e.Rel, sumsFile, sum)
 		imported++
-		if e.Ecosystem == "java" {
-			java = true
-		}
-	}
-	if java {
-		fmt.Fprintln(w, "注意：Java（Maven）依赖没有锁哈希钉定，请人工核对导入构件（Maven 锁文件见设计第 8 步）。")
 	}
 	fmt.Fprintf(w, "导入完成：新增 %d 个条目，跳过 %d 个；来源 %s\n", imported, skipped, from)
 	return nil
@@ -1054,7 +1174,7 @@ func importDevkit(ctx context.Context, cfg *siteConfig, kitRoot, from, staging s
 		return fmt.Errorf("发行开发套件无效：%w", err)
 	}
 	fmt.Fprintf(w, "签名已核验（%s）；%s\n", trustLabel, d.describe())
-	imported, skipped, java := 0, 0, false
+	imported, skipped := 0, 0
 	var missing []string
 	for _, lock := range locks {
 		target := filepath.Join(cfg.Deps.Cache, "inputs", lock.Ecosystem, lock.Digest)
@@ -1077,6 +1197,11 @@ func importDevkit(ctx context.Context, cfg *siteConfig, kitRoot, from, staging s
 		if err := d.extractInput(release, lock, out); err != nil {
 			return fmt.Errorf("%s 输入（版本 %s）：%w", lock.Ecosystem, release.Version, err)
 		}
+		if lock.Ecosystem == "java" {
+			if err := verifyImportedJavaAgainstLock(source, out); err != nil {
+				return fmt.Errorf("%s：%w", rel, err)
+			}
+		}
 		origin := depsOrigin{Kind: "import", Ecosystem: lock.Ecosystem, LockDigest: lock.Digest, From: []string{from + " 版本 " + release.Version + " " + release.InputsRel}, Signed: true, Fingerprint: fp}
 		if err := writeDepsOriginWith(out, "SHA256SUMS", origin); err != nil {
 			return err
@@ -1090,9 +1215,6 @@ func importDevkit(ctx context.Context, cfg *siteConfig, kitRoot, from, staging s
 		sum, _ := digest(filepath.Join(target, "SHA256SUMS"))
 		fmt.Fprintf(w, "  + %s（版本 %s，SHA256SUMS sha256 %s）\n", rel, release.Version, sum)
 		imported++
-		if lock.Ecosystem == "java" {
-			java = true
-		}
 	}
 	images := 0
 	for _, role := range depsImageRoles {
@@ -1141,9 +1263,6 @@ func importDevkit(ctx context.Context, cfg *siteConfig, kitRoot, from, staging s
 			fmt.Fprintf(w, "  + %s（%s，镜像 ID %s）\n", rel, img.Ref, id)
 			images++
 		}
-	}
-	if java {
-		fmt.Fprintln(w, "注意：Java（Maven）依赖没有锁哈希钉定，请人工核对导入构件（Maven 锁文件见设计第 8 步）。")
 	}
 	fmt.Fprintf(w, "导入完成：新增 %d 个依赖输入、%d 个镜像，跳过 %d 个；来源 %s\n", imported, images, skipped, from)
 	if len(missing) > 0 {

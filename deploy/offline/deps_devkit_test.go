@@ -81,6 +81,8 @@ func fixtureDevkitDeps(t *testing.T, src, version string) devkitDepsFixture {
 	writeEntry("web", []byte("other web locks\n"), map[string]string{"web-cache.tar.gz": "w"})
 	writeTestFileAt(t, filepath.Join(inputs, "system", "agent", "packages.txt"), "pkg 1\n")
 	writeTestFileAt(t, filepath.Join(inputs, "system", "agent", "packages", "a.apk"), "apk")
+	// 第 8 步前的套件：operator 的 pip 包在 system/operator/（布局同 python 条目），没有 python/。
+	writeEntry("system/operator", byEco["python"].Raw, map[string]string{"packages/a.whl": "whl", "packages.txt": "./a.whl\n"})
 	recipes := filepath.Join(stage, "recipes")
 	raw, err := os.ReadFile(filepath.Join(src, "deploy", "nas", "offline-build", "system-inputs.sh"))
 	if err != nil {
@@ -154,7 +156,7 @@ func TestDevkitLayoutKitResolvesByLockDigest(t *testing.T) {
 	if k.Err != nil || k.devkit == nil || !strings.Contains(k.devkit.describe(), "0.2.0") {
 		t.Fatalf("发行开发套件应可直接使用：%v", k.Err)
 	}
-	for _, eco := range []string{"go", "system"} {
+	for _, eco := range []string{"go", "system", "python"} {
 		hit, ok := r.findInput(eco, fx.Locks[eco].Digest)
 		if !ok || hit.release == nil || !strings.Contains(hit.Location, "版本 0.2.0") {
 			t.Fatalf("%s 应按锁摘要命中套件：%+v %v", eco, hit, ok)
@@ -168,8 +170,9 @@ func TestDevkitLayoutKitResolvesByLockDigest(t *testing.T) {
 			t.Fatalf("%s 锁摘要不同或套件不提供，不应命中", eco)
 		}
 	}
-	// 解出的 go/system 条目符合缓存条目规则（system 补写锁清单与条目 SHA256SUMS）。
-	for _, eco := range []string{"go", "system"} {
+	// 解出的 go/system/python 条目符合缓存条目规则（system 补写锁清单与条目 SHA256SUMS；
+	// python 取自旧布局的 system/operator/）。
+	for _, eco := range []string{"go", "system", "python"} {
 		dst := filepath.Join(t.TempDir(), eco)
 		if err := os.Mkdir(dst, 0755); err != nil {
 			t.Fatal(err)

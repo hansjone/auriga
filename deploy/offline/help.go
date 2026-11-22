@@ -197,11 +197,11 @@ const depsHelp = `用法：./auriga deps status [--json] [--source <目录>] [--
       ./auriga deps fetch [--accept-new-deps] [--source <目录>] [--config <site.json>]
       ./auriga deps import <目录或归档> [--trust-fingerprint <指纹> | --trust-state] [--source <目录>] [--config <site.json>]
 站点依赖缓存（需要 sudo/root）。配置固定读 /etc/auriga/site.json（root 所有、0600 或 0644）。
-依赖输入按生态（go、web、java、system）的锁摘要整套选取：可写缓存 deps.cache → deps.kits 套件 → 依赖源。
+依赖输入按生态（go、web、java、python、system）的锁摘要整套选取：可写缓存 deps.cache → deps.kits 套件 → 依赖源。
   status  逐生态比较当前源码的锁摘要，列出命中位置（缓存或哪个套件）或缺失及补法。
-  fetch   按规则准备缺失且允许自动补的生态（只有 Go、Web；Java、系统包、Python、镜像只能 import 或套件）；
+  fetch   按规则准备缺失且允许自动补的生态（Go、Web；Java 在 services/maven-deps.sha256 非空且配置了 deps.sources.maven 或 allowPublic 时；Python 在 requirements 全部带 --hash=sha256 且配置了 deps.sources.pypi 或 allowPublic 时；系统包与镜像只能 import 或套件）；
           acceptNewDeps=false 时只打印清单并以退出码 1 结束。
-  import  校验目录或归档（inputs/<生态>/<锁摘要>/、images/<用途>/<digest>/ 布局，或解包后的发行开发套件）后导入缓存并记录来源。
+  import  校验目录或归档（inputs/<生态>/<锁摘要>/、images/<用途>/<digest>/ 布局，或解包后的发行开发套件）后导入缓存并记录来源；导入 Java 时对照源码 maven-deps.sha256，不在锁内或摘要不符则拒绝。
 deps.kits 与 import 都直接接受解包后的发行开发套件（devkit.json 或累积 devkit-catalog.json），按当前锁摘要在各版本里取输入。
 deps.kits 套件目录、import 的源目录或归档、deps.caFile 都必须 root 所有、组和其他用户不可写（同 deps.cache）。
 经 sudo 调用时拒绝 --config 与 --source；root 直接运行时可用。各子命令用 --help 查看参数。
@@ -336,7 +336,7 @@ func init() {
 		notes: []string{
 			"--online 一期不支持系统包与 Dockerfile 基础镜像变化（会明确报错，请联系维护方）；--online 与 --offline 互斥。",
 			"联网收集会透传已设置的 HTTP_PROXY/HTTPS_PROXY/NO_PROXY、GOPROXY、npm_config_registry、AURIGA_MAVEN_MIRROR_URL（Maven 镜像地址）；未设置则不传。",
-			"Java 依赖没有锁哈希钉定：Maven 只校验 Central 或镜像自己提供的校验和，不能防镜像篡改，镜像可信性由现场负责；AURIGA_MAVEN_MIRROR_URL 只接受 https 地址。请用 site-dependencies.json 里的 SHA-256 与 Maven Central 人工核对新增构件。",
+			"Java 依赖由 services/maven-deps.sha256 钉定（prepare/build 核对）；AURIGA_MAVEN_MIRROR_URL 只接受 https 地址。Python（operator）由 requirements 的 --hash=sha256 钉定。",
 		},
 		docs: merge(buildDocs, map[string]string{
 			"release":  "发行索引 JSON 路径",
@@ -402,15 +402,15 @@ func init() {
 	depsSource := "源码目录；只允许 root 直接运行时使用，经 sudo 调用时拒绝（默认用配置的 source.dir）"
 	helpSpecs["deps status"] = helpSpec{
 		usage:   "./auriga deps status [--json] [--source <目录>] [--config <site.json>]",
-		summary: "逐生态（go、web、java、system）比较当前源码锁摘要，列出命中位置（缓存或哪个套件）或缺失及可用补法，并列出工具镜像、基础镜像。需要 sudo/root。",
+		summary: "逐生态（go、web、java、python、system）比较当前源码锁摘要，列出命中位置（缓存或哪个套件）或缺失及可用补法，并列出工具镜像、基础镜像。需要 sudo/root。",
 		docs:    map[string]string{"config": depsConfig, "source": depsSource, "json": "只输出机器可读 JSON"},
 	}
 	helpSpecs["deps fetch"] = helpSpec{
 		usage:   "./auriga deps fetch [--accept-new-deps] [--source <目录>] [--config <site.json>]",
-		summary: "按配置的依赖源准备缺失且允许自动补的生态（Go、Web），在固定 digest 的工具镜像里运行源码中的 <生态>-inputs.sh prepare，写回可写缓存并记录来源与 SHA-256。需要 sudo/root。",
+		summary: "按配置的依赖源准备缺失且允许自动补的生态（Go、Web；锁/哈希就绪后的 Java、Python），在固定 digest 的工具镜像（Python 用 base-operator）里运行源码中的 <生态>-inputs.sh prepare，写回可写缓存并记录来源与 SHA-256。需要 sudo/root。",
 		notes: []string{
 			"allowPublic=false 时 Go 不回落 proxy.golang.org，校验库只经配置的代理，取不到就失败；Web 拒绝没有 integrity 的 lock 条目。",
-			"Java（Maven）、系统包、Python（operator）、基础镜像与工具镜像只能 deps import 或套件提供。",
+			"Java 须 services/maven-deps.sha256 非空且配置 deps.sources.maven 或 allowPublic；Python 须 requirements 全部 --hash=sha256 且配置 deps.sources.pypi 或 allowPublic。系统包、基础镜像与工具镜像只能 deps import 或套件提供。",
 			"acceptNewDeps=false（且未加 --accept-new-deps）时只打印新增依赖清单并以退出码 1 结束。deps.caFile 会只读挂进准备容器。",
 		},
 		docs: merge(buildDocs, map[string]string{
@@ -424,7 +424,7 @@ func init() {
 		summary: "校验目录或 tar 归档后按锁摘要导入可写缓存并记录来源。缓存布局：根 SHA256SUMS（覆盖全部文件，可带 SHA256SUMS.sig 与 release-public.pem）、inputs/<生态>/<锁摘要>/、images/<用途>/<digest>/image.json。也直接接受解包后的发行开发套件（devkit.json 或累积 devkit-catalog.json）。路径必填，放在参数之前。需要 sudo/root。",
 		notes: []string{
 			"导入源（目录或归档文件）必须 root 所有、组和其他用户不可写；U 盘等介质请先复制到这样的目录。",
-			"缓存布局不加 --trust-fingerprint/--trust-state 时按人工导入处理：只校验完整性并打印条目供人工审核。",
+			"缓存布局不加 --trust-fingerprint/--trust-state 时按人工导入处理：只校验完整性并打印条目供人工审核。导入 Java 条目须提供当前源码并对照 services/maven-deps.sha256，构件不在锁内或摘要不符则拒绝。",
 			"发行开发套件必须用 --trust-fingerprint 或 --trust-state 核验发行签名（拒绝未签名与套件自带公钥自证）；按当前源码各生态锁摘要在套件各版本里取输入，写入 inputs/<生态>/<锁摘要>/，并导入最新版本的镜像（带归档与镜像 ID）。",
 		},
 		docs: map[string]string{
@@ -461,7 +461,7 @@ func init() {
 			"source":          "人工源码目录（root 人工部署时使用，受限调用拒绝，不能与提交号同用）；默认用 source.dir 或 source.git",
 			"operator":        "经 sudo 的人工 root 显式跳过参数白名单（运行器账户不可用，需 site.json 登记 server.runner）；不经 sudo 时无作用",
 			"allow-downgrade": "root 人工向不是当前运行提交后代的提交部署（先做与 rollback 相同的数据检查，不通过退出码 3）；受限调用拒绝",
-			"accept-new-deps": "本次允许按依赖源补新增依赖（等同 deps.acceptNewDeps=true，仅限 Go、Web）",
+			"accept-new-deps": "本次允许按依赖源补新增依赖（等同 deps.acceptNewDeps=true，仅限可自动补的生态）",
 		}),
 	}
 	helpSpecs["adopt"] = helpSpec{

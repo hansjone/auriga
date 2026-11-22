@@ -228,7 +228,7 @@ func doDeploy(ctx context.Context, ops siteOps, cfg *siteConfig, cfgPath, data s
 	}
 
 	rc.Deps.Sources = map[string]string{}
-	for _, eco := range []string{"go", "web", "java", "system"} {
+	for _, eco := range []string{"go", "web", "java", "python", "system"} {
 		rc.Deps.Sources[eco] = depsSourceLabel(cfg.Deps, eco)
 	}
 	// deps-lock 输入集用源码锁清单的摘要（与依赖输入的锁摘要同一口径），不要求依赖输入在场。
@@ -329,15 +329,17 @@ func doDeploy(ctx context.Context, ops siteOps, cfg *siteConfig, cfgPath, data s
 			}
 		}
 	}
-	_, needSystem := recipe.needs(chosen)
+	_, needInputs := recipe.needs(chosen)
 	var restEcos []string
 	for _, k := range []string{"web", "java"} {
 		if builds[k] {
 			restEcos = append(restEcos, k)
 		}
 	}
-	if needSystem {
-		restEcos = append(restEcos, "system")
+	for _, eco := range []string{"system", "python"} {
+		if needInputs[eco] {
+			restEcos = append(restEcos, eco)
+		}
 	}
 	if o.DryRun || len(restEcos) > 0 {
 		need := restEcos
@@ -446,7 +448,7 @@ func doDeploy(ctx context.Context, ops siteOps, cfg *siteConfig, cfgPath, data s
 		if err := os.MkdirAll(scratch, 0755); err != nil {
 			return exitWith(1, err)
 		}
-		if err := stageService(ctx, svc, recipe.Services[svc], src.Dir, out, inputDir["system"], scratch); err != nil {
+		if err := stageService(ctx, svc, recipe.Services[svc], src.Dir, out, inputDir, scratch); err != nil {
 			return exitWith(1, fmt.Errorf("暂存 %s 失败：%w", svc, err))
 		}
 		parts, err := assemblyDigest(ctx, svc, recipe, scratch)

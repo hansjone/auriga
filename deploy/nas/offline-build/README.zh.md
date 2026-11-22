@@ -52,12 +52,17 @@ docker run --rm --pull never --network none \
   --entrypoint /usr/local/bin/auriga-agent auriga/agent:site-rebuild --version
 ```
 
-edge 需要 Go 与 Web 输出，platform 需要 Java 与 system/platform，agent 和 bifrost 需要各自的 Go 和系统包，operator 需要 system/operator。两个 Go 辅助程序 auriga-nas-bootstrap 和 runtime-release 与其他 Go 程序一起生成，按公开 NAS 打包配方装入发行目录。
+edge 需要 Go 与 Web 输出，platform 需要 Java 与 system/platform，agent 和 bifrost 需要各自的 Go 和系统包，operator 需要 python 依赖输入（`python-inputs.sh`，布局与昔日 system/operator 相同，装配时挂为 `system/`）。两个 Go 辅助程序 auriga-nas-bootstrap 和 runtime-release 与其他 Go 程序一起生成，按公开 NAS 打包配方装入发行目录。
 
 Docker build 的 --network=none 限制 Dockerfile 的运行步骤。验收整台机器的访问范围时，需在目标网络中限制 Docker daemon 的出站，再照发布索引安装和重建。公开 [NAS 装配文档](../README.md) 的安装、启动和运行时验签门禁仍适用。
 
 ## 现场在线收集（bundle --online）用到的脚本接口
 
-三个输入脚本除 prepare 和 build 外还有 `locks` 模式：只把当前源码锁清单写入空输出目录的 source-locks.sha256，不需要网络。`auriga bundle --build --online` 用它与套件输入里的同名文件比较，判断哪个生态的依赖变了。
+go/web/java 输入脚本除 prepare 和 build 外还有 `locks` 模式：只把当前源码锁清单写入空输出目录的 source-locks.sha256，不需要网络。`python-inputs.sh` 有 prepare/locks。`auriga bundle --build --online` 用 locks 与套件输入里的同名文件比较，判断哪个生态的依赖变了。
 
-prepare 的可选环境变量：go-inputs.sh 读 AURIGA_GO_PREPARE_PROXY（上游代理，默认 proxy.golang.org，GOSUMDB 不可关闭）和 AURIGA_GO_PREPARE_CACHE（旧 download 目录）；web-inputs.sh 的 AURIGA_WEB_PREPARE_STORE_TAR 指向旧 web-cache.tar.gz，只解出其中的 store 和 policy-cache/pnpm 作种子，不再要求锁相同；java-inputs.sh 的 prepare 一律带 -C，并可用 AURIGA_MAVEN_MIRROR_URL（仅 https）生成 central 镜像。Maven 的 -C 只核对 Central 或镜像自己提供的校验和，不能防镜像篡改，镜像可信性由现场负责。
+prepare 的可选环境变量：go-inputs.sh 读 AURIGA_GO_PREPARE_PROXY（上游代理，默认 proxy.golang.org，GOSUMDB 不可关闭）和 AURIGA_GO_PREPARE_CACHE（旧 download 目录）；web-inputs.sh 的 AURIGA_WEB_PREPARE_STORE_TAR 指向旧 web-cache.tar.gz，只解出其中的 store 和 policy-cache/pnpm 作种子，不再要求锁相同；java-inputs.sh 的 prepare 一律带 -C，并可用 AURIGA_MAVEN_MIRROR_URL（仅 https）生成 central 镜像；准备完成后对照 `services/maven-deps.sha256`（空锁或设 `AURIGA_MAVEN_LOCK_UPDATE=1` 时只警告，供生成锁文件用），build 前强制核对（空锁失败）。核对与生成只用 sh、find、sha256sum、awk（JDK 工具镜像没有 python3）。生成锁文件：`java-inputs.sh hash-lock <prepare 输出目录>`（枚举 `repository/` 全部构件，按 C 语言序写出坐标与 sha256；`_remote.repositories`、`resolver-status.properties`、`*.lastUpdated`、`maven-metadata*.xml`、`*.sha1`/`*.md5` 等非构件不参与，推不出坐标的文件与符号链接直接失败）。python-inputs.sh 读 `PIP_INDEX_URL` / `AURIGA_PIP_INDEX_URL`，`pip download --require-hashes`。
+
+### 新增 Java / Python 依赖
+
+1. **Java**：改 POM 后，在 JDK 25 linux/amd64 上 `AURIGA_MAVEN_LOCK_UPDATE=1 java-inputs.sh prepare <空目录>`，再 `java-inputs.sh hash-lock <该目录>` 更新并提交 `services/maven-deps.sha256`，然后重新 prepare（锁文件属于源码锁清单，旧输出的 source-locks 已过期）；现场用 `deps fetch`（配置 `deps.sources.maven` 或 `allowPublic`，且 `acceptNewDeps`）或 `deps import`（导入时按锁核对）。
+2. **Python**：改 `deploy/nas/test/admin-bootstrap-requirements.txt`，全部 `name==version` 并附传递依赖的 `--hash=sha256`（linux/amd64 上 CPython 3.13 的 operator 镜像，以及 CI 系统 python3 3.12 实际选中的 wheel），用 `pip download --only-binary=:all: --require-hashes` 核对；`system-inputs.sh` / `python-inputs.sh` 与 Dockerfile 的 `pip install` 均加 `--require-hashes`。

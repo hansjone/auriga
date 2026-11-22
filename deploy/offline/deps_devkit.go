@@ -62,6 +62,9 @@ type devkitRelease struct {
 	Images     []kitImage // File 已改写为套件根下的相对路径
 
 	locks map[string]ecosystemLock // 生态 → 锁清单（打开套件时计算）
+	// prefixes 生态 → inputs.tar 里的子树前缀；缺省为「<生态>/」。第 8 步前的套件没有 python/，
+	// operator 的 pip 包在 system/operator/（布局与 python 条目相同），此时 python 取那里。
+	prefixes map[string]string
 }
 
 type devkitLayout struct {
@@ -313,9 +316,11 @@ func (d *devkitLayout) indexLocks() error {
 func (d *devkitLayout) computeLocks(rel *devkitRelease) (map[string]ecosystemLock, error) {
 	out := map[string]ecosystemLock{}
 	want := map[string]string{}
-	for _, eco := range []string{"go", "web", "java"} {
+	for _, eco := range []string{"go", "web", "java", "python"} {
 		want[eco+"/source-locks.sha256"] = eco
 	}
+	const pythonCompat = "system/operator/"
+	want[pythonCompat+"source-locks.sha256"] = "python-compat"
 	err := scanTarVerified(filepath.Join(d.Root, filepath.FromSlash(rel.InputsRel)), rel.InputsRel, d.sums[rel.InputsRel], func(name string, h *tar.Header, r io.Reader) error {
 		eco, ok := want[name]
 		if !ok || h.Typeflag != tar.TypeReg {
@@ -337,6 +342,14 @@ func (d *devkitLayout) computeLocks(rel *devkitRelease) (map[string]ecosystemLoc
 	})
 	if err != nil {
 		return nil, err
+	}
+	if compat, ok := out["python-compat"]; ok {
+		delete(out, "python-compat")
+		if _, has := out["python"]; !has {
+			compat.Ecosystem = "python"
+			out["python"] = compat
+			rel.prefixes = map[string]string{"python": pythonCompat}
+		}
 	}
 	if lock, ok, err := d.systemLock(rel); err != nil {
 		return nil, err
@@ -424,6 +437,9 @@ func (d *devkitLayout) extractInput(rel *devkitRelease, lock ecosystemLock, dst 
 	in := io.TeeReader(f, sum)
 	tr := tar.NewReader(in)
 	prefix := eco + "/"
+	if p, ok := rel.prefixes[eco]; ok {
+		prefix = p
+	}
 	seen := map[string]bool{}
 	count := 0
 	var written int64

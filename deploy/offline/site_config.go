@@ -66,11 +66,13 @@ type siteKit struct {
 	TrustState       bool   `json:"trustState,omitempty"`
 }
 
-// siteSources：只有 go 允许多个依赖源（数组）；npm、maven、files 为单个地址。
+// siteSources：只有 go 允许多个依赖源（数组）；npm、maven、pypi、files 为单个地址。
+// pypi 为第 8 步相对设计 D9 示例新增（设计原文无 pip 源字段），规则与 npm/maven 相同。
 type siteSources struct {
 	Go    []string `json:"go"`
 	NPM   *string  `json:"npm"`
 	Maven *string  `json:"maven"`
+	PyPI  *string  `json:"pypi"`
 	Files *string  `json:"files"`
 }
 
@@ -386,7 +388,7 @@ func checkSourceShapes(raw []byte) error {
 			if v[0] != '[' {
 				return errors.New("deps.sources.go 必须是地址数组，例如 [\"https://goproxy.example\"]")
 			}
-		case "npm", "maven", "files":
+		case "npm", "maven", "pypi", "files":
 			if v[0] != '"' {
 				return fmt.Errorf("deps.sources.%s 只能是单个地址字符串（只有 go 支持多个依赖源）", name)
 			}
@@ -616,7 +618,7 @@ func (d *siteDeps) validate() error {
 			return err
 		}
 	}
-	for name, value := range map[string]*string{"npm": d.Sources.NPM, "maven": d.Sources.Maven, "files": d.Sources.Files} {
+	for name, value := range map[string]*string{"npm": d.Sources.NPM, "maven": d.Sources.Maven, "pypi": d.Sources.PyPI, "files": d.Sources.Files} {
 		if value != nil {
 			if err := checkDepsURL("deps.sources."+name, *value); err != nil {
 				return err

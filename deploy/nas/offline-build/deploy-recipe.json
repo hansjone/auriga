@@ -54,7 +54,7 @@
     },
     "operator": {
       "stage": [
-        { "kind": "system", "checkSourceLocks": true },
+        { "kind": "python", "checkSourceLocks": true },
         { "kind": "source", "sources": { "requirements.txt": "deploy/nas/test/admin-bootstrap-requirements.txt" } }
       ]
     }

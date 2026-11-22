@@ -189,9 +189,9 @@ func TestDeployRecipeInSourceIsValid(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	builds, system := r.needs([]string{"operator"})
-	if !builds["go"] || builds["web"] || builds["java"] || !system {
-		t.Fatalf("operator 的构建需求不对 %v %v", builds, system)
+	builds, inputs := r.needs([]string{"operator"})
+	if !builds["go"] || builds["web"] || builds["java"] || !inputs["python"] || inputs["system"] {
+		t.Fatalf("operator 的构建需求不对 builds=%v inputs=%v", builds, inputs)
 	}
 	builds, _ = r.needs(deployServices)
 	if !builds["web"] || !builds["java"] {
@@ -289,11 +289,12 @@ func TestStageServiceAndAssemblyDigest(t *testing.T) {
 	src := t.TempDir()
 	putFile(t, filepath.Join(src, "deploy/nas/docker/agent-entrypoint.sh"), "#!/bin/sh\n", 0755)
 	artifacts, system := t.TempDir(), t.TempDir()
+	inputs := map[string]string{"system": system}
 	writeArtifactDir(t, filepath.Join(artifacts, "go"), map[string]string{"auriga-agent": "agent-v1"})
 	writeArtifactDir(t, filepath.Join(system, "agent"), map[string]string{"packages.txt": "ca-certificates\n"})
 	stage := func() string {
 		scratch := t.TempDir()
-		if err := stageService(context.Background(), "agent", r.Services["agent"], src, artifacts, system, scratch); err != nil {
+		if err := stageService(context.Background(), "agent", r.Services["agent"], src, artifacts, inputs, scratch); err != nil {
 			t.Fatal(err)
 		}
 		for _, want := range []string{"go/auriga-agent", "system/packages.txt", "system/SHA256SUMS", "agent-entrypoint.sh"} {
@@ -319,7 +320,7 @@ func TestStageServiceAndAssemblyDigest(t *testing.T) {
 	r2.Images = cloneImages(r.Images)
 	r2.Images["base-agent"] = "debian@sha256:" + strings.Repeat("1", 64)
 	scratch := t.TempDir()
-	if err := stageService(context.Background(), "agent", r.Services["agent"], src, artifacts, system, scratch); err != nil {
+	if err := stageService(context.Background(), "agent", r.Services["agent"], src, artifacts, inputs, scratch); err != nil {
 		t.Fatal(err)
 	}
 	a, _ := assemblyDigest(context.Background(), "agent", r, scratch)
@@ -331,7 +332,7 @@ func TestStageServiceAndAssemblyDigest(t *testing.T) {
 		t.Fatalf("触发项应含基础镜像：%s", reason)
 	}
 	putFile(t, filepath.Join(artifacts, "go", "auriga-agent"), "tampered", 0755)
-	if err := stageService(context.Background(), "agent", r.Services["agent"], src, artifacts, system, t.TempDir()); err == nil {
+	if err := stageService(context.Background(), "agent", r.Services["agent"], src, artifacts, inputs, t.TempDir()); err == nil {
 		t.Fatal("产物与 SHA256SUMS 不符未被拒绝")
 	}
 }

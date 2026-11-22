@@ -2,7 +2,7 @@ package main
 
 // 依赖缓存与套件（设计 D5）。缓存和套件同一种布局：
 //
-//	inputs/<生态>/<锁摘要>/        生态 go、web、java、system；锁摘要 = 目录内
+//	inputs/<生态>/<锁摘要>/        生态 go、web、java、python、system；锁摘要 = 目录内
 //	                               source-locks.sha256 的 SHA-256；目录内 SHA256SUMS
 //	                               由 <生态>-inputs.sh prepare 写出，覆盖全部依赖文件
 //	images/<用途>/<摘要>/image.json 工具镜像、基础镜像、服务镜像的固定 digest 记录，
@@ -624,7 +624,11 @@ func (r *depsResolver) findImages(role string) ([]imageHit, error) {
 // 先把归档复制到 stage（缓存内的暂存目录），在副本上核对签名清单摘要并算出镜像 ID，
 // 返回的 Tar 指向副本，docker load 只读副本，不再按套件原路径读取。
 func (r *depsResolver) toolImage(eco, stage string) (imageHit, error) {
+	// python 准备在 base-operator（python:3.13）镜像里跑 python-inputs.sh，没有独立 tool-python。
 	role := "tool-" + eco
+	if eco == "python" {
+		role = "base-operator"
+	}
 	hits, err := r.findImages(role)
 	if err != nil {
 		return imageHit{}, err

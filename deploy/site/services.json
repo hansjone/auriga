@@ -65,7 +65,7 @@
       "inputSets": ["java-pack", "deps-java", "tool-java", "assemble-platform"]
     },
     "operator-runtime": {
-      "inputSets": ["assemble-operator"]
+      "inputSets": ["deps-python", "assemble-operator"]
     },
     "auriga-nas-bootstrap": {
       "inputSets": ["go-auriga-nas-bootstrap", "go-mod-files", "deps-go", "tool-go"]
@@ -91,6 +91,7 @@
     "deps-go": { "kind": "deps-lock", "ecosystem": "go" },
     "deps-web": { "kind": "deps-lock", "ecosystem": "web" },
     "deps-java": { "kind": "deps-lock", "ecosystem": "java" },
+    "deps-python": { "kind": "deps-lock", "ecosystem": "python" },
     "tool-go": { "kind": "tool-image", "role": "tool-go" },
     "tool-web": { "kind": "tool-image", "role": "tool-web" },
     "tool-java": { "kind": "tool-image", "role": "tool-java" },

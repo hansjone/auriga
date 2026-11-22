@@ -53,7 +53,7 @@ type recipeService struct {
 }
 
 type stageItem struct {
-	Kind             string            `json:"kind"` // go | web | java | system | source | dirs
+	Kind             string            `json:"kind"` // go | web | java | system | python | source | dirs
 	Files            []string          `json:"files,omitempty"`
 	Dirs             []string          `json:"dirs,omitempty"`
 	Sources          map[string]string `json:"sources,omitempty"`
@@ -163,9 +163,9 @@ func (it stageItem) validate() error {
 			return errors.New("web 只接受 dirs")
 		}
 		return names(it.Dirs, "dirs")
-	case "system":
+	case "system", "python":
 		if len(it.Files) > 0 || len(it.Dirs) > 0 || len(it.Sources) > 0 {
-			return errors.New("system 只接受 checkSourceLocks")
+			return errors.New(it.Kind + " 只接受 checkSourceLocks")
 		}
 		return nil
 	case "source":
@@ -232,25 +232,26 @@ func checkArtifactSums(dir string) error {
 	return verifySumsAgainst(raw, dir, filepath.Base(dir)+"/SHA256SUMS")
 }
 
-// recipeNeeds 返回装配这些服务需要的构建（go、web、java）与是否需要系统输入。
-func (r *deployRecipe) needs(services []string) (map[string]bool, bool) {
-	builds, system := map[string]bool{"go": true}, false // go 总要构建：bootstrap 与 runtime-release 进发行目录
+// recipeNeeds 返回装配这些服务需要的构建（go、web、java）与依赖输入生态（system、python）。
+func (r *deployRecipe) needs(services []string) (builds map[string]bool, needInputs map[string]bool) {
+	builds = map[string]bool{"go": true} // go 总要构建：bootstrap 与 runtime-release 进发行目录
+	needInputs = map[string]bool{}
 	for _, svc := range services {
 		for _, it := range r.Services[svc].Stage {
 			switch it.Kind {
 			case "go", "web", "java":
 				builds[it.Kind] = true
-			case "system":
-				system = true
+			case "system", "python":
+				needInputs[it.Kind] = true
 			}
 		}
 	}
-	return builds, system
+	return builds, needInputs
 }
 
-// stageService 按暂存清单把产物、系统输入与源码文件放进 scratch（装配上下文）。
-// artifacts 是 go/web/java 构建产物根目录，systemDir 是 system 依赖输入条目（含 <服务>/ 子目录）。
-func stageService(ctx context.Context, svc string, s recipeService, source, artifacts, systemDir, scratch string) error {
+// stageService 按暂存清单把产物、系统/Python 输入与源码文件放进 scratch（装配上下文）。
+// artifacts 是 go/web/java 构建产物根目录；inputDir 含 system（按服务子目录）与 python（顶层 packages）。
+func stageService(ctx context.Context, svc string, s recipeService, source, artifacts string, inputDir map[string]string, scratch string) error {
 	checked := map[string]bool{}
 	check := func(dir string) error {
 		if checked[dir] {
@@ -298,7 +299,7 @@ func stageService(ctx context.Context, svc string, s recipeService, source, arti
 				}
 			}
 		case "system":
-			dir := filepath.Join(systemDir, svc)
+			dir := filepath.Join(inputDir["system"], svc)
 			if err := check(dir); err != nil {
 				return err
 			}
@@ -311,6 +312,27 @@ func stageService(ctx context.Context, svc string, s recipeService, source, arti
 					return fmt.Errorf("%s 系统输入缺少 source-locks.sha256：%w", svc, err)
 				}
 				if err := verifySumsAgainst(raw, source, svc+" 系统输入的 source-locks.sha256"); err != nil {
+					return err
+				}
+			}
+		case "python":
+			dir := inputDir["python"]
+			if dir == "" {
+				return fmt.Errorf("%s 需要 python 依赖输入", svc)
+			}
+			if err := check(dir); err != nil {
+				return err
+			}
+			// Dockerfile.assembly 的 operator 段挂载 source=system；布局与 system/operator 相同。
+			if err := copyTreeContext(ctx, dir, filepath.Join(scratch, "system")); err != nil {
+				return err
+			}
+			if it.CheckSourceLocks {
+				raw, err := smallFile(filepath.Join(scratch, "system", "source-locks.sha256"), 1<<20)
+				if err != nil {
+					return fmt.Errorf("%s python 输入缺少 source-locks.sha256：%w", svc, err)
+				}
+				if err := verifySumsAgainst(raw, source, svc+" python 输入的 source-locks.sha256"); err != nil {
 					return err
 				}
 			}

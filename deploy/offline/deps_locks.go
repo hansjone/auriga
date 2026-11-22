@@ -23,7 +23,7 @@ import (
 )
 
 // depsEcosystems 是缓存里按锁摘要整套存放的依赖输入生态。
-var depsEcosystems = []string{"go", "web", "java", "system"}
+var depsEcosystems = []string{"go", "web", "java", "python", "system"}
 
 // emptySHA256Line 复现 GNU xargs 在没有输入时仍运行一次 sha256sum（读空 stdin）的输出。
 const emptySHA256Line = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  -\n"
@@ -48,12 +48,16 @@ var lockRules = map[string]lockRule{
 	},
 	"java": {
 		roots: []string{"services"}, names: map[string]bool{"pom.xml": true}, exclude: true, rootsRequired: true,
-		fixed: []string{"pom.xml", "mvnw", ".mvn/wrapper/maven-wrapper.properties", ".mvn/wrapper/maven-wrapper.jar", "services/contracts/package.json", "services/contracts/package-lock.json"},
+		fixed: []string{"pom.xml", "mvnw", ".mvn/wrapper/maven-wrapper.properties", ".mvn/wrapper/maven-wrapper.jar", "services/contracts/package.json", "services/contracts/package-lock.json", mavenDepsLockRel},
 	},
-	// system 没有 locks 模式：系统包由基础镜像决定，只能导入；以配方脚本与 operator 的
-	// requirements 作为锁清单，二者任一变化都要求导入新的系统输入。
+	// python：operator 的 requirements（须 --require-hashes）；变化换锁摘要、触发重新准备。
+	"python": {
+		fixed: []string{pythonRequirementsRel},
+	},
+	// system 没有 locks 模式：系统包由基础镜像决定，只能导入；以配方脚本为锁清单。
+	// operator 的 pip 包改由 python 生态跟踪（第 8 步）。
 	"system": {
-		fixed: []string{"deploy/nas/offline-build/system-inputs.sh", "deploy/nas/test/admin-bootstrap-requirements.txt"},
+		fixed: []string{"deploy/nas/offline-build/system-inputs.sh"},
 	},
 }
 

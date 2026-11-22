@@ -466,7 +466,7 @@ func TestSiteReportPrinted(t *testing.T) {
 	var out bytes.Buffer
 	printSiteReport(&out, &siteReport{Ecosystems: []string{"go"}, Added: []depEntry{{Ecosystem: "go", Name: "example.com/lib", Version: "v1.0.0", SHA256: "abc"}}, Warnings: []string{"w1"}, Notice: siteReportNotice})
 	text := out.String()
-	for _, want := range []string{"+ [go] example.com/lib v1.0.0 abc", "新增 1 项", "警告：w1", "镜像可信性由现场负责"} {
+	for _, want := range []string{"+ [go] example.com/lib v1.0.0 abc", "新增 1 项", "警告：w1", "maven-deps.sha256", "--hash=sha256"} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("缺少 %q: %s", want, text)
 		}

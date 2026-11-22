@@ -348,15 +348,18 @@ func digestAssembleInputs(ctx context.Context, fc fingerprintContext, svc string
 			fmt.Fprintf(h, "source %s %s %s\n", name, rel, sum)
 		}
 	}
-	// 系统输入：指纹侧用「需要 system」标记 + 锁摘要占位；实际字节进装配摘要。
-	needSystem := false
+	// 系统/Python 输入：指纹侧用需要标记 + 锁摘要占位；实际字节进装配摘要。
+	needSystem, needPython := false, false
 	for _, it := range s.Stage {
-		if it.Kind == "system" {
+		switch it.Kind {
+		case "system":
 			needSystem = true
-			break
+		case "python":
+			needPython = true
 		}
 	}
 	fmt.Fprintf(h, "system %t lock %s\n", needSystem, fc.Locks["system"])
+	fmt.Fprintf(h, "python %t lock %s\n", needPython, fc.Locks["python"])
 	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
