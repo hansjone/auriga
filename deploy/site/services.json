@@ -140,6 +140,8 @@
     "deploy/site/schema-compat.json",
     "deploy/site/services.json",
     "deploy/site/input-sets/**",
+    "deploy/site/workflows/**",
+    "deploy/site/sudoers/**",
     "deploy/nas/**",
     "deploy/bootstrap/**",
     "third_party/**",

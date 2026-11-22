@@ -1,0 +1,131 @@
+# 示例：Forgejo Actions 现场部署工作流（设计 docs/dev/site-deploy.zh.md D12）
+#
+# GitHub Actions 同理：把 runs-on 改成你们的自托管标签即可。
+# 主要差异：
+#   - 运行器必须以宿主机方式执行本 job（Forgejo runner 的标签写成 auriga-site:host；
+#     GitHub 自托管 runner 本身就在宿主机执行）。标签若映射到 docker 镜像，job 会跑在
+#     容器里，既没有 /usr/local/bin/auriga 也没有 sudoers，必然失败。
+#   - 上传动作：GitHub 用 actions/upload-artifact@v4；Forgejo 不支持 v4 的版本请改用
+#     https://code.forgejo.org/actions/upload-artifact@v3（或现场镜像的同名动作）。
+#     这些动作需要宿主机装有 Node；没有就删掉上传步骤，改看任务日志里的收据。
+#   - concurrency：较旧的 Forgejo 版本会忽略该字段，互斥仍由 CLI 的 flock 保证。
+#   - 上下文仍多用 github.*（Forgejo Actions 兼容）；本示例不需要仓库密钥
+#     （sudo 调用本机 /usr/local/bin/auriga）。
+#   - 推送触发默认注释掉：现场只应部署 allowedRefs 上的受信提交，开启前请确认
+#     分支保护与签名策略。推送触发时提交号取 github.sha。
+#
+# 日志策略（设计 D11 / 本步选定）：
+#   logs.dir 为 root 所有，运行器读不到。本工作流只上传 --json 打到标准输出的
+#   脱敏收据（receipt.json）；构建与切换过程的脱敏输出走标准错误，进任务日志。
+#   不放宽 logs.dir 权限，也不在 sudoers 加 cat。
+#
+# 取消与超时：行为取决于运行器怎样结束 job，详见 README.md「取消」一节。要点：
+#   - 运行器账户无权向 root 进程发信号，只有 sudo 本身收到 SIGTERM/SIGINT/SIGHUP
+#     时才会转发给 auriga。deploy 收到后取消构建（退出码 1，照常写收据）；切换阶段的
+#     停启与健康检查不随之中断，跑完后按结果写收据。rollback 不捕获信号，收到即退出、
+#     不写收据。auriga 退出时 flock 由内核释放，残留子进程可能继续运行。
+#   - sudo 被 SIGKILL 时无法转发，root 的 auriga 继续跑完并写收据，期间一直持锁。
+#   - 杀在切换中，现场可能是中间态；由管理员 sudo auriga status / history 查看，
+#     必要时 rollback --to <上一成功序号> 或人工处理。
+# 并发：本文件 concurrency 只减少排队；CLI 的 flock 才是最终互斥，第二个任务直接失败。
+#
+# 回滚示例见同目录 site-rollback.yml。安装与 sudoers 见 README.md。
+
+name: 现场部署
+
+on:
+  workflow_dispatch:
+    inputs:
+      commit:
+        description: 40 位小写十六进制提交号
+        required: true
+        type: string
+      full:
+        description: 强制全量重建（true/false）
+        required: false
+        default: "false"
+        type: string
+      services:
+        description: 可选，逗号分隔镜像名（如 edge,platform），与 full 互斥
+        required: false
+        default: ""
+        type: string
+      dry_run:
+        description: 只打印计划，不构建不切换（true/false）
+        required: false
+        default: "false"
+        type: string
+  # 可选推送触发示例（默认关闭）：
+  # push:
+  #   branches: [main]
+
+concurrency:
+  group: auriga-site-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    # 现场自托管运行器标签（须是宿主机执行方式）；安装说明见同目录 README.md
+    runs-on: [self-hosted, auriga-site]
+    timeout-minutes: 180
+    steps:
+      - name: 校验提交号并部署
+        id: deploy
+        shell: bash
+        env:
+          # 手动触发取输入；推送触发时输入为空，取 github.sha。只经环境变量进入脚本。
+          COMMIT: ${{ inputs.commit || github.sha }}
+          FULL: ${{ inputs.full }}
+          SERVICES: ${{ inputs.services }}
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          set -euo pipefail
+          # 参数全部来自环境变量并加引号，避免注入；不要把工作流表达式直接拼进脚本
+          # （run 里的表达式连注释也会被展开，空表达式还会让工作流解析失败）。
+          rm -f receipt.json
+          if ! printf '%s' "$COMMIT" | grep -Eqx '[0-9a-f]{40}'; then
+            echo "提交号必须是 40 位小写十六进制，当前不合法" >&2
+            exit 1
+          fi
+          args=("$COMMIT" --json)
+          case "${FULL:-false}" in
+            true|TRUE|1|yes|YES) args+=(--full) ;;
+            false|FALSE|0|no|NO|"") ;;
+            *) echo "full 只能是 true 或 false" >&2; exit 1 ;;
+          esac
+          case "${DRY_RUN:-false}" in
+            true|TRUE|1|yes|YES) args+=(--dry-run) ;;
+            false|FALSE|0|no|NO|"") ;;
+            *) echo "dry_run 只能是 true 或 false" >&2; exit 1 ;;
+          esac
+          if [ -n "${SERVICES:-}" ]; then
+            # 只允许逗号分隔的小写镜像名，挡住以 - 开头的额外参数（CLI 白名单也会拒绝）。
+            if ! printf '%s' "$SERVICES" | grep -Eqx '[a-z0-9][a-z0-9-]*(,[a-z0-9][a-z0-9-]*)*'; then
+              echo "services 只能是逗号分隔的镜像名（如 edge,platform）" >&2
+              exit 1
+            fi
+            args+=(--services "$SERVICES")
+          fi
+          set +e
+          # -n：sudoers 未放行时立即失败，不会卡在口令提示上。
+          sudo -n /usr/local/bin/auriga deploy "${args[@]}" > receipt.json
+          code=$?
+          set -e
+          echo "exit_code=$code" >> "$GITHUB_OUTPUT"
+          case "$code" in
+            0) echo "退出码 0：成功" ;;
+            1) echo "退出码 1：未切换就失败（参数、依赖、构建或首装失败，现场未受影响）" ;;
+            2) echo "退出码 2：切换失败且已自动回滚" ;;
+            3) echo "退出码 3：需要人工（回滚失败或格式检查拒绝回滚）" ;;
+            *) echo "退出码 $code：非约定值（可能被信号终止），请管理员查看 auriga status / history" ;;
+          esac
+          # 非 0 时步骤失败，工作流标红；收据仍由下一步（if: always）上传。
+          exit "$code"
+
+      - name: 上传脱敏收据
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: auriga-deploy-receipt
+          path: receipt.json
+          if-no-files-found: warn

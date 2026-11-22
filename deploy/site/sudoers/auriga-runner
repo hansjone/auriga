@@ -1,0 +1,24 @@
+# Auriga 现场运行器 sudoers 片段（设计 docs/dev/site-deploy.zh.md D12）
+#
+# 使用前必须：
+#   1. 在 /etc/auriga/site.json 的 server 段登记运行器 server.runner：
+#      "server": { ..., "runner": "auriga-runner" }
+#      （用户名须与下面 Defaults / 授权行一致；改名时两边一起改）
+#   2. 已安装 /usr/local/bin/auriga（root 所有、0755）
+#   3. 本文件放到 /etc/sudoers.d/auriga-runner，权限 0440
+#   4. 执行 visudo -cf /etc/sudoers.d/auriga-runner 校验通过后再生效
+#
+# 只放行四条命令（标准通配，不用正则）。参数白名单由 CLI 按 SUDO_UID 执行，
+# 不在此用 sudo 参数限制。签名包 bundle 故意不进白名单。
+# 通配语义：deploy * / rollback * 的 * 能匹配任意参数（含空格），真正的参数门禁是 CLI
+# 白名单（子命令已由本片段固定为第一个参数，无法借 deploy 跑 bundle、trust、adopt 等）；
+# rollback * 至少要带一个参数（示例工作流总带 --json）。status、history 两行不带通配，
+# 只放行不带参数的写法，因此经 sudo 不能用 history --json。
+# 文件名不能含 . 或以 ~ 结尾，否则 sudo 会忽略 /etc/sudoers.d 下的该文件。
+# 不要加 SETENV，也不要放行 cat/tee 去读 logs.dir。
+
+Defaults:auriga-runner env_reset,secure_path="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+auriga-runner ALL=(root) NOPASSWD: /usr/local/bin/auriga deploy *
+auriga-runner ALL=(root) NOPASSWD: /usr/local/bin/auriga rollback *
+auriga-runner ALL=(root) NOPASSWD: /usr/local/bin/auriga status
+auriga-runner ALL=(root) NOPASSWD: /usr/local/bin/auriga history

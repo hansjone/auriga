@@ -10,6 +10,7 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -256,14 +257,17 @@ func copyRedacted(r io.Reader, outs ...io.Writer) {
 }
 
 var (
-	secretAssign = regexp.MustCompile(`(?i)([A-Za-z0-9_.-]*(?:password|passwd|secret|token|private_key|privatekey|api_key|apikey)[A-Za-z0-9_.-]*)("?\s*[=:]\s*)("(?:[^"\\]|\\.)*"|'[^']*'|[^\s,;"']+)`)
+	// 口令/令牌/私钥字段名；另含 totp / otp_secret，避免应急 TOTP 种子进日志与收据。
+	secretAssign = regexp.MustCompile(`(?i)([A-Za-z0-9_.-]*(?:password|passwd|secret|token|private_key|privatekey|api_key|apikey|totp_secret|otp_secret|totp)[A-Za-z0-9_.-]*)("?\s*[=:]\s*)("(?:[^"\\]|\\.)*"|'[^']*'|[^\s,;"']+)`)
 	bearer       = regexp.MustCompile(`(?i)(bearer|basic)\s+[A-Za-z0-9._~+/=-]{8,}`)
 	urlUserinfo  = regexp.MustCompile(`([a-z][a-z0-9+.-]*://)[^/\s:@]+:[^/\s@]+@`)
+	// 同行内完整 PEM（含 JSON 字符串里的 \n 转义）；只替换块本身，避免整行替换破坏收据 JSON。
+	pemInline = regexp.MustCompile(`-----BEGIN [^-]*PRIVATE KEY-----[\s\\n]+.*?-----END [^-]*PRIVATE KEY-----`)
 )
 
-// redactor 去掉密钥材料：PEM 私钥块整块替换；KEY=值 形式的口令、令牌、私钥值替换为 ***；
+// redactor 去掉密钥材料：PEM 私钥块替换为标记；KEY=值 形式的口令、令牌、私钥、TOTP 种子替换为 ***；
 // Authorization 凭据与 URL 内嵌口令同样替换。密钥文件路径不算密钥材料，但写成
-// xxx_PASSWORD=路径 时也会被替换（宁可多遮）。
+// xxx_PASSWORD=路径 时也会被替换（宁可多遮）。access 文件内容若误进输出，其中的口令/TOTP 字段同样被遮。
 type redactor struct{ inKey bool }
 
 func (r *redactor) line(s string) (string, bool) {
@@ -274,8 +278,14 @@ func (r *redactor) line(s string) (string, bool) {
 		return "", false
 	}
 	if strings.Contains(s, "-----BEGIN") && strings.Contains(s, "PRIVATE KEY-----") {
-		r.inKey = !strings.Contains(s, "-----END")
-		return "[已脱敏：私钥材料]\n", true
+		if strings.Contains(s, "-----END") {
+			s = pemInline.ReplaceAllString(s, "[已脱敏：私钥材料]")
+		}
+		// 同行替换后仍残留私钥头（不成对、头尾类型不一致、头后直接接正文等）：按旧规则整行替换，宁可多遮。
+		if strings.Contains(s, "-----BEGIN") && strings.Contains(s, "PRIVATE KEY-----") {
+			r.inKey = !strings.Contains(s, "-----END")
+			return "[已脱敏：私钥材料]\n", true
+		}
 	}
 	s = secretAssign.ReplaceAllString(s, "${1}${2}***")
 	s = bearer.ReplaceAllString(s, "${1} ***")
@@ -292,6 +302,102 @@ func redactText(s string) string {
 		}
 	}
 	return out.String()
+}
+
+// secretKeyName：JSON 键名像口令/令牌/私钥/TOTP 种子时，其字符串值整体替换为 ***。
+var secretKeyName = regexp.MustCompile(`(?i)(password|passwd|secret|token|private_?key|api_?key|totp|otp_secret)`)
+
+// redactJSON 按 JSON 结构逐个字符串值脱敏后重新缩进输出：字段顺序不变、结果仍是合法 JSON。
+// 不能对整段 JSON 文本做逐行脱敏：字符串里的换行被转义成 \n、引号被转义成 \"，
+// 多行私钥与 password: "值" 这类内容会漏遮，私钥头不成对时还会吞掉后续行、破坏 JSON。
+// 这里先解码出原始字符串再交给 redactText，键名敏感的字符串值直接替换为 ***。
+func redactJSON(raw []byte) ([]byte, error) {
+	type frame struct {
+		object, wantKey bool
+		n               int
+	}
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.UseNumber()
+	var out bytes.Buffer
+	var stack []frame
+	secretValue := false
+	sep := func() {
+		if len(stack) == 0 {
+			return
+		}
+		top := stack[len(stack)-1]
+		if top.n > 0 && (!top.object || top.wantKey) {
+			out.WriteByte(',')
+		}
+	}
+	done := func() {
+		secretValue = false
+		if len(stack) > 0 {
+			top := &stack[len(stack)-1]
+			top.n++
+			top.wantKey = top.object
+		}
+	}
+	writeString := func(s string) error {
+		enc, err := json.Marshal(s)
+		out.Write(enc)
+		return err
+	}
+	for {
+		tok, err := dec.Token()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return nil, err
+		}
+		switch v := tok.(type) {
+		case json.Delim:
+			if v == '{' || v == '[' {
+				sep()
+				out.WriteByte(byte(v))
+				secretValue = false
+				stack = append(stack, frame{object: v == '{', wantKey: v == '{'})
+				continue
+			}
+			out.WriteByte(byte(v))
+			stack = stack[:len(stack)-1]
+			done()
+		case string:
+			if n := len(stack); n > 0 && stack[n-1].object && stack[n-1].wantKey {
+				sep()
+				if err := writeString(v); err != nil {
+					return nil, err
+				}
+				out.WriteByte(':')
+				stack[n-1].wantKey = false
+				secretValue = secretKeyName.MatchString(v)
+				continue
+			}
+			sep()
+			clean := redactText(v)
+			if secretValue && v != "" {
+				clean = "***"
+			}
+			if err := writeString(clean); err != nil {
+				return nil, err
+			}
+			done()
+		default:
+			sep()
+			enc, err := json.Marshal(v)
+			if err != nil {
+				return nil, err
+			}
+			out.Write(enc)
+			done()
+		}
+	}
+	var pretty bytes.Buffer
+	if err := json.Indent(&pretty, out.Bytes(), "", "  "); err != nil {
+		return nil, err
+	}
+	return pretty.Bytes(), nil
 }
 
 // finish 写收据、恢复输出；--json 时把收据打印到标准输出。返回原错误（保留退出码）。
@@ -319,7 +425,9 @@ func (run *siteRun) finish(err error) error {
 	run.stop()
 	raw, mErr := json.MarshalIndent(rc, "", "  ")
 	if mErr == nil {
-		raw = []byte(redactText(string(raw)))
+		raw, mErr = redactJSON(raw)
+	}
+	if mErr == nil {
 		f, oErr := openNoFollow(run.receiptPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
 		if oErr == nil {
 			_, mErr = f.Write(append(raw, '\n'))

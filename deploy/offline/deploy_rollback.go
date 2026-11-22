@@ -512,11 +512,7 @@ func historyCommand(args []string, inv siteInvocation, w io.Writer) error {
 		return err
 	}
 	if *asJSON {
-		raw, err := json.MarshalIndent(struct {
-			Source  string         `json:"source"`
-			Current int            `json:"current"`
-			History []deployRecord `json:"history"`
-		}{s.source(), s.Current, s.History}, "", "  ")
+		raw, err := historyJSON(s)
 		if err != nil {
 			return err
 		}
@@ -525,6 +521,20 @@ func historyCommand(args []string, inv siteInvocation, w io.Writer) error {
 	}
 	printHistory(w, s)
 	return nil
+}
+
+// historyJSON 是 history --json 的输出：只含来源、当前序号与发行元数据，并按收据同样的规则脱敏
+// （工作流会上传或打印它）。
+func historyJSON(s state) ([]byte, error) {
+	raw, err := json.MarshalIndent(struct {
+		Source  string         `json:"source"`
+		Current int            `json:"current"`
+		History []deployRecord `json:"history"`
+	}{s.source(), s.Current, s.History}, "", "  ")
+	if err != nil {
+		return nil, err
+	}
+	return redactJSON(raw)
 }
 
 func printHistory(w io.Writer, s state) {

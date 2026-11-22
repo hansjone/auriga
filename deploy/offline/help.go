@@ -242,9 +242,10 @@ func printTopHelp(w io.Writer) {
   history                    列出部署历史与当前发行
   经 sudo 调用（工作流）：运行器账户（site.json 的 server.runner）只能 deploy <提交号>、rollback、status、
   history 且参数受白名单限制，deploy 只允许快进；其他管理员经 sudo 运行 deploy/rollback 需加 --operator；
-  有 site.json 时经 sudo 的 status 不收参数（数据目录取 server.data）；经 sudo 的 adopt 同样需 --operator
+  有 site.json 时经 sudo 的 status 不收参数（数据目录取 server.data）；经 sudo 的 adopt 同样需 --operator。
+  sudoers 片段 deploy/site/sudoers/auriga-runner；示例工作流与运行器安装说明 deploy/site/workflows/。
   status 会同时显示安装来源与当前发行；deploy/rollback/adopt 每次写 <logs.dir>/<时间>-<命令>.log 与 .json 收据，
-  退出码 0 成功、1 未切换就失败、2 已自动回滚、3 需人工
+  退出码 0 成功、1 未切换就失败、2 已自动回滚、3 需人工；--json 标准输出只打印脱敏收据
 
 维护者
   release         生成发行附件（标签、签名、Windows 与 DSH 输入见 docs/release/maintainer.zh.md）
@@ -447,7 +448,8 @@ func init() {
 			"输入指纹：Go 由源码配方 go-inputs.sh deps 在断网 tool-go 容器里 go list -deps 展开（每次都需要 Go 依赖输入与 tool-go 镜像），Web/Java 用 deploy/site/input-sets 的打包清单，另加依赖锁摘要、工具镜像与构建脚本；--dry-run 不展开 Go 依赖图，Go 产物按将重建列出。",
 			"再次部署：按输入指纹决定是否构建产物（指纹与当前发行一致则复用 auriga-releases/<序号>/artifacts/，复用前核对该发行目录与 state 锚定的 releaseSums，不过就改为重建）；构建后按装配摘要（产物树、基础镜像、系统输入、Dockerfile 目标段、暂存清单）决定是否换镜像，收据写明触发项。编排摘要未变且仅 edge/platform 变化时只换容器（跳过 panel-prepare、不重建 network-broker；broker 产物也变则完整启动，否则收据写混合版本；之后照 start.sh 重启 agent；有 collab-source 时以离线维护模式走 start-collab-network.sh，不直接 up collab；上一版无编排摘要按编排变化处理）；仅 operator 变化时只改 stack.env 并 preflight；agent/bifrost/编排变化或首装走完整启动（render → preflight → start）。新发行写入 auriga-releases/<序号>/（含 provenance.json、fingerprints.json、artifacts/、versions.txt 与 status 可读的发行标记），镜像加打 auriga/<服务>:r<序号>，保留 server.keepHistory 份（默认 3）。",
 			"切换失败时：先停掉新版本会写数据的服务（platform、collab、edge 等），再读迁移与数据目录格式版本；与切换前相同（数据未触碰），或上一版不早于新发行的 schemaCompatFloor 且当前格式不高于上一版的 formatMax，并且上一版是成功记录、其发行目录与 state 锚定的 releaseSums 一致，才自动回滚（退出码 2；判定前已停掉全部写数据服务，故自动回滚一律完整启动上一版），否则退出码 3 交人工；首装失败退出码 1 并保留现场。",
-			"每次写 <logs.dir>/<时间>-deploy.log 与同名 .json 收据（脱敏），--json 时标准输出只打印收据。",
+			"每次写 <logs.dir>/<时间>-deploy.log 与同名 .json 收据（脱敏），--json 时标准输出只打印收据（工作流据此上传；logs.dir 仍仅 root 可读）。",
+			"sudoers 与示例工作流：deploy/site/sudoers/auriga-runner、deploy/site/workflows/（须先登记 server.runner）。",
 		},
 		docs: merge(buildDocs, map[string]string{
 			"full":            "强制重建全部产物与镜像（忽略输入指纹与装配摘要跳过），与 --services 互斥",
