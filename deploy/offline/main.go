@@ -37,9 +37,36 @@ func main() {
 	}
 }
 
+func windowsClientCommand(args []string) bool {
+	if len(args) == 0 {
+		return false
+	}
+	switch args[0] {
+	case "client":
+		return true
+	case "deps":
+		if len(args) > 1 && args[1] == "baseline" {
+			return true
+		}
+		for _, a := range args[1:] {
+			if a == "--client" {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 func dispatch(args []string) error {
-	if runtime.GOOS != "linux" || runtime.GOARCH != "amd64" {
-		return errors.New("离线部署和构建仅支持 Linux amd64；请把附件和源码拷到 Linux 服务器或独立 Linux 构建机运行")
+	// Windows 上可看客户端相关命令（deps、client）的帮助；其余命令（含顶层帮助）仍按平台拒绝。
+	if runtime.GOOS == "windows" && len(args) > 0 && (args[0] == "deps" || args[0] == "client") {
+		if done, err := tryHelp(args); done {
+			return err
+		}
+	}
+	winClient := runtime.GOOS == "windows" && windowsClientCommand(args)
+	if !winClient && (runtime.GOOS != "linux" || runtime.GOARCH != "amd64") {
+		return errors.New("离线部署和构建仅支持 Linux amd64；Windows 上仅支持 auriga deps … --client、deps baseline --client 与 client build")
 	}
 	// 经 sudo 的运行器账户只能运行 deploy、rollback、status、history（D12、P3），在帮助与
 	// 其余分派之前拦截。
@@ -80,6 +107,24 @@ func dispatch(args []string) error {
 	}
 	if args[0] == "changes" {
 		return changesCommand(args[1:])
+	}
+	if args[0] == "client" {
+		if runtime.GOOS != "windows" {
+			return errors.New("client build 仅支持 Windows；请在 Windows 现场使用发行附件中的 auriga.exe")
+		}
+		if len(args) < 2 {
+			return errors.New("用法：auriga client build --version <SemVer>；运行 auriga client --help 查看说明")
+		}
+		if args[1] != "build" {
+			return fmt.Errorf("未知 client 子命令 %s；可用 build", args[1])
+		}
+		return clientBuildCommand(args[2:], currentInvocation(), os.Stdout)
+	}
+	if winClient {
+		if args[0] == "deps" {
+			return depsCommand(args[1:])
+		}
+		return errors.New("Windows 上仅支持 auriga deps … --client、deps baseline --client 与 client build")
 	}
 	if os.Geteuid() != 0 {
 		return errors.New("现场操作需要 sudo/root，以保护服务密钥及备份权限")
@@ -313,6 +358,9 @@ func withLock(data, op string, work func() error) error {
 var siteLock = acquireSiteLock
 
 func trustedParent(parent string) error {
+	if runtime.GOOS == "windows" {
+		return windowsTrustedParent(parent)
+	}
 	if err := noSymlinks(parent); err != nil {
 		return err
 	}

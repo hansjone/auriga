@@ -4,7 +4,7 @@
 
 正式附件只在 Forgejo Release 用浏览器手动下载。未分卷时只部署需安装 tar 和 SHA256SUMS；改代码再下源码归档与累积 devkit，见根 DEPLOY.md / MAINTAIN.md。包自带静态 CLI 和公钥，`./auriga verify <文件或目录>` 全离线校验摘要与签名；必须使用独立批准公钥，例如 `--verify-key /secure/release-public.pem` 固定。分卷保留全部 `.part001…`、`.parts.json`、`.parts.json.sig`，用同页引导程序 `./auriga unpack <安装包.tar.part001> --out <全新目录>` 逐卷校验和读取，无须拼大 tar。未分卷 tar 也支持同一命令。
 
-新基线发行提供完整 devkit。同一基线的后续版本提供精确上版可用的 delta，同页仍可下载完整套件。Windows 客户端开发需要签名源码和独立 Windows 输入套件。DSH 上游源码归档、许可证及来源清单供只读参考。Windows 与 DSH 的附件选择、整包摘要及分卷说明见同页 `DOWNLOADS.txt`。
+新基线发行提供完整 devkit。同一基线的后续版本提供精确上版可用的 delta，同页仍可下载完整套件。Windows 客户端开发需要签名源码和独立 Windows 输入套件。发行附件另带 `auriga.exe`（Windows amd64 薄壳，见 `SHA256SUMS`）：现场用它跑 `auriga deps … --client`、`deps baseline --client` 与 `auriga client build`，再转调 `scripts/client-release`。新发布者或未签名时 SmartScreen 可能提示已阻止——先用 `Get-FileHash` 对照 `SHA256SUMS` 中的 `auriga.exe` 摘要，核对无误后再在提示中选“更多信息”→“仍要运行”。DSH 上游源码归档、许可证及来源清单供只读参考。Windows 与 DSH 的附件选择、整包摘要及分卷说明见同页 `DOWNLOADS.txt`。
 
 包含 dedicated 运行配方的新 Linux devkit 还必须携带 `build.runtimeTooling` 指定的原始 pnpm 11.28.5 TGZ，存入 `cache/runtime-tooling.tgz` 或对应累积 blob。它复用 installer 的同一固定版本/SHA512，并另以发行索引 SHA256、套件签名和依赖锁键登记；缺失或篡改明确失败。现场仍先运行 `./auriga devkit verify`，real-dsh checked context 会从对应版本自动定位此输入，按固定配方离线安装至只读 `/opt/auriga-tools/pnpm`。维护者输入准备、原始 TGZ 校验与镜像命令见 [real-dsh 配方](../compose/real-dsh/README.md)。旧已签套件不修改，使用与新源码锁匹配的新套件。
 
@@ -68,6 +68,26 @@ sudo ./auriga deps fetch             # 按规则准备缺失且允许自动补�
 sudo ./auriga deps import /media/auriga-deps.tar --trust-fingerprint SHA256:<64位指纹>
 sudo ./auriga deps import /srv/auriga/kits/auriga-devkit-0.2.0 --trust-state   # 直接导入解包后的发行开发套件
 ```
+
+Windows 客户端（`auriga.exe`，在提权的管理员 PowerShell 里运行）。配置只读固定的 `%ProgramData%\Auriga\site.json`（不接受 `--config`）；该文件、所在目录 `%ProgramData%\Auriga` 与 `deps.cache` 必须由 Administrators 或 SYSTEM 所有、普通用户（Users、Authenticated Users、Everyone 等）没有任何写类权限，空 DACL 视为全开放而拒绝；更上层祖先（如 `C:\ProgramData`、`D:\`）允许普通用户新建子项，但不得能删除/改名子项或改权限。新建目录会继承 `C:\ProgramData` 中 Users 的“新建文件”权限，需要先收紧：
+
+```powershell
+icacls "$env:ProgramData\Auriga" /setowner *S-1-5-32-544 /T
+icacls "$env:ProgramData\Auriga" /inheritance:r /grant:r "*S-1-5-18:(OI)(CI)F" "*S-1-5-32-544:(OI)(CI)F" "*S-1-5-32-545:(OI)(CI)RX" /T
+# deps.cache（例如 D:\auriga\cache）的父目录 D:\auriga 按同样方式收紧
+```
+
+```powershell
+.\auriga.exe deps status --client
+.\auriga.exe deps fetch --client --accept-new-deps   # 写入 deps.cache\inputs\client\<锁摘要>\，记录 site-dependencies.json（来源与清单 SHA-256）
+.\auriga.exe deps import D:\kits\auriga-client-windows-<锁摘要> --client [--trust-fingerprint SHA256:<64位>]
+.\auriga.exe deps baseline --client                  # 登记本机 csc/tar/PowerShell 系统工具基线
+.\auriga.exe client build --version 1.0.2-site.1     # sequence 从 platformOrigin 公开桌面账本自动取；产出待签目录后人工 sign --review-only
+```
+
+- `deps.sources.files` 映射规则：锁定 URL 先试 `<files>/<URL 路径>`，再试 `<files>/<文件名>`；路径逐段百分号解码（如 `%2B` 存为 `+`），解码后含 `..`、`\`、`:` 等的拒绝。支持 `https://`（不得内嵌凭据，只跟随 https 重定向，`deps.caFile` 作为私有 CA）与 `file://`（离线介质）。摘要仍按锁核对，不符即失败；配置了 files 时不回落公网。`allowPublic=false` 时缺 files 或 npm 源都会失败并说明缺什么。
+- `deps.kits` 只使用带 `trustFingerprint` 的发行签名客户端套件（先验签再用）；`trustState` 依赖 Linux state，客户端跳过。`deps import --client` 先把导入源复制到缓存内暂存目录、校验副本后再落位；导入源须同样由管理员受控。
+- `client build`：现场缓存套件以写入时记录的清单摘要（`site-dependencies.json`）走 `--site-kit --devkit-sha256`，`client.verifyKey`/`trustFingerprint` 只用于核验签名源码；构建 Node 只执行套件内 `build-node\node.exe`，执行前核对其摘要等于套件清单登记值。sequence 取 stable、beta 两渠道 `latest` 可见最大序号 +1（都 404 时为 1，其他错误失败）；已撤回发行不可见，发布被拒时用 `--sequence` 指定更大值重建。系统工具按现场基线放行时，`offline-evidence.json` 的 `systemTools` 记录所用基线，`sign --review-only` 也会提示。
 
 ## 本机部署（deploy、rollback、history）
 

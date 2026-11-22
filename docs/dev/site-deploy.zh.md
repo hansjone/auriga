@@ -248,6 +248,7 @@ auriga client build                                Windows 客户端，见 D13
 - “不用发行套件”指：基础输入来自现场缓存。构建用 Node 只用缓存或套件中摘要匹配 `build-node.json` 的版本，不用系统 Node。
 - 构建 Node、CPython 独立包、DSH runtime、LibreOffice 闭包等文件类输入，经 `deps.sources.files` 按锁定 URL 与 SHA-256 取得。系统工具（csc.exe、tar、PowerShell）摘要允许“现场登记基线”（`auriga deps baseline --client`），写入收据；Windows 更新导致变化时提示重新登记。
 - 签名仍保留人工 `sign --review-only` 核对；自动化只做到产出待签目录。
+- **实施注记（第 9 步）**：Go 薄壳负责站点配置与缓存的 Windows ACL、并发锁、导入源受信校验，准备与构建转调 `scripts/client-release/site-deps.mjs` / `cli.mjs`（复用 `prepare.mjs`）；`deploy/offline` 仍只依赖标准库。缓存布局 `inputs/client/<lockSha256>/`（锁键用 `inputs.mjs` 的 `lockIdentity`）。`files` 映射先 `<files>/<URL 路径>` 再 `<files>/<文件名>`（逐段百分号解码，支持 `file://`）。现场缓存套件无发行签名：以 fetch/import 写入时记录在 `site-dependencies.json` 的清单摘要经 `--site-kit --devkit-sha256` 门禁（信任依据是管理员 ACL 保护的缓存），`client.verifyKey`/`trustFingerprint` 仍核签名源码；`deps.kits` 套件须带 `trustFingerprint` 并验签，`trustState` 不适用于客户端。构建 Node 执行前由 Go 核对其摘要等于套件清单登记值。Windows ACL：对象与直接父目录严格（Administrators/SYSTEM 所有、普通主体无任何写类权限、拒绝空 DACL），更上层祖先允许普通用户新建子项但不得删除/替换（对应 Linux 粘滞位规则）。`client build --version` 必填；`sequence` = `{platformOrigin}/api/resource/v1/desktop/latest` 在 stable、beta 的可见最大序号 +1（都 404 时为 1，其他错误失败），已撤回发行不可见时用 `--sequence` 覆盖。系统工具基线所用依据记入 `offline-evidence.json`。
 
 ### D14 构建缓存加速（后续）
 

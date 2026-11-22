@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"crypto/ed25519"
 	"crypto/rand"
 	"crypto/x509"
@@ -137,6 +138,9 @@ func TestReleaseCacheSignedPartsAndTagGate(t *testing.T) {
 	if err := os.WriteFile(builders.Executable, []byte("fixture cli"), 0755); err != nil {
 		t.Fatal(err)
 	}
+	builders.WindowsCLI = func(_ context.Context, _, out string) error {
+		return os.WriteFile(out, []byte("fixture windows cli"), 0755)
+	}
 	parent := t.TempDir()
 	opts := releaseOptions{Source: source, Tag: "1.0", Index: index, Out: filepath.Join(parent, "v1"), Cache: filepath.Join(parent, "cache"), Key: key, Limit: 65536, NewBaseline: true, WindowsClient: windowsArchive, WindowsSHA: windowsSHA, DSHSource: dshSource}
 	if err := generateRelease(opts, builders); err != nil {
@@ -224,8 +228,15 @@ exec "$GATE_COMMIT_REAL_GIT" "$@"
 	if err := verifySums(opts.Out); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := os.Stat(filepath.Join(opts.Out, "auriga.exe")); !os.IsNotExist(err) {
-		t.Fatal("Linux release unexpectedly includes a Windows launcher", err)
+	if _, err := os.Stat(filepath.Join(opts.Out, "auriga.exe")); err != nil {
+		t.Fatal("发行附件应包含 Windows 薄壳 auriga.exe", err)
+	}
+	sumsRaw, err := os.ReadFile(filepath.Join(opts.Out, "SHA256SUMS"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(sumsRaw), "  auriga.exe\n") && !strings.Contains(string(sumsRaw), "  auriga.exe\r\n") {
+		t.Fatal("SHA256SUMS 应登记 auriga.exe")
 	}
 	fp, err := publicFingerprint(public)
 	if err != nil {

@@ -218,10 +218,15 @@ func writeDownloads(root string, m distributionManifest, cat devkitCatalog, asse
 			purpose = "可选审计：版本/锁/断网构建门禁"
 		case a.Name == "DOWNLOADS.txt":
 			purpose = "本下载说明"
+		case a.Name == "auriga.exe":
+			purpose = "Windows 现场薄壳：deps --client / client build（先核 SHA256SUMS）"
+		case a.Name == "auriga":
+			purpose = "Linux amd64 引导程序"
 		}
 		fmt.Fprintf(&b, "%s  %d B  %s\n", a.Name, a.Size, purpose)
 	}
 	b.WriteString("SHA256SUMS：必下，全部附件摘要。SHA256SUMS.sig：签名（包内也自带摘要/签名）。\nrelease-manifest.json：可选审计，支持版本/每版锁摘要及真实断网构建门禁结果。\nDOWNLOADS.txt：本说明；所有文件均只在Forgejo Release发布。\n")
+	b.WriteString("Windows auriga.exe：新发布者或未签名时 SmartScreen 可能提示“已阻止”。先用 Get-FileHash 对照 SHA256SUMS 中的 auriga.exe 摘要；核对无误后在提示中选“更多信息”→“仍要运行”。不要跳过摘要核对。\n")
 	return os.WriteFile(filepath.Join(root, "DOWNLOADS.txt"), []byte(b.String()), 0644)
 }
 

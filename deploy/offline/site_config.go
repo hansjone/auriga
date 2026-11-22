@@ -2,8 +2,8 @@ package main
 
 // 站点配置 site.json（设计 docs/dev/site-deploy.zh.md D9）。
 //
-// 第 1 步只实现解析、严格校验和权限校验；client 段只解析与校验，不接线；
-// server、sign、logs、source.git 也只做格式校验，由后续步骤使用。
+// 第 1 步实现解析、严格校验和权限校验；第 9 步补 Windows ACL，并把 client 段接到
+// deps --client / client build。server、sign、logs、source.git 的格式校验仍由后续步骤使用。
 
 import (
 	"bytes"
@@ -144,6 +144,8 @@ var (
 	siteOwnerOf      = fileOwnerUID
 	siteParentCheck  = trustedParent
 	openSiteFileFunc = openSiteFile
+	// Windows：读取已打开站点配置句柄上的所有者与 DACL。
+	siteFileSecurityFunc = siteFileSecurity
 )
 
 // loadSiteConfig 读取并校验站点配置。经 sudo 调用时拒绝 --config；root 直接运行
@@ -191,6 +193,16 @@ func readSiteConfigFile(path string) ([]byte, error) {
 	if err := checkSiteConfigInfo(path, info); err != nil {
 		return nil, err
 	}
+	if runtime.GOOS == "windows" {
+		// ACL 取自已打开的同一句柄，避免检查与读取之间被替换。
+		sec, err := siteFileSecurityFunc(f)
+		if err != nil {
+			return nil, fmt.Errorf("站点配置 ACL 校验失败 %s：%w", path, err)
+		}
+		if err := checkWindowsSiteSecurity(path, sec); err != nil {
+			return nil, fmt.Errorf("%w%s", err, windowsACLHint(filepath.Dir(path)))
+		}
+	}
 	raw, err := io.ReadAll(io.LimitReader(f, siteConfigLimit+1))
 	if err != nil {
 		return nil, err
@@ -201,12 +213,20 @@ func readSiteConfigFile(path string) ([]byte, error) {
 	return raw, nil
 }
 
-// checkSiteConfigInfo：root 所有、普通文件、权限恰为 0600 或 0644，
-// 祖先目录不可被组或其他用户写（复用 trustedParent）。
+// checkSiteConfigInfo：必须是普通文件；Linux 另要求 root 所有、0600/0644 与受信祖先。
+// Windows 的所有者/DACL/祖先校验在 readSiteConfigFile 中基于已打开句柄完成。
 func checkSiteConfigInfo(path string, info os.FileInfo) error {
 	if !info.Mode().IsRegular() {
 		return fmt.Errorf("站点配置必须是普通文件 %s", path)
 	}
+	if runtime.GOOS == "windows" {
+		return nil
+	}
+	return checkUnixSiteConfigInfo(path, info)
+}
+
+// checkUnixSiteConfigInfo：root 所有、权限恰为 0600 或 0644，祖先不可被组或其他用户写。
+func checkUnixSiteConfigInfo(path string, info os.FileInfo) error {
 	uid, err := siteOwnerOf(info)
 	if err != nil {
 		return err
@@ -223,7 +243,8 @@ func checkSiteConfigInfo(path string, info os.FileInfo) error {
 	return nil
 }
 
-// checkRootOwnedDir：目录本身 root 所有、组和其他用户不可写，祖先目录同 trustedParent。
+// checkRootOwnedDir：Linux 上 root 所有且组/其他人不可写；Windows 上 Administrators/SYSTEM
+// 所有且普通用户无写；祖先目录同平台受信校验。
 func checkRootOwnedDir(what, dir string) error {
 	if err := noSymlinks(dir); err != nil {
 		return err
@@ -234,6 +255,17 @@ func checkRootOwnedDir(what, dir string) error {
 	}
 	if !info.IsDir() {
 		return fmt.Errorf("%s不是目录 %s", what, dir)
+	}
+	if runtime.GOOS == "windows" {
+		if err := checkWindowsTrustedPath(what, dir); err != nil {
+			return fmt.Errorf("%w%s", err, windowsACLHint(dir))
+		}
+		if parent := filepath.Dir(dir); parent != dir {
+			if err := siteParentCheck(parent); err != nil {
+				return fmt.Errorf("%s的祖先目录不受信：%w", what, err)
+			}
+		}
+		return nil
 	}
 	uid, err := siteOwnerOf(info)
 	if err != nil {
@@ -253,8 +285,8 @@ func checkRootOwnedDir(what, dir string) error {
 	return nil
 }
 
-// checkRootOwnedPath：目录同 checkRootOwnedDir；普通文件要求 root 所有、组和其他用户
-// 不可写，所在目录同 trustedParent。用于套件目录、导入源（目录或归档）与 deps.caFile。
+// checkRootOwnedPath：目录同 checkRootOwnedDir；普通文件要求受信属主且普通主体不可写。
+// 用于套件目录、导入源（目录或归档）与 deps.caFile。
 func checkRootOwnedPath(what, path string) error {
 	if err := noSymlinks(path); err != nil {
 		return err
@@ -268,6 +300,15 @@ func checkRootOwnedPath(what, path string) error {
 	}
 	if !info.Mode().IsRegular() {
 		return fmt.Errorf("%s不是普通文件或目录 %s", what, path)
+	}
+	if runtime.GOOS == "windows" {
+		if err := checkWindowsTrustedPath(what, path); err != nil {
+			return err
+		}
+		if err := siteParentCheck(filepath.Dir(path)); err != nil {
+			return fmt.Errorf("%s所在目录不受信：%w", what, err)
+		}
+		return nil
 	}
 	uid, err := siteOwnerOf(info)
 	if err != nil {
@@ -445,22 +486,65 @@ func (c *siteConfig) validate() error {
 	return nil
 }
 
-// checkConfigPath：Linux 规范绝对路径，不含空白控制字符和引号。
+// checkConfigPath：接受 Linux 规范绝对路径；仅在 Windows 上另接受 Windows 盘符/UNC 绝对路径
+// （现场 Windows 的 deps.cache 等）——Linux 上 `D:\x` 会被当成相对路径，必须拒绝。
+// 不含空白控制字符和引号。
 func checkConfigPath(name, value string) error {
 	if value == "" {
 		return fmt.Errorf("%s 不能为空", name)
 	}
-	if !pathpkg.IsAbs(value) || pathpkg.Clean(value) != value || strings.ContainsAny(value, "\x00\n\r\t\"'\\") {
-		return fmt.Errorf("%s 必须是规范绝对路径（当前 %q）", name, value)
+	if strings.ContainsAny(value, "\x00\n\r\t\"'") {
+		return fmt.Errorf("%s 不能含空白、控制字符或引号（当前 %q）", name, value)
+	}
+	if pathpkg.IsAbs(value) && pathpkg.Clean(value) == value && !strings.Contains(value, `\`) {
+		return nil
+	}
+	if siteGOOS == "windows" && windowsAbsPath.MatchString(value) {
+		return nil
+	}
+	return fmt.Errorf("%s 必须是规范绝对路径（当前 %q）", name, value)
+}
+
+// siteGOOS 是路径语法所依据的平台；测试可替换。
+var siteGOOS = runtime.GOOS
+
+// checkClientPaths：Windows 客户端命令使用的 deps.cache、deps.kits、deps.caFile 必须是
+// Windows 绝对路径（POSIX 风格路径在 Windows 上会落到当前盘符下的相对位置）。
+func checkClientPaths(cfg *siteConfig) error {
+	if siteGOOS != "windows" || cfg.Deps == nil {
+		return nil
+	}
+	if err := checkWindowsPath("deps.cache", cfg.Deps.Cache); err != nil {
+		return err
+	}
+	for i, kit := range cfg.Deps.Kits {
+		if err := checkWindowsPath(fmt.Sprintf("deps.kits[%d].path", i), kit.Path); err != nil {
+			return err
+		}
+	}
+	if cfg.Deps.CAFile != nil {
+		return checkWindowsPath("deps.caFile", *cfg.Deps.CAFile)
 	}
 	return nil
 }
 
 func checkWindowsPath(name, value string) error {
+	if value == "" {
+		return fmt.Errorf("%s 不能为空", name)
+	}
 	if !windowsAbsPath.MatchString(value) {
 		return fmt.Errorf("%s 必须是 Windows 绝对路径，例如 D:\\\\auriga-client-out（当前 %q）", name, value)
 	}
 	return nil
+}
+
+// pathsOverlap 判断两个绝对路径是否相同或互为祖先（兼容 / 与 \）。
+func pathsOverlap(a, b string) bool {
+	norm := func(p string) string {
+		return strings.TrimRight(strings.ReplaceAll(p, `\`, "/"), "/")
+	}
+	na, nb := norm(a), norm(b)
+	return na == nb || strings.HasPrefix(na, nb+"/") || strings.HasPrefix(nb, na+"/")
 }
 
 func (s *siteSource) validate() error {
@@ -586,8 +670,9 @@ func (d *siteDeps) validate() error {
 	if err := checkConfigPath("deps.cache", d.Cache); err != nil {
 		return err
 	}
-	if len(strings.Split(strings.Trim(d.Cache, "/"), "/")) < 2 {
-		return errors.New("deps.cache 至少需要两层路径，例如 /srv/auriga/cache")
+	cacheDepth := strings.Split(strings.Trim(strings.ReplaceAll(d.Cache, `\`, `/`), "/"), "/")
+	if len(cacheDepth) < 2 {
+		return errors.New("deps.cache 至少需要两层路径，例如 /srv/auriga/cache 或 D:\\auriga\\cache")
 	}
 	seen := map[string]bool{}
 	for i, kit := range d.Kits {
@@ -599,7 +684,7 @@ func (d *siteDeps) validate() error {
 			return fmt.Errorf("%s.path 重复 %s", name, kit.Path)
 		}
 		seen[kit.Path] = true
-		if kit.Path == d.Cache || strings.HasPrefix(kit.Path, d.Cache+"/") || strings.HasPrefix(d.Cache, kit.Path+"/") {
+		if pathsOverlap(kit.Path, d.Cache) {
 			return fmt.Errorf("%s.path 不能与 deps.cache 重叠", name)
 		}
 		switch {

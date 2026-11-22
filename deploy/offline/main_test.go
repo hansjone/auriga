@@ -89,3 +89,33 @@ func TestPrivateResourceKeys(t *testing.T) {
 		}
 	}
 }
+
+func TestWindowsClientCommandsAndHelp(t *testing.T) {
+	for _, c := range []struct {
+		args []string
+		want bool
+	}{
+		{[]string{"client", "build"}, true},
+		{[]string{"deps", "baseline", "--client"}, true},
+		{[]string{"deps", "fetch", "--client"}, true},
+		{[]string{"deps", "import", `D:\kit`, "--client"}, true},
+		{[]string{"deps", "fetch"}, false},
+		{[]string{"deploy"}, false},
+		{[]string{"--help"}, false},
+	} {
+		if got := windowsClientCommand(c.args); got != c.want {
+			t.Errorf("windowsClientCommand(%v)=%v，期望 %v", c.args, got, c.want)
+		}
+	}
+	if runtime.GOOS != "windows" {
+		return
+	}
+	for _, args := range [][]string{{"deps", "--help"}, {"client", "--help"}, {"client", "build", "--help"}, {"deps", "baseline", "--help"}} {
+		if err := dispatch(args); err != nil {
+			t.Errorf("Windows 上应能查看 %v 帮助：%v", args, err)
+		}
+	}
+	if err := dispatch([]string{"deploy"}); err == nil || !strings.Contains(err.Error(), "Linux amd64") {
+		t.Errorf("Windows 上非客户端命令应拒绝：%v", err)
+	}
+}

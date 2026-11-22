@@ -29,6 +29,8 @@ type releaseBuilders struct {
 	Bundle     func([]string, string) error
 	Devkit     func([]string) error
 	Executable string
+	// WindowsCLI 交叉编译 auriga.exe；测试可注入写桩文件。空则默认 go build GOOS=windows。
+	WindowsCLI func(ctx context.Context, source, out string) error
 	Gate       func(gateRequest) (buildGate, error)
 }
 type cachedKit struct {
@@ -481,6 +483,20 @@ func generateRelease(o releaseOptions, builders releaseBuilders) error {
 		return err
 	}
 	assets = append(assets, cli)
+	winExe := filepath.Join(stage, "auriga.exe")
+	buildWin := builders.WindowsCLI
+	if buildWin == nil {
+		buildWin = buildWindowsAurigaCLI
+	}
+	// 从已签名的发行源码快照（与源码附件同一棵树）编译，不读工作区未提交内容。
+	if err := buildWin(ctx, sourceRoot, winExe); err != nil {
+		return fmt.Errorf("交叉编译 Windows auriga.exe：%w", err)
+	}
+	winCLI, err := describeAssetContext(ctx, winExe)
+	if err != nil {
+		return err
+	}
+	assets = append(assets, winCLI)
 	if err := signingPublic(o.Key, filepath.Join(stage, "release-public.pem")); err != nil {
 		return err
 	}

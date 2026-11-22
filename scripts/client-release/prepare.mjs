@@ -20,6 +20,7 @@ import {
   systemTools,
   sealInputs,
 } from './inputs.mjs';
+import { createDownloader } from './files-source.mjs';
 import { sha256File } from '../../clients/installer/runtime/verify.mjs';
 import {
   downloadPythonInputs,
@@ -35,32 +36,6 @@ export function run(command, args, cwd, env = process.env) {
   });
   if (result.status !== 0)
     throw new Error(`输入准备命令失败（${result.status}）：${command}`);
-}
-async function download(url, path) {
-  if (existsSync(path)) throw new Error('准备输入禁止覆盖');
-  // Windows curl honors the maintenance computer's HTTPS_PROXY. Node 22 fetch
-  // does not automatically do so. No curl invocation exists in offline build.
-  const result = spawnSync(
-    'curl.exe',
-    [
-      '--fail',
-      '--silent',
-      '--show-error',
-      '--location',
-      '--proto',
-      '=https',
-      '--proto-redir',
-      '=https',
-      '--max-time',
-      '300',
-      '--output',
-      path,
-      url,
-    ],
-    { stdio: 'inherit', windowsHide: true },
-  );
-  if (result.status !== 0)
-    throw new Error(`缺少联网准备输入：${url}（curl ${result.status}）`);
 }
 export function removeProjectReferences(store) {
   // pnpm keeps machine-local junctions to previous virtual stores. They are
@@ -131,18 +106,34 @@ export function installPluginDeps(kit, root, env, runner = run) {
     env,
   );
 }
-export async function prepareInputs(parent) {
+/**
+ * 准备 Windows 客户端输入套件。
+ * options：filesSource、allowPublic（默认 true，兼容维护机直连公网）、
+ * npmRegistry、caFile（内部依赖源私有 CA，curl --cacert 与 npm cafile）、
+ * download（注入下载器，测试用）、root。
+ */
+export async function prepareInputs(parent, options = {}) {
+  const {
+    filesSource,
+    allowPublic = true,
+    npmRegistry,
+    caFile,
+    download: injectedDownload,
+    root = ROOT,
+  } = options;
+  const download =
+    injectedDownload ?? createDownloader({ filesSource, allowPublic, caFile });
   const tools = systemTools();
-  const { lockSha256, locks } = lockIdentity();
+  const { lockSha256, locks } = lockIdentity(root);
   const kit = join(resolve(parent), `auriga-client-windows-${lockSha256}`);
   mkdirSync(kit, { recursive: false });
   const work = join(kit, '_prepare');
   mkdirSync(work);
   const runtime = JSON.parse(
-    readFileSync(join(ROOT, 'clients/installer/upstream.json')),
+    readFileSync(join(root, 'clients/installer/upstream.json')),
   );
   const packageManager = JSON.parse(
-    readFileSync(join(ROOT, 'package.json')),
+    readFileSync(join(root, 'package.json')),
   ).packageManager;
   const pnpmBuildVersion = packageManager.match(/^pnpm@(\d+\.\d+\.\d+)$/)?.[1];
   if (!pnpmBuildVersion) throw new Error('pnpm 必须固定精确版本');
@@ -172,7 +163,7 @@ export async function prepareInputs(parent) {
     if (sha256File(zip) !== expected)
       throw new Error(`Node zip 摘要不符：${name}`);
     if (version === BUILD_NODE) {
-      run(tar, ['-xf', zip, '-C', work], ROOT);
+      run(tar, ['-xf', zip, '-C', work], root);
       cpSync(join(work, `node-v${version}-win-x64`), join(kit, 'build-node'), {
         recursive: true,
       });
@@ -185,6 +176,8 @@ export async function prepareInputs(parent) {
     NODE_OPTIONS: '',
     npm_config_cache: join(work, 'npm-cache'),
     npm_config_update_notifier: 'false',
+    ...(npmRegistry ? { npm_config_registry: npmRegistry } : {}),
+    ...(caFile ? { npm_config_cafile: caFile } : {}),
   };
   const flags = NPM_FLAGS;
   for (const [name, version, integrity] of [
@@ -220,7 +213,7 @@ export async function prepareInputs(parent) {
     }),
   );
   cpSync(
-    join(ROOT, `clients/installer/locks/dsh-${runtime.dsh}.package-lock.json`),
+    join(root, `clients/installer/locks/dsh-${runtime.dsh}.package-lock.json`),
     join(app, 'package-lock.json'),
   );
   const dsh = JSON.parse(readFileSync(join(app, 'package-lock.json'))).packages[
@@ -229,29 +222,24 @@ export async function prepareInputs(parent) {
   if (dsh.version !== runtime.dsh || dsh.integrity !== runtime.dshIntegrity)
     throw new Error('DSH pin 与锁不符');
   run(node, [npm, 'ci', '--omit=dev', ...flags], app, env);
-  installPluginDeps(kit, ROOT, env);
+  installPluginDeps(kit, root, env);
   const workspace = join(work, 'workspace');
-  stageWorkspaceLocks(ROOT, locks, workspace);
+  stageWorkspaceLocks(root, locks, workspace);
   fetchPnpmStore(kit, workspace, join(kit, 'pnpm-store'), env);
   // Every recursive removal is a new directory inside this exclusively reserved kit.
   if (!work.startsWith(kit + '\\') && !work.startsWith(kit + '/'))
     throw new Error('非法准备工作路径');
   rmSync(work, { recursive: true, force: true });
-  const manifest = sealInputs(kit, tools);
-  console.log(
-    JSON.stringify(
-      {
-        directory: kit,
-        lockSha256,
-        manifestSha256: manifest.manifestSha256,
-        files: manifest.files.length,
-        bytes: manifest.bytes,
-      },
-      null,
-      2,
-    ),
-  );
-  return manifest;
+  const manifest = sealInputs(kit, tools, root);
+  const summary = {
+    directory: kit,
+    lockSha256,
+    manifestSha256: manifest.manifestSha256,
+    files: manifest.files.length,
+    bytes: manifest.bytes,
+  };
+  console.log(JSON.stringify(summary, null, 2));
+  return { ...manifest, ...summary };
 }
 if (resolve(process.argv[1] ?? '') === fileURLToPath(import.meta.url)) {
   try {

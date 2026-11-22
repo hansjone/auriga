@@ -96,8 +96,12 @@ docker build --platform linux/amd64 --network none --pull=false --provenance=fal
               distribution / 'auriga-source-0.2.0.tar', '--out', original, '--verify-key', public))
     assert not (original / '.git').exists()
     assert not (original / 'bin/auriga-cli.exe').exists()
-    assert not (distribution / 'auriga.exe').exists()
-    assert not any(asset['name'].endswith('.exe') for asset in first_manifest['assets'])
+    assert (distribution / 'auriga.exe').is_file()
+    assert any(asset['name'] == 'auriga.exe' for asset in first_manifest['assets'])
+    assert not any(
+        asset['name'].endswith('.exe') and asset['name'] != 'auriga.exe'
+        for asset in first_manifest['assets']
+    )
     fakebin = directory / 'no-git'
     marker = directory / 'git-was-called'
     write(fakebin / 'git', '#!/bin/sh\nprintf "%s\\n" "$PWD: $*" >>"' + str(marker) + '"\nexit 99\n', 0o755)

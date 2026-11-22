@@ -169,12 +169,19 @@ func tryHelp(args []string) (done bool, err error) {
 		err = historyCommand(h, siteInvocation{}, helpOut)
 	case "deps":
 		switch sub {
-		case "status", "fetch":
+		case "status", "fetch", "baseline":
 			err = depsCommandWith([]string{sub, "--help"}, siteInvocation{}, helpOut)
 		case "import":
 			err = depsCommandWith([]string{"import", "x", "--help"}, siteInvocation{}, helpOut)
 		default:
 			fmt.Fprint(helpOut, depsHelp)
+		}
+	case "client":
+		switch sub {
+		case "build":
+			err = clientBuildCommand([]string{"--help"}, siteInvocation{}, helpOut)
+		default:
+			fmt.Fprint(helpOut, clientHelp)
 		}
 	default:
 		return false, nil
@@ -193,18 +200,27 @@ const changesHelp = `用法：./auriga changes export --out <补丁.tar>
   apply   把补丁归档应用到当前源码目录（补丁基线与当前源码版本须匹配）。
 `
 
-const depsHelp = `用法：./auriga deps status [--json] [--source <目录>] [--config <site.json>]
-      ./auriga deps fetch [--accept-new-deps] [--source <目录>] [--config <site.json>]
-      ./auriga deps import <目录或归档> [--trust-fingerprint <指纹> | --trust-state] [--source <目录>] [--config <site.json>]
-站点依赖缓存（需要 sudo/root）。配置固定读 /etc/auriga/site.json（root 所有、0600 或 0644）。
+const depsHelp = `用法：./auriga deps status [--json] [--source <目录>] [--config <site.json>] [--client]
+      ./auriga deps fetch [--accept-new-deps] [--source <目录>] [--config <site.json>] [--client]
+      ./auriga deps import <目录或归档> [--trust-fingerprint <指纹> | --trust-state] [--source <目录>] [--config <site.json>] [--client]
+      ./auriga deps baseline --client [--json] [--source <目录>] [--config <site.json>]
+站点依赖缓存。Linux 服务端需要 sudo/root，配置读 /etc/auriga/site.json（root 所有、0600 或 0644）。
+Windows 客户端加 --client（或 baseline --client）：只读固定的 %ProgramData%\Auriga\site.json，要求它与所在目录、deps.cache 由 Administrators/SYSTEM 所有、普通用户无写（上层祖先不得让普通用户删除或替换子项），须在提权的管理员终端运行；转调 scripts/client-release/site-deps.mjs。
+  客户端套件：deps.kits 只用带 trustFingerprint 的发行签名套件（trustState 不适用）；import --client 只接受 --trust-fingerprint。
 依赖输入按生态（go、web、java、python、system）的锁摘要整套选取：可写缓存 deps.cache → deps.kits 套件 → 依赖源。
-  status  逐生态比较当前源码的锁摘要，列出命中位置（缓存或哪个套件）或缺失及补法。
-  fetch   按规则准备缺失且允许自动补的生态（Go、Web；Java 在 services/maven-deps.sha256 非空且配置了 deps.sources.maven 或 allowPublic 时；Python 在 requirements 全部带 --hash=sha256 且配置了 deps.sources.pypi 或 allowPublic 时；系统包与镜像只能 import 或套件）；
-          acceptNewDeps=false 时只打印清单并以退出码 1 结束。
-  import  校验目录或归档（inputs/<生态>/<锁摘要>/、images/<用途>/<digest>/ 布局，或解包后的发行开发套件）后导入缓存并记录来源；导入 Java 时对照源码 maven-deps.sha256，不在锁内或摘要不符则拒绝。
-deps.kits 与 import 都直接接受解包后的发行开发套件（devkit.json 或累积 devkit-catalog.json），按当前锁摘要在各版本里取输入。
-deps.kits 套件目录、import 的源目录或归档、deps.caFile 都必须 root 所有、组和其他用户不可写（同 deps.cache）。
+  status  逐生态比较当前源码的锁摘要，列出命中位置（缓存或哪个套件）或缺失及补法；--client 查客户端输入。
+  fetch   按规则准备缺失且允许自动补的生态；--client 联网写入现场客户端套件（files/npm 源、allowPublic 规则同配置）。
+  import  校验目录或归档后导入缓存；--client 导入客户端输入。
+  baseline --client  登记本机系统工具（csc/tar/PowerShell）现场基线；Windows 更新导致摘要变化后需重新登记。
 经 sudo 调用时拒绝 --config 与 --source；root 直接运行时可用。各子命令用 --help 查看参数。
+`
+
+const clientHelp = `用法：./auriga client build --version <SemVer> [--channel stable|beta] [--sequence <整数>] [--source <源码根>]
+Windows 客户端薄壳（设计 D13）。读 site.json 的 client 段与 deps.cache/kits，解析现场套件后调用同一套 auriga-client 离线构建。
+  --version 必填；sequence 取 client.platformOrigin 公开 /api/resource/v1/desktop/latest（stable、beta）可见最大序号 +1，
+  各渠道 404 时从 1 起，其他错误直接失败；已撤回的发行不可见，必要时用 --sequence 指定更大的值。
+  只产出待签目录，并提示下一步人工 auriga-client sign --review-only；不自动签名。
+主入口仍是 scripts/client-release/auriga-client.cmd；本命令为可选薄壳。
 `
 
 func printTopHelp(w io.Writer) {
@@ -236,6 +252,7 @@ func printTopHelp(w io.Writer) {
 
 站点构建（需要 root，读 /etc/auriga/site.json）
   deps status|fetch|import   依赖缓存：看缺什么、按配置的依赖源补 Go/Web 依赖、导入手工缓存或套件
+  deps … --client / baseline --client  Windows 客户端依赖与系统工具基线（转调 site-deps.mjs）
   deploy [<提交号>]          本机全量构建并部署（无 state 时首次安装）；失败且数据未被触碰时自动回滚
   adopt --stack-env … --deploy-nas …  接管已有 deploy-nas 站点（建立 state，不重启；不在 sudo 工作流白名单）
   rollback [--to <序号>]     退回保留的历史发行（deploy、upgrade 与 adopt 产生的都可以；数据须与目标运行时相同）
@@ -247,6 +264,9 @@ func printTopHelp(w io.Writer) {
   status 会同时显示安装来源与当前发行；deploy/rollback/adopt 每次写 <logs.dir>/<时间>-<命令>.log 与 .json 收据，
   退出码 0 成功、1 未切换就失败、2 已自动回滚、3 需人工；--json 标准输出只打印脱敏收据
 
+Windows 客户端
+  client build    读 site.json 映射为 auriga-client 离线构建（--version 必填；sequence 从平台账本取）
+
 维护者
   release         生成发行附件（标签、签名、Windows 与 DSH 输入见 docs/release/maintainer.zh.md）
   release upload  把发行附件上传到 Forgejo
@@ -255,6 +275,7 @@ func printTopHelp(w io.Writer) {
 提示
   - verify/unpack/install 必须 --verify-key <批准公钥> 或 --trust-fingerprint <独立核对的 SHA256(SPKI)>；缺签名默认拒绝。
   - 站点构建流程：keygen site --out <私密目录> → 服务器 trust add-site-key <pem> --confirm-fingerprint <sha> → bundle --build --offline --sign-key <私钥>。
+  - Windows：auriga.exe 随发行附件分发（见 SHA256SUMS）；SmartScreen 提示见 DOWNLOADS.txt / README-OFFLINE.md。
 `)
 }
 
@@ -400,28 +421,31 @@ func init() {
 	}
 	depsConfig := "站点配置路径；只允许 root 直接运行时使用，经 sudo 调用时拒绝（默认读 /etc/auriga/site.json）"
 	depsSource := "源码目录；只允许 root 直接运行时使用，经 sudo 调用时拒绝（默认用配置的 source.dir）"
+	clientFlag := "客户端模式：转调 scripts/client-release/site-deps.mjs，读写现场客户端套件（Windows 可用）"
 	helpSpecs["deps status"] = helpSpec{
-		usage:   "./auriga deps status [--json] [--source <目录>] [--config <site.json>]",
-		summary: "逐生态（go、web、java、python、system）比较当前源码锁摘要，列出命中位置（缓存或哪个套件）或缺失及可用补法，并列出工具镜像、基础镜像。需要 sudo/root。",
-		docs:    map[string]string{"config": depsConfig, "source": depsSource, "json": "只输出机器可读 JSON"},
+		usage:   "./auriga deps status [--json] [--source <目录>] [--config <site.json>] [--client]",
+		summary: "逐生态（go、web、java、python、system）比较当前源码锁摘要，列出命中位置（缓存或哪个套件）或缺失及可用补法，并列出工具镜像、基础镜像。服务端需要 sudo/root；--client 走客户端依赖。",
+		docs:    map[string]string{"config": depsConfig, "source": depsSource, "json": "只输出机器可读 JSON", "client": clientFlag},
 	}
 	helpSpecs["deps fetch"] = helpSpec{
-		usage:   "./auriga deps fetch [--accept-new-deps] [--source <目录>] [--config <site.json>]",
-		summary: "按配置的依赖源准备缺失且允许自动补的生态（Go、Web；锁/哈希就绪后的 Java、Python），在固定 digest 的工具镜像（Python 用 base-operator）里运行源码中的 <生态>-inputs.sh prepare，写回可写缓存并记录来源与 SHA-256。需要 sudo/root。",
+		usage:   "./auriga deps fetch [--accept-new-deps] [--source <目录>] [--config <site.json>] [--client]",
+		summary: "按配置的依赖源准备缺失且允许自动补的生态（Go、Web；锁/哈希就绪后的 Java、Python），在固定 digest 的工具镜像（Python 用 base-operator）里运行源码中的 <生态>-inputs.sh prepare，写回可写缓存并记录来源与 SHA-256。--client 时联网准备现场客户端套件。",
 		notes: []string{
 			"allowPublic=false 时 Go 不回落 proxy.golang.org，校验库只经配置的代理，取不到就失败；Web 拒绝没有 integrity 的 lock 条目。",
 			"Java 须 services/maven-deps.sha256 非空且配置 deps.sources.maven 或 allowPublic；Python 须 requirements 全部 --hash=sha256 且配置 deps.sources.pypi 或 allowPublic。系统包、基础镜像与工具镜像只能 deps import 或套件提供。",
 			"acceptNewDeps=false（且未加 --accept-new-deps）时只打印新增依赖清单并以退出码 1 结束。deps.caFile 会只读挂进准备容器。",
+			"--client：files 源映射构建 Node/CPython/DSH/LibreOffice 等文件输入（先 <files>/<URL 路径> 再 <files>/<文件名>，路径按百分号解码），摘要仍按锁核对；pnpm/插件 npm 走 deps.sources.npm。allowPublic=false 时 files 与 npm 源缺一即失败。",
 		},
 		docs: merge(buildDocs, map[string]string{
 			"config":          depsConfig,
 			"source":          depsSource,
 			"accept-new-deps": "本次允许拉取新增依赖（等同配置 deps.acceptNewDeps=true，仅限可自动补的生态）",
+			"client":          clientFlag,
 		}),
 	}
 	helpSpecs["deps import"] = helpSpec{
-		usage:   "./auriga deps import <目录或归档> [--trust-fingerprint <指纹> | --trust-state] [--source <目录>] [--config <site.json>]",
-		summary: "校验目录或 tar 归档后按锁摘要导入可写缓存并记录来源。缓存布局：根 SHA256SUMS（覆盖全部文件，可带 SHA256SUMS.sig 与 release-public.pem）、inputs/<生态>/<锁摘要>/、images/<用途>/<digest>/image.json。也直接接受解包后的发行开发套件（devkit.json 或累积 devkit-catalog.json）。路径必填，放在参数之前。需要 sudo/root。",
+		usage:   "./auriga deps import <目录或归档> [--trust-fingerprint <指纹> | --trust-state] [--source <目录>] [--config <site.json>] [--client]",
+		summary: "校验目录或 tar 归档后按锁摘要导入可写缓存并记录来源。缓存布局：根 SHA256SUMS（覆盖全部文件，可带 SHA256SUMS.sig 与 release-public.pem）、inputs/<生态>/<锁摘要>/、images/<用途>/<digest>/image.json。也直接接受解包后的发行开发套件（devkit.json 或累积 devkit-catalog.json）。路径必填，放在参数之前。--client 导入客户端输入。",
 		notes: []string{
 			"导入源（目录或归档文件）必须 root 所有、组和其他用户不可写；U 盘等介质请先复制到这样的目录。",
 			"缓存布局不加 --trust-fingerprint/--trust-state 时按人工导入处理：只校验完整性并打印条目供人工审核。导入 Java 条目须提供当前源码并对照 services/maven-deps.sha256，构件不在锁内或摘要不符则拒绝。",
@@ -432,6 +456,32 @@ func init() {
 			"source":            "源码目录（只有导入发行开发套件时用来算锁摘要）；只允许 root 直接运行时使用，经 sudo 调用时拒绝（默认用配置的 source.dir）",
 			"trust-fingerprint": "独立核对过的签名公钥指纹（SHA256:<64 位小写十六进制> 或裸十六进制）；给出时必须签名有效且指纹匹配",
 			"trust-state":       "用 state 已钉定的发行/站点公钥核验签名（需要配置 server.data）；与 --trust-fingerprint 二选一",
+			"client":            clientFlag,
+		},
+	}
+	helpSpecs["deps baseline"] = helpSpec{
+		usage:   "./auriga deps baseline --client [--json] [--source <目录>] [--config <site.json>]",
+		summary: "登记本机系统工具（csc.exe、System32 tar、PowerShell 5.1 等）的现场基线到可写缓存；构建时摘要须匹配发行清单或该基线。仅 --client。",
+		notes: []string{
+			"Windows 更新导致系统工具变化时，重新运行本命令；不能用基线绕过非系统工具的摘要。",
+		},
+		docs: map[string]string{"config": depsConfig, "source": depsSource, "json": "只输出机器可读 JSON", "client": "必填：客户端系统工具基线"},
+	}
+	helpSpecs["client build"] = helpSpec{
+		usage:   "./auriga client build --version <SemVer> [--channel stable|beta] [--sequence <整数>] [--source <源码根>]",
+		summary: "Windows 客户端薄壳：读 site.json，把 client 段与 deps.cache/kits 映射为 auriga-client build --offline，sequence 从平台公开桌面账本自动取。",
+		notes: []string{
+			"--version 必填。基础输入来自现场缓存（deps fetch/import --client），以写入缓存时记录的清单摘要（site-dependencies.json）走 --site-kit --devkit-sha256；deps.kits 套件先按其 trustFingerprint 验签。",
+			"client.verifyKey/trustFingerprint 始终传入以核验签名源码。构建 Node 只用套件内 build-node/node.exe，执行前核对其摘要等于套件清单登记值，不用系统 Node。",
+			"sequence = stable、beta 两渠道 latest 可见最大序号 +1（404 视为该渠道无发行，其他错误失败；只允许同源 https 重定向）。",
+			"签名不自动化：结束后提示 auriga-client sign --review-only。主入口仍是 auriga-client.cmd。",
+		},
+		docs: map[string]string{
+			"version":  "客户端版本（SemVer），必填",
+			"channel":  "桌面渠道 stable 或 beta，默认 stable",
+			"sequence": "手动指定发布序号（不小于账本可见最大序号 +1；用于已撤回发行导致的冲突）",
+			"source":   "源码根（含 scripts/client-release）；默认 source.dir 或当前目录",
+			"config":   "站点配置路径；Windows 不接受（只读固定的 %ProgramData%\\Auriga\\site.json）",
 		},
 	}
 	helpSpecs["deploy"] = helpSpec{
