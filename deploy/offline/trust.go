@@ -70,6 +70,11 @@ func trustHealth(s state) error {
 	if s.AllowUnsigned {
 		return errors.New("警告：state记录曾使用--allow-unsigned，发行身份未核验")
 	}
+	// 本机构建的发行不靠发行钥（信任依据是 root 自取的源码与 releaseSums）；未钉定只影响之后的
+	// 签名包 upgrade，由 doctor 另行提示。
+	if s.source() == sourceLocalDeploy && len(s.TrustedKeys) == 0 && s.PublicKey == "" {
+		return nil
+	}
 	_, err := s.trustKeys()
 	return err
 }
@@ -141,7 +146,29 @@ func (s state) trustKeys() ([]string, error) {
 	return keys, nil
 }
 
+// verifyStatePackage 核验发行目录或待升级的签名包。对当前发行（root 即 s.Package）：
+// local-deploy 来源核对本地清单 SHA256SUMS 与 state 锚定的 releaseSums（不要求签名，也不借用
+// AllowUnsigned，设计 D10）；签名包来源按 state 固定的公钥验签，有历史记录时同样核对
+// releaseSums。待升级的包（root 不是当前发行）一律按 state 固定的公钥验签。
 func verifyStatePackage(s state, root, index string, allow bool) (bool, error) {
+	current := filepath.Clean(root) == filepath.Clean(s.Package)
+	var rec *deployRecord
+	if current {
+		if rec = s.record(s.Current); rec != nil && filepath.Clean(rec.Release) != filepath.Clean(s.Package) {
+			return false, fmt.Errorf("state 的当前发行 r%d 与安装目录不一致", rec.Seq)
+		}
+	}
+	if current && s.source() == sourceLocalDeploy {
+		if rec == nil {
+			return false, fmt.Errorf("state 缺少当前发行 r%d 的历史记录，无法核对本地清单", s.Current)
+		}
+		return false, checkReleaseDir(s.Data, rec)
+	}
+	if rec != nil {
+		if err := checkReleaseDir(s.Data, rec); err != nil {
+			return false, err
+		}
+	}
 	// Only missing signatures may use the explicit emergency exception; a bad
 	// signature or an unknown signer can never fall back to package-contained keys.
 	if _, err := os.Stat(filepath.Join(root, "SHA256SUMS.sig")); os.IsNotExist(err) && allow {
@@ -280,7 +307,11 @@ func registerSiteKey(s *state, key, confirm string) error {
 	}
 	keys, err := s.trustKeys()
 	if err != nil {
-		return err
+		// 首装没有钉定发行钥的站点（trustUnpinned）可以直接登记站点钥作为第一把受信公钥。
+		if !s.TrustUnpinned || len(s.TrustedKeys) != 0 || s.PublicKey != "" {
+			return err
+		}
+		keys = nil
 	}
 	s.TrustedKeys = keys
 	target := filepath.Join(s.Data+".oneclick", "trusted-keys", fp+".pem")
@@ -296,9 +327,41 @@ func registerSiteKey(s *state, key, confirm string) error {
 	return nil
 }
 
+// pinReleaseKey：首装未钉定发行钥的站点（deploy 首装没有带 trustFingerprint 的套件）登记发行
+// 公钥；已钉定的站点不能替换。保留已登记的站点钥，清除 trustUnpinned。
+func pinReleaseKey(s *state, key, confirm string) error {
+	if s.PublicKey != "" {
+		return errors.New("state 已钉定发行公钥，不能替换（轮换发行钥不在本工具范围）")
+	}
+	// 只用于首装未钉定的站点：已靠 trustedKeys 钉定信任（未标记 trustUnpinned）的 state 不能借此
+	// 再加一个信任根，站点钥请用 add-site-key / remove-site-key。
+	if !s.TrustUnpinned && len(s.TrustedKeys) != 0 {
+		return errors.New("state 已固定受信公钥（trustedKeys），add-release-key 只用于首装未钉定发行钥的站点")
+	}
+	fp, err := publicFingerprint(key)
+	if err != nil {
+		return err
+	}
+	if !hex64.MatchString(confirm) || fp != confirm {
+		return errors.New("发行公钥与--confirm-fingerprint不符，拒绝钉定")
+	}
+	target := filepath.Join(s.Data+".oneclick", "trusted-keys", fp+".pem")
+	if err := copyTrustKey(key, target, fp); err != nil {
+		return err
+	}
+	keys := []string{target}
+	for _, existing := range s.TrustedKeys {
+		if existing != target {
+			keys = append(keys, existing)
+		}
+	}
+	s.PublicKey, s.TrustedKeys, s.TrustUnpinned = target, keys, false
+	return nil
+}
+
 func trustCommand(args []string) error {
-	if len(args) < 2 || args[0] != "add-site-key" && args[0] != "remove-site-key" {
-		return errors.New("trust add-site-key <pem> --confirm-fingerprint <sha> 或 remove-site-key <sha>")
+	if len(args) < 2 || args[0] != "add-site-key" && args[0] != "remove-site-key" && args[0] != "add-release-key" {
+		return errors.New("trust add-release-key <pem> --confirm-fingerprint <sha>、add-site-key <pem> --confirm-fingerprint <sha> 或 remove-site-key <sha>")
 	}
 	f := flags("trust")
 	data := f.String("data", "/srv/auriga", "")
@@ -320,6 +383,12 @@ func trustCommand(args []string) error {
 		}
 		if args[0] == "add-site-key" {
 			if err := registerSiteKey(&s, args[1], *confirm); err != nil {
+				return err
+			}
+			return saveState(s)
+		}
+		if args[0] == "add-release-key" {
+			if err := pinReleaseKey(&s, args[1], *confirm); err != nil {
 				return err
 			}
 			return saveState(s)

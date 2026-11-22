@@ -11,6 +11,10 @@ package main
 //	    SHA256SUMS                 本地清单（不签名）
 //
 // state.current 指向当前序号（随 state 原子切换），state.history 保留最近 N 份（默认 3）。
+// 历史有三种（deployRecord.Kind）：deploy（本机构建，目录结构如上）、upgrade（签名包 upgrade，
+// 目录内是完整的签名离线包，同样在 auriga-releases/<序号>/）、install（签名包安装的旧布局
+// <数据目录>.oneclick/release，第一次 deploy 或 upgrade 前登记为基线）。三种都用 releaseSums
+// 锚定发行目录的 SHA256SUMS。
 // 五个装配镜像除 auriga/<svc>:nas 外再打 auriga/<svc>:r<序号>；淘汰历史前确认没有容器在用。
 
 import (
@@ -25,7 +29,9 @@ import (
 )
 
 type deployRecord struct {
-	Seq     int          `json:"seq"`
+	Seq int `json:"seq"`
+	// Kind：deploy（缺省）、upgrade、install，见文件头。
+	Kind    string       `json:"kind,omitempty"`
 	Status  string       `json:"status"` // installing | ok | failed
 	At      string       `json:"at"`
 	Source  deploySource `json:"source"`
@@ -48,7 +54,31 @@ const (
 	recordInstalling = "installing"
 	recordOK         = "ok"
 	recordFailed     = "failed"
+
+	recordKindDeploy  = "deploy"
+	recordKindUpgrade = "upgrade"
+	recordKindInstall = "install"
 )
+
+func (r *deployRecord) kind() string {
+	if r.Kind == "" {
+		return recordKindDeploy
+	}
+	return r.Kind
+}
+
+// sourceForRecord：切到某条历史后 state.source 的取值（当前发行的来源）。
+func sourceForRecord(r *deployRecord) string {
+	if r.kind() == recordKindDeploy {
+		return sourceLocalDeploy
+	}
+	return sourceSignedPackage
+}
+
+// legacyReleaseDir 是签名包 install 的旧布局发行目录。
+func legacyReleaseDir(data string) string {
+	return filepath.Join(data+".oneclick", "release")
+}
 
 // releaseManifest 写在发行目录的 release.json 与 deploy-nas/.auriga-release（status.sh 显示）。
 type releaseManifest struct {
@@ -172,13 +202,18 @@ func writeReleaseDir(ctx context.Context, data string, seq int, source, goOut st
 	return final, sums, nil
 }
 
-// checkReleaseDir 回滚前核对发行目录：根目录 root 所有、路径即 auriga-releases/<序号>、
-// SHA256SUMS 与 state 锚定的摘要一致、本地清单完整。
+// checkReleaseDir 回滚前核对发行目录：根目录 root 所有、路径即 auriga-releases/<序号>（install
+// 记录为旧布局 <数据目录>.oneclick/release）、SHA256SUMS 与 state 锚定的摘要一致、本地清单完整。
 func checkReleaseDir(data string, r *deployRecord) error {
-	if r.Release != releaseDir(data, r.Seq) {
+	root := releasesRoot(data)
+	switch {
+	case r.Release == releaseDir(data, r.Seq) && r.kind() != recordKindInstall:
+	case r.Release == legacyReleaseDir(data) && r.kind() == recordKindInstall:
+		root = data + ".oneclick"
+	default:
 		return fmt.Errorf("历史 %d 的发行目录路径异常 %s", r.Seq, r.Release)
 	}
-	if err := depsTrustedSourceCheck("发行根目录 ", releasesRoot(data)); err != nil {
+	if err := depsTrustedSourceCheck("发行根目录 ", root); err != nil {
 		return err
 	}
 	if err := noSymlinks(filepath.Join(r.Release, "SHA256SUMS")); err != nil {
@@ -207,13 +242,22 @@ func tagImages(ctx context.Context, images map[string]string, tag func(svc strin
 	return nil
 }
 
-// checkTaggedImages 回滚前确认 auriga/<svc>:r<序号> 仍指向历史记录的镜像 ID。
+// checkTaggedImages 回滚前确认 auriga/<svc>:r<序号> 仍指向历史记录的镜像 ID（签名包记录的镜像
+// 可能写成 仓库@sha256:，先解析为本机镜像 ID 再比较）。
 func checkTaggedImages(ctx context.Context, r *deployRecord) error {
 	for _, svc := range deployServices {
 		want := r.Images[imageKey(svc)]
+		if want == "" {
+			continue
+		}
+		if !imageIDPattern.MatchString(want) {
+			if id, _, ok := localImage(ctx, want); ok {
+				want = id
+			}
+		}
 		id, _, ok := localImage(ctx, imageTag(svc, r.Seq))
 		if !ok || id != want {
-			return fmt.Errorf("镜像 %s 不在本机或已不是历史记录的镜像（%s）", imageTag(svc, r.Seq), want)
+			return fmt.Errorf("镜像 %s 不在本机或已不是历史记录的镜像（%s）", imageTag(svc, r.Seq), r.Images[imageKey(svc)])
 		}
 	}
 	for _, svc := range deployExtraServices {

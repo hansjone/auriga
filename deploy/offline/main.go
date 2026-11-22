@@ -41,6 +41,13 @@ func dispatch(args []string) error {
 	if runtime.GOOS != "linux" || runtime.GOARCH != "amd64" {
 		return errors.New("离线部署和构建仅支持 Linux amd64；请把附件和源码拷到 Linux 服务器或独立 Linux 构建机运行")
 	}
+	// 经 sudo 的运行器账户只能运行 deploy、rollback、status、history（D12、P3），在帮助与
+	// 其余分派之前拦截。
+	if len(args) > 0 {
+		if err := guardSudoCommand(args, currentInvocation()); err != nil {
+			return err
+		}
+	}
 	if done, err := tryHelp(args); done {
 		return err
 	}
@@ -91,6 +98,13 @@ func dispatch(args []string) error {
 	}
 	if args[0] == "history" {
 		return historyCommand(args[1:], currentInvocation(), os.Stdout)
+	}
+	if args[0] == "status" {
+		if inv := currentInvocation(); inv.Sudo {
+			if handled, err := restrictedStatus(args[1:], inv); handled {
+				return err
+			}
+		}
 	}
 	if args[0] == "install" {
 		o, err := parseInstall(args[1:])

@@ -486,8 +486,8 @@ func TestStateSourceAndAtomicCurrentSwitch(t *testing.T) {
 	if err := json.Unmarshal([]byte(`{"data":"/x","package":"/p"}`), &old); err != nil || old.source() != sourceSignedPackage {
 		t.Fatal("旧 state 缺省来源应为 signed-package")
 	}
-	if err := upgradeAllowed(s.Data, filepath.Join(t.TempDir(), "x.tar"), false); err == nil || !strings.Contains(err.Error(), "2a（下）") {
-		t.Fatalf("local-deploy 站点的签名包 upgrade 应明确拒绝：%v", err)
+	if err := upgradeAllowed(s.Data, filepath.Join(t.TempDir(), "x.tar"), false); err == nil || !strings.Contains(err.Error(), "trust add-release-key") {
+		t.Fatalf("发行钥未钉定的 local-deploy 站点第一次签名包 upgrade 前应要求 trust add-*：%v", err)
 	}
 }
 
@@ -655,9 +655,29 @@ func (f *fakeSite) ops() siteOps {
 	}
 }
 
+// writeTestRelease 为历史记录写一个最小的发行目录与 SHA256SUMS，并记下 releaseSums。
+func writeTestRelease(t *testing.T, s *state, seq int) {
+	t.Helper()
+	r := s.record(seq)
+	putFile(t, filepath.Join(r.Release, "deploy-nas/scripts/start.sh"), "#!/bin/sh\n", 0755)
+	if err := writeSumsContext(context.Background(), r.Release); err != nil {
+		t.Fatal(err)
+	}
+	sums, err := digest(filepath.Join(r.Release, "SHA256SUMS"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.ReleaseSums = sums
+	if err := saveState(*s); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func switchFixture(t *testing.T) (state, *deployRecord, deployRecord, *siteConfig) {
 	t.Helper()
+	stubTrustedSource(t)
 	s := deployTestSite(t, deployRecord{Seq: 1, Status: recordOK, Images: imagesFor("1")})
+	writeTestRelease(t, &s, 1)
 	prev := s.record(1)
 	rec := deployRecord{Seq: 2, Status: recordInstalling, Images: imagesFor("2"), Release: releaseDir(s.Data, 2)}
 	keep := 3
@@ -677,7 +697,7 @@ func TestDeploySwitchAutoRollbackWhenDataUntouched(t *testing.T) {
 		return nil
 	}}
 	run, _ := testRun()
-	err := deploySwitch(context.Background(), site.ops(), cfg, &s, prev, rec, run)
+	err := deploySwitch(context.Background(), site.ops(), cfg, &s, prev, rec, run, nil)
 	if exitCodeOf(err) != 2 || !run.receipt.RolledBack {
 		t.Fatalf("应自动回滚并以退出码 2 结束：%v", err)
 	}
@@ -699,7 +719,7 @@ func TestDeploySwitchDataTouchedExit3(t *testing.T) {
 	stubDataVersions(t, &dataVersions{Migrations: map[string]string{"auriga/x": "1:1:a"}, Formats: map[string]string{}}, &dataVersions{Migrations: map[string]string{"auriga/x": "2:2:b"}, Formats: map[string]string{}})
 	site := &fakeSite{healthy: func(int) error { return errors.New("platform unhealthy") }}
 	run, _ := testRun()
-	err := deploySwitch(context.Background(), site.ops(), cfg, &s, prev, rec, run)
+	err := deploySwitch(context.Background(), site.ops(), cfg, &s, prev, rec, run, nil)
 	if exitCodeOf(err) != 3 || run.receipt.RolledBack || len(site.starts) != 1 {
 		t.Fatalf("数据被触碰时应不回滚并退出码 3：%v starts=%v", err, site.starts)
 	}
@@ -714,7 +734,7 @@ func TestDeploySwitchRollbackFailureExit3(t *testing.T) {
 	stubDataVersions(t, v, v)
 	site := &fakeSite{healthy: func(int) error { return errors.New("down") }}
 	run, _ := testRun()
-	err := deploySwitch(context.Background(), site.ops(), cfg, &s, prev, rec, run)
+	err := deploySwitch(context.Background(), site.ops(), cfg, &s, prev, rec, run, nil)
 	if exitCodeOf(err) != 3 || !strings.Contains(err.Error(), "不重试") || len(site.starts) != 2 {
 		t.Fatalf("回滚失败应退出码 3 且不重试：%v starts=%v", err, site.starts)
 	}
@@ -726,7 +746,7 @@ func TestDeploySwitchSuccessRecordsVersions(t *testing.T) {
 	stubDataVersions(t, v, v)
 	site := &fakeSite{healthy: func(int) error { return nil }}
 	run, _ := testRun()
-	if err := deploySwitch(context.Background(), site.ops(), cfg, &s, prev, rec, run); err != nil {
+	if err := deploySwitch(context.Background(), site.ops(), cfg, &s, prev, rec, run, nil); err != nil {
 		t.Fatal(err)
 	}
 	got, _ := readState(s.Data)

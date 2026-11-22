@@ -11,28 +11,18 @@ import (
 	"testing"
 )
 
-// M2：配置了签名要求时，无论哪种源码模式都直接拒绝，且不调用 git。
-func TestDeployRefusesWhenSigningRequired(t *testing.T) {
+// 要求签名提交时，源码目录模式（source.dir 与 --source）直接拒绝，且不调用 git。
+func TestDeployDirModeRefusedWhenSigningRequired(t *testing.T) {
 	stubTrustedSource(t)
 	calls := stubDeployRun(t, func(runSpec) (string, error) { return "", nil })
 	dir := t.TempDir()
-	for name, g := range map[string]*siteGit{
-		"requireSignedCommits": {URL: "https://git.example.com/a.git", AllowedRefs: []string{"refs/heads/main"}, RequireSignedCommits: true, TrustedSigners: []string{"SHA256:x"}},
-		"trustedSigners":       {URL: "https://git.example.com/a.git", AllowedRefs: []string{"refs/heads/main"}, TrustedSigners: []string{"SHA256:x"}},
-	} {
-		for _, cfg := range []*siteConfig{
-			{Source: &siteSource{Git: g}},
-			{Source: &siteSource{Git: g, Dir: &dir}},
-		} {
-			_, err := resolveDeploySource(context.Background(), cfg, t.TempDir()+"/data", "", strings.Repeat("a", 40), t.TempDir())
-			if err == nil || !strings.Contains(err.Error(), "2a（下）") {
-				t.Fatalf("%s：配置了签名要求应拒绝：%v", name, err)
-			}
-			_, err = resolveDeploySource(context.Background(), cfg, t.TempDir()+"/data", "", "", t.TempDir())
-			if err == nil || !strings.Contains(err.Error(), "签名") {
-				t.Fatalf("%s：目录模式也应拒绝：%v", name, err)
-			}
-		}
+	g := &siteGit{URL: "https://git.example.com/a.git", AllowedRefs: []string{"refs/heads/main"}, RequireSignedCommits: true, TrustedSigners: []string{"/etc/auriga/signers.pub"}}
+	cfg := &siteConfig{Source: &siteSource{Git: g, Dir: &dir}}
+	if _, err := resolveDeploySource(context.Background(), cfg, t.TempDir()+"/data", "", "", t.TempDir()); err == nil || !strings.Contains(err.Error(), "签名") {
+		t.Fatalf("source.dir 模式应拒绝：%v", err)
+	}
+	if _, err := resolveDeploySource(context.Background(), cfg, t.TempDir()+"/data", t.TempDir(), "", t.TempDir()); err == nil || !strings.Contains(err.Error(), "签名") {
+		t.Fatalf("--source 模式应拒绝：%v", err)
 	}
 	if len(*calls) != 0 {
 		t.Fatalf("拒绝时不应调用 git：%v", *calls)
@@ -170,7 +160,7 @@ func TestDeploySwitchStopsWritersBeforeReadingVersions(t *testing.T) {
 			}
 		}
 		run, _ := testRun()
-		err := deploySwitch(context.Background(), ops, cfg, &s, prev, rec, run)
+		err := deploySwitch(context.Background(), ops, cfg, &s, prev, rec, run, nil)
 		if exitCodeOf(err) != 2 {
 			t.Fatalf("smokeFails=%t：应自动回滚：%v", smokeFails, err)
 		}
@@ -193,7 +183,7 @@ func TestDeploySwitchStopFailureExit3(t *testing.T) {
 	t.Cleanup(func() { readDataVersions = old })
 	site := &fakeSite{events: &events, stopErr: errors.New("服务 platform 停止后仍在运行"), healthy: func(int) error { return errors.New("down") }}
 	run, _ := testRun()
-	err := deploySwitch(context.Background(), site.ops(), cfg, &s, prev, rec, run)
+	err := deploySwitch(context.Background(), site.ops(), cfg, &s, prev, rec, run, nil)
 	if exitCodeOf(err) != 3 || run.receipt.RolledBack || len(site.starts) != 1 {
 		t.Fatalf("停不下来应退出码 3 且不回滚：%v starts=%v", err, site.starts)
 	}
@@ -210,7 +200,7 @@ func TestDeploySwitchNoAutoRollbackToFailedRecord(t *testing.T) {
 	stubDataVersions(t, v, v)
 	site := &fakeSite{healthy: func(int) error { return errors.New("down") }}
 	run, _ := testRun()
-	err := deploySwitch(context.Background(), site.ops(), cfg, &s, prev, rec, run)
+	err := deploySwitch(context.Background(), site.ops(), cfg, &s, prev, rec, run, nil)
 	if exitCodeOf(err) != 3 || len(site.starts) != 1 || !strings.Contains(run.receipt.RollbackReason, "不是成功记录") {
 		t.Fatalf("上一版失败时应交人工：%v %v %q", err, site.starts, run.receipt.RollbackReason)
 	}

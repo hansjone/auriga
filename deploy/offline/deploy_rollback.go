@@ -11,6 +11,9 @@ package main
 // 迁移/格式版本相同即可执行；否则需要目标声明 schemaCompatFloor 与格式上限并通过检查——
 // floor 生成与祖先判定属 2b，本步对没有声明的目标拒绝，对有声明的目标也只做格式上限检查
 // 后仍交人工（floor 的提交祖先判定未实现）。
+//
+// 历史里的 deploy、upgrade、install（签名包基线）记录都可以作为 rollback 目标，检查相同；切到
+// 某条记录后 state.source 随之变为该记录的来源（deploy → local-deploy，其余 → signed-package）。
 
 import (
 	"bytes"
@@ -256,6 +259,7 @@ func startRecord(ops siteOps, s *state, r *deployRecord, timeout time.Duration) 
 		return err
 	}
 	s.Current, s.Package, s.Images = r.Seq, r.Release, cloneImages(r.Images)
+	s.Source = sourceForRecord(r)
 	if err := saveState(*s); err != nil {
 		return err
 	}
@@ -300,18 +304,20 @@ func siteDataPath(cfg *siteConfig) (string, error) {
 }
 
 func rollbackCommand(args []string, inv siteInvocation) error {
+	rest, restricted, err := sitePrivilege("rollback", args, inv)
+	if err != nil {
+		return err
+	}
 	f := flags("rollback")
 	config := f.String("config", "", "")
 	to := f.Int("to", 0, "")
 	asJSON := f.Bool("json", false, "")
-	if err := f.Parse(args); err != nil {
+	f.Bool("operator", false, "")
+	if err := f.Parse(rest); err != nil {
 		return err
 	}
 	if f.NArg() != 0 {
 		return errors.New("多余 rollback 参数")
-	}
-	if inv.Sudo {
-		return errors.New("经 sudo 调用的 rollback 与参数白名单在统一现场部署 2a（下）开放；请以 root 直接运行")
 	}
 	cfg, cfgPath, err := loadSiteConfig(*config, inv)
 	if err != nil {
@@ -325,6 +331,7 @@ func rollbackCommand(args []string, inv siteInvocation) error {
 	if err != nil {
 		return err
 	}
+	run.receipt.Notes = append(run.receipt.Notes, invocationNote(inv, restricted))
 	err = withLock(data, "rollback", func() error {
 		return doRollback(context.Background(), defaultSiteOps, cfg, data, *to, run)
 	})
@@ -338,8 +345,11 @@ func doRollback(ctx context.Context, ops siteOps, cfg *siteConfig, data string, 
 	if err != nil {
 		return exitWith(1, err)
 	}
-	if s.source() != sourceLocalDeploy || len(s.History) == 0 {
-		return exitWith(1, fmt.Errorf("当前安装来源为 %s，没有 deploy 历史可回滚（签名包安装用 upgrade 的冷备份恢复）", s.source()))
+	if len(s.History) == 0 {
+		return exitWith(1, fmt.Errorf("当前安装来源为 %s，没有部署历史可回滚（旧布局的签名包安装在第一次 deploy 或 upgrade 后才有历史）", s.source()))
+	}
+	if _, err := os.Lstat(data + ".upgrade.json"); err == nil {
+		return exitWith(1, errors.New("存在中断的签名包升级，请先重新运行 upgrade 恢复"))
 	}
 	current := s.record(s.Current)
 	var target *deployRecord
@@ -396,6 +406,17 @@ func doRollback(ctx context.Context, ops siteOps, cfg *siteConfig, data string, 
 }
 
 func historyCommand(args []string, inv siteInvocation, w io.Writer) error {
+	if inv.Sudo {
+		cfg, err := loadSudoSiteConfig(inv)
+		if err != nil {
+			return err
+		}
+		if runnerOnly(inv, cfg) {
+			if err := restrictedArgs("history", args); err != nil {
+				return err
+			}
+		}
+	}
 	f := flags("history")
 	config := f.String("config", "", "")
 	asJSON := f.Bool("json", false, "")
@@ -458,7 +479,7 @@ func printHistory(w io.Writer, s state) {
 		if r.Source.Dirty {
 			dirty = " 含未提交改动"
 		}
-		fmt.Fprintf(w, "%s r%-4d %-10s %s 源码 %s %s 快照 %s%s，%s\n", mark, r.Seq, r.Status, r.At, r.Source.Mode, commit, r.Source.SnapshotSHA256[:min(12, len(r.Source.SnapshotSHA256))], dirty, floor)
+		fmt.Fprintf(w, "%s r%-4d %-8s %-10s %s 源码 %s %s 快照 %s%s，%s\n", mark, r.Seq, r.kind(), r.Status, r.At, r.Source.Mode, commit, r.Source.SnapshotSHA256[:min(12, len(r.Source.SnapshotSHA256))], dirty, floor)
 	}
 }
 

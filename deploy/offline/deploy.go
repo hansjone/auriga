@@ -1,6 +1,6 @@
 package main
 
-// auriga deploy（设计 D10，统一现场部署第 2a 步上半：root 直接运行的全量部署）。
+// auriga deploy（设计 D10，统一现场部署第 2a 步：全量部署，含经 sudo 的受限入口）。
 //
 // 流程：统一站点锁 → 取源码快照 → 读源码配方（能力版本、# syntax=、上游摘要）→ 依赖输入
 // （缓存 → 套件 → 依赖源，verifyInput，锁清单比较）→ 固定 digest 的工具/基础/服务镜像 →
@@ -8,8 +8,11 @@ package main
 // 写不可变发行目录 → 首装复用 install 步骤，或完整启动切换（失败且数据未被触碰时自动回滚）→
 // 淘汰旧历史 → 收据。
 //
-// 不在本步：sudo 入口与参数白名单、快进限制、提交签名校验（配置了就拒绝）、只换容器、按指纹
-// 跳过构建、--backup-db、floor 生成。
+// 受限调用（经 sudo，见 privilege.go）只接受白名单参数，且只允许部署当前运行提交的后代
+// （快进）；root 人工 --allow-downgrade 可向旧提交部署，先做与 rollback 相同的数据检查。
+// 签名包安装的站点也可以 deploy：第一次 deploy 前把当前安装包登记为一条历史（基线）。
+//
+// 不在本步：只换容器、按指纹跳过构建、--backup-db、floor 生成。
 
 import (
 	"context"
@@ -33,6 +36,12 @@ type deployOptions struct {
 	Accept   bool
 	BackupDB bool
 	Budget   buildBudget
+	// Operator：经 sudo 的人工 root 显式跳过白名单（privilege.go）；本身不改变部署行为。
+	Operator bool
+	// AllowDowngrade：root 人工向非当前提交后代的提交部署（先做数据检查）。
+	AllowDowngrade bool
+	// Restricted：受限调用（白名单已在解析前执行），部署只允许快进。
+	Restricted bool
 }
 
 func parseDeploy(args []string) (deployOptions, error) {
@@ -48,6 +57,8 @@ func parseDeploy(args []string) (deployOptions, error) {
 	f.BoolVar(&o.Accept, "accept-new-deps", false, "")
 	f.IntVar(&o.Budget.MemoryMiB, "memory-mib", 4096, "")
 	f.IntVar(&o.Budget.CPUs, "cpus", 2, "")
+	f.BoolVar(&o.Operator, "operator", false, "")
+	f.BoolVar(&o.AllowDowngrade, "allow-downgrade", false, "")
 	rest := args
 	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
 		o.Commit, rest = args[0], args[1:]
@@ -87,13 +98,15 @@ func parseDeploy(args []string) (deployOptions, error) {
 }
 
 func deployCommand(args []string, inv siteInvocation) error {
-	o, err := parseDeploy(args)
+	rest, restricted, err := sitePrivilege("deploy", args, inv)
 	if err != nil {
 		return err
 	}
-	if inv.Sudo {
-		return errors.New("经 sudo 调用的 deploy 与参数白名单在统一现场部署 2a（下）开放；请以 root 直接运行")
+	o, err := parseDeploy(rest)
+	if err != nil {
+		return err
 	}
+	o.Restricted = restricted
 	if o.BackupDB {
 		return errors.New("--backup-db 属统一现场部署 2b，本版本尚未实现")
 	}
@@ -109,6 +122,7 @@ func deployCommand(args []string, inv siteInvocation) error {
 	if err != nil {
 		return err
 	}
+	run.receipt.Notes = append(run.receipt.Notes, invocationNote(inv, restricted))
 	ctx, cancel := depsSignalContext()
 	defer cancel()
 	err = withLock(data, "deploy", func() error {
@@ -135,11 +149,23 @@ func doDeploy(ctx context.Context, ops siteOps, cfg *siteConfig, cfgPath, data s
 	rc.FirstInstall = first
 	var prev *deployRecord
 	if !first {
-		if s.source() != sourceLocalDeploy {
-			return exitWith(1, fmt.Errorf("当前安装来源为 %s：deploy 只接管自己建立的站点（签名包安装接入新布局属 2a（下），已有 deploy-nas 站点用 adopt，属 2e）", s.source()))
+		if src := s.source(); src != sourceLocalDeploy && src != sourceSignedPackage {
+			return exitWith(1, fmt.Errorf("当前安装来源为 %s：deploy 只接管 deploy 或签名包安装的站点（已有 deploy-nas 站点用 adopt，属 2e）", src))
+		}
+		if _, err := os.Lstat(data + ".upgrade.json"); err == nil {
+			return exitWith(1, errors.New("存在中断的签名包升级，请先重新运行 upgrade 恢复"))
 		}
 		if prev = s.record(s.Current); prev == nil {
-			return exitWith(1, fmt.Errorf("state 缺少当前发行 r%d 的历史记录，拒绝继续", s.Current))
+			if s.source() != sourceSignedPackage || len(s.History) != 0 {
+				return exitWith(1, fmt.Errorf("state 缺少当前发行 r%d 的历史记录，拒绝继续", s.Current))
+			}
+			// 签名包安装、还没有历史的站点：把当前安装包登记为基线历史，切换失败时可以回到它。
+			base, err := packageBaseline(ctx, &s, !o.DryRun)
+			if err != nil {
+				return exitWith(1, err)
+			}
+			prev = base
+			rc.Notes = append(rc.Notes, fmt.Sprintf("签名包安装的站点第一次 deploy：当前安装包已登记为历史 r%d（%s）", base.Seq, base.Release))
 		}
 		if prev.Status == recordInstalling {
 			return exitWith(1, fmt.Errorf("首次安装（r%d）未完成：现场已保留，请先排查 %s 与数据目录；确认放弃后移走二者再重新 deploy", prev.Seq, data+".oneclick"))
@@ -178,6 +204,20 @@ func doDeploy(ctx context.Context, ops siteOps, cfg *siteConfig, cfgPath, data s
 	}
 	rc.Source = src
 	fmt.Fprintf(w, "源码：%s %s 提交 %s，快照 %s，未提交改动 %t\n", src.Mode, src.URL, src.Commit, src.SnapshotSHA256, src.Dirty)
+	if src.Signature != "" {
+		fmt.Fprintf(w, "提交签名：%s\n", src.Signature)
+	}
+	if g := cfg.Source; g != nil && g.Git != nil && !g.Git.RequireSignedCommits && len(g.Git.TrustedSigners) > 0 {
+		rc.Notes = append(rc.Notes, "source.git.trustedSigners 已配置但 requireSignedCommits=false：本次未校验提交签名")
+	}
+	var downgradeBaseline *dataVersions
+	if !first {
+		baseline, err := checkDeployDirection(ctx, data, &s, prev, src, o, rc, w)
+		if err != nil {
+			return err
+		}
+		downgradeBaseline = baseline
+	}
 	recipe, err := loadDeployRecipe(src.Dir)
 	if err != nil {
 		return exitWith(1, err)
@@ -345,11 +385,12 @@ func doDeploy(ctx context.Context, ops siteOps, cfg *siteConfig, cfgPath, data s
 	if first {
 		return deployFirstInstall(ctx, cfg, data, rec, run)
 	}
-	return deploySwitch(ctx, ops, cfg, &s, prev, rec, run)
+	return deploySwitch(ctx, ops, cfg, &s, prev, rec, run, downgradeBaseline)
 }
 
 // deploySwitch：完整启动切到新发行；失败且数据未被触碰时自动回滚（退出码 2），否则退出码 3。
-func deploySwitch(ctx context.Context, ops siteOps, cfg *siteConfig, s *state, prev *deployRecord, rec deployRecord, run *siteRun) error {
+// downgrade 非空时是 --allow-downgrade 检查时读到的数据版本：切换前再读一次，变了就不切换（退出码 3）。
+func deploySwitch(ctx context.Context, ops siteOps, cfg *siteConfig, s *state, prev *deployRecord, rec deployRecord, run *siteRun, downgrade *dataVersions) error {
 	rc, w := run.receipt, run.out
 	rc.Phase = "switch"
 	rc.SwitchMode = "完整启动（render → preflight → start）"
@@ -361,6 +402,10 @@ func deploySwitch(ctx context.Context, ops siteOps, cfg *siteConfig, s *state, p
 	rc.Notes = append(rc.Notes, "编排摘要与只换容器属 2d：本版本每次都完整启动，orchestrationChanged 未计算")
 	before := readDataVersions(*s)
 	rc.Data.Before = before
+	if downgrade != nil && !dataUntouched(downgrade, before) {
+		return exitWith(3, errors.New("--allow-downgrade 检查之后迁移或格式版本发生了变化（或读不到），不切换，需人工处理"))
+	}
+	rec.Kind = recordKindDeploy
 	rec.Status = recordFailed // 成功后改为 ok；中途崩溃时不会被当作可回滚目标
 	s.History = append(s.History, rec)
 	cur := s.record(rec.Seq)
@@ -431,6 +476,10 @@ func deploySwitch(ctx context.Context, ops siteOps, cfg *siteConfig, s *state, p
 	}
 	if prev.Status != recordOK {
 		return refuse(fmt.Sprintf("上一版 r%d 不是成功记录（%s），没有可自动回滚的健康基线", prev.Seq, prev.Status))
+	}
+	// 与手动 rollback 一样，回到上一版前核对其发行目录（SHA256SUMS 与 state 锚定的 releaseSums）。
+	if err := checkReleaseDir(s.Data, prev); err != nil {
+		return refuse(fmt.Sprintf("上一版 r%d 的发行目录校验失败（%v），不自动回滚", prev.Seq, err))
 	}
 	rc.RollbackReason = fmt.Sprintf("迁移与格式版本与切换前相同（数据未被新版本触碰），自动回滚到 r%d", prev.Seq)
 	fmt.Fprintf(w, "切换失败：%v\n%s\n", err, rc.RollbackReason)
@@ -529,7 +578,7 @@ func deployFirstInstall(ctx context.Context, cfg *siteConfig, data string, rec d
 	if err := os.Mkdir(meta, 0755); err != nil {
 		return exitWith(1, err)
 	}
-	rec.Status = recordInstalling
+	rec.Status, rec.Kind = recordInstalling, recordKindDeploy
 	s := state{Data: data, Package: rec.Release, Access: filepath.Join(meta, "access.json"), Source: sourceLocalDeploy, Current: rec.Seq, History: []deployRecord{rec}}
 	key := initialTrustKey(cfg)
 	if key != "" {
@@ -590,7 +639,7 @@ func printDeployPlan(ctx context.Context, w io.Writer, cfg *siteConfig, r *depsR
 	if first {
 		fmt.Fprintln(w, "  类型：首次安装（复用 install 步骤），构建全部镜像")
 	} else {
-		fmt.Fprintf(w, "  类型：再次部署，当前 r%d，新序号 r%d\n", prev.Seq, nextSeq(*s))
+		fmt.Fprintf(w, "  类型：再次部署，当前 r%d，新序号 r%d\n", prev.Seq, max(nextSeq(*s), prev.Seq+1))
 	}
 	fmt.Fprintf(w, "  构建镜像：%s（原因：全量构建；按输入指纹跳过构建属 2c，构建后装配摘要与当前相同的镜像跳过切换）\n", strings.Join(chosen, "、"))
 	var skipped []string

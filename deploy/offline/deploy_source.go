@@ -9,8 +9,8 @@ package main
 //     snapshotSourceContext 复制并检查 git 状态，记录 dirty 标志。
 //
 // 两种模式都得到导出目录与 SnapshotSHA256（directorySnapshotSHA256 与原函数同一口径）。
-// 提交必须在某个 allowedRefs 上（是其祖先或本身），否则拒绝。签名校验（requireSignedCommits、
-// trustedSigners）在 2a（下）实现：本版本只要配置了签名要求就整体拒绝 deploy（失败关闭）。
+// 提交必须在某个 allowedRefs 上（是其祖先或本身），否则拒绝。requireSignedCommits=true 时，
+// git 远端模式在导出前按 trustedSigners 校验提交签名（deploy_signature.go），目录模式直接拒绝。
 // git 调用隔离 root 的系统/全局配置与继承的 GIT_* 环境，快照只由提交决定。
 
 import (
@@ -37,6 +37,7 @@ type runSpec struct {
 	Stdout io.Writer
 	Limit  time.Duration
 	Quiet  bool // 丢弃标准错误（只用于探测，例如镜像是否存在）
+	Stdin  io.Reader
 	// DropEnvPrefix 非空时，继承的环境里去掉以它开头的变量（git 用 "GIT_"）。
 	DropEnvPrefix string
 }
@@ -67,10 +68,10 @@ var deployRun = func(ctx context.Context, r runSpec) error {
 		probe, cancel := context.WithTimeout(ctx, limit)
 		defer cancel()
 		c := exec.CommandContext(probe, r.Name, r.Args...)
-		c.Stdout, c.Stderr, c.Env = out, io.Discard, runEnv(os.Environ(), r)
+		c.Stdin, c.Stdout, c.Stderr, c.Env = r.Stdin, out, io.Discard, runEnv(os.Environ(), r)
 		return c.Run()
 	}
-	return commandEnvLimit(ctx, limit, nil, out, runEnv(os.Environ(), r), r.Name, r.Args...)
+	return commandEnvLimit(ctx, limit, r.Stdin, out, runEnv(os.Environ(), r), r.Name, r.Args...)
 }
 
 func deployCapture(ctx context.Context, name string, args ...string) (string, error) {
@@ -94,14 +95,15 @@ func withGitEnv(r runSpec) runSpec {
 	return r
 }
 
-// checkSigningPolicy：签名校验属 2a（下）；配置了签名要求时本版本失败关闭。
-func checkSigningPolicy(cfg *siteConfig) error {
-	if cfg == nil || cfg.Source == nil || cfg.Source.Git == nil {
-		return nil
-	}
-	g := cfg.Source.Git
-	if g.RequireSignedCommits || len(g.TrustedSigners) > 0 {
-		return errors.New("site.json 配置了 source.git.requireSignedCommits 或 trustedSigners：提交签名校验在统一现场部署 2a（下）实现，本版本不能保证只部署签名提交，拒绝 deploy（升级 CLI 后重试，或确认不需要签名后删除这两项）")
+// requireSigned：site.json 要求部署签名提交。
+func requireSigned(cfg *siteConfig) bool {
+	return cfg != nil && cfg.Source != nil && cfg.Source.Git != nil && cfg.Source.Git.RequireSignedCommits
+}
+
+// dirModeSigningPolicy：要求签名提交时不能用源码目录模式（目录快照无法证明来自签名提交）。
+func dirModeSigningPolicy(cfg *siteConfig) error {
+	if requireSigned(cfg) {
+		return errors.New("site.json 要求签名提交（source.git.requireSignedCommits=true）：源码目录模式（source.dir 或 --source）无法校验签名，拒绝；请按提交号从 source.git 部署")
 	}
 	return nil
 }
@@ -115,6 +117,8 @@ type deploySource struct {
 	Dir            string `json:"-"` // 导出目录
 	SnapshotSHA256 string `json:"snapshotSha256"`
 	Dirty          bool   `json:"dirty"`
+	// Signature：requireSignedCommits=true 时的签名校验结果（签名类型与签名者）。
+	Signature string `json:"signature,omitempty"`
 }
 
 // 可注入点：人工源码目录模式的快照（真实实现调用原 snapshotSourceContext）。
@@ -128,9 +132,6 @@ var snapshotDirSource = func(ctx context.Context, dir, target string) (*provenan
 //   - 都没给：有 source.dir 用目录模式，否则用 source.git 第一个 allowedRefs 的最新提交。
 func resolveDeploySource(ctx context.Context, cfg *siteConfig, data, flagSource, commit, stage string) (*deploySource, error) {
 	target := filepath.Join(stage, "source")
-	if err := checkSigningPolicy(cfg); err != nil {
-		return nil, err
-	}
 	if commit != "" && !commitPattern.MatchString(commit) {
 		return nil, fmt.Errorf("提交号必须是 40 位小写十六进制（当前 %q）", commit)
 	}
@@ -148,6 +149,9 @@ func resolveDeploySource(ctx context.Context, cfg *siteConfig, data, flagSource,
 		if err := depsTrustedSourceCheck("源码目录 --source ", abs); err != nil {
 			return nil, err
 		}
+		if err := dirModeSigningPolicy(cfg); err != nil {
+			return nil, err
+		}
 		return dirSnapshot(ctx, abs, target)
 	}
 	var git *siteGit
@@ -159,6 +163,9 @@ func resolveDeploySource(ctx context.Context, cfg *siteConfig, data, flagSource,
 		if err := depsTrustedSourceCheck("源码目录 source.dir ", *dir); err != nil {
 			return nil, err
 		}
+		if err := dirModeSigningPolicy(cfg); err != nil {
+			return nil, err
+		}
 		return dirSnapshot(ctx, *dir, target)
 	}
 	if git == nil {
@@ -167,7 +174,7 @@ func resolveDeploySource(ctx context.Context, cfg *siteConfig, data, flagSource,
 		}
 		return nil, errors.New("没有可用源码：配置 source.git 或 source.dir，或由 root 直接运行时加 --source <目录>")
 	}
-	return gitSnapshot(ctx, git, filepath.Join(filepath.Dir(data), "auriga-source.git"), commit, stage, target)
+	return gitSnapshot(ctx, git, sourceRepo(data), commit, stage, target)
 }
 
 func dirSnapshot(ctx context.Context, dir, target string) (*deploySource, error) {
@@ -243,6 +250,13 @@ func gitSnapshot(ctx context.Context, g *siteGit, repo, commit, stage, target st
 		src.Ref = onRef
 	}
 	src.Commit = commit
+	if g.RequireSignedCommits {
+		sig, err := verifyCommitSignature(ctx, repo, commit, g.TrustedSigners, filepath.Join(stage, "signature"))
+		if err != nil {
+			return nil, err
+		}
+		src.Signature = sig
+	}
 	// 导出提交的树（不是提交本身）：git archive 不写 pax 全局头，导出只含普通文件与目录。
 	archive := filepath.Join(stage, "source.tar")
 	if err := deployRun(ctx, withGitEnv(runSpec{Name: "git", Args: []string{gitDir, "archive", "--format=tar", "-o", archive, commit + "^{tree}"}})); err != nil {

@@ -39,7 +39,7 @@ sudo ./auriga upgrade /media/auriga-offline-new.tar
 sudo ./auriga doctor
 ```
 
-备份保存在数据父目录的 `auriga-backups/`，权限0700，归档0600。升级先校验新包、加载镜像、冷备份，再更新发行和数据库。启动/健康失败会恢复升级前完整数据库、原私钥和代码，失败现场以 `.failed-时间` 保留。升级进程中断后，再次执行相同 upgrade 会按升级记录恢复原版。install、upgrade、backup、stop、deploy、rollback 共用一把 `flock` 站点锁（`<数据目录>.oneclick-lock`，进程退出或被杀时自动释放），同时只能有一个在跑，第二个直接失败并说明正在进行的操作；旧版本留下的同名锁目录需确认没有 auriga 进程后手工删除。不要删除备份和 `.upgrade.json`。
+备份保存在数据父目录的 `auriga-backups/`，权限0700，归档0600。升级先校验新包、加载镜像、冷备份，再更新发行和数据库。新发行写到数据父目录的 `auriga-releases/<序号>/`（占用新序号，记一条 upgrade 历史，镜像加打 `auriga/<服务>:r<序号>`）；旧布局的安装第一次升级前，原安装包（`<数据目录>.oneclick/release`）先登记为一条 install 历史并留在原处。启动/健康失败会恢复升级前完整数据库、原私钥和代码并删除本次写入的发行目录，失败现场以 `.failed-时间` 保留。之后 `rollback` 可以退回保留的任一历史（见“本机部署”）。升级进程中断后，再次执行相同 upgrade 会按升级记录恢复原版。install、upgrade、backup、stop、deploy、rollback 共用一把 `flock` 站点锁（`<数据目录>.oneclick-lock`，进程退出或被杀时自动释放），同时只能有一个在跑，第二个直接失败并说明正在进行的操作；旧版本留下的同名锁目录需确认没有 auriga 进程后手工删除。不要删除备份和 `.upgrade.json`。
 
 默认 Docker 内部网段沿用配方的 `192.0.2.0/26` 与 `192.0.2.128/26`。冲突时保留错误与已有配置，交部署维护者选择不重叠网段并走原有手工路径。安装器不改宿主路由、DNS或防火墙。
 
@@ -49,7 +49,7 @@ verify/unpack/install 只用包内公钥时打印指纹与“仅完整性，未�
 
 统一现场部署（设计见源码 `docs/dev/site-deploy.zh.md`）的站点配置和依赖缓存，`deploy`、`rollback`、`history` 见下一节。
 
-- **站点配置** 固定读 `/etc/auriga/site.json`，字段按设计 D9，`schemaVersion` 为 1，未知字段、重复键直接报错。文件必须 root 所有、权限 0600 或 0644，祖先目录不可被组或其他用户写。经 sudo 调用时不接受 `--config` 与 `--source`；root 直接运行时可用 `--config` 指向同样满足权限要求的文件。依赖源只允许 `https://` 与 `file://`，不能内嵌凭据，不能带查询、片段，也不能含 `,` 或 `|`（GOPROXY 列表分隔符，多个 Go 源写成数组元素）；只有 `deps.sources.go` 是数组，`npm`、`maven`、`files` 各一个地址；`deps.registry` 只写主机名[:端口]。
+- **站点配置** 固定读 `/etc/auriga/site.json`，字段按设计 D9（另加 `server.runner`，见“经 sudo 调用”），`schemaVersion` 为 1，未知字段、重复键直接报错。文件必须 root 所有、权限 0600 或 0644，祖先目录不可被组或其他用户写。经 sudo 调用时不接受 `--config` 与 `--source`；root 直接运行时可用 `--config` 指向同样满足权限要求的文件。依赖源只允许 `https://` 与 `file://`，不能内嵌凭据，不能带查询、片段，也不能含 `,` 或 `|`（GOPROXY 列表分隔符，多个 Go 源写成数组元素）；只有 `deps.sources.go` 是数组，`npm`、`maven`、`files` 各一个地址；`deps.registry` 只写主机名[:端口]。
 - **依赖缓存** `deps.cache` 必须 root 所有、组和其他用户不可写。布局为 `inputs/<生态>/<锁摘要>/`（生态 go、web、java、system；锁摘要是目录内 `source-locks.sha256` 的 SHA-256）和 `images/<用途>/<digest>/image.json`（可带 `image.tar`）。依赖输入按锁摘要整套选取：可写缓存 → `deps.kits` → 依赖源。
 - **套件** 有两种布局，都直接可用、不需要转换：
   - 解包后的**发行开发套件**（单版本 `devkit.json`，或累积 `devkit-catalog.json`）。CLI 按当前源码各生态的锁摘要，在套件各版本的 `inputs.tar` 里找 `<生态>/source-locks.sha256` 匹配的输入；system 的锁清单由该版本 `recipes.tar` 里的 `system-inputs.sh` 和版本锁清单记录的 `admin-bootstrap-requirements.txt` 摘要合成。工具镜像、基础镜像取最新版本的镜像记录。
@@ -70,7 +70,7 @@ sudo ./auriga deps import /srv/auriga/kits/auriga-devkit-0.2.0 --trust-state   #
 
 ## 本机部署（deploy、rollback、history）
 
-当前版本只支持 **root 直接运行**（经 sudo 调用的入口、参数白名单与快进限制在下一版提供，现在经 sudo 调用会被拒绝）。站点配置需要 `server.data`；首次安装还需要 `server.install`（`address`、`domain`、`proxy` 三选一）。
+需要 root：root 直接运行，或经 sudo 的受限调用（工作流，见下面“经 sudo 调用”）。站点配置需要 `server.data`；首次安装还需要 `server.install`（`address`、`domain`、`proxy` 三选一）。
 
 ```sh
 ./auriga deploy --dry-run                 # 只打印计划：构建哪些镜像、切换方式、缺的依赖、镜像来源、迁移与格式版本
@@ -79,15 +79,25 @@ sudo ./auriga deps import /srv/auriga/kits/auriga-devkit-0.2.0 --trust-state   #
 ./auriga deploy --services edge,platform  # 只构建这两个镜像，其余沿用当前；仍完整启动
 ./auriga history                          # 部署历史，* 为当前
 ./auriga rollback [--to <序号>]
+./auriga deploy <旧提交号> --allow-downgrade   # root 人工向旧提交部署（先做数据检查）
+sudo auriga deploy <40 位提交号> --json        # 工作流：运行器账户经 sudo 的受限调用
 ```
 
+- **经 sudo 调用（D12，CLI 侧规则；sudoers 片段与示例工作流见第 7 步）**：
+  - 环境里有 `SUDO_UID` 即为经 sudo 调用。`site.json` 新增 `server.runner`（运行器的本机账户名：小写字母、数字、`_`、`-`，以字母或 `_` 开头，不超过 32 位，不能是 `root`；未知字段规则不变）。调用者（`SUDO_UID`）是该账户时**一律受限**，不能用 `--operator`，而且只能运行 `deploy`、`rollback`、`status`、`history`（其余子命令与帮助参数都拒绝）。
+  - 其他账户经 sudo（包括 `sudo -i` 的管理员，同样带 `SUDO_UID`）运行 `deploy`、`rollback` 默认也受限；显式加 `--operator` 才按人工 root 处理。`--operator` 要求 `site.json` 已登记 `server.runner` 且能解析为本机账户（否则无法证明调用者不是运行器，拒绝）；没登记时请以 root 登录直接运行。不经 sudo 时 `--operator` 无作用。`history` 与旧命令（install、upgrade、trust、deps 等）对非运行器账户保持原有行为；`status` 只要 `site.json` 存在，任何经 sudo 的调用都不收参数、数据目录取 `server.data`（`status` 会以 root 执行当前发行的 `status.sh`，不能让 `--data` 指向别人可写的 state；没有 `site.json` 的旧签名包站点照旧 `sudo ./auriga status --data …`）；`site.json` 存在但读不出来时经 sudo 的调用一律拒绝。给运行器放行 sudoers 之前必须先登记 `server.runner`，否则运行器不会被识别为运行器。
+  - 受限时参数白名单（只认精确写法，不接受单横线、`=true`、重复参数与 `--`）：`deploy` 恰好一个 40 位小写十六进制提交号（放在第一个或最后一个参数），可选 `--full`、`--services <a,b>`、`--dry-run`、`--json`、`--backup-db`（`--backup-db` 本版本仍拒绝，属 2b）；`rollback` 只有 `--to <序号>` 与 `--json`；`history` 只有 `--json`；`status` 不接受参数（数据目录取 `server.data`）。`--config`、`--source`、`--allow-downgrade`、`--operator` 等一律拒绝。
+  - **快进**：受限 `deploy` 只允许当前运行提交的后代（root 在自己 fetch 的 `auriga-source.git` 里 `merge-base --is-ancestor`，同一提交可重新部署）；当前发行没有可比较的提交（目录模式含未提交改动、旧签名包没有提交号）或该提交不在暂存仓库里时也拒绝，需 root 人工部署一次。首装不限。退出码 1。
+  - **`--allow-downgrade`**（只限 root 人工）：目标不是当前运行提交的后代时必须加，并先做与 rollback 相同的数据检查——2b 前的口径：历史里有一条成功记录，其提交是目标提交本身或祖先，且当前迁移与格式版本与它运行时相同，才允许；否则退出码 3。切换前再读一次版本，变了也退出码 3。
+
 - **源码**：给了提交号时，root 把 `source.git.url` 的 `allowedRefs` fetch 到数据目录同级的裸仓库 `auriga-source.git`，提交必须在某个 `allowedRefs` 上（是其祖先或本身），否则拒绝；再用 `git archive` 导出提交的树，不在任何运行器目录里执行 git，也不读 root 的系统/全局 git 配置和继承的 `GIT_*` 环境变量。没有提交号时用 `source.dir`，root 直接运行时也可用 `--source <目录>`（两者都须 root 所有、组和其他用户不可写），此时记录工作区是否有未提交改动。收据记录提交号和快照摘要 `SnapshotSHA256`。
-- **签名提交**：提交签名校验在下一版实现。现在只要 `source.git` 配置了 `requireSignedCommits: true` 或非空的 `trustedSigners`，deploy 就直接拒绝（退出码 1），不会在不校验签名的情况下部署。
+- **签名提交**：`source.git.requireSignedCommits: true` 时必须配置 `trustedSigners`（受信签名者公钥文件路径列表，每个文件 root 所有、组和其他用户不可写；内容是 ASCII 装甲的 PGP 公钥块，或若干行 `<类型> <base64> [注释]` 的 ssh 公钥）。导出前在 root 的隔离环境里校验该提交：用 `git cat-file` 从暂存裸仓库读出提交，ssh 签名用临时 allowed_signers 跑 `ssh-keygen -Y verify -n git`，gpg 签名把受信公钥导入临时 `GNUPGHOME` 后 `gpg --verify`（不用 root 的全局 keyring、`~/.ssh` 或 git 配置）。未签名、签名者不在列表里、签名无效或密钥过期吊销、x509（gpgsm）签名一律拒绝，退出码 1；收据的 `source.signature` 记录签名类型与签名者。要求签名时源码目录模式（`source.dir`、`--source`）也拒绝。`requireSignedCommits: false` 时不校验签名（即使配了 `trustedSigners`）。
 - **配方**：一律使用源码快照里的 `deploy/nas/offline-build`。`deploy-recipe.json` 声明各镜像的暂存清单、工具镜像与基础镜像（以及 postgres、nats、registry）的固定 digest、CLI 能力版本；能力版本与本 CLI 不符时失败并提示先升级 CLI，deploy 不替换自身。CLI 自己按清单暂存产物，`docker build --network=none --pull=false` 装配，构建参数由 CLI 固定；Dockerfile 含 `syntax`/`escape` 解析器指令时拒绝（任意位置，包括 BOM、`//` 前缀、任意空白与 JSON 形式等变体），`FROM` 只能是固定 digest 的镜像、配方的 `${<服务>_BASE}`（只能用在同名阶段）或前面声明的阶段，拒绝 `ADD <URL>`、引用外部镜像的 `COPY --from`/`RUN --mount from=`、`ONBUILD` 与 heredoc；构建前逐字节比较源码锁清单与依赖输入的 `source-locks.sha256`。`bundle` 与 `assemble-image.sh` 不变。
 - **依赖与镜像**：依赖输入沿用 `deps` 的解析（缓存 → 套件），使用前完整校验；缺失时只有 Go、Web 且 `acceptNewDeps`（或 `--accept-new-deps`）才自动补，否则退出码 1 并列出缺什么。镜像按配方 digest 依次找：缓存或套件记录（本机已有就不 load）→ 本机 Docker → `deps.registry` 按 digest 拉取。
 - **发行目录与标签**：每次部署写 `<数据目录的父目录>/auriga-releases/<序号>/`（`deploy-nas/`、`bin/auriga-nas-bootstrap`、`bin/runtime-release`、`release.json`、本地 `SHA256SUMS`），五个装配镜像加打 `auriga/<服务>:r<序号>`；发行目录 `SHA256SUMS` 的摘要记进 state，回滚前核对。state 的 `current` 原子切换。保留 `server.keepHistory` 份成功的发行（默认 3，失败记录不占名额），淘汰前确认没有容器在用对应镜像。装配摘要（产物、系统输入、基础镜像、Dockerfile、暂存清单）与当前一致的镜像不重建、不切换。每次都完整启动（render → preflight → start）。
-- **首次安装**：没有 state 时复用 install 的步骤，只是镜像来自本机构建。配置了带 `trustFingerprint` 的套件时用其发行公钥钉定，否则 state 标记未钉定（`auriga status` 会提示），之后第一次签名包 upgrade 前须先 `trust add-*`。state 记录 `source: local-deploy`。
-- **回滚**：切换失败时，先停掉新版本里会写库或改写数据目录的服务（platform、collab、collab-renew、edge 系列、agent、bifrost）并确认已停止，再读迁移版本（各库各 schema 的 `flyway_schema_history`、`auriga_common_schema_history`）与数据目录 `format-versions.json`；与切换前完全相同、且上一份发行是成功记录时才自动回滚（退出码 2）；停不下来、读不到或有变化时不回滚（退出码 3，会写数据的新容器保持停止）；回滚本身失败不重试（退出码 3）。首装失败退出码 1，保留现场。
+- **首次安装**：没有 state 时复用 install 的步骤，只是镜像来自本机构建。配置了带 `trustFingerprint` 的套件时用其发行公钥钉定，否则 state 标记未钉定（`auriga status`、`doctor` 会提示），之后第一次签名包 upgrade 前须先 `sudo ./auriga trust add-release-key <发行公钥.pem> --confirm-fingerprint <独立核对的指纹>`（或 `trust add-site-key` 登记站点构建公钥）。state 的 `source` 表示当前发行的来源：`local-deploy`（deploy 构建）或 `signed-package`（签名包安装或 upgrade）。
+- **verifyStatePackage 与 doctor**：`local-deploy` 来源的当前发行按本地 `SHA256SUMS` 与 state 锚定的 `releaseSums` 核对（不要求签名，也不借用 `--allow-unsigned` 例外）；`doctor` 的“发行信任状态”“离线包完整性”“镜像摘要与层”三项按此判断（镜像项核对 `auriga/<服务>:r<序号>` 仍指向历史记录的镜像），`trust remove-site-key` 同样可用。
+- **回滚**：切换失败时，先停掉新版本里会写库或改写数据目录的服务（platform、collab、collab-renew、edge 系列、agent、bifrost）并确认已停止，再读迁移版本（各库各 schema 的 `flyway_schema_history`、`auriga_common_schema_history`）与数据目录 `format-versions.json`；与切换前完全相同、上一份发行是成功记录、且其发行目录与 state 锚定的 `releaseSums` 一致（与手动 rollback 同样核对）时才自动回滚（退出码 2）；停不下来、读不到或有变化时不回滚（退出码 3，会写数据的新容器保持停止）；回滚本身失败不重试（退出码 3）。首装失败退出码 1，保留现场。
 - **手动 rollback（2b 之前的规则与风险）**：`rollback` 只在当前迁移与格式版本与目标发行运行时记录的完全相同才执行，否则退出码 3；跨越迁移的回滚需要 `schemaCompatFloor` 与格式上限声明（2b 生成），现在一律交人工。注意：迁移版本没变不等于数据没变——新版本运行期间可能已写入旧代码不认识的行数据或取值，回滚后旧代码可能读错或报错；新版本运行越久风险越大。执行前请先备份，并确认这段时间的业务改动。2b 上线后改为按 floor 与格式上限判断。
 - **日志与收据**：每次 deploy/rollback 写 `<logs.dir>/<时间>-<命令>.log` 与同名 `.json` 收据（默认 `/var/log/auriga`，必须 root 所有、组和其他用户不可写），内容脱敏。`--json` 让标准输出只打印收据。退出码：0 成功；1 未切换就失败；2 切换失败已自动回滚；3 需要人工。
-- 已用签名包 `install` 的站点暂不能 `deploy`（接入新布局在下一版），deploy 安装的站点也暂不能用签名包 `upgrade`。
+- **deploy 与 upgrade 互通**：签名包安装的站点可以直接 `deploy`——第一次 deploy 前，当前安装包（核验签名后）登记为一条 install 历史并打 `:r<序号>` 标签，切换失败时可以自动回滚到它；deploy 建立的站点可以接收签名包 `upgrade`（发行钥未钉定时先 `trust add-*`）。`history` 列出每条历史的种类（deploy、upgrade、install），`rollback` 能退回其中任一条，检查规则相同；切过去后 state 的 `source` 随之变化。`adopted` 站点属 2e。
