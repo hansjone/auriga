@@ -1,0 +1,66 @@
+# 示例：Forgejo Actions 现场回滚工作流（设计 docs/dev/site-deploy.zh.md D12）
+#
+# GitHub Actions 同理，差异（宿主机执行标签、上传动作版本、concurrency 支持）见
+# site-deploy.yml 头部说明。
+# 与 site-deploy.yml 共用 concurrency 组，减少与部署同时排队；最终互斥仍靠 CLI flock。
+#
+# 日志策略同 site-deploy.yml：只上传 --json 标准输出的脱敏收据，不读 logs.dir。
+# 取消时的信号转发、flock 与切换中被杀的处理办法见 site-deploy.yml 头部与 README.md。
+
+name: 现场回滚
+
+on:
+  workflow_dispatch:
+    inputs:
+      to:
+        description: 目标发行序号（auriga history 查看；留空表示上一份成功发行）
+        required: false
+        default: ""
+        type: string
+
+concurrency:
+  group: auriga-site-deploy
+  cancel-in-progress: false
+
+jobs:
+  rollback:
+    runs-on: [self-hosted, auriga-site]
+    timeout-minutes: 60
+    steps:
+      - name: 回滚到指定发行
+        shell: bash
+        env:
+          TO: ${{ inputs.to }}
+        run: |
+          set -euo pipefail
+          rm -f receipt.json
+          args=(--json)
+          if [ -n "${TO:-}" ]; then
+            if ! printf '%s' "$TO" | grep -Eqx '[1-9][0-9]*'; then
+              echo "目标序号须为正整数，当前不合法" >&2
+              exit 1
+            fi
+            args+=(--to "$TO")
+          fi
+          set +e
+          # -n：sudoers 未放行时立即失败，不会卡在口令提示上。
+          sudo -n /usr/local/bin/auriga rollback "${args[@]}" > receipt.json
+          code=$?
+          set -e
+          echo "exit_code=$code" >> "$GITHUB_OUTPUT"
+          case "$code" in
+            0) echo "退出码 0：成功" ;;
+            1) echo "退出码 1：未切换就失败（参数错误或目标不存在等，现场未受影响）" ;;
+            2) echo "退出码 2：切换失败且已自动回滚（rollback 目前不会返回 2）" ;;
+            3) echo "退出码 3：需要人工（格式检查拒绝回滚或回滚本身失败）" ;;
+            *) echo "退出码 $code：非约定值（可能被信号终止），请管理员查看 auriga status / history" ;;
+          esac
+          exit "$code"
+
+      - name: 上传脱敏收据
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: auriga-rollback-receipt
+          path: receipt.json
+          if-no-files-found: warn

@@ -266,11 +266,11 @@ func TestPruneKeepsSuccessfulReleases(t *testing.T) {
 	}
 }
 
-// L6：JSON 形式的口令也要脱敏（含转义引号）。
+// L6：JSON 形式的口令也要脱敏（含转义引号）；TOTP 种子同理。
 func TestRedactJSONSecrets(t *testing.T) {
-	in := `{"password": "a\"bc-secret", "api_key":"zzz123", "user":"alice", "AURIGA_TOKEN" : "tok-999"}`
+	in := `{"password": "a\"bc-secret", "api_key":"zzz123", "user":"alice", "AURIGA_TOKEN" : "tok-999", "totpSeed":"JBSWY3DPEHPK3PXP"}`
 	out := redactText(in)
-	for _, secret := range []string{`a\"bc-secret`, "bc-secret", "zzz123", "tok-999"} {
+	for _, secret := range []string{`a\"bc-secret`, "bc-secret", "zzz123", "tok-999", "JBSWY3DPEHPK3PXP"} {
 		if strings.Contains(out, secret) {
 			t.Fatalf("JSON 口令未脱敏 %s：%s", secret, out)
 		}
