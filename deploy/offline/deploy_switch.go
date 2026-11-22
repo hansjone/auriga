@@ -389,6 +389,10 @@ func planSwitchWith(prev, rec *deployRecord, orch, data string) switchPlan {
 	}
 
 	switch {
+	case prev != nil && (prev.kind() == recordKindAdopt || rec.kind() == recordKindAdopt):
+		// adopt 接管记录没有可信的产物指纹与装配摘要，现场容器也不是本工具启动的：与它之间的
+		// 切换（adopt 后第一次 deploy、回滚到 adopt 版）一律完整启动，不走只换容器或仅切指针。
+		p.Mode, p.Reason = switchModeFull, "adopt 接管记录没有可信的产物指纹/装配摘要，与它之间的切换一律完整启动"
 	case p.OrchestrationChanged:
 		p.Mode, p.Reason = switchModeFull, "编排摘要变化"
 		if prev != nil && prev.Orchestration == "" {

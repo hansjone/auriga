@@ -147,8 +147,8 @@ func (s state) trustKeys() ([]string, error) {
 }
 
 // verifyStatePackage 核验发行目录或待升级的签名包。对当前发行（root 即 s.Package）：
-// local-deploy 来源核对本地清单 SHA256SUMS 与 state 锚定的 releaseSums（不要求签名，也不借用
-// AllowUnsigned，设计 D10）；签名包来源按 state 固定的公钥验签，有历史记录时同样核对
+// local-deploy / adopted 来源核对本地清单 SHA256SUMS 与 state 锚定的 releaseSums（不要求签名，
+// 也不借用 AllowUnsigned，设计 D10）；签名包来源按 state 固定的公钥验签，有历史记录时同样核对
 // releaseSums。待升级的包（root 不是当前发行）一律按 state 固定的公钥验签。
 func verifyStatePackage(s state, root, index string, allow bool) (bool, error) {
 	current := filepath.Clean(root) == filepath.Clean(s.Package)
@@ -158,7 +158,7 @@ func verifyStatePackage(s state, root, index string, allow bool) (bool, error) {
 			return false, fmt.Errorf("state 的当前发行 r%d 与安装目录不一致", rec.Seq)
 		}
 	}
-	if current && s.source() == sourceLocalDeploy {
+	if current && (s.source() == sourceLocalDeploy || s.source() == sourceAdopted) {
 		if rec == nil {
 			return false, fmt.Errorf("state 缺少当前发行 r%d 的历史记录，无法核对本地清单", s.Current)
 		}

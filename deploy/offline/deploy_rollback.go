@@ -541,7 +541,9 @@ func printHistory(w io.Writer, s state) {
 			mark = "*"
 		}
 		commit := r.Source.Commit
-		if len(commit) > 12 {
+		if commit == "" {
+			commit = "未知"
+		} else if len(commit) > 12 {
 			commit = commit[:12]
 		}
 		floor := "未声明 floor"
@@ -563,6 +565,10 @@ func printDeploySummary(w io.Writer, s state) {
 		fmt.Fprintln(w, "发行钥未钉定：第一次签名包 upgrade 前须先 trust add-*")
 	}
 	if r := s.record(s.Current); r != nil {
-		fmt.Fprintf(w, "当前发行 r%d（%s，源码 %s %s，快照 %s）\n", r.Seq, r.Status, r.Source.Mode, r.Source.Commit, r.Source.SnapshotSHA256)
+		commit := r.Source.Commit
+		if commit == "" {
+			commit = "提交未知"
+		}
+		fmt.Fprintf(w, "当前发行 r%d（%s，%s，源码 %s %s，快照 %s）\n", r.Seq, r.kind(), r.Status, r.Source.Mode, commit, r.Source.SnapshotSHA256)
 	}
 }
