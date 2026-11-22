@@ -250,9 +250,13 @@ type siteOps struct {
 	smoke  func(s state) (string, error)
 	// stopWriters 停掉会写库或改写数据目录的容器并确认已停止，返回停掉的服务。
 	stopWriters func(s state) ([]string, error)
+	// compose 只换容器路径用；nil 时用包级 compose。
+	compose func(s state, out *bytes.Buffer, args ...string) error
+	// collabNetwork 只换容器且有 collab-source 时运行 start-collab-network.sh（离线维护模式）；nil 时用默认。
+	collabNetwork func(s state) error
 }
 
-var defaultSiteOps = siteOps{nas: nas, health: waitHealthyFor, smoke: runDeploySmoke, stopWriters: stopDataWriters}
+var defaultSiteOps = siteOps{nas: nas, health: waitHealthyFor, smoke: runDeploySmoke, stopWriters: stopDataWriters, compose: compose, collabNetwork: startCollabNetworkOffline}
 
 // dataWriterServices：按镜像列出会写库或改写数据目录的 compose 服务（docker-compose.yml、
 // collab-compose.yml）。postgres、collab-db、nats、registry 不在内：读迁移版本要用 postgres，
@@ -321,7 +325,7 @@ func stopDataWriters(s state) ([]string, error) {
 }
 
 // runDeploySmoke：发行目录里有只读部署冒烟脚本 scripts/deploy-smoke.sh 时运行；没有就跳过
-// （不用会默认报 PARTIAL 的 smoke.sh；冒烟脚本由后续步骤提供）。
+// （不用会默认报 PARTIAL 的 smoke.sh）。
 func runDeploySmoke(s state) (string, error) {
 	script := filepath.Join(s.Package, "deploy-nas", "scripts", "deploy-smoke.sh")
 	if _, err := os.Lstat(script); os.IsNotExist(err) {
@@ -331,28 +335,6 @@ func runDeploySmoke(s state) (string, error) {
 		return "失败", err
 	}
 	return "通过", nil
-}
-
-// startRecord 把站点切到某条历史：写 stack.env 镜像、原子保存 state（current 指针），
-// 再 render → preflight → start → 等待健康。
-func startRecord(ops siteOps, s *state, r *deployRecord, timeout time.Duration) error {
-	if err := updateStackEnv(s.Data, r.Images); err != nil {
-		return err
-	}
-	s.Current, s.Package, s.Images = r.Seq, r.Release, cloneImages(r.Images)
-	s.Source = sourceForRecord(r)
-	if err := saveState(*s); err != nil {
-		return err
-	}
-	for _, step := range [][]string{{"render"}, {"preflight"}, {"start", "--network-offline"}} {
-		if err := ops.nas(*s, step[0], step[1:]...); err != nil {
-			return fmt.Errorf("%s 失败：%w", step[0], err)
-		}
-	}
-	if err := ops.health(*s, timeout); err != nil {
-		return fmt.Errorf("健康检查失败：%w", err)
-	}
-	return nil
 }
 
 // previousRecord 返回当前序号之前最近一条成功的历史。
@@ -473,8 +455,18 @@ func doRollback(ctx context.Context, ops siteOps, cfg *siteConfig, data string, 
 			rc.Images = append(rc.Images, receiptImage{Service: svc, Action: "rollback", OldID: old, NewID: target.Images[key], Tag: imageTag(svc, target.Seq)})
 		}
 	}
-	fmt.Fprintf(run.out, "回滚到 r%d（%s）…\n", target.Seq, target.Release)
-	if err := startRecord(ops, &s, target, healthTimeout(cfg)); err != nil {
+	plan, planErr := planRollbackSwitch(current, target, data, s.Access)
+	if planErr != nil {
+		return exitWith(1, fmt.Errorf("计算回滚切换方案失败：%w", planErr))
+	}
+	rc.SwitchMode = plan.Mode
+	orchChanged := plan.OrchestrationChanged
+	rc.OrchestrationChanged = &orchChanged
+	rc.Orchestration = plan.Orchestration
+	rc.MixedVersions = mixedVersionsNote(plan)
+	rc.Notes = append(rc.Notes, "回滚路径："+formatSwitchPlanLine(plan))
+	fmt.Fprintf(run.out, "回滚到 r%d（%s）…\n", target.Seq, formatSwitchPlanLine(plan))
+	if err := startRecord(ops, &s, target, healthTimeout(cfg), plan); err != nil {
 		rc.Health = err.Error()
 		rc.RolledBack = false
 		return exitWith(3, fmt.Errorf("回滚到 r%d 失败，不重试，需人工处理：%w", target.Seq, err))

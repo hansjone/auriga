@@ -1,16 +1,18 @@
 package main
 
-// auriga deploy（设计 D10；第 2c 步：输入指纹决定是否构建，装配摘要决定是否切换）。
+// auriga deploy（设计 D10；第 2c/2d 步：输入指纹决定是否构建，装配摘要决定是否换镜像，
+// 编排摘要决定完整启动还是只换容器）。
 //
 // 流程：统一站点锁 → 取源码快照 → 读源码配方与 services.json → 依赖输入 → 固定 digest 镜像 →
 // 计算产物指纹（与当前发行一致则跳过构建并复用 artifacts/）→ 断网构建需要的 go/web/java →
 // 按暂存清单装配（装配摘要分项与当前相同则跳过切换，收据写触发项）→ 打 r<序号> 标签 →
-// 写不可变发行目录（含 provenance.json、fingerprints.json、artifacts/）→ 首装或完整启动 → 收据。
+// 写不可变发行目录（含 provenance.json、fingerprints.json、artifacts/、versions.txt）→
+// 首装或切换（编排未变且仅 edge/platform 时只换容器，否则完整启动）→ 收据。
 //
 // 受限调用（经 sudo，见 privilege.go）只接受白名单参数，且只允许部署当前运行提交的后代
 // （快进）；root 人工 --allow-downgrade 可向旧提交部署，先做与 rollback 相同的数据检查。
 //
-// 不在本步：只换容器（2d）、adopt（2e）。
+// 不在本步：adopt（2e）。
 
 import (
 	"context"
@@ -363,7 +365,7 @@ func doDeploy(ctx context.Context, ops siteOps, cfg *siteConfig, cfgPath, data s
 		roles = append(roles, "service-"+svc)
 	}
 	if o.DryRun {
-		return printDeployPlan(ctx, w, cfg, r, recipe, fpReport, prevFP, &s, first, prev, chosen, builds, roles, inputs, missing, o, rc)
+		return printDeployPlan(ctx, w, cfg, r, recipe, fpReport, prevFP, &s, first, prev, chosen, builds, roles, inputs, missing, o, rc, src.Dir)
 	}
 	for _, role := range roles {
 		if err := resolveRole(role); err != nil {
@@ -519,7 +521,11 @@ func doDeploy(ctx context.Context, ops siteOps, cfg *siteConfig, cfgPath, data s
 		Source: *src, Images: images, Assembly: assembly, AssemblyParts: assemblyPartsMap,
 		Fingerprints: fingerprintMap(recorded), SchemaCompatFloor: floorPtr(floor), FormatMax: formatMax, CreatedAt: nowRFC3339(),
 	}
-	release, releaseSums, err := writeReleaseDir(ctx, data, seq, src.Dir, filepath.Join(out, "go"), out, manifest, prov, recorded)
+	var orchIn *orchInputs
+	if !first {
+		orchIn = &orchInputs{Data: s.Data, Access: s.Access}
+	}
+	release, releaseSums, err := writeReleaseDir(ctx, data, seq, src.Dir, filepath.Join(out, "go"), out, manifest, prov, recorded, orchIn)
 	if err != nil {
 		return exitWith(1, err)
 	}
@@ -536,18 +542,30 @@ func doDeploy(ctx context.Context, ops siteOps, cfg *siteConfig, cfgPath, data s
 	return deploySwitch(ctx, ops, cfg, &s, prev, rec, run, downgradeBaseline)
 }
 
-// deploySwitch：完整启动切到新发行；失败且数据未被触碰时自动回滚（退出码 2），否则退出码 3。
+// deploySwitch：按编排摘要与镜像差选择只换容器或完整启动；失败且数据未被触碰时自动回滚（退出码 2），否则退出码 3。
 // downgrade 非空时是 --allow-downgrade 检查时读到的数据版本：切换前再读一次，变了就不切换（退出码 3）。
 func deploySwitch(ctx context.Context, ops siteOps, cfg *siteConfig, s *state, prev *deployRecord, rec deployRecord, run *siteRun, downgrade *dataVersions) error {
 	rc, w := run.receipt, run.out
 	rc.Phase = "switch"
-	rc.SwitchMode = "完整启动（render → preflight → start）"
+	plan, err := planSwitch(prev, &rec, s.Data, s.Access)
+	if err != nil {
+		return exitWith(1, fmt.Errorf("计算切换方案失败：%w", err))
+	}
+	rec.Orchestration = plan.Orchestration
+	changed := plan.OrchestrationChanged
+	rc.OrchestrationChanged = &changed
+	rc.Orchestration = plan.Orchestration
+	rc.SwitchMode = plan.Mode
+	rc.MixedVersions = mixedVersionsNote(plan)
+	rc.Notes = append(rc.Notes, "切换原因："+plan.Reason)
+	if plan.MixedBroker {
+		rc.Notes = append(rc.Notes, rc.MixedVersions)
+	}
 	for _, svc := range append(append([]string(nil), deployServices...), deployExtraServices...) {
 		if prev.Images[imageKey(svc)] != rec.Images[imageKey(svc)] {
 			rc.SwitchedServices = append(rc.SwitchedServices, svc)
 		}
 	}
-	rc.Notes = append(rc.Notes, "编排摘要与只换容器属 2d：本版本每次都完整启动，orchestrationChanged 未计算")
 	before := readDataVersions(*s)
 	rc.Data.Before = before
 	if downgrade != nil && !dataUntouched(downgrade, before) {
@@ -557,12 +575,15 @@ func deploySwitch(ctx context.Context, ops siteOps, cfg *siteConfig, s *state, p
 	rec.Status = recordFailed // 成功后改为 ok；中途崩溃时不会被当作可回滚目标
 	s.History = append(s.History, rec)
 	cur := s.record(rec.Seq)
+	if p := s.record(prev.Seq); p != nil {
+		prev = p // append 可能换了底层数组：之后对 prev 的修改（broker 运行镜像）要落进 state
+	}
 	timeout := healthTimeout(cfg)
-	fmt.Fprintf(w, "切换到 r%d（%s）…\n", rec.Seq, rc.SwitchMode)
-	err := startRecord(ops, s, cur, timeout)
+	fmt.Fprintf(w, "切换到 r%d（%s）…\n", rec.Seq, formatSwitchPlanLine(plan))
+	err = startRecord(ops, s, cur, timeout, plan)
 	if err == nil {
 		rc.Health = "healthy"
-		if cfg.Server.Smoke != nil && !*cfg.Server.Smoke {
+		if cfg.Server != nil && cfg.Server.Smoke != nil && !*cfg.Server.Smoke {
 			rc.Smoke = "已关闭（server.smoke=false）"
 		} else {
 			var smokeErr error
@@ -639,7 +660,19 @@ func deploySwitch(ctx context.Context, ops siteOps, cfg *siteConfig, s *state, p
 	}
 	rc.RollbackReason = reason
 	fmt.Fprintf(w, "切换失败：%v\n%s\n", err, rc.RollbackReason)
-	if rbErr := startRecord(ops, s, prev, timeout); rbErr != nil {
+	rbPlan, rbPlanErr := planRollbackSwitch(cur, prev, s.Data, s.Access)
+	if rbPlanErr != nil {
+		return refuse("计算回滚切换方案失败：" + rbPlanErr.Error())
+	}
+	if rbPlan.Mode != switchModeFull {
+		// 上面为判定数据是否被触碰已停掉全部写数据服务（含 platform、agent、bifrost、network-broker），
+		// 只换容器“其余服务保持运行”的前提不成立，只能完整启动上一版才能把它们按原样拉起。
+		rbPlan.Mode = switchModeFull
+		rbPlan.Reason += "；但自动回滚前已停止全部写数据服务，改为完整启动"
+		rbPlan.setBroker(cur, prev)
+	}
+	rc.Notes = append(rc.Notes, "自动回滚路径："+formatSwitchPlanLine(rbPlan))
+	if rbErr := startRecord(ops, s, prev, timeout, rbPlan); rbErr != nil {
 		rc.Health += "；回滚：" + rbErr.Error()
 		rc.Notes = append(rc.Notes, runningImages(ctx)...)
 		return exitWith(3, fmt.Errorf("切换到 r%d 失败（%v），自动回滚到 r%d 也失败，不重试，需人工处理：%w", rec.Seq, err, prev.Seq, rbErr))
@@ -755,11 +788,21 @@ func deployFirstInstall(ctx context.Context, cfg *siteConfig, data string, rec d
 	}
 	cur := s.record(rec.Seq)
 	cur.Status = recordOK
+	if orch, err := orchestrationDigest(filepath.Join(rec.Release, "deploy-nas"), s.Data, s.Access); err == nil {
+		cur.Orchestration = orch
+		rc.Orchestration = orch
+	} else {
+		// 没有摘要的记录下次部署按编排变化完整启动，安全；只提示。
+		rc.Notes = append(rc.Notes, "编排摘要计算失败（下次部署将完整启动）："+err.Error())
+	}
 	after := readDataVersions(s)
 	rc.Data.After = after
 	if after.ok() {
 		cur.Migrations, cur.Formats = after.Migrations, after.Formats
 	}
+	changed := false
+	rc.OrchestrationChanged = &changed
+	rc.MixedVersions = "无"
 	if err := saveState(s); err != nil {
 		return exitWith(1, err)
 	}
@@ -790,7 +833,7 @@ func probeRecipeImage(ctx context.Context, r *depsResolver, cfg *siteConfig, rol
 	return "缺失（deps import 或配置 deps.registry）"
 }
 
-func printDeployPlan(ctx context.Context, w io.Writer, cfg *siteConfig, r *depsResolver, recipe *deployRecipe, fp *fingerprintReport, prevFP map[string]string, s *state, first bool, prev *deployRecord, chosen []string, builds map[string]bool, roles []string, inputs []resolvedInput, missing []string, o deployOptions, rc *siteReceipt) error {
+func printDeployPlan(ctx context.Context, w io.Writer, cfg *siteConfig, r *depsResolver, recipe *deployRecipe, fp *fingerprintReport, prevFP map[string]string, s *state, first bool, prev *deployRecord, chosen []string, builds map[string]bool, roles []string, inputs []resolvedInput, missing []string, o deployOptions, rc *siteReceipt, srcDir string) error {
 	fmt.Fprintln(w, "部署计划（--dry-run：不构建、不切换）")
 	if first {
 		fmt.Fprintln(w, "  类型：首次安装（复用 install 步骤），构建全部镜像")
@@ -839,7 +882,36 @@ func printDeployPlan(ctx context.Context, w io.Writer, cfg *siteConfig, r *depsR
 	if len(skipped) > 0 {
 		fmt.Fprintf(w, "  沿用当前镜像：%s（--services 未选中且无共享输入变化）\n", strings.Join(skipped, "、"))
 	}
-	fmt.Fprintln(w, "  切换：装配摘要（产物树、基础镜像、系统输入、Dockerfile 目标段、暂存清单）与当前相同则跳过；完整启动（render → preflight → start）；只换容器属 2d")
+	fmt.Fprintln(w, "  装配：装配摘要（产物树、基础镜像、系统输入、Dockerfile 目标段、暂存清单）与当前相同则跳过换镜像")
+	if !first && prev != nil {
+		// dry-run 时尚无新发行目录：编排按源码快照的 deploy/nas + 当前发行的 deploy-nas/bin（假定
+		// bootstrap 与 runtime-release 不变）+ 当前站点输入估算；选中镜像一律按将更换（真实装配后
+		// 可能因摘要未变而跳过）；broker 指纹按未变假定（--dry-run 不展开 Go 依赖图，无法确认）。
+		probe := *prev
+		probe.Seq = prev.Seq + 1
+		probe.Images = cloneImages(prev.Images)
+		for _, svc := range chosen {
+			probe.Images[imageKey(svc)] = "dry-run-new-" + svc
+		}
+		parts, err := orchestrationParts(filepath.Join(srcDir, "deploy", "nas"), filepath.Join(prev.Release, "deploy-nas", "bin"), s.Data, s.Access)
+		if err == nil {
+			plan := planSwitchWith(prev, &probe, parts.Total, s.Data)
+			line := formatSwitchPlanLine(plan)
+			if plan.Mode == switchModeContainers && plan.Edge {
+				line += "；前提：auriga-network-broker 产物指纹未变，否则完整启动"
+			}
+			fmt.Fprintf(w, "  切换（预估）：%s\n", line)
+			rc.SwitchMode = plan.Mode
+			changed := plan.OrchestrationChanged
+			rc.OrchestrationChanged = &changed
+			rc.Orchestration = parts.Total
+			rc.Notes = append(rc.Notes, "dry-run 切换预估："+line)
+		} else {
+			fmt.Fprintf(w, "  切换：无法预估（%v）；将按完整启动处理\n", err)
+		}
+	} else {
+		fmt.Fprintln(w, "  切换：首次安装走完整安装步骤")
+	}
 	fmt.Fprintln(w, "  依赖输入：")
 	for _, in := range inputs {
 		dig := in.LockDigest
