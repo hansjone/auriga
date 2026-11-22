@@ -102,7 +102,7 @@ func doctor(s state) error {
 	}
 	fmt.Printf("安装来源 %s\n", s.source())
 	if s.TrustUnpinned {
-		fmt.Println("INFO 发行钥未钉定（本机构建首装没有带 trustFingerprint 的套件）：第一次签名包 upgrade 前须先 trust add-release-key 或 add-site-key")
+		fmt.Println("INFO 发行钥未钉定（本机构建首装没有带 trustFingerprint 的套件，或 adopt 接管）：第一次签名包 upgrade 前须先 trust add-release-key 或 add-site-key")
 	}
 	check("Docker/Compose版本", "离线预装 Docker Engine 与 Compose 2.29+，检查本机 socket。", dockerReady)
 	for _, c := range releaseChecks(s) {
@@ -206,8 +206,8 @@ func releaseChecks(s state) []doctorCheck {
 			_, err := verifyStatePackage(s, s.Package, "", false)
 			return err
 		}},
-		{"镜像摘要与层", "重拷离线包并由 install/upgrade 重新 load，勿直接替换镜像；本机构建的发行用 deploy 重新构建或 rollback。", func() error {
-			if s.source() == sourceLocalDeploy {
+		{"镜像摘要与层", "重拷离线包并由 install/upgrade 重新 load，勿直接替换镜像；本机构建或 adopt 的发行用 deploy 重新构建或 rollback。", func() error {
+			if s.source() == sourceLocalDeploy || s.source() == sourceAdopted {
 				return checkLocalDeployImages(s)
 			}
 			var r release

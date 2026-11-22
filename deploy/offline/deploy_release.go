@@ -68,6 +68,7 @@ const (
 	recordKindDeploy  = "deploy"
 	recordKindUpgrade = "upgrade"
 	recordKindInstall = "install"
+	// recordKindAdopt 在 deploy_adopt.go（接管已有 deploy-nas 站点）。
 )
 
 func (r *deployRecord) kind() string {
@@ -79,10 +80,14 @@ func (r *deployRecord) kind() string {
 
 // sourceForRecord：切到某条历史后 state.source 的取值（当前发行的来源）。
 func sourceForRecord(r *deployRecord) string {
-	if r.kind() == recordKindDeploy {
+	switch r.kind() {
+	case recordKindDeploy:
 		return sourceLocalDeploy
+	case recordKindAdopt:
+		return sourceAdopted
+	default:
+		return sourceSignedPackage
 	}
-	return sourceSignedPackage
 }
 
 // legacyReleaseDir 是签名包 install 的旧布局发行目录。

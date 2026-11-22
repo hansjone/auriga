@@ -93,6 +93,9 @@ func dispatch(args []string) error {
 	if args[0] == "deploy" {
 		return deployCommand(args[1:], currentInvocation())
 	}
+	if args[0] == "adopt" {
+		return adoptCommand(args[1:], currentInvocation())
+	}
 	if args[0] == "rollback" {
 		return rollbackCommand(args[1:], currentInvocation())
 	}

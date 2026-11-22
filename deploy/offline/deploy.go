@@ -11,8 +11,7 @@ package main
 //
 // 受限调用（经 sudo，见 privilege.go）只接受白名单参数，且只允许部署当前运行提交的后代
 // （快进）；root 人工 --allow-downgrade 可向旧提交部署，先做与 rollback 相同的数据检查。
-//
-// 不在本步：adopt（2e）。
+// adopt 接管的站点（source=adopted）可继续 deploy：无可信指纹/装配摘要时一律重建并切换。
 
 import (
 	"context"
@@ -147,8 +146,8 @@ func doDeploy(ctx context.Context, ops siteOps, cfg *siteConfig, cfgPath, data s
 	rc.FirstInstall = first
 	var prev *deployRecord
 	if !first {
-		if src := s.source(); src != sourceLocalDeploy && src != sourceSignedPackage {
-			return exitWith(1, fmt.Errorf("当前安装来源为 %s：deploy 只接管 deploy 或签名包安装的站点（已有 deploy-nas 站点用 adopt，属 2e）", src))
+		if src := s.source(); src != sourceLocalDeploy && src != sourceSignedPackage && src != sourceAdopted {
+			return exitWith(1, fmt.Errorf("当前安装来源为 %s：deploy 只接管 deploy、签名包安装或 adopt 接管的站点", src))
 		}
 		if _, err := os.Lstat(data + ".upgrade.json"); err == nil {
 			return exitWith(1, errors.New("存在中断的签名包升级，请先重新运行 upgrade 恢复"))

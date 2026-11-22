@@ -161,6 +161,8 @@ func tryHelp(args []string) (done bool, err error) {
 		err = trustCommand([]string{"add-site-key", "x", "--help"})
 	case "deploy":
 		_, err = parseDeploy(h)
+	case "adopt":
+		_, err = parseAdopt(h)
 	case "rollback":
 		err = rollbackCommand(h, siteInvocation{})
 	case "history":
@@ -235,12 +237,13 @@ func printTopHelp(w io.Writer) {
 站点构建（需要 root，读 /etc/auriga/site.json）
   deps status|fetch|import   依赖缓存：看缺什么、按配置的依赖源补 Go/Web 依赖、导入手工缓存或套件
   deploy [<提交号>]          本机全量构建并部署（无 state 时首次安装）；失败且数据未被触碰时自动回滚
-  rollback [--to <序号>]     退回保留的历史发行（deploy 与 upgrade 产生的都可以；数据须与目标运行时相同）
+  adopt --stack-env … --deploy-nas …  接管已有 deploy-nas 站点（建立 state，不重启；不在 sudo 工作流白名单）
+  rollback [--to <序号>]     退回保留的历史发行（deploy、upgrade 与 adopt 产生的都可以；数据须与目标运行时相同）
   history                    列出部署历史与当前发行
   经 sudo 调用（工作流）：运行器账户（site.json 的 server.runner）只能 deploy <提交号>、rollback、status、
   history 且参数受白名单限制，deploy 只允许快进；其他管理员经 sudo 运行 deploy/rollback 需加 --operator；
-  有 site.json 时经 sudo 的 status 不收参数（数据目录取 server.data）
-  status 会同时显示安装来源与当前发行；deploy/rollback 每次写 <logs.dir>/<时间>-<命令>.log 与 .json 收据，
+  有 site.json 时经 sudo 的 status 不收参数（数据目录取 server.data）；经 sudo 的 adopt 同样需 --operator
+  status 会同时显示安装来源与当前发行；deploy/rollback/adopt 每次写 <logs.dir>/<时间>-<命令>.log 与 .json 收据，
   退出码 0 成功、1 未切换就失败、2 已自动回滚、3 需人工
 
 维护者
@@ -438,9 +441,9 @@ func init() {
 			"快进：受限调用只允许部署当前运行提交的后代（在 root 自己 fetch 的仓库里 merge-base --is-ancestor，同一提交可重新部署）；首装不限。root 人工部署非后代提交须 --allow-downgrade，先做与 rollback 相同的数据检查（未触碰或 floor+FormatMax 通过，否则退出码 3）。",
 			"源码：给了提交号就从 source.git 远端 fetch 到数据目录同级的 auriga-source.git，提交必须在某个 allowedRefs 上，git archive 导出（不读 root 的系统/全局 git 配置）；否则用 source.dir 或 --source（都须 root 所有、组和其他用户不可写）。",
 			"签名：source.git.requireSignedCommits=true 时，导出前用 trustedSigners（root 所有的公钥文件：PGP 公钥块或 ssh 公钥行）在隔离环境里校验该提交的 gpg 或 ssh 签名，未签名、签名者不受信、x509 签名一律拒绝（退出码 1）；此时源码目录模式也拒绝。",
-			"签名包安装的站点也可以 deploy：第一次 deploy 前当前安装包登记为一条 install 历史，切换失败时可自动回滚到它。",
+			"签名包安装的站点也可以 deploy：第一次 deploy 前当前安装包登记为一条 install 历史，切换失败时可自动回滚到它。adopt 接管的站点（source=adopted）同样可 deploy：无可信指纹/装配摘要时一律重建并切换，第一次通常走完整启动。",
 			"配方：一律用源码快照里的 deploy/nas/offline-build（deploy-recipe.json 声明暂存清单、固定 digest 与 CLI 能力版本，能力版本不符时先升级 CLI）；Dockerfile 拒绝 syntax/escape 解析器指令（含 BOM、// 与 JSON 变体），FROM 只能是固定 digest、${<SVC>_BASE} 或已声明阶段，拒绝 ADD <URL> 与引用外部镜像的 --from；构建前比较源码锁清单与依赖输入。",
-			"没有 state 时执行首次安装（复用 install 步骤，访问方式取 server.install）；有带 trustFingerprint 的套件就钉定发行钥，否则标记未钉定。",
+			"没有 state 时执行首次安装（复用 install 步骤，访问方式取 server.install）；有带 trustFingerprint 的套件就钉定发行钥，否则标记未钉定。已有 deploy-nas 站点用 adopt，不要对非空数据目录直接 deploy。",
 			"输入指纹：Go 由源码配方 go-inputs.sh deps 在断网 tool-go 容器里 go list -deps 展开（每次都需要 Go 依赖输入与 tool-go 镜像），Web/Java 用 deploy/site/input-sets 的打包清单，另加依赖锁摘要、工具镜像与构建脚本；--dry-run 不展开 Go 依赖图，Go 产物按将重建列出。",
 			"再次部署：按输入指纹决定是否构建产物（指纹与当前发行一致则复用 auriga-releases/<序号>/artifacts/，复用前核对该发行目录与 state 锚定的 releaseSums，不过就改为重建）；构建后按装配摘要（产物树、基础镜像、系统输入、Dockerfile 目标段、暂存清单）决定是否换镜像，收据写明触发项。编排摘要未变且仅 edge/platform 变化时只换容器（跳过 panel-prepare、不重建 network-broker；broker 产物也变则完整启动，否则收据写混合版本；之后照 start.sh 重启 agent；有 collab-source 时以离线维护模式走 start-collab-network.sh，不直接 up collab；上一版无编排摘要按编排变化处理）；仅 operator 变化时只改 stack.env 并 preflight；agent/bifrost/编排变化或首装走完整启动（render → preflight → start）。新发行写入 auriga-releases/<序号>/（含 provenance.json、fingerprints.json、artifacts/、versions.txt 与 status 可读的发行标记），镜像加打 auriga/<服务>:r<序号>，保留 server.keepHistory 份（默认 3）。",
 			"切换失败时：先停掉新版本会写数据的服务（platform、collab、edge 等），再读迁移与数据目录格式版本；与切换前相同（数据未触碰），或上一版不早于新发行的 schemaCompatFloor 且当前格式不高于上一版的 formatMax，并且上一版是成功记录、其发行目录与 state 锚定的 releaseSums 一致，才自动回滚（退出码 2；判定前已停掉全部写数据服务，故自动回滚一律完整启动上一版），否则退出码 3 交人工；首装失败退出码 1 并保留现场。",
@@ -459,9 +462,29 @@ func init() {
 			"accept-new-deps": "本次允许按依赖源补新增依赖（等同 deps.acceptNewDeps=true，仅限 Go、Web）",
 		}),
 	}
+	helpSpecs["adopt"] = helpSpec{
+		usage:   "./auriga adopt --stack-env <路径> --deploy-nas <目录> [--dry-run] [--json] [--config <site.json>] [--operator]",
+		summary: "接管已用 deploy-nas 脚本部署的站点：只读核查 stack.env 与运行中容器镜像，建立 source=adopted 的 state 与 auriga-releases/<序号>/，打 :r<序号> 标签，不重启容器、不改数据目录与 stack.env，不伪造信任。需要 root：root 直接运行，或非运行器管理员经 sudo 加 --operator（不在工作流 sudo 白名单）。",
+		notes: []string{
+			"支持 AURIGA_INSTALL_MODE=host、没有 .oneclick 的站点（例如 NAS 测试栈经 deploy.mjs 部署的布局）。持统一站点锁。",
+			"核对固定 compose 项目 auriga-nas-test（与 lib.sh 一致）里每个运行中容器的镜像 ID，含 collab overlay；常驻服务未运行、镜像与 stack.env 不一致、或 AURIGA_INSTALLER_IMAGE 与 POSTGRES 不一致时列出差异，退出码 3，不写任何内容。已有 .oneclick 时拒绝（退出码 1）。",
+			"state 标记 trustUnpinned；第一次签名包 upgrade 前须先 trust add-release-key / add-site-key。access 直接引用 stack.env 的 AURIGA_ACCESS_FILE（不复制）。",
+			"之后可 deploy：adopt 记录没有可信指纹/装配摘要，第一次 deploy（以及回滚到 adopt 版）一律完整启动；rollback 回 adopt 记录受 floor/格式检查（adopt 版无 floor 声明，数据已变则退出码 3；数据未触碰仍允许）。",
+			"序号占 1，或接续已有 auriga-releases 的下一个。提交号只在 .auriga-release 发行标记（deploy-nas 内或其上一级）的镜像 ID 与运行镜像一致时采信，否则记未知；迁移版本读不到时不记迁移基线。",
+			"--dry-run 只核查并打印将写入的 state/发行内容（序号、编排摘要、镜像、未知项），不写 state、发行目录或镜像标签。每次写日志与收据。",
+		},
+		docs: map[string]string{
+			"stack-env":  "现场 stack.env 路径（须为 <数据目录>/stack.env）",
+			"deploy-nas": "当前使用的 deploy-nas 目录（将被复制进不可变发行目录）",
+			"dry-run":    "只核查并打印计划，不写 state、发行目录或镜像标签",
+			"json":       "标准输出只打印收据 JSON",
+			"config":     "站点配置路径（可选，只允许 root 直接运行时使用；用于日志目录；默认 /etc/auriga/site.json，不存在时用默认日志目录）",
+			"operator":   "经 sudo 的非运行器管理员按人工 root 运行 adopt（需 site.json 登记 server.runner）；不经 sudo 时无作用",
+		},
+	}
 	helpSpecs["rollback"] = helpSpec{
 		usage:   "./auriga rollback [--to <序号>] [--json] [--config <site.json>]",
-		summary: "把站点切回保留的历史发行（默认上一份成功的部署；deploy、upgrade 与签名包基线产生的历史都可以）；编排未变时按只换容器，否则完整启动并等待健康。需要 root：root 直接运行，或经 sudo 的受限调用。",
+		summary: "把站点切回保留的历史发行（默认上一份成功的部署；deploy、upgrade、adopt 与签名包基线产生的历史都可以）；编排未变时按只换容器，否则完整启动并等待健康。需要 root：root 直接运行，或经 sudo 的受限调用。",
 		notes: []string{
 			"经 sudo 调用时与 deploy 同样判定受限：受限时只接受 --to <序号> 与 --json；非运行器账户加 --operator 按人工 root 处理。",
 			"数据与目标运行时记录相同（未触碰）则执行；否则检查当前发行及历史里序号比目标大的每条发行的 schemaCompatFloor（目标提交不得更早；未声明则拒绝）与目标的 formatMax（当前格式不得超过）。缺声明或失败退出码 3。",
@@ -477,7 +500,7 @@ func init() {
 	}
 	helpSpecs["history"] = helpSpec{
 		usage:   "./auriga history [--json] [--config <site.json>]",
-		summary: "列出保留的部署历史：序号、种类（deploy/upgrade/install）、状态、源码提交与快照摘要、是否声明 floor，* 标出当前发行。需要 root；经 sudo 的运行器只能加 --json。",
+		summary: "列出保留的部署历史：序号、种类（deploy/upgrade/install/adopt）、状态、源码提交与快照摘要、是否声明 floor，* 标出当前发行。需要 root；经 sudo 的运行器只能加 --json。",
 		docs: map[string]string{
 			"json":   "输出机器可读 JSON",
 			"config": "站点配置路径；只允许 root 直接运行时使用（默认 /etc/auriga/site.json）",

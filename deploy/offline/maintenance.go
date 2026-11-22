@@ -124,8 +124,8 @@ func upgrade(data, archive string) error {
 var upgradeOps = siteOps{nas: nas, health: waitHealthyFor}
 
 // 签名包 upgrade（设计 D10 接入新布局）：
-//   - 来源为 signed-package 或 local-deploy 的站点都可以接收签名包；adopted 属 2e。
-//   - state 没有钉定任何公钥（deploy 首装未钉定）时先要求 trust add-release-key / add-site-key。
+//   - 来源为 signed-package、local-deploy 或 adopted（已 trust add-* 钉定）的站点都可以接收签名包。
+//   - state 没有钉定任何公钥（deploy/adopt 首装未钉定）时先要求 trust add-release-key / add-site-key。
 //   - 旧布局的签名包安装（没有历史）先把当前安装包登记为基线历史（kind=install）。
 //   - 包内发行写到 auriga-releases/<序号>/（占用新序号，产生一条 kind=upgrade 的历史），镜像
 //     打 :r<序号>，切换 current；冷备份语义不变：先冷备份，失败从冷备份恢复并删除本次发行目录。
@@ -150,12 +150,12 @@ func upgradeAllowed(data, archive string, allow bool) error {
 		return err
 	}
 	switch s.source() {
-	case sourceSignedPackage, sourceLocalDeploy:
+	case sourceSignedPackage, sourceLocalDeploy, sourceAdopted:
 	default:
-		return fmt.Errorf("当前安装来源为 %s：签名包 upgrade 只接收签名包安装或 deploy 建立的站点（adopted 站点属统一现场部署 2e）", s.source())
+		return fmt.Errorf("当前安装来源为 %s：签名包 upgrade 只接收签名包安装、deploy 或 adopt 建立的站点", s.source())
 	}
 	if len(s.TrustedKeys) == 0 && s.PublicKey == "" {
-		return errors.New("state 没有钉定任何发行/站点公钥（本机构建首装未钉定发行钥）：第一次签名包 upgrade 前请先 trust add-release-key <公钥.pem> --confirm-fingerprint <指纹>，或 trust add-site-key 登记站点构建公钥")
+		return errors.New("state 没有钉定任何发行/站点公钥（本机构建或 adopt 未钉定发行钥）：第一次签名包 upgrade 前请先 trust add-release-key <公钥.pem> --confirm-fingerprint <指纹>，或 trust add-site-key 登记站点构建公钥")
 	}
 	if err := verifySums(s.Package); err != nil {
 		return err
