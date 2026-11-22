@@ -12,8 +12,8 @@
 # 不在此用 sudo 参数限制。签名包 bundle 故意不进白名单。
 # 通配语义：deploy * / rollback * 的 * 能匹配任意参数（含空格），真正的参数门禁是 CLI
 # 白名单（子命令已由本片段固定为第一个参数，无法借 deploy 跑 bundle、trust、adopt 等）；
-# rollback * 至少要带一个参数（示例工作流总带 --json）。status、history 两行不带通配，
-# 只放行不带参数的写法，因此经 sudo 不能用 history --json。
+# rollback * 至少要带一个参数（示例工作流总带 --json）。status 不带通配，只放行无参数写法。
+# history 另加精确行放行 --json（CLI 白名单本就允许；工作流需要机器可读历史）。
 # 文件名不能含 . 或以 ~ 结尾，否则 sudo 会忽略 /etc/sudoers.d 下的该文件。
 # 不要加 SETENV，也不要放行 cat/tee 去读 logs.dir。
 
@@ -22,3 +22,4 @@ auriga-runner ALL=(root) NOPASSWD: /usr/local/bin/auriga deploy *
 auriga-runner ALL=(root) NOPASSWD: /usr/local/bin/auriga rollback *
 auriga-runner ALL=(root) NOPASSWD: /usr/local/bin/auriga status
 auriga-runner ALL=(root) NOPASSWD: /usr/local/bin/auriga history
+auriga-runner ALL=(root) NOPASSWD: /usr/local/bin/auriga history --json

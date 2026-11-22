@@ -88,6 +88,70 @@ maven_lock_entries() {
     rm -f -- "$2.raw"
 }
 
+# verify_maven_distribution wrapper/dists目录 [maven-wrapper.properties]：按源码
+# distributionSha256Sum 复核发行 zip（须保留 zip；不符或缺失即失败）。通过时把 zip
+# 路径写入全局变量 VERIFIED_MAVEN_ZIP，供 stage_verified_maven_distribution 现解开。
+verify_maven_distribution() {
+    v_dists=$1
+    v_props=${2:-"$src/.mvn/wrapper/maven-wrapper.properties"}
+    VERIFIED_MAVEN_ZIP=
+    v_want=$(sed -n 's/^distributionSha256Sum=//p' "$v_props" | tr -d '\r')
+    v_url=$(sed -n 's/^distributionUrl=//p' "$v_props" | tr -d '\r')
+    if ! printf '%s\n' "$v_want" | grep -Exq '[0-9a-f]{64}'; then
+        echo "maven-wrapper.properties 的 distributionSha256Sum 无效" >&2
+        return 2
+    fi
+    v_name=$(basename -- "$v_url")
+    case "$v_name" in
+        *-bin.zip) ;;
+        *) echo "意外的 Maven 发行包名：$v_name" >&2; return 2 ;;
+    esac
+    if [ ! -d "$v_dists" ]; then
+        echo "缺少 Maven wrapper/dists：$v_dists" >&2
+        return 2
+    fi
+    # 只认发行 zip 本体；解压目录不参与摘要。
+    v_found=$(find "$v_dists" -type f -name "$v_name" -print | LC_ALL=C sort)
+    v_count=$(printf '%s\n' "$v_found" | sed '/^$/d' | wc -l | tr -d ' ')
+    if [ "$v_count" != 1 ]; then
+        echo "Maven wrapper/dists 中应恰好有一份 $v_name（实际 $v_count）；prepare 须保留发行 zip 供 build 按 distributionSha256Sum 复核" >&2
+        return 2
+    fi
+    v_zip=$(printf '%s\n' "$v_found" | head -n 1)
+    v_got=$(sha256sum -- "$v_zip" | cut -d' ' -f1)
+    if [ "$v_got" != "$v_want" ]; then
+        echo "Maven 发行包摘要不符：$v_zip（得 $v_got，期望 $v_want）" >&2
+        return 2
+    fi
+    VERIFIED_MAVEN_ZIP=$v_zip
+}
+
+# stage_verified_maven_distribution 输入dists目录 目标dists目录 [maven-wrapper.properties]：
+# 先按 distributionSha256Sum 复核输入里的发行 zip，再只拷贝该 zip 到目标目录并现解开，
+# 不信任、不拷贝输入里已预先解压的目录。
+stage_verified_maven_distribution() {
+    s_src_dists=$1
+    s_dst_dists=$2
+    s_props=${3:-"$src/.mvn/wrapper/maven-wrapper.properties"}
+    verify_maven_distribution "$s_src_dists" "$s_props" || return $?
+    s_rel=${VERIFIED_MAVEN_ZIP#"$s_src_dists"/}
+    s_rel_dir=$(dirname -- "$s_rel")
+    s_zip_name=$(basename -- "$s_rel")
+    s_target="$s_dst_dists/$s_rel_dir"
+    mkdir -p -- "$s_target"
+    cp -- "$VERIFIED_MAVEN_ZIP" "$s_target/$s_zip_name"
+    if command -v unzip >/dev/null 2>&1; then
+        (cd -- "$s_target" && unzip -q -- "$s_zip_name")
+    elif command -v jar >/dev/null 2>&1; then
+        (cd -- "$s_target" && jar xf "$s_zip_name")
+        # jar xf 不保留 POSIX 可执行位，恢复 Maven 入口脚本权限。
+        chmod +x "$s_target"/*/bin/mvn 2>/dev/null || true
+    else
+        echo "缺少 unzip 与 jar，无法解开已复核的 Maven 发行包" >&2
+        return 2
+    fi
+}
+
 # verify_maven_lock 仓库 锁文件 [prepare|build]：逐个核对，多出、缺少、摘要不符都失败并列出差异。
 # 空锁或缺锁：build 失败；prepare 只警告（便于首次 hash-lock）。prepare 设 AURIGA_MAVEN_LOCK_UPDATE=1
 # 时同样只警告不核对——仅供改了 POM、要重新生成锁文件的开发者使用。
@@ -285,6 +349,8 @@ SETTINGS
     fi
     mkdir "$out/wrapper"
     cp -a -- "$MAVEN_USER_HOME/wrapper/dists" "$out/wrapper/dists"
+    # 保留发行 zip，并按源码 distributionSha256Sum 复核，供离线 build 再次核对。
+    verify_maven_distribution "$out/wrapper/dists"
     cp -a -- "$repo" "$out/repository"
     find "$out/repository" -type f \( -name '*.lastUpdated' -o -name '*.part' -o -name '*.lock' -o -name '*.tmp' \) -delete
     # prepare 拉完依赖后对照锁文件；空锁仅警告（便于首次 hash-lock）。
@@ -302,8 +368,9 @@ else
     inputs=$(CDPATH='' cd -- "$AURIGA_JAVA_INPUTS_DIR" && pwd)
     (cd "$inputs" && sha256sum --quiet -c SHA256SUMS)
     cmp "$scratch/source-locks" "$inputs/source-locks.sha256"
-    mkdir "$MAVEN_USER_HOME"
-    cp -a -- "$inputs/wrapper" "$MAVEN_USER_HOME/wrapper"
+    # 使用 wrapper/dists 前按源码 distributionSha256Sum 复核发行 zip 并现解开，不信任预解压目录。
+    mkdir -p "$MAVEN_USER_HOME/wrapper/dists"
+    stage_verified_maven_distribution "$inputs/wrapper/dists" "$MAVEN_USER_HOME/wrapper/dists"
     cp -a -- "$inputs/repository" "$repo"
     # build 用依赖前核对锁文件：核对 Maven 实际要读的副本，不留核对后被替换的窗口。
     verify_maven_lock "$repo" "$src/services/maven-deps.sha256"

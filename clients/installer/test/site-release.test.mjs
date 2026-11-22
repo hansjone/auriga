@@ -18,6 +18,7 @@ import { createServer } from 'node:http';
 import {
   ROOT,
   BUILD_NODE,
+  BUILD_NODE_ZIP_SHA256,
   lockIdentity,
   sealInputs,
   verifyInputs,
@@ -121,7 +122,13 @@ test('changing only the target build Node version invalidates a Windows kit', (t
   }
   const pin = join(source, pinPath);
   mkdirSync(dirname(pin), { recursive: true });
-  writeFileSync(pin, JSON.stringify({ version: original.buildNode }));
+  writeFileSync(
+    pin,
+    JSON.stringify({
+      version: original.buildNode,
+      winX64ZipSha256: BUILD_NODE_ZIP_SHA256,
+    }),
+  );
   writeFileSync(join(kit, 'input'), 'pinned');
   const sealed = sealInputs(kit, [], source);
   const verify = () =>
@@ -131,7 +138,13 @@ test('changing only the target build Node version invalidates a Windows kit', (t
   const upgraded = original.buildNode.replace(/\d+$/, (patch) =>
     String(Number(patch) + 1),
   );
-  writeFileSync(pin, JSON.stringify({ version: upgraded }));
+  writeFileSync(
+    pin,
+    JSON.stringify({
+      version: upgraded,
+      winX64ZipSha256: BUILD_NODE_ZIP_SHA256,
+    }),
+  );
   assert.deepEqual(lockIdentity(source).locks, original.locks);
   assert.throws(verify, /依赖锁不匹配/);
 });
@@ -1884,7 +1897,13 @@ function makeSourceTree(t) {
     mkdirSync(dirname(join(root, path)), { recursive: true });
     writeFileSync(join(root, path), text);
   };
-  write('scripts/client-release/build-node.json', '{"version":"22.19.0"}\n');
+  write(
+    'scripts/client-release/build-node.json',
+    JSON.stringify({
+      version: '22.19.0',
+      winX64ZipSha256: BUILD_NODE_ZIP_SHA256,
+    }) + '\n',
+  );
   write('scripts/client-release/cli.mjs', '// worker\n');
   write('scripts/client-release/offline-guard.cjs', '// guard\n');
   write('package.json', '{"name":"fixture"}\n');

@@ -51,6 +51,7 @@ func TestSudoersFragmentStatic(t *testing.T) {
 		"/usr/local/bin/auriga rollback *",
 		"/usr/local/bin/auriga status",
 		"/usr/local/bin/auriga history",
+		"/usr/local/bin/auriga history --json",
 	}
 	for _, cmd := range wantCmds {
 		if !strings.Contains(body, cmd) {

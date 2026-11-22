@@ -395,8 +395,11 @@ func rollbackCommand(args []string, inv siteInvocation) error {
 		return err
 	}
 	run.receipt.Notes = append(run.receipt.Notes, invocationNote(inv, restricted))
+	// 与 deploy 一样捕获 SIGINT/SIGTERM：取消时子进程失败，仍经 finish 写收据（第 7 步遗留）。
+	ctx, cancel := depsSignalContext()
+	defer cancel()
 	err = withLock(data, "rollback", func() error {
-		return doRollback(context.Background(), defaultSiteOps, cfg, data, *to, run)
+		return doRollback(ctx, defaultSiteOps, cfg, data, *to, run)
 	})
 	return run.finish(err)
 }
@@ -473,7 +476,9 @@ func doRollback(ctx context.Context, ops siteOps, cfg *siteConfig, data string, 
 	}
 	rc.Health = "healthy"
 	rc.RolledBack = true
-	_ = tagImages(ctx, target.Images, func(svc string) string { return "auriga/" + svc + ":nas" })
+	cleanupCtx, cleanupCancel := deployCleanupContext()
+	defer cleanupCancel()
+	_ = tagImages(cleanupCtx, target.Images, func(svc string) string { return "auriga/" + svc + ":nas" })
 	fmt.Fprintf(run.out, "已回滚到 r%d\n", target.Seq)
 	return nil
 }

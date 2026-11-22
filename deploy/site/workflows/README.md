@@ -21,14 +21,20 @@
 
 **日志上传选定**：只上传 `--json` 标准输出的脱敏收据。`logs.dir`（默认 `/var/log/auriga`）为 root 所有，运行器读不到；**不要**放宽该目录权限，也**不要**在 sudoers 加 `cat`/`tee` 去读日志。
 
-**取消与超时**（结果取决于运行器怎样结束 job，第 11 步验收时实测一次并把结论补到这里）：
+**取消与超时**：
 
-- 运行器以普通用户运行，无权直接向 root 进程发信号；只有 `sudo` 本身收到 SIGTERM / SIGINT / SIGHUP 时，才会把信号转发给 root 的 `auriga`。
-- `auriga deploy` 捕获 SIGINT / SIGTERM 并取消上下文：构建阶段的子进程（依赖检查、构建容器等走上下文的命令）连同其进程组被终止，部署按“未切换就失败”结束（退出码 1），照常写收据并在 `--json` 时打印。切换阶段的停启服务与健康检查不随上下文中断，会继续执行到切换成功或进入失败处理（自动回滚 / 交人工），然后写收据。
-- `auriga rollback` 不捕获这些信号，收到即退出：不写收据，`receipt.json` 为空或缺失；已启动的启动脚本、`docker compose` 等子进程不一定随之结束。
-- 两种情况下站点 `flock` 都由内核在 `auriga` 进程退出时释放（锁文件描述符不会被子进程继承），所以残留子进程可能在锁释放后继续运行；取消后先确认没有残留的构建或启动进程，再触发下一次部署或回滚。
-- `sudo` 被 SIGKILL（部分运行器取消或超时直接 kill）时无法转发：root 的 `auriga` 继续跑完、照常写收据到 `logs.dir`，期间一直持锁，后续任务会因锁失败（退出码 1），工作流只是看不到结果。
-- 杀在切换中（`phase` 为 `switch` 或 `rollback`），现场可能是混合版本：由管理员 `sudo auriga status`、`sudo auriga history` 看当前发行与最后一条记录，查看 `logs.dir` 里的日志；必要时 `rollback --to <上一成功序号>`，或人工处理。不要靠再次取消或重复触发来“修复”。
+- 运行器以普通用户运行，无权直接向 root 进程发信号；只有 `sudo` 本身收到可捕获信号时，才会把信号转发给 root 的 `auriga`。
+- `auriga deploy` / `auriga rollback` 捕获 SIGINT / SIGTERM 并取消上下文：依赖上下文的子进程失败后仍经 `finish` 写收据。切换阶段的 compose/启动脚本不一定随取消立刻停下；`deploy` 切换失败收尾改用独立带超时的 cleanup 上下文，避免已取消的 ctx 把本可自动回滚的情况误判成退出码 3。
+- 站点 `flock` 由内核在 `auriga` 进程退出时释放（锁 fd 不被子进程继承）；取消后先确认没有残留构建/启动进程，再触发下一次。
+- 杀在切换中（`phase` 为 `switch` 或 `rollback`），现场可能是混合版本：由管理员 `sudo auriga status`、`sudo auriga history` / `history --json` 查看，必要时 `rollback --to <上一成功序号>`。不要靠再次取消或重复触发来“修复”。
+
+**取消信号实测（第 11 步，forgejo-runner v13.2.1 源码 + WSL 进程组复现）**：
+
+- 现场示例工作流使用 `auriga-site:host`（宿主机执行）。host 步骤走 `act/container/host_environment.go` → `common.RunCmdInGroup`。
+- `RunCmdInGroup`（`act/common/cmdgroup.go`）给步骤设 `Setpgid: true`，上下文取消时 `cmd.Cancel` 对**整个进程组**发 **`SIGKILL`**（`syscall.Kill(-pgid, SIGKILL)`），**不是**先 SIGTERM 再 SIGKILL。
+- Docker 后端取消容器时也是直接 `ContainerKill(SIGKILL)`（见 `act/container/docker/run.go`）。
+- WSL 复现（`setsid` 起独立进程组 + `kill -KILL -<pgid>`）：受害者脚本的 SIGTERM/SIGINT trap **未触发**，进程组直接死亡——与源码一致。
+- 因此工作流点「取消」时：步骤进程组（含 `sudo` 与 root 的 `auriga`）通常被 SIGKILL，**来不及**走 CLI 的信号上下文与 `finish` 写收据；`receipt.json` 可能为空。这比「sudo 收到 SIGTERM 再转发」更糟。取消后以 `logs.dir` 与 `sudo auriga status/history` 为准，不要假定标准输出收据完整。
 
 **并发**：YAML `concurrency` 组减少排队；CLI 对站点锁文件的 `flock` 是最终保证，第二个任务直接失败。
 
