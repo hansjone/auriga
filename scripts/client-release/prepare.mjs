@@ -16,6 +16,7 @@ import { fileURLToPath } from 'node:url';
 import {
   ROOT,
   BUILD_NODE,
+  BUILD_NODE_ZIP_SHA256,
   lockIdentity,
   systemTools,
   sealInputs,
@@ -147,21 +148,37 @@ export async function prepareInputs(parent, options = {}) {
       version === runtime.node ? join(kit, 'runtime') : work,
       name,
     );
+    // 构建 Node：以仓库 build-node.json 的 winX64ZipSha256 为准；runtime Node：以
+    // upstream.json 为准。下载的 SHASUMS256.txt 仅作参考比对，不得覆盖仓库钉死摘要。
+    const pinned =
+      version === BUILD_NODE
+        ? BUILD_NODE_ZIP_SHA256
+        : runtime.nodeWinX64Sha256;
     const sums = join(work, `SHASUMS256-${version}.txt`);
-    await download(`https://nodejs.org/dist/v${version}/SHASUMS256.txt`, sums);
-    const expected = readFileSync(sums, 'utf8')
-      .split('\n')
-      .find((line) => line.trim().endsWith(` ${name}`))
-      ?.trim()
-      .split(/\s+/)[0];
-    if (
-      !expected ||
-      (version === runtime.node && expected !== runtime.nodeWinX64Sha256)
-    )
-      throw new Error('Node runtime 与仓库固定摘要不符');
+    let listed;
+    try {
+      await download(`https://nodejs.org/dist/v${version}/SHASUMS256.txt`, sums);
+      listed = readFileSync(sums, 'utf8')
+        .split('\n')
+        .find((line) => line.trim().endsWith(` ${name}`))
+        ?.trim()
+        .split(/\s+/)[0];
+    } catch (err) {
+      console.warn(
+        `警告：无法取得 SHASUMS256.txt（${err.message}），仍按仓库钉死摘要核 zip`,
+      );
+    }
+    if (listed && listed !== pinned)
+      throw new Error(
+        `Node SHASUMS256.txt 参考行与仓库钉死摘要不符：${name}（参考=${listed} 钉死=${pinned}）`,
+      );
+    if (listed === undefined && existsSync(sums))
+      console.warn(
+        `警告：SHASUMS256.txt 无 ${name} 行，仍按仓库钉死摘要核 zip`,
+      );
     await download(`https://nodejs.org/dist/v${version}/${name}`, zip);
-    if (sha256File(zip) !== expected)
-      throw new Error(`Node zip 摘要不符：${name}`);
+    if (sha256File(zip) !== pinned)
+      throw new Error(`Node zip 摘要不符：${name}（期望仓库钉死 ${pinned}）`);
     if (version === BUILD_NODE) {
       run(tar, ['-xf', zip, '-C', work], root);
       cpSync(join(work, `node-v${version}-win-x64`), join(kit, 'build-node'), {

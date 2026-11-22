@@ -777,6 +777,50 @@ func TestDeploySwitchDataTouchedExit3(t *testing.T) {
 	}
 }
 
+// 切换阶段父 ctx 已取消时，失败收尾仍用独立 cleanup 上下文读运行镜像，避免误记 context canceled。
+func TestDeploySwitchRefuseUsesCleanupContext(t *testing.T) {
+	s, prev, rec, cfg := switchFixture(t)
+	stubDataVersions(t, &dataVersions{Migrations: map[string]string{"auriga/x": "1:1:a"}, Formats: map[string]string{}}, &dataVersions{Migrations: map[string]string{"auriga/x": "2:2:b"}, Formats: map[string]string{}})
+	var psCalled, psCtxAlive bool
+	oldRun := deployRun
+	deployRun = func(ctx context.Context, r runSpec) error {
+		if len(r.Args) > 0 && r.Args[0] == "ps" {
+			psCalled = true
+			psCtxAlive = ctx.Err() == nil
+		}
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if r.Stdout != nil {
+			_, _ = io.WriteString(r.Stdout, "c1 auriga/edge:r2 Up")
+		}
+		return nil
+	}
+	t.Cleanup(func() { deployRun = oldRun })
+	old := deployCleanupContext
+	var cleanupUsed bool
+	deployCleanupContext = func() (context.Context, context.CancelFunc) {
+		cleanupUsed = true
+		return context.WithTimeout(context.Background(), time.Minute)
+	}
+	t.Cleanup(func() { deployCleanupContext = old })
+	cancelled, cancel := context.WithCancel(context.Background())
+	cancel()
+	site := &fakeSite{healthy: func(int) error { return errors.New("platform unhealthy") }}
+	run, _ := testRun()
+	err := deploySwitch(cancelled, site.ops(), cfg, &s, prev, rec, run, nil)
+	if exitCodeOf(err) != 3 || !cleanupUsed || !psCalled || !psCtxAlive {
+		t.Fatalf("应走拒绝回滚且用未取消的 cleanup 上下文调 docker ps：err=%v cleanup=%v ps=%v alive=%v", err, cleanupUsed, psCalled, psCtxAlive)
+	}
+	notes := strings.Join(run.receipt.Notes, "\n")
+	if strings.Contains(notes, "context canceled") || strings.Contains(notes, "读取失败") {
+		t.Fatalf("收尾不应因已取消的父 ctx 失败：%s", notes)
+	}
+	if !strings.Contains(notes, "各容器实际运行的镜像") {
+		t.Fatalf("收据应含运行镜像摘录：%s", notes)
+	}
+}
+
 func TestDeploySwitchRollbackFailureExit3(t *testing.T) {
 	s, prev, rec, cfg := switchFixture(t)
 	v := &dataVersions{Migrations: map[string]string{}, Formats: map[string]string{}}

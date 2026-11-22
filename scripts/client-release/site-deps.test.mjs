@@ -19,6 +19,10 @@ import {
   verifyInputs,
   digest,
   systemTools,
+  readBuildNodePin,
+  BUILD_NODE,
+  BUILD_NODE_ZIP_SHA256,
+  HASH,
 } from './inputs.mjs';
 import { createDownloader, mapLockedUrlCandidates } from './files-source.mjs';
 import {
@@ -443,6 +447,33 @@ test('site-deps 参数：--kit-fingerprint 跟随 --kit，未知参数报错', (
     () => parseArgs(['status', '--kit-fingerprint', 'a'.repeat(64)]),
     /紧跟/,
   );
+});
+
+test('build-node.json 钉死 win-x64 zip SHA-256，缺字段或非法摘要拒绝', (t) => {
+  assert.match(BUILD_NODE, /^\d+\.\d+\.\d+$/);
+  assert.match(BUILD_NODE_ZIP_SHA256, HASH);
+  const pin = readBuildNodePin(ROOT);
+  assert.equal(pin.version, BUILD_NODE);
+  assert.equal(pin.winX64ZipSha256, BUILD_NODE_ZIP_SHA256);
+  assert.ok(pin.sources.length >= 2, '须记录至少两个独立核对来源');
+  const dir = temporary(t);
+  const path = join(dir, 'scripts/client-release/build-node.json');
+  mkdirSync(join(dir, 'scripts/client-release'), { recursive: true });
+  writeFileSync(path, JSON.stringify({ version: '22.19.0' }));
+  assert.throws(() => readBuildNodePin(dir), /winX64ZipSha256/);
+  writeFileSync(
+    path,
+    JSON.stringify({ version: '22.19.0', winX64ZipSha256: 'ZZ' }),
+  );
+  assert.throws(() => readBuildNodePin(dir), /winX64ZipSha256/);
+  writeFileSync(
+    path,
+    JSON.stringify({
+      version: '22.19.0',
+      winX64ZipSha256: 'ea3fad0e67a991d8477d8c01344b56e69c676ccb733f065b22436994b1253f86',
+    }),
+  );
+  assert.equal(readBuildNodePin(dir).winX64ZipSha256, BUILD_NODE_ZIP_SHA256);
 });
 
 test('build：--site-kit 必须带 --devkit-sha256；收据记录基线依据', () => {

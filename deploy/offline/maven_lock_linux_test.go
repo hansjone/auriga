@@ -3,6 +3,7 @@
 package main
 
 import (
+	"archive/zip"
 	"bytes"
 	"os"
 	"os/exec"
@@ -201,5 +202,79 @@ func TestPythonLockScriptParity(t *testing.T) {
 	}
 	if !bytes.Equal(got, want) {
 		t.Fatalf("python 锁清单与脚本不一致：\nCLI:\n%s\n脚本:\n%s", got, want)
+	}
+}
+
+func TestVerifyMavenDistribution(t *testing.T) {
+	funcs := mavenLockScript(t)
+	if !strings.Contains(funcs, "verify_maven_distribution()") || !strings.Contains(funcs, "stage_verified_maven_distribution()") {
+		t.Fatal("java-inputs.sh 须含 verify_maven_distribution 与 stage_verified_maven_distribution")
+	}
+	dir := t.TempDir()
+	props := filepath.Join(dir, "maven-wrapper.properties")
+	zipName := "apache-maven-3.9.16-bin.zip"
+	var zbuf bytes.Buffer
+	zw := zip.NewWriter(&zbuf)
+	w, err := zw.Create("apache-maven-3.9.16/bin/mvn")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := w.Write([]byte("#!/bin/sh\necho clean-mvn\n")); err != nil {
+		t.Fatal(err)
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	body := zbuf.Bytes()
+	sum := sha256Hex(body)
+	if err := os.WriteFile(props, []byte(
+		"distributionUrl=https://repo.maven.apache.org/maven2/org/apache/maven/apache-maven/3.9.16/"+zipName+"\n"+
+			"distributionSha256Sum="+sum+"\n",
+	), 0644); err != nil {
+		t.Fatal(err)
+	}
+	dists := filepath.Join(dir, "dists", "apache-maven-3.9.16-bin", "hash")
+	if err := os.MkdirAll(filepath.Join(dists, "apache-maven-3.9.16", "bin"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	// 在输入目录故意放置被篡改的预解压文件，验证 stage_verified_maven_distribution 不会使用它。
+	if err := os.WriteFile(filepath.Join(dists, "apache-maven-3.9.16", "bin", "mvn"), []byte("#!/bin/sh\necho tampered\n"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	zipPath := filepath.Join(dists, zipName)
+	if err := os.WriteFile(zipPath, body, 0644); err != nil {
+		t.Fatal(err)
+	}
+	_, stderr, err := runMavenLockScript(t, funcs, "verify_maven_distribution '"+filepath.Join(dir, "dists")+"' '"+props+"'\n")
+	if err != nil {
+		t.Fatalf("期望通过：%v\n%s", err, stderr)
+	}
+	_, hasUnzip := exec.LookPath("unzip")
+	_, hasJar := exec.LookPath("jar")
+	if hasUnzip == nil || hasJar == nil {
+		staged := filepath.Join(dir, "staged-dists")
+		_, stderr, err = runMavenLockScript(t, funcs, "stage_verified_maven_distribution '"+filepath.Join(dir, "dists")+"' '"+staged+"' '"+props+"'\n")
+		if err != nil {
+			t.Fatalf("stage_verified_maven_distribution 应成功：%v\n%s", err, stderr)
+		}
+		gotMvn, err := os.ReadFile(filepath.Join(staged, "apache-maven-3.9.16-bin", "hash", "apache-maven-3.9.16", "bin", "mvn"))
+		if err != nil {
+			t.Fatalf("应从已复核 zip 现解开 mvn：%v", err)
+		}
+		if !strings.Contains(string(gotMvn), "clean-mvn") || strings.Contains(string(gotMvn), "tampered") {
+			t.Fatalf("应使用 zip 现解开的干净内容，实际：%q", string(gotMvn))
+		}
+	}
+	if err := os.WriteFile(zipPath, []byte("tampered"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	_, stderr, err = runMavenLockScript(t, funcs, "verify_maven_distribution '"+filepath.Join(dir, "dists")+"' '"+props+"'\n")
+	if err == nil || !strings.Contains(stderr, "发行包摘要不符") {
+		t.Fatalf("篡改 zip 应失败：err=%v stderr=%s", err, stderr)
+	}
+	_ = os.Remove(zipPath)
+	_, stderr, err = runMavenLockScript(t, funcs, "verify_maven_distribution '"+filepath.Join(dir, "dists")+"' '"+props+"'\n")
+	if err == nil || !strings.Contains(stderr, "应恰好有一份") {
+		t.Fatalf("缺 zip 应失败：err=%v stderr=%s", err, stderr)
 	}
 }

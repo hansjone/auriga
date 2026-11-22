@@ -650,11 +650,15 @@ func deploySwitch(ctx context.Context, ops siteOps, cfg *siteConfig, s *state, p
 	}
 	rc.Phase = "rollback"
 	_ = saveState(*s)
+	// 切换阶段可能已被取消：收尾用独立带超时的上下文，避免 runningImages / floor 祖先检查
+	// 拿到已取消的 ctx 而把本可自动回滚的情况误判成退出码 3（第 7 步遗留）。
+	cleanupCtx, cleanupCancel := deployCleanupContext()
+	defer cleanupCancel()
 	// 先停掉新版本里会写库或改写数据目录的容器，确认停止后再读迁移与格式版本：否则读完到
 	// 回滚完成之间，新容器（例如迁移较慢的 platform）仍可能提交迁移（P2）。
 	refuse := func(reason string) error {
 		rc.RollbackReason = reason
-		rc.Notes = append(rc.Notes, runningImages(ctx)...)
+		rc.Notes = append(rc.Notes, runningImages(cleanupCtx)...)
 		return exitWith(3, fmt.Errorf("切换到 r%d 失败：%v；%s，需人工处理", rec.Seq, err, reason))
 	}
 	stopped, stopErr := ops.stopWriters(*s)
@@ -673,7 +677,7 @@ func deploySwitch(ctx context.Context, ops siteOps, cfg *siteConfig, s *state, p
 	if dataUntouched(before, after) {
 		reason = fmt.Sprintf("迁移与格式版本与切换前相同（数据未被新版本触碰），自动回滚到 r%d", prev.Seq)
 	} else {
-		ok, why := rollbackDecision(prev, cur, newerRecords(s, prev), after, floorAncestorCheck(ctx, s.Data, prev))
+		ok, why := rollbackDecision(prev, cur, newerRecords(s, prev), after, floorAncestorCheck(cleanupCtx, s.Data, prev))
 		if !ok {
 			return refuse(why + "；会写数据的新容器保持停止")
 		}
@@ -699,12 +703,20 @@ func deploySwitch(ctx context.Context, ops siteOps, cfg *siteConfig, s *state, p
 	rc.Notes = append(rc.Notes, "自动回滚路径："+formatSwitchPlanLine(rbPlan))
 	if rbErr := startRecord(ops, s, prev, timeout, rbPlan); rbErr != nil {
 		rc.Health += "；回滚：" + rbErr.Error()
-		rc.Notes = append(rc.Notes, runningImages(ctx)...)
+		rc.Notes = append(rc.Notes, runningImages(cleanupCtx)...)
 		return exitWith(3, fmt.Errorf("切换到 r%d 失败（%v），自动回滚到 r%d 也失败，不重试，需人工处理：%w", rec.Seq, err, prev.Seq, rbErr))
 	}
 	rc.RolledBack = true
 	_ = tagImages(ctx, prev.Images, func(svc string) string { return "auriga/" + svc + ":nas" })
 	return exitWith(2, fmt.Errorf("切换到 r%d 失败，已自动回滚到 r%d：%w", rec.Seq, prev.Seq, err))
+}
+
+// deployCleanupTimeout 是切换失败收尾（读运行镜像、floor 祖先检查）用的独立超时。
+const deployCleanupTimeout = 2 * time.Minute
+
+// deployCleanupContext 返回与信号无关的收尾上下文（可注入以便单测）。
+var deployCleanupContext = func() (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.Background(), deployCleanupTimeout)
 }
 
 // runningImages 记录各容器实际运行的镜像（回滚失败或拒绝回滚时写进收据）。

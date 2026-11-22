@@ -20,17 +20,30 @@ import { checkRequires, stampRequires } from './compat.mjs';
 import { assertToolsAllowed, readBaseline } from './baseline.mjs';
 
 export const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
-function readBuildNode(root) {
-  const { version } = JSON.parse(
+export const HASH = /^[a-f0-9]{64}$/;
+/** 读取并校验 scripts/client-release/build-node.json（版本 + 钉死的 win-x64 zip SHA-256）。 */
+export function readBuildNodePin(root = ROOT) {
+  const pin = JSON.parse(
     readFileSync(join(root, 'scripts/client-release/build-node.json'), 'utf8'),
   );
-  if (typeof version !== 'string' || !/^\d+\.\d+\.\d+$/.test(version))
+  if (typeof pin.version !== 'string' || !/^\d+\.\d+\.\d+$/.test(pin.version))
     throw new Error('Windows 目标源码的构建 Node 版本无效');
-  return version;
+  if (typeof pin.winX64ZipSha256 !== 'string' || !HASH.test(pin.winX64ZipSha256))
+    throw new Error(
+      'build-node.json 缺少有效的 winX64ZipSha256（须为 64 位小写十六进制）',
+    );
+  return {
+    version: pin.version,
+    winX64ZipSha256: pin.winX64ZipSha256,
+    sources: Array.isArray(pin.winX64ZipSha256Sources)
+      ? pin.winX64ZipSha256Sources
+      : [],
+  };
 }
 
-export const BUILD_NODE = readBuildNode(ROOT);
-export const HASH = /^[a-f0-9]{64}$/;
+export const BUILD_NODE_PIN = readBuildNodePin(ROOT);
+export const BUILD_NODE = BUILD_NODE_PIN.version;
+export const BUILD_NODE_ZIP_SHA256 = BUILD_NODE_PIN.winX64ZipSha256;
 export const LOCK_PATHS = [
   'package.json',
   'pnpm-workspace.yaml',
@@ -72,7 +85,7 @@ export function dependencyLocks(root = ROOT) {
 }
 export function lockIdentity(root = ROOT) {
   const locks = dependencyLocks(root);
-  const buildNode = readBuildNode(root);
+  const buildNode = readBuildNodePin(root).version;
   return {
     buildNode,
     locks,
