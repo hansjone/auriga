@@ -1,0 +1,9 @@
+# Web 打包清单（web-inputs.sh 与 deploy CLI 共用）。一行一个相对源码根的路径；# 开头为注释。
+package.json
+pnpm-workspace.yaml
+.npmrc
+.prettierrc.json
+web
+clients
+contracts
+tsconfig.base.json

@@ -30,9 +30,18 @@ if [ "$(uname -m)" != x86_64 ] || ! javac -version 2>&1 | grep -q '^javac 25\.';
 fi
 workspace="$scratch/source"
 mkdir "$workspace"
+# 打包清单与 deploy CLI 共用（设计 D6）：deploy/site/input-sets/java-pack.list
+pack_args=
+while IFS= read -r line || [ -n "$line" ]; do
+    case "$line" in
+        ''|\#*) continue ;;
+    esac
+    pack_args="$pack_args $line"
+done <"$src/deploy/site/input-sets/java-pack.list"
+# 清单条目是不含空白的相对路径，按词展开。
+# shellcheck disable=SC2086
 (cd "$src" &&
-    tar -cf - --exclude=node_modules --exclude=dist --exclude=target \
-        mvnw .mvn pom.xml services contracts infra) |
+    tar -cf - --exclude=node_modules --exclude=dist --exclude=target $pack_args) |
     tar -xf - -C "$workspace"
 cd "$workspace"
 find services -name pom.xml -type f -print |

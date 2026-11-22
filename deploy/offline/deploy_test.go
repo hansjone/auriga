@@ -305,7 +305,7 @@ func TestStageServiceAndAssemblyDigest(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		return d
+		return d.Total
 	}
 	first := stage()
 	if stage() != first {
@@ -324,8 +324,11 @@ func TestStageServiceAndAssemblyDigest(t *testing.T) {
 	}
 	a, _ := assemblyDigest(context.Background(), "agent", r, scratch)
 	b, _ := assemblyDigest(context.Background(), "agent", &r2, scratch)
-	if a == b {
+	if a.Total == b.Total {
 		t.Fatal("基础镜像变化后装配摘要不变")
+	}
+	if reason := assemblyChangeReason(a.Total, &a, b); !strings.Contains(reason, "基础镜像") {
+		t.Fatalf("触发项应含基础镜像：%s", reason)
 	}
 	putFile(t, filepath.Join(artifacts, "go", "auriga-agent"), "tampered", 0755)
 	if err := stageService(context.Background(), "agent", r.Services["agent"], src, artifacts, system, t.TempDir()); err == nil {
@@ -502,7 +505,7 @@ func TestReleaseDirAndRetention(t *testing.T) {
 	putFile(t, filepath.Join(src, "deploy/nas/scripts/start.sh"), "#!/bin/sh\n", 0755)
 	writeArtifactDir(t, goOut, map[string]string{"auriga-nas-bootstrap": "boot", "runtime-release": "rr"})
 	for _, r := range recs {
-		dir, sums, err := writeReleaseDir(context.Background(), s.Data, r.Seq, src, goOut, releaseManifest{Images: r.Images})
+		dir, sums, err := writeReleaseDir(context.Background(), s.Data, r.Seq, src, goOut, "", releaseManifest{Images: r.Images}, nil, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -519,7 +522,7 @@ func TestReleaseDirAndRetention(t *testing.T) {
 			}
 		}
 	}
-	if _, _, err := writeReleaseDir(context.Background(), s.Data, 3, src, goOut, releaseManifest{}); err == nil {
+	if _, _, err := writeReleaseDir(context.Background(), s.Data, 3, src, goOut, "", releaseManifest{}, nil, nil); err == nil {
 		t.Fatal("已存在的发行目录被覆盖")
 	}
 	putFile(t, filepath.Join(releaseDir(s.Data, 3), "deploy-nas/scripts/start.sh"), "tampered", 0755)
@@ -542,7 +545,7 @@ func TestReleaseDirAndRetention(t *testing.T) {
 	}
 	// go 产物与其 SHA256SUMS 不符时不写发行目录。
 	putFile(t, filepath.Join(goOut, "runtime-release"), "changed", 0755)
-	if _, _, err := writeReleaseDir(context.Background(), s.Data, 9, src, goOut, releaseManifest{}); err == nil {
+	if _, _, err := writeReleaseDir(context.Background(), s.Data, 9, src, goOut, "", releaseManifest{}, nil, nil); err == nil {
 		t.Fatal("go 产物被篡改时应拒绝写发行目录")
 	}
 	if nextSeq(s) != 6 {

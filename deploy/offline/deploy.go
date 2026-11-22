@@ -1,18 +1,16 @@
 package main
 
-// auriga deploy（设计 D10，统一现场部署第 2a 步：全量部署，含经 sudo 的受限入口）。
+// auriga deploy（设计 D10；第 2c 步：输入指纹决定是否构建，装配摘要决定是否切换）。
 //
-// 流程：统一站点锁 → 取源码快照 → 读源码配方（能力版本、# syntax=、上游摘要）→ 依赖输入
-// （缓存 → 套件 → 依赖源，verifyInput，锁清单比较）→ 固定 digest 的工具/基础/服务镜像 →
-// 断网构建 go/web/java → 按暂存清单装配镜像（装配摘要与当前相同的跳过）→ 打 r<序号> 标签 →
-// 写不可变发行目录 → 首装复用 install 步骤，或完整启动切换（失败且数据未被触碰时自动回滚）→
-// 淘汰旧历史 → 收据。
+// 流程：统一站点锁 → 取源码快照 → 读源码配方与 services.json → 依赖输入 → 固定 digest 镜像 →
+// 计算产物指纹（与当前发行一致则跳过构建并复用 artifacts/）→ 断网构建需要的 go/web/java →
+// 按暂存清单装配（装配摘要分项与当前相同则跳过切换，收据写触发项）→ 打 r<序号> 标签 →
+// 写不可变发行目录（含 provenance.json、fingerprints.json、artifacts/）→ 首装或完整启动 → 收据。
 //
 // 受限调用（经 sudo，见 privilege.go）只接受白名单参数，且只允许部署当前运行提交的后代
 // （快进）；root 人工 --allow-downgrade 可向旧提交部署，先做与 rollback 相同的数据检查。
-// 签名包安装的站点也可以 deploy：第一次 deploy 前把当前安装包登记为一条历史（基线）。
 //
-// 不在本步：只换容器、按指纹跳过构建。schemaCompatFloor / FormatMax / --backup-db 属 2b。
+// 不在本步：只换容器（2d）、adopt（2e）。
 
 import (
 	"context"
@@ -23,6 +21,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 )
 
 type deployOptions struct {
@@ -168,23 +167,8 @@ func doDeploy(ctx context.Context, ops siteOps, cfg *siteConfig, cfgPath, data s
 			return exitWith(1, fmt.Errorf("首次安装（r%d）未完成：现场已保留，请先排查 %s 与数据目录；确认放弃后移走二者再重新 deploy", prev.Seq, data+".oneclick"))
 		}
 	}
-	selected := map[string]bool{}
 	if first && len(o.Services) > 0 {
 		return exitWith(1, errors.New("首次安装必须构建全部镜像，不能用 --services"))
-	}
-	if len(o.Services) == 0 {
-		for _, svc := range deployServices {
-			selected[svc] = true
-		}
-	}
-	for _, svc := range o.Services {
-		selected[svc] = true
-	}
-	var chosen []string
-	for _, svc := range deployServices {
-		if selected[svc] {
-			chosen = append(chosen, svc)
-		}
 	}
 
 	stage, err := os.MkdirTemp(filepath.Dir(data), ".auriga-deploy-")
@@ -219,20 +203,153 @@ func doDeploy(ctx context.Context, ops siteOps, cfg *siteConfig, cfgPath, data s
 	if err != nil {
 		return exitWith(1, err)
 	}
-	builds, needSystem := recipe.needs(chosen)
-	ecos := []string{"go"}
+	services, err := loadSiteServices(src.Dir)
+	if err != nil {
+		return exitWith(1, err)
+	}
+
+	// 先按用户选择确定候选；指纹算完后再补共享输入变化的服务。
+	manual := len(o.Services) > 0
+	selected := map[string]bool{}
+	if !manual {
+		for _, svc := range deployServices {
+			selected[svc] = true
+		}
+	}
+	for _, svc := range o.Services {
+		selected[svc] = true
+	}
+	var seed []string
+	for _, svc := range deployServices {
+		if selected[svc] {
+			seed = append(seed, svc)
+		}
+	}
+
+	rc.Deps.Sources = map[string]string{}
+	for _, eco := range []string{"go", "web", "java", "system"} {
+		rc.Deps.Sources[eco] = depsSourceLabel(cfg.Deps, eco)
+	}
+	// deps-lock 输入集用源码锁清单的摘要（与依赖输入的锁摘要同一口径），不要求依赖输入在场。
+	srcLocks, err := sourceEcosystemLocks(src.Dir)
+	if err != nil {
+		return exitWith(1, err)
+	}
+	locks := map[string]string{}
+	for _, l := range srcLocks {
+		locks[l.Ecosystem] = l.Digest
+	}
+	r := newDepsResolver(cfg)
+	resolved := map[string]resolvedImage{}
+	inputDir := map[string]string{}
+	var inputs []resolvedInput
+	var missing []string
+	addInputs := func(got []resolvedInput, miss []string) {
+		inputs = append(inputs, got...)
+		missing = append(missing, miss...)
+		rc.Deps.Inputs, rc.Deps.Missing = inputs, append([]string{}, missing...)
+		for _, in := range got {
+			inputDir[in.Ecosystem] = in.Dir
+		}
+	}
+	resolveRole := func(role string) error {
+		if _, ok := resolved[role]; ok {
+			return nil
+		}
+		img, err := resolveRecipeImage(ctx, r, cfg, role, recipe.Images[role], stage)
+		if err != nil {
+			return err
+		}
+		resolved[role] = img
+		rc.BuildImages = append(rc.BuildImages, img)
+		return nil
+	}
+	// Go 指纹要在断网工具容器里跑 go list -deps（依赖只来自已校验的 Go 依赖输入），
+	// 所以 Go 依赖输入与 tool-go 镜像每次都先就位；--dry-run 不跑容器，Go 产物按“将重建”计。
+	var goDeps map[string][]string
+	if !o.DryRun {
+		if err := deployBuildEnv(ctx, o.Budget); err != nil {
+			return exitWith(1, err)
+		}
+		got, miss, err := resolveDeployInputs(ctx, cfg, cfgPath, src.Dir, []string{"go"}, o.Accept, false, o.Budget, stage, w)
+		addInputs(got, miss)
+		if err != nil {
+			return exitWith(1, err)
+		}
+		if err := resolveRole("tool-go"); err != nil {
+			return exitWith(1, err)
+		}
+		if goDeps, err = goDepsRunner(ctx, resolved["tool-go"].ID, src.Dir, inputDir["go"], stage, o.Budget); err != nil {
+			return exitWith(1, err)
+		}
+	}
+	prevFP := map[string]string{}
+	if prev != nil && len(prev.Fingerprints) > 0 {
+		prevFP = prev.Fingerprints
+	}
+	fc := fingerprintContext{Source: src.Dir, Services: services, Recipe: recipe, Locks: locks, Tools: recipe.Images, GoDeps: goDeps}
+	fpReport, err := computeAllFingerprints(ctx, fc)
+	if err != nil {
+		return exitWith(1, fmt.Errorf("计算输入指纹失败：%w", err))
+	}
+	rc.Fingerprints = fingerprintMap(fpReport)
+
+	chosen := seed
+	if manual {
+		var autoAdded []string
+		chosen, autoAdded = expandSelectedServices(services, seed, fpReport, prevFP)
+		for _, a := range autoAdded {
+			selected[a] = true
+			fmt.Fprintf(w, "提示：服务 %s 与所选服务共享输入且指纹已变，自动补上\n", a)
+			rc.Notes = append(rc.Notes, "因共享输入变化自动补上服务 "+a)
+		}
+	}
+
+	builds := kindsToBuild(services, fpReport, prevFP, o.Full || first, chosen)
+	out := filepath.Join(stage, "output")
+	for _, kind := range []string{"go", "web", "java"} {
+		if err := os.MkdirAll(filepath.Join(out, kind), 0755); err != nil {
+			return exitWith(1, err)
+		}
+	}
+	// 先复用未变产物（复用前按回滚规则核对上一版发行目录）；任何问题都改为重建，不拿可疑产物装配。
+	if !o.DryRun && !o.Full && !first {
+		var reuse []string
+		for _, a := range reusableArtifacts(fpReport, prevFP, chosen, services) {
+			if !builds[artifactBuildKind(a)] {
+				reuse = append(reuse, a)
+			}
+		}
+		if err := reuseArtifactsFromRelease(ctx, data, prev, out, reuse); err != nil {
+			fmt.Fprintf(w, "警告：%v；改为重建相关产物\n", err)
+			rc.Notes = append(rc.Notes, "复用上一版产物失败，改为重建："+err.Error())
+			for k := range kindsToBuild(services, fpReport, map[string]string{}, true, chosen) {
+				builds[k] = true
+			}
+		}
+	}
+	_, needSystem := recipe.needs(chosen)
+	var restEcos []string
 	for _, k := range []string{"web", "java"} {
 		if builds[k] {
-			ecos = append(ecos, k)
+			restEcos = append(restEcos, k)
 		}
 	}
 	if needSystem {
-		ecos = append(ecos, "system")
+		restEcos = append(restEcos, "system")
 	}
-	rc.Deps.Sources = map[string]string{}
-	for _, eco := range ecos {
-		rc.Deps.Sources[eco] = depsSourceLabel(cfg.Deps, eco)
+	if o.DryRun || len(restEcos) > 0 {
+		need := restEcos
+		if o.DryRun {
+			need = append([]string{"go"}, restEcos...)
+		}
+		got, miss, err := resolveDeployInputs(ctx, cfg, cfgPath, src.Dir, need, o.Accept, o.DryRun, o.Budget, stage, w)
+		addInputs(got, miss)
+		if err != nil {
+			return exitWith(1, err)
+		}
 	}
+
 	var roles []string
 	for _, k := range []string{"go", "web", "java"} {
 		if builds[k] {
@@ -245,59 +362,73 @@ func doDeploy(ctx context.Context, ops siteOps, cfg *siteConfig, cfgPath, data s
 	for _, svc := range deployExtraServices {
 		roles = append(roles, "service-"+svc)
 	}
-	if !o.DryRun {
-		if err := deployBuildEnv(ctx, o.Budget); err != nil {
-			return exitWith(1, err)
-		}
-	}
-	inputs, missing, err := resolveDeployInputs(ctx, cfg, cfgPath, src.Dir, ecos, o.Accept, o.DryRun, o.Budget, stage, w)
-	rc.Deps.Inputs, rc.Deps.Missing = inputs, append([]string{}, missing...)
-	if err != nil {
-		return exitWith(1, err)
-	}
-	r := newDepsResolver(cfg)
 	if o.DryRun {
-		return printDeployPlan(ctx, w, cfg, r, recipe, &s, first, prev, chosen, roles, inputs, missing, rc)
+		return printDeployPlan(ctx, w, cfg, r, recipe, fpReport, prevFP, &s, first, prev, chosen, builds, roles, inputs, missing, o, rc)
 	}
-	resolved := map[string]resolvedImage{}
 	for _, role := range roles {
-		img, err := resolveRecipeImage(ctx, r, cfg, role, recipe.Images[role], stage)
-		if err != nil {
+		if err := resolveRole(role); err != nil {
 			return exitWith(1, err)
 		}
-		resolved[role] = img
-		rc.BuildImages = append(rc.BuildImages, img)
-	}
-	inputDir := map[string]string{}
-	for _, in := range inputs {
-		inputDir[in.Ecosystem] = in.Dir
 	}
 
-	out := filepath.Join(stage, "output")
 	for _, kind := range []string{"go", "web", "java"} {
+		dir := filepath.Join(out, kind)
 		if !builds[kind] {
+			if dirHasFiles(dir) {
+				// 复用的产物已按上一版清单核对过；按本次实际内容重写 SHA256SUMS 供暂存核对。
+				if err := rewriteArtifactSums(dir); err != nil {
+					return exitWith(1, err)
+				}
+				rc.Artifacts = append(rc.Artifacts, receiptArtifact{Name: kind, Action: "reused", Reason: fmt.Sprintf("输入指纹与 r%d 一致，复用其 artifacts/%s", prev.Seq, kind)})
+			}
 			continue
 		}
-		if err := os.MkdirAll(filepath.Join(out, kind), 0755); err != nil {
+		// 重建该生态时清空后全量构建，避免与复用文件混杂。
+		if err := os.RemoveAll(dir); err != nil {
 			return exitWith(1, err)
 		}
-		fmt.Fprintf(w, "构建 %s（工具镜像 %s，断网）…\n", kind, recipe.Images["tool-"+kind])
-		if err := runToolBuild(ctx, kind, resolved["tool-"+kind].ID, src.Dir, inputDir[kind], filepath.Join(out, kind), o.Budget); err != nil {
+		if err := os.MkdirAll(dir, 0755); err != nil {
 			return exitWith(1, err)
 		}
+		fmt.Fprintf(w, "构建 %s 产物（断网）\n", kind)
+		if err := runToolBuild(ctx, kind, resolved["tool-"+kind].ID, src.Dir, inputDir[kind], dir, o.Budget); err != nil {
+			return exitWith(1, err)
+		}
+		if err := checkArtifactSums(dir); err != nil {
+			return exitWith(1, err)
+		}
+		reason := "输入指纹变化"
+		switch {
+		case first:
+			reason = "首次安装"
+		case o.Full:
+			reason = "--full 强制重建"
+		}
+		rc.Artifacts = append(rc.Artifacts, receiptArtifact{Name: kind, Action: "built", Reason: reason})
 	}
-	if builds["web"] {
-		// 2c 前 provenance 仍打进 edge 镜像；不写构建时间，产物不变时装配摘要也不变。
-		info := provenance{Version: "local-" + src.SnapshotSHA256[:12], Commit: src.Commit, Dirty: src.Dirty, SiteChanges: src.Dirty, SnapshotSHA256: src.SnapshotSHA256}
-		if err := jsonFile(filepath.Join(out, "web/admin/provenance.json"), info, 0644); err != nil {
-			return exitWith(1, err)
-		}
+	recorded := recordedFingerprints(fpReport, out)
+	rc.Fingerprints = fingerprintMap(recorded)
+
+	prov := &provenance{
+		Version:        "local-" + src.SnapshotSHA256[:12],
+		Commit:         src.Commit,
+		Dirty:          src.Dirty,
+		SiteChanges:    src.Dirty,
+		SnapshotSHA256: src.SnapshotSHA256,
+		BuiltAt:        time.Now().UTC().Format(time.RFC3339),
 	}
 
 	seq := nextSeq(s)
 	images, assembly := map[string]string{}, map[string]string{}
+	assemblyPartsMap := map[string]assemblyParts{}
 	if prev != nil {
 		images = cloneImages(prev.Images)
+		for k, v := range prev.Assembly {
+			assembly[k] = v
+		}
+		for k, v := range prev.AssemblyParts {
+			assemblyPartsMap[k] = v
+		}
 	}
 	dockerfile := filepath.Join(src.Dir, filepath.FromSlash(deployDockerfile))
 	for _, svc := range deployServices {
@@ -307,10 +438,7 @@ func doDeploy(ctx context.Context, ops siteOps, cfg *siteConfig, cfgPath, data s
 			old = prev.Images[key]
 		}
 		if !selected[svc] {
-			if prev != nil && prev.Assembly[svc] != "" {
-				assembly[svc] = prev.Assembly[svc]
-			}
-			rc.Images = append(rc.Images, receiptImage{Service: svc, Action: "not-selected", Reason: "--services 未选中，沿用 r" + fmt.Sprint(prev.Seq), OldID: old, NewID: old, Tag: imageTag(svc, seq)})
+			rc.Images = append(rc.Images, receiptImage{Service: svc, Action: "not-selected", Reason: "--services 未选中，沿用 r" + fmt.Sprint(prev.Seq), OldID: old, NewID: old, Tag: imageTag(svc, seq), Assembly: assembly[svc]})
 			continue
 		}
 		scratch := filepath.Join(stage, "assemble", svc)
@@ -320,26 +448,31 @@ func doDeploy(ctx context.Context, ops siteOps, cfg *siteConfig, cfgPath, data s
 		if err := stageService(ctx, svc, recipe.Services[svc], src.Dir, out, inputDir["system"], scratch); err != nil {
 			return exitWith(1, fmt.Errorf("暂存 %s 失败：%w", svc, err))
 		}
-		sum, err := assemblyDigest(ctx, svc, recipe, scratch)
+		parts, err := assemblyDigest(ctx, svc, recipe, scratch)
 		if err != nil {
 			return exitWith(1, err)
 		}
-		assembly[svc] = sum
+		assembly[svc] = parts.Total
+		assemblyPartsMap[svc] = parts
+		var oldParts *assemblyParts
+		if prev != nil {
+			if p, ok := prev.AssemblyParts[svc]; ok {
+				oldParts = &p
+			}
+		}
 		reason := "首次安装"
 		switch {
 		case first:
 		case o.Full:
 			reason = "--full 强制重建"
-		case prev.Assembly[svc] == "":
-			reason = "上一版没有装配摘要"
-		case prev.Assembly[svc] == sum:
+		case prev.Assembly[svc] == parts.Total:
 			if _, _, ok := localImage(ctx, old); ok {
-				rc.Images = append(rc.Images, receiptImage{Service: svc, Action: "unchanged", Reason: fmt.Sprintf("装配摘要与 r%d 相同，跳过构建与切换", prev.Seq), OldID: old, NewID: old, Tag: imageTag(svc, seq), Assembly: sum})
+				rc.Images = append(rc.Images, receiptImage{Service: svc, Action: "unchanged", Reason: fmt.Sprintf("装配摘要与 r%d 相同，跳过切换", prev.Seq), OldID: old, NewID: old, Tag: imageTag(svc, seq), Assembly: parts.Total})
 				continue
 			}
 			reason = "装配摘要相同但旧镜像已不在本机"
 		default:
-			reason = "装配摘要变化（产物、系统输入、基础镜像、Dockerfile 或暂存清单）"
+			reason = assemblyChangeReason(prev.Assembly[svc], oldParts, parts)
 		}
 		base := resolved["base-"+svc]
 		baseTag := kitImageTag("base-"+svc, base.Ref)
@@ -352,7 +485,7 @@ func doDeploy(ctx context.Context, ops siteOps, cfg *siteConfig, cfgPath, data s
 			return exitWith(1, err)
 		}
 		images[key] = id
-		rc.Images = append(rc.Images, receiptImage{Service: svc, Action: "built", Reason: reason, OldID: old, NewID: id, Tag: imageTag(svc, seq), Assembly: sum})
+		rc.Images = append(rc.Images, receiptImage{Service: svc, Action: "built", Reason: reason, Triggers: reason, OldID: old, NewID: id, Tag: imageTag(svc, seq), Assembly: parts.Total})
 	}
 	for _, svc := range deployExtraServices {
 		key := imageKey(svc)
@@ -368,8 +501,6 @@ func doDeploy(ctx context.Context, ops siteOps, cfg *siteConfig, cfgPath, data s
 		}
 		rc.Images = append(rc.Images, receiptImage{Service: svc, Action: action, Reason: "配方固定 digest " + recipe.Images["service-"+svc], OldID: old, NewID: id})
 	}
-	// --backup-db 在打标签、写发行目录之前做：失败时不留下孤儿发行目录（否则下次同序号拒绝覆盖）。
-	// 构建已完成，离切换只差打标签与写发行目录，备份仍是切换前最新的数据。
 	if o.BackupDB && !first {
 		if err := backupDatabases(s, rc, w); err != nil {
 			return exitWith(1, err)
@@ -384,12 +515,19 @@ func doDeploy(ctx context.Context, ops siteOps, cfg *siteConfig, cfgPath, data s
 	if err != nil {
 		return exitWith(1, fmt.Errorf("读取源码 schema 兼容声明失败：%w", err))
 	}
-	manifest := releaseManifest{Source: *src, Images: images, Assembly: assembly, SchemaCompatFloor: floorPtr(floor), FormatMax: formatMax, CreatedAt: nowRFC3339()}
-	release, releaseSums, err := writeReleaseDir(ctx, data, seq, src.Dir, filepath.Join(out, "go"), manifest)
+	manifest := releaseManifest{
+		Source: *src, Images: images, Assembly: assembly, AssemblyParts: assemblyPartsMap,
+		Fingerprints: fingerprintMap(recorded), SchemaCompatFloor: floorPtr(floor), FormatMax: formatMax, CreatedAt: nowRFC3339(),
+	}
+	release, releaseSums, err := writeReleaseDir(ctx, data, seq, src.Dir, filepath.Join(out, "go"), out, manifest, prov, recorded)
 	if err != nil {
 		return exitWith(1, err)
 	}
-	rec := deployRecord{Seq: seq, Status: recordInstalling, At: nowRFC3339(), Source: *src, Release: release, ReleaseSums: releaseSums, Images: images, Assembly: assembly, SchemaCompatFloor: floor, FormatMax: formatMax}
+	rec := deployRecord{
+		Seq: seq, Status: recordInstalling, At: nowRFC3339(), Source: *src, Release: release, ReleaseSums: releaseSums,
+		Images: images, Assembly: assembly, AssemblyParts: assemblyPartsMap, Fingerprints: fingerprintMap(recorded),
+		SchemaCompatFloor: floor, FormatMax: formatMax,
+	}
 	rc.Release = &receiptRelease{Seq: seq, Dir: release, Previous: s.Current}
 	fmt.Fprintf(w, "发行目录 %s\n", release)
 	if first {
@@ -652,31 +790,63 @@ func probeRecipeImage(ctx context.Context, r *depsResolver, cfg *siteConfig, rol
 	return "缺失（deps import 或配置 deps.registry）"
 }
 
-func printDeployPlan(ctx context.Context, w io.Writer, cfg *siteConfig, r *depsResolver, recipe *deployRecipe, s *state, first bool, prev *deployRecord, chosen, roles []string, inputs []resolvedInput, missing []string, rc *siteReceipt) error {
+func printDeployPlan(ctx context.Context, w io.Writer, cfg *siteConfig, r *depsResolver, recipe *deployRecipe, fp *fingerprintReport, prevFP map[string]string, s *state, first bool, prev *deployRecord, chosen []string, builds map[string]bool, roles []string, inputs []resolvedInput, missing []string, o deployOptions, rc *siteReceipt) error {
 	fmt.Fprintln(w, "部署计划（--dry-run：不构建、不切换）")
 	if first {
 		fmt.Fprintln(w, "  类型：首次安装（复用 install 步骤），构建全部镜像")
 	} else {
 		fmt.Fprintf(w, "  类型：再次部署，当前 r%d，新序号 r%d\n", prev.Seq, max(nextSeq(*s), prev.Seq+1))
 	}
-	fmt.Fprintf(w, "  构建镜像：%s（原因：全量构建；按输入指纹跳过构建属 2c，构建后装配摘要与当前相同的镜像跳过切换）\n", strings.Join(chosen, "、"))
-	var skipped []string
-	for _, svc := range deployServices {
-		found := false
-		for _, c := range chosen {
-			found = found || c == svc
+	fmt.Fprintf(w, "  目标镜像：%s\n", strings.Join(chosen, "、"))
+	var buildKinds, skipKinds []string
+	for _, k := range []string{"go", "web", "java"} {
+		if builds[k] {
+			buildKinds = append(buildKinds, k)
+		} else {
+			skipKinds = append(skipKinds, k)
 		}
-		if !found {
+	}
+	if len(buildKinds) > 0 {
+		fmt.Fprintf(w, "  将构建产物生态：%s（输入指纹变化、--full 或首次安装）\n", strings.Join(buildKinds, "、"))
+	}
+	if len(skipKinds) > 0 && !first {
+		fmt.Fprintf(w, "  跳过构建（指纹未变，复用上一版 artifacts/）：%s\n", strings.Join(skipKinds, "、"))
+	}
+	fmt.Fprintln(w, "  产物指纹（--dry-run 不跑工具容器展开 Go 依赖图，Go 产物一律按“将重建”列出）：")
+	names := make([]string, 0, len(fp.Artifacts))
+	for n := range fp.Artifacts {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+	for _, n := range names {
+		a := fp.Artifacts[n]
+		status := "将重建"
+		if !o.Full && !first && prevFP[n] != "" && prevFP[n] == a.Digest {
+			status = "未变"
+		}
+		fmt.Fprintf(w, "    %-22s %s  %s\n", n, a.Digest[:12], status)
+	}
+	var skipped []string
+	chosenSet := map[string]bool{}
+	for _, c := range chosen {
+		chosenSet[c] = true
+	}
+	for _, svc := range deployServices {
+		if !chosenSet[svc] {
 			skipped = append(skipped, svc)
 		}
 	}
 	if len(skipped) > 0 {
-		fmt.Fprintf(w, "  沿用当前镜像：%s（--services 未选中）\n", strings.Join(skipped, "、"))
+		fmt.Fprintf(w, "  沿用当前镜像：%s（--services 未选中且无共享输入变化）\n", strings.Join(skipped, "、"))
 	}
-	fmt.Fprintln(w, "  切换方式：完整启动（render → preflight → start）；只换容器属 2d")
+	fmt.Fprintln(w, "  切换：装配摘要（产物树、基础镜像、系统输入、Dockerfile 目标段、暂存清单）与当前相同则跳过；完整启动（render → preflight → start）；只换容器属 2d")
 	fmt.Fprintln(w, "  依赖输入：")
 	for _, in := range inputs {
-		fmt.Fprintf(w, "    %-6s %s  %s\n", in.Ecosystem, in.LockDigest[:12], in.Location)
+		dig := in.LockDigest
+		if len(dig) > 12 {
+			dig = dig[:12]
+		}
+		fmt.Fprintf(w, "    %-6s %s  %s\n", in.Ecosystem, dig, in.Location)
 	}
 	if len(missing) > 0 {
 		fmt.Fprintf(w, "  需要补的依赖：%s（acceptNewDeps=%t）\n", strings.Join(missing, "、"), cfg.Deps.AcceptNewDeps)

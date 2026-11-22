@@ -9,6 +9,8 @@
   <properties>
     <maven.compiler.release>25</maven.compiler.release>
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+    <!-- 同源码两次构建 jar 摘要一致（现场部署 D6 / 2c） -->
+    <project.build.outputTimestamp>2020-01-01T00:00:00Z</project.build.outputTimestamp>
     <spring-boot.version>4.1.1</spring-boot.version>
     <grpc.version>1.85.0</grpc.version>
     <protobuf.version>4.36.2</protobuf.version>

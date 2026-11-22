@@ -1,0 +1,7 @@
+# Java 打包清单（java-inputs.sh 与 deploy CLI 共用）。一行一个相对源码根的路径；# 开头为注释。
+mvnw
+.mvn
+pom.xml
+services
+contracts
+infra
