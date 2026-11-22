@@ -1,6 +1,6 @@
 # operator 引导依赖：全部钉版本并带 --hash=sha256（含传递依赖 cffi、pycparser），pip 遇到 --hash 自动进入哈希模式。
-# 覆盖 linux/amd64 上 CPython 3.13（operator 镜像 python:3.13.8-slim-bookworm）与 CPython 3.12
-# （CI ubuntu-latest 系统 python3）实际选中的 wheel；哈希取自 PyPI 并用 pip download --require-hashes 实测。
+# 覆盖 linux/amd64 上 CPython 3.13（operator 镜像 python:3.13.8-slim-bookworm）、CPython 3.12 与 CPython 3.14
+# （CI ubuntu-latest 上可能出现的系统 python3）实际选中的 wheel；哈希取自 PyPI 并用 pip download --require-hashes 实测。
 # 核对：pip download --only-binary=:all: --require-hashes --dest <空目录> -r 本文件
 cryptography==46.0.7 \
     --hash=sha256:5ad9ef796328c5e3c4ceed237a183f5d41d21150f972455a9d926593a1dcb308 \
@@ -8,6 +8,7 @@ cryptography==46.0.7 \
     --hash=sha256:42a1e5f98abb6391717978baf9f90dc28a743b7d9be7f0751a6f56a75d14065b
 cffi==2.0.0 \
     --hash=sha256:c8d3b5532fc71b7a77c09192b4a5a200ea992702734a2e9279a37f2478236f26 \
-    --hash=sha256:3e17ed538242334bf70832644a32a7aae3d83b57567f9fd60a26257e992b79ba
+    --hash=sha256:3e17ed538242334bf70832644a32a7aae3d83b57567f9fd60a26257e992b79ba \
+    --hash=sha256:afb8db5439b81cf9c9d0c80404b60c3cc9c3add93e114dcae767f1477cb53775
 pycparser==3.0 \
     --hash=sha256:b727414169a36b7d524c1c3e31839a521725078d7b2ff038656844266160a992
