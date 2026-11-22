@@ -42,7 +42,19 @@ src=$(CDPATH='' cd -- "$(dirname -- "$0")/../../.." && pwd)
 scratch=$(mktemp -d)
 trap 'rm -rf -- "$scratch"' EXIT
 export GOOS=linux GOARCH=amd64 CGO_ENABLED=0 GOENV=off GOTOOLCHAIN=local
-export GOMODCACHE="$scratch/modules" GOCACHE="$scratch/build"
+export GOMODCACHE="$scratch/modules"
+# build 模式可由 CLI 挂入持久化 GOCACHE（AURIGA_GO_BUILD_CACHE）；未设置时仍用 scratch，
+# 保证 bundle / prepare / deps / 旧调用方行为不变。只持久化 GOCACHE，不持久化 GOMODCACHE。
+if [ "$mode" = build ] && [ -n "${AURIGA_GO_BUILD_CACHE:-}" ]; then
+    case "$AURIGA_GO_BUILD_CACHE" in
+        /*) ;;
+        *) echo "AURIGA_GO_BUILD_CACHE must be an absolute path" >&2; exit 2 ;;
+    esac
+    mkdir -p -- "$AURIGA_GO_BUILD_CACHE"
+    export GOCACHE="$AURIGA_GO_BUILD_CACHE"
+else
+    export GOCACHE="$scratch/build"
+fi
 export GOFLAGS=-mod=readonly
 if [ "$(go version)" != 'go version go1.27.3 linux/amd64' ]; then
     echo "Go 1.27.3 linux/amd64 is required" >&2

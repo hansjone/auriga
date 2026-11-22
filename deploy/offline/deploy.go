@@ -374,6 +374,38 @@ func doDeploy(ctx context.Context, ops siteOps, cfg *siteConfig, cfgPath, data s
 		}
 	}
 
+	buildCache := &receiptBuildCache{AssemblyLayerCache: !o.Full}
+	var goBuildOpts toolBuildOpts
+	if builds["go"] {
+		toolRef := recipe.Images["tool-go"]
+		if img, ok := resolved["tool-go"]; ok && img.Ref != "" {
+			toolRef = img.Ref
+		}
+		if o.Full {
+			fmt.Fprintln(w, "Go 构建缓存：--full，使用容器内临时 GOCACHE（不挂持久化缓存）")
+			rc.Notes = append(rc.Notes, "Go 构建缓存：--full，临时 GOCACHE")
+		} else {
+			if _, err := ensureDepsCache(cfg.Deps.Cache, true); err != nil {
+				return exitWith(1, err)
+			}
+			cacheDir, err := ensureGoBuildCache(cfg.Deps.Cache, digestOf(toolRef))
+			if err != nil {
+				return exitWith(1, fmt.Errorf("准备 Go 构建缓存失败：%w", err))
+			}
+			goBuildOpts.GoCacheHost = cacheDir
+			buildCache.GoUsed = true
+			buildCache.GoPath = cacheDir
+			buildCache.GoToolImage = toolRef
+			fmt.Fprintf(w, "Go 构建缓存：%s（工具镜像 %s）\n", cacheDir, toolRef)
+		}
+	}
+	if o.Full {
+		fmt.Fprintln(w, "装配层缓存：--full，带 --no-cache")
+	} else {
+		fmt.Fprintln(w, "装配层缓存：启用（BuildKit 确定性层缓存）")
+	}
+	rc.BuildCache = buildCache
+
 	for _, kind := range []string{"go", "web", "java"} {
 		dir := filepath.Join(out, kind)
 		if !builds[kind] {
@@ -394,7 +426,11 @@ func doDeploy(ctx context.Context, ops siteOps, cfg *siteConfig, cfgPath, data s
 			return exitWith(1, err)
 		}
 		fmt.Fprintf(w, "构建 %s 产物（断网）\n", kind)
-		if err := runToolBuild(ctx, kind, resolved["tool-"+kind].ID, src.Dir, inputDir[kind], dir, o.Budget); err != nil {
+		opts := toolBuildOpts{}
+		if kind == "go" {
+			opts = goBuildOpts
+		}
+		if err := runToolBuild(ctx, kind, resolved["tool-"+kind].ID, src.Dir, inputDir[kind], dir, o.Budget, opts); err != nil {
 			return exitWith(1, err)
 		}
 		if err := checkArtifactSums(dir); err != nil {
@@ -457,25 +493,13 @@ func doDeploy(ctx context.Context, ops siteOps, cfg *siteConfig, cfgPath, data s
 		}
 		assembly[svc] = parts.Total
 		assemblyPartsMap[svc] = parts
-		var oldParts *assemblyParts
-		if prev != nil {
-			if p, ok := prev.AssemblyParts[svc]; ok {
-				oldParts = &p
-			}
-		}
-		reason := "首次安装"
-		switch {
-		case first:
-		case o.Full:
-			reason = "--full 强制重建"
-		case prev.Assembly[svc] == parts.Total:
-			if _, _, ok := localImage(ctx, old); ok {
-				rc.Images = append(rc.Images, receiptImage{Service: svc, Action: "unchanged", Reason: fmt.Sprintf("装配摘要与 r%d 相同，跳过切换", prev.Seq), OldID: old, NewID: old, Tag: imageTag(svc, seq), Assembly: parts.Total})
-				continue
-			}
-			reason = "装配摘要相同但旧镜像已不在本机"
-		default:
-			reason = assemblyChangeReason(prev.Assembly[svc], oldParts, parts)
+		needBuild, reason := decideAssembly(first, o.Full, svc, prev, parts, func(id string) bool {
+			_, _, ok := localImage(ctx, id)
+			return ok
+		})
+		if !needBuild {
+			rc.Images = append(rc.Images, receiptImage{Service: svc, Action: "unchanged", Reason: reason, OldID: old, NewID: old, Tag: imageTag(svc, seq), Assembly: parts.Total})
+			continue
 		}
 		base := resolved["base-"+svc]
 		baseTag := kitImageTag("base-"+svc, base.Ref)
@@ -483,7 +507,7 @@ func doDeploy(ctx context.Context, ops siteOps, cfg *siteConfig, cfgPath, data s
 			return exitWith(1, err)
 		}
 		fmt.Fprintf(w, "装配 %s 镜像（%s）…\n", svc, reason)
-		id, err := assembleImage(ctx, svc, baseTag, dockerfile, scratch, imageTag(svc, seq))
+		id, err := assembleImage(ctx, svc, baseTag, dockerfile, scratch, imageTag(svc, seq), o.Full)
 		if err != nil {
 			return exitWith(1, err)
 		}
@@ -884,6 +908,30 @@ func printDeployPlan(ctx context.Context, w io.Writer, cfg *siteConfig, r *depsR
 		fmt.Fprintf(w, "  沿用当前镜像：%s（--services 未选中且无共享输入变化）\n", strings.Join(skipped, "、"))
 	}
 	fmt.Fprintln(w, "  装配：装配摘要（产物树、基础镜像、系统输入、Dockerfile 目标段、暂存清单）与当前相同则跳过换镜像")
+	// 构建缓存计划（D14）：只打印路径与是否启用，不创建目录、不读缓存内容。
+	bc := &receiptBuildCache{AssemblyLayerCache: !o.Full}
+	if builds["go"] {
+		toolRef := recipe.Images["tool-go"]
+		if o.Full {
+			fmt.Fprintln(w, "  Go 构建缓存：--full，将使用临时 GOCACHE（不挂持久化缓存）")
+		} else {
+			path := planGoBuildCache(cfg.Deps.Cache, digestOf(toolRef))
+			if path != "" {
+				bc.GoUsed = true
+				bc.GoPath = path
+				bc.GoToolImage = toolRef
+				fmt.Fprintf(w, "  Go 构建缓存：将使用 %s（工具镜像 %s）\n", path, toolRef)
+			}
+		}
+	} else {
+		fmt.Fprintln(w, "  Go 构建缓存：本次不构建 go 产物")
+	}
+	if o.Full {
+		fmt.Fprintln(w, "  装配层缓存：--full，将带 --no-cache")
+	} else {
+		fmt.Fprintln(w, "  装配层缓存：启用（BuildKit 确定性层缓存；切换仍只看装配摘要）")
+	}
+	rc.BuildCache = bc
 	if !first && prev != nil {
 		// dry-run 时尚无新发行目录：编排按源码快照的 deploy/nas + 当前发行的 deploy-nas/bin（假定
 		// bootstrap 与 runtime-release 不变）+ 当前站点输入估算；选中镜像一律按将更换（真实装配后
