@@ -113,15 +113,25 @@ type siteReceipt struct {
 		Before *dataVersions `json:"before"`
 		After  *dataVersions `json:"after"`
 	} `json:"data"`
-	Health         string            `json:"health,omitempty"`
-	Smoke          string            `json:"smoke,omitempty"`
-	RolledBack     bool              `json:"rolledBack"`
-	RollbackReason string            `json:"rollbackReason,omitempty"`
-	Release        *receiptRelease   `json:"release,omitempty"`
-	Pruned         []int             `json:"pruned,omitempty"`
-	DBBackups      []receiptDBBackup `json:"dbBackups,omitempty"`
-	Notes          []string          `json:"notes"`
-	Log            string            `json:"log"`
+	Health         string             `json:"health,omitempty"`
+	Smoke          string             `json:"smoke,omitempty"`
+	RolledBack     bool               `json:"rolledBack"`
+	RollbackReason string             `json:"rollbackReason,omitempty"`
+	Release        *receiptRelease    `json:"release,omitempty"`
+	Pruned         []int              `json:"pruned,omitempty"`
+	DBBackups      []receiptDBBackup  `json:"dbBackups,omitempty"`
+	BuildCache     *receiptBuildCache `json:"buildCache,omitempty"`
+	Notes          []string           `json:"notes"`
+	Log            string             `json:"log"`
+}
+
+// receiptBuildCache 记录本次是否使用 Go 构建缓存与装配层缓存（设计 D14）。
+// 只记路径与工具镜像引用，不记缓存内容。
+type receiptBuildCache struct {
+	GoUsed             bool   `json:"goUsed"`
+	GoPath             string `json:"goPath,omitempty"`
+	GoToolImage        string `json:"goToolImage,omitempty"`
+	AssemblyLayerCache bool   `json:"assemblyLayerCache"`
 }
 
 // siteLogDirCheck 是可注入点（Windows 与非 root 单测替换属主校验）。

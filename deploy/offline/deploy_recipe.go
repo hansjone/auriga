@@ -482,10 +482,16 @@ func assemblyChangeReason(oldTotal string, oldParts *assemblyParts, cur assembly
 }
 
 // assembleImage 用 CLI 固定的参数装配一个镜像，返回镜像 ID。
-func assembleImage(ctx context.Context, svc, baseRef, dockerfile, scratch, tag string) (string, error) {
-	args := []string{"build", "--platform=linux/amd64", "--network=none", "--pull=false", "--no-cache",
+// noCache=true（deploy --full）带回 --no-cache；否则依赖 BuildKit 按指令与 COPY
+// 内容校验和的确定性层缓存。切换判定仍只看装配摘要，与镜像 ID 是否因缓存相同无关。
+func assembleImage(ctx context.Context, svc, baseRef, dockerfile, scratch, tag string, noCache bool) (string, error) {
+	args := []string{"build", "--platform=linux/amd64", "--network=none", "--pull=false"}
+	if noCache {
+		args = append(args, "--no-cache")
+	}
+	args = append(args,
 		"--provenance=false", "--sbom=false", "--target", svc,
-		"--build-arg", imageKey(svc) + "_BASE=" + baseRef, "-f", dockerfile, "-t", tag, scratch}
+		"--build-arg", imageKey(svc)+"_BASE="+baseRef, "-f", dockerfile, "-t", tag, scratch)
 	env := []string{"DOCKER_BUILDKIT=1", "BUILDX_GIT_INFO=false", "BUILDX_GIT_LABELS=false"}
 	if err := deployRun(ctx, runSpec{Name: "docker", Args: args, Env: env}); err != nil {
 		return "", fmt.Errorf("装配 %s 镜像失败：%w", svc, err)
@@ -497,8 +503,15 @@ func assembleImage(ctx context.Context, svc, baseRef, dockerfile, scratch, tag s
 	return id, nil
 }
 
+// toolBuildOpts 控制 runToolBuild 的可选挂载（当前仅 Go 构建缓存）。
+type toolBuildOpts struct {
+	// GoCacheHost 非空时以读写方式挂到容器 /gocache，并设 AURIGA_GO_BUILD_CACHE=/gocache。
+	// 仅 kind=go 时生效；--full 时留空，脚本退回 scratch 临时 GOCACHE。
+	GoCacheHost string
+}
+
 // runToolBuild 在固定 digest 的工具镜像里断网运行源码中的 <生态>-inputs.sh build。
-func runToolBuild(ctx context.Context, kind, tool, source, inputs, out string, budget buildBudget) error {
+func runToolBuild(ctx context.Context, kind, tool, source, inputs, out string, budget buildBudget, opts toolBuildOpts) error {
 	envName := map[string]string{"go": "AURIGA_GO_PROXY_DIR", "web": "AURIGA_WEB_INPUTS_DIR", "java": "AURIGA_JAVA_INPUTS_DIR"}[kind]
 	if envName == "" {
 		return fmt.Errorf("未知构建 %s", kind)
@@ -507,8 +520,13 @@ func runToolBuild(ctx context.Context, kind, tool, source, inputs, out string, b
 	args = append(args,
 		"--mount", "type=bind,src="+source+",dst=/source,readonly",
 		"--mount", "type=bind,src="+inputs+",dst=/inputs,readonly",
-		"--mount", "type=bind,src="+out+",dst=/output",
-		"--env", envName+"=/inputs", tool, "sh", "/source/deploy/nas/offline-build/"+kind+"-inputs.sh", "build", "/output")
+		"--mount", "type=bind,src="+out+",dst=/output")
+	if kind == "go" && opts.GoCacheHost != "" {
+		args = append(args,
+			"--mount", "type=bind,src="+opts.GoCacheHost+",dst="+goBuildCacheMount,
+			"--env", "AURIGA_GO_BUILD_CACHE="+goBuildCacheMount)
+	}
+	args = append(args, "--env", envName+"=/inputs", tool, "sh", "/source/deploy/nas/offline-build/"+kind+"-inputs.sh", "build", "/output")
 	if err := deployRun(ctx, runSpec{Name: "docker", Args: args}); err != nil {
 		return fmt.Errorf("%s 构建失败：%w", kind, err)
 	}

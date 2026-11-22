@@ -250,9 +250,17 @@ auriga client build                                Windows 客户端，见 D13
 - 签名仍保留人工 `sign --review-only` 核对；自动化只做到产出待签目录。
 - **实施注记（第 9 步）**：Go 薄壳负责站点配置与缓存的 Windows ACL、并发锁、导入源受信校验，准备与构建转调 `scripts/client-release/site-deps.mjs` / `cli.mjs`（复用 `prepare.mjs`）；`deploy/offline` 仍只依赖标准库。缓存布局 `inputs/client/<lockSha256>/`（锁键用 `inputs.mjs` 的 `lockIdentity`）。`files` 映射先 `<files>/<URL 路径>` 再 `<files>/<文件名>`（逐段百分号解码，支持 `file://`）。现场缓存套件无发行签名：以 fetch/import 写入时记录在 `site-dependencies.json` 的清单摘要经 `--site-kit --devkit-sha256` 门禁（信任依据是管理员 ACL 保护的缓存），`client.verifyKey`/`trustFingerprint` 仍核签名源码；`deps.kits` 套件须带 `trustFingerprint` 并验签，`trustState` 不适用于客户端。构建 Node 执行前由 Go 核对其摘要等于套件清单登记值。Windows ACL：对象与直接父目录严格（Administrators/SYSTEM 所有、普通主体无任何写类权限、拒绝空 DACL），更上层祖先允许普通用户新建子项但不得删除/替换（对应 Linux 粘滞位规则）。`client build --version` 必填；`sequence` = `{platformOrigin}/api/resource/v1/desktop/latest` 在 stable、beta 的可见最大序号 +1（都 404 时为 1，其他错误失败），已撤回发行不可见时用 `--sequence` 覆盖。系统工具基线所用依据记入 `offline-evidence.json`。
 
-### D14 构建缓存加速（后续）
+### D14 构建缓存加速
 
-在可写缓存下持久化 Go 的 GOCACHE（按内容寻址，不影响结果正确性），以读写方式挂进构建容器。装配镜像去掉 `--no-cache`，改为基于输入摘要的确定性层缓存。只影响速度，功能闭环后再做。
+在可写缓存下持久化 Go 的 GOCACHE（按内容寻址，不影响结果正确性），以读写方式挂进构建容器。装配镜像去掉 `--no-cache`，改为基于输入摘要的确定性层缓存。只影响速度。
+
+**实施注记（第 10 步）**：
+- 布局：`<deps.cache>/build/go/<tool-go 镜像 digest 完整 64 hex>/`（按工具镜像分目录；root 所有、0700；父链同 `deps.cache`；拒绝符号链接）。只持久化 GOCACHE，**不**持久化 GOMODCACHE。
+- `deploy` 构建 Go 时把该目录读写挂到容器 `/gocache`，设 `AURIGA_GO_BUILD_CACHE=/gocache`；`go-inputs.sh build` 未设该变量时仍用 scratch 临时目录（`bundle`/`prepare`/`deps` 与旧调用方不变）。
+- `assembleImage`（仅 `deploy` 路径）默认去掉 `--no-cache`，保留 `--network=none --pull=false`、固定 digest 基础镜像、`--provenance=false --sbom=false`；`assemble-image.sh`（`bundle`）仍默认 `--no-cache`。
+- `--full`：Go 用不挂持久化缓存的临时 GOCACHE；装配带回 `--no-cache`。缓存只影响速度；怀疑污染时用 `--full`。
+- 切换仍只看装配摘要；镜像 ID 是否因层缓存相同不影响切换判定。收据与 `--dry-run` 记录是否使用 Go 缓存（路径、工具镜像）与装配是否启用层缓存；日志不打印缓存内容。
+- 并发：Go 缓存写入落在已有 deploy `flock` 范围内；`deps` 只写 `inputs/`/`images/`，不碰 `build/`，与 `deploy` 可并行而不互相破坏。
 
 ## 4. 安全边界（与现状对比）
 
