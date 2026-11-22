@@ -200,8 +200,13 @@ func digestGoProgram(ctx context.Context, fc fingerprintContext, program string)
 	}
 	seen := map[string]bool{}
 	var paths []string
-	for _, dir := range dirs {
-		dir = path.Clean(dir)
+	for _, raw := range dirs {
+		for _, seg := range strings.Split(raw, "/") {
+			if seg == ".." {
+				return "", fmt.Errorf("go list -deps 返回了异常目录 %s", raw)
+			}
+		}
+		dir := path.Clean(raw)
 		var rel string
 		switch {
 		case dir == goDepsSourceMount:
@@ -221,7 +226,10 @@ func digestGoProgram(ctx context.Context, fc fingerprintContext, program string)
 		}
 	}
 	if len(paths) == 0 {
-		return "", fmt.Errorf("程序 %s 没有源码树内的包", program)
+		// 纯外部模块程序（如 auriga-network-broker 编译 github.com/nats-io/nats-server/v2）
+		// 所有包均位于 GOROOT 或模块缓存，其输入完全由 go-mod-files、deps-go 与 tool-go 覆盖。
+		fmt.Fprintln(h, "external-only")
+		return hex.EncodeToString(h.Sum(nil)), nil
 	}
 	sort.Strings(paths)
 	for _, p := range paths {

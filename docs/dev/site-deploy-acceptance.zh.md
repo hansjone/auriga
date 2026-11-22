@@ -31,18 +31,16 @@
 | A5-4 运行器取消信号 | 已测 | host → 进程组 **SIGKILL** |
 | A6 2d Docker / P5 / 降级 | 部分 | 单测覆盖；真 compose / P5 组合未做 → **保持** broker 变化走完整启动 |
 
-## B. 服务端矩阵（WSL 隔离站点）
+## B. 服务端矩阵（NAS 隔离 DinD 引擎实测）
 
 | 格 | 结果 | 命令/退出码/耗时/关键字段 |
 |---|---|---|
-| B1 源码+本地缓存 | 未做完 | java/python 输入已备；全量 go/web/基镜与真部署未串完 |
-| B1 发行开发套件 | 未做 | 需主控提供带 `trustFingerprint` 的现有套件 |
-| B1 现场套件 `deps fetch` | 未做 | 同上 |
-| B2 全量首装 / 增量路径 | 单测覆盖路径判定 | 真 Docker 未跑完 |
-| B3 退出码 2 / 3 | 单测通过 | |
-| B4 离线缺依赖→import | 未做完 | |
-| B5 工作流 | 取消见 A5-4；成功/回滚/并发未在一次性用户下跑完 | |
-| B6 缓存两次部署 | 未做完 | |
+| B1 源码+本地缓存+签名套件 | **通过** | `auriga deploy 7dc45c17 --json`（`go`/`web` 命中签名套件 `trustFingerprint=SHA256:fcce8d2d…`，`java`/`python` 自动从外网补入缓存并过锁校验，`system` 与 11 个固定 digest 镜像经 `auriga deps import` 入缓存） |
+| B2 全量首装 / 增量只换容器 | **通过** | `r1` 全量首装 `exitCode=0`（779s，12 容器起齐且健康，`deploy-smoke` 通过，采齐 12 张 Flyway 迁移表）；`r2` 仅改 `infra/edge/main.go`，`exitCode=0`（442s），`web` 复用 `r1` 产物、`platform`/`agent`/`bifrost`/`operator` 装配摘要相同跳过切换，`switchMode="只换容器"`、`mixedVersions="混合版本：network-broker 仍为 r1"` |
+| B3 手动回滚 / 退出码 2 & 3 | **通过** | `auriga rollback --to 1 --json` `exitCode=0`（103s，`switchMode="只换容器"`，`health="healthy"`，`history` 切回 `r1`）；自动回滚退出码 2/3 由单测覆盖 |
+| B4 离线缺依赖→import | **通过** | `allowPublic=false` 且移除缓存 `python` 条目后 `deploy` 退出码 `1` 并列出缺失项与 `deps import` 指引；执行 `auriga deps import` 新增 1 条目恢复 |
+| B5 工作流 | 部分 | 取消见 A5-4；成功/回滚/并发未在一次性运行器用户下跑完 |
+| B6 缓存加速（D14） | **通过** | `r1`/`r2` 收据均确认 `buildCache.goUsed=true`（持久化 `GOCACHE`）与 `assemblyLayerCache=true`；全量首次与增量热缓存两轮实测通过 |
 
 ## C. 客户端（Windows）
 
