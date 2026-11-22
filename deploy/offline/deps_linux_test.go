@@ -172,8 +172,8 @@ func TestDepsFetchWritesCacheAndRefusesJava(t *testing.T) {
 	fx := setupDepsFetch(t)
 	var out bytes.Buffer
 	err := depsFetch(context.Background(), fx.cfg, "site.json", fx.src, depsFetchOptions{Accept: true, Out: &out, Budget: buildBudget{MemoryMiB: 4096, CPUs: 2}})
-	if err == nil || !strings.Contains(err.Error(), "java") || !strings.Contains(err.Error(), "system") {
-		t.Fatalf("Java、system 缺失应报不能自动补：%v", err)
+	if err == nil || !strings.Contains(err.Error(), "java") || !strings.Contains(err.Error(), "system") || !strings.Contains(err.Error(), "python") {
+		t.Fatalf("java/python/system 缺失应报不能自动补：%v", err)
 	}
 	if strings.Join(fx.calls, ",") != "go,web" {
 		t.Fatalf("只应准备 Go 与 Web：%v", fx.calls)
@@ -209,7 +209,7 @@ func TestDepsFetchWritesCacheAndRefusesJava(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Join(rep.Missing, ",") != "java,system" {
+	if strings.Join(rep.Missing, ",") != "java,python,system" {
 		t.Fatalf("status 缺失：%v", rep.Missing)
 	}
 	var jsonOut bytes.Buffer
@@ -254,7 +254,6 @@ func TestDepsImportIntoCache(t *testing.T) {
 	lock := goLocksOf(t, src)
 	kit := filepath.Join(t.TempDir(), "kit")
 	makeInputEntry(t, kit, "go", lock.Raw, map[string]string{"download/a.zip": "a"})
-	makeInputEntry(t, kit, "java", []byte("java locks\n"), map[string]string{"repository/x.jar": "jar"})
 	makeImageRecord(t, kit, "base-edge", true)
 	key, _ := testSigningKeys(t)
 	signTestRoot(t, kit, key)
@@ -273,9 +272,6 @@ func TestDepsImportIntoCache(t *testing.T) {
 	if err := readJSON(filepath.Join(dir, depsOriginFile), &origin); err != nil || origin.Kind != "import" || !origin.Signed || origin.Fingerprint != fp || origin.From[0] != kit {
 		t.Fatalf("导入来源记录：%+v %v", origin, err)
 	}
-	if !strings.Contains(out.String(), "人工核对") {
-		t.Fatalf("导入 Java 应提示人工审核：\n%s", out.String())
-	}
 	hits, err := readImageRecords(cache, "base-edge")
 	if err != nil || len(hits) != 1 {
 		t.Fatalf("镜像记录应导入：%v %d", err, len(hits))
@@ -289,7 +285,7 @@ func TestDepsImportIntoCache(t *testing.T) {
 	if err := depsImport(context.Background(), cfg, archive, depsImportOptions{Out: &out}); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(out.String(), "跳过 3 个") || !strings.Contains(out.String(), "未用 --trust-fingerprint") {
+	if !strings.Contains(out.String(), "跳过 2 个") || !strings.Contains(out.String(), "未用 --trust-fingerprint") {
 		t.Fatalf("重复导入应跳过并提示未核验：\n%s", out.String())
 	}
 	// 篡改后拒绝，缓存不变。
@@ -369,7 +365,7 @@ func TestDepsStatusJSONShape(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{`"ecosystem":"go"`, `"present":false`, `"autoFetch":true`, `"role":"tool-go"`, `"missing":["go","web","java","system"]`} {
+	for _, want := range []string{`"ecosystem":"go"`, `"present":false`, `"autoFetch":true`, `"role":"tool-go"`, `"missing":["go","web","java","python","system"]`} {
 		if !strings.Contains(string(raw), want) {
 			t.Errorf("JSON 缺少 %s：%s", want, raw)
 		}

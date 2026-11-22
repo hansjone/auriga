@@ -68,5 +68,5 @@ COPY requirements.txt /tmp/requirements.txt
 RUN --mount=type=bind,source=system,target=/inputs,readonly \
     cd /inputs && sha256sum -c SHA256SUMS \
     && python -m pip install --no-cache-dir --disable-pip-version-check \
-        --no-index --find-links /inputs/packages -r /tmp/requirements.txt
+        --require-hashes --no-index --find-links /inputs/packages -r /tmp/requirements.txt
 USER 10001:10001

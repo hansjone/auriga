@@ -23,7 +23,7 @@
 
 - `auriga bundle --build`：以下载的 NAS 发行制品为骨架（`bundle.go` 先对骨架 `image-check`），用发行索引或开发套件里**审核过的配方**覆盖源码中的 `deploy/nas/offline-build`（`build.go:50-56`），构建五个镜像和 `auriga-nas-bootstrap`、`runtime-release`、`auriga-cli`，打成签名离线包。
 - `--install` 接 `upgrade`：冷备份整站，激活新发行；成功后上一版发行被移到 `auriga-backups/release-*`；失败从冷备份恢复。
-- 依赖输入按生态**按锁摘要整套封闭**（build 时 `cmp source-locks`）。Go 由 `go.sum` 保证完整性，pnpm 由 lock 的 `integrity` 保证；**Maven 和 pip 没有锁哈希**，现有 `--online` 靠打印清单、`site-dependencies.json` 和人工审核兜底（`online.go` 的 `siteReportNotice`）。
+- 依赖输入按生态**按锁摘要整套封闭**（build 时 `cmp source-locks`）。Go 由 `go.sum` 保证完整性，pnpm 由 lock 的 `integrity` 保证；Maven 由 `services/maven-deps.sha256` 钉定，Python（operator）由 requirements 的 `--hash=sha256` 钉定。
 - 客户端 `auriga-client build` 必须有 `--devkit`；`--online` 分两段：先联网派生现场套件，再断网构建，产出 `offline-evidence.json` 和空的 `network-denials.log` 作为证据；签名要人工 `sign --review-only` 核对。
 
 差距：
@@ -93,10 +93,12 @@
 |---|---|---|
 | Go | `go.sum`；`allowPublic=false` 时不回落 `proxy.golang.org`，sumdb 走配置代理，取不到就失败 | 能 |
 | Web（pnpm） | lock 的 `integrity`；拒绝没有 `integrity` 的条目 | 能 |
-| Java（Maven） | 新增 `services/maven-deps.sha256`（坐标:版本:sha256），构建时核对 | 锁文件就绪前不能，只能 `deps import` 加人工审核 |
-| Python（operator） | requirements 改为 `--require-hashes` | 改造前不能，只能 `deps import` |
+| Java（Maven） | `services/maven-deps.sha256`（`groupId:artifactId[:classifier]:type:version sha256`），prepare/build 核对 | 锁文件非空且配置 `deps.sources.maven` 或 `allowPublic` 时能 |
+| Python（operator） | requirements 全部钉版本并带 `--hash=sha256`；`pip download/install --require-hashes` | requirements 带齐哈希且配置 `deps.sources.pypi` 或 `allowPublic` 时能 |
 | 系统包、基础镜像、工具镜像 | 固定 digest 或套件签名 | 不能，只能 `deps import` 或套件 |
 
+- **Maven 锁文件**（第 8 步）：覆盖 `java-inputs.sh prepare` 产出的本地仓库全部构件（插件、插件依赖、parent/BOM pom、frontend 插件下载的 Node、protoc 等）。`_remote.repositories`、`resolver-status.properties`、`maven-metadata*.xml`、`*.lastUpdated`、`*.sha1`/`*.md5` 等非构件不参与摘要；其余文件推不出坐标、符号链接与特殊文件一律失败。Maven 发行包由 `maven-wrapper.properties` 的 `distributionSha256Sum` 钉定，不在锁文件里。核对由 `java-inputs.sh`（prepare 后、build 前，纯 sh 实现，JDK 工具镜像无 python3）与 CLI（`deps fetch` 入缓存前、`deps import` 与导入发行开发套件时）各做一次；锁文件进入 java 源码锁清单，变化即换锁摘要。生成：`AURIGA_MAVEN_LOCK_UPDATE=1 java-inputs.sh prepare <空目录>` → `java-inputs.sh hash-lock <该目录>` → 再 prepare 一次得到可用输入。
+- **Python 生态**（第 8 步，相对原稿新增）：operator 的 pip 包从 `inputs/system/<摘要>/operator` 拆成独立的 `inputs/python/<摘要>/`（`python-inputs.sh prepare`，在 `base-operator` 镜像里运行；锁清单为 requirements 的摘要，布局与原 `system/operator` 相同，装配时仍挂为 `system/`），这样 requirements 变化只换 python 锁摘要、可单独自动补；`system` 锁清单只剩 `system-inputs.sh`。第 8 步前的发行开发套件没有 `python/`，CLI 从其 `system/operator/` 取 python 输入。依赖源为 `deps.sources.pypi`（D9）。
 - **工作流模式出现新增依赖时默认失败**（退出码 1），收据列出全部新增项。配置或参数显式 `acceptNewDeps` 才允许自动补，且仅限上表中“能”的生态。
 - 新拉到的依赖写回可写缓存并记录来源和 SHA-256（沿用 `site-dependencies.json`）。离线缺依赖时失败，列出缺什么、去哪里取，用 `auriga deps import <目录或归档>` 补进缓存。
 - 内部依赖源常用私有 CA：`deps.caFile` 以只读方式挂进准备依赖的容器。
@@ -107,7 +109,7 @@
 - **指纹输入从配方声明生成，不手写路径**：
   - Go：`go list -deps -f '{{.Dir}} {{.EmbedFiles}}'` 得到每个程序的包目录和嵌入文件，加上 `go.mod`、`go.sum`、`go.work`、`go.work.sum`；
   - Web 和 Java：把 `web-inputs.sh`、`java-inputs.sh` 里的打包清单抽成共享常量（配方和 CLI 共用）；
-  - 各镜像的装配输入：取自 `assemble-image.sh` 的声明（如 agent 的 `agent-entrypoint.sh`，bifrost 的 `config.json` 与 `third_party/bifrost/*`，operator 的 requirements 与 `inputs/system/operator`）；
+  - 各镜像的装配输入：取自 `assemble-image.sh` 的声明（如 agent 的 `agent-entrypoint.sh`，bifrost 的 `config.json` 与 `third_party/bifrost/*`，operator 的 requirements 与 `inputs/python/<锁摘要>`，第 8 步前为 `inputs/system/operator`）；
   - 再加依赖输入锁摘要、工具镜像、基础镜像。
 - `deploy/site/services.json` 只声明“镜像 → 产物”和“产物 → 配方输入集”的对应关系，不列路径。CI 覆盖测试：每个受跟踪文件要么属于某个输入集，要么在显式 `ignore` 里。
 - **双保险**：指纹变了才构建；构建后按该镜像的**装配摘要**决定是否切换。装配摘要 = 该镜像全部产物摘要（Go 二进制已用 `-trimpath`，可复现；jar 设置 `project.build.outputTimestamp`；web 产物）+ 基础镜像 digest + 该服务的系统输入摘要（`inputs/system/<svc>`）+ `Dockerfile.assembly` 对应目标段与暂存清单摘要。任何一项与当前版本不同就切换，收据写明是哪一项触发的。这样基础镜像安全更新这类“产物不变、镜像要变”的情况不会漏掉；漏判“要构建”只会多构建，不会漏切换。
@@ -144,7 +146,7 @@
 ### D9 统一配置文件
 
 - 固定路径 `/etc/auriga/site.json`（Windows `%ProgramData%\Auriga\site.json`）。Linux 要求 root 所有、0600 或 0644，祖先目录不可被组或其他用户写（复用 `trustedParent`）；Windows 不能复用 `trustedParent`（它依赖 `stat -c`），单独实现 ACL 校验：所有者为 Administrators 或 SYSTEM，普通用户没有写权限。
-- `deps.cache` 同样要求 root 所有、组和其他用户不可写。在 Maven 锁文件（§5 第 8 步）就绪前，可写缓存是 Java 依赖唯一的保护边界。
+- `deps.cache` 同样要求 root 所有、组和其他用户不可写。Java 已由 `services/maven-deps.sha256` 钉定、Python 已由 requirements 哈希钉定；可写缓存仍是自动补与 `deps import` 的落点与权限边界。
 - **经 sudo 调用时不接受 `--config`**；人工以 root 直接运行时可以用 `--config` 指向同样满足权限要求的文件。
 - 示例：
 
@@ -165,6 +167,7 @@
       "go": ["https://goproxy.internal.example"],
       "npm": "https://npm.internal.example",
       "maven": "https://maven.internal.example/repository/public",
+      "pypi": "https://pypi.internal.example/simple",
       "files": "https://files.internal.example/auriga-inputs"
     },
     "registry": "registry.internal.example",
@@ -193,7 +196,7 @@
 }
 ```
 
-- 规则：未知字段报错；`schemaVersion` 升级沿用套件 `requires` 能力表做法。依赖源 URL 只允许 `https://` 和 `file://`，`registry` 单独校验主机名。只有 Go 支持多个依赖源，npm、maven 各一个。密钥只写路径。客户端 `sequence` 从发布账本自动取，不写在配置里。
+- 规则：未知字段报错；`schemaVersion` 升级沿用套件 `requires` 能力表做法。依赖源 URL 只允许 `https://` 和 `file://`，`registry` 单独校验主机名。只有 Go 支持多个依赖源，npm、maven、pypi、files 各一个（`pypi` 为第 8 步相对原稿新增，规则同 npm/maven）。密钥只写路径。客户端 `sequence` 从发布账本自动取，不写在配置里。
 
 ### D10 统一命令
 
@@ -254,7 +257,7 @@ auriga client build                                Windows 客户端，见 D13
 
 | 项 | 现状 | 本设计 |
 |---|---|---|
-| 依赖完整性 | 套件签名；Go `go.sum`、pnpm `integrity`；Maven、pip 无锁哈希，靠人工审核 | Go、pnpm 不变且禁止无 `integrity` 条目；Maven 补锁文件前、pip 改 `--require-hashes` 前不自动补；工作流默认拒绝新增依赖 |
+| 依赖完整性 | 套件签名；Go `go.sum`、pnpm `integrity`；Maven、pip 无锁哈希，靠人工审核 | Go、pnpm 不变且禁止无 `integrity` 条目；Maven `maven-deps.sha256`、pip `--require-hashes`；工作流默认拒绝新增依赖 |
 | 公网访问 | `--online` 时访问 | 默认关闭，`allowPublic` 显式打开；Go 不默认回落公网 |
 | 套件信任 | 签名源码时用源码钥，否则用套件自带钥 | 每个套件必须带独立信任指纹或 state 钉定钥 |
 | 配方 | 套件或发行的审核配方覆盖源码配方 | `deploy` 用源码配方；构建与装配都由 CLI 以断网参数启动，锁比较、固定 digest 由 CLI 强制；宿主机上只执行 `deploy-nas/scripts`；`bundle` 不变 |
@@ -275,7 +278,7 @@ auriga client build                                Windows 客户端，见 D13
 5. **2d 只换容器切换**：镜像 → 服务表与 compose 交叉测试；先开放 edge（broker 混合版本规则）与 platform（collab 走公开脚本）。
 6. **2e adopt**：接入我们的 NAS 测试栈。
 7. **工作流**：示例工作流、sudoers 片段、运行器安装说明、脱敏。
-8. **Maven 锁文件与 pip 哈希**：完成后放开 Java、Python 的自动补依赖。
+8. **Maven 锁文件与 pip 哈希**：`services/maven-deps.sha256` 与 requirements `--require-hashes`；完成后放开 Java、Python 的自动补依赖（含 `deps.sources.pypi`）。
 9. **客户端统一**：`deps fetch --client`、文件类依赖源、系统工具基线登记、`auriga.exe` 薄壳。
 10. **构建缓存加速**（D14）。
 11. **验收矩阵**（NAS 与本机 Windows）：源码配本地缓存、发行套件、现场套件；全量、增量（只改 edge、只改 platform、改编排、改 broker）；健康失败触发回滚；格式检查拒绝回滚；离线缺依赖报错与 `import`；工作流成功一次、回滚一次、并发一次、取消一次；客户端两种依赖方式各构建一次。

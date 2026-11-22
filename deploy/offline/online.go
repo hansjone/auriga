@@ -52,7 +52,7 @@ type siteReport struct {
 	Notice           string     `json:"notice"`
 }
 
-const siteReportNotice = "Go 依赖由 go.sum/GOSUMDB 钉定，Web 依赖由 pnpm-lock integrity 钉定；Java 依赖没有锁哈希钉定，Maven 只校验所用 Central 或镜像自己提供的校验和，镜像可信性由现场负责，请用 sha256 与 Maven Central 人工核对新增构件。"
+const siteReportNotice = "Go 依赖由 go.sum/GOSUMDB 钉定，Web 依赖由 pnpm-lock integrity 钉定；Java 依赖由 services/maven-deps.sha256 钉定；Python（operator）由 requirements 的 --hash=sha256 钉定。"
 
 // 可注入点：测试用假执行器替换 docker、镜像检查和环境读取。
 var (
@@ -234,6 +234,9 @@ func prepareDockerArgs(run prepareRun, lookup func(string) (string, bool)) (args
 		if run.Cache != "" {
 			args = append(args, "--env", "AURIGA_JAVA_PREP_CACHE_DIR="+onlineCacheDir)
 		}
+	case "python":
+		pass("PIP_INDEX_URL", "PIP_INDEX_URL")
+		pass("AURIGA_PIP_INDEX_URL", "AURIGA_PIP_INDEX_URL")
 	}
 	args = append(args, run.Extra...)
 	args = append(args, run.Tool, "sh", onlineScriptDir+run.Kind+"-inputs.sh", "prepare", "/output")
@@ -261,6 +264,8 @@ func prepareCache(ctx context.Context, kind, oldInputs, scratch string) (dir str
 			}
 		}
 		return cache, true, nil
+	case "python":
+		return "", false, nil // 无种子缓存；每次按 requirements 全量下载
 	}
 	return "", false, fmt.Errorf("未知生态 %s", kind)
 }

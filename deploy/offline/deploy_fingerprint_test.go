@@ -153,7 +153,7 @@ func fingerprintFixture(t *testing.T) (string, fingerprintContext) {
 			"bifrost":              {InputSets: []string{"go-bifrost", "go-mod-files", "deps-go", "tool-go"}},
 			"web":                  {InputSets: []string{"web-pack", "deps-web", "tool-web"}},
 			"platform.jar":         {InputSets: []string{"java-pack", "deps-java", "tool-java"}},
-			"operator-runtime":     {InputSets: []string{"assemble-operator"}},
+			"operator-runtime":     {InputSets: []string{"deps-python", "assemble-operator"}},
 			"auriga-nas-bootstrap": {InputSets: []string{"go-bootstrap", "go-mod-files"}},
 			"runtime-release":      {InputSets: []string{"go-runtime", "go-mod-files"}},
 		},
@@ -168,6 +168,7 @@ func fingerprintFixture(t *testing.T) (string, fingerprintContext) {
 			"deps-go":           {Kind: "deps-lock", Ecosystem: "go"},
 			"deps-web":          {Kind: "deps-lock", Ecosystem: "web"},
 			"deps-java":         {Kind: "deps-lock", Ecosystem: "java"},
+			"deps-python":       {Kind: "deps-lock", Ecosystem: "python"},
 			"tool-go":           {Kind: "tool-image", Role: "tool-go"},
 			"tool-web":          {Kind: "tool-image", Role: "tool-web"},
 			"tool-java":         {Kind: "tool-image", Role: "tool-java"},
@@ -183,7 +184,7 @@ func fingerprintFixture(t *testing.T) (string, fingerprintContext) {
 		},
 		Services: map[string]recipeService{
 			"operator": {Stage: []stageItem{
-				{Kind: "system"},
+				{Kind: "python"},
 				{Kind: "source", Sources: map[string]string{"requirements.txt": "deploy/nas/test/admin-bootstrap-requirements.txt"}},
 			}},
 		},
@@ -197,7 +198,7 @@ func fingerprintFixture(t *testing.T) (string, fingerprintContext) {
 	}
 	return src, fingerprintContext{
 		Source: src, Services: services, Recipe: recipe, GoDeps: goDeps,
-		Locks: map[string]string{"go": "g", "web": "w", "java": "j", "system": "s"},
+		Locks: map[string]string{"go": "g", "web": "w", "java": "j", "python": "p", "system": "s"},
 		Tools: recipe.Images,
 	}
 }
@@ -261,8 +262,8 @@ func TestFingerprintStableAndScoped(t *testing.T) {
 	expect("Go 工具镜像", "auriga-agent", "bifrost")
 	putFile(t, filepath.Join(src, "deploy/nas/test/admin-bootstrap-requirements.txt"), "requests==2\n", 0644)
 	expect("operator 装配源文件", "operator-runtime")
-	fc.Locks["system"] = "s2"
-	expect("系统输入锁摘要", "operator-runtime")
+	fc.Locks["python"] = "p2"
+	expect("python 依赖锁摘要", "operator-runtime")
 }
 
 func TestFingerprintGoDepsErrorsAndDryRun(t *testing.T) {

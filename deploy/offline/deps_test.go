@@ -212,27 +212,66 @@ func TestSudoRejectsConfigAndSource(t *testing.T) {
 
 func TestAutoFetchRules(t *testing.T) {
 	d := &siteDeps{Cache: "/srv/auriga/cache"}
-	for _, eco := range []string{"java", "python", "system"} {
-		if ok, reason := autoFetchRule(eco, &siteDeps{AllowPublic: true, Sources: siteSources{Go: []string{"https://g"}}}); ok || !strings.Contains(reason, "deps import") {
-			t.Errorf("%s 不应允许自动补：%v %s", eco, ok, reason)
-		}
+	// 无源码时：system 仍不能自动补；java/python 在有公网/源时按配置放行（源码侧锁/哈希由调用方再核）。
+	if ok, reason := autoFetchRule("system", &siteDeps{AllowPublic: true}, ""); ok || !strings.Contains(reason, "deps import") {
+		t.Errorf("system 不应允许自动补：%v %s", ok, reason)
 	}
-	if ok, _ := autoFetchRule("go", d); ok {
+	if ok, _ := autoFetchRule("go", d, ""); ok {
 		t.Error("没有 Go 源且不允许公网时不能自动补")
 	}
 	d.Sources.Go = []string{"https://goproxy.internal.example"}
-	if ok, _ := autoFetchRule("go", d); !ok {
+	if ok, _ := autoFetchRule("go", d, ""); !ok {
 		t.Error("配置了 Go 源应允许自动补")
 	}
-	if ok, _ := autoFetchRule("web", d); ok {
+	if ok, _ := autoFetchRule("web", d, ""); ok {
 		t.Error("没有 npm 源且不允许公网时不能自动补")
 	}
 	d.AllowPublic = true
-	if ok, _ := autoFetchRule("web", d); !ok {
+	if ok, _ := autoFetchRule("web", d, ""); !ok {
 		t.Error("allowPublic 时 Web 应允许自动补")
 	}
+	if ok, _ := autoFetchRule("java", d, ""); !ok {
+		t.Error("无源码路径且 allowPublic 时 Java 应允许自动补（锁文件由 status/fetch 再核）")
+	}
+	if ok, _ := autoFetchRule("python", d, ""); !ok {
+		t.Error("无源码路径且 allowPublic 时 Python 应允许自动补（哈希由 status/fetch 再核）")
+	}
+	src := t.TempDir()
+	writeTestFileAt(t, filepath.Join(src, filepath.FromSlash(mavenDepsLockRel)), "# empty\n")
+	writeTestFileAt(t, filepath.Join(src, filepath.FromSlash(pythonRequirementsRel)), "cryptography==1\n")
+	if ok, reason := autoFetchRule("java", d, src); ok || !strings.Contains(reason, mavenDepsLockRel) {
+		t.Errorf("空 Maven 锁不应自动补：%v %s", ok, reason)
+	}
+	if ok, reason := autoFetchRule("python", d, src); ok || !strings.Contains(reason, "hash") {
+		t.Errorf("无哈希的 requirements 不应自动补：%v %s", ok, reason)
+	}
+	writeTestFileAt(t, filepath.Join(src, filepath.FromSlash(mavenDepsLockRel)), "a.b:c:jar:1 "+strings.Repeat("a", 64)+"\n")
+	writeTestFileAt(t, filepath.Join(src, filepath.FromSlash(pythonRequirementsRel)), "pkg==1.0 --hash=sha256:"+strings.Repeat("b", 64)+"\n")
+	if ok, _ := autoFetchRule("java", d, src); !ok {
+		t.Error("有非空 Maven 锁且 allowPublic 时应允许自动补")
+	}
+	if ok, _ := autoFetchRule("python", d, src); !ok {
+		t.Error("requirements 带哈希且 allowPublic 时应允许自动补")
+	}
+	d.AllowPublic = false
+	if ok, reason := autoFetchRule("java", d, src); ok || !strings.Contains(reason, "maven") {
+		t.Errorf("无 maven 源且不允许公网时不能自动补：%v %s", ok, reason)
+	}
+	maven := "https://maven.internal.example/repo"
+	d.Sources.Maven = &maven
+	if ok, _ := autoFetchRule("java", d, src); !ok {
+		t.Error("配置了 maven 源应允许自动补")
+	}
+	pypi := "https://pypi.internal.example/simple"
+	d.Sources.PyPI = &pypi
+	if ok, _ := autoFetchRule("python", d, src); !ok {
+		t.Error("配置了 pypi 源应允许自动补")
+	}
 	if _, _, err := depsPrepareSettings(d, "java", fakeEnv(nil)); err != nil {
-		t.Fatalf("Java 环境生成（供 import 后续使用）不应失败：%v", err)
+		t.Fatalf("Java 环境生成不应失败：%v", err)
+	}
+	if _, _, err := depsPrepareSettings(d, "python", fakeEnv(nil)); err != nil {
+		t.Fatalf("Python 环境生成不应失败：%v", err)
 	}
 	if _, _, err := depsPrepareSettings(d, "system", fakeEnv(nil)); err == nil {
 		t.Fatal("system 不能生成自动准备环境")
@@ -394,7 +433,8 @@ func fakeSourceTree(t *testing.T) string {
 		"services/contracts/package.json":                  "{}",
 		"services/contracts/package-lock.json":             "{}",
 		"deploy/nas/offline-build/system-inputs.sh":        "#!/bin/sh\n",
-		"deploy/nas/test/admin-bootstrap-requirements.txt": "pip==1\n",
+		"deploy/nas/test/admin-bootstrap-requirements.txt": "pip==1.0 --hash=sha256:" + strings.Repeat("c", 64) + "\n",
+		"services/maven-deps.sha256":                       "# empty\n",
 	}
 	for name, body := range files {
 		writeTestFileAt(t, filepath.Join(src, filepath.FromSlash(name)), body)
@@ -424,8 +464,9 @@ func TestEcosystemLocksMirrorScripts(t *testing.T) {
 	want := map[string]string{
 		"go":     h("deploy/bootstrap/go.mod") + h("infra/edge/go.mod") + h("infra/edge/go.sum") + h("infra/go.work"),
 		"web":    h("clients/desk/package.json") + h("web/package.json") + h("package.json") + h("pnpm-workspace.yaml") + h(".npmrc") + h("web/pnpm-lock.yaml"),
-		"java":   h("services/platform/pom.xml") + h("pom.xml") + h("mvnw") + h(".mvn/wrapper/maven-wrapper.properties") + h(".mvn/wrapper/maven-wrapper.jar") + h("services/contracts/package.json") + h("services/contracts/package-lock.json"),
-		"system": h("deploy/nas/offline-build/system-inputs.sh") + h("deploy/nas/test/admin-bootstrap-requirements.txt"),
+		"java":   h("services/platform/pom.xml") + h("pom.xml") + h("mvnw") + h(".mvn/wrapper/maven-wrapper.properties") + h(".mvn/wrapper/maven-wrapper.jar") + h("services/contracts/package.json") + h("services/contracts/package-lock.json") + h("services/maven-deps.sha256"),
+		"python": h("deploy/nas/test/admin-bootstrap-requirements.txt"),
+		"system": h("deploy/nas/offline-build/system-inputs.sh"),
 	}
 	locks, err := sourceEcosystemLocks(src)
 	if err != nil {
