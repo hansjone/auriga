@@ -505,7 +505,7 @@ func TestReleaseDirAndRetention(t *testing.T) {
 	putFile(t, filepath.Join(src, "deploy/nas/scripts/start.sh"), "#!/bin/sh\n", 0755)
 	writeArtifactDir(t, goOut, map[string]string{"auriga-nas-bootstrap": "boot", "runtime-release": "rr"})
 	for _, r := range recs {
-		dir, sums, err := writeReleaseDir(context.Background(), s.Data, r.Seq, src, goOut, "", releaseManifest{Images: r.Images}, nil, nil)
+		dir, sums, err := writeReleaseDir(context.Background(), s.Data, r.Seq, src, goOut, "", releaseManifest{Images: r.Images}, nil, nil, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -522,7 +522,7 @@ func TestReleaseDirAndRetention(t *testing.T) {
 			}
 		}
 	}
-	if _, _, err := writeReleaseDir(context.Background(), s.Data, 3, src, goOut, "", releaseManifest{}, nil, nil); err == nil {
+	if _, _, err := writeReleaseDir(context.Background(), s.Data, 3, src, goOut, "", releaseManifest{}, nil, nil, nil); err == nil {
 		t.Fatal("已存在的发行目录被覆盖")
 	}
 	putFile(t, filepath.Join(releaseDir(s.Data, 3), "deploy-nas/scripts/start.sh"), "tampered", 0755)
@@ -545,7 +545,7 @@ func TestReleaseDirAndRetention(t *testing.T) {
 	}
 	// go 产物与其 SHA256SUMS 不符时不写发行目录。
 	putFile(t, filepath.Join(goOut, "runtime-release"), "changed", 0755)
-	if _, _, err := writeReleaseDir(context.Background(), s.Data, 9, src, goOut, "", releaseManifest{}, nil, nil); err == nil {
+	if _, _, err := writeReleaseDir(context.Background(), s.Data, 9, src, goOut, "", releaseManifest{}, nil, nil, nil); err == nil {
 		t.Fatal("go 产物被篡改时应拒绝写发行目录")
 	}
 	if nextSeq(s) != 6 {
@@ -722,7 +722,12 @@ func switchFixture(t *testing.T) (state, *deployRecord, deployRecord, *siteConfi
 	s := deployTestSite(t, deployRecord{Seq: 1, Status: recordOK, Images: imagesFor("1")})
 	writeTestRelease(t, &s, 1)
 	prev := s.record(1)
-	rec := deployRecord{Seq: 2, Status: recordInstalling, Images: imagesFor("2"), Release: releaseDir(s.Data, 2)}
+	if orch, err := orchestrationDigest(filepath.Join(prev.Release, "deploy-nas"), s.Data, s.Access); err == nil {
+		prev.Orchestration = orch
+		_ = saveState(s)
+	}
+	rec := deployRecord{Seq: 2, Status: recordInstalling, Images: imagesFor("2"), Release: releaseDir(s.Data, 2), Fingerprints: cloneImages(prev.Fingerprints)}
+	putFile(t, filepath.Join(rec.Release, "deploy-nas/scripts/start.sh"), "#!/bin/sh\n", 0755)
 	keep := 3
 	cfg := &siteConfig{Server: &siteServer{Data: s.Data, KeepHistory: &keep}}
 	stubDeployRun(t, func(runSpec) (string, error) { return "", nil })

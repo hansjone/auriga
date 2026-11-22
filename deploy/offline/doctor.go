@@ -15,7 +15,7 @@ import (
 )
 
 func waitHealthy(s state) error {
-	return waitHealthyFor(s, 5*time.Minute)
+	return waitHealthyFor(s, 10*time.Minute)
 }
 
 // waitHealthyFor 等待全部服务健康，超时返回最后一次的不健康原因（deploy 用 server.healthTimeout，默认 10 分钟）。

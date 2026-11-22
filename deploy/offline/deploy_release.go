@@ -45,6 +45,12 @@ type deployRecord struct {
 	AssemblyParts map[string]assemblyParts `json:"assemblyParts,omitempty"`
 	// Fingerprints 产物输入指纹（2c）。
 	Fingerprints map[string]string `json:"fingerprints,omitempty"`
+	// Orchestration 编排摘要（2d）：deploy-nas + 去镜像 stack.env + access + collab-source 回执。
+	Orchestration string `json:"orchestration,omitempty"`
+	// BrokerSeq/BrokerImage：本条为当前时 network-broker 容器实际运行的 edge 镜像及其所属序号
+	// （只换容器不重建 broker，可能仍是更早序号的镜像）；为空表示与本条 edge 镜像相同。
+	BrokerSeq   int    `json:"brokerSeq,omitempty"`
+	BrokerImage string `json:"brokerImage,omitempty"`
 	// 部署成功后读到的迁移版本与数据目录格式版本：之后回滚到本条时用来判断数据是否
 	// 仍与本条运行时相同。
 	Migrations map[string]string `json:"migrations,omitempty"`
@@ -84,7 +90,8 @@ func legacyReleaseDir(data string) string {
 	return filepath.Join(data+".oneclick", "release")
 }
 
-// releaseManifest 写在发行目录的 release.json 与 deploy-nas/.auriga-release（status.sh 显示）。
+// releaseManifest 写在发行目录的 release.json；deploy-nas/.auriga-release 与 versions.txt
+// 另写成与 load-images.sh 等价的格式供 status.sh 显示。
 type releaseManifest struct {
 	Schema            int                      `json:"schemaVersion"`
 	Seq               int                      `json:"seq"`
@@ -93,6 +100,7 @@ type releaseManifest struct {
 	Assembly          map[string]string        `json:"assembly"`
 	AssemblyParts     map[string]assemblyParts `json:"assemblyParts,omitempty"`
 	Fingerprints      map[string]string        `json:"fingerprints,omitempty"`
+	Orchestration     string                   `json:"orchestration,omitempty"`
 	SchemaCompatFloor *string                  `json:"schemaCompatFloor"`
 	FormatMax         map[string]string        `json:"formatMax"`
 	CreatedAt         string                   `json:"createdAt"`
@@ -144,7 +152,8 @@ func imageTag(svc string, seq int) string {
 // writeReleaseDir 在暂存目录写完整发行，写好本地 SHA256SUMS 后一次 rename 到 <序号>；
 // 返回发行目录与其 SHA256SUMS 文件的摘要（记进 state 的 releaseSums）。
 // artifactsOut 是 go/web/java 产物根（含各生态子目录），provenance 为运行时挂载的版本来源。
-func writeReleaseDir(ctx context.Context, data string, seq int, source, goOut, artifactsOut string, m releaseManifest, prov *provenance, fpReport *fingerprintReport) (string, string, error) {
+// orch 非空时按发行内 deploy-nas 与站点输入计算编排摘要写进 release.json（首装没有站点输入，传 nil）。
+func writeReleaseDir(ctx context.Context, data string, seq int, source, goOut, artifactsOut string, m releaseManifest, prov *provenance, fpReport *fingerprintReport, orch *orchInputs) (string, string, error) {
 	root := releasesRoot(data)
 	if err := os.MkdirAll(root, 0755); err != nil {
 		return "", "", err
@@ -215,10 +224,18 @@ func writeReleaseDir(ctx context.Context, data string, seq int, source, goOut, a
 		m.Fingerprints = fingerprintMap(fpReport)
 	}
 	m.Schema, m.Seq = 1, seq
+	if orch != nil {
+		// 在写发行标记之前算：标记按序号与镜像变化，不属于编排输入（digestDeployNas 也会排除它）。
+		sum, err := orchestrationDigest(filepath.Join(tmp, "deploy-nas"), orch.Data, orch.Access)
+		if err != nil {
+			return fail(err)
+		}
+		m.Orchestration = sum
+	}
 	if err := jsonFile(filepath.Join(tmp, "release.json"), m, 0644); err != nil {
 		return fail(err)
 	}
-	if err := jsonFile(filepath.Join(tmp, "deploy-nas", ".auriga-release"), m, 0644); err != nil {
+	if err := writeReleaseMarkers(tmp, m); err != nil {
 		return fail(err)
 	}
 	if err := writeSumsContext(ctx, tmp); err != nil {

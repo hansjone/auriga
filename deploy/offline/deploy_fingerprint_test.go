@@ -348,7 +348,7 @@ func TestReuseArtifactsFromRelease(t *testing.T) {
 			t.Fatalf("应记录 %s 的指纹", a)
 		}
 	}
-	dir, sums, err := writeReleaseDir(context.Background(), s.Data, 1, src, filepath.Join(out, "go"), out, releaseManifest{}, &provenance{Commit: "c"}, kept)
+	dir, sums, err := writeReleaseDir(context.Background(), s.Data, 1, src, filepath.Join(out, "go"), out, releaseManifest{}, &provenance{Commit: "c"}, kept, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

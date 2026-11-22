@@ -107,6 +107,7 @@ type siteReceipt struct {
 	SwitchMode           string            `json:"switchMode,omitempty"`
 	MixedVersions        string            `json:"mixedVersions"`
 	OrchestrationChanged *bool             `json:"orchestrationChanged"`
+	Orchestration        string            `json:"orchestration,omitempty"`
 	Data                 struct {
 		Before *dataVersions `json:"before"`
 		After  *dataVersions `json:"after"`
@@ -199,7 +200,7 @@ func startRun(cfg *siteConfig, cfgPath, cmd string, args []string, asJSON bool) 
 	run.receipt = &siteReceipt{Schema: 1, Command: cmd, Args: append([]string{}, args...), Config: cfgPath, ConfigSHA256: sum,
 		StartedAt: now.Format(time.RFC3339), Phase: "build", Log: run.logPath,
 		Images: []receiptImage{}, SwitchedServices: []string{}, BuildImages: []resolvedImage{}, Notes: []string{},
-		MixedVersions: "无：本版本只做完整启动（只换容器与混合版本属 2d）"}
+		MixedVersions: "无"}
 	run.receipt.Deps.Inputs, run.receipt.Deps.Missing = []resolvedInput{}, []string{}
 	run.receipt.Deps.NewDeps = "新增依赖清单见日志与缓存条目的 site-dependencies.json"
 	run.terminal = os.Stdout
