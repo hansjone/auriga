@@ -28,14 +28,16 @@ type image struct {
 	Archive string `json:"archive"`
 }
 type release struct {
-	Schema  int              `json:"schemaVersion"`
-	Version string           `json:"version"`
-	NAS     artifact         `json:"nas"`
-	Images  map[string]image `json:"images"`
-	Desktop *artifact        `json:"desktop,omitempty"`
-	Seeds   *artifact        `json:"seeds,omitempty"`
-	Build   *buildSpec       `json:"build,omitempty"`
-	Source  *provenance      `json:"source,omitempty"`
+	Schema            int               `json:"schemaVersion"`
+	Version           string            `json:"version"`
+	NAS               artifact          `json:"nas"`
+	Images            map[string]image  `json:"images"`
+	Desktop           *artifact         `json:"desktop,omitempty"`
+	Seeds             *artifact         `json:"seeds,omitempty"`
+	Build             *buildSpec        `json:"build,omitempty"`
+	Source            *provenance       `json:"source,omitempty"`
+	SchemaCompatFloor string            `json:"schemaCompatFloor,omitempty"`
+	FormatMax         map[string]string `json:"formatMax,omitempty"`
 }
 
 type buildSpec struct {
@@ -369,6 +371,13 @@ func bundleExpectedContext(ctx context.Context, args []string, expectedCommit st
 		exe = filepath.Join(stage, "output/go/auriga-cli")
 	}
 	if err := copyFileContext(ctx, exe, filepath.Join(root, "bin/auriga-cli"), 0755); err != nil {
+		return err
+	}
+	if _, err := os.Stat(filepath.Join(source, filepath.FromSlash(siteCompatRel))); err == nil {
+		if err := applySchemaCompatToRelease(source, &r); err != nil {
+			return err
+		}
+	} else if !os.IsNotExist(err) {
 		return err
 	}
 	if err := jsonFile(filepath.Join(root, "offline-release.json"), r, 0644); err != nil {

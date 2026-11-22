@@ -101,14 +101,15 @@ type siteReceipt struct {
 		Before *dataVersions `json:"before"`
 		After  *dataVersions `json:"after"`
 	} `json:"data"`
-	Health         string          `json:"health,omitempty"`
-	Smoke          string          `json:"smoke,omitempty"`
-	RolledBack     bool            `json:"rolledBack"`
-	RollbackReason string          `json:"rollbackReason,omitempty"`
-	Release        *receiptRelease `json:"release,omitempty"`
-	Pruned         []int           `json:"pruned,omitempty"`
-	Notes          []string        `json:"notes"`
-	Log            string          `json:"log"`
+	Health         string            `json:"health,omitempty"`
+	Smoke          string            `json:"smoke,omitempty"`
+	RolledBack     bool              `json:"rolledBack"`
+	RollbackReason string            `json:"rollbackReason,omitempty"`
+	Release        *receiptRelease   `json:"release,omitempty"`
+	Pruned         []int             `json:"pruned,omitempty"`
+	DBBackups      []receiptDBBackup `json:"dbBackups,omitempty"`
+	Notes          []string          `json:"notes"`
+	Log            string            `json:"log"`
 }
 
 // siteLogDirCheck 是可注入点（Windows 与非 root 单测替换属主校验）。

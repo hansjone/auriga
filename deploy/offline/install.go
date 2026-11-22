@@ -7,6 +7,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"path/filepath"
@@ -193,12 +194,21 @@ func nas(s state, operation string, args ...string) error {
 }
 
 func compose(s state, output *bytes.Buffer, args ...string) error {
+	if output != nil {
+		return composeTo(s, output, args...)
+	}
+	return composeCommand(s, os.Stdin, os.Stdout, args...)
+}
+
+// composeTo 把标准输出直接写到 w（大输出如 pg_dump 不进内存）。
+func composeTo(s state, w io.Writer, args ...string) error {
+	return composeCommand(s, nil, w, args...)
+}
+
+func composeCommand(s state, input io.Reader, output io.Writer, args ...string) error {
 	env := []string{"AURIGA_DATA_ROOT=" + s.Data, "NAS_ROOT=" + filepath.Join(s.Package, "deploy-nas"), "STACK_ENV=" + filepath.Join(s.Data, "stack.env")}
 	all := append([]string{filepath.Join(s.Package, "deploy-nas/scripts/oneclick-compose.sh")}, args...)
-	if output != nil {
-		return command(nil, output, env, "sh", all...)
-	}
-	return command(os.Stdin, os.Stdout, env, "sh", all...)
+	return command(input, output, env, "sh", all...)
 }
 
 func install(o installOptions) error {

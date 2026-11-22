@@ -95,9 +95,11 @@ var devkitFieldFeature = map[string]string{
 	"runtimeDependencyInputs.npmCache": "",
 	"runtimeDependencyInputs.webCache": "",
 	"release.build":                    "",
+	"release.formatMax":                devkitInfo, // N-1 兼容声明（2b），只影响站点回滚判定，旧 CLI 可忽略
 	"release.desktop":                  "",
 	"release.images":                   "",
 	"release.nas":                      "",
+	"release.schemaCompatFloor":        devkitInfo, // 同上
 	"release.schemaVersion":            "",
 	"release.seeds":                    "",
 	"release.source":                   "",

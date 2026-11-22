@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "schemaCompatFloor": "",
+  "formatMax": {
+    "materials": "1",
+    "collab-keys": "1",
+    "materials-upgrades": "1",
+    "relay": "1"
+  }
+}

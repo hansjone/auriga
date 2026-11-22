@@ -7,9 +7,9 @@ package main
 //     （目录模式含未提交改动、旧签名包没有提交号）或当前提交不在暂存仓库里时，受限调用拒绝。
 //     首装（没有 state）不检查。
 //   - root 人工部署（不经 sudo，或经 sudo 加 --operator）：目标不是当前提交的后代时必须
-//     --allow-downgrade，并先做与 rollback 相同的数据检查——2b 之前的口径是“数据未被比目标
-//     更新的版本触碰”：历史里存在一条成功记录，其提交是目标提交本身或祖先，且当前迁移与格式
-//     版本与该记录运行时相同；否则退出码 3。当前发行没有可比较的提交时如实记入收据后放行。
+//     --allow-downgrade，并先做与 rollback 相同的数据检查：数据未触碰（相对某条 ≤ 目标提交的
+//     成功历史）或通过当前发行的 schemaCompatFloor + 目标源码 FormatMax 检查；否则退出码 3。
+//     当前发行没有可比较的提交时如实记入收据后放行。
 
 import (
 	"context"
@@ -157,7 +157,13 @@ func checkDeployDirection(ctx context.Context, data string, s *state, prev *depl
 	if !o.AllowDowngrade {
 		return nil, exitWith(1, fmt.Errorf("目标提交 %s 不是当前运行提交 %s 的后代：向旧提交部署须加 --allow-downgrade（会先做与 rollback 相同的数据检查）", src.Commit, base))
 	}
-	now, reason, err := downgradeCheck(ctx, repo, s, src.Commit)
+	var targetFormatMax map[string]string
+	if src.Dir != "" {
+		if c, err := LoadSchemaCompat(src.Dir); err == nil {
+			targetFormatMax = cloneFormatMax(c.FormatMax)
+		}
+	}
+	now, reason, err := downgradeCheck(ctx, repo, s, src.Commit, targetFormatMax)
 	rc.Data.Before = now
 	rc.RollbackReason = reason
 	if err != nil {
@@ -167,8 +173,8 @@ func checkDeployDirection(ctx context.Context, data string, s *state, prev *depl
 	return now, nil
 }
 
-// downgradeCheck：2b 前的口径（D8 2b 前保护），见文件头。
-func downgradeCheck(ctx context.Context, repo string, s *state, target string) (*dataVersions, string, error) {
+// downgradeCheck：数据未触碰（相对 ≤ 目标的历史）或 floor+FormatMax 通过则允许。
+func downgradeCheck(ctx context.Context, repo string, s *state, target string, targetFormatMax map[string]string) (*dataVersions, string, error) {
 	now := readDataVersions(*s)
 	if !now.ok() {
 		reason := "读不到当前迁移或格式版本，无法确认数据状态：" + now.Err
@@ -182,6 +188,7 @@ func downgradeCheck(ctx context.Context, repo string, s *state, target string) (
 		}
 	}
 	sort.Slice(candidates, func(i, j int) bool { return candidates[i].Seq > candidates[j].Seq })
+	current := s.record(s.Current)
 	for _, r := range candidates {
 		older := r.Source.Commit == target
 		if !older {
@@ -193,11 +200,27 @@ func downgradeCheck(ctx context.Context, repo string, s *state, target string) (
 		if !older {
 			continue
 		}
-		if ok, why := rollbackDecision(r, now); ok {
-			return now, fmt.Sprintf("r%d 的提交 %s 不晚于目标提交；%s", r.Seq, r.Source.Commit, why), nil
+		// 仅用「数据未触碰」捷径；floor 路径在循环外用目标源码 FormatMax 统一判定。
+		if r.Migrations != nil && sameMap(r.Migrations, now.Migrations) && sameMap(r.Formats, now.Formats) {
+			return now, fmt.Sprintf("r%d 的提交 %s 不晚于目标提交；当前迁移与格式版本与该记录相同，数据未被之后的版本改动", r.Seq, r.Source.Commit), nil
 		}
 	}
-	reason := "历史里没有不晚于目标提交、且运行时迁移与格式版本与当前相同的成功记录：数据可能已被更新的版本改动（跨越迁移的降级属 2b 的 floor 检查），拒绝"
+	// 目标是尚未部署过的提交：所有保留的历史都可能在它之后改过数据，逐条对照 floor。
+	var others []*deployRecord
+	for i := range s.History {
+		if s.History[i].Seq != s.Current {
+			others = append(others, &s.History[i])
+		}
+	}
+	synthetic := &deployRecord{Seq: 0, Source: deploySource{Mode: "git", Commit: target}, FormatMax: targetFormatMax}
+	ok, why := rollbackDecision(synthetic, current, others, now, targetAncestorCheck(ctx, repo, target, 0))
+	if ok {
+		return now, why, nil
+	}
+	reason := why
+	if targetFormatMax == nil {
+		reason = "目标源码未声明 formatMax（deploy/site/schema-compat.json），且历史里没有不晚于目标、数据未触碰的成功记录，拒绝"
+	}
 	return now, reason, exitWith(3, errors.New("--allow-downgrade "+reason+"，需人工处理"))
 }
 
@@ -219,7 +242,9 @@ func packageBaseline(ctx context.Context, s *state, persist bool) (*deployRecord
 		return nil, err
 	}
 	seq := nextSeq(*s)
-	rec := deployRecord{Seq: seq, Kind: recordKindInstall, Status: recordOK, At: nowRFC3339(), Source: packageSource(s.Package, ""), Release: s.Package, ReleaseSums: sums, Images: cloneImages(s.Images)}
+	src := packageSource(s.Package, "")
+	floor, formatMax := packageCompatFields(s.Package)
+	rec := deployRecord{Seq: seq, Kind: recordKindInstall, Status: recordOK, At: nowRFC3339(), Source: src, Release: s.Package, ReleaseSums: sums, Images: cloneImages(s.Images), SchemaCompatFloor: floor, FormatMax: formatMax}
 	if v := readDataVersions(*s); v.ok() {
 		rec.Migrations, rec.Formats = v.Migrations, v.Formats
 	}

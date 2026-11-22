@@ -755,3 +755,54 @@ func TestSignedPackageBaselineForDeploy(t *testing.T) {
 		t.Fatal("签名不属于 state 固定公钥的安装包不应登记为基线")
 	}
 }
+
+// 2b：--allow-downgrade 在数据已被改动时走 floor + formatMax 路径（目标源码声明 formatMax，
+// 当前与之后运行过的发行声明 floor）。
+func TestDowngradeFloorPath(t *testing.T) {
+	old, mid, cur := strings.Repeat("1", 40), strings.Repeat("2", 40), strings.Repeat("3", 40)
+	fakeGit(t, map[string]bool{old: true, mid: true, cur: true}, map[string][]string{old: {mid, cur}, mid: {cur}})
+	v1 := &dataVersions{Migrations: map[string]string{"auriga/x": "1:1:a"}, Formats: map[string]string{}}
+	v3 := &dataVersions{Migrations: map[string]string{"auriga/x": "3:3:c"}, Formats: map[string]string{"materials": "1"}}
+	srcDir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(srcDir, "deploy", "site"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	writeCompat := func(formatMax string) {
+		body := `{"schemaVersion":1,"schemaCompatFloor":"","formatMax":` + formatMax + `}`
+		if err := os.WriteFile(filepath.Join(srcDir, "deploy", "site", "schema-compat.json"), []byte(body), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	run := func(curFloor string, curMax map[string]string) error {
+		s := deployTestSite(t,
+			deployRecord{Seq: 1, Status: recordOK, Source: deploySource{Mode: "git", Commit: old}, Images: imagesFor("1"), Migrations: v1.Migrations, Formats: v1.Formats},
+			deployRecord{Seq: 2, Status: recordOK, Source: deploySource{Mode: "git", Commit: cur}, Images: imagesFor("2"), Migrations: v3.Migrations, Formats: v3.Formats, SchemaCompatFloor: curFloor, FormatMax: curMax})
+		_, err := checkDeployDirection(context.Background(), s.Data, &s, s.record(2), &deploySource{Mode: "git", Commit: mid, Dir: srcDir}, deployOptions{AllowDowngrade: true}, &siteReceipt{}, &bytes.Buffer{})
+		return err
+	}
+	stubDataVersions(t, v3)
+	max := map[string]string{"materials": "1", "collab-keys": "1", "materials-upgrades": "1", "relay": "1"}
+	writeCompat(`{"materials":"1","collab-keys":"1","materials-upgrades":"1","relay":"1"}`)
+	if err := run(old, max); err != nil {
+		t.Fatalf("目标不早于当前 floor 且格式通过时应允许降级：%v", err)
+	}
+	if err := run("", max); err != nil {
+		t.Fatalf("当前 floor 为设计起点时应允许降级：%v", err)
+	}
+	if err := run(cur, max); exitCodeOf(err) != 3 {
+		t.Fatalf("目标早于当前 floor 应退出码 3：%v", err)
+	}
+	if err := run(old, nil); exitCodeOf(err) != 3 {
+		t.Fatalf("当前发行未声明 floor 应退出码 3：%v", err)
+	}
+	writeCompat(`{"materials":"0","collab-keys":"1","materials-upgrades":"1","relay":"1"}`)
+	if err := run(old, max); exitCodeOf(err) != 3 {
+		t.Fatalf("当前格式高于目标 formatMax 应退出码 3：%v", err)
+	}
+	if err := os.Remove(filepath.Join(srcDir, "deploy", "site", "schema-compat.json")); err != nil {
+		t.Fatal(err)
+	}
+	if err := run(old, max); exitCodeOf(err) != 3 {
+		t.Fatalf("目标源码没有 schema-compat.json 应退出码 3：%v", err)
+	}
+}

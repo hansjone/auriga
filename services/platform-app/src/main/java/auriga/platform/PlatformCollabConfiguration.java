@@ -31,15 +31,7 @@ public class PlatformCollabConfiguration {
       migration.setMaximumPoolSize(2);
       migration.setSchema("collab");
       rejectPrivilegedRole(migration, false);
-      CommonMigrations.migrate(migration, "collab");
-      CommonMigrations.serviceFlyway(
-              Flyway.configure()
-                  .dataSource(migration)
-                  .schemas("collab")
-                  .defaultSchema("collab")
-                  .locations("classpath:db/collab")
-                  .load())
-          .migrate();
+      migrateCollab(migration);
     }
     var runtime = new HikariDataSource();
     runtime.setJdbcUrl(url);
@@ -55,6 +47,20 @@ public class PlatformCollabConfiguration {
       runtime.close();
       throw e;
     }
+  }
+
+  /** 包内可见：单测覆盖 N-1 {@code *:future}。 */
+  static void migrateCollab(DataSource migration) {
+    CommonMigrations.migrate(migration, "collab");
+    CommonMigrations.serviceFlyway(
+            Flyway.configure()
+                .dataSource(migration)
+                .schemas("collab")
+                .defaultSchema("collab")
+                .locations("classpath:db/collab")
+                .ignoreMigrationPatterns(CommonMigrations.IGNORE_FUTURE_MIGRATIONS)
+                .load())
+        .migrate();
   }
 
   private static void rejectPrivilegedRole(DataSource source, boolean runtime) {

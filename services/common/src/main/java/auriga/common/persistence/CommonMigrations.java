@@ -14,6 +14,10 @@ import org.flywaydb.core.Flyway;
 public final class CommonMigrations {
   public static final String LOCATION = "classpath:auriga/db/common";
   public static final String HISTORY_TABLE = "auriga_common_schema_history";
+
+  /** N-1：库里可以有比当前代码更新的迁移记录（新版本留下的），旧进程仍须能启动；校验仍拒绝被改过的旧迁移。 */
+  public static final String IGNORE_FUTURE_MIGRATIONS = "*:future";
+
   private static final Pattern SCHEMA = Pattern.compile("^[a-z][a-z0-9_]{0,62}$");
 
   private CommonMigrations() {}
@@ -28,13 +32,15 @@ public final class CommonMigrations {
         .createSchemas(true)
         .table(HISTORY_TABLE)
         .locations(LOCATION)
+        .ignoreMigrationPatterns(IGNORE_FUTURE_MIGRATIONS)
         .load()
         .migrate();
   }
 
   /**
    * The service's own Flyway, adjusted so that a schema already holding common's objects counts as
-   * "baseline 0": every service migration (V1 and up) still runs.
+   * "baseline 0": every service migration (V1 and up) still runs. Also keeps {@link
+   * #IGNORE_FUTURE_MIGRATIONS} so N-1 回滚后旧镜像能忽略库里更新的迁移记录。
    */
   public static Flyway serviceFlyway(Flyway configured) {
     return Flyway.configure(configured.getConfiguration().getClassLoader())
@@ -42,6 +48,7 @@ public final class CommonMigrations {
         .baselineOnMigrate(true)
         .baselineVersion("0")
         .baselineDescription("auriga common objects")
+        .ignoreMigrationPatterns(IGNORE_FUTURE_MIGRATIONS)
         .load();
   }
 

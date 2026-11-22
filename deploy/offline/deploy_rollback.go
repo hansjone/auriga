@@ -6,11 +6,11 @@ package main
 // auriga_common_schema_history（collab-db、audit 在同一实例里，各库逐个读取），记录每张表的
 // 行数、最大 installed_rank 与全部行的摘要。数据目录格式版本：<数据目录>/format-versions.json。
 //
-// 自动回滚只在新版本未触碰数据时执行（切换前后迁移与格式版本都读得到且完全相同），作为
-// 长期规则（P2）；否则退出码 3 交人工。手动 rollback：当前数据与目标历史运行时记录的
-// 迁移/格式版本相同即可执行；否则需要目标声明 schemaCompatFloor 与格式上限并通过检查——
-// floor 生成与祖先判定属 2b，本步对没有声明的目标拒绝，对有声明的目标也只做格式上限检查
-// 后仍交人工（floor 的提交祖先判定未实现）。
+// 自动回滚、手动 rollback、deploy --allow-downgrade 用同一判定（rollbackDecision）：数据与目标
+// 运行时记录相同（未触碰）即允许，作为长期规则（P2）；否则检查（1）当前运行版本以及目标之后
+// 运行过的每个更新发行的 schemaCompatFloor——目标提交须不早于它们；（2）目标的 formatMax——
+// 当前数据目录格式不得超过。floor 在「较新、留下数据形态」的发行上；formatMax 在回滚目标
+// （旧代码能读的上限）上。缺声明、读不到或祖先判定失败一律退出码 3 交人工。
 //
 // 历史里的 deploy、upgrade、install（签名包基线）记录都可以作为 rollback 目标，检查相同；切到
 // 某条记录后 state.source 随之变为该记录的来源（deploy → local-deploy，其余 → signed-package）。
@@ -25,7 +25,6 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
-	"strconv"
 	"strings"
 	"time"
 )
@@ -137,29 +136,111 @@ var readDataVersions = func(s state) *dataVersions {
 	return v
 }
 
-// rollbackDecision 判断能否回到 target：now 是当前数据版本。
-func rollbackDecision(target *deployRecord, now *dataVersions) (bool, string) {
+// rollbackDecision 判断能否回到 target。
+//
+//   - now：当前数据版本
+//   - current：当前运行发行；newer：current 以外、在 target 之后运行过（可能改过数据）的历史
+//   - atOrBeforeTarget(c)：提交 c 是否为目标提交本身或其祖先（git 祖先判定由调用方注入，
+//     本函数保持纯逻辑）；为 nil 时一律按“无法判定”处理。
+//
+// 数据与目标运行时记录相同（未触碰）直接允许（P2）。否则目标必须声明 formatMax 且当前格式不超过；
+// current 与 newer 里每一条比目标新的记录（提交不是目标本身或祖先）都必须声明兼容元数据
+// （FormatMax 非空；schemaCompatFloor 空串表示设计合入起点），且目标不早于它的 floor。只看
+// current 不够：降级到 floor 较旧的提交后，之前破坏性迁移留下的库结构仍在。
+func rollbackDecision(target, current *deployRecord, newer []*deployRecord, now *dataVersions, atOrBeforeTarget func(commit string) (bool, error)) (bool, string) {
 	if !now.ok() {
 		return false, "读不到当前迁移或格式版本，无法确认数据状态：" + now.Err
+	}
+	if target == nil {
+		return false, "没有回滚目标，需人工处理"
 	}
 	if target.Migrations != nil && sameMap(target.Migrations, now.Migrations) && sameMap(target.Formats, now.Formats) {
 		return true, fmt.Sprintf("当前迁移与格式版本与 r%d 运行时记录相同，数据未被之后的版本改动", target.Seq)
 	}
-	if target.SchemaCompatFloor == "" || target.FormatMax == nil {
-		return false, fmt.Sprintf("数据已在 r%d 之后被改动，且 r%d 没有声明 schemaCompatFloor 与格式上限，拒绝自动回滚，需人工处理", target.Seq, target.Seq)
+	if current == nil {
+		return false, fmt.Sprintf("数据已在 r%d 之后被改动，且找不到当前运行版本的记录（没有 schemaCompatFloor 可对照），拒绝回滚，需人工处理", target.Seq)
+	}
+	if target.FormatMax == nil {
+		return false, fmt.Sprintf("数据已被改动，且目标 r%d 没有声明兼容元数据（schemaCompatFloor 与格式上限 formatMax），拒绝回滚，需人工处理", target.Seq)
 	}
 	for k, v := range now.Formats {
 		max, declared := target.FormatMax[k]
 		if !declared {
 			return false, fmt.Sprintf("数据目录格式 %s 不在 r%d 的格式上限声明里", k, target.Seq)
 		}
-		a, errA := strconv.Atoi(v)
-		b, errB := strconv.Atoi(max)
-		if errA != nil || errB != nil || a > b {
+		if !formatVersionAtMost(v, max) {
 			return false, fmt.Sprintf("数据目录格式 %s=%s 高于 r%d 能读的上限 %s", k, v, target.Seq, max)
 		}
 	}
-	return false, "schemaCompatFloor 的提交祖先判定属统一现场部署 2b，本版本不自动执行跨越迁移的回滚，需人工处理"
+	checked := map[int]bool{target.Seq: true}
+	var floors []string
+	for _, r := range append([]*deployRecord{current}, newer...) {
+		if r == nil || checked[r.Seq] {
+			continue
+		}
+		checked[r.Seq] = true
+		if c := comparableCommit(r); c != "" && atOrBeforeTarget != nil {
+			if ok, err := atOrBeforeTarget(c); err == nil && ok {
+				continue // 不比目标新：它的迁移目标代码都认识
+			}
+		}
+		who := fmt.Sprintf("r%d", r.Seq)
+		if r == current {
+			who = "当前运行版本 " + who
+		}
+		if r.FormatMax == nil {
+			return false, fmt.Sprintf("数据已在目标发行之后被改动，且%s 没有声明 schemaCompatFloor（兼容元数据），拒绝回滚到 r%d，需人工处理", who, target.Seq)
+		}
+		floor := r.SchemaCompatFloor
+		if floor == "" {
+			continue
+		}
+		if atOrBeforeTarget == nil {
+			return false, "缺少 schemaCompatFloor 祖先判定，拒绝回滚，需人工处理"
+		}
+		ok, err := atOrBeforeTarget(floor)
+		if err != nil {
+			return false, fmt.Sprintf("判定目标是否不早于 %s 的 schemaCompatFloor %s 失败：%v；拒绝回滚，需人工处理", who, floor, err)
+		}
+		if !ok {
+			return false, fmt.Sprintf("目标 r%d 早于%s 的 schemaCompatFloor %s，拒绝回滚，需人工处理", target.Seq, who, floor)
+		}
+		floors = append(floors, who+"="+floor)
+	}
+	if len(floors) == 0 {
+		return true, fmt.Sprintf("格式上限通过；比目标新的发行 schemaCompatFloor 均为空（设计合入起点）或不比目标新，允许回滚到 r%d", target.Seq)
+	}
+	return true, fmt.Sprintf("格式上限通过，且目标不早于 schemaCompatFloor（%s），允许回滚到 r%d", strings.Join(floors, "、"), target.Seq)
+}
+
+// newerRecords：历史里序号大于 target、且不是 current 的记录（不论成败——失败的部署也可能已迁移）。
+func newerRecords(s *state, target *deployRecord) []*deployRecord {
+	var out []*deployRecord
+	for i := range s.History {
+		r := &s.History[i]
+		if target != nil && r.Seq > target.Seq && r.Seq != s.Current {
+			out = append(out, r)
+		}
+	}
+	return out
+}
+
+// targetAncestorCheck 返回「提交 c 是否为目标提交本身或其祖先」的回调。
+func targetAncestorCheck(ctx context.Context, repo, targetCommit string, seq int) func(c string) (bool, error) {
+	return func(c string) (bool, error) {
+		if !commitPattern.MatchString(targetCommit) {
+			return false, fmt.Errorf("目标 r%d 没有可比较的提交号，无法对照 schemaCompatFloor", seq)
+		}
+		if c == targetCommit {
+			return true, nil
+		}
+		return gitIsAncestor(ctx, repo, c, targetCommit)
+	}
+}
+
+// floorAncestorCheck：回到历史记录 target 时用的祖先判定。
+func floorAncestorCheck(ctx context.Context, data string, target *deployRecord) func(c string) (bool, error) {
+	return targetAncestorCheck(ctx, sourceRepo(data), comparableCommit(target), target.Seq)
 }
 
 // siteOps 是切换与回滚用到的站点动作（测试注入）。
@@ -370,7 +451,7 @@ func doRollback(ctx context.Context, ops siteOps, cfg *siteConfig, data string, 
 	rc.Release = &receiptRelease{Seq: target.Seq, Dir: target.Release, Previous: s.Current}
 	now := readDataVersions(s)
 	rc.Data.Before = now
-	ok, reason := rollbackDecision(target, now)
+	ok, reason := rollbackDecision(target, current, newerRecords(&s, target), now, floorAncestorCheck(ctx, data, target))
 	rc.RollbackReason = reason
 	fmt.Fprintln(run.out, reason)
 	if !ok {
