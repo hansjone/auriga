@@ -1334,7 +1334,7 @@ func depsCommand(args []string) error {
 
 func depsCommandWith(args []string, inv siteInvocation, w io.Writer) error {
 	if len(args) == 0 {
-		return errors.New("用法：auriga deps status|fetch|import <目录或归档>；运行 auriga deps --help 查看说明")
+		return errors.New("用法：auriga deps status|fetch|import|baseline；运行 auriga deps --help 查看说明")
 	}
 	switch args[0] {
 	case "status":
@@ -1342,6 +1342,7 @@ func depsCommandWith(args []string, inv siteInvocation, w io.Writer) error {
 		config := f.String("config", "", "")
 		source := f.String("source", "", "")
 		asJSON := f.Bool("json", false, "")
+		client := f.Bool("client", false, "")
 		if err := f.Parse(args[1:]); err != nil {
 			return err
 		}
@@ -1351,6 +1352,15 @@ func depsCommandWith(args []string, inv siteInvocation, w io.Writer) error {
 		cfg, path, err := loadSiteConfig(*config, inv)
 		if err != nil {
 			return err
+		}
+		if *client {
+			src, err := resolveClientSource(*source, cfg, inv)
+			if err != nil {
+				return err
+			}
+			ctx, cancel := depsSignalContext()
+			defer cancel()
+			return runClientDeps(ctx, cfg, src, clientDepsRequest{Action: "status", JSON: *asJSON}, w)
 		}
 		src, err := resolveDepsSource(*source, cfg, inv)
 		if err != nil {
@@ -1377,6 +1387,7 @@ func depsCommandWith(args []string, inv siteInvocation, w io.Writer) error {
 		accept := f.Bool("accept-new-deps", false, "")
 		memory := f.Int("memory-mib", 4096, "")
 		cpus := f.Int("cpus", 2, "")
+		client := f.Bool("client", false, "")
 		if err := f.Parse(args[1:]); err != nil {
 			return err
 		}
@@ -1386,6 +1397,15 @@ func depsCommandWith(args []string, inv siteInvocation, w io.Writer) error {
 		cfg, path, err := loadSiteConfig(*config, inv)
 		if err != nil {
 			return err
+		}
+		if *client {
+			src, err := resolveClientSource(*source, cfg, inv)
+			if err != nil {
+				return err
+			}
+			ctx, cancel := depsSignalContext()
+			defer cancel()
+			return runClientDeps(ctx, cfg, src, clientDepsRequest{Action: "fetch", Accept: *accept}, w)
 		}
 		src, err := resolveDepsSource(*source, cfg, inv)
 		if err != nil {
@@ -1403,6 +1423,7 @@ func depsCommandWith(args []string, inv siteInvocation, w io.Writer) error {
 		fp := f.String("trust-fingerprint", "", "")
 		trustState := f.Bool("trust-state", false, "")
 		source := f.String("source", "", "")
+		client := f.Bool("client", false, "")
 		if err := f.Parse(args[2:]); err != nil {
 			return err
 		}
@@ -1418,8 +1439,41 @@ func depsCommandWith(args []string, inv siteInvocation, w io.Writer) error {
 		}
 		ctx, cancel := depsSignalContext()
 		defer cancel()
+		if *client {
+			src, err := resolveClientSource(*source, cfg, inv)
+			if err != nil {
+				return err
+			}
+			return runClientDeps(ctx, cfg, src, clientDepsRequest{Action: "import", From: args[1], Fingerprint: *fp, TrustState: *trustState}, w)
+		}
 		src := func() (string, error) { return resolveDepsSource(*source, cfg, inv) }
 		return depsImport(ctx, cfg, args[1], depsImportOptions{Fingerprint: *fp, TrustState: *trustState, Source: src, Out: w})
+	case "baseline":
+		f := flags("deps baseline")
+		config := f.String("config", "", "")
+		source := f.String("source", "", "")
+		asJSON := f.Bool("json", false, "")
+		client := f.Bool("client", false, "")
+		if err := f.Parse(args[1:]); err != nil {
+			return err
+		}
+		if f.NArg() != 0 {
+			return errors.New("多余 deps baseline 参数")
+		}
+		if !*client {
+			return errors.New("deps baseline 仅支持 --client（登记 Windows 系统工具现场基线）")
+		}
+		cfg, _, err := loadSiteConfig(*config, inv)
+		if err != nil {
+			return err
+		}
+		src, err := resolveClientSource(*source, cfg, inv)
+		if err != nil {
+			return err
+		}
+		ctx, cancel := depsSignalContext()
+		defer cancel()
+		return runClientDeps(ctx, cfg, src, clientDepsRequest{Action: "baseline", JSON: *asJSON}, w)
 	}
-	return fmt.Errorf("未知 deps 子命令 %s；可用 status、fetch、import", args[0])
+	return fmt.Errorf("未知 deps 子命令 %s；可用 status、fetch、import、baseline", args[0])
 }

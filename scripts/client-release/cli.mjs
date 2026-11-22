@@ -22,6 +22,9 @@ const HELP = `独立客户端发行（auriga-client.cmd / Node cli.mjs）
     --online：现场依赖锁（前端 pnpm、dsh-plugin 的 npm）与发行套件不一致时，联网只补变化的依赖，
     把基础套件（只读）派生为 --site-devkit，再按 --offline 同样的断网方式构建。Node/Python/DSH/Java 版本变化仍需维护方出新套件。
     联网步骤透传已设置的 HTTPS_PROXY/HTTP_PROXY/NO_PROXY 与 npm_config_registry；与 --offline 互斥。
+  auriga-client build --offline --site-kit --devkit <现场缓存套件> --devkit-sha256 <缓存写入时记录的清单摘要> (--verify-key <公钥> | --trust-fingerprint <指纹>) ...其余参数同 --offline
+    --site-kit：套件来自现场可写缓存（auriga deps fetch/import --client），无发行签名，按 --devkit-sha256 校验；
+    --verify-key/--trust-fingerprint 此时只用于核验签名源码。通常由 auriga.exe client build 自动传入。
   auriga-client clean-source <源码目录> [--include-ui]
     构建不再向源码树写入；本命令清理旧版本构建留下的 node_modules、dist、.pnpm-store（--include-ui 另含 clients/dsh-plugin/ui），支持超长路径，不删其他文件。
   auriga-client sign --dir <构建输出目录> --review-only
@@ -66,6 +69,16 @@ export function signCommand(o) {
       warnings: site.warnings ?? [],
       notice: `含现场联网依赖：${Array.isArray(site.added) ? site.added.length : '未知'} 项（见 site-dependencies.json）。输入摘要来自现场派生套件，不在维护方的发行签名之内，签名前请人工审阅该清单。`,
     };
+  }
+  // 构建时系统工具按现场基线（deps baseline --client）放行的，在审阅输出里提示。
+  const evidenceFile = join(dir, 'offline-evidence.json');
+  if (existsSync(evidenceFile)) {
+    const tools = JSON.parse(readFileSync(evidenceFile, 'utf8')).systemTools;
+    if (tools?.source === 'baseline')
+      review.systemToolsBaseline = {
+        ...tools,
+        notice: `系统工具摘要按现场基线放行（${tools.windowsVersion ?? '未知 Windows 版本'}，登记于 ${tools.registeredAt ?? '未知时间'}），与维护方发行清单不同，签名前请确认本机 Windows 更新属预期。`,
+      };
   }
   if (o['review-only']) {
     writeFileSync(
@@ -131,6 +144,7 @@ export async function main(argv) {
         .concat([
           ['offline', 'boolean'],
           ['online', 'boolean'],
+          ['site-kit', 'boolean'],
         ]),
     ),
     sign: {

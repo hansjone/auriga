@@ -42,3 +42,11 @@ func lockDepsCache(cache string) (func(), error) {
 		_ = f.Close()
 	}, nil
 }
+
+func inspectWindowsSecurity(string) (windowsSecurity, error) {
+	return windowsSecurity{}, errWindowsOnly
+}
+
+func siteFileSecurity(*os.File) (windowsSecurity, error) {
+	return windowsSecurity{}, errWindowsOnly
+}

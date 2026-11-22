@@ -1,6 +1,7 @@
 /** Windows devkit identity. Approval of the manifest digest is independent of the kit. */
 import { createHash } from 'node:crypto';
 import {
+  existsSync,
   lstatSync,
   readFileSync,
   readdirSync,
@@ -16,6 +17,7 @@ import { sha256File } from '../../clients/installer/runtime/verify.mjs';
 import { canonical } from '../../clients/installer/runtime/release.mjs';
 import { verifySignedInventory } from './trust.mjs';
 import { checkRequires, stampRequires } from './compat.mjs';
+import { assertToolsAllowed, readBaseline } from './baseline.mjs';
 
 export const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 function readBuildNode(root) {
@@ -103,6 +105,8 @@ export function inventory(root, prefix = '') {
         'release-public.pem',
         // 现场联网派生套件的审阅清单：含派生后的清单摘要，只能在封存之后写入。
         'site-dependencies.json',
+        // 可写缓存条目元数据（deps fetch/import），不参与套件内容摘要。
+        'auriga-origin.json',
       ].includes(path)
     )
       rows.push({
@@ -141,6 +145,9 @@ export function verifyInputs(
     // 'skip'：联网派生的基础套件。只跳过“依赖锁必须与当前源码一致”，
     // 其余签名、摘要、逐文件和系统工具校验不变；锁与构建 Node 由调用方比对。
     lockPolicy = 'strict',
+    // 现场系统工具基线：对象、基线 JSON 路径，或可写缓存目录（内含 client-tools-baseline.json）。
+    // 只放宽系统工具比对，绝不绕过非工具输入摘要。
+    toolsBaseline,
   } = {},
 ) {
   if (lockPolicy !== 'strict' && lockPolicy !== 'skip')
@@ -239,18 +246,40 @@ export function verifyInputs(
     if (!seen.has(row.path)) throw new Error(`未登记的离线输入：${row.path}`);
   if (manifest.bytes !== actual.reduce((n, f) => n + f.bytes, 0))
     throw new Error('离线输入体积不符');
+  let toolsMatch;
   if (checkTools) {
     const tools = systemTools();
-    if (canonical(tools) !== canonical(manifest.tools))
-      throw new Error(
-        'Windows 系统工具不匹配，请在匹配的 Windows 构建机准备套件',
-      );
+    const baseline = resolveToolsBaseline(toolsBaseline);
+    toolsMatch = assertToolsAllowed(tools, manifest.tools, baseline);
   }
   return {
     ...manifest,
     directory: resolve(directory),
     manifestSha256: expected,
+    ...(toolsMatch ? { toolsMatch } : {}),
   };
+}
+
+function resolveToolsBaseline(value) {
+  if (value == null || value === false) return null;
+  if (typeof value === 'object' && Array.isArray(value.tools)) return value;
+  if (typeof value === 'string') {
+    const path = resolve(value);
+    // 可写缓存目录：未登记基线时为 null（只按发行清单核对），不能把目录当文件读。
+    if (existsSync(path) && lstatSync(path).isDirectory())
+      return readBaseline(path);
+    // 直接给基线文件路径
+    const raw = JSON.parse(readFileSync(path, 'utf8'));
+    if (
+      raw?.schemaVersion !== 1 ||
+      raw.platform !== CLIENT_TARGET ||
+      !Array.isArray(raw.tools) ||
+      !raw.tools.length
+    )
+      throw new Error(`系统工具基线无效：${path}`);
+    return raw;
+  }
+  throw new Error('toolsBaseline 无效');
 }
 export function systemTools() {
   if (

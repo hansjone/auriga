@@ -19,7 +19,7 @@ import {
   resolve,
   sep,
 } from 'node:path';
-import { ROOT, BUILD_NODE, verifyInputs, physical } from './inputs.mjs';
+import { ROOT, BUILD_NODE, digest, verifyInputs, physical } from './inputs.mjs';
 import {
   canonical,
   RELEASE_KID,
@@ -45,9 +45,14 @@ const inputTrust = (o) => ({
   verifyKey: o['verify-key'],
   trustFingerprint: o['trust-fingerprint'],
 });
-// 联网派生的现场套件没有发行签名，由派生时刚算出的清单摘要校验；
+// 联网派生的现场套件（--online）与现场缓存套件（--site-kit，auriga.exe client build
+// 从 deps.cache 取用）没有发行签名，由派生时算出 / 缓存写入时记录的清单摘要校验；
 // 源码身份仍按 inputTrust 验签。
-const kitTrust = (o) => (o['site-derived'] ? {} : inputTrust(o));
+const kitTrust = (o) =>
+  o['site-derived'] || o['site-kit'] ? {} : inputTrust(o);
+// 现场系统工具基线（auriga deps baseline --client 写在 deps.cache 下）。
+const toolsBaselineOption = () =>
+  process.env.AURIGA_CLIENT_TOOLS_BASELINE || null;
 /** 路径 child 是否等于 parent 或位于其内（Windows 不区分大小写）。 */
 export function canonicalPath(path) {
   // 对已存在的最近祖先取真实路径（展开 8.3 短名、junction），再接回不存在的部分。
@@ -97,6 +102,13 @@ export function validateBuildOptions(o) {
       );
   } else if (o['site-devkit'])
     throw new Error('--site-devkit 只能与 --online 同用');
+  if (o['site-kit'] === true) {
+    if (o.online === true) throw new Error('--site-kit 只能与 --offline 同用');
+    if (!/^[a-f0-9]{64}$/.test(o['devkit-sha256'] ?? ''))
+      throw new Error(
+        '--site-kit 需要 --devkit-sha256（现场缓存写入时记录的 windows-client.json 摘要）',
+      );
+  }
   if (o.online !== true && o['base-pnpm-lock'])
     throw new Error('--base-pnpm-lock 只能与 --online 同用');
   for (const key of [
@@ -196,12 +208,10 @@ export function startOfflineBuild(options, hooks = {}) {
   if (options.online === true) throw new Error('--online 请走联网派生入口');
   validateBuildOptions(options);
   sourceIdentity(ROOT, inputTrust(options), { forBuild: true });
-  const kit = verifyInputs(
-    options.devkit,
-    options['devkit-sha256'],
-    ROOT,
-    inputTrust(options),
-  );
+  const kit = verifyInputs(options.devkit, options['devkit-sha256'], ROOT, {
+    ...kitTrust(options),
+    toolsBaseline: toolsBaselineOption(),
+  });
   launchOfflineBuild(options, kit, hooks);
 }
 /**
@@ -240,7 +250,7 @@ export function launchOfflineBuild(options, kit, hooks = {}) {
       offline: true,
       out,
       devkit: kit.directory,
-      ...(options.online === true
+      ...(options.online === true || options['site-kit'] === true
         ? { 'site-derived': true, 'devkit-sha256': kit.manifestSha256 }
         : {}),
     }),
@@ -300,6 +310,18 @@ export function launchOfflineBuild(options, kit, hooks = {}) {
     );
   return { out };
 }
+export function systemToolsEvidence(match) {
+  if (!match) return null;
+  if (match.source !== 'baseline') return { source: match.source };
+  const baseline = match.baseline;
+  return {
+    source: 'baseline',
+    baselinePath: toolsBaselineOption(),
+    windowsVersion: baseline.windowsVersion ?? null,
+    registeredAt: baseline.registeredAt ?? null,
+    toolsSha256: digest(canonical(baseline.tools)),
+  };
+}
 export async function buildWorker(optionsFile, hooks = {}) {
   const root = hooks.root ?? ROOT;
   if (
@@ -312,6 +334,7 @@ export async function buildWorker(optionsFile, hooks = {}) {
   const policy = validateBuildOptions(o);
   const kit = verifyInputs(o.devkit, o['devkit-sha256'], root, {
     ...kitTrust(o),
+    toolsBaseline: toolsBaselineOption(),
     ...(hooks.checkTools === false ? { checkTools: false } : {}),
   });
   // ROOT 是 <out>/build-src 里的副本；源码身份与“构建期间未变化”都按用户的源码目录。
@@ -413,7 +436,12 @@ export async function buildWorker(optionsFile, hooks = {}) {
         proxies: false,
         nodeNetworkGuard: true,
         deniedRequests: 0,
-        nativeTools: kit.tools,
+        nativeTools:
+          kit.toolsMatch?.source === 'baseline'
+            ? kit.toolsMatch.baseline.tools
+            : kit.tools,
+        // 收据记录系统工具依据：发行清单，或现场登记的基线（路径、Windows 版本、登记时间、摘要）。
+        systemTools: systemToolsEvidence(kit.toolsMatch),
         inputsSha256: kit.manifestSha256,
         sourceCommit: source.sourceCommit,
         sourceTreeSha256: source.sourceTreeSha256,

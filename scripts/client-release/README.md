@@ -50,6 +50,20 @@ Go→Node 互操作在 deploy/offline/desktop_source_test.go 检查。凭据、�
 
 构建先核全部输入，把 store 复制到新输出目录，以 --offline --frozen-lockfile --ignore-scripts 恢复独立工作区依赖；清空代理，Node 子进程继承拒绝 TCP/TLS/HTTP/fetch/DNS（含 Resolver）/UDP 的 preload。原生子程序为本地csc、tar、esbuild及固定Python（以 `-I -S -B` 运行stdlib wheel解包器和compileall）；生产闭包只复制本地输入，不用npm view/联网解析。成功保留offline-evidence.json和空network-denials.log，出现拒绝请求则失败。它不是恶意源码/原生程序的OS沙箱，严格断网仍建议专用Windows VM；不改系统网络/防火墙、不操作用户桌面、不启动常驻项目服务。
 
+## 现场 deps（`--client`）与文件源 / 系统工具基线
+
+现场由 Go `auriga deps … --client` 调用本目录 `site-deps.mjs`（也可直接用 Node）。可写缓存布局与服务端一致：`inputs/client/<锁摘要>/`（锁摘要即 `inputs.mjs` 的 `lockIdentity().lockSha256`）；系统工具基线写在缓存根 `client-tools-baseline.json`。
+
+- **files 源**（`deps.sources.files`）：锁定 URL 映射为 `<files>/<URL 路径>`，没有再用 `<files>/<文件名>`；路径逐段百分号解码（`%2B` → `+`），解码后为空、`.`、`..` 或含 `/ \ :`、控制字符、Windows 保留字符的一律拒绝。支持 `https://`（不得内嵌凭据；curl 只允许 https 与 https 重定向；`deps.caFile` 作 `--cacert`）与 `file://`（离线介质）。配置了 files 时不回落公网；未配置且 `allowPublic=false` 则失败并说明缺什么。摘要由调用方按锁核对。实现见 `files-source.mjs`，`prepare.mjs` 经 `createDownloader` 接入。已知限制：构建 Node（`build-node.json` 只钉版本）的 zip 摘要来自同一来源的 `SHASUMS256.txt`，没有仓库内固定摘要。
+- **npm**：`deps.sources.npm` 经 `prepareInputs(..., { npmRegistry })` 写入 `npm_config_registry`（pnpm / 插件 npm 同源），`deps.caFile` 写入 `npm_config_cafile`；`allowPublic=false` 且未配置 npm 源时 `fetch` 失败。
+- **基线**：`deps baseline --client` 登记本机 csc/tar/PowerShell 等摘要；`verifyInputs(..., { toolsBaseline })` 允许当前工具与发行清单或现场基线之一相符，不能用基线绕过非工具文件摘要；都不符时报「Windows 更新导致系统工具变化，请重新 deps baseline --client」。构建入口与 worker 都从 `AURIGA_CLIENT_TOOLS_BASELINE`（`auriga.exe` 设为 `deps.cache`，未登记时只按清单）读取；所用依据写入 `offline-evidence.json` 的 `systemTools`，`sign --review-only` 输出 `systemToolsBaseline` 提示。
+- **缓存条目信任**：`fetch`/`import` 把 `site-dependencies.json`（来源、锁摘要、`manifestSha256`）与 `auriga-origin.json` 写进暂存目录后整体改名落位；之后命中缓存时当前 `windows-client.json` 必须等于记录的 `manifestSha256`，缺记录或不符即拒绝。缓存目录本身的管理员 ACL 与并发锁由 Go 侧校验。
+- **套件独立信任**：`deps.kits` 套件必须带 `trustFingerprint`，用 `trust.mjs` 验发行签名并核对 `client-inputs-release.json` 绑定的清单摘要与锁摘要；不接受未签名套件或套件自带公钥自证。
+- **import**：先复制到 `<cache>/_client-import-staging` 再校验副本（逐文件、锁摘要一致；给了 `--trust-fingerprint` 时另验签），失败不留半成品。
+- **build --offline --site-kit**：现场缓存套件无发行签名，按 `--devkit-sha256`（缓存记录的清单摘要）校验套件，`--verify-key`/`--trust-fingerprint` 只核签名源码；worker 同样以该摘要复核。
+- **acceptNewDeps**：缓存与套件都未命中时，`fetch` 在 `acceptNewDeps=false` 下拒绝。
+- 解析顺序：可写缓存 → `deps.kits` → 缺失（`resolve-devkit`）。单测：`node --test scripts/client-release/site-deps.test.mjs`。
+
 ## 联网补依赖（build --online）
 
 现场只改了前端 / workspace 的 pnpm 依赖，或 dsh-plugin 的 npm 依赖，而发行套件里没有这些新包时，`--offline` 会因“依赖锁不匹配”拒绝。联网构建机可以改用：

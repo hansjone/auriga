@@ -155,10 +155,11 @@ func stubTrustedSource(t *testing.T) {
 
 func TestSiteConfigFilePermissions(t *testing.T) {
 	stubSiteOwner(t, nil)
-	if err := checkSiteConfigInfo("/etc/auriga/site.json", fakeInfo{mode: 0644}); err != nil {
+	// POSIX 权限规则在全平台单测；Windows ACL 见 TestWindowsSiteACLView。
+	if err := checkUnixSiteConfigInfo("/etc/auriga/site.json", fakeInfo{mode: 0644}); err != nil {
 		t.Fatal(err)
 	}
-	if err := checkSiteConfigInfo("/etc/auriga/site.json", fakeInfo{mode: 0600}); err != nil {
+	if err := checkUnixSiteConfigInfo("/etc/auriga/site.json", fakeInfo{mode: 0600}); err != nil {
 		t.Fatal(err)
 	}
 	for _, c := range []struct {
@@ -171,12 +172,16 @@ func TestSiteConfigFilePermissions(t *testing.T) {
 		{fakeInfo{mode: 0755}, "0600 或 0644"},
 		{fakeInfo{mode: os.ModeDir | 0755}, "普通文件"},
 	} {
-		if err := checkSiteConfigInfo("/etc/auriga/site.json", c.info); err == nil || !strings.Contains(err.Error(), c.want) {
+		check := checkUnixSiteConfigInfo
+		if c.info.Mode().IsDir() {
+			check = checkSiteConfigInfo
+		}
+		if err := check("/etc/auriga/site.json", c.info); err == nil || !strings.Contains(err.Error(), c.want) {
 			t.Errorf("%+v：期望 %q，得到 %v", c.info, c.want, err)
 		}
 	}
 	stubSiteOwner(t, errors.New("祖先可写"))
-	if err := checkSiteConfigInfo("/etc/auriga/site.json", fakeInfo{mode: 0644}); err == nil || !strings.Contains(err.Error(), "祖先可写") {
+	if err := checkUnixSiteConfigInfo("/etc/auriga/site.json", fakeInfo{mode: 0644}); err == nil || !strings.Contains(err.Error(), "祖先可写") {
 		t.Errorf("祖先目录不受信应拒绝：%v", err)
 	}
 }
