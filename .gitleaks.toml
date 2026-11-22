@@ -78,3 +78,12 @@ targetRules = ["private-ipv4"]
 condition = "AND"
 commits = ["b723942aaea01f855e99dba26255b3594a54de89"]
 paths = ['''(^|/)docs/dev/site-deploy.zh.md$''']
+
+# 第 7 步收据脱敏测试故意构造的假私钥块，正文是固定的可识别假值，用来断言收据里不出现。
+[[allowlists]]
+description = "Synthetic private-key blocks in receipt redaction tests"
+targetRules = ["private-key"]
+condition = "AND"
+paths = ['''(^|/)deploy/offline/deploy_workflow_test\.go$''']
+regexTarget = "secret"
+regexes = ['''(SITEPRIVKEYMATERIAL99|MULTILINEKEYLEAK|NOSPACEKEYLEAK|UNPAIREDLEAK|TRUNCATEDKEYLEAK)''']
