@@ -291,6 +291,22 @@ func TestFingerprintGoDepsErrorsAndDryRun(t *testing.T) {
 	}
 }
 
+func TestDigestGoProgramExternalOnly(t *testing.T) {
+	_, fc := fingerprintFixture(t)
+	// 纯外部模块程序（如 auriga-network-broker 编译 github.com/nats-io/nats-server/v2）：
+	// 所有包都在 GOROOT 或模块缓存中，没有源码树内目录，应返回稳定指纹而不是报错。
+	fc.GoDeps["bifrost"] = []string{"/usr/local/go/src/fmt", "/tmp/modules/github.com/nats-io/nats-server/v2@v2.12.6"}
+	a := fingerprintsOf(t, fc)["bifrost"]
+	b := fingerprintsOf(t, fc)["bifrost"]
+	if a == "" || a != b {
+		t.Fatalf("纯外部模块程序指纹应非空且稳定：a=%q b=%q", a, b)
+	}
+	fc.GoDeps["bifrost"] = nil
+	if _, err := computeAllFingerprints(context.Background(), fc); err == nil {
+		t.Fatal("go list 返回空切片时仍应失败")
+	}
+}
+
 func TestExpandSelectedServicesSharedInput(t *testing.T) {
 	spec := &siteServices{
 		Images: map[string]siteImage{
