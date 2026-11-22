@@ -3,7 +3,10 @@
 services:
   edge:
     volumes:
-      - ${AURIGA_DATA_ROOT}.oneclick/release/provenance.json:/srv/auriga/static/admin/provenance.json:ro
+      # provenance.json 在发行根（deploy-nas 的上一级）：签名包为 <数据目录>.oneclick/release，
+      # deploy 为 auriga-releases/<序号>/。AURIGA_PACKAGE_ROOT 由 lib.sh 按 NAS_ROOT 导出，
+      # 手工运行脚本、回滚到旧序号后都指向当前所用发行的文件。
+      - ${AURIGA_PACKAGE_ROOT:?AURIGA_PACKAGE_ROOT is set by lib.sh}/provenance.json:/srv/auriga/static/admin/provenance.json:ro
     ports:
       - '${AURIGA_NAS_PORTAL_TARGET_PORT}:${AURIGA_NAS_PORTAL_TARGET_PORT}'
       - '${AURIGA_NAS_ADMIN_TARGET_PORT}:${AURIGA_NAS_ADMIN_TARGET_PORT}'

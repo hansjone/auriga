@@ -1,0 +1,162 @@
+{
+  "schemaVersion": 1,
+  "images": {
+    "agent": {
+      "artifacts": ["auriga-agent"]
+    },
+    "bifrost": {
+      "artifacts": ["bifrost"]
+    },
+    "edge": {
+      "artifacts": [
+        "auriga-edge",
+        "auriga-ai-gateway",
+        "auriga-egress",
+        "auriga-network-broker",
+        "auriga-network-probe",
+        "auriga-panel",
+        "web"
+      ]
+    },
+    "platform": {
+      "artifacts": ["platform.jar"]
+    },
+    "operator": {
+      "artifacts": ["operator-runtime"]
+    },
+    "auriga-nas-bootstrap": {
+      "pseudo": true,
+      "artifacts": ["auriga-nas-bootstrap"]
+    },
+    "runtime-release": {
+      "pseudo": true,
+      "artifacts": ["runtime-release"]
+    }
+  },
+  "artifacts": {
+    "auriga-agent": {
+      "inputSets": ["go-auriga-agent", "go-mod-files", "deps-go", "tool-go", "assemble-agent"]
+    },
+    "bifrost": {
+      "inputSets": ["go-bifrost", "go-mod-files", "deps-go", "tool-go", "assemble-bifrost"]
+    },
+    "auriga-edge": {
+      "inputSets": ["go-auriga-edge", "go-mod-files", "deps-go", "tool-go", "assemble-edge"]
+    },
+    "auriga-ai-gateway": {
+      "inputSets": ["go-auriga-ai-gateway", "go-mod-files", "deps-go", "tool-go", "assemble-edge"]
+    },
+    "auriga-egress": {
+      "inputSets": ["go-auriga-egress", "go-mod-files", "deps-go", "tool-go", "assemble-edge"]
+    },
+    "auriga-network-broker": {
+      "inputSets": ["go-auriga-network-broker", "go-mod-files", "deps-go", "tool-go", "assemble-edge"]
+    },
+    "auriga-network-probe": {
+      "inputSets": ["go-auriga-network-probe", "go-mod-files", "deps-go", "tool-go", "assemble-edge"]
+    },
+    "auriga-panel": {
+      "inputSets": ["go-auriga-panel", "go-mod-files", "deps-go", "tool-go", "assemble-edge"]
+    },
+    "web": {
+      "inputSets": ["web-pack", "deps-web", "tool-web", "assemble-edge"]
+    },
+    "platform.jar": {
+      "inputSets": ["java-pack", "deps-java", "tool-java", "assemble-platform"]
+    },
+    "operator-runtime": {
+      "inputSets": ["assemble-operator"]
+    },
+    "auriga-nas-bootstrap": {
+      "inputSets": ["go-auriga-nas-bootstrap", "go-mod-files", "deps-go", "tool-go"]
+    },
+    "runtime-release": {
+      "inputSets": ["go-runtime-release", "go-mod-files", "deps-go", "tool-go"]
+    }
+  },
+  "inputSets": {
+    "go-auriga-agent": { "kind": "go-program", "program": "auriga-agent" },
+    "go-bifrost": { "kind": "go-program", "program": "bifrost" },
+    "go-auriga-edge": { "kind": "go-program", "program": "auriga-edge" },
+    "go-auriga-ai-gateway": { "kind": "go-program", "program": "auriga-ai-gateway" },
+    "go-auriga-egress": { "kind": "go-program", "program": "auriga-egress" },
+    "go-auriga-network-broker": { "kind": "go-program", "program": "auriga-network-broker" },
+    "go-auriga-network-probe": { "kind": "go-program", "program": "auriga-network-probe" },
+    "go-auriga-panel": { "kind": "go-program", "program": "auriga-panel" },
+    "go-auriga-nas-bootstrap": { "kind": "go-program", "program": "auriga-nas-bootstrap" },
+    "go-runtime-release": { "kind": "go-program", "program": "runtime-release" },
+    "go-mod-files": { "kind": "go-mod-files" },
+    "web-pack": { "kind": "pack-list", "file": "deploy/site/input-sets/web-pack.list" },
+    "java-pack": { "kind": "pack-list", "file": "deploy/site/input-sets/java-pack.list" },
+    "deps-go": { "kind": "deps-lock", "ecosystem": "go" },
+    "deps-web": { "kind": "deps-lock", "ecosystem": "web" },
+    "deps-java": { "kind": "deps-lock", "ecosystem": "java" },
+    "tool-go": { "kind": "tool-image", "role": "tool-go" },
+    "tool-web": { "kind": "tool-image", "role": "tool-web" },
+    "tool-java": { "kind": "tool-image", "role": "tool-java" },
+    "assemble-agent": { "kind": "assemble", "service": "agent" },
+    "assemble-bifrost": { "kind": "assemble", "service": "bifrost" },
+    "assemble-edge": { "kind": "assemble", "service": "edge" },
+    "assemble-platform": { "kind": "assemble", "service": "platform" },
+    "assemble-operator": { "kind": "assemble", "service": "operator" }
+  },
+  "ignore": [
+    ".agents/**",
+    ".git*",
+    ".github/**",
+    ".gitignore",
+    ".gitattributes",
+    ".editorconfig",
+    ".nvmrc",
+    ".vscode/**",
+    ".idea/**",
+    "*.md",
+    "**/*.md",
+    "docs/**",
+    "LICENSE*",
+    "NOTICE*",
+    "CHANGELOG*",
+    "AGENTS.md",
+    "CLAUDE.md",
+    "README*",
+    "auriga",
+    "mvnw.cmd",
+    "assets/**",
+    "e2e/**",
+    "tools/**",
+    "ops/**",
+    "examples/**",
+    "fixtures/**",
+    "misc/**",
+    "vendor/**",
+    "seed-resources/**",
+    "eslint.config.mjs",
+    "scripts/**",
+    "deploy/offline/**",
+    "deploy/forgejo/**",
+    "deploy/compose/**",
+    "deploy/client/**",
+    "deploy/site/format-versions.json",
+    "deploy/site/schema-compat.json",
+    "deploy/site/services.json",
+    "deploy/site/input-sets/**",
+    "deploy/nas/**",
+    "deploy/bootstrap/**",
+    "third_party/**",
+    "package-lock.json",
+    "**/.DS_Store",
+    "**/node_modules/**",
+    "**/target/**",
+    "**/dist/**",
+    "**/*_test.go",
+    "**/*Test.java",
+    "**/*Tests.java",
+    "**/*.test.ts",
+    "**/*.test.js",
+    "**/*.test.mjs",
+    "**/*.spec.ts",
+    "**/testdata/**",
+    "**/src/test/**",
+    "**/test/**"
+  ]
+}

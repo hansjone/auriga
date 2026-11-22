@@ -336,21 +336,127 @@ func stageService(ctx context.Context, svc string, s recipeService, source, arti
 	return nil
 }
 
-// assemblyDigest 是装配摘要的最小实现（设计 D6）：装配上下文的全部文件（产物、系统输入、
-// 源码文件，按快照口径）+ 基础镜像固定 digest + Dockerfile.assembly + 该服务暂存清单。
-// 任何一项变化都换镜像；与当前版本相同时跳过构建与切换。
-func assemblyDigest(ctx context.Context, svc string, r *deployRecipe, scratch string) (string, error) {
+// assemblyParts 是装配摘要的分项（设计 D6）：任一项变化即切换，收据写明触发项。
+type assemblyParts struct {
+	Total            string `json:"total"`
+	ArtifactsTree    string `json:"artifactsTree"`
+	BaseImage        string `json:"baseImage"`
+	SystemInputs     string `json:"systemInputs"`
+	DockerfileTarget string `json:"dockerfileTarget"`
+	StageManifest    string `json:"stageManifest"`
+}
+
+// assemblyDigest 计算装配摘要与分项。
+func assemblyDigest(ctx context.Context, svc string, r *deployRecipe, scratch string) (assemblyParts, error) {
+	var zero assemblyParts
 	tree, err := directorySnapshotSHA256(ctx, scratch)
 	if err != nil {
-		return "", err
+		return zero, err
 	}
 	stage, err := json.Marshal(r.Services[svc])
 	if err != nil {
-		return "", err
+		return zero, err
+	}
+	sysSum := "none"
+	if st, err := os.Lstat(filepath.Join(scratch, "system")); err == nil && st.IsDir() {
+		sysSum, err = directorySnapshotSHA256(ctx, filepath.Join(scratch, "system"))
+		if err != nil {
+			return zero, err
+		}
+	}
+	targetSum := dockerfileTargetDigest(r.dockerfile, svc)
+	parts := assemblyParts{
+		ArtifactsTree:    tree,
+		BaseImage:        r.Images["base-"+svc],
+		SystemInputs:     sysSum,
+		DockerfileTarget: targetSum,
+		StageManifest:    sha256Hex(stage),
 	}
 	h := sha256.New()
-	fmt.Fprintf(h, "service %s\ncontext %s\nbase %s\ndockerfile %s\nstage %s\n", svc, tree, r.Images["base-"+svc], sha256Hex(r.dockerfile), sha256Hex(stage))
-	return hex.EncodeToString(h.Sum(nil)), nil
+	fmt.Fprintf(h, "service %s\nartifacts %s\nbase %s\nsystem %s\ndockerfile-target %s\nstage %s\n",
+		svc, parts.ArtifactsTree, parts.BaseImage, parts.SystemInputs, parts.DockerfileTarget, parts.StageManifest)
+	parts.Total = hex.EncodeToString(h.Sum(nil))
+	return parts, nil
+}
+
+// dockerfileTargetDigest 是 Dockerfile.assembly 中与该服务有关部分的摘要：第一个 FROM 之前的
+// 全局段（ARG 默认值）+ “FROM … AS <svc>” 到下一个 FROM 之前的目标段。目标段若引用了其它阶段
+// （FROM <阶段>、COPY/RUN --from 或 --mount from=），无法只看本段，退回整个文件的摘要（宁可多切换）。
+// 找不到目标段同样用整个文件。
+func dockerfileTargetDigest(dockerfile []byte, svc string) string {
+	lines := strings.Split(string(dockerfile), "\n")
+	isFrom := func(line string) bool {
+		f := strings.Fields(line)
+		return len(f) > 0 && strings.EqualFold(f[0], "FROM")
+	}
+	first, start := -1, -1
+	for i, line := range lines {
+		if !isFrom(line) {
+			continue
+		}
+		if first < 0 {
+			first = i
+		}
+		f := strings.Fields(line)
+		if len(f) >= 4 && strings.EqualFold(f[len(f)-2], "AS") && strings.EqualFold(f[len(f)-1], svc) {
+			start = i
+			break
+		}
+	}
+	if start < 0 {
+		return sha256Hex(dockerfile)
+	}
+	end := len(lines)
+	for i := start + 1; i < len(lines); i++ {
+		if isFrom(lines[i]) {
+			end = i
+			break
+		}
+	}
+	segment := strings.Join(lines[start:end], "\n")
+	from := strings.Fields(lines[start])
+	image := from[len(from)-3]
+	lower := strings.ToLower(segment)
+	if !strings.HasPrefix(image, "${") || strings.Contains(lower, "--from") || strings.Contains(lower, "from=") {
+		return sha256Hex(dockerfile)
+	}
+	return sha256Hex([]byte(strings.Join(lines[:first], "\n") + "\n--target--\n" + segment))
+}
+
+// assemblyChangeReason 对比新旧分项，返回中文触发说明。
+func assemblyChangeReason(oldTotal string, oldParts *assemblyParts, cur assemblyParts) string {
+	if oldTotal == "" {
+		return "上一版没有装配摘要"
+	}
+	if oldParts == nil {
+		if oldTotal == cur.Total {
+			return ""
+		}
+		return "装配摘要变化（产物、系统输入、基础镜像、Dockerfile 或暂存清单）"
+	}
+	if oldParts.Total == cur.Total {
+		return ""
+	}
+	var triggers []string
+	if oldParts.ArtifactsTree != cur.ArtifactsTree {
+		triggers = append(triggers, "产物树")
+	}
+	if oldParts.BaseImage != cur.BaseImage {
+		triggers = append(triggers, "基础镜像")
+	}
+	if oldParts.SystemInputs != cur.SystemInputs {
+		triggers = append(triggers, "系统输入")
+	}
+	if oldParts.DockerfileTarget != cur.DockerfileTarget {
+		triggers = append(triggers, "Dockerfile 目标段")
+	}
+	if oldParts.StageManifest != cur.StageManifest {
+		triggers = append(triggers, "暂存清单")
+	}
+	if len(triggers) == 0 {
+		return "装配摘要变化"
+	}
+	return "装配摘要变化：" + strings.Join(triggers, "、")
 }
 
 // assembleImage 用 CLI 固定的参数装配一个镜像，返回镜像 ID。

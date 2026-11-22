@@ -2,7 +2,7 @@
 set -eu
 
 if [ "$#" -lt 2 ] || [ "$#" -gt 3 ]; then
-    echo "usage: $0 prepare|build|locks ABSOLUTE_EMPTY_OUTPUT_DIRECTORY [PROGRAM]" >&2
+    echo "usage: $0 prepare|build|locks|deps ABSOLUTE_EMPTY_OUTPUT_DIRECTORY [PROGRAM]" >&2
     exit 2
 fi
 mode=$1
@@ -25,13 +25,13 @@ case "$mode" in
             *) echo "unknown NAS Go program: $program" >&2; exit 2 ;;
         esac
         ;;
-    locks)
+    locks|deps)
         if [ "$program" != all ]; then
-            echo "locks takes no program" >&2
+            echo "$mode takes no program" >&2
             exit 2
         fi
         ;;
-    *) echo "choose prepare, build or locks" >&2; exit 2 ;;
+    *) echo "choose prepare, build, locks or deps" >&2; exit 2 ;;
 esac
 mkdir -p "$out"
 if [ -n "$(ls -A "$out")" ]; then
@@ -75,6 +75,11 @@ record_run() (
     export GOWORK="$workspace"
     if [ "$mode" = prepare ]; then
         go list -deps "$@" >/dev/null
+    elif [ "$mode" = deps ]; then
+        # Input fingerprint (site deploy D6): every package directory the program
+        # compiles, offline against the verified dependency inputs. Embedded files
+        # always live under their package directory, which the CLI hashes whole.
+        go list -deps -f "$output {{.Dir}}" "$@" >>"$out/deps.txt"
     else
         go build -trimpath -o "$out/$output" "$@"
     fi
@@ -101,7 +106,7 @@ else
     export GOPROXY="file://$inputs/download" GOSUMDB=off
 fi
 snapshot >"$scratch/source-locks"
-if [ "$mode" = build ]; then
+if [ "$mode" != prepare ]; then
     cmp "$scratch/source-locks" "$inputs/source-locks.sha256"
 fi
 
@@ -132,7 +137,7 @@ if [ "$mode" = prepare ]; then
     (cd "$out" &&
         find download -type f -print | LC_ALL=C sort | xargs sha256sum > SHA256SUMS &&
         sha256sum source-locks.sha256 >> SHA256SUMS)
-else
+elif [ "$mode" = build ]; then
     if [ "$program" = all ]; then
         (cd "$out" && sha256sum auriga-* bifrost runtime-release > SHA256SUMS)
     else

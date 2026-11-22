@@ -86,9 +86,7 @@ func buildRelease(root, stage string, r release, options buildOptions) error {
 			return err
 		}
 	}
-	if err := jsonFile(filepath.Join(output, "web/admin/provenance.json"), options.Info, 0644); err != nil {
-		return err
-	}
+	// provenance.json 由发行目录提供并在运行时挂载，不再打进 edge 镜像（设计 D6 / 2c）。
 	for _, service := range []string{"platform", "edge", "agent", "bifrost", "operator"} {
 		base := b.Bases[service]
 		if !options.Offline && !immutable.MatchString(base) {

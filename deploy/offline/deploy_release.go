@@ -41,6 +41,10 @@ type deployRecord struct {
 	ReleaseSums string            `json:"releaseSums"`
 	Images      map[string]string `json:"images"`
 	Assembly    map[string]string `json:"assembly,omitempty"`
+	// AssemblyParts 各镜像装配分项，供下次对比触发项（2c）。
+	AssemblyParts map[string]assemblyParts `json:"assemblyParts,omitempty"`
+	// Fingerprints 产物输入指纹（2c）。
+	Fingerprints map[string]string `json:"fingerprints,omitempty"`
 	// 部署成功后读到的迁移版本与数据目录格式版本：之后回滚到本条时用来判断数据是否
 	// 仍与本条运行时相同。
 	Migrations map[string]string `json:"migrations,omitempty"`
@@ -82,14 +86,16 @@ func legacyReleaseDir(data string) string {
 
 // releaseManifest 写在发行目录的 release.json 与 deploy-nas/.auriga-release（status.sh 显示）。
 type releaseManifest struct {
-	Schema            int               `json:"schemaVersion"`
-	Seq               int               `json:"seq"`
-	Source            deploySource      `json:"source"`
-	Images            map[string]string `json:"images"`
-	Assembly          map[string]string `json:"assembly"`
-	SchemaCompatFloor *string           `json:"schemaCompatFloor"`
-	FormatMax         map[string]string `json:"formatMax"`
-	CreatedAt         string            `json:"createdAt"`
+	Schema            int                      `json:"schemaVersion"`
+	Seq               int                      `json:"seq"`
+	Source            deploySource             `json:"source"`
+	Images            map[string]string        `json:"images"`
+	Assembly          map[string]string        `json:"assembly"`
+	AssemblyParts     map[string]assemblyParts `json:"assemblyParts,omitempty"`
+	Fingerprints      map[string]string        `json:"fingerprints,omitempty"`
+	SchemaCompatFloor *string                  `json:"schemaCompatFloor"`
+	FormatMax         map[string]string        `json:"formatMax"`
+	CreatedAt         string                   `json:"createdAt"`
 }
 
 func releasesRoot(data string) string {
@@ -137,7 +143,8 @@ func imageTag(svc string, seq int) string {
 
 // writeReleaseDir 在暂存目录写完整发行，写好本地 SHA256SUMS 后一次 rename 到 <序号>；
 // 返回发行目录与其 SHA256SUMS 文件的摘要（记进 state 的 releaseSums）。
-func writeReleaseDir(ctx context.Context, data string, seq int, source, goOut string, m releaseManifest) (string, string, error) {
+// artifactsOut 是 go/web/java 产物根（含各生态子目录），provenance 为运行时挂载的版本来源。
+func writeReleaseDir(ctx context.Context, data string, seq int, source, goOut, artifactsOut string, m releaseManifest, prov *provenance, fpReport *fingerprintReport) (string, string, error) {
 	root := releasesRoot(data)
 	if err := os.MkdirAll(root, 0755); err != nil {
 		return "", "", err
@@ -181,6 +188,31 @@ func writeReleaseDir(ctx context.Context, data string, seq int, source, goOut st
 				return fail(err)
 			}
 		}
+	}
+	if artifactsOut != "" {
+		if err := os.Mkdir(filepath.Join(tmp, "artifacts"), 0755); err != nil {
+			return fail(err)
+		}
+		for _, kind := range []string{"go", "web", "java"} {
+			src := filepath.Join(artifactsOut, kind)
+			if _, err := os.Lstat(src); err != nil {
+				continue
+			}
+			if err := copyTreeContext(ctx, src, filepath.Join(tmp, "artifacts", kind)); err != nil {
+				return fail(fmt.Errorf("写入 artifacts/%s：%w", kind, err))
+			}
+		}
+	}
+	if prov != nil {
+		if err := jsonFile(filepath.Join(tmp, "provenance.json"), prov, 0644); err != nil {
+			return fail(err)
+		}
+	}
+	if fpReport != nil {
+		if err := writeFingerprintReport(filepath.Join(tmp, "fingerprints.json"), fpReport); err != nil {
+			return fail(err)
+		}
+		m.Fingerprints = fingerprintMap(fpReport)
 	}
 	m.Schema, m.Seq = 1, seq
 	if err := jsonFile(filepath.Join(tmp, "release.json"), m, 0644); err != nil {

@@ -1,0 +1,55 @@
+{
+  "schemaVersion": 1,
+  "programs": {
+    "auriga-edge": {
+      "directory": "infra/edge",
+      "workspace": "infra/go.work",
+      "packages": ["."]
+    },
+    "auriga-ai-gateway": {
+      "directory": "infra/ai-gateway",
+      "workspace": "infra/go.work",
+      "packages": ["."]
+    },
+    "auriga-network-broker": {
+      "directory": "infra/ai-gateway",
+      "workspace": "infra/go.work",
+      "packages": ["github.com/nats-io/nats-server/v2"]
+    },
+    "bifrost": {
+      "directory": "infra/ai-gateway",
+      "workspace": "infra/go.work",
+      "packages": ["./cmd/relay-backend"]
+    },
+    "auriga-egress": {
+      "directory": "infra/egress",
+      "workspace": "infra/go.work",
+      "packages": ["."]
+    },
+    "auriga-agent": {
+      "directory": "infra/agent",
+      "workspace": "infra/go.work",
+      "packages": ["."]
+    },
+    "runtime-release": {
+      "directory": "infra",
+      "workspace": "infra/go.work",
+      "packages": ["./agent/cmd/runtime-release"]
+    },
+    "auriga-network-probe": {
+      "directory": "deploy/bootstrap",
+      "workspace": "off",
+      "packages": ["./cmd/network-probe"]
+    },
+    "auriga-panel": {
+      "directory": "deploy/bootstrap",
+      "workspace": "off",
+      "packages": ["./cmd/panel"]
+    },
+    "auriga-nas-bootstrap": {
+      "directory": "deploy/nas/bootstrap",
+      "workspace": "off",
+      "packages": ["."]
+    }
+  }
+}

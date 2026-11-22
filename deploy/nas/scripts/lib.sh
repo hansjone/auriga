@@ -19,6 +19,9 @@ nas_scripts_dir() {
 
 NAS_ROOT=$(nas_scripts_dir)
 export NAS_ROOT
+# Release root (parent of deploy-nas); oneclick-compose.yml mounts its provenance.json.
+AURIGA_PACKAGE_ROOT=$(dirname -- "$NAS_ROOT")
+export AURIGA_PACKAGE_ROOT
 shared_present() {
   # A lost source after activation must fail validation, never look like a
   # deployment that has never enabled shared mode. Keep every old artifact.

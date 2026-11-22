@@ -61,6 +61,14 @@ type receiptImage struct {
 	NewID    string `json:"newId,omitempty"`
 	Tag      string `json:"tag,omitempty"`
 	Assembly string `json:"assembly,omitempty"`
+	Triggers string `json:"triggers,omitempty"` // 装配切换触发项说明
+}
+
+type receiptArtifact struct {
+	Name   string `json:"name"`
+	Action string `json:"action"` // built | reused | skipped
+	Reason string `json:"reason,omitempty"`
+	Digest string `json:"digest,omitempty"`
 }
 
 type receiptRelease struct {
@@ -91,12 +99,14 @@ type siteReceipt struct {
 		Sources map[string]string `json:"sources,omitempty"`
 		NewDeps string            `json:"newDeps"`
 	} `json:"deps"`
-	BuildImages          []resolvedImage `json:"buildImages"`
-	Images               []receiptImage  `json:"images"`
-	SwitchedServices     []string        `json:"switchedServices"`
-	SwitchMode           string          `json:"switchMode,omitempty"`
-	MixedVersions        string          `json:"mixedVersions"`
-	OrchestrationChanged *bool           `json:"orchestrationChanged"`
+	BuildImages          []resolvedImage   `json:"buildImages"`
+	Artifacts            []receiptArtifact `json:"artifacts,omitempty"`
+	Fingerprints         map[string]string `json:"fingerprints,omitempty"`
+	Images               []receiptImage    `json:"images"`
+	SwitchedServices     []string          `json:"switchedServices"`
+	SwitchMode           string            `json:"switchMode,omitempty"`
+	MixedVersions        string            `json:"mixedVersions"`
+	OrchestrationChanged *bool             `json:"orchestrationChanged"`
 	Data                 struct {
 		Before *dataVersions `json:"before"`
 		After  *dataVersions `json:"after"`
