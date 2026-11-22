@@ -435,14 +435,14 @@ func init() {
 		summary: "在本机用源码快照构建并部署（设计 docs/dev/site-deploy.zh.md D10）。需要 root：root 直接运行，或经 sudo 的受限调用（工作流）。",
 		notes: []string{
 			"经 sudo 调用（环境里有 SUDO_UID）：调用者是 site.json 登记的运行器账户 server.runner 时一律受限，不能用 --operator；其他账户（含 sudo -i 的管理员）默认也受限，显式 --operator 才按人工 root 处理（要求已登记 server.runner）。受限时只接受一个 40 位小写十六进制提交号与 --full、--services、--dry-run、--json、--backup-db，其余参数（含 --config、--source、--allow-downgrade、--operator）一律拒绝。",
-			"快进：受限调用只允许部署当前运行提交的后代（在 root 自己 fetch 的仓库里 merge-base --is-ancestor，同一提交可重新部署）；首装不限。root 人工部署非后代提交须 --allow-downgrade，先做与 rollback 相同的数据检查（数据未被比目标更新的版本触碰才允许，否则退出码 3）。",
+			"快进：受限调用只允许部署当前运行提交的后代（在 root 自己 fetch 的仓库里 merge-base --is-ancestor，同一提交可重新部署）；首装不限。root 人工部署非后代提交须 --allow-downgrade，先做与 rollback 相同的数据检查（未触碰或 floor+FormatMax 通过，否则退出码 3）。",
 			"源码：给了提交号就从 source.git 远端 fetch 到数据目录同级的 auriga-source.git，提交必须在某个 allowedRefs 上，git archive 导出（不读 root 的系统/全局 git 配置）；否则用 source.dir 或 --source（都须 root 所有、组和其他用户不可写）。",
 			"签名：source.git.requireSignedCommits=true 时，导出前用 trustedSigners（root 所有的公钥文件：PGP 公钥块或 ssh 公钥行）在隔离环境里校验该提交的 gpg 或 ssh 签名，未签名、签名者不受信、x509 签名一律拒绝（退出码 1）；此时源码目录模式也拒绝。",
 			"签名包安装的站点也可以 deploy：第一次 deploy 前当前安装包登记为一条 install 历史，切换失败时可自动回滚到它。",
 			"配方：一律用源码快照里的 deploy/nas/offline-build（deploy-recipe.json 声明暂存清单、固定 digest 与 CLI 能力版本，能力版本不符时先升级 CLI）；Dockerfile 拒绝 syntax/escape 解析器指令（含 BOM、// 与 JSON 变体），FROM 只能是固定 digest、${<SVC>_BASE} 或已声明阶段，拒绝 ADD <URL> 与引用外部镜像的 --from；构建前比较源码锁清单与依赖输入。",
 			"没有 state 时执行首次安装（复用 install 步骤，访问方式取 server.install）；有带 trustFingerprint 的套件就钉定发行钥，否则标记未钉定。",
 			"再次部署：全量构建，装配摘要与当前一致的镜像跳过切换，然后完整启动（render → preflight → start）；新发行写入 auriga-releases/<序号>/，镜像加打 auriga/<服务>:r<序号>，保留 server.keepHistory 份（默认 3）。",
-			"切换失败时：先停掉新版本会写数据的服务（platform、collab、edge 等），再读迁移与数据目录格式版本，与切换前相同、上一版是成功记录且其发行目录与 state 锚定的 releaseSums 一致才自动回滚（退出码 2），否则退出码 3 交人工；首装失败退出码 1 并保留现场。",
+			"切换失败时：先停掉新版本会写数据的服务（platform、collab、edge 等），再读迁移与数据目录格式版本；与切换前相同（数据未触碰），或上一版不早于新发行的 schemaCompatFloor 且当前格式不高于上一版的 formatMax，并且上一版是成功记录、其发行目录与 state 锚定的 releaseSums 一致，才自动回滚（退出码 2），否则退出码 3 交人工；首装失败退出码 1 并保留现场。",
 			"每次写 <logs.dir>/<时间>-deploy.log 与同名 .json 收据（脱敏），--json 时标准输出只打印收据。",
 		},
 		docs: merge(buildDocs, map[string]string{
@@ -450,7 +450,7 @@ func init() {
 			"services":        "只构建这些镜像（逗号分隔：platform,edge,agent,bifrost,operator），其余沿用当前；切换仍完整启动；首次安装不可用",
 			"dry-run":         "只打印计划：会构建哪些镜像、切换方式、要补的依赖、镜像来源、迁移与格式版本；不构建、不切换",
 			"json":            "标准输出只打印收据 JSON（进度写标准错误）",
-			"backup-db":       "部署前 pg_dump 各库（统一现场部署 2b 实现，本版本会拒绝）",
+			"backup-db":       "构建后、切换前对 auriga、若存在的 collab-db/audit 分别 pg_dump（不停服），写入 auriga-backups/db-<时间>/（根目录须 root 所有，转储 0600），收据记路径与 sha256；任一库失败则不切换（退出码 1）；不参与自动回滚",
 			"config":          "站点配置路径；只允许 root 直接运行时使用（默认 /etc/auriga/site.json）",
 			"source":          "人工源码目录（root 人工部署时使用，受限调用拒绝，不能与提交号同用）；默认用 source.dir 或 source.git",
 			"operator":        "经 sudo 的人工 root 显式跳过参数白名单（运行器账户不可用，需 site.json 登记 server.runner）；不经 sudo 时无作用",
@@ -463,8 +463,8 @@ func init() {
 		summary: "把站点切回保留的历史发行（默认上一份成功的部署；deploy、upgrade 与签名包基线产生的历史都可以），完整启动并等待健康。需要 root：root 直接运行，或经 sudo 的受限调用。",
 		notes: []string{
 			"经 sudo 调用时与 deploy 同样判定受限：受限时只接受 --to <序号> 与 --json；非运行器账户加 --operator 按人工 root 处理。",
-			"只有当前迁移与数据目录格式版本与目标运行时记录相同才执行；否则需要目标声明 schemaCompatFloor 与格式上限（统一现场部署 2b 生成），本版本一律交人工，退出码 3。",
-			"这是 2b 之前的临时规则，有风险：迁移版本没变不等于数据没变，新版本运行期间可能写入了旧代码不认识的行数据或取值，回滚后旧代码可能读错或报错。新版本运行越久风险越大，执行前请先备份并确认这段时间的业务改动。",
+			"数据与目标运行时记录相同（未触碰）则执行；否则检查当前发行及历史里序号比目标大的每条发行的 schemaCompatFloor（目标提交不得更早；未声明则拒绝）与目标的 formatMax（当前格式不得超过）。缺声明或失败退出码 3。",
+			"迁移版本相同不等于行数据语义相同；新版本运行越久，回滚后旧代码读错的风险越大。执行前请备份。",
 			"回滚失败不重试，退出码 3。每次写日志与收据。",
 		},
 		docs: map[string]string{

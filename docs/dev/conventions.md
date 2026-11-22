@@ -27,6 +27,7 @@
 
 ## 4. 数据库
 - 迁移用 Flyway：`impl/src/main/resources/db/<服务>/V<序号>__<说明>.sql`（**不要放在 `db/migration` 下**：Spring Boot 默认迁移会递归扫描那里，在 common 函数建好之前就执行），已合并的迁移**不再修改**，只加新的。
+- **N-1 兼容**：破坏旧镜像读写的变更须分两版，或在 SQL 文件头标 `-- auriga:destructive`（详见 `schema-compat.zh.md` / 现场部署 D2）。`schemaCompatFloor` 与格式上限声明在 `deploy/site/`。
 - 业务表必须有 `tenant_id` 并启用 RLS（用 common 的模板）；主键 UUIDv7；时间 `timestamptz`（UTC）；金额和配额用整数最小单位。
 - 迁移角色（表所有者）和运行时角色（只有 DML）分开，见 `common.md`。
 - 事件经 outbox 同事务发出；不要在事务里直接调 NATS 或外部 HTTP。

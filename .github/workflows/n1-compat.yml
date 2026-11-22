@@ -1,0 +1,110 @@
+# N-1 兼容门禁（统一现场部署 2b / 设计 D2、遗留 P1）
+#
+# declare：deploy/site 声明自洽；schemaCompatFloor 与迁移内容一致（相对真实父提交）；
+#          变更迁移的破坏性关键字辅助检查。
+# rollback-smoke：本次改动迁移后的库上，分别用父提交与 schemaCompatFloor 提交构建的 platform
+#          镜像做健康冒烟（真实门禁）。
+#
+# “真实父提交”一律取被测提交的第一父提交 HEAD^1：
+#   - pull_request：检出的是 refs/pull/N/merge，HEAD^1 就是测试时的 main 头；
+#   - merge_group：检出的是合并队列临时提交，HEAD^1 是队列里排在前面的结果（即合入后真正的父
+#     提交，不是 origin/main），所以队列里第二个 PR 也测到真实父提交；
+#   - push（main）：squash/合并后的提交，HEAD^1 是合入时的 main 头。
+# 仓库目前没有启用合并队列：合并前须对最新 main 重测，靠分支保护“合并前须与 main 同步”或在
+# main 前进后重跑本工作流；main 上的 push 运行是合入后的兜底复核。
+name: N-1 Compat
+on:
+  pull_request:
+    paths-ignore: ['docs/**', '*.md', 'LICENSE', 'LICENSING.md', 'CLA.md']
+  merge_group:
+  push:
+    branches: [main]
+    paths-ignore: ['docs/**', '*.md', 'LICENSE', 'LICENSING.md', 'CLA.md']
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: n1-compat-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+jobs:
+  declare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-go@v7
+        with:
+          go-version: '1.27.3'
+          cache-dependency-path: deploy/offline/go.sum
+      - name: Resolve parent commit
+        id: refs
+        run: |
+          set -euo pipefail
+          PARENT="$(git rev-parse --verify 'HEAD^1^{commit}')"
+          echo "parent=$PARENT" >> "$GITHUB_OUTPUT"
+          echo "父提交=$PARENT"
+      - name: Schema-compat unit tests
+        working-directory: deploy/offline
+        run: |
+          set -euo pipefail
+          test -z "$(gofmt -l schema_compat.go schema_compat_test.go)"
+          go test -count=1 -run '^(TestValidateSchemaCompat|TestComputeSchemaCompat|TestValidateFloorAgainstParent|TestParseSchemaCompat|TestFormatMaxStaysAtOne|TestDestructive|TestWriteFormat)' .
+      - name: Floor consistency and migration keyword check
+        env:
+          PARENT: ${{ steps.refs.outputs.parent }}
+        run: bash .github/scripts/n1-check-migrations.sh "$PARENT"
+
+  rollback-smoke:
+    needs: declare
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Resolve parent, floor and gate
+        id: refs
+        run: |
+          set -euo pipefail
+          PARENT="$(git rev-parse --verify 'HEAD^1^{commit}')"
+          # floor 来自 PR 可改的文件：先校验格式，再写进输出（不可信内容不进 GITHUB_OUTPUT 的多行或 shell）。
+          FLOOR="$(python3 -c 'import json; print(json.load(open("deploy/site/schema-compat.json")).get("schemaCompatFloor",""))')"
+          if [ -n "$FLOOR" ] && ! printf '%s' "$FLOOR" | grep -Eqx '[0-9a-f]{40}'; then
+            echo "schemaCompatFloor 格式非法" >&2
+            exit 1
+          fi
+          RUN=false
+          if git diff --name-only "$PARENT" HEAD -- services/ deploy/site/ deploy/compose/Dockerfile.platform pom.xml .mvn/ | grep -q .; then
+            RUN=true
+          fi
+          {
+            echo "parent=$PARENT"
+            echo "floor=$FLOOR"
+            echo "run=$RUN"
+          } >> "$GITHUB_OUTPUT"
+          echo "父提交=$PARENT floor=${FLOOR:-空} 运行冒烟=$RUN"
+      - uses: actions/setup-go@v7
+        if: steps.refs.outputs.run == 'true'
+        with:
+          go-version: '1.27.3'
+          cache-dependency-path: |
+            infra/**/go.sum
+            deploy/compose/bootstrap/go.sum
+      - uses: actions/setup-node@v7
+        if: steps.refs.outputs.run == 'true'
+        with:
+          node-version: '22'
+      - name: Parent + floor image smoke on migrated DB
+        if: steps.refs.outputs.run == 'true'
+        env:
+          PARENT: ${{ steps.refs.outputs.parent }}
+          FLOOR: ${{ steps.refs.outputs.floor }}
+        run: bash .github/scripts/n1-rollback-smoke.sh
+      - name: Tear down
+        if: always() && steps.refs.outputs.run == 'true'
+        working-directory: deploy/compose
+        run: docker compose --env-file var/compose.env down -v || docker compose down -v || true

@@ -12,7 +12,7 @@ package main
 // （快进）；root 人工 --allow-downgrade 可向旧提交部署，先做与 rollback 相同的数据检查。
 // 签名包安装的站点也可以 deploy：第一次 deploy 前把当前安装包登记为一条历史（基线）。
 //
-// 不在本步：只换容器、按指纹跳过构建、--backup-db、floor 生成。
+// 不在本步：只换容器、按指纹跳过构建。schemaCompatFloor / FormatMax / --backup-db 属 2b。
 
 import (
 	"context"
@@ -107,9 +107,6 @@ func deployCommand(args []string, inv siteInvocation) error {
 		return err
 	}
 	o.Restricted = restricted
-	if o.BackupDB {
-		return errors.New("--backup-db 属统一现场部署 2b，本版本尚未实现")
-	}
 	cfg, cfgPath, err := loadSiteConfig(o.Config, inv)
 	if err != nil {
 		return err
@@ -371,15 +368,28 @@ func doDeploy(ctx context.Context, ops siteOps, cfg *siteConfig, cfgPath, data s
 		}
 		rc.Images = append(rc.Images, receiptImage{Service: svc, Action: action, Reason: "配方固定 digest " + recipe.Images["service-"+svc], OldID: old, NewID: id})
 	}
+	// --backup-db 在打标签、写发行目录之前做：失败时不留下孤儿发行目录（否则下次同序号拒绝覆盖）。
+	// 构建已完成，离切换只差打标签与写发行目录，备份仍是切换前最新的数据。
+	if o.BackupDB && !first {
+		if err := backupDatabases(s, rc, w); err != nil {
+			return exitWith(1, err)
+		}
+	} else if o.BackupDB && first {
+		rc.Notes = append(rc.Notes, "--backup-db：首次安装无运行中的库，已跳过 pg_dump")
+	}
 	if err := tagImages(ctx, images, func(svc string) string { return imageTag(svc, seq) }); err != nil {
 		return exitWith(1, err)
 	}
-	manifest := releaseManifest{Source: *src, Images: images, Assembly: assembly, CreatedAt: nowRFC3339()}
+	floor, formatMax, err := loadCompatForManifest(src.Dir)
+	if err != nil {
+		return exitWith(1, fmt.Errorf("读取源码 schema 兼容声明失败：%w", err))
+	}
+	manifest := releaseManifest{Source: *src, Images: images, Assembly: assembly, SchemaCompatFloor: floorPtr(floor), FormatMax: formatMax, CreatedAt: nowRFC3339()}
 	release, releaseSums, err := writeReleaseDir(ctx, data, seq, src.Dir, filepath.Join(out, "go"), manifest)
 	if err != nil {
 		return exitWith(1, err)
 	}
-	rec := deployRecord{Seq: seq, Status: recordInstalling, At: nowRFC3339(), Source: *src, Release: release, ReleaseSums: releaseSums, Images: images, Assembly: assembly}
+	rec := deployRecord{Seq: seq, Status: recordInstalling, At: nowRFC3339(), Source: *src, Release: release, ReleaseSums: releaseSums, Images: images, Assembly: assembly, SchemaCompatFloor: floor, FormatMax: formatMax}
 	rc.Release = &receiptRelease{Seq: seq, Dir: release, Previous: s.Current}
 	fmt.Fprintf(w, "发行目录 %s\n", release)
 	if first {
@@ -471,17 +481,25 @@ func deploySwitch(ctx context.Context, ops siteOps, cfg *siteConfig, s *state, p
 	rc.Notes = append(rc.Notes, "判定是否回滚前已停止新版本会写数据的服务："+strings.Join(stopped, "、"))
 	after := readDataVersions(*s)
 	rc.Data.After = after
-	if !dataUntouched(before, after) {
-		return refuse("迁移或数据目录格式版本与切换前不同（或读不到），新版本可能已改动数据，不自动回滚（会写数据的新容器保持停止）")
-	}
 	if prev.Status != recordOK {
 		return refuse(fmt.Sprintf("上一版 r%d 不是成功记录（%s），没有可自动回滚的健康基线", prev.Seq, prev.Status))
+	}
+	// P2：切换前后数据版本相同即可回滚；否则用新发行 floor + 上一版 FormatMax（2b）。
+	var reason string
+	if dataUntouched(before, after) {
+		reason = fmt.Sprintf("迁移与格式版本与切换前相同（数据未被新版本触碰），自动回滚到 r%d", prev.Seq)
+	} else {
+		ok, why := rollbackDecision(prev, cur, newerRecords(s, prev), after, floorAncestorCheck(ctx, s.Data, prev))
+		if !ok {
+			return refuse(why + "；会写数据的新容器保持停止")
+		}
+		reason = why + fmt.Sprintf("，自动回滚到 r%d", prev.Seq)
 	}
 	// 与手动 rollback 一样，回到上一版前核对其发行目录（SHA256SUMS 与 state 锚定的 releaseSums）。
 	if err := checkReleaseDir(s.Data, prev); err != nil {
 		return refuse(fmt.Sprintf("上一版 r%d 的发行目录校验失败（%v），不自动回滚", prev.Seq, err))
 	}
-	rc.RollbackReason = fmt.Sprintf("迁移与格式版本与切换前相同（数据未被新版本触碰），自动回滚到 r%d", prev.Seq)
+	rc.RollbackReason = reason
 	fmt.Fprintf(w, "切换失败：%v\n%s\n", err, rc.RollbackReason)
 	if rbErr := startRecord(ops, s, prev, timeout); rbErr != nil {
 		rc.Health += "；回滚：" + rbErr.Error()

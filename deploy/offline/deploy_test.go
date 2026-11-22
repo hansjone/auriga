@@ -586,23 +586,63 @@ func TestReleaseDirAndRetention(t *testing.T) {
 
 func TestRollbackDecisionRules(t *testing.T) {
 	mig := map[string]string{"auriga/public.flyway_schema_history": "10:10:abc"}
-	target := &deployRecord{Seq: 2, Migrations: mig, Formats: map[string]string{}}
+	floor := strings.Repeat("a", 40)
+	targetCommit := strings.Repeat("b", 40)
+	target := &deployRecord{Seq: 2, Migrations: mig, Formats: map[string]string{}, Source: deploySource{Mode: "git", Commit: targetCommit}, FormatMax: map[string]string{"materials": "2"}}
+	current := &deployRecord{Seq: 3, SchemaCompatFloor: floor, FormatMax: map[string]string{"materials": "3"}}
 	now := &dataVersions{Migrations: cloneImages(mig), Formats: map[string]string{}}
-	if ok, _ := rollbackDecision(target, now); !ok {
+	allowFloor := func(string) (bool, error) { return true, nil }
+	denyFloor := func(string) (bool, error) { return false, nil }
+	if ok, _ := rollbackDecision(target, current, nil, now, allowFloor); !ok {
 		t.Fatal("数据未变时应允许回滚")
 	}
-	changed := &dataVersions{Migrations: map[string]string{"auriga/public.flyway_schema_history": "11:11:def"}, Formats: map[string]string{}}
-	if ok, reason := rollbackDecision(target, changed); ok || !strings.Contains(reason, "没有声明 schemaCompatFloor") {
-		t.Fatalf("无 floor 目标应拒绝：%v %s", ok, reason)
+	changed := &dataVersions{Migrations: map[string]string{"auriga/public.flyway_schema_history": "11:11:def"}, Formats: map[string]string{"materials": "2"}}
+	if ok, reason := rollbackDecision(target, &deployRecord{Seq: 3}, nil, changed, allowFloor); ok || !strings.Contains(reason, "没有声明 schemaCompatFloor") {
+		t.Fatalf("当前无兼容元数据应拒绝：%v %s", ok, reason)
 	}
-	declared := &deployRecord{Seq: 2, SchemaCompatFloor: strings.Repeat("d", 40), FormatMax: map[string]string{"materials": "2"}}
-	if ok, reason := rollbackDecision(declared, &dataVersions{Migrations: mig, Formats: map[string]string{"materials": "3"}}); ok || !strings.Contains(reason, "高于") {
+	noMax := &deployRecord{Seq: 2, Migrations: map[string]string{"x": "1"}, Formats: map[string]string{}}
+	if ok, reason := rollbackDecision(noMax, current, nil, changed, allowFloor); ok || !strings.Contains(reason, "格式上限") {
+		t.Fatalf("目标无 FormatMax 应拒绝：%v %s", ok, reason)
+	}
+	if ok, reason := rollbackDecision(target, current, nil, &dataVersions{Migrations: mig, Formats: map[string]string{"materials": "3"}}, allowFloor); ok || !strings.Contains(reason, "高于") {
 		t.Fatalf("格式超上限应拒绝：%v %s", ok, reason)
 	}
-	if ok, reason := rollbackDecision(declared, &dataVersions{Migrations: mig, Formats: map[string]string{"materials": "2"}}); ok || !strings.Contains(reason, "2b") {
-		t.Fatalf("floor 判定未实现时仍应交人工：%v %s", ok, reason)
+	if ok, reason := rollbackDecision(target, current, nil, changed, denyFloor); ok || !strings.Contains(reason, "早于") {
+		t.Fatalf("目标早于 floor 应拒绝：%v %s", ok, reason)
 	}
-	if ok, _ := rollbackDecision(target, &dataVersions{Err: "psql 不可用"}); ok {
+	if ok, reason := rollbackDecision(target, current, nil, changed, allowFloor); !ok {
+		t.Fatalf("floor 与格式通过应允许：%v %s", ok, reason)
+	}
+	baseline := &deployRecord{Seq: 3, SchemaCompatFloor: "", FormatMax: map[string]string{"materials": "2"}}
+	if ok, _ := rollbackDecision(target, baseline, nil, changed, nil); !ok {
+		t.Fatal("空 floor（设计起点）且格式通过时应允许")
+	}
+	// 降级到 floor 较旧的提交后再回滚：之前更新发行（r4）的 floor 仍要满足。
+	r4 := &deployRecord{Seq: 4, Source: deploySource{Mode: "git", Commit: strings.Repeat("e", 40)}, SchemaCompatFloor: strings.Repeat("f", 40), FormatMax: map[string]string{"materials": "2"}}
+	lenient := &deployRecord{Seq: 5, Source: deploySource{Mode: "git", Commit: strings.Repeat("c", 40)}, SchemaCompatFloor: "", FormatMax: map[string]string{"materials": "2"}}
+	onlyFloorF := func(c string) (bool, error) {
+		return c != strings.Repeat("f", 40) && c != strings.Repeat("e", 40) && c != strings.Repeat("c", 40), nil
+	}
+	if ok, reason := rollbackDecision(target, lenient, []*deployRecord{r4}, changed, onlyFloorF); ok || !strings.Contains(reason, "r4") {
+		t.Fatalf("目标早于更新发行 r4 的 floor 应拒绝：%v %s", ok, reason)
+	}
+	undeclared := &deployRecord{Seq: 4, Source: deploySource{Mode: "git", Commit: strings.Repeat("e", 40)}}
+	if ok, reason := rollbackDecision(target, lenient, []*deployRecord{undeclared}, changed, onlyFloorF); ok || !strings.Contains(reason, "没有声明 schemaCompatFloor") {
+		t.Fatalf("目标之后运行过、未声明 floor 的发行应拒绝：%v %s", ok, reason)
+	}
+	// 不比目标新的记录（提交是目标的祖先）不需要声明。
+	ancestorOld := func(c string) (bool, error) { return c == strings.Repeat("e", 40), nil }
+	if ok, reason := rollbackDecision(target, lenient, []*deployRecord{undeclared}, changed, ancestorOld); !ok {
+		t.Fatalf("祖先提交的记录不应拦截：%s", reason)
+	}
+	failing := func(string) (bool, error) { return false, errors.New("git 不可用") }
+	if ok, _ := rollbackDecision(target, current, nil, changed, failing); ok {
+		t.Fatal("祖先判定失败必须保守拒绝")
+	}
+	if ok, _ := rollbackDecision(target, nil, nil, changed, allowFloor); ok {
+		t.Fatal("找不到当前记录必须拒绝")
+	}
+	if ok, _ := rollbackDecision(target, current, nil, &dataVersions{Err: "psql 不可用"}, allowFloor); ok {
 		t.Fatal("读不到版本时不能回滚")
 	}
 	if !dataUntouched(now, &dataVersions{Migrations: cloneImages(mig), Formats: map[string]string{}}) || dataUntouched(now, changed) || dataUntouched(&dataVersions{Err: "x"}, now) {
@@ -859,5 +899,82 @@ func TestCheckImportPartsOwnership(t *testing.T) {
 	}
 	if err := checkImportParts(filepath.Join(dir, "plain.tar")); err != nil {
 		t.Fatalf("非分卷归档不应检查分卷：%v", err)
+	}
+}
+
+// 2b：数据已被新版本改动时，自动回滚按新发行的 floor 与上一版的 formatMax 判定。
+func TestDeploySwitchAutoRollbackByFloor(t *testing.T) {
+	maxAll := map[string]string{"materials": "1", "collab-keys": "1", "materials-upgrades": "1", "relay": "1"}
+	for _, tc := range []struct {
+		name     string
+		prevMax  map[string]string
+		recMax   map[string]string
+		wantCode int
+	}{
+		{"双方已声明且 floor 为设计起点", maxAll, maxAll, 2},
+		{"上一版未声明 formatMax", nil, maxAll, 3},
+		{"新发行未声明 floor", maxAll, nil, 3},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s, prev, rec, cfg := switchFixture(t)
+			prev.FormatMax = tc.prevMax
+			if err := saveState(s); err != nil {
+				t.Fatal(err)
+			}
+			rec.FormatMax = tc.recMax
+			stubDataVersions(t, &dataVersions{Migrations: map[string]string{"auriga/x": "1:1:a"}, Formats: map[string]string{}}, &dataVersions{Migrations: map[string]string{"auriga/x": "2:2:b"}, Formats: map[string]string{"materials": "1"}})
+			site := &fakeSite{healthy: func(n int) error {
+				if n == 1 {
+					return errors.New("platform unhealthy")
+				}
+				return nil
+			}}
+			run, _ := testRun()
+			err := deploySwitch(context.Background(), site.ops(), cfg, &s, prev, rec, run, nil)
+			if exitCodeOf(err) != tc.wantCode || run.receipt.RolledBack != (tc.wantCode == 2) {
+				t.Fatalf("期望退出码 %d：%v（%s）", tc.wantCode, err, run.receipt.RollbackReason)
+			}
+		})
+	}
+}
+
+// 2b：手动 rollback 的 floor 路径（真实祖先判定由 fakeGit 模拟）。
+func TestManualRollbackByFloor(t *testing.T) {
+	old, mid, cur := strings.Repeat("1", 40), strings.Repeat("2", 40), strings.Repeat("3", 40)
+	fakeGit(t, map[string]bool{old: true, mid: true, cur: true}, map[string][]string{old: {mid, cur}, mid: {cur}})
+	maxAll := map[string]string{"materials": "1", "collab-keys": "1", "materials-upgrades": "1", "relay": "1"}
+	for _, tc := range []struct {
+		name     string
+		floor    string
+		wantCode int
+	}{
+		{"目标等于 floor", old, 0},
+		{"目标早于 floor", mid, 3},
+		{"floor 不在暂存仓库", strings.Repeat("9", 40), 3},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			stubTrustedSource(t)
+			s := deployTestSite(t,
+				deployRecord{Seq: 1, Status: recordOK, Source: deploySource{Mode: "git", Commit: old}, Images: imagesFor("1"), Migrations: map[string]string{"auriga/x": "1:1:a"}, Formats: map[string]string{}, FormatMax: maxAll},
+				deployRecord{Seq: 2, Status: recordOK, Source: deploySource{Mode: "git", Commit: cur}, Images: imagesFor("2"), SchemaCompatFloor: tc.floor, FormatMax: maxAll})
+			writeTestRelease(t, &s, 1)
+			stubDataVersions(t, &dataVersions{Migrations: map[string]string{"auriga/x": "2:2:b"}, Formats: map[string]string{}})
+			run, _ := testRun()
+			site := &fakeSite{healthy: func(int) error { return nil }}
+			err := doRollback(context.Background(), site.ops(), &siteConfig{Server: &siteServer{Data: s.Data}}, s.Data, 1, run)
+			if tc.wantCode == 0 {
+				// 判定通过即可；之后的镜像核对由 fakeGit 桩拦下，不在本测试范围。
+				if exitCodeOf(err) == 3 || !strings.Contains(run.receipt.RollbackReason, "允许回滚到 r1") {
+					t.Fatalf("floor 判定应通过：%v（%s）", err, run.receipt.RollbackReason)
+				}
+				return
+			}
+			if exitCodeOf(err) != tc.wantCode {
+				t.Fatalf("期望退出码 %d：%v（%s）", tc.wantCode, err, run.receipt.RollbackReason)
+			}
+			if len(site.starts) != 0 {
+				t.Fatalf("拒绝时不应启动：%v", site.starts)
+			}
+		})
 	}
 }

@@ -253,7 +253,9 @@ func activateUpgrade(ctx context.Context, s *state, stage string, images map[str
 	if err := tagImages(ctx, images, func(svc string) string { return imageTag(svc, seq) }); err != nil {
 		return err
 	}
-	rec := deployRecord{Seq: seq, Kind: recordKindUpgrade, Status: recordFailed, At: nowRFC3339(), Source: packageSource(release, archive), Release: release, ReleaseSums: sums, Images: cloneImages(images)}
+	src := packageSource(release, archive)
+	floor, formatMax := packageCompatFields(release)
+	rec := deployRecord{Seq: seq, Kind: recordKindUpgrade, Status: recordFailed, At: nowRFC3339(), Source: src, Release: release, ReleaseSums: sums, Images: cloneImages(images), SchemaCompatFloor: floor, FormatMax: formatMax}
 	s.History = append(s.History, rec)
 	// Preserve every operator setting. Only exact image references and seed state
 	// change, using the same parser-safe KEY=VALUE format as the existing scripts.

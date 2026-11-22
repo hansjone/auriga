@@ -58,7 +58,7 @@ public class PlatformCombinedConfiguration {
             env.getRequiredProperty("auriga.platform.iam.jdbc-url"),
             env.getRequiredProperty("auriga.platform.iam.username"),
             env.getProperty("auriga.platform.iam.password", ""));
-    migrate("iam", ds, "classpath:db/iam");
+    migrateSchema("iam", ds, "classpath:db/iam");
     return ds;
   }
 
@@ -69,7 +69,7 @@ public class PlatformCombinedConfiguration {
             env.getRequiredProperty("auriga.platform.org.jdbc-url"),
             env.getRequiredProperty("auriga.platform.org.username"),
             env.getProperty("auriga.platform.org.password", ""));
-    migrate("org", ds, "classpath:db/org");
+    migrateSchema("org", ds, "classpath:db/org");
     return ds;
   }
 
@@ -83,7 +83,8 @@ public class PlatformCombinedConfiguration {
     return ds;
   }
 
-  private static void migrate(String schema, DataSource ds, String locations) {
+  /** 包内可见：单测覆盖 N-1 {@code *:future}。 */
+  static void migrateSchema(String schema, DataSource ds, String locations) {
     CommonMigrations.migrate(ds, schema);
     CommonMigrations.serviceFlyway(
             Flyway.configure()
@@ -91,6 +92,7 @@ public class PlatformCombinedConfiguration {
                 .schemas(schema)
                 .defaultSchema(schema)
                 .locations(locations)
+                .ignoreMigrationPatterns(CommonMigrations.IGNORE_FUTURE_MIGRATIONS)
                 .load())
         .migrate();
   }

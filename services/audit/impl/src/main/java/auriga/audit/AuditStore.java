@@ -36,6 +36,8 @@ public class AuditStore implements auriga.audit.api.UacAuditEvents {
                   .schemas("audit")
                   .defaultSchema("audit")
                   .locations("classpath:db/audit")
+                  .ignoreMigrationPatterns(
+                      auriga.common.persistence.CommonMigrations.IGNORE_FUTURE_MIGRATIONS)
                   .load())
           .migrate();
     }

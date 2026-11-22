@@ -7,7 +7,7 @@ package main
 //	                               （脚本按 $NAS_ROOT/bin 找 bootstrap，与 bin/ 下为同一文件的硬链接）
 //	    bin/auriga-nas-bootstrap
 //	    bin/runtime-release
-//	    release.json               序号、源码、镜像 ID、装配摘要、floor 与格式上限声明（本步为空，2b 生成）
+//	    release.json               序号、源码、镜像 ID、装配摘要、schemaCompatFloor 与 formatMax
 //	    SHA256SUMS                 本地清单（不签名）
 //
 // state.current 指向当前序号（随 state 原子切换），state.history 保留最近 N 份（默认 3）。
@@ -45,7 +45,7 @@ type deployRecord struct {
 	// 仍与本条运行时相同。
 	Migrations map[string]string `json:"migrations,omitempty"`
 	Formats    map[string]string `json:"formats,omitempty"`
-	// 2b 生成；本步只读取与判断，没有声明的目标拒绝按 floor 自动回滚。
+	// 本发行声明的兼容下限（floor）与本版能读的格式上限；旧记录无字段则不能按 floor 回滚。
 	SchemaCompatFloor string            `json:"schemaCompatFloor,omitempty"`
 	FormatMax         map[string]string `json:"formatMax,omitempty"`
 }

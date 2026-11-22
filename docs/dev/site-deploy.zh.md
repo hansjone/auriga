@@ -52,12 +52,12 @@
 - **“版本”的含义**：现场按提交部署，可能跳过中间提交。所以兼容关系按提交表达：每个发行目录的清单声明 `schemaCompatFloor`，即本提交的迁移和格式变更之后，仍能正常运行的最旧提交。它由迁移脚本和格式登记的元数据生成：本提交没有破坏性变更时继承父提交的 floor，有破坏性变更时 floor 前移到本提交的父提交之后。CI 校验这个值和迁移内容一致。
 - **数据库**：
   - Flyway 在全部 4 个自建入口显式配置 `ignoreMigrationPatterns("*:future")`：`CommonMigrations.migrate`、`PlatformCombinedConfiguration.migrate`、`PlatformCollabConfiguration`、`AuditStore`。它们不吃 Spring 配置，每个入口各有单测。
-  - 破坏旧代码的变更（删除或改名、新增无默认值的 NOT NULL 列、新唯一或 CHECK 约束、收紧 RLS、改变语义的回填）必须分两个版本做；确需一次完成时，迁移元数据标记为破坏性，floor 随之前移。
+  - 破坏旧代码的变更（删除或改名、新增无默认值的 NOT NULL 列、新唯一或 CHECK 约束、收紧 RLS、改变语义的回填）必须分两个版本做；确需一次完成时，在迁移 SQL **文件头**标 `-- auriga:destructive`（可跟说明），floor 随之前移。细则与关键字辅助检查见 `docs/dev/schema-compat.zh.md`。
   - **CI 真实回退测试**（PR 门禁）：用当前 main 头的镜像，跑在本 PR 迁移后的库上做冒烟。每个合入的提交都对它的父提交保证兼容，逐提交部署因此也有依据。这是硬门禁，不靠关键字检查。
   - 约定从本设计合入后的第一个版本起执行。仓库里已有含 DROP 的历史迁移不追溯；本设计之前的发行没有声明 floor，回滚到这些发行一律按“拒绝自动回滚”处理。
-- **数据目录格式**：`config/materials`、collab 密钥与轮换快照、`materials-upgrades`、relay 迁移等会就地改写数据目录的流程，各自登记格式版本号（写进数据目录的 `format-versions.json`）。发行清单声明本版能读的最高格式版本。
+- **数据目录格式**：`config/materials`、collab 密钥与轮换快照、`materials-upgrades`、relay 迁移等会就地改写数据目录的流程，各自登记格式版本号（写进数据目录的 `format-versions.json`，Go 辅助 `WriteFormatVersion`）。发行清单声明本版能读的最高格式版本（源码 `deploy/site/format-versions.json`，写入 `release.json` / `offline-release.json` 的 `formatMax`）。**不要**在 deploy 时把源码 formatMax 覆盖进数据目录——那是「能读上限」不是「当前格式」。
 - **收据**：逐库逐表记录迁移版本，覆盖主库各 schema 的 `flyway_schema_history` 与 `auriga_common_schema_history`、`collab-db`、audit。
-- **回滚前检查**（自动和手动回滚、向更旧提交部署都适用）：目标提交必须不早于当前运行版本的 `schemaCompatFloor`，且当前数据目录格式版本不高于目标能读的上限。任一不满足，或目标没有声明 floor 和格式上限，就不自动执行，按退出码 3 交给人工。
+- **回滚前检查**（自动和手动回滚、向更旧提交部署都适用）：目标提交必须不早于**当前运行版本**（以及历史里在目标之后运行过的每个发行）的 `schemaCompatFloor`，且当前数据目录格式版本不高于**目标发行**能读的上限（`formatMax`）。数据与目标运行时记录完全相同（未触碰）仍直接允许（P2）。缺声明或不满足则退出码 3 交人工。
 - `--backup-db` 进入第一版：对主库、`collab-db`、audit 分别 `pg_dump`（不停服，每个库内部一致，跨库不保证同一时刻），不参与自动回滚。
 
 ### D3 同机构建同机安装，不打包；信任依据是 root 自己取的源码
