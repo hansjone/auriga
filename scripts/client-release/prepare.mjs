@@ -151,13 +151,14 @@ export async function prepareInputs(parent, options = {}) {
     // 构建 Node：以仓库 build-node.json 的 winX64ZipSha256 为准；runtime Node：以
     // upstream.json 为准。下载的 SHASUMS256.txt 仅作参考比对，不得覆盖仓库钉死摘要。
     const pinned =
-      version === BUILD_NODE
-        ? BUILD_NODE_ZIP_SHA256
-        : runtime.nodeWinX64Sha256;
+      version === BUILD_NODE ? BUILD_NODE_ZIP_SHA256 : runtime.nodeWinX64Sha256;
     const sums = join(work, `SHASUMS256-${version}.txt`);
     let listed;
     try {
-      await download(`https://nodejs.org/dist/v${version}/SHASUMS256.txt`, sums);
+      await download(
+        `https://nodejs.org/dist/v${version}/SHASUMS256.txt`,
+        sums,
+      );
       listed = readFileSync(sums, 'utf8')
         .split('\n')
         .find((line) => line.trim().endsWith(` ${name}`))

@@ -470,7 +470,8 @@ test('build-node.json 钉死 win-x64 zip SHA-256，缺字段或非法摘要拒�
     path,
     JSON.stringify({
       version: '22.19.0',
-      winX64ZipSha256: 'ea3fad0e67a991d8477d8c01344b56e69c676ccb733f065b22436994b1253f86',
+      winX64ZipSha256:
+        'ea3fad0e67a991d8477d8c01344b56e69c676ccb733f065b22436994b1253f86',
     }),
   );
   assert.equal(readBuildNodePin(dir).winX64ZipSha256, BUILD_NODE_ZIP_SHA256);

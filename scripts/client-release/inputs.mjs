@@ -28,7 +28,10 @@ export function readBuildNodePin(root = ROOT) {
   );
   if (typeof pin.version !== 'string' || !/^\d+\.\d+\.\d+$/.test(pin.version))
     throw new Error('Windows 目标源码的构建 Node 版本无效');
-  if (typeof pin.winX64ZipSha256 !== 'string' || !HASH.test(pin.winX64ZipSha256))
+  if (
+    typeof pin.winX64ZipSha256 !== 'string' ||
+    !HASH.test(pin.winX64ZipSha256)
+  )
     throw new Error(
       'build-node.json 缺少有效的 winX64ZipSha256（须为 64 位小写十六进制）',
     );
