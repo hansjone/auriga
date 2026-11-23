@@ -141,10 +141,7 @@ test('ensureWorkspaceEsbuildPublicHoist injects publicHoistPattern in build copy
   );
   assert.equal(ensureWorkspaceEsbuildPublicHoist(dir), true);
   const content = readFileSync(ws, 'utf8');
-  assert.equal(
-    content.endsWith("publicHoistPattern:\n  - '*esbuild*'\n"),
-    true,
-  );
+  assert.equal(content.endsWith("publicHoistPattern:\n  - '*'\n"), true);
   assert.equal(ensureWorkspaceEsbuildPublicHoist(dir), false);
   assert.equal(readFileSync(ws, 'utf8'), content);
 });

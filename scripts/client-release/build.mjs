@@ -386,7 +386,7 @@ export function ensureWorkspaceEsbuildPublicHoist(root) {
   const text = readFileSync(file, 'utf8');
   if (/^\s*publicHoistPattern\s*:/m.test(text)) return false;
   const eol = text.includes('\r\n') ? '\r\n' : '\n';
-  const suffix = `${text.endsWith('\n') ? '' : eol}publicHoistPattern:${eol}  - '*esbuild*'${eol}`;
+  const suffix = `${text.endsWith('\n') ? '' : eol}publicHoistPattern:${eol}  - '*'${eol}`;
   writeFileSync(file, text + suffix, 'utf8');
   return true;
 }

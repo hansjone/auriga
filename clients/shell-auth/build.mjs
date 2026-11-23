@@ -1,6 +1,7 @@
 import {
   mkdirSync,
   readdirSync,
+  realpathSync,
   copyFileSync,
   readFileSync,
   writeFileSync,
@@ -13,6 +14,30 @@ import { createRequire } from 'node:module';
 import { safePath } from './vault.mjs';
 import { buildHelper } from './windows/build.mjs';
 const source = dirname(fileURLToPath(import.meta.url));
+function tryRealpath(filePath) {
+  try {
+    return realpathSync(filePath);
+  } catch {
+    return filePath;
+  }
+}
+export function pnpmVirtualStoreDirs(repoRoot = resolve(source, '../..')) {
+  const candidates = [
+    join(repoRoot, 'web', 'node_modules', '.pnpm'),
+    join(repoRoot, 'web', 'web', 'node_modules', '.pnpm'),
+    join(repoRoot, 'node_modules', '.pnpm'),
+  ];
+  const seen = new Set();
+  const dirs = [];
+  for (const dir of candidates) {
+    if (!existsSync(dir)) continue;
+    const key = process.platform === 'win32' ? dir.toLowerCase() : dir;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    dirs.push(dir);
+  }
+  return dirs;
+}
 export function resolveEsbuild(repoRoot = resolve(source, '../..')) {
   const roots = [
     join(repoRoot, 'package.json'),
@@ -23,7 +48,9 @@ export function resolveEsbuild(repoRoot = resolve(source, '../..')) {
   for (const base of roots) {
     const loader = createRequire(base);
     try {
-      return createRequire(loader.resolve('vite/package.json'))('esbuild');
+      return createRequire(tryRealpath(loader.resolve('vite/package.json')))(
+        'esbuild',
+      );
     } catch (error) {
       errors.push(`${base} -> vite -> esbuild: ${error.message}`);
     }
@@ -33,11 +60,7 @@ export function resolveEsbuild(repoRoot = resolve(source, '../..')) {
       errors.push(`${base} -> esbuild: ${error.message}`);
     }
   }
-  for (const pnpmDir of [
-    join(repoRoot, 'web', 'node_modules', '.pnpm'),
-    join(repoRoot, 'node_modules', '.pnpm'),
-  ]) {
-    if (!existsSync(pnpmDir)) continue;
+  for (const pnpmDir of pnpmVirtualStoreDirs(repoRoot)) {
     const hoisted = join(pnpmDir, 'node_modules', 'esbuild');
     if (existsSync(join(hoisted, 'package.json'))) {
       try {
@@ -73,9 +96,27 @@ export function resolvePluginNodePaths({
     join(repoRoot, 'web', 'node_modules'),
     join(repoRoot, 'node_modules'),
   ].filter((dir) => existsSync(dir));
+  const expanded = [];
+  for (const dir of [...configured, ...auto]) {
+    expanded.push(dir);
+    for (const pkgName of ['ajv', '@nats-io/nats-core', 'undici', 'ws']) {
+      const pkgFile = join(dir, pkgName, 'package.json');
+      if (!existsSync(pkgFile)) continue;
+      const realPkgDir = dirname(tryRealpath(pkgFile));
+      const peerNodeModules = dirname(
+        pkgName.startsWith('@') ? dirname(realPkgDir) : realPkgDir,
+      );
+      if (basename(peerNodeModules) === 'node_modules')
+        expanded.push(peerNodeModules);
+    }
+  }
+  for (const pnpmDir of pnpmVirtualStoreDirs(repoRoot)) {
+    const hoisted = join(pnpmDir, 'node_modules');
+    if (existsSync(hoisted)) expanded.push(hoisted);
+  }
   const seen = new Set();
   const paths = [];
-  for (const dir of [...configured, ...auto]) {
+  for (const dir of expanded) {
     const key = process.platform === 'win32' ? dir.toLowerCase() : dir;
     if (seen.has(key)) continue;
     seen.add(key);
@@ -83,23 +124,70 @@ export function resolvePluginNodePaths({
   }
   return paths;
 }
-function resolveWithNodePaths(baseFile, specifier, nodePaths = []) {
-  const loader = createRequire(baseFile);
+function findRepoRoots(startFile, nodePaths = []) {
+  const roots = [];
+  const seen = new Set();
+  const add = (dir) => {
+    const key = process.platform === 'win32' ? dir.toLowerCase() : dir;
+    if (seen.has(key)) return;
+    seen.add(key);
+    roots.push(dir);
+  };
+  add(resolve(source, '../..'));
+  for (const seed of [dirname(startFile), ...nodePaths]) {
+    let cur = resolve(seed);
+    for (let depth = 0; depth < 8; depth++) {
+      if (pnpmVirtualStoreDirs(cur).length) add(cur);
+      const parent = dirname(cur);
+      if (parent === cur) break;
+      cur = parent;
+    }
+  }
+  return roots;
+}
+export function resolveWithNodePaths(baseFile, specifier, nodePaths = []) {
+  const realBaseFile = tryRealpath(baseFile);
+  const loader = createRequire(realBaseFile);
+  const realDirs = [];
+  for (const dir of nodePaths) {
+    realDirs.push(dir);
+    const realDir = tryRealpath(dir);
+    if (realDir !== dir) realDirs.push(realDir);
+  }
   const searchRoots = [
+    dirname(realBaseFile),
     dirname(baseFile),
-    ...nodePaths.map((dir) =>
+    ...realDirs.map((dir) =>
       basename(dir) === 'node_modules' ? dirname(dir) : dir,
     ),
   ];
   try {
-    return loader.resolve(specifier, { paths: searchRoots });
+    return tryRealpath(loader.resolve(specifier, { paths: searchRoots }));
   } catch (primaryError) {
-    for (const dir of nodePaths) {
+    for (const dir of realDirs) {
       const candidate = join(dir, specifier);
       try {
-        return loader.resolve(candidate);
+        return tryRealpath(loader.resolve(candidate));
       } catch {
         /* Try next configured nodePaths directory. */
+      }
+    }
+    for (const repoCandidate of findRepoRoots(realBaseFile, realDirs)) {
+      for (const pnpmDir of pnpmVirtualStoreDirs(repoCandidate)) {
+        for (const entry of readdirSync(pnpmDir, { withFileTypes: true })) {
+          if (!entry.isDirectory() || entry.name === 'node_modules') continue;
+          const candidate = join(
+            pnpmDir,
+            entry.name,
+            'node_modules',
+            specifier,
+          );
+          try {
+            return tryRealpath(loader.resolve(candidate));
+          } catch {
+            /* Try next virtual store package directory. */
+          }
+        }
       }
     }
     throw primaryError;
