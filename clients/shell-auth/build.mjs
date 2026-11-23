@@ -133,7 +133,6 @@ function findRepoRoots(startFile, nodePaths = []) {
     seen.add(key);
     roots.push(dir);
   };
-  add(resolve(source, '../..'));
   for (const seed of [dirname(startFile), ...nodePaths]) {
     let cur = resolve(seed);
     for (let depth = 0; depth < 8; depth++) {
@@ -143,6 +142,7 @@ function findRepoRoots(startFile, nodePaths = []) {
       cur = parent;
     }
   }
+  add(resolve(source, '../..'));
   return roots;
 }
 export function resolveWithNodePaths(baseFile, specifier, nodePaths = []) {
