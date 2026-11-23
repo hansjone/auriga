@@ -234,6 +234,9 @@ func unpackReader(input io.Reader, destination string) error {
 			if closeErr != nil {
 				return closeErr
 			}
+			if err := os.Chmod(path, mode); err != nil {
+				return err
+			}
 		default:
 			return errors.New("归档包含链接或特殊文件")
 		}
@@ -326,7 +329,10 @@ func copyFileContext(ctx context.Context, source, target string, mode fs.FileMod
 	if err != nil {
 		return err
 	}
-	return closeErr
+	if closeErr != nil {
+		return closeErr
+	}
+	return os.Chmod(target, mode)
 }
 
 func jsonFile(path string, value any, mode fs.FileMode) error {

@@ -150,7 +150,10 @@ func TestChangesRebaseConflictAndTraversal(t *testing.T) {
 	if err := applyChanges(target, patch); err == nil || !strings.Contains(err.Error(), "change.txt") {
 		t.Fatal("conflict not named", err)
 	}
-	if sourcePathAllowed("../escape") || sourcePathAllowed(".git/config") || sourcePathAllowed("auriga-source.json") {
+	if sourcePathAllowed("../escape") || sourcePathAllowed(".git/config") || sourcePathAllowed("auriga-source.json") || sourcePathAllowed("SHA256SUMS") {
 		t.Fatal("unsafe patch target")
+	}
+	if !sourcePathAllowed("docs/company-uac/SHA256SUMS") || !sourcePathAllowed("docs/auriga-source.json") {
+		t.Fatal("nested source file matching root metadata name should be allowed")
 	}
 }

@@ -380,6 +380,16 @@ export function collectPluginModulePaths(
   }
   return result;
 }
+export function ensureWorkspaceEsbuildPublicHoist(root) {
+  const file = join(root, 'pnpm-workspace.yaml');
+  if (!existsSync(file)) return false;
+  const text = readFileSync(file, 'utf8');
+  if (/^\s*publicHoistPattern\s*:/m.test(text)) return false;
+  const eol = text.includes('\r\n') ? '\r\n' : '\n';
+  const suffix = `${text.endsWith('\n') ? '' : eol}publicHoistPattern:${eol}  - '*esbuild*'${eol}`;
+  writeFileSync(file, text + suffix, 'utf8');
+  return true;
+}
 export async function buildWorker(optionsFile, hooks = {}) {
   const root = hooks.root ?? ROOT;
   if (
@@ -401,6 +411,9 @@ export async function buildWorker(optionsFile, hooks = {}) {
   // 复制与校验之间源码可能被改动：副本必须与刚校验的源码身份一致，才允许装依赖和构建。
   if (o['source-root'])
     assertBuildCopyMatches(root, sourceRoot, inputTrust(o), source);
+  // pnpm 11 的项目级 publicHoistPattern 配置位于 pnpm-workspace.yaml（CLI --config.public-hoist-pattern[] 不再生效）。
+  // 在已通过 verifyInputs 与 assertBuildCopyMatches 校验的构建副本里注入，不改动原源码或套件锁摘要。
+  if (o['source-root']) ensureWorkspaceEsbuildPublicHoist(root);
   const pnpm = join(kit.directory, 'build-pnpm/node_modules/pnpm/bin/pnpm.cjs');
   const store = join(o.out, 'pnpm-store');
   cpSync(join(kit.directory, 'pnpm-store'), store, { recursive: true });
@@ -420,7 +433,6 @@ export async function buildWorker(optionsFile, hooks = {}) {
     '--offline',
     '--frozen-lockfile',
     '--ignore-scripts',
-    '--config.public-hoist-pattern[]=*esbuild*',
     '--store-dir',
     store,
   ]);

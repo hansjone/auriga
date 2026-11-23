@@ -38,10 +38,16 @@ export function resolveEsbuild(repoRoot = resolve(source, '../..')) {
     join(repoRoot, 'node_modules', '.pnpm'),
   ]) {
     if (!existsSync(pnpmDir)) continue;
+    const hoisted = join(pnpmDir, 'node_modules', 'esbuild');
+    if (existsSync(join(hoisted, 'package.json'))) {
+      try {
+        return createRequire(join(hoisted, 'package.json'))(hoisted);
+      } catch (error) {
+        errors.push(`${hoisted}: ${error.message}`);
+      }
+    }
     for (const entry of readdirSync(pnpmDir, { withFileTypes: true })) {
-      if (!entry.isDirectory()) continue;
-      if (!entry.name.startsWith('esbuild@') && !entry.name.startsWith('vite@'))
-        continue;
+      if (!entry.isDirectory() || entry.name === 'node_modules') continue;
       const candidate = join(pnpmDir, entry.name, 'node_modules', 'esbuild');
       if (!existsSync(join(candidate, 'package.json'))) continue;
       try {

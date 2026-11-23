@@ -41,11 +41,17 @@ func sourcePathAllowed(name string) bool {
 		return false
 	}
 	base := filepath.Base(name)
-	if !strings.Contains(name, "/") && (strings.HasPrefix(base, "auriga-offline-") || strings.HasPrefix(base, "auriga-devkit-") || strings.HasPrefix(base, "auriga-changes-")) && (strings.Contains(base, ".tar") || strings.HasSuffix(base, ".sha256")) {
-		return false
+	if !strings.Contains(name, "/") {
+		if (strings.HasPrefix(base, "auriga-offline-") || strings.HasPrefix(base, "auriga-devkit-") || strings.HasPrefix(base, "auriga-changes-")) && (strings.Contains(base, ".tar") || strings.HasSuffix(base, ".sha256")) {
+			return false
+		}
+		switch base {
+		case "auriga-source.json", "sha256sums", "sha256sums.sig", "release-public.pem", ".auriga-devkit.json":
+			return false
+		}
 	}
 	switch base {
-	case "auriga-source.json", "sha256sums", "sha256sums.sig", "release-public.pem", ".auriga-devkit.json", ".agent-task.md", ".agent-report.md":
+	case ".agent-task.md", ".agent-report.md":
 		return false
 	}
 	if base == ".env" || strings.HasPrefix(base, ".env.") && base != ".env.example" {
@@ -122,7 +128,16 @@ func sourceNamesContext(ctx context.Context, root string) ([]string, error) {
 		return names, nil
 	}
 	raw, err := gitFilesContext(ctx, root, "ls-files", "--cached", "--others", "--exclude-standard", "-z")
-	return strings.Split(raw, "\x00"), err
+	if err != nil {
+		return nil, err
+	}
+	var names []string
+	for _, name := range strings.Split(raw, "\x00") {
+		if name != "" && sourcePathAllowed(name) {
+			names = append(names, name)
+		}
+	}
+	return names, nil
 }
 
 func fileInventory(root string, names []string, baseline map[string]sourceFile) (map[string]sourceFile, string, error) {
