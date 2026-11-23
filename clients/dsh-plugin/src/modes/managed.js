@@ -1,5 +1,5 @@
 // @ts-nocheck
-import { readFileSync } from 'node:fs';
+import { lstatSync, readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { createManagedNetwork } from '../network/managed-device.js';
 import { installResourceChannel } from '../resources/channel.js';
@@ -53,6 +53,22 @@ function readPkgVersion() {
     return pkg.version || '0.0.0';
   } catch {
     return '0.0.0';
+  }
+}
+
+/**
+ * Treat a missing device credential file (`ENOENT`) as unconfigured so older
+ * agents that unconditionally exported AURIGA_DEVICE_CREDENTIAL_FILE remain
+ * compatible. Any other error (such as `EACCES` or `ENOTDIR`) fails closed.
+ * @param {string | undefined} file
+ */
+function hasDeviceCredentialFile(file) {
+  if (!file) return false;
+  try {
+    lstatSync(file);
+    return true;
+  } catch (err) {
+    return err?.code !== 'ENOENT';
   }
 }
 
@@ -385,14 +401,14 @@ export async function createManaged(options = {}) {
       });
       const deviceCredentialFile =
         options.deviceCredentialFile ?? env.AURIGA_DEVICE_CREDENTIAL_FILE;
-      const managedNetworkConfigured = Boolean(
-        options.connection || options.networkConnection || deviceCredentialFile,
-      );
+      const managedNetworkConfigured = () =>
+        Boolean(options.connection || options.networkConnection) ||
+        hasDeviceCredentialFile(deviceCredentialFile);
       registerHealthRoute(ctx, {
         pluginVersion,
         instanceId,
         ready: () =>
-          managedNetworkConfigured
+          managedNetworkConfigured()
             ? network?.sessionAvailable === true
             : active && !stopping && network?.sessionRevoked !== true,
       });

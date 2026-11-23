@@ -90,6 +90,9 @@ func TestRenderDeterministicAndSecretPerms(t *testing.T) {
 	if !strings.Contains(string(env), "AURIGA_IDENTITY_KEYS_FILE="+renderer.ContainerIdentityKeys) {
 		t.Fatalf("env should use container paths: %s", env)
 	}
+	if strings.Contains(string(env), "AURIGA_DEVICE_CREDENTIAL_FILE=") {
+		t.Fatalf("env should omit AURIGA_DEVICE_CREDENTIAL_FILE when device_credential is absent: %s", env)
+	}
 	var bypass string
 	for _, line := range strings.Split(string(env), "\n") {
 		if value, found := strings.CutPrefix(line, "NO_PROXY="); found {

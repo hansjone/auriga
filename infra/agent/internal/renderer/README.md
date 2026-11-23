@@ -5,9 +5,10 @@ Deterministic instance config into `meta/` (package.json, cordis.patch.yml, env,
 `Secrets.device_credential` is independently HPKE-sealed with that field name and
 the current specification generation. It becomes `device-credential.json` (0600)
 and only its path enters `AURIGA_DEVICE_CREDENTIAL_FILE`. Missing material removes
-the old file. Its bytes participate in the rendered digest so rotation reaches
-an already running instance. The managed plugin reuses the desktop device network
-provider; `instance.token` remains exclusively for instance control.
+the old file and omits `AURIGA_DEVICE_CREDENTIAL_FILE` from `env`. Its bytes
+participate in the rendered digest so rotation reaches an already running
+instance. The managed plugin reuses the desktop device network provider;
+`instance.token` remains exclusively for instance control.
 
 `Secrets.model_credential` is separate trusted model material. It is validated
 against the instance identity and becomes `model-credential.json` (0600).

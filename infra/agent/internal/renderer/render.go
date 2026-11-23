@@ -169,7 +169,7 @@ func Render(spec *nodev1.InstanceSpec, opt Options) (Result, error) {
 		}
 	}
 	envPath := filepath.Join(opt.MetaDir, "env")
-	envRaw, err := buildEnvFile(spec, opt)
+	envRaw, err := buildEnvFile(spec, opt, len(deviceCredential) > 0)
 	if err != nil {
 		return Result{}, err
 	}
@@ -303,7 +303,7 @@ func buildIdentityKeys(spec *nodev1.InstanceSpec) []byte {
 	return append(raw, '\n')
 }
 
-func buildEnvFile(spec *nodev1.InstanceSpec, opt Options) ([]byte, error) {
+func buildEnvFile(spec *nodev1.InstanceSpec, opt Options, hasDeviceCredential bool) ([]byte, error) {
 	lines := []string{
 		"AURIGA_MODE=managed",
 		"AURIGA_PROTOCOL=1",
@@ -313,8 +313,10 @@ func buildEnvFile(spec *nodev1.InstanceSpec, opt Options) ([]byte, error) {
 		"AURIGA_PLATFORM_URL=" + originURL(opt.Access.InstanceControl().Origin),
 		"AURIGA_IDENTITY_KEYS_FILE=" + ContainerIdentityKeys,
 		"AURIGA_INSTANCE_TOKEN_FILE=" + ContainerInstanceToken,
-		"AURIGA_DEVICE_CREDENTIAL_FILE=" + ContainerDeviceCredential,
 		"DSH_HOME=" + ContainerDSHHome,
+	}
+	if hasDeviceCredential {
+		lines = append(lines, "AURIGA_DEVICE_CREDENTIAL_FILE="+ContainerDeviceCredential)
 	}
 	if os.Getenv("AURIGA_AGENT_MANAGED_CA_FILE") != "" {
 		lines = append(lines, "NODE_EXTRA_CA_CERTS="+ContainerMetaRoot+"/managed-ca.pem")
