@@ -1,4 +1,22 @@
 # Shared shell integration rules. Functions are side-effect-free until called.
+
+# Normalizes a path that arrived from outside the process: environment variables, command
+# lines and dialogs can carry wrapping quotes and a trailing separator. Both make the .NET
+# path APIs throw ArgumentException, so strip them before use. Keeps a drive/UNC root intact.
+function Format-DesktopPath([string]$Path) {
+  if (-not $Path) { return $Path }
+  $value = $Path.Trim()
+  while ($value.Length -ge 2 -and (($value[0] -eq '"' -and $value[-1] -eq '"') -or ($value[0] -eq "'" -and $value[-1] -eq "'"))) {
+    $value = $value.Substring(1, $value.Length - 2).Trim()
+  }
+  $value = $value.Trim('"').Trim("'").Trim()
+  if (-not $value) { return $value }
+  # Only strip separators that are not the root itself (C:\ and \\server\share stay whole).
+  $root = [IO.Path]::GetPathRoot($value)
+  if ($root -and $root.Length -ge $value.Length) { return $value }
+  return $value.TrimEnd('\', '/')
+}
+
 function Test-DesktopPath([string]$First, [string]$Second) {
   if (-not $First -or -not $Second) { return $false }
   try {

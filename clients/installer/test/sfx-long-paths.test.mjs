@@ -58,7 +58,14 @@ test(
 if (!(Test-Path -LiteralPath (Join-Path $PSScriptRoot 'payload'))) { exit 9 }
 Write-Output '@@progress {"stage":"verify","fraction":1}'
 [IO.File]::WriteAllText($env:SFX_TEST_RESULT, 'installed')
-if ($env:SFX_FAIL) { exit 7 }
+if ($env:SFX_FAIL) {
+  # Same shape as a real PowerShell terminating error: the message comes first and the
+  # "+ FullyQualifiedErrorId" bookkeeping last. The wizard must surface the message.
+  [Console]::Error.WriteLine('Exception calling "GetFullPath" with "1" argument(s): "Illegal characters in path."')
+  [Console]::Error.WriteLine('At C:\\pkg\\install.ps1:23 char:1')
+  [Console]::Error.WriteLine('+ FullyQualifiedErrorId : ArgumentException')
+  exit 7
+}
 exit $ExitCode
 `,
     );
@@ -114,6 +121,18 @@ exit $ExitCode
     assert.match(wizard.stdout, /wizardExit=0 progress=1000/);
     t.diagnostic(wizard.stdout.trim());
     assert.equal(readFileSync(env.SFX_TEST_RESULT, 'utf8'), 'installed');
+    // Regression: a root with a trailing separator used to escape the closing quote on the
+    // install.ps1 command line, so PowerShell received `D:\X"` and died in GetFullPath with
+    // ArgumentException ("路径中具有非法字符") -- the wizard then reported a failure with no
+    // usable log. The argument must survive quoting and reach install.ps1 unchanged.
+    const trailing = run(harness, [
+      'wizard',
+      join(base, 'isolated-install-trailing') + '\\',
+    ]);
+    assert.equal(trailing.status, 0, trailing.stdout + trailing.stderr);
+    assert.match(trailing.stdout, /wizardExit=0 progress=1000 openLog=False/);
+    t.diagnostic(trailing.stdout.trim());
+    assert.equal(readFileSync(env.SFX_TEST_RESULT, 'utf8'), 'installed');
     env.SFX_FAIL = '1';
     const failedWizard = run(harness, [
       'wizard',
@@ -125,6 +144,13 @@ exit $ExitCode
       failedWizard.stdout + failedWizard.stderr,
     );
     assert.match(failedWizard.stdout, /wizardExit=7/);
+    assert.match(failedWizard.stdout, /openLog=True/);
+    // The failure page must show the real error and a usable log path, not the
+    // "+ FullyQualifiedErrorId" tail with an empty log location.
+    assert.match(failedWizard.stdout, /Illegal characters in path/);
+    assert.doesNotMatch(failedWizard.stdout, /安装日志：\s*$/m);
+    assert.doesNotMatch(failedWizard.stdout, /安装失败：\s*\+/);
+    t.diagnostic(`failed finish text: ${failedWizard.stdout.trim()}`);
     assert.equal(
       readdirSync(longTemp).some(
         (name) =>

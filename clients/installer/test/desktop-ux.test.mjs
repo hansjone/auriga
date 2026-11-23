@@ -11,6 +11,7 @@ import {
   existsSync,
   mkdirSync,
   readdirSync,
+  renameSync,
   writeFileSync,
 } from 'node:fs';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -171,6 +172,26 @@ test(
     const unlock = acquireOperationLock(lock);
     assert.equal(existsSync(owner), false);
     unlock();
+
+    // Regression (Windows LTSC / filter driver): transient EPERM on initial rename
+    // when the target lock directory does not exist yet must retry rather than throw ENOENT.
+    let transientAttempts = 0;
+    const unlockTransient = acquireOperationLock(
+      join(base, 'transient.lock'),
+      0,
+      {
+        renameSync(from, to) {
+          if (++transientAttempts === 1) {
+            throw Object.assign(new Error('transient filter hold'), {
+              code: 'EPERM',
+            });
+          }
+          return renameSync(from, to);
+        },
+      },
+    );
+    assert.equal(transientAttempts, 2);
+    unlockTransient();
 
     const a = buildPayload(base, { name: 'a' });
     const b = buildPayload(base, { name: 'b', pluginVersion: '1.1.0' });

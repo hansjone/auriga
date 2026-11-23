@@ -81,7 +81,7 @@ static class SfxPaths
             {
                 peak = Math.Max(peak, ((ProgressBar)Field(wizard, "bar")).Value);
                 if ((int)Field(wizard, "page") != 3) return;
-                Console.WriteLine("wizardExit=" + wizard.ExitCode + " progress=" + peak + " finish=" + ((Label)Field(wizard, "finishText")).Text);
+                Console.WriteLine("wizardExit=" + wizard.ExitCode + " progress=" + peak + " openLog=" + ((Control)Field(wizard, "openLog")).Visible + " finish=" + ((Label)Field(wizard, "finishText")).Text);
                 timer.Stop(); wizard.Close();
             };
             Application.Run(wizard);
