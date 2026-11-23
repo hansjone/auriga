@@ -279,7 +279,9 @@ onBeforeUnmount(() => {
     <header class="placement-head">
       <h3>{{ t('title') }}</h3>
       <HintTrigger>
-        <p><strong>{{ t('risks') }}</strong></p>
+        <p>
+          <strong>{{ t('risks') }}</strong>
+        </p>
         <p>{{ t('impact') }}</p>
         <p>{{ t('budget') }}</p>
         <p>{{ t('resources') }}</p>
