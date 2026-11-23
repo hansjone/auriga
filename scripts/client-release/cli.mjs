@@ -17,7 +17,7 @@ import { parse as parseVersion } from '../../clients/installer/runtime/semver-li
 
 const HELP = `独立客户端发行（auriga-client.cmd / Node cli.mjs）
   auriga-client keygen --out <新密钥目录>
-  auriga-client build --offline --devkit <Windows套件目录> --verify-key <独立批准发行公钥> --release-public-key <公钥.pem> --resource-trust-json <resource-roots.json> --version <SemVer> --sequence <递增整数> --out <新输出目录>
+  auriga-client build --offline --devkit <Windows套件目录> --verify-key <独立批准发行公钥> --release-public-key <公钥.pem> --resource-trust-json <resource-roots.json> --version <SemVer> --sequence <递增整数> --out <新输出目录> [--temp <临时目录>]
   auriga-client build --online --devkit <发行签名套件目录> (--verify-key <公钥> | --trust-fingerprint <指纹>) --site-devkit <新现场套件目录> [--base-pnpm-lock <原始web/pnpm-lock.yaml>] ...其余参数同 --offline
     --online：现场依赖锁（前端 pnpm、dsh-plugin 的 npm）与发行套件不一致时，联网只补变化的依赖，
     把基础套件（只读）派生为 --site-devkit，再按 --offline 同样的断网方式构建。Node/Python/DSH/Java 版本变化仍需维护方出新套件。
@@ -139,6 +139,7 @@ export async function main(argv) {
         'confirm-platform-origin',
         'site-devkit',
         'base-pnpm-lock',
+        'temp',
       ]
         .map((name) => [name, 'string'])
         .concat([

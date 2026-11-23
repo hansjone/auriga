@@ -18,6 +18,11 @@ import tools.jackson.databind.JsonNode;
  * Destination and resolved addresses are checked at socket creation, including private networks.
  */
 final class UacHttp {
+  @FunctionalInterface
+  interface DnsLookup {
+    InetAddress[] resolve(String host) throws UnknownHostException;
+  }
+
   record Response(int status, byte[] body, Map<String, List<String>> headers) {
     Response(int status, byte[] body) {
       this(status, body, Map.of());
@@ -29,33 +34,92 @@ final class UacHttp {
     }
   }
 
-  private final Map<String, Set<String>> destinations;
+  private record DestinationPolicy(Set<String> addresses, boolean dynamicAddresses) {
+    boolean allows(InetAddress address, boolean testLoopback) {
+      if (!dynamicAddresses) return addresses.contains(address.getHostAddress());
+      return isSafeDynamicAddress(address, testLoopback);
+    }
+  }
+
+  private final Map<String, DestinationPolicy> destinations;
 
   /** Empty or missing allowedDestinations: any HTTPS origin, resolved address not checked. */
   private final boolean unrestricted;
 
   private final boolean testLoopback;
+  private final DnsLookup dnsLookup;
 
   UacHttp(JsonNode settings, boolean testLoopback) {
+    this(settings, testLoopback, InetAddress::getAllByName);
+  }
+
+  UacHttp(JsonNode settings, boolean testLoopback, DnsLookup dnsLookup) {
     this.testLoopback = testLoopback;
-    Map<String, Set<String>> entries = new HashMap<>();
-    for (JsonNode entry : settings.path("allowedDestinations")) {
+    this.dnsLookup = Objects.requireNonNull(dnsLookup, "dnsLookup");
+    Map<String, DestinationPolicy> entries = new HashMap<>();
+    JsonNode list = settings.path("allowedDestinations");
+    if (!list.isMissingNode() && !list.isNull() && !list.isArray())
+      throw new IllegalArgumentException("Invalid UAC destination allowlist");
+    for (JsonNode entry : list) {
+      if (!entry.isObject() || !entry.path("origin").isString())
+        throw new IllegalArgumentException("Invalid UAC destination allowlist");
       URI origin = URI.create(entry.path("origin").asString());
+      if (origin.getHost() == null || origin.getScheme() == null)
+        throw new IllegalArgumentException("Invalid UAC destination allowlist");
+      JsonNode dynamicNode = entry.path("allowDynamicAddresses");
+      if (!dynamicNode.isMissingNode() && !dynamicNode.isBoolean())
+        throw new IllegalArgumentException("Invalid UAC destination allowlist");
+      boolean dynamicAddresses = dynamicNode.asBoolean(false);
+      JsonNode addressesNode = entry.path("addresses");
+      if (!addressesNode.isMissingNode() && !addressesNode.isNull() && !addressesNode.isArray())
+        throw new IllegalArgumentException("Invalid UAC address allowlist");
       Set<String> addresses = new HashSet<>();
-      for (JsonNode value : entry.path("addresses")) {
-        try {
-          if (!value.asString().matches("[0-9a-fA-F:.]+")) throw new IllegalArgumentException();
-          addresses.add(InetAddress.getByName(value.asString()).getHostAddress());
-        } catch (UnknownHostException e) {
+      for (JsonNode value : addressesNode) {
+        if (!value.isString() || !value.asString().matches("[0-9a-fA-F:.]+"))
           throw new IllegalArgumentException("Invalid UAC address allowlist");
+        try {
+          addresses.add(InetAddress.ofLiteral(value.asString()).getHostAddress());
+        } catch (IllegalArgumentException e) {
+          throw new IllegalArgumentException("Invalid UAC address allowlist", e);
         }
       }
-      if (addresses.isEmpty() || origin.getHost() == null)
+      if (dynamicAddresses) {
+        if (!addresses.isEmpty() || parseLiteralAddress(origin.getHost()) != null)
+          throw new IllegalArgumentException("Invalid UAC destination allowlist");
+      } else if (addresses.isEmpty()) {
         throw new IllegalArgumentException("Invalid UAC destination allowlist");
-      entries.put(origin(origin), Set.copyOf(addresses));
+      }
+      String key = origin(origin);
+      if (entries.putIfAbsent(key, new DestinationPolicy(Set.copyOf(addresses), dynamicAddresses))
+          != null) throw new IllegalArgumentException("Invalid UAC destination allowlist");
     }
     destinations = Map.copyOf(entries);
     unrestricted = destinations.isEmpty();
+  }
+
+  static boolean isSafeDynamicAddress(InetAddress address, boolean testLoopback) {
+    if (testLoopback && address.isLoopbackAddress()) return true;
+    if (address.isAnyLocalAddress()
+        || address.isLoopbackAddress()
+        || address.isLinkLocalAddress()
+        || address.isMulticastAddress()) return false;
+    byte[] bytes = address.getAddress();
+    if (bytes.length == 4) {
+      int first = bytes[0] & 0xff;
+      return first != 0 && first < 224;
+    }
+    return true;
+  }
+
+  private static InetAddress parseLiteralAddress(String host) {
+    if (host == null || host.isEmpty()) return null;
+    String candidate =
+        host.startsWith("[") && host.endsWith("]") ? host.substring(1, host.length() - 1) : host;
+    try {
+      return InetAddress.ofLiteral(candidate);
+    } catch (IllegalArgumentException ignored) {
+      return null;
+    }
   }
 
   void validate(URI uri, boolean base) {
@@ -92,6 +156,30 @@ final class UacHttp {
         Context.ROOT);
   }
 
+  InetAddress[] resolve(URI uri) throws UnknownHostException {
+    validate(uri, false);
+    DestinationPolicy policy = destinations.get(origin(uri));
+    InetAddress literal = parseLiteralAddress(uri.getHost());
+    if (literal != null) {
+      if (policy != null && !policy.allows(literal, testLoopback))
+        throw new UnknownHostException("UAC destination rejected");
+      return new InetAddress[] {literal};
+    }
+    return resolveHost(policy, uri.getHost());
+  }
+
+  private InetAddress[] resolveHost(DestinationPolicy policy, String host)
+      throws UnknownHostException {
+    InetAddress[] resolved = dnsLookup.resolve(host);
+    if (resolved == null || resolved.length == 0)
+      throw new UnknownHostException("UAC destination rejected");
+    if (policy != null)
+      for (InetAddress address : resolved)
+        if (!policy.allows(address, testLoopback))
+          throw new UnknownHostException("UAC destination rejected");
+    return resolved;
+  }
+
   Response execute(
       URI uri,
       String method,
@@ -103,25 +191,16 @@ final class UacHttp {
       throws IOException {
     validate(uri, false);
     if (context.isCancelled()) throw new java.io.InterruptedIOException("UAC request cancelled");
-    Set<String> allowed = destinations.get(origin(uri));
+    DestinationPolicy policy = destinations.get(origin(uri));
     // A numeric HttpHost may bypass the DNS resolver in an HTTP transport.
-    // Apply the same pin before connecting in that case as well.
-    InetAddress literal = null;
-    try {
-      literal = InetAddress.ofLiteral(uri.getHost());
-    } catch (IllegalArgumentException ignored) {
-    }
-    if (literal != null && !allowed.contains(literal.getHostAddress()))
+    // Apply the same policy before connecting in that case as well.
+    InetAddress literal = parseLiteralAddress(uri.getHost());
+    if (literal != null && policy != null && !policy.allows(literal, testLoopback))
       throw new UnknownHostException("UAC destination rejected");
     DnsResolver resolver =
         new DnsResolver() {
           public InetAddress[] resolve(String host) throws UnknownHostException {
-            InetAddress[] resolved = InetAddress.getAllByName(host);
-            if (allowed != null)
-              for (InetAddress address : resolved)
-                if (!allowed.contains(address.getHostAddress()))
-                  throw new UnknownHostException("UAC destination rejected");
-            return resolved;
+            return resolveHost(policy, host);
           }
 
           public String resolveCanonicalHostname(String host) {

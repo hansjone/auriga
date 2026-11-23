@@ -78,28 +78,25 @@ func nasInputDigest(raw []byte, peer, subnet string, registry int, lanIP, lanSub
 	return hex.EncodeToString(h.Sum(nil))
 }
 
-func writeRuntimeMaterials(out string, m *runtimebundle.Material, memory int64) error {
-	if m == nil {
-		return nil
-	}
-	// This public file was just created by this installation, under the guard;
+func buildRuntimeInstanceSpec(out string, m *runtimebundle.Material, memory int64) (*nodev1.InstanceSpec, error) {
+	// This public file was created by this installation, under the guard;
 	// publisher material supplies neither this key nor any installation secret.
 	raw, err := os.ReadFile(filepath.Join(out, "identity-keys.json"))
 	if err != nil {
-		return err
+		return nil, err
 	}
 	var identity struct {
 		Keys []struct{ Kid, Alg, X string }
 	}
 	if err := json.Unmarshal(raw, &identity); err != nil || len(identity.Keys) != 1 {
-		return fmt.Errorf("invalid installation public identity")
+		return nil, fmt.Errorf("invalid installation public identity")
 	}
 	key := identity.Keys[0]
 	public, err := base64.RawURLEncoding.DecodeString(key.X)
 	if err != nil || len(public) != 32 || key.Alg != "EdDSA" || key.Kid == "" {
-		return fmt.Errorf("invalid installation public identity")
+		return nil, fmt.Errorf("invalid installation public identity")
 	}
-	spec := &nodev1.InstanceSpec{
+	return &nodev1.InstanceSpec{
 		Runtime:   nodev1.RuntimeKind_RUNTIME_KIND_DOCKER,
 		Resources: &nodev1.Resources{CpuMillis: 500, MemoryMb: memory, DiskGb: 1, Pids: 128},
 		Dsh:       m.Runtime(),
@@ -110,6 +107,16 @@ func writeRuntimeMaterials(out string, m *runtimebundle.Material, memory int64) 
 		}},
 		Secrets: &nodev1.Secrets{IdentityKeys: []*nodev1.IdentityPublicKey{{Kid: key.Kid, Alg: key.Alg, PublicKey: public}}},
 		Labels:  map[string]string{"template": "real-dsh"},
+	}, nil
+}
+
+func writeRuntimeMaterials(out string, m *runtimebundle.Material, memory int64) error {
+	if m == nil {
+		return nil
+	}
+	spec, err := buildRuntimeInstanceSpec(out, m, memory)
+	if err != nil {
+		return err
 	}
 	template, err := proto.MarshalOptions{Deterministic: true}.Marshal(spec)
 	if err != nil {
@@ -146,5 +153,5 @@ func writeRuntimePolicy(out, image string, memory int64) {
 	// The verified locator has already passed the production image parser. This
 	// only separates its repository for the existing prefix policy field.
 	repo, _, _ := strings.Cut(image, "@")
-	writeFile(filepath.Join(out, "agent-policy.yaml"), []byte(fmt.Sprintf("allowedImageRepos:\n  - %q\nallowedImageRefs:\n  - %q\nmaxCPUMillis: 500\nmaxMemoryMB: %d\nmaxPIDs: 128\nmaxArtifactBytes: 2147483648\n", repo, image, memory)), 0o644)
+	writeFile(filepath.Join(out, "agent-policy.yaml"), []byte(fmt.Sprintf("allowedImageRepos:\n  - %q\nallowedImageRefs:\n  - %q\nmaxCPUMillis: 500\nmaxMemoryMB: %d\nmaxPIDs: 128\nmaxArtifactBytes: 2147483648\nlabels:\n  template: real-dsh\n", repo, image, memory)), 0o644)
 }

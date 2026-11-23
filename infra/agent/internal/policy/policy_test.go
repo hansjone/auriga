@@ -244,3 +244,86 @@ func TestLoadImageExactReferences(t *testing.T) {
 		})
 	}
 }
+
+func TestLoadLabels(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "agent-policy.yaml")
+	raw := "labels:\n  template: real-dsh\n  tier/node: nas-01\n"
+	if err := os.WriteFile(path, []byte(raw), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	p, err := policy.Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(p.Labels) != 2 || p.Labels["template"] != "real-dsh" || p.Labels["tier/node"] != "nas-01" {
+		t.Fatalf("unexpected labels: %#v", p.Labels)
+	}
+
+	emptyPath := filepath.Join(t.TempDir(), "empty-labels.yaml")
+	if err := os.WriteFile(emptyPath, []byte("labels: {}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	p, err = policy.Load(emptyPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.Labels != nil {
+		t.Fatalf("empty labels should normalize to nil: %#v", p.Labels)
+	}
+}
+
+func TestLoadLabelsRejectsInvalid(t *testing.T) {
+	cases := []struct {
+		name string
+		yaml string
+	}{
+		{name: "reserved_shared_runtime", yaml: "labels:\n  auriga.shared-dsh-runtime: prepare-v1\n"},
+		{name: "reserved_shared_process", yaml: "labels:\n  auriga.shared-dsh-process: persistent-v1\n"},
+		{name: "reserved_uppercase", yaml: "labels:\n  AURIGA.custom: yes\n"},
+		{name: "empty_key", yaml: "labels:\n  \"\": real-dsh\n"},
+		{name: "empty_value", yaml: "labels:\n  template: \"\"\n"},
+		{name: "invalid_key_chars", yaml: "labels:\n  \"bad key\": real-dsh\n"},
+		{name: "invalid_value_chars", yaml: "labels:\n  template: \"real dsh\"\n"},
+		{name: "value_leading_dash", yaml: "labels:\n  template: \"-real-dsh\"\n"},
+		{name: "key_too_long", yaml: "labels:\n  " + strings.Repeat("a", policy.MaxLabelKeyLength+1) + ": ok\n"},
+		{name: "value_too_long", yaml: "labels:\n  template: " + strings.Repeat("v", policy.MaxLabelValueLength+1) + "\n"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "agent-policy.yaml")
+			if err := os.WriteFile(path, []byte(tc.yaml), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := policy.Load(path); err == nil {
+				t.Fatalf("expected error for %s", tc.name)
+			}
+		})
+	}
+}
+
+func TestParseLabelsEnv(t *testing.T) {
+	got, err := policy.ParseLabelsEnv("")
+	if err != nil || got != nil {
+		t.Fatalf("empty env = %#v, %v", got, err)
+	}
+	got, err = policy.ParseLabelsEnv(" template = real-dsh , zone=nas-1 ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 || got["template"] != "real-dsh" || got["zone"] != "nas-1" {
+		t.Fatalf("parsed = %#v", got)
+	}
+	for _, bad := range []string{
+		"template",
+		"template=",
+		"=real-dsh",
+		"template=real-dsh,",
+		"template=a,template=b",
+		"auriga.shared-dsh-runtime=prepare-v1",
+		"template=bad value",
+	} {
+		if _, err := policy.ParseLabelsEnv(bad); err == nil {
+			t.Fatalf("ParseLabelsEnv(%q) expected error", bad)
+		}
+	}
+}

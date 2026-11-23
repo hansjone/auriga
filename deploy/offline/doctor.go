@@ -136,9 +136,15 @@ func doctor(s state) error {
 	if err := readJSON(filepath.Join(s.Package, "offline-release.json"), &r); err == nil && r.Desktop == nil {
 		fmt.Println("SKIP 桌面发行 — 未随包附带，桌面端验收待单独执行")
 	} else {
-		check("桌面发行", "将公钥根传给桌面构建 --resource-trust-json，导入已签名桌面发行。", func() error {
-			return errors.New("桌面包待正常管理台导入及真实客户端安装验收")
+		var desktopSummary string
+		check("桌面发行", "将公钥根传给桌面构建 --resource-trust-json，通过管理台导入已签名桌面发行。", func() error {
+			var err error
+			desktopSummary, err = desktopReleaseCheck(s)
+			return err
 		})
+		if desktopSummary != "" {
+			fmt.Printf("  %s\n", desktopSummary)
+		}
 	}
 	fmt.Printf("doctor 结束，失败项 %d。输出不含凭据。\n", failures)
 	if failures > 0 {
@@ -275,4 +281,112 @@ func loginProbe(s state) error {
 	}
 	args = append(args, "--entrypoint", "python", s.Images["OPERATOR"], "/tools/oneclick-doctor.py")
 	return command(nil, os.Stdout, nil, "docker", args...)
+}
+
+type desktopReleaseManifest struct {
+	Version   string `json:"version"`
+	Sequence  int64  `json:"sequence"`
+	SizeBytes int64  `json:"sizeBytes"`
+	SHA256    string `json:"sha256"`
+}
+
+type desktopReleaseItem struct {
+	Manifest  desktopReleaseManifest `json:"manifest"`
+	Withdrawn bool                   `json:"withdrawn"`
+}
+
+type desktopReleaseState struct {
+	Items []desktopReleaseItem `json:"items"`
+}
+
+func desktopPublisherTenant(s state) (string, error) {
+	tenant := strings.TrimSpace(s.DesktopPublisherTenant)
+	if tenant == "" && s.Data != "" {
+		envPath := filepath.Join(s.Data, "stack.env")
+		if err := noSymlinks(envPath); err == nil {
+			if raw, err := os.ReadFile(envPath); err == nil {
+				for _, line := range strings.Split(string(raw), "\n") {
+					line = strings.TrimSpace(line)
+					if strings.HasPrefix(line, "AURIGA_DESKTOP_PUBLISHER_TENANT_ID=") {
+						tenant = strings.TrimSpace(strings.TrimPrefix(line, "AURIGA_DESKTOP_PUBLISHER_TENANT_ID="))
+						break
+					}
+				}
+			}
+		}
+	}
+	if !desktopTenant.MatchString(tenant) || tenant == "00000000-0000-0000-0000-000000000000" {
+		return "", errors.New("未配置有效的桌面发行租户，请先配置桌面发行公钥与租户并通过管理台导入已签名桌面发行")
+	}
+	return tenant, nil
+}
+
+// desktopReleaseCheck 校验 <data>/desktop/<publisherTenant>/state.json 中最新未撤回的桌面发行记录
+// 及其对应的 <sha256>.exe 安装包（无符号链接、文件存在、大小与 SHA-256 均匹配）。
+func desktopReleaseCheck(s state) (string, error) {
+	tenant, err := desktopPublisherTenant(s)
+	if err != nil {
+		return "", err
+	}
+	tenantDir := filepath.Join(s.Data, "desktop", tenant)
+	statePath := filepath.Join(tenantDir, "state.json")
+	if err := noSymlinks(statePath); err != nil {
+		return "", err
+	}
+	info, err := os.Lstat(statePath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return "", errors.New("尚未导入桌面发行（缺少 state.json），请通过管理台导入已签名桌面发行")
+		}
+		return "", err
+	}
+	if !info.Mode().IsRegular() {
+		return "", errors.New("桌面发行台账 state.json 不是普通文件")
+	}
+	var ledger desktopReleaseState
+	if err := readJSONLoose(statePath, &ledger); err != nil {
+		return "", fmt.Errorf("桌面发行台账 state.json 解析失败：%w", err)
+	}
+	var best *desktopReleaseManifest
+	for i := range ledger.Items {
+		item := ledger.Items[i]
+		if item.Withdrawn || item.Manifest.Sequence < 1 {
+			continue
+		}
+		if best == nil || item.Manifest.Sequence > best.Sequence {
+			candidate := item.Manifest
+			best = &candidate
+		}
+	}
+	if best == nil {
+		return "", errors.New("尚无未撤回的桌面发行记录，请通过管理台导入已签名桌面发行")
+	}
+	if strings.TrimSpace(best.Version) == "" || best.SizeBytes < 1 || !hex64.MatchString(best.SHA256) {
+		return "", fmt.Errorf("桌面发行记录（sequence %d）元数据不完整或无效", best.Sequence)
+	}
+	blobPath := filepath.Join(tenantDir, best.SHA256+".exe")
+	if err := noSymlinks(blobPath); err != nil {
+		return "", err
+	}
+	blobInfo, err := os.Lstat(blobPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return "", fmt.Errorf("桌面安装包缺失：%s.exe", best.SHA256)
+		}
+		return "", err
+	}
+	if !blobInfo.Mode().IsRegular() {
+		return "", fmt.Errorf("桌面安装包不是普通文件：%s.exe", best.SHA256)
+	}
+	if blobInfo.Size() != best.SizeBytes {
+		return "", fmt.Errorf("桌面安装包大小不符：记录 %d 字节，实际 %d 字节", best.SizeBytes, blobInfo.Size())
+	}
+	actual, err := digest(blobPath)
+	if err != nil {
+		return "", err
+	}
+	if actual != best.SHA256 {
+		return "", fmt.Errorf("桌面安装包 SHA-256 不符：记录 %s，实际 %s", best.SHA256, actual)
+	}
+	return fmt.Sprintf("已发布 %s（sequence %d，%d 字节，摘要校验通过；真实客户端安装验收仍由桌面端单独执行）", best.Version, best.Sequence, best.SizeBytes), nil
 }

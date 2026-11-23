@@ -157,6 +157,10 @@ func runAgent(args []string, logs io.Writer) error {
 	if err != nil {
 		return fmt.Errorf("load policy: %w", err)
 	}
+	nodeLabels, err := resolveNodeLabels(pol, os.Getenv("AURIGA_AGENT_LABELS"))
+	if err != nil {
+		return fmt.Errorf("resolve node labels: %w", err)
+	}
 	var surface instanceSurface
 	dockerCfg := runtime.DockerConfig{DataRoot: cfg.DataRoot, Policy: pol}
 	if driverName != "fake" {
@@ -239,6 +243,7 @@ func runAgent(args []string, logs io.Writer) error {
 		Store:         store,
 		AllowInsecure: cfg.AllowInsecure,
 		Capacity:      helloCapacity(cfg.DetectCapacity()),
+		Labels:        nodeLabels,
 		SharedPools:   shared,
 		SharedRuntime: poolRuntime,
 		OnWelcome: func(welcome *nodev1.Welcome) {
@@ -382,4 +387,27 @@ func helloCapacity(c config.Capacity) *nodev1.Capacity {
 		out.MaxInstances = &max
 	}
 	return out
+}
+
+// resolveNodeLabels merges optional AURIGA_AGENT_LABELS with agent-policy.yaml labels.
+// Policy labels take precedence over environment labels.
+func resolveNodeLabels(pol policy.Policy, envRaw string) (map[string]string, error) {
+	if err := policy.ValidateLabels(pol.Labels); err != nil {
+		return nil, err
+	}
+	envLabels, err := policy.ParseLabelsEnv(envRaw)
+	if err != nil {
+		return nil, err
+	}
+	if len(envLabels) == 0 && len(pol.Labels) == 0 {
+		return nil, nil
+	}
+	out := make(map[string]string, len(envLabels)+len(pol.Labels))
+	for k, v := range envLabels {
+		out[k] = v
+	}
+	for k, v := range pol.Labels {
+		out[k] = v
+	}
+	return out, nil
 }

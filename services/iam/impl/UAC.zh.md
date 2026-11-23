@@ -52,7 +52,13 @@ SSO 退出抑制使用 host-only 会话 Cookie；HTTPS 带 `__Host-`、Secure、
 
 部署 JSON 的 `constants` 最多 32 个字符串，操作 `derived` 最多 16 项，仅允许 md5/sha256 与模板拼接，无脚本求值；不能覆盖系统坐标/凭据变量，未知模板拒绝启用。`headers` 可在 qr/department 中配置私有静态或模板头，不从浏览器透传任何 header；代码不会自动附加我方内部身份/追踪头，部署方也不得在私有映射中配置这些内部凭据。Cookie 项支持 `urlEncoded`、JSON `pointer`；UDS 可配置独立 `clientIP` Cookie 项，缺失时使用服务器固定 IP 或空串。IP 必须为合法数字地址，不查 DNS。`diagnostics.originSystemCodeEmpty` 只声明布尔能力；未声明则导出 null，不导出私有常量原值。自定义适配器 `diagnosticCapabilities()` 同样仅允许固定布尔能力。
 
-允许列表同时核对 origin 和 socket 实际 DNS 地址；地址集合变化时必须显式更新私有配置。`allowedDestinations` 为空或缺省时不限制 origin、不校验 UAC 服务器 IP（仍只允许 HTTPS）。生产仅允许 HTTPS，禁止重定向、自动重试和自动 Cookie jar。连接/响应/整体超时及响应体大小有界。token-verify 使用固定请求规范与响应判定：合法完整响应的明确业务/身份拒绝才失效，HTTP/解析/协议异常按持久预算重试。只有 code.code 与 bo.code 均为字符串 0000 才判候选成功。优先使用 other.token，仅字段缺失才读 bo.token；显式非法字段不回退。可选 bo.user 若存在须匹配已验证工号；SSO 使用匹配回显的原有写法来走与扫码一致的绑定，缺回显才用已验证的请求工号。会话复验不改写既有绑定。新令牌允许与旧令牌相同，以凭据版本 CAS 原子替换。MD5 仅用于既有企业协议的请求校验。
+`allowedDestinations` 支持三种白名单模式，按安全严格程度依次为：
+
+1. **静态 IP 钉住模式（默认推荐，最严格）**：条目配置 `origin` 与非空 `addresses` 列表（如 `{"origin":"https://identity.example.com","addresses":["192.0.2.10"]}`），同时核对 origin 精确匹配和 socket 实际 DNS 解析出的全部 IP；适合固定 IP 部署，地址集合变化时必须显式更新私有配置。
+2. **Host 级白名单 + 动态 DNS 模式**：条目配置域名 `origin` 与 `"allowDynamicAddresses": true`（如 `{"origin":"https://uac.corp.example","allowDynamicAddresses":true}`），且不得同时提供非空 `addresses`、不得使用字面 IP 作为 `origin`；未显式开启 `allowDynamicAddresses` 时，空 `addresses` 仍拒绝配置。适合多 IP 轮询或弹性扩容的企业域名：仍严格限制请求 origin（生产仅允许 HTTPS），每次 DNS 解析不钉死静态 IP，但拒绝回环、链路本地、未指定（含 `0.0.0.0/8`）、组播及保留/广播地址（允许企业内网 RFC1918 / ULA 与公网地址；任一解析结果命中危险地址即拒绝）。（注：`sharedOutbound.allowedDestinations` 仍要求静态 `addresses` 钉住。）
+3. **空列表无限制模式**：`allowedDestinations` 为空数组 `[]` 或缺省时不限制 origin、不校验 UAC 服务器 IP（仍只允许 HTTPS）。**仅限受控内网环境且明确接受 SSRF 边界放宽时使用，公网部署禁止使用。**
+
+生产仅允许 HTTPS，禁止重定向、自动重试和自动 Cookie jar。连接/响应/整体超时及响应体大小有界。token-verify 使用固定请求规范与响应判定：合法完整响应的明确业务/身份拒绝才失效，HTTP/解析/协议异常按持久预算重试。只有 code.code 与 bo.code 均为字符串 0000 才判候选成功。优先使用 other.token，仅字段缺失才读 bo.token；显式非法字段不回退。可选 bo.user 若存在须匹配已验证工号；SSO 使用匹配回显的原有写法来走与扫码一致的绑定，缺回显才用已验证的请求工号。会话复验不改写既有绑定。新令牌允许与旧令牌相同，以凭据版本 CAS 原子替换。MD5 仅用于既有企业协议的请求校验。
 
 ## 密钥轮换
 

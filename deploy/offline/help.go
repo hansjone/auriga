@@ -159,6 +159,12 @@ func tryHelp(args []string) (done bool, err error) {
 		err = keygenCommand([]string{"site", "--help"})
 	case "trust":
 		err = trustCommand([]string{"add-site-key", "x", "--help"})
+	case "runtime":
+		if sub == "attach" {
+			_, err = parseRuntimeAttach(h)
+		} else {
+			fmt.Fprint(helpOut, runtimeHelp)
+		}
 	case "deploy":
 		_, err = parseDeploy(h)
 	case "adopt":
@@ -215,6 +221,13 @@ Windows 客户端加 --client（或 baseline --client）：只读固定的 %Prog
 经 sudo 调用时拒绝 --config 与 --source；root 直接运行时可用。各子命令用 --help 查看参数。
 `
 
+const runtimeHelp = `用法：./auriga runtime attach --bundle <目录> --root <root.pb> --image <repo@sha256:...> [--data <数据目录>] [--no-restart]
+对已安装且尚未登记 DSH 运行时的站点受控追加运行时（需要 root）。
+  attach  先用 runtime-release verify 校验，再通过 auriga-nas-bootstrap 写入独立的 config/runtime-source，
+          不修改已封存的 config/materials 及 bootstrap.receipt，并持久化快照与 state.json。
+          已有 runtime 的站点不能用 attach 换根，请走 runtime-upgrade。
+`
+
 const clientHelp = `用法：./auriga client build --version <SemVer> [--channel stable|beta] [--sequence <整数>] [--source <源码根>]
 Windows 客户端薄壳（设计 D13）。读 site.json 的 client 段与 deps.cache/kits，解析现场套件后调用同一套 auriga-client 离线构建。
   --version 必填；sequence 取 client.platformOrigin 公开 /api/resource/v1/desktop/latest（stable、beta）可见最大序号 +1，
@@ -254,6 +267,7 @@ func printTopHelp(w io.Writer) {
   deps status|fetch|import   依赖缓存：看缺什么、按配置的依赖源补 Go/Web 依赖、导入手工缓存或套件
   deps … --client / baseline --client  Windows 客户端依赖与系统工具基线（转调 site-deps.mjs）
   deploy [<提交号>]          本机全量构建并部署（无 state 时首次安装）；失败且数据未被触碰时自动回滚
+  runtime attach             对已安装站点受控追加 DSH 运行时（写入独立 config/runtime-source，不破坏原收据）
   adopt --stack-env … --deploy-nas …  接管已有 deploy-nas 站点（建立 state，不重启；不在 sudo 工作流白名单）
   rollback [--to <序号>]     退回保留的历史发行（deploy、upgrade 与 adopt 产生的都可以；数据须与目标运行时相同）
   history                    列出部署历史与当前发行
@@ -587,6 +601,17 @@ func init() {
 			"previous-devkit":       "上一版完整累积套件目录（与 --new-baseline 二选一）",
 			"new-baseline":          "以本次为新基线开发套件",
 			"max-devkit-bytes":      "开发套件总大小上限（字节）",
+		},
+	}
+	helpSpecs["runtime attach"] = helpSpec{
+		usage:   "./auriga runtime attach --bundle <目录> --root <root.pb> --image <repo@sha256:...> [--data <数据目录>] [--no-restart]",
+		summary: "对已安装且尚未登记 DSH 运行时的站点受控追加运行时（写入独立的 config/runtime-source，不修改原始 config/materials 收据）。",
+		docs: map[string]string{
+			"bundle":     "已签名的运行时公开发布目录（必填）",
+			"root":       "维护者独立批准的外部运行时根公钥 root.pb（必填）",
+			"image":      "精确的运行时镜像 repo@sha256:<digest>（必填）",
+			"data":       "数据目录或父目录",
+			"no-restart": "仅登记并写入 runtime-source，不自动执行 render/start",
 		},
 	}
 	helpSpecs["release upload"] = helpSpec{

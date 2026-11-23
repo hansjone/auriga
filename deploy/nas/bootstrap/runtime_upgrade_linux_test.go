@@ -154,3 +154,77 @@ func testNASRuntimeUpgradeLifecycle(t *testing.T) {
 	}
 	run("path", "", "", false)
 }
+
+func TestNASRuntimeAttachLifecycle(t *testing.T) {
+	if os.Geteuid() != 0 {
+		t.Skip("requires Linux root and fixed uid10001")
+	}
+	parent, err := os.MkdirTemp("", "auriga-runtime-attach-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = os.RemoveAll(parent) }()
+	if err := os.Chmod(parent, 0755); err != nil {
+		t.Fatal(err)
+	}
+	binary := filepath.Join(parent, "bootstrap")
+	if b, err := exec.Command("go", "build", "-o", binary, ".").CombinedOutput(); err != nil {
+		t.Fatalf("build: %v %s", err, b)
+	}
+	r, _ := runtimeTestFixture(t, parent)
+	base := filepath.Join(parent, "materials")
+	// Install without runtime first (existing site without DSH runtime).
+	baseArgs := []string{"-out", base, "-access-file", "../access-ip.example.json", "-edge-peer-ip", "192.0.2.138", "-internal-subnet", "192.0.2.128/26", "-lan-ip", "192.0.2.10", "-lan-subnet", "192.0.2.0/26"}
+	if b, err := exec.Command(binary, baseArgs...).CombinedOutput(); err != nil {
+		t.Fatalf("install without runtime: %v %s", err, b)
+	}
+	before := nasSnapshot(t, base)
+	out := filepath.Join(parent, "runtime-source")
+	run := func(ok bool, extra ...string) string {
+		t.Helper()
+		a := append([]string{"runtime-upgrade", "-base", base, "-out", out}, extra...)
+		b, err := exec.Command("sh", append([]string{"-c", `umask 077; exec "$@"`, "sh", binary}, a...)...).CombinedOutput()
+		if (err == nil) != ok {
+			t.Fatalf("%v: %v %s", extra, err, b)
+		}
+		if nasSnapshot(t, base) != before {
+			t.Fatal("sealed base changed")
+		}
+		return strings.TrimSpace(string(b))
+	}
+	// Before attach: path falls back to base, stage is refused.
+	if got := run(true, "-action", "path"); got != base {
+		t.Fatalf("expected base before attach, got %s", got)
+	}
+	run(false, "-action", "stage", "-bundle", r.bundle, "-image", r.image)
+	// Attach with wrong image fails; valid attach succeeds.
+	run(false, "-action", "attach", "-bundle", r.bundle, "-root", r.root, "-image", r.image+"bad")
+	run(true, "-action", "attach", "-bundle", r.bundle, "-root", r.root, "-image", r.image)
+	active := run(true, "-action", "path")
+	if active == base || !strings.HasPrefix(active, out+"/s-") {
+		t.Fatalf("unexpected attached path: %s", active)
+	}
+	// Re-running bootstrap on base still passes receipt validation (no unknown NAS source leaf).
+	if b, err := exec.Command(binary, baseArgs...).CombinedOutput(); err != nil {
+		t.Fatalf("base receipt re-check after attach failed: %v %s", err, b)
+	}
+	// Second attach is refused (cannot replace pinned root).
+	run(false, "-action", "attach", "-bundle", r.bundle, "-root", r.root, "-image", r.image)
+	// Subsequent runtime-upgrade stage/commit works against the attached root.
+	dir := filepath.Dir(r.bundle)
+	nextBundle := filepath.Join(dir, "release8")
+	if _, err := runtimebundle.Sign(runtimebundle.SignOptions{
+		Image: r.image, ArtifactID: "dsh-test-linux-amd64", Version: "1.2.4", OS: "linux", Arch: "amd64",
+		Sequence: 8, IssuedAt: timestamppb.New(time.Now().Add(-time.Minute)), RootPath: r.root,
+		PrivateKeyPath: filepath.Join(dir, "publisher.pem"), ManifestPath: filepath.Join(dir, "manifest.json"),
+		ConfigPath: filepath.Join(dir, "config.json"), OutputDir: nextBundle,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	run(true, "-action", "stage", "-bundle", nextBundle, "-image", r.image)
+	upgraded := run(true, "-action", "path")
+	if upgraded == active || !strings.HasPrefix(upgraded, out+"/s-00000000000000000008") {
+		t.Fatalf("unexpected upgraded path: %s", upgraded)
+	}
+	run(true, "-action", "commit", "-bundle", nextBundle, "-image", r.image)
+}

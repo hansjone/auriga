@@ -58,6 +58,11 @@ case "${1:-}" in
     [ "$_action" = path ] || set -- "$@" -operator-jar-sha256 "${AURIGA_COLLAB_OPERATOR_JAR_SHA256:-}"
     [ -z "${NAS_COLLAB_ROTATION_INPUT:-}" ] || set -- "$@" -input "$NAS_COLLAB_ROTATION_INPUT"
     exec "$(bootstrap_binary)" collab-rotation "$@" ;;
+  runtime-attach)
+    exec "$(bootstrap_binary)" runtime-upgrade -action attach \
+      -base "$AURIGA_DATA_ROOT/config/materials" -out "$AURIGA_DATA_ROOT/config/runtime-source" \
+      -bundle "${NAS_RUNTIME_UPGRADE_BUNDLE:?}" -root "${NAS_RUNTIME_UPGRADE_ROOT:?}" \
+      -image "${NAS_RUNTIME_UPGRADE_IMAGE:?}" -instance-max-memory-mb "${AURIGA_INSTANCE_MAX_MEMORY_MB-512}" ;;
   runtime-path|runtime-stage|runtime-commit|runtime-rollback)
     _action=${1#runtime-}
     set -- -action "$_action" -base "$AURIGA_DATA_ROOT/config/materials" -out "$AURIGA_DATA_ROOT/config/runtime-source"

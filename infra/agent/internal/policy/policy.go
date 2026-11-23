@@ -37,6 +37,9 @@ type Policy struct {
 	AllowAnyArtifact bool `yaml:"allowAnyArtifact"`
 	// AllowAnyImage disables image registry checks (unit tests only).
 	AllowAnyImage bool `yaml:"allowAnyImage"`
+	// Labels are operator-configured node labels advertised in Hello.Labels.
+	// Reserved auriga.* capability labels are rejected.
+	Labels map[string]string `yaml:"labels"`
 
 	ArtifactConnectTimeout time.Duration `yaml:"-"`
 	ArtifactTotalTimeout   time.Duration `yaml:"-"`
@@ -89,6 +92,11 @@ func Load(path string) (Policy, error) {
 		p.ArtifactTotalTimeout = 10 * time.Minute
 	}
 	p.AllowedArtifactURLPrefixes = NormalizeURLPrefixes(p.AllowedArtifactURLPrefixes)
+	if len(p.Labels) == 0 {
+		p.Labels = nil
+	} else if err := ValidateLabels(p.Labels); err != nil {
+		return Policy{}, err
+	}
 	// AllowAny* from YAML is ignored in production loads — only tests set them in code.
 	p.AllowAnyArtifact = false
 	p.AllowAnyImage = false
@@ -196,4 +204,101 @@ func (p Policy) AllowImage(image string) error {
 		}
 	}
 	return fmt.Errorf("policy: image repository not allowlisted")
+}
+
+const (
+	MaxLabelKeyLength   = 128
+	MaxLabelValueLength = 63
+)
+
+// IsReservedLabelKey reports whether key uses the platform-reserved auriga.* prefix.
+func IsReservedLabelKey(key string) bool {
+	return strings.HasPrefix(strings.ToLower(key), "auriga.")
+}
+
+// ValidateLabel validates a single operator-configured node label key and value.
+func ValidateLabel(key, value string) error {
+	if key == "" {
+		return fmt.Errorf("policy: label key must not be empty")
+	}
+	if len(key) > MaxLabelKeyLength {
+		return fmt.Errorf("policy: label key %q exceeds %d bytes", key, MaxLabelKeyLength)
+	}
+	if IsReservedLabelKey(key) {
+		return fmt.Errorf("policy: label key %q uses reserved prefix %q", key, "auriga.")
+	}
+	if !validLabelToken(key, true) {
+		return fmt.Errorf("policy: label key %q contains invalid characters", key)
+	}
+	if value == "" {
+		return fmt.Errorf("policy: label %q value must not be empty", key)
+	}
+	if len(value) > MaxLabelValueLength {
+		return fmt.Errorf("policy: label %q value exceeds %d bytes", key, MaxLabelValueLength)
+	}
+	if !validLabelToken(value, false) {
+		return fmt.Errorf("policy: label %q value %q contains invalid characters", key, value)
+	}
+	return nil
+}
+
+// ValidateLabels validates all entries in an operator-configured label map.
+func ValidateLabels(labels map[string]string) error {
+	for k, v := range labels {
+		if err := ValidateLabel(k, v); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// ParseLabelsEnv parses a comma-separated "k1=v1,k2=v2" label list and validates each pair.
+func ParseLabelsEnv(raw string) (map[string]string, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil, nil
+	}
+	parts := strings.Split(raw, ",")
+	out := make(map[string]string, len(parts))
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			return nil, fmt.Errorf("policy: empty label entry in %q", raw)
+		}
+		k, v, ok := strings.Cut(part, "=")
+		if !ok {
+			return nil, fmt.Errorf("policy: label %q must be key=value", part)
+		}
+		k = strings.TrimSpace(k)
+		v = strings.TrimSpace(v)
+		if err := ValidateLabel(k, v); err != nil {
+			return nil, err
+		}
+		if _, dup := out[k]; dup {
+			return nil, fmt.Errorf("policy: duplicate label key %q", k)
+		}
+		out[k] = v
+	}
+	return out, nil
+}
+
+func validLabelToken(s string, allowSlash bool) bool {
+	if len(s) == 0 {
+		return false
+	}
+	if !isASCIIAlnum(s[0]) || !isASCIIAlnum(s[len(s)-1]) {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if isASCIIAlnum(c) || c == '-' || c == '_' || c == '.' || (allowSlash && c == '/') {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
+func isASCIIAlnum(c byte) bool {
+	return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')
 }

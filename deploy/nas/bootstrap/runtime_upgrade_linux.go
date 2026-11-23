@@ -41,19 +41,21 @@ func nasRuntimeUpgrade(args []string, stdout io.Writer) error {
 	f := flag.NewFlagSet("runtime-upgrade", flag.ContinueOnError)
 	base := f.String("base", "", "original sealed material directory")
 	out := f.String("out", "", "root-owned append-only runtime source")
-	action := f.String("action", "path", "stage, commit, rollback or path")
+	action := f.String("action", "path", "attach, stage, commit, rollback or path")
 	bundle := f.String("bundle", "", "operator-approved public candidate bundle")
+	rootFile := f.String("root", "", "independently approved external runtime root protobuf (attach only)")
 	image := f.String("image", "", "operator-approved exact image locator")
+	instanceMemory := f.String("instance-max-memory-mb", "512", "per-instance memory limit in positive canonical decimal MiB (attach only)")
 	if err := f.Parse(args); err != nil {
 		return err
 	}
 	if f.NArg() != 0 || os.Geteuid() != 0 || *base == "" || *out == "" {
 		return fmt.Errorf("runtime upgrade requires root, base and output")
 	}
-	if *action != "stage" && *action != "commit" && *action != "rollback" && *action != "path" {
+	if *action != "attach" && *action != "stage" && *action != "commit" && *action != "rollback" && *action != "path" {
 		return fmt.Errorf("unsupported runtime upgrade action")
 	}
-	if (*action != "path") != (*bundle != "") || (*action != "path") != (*image != "") {
+	if (*action != "path") != (*bundle != "") || (*action != "path") != (*image != "") || (*action == "attach") != (*rootFile != "") {
 		return fmt.Errorf("invalid runtime upgrade arguments")
 	}
 	if !filepath.IsAbs(*out) || filepath.Clean(*out) != *out || strings.ContainsAny(*out, "\\\n\r") {
@@ -66,20 +68,32 @@ func nasRuntimeUpgrade(args []string, stdout io.Writer) error {
 	if err != nil {
 		return err
 	}
+	hasBaseRuntime := false
+	var spec *nodev1.InstanceSpec
 	raw, err := os.ReadFile(filepath.Join(*base, "templates/real-dsh.pb"))
-	if err != nil {
+	if err == nil {
+		hasBaseRuntime = true
+		spec = new(nodev1.InstanceSpec)
+		if err := proto.Unmarshal(raw, spec); err != nil || spec.GetDsh().GetReleaseEnvelope().GetReleaseSequence() == 0 {
+			return fmt.Errorf("signed base template required")
+		}
+		if *action == "attach" {
+			return fmt.Errorf("base runtime already sealed; use runtime-upgrade stage/commit instead of attach")
+		}
+	} else if !os.IsNotExist(err) {
 		return fmt.Errorf("signed base runtime required: %w", err)
-	}
-	spec := new(nodev1.InstanceSpec)
-	if err := proto.Unmarshal(raw, spec); err != nil || spec.GetDsh().GetReleaseEnvelope().GetReleaseSequence() == 0 {
-		return fmt.Errorf("signed base template required")
+	} else if _, rootStatErr := os.Lstat(filepath.Join(*base, "runtime-keys/root.pb")); !os.IsNotExist(rootStatErr) {
+		return fmt.Errorf("signed base runtime required: incomplete base runtime materials")
 	}
 	if _, err := os.Lstat(*out); os.IsNotExist(err) {
 		if *action == "path" {
 			_, err = fmt.Fprint(stdout, *base)
 			return err
 		}
-		if *action != "stage" {
+		if !hasBaseRuntime && *action != "attach" {
+			return fmt.Errorf("signed base runtime required")
+		}
+		if *action != "stage" && *action != "attach" {
 			return fmt.Errorf("no runtime activation")
 		}
 		if err := os.Mkdir(*out, 0755); err != nil {
@@ -108,10 +122,33 @@ func nasRuntimeUpgrade(args []string, stdout io.Writer) error {
 		return err
 	}
 	defer func() { _ = unix.Flock(fd, unix.LOCK_UN) }()
+	if *action == "attach" {
+		return attachRuntimeToBase(*base, *out, baseHash, *bundle, *rootFile, *image, *instanceMemory)
+	}
 	root := filepath.Join(*base, "runtime-keys/root.pb") // sole authority; never candidate root
-	gens, err := readRuntimeGenerations(*out, baseHash, root)
+	if !hasBaseRuntime {
+		attachedRoot := filepath.Join(*out, "root.pb")
+		if _, err := runtimeReadLeaf(attachedRoot, 0644, 1<<20); err != nil {
+			return fmt.Errorf("signed base runtime required: %w", err)
+		}
+		root = attachedRoot
+	}
+	gens, err := readRuntimeGenerations(*out, baseHash, root, !hasBaseRuntime)
 	if err != nil {
 		return err
+	}
+	if !hasBaseRuntime {
+		if len(gens) == 0 {
+			return fmt.Errorf("attached runtime generation absent")
+		}
+		latestSpecRaw, err := runtimeReadLeaf(filepath.Join(*out, gens[len(gens)-1].name, "templates/real-dsh.pb"), 0644, 1<<20)
+		if err != nil {
+			return err
+		}
+		spec = new(nodev1.InstanceSpec)
+		if err := proto.Unmarshal(latestSpecRaw, spec); err != nil || spec.GetDsh().GetReleaseEnvelope().GetReleaseSequence() == 0 {
+			return fmt.Errorf("invalid attached runtime template")
+		}
 	}
 	active := runtimeActivation{}
 	if b, err := runtimeReadLeaf(filepath.Join(*out, "active.json"), 0600, 65536); err == nil {
@@ -142,6 +179,8 @@ func nasRuntimeUpgrade(args []string, stdout io.Writer) error {
 		path := *base
 		if active.Current != "" {
 			path = filepath.Join(*out, active.Current)
+		} else if !hasBaseRuntime {
+			return fmt.Errorf("attached runtime pointer absent")
 		}
 		_, err := fmt.Fprint(stdout, path)
 		return err
@@ -203,7 +242,7 @@ func nasRuntimeUpgrade(args []string, stdout io.Writer) error {
 		if err := runtimePublicDirectory(stage); err != nil {
 			return err
 		}
-		if err := writeRuntimeGeneration(stage, *base, spec, m, gens); err != nil {
+		if err := writeRuntimeGeneration(stage, *base, hasBaseRuntime, spec, m, gens); err != nil {
 			return err
 		}
 		digest, err := runtimeTreeDigest(stage)
@@ -267,7 +306,82 @@ func runtimeDecode(b []byte, v any) error {
 	return nil
 }
 
-func readRuntimeGenerations(out, baseHash, root string) ([]runtimeGeneration, error) {
+func attachRuntimeToBase(base, out, baseHash, bundle, rootFile, image, instanceMemory string) error {
+	maxMemoryMB, err := parseInstanceMaxMemoryMB(instanceMemory)
+	if err != nil {
+		return err
+	}
+	if maxMemoryMB < 256 {
+		return fmt.Errorf("runtime template requires instance-max-memory-mb >=256 for WorkspaceTemplates")
+	}
+	entries, err := os.ReadDir(out)
+	if err != nil {
+		return err
+	}
+	for _, e := range entries {
+		if e.Name() != ".lock" {
+			return fmt.Errorf("runtime already attached or pending; use runtime-upgrade stage/commit instead of attach")
+		}
+	}
+	m, err := runtimebundle.Verify(runtimebundle.VerifyOptions{
+		Dir:             bundle,
+		TrustedRootPath: rootFile,
+		Policy:          runtimebundle.Policy{OS: "linux", Arch: "amd64", AllowedImage: image},
+	})
+	if err != nil {
+		return err
+	}
+	seq := m.Runtime().GetReleaseEnvelope().GetReleaseSequence()
+	if seq == 0 {
+		return fmt.Errorf("signed runtime release sequence required")
+	}
+	spec, err := buildRuntimeInstanceSpec(base, m, maxMemoryMB)
+	if err != nil {
+		return err
+	}
+	stage, err := os.MkdirTemp(out, ".pending-")
+	if err != nil {
+		return err
+	}
+	defer func() { _ = os.RemoveAll(stage) }()
+	if err := runtimePublicDirectory(stage); err != nil {
+		return err
+	}
+	if err := writeRuntimeGeneration(stage, base, false, spec, m, nil); err != nil {
+		return err
+	}
+	digest, err := runtimeTreeDigest(stage)
+	if err != nil {
+		return err
+	}
+	receipt := runtimeUpgradeReceipt{Base: baseHash, Previous: "", Body: m.BodyDigest(), Files: digest, Sequence: seq}
+	b, err := json.Marshal(receipt)
+	if err != nil {
+		return err
+	}
+	if err := runtimeCreate(filepath.Join(stage, "upgrade.receipt"), b); err != nil {
+		return err
+	}
+	if fresh, err := verifyNASCollabBase(base); err != nil || fresh != baseHash {
+		return fmt.Errorf("sealed source changed during runtime attach")
+	}
+	if err := runtimeSyncTree(stage); err != nil {
+		return err
+	}
+	if err := runtimeCreate(filepath.Join(out, "root.pb"), m.RootBytes()); err != nil {
+		return err
+	}
+	name := fmt.Sprintf("s-%020d", seq)
+	if err := os.Rename(stage, filepath.Join(out, name)); err != nil {
+		return err
+	}
+	if err := runtimeSyncDir(out); err != nil {
+		return err
+	}
+	return runtimeWriteActive(out, runtimeActivation{Current: name, Previous: "", Pending: false})
+}
+
+func readRuntimeGenerations(out, baseHash, root string, allowRootFile bool) ([]runtimeGeneration, error) {
 	entries, err := os.ReadDir(out)
 	if err != nil {
 		return nil, err
@@ -276,7 +390,7 @@ func readRuntimeGenerations(out, baseHash, root string) ([]runtimeGeneration, er
 	previous := ""
 	for _, e := range entries {
 		name := e.Name()
-		if name == ".lock" || name == "active.json" {
+		if name == ".lock" || name == "active.json" || (allowRootFile && name == "root.pb") {
 			continue
 		}
 		if len(name) != 22 || !strings.HasPrefix(name, "s-") {
@@ -440,7 +554,7 @@ func runtimeSyncTree(path string) error {
 	return nil
 }
 
-func writeRuntimeGeneration(out, base string, spec *nodev1.InstanceSpec, m *runtimebundle.Material, gens []runtimeGeneration) error {
+func writeRuntimeGeneration(out, base string, hasBaseRuntime bool, spec *nodev1.InstanceSpec, m *runtimebundle.Material, gens []runtimeGeneration) error {
 	// Retain all previously approved proofs/locators for instances still running
 	// older generations; the template alone selects the new default runtime.
 	proofs := map[string][]byte{}
@@ -448,15 +562,18 @@ func writeRuntimeGeneration(out, base string, spec *nodev1.InstanceSpec, m *runt
 		proofs[prefix+"/manifest.json"] = material.Manifest()
 		proofs[prefix+"/config.json"] = material.Config()
 	}
-	baseProof := "runtime-proofs/" + strings.TrimPrefix(spec.GetDsh().GetReleaseEnvelope().GetImageDigest(), "sha256:")
-	for _, leaf := range []string{"manifest.json", "config.json"} {
-		b, err := os.ReadFile(filepath.Join(base, baseProof, leaf))
-		if err != nil {
-			return err
+	var images []string
+	if hasBaseRuntime {
+		baseProof := "runtime-proofs/" + strings.TrimPrefix(spec.GetDsh().GetReleaseEnvelope().GetImageDigest(), "sha256:")
+		for _, leaf := range []string{"manifest.json", "config.json"} {
+			b, err := os.ReadFile(filepath.Join(base, baseProof, leaf))
+			if err != nil {
+				return err
+			}
+			proofs[baseProof+"/"+leaf] = b
 		}
-		proofs[baseProof+"/"+leaf] = b
+		images = append(images, spec.GetDsh().Image)
 	}
-	images := []string{spec.GetDsh().Image}
 	for _, g := range gens {
 		add(runtimeProofDirectory(g.material), g.material)
 		images = append(images, g.material.Runtime().Image)
@@ -500,7 +617,7 @@ func writeRuntimeGeneration(out, base string, spec *nodev1.InstanceSpec, m *runt
 			repos[repo] = true
 		}
 	}
-	fmt.Fprintf(&policy, "maxCPUMillis: %d\nmaxMemoryMB: %d\nmaxPIDs: %d\nmaxArtifactBytes: 2147483648\n", spec.GetResources().GetCpuMillis(), spec.GetResources().GetMemoryMb(), spec.GetResources().GetPids())
+	fmt.Fprintf(&policy, "maxCPUMillis: %d\nmaxMemoryMB: %d\nmaxPIDs: %d\nmaxArtifactBytes: 2147483648\nlabels:\n  template: real-dsh\n", spec.GetResources().GetCpuMillis(), spec.GetResources().GetMemoryMb(), spec.GetResources().GetPids())
 	return runtimeCreate(filepath.Join(out, "agent-policy.yaml"), []byte(policy.String()))
 }
 

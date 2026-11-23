@@ -84,6 +84,63 @@ func verifyInstallRuntime(pkg string, r installRuntimeOptions) error {
 		"verify", "--dir", r.Bundle, "--root", r.Root, "--os", "linux", "--arch", "amd64", "--allow-image", r.Image)
 }
 
+// 测试可注入点。
+var (
+	verifyInstallRuntimeFunc   = verifyInstallRuntime
+	attachBootstrapRuntimeFunc = attachBootstrapRuntime
+)
+
+// prepareRuntimeSnapshot 验证原始 runtime 输入、复制四项公开材料与 root.pb 到临时目录，
+// 在副本上再次验签并计算快照摘要。供首装（install / deploy）与已安装站点 runtime attach 共用。
+func prepareRuntimeSnapshot(pkg string, req installRuntimeOptions) (*preparedInstallRuntime, error) {
+	if err := req.validate(); err != nil {
+		return nil, err
+	}
+	if !req.enabled() {
+		return nil, nil
+	}
+	// Validate original physical inputs before copying; copying must not turn a
+	// linked, malformed or otherwise rejected original into an accepted bundle.
+	if err := verifyInstallRuntimeFunc(pkg, req); err != nil {
+		return nil, err
+	}
+	dir, err := os.MkdirTemp("", "auriga-install-runtime-")
+	if err != nil {
+		return nil, err
+	}
+	keep := false
+	defer func() {
+		if !keep {
+			_ = os.RemoveAll(dir)
+		}
+	}()
+	names, err := regularFiles(req.Bundle)
+	if err != nil {
+		return nil, err
+	}
+	if len(names) != 4 {
+		return nil, errors.New("runtime bundle 不是原四项公开材料闭集")
+	}
+	for _, name := range names {
+		if err := copyRuntimePublic(filepath.Join(req.Bundle, name), filepath.Join(dir, "bundle", name)); err != nil {
+			return nil, err
+		}
+	}
+	if err := copyRuntimePublic(req.Root, filepath.Join(dir, "root.pb")); err != nil {
+		return nil, err
+	}
+	snapshot := runtimeSnapshotOptions(dir, req.Image)
+	if err := verifyInstallRuntimeFunc(pkg, snapshot); err != nil {
+		return nil, err
+	}
+	hash, err := runtimeSnapshotDigest(dir)
+	if err != nil {
+		return nil, err
+	}
+	keep = true
+	return &preparedInstallRuntime{directory: dir, identity: installRuntime{Source: req, SHA256: hash}}, nil
+}
+
 func prepareInstallRuntime(pkg string, o installOptions, unsigned bool) (*preparedInstallRuntime, error) {
 	if err := o.Runtime.validate(); err != nil {
 		return nil, err
@@ -106,50 +163,15 @@ func prepareInstallRuntime(pkg string, o installOptions, unsigned bool) (*prepar
 	if !o.Runtime.enabled() {
 		return nil, nil
 	}
-	// Validate original physical inputs before copying; copying must not turn a
-	// linked, malformed or otherwise rejected original into an accepted bundle.
-	if err := verifyInstallRuntime(pkg, o.Runtime); err != nil {
-		return nil, err
-	}
-	dir, err := os.MkdirTemp("", "auriga-install-runtime-")
+	prepared, err := prepareRuntimeSnapshot(pkg, o.Runtime)
 	if err != nil {
 		return nil, err
 	}
-	keep := false
-	defer func() {
-		if !keep {
-			_ = os.RemoveAll(dir)
-		}
-	}()
-	names, err := regularFiles(o.Runtime.Bundle)
-	if err != nil {
-		return nil, err
-	}
-	if len(names) != 4 {
-		return nil, errors.New("runtime bundle 不是原四项公开材料闭集")
-	}
-	for _, name := range names {
-		if err := copyRuntimePublic(filepath.Join(o.Runtime.Bundle, name), filepath.Join(dir, "bundle", name)); err != nil {
-			return nil, err
-		}
-	}
-	if err := copyRuntimePublic(o.Runtime.Root, filepath.Join(dir, "root.pb")); err != nil {
-		return nil, err
-	}
-	snapshot := runtimeSnapshotOptions(dir, o.Runtime.Image)
-	if err := verifyInstallRuntime(pkg, snapshot); err != nil {
-		return nil, err
-	}
-	hash, err := runtimeSnapshotDigest(dir)
-	if err != nil {
-		return nil, err
-	}
-	identity := installRuntime{Source: o.Runtime, SHA256: hash}
-	if existingErr == nil && existing.Runtime != nil && identity != *existing.Runtime {
+	if existingErr == nil && existing.Runtime != nil && prepared.identity != *existing.Runtime {
+		_ = os.RemoveAll(prepared.directory)
 		return nil, errors.New("同路径 runtime 输入字节已变，拒绝重试漂移")
 	}
-	keep = true
-	return &preparedInstallRuntime{directory: dir, identity: identity}, nil
+	return prepared, nil
 }
 
 func copyRuntimePublic(source, target string) error {
@@ -228,7 +250,7 @@ func checkPinnedInstallRuntime(pkg string, s state) error {
 	if hash != s.Runtime.SHA256 {
 		return errors.New("已固定 runtime 快照摘要不符，保留现场并拒绝替换")
 	}
-	if err := verifyInstallRuntime(pkg, runtimeSnapshotOptions(dir, s.Runtime.Source.Image)); err != nil {
+	if err := verifyInstallRuntimeFunc(pkg, runtimeSnapshotOptions(dir, s.Runtime.Source.Image)); err != nil {
 		return err
 	}
 	after, err := runtimeSnapshotDigest(dir)

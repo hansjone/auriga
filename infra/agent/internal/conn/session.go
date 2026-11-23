@@ -21,6 +21,7 @@ import (
 
 	"github.com/hansjone/auriga/infra/agent/internal/enroll"
 	"github.com/hansjone/auriga/infra/agent/internal/identity"
+	"github.com/hansjone/auriga/infra/agent/internal/policy"
 	"github.com/hansjone/auriga/infra/agent/internal/reconciler"
 	agentruntime "github.com/hansjone/auriga/infra/agent/internal/runtime"
 	"github.com/hansjone/auriga/infra/agent/internal/state"
@@ -40,6 +41,7 @@ type Config struct {
 	IngressEndpoint string
 	// Capacity is reported in Hello so the scheduler can place instances here.
 	Capacity      *nodev1.Capacity
+	Labels        map[string]string
 	Drivers       []nodev1.RuntimeKind
 	BootID        string
 	Logger        *slog.Logger
@@ -120,6 +122,15 @@ func New(cfg Config) *Session {
 	}
 	if cfg.BootID == "" {
 		cfg.BootID = fmt.Sprintf("boot-%d", time.Now().UnixNano())
+	}
+	if len(cfg.Labels) > 0 {
+		copied := make(map[string]string, len(cfg.Labels))
+		for k, v := range cfg.Labels {
+			copied[k] = v
+		}
+		cfg.Labels = copied
+	} else {
+		cfg.Labels = nil
 	}
 	session := &Session{
 		cfg:             cfg,
@@ -568,13 +579,29 @@ func (s *Session) sendHello(stream nodev1.NodeControlService_SessionClient, mat 
 	agentVersion := s.cfg.AgentVersion
 	bootID := s.cfg.BootID
 	capacity := s.cfg.Capacity
+	cfgLabels := s.cfg.Labels
 	s.mu.Unlock()
 	if len(drivers) == 0 {
 		drivers = []nodev1.RuntimeKind{nodev1.RuntimeKind_RUNTIME_KIND_UNSPECIFIED}
 	}
 	var labels map[string]string
+	if len(cfgLabels) > 0 {
+		labels = make(map[string]string, len(cfgLabels)+2)
+		for k, v := range cfgLabels {
+			if policy.IsReservedLabelKey(k) || k == "" || v == "" {
+				continue
+			}
+			labels[k] = v
+		}
+		if len(labels) == 0 {
+			labels = nil
+		}
+	}
 	if s.cfg.SharedPools != nil {
-		labels = map[string]string{"auriga.shared-dsh-runtime": "prepare-v1"}
+		if labels == nil {
+			labels = make(map[string]string, 2)
+		}
+		labels["auriga.shared-dsh-runtime"] = "prepare-v1"
 		if s.cfg.SharedRuntime != nil {
 			labels["auriga.shared-dsh-process"] = "persistent-v1"
 		}

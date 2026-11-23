@@ -4,6 +4,7 @@ import { Buffer } from 'node:buffer';
 import {
   cpSync,
   copyFileSync,
+  existsSync,
   realpathSync,
   mkdirSync,
   readFileSync,
@@ -12,6 +13,7 @@ import {
 } from 'node:fs';
 import {
   basename,
+  delimiter,
   dirname,
   join,
   relative,
@@ -196,6 +198,7 @@ export function resolveBuildPaths(options) {
     'site-devkit',
     'base-pnpm-lock',
     'out',
+    'temp',
     'release-public-key',
     'resource-trust-json',
     'verify-key',
@@ -231,8 +234,17 @@ export function launchOfflineBuild(options, kit, hooks = {}) {
     out === kit.directory
   )
     throw new Error('构建输出不得位于只读 devkit 内');
+  const customTemp =
+    typeof options.temp === 'string' && options.temp.length > 0;
+  const tempDir = customTemp ? resolve(options.temp) : join(out, 'tmp');
+  if (customTemp) {
+    physical(dirname(tempDir));
+    if (isInside(tempDir, kit.directory))
+      throw new Error('临时目录不得位于只读 devkit 内');
+  }
   const sourceRoot = resolve(hooks.root ?? ROOT);
   mkdirSync(out); // No overwrite/reuse of old release or review material.
+  mkdirSync(tempDir, { recursive: true });
   const buildRoot = join(out, 'build-src');
   const optionsFile = join(out, 'site-options.json');
   if (hooks.siteDependencies)
@@ -242,6 +254,7 @@ export function launchOfflineBuild(options, kit, hooks = {}) {
   delete worker.online;
   delete worker['site-devkit'];
   delete worker['base-pnpm-lock'];
+  delete worker.temp;
   writeFileSync(
     optionsFile,
     JSON.stringify({
@@ -257,12 +270,17 @@ export function launchOfflineBuild(options, kit, hooks = {}) {
   );
   const env = Object.fromEntries(
     Object.entries(process.env).filter(
-      ([name]) => !/proxy/i.test(name) && !/^npm_config_/i.test(name),
+      ([name]) =>
+        !/proxy/i.test(name) &&
+        !/^npm_config_/i.test(name) &&
+        !/^(temp|tmp)$/i.test(name),
     ),
   );
   Object.assign(env, {
     NODE_OPTIONS: `--max-old-space-size=1024 --require="${join(buildRoot, 'scripts/client-release/offline-guard.cjs').replaceAll('\\', '/')}"`,
     AURIGA_CLIENT_NETWORK_LOG: join(out, 'network-denials.log'),
+    TEMP: tempDir,
+    TMP: tempDir,
     npm_config_offline: 'true',
     npm_config_ignore_scripts: 'true',
     npm_config_audit: 'false',
@@ -303,6 +321,20 @@ export function launchOfflineBuild(options, kit, hooks = {}) {
         `警告：无法删除临时构建目录 ${buildRoot}（${error.message}）；请稍后用 Node 删除：node -e "require('fs').rmSync(process.argv[1],{recursive:true,force:true})" "${buildRoot}"`,
       );
     }
+    if (!customTemp) {
+      try {
+        rmSync(tempDir, {
+          recursive: true,
+          force: true,
+          maxRetries: 3,
+          retryDelay: 200,
+        });
+      } catch (error) {
+        console.warn(
+          `警告：无法删除构建临时目录 ${tempDir}（${error.message}）`,
+        );
+      }
+    }
   }
   if (result.status !== 0)
     throw new Error(
@@ -321,6 +353,32 @@ export function systemToolsEvidence(match) {
     registeredAt: baseline.registeredAt ?? null,
     toolsSha256: digest(canonical(baseline.tools)),
   };
+}
+export function collectPluginModulePaths(
+  root,
+  kitDirectory,
+  env = process.env,
+) {
+  const configured = (env.AURIGA_CLIENT_PLUGIN_MODULES ?? '')
+    .split(delimiter)
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .map((item) => resolve(item));
+  const candidates = [
+    join(root, 'clients/dsh-plugin/node_modules'),
+    kitDirectory ? join(kitDirectory, 'plugin-deps/node_modules') : null,
+    join(root, 'web/node_modules'),
+    join(root, 'node_modules'),
+  ].filter((dir) => dir && existsSync(dir));
+  const seen = new Set();
+  const result = [];
+  for (const dir of [...configured, ...candidates]) {
+    const key = process.platform === 'win32' ? dir.toLowerCase() : dir;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    result.push(dir);
+  }
+  return result;
 }
 export async function buildWorker(optionsFile, hooks = {}) {
   const root = hooks.root ?? ROOT;
@@ -346,9 +404,10 @@ export async function buildWorker(optionsFile, hooks = {}) {
   const pnpm = join(kit.directory, 'build-pnpm/node_modules/pnpm/bin/pnpm.cjs');
   const store = join(o.out, 'pnpm-store');
   cpSync(join(kit.directory, 'pnpm-store'), store, { recursive: true });
-  const run = (args) => {
+  const run = (args, env = process.env) => {
     const result = spawnSync(process.execPath, args, {
       cwd: root,
+      env,
       stdio: 'inherit',
       windowsHide: true,
     });
@@ -361,11 +420,19 @@ export async function buildWorker(optionsFile, hooks = {}) {
     '--offline',
     '--frozen-lockfile',
     '--ignore-scripts',
+    '--config.public-hoist-pattern[]=*esbuild*',
     '--store-dir',
     store,
   ]);
+  const pluginModules = collectPluginModulePaths(root, kit.directory);
+  const brokerEnv = pluginModules.length
+    ? {
+        ...process.env,
+        AURIGA_CLIENT_PLUGIN_MODULES: pluginModules.join(delimiter),
+      }
+    : process.env;
   const broker = join(o.out, 'broker');
-  run([join(root, 'clients/shell-auth/build.mjs'), broker]);
+  run([join(root, 'clients/shell-auth/build.mjs'), broker], brokerEnv);
   const pluginVersion = JSON.parse(
     readFileSync(join(root, 'clients/dsh-plugin/package.json')),
   ).version;
