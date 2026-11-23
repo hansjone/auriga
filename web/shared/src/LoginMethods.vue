@@ -70,7 +70,7 @@ function icon(p: LoginProvider) {
   justify-content: center;
   gap: 24px;
   width: 100%;
-  margin-top: 16px;
+  margin-top: 10px;
   flex-shrink: 0;
 }
 button {

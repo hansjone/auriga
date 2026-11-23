@@ -225,7 +225,7 @@ const step = (): ClientStep | null =>
   gap: 0;
 }
 .login-panel.auriga-qr-login {
-  min-height: 420px;
+  min-height: 0;
 }
 .qr-heading {
   display: flex;
@@ -246,8 +246,12 @@ const step = (): ClientStep | null =>
   width: 100%;
 }
 .auriga-qr-login :deep([data-testid='uac-target']),
-.auriga-qr-login :deep(.uac-cancel) {
+.auriga-qr-login :deep(.uac-cancel),
+.auriga-qr-login :deep(.uac-actions) {
   display: none;
+}
+.auriga-qr-login :deep(.uac-status-row) {
+  height: 28px;
 }
 .auriga-login-step {
   border: 0;
@@ -262,7 +266,7 @@ const step = (): ClientStep | null =>
   padding: 20px 0 8px;
 }
 .login-panel :deep(.login-methods) {
-  margin-top: 16px;
+  margin-top: 10px;
 }
 @media (max-width: 390px) {
   .login-panel {

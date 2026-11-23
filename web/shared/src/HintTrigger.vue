@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onBeforeUnmount, ref, watch } from 'vue';
+import { nextTick, onBeforeUnmount, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 
 const props = withDefaults(
@@ -9,12 +9,35 @@ const props = withDefaults(
 const { locale } = useI18n();
 const shown = ref(props.open);
 const root = ref<globalThis.HTMLElement>();
+const panel = ref<globalThis.HTMLElement>();
+const alignEnd = ref(false);
+const panelStyle = ref<Record<string, string>>({});
 watch(
   () => props.open,
   (value) => {
     shown.value = value;
   },
 );
+
+function placePanel() {
+  void nextTick(() => {
+    const host = root.value;
+    const el = panel.value;
+    if (!host || !el) return;
+    const rect = host.getBoundingClientRect();
+    const gutter = 12;
+    const preferred = Math.min(360, Math.floor(window.innerWidth * 0.72));
+    const spaceRight = Math.max(0, window.innerWidth - rect.left - gutter);
+    const spaceLeft = Math.max(0, rect.right - gutter);
+    const end = spaceRight < preferred && spaceLeft > spaceRight;
+    alignEnd.value = end;
+    const available = Math.max(180, end ? spaceLeft : spaceRight);
+    panelStyle.value = {
+      width: `${Math.min(preferred, available)}px`,
+      maxWidth: `calc(100vw - ${gutter * 2}px)`,
+    };
+  });
+}
 
 function toggle() {
   shown.value = !shown.value;
@@ -32,18 +55,27 @@ function close(event: globalThis.Event) {
   )
     shown.value = false;
 }
+function onViewport() {
+  if (shown.value) placePanel();
+}
 watch(shown, (value) => {
   if (value) {
     document.addEventListener('click', close, true);
     document.addEventListener('keydown', close, true);
+    window.addEventListener('resize', onViewport);
+    placePanel();
   } else {
     document.removeEventListener('click', close, true);
     document.removeEventListener('keydown', close, true);
+    window.removeEventListener('resize', onViewport);
+    alignEnd.value = false;
+    panelStyle.value = {};
   }
 });
 onBeforeUnmount(() => {
   document.removeEventListener('click', close, true);
   document.removeEventListener('keydown', close, true);
+  window.removeEventListener('resize', onViewport);
 });
 const aria = () =>
   props.label || (locale.value === 'en' ? 'Details' : '说明');
@@ -72,7 +104,15 @@ const aria = () =>
         <path d="M12 11v6M12 8h.01" />
       </svg>
     </button>
-    <span v-if="shown" class="auriga-hint-panel" role="note" @click.stop>
+    <span
+      v-if="shown"
+      ref="panel"
+      class="auriga-hint-panel"
+      :class="{ 'auriga-hint-panel--end': alignEnd }"
+      :style="panelStyle"
+      role="note"
+      @click.stop
+    >
       <slot />
     </span>
   </span>
@@ -106,6 +146,7 @@ const aria = () =>
   z-index: 40;
   top: calc(100% + 6px);
   left: 0;
+  right: auto;
   width: min(360px, 72vw);
   padding: 12px 14px;
   border-radius: 10px;
@@ -117,6 +158,11 @@ const aria = () =>
   line-height: 1.55;
   text-align: left;
   white-space: normal;
+  box-sizing: border-box;
+}
+.auriga-hint-panel--end {
+  left: auto;
+  right: 0;
 }
 .auriga-hint-panel :deep(p) {
   margin: 0 0 0.55rem;
