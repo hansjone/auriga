@@ -43,9 +43,9 @@ function back() {
   z-index: 10;
   box-sizing: border-box;
   width: 100%;
-  max-width: 1280px;
+  max-width: 1120px;
   margin: 0 auto;
-  padding: 25px 40px;
+  padding: 22px 32px;
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -53,17 +53,18 @@ function back() {
 }
 .brand {
   display: flex;
-  gap: 12px;
+  gap: 11px;
   align-items: center;
-  font-size: 21px;
+  font-size: 20px;
   font-weight: 650;
+  letter-spacing: -0.03em;
   color: inherit;
   text-decoration: none;
 }
 nav {
   display: flex;
   align-items: center;
-  gap: 26px;
+  gap: 20px;
 }
 button {
   font: inherit;
@@ -73,13 +74,19 @@ button {
   border: 0;
   background: transparent;
   color: #a9bfd0;
+  font-size: 14px;
+}
+.language:hover {
+  color: #e8f0f7;
 }
 .back {
   color: #e8f0f7;
-  background: transparent;
-  border: 1px solid #365065;
-  padding: 9px 23px;
+  background: rgba(14, 30, 46, 0.35);
+  border: 1px solid rgba(150, 182, 208, 0.28);
   border-radius: 8px;
+  padding: 8px 18px;
+  font-size: 14px;
+  font-weight: 500;
 }
 a:focus-visible,
 button:focus-visible {

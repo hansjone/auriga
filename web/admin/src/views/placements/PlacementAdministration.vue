@@ -560,18 +560,20 @@ onBeforeUnmount(() => {
 <style scoped>
 .placement-admin {
   border-top: 1px solid var(--auriga-border);
-  margin-top: 2rem;
+  margin-top: 1.5rem;
   padding-top: 1rem;
-  line-height: 1.7;
+  line-height: 1.55;
 }
 article {
   border-bottom: 1px solid var(--auriga-border);
-  padding: 0.5rem 0;
+  padding: 0.65rem 0;
   overflow-wrap: anywhere;
 }
 label {
   display: block;
   margin: 0.5rem 0;
+  font-size: 13px;
+  color: var(--auriga-muted);
 }
 input:not([type='checkbox']),
 textarea,
@@ -586,11 +588,11 @@ input,
 textarea,
 select {
   font: inherit;
-  color: inherit;
-  background: var(--auriga-surface);
+  color: var(--auriga-text);
+  background: var(--auriga-field-bg, var(--auriga-surface));
   border: 1px solid var(--auriga-border);
-  border-radius: 6px;
-  padding: 0.4rem;
+  border-radius: 8px;
+  padding: 0.45rem 0.65rem;
 }
 button {
   cursor: pointer;

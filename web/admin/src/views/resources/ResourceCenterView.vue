@@ -38,31 +38,39 @@ const base = () =>
 .resource-center > nav {
   display: flex;
   align-items: center;
-  gap: 24px;
+  gap: 20px;
   margin-bottom: 20px;
   border-bottom: 1px solid var(--auriga-border);
+  overflow-x: auto;
 }
 .resource-center > nav a {
-  padding: 12px 4px;
+  padding: 0 2px 11px;
   border-bottom: 2px solid transparent;
   color: var(--auriga-muted);
   text-decoration: none;
+  font-size: 13.5px;
+  white-space: nowrap;
 }
 .resource-center > nav a[aria-current='page'] {
-  border-bottom-color: var(--auriga-accent-line);
+  border-bottom-color: var(--auriga-accent);
+  color: var(--auriga-text);
+  font-weight: 600;
+}
+.resource-center > nav a:hover {
   color: var(--auriga-text);
 }
 .resource-intro {
-  margin-bottom: 16px;
-  max-width: 80ch;
+  margin-bottom: 14px;
+  max-width: 72ch;
 }
 .resource-intro p {
-  line-height: 1.7;
-  margin: 0 0 8px;
+  line-height: 1.55;
+  margin: 0 0 6px;
+  font-size: 13px;
   color: var(--auriga-muted);
 }
 .resource-center > nav a:focus-visible {
-  outline: 2px solid var(--auriga-accent-line);
+  outline: 2px solid var(--auriga-accent);
   outline-offset: 3px;
 }
 </style>

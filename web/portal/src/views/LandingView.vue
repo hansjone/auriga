@@ -37,6 +37,7 @@ const copy = computed(() => messages[locale.value === 'en' ? 'en' : 'zh-CN']);
     </header>
     <section class="hero" :lang="locale === 'en' ? 'en' : 'zh-CN'">
       <div class="hero-content">
+        <p class="brand-line">Auriga DSH</p>
         <h1>{{ copy.title }}</h1>
         <p>{{ copy.sub }}</p>
         <DesktopDownload />
@@ -51,74 +52,97 @@ const copy = computed(() => messages[locale.value === 'en' ? 'en' : 'zh-CN']);
   height: 100dvh;
   display: grid;
   grid-template-rows: auto 1fr;
-  background: #071421;
+  background:
+    radial-gradient(72% 48% at 50% -8%, #12314a 0%, rgba(18, 49, 74, 0) 70%),
+    linear-gradient(180deg, #071421 0%, #040b13 100%);
   color: #e8f0f7;
   overflow: clip;
 }
 .landing-nav {
   box-sizing: border-box;
   width: 100%;
-  max-width: 1280px;
+  max-width: 1120px;
   margin: 0 auto;
-  padding: 25px 40px;
+  padding: 22px 32px;
   display: flex;
   justify-content: space-between;
   align-items: center;
 }
 .landing-brand {
   display: flex;
-  gap: 12px;
+  gap: 11px;
   align-items: center;
-  font-size: 21px;
+  font-size: 20px;
   font-weight: 650;
+  letter-spacing: -0.03em;
   color: inherit;
   text-decoration: none;
 }
 nav {
   display: flex;
   align-items: center;
-  gap: 26px;
+  gap: 20px;
 }
 .language {
   border: 0;
   background: transparent;
   color: #a9bfd0;
   font: inherit;
+  font-size: 14px;
   cursor: pointer;
+}
+.language:hover {
+  color: #e8f0f7;
 }
 .sign-in {
   color: #e8f0f7;
   text-decoration: none;
-  border: 1px solid #365065;
-  padding: 9px 23px;
+  border: 1px solid rgba(150, 182, 208, 0.28);
+  background: rgba(14, 30, 46, 0.35);
+  padding: 8px 18px;
   border-radius: 8px;
+  font-size: 14px;
+  font-weight: 500;
+}
+.sign-in:hover {
+  border-color: rgba(150, 182, 208, 0.45);
+  background: rgba(20, 42, 62, 0.5);
 }
 .hero {
   min-height: 0;
   display: grid;
   align-items: center;
   text-align: center;
-  padding: 0 24px 8vh;
+  padding: 0 24px 7vh;
 }
 .hero-content {
   width: 100%;
-  max-width: 1000px;
+  max-width: 920px;
   margin: auto;
 }
-h1 {
-  font-size: clamp(34px, 4.5vw, 60px);
+.brand-line {
+  margin: 0 auto 14px;
+  color: #9cc0dc;
+  font-size: 13px;
   font-weight: 600;
-  line-height: 1.25;
-  letter-spacing: -0.045em;
-  text-wrap: balance;
-  margin: 0 0 25px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
 }
-p {
+h1 {
+  font-size: clamp(32px, 4.2vw, 52px);
+  font-weight: 600;
+  line-height: 1.22;
+  letter-spacing: -0.04em;
+  text-wrap: balance;
+  margin: 0 0 18px;
+  color: #f0f5fa;
+}
+p:not(.brand-line) {
   color: #a9bfd0;
-  font-size: 17px;
-  line-height: 1.8;
-  margin: 0 auto 34px;
-  max-width: 620px;
+  font-size: 16px;
+  line-height: 1.7;
+  margin: 0 auto 28px;
+  max-width: 560px;
 }
 a:focus-visible,
 button:focus-visible {
@@ -127,22 +151,22 @@ button:focus-visible {
 }
 @media (max-width: 600px) {
   .landing-nav {
-    padding: 20px;
+    padding: 18px 20px;
   }
   .landing-brand {
     gap: 8px;
-    font-size: 18px;
+    font-size: 17px;
   }
   nav {
-    gap: 14px;
+    gap: 12px;
   }
   .sign-in {
-    padding: 8px 16px;
+    padding: 7px 14px;
   }
   .hero {
-    padding: 0 20px 10vh;
+    padding: 0 20px 8vh;
   }
-  p {
+  p:not(.brand-line) {
     font-size: 15px;
   }
 }
@@ -153,12 +177,15 @@ button:focus-visible {
   .hero {
     padding-bottom: 16px;
   }
-  h1 {
-    font-size: 30px;
-    margin-bottom: 12px;
+  .brand-line {
+    margin-bottom: 8px;
   }
-  p {
-    margin-bottom: 18px;
+  h1 {
+    font-size: 28px;
+    margin-bottom: 10px;
+  }
+  p:not(.brand-line) {
+    margin-bottom: 16px;
     font-size: 14px;
   }
 }

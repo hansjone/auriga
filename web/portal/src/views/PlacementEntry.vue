@@ -69,7 +69,7 @@ onBeforeUnmount(() => {
 });
 </script>
 <template>
-  <section :aria-busy="busy">
+  <section class="placement" :aria-busy="busy">
     <h2>{{ t('title') }}</h2>
     <p v-if="placement">
       {{ t(placement.mode) }} · {{ t('states.' + placement.state) }}
@@ -80,20 +80,53 @@ onBeforeUnmount(() => {
     <p v-if="empty">{{ t('empty') }}</p>
     <p v-if="error" role="alert">{{ error }}</p>
     <a v-if="expired" href="/login">{{ t('signIn') }}</a>
-    <ElButton
-      type="primary"
-      :disabled="busy || expired || (!empty && placement?.state !== 'ready')"
-      @click="run(true)"
-      >{{ t('open') }}</ElButton
-    >
-    <ElButton :disabled="busy || expired" @click="run()">{{
-      t('refresh')
-    }}</ElButton>
+    <div class="actions">
+      <ElButton
+        type="primary"
+        :disabled="busy || expired || (!empty && placement?.state !== 'ready')"
+        @click="run(true)"
+        >{{ t('open') }}</ElButton
+      >
+      <ElButton :disabled="busy || expired" @click="run()">{{
+        t('refresh')
+      }}</ElButton>
+    </div>
     <p v-if="placement?.state === 'ready'">
       <a href="/resources">{{ t('market') }}</a>
     </p>
-    <p>{{ t('resource') }}</p>
-    <p>{{ t('risk') }}</p>
-    <p>{{ t('policy') }}</p>
+    <p class="hint">{{ t('resource') }}</p>
+    <p class="hint">{{ t('risk') }}</p>
+    <p class="hint">{{ t('policy') }}</p>
   </section>
 </template>
+<style scoped>
+.placement {
+  margin: 0.25rem 0 1.25rem;
+}
+h2 {
+  margin: 0 0 0.5rem;
+  font-size: 1.0625rem;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+p {
+  margin: 0.35rem 0;
+  font-size: 0.875rem;
+  line-height: 1.55;
+}
+.hint {
+  color: var(--auriga-muted);
+}
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin: 0.75rem 0;
+}
+.actions :deep(.el-button + .el-button) {
+  margin-left: 0;
+}
+a {
+  color: var(--auriga-accent-line);
+}
+</style>

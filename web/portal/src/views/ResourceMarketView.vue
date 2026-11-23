@@ -287,40 +287,81 @@ onBeforeUnmount(() => {
 </template>
 <style scoped>
 .resources {
-  width: min(800px, calc(100% - 2rem));
-  margin: 2rem auto;
+  width: min(760px, calc(100% - 2rem));
+  margin: 1.75rem auto 2.5rem;
+}
+.resources > a:first-child {
+  display: inline-block;
+  margin-bottom: 0.85rem;
+  font-size: 0.8125rem;
+  color: var(--auriga-muted);
+  text-decoration: none;
+}
+.resources > a:first-child:hover {
+  color: var(--auriga-accent-line);
+}
+.resources h1 {
+  margin: 0 0 0.4rem;
+  font-size: 1.5rem;
+  font-weight: 600;
+  letter-spacing: -0.03em;
+  line-height: 1.3;
+}
+.resources h2 {
+  margin: 1.5rem 0 0.75rem;
+  font-size: 1.0625rem;
+  font-weight: 600;
+}
+.resources > p {
+  margin: 0.35rem 0 0.75rem;
+  color: var(--auriga-muted);
+  font-size: 0.875rem;
+  line-height: 1.55;
 }
 a {
   color: var(--auriga-accent-line);
 }
 .resource-list {
   padding: 0;
+  margin: 0;
   list-style: none;
 }
 .resource-list li {
-  padding: 1rem 0;
+  padding: 0.9rem 0;
   border-bottom: 1px solid var(--auriga-border);
   overflow-wrap: anywhere;
 }
+.resource-list li:last-child {
+  border-bottom: 0;
+}
 .resource-list p {
   color: var(--auriga-muted);
-  margin: 0.5rem 0;
+  margin: 0.4rem 0;
+  font-size: 0.8125rem;
 }
 .actions {
   display: flex;
   flex-wrap: wrap;
   gap: 0.5rem;
+  margin: 0.5rem 0;
 }
 .actions :deep(.el-button + .el-button) {
   margin-left: 0;
 }
 .version {
+  margin-top: 1rem;
   border-left: 2px solid var(--auriga-accent-line);
-  padding-left: 1rem;
+  padding: 0.25rem 0 0.25rem 1rem;
+}
+.version h3 {
+  margin: 0 0 0.4rem;
+  font-size: 1rem;
+  font-weight: 600;
 }
 @media (max-width: 600px) {
   .resources {
-    padding: 1.25rem;
+    margin-inline: 1rem;
+    width: calc(100% - 2rem);
   }
 }
 </style>

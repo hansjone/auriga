@@ -646,11 +646,12 @@ onMounted(async () => {
 }
 h1 {
   margin: 0;
-  font-size: 1.6rem;
-  font-weight: 650;
+  font-size: 1.375rem;
+  font-weight: 600;
+  letter-spacing: -0.03em;
 }
 h2 {
-  font-size: 1.15rem;
+  font-size: 1.0625rem;
   font-weight: 600;
 }
 h3 {
@@ -658,17 +659,22 @@ h3 {
   font-size: 1rem;
 }
 p {
-  margin-block: 0.6rem;
+  margin-block: 0.55rem;
 }
 section > section {
-  margin-top: 2rem;
+  margin-top: 1.75rem;
 }
 .page-head,
 .section-head {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
   gap: 1rem;
+}
+.page-head p {
+  margin: 0.35rem 0 0;
+  color: var(--auriga-muted);
+  font-size: 13px;
 }
 .muted,
 dt,
@@ -685,10 +691,10 @@ small {
   gap: 1.25rem;
 }
 .channel {
-  padding: 1.25rem;
+  padding: 1.125rem 1.2rem;
   background: var(--auriga-surface);
   border: 1px solid var(--auriga-border);
-  border-radius: 12px;
+  border-radius: 10px;
 }
 .version {
   font-size: 1.8rem;
