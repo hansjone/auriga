@@ -13,11 +13,17 @@ function setup(locale: 'zh-CN' | 'en' = 'zh-CN') {
     global: { plugins: [createAurigaI18n(locale)] },
   });
 }
+function openButton(view: ReturnType<typeof setup>) {
+  return view.findAll('button').find((node) => {
+    const text = node.text();
+    return text.includes('打开') || text.includes('Open');
+  })!;
+}
 it('opens only from unassigned or ready, never posts during a switch', async () => {
   api.get.mockResolvedValue({ mode: 'shared', state: 'switching' });
   const view = setup();
   await flushPromises();
-  expect(view.findAll('button')[0].attributes('disabled')).toBeDefined();
+  expect(openButton(view).attributes('disabled')).toBeDefined();
   expect(api.post).not.toHaveBeenCalled();
   view.unmount();
 });
@@ -31,6 +37,7 @@ it('shows English risk disclosure and a login action after expiry', async () => 
   );
   const view = setup('en');
   await flushPromises();
+  await view.get('.auriga-hint-trigger').trigger('click');
   expect(view.text()).toContain('audit attributed to that member');
   expect(view.find('a[href="/login"]').text()).toBe('Sign in again');
   view.unmount();
@@ -44,7 +51,7 @@ it('allows first open after the contractual 404 and reports failure without fall
   );
   const view = setup();
   await flushPromises();
-  await view.findAll('button')[0].trigger('click');
+  await openButton(view).trigger('click');
   await flushPromises();
   expect(api.post).toHaveBeenCalledWith(
     '/api/workspace/v1/me/placement/open',
@@ -61,6 +68,6 @@ it('rejects unknown mode rather than showing a dedicated entry', async () => {
   api.get.mockResolvedValue({ mode: 'future-mode', state: 'ready' });
   const view = setup();
   await flushPromises();
-  expect(view.findAll('button')[0].attributes('disabled')).toBeDefined();
+  expect(openButton(view).attributes('disabled')).toBeDefined();
   view.unmount();
 });

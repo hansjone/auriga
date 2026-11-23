@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, inject, onBeforeUnmount, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
-import { isApiError } from '@auriga/shared';
+import { HintTrigger, isApiError } from '@auriga/shared';
 import { adminApi } from '../../admin/api';
 import { placementMessages } from './messages';
 import {
@@ -276,11 +276,17 @@ onBeforeUnmount(() => {
 </script>
 <template>
   <section class="placement" :aria-busy="busy">
-    <h3>{{ t('title') }}</h3>
-    <p>{{ t('risks') }}</p>
-    <p>{{ t('impact') }}</p>
-    <p>{{ t('budget') }}</p>
-    <p>{{ t('resources') }}</p>
+    <header class="placement-head">
+      <h3>{{ t('title') }}</h3>
+      <HintTrigger>
+        <p>
+          <strong>{{ t('risks') }}</strong>
+        </p>
+        <p>{{ t('impact') }}</p>
+        <p>{{ t('budget') }}</p>
+        <p>{{ t('resources') }}</p>
+      </HintTrigger>
+    </header>
     <p v-if="error" role="alert">{{ error }}</p>
     <p v-if="!writable">{{ t('denied') }}</p>
     <p>
@@ -328,10 +334,15 @@ onBeforeUnmount(() => {
       {{ t('refresh') }}
     </button>
     <form v-if="snapshot && writable" @submit.prevent="submit">
-      <h4 v-if="snapshot.placement">{{ t(target) }}</h4>
-      <p>{{ t('policy') }}</p>
-      <p>{{ t('risks') }}</p>
-      <p>{{ t('impact') }}</p>
+      <header class="placement-head">
+        <h4 v-if="snapshot.placement">{{ t(target) }}</h4>
+        <HintTrigger>
+          <p>{{ t('policy') }}</p>
+          <p>{{ t('risks') }}</p>
+          <p>{{ t('impact') }}</p>
+          <p>{{ t('entitlementHelp') }}</p>
+        </HintTrigger>
+      </header>
       <label
         >{{ t('reason')
         }}<textarea
@@ -378,7 +389,6 @@ onBeforeUnmount(() => {
       >
         {{ t(snapshot.dedicatedEntitled ? 'revoke' : 'grant') }}
       </button>
-      <p>{{ t('entitlementHelp') }}</p>
     </form>
     <label
       >{{ t('operation') }}<input v-model="operationId" :disabled="busy"
@@ -408,7 +418,17 @@ onBeforeUnmount(() => {
   border-top: 1px solid var(--auriga-border);
   margin-top: 1rem;
   padding-top: 1rem;
-  line-height: 1.7;
+  line-height: 1.55;
+}
+.placement-head {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  margin-bottom: 0.5rem;
+}
+.placement-head h3,
+.placement-head h4 {
+  margin: 0;
 }
 label {
   display: block;

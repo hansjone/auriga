@@ -833,13 +833,18 @@ function cancelConfirm() {
   border: 0;
   border-bottom: 2px solid transparent;
   background: none;
-  padding: 0 0 12px;
+  padding: 0 2px 11px;
   color: var(--auriga-muted);
   font: inherit;
+  font-size: 13.5px;
   cursor: pointer;
 }
 .providers-page .resource-tabs button.active {
-  border-bottom-color: var(--auriga-text);
+  border-bottom-color: var(--auriga-accent);
+  color: var(--auriga-text);
+  font-weight: 600;
+}
+.providers-page .resource-tabs button:hover {
   color: var(--auriga-text);
 }
 .provider-form {

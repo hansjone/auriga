@@ -4,6 +4,7 @@ import { useI18n } from 'vue-i18n';
 import type { FormStep, StepInput } from '../generated/steps';
 import { pickLocalized } from '../locale';
 import { mapProblemMessage } from '../api/problem';
+import OtpInput from './OtpInput.vue';
 
 const props = defineProps<{ step: FormStep }>();
 const emit = defineEmits<{ submit: [input: StepInput] }>();
@@ -53,7 +54,12 @@ function onSubmit(e: { preventDefault: () => void }) {
 </script>
 
 <template>
-  <form class="form-step" data-testid="form-step" @submit="onSubmit">
+  <form
+    class="form-step"
+    data-testid="form-step"
+    :data-form-id="step.formId"
+    @submit="onSubmit"
+  >
     <h2 v-if="step.title" class="title">{{ label(step.title) }}</h2>
     <p v-if="step.description" class="desc">{{ label(step.description) }}</p>
     <p v-if="step.error" class="error" role="alert">
@@ -100,6 +106,24 @@ function onSubmit(e: { preventDefault: () => void }) {
           </option>
         </select>
       </label>
+      <label v-else-if="field.kind === 'otp'" class="field field-otp">
+        <span v-if="field.label">{{ label(field.label) }}</span>
+        <OtpInput
+          v-model="values[field.name] as string"
+          :name="field.name"
+          :length="field.maxLength || field.minLength || 6"
+          :required="field.required"
+          :autocomplete="field.autocomplete"
+        />
+        <small v-if="field.help" class="help">{{ label(field.help) }}</small>
+        <small v-if="step.fieldErrors?.[field.name]" class="error" role="alert">
+          {{
+            step.fieldErrors[field.name]?.message
+              ? label(step.fieldErrors[field.name]!.message)
+              : step.fieldErrors[field.name]?.code
+          }}
+        </small>
+      </label>
       <label v-else class="field">
         <span v-if="field.label">{{ label(field.label) }}</span>
         <input
@@ -120,8 +144,6 @@ function onSubmit(e: { preventDefault: () => void }) {
           :pattern="field.pattern"
           :minlength="field.minLength"
           :maxlength="field.maxLength"
-          :inputmode="field.kind === 'otp' ? 'numeric' : undefined"
-          :class="{ otp: field.kind === 'otp' }"
         />
         <small v-if="field.help" class="help">{{ label(field.help) }}</small>
         <small v-if="step.fieldErrors?.[field.name]" class="error" role="alert">
@@ -200,11 +222,8 @@ function onSubmit(e: { preventDefault: () => void }) {
 .field select:focus {
   border-color: var(--auriga-accent-line, #5b93bd);
 }
-.field input.otp {
-  letter-spacing: 0.4em;
-  text-align: center;
-  font-size: 1.125rem;
-  font-variant-numeric: tabular-nums;
+.field-otp {
+  align-items: stretch;
 }
 .check {
   display: flex;

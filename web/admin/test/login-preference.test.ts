@@ -52,7 +52,7 @@ it.each([false, true])('管理登录团队优先=%s，仍保留其他方式', as
   if (team) {
     expect(view.find('input[name=username]').exists()).toBe(true);
     expect(view.find('.auriga-login-back').exists()).toBe(false);
-    expect(view.get('.auriga-login-topbar .back').text()).toBe('返回');
+    expect(view.find('.auriga-login-topbar .back').exists()).toBe(false);
     expect(
       view
         .findAll('[data-provider-id]')

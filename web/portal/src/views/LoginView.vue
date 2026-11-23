@@ -7,7 +7,6 @@ import {
 import { useI18n } from 'vue-i18n';
 import { useRoute, useRouter } from 'vue-router';
 import {
-  BrandMark,
   StepContainer,
   type ClientStep,
   type LoginProvider,
@@ -270,7 +269,6 @@ const step = (): ClientStep | null =>
     :class="{ 'auriga-qr-login': uacActive }"
   >
     <header class="qr-heading">
-      <BrandMark :size="24" />
       <h1>{{ heading }}</h1>
     </header>
     <div class="login-content">
@@ -318,20 +316,25 @@ const step = (): ClientStep | null =>
 <style scoped>
 .login-panel {
   width: min(384px, 100%);
-  min-height: 552px;
-  padding: 32px;
-  border-radius: 24px;
+  min-height: 0;
+  padding: 28px 28px 20px;
+  border-radius: 20px;
   display: flex;
   flex-direction: column;
   align-items: center;
+  gap: 0;
+}
+.login-panel.auriga-qr-login {
+  min-height: 0;
 }
 .qr-heading {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 8px;
-  margin-bottom: 24px;
+  margin-bottom: 16px;
   flex-shrink: 0;
+  width: 100%;
+  text-align: center;
 }
 .qr-heading h1 {
   font-size: 18px;
@@ -342,11 +345,17 @@ const step = (): ClientStep | null =>
 }
 .login-content {
   width: 100%;
-  flex: 1;
+}
+.login-panel :deep(.form-step[data-form-id='password'] > .title) {
+  display: none;
 }
 .auriga-qr-login :deep([data-testid='uac-target']),
-.auriga-qr-login :deep(.uac-cancel) {
+.auriga-qr-login :deep(.uac-cancel),
+.auriga-qr-login :deep(.uac-actions) {
   display: none;
+}
+.auriga-qr-login :deep(.uac-status-row) {
+  height: 28px;
 }
 .auriga-login-step {
   border: 0;
@@ -358,7 +367,10 @@ const step = (): ClientStep | null =>
   text-align: center;
   color: var(--auriga-muted);
   font-size: 13px;
-  padding: 48px 0;
+  padding: 20px 0 8px;
+}
+.login-panel :deep(.login-methods) {
+  margin-top: 10px;
 }
 .restart {
   font: inherit;

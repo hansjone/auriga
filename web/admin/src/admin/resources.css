@@ -13,6 +13,7 @@
   --auriga-field-hover: #f4f8fb;
   --auriga-danger: #b4483f;
   --auriga-danger-soft: rgba(180, 72, 63, 0.08);
+  --auriga-focus: #4f87b3;
   --admin-soft: #f1f4f7;
   --admin-nav: #fafbfc;
   --admin-blue-soft: #e8f0f7;
@@ -23,7 +24,8 @@
   background: var(--auriga-bg);
   color: var(--auriga-text);
   font-size: 14px;
-  line-height: 1.6;
+  line-height: 1.55;
+  -webkit-font-smoothing: antialiased;
 }
 .admin-shell[data-admin-theme='dark'] {
   --auriga-bg: #0f151c;
@@ -39,6 +41,7 @@
   --auriga-field-hover: #1b2530;
   --auriga-danger: #e08c8c;
   --auriga-danger-soft: rgba(224, 140, 140, 0.1);
+  --auriga-focus: #7fb0d8;
   --admin-soft: #1c2530;
   --admin-nav: #121920;
   --admin-blue-soft: #1a2b3b;
@@ -46,20 +49,28 @@
 }
 .admin-shell,
 .resource-drawer,
-.resource-page .el-dialog {
+.resource-page .el-dialog,
+.admin-dialog.el-dialog {
   --el-color-primary: var(--auriga-accent);
   --el-bg-color: var(--auriga-surface);
   --el-bg-color-overlay: var(--auriga-surface);
+  --el-bg-color-page: var(--auriga-bg);
   --el-text-color-primary: var(--auriga-text);
   --el-text-color-regular: var(--auriga-text);
+  --el-text-color-secondary: var(--auriga-muted);
   --el-text-color-placeholder: var(--auriga-muted);
   --el-border-color: var(--auriga-border);
   --el-border-color-light: var(--auriga-border);
+  --el-border-color-lighter: var(--auriga-border);
+  --el-border-color-extra-light: var(--auriga-border);
   --el-border-color-hover: var(--auriga-border-strong);
-  --el-fill-color-blank: var(--auriga-surface);
+  --el-fill-color: var(--admin-soft);
   --el-fill-color-light: var(--admin-soft);
+  --el-fill-color-blank: var(--auriga-field-bg);
+  --el-fill-color-darker: var(--auriga-bg);
   --el-font-size-base: 13px;
   --el-border-radius-base: 8px;
+  --el-mask-color: rgba(15, 21, 28, 0.55);
   --el-table-bg-color: var(--auriga-surface);
   --el-table-tr-bg-color: var(--auriga-surface);
   --el-table-header-bg-color: var(--admin-soft);
@@ -68,14 +79,24 @@
   --el-table-border-color: var(--auriga-border);
   --el-table-row-hover-bg-color: var(--auriga-bg);
   --el-input-bg-color: var(--auriga-field-bg);
+  --el-disabled-bg-color: var(--admin-soft);
+  --el-disabled-text-color: var(--auriga-muted);
+  --el-disabled-border-color: var(--auriga-border);
 }
 .admin-side {
   display: flex;
   flex-direction: column;
   border-right: 1px solid var(--auriga-border);
   background: var(--admin-nav);
-  padding: 20px 12px 14px;
+  padding: 18px 12px 14px;
   min-height: 0;
+}
+.admin-side-bottom a {
+  color: inherit;
+  text-decoration: none;
+}
+.admin-side-bottom a:hover {
+  color: var(--auriga-text);
 }
 .admin-brand {
   display: flex;
@@ -111,8 +132,8 @@
   display: flex;
   align-items: center;
   gap: 10px;
-  margin: 2px 0;
-  padding: 8px 10px;
+  margin: 1px 0;
+  padding: 9px 10px;
   border-radius: 8px;
   font-size: 13.5px;
   color: var(--auriga-muted);
@@ -234,22 +255,22 @@ img.admin-avatar {
 }
 .admin-main {
   overflow: auto;
-  padding: 28px 32px 32px;
+  padding: 24px 32px 36px;
   flex: 1;
 }
 .admin-subnav,
 .resource-tabs {
   display: flex;
-  gap: 24px;
+  gap: 20px;
   border-bottom: 1px solid var(--auriga-border);
-  margin-bottom: 24px;
+  margin-bottom: 22px;
   overflow-x: auto;
 }
 .admin-subnav a,
 .resource-tabs a,
 .resource-tabs > span {
   font-size: 13.5px;
-  padding-bottom: 11px;
+  padding: 0 2px 11px;
   color: var(--auriga-muted);
   border-bottom: 2px solid transparent;
   text-decoration: none;
@@ -268,39 +289,58 @@ img.admin-avatar {
 .admin-main:has(.resource-page .resource-tabs) > .admin-subnav {
   display: none;
 }
-.resource-head {
+/* Shared page header: title + description + actions (resource-head / page-head). */
+.resource-head,
+.page-head {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
   gap: 16px;
   margin-bottom: 22px;
 }
-.resource-head h1 {
+.resource-head > div:first-child,
+.page-head > div:first-child {
+  min-width: 0;
+}
+.resource-head h1,
+.page-head h1 {
   font-size: 22px;
-  letter-spacing: -0.4px;
-  line-height: 1.35;
+  letter-spacing: -0.35px;
+  line-height: 1.3;
   margin: 0;
   font-weight: 600;
 }
 .resource-head p,
+.page-head p,
 .resource-muted {
+  margin: 0.35rem 0 0;
   font-size: 13px;
   color: var(--auriga-muted);
+  line-height: 1.55;
+  max-width: 44rem;
+}
+.resource-actions,
+.page-head > .resource-actions,
+.page-head > .el-button,
+.resource-head > .el-button {
+  flex-shrink: 0;
 }
 .resource-notice {
   font-size: 13px;
-  padding: 11px 14px;
+  padding: 10px 14px;
   margin-bottom: 16px;
-  border-radius: 6px;
+  border-radius: 8px;
+  border: 1px solid var(--auriga-border);
   background: var(--admin-soft, #f3f5f8);
   color: var(--auriga-muted);
-  line-height: 1.7;
+  line-height: 1.65;
 }
 .resource-toolbar {
   display: flex;
   gap: 8px;
   flex-wrap: wrap;
-  margin-bottom: 12px;
+  align-items: center;
+  margin-bottom: 14px;
 }
 .resource-toolbar .el-input {
   width: 260px;
@@ -313,6 +353,22 @@ img.admin-avatar {
   border-radius: 10px;
   background: var(--auriga-surface);
   overflow-x: auto;
+}
+.admin-shell .el-table {
+  --el-table-border-color: var(--auriga-border);
+  background: var(--auriga-surface);
+  color: var(--auriga-text);
+}
+.admin-shell .el-table th.el-table__cell {
+  background: var(--admin-soft);
+  color: var(--auriga-muted);
+  font-weight: 500;
+}
+.admin-shell .el-card,
+.admin-shell .el-dialog,
+.admin-shell .el-drawer {
+  --el-bg-color: var(--auriga-surface);
+  color: var(--auriga-text);
 }
 .resource-table table {
   border-collapse: collapse;
@@ -373,19 +429,44 @@ small.resource-mono {
 }
 .resource-empty {
   text-align: center;
-  padding: 50px 20px;
+  padding: 48px 20px;
   color: var(--auriga-muted);
+  border: 1px dashed var(--auriga-border);
+  border-radius: 10px;
+  background: var(--auriga-surface);
+}
+.resource-empty strong {
+  display: block;
+  margin-bottom: 6px;
+  font-size: 14px;
+  font-weight: 550;
+  color: var(--auriga-text);
 }
 .resource-pager {
   display: flex;
   justify-content: flex-end;
   gap: 8px;
-  padding: 12px 17px;
+  padding: 12px 16px;
   border-top: 1px solid var(--auriga-border);
 }
 .resource-error {
   color: var(--auriga-danger, #b4483f);
   font-size: 13px;
+  margin: 0 0 12px;
+}
+.admin-shell .el-input__wrapper,
+.admin-shell .el-textarea__inner,
+.admin-shell .el-select__wrapper {
+  background-color: var(--auriga-field-bg);
+  box-shadow: 0 0 0 1px var(--auriga-border) inset;
+}
+.admin-shell .el-input__wrapper:hover,
+.admin-shell .el-select__wrapper:hover {
+  box-shadow: 0 0 0 1px var(--auriga-border-strong) inset;
+}
+.admin-shell .el-input__wrapper.is-focus,
+.admin-shell .el-select__wrapper.is-focused {
+  box-shadow: 0 0 0 1px var(--auriga-accent) inset;
 }
 .resource-drawer .el-drawer__header {
   padding: 25px 25px 19px;
@@ -461,8 +542,11 @@ small.resource-mono {
   min-height: 90px;
 }
 .admin-shell button:focus-visible,
-.admin-shell a:focus-visible {
-  outline: 2px solid var(--auriga-accent);
+.admin-shell a:focus-visible,
+.admin-shell input:focus-visible,
+.admin-shell select:focus-visible,
+.admin-shell textarea:focus-visible {
+  outline: 2px solid var(--auriga-focus, var(--auriga-accent));
   outline-offset: 3px;
 }
 @media (max-width: 1050px) {
@@ -505,11 +589,13 @@ small.resource-mono {
   .admin-crumb {
     display: none;
   }
-  .resource-head {
+  .resource-head,
+  .page-head {
     align-items: flex-start;
     flex-direction: column;
   }
-  .resource-head h1 {
+  .resource-head h1,
+  .page-head h1 {
     font-size: 20px;
   }
   .resource-drawer {

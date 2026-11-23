@@ -9,18 +9,28 @@
 }
 .management .head {
   justify-content: space-between;
-  margin-bottom: 1rem;
+  align-items: flex-start;
+  margin-bottom: 1.125rem;
+  gap: 1rem;
 }
-.management h1,
-.management h2 {
-  font-size: 1.25rem;
+.management h1 {
+  margin: 0;
+  font-size: 1.375rem;
   font-weight: 600;
+  letter-spacing: -0.03em;
+  line-height: 1.3;
+}
+.management h2 {
+  margin: 0;
+  font-size: 1.0625rem;
+  font-weight: 600;
+  letter-spacing: -0.02em;
 }
 .management .details {
-  margin-top: 1.5rem;
-  padding: 1.25rem;
+  margin-top: 1.25rem;
+  padding: 1.125rem 1.25rem;
   border: 1px solid var(--auriga-border);
-  border-radius: 12px;
+  border-radius: 10px;
   background: var(--auriga-surface);
 }
 .management .details dl {
@@ -38,10 +48,12 @@
   white-space: pre-wrap;
 }
 .management .error {
-  color: var(--el-color-danger);
+  color: var(--auriga-danger, var(--el-color-danger));
+  font-size: 13px;
 }
 .management .notice {
   color: var(--auriga-accent);
+  font-size: 13px;
 }
 .management .pager,
 .management .actions {
@@ -56,4 +68,9 @@
 .management .edit-form {
   max-width: 720px;
   margin-top: 1.25rem;
+}
+.management .el-table {
+  border: 1px solid var(--auriga-border);
+  border-radius: 10px;
+  overflow: hidden;
 }

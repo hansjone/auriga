@@ -290,9 +290,7 @@ onMounted(() => void query());
 </template>
 <style scoped>
 .audit-page {
-  padding: 24px;
   color: var(--auriga-text);
-  font-family: inherit;
 }
 header,
 footer {
@@ -302,34 +300,41 @@ footer {
 }
 header {
   justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 4px;
 }
 h1 {
-  font-size: 24px;
+  margin: 0;
+  font-size: 22px;
   font-weight: 600;
+  letter-spacing: -0.35px;
 }
 h2 {
-  font-size: 20px;
+  margin: 0;
+  font-size: 18px;
+  font-weight: 600;
 }
 form {
   display: flex;
   flex-wrap: wrap;
   gap: 12px;
   align-items: end;
-  margin: 20px 0;
+  margin: 18px 0 12px;
 }
 label {
   display: flex;
   flex-direction: column;
   gap: 6px;
   font-size: 13px;
+  color: var(--auriga-muted);
 }
 input,
 select,
 button {
   font: inherit;
-  color: inherit;
+  color: var(--auriga-text);
   border: 1px solid var(--auriga-border);
-  background: var(--auriga-surface);
+  background: var(--auriga-field-bg, var(--auriga-surface));
   border-radius: 8px;
   padding: 8px 10px;
 }
@@ -349,7 +354,8 @@ select:focus-visible {
 .audit-table {
   overflow: auto;
   border: 1px solid var(--auriga-border);
-  border-radius: 12px;
+  border-radius: 10px;
+  background: var(--auriga-surface);
 }
 table {
   width: 100%;
@@ -359,18 +365,21 @@ table {
 th,
 td {
   text-align: left;
-  padding: 12px;
+  padding: 11px 14px;
   border-bottom: 1px solid var(--auriga-border);
 }
 th {
   font-weight: 500;
+  background: var(--admin-soft);
+  color: var(--auriga-muted);
+  font-size: 12px;
 }
 .trace {
   max-width: 180px;
   overflow-wrap: anywhere;
 }
 .muted {
-  color: var(--auriga-text-muted);
+  color: var(--auriga-muted);
   font-size: 13px;
 }
 footer {
@@ -383,15 +392,16 @@ aside {
   position: fixed;
   inset: 0 0 0 auto;
   width: min(560px, 90vw);
-  background: var(--auriga-bg);
+  background: var(--auriga-surface);
   border-left: 1px solid var(--auriga-border);
-  padding: 24px;
+  padding: 22px 24px;
   overflow: auto;
   z-index: 30;
+  box-shadow: -12px 0 40px -24px rgba(15, 25, 35, 0.35);
 }
 dt {
-  font-size: 13px;
-  color: var(--auriga-text-muted);
+  font-size: 12px;
+  color: var(--auriga-muted);
 }
 dd {
   margin: 6px 0 18px;

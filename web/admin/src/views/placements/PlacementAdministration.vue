@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onBeforeUnmount, ref, shallowRef } from 'vue';
 import { useI18n } from 'vue-i18n';
-import { isApiError } from '@auriga/shared';
+import { HintTrigger, isApiError } from '@auriga/shared';
 import { adminApi } from '../../admin/api';
 import {
   placementAdminApi as api,
@@ -405,9 +405,13 @@ onBeforeUnmount(() => {
         }}
       </p>
     </article>
-    <h3>{{ t('impact') }}</h3>
-    <p>{{ risk('impact') }}</p>
-    <p>{{ t('retained') }}</p>
+    <header class="section-head">
+      <h3>{{ t('impact') }}</h3>
+      <HintTrigger>
+        <p>{{ risk('impact') }}</p>
+        <p>{{ t('retained') }}</p>
+      </HintTrigger>
+    </header>
     <article v-for="impact in impacts" :key="impact.operationId" role="status">
       <p>
         {{ impact.physicalInstanceId }} · {{ impact.operationId }} ·
@@ -429,8 +433,15 @@ onBeforeUnmount(() => {
         {{ impact.affected.map((v) => v.memberId).join(', ') }}
       </p>
     </article>
-    <h3>{{ t('plans') }}</h3>
-    <p>{{ t('help') }}</p>
+    <header class="section-head">
+      <h3>{{ t('plans') }}</h3>
+      <HintTrigger>
+        <p>{{ t('help') }}</p>
+        <p>{{ risk('policy') }}</p>
+        <p>{{ risk('risks') }}</p>
+        <p>{{ risk('impact') }}</p>
+      </HintTrigger>
+    </header>
     <label
       >{{ t('planId')
       }}<input
@@ -505,12 +516,6 @@ onBeforeUnmount(() => {
         <button :disabled="!!plan && !etag">{{ t('save') }}</button>
       </fieldset>
     </form>
-    <p>{{ risk('policy') }}</p>
-    <div class="rebuild-risks">
-      <h4>{{ risk('title') }}</h4>
-      <p>{{ risk('risks') }}</p>
-      <p>{{ risk('impact') }}</p>
-    </div>
     <label
       ><input
         v-model="confirmed"
@@ -560,18 +565,29 @@ onBeforeUnmount(() => {
 <style scoped>
 .placement-admin {
   border-top: 1px solid var(--auriga-border);
-  margin-top: 2rem;
+  margin-top: 1.5rem;
   padding-top: 1rem;
-  line-height: 1.7;
+  line-height: 1.55;
+}
+.section-head {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  margin: 1rem 0 0.5rem;
+}
+.section-head h3 {
+  margin: 0;
 }
 article {
   border-bottom: 1px solid var(--auriga-border);
-  padding: 0.5rem 0;
+  padding: 0.65rem 0;
   overflow-wrap: anywhere;
 }
 label {
   display: block;
   margin: 0.5rem 0;
+  font-size: 13px;
+  color: var(--auriga-muted);
 }
 input:not([type='checkbox']),
 textarea,
@@ -586,11 +602,11 @@ input,
 textarea,
 select {
   font: inherit;
-  color: inherit;
-  background: var(--auriga-surface);
+  color: var(--auriga-text);
+  background: var(--auriga-field-bg, var(--auriga-surface));
   border: 1px solid var(--auriga-border);
-  border-radius: 6px;
-  padding: 0.4rem;
+  border-radius: 8px;
+  padding: 0.45rem 0.65rem;
 }
 button {
   cursor: pointer;

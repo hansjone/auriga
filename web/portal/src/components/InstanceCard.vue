@@ -326,7 +326,18 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
+section {
+  margin: 0.25rem 0 1.25rem;
+}
+h2 {
+  margin: 0 0 0.5rem;
+  font-size: 1.0625rem;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
 .muted {
   color: var(--auriga-muted);
+  font-size: 0.875rem;
+  line-height: 1.55;
 }
 </style>

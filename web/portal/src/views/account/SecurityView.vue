@@ -387,17 +387,37 @@ onBeforeUnmount(() => {
 </template>
 <style scoped>
 .security {
-  width: min(760px, calc(100% - 2rem));
-  margin: 2rem auto;
+  width: min(720px, calc(100% - 2rem));
+  margin: 1.75rem auto 2.5rem;
 }
 header {
   display: flex;
   justify-content: space-between;
-  align-items: center;
+  align-items: flex-start;
+  gap: 1rem;
+  margin-bottom: 0.35rem;
+}
+header h1 {
+  margin: 0;
+  font-size: 1.5rem;
+  font-weight: 600;
+  letter-spacing: -0.03em;
+  line-height: 1.3;
 }
 section {
-  padding: 1rem 0;
+  padding: 1.1rem 0;
   border-top: 1px solid var(--auriga-border);
+}
+section h2 {
+  margin: 0 0 0.45rem;
+  font-size: 1.0625rem;
+  font-weight: 600;
+}
+section p {
+  margin: 0.35rem 0;
+  color: var(--auriga-muted);
+  font-size: 0.875rem;
+  line-height: 1.55;
 }
 fieldset {
   border: 0;
@@ -406,25 +426,35 @@ fieldset {
 }
 label {
   display: grid;
-  gap: 0.5rem;
+  gap: 0.45rem;
   margin: 0.75rem 0;
+  font-size: 0.875rem;
+  color: var(--auriga-muted);
 }
 input {
   font: inherit;
-  padding: 0.6rem;
-  color: inherit;
-  background: transparent;
+  padding: 0.55rem 0.7rem;
+  color: var(--auriga-text);
+  background: var(--auriga-field-bg);
   border: 1px solid var(--auriga-border);
-  border-radius: 6px;
+  border-radius: 8px;
 }
 button {
   font: inherit;
   cursor: pointer;
-  padding: 0.5rem 0.8rem;
+  padding: 0.45rem 0.85rem;
   margin: 0.25rem 0.5rem 0.25rem 0;
+  border: 1px solid var(--auriga-border);
+  border-radius: 8px;
+  background: var(--auriga-surface);
+  color: var(--auriga-text);
 }
 li,
 code {
   overflow-wrap: anywhere;
+}
+ul {
+  padding-left: 1.1rem;
+  margin: 0.75rem 0 0;
 }
 </style>

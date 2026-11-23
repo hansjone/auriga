@@ -70,29 +70,41 @@ function start() {
   text-align: center;
 }
 .brand {
-  letter-spacing: 0.2em;
+  margin: 0 0 0.5rem;
+  letter-spacing: 0.14em;
   text-transform: uppercase;
   font-size: 0.75rem;
+  color: var(--auriga-muted);
 }
 h1 {
-  font-size: 1.35rem;
+  margin: 0 0 0.75rem;
+  font-size: 1.25rem;
   font-weight: 600;
+  letter-spacing: -0.02em;
+  line-height: 1.3;
 }
 .muted {
   color: var(--auriga-muted);
+  font-size: 0.875rem;
+  line-height: 1.55;
 }
 .error {
-  color: #d27a7a;
+  color: var(--auriga-danger);
+  font-size: 0.875rem;
 }
 .primary {
   margin-top: 1rem;
-  height: 2.75rem;
-  padding: 0 1.25rem;
+  height: 2.5rem;
+  padding: 0 1.15rem;
   border: 0;
-  border-radius: 14px;
+  border-radius: 10px;
   background: var(--auriga-accent);
-  color: #dbe4ee;
+  color: #e8eef5;
   font: inherit;
+  font-weight: 550;
   cursor: pointer;
+}
+.primary:hover {
+  filter: brightness(1.06);
 }
 </style>

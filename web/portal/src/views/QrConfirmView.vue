@@ -99,9 +99,17 @@ async function reject() {
   width: min(380px, 100%);
   text-align: center;
 }
+.qr-card h1 {
+  margin: 0 0 0.75rem;
+  font-size: 1.25rem;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
 .muted,
 .hint {
   color: var(--auriga-muted);
+  font-size: 0.875rem;
+  line-height: 1.55;
 }
 .field {
   display: flex;
@@ -109,15 +117,17 @@ async function reject() {
   gap: 0.35rem;
   text-align: left;
   margin: 1rem 0;
+  font-size: 0.8125rem;
+  color: var(--auriga-muted);
 }
 .field input {
-  height: 2.75rem;
+  height: 2.5rem;
   text-align: center;
   letter-spacing: 0.3em;
-  font-size: 1.25rem;
-  border-radius: 13px;
+  font-size: 1.2rem;
+  border-radius: 10px;
   border: 1px solid var(--auriga-border);
-  background: rgba(8, 18, 28, 0.45);
+  background: var(--auriga-field-bg);
   color: var(--auriga-text);
 }
 .actions {
@@ -127,16 +137,17 @@ async function reject() {
 }
 .primary,
 .ghost {
-  height: 2.75rem;
+  height: 2.5rem;
   padding: 0 1.1rem;
-  border-radius: 14px;
+  border-radius: 10px;
   font: inherit;
+  font-weight: 550;
   cursor: pointer;
 }
 .primary {
   border: 0;
   background: var(--auriga-accent);
-  color: #dbe4ee;
+  color: #e8eef5;
 }
 .ghost {
   border: 1px solid var(--auriga-border);
@@ -144,7 +155,8 @@ async function reject() {
   color: var(--auriga-text);
 }
 .error {
-  color: #d27a7a;
+  color: var(--auriga-danger);
+  font-size: 0.875rem;
 }
 .ok {
   color: #5aa58a;

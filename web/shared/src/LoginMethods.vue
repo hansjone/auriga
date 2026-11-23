@@ -68,9 +68,10 @@ function icon(p: LoginProvider) {
 .login-methods {
   display: flex;
   justify-content: center;
-  gap: 28px;
+  gap: 24px;
   width: 100%;
-  margin-top: 28px;
+  margin-top: 10px;
+  flex-shrink: 0;
 }
 button {
   position: relative;

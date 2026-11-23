@@ -2,7 +2,7 @@
 import { onBeforeUnmount, onMounted, reactive, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { ElButton } from 'element-plus';
-import { isApiError } from '@auriga/shared';
+import { HintTrigger, isApiError } from '@auriga/shared';
 import { orgApi } from '../api';
 import { adminApi } from '../admin/api';
 import { readAllPages } from '../admin/pagination';
@@ -113,10 +113,12 @@ onBeforeUnmount(() => {
 
 <template>
   <section>
-    <header class="overview-heading">
-      <div>
+    <header class="resource-head">
+      <div class="overview-title">
         <h1>{{ t('title') }}</h1>
-        <p>{{ t('description') }}</p>
+        <HintTrigger>
+          <p>{{ t('description') }}</p>
+        </HintTrigger>
       </div>
       <ElButton :disabled="loading" @click="reload">{{
         t('refresh')
@@ -148,36 +150,26 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
-.overview-heading {
+.overview-title {
   display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 1rem;
-  margin-bottom: 22px;
+  align-items: center;
+  gap: 0.35rem;
 }
-.overview-heading h1 {
-  margin: 0 0 4px;
-  font-size: 22px;
-  font-weight: 600;
-  letter-spacing: -0.4px;
-}
-.overview-heading p {
+.overview-title h1 {
   margin: 0;
-  color: var(--auriga-muted);
-  font-size: 13px;
 }
 .overview-cards {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
-  gap: 16px;
+  gap: 14px;
 }
 .overview-card {
   display: flex;
   flex-direction: column;
   gap: 6px;
-  padding: 18px 20px;
+  padding: 16px 18px;
   border: 1px solid var(--auriga-border);
-  border-radius: 12px;
+  border-radius: 10px;
   background: var(--auriga-surface);
 }
 .overview-card h2 {
@@ -187,9 +179,10 @@ onBeforeUnmount(() => {
   color: var(--auriga-muted);
 }
 .overview-card strong {
-  font-size: 30px;
+  font-size: 28px;
   font-weight: 600;
   line-height: 1.2;
+  letter-spacing: -0.03em;
   font-variant-numeric: tabular-nums;
 }
 .overview-card p {
