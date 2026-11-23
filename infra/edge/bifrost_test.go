@@ -83,11 +83,9 @@ func TestBifrostAdminAuthority(t *testing.T) {
 	headers.Set("Origin", "http://"+addresses["admin"])
 	headers.Set("X-Auriga-CSRF", "csrf")
 	code, _, body := aiAdminRequest(t, g, addresses, "admin", "POST", relayAdminPrefix+"/providers", headers)
-	if code != 403 || !strings.Contains(body, "iam.step_up_required") || calls.Load() != before {
-		t.Fatalf("missing stepup: %d %s", code, body)
+	if code != 200 || calls.Load() != before+1 {
+		t.Fatalf("write without stepup: %d %s", code, body)
 	}
-	s.StepUpAt = g.Now().Add(-time.Minute)
-	store.Put("admin", s)
 	headers.Set("Idempotency-Key", "fixture-admin-write")
 	code, _, _ = aiAdminRequest(t, g, addresses, "admin", "POST", relayAdminPrefix+"/providers", headers)
 	if code != 200 {

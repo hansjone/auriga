@@ -4,7 +4,6 @@ import { useI18n } from 'vue-i18n';
 import { useRoute, useRouter } from 'vue-router';
 import { BRAND_NAME, BrandMark, type Me } from '@auriga/shared';
 import { apiClient, iamApi } from '../api';
-import StepUpDialog from '../admin/StepUpDialog.vue';
 import { useAdminI18n } from '../admin/messages';
 import { navigation, iconPaths } from '../admin/navigation';
 import '../admin/resources.css';
@@ -87,7 +86,6 @@ async function logout() {
 </script>
 <template>
   <div class="admin-shell" :data-admin-theme="dark ? 'dark' : 'light'">
-    <StepUpDialog :me="me" />
     <aside class="admin-side">
       <RouterLink class="admin-brand" to="/overview"
         ><BrandMark :size="30" />

@@ -107,18 +107,8 @@ class SharedDshAdminHttpTest {
   }
 
   @Test
-  void writesEnforceStrictStepUpAndOriginCsrfGate() throws Exception {
-    for (Instant step : Arrays.asList(null, now.minusSeconds(600), now.plusSeconds(1))) {
-      login(TokenContext.ADMIN, Set.of("workspace.placements.write"), step);
-      mvc.perform(
-              put("/api/workspace/v1/admin/members/{id}/dedicated-entitlement", member)
-                  .header("Idempotency-Key", "key")
-                  .header("If-Match", "\"opaque\"")
-                  .contentType("application/json")
-                  .content("{\"granted\":true,\"reason\":\"grant\"}"))
-          .andExpect(status().isForbidden());
-    }
-    login(TokenContext.ADMIN, Set.of("workspace.placements.write"), now.minusSeconds(599));
+  void writesEnforceOriginCsrfGateWithoutStepUp() throws Exception {
+    login(TokenContext.ADMIN, Set.of("workspace.placements.write"), null);
     doThrow(new AurigaException(CommonErrors.FORBIDDEN)).when(gate).require(any(), any(), eq(true));
     mvc.perform(
             put("/api/workspace/v1/admin/members/{id}/dedicated-entitlement", member)

@@ -6,7 +6,6 @@ import {
   type ApiClientOptions,
 } from '@auriga/shared';
 import type { Router } from 'vue-router';
-import { withStepUp, requestStepUp } from './admin/stepUp';
 
 let loginRedirect: (() => void) | undefined;
 
@@ -30,7 +29,7 @@ const clientOptions: ApiClientOptions = {
   },
 };
 const sessionClient = createApiClient(clientOptions);
-export const apiClient = withStepUp(sessionClient, requestStepUp);
+export const apiClient = sessionClient;
 
 // Resource detail editing needs the actual response ETag, not a guessed revision.
 // A reader per call keeps concurrent responses isolated; writes use apiClient.

@@ -146,6 +146,8 @@ class AuthorizationAdvisorTest {
             as(
                 principal(TokenContext.PORTAL, Set.of(), NOW.minusSeconds(120)),
                 api::verySensitive));
+    assertEquals("ok", as(principal(TokenContext.ADMIN, Set.of(), null), api::sensitive));
+    assertEquals("ok", as(principal(TokenContext.ADMIN, Set.of(), null), api::verySensitive));
   }
 
   @Test

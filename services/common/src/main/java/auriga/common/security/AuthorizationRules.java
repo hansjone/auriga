@@ -100,7 +100,9 @@ public record AuthorizationRules(
         throw AurigaException.of(CommonErrors.FORBIDDEN, "permission", permission);
       }
     }
-    if (stepUpMaxAge != null && !principal.steppedUpWithin(stepUpMaxAge, clock.instant())) {
+    if (stepUpMaxAge != null
+        && !principal.isAdminContext()
+        && !principal.steppedUpWithin(stepUpMaxAge, clock.instant())) {
       throw AurigaException.of(
           CommonErrors.STEP_UP_REQUIRED, "maxAgeSeconds", stepUpMaxAge.toSeconds());
     }

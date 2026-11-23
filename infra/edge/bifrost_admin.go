@@ -10,7 +10,6 @@ import (
 	"regexp"
 	"slices"
 	"strings"
-	"time"
 )
 
 const relayAdminPrefix = "/api/ai/v1/admin/relay"
@@ -139,13 +138,6 @@ func (g *Gateway) proxyRelayAdmin(w http.ResponseWriter, r *http.Request, audien
 	if !relayAdministrator(response.AccessToken, fresh, permission) {
 		fail(403, "common.forbidden")
 		return
-	}
-	if isWriteMethod(r.Method) || permission == "ai.usage.admin" {
-		age := g.Now().UTC().Sub(fresh.StepUpAt)
-		if fresh.StepUpAt.IsZero() || age < 0 || age > 10*time.Minute {
-			fail(403, "iam.step_up_required")
-			return
-		}
 	}
 	if isWriteMethod(r.Method) {
 		if len(r.Header.Values("X-Auriga-CSRF")) != 1 {

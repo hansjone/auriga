@@ -213,7 +213,7 @@ class OpsOperationsTest {
             TokenContext.ADMIN,
             Set.of("ops.backups.download"),
             clock.instant().minusSeconds(601));
-    assertThrows(AurigaException.class, () -> rules.check(stale, clock));
+    rules.check(stale, clock);
     rules.check(
         principal(
             tenant,

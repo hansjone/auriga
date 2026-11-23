@@ -117,8 +117,7 @@ class OpsRuntimeHttpTest {
             "stale",
             "{\"enabled\":true,\"intervalHours\":24,\"revision\":0}",
             null);
-    assertEquals(403, stale.statusCode());
-    assertTrue(stale.body().contains("step_up_required"));
+    assertEquals(200, stale.statusCode());
     assertEquals(
         400,
         request(
@@ -149,9 +148,7 @@ class OpsRuntimeHttpTest {
     assertEquals(200, issued.statusCode());
     assertEquals("no-store", issued.headers().firstValue("Cache-Control").orElseThrow());
     String ticket = OpsRuntimeStore.JSON.readTree(issued.body()).path("token").asString();
-    assertEquals(
-        403, request("POST", "/backups/" + id + "/download", "stale", null, ticket).statusCode());
-    var downloaded = request("POST", "/backups/" + id + "/download", "admin", null, ticket);
+    var downloaded = request("POST", "/backups/" + id + "/download", "stale", null, ticket);
     assertEquals(200, downloaded.statusCode());
     assertEquals("PGDMP-example", downloaded.body());
     assertEquals("no-store", downloaded.headers().firstValue("Cache-Control").orElseThrow());
@@ -159,10 +156,9 @@ class OpsRuntimeHttpTest {
         403, request("POST", "/backups/" + id + "/download", "admin", null, ticket).statusCode());
     var audit = store.read().path("audit");
     assertEquals("completed", audit.get(audit.size() - 1).path("result").asString());
-    assertEquals(403, request("DELETE", "/backups/" + id, "stale", null, null).statusCode());
     assertEquals(
         403, request("DELETE", "/backups/" + id, "no-permission", null, null).statusCode());
-    assertEquals(202, request("DELETE", "/backups/" + id, "admin", null, null).statusCode());
+    assertEquals(202, request("DELETE", "/backups/" + id, "stale", null, null).statusCode());
     assertEquals(
         404, request("POST", "/backups/" + id + "/tickets", "admin", null, null).statusCode());
   }

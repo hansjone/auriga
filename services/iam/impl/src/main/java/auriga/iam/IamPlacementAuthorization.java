@@ -56,15 +56,6 @@ final class IamPlacementAuthorization implements PlacementAuthorization {
                   .contains(permission),
               "forbidden",
               403);
-          if (write) {
-            Instant step =
-                session.has("stepUpAt") ? Instant.parse(session.path("stepUpAt").asString()) : null;
-            Instant now = clock.instant();
-            IamError.require(
-                step != null && !step.isAfter(now) && step.isAfter(now.minusSeconds(600)),
-                "step_up_required",
-                403);
-          }
           return null;
         });
   }
