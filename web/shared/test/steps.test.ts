@@ -34,9 +34,17 @@ describe('StepContainer', () => {
     });
   });
 
-  it('renders totp otp field', () => {
+  it('renders totp otp field as six boxes', async () => {
     const wrapper = mountStep(totpStep());
-    expect(wrapper.find('input[name="code"]').exists()).toBe(true);
+    expect(wrapper.find('[data-testid="otp-boxes"]').exists()).toBe(true);
+    expect(wrapper.findAll('.otp-cell')).toHaveLength(6);
+    await wrapper.find('input[name="code"]').setValue('123456');
+    await wrapper.find('form').trigger('submit');
+    expect(wrapper.emitted('submit')?.[0]?.[0]).toEqual({
+      type: 'form',
+      formId: 'totp',
+      values: { code: '123456' },
+    });
   });
 
   it('renders fail step and retries', async () => {

@@ -3,7 +3,6 @@ import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useRoute, useRouter } from 'vue-router';
 import {
-  BrandMark,
   StepContainer,
   pickLocalized,
   type ClientStep,
@@ -178,7 +177,6 @@ const step = (): ClientStep | null =>
     :class="{ 'auriga-qr-login': uacActive }"
   >
     <header class="qr-heading">
-      <BrandMark :size="24" />
       <h1>{{ heading }}</h1>
     </header>
     <div class="login-content">
@@ -231,9 +229,10 @@ const step = (): ClientStep | null =>
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 8px;
   margin-bottom: 16px;
   flex-shrink: 0;
+  width: 100%;
+  text-align: center;
 }
 .qr-heading h1 {
   font-size: 18px;
@@ -244,6 +243,9 @@ const step = (): ClientStep | null =>
 }
 .login-content {
   width: 100%;
+}
+.login-panel :deep(.form-step > .title) {
+  display: none;
 }
 .auriga-qr-login :deep([data-testid='uac-target']),
 .auriga-qr-login :deep(.uac-cancel),
