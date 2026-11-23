@@ -1,5 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { Buffer } from 'node:buffer';
 import {
   existsSync,
   mkdirSync,
@@ -15,7 +16,9 @@ import {
   ensureWorkspaceEsbuildPublicHoist,
   launchOfflineBuild,
   resolveBuildPaths,
+  withWorkspaceEsbuildPublicHoist,
 } from './build.mjs';
+import { digest } from './inputs.mjs';
 import {
   assertBuildCopyMatches,
   copyBuildSource,
@@ -144,6 +147,40 @@ test('ensureWorkspaceEsbuildPublicHoist injects publicHoistPattern in build copy
   assert.equal(content.endsWith("publicHoistPattern:\n  - '*'\n"), true);
   assert.equal(ensureWorkspaceEsbuildPublicHoist(dir), false);
   assert.equal(readFileSync(ws, 'utf8'), content);
+});
+
+test('withWorkspaceEsbuildPublicHoist restores pnpm-workspace.yaml byte-for-byte after success or failure', (t) => {
+  const dir = makeTempDir(t, 'auriga-client-hoist-restore-');
+  const ws = join(dir, 'pnpm-workspace.yaml');
+  const original = Buffer.from(
+    'packages:\r\n  - web/*\r\n  - clients/*\r\nlockfileDir: web\r\nsaveExact: true\r\n',
+    'utf8',
+  );
+  const originalSha = digest(original);
+  writeFileSync(ws, original);
+
+  let duringInstall = '';
+  const value = withWorkspaceEsbuildPublicHoist(dir, () => {
+    duringInstall = readFileSync(ws, 'utf8');
+    return 'installed';
+  });
+  assert.equal(value, 'installed');
+  assert.match(duringInstall, /publicHoistPattern:\r\n  - '\*'\r\n$/);
+  const afterSuccess = readFileSync(ws);
+  assert.equal(afterSuccess.equals(original), true);
+  assert.equal(digest(afterSuccess), originalSha);
+
+  assert.throws(
+    () =>
+      withWorkspaceEsbuildPublicHoist(dir, () => {
+        assert.match(readFileSync(ws, 'utf8'), /publicHoistPattern:/);
+        throw new Error('simulated pnpm install failure');
+      }),
+    /simulated pnpm install failure/,
+  );
+  const afterFailure = readFileSync(ws);
+  assert.equal(afterFailure.equals(original), true);
+  assert.equal(digest(afterFailure), originalSha);
 });
 
 test('sourcePathAllowed and assertBuildCopyMatches allow nested SHA256SUMS while excluding root release metadata', (t) => {

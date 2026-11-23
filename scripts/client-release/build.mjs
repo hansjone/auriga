@@ -390,6 +390,16 @@ export function ensureWorkspaceEsbuildPublicHoist(root) {
   writeFileSync(file, text + suffix, 'utf8');
   return true;
 }
+export function withWorkspaceEsbuildPublicHoist(root, fn) {
+  const file = join(root, 'pnpm-workspace.yaml');
+  const original = existsSync(file) ? readFileSync(file) : null;
+  const injected = ensureWorkspaceEsbuildPublicHoist(root);
+  try {
+    return fn();
+  } finally {
+    if (injected && original !== null) writeFileSync(file, original);
+  }
+}
 export async function buildWorker(optionsFile, hooks = {}) {
   const root = hooks.root ?? ROOT;
   if (
@@ -411,9 +421,6 @@ export async function buildWorker(optionsFile, hooks = {}) {
   // 复制与校验之间源码可能被改动：副本必须与刚校验的源码身份一致，才允许装依赖和构建。
   if (o['source-root'])
     assertBuildCopyMatches(root, sourceRoot, inputTrust(o), source);
-  // pnpm 11 的项目级 publicHoistPattern 配置位于 pnpm-workspace.yaml（CLI --config.public-hoist-pattern[] 不再生效）。
-  // 在已通过 verifyInputs 与 assertBuildCopyMatches 校验的构建副本里注入，不改动原源码或套件锁摘要。
-  if (o['source-root']) ensureWorkspaceEsbuildPublicHoist(root);
   const pnpm = join(kit.directory, 'build-pnpm/node_modules/pnpm/bin/pnpm.cjs');
   const store = join(o.out, 'pnpm-store');
   cpSync(join(kit.directory, 'pnpm-store'), store, { recursive: true });
@@ -427,15 +434,24 @@ export async function buildWorker(optionsFile, hooks = {}) {
     if (result.status !== 0)
       throw new Error(`离线构建步骤失败（${result.status}）：${args[0]}`);
   };
-  run([
-    pnpm,
-    'install',
-    '--offline',
-    '--frozen-lockfile',
-    '--ignore-scripts',
-    '--store-dir',
-    store,
-  ]);
+  const installWorkspace = () =>
+    run([
+      pnpm,
+      'install',
+      '--offline',
+      '--frozen-lockfile',
+      '--ignore-scripts',
+      '--store-dir',
+      store,
+    ]);
+  if (o['source-root']) {
+    // pnpm 11 的项目级 publicHoistPattern 配置位于 pnpm-workspace.yaml（CLI --config.public-hoist-pattern[] 不再生效）。
+    // 仅在构建副本执行 pnpm install 期间临时注入，并在安装后立即逐字节还原，
+    // 确保后续插件打包与安装器 build() 的 strict 锁校验看到未改动的 pnpm-workspace.yaml。
+    withWorkspaceEsbuildPublicHoist(root, installWorkspace);
+  } else {
+    installWorkspace();
+  }
   const pluginModules = collectPluginModulePaths(root, kit.directory);
   const brokerEnv = pluginModules.length
     ? {

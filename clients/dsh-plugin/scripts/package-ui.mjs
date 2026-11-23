@@ -16,9 +16,23 @@ function tryRealpath(filePath) {
   }
 }
 
+function canResolveRollup(vitePkgPath) {
+  try {
+    createRequire(vitePkgPath).resolve('rollup/package.json', {
+      paths: [dirname(vitePkgPath)],
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export function resolveViteCli(
   repoRoot = fileURLToPath(new URL('../../../', import.meta.url)),
 ) {
+  // Vite's CLI entry is ESM, so `import 'rollup'` ignores NODE_PATH and only
+  // walks up from the realpath of the selected vite package. Prefer the first
+  // candidate whose own directory hierarchy can resolve rollup/package.json.
   const roots = [
     join(repoRoot, 'package.json'),
     join(repoRoot, 'web', 'package.json'),
@@ -26,13 +40,22 @@ export function resolveViteCli(
   ];
   const errors = [];
   let vitePkgPath = null;
+  let fallbackVitePkgPath = null;
+  const considerCandidate = (candidatePath) => {
+    const resolved = tryRealpath(candidatePath);
+    if (canResolveRollup(resolved)) {
+      vitePkgPath = resolved;
+      return true;
+    }
+    if (!fallbackVitePkgPath) fallbackVitePkgPath = resolved;
+    return false;
+  };
   for (const base of roots) {
-    if (!existsSync(base)) continue;
+    if (!existsSync(base) && !existsSync(join(dirname(base), 'node_modules')))
+      continue;
     try {
-      vitePkgPath = tryRealpath(
-        createRequire(base).resolve('vite/package.json'),
-      );
-      break;
+      const candidate = createRequire(base).resolve('vite/package.json');
+      if (considerCandidate(candidate)) break;
     } catch (error) {
       errors.push(`${base}: ${error.message}`);
     }
@@ -53,18 +76,18 @@ export function resolveViteCli(
           'vite',
           'package.json',
         );
-        if (existsSync(candidate)) {
-          vitePkgPath = tryRealpath(candidate);
-          break;
-        }
+        if (existsSync(candidate) && considerCandidate(candidate)) break;
       }
       if (vitePkgPath) break;
     }
   }
+  vitePkgPath ??= fallbackVitePkgPath;
   if (!vitePkgPath)
     throw new Error(`Cannot resolve vite/package.json:\n${errors.join('\n')}`);
   const viteDir = dirname(vitePkgPath);
   const viteBin = join(viteDir, 'bin', 'vite.js');
+  // Retained for CJS config/plugin resolution; ESM imports (e.g. rollup) rely
+  // on selecting a vite candidate whose realpath can resolve them directly.
   const nodePathEntries = [];
   const peerNm = dirname(viteDir);
   if (basename(peerNm) === 'node_modules') nodePathEntries.push(peerNm);
