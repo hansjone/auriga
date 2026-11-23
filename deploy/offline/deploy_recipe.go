@@ -24,7 +24,7 @@ import (
 
 // deployCLICapability 是本 CLI 的 deploy 能力版本；源码配方声明的 cliCapability 必须相等，
 // 否则提示先升级 CLI（deploy 不替换自己，设计 D10）。
-const deployCLICapability = 1
+const deployCLICapability = 2
 
 const (
 	deployRecipeRel   = "deploy/nas/offline-build/deploy-recipe.json"
@@ -271,7 +271,7 @@ func stageService(ctx context.Context, svc string, s recipeService, source, arti
 		if !info.Mode().IsRegular() {
 			return fmt.Errorf("暂存源必须是普通文件 %s", from)
 		}
-		return copyFileContext(ctx, from, to, info.Mode().Perm())
+		return copyFileContext(ctx, from, to, normalizedFileMode(info.Mode()))
 	}
 	for _, it := range s.Stage {
 		switch it.Kind {
@@ -290,7 +290,7 @@ func stageService(ctx context.Context, svc string, s recipeService, source, arti
 			if err := check(dir); err != nil {
 				return err
 			}
-			if err := os.MkdirAll(filepath.Join(scratch, "web"), 0755); err != nil {
+			if err := mkdirAllExact(filepath.Join(scratch, "web"), 0755); err != nil {
 				return err
 			}
 			for _, d := range it.Dirs {
@@ -349,7 +349,7 @@ func stageService(ctx context.Context, svc string, s recipeService, source, arti
 			}
 		case "dirs":
 			for _, d := range it.Dirs {
-				if err := os.MkdirAll(filepath.Join(scratch, filepath.FromSlash(d)), 0755); err != nil {
+				if err := mkdirAllExact(filepath.Join(scratch, filepath.FromSlash(d)), 0755); err != nil {
 					return err
 				}
 			}

@@ -86,6 +86,9 @@ func decideAssembly(first, full bool, svc string, prev *deployRecord, parts asse
 	if full {
 		return true, "--full 强制重建"
 	}
+	if prev != nil && prev.Status != recordOK {
+		return true, fmt.Sprintf("上一版 r%d 状态为 %s，重新装配", prev.Seq, prev.Status)
+	}
 	if prev != nil && prev.Assembly[svc] == parts.Total {
 		if hasLocal(prev.Images[imageKey(svc)]) {
 			return false, fmt.Sprintf("装配摘要与 r%d 相同，跳过切换", prev.Seq)

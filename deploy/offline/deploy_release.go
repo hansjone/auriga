@@ -160,7 +160,7 @@ func imageTag(svc string, seq int) string {
 // orch 非空时按发行内 deploy-nas 与站点输入计算编排摘要写进 release.json（首装没有站点输入，传 nil）。
 func writeReleaseDir(ctx context.Context, data string, seq int, source, goOut, artifactsOut string, m releaseManifest, prov *provenance, fpReport *fingerprintReport, orch *orchInputs) (string, string, error) {
 	root := releasesRoot(data)
-	if err := os.MkdirAll(root, 0755); err != nil {
+	if err := mkdirAllExact(root, 0755); err != nil {
 		return "", "", err
 	}
 	if err := depsTrustedSourceCheck("发行根目录 ", root); err != nil {
@@ -193,7 +193,7 @@ func writeReleaseDir(ctx context.Context, data string, seq int, source, goOut, a
 			return fail(fmt.Errorf("发行目录缺少 %s：%w", name, err))
 		}
 		link := filepath.Join(tmp, "deploy-nas", "bin", name)
-		if err := os.MkdirAll(filepath.Dir(link), 0755); err != nil {
+		if err := mkdirAllExact(filepath.Dir(link), 0755); err != nil {
 			return fail(err)
 		}
 		_ = os.Remove(link)
@@ -204,7 +204,11 @@ func writeReleaseDir(ctx context.Context, data string, seq int, source, goOut, a
 		}
 	}
 	if artifactsOut != "" {
-		if err := os.Mkdir(filepath.Join(tmp, "artifacts"), 0755); err != nil {
+		artDir := filepath.Join(tmp, "artifacts")
+		if err := os.Mkdir(artDir, 0755); err != nil {
+			return fail(err)
+		}
+		if err := os.Chmod(artDir, 0755); err != nil {
 			return fail(err)
 		}
 		for _, kind := range []string{"go", "web", "java"} {

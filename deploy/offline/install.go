@@ -178,6 +178,10 @@ func writeFileAtomic(path string, raw []byte, mode os.FileMode) error {
 		_ = os.Remove(tmp)
 		return err
 	}
+	if err := os.Chmod(tmp, mode); err != nil {
+		_ = os.Remove(tmp)
+		return err
+	}
 	if err := os.Rename(tmp, path); err != nil {
 		return err
 	}
@@ -469,12 +473,15 @@ func copyTreeContext(ctx context.Context, source, target string) error {
 	if err := os.Mkdir(target, 0755); err != nil {
 		return err
 	}
+	if err := os.Chmod(target, 0755); err != nil {
+		return err
+	}
 	for _, name := range names {
 		info, err := os.Stat(filepath.Join(source, name))
 		if err != nil {
 			return err
 		}
-		if err := copyFileContext(ctx, filepath.Join(source, name), filepath.Join(target, name), info.Mode().Perm()); err != nil {
+		if err := copyFileContext(ctx, filepath.Join(source, name), filepath.Join(target, name), normalizedFileMode(info.Mode())); err != nil {
 			return err
 		}
 	}

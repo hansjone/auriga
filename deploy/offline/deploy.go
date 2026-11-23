@@ -167,6 +167,9 @@ func doDeploy(ctx context.Context, ops siteOps, cfg *siteConfig, cfgPath, data s
 		if prev.Status == recordInstalling {
 			return exitWith(1, fmt.Errorf("首次安装（r%d）未完成：现场已保留，请先排查 %s 与数据目录；确认放弃后移走二者再重新 deploy", prev.Seq, data+".oneclick"))
 		}
+		if prev.Status != recordOK && len(o.Services) > 0 {
+			return exitWith(1, fmt.Errorf("上一版 r%d 状态为 %s，不能使用 --services 增量部署，请去掉 --services 完整部署", prev.Seq, prev.Status))
+		}
 	}
 	if first && len(o.Services) > 0 {
 		return exitWith(1, errors.New("首次安装必须构建全部镜像，不能用 --services"))
@@ -284,8 +287,9 @@ func doDeploy(ctx context.Context, ops siteOps, cfg *siteConfig, cfgPath, data s
 			return exitWith(1, err)
 		}
 	}
+	prevOK := prev != nil && prev.Status == recordOK
 	prevFP := map[string]string{}
-	if prev != nil && len(prev.Fingerprints) > 0 {
+	if prevOK && len(prev.Fingerprints) > 0 {
 		prevFP = prev.Fingerprints
 	}
 	fc := fingerprintContext{Source: src.Dir, Services: services, Recipe: recipe, Locks: locks, Tools: recipe.Images, GoDeps: goDeps}
@@ -306,15 +310,16 @@ func doDeploy(ctx context.Context, ops siteOps, cfg *siteConfig, cfgPath, data s
 		}
 	}
 
-	builds := kindsToBuild(services, fpReport, prevFP, o.Full || first, chosen)
+	builds := kindsToBuild(services, fpReport, prevFP, o.Full || first || (prev != nil && !prevOK), chosen)
 	out := filepath.Join(stage, "output")
 	for _, kind := range []string{"go", "web", "java"} {
-		if err := os.MkdirAll(filepath.Join(out, kind), 0755); err != nil {
+		if err := mkdirAllExact(filepath.Join(out, kind), 0755); err != nil {
 			return exitWith(1, err)
 		}
 	}
 	// 先复用未变产物（复用前按回滚规则核对上一版发行目录）；任何问题都改为重建，不拿可疑产物装配。
-	if !o.DryRun && !o.Full && !first {
+	// 上一版不是 ok 记录时禁止复用，避免把坏产物带入新发行。
+	if !o.DryRun && !o.Full && !first && prevOK {
 		var reuse []string
 		for _, a := range reusableArtifacts(fpReport, prevFP, chosen, services) {
 			if !builds[artifactBuildKind(a)] {
@@ -422,7 +427,7 @@ func doDeploy(ctx context.Context, ops siteOps, cfg *siteConfig, cfgPath, data s
 		if err := os.RemoveAll(dir); err != nil {
 			return exitWith(1, err)
 		}
-		if err := os.MkdirAll(dir, 0755); err != nil {
+		if err := mkdirAllExact(dir, 0755); err != nil {
 			return exitWith(1, err)
 		}
 		fmt.Fprintf(w, "构建 %s 产物（断网）\n", kind)
@@ -442,6 +447,8 @@ func doDeploy(ctx context.Context, ops siteOps, cfg *siteConfig, cfgPath, data s
 			reason = "首次安装"
 		case o.Full:
 			reason = "--full 强制重建"
+		case prev != nil && !prevOK:
+			reason = fmt.Sprintf("上一版 r%d 状态为 %s，强制重建", prev.Seq, prev.Status)
 		}
 		rc.Artifacts = append(rc.Artifacts, receiptArtifact{Name: kind, Action: "built", Reason: reason})
 	}
@@ -460,7 +467,7 @@ func doDeploy(ctx context.Context, ops siteOps, cfg *siteConfig, cfgPath, data s
 	seq := nextSeq(s)
 	images, assembly := map[string]string{}, map[string]string{}
 	assemblyPartsMap := map[string]assemblyParts{}
-	if prev != nil {
+	if prevOK {
 		images = cloneImages(prev.Images)
 		for k, v := range prev.Assembly {
 			assembly[k] = v
@@ -481,7 +488,7 @@ func doDeploy(ctx context.Context, ops siteOps, cfg *siteConfig, cfgPath, data s
 			continue
 		}
 		scratch := filepath.Join(stage, "assemble", svc)
-		if err := os.MkdirAll(scratch, 0755); err != nil {
+		if err := mkdirAllExact(scratch, 0755); err != nil {
 			return exitWith(1, err)
 		}
 		if err := stageService(ctx, svc, recipe.Services[svc], src.Dir, out, inputDir, scratch); err != nil {
@@ -675,10 +682,12 @@ func deploySwitch(ctx context.Context, ops siteOps, cfg *siteConfig, s *state, p
 	defer cleanupCancel()
 	// 先停掉新版本里会写库或改写数据目录的容器，确认停止后再读迁移与格式版本：否则读完到
 	// 回滚完成之间，新容器（例如迁移较慢的 platform）仍可能提交迁移（P2）。
+	const manualConvergeHint = "人工收敛指引：先运行 auriga status 查看当前状态与容器镜像，排查修复后运行 auriga deploy <commit> --full 收敛到目标发行（或按需检查发行目录 deploy-nas/scripts/start.sh / auriga rollback）"
 	refuse := func(reason string) error {
 		rc.RollbackReason = reason
 		rc.Notes = append(rc.Notes, runningImages(cleanupCtx)...)
-		return exitWith(3, fmt.Errorf("切换到 r%d 失败：%v；%s，需人工处理", rec.Seq, err, reason))
+		rc.Notes = append(rc.Notes, manualConvergeHint)
+		return exitWith(3, fmt.Errorf("切换到 r%d 失败：%v；%s，需人工处理。%s", rec.Seq, err, reason, manualConvergeHint))
 	}
 	stopped, stopErr := ops.stopWriters(*s)
 	if stopErr != nil {
@@ -723,7 +732,8 @@ func deploySwitch(ctx context.Context, ops siteOps, cfg *siteConfig, s *state, p
 	if rbErr := startRecord(ops, s, prev, timeout, rbPlan); rbErr != nil {
 		rc.Health += "；回滚：" + rbErr.Error()
 		rc.Notes = append(rc.Notes, runningImages(cleanupCtx)...)
-		return exitWith(3, fmt.Errorf("切换到 r%d 失败（%v），自动回滚到 r%d 也失败，不重试，需人工处理：%w", rec.Seq, err, prev.Seq, rbErr))
+		rc.Notes = append(rc.Notes, manualConvergeHint)
+		return exitWith(3, fmt.Errorf("切换到 r%d 失败（%v），自动回滚到 r%d 也失败，不重试，需人工处理（%s）：%w", rec.Seq, err, prev.Seq, manualConvergeHint, rbErr))
 	}
 	rc.RolledBack = true
 	_ = tagImages(ctx, prev.Images, func(svc string) string { return "auriga/" + svc + ":nas" })

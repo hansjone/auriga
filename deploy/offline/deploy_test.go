@@ -185,9 +185,15 @@ func repoRoot(t *testing.T) string {
 }
 
 func TestDeployRecipeInSourceIsValid(t *testing.T) {
+	if deployCLICapability != 2 {
+		t.Fatalf("deployCLICapability 应为 2，当前 %d", deployCLICapability)
+	}
 	r, err := loadDeployRecipe(repoRoot(t))
 	if err != nil {
 		t.Fatal(err)
+	}
+	if r.CLICapability != 2 {
+		t.Fatalf("源码配方 cliCapability 应为 2，当前 %d", r.CLICapability)
 	}
 	builds, inputs := r.needs([]string{"operator"})
 	if !builds["go"] || builds["web"] || builds["java"] || !inputs["python"] || inputs["system"] {
@@ -227,9 +233,13 @@ func TestDeployRecipeRejections(t *testing.T) {
 	if _, err := loadDeployRecipe(fakeRecipeSource(t, nil, validDockerfile)); err != nil {
 		t.Fatalf("合法配方被拒：%v", err)
 	}
-	_, err := loadDeployRecipe(fakeRecipeSource(t, func(m map[string]any) { m["cliCapability"] = 2; m["futureField"] = true }, validDockerfile))
+	_, err := loadDeployRecipe(fakeRecipeSource(t, func(m map[string]any) { m["cliCapability"] = deployCLICapability + 1; m["futureField"] = true }, validDockerfile))
 	if err == nil || !strings.Contains(err.Error(), "先升级") {
 		t.Fatalf("能力版本不匹配应提示先升级 CLI：%v", err)
+	}
+	_, err = loadDeployRecipe(fakeRecipeSource(t, func(m map[string]any) { m["cliCapability"] = 1 }, validDockerfile))
+	if err == nil || !strings.Contains(err.Error(), "先升级") {
+		t.Fatalf("旧版 cliCapability=1 应被拒绝：%v", err)
 	}
 	if _, err := loadDeployRecipe(fakeRecipeSource(t, nil, "# syntax=docker/dockerfile:1.7\n"+validDockerfile)); err == nil || !strings.Contains(err.Error(), "syntax") {
 		t.Fatalf("# syntax= 未被拒绝：%v", err)
@@ -772,6 +782,13 @@ func TestDeploySwitchDataTouchedExit3(t *testing.T) {
 	if exitCodeOf(err) != 3 || run.receipt.RolledBack || len(site.starts) != 1 {
 		t.Fatalf("数据被触碰时应不回滚并退出码 3：%v starts=%v", err, site.starts)
 	}
+	if !strings.Contains(err.Error(), "auriga status") || !strings.Contains(err.Error(), "auriga deploy <commit> --full") {
+		t.Fatalf("拒绝回滚错误应含人工收敛指引：%v", err)
+	}
+	notes := strings.Join(run.receipt.Notes, "\n")
+	if !strings.Contains(notes, "auriga status") || !strings.Contains(notes, "auriga deploy <commit> --full") {
+		t.Fatalf("收据 notes 应含人工收敛指引：%s", notes)
+	}
 	if got, _ := readState(s.Data); got.Current != 2 {
 		t.Fatalf("拒绝回滚时 state 应如实指向正在运行的 r2：%d", got.Current)
 	}
@@ -830,6 +847,134 @@ func TestDeploySwitchRollbackFailureExit3(t *testing.T) {
 	err := deploySwitch(context.Background(), site.ops(), cfg, &s, prev, rec, run, nil)
 	if exitCodeOf(err) != 3 || !strings.Contains(err.Error(), "不重试") || len(site.starts) != 2 {
 		t.Fatalf("回滚失败应退出码 3 且不重试：%v starts=%v", err, site.starts)
+	}
+	if !strings.Contains(err.Error(), "auriga status") || !strings.Contains(err.Error(), "auriga deploy <commit> --full") {
+		t.Fatalf("回滚失败错误应含人工收敛指引：%v", err)
+	}
+}
+
+func TestDoDeployRejectsServicesAndRebuildsWhenPrevFailed(t *testing.T) {
+	stubTrustedSource(t)
+	stubSiteOwner(t, nil)
+	s := deployTestSite(t,
+		deployRecord{Seq: 1, Status: recordOK, Images: imagesFor("1")},
+		deployRecord{
+			Seq:           2,
+			Status:        recordFailed,
+			Images:        imagesFor("2"),
+			Fingerprints:  map[string]string{"web-panel": "same", "platform-jar": "same", brokerArtifact: "same"},
+			Assembly:      map[string]string{"edge": "same", "platform": "same"},
+			Orchestration: "same-orch",
+		},
+	)
+	writeTestRelease(t, &s, 2)
+	cfg := &siteConfig{
+		Server: &siteServer{Data: s.Data},
+		Deps:   &siteDeps{Cache: filepath.Join(t.TempDir(), "cache")},
+	}
+	run, _ := testRun()
+	err := doDeploy(context.Background(), defaultSiteOps, cfg, "", s.Data, deployOptions{Services: []string{"edge"}}, run)
+	if exitCodeOf(err) != 1 || !strings.Contains(err.Error(), "状态为 failed") || !strings.Contains(err.Error(), "--services") {
+		t.Fatalf("上一版 failed 时使用 --services 应拒绝：%v", err)
+	}
+
+	// 不带 --services 的 dry-run：不得复用上一版失败记录的指纹/产物，且切换预估必须走 switchModeFull。
+	src := fakeRecipeSource(t, nil, validDockerfile)
+	putFile(t, filepath.Join(src, "deploy/nas/scripts/start.sh"), "#!/bin/sh\n", 0755)
+	putFile(t, filepath.Join(src, "deploy/site/services.json"), `{
+  "schemaVersion": 1,
+  "images": {
+    "platform": {"artifacts": ["platform.jar"]},
+    "edge": {"artifacts": ["auriga-edge", "web"]},
+    "agent": {"artifacts": ["auriga-agent"]},
+    "bifrost": {"artifacts": ["bifrost"]},
+    "operator": {"artifacts": ["operator-runtime"]},
+    "auriga-nas-bootstrap": {"pseudo": true, "artifacts": ["auriga-nas-bootstrap"]},
+    "runtime-release": {"pseudo": true, "artifacts": ["runtime-release"]}
+  },
+  "artifacts": {
+    "platform.jar": {"inputSets": ["java-lock"]},
+    "auriga-edge": {"inputSets": ["go-lock"]},
+    "web": {"inputSets": ["web-lock"]},
+    "auriga-agent": {"inputSets": ["go-lock"]},
+    "bifrost": {"inputSets": ["go-lock"]},
+    "operator-runtime": {"inputSets": ["py-lock"]},
+    "auriga-nas-bootstrap": {"inputSets": ["go-lock"]},
+    "runtime-release": {"inputSets": ["go-lock"]}
+  },
+  "inputSets": {
+    "go-lock": {"kind": "deps-lock", "ecosystem": "go"},
+    "web-lock": {"kind": "deps-lock", "ecosystem": "web"},
+    "java-lock": {"kind": "deps-lock", "ecosystem": "java"},
+    "py-lock": {"kind": "deps-lock", "ecosystem": "python"}
+  },
+  "ignore": []
+}`, 0644)
+	for _, rel := range []string{
+		"web/package.json", "clients/package.json", "package.json", "pnpm-workspace.yaml", ".npmrc", "web/pnpm-lock.yaml",
+		"services/pom.xml", "pom.xml", "mvnw", ".mvn/wrapper/maven-wrapper.properties", ".mvn/wrapper/maven-wrapper.jar",
+		"services/contracts/package.json", "services/contracts/package-lock.json", mavenDepsLockRel,
+		pythonRequirementsRel, "deploy/nas/offline-build/system-inputs.sh",
+	} {
+		putFile(t, filepath.Join(src, filepath.FromSlash(rel)), "x\n", 0644)
+	}
+	for _, args := range [][]string{
+		{"init", "--quiet"},
+		{"config", "user.email", "test@example.com"},
+		{"config", "user.name", "Test"},
+		{"add", "-A"},
+		{"commit", "--quiet", "-m", "init"},
+	} {
+		if err := deployRun(context.Background(), runSpec{Name: "git", Args: append([]string{"-C", src}, args...)}); err != nil {
+			t.Fatalf("git %v: %v", args, err)
+		}
+	}
+	// 先算一次该极简源码树的真实指纹，故意塞进失败的 prev.Fingerprints 里：
+	// 如果 doDeploy 错误复用了失败记录的指纹，就会跳过 web/java 构建！
+	srcLocks, err := sourceEcosystemLocks(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lockMap := map[string]string{}
+	for _, l := range srcLocks {
+		lockMap[l.Ecosystem] = l.Digest
+	}
+	recRecipe, err := loadDeployRecipe(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	recSvcs, err := loadSiteServices(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fpRep, err := computeAllFingerprints(context.Background(), fingerprintContext{Source: src, Services: recSvcs, Recipe: recRecipe, Locks: lockMap, Tools: recRecipe.Images})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.record(2).Fingerprints = fingerprintMap(fpRep)
+	if err := saveState(s); err != nil {
+		t.Fatal(err)
+	}
+
+	stubDataVersions(t, &dataVersions{Migrations: map[string]string{}, Formats: map[string]string{}})
+	stubDeployRun(t, func(runSpec) (string, error) { return "", errors.New("no docker") })
+	run2, out2 := testRun()
+	err = doDeploy(context.Background(), defaultSiteOps, cfg, "", s.Data, deployOptions{
+		DryRun: true,
+		Source: src,
+	}, run2)
+	if err != nil {
+		t.Fatalf("dry-run 不应失败：%v\n%s", err, out2.String())
+	}
+	text := out2.String()
+	if strings.Contains(text, "跳过构建") {
+		t.Fatalf("上一版 failed 时不得跳过构建复用产物：\n%s", text)
+	}
+	if !strings.Contains(text, "将构建产物生态：go、web、java") {
+		t.Fatalf("上一版 failed 时必须重建 go、web、java：\n%s", text)
+	}
+	if run2.receipt.SwitchMode != switchModeFull {
+		t.Fatalf("上一版 failed 时切换预估必须为完整启动，得 %q：\n%s", run2.receipt.SwitchMode, text)
 	}
 }
 

@@ -211,21 +211,21 @@ func TestPlanSwitchMixedBrokerSeqAcrossDeploys(t *testing.T) {
 	s, prev, _, _ := switchFixture(t)
 	r2 := containerRecords(t, s, prev, "EDGE")
 	p2, _ := planSwitch(prev, &r2, s.Data, s.Access)
-	r2.Orchestration, r2.BrokerSeq, r2.BrokerImage = p2.Orchestration, p2.BrokerSeq, p2.BrokerImage
+	r2.Status, r2.Orchestration, r2.BrokerSeq, r2.BrokerImage = recordOK, p2.Orchestration, p2.BrokerSeq, p2.BrokerImage
 	// r3：只改 platform——broker 仍是 r1 的镜像，仍是混合版本
 	r3 := containerRecords(t, s, &r2, "PLATFORM")
 	p3, _ := planSwitch(&r2, &r3, s.Data, s.Access)
 	if p3.Mode != switchModeContainers || mixedVersionsNote(p3) != "混合版本：network-broker 仍为 r1" {
 		t.Fatalf("r3 应仍报 r1：%+v", p3)
 	}
-	r3.Orchestration, r3.BrokerSeq, r3.BrokerImage = p3.Orchestration, p3.BrokerSeq, p3.BrokerImage
+	r3.Status, r3.Orchestration, r3.BrokerSeq, r3.BrokerImage = recordOK, p3.Orchestration, p3.BrokerSeq, p3.BrokerImage
 	// r4：再改 edge，broker 指纹仍相同——仍是 r1，而不是上一条 r3
 	r4 := containerRecords(t, s, &r3, "EDGE")
 	p4, _ := planSwitch(&r3, &r4, s.Data, s.Access)
 	if mixedVersionsNote(p4) != "混合版本：network-broker 仍为 r1" {
 		t.Fatalf("r4 应仍报 r1：%+v", p4)
 	}
-	r4.Orchestration, r4.BrokerSeq, r4.BrokerImage = p4.Orchestration, p4.BrokerSeq, p4.BrokerImage
+	r4.Status, r4.Orchestration, r4.BrokerSeq, r4.BrokerImage = recordOK, p4.Orchestration, p4.BrokerSeq, p4.BrokerImage
 	// r5：agent 变 → 完整启动，broker 跟上
 	r5 := containerRecords(t, s, &r4, "AGENT")
 	p5, _ := planSwitch(&r4, &r5, s.Data, s.Access)
@@ -538,7 +538,7 @@ func TestPlanRollbackSwitchBranches(t *testing.T) {
 	s, prev, _, _ := switchFixture(t)
 	cur := containerRecords(t, s, prev, "EDGE")
 	p0, _ := planSwitch(prev, &cur, s.Data, s.Access)
-	cur.Orchestration, cur.BrokerSeq, cur.BrokerImage = p0.Orchestration, p0.BrokerSeq, p0.BrokerImage
+	cur.Status, cur.Orchestration, cur.BrokerSeq, cur.BrokerImage = recordOK, p0.Orchestration, p0.BrokerSeq, p0.BrokerImage
 
 	p, err := planRollbackSwitch(&cur, prev, s.Data, s.Access)
 	if err != nil || p.Mode != switchModeContainers || !p.Edge || !strings.HasPrefix(p.Reason, "回滚：") {
@@ -593,5 +593,25 @@ func TestRunDeploySmokeMissingScript(t *testing.T) {
 	msg, err := runDeploySmoke(s)
 	if err != nil || !strings.Contains(msg, "跳过") {
 		t.Fatalf("%q %v", msg, err)
+	}
+}
+
+func TestPlanSwitchForcesFullWhenPrevNotOK(t *testing.T) {
+	s, prev, _, _ := switchFixture(t)
+	prev.Status = recordFailed
+	// 即使镜像与编排完全相同（正常会走 switchModePointer），或仅改 EDGE（正常会走 switchModeContainers），
+	// 上一版不是 ok 时一律必须走 switchModeFull。
+	for _, keys := range [][]string{nil, {"EDGE"}, {"PLATFORM"}, {"OPERATOR"}} {
+		rec := containerRecords(t, s, prev, keys...)
+		plan, err := planSwitch(prev, &rec, s.Data, s.Access)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if plan.Mode != switchModeFull || plan.MixedBroker {
+			t.Fatalf("keys=%v prev=failed 应强制完整启动：%+v", keys, plan)
+		}
+		if !strings.Contains(plan.Reason, "failed") || !strings.Contains(plan.Reason, "无法作为已运行基线") {
+			t.Fatalf("keys=%v 原因未说明失败基线：%q", keys, plan.Reason)
+		}
 	}
 }
