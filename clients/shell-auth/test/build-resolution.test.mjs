@@ -76,6 +76,36 @@ test('resolveEsbuild falls back to web/node_modules/.pnpm virtual store', (t) =>
   assert.equal(esbuild.marker, 'pnpm-virtual-esbuild');
 });
 
+test('resolveEsbuild falls back to web/node_modules/.pnpm/node_modules/esbuild and other virtual store packages', (t) => {
+  const repo = makeTempDir(t, 'auriga-esbuild-pnpm-hoist-');
+  writeFileSync(join(repo, 'package.json'), JSON.stringify({ name: 'root' }));
+  writeFakePkg(
+    join(repo, 'web', 'node_modules', '.pnpm', 'node_modules', 'esbuild'),
+    'esbuild',
+    'index.js',
+    'module.exports = { marker: "pnpm-hoisted-esbuild" };\n',
+  );
+  assert.equal(resolveEsbuild(repo).marker, 'pnpm-hoisted-esbuild');
+
+  const repo2 = makeTempDir(t, 'auriga-esbuild-pnpm-nested-');
+  writeFileSync(join(repo2, 'package.json'), JSON.stringify({ name: 'root' }));
+  writeFakePkg(
+    join(
+      repo2,
+      'web',
+      'node_modules',
+      '.pnpm',
+      '@vitejs+plugin-vue@6.0.10_vite@7.3.1',
+      'node_modules',
+      'esbuild',
+    ),
+    'esbuild',
+    'index.js',
+    'module.exports = { marker: "pnpm-nested-esbuild" };\n',
+  );
+  assert.equal(resolveEsbuild(repo2).marker, 'pnpm-nested-esbuild');
+});
+
 test('resolvePluginNodePaths and resolvePluginDependency resolve plugin deps from AURIGA_CLIENT_PLUGIN_MODULES', (t) => {
   const repo = makeTempDir(t, 'auriga-plugin-deps-');
   const externalModules = join(repo, 'external-plugin-modules');

@@ -31,15 +31,14 @@ const EXCLUDED = new Set([
   '__pycache__',
   '.dev',
 ]);
-const METADATA = new Set([
+const ROOT_METADATA = new Set([
   'auriga-source.json',
   'sha256sums',
   'sha256sums.sig',
   'release-public.pem',
   '.auriga-devkit.json',
-  '.agent-task.md',
-  '.agent-report.md',
 ]);
+const METADATA = new Set(['.agent-task.md', '.agent-report.md']);
 export function sourcePathAllowed(name) {
   if (
     typeof name !== 'string' ||
@@ -78,6 +77,7 @@ export function sourcePathAllowed(name) {
   )
     return false;
   return (
+    !(!name.includes('/') && ROOT_METADATA.has(base)) &&
     !METADATA.has(base) &&
     !(
       base === '.env' ||
@@ -353,7 +353,7 @@ function gitSourcePaths(root) {
         '-z',
       ])
         .split('\0')
-        .filter(Boolean),
+        .filter((p) => p && sourcePathAllowed(p)),
     ),
   ].sort();
 }
@@ -364,23 +364,30 @@ function gitSourcePaths(root) {
  * （身份已计入、副本里没有的文件按缺失处理，因而不一致）。
  */
 export function assertBuildCopyMatches(copyRoot, sourceRoot, trust, source) {
-  const actual =
-    source.sourceType === 'signed-archive'
-      ? sourceIdentity(copyRoot, trust).sourceTreeSha256
-      : digest(
-          canonical(
-            gitSourcePaths(sourceRoot).map((p) => [
-              p,
-              existsSync(join(copyRoot, p))
-                ? digest(readFileSync(join(copyRoot, p)))
-                : null,
-            ]),
-          ),
-        );
-  if (actual !== source.sourceTreeSha256)
+  if (source.sourceType === 'signed-archive') {
+    const actual = sourceIdentity(copyRoot, trust).sourceTreeSha256;
+    if (actual !== source.sourceTreeSha256)
+      throw new Error(
+        '构建副本与源码身份不一致（复制后源码或副本被改动，或副本缺少身份已计入的文件），拒绝构建；请从新目录重建',
+      );
+    return;
+  }
+  const paths = gitSourcePaths(sourceRoot);
+  const missing = [];
+  const entries = paths.map((p) => {
+    const inCopy = existsSync(join(copyRoot, p));
+    if (!inCopy && existsSync(join(sourceRoot, p))) missing.push(p);
+    return [p, inCopy ? digest(readFileSync(join(copyRoot, p))) : null];
+  });
+  const actual = digest(canonical(entries));
+  if (actual !== source.sourceTreeSha256) {
+    const detail = missing.length
+      ? `（副本缺少文件：${missing.slice(0, 10).join('、')}${missing.length > 10 ? ` 等 ${missing.length} 项` : ''}）`
+      : '';
     throw new Error(
-      '构建副本与源码身份不一致（复制后源码或副本被改动，或副本缺少身份已计入的文件），拒绝构建；请从新目录重建',
+      `构建副本与源码身份不一致（复制后源码或副本被改动，或副本缺少身份已计入的文件）${detail}，拒绝构建；请从新目录重建`,
     );
+  }
 }
 export function sourceIdentity(
   root = ROOT,

@@ -41,11 +41,17 @@ func sourcePathAllowed(name string) bool {
 		return false
 	}
 	base := filepath.Base(name)
-	if !strings.Contains(name, "/") && (strings.HasPrefix(base, "auriga-offline-") || strings.HasPrefix(base, "auriga-devkit-") || strings.HasPrefix(base, "auriga-changes-")) && (strings.Contains(base, ".tar") || strings.HasSuffix(base, ".sha256")) {
-		return false
+	if !strings.Contains(name, "/") {
+		if (strings.HasPrefix(base, "auriga-offline-") || strings.HasPrefix(base, "auriga-devkit-") || strings.HasPrefix(base, "auriga-changes-")) && (strings.Contains(base, ".tar") || strings.HasSuffix(base, ".sha256")) {
+			return false
+		}
+		switch base {
+		case "auriga-source.json", "sha256sums", "sha256sums.sig", "release-public.pem", ".auriga-devkit.json":
+			return false
+		}
 	}
 	switch base {
-	case "auriga-source.json", "sha256sums", "sha256sums.sig", "release-public.pem", ".auriga-devkit.json", ".agent-task.md", ".agent-report.md":
+	case ".agent-task.md", ".agent-report.md":
 		return false
 	}
 	if base == ".env" || strings.HasPrefix(base, ".env.") && base != ".env.example" {

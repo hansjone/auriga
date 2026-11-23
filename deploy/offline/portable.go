@@ -153,5 +153,9 @@ func copySourceTextContext(ctx context.Context, source, target, name string, mod
 		return err
 	}
 	_, writeErr := out.Write(raw)
-	return errors.Join(writeErr, out.Close(), ctx.Err())
+	closeErr := out.Close()
+	if err := errors.Join(writeErr, closeErr, ctx.Err()); err != nil {
+		return err
+	}
+	return os.Chmod(target, mode)
 }

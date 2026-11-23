@@ -4,6 +4,7 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readFileSync,
   rmSync,
   writeFileSync,
 } from 'node:fs';
@@ -11,9 +12,17 @@ import { tmpdir } from 'node:os';
 import { delimiter, join, resolve } from 'node:path';
 import {
   collectPluginModulePaths,
+  ensureWorkspaceEsbuildPublicHoist,
   launchOfflineBuild,
   resolveBuildPaths,
 } from './build.mjs';
+import {
+  assertBuildCopyMatches,
+  copyBuildSource,
+  sourceIdentity,
+  sourcePathAllowed,
+} from './source.mjs';
+import { spawnSync } from 'node:child_process';
 
 function makeTempDir(t, prefix) {
   const dir = mkdtempSync(join(tmpdir(), prefix));
@@ -121,4 +130,58 @@ test('collectPluginModulePaths merges env override, kit plugin-deps, and workspa
   });
 
   assert.deepEqual(paths, [extra, kitPluginNm, pluginNm, webNm, rootNm]);
+});
+
+test('ensureWorkspaceEsbuildPublicHoist injects publicHoistPattern in build copy once and preserves existing setting', (t) => {
+  const dir = makeTempDir(t, 'auriga-client-hoist-');
+  const ws = join(dir, 'pnpm-workspace.yaml');
+  writeFileSync(
+    ws,
+    'packages:\n  - web/*\n  - clients/*\nlockfileDir: web\nsaveExact: true\n',
+  );
+  assert.equal(ensureWorkspaceEsbuildPublicHoist(dir), true);
+  const content = readFileSync(ws, 'utf8');
+  assert.match(content, /publicHoistPattern:\n  - '\*esbuild\*'\n$/);
+  assert.equal(ensureWorkspaceEsbuildPublicHoist(dir), false);
+  assert.equal(readFileSync(ws, 'utf8'), content);
+});
+
+test('sourcePathAllowed and assertBuildCopyMatches allow nested SHA256SUMS while excluding root release metadata', (t) => {
+  assert.equal(sourcePathAllowed('SHA256SUMS'), false);
+  assert.equal(sourcePathAllowed('auriga-source.json'), false);
+  assert.equal(sourcePathAllowed('docs/company-uac/SHA256SUMS'), true);
+  assert.equal(sourcePathAllowed('docs/auriga-source.json'), true);
+
+  const base = makeTempDir(t, 'auriga-git-nested-sha-');
+  const repo = join(base, 'repo');
+  const copy = join(base, 'copy');
+  mkdirSync(join(repo, 'docs/company-uac'), { recursive: true });
+  writeFileSync(join(repo, 'README.md'), 'hello\n');
+  writeFileSync(
+    join(repo, 'docs/company-uac/SHA256SUMS'),
+    'deadbeef  uac.txt\n',
+  );
+  writeFileSync(join(repo, 'SHA256SUMS'), 'root-metadata-ignored\n');
+
+  for (const args of [
+    ['init', '-q'],
+    ['config', 'user.email', 'test@example.com'],
+    ['config', 'user.name', 'Test'],
+    ['add', 'README.md', 'docs/company-uac/SHA256SUMS'],
+    ['commit', '-q', '-m', 'init'],
+  ]) {
+    const r = spawnSync('git', args, { cwd: repo, windowsHide: true });
+    assert.equal(r.status, 0);
+  }
+
+  const identity = sourceIdentity(repo);
+  copyBuildSource(repo, copy);
+  assert.equal(existsSync(join(copy, 'docs/company-uac/SHA256SUMS')), true);
+  assert.doesNotThrow(() => assertBuildCopyMatches(copy, repo, {}, identity));
+
+  rmSync(join(copy, 'docs/company-uac/SHA256SUMS'));
+  assert.throws(
+    () => assertBuildCopyMatches(copy, repo, {}, identity),
+    /副本缺少文件：docs\/company-uac\/SHA256SUMS/,
+  );
 });

@@ -98,10 +98,19 @@ if [ -n "$own_edge" ]; then
   info "LAN IP $IP held by verified project edge on $NET — ok for re-start"
 fi
 
-if command -v ip >/dev/null 2>&1; then
-  if [ -z "$own_edge" ] && ip neigh show "$IP" 2>/dev/null | grep -qi 'REACHABLE\|DELAY\|STALE\|PERMANENT'; then
+if command -v ip >/dev/null 2>&1 && [ -z "$own_edge" ]; then
+  _neigh=$(ip neigh show "$IP" 2>/dev/null || true)
+  if printf '%s\n' "$_neigh" | grep -qi 'REACHABLE\|DELAY\|PROBE\|PERMANENT'; then
     info "neighbor_table mentions $IP — treat as occupied until operator clears ARP/DHCP reservation"
     die "LAN IP appears in neighbor table: $IP"
+  fi
+  if printf '%s\n' "$_neigh" | grep -qi 'STALE'; then
+    if [ "$driver" = bridge ]; then
+      info "neighbor_table has STALE entry for $IP on local bridge $NET (no container member holds $IP) — ignoring historical bridge cache"
+    else
+      info "neighbor_table mentions $IP — treat as occupied until operator clears ARP/DHCP reservation"
+      die "LAN IP appears in neighbor table: $IP"
+    fi
   fi
 fi
 

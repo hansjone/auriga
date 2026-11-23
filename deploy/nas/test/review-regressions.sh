@@ -121,11 +121,15 @@ case "$1" in
     [ "$2" = inspect ] || exit 1
     [ "${3:-}" = -f ] || exit 0
     case "$4" in
-      *Driver*) echo bridge ;;
+      *Driver*) echo "${TEST_NET_DRIVER:-bridge}" ;;
       *Subnet*) echo 192.0.2.0/26 ;;
       *Gateway*) echo 192.0.2.1 ;;
       *AuxiliaryAddresses*|*IPRange*) : ;;
-      *Containers*) printf '%s 192.0.2.10/24\n' "${TEST_IP_OWNER:-aaaaaaaaaaaa}" ;;
+      *Containers*)
+        if [ "${TEST_IP_OWNER:-aaaaaaaaaaaa}" != NONE ]; then
+          printf '%s 192.0.2.10/24\n' "${TEST_IP_OWNER:-aaaaaaaaaaaa}"
+        fi
+        ;;
       *) exit 1 ;;
     esac
     ;;
@@ -147,7 +151,17 @@ cat >"$TMP/bin/pgrep" <<'EOF'
 #!/bin/sh
 exit 0
 EOF
-chmod +x "$TMP/bin/docker" "$TMP/bin/ss" "$TMP/bin/crontab" "$TMP/bin/pgrep"
+cat >"$TMP/bin/ip" <<'EOF'
+#!/bin/sh
+if [ "${1:-}" = neigh ] && [ "${2:-}" = show ]; then
+  if [ -n "${TEST_NEIGH_OUTPUT:-}" ]; then
+    printf '%s\n' "$TEST_NEIGH_OUTPUT"
+  fi
+  exit 0
+fi
+exit 0
+EOF
+chmod +x "$TMP/bin/docker" "$TMP/bin/ss" "$TMP/bin/crontab" "$TMP/bin/pgrep" "$TMP/bin/ip"
 export PATH="$TMP/bin:$PATH"
 # All registration entries receive the same label AND path checks as discovery.
 printf '%s\n' bbbbbbbbbbbb cccccccccccc unrelated-name >"$DATA/results/registered-instances.txt"
@@ -171,6 +185,20 @@ TEST_IP_OWNER=bbbbbbbbbbbb; export TEST_IP_OWNER
 if sh "$ROOT/scripts/network-preflight.sh" >"$TMP/network-foreign.log" 2>&1; then
   echo 'foreign target IP accepted while own edge exists' >&2; exit 1
 fi
+TEST_IP_OWNER=NONE; TEST_NET_DRIVER=bridge; TEST_NEIGH_OUTPUT='192.0.2.10 dev br-16d6f4e17442 lladdr 42:ed:ee:e0:69:0d STALE'
+export TEST_IP_OWNER TEST_NET_DRIVER TEST_NEIGH_OUTPUT
+sh "$ROOT/scripts/network-preflight.sh" >"$TMP/network-stale-bridge.log"
+grep -q 'ignoring historical bridge cache' "$TMP/network-stale-bridge.log"
+TEST_NET_DRIVER=macvlan; export TEST_NET_DRIVER
+if sh "$ROOT/scripts/network-preflight.sh" >"$TMP/network-stale-macvlan.log" 2>&1; then
+  echo 'STALE neighbor on non-bridge driver should be rejected' >&2; exit 1
+fi
+TEST_NET_DRIVER=bridge; TEST_NEIGH_OUTPUT='192.0.2.10 dev br-16d6f4e17442 lladdr 42:ed:ee:e0:69:0d REACHABLE'
+export TEST_NET_DRIVER TEST_NEIGH_OUTPUT
+if sh "$ROOT/scripts/network-preflight.sh" >"$TMP/network-reachable-bridge.log" 2>&1; then
+  echo 'REACHABLE neighbor on bridge should be rejected' >&2; exit 1
+fi
+unset TEST_NET_DRIVER TEST_NEIGH_OUTPUT
 printf 'PASS exact_ip_member_owner_checked\n'
 
 # Follow the real start chain as well as init/re-init. Source archives keep

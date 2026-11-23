@@ -187,3 +187,56 @@ func TestImportPartsRealOwnership(t *testing.T) {
 		t.Fatalf("0666 的第二个分卷应被拒绝：%v", err)
 	}
 }
+
+func TestCopyAndUnpackPreserveExplicitModesUnderRestrictiveUmask(t *testing.T) {
+	oldMask := syscall.Umask(0077)
+	defer syscall.Umask(oldMask)
+
+	base := t.TempDir()
+	srcBin := filepath.Join(base, "src-bin")
+	if err := os.WriteFile(srcBin, []byte("binary"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(srcBin, 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	dstBin := filepath.Join(base, "copied", "auriga-nas-bootstrap")
+	if err := copyFile(srcBin, dstBin, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if st, err := os.Stat(dstBin); err != nil || st.Mode().Perm() != 0755 {
+		t.Fatalf("copyFile under umask 0077 got mode %o, want 0755 (err=%v)", st.Mode().Perm(), err)
+	}
+
+	srcScript := filepath.Join(base, "installer.sh")
+	if err := os.WriteFile(srcScript, []byte("#!/bin/sh\necho ok\n"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	dstScript := filepath.Join(base, "copied", "installer.sh")
+	if err := copySourceFile(srcScript, dstScript, "deploy/nas/scripts/installer.sh", 0755); err != nil {
+		t.Fatal(err)
+	}
+	if st, err := os.Stat(dstScript); err != nil || st.Mode().Perm() != 0755 {
+		t.Fatalf("copySourceFile under umask 0077 got mode %o, want 0755 (err=%v)", st.Mode().Perm(), err)
+	}
+
+	archiveRoot := filepath.Join(base, "archive-src")
+	if err := os.MkdirAll(archiveRoot, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := copyFile(srcBin, filepath.Join(archiveRoot, "bin/boot"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	archiveFile := filepath.Join(base, "pkg.tar")
+	if err := pack(archiveRoot, archiveFile); err != nil {
+		t.Fatal(err)
+	}
+	unpackDir := filepath.Join(base, "unpacked")
+	if err := unpack(archiveFile, unpackDir); err != nil {
+		t.Fatal(err)
+	}
+	if st, err := os.Stat(filepath.Join(unpackDir, "bin/boot")); err != nil || st.Mode().Perm() != 0755 {
+		t.Fatalf("unpack under umask 0077 got mode %o, want 0755 (err=%v)", st.Mode().Perm(), err)
+	}
+}
