@@ -4,6 +4,7 @@ export { default as Placeholder } from './Placeholder.vue';
 export { default as BrandMark } from './BrandMark.vue';
 export { default as LoginMethods } from './LoginMethods.vue';
 export { default as LoginTopBar } from './LoginTopBar.vue';
+export { default as HintTrigger } from './HintTrigger.vue';
 export { pickLocalized } from './locale';
 
 export {

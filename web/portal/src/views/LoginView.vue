@@ -318,19 +318,23 @@ const step = (): ClientStep | null =>
 <style scoped>
 .login-panel {
   width: min(384px, 100%);
-  min-height: 552px;
-  padding: 32px;
-  border-radius: 24px;
+  min-height: 0;
+  padding: 28px 28px 20px;
+  border-radius: 20px;
   display: flex;
   flex-direction: column;
   align-items: center;
+  gap: 0;
+}
+.login-panel.auriga-qr-login {
+  min-height: 420px;
 }
 .qr-heading {
   display: flex;
   align-items: center;
   justify-content: center;
   gap: 8px;
-  margin-bottom: 24px;
+  margin-bottom: 16px;
   flex-shrink: 0;
 }
 .qr-heading h1 {
@@ -342,7 +346,6 @@ const step = (): ClientStep | null =>
 }
 .login-content {
   width: 100%;
-  flex: 1;
 }
 .auriga-qr-login :deep([data-testid='uac-target']),
 .auriga-qr-login :deep(.uac-cancel) {
@@ -358,7 +361,10 @@ const step = (): ClientStep | null =>
   text-align: center;
   color: var(--auriga-muted);
   font-size: 13px;
-  padding: 48px 0;
+  padding: 20px 0 8px;
+}
+.login-panel :deep(.login-methods) {
+  margin-top: 16px;
 }
 .restart {
   font: inherit;

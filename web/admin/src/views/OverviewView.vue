@@ -2,7 +2,7 @@
 import { onBeforeUnmount, onMounted, reactive, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { ElButton } from 'element-plus';
-import { isApiError } from '@auriga/shared';
+import { HintTrigger, isApiError } from '@auriga/shared';
 import { orgApi } from '../api';
 import { adminApi } from '../admin/api';
 import { readAllPages } from '../admin/pagination';
@@ -114,9 +114,11 @@ onBeforeUnmount(() => {
 <template>
   <section>
     <header class="resource-head">
-      <div>
+      <div class="overview-title">
         <h1>{{ t('title') }}</h1>
-        <p>{{ t('description') }}</p>
+        <HintTrigger>
+          <p>{{ t('description') }}</p>
+        </HintTrigger>
       </div>
       <ElButton :disabled="loading" @click="reload">{{
         t('refresh')
@@ -148,6 +150,14 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
+.overview-title {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+.overview-title h1 {
+  margin: 0;
+}
 .overview-cards {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));

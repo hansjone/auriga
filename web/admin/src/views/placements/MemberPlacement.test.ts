@@ -76,6 +76,7 @@ it.each(['zh-CN', 'en'] as const)(
       locale === 'zh-CN'
         ? '共享池仅限互信团队。成员可能互相看到文件，并可能以 owner 能力操作。成员之间会话内容可见，且可能以其他成员的身份操作内部应用、审计记在被冒用者名下。同一进程卡死、崩溃或取消超时会中断全池任务。需要保密或独立故障域请使用独立容器。'
         : "Shared pools are for mutually trusted teams only. Members may see each other's files, act with owner capabilities, read each other's sessions and operate internal applications as another member, with audit attributed to the impersonated member. Stalls, crashes and cancellation timeouts interrupt the entire pool. Use a dedicated container for confidentiality or an independent failure domain.";
+    await view.get('.auriga-hint-trigger').trigger('click');
     expect(view.text()).toContain(required);
     expect(placementMessages[locale].risks).toContain(required);
     view.unmount();
@@ -159,6 +160,7 @@ it('keeps operation ID on refresh and discards it on member change', async () =>
 it('requires impact confirmation, preserves opaque ETag, treats 202 as registered and blocked as unconfirmed', async () => {
   const { view, port } = setup();
   await flushPromises();
+  await view.get('.auriga-hint-trigger').trigger('click');
   expect(view.text()).toContain('成员之间会话内容可见');
   expect(view.text()).toContain('审计记在被冒用者名下');
   await view.find('textarea').setValue('maintenance');

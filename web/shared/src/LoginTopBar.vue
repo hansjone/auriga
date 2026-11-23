@@ -1,9 +1,13 @@
 <script setup lang="ts">
 import { useI18n } from 'vue-i18n';
 import BrandMark from './BrandMark.vue';
-const props = withDefaults(defineProps<{ fallback?: string }>(), {
-  fallback: '/',
-});
+const props = withDefaults(
+  defineProps<{ fallback?: string; showBack?: boolean }>(),
+  {
+    fallback: '/',
+    showBack: true,
+  },
+);
 const { locale } = useI18n();
 function language() {
   locale.value = locale.value === 'en' ? 'zh-CN' : 'en';
@@ -30,7 +34,7 @@ function back() {
     <nav>
       <button type="button" class="language" @click="language">
         {{ locale === 'en' ? '中文' : 'EN' }}</button
-      ><button type="button" class="back" @click="back">
+      ><button v-if="showBack" type="button" class="back" @click="back">
         {{ locale === 'en' ? 'Back' : '返回' }}
       </button>
     </nav>

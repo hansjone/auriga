@@ -2,7 +2,7 @@
 import { onMounted, onBeforeUnmount, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { ElButton } from 'element-plus';
-import { isApiError } from '@auriga/shared';
+import { HintTrigger, isApiError } from '@auriga/shared';
 import { placementMessages } from './placement-messages';
 import { apiClient } from '../api';
 import {
@@ -11,7 +11,10 @@ import {
   placementRequestKey,
   type Placement,
 } from './placement-api';
-const { t } = useI18n({ useScope: 'local', messages: placementMessages });
+const { t, locale } = useI18n({
+  useScope: 'local',
+  messages: placementMessages,
+});
 const api = createPlacementApi(apiClient),
   placement = ref<Placement>(),
   busy = ref(false),
@@ -70,7 +73,23 @@ onBeforeUnmount(() => {
 </script>
 <template>
   <section class="placement" :aria-busy="busy">
-    <h2>{{ t('title') }}</h2>
+    <header class="placement-head">
+      <h2>{{ t('title') }}</h2>
+      <HintTrigger :label="locale === 'en' ? 'Placement notes' : '分配说明'">
+        <p>
+          <strong>{{ locale === 'en' ? 'Resources' : '资源' }}</strong>
+          {{ t('resource') }}
+        </p>
+        <p>
+          <strong>{{ locale === 'en' ? 'Risks' : '风险' }}</strong>
+          {{ t('risk') }}
+        </p>
+        <p>
+          <strong>{{ locale === 'en' ? 'Policy' : '策略' }}</strong>
+          {{ t('policy') }}
+        </p>
+      </HintTrigger>
+    </header>
     <p v-if="placement">
       {{ t(placement.mode) }} · {{ t('states.' + placement.state) }}
     </p>
@@ -91,20 +110,23 @@ onBeforeUnmount(() => {
         t('refresh')
       }}</ElButton>
     </div>
-    <p v-if="placement?.state === 'ready'">
+    <p v-if="placement?.state === 'ready'" class="market">
       <a href="/resources">{{ t('market') }}</a>
     </p>
-    <p class="hint">{{ t('resource') }}</p>
-    <p class="hint">{{ t('risk') }}</p>
-    <p class="hint">{{ t('policy') }}</p>
   </section>
 </template>
 <style scoped>
 .placement {
-  margin: 0.25rem 0 1.25rem;
+  margin: 0.25rem 0 1rem;
+}
+.placement-head {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  margin-bottom: 0.35rem;
 }
 h2 {
-  margin: 0 0 0.5rem;
+  margin: 0;
   font-size: 1.0625rem;
   font-weight: 600;
   letter-spacing: -0.02em;
@@ -114,17 +136,17 @@ p {
   font-size: 0.875rem;
   line-height: 1.55;
 }
-.hint {
-  color: var(--auriga-muted);
-}
 .actions {
   display: flex;
   flex-wrap: wrap;
   gap: 0.5rem;
-  margin: 0.75rem 0;
+  margin: 0.75rem 0 0.35rem;
 }
 .actions :deep(.el-button + .el-button) {
   margin-left: 0;
+}
+.market {
+  margin-top: 0.5rem;
 }
 a {
   color: var(--auriga-accent-line);

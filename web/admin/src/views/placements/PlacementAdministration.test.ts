@@ -126,7 +126,8 @@ it('requires explicit export confirmation, preserves ETag, and treats 202 only a
   const w = view();
   await flushPromises();
   await load(w);
-  expect(w.find('.rebuild-risks').text()).toContain('审计记在被冒用者名下');
+  await w.findAll('.auriga-hint-trigger').at(-1)!.trigger('click');
+  expect(w.text()).toContain('审计记在被冒用者名下');
   expect(w.find('details').exists()).toBe(false);
   await click(w, '确认导出并开始重建');
   expect(mock.start).not.toHaveBeenCalled();
