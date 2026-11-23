@@ -281,7 +281,6 @@ onBeforeUnmount(() => {
     <p>{{ t('impact') }}</p>
     <p>{{ t('budget') }}</p>
     <p>{{ t('resources') }}</p>
-    <p>{{ t('stepup') }}</p>
     <p v-if="error" role="alert">{{ error }}</p>
     <p v-if="!writable">{{ t('denied') }}</p>
     <p>

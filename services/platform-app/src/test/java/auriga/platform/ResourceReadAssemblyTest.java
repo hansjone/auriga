@@ -3447,7 +3447,9 @@ class ResourceReadAssemblyTest {
                 .claim("stepup_time", null)
                 .build());
     unverified.sign(new ECDSASigner(KEY));
-    failure(governanceRequest("review", unverified.serialize()), 403, "iam.step_up_required");
+    assertEquals(
+        List.of(pending.toString()),
+        ids(result(governanceRequest("review", unverified.serialize()), 200)));
     var review = governanceRequest("review", bearer);
     assertEquals(List.of(pending.toString()), ids(result(review, 200)));
     assertEquals("no-store", review.headers().firstValue("cache-control").orElse(""));

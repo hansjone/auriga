@@ -234,18 +234,16 @@ it('hides writes and download when permissions are absent', async () => {
   expect(wrapper!.find('[data-testid=uac-save]').exists()).toBe(false);
   expect(wrapper!.find('[data-testid=uac-download]').exists()).toBe(false);
 });
-it('continues the same config and ETag through step-up', async () => {
+it('does not trigger step-up dialog on admin write', async () => {
   const verify = vi.fn(async () => {});
   const unbind = bindStepUp(verify);
   try {
     await render();
-    fail = 403;
     await click('uac-save');
     await confirm();
-    expect(verify).toHaveBeenCalledOnce();
-    expect(puts()).toHaveLength(2);
-    expect(puts()[0].init.body).toBe(puts()[1].init.body);
-    expect(new Headers(puts()[1].init.headers).get('If-Match')).toBe(
+    expect(verify).not.toHaveBeenCalled();
+    expect(puts()).toHaveLength(1);
+    expect(new Headers(puts()[0].init.headers).get('If-Match')).toBe(
       '"provider-3"',
     );
   } finally {

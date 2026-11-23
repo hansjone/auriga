@@ -51,7 +51,7 @@ class DesktopControllerAuthorizationTest {
   }
 
   @Test
-  void readsAndPreflightAcceptStaleStepUpWhileWritesRequireRecentIdentity() throws Exception {
+  void readsPreflightAndWritesWorkForAuthenticatedAdminWithoutStepUp() throws Exception {
     when(releases.list(any())).thenReturn(ResourceBody.JSON.createObjectNode());
     when(releases.preflight(any(), any())).thenReturn(ResourceBody.JSON.createObjectNode());
     var api = controller();
@@ -66,24 +66,10 @@ class DesktopControllerAuthorizationTest {
                   "{\"signature\":{}}".getBytes(java.nio.charset.StandardCharsets.UTF_8));
               assertEquals(200, api.preflight(request).getStatusCode().value());
             });
-    denied(actor, CommonErrors.STEP_UP_REQUIRED, () -> api.withdraw(2));
-    denied(
-        actor,
-        CommonErrors.STEP_UP_REQUIRED,
-        () -> {
-          try {
-            api.publish(new MockHttpServletRequest());
-          } catch (java.io.IOException e) {
-            throw new AssertionError(e);
-          }
-        });
-    verify(releases, never()).withdraw(any(), anyLong());
-    verify(releases, never()).publish(any(), any(), any());
     var noStepUp = actor(TokenContext.ADMIN, Set.of(DesktopReleases.MANAGE), null);
     RequestContext.start(null, null).withPrincipal(noStepUp).run(() -> api.list());
-    var recent = actor(TokenContext.ADMIN, Set.of(DesktopReleases.MANAGE), now);
-    RequestContext.start(null, null).withPrincipal(recent).run(() -> api.withdraw(2));
-    verify(releases).withdraw(recent, 2);
+    RequestContext.start(null, null).withPrincipal(noStepUp).run(() -> api.withdraw(2));
+    verify(releases).withdraw(noStepUp, 2);
     var request = new MockHttpServletRequest();
     request.addHeader(
         "X-Desktop-Manifest",
@@ -95,11 +81,11 @@ class DesktopControllerAuthorizationTest {
     assertEquals(
         201,
         RequestContext.start(null, null)
-            .withPrincipal(recent)
+            .withPrincipal(noStepUp)
             .call(() -> api.publish(request))
             .getStatusCode()
             .value());
-    verify(releases).publish(eq(recent), any(), any());
+    verify(releases).publish(eq(noStepUp), any(), any());
   }
 
   @Test

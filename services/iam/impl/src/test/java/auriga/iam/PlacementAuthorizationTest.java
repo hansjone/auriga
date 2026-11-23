@@ -71,15 +71,7 @@ class PlacementAuthorizationTest {
         caller(TokenContext.ADMIN, tenant),
         () -> {
           auth.requireRead();
-          denied("iam.step_up_required", auth::requireWrite);
-          for (long seconds : List.of(-1L, 600L, 601L)) {
-            session.put("stepUpAt", now.minusSeconds(seconds).toString());
-            denied("iam.step_up_required", auth::requireWrite);
-          }
-          for (long seconds : List.of(0L, 599L)) {
-            session.put("stepUpAt", now.minusSeconds(seconds).toString());
-            auth.requireWrite();
-          }
+          auth.requireWrite();
           when(permissions.resolve(tenant, "actor", "admin")).thenReturn(Set.of());
           denied("iam.forbidden", auth::requireWrite);
           when(sessions.activeById("sid")).thenReturn(null);

@@ -163,8 +163,6 @@ public class SharedDshController {
     if (!p.isAdminContext()
         || !p.hasPermission("workspace.placements." + (write ? "write" : "read")))
       throw new AurigaException(CommonErrors.FORBIDDEN);
-    if (write && !stepUp(p.stepUpTime(), clock.instant()))
-      throw new AurigaException(CommonErrors.STEP_UP_REQUIRED);
     trusted(
         () -> {
           if (write) authorization.requireWrite();

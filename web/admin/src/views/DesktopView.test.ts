@@ -142,11 +142,11 @@ it.each(['common.forbidden', 'iam.step_up_required', 'common.unavailable'])(
     wrapper.unmount();
   },
 );
-it('空台账成功加载才显示暂无版本，并提示写操作需验证', async () => {
+it('空台账成功加载才显示暂无版本，且不提示二次验证', async () => {
   const wrapper = view();
   await flushPromises();
   expect(wrapper.text()).toContain('暂无版本');
-  expect(wrapper.text()).toContain('发布/下架前需验证身份');
+  expect(wrapper.text()).not.toContain('发布/下架前需验证身份');
   expect(api.verify).not.toHaveBeenCalled();
   wrapper.unmount();
 });

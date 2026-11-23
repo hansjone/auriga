@@ -32,33 +32,20 @@ class OpsAuthorizationTest {
                 () -> rules.check(principal(TokenContext.ADMIN, Set.of(), Instant.now()), clock))
             .errorCode()
             .code());
-    assertEquals(
-        "iam.step_up_required",
-        assertThrows(
-                AurigaException.class,
-                () -> rules.check(principal(TokenContext.ADMIN, perms, null), clock))
-            .errorCode()
-            .code());
+    assertDoesNotThrow(() -> rules.check(principal(TokenContext.ADMIN, perms, null), clock));
     assertDoesNotThrow(
         () -> rules.check(principal(TokenContext.ADMIN, perms, Instant.now()), clock));
   }
 
   @Test
-  void alertActionsRequireRecentStepUp() throws Exception {
+  void alertActionsRequireAdminPermissionWithoutStepUp() throws Exception {
     var rules =
         AuthorizationRules.of(
             OpsController.class.getMethod("action", UUID.class, String.class, int.class),
             OpsController.class);
     var permissions = Set.of("ops.alerts.write");
-    assertEquals(
-        "iam.step_up_required",
-        assertThrows(
-                AurigaException.class,
-                () ->
-                    rules.check(
-                        principal(TokenContext.ADMIN, permissions, null), Clock.systemUTC()))
-            .errorCode()
-            .code());
+    assertDoesNotThrow(
+        () -> rules.check(principal(TokenContext.ADMIN, permissions, null), Clock.systemUTC()));
     assertDoesNotThrow(
         () ->
             rules.check(

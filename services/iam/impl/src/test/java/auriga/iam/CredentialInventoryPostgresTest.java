@@ -132,9 +132,7 @@ class CredentialInventoryPostgresTest {
             null,
             "test");
     list.check(admin, clock);
-    assertEquals(
-        "iam.step_up_required",
-        assertThrows(AurigaException.class, () -> revoke.check(admin, clock)).errorCode().code());
+    revoke.check(admin, clock);
     var portal =
         new auriga.common.security.AurigaPrincipal(
             admin.subject(),

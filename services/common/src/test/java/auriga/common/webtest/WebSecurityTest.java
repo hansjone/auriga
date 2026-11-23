@@ -116,6 +116,13 @@ class WebSecurityTest {
       return Map.of("ok", true);
     }
 
+    @PostMapping("/api/demo/v1/sensitive")
+    @AuthenticatedOnly
+    @RequiresRecentStepUp
+    Map<String, Object> portalSensitive() {
+      return Map.of("ok", true);
+    }
+
     @PostMapping("/api/demo/v1/items")
     @AuthenticatedOnly
     Map<String, Object> create(@Valid @RequestBody Item item) {
@@ -302,8 +309,8 @@ class WebSecurityTest {
     problem(
         call(
             "POST",
-            "/api/demo/v1/admin/sensitive",
-            TOKENS.token(c -> c.claim("ctx", "admin")),
+            "/api/demo/v1/sensitive",
+            TOKENS.token(c -> c.claim("ctx", "portal")),
             Map.of(),
             null),
         403,
@@ -311,8 +318,8 @@ class WebSecurityTest {
     problem(
         call(
             "POST",
-            "/api/demo/v1/admin/sensitive",
-            TOKENS.token(c -> c.claim("ctx", "admin").claim("stepup_time", now - 700)),
+            "/api/demo/v1/sensitive",
+            TOKENS.token(c -> c.claim("ctx", "portal").claim("stepup_time", now - 700)),
             Map.of(),
             null),
         403,
@@ -321,8 +328,17 @@ class WebSecurityTest {
         200,
         call(
                 "POST",
+                "/api/demo/v1/sensitive",
+                TOKENS.token(c -> c.claim("ctx", "portal").claim("stepup_time", now - 60)),
+                Map.of(),
+                null)
+            .statusCode());
+    assertEquals(
+        200,
+        call(
+                "POST",
                 "/api/demo/v1/admin/sensitive",
-                TOKENS.token(c -> c.claim("ctx", "admin").claim("stepup_time", now - 60)),
+                TOKENS.token(c -> c.claim("ctx", "admin")),
                 Map.of(),
                 null)
             .statusCode());

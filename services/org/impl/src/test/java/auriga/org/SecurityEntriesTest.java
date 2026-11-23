@@ -142,6 +142,8 @@ class SecurityEntriesTest {
         .withPrincipal(actor)
         .run(
             () ->
-                error("iam.step_up_required", () -> svc.putPolicy("egress", OrgJson.object(), 1L)));
+                error(
+                    "org.precondition_required",
+                    () -> svc.putPolicy("egress", OrgJson.object(), null)));
   }
 }

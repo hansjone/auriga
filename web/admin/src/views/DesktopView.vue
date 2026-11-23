@@ -7,7 +7,6 @@ import { adminApi } from '../admin/api';
 import { sha256 } from '../admin/resourceHash';
 import { devicesApi, type AdminDevice } from '../admin/devicesApi';
 import { apiClient } from '../api';
-import { requestStepUp } from '../admin/stepUp';
 import type { components } from '../../../shared/src/generated/resource';
 
 type Ledger = components['schemas']['DesktopReleaseLedger'];
@@ -30,7 +29,6 @@ const validationError = ref('');
 const validated = ref(false);
 const confirmed = ref(false);
 const progress = ref(0);
-const verifiedAt = ref(0);
 const deviceAllowed = ref(false);
 const devices = shallowRef<AdminDevice[]>();
 const deviceError = ref('');
@@ -83,7 +81,6 @@ const updateSummary = computed(() => {
   }
   return result;
 });
-const identityFresh = computed(() => verifiedAt.value > 0);
 function reason(error: unknown) {
   if (!isApiError(error)) return t('desktopServiceError');
   let key = 'desktopRequestError';
@@ -224,18 +221,6 @@ async function loadDevices() {
 }
 async function refresh() {
   await Promise.allSettled([loadLedger(), loadDevices()]);
-}
-async function verifyIdentity() {
-  busy.value = true;
-  actionError.value = '';
-  try {
-    await requestStepUp();
-    verifiedAt.value = Date.now();
-  } catch (error) {
-    actionError.value = reason(error);
-  } finally {
-    busy.value = false;
-  }
 }
 async function withdraw(sequence: number) {
   if (busy.value || checking.value) return;
@@ -451,15 +436,7 @@ onMounted(async () => {
       <section aria-labelledby="upload-title">
         <div class="section-head">
           <h2 id="upload-title">{{ t('desktopUpload') }}</h2>
-          <button
-            type="button"
-            :disabled="busy || checking"
-            @click="verifyIdentity"
-          >
-            {{ t('desktopVerify') }}
-          </button>
         </div>
-        <p>{{ t(identityFresh ? 'desktopVerified' : 'desktopStepUpHint') }}</p>
         <p class="muted">
           {{ t('desktopPolicyInstructions') }}
           {{ t('desktopMandatoryInstructions') }}

@@ -32,12 +32,6 @@ class AdminDevicesAuthorizationTest {
         assertThrows(AurigaException.class, () -> read.check(principal, clock)).errorCode().code());
     when(principal.hasPermission("iam.network.manage")).thenReturn(true);
     assertDoesNotThrow(() -> read.check(principal, clock));
-    assertEquals(
-        "iam.step_up_required",
-        assertThrows(AurigaException.class, () -> write.check(principal, clock))
-            .errorCode()
-            .code());
-    when(principal.steppedUpWithin(any(), any())).thenReturn(true);
     assertDoesNotThrow(() -> write.check(principal, clock));
   }
 }
