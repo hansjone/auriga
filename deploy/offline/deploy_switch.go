@@ -389,6 +389,8 @@ func planSwitchWith(prev, rec *deployRecord, orch, data string) switchPlan {
 	}
 
 	switch {
+	case prev != nil && prev.Status != recordOK:
+		p.Mode, p.Reason = switchModeFull, fmt.Sprintf("上一版 r%d 状态为 %s，无法作为已运行基线，走完整启动", prev.Seq, prev.Status)
 	case prev != nil && (prev.kind() == recordKindAdopt || rec.kind() == recordKindAdopt):
 		// adopt 接管记录没有可信的产物指纹与装配摘要，现场容器也不是本工具启动的：与它之间的
 		// 切换（adopt 后第一次 deploy、回滚到 adopt 版）一律完整启动，不走只换容器或仅切指针。

@@ -4,8 +4,10 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"fmt"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -238,5 +240,164 @@ func TestCopyAndUnpackPreserveExplicitModesUnderRestrictiveUmask(t *testing.T) {
 	}
 	if st, err := os.Stat(filepath.Join(unpackDir, "bin/boot")); err != nil || st.Mode().Perm() != 0755 {
 		t.Fatalf("unpack under umask 0077 got mode %o, want 0755 (err=%v)", st.Mode().Perm(), err)
+	}
+	if st, err := os.Stat(filepath.Join(unpackDir, "bin")); err != nil || st.Mode().Perm() != 0755 {
+		t.Fatalf("unpack dir under umask 0077 got mode %o, want 0755 (err=%v)", st.Mode().Perm(), err)
+	}
+}
+
+func TestReleaseStageAndCopyTreeNormalizePermissionsUnderUmask0077(t *testing.T) {
+	stubTrustedSource(t)
+	oldMask := syscall.Umask(0077)
+	defer syscall.Umask(oldMask)
+
+	ctx := context.Background()
+	base := t.TempDir()
+
+	// 故意构造 0700 目录与 0600/0700 文件作为输入，模拟受 umask 0077 污染的源产物。
+	mk := func(path string, content string, mode os.FileMode) {
+		t.Helper()
+		if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(content), mode); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chmod(path, mode); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// 1. copyTreeContext：源目录 0700、静态文件 0600、可执行文件 0700 -> 目标全 0755/0644/0755。
+	webSrc := filepath.Join(base, "artifacts", "web")
+	mk(filepath.Join(webSrc, "panel/index.html"), "<html>ok</html>\n", 0600)
+	mk(filepath.Join(webSrc, "panel/assets/app.js"), "console.log(1)\n", 0600)
+	mk(filepath.Join(webSrc, "portal/index.html"), "<html>portal</html>\n", 0600)
+	mk(filepath.Join(webSrc, "admin/index.html"), "<html>admin</html>\n", 0600)
+	mk(filepath.Join(webSrc, "panel/run.sh"), "#!/bin/sh\n", 0700)
+	if err := writeSumsContext(ctx, webSrc); err != nil {
+		t.Fatal(err)
+	}
+	copiedTree := filepath.Join(base, "copied-web")
+	if err := copyTreeContext(ctx, webSrc, copiedTree); err != nil {
+		t.Fatal(err)
+	}
+	assertTreePerms(t, copiedTree, map[string]fs.FileMode{
+		"panel/run.sh": 0755,
+	})
+
+	// 2. stageService（edge）：包含 go 可执行文件（源 0700）、web 静态目录（源 0600/0700）、dirs 空目录；
+	// 顶层 stage 保持 0700 不被放宽，scratch 内所有目录 0755、普通文件 0644、可执行文件 0755。
+	r, err := loadDeployRecipe(repoRoot(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	goSrc := filepath.Join(base, "artifacts", "go")
+	for _, bin := range []string{"auriga-nas-bootstrap", "runtime-release", "auriga-edge", "auriga-ai-gateway", "auriga-egress", "auriga-network-broker", "auriga-network-probe", "auriga-panel"} {
+		mk(filepath.Join(goSrc, bin), "bin-"+bin, 0700)
+	}
+	if err := writeSumsContext(ctx, goSrc); err != nil {
+		t.Fatal(err)
+	}
+	stage := filepath.Join(base, ".auriga-deploy-stage")
+	if err := os.Mkdir(stage, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(stage, 0700); err != nil {
+		t.Fatal(err)
+	}
+	scratch := filepath.Join(stage, "assemble", "edge")
+	if err := mkdirAllExact(scratch, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := stageService(ctx, "edge", r.Services["edge"], repoRoot(t), filepath.Join(base, "artifacts"), map[string]string{}, scratch); err != nil {
+		t.Fatal(err)
+	}
+	if st, err := os.Stat(stage); err != nil || st.Mode().Perm() != 0700 {
+		t.Fatalf("顶层敏感 stage 目录权限应保持 0700，实际 %o (err=%v)", st.Mode().Perm(), err)
+	}
+	assertTreePerms(t, scratch, map[string]fs.FileMode{
+		"go/auriga-edge":           0755,
+		"go/auriga-ai-gateway":     0755,
+		"go/auriga-egress":         0755,
+		"go/auriga-network-broker": 0755,
+		"go/auriga-network-probe":  0755,
+		"go/auriga-panel":          0755,
+		"web/panel/run.sh":         0755,
+	})
+	for _, emptyDir := range []string{"directories/policies", "directories/reports"} {
+		if st, err := os.Stat(filepath.Join(scratch, filepath.FromSlash(emptyDir))); err != nil || !st.IsDir() || st.Mode().Perm() != 0755 {
+			t.Fatalf("stageService dirs %s 权限应为 0755，实际 %o (err=%v)", emptyDir, st.Mode().Perm(), err)
+		}
+	}
+
+	// 3. writeReleaseDir：在 umask 0077 下生成完整发行目录，目录全 0755、普通文件全 0644、可执行文件全 0755。
+	srcTree := filepath.Join(base, "src")
+	mk(filepath.Join(srcTree, "deploy/nas/scripts/start.sh"), "#!/bin/sh\necho ok\n", 0700)
+	mk(filepath.Join(srcTree, "deploy/nas/docker-compose.yml"), "services: {}\n", 0600)
+	s := deployTestSite(t)
+	m := releaseManifest{
+		Images:    imagesFor("1"),
+		Source:    deploySource{Commit: strings.Repeat("a", 40)},
+		CreatedAt: "2026-11-23T00:00:00Z",
+	}
+	prov := &provenance{Version: "local-test", Commit: strings.Repeat("a", 40), BuiltAt: "2026-11-23T00:00:00Z"}
+	fpRep := &fingerprintReport{Artifacts: map[string]artifactFingerprint{"web-panel": {Digest: "abc"}}}
+	final, _, err := writeReleaseDir(ctx, s.Data, 1, srcTree, goSrc, filepath.Join(base, "artifacts"), m, prov, fpRep, &orchInputs{Data: s.Data, Access: s.Access})
+	if err != nil {
+		t.Fatal(err)
+	}
+	execFiles := map[string]fs.FileMode{
+		"bin/auriga-nas-bootstrap":            0755,
+		"bin/runtime-release":                 0755,
+		"deploy-nas/bin/auriga-nas-bootstrap": 0755,
+		"deploy-nas/bin/runtime-release":      0755,
+		"deploy-nas/scripts/start.sh":         0755,
+		"artifacts/go/auriga-nas-bootstrap":   0755,
+		"artifacts/go/runtime-release":        0755,
+		"artifacts/go/auriga-edge":            0755,
+		"artifacts/go/auriga-ai-gateway":      0755,
+		"artifacts/go/auriga-egress":          0755,
+		"artifacts/go/auriga-network-broker":  0755,
+		"artifacts/go/auriga-network-probe":   0755,
+		"artifacts/go/auriga-panel":           0755,
+		"artifacts/web/panel/run.sh":          0755,
+	}
+	assertTreePerms(t, final, execFiles)
+}
+
+func assertTreePerms(t *testing.T, root string, execFiles map[string]fs.FileMode) {
+	t.Helper()
+	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		info, err := os.Lstat(path)
+		if err != nil {
+			return err
+		}
+		rel, err := filepath.Rel(root, path)
+		if err != nil {
+			return err
+		}
+		rel = filepath.ToSlash(rel)
+		got := info.Mode().Perm()
+		if d.IsDir() {
+			if got != 0755 {
+				t.Errorf("目录 %s 权限为 %04o，期望 0755", rel, got)
+			}
+			return nil
+		}
+		want := fs.FileMode(0644)
+		if w, ok := execFiles[rel]; ok {
+			want = w
+		}
+		if got != want {
+			t.Errorf("文件 %s 权限为 %04o，期望 %04o", rel, got, want)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
 }

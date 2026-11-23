@@ -101,7 +101,11 @@ func writeSumsContext(ctx context.Context, root string) error {
 		}
 		fmt.Fprintf(&sums, "%s  %s\n", hash, name)
 	}
-	return os.WriteFile(filepath.Join(root, "SHA256SUMS"), []byte(sums.String()), 0644)
+	sumPath := filepath.Join(root, "SHA256SUMS")
+	if err := os.WriteFile(sumPath, []byte(sums.String()), 0644); err != nil {
+		return err
+	}
+	return os.Chmod(sumPath, 0644)
 }
 
 func verifySums(root string) error {
@@ -211,11 +215,11 @@ func unpackReader(input io.Reader, destination string) error {
 		path := filepath.Join(destination, filepath.FromSlash(name))
 		switch h.Typeflag {
 		case tar.TypeDir:
-			if err := os.MkdirAll(path, 0755); err != nil {
+			if err := mkdirAllExact(path, 0755); err != nil {
 				return err
 			}
 		case tar.TypeReg:
-			if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+			if err := mkdirAllExact(filepath.Dir(path), 0755); err != nil {
 				return err
 			}
 			mode := fs.FileMode(0644)
@@ -298,6 +302,50 @@ func packContext(ctx context.Context, root, archive string) error {
 	return f.Close()
 }
 
+// mkdirAllExact 按指定权限逐级创建不存在的目录，并对新建的每一级目录显式 Chmod，
+// 避免受调用者 umask（如 0077）影响；已存在的父目录权限保持不变。
+func mkdirAllExact(dir string, mode fs.FileMode) error {
+	clean := filepath.Clean(dir)
+	if st, err := os.Stat(clean); err == nil {
+		if !st.IsDir() {
+			return fmt.Errorf("%s 已存在且不是目录", clean)
+		}
+		return nil
+	}
+	var missing []string
+	cur := clean
+	for {
+		if _, err := os.Stat(cur); err == nil {
+			break
+		}
+		missing = append(missing, cur)
+		parent := filepath.Dir(cur)
+		if parent == cur {
+			break
+		}
+		cur = parent
+	}
+	for i := len(missing) - 1; i >= 0; i-- {
+		p := missing[i]
+		if err := os.Mkdir(p, mode); err != nil && !os.IsExist(err) {
+			return err
+		}
+		if err := os.Chmod(p, mode); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// normalizedFileMode 把文件权限规范化为发行/装配公开权限：
+// 含任意执行位则为 0755，否则为 0644，避免把源文件的 0600/0700 透传进镜像或发行目录。
+func normalizedFileMode(mode fs.FileMode) fs.FileMode {
+	if mode&0111 != 0 {
+		return 0755
+	}
+	return 0644
+}
+
 func copyFile(source, target string, mode fs.FileMode) error {
 	return copyFileContext(context.Background(), source, target, mode)
 }
@@ -317,7 +365,7 @@ func copyFileContext(ctx context.Context, source, target string, mode fs.FileMod
 	defer func() { _ = in.Close() }()
 	stop := context.AfterFunc(ctx, func() { _ = in.Close() })
 	defer stop()
-	if err := os.MkdirAll(filepath.Dir(target), 0755); err != nil {
+	if err := mkdirAllExact(filepath.Dir(target), 0755); err != nil {
 		return err
 	}
 	out, err := os.OpenFile(target, os.O_CREATE|os.O_EXCL|os.O_WRONLY, mode)
@@ -340,7 +388,10 @@ func jsonFile(path string, value any, mode fs.FileMode) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, append(b, '\n'), mode)
+	if err := os.WriteFile(path, append(b, '\n'), mode); err != nil {
+		return err
+	}
+	return os.Chmod(path, mode)
 }
 
 func resourceKeys(root string) error {

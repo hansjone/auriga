@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "cliCapability": 1,
+  "cliCapability": 2,
   "images": {
     "tool-go": "golang:1.27.3@sha256:2920bb124f1a2e12a1d39f0cab756ae0068441ee1da7655dec7f5e374944095b",
     "tool-web": "node:22-bookworm@sha256:e13726ca604184d7a91fcacab1fc09eefd642dc28e79ac34e85540dd93b78cfb",

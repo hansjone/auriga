@@ -103,6 +103,7 @@ func TestAssemblySwitchIgnoresImageID(t *testing.T) {
 	prev := &deployRecord{
 		Seq:           1,
 		Kind:          recordKindDeploy,
+		Status:        recordOK,
 		Orchestration: "orch-1",
 		Assembly:      map[string]string{"edge": "same-digest"},
 		Images:        map[string]string{imageKey("edge"): oldID},
@@ -141,6 +142,23 @@ func TestAssemblySwitchIgnoresImageID(t *testing.T) {
 	}
 	if plan := planSwitchWith(prev, newImgRec, "orch-1", t.TempDir()); plan.Mode != switchModeContainers {
 		t.Fatalf("edge 新镜像且 broker 指纹不变应只换容器：got %s (%s)", plan.Mode, plan.Reason)
+	}
+}
+
+func TestDecideAssemblyRejectsFailedPrevious(t *testing.T) {
+	oldID := "sha256:" + strings.Repeat("a", 64)
+	prev := &deployRecord{
+		Seq:           2,
+		Kind:          recordKindDeploy,
+		Status:        recordFailed,
+		Orchestration: "orch-1",
+		Assembly:      map[string]string{"edge": "same-digest"},
+		Images:        map[string]string{imageKey("edge"): oldID},
+	}
+	same := assemblyParts{Total: "same-digest"}
+	needBuild, reason := decideAssembly(false, false, "edge", prev, same, func(string) bool { return true })
+	if !needBuild || !strings.Contains(reason, "failed") || !strings.Contains(reason, "重新装配") {
+		t.Fatalf("上一版为 failed 时必须强制重新装配：needBuild=%v reason=%q", needBuild, reason)
 	}
 }
 
