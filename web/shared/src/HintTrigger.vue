@@ -2,10 +2,10 @@
 import { nextTick, onBeforeUnmount, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 
-const props = withDefaults(
-  defineProps<{ label?: string; open?: boolean }>(),
-  { open: false, label: undefined },
-);
+const props = withDefaults(defineProps<{ label?: string; open?: boolean }>(), {
+  open: false,
+  label: undefined,
+});
 const { locale } = useI18n();
 const shown = ref(props.open);
 const root = ref<globalThis.HTMLElement>();
@@ -43,8 +43,7 @@ function placePanel() {
     const panelH = el.getBoundingClientRect().height;
     const spaceBelow = Math.max(0, viewH - rect.bottom - gutter);
     const spaceAbove = Math.max(0, rect.top - gutter);
-    const above =
-      spaceBelow < Math.min(panelH, 160) && spaceAbove > spaceBelow;
+    const above = spaceBelow < Math.min(panelH, 160) && spaceAbove > spaceBelow;
     placeAbove.value = above;
     const room = Math.max(120, above ? spaceAbove : spaceBelow);
     panelStyle.value = {
@@ -98,8 +97,7 @@ onBeforeUnmount(() => {
   globalThis.removeEventListener('resize', onViewport);
   globalThis.removeEventListener('scroll', onViewport, true);
 });
-const aria = () =>
-  props.label || (locale.value === 'en' ? 'Details' : '说明');
+const aria = () => props.label || (locale.value === 'en' ? 'Details' : '说明');
 </script>
 <template>
   <span ref="root" class="auriga-hint">

@@ -100,7 +100,10 @@ function onPaste(index: number, event: globalThis.ClipboardEvent) {
   const text = event.clipboardData?.getData('text') ?? '';
   if (!/\d/.test(text)) return;
   event.preventDefault();
-  const digits = text.replace(/\D/g, '').slice(0, size.value - index).split('');
+  const digits = text
+    .replace(/\D/g, '')
+    .slice(0, size.value - index)
+    .split('');
   for (let i = 0; i < digits.length; i++) cells.value[index + i] = digits[i]!;
   publish();
   focusAt(Math.min(index + digits.length, size.value - 1));
@@ -113,8 +116,7 @@ function onBackingInvalid(event: globalThis.Event) {
 }
 
 function setRef(el: unknown, index: number) {
-  refs.value[index] =
-    el instanceof globalThis.HTMLInputElement ? el : null;
+  refs.value[index] = el instanceof globalThis.HTMLInputElement ? el : null;
 }
 </script>
 
