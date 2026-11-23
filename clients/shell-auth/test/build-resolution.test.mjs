@@ -1,13 +1,22 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  mkdirSync,
+  mkdtempSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
-import { delimiter, join } from 'node:path';
+import { delimiter, dirname, join } from 'node:path';
 import {
   resolveEsbuild,
   resolvePluginDependency,
   resolvePluginNodePaths,
+  resolveWithNodePaths,
 } from '../build.mjs';
+import { resolveViteCli } from '../../dsh-plugin/scripts/package-ui.mjs';
 
 function makeTempDir(t, prefix) {
   const dir = mkdtempSync(join(tmpdir(), prefix));
@@ -23,7 +32,7 @@ function makeTempDir(t, prefix) {
 }
 
 function writeFakePkg(dir, name, mainFile = 'index.js', content = '') {
-  mkdirSync(dir, { recursive: true });
+  mkdirSync(join(dir, dirname(mainFile)), { recursive: true });
   writeFileSync(
     join(dir, 'package.json'),
     JSON.stringify({ name, version: '1.0.0', main: mainFile }),
@@ -153,6 +162,92 @@ test('resolvePluginNodePaths and resolvePluginDependency resolve plugin deps fro
   );
   assert.equal(
     resolvePluginDependency('ajv/dist/2020.js', { repoRoot: repo, nodePaths }),
-    join(externalModules, 'ajv', 'dist', '2020.js'),
+    realpathSync(join(externalModules, 'ajv', 'dist', '2020.js')),
   );
+});
+
+test('resolveWithNodePaths resolves transitive ajv deps via realpath and virtual store fallback', (t) => {
+  const repo = makeTempDir(t, 'auriga-ajv-transitive-');
+  const pluginDir = join(repo, 'clients', 'dsh-plugin');
+  mkdirSync(pluginDir, { recursive: true });
+  writeFileSync(
+    join(pluginDir, 'package.json'),
+    JSON.stringify({ name: 'auriga-dsh', version: '0.1.0' }),
+  );
+  const pnpmAjvRoot = join(
+    repo,
+    'web',
+    'web',
+    'node_modules',
+    '.pnpm',
+    'ajv@8.20.0',
+    'node_modules',
+  );
+  writeFakePkg(join(pnpmAjvRoot, 'ajv'), 'ajv');
+  writeFakePkg(join(pnpmAjvRoot, 'fast-deep-equal'), 'fast-deep-equal');
+
+  // Case 1: physical copy in clients/dsh-plugin/node_modules/ajv without sibling fast-deep-equal
+  const physicalAjv = join(pluginDir, 'node_modules', 'ajv');
+  writeFakePkg(physicalAjv, 'ajv');
+  const nodePaths = resolvePluginNodePaths({ repoRoot: repo, env: {} });
+  assert.equal(
+    resolveWithNodePaths(
+      join(physicalAjv, 'package.json'),
+      'fast-deep-equal/package.json',
+      nodePaths,
+    ),
+    realpathSync(join(pnpmAjvRoot, 'fast-deep-equal', 'package.json')),
+  );
+
+  // Case 2: junction/symlink to virtual store
+  rmSync(physicalAjv, { recursive: true, force: true });
+  symlinkSync(
+    join(pnpmAjvRoot, 'ajv'),
+    physicalAjv,
+    process.platform === 'win32' ? 'junction' : 'dir',
+  );
+  const nodePathsWithLink = resolvePluginNodePaths({ repoRoot: repo, env: {} });
+  assert.equal(nodePathsWithLink.includes(realpathSync(pnpmAjvRoot)), true);
+  assert.equal(
+    resolveWithNodePaths(
+      join(physicalAjv, 'package.json'),
+      'fast-deep-equal/package.json',
+      nodePathsWithLink,
+    ),
+    realpathSync(join(pnpmAjvRoot, 'fast-deep-equal', 'package.json')),
+  );
+});
+
+test('resolveViteCli resolves real vite binary and includes peer node_modules in nodePaths', (t) => {
+  const repo = makeTempDir(t, 'auriga-vite-cli-');
+  writeFileSync(join(repo, 'package.json'), JSON.stringify({ name: 'root' }));
+  const pnpmViteNm = join(
+    repo,
+    'web',
+    'web',
+    'node_modules',
+    '.pnpm',
+    'vite@7.3.1',
+    'node_modules',
+  );
+  writeFakePkg(
+    join(pnpmViteNm, 'vite'),
+    'vite',
+    'bin/vite.js',
+    '// vite cli\n',
+  );
+  writeFakePkg(join(pnpmViteNm, 'rollup'), 'rollup');
+  mkdirSync(join(repo, 'node_modules'), { recursive: true });
+  symlinkSync(
+    join(pnpmViteNm, 'vite'),
+    join(repo, 'node_modules', 'vite'),
+    process.platform === 'win32' ? 'junction' : 'dir',
+  );
+
+  const { viteBin, nodePaths } = resolveViteCli(repo);
+  assert.equal(
+    viteBin,
+    realpathSync(join(pnpmViteNm, 'vite', 'bin', 'vite.js')),
+  );
+  assert.equal(nodePaths.includes(realpathSync(pnpmViteNm)), true);
 });
