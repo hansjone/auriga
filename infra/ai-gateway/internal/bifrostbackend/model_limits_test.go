@@ -17,10 +17,10 @@ func TestPublicModelSuppliesPoolCapabilitiesWithoutUpstreamIdentity(t *testing.T
 	}
 }
 
-func TestPublicModelPublishesUnknownContextAsHighPlaceholderWithoutClamping(t *testing.T) {
+func TestPublicModelOmitsUnknownCapabilitiesWithoutClamping(t *testing.T) {
 	unknown := publicModel(api.RelayPool{Id: "auto"})
-	if unknown["context_window"] != int64(UnknownContextWindow) {
-		t.Fatalf("unknown context must be published as the high placeholder: %#v", unknown)
+	if _, ok := unknown["context_window"]; ok {
+		t.Fatalf("unknown context must be omitted: %#v", unknown)
 	}
 	if _, ok := unknown["max_output_tokens"]; ok {
 		t.Fatal("unknown output invented")
@@ -29,13 +29,12 @@ func TestPublicModelPublishesUnknownContextAsHighPlaceholderWithoutClamping(t *t
 	if known["context_window"] != int64(2000000) || known["max_output_tokens"] != int64(128000) {
 		t.Fatal("known capabilities clamped")
 	}
-	if publicModel(api.RelayPool{Id: "legacy", ContextWindow: 1})["context_window"] != int64(UnknownContextWindow) {
-		t.Fatal("invalid legacy context must fall back to the placeholder")
+	if _, ok := publicModel(api.RelayPool{Id: "legacy", ContextWindow: 1})["context_window"]; ok {
+		t.Fatal("invalid legacy context must be omitted")
 	}
-	// A known output at or above the placeholder would violate output < context.
-	large := publicModel(api.RelayPool{Id: "huge", MaxOutputTokens: UnknownContextWindow})
-	if _, ok := large["context_window"]; ok || large["max_output_tokens"] != int64(UnknownContextWindow) {
-		t.Fatalf("placeholder below a known output: %#v", large)
+	large := publicModel(api.RelayPool{Id: "huge", MaxOutputTokens: 1000000})
+	if _, ok := large["context_window"]; ok || large["max_output_tokens"] != int64(1000000) {
+		t.Fatalf("unknown context with large output: %#v", large)
 	}
 }
 
@@ -66,12 +65,7 @@ func TestPublicModelResolvesInheritedRecommendedAndManualCapabilities(t *testing
 			}
 			model := publicModel(pool)
 			for field, want := range map[string]int64{"context_window": tc.context, "max_output_tokens": tc.output} {
-				if want == 0 && field == "context_window" {
-					// Unknown (including stale or input-only metadata) publishes only the placeholder.
-					if model[field] != int64(UnknownContextWindow) {
-						t.Fatalf("unknown context must be the placeholder: %v", model)
-					}
-				} else if want == 0 {
+				if want == 0 {
 					if _, exists := model[field]; exists {
 						t.Fatalf("%s invented or retained stale metadata: %v", field, model)
 					}
