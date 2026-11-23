@@ -165,7 +165,7 @@ test('withWorkspaceEsbuildPublicHoist restores pnpm-workspace.yaml byte-for-byte
     return 'installed';
   });
   assert.equal(value, 'installed');
-  assert.match(duringInstall, /publicHoistPattern:\r\n  - '\*'\r\n$/);
+  assert.match(duringInstall, /publicHoistPattern:\r\n {2}- '\*'\r\n$/);
   const afterSuccess = readFileSync(ws);
   assert.equal(afterSuccess.equals(original), true);
   assert.equal(digest(afterSuccess), originalSha);
