@@ -346,7 +346,7 @@ const step = (): ClientStep | null =>
 .login-content {
   width: 100%;
 }
-.login-panel :deep(.form-step > .title) {
+.login-panel :deep(.form-step[data-form-id='password'] > .title) {
   display: none;
 }
 .auriga-qr-login :deep([data-testid='uac-target']),

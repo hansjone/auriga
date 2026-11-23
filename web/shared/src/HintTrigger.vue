@@ -4,13 +4,14 @@ import { useI18n } from 'vue-i18n';
 
 const props = withDefaults(
   defineProps<{ label?: string; open?: boolean }>(),
-  { open: false },
+  { open: false, label: undefined },
 );
 const { locale } = useI18n();
 const shown = ref(props.open);
 const root = ref<globalThis.HTMLElement>();
 const panel = ref<globalThis.HTMLElement>();
 const alignEnd = ref(false);
+const placeAbove = ref(false);
 const panelStyle = ref<Record<string, string>>({});
 watch(
   () => props.open,
@@ -26,15 +27,31 @@ function placePanel() {
     if (!host || !el) return;
     const rect = host.getBoundingClientRect();
     const gutter = 12;
-    const preferred = Math.min(360, Math.floor(window.innerWidth * 0.72));
-    const spaceRight = Math.max(0, window.innerWidth - rect.left - gutter);
+    const viewW = globalThis.innerWidth;
+    const viewH = globalThis.innerHeight;
+    const preferred = Math.min(360, Math.floor(viewW * 0.72));
+    const spaceRight = Math.max(0, viewW - rect.left - gutter);
     const spaceLeft = Math.max(0, rect.right - gutter);
     const end = spaceRight < preferred && spaceLeft > spaceRight;
     alignEnd.value = end;
     const available = Math.max(180, end ? spaceLeft : spaceRight);
+
+    // Measure natural height then decide above/below and clamp.
+    el.style.maxHeight = '';
+    el.style.top = '';
+    el.style.bottom = '';
+    const panelH = el.getBoundingClientRect().height;
+    const spaceBelow = Math.max(0, viewH - rect.bottom - gutter);
+    const spaceAbove = Math.max(0, rect.top - gutter);
+    const above =
+      spaceBelow < Math.min(panelH, 160) && spaceAbove > spaceBelow;
+    placeAbove.value = above;
+    const room = Math.max(120, above ? spaceAbove : spaceBelow);
     panelStyle.value = {
       width: `${Math.min(preferred, available)}px`,
       maxWidth: `calc(100vw - ${gutter * 2}px)`,
+      maxHeight: `${room}px`,
+      overflowY: panelH > room ? 'auto' : 'visible',
     };
   });
 }
@@ -62,20 +79,24 @@ watch(shown, (value) => {
   if (value) {
     document.addEventListener('click', close, true);
     document.addEventListener('keydown', close, true);
-    window.addEventListener('resize', onViewport);
+    globalThis.addEventListener('resize', onViewport);
+    globalThis.addEventListener('scroll', onViewport, true);
     placePanel();
   } else {
     document.removeEventListener('click', close, true);
     document.removeEventListener('keydown', close, true);
-    window.removeEventListener('resize', onViewport);
+    globalThis.removeEventListener('resize', onViewport);
+    globalThis.removeEventListener('scroll', onViewport, true);
     alignEnd.value = false;
+    placeAbove.value = false;
     panelStyle.value = {};
   }
 });
 onBeforeUnmount(() => {
   document.removeEventListener('click', close, true);
   document.removeEventListener('keydown', close, true);
-  window.removeEventListener('resize', onViewport);
+  globalThis.removeEventListener('resize', onViewport);
+  globalThis.removeEventListener('scroll', onViewport, true);
 });
 const aria = () =>
   props.label || (locale.value === 'en' ? 'Details' : '说明');
@@ -108,7 +129,10 @@ const aria = () =>
       v-if="shown"
       ref="panel"
       class="auriga-hint-panel"
-      :class="{ 'auriga-hint-panel--end': alignEnd }"
+      :class="{
+        'auriga-hint-panel--end': alignEnd,
+        'auriga-hint-panel--above': placeAbove,
+      }"
       :style="panelStyle"
       role="note"
       @click.stop
@@ -145,6 +169,7 @@ const aria = () =>
   position: absolute;
   z-index: 40;
   top: calc(100% + 6px);
+  bottom: auto;
   left: 0;
   right: auto;
   width: min(360px, 72vw);
@@ -163,6 +188,10 @@ const aria = () =>
 .auriga-hint-panel--end {
   left: auto;
   right: 0;
+}
+.auriga-hint-panel--above {
+  top: auto;
+  bottom: calc(100% + 6px);
 }
 .auriga-hint-panel :deep(p) {
   margin: 0 0 0.55rem;

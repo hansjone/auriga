@@ -54,7 +54,12 @@ function onSubmit(e: { preventDefault: () => void }) {
 </script>
 
 <template>
-  <form class="form-step" data-testid="form-step" @submit="onSubmit">
+  <form
+    class="form-step"
+    data-testid="form-step"
+    :data-form-id="step.formId"
+    @submit="onSubmit"
+  >
     <h2 v-if="step.title" class="title">{{ label(step.title) }}</h2>
     <p v-if="step.description" class="desc">{{ label(step.description) }}</p>
     <p v-if="step.error" class="error" role="alert">

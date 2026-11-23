@@ -10,7 +10,13 @@ const props = withDefaults(
     autocomplete?: string;
     disabled?: boolean;
   }>(),
-  { modelValue: '', length: 6, required: false },
+  {
+    modelValue: '',
+    length: 6,
+    required: false,
+    autocomplete: 'one-time-code',
+    disabled: false,
+  },
 );
 const emit = defineEmits<{ 'update:modelValue': [value: string] }>();
 
@@ -52,15 +58,13 @@ function onInput(index: number, event: globalThis.Event) {
     return;
   }
   if (raw.length > 1) {
-    // Paste or autofill landed in one box — distribute across cells.
     const start = cells.value.slice(0, index);
     const incoming = raw.split('');
     const rest = cells.value.slice(index + incoming.length);
     cells.value = [...start, ...incoming, ...rest].slice(0, size.value);
     while (cells.value.length < size.value) cells.value.push('');
     publish();
-    const next = Math.min(index + incoming.length, size.value - 1);
-    focusAt(next);
+    focusAt(Math.min(index + incoming.length, size.value - 1));
     return;
   }
   cells.value[index] = raw;
@@ -102,6 +106,12 @@ function onPaste(index: number, event: globalThis.ClipboardEvent) {
   focusAt(Math.min(index + digits.length, size.value - 1));
 }
 
+function onBackingInvalid(event: globalThis.Event) {
+  event.preventDefault();
+  const empty = cells.value.findIndex((d) => !d);
+  focusAt(empty < 0 ? 0 : empty);
+}
+
 function setRef(el: unknown, index: number) {
   refs.value[index] =
     el instanceof globalThis.HTMLInputElement ? el : null;
@@ -115,22 +125,24 @@ function setRef(el: unknown, index: number) {
     role="group"
     :style="{ gridTemplateColumns: `repeat(${size}, minmax(0, 1fr))` }"
   >
-    <!-- Backing field keeps form name + test hooks (setValue / query). -->
+    <!-- Named backing for submit/tests; kept out of tab order. -->
     <input
       class="otp-value"
       :name="name"
       :value="modelValue"
       :required="required"
-      :autocomplete="autocomplete || 'one-time-code'"
-      :disabled="disabled"
+      tabindex="-1"
+      aria-hidden="true"
       inputmode="numeric"
       pattern="[0-9]*"
       :minlength="size"
       :maxlength="size"
+      :disabled="disabled"
       @input="
         fill(($event.target as globalThis.HTMLInputElement).value);
         publish();
       "
+      @invalid="onBackingInvalid"
     />
     <input
       v-for="(_, index) in size"
@@ -140,7 +152,7 @@ function setRef(el: unknown, index: number) {
       type="text"
       inputmode="numeric"
       maxlength="1"
-      autocomplete="off"
+      :autocomplete="index === 0 ? autocomplete || 'one-time-code' : 'off'"
       :aria-label="`${index + 1} / ${size}`"
       :disabled="disabled"
       :value="cells[index] || ''"
@@ -169,6 +181,7 @@ function setRef(el: unknown, index: number) {
   clip-path: inset(50%);
   white-space: nowrap;
   border: 0;
+  pointer-events: none;
 }
 .otp-cell {
   box-sizing: border-box;
@@ -193,7 +206,7 @@ function setRef(el: unknown, index: number) {
 .otp-cell:hover {
   border-color: var(--auriga-border-strong, rgba(150, 182, 208, 0.32));
 }
-.otp-cell:focus {
+.otp-cell:focus-visible {
   border-color: var(--auriga-accent-line, #5b93bd);
 }
 .otp-cell:disabled {
