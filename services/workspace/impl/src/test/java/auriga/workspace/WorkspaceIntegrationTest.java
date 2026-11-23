@@ -4466,6 +4466,206 @@ class WorkspaceIntegrationTest {
   }
 
   @Test
+  void helloLabelsPersistOnFirstHelloAndRespectAdminOverrides() throws Exception {
+    var labeledTemplate =
+        service.templates.all().getFirst().toBuilder().putLabels("template", "real-dsh").build();
+    var labeledService =
+        new WorkspaceService(
+            store,
+            inputs,
+            new WorkspaceTemplates(List.of(labeledTemplate)),
+            managedCrypto,
+            new OutboxEventPublisher(
+                store.jdbc,
+                "workspace",
+                "workspace",
+                new EventSchemas(),
+                WorkspaceService.JSON,
+                clock,
+                () -> {}),
+            clock);
+    var queries = new WorkspaceQueries(labeledService);
+    var admin = new WorkspaceAdmin(labeledService, inputs);
+
+    var request = joinRequest(token().token(), TestPki.key());
+    var joined = enrollment.join(request);
+    UUID node = UUID.fromString(joined.getNodeId());
+    String keyId =
+        HexFormat.of()
+            .formatHex(WorkspaceCrypto.hash(request.getSealingPublicKey().toByteArray()))
+            .substring(0, 16);
+    var peer = NodeCa.parse(joined.getCertificateChain().toByteArray());
+    var context = Context.current().withValue(NodeSessions.PEER, peer);
+
+    Hello hello =
+        Hello.newBuilder()
+            .setNodeId(node.toString())
+            .setProtocolVersion(1)
+            .setOs("linux")
+            .setArch("amd64")
+            .addDrivers(RuntimeKind.RUNTIME_KIND_DOCKER)
+            .setCapacity(
+                Capacity.newBuilder()
+                    .setCpuMillis(10000)
+                    .setMemoryMb(8192)
+                    .setDiskGb(100)
+                    .setMaxInstances(2))
+            .setSealingKeyId(keyId)
+            .putLabels("template", "real-dsh")
+            .putLabels("zone", "nas")
+            .putLabels("auriga.reserved", "x")
+            .putLabels("auriga.shared-dsh-runtime", SharedDshNodeRuntime.PREPARATION)
+            .putLabels("bad key", "ignored")
+            .putLabels("bad-val", "a/b")
+            .build();
+
+    var fake1 = new FakeNode();
+    var stream1 = context.call(() -> sessions.session(fake1));
+    stream1.onNext(SessionRequest.newBuilder().setHello(hello).build());
+    assertTrue(fake1.next().hasWelcome());
+    stream1.onCompleted();
+
+    var view1 = TenantContext.call(tenant, () -> queries.node(node));
+    assertEquals(Map.of("template", "real-dsh", "zone", "nas"), view1.getLabels());
+
+    UUID instance =
+        TenantContext.call(tenant, () -> (UUID) labeledService.open(owner).instance().get("id"));
+    assertEquals(node, store.in(tenant, () -> store.instance(instance).get("node_id")));
+
+    // Admin PATCH updates labels; subsequent reconnect Hello must not overwrite admin labels.
+    TenantContext.call(
+        tenant,
+        () ->
+            admin.node(
+                node,
+                new auriga.workspace.web.model.UpdateNodeRequest()
+                    .labels(Map.of("template", "custom")),
+                false));
+    var fake2 = new FakeNode();
+    var stream2 = context.call(() -> sessions.session(fake2));
+    stream2.onNext(SessionRequest.newBuilder().setHello(hello).build());
+    assertTrue(fake2.next().hasWelcome());
+    stream2.onCompleted();
+    assertEquals(
+        Map.of("template", "custom"),
+        TenantContext.call(tenant, () -> queries.node(node)).getLabels());
+
+    // Admin PATCH clears labels to {}; subsequent reconnect Hello must still not overwrite them.
+    TenantContext.call(
+        tenant,
+        () ->
+            admin.node(
+                node, new auriga.workspace.web.model.UpdateNodeRequest().labels(Map.of()), false));
+    var fake3 = new FakeNode();
+    var stream3 = context.call(() -> sessions.session(fake3));
+    stream3.onNext(SessionRequest.newBuilder().setHello(hello).build());
+    assertTrue(fake3.next().hasWelcome());
+    stream3.onCompleted();
+    assertEquals(Map.of(), TenantContext.call(tenant, () -> queries.node(node)).getLabels());
+
+    // Labels pre-configured before a node's very first Hello must also be preserved.
+    var preReq = joinRequest(token().token(), TestPki.key());
+    var preJoined = enrollment.join(preReq);
+    UUID preNode = UUID.fromString(preJoined.getNodeId());
+    TenantContext.call(
+        tenant,
+        () ->
+            admin.node(
+                preNode,
+                new auriga.workspace.web.model.UpdateNodeRequest().labels(Map.of("env", "pre")),
+                false));
+    var preCtx =
+        Context.current()
+            .withValue(
+                NodeSessions.PEER, NodeCa.parse(preJoined.getCertificateChain().toByteArray()));
+    var preFake = new FakeNode();
+    var preStream = preCtx.call(() -> sessions.session(preFake));
+    preStream.onNext(
+        SessionRequest.newBuilder()
+            .setHello(
+                hello.toBuilder()
+                    .setNodeId(preNode.toString())
+                    .setSealingKeyId(
+                        HexFormat.of()
+                            .formatHex(
+                                WorkspaceCrypto.hash(preReq.getSealingPublicKey().toByteArray()))
+                            .substring(0, 16)))
+            .build());
+    assertTrue(preFake.next().hasWelcome());
+    preStream.onCompleted();
+    assertEquals(
+        Map.of("env", "pre"), TenantContext.call(tenant, () -> queries.node(preNode)).getLabels());
+  }
+
+  @Test
+  void nodeClockSkewUsesHelloTimeAndDoesNotDriftWithUsageHeartbeats() throws Exception {
+    clock.now = Instant.parse("2026-11-24T00:00:00Z");
+    var queries = new WorkspaceQueries(service);
+
+    var request = joinRequest(token().token(), TestPki.key());
+    var joined = enrollment.join(request);
+    UUID node = UUID.fromString(joined.getNodeId());
+    String keyId =
+        HexFormat.of()
+            .formatHex(WorkspaceCrypto.hash(request.getSealingPublicKey().toByteArray()))
+            .substring(0, 16);
+    var context =
+        Context.current()
+            .withValue(NodeSessions.PEER, NodeCa.parse(joined.getCertificateChain().toByteArray()));
+    var fake = new FakeNode();
+    var stream = context.call(() -> sessions.session(fake));
+
+    Instant nodeClockAtHello = clock.now.plusMillis(250);
+    stream.onNext(
+        SessionRequest.newBuilder()
+            .setHello(
+                Hello.newBuilder()
+                    .setNodeId(node.toString())
+                    .setProtocolVersion(1)
+                    .setOs("linux")
+                    .setArch("amd64")
+                    .addDrivers(RuntimeKind.RUNTIME_KIND_DOCKER)
+                    .setCapacity(
+                        Capacity.newBuilder().setCpuMillis(4000).setMemoryMb(4096).setDiskGb(40))
+                    .setSealingKeyId(keyId)
+                    .setNodeTime(NodeEnrollment.timestamp(nodeClockAtHello)))
+            .build());
+    assertTrue(fake.next().hasWelcome());
+    stream.onNext(SessionRequest.newBuilder().setInventory(Inventory.getDefaultInstance()).build());
+
+    var initial = TenantContext.call(tenant, () -> queries.node(node));
+    assertEquals(250, initial.getClockSkewMs());
+
+    // Advance server clock by +60s and send a Usage heartbeat that refreshes last_seen_at.
+    clock.now = clock.now.plusSeconds(60);
+    stream.onNext(SessionRequest.newBuilder().setUsage(NodeUsage.getDefaultInstance()).build());
+    var after60s = TenantContext.call(tenant, () -> queries.node(node));
+    assertEquals(clock.now.toString(), after60s.getLastSeenAt().toInstant().toString());
+    assertEquals(250, after60s.getClockSkewMs());
+
+    // Advance another +240s (+300s total) and send another Usage heartbeat.
+    clock.now = clock.now.plusSeconds(240);
+    stream.onNext(SessionRequest.newBuilder().setUsage(NodeUsage.getDefaultInstance()).build());
+    var after300s = TenantContext.call(tenant, () -> queries.node(node));
+    assertEquals(clock.now.toString(), after300s.getLastSeenAt().toInstant().toString());
+    assertEquals(250, after300s.getClockSkewMs());
+    stream.onCompleted();
+
+    // Legacy rows without hello_at fall back to last_seen_at without failing.
+    TenantContext.run(
+        tenant,
+        () ->
+            store.tx(
+                () ->
+                    store.jdbc.update(
+                        "UPDATE node SET hello_at=NULL WHERE tenant_id=? AND id=?", tenant, node)));
+    var legacy = TenantContext.call(tenant, () -> queries.node(node));
+    assertEquals(
+        (int) (nodeClockAtHello.toEpochMilli() - clock.now.toEpochMilli()),
+        legacy.getClockSkewMs());
+  }
+
+  @Test
   void revokedNodeCannotRenew() throws Exception {
     var key = TestPki.key();
     var joined = enrollment.join(joinRequest(token().token(), key));
