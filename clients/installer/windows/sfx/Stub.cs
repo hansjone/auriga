@@ -1,4 +1,4 @@
-﻿// Self-extracting setup. The package zip is appended to this exe, followed by a
+// Self-extracting setup. The package zip is appended to this exe, followed by a
 // 16-byte trailer: 8 bytes magic "AURZIP01" and the zip length (int64, LE).
 // Interactive runs show a wizard: welcome -> location -> progress -> finish.
 // /VERYSILENT keeps the console path: unpack, run install.ps1 with the same
@@ -136,6 +136,31 @@ static class Setup
         }
     }
 
+    /// Quotes one command-line argument using the Windows (CommandLineToArgv) rules.
+    /// A trailing backslash must be doubled, otherwise it escapes the closing quote and
+    /// the argument swallows the rest of the command line.
+    public static string Quote(string argument)
+    {
+        if (argument.Length == 0) return "\"\"";
+        if (argument.IndexOfAny(new[] { ' ', '\t', '\n', '\v', '"' }) < 0) return argument;
+        var builder = new StringBuilder("\"");
+        int backslashes = 0;
+        foreach (char c in argument)
+        {
+            if (c == '\\') { backslashes++; continue; }
+            if (c == '"')
+            {
+                builder.Append('\\', backslashes * 2 + 1).Append('"');
+                backslashes = 0;
+                continue;
+            }
+            builder.Append('\\', backslashes).Append(c);
+            backslashes = 0;
+        }
+        builder.Append('\\', backslashes * 2).Append('"');
+        return builder.ToString();
+    }
+
     static int Install(string[] args)
     {
         string temp = Path.Combine(Path.GetTempPath(), "auriga-desktop-setup-" + Guid.NewGuid().ToString("N"));
@@ -151,7 +176,7 @@ static class Setup
             using (var zip = new ZipArchive(payload, ZipArchiveMode.Read))
                 Extract(zip, package, () => false, (name, done) => { });
             Console.WriteLine("Installing " + Brand + "...");
-            string forwarded = string.Join(" ", Array.ConvertAll(args, a => "\"" + a.Replace("\"", "\\\"") + "\""));
+            string forwarded = string.Join(" ", Array.ConvertAll(args, Quote));
             return Run(PowerShell, "-NoProfile -ExecutionPolicy Bypass -File \"" + Path.Combine(package, "install.ps1") + "\" " + forwarded, null);
         }
         catch (Exception e)
@@ -166,6 +191,21 @@ static class Setup
     }
 
     public static string PowerShell { get { return Path.Combine(Environment.SystemDirectory, "WindowsPowerShell", "v1.0", "powershell.exe"); } }
+
+    /// Stable per-user directory for setup logs, falling back to TEMP when it is unusable.
+    /// A failed install must always leave a log the user can find and open.
+    public static string LogDirectory()
+    {
+        try
+        {
+            string directory = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "AurigaDesktop", "logs");
+            Directory.CreateDirectory(directory);
+            return directory;
+        }
+        catch (Exception) { return Path.GetTempPath(); }
+    }
 
     public static int Run(string file, string arguments, Action<string> onLine)
     {
@@ -237,6 +277,7 @@ sealed class Wizard : Form
     readonly Label percentLabel = new Label { Left = 32, Top = 100, Width = 550, Height = 22, ForeColor = Color.DimGray };
     readonly CheckBox launch = new CheckBox { Left = 32, Top = 120, Width = 520, Text = "立即启动 Auriga DSH", Checked = true };
     readonly Label finishText = new Label { Left = 32, Top = 30, Width = 550, Height = 84 };
+    readonly LinkLabel openLog = new LinkLabel { Left = 32, Top = 120, Width = 550, Height = 22, Text = "打开安装日志", Visible = false };
     int page;
     string version = "?", existingRoot, existingVersion, logFile, cancelFile, temp;
     long unpackedBytes;
@@ -274,6 +315,7 @@ sealed class Wizard : Form
             }
         };
         FormClosing += delegate (object s, FormClosingEventArgs e) { if (installing) { e.Cancel = true; Cancel(); } };
+        openLog.LinkClicked += delegate { OpenLog(); };
         ReadPackage();
         DetectExisting();
         folder.Text = existingRoot ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Programs", "AurigaDesktop");
@@ -375,6 +417,8 @@ sealed class Wizard : Form
         {
             Header(succeeded ? "安装完成" : "安装未完成", succeeded ? Setup.Brand + " " + version + " 已就绪" : "未做任何更改");
             body.Controls.Add(finishText);
+            openLog.Visible = !succeeded && ExitCode != 2 && !string.IsNullOrEmpty(logFile) && File.Exists(logFile);
+            body.Controls.Add(openLog);
             if (succeeded) body.Controls.Add(launch);
             next.Text = "完成(&F)"; next.Enabled = true; cancel.Enabled = false; back.Visible = false;
         }
@@ -460,7 +504,11 @@ sealed class Wizard : Form
         catch (Exception e) { Fail("无法准备安装目录：" + e.Message); return; }
         cancelFile = Path.Combine(temp, "decision");
         installing = true;
-        logFile = Path.Combine(Path.GetTempPath(), "AurigaDSH-Setup-" + DateTime.Now.ToString("yyyyMMdd-HHmmss") + ".log");
+        // Logs go to a stable per-user directory, not TEMP: TEMP may be redirected, cleaned by
+        // policy, or already unwritable -- exactly when a log matters. Fall back to TEMP only if
+        // the stable location cannot be created.
+        logFile = Path.Combine(Setup.LogDirectory(), "setup-" + DateTime.Now.ToString("yyyyMMdd-HHmmss") + ".log");
+        Log("setup " + version + " -> " + folder.Text);
         Show(2);
         string root = folder.Text;
         bool desktop = desktopLink.Checked;
@@ -483,8 +531,12 @@ sealed class Wizard : Form
                         Report("正在解包安装文件… " + Path.GetFileName(name), 0.35 * done / Math.Max(1, unpackedBytes)));
                 }
                 if (cancelRequested) throw new OperationCanceledException();
-                string arguments = "-NoProfile -ExecutionPolicy Bypass -File \"" + Path.Combine(package, "install.ps1") + "\" -InstallDir \"" + root + "\" -Progress -CancelFile \"" + cancelFile + "\"" + (desktop || upgrade ? "" : " -NoDesktopShortcut");
+                string arguments = "-NoProfile -ExecutionPolicy Bypass -File " + Setup.Quote(Path.Combine(package, "install.ps1"))
+                    + " -InstallDir " + Setup.Quote(root)
+                    + " -Progress -CancelFile " + Setup.Quote(cancelFile)
+                    + (desktop || upgrade ? "" : " -NoDesktopShortcut");
                 string lastError = null;
+                string firstError = null;
                 code = Setup.Run(Setup.PowerShell, arguments, line =>
                 {
                     Log(line);
@@ -499,9 +551,17 @@ sealed class Wizard : Form
                         if (stage == "commit" || stage == "done") canCancel = false;
                         Report(StageText[stage] + (stage == "copy" ? " " + (int)(fraction * 100) + "%" : ""), range[0] + (range[1] - range[0]) * fraction);
                     }
-                    else if (line.StartsWith("[stderr] ") && line.Trim().Length > 9) lastError = line.Substring(9);
+                    else if (line.StartsWith("[stderr] ") && line.Trim().Length > 9)
+                    {
+                        // Keep the FIRST meaningful stderr line: PowerShell prints the exception
+                        // message first and the "+ FullyQualifiedErrorId" bookkeeping last, so
+                        // keeping the last line showed users a useless tail of the error.
+                        string error = line.Substring(9).Trim();
+                        if (firstError == null && !error.StartsWith("+")) firstError = error;
+                        if (!error.StartsWith("+")) lastError = error;
+                    }
                 });
-                if (code != 0) failure = lastError ?? "安装程序退出代码 " + code;
+                if (code != 0) failure = firstError ?? lastError ?? "安装程序退出代码 " + code;
                 else Report("安装完成", 1);
             }
             catch (OperationCanceledException) { code = 2; }
@@ -525,7 +585,14 @@ sealed class Wizard : Form
         if (code == 2)
             finishText.Text = "安装已取消，已回滚所有更改" + (existingRoot != null ? "，原版本保持可用" : "") + "。";
         else if (!succeeded)
-            finishText.Text = "安装失败：" + failure + "\n\n已自动回滚，" + (existingRoot != null ? "原版本保持可用，数据未受影响。" : "没有留下半装的文件。") + "\n安装日志：" + logFile;
+        {
+            // Show where the log actually is; an empty path left the user with nothing to send us.
+            string where = string.IsNullOrEmpty(logFile) ? "（未能创建日志文件）" : logFile;
+            finishText.Text = "安装失败：" + (string.IsNullOrEmpty(failure) ? "未知错误" : failure)
+                + "\n\n已自动回滚，" + (existingRoot != null ? "原版本保持可用，数据未受影响。" : "没有留下半装的文件。")
+                + "\n安装日志：" + where;
+            openLog.Visible = !string.IsNullOrEmpty(logFile) && File.Exists(logFile);
+        }
         else
             finishText.Text = Setup.Brand + " " + version + " 已" + (existingRoot != null ? "升级" : "安装") + "到：\n" + folder.Text + "\n\n可从开始菜单“" + Setup.Brand + "”打开；运行时右下角托盘图标提供打开、检查更新、设置和退出。";
         Show(3);
@@ -552,6 +619,13 @@ sealed class Wizard : Form
         cancelRequested = true;
         cancel.Enabled = false;
         stepLabel.Text = "正在取消并回滚，请稍候…";
+    }
+
+    void OpenLog()
+    {
+        if (string.IsNullOrEmpty(logFile) || !File.Exists(logFile)) return;
+        try { Process.Start(new ProcessStartInfo(logFile) { UseShellExecute = true }); }
+        catch (Exception e) { MessageBox.Show(this, "未能打开日志：" + e.Message + "\n\n请手动打开：\n" + logFile, Setup.Brand); }
     }
 
     static void LaunchInstalled(string root)

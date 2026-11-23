@@ -20,7 +20,11 @@ $ErrorActionPreference = 'Stop'
 $BrandName = 'Auriga DSH'
 $payload = Join-Path $PSScriptRoot 'payload'
 . (Join-Path $payload 'auriga\launcher\shell-integration.ps1')
-$InstallDir = [IO.Path]::GetFullPath($InstallDir)
+# A caller may hand us a path that still carries its own quotes (AURIGA_* variables written
+# as "D:\X\", or a Windows command line where a trailing backslash escaped the closing quote
+# and left it glued to the value). Strip quotes/whitespace and the trailing separator before
+# the path APIs see it, otherwise GetFullPath throws ArgumentException ("路径中具有非法字符").
+$InstallDir = [IO.Path]::GetFullPath((Format-DesktopPath $InstallDir))
 if ($InstallDir -ne [IO.Path]::GetPathRoot($InstallDir)) { $InstallDir = $InstallDir.TrimEnd('\') }
 $installArgs = $PSBoundParameters
 Invoke-DesktopShellChange {

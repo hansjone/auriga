@@ -54,7 +54,9 @@ function removeEmpty(path) {
 
 /** Publish a nonempty lock directory atomically. Only the exact retired owner
  * file may be removed, and a newly published nonempty directory cannot be removed. */
-export function acquireOperationLock(path, waitMs = 0) {
+export function acquireOperationLock(path, waitMs = 0, ops = {}) {
+  const renameDir = ops.renameSync ?? renameSync;
+  const readDir = ops.readdirSync ?? readdirSync;
   assertLocalPath(path);
   mkdirSync(dirname(path), { recursive: true });
   const token = randomUUID();
@@ -70,9 +72,13 @@ export function acquireOperationLock(path, waitMs = 0) {
       { flag: 'wx', mode: 0o600 },
     );
     const start = performance.now();
+    // On Windows (e.g. LTSC / endpoint filter drivers scanning the newly written
+    // owner file inside claim), the initial directory rename can transiently fail
+    // with EPERM/EACCES even when the target lock directory does not exist yet.
+    let missingTargetRetries = 20;
     for (;;) {
       try {
-        renameSync(claim, path);
+        renameDir(claim, path);
         return () => {
           unlinkSync(join(path, owner));
           removeEmpty(path);
@@ -84,10 +90,15 @@ export function acquireOperationLock(path, waitMs = 0) {
       assertLocalPath(path);
       let entries;
       try {
-        entries = readdirSync(path);
+        entries = readDir(path);
       } catch (error) {
         if (error.code !== 'ENOENT') throw error;
         if (performance.now() - start < waitMs) continue;
+        if (missingTargetRetries > 0) {
+          missingTargetRetries--;
+          Atomics.wait(sleep, 0, 0, 15);
+          continue;
+        }
         throw error;
       }
       if (entries.length === 0) {
