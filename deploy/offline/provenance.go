@@ -133,18 +133,18 @@ func snapshotGitSourceContext(ctx context.Context, root, target string, excluded
 	names := strings.Split(raw, "\x00")
 	var nonempty []string
 	for _, name := range names {
-		if name != "" {
+		if name != "" && sourcePathAllowed(name) {
 			nonempty = append(nonempty, name)
 		}
 	}
 	if err := portablePaths(nonempty); err != nil {
 		return nil, err
 	}
-	sort.Strings(names)
+	sort.Strings(nonempty)
 	seen := map[string]bool{}
 	hash := sha256.New()
-	for _, name := range names {
-		if name == "" || seen[name] || excludedNames[name] {
+	for _, name := range nonempty {
+		if seen[name] || excludedNames[name] {
 			continue
 		}
 		seen[name] = true

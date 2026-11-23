@@ -128,7 +128,16 @@ func sourceNamesContext(ctx context.Context, root string) ([]string, error) {
 		return names, nil
 	}
 	raw, err := gitFilesContext(ctx, root, "ls-files", "--cached", "--others", "--exclude-standard", "-z")
-	return strings.Split(raw, "\x00"), err
+	if err != nil {
+		return nil, err
+	}
+	var names []string
+	for _, name := range strings.Split(raw, "\x00") {
+		if name != "" && sourcePathAllowed(name) {
+			names = append(names, name)
+		}
+	}
+	return names, nil
 }
 
 func fileInventory(root string, names []string, baseline map[string]sourceFile) (map[string]sourceFile, string, error) {
