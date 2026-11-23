@@ -130,3 +130,48 @@ sudo auriga deploy <40 位提交号> --json        # 工作流：运行器账户
 - **手动 rollback（D2）**：当前迁移与格式与目标运行时记录相同（数据未触碰）则执行；否则检查（1）**当前运行发行以及历史里序号比目标大的每条发行**的 `schemaCompatFloor`——目标提交不得早于它们（只看当前不够：降级到 floor 较旧的提交后，之前破坏性迁移留下的结构仍在；比目标旧的提交不受限）；（2）**目标发行**的 `formatMax`——当前数据目录格式不得超过。缺声明或失败则退出码 3。编排未变时只换容器，否则完整启动。签名包 `offline-release.json` 同样携带这两字段（P6），否则 upgrade 历史只能人工回滚。注意：迁移版本没变不等于行数据语义没变；新版本运行越久风险越大，执行前请备份。破坏性迁移标记与格式键说明见 `docs/dev/schema-compat.zh.md`。
 - **日志与收据**：每次 deploy/rollback 写 `<logs.dir>/<时间>-<命令>.log` 与同名 `.json` 收据（默认 `/var/log/auriga`，必须 root 所有、组和其他用户不可写），内容脱敏。`--json` 让标准输出只打印收据。退出码：0 成功；1 未切换就失败；2 切换失败已自动回滚；3 需要人工。
 - **deploy 与 upgrade 互通**：签名包安装的站点可以直接 `deploy`——第一次 deploy 前，当前安装包（核验签名后）登记为一条 install 历史并打 `:r<序号>` 标签，切换失败时可以自动回滚到它；deploy / adopt 建立的站点可以接收签名包 `upgrade`（发行钥未钉定时先 `trust add-*`）。`history` 列出每条历史的种类（deploy、upgrade、install、adopt），`rollback` 能退回其中任一条，检查规则相同；切过去后 state 的 `source` 随之变化。
+
+## 站点 DSH 运行时与 UAC 部署后置配置
+
+- **在 `site.json` 中声明 DSH 运行时**：在 `server.install.runtime` 下提供 `bundle`、`root`、`image`（均须与 `install --runtime-*` 同等严格格式校验）：
+  - `auriga deploy` 干净首装时自动调用 `runtime-release verify` 校验并登记运行时，将公开快照固定到 `<data>.oneclick/runtime-inputs` 并写入 `state.json`。
+  - 对**已安装且尚未登记运行时**的站点，不会修改已封存的 `config/materials` 及其 `bootstrap.receipt`（避免 `unknown NAS source leaf`）：
+    - 可直接执行 `sudo ./auriga runtime attach --bundle <目录> --root <root.pb> --image <repo@sha256:...> [--data <数据目录>]`；
+    - 或在 `site.json` 的 `server.install.runtime` 中补充后运行 `auriga deploy`，CLI 会自动先经 `runtime-release verify` 校验，再通过 `auriga-nas-bootstrap runtime-upgrade -action attach` 写入独立的 `config/runtime-source`，同步持久化 `runtime-inputs` 与 `state.json` 并完整启动生效。
+  - 已登记运行时的站点不能通过 `attach` 或 `deploy` 替换信任根，后续运行时升级继续使用受控 `runtime-upgrade` 流程。
+- **部署时自动启用 UAC 身份源（`uacMaterialsDir` + `postDeployHook`）**：
+  - `server.install.uacMaterialsDir`：可选规范绝对路径（root 所有、组和其他用户不可写，目录内仅允许 `uac.properties`、`adapter.json`、`members.json`）。`auriga deploy` 首次安装/干净重装时自动按 `10001:10001` `0640` 同步到 `<data>/config/materials/uac/`（不覆盖已有文件，满足 `nasMaterialGuard` 校验，不触发 `unknown NAS source leaf`）。
+  - `server.postDeployHook`：可选规范绝对路径，指向部署后置脚本（普通文件、非符号链接、root 所有、不可被组或其他用户写、属主可执行如 `0700`、祖先目录受信）。`auriga deploy` 在首次安装与后续升级的服务健康检查通过后自动执行该脚本，并通过只读环境变量传入 `AURIGA_DATA`、`AURIGA_DEPLOY_PHASE`（`install` 或 `upgrade`）、`AURIGA_PACKAGE`、`AURIGA_ACCESS_FILE`（不向环境变量或日志泄露任何凭据）；脚本返回非零退出码时部署清晰报错。
+
+配置示例（`/etc/auriga/site.json` 片段，使用占位域名 `uac.corp.example`）：
+
+```json
+{
+  "server": {
+    "data": "/srv/auriga/auriga-data",
+    "postDeployHook": "/etc/auriga/hooks/post-deploy-uac.sh",
+    "install": {
+      "domain": "site.example",
+      "uacMaterialsDir": "/etc/auriga/uac-materials",
+      "runtime": {
+        "bundle": "/srv/auriga/runtime/release-1",
+        "root": "/etc/auriga/runtime/root.pb",
+        "image": "127.0.0.1:15000/auriga/dsh@sha256:0000000000000000000000000000000000000000000000000000000000000000"
+      }
+    }
+  }
+}
+```
+
+后置钩子示例（`/etc/auriga/hooks/post-deploy-uac.sh`，`chown root:root && chmod 0700`）：
+
+```sh
+#!/bin/sh
+set -eu
+# 仅在首次安装后幂等启用 UAC 身份源（升级阶段可跳过或做状态核验）
+[ "${AURIGA_DEPLOY_PHASE:-}" = "install" ] || exit 0
+# 使用站点受控凭证获取 owner 会话（脚本自身只读 0700，凭据不打印到 stdout/stderr）
+# 随后幂等调用平台管理接口启用 UAC 身份源，例如指向 https://uac.corp.example：
+#   POST /api/iam/v1/admin/providers
+#   PUT  /api/iam/v1/admin/providers/<providerId>/uac
+```

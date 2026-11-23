@@ -576,6 +576,22 @@ func deploySwitch(ctx context.Context, ops siteOps, cfg *siteConfig, s *state, p
 	if err != nil {
 		return exitWith(1, fmt.Errorf("计算切换方案失败：%w", err))
 	}
+	if cfg != nil && cfg.Server != nil && cfg.Server.Install != nil && cfg.Server.Install.Runtime != nil {
+		req := *cfg.Server.Install.Runtime
+		if s.Runtime == nil {
+			fmt.Fprintf(w, "为既有站点受控追加 DSH 运行时（%s）…\n", req.Image)
+			if err := attachInstalledRuntime(s, rec.Release, req); err != nil {
+				return exitWith(1, fmt.Errorf("追加 DSH 运行时失败：%w", err))
+			}
+			rc.Notes = append(rc.Notes, "已为既有站点受控追加 DSH 运行时（config/runtime-source）")
+			if plan.Mode != switchModeFull {
+				plan.Mode = switchModeFull
+				plan.Reason += "；已追加 DSH 运行时，改为完整启动"
+			}
+		} else if s.Runtime.Source != req {
+			return exitWith(1, errors.New("site.json 的 server.install.runtime 与已登记的站点 runtime 不同；不得通过 deploy 替换根或模板，请使用 runtime-upgrade"))
+		}
+	}
 	rec.Orchestration = plan.Orchestration
 	changed := plan.OrchestrationChanged
 	rc.OrchestrationChanged = &changed
@@ -644,6 +660,9 @@ func deploySwitch(ctx context.Context, ops siteOps, cfg *siteConfig, s *state, p
 			if err := saveState(*s); err != nil {
 				fmt.Fprintf(w, "警告：淘汰历史后保存 state 失败：%v\n", err)
 			}
+		}
+		if err := executePostDeployHook(ctx, cfg, "upgrade", *s, rc, w); err != nil {
+			return exitWith(1, err)
 		}
 		fmt.Fprintf(w, "部署完成：当前 r%d\n", rec.Seq)
 		return nil
@@ -758,6 +777,10 @@ func siteInstallOptions(cfg *siteConfig, data string) (installOptions, error) {
 	}
 	o.Address, o.Domain, o.Proxy = str(in.Address), str(in.Domain), str(in.Proxy)
 	o.DesktopPublicKey, o.DesktopPublisherTenant, o.DesktopConfirmFingerprint = str(in.DesktopPublicKey), str(in.DesktopPublisherTenant), str(in.DesktopConfirmFingerprint)
+	if in.Runtime != nil {
+		o.Runtime = *in.Runtime
+	}
+	o.UACMaterialsDir = str(in.UACMaterialsDir)
 	return o, nil
 }
 
@@ -801,6 +824,14 @@ func deployFirstInstall(ctx context.Context, cfg *siteConfig, data string, rec d
 	if err != nil {
 		return exitWith(1, err)
 	}
+	var prepared *preparedInstallRuntime
+	if o.Runtime.enabled() {
+		prepared, err = prepareRuntimeSnapshot(rec.Release, o.Runtime)
+		if err != nil {
+			return exitWith(1, fmt.Errorf("首次安装 runtime 校验失败：%w", err))
+		}
+		defer func() { _ = os.RemoveAll(prepared.directory) }()
+	}
 	if err := os.Mkdir(meta, 0755); err != nil {
 		return exitWith(1, err)
 	}
@@ -818,7 +849,7 @@ func deployFirstInstall(ctx context.Context, cfg *siteConfig, data string, rec d
 		fmt.Fprintln(w, "没有带 trustFingerprint 的套件：发行钥未钉定（state 标记 trustUnpinned）；第一次签名包 upgrade 前须先 trust add-*")
 	}
 	images := cloneImages(rec.Images)
-	err = deployInstallSteps(&s, o, key != "", nil, func(state) (map[string]string, error) { return images, nil }, healthTimeout(cfg))
+	err = deployInstallSteps(&s, o, key != "", prepared, func(state) (map[string]string, error) { return images, nil }, healthTimeout(cfg))
 	if err != nil {
 		rc.Health = err.Error()
 		return exitWith(1, fmt.Errorf("首次安装失败，已保留现场（%s 与数据目录），排查后处理：%w", meta, err))
@@ -848,6 +879,9 @@ func deployFirstInstall(ctx context.Context, cfg *siteConfig, data string, rec d
 		rc.SwitchedServices = append(rc.SwitchedServices, svc)
 	}
 	_ = tagImages(ctx, cur.Images, func(svc string) string { return "auriga/" + svc + ":nas" })
+	if err := executePostDeployHook(ctx, cfg, "install", s, rc, w); err != nil {
+		return exitWith(1, err)
+	}
 	fmt.Fprintf(w, "首次安装完成：当前 r%d\n", rec.Seq)
 	return nil
 }
@@ -972,6 +1006,21 @@ func printDeployPlan(ctx context.Context, w io.Writer, cfg *siteConfig, r *depsR
 		}
 	} else {
 		fmt.Fprintln(w, "  切换：首次安装走完整安装步骤")
+	}
+	if cfg != nil && cfg.Server != nil {
+		if cfg.Server.Install != nil && cfg.Server.Install.Runtime != nil {
+			if first {
+				fmt.Fprintf(w, "  DSH 运行时：首次安装将验签并登记 %s\n", cfg.Server.Install.Runtime.Image)
+			} else if s.Runtime == nil {
+				fmt.Fprintf(w, "  DSH 运行时：将为既有站点受控追加 %s（config/runtime-source）并完整启动\n", cfg.Server.Install.Runtime.Image)
+			}
+		}
+		if first && cfg.Server.Install != nil && cfg.Server.Install.UACMaterialsDir != nil {
+			fmt.Fprintf(w, "  UAC 材料：首次安装将从 %s 同步到 config/materials/uac\n", *cfg.Server.Install.UACMaterialsDir)
+		}
+		if cfg.Server.PostDeployHook != nil {
+			fmt.Fprintf(w, "  部署后置钩子：健康检查通过后执行 %s\n", *cfg.Server.PostDeployHook)
+		}
 	}
 	fmt.Fprintln(w, "  依赖输入：")
 	for _, in := range inputs {

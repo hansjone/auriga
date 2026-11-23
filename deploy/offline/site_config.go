@@ -85,15 +85,20 @@ type siteServer struct {
 	// Runner 是工作流运行器账户名（设计 D12、遗留 P3）：经 sudo 调用且调用者是该账户时，
 	// 一律按受限调用执行参数白名单，不能用 --operator 跳过。
 	Runner *string `json:"runner"`
+	// PostDeployHook 是可选的部署后置脚本绝对路径：首装与升级在服务健康检查通过后执行，
+	// 须 root 所有、非符号链接、组和其他用户不可写、祖先目录受信。
+	PostDeployHook *string `json:"postDeployHook"`
 }
 
 type siteInstall struct {
-	Address                   *string `json:"address"`
-	Domain                    *string `json:"domain"`
-	Proxy                     *string `json:"proxy"`
-	DesktopPublicKey          *string `json:"desktopPublicKey"`
-	DesktopPublisherTenant    *string `json:"desktopPublisherTenant"`
-	DesktopConfirmFingerprint *string `json:"desktopConfirmFingerprint"`
+	Address                   *string                `json:"address"`
+	Domain                    *string                `json:"domain"`
+	Proxy                     *string                `json:"proxy"`
+	DesktopPublicKey          *string                `json:"desktopPublicKey"`
+	DesktopPublisherTenant    *string                `json:"desktopPublisherTenant"`
+	DesktopConfirmFingerprint *string                `json:"desktopConfirmFingerprint"`
+	Runtime                   *installRuntimeOptions `json:"runtime"`
+	UACMaterialsDir           *string                `json:"uacMaterialsDir"`
 }
 
 type siteSign struct {
@@ -741,6 +746,11 @@ func (s *siteServer) validate() error {
 			return fmt.Errorf("server.runner 需要运行器的本机账户名（小写字母、数字、_、-，以字母或 _ 开头，不超过 32 位，不能是 root），当前 %q", *s.Runner)
 		}
 	}
+	if s.PostDeployHook != nil {
+		if err := checkConfigPath("server.postDeployHook", *s.PostDeployHook); err != nil {
+			return err
+		}
+	}
 	if s.Install == nil {
 		return nil
 	}
@@ -777,6 +787,19 @@ func (s *siteServer) validate() error {
 		}
 		if !hex64.MatchString(*in.DesktopConfirmFingerprint) {
 			return errors.New("server.install.desktopConfirmFingerprint 需要 64 位小写 SHA256（SPKI DER）")
+		}
+	}
+	if in.Runtime != nil {
+		if !in.Runtime.enabled() {
+			return errors.New("server.install.runtime 必须同时提供 bundle、root、image，或设为 null")
+		}
+		if err := in.Runtime.validate(); err != nil {
+			return fmt.Errorf("server.install.runtime：%w", err)
+		}
+	}
+	if in.UACMaterialsDir != nil {
+		if err := checkConfigPath("server.install.uacMaterialsDir", *in.UACMaterialsDir); err != nil {
+			return err
 		}
 	}
 	return nil

@@ -8,6 +8,14 @@ out=$2
 case "$out" in /*) ;; *) echo "use an absolute output directory" >&2; exit 2 ;; esac
 case "${AURIGA_DSH_WEB_INPUTS_DIR:-}" in /*) ;; *) echo "set AURIGA_DSH_WEB_INPUTS_DIR to the approved web inputs" >&2; exit 2 ;; esac
 case "${AURIGA_DSH_NODE_IMAGE_CONFIG:-}" in sha256:*) ;; *) echo "set the approved original Node image config SHA256" >&2; exit 2 ;; esac
+npm_registry=${AURIGA_DSH_NPM_REGISTRY:-https://registry.npmjs.org}
+case "$npm_registry" in
+    http://?* | https://?*) ;;
+    *) echo "AURIGA_DSH_NPM_REGISTRY must be an http:// or https:// URL" >&2; exit 2 ;;
+esac
+case "$npm_registry" in
+    *[[:space:]]*) echo "AURIGA_DSH_NPM_REGISTRY must not contain whitespace" >&2; exit 2 ;;
+esac
 mkdir -p "$out"
 test -z "$(ls -A "$out")" || { echo "output directory must be empty" >&2; exit 2; }
 src=$(CDPATH='' cd -- "$(dirname -- "$0")/../../.." && pwd)
@@ -45,7 +53,7 @@ writeFileSync(join(out,'package-lock.json'),JSON.stringify(lock,null,2)+'\n');
 NODE
 for package in host plugin; do
     (cd "$scratch/$package" && npm ci --omit=dev --include=optional --ignore-scripts --bin-links=false \
-        --no-audit --no-fund --registry=https://registry.npmjs.org --os=linux --cpu=x64 --libc=glibc --cache "$cache")
+        --no-audit --no-fund "--registry=$npm_registry" --os=linux --cpu=x64 --libc=glibc --cache "$cache")
 done
 cp "$web/corepack.tgz" "$out/corepack.tgz"
 cp "$web/web-cache.tar.gz" "$out/web-cache.tar.gz"

@@ -494,7 +494,17 @@ func sharedRuntimeSnapshot(base string, allowVerifiedPredecessor bool) ([]byte, 
 	if err != nil {
 		return nil, err
 	}
-	generations, err := readRuntimeGenerations(out, baseHash, filepath.Join(base, "runtime-keys/root.pb"))
+	root := filepath.Join(base, "runtime-keys/root.pb")
+	allowRootFile := false
+	if _, statErr := os.Lstat(root); os.IsNotExist(statErr) {
+		attachedRoot := filepath.Join(out, "root.pb")
+		if _, err := runtimeReadLeaf(attachedRoot, 0644, 1<<20); err != nil {
+			return nil, fmt.Errorf("signed base runtime required: %w", err)
+		}
+		root = attachedRoot
+		allowRootFile = true
+	}
+	generations, err := readRuntimeGenerations(out, baseHash, root, allowRootFile)
 	if err != nil {
 		return nil, err
 	}

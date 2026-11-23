@@ -6,13 +6,106 @@ import {
   writeFileSync,
   existsSync,
 } from 'node:fs';
-import { join, dirname, resolve } from 'node:path';
+import { basename, join, dirname, resolve, delimiter } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
 import { createRequire } from 'node:module';
 import { safePath } from './vault.mjs';
 import { buildHelper } from './windows/build.mjs';
 const source = dirname(fileURLToPath(import.meta.url));
+export function resolveEsbuild(repoRoot = resolve(source, '../..')) {
+  const roots = [
+    join(repoRoot, 'package.json'),
+    join(repoRoot, 'web', 'package.json'),
+    join(repoRoot, 'web', 'admin', 'package.json'),
+  ];
+  const errors = [];
+  for (const base of roots) {
+    const loader = createRequire(base);
+    try {
+      return createRequire(loader.resolve('vite/package.json'))('esbuild');
+    } catch (error) {
+      errors.push(`${base} -> vite -> esbuild: ${error.message}`);
+    }
+    try {
+      return loader('esbuild');
+    } catch (error) {
+      errors.push(`${base} -> esbuild: ${error.message}`);
+    }
+  }
+  for (const pnpmDir of [
+    join(repoRoot, 'web', 'node_modules', '.pnpm'),
+    join(repoRoot, 'node_modules', '.pnpm'),
+  ]) {
+    if (!existsSync(pnpmDir)) continue;
+    for (const entry of readdirSync(pnpmDir, { withFileTypes: true })) {
+      if (!entry.isDirectory()) continue;
+      if (!entry.name.startsWith('esbuild@') && !entry.name.startsWith('vite@'))
+        continue;
+      const candidate = join(pnpmDir, entry.name, 'node_modules', 'esbuild');
+      if (!existsSync(join(candidate, 'package.json'))) continue;
+      try {
+        return createRequire(join(candidate, 'package.json'))(candidate);
+      } catch (error) {
+        errors.push(`${candidate}: ${error.message}`);
+      }
+    }
+  }
+  throw new Error(`Cannot resolve esbuild:\n${errors.join('\n')}`);
+}
+export function resolvePluginNodePaths({
+  repoRoot = resolve(source, '../..'),
+  env = process.env,
+} = {}) {
+  const configured = (env.AURIGA_CLIENT_PLUGIN_MODULES ?? '')
+    .split(delimiter)
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .map((item) => resolve(item));
+  const auto = [
+    join(repoRoot, 'clients', 'dsh-plugin', 'node_modules'),
+    join(repoRoot, 'web', 'node_modules'),
+    join(repoRoot, 'node_modules'),
+  ].filter((dir) => existsSync(dir));
+  const seen = new Set();
+  const paths = [];
+  for (const dir of [...configured, ...auto]) {
+    const key = process.platform === 'win32' ? dir.toLowerCase() : dir;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    paths.push(dir);
+  }
+  return paths;
+}
+function resolveWithNodePaths(baseFile, specifier, nodePaths = []) {
+  const loader = createRequire(baseFile);
+  const searchRoots = [
+    dirname(baseFile),
+    ...nodePaths.map((dir) =>
+      basename(dir) === 'node_modules' ? dirname(dir) : dir,
+    ),
+  ];
+  try {
+    return loader.resolve(specifier, { paths: searchRoots });
+  } catch (primaryError) {
+    for (const dir of nodePaths) {
+      const candidate = join(dir, specifier);
+      try {
+        return loader.resolve(candidate);
+      } catch {
+        /* Try next configured nodePaths directory. */
+      }
+    }
+    throw primaryError;
+  }
+}
+export function resolvePluginDependency(
+  specifier,
+  { repoRoot = resolve(source, '../..'), nodePaths = [] } = {},
+) {
+  const pluginPkg = join(repoRoot, 'clients', 'dsh-plugin', 'package.json');
+  return resolveWithNodePaths(pluginPkg, specifier, nodePaths);
+}
 export function buildBroker(output, { managedLinux = false } = {}) {
   output = resolve(output);
   safePath(output);
@@ -52,12 +145,9 @@ export function buildBroker(output, { managedLinux = false } = {}) {
     buildHelper(join(output, helper));
     files.push(helper);
   }
-  const rootLoader = createRequire(
-    new URL('../../package.json', import.meta.url),
-  );
-  const esbuild = createRequire(rootLoader.resolve('vite/package.json'))(
-    'esbuild',
-  );
+  const repoRoot = resolve(source, '../..');
+  const esbuild = resolveEsbuild(repoRoot);
+  const nodePaths = resolvePluginNodePaths({ repoRoot });
   esbuild.buildSync({
     entryPoints: [join(source, 'network-core.mjs')],
     bundle: true,
@@ -69,6 +159,7 @@ export function buildBroker(output, { managedLinux = false } = {}) {
       js: "import {createRequire as networkRequire} from 'node:module'; const require=networkRequire(import.meta.url);",
     },
     external: ['bufferutil', 'utf-8-validate'],
+    ...(nodePaths.length ? { nodePaths } : {}),
   });
   files.push('network-core.bundle.mjs');
   mkdirSync(join(output, 'schemas', 'identity'), { recursive: true });
@@ -126,21 +217,26 @@ export function buildBroker(output, { managedLinux = false } = {}) {
     );
     files.push(file);
   }
-  const loader = createRequire(
-    new URL('../dsh-plugin/package.json', import.meta.url),
-  );
+  const ajvEntry = resolvePluginDependency('ajv/dist/2020.js', {
+    repoRoot,
+    nodePaths,
+  });
+  const ajvPkg = resolvePluginDependency('ajv/package.json', {
+    repoRoot,
+    nodePaths,
+  });
   // npm pack excludes nested node_modules. Bundle the pinned validator so both
   // distributed consumers contain the complete manifest closure.
   esbuild.buildSync({
-    entryPoints: [loader.resolve('ajv/dist/2020.js')],
+    entryPoints: [ajvEntry],
     bundle: true,
     platform: 'node',
     format: 'cjs',
     target: 'node22',
     outfile: join(output, 'vendor-ajv.cjs'),
+    ...(nodePaths.length ? { nodePaths } : {}),
   });
   files.push('vendor-ajv.cjs');
-  const dependencyLoader = createRequire(loader.resolve('ajv/package.json'));
   for (const name of [
     'ajv',
     'fast-deep-equal',
@@ -149,9 +245,9 @@ export function buildBroker(output, { managedLinux = false } = {}) {
     'require-from-string',
   ]) {
     const packageDirectory = dirname(
-      (name === 'ajv' ? loader : dependencyLoader).resolve(
-        name + '/package.json',
-      ),
+      name === 'ajv'
+        ? ajvPkg
+        : resolveWithNodePaths(ajvPkg, name + '/package.json', nodePaths),
     );
     const relative = 'licenses/' + name + '.txt';
     mkdirSync(join(output, 'licenses'), { recursive: true });

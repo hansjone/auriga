@@ -383,10 +383,18 @@ export async function createManaged(options = {}) {
           role: 'owner',
         }),
       });
+      const deviceCredentialFile =
+        options.deviceCredentialFile ?? env.AURIGA_DEVICE_CREDENTIAL_FILE;
+      const managedNetworkConfigured = Boolean(
+        options.connection || options.networkConnection || deviceCredentialFile,
+      );
       registerHealthRoute(ctx, {
         pluginVersion,
         instanceId,
-        ready: () => network?.sessionAvailable === true,
+        ready: () =>
+          managedNetworkConfigured
+            ? network?.sessionAvailable === true
+            : active && !stopping && network?.sessionRevoked !== true,
       });
 
       // Same public host services, provider and network lifecycle as connect mode.
@@ -422,20 +430,10 @@ export async function createManaged(options = {}) {
                   }
                   return true;
                 },
-                file:
-                  options.deviceCredentialFile ??
-                  env.AURIGA_DEVICE_CREDENTIAL_FILE,
-                modelFile:
-                  (options.deviceCredentialFile ??
-                  env.AURIGA_DEVICE_CREDENTIAL_FILE)
-                    ? join(
-                        dirname(
-                          options.deviceCredentialFile ??
-                            env.AURIGA_DEVICE_CREDENTIAL_FILE,
-                        ),
-                        'model-credential.json',
-                      )
-                    : undefined,
+                file: deviceCredentialFile,
+                modelFile: deviceCredentialFile
+                  ? join(dirname(deviceCredentialFile), 'model-credential.json')
+                  : undefined,
                 platformOrigin: platformUrl,
                 directory: join(directory, 'auriga-managed'),
                 tenantId,

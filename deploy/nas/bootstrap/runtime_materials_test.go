@@ -71,6 +71,7 @@ func TestNASRuntimeConsumerWiring(t *testing.T) {
 		"../scripts/render.sh": {
 			"AURIGA_WORKSPACE_ARTIFACT_KEYS_DIRECTORY=/etc/auriga/runtime-keys",
 			"AURIGA_AGENT_RUNTIME_PROOFS_DIR=/etc/auriga/runtime-proofs",
+			"AURIGA_AGENT_LABELS=template=real-dsh",
 		},
 		"../scripts/lib.sh": {"-runtime-bundle", "-runtime-root", "-runtime-image"},
 	}
@@ -87,5 +88,19 @@ func TestNASRuntimeConsumerWiring(t *testing.T) {
 		if strings.Contains(string(raw), "$CONFIG/templates") || strings.Contains(string(raw), "/config/templates:") {
 			t.Errorf("%s uses unreceipted outer templates", path)
 		}
+	}
+}
+
+func TestWriteRuntimePolicyIncludesRealDshLabel(t *testing.T) {
+	dir := t.TempDir()
+	image := "registry.example.com/auriga/dsh@sha256:" + strings.Repeat("a", 64)
+	writeRuntimePolicy(dir, image, 512)
+	raw, err := os.ReadFile(dir + "/agent-policy.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := string(raw)
+	if !strings.Contains(got, "labels:\n  template: real-dsh\n") {
+		t.Fatalf("agent-policy.yaml missing template=real-dsh label:\n%s", got)
 	}
 }

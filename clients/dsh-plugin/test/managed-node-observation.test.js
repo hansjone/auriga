@@ -227,7 +227,9 @@ test('production managed door confines the node Bearer to the renderer observer'
 
   const readiness = await send(health);
   assert.equal(readiness.status, 200);
-  assert.equal(JSON.parse(readiness.body).ready, false);
+  // Managed network is unconfigured here, so /_auriga/health reports ready=true
+  // while session-gated panel routes below still require a ready user session.
+  assert.equal(JSON.parse(readiness.body).ready, true);
   assert.equal((await send(health, bearer, 'HEAD')).status, 200);
   assert.equal(runtime.activity.snapshot().lastInteractionAt, undefined);
   assert.equal((await send(status, identity(status))).status, 200);

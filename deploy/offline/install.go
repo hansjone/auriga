@@ -28,6 +28,7 @@ type installOptions struct {
 	Fingerprint                                      string
 	AllowUnsigned                                    bool
 	Runtime                                          installRuntimeOptions
+	UACMaterialsDir                                  string
 }
 type state struct {
 	Data                        string            `json:"data"`
@@ -390,6 +391,9 @@ func installSteps(s *state, o installOptions, register bool, prepared *preparedI
 		return err
 	}
 	if err := nas(*s, "init"); err != nil {
+		return err
+	}
+	if err := syncUACMaterials(s.Data, o.UACMaterialsDir); err != nil {
 		return err
 	}
 	if err := provisionResource(*s); err != nil {

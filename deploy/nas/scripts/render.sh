@@ -311,6 +311,9 @@ AURIGA_AGENT_ALLOW_INSECURE=false
 AURIGA_DEPLOYMENT_ACCESS_FILE=/etc/auriga/access.json
 AURIGA_AGENT_RUNTIME_PROOFS_DIR=/etc/auriga/runtime-proofs
 EOF
+if [ -f "$CONFIG/materials/templates/real-dsh.pb" ]; then
+  printf 'AURIGA_AGENT_LABELS=template=real-dsh\n' >>"$CONFIG/agent.env"
+fi
 chmod 0600 "$CONFIG/agent.env"
 
 printf '%s' "$PG_BOOT" >"$SECRETS/pg_bootstrap_password"

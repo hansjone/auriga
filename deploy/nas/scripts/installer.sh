@@ -3,11 +3,12 @@
 set -eu
 . "$(CDPATH= cd -P -- "$(dirname -- "$0")" && pwd)/lib.sh"
 case "${1:-}" in
-  init|render|render-core|render-collab|check|prepare-socket|export-env|activate-collab|runtime-path|runtime-stage|runtime-commit|runtime-rollback|collab-publish|collab-install|collab-status|collab-history-check|collab-history-check-pg|collab-startup-check|collab-path|collab-check|collab-stop|collab-prepare|collab-renew|collab-prepare-recovery|collab-recover-expired|collab-queue-prepare|collab-queue-export|collab-queue-import|collab-recover-pending|collab-pause|collab-resume|materials-stage|materials-commit|materials-rollback|materials-status|materials-check|materials-path|materials-project|materials-project-core) operation=$1 ;;
+  init|render|render-core|render-collab|check|prepare-socket|export-env|activate-collab|runtime-path|runtime-attach|runtime-stage|runtime-commit|runtime-rollback|collab-publish|collab-install|collab-status|collab-history-check|collab-history-check-pg|collab-startup-check|collab-path|collab-check|collab-stop|collab-prepare|collab-renew|collab-prepare-recovery|collab-recover-expired|collab-queue-prepare|collab-queue-export|collab-queue-import|collab-recover-pending|collab-pause|collab-resume|materials-stage|materials-commit|materials-rollback|materials-status|materials-check|materials-path|materials-project|materials-project-core) operation=$1 ;;
   shared-source-check|shared-stage|shared-set-model|shared-set-profile|shared-commit|shared-project|shared-check|shared-path|shared-status|shared-replay-stage|shared-replay-prepare-path|shared-replay-final-path|shared-replay-provision|shared-replay-verify-final|shared-replay-close|shared-replay-check|shared-replay-rebind) operation=$1 ;;
   *) die 'Usage: sh installer.sh init|render|check|prepare-socket|export-env|activate-collab' ;;
 esac
 upgrade_bundle=
+upgrade_root=
 upgrade_image=
 materials_expected=
 rotation_input=
@@ -33,6 +34,9 @@ case "$operation" in
   collab-publish|collab-install|collab-recover-expired|collab-queue-import)
     [ "$#" = 2 ] || die 'collab rotation requires an approved directory'
     rotation_input=$2 ;;
+  runtime-attach)
+    [ "$#" = 4 ] || die 'runtime attach requires bundle, root and exact image'
+    upgrade_bundle=$2; upgrade_root=$3; upgrade_image=$4 ;;
   runtime-stage|runtime-commit|runtime-rollback)
     [ "$#" = 3 ] || die 'runtime operation requires bundle and exact image'
     upgrade_bundle=$2; upgrade_image=$3 ;;
@@ -88,6 +92,10 @@ done
 if [ -n "$upgrade_bundle" ]; then
   validate_input_path "$upgrade_bundle"
   set -- "$@" --mount "type=bind,src=$upgrade_bundle,dst=$upgrade_bundle,readonly"
+fi
+if [ -n "$upgrade_root" ]; then
+  validate_input_path "$upgrade_root"
+  set -- "$@" --mount "type=bind,src=$upgrade_root,dst=$upgrade_root,readonly"
 fi
 if [ "$operation" = shared-stage ] || [ "$operation" = shared-set-profile ]; then
   validate_input_path "$shared_profile"
@@ -154,7 +162,7 @@ esac
     --security-opt no-new-privileges:true --read-only --tmpfs /tmp:mode=1777,exec \
     "$@" --env "NAS_ROOT=$NAS_ROOT" --env "AURIGA_DATA_ROOT=$AURIGA_DATA_ROOT" \
     --env "AURIGA_NAS_BOOTSTRAP_BINARY=$_boot" --env NAS_INSTALLER_ACTIVE=1 \
-    --env "NAS_RUNTIME_UPGRADE_BUNDLE=$upgrade_bundle" --env "NAS_RUNTIME_UPGRADE_IMAGE=$upgrade_image" \
+    --env "NAS_RUNTIME_UPGRADE_BUNDLE=$upgrade_bundle" --env "NAS_RUNTIME_UPGRADE_ROOT=$upgrade_root" --env "NAS_RUNTIME_UPGRADE_IMAGE=$upgrade_image" \
     --env "NAS_MATERIALS_EXPECTED_BASE=$materials_expected" \
     --env "NAS_COLLAB_ROTATION_INPUT=$rotation_input" \
     --env "NAS_SHARED_EXPECTED_BASE=$shared_base" --env "NAS_SHARED_PROFILE=$shared_profile" \

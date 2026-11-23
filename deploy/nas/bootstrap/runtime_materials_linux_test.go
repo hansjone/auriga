@@ -390,6 +390,9 @@ func assertRuntimeInstallation(t *testing.T, out string, r runtimeInputs, m *run
 	if !strings.Contains(policy, fmt.Sprintf("allowedImageRepos:\n  - %q\nallowedImageRefs:\n  - %q\n", repo, r.image)) || strings.Contains(policy, "127.0.0.1:") {
 		t.Fatal("approved exact image policy missing")
 	}
+	if !strings.Contains(policy, "labels:\n  template: real-dsh\n") {
+		t.Fatal("real-dsh node label missing from agent-policy.yaml")
+	}
 	set := runtimeMaterialSet(m)
 	guard, err := openNASMaterialGuard(out, set)
 	if err != nil {

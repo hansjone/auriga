@@ -132,6 +132,9 @@ func dispatch(args []string) error {
 	if args[0] == "trust" {
 		return trustCommand(args[1:])
 	}
+	if args[0] == "runtime" {
+		return runtimeCommand(args[1:])
+	}
 	if args[0] == "deps" {
 		return depsCommand(args[1:])
 	}
