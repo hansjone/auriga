@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -88,6 +89,10 @@ func TestNASCollabPresentationOrigin(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	controlOrigin := fmt.Sprintf("https://%s:%d", cfg.InstanceControl().DnsAlias, cfg.InstanceControl().Origin.Port)
+	controlListen := fmt.Sprintf("https://%s:%d", cfg.InstanceControl().DnsAlias, cfg.Listeners().InstanceControl.Port)
+	portalListen := fmt.Sprintf("https://%s:%d", cfg.InstanceControl().DnsAlias, cfg.Listeners().Portal.Port)
+	adminListen := fmt.Sprintf("https://%s:%d", cfg.InstanceControl().DnsAlias, cfg.Listeners().Admin.Port)
 	for _, tc := range []struct {
 		origin, allowed string
 		valid           bool
@@ -102,9 +107,10 @@ func TestNASCollabPresentationOrigin(t *testing.T) {
 		{"https://auriga-instance.internal", "https://auriga-instance.internal", false},
 		{"https://auriga-instance.internal:443", "https://auriga-instance.internal:443", false},
 		{"https://auriga-instance.internal:018446", "https://auriga-instance.internal:018446", false},
-		{"https://auriga-instance.internal:15000", "https://auriga-instance.internal:15000", false},
-		{"https://auriga-instance.internal:8080", "https://auriga-instance.internal:8080", false},
-		{"https://auriga-instance.internal:8084", "https://auriga-instance.internal:8084", false},
+		{controlOrigin, controlOrigin, false},
+		{controlListen, controlListen, false},
+		{portalListen, portalListen, false},
+		{adminListen, adminListen, false},
 		{"https://portal.example.com/path", "https://portal.example.com/path", false},
 		{"https://alice@portal.example.com", "https://alice@portal.example.com", false},
 		{"https://portal.example.com:70000", "https://portal.example.com:70000", false},
