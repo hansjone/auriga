@@ -41,7 +41,7 @@ func TestManagedDeviceSecretFileRotationAndRemoval(t *testing.T) {
 		}
 	}
 	env, err := os.ReadFile(result.EnvFile)
-	if err != nil || !bytes.Contains(env, []byte("AURIGA_DEVICE_CREDENTIAL_FILE=")) {
+	if err != nil || !bytes.Contains(env, []byte("AURIGA_DEVICE_CREDENTIAL_FILE="+renderer.ContainerDeviceCredential)) {
 		t.Fatal("missing credential file path")
 	}
 	spec.Generation = 2
@@ -49,10 +49,18 @@ func TestManagedDeviceSecretFileRotationAndRemoval(t *testing.T) {
 		t.Fatal("old generation ciphertext accepted")
 	}
 	spec.Secrets.DeviceCredential = nil
-	if _, err := renderer.Render(spec, opt); err != nil {
+	resultAfterRemoval, err := renderer.Render(spec, opt)
+	if err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(path); !os.IsNotExist(err) {
 		t.Fatal("revoked credential file retained")
+	}
+	envAfterRemoval, err := os.ReadFile(resultAfterRemoval.EnvFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(envAfterRemoval, []byte("AURIGA_DEVICE_CREDENTIAL_FILE=")) {
+		t.Fatalf("AURIGA_DEVICE_CREDENTIAL_FILE should be omitted when device_credential is absent: %s", envAfterRemoval)
 	}
 }

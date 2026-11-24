@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -308,13 +308,31 @@ test('managed /_auriga/health is ready when managed network is unconfigured', as
   assert.equal(afterDispose.body.ready, false);
 });
 
-test('managed /_auriga/health stays ready=false when deviceCredentialFile is configured without session', async (t) => {
-  const missingFile = join(
-    tmpdir(),
-    'auriga-nonexistent-device-credential.json',
-  );
+test('managed /_auriga/health is ready when deviceCredentialFile does not exist and gates once it appears', async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), 'auriga-missing-cred-'));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const credFile = join(dir, 'device-credential.json');
   const { runtime, getHealth } = await startManagedHealthFixture(t, {
-    deviceCredentialFile: missingFile,
+    deviceCredentialFile: credFile,
+  });
+  await runtime.ready;
+  const before = await getHealth();
+  assert.equal(before.status, 200);
+  assert.equal(before.body.ready, true);
+
+  await writeFile(credFile, '{}', 'utf8');
+  const after = await getHealth();
+  assert.equal(after.status, 200);
+  assert.equal(after.body.ready, false);
+});
+
+test('managed /_auriga/health stays ready=false when deviceCredentialFile exists without session', async (t) => {
+  const dir = await mkdtemp(join(tmpdir(), 'auriga-existing-cred-'));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const credFile = join(dir, 'device-credential.json');
+  await writeFile(credFile, '{}', 'utf8');
+  const { runtime, getHealth } = await startManagedHealthFixture(t, {
+    deviceCredentialFile: credFile,
   });
   await runtime.ready;
   const res = await getHealth();
