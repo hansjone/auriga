@@ -31,7 +31,7 @@ func TestAccessCapabilities_HTTPAndIPModeWarns(t *testing.T) {
 	if r.Mode != "ip" || r.PortalScheme != "http" {
 		t.Fatalf("unexpected access: %+v", r)
 	}
-	if r.ManagedNetworkState != "unconfigured" || r.ManagedNetworkReason != "access_mode_not_https_domain" {
+	if r.ManagedNetworkState != "unconfigured" || r.ManagedNetworkReason != "portal_http_no_managed_origin" {
 		t.Fatalf("unexpected managed network state: %+v", r)
 	}
 	docLine := r.DoctorLine()
@@ -104,6 +104,74 @@ func TestAccessCapabilities_ConfiguredDomainHTTPSPasses(t *testing.T) {
 	}
 	if !strings.HasPrefix(r.DoctorLine(), "PASS 访问形态与可选能力") {
 		t.Fatalf("expected PASS DoctorLine, got %q", r.DoctorLine())
+	}
+}
+
+func TestAccessCapabilities_IPDirectHTTPSConfiguredPasses(t *testing.T) {
+	data := t.TempDir()
+	accessPath := filepath.Join(data, "config/materials/access.json")
+	writeAccessFixture(t, accessPath, "ip", "https")
+	if err := os.WriteFile(filepath.Join(data, "stack.env"), []byte("AURIGA_MANAGED_PLATFORM_ORIGIN=\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(data, "config/collab-source"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	mnPath := filepath.Join(data, "config/collab-runtime/platform/managed-network.json")
+	if err := os.MkdirAll(filepath.Dir(mnPath), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(mnPath, []byte(`{}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	r := accessCapabilities(state{Data: data, Access: accessPath})
+	if r.ManagedNetworkState != "configured" || r.ManagedNetworkReason != "" || !r.CollabConfigured {
+		t.Fatalf("expected configured for IP direct HTTPS, got %+v", r)
+	}
+	if !strings.HasPrefix(r.DoctorLine(), "PASS 访问形态与可选能力") {
+		t.Fatalf("expected PASS DoctorLine for IP direct HTTPS, got %q", r.DoctorLine())
+	}
+}
+
+func TestAccessCapabilities_DirectHTTPSWithoutCollabReportsMaterialAbsent(t *testing.T) {
+	data := t.TempDir()
+	accessPath := filepath.Join(data, "config/materials/access.json")
+	writeAccessFixture(t, accessPath, "ip", "https")
+	if err := os.WriteFile(filepath.Join(data, "stack.env"), []byte("AURIGA_MANAGED_PLATFORM_ORIGIN=\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	r := accessCapabilities(state{Data: data, Access: accessPath})
+	if r.ManagedNetworkState != "unconfigured" || r.ManagedNetworkReason != "collab_material_absent" {
+		t.Fatalf("expected collab_material_absent for direct HTTPS without collab, got %+v", r)
+	}
+}
+
+func TestAccessCapabilities_IPHTTPWithInternalManagedIngressPasses(t *testing.T) {
+	data := t.TempDir()
+	accessPath := filepath.Join(data, "config/materials/access.json")
+	writeAccessFixture(t, accessPath, "ip", "http")
+	if err := os.WriteFile(filepath.Join(data, "stack.env"), []byte("AURIGA_MANAGED_PLATFORM_ORIGIN=https://auriga-instance.internal:18446\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(data, "config/collab-source"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	mnPath := filepath.Join(data, "config/collab-runtime/platform/managed-network.json")
+	if err := os.MkdirAll(filepath.Dir(mnPath), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(mnPath, []byte(`{}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	r := accessCapabilities(state{Data: data, Access: accessPath})
+	if r.ManagedNetworkState != "configured" || r.ManagedNetworkReason != "" || !r.CollabConfigured {
+		t.Fatalf("expected configured for IP+HTTP+managed ingress, got %+v", r)
+	}
+	if !strings.HasPrefix(r.DoctorLine(), "PASS 访问形态与可选能力") {
+		t.Fatalf("expected PASS DoctorLine for IP+HTTP+managed ingress, got %q", r.DoctorLine())
 	}
 }
 

@@ -206,8 +206,10 @@ ALTER DEFAULT PRIVILEGES FOR ROLE auriga_collab_owner IN SCHEMA collab GRANT USA
 }
 
 // An HTTP access baseline may be presented through an explicitly approved
-// HTTPS reverse proxy. The chosen network URL must also be in NAS's existing
-// installation-owned link-origin allowlist; it cannot come from request input.
+// HTTPS reverse proxy or the installation's dedicated internal TLS managed
+// ingress (https://<instanceControl.dnsAlias>:<dedicated-port>). The chosen
+// network URL must also be in NAS's existing installation-owned link-origin
+// allowlist; it cannot come from request input.
 func nasCollabOrigin(cfg deploymentconfig.Config, requested, allowed string) (string, error) {
 	if requested == "" {
 		requested = cfg.PortalURL()
@@ -216,14 +218,23 @@ func nasCollabOrigin(cfg deploymentconfig.Config, requested, allowed string) (st
 	if err != nil || u.Scheme != "https" || u.User != nil || u.Hostname() == "" || u.Path != "" || u.RawQuery != "" || u.ForceQuery || u.Fragment != "" || u.Opaque != "" || u.String() != requested || u.Host != strings.ToLower(u.Host) || strings.ContainsAny(requested, "\\\r\n\t ") {
 		return "", fmt.Errorf("collab requires an approved canonical HTTPS presentation origin")
 	}
+	var port int
 	if u.Port() != "" {
-		port, err := strconv.Atoi(u.Port())
-		if err != nil || port < 1 || port > 65535 {
+		port, err = strconv.Atoi(u.Port())
+		if err != nil || port < 1 || port > 65535 || strconv.Itoa(port) != u.Port() {
 			return "", fmt.Errorf("collab presentation port refused")
 		}
 	}
-	if requested == cfg.AdminURL() || u.Hostname() == cfg.InstanceControl().DnsAlias {
+	if requested == cfg.AdminURL() {
 		return "", fmt.Errorf("collab presentation origin is not a portal")
+	}
+	if u.Hostname() == cfg.InstanceControl().DnsAlias {
+		// Internal managed ingress reuses instanceControl.dnsAlias on a dedicated
+		// non-default HTTPS port distinct from portal/admin/instance-control listeners.
+		ls := cfg.Listeners()
+		if port == 0 || port == 443 || port == int(cfg.InstanceControl().Origin.Port) || port == int(ls.InstanceControl.Port) || port == int(ls.Portal.Port) || port == int(ls.Admin.Port) {
+			return "", fmt.Errorf("collab presentation origin is not a portal")
+		}
 	}
 	if parent := cfg.InstanceParentDomain(); parent != "" && (u.Hostname() == parent || strings.HasSuffix(u.Hostname(), "."+parent)) {
 		return "", fmt.Errorf("instance origins cannot present collab")
