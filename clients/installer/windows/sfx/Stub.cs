@@ -57,7 +57,33 @@ static class Setup
     public const string Publisher = "Auriga";
     public const string FolderName = "Auriga DSH";
     static readonly Regex SafeVersionId = new Regex("^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$");
+    const int StdOutputHandle = -11;
+    const int StdErrorHandle = -12;
     [DllImport("kernel32.dll")] static extern bool AttachConsole(int dwProcessId);
+    [DllImport("kernel32.dll")] static extern IntPtr GetStdHandle(int nStdHandle);
+    [DllImport("kernel32.dll")] static extern bool SetStdHandle(int nStdHandle, IntPtr hHandle);
+
+    static bool HasStdHandle(IntPtr handle)
+    {
+        return handle != IntPtr.Zero && handle != new IntPtr(-1);
+    }
+
+    static void AttachParentConsoleIfNeeded()
+    {
+        try
+        {
+            IntPtr origOut = GetStdHandle(StdOutputHandle);
+            IntPtr origErr = GetStdHandle(StdErrorHandle);
+            bool hasOut = HasStdHandle(origOut);
+            bool hasErr = HasStdHandle(origErr);
+            if (hasOut && hasErr) return;
+            if (!AttachConsole(-1)) return;
+            // Preserve whichever stream was explicitly redirected by the caller.
+            if (hasOut) SetStdHandle(StdOutputHandle, origOut);
+            if (hasErr) SetStdHandle(StdErrorHandle, origErr);
+        }
+        catch (Exception) { }
+    }
 
     [STAThread]
     static int Main(string[] args)
@@ -152,8 +178,7 @@ static class Setup
             Application.SetCompatibleTextRenderingDefault(false);
             using (var wizard = new Wizard()) { Application.Run(wizard); return wizard.ExitCode; }
         }
-        if (!Console.IsOutputRedirected && !Console.IsErrorRedirected)
-            try { AttachConsole(-1); } catch (Exception) { }
+        AttachParentConsoleIfNeeded();
         args = Array.FindAll(args, a =>
             !a.Equals("/VERYSILENT", StringComparison.OrdinalIgnoreCase) &&
             !a.Equals("/ELEVATED", StringComparison.OrdinalIgnoreCase) &&
@@ -672,6 +697,7 @@ sealed class Wizard : Form
         var table = new TableLayoutPanel
         {
             Dock = DockStyle.Fill,
+            AutoScroll = true,
             ColumnCount = 1,
             RowCount = controls.Length + 1,
             Padding = new Padding(24, 24, 24, 16),
