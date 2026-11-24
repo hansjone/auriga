@@ -408,7 +408,7 @@ sealed class Wizard : Form
 {
     const int W = 660, H = 470;
     const int SidebarW = 196;
-    const int HeaderH = 68;
+    const int HeaderH = 76;
     const int FooterH = 54;
 
     const int PageWelcome = 0;
@@ -437,9 +437,9 @@ sealed class Wizard : Form
     readonly Label sideDesc = new Label { Left = 28, Top = 176, Width = SidebarW - 44, Height = 140, ForeColor = Color.FromArgb(154, 174, 204), Font = new Font("Microsoft YaHei UI", 8.5f), Text = "桌面工作空间与插件运行时\n\n· 独立运行环境\n· 签名校验与安全更新\n· 原子安装与自动回滚" };
 
     readonly Panel header = new Panel { Left = 0, Top = 0, Width = W, Height = HeaderH, BackColor = Color.White };
-    readonly Label heading = new Label { Left = 24, Top = 12, Width = 540, Height = 26, Font = new Font("Microsoft YaHei UI", 11.5f, FontStyle.Bold), ForeColor = TitleText };
-    readonly Label subheading = new Label { Left = 26, Top = 39, Width = 540, Height = 22, ForeColor = MutedText };
-    readonly PictureBox logo = new PictureBox { Left = W - 64, Top = 14, Width = 40, Height = 40, SizeMode = PictureBoxSizeMode.Zoom, Anchor = AnchorStyles.Top | AnchorStyles.Right };
+    readonly Label heading = new Label { Left = 24, Top = 14, Width = 540, Height = 26, Font = new Font("Microsoft YaHei UI", 11.5f, FontStyle.Bold), ForeColor = TitleText };
+    readonly Label subheading = new Label { Left = 26, Top = 43, Width = 540, Height = 22, ForeColor = MutedText };
+    readonly PictureBox logo = new PictureBox { Left = W - 62, Top = 18, Width = 36, Height = 36, SizeMode = PictureBoxSizeMode.Zoom, Anchor = AnchorStyles.Top | AnchorStyles.Right };
     readonly Panel headerLine = new Panel { Left = 0, Top = HeaderH, Width = W, Height = 1, BackColor = BorderGray };
 
     // Keep `body` (full-width pages 1..5) and `sidebarBody` (sidebar pages 0, 6) separate
@@ -738,6 +738,7 @@ sealed class Wizard : Form
         int contentBottom = footerLine.Top;
         int sideLeft = sidebar.Right;
         sidebarBody.Bounds = new Rectangle(sideLeft, 0, Math.Max(0, ClientSize.Width - sideLeft), Math.Max(0, contentBottom));
+        headerLine.Top = header.Bottom;
         int fullTop = headerLine.Bottom;
         body.Bounds = new Rectangle(0, fullTop, ClientSize.Width, Math.Max(0, contentBottom - fullTop));
     }
@@ -934,44 +935,10 @@ sealed class Wizard : Form
             if (string.IsNullOrEmpty(driveRoot) || !Directory.Exists(driveRoot))
                 return Fail("目标驱动器不存在或不可访问，请检查路径是否正确。");
 
-            // Probe inside the target folder itself rather than dropping a loose file in a
-            // drive root (e.g. D:\): corporate NTFS policies often allow creating subfolders
-            // under D:\ while denying loose file creation at the drive root even for admins.
-            var createdDirs = new List<string>();
-            string probe = null;
-            try
-            {
-                if (!Directory.Exists(path))
-                {
-                    string cursor = path;
-                    while (!string.IsNullOrEmpty(cursor) && !Directory.Exists(cursor))
-                    {
-                        createdDirs.Add(cursor);
-                        string parent = Path.GetDirectoryName(cursor);
-                        if (string.IsNullOrEmpty(parent) || parent.Equals(cursor, StringComparison.OrdinalIgnoreCase)) break;
-                        cursor = parent;
-                    }
-                    Directory.CreateDirectory(path);
-                }
-                probe = Path.Combine(path, ".auriga-write-test-" + Guid.NewGuid().ToString("N"));
-                File.WriteAllText(probe, "");
-            }
-            finally
-            {
-                if (!string.IsNullOrEmpty(probe))
-                    try { if (File.Exists(probe)) File.Delete(probe); } catch (Exception) { }
-                // Clean up only the empty directories created solely for this probe (leaf-first).
-                foreach (string dir in createdDirs)
-                {
-                    try
-                    {
-                        if (Directory.Exists(dir) && Directory.GetFileSystemEntries(dir).Length == 0)
-                            Directory.Delete(dir, false);
-                    }
-                    catch (Exception) { }
-                }
-            }
-
+            // Do not write a synthetic dot-file probe from the unsigned setup stub:
+            // enterprise EDR / controlled-folder policies often block unsigned stubs from
+            // creating hidden dot-files on secondary drives while allowing the elevated
+            // install.ps1 (PowerShell + signed Node) transactional install to succeed.
             long needed = RequiredBytes();
             if (drive.AvailableFreeSpace < needed)
                 return Fail(string.Format("目标磁盘空间不足：至少需要 {0:0} MB 可用空间。", needed / 1048576.0));
@@ -979,8 +946,8 @@ sealed class Wizard : Form
         catch (UnauthorizedAccessException e)
         {
             return Fail(Setup.IsElevated()
-                ? "当前已以管理员身份运行，但仍无权写入目标位置：" + path + "\n\n可能受系统磁盘权限或终端安全策略限制（" + e.Message + "）。请检查目录权限或更换其他可写路径。"
-                : "没有足够权限写入目标位置：" + path + "\n\n请以管理员身份重新运行安装程序，或更换其他可写路径。");
+                ? "当前已以管理员身份运行，但无法访问目标位置：" + path + "\n\n（" + e.Message + "）请检查目录权限或更换其他路径。"
+                : "没有足够权限访问目标位置：" + path + "\n\n请以管理员身份重新运行安装程序，或更换其他路径。");
         }
         catch (Exception e) { return Fail("无法使用该安装位置：" + e.Message); }
 
