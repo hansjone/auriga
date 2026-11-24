@@ -76,11 +76,31 @@ static class SfxPaths
             ((TextBox)Field(wizard, "folder")).Text = root;
             var next = typeof(Wizard).GetMethod("Next", BindingFlags.Instance | BindingFlags.NonPublic);
             int peak = 0;
-            wizard.Shown += delegate { next.Invoke(wizard, null); next.Invoke(wizard, null); timer.Start(); };
+            wizard.Shown += delegate
+            {
+                // Welcome -> License
+                next.Invoke(wizard, null);
+                // License must block advancing until accepted
+                next.Invoke(wizard, null);
+                if ((int)Field(wizard, "page") != 1)
+                {
+                    Console.WriteLine("licenseGateFailed=True");
+                    wizard.ExitCode = 98;
+                    wizard.Close();
+                    return;
+                }
+                ((RadioButton)Field(wizard, "acceptLicense")).Checked = true;
+                // License -> Location -> Tasks -> Ready -> Progress
+                next.Invoke(wizard, null);
+                next.Invoke(wizard, null);
+                next.Invoke(wizard, null);
+                next.Invoke(wizard, null);
+                timer.Start();
+            };
             timer.Tick += delegate
             {
                 peak = Math.Max(peak, ((ProgressBar)Field(wizard, "bar")).Value);
-                if ((int)Field(wizard, "page") != 3) return;
+                if ((int)Field(wizard, "page") != 6) return;
                 Console.WriteLine("wizardExit=" + wizard.ExitCode + " progress=" + peak + " openLog=" + ((Control)Field(wizard, "openLog")).Visible + " finish=" + ((Label)Field(wizard, "finishText")).Text);
                 timer.Stop(); wizard.Close();
             };

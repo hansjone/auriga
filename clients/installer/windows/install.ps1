@@ -1,7 +1,8 @@
-﻿# Installs or upgrades Auriga Desktop from this package. Needs no administrator rights.
-# Defaults can also come from AURIGA_* environment variables (used by the single-file installer and tests).
+﻿# Installs or upgrades Auriga Desktop from this package.
+# Setup .exe runs elevated (requireAdministrator) by default so users can install to
+# Program Files or any local drive. Defaults can also come from AURIGA_* environment variables.
 param(
-  [string]$InstallDir = $(if ($env:AURIGA_INSTALL_DIR) { $env:AURIGA_INSTALL_DIR } else { Join-Path $env:LOCALAPPDATA 'Programs\AurigaDesktop' }),
+  [string]$InstallDir = $(if ($env:AURIGA_INSTALL_DIR) { $env:AURIGA_INSTALL_DIR } elseif ($env:ProgramFiles) { Join-Path $env:ProgramFiles 'Auriga DSH' } else { Join-Path $env:LOCALAPPDATA 'Programs\AurigaDesktop' }),
   [string]$DataHome = $(if ($env:AURIGA_DATA_HOME) { $env:AURIGA_DATA_HOME } else { Join-Path $env:LOCALAPPDATA 'AurigaDesktop\home' }),
   [string]$PlatformOrigin = $env:AURIGA_PLATFORM_ORIGIN,
   [string]$PlatformAccessMode,
@@ -11,6 +12,7 @@ param(
   [string]$RegistryKey = $(if ($env:AURIGA_REGISTRY_KEY) { $env:AURIGA_REGISTRY_KEY } else { 'AurigaDesktop' }),
   [switch]$NoDesktopShortcut,
   [switch]$NoShortcuts,
+  [switch]$Autostart,
   # Setup wizard: machine-readable steps on stdout, and cancellation by creating this file.
   [switch]$Progress,
   [string]$CancelFile
@@ -60,6 +62,25 @@ if ($ConfirmPlatformOrigin) { $argList += @('--confirm-platform-origin', $Confir
 & $node @argList
 if ($LASTEXITCODE -eq 2 -and $CancelFile) { exit 2 }
 if ($LASTEXITCODE -ne 0) { throw "install failed ($LASTEXITCODE)" }
+
+# When installed elevated (e.g. into Program Files or a restricted drive), grant the
+# installing user Modify rights on the install root so the standard-privilege tray can
+# persist settings, logs, and in-app updates. Inherited rules do not override the
+# protected read-only ACL on versions\<id>\runtime\python.
+try {
+  $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
+  $isAdmin = ([Security.Principal.WindowsPrincipal]::new($identity)).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+  if ($isAdmin -and (Test-Path -LiteralPath $InstallDir -PathType Container)) {
+    $acl = Get-Acl -LiteralPath $InstallDir
+    $inherit = [Security.AccessControl.InheritanceFlags]'ContainerInherit, ObjectInherit'
+    $propagate = [Security.AccessControl.PropagationFlags]::None
+    $rule = New-Object Security.AccessControl.FileSystemAccessRule($identity.User, 'Modify', $inherit, $propagate, 'Allow')
+    $acl.AddAccessRule($rule)
+    Set-Acl -LiteralPath $InstallDir -AclObject $acl
+  }
+} catch {
+  Write-Warning "Failed to grant user maintenance permissions on ${InstallDir}: $_"
+}
 
 # Shell integration (best effort: the installation itself already succeeded).
 try {
@@ -126,6 +147,11 @@ try {
     $values.NoModify = 1
     $values.NoRepair = 1
     Set-DesktopRegistration $RegistryKey $values
+    if ($Autostart) {
+      $runKey = [Microsoft.Win32.Registry]::CurrentUser.CreateSubKey('Software\Microsoft\Windows\CurrentVersion\Run')
+      try { $runKey.SetValue($RegistryKey, (Get-DesktopStartupCommand $InstallDir), [Microsoft.Win32.RegistryValueKind]::String) }
+      finally { $runKey.Dispose() }
+    }
   } finally {
     @{ shortcuts = $links; registryKey = $RegistryKey } | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $InstallDir 'shell.json') -Encoding UTF8
   }
