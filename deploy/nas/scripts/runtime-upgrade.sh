@@ -63,3 +63,4 @@ if shared_present; then
 fi
 trap - EXIT INT TERM
 info 'runtime activation committed; upgrade existing instances through the workspace API and verify them separately'
+info 'next step for existing instances: GET /api/workspace/v1/admin/instances to read each {id} and generation, then send PATCH /api/workspace/v1/admin/instances/{id} with Content-Type: application/merge-patch+json, If-Match: "<generation>", body {"dshVersionPin": null} (requires admin session with workspace.instances.admin; browser cookie writes also require matching Origin and X-Auriga-CSRF; 401 means session expired, 403 request/entry rejected usually means CSRF/Origin mismatch rather than missing permission). See deploy/nas/README.md and docs/dev/runtime-release.md.'

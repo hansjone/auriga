@@ -227,6 +227,45 @@ operator 审核的初始根通过既有 **CA SPKI pin + TLS 校验的首次 Join
 激活仍经过现有生产 S 的当前 key 检查、持久高水位、防回滚、intent 及真实 Engine 身份/启动闭窗。
 本工具的 sign/verify 成功不更新这些状态，也不承诺部署就绪或现场可用。
 
+## 运行时升级后切换已有实例
+
+执行 `deploy/nas/scripts/runtime-upgrade.sh` 成功 commit 后，仅更新了 `config/runtime-source/active.json` 与 `platform`/`agent` 消费的默认运行时模板；已有实例的持久化 `spec` 仍保留升级前的镜像 digest，不会自动切换。唯一受支持的在线切换入口是管理台 Workspace Admin API：
+
+1. **获取目标实例 `{id}` 与当前 `generation`**：
+   使用具备 `workspace.instances.read` 权限的管理台会话调用 `GET /api/workspace/v1/admin/instances`（支持 `ownerId`、`nodeId`、`phase`、`limit`、`cursor` 查询参数），从返回的 `items[]` 中读取每个实例的 `id` 与 `generation`；也可调用 `GET /api/workspace/v1/instances/{id}`（响应体包含 `generation`，响应头同时带 `ETag: "<generation>"`；注意该单实例接口要求实例主人或具备 `workspace.instances.admin` 权限的管理台会话，仅有 `workspace.instances.read` 会返回 `404`）。
+2. **发送 Merge Patch 重新解析默认运行时**：
+   使用具备 `workspace.instances.admin` 权限的管理台会话调用：
+
+   ```http
+   PATCH /api/workspace/v1/admin/instances/{id}
+   Content-Type: application/merge-patch+json
+   If-Match: "<generation>"
+
+   {"dshVersionPin": null}
+   ```
+
+   示例命令（浏览器管理台会话 Cookie 调用写接口时必须同时携带与管理台入口精确匹配的同源 `Origin` 头和当前会话的 `X-Auriga-CSRF` 头，域名模式下 Cookie Jar 中须包含对应的 `auriga_csrf` Cookie，否则会被 edge 拦截返回 `403 common.forbidden` / `entry rejected` 或 `request rejected`）：
+
+   ```sh
+   curl -fsS -X PATCH -b admin.cookies \
+     -H "Origin: https://<admin-origin>" \
+     -H "Content-Type: application/merge-patch+json" \
+     -H 'If-Match: "<generation>"' \
+     -H "X-Auriga-CSRF: <csrf-token>" \
+     -d '{"dshVersionPin": null}' \
+     "https://<admin-origin>/api/workspace/v1/admin/instances/<instance-id>"
+   ```
+
+   - `If-Match` 必须带双引号匹配当前 `generation`，否则返回 `412 common.precondition_failed`。
+   - 请求体中的 `{"dshVersionPin": null}` 会让服务端按当前生效的默认运行时模板重新解析 `spec.dsh` 与 `spec.network`、递增 `generation` 并立即向 agent 分发，触发 agent 重新执行 `Prepare → Ensure` 换用新镜像。
+3. **权限与 `401`/`403` 排障说明**：
+   - 该接口要求管理台上下文（`@AdminOnly`）及 `workspace.instances.admin` 权限。
+   - 会话过期或未登录时，edge 返回 `401 common.unauthenticated`，重新登录管理台即可。
+   - **遇到 `403 common.forbidden`（`request rejected` / `entry rejected`）时不要误判为单纯缺少权限**：写请求缺少/错配 `X-Auriga-CSRF`、沿用过期会话对应的旧 CSRF 令牌或域名模式下 `auriga_csrf` Cookie 失配时，edge 返回 `403 request rejected`（`common.forbidden`）；缺少或不匹配同源 `Origin`（或请求打到非管理台入口）时返回 `403 entry rejected`（`common.forbidden`）。优先核对请求入口、同源 `Origin` 与当前有效管理台会话的 `X-Auriga-CSRF` / Cookie（必要时重新登录管理台获取新会话与 CSRF 令牌）；确认无误后再核对管理台上下文（`@AdminOnly`）与 `workspace.instances.admin` 权限。
+4. **观察 `Prepare → Ensure` 与就绪验收**：
+   - 通过 `GET /api/workspace/v1/admin/instances`、`GET /api/workspace/v1/instances/{id}` 或 SSE `GET /api/workspace/v1/instances/{id}/events` 跟踪实例状态。若运行中实例标记了 `pendingRestart=true`，再经公开入口 `POST /api/workspace/v1/instances/{id}/restart`（或成员正常重开）完成重启。
+   - 确认同实例 `observedGeneration == generation`、`pendingRestart=false`、`phase="running"`、`ready=true`，并核对实际容器镜像/插件版本与网络 `READY`（如 `managedNetworkState="ready"`）。
+
 ## 已提交运行时中断后的离线恢复
 
 如果 agent 在启动或 Recover 过程中中断，持久 intent 会阻止后续启动并报
