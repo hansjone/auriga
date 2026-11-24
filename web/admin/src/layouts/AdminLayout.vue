@@ -21,7 +21,8 @@ function storedTheme(): string | null {
   }
 }
 const dark = ref(
-  (storedTheme() ?? document.documentElement.dataset.adminTheme) === 'dark',
+  (storedTheme() ?? document.documentElement.dataset.adminTheme ?? 'dark') !==
+    'light',
 );
 document.documentElement.dataset.adminTheme = dark.value ? 'dark' : 'light';
 const logoutError = ref('');
