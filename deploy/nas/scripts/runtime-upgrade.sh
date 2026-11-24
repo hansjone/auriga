@@ -63,3 +63,4 @@ if shared_present; then
 fi
 trap - EXIT INT TERM
 info 'runtime activation committed; upgrade existing instances through the workspace API and verify them separately'
+info 'next step for existing instances: GET /api/workspace/v1/admin/instances to read each {id} and generation, then send PATCH /api/workspace/v1/admin/instances/{id} with Content-Type: application/merge-patch+json, If-Match: "<generation>", body {"dshVersionPin": null} (requires admin session with workspace.instances.admin; if 403 request rejected / common.forbidden occurs, re-login and complete step-up). See deploy/nas/README.md and docs/dev/runtime-release.md.'
