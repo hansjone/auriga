@@ -63,11 +63,21 @@ public final class SharedDshEntryQueries implements SharedDshSessions {
               || !stored.getPhysicalInstanceId().equals(physicalInstance.toString())
               || !stored.getSessionId().equals(session.toString()))
             throw new AurigaException(CommonErrors.NOT_FOUND);
-          var current =
-              authority.resolve(
-                  UUID.fromString(stored.getMemberId()),
-                  UUID.fromString(stored.getPlacementId()),
-                  UUID.fromString(stored.getPlatformSessionId()));
+          SharedDshAuthority.Placement current;
+          try {
+            current =
+                authority.resolve(
+                    UUID.fromString(stored.getMemberId()),
+                    UUID.fromString(stored.getPlacementId()),
+                    UUID.fromString(stored.getPlatformSessionId()));
+          } catch (AurigaException ex) {
+            if (ex.errorCode().equals(CommonErrors.UNAUTHENTICATED)
+                || ex.errorCode().equals(CommonErrors.FORBIDDEN)
+                || ex.errorCode().code().equals("shared.revoked")) {
+              throw new AurigaException(CommonErrors.NOT_FOUND);
+            }
+            throw ex;
+          }
           var binding = current.binding();
           if (!current.state().equals("ready")
               || current.authGeneration() != stored.getAuthGeneration()
