@@ -62,11 +62,18 @@ func accessCapabilities(s state) accessCapabilitiesReport {
 		report.ManagedNetworkState = "unconfigured"
 		report.ManagedNetworkReason = "origin_not_https"
 	case managedOrigin == "":
-		report.ManagedNetworkState = "unconfigured"
-		if report.Mode == "ip" || report.PortalScheme == "http" {
-			report.ManagedNetworkReason = "access_mode_not_https_domain"
+		if report.PortalScheme == "https" && managedFilePresent {
+			report.ManagedNetworkState = "configured"
+			report.ManagedNetworkReason = ""
 		} else {
-			report.ManagedNetworkReason = "origin_empty"
+			report.ManagedNetworkState = "unconfigured"
+			if report.PortalScheme == "http" {
+				report.ManagedNetworkReason = "portal_http_no_managed_origin"
+			} else if report.PortalScheme == "https" {
+				report.ManagedNetworkReason = "collab_material_absent"
+			} else {
+				report.ManagedNetworkReason = "origin_empty"
+			}
 		}
 	case !managedFilePresent:
 		report.ManagedNetworkState = "unconfigured"
@@ -125,8 +132,8 @@ func (r accessCapabilitiesReport) reasonDescription() string {
 	switch r.ManagedNetworkReason {
 	case "":
 		return "已配置"
-	case "access_mode_not_https_domain":
-		return fmt.Sprintf("未配置：当前访问形态为 mode=%s/portal=%s，托管网络与 collab 默认要求 HTTPS 呈现入口，且 AURIGA_MANAGED_PLATFORM_ORIGIN 为空", r.Mode, r.PortalScheme)
+	case "portal_http_no_managed_origin":
+		return fmt.Sprintf("未配置：当前 portal 为 %s（mode=%s），且 AURIGA_MANAGED_PLATFORM_ORIGIN 为空；纯 IP 场景可采用 Direct HTTPS（IP SAN）或内部 TLS Managed Ingress 启用托管网络", r.PortalScheme, r.Mode)
 	case "origin_empty":
 		return "未配置：AURIGA_MANAGED_PLATFORM_ORIGIN 为空"
 	case "origin_not_https":
@@ -139,11 +146,8 @@ func (r accessCapabilitiesReport) reasonDescription() string {
 }
 
 func (r accessCapabilitiesReport) DoctorLine() string {
-	if r.Mode == "ip" || r.PortalScheme == "http" || len(r.DisabledCapabilities) > 0 {
-		disabled := "无"
-		if len(r.DisabledCapabilities) > 0 {
-			disabled = strings.Join(r.DisabledCapabilities, "、")
-		}
+	if len(r.DisabledCapabilities) > 0 {
+		disabled := strings.Join(r.DisabledCapabilities, "、")
 		return fmt.Sprintf(
 			"WARN 访问形态与可选能力 — mode=%s portal=%s，managedNetworkState=%s（%s）；未启用能力：%s（共享模式核心能力不依赖托管网络/HTTPS）",
 			r.Mode,
