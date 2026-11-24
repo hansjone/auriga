@@ -5,9 +5,12 @@ import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
 import auriga.common.error.AurigaException;
+import auriga.common.error.CommonErrors;
+import auriga.common.error.ErrorCode;
 import auriga.contracts.node.v1.*;
 import auriga.workspace.api.SharedDshAuthority;
 import auriga.workspace.persistence.WorkspaceStore;
+import io.grpc.Status;
 import java.util.*;
 import java.util.function.Supplier;
 import org.junit.jupiter.api.Test;
@@ -72,5 +75,19 @@ class SharedDshEntryQueriesTest {
     when(authority.resolve(member, placement, portal))
         .thenReturn(new SharedDshAuthority.Placement(binding, "ready", 2));
     assertThrows(AurigaException.class, () -> queries.lookup(pool, session));
+    for (var expired :
+        List.of(
+            CommonErrors.UNAUTHENTICATED,
+            CommonErrors.FORBIDDEN,
+            ErrorCode.of("shared.revoked", 403, Status.Code.PERMISSION_DENIED))) {
+      doThrow(new AurigaException(expired)).when(authority).resolve(member, placement, portal);
+      var thrown = assertThrows(AurigaException.class, () -> queries.lookup(pool, session));
+      assertEquals(CommonErrors.NOT_FOUND, thrown.errorCode());
+    }
+    doThrow(new AurigaException(CommonErrors.UNAVAILABLE))
+        .when(authority)
+        .resolve(member, placement, portal);
+    var unavailable = assertThrows(AurigaException.class, () -> queries.lookup(pool, session));
+    assertEquals(CommonErrors.UNAVAILABLE, unavailable.errorCode());
   }
 }
