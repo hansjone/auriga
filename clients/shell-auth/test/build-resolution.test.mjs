@@ -251,3 +251,86 @@ test('resolveViteCli resolves real vite binary and includes peer node_modules in
   );
   assert.equal(nodePaths.includes(realpathSync(pnpmViteNm)), true);
 });
+
+test('resolveViteCli skips root vite without rollup and selects web/node_modules/vite with rollup', (t) => {
+  const repo = makeTempDir(t, 'auriga-vite-rollup-web-');
+  writeFileSync(join(repo, 'package.json'), JSON.stringify({ name: 'root' }));
+  mkdirSync(join(repo, 'web', 'panel'), { recursive: true });
+  writeFileSync(
+    join(repo, 'web', 'panel', 'package.json'),
+    JSON.stringify({ name: 'panel' }),
+  );
+  // Root node_modules has vite but no rollup (matches lockfileDir: web layout).
+  writeFakePkg(
+    join(repo, 'node_modules', 'vite'),
+    'vite',
+    'bin/vite.js',
+    '// root vite\n',
+  );
+  // web/node_modules has both vite and rollup.
+  writeFakePkg(
+    join(repo, 'web', 'node_modules', 'vite'),
+    'vite',
+    'bin/vite.js',
+    '// web vite\n',
+  );
+  writeFakePkg(join(repo, 'web', 'node_modules', 'rollup'), 'rollup');
+
+  const { viteBin, nodePaths } = resolveViteCli(repo);
+  assert.equal(
+    viteBin,
+    realpathSync(join(repo, 'web', 'node_modules', 'vite', 'bin', 'vite.js')),
+  );
+  assert.equal(
+    nodePaths.includes(realpathSync(join(repo, 'web', 'node_modules'))),
+    true,
+  );
+});
+
+test('resolveViteCli falls back to .pnpm vite with rollup and retains first candidate when none resolve rollup', (t) => {
+  const repo = makeTempDir(t, 'auriga-vite-rollup-pnpm-');
+  writeFileSync(join(repo, 'package.json'), JSON.stringify({ name: 'root' }));
+  writeFakePkg(
+    join(repo, 'node_modules', 'vite'),
+    'vite',
+    'bin/vite.js',
+    '// root vite\n',
+  );
+  const pnpmViteNm = join(
+    repo,
+    'web',
+    'node_modules',
+    '.pnpm',
+    'vite@7.3.1',
+    'node_modules',
+  );
+  writeFakePkg(
+    join(pnpmViteNm, 'vite'),
+    'vite',
+    'bin/vite.js',
+    '// pnpm vite\n',
+  );
+  writeFakePkg(join(pnpmViteNm, 'rollup'), 'rollup');
+
+  assert.equal(
+    resolveViteCli(repo).viteBin,
+    realpathSync(join(pnpmViteNm, 'vite', 'bin', 'vite.js')),
+  );
+
+  // When no candidate can resolve rollup, keep the first vite candidate as fallback.
+  const repoFallback = makeTempDir(t, 'auriga-vite-rollup-fallback-');
+  writeFileSync(
+    join(repoFallback, 'package.json'),
+    JSON.stringify({ name: 'root' }),
+  );
+  writeFakePkg(
+    join(repoFallback, 'node_modules', 'vite'),
+    'vite',
+    'bin/vite.js',
+    '// root vite\n',
+  );
+  assert.equal(
+    resolveViteCli(repoFallback).viteBin,
+    realpathSync(join(repoFallback, 'node_modules', 'vite', 'bin', 'vite.js')),
+  );
+});
