@@ -57,8 +57,33 @@ static class Setup
     public const string Publisher = "Auriga";
     public const string FolderName = "Auriga DSH";
     static readonly Regex SafeVersionId = new Regex("^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$");
-    [DllImport("kernel32.dll")] static extern IntPtr GetConsoleWindow();
-    [DllImport("user32.dll")] static extern bool ShowWindow(IntPtr window, int command);
+    const int StdOutputHandle = -11;
+    const int StdErrorHandle = -12;
+    [DllImport("kernel32.dll")] static extern bool AttachConsole(int dwProcessId);
+    [DllImport("kernel32.dll")] static extern IntPtr GetStdHandle(int nStdHandle);
+    [DllImport("kernel32.dll")] static extern bool SetStdHandle(int nStdHandle, IntPtr hHandle);
+
+    static bool HasStdHandle(IntPtr handle)
+    {
+        return handle != IntPtr.Zero && handle != new IntPtr(-1);
+    }
+
+    static void AttachParentConsoleIfNeeded()
+    {
+        try
+        {
+            IntPtr origOut = GetStdHandle(StdOutputHandle);
+            IntPtr origErr = GetStdHandle(StdErrorHandle);
+            bool hasOut = HasStdHandle(origOut);
+            bool hasErr = HasStdHandle(origErr);
+            if (hasOut && hasErr) return;
+            if (!AttachConsole(-1)) return;
+            // Preserve whichever stream was explicitly redirected by the caller.
+            if (hasOut) SetStdHandle(StdOutputHandle, origOut);
+            if (hasErr) SetStdHandle(StdErrorHandle, origErr);
+        }
+        catch (Exception) { }
+    }
 
     [STAThread]
     static int Main(string[] args)
@@ -106,17 +131,58 @@ static class Setup
         return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "AurigaDesktop", "home");
     }
 
+    static int RelaunchElevated(string[] args)
+    {
+        try
+        {
+            string exe = Assembly.GetExecutingAssembly().Location;
+            var forwarded = new List<string>();
+            foreach (string a in args) forwarded.Add(Quote(a));
+            forwarded.Add("/ELEVATED");
+            var info = new ProcessStartInfo(exe, string.Join(" ", forwarded.ToArray()))
+            {
+                UseShellExecute = true,
+                Verb = "runas",
+            };
+            using (var p = Process.Start(info))
+            {
+                if (p == null) return 1;
+                p.WaitForExit();
+                return p.ExitCode;
+            }
+        }
+        catch (System.ComponentModel.Win32Exception e)
+        {
+            // ERROR_CANCELLED (1223): user declined the UAC prompt.
+            if (e.NativeErrorCode == 1223) return 2;
+            MessageBox.Show("无法请求管理员权限：" + e.Message, Brand, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return 1;
+        }
+        catch (Exception e)
+        {
+            MessageBox.Show("无法请求管理员权限：" + e.Message, Brand, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return 1;
+        }
+    }
+
     static int Start(string[] args)
     {
         bool silent = Array.Exists(args, a => a.Equals("/VERYSILENT", StringComparison.OrdinalIgnoreCase));
         if (!silent)
         {
-            ShowWindow(GetConsoleWindow(), 0);
+            bool triedElevate = Array.Exists(args, a => a.Equals("/ELEVATED", StringComparison.OrdinalIgnoreCase));
+            bool noElevate = Array.Exists(args, a => a.Equals("/NOELEVATE", StringComparison.OrdinalIgnoreCase));
+            if (!IsElevated() && !triedElevate && !noElevate)
+                return RelaunchElevated(args);
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
             using (var wizard = new Wizard()) { Application.Run(wizard); return wizard.ExitCode; }
         }
-        args = Array.FindAll(args, a => !a.Equals("/VERYSILENT", StringComparison.OrdinalIgnoreCase));
+        AttachParentConsoleIfNeeded();
+        args = Array.FindAll(args, a =>
+            !a.Equals("/VERYSILENT", StringComparison.OrdinalIgnoreCase) &&
+            !a.Equals("/ELEVATED", StringComparison.OrdinalIgnoreCase) &&
+            !a.Equals("/NOELEVATE", StringComparison.OrdinalIgnoreCase));
         return Install(args);
     }
 
@@ -373,10 +439,13 @@ sealed class Wizard : Form
     readonly Panel header = new Panel { Left = 0, Top = 0, Width = W, Height = HeaderH, BackColor = Color.White };
     readonly Label heading = new Label { Left = 24, Top = 12, Width = 540, Height = 26, Font = new Font("Microsoft YaHei UI", 11.5f, FontStyle.Bold), ForeColor = TitleText };
     readonly Label subheading = new Label { Left = 26, Top = 39, Width = 540, Height = 22, ForeColor = MutedText };
-    readonly PictureBox logo = new PictureBox { Left = W - 68, Top = 12, Width = 44, Height = 44, SizeMode = PictureBoxSizeMode.Zoom };
+    readonly PictureBox logo = new PictureBox { Left = W - 64, Top = 14, Width = 40, Height = 40, SizeMode = PictureBoxSizeMode.Zoom, Anchor = AnchorStyles.Top | AnchorStyles.Right };
     readonly Panel headerLine = new Panel { Left = 0, Top = HeaderH, Width = W, Height = 1, BackColor = BorderGray };
 
+    // Keep `body` (full-width pages 1..5) and `sidebarBody` (sidebar pages 0, 6) separate
+    // so switching between sidebar and full-width pages never resizes hidden panels' Anchors.
     readonly Panel body = new Panel { Left = 0, Top = HeaderH + 1, Width = W, Height = H - HeaderH - 1 - FooterH, BackColor = SystemColors.Control };
+    readonly Panel sidebarBody = new Panel { Left = SidebarW, Top = 0, Width = W - SidebarW, Height = H - FooterH, BackColor = Color.White, Visible = false };
 
     readonly Panel footerLine = new Panel { Left = 0, Top = H - FooterH, Width = W, Height = 1, BackColor = BorderGray };
     readonly Panel footerPanel = new Panel { Left = 0, Top = H - FooterH + 1, Width = W, Height = FooterH - 1, BackColor = FooterBg };
@@ -389,10 +458,11 @@ sealed class Wizard : Form
     // WinForms AutoScaleMode.Dpi scales every page's controls consistently at 125%/150%/200% DPI.
     readonly Panel[] pagePanels = new Panel[7];
 
-    // Welcome controls
-    readonly Label welcomeTitle = new Label { Left = 24, Top = 28, Width = W - SidebarW - 48, Height = 36, Font = new Font("Microsoft YaHei UI", 14, FontStyle.Bold), ForeColor = TitleText };
-    readonly Label welcomeIntro = new Label { Left = 24, Top = 74, Width = W - SidebarW - 48, Height = 148, ForeColor = BodyText };
-    readonly Label welcomeHint = new Label { Left = 24, Top = 246, Width = W - SidebarW - 48, Height = 72, ForeColor = MutedText };
+    // Welcome controls (hosted in a single-column auto-sizing TableLayoutPanel so text
+    // wraps cleanly to the live panel width and never clips or overlaps at any DPI)
+    readonly Label welcomeTitle = new Label { AutoSize = true, Dock = DockStyle.Fill, Margin = new Padding(0, 0, 0, 14), Font = new Font("Microsoft YaHei UI", 14, FontStyle.Bold), ForeColor = TitleText };
+    readonly Label welcomeIntro = new Label { AutoSize = true, Dock = DockStyle.Fill, Margin = new Padding(0, 0, 0, 18), ForeColor = BodyText };
+    readonly Label welcomeHint = new Label { AutoSize = true, Dock = DockStyle.Fill, Margin = new Padding(0, 0, 0, 0), ForeColor = MutedText };
 
     // License controls
     readonly TextBox licenseBox = new TextBox
@@ -400,53 +470,56 @@ sealed class Wizard : Form
         Left = 28, Top = 16, Width = W - 56, Height = 224,
         Multiline = true, ReadOnly = true, ScrollBars = ScrollBars.Vertical,
         BackColor = Color.White, BorderStyle = BorderStyle.FixedSingle,
-        Font = new Font("Microsoft YaHei UI", 9), TabStop = false
+        Font = new Font("Microsoft YaHei UI", 9), TabStop = false,
+        Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right | AnchorStyles.Bottom
     };
-    readonly RadioButton acceptLicense = new RadioButton { Left = 28, Top = 252, Width = 580, Height = 28, Text = "我已阅读并同意上述许可协议与使用声明(&A)" };
-    readonly RadioButton declineLicense = new RadioButton { Left = 28, Top = 284, Width = 580, Height = 28, Text = "我不同意此协议(&D)", Checked = true };
+    readonly RadioButton acceptLicense = new RadioButton { Left = 28, Top = 252, Width = W - 56, Height = 28, Text = "我已阅读并同意上述许可协议与使用声明(&A)", Anchor = AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right };
+    readonly RadioButton declineLicense = new RadioButton { Left = 28, Top = 284, Width = W - 56, Height = 28, Text = "我不同意此协议(&D)", Checked = true, Anchor = AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right };
 
     // Location controls (keep field name `folder` for test harness compatibility)
-    readonly Label locationPrompt = new Label { Left = 28, Top = 26, Width = W - 56, Height = 26, ForeColor = TitleText };
-    readonly TextBox folder = new TextBox { Left = 28, Top = 60, Width = 492, Height = 24 };
-    readonly Button browse = new Button { Text = "浏览(&R)…", Left = 530, Top = 58, Width = 102, Height = 28, FlatStyle = FlatStyle.System };
-    readonly Label spaceInfo = new Label { Left = 28, Top = 102, Width = 604, Height = 48, ForeColor = MutedText };
-    readonly Label dataHomeInfo = new Label { Left = 28, Top = 166, Width = 604, Height = 68, ForeColor = MutedText };
+    readonly Label locationPrompt = new Label { Left = 28, Top = 24, Width = W - 56, Height = 28, ForeColor = TitleText, Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right };
+    readonly TextBox folder = new TextBox { Left = 28, Top = 58, Width = 492, Height = 24, Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right };
+    readonly Button browse = new Button { Text = "浏览(&R)…", Left = 530, Top = 56, Width = 102, Height = 28, FlatStyle = FlatStyle.System, Anchor = AnchorStyles.Top | AnchorStyles.Right };
+    readonly Label spaceInfo = new Label { Left = 28, Top = 98, Width = W - 56, Height = 56, ForeColor = MutedText, Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right };
+    readonly Label dataHomeInfo = new Label { Left = 28, Top = 164, Width = W - 56, Height = 84, ForeColor = MutedText, Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right };
 
     // Tasks controls
-    readonly Label tasksShortcutHeading = new Label { Left = 28, Top = 26, Width = 560, Height = 24, Font = new Font("Microsoft YaHei UI", 9, FontStyle.Bold), ForeColor = TitleText, Text = "快捷方式：" };
-    readonly CheckBox desktopLink = new CheckBox { Left = 44, Top = 58, Width = 560, Height = 28, Text = "创建桌面快捷方式(&D)", Checked = true };
-    readonly CheckBox startMenuLink = new CheckBox { Left = 44, Top = 92, Width = 560, Height = 28, Text = "创建开始菜单快捷方式及卸载入口（默认启用）", Checked = true, Enabled = false };
-    readonly Label tasksStartupHeading = new Label { Left = 28, Top = 136, Width = 560, Height = 24, Font = new Font("Microsoft YaHei UI", 9, FontStyle.Bold), ForeColor = TitleText, Text = "启动选项：" };
-    readonly CheckBox autostartBox = new CheckBox { Left = 44, Top = 168, Width = 560, Height = 28, Text = "开机时自动启动 " + Setup.Brand + "(&S)" };
-    readonly Label tasksHint = new Label { Left = 28, Top = 216, Width = 580, Height = 26, ForeColor = MutedText, Text = "以上选项在安装完成后均可随时通过系统托盘菜单调整。" };
+    readonly Label tasksShortcutHeading = new Label { Left = 28, Top = 26, Width = W - 56, Height = 24, Font = new Font("Microsoft YaHei UI", 9, FontStyle.Bold), ForeColor = TitleText, Text = "快捷方式：", Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right };
+    readonly CheckBox desktopLink = new CheckBox { Left = 44, Top = 58, Width = W - 72, Height = 28, Text = "创建桌面快捷方式(&D)", Checked = true, Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right };
+    readonly CheckBox startMenuLink = new CheckBox { Left = 44, Top = 92, Width = W - 72, Height = 28, Text = "创建开始菜单快捷方式及卸载入口（默认启用）", Checked = true, Enabled = false, Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right };
+    readonly Label tasksStartupHeading = new Label { Left = 28, Top = 136, Width = W - 56, Height = 24, Font = new Font("Microsoft YaHei UI", 9, FontStyle.Bold), ForeColor = TitleText, Text = "启动选项：", Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right };
+    readonly CheckBox autostartBox = new CheckBox { Left = 44, Top = 168, Width = W - 72, Height = 28, Text = "开机时自动启动 " + Setup.Brand + "(&S)", Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right };
+    readonly Label tasksHint = new Label { Left = 28, Top = 216, Width = W - 56, Height = 36, ForeColor = MutedText, Text = "以上选项在安装完成后均可随时通过系统托盘菜单调整。", Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right };
 
     // Ready summary controls
-    readonly Label readyPrompt = new Label { Left = 28, Top = 18, Width = W - 56, Height = 26, ForeColor = TitleText };
+    readonly Label readyPrompt = new Label { Left = 28, Top = 18, Width = W - 56, Height = 26, ForeColor = TitleText, Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right };
     readonly TextBox summaryBox = new TextBox
     {
-        Left = 28, Top = 50, Width = W - 56, Height = 236,
+        Left = 28, Top = 50, Width = W - 56, Height = 244,
         Multiline = true, ReadOnly = true, ScrollBars = ScrollBars.Vertical,
         BackColor = Color.White, BorderStyle = BorderStyle.FixedSingle,
-        Font = new Font("Microsoft YaHei UI", 9), TabStop = false
+        Font = new Font("Microsoft YaHei UI", 9), TabStop = false,
+        Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right | AnchorStyles.Bottom
     };
 
     // Progress controls (keep field names `bar` for test harness compatibility)
-    readonly Label stepLabel = new Label { Left = 28, Top = 24, Width = W - 56, Height = 26, Font = new Font("Microsoft YaHei UI", 9.5f, FontStyle.Bold) };
-    readonly ProgressBar bar = new ProgressBar { Left = 28, Top = 56, Width = W - 56, Height = 22, Maximum = 1000 };
-    readonly Label percentLabel = new Label { Left = 28, Top = 86, Width = W - 56, Height = 22, ForeColor = MutedText };
+    readonly Label stepLabel = new Label { Left = 28, Top = 24, Width = W - 56, Height = 26, Font = new Font("Microsoft YaHei UI", 9.5f, FontStyle.Bold), Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right };
+    readonly ProgressBar bar = new ProgressBar { Left = 28, Top = 56, Width = W - 56, Height = 22, Maximum = 1000, Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right };
+    readonly Label percentLabel = new Label { Left = 28, Top = 86, Width = W - 56, Height = 22, ForeColor = MutedText, Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right };
     readonly TextBox progressDetail = new TextBox
     {
         Left = 28, Top = 118, Width = W - 56, Height = 196,
         Multiline = true, ReadOnly = true, ScrollBars = ScrollBars.Vertical,
         BackColor = Color.White, BorderStyle = BorderStyle.FixedSingle,
-        Font = new Font("Consolas", 8.5f), TabStop = false
+        Font = new Font("Consolas", 8.5f), TabStop = false,
+        Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right | AnchorStyles.Bottom
     };
 
     // Finish controls (keep field names `finishText`, `openLog` for test harness compatibility)
-    readonly Label finishTitle = new Label { Left = 24, Top = 26, Width = W - SidebarW - 44, Height = 36, Font = new Font("Microsoft YaHei UI", 14, FontStyle.Bold), ForeColor = TitleText };
-    readonly Label finishText = new Label { Left = 24, Top = 72, Width = W - SidebarW - 44, Height = 152, ForeColor = BodyText };
-    readonly CheckBox launch = new CheckBox { Left = 24, Top = 236, Width = W - SidebarW - 44, Height = 28, Text = "立即启动 " + Setup.Brand + "(&L)", Checked = true };
-    readonly LinkLabel openLog = new LinkLabel { Left = 24, Top = 236, Width = W - SidebarW - 44, Height = 26, Text = "打开安装日志", Visible = false };
+    readonly Label finishTitle = new Label { AutoSize = true, Dock = DockStyle.Fill, Margin = new Padding(0, 0, 0, 14), Font = new Font("Microsoft YaHei UI", 14, FontStyle.Bold), ForeColor = TitleText };
+    readonly Label finishText = new Label { AutoSize = true, Dock = DockStyle.Fill, Margin = new Padding(0, 0, 0, 16), ForeColor = BodyText };
+    readonly CheckBox launch = new CheckBox { AutoSize = true, Margin = new Padding(0, 0, 0, 8), Text = "立即启动 " + Setup.Brand + "(&L)", Checked = true };
+    readonly LinkLabel openLog = new LinkLabel { AutoSize = true, Margin = new Padding(0, 0, 0, 8), Text = "打开安装日志", Visible = false };
 
     readonly object logLock = new object();
     int page;
@@ -490,20 +563,22 @@ sealed class Wizard : Form
             bool withSidebar = i == PageWelcome || i == PageFinish;
             pagePanels[i] = new Panel
             {
+                Size = withSidebar ? new Size(W - SidebarW, H - FooterH) : new Size(W, H - HeaderH - 1 - FooterH),
                 Dock = DockStyle.Fill,
                 BackColor = withSidebar ? Color.White : SystemColors.Control,
                 Visible = false
             };
         }
 
-        pagePanels[PageWelcome].Controls.AddRange(new Control[] { welcomeTitle, welcomeIntro, welcomeHint });
+        pagePanels[PageWelcome].Controls.Add(MakeVerticalStack(welcomeTitle, welcomeIntro, welcomeHint));
         pagePanels[PageLicense].Controls.AddRange(new Control[] { licenseBox, acceptLicense, declineLicense });
         pagePanels[PageLocation].Controls.AddRange(new Control[] { locationPrompt, folder, browse, spaceInfo, dataHomeInfo });
         pagePanels[PageTasks].Controls.AddRange(new Control[] { tasksShortcutHeading, desktopLink, startMenuLink, tasksStartupHeading, autostartBox, tasksHint });
         pagePanels[PageReady].Controls.AddRange(new Control[] { readyPrompt, summaryBox });
         pagePanels[PageProgress].Controls.AddRange(new Control[] { stepLabel, bar, percentLabel, progressDetail });
-        pagePanels[PageFinish].Controls.AddRange(new Control[] { finishTitle, finishText, openLog, launch });
-        body.Controls.AddRange(pagePanels);
+        pagePanels[PageFinish].Controls.Add(MakeVerticalStack(finishTitle, finishText, openLog, launch));
+        sidebarBody.Controls.AddRange(new Control[] { pagePanels[PageWelcome], pagePanels[PageFinish] });
+        body.Controls.AddRange(new Control[] { pagePanels[PageLicense], pagePanels[PageLocation], pagePanels[PageTasks], pagePanels[PageReady], pagePanels[PageProgress] });
 
         back.Click += delegate { if (page > PageWelcome && page <= PageReady) Show(page - 1); };
         next.Click += delegate { Next(); };
@@ -538,7 +613,7 @@ sealed class Wizard : Form
             }
         };
 
-        Controls.AddRange(new Control[] { sidebar, header, headerLine, body, footerLine, footerPanel });
+        Controls.AddRange(new Control[] { sidebar, sidebarBody, header, headerLine, body, footerLine, footerPanel });
         AcceptButton = next;
         CancelButton = cancel;
         FormClosing += delegate (object s, FormClosingEventArgs e) { if (installing) { e.Cancel = true; Cancel(); } };
@@ -617,27 +692,54 @@ sealed class Wizard : Form
         catch (Exception) { }
     }
 
+    static TableLayoutPanel MakeVerticalStack(params Control[] controls)
+    {
+        var table = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            AutoScroll = true,
+            ColumnCount = 1,
+            RowCount = controls.Length + 1,
+            Padding = new Padding(24, 24, 24, 16),
+            BackColor = Color.White
+        };
+        table.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
+        for (int i = 0; i < controls.Length; i++)
+        {
+            table.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            table.Controls.Add(controls[i], 0, i);
+        }
+        table.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
+        return table;
+    }
+
+    protected override void OnLoad(EventArgs e)
+    {
+        base.OnLoad(e);
+        ApplyChrome(page == PageWelcome || page == PageFinish);
+    }
+
+    protected override void OnResize(EventArgs e)
+    {
+        base.OnResize(e);
+        if (IsHandleCreated) ApplyChrome(page == PageWelcome || page == PageFinish);
+    }
+
     void Header(string title, string sub) { heading.Text = title; subheading.Text = sub; }
 
     void ApplyChrome(bool useSidebar)
     {
         sidebar.Visible = useSidebar;
+        sidebarBody.Visible = useSidebar;
         header.Visible = !useSidebar;
         headerLine.Visible = !useSidebar;
-        // Derive `body` bounds from live scaled chrome controls so 125%/150%/200% DPI never clips.
+        body.Visible = !useSidebar;
+        // Derive bounds from live scaled chrome controls so 125%/150%/200% DPI never clips.
         int contentBottom = footerLine.Top;
-        if (useSidebar)
-        {
-            int left = sidebar.Right;
-            body.Bounds = new Rectangle(left, 0, Math.Max(0, ClientSize.Width - left), Math.Max(0, contentBottom));
-            body.BackColor = Color.White;
-        }
-        else
-        {
-            int top = headerLine.Bottom;
-            body.Bounds = new Rectangle(0, top, ClientSize.Width, Math.Max(0, contentBottom - top));
-            body.BackColor = SystemColors.Control;
-        }
+        int sideLeft = sidebar.Right;
+        sidebarBody.Bounds = new Rectangle(sideLeft, 0, Math.Max(0, ClientSize.Width - sideLeft), Math.Max(0, contentBottom));
+        int fullTop = headerLine.Bottom;
+        body.Bounds = new Rectangle(0, fullTop, ClientSize.Width, Math.Max(0, contentBottom - fullTop));
     }
 
     long RequiredBytes()
@@ -828,21 +930,57 @@ sealed class Wizard : Form
             if (Directory.Exists(path) && Directory.GetFileSystemEntries(path).Length > 0 && !File.Exists(Path.Combine(path, ".auriga-desktop-install")))
                 return Fail("该文件夹不是空的，也不是 " + Setup.Brand + " 的安装位置。请选择空文件夹或新文件夹。");
 
-            string probeDir = path;
-            while (!string.IsNullOrEmpty(probeDir) && !Directory.Exists(probeDir))
-                probeDir = Path.GetDirectoryName(probeDir);
-            if (string.IsNullOrEmpty(probeDir)) return Fail("目标驱动器不存在或不可访问，请检查路径是否正确。");
-            string probe = Path.Combine(probeDir, ".auriga-write-test-" + Guid.NewGuid().ToString("N"));
-            File.WriteAllText(probe, "");
-            File.Delete(probe);
+            string driveRoot = Path.GetPathRoot(path);
+            if (string.IsNullOrEmpty(driveRoot) || !Directory.Exists(driveRoot))
+                return Fail("目标驱动器不存在或不可访问，请检查路径是否正确。");
+
+            // Probe inside the target folder itself rather than dropping a loose file in a
+            // drive root (e.g. D:\): corporate NTFS policies often allow creating subfolders
+            // under D:\ while denying loose file creation at the drive root even for admins.
+            var createdDirs = new List<string>();
+            string probe = null;
+            try
+            {
+                if (!Directory.Exists(path))
+                {
+                    string cursor = path;
+                    while (!string.IsNullOrEmpty(cursor) && !Directory.Exists(cursor))
+                    {
+                        createdDirs.Add(cursor);
+                        string parent = Path.GetDirectoryName(cursor);
+                        if (string.IsNullOrEmpty(parent) || parent.Equals(cursor, StringComparison.OrdinalIgnoreCase)) break;
+                        cursor = parent;
+                    }
+                    Directory.CreateDirectory(path);
+                }
+                probe = Path.Combine(path, ".auriga-write-test-" + Guid.NewGuid().ToString("N"));
+                File.WriteAllText(probe, "");
+            }
+            finally
+            {
+                if (!string.IsNullOrEmpty(probe))
+                    try { if (File.Exists(probe)) File.Delete(probe); } catch (Exception) { }
+                // Clean up only the empty directories created solely for this probe (leaf-first).
+                foreach (string dir in createdDirs)
+                {
+                    try
+                    {
+                        if (Directory.Exists(dir) && Directory.GetFileSystemEntries(dir).Length == 0)
+                            Directory.Delete(dir, false);
+                    }
+                    catch (Exception) { }
+                }
+            }
 
             long needed = RequiredBytes();
             if (drive.AvailableFreeSpace < needed)
                 return Fail(string.Format("目标磁盘空间不足：至少需要 {0:0} MB 可用空间。", needed / 1048576.0));
         }
-        catch (UnauthorizedAccessException)
+        catch (UnauthorizedAccessException e)
         {
-            return Fail("没有足够权限写入目标位置：" + path + "\n\n请右键点击安装程序并选择“以管理员身份运行”，或更换其他可写路径。");
+            return Fail(Setup.IsElevated()
+                ? "当前已以管理员身份运行，但仍无权写入目标位置：" + path + "\n\n可能受系统磁盘权限或终端安全策略限制（" + e.Message + "）。请检查目录权限或更换其他可写路径。"
+                : "没有足够权限写入目标位置：" + path + "\n\n请以管理员身份重新运行安装程序，或更换其他可写路径。");
         }
         catch (Exception e) { return Fail("无法使用该安装位置：" + e.Message); }
 

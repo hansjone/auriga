@@ -119,30 +119,49 @@ static class SfxPaths
             wizard.Scale(new System.Drawing.SizeF(1.5f, 1.5f));
             var show = typeof(Wizard).GetMethod("Show", BindingFlags.Instance | BindingFlags.NonPublic);
             var sidebar = (Control)Field(wizard, "sidebar");
+            var header = (Control)Field(wizard, "header");
             var headerLine = (Control)Field(wizard, "headerLine");
+            var logo = (Control)Field(wizard, "logo");
             var footerLine = (Control)Field(wizard, "footerLine");
             var body = (Control)Field(wizard, "body");
+            var sidebarBody = (Control)Field(wizard, "sidebarBody");
             var folder = (Control)Field(wizard, "folder");
-            if (folder.Width < 600) { Console.WriteLine("unscaledFolderWidth=" + folder.Width); return 1; }
+            var browse = (Control)Field(wizard, "browse");
+            if (logo.Bottom > header.Height) { Console.WriteLine("logoClipped logoBottom=" + logo.Bottom + " headerHeight=" + header.Height); return 5; }
+            show.Invoke(wizard, new object[] { 0 });
+            wizard.PerformLayout();
+            var welcomeIntro = (Control)Field(wizard, "welcomeIntro");
+            var welcomeHint = (Control)Field(wizard, "welcomeHint");
+            if (welcomeIntro.Right > sidebarBody.ClientSize.Width) { Console.WriteLine("welcomeClipped right=" + welcomeIntro.Right + " bodyW=" + sidebarBody.ClientSize.Width); return 6; }
+            if (welcomeHint.Top < welcomeIntro.Bottom) { Console.WriteLine("welcomeOverlap hintTop=" + welcomeHint.Top + " introBottom=" + welcomeIntro.Bottom); return 7; }
             for (int p = 0; p <= 6; p++)
             {
                 show.Invoke(wizard, new object[] { p });
+                wizard.PerformLayout();
                 bool withSidebar = (p == 0 || p == 6);
-                if (withSidebar && body.Left < sidebar.Right)
+                Control active = withSidebar ? sidebarBody : body;
+                if (withSidebar && active.Left < sidebar.Right)
                 {
-                    Console.WriteLine("sidebarOverlap page=" + p + " bodyLeft=" + body.Left + " sidebarRight=" + sidebar.Right);
+                    Console.WriteLine("sidebarOverlap page=" + p + " bodyLeft=" + active.Left + " sidebarRight=" + sidebar.Right);
                     return 2;
                 }
-                if (!withSidebar && body.Top < headerLine.Bottom)
+                if (!withSidebar && active.Top < headerLine.Bottom)
                 {
-                    Console.WriteLine("headerOverlap page=" + p + " bodyTop=" + body.Top + " headerBottom=" + headerLine.Bottom);
+                    Console.WriteLine("headerOverlap page=" + p + " bodyTop=" + active.Top + " headerBottom=" + headerLine.Bottom);
                     return 3;
                 }
-                if (body.Bottom > footerLine.Top)
+                if (active.Bottom > footerLine.Top)
                 {
-                    Console.WriteLine("footerOverlap page=" + p + " bodyBottom=" + body.Bottom + " footerTop=" + footerLine.Top);
+                    Console.WriteLine("footerOverlap page=" + p + " bodyBottom=" + active.Bottom + " footerTop=" + footerLine.Top);
                     return 4;
                 }
+            }
+            show.Invoke(wizard, new object[] { 2 });
+            wizard.PerformLayout();
+            if (folder.Width < 650 || folder.Width > 820 || folder.Right >= browse.Left || browse.Right > body.ClientSize.Width)
+            {
+                Console.WriteLine("badLocationLayout folderW=" + folder.Width + " folderR=" + folder.Right + " browseL=" + browse.Left + " browseR=" + browse.Right + " bodyW=" + body.ClientSize.Width);
+                return 8;
             }
             Console.WriteLine("hidpi=OK folderWidth=" + folder.Width + " sidebarRight=" + sidebar.Right + " headerBottom=" + headerLine.Bottom);
             return 0;

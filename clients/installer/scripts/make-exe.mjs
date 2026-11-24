@@ -44,7 +44,7 @@ export function compileStub(output, icon, options = {}) {
     [
       '/nologo',
       '/codepage:65001',
-      '/target:exe',
+      '/target:winexe',
       '/optimize+',
       '/r:System.Windows.Forms.dll',
       '/r:System.Drawing.dll',
