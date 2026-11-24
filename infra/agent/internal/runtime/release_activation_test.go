@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -55,6 +56,7 @@ type releaseEngine struct {
 	stopUnknown bool
 	stops       int
 	healthy     atomic.Bool
+	onHealth    func()
 
 	beforeInspect func(string) error
 	memoryStats   map[string]any
@@ -88,6 +90,12 @@ func newReleaseEngine(t *testing.T) (*releaseEngine, *runtime.Docker, *dockerRel
 				http.NotFound(w, r)
 			}
 			return
+		}
+		e.mu.Lock()
+		onHealth := e.onHealth
+		e.mu.Unlock()
+		if onHealth != nil {
+			onHealth()
 		}
 		if e.healthy.Load() {
 			_, _ = io.WriteString(w, readyBody)
@@ -1435,5 +1443,241 @@ func TestReleaseRestartPreparesPendingGenerationAfterDurableStop(t *testing.T) {
 				t.Fatal("completed replay rebuilt or restarted runtime")
 			}
 		})
+	}
+}
+
+func TestReleaseHealthWaitClearsIntentBeforeReadyAndSurvivesCrash(t *testing.T) {
+	t.Run("health-timeout-clears-intent-and-withholds-endpoint", func(t *testing.T) {
+		e, d, f := newReleaseEngine(t)
+		e.healthy.Store(false)
+		s := releaseSpec(f, "health-timeout-recovery", 7)
+		var healthChecked atomic.Bool
+		var checkErr atomic.Value
+		e.mu.Lock()
+		e.onHealth = func() {
+			if healthChecked.Swap(true) {
+				return
+			}
+			// During the health wait itself, release_intent_v1 must already be
+			// cleared while the endpoint remains unpublished (not Ready).
+			rec, err := f.store.GetExecution(s.InstanceId)
+			if err != nil || rec == nil {
+				checkErr.Store(fmt.Errorf("missing execution record during health wait: %v (%v)", rec, err))
+				return
+			}
+			if err := f.store.CheckReleaseExecution(rec.Candidate); err != nil {
+				checkErr.Store(fmt.Errorf("release_intent_v1 remained persisted during health wait: %v", err))
+				return
+			}
+			if ep, err := d.Endpoint(s.InstanceId); err == nil || ep.URL != "" {
+				checkErr.Store(fmt.Errorf("unhealthy instance published ingress endpoint: %+v (%v)", ep, err))
+				return
+			}
+			if st, err := d.Inspect(context.Background(), s.InstanceId); err != nil || st.Ready {
+				checkErr.Store(fmt.Errorf("unhealthy instance reported Ready or failed Inspect: %+v (%v)", st, err))
+				return
+			}
+		}
+		e.mu.Unlock()
+
+		home, meta := t.TempDir(), t.TempDir()
+		err := d.Activation.Activate(context.Background(), s, func(ctx context.Context) error {
+			if err := d.Ensure(ctx, &runtime.Spec{Full: s, InstanceID: s.InstanceId, Generation: 1, Image: s.Dsh.Image, HostUID: 200001, HomeBind: home, MetaBind: meta}, nil); err != nil {
+				return err
+			}
+			phase, cancel := context.WithTimeout(ctx, 150*time.Millisecond)
+			defer cancel()
+			return d.Start(phase, s.InstanceId)
+		})
+		if err == nil || !strings.Contains(err.Error(), "health not ready") || !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("expected health not ready deadline error, got: %v", err)
+		}
+		if errors.Is(err, state.ErrReleaseUnresolved) {
+			t.Fatalf("health timeout produced unresolved release error: %v", err)
+		}
+		if !healthChecked.Load() {
+			t.Fatal("health probe never ran")
+		}
+		if v := checkErr.Load(); v != nil {
+			t.Fatal(v.(error))
+		}
+		if ep, err := d.Endpoint(s.InstanceId); err == nil || ep.URL != "" {
+			t.Fatalf("failed health start published endpoint: %+v (%v)", ep, err)
+		}
+
+		// Simulate agent restart by reopening state.db and creating a fresh Docker driver.
+		if err := f.store.Close(); err != nil {
+			t.Fatal(err)
+		}
+		reopened, err := state.Open(f.dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = reopened.Close() })
+		fresh := runtime.NewDockerWithClient(d.Client, "")
+		fresh.Policy = d.Policy
+		fresh.Activation = &runtime.ReleaseActivation{Store: reopened, ProofsDir: f.proofs, Policy: func() policy.Policy { return fresh.Policy }}
+
+		st, err := fresh.Inspect(context.Background(), s.InstanceId)
+		if err != nil || !st.Running || st.Ready {
+			t.Fatalf("post-restart Inspect after health timeout failed: %+v (%v)", st, err)
+		}
+		e.healthy.Store(true)
+		if err := fresh.Activation.Recover(context.Background(), s.InstanceId, 1, func(ctx context.Context) error {
+			return fresh.Start(ctx, s.InstanceId)
+		}); err != nil {
+			t.Fatalf("post-restart Recover/Start failed after health timeout: %v", err)
+		}
+		if ep, err := fresh.Endpoint(s.InstanceId); err != nil || ep.URL == "" {
+			t.Fatalf("recovered healthy instance did not publish endpoint: %+v (%v)", ep, err)
+		}
+	})
+
+	t.Run("process-kill-during-health-wait-leaves-no-intent", func(t *testing.T) {
+		e, d, f := newReleaseEngine(t)
+		e.healthy.Store(false)
+		inHealth := make(chan struct{})
+		var once sync.Once
+		e.mu.Lock()
+		e.onHealth = func() { once.Do(func() { close(inHealth) }) }
+		e.mu.Unlock()
+		s := releaseSpec(f, "health-crash-recovery", 7)
+		if err := f.store.Close(); err != nil {
+			t.Fatal(err)
+		}
+		raw, err := proto.Marshal(s)
+		if err != nil {
+			t.Fatal(err)
+		}
+		exe, err := os.Executable()
+		if err != nil {
+			t.Fatal(err)
+		}
+		cmd := exec.Command(exe, "-test.run=^TestReleaseSubprocessHelper$", "-test.timeout=30s")
+		cmd.Env = append(os.Environ(), "AURIGA_RT2R_CHILD=1", "AURIGA_RT2R_DIR="+f.dir, "AURIGA_RT2R_ENGINE="+d.Client.BaseURL, "AURIGA_RT2R_SPEC="+base64.RawStdEncoding.EncodeToString(raw))
+		var output bytes.Buffer
+		cmd.Stdout = &output
+		cmd.Stderr = &output
+		if err := cmd.Start(); err != nil {
+			t.Fatal(err)
+		}
+		waited := false
+		defer func() {
+			if !waited {
+				_ = cmd.Process.Kill()
+				_ = cmd.Wait()
+			}
+		}()
+		select {
+		case <-inHealth:
+		case <-time.After(10 * time.Second):
+			t.Fatalf("child did not reach health wait; output=%s", output.String())
+		}
+		if err := cmd.Process.Kill(); err != nil {
+			t.Fatal(err)
+		}
+		_ = cmd.Wait()
+		waited = true
+
+		reopened, err := state.Open(f.dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = reopened.Close() })
+		fresh := runtime.NewDockerWithClient(d.Client, "")
+		fresh.Policy = d.Policy
+		fresh.Activation = &runtime.ReleaseActivation{Store: reopened, ProofsDir: f.proofs, Policy: func() policy.Policy { return fresh.Policy }}
+
+		rec, err := reopened.GetExecution(s.InstanceId)
+		if err != nil || rec == nil {
+			t.Fatalf("missing execution record after health-wait kill: %v (%v)", rec, err)
+		}
+		if err := reopened.CheckReleaseExecution(rec.Candidate); err != nil {
+			t.Fatalf("kill during health wait left stale release_intent_v1: %v", err)
+		}
+		st, err := fresh.Inspect(context.Background(), s.InstanceId)
+		if err != nil || !st.Running || st.Ready {
+			t.Fatalf("Inspect after health-wait kill failed: %+v (%v)", st, err)
+		}
+		e.healthy.Store(true)
+		if err := fresh.Activation.Recover(context.Background(), s.InstanceId, 1, func(ctx context.Context) error {
+			return fresh.Start(ctx, s.InstanceId)
+		}); err != nil {
+			t.Fatalf("Recover after health-wait kill failed: %v", err)
+		}
+	})
+}
+
+func TestReleaseUnresolvedIntentDiagnosticsInReconciler(t *testing.T) {
+	e, d, f := newReleaseEngine(t)
+	s := releaseSpec(f, "unresolved-diag", 7)
+	home, meta := t.TempDir(), t.TempDir()
+	// Start once cleanly so an ExecutionRecord exists, then simulate an uncertain
+	// Engine mutation that leaves release_intent_v1 persisted in state.db.
+	if err := executeRelease(context.Background(), d, s, home, meta); err != nil {
+		t.Fatal(err)
+	}
+	recExec, err := f.store.GetExecution(s.InstanceId)
+	if err != nil || recExec == nil {
+		t.Fatal(recExec, err)
+	}
+	if err := f.store.PutDesired(s); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.store.WithReleaseExecution(context.Background(), recExec.Candidate, func(context.Context) error { return nil }, func(_ context.Context, exec *state.ReleaseExecution) error {
+		finish, err := exec.BeginAction()
+		if err == nil {
+			finish(false)
+		}
+		return err
+	}); !errors.Is(err, state.ErrReleaseUnresolved) {
+		t.Fatalf("expected unresolved intent setup error, got: %v", err)
+	}
+	_ = e
+
+	var logs bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&logs, nil))
+	driver := &configuredReleaseDriver{Docker: d, home: home, meta: meta}
+	rec := reconciler.New(f.store, driver, logger, 1)
+	defer rec.Close()
+	statuses := make(chan *nodev1.InstanceStatus, 16)
+	rec.Sink = func(st *nodev1.InstanceStatus) { statuses <- st }
+	if err := rec.ReconcileAll(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	var failed *nodev1.InstanceStatus
+	timer := time.NewTimer(5 * time.Second)
+	defer timer.Stop()
+	for failed == nil {
+		select {
+		case st := <-statuses:
+			if st.Phase == nodev1.InstancePhase_INSTANCE_PHASE_FAILED {
+				failed = st
+			}
+		case <-timer.C:
+			t.Fatal("reconciler did not emit failed status for unresolved intent")
+		}
+	}
+	if failed.Ready || failed.GetError() == nil {
+		t.Fatalf("unexpected failed status: %v", failed)
+	}
+	if failed.GetError().GetRetryable() {
+		t.Fatalf("unresolved release intent should not be marked retryable: %v", failed.GetError())
+	}
+	msg := failed.GetError().GetMessage()
+	for _, want := range []string{"unresolved release execution", state.ErrReleaseUnresolved.Error(), "auriga-agent recover-runtime --data-root", "--instance " + s.InstanceId, "--stopped-agent"} {
+		if !strings.Contains(msg, want) {
+			t.Fatalf("status error missing %q: %s", want, msg)
+		}
+	}
+	logOut := logs.String()
+	for _, want := range []string{"unresolved_release_execution", "auriga-agent recover-runtime"} {
+		if !strings.Contains(logOut, want) {
+			t.Fatalf("reconciler logs missing %q: %s", want, logOut)
+		}
+	}
+	// Intent must remain fail-closed in state.db.
+	if err := f.store.CheckReleaseExecution(recExec.Candidate); !errors.Is(err, state.ErrReleaseUnresolved) {
+		t.Fatalf("reconciler cleared unresolved release intent: %v", err)
 	}
 }

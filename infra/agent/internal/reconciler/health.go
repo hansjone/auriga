@@ -3,6 +3,7 @@ package reconciler
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"time"
 
 	"github.com/hansjone/auriga/infra/agent/internal/runtime"
@@ -249,6 +250,9 @@ func (r *Reconciler) handleHealth(id string, parent context.Context, epoch uint6
 	}
 	if checkErr != nil {
 		telemetry.Failed(ctx, checkErr)
+		if errors.Is(checkErr, state.ErrReleaseUnresolved) {
+			telemetry.Log(ctx, slog.LevelWarn, "runtime health check blocked by unresolved release execution", "reason", "unresolved_release_execution", "error", telemetry.Mask(formatRecoveryFailure(id, "runtime health check failed", checkErr)))
+		}
 	}
 	r.mu.Lock()
 	if r.closed || epoch != r.healthEpochs[id] || ctx.Err() != nil {
