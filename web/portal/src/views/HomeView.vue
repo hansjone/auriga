@@ -21,10 +21,18 @@ import DesktopDownload from '../components/DesktopDownload.vue';
 import { portalMessages } from '../portal-messages';
 
 const { t, locale } = useI18n();
-const { t: portalT } = useI18n({ useScope: 'local', messages: portalMessages });
-const { t: placementT } = useI18n({
+const { t: portalT } = useI18n({
   useScope: 'local',
-  messages: placementMessages,
+  messages: {
+    'zh-CN': {
+      ...portalMessages['zh-CN'],
+      backToShared: placementMessages['zh-CN'].backToShared,
+    },
+    en: {
+      ...portalMessages.en,
+      backToShared: placementMessages.en.backToShared,
+    },
+  },
 });
 const me = ref<Me | null>(null);
 const sharedPlacementEnabled = readPlacementConfig().sharedPlacementEnabled;
@@ -137,7 +145,7 @@ async function logout() {
             text
             data-testid="back-to-shared"
             @click="personalFallback = false"
-            >{{ placementT('backToShared') }}</ElButton
+            >{{ portalT('backToShared') }}</ElButton
           >
         </template>
       </template>
