@@ -23,6 +23,7 @@ const { t, locale } = useI18n();
 const { t: portalT } = useI18n({ useScope: 'local', messages: portalMessages });
 const me = ref<Me | null>(null);
 const sharedPlacementEnabled = readPlacementConfig().sharedPlacementEnabled;
+const personalFallback = ref(false);
 const loginInfo = ref<Me['uacLoginInfo']>();
 const department = computed(() => loginInfoText(loginInfo.value, locale.value));
 let infoMonitor: ReturnType<typeof watchLoginInfo> | undefined;
@@ -120,8 +121,22 @@ async function logout() {
         {{ department }}
       </p>
       <template v-if="me">
-        <PlacementEntry v-if="sharedPlacementEnabled" />
-        <InstanceCard v-else />
+        <PlacementEntry
+          v-if="sharedPlacementEnabled && !personalFallback"
+          @fallback="personalFallback = true"
+        />
+        <template v-else>
+          <InstanceCard />
+          <ElButton
+            v-if="sharedPlacementEnabled"
+            text
+            data-testid="back-to-shared"
+            @click="personalFallback = false"
+            >{{
+              locale === 'en' ? 'Back to shared entry' : '返回共享入口'
+            }}</ElButton
+          >
+        </template>
       </template>
       <DesktopDownload v-if="me" />
       <p v-if="loadError" role="alert">{{ t('errors.unknown') }}</p>

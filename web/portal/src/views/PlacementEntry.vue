@@ -11,6 +11,7 @@ import {
   placementRequestKey,
   type Placement,
 } from './placement-api';
+const emit = defineEmits<{ fallback: [] }>();
 const { t, locale } = useI18n({
   useScope: 'local',
   messages: placementMessages,
@@ -109,7 +110,19 @@ onBeforeUnmount(() => {
       <ElButton :disabled="busy || expired" @click="run()">{{
         t('refresh')
       }}</ElButton>
+      <ElButton
+        v-if="!expired && ((placement && placement.state !== 'ready') || error)"
+        data-testid="fallback-personal"
+        @click="emit('fallback')"
+        >{{ t('fallbackAction') }}</ElButton
+      >
     </div>
+    <p
+      v-if="!expired && ((placement && placement.state !== 'ready') || error)"
+      role="status"
+    >
+      {{ t('fallbackHint') }}
+    </p>
     <p v-if="placement?.state === 'ready'" class="market">
       <a href="/resources">{{ t('market') }}</a>
     </p>

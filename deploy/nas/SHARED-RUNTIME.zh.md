@@ -17,7 +17,7 @@
    常驻 Edge NKey 不授予任何 STREAM.CREATE/UPDATE：同名 stream 的管理请求仍能在 JSON 中配置 Sources/Mirror，按请求 subject 限制到一个桶并不能隔离其他桶内容。桶须在受控安装阶段预建，Edge 只绑定已有桶，缺失时明确要求完成公开 shared-replay-prepare 安装步骤；该公开命令与标准启用链仍由安装闭包批接通，未完成前不能启用入口。绑定时核原始完整 StreamInfo，要求固定名称/唯一固定 KV subject、无 Sources/Mirror/subject transform/republish、文件存储、单份历史与复制，以及至少12小时或无限保留；不能仅凭同名 stream 或裁剪过的 KeyValueConfig 接受。旧密码用户及W仅读权限不增加。票据仍只用桶内 Create 的原子“仅首次成功”语义及 Get，不能让 Edge 自行创建或修改 stream 配置。
 4. 将 [Agent 公开样例](shared-runtime-agent.example.json) 与既有 node enrollment 配置合并，安装到 `config/materials/shared-runtime/agent.json`；将 [服务样例](shared-runtime-services.example.json) 填为部署 tenant、真实固定 origins 和各 CA 的绝对路径。服务 token 文件只给 Agent，Unix 0600；各 CA/公开配置禁止组/其他人写入。已 enroll 的 `agent/node.crt`、私钥和 CA 沿既有存储加载，不重新生成身份。
 5. 将批准的完整 `InstanceSpec`（`dsh` 内有原签名发行信封）装入 `runtime.json`，原始 M/C 证明装入 `runtime-proofs`。运行时必须导出 `auriga-dsh/shared-ports`；`profile.yml` 使用[冻结的完整 60 行 shared 配方](shared-runtime-profile.example.yml)，包含 57 个 rc.3 公开 SDK 根和 ports、Host、browser 三个 Auriga 角色。Node 逐行核完整集合、唯一标识及精确 config，拒绝部分配方、额外字段、嵌套插件、任意导入和可执行 YAML。禁止凭空填写发行摘要、跳过发行校验或临时挂可变 ports 模块。Agent 渲染 launcher 并启动唯一常驻 Host，不手工另起第二个 DSH。
-6. Resource 复用既有 `agent/resource-trust.json` 的 `schemaVersion:1,origin,keys`、Node 客户端证书和 CA。origin 指向 Resource 直接 HTTPS 服务。每成员的 signed ref 仅直接 GET `/internal/resource/v1/catalog/downloads/<lease>/manifest` 和 `/artifacts/<artifactId>`；不再配置 `sharedResources`，不使用旧 POST 或成员 API。release/revocation/downgrade 用途公钥必须独立，沿原安装信任包与轮换流程更新。
+6. Resource 复用既有 `agent/resource-trust.json` 的 `schemaVersion:1,origin,keys`（其中 `keys[].publicKey` 为 32 字节原始 Ed25519 公钥的 base64，并包含 `notBefore`/`notAfter` 有效窗）、Node 客户端证书和 CA。`auriga install` 及共享投影（`shared-install.sh` / `render.sh`）会在 `<DATA>/resource-keys/resource-roots.json` 存在时自动将其投影到 `<DATA>/data/agent/agent/resource-trust.json`（默认 `origin=https://platform:18081`）；`preflight.sh` 会在共享模式下校验该文件存在且非空。origin 指向 Resource 直接 HTTPS 服务。每成员的 signed ref 仅直接 GET `/internal/resource/v1/catalog/downloads/<lease>/manifest` 和 `/artifacts/<artifactId>`；不再配置 `sharedResources`，不使用旧 POST 或成员 API。release/revocation/downgrade 用途公钥必须独立，沿原安装信任包与轮换流程更新。
 7. 用原批准 Edge identity、IAM 三用途公开 JWKS 和企业公开策略渲染 Host 公开配置。`message-trust.json` 只含批准的 `{realm,roots:[{kid,public_key_spki}]}`，SPKI 为 Ed25519 DER 的无 padding base64url；不能从 context 回包复制任意公钥为根：
 
 ```sh
@@ -41,7 +41,7 @@ docker compose -f deploy/nas/docker-compose.yml -f deploy/nas/shared-runtime-com
 docker compose -f deploy/nas/docker-compose.yml -f deploy/nas/shared-runtime-compose.yml up -d agent
 ```
 
-入口最终为 `auriga-agent run --data-root /var/lib/auriga --config /etc/auriga/shared-runtime/agent.json`。服务端 NodeControl mTLS Welcome 提供可信时间；认证、资源签名/撤销、真实字节、完整成员视图、配额和签名发行全部确认后才发 READY。主干的同执行分区 intent、高水位、实际执行身份围栏保留；未决 Engine 动作不因取消或重连被当成排空。
+入口最终为 `auriga-agent run --data-root /var/lib/auriga --config /etc/auriga/shared-runtime/agent.json`。服务端 NodeControl mTLS Welcome 提供可信时间，且在向 Node 下发每条非 `stop-pool` 的 `SharedDshRuntimeIntent`（包括首轮 `prepare-empty`）前必先下发与该 binding 一致的权威 `SharedDshResourceView`（含空资源快照）；认证、资源签名/撤销、真实字节、完整成员视图、配额和签名发行全部确认后才发 READY。主干的同执行分区 intent、高水位、实际执行身份围栏保留；未决 Engine 动作不因取消或重连被当成排空。
 
 ## Linux/NAS 存储与进程边界
 

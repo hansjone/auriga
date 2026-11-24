@@ -217,6 +217,9 @@ func projectSharedInstallation(base string, receipt *sharedInstallationReceipt, 
 			return "", err
 		}
 	}
+	if err := ensureSharedAgentResourceTrust(data); err != nil {
+		return "", err
+	}
 	if fresh, err := verifyNASCollabBase(base); err != nil || fresh != receipt.Base {
 		return "", fmt.Errorf("sealed base changed during shared projection")
 	}

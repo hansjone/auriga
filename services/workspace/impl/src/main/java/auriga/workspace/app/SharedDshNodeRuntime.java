@@ -142,6 +142,19 @@ public final class SharedDshNodeRuntime {
         List.copyOf(views), rows.size() < 100 ? null : (UUID) rows.getLast().get("id"));
   }
 
+  /** Authoritative view for one owned placement so prepare-empty never outruns its snapshot. */
+  public Optional<SharedDshResourceView> view(UUID node, SharedDshBinding binding) {
+    if (!binding.getTenantId().equals(store.tenant().toString())) return Optional.empty();
+    var owner = owners(UUID.fromString(binding.getPhysicalInstanceId()));
+    if (owner.size() != 1 || !node.equals(owner.getFirst().get("node_id"))) return Optional.empty();
+    try {
+      return Optional.of(placements.resourceView(binding));
+    } catch (auriga.common.error.AurigaException e) {
+      if (e.errorCode() == auriga.common.error.CommonErrors.NOT_FOUND) return Optional.empty();
+      throw e;
+    }
+  }
+
   private void requireOwner(UUID node, SharedDshBinding binding) {
     var rows = owners(UUID.fromString(binding.getPhysicalInstanceId()));
     if (!binding.getTenantId().equals(store.tenant().toString())

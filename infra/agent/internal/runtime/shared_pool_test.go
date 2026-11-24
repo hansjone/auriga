@@ -373,3 +373,31 @@ func TestSharedPoolAdmissionBudget(t *testing.T) {
 		t.Fatal("80 percent")
 	}
 }
+
+func TestSharedPoolSupersedesSameOperationOnMonotonicGenerationAndRejectsTamper(t *testing.T) {
+	m, _, _ := newPoolTest(t)
+	ctx := context.Background()
+	first := poolIntent("prepare-empty", "placement-alice", "alice")
+	if r := applyPool(t, m, first); r.Outcome != "confirmed" {
+		t.Fatalf("initial prepare-empty failed: %v", r)
+	}
+	// Monotonic epoch/revision advancement for the same placement/member supersedes the prior generation.
+	next := proto.Clone(first).(*nodev1.SharedDshRuntimeIntent)
+	next.Binding.Epoch = 2
+	next.Binding.Revision = 2
+	if r, err := m.Apply(ctx, next); err != nil || r.Outcome != "confirmed" {
+		t.Fatalf("expected monotonic generation retry to succeed, got receipt=%v err=%v", r, err)
+	}
+	// Stale revision rollback on the same operation key must be rejected.
+	stale := proto.Clone(first).(*nodev1.SharedDshRuntimeIntent)
+	if _, err := m.Apply(ctx, stale); err == nil {
+		t.Fatal("expected stale generation to be rejected")
+	}
+	// Cross-member tamper on the same operation key must still be rejected.
+	tamper := proto.Clone(next).(*nodev1.SharedDshRuntimeIntent)
+	tamper.Binding.MemberId = poolID("bob")
+	tamper.Binding.Revision = 3
+	if _, err := m.Apply(ctx, tamper); err == nil {
+		t.Fatal("expected cross-member operation reuse to be rejected")
+	}
+}

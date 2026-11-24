@@ -161,8 +161,11 @@ func (m *PersistentPools) snapshot(pool string) ([]*nodev1.SharedDshBinding, []*
 	views := make([]*nodev1.SharedDshResourceView, len(bindings))
 	for i, binding := range bindings {
 		view := m.views[binding.PlacementId]
-		if view == nil || !proto.Equal(view.Binding, binding) {
-			return nil, nil, fmt.Errorf("fresh complete platform resource snapshot required")
+		if view == nil {
+			return nil, nil, fmt.Errorf("fresh complete platform resource snapshot required (missing view for placement %s; cached=%d expected=%d)", binding.PlacementId, len(m.views), len(bindings))
+		}
+		if !proto.Equal(view.Binding, binding) {
+			return nil, nil, fmt.Errorf("fresh complete platform resource snapshot required (binding mismatch for placement %s: view epoch=%d rev=%d pool epoch=%d rev=%d)", binding.PlacementId, view.Binding.GetEpoch(), view.Binding.GetRevision(), binding.GetEpoch(), binding.GetRevision())
 		}
 		views[i] = view
 	}

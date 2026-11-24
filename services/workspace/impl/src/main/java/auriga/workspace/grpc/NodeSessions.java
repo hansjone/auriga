@@ -630,9 +630,28 @@ public final class NodeSessions implements AutoCloseable {
                     sharedCursor = batch.next();
                     var views = sharedRuntime.views(node, sharedViewCursor);
                     sharedViewCursor = views.next();
-                    for (var view : views.views())
+                    var emittedViews = new HashSet<String>();
+                    for (var view : views.views()) {
+                      emittedViews.add(view.getBinding().getPlacementId());
                       frames.add(
                           SessionResponse.newBuilder().setSharedDshResourceView(view).build());
+                    }
+                    // Ensure an authoritative resource view precedes every non-stop intent even
+                    // when the paginated views cursor has moved past this placement.
+                    for (var delivery : batch.deliveries()) {
+                      var intent = delivery.intent();
+                      if (!intent.getAction().equals("stop-pool")
+                          && emittedViews.add(intent.getBinding().getPlacementId())) {
+                        sharedRuntime
+                            .view(node, intent.getBinding())
+                            .ifPresent(
+                                view ->
+                                    frames.add(
+                                        SessionResponse.newBuilder()
+                                            .setSharedDshResourceView(view)
+                                            .build()));
+                      }
+                    }
                     for (var delivery : batch.deliveries()) {
                       // Bound each stream's correlation state. Evicted commands remain in the
                       // durable outbox and are retried on the next scan or reconnect.

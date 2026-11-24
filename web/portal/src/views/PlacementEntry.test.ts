@@ -71,3 +71,21 @@ it('rejects unknown mode rather than showing a dedicated entry', async () => {
   expect(openButton(view).attributes('disabled')).toBeDefined();
   view.unmount();
 });
+it('emits personal fallback when placement is pending and hides it when ready', async () => {
+  api.get.mockResolvedValue({ mode: 'shared', state: 'pending' });
+  const pendingView = setup();
+  await flushPromises();
+  const btn = pendingView.find('[data-testid="fallback-personal"]');
+  expect(btn.exists()).toBe(true);
+  await btn.trigger('click');
+  expect(pendingView.emitted('fallback')).toHaveLength(1);
+  pendingView.unmount();
+
+  api.get.mockResolvedValue({ mode: 'shared', state: 'ready' });
+  const readyView = setup();
+  await flushPromises();
+  expect(readyView.find('[data-testid="fallback-personal"]').exists()).toBe(
+    false,
+  );
+  readyView.unmount();
+});
