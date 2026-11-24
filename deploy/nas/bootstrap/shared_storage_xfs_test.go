@@ -55,18 +55,79 @@ func TestNormalizeSharedStorageSpec(t *testing.T) {
 		"xfs-relative":      {"xfs", "relative/pools", "", 0, 0},
 		"xfs-dotdot":        {"xfs", "/srv/auriga/../pools", "", 0, 0},
 		"xfs-trailing-slash": {"xfs", "/srv/auriga/pools/", "", 0, 0},
-		"xfs-space":         {"xfs", "/srv/auriga/my pools", "", 0, 0},
-		"xfs-comma":         {"xfs", "/srv/auriga/pools,bad", "", 0, 0},
-		"xfs-bad-binary":    {"xfs", "/srv/auriga/pools", "xfs_quota", 0, 0},
-		"only-first":        {"xfs", "/srv/auriga/pools", "", 10000, 0},
-		"only-last":         {"xfs", "/srv/auriga/pools", "", 0, 199999},
-		"reversed-range":    {"xfs", "/srv/auriga/pools", "", 20000, 10000},
+		"xfs-space":          {"xfs", "/srv/auriga/my pools", "", 0, 0},
+		"xfs-comma":          {"xfs", "/srv/auriga/pools,bad", "", 0, 0},
+		"xfs-nul":            {"xfs", "/srv/auriga/pools\x00bad", "", 0, 0},
+		"xfs-vtab":           {"xfs", "/srv/auriga/pools\vbad", "", 0, 0},
+		"xfs-formfeed":       {"xfs", "/srv/auriga/pools\fbad", "", 0, 0},
+		"xfs-hash":           {"xfs", "/srv/auriga/pools#1", "", 0, 0},
+		"xfs-semicolon":      {"xfs", "/srv/auriga/pools;id", "", 0, 0},
+		"xfs-dollar":         {"xfs", "/srv/auriga/$pools", "", 0, 0},
+		"xfs-non-ascii":      {"xfs", "/srv/auriga/共享池", "", 0, 0},
+		"xfs-bad-binary":     {"xfs", "/srv/auriga/pools", "xfs_quota", 0, 0},
+		"xfs-binary-hash":    {"xfs", "/srv/auriga/pools", "/usr/sbin/xfs#quota", 0, 0},
+		"only-first":         {"xfs", "/srv/auriga/pools", "", 10000, 0},
+		"only-last":          {"xfs", "/srv/auriga/pools", "", 0, 199999},
+		"reversed-range":     {"xfs", "/srv/auriga/pools", "", 20000, 10000},
 	} {
 		t.Run(name, func(t *testing.T) {
 			if _, err := normalizeSharedStorageSpec(tc.backend, tc.mount, tc.bin, tc.first, tc.last); err == nil {
 				t.Fatalf("expected %s to fail", name)
 			}
 		})
+	}
+
+	// Stored receipts must be strictly canonical.
+	for name, bad := range map[string]sharedInstallationReceipt{
+		"noncanonical-ext4-backend": {Version: 1, StorageBackend: "ext4-image"},
+		"xfs-missing-binary":        {Version: 1, StorageBackend: "xfs", QuotaMount: "/srv/auriga/auriga-data/data/agent/pools"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			r := bad
+			if _, err := sharedStorageSpecFromReceipt(&r); err == nil {
+				t.Fatalf("expected stored receipt %s to fail", name)
+			}
+		})
+	}
+}
+
+func TestSharedReplayBinding_IncludesXFSStorageFields(t *testing.T) {
+	base := sharedInstallationReceipt{
+		Version:        1,
+		Tenant:         "t",
+		Node:           "n",
+		StorageBackend: "xfs",
+		QuotaMount:     "/srv/auriga/auriga-data/data/agent/pools",
+		QuotaBinary:    "/usr/sbin/xfs_quota",
+		ProjectFirst:   10000,
+		ProjectLast:    199999,
+		Model:          "m1",
+		Profile:        "p1",
+		Files:          "f1",
+	}
+	want, err := sharedReplayBinding(&base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rotated := base
+	rotated.Model, rotated.Profile, rotated.Files = "m2", "p2", "f2"
+	gotRotated, err := sharedReplayBinding(&rotated)
+	if err != nil || gotRotated != want {
+		t.Fatalf("rotation changed XFS replay binding: got %q want %q err=%v", gotRotated, want, err)
+	}
+	for name, mutate := range map[string]func(*sharedInstallationReceipt){
+		"backend": func(r *sharedInstallationReceipt) { r.StorageBackend = "" },
+		"mount":   func(r *sharedInstallationReceipt) { r.QuotaMount = "/srv/other/pools" },
+		"binary":  func(r *sharedInstallationReceipt) { r.QuotaBinary = "/sbin/xfs_quota" },
+		"first":   func(r *sharedInstallationReceipt) { r.ProjectFirst = 10001 },
+		"last":    func(r *sharedInstallationReceipt) { r.ProjectLast = 199998 },
+	} {
+		changed := base
+		mutate(&changed)
+		got, err := sharedReplayBinding(&changed)
+		if err != nil || got == want {
+			t.Fatalf("storage field %s change did not alter replay binding", name)
+		}
 	}
 }
 

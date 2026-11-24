@@ -64,8 +64,16 @@ type sharedStorageSpec struct {
 }
 
 func sharedCanonicalPOSIXPath(raw string) bool {
-	if raw == "" || raw[0] != '/' || strings.ContainsAny(raw, " \t\r\n,:;\"'\\`$|&<>()?*[]{}~") {
+	if raw == "" || raw[0] != '/' {
 		return false
+	}
+	for i := 0; i < len(raw); i++ {
+		c := raw[i]
+		ok := c == '/' || c == '-' || c == '_' || c == '.' ||
+			(c >= '0' && c <= '9') || (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z')
+		if !ok {
+			return false
+		}
 	}
 	return path.Clean(raw) == raw
 }
@@ -113,7 +121,14 @@ func sharedStorageSpecFromReceipt(receipt *sharedInstallationReceipt) (sharedSto
 	if receipt == nil {
 		return sharedStorageSpec{}, fmt.Errorf("shared installation receipt required")
 	}
-	return normalizeSharedStorageSpec(receipt.StorageBackend, receipt.QuotaMount, receipt.QuotaBinary, receipt.ProjectFirst, receipt.ProjectLast)
+	spec, err := normalizeSharedStorageSpec(receipt.StorageBackend, receipt.QuotaMount, receipt.QuotaBinary, receipt.ProjectFirst, receipt.ProjectLast)
+	if err != nil {
+		return sharedStorageSpec{}, err
+	}
+	if receipt.StorageBackend != spec.Backend || receipt.QuotaMount != spec.QuotaMount || receipt.QuotaBinary != spec.QuotaBinary {
+		return sharedStorageSpec{}, fmt.Errorf("shared installation receipt storage config is not canonical")
+	}
+	return spec, nil
 }
 
 func (s sharedStorageSpec) effectiveProjectRange() (uint32, uint32) {
