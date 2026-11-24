@@ -8,14 +8,14 @@ const messages = {
   'zh-CN': {
     login: '登录',
     home: 'Auriga DSH 首页',
-    title: '智能无界，创造无限。',
-    sub: '汇聚智能，连接一切，让每一种可能自由发生。',
+    title: '智能无界，创造无限',
+    sub: '汇聚智能，连接一切，让每一种可能自由发生',
   },
   en: {
     login: 'Sign in',
     home: 'Auriga DSH home',
-    title: 'Boundless intelligence. Infinite creation.',
-    sub: 'Gather intelligence, connect everything, and let every possibility unfold freely.',
+    title: 'Boundless intelligence. Infinite creation',
+    sub: 'Gather intelligence, connect everything, and let every possibility unfold freely',
   },
 };
 const copy = computed(() => messages[locale.value === 'en' ? 'en' : 'zh-CN']);
