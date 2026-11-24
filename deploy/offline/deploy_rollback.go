@@ -586,4 +586,5 @@ func printDeploySummary(w io.Writer, s state) {
 		}
 		fmt.Fprintf(w, "当前发行 r%d（%s，%s，源码 %s %s，快照 %s）\n", r.Seq, r.kind(), r.Status, r.Source.Mode, commit, r.Source.SnapshotSHA256)
 	}
+	fmt.Fprintln(w, accessCapabilities(s).StatusLine())
 }

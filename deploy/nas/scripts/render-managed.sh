@@ -15,7 +15,10 @@ directory() {
 directory "$CONFIG/managed-edge" 0 65532 750
 directory "$CONFIG/managed-ca" 0 0 755
 origin=${AURIGA_MANAGED_PLATFORM_ORIGIN:-}
-[ -n "$origin" ] || exit 0
+if [ -z "$origin" ]; then
+  info 'SKIP: managed network not configured (AURIGA_MANAGED_PLATFORM_ORIGIN empty)'
+  exit 0
+fi
 require_cmd openssl cmp
 case "$origin" in https://*) ;; *) die 'managed origin requires HTTPS' ;; esac
 authority=${origin#https://}

@@ -56,4 +56,13 @@ for origin in 'http://platform.internal:18446' 'https://platform.internal:99999'
 done
 chmod 0644 "$DATA/config/managed-source/server.key"
 if NAS_ROOT="$ROOT" AURIGA_DATA_ROOT="$DATA" sh "$ROOT/scripts/render-managed.sh" >/dev/null 2>&1; then echo 'managed private key widening accepted' >&2; exit 1; fi
+EMPTY_DATA="$PARENT/auriga-managed-empty-data"
+mkdir -p "$EMPTY_DATA/config"
+cat >"$EMPTY_DATA/stack.env" <<EOF
+AURIGA_DATA_ROOT=$EMPTY_DATA
+AURIGA_ACCESS_FILE=$ROOT/access-ip.example.json
+EOF
+chmod 0600 "$EMPTY_DATA/stack.env"
+skip_out=$(NAS_ROOT="$ROOT" AURIGA_DATA_ROOT="$EMPTY_DATA" sh "$ROOT/scripts/render-managed.sh")
+printf '%s\n' "$skip_out" | grep -F 'SKIP: managed network not configured (AURIGA_MANAGED_PLATFORM_ORIGIN empty)' >/dev/null
 echo 'PASS managed_tls_idempotent_root_preserved_origin_and_permission_fences'

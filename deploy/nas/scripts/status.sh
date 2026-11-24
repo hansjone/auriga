@@ -52,4 +52,14 @@ if [ -n "$HP" ] && command -v curl >/dev/null 2>&1; then
   info "platform_health_http=$code"
 fi
 
+_managed_origin=${AURIGA_MANAGED_PLATFORM_ORIGIN:-}
+_managed_file="$AURIGA_DATA_ROOT/config/collab-runtime/platform/managed-network.json"
+if [ -z "$_managed_origin" ]; then
+  info "managed_network_state=unconfigured (AURIGA_MANAGED_PLATFORM_ORIGIN empty)"
+elif [ ! -f "$_managed_file" ]; then
+  info "managed_network_state=unconfigured (collab/managed-network.json absent)"
+else
+  info "managed_network_state=configured"
+fi
+
 info "status done (secrets/env contents not printed)"
