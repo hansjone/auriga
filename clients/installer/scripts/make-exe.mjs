@@ -34,9 +34,11 @@ const CSC = join(
 );
 const MAGIC = 'AURZIP01';
 
-export function compileStub(output, icon) {
+export function compileStub(output, icon, options = {}) {
   if (!existsSync(CSC)) throw new Error(`C# compiler not found: ${CSC}`);
   const source = join(here, '..', 'windows', 'sfx', 'Stub.cs');
+  const manifest =
+    options.manifest ?? join(here, '../windows/sfx/app.manifest');
   const result = spawnSync(
     CSC,
     [
@@ -49,7 +51,7 @@ export function compileStub(output, icon) {
       '/r:System.IO.Compression.dll',
       '/r:System.IO.Compression.FileSystem.dll',
       '/r:System.Web.Extensions.dll',
-      `/win32manifest:${join(here, '../windows/sfx/app.manifest')}`,
+      `/win32manifest:${manifest}`,
       ...(icon ? [`/win32icon:${icon}`] : []),
       `/out:${output}`,
       source,
@@ -74,7 +76,7 @@ export function compileTray(output, icon) {
       '/r:System.Windows.Forms.dll',
       '/r:System.Drawing.dll',
       '/r:System.Web.Extensions.dll',
-      `/win32manifest:${join(here, '../windows/sfx/app.manifest')}`,
+      `/win32manifest:${join(here, '../windows/tray/app.manifest')}`,
       ...(icon ? [`/win32icon:${icon}`] : []),
       `/out:${output}`,
       join(here, '..', 'windows', 'tray', 'Tray.cs'),
@@ -87,7 +89,7 @@ export function compileTray(output, icon) {
   return output;
 }
 
-export function makeExe({ stage, out, icon, archive }) {
+export function makeExe({ stage, out, icon, archive, manifest }) {
   stage = resolve(stage);
   out = resolve(out);
   const work = `${out}.work`;
@@ -101,7 +103,7 @@ export function makeExe({ stage, out, icon, archive }) {
       });
   if (tar.status !== 0) throw new Error(`zip failed: ${tar.stderr}`);
   rmSync(out, { force: true });
-  compileStub(out, icon);
+  compileStub(out, icon, { manifest });
   const trailer = Buffer.alloc(16);
   trailer.write(MAGIC, 0, 'ascii');
   trailer.writeBigInt64LE(BigInt(statSync(zip).size), 8);

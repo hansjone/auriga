@@ -54,7 +54,7 @@ test(
       writeFileSync(join(stage, `file-${i}`), 'fixture');
     writeFileSync(
       join(stage, 'install.ps1'),
-      `param([string]$InstallDir, [switch]$Progress, [string]$CancelFile, [switch]$NoDesktopShortcut, [int]$ExitCode=0)
+      `param([string]$InstallDir, [switch]$Progress, [string]$CancelFile, [switch]$NoDesktopShortcut, [switch]$Autostart, [switch]$NoAutostart, [int]$ExitCode=0)
 if (!(Test-Path -LiteralPath (Join-Path $PSScriptRoot 'payload'))) { exit 9 }
 Write-Output '@@progress {"stage":"verify","fraction":1}'
 [IO.File]::WriteAllText($env:SFX_TEST_RESULT, 'installed')
@@ -69,7 +69,18 @@ if ($env:SFX_FAIL) {
 exit $ExitCode
 `,
     );
-    const exe = makeExe({ stage, out: join(base, 'setup.exe') });
+    // Default production build embeds requireAdministrator + PerMonitorV2 DPI manifest.
+    const adminExe = makeExe({ stage, out: join(base, 'setup-admin.exe') });
+    const adminBytes = readFileSync(adminExe).toString('utf8');
+    assert.match(adminBytes, /level="requireAdministrator"/);
+    assert.match(adminBytes, /PerMonitorV2/);
+    // Non-elevated test hosts cannot CreateProcess a requireAdministrator binary without UAC,
+    // so /VERYSILENT execution uses the asInvoker manifest while keeping the exact same stub.
+    const exe = makeExe({
+      stage,
+      out: join(base, 'setup.exe'),
+      manifest: resolve(here, '../windows/tray/app.manifest'),
+    });
     const harness = join(base, 'paths.exe');
     const compile = run(
       join(windows, 'Microsoft.NET/Framework64/v4.0.30319/csc.exe'),
@@ -112,6 +123,10 @@ exit $ExitCode
     }
     const unsafe = run(harness, ['unsafe', join(base, 'unsafe')]);
     assert.equal(unsafe.status, 0, unsafe.stdout + unsafe.stderr);
+    const hidpi = run(harness, ['hidpi']);
+    assert.equal(hidpi.status, 0, hidpi.stdout + hidpi.stderr);
+    assert.match(hidpi.stdout, /hidpi=OK/);
+    t.diagnostic(hidpi.stdout.trim());
     for (const code of [0, 7]) {
       const result = run(exe, ['/VERYSILENT', '-ExitCode', String(code)]);
       assert.equal(result.status, code, result.stdout + result.stderr);

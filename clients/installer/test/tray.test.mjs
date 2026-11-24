@@ -48,6 +48,14 @@ test(
     compileTray(join(base, 'tray', 'AurigaDesktop.exe'), icon);
     assert.ok(existsSync(join(base, 'stub.exe')));
     assert.ok(existsSync(join(base, 'tray', 'AurigaDesktop.exe')));
+    assert.match(
+      readFileSync(join(base, 'stub.exe')).toString('utf8'),
+      /level="requireAdministrator"/,
+    );
+    assert.match(
+      readFileSync(join(base, 'tray', 'AurigaDesktop.exe')).toString('utf8'),
+      /level="asInvoker"/,
+    );
   },
 );
 

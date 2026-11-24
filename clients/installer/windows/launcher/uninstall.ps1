@@ -4,6 +4,45 @@
 param([switch]$PurgeData, [switch]$Quiet, [switch]$ReportResult)
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
+# If the install lives in a protected location (e.g. Program Files) and this is an
+# interactive uninstall without admin rights, elevate once so the root folder can be removed.
+if (-not $Quiet) {
+  $isAdmin = ([Security.Principal.WindowsPrincipal]::new([Security.Principal.WindowsIdentity]::GetCurrent())).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+  if (-not $isAdmin) {
+    $needsElevation = $false
+    $parentDir = Split-Path -Parent $root
+    if ($parentDir -and (Test-Path -LiteralPath $parentDir -PathType Container)) {
+      $probe = Join-Path $parentDir ('.auriga-uninstall-probe-' + [guid]::NewGuid().ToString('N'))
+      try {
+        [IO.File]::WriteAllText($probe, '')
+        Remove-Item -LiteralPath $probe -Force -ErrorAction SilentlyContinue
+      } catch [UnauthorizedAccessException] {
+        $needsElevation = $true
+      } catch { }
+    }
+    if ($needsElevation) {
+      $elevArgs = '-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "' + ($PSCommandPath -replace '"', '\"') + '"'
+      if ($PurgeData) { $elevArgs += ' -PurgeData' }
+      if ($ReportResult) { $elevArgs += ' -ReportResult' }
+      $psi = New-Object System.Diagnostics.ProcessStartInfo
+      $psi.FileName = Join-Path ([Environment]::SystemDirectory) 'WindowsPowerShell\v1.0\powershell.exe'
+      $psi.Arguments = $elevArgs
+      $psi.UseShellExecute = $true
+      $psi.Verb = 'RunAs'
+      try {
+        $elevated = [System.Diagnostics.Process]::Start($psi)
+        $elevated.WaitForExit()
+        $code = $elevated.ExitCode
+        $elevated.Dispose()
+        exit $code
+      } catch [System.ComponentModel.Win32Exception] {
+        # ERROR_CANCELLED (1223): user cancelled UAC prompt.
+        if ($_.Exception.NativeErrorCode -eq 1223) { exit 0 }
+        throw
+      }
+    }
+  }
+}
 $tempRoot = [IO.Path]::GetTempPath()
 Set-Location -LiteralPath $tempRoot
 [Environment]::CurrentDirectory = $tempRoot

@@ -12,6 +12,7 @@ static class SfxPaths
     {
         if (args[0] != "legacy") Setup.ConfigurePaths();
         if (args[0] == "wizard") return WizardRun(args[1]);
+        if (args[0] == "hidpi") return HiDpiRun();
         if (args[0] == "unsafe") return UnsafeRun(args[1]);
         string directory = args[2];
         int files = 0; long bytes = 0; int max = 0;
@@ -76,16 +77,75 @@ static class SfxPaths
             ((TextBox)Field(wizard, "folder")).Text = root;
             var next = typeof(Wizard).GetMethod("Next", BindingFlags.Instance | BindingFlags.NonPublic);
             int peak = 0;
-            wizard.Shown += delegate { next.Invoke(wizard, null); next.Invoke(wizard, null); timer.Start(); };
+            wizard.Shown += delegate
+            {
+                // Welcome -> License
+                next.Invoke(wizard, null);
+                // License must block advancing until accepted
+                next.Invoke(wizard, null);
+                if ((int)Field(wizard, "page") != 1)
+                {
+                    Console.WriteLine("licenseGateFailed=True");
+                    wizard.ExitCode = 98;
+                    wizard.Close();
+                    return;
+                }
+                ((RadioButton)Field(wizard, "acceptLicense")).Checked = true;
+                // License -> Location -> Tasks -> Ready -> Progress
+                next.Invoke(wizard, null);
+                next.Invoke(wizard, null);
+                next.Invoke(wizard, null);
+                next.Invoke(wizard, null);
+                timer.Start();
+            };
             timer.Tick += delegate
             {
                 peak = Math.Max(peak, ((ProgressBar)Field(wizard, "bar")).Value);
-                if ((int)Field(wizard, "page") != 3) return;
+                if ((int)Field(wizard, "page") != 6) return;
                 Console.WriteLine("wizardExit=" + wizard.ExitCode + " progress=" + peak + " openLog=" + ((Control)Field(wizard, "openLog")).Visible + " finish=" + ((Label)Field(wizard, "finishText")).Text);
                 timer.Stop(); wizard.Close();
             };
             Application.Run(wizard);
             return wizard.ExitCode;
+        }
+    }
+
+    static int HiDpiRun()
+    {
+        Application.EnableVisualStyles();
+        using (var wizard = new Wizard())
+        {
+            wizard.CreateControl();
+            wizard.Scale(new System.Drawing.SizeF(1.5f, 1.5f));
+            var show = typeof(Wizard).GetMethod("Show", BindingFlags.Instance | BindingFlags.NonPublic);
+            var sidebar = (Control)Field(wizard, "sidebar");
+            var headerLine = (Control)Field(wizard, "headerLine");
+            var footerLine = (Control)Field(wizard, "footerLine");
+            var body = (Control)Field(wizard, "body");
+            var folder = (Control)Field(wizard, "folder");
+            if (folder.Width < 600) { Console.WriteLine("unscaledFolderWidth=" + folder.Width); return 1; }
+            for (int p = 0; p <= 6; p++)
+            {
+                show.Invoke(wizard, new object[] { p });
+                bool withSidebar = (p == 0 || p == 6);
+                if (withSidebar && body.Left < sidebar.Right)
+                {
+                    Console.WriteLine("sidebarOverlap page=" + p + " bodyLeft=" + body.Left + " sidebarRight=" + sidebar.Right);
+                    return 2;
+                }
+                if (!withSidebar && body.Top < headerLine.Bottom)
+                {
+                    Console.WriteLine("headerOverlap page=" + p + " bodyTop=" + body.Top + " headerBottom=" + headerLine.Bottom);
+                    return 3;
+                }
+                if (body.Bottom > footerLine.Top)
+                {
+                    Console.WriteLine("footerOverlap page=" + p + " bodyBottom=" + body.Bottom + " footerTop=" + footerLine.Top);
+                    return 4;
+                }
+            }
+            Console.WriteLine("hidpi=OK folderWidth=" + folder.Width + " sidebarRight=" + sidebar.Right + " headerBottom=" + headerLine.Bottom);
+            return 0;
         }
     }
 }

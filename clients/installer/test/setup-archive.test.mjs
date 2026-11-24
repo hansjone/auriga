@@ -4,9 +4,12 @@ import { makeExe } from '../scripts/make-exe.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { writeFileSync, readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { unpackSetup } from '../runtime/setup-archive.mjs';
 import { tempBase, wrapSetupFixture } from './helpers.mjs';
+
+const here = dirname(fileURLToPath(import.meta.url));
 
 test('embedded payload is read as data and malformed envelopes fail closed', (t) => {
   const base = tempBase(t),
@@ -58,7 +61,11 @@ Write-Output '{"installed":true}'
 exit $ExitCode
 `,
     );
-    const exe = makeExe({ stage, out: join(base, 'setup.exe') });
+    const exe = makeExe({
+      stage,
+      out: join(base, 'setup.exe'),
+      manifest: resolve(here, '../windows/tray/app.manifest'),
+    });
     const success = spawnSync(exe, ['/VERYSILENT'], {
       encoding: 'utf8',
       timeout: 30000,

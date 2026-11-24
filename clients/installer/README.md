@@ -146,12 +146,15 @@ node payload/auriga/runtime/cli.mjs install --payload payload --root <独立安�
 
 ## Windows exe 安装向导
 
-用户下载件：`AurigaDSH-Setup-<Desktop版本>.exe`。双击显示中文向导，仅为当前用户安装（`asInvoker`，不提权）：
+用户下载件：`AurigaDSH-Setup-<Desktop版本>.exe`。双击触发 UAC 管理员提权（`requireAdministrator`），显示标准中文产品化安装向导（支持 HiDPI 清晰显示）：
 
-1. 欢迎页：显示包内版本；检测到已安装（HKCU 卸载登记的安装位置带 `.auriga-desktop-install` 标记）时说明“升级并保留配置、会话和登录信息”。
-2. 安装位置：默认 `%LOCALAPPDATA%\Programs\AurigaDesktop`，可改；升级固定为原位置。下一步前校验：完整本机路径、非盘根、非网络路径、空目录或我方安装、磁盘空间、写权限。需要管理员权限的目录（如 `C:\Program Files`）在写入前拒绝并提示改选可写位置；不支持全机安装。桌面快捷方式可选。
-3. 进度：分阶段显示步骤与百分比——解包（按条目）、校验安装包、复制程序文件（按单元）、校验已复制文件、配置用户环境、启动自检、完成安装、快捷方式与登记。提交前任何阶段可取消：首次安装取消或失败后不留安装目录、数据目录、登记和快捷方式；升级取消或失败回到原版本。日志写 `%TEMP%\AurigaDSH-Setup-<时间>.log`（令牌已遮蔽）。
-4. 完成：勾选“立即启动”（默认勾选）启动托盘程序。
+1. 欢迎页：左侧品牌竖幅与版本信息；检测到已安装（HKCU 卸载登记的安装位置带 `.auriga-desktop-install` 标记）时说明“升级并保留配置、会话和登录信息”。
+2. 许可协议与使用声明：展示 AGPL-3.0 / MIT / 商业许可、第三方运行时声明、管理员权限与系统变更说明、数据与签名更新安全声明及免责条款；需勾选“我已阅读并同意上述许可协议与使用声明”后方可继续。
+3. 安装位置：默认 `%ProgramFiles%\Auriga DSH`（支持任意本地磁盘如 `D:\Auriga DSH`）；升级固定为原位置（兼容从旧版 `%LOCALAPPDATA%\Programs\AurigaDesktop` 平滑升级）。实时显示所需空间与目标盘可用空间，并展示独立用户数据目录。下一步前校验：完整本机路径、非盘根、非网络路径、空目录或我方安装、磁盘空间、写权限。
+4. 附加任务：可选“创建桌面快捷方式”（默认勾选，升级沿用现有设置）、“开机时自动启动 Auriga DSH”；开始菜单快捷方式及卸载入口默认创建。
+5. 准备安装：汇总展示安装模式、目标位置、用户数据目录、附加任务与预计所需磁盘空间，确认后开始安装。
+6. 进度：分阶段显示步骤、百分比与实时操作明细——解包（按条目）、校验安装包、复制程序文件（按单元）、校验已复制文件、配置用户环境、启动自检、完成安装、快捷方式与登记。提交前任何阶段可取消：首次安装取消或失败后不留安装目录、数据目录、登记和快捷方式；升级取消或失败回到原版本。日志写 `%LOCALAPPDATA%\AurigaDesktop\logs\setup-<时间>.log`（令牌已遮蔽）。
+7. 完成：勾选“立即启动 Auriga DSH”（默认勾选）时通过 `explorer.exe` 降权以标准用户权限启动托盘程序，避免日常托盘运行在管理员权限下。安装完成后，安装脚本为当前用户授予安装根目录的维护权限（内置 Python 运行时目录保持独立只读防篡改 ACL），保证应用内更新与托盘设置可免提权正常工作。
 
 升级时向导先通过命名事件请求运行中的托盘退出（托盘停止 DSH 后释放单实例锁）；旧版无托盘的命令行窗口仍在运行时提示用户先关闭。
 自动化安装用 `/VERYSILENT`，路径沿用 `AURIGA_INSTALL_DIR` 等环境变量或 `-InstallDir` 参数；升级沿用原安装的数据目录。
@@ -187,7 +190,7 @@ stdin 一行 `stop` 或 stdin 关闭会通知 DSH 执行正常停止和持久化
 因此新启动器在这两个偏移固定放置 `exit /b %ERRORLEVEL%`，前面用 `goto main` 跳过；新启动器的长命令都在同一行以 `& call exit /b %%ERRORLEVEL%%` 结束，以后不再重读文件。构建时把 `.cmd` 统一为 CRLF。
 
 工具沿用 Windows 自带 .NET Framework C# 编译器与本仓库开源 WinForms 向导，
-无需付费工具或额外下载。`app.manifest` 明确 `asInvoker`。
+无需付费工具或额外下载。安装程序使用 `windows/sfx/app.manifest`（`requireAdministrator` + HiDPI），托盘程序独立使用 `windows/tray/app.manifest`（`asInvoker` + HiDPI）。
 默认注入 `assets/brand/auriga-dsh.ico`；可用 `--installer-icon <ico>` 覆盖。
 换图标须重新构建、计算摘要和离线签名。
 
