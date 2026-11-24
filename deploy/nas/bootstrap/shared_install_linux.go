@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"math"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -36,6 +37,11 @@ func nasSharedRuntime(args []string, stdout io.Writer) error {
 	dedicatedSHA := f.String("dedicated-profile-sha256", "", "independently approved dedicated profile SHA256")
 	model := f.String("model", "", "approved public model ID")
 	teamOnly := f.Bool("team-only", false, "explicit first installation without an existing company adapter")
+	backend := f.String("backend", "", "shared pool storage backend: ext4-image (default) or xfs")
+	quotaMount := f.String("quota-mount", "", "canonical absolute XFS project-quota mount path (xfs backend only)")
+	quotaBinary := f.String("quota-binary", "", "canonical absolute xfs_quota path (xfs backend only, default /usr/sbin/xfs_quota)")
+	projectFirst := f.Uint("project-first", 0, "optional reserved project quota ID range start")
+	projectLast := f.Uint("project-last", 0, "optional reserved project quota ID range end")
 	if err := f.Parse(args); err != nil {
 		return err
 	}
@@ -52,24 +58,34 @@ func nasSharedRuntime(args []string, stdout io.Writer) error {
 	if (*dedicatedProfile == "") != (*dedicatedSHA == "") {
 		return fmt.Errorf("dedicated profile file and approval SHA256 must be supplied together")
 	}
+	hasStorageFlags := *backend != "" || *quotaMount != "" || *quotaBinary != "" || *projectFirst != 0 || *projectLast != 0
+	var storageSpec sharedStorageSpec
 	switch *action {
 	case "set-model":
-		if *adapter != "" || *adapterSHA != "" || *profile != "" || *profileSHA != "" || *dedicatedProfile != "" || *dedicatedSHA != "" || *teamOnly {
+		if *adapter != "" || *adapterSHA != "" || *profile != "" || *profileSHA != "" || *dedicatedProfile != "" || *dedicatedSHA != "" || *teamOnly || hasStorageFlags {
 			return fmt.Errorf("set-model only accepts model and original base approval")
 		}
 		if err := sharedApprovedModelID(*model); err != nil {
 			return err
 		}
 	case "set-profile":
-		if *adapter != "" || *adapterSHA != "" || *model != "" || *dedicatedProfile != "" || *dedicatedSHA != "" || *teamOnly {
+		if *adapter != "" || *adapterSHA != "" || *model != "" || *dedicatedProfile != "" || *dedicatedSHA != "" || *teamOnly || hasStorageFlags {
 			return fmt.Errorf("set-profile only accepts profile file, profile approval and original base approval")
 		}
 		if *profile == "" || *profileSHA == "" {
 			return fmt.Errorf("set-profile requires profile file and independent SHA256")
 		}
 	case "stage":
+		if uint64(*projectFirst) > math.MaxUint32 || uint64(*projectLast) > math.MaxUint32 {
+			return fmt.Errorf("shared storage project ID out of uint32 range")
+		}
+		var err error
+		storageSpec, err = normalizeSharedStorageSpec(*backend, *quotaMount, *quotaBinary, uint32(*projectFirst), uint32(*projectLast))
+		if err != nil {
+			return err
+		}
 	default:
-		if *adapter != "" || *adapterSHA != "" || *profile != "" || *profileSHA != "" || *dedicatedProfile != "" || *dedicatedSHA != "" || *model != "" || *teamOnly {
+		if *adapter != "" || *adapterSHA != "" || *profile != "" || *profileSHA != "" || *dedicatedProfile != "" || *dedicatedSHA != "" || *model != "" || *teamOnly || hasStorageFlags {
 			return fmt.Errorf("staging inputs are only accepted by stage")
 		}
 	}
@@ -135,7 +151,7 @@ func nasSharedRuntime(args []string, stdout io.Writer) error {
 		if hasRotation || len(eventNames) != 0 || *action != "stage" {
 			return fmt.Errorf("shared generation absent; activation refused")
 		}
-		if err := stageSharedInstallation(*base, *out, baseHash, *adapter, *adapterSHA, *profile, *profileSHA, *dedicatedProfile, *dedicatedSHA, *model, *teamOnly); err != nil {
+		if err := stageSharedInstallation(*base, *out, baseHash, *adapter, *adapterSHA, *profile, *profileSHA, *dedicatedProfile, *dedicatedSHA, *model, *teamOnly, storageSpec); err != nil {
 			return err
 		}
 	}
@@ -160,7 +176,9 @@ func nasSharedRuntime(args []string, stdout io.Writer) error {
 		if *teamOnly {
 			approvedAdapter = sharedSHA([]byte(sharedTeamOnlyAdapter))
 		}
-		if receipt.Adapter != approvedAdapter || receipt.TeamOnly != *teamOnly || receipt.Profile != *profileSHA || receipt.DedicatedProfile != *dedicatedSHA || receipt.Model != *model {
+		if receipt.Adapter != approvedAdapter || receipt.TeamOnly != *teamOnly || receipt.Profile != *profileSHA || receipt.DedicatedProfile != *dedicatedSHA || receipt.Model != *model ||
+			receipt.StorageBackend != storageSpec.Backend || receipt.QuotaMount != storageSpec.QuotaMount || receipt.QuotaBinary != storageSpec.QuotaBinary ||
+			receipt.ProjectFirst != storageSpec.ProjectFirst || receipt.ProjectLast != storageSpec.ProjectLast {
 			return fmt.Errorf("shared staging approval differs; implicit identity or policy rotation refused")
 		}
 	}
@@ -810,7 +828,7 @@ func restoreSharedRotation(out, generation string) error {
 	return runtimeSyncDir(out)
 }
 
-func stageSharedInstallation(base, out, baseHash, adapter, adapterSHA, profile, profileSHA, dedicatedProfile, dedicatedSHA, model string, teamOnly bool) error {
+func stageSharedInstallation(base, out, baseHash, adapter, adapterSHA, profile, profileSHA, dedicatedProfile, dedicatedSHA, model string, teamOnly bool, storage sharedStorageSpec) error {
 	if err := sharedApprovedModelID(model); err != nil {
 		return err
 	}
@@ -919,7 +937,7 @@ func stageSharedInstallation(base, out, baseHash, adapter, adapterSHA, profile, 
 	if err != nil {
 		return err
 	}
-	receipt := sharedInstallationReceipt{Version: 1, Base: baseHash, Tenant: access.TenantID(), Node: node, CA: ca, Adapter: adapterSHA, Profile: profileSHA, DedicatedProfile: dedicatedSHA, InitialRuntime: sharedSHA(runtimeJSON), Model: model, Files: digest, TeamOnly: teamOnly}
+	receipt := sharedInstallationReceipt{Version: 1, Base: baseHash, Tenant: access.TenantID(), Node: node, CA: ca, Adapter: adapterSHA, Profile: profileSHA, DedicatedProfile: dedicatedSHA, InitialRuntime: sharedSHA(runtimeJSON), Model: model, Files: digest, TeamOnly: teamOnly, StorageBackend: storage.Backend, QuotaMount: storage.QuotaMount, QuotaBinary: storage.QuotaBinary, ProjectFirst: storage.ProjectFirst, ProjectLast: storage.ProjectLast}
 	raw, err := json.Marshal(receipt)
 	if err != nil {
 		return err
@@ -951,6 +969,9 @@ func readSharedInstallationPolicy(base, generation, baseHash string, replacingPr
 	var receipt sharedInstallationReceipt
 	if sharedUniqueJSON(raw) != nil || runtimeDecode(raw, &receipt) != nil || receipt.Version != 1 || receipt.DedicatedProfile != "" && !sharedCanonicalSHA(receipt.DedicatedProfile) {
 		return nil, nil, fmt.Errorf("shared installation receipt refused")
+	}
+	if _, err := sharedStorageSpecFromReceipt(&receipt); err != nil {
+		return nil, nil, fmt.Errorf("shared installation receipt storage config refused: %w", err)
 	}
 	leaves := sharedInstallationLeaves(receipt.DedicatedProfile != "")
 	allowed := map[string]bool{".": true, "installation.receipt": true, "platform": true, "platform/agent-secret": true, "edge": true, "public": true}

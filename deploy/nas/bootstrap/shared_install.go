@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"path"
 	"sort"
 	"strings"
 
@@ -41,6 +42,100 @@ type sharedInstallationReceipt struct {
 	Model            string `json:"model"`
 	Files            string `json:"files"`
 	TeamOnly         bool   `json:"teamOnly,omitempty"`
+	StorageBackend   string `json:"storageBackend,omitempty"`
+	QuotaMount       string `json:"quotaMount,omitempty"`
+	QuotaBinary      string `json:"quotaBinary,omitempty"`
+	ProjectFirst     uint32 `json:"projectFirst,omitempty"`
+	ProjectLast      uint32 `json:"projectLast,omitempty"`
+}
+
+const (
+	sharedStorageDefaultProjectFirst uint32 = 10000
+	sharedStorageDefaultProjectLast  uint32 = 199999
+	sharedStorageDefaultXFSBinary           = "/usr/sbin/xfs_quota"
+)
+
+type sharedStorageSpec struct {
+	Backend      string
+	QuotaMount   string
+	QuotaBinary  string
+	ProjectFirst uint32
+	ProjectLast  uint32
+}
+
+func sharedCanonicalPOSIXPath(raw string) bool {
+	if raw == "" || raw[0] != '/' {
+		return false
+	}
+	for i := 0; i < len(raw); i++ {
+		c := raw[i]
+		ok := c == '/' || c == '-' || c == '_' || c == '.' ||
+			(c >= '0' && c <= '9') || (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z')
+		if !ok {
+			return false
+		}
+	}
+	return path.Clean(raw) == raw
+}
+
+func normalizeSharedStorageSpec(backend, quotaMount, quotaBinary string, projectFirst, projectLast uint32) (sharedStorageSpec, error) {
+	if (projectFirst == 0) != (projectLast == 0) {
+		return sharedStorageSpec{}, fmt.Errorf("shared storage project-first and project-last must be supplied together")
+	}
+	if projectFirst != 0 && projectLast < projectFirst {
+		return sharedStorageSpec{}, fmt.Errorf("shared storage project-last must be >= project-first")
+	}
+	switch backend {
+	case "", "ext4-image":
+		if quotaMount != "" || quotaBinary != "" {
+			return sharedStorageSpec{}, fmt.Errorf("quota-mount and quota-binary are only valid with xfs backend")
+		}
+		return sharedStorageSpec{
+			Backend:      "",
+			ProjectFirst: projectFirst,
+			ProjectLast:  projectLast,
+		}, nil
+	case "xfs":
+		if !sharedCanonicalPOSIXPath(quotaMount) || quotaMount == "/" {
+			return sharedStorageSpec{}, fmt.Errorf("xfs backend requires a canonical absolute quota-mount path")
+		}
+		if quotaBinary == "" {
+			quotaBinary = sharedStorageDefaultXFSBinary
+		}
+		if !sharedCanonicalPOSIXPath(quotaBinary) || quotaBinary == "/" {
+			return sharedStorageSpec{}, fmt.Errorf("xfs backend requires a canonical absolute quota-binary path")
+		}
+		return sharedStorageSpec{
+			Backend:      "xfs",
+			QuotaMount:   quotaMount,
+			QuotaBinary:  quotaBinary,
+			ProjectFirst: projectFirst,
+			ProjectLast:  projectLast,
+		}, nil
+	default:
+		return sharedStorageSpec{}, fmt.Errorf("unsupported shared storage backend %q (expected ext4-image or xfs)", backend)
+	}
+}
+
+func sharedStorageSpecFromReceipt(receipt *sharedInstallationReceipt) (sharedStorageSpec, error) {
+	if receipt == nil {
+		return sharedStorageSpec{}, fmt.Errorf("shared installation receipt required")
+	}
+	spec, err := normalizeSharedStorageSpec(receipt.StorageBackend, receipt.QuotaMount, receipt.QuotaBinary, receipt.ProjectFirst, receipt.ProjectLast)
+	if err != nil {
+		return sharedStorageSpec{}, err
+	}
+	if receipt.StorageBackend != spec.Backend || receipt.QuotaMount != spec.QuotaMount || receipt.QuotaBinary != spec.QuotaBinary {
+		return sharedStorageSpec{}, fmt.Errorf("shared installation receipt storage config is not canonical")
+	}
+	return spec, nil
+}
+
+func (s sharedStorageSpec) effectiveProjectRange() (uint32, uint32) {
+	if s.ProjectFirst == 0 {
+		return sharedStorageDefaultProjectFirst, sharedStorageDefaultProjectLast
+	}
+	return s.ProjectFirst, s.ProjectLast
 }
 
 type sharedInstallationEvent struct {
