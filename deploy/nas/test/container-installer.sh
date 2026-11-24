@@ -20,11 +20,12 @@ printf '0\n' >"$TMP/export/collab.enabled"
 printf '0\n' >"$TMP/export/bifrost.enabled"
 : >"$TMP/export/shared.path"
 printf '1\n' >"$TMP/export/shared.ready"
+: >"$TMP/export/shared-ai-relay.env"
 printf '0\n' >"$TMP/export/managed.identity.enabled"
 : >"$TMP/export/collab.rotation.path"
 printf '1\n' >"$TMP/export/collab.rotation.available"
 printf '%s\n' "$AURIGA_DATA_ROOT/config/materials" >"$TMP/export/runtime.path"
-tar -C "$TMP/export" -cf "$TMP/export.tar" platform.env edge.env agent.env audit-db.env bifrost-audit.env collab.enabled managed.identity.enabled collab.rotation.path collab.rotation.available runtime.path bifrost.enabled shared.path shared.ready
+tar -C "$TMP/export" -cf "$TMP/export.tar" platform.env edge.env agent.env audit-db.env bifrost-audit.env collab.enabled managed.identity.enabled collab.rotation.path collab.rotation.available runtime.path bifrost.enabled shared.path shared.ready shared-ai-relay.env
 export INSTALL_ARCHIVE="$TMP/export.tar" INSTALL_OVERRIDE="$TMP/override-path" INSTALL_SHARED_SNAPSHOT="$TMP/shared-snapshot.yml"
 unset NAS_ALLOW_NONROOT NAS_INSTALLER_ACTIVE AURIGA_NAS_BOOTSTRAP_BINARY INSTALL_EXIT INSTALL_PLATFORM INSTALL_COMPOSE_EXIT
 cat >"$TMP/bin/docker" <<'EOF'
@@ -94,22 +95,22 @@ if [ -f "$INSTALL_OVERRIDE" ] && [ ! -e "$(dirname "$(cat "$INSTALL_OVERRIDE")")
 else printf 'FAIL compose_failure_cleanup\n'; fail=1; fi
 unset INSTALL_COMPOSE_EXIT
 printf '1\n' >"$TMP/export/collab.enabled"
-tar -C "$TMP/export" -cf "$TMP/export.tar" platform.env edge.env agent.env audit-db.env bifrost-audit.env collab.enabled managed.identity.enabled collab.rotation.path collab.rotation.available runtime.path bifrost.enabled shared.path shared.ready
+tar -C "$TMP/export" -cf "$TMP/export.tar" platform.env edge.env agent.env audit-db.env bifrost-audit.env collab.enabled managed.identity.enabled collab.rotation.path collab.rotation.available runtime.path bifrost.enabled shared.path shared.ready shared-ai-relay.env
 check compose_activated_overlay 0 sh -c '. "$NAS_ROOT/scripts/lib.sh"; load_stack_env; run_compose config --quiet'
 if grep -q -- "$NAS_ROOT/collab-compose.yml" "$INSTALL_LOG"; then printf 'PASS compose_checked_overlay_selected\n'
 else printf 'FAIL compose_checked_overlay_selected\n'; fail=1; fi
 printf '1\n' >"$TMP/export/bifrost.enabled"
-tar -C "$TMP/export" -cf "$TMP/export.tar" platform.env edge.env agent.env audit-db.env bifrost-audit.env collab.enabled managed.identity.enabled collab.rotation.path collab.rotation.available runtime.path bifrost.enabled shared.path shared.ready
+tar -C "$TMP/export" -cf "$TMP/export.tar" platform.env edge.env agent.env audit-db.env bifrost-audit.env collab.enabled managed.identity.enabled collab.rotation.path collab.rotation.available runtime.path bifrost.enabled shared.path shared.ready shared-ai-relay.env
 check compose_bifrost_overlay 0 sh -c '. "$NAS_ROOT/scripts/lib.sh"; load_stack_env; run_compose config --quiet'
 if grep -Eq 'collab-compose.yml -f [^ ]*/bifrost.yml config --quiet' "$INSTALL_LOG"; then printf 'PASS bifrost_overlay_after_collab\n'
 else printf 'FAIL bifrost_overlay_after_collab\n'; fail=1; fi
 printf 'invalid\n' >"$TMP/export/bifrost.enabled"
-tar -C "$TMP/export" -cf "$TMP/export.tar" platform.env edge.env agent.env audit-db.env bifrost-audit.env collab.enabled managed.identity.enabled collab.rotation.path collab.rotation.available runtime.path bifrost.enabled shared.path shared.ready
+tar -C "$TMP/export" -cf "$TMP/export.tar" platform.env edge.env agent.env audit-db.env bifrost-audit.env collab.enabled managed.identity.enabled collab.rotation.path collab.rotation.available runtime.path bifrost.enabled shared.path shared.ready shared-ai-relay.env
 check reject_invalid_bifrost_decision 1 sh -c '. "$NAS_ROOT/scripts/lib.sh"; load_stack_env; run_compose config --quiet'
 # Keep Bifrost active through degraded message/identity cases.
 printf '1\n' >"$TMP/export/bifrost.enabled"
 printf '0\n' >"$TMP/export/collab.rotation.available"
-tar -C "$TMP/export" -cf "$TMP/export.tar" platform.env edge.env agent.env audit-db.env bifrost-audit.env collab.enabled managed.identity.enabled collab.rotation.path collab.rotation.available runtime.path bifrost.enabled shared.path shared.ready
+tar -C "$TMP/export" -cf "$TMP/export.tar" platform.env edge.env agent.env audit-db.env bifrost-audit.env collab.enabled managed.identity.enabled collab.rotation.path collab.rotation.available runtime.path bifrost.enabled shared.path shared.ready shared-ai-relay.env
 check busy_rotation_core_config_available 0 sh -c '. "$NAS_ROOT/scripts/lib.sh"; load_stack_env; run_compose config --quiet'
 if grep -q '/bifrost.yml' "$INSTALL_LOG"; then printf 'PASS busy_rotation_preserves_bifrost\n'
 else printf 'FAIL busy_rotation_lost_bifrost\n'; fail=1; fi
@@ -117,26 +118,26 @@ check busy_rotation_stop_available 0 sh -c '. "$NAS_ROOT/scripts/lib.sh"; load_s
 check busy_rotation_message_start_refused 1 sh -c '. "$NAS_ROOT/scripts/lib.sh"; load_stack_env; run_compose --profile collab-network up -d collab network'
 printf '1\n' >"$TMP/export/collab.rotation.available"
 printf '0\n' >"$TMP/export/collab.enabled"
-tar -C "$TMP/export" -cf "$TMP/export.tar" platform.env edge.env agent.env audit-db.env bifrost-audit.env collab.enabled managed.identity.enabled collab.rotation.path collab.rotation.available runtime.path bifrost.enabled shared.path shared.ready
+tar -C "$TMP/export" -cf "$TMP/export.tar" platform.env edge.env agent.env audit-db.env bifrost-audit.env collab.enabled managed.identity.enabled collab.rotation.path collab.rotation.available runtime.path bifrost.enabled shared.path shared.ready shared-ai-relay.env
 check rejected_message_config_core_up 0 sh -c '. "$NAS_ROOT/scripts/lib.sh"; load_stack_env; run_compose up -d'
 if grep -q -- "$NAS_ROOT/collab-compose.yml" "$INSTALL_LOG"; then printf 'FAIL rejected_message_config_mounted_into_core\n'; fail=1; fi
 printf '1\n' >"$TMP/export/managed.identity.enabled"
-tar -C "$TMP/export" -cf "$TMP/export.tar" platform.env edge.env agent.env audit-db.env bifrost-audit.env collab.enabled managed.identity.enabled collab.rotation.path collab.rotation.available runtime.path bifrost.enabled shared.path shared.ready
+tar -C "$TMP/export" -cf "$TMP/export.tar" platform.env edge.env agent.env audit-db.env bifrost-audit.env collab.enabled managed.identity.enabled collab.rotation.path collab.rotation.available runtime.path bifrost.enabled shared.path shared.ready shared-ai-relay.env
 check checked_identity_survives_message_failure 0 sh -c '. "$NAS_ROOT/scripts/lib.sh"; load_stack_env; run_compose up -d'
 if grep -q -- "$NAS_ROOT/managed-identity-compose.yml" "$INSTALL_LOG" && grep -q '/bifrost.yml' "$INSTALL_LOG" && ! grep -q -- "$NAS_ROOT/collab-compose.yml" "$INSTALL_LOG"; then printf 'PASS independent_identity_overlay_selected\n'
 else printf 'FAIL independent_identity_overlay_selected\n'; fail=1; fi
 printf 'invalid\n' >"$TMP/export/managed.identity.enabled"
-tar -C "$TMP/export" -cf "$TMP/export.tar" platform.env edge.env agent.env audit-db.env bifrost-audit.env collab.enabled managed.identity.enabled collab.rotation.path collab.rotation.available runtime.path bifrost.enabled shared.path shared.ready
+tar -C "$TMP/export" -cf "$TMP/export.tar" platform.env edge.env agent.env audit-db.env bifrost-audit.env collab.enabled managed.identity.enabled collab.rotation.path collab.rotation.available runtime.path bifrost.enabled shared.path shared.ready shared-ai-relay.env
 check reject_invalid_identity_decision 1 sh -c '. "$NAS_ROOT/scripts/lib.sh"; load_stack_env; run_compose up -d'
-tar -C "$TMP/export" -cf "$TMP/export.tar" platform.env edge.env agent.env audit-db.env bifrost-audit.env collab.enabled collab.rotation.path collab.rotation.available runtime.path bifrost.enabled shared.path shared.ready
+tar -C "$TMP/export" -cf "$TMP/export.tar" platform.env edge.env agent.env audit-db.env bifrost-audit.env collab.enabled collab.rotation.path collab.rotation.available runtime.path bifrost.enabled shared.path shared.ready shared-ai-relay.env
 check reject_missing_identity_decision 1 sh -c '. "$NAS_ROOT/scripts/lib.sh"; load_stack_env; run_compose up -d'
 printf '0\n' >"$TMP/export/managed.identity.enabled"
-tar -C "$TMP/export" -cf "$TMP/export.tar" platform.env edge.env agent.env audit-db.env bifrost-audit.env collab.enabled managed.identity.enabled collab.rotation.path collab.rotation.available runtime.path bifrost.enabled shared.path shared.ready
+tar -C "$TMP/export" -cf "$TMP/export.tar" platform.env edge.env agent.env audit-db.env bifrost-audit.env collab.enabled managed.identity.enabled collab.rotation.path collab.rotation.available runtime.path bifrost.enabled shared.path shared.ready shared-ai-relay.env
 check rejected_message_config_stop 0 sh -c '. "$NAS_ROOT/scripts/lib.sh"; load_stack_env; run_compose stop collab network network-broker'
 if grep -q -- "$NAS_ROOT/collab-compose.yml" "$INSTALL_LOG"; then printf 'PASS rejected_message_config_retains_stop_definitions\n'
 else printf 'FAIL rejected_message_config_lost_stop_definitions\n'; fail=1; fi
 printf 'invalid\n' >"$TMP/export/collab.enabled"
-tar -C "$TMP/export" -cf "$TMP/export.tar" platform.env edge.env agent.env audit-db.env bifrost-audit.env collab.enabled managed.identity.enabled collab.rotation.path collab.rotation.available runtime.path bifrost.enabled shared.path shared.ready
+tar -C "$TMP/export" -cf "$TMP/export.tar" platform.env edge.env agent.env audit-db.env bifrost-audit.env collab.enabled managed.identity.enabled collab.rotation.path collab.rotation.available runtime.path bifrost.enabled shared.path shared.ready shared-ai-relay.env
 check reject_invalid_overlay_decision 1 sh -c '. "$NAS_ROOT/scripts/lib.sh"; load_stack_env; run_compose config --quiet'
 tar -C "$TMP/export" -cf "$TMP/export.tar" platform.env edge.env agent.env
 check reject_missing_overlay_decision 1 sh -c '. "$NAS_ROOT/scripts/lib.sh"; load_stack_env; run_compose config --quiet'
@@ -153,29 +154,34 @@ else printf 'FAIL source_check_boundary\n'; fail=1; fi
 printf '0\n' >"$TMP/export/collab.enabled"
 printf '%s' "$AURIGA_DATA_ROOT/config/shared-runtime/g-$(printf '%064d' 1)" >"$TMP/export/shared.path"
 printf '0\n' >"$TMP/export/shared.ready"
-tar -C "$TMP/export" -cf "$TMP/export.tar" platform.env edge.env agent.env audit-db.env bifrost-audit.env collab.enabled managed.identity.enabled collab.rotation.path collab.rotation.available runtime.path bifrost.enabled shared.path shared.ready
+: >"$TMP/export/shared-ai-relay.env"
+tar -C "$TMP/export" -cf "$TMP/export.tar" platform.env edge.env agent.env audit-db.env bifrost-audit.env collab.enabled managed.identity.enabled collab.rotation.path collab.rotation.available runtime.path bifrost.enabled shared.path shared.ready shared-ai-relay.env
+check shared_missing_ai_dsn_refused 1 sh -c '. "$NAS_ROOT/scripts/lib.sh"; load_stack_env; run_compose config --quiet'
+printf 'AURIGA_AI_PG_DSN=postgres://auriga_bifrost:test@postgres:5432/bifrost?sslmode=disable\nAURIGA_AI_MIGRATION_PG_DSN=postgres://auriga_bifrost_owner:test@postgres:5432/bifrost?sslmode=disable\n' >"$TMP/export/shared-ai-relay.env"
+tar -C "$TMP/export" -cf "$TMP/export.tar" platform.env edge.env agent.env audit-db.env bifrost-audit.env collab.enabled managed.identity.enabled collab.rotation.path collab.rotation.available runtime.path bifrost.enabled shared.path shared.ready shared-ai-relay.env
 check shared_closed_config_available 0 sh -c '. "$NAS_ROOT/scripts/lib.sh"; load_stack_env; run_compose config --quiet'
 check shared_closed_up_refused 1 sh -c '. "$NAS_ROOT/scripts/lib.sh"; load_stack_env; run_compose up -d'
 check shared_service_stop_cannot_bypass_up 1 sh -c '. "$NAS_ROOT/scripts/lib.sh"; load_stack_env; run_compose up stop'
 check shared_closed_stop_available 0 sh -c '. "$NAS_ROOT/scripts/lib.sh"; load_stack_env; run_compose stop edge'
 printf '1\n' >"$TMP/export/shared.ready"
-tar -C "$TMP/export" -cf "$TMP/export.tar" platform.env edge.env agent.env audit-db.env bifrost-audit.env collab.enabled managed.identity.enabled collab.rotation.path collab.rotation.available runtime.path bifrost.enabled shared.path shared.ready
+tar -C "$TMP/export" -cf "$TMP/export.tar" platform.env edge.env agent.env audit-db.env bifrost-audit.env collab.enabled managed.identity.enabled collab.rotation.path collab.rotation.available runtime.path bifrost.enabled shared.path shared.ready shared-ai-relay.env
 check shared_ready_up_uses_overlay 0 sh -c '. "$NAS_ROOT/scripts/lib.sh"; load_stack_env; run_compose up -d'
 if grep -qx '      AURIGA_GRPC_SERVER_TENANT_DELEGATES: svc:edge,svc:ai-gateway,svc:agent' "$INSTALL_SHARED_SNAPSHOT" \
   && grep -qx '      AURIGA_GRPC_SERVER_TENANT_DELEGATES: svc:edge,svc:ai-gateway' "$ROOT/docker-compose.yml" \
   && grep -Fq '/agent-tokens:/run/auriga-agent-token:ro' "$INSTALL_SHARED_SNAPSHOT" \
-  && grep -Fq '/platform:/etc/auriga/shared:ro' "$INSTALL_SHARED_SNAPSHOT"; then
+  && grep -Fq '/platform:/etc/auriga/shared:ro' "$INSTALL_SHARED_SNAPSHOT" \
+  && grep -Fq "/shared-ai-relay.env'" "$INSTALL_SHARED_SNAPSHOT"; then
   printf 'PASS shared_adds_only_existing_agent_delegate_and_keeps_dedicated_readonly_consumer_mount\n'
 else printf 'FAIL shared_authentication_or_mount_boundary\n'; fail=1; fi
 if grep -Eq 'bifrost.yml -f [^ ]*shared-runtime-compose.yml -f [^ ]*/shared.yml up' "$INSTALL_LOG"; then printf 'PASS shared_projection_overrides_original_edge_paths\n'
 else printf 'FAIL shared_overlay_order\n'; fail=1; fi
 printf '2\n' >"$TMP/export/shared.ready"
 : >"$TMP/export/shared.path"
-tar -C "$TMP/export" -cf "$TMP/export.tar" platform.env edge.env agent.env audit-db.env bifrost-audit.env collab.enabled managed.identity.enabled collab.rotation.path collab.rotation.available runtime.path bifrost.enabled shared.path shared.ready
+tar -C "$TMP/export" -cf "$TMP/export.tar" platform.env edge.env agent.env audit-db.env bifrost-audit.env collab.enabled managed.identity.enabled collab.rotation.path collab.rotation.available runtime.path bifrost.enabled shared.path shared.ready shared-ai-relay.env
 check shared_invalid_refuses_personal_fallback 1 sh -c '. "$NAS_ROOT/scripts/lib.sh"; load_stack_env; run_compose up -d'
 check shared_invalid_stop_available 0 sh -c '. "$NAS_ROOT/scripts/lib.sh"; load_stack_env; run_compose stop edge'
 printf '1\n' >"$TMP/export/shared.ready"
-tar -C "$TMP/export" -cf "$TMP/export.tar" platform.env edge.env agent.env audit-db.env bifrost-audit.env collab.enabled managed.identity.enabled collab.rotation.path collab.rotation.available runtime.path bifrost.enabled shared.path shared.ready
+tar -C "$TMP/export" -cf "$TMP/export.tar" platform.env edge.env agent.env audit-db.env bifrost-audit.env collab.enabled managed.identity.enabled collab.rotation.path collab.rotation.available runtime.path bifrost.enabled shared.path shared.ready shared-ai-relay.env
 ln -s "$TMP/access.json" "$TMP/access-link.json"
 sed -i "s|^AURIGA_ACCESS_FILE=.*|AURIGA_ACCESS_FILE=$TMP/access-link.json|" "$AURIGA_DATA_ROOT/stack.env"
 check reject_input_symlink 1 sh "$NAS_ROOT/scripts/installer.sh" init

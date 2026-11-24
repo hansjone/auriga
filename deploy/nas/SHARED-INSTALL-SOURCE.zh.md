@@ -56,7 +56,27 @@ sh deploy/nas/scripts/start.sh
 
 明确无任何公司身份配置的新装才把两个adapter选项替换为 `--team-only`。NAS团队登录优先继续来自原部署配置；共享装配保留原Edge登录设置及私有UAC字节，不修改产品SSO默认策略。
 
-`render` 重新验证原source/Node/runtime/proofs，创建 `config/shared-runtime/g-<digest>`。Platform只收到本服务签名与agent exporter输入，Edge只收到本服务identity/replay seed，Gateway只收到模型公钥，Agent只收到原完整runtime/profile/公开Host材料及svc:agent JWT只读目录；Host没有安装secret、服务JWT或签名私钥挂载。原Edge/Gateway exporter权限不变。Agent JWT由原IAM受信签发器自动续签并0600原子替换目录内文件。仅共享安装的原tenant-delegates追加既定svc:agent；原edge/gateway保留，无新增issuer或audience。新的RPC/model只发布到NAS loopback19091/18087，平台9091与共享模型18887仍有原mTLS、既定服务主体/Node UUID核验。
+`render` 重新验证原source/Node/runtime/proofs，创建 `config/shared-runtime/g-<digest>`。Platform只收到本服务签名与agent exporter输入，Edge只收到本服务identity/replay seed，Gateway只收到模型公钥及独立的 `gateway/ai-relay.env`（自动从既有 Bifrost PG 运行/迁移密码投影 `AURIGA_AI_PG_DSN` 与 `AURIGA_AI_MIGRATION_PG_DSN`，host 与 container 模式均自动注入 `ai-relay`，无需现场手拼 DSN），Agent只收到原完整runtime/profile/公开Host材料及svc:agent JWT只读目录；Host没有安装secret、服务JWT或签名私钥挂载。原Edge/Gateway exporter权限不变。Agent JWT由原IAM受信签发器自动续签并0600原子替换目录内文件。仅共享安装的原tenant-delegates追加既定svc:agent；原edge/gateway保留，无新增issuer或audience。新的RPC/model只发布到NAS loopback19091/18087，平台9091与共享模型18887仍有原mTLS、既定服务主体/Node UUID核验。
+
+## 输入获取与 XFS 存储后端前置
+
+1. **`BASE_SHA256`**：取自原 `config/materials/iam-installation/bootstrap.receipt` 文件字节的 SHA-256（可用 `auriga-nas-bootstrap collab-base "$DATA/config/materials"` 交叉核对）。
+2. **`profile.yml`**：使用仓库冻结的 [shared-runtime-profile.example.yml](shared-runtime-profile.example.yml)（须通过 `ValidateSharedProfile` 校验，不可随意删改行；渲染器会自动替换监听占位符）。
+3. **存储后端选择（默认 `ext4-image`，可选 `--backend xfs`）**：
+   - 在不支持 ext4 `prjquota` 的内核（例如 CentOS 7 `3.10.x`）上，可使用 XFS 项目配额后端：
+     ```sh
+     sh deploy/nas/scripts/shared-install.sh \
+       --expected-base-sha256 "$BASE_SHA256" \
+       --profile-file "$APPROVED_PROFILE" --profile-sha256 "$PROFILE_SHA256" \
+       --model auto --team-only \
+       --backend xfs \
+       --quota-mount "$AURIGA_DATA_ROOT/data/agent/pools" \
+       --quota-binary /usr/sbin/xfs_quota \
+       --project-first 10000 --project-last 199999
+     ```
+   - **`--quota-mount` 路径规则**：必须是已启用 `prjquota`（`Accounting: ON / Enforcement: ON`）的独立 XFS 挂载点（可为裸设备或写入 `/etc/fstab` 的 loop XFS 镜像文件），且必须位于 `$AURIGA_DATA_ROOT/data/agent/pools`（Agent 容器内 `DataRoot` 为 `$AURIGA_DATA_ROOT/data/agent`，池根为 `data/agent/pools`）。
+   - **Agent 镜像要求**：`xfs` 后端要求 `agent` 容器内存在可执行 `xfs_quota`（官方 `Dockerfile.agent` 与离线装配 `system-inputs.sh` / `Dockerfile.assembly` 已纳入 `xfsprogs`；离线构建变更后须同步刷新 `system/agent` 离线 deb 输入包）。`shared-install.sh`、`preflight.sh` 与 `auriga doctor` 均会以无网络只读容器探针校验 `xfs_quota` 可执行性。
+   - **启动与观测**：提交并 render 后必须执行一次 `sh deploy/nas/scripts/start.sh` 完成 NATS replay 桶预建与临时安装身份撤权。可通过 `sh deploy/nas/scripts/status.sh`、`sh deploy/nas/scripts/preflight.sh` 与 `auriga doctor` 查看 `shared_runtime_state`、`backend`、`quota_mount`、`shared_replay_state` 及 XFS 探针状态（不含任何凭据）。
 
 ## 显式更换共享模型或共享 profile
 

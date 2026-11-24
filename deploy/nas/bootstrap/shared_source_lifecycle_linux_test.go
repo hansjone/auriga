@@ -571,7 +571,7 @@ func testNASSharedRoleAndReplayPreparation(t *testing.T, data, base, binary stri
 		}
 	}
 	checkDedicated(projected)
-	for name, uid := range map[string]uint32{"platform/platform.properties": 10001, "edge/edge.config.json": 65532, "gateway/bifrost-runtime.json": 10001, "agent/agent.json": 0, "nats/nats.conf": 65532} {
+	for name, uid := range map[string]uint32{"platform/platform.properties": 10001, "edge/edge.config.json": 65532, "gateway/bifrost-runtime.json": 10001, "gateway/ai-relay.env": 10001, "agent/agent.json": 0, "nats/nats.conf": 65532} {
 		if _, err := sharedRoleReadLeaf(filepath.Join(projected, name), uid, 0600, 4<<20); err != nil {
 			t.Fatal(name, err)
 		}

@@ -200,7 +200,15 @@ func nasSharedRuntime(args []string, stdout io.Writer) error {
 		return err
 	}
 	if *action == "status" {
-		_, err = fmt.Fprintf(stdout, "state=%s version=1 records=%d\n", state, len(eventNames)+1)
+		storageSpec, err := sharedStorageSpecFromReceipt(receipt)
+		if err != nil {
+			return err
+		}
+		if storageSpec.Backend == "xfs" {
+			_, err = fmt.Fprintf(stdout, "state=%s version=1 records=%d backend=xfs quota_mount=%s quota_binary=%s\n", state, len(eventNames)+1, storageSpec.QuotaMount, storageSpec.QuotaBinary)
+			return err
+		}
+		_, err = fmt.Fprintf(stdout, "state=%s version=1 records=%d backend=ext4-image\n", state, len(eventNames)+1)
 		return err
 	}
 	if *action == "set-model" {
@@ -314,21 +322,22 @@ func sharedInstallationLock(out string) (func(), error) {
 // Read only fixed public leaves from the original UID10001 sealed base, using
 // the same pinned directory and exact metadata rules as its existing guard.
 func sharedBasePublic(base, name string) ([]byte, error) {
-	if name == "uac/adapter.json" {
-		return nil, fmt.Errorf("private adapter is not a public base leaf")
+	if name == "uac/adapter.json" || name == "bifrost/pg_password" || name == "bifrost/pg_migration_password" {
+		return nil, fmt.Errorf("private base leaf is not public")
 	}
 	return sharedBaseLeaf(base, name)
 }
 
 func sharedBaseLeaf(base, name string) ([]byte, error) {
-	if name != "access.json" && name != "identity-keys.json" && name != "pki/ca.crt" && name != "templates/real-dsh.pb" && name != "bifrost-runtime.json" {
-		if name != "uac/adapter.json" {
-			return nil, fmt.Errorf("unsupported fixed shared base leaf")
-		}
-	}
 	mode := uint32(0644)
-	if name == "uac/adapter.json" {
+	switch name {
+	case "access.json", "identity-keys.json", "pki/ca.crt", "templates/real-dsh.pb", "bifrost-runtime.json":
+	case "uac/adapter.json":
 		mode = 0640
+	case "bifrost/pg_password", "bifrost/pg_migration_password":
+		mode = 0600
+	default:
+		return nil, fmt.Errorf("unsupported fixed shared base leaf")
 	}
 	current, err := openNASSourceRoot(base)
 	if err != nil {

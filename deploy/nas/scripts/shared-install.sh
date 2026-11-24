@@ -102,6 +102,13 @@ case "$_shared_team" in
   true) [ -z "$_shared_adapter$_shared_adapter_sha" ] || die 'team-only and adapter inputs are mutually exclusive' ;;
   false) [ -n "$_shared_adapter" ] && [ -n "$_shared_adapter_sha" ] || die 'approve the existing company adapter or explicitly select new team-only installation' ;;
 esac
+if [ "$_shared_backend" = xfs ] && [ -n "${AURIGA_IMAGE_AGENT:-}" ] && command -v docker >/dev/null 2>&1; then
+  if docker image inspect "$AURIGA_IMAGE_AGENT" >/dev/null 2>&1; then
+    _xfs_probe_bin=${_shared_quota_binary:-/usr/sbin/xfs_quota}
+    docker run --rm --pull never --network none --entrypoint sh "$AURIGA_IMAGE_AGENT" -c 'test -x "$1"' -- "$_xfs_probe_bin" \
+      || die "agent image ($AURIGA_IMAGE_AGENT) is missing executable $_xfs_probe_bin required for --backend xfs; rebuild or upgrade agent image with xfsprogs"
+  fi
+fi
 if [ "${AURIGA_INSTALL_MODE:-host}" = container ]; then
   NAS_SHARED_BACKEND="$_shared_backend" \
   NAS_SHARED_QUOTA_MOUNT="$_shared_quota_mount" \

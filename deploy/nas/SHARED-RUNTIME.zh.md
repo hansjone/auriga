@@ -9,7 +9,7 @@
    同宿主 combined Linux 安装可显式启用 `auriga.iam.agent-token-export.enabled=true`，由原 `InternalTokenIssuer` 固定签发 `svc:agent`。先为 Agent 安装独立的 43 字符安装 secret，并将其 SHA256 注册到既有 `auriga.iam.internal-secret-hashes.agent`；不能复用 Edge/Gateway secret、JWT 或签名私钥。配置 `installation-secret-file`、`token-file` 两个绝对路径，其目录与其他服务以及彼此独立；秘密只给 IAM。若安装 secret 的属主与 IAM 进程不同，沿原受信安装配置显式设置 `installation-owner`，不得开放文件权限。输出目录固定0700、令牌固定0600，原子替换。只把专用输出目录整体只读挂给受信 Agent，使每次按路径读取可看到新 inode，不能只 bind 旧 token 文件；Host 不挂此目录，也不挂安装 secret。Agent 必须具备安装方批准的属主读取能力，不添加组或其他用户读权限。这里没有任意 service/filemode/reader-group 配置。
 
    导出器沿原60秒续签周期和300秒 JWT 有效期，每次重新核安装 secret。签发/文件检查失败保留旧文件与原到期时间；关闭/停用只停止续签，不删除旧 Agent 文件，也不延长旧票有效期。停止代次后的迟到结果不可重新发布。此新增 Agent 导出仅支持 POSIX 服务端，其他文件系统明确拒绝；原 Edge/Gateway 的组读取与 Windows ACL 行为保留。NAS 安装 secret/hash 的受控生成、Compose 投影和持久启用仍须由安装流程提供，此开关不等于全部共享材料已经安装。
-2. 在 N 原 `--bifrost-config` 配置中添加 [模型独立 listener](../../infra/ai-gateway/SHARED-DSH.zh.md)。同时整合 N 消息作者的 `sharedMessages` listener：固定 `listen,tenantId,allowedNodeIds,tlsCertFile,tlsKeyFile,clientCAFile,messagePublicKeys,collab`，`collab` 沿原 `team.RPCConfig` 的 mTLS/轮换服务 JWT。模型和消息使用独立监听地址；Node 配置各自固定 origin/CA，不能把成员入口当内部入口。证书必须具有唯一 `auriga://node/<Node UUID>` URI SAN，N 的专用 CA 和精确 allowlist 必须认可该 Node。N 使用原迁移、真实调用账本和 collab 邮箱，不另启内存实现。
+2. 在 N 原 `--bifrost-config` 配置中添加 [模型独立 listener](../../infra/ai-gateway/SHARED-DSH.zh.md)。同时整合 N 消息作者的 `sharedMessages` listener：固定 `listen,tenantId,allowedNodeIds,tlsCertFile,tlsKeyFile,clientCAFile,messagePublicKeys,collab`，`collab` 沿原 `team.RPCConfig` 的 mTLS/轮换服务 JWT。模型和消息使用独立监听地址；Node 配置各自固定 origin/CA，不能把成员入口当内部入口。证书必须具有唯一 `auriga://node/<Node UUID>` URI SAN，N 的专用 CA 和精确 allowlist 必须认可该 Node。N 使用原迁移、真实调用账本和 collab 邮箱，不另启内存实现。NAS 共享投影会自动从既有 Bifrost PG 凭据（角色 `auriga_bifrost` / `auriga_bifrost_owner`，库 `bifrost`）投影 `gateway/ai-relay.env` 并为 `ai-relay` 注入 `AURIGA_AI_PG_DSN` 与 `AURIGA_AI_MIGRATION_PG_DSN`（host 与 container 模式均自动生效）。
 3. 启动 platform 原服务，再启动 N：`auriga-ai-gateway --bifrost-config /etc/auriga/shared-runtime/bifrost.json`。服务监听端口只向授权 Node 开放。普通 keyset 暂时过期时保留已安装消息 handler，调用真实失败；不移除 handler 令 Host/model 启动失败。
 
    Edge 的 `sharedDsh` 安装对象只接受固定字段；NATS 认证必须在原 `natsCredsFile`（账户 JWT 凭据文件）与 `natsSeedFile`（静态账户的专用 user NKey seed）中恰选一个，不能混用或回退其他用户。seed 路径必须绝对且规范，Linux要求受保护祖先及单链接、属主私有文件；每次重连按同一已解析 public user 回验并签 nonce，材料改变即拒绝。此专用连接去除旧 NATS URL 的用户名/密码，不改变其他连接。回复 inbox 固定 `_INBOX_auriga_shared_entry`，服务端只授予其回复订阅和 `auriga-shared-entry` 账本必要权限；W 的平台身份只需同桶读取。只生成种子或示例配置不代表服务器身份/账本已安装，必须沿受控安装快照及标准启动链启用。
@@ -46,6 +46,8 @@ docker compose -f deploy/nas/docker-compose.yml -f deploy/nas/shared-runtime-com
 ## Linux/NAS 存储与进程边界
 
 NAS 原 ext4 不要求 project quota，也不重格式化。`ext4-image` 在 Node 私有 control 下预分配普通 backing file，以 loop 挂为独立 ext4/project quota，Docker 用同一 loop 设备建立受管 volume。镜像仅启用内核 5.10 兼容特性：关闭 orphan_file/metadata_csum_seed。任何设备、superblock、挂载 prjquota、工程配额或读回不符均拒绝 READY，不回退软配额。
+
+若宿主内核不支持 ext4 `prjquota`（如 CentOS 7 `3.10.x`），可在 `shared-install.sh` 中启用 `--backend xfs`：要求宿主机将启用 `prjquota`（`Accounting: ON / Enforcement: ON`）的独立 XFS 文件系统（或写入 `/etc/fstab` 的 XFS loop 镜像）挂载到 `${AURIGA_DATA_ROOT}/data/agent/pools`，且 `agent` 镜像内具备可执行 `xfs_quota`（`xfsprogs` 已纳入 `Dockerfile.agent` 与离线装配清单）；`ext4-image` 后端不依赖 `xfsprogs`。
 
 Agent overlay 明确要求 root、host user/PID namespace、loop 设备、CHOWN/DAC_OVERRIDE/FOWNER/SYS_ADMIN；Host 自身仍是私有 PID namespace、非 root、只读根、无 capabilities。host PID namespace 仅用于将 UDS SO_PEERCRED 的 PID/启动 tick 沿 `/proc` 父链绑定到已验签的真实容器进程；每次调用和结果前复核，不能用 body 的 boot/task/member 绕过。Docker endpoint 必须是同机 daemon。
 

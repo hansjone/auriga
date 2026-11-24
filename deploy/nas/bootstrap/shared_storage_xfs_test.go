@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"strings"
 	"testing"
 )
 
@@ -149,13 +150,15 @@ func TestSharedServiceProjection_XFSBackend(t *testing.T) {
 		ProjectLast:    199999,
 	}
 	files, err := sharedServiceProjection(sharedProjectionInputs{
-		Receipt:       receipt,
-		Source:        source,
-		RuntimeJSON:   []byte(`{"syntheticRuntime":true}`),
-		InternalCA:    []byte("synthetic-public-ca"),
-		EdgeConfig:    edge,
-		BifrostConfig: gateway,
-		NATSConfig:    sharedRenderedNATSFixture(t),
+		Receipt:                    receipt,
+		Source:                     source,
+		RuntimeJSON:                []byte(`{"syntheticRuntime":true}`),
+		InternalCA:                 []byte("synthetic-public-ca"),
+		EdgeConfig:                 edge,
+		BifrostConfig:              gateway,
+		BifrostPGPassword:          []byte(strings.Repeat("a", 64)),
+		BifrostPGMigrationPassword: []byte(strings.Repeat("b", 64)),
+		NATSConfig:                 sharedRenderedNATSFixture(t),
 	})
 	if err != nil {
 		t.Fatalf("sharedServiceProjection(xfs) failed: %v", err)

@@ -11,13 +11,29 @@ import (
 // Each role receives only its own immutable projection. The source, Agent
 // installation secret and service-token output directory are never Host mounts.
 type sharedProjectionInputs struct {
-	Receipt       *sharedInstallationReceipt
-	Source        map[string][]byte
-	RuntimeJSON   []byte // resolved by the existing runtime/proof verifier
-	InternalCA    []byte // fixed public sealed CA
-	EdgeConfig    []byte // original verified base/collab projection
-	BifrostConfig []byte // original verified Bifrost material source
-	NATSConfig    []byte // freshly rendered standard password-user configuration
+	Receipt                    *sharedInstallationReceipt
+	Source                     map[string][]byte
+	RuntimeJSON                []byte // resolved by the existing runtime/proof verifier
+	InternalCA                 []byte // fixed public sealed CA
+	EdgeConfig                 []byte // original verified base/collab projection
+	BifrostConfig              []byte // original verified Bifrost material source
+	BifrostPGPassword          []byte // existing Bifrost runtime PostgreSQL password (64 lower-hex)
+	BifrostPGMigrationPassword []byte // existing Bifrost migration PostgreSQL password (64 lower-hex)
+	NATSConfig                 []byte // freshly rendered standard password-user configuration
+}
+
+func sharedBifrostHexPassword(raw []byte) (string, error) {
+	pw := strings.TrimSpace(string(raw))
+	if len(pw) != 64 {
+		return "", fmt.Errorf("verified 64-hex Bifrost PostgreSQL password required")
+	}
+	for i := 0; i < len(pw); i++ {
+		c := pw[i]
+		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')) {
+			return "", fmt.Errorf("verified 64-hex Bifrost PostgreSQL password required")
+		}
+	}
+	return pw, nil
 }
 
 func sharedServiceProjection(in sharedProjectionInputs) (map[string]sharedProjectedFile, error) {
@@ -104,6 +120,23 @@ func sharedServiceProjection(in sharedProjectionInputs) (map[string]sharedProjec
 		return nil, err
 	}
 	put("gateway/model.pem", in.Source["public/model.pem"], 10001, 0644)
+	bifrostPG, err := sharedBifrostHexPassword(in.BifrostPGPassword)
+	if err != nil {
+		return nil, err
+	}
+	bifrostMigPG, err := sharedBifrostHexPassword(in.BifrostPGMigrationPassword)
+	if err != nil {
+		return nil, err
+	}
+	if bifrostPG == bifrostMigPG {
+		return nil, fmt.Errorf("Bifrost runtime and migration PostgreSQL passwords must differ")
+	}
+	aiRelayEnv := fmt.Sprintf(
+		"AURIGA_AI_PG_DSN=postgres://auriga_bifrost:%s@postgres:5432/bifrost?sslmode=disable\nAURIGA_AI_MIGRATION_PG_DSN=postgres://auriga_bifrost_owner:%s@postgres:5432/bifrost?sslmode=disable\n",
+		bifrostPG,
+		bifrostMigPG,
+	)
+	put("gateway/ai-relay.env", []byte(aiRelayEnv), 10001, 0600)
 	endpoint := func(address string) map[string]string {
 		return map[string]string{"address": address, "caFile": "/etc/auriga/shared-runtime/internal-ca.crt"}
 	}

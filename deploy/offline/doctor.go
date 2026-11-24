@@ -148,6 +148,7 @@ func doctor(s state) error {
 		}
 	}
 	fmt.Println(accessCapabilities(s).DoctorLine())
+	fmt.Println(checkSharedRuntime(s).DoctorLine())
 	fmt.Printf("doctor 结束，失败项 %d。输出不含凭据。\n", failures)
 	if failures > 0 {
 		return errors.New("请按 FAIL 修复建议处理")
