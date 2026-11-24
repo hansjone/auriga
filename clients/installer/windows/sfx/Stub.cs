@@ -57,8 +57,7 @@ static class Setup
     public const string Publisher = "Auriga";
     public const string FolderName = "Auriga DSH";
     static readonly Regex SafeVersionId = new Regex("^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$");
-    [DllImport("kernel32.dll")] static extern IntPtr GetConsoleWindow();
-    [DllImport("user32.dll")] static extern bool ShowWindow(IntPtr window, int command);
+    [DllImport("kernel32.dll")] static extern bool AttachConsole(int dwProcessId);
 
     [STAThread]
     static int Main(string[] args)
@@ -106,17 +105,59 @@ static class Setup
         return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "AurigaDesktop", "home");
     }
 
+    static int RelaunchElevated(string[] args)
+    {
+        try
+        {
+            string exe = Assembly.GetExecutingAssembly().Location;
+            var forwarded = new List<string>();
+            foreach (string a in args) forwarded.Add(Quote(a));
+            forwarded.Add("/ELEVATED");
+            var info = new ProcessStartInfo(exe, string.Join(" ", forwarded.ToArray()))
+            {
+                UseShellExecute = true,
+                Verb = "runas",
+            };
+            using (var p = Process.Start(info))
+            {
+                if (p == null) return 1;
+                p.WaitForExit();
+                return p.ExitCode;
+            }
+        }
+        catch (System.ComponentModel.Win32Exception e)
+        {
+            // ERROR_CANCELLED (1223): user declined the UAC prompt.
+            if (e.NativeErrorCode == 1223) return 2;
+            MessageBox.Show("无法请求管理员权限：" + e.Message, Brand, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return 1;
+        }
+        catch (Exception e)
+        {
+            MessageBox.Show("无法请求管理员权限：" + e.Message, Brand, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return 1;
+        }
+    }
+
     static int Start(string[] args)
     {
         bool silent = Array.Exists(args, a => a.Equals("/VERYSILENT", StringComparison.OrdinalIgnoreCase));
         if (!silent)
         {
-            ShowWindow(GetConsoleWindow(), 0);
+            bool triedElevate = Array.Exists(args, a => a.Equals("/ELEVATED", StringComparison.OrdinalIgnoreCase));
+            bool noElevate = Array.Exists(args, a => a.Equals("/NOELEVATE", StringComparison.OrdinalIgnoreCase));
+            if (!IsElevated() && !triedElevate && !noElevate)
+                return RelaunchElevated(args);
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
             using (var wizard = new Wizard()) { Application.Run(wizard); return wizard.ExitCode; }
         }
-        args = Array.FindAll(args, a => !a.Equals("/VERYSILENT", StringComparison.OrdinalIgnoreCase));
+        if (!Console.IsOutputRedirected && !Console.IsErrorRedirected)
+            try { AttachConsole(-1); } catch (Exception) { }
+        args = Array.FindAll(args, a =>
+            !a.Equals("/VERYSILENT", StringComparison.OrdinalIgnoreCase) &&
+            !a.Equals("/ELEVATED", StringComparison.OrdinalIgnoreCase) &&
+            !a.Equals("/NOELEVATE", StringComparison.OrdinalIgnoreCase));
         return Install(args);
     }
 
@@ -373,7 +414,7 @@ sealed class Wizard : Form
     readonly Panel header = new Panel { Left = 0, Top = 0, Width = W, Height = HeaderH, BackColor = Color.White };
     readonly Label heading = new Label { Left = 24, Top = 12, Width = 540, Height = 26, Font = new Font("Microsoft YaHei UI", 11.5f, FontStyle.Bold), ForeColor = TitleText };
     readonly Label subheading = new Label { Left = 26, Top = 39, Width = 540, Height = 22, ForeColor = MutedText };
-    readonly PictureBox logo = new PictureBox { Left = W - 68, Top = 12, Width = 44, Height = 44, SizeMode = PictureBoxSizeMode.Zoom };
+    readonly PictureBox logo = new PictureBox { Left = W - 64, Top = 14, Width = 40, Height = 40, SizeMode = PictureBoxSizeMode.Zoom, Anchor = AnchorStyles.Top | AnchorStyles.Right };
     readonly Panel headerLine = new Panel { Left = 0, Top = HeaderH, Width = W, Height = 1, BackColor = BorderGray };
 
     readonly Panel body = new Panel { Left = 0, Top = HeaderH + 1, Width = W, Height = H - HeaderH - 1 - FooterH, BackColor = SystemColors.Control };
@@ -828,21 +869,57 @@ sealed class Wizard : Form
             if (Directory.Exists(path) && Directory.GetFileSystemEntries(path).Length > 0 && !File.Exists(Path.Combine(path, ".auriga-desktop-install")))
                 return Fail("该文件夹不是空的，也不是 " + Setup.Brand + " 的安装位置。请选择空文件夹或新文件夹。");
 
-            string probeDir = path;
-            while (!string.IsNullOrEmpty(probeDir) && !Directory.Exists(probeDir))
-                probeDir = Path.GetDirectoryName(probeDir);
-            if (string.IsNullOrEmpty(probeDir)) return Fail("目标驱动器不存在或不可访问，请检查路径是否正确。");
-            string probe = Path.Combine(probeDir, ".auriga-write-test-" + Guid.NewGuid().ToString("N"));
-            File.WriteAllText(probe, "");
-            File.Delete(probe);
+            string driveRoot = Path.GetPathRoot(path);
+            if (string.IsNullOrEmpty(driveRoot) || !Directory.Exists(driveRoot))
+                return Fail("目标驱动器不存在或不可访问，请检查路径是否正确。");
+
+            // Probe inside the target folder itself rather than dropping a loose file in a
+            // drive root (e.g. D:\): corporate NTFS policies often allow creating subfolders
+            // under D:\ while denying loose file creation at the drive root even for admins.
+            var createdDirs = new List<string>();
+            string probe = null;
+            try
+            {
+                if (!Directory.Exists(path))
+                {
+                    string cursor = path;
+                    while (!string.IsNullOrEmpty(cursor) && !Directory.Exists(cursor))
+                    {
+                        createdDirs.Add(cursor);
+                        string parent = Path.GetDirectoryName(cursor);
+                        if (string.IsNullOrEmpty(parent) || parent.Equals(cursor, StringComparison.OrdinalIgnoreCase)) break;
+                        cursor = parent;
+                    }
+                    Directory.CreateDirectory(path);
+                }
+                probe = Path.Combine(path, ".auriga-write-test-" + Guid.NewGuid().ToString("N"));
+                File.WriteAllText(probe, "");
+            }
+            finally
+            {
+                if (!string.IsNullOrEmpty(probe))
+                    try { if (File.Exists(probe)) File.Delete(probe); } catch (Exception) { }
+                // Clean up only the empty directories created solely for this probe (leaf-first).
+                foreach (string dir in createdDirs)
+                {
+                    try
+                    {
+                        if (Directory.Exists(dir) && Directory.GetFileSystemEntries(dir).Length == 0)
+                            Directory.Delete(dir, false);
+                    }
+                    catch (Exception) { }
+                }
+            }
 
             long needed = RequiredBytes();
             if (drive.AvailableFreeSpace < needed)
                 return Fail(string.Format("目标磁盘空间不足：至少需要 {0:0} MB 可用空间。", needed / 1048576.0));
         }
-        catch (UnauthorizedAccessException)
+        catch (UnauthorizedAccessException e)
         {
-            return Fail("没有足够权限写入目标位置：" + path + "\n\n请右键点击安装程序并选择“以管理员身份运行”，或更换其他可写路径。");
+            return Fail(Setup.IsElevated()
+                ? "当前已以管理员身份运行，但仍无权写入目标位置：" + path + "\n\n可能受系统磁盘权限或终端安全策略限制（" + e.Message + "）。请检查目录权限或更换其他可写路径。"
+                : "没有足够权限写入目标位置：" + path + "\n\n请以管理员身份重新运行安装程序，或更换其他可写路径。");
         }
         catch (Exception e) { return Fail("无法使用该安装位置：" + e.Message); }
 

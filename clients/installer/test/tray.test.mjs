@@ -48,10 +48,11 @@ test(
     compileTray(join(base, 'tray', 'AurigaDesktop.exe'), icon);
     assert.ok(existsSync(join(base, 'stub.exe')));
     assert.ok(existsSync(join(base, 'tray', 'AurigaDesktop.exe')));
-    assert.match(
-      readFileSync(join(base, 'stub.exe')).toString('utf8'),
-      /level="requireAdministrator"/,
-    );
+    const stubBytes = readFileSync(join(base, 'stub.exe'));
+    const peOffset = stubBytes.readUInt32LE(0x3c);
+    // IMAGE_SUBSYSTEM_WINDOWS_GUI (2): no console window flashes on interactive launch.
+    assert.equal(stubBytes.readUInt16LE(peOffset + 0x5c), 2);
+    assert.match(stubBytes.toString('utf8'), /level="requireAdministrator"/);
     assert.match(
       readFileSync(join(base, 'tray', 'AurigaDesktop.exe')).toString('utf8'),
       /level="asInvoker"/,

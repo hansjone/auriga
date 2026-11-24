@@ -119,11 +119,14 @@ static class SfxPaths
             wizard.Scale(new System.Drawing.SizeF(1.5f, 1.5f));
             var show = typeof(Wizard).GetMethod("Show", BindingFlags.Instance | BindingFlags.NonPublic);
             var sidebar = (Control)Field(wizard, "sidebar");
+            var header = (Control)Field(wizard, "header");
             var headerLine = (Control)Field(wizard, "headerLine");
+            var logo = (Control)Field(wizard, "logo");
             var footerLine = (Control)Field(wizard, "footerLine");
             var body = (Control)Field(wizard, "body");
             var folder = (Control)Field(wizard, "folder");
             if (folder.Width < 600) { Console.WriteLine("unscaledFolderWidth=" + folder.Width); return 1; }
+            if (logo.Bottom > header.Height) { Console.WriteLine("logoClipped logoBottom=" + logo.Bottom + " headerHeight=" + header.Height); return 5; }
             for (int p = 0; p <= 6; p++)
             {
                 show.Invoke(wizard, new object[] { p });
