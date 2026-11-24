@@ -4599,7 +4599,7 @@ class WorkspaceIntegrationTest {
 
   @Test
   void nodeClockSkewUsesHelloTimeAndDoesNotDriftWithUsageHeartbeats() throws Exception {
-    clock.now = Instant.parse("2026-11-24T00:00:00Z");
+    clock.now = clock.instant().truncatedTo(java.time.temporal.ChronoUnit.SECONDS);
     var queries = new WorkspaceQueries(service);
 
     var request = joinRequest(token().token(), TestPki.key());
