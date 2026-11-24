@@ -417,7 +417,10 @@ sealed class Wizard : Form
     readonly PictureBox logo = new PictureBox { Left = W - 64, Top = 14, Width = 40, Height = 40, SizeMode = PictureBoxSizeMode.Zoom, Anchor = AnchorStyles.Top | AnchorStyles.Right };
     readonly Panel headerLine = new Panel { Left = 0, Top = HeaderH, Width = W, Height = 1, BackColor = BorderGray };
 
+    // Keep `body` (full-width pages 1..5) and `sidebarBody` (sidebar pages 0, 6) separate
+    // so switching between sidebar and full-width pages never resizes hidden panels' Anchors.
     readonly Panel body = new Panel { Left = 0, Top = HeaderH + 1, Width = W, Height = H - HeaderH - 1 - FooterH, BackColor = SystemColors.Control };
+    readonly Panel sidebarBody = new Panel { Left = SidebarW, Top = 0, Width = W - SidebarW, Height = H - FooterH, BackColor = Color.White, Visible = false };
 
     readonly Panel footerLine = new Panel { Left = 0, Top = H - FooterH, Width = W, Height = 1, BackColor = BorderGray };
     readonly Panel footerPanel = new Panel { Left = 0, Top = H - FooterH + 1, Width = W, Height = FooterH - 1, BackColor = FooterBg };
@@ -430,10 +433,11 @@ sealed class Wizard : Form
     // WinForms AutoScaleMode.Dpi scales every page's controls consistently at 125%/150%/200% DPI.
     readonly Panel[] pagePanels = new Panel[7];
 
-    // Welcome controls
-    readonly Label welcomeTitle = new Label { Left = 24, Top = 28, Width = W - SidebarW - 48, Height = 36, Font = new Font("Microsoft YaHei UI", 14, FontStyle.Bold), ForeColor = TitleText };
-    readonly Label welcomeIntro = new Label { Left = 24, Top = 74, Width = W - SidebarW - 48, Height = 148, ForeColor = BodyText };
-    readonly Label welcomeHint = new Label { Left = 24, Top = 246, Width = W - SidebarW - 48, Height = 72, ForeColor = MutedText };
+    // Welcome controls (hosted in a single-column auto-sizing TableLayoutPanel so text
+    // wraps cleanly to the live panel width and never clips or overlaps at any DPI)
+    readonly Label welcomeTitle = new Label { AutoSize = true, Dock = DockStyle.Fill, Margin = new Padding(0, 0, 0, 14), Font = new Font("Microsoft YaHei UI", 14, FontStyle.Bold), ForeColor = TitleText };
+    readonly Label welcomeIntro = new Label { AutoSize = true, Dock = DockStyle.Fill, Margin = new Padding(0, 0, 0, 18), ForeColor = BodyText };
+    readonly Label welcomeHint = new Label { AutoSize = true, Dock = DockStyle.Fill, Margin = new Padding(0, 0, 0, 0), ForeColor = MutedText };
 
     // License controls
     readonly TextBox licenseBox = new TextBox
@@ -441,53 +445,56 @@ sealed class Wizard : Form
         Left = 28, Top = 16, Width = W - 56, Height = 224,
         Multiline = true, ReadOnly = true, ScrollBars = ScrollBars.Vertical,
         BackColor = Color.White, BorderStyle = BorderStyle.FixedSingle,
-        Font = new Font("Microsoft YaHei UI", 9), TabStop = false
+        Font = new Font("Microsoft YaHei UI", 9), TabStop = false,
+        Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right | AnchorStyles.Bottom
     };
-    readonly RadioButton acceptLicense = new RadioButton { Left = 28, Top = 252, Width = 580, Height = 28, Text = "我已阅读并同意上述许可协议与使用声明(&A)" };
-    readonly RadioButton declineLicense = new RadioButton { Left = 28, Top = 284, Width = 580, Height = 28, Text = "我不同意此协议(&D)", Checked = true };
+    readonly RadioButton acceptLicense = new RadioButton { Left = 28, Top = 252, Width = W - 56, Height = 28, Text = "我已阅读并同意上述许可协议与使用声明(&A)", Anchor = AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right };
+    readonly RadioButton declineLicense = new RadioButton { Left = 28, Top = 284, Width = W - 56, Height = 28, Text = "我不同意此协议(&D)", Checked = true, Anchor = AnchorStyles.Bottom | AnchorStyles.Left | AnchorStyles.Right };
 
     // Location controls (keep field name `folder` for test harness compatibility)
-    readonly Label locationPrompt = new Label { Left = 28, Top = 26, Width = W - 56, Height = 26, ForeColor = TitleText };
-    readonly TextBox folder = new TextBox { Left = 28, Top = 60, Width = 492, Height = 24 };
-    readonly Button browse = new Button { Text = "浏览(&R)…", Left = 530, Top = 58, Width = 102, Height = 28, FlatStyle = FlatStyle.System };
-    readonly Label spaceInfo = new Label { Left = 28, Top = 102, Width = 604, Height = 48, ForeColor = MutedText };
-    readonly Label dataHomeInfo = new Label { Left = 28, Top = 166, Width = 604, Height = 68, ForeColor = MutedText };
+    readonly Label locationPrompt = new Label { Left = 28, Top = 24, Width = W - 56, Height = 28, ForeColor = TitleText, Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right };
+    readonly TextBox folder = new TextBox { Left = 28, Top = 58, Width = 492, Height = 24, Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right };
+    readonly Button browse = new Button { Text = "浏览(&R)…", Left = 530, Top = 56, Width = 102, Height = 28, FlatStyle = FlatStyle.System, Anchor = AnchorStyles.Top | AnchorStyles.Right };
+    readonly Label spaceInfo = new Label { Left = 28, Top = 98, Width = W - 56, Height = 56, ForeColor = MutedText, Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right };
+    readonly Label dataHomeInfo = new Label { Left = 28, Top = 164, Width = W - 56, Height = 84, ForeColor = MutedText, Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right };
 
     // Tasks controls
-    readonly Label tasksShortcutHeading = new Label { Left = 28, Top = 26, Width = 560, Height = 24, Font = new Font("Microsoft YaHei UI", 9, FontStyle.Bold), ForeColor = TitleText, Text = "快捷方式：" };
-    readonly CheckBox desktopLink = new CheckBox { Left = 44, Top = 58, Width = 560, Height = 28, Text = "创建桌面快捷方式(&D)", Checked = true };
-    readonly CheckBox startMenuLink = new CheckBox { Left = 44, Top = 92, Width = 560, Height = 28, Text = "创建开始菜单快捷方式及卸载入口（默认启用）", Checked = true, Enabled = false };
-    readonly Label tasksStartupHeading = new Label { Left = 28, Top = 136, Width = 560, Height = 24, Font = new Font("Microsoft YaHei UI", 9, FontStyle.Bold), ForeColor = TitleText, Text = "启动选项：" };
-    readonly CheckBox autostartBox = new CheckBox { Left = 44, Top = 168, Width = 560, Height = 28, Text = "开机时自动启动 " + Setup.Brand + "(&S)" };
-    readonly Label tasksHint = new Label { Left = 28, Top = 216, Width = 580, Height = 26, ForeColor = MutedText, Text = "以上选项在安装完成后均可随时通过系统托盘菜单调整。" };
+    readonly Label tasksShortcutHeading = new Label { Left = 28, Top = 26, Width = W - 56, Height = 24, Font = new Font("Microsoft YaHei UI", 9, FontStyle.Bold), ForeColor = TitleText, Text = "快捷方式：", Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right };
+    readonly CheckBox desktopLink = new CheckBox { Left = 44, Top = 58, Width = W - 72, Height = 28, Text = "创建桌面快捷方式(&D)", Checked = true, Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right };
+    readonly CheckBox startMenuLink = new CheckBox { Left = 44, Top = 92, Width = W - 72, Height = 28, Text = "创建开始菜单快捷方式及卸载入口（默认启用）", Checked = true, Enabled = false, Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right };
+    readonly Label tasksStartupHeading = new Label { Left = 28, Top = 136, Width = W - 56, Height = 24, Font = new Font("Microsoft YaHei UI", 9, FontStyle.Bold), ForeColor = TitleText, Text = "启动选项：", Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right };
+    readonly CheckBox autostartBox = new CheckBox { Left = 44, Top = 168, Width = W - 72, Height = 28, Text = "开机时自动启动 " + Setup.Brand + "(&S)", Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right };
+    readonly Label tasksHint = new Label { Left = 28, Top = 216, Width = W - 56, Height = 36, ForeColor = MutedText, Text = "以上选项在安装完成后均可随时通过系统托盘菜单调整。", Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right };
 
     // Ready summary controls
-    readonly Label readyPrompt = new Label { Left = 28, Top = 18, Width = W - 56, Height = 26, ForeColor = TitleText };
+    readonly Label readyPrompt = new Label { Left = 28, Top = 18, Width = W - 56, Height = 26, ForeColor = TitleText, Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right };
     readonly TextBox summaryBox = new TextBox
     {
-        Left = 28, Top = 50, Width = W - 56, Height = 236,
+        Left = 28, Top = 50, Width = W - 56, Height = 244,
         Multiline = true, ReadOnly = true, ScrollBars = ScrollBars.Vertical,
         BackColor = Color.White, BorderStyle = BorderStyle.FixedSingle,
-        Font = new Font("Microsoft YaHei UI", 9), TabStop = false
+        Font = new Font("Microsoft YaHei UI", 9), TabStop = false,
+        Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right | AnchorStyles.Bottom
     };
 
     // Progress controls (keep field names `bar` for test harness compatibility)
-    readonly Label stepLabel = new Label { Left = 28, Top = 24, Width = W - 56, Height = 26, Font = new Font("Microsoft YaHei UI", 9.5f, FontStyle.Bold) };
-    readonly ProgressBar bar = new ProgressBar { Left = 28, Top = 56, Width = W - 56, Height = 22, Maximum = 1000 };
-    readonly Label percentLabel = new Label { Left = 28, Top = 86, Width = W - 56, Height = 22, ForeColor = MutedText };
+    readonly Label stepLabel = new Label { Left = 28, Top = 24, Width = W - 56, Height = 26, Font = new Font("Microsoft YaHei UI", 9.5f, FontStyle.Bold), Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right };
+    readonly ProgressBar bar = new ProgressBar { Left = 28, Top = 56, Width = W - 56, Height = 22, Maximum = 1000, Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right };
+    readonly Label percentLabel = new Label { Left = 28, Top = 86, Width = W - 56, Height = 22, ForeColor = MutedText, Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right };
     readonly TextBox progressDetail = new TextBox
     {
         Left = 28, Top = 118, Width = W - 56, Height = 196,
         Multiline = true, ReadOnly = true, ScrollBars = ScrollBars.Vertical,
         BackColor = Color.White, BorderStyle = BorderStyle.FixedSingle,
-        Font = new Font("Consolas", 8.5f), TabStop = false
+        Font = new Font("Consolas", 8.5f), TabStop = false,
+        Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right | AnchorStyles.Bottom
     };
 
     // Finish controls (keep field names `finishText`, `openLog` for test harness compatibility)
-    readonly Label finishTitle = new Label { Left = 24, Top = 26, Width = W - SidebarW - 44, Height = 36, Font = new Font("Microsoft YaHei UI", 14, FontStyle.Bold), ForeColor = TitleText };
-    readonly Label finishText = new Label { Left = 24, Top = 72, Width = W - SidebarW - 44, Height = 152, ForeColor = BodyText };
-    readonly CheckBox launch = new CheckBox { Left = 24, Top = 236, Width = W - SidebarW - 44, Height = 28, Text = "立即启动 " + Setup.Brand + "(&L)", Checked = true };
-    readonly LinkLabel openLog = new LinkLabel { Left = 24, Top = 236, Width = W - SidebarW - 44, Height = 26, Text = "打开安装日志", Visible = false };
+    readonly Label finishTitle = new Label { AutoSize = true, Dock = DockStyle.Fill, Margin = new Padding(0, 0, 0, 14), Font = new Font("Microsoft YaHei UI", 14, FontStyle.Bold), ForeColor = TitleText };
+    readonly Label finishText = new Label { AutoSize = true, Dock = DockStyle.Fill, Margin = new Padding(0, 0, 0, 16), ForeColor = BodyText };
+    readonly CheckBox launch = new CheckBox { AutoSize = true, Margin = new Padding(0, 0, 0, 8), Text = "立即启动 " + Setup.Brand + "(&L)", Checked = true };
+    readonly LinkLabel openLog = new LinkLabel { AutoSize = true, Margin = new Padding(0, 0, 0, 8), Text = "打开安装日志", Visible = false };
 
     readonly object logLock = new object();
     int page;
@@ -531,20 +538,22 @@ sealed class Wizard : Form
             bool withSidebar = i == PageWelcome || i == PageFinish;
             pagePanels[i] = new Panel
             {
+                Size = withSidebar ? new Size(W - SidebarW, H - FooterH) : new Size(W, H - HeaderH - 1 - FooterH),
                 Dock = DockStyle.Fill,
                 BackColor = withSidebar ? Color.White : SystemColors.Control,
                 Visible = false
             };
         }
 
-        pagePanels[PageWelcome].Controls.AddRange(new Control[] { welcomeTitle, welcomeIntro, welcomeHint });
+        pagePanels[PageWelcome].Controls.Add(MakeVerticalStack(welcomeTitle, welcomeIntro, welcomeHint));
         pagePanels[PageLicense].Controls.AddRange(new Control[] { licenseBox, acceptLicense, declineLicense });
         pagePanels[PageLocation].Controls.AddRange(new Control[] { locationPrompt, folder, browse, spaceInfo, dataHomeInfo });
         pagePanels[PageTasks].Controls.AddRange(new Control[] { tasksShortcutHeading, desktopLink, startMenuLink, tasksStartupHeading, autostartBox, tasksHint });
         pagePanels[PageReady].Controls.AddRange(new Control[] { readyPrompt, summaryBox });
         pagePanels[PageProgress].Controls.AddRange(new Control[] { stepLabel, bar, percentLabel, progressDetail });
-        pagePanels[PageFinish].Controls.AddRange(new Control[] { finishTitle, finishText, openLog, launch });
-        body.Controls.AddRange(pagePanels);
+        pagePanels[PageFinish].Controls.Add(MakeVerticalStack(finishTitle, finishText, openLog, launch));
+        sidebarBody.Controls.AddRange(new Control[] { pagePanels[PageWelcome], pagePanels[PageFinish] });
+        body.Controls.AddRange(new Control[] { pagePanels[PageLicense], pagePanels[PageLocation], pagePanels[PageTasks], pagePanels[PageReady], pagePanels[PageProgress] });
 
         back.Click += delegate { if (page > PageWelcome && page <= PageReady) Show(page - 1); };
         next.Click += delegate { Next(); };
@@ -579,7 +588,7 @@ sealed class Wizard : Form
             }
         };
 
-        Controls.AddRange(new Control[] { sidebar, header, headerLine, body, footerLine, footerPanel });
+        Controls.AddRange(new Control[] { sidebar, sidebarBody, header, headerLine, body, footerLine, footerPanel });
         AcceptButton = next;
         CancelButton = cancel;
         FormClosing += delegate (object s, FormClosingEventArgs e) { if (installing) { e.Cancel = true; Cancel(); } };
@@ -658,27 +667,53 @@ sealed class Wizard : Form
         catch (Exception) { }
     }
 
+    static TableLayoutPanel MakeVerticalStack(params Control[] controls)
+    {
+        var table = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            ColumnCount = 1,
+            RowCount = controls.Length + 1,
+            Padding = new Padding(24, 24, 24, 16),
+            BackColor = Color.White
+        };
+        table.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
+        for (int i = 0; i < controls.Length; i++)
+        {
+            table.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            table.Controls.Add(controls[i], 0, i);
+        }
+        table.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
+        return table;
+    }
+
+    protected override void OnLoad(EventArgs e)
+    {
+        base.OnLoad(e);
+        ApplyChrome(page == PageWelcome || page == PageFinish);
+    }
+
+    protected override void OnResize(EventArgs e)
+    {
+        base.OnResize(e);
+        if (IsHandleCreated) ApplyChrome(page == PageWelcome || page == PageFinish);
+    }
+
     void Header(string title, string sub) { heading.Text = title; subheading.Text = sub; }
 
     void ApplyChrome(bool useSidebar)
     {
         sidebar.Visible = useSidebar;
+        sidebarBody.Visible = useSidebar;
         header.Visible = !useSidebar;
         headerLine.Visible = !useSidebar;
-        // Derive `body` bounds from live scaled chrome controls so 125%/150%/200% DPI never clips.
+        body.Visible = !useSidebar;
+        // Derive bounds from live scaled chrome controls so 125%/150%/200% DPI never clips.
         int contentBottom = footerLine.Top;
-        if (useSidebar)
-        {
-            int left = sidebar.Right;
-            body.Bounds = new Rectangle(left, 0, Math.Max(0, ClientSize.Width - left), Math.Max(0, contentBottom));
-            body.BackColor = Color.White;
-        }
-        else
-        {
-            int top = headerLine.Bottom;
-            body.Bounds = new Rectangle(0, top, ClientSize.Width, Math.Max(0, contentBottom - top));
-            body.BackColor = SystemColors.Control;
-        }
+        int sideLeft = sidebar.Right;
+        sidebarBody.Bounds = new Rectangle(sideLeft, 0, Math.Max(0, ClientSize.Width - sideLeft), Math.Max(0, contentBottom));
+        int fullTop = headerLine.Bottom;
+        body.Bounds = new Rectangle(0, fullTop, ClientSize.Width, Math.Max(0, contentBottom - fullTop));
     }
 
     long RequiredBytes()
