@@ -92,9 +92,15 @@ class PlatformOpsConfigurationTest {
                       .put("id", UUID.randomUUID().toString())
                       .put("tenantid", t.toString())
                       .put("source", "auriga/workspace")
+                      .put("subject", instance.toString())
                       .put("type", "instance.failed")
                       .put("time", java.time.Instant.now().toString());
-              event.putObject("data").put("instanceId", instance.toString());
+              var data = event.putObject("data").put("code", "START_FAILED");
+              data.putObject("instance")
+                  .put("instanceId", instance.toString())
+                  .put("ownerId", UUID.randomUUID().toString())
+                  .putNull("nodeId")
+                  .put("generation", 1L);
               var bytes = event.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8);
               assertEquals(
                   auriga.common.events.InboxProcessor.Outcome.PROCESSED,
@@ -105,6 +111,8 @@ class PlatformOpsConfigurationTest {
                   inbox.process(
                       "ops-instance-alerts", handler, "auriga.evt.instance.failed", bytes, 2));
               event.put("id", UUID.randomUUID().toString()).put("type", "instance.started");
+              data.remove("code");
+              data.put("reason", "user");
               assertEquals(
                   auriga.common.events.InboxProcessor.Outcome.PROCESSED,
                   inbox.process(
@@ -112,6 +120,25 @@ class PlatformOpsConfigurationTest {
                       handler,
                       "auriga.evt.instance.started",
                       event.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8),
+                      1));
+              var invalidEvent =
+                  tools.jackson.databind.json.JsonMapper.builder()
+                      .build()
+                      .createObjectNode()
+                      .put("id", UUID.randomUUID().toString())
+                      .put("tenantid", t.toString())
+                      .put("source", "auriga/workspace")
+                      .put("subject", "not-a-uuid")
+                      .put("type", "instance.failed")
+                      .put("time", java.time.Instant.now().toString());
+              invalidEvent.putObject("data").put("code", "START_FAILED");
+              assertEquals(
+                  auriga.common.events.InboxProcessor.Outcome.PROCESSED,
+                  inbox.process(
+                      "ops-instance-alerts",
+                      handler,
+                      "auriga.evt.instance.failed",
+                      invalidEvent.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8),
                       1));
               TenantContext.run(
                   t,
@@ -124,6 +151,10 @@ class PlatformOpsConfigurationTest {
                                     "SELECT count(*) FROM ops.alert WHERE subject=? AND resolved_at IS NOT NULL",
                                     Integer.class,
                                     instance.toString()));
+                            assertEquals(
+                                2,
+                                jdbc.queryForObject(
+                                    "SELECT count(*) FROM ops.alert", Integer.class));
                             return null;
                           }));
               assertNotNull(ctx.getBean("opsNodeSignals"));
