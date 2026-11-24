@@ -33,6 +33,11 @@ case "${1:-}" in
         false) set -- "$@" -adapter-file "${NAS_SHARED_ADAPTER:?}" -adapter-sha256 "${NAS_SHARED_ADAPTER_SHA:?}" ;;
         *) die 'invalid explicit team-only decision' ;;
       esac
+      if [ -n "${NAS_SHARED_BACKEND:-}" ]; then set -- "$@" -backend "$NAS_SHARED_BACKEND"; fi
+      if [ -n "${NAS_SHARED_QUOTA_MOUNT:-}" ]; then set -- "$@" -quota-mount "$NAS_SHARED_QUOTA_MOUNT"; fi
+      if [ -n "${NAS_SHARED_QUOTA_BINARY:-}" ]; then set -- "$@" -quota-binary "$NAS_SHARED_QUOTA_BINARY"; fi
+      if [ -n "${NAS_SHARED_PROJECT_FIRST:-}" ]; then set -- "$@" -project-first "$NAS_SHARED_PROJECT_FIRST"; fi
+      if [ -n "${NAS_SHARED_PROJECT_LAST:-}" ]; then set -- "$@" -project-last "$NAS_SHARED_PROJECT_LAST"; fi
     fi
     if [ "$_action" = set-model ]; then
       set -- "$@" -model "${NAS_SHARED_MODEL:?}"

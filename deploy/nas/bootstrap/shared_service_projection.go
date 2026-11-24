@@ -111,7 +111,18 @@ func sharedServiceProjection(in sharedProjectionInputs) (map[string]sharedProjec
 	if err := jsonFile("agent/services.json", services, 0); err != nil {
 		return nil, err
 	}
-	agent := map[string]any{"sharedDshPreparation": map[string]any{"backend": "ext4-image", "imageBytes": int64(137438953472), "mkfsBinary": "/usr/sbin/mkfs.ext4", "losetupBinary": "/usr/sbin/losetup", "projectFirst": 10000, "projectLast": 199999}, "sharedDshRuntime": map[string]string{"templateFile": "/etc/auriga/shared-runtime/runtime.json", "profileFile": "/etc/auriga/shared-runtime/profile.yml", "servicesFile": "/etc/auriga/shared-runtime/services.json", "hostConfigFile": "/etc/auriga/shared-runtime/host.json"}}
+	storageSpec, err := sharedStorageSpecFromReceipt(in.Receipt)
+	if err != nil {
+		return nil, err
+	}
+	projectFirst, projectLast := storageSpec.effectiveProjectRange()
+	var preparation map[string]any
+	if storageSpec.Backend == "xfs" {
+		preparation = map[string]any{"backend": "xfs", "quotaMount": storageSpec.QuotaMount, "quotaBinary": storageSpec.QuotaBinary, "projectFirst": projectFirst, "projectLast": projectLast}
+	} else {
+		preparation = map[string]any{"backend": "ext4-image", "imageBytes": int64(137438953472), "mkfsBinary": "/usr/sbin/mkfs.ext4", "losetupBinary": "/usr/sbin/losetup", "projectFirst": projectFirst, "projectLast": projectLast}
+	}
+	agent := map[string]any{"sharedDshPreparation": preparation, "sharedDshRuntime": map[string]string{"templateFile": "/etc/auriga/shared-runtime/runtime.json", "profileFile": "/etc/auriga/shared-runtime/profile.yml", "servicesFile": "/etc/auriga/shared-runtime/services.json", "hostConfigFile": "/etc/auriga/shared-runtime/host.json"}}
 	if dedicated != nil {
 		agent["sharedDshRuntime"].(map[string]string)["dedicatedProfileFile"] = "/etc/auriga/shared-runtime/dedicated-profile.yml"
 		put("agent/dedicated-profile.yml", dedicated, 0, 0444)

@@ -169,6 +169,9 @@ esac
     --env "NAS_SHARED_PROFILE_SHA=$shared_profile_sha" --env "NAS_SHARED_MODEL=$shared_model" \
     --env "NAS_SHARED_DEDICATED_PROFILE=$shared_dedicated" --env "NAS_SHARED_DEDICATED_PROFILE_SHA=$shared_dedicated_sha" \
     --env "NAS_SHARED_ADAPTER=$shared_adapter" --env "NAS_SHARED_ADAPTER_SHA=$shared_adapter_sha" --env "NAS_SHARED_TEAM=$shared_team" \
+    --env "NAS_SHARED_BACKEND=${NAS_SHARED_BACKEND:-}" --env "NAS_SHARED_QUOTA_MOUNT=${NAS_SHARED_QUOTA_MOUNT:-}" \
+    --env "NAS_SHARED_QUOTA_BINARY=${NAS_SHARED_QUOTA_BINARY:-}" \
+    --env "NAS_SHARED_PROJECT_FIRST=${NAS_SHARED_PROJECT_FIRST:-}" --env "NAS_SHARED_PROJECT_LAST=${NAS_SHARED_PROJECT_LAST:-}" \
     --env "NAS_COLLAB_CONFIG_DEGRADED=${NAS_COLLAB_CONFIG_DEGRADED:-0}" \
     --entrypoint /bin/sh "$_image" "$NAS_ROOT/scripts/installer-entry.sh" "$operation"
 )
