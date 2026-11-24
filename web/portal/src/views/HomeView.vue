@@ -16,11 +16,16 @@ import {
 import PlacementEntry from './PlacementEntry.vue';
 import InstanceCard from '../components/InstanceCard.vue';
 import { readPlacementConfig } from './placement-config';
+import { placementMessages } from './placement-messages';
 import DesktopDownload from '../components/DesktopDownload.vue';
 import { portalMessages } from '../portal-messages';
 
 const { t, locale } = useI18n();
 const { t: portalT } = useI18n({ useScope: 'local', messages: portalMessages });
+const { t: placementT } = useI18n({
+  useScope: 'local',
+  messages: placementMessages,
+});
 const me = ref<Me | null>(null);
 const sharedPlacementEnabled = readPlacementConfig().sharedPlacementEnabled;
 const personalFallback = ref(false);
@@ -132,9 +137,7 @@ async function logout() {
             text
             data-testid="back-to-shared"
             @click="personalFallback = false"
-            >{{
-              locale === 'en' ? 'Back to shared entry' : '返回共享入口'
-            }}</ElButton
+            >{{ placementT('backToShared') }}</ElButton
           >
         </template>
       </template>

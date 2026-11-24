@@ -258,7 +258,7 @@ func (m *SharedPools) Apply(ctx context.Context, in *nodev1.SharedDshRuntimeInte
 	supersedeOp := false
 	if op := s.Operations[operationKey]; op != nil {
 		if op.Fingerprint != fingerprint {
-			if !sameOperationIdentity(op.Binding, b) || !newerOperationGeneration(op.Binding, b) {
+			if in.Action != "prepare-empty" || in.OperationId != b.PlacementId || !sameOperationIdentity(op.Binding, b) || !newerOperationGeneration(op.Binding, b) {
 				return nil, fmt.Errorf("operation fingerprint conflict")
 			}
 			supersedeOp = true

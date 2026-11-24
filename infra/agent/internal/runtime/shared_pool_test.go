@@ -400,4 +400,17 @@ func TestSharedPoolSupersedesSameOperationOnMonotonicGenerationAndRejectsTamper(
 	if _, err := m.Apply(ctx, tamper); err == nil {
 		t.Fatal("expected cross-member operation reuse to be rejected")
 	}
+	// Non-prepare-empty actions must never supersede a prior operation fingerprint.
+	stop1 := proto.Clone(next).(*nodev1.SharedDshRuntimeIntent)
+	stop1.OperationId = poolID("stop-op-1")
+	stop1.Action = "stop-pool"
+	if r, err := m.Apply(ctx, stop1); err != nil || r.Outcome != "confirmed" {
+		t.Fatalf("initial stop-pool failed: %v %v", r, err)
+	}
+	stop2 := proto.Clone(stop1).(*nodev1.SharedDshRuntimeIntent)
+	stop2.Binding.Epoch = 3
+	stop2.Binding.Revision = 3
+	if _, err := m.Apply(ctx, stop2); err == nil {
+		t.Fatal("expected non-prepare-empty action supersede to be rejected")
+	}
 }

@@ -111,16 +111,13 @@ onBeforeUnmount(() => {
         t('refresh')
       }}</ElButton>
       <ElButton
-        v-if="!expired && ((placement && placement.state !== 'ready') || error)"
+        v-if="!expired && (empty || error)"
         data-testid="fallback-personal"
         @click="emit('fallback')"
         >{{ t('fallbackAction') }}</ElButton
       >
     </div>
-    <p
-      v-if="!expired && ((placement && placement.state !== 'ready') || error)"
-      role="status"
-    >
+    <p v-if="!expired && (empty || error)" role="status">
       {{ t('fallbackHint') }}
     </p>
     <p v-if="placement?.state === 'ready'" class="market">

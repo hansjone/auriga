@@ -236,8 +236,7 @@ public final class WorkspaceService {
         () -> {
           store.lock();
           if (store.jdbc.queryForObject(
-                  "SELECT count(*) FROM shared_dsh_placement WHERE tenant_id=? AND member_id=?"
-                      + " AND state NOT IN ('pending','unavailable')",
+                  "SELECT count(*) FROM shared_dsh_placement WHERE tenant_id=? AND member_id=?",
                   Long.class,
                   tenant,
                   owner)

@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 const (
@@ -29,6 +30,53 @@ type agentResourceTrustConfig struct {
 	SchemaVersion int                     `json:"schemaVersion"`
 	Origin        string                  `json:"origin"`
 	Keys          []agentResourceTrustKey `json:"keys"`
+}
+
+func validAgentResourceTrust(cfg agentResourceTrustConfig) bool {
+	if cfg.SchemaVersion != 1 || strings.TrimSpace(cfg.Origin) == "" || len(cfg.Keys) == 0 {
+		return false
+	}
+	seenKeys := map[string]string{}
+	for _, k := range cfg.Keys {
+		if strings.TrimSpace(k.Kid) == "" {
+			return false
+		}
+		if k.Purpose != "release" && k.Purpose != "revocation" && k.Purpose != "downgrade" {
+			return false
+		}
+		pub, err := base64.StdEncoding.DecodeString(strings.TrimSpace(k.PublicKey))
+		if err != nil || len(pub) != ed25519.PublicKeySize {
+			return false
+		}
+		if prior, exists := seenKeys[string(pub)]; exists && prior != k.Purpose {
+			return false
+		}
+		seenKeys[string(pub)] = k.Purpose
+		start, e1 := time.Parse(time.RFC3339Nano, strings.TrimSpace(k.NotBefore))
+		end, e2 := time.Parse(time.RFC3339Nano, strings.TrimSpace(k.NotAfter))
+		if e1 != nil || e2 != nil || !start.Before(end) {
+			return false
+		}
+	}
+	return true
+}
+
+func checkNoSymlinkSegments(base string, parts ...string) error {
+	cur := base
+	for _, p := range parts {
+		cur = filepath.Join(cur, p)
+		info, err := os.Lstat(cur)
+		if os.IsNotExist(err) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		if info.Mode()&os.ModeSymlink != 0 {
+			return fmt.Errorf("拒绝符号链接路径: %s", cur)
+		}
+	}
+	return nil
 }
 
 func buildAgentResourceTrust(roots map[string]map[string]string, origin string) ([]byte, error) {
@@ -82,6 +130,9 @@ func buildAgentResourceTrust(roots map[string]map[string]string, origin string) 
 }
 
 func ensureAgentResourceTrust(dataRoot string, roots map[string]map[string]string) error {
+	if err := checkNoSymlinkSegments(dataRoot, "data", "agent", "agent", "resource-trust.json"); err != nil {
+		return err
+	}
 	agentDir := filepath.Join(dataRoot, "data", "agent", "agent")
 	trustPath := filepath.Join(agentDir, "resource-trust.json")
 	if info, err := os.Lstat(trustPath); err == nil {
@@ -92,7 +143,7 @@ func ensureAgentResourceTrust(dataRoot string, roots map[string]map[string]strin
 		if err := readJSON(trustPath, &existing); err != nil {
 			return fmt.Errorf("已有 agent resource-trust.json 无法解析: %w", err)
 		}
-		if existing.SchemaVersion == 1 && strings.TrimSpace(existing.Origin) != "" && len(existing.Keys) > 0 {
+		if validAgentResourceTrust(existing) {
 			return nil
 		}
 	} else if !os.IsNotExist(err) {

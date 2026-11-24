@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 const (
@@ -29,6 +30,53 @@ type sharedAgentResourceTrustConfig struct {
 	SchemaVersion int                           `json:"schemaVersion"`
 	Origin        string                        `json:"origin"`
 	Keys          []sharedAgentResourceTrustKey `json:"keys"`
+}
+
+func validSharedAgentResourceTrust(cfg sharedAgentResourceTrustConfig) bool {
+	if cfg.SchemaVersion != 1 || strings.TrimSpace(cfg.Origin) == "" || len(cfg.Keys) == 0 {
+		return false
+	}
+	seenKeys := map[string]string{}
+	for _, k := range cfg.Keys {
+		if strings.TrimSpace(k.Kid) == "" {
+			return false
+		}
+		if k.Purpose != "release" && k.Purpose != "revocation" && k.Purpose != "downgrade" {
+			return false
+		}
+		pub, err := base64.StdEncoding.DecodeString(strings.TrimSpace(k.PublicKey))
+		if err != nil || len(pub) != ed25519.PublicKeySize {
+			return false
+		}
+		if prior, exists := seenKeys[string(pub)]; exists && prior != k.Purpose {
+			return false
+		}
+		seenKeys[string(pub)] = k.Purpose
+		start, e1 := time.Parse(time.RFC3339Nano, strings.TrimSpace(k.NotBefore))
+		end, e2 := time.Parse(time.RFC3339Nano, strings.TrimSpace(k.NotAfter))
+		if e1 != nil || e2 != nil || !start.Before(end) {
+			return false
+		}
+	}
+	return true
+}
+
+func checkSharedNoSymlinkSegments(base string, parts ...string) error {
+	cur := base
+	for _, p := range parts {
+		cur = filepath.Join(cur, p)
+		info, err := os.Lstat(cur)
+		if os.IsNotExist(err) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		if info.Mode()&os.ModeSymlink != 0 {
+			return fmt.Errorf("symlink refused in path: %s", cur)
+		}
+	}
+	return nil
 }
 
 func buildSharedAgentResourceTrust(rootsRaw []byte, origin string) ([]byte, error) {
@@ -89,6 +137,12 @@ func buildSharedAgentResourceTrust(rootsRaw []byte, origin string) ([]byte, erro
 // to <dataRoot>/data/agent/agent/resource-trust.json when the site has resource roots
 // and no valid agent trust file yet.
 func ensureSharedAgentResourceTrust(dataRoot string) error {
+	if err := checkSharedNoSymlinkSegments(dataRoot, "data", "agent", "agent", "resource-trust.json"); err != nil {
+		return err
+	}
+	if err := checkSharedNoSymlinkSegments(dataRoot, "resource-keys", "resource-roots.json"); err != nil {
+		return err
+	}
 	rootsPath := filepath.Join(dataRoot, "resource-keys", "resource-roots.json")
 	trustDir := filepath.Join(dataRoot, "data", "agent", "agent")
 	trustPath := filepath.Join(trustDir, "resource-trust.json")
@@ -105,10 +159,10 @@ func ensureSharedAgentResourceTrust(dataRoot string) error {
 		if err := json.Unmarshal(raw, &existing); err != nil {
 			return fmt.Errorf("invalid agent resource-trust.json: %w", err)
 		}
-		if existing.SchemaVersion == 1 && strings.TrimSpace(existing.Origin) != "" && len(existing.Keys) > 0 {
+		if validSharedAgentResourceTrust(existing) {
 			return nil
 		}
-		// Existing file is incomplete (e.g. empty keys); fall through to project from roots if available.
+		// Existing file is incomplete (e.g. empty or invalid keys); fall through to project from roots if available.
 	} else if !os.IsNotExist(err) {
 		return err
 	}
