@@ -134,6 +134,20 @@ func TestAccessCapabilities_IPDirectHTTPSConfiguredPasses(t *testing.T) {
 	}
 }
 
+func TestAccessCapabilities_DirectHTTPSWithoutCollabReportsMaterialAbsent(t *testing.T) {
+	data := t.TempDir()
+	accessPath := filepath.Join(data, "config/materials/access.json")
+	writeAccessFixture(t, accessPath, "ip", "https")
+	if err := os.WriteFile(filepath.Join(data, "stack.env"), []byte("AURIGA_MANAGED_PLATFORM_ORIGIN=\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	r := accessCapabilities(state{Data: data, Access: accessPath})
+	if r.ManagedNetworkState != "unconfigured" || r.ManagedNetworkReason != "collab_material_absent" {
+		t.Fatalf("expected collab_material_absent for direct HTTPS without collab, got %+v", r)
+	}
+}
+
 func TestAccessCapabilities_IPHTTPWithInternalManagedIngressPasses(t *testing.T) {
 	data := t.TempDir()
 	accessPath := filepath.Join(data, "config/materials/access.json")

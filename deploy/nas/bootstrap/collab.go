@@ -221,7 +221,7 @@ func nasCollabOrigin(cfg deploymentconfig.Config, requested, allowed string) (st
 	var port int
 	if u.Port() != "" {
 		port, err = strconv.Atoi(u.Port())
-		if err != nil || port < 1 || port > 65535 {
+		if err != nil || port < 1 || port > 65535 || strconv.Itoa(port) != u.Port() {
 			return "", fmt.Errorf("collab presentation port refused")
 		}
 	}
@@ -230,8 +230,9 @@ func nasCollabOrigin(cfg deploymentconfig.Config, requested, allowed string) (st
 	}
 	if u.Hostname() == cfg.InstanceControl().DnsAlias {
 		// Internal managed ingress reuses instanceControl.dnsAlias on a dedicated
-		// HTTPS port distinct from the HTTP instance-control listener.
-		if port == 0 || port == int(cfg.InstanceControl().Origin.Port) || port == int(cfg.Listeners().InstanceControl.Port) {
+		// non-default HTTPS port distinct from portal/admin/instance-control listeners.
+		ls := cfg.Listeners()
+		if port == 0 || port == 443 || port == int(cfg.InstanceControl().Origin.Port) || port == int(ls.InstanceControl.Port) || port == int(ls.Portal.Port) || port == int(ls.Admin.Port) {
 			return "", fmt.Errorf("collab presentation origin is not a portal")
 		}
 	}
