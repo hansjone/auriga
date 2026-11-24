@@ -483,6 +483,13 @@ func (d *Docker) start(ctx context.Context, id string, resources *UnifiedManager
 	if err != nil {
 		return fmt.Errorf("docker: %s: %w", name, err)
 	}
+	// All startup Engine mutations have definite replies. Clear the persisted
+	// release intent before the potentially long business health wait so a
+	// health timeout or agent crash/restart during health polling cannot leave
+	// release_intent_v1 behind and permanently lock the runtime partition.
+	if err := scope.execution.Settle(); err != nil {
+		return err
+	}
 	if err := waitInstanceHealth(ctx, endpoint); err != nil {
 		return fmt.Errorf("docker: %s health not ready: %w", name, err)
 	}
@@ -503,6 +510,12 @@ func (d *Docker) start(ctx context.Context, id string, resources *UnifiedManager
 	}
 	if finalProcess != process {
 		return fmt.Errorf("docker: process changed during health wait")
+	}
+	// Health check passed. Re-establish the short-lived startup intent for the
+	// post-health commit phase (PutExecution, endpoint/bridge verification, and
+	// optional resource observation) so commit ordering remains unchanged.
+	if err := scope.execution.ReacquireIntent(); err != nil {
+		return err
 	}
 	record.Phase = "started"
 	if err := d.Activation.Store.PutExecution(*record); err != nil {

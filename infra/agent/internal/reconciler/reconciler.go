@@ -3,6 +3,7 @@ package reconciler
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"sync"
@@ -362,7 +363,7 @@ func (r *Reconciler) applySpec(ctx context.Context, id string, spec *nodev1.Inst
 		}
 		if err != nil {
 			cancel()
-			r.failRecovery(ctx, rec, "runtime inspection failed")
+			r.failRecoveryErr(ctx, rec, "runtime inspection failed", err)
 			return
 		}
 		if spec.Desired == nodev1.DesiredState_DESIRED_STATE_RUNNING && (st.Running || r.Activation != nil) {
@@ -406,7 +407,9 @@ func (r *Reconciler) applySpec(ctx context.Context, id string, spec *nodev1.Inst
 			err = recoveryCtx.Err()
 		}
 		switch {
-		case err != nil || !actual.Running:
+		case err != nil:
+			r.failRecoveryErr(ctx, pending, "pending runtime inspection failed", err)
+		case !actual.Running:
 			r.failRecovery(ctx, pending, "pending runtime inspection failed")
 		case !actual.Ready || r.Activation != nil:
 			r.recoverRunning(ctx, pending, actual.Ready && pending.Status.Ready)
@@ -477,8 +480,14 @@ func (r *Reconciler) applySpec(ctx context.Context, id string, spec *nodev1.Inst
 	}
 	if err != nil {
 		telemetry.Failed(ctx, err)
-		telemetry.Log(ctx, slog.LevelWarn, "runtime activation failed", "error", telemetry.Mask(err.Error()))
-		r.fail(id, spec.Generation, rec.Attempts, code, err.Error(), true)
+		msg := err.Error()
+		retryable := true
+		if errors.Is(err, state.ErrReleaseUnresolved) {
+			msg = formatRecoveryFailure(id, "runtime activation failed", err)
+			retryable = false
+		}
+		telemetry.Log(ctx, slog.LevelWarn, "runtime activation failed", "error", telemetry.Mask(msg))
+		r.fail(id, spec.Generation, rec.Attempts, code, msg, retryable)
 		return
 	}
 	switch spec.Desired {
@@ -538,7 +547,7 @@ func (r *Reconciler) recoverRunning(ctx context.Context, rec state.ActualRecord,
 	}
 	if err != nil {
 		telemetry.Failed(ctx, err)
-		r.failRecovery(ctx, rec, "runtime health recovery failed")
+		r.failRecoveryErr(ctx, rec, "runtime health recovery failed", err)
 		return
 	}
 	st.Phase = nodev1.InstancePhase_INSTANCE_PHASE_RUNNING
@@ -551,6 +560,35 @@ func (r *Reconciler) recoverRunning(ctx context.Context, rec state.ActualRecord,
 	if r.persist(st, 0) == nil && st.Ready {
 		telemetry.Stage(ctx, "ready")
 	}
+}
+
+func formatRecoveryFailure(id, summary string, err error) string {
+	if err == nil {
+		return summary
+	}
+	if errors.Is(err, state.ErrReleaseUnresolved) {
+		return fmt.Sprintf("%s: unresolved release execution (%v); stop the agent and affected instance, then run: auriga-agent recover-runtime --data-root <dir> --instance %s --stopped-agent <agent-container-id>", summary, err, id)
+	}
+	return fmt.Sprintf("%s: %v", summary, err)
+}
+
+func (r *Reconciler) failRecoveryErr(ctx context.Context, rec state.ActualRecord, summary string, err error) {
+	id := ""
+	if rec.Status != nil {
+		id = rec.Status.InstanceId
+	}
+	message := formatRecoveryFailure(id, summary, err)
+	if errors.Is(err, state.ErrReleaseUnresolved) {
+		telemetry.Log(ctx, slog.LevelWarn, summary, "reason", "unresolved_release_execution", "error", telemetry.Mask(message))
+		attempts := rec.Attempts + 1
+		st := cloneStatus(rec.Status)
+		st.Phase, st.Ready = nodev1.InstancePhase_INSTANCE_PHASE_FAILED, false
+		st.UpdatedAt = timestamppb.Now()
+		st.Error = &nodev1.InstanceError{Code: "agent.start_failed", Message: message, Retryable: false, Attempts: attempts}
+		_ = r.persist(st, attempts)
+		return
+	}
+	r.failRecovery(ctx, rec, message)
 }
 
 func (r *Reconciler) failRecovery(ctx context.Context, rec state.ActualRecord, message string) {

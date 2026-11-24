@@ -347,3 +347,36 @@ auriga client build                                Windows 客户端，见 D13
 | P4 | CLI 直接 `docker build` 时拒绝 Dockerfile 中的 `# syntax=` 指令，防止拉取外部前端 | 2a |
 | P5 | edge 只换容器时 `network` 新镜像与 broker 旧镜像的组合要有测试；未测通前 broker 产物变化一律走完整启动 | 2d |
 | P6 | 签名包（`bundle`）同样写入 `schemaCompatFloor` 与格式上限声明，否则 `upgrade` 产生的历史只能人工回滚 | 2b |
+
+## 8. 排障与恢复：未决 release intent（`recover-runtime`）
+
+当 `auriga-agent` 在执行真实 Docker Engine 变更（如拉取镜像、创建或启动容器）期间意外崩溃或失去应答时，会在本地 `state.db` 中保留 `release_intent_v1`（fail-closed 保护）。重启后，该 runtime partition 下的实例检查与启动都会被拒绝，日志或实例错误中会看到 `unresolved release execution`（`runtime release has unresolved execution; protected recovery required`）及恢复提示。
+
+**禁止**直接删除 `state.db` 绕过保护性恢复；请按以下两步执行离线恢复：
+
+1. **停止原 agent 与受影响实例容器，并记下原 agent 容器完整 64 位 ID**：
+   ```bash
+   docker ps -a --no-trunc --filter label=com.docker.compose.service=agent
+   docker stop <agent-container-id>
+   docker stop auriga-inst-<instance-id>
+   ```
+   确认原 `agent` 容器与受影响实例容器均已处于 `exited`（或 `created`）状态，且没有其他未登记的 `auriga.managed=true` 容器。
+
+2. **先以 inspect-only 模式核对并获取 `expectation`**：
+   ```bash
+   auriga-agent recover-runtime \
+     --data-root <agent-data-root> \
+     --instance <instance-id> \
+     --stopped-agent <agent-container-id>
+   ```
+   该步骤只校验离线 `state.db` 与 Docker Engine 现状，不做任何修改，输出 JSON 中包含 `expectation` 摘要以及 `"applied": false`。
+
+3. **确认无误后，传入 `--expect` 执行恢复并重启 agent**：
+   ```bash
+   auriga-agent recover-runtime \
+     --data-root <agent-data-root> \
+     --instance <instance-id> \
+     --stopped-agent <agent-container-id> \
+     --expect <上一步输出的 expectation>
+   ```
+   输出中 `"applied": true` 表示 `release_intent_v1` 已在核对一致后安全清除；随后按正常编排启动 `agent` 容器即可恢复实例。

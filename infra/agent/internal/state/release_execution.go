@@ -243,9 +243,61 @@ func checkReleaseExecution(tx *bbolt.Tx, c ReleaseCandidate) error {
 // Normal startup never clears a persisted unresolved intent. The separate,
 // explicit offline recovery path requires committed-candidate and Engine proof.
 type ReleaseExecution struct {
-	mu      sync.Mutex
-	pending int
-	active  bool
+	mu              sync.Mutex
+	pending         int
+	active          bool
+	intentPersisted bool
+	intent          releaseIntent
+	store           *Store
+	ctx             context.Context
+	candidate       ReleaseCandidate
+}
+
+func (e *ReleaseExecution) persistIntentLocked() error {
+	if e.store == nil {
+		return ErrReleaseUnresolved
+	}
+	if e.ctx != nil && e.ctx.Err() != nil {
+		return errors.Join(e.ctx.Err(), ErrReleaseUnresolved)
+	}
+	var token [32]byte
+	if _, err := rand.Read(token[:]); err != nil {
+		return err
+	}
+	intent := releaseIntent{1, hex.EncodeToString(token[:]), e.candidate}
+	raw, err := json.Marshal(intent)
+	if err != nil {
+		return err
+	}
+	if err = e.store.db.Update(func(tx *bbolt.Tx) error {
+		old, err := readIntents(tx, e.candidate.Partition)
+		if err != nil {
+			return err
+		}
+		if old != nil {
+			return ErrReleaseUnresolved
+		}
+		high, found, err := readReleaseActivation(tx, e.candidate.Partition)
+		if err != nil {
+			return err
+		}
+		if !found || high != e.candidate {
+			return ErrReleaseUnresolved
+		}
+		b, err := tx.CreateBucketIfNotExists(bucketReleaseIntent)
+		if err != nil {
+			return err
+		}
+		return b.Put([]byte(e.candidate.Partition.key()), raw)
+	}); err != nil {
+		return err
+	}
+	if err = e.store.db.Sync(); err != nil {
+		return err
+	}
+	e.intent = intent
+	e.intentPersisted = true
+	return nil
 }
 
 func (e *ReleaseExecution) BeginAction() (func(bool), error) {
@@ -253,6 +305,11 @@ func (e *ReleaseExecution) BeginAction() (func(bool), error) {
 	defer e.mu.Unlock()
 	if !e.active {
 		return nil, ErrReleaseUnresolved
+	}
+	if !e.intentPersisted {
+		if err := e.persistIntentLocked(); err != nil {
+			return nil, err
+		}
 	}
 	e.pending++
 	var once sync.Once
@@ -265,6 +322,65 @@ func (e *ReleaseExecution) BeginAction() (func(bool), error) {
 			}
 		})
 	}, nil
+}
+
+// Settle durably clears this invocation's persisted release intent once all
+// prior Engine mutations have received definite replies (e.pending == 0).
+// Callers may invoke Settle before a long non-Engine wait (such as business
+// health polling) so a crash or restart during that wait does not leave the
+// partition permanently blocked behind a stale release_intent_v1. Any later
+// BeginAction or ReacquireIntent re-persists a fresh synced intent before
+// permitting another Engine mutation.
+func (e *ReleaseExecution) Settle() error {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if !e.active || e.store == nil {
+		return ErrReleaseUnresolved
+	}
+	if e.pending != 0 || (e.ctx != nil && e.ctx.Err() != nil) {
+		return ErrReleaseUnresolved
+	}
+	if !e.intentPersisted {
+		return nil
+	}
+	intent := e.intent
+	if err := e.store.db.Update(func(tx *bbolt.Tx) error {
+		old, err := readIntents(tx, e.candidate.Partition)
+		if err != nil {
+			return err
+		}
+		if old == nil || *old != intent {
+			return ErrReleaseUnresolved
+		}
+		high, found, err := readReleaseActivation(tx, e.candidate.Partition)
+		if err != nil {
+			return err
+		}
+		if !found || high != e.candidate {
+			return ErrReleaseUnresolved
+		}
+		return tx.Bucket(bucketReleaseIntent).Delete([]byte(e.candidate.Partition.key()))
+	}); err != nil {
+		return err
+	}
+	e.intentPersisted = false
+	e.intent = releaseIntent{}
+	return nil
+}
+
+// ReacquireIntent explicitly re-persists and syncs a release intent for this
+// still-active qualification after an earlier Settle (for example, before
+// post-health resource observation that may issue an isolation ContainerStop).
+func (e *ReleaseExecution) ReacquireIntent() error {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if !e.active {
+		return ErrReleaseUnresolved
+	}
+	if e.intentPersisted {
+		return nil
+	}
+	return e.persistIntentLocked()
 }
 
 // WithReleaseExecution adds crash persistence around RT2S's unchanged continuous
@@ -312,33 +428,63 @@ func (s *Store) WithReleaseExecution(ctx context.Context, c ReleaseCandidate, au
 		if err = s.db.Sync(); err != nil {
 			return err
 		}
-		e := &ReleaseExecution{active: true}
+		e := &ReleaseExecution{
+			active:          true,
+			intentPersisted: true,
+			intent:          intent,
+			store:           s,
+			ctx:             ctx,
+			candidate:       c,
+		}
 		defer func() { e.mu.Lock(); e.active = false; e.mu.Unlock() }()
 		err = activate(ctx, e)
 		e.mu.Lock()
 		complete := e.pending == 0
+		persisted := e.intentPersisted
+		currentIntent := e.intent
 		e.active = false
 		e.mu.Unlock()
 		if !complete || ctx.Err() != nil {
 			return errors.Join(err, ErrReleaseUnresolved)
 		}
-		clearErr := s.db.Update(func(tx *bbolt.Tx) error {
-			old, err := readIntents(tx, c.Partition)
-			if err != nil {
-				return err
-			}
-			if old == nil || *old != intent {
-				return ErrReleaseUnresolved
-			}
-			high, found, err := readReleaseActivation(tx, c.Partition)
-			if err != nil {
-				return err
-			}
-			if !found || high != c {
-				return ErrReleaseUnresolved
-			}
-			return tx.Bucket(bucketReleaseIntent).Delete([]byte(c.Partition.key()))
-		})
+		var clearErr error
+		if persisted {
+			clearErr = s.db.Update(func(tx *bbolt.Tx) error {
+				old, err := readIntents(tx, c.Partition)
+				if err != nil {
+					return err
+				}
+				if old == nil || *old != currentIntent {
+					return ErrReleaseUnresolved
+				}
+				high, found, err := readReleaseActivation(tx, c.Partition)
+				if err != nil {
+					return err
+				}
+				if !found || high != c {
+					return ErrReleaseUnresolved
+				}
+				return tx.Bucket(bucketReleaseIntent).Delete([]byte(c.Partition.key()))
+			})
+		} else {
+			clearErr = s.db.View(func(tx *bbolt.Tx) error {
+				old, err := readIntents(tx, c.Partition)
+				if err != nil {
+					return err
+				}
+				if old != nil {
+					return ErrReleaseUnresolved
+				}
+				high, found, err := readReleaseActivation(tx, c.Partition)
+				if err != nil {
+					return err
+				}
+				if !found || high != c {
+					return ErrReleaseUnresolved
+				}
+				return nil
+			})
+		}
 		// Open uses bbolt's synchronous commits. A successful Update is the
 		// definite durable deletion; a failed commit preserves fail-closed state.
 		if err := errors.Join(err, clearErr); err != nil {

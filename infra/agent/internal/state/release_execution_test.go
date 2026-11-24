@@ -343,3 +343,72 @@ func TestIntentClearCommitFailureKeepsPartitionBlocked(t *testing.T) {
 	}
 	assertReleaseWater(t, s, releaseTestCandidate(7))
 }
+
+func TestReleaseExecutionSettleAndReacquireIntent(t *testing.T) {
+	dir := t.TempDir()
+	s, err := Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := releaseTestCandidate(7)
+	// 1. Settle clears persisted intent when pending == 0, and rejects when pending > 0.
+	err = s.WithReleaseExecution(context.Background(), c, releaseAllow, func(_ context.Context, e *ReleaseExecution) error {
+		finish, err := e.BeginAction()
+		if err != nil {
+			return err
+		}
+		if err := e.Settle(); !errors.Is(err, ErrReleaseUnresolved) {
+			t.Fatalf("Settle succeeded with pending Engine action: %v", err)
+		}
+		if err := s.CheckReleaseExecution(c); !errors.Is(err, ErrReleaseUnresolved) {
+			t.Fatalf("intent disappeared while action was pending: %v", err)
+		}
+		finish(true)
+		if err := e.Settle(); err != nil {
+			t.Fatalf("Settle failed after definite reply: %v", err)
+		}
+		if err := s.CheckReleaseExecution(c); err != nil {
+			t.Fatalf("intent remained persisted after Settle: %v", err)
+		}
+		return errors.New("business health timeout")
+	})
+	if err == nil || errors.Is(err, ErrReleaseUnresolved) {
+		t.Fatalf("settled non-Engine failure should not be unresolved: %v", err)
+	}
+	if err := s.CheckReleaseExecution(c); err != nil {
+		t.Fatalf("partition remained blocked after settled failure: %v", err)
+	}
+
+	// 2. A later BeginAction after Settle must re-persist the intent and stay fail-closed if uncertain.
+	err = s.WithReleaseExecution(context.Background(), c, releaseAllow, func(_ context.Context, e *ReleaseExecution) error {
+		if err := e.Settle(); err != nil {
+			return err
+		}
+		if err := s.CheckReleaseExecution(c); err != nil {
+			t.Fatalf("expected cleared intent after Settle: %v", err)
+		}
+		finish, err := e.BeginAction()
+		if err != nil {
+			return err
+		}
+		if err := s.CheckReleaseExecution(c); !errors.Is(err, ErrReleaseUnresolved) {
+			t.Fatalf("BeginAction after Settle did not re-persist intent: %v", err)
+		}
+		finish(false)
+		return errors.New("uncertain post-settle Engine stop")
+	})
+	if !errors.Is(err, ErrReleaseUnresolved) {
+		t.Fatalf("uncertain action after Settle lost unresolved error: %v", err)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = reopened.Close() }()
+	if err := reopened.CheckReleaseExecution(c); !errors.Is(err, ErrReleaseUnresolved) {
+		t.Fatalf("uncertain action after Settle did not persist intent across reopen: %v", err)
+	}
+}
