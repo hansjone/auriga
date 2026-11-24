@@ -13,6 +13,7 @@ param(
   [switch]$NoDesktopShortcut,
   [switch]$NoShortcuts,
   [switch]$Autostart,
+  [switch]$NoAutostart,
   # Setup wizard: machine-readable steps on stdout, and cancellation by creating this file.
   [switch]$Progress,
   [string]$CancelFile
@@ -64,19 +65,20 @@ if ($LASTEXITCODE -eq 2 -and $CancelFile) { exit 2 }
 if ($LASTEXITCODE -ne 0) { throw "install failed ($LASTEXITCODE)" }
 
 # When installed elevated (e.g. into Program Files or a restricted drive), grant the
-# installing user Modify rights on the install root so the standard-privilege tray can
-# persist settings, logs, and in-app updates. Inherited rules do not override the
-# protected read-only ACL on versions\<id>\runtime\python.
+# installing user Modify rights on the install root (DACL only, without rewriting Owner)
+# so the standard-privilege tray can persist settings, logs, and in-app updates.
+# Inherited rules do not override the protected read-only ACL on versions\<id>\runtime\python.
 try {
   $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
   $isAdmin = ([Security.Principal.WindowsPrincipal]::new($identity)).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
   if ($isAdmin -and (Test-Path -LiteralPath $InstallDir -PathType Container)) {
-    $acl = Get-Acl -LiteralPath $InstallDir
+    $dirItem = Get-Item -LiteralPath $InstallDir
+    $acl = $dirItem.GetAccessControl([Security.AccessControl.AccessControlSections]::Access)
     $inherit = [Security.AccessControl.InheritanceFlags]'ContainerInherit, ObjectInherit'
     $propagate = [Security.AccessControl.PropagationFlags]::None
     $rule = New-Object Security.AccessControl.FileSystemAccessRule($identity.User, 'Modify', $inherit, $propagate, 'Allow')
     $acl.AddAccessRule($rule)
-    Set-Acl -LiteralPath $InstallDir -AclObject $acl
+    [IO.Directory]::SetAccessControl($InstallDir, $acl)
   }
 } catch {
   Write-Warning "Failed to grant user maintenance permissions on ${InstallDir}: $_"
@@ -151,6 +153,16 @@ try {
       $runKey = [Microsoft.Win32.Registry]::CurrentUser.CreateSubKey('Software\Microsoft\Windows\CurrentVersion\Run')
       try { $runKey.SetValue($RegistryKey, (Get-DesktopStartupCommand $InstallDir), [Microsoft.Win32.RegistryValueKind]::String) }
       finally { $runKey.Dispose() }
+    } elseif ($NoAutostart) {
+      $runKey = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey('Software\Microsoft\Windows\CurrentVersion\Run', $true)
+      if ($runKey) {
+        try {
+          $existingAuto = $runKey.GetValue($RegistryKey, $null)
+          if ($existingAuto -and (Test-DesktopStartupCommand ([string]$existingAuto) $InstallDir)) {
+            $runKey.DeleteValue($RegistryKey, $false)
+          }
+        } finally { $runKey.Dispose() }
+      }
     }
   } finally {
     @{ shortcuts = $links; registryKey = $RegistryKey } | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $InstallDir 'shell.json') -Encoding UTF8

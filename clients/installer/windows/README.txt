@@ -1,7 +1,7 @@
 Auriga DSH installer (test build, unsigned)
 
-Single-file: run Auriga-Desktop-Setup-<version>.exe. Zip: unpack, run install.cmd.
-Options (zip): install.cmd [-InstallDir <dir>] [-DataHome <dir>] [-PlatformOrigin <https://...>] [-NoShortcuts]
+Single-file: run AurigaDSH-Setup-<version>.exe. Zip: unpack, run install.cmd.
+Options (zip): install.cmd [-InstallDir <dir>] [-DataHome <dir>] [-PlatformOrigin <https://...>] [-NoDesktopShortcut] [-NoShortcuts] [-Autostart|-NoAutostart]
   Default install dir: %ProgramFiles%\Auriga DSH
   Default data home  : %LOCALAPPDATA%\AurigaDesktop\home (separate from any existing ~/.dsh)
 Single-file setup requests administrator rights (UAC) so you can install to Program Files or any local drive, and grants the installing user maintenance permissions on the install root (while keeping the embedded Python runtime read-only).

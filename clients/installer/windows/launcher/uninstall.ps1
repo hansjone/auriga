@@ -21,16 +21,24 @@ if (-not $Quiet) {
       } catch { }
     }
     if ($needsElevation) {
-      $elevArgs = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden', '-File', "`"$PSCommandPath`"")
-      if ($PurgeData) { $elevArgs += '-PurgeData' }
-      if ($ReportResult) { $elevArgs += '-ReportResult' }
+      $elevArgs = '-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "' + ($PSCommandPath -replace '"', '\"') + '"'
+      if ($PurgeData) { $elevArgs += ' -PurgeData' }
+      if ($ReportResult) { $elevArgs += ' -ReportResult' }
+      $psi = New-Object System.Diagnostics.ProcessStartInfo
+      $psi.FileName = Join-Path ([Environment]::SystemDirectory) 'WindowsPowerShell\v1.0\powershell.exe'
+      $psi.Arguments = $elevArgs
+      $psi.UseShellExecute = $true
+      $psi.Verb = 'RunAs'
       try {
-        $elevated = Start-Process -FilePath (Join-Path ([Environment]::SystemDirectory) 'WindowsPowerShell\v1.0\powershell.exe') -ArgumentList $elevArgs -Verb RunAs -PassThru
+        $elevated = [System.Diagnostics.Process]::Start($psi)
         $elevated.WaitForExit()
-        exit $elevated.ExitCode
+        $code = $elevated.ExitCode
+        $elevated.Dispose()
+        exit $code
       } catch [System.ComponentModel.Win32Exception] {
-        # User cancelled UAC prompt.
-        exit 0
+        # ERROR_CANCELLED (1223): user cancelled UAC prompt.
+        if ($_.Exception.NativeErrorCode -eq 1223) { exit 0 }
+        throw
       }
     }
   }

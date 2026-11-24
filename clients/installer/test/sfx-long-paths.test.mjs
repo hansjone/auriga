@@ -54,7 +54,7 @@ test(
       writeFileSync(join(stage, `file-${i}`), 'fixture');
     writeFileSync(
       join(stage, 'install.ps1'),
-      `param([string]$InstallDir, [switch]$Progress, [string]$CancelFile, [switch]$NoDesktopShortcut, [switch]$Autostart, [int]$ExitCode=0)
+      `param([string]$InstallDir, [switch]$Progress, [string]$CancelFile, [switch]$NoDesktopShortcut, [switch]$Autostart, [switch]$NoAutostart, [int]$ExitCode=0)
 if (!(Test-Path -LiteralPath (Join-Path $PSScriptRoot 'payload'))) { exit 9 }
 Write-Output '@@progress {"stage":"verify","fraction":1}'
 [IO.File]::WriteAllText($env:SFX_TEST_RESULT, 'installed')
@@ -123,6 +123,10 @@ exit $ExitCode
     }
     const unsafe = run(harness, ['unsafe', join(base, 'unsafe')]);
     assert.equal(unsafe.status, 0, unsafe.stdout + unsafe.stderr);
+    const hidpi = run(harness, ['hidpi']);
+    assert.equal(hidpi.status, 0, hidpi.stdout + hidpi.stderr);
+    assert.match(hidpi.stdout, /hidpi=OK/);
+    t.diagnostic(hidpi.stdout.trim());
     for (const code of [0, 7]) {
       const result = run(exe, ['/VERYSILENT', '-ExitCode', String(code)]);
       assert.equal(result.status, code, result.stdout + result.stderr);

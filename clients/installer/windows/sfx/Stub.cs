@@ -56,6 +56,7 @@ static class Setup
     public const string Brand = "Auriga DSH";
     public const string Publisher = "Auriga";
     public const string FolderName = "Auriga DSH";
+    static readonly Regex SafeVersionId = new Regex("^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$");
     [DllImport("kernel32.dll")] static extern IntPtr GetConsoleWindow();
     [DllImport("user32.dll")] static extern bool ShowWindow(IntPtr window, int command);
 
@@ -83,6 +84,11 @@ static class Setup
                 return new WindowsPrincipal(identity).IsInRole(WindowsBuiltInRole.Administrator);
         }
         catch (Exception) { return false; }
+    }
+
+    public static bool IsSafeVersionId(string id)
+    {
+        return !string.IsNullOrEmpty(id) && SafeVersionId.IsMatch(id);
     }
 
     public static string DefaultInstallDir()
@@ -285,6 +291,16 @@ static class Setup
         return true;
     }
 
+    public static bool OwnsStartupCommand(string command, string root)
+    {
+        if (string.IsNullOrEmpty(command) || string.IsNullOrEmpty(root)) return false;
+        string canonical = Path.GetFullPath(root).TrimEnd('\\');
+        string script = Path.Combine(canonical, "bin", "auriga-autostart.ps1");
+        if (command.IndexOf("\"" + script + "\"", StringComparison.OrdinalIgnoreCase) >= 0) return true;
+        string versions = Regex.Escape(Path.Combine(canonical, "versions").TrimEnd('\\'));
+        return Regex.IsMatch(command, "^\"(" + versions + "\\\\[A-Za-z0-9._-]+\\\\auriga\\\\tray\\\\AurigaDesktop\\.exe)\" /autostart$", RegexOptions.IgnoreCase);
+    }
+
     public static string LicenseAndNoticeText()
     {
         return string.Join("\r\n", new[]
@@ -292,7 +308,7 @@ static class Setup
             "Auriga DSH 软件许可协议与使用声明",
             "============================================================",
             "",
-            "在安装或使用 Auriga DSH 桌面客户端（以下简称“本软件”）前，请仔细阅读以下许可协议与产品声明。选择“我同意此协议”并继续安装，即表示您已阅读、理解并同意遵守以下条款。",
+            "在安装或使用 Auriga DSH 桌面客户端（以下简称“本软件”）前，请仔细阅读以下许可协议与产品声明。选择“我已阅读并同意”并继续安装，即表示您已阅读、理解并同意遵守以下条款。",
             "",
             "一、软件许可协议",
             "1. Auriga 项目采用双重许可模式：",
@@ -338,9 +354,10 @@ sealed class Wizard : Form
     const int PageFinish = 6;
 
     static readonly Color BrandDark = Color.FromArgb(22, 35, 58);
-    static readonly Color BrandAccent = Color.FromArgb(47, 111, 237);
     static readonly Color BorderGray = Color.FromArgb(220, 224, 232);
     static readonly Color FooterBg = Color.FromArgb(245, 246, 248);
+    static readonly Color TitleText = Color.FromArgb(24, 30, 42);
+    static readonly Color BodyText = Color.FromArgb(52, 60, 72);
     static readonly Color MutedText = Color.FromArgb(92, 102, 118);
     static readonly Color DangerText = Color.FromArgb(196, 43, 28);
 
@@ -351,11 +368,11 @@ sealed class Wizard : Form
     readonly PictureBox sideLogo = new PictureBox { Left = 28, Top = 36, Width = 56, Height = 56, SizeMode = PictureBoxSizeMode.Zoom, BackColor = Color.Transparent };
     readonly Label sideTitle = new Label { Left = 28, Top = 104, Width = SidebarW - 44, Height = 30, ForeColor = Color.White, Font = new Font("Microsoft YaHei UI", 14, FontStyle.Bold), Text = Setup.Brand };
     readonly Label sideVersion = new Label { Left = 28, Top = 136, Width = SidebarW - 44, Height = 22, ForeColor = Color.FromArgb(176, 196, 226), Font = new Font("Microsoft YaHei UI", 9) };
-    readonly Label sideDesc = new Label { Left = 28, Top = 176, Width = SidebarW - 44, Height = 120, ForeColor = Color.FromArgb(154, 174, 204), Font = new Font("Microsoft YaHei UI", 8.5f), Text = "桌面工作空间与插件运行时\n\n· 独立运行环境\n· 签名校验与安全更新\n· 原子安装与自动回滚" };
+    readonly Label sideDesc = new Label { Left = 28, Top = 176, Width = SidebarW - 44, Height = 140, ForeColor = Color.FromArgb(154, 174, 204), Font = new Font("Microsoft YaHei UI", 8.5f), Text = "桌面工作空间与插件运行时\n\n· 独立运行环境\n· 签名校验与安全更新\n· 原子安装与自动回滚" };
 
     readonly Panel header = new Panel { Left = 0, Top = 0, Width = W, Height = HeaderH, BackColor = Color.White };
-    readonly Label heading = new Label { Left = 24, Top = 12, Width = 540, Height = 26, Font = new Font("Microsoft YaHei UI", 11.5f, FontStyle.Bold), ForeColor = Color.FromArgb(24, 30, 42) };
-    readonly Label subheading = new Label { Left = 26, Top = 39, Width = 540, Height = 20, ForeColor = MutedText };
+    readonly Label heading = new Label { Left = 24, Top = 12, Width = 540, Height = 26, Font = new Font("Microsoft YaHei UI", 11.5f, FontStyle.Bold), ForeColor = TitleText };
+    readonly Label subheading = new Label { Left = 26, Top = 39, Width = 540, Height = 22, ForeColor = MutedText };
     readonly PictureBox logo = new PictureBox { Left = W - 68, Top = 12, Width = 44, Height = 44, SizeMode = PictureBoxSizeMode.Zoom };
     readonly Panel headerLine = new Panel { Left = 0, Top = HeaderH, Width = W, Height = 1, BackColor = BorderGray };
 
@@ -363,60 +380,75 @@ sealed class Wizard : Form
 
     readonly Panel footerLine = new Panel { Left = 0, Top = H - FooterH, Width = W, Height = 1, BackColor = BorderGray };
     readonly Panel footerPanel = new Panel { Left = 0, Top = H - FooterH + 1, Width = W, Height = FooterH - 1, BackColor = FooterBg };
-    readonly Label footerBrand = new Label { Left = 20, Top = 18, Width = 240, Height = 18, ForeColor = Color.FromArgb(140, 148, 160), Font = new Font("Microsoft YaHei UI", 8.5f), Text = Setup.Brand + " 安装向导" };
-    readonly Button back = new Button { Text = "< 上一步(&B)", Width = 96, Height = 29, FlatStyle = FlatStyle.System };
-    readonly Button next = new Button { Text = "下一步(&N) >", Width = 96, Height = 29, FlatStyle = FlatStyle.System };
+    readonly Label footerBrand = new Label { Left = 20, Top = 18, Width = 240, Height = 20, ForeColor = Color.FromArgb(140, 148, 160), Font = new Font("Microsoft YaHei UI", 8.5f), Text = Setup.Brand + " 安装向导" };
+    readonly Button back = new Button { Text = "< 上一步(&B)", Width = 98, Height = 29, FlatStyle = FlatStyle.System };
+    readonly Button next = new Button { Text = "下一步(&N) >", Width = 98, Height = 29, FlatStyle = FlatStyle.System };
     readonly Button cancel = new Button { Text = "取消", Width = 88, Height = 29, FlatStyle = FlatStyle.System };
+
+    // All 7 page containers are pre-mounted inside `body` before Initialize ends so
+    // WinForms AutoScaleMode.Dpi scales every page's controls consistently at 125%/150%/200% DPI.
+    readonly Panel[] pagePanels = new Panel[7];
+
+    // Welcome controls
+    readonly Label welcomeTitle = new Label { Left = 24, Top = 28, Width = W - SidebarW - 48, Height = 36, Font = new Font("Microsoft YaHei UI", 14, FontStyle.Bold), ForeColor = TitleText };
+    readonly Label welcomeIntro = new Label { Left = 24, Top = 74, Width = W - SidebarW - 48, Height = 148, ForeColor = BodyText };
+    readonly Label welcomeHint = new Label { Left = 24, Top = 246, Width = W - SidebarW - 48, Height = 72, ForeColor = MutedText };
 
     // License controls
     readonly TextBox licenseBox = new TextBox
     {
-        Left = 28, Top = 16, Width = W - 56, Height = 232,
+        Left = 28, Top = 16, Width = W - 56, Height = 224,
         Multiline = true, ReadOnly = true, ScrollBars = ScrollBars.Vertical,
         BackColor = Color.White, BorderStyle = BorderStyle.FixedSingle,
         Font = new Font("Microsoft YaHei UI", 9), TabStop = false
     };
-    readonly RadioButton acceptLicense = new RadioButton { Left = 28, Top = 262, Width = 560, Height = 24, Text = "我已阅读并同意上述许可协议与使用声明(&A)" };
-    readonly RadioButton declineLicense = new RadioButton { Left = 28, Top = 290, Width = 560, Height = 24, Text = "我不同意此协议(&D)", Checked = true };
+    readonly RadioButton acceptLicense = new RadioButton { Left = 28, Top = 252, Width = 580, Height = 28, Text = "我已阅读并同意上述许可协议与使用声明(&A)" };
+    readonly RadioButton declineLicense = new RadioButton { Left = 28, Top = 284, Width = 580, Height = 28, Text = "我不同意此协议(&D)", Checked = true };
 
     // Location controls (keep field name `folder` for test harness compatibility)
-    readonly TextBox folder = new TextBox { Left = 28, Top = 62, Width = 492, Height = 24 };
-    readonly Button browse = new Button { Text = "浏览(&R)…", Left = 530, Top = 60, Width = 102, Height = 27, FlatStyle = FlatStyle.System };
-    readonly Label spaceInfo = new Label { Left = 28, Top = 102, Width = 604, Height = 44, ForeColor = MutedText };
-    readonly Label dataHomeInfo = new Label { Left = 28, Top = 166, Width = 604, Height = 64, ForeColor = MutedText };
+    readonly Label locationPrompt = new Label { Left = 28, Top = 26, Width = W - 56, Height = 26, ForeColor = TitleText };
+    readonly TextBox folder = new TextBox { Left = 28, Top = 60, Width = 492, Height = 24 };
+    readonly Button browse = new Button { Text = "浏览(&R)…", Left = 530, Top = 58, Width = 102, Height = 28, FlatStyle = FlatStyle.System };
+    readonly Label spaceInfo = new Label { Left = 28, Top = 102, Width = 604, Height = 48, ForeColor = MutedText };
+    readonly Label dataHomeInfo = new Label { Left = 28, Top = 166, Width = 604, Height = 68, ForeColor = MutedText };
 
     // Tasks controls
-    readonly CheckBox desktopLink = new CheckBox { Left = 44, Top = 62, Width = 540, Height = 24, Text = "创建桌面快捷方式(&D)", Checked = true };
-    readonly CheckBox startMenuLink = new CheckBox { Left = 44, Top = 92, Width = 540, Height = 24, Text = "创建开始菜单快捷方式及卸载入口（默认启用）", Checked = true, Enabled = false };
-    readonly CheckBox autostartBox = new CheckBox { Left = 44, Top = 164, Width = 540, Height = 24, Text = "开机时自动启动 " + Setup.Brand + "(&S)" };
+    readonly Label tasksShortcutHeading = new Label { Left = 28, Top = 26, Width = 560, Height = 24, Font = new Font("Microsoft YaHei UI", 9, FontStyle.Bold), ForeColor = TitleText, Text = "快捷方式：" };
+    readonly CheckBox desktopLink = new CheckBox { Left = 44, Top = 58, Width = 560, Height = 28, Text = "创建桌面快捷方式(&D)", Checked = true };
+    readonly CheckBox startMenuLink = new CheckBox { Left = 44, Top = 92, Width = 560, Height = 28, Text = "创建开始菜单快捷方式及卸载入口（默认启用）", Checked = true, Enabled = false };
+    readonly Label tasksStartupHeading = new Label { Left = 28, Top = 136, Width = 560, Height = 24, Font = new Font("Microsoft YaHei UI", 9, FontStyle.Bold), ForeColor = TitleText, Text = "启动选项：" };
+    readonly CheckBox autostartBox = new CheckBox { Left = 44, Top = 168, Width = 560, Height = 28, Text = "开机时自动启动 " + Setup.Brand + "(&S)" };
+    readonly Label tasksHint = new Label { Left = 28, Top = 216, Width = 580, Height = 26, ForeColor = MutedText, Text = "以上选项在安装完成后均可随时通过系统托盘菜单调整。" };
 
-    // Ready summary control
+    // Ready summary controls
+    readonly Label readyPrompt = new Label { Left = 28, Top = 18, Width = W - 56, Height = 26, ForeColor = TitleText };
     readonly TextBox summaryBox = new TextBox
     {
-        Left = 28, Top = 52, Width = W - 56, Height = 224,
+        Left = 28, Top = 50, Width = W - 56, Height = 236,
         Multiline = true, ReadOnly = true, ScrollBars = ScrollBars.Vertical,
         BackColor = Color.White, BorderStyle = BorderStyle.FixedSingle,
         Font = new Font("Microsoft YaHei UI", 9), TabStop = false
     };
 
     // Progress controls (keep field names `bar` for test harness compatibility)
-    readonly Label stepLabel = new Label { Left = 28, Top = 28, Width = W - 56, Height = 24, Font = new Font("Microsoft YaHei UI", 9.5f, FontStyle.Bold) };
-    readonly ProgressBar bar = new ProgressBar { Left = 28, Top = 58, Width = W - 56, Height = 22, Maximum = 1000 };
-    readonly Label percentLabel = new Label { Left = 28, Top = 86, Width = W - 56, Height = 20, ForeColor = MutedText };
+    readonly Label stepLabel = new Label { Left = 28, Top = 24, Width = W - 56, Height = 26, Font = new Font("Microsoft YaHei UI", 9.5f, FontStyle.Bold) };
+    readonly ProgressBar bar = new ProgressBar { Left = 28, Top = 56, Width = W - 56, Height = 22, Maximum = 1000 };
+    readonly Label percentLabel = new Label { Left = 28, Top = 86, Width = W - 56, Height = 22, ForeColor = MutedText };
     readonly TextBox progressDetail = new TextBox
     {
-        Left = 28, Top = 118, Width = W - 56, Height = 192,
+        Left = 28, Top = 118, Width = W - 56, Height = 196,
         Multiline = true, ReadOnly = true, ScrollBars = ScrollBars.Vertical,
         BackColor = Color.White, BorderStyle = BorderStyle.FixedSingle,
         Font = new Font("Consolas", 8.5f), TabStop = false
     };
 
     // Finish controls (keep field names `finishText`, `openLog` for test harness compatibility)
-    readonly Label finishTitle = new Label { Left = 24, Top = 26, Width = W - SidebarW - 44, Height = 34, Font = new Font("Microsoft YaHei UI", 14, FontStyle.Bold), ForeColor = Color.FromArgb(24, 30, 42) };
-    readonly Label finishText = new Label { Left = 24, Top = 70, Width = W - SidebarW - 44, Height = 148 };
-    readonly CheckBox launch = new CheckBox { Left = 24, Top = 232, Width = W - SidebarW - 44, Height = 26, Text = "立即启动 " + Setup.Brand + "(&L)", Checked = true };
-    readonly LinkLabel openLog = new LinkLabel { Left = 24, Top = 232, Width = W - SidebarW - 44, Height = 24, Text = "打开安装日志", Visible = false };
+    readonly Label finishTitle = new Label { Left = 24, Top = 26, Width = W - SidebarW - 44, Height = 36, Font = new Font("Microsoft YaHei UI", 14, FontStyle.Bold), ForeColor = TitleText };
+    readonly Label finishText = new Label { Left = 24, Top = 72, Width = W - SidebarW - 44, Height = 152, ForeColor = BodyText };
+    readonly CheckBox launch = new CheckBox { Left = 24, Top = 236, Width = W - SidebarW - 44, Height = 28, Text = "立即启动 " + Setup.Brand + "(&L)", Checked = true };
+    readonly LinkLabel openLog = new LinkLabel { Left = 24, Top = 236, Width = W - SidebarW - 44, Height = 26, Text = "打开安装日志", Visible = false };
 
+    readonly object logLock = new object();
     int page;
     string version = "?", existingRoot, existingVersion, logFile, cancelFile, temp;
     long unpackedBytes;
@@ -426,7 +458,9 @@ sealed class Wizard : Form
 
     public Wizard()
     {
+        SuspendLayout();
         Text = Setup.Brand + " 安装程序";
+        AutoScaleDimensions = new SizeF(96F, 96F);
         AutoScaleMode = AutoScaleMode.Dpi;
         ClientSize = new Size(W, H);
         FormBorderStyle = FormBorderStyle.FixedDialog;
@@ -446,10 +480,30 @@ sealed class Wizard : Form
         sidebar.Controls.AddRange(new Control[] { sideLogo, sideTitle, sideVersion, sideDesc });
         header.Controls.AddRange(new Control[] { heading, subheading, logo });
 
-        back.Location = new Point(W - 318, 12);
-        next.Location = new Point(W - 212, 12);
+        back.Location = new Point(W - 322, 12);
+        next.Location = new Point(W - 214, 12);
         cancel.Location = new Point(W - 106, 12);
         footerPanel.Controls.AddRange(new Control[] { footerBrand, back, next, cancel });
+
+        for (int i = 0; i < pagePanels.Length; i++)
+        {
+            bool withSidebar = i == PageWelcome || i == PageFinish;
+            pagePanels[i] = new Panel
+            {
+                Dock = DockStyle.Fill,
+                BackColor = withSidebar ? Color.White : SystemColors.Control,
+                Visible = false
+            };
+        }
+
+        pagePanels[PageWelcome].Controls.AddRange(new Control[] { welcomeTitle, welcomeIntro, welcomeHint });
+        pagePanels[PageLicense].Controls.AddRange(new Control[] { licenseBox, acceptLicense, declineLicense });
+        pagePanels[PageLocation].Controls.AddRange(new Control[] { locationPrompt, folder, browse, spaceInfo, dataHomeInfo });
+        pagePanels[PageTasks].Controls.AddRange(new Control[] { tasksShortcutHeading, desktopLink, startMenuLink, tasksStartupHeading, autostartBox, tasksHint });
+        pagePanels[PageReady].Controls.AddRange(new Control[] { readyPrompt, summaryBox });
+        pagePanels[PageProgress].Controls.AddRange(new Control[] { stepLabel, bar, percentLabel, progressDetail });
+        pagePanels[PageFinish].Controls.AddRange(new Control[] { finishTitle, finishText, openLog, launch });
+        body.Controls.AddRange(pagePanels);
 
         back.Click += delegate { if (page > PageWelcome && page <= PageReady) Show(page - 1); };
         next.Click += delegate { Next(); };
@@ -471,9 +525,14 @@ sealed class Wizard : Form
                 if (dialog.ShowDialog(this) == DialogResult.OK)
                 {
                     string selected = dialog.SelectedPath;
-                    bool nonEmptyOther = Directory.Exists(selected)
-                        && Directory.GetFileSystemEntries(selected).Length > 0
-                        && !File.Exists(Path.Combine(selected, ".auriga-desktop-install"));
+                    bool nonEmptyOther = false;
+                    try
+                    {
+                        nonEmptyOther = Directory.Exists(selected)
+                            && Directory.GetFileSystemEntries(selected).Length > 0
+                            && !File.Exists(Path.Combine(selected, ".auriga-desktop-install"));
+                    }
+                    catch (Exception) { nonEmptyOther = true; }
                     folder.Text = nonEmptyOther ? Path.Combine(selected, Setup.FolderName) : selected;
                 }
             }
@@ -489,6 +548,9 @@ sealed class Wizard : Form
         DetectExisting();
         sideVersion.Text = "版本 " + version;
         folder.Text = existingRoot ?? Setup.DefaultInstallDir();
+
+        ResumeLayout(false);
+        PerformLayout();
         Show(PageWelcome);
     }
 
@@ -546,7 +608,7 @@ sealed class Wizard : Form
                     if (run != null)
                     {
                         string val = Convert.ToString(run.GetValue(RegistryName, ""));
-                        if (val.IndexOf(existingRoot, StringComparison.OrdinalIgnoreCase) >= 0)
+                        if (Setup.OwnsStartupCommand(val, existingRoot))
                             autostartBox.Checked = true;
                     }
                 }
@@ -557,38 +619,36 @@ sealed class Wizard : Form
 
     void Header(string title, string sub) { heading.Text = title; subheading.Text = sub; }
 
-    static Label MakeLabel(string text, int left, int top, int width, int height, Font font, Color color)
-    {
-        return new Label { Left = left, Top = top, Width = width, Height = height, Text = text, Font = font, ForeColor = color };
-    }
-
     void ApplyChrome(bool useSidebar)
     {
         sidebar.Visible = useSidebar;
         header.Visible = !useSidebar;
         headerLine.Visible = !useSidebar;
+        // Derive `body` bounds from live scaled chrome controls so 125%/150%/200% DPI never clips.
+        int contentBottom = footerLine.Top;
         if (useSidebar)
         {
-            body.Left = SidebarW;
-            body.Top = 0;
-            body.Width = W - SidebarW;
-            body.Height = H - FooterH;
+            int left = sidebar.Right;
+            body.Bounds = new Rectangle(left, 0, Math.Max(0, ClientSize.Width - left), Math.Max(0, contentBottom));
             body.BackColor = Color.White;
         }
         else
         {
-            body.Left = 0;
-            body.Top = HeaderH + 1;
-            body.Width = W;
-            body.Height = H - HeaderH - 1 - FooterH;
+            int top = headerLine.Bottom;
+            body.Bounds = new Rectangle(0, top, ClientSize.Width, Math.Max(0, contentBottom - top));
             body.BackColor = SystemColors.Control;
         }
     }
 
+    long RequiredBytes()
+    {
+        return Math.Max(unpackedBytes * 2, 1024 * 1024);
+    }
+
     void UpdateSpaceInfo()
     {
-        double requiredMb = Math.Max(1.0, unpackedBytes / 1048576.0 * 1.15);
-        long neededBytes = Math.Max(unpackedBytes * 2, 1024 * 1024);
+        long neededBytes = RequiredBytes();
+        double requiredMb = Math.Max(1.0, neededBytes / 1048576.0);
         string path = folder.Text.Trim();
         try
         {
@@ -602,7 +662,7 @@ sealed class Wizard : Form
                     bool enough = drive.AvailableFreeSpace >= neededBytes;
                     spaceInfo.ForeColor = enough ? MutedText : DangerText;
                     spaceInfo.Text = string.Format(
-                        "所需磁盘空间：约 {0:0} MB\n目标磁盘（{1}）当前可用空间：{2:0.00} GB{3}",
+                        "至少需要可用磁盘空间：约 {0:0} MB\n目标磁盘（{1}）当前可用空间：{2:0.00} GB{3}",
                         requiredMb, root.TrimEnd('\\'), availGb, enough ? "" : "（空间不足）");
                     return;
                 }
@@ -610,7 +670,7 @@ sealed class Wizard : Form
         }
         catch (Exception) { }
         spaceInfo.ForeColor = MutedText;
-        spaceInfo.Text = string.Format("所需磁盘空间：约 {0:0} MB", requiredMb);
+        spaceInfo.Text = string.Format("至少需要可用磁盘空间：约 {0:0} MB", requiredMb);
     }
 
     string BuildSummary()
@@ -635,109 +695,84 @@ sealed class Wizard : Form
             lines.Add("    · 创建桌面快捷方式");
         else
             lines.Add("    · 不创建桌面快捷方式");
-        if (autostartBox.Checked)
-            lines.Add("    · 开机时自动启动 " + Setup.Brand);
+        lines.Add(autostartBox.Checked
+            ? "    · 开机时自动启动 " + Setup.Brand
+            : "    · 不开启开机自动启动");
         lines.Add("");
-        lines.Add(string.Format("预计所需磁盘空间：约 {0:0} MB", Math.Max(1.0, unpackedBytes / 1048576.0 * 1.15)));
+        lines.Add(string.Format("至少需要可用磁盘空间：约 {0:0} MB", Math.Max(1.0, RequiredBytes() / 1048576.0)));
         return string.Join("\r\n", lines.ToArray());
     }
 
     void Show(int target)
     {
         page = target;
-        body.Controls.Clear();
         back.Visible = page >= PageLicense && page <= PageReady;
         next.Enabled = true;
         cancel.Enabled = true;
 
+        bool useSidebar = page == PageWelcome || page == PageFinish;
+        ApplyChrome(useSidebar);
+
+        for (int i = 0; i < pagePanels.Length; i++)
+            pagePanels[i].Visible = (i == page);
+
         if (page == PageWelcome)
         {
-            ApplyChrome(true);
-            int rw = body.Width - 48;
-            body.Controls.Add(MakeLabel(
-                existingRoot != null ? "欢迎升级 " + Setup.Brand : "欢迎使用 " + Setup.Brand + " 安装向导",
-                24, 28, rw, 34, new Font("Microsoft YaHei UI", 14, FontStyle.Bold), Color.FromArgb(24, 30, 42)));
-            string intro = existingRoot != null
+            welcomeTitle.Text = existingRoot != null ? "欢迎升级 " + Setup.Brand : "欢迎使用 " + Setup.Brand + " 安装向导";
+            welcomeIntro.Text = existingRoot != null
                 ? "检测到您的计算机已安装 " + Setup.Brand + (existingVersion.Length > 0 ? " " + existingVersion : "") + "。\n\n本向导将把现有安装升级至 " + version + "，并完整保留您的个人配置、历史会话和登录状态。安装开始前会自动安全退出正在运行的 " + Setup.Brand + "。"
                 : "本向导将在您的计算机上安装 " + Setup.Brand + " " + version + "。\n\n" + Setup.Brand + " 内置本地 DSH 工作空间、Auriga 插件、Node.js 以及只读保护的 Python 运行环境，安装完成后可通过开始菜单、桌面快捷方式或系统托盘启动。";
-            body.Controls.Add(MakeLabel(intro, 24, 74, rw, 138, Font, Color.FromArgb(52, 60, 72)));
-            body.Controls.Add(MakeLabel(
-                "建议在继续之前关闭其他正在运行的 " + Setup.Brand + " 窗口。\n\n单击“下一步”继续，或单击“取消”退出安装向导。",
-                24, 246, rw, 68, Font, MutedText));
+            welcomeHint.Text = "建议在继续之前关闭其他正在运行的 " + Setup.Brand + " 窗口。\n\n单击“下一步”继续，或单击“取消”退出安装向导。";
             next.Text = "下一步(&N) >";
         }
         else if (page == PageLicense)
         {
-            ApplyChrome(false);
             Header("许可协议与使用声明", "在继续安装前，请仔细阅读以下重要信息。");
-            body.Controls.Add(licenseBox);
-            body.Controls.Add(acceptLicense);
-            body.Controls.Add(declineLicense);
             next.Text = "下一步(&N) >";
             next.Enabled = acceptLicense.Checked;
         }
         else if (page == PageLocation)
         {
-            ApplyChrome(false);
             Header("选择目标位置", existingRoot != null
                 ? "升级将沿用当前安装位置，以保持配置与快捷方式一致。"
                 : "选择 " + Setup.Brand + " 的安装目录，支持安装在系统盘或其他本地磁盘。");
-            body.Controls.Add(MakeLabel(
-                existingRoot != null ? "将升级以下位置的现有安装：" : "将 " + Setup.Brand + " 安装到以下文件夹（点击“浏览”可选择其他盘符或目录）：",
-                28, 30, W - 56, 24, Font, Color.FromArgb(32, 38, 48)));
+            locationPrompt.Text = existingRoot != null
+                ? "将升级以下位置的现有安装："
+                : "将 " + Setup.Brand + " 安装到以下文件夹（点击“浏览”可选择其他盘符或目录）：";
             folder.Enabled = browse.Enabled = existingRoot == null;
-            body.Controls.Add(folder);
-            body.Controls.Add(browse);
             UpdateSpaceInfo();
-            body.Controls.Add(spaceInfo);
             dataHomeInfo.Text = "用户数据目录：" + Setup.DefaultDataHome()
                 + "\n（个人配置、会话与登录凭据独立存放于此，不与程序目录混淆，卸载时默认保留。）";
-            body.Controls.Add(dataHomeInfo);
             next.Text = "下一步(&N) >";
         }
         else if (page == PageTasks)
         {
-            ApplyChrome(false);
             Header("选择附加任务", "选择安装 " + Setup.Brand + " 时希望同时执行的附加选项。");
-            body.Controls.Add(MakeLabel("快捷方式：", 28, 30, 560, 22, new Font("Microsoft YaHei UI", 9, FontStyle.Bold), Color.FromArgb(32, 38, 48)));
             desktopLink.Enabled = existingRoot == null;
             desktopLink.Text = existingRoot != null ? "桌面快捷方式（升级时沿用现有设置）" : "创建桌面快捷方式(&D)";
-            body.Controls.Add(desktopLink);
-            body.Controls.Add(startMenuLink);
-            body.Controls.Add(MakeLabel("启动选项：", 28, 134, 560, 22, new Font("Microsoft YaHei UI", 9, FontStyle.Bold), Color.FromArgb(32, 38, 48)));
-            body.Controls.Add(autostartBox);
-            body.Controls.Add(MakeLabel("以上选项在安装完成后均可随时通过系统托盘菜单调整。", 28, 214, 580, 24, Font, MutedText));
             next.Text = "下一步(&N) >";
         }
         else if (page == PageReady)
         {
-            ApplyChrome(false);
             Header("准备安装", "安装向导现已准备好在您的计算机上" + (existingRoot != null ? "升级" : "安装") + " " + Setup.Brand + "。");
-            body.Controls.Add(MakeLabel("请确认以下安装设置。单击“" + (existingRoot != null ? "升级" : "安装") + "”开始，或单击“上一步”修改设置：", 28, 20, W - 56, 24, Font, Color.FromArgb(32, 38, 48)));
+            readyPrompt.Text = "请确认以下安装设置。单击“" + (existingRoot != null ? "升级" : "安装") + "”开始，或单击“上一步”修改设置：";
             summaryBox.Text = BuildSummary();
-            body.Controls.Add(summaryBox);
             next.Text = existingRoot != null ? "升级(&U)" : "安装(&I)";
         }
         else if (page == PageProgress)
         {
-            ApplyChrome(false);
             Header(existingRoot != null ? "正在升级" : "正在安装", "请稍候，安装向导正在将 " + Setup.Brand + " 部署到您的计算机。");
-            body.Controls.AddRange(new Control[] { stepLabel, bar, percentLabel, progressDetail });
             back.Visible = false;
             next.Enabled = false;
             next.Text = "下一步(&N) >";
         }
         else
         {
-            ApplyChrome(true);
             finishTitle.Text = succeeded
                 ? "已完成 " + Setup.Brand + " 安装向导"
                 : (ExitCode == 2 ? "安装已取消" : "安装未能完成");
-            body.Controls.Add(finishTitle);
-            body.Controls.Add(finishText);
             openLog.Visible = !succeeded && ExitCode != 2 && !string.IsNullOrEmpty(logFile) && File.Exists(logFile);
-            body.Controls.Add(openLog);
-            if (succeeded) body.Controls.Add(launch);
+            launch.Visible = succeeded;
             next.Text = "完成(&F)";
             next.Enabled = true;
             cancel.Enabled = false;
@@ -780,10 +815,16 @@ sealed class Wizard : Form
         try
         {
             if (path.Length == 0 || !Path.IsPathRooted(path)) return Fail("请选择一个完整的本机安装路径。");
+            if (path.StartsWith("\\\\")) return Fail("不支持网络路径，请选择本机磁盘上的文件夹。");
             path = Path.GetFullPath(path);
+            if (path.StartsWith("\\\\")) return Fail("不支持网络路径，请选择本机磁盘上的文件夹。");
             if (Path.GetPathRoot(path).TrimEnd('\\').Equals(path.TrimEnd('\\'), StringComparison.OrdinalIgnoreCase))
                 return Fail("不能直接安装到磁盘根目录，请选择或输入一个子文件夹（例如 D:\\Auriga DSH）。");
-            if (path.StartsWith("\\\\")) return Fail("不支持网络路径，请选择本机磁盘上的文件夹。");
+
+            var drive = new DriveInfo(Path.GetPathRoot(path));
+            if (drive.DriveType == DriveType.Network)
+                return Fail("不支持网络映射盘，请选择本机固定磁盘上的文件夹。");
+
             if (Directory.Exists(path) && Directory.GetFileSystemEntries(path).Length > 0 && !File.Exists(Path.Combine(path, ".auriga-desktop-install")))
                 return Fail("该文件夹不是空的，也不是 " + Setup.Brand + " 的安装位置。请选择空文件夹或新文件夹。");
 
@@ -795,9 +836,9 @@ sealed class Wizard : Form
             File.WriteAllText(probe, "");
             File.Delete(probe);
 
-            var drive = new DriveInfo(Path.GetPathRoot(path));
-            if (drive.AvailableFreeSpace < unpackedBytes * 2)
-                return Fail(string.Format("目标磁盘空间不足：至少需要 {0:0} MB 可用空间。", unpackedBytes * 2 / 1048576.0));
+            long needed = RequiredBytes();
+            if (drive.AvailableFreeSpace < needed)
+                return Fail(string.Format("目标磁盘空间不足：至少需要 {0:0} MB 可用空间。", needed / 1048576.0));
         }
         catch (UnauthorizedAccessException)
         {
@@ -835,7 +876,10 @@ sealed class Wizard : Form
 
     void Log(string line)
     {
-        try { File.AppendAllText(logFile, DateTime.Now.ToString("HH:mm:ss ") + Regex.Replace(line, "token=[A-Za-z0-9_\\-]+", "token=REDACTED") + Environment.NewLine, Encoding.UTF8); } catch (Exception) { }
+        lock (logLock)
+        {
+            try { File.AppendAllText(logFile, DateTime.Now.ToString("HH:mm:ss ") + Regex.Replace(line, "token=[A-Za-z0-9_\\-]+", "token=REDACTED") + Environment.NewLine, Encoding.UTF8); } catch (Exception) { }
+        }
     }
 
     static readonly Dictionary<string, double[]> Stages = new Dictionary<string, double[]>
@@ -895,7 +939,7 @@ sealed class Wizard : Form
                     + " -InstallDir " + Setup.Quote(root)
                     + " -Progress -CancelFile " + Setup.Quote(cancelFile)
                     + (desktop || upgrade ? "" : " -NoDesktopShortcut")
-                    + (autostart ? " -Autostart" : "");
+                    + (autostart ? " -Autostart" : " -NoAutostart");
                 string lastError = null;
                 string firstError = null;
                 code = Setup.Run(Setup.PowerShell, arguments, line =>
@@ -1005,20 +1049,23 @@ sealed class Wizard : Form
         try
         {
             string current = File.ReadAllText(Path.Combine(root, "current.txt")).Trim();
-            string tray = Path.Combine(root, "versions", current, "auriga", "tray", "AurigaDesktop.exe");
-            string target = File.Exists(tray) ? tray : Path.Combine(root, "bin", "auriga-desktop.cmd");
+            string tray = Setup.IsSafeVersionId(current)
+                ? Path.Combine(root, "versions", current, "auriga", "tray", "AurigaDesktop.exe")
+                : "";
+            string target = tray.Length > 0 && File.Exists(tray) ? tray : Path.Combine(root, "bin", "auriga-desktop.cmd");
             if (Setup.IsElevated())
             {
                 // Delegate launch through explorer.exe so the tray runs at the desktop user's
                 // standard (non-elevated) integrity level rather than inheriting setup elevation.
+                // Always wrap in quotes so paths with commas are not parsed as explorer switches.
                 string explorer = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), "explorer.exe");
                 if (File.Exists(explorer))
                 {
-                    Process.Start(new ProcessStartInfo(explorer, Setup.Quote(target)) { UseShellExecute = false });
+                    Process.Start(new ProcessStartInfo(explorer, "\"" + target + "\"") { UseShellExecute = false });
                     return;
                 }
             }
-            if (File.Exists(tray))
+            if (tray.Length > 0 && File.Exists(tray))
                 Process.Start(new ProcessStartInfo(tray) { UseShellExecute = false, WorkingDirectory = root });
             else
                 Process.Start(new ProcessStartInfo(target) { UseShellExecute = true, WindowStyle = ProcessWindowStyle.Minimized });
