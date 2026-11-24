@@ -142,9 +142,9 @@ host root 执行 `auriga-nas-bootstrap runtime-upgrade -action rollback -base <d
 `runtime-upgrade.sh` 成功 commit 后，仅切好了 `config/runtime-source/active.json` 以及 `platform`/`agent` 挂载的默认运行时模板；**更新默认模板不等于已有实例已升级**，已有实例的 `spec` 仍保留旧镜像 digest。须经管理台 Workspace Admin API 逐个触发已有实例重算规格并切换：
 
 1. **查询已有实例的 `{id}` 与当前 `generation`**（管理台会话需 `workspace.instances.read` 权限）：
-   调用 `GET /api/workspace/v1/admin/instances`（可选查询参数 `ownerId`、`nodeId`、`phase`、`limit`、`cursor`），从返回 `items[]` 中读取每个目标实例的 `id` 与当前 `generation`（也可调用 `GET /api/workspace/v1/instances/{id}`，其响应头同时返回 `ETag: "<generation>"`）。
+   调用 `GET /api/workspace/v1/admin/instances`（可选查询参数 `ownerId`、`nodeId`、`phase`、`limit`、`cursor`），从返回 `items[]` 中读取每个目标实例的 `id` 与当前 `generation`（也可调用 `GET /api/workspace/v1/instances/{id}`，其响应头同时返回 `ETag: "<generation>"`；注意该单实例接口要求实例主人或具备 `workspace.instances.admin` 权限的管理台会话，仅有 `workspace.instances.read` 会返回 `404`）。
 2. **提交 Merge Patch 触发切换**（管理台会话需 `workspace.instances.admin` 权限）：
-   向目标实例发送 `PATCH /api/workspace/v1/admin/instances/{id}`，请求头必须包含 `Content-Type: application/merge-patch+json` 与 `If-Match: "<generation>"`（带双引号；版本不匹配会返回 `412 common.precondition_failed`），请求体为 `{"dshVersionPin": null}`；使用管理台浏览器会话 Cookie 调用写接口时还须携带当前会话的 `X-Auriga-CSRF` 头。例如：
+   向目标实例发送 `PATCH /api/workspace/v1/admin/instances/{id}`，请求头必须包含 `Content-Type: application/merge-patch+json` 与 `If-Match: "<generation>"`（带双引号；版本不匹配会返回 `412 common.precondition_failed`），请求体为 `{"dshVersionPin": null}`；使用管理台浏览器会话 Cookie 调用写接口时还须同时携带与管理台入口完全匹配的同源 `Origin` 头和当前会话的 `X-Auriga-CSRF` 头（域名模式下 Cookie Jar 中须包含对应的 `auriga_csrf` Cookie），否则会被 edge 拦截返回 `403 common.forbidden`（缺/错 `Origin` 返回 `entry rejected`，CSRF 校验失败返回 `request rejected`）。例如：
 
    ```sh
    # 1. 查询实例列表，获取 {id} 与当前 generation
@@ -153,6 +153,7 @@ host root 执行 `auriga-nas-bootstrap runtime-upgrade -action rollback -base <d
 
    # 2. 对目标实例发送 PATCH，按当前默认运行时模板重新解析 spec.dsh 并下发 agent
    curl -fsS -X PATCH -b admin.cookies \
+     -H "Origin: https://<admin-origin>" \
      -H "Content-Type: application/merge-patch+json" \
      -H 'If-Match: "<generation>"' \
      -H "X-Auriga-CSRF: <csrf-token>" \
@@ -161,9 +162,10 @@ host root 执行 `auriga-nas-bootstrap runtime-upgrade -action rollback -base <d
    ```
 
    该接口会清除版本固定并按当前生效默认模板重新解析实例的 `spec.dsh` 与 `spec.network`、将 `generation` 加一、保存新规格并立即向 agent 分发，触发 agent 重新执行 `Prepare → Ensure` 换用新镜像。
-3. **权限与 `403` 避坑说明**：
+3. **权限与 `401`/`403` 排障说明**：
    - 本操作要求管理台上下文（`@AdminOnly`）及 `workspace.instances.admin` 权限。
-   - **重要**：当管理台会话已过期或尚未完成有效 step-up（或写请求 CSRF 校验失败）时，该 `PATCH` 请求会返回 `403 request rejected`（错误码 `common.forbidden`），**不要误判为账号缺少权限**；重新登录管理台并完成 step-up（刷新会话 Cookie 与 `X-Auriga-CSRF`）后重试即可。
+   - 会话过期或未登录时，edge 返回 `401 common.unauthenticated`，重新登录管理台即可。
+   - **遇到 `403 common.forbidden`（`request rejected` / `entry rejected`）时不要误判为单纯权限不足**：写请求缺少或错配 `X-Auriga-CSRF`、沿用过期会话对应的旧 CSRF 令牌或域名模式下 `auriga_csrf` Cookie 失配时，edge 会返回 `403 request rejected`（`common.forbidden`）；缺少或不匹配同源 `Origin`（或请求打到非管理台入口）时返回 `403 entry rejected`（`common.forbidden`）。优先核对请求入口、同源 `Origin` 以及当前有效管理台会话的 `X-Auriga-CSRF` / Cookie（必要时重新登录管理台获取新会话与 CSRF 令牌）；确认无误后再排查是否缺少管理台上下文或 `workspace.instances.admin` 权限。
 4. **观察切换并完成实例验收**：
    - 通过 `GET /api/workspace/v1/admin/instances`、`GET /api/workspace/v1/instances/{id}` 或 SSE `GET /api/workspace/v1/instances/{id}/events` 观察实例完成 `Prepare → Ensure`；若运行中实例出现 `pendingRestart=true`，经公开接口 `POST /api/workspace/v1/instances/{id}/restart`（或成员正常重开流程）完成重启。
    - 核实同实例 `observedGeneration == generation`、`pendingRestart=false`、`phase="running"`、`ready=true`，并进一步确认实际容器镜像/插件版本及 network READY（如 `managedNetworkState="ready"`）；身份/collab 未轮换、控制服务健康均不能替代这些实例验收。
