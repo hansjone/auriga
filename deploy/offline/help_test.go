@@ -84,6 +84,8 @@ func TestSubcommandHelpExitsCleanlyWithFlagsAndDefaults(t *testing.T) {
 		{[]string{"deploy", "--help"}, []string{"--full", "--services", "--dry-run", "--json", "--config", "--source", "--accept-new-deps", "--memory-mib", "4096", "退出码"}},
 		{[]string{"rollback", "--help"}, []string{"--to", "--json", "--config", "退出码 3"}},
 		{[]string{"history", "--help"}, []string{"--json", "--config"}},
+		{[]string{"runtime", "--help"}, []string{"attach", "sync-pin"}},
+		{[]string{"runtime", "sync-pin", "--help"}, []string{"--bundle", "--root", "--image", "--data", "active.json"}},
 	}
 	for _, c := range cases {
 		out, done, err := captureHelp(t, c.args)

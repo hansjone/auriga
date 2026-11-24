@@ -160,9 +160,12 @@ func tryHelp(args []string) (done bool, err error) {
 	case "trust":
 		err = trustCommand([]string{"add-site-key", "x", "--help"})
 	case "runtime":
-		if sub == "attach" {
+		switch sub {
+		case "attach":
 			_, err = parseRuntimeAttach(h)
-		} else {
+		case "sync-pin":
+			_, err = parseRuntimeSyncPin(h)
+		default:
 			fmt.Fprint(helpOut, runtimeHelp)
 		}
 	case "deploy":
@@ -222,10 +225,14 @@ Windows 客户端加 --client（或 baseline --client）：只读固定的 %Prog
 `
 
 const runtimeHelp = `用法：./auriga runtime attach --bundle <目录> --root <root.pb> --image <repo@sha256:...> [--data <数据目录>] [--no-restart]
-对已安装且尚未登记 DSH 运行时的站点受控追加运行时（需要 root）。
-  attach  先用 runtime-release verify 校验，再通过 auriga-nas-bootstrap 写入独立的 config/runtime-source，
-          不修改已封存的 config/materials 及 bootstrap.receipt，并持久化快照与 state.json。
-          已有 runtime 的站点不能用 attach 换根，请走 runtime-upgrade。
+      ./auriga runtime sync-pin --bundle <目录> --root <root.pb> --image <repo@sha256:...> [--data <数据目录>]
+已安装站点的 DSH 运行时受控运维命令（需要 root）。
+  attach    对尚未登记 DSH 运行时的站点受控追加运行时：先用 runtime-release verify 校验，再通过
+            auriga-nas-bootstrap 写入独立的 config/runtime-source，不修改已封存的 config/materials 及
+            bootstrap.receipt，并持久化快照与 state.json。已有 runtime 的站点不能用 attach 换根，请走 runtime-upgrade。
+  sync-pin  在 runtime-upgrade.sh 完成升级并提交（active.json 非 pending）后，将安装钉定快照
+            （runtime-inputs）、state.json 与 stack.env 中的 AURIGA_RUNTIME_* 同步为当前生效运行时；
+            仅接受与 active.json 生效镜像一致且通过 runtime-release verify 的输入，完成后请同步更新 site.json。
 `
 
 const clientHelp = `用法：./auriga client build --version <SemVer> [--channel stable|beta] [--sequence <整数>] [--source <源码根>]
@@ -267,7 +274,7 @@ func printTopHelp(w io.Writer) {
   deps status|fetch|import   依赖缓存：看缺什么、按配置的依赖源补 Go/Web 依赖、导入手工缓存或套件
   deps … --client / baseline --client  Windows 客户端依赖与系统工具基线（转调 site-deps.mjs）
   deploy [<提交号>]          本机全量构建并部署（无 state 时首次安装）；失败且数据未被触碰时自动回滚
-  runtime attach             对已安装站点受控追加 DSH 运行时（写入独立 config/runtime-source，不破坏原收据）
+  runtime attach|sync-pin    受控追加 DSH 运行时，或在 runtime-upgrade 后同步安装钉定快照与 state/stack.env
   adopt --stack-env … --deploy-nas …  接管已有 deploy-nas 站点（建立 state，不重启；不在 sudo 工作流白名单）
   rollback [--to <序号>]     退回保留的历史发行（deploy、upgrade 与 adopt 产生的都可以；数据须与目标运行时相同）
   history                    列出部署历史与当前发行
@@ -612,6 +619,20 @@ func init() {
 			"image":      "精确的运行时镜像 repo@sha256:<digest>（必填）",
 			"data":       "数据目录或父目录",
 			"no-restart": "仅登记并写入 runtime-source，不自动执行 render/start",
+		},
+	}
+	helpSpecs["runtime sync-pin"] = helpSpec{
+		usage:   "./auriga runtime sync-pin --bundle <目录> --root <root.pb> --image <repo@sha256:...> [--data <数据目录>]",
+		summary: "在 runtime-upgrade.sh 升级提交后，经 runtime-release verify 验签并核对 active.json 生效镜像，原子同步安装钉定快照（runtime-inputs）、state.json 与 stack.env。",
+		notes: []string{
+			"仅接受已提交（active.json 非 pending）且与当前生效槽位镜像完全一致的输入；不可用于绕过 runtime-upgrade 私自换根。",
+			"同步完成后请将 site.json 的 server.install.runtime 更新为相同参数，以便后续 deploy 与干净重装一致。",
+		},
+		docs: map[string]string{
+			"bundle": "已签名的运行时公开发布目录（必填）",
+			"root":   "维护者独立批准的外部运行时根公钥 root.pb（必填）",
+			"image":  "精确的运行时镜像 repo@sha256:<digest>，须与 active.json 当前生效镜像一致（必填）",
+			"data":   "数据目录或父目录",
 		},
 	}
 	helpSpecs["release upload"] = helpSpec{

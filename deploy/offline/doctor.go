@@ -132,6 +132,7 @@ func doctor(s state) error {
 	check("正常管理台入口", "检查现场地址、DNS或受信代理及端口映射。", func() error { return browserEntry(s) })
 	check("对象存储UID10001写入", "恢复资源对象目录属主10001及0700权限，检查磁盘。", func() error { return objectWrite(s) })
 	check("真实登录及资源撤销签名", "私密TTY查看应急材料并核对时间与账户，使用正常页面登录。代理模式核对mTLS接线。", func() error { return loginProbe(s) })
+	printDoctorRuntimeCheck(os.Stdout, s)
 	var r release
 	if err := readJSON(filepath.Join(s.Package, "offline-release.json"), &r); err == nil && r.Desktop == nil {
 		fmt.Println("SKIP 桌面发行 — 未随包附带，桌面端验收待单独执行")
