@@ -690,6 +690,9 @@ func provisionResource(s state) error {
 	if err := readJSON(filepath.Join(root, "resource-roots.json"), &roots); err != nil {
 		return err
 	}
+	if err := ensureAgentResourceTrust(s.Data, roots); err != nil {
+		return err
+	}
 	env := filepath.Join(s.Data, "stack.env")
 	raw, err := os.ReadFile(env)
 	if err != nil {

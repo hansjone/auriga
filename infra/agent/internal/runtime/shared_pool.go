@@ -170,6 +170,25 @@ func validPoolBinding(b *nodev1.SharedDshBinding) bool {
 	return b != nil && len(b.ProtoReflect().GetUnknown()) == 0 && (b.Mode == nodev1.DshInstanceMode_DSH_INSTANCE_MODE_SHARED || b.Mode == nodev1.DshInstanceMode_DSH_INSTANCE_MODE_DEDICATED) && b.Epoch > 0 && b.Epoch <= 9007199254740991 && b.Revision > 0 && b.Revision <= 9007199254740991 && poolUUID.MatchString(b.TenantId) && poolUUID.MatchString(b.MemberId) && poolUUID.MatchString(b.PlacementId) && poolUUID.MatchString(b.PhysicalInstanceId)
 }
 
+func sameOperationIdentity(prev, next *nodev1.SharedDshBinding) bool {
+	return prev != nil && next != nil &&
+		prev.TenantId == next.TenantId &&
+		prev.MemberId == next.MemberId &&
+		prev.PlacementId == next.PlacementId &&
+		prev.PhysicalInstanceId == next.PhysicalInstanceId &&
+		prev.Mode == next.Mode
+}
+
+func newerOperationGeneration(prev, next *nodev1.SharedDshBinding) bool {
+	if prev == nil || next == nil {
+		return false
+	}
+	if next.Epoch < prev.Epoch {
+		return false
+	}
+	return next.Revision > prev.Revision
+}
+
 // ValidInitialPoolIntent performs only pure wire validation on the Recv loop.
 func ValidInitialPoolIntent(in *nodev1.SharedDshRuntimeIntent) bool {
 	return in != nil && len(in.ProtoReflect().GetUnknown()) == 0 && in.SchemaVersion == 1 && validPoolBinding(in.Binding) && poolUUID.MatchString(in.OperationId) && in.Action == "prepare-empty" && in.OperationId == in.Binding.PlacementId && in.CancelWaitSeconds == 30 && in.ArchiveRetentionSeconds == 2592000 && in.WorkspacePolicy == "empty" && in.SessionPolicy == "discard"
@@ -236,11 +255,14 @@ func (m *SharedPools) Apply(ctx context.Context, in *nodev1.SharedDshRuntimeInte
 	sum := sha256.Sum256(wire)
 	fingerprint := hex.EncodeToString(sum[:])
 	operationKey := in.OperationId + "/" + in.Action
+	supersedeOp := false
 	if op := s.Operations[operationKey]; op != nil {
 		if op.Fingerprint != fingerprint {
-			return nil, fmt.Errorf("operation fingerprint conflict")
-		}
-		if op.Receipt != nil && op.Receipt.Outcome == "confirmed" {
+			if in.Action != "prepare-empty" || in.OperationId != b.PlacementId || !sameOperationIdentity(op.Binding, b) || !newerOperationGeneration(op.Binding, b) {
+				return nil, fmt.Errorf("operation fingerprint conflict")
+			}
+			supersedeOp = true
+		} else if op.Receipt != nil && op.Receipt.Outcome == "confirmed" {
 			return proto.Clone(op.Receipt).(*nodev1.SharedDshRuntimeReceipt), nil
 		}
 	}
@@ -261,8 +283,8 @@ func (m *SharedPools) Apply(ctx context.Context, in *nodev1.SharedDshRuntimeInte
 	s.Tenant = b.TenantId
 	s.Bindings[b.MemberId] = proto.Clone(b).(*nodev1.SharedDshBinding)
 	op := s.Operations[operationKey]
-	if op == nil {
-		op = &poolOperation{Fingerprint: fingerprint, Action: in.Action, Binding: b}
+	if op == nil || supersedeOp {
+		op = &poolOperation{Fingerprint: fingerprint, Action: in.Action, Binding: proto.Clone(b).(*nodev1.SharedDshBinding)}
 		s.Operations[operationKey] = op
 	}
 	op.Pending = true

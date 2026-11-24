@@ -109,6 +109,16 @@ if [ -f "$(marker_path)" ]; then
   info "compose_config=ok"
   sh "$NAS_ROOT/scripts/mount-access.sh"
   if shared_present; then
+    if [ "${AURIGA_INSTALL_MODE:-host}" = container ]; then
+      docker run --rm --pull never --network none -u 0:0 --entrypoint sh \
+        --mount "type=bind,src=$AURIGA_DATA_ROOT/data/agent,dst=/probe,readonly" \
+        "$AURIGA_IMAGE_AGENT" -c 'test -f /probe/agent/resource-trust.json && test -s /probe/agent/resource-trust.json' \
+        || die "missing $AURIGA_DATA_ROOT/data/agent/agent/resource-trust.json (run render.sh after resource-keys/resource-roots.json is present)"
+    else
+      [ -f "$AURIGA_DATA_ROOT/data/agent/agent/resource-trust.json" ] && [ -s "$AURIGA_DATA_ROOT/data/agent/agent/resource-trust.json" ] \
+        || die "missing $AURIGA_DATA_ROOT/data/agent/agent/resource-trust.json (run render.sh after resource-keys/resource-roots.json is present)"
+    fi
+    info "shared_agent_resource_trust=ok"
     _shared_status=$(shared_action status 2>/dev/null || true)
     if [ -n "$_shared_status" ]; then
       info "shared_runtime_status=$_shared_status"

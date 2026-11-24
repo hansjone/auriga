@@ -71,3 +71,25 @@ it('rejects unknown mode rather than showing a dedicated entry', async () => {
   expect(openButton(view).attributes('disabled')).toBeDefined();
   view.unmount();
 });
+it('emits personal fallback when unassigned and hides it once placement exists', async () => {
+  api.get.mockRejectedValue(
+    new ApiError({ status: 404, title: 'Missing', code: 'common.not_found' }),
+  );
+  const unassignedView = setup();
+  await flushPromises();
+  const btn = unassignedView.find('[data-testid="fallback-personal"]');
+  expect(btn.exists()).toBe(true);
+  await btn.trigger('click');
+  expect(unassignedView.emitted('fallback')).toHaveLength(1);
+  unassignedView.unmount();
+
+  for (const state of ['pending', 'switching', 'unavailable', 'ready']) {
+    api.get.mockResolvedValue({ mode: 'shared', state });
+    const existingView = setup();
+    await flushPromises();
+    expect(
+      existingView.find('[data-testid="fallback-personal"]').exists(),
+    ).toBe(false);
+    existingView.unmount();
+  }
+});
