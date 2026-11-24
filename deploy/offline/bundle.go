@@ -386,6 +386,9 @@ func bundleExpectedContext(ctx context.Context, args []string, expectedCommit st
 	if err := jsonFile(filepath.Join(root, "provenance.json"), r.Source, 0644); err != nil {
 		return err
 	}
+	if err := writeRuntimeExpectedManifest(source, root); err != nil {
+		return err
+	}
 	if err := os.Remove(filepath.Join(root, "SHA256SUMS")); err != nil {
 		return err
 	}

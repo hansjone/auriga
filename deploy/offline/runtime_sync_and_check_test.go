@@ -64,12 +64,20 @@ func encodeTestInstanceSpecProto(dshBytes []byte) []byte {
 
 func writeTestRuntimeSlot(t *testing.T, dataDir, slot, image, dshVersion, pluginLabel string, seq uint64, pending bool) {
 	t.Helper()
+	_, digestPart, _ := strings.Cut(image, "@")
+	dshRaw := encodeTestDshRuntimeProto(image, dshVersion, digestPart, seq)
+	writeTestRuntimeSlotBytes(t, dataDir, slot, image, dshRaw, []byte("slot-root-"+slot), pluginLabel, pending)
+}
+
+func writeTestRuntimeSlotBytes(t *testing.T, dataDir, slot, image string, runtimePB, rootPB []byte, pluginLabel string, pending bool) {
+	t.Helper()
 	sourceDir := filepath.Join(dataDir, "config", "runtime-source")
 	slotDir := filepath.Join(sourceDir, slot)
 	_, digestPart, _ := strings.Cut(image, "@")
 	hexDigest := strings.TrimPrefix(digestPart, "sha256:")
 	for _, rel := range []string{
 		"release",
+		"runtime-keys",
 		"templates",
 		filepath.Join("release", "runtime-proofs", hexDigest),
 	} {
@@ -77,9 +85,11 @@ func writeTestRuntimeSlot(t *testing.T, dataDir, slot, image, dshVersion, plugin
 			t.Fatal(err)
 		}
 	}
-	dshRaw := encodeTestDshRuntimeProto(image, dshVersion, digestPart, seq)
-	specRaw := encodeTestInstanceSpecProto(dshRaw)
-	if err := os.WriteFile(filepath.Join(slotDir, "release", "runtime.pb"), dshRaw, 0644); err != nil {
+	specRaw := encodeTestInstanceSpecProto(runtimePB)
+	if err := os.WriteFile(filepath.Join(slotDir, "release", "runtime.pb"), runtimePB, 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(slotDir, "runtime-keys", "root.pb"), rootPB, 0644); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(slotDir, "templates", "real-dsh.pb"), specRaw, 0644); err != nil {
@@ -193,6 +203,96 @@ func TestReadActiveRuntimeInfo_SourcesAndErrors(t *testing.T) {
 	if !baseInfo.Configured || baseInfo.SourceKind != "base-materials" || baseInfo.Image != img || baseInfo.DSHVersion != "0.2.0" {
 		t.Fatalf("unexpected base-materials info: %+v", baseInfo)
 	}
+}
+
+func TestWriteAndReadRuntimeExpectedManifest(t *testing.T) {
+	oldInspect := inspectRuntimeImageMetadataFunc
+	oldDirs := runtimeExpectedSourceDirsFunc
+	defer func() {
+		inspectRuntimeImageMetadataFunc = oldInspect
+		runtimeExpectedSourceDirsFunc = oldDirs
+	}()
+
+	src := t.TempDir()
+	writeTestExpectedSource(t, src, "0.2.1-rc.3", "0.1.17")
+	pkg := t.TempDir()
+	if err := writeRuntimeExpectedManifest(src, pkg); err != nil {
+		t.Fatalf("writeRuntimeExpectedManifest failed: %v", err)
+	}
+
+	// 仅指向离线包目录 pkg（不依赖 source.dir），可稳定读出预期版本。
+	runtimeExpectedSourceDirsFunc = func(s state) []string { return []string{s.Package} }
+	imgV1 := "127.0.0.1:15000/auriga/dsh@sha256:" + strings.Repeat("1", 64)
+
+	t.Run("offline package manifest detects drift without source.dir", func(t *testing.T) {
+		data := t.TempDir()
+		writeTestRuntimeSlot(t, data, "s-00000000000000000001", imgV1, "0.2.0", "", 1, false)
+		inspectRuntimeImageMetadataFunc = func(ctx context.Context, image string) (runtimeImageMetadata, bool) {
+			return runtimeImageMetadata{DSHVersion: "0.2.0", PluginVersion: "0.1.15"}, true
+		}
+		s := state{
+			Data:    data,
+			Package: pkg,
+			Runtime: &installRuntime{Source: installRuntimeOptions{Bundle: "/srv/r1", Root: "/srv/root.pb", Image: imgV1}},
+		}
+		var docBuf bytes.Buffer
+		rep := printDoctorRuntimeCheck(&docBuf, s)
+		if rep.Status != "WARN" || len(rep.Warnings) != 2 {
+			t.Fatalf("expected 2 drift warnings from offline package manifest, got %+v", rep)
+		}
+		if !strings.Contains(docBuf.String(), runtimeExpectedManifestName) {
+			t.Fatalf("expected manifest source in output:\n%s", docBuf.String())
+		}
+	})
+
+	t.Run("missing expected metadata does not silently report PASS", func(t *testing.T) {
+		data := t.TempDir()
+		legacyPkg := t.TempDir() // 无 runtime-expected.json 也无 versions.json
+		writeTestRuntimeSlot(t, data, "s-00000000000000000001", imgV1, "0.2.1-rc.3", "0.1.17", 1, false)
+		inspectRuntimeImageMetadataFunc = func(ctx context.Context, image string) (runtimeImageMetadata, bool) {
+			return runtimeImageMetadata{DSHVersion: "0.2.1-rc.3", PluginVersion: "0.1.17"}, true
+		}
+		s := state{
+			Data:    data,
+			Package: legacyPkg,
+			Runtime: &installRuntime{Source: installRuntimeOptions{Bundle: "/srv/r1", Root: "/srv/root.pb", Image: imgV1}},
+		}
+		var docBuf, stBuf bytes.Buffer
+		rep := printDoctorRuntimeCheck(&docBuf, s)
+		printStatusRuntimeSummary(&stBuf, s)
+		if rep.Status != "INFO" || len(rep.Notes) == 0 {
+			t.Fatalf("expected INFO with notes when expected metadata absent, got %+v", rep)
+		}
+		if strings.Contains(docBuf.String(), "PASS 运行时一致性") {
+			t.Fatalf("must not emit unconditional PASS without expected metadata:\n%s", docBuf.String())
+		}
+		for _, want := range []string{"INFO 运行时一致性", "缺少源码预期版本元数据", "未完成 DSH/插件版本漂移比对"} {
+			if !strings.Contains(docBuf.String(), want) {
+				t.Fatalf("doctor output missing %q:\n%s", want, docBuf.String())
+			}
+		}
+		if !strings.Contains(stBuf.String(), "INFO ") || !strings.Contains(stBuf.String(), "缺少源码预期版本元数据") {
+			t.Fatalf("status output missing INFO note:\n%s", stBuf.String())
+		}
+	})
+
+	t.Run("missing local image plugin metadata in doctor reports INFO", func(t *testing.T) {
+		data := t.TempDir()
+		writeTestRuntimeSlot(t, data, "s-00000000000000000001", imgV1, "0.2.1-rc.3", "", 1, false)
+		inspectRuntimeImageMetadataFunc = func(ctx context.Context, image string) (runtimeImageMetadata, bool) {
+			return runtimeImageMetadata{}, false
+		}
+		s := state{
+			Data:    data,
+			Package: pkg,
+			Runtime: &installRuntime{Source: installRuntimeOptions{Bundle: "/srv/r1", Root: "/srv/root.pb", Image: imgV1}},
+		}
+		var docBuf bytes.Buffer
+		rep := printDoctorRuntimeCheck(&docBuf, s)
+		if rep.Status != "INFO" || !strings.Contains(docBuf.String(), "未能从本地运行时镜像读取内嵌插件") {
+			t.Fatalf("expected INFO note when image plugin version unreadable, got %+v\n%s", rep, docBuf.String())
+		}
+	})
 }
 
 func TestRuntimeConsistencyCheck_DoctorAndStatus(t *testing.T) {
@@ -376,20 +476,23 @@ func TestUpdateStackEnvRuntimePreservesLinesAndPermissions(t *testing.T) {
 	}
 }
 
-func makeCustomRuntimeBundleFixture(t *testing.T, tag, img string) installRuntimeOptions {
+func makeCustomRuntimeBundleFixture(t *testing.T, tag, img string, runtimePB, rootPB []byte) installRuntimeOptions {
 	t.Helper()
 	rootDir := t.TempDir()
 	bundle := filepath.Join(rootDir, "bundle")
 	if err := os.MkdirAll(bundle, 0755); err != nil {
 		t.Fatal(err)
 	}
-	for _, f := range []string{"runtime.pb", "manifest.json", "config.json", "signature.json"} {
+	if err := os.WriteFile(filepath.Join(bundle, "runtime.pb"), runtimePB, 0644); err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range []string{"manifest.json", "config.json", "signature.json"} {
 		if err := os.WriteFile(filepath.Join(bundle, f), []byte(tag+"-"+f), 0644); err != nil {
 			t.Fatal(err)
 		}
 	}
 	rootFile := filepath.Join(rootDir, "root.pb")
-	if err := os.WriteFile(rootFile, []byte(tag+"-root"), 0644); err != nil {
+	if err := os.WriteFile(rootFile, rootPB, 0644); err != nil {
 		t.Fatal(err)
 	}
 	return installRuntimeOptions{Bundle: bundle, Root: rootFile, Image: img}
@@ -401,13 +504,26 @@ func TestSyncPinnedInstalledRuntimeLifecycleAndGuards(t *testing.T) {
 	}
 
 	oldVerify := verifyInstallRuntimeFunc
-	defer func() { verifyInstallRuntimeFunc = oldVerify }()
+	oldDirs := runtimeExpectedSourceDirsFunc
+	defer func() {
+		verifyInstallRuntimeFunc = oldVerify
+		runtimeExpectedSourceDirsFunc = oldDirs
+	}()
 	verifyInstallRuntimeFunc = func(pkg string, r installRuntimeOptions) error { return nil }
 
 	imgV1 := "127.0.0.1:15000/auriga/dsh@sha256:" + strings.Repeat("1", 64)
 	imgV2 := "127.0.0.1:15000/auriga/dsh@sha256:" + strings.Repeat("2", 64)
-	reqV1 := makeCustomRuntimeBundleFixture(t, "v1", imgV1)
-	reqV2 := makeCustomRuntimeBundleFixture(t, "v2", imgV2)
+	rootV1 := []byte("trusted-root-pb-v1")
+	rootV2 := []byte("trusted-root-pb-v2")
+	rogueRoot := []byte("rogue-root-pb-attacker")
+	runtimePBV1 := encodeTestDshRuntimeProto(imgV1, "0.2.0", "sha256:"+strings.Repeat("1", 64), 1)
+	runtimePBV2 := encodeTestDshRuntimeProto(imgV2, "0.2.1-rc.3", "sha256:"+strings.Repeat("2", 64), 2)
+	runtimePBV2OtherSeq := encodeTestDshRuntimeProto(imgV2, "0.2.1-rc.3", "sha256:"+strings.Repeat("2", 64), 99)
+
+	reqV1 := makeCustomRuntimeBundleFixture(t, "v1", imgV1, runtimePBV1, rootV1)
+	reqV2 := makeCustomRuntimeBundleFixture(t, "v2", imgV2, runtimePBV2, rootV2)
+	reqV2RogueRoot := makeCustomRuntimeBundleFixture(t, "v2-rogue", imgV2, runtimePBV2, rogueRoot)
+	reqV2OtherPB := makeCustomRuntimeBundleFixture(t, "v2-other-pb", imgV2, runtimePBV2OtherSeq, rootV2)
 
 	tmp := t.TempDir()
 	data := filepath.Join(tmp, "auriga-data")
@@ -417,6 +533,10 @@ func TestSyncPinnedInstalledRuntimeLifecycleAndGuards(t *testing.T) {
 	if err := os.MkdirAll(data+".oneclick", 0755); err != nil {
 		t.Fatal(err)
 	}
+	if err := jsonFile(filepath.Join(tmp, runtimeExpectedManifestName), runtimeExpectedManifest{SchemaVersion: 1, DSHVersion: "0.2.1-rc.3", PluginVersion: "0.1.17"}, 0644); err != nil {
+		t.Fatal(err)
+	}
+	runtimeExpectedSourceDirsFunc = func(s state) []string { return []string{tmp} }
 
 	// 先建立首装钉定快照 v1、state.json 与 stack.env。
 	prepV1, err := prepareRuntimeSnapshot(tmp, reqV1)
@@ -464,18 +584,28 @@ func TestSyncPinnedInstalledRuntimeLifecycleAndGuards(t *testing.T) {
 	}
 
 	// 4. Pending active.json rejected.
-	writeTestRuntimeSlot(t, data, "s-00000000000000000002", imgV2, "0.2.1-rc.3", "0.1.17", 2, true)
+	writeTestRuntimeSlotBytes(t, data, "s-00000000000000000002", imgV2, runtimePBV2, rootV2, "0.1.17", true)
 	if _, _, err := syncPinnedInstalledRuntime(&s, tmp, reqV2); err == nil || !strings.Contains(err.Error(), "pending") {
 		t.Fatalf("expected pending rejection, got %v", err)
 	}
 
 	// 5. Committed active.json with mismatched image rejected.
-	writeTestRuntimeSlot(t, data, "s-00000000000000000002", imgV2, "0.2.1-rc.3", "0.1.17", 2, false)
+	writeTestRuntimeSlotBytes(t, data, "s-00000000000000000002", imgV2, runtimePBV2, rootV2, "0.1.17", false)
 	if _, _, err := syncPinnedInstalledRuntime(&s, tmp, reqV1); err == nil || !strings.Contains(err.Error(), "不一致") {
 		t.Fatalf("expected image mismatch rejection, got %v", err)
 	}
 
-	// 6. Verifier failure preserves original snapshot, state, and stack.env.
+	// 6. F1: Same image but different root.pb rejected (prevents root replacement).
+	if _, _, err := syncPinnedInstalledRuntime(&s, tmp, reqV2RogueRoot); err == nil || !strings.Contains(err.Error(), "替换信任根") {
+		t.Fatalf("expected root.pb mismatch rejection, got %v", err)
+	}
+
+	// 7. F1: Same image and root.pb but different bundle/runtime.pb rejected.
+	if _, _, err := syncPinnedInstalledRuntime(&s, tmp, reqV2OtherPB); err == nil || !strings.Contains(err.Error(), "runtime.pb") {
+		t.Fatalf("expected runtime.pb mismatch rejection, got %v", err)
+	}
+
+	// 8. Verifier failure preserves original snapshot, state, and stack.env.
 	verifyInstallRuntimeFunc = func(pkg string, r installRuntimeOptions) error {
 		return errors.New("signature verification failed")
 	}
@@ -486,8 +616,24 @@ func TestSyncPinnedInstalledRuntimeLifecycleAndGuards(t *testing.T) {
 		t.Fatalf("state mutated on verify failure: %+v", s.Runtime)
 	}
 
-	// 7. Successful sync-pin updates snapshot, state.json, stack.env, and passes resumeInstallRuntime.
+	// 9. L2: Failure during stack.env update rolls back runtime-inputs snapshot cleanly.
 	verifyInstallRuntimeFunc = func(pkg string, r installRuntimeOptions) error { return nil }
+	envPath := filepath.Join(data, "stack.env")
+	if err := os.Remove(envPath); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := syncPinnedInstalledRuntime(&s, tmp, reqV2); err == nil {
+		t.Fatalf("expected error when stack.env missing")
+	}
+	// 原 v1 快照与 state 必须完好回滚。
+	if err := checkPinnedInstallRuntime(tmp, s); err != nil {
+		t.Fatalf("runtime-inputs not rolled back after stack.env failure: %v", err)
+	}
+	if err := os.WriteFile(envPath, []byte(stackContent), 0640); err != nil {
+		t.Fatal(err)
+	}
+
+	// 10. Successful sync-pin updates snapshot, state.json, stack.env, and passes resumeInstallRuntime.
 	oldImg, slot, err := syncPinnedInstalledRuntime(&s, tmp, reqV2)
 	if err != nil {
 		t.Fatalf("syncPinnedInstalledRuntime failed: %v", err)
@@ -505,18 +651,18 @@ func TestSyncPinnedInstalledRuntimeLifecycleAndGuards(t *testing.T) {
 	if _, err := os.Lstat(runtimeSnapshot(data) + ".sync-pin.bak"); !os.IsNotExist(err) {
 		t.Fatalf("backup dir should be cleaned up")
 	}
-	envRaw, err := os.ReadFile(filepath.Join(data, "stack.env"))
+	envRaw, err := os.ReadFile(envPath)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(string(envRaw), "AURIGA_KEEP_ME=yes\n") || !strings.Contains(string(envRaw), "AURIGA_RUNTIME_IMAGE="+imgV2+"\n") {
 		t.Fatalf("stack.env unexpected content:\n%s", string(envRaw))
 	}
-	if info, err := os.Stat(filepath.Join(data, "stack.env")); err != nil || info.Mode().Perm() != 0640 {
+	if info, err := os.Stat(envPath); err != nil || info.Mode().Perm() != 0640 {
 		t.Fatalf("stack.env permission changed: %v %v", info, err)
 	}
 
-	// 8. Subsequent deploy resumeInstallRuntime with new reqV2 succeeds!
+	// 11. Subsequent deploy resumeInstallRuntime with new reqV2 succeeds!
 	prepCheck, err := prepareRuntimeSnapshot(tmp, reqV2)
 	if err != nil {
 		t.Fatalf("prepareRuntimeSnapshot v2 failed: %v", err)

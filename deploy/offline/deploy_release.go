@@ -247,6 +247,9 @@ func writeReleaseDir(ctx context.Context, data string, seq int, source, goOut, a
 	if err := writeReleaseMarkers(tmp, m); err != nil {
 		return fail(err)
 	}
+	if err := writeRuntimeExpectedManifest(source, tmp); err != nil {
+		return fail(err)
+	}
 	if err := writeSumsContext(ctx, tmp); err != nil {
 		return fail(err)
 	}

@@ -396,7 +396,8 @@ auriga client build                                Windows 客户端，见 D13
        --image <repo@sha256:...> \
        [--data <数据目录>]
      ```
-   - `runtime sync-pin` 在站点锁内拒绝未签名安装、未登记 runtime（提示先用 `runtime attach`）以及 `active.json` 未提交（`pending`）或镜像不匹配的请求；通过 `runtime-release verify` 完整验签后原子更新 `<data>.oneclick/runtime-inputs`、`state.json` 与 `stack.env`（保留原文件权限与其它行）。完成后请将 `site.json` 的 `server.install.runtime` 同步修改为相同参数，后续 `auriga deploy` 的 `resumeInstallRuntime` 校验即可正常通过。
+   - `runtime sync-pin` 在站点锁内拒绝未签名安装、未登记 runtime（提示先用 `runtime attach`）、`active.json` 未提交（`pending`）或镜像不匹配的请求，并强制核对输入 `root.pb`、`bundle/runtime.pb` 与当前激活槽位的 `runtime-keys/root.pb`、`release/runtime.pb` 逐字节一致（杜绝同镜像换根）；通过 `runtime-release verify` 完整验签后原子更新 `<data>.oneclick/runtime-inputs`、`state.json` 与 `stack.env`（保留原文件权限与其它行）。完成后请将 `site.json` 的 `server.install.runtime` 同步修改为相同参数，后续 `auriga deploy` 的 `resumeInstallRuntime` 校验即可正常通过。
 3. **`auriga doctor` 与 `auriga status` 运行时一致性检查**：
    - `auriga doctor` 与 `auriga status` 会同时展示“安装钉定运行时（install pinned）”与“当前生效运行时（active runtime）”。
-   - 当安装钉定与生效运行时不一致、存在未提交的 `pending` 升级，或生效运行时的 DSH/内嵌 `auriga-dsh` 插件版本与当前源码/发行包预期版本不一致时，输出明确的 `WARN` 提示及 `runtime-upgrade.sh` / `runtime sync-pin` 操作指引；未配置运行时的站点优雅跳过，不阻断既有体检。
+   - 离线发布包与 `auriga deploy` 发行目录会随包写入独立的 `runtime-expected.json`（预期 DSH 与 `auriga-dsh` 插件版本，不改动 `offline-release.json` schema）。当安装钉定与生效运行时不一致、存在未提交的 `pending` 升级，或生效运行时的版本与预期版本不一致时，输出明确的 `WARN` 提示及 `runtime-upgrade.sh` / `runtime sync-pin` 操作指引；历史旧包缺少预期版本清单且无 `source.dir` 时明确输出 `INFO` 说明未完成版本漂移比对，不会静默报 `PASS`；未配置运行时的站点优雅跳过，不阻断既有体检。
+   - `auriga status` 仅做快速只读元数据核对（不启动临时容器）；`auriga doctor` 会进一步以只读无网络方式探测本地镜像（Labels 与 `/opt/fixture/manifest.json`）以核对内嵌 `auriga-dsh` 插件版本。

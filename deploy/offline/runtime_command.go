@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"os"
@@ -280,6 +281,31 @@ func syncPinnedInstalledRuntime(s *state, pkg string, req installRuntimeOptions)
 		return "", "", err
 	}
 	defer func() { _ = os.RemoveAll(prepared.directory) }()
+
+	// F1：将待钉定快照中的 root.pb 与 bundle/runtime.pb 同当前激活槽位逐字节绑定比对，
+	// 防止用同镜像但不同根公钥或不同发布信封的材料替换安装钉定信任根。
+	slotRootBytes, err := readSafeSmallFile(filepath.Join(active.SlotDir, "runtime-keys", "root.pb"), 4<<20)
+	if err != nil {
+		return "", "", fmt.Errorf("读取当前激活槽位 runtime-keys/root.pb 失败：%w", err)
+	}
+	preparedRootBytes, err := readSafeSmallFile(filepath.Join(prepared.directory, "root.pb"), 4<<20)
+	if err != nil {
+		return "", "", fmt.Errorf("读取待钉定快照 root.pb 失败：%w", err)
+	}
+	if !bytes.Equal(slotRootBytes, preparedRootBytes) {
+		return "", "", fmt.Errorf("输入 root.pb 与当前激活槽位（%s）的 runtime-keys/root.pb 不一致；拒绝通过 sync-pin 替换信任根", active.Slot)
+	}
+	slotRuntimeBytes, err := readSafeSmallFile(filepath.Join(active.SlotDir, "release", "runtime.pb"), 4<<20)
+	if err != nil {
+		return "", "", fmt.Errorf("读取当前激活槽位 release/runtime.pb 失败：%w", err)
+	}
+	preparedRuntimeBytes, err := readSafeSmallFile(filepath.Join(prepared.directory, "bundle", "runtime.pb"), 4<<20)
+	if err != nil {
+		return "", "", fmt.Errorf("读取待钉定快照 bundle/runtime.pb 失败：%w", err)
+	}
+	if !bytes.Equal(slotRuntimeBytes, preparedRuntimeBytes) {
+		return "", "", fmt.Errorf("输入 bundle/runtime.pb 与当前激活槽位（%s）的 release/runtime.pb 不一致；sync-pin 只能同步与当前激活运行时完全一致的发布材料", active.Slot)
+	}
 
 	snapDir := runtimeSnapshot(s.Data)
 	if err := noSymlinks(snapDir); err != nil {

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/binary"
 	"encoding/json"
@@ -8,10 +9,21 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
 )
+
+const runtimeExpectedManifestName = "runtime-expected.json"
+
+// runtimeExpectedManifest 随离线包与 local-deploy 发行目录写入发行根，
+// 独立于 offline-release.json / release.json 以保持对旧版 CLI 严格解码的兼容。
+type runtimeExpectedManifest struct {
+	SchemaVersion int    `json:"schemaVersion"`
+	DSHVersion    string `json:"dshVersion,omitempty"`
+	PluginVersion string `json:"pluginVersion,omitempty"`
+}
 
 // runtimeActivation 对应 <data>/config/runtime-source/active.json（由 auriga-nas-bootstrap 维护）。
 type runtimeActivation struct {
@@ -55,8 +67,9 @@ type runtimeConsistencyReport struct {
 	PinnedSource string // "state.json" | "stack.env" | ""
 	Active       activeRuntimeInfo
 	Expected     expectedRuntimeVersions
-	Status       string // "SKIP" | "PASS" | "WARN"
+	Status       string // "SKIP" | "PASS" | "INFO" | "WARN"
 	Warnings     []string
+	Notes        []string
 }
 
 // 测试可注入点。
@@ -64,6 +77,56 @@ var (
 	inspectRuntimeImageMetadataFunc = inspectRuntimeImageMetadata
 	runtimeExpectedSourceDirsFunc   = defaultRuntimeExpectedSourceDirs
 )
+
+func readSafeSmallFile(path string, limit int64) ([]byte, error) {
+	if err := noSymlinks(path); err != nil {
+		return nil, err
+	}
+	return smallFile(path, limit)
+}
+
+// readSourceRuntimeVersions 从源码目录读取预期 DSH 与 auriga-dsh 插件版本（带 noSymlinks 检查）。
+func readSourceRuntimeVersions(dir string) (dshVersion, pluginVersion string, sources []string) {
+	if dir == "" {
+		return "", "", nil
+	}
+	vPath := filepath.Join(dir, "deploy", "compose", "real-dsh", "versions.json")
+	if raw, err := readSafeSmallFile(vPath, 1<<20); err == nil {
+		var v struct {
+			DSHVersion string `json:"dshVersion"`
+		}
+		if json.Unmarshal(raw, &v) == nil && strings.TrimSpace(v.DSHVersion) != "" {
+			dshVersion = strings.TrimSpace(v.DSHVersion)
+			sources = append(sources, vPath)
+		}
+	}
+	pPath := filepath.Join(dir, "clients", "dsh-plugin", "package.json")
+	if raw, err := readSafeSmallFile(pPath, 1<<20); err == nil {
+		var p struct {
+			Version string `json:"version"`
+		}
+		if json.Unmarshal(raw, &p) == nil && strings.TrimSpace(p.Version) != "" {
+			pluginVersion = strings.TrimSpace(p.Version)
+			sources = append(sources, pPath)
+		}
+	}
+	return dshVersion, pluginVersion, sources
+}
+
+// writeRuntimeExpectedManifest 从源码目录提取预期 DSH/插件版本并写入发行目录的 runtime-expected.json。
+// 若源码目录不含版本清单（如最小测试 fixture），静默跳过不报错。
+func writeRuntimeExpectedManifest(sourceDir, targetDir string) error {
+	dshVer, pluginVer, _ := readSourceRuntimeVersions(sourceDir)
+	if dshVer == "" && pluginVer == "" {
+		return nil
+	}
+	m := runtimeExpectedManifest{
+		SchemaVersion: 1,
+		DSHVersion:    dshVer,
+		PluginVersion: pluginVer,
+	}
+	return jsonFile(filepath.Join(targetDir, runtimeExpectedManifestName), m, 0644)
+}
 
 type parsedDshRuntime struct {
 	ArtifactID      string
@@ -224,12 +287,12 @@ func validRuntimeSlotName(name string) bool {
 
 func readRuntimeSlotMetadata(slotDir string, info *activeRuntimeInfo) {
 	var parsed parsedDshRuntime
-	if raw, err := smallFile(filepath.Join(slotDir, "release", "runtime.pb"), 1<<20); err == nil {
+	if raw, err := readSafeSmallFile(filepath.Join(slotDir, "release", "runtime.pb"), 1<<20); err == nil {
 		if d, err := parseDshRuntimeProto(raw); err == nil {
 			parsed.merge(d)
 		}
 	}
-	if raw, err := smallFile(filepath.Join(slotDir, "templates", "real-dsh.pb"), 1<<20); err == nil {
+	if raw, err := readSafeSmallFile(filepath.Join(slotDir, "templates", "real-dsh.pb"), 1<<20); err == nil {
 		if d, err := parseInstanceSpecDshProto(raw); err == nil {
 			parsed.merge(d)
 		}
@@ -246,7 +309,7 @@ func readRuntimeSlotMetadata(slotDir string, info *activeRuntimeInfo) {
 		var receipt struct {
 			Sequence uint64 `json:"Sequence"`
 		}
-		if raw, err := smallFile(filepath.Join(slotDir, "upgrade.receipt"), 65536); err == nil {
+		if raw, err := readSafeSmallFile(filepath.Join(slotDir, "upgrade.receipt"), 65536); err == nil {
 			if json.Unmarshal(raw, &receipt) == nil && receipt.Sequence > 0 {
 				info.ReleaseSequence = receipt.Sequence
 			}
@@ -255,6 +318,9 @@ func readRuntimeSlotMetadata(slotDir string, info *activeRuntimeInfo) {
 	// 从 release/runtime-proofs/<digest>（单代）或 runtime-proofs/<digest> 补充 digest 与镜像标签。
 	for _, proofsRel := range []string{filepath.Join("release", "runtime-proofs"), "runtime-proofs"} {
 		proofsDir := filepath.Join(slotDir, proofsRel)
+		if err := noSymlinks(proofsDir); err != nil {
+			continue
+		}
 		entries, err := os.ReadDir(proofsDir)
 		if err != nil {
 			continue
@@ -272,7 +338,7 @@ func readRuntimeSlotMetadata(slotDir string, info *activeRuntimeInfo) {
 		}
 		if targetHex != "" {
 			cfgPath := filepath.Join(proofsDir, targetHex, "config.json")
-			if raw, err := smallFile(cfgPath, 1<<20); err == nil {
+			if raw, err := readSafeSmallFile(cfgPath, 1<<20); err == nil {
 				var ociCfg struct {
 					Config struct {
 						Labels map[string]string `json:"Labels"`
@@ -314,7 +380,7 @@ func readActiveRuntimeInfo(data string) activeRuntimeInfo {
 		info.ParseError = err
 		return info
 	}
-	if raw, err := smallFile(activePath, 65536); err == nil {
+	if raw, err := readSafeSmallFile(activePath, 65536); err == nil {
 		info.Configured = true
 		info.SourceKind = "runtime-source"
 		var active runtimeActivation
@@ -364,6 +430,19 @@ func readActiveRuntimeInfo(data string) activeRuntimeInfo {
 	return info
 }
 
+// captureQuietContext 执行只读轻量探测命令并丢弃 stderr，避免降级跳过时污染 doctor 输出。
+func captureQuietContext(ctx context.Context, name string, args ...string) (string, error) {
+	var stdout bytes.Buffer
+	c := exec.CommandContext(ctx, name, args...)
+	c.Stdout = &stdout
+	c.Stderr = io.Discard
+	c.WaitDelay = 3 * time.Second
+	if err := c.Run(); err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(stdout.String()), nil
+}
+
 func inspectRuntimeImageMetadata(ctx context.Context, image string) (runtimeImageMetadata, bool) {
 	var meta runtimeImageMetadata
 	if strings.TrimSpace(image) == "" {
@@ -371,7 +450,7 @@ func inspectRuntimeImageMetadata(ctx context.Context, image string) (runtimeImag
 	}
 	inspectCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	labelsRaw, err := captureContext(inspectCtx, "docker", "image", "inspect", "--format", "{{json .Config.Labels}}", image)
+	labelsRaw, err := captureQuietContext(inspectCtx, "docker", "image", "inspect", "--format", "{{json .Config.Labels}}", image)
 	if err != nil {
 		return meta, false
 	}
@@ -386,7 +465,7 @@ func inspectRuntimeImageMetadata(ctx context.Context, image string) (runtimeImag
 	// real-dsh 镜像构建时将版本清单写入 /opt/fixture/manifest.json。
 	runCtx, runCancel := context.WithTimeout(ctx, 10*time.Second)
 	defer runCancel()
-	manifestRaw, err := captureContext(runCtx, "docker", "run", "--rm", "--pull", "never", "--network", "none",
+	manifestRaw, err := captureQuietContext(runCtx, "docker", "run", "--rm", "--pull", "never", "--network", "none",
 		"--log-driver", "none", "--read-only", "--cap-drop", "ALL",
 		"--security-opt", "no-new-privileges:true",
 		"--entrypoint", "cat", image, "/opt/fixture/manifest.json")
@@ -421,7 +500,7 @@ func defaultRuntimeExpectedSourceDirs(s state) []string {
 	}
 	add(s.Package)
 	if cfgPath := defaultSiteConfigPath(); cfgPath != "" {
-		if raw, err := smallFile(cfgPath, 1<<20); err == nil {
+		if raw, err := readSafeSmallFile(cfgPath, 1<<20); err == nil {
 			var partial struct {
 				Source *struct {
 					Dir string `json:"dir"`
@@ -447,27 +526,44 @@ func readExpectedRuntimeVersions(s state) expectedRuntimeVersions {
 		sources = append(sources, src)
 	}
 	for _, dir := range runtimeExpectedSourceDirsFunc(s) {
-		if out.DSHVersion == "" {
-			vPath := filepath.Join(dir, "deploy", "compose", "real-dsh", "versions.json")
-			if raw, err := smallFile(vPath, 1<<20); err == nil {
-				var v struct {
-					DSHVersion string `json:"dshVersion"`
-				}
-				if json.Unmarshal(raw, &v) == nil && strings.TrimSpace(v.DSHVersion) != "" {
-					out.DSHVersion = strings.TrimSpace(v.DSHVersion)
-					addSource(vPath)
+		// 1. 优先读取随离线发布包或 local-deploy 发行目录携带的 runtime-expected.json。
+		if out.DSHVersion == "" || out.PluginVersion == "" {
+			mPath := filepath.Join(dir, runtimeExpectedManifestName)
+			if raw, err := readSafeSmallFile(mPath, 1<<20); err == nil {
+				var m runtimeExpectedManifest
+				if json.Unmarshal(raw, &m) == nil {
+					used := false
+					if out.DSHVersion == "" && strings.TrimSpace(m.DSHVersion) != "" {
+						out.DSHVersion = strings.TrimSpace(m.DSHVersion)
+						used = true
+					}
+					if out.PluginVersion == "" && strings.TrimSpace(m.PluginVersion) != "" {
+						out.PluginVersion = strings.TrimSpace(m.PluginVersion)
+						used = true
+					}
+					if used {
+						addSource(mPath)
+					}
 				}
 			}
 		}
-		if out.PluginVersion == "" {
-			pPath := filepath.Join(dir, "clients", "dsh-plugin", "package.json")
-			if raw, err := smallFile(pPath, 1<<20); err == nil {
-				var p struct {
-					Version string `json:"version"`
+		// 2. 回退读取源码树中的 versions.json 与 clients/dsh-plugin/package.json。
+		if out.DSHVersion == "" || out.PluginVersion == "" {
+			dshVer, pluginVer, srcList := readSourceRuntimeVersions(dir)
+			if out.DSHVersion == "" && dshVer != "" {
+				out.DSHVersion = dshVer
+				for _, p := range srcList {
+					if strings.HasSuffix(p, "versions.json") {
+						addSource(p)
+					}
 				}
-				if json.Unmarshal(raw, &p) == nil && strings.TrimSpace(p.Version) != "" {
-					out.PluginVersion = strings.TrimSpace(p.Version)
-					addSource(pPath)
+			}
+			if out.PluginVersion == "" && pluginVer != "" {
+				out.PluginVersion = pluginVer
+				for _, p := range srcList {
+					if strings.HasSuffix(p, "package.json") {
+						addSource(p)
+					}
 				}
 			}
 		}
@@ -532,23 +628,41 @@ func evaluateRuntimeConsistency(s state, inspectImage bool) runtimeConsistencyRe
 
 	// #23：生效运行时与当前源码/发行包预期版本一致性检查。
 	if rep.Active.Configured && rep.Active.ParseError == nil {
-		if rep.Expected.DSHVersion != "" && rep.Active.DSHVersion != "" && rep.Active.DSHVersion != rep.Expected.DSHVersion {
-			rep.Warnings = append(rep.Warnings, fmt.Sprintf(
-				"生效运行时 DSH 版本（%s）与当前源码/发行包预期版本（%s，来源 %s）不一致；auriga deploy 不会自动升级 DSH 运行时，请重新构建运行时并运行 runtime-upgrade.sh 升级。",
-				rep.Active.DSHVersion, rep.Expected.DSHVersion, rep.Expected.SourceDesc,
-			))
-		}
-		if rep.Expected.PluginVersion != "" && rep.Active.PluginVersion != "" && rep.Active.PluginVersion != rep.Expected.PluginVersion {
-			rep.Warnings = append(rep.Warnings, fmt.Sprintf(
-				"生效运行时内嵌插件 auriga-dsh 版本（%s）与当前源码/发行包预期版本（%s，来源 %s）不一致；auriga deploy 不会自动升级 DSH 运行时，请重新构建运行时镜像并运行 runtime-upgrade.sh 升级。",
-				rep.Active.PluginVersion, rep.Expected.PluginVersion, rep.Expected.SourceDesc,
-			))
+		if rep.Expected.DSHVersion == "" && rep.Expected.PluginVersion == "" {
+			rep.Notes = append(rep.Notes, "当前发行包与站点配置缺少源码预期版本元数据（runtime-expected.json / versions.json / package.json），未完成 DSH/插件版本漂移比对。")
+		} else {
+			if rep.Expected.DSHVersion == "" {
+				rep.Notes = append(rep.Notes, "当前发行包缺少预期 DSH 版本元数据，未完成 DSH 版本漂移比对。")
+			} else if rep.Active.DSHVersion == "" {
+				rep.Notes = append(rep.Notes, "未能读取生效运行时的 DSH 版本，未完成 DSH 版本漂移比对。")
+			} else if rep.Active.DSHVersion != rep.Expected.DSHVersion {
+				rep.Warnings = append(rep.Warnings, fmt.Sprintf(
+					"生效运行时 DSH 版本（%s）与当前源码/发行包预期版本（%s，来源 %s）不一致；auriga deploy 不会自动升级 DSH 运行时，请重新构建运行时并运行 runtime-upgrade.sh 升级。",
+					rep.Active.DSHVersion, rep.Expected.DSHVersion, rep.Expected.SourceDesc,
+				))
+			}
+
+			if rep.Expected.PluginVersion == "" {
+				rep.Notes = append(rep.Notes, "当前发行包缺少预期 auriga-dsh 插件版本元数据，未完成插件版本漂移比对。")
+			} else if rep.Active.PluginVersion == "" {
+				if inspectImage {
+					rep.Notes = append(rep.Notes, "未能从本地运行时镜像读取内嵌插件 auriga-dsh 版本，未完成插件版本漂移比对。")
+				}
+			} else if rep.Active.PluginVersion != rep.Expected.PluginVersion {
+				rep.Warnings = append(rep.Warnings, fmt.Sprintf(
+					"生效运行时内嵌插件 auriga-dsh 版本（%s）与当前源码/发行包预期版本（%s，来源 %s）不一致；auriga deploy 不会自动升级 DSH 运行时，请重新构建运行时镜像并运行 runtime-upgrade.sh 升级。",
+					rep.Active.PluginVersion, rep.Expected.PluginVersion, rep.Expected.SourceDesc,
+				))
+			}
 		}
 	}
 
-	if len(rep.Warnings) > 0 {
+	switch {
+	case len(rep.Warnings) > 0:
 		rep.Status = "WARN"
-	} else {
+	case len(rep.Notes) > 0:
+		rep.Status = "INFO"
+	default:
 		rep.Status = "PASS"
 	}
 	return rep
@@ -597,6 +711,11 @@ func printDoctorRuntimeCheck(w io.Writer, s state) runtimeConsistencyReport {
 		fmt.Fprintln(w, "SKIP 运行时一致性 — 未配置独立 runtime-source 与安装钉定运行时")
 	case "PASS":
 		fmt.Fprintf(w, "PASS 运行时一致性 — 安装钉定与生效运行时一致：%s\n", formatActiveRuntimeDesc(rep.Active))
+	case "INFO":
+		fmt.Fprintf(w, "INFO 运行时一致性 — 安装钉定与生效运行时一致：%s（版本漂移检查未完整覆盖，见下方说明）\n", formatActiveRuntimeDesc(rep.Active))
+		for _, note := range rep.Notes {
+			fmt.Fprintf(w, "INFO 运行时一致性 — %s\n", note)
+		}
 	case "WARN":
 		pinnedDesc := rep.PinnedImage
 		if pinnedDesc == "" {
@@ -607,6 +726,9 @@ func printDoctorRuntimeCheck(w io.Writer, s state) runtimeConsistencyReport {
 		fmt.Fprintf(w, "INFO 运行时视图 — 安装钉定：%s；当前生效：%s\n", pinnedDesc, formatActiveRuntimeDesc(rep.Active))
 		for _, warn := range rep.Warnings {
 			fmt.Fprintf(w, "WARN 运行时一致性 — %s\n", warn)
+		}
+		for _, note := range rep.Notes {
+			fmt.Fprintf(w, "INFO 运行时一致性 — %s\n", note)
 		}
 	}
 	return rep
@@ -626,11 +748,20 @@ func printStatusRuntimeSummary(w io.Writer, s state) {
 	}
 	fmt.Fprintf(w, "安装钉定运行时（install pinned）：%s\n", pinnedDesc)
 	fmt.Fprintf(w, "当前生效运行时（active runtime）：%s\n", formatActiveRuntimeDesc(rep.Active))
-	if rep.Status == "PASS" {
+	switch rep.Status {
+	case "PASS":
 		fmt.Fprintln(w, "运行时一致性：一致")
-		return
-	}
-	for _, warn := range rep.Warnings {
-		fmt.Fprintf(w, "WARN %s\n", warn)
+	case "INFO":
+		fmt.Fprintln(w, "运行时一致性：安装钉定与生效运行时一致（部分版本漂移未核对，详查请运行 auriga doctor）")
+		for _, note := range rep.Notes {
+			fmt.Fprintf(w, "INFO %s\n", note)
+		}
+	default:
+		for _, warn := range rep.Warnings {
+			fmt.Fprintf(w, "WARN %s\n", warn)
+		}
+		for _, note := range rep.Notes {
+			fmt.Fprintf(w, "INFO %s\n", note)
+		}
 	}
 }
