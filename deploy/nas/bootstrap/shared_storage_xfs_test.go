@@ -47,13 +47,13 @@ func TestNormalizeSharedStorageSpec(t *testing.T) {
 		backend, mount, bin string
 		first, last         uint32
 	}{
-		"unknown-backend":   {"btrfs", "", "", 0, 0},
-		"ext4-with-mount":   {"ext4-image", "/srv/pools", "", 0, 0},
-		"ext4-with-binary":  {"", "", "/sbin/xfs_quota", 0, 0},
-		"xfs-missing-mount": {"xfs", "", "", 0, 0},
-		"xfs-root-mount":    {"xfs", "/", "", 0, 0},
-		"xfs-relative":      {"xfs", "relative/pools", "", 0, 0},
-		"xfs-dotdot":        {"xfs", "/srv/auriga/../pools", "", 0, 0},
+		"unknown-backend":    {"btrfs", "", "", 0, 0},
+		"ext4-with-mount":    {"ext4-image", "/srv/pools", "", 0, 0},
+		"ext4-with-binary":   {"", "", "/sbin/xfs_quota", 0, 0},
+		"xfs-missing-mount":  {"xfs", "", "", 0, 0},
+		"xfs-root-mount":     {"xfs", "/", "", 0, 0},
+		"xfs-relative":       {"xfs", "relative/pools", "", 0, 0},
+		"xfs-dotdot":         {"xfs", "/srv/auriga/../pools", "", 0, 0},
 		"xfs-trailing-slash": {"xfs", "/srv/auriga/pools/", "", 0, 0},
 		"xfs-space":          {"xfs", "/srv/auriga/my pools", "", 0, 0},
 		"xfs-comma":          {"xfs", "/srv/auriga/pools,bad", "", 0, 0},
