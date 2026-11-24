@@ -131,11 +131,13 @@ public final class WorkspaceViews {
                     r -> r != RuntimeKind.UNRECOGNIZED && r != RuntimeKind.RUNTIME_KIND_UNSPECIFIED)
                 .map(r -> r.name().replace("RUNTIME_KIND_", "").toLowerCase(Locale.ROOT))
                 .toList());
-        if (h.hasNodeTime())
+        var helloAt = instant(row, "hello_at");
+        var reference = helloAt != null ? helloAt : seen;
+        if (h.hasNodeTime() && reference != null)
           out.put(
               "clockSkewMs",
               (h.getNodeTime().getSeconds() * 1000 + h.getNodeTime().getNanos() / 1000000)
-                  - seen.toEpochMilli());
+                  - reference.toEpochMilli());
       } catch (Exception e) {
         throw new IllegalStateException(e);
       }

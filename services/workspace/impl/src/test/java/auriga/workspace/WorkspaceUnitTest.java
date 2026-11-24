@@ -314,4 +314,24 @@ class WorkspaceUnitTest {
         "common.unauthenticated",
         assertThrows(AurigaException.class, () -> later.verify(certificate)).errorCode().code());
   }
+
+  @Test
+  void filterHelloLabelsDropsReservedAndInvalidEntries() {
+    Map<String, String> raw = new LinkedHashMap<>();
+    raw.put("template", "real-dsh");
+    raw.put("topology.kubernetes.io/zone", "nas-1");
+    raw.put("auriga.reserved", "x");
+    raw.put("AURIGA.shared-dsh-runtime", "prepare-v1");
+    raw.put("", "empty-key");
+    raw.put("empty-val", "");
+    raw.put("-bad-start", "ok");
+    raw.put("bad space", "ok");
+    raw.put("bad-val-slash", "a/b");
+    raw.put("k".repeat(129), "too-long-key");
+    raw.put("too-long-val", "v".repeat(64));
+
+    assertEquals(
+        Map.of("template", "real-dsh", "topology.kubernetes.io/zone", "nas-1"),
+        auriga.workspace.grpc.NodeSessions.filterHelloLabels(raw));
+  }
 }

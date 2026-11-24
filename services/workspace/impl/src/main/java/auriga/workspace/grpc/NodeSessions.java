@@ -271,6 +271,50 @@ public final class NodeSessions implements AutoCloseable {
       throw new AurigaException(CommonErrors.UNAVAILABLE);
   }
 
+  private static final int MAX_LABEL_KEY_LENGTH = 128;
+  private static final int MAX_LABEL_VALUE_LENGTH = 63;
+
+  /**
+   * Extracts valid non-reserved scheduling labels from a node Hello payload.
+   *
+   * <p>System capability labels prefixed with {@code auriga.} and malformed entries are ignored so
+   * untrusted or internal labels never pollute {@code node.labels}.
+   */
+  public static Map<String, String> filterHelloLabels(Map<String, String> labels) {
+    if (labels == null || labels.isEmpty()) return Map.of();
+    Map<String, String> out = new TreeMap<>();
+    for (var entry : labels.entrySet()) {
+      String key = entry.getKey();
+      String value = entry.getValue();
+      if (isValidHelloLabel(key, value)) out.put(key, value);
+    }
+    return out;
+  }
+
+  private static boolean isValidHelloLabel(String key, String value) {
+    if (key == null || value == null || key.isEmpty() || value.isEmpty()) return false;
+    if (key.length() > MAX_LABEL_KEY_LENGTH || value.length() > MAX_LABEL_VALUE_LENGTH)
+      return false;
+    if (key.toLowerCase(Locale.ROOT).startsWith("auriga.")) return false;
+    return validLabelToken(key, true) && validLabelToken(value, false);
+  }
+
+  private static boolean validLabelToken(String token, boolean allowSlash) {
+    if (token.isEmpty()) return false;
+    if (!isAsciiAlnum(token.charAt(0)) || !isAsciiAlnum(token.charAt(token.length() - 1)))
+      return false;
+    for (int i = 0; i < token.length(); i++) {
+      char c = token.charAt(i);
+      if (isAsciiAlnum(c) || c == '-' || c == '_' || c == '.' || (allowSlash && c == '/')) continue;
+      return false;
+    }
+    return true;
+  }
+
+  private static boolean isAsciiAlnum(char c) {
+    return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9');
+  }
+
   private static StreamObserver<SessionRequest> ignored() {
     return new StreamObserver<>() {
       public void onNext(SessionRequest ignored) {}
@@ -390,14 +434,21 @@ public final class NodeSessions implements AutoCloseable {
                         .substring(0, 16);
                 if (!h.getSealingKeyId().equals(keyId))
                   throw new AurigaException(CommonErrors.PRECONDITION_FAILED);
+                Instant now = workspace.clock.instant();
+                String helloLabels =
+                    WorkspaceService.JSON.writeValueAsString(filterHelloLabels(h.getLabelsMap()));
                 enrollment.store.tx(
                     () ->
                         enrollment.store.jdbc.update(
-                            "UPDATE node SET hello=?,last_seen_at=?,agent_version=?,ingress_endpoint=? WHERE tenant_id=? AND id=?",
+                            "UPDATE node SET hello=?,hello_at=?,last_seen_at=?,agent_version=?,ingress_endpoint=?,"
+                                + "labels=CASE WHEN hello IS NULL AND labels='{}'::jsonb THEN ?::jsonb ELSE labels END"
+                                + " WHERE tenant_id=? AND id=?",
                             h.toByteArray(),
-                            time(workspace.clock.instant()),
+                            time(now),
+                            time(now),
                             h.getAgentVersion(),
                             h.getIngressEndpoint(),
+                            helloLabels,
                             tenant,
                             node));
                 hello = true;
@@ -408,7 +459,7 @@ public final class NodeSessions implements AutoCloseable {
                             Welcome.newBuilder()
                                 .setNodeId(node.toString())
                                 .setProtocolVersion(1)
-                                .setServerTime(NodeEnrollment.timestamp(workspace.clock.instant()))
+                                .setServerTime(NodeEnrollment.timestamp(now))
                                 .setHeartbeatInterval(Duration.newBuilder().setSeconds(15)))
                         .build());
               } else {
