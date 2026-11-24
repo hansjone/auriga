@@ -62,4 +62,20 @@ else
   info "managed_network_state=configured"
 fi
 
+if shared_present; then
+  info "shared_runtime_state=present"
+  if _shared_status=$(shared_action status 2>/dev/null); then
+    info "shared_runtime_status=$_shared_status"
+  else
+    info "shared_runtime_status=unavailable_or_invalid"
+  fi
+  if shared_replay_action check >/dev/null 2>&1; then
+    info "shared_replay_state=ready"
+  else
+    info "shared_replay_state=not_ready"
+  fi
+else
+  info "shared_runtime_state=absent"
+fi
+
 info "status done (secrets/env contents not printed)"

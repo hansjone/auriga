@@ -65,7 +65,12 @@ shared_export_decision() (
   fi
   printf '%s' "$_shared_path" >"$_shared_export/shared.path"
   printf '%s' "$_shared_ready" >"$_shared_export/shared.ready"
-  chmod 0600 "$_shared_export/shared.path" "$_shared_export/shared.ready"
+  if [ -n "$_shared_path" ] && [ -f "$_shared_path/gateway/ai-relay.env" ]; then
+    cp -- "$_shared_path/gateway/ai-relay.env" "$_shared_export/shared-ai-relay.env"
+  else
+    : >"$_shared_export/shared-ai-relay.env"
+  fi
+  chmod 0600 "$_shared_export/shared.path" "$_shared_export/shared.ready" "$_shared_export/shared-ai-relay.env"
 )
 
 shared_replay_action() (
@@ -107,6 +112,7 @@ shared_compose_needs_ready() {
 write_shared_override() {
   _shared_path=$1
   _shared_prepare=${2:-}
+  _shared_ai_env=${3:-$_shared_path/gateway/ai-relay.env}
   [ -n "$_shared_path" ] || return 0
   _shared_generation=${_shared_path##*/}
   case "$_shared_generation" in g-*) ;; *) die 'invalid privileged shared projection' ;; esac
@@ -126,6 +132,7 @@ write_shared_override() {
   _shared_yaml=$(printf '%s' "$_shared_path" | sed -e "s/'/''/g" -e 's/\$/$$/g')
   _shared_nats_yaml=$(printf '%s' "$_shared_nats" | sed -e "s/'/''/g" -e 's/\$/$$/g')
   _shared_tokens_yaml=$(printf '%s' "$AURIGA_DATA_ROOT/agent-tokens" | sed -e "s/'/''/g" -e 's/\$/$$/g')
+  _shared_ai_env_yaml=$(printf '%s' "$_shared_ai_env" | sed -e "s/'/''/g" -e 's/\$/$$/g')
   cat <<EOF
 services:
   platform:
@@ -142,6 +149,9 @@ services:
       - '$_shared_yaml/edge/edge.config.json:/etc/auriga/edge.config.json:ro'
       - '$_shared_yaml/edge:/etc/auriga/shared:ro'
   ai-relay:
+    env_file:
+      - path: '$_shared_ai_env_yaml'
+        required: true
     ports:
       - '127.0.0.1:18087:18887'
     networks: [internal, publish]
@@ -714,7 +724,8 @@ EOF
       '') if shared_compose_needs_ready "$@"; then [ "$_shared_ready" = 1 ] || die 'shared replay preparation or final revocation incomplete'; fi ;;
       *) die 'invalid shared Compose phase' ;;
     esac
-    write_shared_override "$_shared_path" "$_shared_prepare" >"$_private/shared.yml"
+    [ -s "$_private/shared-ai-relay.env" ] || die 'shared ai-relay DSN env absent; re-run render.sh'
+    write_shared_override "$_shared_path" "$_shared_prepare" "$_private/shared-ai-relay.env" >"$_private/shared.yml"
     set -- -f "$NAS_ROOT/shared-runtime-compose.yml" -f "$_private/shared.yml" "$@"
   elif [ -n "${NAS_SHARED_COMPOSE_PHASE:-}" ]; then die 'shared installation absent'; fi
   write_bifrost_override "$(cat "$_private/bifrost.enabled")" >"$_private/bifrost.yml"

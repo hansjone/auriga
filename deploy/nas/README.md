@@ -4,6 +4,8 @@
 
 公网预算、时钟容差、断线工具行为与 join 日志定位见 [网络运维说明](../../docs/operations/network-timing.zh.md)。
 
+常驻共享 DSH 安装源、XFS 后端与可观测性见 [共享安装源说明](SHARED-INSTALL-SOURCE.zh.md) 与 [常驻共享运行态说明](SHARED-RUNTIME.zh.md)。
+
 ## 首次安装：装 → 看应急账号 → 登录管理台 → 邀请成员
 
 1. 按[安装指南](../../docs/dev/nas.md#初始化启动停止)准备公开制品、已批准的本地镜像、
@@ -50,6 +52,7 @@ Set `AURIGA_MANAGED_PLATFORM_HOST` to the exact `instanceControl.dnsAlias` in
 `access.json`, and `AURIGA_MANAGED_PLATFORM_ORIGIN` to
 `https://<that-alias>:<unused-port>` (for example port `18446`). Add that exact
 origin to `AURIGA_LINKS_ALLOWED_ORIGINS`. These values belong in `stack.env`.
+When bootstrapping `collab` on an IP + HTTP baseline without an external HTTPS reverse proxy, set `AURIGA_COLLAB_PUBLIC_ORIGIN` to the same `https://<instanceControl.dnsAlias>:<unused-port>` (distinct from portal/admin/instance-control ports and port `443`). Alternatively, `mode: "ip"` also supports Direct HTTPS with an IP SAN certificate (`portalOrigin`/`adminOrigin`/`issuerOrigin` using `https`, `AURIGA_HTTPS_CERT_FILE`/`AURIGA_HTTPS_KEY_FILE`), in which case `AURIGA_MANAGED_PLATFORM_ORIGIN` may remain empty and both managed instances and external desktop clients can connect over HTTPS/WSS.
 The internal bridge gets the same edge alias already used on instance networks;
 the NAS resolver, public ingress and instance isolation are unchanged.
 

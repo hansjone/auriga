@@ -14,12 +14,14 @@ func TestSharedServiceProjectionKeepsCredentialsInTheirRequiredRoles(t *testing.
 	source["public/host.json"] = []byte(`{"publicOnly":true}`)
 	edge := []byte(`{"issuer":"https://fixture.example.invalid","loginPreference":"team","iamRpc":{"address":"platform:9091","serverName":"platform","serviceTokenFile":"/run/auriga-internal/edge/service.jwt","timeoutMillis":2000},"iamHop":{"certFile":"/etc/auriga/pki/edge-iam.crt","keyFile":"/etc/auriga/pki/edge-iam.key","caFile":"/etc/auriga/pki/ca.crt","serverName":"platform"}}`)
 	gateway := []byte(`{"origin":"http://bifrost:8080","memberPasswordFile":"/run/secrets/bifrost_member_password","iam":{"Target":"platform:9091"},"org":{"Target":"platform:9091"}}`)
-	in := sharedProjectionInputs{Receipt: &sharedInstallationReceipt{Tenant: "11111111-2222-4333-8444-555555555555", Node: "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"}, Source: source, RuntimeJSON: []byte(`{"syntheticRuntime":true}`), InternalCA: []byte("synthetic-public-ca"), EdgeConfig: edge, BifrostConfig: gateway, NATSConfig: sharedRenderedNATSFixture(t)}
+	pgPass := []byte(strings.Repeat("a", 64))
+	pgMigPass := []byte(strings.Repeat("b", 64))
+	in := sharedProjectionInputs{Receipt: &sharedInstallationReceipt{Tenant: "11111111-2222-4333-8444-555555555555", Node: "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"}, Source: source, RuntimeJSON: []byte(`{"syntheticRuntime":true}`), InternalCA: []byte("synthetic-public-ca"), EdgeConfig: edge, BifrostConfig: gateway, BifrostPGPassword: pgPass, BifrostPGMigrationPassword: pgMigPass, NATSConfig: sharedRenderedNATSFixture(t)}
 	projected, err := sharedServiceProjection(in)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(projected) != 20 {
+	if len(projected) != 21 {
 		t.Fatal("role leaf set changed without explicit review", len(projected))
 	}
 	for name, file := range projected {
@@ -37,9 +39,20 @@ func TestSharedServiceProjectionKeepsCredentialsInTheirRequiredRoles(t *testing.
 		if !strings.HasPrefix(name, "edge/") && bytes.Contains(file.Body, source["edge/replay.seed"]) {
 			t.Fatal("Edge private seed escaped role", name)
 		}
+		if name != "gateway/ai-relay.env" && (bytes.Contains(file.Body, pgPass) || bytes.Contains(file.Body, pgMigPass)) {
+			t.Fatal("Bifrost PostgreSQL password escaped gateway role", name)
+		}
 		if strings.HasPrefix(name, "agent/") && bytes.Contains(file.Body, []byte("PRIVATE KEY")) {
 			t.Fatal("Agent/Host public projection contains a signing key")
 		}
+	}
+	aiRelayEnv, ok := projected["gateway/ai-relay.env"]
+	if !ok || aiRelayEnv.UID != 10001 || aiRelayEnv.Mode != 0600 {
+		t.Fatal("gateway/ai-relay.env missing or metadata wrong")
+	}
+	if !bytes.Contains(aiRelayEnv.Body, []byte("AURIGA_AI_PG_DSN=postgres://auriga_bifrost:"+string(pgPass)+"@postgres:5432/bifrost?sslmode=disable\n")) ||
+		!bytes.Contains(aiRelayEnv.Body, []byte("AURIGA_AI_MIGRATION_PG_DSN=postgres://auriga_bifrost_owner:"+string(pgMigPass)+"@postgres:5432/bifrost?sslmode=disable\n")) {
+		t.Fatal("gateway/ai-relay.env missing expected DSN lines")
 	}
 	if !bytes.Contains(projected["platform/platform.properties"].Body, []byte("allow-raw-agent-token=true")) || !bytes.Contains(projected["platform/platform.properties"].Body, []byte("agent-token-export.installation-owner=10001")) {
 		t.Fatal("current-member raw credential/exporter policy was not wired")
@@ -68,5 +81,45 @@ func TestSharedServiceProjectionKeepsCredentialsInTheirRequiredRoles(t *testing.
 	}
 	if !bytes.Equal(projected["edge/replay.seed"].Body, saved) {
 		t.Fatal("projection aliases cleared source private memory")
+	}
+}
+
+func TestSharedServiceProjectionRejectsInvalidOrDuplicateBifrostPasswords(t *testing.T) {
+	source := sharedFixture(t)
+	source["platform/uac-adapter.json"] = []byte(sharedApprovedAdapterFixture)
+	source["public/profile.yml"] = []byte("synthetic-approved-profile")
+	source["public/host.json"] = []byte(`{"publicOnly":true}`)
+	edge := []byte(`{"issuer":"https://fixture.example.invalid","loginPreference":"team","iamRpc":{"address":"platform:9091","serverName":"platform","serviceTokenFile":"/run/auriga-internal/edge/service.jwt","timeoutMillis":2000},"iamHop":{"certFile":"/etc/auriga/pki/edge-iam.crt","keyFile":"/etc/auriga/pki/edge-iam.key","caFile":"/etc/auriga/pki/ca.crt","serverName":"platform"}}`)
+	gateway := []byte(`{"origin":"http://bifrost:8080","memberPasswordFile":"/run/secrets/bifrost_member_password","iam":{"Target":"platform:9091"},"org":{"Target":"platform:9091"}}`)
+	validA := []byte(strings.Repeat("a", 64))
+	validB := []byte(strings.Repeat("b", 64))
+	for _, tc := range []struct {
+		name string
+		pw   []byte
+		mig  []byte
+	}{
+		{"empty_runtime", nil, validB},
+		{"empty_migration", validA, nil},
+		{"short_runtime", []byte("deadbeef"), validB},
+		{"uppercase_hex", []byte(strings.Repeat("A", 64)), validB},
+		{"non_hex", []byte(strings.Repeat("z", 64)), validB},
+		{"duplicate", validA, validA},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			in := sharedProjectionInputs{
+				Receipt:                    &sharedInstallationReceipt{Tenant: "11111111-2222-4333-8444-555555555555", Node: "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"},
+				Source:                     source,
+				RuntimeJSON:                []byte(`{"syntheticRuntime":true}`),
+				InternalCA:                 []byte("synthetic-public-ca"),
+				EdgeConfig:                 edge,
+				BifrostConfig:              gateway,
+				BifrostPGPassword:          tc.pw,
+				BifrostPGMigrationPassword: tc.mig,
+				NATSConfig:                 sharedRenderedNATSFixture(t),
+			}
+			if _, err := sharedServiceProjection(in); err == nil {
+				t.Fatalf("expected error for %s", tc.name)
+			}
+		})
 	}
 }

@@ -108,6 +108,26 @@ if [ -f "$(marker_path)" ]; then
     || die "docker compose config failed"
   info "compose_config=ok"
   sh "$NAS_ROOT/scripts/mount-access.sh"
+  if shared_present; then
+    _shared_status=$(shared_action status 2>/dev/null || true)
+    if [ -n "$_shared_status" ]; then
+      info "shared_runtime_status=$_shared_status"
+      case " $_shared_status " in
+        *" backend=xfs "*)
+          _xfs_bin=/usr/sbin/xfs_quota
+          for _tok in $_shared_status; do
+            case "$_tok" in
+              quota_binary=*) _xfs_bin=${_tok#quota_binary=} ;;
+            esac
+          done
+          docker run --rm --pull never --network none --entrypoint sh "$AURIGA_IMAGE_AGENT" -c 'test -x "$1"' -- "$_xfs_bin" \
+            || die "agent image ($AURIGA_IMAGE_AGENT) is missing executable $_xfs_bin required for shared xfs backend"
+          info "shared_xfs_quota_binary=ok ($_xfs_bin)" ;;
+      esac
+    else
+      info "shared_runtime_status=unavailable_or_invalid"
+    fi
+  fi
 fi
 
 info "HOST-PREREQUISITES-PASSED"

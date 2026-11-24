@@ -94,5 +94,5 @@ func sharedDedicatedProjectionFixture(t *testing.T) sharedProjectionInputs {
 	source["public/host.json"] = []byte(`{"publicOnly":true}`)
 	receipt := &sharedInstallationReceipt{}
 	setSharedDedicatedFixtureReceipt(t, receipt, sharedSHA(source["public/dedicated-profile.yml"]))
-	return sharedProjectionInputs{Receipt: receipt, Source: source, RuntimeJSON: []byte(`{"syntheticRuntime":true}`), InternalCA: []byte("synthetic-public-ca"), EdgeConfig: []byte(`{"iamRpc":{"address":"platform:9091"},"iamHop":{"serverName":"platform"}}`), BifrostConfig: []byte(`{"iam":{"Target":"platform:9091"},"org":{"Target":"platform:9091"},"memberPasswordFile":"/run/secrets/bifrost_member_password"}`), NATSConfig: sharedRenderedNATSFixture(t)}
+	return sharedProjectionInputs{Receipt: receipt, Source: source, RuntimeJSON: []byte(`{"syntheticRuntime":true}`), InternalCA: []byte("synthetic-public-ca"), EdgeConfig: []byte(`{"iamRpc":{"address":"platform:9091"},"iamHop":{"serverName":"platform"}}`), BifrostConfig: []byte(`{"iam":{"Target":"platform:9091"},"org":{"Target":"platform:9091"},"memberPasswordFile":"/run/secrets/bifrost_member_password"}`), BifrostPGPassword: []byte(strings.Repeat("a", 64)), BifrostPGMigrationPassword: []byte(strings.Repeat("b", 64)), NATSConfig: sharedRenderedNATSFixture(t)}
 }

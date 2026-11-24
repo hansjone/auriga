@@ -55,12 +55,26 @@ func projectSharedInstallation(base string, receipt *sharedInstallationReceipt, 
 	if bifrostPath.Len() == 0 {
 		return "", fmt.Errorf("standard Bifrost materials must be installed before shared projection")
 	}
-	var bifrostRaw []byte
+	var bifrostRaw, bifrostPG, bifrostMigPG []byte
 	if bifrostPath.String() == base {
 		bifrostRaw, err = sharedBasePublic(base, "bifrost-runtime.json")
+		if err == nil {
+			bifrostPG, err = sharedBaseLeaf(base, "bifrost/pg_password")
+		}
+		if err == nil {
+			bifrostMigPG, err = sharedBaseLeaf(base, "bifrost/pg_migration_password")
+		}
 	} else {
 		bifrostRaw, err = runtimeReadLeaf(filepath.Join(bifrostPath.String(), "bifrost-runtime.json"), 0600, 1<<20)
+		if err == nil {
+			bifrostPG, err = runtimeReadLeaf(filepath.Join(bifrostPath.String(), "bifrost/pg_password"), 0600, 1024)
+		}
+		if err == nil {
+			bifrostMigPG, err = runtimeReadLeaf(filepath.Join(bifrostPath.String(), "bifrost/pg_migration_password"), 0600, 1024)
+		}
 	}
+	defer clear(bifrostPG)
+	defer clear(bifrostMigPG)
 	if err != nil {
 		return "", err
 	}
@@ -87,7 +101,17 @@ func projectSharedInstallation(base string, receipt *sharedInstallationReceipt, 
 		return "", err
 	}
 	defer clear(natsRaw)
-	files, err := sharedServiceProjection(sharedProjectionInputs{Receipt: receipt, Source: source, RuntimeJSON: runtimeJSON, InternalCA: caPEM, EdgeConfig: edgeRaw, BifrostConfig: bifrostRaw, NATSConfig: natsRaw})
+	files, err := sharedServiceProjection(sharedProjectionInputs{
+		Receipt:                    receipt,
+		Source:                     source,
+		RuntimeJSON:                runtimeJSON,
+		InternalCA:                 caPEM,
+		EdgeConfig:                 edgeRaw,
+		BifrostConfig:              bifrostRaw,
+		BifrostPGPassword:          bifrostPG,
+		BifrostPGMigrationPassword: bifrostMigPG,
+		NATSConfig:                 natsRaw,
+	})
 	if err != nil {
 		return "", err
 	}
