@@ -138,7 +138,13 @@ sudo auriga deploy <40 位提交号> --json        # 工作流：运行器账户
   - 对**已安装且尚未登记运行时**的站点，不会修改已封存的 `config/materials` 及其 `bootstrap.receipt`（避免 `unknown NAS source leaf`）：
     - 可直接执行 `sudo ./auriga runtime attach --bundle <目录> --root <root.pb> --image <repo@sha256:...> [--data <数据目录>]`；
     - 或在 `site.json` 的 `server.install.runtime` 中补充后运行 `auriga deploy`，CLI 会自动先经 `runtime-release verify` 校验，再通过 `auriga-nas-bootstrap runtime-upgrade -action attach` 写入独立的 `config/runtime-source`，同步持久化 `runtime-inputs` 与 `state.json` 并完整启动生效。
-  - 已登记运行时的站点不能通过 `attach` 或 `deploy` 替换信任根，后续运行时升级继续使用受控 `runtime-upgrade` 流程。
+  - 已登记运行时的站点不能通过 `attach` 或 `deploy` 替换信任根，后续运行时升级继续使用受控 `runtime-upgrade.sh` 流程；**`auriga deploy` 不会自动升级 DSH 运行时**。
+  - **运行时升级后的安装钉定同步（`runtime sync-pin`）**：通过 `runtime-upgrade.sh` 升级并提交后，实际生效运行时由 `<data>/config/runtime-source/active.json` 指向的新槽位决定，但 `site.json`（`server.install.runtime`）、`stack.env`（`AURIGA_RUNTIME_*`）与 `state.json` 仍保留首装钉定值（若直接改 `site.json` 会被下次 `deploy` 拒绝，若按旧 `site.json` 干净重装则会装回旧运行时）。升级提交完成后，可执行：
+    ```sh
+    sudo ./auriga runtime sync-pin --bundle <新发布目录> --root <root.pb> --image <新repo@sha256:...> [--data <数据目录>]
+    ```
+    该命令在站点锁内核对 `active.json` 已提交且生效镜像与 `--image` 一致，经 `runtime-release verify` 严格验签后原子更新 `<data>.oneclick/runtime-inputs`、`state.json` 与 `stack.env`（保持权限与其它行不变）；执行完成后再将 `site.json` 的 `server.install.runtime` 更新为相同参数，使后续 `deploy` 与干净重装保持一致。
+  - **运行时一致性体检（`doctor` / `status`）**：`sudo ./auriga doctor` 与 `sudo ./auriga status` 会清晰区分“安装钉定运行时（install pinned）”与“当前生效运行时（active runtime）”。当两者不一致，或生效运行时的 DSH/内嵌插件（`auriga-dsh`）版本与当前源码/发行包预期版本（`deploy/compose/real-dsh/versions.json`、`clients/dsh-plugin/package.json`）不一致时，输出明确 `WARN` 并提示运行 `runtime-upgrade.sh` 或 `runtime sync-pin`（无 runtime 站点优雅跳过）。
 - **部署时自动启用 UAC 身份源（`uacMaterialsDir` + `postDeployHook`）**：
   - `server.install.uacMaterialsDir`：可选规范绝对路径（root 所有、组和其他用户不可写，目录内仅允许 `uac.properties`、`adapter.json`、`members.json`）。`auriga deploy` 首次安装/干净重装时自动按 `10001:10001` `0640` 同步到 `<data>/config/materials/uac/`（不覆盖已有文件，满足 `nasMaterialGuard` 校验，不触发 `unknown NAS source leaf`）。
   - `server.postDeployHook`：可选规范绝对路径，指向部署后置脚本（普通文件、非符号链接、root 所有、不可被组或其他用户写、属主可执行如 `0700`、祖先目录受信）。`auriga deploy` 在首次安装与后续升级的服务健康检查通过后自动执行该脚本，并通过只读环境变量传入 `AURIGA_DATA`、`AURIGA_DEPLOY_PHASE`（`install` 或 `upgrade`）、`AURIGA_PACKAGE`、`AURIGA_ACCESS_FILE`（不向环境变量或日志泄露任何凭据）；脚本返回非零退出码时部署清晰报错。
