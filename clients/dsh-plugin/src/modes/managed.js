@@ -404,13 +404,14 @@ export async function createManaged(options = {}) {
       const managedNetworkConfigured = () =>
         Boolean(options.connection || options.networkConnection) ||
         hasDeviceCredentialFile(deviceCredentialFile);
+      const sessionAvailable = () =>
+        managedNetworkConfigured()
+          ? network?.sessionAvailable === true
+          : active && !stopping && network?.sessionRevoked !== true;
       registerHealthRoute(ctx, {
         pluginVersion,
         instanceId,
-        ready: () =>
-          managedNetworkConfigured()
-            ? network?.sessionAvailable === true
-            : active && !stopping && network?.sessionRevoked !== true,
+        ready: sessionAvailable,
       });
 
       // Same public host services, provider and network lifecycle as connect mode.
@@ -639,7 +640,7 @@ export async function createManaged(options = {}) {
       disposeHttpGuard = installNativePluginHttpGuard(server);
       disposeSession = installManagedSessionGuard(
         server,
-        () => network?.sessionAvailable === true,
+        sessionAvailable,
         revoked,
       );
       // Observation is needed before browser session readiness, but a proven
