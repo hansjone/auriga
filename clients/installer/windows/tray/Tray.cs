@@ -980,7 +980,8 @@ sealed class TrayApp : ApplicationContext
                 ThreadPool.QueueUserWorkItem(delegate
                 {
                     // Keep the progress window open: applyPending reports stages over stdout while stopping.
-                    bool stopped = StopLauncher(120, 120, 900);
+                    // Idle/max must stay wide: extract/copy may report a stage only once without heartbeat.
+                    bool stopped = StopLauncher(120, 300, 1800);
                     Post(delegate
                     {
                         busy = false;
