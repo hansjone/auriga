@@ -40,6 +40,7 @@ import {
   profileDir,
   desktopSession,
   uninstall,
+  writeAtomic,
 } from '../runtime/core.mjs';
 import { buildPayload, tempBase } from './helpers.mjs';
 
@@ -1401,4 +1402,38 @@ test('update diagnostics rotate at 256 KiB and uninstall removes both files', as
   uninstall({ root: f.root });
   assert.equal(existsSync(log), false);
   assert.equal(existsSync(log + '.1'), false);
+});
+
+test('writeAtomic retries transient EPERM/EBUSY renames and cleans temp files on failure', (t) => {
+  const base = tempBase(t);
+  const target = join(base, 'current.txt');
+  let attempts = 0;
+  writeAtomic(target, 'v2\n', {
+    retries: 5,
+    rename(from, to) {
+      attempts++;
+      if (attempts <= 2) {
+        throw Object.assign(new Error('transient lock'), {
+          code: attempts === 1 ? 'EPERM' : 'EBUSY',
+        });
+      }
+      writeFileSync(to, readFileSync(from));
+      rmSync(from);
+    },
+  });
+  assert.equal(attempts, 3);
+  assert.equal(readFileSync(target, 'utf8'), 'v2\n');
+  assert.deepEqual(readdirSync(base), ['current.txt']);
+
+  assert.throws(
+    () =>
+      writeAtomic(target, 'v3\n', {
+        retries: 2,
+        rename() {
+          throw Object.assign(new Error('still denied'), { code: 'EPERM' });
+        },
+      }),
+    { code: 'EPERM' },
+  );
+  assert.deepEqual(readdirSync(base), ['current.txt']);
 });

@@ -780,7 +780,9 @@ async function applyPendingLocked(
     const saved = readUpdateState(root);
     const current = readState(root);
     previousId = current.current;
-    const old = verifyPackage(versionDir(root, current.current));
+    const old = verifyPackage(versionDir(root, current.current), {
+      trees: false,
+    });
     note('verify-release');
     const envelope = rejectInvalid(() =>
       JSON.parse(

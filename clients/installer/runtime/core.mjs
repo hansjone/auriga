@@ -121,11 +121,39 @@ export class CrashError extends Error {}
 
 const readJson = (file) => JSON.parse(readFileSync(file, 'utf8'));
 
+const sleepBuffer = new Int32Array(new SharedArrayBuffer(4));
+
+/** Retry transient Windows file/dir rename errors caused by AV/EDR or closing handles. */
+function renameWithRetry(from, to, { rename = renameSync, retries = 15 } = {}) {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      rename(from, to);
+      return;
+    } catch (error) {
+      if (
+        !['EPERM', 'EBUSY', 'EACCES'].includes(error.code) ||
+        attempt >= retries
+      )
+        throw error;
+      Atomics.wait(sleepBuffer, 0, 0, Math.min(50 + attempt * 25, 250));
+    }
+  }
+}
+
 /** Write via a temp file and rename so readers never see a partial file. */
-function writeAtomic(file, content) {
-  const tmp = `${file}.tmp`;
+export function writeAtomic(file, content, ops) {
+  const tmp = `${file}.${process.pid}.${randomUUID().slice(0, 8)}.tmp`;
   writeFileSync(tmp, content);
-  renameSync(tmp, file);
+  try {
+    renameWithRetry(tmp, file, ops);
+  } catch (error) {
+    try {
+      rmSync(tmp, { force: true });
+    } catch {
+      /* Preserve the original rename error. */
+    }
+    throw error;
+  }
 }
 const writeJsonAtomic = (file, value) =>
   writeAtomic(file, JSON.stringify(value, null, 2) + '\n');
@@ -500,7 +528,7 @@ function writeLaunchers(root, dir, fault) {
   mkdirSync(`${prev}.partial`);
   for (const name of readdirSync(bin))
     cpSync(join(bin, name), join(`${prev}.partial`, name));
-  renameSync(`${prev}.partial`, prev);
+  renameWithRetry(`${prev}.partial`, prev);
   const keepMaintenance =
     existsSync(join(bin, 'maintenance.ps1')) &&
     !existsSync(join(source, 'maintenance.ps1'));
@@ -1019,7 +1047,7 @@ function installStopped({
         rmSync(staging, { recursive: true, force: true });
         throw error;
       }
-      renameSync(staging, target);
+      renameWithRetry(staging, target);
     }
     if (!fresh) protectPythonDirectory(target);
     transition({
@@ -1398,7 +1426,10 @@ async function launchLocked({
     const { applyPending } = await import('./update.mjs');
     const apply = async () => {
       try {
-        if (existsSync(join(root, 'desktop-pending')))
+        if (
+          existsSync(join(root, 'desktop-pending')) &&
+          !existsSync(join(root, 'desktop-pending', 'approval-required'))
+        )
           report({ event: 'update', phase: 'installing' });
         if (
           await applyPending(root, {
@@ -1426,6 +1457,7 @@ async function launchLocked({
       }
     };
     await apply();
+    if (control?.requested) return 0;
     const state = readState(root);
     const dir = versionDir(root, state.current);
     // The update transaction may have changed packaged trust or profile bytes.
