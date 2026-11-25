@@ -79,3 +79,67 @@ for (const code of ['desktop.smoke_failed', 'unexpected_failure'])
     assert.deepEqual(readState(root), before);
     assert.equal(existsSync(join(root, 'desktop-session.json')), false);
   });
+
+test('launch stops after initial apply when control already requested stop', async (t) => {
+  const base = tempBase(t),
+    root = join(base, 'app'),
+    dataHome = join(base, 'home'),
+    runtime = join(base, 'runtime');
+  const payload = buildPayload(base);
+  install({ payload: payload.dir, root, dataHome, smoke: () => {} });
+
+  cpSync(new URL('../runtime/', import.meta.url), runtime, {
+    recursive: true,
+  });
+  writeFileSync(
+    join(runtime, 'process-tree.mjs'),
+    `export class ProcessTree {
+      record = { children: [] };
+      singleton() { return () => {}; }
+      async stopTree() {}
+    }
+    export function assertNTFS() {}
+    export function processIdentity() { return null; }
+    export function sameProcess() { return false; }
+    export function notifyPrivateOnly() {}
+    export function notifySharedRestart() {}`,
+  );
+  writeFileSync(
+    join(runtime, 'supervisor.mjs'),
+    `export class Supervisor {
+      guardian = { read: () => null };
+      async prepare() {}
+      async reconcile() { throw new Error('should not reconcile after stop'); }
+    }
+    export function packagedTrust() { return {}; }`,
+  );
+  writeFileSync(
+    join(runtime, 'desktop-supervision.mjs'),
+    'export async function superviseDsh() { throw new Error("should not start dsh after stop"); }',
+  );
+  writeFileSync(
+    join(runtime, 'resource-plugins.mjs'),
+    'export function resourcePluginControl() { return {}; }',
+  );
+  writeFileSync(
+    join(runtime, 'update.mjs'),
+    `export let calls = 0;
+    export async function applyPending() {
+      calls++;
+      return false;
+    }`,
+  );
+  const { launch } = await import(pathToFileURL(join(runtime, 'core.mjs')));
+  const updateMod = await import(pathToFileURL(join(runtime, 'update.mjs')));
+  const events = [];
+  const control = {
+    requested: true,
+    on() {},
+    report(event) {
+      events.push(event);
+    },
+  };
+  assert.equal(await launch({ root, control }), 0);
+  assert.equal(updateMod.calls, 1);
+  assert.equal(events.length, 0);
+});
