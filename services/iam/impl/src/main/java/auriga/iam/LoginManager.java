@@ -62,6 +62,12 @@ public final class LoginManager {
     return nativeDevices.beginNative(tx, request.path("nativeConnect"));
   }
 
+  void validateUacNative(JsonNode request, String audience) {
+    validateNative(request, audience);
+    IamError.require(nativeDevices != null, "invalid_config", 400);
+    nativeDevices.validateNativeClient(request.path("nativeConnect"));
+  }
+
   static void validateNative(JsonNode request, String audience) {
     if (!request.has("nativeConnect")) return;
     IamError.validate(

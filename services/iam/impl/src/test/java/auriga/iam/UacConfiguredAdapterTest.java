@@ -14,6 +14,47 @@ import tools.jackson.databind.node.ObjectNode;
 
 class UacConfiguredAdapterTest {
   @Test
+  void proofUsesOnlyTrustedClientIpAndRequiresAuthoritativeSubject() throws Exception {
+    var server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+    var response =
+        new AtomicReference<>(
+            Json.object(
+                "code",
+                Json.object("code", "0000"),
+                "bo",
+                Json.object("code", "0000"),
+                "other",
+                Json.object("account", "001Ab", "token", "replacement-synthetic")));
+    var observed = new AtomicReference<JsonNode>();
+    server.createContext(
+        "/verify",
+        exchange -> {
+          observed.set(Json.MAPPER.readTree(exchange.getRequestBody().readAllBytes()));
+          byte[] bytes = response.get().toString().getBytes(StandardCharsets.UTF_8);
+          exchange.sendResponseHeaders(200, bytes.length);
+          exchange.getResponseBody().write(bytes);
+          exchange.close();
+        });
+    server.start();
+    try {
+      String origin = "http://127.0.0.1:" + server.getAddress().getPort();
+      var privateConfig = settings(origin).put("clientIP", "192.0.2.10");
+      var adapter = new UacConfiguredAdapter(privateConfig, true);
+      var config = Json.object("baseUrl", origin, "systemCode", "test-system");
+      var credential =
+          Json.object("empNo", "001Ab", "token", "synthetic-token", "clientIP", "203.0.113.9");
+      assertTrue(adapter.verifyProof(config, credential).path("success").asBoolean());
+      assertEquals("192.0.2.10", observed.get().path("clientIP").asString());
+      response.get().withObject("/other").remove("account");
+      var missing = adapter.verifyProof(config, credential);
+      assertFalse(missing.path("success").asBoolean());
+      assertEquals("missing_subject", missing.path("faultReason").asString());
+    } finally {
+      server.stop(0);
+    }
+  }
+
+  @Test
   void qrTimeoutIsConfigurableAndCancelsTheUpstreamRequest() throws Exception {
     var server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
     var interrupted = new java.util.concurrent.CountDownLatch(1);

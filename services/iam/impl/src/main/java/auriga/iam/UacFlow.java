@@ -111,8 +111,9 @@ final class UacFlow {
         .forEach(
             name ->
                 IamError.validate(
-                    Set.of("providerId", "purpose", "invitationCode", "nativeConnect")
+                    Set.of("providerId", "purpose", "invitationCode", "nativeConnect", "uacProof")
                         .contains(name)));
+    if (body.has("uacProof")) return createProof((ObjectNode) body, audience, origin, ip);
     if (body.has("nativeConnect")) LoginManager.validateNative(body, audience);
     String purpose = body.path("purpose").asString("login"),
         invitation = body.path("invitationCode").asString("");
@@ -277,6 +278,192 @@ final class UacFlow {
         });
   }
 
+  /**
+   * A native login proof is a credential, never a client assertion of an IAM identity. Both
+   * provider lookup and the idempotency lookup are tenant-scoped. Upstream I/O is outside tx.
+   */
+  private Created createProof(ObjectNode body, String audience, String origin, String ip) {
+    ObjectNode nativeBody = body.deepCopy();
+    nativeBody.remove("uacProof");
+    IamError.validate(nativeBody.has("nativeConnect"));
+    JsonNode proof = body.path("uacProof");
+    IamError.validate(proof.isObject());
+    proof
+        .propertyNames()
+        .forEach(
+            name ->
+                IamError.validate(Set.of("empNo", "token", "nonce", "issuedAt").contains(name)));
+    IamError.validate(
+        proof.path("empNo").isString()
+            && UacTokenVerification.validUser(proof.path("empNo").asString())
+            && proof.path("token").isString()
+            && UacTokenVerification.validToken(proof.path("token").asString())
+            && proof.path("nonce").isString()
+            && SessionManager.canonicalCsrf(proof.path("nonce").asString())
+            && proof.path("issuedAt").isString());
+    Instant issued;
+    try {
+      issued = Instant.parse(proof.path("issuedAt").asString());
+    } catch (RuntimeException invalid) {
+      throw IamError.error("invalid_step_input", 400);
+    }
+    IamError.require(
+        !issued.isAfter(clock.instant().plusSeconds(30))
+            && issued.isAfter(clock.instant().minusSeconds(120)),
+        "login_tx_expired",
+        409);
+    String provider = body.path("providerId").asString();
+    String lookup =
+        "proof:"
+            + Secrets.hash(
+                Json.object(
+                        "provider",
+                        provider,
+                        "client",
+                        nativeBody.path("nativeConnect").path("clientId"),
+                        "nonce",
+                        proof.path("nonce"))
+                    .toString());
+    String fingerprint =
+        Secrets.hash(
+            Json.object("request", body, "audience", audience, "origin", origin).toString());
+    ObjectNode row =
+        store.tx(
+            () -> {
+              login.validateUacNative(nativeBody, audience);
+              ObjectNode current = providers.row(provider, false);
+              IamError.require(
+                  current.path("enabled").asBoolean() && current.path("uacConfigured").asBoolean(),
+                  "provider_disabled",
+                  403);
+              return current;
+            });
+    Created previous = store.tx(() -> existingProof(lookup, fingerprint, row));
+    if (previous != null) return previous;
+    JsonNode verified;
+    try {
+      verified =
+          adapter.verifyProof(
+              generic.decryptedConfig(row),
+              Json.object("empNo", proof.path("empNo"), "token", proof.path("token")));
+    } catch (RuntimeException unavailable) {
+      throw IamError.error("uac_proof_unavailable", 503);
+    }
+    if (!verified.path("success").asBoolean()) {
+      String failure = verified.path("failureClass").asString();
+      if (failure.equals("rate_limited")) throw IamError.error("rate_limited", 429);
+      if (Set.of("business_rejected", "identity_mismatch").contains(failure))
+        throw IamError.error("uac_proof_rejected", 401);
+      if (Set.of("missing_subject", "invalid_success_payload")
+          .contains(verified.path("faultReason").asString()))
+        throw IamError.error("uac_proof_subject_required", 403);
+      throw IamError.error("uac_proof_unavailable", 503);
+    }
+    IamError.require(
+        verified.path("empNo").isString()
+            && UacTokenVerification.validUser(verified.path("empNo").asString())
+            && verified.path("token").isString()
+            && UacTokenVerification.validToken(verified.path("token").asString()),
+        "uac_proof_subject_required",
+        403);
+    JsonNode credential =
+        Json.object(
+            "empNo",
+            verified.path("empNo"),
+            "token",
+            verified.path("token"),
+            "clientIP",
+            verified.path("clientIP").asString(""));
+    return store.tx(
+        () -> {
+          ObjectNode current = providers.row(provider, true);
+          IamError.require(
+              current.path("enabled").asBoolean()
+                  && UacProviderService.etag(current).equals(UacProviderService.etag(row)),
+              "provider_disabled",
+              403);
+          login.validateUacNative(nativeBody, audience);
+          store.lock("uac-" + lookup);
+          Created existing = existingProof(lookup, fingerprint, current);
+          if (existing != null) return existing;
+          IamError.require(
+              issued.isAfter(clock.instant().minusSeconds(120)), "login_tx_expired", 409);
+          String binding = Secrets.random();
+          ObjectNode tx = transaction(provider, "login", audience, origin, ip, "", null, binding);
+          ObjectNode nativeDevice = login.beginUacNative(tx, nativeBody, audience);
+          Instant expires = clock.instant().plusSeconds(120);
+          // Retain the nonce beyond its acceptance window, including permitted clock skew.
+          ObjectNode challenge =
+              store.insert(
+                  "uac_challenge",
+                  lookup,
+                  Json.object(
+                      "providerId",
+                      provider,
+                      "transactionId",
+                      tx.path("id"),
+                      "state",
+                      "verified",
+                      "bindingHash",
+                      Secrets.hash(binding),
+                      "audience",
+                      audience,
+                      "origin",
+                      origin,
+                      "providerRevision",
+                      UacProviderService.etag(current),
+                      "expiresAt",
+                      expires.toString(),
+                      "correlationId",
+                      tx.path("correlationId"),
+                      "proofFingerprint",
+                      fingerprint,
+                      "credential",
+                      uac.seal(credential, provider)),
+                  clock.instant().plusSeconds(300));
+          ObjectNode view =
+              Json.object(
+                  "id",
+                  challenge.path("id"),
+                  "transactionId",
+                  tx.path("id"),
+                  "state",
+                  "verified",
+                  "expiresAt",
+                  expires.toString(),
+                  "pollIntervalSeconds",
+                  2,
+                  "nativeDevice",
+                  nativeDevice);
+          challenge.set(
+              "proofResponse", uac.seal(Json.object("view", view, "binding", binding), provider));
+          store.save("uac_challenge", challenge);
+          store.uacTenant();
+          return new Created(view, binding);
+        });
+  }
+
+  private Created existingProof(String lookup, String fingerprint, ObjectNode provider) {
+    ObjectNode challenge = store.get("uac_challenge", lookup, false);
+    if (challenge == null) return null;
+    IamError.require(
+        Secrets.same(challenge.path("proofFingerprint").asString(), fingerprint),
+        "login_tx_finished",
+        409);
+    IamError.require(
+        UacProviderService.etag(provider).equals(challenge.path("providerRevision").asString()),
+        "provider_disabled",
+        403);
+    IamError.require(
+        clock.instant().isBefore(Instant.parse(challenge.path("expiresAt").asString())),
+        "login_tx_expired",
+        409);
+    ObjectNode response = uac.open(challenge.path("proofResponse"), provider.path("id").asString());
+    ObjectNode view = (ObjectNode) response.path("view");
+    view.set("state", challenge.path("state"));
+    return new Created(view, response.path("binding").asString());
+  }
+
   private static String coordinate() {
     byte[] raw = new byte[16];
     new SecureRandom().nextBytes(raw);
@@ -336,7 +523,7 @@ final class UacFlow {
   }
 
   ObjectNode bound(String id, String binding, String audience, String origin, boolean lock) {
-    ObjectNode row = store.get("uac_challenge", id, lock);
+    ObjectNode row = store.byId("uac_challenge", id, lock);
     if (row == null
         || binding == null
         || !Secrets.same(row.path("bindingHash").asString(), Secrets.hash(binding))

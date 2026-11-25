@@ -186,6 +186,13 @@ class UacFlowPostgresTest {
                 return i.callRealMethod();
               })
           .when(adapter)
+          .verifyProof(any(), any());
+      doAnswer(
+              i -> {
+                store.requireTransactionReleased();
+                return i.callRealMethod();
+              })
+          .when(adapter)
           .department(any(), any(), anyString());
       secrets = new Secrets(UacProviderPostgresTest.key());
       var registry = new ConnectorRegistry(new ContractSchemas(), List.of(adapter));
@@ -353,9 +360,9 @@ class UacFlowPostgresTest {
   }
 
   @ParameterizedTest
-  @CsvSource({"never,false", "always,true"})
-  void nativeUacUsesItsOwnPkceGrantAndRespectsPortalMfaPolicy(String policy, boolean needsMfa)
-      throws Exception {
+  @CsvSource({"never,false,false", "always,true,false", "never,false,true", "always,true,true"})
+  void nativeUacUsesItsOwnPkceGrantAndRespectsPortalMfaPolicy(
+      String policy, boolean needsMfa, boolean proof) throws Exception {
     try (var f = new Fixture("token-verify", 3)) {
       String verifier = Secrets.random(), totp = "JBSWY3DPEHPK3PXP";
       var key =
@@ -415,11 +422,68 @@ class UacFlowPostgresTest {
                   OAuthProvider.challenge(verifier),
                   "codeChallengeMethod",
                   "S256"));
+      if (proof)
+        request.set(
+            "uacProof",
+            Json.object(
+                "empNo",
+                "001Ab",
+                "token",
+                f.token,
+                "nonce",
+                Secrets.random(),
+                "issuedAt",
+                f.time.instant().toString()));
       var created =
           f.call(
               () ->
                   f.flow.create(
                       request, "portal", "https://portal.example.com", "127.0.0.1", null, null));
+      if (proof) {
+        for (int i = 0; i < 3; i++) {
+          var repeat =
+              f.call(
+                  () ->
+                      f.flow.create(
+                          request,
+                          "portal",
+                          "https://portal.example.com",
+                          "127.0.0.1",
+                          created.binding(),
+                          null));
+          assertEquals(created.challenge(), repeat.challenge());
+          assertEquals(created.binding(), repeat.binding());
+        }
+        assertEquals(1, f.verifications.get());
+        assertEquals(0, f.scans.get());
+        f.call(
+            () ->
+                store.tx(
+                    () -> {
+                      assertEquals(0, store.all("device").size());
+                      var stored =
+                          store.byId(
+                              "uac_challenge", created.challenge().path("id").asString(), false);
+                      assertFalse(stored.toString().contains(f.token));
+                      assertFalse(stored.toString().contains(f.replacement));
+                      assertFalse(stored.toString().contains(created.binding()));
+                      return null;
+                    }));
+        var changed = request.deepCopy();
+        changed.withObject("/nativeConnect").put("codeChallenge", Secrets.random());
+        assertThrows(
+            AurigaException.class,
+            () ->
+                f.call(
+                    () ->
+                        f.flow.create(
+                            changed,
+                            "portal",
+                            "https://portal.example.com",
+                            "127.0.0.1",
+                            null,
+                            null)));
+      }
       String raw = created.challenge().path("nativeDevice").path("deviceCode").asString();
       assertFalse(raw.isEmpty());
       assertFalse(
@@ -499,6 +563,21 @@ class UacFlowPostgresTest {
                         "code_verifier",
                         verifier));
             assertFalse(issued.has("error"), issued.toString());
+            assertEquals(
+                "invalid_grant",
+                oauth
+                    .token(
+                        Map.of(
+                            "client_id",
+                            "inline-test",
+                            "grant_type",
+                            OAuthProvider.DEVICE,
+                            "device_code",
+                            raw,
+                            "code_verifier",
+                            verifier))
+                    .path("error")
+                    .asString());
             var first = tokens.verify(issued.path("access_token").asString());
             var identity = oauth.nativeIdentity(issued.path("access_token").asString(), false);
             // Session establishment creates a LongNode; JSONB/JWT round trips decode small

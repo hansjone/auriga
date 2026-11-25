@@ -2376,11 +2376,22 @@ components:
           minLength: 1
           maxLength: 128
       additionalProperties: false
+    UacNativeProof:
+      type: object
+      description: Native portal login only. IAM independently verifies the credential and requires an explicit authoritative subject. No session, account, tenant or clientIP assertion is accepted. Nonce is bound to provider/client/PKCE and retained beyond the 120-second issuedAt window (30-second future skew). Retries must send the exact same proof; complete and MFA use the existing transaction.
+      required: [empNo, token, nonce, issuedAt]
+      additionalProperties: false
+      properties:
+        empNo: { type: string, minLength: 1, maxLength: 128 }
+        token: { type: string, minLength: 1, maxLength: 16384, writeOnly: true }
+        nonce: { type: string, pattern: '^[A-Za-z0-9_-]{43}$' }
+        issuedAt: { type: string, format: date-time }
     UacChallengeCreate:
       type: object
       required:
         - providerId
       properties:
+        uacProof: { $ref: '#/components/schemas/UacNativeProof' }
         nativeConnect: { $ref: '#/components/schemas/NativeConnect', description: 'First-party native login only; purpose=login, no invitationCode. S256 binds the created device grant.' }
         providerId:
           type: string
@@ -2401,11 +2412,11 @@ components:
       required:
         - id
         - transactionId
-        - qrContent
         - expiresAt
         - pollIntervalSeconds
       properties:
         nativeDevice: { $ref: '#/components/schemas/NativeDeviceGrant' }
+        state: { type: string, enum: [verified, cancelled] }
         id:
           type: string
           format: uuid
