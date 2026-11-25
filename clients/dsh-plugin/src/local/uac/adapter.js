@@ -1,6 +1,11 @@
 import { createHash } from 'node:crypto';
 import { canonicalize, parseStrictJson } from '../../network/trust/jcs.js';
-import { createUacHttp, MAX_BODY, parseIpAddress } from './http.js';
+import {
+  createUacHttp,
+  MAX_BODY,
+  parseIpAddress,
+  uacTransportReason,
+} from './http.js';
 import { resolveCookieDomain } from './browser-cookies.js';
 import { memberName, memberAvatar } from '../member-profile.js';
 
@@ -404,7 +409,7 @@ export function createUacAdapter(settings, provider, options = {}) {
     } catch (error) {
       return /** @type {any} */ (error)?.message === 'invalid UAC configuration'
         ? failure('failed', 'invalid_response')
-        : failure('unavailable', 'transport_error');
+        : failure('unavailable', uacTransportReason(error));
     }
   }
 
@@ -432,8 +437,8 @@ export function createUacAdapter(settings, provider, options = {}) {
         { 'X-Emp-No': account },
         3,
       );
-    } catch {
-      return fault('transport_error');
+    } catch (error) {
+      return fault(uacTransportReason(error));
     }
     if (response.status !== 200) return fault('http_error');
     let root;
@@ -575,8 +580,8 @@ export function createUacAdapter(settings, provider, options = {}) {
           };
       }
       return { available: false, faultReason: 'missing_department' };
-    } catch {
-      return { available: false, faultReason: 'transport_error' };
+    } catch (error) {
+      return { available: false, faultReason: uacTransportReason(error) };
     }
   }
   /** Extract one cookie field per UacConfiguredAdapter rules (optional urlEncoded + JSON pointer).

@@ -11,6 +11,7 @@ import { createUacAdapter, fold } from './adapter.js';
 import { readLocalBrowserCookieSets } from './browser-cookies.js';
 import { readUacConfig } from './config.js';
 import { qrPath } from './qr.js';
+import { uacTransportReason } from './http.js';
 
 export const CHALLENGE_TTL_MS = 120000;
 const MIN_SCAN_INTERVAL_MS = 2000;
@@ -28,6 +29,7 @@ export const tokenHash = (token) =>
  * @param {{directory:string,loadConfig?:typeof readUacConfig,createAdapter?:typeof createUacAdapter,
  *   writeOwner?:typeof atomicWriteJson,
  *   readBrowserCookies?:typeof import('./browser-cookies.js').readLocalBrowserCookies,
+ *   readBrowserCookieSets?:typeof readLocalBrowserCookieSets,
  *   now?:()=>number,setTimer?:(fn:()=>void,ms:number)=>any,clearTimer?:(t:any)=>void,
  *   log?:(level:string,message:string,fields:Record<string,unknown>)=>void}} options
  */
@@ -59,6 +61,8 @@ export function createLocalUacIdentity(options) {
   /** @type {any} */ let timer;
   let ssoSuppressed = false;
   let ssoAttempted = false;
+  /** @type {string|undefined} */ let ssoDiagnostic;
+  /** @type {string|undefined} */ let configurationDiagnostic;
   /** @type {Promise<boolean>|undefined} */ let ssoInflight;
   let closed = false;
   let operations = Promise.resolve();
@@ -103,11 +107,16 @@ export function createLocalUacIdentity(options) {
       );
       adapter.validate();
       identityDomain = adapter.identityDomain();
-    } catch {
+    } catch (error) {
       config = null;
       adapter = null;
       availability = 'invalid';
-      emit('WARN', 'configuration', { result: 'invalid' });
+      const reason = uacTransportReason(error);
+      if (reason !== 'transport_error') configurationDiagnostic = reason;
+      emit('WARN', 'configuration', {
+        result: 'invalid',
+        ...(configurationDiagnostic ? { reason: configurationDiagnostic } : {}),
+      });
       return;
     }
     try {
@@ -163,7 +172,7 @@ export function createLocalUacIdentity(options) {
     }
   })();
 
-  /** Silent local browser SSO cookie authentication. Never throws or surfaces UI errors. */
+  /** Local browser SSO never blocks QR login; only fixed diagnostic reasons leave it. */
   async function trySsoInternal() {
     if (
       closed ||
@@ -182,7 +191,8 @@ export function createLocalUacIdentity(options) {
       try {
         let maps = /** @type {Map<string,string>[]} */ ([]);
         let v20Detected = false;
-        if (readBrowserCookies) {
+        let unreadable = false;
+        if (readBrowserCookies && !options.readBrowserCookieSets) {
           const single = await readBrowserCookies({
             domain: spec.domain,
             names: spec.names,
@@ -190,13 +200,16 @@ export function createLocalUacIdentity(options) {
           });
           if (single instanceof Map && single.size) maps = [single];
         } else {
-          const result = await readLocalBrowserCookieSets({
+          const result = await (
+            options.readBrowserCookieSets ?? readLocalBrowserCookieSets
+          )({
             domain: spec.domain,
             names: spec.names,
             now,
           });
           maps = result.maps;
           v20Detected = result.v20Detected;
+          unreadable = !!result.unreadable;
         }
         if (closed || session || ssoSuppressed) return !!session;
         let cred = null;
@@ -205,10 +218,15 @@ export function createLocalUacIdentity(options) {
           if (cred) break;
         }
         if (!cred) {
+          ssoDiagnostic = v20Detected
+            ? 'v20_app_bound'
+            : unreadable
+              ? 'browser_store_unreadable'
+              : 'no_readable_cookies';
           emit('INFO', 'sso', {
             phase: 'end',
             result: 'fallback_qr',
-            reason: v20Detected ? 'v20_app_bound' : 'no_readable_cookies',
+            reason: ssoDiagnostic,
             correlationId,
           });
           return false;
@@ -226,9 +244,14 @@ export function createLocalUacIdentity(options) {
         });
         if (closed || session || ssoSuppressed) return !!session;
         if (!verified.success) {
+          ssoDiagnostic =
+            verified.failureClass === 'upstream_fault'
+              ? uacTransportReason({ code: verified.faultReason })
+              : 'token_rejected';
           emit('INFO', 'sso', {
             phase: 'end',
             result: verified.failureClass ?? 'rejected',
+            reason: ssoDiagnostic,
             correlationId,
           });
           return false;
@@ -280,6 +303,7 @@ export function createLocalUacIdentity(options) {
             nextRevalidateAt: at + config.revalidation.intervalSeconds * 1000,
           };
           last = { outcome: 'signed_in', at };
+          ssoDiagnostic = undefined;
           emit('INFO', 'sso', {
             phase: 'end',
             result: 'authenticated',
@@ -290,7 +314,13 @@ export function createLocalUacIdentity(options) {
           return true;
         });
       } catch {
-        emit('WARN', 'sso', { phase: 'end', result: 'error', correlationId });
+        ssoDiagnostic = 'sso_unavailable';
+        emit('WARN', 'sso', {
+          phase: 'end',
+          result: 'error',
+          reason: ssoDiagnostic,
+          correlationId,
+        });
         return false;
       } finally {
         ssoInflight = undefined;
@@ -438,6 +468,8 @@ export function createLocalUacIdentity(options) {
           }
         : {}),
       ...(last ? { lastOutcome: last.outcome } : {}),
+      ...(!session && ssoDiagnostic ? { ssoDiagnostic } : {}),
+      ...(configurationDiagnostic ? { configurationDiagnostic } : {}),
       ...(challenge ? { challenge: projectChallenge() } : {}),
     };
   }
@@ -551,7 +583,11 @@ export function createLocalUacIdentity(options) {
         current,
         verified.failureClass === 'upstream_fault' ? 'unavailable' : 'rejected',
         verified.failureClass === 'upstream_fault'
-          ? 'verify_unavailable'
+          ? verified.faultReason &&
+            uacTransportReason({ code: verified.faultReason }) !==
+              'transport_error'
+            ? verified.faultReason
+            : 'verify_unavailable'
           : 'token_rejected',
       );
     const deptResult = await adapter

@@ -214,6 +214,18 @@ async function fixture(http, options = {}) {
         modal: false,
         reloadShell() {},
       }),
+    async renderLocalIdentity(uac) {
+      const overlay = await this.renderLogin();
+      const card = all(overlay).find(
+        (node) => node.type?.name === 'LocalIdentityCard',
+      );
+      assert.ok(card);
+      return renderSurface('local-card', card.type, {
+        ...card.props,
+        uac,
+        active: false,
+      });
+    },
     async renderLoginContent() {
       const overlay = await this.renderLogin();
       if (!overlay) {
@@ -1192,3 +1204,29 @@ for (const local of [
       }
     },
   );
+
+for (const [reason, hint] of [
+  ['v20_app_bound', /不支持静默 SSO.*扫码/],
+  ['browser_store_unreadable', /可能被占用.*关闭浏览器.*扫码/],
+  ['dns_address_mismatch', /受控配置.*管理员.*DNS/],
+])
+  test('local login shows an actionable diagnostic: ' + reason, async () => {
+    const uac = {
+      available: true,
+      state: 'signed_out',
+      csrf: 'synthetic',
+      ssoDiagnostic: reason,
+    };
+    const f = await fixture(async (url) => ({
+      ok: true,
+      json: async () =>
+        String(url).includes('/auriga/uac/status')
+          ? uac
+          : { configured: false, loggedIn: false },
+    }));
+    try {
+      assert.match(text(await f.renderLocalIdentity(uac)), hint);
+    } finally {
+      f.close();
+    }
+  });

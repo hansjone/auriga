@@ -163,7 +163,7 @@ async function copySqliteWithWal(source, dest) {
   for (const suffix of ['-wal', '-shm']) {
     const sidecar = source + suffix;
     if (existsSync(sidecar)) {
-      await copySharedFile(sidecar, dest + suffix).catch(() => false);
+      if (!(await copySharedFile(sidecar, dest + suffix))) return false;
     }
   }
   return true;
@@ -220,7 +220,7 @@ function chromiumProfileCookieFiles(userDataDir) {
  * @param {string} configuredDomain
  * @param {string[]} names
  * @param {number} nowMs
- * @returns {Promise<{maps:Map<string,string>[],v20Detected:boolean}>} */
+ * @returns {Promise<{maps:Map<string,string>[],v20Detected:boolean,unreadable?:boolean}>} */
 async function readChromiumUserData(
   DatabaseSync,
   userDataDir,
@@ -241,7 +241,7 @@ async function readChromiumUserData(
       }
     }
   } catch {
-    return { maps: [], v20Detected: false };
+    return { maps: [], v20Detected: false, unreadable: true };
   }
 
   // Chromium timestamps are microseconds since 1601-01-01.
@@ -249,6 +249,7 @@ async function readChromiumUserData(
   const cookieFiles = chromiumProfileCookieFiles(userDataDir);
   /** @type {Map<string,string>[]} */ const maps = [];
   let v20Detected = false;
+  let unreadable = false;
   const placeholders = names.map(() => '?').join(',');
   const sql = `SELECT host_key, name, value, encrypted_value, expires_utc, last_access_utc FROM cookies WHERE name IN (${placeholders}) ORDER BY last_access_utc DESC`;
 
@@ -258,7 +259,10 @@ async function readChromiumUserData(
     let db;
     try {
       const copied = await copySqliteWithWal(file, tempDb);
-      if (!copied) continue;
+      if (!copied) {
+        unreadable = true;
+        continue;
+      }
       db = new DatabaseSync(tempDb, { readOnly: true });
       const rows = db.prepare(sql).all(...names);
       /** @type {Map<string,string>} */ const found = new Map();
@@ -281,7 +285,7 @@ async function readChromiumUserData(
       }
       if (found.size) maps.push(found);
     } catch {
-      /* Ignore unreadable or locked profile databases. */
+      unreadable = true;
     } finally {
       try {
         db?.close();
@@ -295,7 +299,7 @@ async function readChromiumUserData(
       }
     }
   }
-  return { maps, v20Detected };
+  return { maps, v20Detected, unreadable };
 }
 
 /** Read matching cookies per Firefox profile (plaintext SQLite).
@@ -304,7 +308,7 @@ async function readChromiumUserData(
  * @param {string} configuredDomain
  * @param {string[]} names
  * @param {number} nowMs
- * @returns {Promise<Map<string,string>[]>} */
+ * @returns {Promise<{maps:Map<string,string>[],unreadable?:boolean}>} */
 async function readFirefoxProfiles(
   DatabaseSync,
   profilesRoot,
@@ -312,15 +316,16 @@ async function readFirefoxProfiles(
   names,
   nowMs,
 ) {
-  if (!existsSync(profilesRoot)) return [];
+  if (!existsSync(profilesRoot)) return { maps: [] };
   let entries = [];
   try {
     entries = readdirSync(profilesRoot, { withFileTypes: true });
   } catch {
-    return [];
+    return { maps: [], unreadable: true };
   }
   const nowSec = Math.floor(nowMs / 1000);
   /** @type {Map<string,string>[]} */ const maps = [];
+  let unreadable = false;
   const placeholders = names.map(() => '?').join(',');
   const sql = `SELECT host, name, value, expiry, lastAccessed FROM moz_cookies WHERE name IN (${placeholders}) ORDER BY lastAccessed DESC`;
 
@@ -333,7 +338,10 @@ async function readFirefoxProfiles(
     let db;
     try {
       const copied = await copySqliteWithWal(cookiePath, tempDb);
-      if (!copied) continue;
+      if (!copied) {
+        unreadable = true;
+        continue;
+      }
       db = new DatabaseSync(tempDb, { readOnly: true });
       const rows = db.prepare(sql).all(...names);
       /** @type {Map<string,string>} */ const found = new Map();
@@ -347,7 +355,7 @@ async function readFirefoxProfiles(
       }
       if (found.size) maps.push(found);
     } catch {
-      /* ignore */
+      unreadable = true;
     } finally {
       try {
         db?.close();
@@ -361,16 +369,16 @@ async function readFirefoxProfiles(
       }
     }
   }
-  return maps;
+  return { maps, unreadable };
 }
 
 /**
  * Read local browser SSO cookie maps per profile, preserving profile isolation
  * and reporting whether App-Bound Encryption (v20) cookies were encountered.
  * Note: Chromium v20 (App-Bound Encryption) is OS-enforced and cannot be
- * decrypted by an unprivileged user process; callers fall back silently to QR.
+ * decrypted by an unprivileged user process; callers offer QR with a safe reason.
  * @param {{domain:string,names:string[],now?:()=>number}} options
- * @returns {Promise<{maps:Map<string,string>[],v20Detected:boolean}>}
+ * @returns {Promise<{maps:Map<string,string>[],v20Detected:boolean,unreadable?:boolean}>}
  */
 export async function readLocalBrowserCookieSets({
   domain,
@@ -384,11 +392,23 @@ export async function readLocalBrowserCookieSets({
   ];
   if (!uniqueNames.length) return { maps: [], v20Detected: false };
   const DatabaseSync = await loadSqlite();
-  if (!DatabaseSync) return { maps: [], v20Detected: false };
+  if (!DatabaseSync) return { maps: [], v20Detected: false, unreadable: true };
 
   const nowMs = now();
   /** @type {Map<string,string>[]} */ const maps = [];
   let v20Detected = false;
+  let unreadable = false;
+  const includeFirefox = async (/** @type {string} */ root) => {
+    const result = await readFirefoxProfiles(
+      DatabaseSync,
+      root,
+      domain,
+      uniqueNames,
+      nowMs,
+    );
+    maps.push(...result.maps);
+    unreadable ||= !!result.unreadable;
+  };
 
   if (process.platform === 'win32') {
     const localAppData = process.env.LOCALAPPDATA ?? '';
@@ -407,33 +427,18 @@ export async function readLocalBrowserCookieSets({
       );
       maps.push(...res.maps);
       if (res.v20Detected) v20Detected = true;
+      unreadable ||= !!res.unreadable;
     }
     if (appData) {
-      maps.push(
-        ...(await readFirefoxProfiles(
-          DatabaseSync,
-          join(appData, 'Mozilla', 'Firefox', 'Profiles'),
-          domain,
-          uniqueNames,
-          nowMs,
-        )),
-      );
+      await includeFirefox(join(appData, 'Mozilla', 'Firefox', 'Profiles'));
     }
   } else if (process.platform === 'linux') {
     const home = process.env.HOME ?? '';
     if (home) {
-      maps.push(
-        ...(await readFirefoxProfiles(
-          DatabaseSync,
-          join(home, '.mozilla', 'firefox'),
-          domain,
-          uniqueNames,
-          nowMs,
-        )),
-      );
+      await includeFirefox(join(home, '.mozilla', 'firefox'));
     }
   }
-  return { maps, v20Detected };
+  return { maps, v20Detected, unreadable };
 }
 
 /**

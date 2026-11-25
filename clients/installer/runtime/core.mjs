@@ -360,6 +360,7 @@ function syncBundledUacConfig(profileDirectory, target) {
     mkdirSync(dstRoot, { recursive: true });
     if (process.platform !== 'win32') chmodSync(dstRoot, 0o700);
   }
+  // Check the complete destination pair before modifying either file.
   for (const name of files) {
     const dst = join(dstRoot, name);
     if (existsSync(dst)) {
@@ -367,7 +368,15 @@ function syncBundledUacConfig(profileDirectory, target) {
       if (!st.isFile() || st.isSymbolicLink())
         throw new Error(`refusing to overwrite non-regular UAC file: ${name}`);
     }
-    writeAtomic(dst, payload[name]);
+  }
+  for (const name of files) {
+    const dst = join(dstRoot, name);
+    if (
+      !existsSync(dst) ||
+      lstatSync(dst).size !== payload[name].length ||
+      !readFileSync(dst).equals(payload[name])
+    )
+      writeAtomic(dst, payload[name]);
     if (process.platform !== 'win32') chmodSync(dst, 0o600);
   }
 }
@@ -1514,6 +1523,7 @@ async function launchLocked({
     const dir = versionDir(root, state.current);
     // The update transaction may have changed packaged trust or profile bytes.
     verifyPackage(dir, { trees: false });
+    syncBundledUacConfig(profileDir(state.dataHome), dir);
     supervisor.trust = packagedTrust(dir);
     if (existsSync(join(dir, 'auriga/shell-auth/desktop.mjs'))) {
       supervisor.shellSnapshot = () => shellAuth?.snapshot();

@@ -1085,7 +1085,7 @@ test('local UAC http: resolved address must be allowlisted; redirects are not fo
   );
   await assert.rejects(
     http.post(new URL('https://identity.example.com/scan'), {}, {}, 1),
-    /UAC destination rejected/,
+    { code: 'dns_address_mismatch' },
   );
   assert.throws(() =>
     http.validate(new URL('https://identity.example.com/scan#x')),
@@ -1109,6 +1109,35 @@ test('local UAC http: resolved address must be allowlisted; redirects are not fo
     failureCode: 'transport_error',
   });
   assert.equal(upstream.calls.length, 1);
+});
+
+test('local UAC transport diagnostics distinguish DNS failures without weakening destination policy', async () => {
+  for (const [lookup, code] of [
+    [
+      async () => {
+        throw new Error('private resolver details');
+      },
+      'dns_unavailable',
+    ],
+    [async () => [], 'dns_unavailable'],
+  ]) {
+    const http = createUacHttp(
+      {
+        allowedDestinations: [
+          { origin: 'https://identity.example.com', addresses: ['192.0.2.10'] },
+        ],
+      },
+      { lookup },
+    );
+    await assert.rejects(
+      http.post(new URL('https://identity.example.com/verify'), {}, {}, 1),
+      { code },
+    );
+    await assert.rejects(
+      http.post(new URL('https://different.example.com/verify'), {}, {}, 1),
+      { code: 'destination_not_allowed' },
+    );
+  }
 });
 
 test('local UAC http: only canonical numeric address families reach DNS pinning', () => {

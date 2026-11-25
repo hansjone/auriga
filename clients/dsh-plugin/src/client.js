@@ -149,6 +149,13 @@ window.__ModuleLoader__.load({
       uac_denied: '本次登录已被拒绝',
       uac_rejected: '登录未通过校验',
       uac_unavailable: '公司登录服务暂不可用，请稍后重试',
+      uacSsoAppBound: '当前浏览器不支持静默 SSO，请直接扫码登录。',
+      uacSsoUnreadable:
+        '浏览器凭据库暂不可读（可能被占用）。可关闭浏览器后重启 Auriga，或直接扫码登录。',
+      uacDestinationRejected:
+        '公司登录地址与受控配置不一致，请管理员核对地址清单及 DNS 后重试。',
+      uacDnsUnavailable: '公司登录域名暂时无法解析，请检查公司网络后重试。',
+      uacSsoRejected: '浏览器登录凭据已失效，请扫码重新登录。',
       uac_cancelled: '已取消登录',
       uac_failed: '登录失败，请重新获取二维码',
       uacValidity: '剩余有效期',
@@ -371,6 +378,16 @@ window.__ModuleLoader__.load({
       uac_denied: 'Sign-in was denied',
       uac_rejected: 'Sign-in did not pass verification',
       uac_unavailable: 'Company sign-in is unavailable. Try again later.',
+      uacSsoAppBound:
+        'This browser does not support silent SSO. Scan the QR code to sign in.',
+      uacSsoUnreadable:
+        'The browser credential store cannot be read and may be locked. Close the browser and restart Auriga, or scan the QR code.',
+      uacDestinationRejected:
+        'The company sign-in address does not match the approved configuration. Ask an administrator to check the address list and DNS.',
+      uacDnsUnavailable:
+        'The company sign-in hostname cannot be resolved. Check the company network and retry.',
+      uacSsoRejected:
+        'The browser sign-in has expired. Scan the QR code to sign in again.',
       uac_cancelled: 'Sign-in cancelled',
       uac_failed: 'Sign-in failed. Request a new code.',
       uacValidity: 'Expires in',
@@ -1970,9 +1987,13 @@ window.__ModuleLoader__.load({
             if (!enabled) return undefined;
             let live = true;
             let reading = false;
+            let readAgain = false;
             const controller = new AbortController();
             const read = async () => {
-              if (reading) return;
+              if (reading) {
+                readAgain = true;
+                return;
+              }
               reading = true;
               const started = revision.current;
               const next = await fetch(localURL(path), {
@@ -1994,10 +2015,17 @@ window.__ModuleLoader__.load({
                       ? { available: true, reason: 'status_unavailable' }
                       : null),
                 );
+              if (live && readAgain) {
+                readAgain = false;
+                void read();
+              }
             };
             void read();
             const timer = setInterval(read, interval);
-            const unsubscribe = subscribeIdentity(read);
+            const unsubscribe = subscribeIdentity(() => {
+              revision.current++;
+              void read();
+            });
             return () => {
               unsubscribe();
               live = false;
@@ -2176,6 +2204,18 @@ window.__ModuleLoader__.load({
             uac.challenge?.state === 'authenticated'
               ? undefined
               : uac.challenge;
+          const diagnosticKey = {
+            v20_app_bound: 'uacSsoAppBound',
+            browser_store_unreadable: 'uacSsoUnreadable',
+            destination_not_allowed: 'uacDestinationRejected',
+            dns_address_mismatch: 'uacDestinationRejected',
+            dns_unavailable: 'uacDnsUnavailable',
+            token_rejected: 'uacSsoRejected',
+          }[
+            uac.configurationDiagnostic ??
+              challenge?.failureCode ??
+              uac.ssoDiagnostic
+          ];
           const pending =
             challenge &&
             ['waiting', 'scanned', 'verifying'].includes(challenge.state);
@@ -2236,13 +2276,15 @@ window.__ModuleLoader__.load({
             return h(Blocked, {
               tone: 'warning',
               title: t('localIdentity'),
-              detail: t(
-                {
-                  invalid: 'uacConfigInvalid',
-                  storage: 'uacStorageUnavailable',
-                  owner_domain: 'uacOwnerDomain',
-                }[uac.reason] ?? 'uacUnavailable',
-              ),
+              detail: diagnosticKey
+                ? t(diagnosticKey)
+                : t(
+                    {
+                      invalid: 'uacConfigInvalid',
+                      storage: 'uacStorageUnavailable',
+                      owner_domain: 'uacOwnerDomain',
+                    }[uac.reason] ?? 'uacUnavailable',
+                  ),
               action: h(Action, { onClick: reload }, t('refresh')),
             });
           const seconds = challenge
@@ -2268,6 +2310,9 @@ window.__ModuleLoader__.load({
                 h('h3', null, t('localIdentity')),
                 h('span', { className: 'auriga-badge' }, t('uacMethod')),
               ),
+            !signedIn &&
+              diagnosticKey &&
+              h('p', { role: 'status' }, t(diagnosticKey)),
             signedIn
               ? h(
                   'div',

@@ -9,6 +9,7 @@ import {
   domainMatches,
   isChromiumV20,
   resolveCookieDomain,
+  readLocalBrowserCookieSets,
 } from '../src/local/uac/browser-cookies.js';
 import { createUacAdapter } from '../src/local/uac/adapter.js';
 import { createLocalUacIdentity } from '../src/local/uac/session.js';
@@ -106,6 +107,123 @@ test('browser-cookies: cross-domain/parent-domain matching and Chromium v10/v24/
   assert.equal(isChromiumV20(v20), true);
   assert.equal(decryptChromiumValue(v20, key, '.corp.com.cn'), null);
 });
+
+for (const scenario of [
+  { reader: { maps: [], v20Detected: true }, reason: 'v20_app_bound' },
+  {
+    reader: { maps: [], v20Detected: false, unreadable: true },
+    reason: 'browser_store_unreadable',
+  },
+  {
+    reader: {
+      maps: [
+        new Map([
+          ['PORTAL_USER', 'A1001'],
+          ['PORTAL_TOKEN', 'synthetic-secret'],
+        ]),
+      ],
+      v20Detected: false,
+    },
+    reason: 'dns_address_mismatch',
+  },
+])
+  test(
+    'SSO exposes a safe QR fallback diagnostic: ' + scenario.reason,
+    async (t) => {
+      const dir = await mkdtemp(join(tmpdir(), 'auriga-uac-diagnostic-'));
+      t.after(() => rm(dir, { recursive: true, force: true }));
+      const events = [];
+      const identity = createLocalUacIdentity({
+        directory: dir,
+        loadConfig: async () => ({
+          adapter: syntheticAdapter(),
+          provider: {
+            baseUrl: 'https://identity.example.com',
+            systemCode: 'EXAMPLE',
+          },
+          revalidation: {
+            strategy: 'token-verify',
+            intervalSeconds: 7200,
+            retryIntervalSeconds: 30,
+            maxRetries: 3,
+          },
+        }),
+        readBrowserCookieSets: async () => scenario.reader,
+        // Legacy injection is a fail-safe when this test is run against pre-change code.
+        readBrowserCookies: async () => new Map(),
+        createAdapter: (settings, provider) => ({
+          ...createUacAdapter(settings, provider),
+          verify: async () => ({
+            success: false,
+            failureClass: 'upstream_fault',
+            faultReason: 'dns_address_mismatch',
+          }),
+        }),
+        log: (_level, _message, fields) => events.push(fields),
+      });
+      t.after(() => identity.close());
+      await identity.ready;
+      assert.equal(identity.status().ssoDiagnostic, scenario.reason);
+      assert.equal(identity.status().state, 'signed_out');
+      assert.ok(events.some((event) => event.reason === scenario.reason));
+      assert.doesNotMatch(
+        JSON.stringify(events),
+        /synthetic-secret|identity\.example\.com|A1001/,
+      );
+      assert.equal((await identity.start()).state, 'waiting');
+    },
+  );
+
+test(
+  'browser cookie reader reports v20 and unreadable synthetic stores without reading real profiles',
+  { skip: process.platform !== 'win32' },
+  async (t) => {
+    const { mkdir, writeFile } = await import('node:fs/promises');
+    const { DatabaseSync } = await import('node:sqlite');
+    const base = await mkdtemp(join(tmpdir(), 'auriga-browser-diagnostic-'));
+    t.after(() => rm(base, { recursive: true, force: true }));
+    const before = {
+      LOCALAPPDATA: process.env.LOCALAPPDATA,
+      APPDATA: process.env.APPDATA,
+    };
+    process.env.LOCALAPPDATA = base;
+    process.env.APPDATA = base;
+    t.after(() => {
+      for (const [key, value] of Object.entries(before)) {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      }
+    });
+    const root = join(base, 'Microsoft/Edge/User Data');
+    await mkdir(join(root, 'Default/Network'), { recursive: true });
+    await writeFile(join(root, 'Local State'), '{}');
+    const file = join(root, 'Default/Network/Cookies');
+    const db = new DatabaseSync(file);
+    db.exec(
+      'CREATE TABLE cookies(host_key TEXT,name TEXT,value TEXT,encrypted_value BLOB,expires_utc INTEGER,last_access_utc INTEGER)',
+    );
+    db.prepare('INSERT INTO cookies VALUES(?,?,?,?,0,0)').run(
+      '.example.com',
+      'TOKEN',
+      '',
+      Buffer.from('v20synthetic'),
+    );
+    db.close();
+    const first = await readLocalBrowserCookieSets({
+      domain: 'portal.example.com',
+      names: ['TOKEN'],
+    });
+    assert.equal(first.v20Detected, true);
+    assert.equal(first.maps.length, 0);
+    await writeFile(file, 'invalid synthetic SQLite');
+    const second = await readLocalBrowserCookieSets({
+      domain: 'portal.example.com',
+      names: ['TOKEN'],
+    });
+    assert.equal(second.unreadable, true);
+    assert.equal(second.maps.length, 0);
+  },
+);
 
 test('local UAC emits observable diagnostic logs for unconfigured and SSO fallback states', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'auriga-uac-logs-'));
