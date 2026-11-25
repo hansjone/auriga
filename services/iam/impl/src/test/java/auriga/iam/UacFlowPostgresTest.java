@@ -361,16 +361,13 @@ class UacFlowPostgresTest {
 
   @ParameterizedTest
   @CsvSource({
-    "never,false,false",
-    "always,true,false",
-    "never,false,true",
-    "always,true,true",
-    "new_device,true,true"
+    "never,false", "new_device,false", "always,false",
+    "never,true", "new_device,true", "always,true"
   })
-  void nativeUacUsesItsOwnPkceGrantAndRespectsPortalMfaPolicy(
-      String policy, boolean needsMfa, boolean proof) throws Exception {
+  void nativeUacUsesItsOwnPkceGrantWithoutPlatformAuthenticator(String policy, boolean proof)
+      throws Exception {
     try (var f = new Fixture("token-verify", 3)) {
-      String verifier = Secrets.random(), totp = "JBSWY3DPEHPK3PXP";
+      String verifier = Secrets.random();
       var key =
           new com.nimbusds.jose.jwk.gen.ECKeyGenerator(com.nimbusds.jose.jwk.Curve.P_256)
               .keyID(UUID.randomUUID().toString())
@@ -502,46 +499,12 @@ class UacFlowPostgresTest {
                           "https://portal.example.com"))
               .has("nativeDevice"));
       f.run();
-      var pending = f.complete(created);
-      LoginManager.Result done;
-      if (needsMfa) {
-        assertEquals("platform_totp", pending.transaction().path("step").path("formId").asString());
-        assertNull(pending.session());
-        f.call(
-            () ->
-                store.tx(
-                    () -> {
-                      store.insert(
-                          "team_totp",
-                          f.account.toString(),
-                          Json.object(
-                              "accountId",
-                              f.account,
-                              "totp",
-                              f.secrets.encrypt(totp, "totp:" + f.tenant + ":" + f.account),
-                              "lastCounter",
-                              -1),
-                          null);
-                      return null;
-                    }));
-        done =
-            f.call(
-                () ->
-                    f.login.advance(
-                        pending.transaction().path("id").asString(),
-                        created.binding(),
-                        Json.object(
-                            "type",
-                            "form",
-                            "formId",
-                            "platform_totp",
-                            "values",
-                            Json.object(
-                                "otp", Totp.code(totp, f.time.instant().getEpochSecond() / 30))),
-                        false));
-      } else {
-        done = pending;
-      }
+      var done = f.complete(created);
+      assertNotNull(done.session());
+      assertEquals("complete", done.transaction().path("step").path("type").asString());
+      assertFalse(done.session().session().path("mfa").asBoolean());
+      assertTrue(f.call(() -> store.tx(() -> store.all("team_totp").isEmpty())));
+      verify(f.hooks, never()).verifyMfa(any(), any());
       assertEquals("completed", done.transaction().path("status").asString());
       f.call(
           () ->
@@ -687,7 +650,7 @@ class UacFlowPostgresTest {
 
   @ParameterizedTest
   @CsvSource({"false,false", "false,true", "true,false", "true,true"})
-  void reviewN1ReplacementCancelsMfaAfterBrowserRecordsExpire(
+  void reviewN1ReplacementCancelsUnfinishedLoginAfterBrowserRecordsExpire(
       boolean fromNavigation, boolean toNavigation) throws Exception {
     try (var f = new Fixture("token-verify", 3)) {
       f.call(
@@ -699,25 +662,21 @@ class UacFlowPostgresTest {
                     store.save("idp_provider", provider);
                     return null;
                   }));
-      when(f.hooks.verifyMfa(any(), any())).thenReturn(true);
       var nav = navigation(f, "true");
       String binding;
-      LoginManager.Result pending;
+      String transaction;
       if (fromNavigation) {
         var issued = f.call(() -> nav.issue(navigationInput(f, "portal"), false));
         binding = issued.path("transactionCookie").asString();
         var prepared = prepare(f, nav, issued, "auto", null, null);
-        var verified = f.call(() -> nav.verify(prepared, ssoCookies(f)));
-        pending = f.call(() -> nav.finish(prepared, verified, binding)).result();
+        f.call(() -> nav.verify(prepared, ssoCookies(f)));
+        transaction = prepared.navigation().path("transactionId").asString();
       } else {
         var challenge = f.begin();
         binding = challenge.binding();
         f.run();
-        pending = f.complete(challenge);
+        transaction = challenge.challenge().path("transactionId").asString();
       }
-      assertNull(pending.session());
-      assertEquals("platform_totp", pending.transaction().path("step").path("formId").asString());
-      String transaction = pending.transaction().path("id").asString();
       var independent = f.begin();
       var otherContexts =
           f.call(
@@ -852,7 +811,7 @@ class UacFlowPostgresTest {
   }
 
   @Test
-  void mfaCompletionIsRecordedOnTransactionAndReplacementFencesItsLateSession() throws Exception {
+  void uacCompletionIsRecordedOnTransactionAndReplacementFencesItsLateSession() throws Exception {
     try (var f = new Fixture("token-verify", 3)) {
       f.call(
           () ->
@@ -863,27 +822,9 @@ class UacFlowPostgresTest {
                     store.save("idp_provider", row);
                     return null;
                   }));
-      when(f.hooks.verifyMfa(any(), any())).thenReturn(true);
       var challenge = f.begin();
       f.run();
-      var pending = f.complete(challenge);
-      assertNull(pending.session());
-      assertEquals("pending", pending.transaction().path("status").asString());
-      assertEquals("platform_totp", pending.transaction().path("step").path("formId").asString());
-      var completed =
-          f.call(
-              () ->
-                  f.login.advance(
-                      pending.transaction().path("id").asString(),
-                      challenge.binding(),
-                      Json.object(
-                          "type",
-                          "form",
-                          "formId",
-                          "platform_totp",
-                          "values",
-                          Json.object("otp", "000000")),
-                      false));
+      var completed = f.complete(challenge);
       assertNotNull(completed.session());
       String sid = completed.session().session().path("sessionId").asString();
       f.call(
@@ -893,14 +834,16 @@ class UacFlowPostgresTest {
                     assertEquals(
                         sid,
                         store
-                            .get("login_tx", pending.transaction().path("id").asString(), false)
+                            .get("login_tx", completed.transaction().path("id").asString(), false)
                             .path("uacIssuedSessionId")
                             .asString());
-                    assertFalse(
+                    assertEquals(
+                        sid,
                         store
                             .get(
                                 "uac_challenge", challenge.challenge().path("id").asString(), false)
-                            .has("issuedSessionId"));
+                            .path("issuedSessionId")
+                            .asString());
                     return null;
                   }));
       f.call(
@@ -1730,15 +1673,17 @@ class UacFlowPostgresTest {
     }
   }
 
-  @Test
-  void firstVerifiedPortalScanCanEnrollTheFactorRequiredByTheProvider() throws Exception {
+  @ParameterizedTest
+  @ValueSource(strings = {"never", "new_device", "always"})
+  void firstVerifiedPortalScanCompletesWithoutPlatformAuthenticator(String policy)
+      throws Exception {
     try (var f = new Fixture("token-verify", 3)) {
       f.call(
           () ->
               store.tx(
                   () -> {
                     var provider = store.get("idp_provider", f.provider, true);
-                    ((ObjectNode) provider.path("admission")).put("mfa", "always");
+                    provider.withObject("/admission").put("mfa", policy);
                     store.save("idp_provider", provider);
                     return null;
                   }));
@@ -1757,37 +1702,49 @@ class UacFlowPostgresTest {
           .thenReturn(true);
       var challenge = f.begin();
       f.run();
-      var pending = f.complete(challenge);
-      assertNull(pending.session());
-      verify(f.hooks, never()).provisionVerifiedUacMember(any(), anyString(), any(), anyString());
-      var tx = pending.transaction();
-      assertEquals("first_totp", tx.path("step").path("formId").asString());
-      String label = tx.path("step").path("fields").get(0).path("label").path("en").asString();
-      String secret = label.substring(label.lastIndexOf(' ') + 1);
-      var input =
-          Json.object(
-              "type",
-              "form",
-              "formId",
-              "first_totp",
-              "values",
-              Json.object("otp", Totp.code(secret, f.time.instant().getEpochSecond() / 30)));
-      assertThrows(
-          AurigaException.class,
-          () ->
-              f.call(
-                  () -> f.login.advance(tx.path("id").asString(), Secrets.random(), input, false)));
-      var completed =
-          f.call(
-              () -> f.login.advance(tx.path("id").asString(), challenge.binding(), input, false));
+      var completed = f.complete(challenge);
       assertNotNull(completed.session());
+      assertEquals("completed", completed.transaction().path("status").asString());
+      assertEquals("complete", completed.transaction().path("step").path("type").asString());
+      assertFalse(completed.session().session().path("mfa").asBoolean());
+      assertTrue(f.call(() -> store.tx(() -> store.all("team_totp").isEmpty())));
       verify(f.hooks, times(1)).provisionVerifiedUacMember(any(), anyString(), any(), anyString());
+      verify(f.hooks, never()).verifyMfa(any(), any());
+    }
+  }
+
+  @ParameterizedTest
+  @ValueSource(strings = {"never", "new_device", "always"})
+  void verifiedSsoCompletesWithoutPlatformAuthenticator(String policy) throws Exception {
+    try (var f = new Fixture("token-verify", 3)) {
+      f.call(
+          () ->
+              store.tx(
+                  () -> {
+                    var provider = store.get("idp_provider", f.provider, true);
+                    provider.withObject("/admission").put("mfa", policy);
+                    store.save("idp_provider", provider);
+                    return null;
+                  }));
+      var nav = navigation(f, "true");
+      var issued = f.call(() -> nav.issue(navigationInput(f, "portal"), false));
+      var prepared = prepare(f, nav, issued, "auto", null, null);
+      var verified = f.call(() -> nav.verify(prepared, ssoCookies(f)));
+      var completed =
+          f.call(() -> nav.finish(prepared, verified, issued.path("transactionCookie").asString()));
+      assertEquals("authenticated", completed.state());
+      assertNotNull(completed.result().session());
+      assertEquals(
+          "complete", completed.result().transaction().path("step").path("type").asString());
+      assertFalse(completed.result().session().session().path("mfa").asBoolean());
+      assertTrue(f.call(() -> store.tx(() -> store.all("team_totp").isEmpty())));
+      verify(f.hooks, never()).verifyMfa(any(), any());
     }
   }
 
   @ParameterizedTest
   @ValueSource(booleans = {false, true})
-  void firstTotpRejectsAnEnabledProviderRevisionChangedAfterQrOrSso(boolean sso) throws Exception {
+  void verifiedQrOrSsoCannotCompleteAfterProviderRevisionChanges(boolean sso) throws Exception {
     try (var f = new Fixture("token-verify", 3)) {
       f.call(
           () ->
@@ -1802,38 +1759,19 @@ class UacFlowPostgresTest {
                   }));
       when(f.hooks.provisionVerifiedUacMember(any(), anyString(), any(), anyString()))
           .thenReturn(true);
-      LoginManager.Result pending;
-      String binding;
+      java.util.function.Supplier<LoginManager.Result> complete;
       if (sso) {
         var nav = navigation(f, "true");
         var issued = f.call(() -> nav.issue(navigationInput(f, "portal"), false));
-        binding = issued.path("transactionCookie").asString();
+        var binding = issued.path("transactionCookie").asString();
         var prepared = prepare(f, nav, issued, "auto", null, null);
         var verified = f.call(() -> nav.verify(prepared, ssoCookies(f)));
-        var completed = f.call(() -> nav.finish(prepared, verified, binding));
-        assertEquals("additional_step_required", completed.state());
-        pending = completed.result();
+        complete = () -> f.call(() -> nav.finish(prepared, verified, binding)).result();
       } else {
         var challenge = f.begin();
         f.run();
-        binding = challenge.binding();
-        pending = f.complete(challenge);
+        complete = () -> f.complete(challenge);
       }
-      var tx = pending.transaction();
-      assertEquals("first_totp", tx.path("step").path("formId").asString());
-      String label = tx.path("step").path("fields").get(0).path("label").path("en").asString();
-      var input =
-          Json.object(
-              "type",
-              "form",
-              "formId",
-              "first_totp",
-              "values",
-              Json.object(
-                  "otp",
-                  Totp.code(
-                      label.substring(label.lastIndexOf(' ') + 1),
-                      f.time.instant().getEpochSecond() / 30)));
       var config =
           new UacProviderService(
               store, f.uac.providers, f.uac.adapter, f.sessions, f.audit, f.time);
@@ -1845,10 +1783,13 @@ class UacFlowPostgresTest {
                 Json.object("enabled", true, "baseUrl", f.origin, "systemCode", "replacement"),
                 etag);
           });
-      var rejected = f.call(() -> f.login.advance(tx.path("id").asString(), binding, input, false));
-      assertNull(rejected.session());
-      assertEquals("failed", rejected.transaction().path("status").asString());
-      assertEquals("common.not_found", rejected.transaction().path("step").path("code").asString());
+      if (sso) {
+        var rejected = complete.get();
+        assertNull(rejected.session());
+        assertEquals("failed", rejected.transaction().path("status").asString());
+      } else {
+        assertThrows(AurigaException.class, complete::get);
+      }
       verify(f.hooks, never()).provisionVerifiedUacMember(any(), anyString(), any(), anyString());
       f.call(
           () ->

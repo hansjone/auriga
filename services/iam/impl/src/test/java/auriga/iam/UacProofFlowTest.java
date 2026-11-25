@@ -143,11 +143,27 @@ class UacProofFlowTest {
 
   @Test
   void rejectsUntrustedFieldsPortalMismatchAndStaleOrFutureNonceBeforeUpstream() {
-    for (String field : List.of("clientIP", "accountId", "sessionId", "generation")) {
+    for (String field :
+        List.of(
+            "clientIP",
+            "accountId",
+            "sessionId",
+            "generation",
+            "uacVerified",
+            "uacCredential",
+            "uacVerifiedRevision",
+            "uacProofLogin")) {
       var request = body.deepCopy();
       request.withObject("/uacProof").put(field, "synthetic");
       assertThrows(
           AurigaException.class, () -> create(request, "portal", "https://portal.example.com"));
+    }
+    for (String field :
+        List.of("uacVerified", "uacCredential", "uacVerifiedRevision", "uacProofLogin")) {
+      var forged = body.deepCopy();
+      forged.put(field, true);
+      assertThrows(
+          AurigaException.class, () -> create(forged, "portal", "https://portal.example.com"));
     }
     assertThrows(AurigaException.class, () -> create(body, "admin", "https://admin.example.com"));
     for (long seconds : List.of(-121L, 31L)) {

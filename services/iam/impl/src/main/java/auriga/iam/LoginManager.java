@@ -62,14 +62,16 @@ public final class LoginManager {
     return nativeDevices.beginNative(tx, request.path("nativeConnect"));
   }
 
-  static boolean uacMaySkipPlatformMfa(JsonNode tx, String policy) {
-    if ("never".equals(policy)) return true;
-    if (!"new_device".equals(policy)) return false;
-    JsonNode proof = tx.path("uacProofLogin");
-    // Native proof transactions must never inherit the QR exception when their marker is
-    // missing or malformed. Non-native browser navigation keeps its established policy.
-    return !tx.has("nativeGrantHash") && proof.isMissingNode()
-        || proof.isBoolean() && !proof.asBoolean();
+  static boolean verifiedUacLogin(JsonNode tx, JsonNode provider) {
+    // Only the server's UAC completion path supplies the verified credential and revision.
+    // A reusable proof, QR scan and verified SSO share the same UAC login policy; this
+    // does not assert that platform MFA was performed or bypass another connector's MFA.
+    return "uac".equals(provider.path("connectorType").asString())
+        && "login".equals(tx.path("purpose").asString())
+        && tx.path("uacVerified").isBoolean()
+        && tx.path("uacVerified").asBoolean()
+        && tx.path("uacCredential").isObject()
+        && !tx.path("uacVerifiedRevision").asString("").isBlank();
   }
 
   void validateUacNative(JsonNode request, String audience) {
@@ -921,13 +923,7 @@ public final class LoginManager {
             || profile.path("mfaPerformed").asBoolean()
                 && (team || policy.path("trustExternalMfa").asBoolean(false));
     boolean teamNeedsPlatformTotp = team && teamAccounts.hasTotp(UUID.fromString(accountId));
-    // Preserve the fresh-QR exception. A reusable credential proof is not a fresh scan:
-    // it must complete the configured new_device/always MFA policy, unless MFA is never required.
-    boolean uacWithoutPlatformMfa =
-        uac
-            && purpose.equals("login")
-            && tx.path("uacVerified").asBoolean()
-            && uacMaySkipPlatformMfa(tx, policy.path("mfa").asString("new_device"));
+    boolean uacWithoutPlatformMfa = verifiedUacLogin(tx, provider);
     if (!mfa
         && !uacWithoutPlatformMfa
         && (!policy.path("mfa").asString("new_device").equals("never")

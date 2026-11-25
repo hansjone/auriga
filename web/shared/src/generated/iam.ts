@@ -153,7 +153,7 @@ export interface paths {
     put?: never;
     /**
      * 门户服务端尝试SSO免扫码登录草案
-     * @description 仅portal/login用途。门户顶层导航服务端签发120秒一次性navigationProof，绑定浏览器事务cookie、完整Origin、tenant/provider和导航资格；POST精确Origin、CSRF和CAS消费验证。auto须再次检查导航资格及退出抑制，continue仅由旧版可信页面明确按钮触发，不接受link/stepup或客户端UAC凭据。Cookie只由门户服务端读取，私有映射选Portal完整配对优先、其次UDS，禁止跨体系混配；前端不读取或转发Cookie。未开启、无Cookie、退出抑制或上游验证不通过返回scan_required；安全围栏失败403。成功保存验证返回的令牌（优先 other.token，仅字段缺失时读取 bo.token；显式非法字段不回退），执行既有准入/MFA，轮换会话ID，SSO/扫码共用信息查询与复验。既有有效会话不被该接口静默切换；响应不含上游原文或token，Cache-Control no-store。合法待批准设备的顶层浏览器导航可自动完成门户SSO，批准设备仍需要本人核码与既有验证。按用户决定支持单IP单域名部署，SSO按既有开关与Cookie可用性生效。
+     * @description 仅portal/login用途。门户顶层导航服务端签发120秒一次性navigationProof，绑定浏览器事务cookie、完整Origin、tenant/provider和导航资格；POST精确Origin、CSRF和CAS消费验证。auto须再次检查导航资格及退出抑制，continue仅由旧版可信页面明确按钮触发，不接受link/stepup或客户端UAC凭据。Cookie只由门户服务端读取，私有映射选Portal完整配对优先、其次UDS，禁止跨体系混配；前端不读取或转发Cookie。未开启、无Cookie、退出抑制或上游验证不通过返回scan_required；安全围栏失败403。成功保存验证返回的令牌（优先 other.token，仅字段缺失时读取 bo.token；显式非法字段不回退），执行既有准入，UAC校验通过后不追加平台验证器，轮换会话ID，SSO/扫码共用信息查询与复验。既有有效会话不被该接口静默切换；响应不含上游原文或token，Cache-Control no-store。合法待批准设备的顶层浏览器导航可自动完成门户SSO，批准设备仍需要本人核码与既有验证。按用户决定支持单IP单域名部署，SSO按既有开关与Cookie可用性生效。
      */
     post: operations['loginUacSso'];
     delete?: never;
@@ -247,7 +247,7 @@ export interface paths {
     put?: never;
     /**
      * 原子消费已验证挑战草案
-     * @description 需要绑定 cookie + 精确 Origin。验证身份和成员策略后才设置现有入口会话 cookie。若需 MFA 则继续既有 transaction advance。完成结果只在原事务发起端可重复读取，绝不重复创建会话。尚未 verified 返回409，过期返回404。 purpose=login可匿名。purpose=link需要当前已认证入口会话且最近10分钟内完成认证，绑定已有账号的sessionId和认证代次，缺失401、过期或主体变化拒绝，禁止降级为匿名login。扫码所得另一身份必须新鲜，重复绑定遵循现有唯一约束。
+     * @description 需要绑定 cookie + 精确 Origin。验证身份和成员策略后才设置现有入口会话 cookie。UAC purpose=login 校验通过后直接完成，不追加平台 TOTP 或首个验证器登记；其他用途继续既有验证要求。完成结果只在原事务发起端可重复读取，绝不重复创建会话。尚未 verified 返回409，过期返回404。 purpose=login可匿名。purpose=link需要当前已认证入口会话且最近10分钟内完成认证，绑定已有账号的sessionId和认证代次，缺失401、过期或主体变化拒绝，禁止降级为匿名login。扫码所得另一身份必须新鲜，重复绑定遵循现有唯一约束。
      */
     post: operations['completeUacChallenge'];
     delete?: never;
@@ -438,7 +438,7 @@ export interface paths {
      * 开始一次登录（或绑定、补验证）
      * @description 返回第一步。按本入口下发 portal/admin 分名的登录事务cookie（见文首），绑定事务和浏览器，扫码类防转发。
      *     purpose=link / stepup 时需要已登录。
-     *     nativeConnect 仅已显式登记的第一方public client在portal的team-account账号+TOTP或内置emergency账号登录使用；UAC经同名challenge创建字段发起并遵循门户MFA策略，
+     *     nativeConnect 仅已显式登记的第一方public client在portal的team-account账号+TOTP或内置emergency账号登录使用；UAC经同名challenge创建字段发起，可信UAC校验完成后不追加平台验证器，
      *     purpose固定login、returnTo省略或/、不带invitationCode；拒绝任何外来设备码/主体/权限和未知字段。
      *     创建响应nativeDevice只回一次，GET/SSE/advance不回放；完成登录仅批准本事务自己的grant，
      *     token端点仍须S256 verifier兑换device-only凭据，不得自动调用人工核码或consent接口。
@@ -1731,7 +1731,7 @@ export interface components {
       baseUrl: string;
       systemCode: string;
     };
-    /** @description Native portal login only. IAM independently verifies the credential and requires an explicit authoritative subject. No session, account, tenant or clientIP assertion is accepted. Nonce is bound to provider/client/PKCE and retained beyond the 120-second issuedAt window (30-second future skew). Retries must send the exact same proof; complete and MFA use the existing transaction. */
+    /** @description Native portal login only. IAM independently verifies the credential and requires an explicit authoritative subject. No session, account, tenant or clientIP assertion is accepted. Nonce is bound to provider/client/PKCE and retained beyond the 120-second issuedAt window (30-second future skew). Retries must send the exact same proof; verified UAC completes through the existing transaction without an additional platform authenticator. */
     UacNativeProof: {
       empNo: string;
       token: string;

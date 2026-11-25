@@ -12,24 +12,42 @@ class UacProofTest {
   }
 
   @Test
-  void nativeProofNeverBorrowsTheQrMfaExceptionAndMissingMarkersFailClosed() {
-    var tx = Json.object("nativeGrantHash", "synthetic-grant");
-    for (var marker :
-        java.util.List.of(
-            Json.object(),
-            Json.object("uacProofLogin", true),
-            Json.object("uacProofLogin", "false"),
-            Json.object("uacProofLogin", null))) {
-      var candidate = tx.deepCopy();
-      candidate.setAll(marker);
-      assertFalse(LoginManager.uacMaySkipPlatformMfa(candidate, "new_device"));
-      assertFalse(LoginManager.uacMaySkipPlatformMfa(candidate, "always"));
-      assertTrue(LoginManager.uacMaySkipPlatformMfa(candidate, "never"));
+  void onlyServerVerifiedUacLoginAvoidsAdditionalPlatformMfa() {
+    var tx =
+        Json.object(
+            "purpose",
+            "login",
+            "uacVerified",
+            true,
+            "uacCredential",
+            Json.object("encrypted", "synthetic"),
+            "uacVerifiedRevision",
+            "synthetic-provider-revision");
+    for (String policy : java.util.List.of("never", "new_device", "always")) {
+      var provider = Json.object("connectorType", "uac", "admission", Json.object("mfa", policy));
+      assertTrue(LoginManager.verifiedUacLogin(tx, provider));
+      for (boolean proof : java.util.List.of(false, true)) {
+        var nativeTx =
+            tx.deepCopy().put("nativeGrantHash", "synthetic").put("uacProofLogin", proof);
+        assertTrue(LoginManager.verifiedUacLogin(nativeTx, provider));
+      }
+      for (String field :
+          java.util.List.of("purpose", "uacVerified", "uacCredential", "uacVerifiedRevision")) {
+        var missing = tx.deepCopy();
+        missing.remove(field);
+        assertFalse(LoginManager.verifiedUacLogin(missing, provider));
+      }
+      assertFalse(
+          LoginManager.verifiedUacLogin(tx.deepCopy().put("uacVerified", "true"), provider));
+      assertFalse(
+          LoginManager.verifiedUacLogin(tx.deepCopy().put("uacCredential", "synthetic"), provider));
+      assertFalse(LoginManager.verifiedUacLogin(tx.deepCopy().put("purpose", "stepup"), provider));
+      assertFalse(
+          LoginManager.verifiedUacLogin(
+              tx, provider.deepCopy().put("connectorType", "team-account")));
+      assertFalse(
+          LoginManager.verifiedUacLogin(tx, provider.deepCopy().put("connectorType", "oidc")));
     }
-    tx.put("uacProofLogin", false);
-    assertTrue(LoginManager.uacMaySkipPlatformMfa(tx, "new_device"));
-    assertFalse(LoginManager.uacMaySkipPlatformMfa(tx, "always"));
-    assertFalse(LoginManager.uacMaySkipPlatformMfa(tx, "unknown"));
   }
 
   @Test
