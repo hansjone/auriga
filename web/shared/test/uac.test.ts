@@ -42,6 +42,31 @@ afterEach(() => {
   document.body.replaceChildren();
 });
 describe('UAC native login', () => {
+  it.each([undefined, ''])(
+    'rejects a scan response without QR content (%s)',
+    async (qrContent) => {
+      const ctx = setup();
+      ctx.fetch.mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({ ...challenge, qrContent, state: 'verified' }),
+          {
+            headers: { 'Content-Type': 'application/json' },
+          },
+        ),
+      );
+      const view = createUacLoginView(ctx.root, {
+        ...ctx,
+        providerId: 'provider',
+      });
+      await tick();
+      expect(ctx.root.dataset.uacState).toBe('unavailable');
+      expect(ctx.root.querySelector('svg')).toBeNull();
+      expect(ctx.fetch).toHaveBeenCalledTimes(1);
+      expect(ctx.onComplete).not.toHaveBeenCalled();
+      await view.dispose();
+      expect(ctx.fetch.mock.calls.at(-1)?.[1]?.method).toBe('DELETE');
+    },
+  );
   it('renders a real QR SVG and reads status without completing waiting attempts', async () => {
     const ctx = setup();
     const view = createUacLoginView(ctx.root, {

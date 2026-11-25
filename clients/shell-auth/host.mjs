@@ -90,6 +90,12 @@ export class HostChannel {
   }
   async localUac(message, peer) {
     this.checkPeer(peer);
+    if (
+      !peer.verified ||
+      peer.role !== 'plugin-backend' ||
+      typeof this.broker.localUac !== 'function'
+    )
+      throw hostFault('peer_not_allowed');
     requireValid('ShellAuthLocalUacCommand', message);
     const remaining = Date.parse(message.expiresAt) - this.now();
     if (
@@ -106,7 +112,7 @@ export class HostChannel {
     if (!peer) return;
     for (const [id, r] of this.contexts) if (r.owner === peer.id) this.drop(id);
     this.peers.delete(peer.id);
-    this.broker.clearLocalUac(peer.id)?.catch(() => {});
+    this.broker.clearLocalUac?.(peer.id)?.catch(() => {});
     for (const stream of this.streams?.streams.values() ?? [])
       if (stream.owner === peer.id) this.streams.end(stream, 'closed');
   }
@@ -365,7 +371,7 @@ export class HostChannel {
     clearInterval(this.timer);
     this.changed();
     for (const peer of this.peers.values())
-      this.broker.clearLocalUac(peer.id)?.catch(() => {});
+      this.broker.clearLocalUac?.(peer.id)?.catch(() => {});
     this.peers.clear();
     this.broker.off('changed', this.changed);
   }

@@ -1731,7 +1731,16 @@ export interface components {
       baseUrl: string;
       systemCode: string;
     };
+    /** @description Native portal login only. IAM independently verifies the credential and requires an explicit authoritative subject. No session, account, tenant or clientIP assertion is accepted. Nonce is bound to provider/client/PKCE and retained beyond the 120-second issuedAt window (30-second future skew). Retries must send the exact same proof; complete and MFA use the existing transaction. */
+    UacNativeProof: {
+      empNo: string;
+      token: string;
+      nonce: string;
+      /** Format: date-time */
+      issuedAt: string;
+    };
     UacChallengeCreate: {
+      uacProof?: components['schemas']['UacNativeProof'];
       /** @description First-party native login only; purpose=login, no invitationCode. S256 binds the created device grant. */
       nativeConnect?: components['schemas']['NativeConnect'];
       /** Format: uuid */
@@ -1746,11 +1755,13 @@ export interface components {
     };
     UacChallenge: {
       nativeDevice?: components['schemas']['NativeDeviceGrant'];
+      /** @enum {string} */
+      state?: 'verified' | 'cancelled';
       /** Format: uuid */
       id: string;
       /** Format: uuid */
       transactionId: string;
-      qrContent: string;
+      qrContent?: string;
       /** Format: date-time */
       expiresAt: string;
       pollIntervalSeconds: number;

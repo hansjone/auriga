@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
+import { EventEmitter } from 'node:events';
 import { fixture, command, OWNER } from './fixtures.mjs';
 
 function setup() {
@@ -395,4 +396,24 @@ test('proof IPC requires a live OS backend peer, current epoch and increasing se
   );
   host.close();
   await f.broker.close();
+});
+
+test('hosts without local proof capability reject publication and release peers normally', async () => {
+  const { HostChannel } = await import('../host.mjs');
+  const authority = new EventEmitter();
+  const host = new HostChannel(authority);
+  const connect = () =>
+    host.connect({
+      verified: true,
+      connectionId: randomUUID(),
+      sid: 'synthetic-managed-sid',
+      processStart: '1',
+      role: 'plugin-backend',
+    });
+  const peer = connect();
+  await assert.rejects(host.localUac({}, peer), /peer_not_allowed/);
+  assert.doesNotThrow(() => host.disconnect(peer));
+  connect();
+  assert.doesNotThrow(() => host.close());
+  assert.equal(authority.listenerCount('changed'), 0);
 });
