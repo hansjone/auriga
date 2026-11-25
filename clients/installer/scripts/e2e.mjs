@@ -193,11 +193,7 @@ async function withDsh(fn) {
   const port = DESKTOP_DSH_PORT;
   const child = spawn(
     'cmd.exe',
-    [
-      '/c',
-      join(root, 'bin', 'auriga-desktop.cmd'),
-      '--no-open',
-    ],
+    ['/c', join(root, 'bin', 'auriga-desktop.cmd'), '--no-open'],
     { env, cwd: sandbox },
   );
   started.push(child);
