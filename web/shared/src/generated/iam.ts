@@ -2332,6 +2332,11 @@ export interface components {
         /** Format: uuid */
         tenantId: string;
         displayName: string;
+        /**
+         * Format: uri
+         * @description Optional safe absolute HTTP(S) avatar URL from the current account; unsafe values are omitted.
+         */
+        avatarUrl?: string;
       };
     };
     /** Network register request */
