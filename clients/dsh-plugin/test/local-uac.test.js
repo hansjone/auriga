@@ -187,6 +187,33 @@ async function loginFlow(env, empNo = 'A1001') {
   return { challenge, states };
 }
 
+test('local UAC projects verified employee name and safe avatar without any platform session', async (t) => {
+  const env = await setup(t);
+  t.after(() => env.identity.close());
+  env.upstream.script.info = [
+    {
+      body: {
+        ok: true,
+        rows: [
+          {
+            employee: 'A1001',
+            department: 'Engineering',
+            employeeName: 'Alice Example',
+            avatarUrl: 'https://profile.example.com/alice.png',
+          },
+        ],
+      },
+    },
+  ];
+  await loginFlow(env);
+  const status = env.identity.status();
+  assert.equal(status.state, 'authenticated');
+  assert.equal(status.displayName, 'Alice Example');
+  assert.equal(status.avatarUrl, 'https://profile.example.com/alice.png');
+  assert.equal(status.department, 'Engineering');
+  assert.equal(status.token, undefined);
+});
+
 test('local UAC: waiting → scanned → success, verify by client, correlation IDs, no raw token in logs', async (t) => {
   const env = await setup(t);
   assert.equal(env.identity.status().available, true);
@@ -871,6 +898,8 @@ test('local UAC: incomplete, malformed, or ambiguous response mappings disable s
     (value) => (value.department.listPointer = '/rows~'),
     (value) => delete value.department.empNoPointer,
     (value) => (value.department.departmentPointers = []),
+    (value) => (value.department.namePointers = '/name'),
+    (value) => (value.department.avatarPointers = ['/bad~pointer']),
   ]) {
     const value = settings(env.upstream.origin);
     modify(value);

@@ -35,7 +35,15 @@ const messages = {
     device: '设备名',
     loginTime: '登录时间',
     signedOut: '未登录',
-    local: '本地可正常使用，平台功能暂停',
+    local: '平台功能暂不可用',
+    localIdentity: '本地身份',
+    localSignedIn: '已登录',
+    localUnknown: '状态未知',
+    platformConnection: '平台连接',
+    platformConnected: '已连接',
+    platformSignedIn: '已登录，连接不可用',
+    platformDisconnected: '未连接',
+    loginEntryUnavailable: '登录界面暂未就绪，请在概览中重试。',
     managed: '系统托管',
     managedExpired: '实例会话已失效，请从门户重新进入',
     managedVerifying: '正在验证实例会话',
@@ -125,7 +133,15 @@ const messages = {
     device: 'Device name',
     loginTime: 'Sign-in time',
     signedOut: 'Signed out',
-    local: 'Local DSH available; platform features paused',
+    local: 'Platform features are unavailable',
+    localIdentity: 'Local identity',
+    localSignedIn: 'Signed in',
+    localUnknown: 'Status unknown',
+    platformConnection: 'Platform connection',
+    platformConnected: 'Connected',
+    platformSignedIn: 'Signed in, connection unavailable',
+    platformDisconnected: 'Disconnected',
+    loginEntryUnavailable: 'Sign-in is not ready. Retry from Overview.',
     managed: 'System managed',
     managedExpired: 'Instance session has expired. Re-enter from the portal.',
     managedVerifying: 'Verifying instance session',
@@ -182,10 +198,17 @@ const messages = {
   },
 };
 
-/** @param {any} React @param {{localURL:(path:string)=>string,fetcher?:typeof fetch,navigate:(url:string)=>void}} ports */
+/** @param {any} React @param {{localURL:(path:string)=>string,fetcher?:typeof fetch,navigate:(url:string)=>void,openLogin?:()=>boolean,subscribeIdentity?:(listener:()=>void)=>()=>void,identityChanged?:()=>void}} ports */
 export function createSettingsView(
   React,
-  { localURL, fetcher = fetch, navigate: _navigate },
+  {
+    localURL,
+    fetcher = fetch,
+    navigate: _navigate,
+    openLogin,
+    subscribeIdentity,
+    identityChanged,
+  },
 ) {
   const h = React.createElement;
   function useReceiveSettings(
@@ -324,7 +347,13 @@ export function createSettingsView(
             : 'statusHttp:' + response.status,
       );
     try {
-      return await response.json();
+      const value = await response.json();
+      if (
+        body !== undefined &&
+        (path.startsWith('auriga/uac/') || path === 'auriga/shell/command')
+      )
+        identityChanged?.();
+      return value;
     } catch {
       throw new Error('invalidState');
     }
@@ -729,6 +758,7 @@ export function createSettingsView(
     const t = messages[locale?.startsWith('zh') ? 'zh' : 'en'];
     const [state, setState] = React.useState(null),
       [account, setAccount] = React.useState(null);
+    const [localUac, setLocalUac] = React.useState(null);
     const [address, setAddress] = React.useState(''),
       [notice, setNotice] = React.useState(''),
       [statusError, setStatusError] = React.useState('');
@@ -739,6 +769,7 @@ export function createSettingsView(
       (/** @type {number} */ n) => n + 1,
       0,
     );
+    React.useEffect(() => subscribeIdentity?.(reload), []);
     const explain = (/** @type {any} */ error) =>
       error.message?.startsWith('statusHttp:')
         ? t.statusHttp + error.message.split(':')[1]
@@ -807,6 +838,27 @@ export function createSettingsView(
         clearInterval(timer);
       };
     }, [revision, locale]);
+    React.useEffect(() => {
+      if (state?.mode === 'managed' || boot?.mode === 'managed') return;
+      let live = true;
+      const update = async () => {
+        try {
+          const value = await call('auriga/uac/status');
+          if (live)
+            setLocalUac(typeof value?.available === 'boolean' ? value : null);
+        } catch {
+          if (live) setLocalUac(null);
+        }
+      };
+      void update();
+      const timer = setInterval(() => {
+        void update();
+      }, 5000);
+      return () => {
+        live = false;
+        clearInterval(timer);
+      };
+    }, [revision, state?.mode, boot?.mode]);
     const run = async (/** @type {()=>Promise<void>} */ action) => {
       setBusy(true);
       setNotice('');
@@ -821,6 +873,22 @@ export function createSettingsView(
     const managed = state?.mode === 'managed' || boot?.mode === 'managed';
     const configured = managed || !!state?.platformOrigin;
     const loggedIn = account?.loggedIn === true;
+    const localSignedIn =
+      localUac?.available === true &&
+      !localUac.reason &&
+      localUac.state === 'authenticated';
+    const localName = localSignedIn
+      ? localUac.displayName || localUac.empNo || t.localSignedIn
+      : '';
+    const platformConnection =
+      statusError ||
+      (!account
+        ? t.localUnknown
+        : loggedIn
+          ? account.connected
+            ? t.platformConnected
+            : t.platformSignedIn
+          : t.platformDisconnected);
     const recovering = !loggedIn && account?.resumeAvailable === true;
     const network = account?.network;
     const ready = network?.connected === true;
@@ -832,25 +900,27 @@ export function createSettingsView(
       (account?.session?.available === false || account?.loggedIn === false);
     const reason = managedFailure
       ? t.managedExpired
-      : !loggedIn
-        ? recovering
-          ? t.recovering
-          : account?.models?.reauthenticationRequired
-            ? t.expired
-            : t.signedOut
-        : network?.state === 'unconfigured' ||
-            network?.reason === 'configuration_missing'
-          ? t.unconfiguredNetwork
-          : ['connecting', 'registering', 'joining'].includes(network?.state)
-            ? t.joining
-            : account?.communication === 'unavailable' ||
-                ['unavailable', 'reconnecting', 'disconnected'].includes(
-                  network?.state,
-                )
-              ? t.network
-              : network?.reason
-                ? network.reason
-                : t.networkPending;
+      : !account
+        ? t.localUnknown
+        : !loggedIn
+          ? recovering
+            ? t.recovering
+            : account?.models?.reauthenticationRequired
+              ? t.expired
+              : t.signedOut
+          : network?.state === 'unconfigured' ||
+              network?.reason === 'configuration_missing'
+            ? t.unconfiguredNetwork
+            : ['connecting', 'registering', 'joining'].includes(network?.state)
+              ? t.joining
+              : account?.communication === 'unavailable' ||
+                  ['unavailable', 'reconnecting', 'disconnected'].includes(
+                    network?.state,
+                  )
+                ? t.network
+                : network?.reason
+                  ? network.reason
+                  : t.networkPending;
     const networkText = ready
       ? t.networkReady
       : t.networkPending + ' · ' + reason;
@@ -859,7 +929,7 @@ export function createSettingsView(
       : account?.models?.available
         ? t.modelReady
         : t.modelMissing;
-    const summary =
+    const platformSummary =
       (managed && (managedFailure || statusError || !account)
         ? t.managed +
           ' · ' +
@@ -886,6 +956,16 @@ export function createSettingsView(
               ' ' +
               modelText
             : name + ' · ' + t.networkTitle + ' ' + networkText);
+    const summary =
+      !managed && localSignedIn
+        ? t.localIdentity +
+          '：' +
+          localName +
+          '；' +
+          t.platformConnection +
+          '：' +
+          platformConnection
+        : platformSummary;
     const row = (/** @type {string} */ label, /** @type {any} */ value) =>
       h(
         'div',
@@ -909,29 +989,58 @@ export function createSettingsView(
     };
     const enter = () =>
       run(async () => {
+        if (openLogin) {
+          if (!openLogin()) {
+            setNotice(t.loginEntryUnavailable);
+            gotoOverview?.();
+          }
+          return;
+        }
+        if (localUac?.available) {
+          gotoOverview?.();
+          return;
+        }
         await shellCommand('inline_login');
         gotoOverview?.();
       });
-    const action = statusError
-      ? button(t.retry, reload)
-      : managed
-        ? button(t.refresh, reload)
-        : !configured
-          ? button(t.configure, () =>
-              document
-                .querySelector(
-                  /** @type {string} */ ('#auriga-platform-address'),
+    const action =
+      !managed && localUac?.available && !localSignedIn
+        ? button(t.login, enter)
+        : statusError
+          ? button(t.retry, reload)
+          : managed
+            ? button(t.refresh, reload)
+            : !configured
+              ? button(t.configure, () =>
+                  document
+                    .querySelector(
+                      /** @type {string} */ ('#auriga-platform-address'),
+                    )
+                    ?.scrollIntoView({ block: 'center' }),
                 )
-                ?.scrollIntoView({ block: 'center' }),
-            )
-          : recovering
-            ? button(t.retry, reload)
-            : !loggedIn
-              ? button(t.login, enter)
-              : button(t.refresh, reload);
-    const logout = () => {
-      void shellCommand('logout').catch((error) => setNotice(explain(error)));
-    };
+              : recovering
+                ? button(t.retry, reload)
+                : !loggedIn
+                  ? button(t.login, enter)
+                  : button(t.refresh, reload);
+    const logout = () =>
+      run(async () => {
+        const tasks = [];
+        if (localSignedIn)
+          tasks.push(call('auriga/uac/logout', {}, { csrf: localUac.csrf }));
+        if (loggedIn)
+          tasks.push(
+            call(
+              'auriga/shell/command',
+              { action: 'logout' },
+              { csrf: account.csrf },
+            ),
+          );
+        const results = await Promise.allSettled(tasks);
+        reload();
+        const failed = results.find((result) => result.status === 'rejected');
+        if (failed?.status === 'rejected') throw failed.reason;
+      });
     const receiveControls = useReceiveSettings({ t, account, revision });
     return h(
       'div',
@@ -951,8 +1060,29 @@ export function createSettingsView(
           t.identity,
           managed
             ? name
-            : statusError || (loggedIn || recovering ? name : t.signedOut),
+            : localName ||
+                statusError ||
+                (loggedIn || recovering
+                  ? name
+                  : !account
+                    ? t.localUnknown
+                    : t.signedOut),
         ),
+        !managed &&
+          localUac?.available !== false &&
+          row(
+            t.localIdentity,
+            localSignedIn
+              ? localName
+              : localUac?.state === 'signed_out' && !localUac.reason
+                ? t.signedOut
+                : t.localUnknown,
+          ),
+        !managed && row(t.platformConnection, platformConnection),
+        !managed &&
+          localSignedIn &&
+          localUac.department &&
+          row(t.department, localUac.department),
         managed
           ? h('p', null, t.managed)
           : h(
@@ -970,7 +1100,8 @@ export function createSettingsView(
                   new Date(account.loginTime).toLocaleString(locale),
                 ),
               // Sign-in lives on the status card above; only sign-out here.
-              !statusError && loggedIn && button(t.logout, logout),
+              (localSignedIn || (!statusError && loggedIn)) &&
+                button(t.logout, logout),
             ),
       ),
       !managed &&

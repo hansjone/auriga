@@ -60,6 +60,13 @@ test('profile and provider upstream responses project to fixed DTOs; invalid dat
     memberId: f.identity.memberId,
     displayName: 'test',
   });
+  body.account.avatarUrl = 'https://profile.example.com/alice.png';
+  assert.equal(
+    (await call('profile_read')).output.body.avatarUrl,
+    body.account.avatarUrl,
+  );
+  body.account.avatarUrl = 'javascript:alert(1)';
+  assert.equal((await call('profile_read')).output.body.avatarUrl, undefined);
   for (const account of [
     {},
     { id: randomUUID(), tenantId: f.identity.tenantId, displayName: 'wrong' },

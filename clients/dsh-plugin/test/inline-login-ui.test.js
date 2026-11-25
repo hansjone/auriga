@@ -1014,7 +1014,8 @@ test('settings.launcher replaces DSH bottom-left account slot with Auriga avatar
   let uacState = {
     available: true,
     state: 'authenticated',
-    empNo: '10329667',
+    empNo: 'A1001',
+    platformLink: 'matched',
     csrf: 'uac-csrf',
   };
   let shellState = {
@@ -1045,7 +1046,7 @@ test('settings.launcher replaces DSH bottom-left account slot with Auriga avatar
     const renderedText = text(signedTree);
     assert.match(renderedText, /张/);
     assert.match(renderedText, /张三/);
-    assert.match(renderedText, /10329667/);
+    assert.match(renderedText, /A1001/);
     // Open fallback menu and trigger settings + sign-out
     const trigger = all(signedTree).find((n) => n.type === 'button');
     trigger.props.onClick();
@@ -1070,3 +1071,124 @@ test('settings.launcher replaces DSH bottom-left account slot with Auriga avatar
     f.close();
   }
 });
+
+for (const shellState of [
+  null,
+  { configured: false, brokerAvailable: false, loggedIn: false },
+])
+  test(
+    'manual account login keeps local UAC visible while platform is unavailable: ' +
+      (shellState ? 'unconfigured' : 'unknown'),
+    async () => {
+      const f = await fixture(
+        async (url) =>
+          String(url).includes('/auriga/uac/status')
+            ? {
+                ok: true,
+                json: async () => ({
+                  available: true,
+                  state: 'signed_out',
+                  csrf: 'uac-csrf',
+                }),
+              }
+            : shellState
+              ? { ok: true, json: async () => shellState }
+              : { ok: false, status: 503 },
+        { skipped: true },
+      );
+      try {
+        await f.renderLogin();
+        const launcher = await f.renderLauncher();
+        all(launcher)
+          .find((n) => n.type === 'button')
+          .props.onClick();
+        const menu = await f.renderLauncher();
+        all(menu)
+          .find((n) => n.props?.role === 'menuitem' && /登录/.test(text(n)))
+          .props.onClick();
+        const overlay = await f.renderLogin();
+        assert.ok(
+          overlay,
+          'local login must not be gated by platform readiness',
+        );
+        assert.ok(
+          all(overlay).some((n) => n.type?.name === 'LocalIdentityCard'),
+        );
+      } finally {
+        f.close();
+      }
+    },
+  );
+
+test('account launcher preserves unknown state and renders safe local avatar with glyph fallback', async () => {
+  let uac = null;
+  const f = await fixture(async (url) =>
+    String(url).includes('/auriga/uac/status') && uac
+      ? { ok: true, json: async () => uac }
+      : { ok: false, status: 503 },
+  );
+  try {
+    const unknown = await f.renderLauncher();
+    assert.match(text(unknown), /状态未知|正在确认/);
+    uac = {
+      available: true,
+      state: 'authenticated',
+      empNo: 'A1001',
+      displayName: 'Alice Example',
+      avatarUrl: 'https://profile.example.com/alice.png',
+    };
+    for (const timer of f.intervals.values()) timer.fn();
+    await new Promise((resolve) => setImmediate(resolve));
+    const signed = await f.renderLauncher();
+    assert.match(text(signed), /Alice Example/);
+    const avatar = all(signed).find((n) => n.type === 'img');
+    assert.equal(avatar.props.src, uac.avatarUrl);
+    assert.equal(avatar.props.referrerPolicy, 'no-referrer');
+    avatar.props.onError();
+    const fallback = await f.renderLauncher();
+    assert.ok(!all(fallback).some((n) => n.type === 'img'));
+    assert.match(text(fallback), /A/);
+  } finally {
+    f.close();
+  }
+});
+
+for (const local of [
+  { available: true, state: 'signed_out' },
+  { available: true, reason: 'status_unavailable' },
+])
+  test(
+    'platform login cannot replace a separate local identity state: ' +
+      (local.state ?? local.reason),
+    async () => {
+      const f = await fixture(async (url) => ({
+        ok: true,
+        json: async () =>
+          String(url).includes('/auriga/uac/status')
+            ? local
+            : {
+                configured: true,
+                brokerAvailable: true,
+                loggedIn: true,
+                connected: true,
+                account: { displayName: 'Platform Only' },
+                csrf: 'shell-csrf',
+              },
+      }));
+      try {
+        const launcher = await f.renderLauncher();
+        assert.doesNotMatch(text(launcher), /Platform Only/);
+        assert.match(text(launcher), /平台已连接/);
+        assert.match(
+          text(launcher),
+          local.reason ? /本地身份状态未知/ : /本地身份未登录/,
+        );
+        if (local.reason)
+          assert.ok(
+            !all(launcher).some((n) => n.props?.['data-signed-out'] === 'true'),
+          );
+      } finally {
+        f.close();
+      }
+    },
+  );

@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { canonicalize, parseStrictJson } from '../../network/trust/jcs.js';
 import { createUacHttp, MAX_BODY, parseIpAddress } from './http.js';
 import { resolveCookieDomain } from './browser-cookies.js';
+import { memberName, memberAvatar } from '../member-profile.js';
 
 /*
  * Local port of the platform `UacConfiguredAdapter` (services/iam): the same
@@ -59,6 +60,12 @@ function validateMappings(qr, department) {
     !Object.hasOwn(department, 'successValue')
   )
     throw invalid();
+  for (const field of ['namePointers', 'avatarPointers'])
+    if (
+      Object.hasOwn(department, field) &&
+      (!Array.isArray(department[field]) || !department[field].every(isPointer))
+    )
+      throw invalid();
   canonicalize(department.successValue);
 }
 
@@ -523,6 +530,36 @@ export function createUacAdapter(settings, provider, options = {}) {
           failureClass: 'identity_mismatch',
           matchingCount: matches.length,
         };
+      const displayName = (
+        mapping.namePointers ?? [
+          '/empName',
+          '/employeeName',
+          '/userName',
+          '/name',
+          '/empNameCn',
+          '/employeeNameCn',
+          '/userNameCn',
+          '/chineseName',
+          '/cnName',
+          '/lastName',
+        ]
+      )
+        .map((/** @type {string} */ pointer) =>
+          memberName(at(matches[0], pointer)),
+        )
+        .find(Boolean);
+      const avatarUrl = (
+        mapping.avatarPointers ?? [
+          '/headIcon',
+          '/avatar',
+          '/avatarUrl',
+          '/photoUrl',
+        ]
+      )
+        .map((/** @type {string} */ pointer) =>
+          memberAvatar(at(matches[0], pointer)),
+        )
+        .find(Boolean);
       for (const pointer of mapping.departmentPointers ?? []) {
         const value = at(matches[0], pointer);
         if (
@@ -530,7 +567,12 @@ export function createUacAdapter(settings, provider, options = {}) {
           stripDepartmentText(value) &&
           value.length <= 1024
         )
-          return { available: true, department: stripDepartmentText(value) };
+          return {
+            available: true,
+            department: stripDepartmentText(value),
+            ...(displayName ? { displayName } : {}),
+            ...(avatarUrl ? { avatarUrl } : {}),
+          };
       }
       return { available: false, faultReason: 'missing_department' };
     } catch {

@@ -394,9 +394,35 @@ export class BusinessProxy {
           body.account.tenantId !== context.identity.tenantId
         )
           throw new Error('invalid profile identity');
+        let avatarUrl;
+        const candidate = body.account.avatarUrl;
+        if (
+          typeof candidate === 'string' &&
+          candidate.length <= 2048 &&
+          /^https?:\/\//.test(candidate) &&
+          !/[\s"'<>\\]/.test(candidate) &&
+          !Array.from(candidate).some(
+            (char) => char.charCodeAt(0) < 32 || char.charCodeAt(0) === 127,
+          )
+        ) {
+          try {
+            const parsed = new URL(candidate);
+            if (
+              parsed.hostname &&
+              !parsed.username &&
+              !parsed.password &&
+              !parsed.hash &&
+              parsed.port !== '0'
+            )
+              avatarUrl = candidate;
+          } catch {
+            /* Invalid presentation data does not change identity. */
+          }
+        }
         body = {
           memberId: context.identity.memberId,
           displayName: body.account.displayName,
+          ...(avatarUrl ? { avatarUrl } : {}),
         };
       }
       if (definition.operation === 'provider_diagnostic') {

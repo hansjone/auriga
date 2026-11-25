@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { shellRuntimePeer } from './shell-runtime-peer.js';
-import { memberName } from '../src/local/member-profile.js';
+import { memberName, memberAvatar } from '../src/local/member-profile.js';
 import { setImmediate as nextTurn } from 'node:timers/promises';
 import { randomUUID } from 'node:crypto';
 function profilePeer(reply) {
@@ -22,13 +22,41 @@ test('member name uses the fixed profile operation, never a plugin credential or
     configure: profilePeer((c) => ({
       memberId: c.identity.memberId,
       displayName: ' Alice ',
+      avatarUrl: 'https://profile.example.com/alice.png',
     })),
   });
   t.mock.method(globalThis, 'fetch', () => assert.fail('no directory lookup'));
   await nextTurn();
   assert.equal(f.runtime.status(f.request).account.displayName, 'Alice');
+  assert.equal(
+    f.runtime.status(f.request).account.avatarUrl,
+    'https://profile.example.com/alice.png',
+  );
   assert.equal(f.runtime.baseTools.getState().displayName, 'Alice');
   assert.equal(f.runtime.vault.snapshot().credential, undefined);
+});
+test('member avatars accept only bounded absolute HTTP URLs without credential or active content', () => {
+  for (const value of [
+    'https://profile.example.com/alice.png',
+    'http://192.0.2.10/alice.png',
+  ])
+    assert.equal(memberAvatar(value), value);
+  for (const value of [
+    null,
+    2,
+    '',
+    '//example.com/avatar',
+    'javascript:alert(1)',
+    'data:image/png;base64,x',
+    'file:///avatar',
+    'https://alice:secret@example.com/a',
+    'https://example.com/a#fragment',
+    'https://example.com:70000/a',
+    'https://example.com/<img>',
+    'https://example.com/a b',
+    'https://example.com/' + 'a'.repeat(2048),
+  ])
+    assert.equal(memberAvatar(value), undefined);
 });
 test('unadmitted requests cannot read the authenticated profile, and foreign member names are rejected', async (t) => {
   const f = await shellRuntimePeer(t, {

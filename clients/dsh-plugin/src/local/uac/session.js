@@ -52,7 +52,7 @@ export function createLocalUacIdentity(options) {
   /** @type {string} */ let identityDomain;
   /** @type {{empNo:string,identityDomain:string|null}|null} */ let owner =
     null;
-  /** @type {{empNo:string,token:string,clientIP:string,department?:string,authMethod?:'sso'|'qr',loginAt:number,verifiedAt:number,attempt:number,nextRevalidateAt:number}|null} */
+  /** @type {{empNo:string,token:string,clientIP:string,department?:string,displayName?:string,avatarUrl?:string,authMethod?:'sso'|'qr',loginAt:number,verifiedAt:number,attempt:number,nextRevalidateAt:number}|null} */
   let session = null;
   /** @type {any} */ let challenge;
   /** @type {{outcome:string,at:number}|undefined} */ let last;
@@ -263,7 +263,15 @@ export function createLocalUacIdentity(options) {
             token: verified.token,
             clientIP: cred.clientIP ?? '',
             ...(deptResult?.available && deptResult.department
-              ? { department: deptResult.department }
+              ? {
+                  department: deptResult.department,
+                  ...(deptResult.displayName
+                    ? { displayName: deptResult.displayName }
+                    : {}),
+                  ...(deptResult.avatarUrl
+                    ? { avatarUrl: deptResult.avatarUrl }
+                    : {}),
+                }
               : {}),
             authMethod: 'sso',
             loginAt: at,
@@ -419,6 +427,10 @@ export function createLocalUacIdentity(options) {
         ? {
             empNo: session.empNo,
             ...(session.department ? { department: session.department } : {}),
+            ...(session.displayName
+              ? { displayName: session.displayName }
+              : {}),
+            ...(session.avatarUrl ? { avatarUrl: session.avatarUrl } : {}),
             ...(session.authMethod ? { authMethod: session.authMethod } : {}),
             loginAt: new Date(session.loginAt).toISOString(),
             verifiedAt: new Date(session.verifiedAt).toISOString(),
@@ -574,7 +586,15 @@ export function createLocalUacIdentity(options) {
         token: verified.token,
         clientIP: result.clientIP ?? '',
         ...(deptResult?.available && deptResult.department
-          ? { department: deptResult.department }
+          ? {
+              department: deptResult.department,
+              ...(deptResult.displayName
+                ? { displayName: deptResult.displayName }
+                : {}),
+              ...(deptResult.avatarUrl
+                ? { avatarUrl: deptResult.avatarUrl }
+                : {}),
+            }
           : {}),
         authMethod: 'qr',
         loginAt: at,
