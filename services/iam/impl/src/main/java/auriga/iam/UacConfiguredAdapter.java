@@ -20,6 +20,7 @@ final class UacConfiguredAdapter implements UacEnterpriseAdapter {
   private final JsonNode settings;
   private final UacHttp http;
   private final int scanTimeoutSeconds;
+  private final boolean allowVerifiedProofAccount;
 
   UacConfiguredAdapter(JsonNode settings, boolean testLoopback) {
     String ip = settings.path("clientIP").asString("");
@@ -31,6 +32,13 @@ final class UacConfiguredAdapter implements UacEnterpriseAdapter {
         && (!timeout.isIntegralNumber() || timeout.asInt() < 1 || timeout.asInt() > 15))
       throw new IllegalArgumentException("Invalid private UAC QR timeoutSeconds (1..15)");
     scanTimeoutSeconds = timeout.isMissingNode() ? 15 : timeout.asInt();
+    JsonNode subjectPolicy = settings.path("proofSubjectPolicy");
+    allowVerifiedProofAccount =
+        switch (subjectPolicy.isMissingNode() ? "echo" : subjectPolicy.asString("")) {
+          case "echo" -> false;
+          case "either" -> true;
+          default -> throw new IllegalArgumentException("Invalid private UAC proofSubjectPolicy");
+        };
     this.settings = settings.deepCopy();
     this.http = new UacHttp(settings, testLoopback);
   }
@@ -429,7 +437,8 @@ final class UacConfiguredAdapter implements UacEnterpriseAdapter {
         return Json.object("success", false, "failureClass", "rate_limited");
       var decision =
           proof
-              ? UacTokenVerification.evaluateProof(response.status(), response.body(), account)
+              ? UacTokenVerification.evaluateProof(
+                  response.status(), response.body(), account, allowVerifiedProofAccount)
               : UacTokenVerification.evaluate(response.status(), response.body(), account);
       return Json.object(
           "success",

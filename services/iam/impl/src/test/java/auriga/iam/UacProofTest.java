@@ -8,7 +8,7 @@ import org.junit.jupiter.api.Test;
 class UacProofTest {
   private UacTokenVerification.Decision proof(String payload) {
     return UacTokenVerification.evaluateProof(
-        200, payload.getBytes(StandardCharsets.UTF_8), "001Ab");
+        200, payload.getBytes(StandardCharsets.UTF_8), "001Ab", false);
   }
 
   @Test

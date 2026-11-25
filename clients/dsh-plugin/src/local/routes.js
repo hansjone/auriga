@@ -10,6 +10,7 @@ const actions = new Set([
   'cancel_login',
   'logout',
   'reconnect',
+  'retry_local_uac',
 ]);
 /** @param {any} res @param {number} status @param {any} body */
 function json(res, status, body) {

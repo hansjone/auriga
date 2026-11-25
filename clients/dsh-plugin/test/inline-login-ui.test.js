@@ -1270,6 +1270,52 @@ test('automatic association shows no browser instruction and keeps MFA visible i
     f.close();
   }
 });
+
+test('rejected local association has a one-click retry and safe diagnostics in Overview', async () => {
+  const calls = [];
+  const shell = {
+    configured: true,
+    brokerAvailable: true,
+    loggedIn: false,
+    platform: 'reauth_required',
+    reason: 'login_denied',
+    canRetryLocalUac: true,
+    loginError: {
+      code: 'iam.uac_proof_subject_required',
+      correlationId: '135955a8-3864-42da-93a6-dc6d20bc184b',
+    },
+    csrf: 'csrf',
+  };
+  const f = await fixture(async (url, init = {}) => {
+    if (init.body) calls.push(JSON.parse(init.body));
+    return {
+      ok: true,
+      json: async () =>
+        String(url).includes('/auriga/uac/status')
+          ? { available: true, state: 'authenticated', empNo: '001Ab' }
+          : shell,
+    };
+  });
+  try {
+    assert.equal(await f.renderLogin(), null);
+    assert.deepEqual(calls, []);
+    const card = await f.renderOverview(shell);
+    const details = all(card).find((node) => node.type === 'details');
+    assert.match(text(details), /错误详情.*iam\.uac_proof_subject_required/);
+    assert.ok(text(details).includes(shell.loginError.correlationId));
+    assert.doesNotMatch(text(card), /平台登录已过期/);
+    const primary = all(card).find(
+      (node) => node.type?.name === 'Action' && node.props.primary,
+    );
+    assert.match(text(primary), /用本机身份重新连接平台/);
+    primary.props.onClick();
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.deepEqual(calls, [{ action: 'retry_local_uac' }]);
+  } finally {
+    f.close();
+  }
+});
+
 for (const change of ['account', 'generation'])
   test(
     'launcher binds platform profile to the same UAC snapshot during ' +

@@ -35,6 +35,12 @@ const clientErrors = new Set([
   'invalid_scope',
   'invalid_config',
 ]);
+const retryableProofErrors = new Set([
+  'iam.uac_proof_subject_required',
+  'iam.uac_proof_rejected',
+  'iam.uac_proof_provider_required',
+]);
+const MAX_PROOF_ATTEMPTS = 5;
 function loginFailure(error, fallbackCorrelationId) {
   const code =
     typeof error.code === 'string' &&
@@ -252,7 +258,11 @@ export class Broker extends EventEmitter {
     return result;
   }
   async execute(command, owner) {
-    if (
+    if (command.action === 'retry_local_uac') {
+      if (this.attempt || this.record.tokens || !this.liveLocalSource(owner))
+        throw conflict();
+      this.track(this.checkProof(true));
+    } else if (
       command.action === 'inline_login' ||
       command.action === 'inline_advance'
     ) {
@@ -373,6 +383,7 @@ export class Broker extends EventEmitter {
       this.generation++;
       attempt.controller.abort();
       this.track(attempt.inline.cancel());
+      this.loginError = undefined;
       this.transition('signed_out', 'account_changed');
     }
     this.localSource = credential
@@ -396,14 +407,27 @@ export class Broker extends EventEmitter {
   clearLocalUac(owner) {
     if (this.localSource?.owner === owner) return this.localUac(null, owner);
   }
-  async checkProof() {
-    if (!this.localSource || this.localSource.until <= this.mono()) return;
+  liveLocalSource(owner) {
+    const source = this.localSource;
+    return source && source.owner === owner && source.until > this.mono();
+  }
+  async checkProof(explicit = false) {
+    const source = this.localSource;
+    if (!source || !this.liveLocalSource(source.owner)) return;
     let attempt = this.attempt;
     if (!attempt) {
-      if (this.record.manualLoginRequired || this.record.tokens) return;
+      const blockedGeneration = this.record.proofFailureGeneration;
+      if (
+        this.record.tokens ||
+        (!explicit &&
+          this.record.manualLoginRequired &&
+          (!blockedGeneration ||
+            blockedGeneration === source.credential.generation))
+      )
+        return;
       attempt = {
-        owner: this.localSource.owner,
-        proof: this.localSource.credential,
+        owner: source.owner,
+        proof: source.credential,
         generation: ++this.generation,
         controller: new AbortController(),
         correlationId: randomUUID(),
@@ -444,6 +468,7 @@ export class Broker extends EventEmitter {
         // The code is single-use. Persist the recovery gate BEFORE exchange so a lost
         // response or process crash cannot silently mint a second device on restart.
         this.record.manualLoginRequired = true;
+        delete this.record.proofFailureGeneration;
         await this.save();
         if (!this.current(attempt)) return;
         attempt.exchangeStarted = true;
@@ -470,6 +495,7 @@ export class Broker extends EventEmitter {
         throw conflict();
       this.record.tokens = tokens;
       this.record.manualLoginRequired = false;
+      delete this.record.proofFailureGeneration;
       if (attempt.proof) this.record.proofEmployee = attempt.proof.empNo;
       else delete this.record.proofEmployee;
       await this.save();
@@ -490,8 +516,8 @@ export class Broker extends EventEmitter {
         !attempt.exchangeStarted &&
         !input &&
         (error.status === 429 || !error.status || error.status >= 500);
-      if (transient) {
-        attempt.failures = (attempt.failures ?? 0) + 1;
+      if (transient) attempt.failures = (attempt.failures ?? 0) + 1;
+      if (transient && attempt.failures < MAX_PROOF_ATTEMPTS) {
         attempt.retryAt =
           this.mono() +
           Math.min(30000, 5000 * 2 ** Math.min(attempt.failures - 1, 3));
@@ -500,10 +526,23 @@ export class Broker extends EventEmitter {
           'unreachable',
           error.status === 429 ? 'rate_limited' : 'offline',
         );
+        this.logLoginFailure(error, this.loginError);
         return;
       }
       if (attempt.proof) {
+        const hardGate =
+          this.record.manualLoginRequired &&
+          !this.record.proofFailureGeneration;
         this.record.manualLoginRequired = true;
+        if (
+          !hardGate &&
+          (transient ||
+            (!input &&
+              !attempt.exchangeStarted &&
+              retryableProofErrors.has(error.code)))
+        )
+          this.record.proofFailureGeneration = attempt.proof.generation;
+        else delete this.record.proofFailureGeneration;
         await this.save();
       }
       if (!this.current(attempt)) return;
@@ -515,17 +554,22 @@ export class Broker extends EventEmitter {
         failure.state = 'reauth_required';
         if (error.code === 'iam.provider_disabled')
           failure.reason = 'source_disabled';
+        if (error.status === 429) failure.reason = 'rate_limited';
       }
       this.loginError = failure.error;
       this.transition(failure.state, failure.reason);
-      this.log({
-        stage: 'device_authorization',
-        phase: 'end',
-        result: 'failure',
-        code: failure.error.code,
-        correlationId: failure.error.correlationId,
-      });
+      this.logLoginFailure(error, failure.error);
     }
+  }
+  logLoginFailure(error, { code, correlationId }) {
+    this.log({
+      stage: 'device_authorization',
+      phase: 'end',
+      result: 'failure',
+      code,
+      correlationId,
+      httpStatus: error.status,
+    });
   }
   current(attempt) {
     return (
@@ -547,6 +591,7 @@ export class Broker extends EventEmitter {
     this.generation++;
     if (attempt?.proof) {
       this.record.manualLoginRequired = true;
+      delete this.record.proofFailureGeneration;
       this.track(this.save());
     }
     if (attempt?.inline) this.track(attempt.inline.cancel());
@@ -788,6 +833,7 @@ export class Broker extends EventEmitter {
         oldIdentity = this.projection?.identity;
       this.record.tokens = tokens;
       this.record.manualLoginRequired = false;
+      delete this.record.proofFailureGeneration;
       await this.save();
       if (!this.current(attempt)) {
         await this.queueRevoke(tokens);
@@ -939,6 +985,7 @@ export class Broker extends EventEmitter {
         this.generation++;
         delete this.record.tokens;
         this.record.manualLoginRequired = true;
+        delete this.record.proofFailureGeneration;
         this.transition('revoked', reasonFor(error));
         await this.save();
         await this.queueRevoke(next ?? old);
@@ -956,6 +1003,7 @@ export class Broker extends EventEmitter {
     delete this.record.tokens;
     delete this.record.proofEmployee;
     this.record.manualLoginRequired = true;
+    delete this.record.proofFailureGeneration;
     this.loginError = undefined;
     this.transition('signed_out', 'user_logout'); // local stop before network
     await this.save();

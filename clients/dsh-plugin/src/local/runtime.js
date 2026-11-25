@@ -626,6 +626,12 @@ export async function createConnectRuntime({
           : {}),
         ...(s?.loginError ? { loginError: s.loginError } : {}),
         ...(s?.localUacProof ? { localUacProof: true } : {}),
+        ...(requests.has(req) &&
+        s &&
+        ['signed_out', 'reauth_required', 'revoked'].includes(s.state) &&
+        localUac?.status?.().state === 'authenticated'
+          ? { canRetryLocalUac: true }
+          : {}),
         brokerAvailable: !!s,
         migrationRequired: legacy && !who,
         account: who
