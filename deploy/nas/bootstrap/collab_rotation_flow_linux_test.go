@@ -137,6 +137,9 @@ func nasRotationTestFixture(t *testing.T, mode string) *nasRotationFixture {
 	}
 	f.mounts(r.data+"/config/collab-runtime/collab", r.data+"/config/collab-runtime/network/protocol.key")
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		if nasRotationVersionFixture(w, req) {
+			return
+		}
 		path := strings.TrimPrefix(req.URL.Path, "/v1.41")
 		if path == "/containers/json" {
 			var ids []map[string]string
