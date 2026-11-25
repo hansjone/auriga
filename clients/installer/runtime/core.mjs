@@ -85,6 +85,8 @@ import {
 } from './python-user.mjs';
 
 export const PROFILE = 'auriga';
+/** Fixed loopback port for the published Auriga desktop DSH web UI. */
+export const DESKTOP_DSH_PORT = 12721;
 const PLUGIN = 'auriga-dsh';
 const CLIENT_ID = 'auriga-dsh';
 const PROVIDER_ID = 'discover';
@@ -92,6 +94,14 @@ const PROVIDER_ID = 'discover';
 // reinstall the plugin (it is not on the npm registry) without breaking it.
 const PLUGIN_SPEC = 'file:./.auriga/auriga-dsh.tgz';
 const BUNDLES = ['@deepseek-ai/dsh-base', '@deepseek-ai/dsh-web-app', PLUGIN];
+
+/** Default the desktop web UI to {@link DESKTOP_DSH_PORT} when no `--port` is given. */
+export function desktopLaunchArgs(args = []) {
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] === '--port') return [...args];
+  }
+  return [...args, '--port', String(DESKTOP_DSH_PORT)];
+}
 const INSTALL_MARKER = '.auriga-desktop-install';
 const UNINSTALL_MARKER = '.auriga-desktop-uninstall-pending';
 const DATA_MARKER = '.auriga-desktop';
@@ -1589,7 +1599,7 @@ async function launchLocked({
             dshBin(dir),
             '--profile',
             PROFILE,
-            ...args,
+            ...desktopLaunchArgs(args),
           ],
           {
             // In tray mode stdin is the tray's control pipe; DSH must not own it.

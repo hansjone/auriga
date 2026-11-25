@@ -174,7 +174,7 @@ node payload/auriga/runtime/cli.mjs install --payload payload --root <独立安�
 ### 托盘程序
 
 开始菜单入口仍是 `bin\auriga-desktop.cmd`；无参数时启动当前版本的 `auriga\tray\AurigaDesktop.exe`（带参数时保持原前台启动，供自动化与诊断）。
-托盘按安装目录单实例（`Local\AurigaDesktop-<摘要>` 互斥体）；重复启动把“打开”请求交给已运行实例。托盘以 `cli.mjs launch --stdin-control -- --no-open` 托管启动器：
+托盘按安装目录单实例（`Local\AurigaDesktop-<摘要>` 互斥体）；重复启动把“打开”请求交给已运行实例。托盘以 `cli.mjs launch --stdin-control -- --no-open --port 12721` 托管启动器；DSH Web UI 默认监听 `127.0.0.1:12721`（调用方已传 `--port` 时保留，不再改成上游默认 3080）。
 stdin 一行 `stop` 或 stdin 关闭会通知 DSH 执行正常停止和持久化。超出宽限时间才强制清理进程树，该次停止不会应用排队更新。启动器在 stdout 输出不含令牌、身份和路径的 `@@auriga` 状态事件。
 
 菜单：打开 Auriga、运行状态与版本、平台状态（已登录/未登录/不可达/未接入的具体原因码）、检查更新、立即更新（下载进度、可取消续传）、重启以完成更新、
