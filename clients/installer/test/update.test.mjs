@@ -642,7 +642,8 @@ test('下载完成后按阶段上报校验进度，而不是笼统 verifying', a
     {
       defer: true,
       onState: (state) => {
-        if (state.phase === 'verifying' && state.stage) stages.push(state.stage);
+        if (state.phase === 'verifying' && state.stage)
+          stages.push(state.stage);
       },
     },
   );
