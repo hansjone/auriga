@@ -1,25 +1,29 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createCipheriv, randomBytes } from 'node:crypto';
+import { createCipheriv, createHash, randomBytes } from 'node:crypto';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   decryptChromiumValue,
   domainMatches,
+  isChromiumV20,
   resolveCookieDomain,
 } from '../src/local/uac/browser-cookies.js';
 import { createUacAdapter } from '../src/local/uac/adapter.js';
 import { createLocalUacIdentity } from '../src/local/uac/session.js';
 import { createEnterpriseEnvironment } from '../src/local/enterprise-environment.js';
 
-function encryptV10(plaintext, key) {
+function encryptV10(plaintext, key, hostKey) {
   const nonce = randomBytes(12);
   const cipher = createCipheriv('aes-256-gcm', key, nonce);
-  const body = Buffer.concat([
-    cipher.update(plaintext, 'utf8'),
-    cipher.final(),
-  ]);
+  const plainBuf = hostKey
+    ? Buffer.concat([
+        createHash('sha256').update(hostKey, 'utf8').digest(),
+        Buffer.from(plaintext, 'utf8'),
+      ])
+    : Buffer.from(plaintext, 'utf8');
+  const body = Buffer.concat([cipher.update(plainBuf), cipher.final()]);
   const tag = cipher.getAuthTag();
   return Buffer.concat([Buffer.from('v10', 'ascii'), nonce, body, tag]);
 }
@@ -66,24 +70,91 @@ function syntheticAdapter(overrides = {}) {
   };
 }
 
-test('browser-cookies: domain resolution, matching and Chromium v10/v20 decryption', () => {
+test('browser-cookies: cross-domain/parent-domain matching and Chromium v10/v24/v20 decryption', () => {
   assert.equal(
     resolveCookieDomain(undefined, 'https://uac.corp.com.cn/api'),
     '.corp.com.cn',
   );
+  // Explicit host is preserved so RFC 6265 parent-domain cookies match when cookies.domain != provider.baseUrl
   assert.equal(
-    resolveCookieDomain('corp.example.com', 'https://uac.other.example'),
-    '.corp.example.com',
+    resolveCookieDomain('aip.corp.example.com', 'https://uac.other.example'),
+    'aip.corp.example.com',
   );
   assert.equal(domainMatches('.corp.com.cn', '.corp.com.cn'), true);
   assert.equal(domainMatches('aip.corp.com.cn', '.corp.com.cn'), true);
+  // Parent-domain cookie (.corp.com.cn) matches explicit portal host (aip.corp.com.cn)
+  assert.equal(domainMatches('.corp.com.cn', 'aip.corp.com.cn'), true);
+  assert.equal(domainMatches('aip.corp.com.cn', 'aip.corp.com.cn'), true);
+  // Rejects unrelated domains and single-label TLDs
   assert.equal(domainMatches('evil-corp.com.cn', '.corp.com.cn'), false);
+  assert.equal(domainMatches('evil-corp.com.cn', 'aip.corp.com.cn'), false);
+  assert.equal(domainMatches('.cn', 'aip.corp.com.cn'), false);
 
   const key = randomBytes(32);
   const enc = encryptV10('tok-secret-123', key);
-  assert.equal(decryptChromiumValue(enc, key), 'tok-secret-123');
+  assert.equal(
+    decryptChromiumValue(enc, key, '.corp.com.cn'),
+    'tok-secret-123',
+  );
+  // Chromium 130+ (DB v24+) prepends SHA256(host_key) to plaintext
+  const encV24 = encryptV10('tok-v24-secret', key, '.corp.com.cn');
+  assert.equal(
+    decryptChromiumValue(encV24, key, '.corp.com.cn'),
+    'tok-v24-secret',
+  );
   const v20 = Buffer.concat([Buffer.from('v20', 'ascii'), randomBytes(40)]);
-  assert.equal(decryptChromiumValue(v20, key), null);
+  assert.equal(isChromiumV20(v20), true);
+  assert.equal(decryptChromiumValue(v20, key, '.corp.com.cn'), null);
+});
+
+test('local UAC emits observable diagnostic logs for unconfigured and SSO fallback states', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'auriga-uac-logs-'));
+  try {
+    const events = [];
+    const unconf = createLocalUacIdentity({
+      directory: dir,
+      log: (level, _msg, fields) => events.push({ level, ...fields }),
+    });
+    await unconf.ready;
+    assert.ok(
+      events.some(
+        (e) => e.stage === 'configuration' && e.result === 'unconfigured',
+      ),
+    );
+    await unconf.close();
+
+    const ssoEvents = [];
+    const fallback = createLocalUacIdentity({
+      directory: dir,
+      loadConfig: async () => ({
+        adapter: syntheticAdapter(),
+        provider: {
+          baseUrl: 'https://identity.example.com',
+          systemCode: 'SYS1',
+        },
+        revalidation: {
+          strategy: 'token-verify',
+          intervalSeconds: 7200,
+          retryIntervalSeconds: 30,
+          maxRetries: 3,
+        },
+      }),
+      readBrowserCookies: async () => new Map(),
+      log: (level, _msg, fields) => ssoEvents.push({ level, ...fields }),
+    });
+    await fallback.ready;
+    assert.ok(
+      ssoEvents.some(
+        (e) =>
+          e.stage === 'sso' &&
+          e.result === 'fallback_qr' &&
+          e.reason === 'no_readable_cookies',
+      ),
+    );
+    await fallback.close();
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
 });
 
 test('adapter extractSsoCredentials prefers portal pair, falls back to UDS, never mixes pairs', () => {

@@ -42,8 +42,10 @@ import { pathOperationLock, processAlive } from './operation-lock.mjs';
  * crash before the pointers are committed restores the pre-change state.
  */
 import {
+  chmodSync,
   cpSync,
   existsSync,
+  lstatSync,
   mkdirSync,
   openSync,
   closeSync,
@@ -317,6 +319,56 @@ function seedProfile(dataHome, { platformOrigin, target }) {
     upgradeSkillPatch(patch, yamlParser(yaml), dataHome);
   } catch (error) {
     console.error(`${BRAND_NAME} 共享技能配置未启用：${error.message}`);
+  }
+  syncBundledUacConfig(dir, target);
+}
+
+/** Sync optional site UAC config (adapter.json + provider.json) from the
+ * verified version payload into <profile>/auriga-connect/uac/.
+ * Rejects symlinks and oversized files; leaves existing profile untouched when
+ * the package does not bundle UAC config. */
+function syncBundledUacConfig(profileDirectory, target) {
+  const srcRoot = join(target, 'auriga', 'uac');
+  if (!existsSync(srcRoot)) return;
+  const srcRootStat = lstatSync(srcRoot);
+  if (!srcRootStat.isDirectory() || srcRootStat.isSymbolicLink())
+    throw new Error('invalid bundled UAC config directory');
+  const files = ['adapter.json', 'provider.json'];
+  const payload = {};
+  for (const name of files) {
+    const src = join(srcRoot, name);
+    const st = lstatSync(src);
+    if (!st.isFile() || st.isSymbolicLink() || st.size > 65536)
+      throw new Error(`invalid bundled UAC config file: ${name}`);
+    payload[name] = readFileSync(src);
+  }
+  const connectDir = join(profileDirectory, 'auriga-connect');
+  if (existsSync(connectDir)) {
+    const st = lstatSync(connectDir);
+    if (!st.isDirectory() || st.isSymbolicLink())
+      throw new Error('auriga-connect must be a regular directory');
+  } else {
+    mkdirSync(connectDir, { recursive: true });
+    if (process.platform !== 'win32') chmodSync(connectDir, 0o700);
+  }
+  const dstRoot = join(connectDir, 'uac');
+  if (existsSync(dstRoot)) {
+    const st = lstatSync(dstRoot);
+    if (!st.isDirectory() || st.isSymbolicLink())
+      throw new Error('auriga-connect/uac must be a regular directory');
+  } else {
+    mkdirSync(dstRoot, { recursive: true });
+    if (process.platform !== 'win32') chmodSync(dstRoot, 0o700);
+  }
+  for (const name of files) {
+    const dst = join(dstRoot, name);
+    if (existsSync(dst)) {
+      const st = lstatSync(dst);
+      if (!st.isFile() || st.isSymbolicLink())
+        throw new Error(`refusing to overwrite non-regular UAC file: ${name}`);
+    }
+    writeAtomic(dst, payload[name]);
+    if (process.platform !== 'win32') chmodSync(dst, 0o600);
   }
 }
 

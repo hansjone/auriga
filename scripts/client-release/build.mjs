@@ -31,6 +31,7 @@ import { sign, generateKeyPairSync } from 'node:crypto';
 import { parse as parseVersion } from '../../clients/installer/runtime/semver-lite.mjs';
 import {
   validateResourceRoots,
+  validateUacConfigDir,
   build,
 } from '../../clients/installer/scripts/build.mjs';
 import { makeRelease } from '../../clients/installer/scripts/make-release.mjs';
@@ -189,6 +190,10 @@ export function validateBuildOptions(o) {
   validateResourceRoots(
     JSON.parse(readFileSync(o['resource-trust-json'], 'utf8')),
   );
+  if (o['uac-config-dir']) {
+    physical(o['uac-config-dir']);
+    validateUacConfigDir(o['uac-config-dir']);
+  }
   return unsigned;
 }
 export function resolveBuildPaths(options) {
@@ -201,6 +206,7 @@ export function resolveBuildPaths(options) {
     'temp',
     'release-public-key',
     'resource-trust-json',
+    'uac-config-dir',
     'verify-key',
   ])
     if (options[key]) options[key] = resolve(options[key]);
@@ -485,6 +491,7 @@ export async function buildWorker(optionsFile, hooks = {}) {
     'desktop-version': o.version,
     'release-public-key': o['release-public-key'],
     'resource-trust-json': o['resource-trust-json'],
+    ...(o['uac-config-dir'] ? { 'uac-config-dir': o['uac-config-dir'] } : {}),
     ...(o['platform-origin']
       ? {
           'platform-origin': o['platform-origin'],

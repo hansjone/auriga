@@ -8,7 +8,7 @@ import {
   sealSecret,
 } from '../utils/secret-box.js';
 import { createUacAdapter, fold } from './adapter.js';
-import { readLocalBrowserCookies } from './browser-cookies.js';
+import { readLocalBrowserCookieSets } from './browser-cookies.js';
 import { readUacConfig } from './config.js';
 import { qrPath } from './qr.js';
 
@@ -27,7 +27,7 @@ export const tokenHash = (token) =>
  * Platform features still require the shell's platform session.
  * @param {{directory:string,loadConfig?:typeof readUacConfig,createAdapter?:typeof createUacAdapter,
  *   writeOwner?:typeof atomicWriteJson,
- *   readBrowserCookies?:typeof readLocalBrowserCookies,
+ *   readBrowserCookies?:typeof import('./browser-cookies.js').readLocalBrowserCookies,
  *   now?:()=>number,setTimer?:(fn:()=>void,ms:number)=>any,clearTimer?:(t:any)=>void,
  *   log?:(level:string,message:string,fields:Record<string,unknown>)=>void}} options
  */
@@ -62,8 +62,7 @@ export function createLocalUacIdentity(options) {
   /** @type {Promise<boolean>|undefined} */ let ssoInflight;
   let closed = false;
   let operations = Promise.resolve();
-  const readBrowserCookies =
-    options.readBrowserCookies ?? readLocalBrowserCookies;
+  const readBrowserCookies = options.readBrowserCookies;
 
   const emit = (
     /** @type {string} */ level,
@@ -94,7 +93,10 @@ export function createLocalUacIdentity(options) {
   const ready = (async () => {
     try {
       config = await (options.loadConfig ?? readUacConfig)(directory);
-      if (!config) return;
+      if (!config) {
+        emit('INFO', 'configuration', { result: 'unconfigured' });
+        return;
+      }
       adapter = (options.createAdapter ?? createUacAdapter)(
         config.adapter,
         config.provider,
@@ -147,6 +149,12 @@ export function createLocalUacIdentity(options) {
         } finally {
           clearTimeout(ssoTimer);
         }
+      } else {
+        emit('INFO', 'sso', {
+          phase: 'end',
+          result: 'skipped',
+          reason: 'cookies_unconfigured',
+        });
       }
     } catch {
       // Fail closed: an unreadable owner binding must never permit rebinding.
@@ -172,14 +180,39 @@ export function createLocalUacIdentity(options) {
     ssoInflight = (async () => {
       const correlationId = randomUUID();
       try {
-        const cookieMap = await readBrowserCookies({
-          domain: spec.domain,
-          names: spec.names,
-          now,
-        });
+        let maps = /** @type {Map<string,string>[]} */ ([]);
+        let v20Detected = false;
+        if (readBrowserCookies) {
+          const single = await readBrowserCookies({
+            domain: spec.domain,
+            names: spec.names,
+            now,
+          });
+          if (single instanceof Map && single.size) maps = [single];
+        } else {
+          const result = await readLocalBrowserCookieSets({
+            domain: spec.domain,
+            names: spec.names,
+            now,
+          });
+          maps = result.maps;
+          v20Detected = result.v20Detected;
+        }
         if (closed || session || ssoSuppressed) return !!session;
-        const cred = adapter.extractSsoCredentials?.(cookieMap);
-        if (!cred) return false;
+        let cred = null;
+        for (const map of maps) {
+          cred = adapter.extractSsoCredentials?.(map);
+          if (cred) break;
+        }
+        if (!cred) {
+          emit('INFO', 'sso', {
+            phase: 'end',
+            result: 'fallback_qr',
+            reason: v20Detected ? 'v20_app_bound' : 'no_readable_cookies',
+            correlationId,
+          });
+          return false;
+        }
         if (owner && fold(owner.empNo) !== fold(cred.empNo)) return false;
         emit('INFO', 'sso', {
           phase: 'start',

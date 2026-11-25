@@ -43,8 +43,10 @@ Windows 自带 PowerShell5.1、System32 tar、.NET Framework4.x Framework64/v4.0
 Go→Node 互操作在 deploy/offline/desktop_source_test.go 检查。凭据、数据、bin、node_modules、target/dist、元数据等按 #373 规则排除；客户端生成的 clients/dsh-plugin/ui 在签名基线未含它时也排除，避免构建输出变成源码改动。为防止未记录内容参与构建，构建前拒绝源码树中的 node_modules、dist、.pnpm-store，以及基线未含的 clients/dsh-plugin/ui。构建本身不再向源码树写入：先把源码复制到 `<out>\build-src`（文件集合与源码身份相同，按 sourcePathAllowed 过滤：没有 node_modules、.git、`.env*`、`*.pem`、`*.key`、`*.exe`、顶层归档等；签名源码包另带四个签名元数据文件），worker 在装依赖前先要求副本摘要等于已校验的源码身份（sourceTreeSha256），不等即拒绝构建；随后在副本里恢复依赖、打包 UI 和插件，结束后无论成败都删除副本（Node `fs.rmSync`，超长路径可用）。“构建期间未变化”仍按用户给的源码目录复核，因此同一份源码可连续构建。旧版本残留可用 `auriga-client clean-source <源码目录> [--include-ui]` 一键清理：遍历规则与上述构建前门禁完全一致（不进入 .git、bin、data、target、deploy/compose/var、.dev 等），仅删任意层级的 node_modules、dist、.pnpm-store（`--include-ui` 另含 clients/dsh-plugin/ui，但该目录属于签名基线或已被 Git 跟踪时拒绝），链接只删链接不跟随，目录无 scripts/client-release/build-node.json 时拒绝。--online 与 --offline 同此行为。依赖变更仍由 Windows 锁门禁拒绝。来源记录用于审阅追溯，不代替独立批准；其他额外产物放源码之外。
 
 ```powershell
-.\scripts\client-release\auriga-client.cmd build --offline --devkit $env:AURIGA_CLIENT_DEVKIT --verify-key D:\approved\release-public.pem --version 1.0.2-site.1 --sequence 102 --release-public-key C:\secure\site-desktop\desktop-public.pem --resource-trust-json D:\site\resource-roots.json --out D:\exports\desktop-102
+.\scripts\client-release\auriga-client.cmd build --offline --devkit $env:AURIGA_CLIENT_DEVKIT --verify-key D:\approved\release-public.pem --version 1.0.2-site.1 --sequence 102 --release-public-key C:\secure\site-desktop\desktop-public.pem --resource-trust-json D:\site\resource-roots.json [--uac-config-dir D:\site\uac] --out D:\exports\desktop-102
 ```
+
+- 可选 `--uac-config-dir <目录>`：现场启用桌面端本地 UAC 扫码与无感知浏览器 SSO 自动登录时，传入包含 `adapter.json` 与 `provider.json` 两个普通文件的目录（拒绝符号链接，单文件 ≤ 64 KiB）。构建时原样写入 `payload/auriga/uac/` 并纳入安装包 `manifest.json` SHA-256 校验；安装或升级时由安装器原子落盘到 `<profile>/auriga-connect/uac/`（公开仓库不含企业私有配置，未传此参数时不影响普通安装包）。`adapter.json` 中 `cookies.domain` 支持与 `provider.baseUrl` 异域（如门户域 `aip.corp.example` 匹配父域 `.corp.example` Cookie）；若终端浏览器启用 Chromium App-Bound Encryption (`v20`)，客户端会记录无秘密诊断日志并静默回落到本地 UAC 扫码。
 
 --devkit-sha256 仅保留给有独立批准摘要的旧 Git 输入；正式无 Git 路径用同一发行钥核签名源码与 Windows 附件，不能用此参数跳过源码验签。本机固定磁盘输入/公钥根/签名目录/输出父目录要求，拒绝 UNC、设备路径、映射网络盘和 junction。离线介质先复制到本地，输出目录须全新，单一源码目录不并发构建。
 
