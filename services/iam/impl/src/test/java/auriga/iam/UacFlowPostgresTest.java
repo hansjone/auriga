@@ -360,7 +360,13 @@ class UacFlowPostgresTest {
   }
 
   @ParameterizedTest
-  @CsvSource({"never,false,false", "always,true,false", "never,false,true", "always,true,true"})
+  @CsvSource({
+    "never,false,false",
+    "always,true,false",
+    "never,false,true",
+    "always,true,true",
+    "new_device,true,true"
+  })
   void nativeUacUsesItsOwnPkceGrantAndRespectsPortalMfaPolicy(
       String policy, boolean needsMfa, boolean proof) throws Exception {
     try (var f = new Fixture("token-verify", 3)) {
@@ -630,6 +636,33 @@ class UacFlowPostgresTest {
                             renewed.path("refresh_token").asString()))
                     .path("error")
                     .asString());
+            if (proof) {
+              var repeated =
+                  f.flow.create(
+                      request, "portal", "https://portal.example.com", "127.0.0.1", null, null);
+              assertEquals(
+                  raw, repeated.challenge().path("nativeDevice").path("deviceCode").asString());
+              assertEquals(
+                  "invalid_grant",
+                  oauth
+                      .token(
+                          Map.of(
+                              "client_id",
+                              "inline-test",
+                              "grant_type",
+                              OAuthProvider.DEVICE,
+                              "device_code",
+                              raw,
+                              "code_verifier",
+                              verifier))
+                      .path("error")
+                      .asString());
+              store.tx(
+                  () -> {
+                    assertEquals(1, store.all("device").size());
+                    return null;
+                  });
+            }
             var failure =
                 assertThrows(
                     AurigaException.class,

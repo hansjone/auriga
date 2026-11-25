@@ -12,6 +12,27 @@ class UacProofTest {
   }
 
   @Test
+  void nativeProofNeverBorrowsTheQrMfaExceptionAndMissingMarkersFailClosed() {
+    var tx = Json.object("nativeGrantHash", "synthetic-grant");
+    for (var marker :
+        java.util.List.of(
+            Json.object(),
+            Json.object("uacProofLogin", true),
+            Json.object("uacProofLogin", "false"),
+            Json.object("uacProofLogin", null))) {
+      var candidate = tx.deepCopy();
+      candidate.setAll(marker);
+      assertFalse(LoginManager.uacMaySkipPlatformMfa(candidate, "new_device"));
+      assertFalse(LoginManager.uacMaySkipPlatformMfa(candidate, "always"));
+      assertTrue(LoginManager.uacMaySkipPlatformMfa(candidate, "never"));
+    }
+    tx.put("uacProofLogin", false);
+    assertTrue(LoginManager.uacMaySkipPlatformMfa(tx, "new_device"));
+    assertFalse(LoginManager.uacMaySkipPlatformMfa(tx, "always"));
+    assertFalse(LoginManager.uacMaySkipPlatformMfa(tx, "unknown"));
+  }
+
+  @Test
   void requiresAnExplicitAuthoritativeSubjectAndPreservesLeadingZeros() {
     String prefix =
         "{\"code\":{\"code\":\"0000\"},\"bo\":{\"code\":\"0000\",\"token\":\"synthetic-token\"}";

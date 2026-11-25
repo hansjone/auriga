@@ -169,8 +169,9 @@ class UacProofFlowTest {
     "rate_limited,,common.rate_limited"
   })
   void proofFailuresNeverCreateTransactions(String failure, String reason, String code) {
-    when(adapter.verifyProof(any(), any()))
-        .thenReturn(Json.object("success", false, "failureClass", failure, "faultReason", reason));
+    doReturn(Json.object("success", false, "failureClass", failure, "faultReason", reason))
+        .when(adapter)
+        .verifyProof(any(), any());
     assertEquals(code, assertThrows(AurigaException.class, this::create).errorCode().code());
     assertTrue(rows.isEmpty());
   }
@@ -183,14 +184,15 @@ class UacProofFlowTest {
         assertThrows(AurigaException.class, this::create).errorCode().code());
     verifyNoInteractions(adapter);
     provider.put("enabled", true);
-    when(adapter.verifyProof(any(), any()))
-        .thenAnswer(
+    doAnswer(
             i -> {
               assertFalse(inTx.get());
               provider.put("revision", 2);
               return Json.object(
                   "success", true, "empNo", "001Ab", "token", "replacement-synthetic");
-            });
+            })
+        .when(adapter)
+        .verifyProof(any(), any());
     assertEquals(
         "iam.provider_disabled",
         assertThrows(AurigaException.class, this::create).errorCode().code());

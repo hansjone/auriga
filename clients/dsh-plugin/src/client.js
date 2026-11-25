@@ -2515,10 +2515,12 @@ window.__ModuleLoader__.load({
           const manual = React.useRef(false);
           const manualPlatform = React.useRef(false);
           const cancellation = React.useRef(null);
+          const uacAuthenticated = React.useRef(false);
           const [shell, reloadShell, setShell] = useLocalStatus(
             'auriga/shell/status',
             open && ownsLogin ? 2000 : 15000,
-            local && (!settled || (open && ownsLogin)),
+            local &&
+              (!settled || (open && ownsLogin) || uacAuthenticated.current),
           );
           const [uac, reloadUac, setUac] = useLocalStatus(
             'auriga/uac/status',
@@ -2530,6 +2532,7 @@ window.__ModuleLoader__.load({
           const hasLocalUacRef = React.useRef(hasLocalUac);
           hasLocalUacRef.current = hasLocalUac;
           const uacSignedIn = hasLocalUac && uac.state === 'authenticated';
+          uacAuthenticated.current = uacSignedIn;
           const platformAvailable =
             !!shell?.configured && !!shell?.brokerAvailable;
           const show = (action) => {
@@ -2593,6 +2596,18 @@ window.__ModuleLoader__.load({
               hasLocalUac || !shell?.configured || !!shell?.brokerAvailable,
             );
             const needsPlatform = platformAvailable && !shell?.loggedIn;
+            if (
+              uacSignedIn &&
+              !manualPlatform.current &&
+              !manual.current &&
+              !(
+                shell?.localUacProof &&
+                shell?.inlineLogin?.step?.type === 'form'
+              )
+            ) {
+              setOpen(false);
+              return;
+            }
             if (hasLocalUac) {
               if (uacSignedIn && !needsPlatform) {
                 manualPlatform.current = false;
@@ -3146,7 +3161,11 @@ window.__ModuleLoader__.load({
               ),
             ['signedOut', 'reauth'].includes(view.kind) &&
               h('p', { className: 'auriga-muted' }, t('loginMethods')),
-            (modal || !loginOverlayAvailable || inlineFallback) && inlineView,
+            (modal ||
+              !loginOverlayAvailable ||
+              inlineFallback ||
+              shell?.localUacProof) &&
+              inlineView,
             view.kind === 'authenticating' &&
               !inline &&
               shell?.deviceAttempt &&

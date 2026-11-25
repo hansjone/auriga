@@ -363,7 +363,8 @@ export class Broker extends EventEmitter {
     const changed =
       !credential ||
       (previous &&
-        (previous.credential.generation !== credential.generation ||
+        (previous.until <= this.mono() ||
+          previous.credential.generation !== credential.generation ||
           employeeKey(previous.credential.empNo) !==
             employeeKey(credential.empNo)));
     if (changed && this.attempt?.proof) {
@@ -473,7 +474,7 @@ export class Broker extends EventEmitter {
       else delete this.record.proofEmployee;
       await this.save();
       if (!this.current(attempt)) {
-        delete this.record.tokens;
+        if (this.record.tokens === tokens) delete this.record.tokens;
         await this.queueRevoke(tokens);
         return;
       }

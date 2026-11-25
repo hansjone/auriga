@@ -390,6 +390,7 @@ final class UacFlow {
               issued.isAfter(clock.instant().minusSeconds(120)), "login_tx_expired", 409);
           String binding = Secrets.random();
           ObjectNode tx = transaction(provider, "login", audience, origin, ip, "", null, binding);
+          tx.put("uacProofLogin", true);
           ObjectNode nativeDevice = login.beginUacNative(tx, nativeBody, audience);
           Instant expires = clock.instant().plusSeconds(120);
           // Retain the nonce beyond its acceptance window, including permitted clock skew.
@@ -615,6 +616,8 @@ final class UacFlow {
             fresh(sessions.activeById(tx.path("sessionId").asString()));
           tx.set("uacCredential", row.path("credential"));
           tx.put("uacVerified", true);
+          // The challenge kind is authoritative; callers cannot supply this transaction marker.
+          tx.put("uacProofLogin", row.has("proofFingerprint"));
           store.save("login_tx", tx);
           ObjectNode credential =
               uac.open(row.path("credential"), row.path("providerId").asString());

@@ -99,3 +99,16 @@ Compose 与 NAS 的 `auriga-dsh` 登记为 platform 公共设备客户端：`nat
 本线不部署真实环境；合并与部署由主控串行执行。AUTH-K2 契约已合入本线，由 B/C/D/E 对接正常门户导航、设备 userCode 导航证明、标准设备串行刷新与身份投影、IPC DTO 和管理台下载按钮。内部导航证明仅允许 edge 专用 audience 与明确安装 tenant；`csrfCookie` 只由 edge 设置，不能进 HTML。浏览器 correlationId 以服务端响应头为准。
 
 主控部署后从正常门户入口验证：SSO 成功/拒绝回扫码、扫码并发 complete、MFA、信息失败仍登录、退出后刷新抑制及明确继续、设备明确继续与核码；管理台验证唯一配置入口和 ETag、停用关闭既有会话、诊断开关到期及 ZIP 缺源提示。对两种复验策略用替身/可控时钟检查调用、撤销、刷新拒绝和日志关联。域名及纯 IP/HTTP 正常页面均须验收；容器健康和本工位后端测试不替代页面证据。所有受保护路径变更须【待审查】，交全新非作者 A 级完整独审及精确 HEAD CI。
+
+
+## 本地凭据的 native 登录证明
+
+受信 portal 的 `POST /login/uac/challenges` 可携带 `uacProof`，但必须同时提供已登记第一方 native client 的 S256 PKCE 参数，且 purpose 只能为 login。请求只包含候选工号、token、256-bit 随机 nonce 和 issuedAt；租户来自受信入口，provider 在该租户配置中核验。客户端 session/account/generation/clientIP 声明均拒绝。适配器使用平台私有 clientIP 和 token-verify 地址，必须从 `other.account` 或 `bo.user` 获得明确主体；两处同时出现时必须一致，并与候选工号匹配。工号保留前导零。旧复验的“无主体回退”不适用于此登录证明。
+
+上游验证不持有数据库事务；写入前再次核验 provider revision。nonce 的租户/provider/client 查找键与完整请求、portal origin、PKCE 指纹绑定；同一请求只返回原 challenge 状态及加密保存的原 native grant，不以工号或 token hash 复用 device。issuedAt 只用于限制重放窗口（过去120秒、未来30秒），不是身份权威。幂等记录保留300秒，覆盖整个可接受窗口；challenge 本身120秒有效，原 login_tx/MFA 仍沿300秒有效期。device_code 依旧只能兑换一次，撤销后重放不能创建第二个 device。
+
+证明使用原准入、UacSessions 绑定和 native_tx 流程。可复用凭据不获得新鲜扫码的 MFA 特例：仅 admission.mfa=never 可直接完成；new_device/always 必须完成原 TOTP/首次绑定步骤。原二维码策略不变。
+
+桌面插件仅通过 OS 认证的 plugin-backend 私有 IPC 将内存凭据送入 shell broker，每10秒续租、30秒失效，并在退出/身份变化/断开时主动撤回。generation 只作本机结果隔离，不发送 IAM。broker 先走已有 refresh；无平台会话且无人工恢复闸时，自动选择受信门户公布的唯一 UAC provider。请求单飞，临时故障按5/10/20/30秒退避；本地身份不回滚。永久拒绝、来源停用、缺权威主体和 MFA 都有用户可见状态。
+
+device_code 兑换前将人工恢复闸写入现有加密 vault，兑换成功保存平台凭据后才清除；响应丢失/崩溃、显式退出或撤销不会触发静默重建设备。UAC token 不写入 vault、页面、URL、日志或明文文件；服务端需维护的凭据仅进既有加密 challenge/credential 字段。恢复60秒目标适用于本地仍有效、无需人工 MFA/恢复且平台请求可完成的情形；系统时钟偏差、多个可选 UAC 来源或一次性兑换结果不确定时需人工处理。
