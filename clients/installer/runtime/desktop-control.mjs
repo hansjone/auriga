@@ -125,15 +125,22 @@ export async function updateCommand(
     return;
   }
   let last = 0;
+  let lastKey = '';
   const updater = desktopUpdater(root, {
     ...options,
     requireApproval: action === 'download',
     onState: (state) => {
-      if (action !== 'download' || Date.now() - last < 200) return;
-      last = Date.now();
+      if (action !== 'download') return;
+      const key = `${state.phase ?? ''}\0${state.stage ?? ''}`;
+      const now = Date.now();
+      // Byte progress stays throttled; phase/stage changes always surface.
+      if (key === lastKey && now - last < 200) return;
+      last = now;
+      lastKey = key;
       print({
         progress: true,
         phase: state.phase ?? 'idle',
+        stage: state.stage ?? null,
         downloadedBytes: state.downloadedBytes ?? 0,
         totalBytes: state.totalBytes ?? 0,
       });

@@ -434,7 +434,11 @@ export function createUpdater({
         }
         const archive = join(temporary, 'desktop.exe');
         retain = true;
-        progress('downloading', { error: null, totalBytes: body.sizeBytes });
+        progress('downloading', {
+          error: null,
+          totalBytes: body.sizeBytes,
+          stage: 'download',
+        });
         let lastProgress = 0,
           lastBytes = 0;
         await downloadPackage(
@@ -452,23 +456,34 @@ export function createUpdater({
               ) {
                 lastProgress = now();
                 lastBytes = downloadedBytes;
-                progress('downloading', { downloadedBytes });
+                progress('downloading', {
+                  downloadedBytes,
+                  stage: 'download',
+                });
               }
             },
           },
         );
         retain = false;
-        progress('verifying');
-        installStage = 'verify';
+        // UI shows these verifying stages separately; Ed25519 on the release
+        // envelope was already checked before the transfer started.
+        progress('verifying', { stage: 'verify-archive' });
+        installStage = 'verify-archive';
         if (sha256File(archive) !== body.sha256)
           throw new Error('package SHA mismatch');
+        progress('verifying', { stage: 'extract' });
+        installStage = 'extract';
         const payload = await extract(archive, join(temporary, 'unpacked'));
+        progress('verifying', { stage: 'verify-package' });
+        installStage = 'verify-package';
         const manifest = verifyPackage(payload);
         if (
           manifest.id !== body.packageId ||
           manifest.bundleVersion !== body.version
         )
           throw new Error('package ID/version mismatch');
+        progress('verifying', { stage: 'check-release' });
+        installStage = 'check-release';
         verified(pending); // expiry may have elapsed during the download
         // A withdrawn or replaced release must not be queued after a long transfer.
         retain = true;
