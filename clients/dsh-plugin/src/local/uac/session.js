@@ -54,8 +54,18 @@ export function createLocalUacIdentity(options) {
   /** @type {string} */ let identityDomain;
   /** @type {{empNo:string,identityDomain:string|null}|null} */ let owner =
     null;
-  /** @type {{empNo:string,token:string,clientIP:string,department?:string,displayName?:string,avatarUrl?:string,authMethod?:'sso'|'qr',loginAt:number,verifiedAt:number,attempt:number,nextRevalidateAt:number}|null} */
+  /** @type {{generation:string,empNo:string,token:string,clientIP:string,department?:string,displayName?:string,avatarUrl?:string,authMethod?:'sso'|'qr',loginAt:number,verifiedAt:number,attempt:number,nextRevalidateAt:number}|null} */
   let session = null;
+  /** @type {Set<()=>void>} */ const identityListeners = new Set();
+  function notifyIdentity() {
+    for (const listener of identityListeners) {
+      try {
+        listener();
+      } catch {
+        /* The identity remains authoritative when a consumer is unavailable. */
+      }
+    }
+  }
   /** @type {any} */ let challenge;
   /** @type {{outcome:string,at:number}|undefined} */ let last;
   /** @type {any} */ let timer;
@@ -282,6 +292,7 @@ export function createLocalUacIdentity(options) {
           }
           if (closed) return false;
           session = {
+            generation: randomUUID(),
             empNo: owner.empNo,
             token: verified.token,
             clientIP: cred.clientIP ?? '',
@@ -302,6 +313,7 @@ export function createLocalUacIdentity(options) {
             attempt: 0,
             nextRevalidateAt: at + config.revalidation.intervalSeconds * 1000,
           };
+          notifyIdentity();
           last = { outcome: 'signed_in', at };
           ssoDiagnostic = undefined;
           emit('INFO', 'sso', {
@@ -343,6 +355,7 @@ export function createLocalUacIdentity(options) {
   function signOut(outcome, correlationId) {
     const hash = session ? tokenHash(session.token) : undefined;
     session = null;
+    notifyIdentity();
     challenge = undefined;
     clearTimer(timer);
     timer = undefined;
@@ -418,6 +431,7 @@ export function createLocalUacIdentity(options) {
         });
       }
       session = updated;
+      notifyIdentity();
       if (updated.attempt === 0)
         emit('INFO', 'revalidate', {
           phase: 'end',
@@ -618,6 +632,7 @@ export function createLocalUacIdentity(options) {
       }
       if (closed) return;
       session = {
+        generation: randomUUID(),
         empNo: owner.empNo,
         token: verified.token,
         clientIP: result.clientIP ?? '',
@@ -638,6 +653,7 @@ export function createLocalUacIdentity(options) {
         attempt: 0,
         nextRevalidateAt: at + config.revalidation.intervalSeconds * 1000,
       };
+      notifyIdentity();
       ssoSuppressed = false;
       last = { outcome: 'signed_in', at };
       settle(current, 'authenticated');
@@ -707,12 +723,28 @@ export function createLocalUacIdentity(options) {
     ready,
     status,
     credentials,
+    proofCredentials() {
+      if (closed || !session) return null;
+      return {
+        generation: session.generation,
+        empNo: session.empNo,
+        token: session.token,
+      };
+    },
+    subscribe(/** @type {()=>void} */ listener) {
+      identityListeners.add(listener);
+      return () => {
+        identityListeners.delete(listener);
+      };
+    },
     start,
     poll,
     cancel,
     logout,
     async close() {
       closed = true;
+      notifyIdentity();
+      identityListeners.clear();
       challenge = undefined;
       clearTimer(timer);
       await ready;

@@ -226,6 +226,9 @@ window.__ModuleLoader__.load({
       platformHint_accessDisabled:
         '平台已停用此登录来源或成员。请联系团队管理员。',
       loginBrowserHint: '请在系统浏览器完成本站登录，并核对当前设备的用户码。',
+      loginLinking: '正在连接平台，请稍候。',
+      loginRateLimited: '平台请求过于频繁，稍后会自动重试。',
+      loginProofRequired: '平台无法验证当前身份，请重新扫码登录。',
       loginCompare: '请核对门户预填的确认码与此处一致，仅确认自己发起的登录：',
       loginRejected: '平台拒绝了登录请求，请联系管理员检查客户端配置。',
       loginBadCredentials: '口令或验证码错误，请重试。',
@@ -468,6 +471,10 @@ window.__ModuleLoader__.load({
         'This client cannot reach the platform sign-in service. You can use local DSH and reconnect later.',
       platformHint_accessDisabled:
         'The platform disabled this member or sign-in method. Contact your team administrator.',
+      loginLinking: 'Connecting to the platform. Please wait.',
+      loginRateLimited: 'Too many platform requests. Retrying shortly.',
+      loginProofRequired:
+        'The platform could not verify this identity. Scan again to sign in.',
       loginBrowserHint:
         'Finish sign-in in your system browser and compare the code for this device.',
       loginCompare:
@@ -3132,7 +3139,11 @@ window.__ModuleLoader__.load({
               ),
             view.kind === 'authenticating' &&
               !inline &&
-              h('p', null, t('loginBrowserHint')),
+              h(
+                'p',
+                null,
+                t(shell?.localUacProof ? 'loginLinking' : 'loginBrowserHint'),
+              ),
             ['signedOut', 'reauth'].includes(view.kind) &&
               h('p', { className: 'auriga-muted' }, t('loginMethods')),
             (modal || !loginOverlayAvailable || inlineFallback) && inlineView,
@@ -3146,6 +3157,14 @@ window.__ModuleLoader__.load({
                 ' ',
                 h('strong', null, shell.deviceAttempt.userCode),
               ),
+            shell?.reason === 'rate_limited' &&
+              h('p', { role: 'status' }, t('loginRateLimited')),
+            [
+              'iam.uac_proof_subject_required',
+              'iam.uac_proof_rejected',
+              'iam.uac_proof_provider_required',
+            ].includes(shell?.loginError?.code) &&
+              h('p', { role: 'alert' }, t('loginProofRequired')),
             shell?.reason === 'platform_rejected' &&
               h('p', { role: 'alert' }, t('loginRejected')),
             shell?.reason === 'login_denied' &&

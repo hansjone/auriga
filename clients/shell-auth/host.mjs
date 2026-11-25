@@ -88,10 +88,25 @@ export class HostChannel {
     )
       throw hostFault('peer_not_allowed');
   }
+  async localUac(message, peer) {
+    this.checkPeer(peer);
+    requireValid('ShellAuthLocalUacCommand', message);
+    const remaining = Date.parse(message.expiresAt) - this.now();
+    if (
+      message.shellEpoch !== this.broker.epoch ||
+      message.sequence <= (peer.uacSequence ?? 0)
+    )
+      throw hostFault('stale_identity');
+    if (remaining <= 0 || remaining > 30000) throw hostFault('expired');
+    peer.uacSequence = message.sequence;
+    await this.broker.localUac(message.credential, peer.id);
+    return this.result(message, {});
+  }
   disconnect(peer) {
     if (!peer) return;
     for (const [id, r] of this.contexts) if (r.owner === peer.id) this.drop(id);
     this.peers.delete(peer.id);
+    this.broker.clearLocalUac(peer.id)?.catch(() => {});
     for (const stream of this.streams?.streams.values() ?? [])
       if (stream.owner === peer.id) this.streams.end(stream, 'closed');
   }
@@ -349,6 +364,8 @@ export class HostChannel {
   close() {
     clearInterval(this.timer);
     this.changed();
+    for (const peer of this.peers.values())
+      this.broker.clearLocalUac(peer.id)?.catch(() => {});
     this.peers.clear();
     this.broker.off('changed', this.changed);
   }

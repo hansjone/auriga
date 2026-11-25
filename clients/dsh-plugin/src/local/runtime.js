@@ -1,4 +1,5 @@
 import { qrPath } from './uac/qr.js';
+import { bindLocalUacProof } from './uac/platform-proof.js';
 import { networkInstallation } from '../network/installation.js';
 import { createNetworkLifecycle } from '../network/lifecycle.js';
 import { createBrokerNetworkProvider } from '../network/broker-provider.js';
@@ -201,6 +202,9 @@ export async function createConnectRuntime({
         });
     },
   });
+  const stopLocalProof = installed?.ipc
+    ? bindLocalUacProof({ identity: localUac, broker })
+    : () => {};
   models = createModelLifecycle({
     broker,
     origin: config.platformOrigin || 'https://unconfigured.invalid',
@@ -617,6 +621,7 @@ export async function createConnectRuntime({
           ? { deviceAttempt: s.deviceAttempt }
           : {}),
         ...(s?.loginError ? { loginError: s.loginError } : {}),
+        ...(s?.localUacProof ? { localUacProof: true } : {}),
         brokerAvailable: !!s,
         migrationRequired: legacy && !who,
         account: who
@@ -801,6 +806,7 @@ export async function createConnectRuntime({
     close() {
       if (closed) return closing;
       closed = true;
+      stopLocalProof();
       clearInterval(teamRetry);
       contexts?.close();
       taskContexts.close();

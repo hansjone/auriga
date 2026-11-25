@@ -59,7 +59,8 @@
             "admin_disabled",
             "member_disabled",
             "platform_rejected",
-            "login_denied"
+            "login_denied",
+            "rate_limited"
           ]
         },
         "uacLoginInfo": {
@@ -90,6 +91,10 @@
         },
         "inlineLogin": {
           "$ref": "#/$defs/ShellAuthInlineView"
+        },
+        "localUacProof": {
+          "type": "boolean",
+          "description": "Automatic local identity association is in progress; no browser-device authorization UI is needed."
         }
       },
       "additionalProperties": false,
@@ -589,6 +594,77 @@
                   "format": "date-time"
                 }
               }
+            }
+          ]
+        }
+      }
+    },
+    "ShellAuthLocalUacCredential": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "generation",
+        "empNo",
+        "token"
+      ],
+      "properties": {
+        "generation": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "empNo": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "token": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 16384,
+          "writeOnly": true
+        }
+      },
+      "description": "OS-authenticated plugin backend only. Memory-only local generation fences attempts, never asserted as IAM identity."
+    },
+    "ShellAuthLocalUacCommand": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "protocolVersion",
+        "requestId",
+        "shellEpoch",
+        "sequence",
+        "expiresAt",
+        "credential"
+      ],
+      "properties": {
+        "protocolVersion": {
+          "const": 1
+        },
+        "requestId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "shellEpoch": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "sequence": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "expiresAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "credential": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/ShellAuthLocalUacCredential"
             }
           ]
         }

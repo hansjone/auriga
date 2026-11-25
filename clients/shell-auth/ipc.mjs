@@ -108,6 +108,11 @@ export async function startIpc({ helper, broker, business }) {
       const peer = peers.get(connectionId);
       host.checkPeer(peer);
       const owner = peer.id;
+      if (payload.path === '/host/local-uac') {
+        const response = await host.localUac(payload.body, peer);
+        send({ id, payload: { requestId: payload.requestId, body: response } });
+        return;
+      }
       if (payload.path === '/host/contexts') {
         const response = await host.command(payload.body, peer);
         send({ id, payload: { requestId: payload.requestId, body: response } });
