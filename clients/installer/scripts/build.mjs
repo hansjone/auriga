@@ -15,6 +15,7 @@ import { spawnSync } from 'node:child_process';
 import {
   cpSync,
   existsSync,
+  lstatSync,
   readdirSync,
   mkdirSync,
   readFileSync,
@@ -101,6 +102,40 @@ export function validateResourceRoots(trust) {
   if (new Set(Object.values(trust).map((root) => root.kid)).size !== 3)
     throw new Error('resource trust roles require independent kids');
   return normalized;
+}
+const MAX_UAC_CONFIG_BYTES = 65536;
+/** Validate an optional site UAC config directory containing adapter.json + provider.json. */
+export function validateUacConfigDir(dir) {
+  if (typeof dir !== 'string' || !dir.trim())
+    throw new Error('invalid --uac-config-dir');
+  const rootStat = lstatSync(dir);
+  if (!rootStat.isDirectory() || rootStat.isSymbolicLink())
+    throw new Error('--uac-config-dir must be a regular directory');
+  const readRegularJson = (name) => {
+    const file = join(dir, name);
+    const st = lstatSync(file);
+    if (!st.isFile() || st.isSymbolicLink() || st.size > MAX_UAC_CONFIG_BYTES)
+      throw new Error(`invalid UAC config file: ${name}`);
+    const bytes = readFileSync(file);
+    const parsed = JSON.parse(bytes.toString('utf8'));
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed))
+      throw new Error(`invalid UAC JSON object: ${name}`);
+    return { bytes, parsed };
+  };
+  const adapter = readRegularJson('adapter.json');
+  const provider = readRegularJson('provider.json');
+  const providerKeys = Object.keys(provider.parsed);
+  if (
+    providerKeys.some(
+      (k) => !['baseUrl', 'systemCode', 'revalidation'].includes(k),
+    ) ||
+    typeof provider.parsed.baseUrl !== 'string' ||
+    !provider.parsed.baseUrl.trim() ||
+    typeof provider.parsed.systemCode !== 'string' ||
+    !provider.parsed.systemCode.trim()
+  )
+    throw new Error('invalid UAC provider.json');
+  return { adapterBytes: adapter.bytes, providerBytes: provider.bytes };
 }
 const isWin = process.platform === 'win32';
 const NPM_FLAGS = [
@@ -252,6 +287,9 @@ export async function build(args) {
     ? validateResourceRoots(
         JSON.parse(readFileSync(args['resource-trust-json'], 'utf8')),
       )
+    : null;
+  const uacConfig = args['uac-config-dir']
+    ? validateUacConfigDir(args['uac-config-dir'])
     : null;
   const config = JSON.parse(
     readFileSync(join(installerDir, 'upstream.json'), 'utf8'),
@@ -538,6 +576,12 @@ export async function build(args) {
       join(payload, 'auriga', 'runtime', 'resource-roots.json'),
       JSON.stringify(resourceTrust),
     );
+  }
+  if (uacConfig) {
+    const uacOut = join(payload, 'auriga', 'uac');
+    mkdirSync(uacOut, { recursive: true });
+    writeFileSync(join(uacOut, 'adapter.json'), uacConfig.adapterBytes);
+    writeFileSync(join(uacOut, 'provider.json'), uacConfig.providerBytes);
   }
   if (args['release-public-key']) {
     const key = createPublicKey(readFileSync(args['release-public-key']));

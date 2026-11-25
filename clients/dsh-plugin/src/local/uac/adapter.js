@@ -540,9 +540,9 @@ export function createUacAdapter(settings, provider, options = {}) {
   /** Extract one cookie field per UacConfiguredAdapter rules (optional urlEncoded + JSON pointer).
    * @param {any} spec @param {Map<string,string>} cookieMap */
   function readCookieField(spec, cookieMap) {
-    if (!spec || typeof spec.cookie !== 'string' || !spec.cookie)
-      return undefined;
-    let raw = cookieMap.get(spec.cookie);
+    const name = typeof spec?.cookie === 'string' ? spec.cookie.trim() : '';
+    if (!name) return undefined;
+    let raw = cookieMap.get(name);
     if (typeof raw !== 'string' || !raw) return undefined;
     if (spec.urlEncoded) {
       try {

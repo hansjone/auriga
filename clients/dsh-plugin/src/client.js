@@ -204,7 +204,6 @@ window.__ModuleLoader__.load({
       loginBadCredentials: '口令或验证码错误，请重试。',
       loginMethods: '扫码或使用团队账号登录平台。',
       platformLogin: '登录平台',
-      platformBrowserLogin: '系统浏览器登录',
       platformInlineLogin: '扫码或团队账号登录',
       configurePlatform: '配置平台地址',
       reconnect: '重新连接',
@@ -2417,6 +2416,8 @@ window.__ModuleLoader__.load({
             true,
           );
           const hasLocalUac = !!uac?.available && !uac?.reason;
+          const hasLocalUacRef = React.useRef(hasLocalUac);
+          hasLocalUacRef.current = hasLocalUac;
           const uacSignedIn = hasLocalUac && uac.state === 'authenticated';
           const platformAvailable =
             !!shell?.configured && !!shell?.brokerAvailable;
@@ -2424,7 +2425,9 @@ window.__ModuleLoader__.load({
             loginAction.current = 'inline_login';
             manual.current = true;
             manualPlatform.current = action !== 'uac';
-            setLoginTab(action === 'uac' && hasLocalUac ? 'uac' : 'platform');
+            setLoginTab(
+              action === 'uac' && hasLocalUacRef.current ? 'uac' : 'platform',
+            );
             setSettled(false);
             setRequest((n) => n + 1);
           };

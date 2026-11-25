@@ -126,6 +126,7 @@ export async function main(argv) {
         'out',
         'release-public-key',
         'resource-trust-json',
+        'uac-config-dir',
         'version',
         'sequence',
         'minimum-version',
