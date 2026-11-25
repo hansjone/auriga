@@ -26,10 +26,17 @@ const auth = JSON.stringify({
   cookie: 'session=secret-cookie',
   csrf: 'secret-csrf',
 });
+// Assemble PEM boundaries at runtime; the body is a redaction marker, not key material.
+const syntheticPrivateText = (body) =>
+  [
+    ['-----BEGIN', 'PRIVATE KEY-----'].join(' '),
+    body,
+    ['-----END', 'PRIVATE KEY-----'].join(' '),
+  ].join('\n');
 test('ACL diagnostics preserve exit/spawn classes and bounded sanitized streams without policy bypass', () => {
   const result = {
     status: 1,
-    stderr: `AuthorizationManager check failed. UnauthorizedAccess ${keyPath}\n-----BEGIN PRIVATE KEY-----\nprivate-key-bytes\n-----END PRIVATE KEY-----\n${auth}`,
+    stderr: `AuthorizationManager check failed. UnauthorizedAccess ${keyPath}\n${syntheticPrivateText('private-key-bytes')}\n${auth}`,
     stdout: 'private ACL required ' + 'x'.repeat(6000),
   };
   const error = privateKeyFailure(result, keyPath, {
@@ -86,11 +93,7 @@ test('CLI failure keeps root cause and next step while redacting key path and au
   assert.ok(!message.includes(keyPath));
   assert.ok(!message.includes('secret-cookie'));
   assert.ok(!message.includes('secret-csrf'));
-  assert.ok(
-    !safeDiagnostic(
-      '-----BEGIN PRIVATE KEY-----\nsecret\n-----END PRIVATE KEY-----',
-    ).includes('secret'),
-  );
+  assert.ok(!safeDiagnostic(syntheticPrivateText('secret')).includes('secret'));
   assert.match(
     formatCliError(
       'sign',

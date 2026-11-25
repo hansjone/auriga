@@ -68,3 +68,9 @@ dcb55146c33a4dd6669f011ede57d92229368ba7:deploy/offline/help_test.go:generic-api
 b139cbd16d6004efdf5f4ca8899186c8cdf04598:services/common/src/test/java/auriga/common/audit/AuditDataTest.java:generic-api-key:25
 475c38ad738c26ea11447835c31a86aa715d9424:services/platform-app/src/test/java/auriga/platform/StandaloneWorkspaceAssemblyTest.java:private-key:85
 768943a333085df4194dbe041d260fa38038e32f:services/platform-app/src/test/java/auriga/platform/PlatformWorkspaceAssemblyTest.java:private-key:111
+
+# PR479: exact historical redaction fixture, with literal PEM boundaries around
+# "private-key-bytes" / "secret" markers only; no cryptographic key bytes.
+# Current tests assemble boundaries at runtime and keep the no-secret-output assertions.
+# Published history is preserved; no rule/path-wide exemption is added.
+f027b7dfac15eef0941a74cd98e12e00143ffd46:scripts/client-release/diagnostics.test.mjs:private-key:32

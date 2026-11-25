@@ -155,7 +155,7 @@ test('publish distinguishes actual 401/403 problem codes without echoing respons
     globalThis,
     'fetch',
     async () =>
-      new Response(
+      new globalThis.Response(
         JSON.stringify({
           code,
           detail: 'secret-cookie-value',
