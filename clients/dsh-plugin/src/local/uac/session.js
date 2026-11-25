@@ -134,9 +134,21 @@ export function createLocalUacIdentity(options) {
         return;
       }
       availability = 'ready';
-      // Silently attempt local browser SSO cookie login when configured.
+      // Silently attempt local browser SSO cookie login when configured,
+      // bounded so slow DPAPI/network checks never stall /auriga/uac/status.
       if (adapter.ssoCookieSpec?.()) {
-        await trySsoInternal();
+        let ssoTimer;
+        try {
+          await Promise.race([
+            trySsoInternal(),
+            new Promise((resolve) => {
+              ssoTimer = setTimeout(resolve, 4000);
+              ssoTimer.unref?.();
+            }),
+          ]);
+        } finally {
+          clearTimeout(ssoTimer);
+        }
       } else {
         emit('INFO', 'sso', {
           phase: 'end',

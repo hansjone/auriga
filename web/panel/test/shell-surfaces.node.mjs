@@ -185,7 +185,7 @@ for (const locale of ['zh-CN', 'en'])
       await flush();
       assert.equal(commands.length, 1);
       assert.deepEqual(JSON.parse(commands[0].body), {
-        action: 'open_login',
+        action: 'inline_login',
       });
       assert.equal(commands[0].headers['x-auriga-csrf'], 'settings-login-csrf');
       assert.equal(

@@ -224,10 +224,14 @@ sealed class TrayApp : ApplicationContext
     readonly System.Windows.Forms.Timer checkTimer = new System.Windows.Forms.Timer();
     readonly System.Windows.Forms.Timer pendingTimer = new System.Windows.Forms.Timer();
     Process launcher;
-    string dshUrl, platformState, platformReason, availableVersion, logFile;
+    string dshUrl, platformState, platformReason, availableVersion, logFile, updateStageText;
     readonly object updateLock = new object();
     Process updateWorker;
-    bool openWhenReady, exiting, restarting, busy, restartRequired, updateEnabled = true;
+    ProgressForm updateForm;
+    long lastUpdateActivityTicks;
+    volatile bool updateApplying;
+    bool openWhenReady, exiting, restarting, busy, restartRequired, updateEnabled = true, versionSyncing;
+    DateTime nextSyncAttemptUtc = DateTime.MinValue;
     Dictionary<string, object> info;
 
     public TrayApp(string root, bool autostart)
@@ -259,6 +263,7 @@ sealed class TrayApp : ApplicationContext
             checkItem, updateItem, restartItem, new ToolStripSeparator(),
             settings, logsItem, aboutItem, new ToolStripSeparator(), exitItem });
         icon.ContextMenuStrip = menu;
+        menu.Opening += delegate { SyncCurrentVersionIfChanged(); UpdateMenu(); };
         icon.MouseDoubleClick += delegate (object s, MouseEventArgs e) { if (e.Button == MouseButtons.Left) OpenAuriga(); };
         icon.BalloonTipClicked += delegate { if (restartRequired) RestartForUpdate(); else if (availableVersion != null) DownloadUpdate(); };
         icon.Visible = true;
@@ -267,13 +272,14 @@ sealed class TrayApp : ApplicationContext
         pendingTimer.Interval = 30 * 1000;
         pendingTimer.Tick += delegate
         {
+            SyncCurrentVersionIfChanged();
             bool queued = File.Exists(Path.Combine(root, "desktop-pending", "release.json"));
-            if (queued && !restartRequired && !busy)
+            if (queued && !restartRequired && !busy && !updateApplying)
             {
                 restartRequired = true;
                 icon.ShowBalloonTip(10000, Desktop.Brand, "更新已下载。点击此处重启 Auriga 完成安装。", ToolTipIcon.Info);
             }
-            else if (!queued && restartRequired && !busy) restartRequired = false;
+            else if (!queued && restartRequired && !busy && !updateApplying) restartRequired = false;
             UpdateMenu();
         };
         pendingTimer.Start();
@@ -306,11 +312,56 @@ sealed class TrayApp : ApplicationContext
         catch (Exception) { }
     }
 
+    void SyncCurrentVersionIfChanged()
+    {
+        if (busy || restarting || updateApplying || exiting || versionSyncing) return;
+        if (DateTime.UtcNow < nextSyncAttemptUtc) return;
+        string active = null;
+        try { active = Desktop.Current(root); } catch (Exception) { return; }
+        string known = Desktop.Str(info, "packageId");
+        if (string.IsNullOrEmpty(active) || string.Equals(active, known, StringComparison.Ordinal)) return;
+        versionSyncing = true;
+        ThreadPool.QueueUserWorkItem(delegate
+        {
+            Dictionary<string, object> next = null;
+            string error = null;
+            try { next = Desktop.RunJson(root, "status --root " + Desktop.Quote(root), out error); }
+            catch (Exception e) { error = e.Message; }
+            Post(delegate
+            {
+                versionSyncing = false;
+                if (exiting) return;
+                if (next == null)
+                {
+                    nextSyncAttemptUtc = DateTime.UtcNow.AddSeconds(30);
+                    if (!string.IsNullOrEmpty(error)) Log("version sync failed: " + error);
+                    return;
+                }
+                nextSyncAttemptUtc = DateTime.MinValue;
+                ApplyInfo(next);
+                var snapshot = next;
+                ThreadPool.QueueUserWorkItem(delegate { RefreshShellIntegration(snapshot); });
+            });
+        });
+    }
+
     void RefreshInfo()
     {
-        string error;
-        info = Desktop.RunJson(root, "status --root " + Desktop.Quote(root), out error);
-        if (info == null) return;
+        Dictionary<string, object> next = null;
+        string error = null;
+        try { next = Desktop.RunJson(root, "status --root " + Desktop.Quote(root), out error); }
+        catch (Exception e) { error = e.Message; }
+        if (next == null)
+        {
+            if (!string.IsNullOrEmpty(error)) Log("status refresh failed: " + error);
+            return;
+        }
+        ApplyInfo(next);
+    }
+
+    void ApplyInfo(Dictionary<string, object> next)
+    {
+        info = next;
         string dataHome = Desktop.Str(info, "dataHome");
         string logs = Desktop.Str(info, "logs");
         if (logs != null)
@@ -325,6 +376,10 @@ sealed class TrayApp : ApplicationContext
         {
             var failure = Desktop.Obj(update, "failure");
             restartItem.Text = "重试更新（" + (Desktop.Str(failure, "code") ?? "updateFailed") + "/" + (Desktop.Str(failure, "stage") ?? "unknown") + "）";
+        }
+        else if (!updateApplying)
+        {
+            restartItem.Text = "重启以完成更新";
         }
         string origin = Desktop.Str(info, "platformOrigin");
         originItem.Text = "平台地址：" + (origin ?? "未配置") + (origin != null ? "（点击复制）" : "");
@@ -344,7 +399,9 @@ sealed class TrayApp : ApplicationContext
     const string Registration = "Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\";
 
     /// After an in-app update the Apps & features entry and autostart must follow the new version.
-    void RefreshShellIntegration()
+    void RefreshShellIntegration() { RefreshShellIntegration(info); }
+
+    void RefreshShellIntegration(Dictionary<string, object> snapshot)
     {
         try
         {
@@ -353,11 +410,11 @@ sealed class TrayApp : ApplicationContext
                 string name = Desktop.RegistryName(root);
                 using (var key = Registry.CurrentUser.OpenSubKey(Registration + name, true))
                 {
-                    if (key == null || info == null ||
+                    if (key == null || snapshot == null ||
                         !Desktop.SamePath(key.GetValue("InstallLocation") as string, root)) return;
                     if (Desktop.OwnsStartup(root, Registry.GetValue(RunKey, name, null) as string))
                         Registry.SetValue(RunKey, name, Desktop.StartupCommand(root));
-                    key.SetValue("DisplayVersion", Desktop.Str(info, "version") ?? "");
+                    key.SetValue("DisplayVersion", Desktop.Str(snapshot, "version") ?? "");
                     key.SetValue("Publisher", "Auriga");
                     string ico = Path.Combine(root, "bin", "auriga.ico");
                     if (File.Exists(ico)) key.SetValue("DisplayIcon", ico);
@@ -419,16 +476,22 @@ sealed class TrayApp : ApplicationContext
     void UpdateMenu()
     {
         bool running = launcher != null && !launcher.HasExited;
-        statusItem.Text = restarting ? "正在重启…" : running ? "运行中 · 版本 " + (Desktop.Str(info, "version") ?? "?") : "未运行（点“打开 Auriga”启动）";
+        statusItem.Text = updateApplying
+            ? (updateStageText ?? "正在安装更新…")
+            : restarting ? "正在重启…"
+            : running ? "运行中 · 版本 " + (Desktop.Str(info, "version") ?? "?")
+            : "未运行（点“打开 Auriga”启动）";
         platformItem.Text = running ? Desktop.PlatformText(platformState, platformReason) : "平台：未运行";
-        updateItem.Visible = availableVersion != null && !restartRequired;
+        updateItem.Visible = availableVersion != null && !restartRequired && !updateApplying;
         updateItem.Text = "立即更新到 " + availableVersion;
-        updateItem.Enabled = !busy;
-        restartItem.Visible = restartRequired;
+        updateItem.Enabled = !busy && !updateApplying;
+        restartItem.Visible = restartRequired || updateApplying;
+        if (updateApplying) restartItem.Text = "正在安装更新…（查看进度）";
         fallbackLoginItem.Enabled = launcher != null && !launcher.HasExited && platformState != "authenticated";
-        checkItem.Enabled = !busy && Desktop.Flag(info, "updatesConfigured");
-        pythonResetItem.Enabled = !busy && !restarting;
-        icon.Text = (Desktop.Brand + " · " + (running ? (platformState == "authenticated" ? "已连接" : "运行中") : "未运行")).Substring(0, Math.Min(63, (Desktop.Brand + " · " + (running ? (platformState == "authenticated" ? "已连接" : "运行中") : "未运行")).Length));
+        checkItem.Enabled = !busy && !updateApplying && Desktop.Flag(info, "updatesConfigured");
+        pythonResetItem.Enabled = !busy && !restarting && !updateApplying;
+        string tip = Desktop.Brand + " · " + (updateApplying ? "正在更新" : running ? (platformState == "authenticated" ? "已连接" : "运行中") : "未运行");
+        icon.Text = tip.Substring(0, Math.Min(63, tip.Length));
     }
 
     void StartLauncher()
@@ -487,20 +550,93 @@ sealed class TrayApp : ApplicationContext
         if (line.Contains("desktop.python_runtime_modified")) lastError = "python-runtime-modified";
     }
 
+    static string UpdateStageMessage(string phase, string stage)
+    {
+        if (phase == "retrying") return "正在重试安装更新（" + (string.IsNullOrEmpty(stage) ? "安装" : stage) + "），请稍候…";
+        switch (stage)
+        {
+            case "verify-release":
+            case "check-release": return "正在核验更新发布信息…";
+            case "verify-archive": return "正在校验更新包完整性…";
+            case "extract": return "正在解压新版本文件…";
+            case "verify": return "正在校验新版本文件清单…";
+            case "copy": return "正在复制新版本文件，请稍候…";
+            case "verify-copy": return "正在校验已复制的文件…";
+            case "profile": return "正在同步配置与插件…";
+            case "smoke": return "正在验证新版本启动环境…";
+            case "commit": return "正在切换至新版本…";
+            default: return "正在安装更新，请稍候…";
+        }
+    }
+
+    void ShowOrUpdateProgress(string message)
+    {
+        if (updateForm != null && !updateForm.IsDisposed)
+        {
+            updateForm.Report(message, -1);
+            return;
+        }
+        updateForm = new ProgressForm("正在安装更新", message, false);
+        updateForm.Show();
+    }
+
+    void CloseUpdateProgress()
+    {
+        if (updateForm != null)
+        {
+            if (!updateForm.IsDisposed) updateForm.Close();
+            updateForm = null;
+        }
+    }
+
     void OnEvent(Dictionary<string, object> e)
     {
         string kind = Desktop.Str(e, "event");
+        if (kind == "dsh")
+        {
+            if (Desktop.Str(e, "state") == "stopped")
+            {
+                Interlocked.Exchange(ref lastUpdateActivityTicks, DateTime.UtcNow.Ticks);
+                if (updateForm != null && !updateForm.IsDisposed)
+                    updateForm.Report("Auriga 已停止，正在准备安装更新…", -1);
+            }
+            return;
+        }
         if (kind == "update")
         {
             string phase = Desktop.Str(e, "phase"), stage = Desktop.Str(e, "stage"), code = Desktop.Str(e, "code");
+            Interlocked.Exchange(ref lastUpdateActivityTicks, DateTime.UtcNow.Ticks);
             Log("update " + phase + " stage=" + stage + " code=" + code + " category=" + Desktop.Str(e, "pathCategory"));
-            if (phase == "failed" || phase == "awaiting-retry")
+            if (phase == "installing" || phase == "retrying")
             {
+                updateApplying = true;
+                updateStageText = UpdateStageMessage(phase, stage);
+                if (updateForm != null && !updateForm.IsDisposed)
+                    updateForm.Report(updateStageText, -1);
+            }
+            else if (phase == "failed" || phase == "awaiting-retry")
+            {
+                updateApplying = false;
+                updateStageText = null;
+                if (!restarting) CloseUpdateProgress();
                 restartRequired = File.Exists(Path.Combine(root, "desktop-pending", "release.json"));
                 restartItem.Text = "重试更新（" + (code ?? "updateFailed") + "/" + (stage ?? "unknown") + "）";
                 icon.ShowBalloonTip(8000, Desktop.Brand, "更新失败，原版本已保留。" + (code ?? "updateFailed") + " / " + stage + "。详情见安装目录 desktop-update.log。", ToolTipIcon.Warning);
             }
-            else if (phase == "installed") restartItem.Text = "重启以完成更新";
+            else if (phase == "installed")
+            {
+                updateApplying = false;
+                updateStageText = null;
+                restartRequired = false;
+                restartItem.Text = "重启以完成更新";
+                if (!restarting)
+                {
+                    CloseUpdateProgress();
+                    RefreshInfo();
+                    RefreshShellIntegration();
+                    icon.ShowBalloonTip(6000, Desktop.Brand, "已更新到 " + (Desktop.Str(info, "version") ?? "新版本") + "。", ToolTipIcon.Info);
+                }
+            }
             UpdateMenu();
             return;
         }
@@ -552,6 +688,24 @@ sealed class TrayApp : ApplicationContext
     void OnLauncherExit(Process which)
     {
         if (which != launcher) return;
+        bool wasApplying = updateApplying;
+        updateApplying = false;
+        updateStageText = null;
+        if (wasApplying)
+        {
+            var update = Desktop.Obj(info, "update");
+            if (Desktop.Flag(update, "manualRetryRequired"))
+            {
+                var failure = Desktop.Obj(update, "failure");
+                restartItem.Text = "重试更新（" + (Desktop.Str(failure, "code") ?? "updateFailed") + "/" + (Desktop.Str(failure, "stage") ?? "unknown") + "）";
+            }
+            else restartItem.Text = "重启以完成更新";
+        }
+        if (!restarting)
+        {
+            CloseUpdateProgress();
+            SyncCurrentVersionIfChanged();
+        }
         int code = -1;
         try { code = which.ExitCode; } catch (Exception) { }
         Log("launcher exited " + code);
@@ -569,13 +723,31 @@ sealed class TrayApp : ApplicationContext
     }
 
     /// Ask the launcher to stop DSH (it applies a queued update on the way out) and wait.
-    bool StopLauncher(int seconds)
+    /// While an update is actively reporting progress, extend the wait instead of killing mid-copy.
+    bool StopLauncher(int stopSeconds, int idleUpdateSeconds = 300, int maxTotalSeconds = 1800)
     {
         var p = launcher;
         if (p == null || p.HasExited) return true;
+        DateTime startedAt = DateTime.UtcNow;
         Send("stop");
         try { p.StandardInput.Close(); } catch (Exception) { }
-        if (p.WaitForExit(seconds * 1000)) { p.WaitForExit(); return p.ExitCode == 0; }
+        for (;;)
+        {
+            if (p.WaitForExit(1000)) { p.WaitForExit(); return p.ExitCode == 0; }
+            DateTime now = DateTime.UtcNow;
+            if ((now - startedAt).TotalSeconds >= maxTotalSeconds) break;
+            long activityTicks = Interlocked.Read(ref lastUpdateActivityTicks);
+            bool activeUpdate = updateApplying || activityTicks >= startedAt.Ticks;
+            if (activeUpdate)
+            {
+                DateTime lastActivity = activityTicks > startedAt.Ticks ? new DateTime(activityTicks, DateTimeKind.Utc) : startedAt;
+                if ((now - lastActivity).TotalSeconds >= idleUpdateSeconds) break;
+            }
+            else if ((now - startedAt).TotalSeconds >= stopSeconds)
+            {
+                break;
+            }
+        }
         Log("launcher did not stop in time; ending its process tree");
         Desktop.KillTree(p.Id);
         p.WaitForExit(15000);
@@ -709,57 +881,90 @@ sealed class TrayApp : ApplicationContext
 
     void RestartForUpdate()
     {
-        if (busy || restarting) return;
-        string error;
-        var approved = Desktop.RunJson(root, "update approve --root " + Desktop.Quote(root), out error);
-        if (!Desktop.Flag(approved, "approved"))
+        if (updateApplying)
         {
-            Log("update confirmation failed: " + error);
-            RefreshInfo();
+            ShowOrUpdateProgress(updateStageText ?? "正在安装更新，请稍候…");
+            if (updateForm != null && !updateForm.IsDisposed) updateForm.BringToFront();
             return;
         }
+        if (busy || restarting) return;
         restarting = true; busy = true; UpdateMenu();
         string before = Desktop.Current(root);
-        var form = new ProgressForm("正在安装更新", "正在停止 Auriga 并安装更新，请稍候…", false);
-        form.Show();
-        if (launcher == null || launcher.HasExited) StartLauncher();
+        ShowOrUpdateProgress("正在准备安装更新，请稍候…");
         ThreadPool.QueueUserWorkItem(delegate
         {
-            bool stopped = StopLauncher(600);
-            Post(delegate
+            string error;
+            Dictionary<string, object> approved = null;
+            try { approved = Desktop.RunJson(root, "update approve --root " + Desktop.Quote(root), out error); }
+            catch (Exception e) { error = e.Message; }
+            if (!Desktop.Flag(approved, "approved"))
             {
-                form.Close();
-                busy = false;
-                string after = Desktop.Current(root);
-                if (stopped && after != before)
+                Post(delegate
                 {
-                    Log("update installed " + before + " -> " + after);
-                    // Continue from the new version's tray (new menu, runtime and icon).
-                    string next = Path.Combine(root, "versions", after, "auriga", "tray", "AurigaDesktop.exe");
-                    if (File.Exists(next))
+                    CloseUpdateProgress();
+                    busy = false;
+                    restarting = false;
+                    if (exiting) return;
+                    Log("update confirmation failed: " + error);
+                    RefreshInfo();
+                    UpdateMenu();
+                    if (updateApplying)
                     {
-                        exiting = true;
-                        Process.Start(new ProcessStartInfo(next, "/restarted /updated") { UseShellExecute = false });
-                        Quit();
+                        ShowOrUpdateProgress(updateStageText ?? "正在安装更新，请稍候…");
                         return;
                     }
-                    restarting = false;
-                    restartRequired = false;
-                    RefreshInfo();
-                    StartLauncher();
-                    icon.ShowBalloonTip(6000, Desktop.Brand, "已更新到 " + Desktop.Str(info, "version") + "。", ToolTipIcon.Info);
-                }
-                else
+                    MessageBox.Show(
+                        "当前无法启动更新安装（可能已有更新操作正在进行，或待安装更新已被清理）。请稍候再试或检查日志目录。",
+                        Desktop.Brand, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                });
+                return;
+            }
+            Post(delegate
+            {
+                if (exiting) { CloseUpdateProgress(); busy = false; restarting = false; return; }
+                if (updateForm != null && !updateForm.IsDisposed)
+                    updateForm.Report("正在停止 Auriga 并安装更新，请稍候…", -1);
+                if (launcher == null || launcher.HasExited) StartLauncher();
+                ThreadPool.QueueUserWorkItem(delegate
                 {
-                    restarting = false;
-                    RefreshInfo();
-                    if (stopped) StartLauncher();
-                    string reason = stopped
-                        ? "更新安装失败，已保留原版本。详情见日志目录。"
-                        : "DSH 未完成正常停止，本次未继续更新。请检查日志后重新打开。";
-                    MessageBox.Show(reason, Desktop.Brand, MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                }
-                UpdateMenu();
+                    bool stopped = StopLauncher(300);
+                    Post(delegate
+                    {
+                        CloseUpdateProgress();
+                        busy = false;
+                        if (exiting) { restarting = false; return; }
+                        string after = Desktop.Current(root);
+                        if (stopped && after != before)
+                        {
+                            Log("update installed " + before + " -> " + after);
+                            // Continue from the new version's tray (new menu, runtime and icon).
+                            string next = Path.Combine(root, "versions", after, "auriga", "tray", "AurigaDesktop.exe");
+                            if (File.Exists(next))
+                            {
+                                exiting = true;
+                                Process.Start(new ProcessStartInfo(next, "/restarted /updated") { UseShellExecute = false });
+                                Quit();
+                                return;
+                            }
+                            restarting = false;
+                            restartRequired = false;
+                            RefreshInfo();
+                            StartLauncher();
+                            icon.ShowBalloonTip(6000, Desktop.Brand, "已更新到 " + Desktop.Str(info, "version") + "。", ToolTipIcon.Info);
+                        }
+                        else
+                        {
+                            restarting = false;
+                            RefreshInfo();
+                            if (stopped) StartLauncher();
+                            string reason = stopped
+                                ? "更新安装失败，已保留原版本。详情见日志目录。"
+                                : "更新或停止 Auriga 超时，本次未完成更新。请检查日志后重新打开。";
+                            MessageBox.Show(reason, Desktop.Brand, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                        }
+                        UpdateMenu();
+                    });
+                });
             });
         });
     }
@@ -879,6 +1084,7 @@ sealed class TrayApp : ApplicationContext
 
     void Quit()
     {
+        CloseUpdateProgress();
         checkTimer.Stop();
         pendingTimer.Stop();
         icon.Visible = false;
@@ -904,6 +1110,7 @@ sealed class ProgressForm : Form
     {
         Text = title;
         Icon = Desktop.AppIcon();
+        AutoScaleMode = AutoScaleMode.Dpi;
         ClientSize = new Size(420, cancellable ? 136 : 100);
         FormBorderStyle = FormBorderStyle.FixedDialog;
         MaximizeBox = false; MinimizeBox = false; ControlBox = false;
