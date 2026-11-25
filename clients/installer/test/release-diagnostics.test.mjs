@@ -14,6 +14,95 @@ import { publish } from '../../../scripts/client-release/publish.mjs';
 import { fingerprint } from '../../../scripts/client-release/keys.mjs';
 import { canonical, RELEASE_KID } from '../runtime/release.mjs';
 import { sha256File } from '../runtime/verify.mjs';
+import { build } from '../scripts/build.mjs';
+import {
+  sealInputs,
+  systemTools,
+} from '../../../scripts/client-release/inputs.mjs';
+import {
+  registerBaseline,
+  TOOLS_BASELINE_MISMATCH,
+} from '../../../scripts/client-release/baseline.mjs';
+
+import { formatCliError } from '../../../scripts/client-release/cli.mjs';
+import { launchOfflineBuild } from '../../../scripts/client-release/build.mjs';
+
+test('build diagnostics show a real output collision and keep sensitive or unrelated paths hidden', (t) => {
+  const dir = tempBase(t);
+  const out = join(dir, 'already exists');
+  fs.mkdirSync(out);
+  assert.throws(
+    () => launchOfflineBuild({ out }, { directory: join(dir, 'kit') }),
+    (error) => {
+      assert.equal(error.code, 'EEXIST');
+      const message = formatCliError('build', error, [], {}, { out });
+      assert.match(message, /EEXIST.*mkdir/);
+      assert.ok(message.includes(out));
+      assert.ok(!message.includes('路径已隐藏'));
+      assert.ok(!formatCliError('sign', error, [], {}).includes(out));
+      return true;
+    },
+  );
+
+  const config = join(dir, 'site config');
+  const configFile = join(config, 'adapter.json');
+  const keyFile = join(dir, 'signing.pem');
+  const outside = join(dir, '..', 'elsewhere', 'example.txt');
+  const tokenPath = join(dir, 'secret-token-value');
+  for (const path of [configFile, keyFile, outside, tokenPath]) {
+    const error = Object.assign(new Error(`ENOENT: open '${path}'`), { path });
+    const message = formatCliError(
+      'build',
+      error,
+      [],
+      { FIXTURE_TOKEN: 'secret-token-value' },
+      { temp: dir, 'uac-config-dir': config },
+    );
+    assert.ok(!message.includes(path));
+    assert.ok(!message.includes('构建路径'));
+  }
+});
+
+test(
+  'offline installer uses the registered Windows tools baseline and still checks dependency bytes',
+  { skip: process.platform !== 'win32' },
+  async (t) => {
+    const base = tempBase(t);
+    const kit = join(base, 'kit');
+    const cache = join(base, 'cache');
+    fs.mkdirSync(kit);
+    const dependency = join(kit, 'fixture.bin');
+    fs.writeFileSync(dependency, 'approved bytes');
+    const tools = systemTools();
+    const manifest = sealInputs(
+      kit,
+      tools.map((tool) => ({ ...tool, sha256: '0'.repeat(64) })),
+    );
+    const previousBaseline = process.env.AURIGA_CLIENT_TOOLS_BASELINE;
+    t.after(() => {
+      if (previousBaseline === undefined)
+        delete process.env.AURIGA_CLIENT_TOOLS_BASELINE;
+      else process.env.AURIGA_CLIENT_TOOLS_BASELINE = previousBaseline;
+    });
+    const args = {
+      offline: true,
+      'offline-inputs': kit,
+      'offline-inputs-sha256': manifest.manifestSha256,
+      'broker-artifact': join(base, 'broker'),
+    };
+    delete process.env.AURIGA_CLIENT_TOOLS_BASELINE;
+    await assert.rejects(() => build(args), {
+      message: TOOLS_BASELINE_MISMATCH,
+    });
+
+    registerBaseline(cache, tools);
+    process.env.AURIGA_CLIENT_TOOLS_BASELINE = cache;
+    // Reaching plugin validation proves the installer passed the devkit checks.
+    await assert.rejects(() => build(args), /离线构建必须提供本地重建的插件包/);
+    fs.writeFileSync(dependency, 'changed bytes');
+    await assert.rejects(() => build(args), /离线输入摘要不符：fixture\.bin/);
+  },
+);
 
 function reviewFixture(t) {
   const base = tempBase(t);

@@ -44,6 +44,7 @@ import {
   assertBuildCopyMatches,
 } from './source.mjs';
 import { clientPlatform } from './platform.mjs';
+import { toolsBaselineOption } from './baseline.mjs';
 const inputTrust = (o) => ({
   verifyKey: o['verify-key'],
   trustFingerprint: o['trust-fingerprint'],
@@ -53,9 +54,6 @@ const inputTrust = (o) => ({
 // 源码身份仍按 inputTrust 验签。
 const kitTrust = (o) =>
   o['site-derived'] || o['site-kit'] ? {} : inputTrust(o);
-// 现场系统工具基线（auriga deps baseline --client 写在 deps.cache 下）。
-const toolsBaselineOption = () =>
-  process.env.AURIGA_CLIENT_TOOLS_BASELINE || null;
 /** 路径 child 是否等于 parent 或位于其内（Windows 不区分大小写）。 */
 export function canonicalPath(path) {
   // 对已存在的最近祖先取真实路径（展开 8.3 短名、junction），再接回不存在的部分。
@@ -421,6 +419,7 @@ export async function buildWorker(optionsFile, hooks = {}) {
   )
     throw new Error('必须从受控离线入口构建');
   const o = JSON.parse(readFileSync(optionsFile, 'utf8'));
+  if (hooks.diagnostics) Object.assign(hooks.diagnostics, o);
   const policy = validateBuildOptions(o);
   const kit = verifyInputs(o.devkit, o['devkit-sha256'], root, {
     ...kitTrust(o),

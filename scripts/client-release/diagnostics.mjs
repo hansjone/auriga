@@ -1,10 +1,16 @@
-import { dirname, resolve } from 'node:path';
+import { dirname, isAbsolute, relative, resolve, sep } from 'node:path';
 
 // Sanitize before truncation: a truncated PEM block or credential must never
 // become visible merely because its closing delimiter fell outside the limit.
 export function safeDiagnostic(
   value,
-  { privatePaths = [], env = process.env, limit = 1800 } = {},
+  {
+    privatePaths = [],
+    env = process.env,
+    limit = 1800,
+    visiblePaths = [],
+    hidePaths = true,
+  } = {},
 ) {
   let text = String(value ?? '');
   text = text.replace(
@@ -37,10 +43,16 @@ export function safeDiagnostic(
   }
   for (const secret of secrets.sort((a, b) => b.length - a.length))
     text = text.split(secret).join('[已隐藏]');
+  text = text.replace(/\b(?:https?|file):\/\/[^\s<>"']+/gi, '[地址已隐藏]');
+  if (hidePaths)
+    text = text.replace(
+      /(['"])((?:[A-Za-z]:[\\/]|\\\\|\/)[^\r\n]*?)\1|(?:[A-Za-z]:[\\/]|\\\\)[^\r\n<>"'|;]*|(?<![\w:/])\/(?:[^\s/]+\/)*[^\s,;:)]+/g,
+      (match, quote, path) =>
+        visiblePaths.includes(path ?? match)
+          ? match
+          : `${quote ?? ''}[路径已隐藏]${quote ?? ''}`,
+    );
   text = text
-    .replace(/\b(?:https?|file):\/\/[^\s<>"']+/gi, '[地址已隐藏]')
-    .replace(/(?:[A-Za-z]:[\\/]|\\\\)[^\r\n<>"'|;]*/g, '[路径已隐藏]')
-    .replace(/(?<![\w:/])\/(?:[^\s/]+\/)*[^\s,;:)]+/g, '[路径已隐藏]')
     .replace(
       /\b(?:cookie|authorization|csrf|token|password|secret|key)\s*[:=]\s*[^\r\n;,]+/gi,
       '[凭据已隐藏]',
@@ -52,6 +64,31 @@ export function safeDiagnostic(
     .replace(/\p{Cc}/gu, ' ')
     .trim();
   return text.length > limit ? text.slice(0, limit) + '…[已截断]' : text;
+}
+
+function within(path, root) {
+  const rel = relative(root, path);
+  return rel !== '..' && !rel.startsWith(`..${sep}`) && !isAbsolute(rel);
+}
+
+// Only structured filesystem paths get an exception. Error text can include
+// subprocess output, command arguments or remote responses.
+export function buildErrorPaths(error, roots, privateDir, options) {
+  return [...new Set([error.path, error.dest])].filter((path) => {
+    if (typeof path !== 'string' || !isAbsolute(path)) return false;
+    if (privateDir && within(path, privateDir)) return false;
+    if (
+      /[\\/](?:\.env(?:\.[^\\/]+)?|\.npmrc|\.ssh|\.aws|credentials?|secrets?|private|id_(?:rsa|dsa|ecdsa|ed25519)(?:\.pub)?)(?:[\\/]|$)/i.test(
+        path,
+      ) ||
+      /\.(?:pem|key|pfx|p12)$/i.test(path)
+    )
+      return false;
+    return (
+      roots.some((root) => within(path, root)) &&
+      safeDiagnostic(path, { ...options, hidePaths: false }) === path
+    );
+  });
 }
 
 export function privateKeyFailure(result, path, env = process.env) {

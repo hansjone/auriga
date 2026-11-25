@@ -29,6 +29,7 @@ import {
   verifyInputs,
 } from './inputs.mjs';
 import { sourceIdentity } from './source.mjs';
+import { toolsBaselineOption } from './baseline.mjs';
 import {
   launchOfflineBuild,
   resolveBuildPaths,
@@ -467,6 +468,7 @@ export function startOnlineBuild(options, io = {}) {
   const base = (io.verifyBase ?? verifyInputs)(o.devkit, undefined, root, {
     ...trust,
     lockPolicy: 'skip',
+    toolsBaseline: toolsBaselineOption(),
   });
   // 用户显式给出的旧锁：读不到或摘要不符直接报错，不静默降级。
   let userBaseLock = null;
@@ -540,6 +542,7 @@ export function startOnlineBuild(options, io = {}) {
     site,
     manifest.manifestSha256,
     root,
+    { toolsBaseline: toolsBaselineOption() },
   );
   (io.launch ?? launchOfflineBuild)(o, kit, {
     siteDependencies: join(site, 'site-dependencies.json'),
