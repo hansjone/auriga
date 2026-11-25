@@ -7,7 +7,7 @@
  *
  * Installs into a sandbox (install root, DSH_HOME, USERPROFILE/APPDATA, start
  * menu and desktop folders and a test-only registry key all live under or are
- * named for --sandbox), starts DSH on the fixed desktop port 12721, checks the
+ * named for --sandbox), starts DSH on an explicit isolated port, checks the
  * plugin, shell integration and pnpm, tries a broken upgrade (must roll back),
  * upgrades, rolls back and uninstalls. Every started process is killed at the
  * end and the test registry key is removed.
@@ -23,10 +23,11 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { join, resolve } from 'node:path';
+import { createServer } from 'node:net';
 import { randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { setTimeout as delay } from 'node:timers/promises';
-import { DESKTOP_DSH_PORT, launchEnv } from '../runtime/core.mjs';
+import { launchEnv } from '../runtime/core.mjs';
 
 const args = Object.fromEntries(
   process.argv.slice(2).reduce((acc, v, i, all) => {
@@ -145,6 +146,19 @@ function mustInstall(pkg, extra) {
   return JSON.parse(r.stdout.split('\n').find((l) => l.startsWith('{')));
 }
 
+// Old packages may have a different default; select and pass the same port for
+// every install/upgrade/rollback probe. Default-port behavior is tested separately.
+async function freePort() {
+  return new Promise((resolve, reject) => {
+    const server = createServer();
+    server.once('error', reject);
+    server.listen(0, '127.0.0.1', () => {
+      const { port } = server.address();
+      server.close((error) => (error ? reject(error) : resolve(port)));
+    });
+  });
+}
+
 const started = [];
 function trayExecutable(id) {
   return join(root, 'versions', id, 'auriga', 'tray', 'AurigaDesktop.exe');
@@ -190,10 +204,16 @@ async function startTrayForUninstall(id) {
 }
 
 async function withDsh(fn) {
-  const port = DESKTOP_DSH_PORT;
+  const port = await freePort();
   const child = spawn(
     'cmd.exe',
-    ['/c', join(root, 'bin', 'auriga-desktop.cmd'), '--no-open'],
+    [
+      '/c',
+      join(root, 'bin', 'auriga-desktop.cmd'),
+      '--port',
+      String(port),
+      '--no-open',
+    ],
     { env, cwd: sandbox },
   );
   started.push(child);
