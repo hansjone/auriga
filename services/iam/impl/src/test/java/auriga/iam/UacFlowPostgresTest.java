@@ -501,7 +501,9 @@ class UacFlowPostgresTest {
             assertFalse(issued.has("error"), issued.toString());
             var first = tokens.verify(issued.path("access_token").asString());
             var identity = oauth.nativeIdentity(issued.path("access_token").asString(), false);
-            var expected = done.session().session().path("uacSessionBinding");
+            // Session establishment creates a LongNode; JSONB/JWT round trips decode small
+            // integral values as IntNode. Compare the complete serialized binding, not Java width.
+            var expected = Json.read(done.session().session().path("uacSessionBinding").toString());
             assertEquals(expected, first.path("uacSessionBinding"));
             assertEquals(expected, identity.path("uacSessionBinding"));
             var renewed =

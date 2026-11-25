@@ -150,6 +150,27 @@ class NativeDeviceBindingTest {
   }
 
   @Test
+  void persistedBindingAndJwtKeepTheLongGenerationValue() {
+    var inMemory = binding.deepCopy().put("authGeneration", 7L);
+    var persisted = Json.read(inMemory.toString());
+    assertTrue(inMemory.path("authGeneration").isLong());
+    assertTrue(persisted.path("authGeneration").isInt());
+    assertNotEquals(inMemory, persisted); // Jackson node equality distinguishes int from long.
+    session.set("uacSessionBinding", persisted.deepCopy());
+    device.set("uacSessionBinding", persisted.deepCopy());
+    grant.set("uacSessionBinding", persisted.deepCopy());
+    var result = refresh();
+    assertFalse(result.has("error"));
+    var claims = tokens.verify(result.path("access_token").asString());
+    var identity =
+        TenantContext.call(
+            tenant, () -> oauth.nativeIdentity(result.path("access_token").asString(), false));
+    assertEquals(Json.read(inMemory.toString()), claims.path("uacSessionBinding"));
+    assertEquals(Json.read(inMemory.toString()), identity.path("uacSessionBinding"));
+    assertEquals(7L, claims.path("uacSessionBinding").path("authGeneration").asLong());
+  }
+
+  @Test
   void nativeRefreshSignsExactSourceBindingAndPreservesRefreshLineage() {
     var result = refresh();
     assertFalse(result.has("error"), result.toString());
