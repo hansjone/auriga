@@ -559,7 +559,7 @@ for (const locale of ['zh', 'en'])
     assert.equal(calls[0].method, 'POST');
     assert.equal(calls[0].headers['x-auriga-csrf'], 'test-csrf');
     assert.equal(calls[0].credentials, 'same-origin');
-    assert.deepEqual(JSON.parse(calls[0].body), { action: 'open_login' });
+    assert.deepEqual(JSON.parse(calls[0].body), { action: 'inline_login' });
     assert.equal(overviewCount, 1);
     assert.equal(fixture.navigated, undefined);
   });
