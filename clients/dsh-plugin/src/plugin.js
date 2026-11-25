@@ -207,6 +207,58 @@ export async function apply(ctx, config) {
           },
           'auriga-dsh: local UAC lifetime',
         );
+        let detachStandaloneUacEnv;
+        profileCtx.inject(['shellEnv'], (envCtx) => {
+          if (typeof envCtx.shellEnv?.register !== 'function') return;
+          const contributor = {
+            name: 'auriga-local-uac',
+            variables: {
+              DSH_AURIGA_ID: {
+                description: 'Current local UAC employee ID for this task.',
+              },
+              DSH_AURIGA_TOKEN: {
+                description: 'Current local UAC token; never print or persist.',
+              },
+            },
+            resolve(execution) {
+              if (execution?.signal?.aborted || binding)
+                return { DSH_AURIGA_ID: '', DSH_AURIGA_TOKEN: '' };
+              const cred = localUac?.credentials?.();
+              if (
+                cred &&
+                typeof cred.empNo === 'string' &&
+                cred.empNo &&
+                !cred.empNo.includes('\0') &&
+                typeof cred.token === 'string' &&
+                cred.token &&
+                !cred.token.includes('\0')
+              ) {
+                return {
+                  DSH_AURIGA_ID: cred.empNo,
+                  DSH_AURIGA_TOKEN: cred.token,
+                };
+              }
+              return { DSH_AURIGA_ID: '', DSH_AURIGA_TOKEN: '' };
+            },
+          };
+          const registerStandalone = () => {
+            if (detachStandaloneUacEnv || binding) return;
+            detachStandaloneUacEnv = envCtx.shellEnv.register(contributor);
+          };
+          const unregisterStandalone = () => {
+            detachStandaloneUacEnv?.();
+            detachStandaloneUacEnv = undefined;
+          };
+          if (!configured) registerStandalone();
+          envCtx.effect(
+            () => () => unregisterStandalone(),
+            'auriga-dsh: standalone local UAC env',
+          );
+          uac._syncStandaloneEnv = (hasPlatform) => {
+            if (hasPlatform) unregisterStandalone();
+            else registerStandalone();
+          };
+        });
         const resources = createMemberRoutes({
           directory: profile.dir,
           ctx: profileCtx,
@@ -274,8 +326,10 @@ export async function apply(ctx, config) {
                 await invalidate(origin);
                 if (!origin || disposed) {
                   await resources.attach(undefined);
+                  uac._syncStandaloneEnv?.(false);
                   return;
                 }
+                uac._syncStandaloneEnv?.(true);
                 const effective = await savedPlatformConfig(
                   config?.connect,
                   origin,
@@ -286,6 +340,7 @@ export async function apply(ctx, config) {
                   config: effective,
                   directory: join(profile.dir, 'auriga-connect'),
                   ctx: connectCtx,
+                  localUac: uac,
                 });
                 try {
                   await resources.beforeIdentity(runtime);
