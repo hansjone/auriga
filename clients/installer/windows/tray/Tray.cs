@@ -230,7 +230,8 @@ sealed class TrayApp : ApplicationContext
     ProgressForm updateForm;
     long lastUpdateActivityTicks;
     volatile bool updateApplying;
-    bool openWhenReady, exiting, restarting, busy, restartRequired, updateEnabled = true;
+    bool openWhenReady, exiting, restarting, busy, restartRequired, updateEnabled = true, versionSyncing;
+    DateTime nextSyncAttemptUtc = DateTime.MinValue;
     Dictionary<string, object> info;
 
     public TrayApp(string root, bool autostart)
@@ -313,20 +314,54 @@ sealed class TrayApp : ApplicationContext
 
     void SyncCurrentVersionIfChanged()
     {
-        if (busy || restarting || updateApplying) return;
+        if (busy || restarting || updateApplying || exiting || versionSyncing) return;
+        if (DateTime.UtcNow < nextSyncAttemptUtc) return;
         string active = null;
         try { active = Desktop.Current(root); } catch (Exception) { return; }
         string known = Desktop.Str(info, "packageId");
         if (string.IsNullOrEmpty(active) || string.Equals(active, known, StringComparison.Ordinal)) return;
-        RefreshInfo();
-        RefreshShellIntegration();
+        versionSyncing = true;
+        ThreadPool.QueueUserWorkItem(delegate
+        {
+            Dictionary<string, object> next = null;
+            string error = null;
+            try { next = Desktop.RunJson(root, "status --root " + Desktop.Quote(root), out error); }
+            catch (Exception e) { error = e.Message; }
+            Post(delegate
+            {
+                versionSyncing = false;
+                if (exiting) return;
+                if (next == null)
+                {
+                    nextSyncAttemptUtc = DateTime.UtcNow.AddSeconds(30);
+                    if (!string.IsNullOrEmpty(error)) Log("version sync failed: " + error);
+                    return;
+                }
+                nextSyncAttemptUtc = DateTime.MinValue;
+                ApplyInfo(next);
+                var snapshot = next;
+                ThreadPool.QueueUserWorkItem(delegate { RefreshShellIntegration(snapshot); });
+            });
+        });
     }
 
     void RefreshInfo()
     {
-        string error;
-        info = Desktop.RunJson(root, "status --root " + Desktop.Quote(root), out error);
-        if (info == null) return;
+        Dictionary<string, object> next = null;
+        string error = null;
+        try { next = Desktop.RunJson(root, "status --root " + Desktop.Quote(root), out error); }
+        catch (Exception e) { error = e.Message; }
+        if (next == null)
+        {
+            if (!string.IsNullOrEmpty(error)) Log("status refresh failed: " + error);
+            return;
+        }
+        ApplyInfo(next);
+    }
+
+    void ApplyInfo(Dictionary<string, object> next)
+    {
+        info = next;
         string dataHome = Desktop.Str(info, "dataHome");
         string logs = Desktop.Str(info, "logs");
         if (logs != null)
@@ -364,7 +399,9 @@ sealed class TrayApp : ApplicationContext
     const string Registration = "Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\";
 
     /// After an in-app update the Apps & features entry and autostart must follow the new version.
-    void RefreshShellIntegration()
+    void RefreshShellIntegration() { RefreshShellIntegration(info); }
+
+    void RefreshShellIntegration(Dictionary<string, object> snapshot)
     {
         try
         {
@@ -373,11 +410,11 @@ sealed class TrayApp : ApplicationContext
                 string name = Desktop.RegistryName(root);
                 using (var key = Registry.CurrentUser.OpenSubKey(Registration + name, true))
                 {
-                    if (key == null || info == null ||
+                    if (key == null || snapshot == null ||
                         !Desktop.SamePath(key.GetValue("InstallLocation") as string, root)) return;
                     if (Desktop.OwnsStartup(root, Registry.GetValue(RunKey, name, null) as string))
                         Registry.SetValue(RunKey, name, Desktop.StartupCommand(root));
-                    key.SetValue("DisplayVersion", Desktop.Str(info, "version") ?? "");
+                    key.SetValue("DisplayVersion", Desktop.Str(snapshot, "version") ?? "");
                     key.SetValue("Publisher", "Auriga");
                     string ico = Path.Combine(root, "bin", "auriga.ico");
                     if (File.Exists(ico)) key.SetValue("DisplayIcon", ico);
@@ -651,9 +688,19 @@ sealed class TrayApp : ApplicationContext
     void OnLauncherExit(Process which)
     {
         if (which != launcher) return;
+        bool wasApplying = updateApplying;
         updateApplying = false;
         updateStageText = null;
-        restartItem.Text = "重启以完成更新";
+        if (wasApplying)
+        {
+            var update = Desktop.Obj(info, "update");
+            if (Desktop.Flag(update, "manualRetryRequired"))
+            {
+                var failure = Desktop.Obj(update, "failure");
+                restartItem.Text = "重试更新（" + (Desktop.Str(failure, "code") ?? "updateFailed") + "/" + (Desktop.Str(failure, "stage") ?? "unknown") + "）";
+            }
+            else restartItem.Text = "重启以完成更新";
+        }
         if (!restarting)
         {
             CloseUpdateProgress();
