@@ -1058,10 +1058,10 @@ class DeviceAiResourcePostgresTest {
   void signingFailureLeavesTheRefreshUsable() {
     doThrow(new IllegalStateException("signer unavailable"))
         .when(tokens)
-        .deviceAi(any(), any(), anyString(), anySet());
+        .deviceAi(any(), any(), anyString(), anySet(), any());
     assertThrows(IllegalStateException.class, () -> exchange(refresh, true));
     assertFalse(grant().path("used").asBoolean());
-    doCallRealMethod().when(tokens).deviceAi(any(), any(), anyString(), anySet());
+    doCallRealMethod().when(tokens).deviceAi(any(), any(), anyString(), anySet(), any());
     assertTrue(exchange(refresh, true).has("access_token"));
   }
 

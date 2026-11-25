@@ -247,6 +247,13 @@
             "displayName": {
               "type": "string",
               "maxLength": 256
+            },
+            "avatarUrl": {
+              "type": "string",
+              "format": "uri",
+              "maxLength": 2048,
+              "pattern": "^https?://",
+              "description": "Optional safe absolute HTTP(S) avatar URL from the current account; unsafe values are omitted."
             }
           }
         }

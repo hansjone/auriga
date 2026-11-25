@@ -15,6 +15,7 @@ import auriga.common.events.OutboxEventPublisher;
 import auriga.common.persistence.*;
 import auriga.common.security.*;
 import auriga.iam.api.IdentityPolicyHooks;
+import auriga.iam.api.PermissionResolver;
 import auriga.testsupport.PostgresExtension;
 import com.sun.net.httpserver.HttpServer;
 import java.net.*;
@@ -357,11 +358,30 @@ class UacFlowPostgresTest {
       throws Exception {
     try (var f = new Fixture("token-verify", 3)) {
       String verifier = Secrets.random(), totp = "JBSWY3DPEHPK3PXP";
+      var key =
+          new com.nimbusds.jose.jwk.gen.ECKeyGenerator(com.nimbusds.jose.jwk.Curve.P_256)
+              .keyID(UUID.randomUUID().toString())
+              .generate();
+      var keys = mock(SigningKeys.class);
+      when(keys.current()).thenReturn(key);
+      when(keys.jwks())
+          .thenReturn(Json.object("keys", List.of(Json.read(key.toPublicJWK().toJSONString()))));
+      var permissions = mock(PermissionResolver.class);
+      when(permissions.resolve(f.tenant, f.account.toString(), "device"))
+          .thenReturn(Set.of("auriga.connect.collab.use"));
+      var tokens =
+          new TokenService(
+              keys,
+              new ContractSchemas(),
+              permissions,
+              f.time,
+              "https://portal.example.com",
+              Map.of());
       var oauth =
           new OAuthProvider(
               store,
               f.sessions,
-              mock(TokenService.class),
+              tokens,
               f.time,
               List.of(
                   new OAuthClient(
@@ -465,6 +485,77 @@ class UacFlowPostgresTest {
                           grant.path("uacSessionBinding").path(field).asString());
                     return null;
                   }));
+      f.call(
+          () -> {
+            var issued =
+                oauth.token(
+                    Map.of(
+                        "client_id",
+                        "inline-test",
+                        "grant_type",
+                        OAuthProvider.DEVICE,
+                        "device_code",
+                        raw,
+                        "code_verifier",
+                        verifier));
+            assertFalse(issued.has("error"), issued.toString());
+            var first = tokens.verify(issued.path("access_token").asString());
+            var identity = oauth.nativeIdentity(issued.path("access_token").asString(), false);
+            var expected = done.session().session().path("uacSessionBinding");
+            assertEquals(expected, first.path("uacSessionBinding"));
+            assertEquals(expected, identity.path("uacSessionBinding"));
+            var renewed =
+                oauth.token(
+                    Map.of(
+                        "client_id",
+                        "inline-test",
+                        "grant_type",
+                        "refresh_token",
+                        "refresh_token",
+                        issued.path("refresh_token").asString()));
+            assertFalse(renewed.has("error"), renewed.toString());
+            var second = tokens.verify(renewed.path("access_token").asString());
+            assertEquals(first.path("did"), second.path("did"));
+            for (String field : List.of("sourceSessionId", "providerId", "authGeneration"))
+              assertEquals(expected.path(field), second.path("uacSessionBinding").path(field));
+            store.tx(
+                () -> {
+                  var next =
+                      store.get(
+                          "oauth_grant",
+                          Secrets.hash(renewed.path("refresh_token").asString()),
+                          false);
+                  assertEquals(expected, next.path("uacSessionBinding"));
+                  assertEquals(
+                      expected,
+                      store
+                          .get("device", first.path("did").asString(), false)
+                          .path("uacSessionBinding"));
+                  return null;
+                });
+            oauth.revoke(
+                Map.of(
+                    "client_id", "inline-test", "token", renewed.path("access_token").asString()));
+            assertEquals(
+                "invalid_grant",
+                oauth
+                    .token(
+                        Map.of(
+                            "client_id",
+                            "inline-test",
+                            "grant_type",
+                            "refresh_token",
+                            "refresh_token",
+                            renewed.path("refresh_token").asString()))
+                    .path("error")
+                    .asString());
+            var failure =
+                assertThrows(
+                    AurigaException.class,
+                    () -> oauth.nativeIdentity(renewed.path("access_token").asString(), false));
+            assertEquals("iam.invalid_token", failure.errorCode().code());
+            return null;
+          });
       assertThrows(
           AurigaException.class,
           () ->

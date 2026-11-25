@@ -15,6 +15,8 @@ import com.nimbusds.jwt.SignedJWT;
 import java.time.*;
 import java.util.*;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
@@ -22,8 +24,9 @@ class DeviceAiResourceTest {
   final UUID tenant = UUID.randomUUID(), account = UUID.randomUUID(), device = UUID.randomUUID();
   final Clock clock = Clock.fixed(Instant.parse("2026-10-25T00:00:00Z"), ZoneOffset.UTC);
 
-  @Test
-  void signsOnlyModelPermissionWithOneAiAudienceAndOnlineExpiry() throws Exception {
+  @ParameterizedTest
+  @ValueSource(booleans = {false, true})
+  void signsOnlyModelPermissionWithOneAiAudienceAndOnlineExpiry(boolean uac) throws Exception {
     var key = new ECKeyGenerator(Curve.P_256).keyID("test-key").generate();
     var keys = mock(SigningKeys.class);
     when(keys.current()).thenReturn(key);
@@ -58,6 +61,16 @@ class DeviceAiResourceTest {
     var resource = new DeviceAiResource(devices, tokens, authorization);
     var session =
         Json.object("accountId", account, "authTime", clock.instant().minusSeconds(600).toString());
+    if (uac)
+      session.set(
+          "uacSessionBinding",
+          Json.object(
+              "sourceSessionId",
+              UUID.randomUUID(),
+              "providerId",
+              UUID.randomUUID(),
+              "authGeneration",
+              7));
     var grant = Json.object("deviceId", device);
     var client =
         new OAuthClient(
@@ -83,6 +96,7 @@ class DeviceAiResourceTest {
       assertTrue(jwt.verify(new ECDSAVerifier(key.toPublicJWK())));
       assertEquals("at+jwt", jwt.getHeader().getType().toString());
       var claims = tokens.verify(issued.accessToken());
+      assertEquals(session.path("uacSessionBinding"), claims.path("uacSessionBinding"));
       assertEquals("auriga.ai-gateway", claims.path("aud").asString());
       assertFalse(DeviceAccessAuthority.platformAudience(claims));
       assertEquals("device", claims.path("ptyp").asString());
@@ -298,7 +312,8 @@ class DeviceAiResourceTest {
                   clock.instant().plusSeconds(seconds)),
               clock.instant(),
               "member",
-              Set.of(DeviceAiResource.INVOKE)));
+              Set.of(DeviceAiResource.INVOKE),
+              null));
     }
     verifyNoInteractions(keys);
   }

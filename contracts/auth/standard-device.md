@@ -35,4 +35,4 @@
 
 ## 标准设备资料投影（AUTH-K3）
 
-`GET /api/iam/v1/me/device-profile` 使用当前 aud=auriga 标准设备 Bearer，并复用 device-session 的在线准入与最终来源复核；不接受查询身份选择器。StandardDeviceProfile 仅返回当前账号 id、tenantId、displayName，no-store、无浏览器 session/令牌，不 touch idle。账号 id 对应设备 JWT sub，不作为 memberId 的别名。C 将其名字与已验证 device-session.memberId 合成固定 profile_read DTO。浏览器 `/me` 不增加设备分支，旧浏览器返回结构不变。
+`GET /api/iam/v1/me/device-profile` 使用当前 aud=auriga 设备 Bearer，并复用对应 standard_device 或 native_tx 的 device-session 在线准入与最终来源复核；不接受查询身份选择器。StandardDeviceProfile 仅返回当前账号 id、tenantId、displayName 和可选 avatarUrl，no-store、无浏览器 session/令牌，不 touch idle。头像仅投影账户已有的绝对 HTTP(S) URL（最长 2048，无用户信息、片段或危险字符），无效值省略；服务端不代抓取图片。账号 id 对应设备 JWT sub，不作为 memberId 的别名。C 将其资料与已验证 device-session.memberId 合成固定 profile_read DTO。浏览器 `/me` 不增加设备分支，旧浏览器返回结构不变。

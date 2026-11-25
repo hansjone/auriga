@@ -56,6 +56,7 @@ final class DeviceAiResource {
         identity,
         Instant.parse(session.path("authTime").asString()),
         effective.getMemberType() == MemberType.MEMBER_TYPE_EXTERNAL ? "external" : "member",
-        Set.copyOf(effective.getPermissionsList()));
+        Set.copyOf(effective.getPermissionsList()),
+        session.get("uacSessionBinding"));
   }
 }

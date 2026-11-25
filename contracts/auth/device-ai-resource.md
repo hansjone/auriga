@@ -41,6 +41,7 @@ claims：`iss` 为当前 issuer，`sub/tid` 为真实账号/租户，`aud` 为�
 `scope=auriga.connect`。`perms` 仅含当前有效的 `auriga.connect.models.invoke`；
 没有该权限则拒绝，不从 roles 扩权，不包含 collab、admin、instance 权限或 `sid/instanceId`。
 `mtyp` 取在线有效成员类型，`auth_time` 保留原登录时间。
+UAC 来源同时携带由 IAM 从已验证来源会话复制的 `uacSessionBinding`，与该设备的平台票及 refresh lineage 逐字段一致；非 UAC 来源省略。
 `exp` 不超过签发时间加 300 秒、当前门户会话绝对期限和 idle 期限的最小值。
 AI 换票不更新绝对或 idle 期限。数据面每次准入仍须按 D1 在线核成员、设备、模型 ACL 和预算。
 

@@ -520,7 +520,8 @@ public final class OAuthProvider {
                         ? Instant.parse(session.path("stepUpAt").asString())
                         : null,
                     scope,
-                    session.path("memberType").asString("member")),
+                    session.path("memberType").asString("member"),
+                    device ? session.get("uacSessionBinding") : null),
             "token_type",
             "Bearer",
             "expires_in",
@@ -797,7 +798,11 @@ public final class OAuthProvider {
               401);
           ObjectNode session = sessions.activeById(device.path("sessionId").asString());
           IamError.require(
-              session != null && UacSessions.boundTo(device, session), "invalid_token", 401);
+              session != null
+                  && UacSessions.boundTo(device, session)
+                  && UacSessions.boundTo(claims, session),
+              "invalid_token",
+              401);
           ObjectNode account = store.get("account", valid.account(), false);
           ObjectNode provider =
               store.get("idp_provider", session.path("providerId").asString(), false);
@@ -808,16 +813,7 @@ public final class OAuthProvider {
                   && provider.path("enabled").asBoolean(),
               "invalid_token",
               401);
-          if (profile)
-            return Json.object(
-                "account",
-                Json.object(
-                    "id",
-                    valid.account(),
-                    "tenantId",
-                    valid.tenant(),
-                    "displayName",
-                    account.path("displayName").asString("")));
+          if (profile) return DeviceProfile.project(account, valid.account(), valid.tenant());
           ObjectNode result =
               Json.object(
                   "accountId",
