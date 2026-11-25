@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { canonicalize, parseStrictJson } from '../../network/trust/jcs.js';
 import { createUacHttp, MAX_BODY, parseIpAddress } from './http.js';
+import { resolveCookieDomain } from './browser-cookies.js';
 
 /*
  * Local port of the platform `UacConfiguredAdapter` (services/iam): the same
@@ -536,7 +537,96 @@ export function createUacAdapter(settings, provider, options = {}) {
       return { available: false, faultReason: 'transport_error' };
     }
   }
-  return { validate, identityDomain, qrContent, scan, verify, department };
+  /** Extract one cookie field per UacConfiguredAdapter rules (optional urlEncoded + JSON pointer).
+   * @param {any} spec @param {Map<string,string>} cookieMap */
+  function readCookieField(spec, cookieMap) {
+    if (!spec || typeof spec.cookie !== 'string' || !spec.cookie)
+      return undefined;
+    let raw = cookieMap.get(spec.cookie);
+    if (typeof raw !== 'string' || !raw) return undefined;
+    if (spec.urlEncoded) {
+      try {
+        raw = decodeURIComponent(raw);
+      } catch {
+        return undefined;
+      }
+    }
+    if (typeof spec.pointer === 'string' && spec.pointer !== '') {
+      try {
+        const parsed = parseStrictJson(Buffer.from(raw, 'utf8'), {
+          maxBytes: 16384,
+          maxDepth: 16,
+        });
+        const found = at(parsed, spec.pointer);
+        return typeof found === 'string' ? found : undefined;
+      } catch {
+        return undefined;
+      }
+    }
+    return raw;
+  }
+
+  /** Return cookie names and domain suffix for silent local browser SSO, or null if unconfigured. */
+  function ssoCookieSpec() {
+    const cookies = settings.cookies;
+    if (!cookies || typeof cookies !== 'object' || Array.isArray(cookies))
+      return null;
+    const names = [];
+    for (const pair of [cookies.portal, cookies.uds]) {
+      if (!pair || typeof pair !== 'object') continue;
+      for (const key of ['token', 'account', 'clientIP']) {
+        const name = pair[key]?.cookie;
+        if (typeof name === 'string' && name.trim()) names.push(name.trim());
+      }
+    }
+    if (!names.length) return null;
+    const domain = resolveCookieDomain(cookies.domain, provider.baseUrl);
+    if (!domain) return null;
+    return { domain, names: [...new Set(names)] };
+  }
+
+  /** Extract a complete (empNo, token, clientIP) credential pair from local browser cookies.
+   * Portal pair takes precedence over UDS pair; mixing pairs is forbidden.
+   * @param {Map<string,string>} cookieMap */
+  function extractSsoCredentials(cookieMap) {
+    const cookies = settings.cookies;
+    if (!cookies || typeof cookies !== 'object' || !(cookieMap instanceof Map))
+      return null;
+    for (const [kind, pair] of /** @type {const} */ ([
+      ['portal', cookies.portal],
+      ['uds', cookies.uds],
+    ])) {
+      if (!pair || typeof pair !== 'object') continue;
+      const account = readCookieField(pair.account, cookieMap);
+      const token = readCookieField(pair.token, cookieMap);
+      if (validUser(account) && validToken(token)) {
+        let ip = clientIP;
+        if (kind === 'uds' && pair.clientIP) {
+          const candidateIp = readCookieField(pair.clientIP, cookieMap);
+          if (typeof candidateIp === 'string' && parseIpAddress(candidateIp))
+            ip = candidateIp;
+        }
+        return {
+          source: kind,
+          empNo: stripWhitespace(/** @type {string} */ (account)),
+          token: /** @type {string} */ (token),
+          clientIP: ip,
+        };
+      }
+    }
+    return null;
+  }
+
+  return {
+    validate,
+    identityDomain,
+    qrContent,
+    scan,
+    verify,
+    department,
+    ssoCookieSpec,
+    extractSsoCredentials,
+  };
 }
 
 /** java.net.URLEncoder (UTF-8) semantics: keep [A-Za-z0-9.*_-], space as '+'.

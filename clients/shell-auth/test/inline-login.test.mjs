@@ -194,21 +194,34 @@ test('first inline UAC login completes tenant-required enrollment before exchang
   });
 });
 
-test('inline team and emergency submit their transaction form without returning credentials', async () => {
-  for (const type of ['team-account', 'emergency']) {
-    const { f, run, mode, calls } = setup();
-    mode(type);
-    await run('inline_login');
-    assert.equal(f.broker.snapshot(OWNER).inlineLogin.step.type, 'form');
-    await run('inline_advance', {
-      operation: 'submit',
-      formId: f.broker.snapshot(OWNER).inlineLogin.step.formId,
-      values: { password: randomUUID() },
-    });
-    assert.equal(f.broker.state, 'authenticated');
-    assert.ok(calls.every(({ path }) => !path.includes('/login/uac/')));
-    await f.broker.close();
-  }
+test('inline login excludes emergency providers and submits team-account form without returning credentials', async () => {
+  const { f, run, mode, calls } = setup();
+  mode('team-account');
+  await run('inline_login');
+  assert.equal(f.broker.snapshot(OWNER).inlineLogin.step.type, 'form');
+  assert.ok(
+    f.broker
+      .snapshot(OWNER)
+      .inlineLogin.providers.every((p) => p.connectorType !== 'emergency'),
+  );
+  await run('inline_advance', {
+    operation: 'submit',
+    formId: f.broker.snapshot(OWNER).inlineLogin.step.formId,
+    values: { password: randomUUID() },
+  });
+  assert.equal(f.broker.state, 'authenticated');
+  assert.ok(calls.every(({ path }) => !path.includes('/login/uac/')));
+  await f.broker.close();
+
+  const onlyEmergency = setup();
+  onlyEmergency.mode('emergency');
+  await onlyEmergency.run('inline_login');
+  assert.equal(onlyEmergency.f.broker.state, 'signed_out');
+  assert.equal(
+    onlyEmergency.f.broker.snapshot().loginError?.code,
+    'iam.provider_unavailable',
+  );
+  await onlyEmergency.f.broker.close();
 });
 test('inline QR expiry and denial close the attempt, and cancel removes projections', async () => {
   for (const terminal of ['expired', 'denied']) {
@@ -290,35 +303,33 @@ test('inline invalid_client preserves platform reason and correlation without op
   await f.broker.close();
 });
 
-for (const mode of ['team-account', 'emergency']) {
-  test(`real IAM failed transaction restarts ${mode} with a fresh grant and PKCE`, async () => {
-    const setupResult = setup();
-    const { f, run, calls, reject } = setupResult;
-    setupResult.mode(mode);
-    await run('inline_login');
-    const first = f.broker.attempt.inline;
-    const oldId = first.transactionId;
-    const oldVerifier = first.verifier;
-    const oldCode = first.grant.deviceCode;
-    const input = {
-      operation: 'submit',
-      formId: first.step.formId,
-      values: { password: 'test' },
-    };
-    reject();
-    await run('inline_advance', input);
-    const view = f.broker.snapshot(OWNER);
-    assert.equal(view.reason, undefined);
-    assert.equal(view.inlineLogin.step.error.code, 'iam.invalid_credentials');
-    assert.notEqual(first.transactionId, oldId);
-    assert.notEqual(first.grant.deviceCode, oldCode);
-    assert.notEqual(first.verifier, oldVerifier);
-    await run('inline_advance', input);
-    assert.equal(f.broker.state, 'authenticated');
-    assert.equal(calls.filter((c) => c.path.endsWith('/token')).length, 1);
-    await f.broker.close();
-  });
-}
+test('real IAM failed transaction restarts team-account with a fresh grant and PKCE', async () => {
+  const setupResult = setup();
+  const { f, run, calls, reject } = setupResult;
+  setupResult.mode('team-account');
+  await run('inline_login');
+  const first = f.broker.attempt.inline;
+  const oldId = first.transactionId;
+  const oldVerifier = first.verifier;
+  const oldCode = first.grant.deviceCode;
+  const input = {
+    operation: 'submit',
+    formId: first.step.formId,
+    values: { password: 'test' },
+  };
+  reject();
+  await run('inline_advance', input);
+  const view = f.broker.snapshot(OWNER);
+  assert.equal(view.reason, undefined);
+  assert.equal(view.inlineLogin.step.error.code, 'iam.invalid_credentials');
+  assert.notEqual(first.transactionId, oldId);
+  assert.notEqual(first.grant.deviceCode, oldCode);
+  assert.notEqual(first.verifier, oldVerifier);
+  await run('inline_advance', input);
+  assert.equal(f.broker.state, 'authenticated');
+  assert.equal(calls.filter((c) => c.path.endsWith('/token')).length, 1);
+  await f.broker.close();
+});
 
 test('completed attempt remains valid during token, verification and persistence awaits', async () => {
   const { f, run, mode } = setup();

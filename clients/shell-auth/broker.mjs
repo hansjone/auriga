@@ -45,12 +45,18 @@ function loginFailure(error, fallbackCorrelationId) {
     : fallbackCorrelationId;
   const shortCode = code.replace(/^iam\./, '');
   if (
-    ['expired_token', 'login_tx_expired', 'device_expired'].includes(shortCode)
+    ['expired_token', 'login_tx_expired', 'device_expired'].includes(
+      shortCode,
+    ) ||
+    error?.name === 'TimeoutError'
   )
     return {
       state: 'reauth_required',
       reason: 'expired',
-      error: { code, correlationId },
+      error: {
+        code: error?.name === 'TimeoutError' ? 'expired_token' : code,
+        correlationId,
+      },
     };
   if (clientErrors.has(shortCode))
     return {

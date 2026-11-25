@@ -4,3 +4,16 @@
     - id: auriga-dsh
       name: auriga-dsh
       config: {}
+
+# Suppress upstream DSH native sign-in, API-key onboarding and preview-notice popups
+# via public Cordis patch rows without modifying upstream DSH sources.
+- id: ui-settings-account
+  disabled: true
+
+- id: ui-settings-models
+  config:
+    credentialOnboarding: false
+
+- id: ui-settings-general
+  config:
+    welcomeNoticeVersion: '2026-09-28.1'

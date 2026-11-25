@@ -8,6 +8,7 @@ import {
   sealSecret,
 } from '../utils/secret-box.js';
 import { createUacAdapter, fold } from './adapter.js';
+import { readLocalBrowserCookies } from './browser-cookies.js';
 import { readUacConfig } from './config.js';
 import { qrPath } from './qr.js';
 
@@ -26,6 +27,7 @@ export const tokenHash = (token) =>
  * Platform features still require the shell's platform session.
  * @param {{directory:string,loadConfig?:typeof readUacConfig,createAdapter?:typeof createUacAdapter,
  *   writeOwner?:typeof atomicWriteJson,
+ *   readBrowserCookies?:typeof readLocalBrowserCookies,
  *   now?:()=>number,setTimer?:(fn:()=>void,ms:number)=>any,clearTimer?:(t:any)=>void,
  *   log?:(level:string,message:string,fields:Record<string,unknown>)=>void}} options
  */
@@ -50,13 +52,18 @@ export function createLocalUacIdentity(options) {
   /** @type {string} */ let identityDomain;
   /** @type {{empNo:string,identityDomain:string|null}|null} */ let owner =
     null;
-  /** @type {{empNo:string,token:string,clientIP:string,loginAt:number,verifiedAt:number,attempt:number,nextRevalidateAt:number}|null} */
+  /** @type {{empNo:string,token:string,clientIP:string,department?:string,authMethod?:'sso'|'qr',loginAt:number,verifiedAt:number,attempt:number,nextRevalidateAt:number}|null} */
   let session = null;
   /** @type {any} */ let challenge;
   /** @type {{outcome:string,at:number}|undefined} */ let last;
   /** @type {any} */ let timer;
+  let ssoSuppressed = false;
+  let ssoAttempted = false;
+  /** @type {Promise<boolean>|undefined} */ let ssoInflight;
   let closed = false;
   let operations = Promise.resolve();
+  const readBrowserCookies =
+    options.readBrowserCookies ?? readLocalBrowserCookies;
 
   const emit = (
     /** @type {string} */ level,
@@ -125,12 +132,119 @@ export function createLocalUacIdentity(options) {
         return;
       }
       availability = 'ready';
+      // Silently attempt local browser SSO cookie login when configured.
+      if (adapter.ssoCookieSpec?.()) {
+        await trySsoInternal();
+      }
     } catch {
       // Fail closed: an unreadable owner binding must never permit rebinding.
       availability = 'storage';
       emit('ERROR', 'storage', { result: 'unavailable' });
     }
   })();
+
+  /** Silent local browser SSO cookie authentication. Never throws or surfaces UI errors. */
+  async function trySsoInternal() {
+    if (
+      closed ||
+      availability !== 'ready' ||
+      session ||
+      ssoSuppressed ||
+      ssoAttempted
+    )
+      return !!session;
+    const spec = adapter?.ssoCookieSpec?.();
+    if (!spec) return false;
+    if (ssoInflight) return ssoInflight;
+    ssoAttempted = true;
+    ssoInflight = (async () => {
+      const correlationId = randomUUID();
+      try {
+        const cookieMap = await readBrowserCookies({
+          domain: spec.domain,
+          names: spec.names,
+          now,
+        });
+        if (closed || session || ssoSuppressed) return !!session;
+        const cred = adapter.extractSsoCredentials?.(cookieMap);
+        if (!cred) return false;
+        if (owner && fold(owner.empNo) !== fold(cred.empNo)) return false;
+        emit('INFO', 'sso', {
+          phase: 'start',
+          source: cred.source,
+          correlationId,
+        });
+        const verified = await adapter.verify({
+          empNo: cred.empNo,
+          token: cred.token,
+          clientIP: cred.clientIP,
+        });
+        if (closed || session || ssoSuppressed) return !!session;
+        if (!verified.success) {
+          emit('INFO', 'sso', {
+            phase: 'end',
+            result: verified.failureClass ?? 'rejected',
+            correlationId,
+          });
+          return false;
+        }
+        const deptResult = await adapter
+          .department(
+            {
+              empNo: verified.empNo,
+              token: verified.token,
+              clientIP: cred.clientIP,
+            },
+            'login_info',
+          )
+          .catch(() => ({ available: false }));
+        if (closed || session || ssoSuppressed) return !!session;
+        return await mutate(async () => {
+          if (closed || session || ssoSuppressed) return !!session;
+          if (owner && fold(owner.empNo) !== fold(verified.empNo)) return false;
+          const at = now();
+          if (!owner) {
+            const binding = { empNo: verified.empNo, identityDomain };
+            try {
+              await persistOwner(binding);
+            } catch {
+              return false;
+            }
+            owner = binding;
+          }
+          if (closed) return false;
+          session = {
+            empNo: owner.empNo,
+            token: verified.token,
+            clientIP: cred.clientIP ?? '',
+            ...(deptResult?.available && deptResult.department
+              ? { department: deptResult.department }
+              : {}),
+            authMethod: 'sso',
+            loginAt: at,
+            verifiedAt: at,
+            attempt: 0,
+            nextRevalidateAt: at + config.revalidation.intervalSeconds * 1000,
+          };
+          last = { outcome: 'signed_in', at };
+          emit('INFO', 'sso', {
+            phase: 'end',
+            result: 'authenticated',
+            tokenHash: tokenHash(verified.token),
+            correlationId,
+          });
+          schedule();
+          return true;
+        });
+      } catch {
+        emit('WARN', 'sso', { phase: 'end', result: 'error', correlationId });
+        return false;
+      } finally {
+        ssoInflight = undefined;
+      }
+    })();
+    return ssoInflight;
+  }
 
   function schedule() {
     clearTimer(timer);
@@ -259,6 +373,8 @@ export function createLocalUacIdentity(options) {
       ...(session
         ? {
             empNo: session.empNo,
+            ...(session.department ? { department: session.department } : {}),
+            ...(session.authMethod ? { authMethod: session.authMethod } : {}),
             loginAt: new Date(session.loginAt).toISOString(),
             verifiedAt: new Date(session.verifiedAt).toISOString(),
             revalidation: (session.attempt ?? 0) > 0 ? 'retrying' : 'ok',
@@ -381,6 +497,17 @@ export function createLocalUacIdentity(options) {
           ? 'verify_unavailable'
           : 'token_rejected',
       );
+    const deptResult = await adapter
+      .department(
+        {
+          empNo: verified.empNo,
+          token: verified.token,
+          clientIP: result.clientIP,
+        },
+        'login_info',
+      )
+      .catch(() => ({ available: false }));
+    if (closed || challenge !== current || terminal(current.state)) return;
     return mutate(async () => {
       if (closed || challenge !== current || terminal(current.state)) return;
       if (now() >= current.expiresAt) return settle(current, 'expired');
@@ -401,11 +528,16 @@ export function createLocalUacIdentity(options) {
         empNo: owner.empNo,
         token: verified.token,
         clientIP: result.clientIP ?? '',
+        ...(deptResult?.available && deptResult.department
+          ? { department: deptResult.department }
+          : {}),
+        authMethod: 'qr',
         loginAt: at,
         verifiedAt: at,
         attempt: 0,
         nextRevalidateAt: at + config.revalidation.intervalSeconds * 1000,
       };
+      ssoSuppressed = false;
       last = { outcome: 'signed_in', at };
       settle(current, 'authenticated');
       schedule();
@@ -455,14 +587,25 @@ export function createLocalUacIdentity(options) {
     return mutate(() => {
       if (closed || availability !== 'ready') throw failure('unavailable');
       challenge = undefined;
+      ssoSuppressed = true;
       if (session) signOut('user_logout', randomUUID());
       return status();
     });
   }
 
+  function credentials() {
+    if (closed || !session) return null;
+    return {
+      empNo: session.empNo,
+      token: session.token,
+      updatedAt: new Date(session.verifiedAt).toISOString(),
+    };
+  }
+
   return {
     ready,
     status,
+    credentials,
     start,
     poll,
     cancel,

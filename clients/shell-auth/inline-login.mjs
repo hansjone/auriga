@@ -18,9 +18,7 @@ export class InlineLogin {
     if (!Array.isArray(data.items)) throw fail();
     this.providers = data.items
       .filter(
-        (p) =>
-          uuid(p.id) &&
-          ['uac', 'team-account', 'emergency'].includes(p.connectorType),
+        (p) => uuid(p.id) && ['uac', 'team-account'].includes(p.connectorType),
       )
       .map((p) => ({
         id: p.id,

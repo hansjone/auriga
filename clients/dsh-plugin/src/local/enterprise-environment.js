@@ -1,7 +1,7 @@
 import { fileURLToPath } from 'node:url';
 
 /** Use the async tool dispatch hook before the host synchronously collects env.
- * @param {{auth:any,getServer:()=>any,authorization?:()=>string|null,prepare?:(execution:any)=>Promise<string|undefined>,finishContext?:(id:string)=>void,retain?:(id:string)=>boolean}} options */
+ * @param {{auth:any,getServer:()=>any,authorization?:()=>string|null,prepare?:(execution:any)=>Promise<string|undefined>,finishContext?:(id:string)=>void,retain?:(id:string)=>boolean,localUacCredentials?:()=>{empNo:string,token:string}|null}} options */
 export function createEnterpriseEnvironment({
   auth,
   getServer,
@@ -9,6 +9,7 @@ export function createEnterpriseEnvironment({
   prepare,
   finishContext,
   retain,
+  localUacCredentials,
 }) {
   /** @type {Map<any,any>} */ const issued = new Map();
   const helpers = fileURLToPath(
@@ -45,17 +46,40 @@ export function createEnterpriseEnvironment({
       },
     },
     resolve(/** @type {any} */ execution) {
+      if (execution?.signal?.aborted) return { ...empty };
+      const localFallback = () => {
+        try {
+          const cred = localUacCredentials?.();
+          if (
+            cred &&
+            typeof cred.empNo === 'string' &&
+            cred.empNo &&
+            !cred.empNo.includes('\0') &&
+            typeof cred.token === 'string' &&
+            cred.token &&
+            !cred.token.includes('\0')
+          ) {
+            return { DSH_AURIGA_ID: cred.empNo, DSH_AURIGA_TOKEN: cred.token };
+          }
+        } catch {
+          /* ignore */
+        }
+        return {};
+      };
       const row = issued.get(execution?.token ?? execution);
-      if (!row || execution.signal?.aborted) return { ...empty };
+      if (!row) return { ...empty, ...localFallback() };
       const env = {
         ...empty,
         DSH_TEAM_TASK_CAPABILITY: row.cap,
         DSH_TEAM_BASE: `http://127.0.0.1:${row.port}/dsh-team`,
       };
       try {
-        return { ...env, ...row.current?.() };
+        const fromBroker = /** @type {any} */ (row.current?.());
+        if (fromBroker?.DSH_AURIGA_ID && fromBroker?.DSH_AURIGA_TOKEN)
+          return { ...env, ...fromBroker };
+        return { ...env, ...localFallback() };
       } catch {
-        return env;
+        return { ...env, ...localFallback() };
       }
     },
   };

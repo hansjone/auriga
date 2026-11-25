@@ -162,6 +162,9 @@ window.__ModuleLoader__.load({
       ownerBound: '本机已绑定工号，只允许该工号登录。',
       ownerMismatch: '工号与本机绑定的主人不一致',
       empNo: '工号',
+      department: '部门',
+      uacTab: '公司扫码登录',
+      teamTab: '团队账号登录',
       loginTime: '登录时间',
       revalidation: '定期复验',
       revalidationOk: '正常',
@@ -199,10 +202,10 @@ window.__ModuleLoader__.load({
       loginCompare: '请核对门户预填的确认码与此处一致，仅确认自己发起的登录：',
       loginRejected: '平台拒绝了登录请求，请联系管理员检查客户端配置。',
       loginBadCredentials: '口令或验证码错误，请重试。',
-      loginMethods: '默认在系统浏览器登录，也可在此扫码或使用团队账号。',
+      loginMethods: '扫码或使用团队账号登录平台。',
       platformLogin: '登录平台',
       platformBrowserLogin: '系统浏览器登录',
-      platformInlineLogin: '扫码或团队账号',
+      platformInlineLogin: '扫码或团队账号登录',
       configurePlatform: '配置平台地址',
       reconnect: '重新连接',
       loginDone: '平台登录成功。',
@@ -370,6 +373,9 @@ window.__ModuleLoader__.load({
         'This device is bound to its owner; only that employee can sign in.',
       ownerMismatch: 'Employee does not match the bound owner',
       empNo: 'Employee no.',
+      department: 'Department',
+      uacTab: 'Company QR sign-in',
+      teamTab: 'Team account',
       loginTime: 'Signed in',
       revalidation: 'Revalidation',
       revalidationOk: 'OK',
@@ -2102,7 +2108,13 @@ window.__ModuleLoader__.load({
             ? { kind: 'connected', tone: 'done' }
             : { kind: 'degraded', tone: 'warning' };
         };
-        function LocalIdentityCard({ uac, setUac, reload, active }) {
+        function LocalIdentityCard({
+          uac,
+          setUac,
+          reload,
+          active,
+          modal = false,
+        }) {
           const [busy, setBusy] = React.useState(false);
           const [error, setError] = React.useState('');
           const opened = React.useRef(false);
@@ -2190,13 +2202,19 @@ window.__ModuleLoader__.load({
             : 0;
           return h(
             'section',
-            { className: 'auriga-card', 'aria-label': t('localIdentity') },
-            h(
-              'header',
-              null,
-              h('h3', null, t('localIdentity')),
-              h('span', { className: 'auriga-badge' }, t('uacMethod')),
-            ),
+            {
+              className: modal
+                ? 'auriga-card auriga-login-card'
+                : 'auriga-card',
+              'aria-label': t('localIdentity'),
+            },
+            !modal &&
+              h(
+                'header',
+                null,
+                h('h3', null, t('localIdentity')),
+                h('span', { className: 'auriga-badge' }, t('uacMethod')),
+              ),
             signedIn
               ? h(
                   'div',
@@ -2212,6 +2230,8 @@ window.__ModuleLoader__.load({
                     null,
                     h('dt', null, t('empNo')),
                     h('dd', null, uac.empNo),
+                    uac.department && h('dt', null, t('department')),
+                    uac.department && h('dd', null, uac.department),
                     h('dt', null, t('loginTime')),
                     h(
                       'dd',
@@ -2369,7 +2389,7 @@ window.__ModuleLoader__.load({
         const loginRequests = new Set();
         const openPlatformLogin = (action) =>
           loginRequests.forEach((open) =>
-            open(action === 'inline_login' ? 'inline_login' : 'open_login'),
+            open(action === 'uac' ? 'uac' : 'inline_login'),
           );
         function PlatformLogin() {
           const local = ['127.0.0.1', '[::1]', 'localhost'].includes(
@@ -2379,24 +2399,39 @@ window.__ModuleLoader__.load({
           const [settled, setSettled] = React.useState(false);
           const [ownsLogin, setOwnsLogin] = React.useState(false);
           const [request, setRequest] = React.useState(0);
+          const [loginTab, setLoginTab] = React.useState('uac');
           const attempted = React.useRef(false);
-          const loginAction = React.useRef('open_login');
+          const loginAction = React.useRef('inline_login');
           const manual = React.useRef(false);
+          const manualPlatform = React.useRef(false);
           const cancellation = React.useRef(null);
           const [shell, reloadShell, setShell] = useLocalStatus(
             'auriga/shell/status',
             open && ownsLogin ? 2000 : 15000,
             local && (!settled || (open && ownsLogin)),
           );
+          const [uac, reloadUac, setUac] = useLocalStatus(
+            'auriga/uac/status',
+            open ? 2000 : 15000,
+            local && (!settled || (open && ownsLogin)),
+            true,
+          );
+          const hasLocalUac = !!uac?.available && !uac?.reason;
+          const uacSignedIn = hasLocalUac && uac.state === 'authenticated';
+          const platformAvailable =
+            !!shell?.configured && !!shell?.brokerAvailable;
           const show = (action) => {
-            loginAction.current = action;
+            loginAction.current = 'inline_login';
             manual.current = true;
+            manualPlatform.current = action !== 'uac';
+            setLoginTab(action === 'uac' && hasLocalUac ? 'uac' : 'platform');
             setSettled(false);
             setRequest((n) => n + 1);
           };
           const skip = () => {
             attempted.current = true;
             manual.current = false;
+            manualPlatform.current = false;
             try {
               window.sessionStorage.setItem('auriga.login.skipped', '1');
             } catch {
@@ -2423,6 +2458,7 @@ window.__ModuleLoader__.load({
               // A tray navigation is automatic: it must respect the session skip.
               setSettled(false);
               reloadShell();
+              reloadUac();
             };
             window.addEventListener('hashchange', onHash);
             onHash();
@@ -2432,10 +2468,22 @@ window.__ModuleLoader__.load({
             };
           }, []);
           React.useEffect(() => {
-            if (!local || shell === undefined) return;
-            // Retry startup readiness slowly until the IPC broker appears.
-            setSettled(!shell?.configured || !!shell?.brokerAvailable);
-            if (
+            if (!local || uac === undefined || shell === undefined) return;
+            // Retry startup readiness slowly until the IPC broker appears (when no local UAC).
+            setSettled(
+              hasLocalUac || !shell?.configured || !!shell?.brokerAvailable,
+            );
+            if (hasLocalUac) {
+              if (uacSignedIn && !manualPlatform.current) {
+                setOpen(false);
+                return;
+              }
+              if (manualPlatform.current && shell?.loggedIn) {
+                manualPlatform.current = false;
+                setOpen(false);
+                return;
+              }
+            } else if (
               !shell?.configured ||
               !shell?.brokerAvailable ||
               shell.loggedIn
@@ -2451,13 +2499,17 @@ window.__ModuleLoader__.load({
               /* Storage is optional; attempted still guards this mount. */
             }
             if (manual.current || (!attempted.current && !skipped)) {
+              const wasManualPlatform = manualPlatform.current;
               manual.current = false;
               attempted.current = false;
+              if (!wasManualPlatform) {
+                setLoginTab(hasLocalUac ? 'uac' : 'platform');
+              }
               setOpen(true);
             }
-          }, [shell, request]);
+          }, [shell, uac, request, hasLocalUac, uacSignedIn]);
           React.useEffect(() => {
-            if (!open) return;
+            if (!open || loginTab !== 'platform' || !platformAvailable) return;
             const controller = new AbortController();
             let live = true,
               release;
@@ -2500,10 +2552,11 @@ window.__ModuleLoader__.load({
               setOwnsLogin(false);
               Promise.resolve(cancellation.current).finally(() => release?.());
             };
-          }, [open]);
+          }, [open, loginTab, platformAvailable]);
           React.useEffect(() => {
             if (
               !open ||
+              loginTab !== 'platform' ||
               !ownsLogin ||
               attempted.current ||
               !shell?.csrf ||
@@ -2520,14 +2573,20 @@ window.__ModuleLoader__.load({
             })
               .catch(() => {})
               .finally(reloadShell);
-          }, [open, ownsLogin, shell]);
+          }, [open, loginTab, ownsLogin, shell]);
           if (
             !open ||
-            shell?.loggedIn ||
-            !shell?.configured ||
-            !shell?.brokerAvailable
+            (!hasLocalUac &&
+              (shell?.loggedIn ||
+                !shell?.configured ||
+                !shell?.brokerAvailable))
           )
             return null;
+          const activeTab =
+            hasLocalUac && (loginTab === 'uac' || !platformAvailable)
+              ? 'uac'
+              : 'platform';
+          const showTabs = hasLocalUac && platformAvailable;
           const content = h(
             'div',
             { className: 'auriga-shell auriga-login-content' },
@@ -2535,25 +2594,86 @@ window.__ModuleLoader__.load({
               'p',
               { className: 'auriga-login-intro' },
               state.locale === 'en'
-                ? 'Connect your account to access team resources. You can also sign in later.'
-                : '连接平台账号，使用团队资源与协作服务。也可以稍后登录。',
+                ? 'Sign in to use Auriga services. You can also sign in later.'
+                : '登录账号以使用 Auriga 服务。也可以稍后登录。',
             ),
-            ownsLogin
-              ? h(PlatformCard, {
-                  boot: { mode: 'connect' },
-                  shell,
-                  reloadShell,
+            showTabs &&
+              (HostSegmentedTabs
+                ? h(HostSegmentedTabs, {
+                    items: [
+                      { value: 'uac', label: t('uacTab') },
+                      { value: 'platform', label: t('teamTab') },
+                    ],
+                    value: activeTab,
+                    label:
+                      state.locale === 'en' ? 'Sign-in method' : '登录方式',
+                    className: 'auriga-login-methods',
+                    onChange: (next) => {
+                      attempted.current = false;
+                      manualPlatform.current = next === 'platform';
+                      setLoginTab(next);
+                    },
+                  })
+                : h(
+                    'div',
+                    {
+                      className: 'auriga-login-methods',
+                      role: 'tablist',
+                      'aria-label':
+                        state.locale === 'en' ? 'Sign-in method' : '登录方式',
+                    },
+                    h(
+                      'button',
+                      {
+                        type: 'button',
+                        role: 'tab',
+                        'aria-selected': activeTab === 'uac',
+                        onClick: () => {
+                          manualPlatform.current = false;
+                          setLoginTab('uac');
+                        },
+                      },
+                      t('uacTab'),
+                    ),
+                    h(
+                      'button',
+                      {
+                        type: 'button',
+                        role: 'tab',
+                        'aria-selected': activeTab === 'platform',
+                        onClick: () => {
+                          attempted.current = false;
+                          manualPlatform.current = true;
+                          setLoginTab('platform');
+                        },
+                      },
+                      t('teamTab'),
+                    ),
+                  )),
+            activeTab === 'uac'
+              ? h(LocalIdentityCard, {
+                  uac,
+                  setUac,
+                  reload: reloadUac,
+                  active: open && activeTab === 'uac',
                   modal: true,
                 })
-              : h(
-                  'p',
-                  { role: 'status' },
-                  t(
-                    typeof window.navigator?.locks?.request === 'function'
-                      ? 'loginOtherWindow'
-                      : 'loginWindowUnsupported',
+              : ownsLogin
+                ? h(PlatformCard, {
+                    boot: { mode: 'connect' },
+                    shell,
+                    reloadShell,
+                    modal: true,
+                  })
+                : h(
+                    'p',
+                    { role: 'status' },
+                    t(
+                      typeof window.navigator?.locks?.request === 'function'
+                        ? 'loginOtherWindow'
+                        : 'loginWindowUnsupported',
+                    ),
                   ),
-                ),
             h(
               'div',
               { className: 'auriga-login-footer' },
@@ -2942,19 +3062,6 @@ window.__ModuleLoader__.load({
                   Action,
                   {
                     primary: true,
-                    disabled: busy || !shell?.csrf,
-                    onClick: modal
-                      ? () => command('open_login')
-                      : loginOverlayAvailable
-                        ? openPlatformLogin
-                        : () => command('open_login'),
-                  },
-                  t('platformBrowserLogin'),
-                ),
-              ['signedOut', 'reauth'].includes(view.kind) &&
-                h(
-                  Action,
-                  {
                     disabled: busy || !shell?.csrf,
                     onClick:
                       !modal && loginOverlayAvailable
