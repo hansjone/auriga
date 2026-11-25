@@ -12,6 +12,7 @@ import { spawnSync } from 'node:child_process';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { digest, physical, ROOT } from './inputs.mjs';
+import { privateKeyFailure } from './diagnostics.mjs';
 
 function windows(path, kind) {
   if (process.platform !== 'win32') return;
@@ -40,9 +41,11 @@ function windows(path, kind) {
       env: { ...env, AURIGA_RESOURCE_KEY_PATH: path },
       encoding: 'utf8',
       windowsHide: true,
+      maxBuffer: 64 * 1024,
     },
   );
-  if (result.status !== 0) throw new Error('桌面私钥权限校验或保护失败');
+  if (result.error || result.status !== 0)
+    throw privateKeyFailure(result, path);
 }
 export function assertPrivateKey(file) {
   physical(file);

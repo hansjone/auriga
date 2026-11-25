@@ -122,6 +122,9 @@ func testNASBifrostRotationControlScope(t *testing.T, config string) {
 	}
 	stops := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		if nasRotationVersionFixture(w, req) {
+			return
+		}
 		path := strings.TrimPrefix(req.URL.Path, "/v1.41")
 		switch {
 		case path == "/containers/json":

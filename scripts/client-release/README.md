@@ -36,6 +36,8 @@ node --test clients/installer/test/python-runtime.test.mjs
 
 Windows 自带 PowerShell5.1、System32 tar、.NET Framework4.x Framework64/v4.0.30319/csc.exe 与引用程序集用于认证 helper、托盘和自解压向导。无需额外 .NET SDK/NuGet/MSBuild/7-Zip/WiX 或付费打包工具。系统工具摘要固定在输入清单，补丁/工具变化需在匹配受信 Windows 基线重出套件，不能复制系统目录冒充便携 SDK。锁键包括根/一级 workspace manifests、workspace/config/pnpm lock、插件 npm lock、DSH npm lock、upstream pin、构建 Node 和目标；业务源码可复用，依赖/锁改变明确拒绝。
 
+私钥 ACL 校验或保护失败会保留子进程退出码、启动错误类别及受限的脱敏 stdout/stderr，不打印私钥路径、私钥内容或发布会话。ACL 要求 Owner 为当前用户、关闭继承且仅一条当前用户 Allow FullControl。`scripts/resource-keys/protect-private-path.ps1` 仅用于新建空目录/空文件的保护，不会覆盖或修复现有私钥内容。出现 PowerShell 授权或执行策略拒绝时，先由管理员核对 `Get-ExecutionPolicy -List` 与脚本信任，再按组织策略处理；工具继续使用 `-File`，不会自动添加 Bypass 或改变系统策略。
+
 ## 无 Git 来源及离线构建
 
 保留 #373 源码包的 auriga-source.json、SHA256SUMS、SHA256SUMS.sig 和 release-public.pem。清单优先，即使现场后建 .git 也不替换基线。验发行身份、元数据摘要、文件表与基线快照，再按 Go 同格式 mode/sha256/path 换行计算当前源码摘要。已知文本 CRLF、shell BOM、执行模式沿 #373 规范；支持普通源码新增/修改/删除。固定上游 commit，记录当前/基线摘要、发行者指纹和 dirty/siteChanges。缺失、篡改或没有独立信任拒绝；无清单时仍支持原 Git checkout，两者都无则拒绝。
@@ -47,6 +49,10 @@ Go→Node 互操作在 deploy/offline/desktop_source_test.go 检查。凭据、�
 ```
 
 - 可选 `--uac-config-dir <目录>`：现场启用桌面端本地 UAC 扫码与无感知浏览器 SSO 自动登录时，传入包含 `adapter.json` 与 `provider.json` 两个普通文件的目录（拒绝符号链接，单文件 ≤ 64 KiB）。构建时原样写入 `payload/auriga/uac/` 并纳入安装包 `manifest.json` SHA-256 校验；安装或升级时由安装器原子落盘到 `<profile>/auriga-connect/uac/`（公开仓库不含企业私有配置，未传此参数时不影响普通安装包）。`adapter.json` 中 `cookies.domain` 支持与 `provider.baseUrl` 异域（如门户域 `aip.corp.example` 匹配父域 `.corp.example` Cookie）；若终端浏览器启用 Chromium App-Bound Encryption (`v20`)，客户端会记录无秘密诊断日志并静默回落到本地 UAC 扫码。
+
+构建成功会明确提示是否包含本地 UAC 配置；包含时提示包内 `payload/auriga/uac/` 和两个文件名，不输出配置内容。核对安装包或构建暂存 payload，不能仅看同级发行目录是否有 `auriga/uac/`。
+
+`--verify-key`（别名 `--devkit-verify-key`）核验套件和签名源码的发行身份；`--release-public-key`（别名 `--site-release-public-key`）是写入客户端的站点桌面发行公钥，两者用途不同。每组原名与别名互斥，即使传入同一文件也须只选一个。套件中的 `release-public.pem` 只供与独立批准材料比对，不能自证信任。验签不匹配时打印实际公钥 SPKI SHA-256；只有显式给出独立批准的 `--trust-fingerprint` 才打印期望指纹，未提供时不会从未验清单推断期望值。
 
 --devkit-sha256 仅保留给有独立批准摘要的旧 Git 输入；正式无 Git 路径用同一发行钥核签名源码与 Windows 附件，不能用此参数跳过源码验签。本机固定磁盘输入/公钥根/签名目录/输出父目录要求，拒绝 UNC、设备路径、映射网络盘和 junction。离线介质先复制到本地，输出目录须全新，单一源码目录不并发构建。
 
@@ -92,5 +98,7 @@ Linux install 加 --desktop-public-key <独立Ed25519 SPKI PEM>、--desktop-publ
 平台仅接收公钥，写 <data>/config/desktop/release-public.pem；stack.env 设置 AURIGA_DESKTOP_PUBLISHER_TENANT_ID。原 renderer/Compose 自动配置 AURIGA_RESOURCE_DESKTOP_PUBLIC_KEY_FILE=/etc/auriga/desktop/release-public.pem、AURIGA_RESOURCE_DESKTOP_DIRECTORY=/var/lib/auriga/desktop 和发布租户，桌面卷使用 UID/GID10001:10001、0700。备份发行卷、resource数据库、公钥及安装state。
 
 sign --review-only 展示来源/现场改动、包摘要、公钥/资源根、版本/序号/最低版本/渠道等，Git 来源（无签名源码清单）醒目显示 sourceWarning，须独立核对源码提交及工作区。人工确认 reviewSha256 后才用现场桌面私钥签名。该钥与平台包/Windows附件发行钥分开。publish 要求同目录 desktop-build.json，先核 --public-key 的 SPKI 指纹等于构建记录 publicKeyFingerprint，再通过正常 edge 管理 POST /api/resource/v1/admin/desktop/releases 上传 exe，X-Desktop-Manifest 为已签 JSON base64url；使用近期管理员会话 Cookie、Origin、X-Auriga-CSRF，要求 resource.versions.publish。会话 JSON 仅从 AURIGA_CLIENT_ADMIN_AUTH 环境读，不进入 argv/日志。
+
+审阅结束仅临时目录清理失败时，保留原成功结论或原校验错误，并警告错误类别与残留 `desktop-review-*` 目录，稍后确认没有占用后清理；清理警告不代表制品校验失败。CLI 错误摘要保留脱敏根因和下一步。发布收到 HTTP 401 时提示重新登录；403 的 `iam.step_up_required` 提示完成近期身份验证，`common.forbidden` 提示核对发行权限；其他 403 仅说明原因未识别，不猜测会话已过期，也不输出响应正文中的 title/detail。
 
 发布前核签名、摘要和全平台账本序号；发布后从门户同渠道 latest 验完整清单，再完整流式下载 /api/resource/v1/desktop/packages/<sequence> 核长度/SHA256。拒绝跳转，HTTP 需分别显式确认支持的私有/回环 IP origin。自检失败可能已发布，先看账本，不自动重发或撤回。管理台手动入口 /ops/desktop，完整操作及密钥轮换见根 [MAINTAIN.md](../../MAINTAIN.md#客户端发布windows-开发机)。当前更换桌面发行根需成员受信重新安装；门户/旧版托盘自动更新仍由主控隔离演练验收。

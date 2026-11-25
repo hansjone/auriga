@@ -256,7 +256,7 @@ type siteOps struct {
 	collabNetwork func(s state) error
 }
 
-var defaultSiteOps = siteOps{nas: nas, health: waitHealthyFor, smoke: runDeploySmoke, stopWriters: stopDataWriters, compose: compose, collabNetwork: startCollabNetworkOffline}
+var defaultSiteOps = siteOps{nas: nas, health: waitDeployHealthyFor, smoke: runDeploySmoke, stopWriters: stopDataWriters, compose: compose, collabNetwork: startCollabNetworkOffline}
 
 // dataWriterServices：按镜像列出会写库或改写数据目录的 compose 服务（docker-compose.yml、
 // collab-compose.yml）。postgres、collab-db、nats、registry 不在内：读迁移版本要用 postgres，
@@ -469,6 +469,10 @@ func doRollback(ctx context.Context, ops siteOps, cfg *siteConfig, data string, 
 	rc.MixedVersions = mixedVersionsNote(plan)
 	rc.Notes = append(rc.Notes, "回滚路径："+formatSwitchPlanLine(plan))
 	fmt.Fprintf(run.out, "回滚到 r%d（%s）…\n", target.Seq, formatSwitchPlanLine(plan))
+	if plan.HasCollab && (plan.Mode == switchModeFull || plan.Mode == switchModeContainers) {
+		rc.Notes = append(rc.Notes, deployMessageOfflineNote)
+		fmt.Fprintln(run.out, deployMessageOfflineNote)
+	}
 	if err := startRecord(ops, &s, target, healthTimeout(cfg), plan); err != nil {
 		rc.Health = err.Error()
 		rc.RolledBack = false

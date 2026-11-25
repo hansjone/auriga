@@ -115,6 +115,9 @@ func TestNASRotationDockerOperatorScopeAndCleanup(t *testing.T) {
 				removed := false
 				created := false
 				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+					if nasRotationVersionFixture(w, req) {
+						return
+					}
 					p := strings.TrimPrefix(req.URL.Path, "/v1.41")
 					switch {
 					case p == "/containers/json":

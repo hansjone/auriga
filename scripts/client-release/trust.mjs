@@ -86,6 +86,14 @@ export function verifySignedInventory(
   root,
   { verifyKey, trustFingerprint } = {},
 ) {
+  if (
+    trustFingerprint !== undefined &&
+    trustFingerprint !== null &&
+    !/^[a-f0-9]{64}$/.test(trustFingerprint)
+  )
+    throw new Error(
+      '--trust-fingerprint 必须是独立批准的 64 位小写 SPKI SHA-256',
+    );
   if (!verifyKey && !/^[a-f0-9]{64}$/.test(trustFingerprint ?? ''))
     throw new Error(
       '必须提供独立批准发行公钥 --verify-key 或 --trust-fingerprint',
@@ -98,7 +106,9 @@ export function verifySignedInventory(
     throw new Error('发行公钥必须为 Ed25519');
   const fingerprint = hash(publicKey.export({ type: 'spki', format: 'der' }));
   if (trustFingerprint && trustFingerprint !== fingerprint)
-    throw new Error('发行公钥指纹不匹配');
+    throw new Error(
+      `发行公钥指纹不匹配：实际 SPKI SHA-256=${fingerprint}，独立批准期望=${trustFingerprint}；请核对套件/源码验签公钥 --verify-key，勿使用站点 --release-public-key`,
+    );
   const sums = smallFile(join(root, 'SHA256SUMS'), 4 * 1024 ** 2);
   const encoded = smallFile(join(root, 'SHA256SUMS.sig'), 1024)
     .toString('ascii')
@@ -107,7 +117,9 @@ export function verifySignedInventory(
     !/^[A-Za-z0-9+/]{86}==$/.test(encoded) ||
     !verify(null, sums, publicKey, Buffer.from(encoded, 'base64'))
   )
-    throw new Error('发行 SHA256SUMS 签名不匹配');
+    throw new Error(
+      `发行 SHA256SUMS 签名不匹配：实际验签公钥 SPKI SHA-256=${fingerprint}；${trustFingerprint ? `独立批准期望=${trustFingerprint}` : '未提供独立批准指纹，不从未验材料推断期望值'}；请核对 --verify-key 为套件/源码发行验签公钥，站点 --release-public-key 用于安装包桌面发行`,
+    );
   const entries = new Map();
   for (const line of sums.toString('utf8').trimEnd().split('\n')) {
     if (!/^[a-f0-9]{64} {2}[^\r\n]+$/.test(line))

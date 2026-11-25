@@ -27,10 +27,28 @@ async function request(url, options = {}) {
     signal: AbortSignal.timeout(30 * 60 * 1000),
   });
   if (!response.ok) {
-    await response.body?.cancel();
-    throw new Error(
-      `平台请求失败 HTTP ${response.status}；检查管理会话、近期身份验证和发行权限`,
-    );
+    let code;
+    try {
+      // Only the bounded, recognized problem code is diagnostic evidence.
+      // Response titles/details may contain credentials or private addresses.
+      code = (await json(response)).code;
+    } catch {
+      await response.body?.cancel().catch(() => {});
+    }
+    let reason;
+    if (response.status === 401)
+      reason = '管理会话未认证或已失效；请在正常管理台重新登录后重试';
+    else if (response.status === 403 && code === 'iam.step_up_required')
+      reason =
+        '平台要求近期身份验证（iam.step_up_required）；请在正常管理台完成近期身份验证后立即重试';
+    else if (response.status === 403 && code === 'common.forbidden')
+      reason =
+        '平台拒绝访问（common.forbidden）；请核对管理员的发行权限与站点授权';
+    else if (response.status === 403)
+      reason =
+        '平台拒绝访问，未返回可识别原因；请核对管理会话、近期身份验证及发行权限，不能据此判定会话过期';
+    else reason = '请检查平台状态及管理台发行账本后重试';
+    throw new Error(`平台请求失败 HTTP ${response.status}；${reason}`);
   }
   return response;
 }

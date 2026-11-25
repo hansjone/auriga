@@ -18,6 +18,9 @@ func TestRecoveryEdgeOwnershipAndReadOnlyMount(t *testing.T) {
 		RW                  bool
 	}{filepath.Join(r.data, "config/materials/edge.config.json"), "/etc/auriga/edge.config.json", false})
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		if nasRotationVersionFixture(w, req) {
+			return
+		}
 		if req.Method != "GET" {
 			t.Error("ownership check mutated engine")
 		}
