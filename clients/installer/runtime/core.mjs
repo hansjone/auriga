@@ -98,7 +98,7 @@ const BUNDLES = ['@deepseek-ai/dsh-base', '@deepseek-ai/dsh-web-app', PLUGIN];
 /** Default the desktop web UI to {@link DESKTOP_DSH_PORT} when no `--port` is given. */
 export function desktopLaunchArgs(args = []) {
   for (let i = 0; i < args.length; i++) {
-    if (args[i] === '--port') return [...args];
+    if (args[i] === '--port' || args[i].startsWith('--port=')) return [...args];
   }
   return [...args, '--port', String(DESKTOP_DSH_PORT)];
 }

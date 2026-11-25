@@ -45,6 +45,20 @@ test('desktop launch defaults DSH to the published port', () => {
   assert.deepEqual(desktopLaunchArgs([]), ['--port', '12721']);
 });
 
+for (const args of [
+  ['--port', '3090', '--no-open'],
+  ['--port=3090', '--no-open'],
+  ['--port', '0', '--no-open'],
+  ['--port=0', '--no-open'],
+]) {
+  test(`desktop launch preserves explicit port arguments: ${args.join(' ')}`, () => {
+    const input = Object.freeze([...args]);
+    const launched = desktopLaunchArgs(input);
+    assert.deepEqual(launched, args);
+    assert.notEqual(launched, input);
+  });
+}
+
 test('default smoke distinguishes command and missing-plugin failures with a safe reason code', (t) => {
   const base = tempBase(t);
   const executable = nodeBin(base);
