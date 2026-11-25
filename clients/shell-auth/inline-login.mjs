@@ -36,15 +36,7 @@ export class InlineLogin {
     if (!provider) throw fail();
     await this.cancel();
     this.providerId = id;
-    this.verifier = randomBytes(32).toString('base64url');
-    this.nativeConnect = {
-      clientId: this.platform.config.nativeClientId,
-      codeChallenge: createHash('sha256')
-        .update(this.verifier)
-        .digest('base64url'),
-      codeChallengeMethod: 'S256',
-      deviceName: 'Auriga Desktop',
-    };
+    this.prepareNative();
     const uac = provider.connectorType === 'uac';
     const tx = await this.request(
       uac
@@ -83,6 +75,78 @@ export class InlineLogin {
       };
     } else this.update(tx);
   }
+  prepareNative() {
+    this.verifier = randomBytes(32).toString('base64url');
+    this.nativeConnect = {
+      clientId: this.platform.config.nativeClientId,
+      codeChallenge: createHash('sha256')
+        .update(this.verifier)
+        .digest('base64url'),
+      codeChallengeMethod: 'S256',
+      deviceName: 'Auriga Desktop',
+    };
+  }
+  async startProof(credential, now = Date.now()) {
+    if (!this.proofBody) {
+      const data = await this.request('/api/iam/v1/login/providers');
+      const providers = data.items?.filter(
+        (p) => uuid(p.id) && p.connectorType === 'uac',
+      );
+      // Only a unique provider advertised by the trusted portal can be selected silently.
+      if (providers?.length !== 1)
+        throw fail('iam.uac_proof_provider_required');
+      const provider = providers[0];
+      this.providerId = provider.id;
+      this.providers = [
+        {
+          id: provider.id,
+          connectorType: 'uac',
+          displayName: provider.displayName,
+        },
+      ];
+      this.prepareNative();
+      this.proofBody = {
+        providerId: provider.id,
+        purpose: 'login',
+        nativeConnect: this.nativeConnect,
+        uacProof: {
+          empNo: credential.empNo,
+          token: credential.token,
+          nonce: randomBytes(32).toString('base64url'),
+          issuedAt: new Date(now).toISOString(),
+        },
+      };
+    }
+    if (!this.grant) {
+      const tx = await this.request('/api/iam/v1/login/uac/challenges', {
+        method: 'POST',
+        body: this.proofBody,
+      });
+      if (
+        !uuid(tx.id) ||
+        !uuid(tx.transactionId) ||
+        !tx.nativeDevice?.deviceCode ||
+        !Number.isFinite(Date.parse(tx.nativeDevice.expiresAt))
+      )
+        throw fail();
+      this.challengeId = tx.id;
+      this.transactionId = tx.transactionId;
+      this.grant = tx.nativeDevice;
+      if (tx.state !== 'verified') throw fail('iam.uac_proof_rejected');
+    }
+    if (this.challengeId) {
+      await this.request(
+        '/api/iam/v1/login/uac/challenges/' + this.challengeId + '/complete',
+        { method: 'POST', body: {} },
+      );
+      this.update(
+        await this.request(
+          '/api/iam/v1/login/transactions/' + this.transactionId,
+        ),
+      );
+      this.challengeId = undefined;
+    }
+  }
   update(tx) {
     if (
       tx.id !== this.transactionId ||
@@ -105,7 +169,10 @@ export class InlineLogin {
   async advance(input) {
     if (!this.grant || Date.parse(this.grant.expiresAt) <= Date.now())
       throw fail('expired_token');
-    if (input.operation === 'select') return this.select(input.providerId);
+    if (input.operation === 'select') {
+      if (this.proofBody) throw fail();
+      return this.select(input.providerId);
+    }
     if (this.challengeId) {
       if (input.operation !== 'poll') throw fail();
       const path = '/api/iam/v1/login/uac/challenges/' + this.challengeId;
@@ -157,7 +224,8 @@ export class InlineLogin {
           ),
         );
       } catch (error) {
-        if (error.code !== 'iam.invalid_credentials') throw error;
+        if (this.proofBody || error.code !== 'iam.invalid_credentials')
+          throw error;
         // IAM terminates failed transactions and invalidates their device grants.
         // Restart on the selected provider before accepting another credential.
         await this.select(this.providerId);
@@ -189,6 +257,7 @@ export class InlineLogin {
       : '/api/iam/v1/login/transactions/';
     this.challengeId = this.transactionId = this.grant = this.step = undefined;
     this.completed = false;
+    this.proofBody = undefined;
     if (id) await this.request(path + id, { method: 'DELETE' }).catch(() => {});
   }
 }

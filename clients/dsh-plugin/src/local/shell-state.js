@@ -27,6 +27,7 @@ const reasons = new Set([
   'member_disabled',
   'platform_rejected',
   'login_denied',
+  'rate_limited',
 ]);
 const fail = (code = 'common.unauthenticated') =>
   Object.assign(new Error(code), { code });
@@ -188,6 +189,8 @@ export function createShellState(options) {
       snapshot.identity.uacSessionBinding = JSON.parse(
         JSON.stringify(value.identity.uacSessionBinding),
       );
+    if (value.state === 'authenticating' && value.localUacProof === true)
+      snapshot.localUacProof = true;
     if (reasons.has(value.reason)) snapshot.reason = value.reason;
     if (
       value.loginError &&

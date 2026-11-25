@@ -731,6 +731,41 @@ class NativeConnectPostgresTest {
   }
 
   @Test
+  void forgedUacMarkersCannotBypassTeamAccountTotp() {
+    TenantContext.run(
+        tenant,
+        () -> {
+          for (String field :
+              List.of("uacVerified", "uacCredential", "uacVerifiedRevision", "uacProofLogin"))
+            assertThrows(AurigaException.class, () -> begin(request().put(field, true)));
+          var started = begin(request());
+          var pending =
+              login.advance(
+                  started.transaction().path("id").asString(),
+                  started.bindingCookie(),
+                  Json.object(
+                      "type",
+                      "form",
+                      "formId",
+                      "password",
+                      "values",
+                      Json.object("username", "alice", "password", "correct-horse")),
+                  false);
+          assertEquals("totp", pending.transaction().path("step").path("formId").asString());
+          assertNull(pending.session());
+          assertEquals(
+              "authorization_pending",
+              oauth
+                  .token(
+                      exchange(
+                          started.transaction().path("nativeDevice").path("deviceCode").asString(),
+                          verifier))
+                  .path("error")
+                  .asString());
+        });
+  }
+
+  @Test
   void passwordAloneCannotApproveAndFirstTotpIsRealEnrollment() {
     TenantContext.run(
         tenant,

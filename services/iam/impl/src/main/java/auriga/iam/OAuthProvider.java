@@ -138,6 +138,11 @@ public final class OAuthProvider {
     return c;
   }
 
+  void validateNativeClient(JsonNode request) {
+    IamError.require(
+        client(request.path("clientId").asString()).nativeConnect(), "invalid_client", 401);
+  }
+
   ObjectNode beginNative(ObjectNode tx, JsonNode request) {
     OAuthClient c = client(request.path("clientId").asString());
     IamError.require(c.nativeConnect(), "invalid_client", 401);

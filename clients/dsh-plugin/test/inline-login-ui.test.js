@@ -417,16 +417,16 @@ test('local UAC silent SSO suppresses modal; unsigned local UAC defaults to dire
     };
   });
   try {
-    // Silent local UAC SSO with platform still signed out opens platform tab directly
     const tree = await ssoFixture.renderLogin();
-    assert.equal(tree.type.name, 'Modal');
-    assert.ok(
-      all(tree).some((n) => n.type?.name === 'PlatformCard'),
-      'platform login tab opens when local UAC is authenticated but platform is still signed out',
+    assert.equal(
+      tree,
+      null,
+      'valid local identity waits for automatic association without a second login',
     );
-    assert.ok(
-      ssoCalls.some((c) => c.action === 'inline_login'),
-      'inline_login starts for platform sign-in',
+    assert.equal(
+      ssoCalls.length,
+      0,
+      'the renderer never initiates a second native challenge',
     );
   } finally {
     ssoFixture.close();
@@ -1232,6 +1232,44 @@ for (const [reason, hint] of [
     }
   });
 
+test('automatic association shows no browser instruction and keeps MFA visible in the normal card', async () => {
+  const f = await fixture(async () => ({ ok: true, json: async () => ({}) }));
+  const status = {
+    configured: true,
+    brokerAvailable: true,
+    loggedIn: false,
+    platform: 'authenticating',
+    localUacProof: true,
+    csrf: 'csrf',
+  };
+  try {
+    const working = await f.render(status, false);
+    assert.match(text(working), /正在连接平台/);
+    assert.doesNotMatch(text(working), /请在系统浏览器/);
+    const pending = await f.render(
+      {
+        ...status,
+        inlineLogin: {
+          providers: [],
+          providerId: 'uac',
+          step: {
+            type: 'form',
+            formId: 'platform_totp',
+            fields: [{ name: 'otp', kind: 'otp', required: true }],
+          },
+        },
+      },
+      false,
+    );
+    assert.ok(
+      all(pending).some((n) => n.type === 'form'),
+      'automatic MFA remains visible even when the shared overlay is available',
+    );
+    assert.ok(all(pending).some((n) => n.props?.name === 'otp'));
+  } finally {
+    f.close();
+  }
+});
 for (const change of ['account', 'generation'])
   test(
     'launcher binds platform profile to the same UAC snapshot during ' +

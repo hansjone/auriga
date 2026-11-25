@@ -491,6 +491,8 @@ export function createUacLoginView(
       )
         throw new Error('Invalid polling interval');
       challenge = value;
+      if (typeof value.qrContent !== 'string' || !value.qrContent.trim())
+        throw new Error('Missing QR content for scan challenge');
       image(value.qrContent);
       startClock(remaining);
       expiry = setTimeout(

@@ -173,8 +173,35 @@ export async function createBroker({
       });
     return result;
   }
+  let uacSequence = 0;
   const broker = {
     state,
+    async localUac(/** @type {any} */ credential) {
+      const current = state.current();
+      if (!ipc || closed || !current) throw unavailable();
+      const command = {
+        protocolVersion: 1,
+        requestId: randomUUID(),
+        shellEpoch: current.shellEpoch,
+        sequence: ++uacSequence,
+        expiresAt: new Date(Date.now() + 25000).toISOString(),
+        credential,
+      };
+      validate('ShellAuthLocalUacCommand', command);
+      const event = await receive(() =>
+        ipc.call({
+          requestId: command.requestId,
+          path: '/host/local-uac',
+          body: command,
+        }),
+      );
+      const result = event?.body;
+      if (
+        result?.requestId !== command.requestId ||
+        result?.shellEpoch !== command.shellEpoch
+      )
+        throw unavailable('common.conflict');
+    },
     async call(/** @type {string} */ operation, /** @type {any} */ input) {
       const check = state.fence(),
         command = { ...envelope(), call: { operation, input } };

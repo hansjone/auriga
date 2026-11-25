@@ -1339,3 +1339,28 @@ test('local UAC routes: native auth, same-origin, CSRF and platform association'
   assert.equal(out.payload.state, 'signed_out');
   assert.equal(out.payload.token, undefined);
 });
+
+test('local proof generation changes only on a fresh login, never appears in page status, and logout notifies immediately', async (t) => {
+  const env = await setup(t, { readBrowserCookies: async () => new Map() });
+  t.after(() => env.identity.close());
+  let changes = 0;
+  const off = env.identity.subscribe(() => {
+    changes++;
+  });
+  await loginFlow(env, '001Ab');
+  const first = env.identity.proofCredentials();
+  assert.match(first.generation, /^[0-9a-f-]{36}$/);
+  assert.equal(first.empNo, '001Ab');
+  assert.equal(env.identity.status().generation, undefined);
+  assert.equal(env.identity.status().token, undefined);
+  env.upstream.script.verify = [ok('001Ab')];
+  await env.time.advance(600000);
+  assert.equal(env.identity.proofCredentials().generation, first.generation);
+  const before = changes;
+  await env.identity.logout();
+  assert.equal(env.identity.proofCredentials(), null);
+  assert.ok(changes > before);
+  await loginFlow(env, '001Ab');
+  assert.notEqual(env.identity.proofCredentials().generation, first.generation);
+  off();
+});

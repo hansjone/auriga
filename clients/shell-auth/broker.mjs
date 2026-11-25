@@ -24,6 +24,9 @@ const reasonFor = (error) =>
     'iam.admin_disabled': 'admin_disabled',
   })[error.code] ?? 'revalidation_rejected';
 
+const employeeKey = (value) =>
+  value.trim().replace(/[A-Z]/g, (c) => c.toLowerCase());
+
 const clientErrors = new Set([
   'invalid_client',
   'unauthorized_client',
@@ -186,6 +189,9 @@ export class Broker extends EventEmitter {
       state,
       expiresAt: new Date(expiry).toISOString(),
       ...(reason ? { reason } : {}),
+      ...(state === 'authenticating' && this.attempt?.proof
+        ? { localUacProof: true }
+        : {}),
       ...(this.loginError ? { loginError: this.loginError } : {}),
       ...(inlineLogin
         ? { inlineLogin: requireValid('ShellAuthInlineView', inlineLogin) }
@@ -349,14 +355,98 @@ export class Broker extends EventEmitter {
     this.transition('authenticating');
     this.track(this.runLogin(attempt));
   }
+  async localUac(credential, owner) {
+    if (this.closed) throw unavailable();
+    if (credential) requireValid('ShellAuthLocalUacCredential', credential);
+    if (this.localSource && this.localSource.owner !== owner) throw conflict();
+    const previous = this.localSource;
+    const changed =
+      !credential ||
+      (previous &&
+        (previous.until <= this.mono() ||
+          previous.credential.generation !== credential.generation ||
+          employeeKey(previous.credential.empNo) !==
+            employeeKey(credential.empNo)));
+    if (changed && this.attempt?.proof) {
+      const attempt = this.attempt;
+      this.attempt = undefined;
+      this.generation++;
+      attempt.controller.abort();
+      this.track(attempt.inline.cancel());
+      this.transition('signed_out', 'account_changed');
+    }
+    this.localSource = credential
+      ? {
+          owner,
+          credential: structuredClone(credential),
+          until: this.mono() + 30000,
+        }
+      : undefined;
+    if (
+      credential &&
+      this.record.proofEmployee &&
+      this.record.tokens &&
+      employeeKey(this.record.proofEmployee) !== employeeKey(credential.empNo)
+    ) {
+      await this.logout();
+      this.transition('reauth_required', 'account_changed');
+    }
+    if (credential) this.track(this.check());
+  }
+  clearLocalUac(owner) {
+    if (this.localSource?.owner === owner) return this.localUac(null, owner);
+  }
+  async checkProof() {
+    if (!this.localSource || this.localSource.until <= this.mono()) return;
+    let attempt = this.attempt;
+    if (!attempt) {
+      if (this.record.manualLoginRequired || this.record.tokens) return;
+      attempt = {
+        owner: this.localSource.owner,
+        proof: this.localSource.credential,
+        generation: ++this.generation,
+        controller: new AbortController(),
+        correlationId: randomUUID(),
+      };
+      attempt.inline = new InlineLogin(
+        this.platform,
+        attempt.controller.signal,
+      );
+      this.attempt = attempt;
+    }
+    if (
+      !attempt.proof ||
+      attempt.busy ||
+      attempt.waitingForInput ||
+      (attempt.retryAt ?? 0) > this.mono()
+    )
+      return;
+    attempt.busy = true;
+    this.transition('authenticating');
+    try {
+      await this.runInline(attempt);
+    } finally {
+      attempt.busy = false;
+    }
+  }
   async runInline(attempt, input) {
     let tokens;
     try {
       if (input) await attempt.inline.advance(input);
+      else if (attempt.proof)
+        await attempt.inline.startProof(attempt.proof, this.now());
       else await attempt.inline.start();
       if (!this.current(attempt)) {
         await attempt.inline.cancel();
         return;
+      }
+      if (attempt.proof && attempt.inline.completed) {
+        // The code is single-use. Persist the recovery gate BEFORE exchange so a lost
+        // response or process crash cannot silently mint a second device on restart.
+        this.record.manualLoginRequired = true;
+        await this.save();
+        if (!this.current(attempt)) return;
+        attempt.exchangeStarted = true;
       }
       tokens = await attempt.inline.tokens();
       if (!this.current(attempt)) {
@@ -364,6 +454,7 @@ export class Broker extends EventEmitter {
         return;
       }
       if (!tokens) {
+        if (attempt.proof) attempt.waitingForInput = true;
         this.transition('authenticating');
         return;
       }
@@ -372,11 +463,18 @@ export class Broker extends EventEmitter {
         await this.queueRevoke(tokens);
         return;
       }
+      if (
+        attempt.proof &&
+        verified.projection.identity.providerId !== attempt.inline.providerId
+      )
+        throw conflict();
       this.record.tokens = tokens;
       this.record.manualLoginRequired = false;
+      if (attempt.proof) this.record.proofEmployee = attempt.proof.empNo;
+      else delete this.record.proofEmployee;
       await this.save();
       if (!this.current(attempt)) {
-        delete this.record.tokens;
+        if (this.record.tokens === tokens) delete this.record.tokens;
         await this.queueRevoke(tokens);
         return;
       }
@@ -387,9 +485,37 @@ export class Broker extends EventEmitter {
       if (this.record.tokens === tokens) delete this.record.tokens;
       if (tokens) await this.queueRevoke(tokens).catch(() => {});
       if (!this.current(attempt)) return;
+      const transient =
+        attempt.proof &&
+        !attempt.exchangeStarted &&
+        !input &&
+        (error.status === 429 || !error.status || error.status >= 500);
+      if (transient) {
+        attempt.failures = (attempt.failures ?? 0) + 1;
+        attempt.retryAt =
+          this.mono() +
+          Math.min(30000, 5000 * 2 ** Math.min(attempt.failures - 1, 3));
+        this.loginError = loginFailure(error, attempt.correlationId).error;
+        this.transition(
+          'unreachable',
+          error.status === 429 ? 'rate_limited' : 'offline',
+        );
+        return;
+      }
+      if (attempt.proof) {
+        this.record.manualLoginRequired = true;
+        await this.save();
+      }
+      if (!this.current(attempt)) return;
       await attempt.inline.cancel();
+      if (!this.current(attempt)) return;
       this.attempt = undefined;
       const failure = loginFailure(error, attempt.correlationId);
+      if (attempt.proof) {
+        failure.state = 'reauth_required';
+        if (error.code === 'iam.provider_disabled')
+          failure.reason = 'source_disabled';
+      }
       this.loginError = failure.error;
       this.transition(failure.state, failure.reason);
       this.log({
@@ -406,13 +532,23 @@ export class Broker extends EventEmitter {
       !this.closed &&
       this.attempt === attempt &&
       attempt.generation === this.generation &&
-      !attempt.controller.signal.aborted
+      !attempt.controller.signal.aborted &&
+      (!attempt.proof ||
+        (this.localSource?.owner === attempt.owner &&
+          this.localSource.until > this.mono() &&
+          this.localSource.credential.generation === attempt.proof.generation &&
+          employeeKey(this.localSource.credential.empNo) ===
+            employeeKey(attempt.proof.empNo)))
     );
   }
   cancel() {
     const attempt = this.attempt;
     this.attempt = undefined;
     this.generation++;
+    if (attempt?.proof) {
+      this.record.manualLoginRequired = true;
+      this.track(this.save());
+    }
     if (attempt?.inline) this.track(attempt.inline.cancel());
     attempt?.controller.abort();
     // RFC8628 has no pre-approval revocation endpoint: stop polling. IAM expires
@@ -758,7 +894,10 @@ export class Broker extends EventEmitter {
   }
   async checkOnce() {
     if (this.closed) return;
+    if (this.localSource && this.localSource.until <= this.mono())
+      await this.clearLocalUac(this.localSource.owner);
     if (!this.record.tokens || this.attempt) {
+      await this.checkProof();
       await this.drainRevocations();
       return;
     }
@@ -812,8 +951,10 @@ export class Broker extends EventEmitter {
       identity = this.projection?.identity;
     this.generation++;
     this.attempt?.controller.abort();
+    if (this.attempt?.inline) this.track(this.attempt.inline.cancel());
     this.attempt = undefined;
     delete this.record.tokens;
+    delete this.record.proofEmployee;
     this.record.manualLoginRequired = true;
     this.loginError = undefined;
     this.transition('signed_out', 'user_logout'); // local stop before network
@@ -868,6 +1009,7 @@ export class Broker extends EventEmitter {
   }
   async close() {
     this.closed = true;
+    this.localSource = undefined;
     this.generation++;
     this.attempt?.controller.abort();
     this.attempt = undefined;

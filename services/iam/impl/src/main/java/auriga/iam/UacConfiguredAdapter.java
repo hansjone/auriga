@@ -399,12 +399,23 @@ final class UacConfiguredAdapter implements UacEnterpriseAdapter {
 
   @Override
   public JsonNode verify(JsonNode config, JsonNode credential) {
+    return verify(config, credential, false);
+  }
+
+  @Override
+  public JsonNode verifyProof(JsonNode config, JsonNode credential) {
+    return verify(config, credential, true);
+  }
+
+  private JsonNode verify(JsonNode config, JsonNode credential, boolean proof) {
     try {
       ObjectNode request =
           UacTokenVerification.request(
               credential.path("empNo").asString(),
               credential.path("token").asString(),
-              credential.path("clientIP").asString(""),
+              proof
+                  ? settings.path("clientIP").asString("")
+                  : credential.path("clientIP").asString(""),
               config.path("systemCode").asString());
       String account = request.path("account").asString();
       var response =
@@ -414,7 +425,12 @@ final class UacConfiguredAdapter implements UacEnterpriseAdapter {
               Map.of("X-Emp-No", account),
               3);
       UacTelemetry.capture(response.status(), response.body());
-      var decision = UacTokenVerification.evaluate(response.status(), response.body(), account);
+      if (proof && response.status() == 429)
+        return Json.object("success", false, "failureClass", "rate_limited");
+      var decision =
+          proof
+              ? UacTokenVerification.evaluateProof(response.status(), response.body(), account)
+              : UacTokenVerification.evaluate(response.status(), response.body(), account);
       return Json.object(
           "success",
           decision.success(),
@@ -431,7 +447,11 @@ final class UacConfiguredAdapter implements UacEnterpriseAdapter {
           "token",
           decision.replacementToken(),
           "empNo",
-          decision.employee());
+          decision.employee(),
+          "clientIP",
+          proof
+              ? settings.path("clientIP").asString("")
+              : credential.path("clientIP").asString(""));
     } catch (java.io.IOException e) {
       return Json.object(
           "success", false, "failureClass", "upstream_fault", "faultReason", "transport_error");

@@ -243,7 +243,8 @@ export interface components {
         | 'admin_disabled'
         | 'member_disabled'
         | 'platform_rejected'
-        | 'login_denied';
+        | 'login_denied'
+        | 'rate_limited';
       /** @description 仅authenticated且身份匹配时的可选只读展示资料，注销或切换身份立即清除 */
       uacLoginInfo?: components['schemas']['UacLoginInfo'];
       deviceAttempt?: components['schemas']['ShellAuthDeviceAttempt'];
@@ -254,6 +255,8 @@ export interface components {
         correlationId: string;
       };
       inlineLogin?: components['schemas']['ShellAuthInlineView'];
+      /** @description Automatic local identity association is in progress; no browser-device authorization UI is needed. */
+      localUacProof?: boolean;
     } & (unknown & unknown & unknown & unknown & unknown);
     ShellAuthIdentity: {
       /** Format: uuid */

@@ -74,6 +74,14 @@ final class UacTokenVerification {
   }
 
   static Decision evaluate(int status, byte[] body, String verifiedAccount) {
+    return evaluate(status, body, verifiedAccount, false);
+  }
+
+  static Decision evaluateProof(int status, byte[] body, String claimedAccount) {
+    return evaluate(status, body, claimedAccount, true);
+  }
+
+  private static Decision evaluate(int status, byte[] body, String verifiedAccount, boolean proof) {
     IamError.validate(validUser(verifiedAccount));
     if (status != 200) return fault("http_error");
     if (body == null || body.length == 0 || body.length > MAX_BODY) return fault("invalid_json");
@@ -98,6 +106,20 @@ final class UacTokenVerification {
     if (!other.isMissingNode() && !other.isObject()) return fault("invalid_success_payload");
     JsonNode user = bo.path("user"), token = other.path("token");
     if (token.isMissingNode()) token = bo.path("token");
+    if (proof) {
+      JsonNode account = other.path("account");
+      if (!account.isMissingNode()) {
+        if (!account.isString() || !validUser(account.asString()))
+          return fault("invalid_success_payload");
+        if (!user.isMissingNode()
+            && (!user.isString()
+                || !validUser(user.asString())
+                || !fold(user.asString()).equals(fold(account.asString()))))
+          return new Decision("identity_mismatch", null, null, null);
+        user = account;
+      }
+      if (user.isMissingNode()) return fault("missing_subject");
+    }
     boolean echoed = !user.isMissingNode();
     if ((echoed && (!user.isString() || !validUser(user.asString())))
         || !token.isString()

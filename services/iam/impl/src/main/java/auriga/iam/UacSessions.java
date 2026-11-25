@@ -133,8 +133,8 @@ final class UacSessions {
   void established(ObjectNode tx, SessionManager.Issued issued) {
     if (!tx.has("uacCredential")) return;
     ObjectNode session = issued.session();
-    // Keep the final MFA result on the transaction too. Replacement must fence a
-    // session even when the challenge/navigation completed before MFA did.
+    // Keep the issued session on the transaction too, so replacement can fence it
+    // even after the shorter-lived challenge/navigation record has expired.
     tx.put("uacIssuedSessionId", session.path("sessionId").asString());
     store.save("login_tx", tx);
     String provider = tx.path("providerId").asString(),

@@ -12,6 +12,7 @@ final class UacKeyRotation {
           new Envelope("uac_credential", "envelope"),
           new Envelope("uac_challenge", "credential"),
           new Envelope("uac_challenge", "issued"),
+          new Envelope("uac_challenge", "proofResponse"),
           new Envelope("login_tx", "uacCredential"),
           new Envelope("uac_navigation", "response"));
   private final IamStore store;
