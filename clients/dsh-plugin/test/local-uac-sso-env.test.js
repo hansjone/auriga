@@ -323,7 +323,7 @@ test('adapter extractSsoCredentials prefers portal pair, falls back to UDS, neve
   });
 });
 
-test('local UAC silent SSO auto-authenticates with department and injects DSH_AURIGA_ID/TOKEN without platform', async () => {
+test('local UAC silent SSO projects employee profile and injects DSH_AURIGA_ID/TOKEN without platform', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'auriga-uac-sso-'));
   try {
     let verifyCalls = 0;
@@ -343,7 +343,32 @@ test('local UAC silent SSO auto-authenticates with department and injects DSH_AU
         },
       }),
       createAdapter: (settings, provider) => {
-        const real = createUacAdapter(settings, provider);
+        const real = createUacAdapter(settings, provider, {
+          http: {
+            validate() {},
+            async post(url, body) {
+              assert.equal(url.href, 'https://identity.example.com/info');
+              assert.equal(body.employee, '0010329667');
+              assert.equal(body.credential, 'verified-sso-cookie-token');
+              return {
+                status: 200,
+                body: Buffer.from(
+                  JSON.stringify({
+                    ok: true,
+                    rows: [
+                      {
+                        employee: '0010329667',
+                        employeeName: 'Alice Example',
+                        department: 'R&D / Platform',
+                        avatarUrl: 'https://profile.example.com/alice.png',
+                      },
+                    ],
+                  }),
+                ),
+              };
+            },
+          },
+        });
         return {
           ...real,
           verify: async (cred) => {
@@ -355,10 +380,6 @@ test('local UAC silent SSO auto-authenticates with department and injects DSH_AU
               token: 'verified-' + cred.token,
             };
           },
-          department: async () => ({
-            available: true,
-            department: 'R&D / Platform',
-          }),
         };
       },
       readBrowserCookies: async () =>
@@ -374,7 +395,11 @@ test('local UAC silent SSO auto-authenticates with department and injects DSH_AU
     assert.equal(st.state, 'authenticated');
     assert.equal(st.empNo, '0010329667');
     assert.equal(st.department, 'R&D / Platform');
+    assert.equal(st.displayName, 'Alice Example');
+    assert.equal(st.avatarUrl, 'https://profile.example.com/alice.png');
     assert.equal(st.authMethod, 'sso');
+    assert.equal(st.token, undefined);
+    assert.equal(JSON.stringify(st).includes('sso-cookie-token'), false);
 
     // Enterprise environment injects DSH_AURIGA_ID and DSH_AURIGA_TOKEN even when platform is offline/unauthenticated
     const env = createEnterpriseEnvironment({
