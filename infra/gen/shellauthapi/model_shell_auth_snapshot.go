@@ -29,10 +29,12 @@ type ShellAuthSnapshot struct {
 	Identity        *ShellAuthIdentity `json:"identity,omitempty"`
 	Reason          *string            `json:"reason,omitempty"`
 	// 仅authenticated且身份匹配时的可选只读展示资料，注销或切换身份立即清除
-	UacLoginInfo         *UacLoginInfo                `json:"uacLoginInfo,omitempty"`
-	DeviceAttempt        *ShellAuthDeviceAttempt      `json:"deviceAttempt,omitempty"`
-	LoginError           *ShellAuthSnapshotLoginError `json:"loginError,omitempty"`
-	InlineLogin          *ShellAuthInlineView         `json:"inlineLogin,omitempty"`
+	UacLoginInfo  *UacLoginInfo                `json:"uacLoginInfo,omitempty"`
+	DeviceAttempt *ShellAuthDeviceAttempt      `json:"deviceAttempt,omitempty"`
+	LoginError    *ShellAuthSnapshotLoginError `json:"loginError,omitempty"`
+	InlineLogin   *ShellAuthInlineView         `json:"inlineLogin,omitempty"`
+	// Automatic local identity association is in progress; no browser-device authorization UI is needed.
+	LocalUacProof        *bool `json:"localUacProof,omitempty"`
 	AdditionalProperties map[string]interface{}
 }
 
@@ -372,6 +374,38 @@ func (o *ShellAuthSnapshot) SetInlineLogin(v ShellAuthInlineView) {
 	o.InlineLogin = &v
 }
 
+// GetLocalUacProof returns the LocalUacProof field value if set, zero value otherwise.
+func (o *ShellAuthSnapshot) GetLocalUacProof() bool {
+	if o == nil || IsNil(o.LocalUacProof) {
+		var ret bool
+		return ret
+	}
+	return *o.LocalUacProof
+}
+
+// GetLocalUacProofOk returns a tuple with the LocalUacProof field value if set, nil otherwise
+// and a boolean to check if the value has been set.
+func (o *ShellAuthSnapshot) GetLocalUacProofOk() (*bool, bool) {
+	if o == nil || IsNil(o.LocalUacProof) {
+		return nil, false
+	}
+	return o.LocalUacProof, true
+}
+
+// HasLocalUacProof returns a boolean if a field has been set.
+func (o *ShellAuthSnapshot) HasLocalUacProof() bool {
+	if o != nil && !IsNil(o.LocalUacProof) {
+		return true
+	}
+
+	return false
+}
+
+// SetLocalUacProof gets a reference to the given bool and assigns it to the LocalUacProof field.
+func (o *ShellAuthSnapshot) SetLocalUacProof(v bool) {
+	o.LocalUacProof = &v
+}
+
 func (o ShellAuthSnapshot) MarshalJSON() ([]byte, error) {
 	toSerialize, err := o.ToMap()
 	if err != nil {
@@ -404,6 +438,9 @@ func (o ShellAuthSnapshot) ToMap() (map[string]interface{}, error) {
 	}
 	if !IsNil(o.InlineLogin) {
 		toSerialize["inlineLogin"] = o.InlineLogin
+	}
+	if !IsNil(o.LocalUacProof) {
+		toSerialize["localUacProof"] = o.LocalUacProof
 	}
 
 	for key, value := range o.AdditionalProperties {
@@ -463,6 +500,7 @@ func (o *ShellAuthSnapshot) UnmarshalJSON(data []byte) (err error) {
 		delete(additionalProperties, "deviceAttempt")
 		delete(additionalProperties, "loginError")
 		delete(additionalProperties, "inlineLogin")
+		delete(additionalProperties, "localUacProof")
 		o.AdditionalProperties = additionalProperties
 	}
 
