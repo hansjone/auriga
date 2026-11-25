@@ -272,6 +272,9 @@ async function fixture(http, options = {}) {
       dom.window.dispatchEvent(new dom.window.Event('hashchange'));
     },
     hasModelsCard: () => slots.has('settings.models.provider-card'),
+    hasAccountLauncher: () => slots.has('settings.launcher'),
+    renderLauncher: (props = { wide: true }) =>
+      renderSurface('settings-launcher', slots.get('settings.launcher'), props),
     close: () => {
       for (const v of values) v?.cleanup?.();
       for (const name of surfaceValues.keys()) clearSurface(name);
@@ -402,11 +405,50 @@ test('local UAC silent SSO suppresses modal; unsigned local UAC defaults to dire
     };
   });
   try {
-    // Silent SSO already authenticated: modal stays closed without touching platform
-    assert.equal(await ssoFixture.renderLogin(), null);
-    assert.deepEqual(ssoCalls, []);
+    // Silent local UAC SSO with platform still signed out opens platform tab directly
+    const tree = await ssoFixture.renderLogin();
+    assert.equal(tree.type.name, 'Modal');
+    assert.ok(
+      all(tree).some((n) => n.type?.name === 'PlatformCard'),
+      'platform login tab opens when local UAC is authenticated but platform is still signed out',
+    );
+    assert.ok(
+      ssoCalls.some((c) => c.action === 'inline_login'),
+      'inline_login starts for platform sign-in',
+    );
   } finally {
     ssoFixture.close();
+  }
+
+  // Silent SSO authenticated + platform offline/unconfigured: modal stays closed
+  const standaloneSsoFixture = await fixture(async (url) => {
+    if (String(url).includes('/auriga/uac/status'))
+      return {
+        ok: true,
+        json: async () => ({
+          available: true,
+          state: 'authenticated',
+          empNo: '0010329667',
+          authMethod: 'sso',
+          loginAt: new Date().toISOString(),
+          csrf: 'uac-csrf',
+        }),
+      };
+    return {
+      ok: true,
+      json: async () => ({
+        configured: false,
+        brokerAvailable: false,
+        loggedIn: false,
+        platform: 'signed_out',
+        csrf: 'csrf',
+      }),
+    };
+  });
+  try {
+    assert.equal(await standaloneSsoFixture.renderLogin(), null);
+  } finally {
+    standaloneSsoFixture.close();
   }
 
   // Platform offline/broker unavailable: local UAC scan still opens and runs independently
@@ -966,3 +1008,65 @@ for (const dismiss of ['skip', 'close'])
       f.close();
     }
   });
+
+test('settings.launcher replaces DSH bottom-left account slot with Auriga avatar, name, empNo and sign-in/out actions', async () => {
+  const requests = [];
+  let uacState = {
+    available: true,
+    state: 'authenticated',
+    empNo: '10329667',
+    csrf: 'uac-csrf',
+  };
+  let shellState = {
+    configured: true,
+    brokerAvailable: true,
+    loggedIn: true,
+    connected: true,
+    account: { displayName: '张三' },
+    csrf: 'shell-csrf',
+  };
+  const f = await fixture(async (url, init = {}) => {
+    const href = String(url);
+    if (init.method === 'POST')
+      requests.push({ url: href, body: JSON.parse(init.body) });
+    if (href.includes('/auriga/uac/status'))
+      return { ok: true, json: async () => uacState };
+    if (href.includes('/auriga/shell/status'))
+      return { ok: true, json: async () => shellState };
+    return { ok: true, json: async () => ({ ok: true }) };
+  });
+  try {
+    assert.equal(f.hasAccountLauncher(), true);
+    let settingsOpened = 0;
+    const signedTree = await f.renderLauncher({
+      wide: true,
+      openSettings: () => settingsOpened++,
+    });
+    const renderedText = text(signedTree);
+    assert.match(renderedText, /张/);
+    assert.match(renderedText, /张三/);
+    assert.match(renderedText, /10329667/);
+    // Open fallback menu and trigger settings + sign-out
+    const trigger = all(signedTree).find((n) => n.type === 'button');
+    trigger.props.onClick();
+    const opened = await f.renderLauncher({
+      wide: true,
+      openSettings: () => settingsOpened++,
+    });
+    const items = all(opened).filter((n) => n.props?.role === 'menuitem');
+    assert.equal(items.length, 2);
+    items[0].props.onClick();
+    assert.equal(settingsOpened, 1);
+    items[1].props.onClick();
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.ok(requests.some((r) => r.url.includes('/auriga/uac/logout')));
+    assert.ok(
+      requests.some(
+        (r) =>
+          r.url.includes('/auriga/shell/command') && r.body.action === 'logout',
+      ),
+    );
+  } finally {
+    f.close();
+  }
+});

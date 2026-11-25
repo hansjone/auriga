@@ -16,6 +16,10 @@ window.__ModuleLoader__.load({
     const HostButton = probe('Button');
     const HostSegmentedTabs = probe('SegmentedTabs');
     const HostStateDot = probe('StateDot');
+    const HostMenu = probe('Menu');
+    const IconSettingsOutlineMedium = probe('IconSettingsOutlineMedium');
+    const IconUserOutlineMedium = probe('IconUserOutlineMedium');
+    const IconEllipsisOutlineMedium = probe('IconEllipsisOutlineMedium');
     const h = React.createElement;
     const NS = 'auriga.shell';
     const PANEL_ID = 'auriga-team';
@@ -165,6 +169,12 @@ window.__ModuleLoader__.load({
       department: '部门',
       uacTab: '公司扫码登录',
       teamTab: '团队账号登录',
+      launcherSettings: '设置',
+      launcherSignIn: '登录 Auriga',
+      launcherSignOut: '退出登录',
+      launcherMore: '更多',
+      launcherSignedIn: '已登录',
+      launcherMenu: '账号与设置菜单',
       loginTime: '登录时间',
       revalidation: '定期复验',
       revalidationOk: '正常',
@@ -376,6 +386,12 @@ window.__ModuleLoader__.load({
       department: 'Department',
       uacTab: 'Company QR sign-in',
       teamTab: 'Team account',
+      launcherSettings: 'Settings',
+      launcherSignIn: 'Sign in to Auriga',
+      launcherSignOut: 'Sign out',
+      launcherMore: 'More',
+      launcherSignedIn: 'Signed in',
+      launcherMenu: 'Account and settings menu',
       loginTime: 'Signed in',
       revalidation: 'Revalidation',
       revalidationOk: 'OK',
@@ -503,6 +519,7 @@ window.__ModuleLoader__.load({
 .auriga-blocked p{margin:0;color:var(--dsw-alias-label-secondary,inherit);font-size:13px}
 .auriga-blocked button{align-self:flex-start}
 .auriga-brand-name{display:inline-flex;align-items:baseline;gap:5px;font-size:16px;font-weight:700;letter-spacing:.02em;color:var(--dsw-alias-label-primary,inherit);white-space:nowrap}.auriga-brand-suffix{font-size:11px;font-weight:600;letter-spacing:.12em;color:var(--dsw-alias-label-secondary,inherit)}
+.auriga-launcher-root{flex:1;min-width:0;position:relative}.auriga-launcher-anchor{width:100%}.auriga-launcher-trigger{user-select:none;display:flex;align-items:center;width:100%;height:44px;gap:8px;padding:6px;border:0;border-radius:var(--dsw-radius-md,8px);background:transparent;color:var(--dsw-alias-label-primary,inherit);font:inherit;font-size:14px;cursor:pointer;text-align:left}.auriga-launcher-trigger[data-collapsed="true"]{box-sizing:border-box;width:36px;height:36px;justify-content:center;gap:0;padding:0}.auriga-launcher-trigger:hover{background:var(--dsw-alias-interactive-bg-hover,rgba(128,128,128,.12))}.auriga-launcher-trigger[data-signed-out="true"]:not([data-collapsed="true"]){height:36px;padding:6px}.auriga-launcher-avatar{display:inline-flex;align-items:center;justify-content:center;flex:none;width:24px;height:24px;border-radius:50%;background:var(--dsw-alias-brand-primary,#1f6feb);color:#fff;font-size:12px;font-weight:600;line-height:1;overflow:hidden}.auriga-launcher-avatar[data-signed-out="true"]{background:var(--dsw-alias-bg-skeleton,rgba(128,128,128,.18));color:var(--dsw-alias-label-secondary,inherit)}.auriga-launcher-text{display:flex;flex-direction:column;min-width:0;flex:1;line-height:1.25}.auriga-launcher-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px;font-weight:500}.auriga-launcher-sub{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px;color:var(--dsw-alias-label-secondary,rgba(128,128,128,.9))}.auriga-launcher-fallback-menu{position:absolute;left:0;bottom:calc(100% + 6px);min-width:168px;padding:4px;border-radius:var(--dsw-radius-md,8px);border:1px solid var(--dsw-alias-border-primary,rgba(128,128,128,.22));background:var(--dsw-alias-bg-elevated,#fff);box-shadow:0 8px 24px rgba(0,0,0,.16);z-index:100;display:flex;flex-direction:column;gap:2px}.auriga-launcher-fallback-item{display:flex;align-items:center;gap:8px;width:100%;padding:8px 10px;border:0;border-radius:6px;background:transparent;color:var(--dsw-alias-label-primary,inherit);font:inherit;font-size:13px;cursor:pointer;text-align:left}.auriga-launcher-fallback-item:hover{background:var(--dsw-alias-interactive-bg-hover,rgba(128,128,128,.12))}
 .auriga-tools{margin:0;padding-left:18px;font-size:13px;display:grid;gap:4px}
 .auriga-app>.auriga-settings,.auriga-tabpanel .auriga-settings{padding-top:0}
 
@@ -2387,10 +2404,13 @@ window.__ModuleLoader__.load({
         ].includes(window.location.hash);
         let loginOverlayAvailable = false;
         const loginRequests = new Set();
-        const openPlatformLogin = (action) =>
+        const openPlatformLogin = (action) => {
+          if (!loginRequests.size) return false;
           loginRequests.forEach((open) =>
             open(action === 'uac' ? 'uac' : 'inline_login'),
           );
+          return true;
+        };
         function PlatformLogin() {
           const local = ['127.0.0.1', '[::1]', 'localhost'].includes(
             window.location.hostname,
@@ -2424,8 +2444,10 @@ window.__ModuleLoader__.load({
             loginAction.current = 'inline_login';
             manual.current = true;
             manualPlatform.current = action !== 'uac';
-            setLoginTab(action === 'uac' && hasLocalUac ? 'uac' : 'platform');
+            setLoginTab(action === 'uac' ? 'uac' : 'platform');
             setSettled(false);
+            reloadShell();
+            reloadUac();
             setRequest((n) => n + 1);
           };
           const skip = () => {
@@ -2468,26 +2490,26 @@ window.__ModuleLoader__.load({
             };
           }, []);
           React.useEffect(() => {
-            if (!local || uac === undefined || shell === undefined) return;
+            if (!local || shell === undefined) return;
+            if (uac === undefined && !manualPlatform.current) return;
             // Retry startup readiness slowly until the IPC broker appears (when no local UAC).
             setSettled(
               hasLocalUac || !shell?.configured || !!shell?.brokerAvailable,
             );
+            const needsPlatform = platformAvailable && !shell?.loggedIn;
             if (hasLocalUac) {
-              if (uacSignedIn && !manualPlatform.current) {
-                setOpen(false);
-                return;
-              }
-              if (manualPlatform.current && shell?.loggedIn) {
+              if (uacSignedIn && !needsPlatform) {
                 manualPlatform.current = false;
                 setOpen(false);
                 return;
               }
-            } else if (
-              !shell?.configured ||
-              !shell?.brokerAvailable ||
-              shell.loggedIn
-            ) {
+              if (manualPlatform.current && !needsPlatform) {
+                manualPlatform.current = false;
+                setOpen(false);
+                return;
+              }
+            } else if (!needsPlatform) {
+              manualPlatform.current = false;
               setOpen(false);
               return;
             }
@@ -2502,12 +2524,23 @@ window.__ModuleLoader__.load({
               const wasManualPlatform = manualPlatform.current;
               manual.current = false;
               attempted.current = false;
-              if (!wasManualPlatform) {
-                setLoginTab(hasLocalUac ? 'uac' : 'platform');
-              }
+              const targetTab =
+                wasManualPlatform || (uacSignedIn && needsPlatform)
+                  ? 'platform'
+                  : hasLocalUac
+                    ? 'uac'
+                    : 'platform';
+              setLoginTab(targetTab);
               setOpen(true);
             }
-          }, [shell, uac, request, hasLocalUac, uacSignedIn]);
+          }, [
+            shell,
+            uac,
+            request,
+            hasLocalUac,
+            uacSignedIn,
+            platformAvailable,
+          ]);
           React.useEffect(() => {
             if (!open || loginTab !== 'platform' || !platformAvailable) return;
             const controller = new AbortController();
@@ -2730,6 +2763,7 @@ window.__ModuleLoader__.load({
         }) {
           const [busy, setBusy] = React.useState(false);
           const [outcome, setOutcome] = React.useState('');
+          const [inlineFallback, setInlineFallback] = React.useState(false);
           const intent = React.useRef(null);
           const view = platformView(boot, shell);
           const previous = React.useRef(view.kind);
@@ -2772,7 +2806,7 @@ window.__ModuleLoader__.load({
           const inline = shell?.inlineLogin;
           React.useEffect(() => {
             if (
-              (!modal && loginOverlayAvailable) ||
+              (!modal && loginOverlayAvailable && !inlineFallback) ||
               !inline ||
               inline.step.type !== 'qr' ||
               busy
@@ -2783,7 +2817,7 @@ window.__ModuleLoader__.load({
               2000,
             );
             return () => clearTimeout(timer);
-          }, [inline, busy, modal]);
+          }, [inline, busy, modal, inlineFallback]);
           const localized = (text) => text?.[state.locale] ?? text?.en ?? '';
           const inlineView =
             inline &&
@@ -3014,7 +3048,7 @@ window.__ModuleLoader__.load({
               h('p', null, t('loginBrowserHint')),
             ['signedOut', 'reauth'].includes(view.kind) &&
               h('p', { className: 'auriga-muted' }, t('loginMethods')),
-            (modal || !loginOverlayAvailable) && inlineView,
+            (modal || !loginOverlayAvailable || inlineFallback) && inlineView,
             view.kind === 'authenticating' &&
               !inline &&
               shell?.deviceAttempt &&
@@ -3063,10 +3097,14 @@ window.__ModuleLoader__.load({
                   {
                     primary: true,
                     disabled: busy || !shell?.csrf,
-                    onClick:
-                      !modal && loginOverlayAvailable
-                        ? () => openPlatformLogin('inline_login')
-                        : () => command('inline_login'),
+                    onClick: !modal
+                      ? () => {
+                          if (!openPlatformLogin('inline_login')) {
+                            setInlineFallback(true);
+                            command('inline_login');
+                          }
+                        }
+                      : () => command('inline_login'),
                   },
                   t('platformInlineLogin'),
                 ),
@@ -3460,6 +3498,227 @@ window.__ModuleLoader__.load({
             ),
           'auriga-shell: brand name',
         );
+        function AurigaAccountLauncher({
+          wide = true,
+          settingsShortcut,
+          openSettings,
+        } = {}) {
+          const local = ['127.0.0.1', '[::1]', 'localhost'].includes(
+            window.location.hostname,
+          );
+          const [open, setOpen] = React.useState(false);
+          const [busy, setBusy] = React.useState(false);
+          const trigger = React.useRef(null);
+          const [shell, reloadShell] = useLocalStatus(
+            'auriga/shell/status',
+            15000,
+            local,
+          );
+          const [uac, reloadUac] = useLocalStatus(
+            'auriga/uac/status',
+            15000,
+            local,
+            true,
+          );
+          const hasLocalUac = !!uac?.available && !uac?.reason;
+          const uacSignedIn = hasLocalUac && uac.state === 'authenticated';
+          const platformSignedIn = !!shell?.loggedIn;
+          const signedIn = uacSignedIn || platformSignedIn;
+          const displayName =
+            typeof shell?.account?.displayName === 'string'
+              ? shell.account.displayName.trim()
+              : '';
+          const empNo =
+            uacSignedIn && typeof uac?.empNo === 'string'
+              ? uac.empNo.trim()
+              : '';
+          const primaryLabel = signedIn
+            ? displayName || empNo || t('launcherSignedIn')
+            : t('launcherSignIn');
+          const secondaryLabel =
+            signedIn && displayName && empNo && !displayName.includes(empNo)
+              ? empNo
+              : '';
+          const avatarGlyph = signedIn
+            ? displayName
+              ? Array.from(displayName)[0].toUpperCase()
+              : empNo
+                ? empNo.slice(-2)
+                : 'A'
+            : null;
+          const beginSignIn = () => {
+            setOpen(false);
+            const target = hasLocalUac && !uacSignedIn ? 'uac' : 'inline_login';
+            if (!openPlatformLogin(target)) {
+              ctx.inject?.(['layout'], (scope) => {
+                scope.layout?.selectPanel?.(PANEL_ID);
+              });
+            }
+          };
+          const signOut = () => {
+            if (busy) return;
+            setBusy(true);
+            setOpen(false);
+            const tasks = [];
+            if (uacSignedIn && uac?.csrf)
+              tasks.push(
+                postLocal('auriga/uac/logout', uac.csrf, {}).catch(() => {}),
+              );
+            if (platformSignedIn && shell?.csrf)
+              tasks.push(
+                postLocal('auriga/shell/command', shell.csrf, {
+                  action: 'logout',
+                }).catch(() => {}),
+              );
+            Promise.all(tasks).finally(() => {
+              if (disposed) return;
+              setBusy(false);
+              reloadUac();
+              reloadShell();
+            });
+          };
+          const avatarNode = h(
+            'span',
+            {
+              className: 'auriga-launcher-avatar',
+              'data-signed-out': !signedIn ? 'true' : undefined,
+              'aria-hidden': true,
+            },
+            signedIn
+              ? avatarGlyph
+              : IconUserOutlineMedium
+                ? h(IconUserOutlineMedium, { size: 14 })
+                : IconEllipsisOutlineMedium
+                  ? h(IconEllipsisOutlineMedium, { size: 14 })
+                  : '?',
+          );
+          const triggerButton = h(
+            'button',
+            {
+              ref: trigger,
+              type: 'button',
+              className: 'auriga-launcher-trigger',
+              'data-collapsed': !wide ? 'true' : undefined,
+              'data-signed-out': !signedIn ? 'true' : undefined,
+              'aria-label': t('launcherMenu'),
+              'aria-haspopup': 'menu',
+              'aria-expanded': open,
+              title: secondaryLabel
+                ? primaryLabel + ' (' + secondaryLabel + ')'
+                : primaryLabel,
+              onClick: () => setOpen((value) => !value),
+            },
+            avatarNode,
+            wide &&
+              h(
+                'span',
+                { className: 'auriga-launcher-text' },
+                h('span', { className: 'auriga-launcher-name' }, primaryLabel),
+                secondaryLabel &&
+                  h(
+                    'span',
+                    { className: 'auriga-launcher-sub' },
+                    secondaryLabel,
+                  ),
+              ),
+          );
+          const items = [
+            {
+              id: 'settings',
+              label: t('launcherSettings'),
+              ...(IconSettingsOutlineMedium
+                ? { icon: h(IconSettingsOutlineMedium, { size: 16 }) }
+                : {}),
+              ...(settingsShortcut !== undefined
+                ? { shortcut: settingsShortcut }
+                : {}),
+            },
+            signedIn
+              ? {
+                  id: 'signout',
+                  label: t('launcherSignOut'),
+                  disabled: busy,
+                }
+              : {
+                  id: 'signin',
+                  label: t('launcherSignIn'),
+                  ...(IconUserOutlineMedium
+                    ? { icon: h(IconUserOutlineMedium, { size: 16 }) }
+                    : {}),
+                },
+          ];
+          const onSelect = (id) => {
+            if (id === 'settings') {
+              setOpen(false);
+              trigger.current?.focus();
+              openSettings?.();
+            } else if (id === 'signin') {
+              beginSignIn();
+            } else if (id === 'signout') {
+              signOut();
+            }
+          };
+          if (HostMenu)
+            return h(
+              'div',
+              { className: 'auriga-launcher-root' },
+              h(HostMenu, {
+                open,
+                side: 'top',
+                portal: true,
+                autoFocus: true,
+                className: 'auriga-launcher-anchor',
+                anchor: triggerButton,
+                items,
+                onClose: () => setOpen(false),
+                onSelect,
+              }),
+            );
+          return h(
+            'div',
+            { className: 'auriga-launcher-root' },
+            triggerButton,
+            open &&
+              h(
+                'div',
+                {
+                  className: 'auriga-launcher-fallback-menu',
+                  role: 'menu',
+                  'aria-label': t('launcherMenu'),
+                },
+                ...items.map((item) =>
+                  h(
+                    'button',
+                    {
+                      key: item.id,
+                      type: 'button',
+                      role: 'menuitem',
+                      className: 'auriga-launcher-fallback-item',
+                      disabled: !!item.disabled,
+                      onClick: () => onSelect(item.id),
+                    },
+                    item.label,
+                  ),
+                ),
+              ),
+          );
+        }
+        effect(() => {
+          try {
+            return ctx.slots.inject('settings.launcher', () =>
+              ctx.slots.register(
+                {
+                  name: 'settings.launcher',
+                  priority: -1,
+                  locale: NS,
+                },
+                AurigaAccountLauncher,
+              ),
+            );
+          } catch {
+            /* Older hosts without settings.launcher keep their default footer. */
+          }
+        }, 'auriga-shell: account launcher');
         effect(() => {
           try {
             return ctx.slots.inject('shell.overlay', () => {
