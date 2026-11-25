@@ -144,6 +144,8 @@ class UacHttpPollCompatibilityTest {
                 .cookie(new Cookie("auriga_portal_login_tx", f.binding)))
         .andExpect(status().isNotFound());
     verifyNoInteractions(f.login);
+    verify(f.store, atLeastOnce()).byId("uac_challenge", f.id, false);
+    verify(f.store, never()).get(anyString(), anyString(), anyBoolean());
   }
 
   @Test
@@ -163,6 +165,7 @@ class UacHttpPollCompatibilityTest {
           .andExpect(header().doesNotExist("Access-Control-Allow-Origin"))
           .andExpect(header().doesNotExist("Access-Control-Allow-Headers"));
     verify(f.store, never()).get(anyString(), anyString(), anyBoolean());
+    verify(f.store, never()).byId(anyString(), anyString(), anyBoolean());
   }
 
   @Test
@@ -229,7 +232,8 @@ class UacHttpPollCompatibilityTest {
 
     Fixture() {
       when(store.tx(any())).thenAnswer(call -> ((Supplier<?>) call.getArgument(0)).get());
-      when(store.get(eq("uac_challenge"), eq(id), anyBoolean())).thenReturn(row);
+      // Browser endpoints resolve the public challenge id, not a proof nonce lookup key.
+      when(store.byId(eq("uac_challenge"), eq(id), anyBoolean())).thenReturn(row);
       var flow =
           new UacFlow(store, null, null, null, null, login, null, Clock.fixed(now, ZoneOffset.UTC));
       mvc =
