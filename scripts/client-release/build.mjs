@@ -346,7 +346,13 @@ export function launchOfflineBuild(options, kit, hooks = {}) {
     throw new Error(
       `Windows 离线构建失败（退出码 ${result.status}），保留输出目录供排查`,
     );
+  console.log(uacBuildNotice(options));
   return { out };
+}
+function uacBuildNotice(options) {
+  return options['uac-config-dir']
+    ? 'UAC 配置已写入 payload/auriga/uac/（adapter.json、provider.json，共 2 个文件，位于安装包与构建暂存 payload 内）'
+    : '未提供 --uac-config-dir，安装包不含本地 UAC 配置（payload/auriga/uac/ 未写入）';
 }
 export function systemToolsEvidence(match) {
   if (!match) return null;

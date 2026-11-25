@@ -174,7 +174,21 @@ export function reviewRelease(options) {
           );
       }
     } finally {
-      rmSync(temporary, { recursive: true, force: true });
+      try {
+        rmSync(temporary, {
+          recursive: true,
+          force: true,
+          maxRetries: 3,
+          retryDelay: 100,
+        });
+      } catch (error) {
+        const code = /^[A-Z][A-Z0-9_]{0,31}$/.test(error?.code ?? '')
+          ? error.code
+          : 'cleanup_failed';
+        console.warn(
+          `警告：审阅临时目录清理失败（${code}），校验结论保留；残留目录 ${temporary}，请稍后清理`,
+        );
+      }
     }
   }
   const reviewSha256 = createHash('sha256')
