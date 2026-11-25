@@ -149,6 +149,13 @@ window.__ModuleLoader__.load({
       uac_denied: '本次登录已被拒绝',
       uac_rejected: '登录未通过校验',
       uac_unavailable: '公司登录服务暂不可用，请稍后重试',
+      uacSsoAppBound: '当前浏览器不支持静默 SSO，请直接扫码登录。',
+      uacSsoUnreadable:
+        '浏览器凭据库暂不可读（可能被占用）。可关闭浏览器后重启 Auriga，或直接扫码登录。',
+      uacDestinationRejected:
+        '公司登录地址与受控配置不一致，请管理员核对地址清单及 DNS 后重试。',
+      uacDnsUnavailable: '公司登录域名暂时无法解析，请检查公司网络后重试。',
+      uacSsoRejected: '浏览器登录凭据已失效，请扫码重新登录。',
       uac_cancelled: '已取消登录',
       uac_failed: '登录失败，请重新获取二维码',
       uacValidity: '剩余有效期',
@@ -171,6 +178,16 @@ window.__ModuleLoader__.load({
       teamTab: '团队账号登录',
       launcherSettings: '设置',
       launcherSignIn: '登录 Auriga',
+      launcherUnknown: '身份状态未知',
+      launcherLocal: '本地身份已登录',
+      launcherLocalSignedOut: '本地身份未登录',
+      launcherLocalUnknown: '本地身份状态未知',
+      launcherLocalUnconfigured: '本地身份未配置',
+      launcherPlatform: '平台已连接',
+      launcherPlatformSignedIn: '平台已登录，连接不可用',
+      launcherPlatformUnknown: '平台状态未知',
+      launcherPlatformOffline: '平台未连接',
+      loginEntryUnavailable: '登录界面暂未就绪，请在概览中重试。',
       launcherSignOut: '退出登录',
       launcherMore: '更多',
       launcherSignedIn: '已登录',
@@ -361,6 +378,16 @@ window.__ModuleLoader__.load({
       uac_denied: 'Sign-in was denied',
       uac_rejected: 'Sign-in did not pass verification',
       uac_unavailable: 'Company sign-in is unavailable. Try again later.',
+      uacSsoAppBound:
+        'This browser does not support silent SSO. Scan the QR code to sign in.',
+      uacSsoUnreadable:
+        'The browser credential store cannot be read and may be locked. Close the browser and restart Auriga, or scan the QR code.',
+      uacDestinationRejected:
+        'The company sign-in address does not match the approved configuration. Ask an administrator to check the address list and DNS.',
+      uacDnsUnavailable:
+        'The company sign-in hostname cannot be resolved. Check the company network and retry.',
+      uacSsoRejected:
+        'The browser sign-in has expired. Scan the QR code to sign in again.',
       uac_cancelled: 'Sign-in cancelled',
       uac_failed: 'Sign-in failed. Request a new code.',
       uacValidity: 'Expires in',
@@ -387,6 +414,16 @@ window.__ModuleLoader__.load({
       teamTab: 'Team account',
       launcherSettings: 'Settings',
       launcherSignIn: 'Sign in to Auriga',
+      launcherUnknown: 'Identity status unknown',
+      launcherLocal: 'Local identity signed in',
+      launcherLocalSignedOut: 'Local identity signed out',
+      launcherLocalUnknown: 'Local identity status unknown',
+      launcherLocalUnconfigured: 'Local identity not configured',
+      launcherPlatform: 'Platform connected',
+      launcherPlatformSignedIn: 'Platform signed in, connection unavailable',
+      launcherPlatformUnknown: 'Platform status unknown',
+      launcherPlatformOffline: 'Platform disconnected',
+      loginEntryUnavailable: 'Sign-in is not ready. Retry from Overview.',
       launcherSignOut: 'Sign out',
       launcherMore: 'More',
       launcherSignedIn: 'Signed in',
@@ -1808,6 +1845,11 @@ window.__ModuleLoader__.load({
                     module.createSettingsView(React, {
                       localURL,
                       fetcher: fetch,
+                      openLogin: loginOverlayAvailable
+                        ? () => openPlatformLogin()
+                        : undefined,
+                      subscribeIdentity,
+                      identityChanged,
                       navigate: (url) => window.location.assign(url),
                     }),
                   );
@@ -1917,6 +1959,14 @@ window.__ModuleLoader__.load({
           };
           return [desktop, action];
         }
+        const identityListeners = new Set();
+        const subscribeIdentity = (listener) => {
+          identityListeners.add(listener);
+          return () => identityListeners.delete(listener);
+        };
+        const identityChanged = () => {
+          for (const listener of identityListeners) listener();
+        };
         // Polls one authenticated local JSON status route. Errors become null.
         const useLocalStatus = (
           path,
@@ -1937,9 +1987,13 @@ window.__ModuleLoader__.load({
             if (!enabled) return undefined;
             let live = true;
             let reading = false;
+            let readAgain = false;
             const controller = new AbortController();
             const read = async () => {
-              if (reading) return;
+              if (reading) {
+                readAgain = true;
+                return;
+              }
               reading = true;
               const started = revision.current;
               const next = await fetch(localURL(path), {
@@ -1961,10 +2015,19 @@ window.__ModuleLoader__.load({
                       ? { available: true, reason: 'status_unavailable' }
                       : null),
                 );
+              if (live && readAgain) {
+                readAgain = false;
+                void read();
+              }
             };
             void read();
             const timer = setInterval(read, interval);
+            const unsubscribe = subscribeIdentity(() => {
+              revision.current++;
+              void read();
+            });
             return () => {
+              unsubscribe();
               live = false;
               controller.abort();
               clearInterval(timer);
@@ -1987,7 +2050,9 @@ window.__ModuleLoader__.load({
           });
           if (!response.ok)
             throw Object.assign(failure(), { status: response.status });
-          return response.json();
+          const value = await response.json();
+          identityChanged();
+          return value;
         };
         // Native host controls when the public primitives expose them;
         // plain semantic elements otherwise (capability probe, no version pin).
@@ -2139,6 +2204,18 @@ window.__ModuleLoader__.load({
             uac.challenge?.state === 'authenticated'
               ? undefined
               : uac.challenge;
+          const diagnosticKey = {
+            v20_app_bound: 'uacSsoAppBound',
+            browser_store_unreadable: 'uacSsoUnreadable',
+            destination_not_allowed: 'uacDestinationRejected',
+            dns_address_mismatch: 'uacDestinationRejected',
+            dns_unavailable: 'uacDnsUnavailable',
+            token_rejected: 'uacSsoRejected',
+          }[
+            uac.configurationDiagnostic ??
+              challenge?.failureCode ??
+              uac.ssoDiagnostic
+          ];
           const pending =
             challenge &&
             ['waiting', 'scanned', 'verifying'].includes(challenge.state);
@@ -2199,13 +2276,15 @@ window.__ModuleLoader__.load({
             return h(Blocked, {
               tone: 'warning',
               title: t('localIdentity'),
-              detail: t(
-                {
-                  invalid: 'uacConfigInvalid',
-                  storage: 'uacStorageUnavailable',
-                  owner_domain: 'uacOwnerDomain',
-                }[uac.reason] ?? 'uacUnavailable',
-              ),
+              detail: diagnosticKey
+                ? t(diagnosticKey)
+                : t(
+                    {
+                      invalid: 'uacConfigInvalid',
+                      storage: 'uacStorageUnavailable',
+                      owner_domain: 'uacOwnerDomain',
+                    }[uac.reason] ?? 'uacUnavailable',
+                  ),
               action: h(Action, { onClick: reload }, t('refresh')),
             });
           const seconds = challenge
@@ -2231,6 +2310,9 @@ window.__ModuleLoader__.load({
                 h('h3', null, t('localIdentity')),
                 h('span', { className: 'auriga-badge' }, t('uacMethod')),
               ),
+            !signedIn &&
+              diagnosticKey &&
+              h('p', { role: 'status' }, t(diagnosticKey)),
             signedIn
               ? h(
                   'div',
@@ -2246,6 +2328,8 @@ window.__ModuleLoader__.load({
                     null,
                     h('dt', null, t('empNo')),
                     h('dd', null, uac.empNo),
+                    uac.displayName && h('dt', null, t('identityLabel')),
+                    uac.displayName && h('dd', null, uac.displayName),
                     uac.department && h('dt', null, t('department')),
                     uac.department && h('dd', null, uac.department),
                     h('dt', null, t('loginTime')),
@@ -2435,7 +2519,7 @@ window.__ModuleLoader__.load({
             local && (!settled || (open && ownsLogin)),
             true,
           );
-          const hasLocalUac = !!uac?.available && !uac?.reason;
+          const hasLocalUac = !!uac?.available;
           const hasLocalUacRef = React.useRef(hasLocalUac);
           hasLocalUacRef.current = hasLocalUac;
           const uacSignedIn = hasLocalUac && uac.state === 'authenticated';
@@ -2444,9 +2528,11 @@ window.__ModuleLoader__.load({
           const show = (action) => {
             loginAction.current = 'inline_login';
             manual.current = true;
-            manualPlatform.current = action !== 'uac';
+            manualPlatform.current = action === 'platform';
             setLoginTab(
-              action === 'uac' && hasLocalUacRef.current ? 'uac' : 'platform',
+              action !== 'platform' && hasLocalUacRef.current
+                ? 'uac'
+                : 'platform',
             );
             setSettled(false);
             reloadShell();
@@ -2493,7 +2579,7 @@ window.__ModuleLoader__.load({
             };
           }, []);
           React.useEffect(() => {
-            if (!local || shell === undefined) return;
+            if (!local || (shell === undefined && uac === undefined)) return;
             if (uac === undefined && !manualPlatform.current) return;
             // Retry startup readiness slowly until the IPC broker appears (when no local UAC).
             setSettled(
@@ -2512,6 +2598,11 @@ window.__ModuleLoader__.load({
                 return;
               }
             } else if (!needsPlatform) {
+              if (manual.current && !shell?.loggedIn) {
+                manual.current = false;
+                setOpen(true);
+                return;
+              }
               manualPlatform.current = false;
               setOpen(false);
               return;
@@ -2610,14 +2701,7 @@ window.__ModuleLoader__.load({
               .catch(() => {})
               .finally(reloadShell);
           }, [open, loginTab, ownsLogin, shell]);
-          if (
-            !open ||
-            (!hasLocalUac &&
-              (shell?.loggedIn ||
-                !shell?.configured ||
-                !shell?.brokerAvailable))
-          )
-            return null;
+          if (!open) return null;
           const activeTab =
             hasLocalUac && (loginTab === 'uac' || !platformAvailable)
               ? 'uac'
@@ -2694,7 +2778,7 @@ window.__ModuleLoader__.load({
                   active: open && activeTab === 'uac',
                   modal: true,
                 })
-              : ownsLogin
+              : ownsLogin || !platformAvailable
                 ? h(PlatformCard, {
                     boot: { mode: 'connect' },
                     shell,
@@ -3511,6 +3595,7 @@ window.__ModuleLoader__.load({
           );
           const [open, setOpen] = React.useState(false);
           const [busy, setBusy] = React.useState(false);
+          const [failedAvatar, setFailedAvatar] = React.useState(null);
           const trigger = React.useRef(null);
           const [shell, reloadShell] = useLocalStatus(
             'auriga/shell/status',
@@ -3523,25 +3608,93 @@ window.__ModuleLoader__.load({
             local,
             true,
           );
-          const hasLocalUac = !!uac?.available && !uac?.reason;
-          const uacSignedIn = hasLocalUac && uac.state === 'authenticated';
+          const hasLocalUac = !!uac?.available;
+          const uacSignedIn =
+            hasLocalUac && !uac.reason && uac.state === 'authenticated';
           const platformSignedIn = !!shell?.loggedIn;
-          const signedIn = uacSignedIn || platformSignedIn;
+          // Local identity owns the account presentation whenever configured.
+          // Platform authentication remains an independent second layer.
+          const signedIn = hasLocalUac
+            ? uacSignedIn
+            : uac?.available === false && platformSignedIn;
+          const unknown = hasLocalUac
+            ? !!uac.reason || !uac.state
+            : !uac || !shell;
+          const selectedProfile = uacSignedIn
+            ? {
+                ...(platformSignedIn &&
+                uac.platformLink === 'matched' &&
+                typeof uac.platformBinding === 'string' &&
+                /^[0-9a-f]{64}$/.test(uac.platformBinding) &&
+                uac.platformBinding === shell?.account?.profileBinding
+                  ? shell.account
+                  : {}),
+                ...uac,
+              }
+            : !hasLocalUac
+              ? shell?.account
+              : undefined;
           const displayName =
-            typeof shell?.account?.displayName === 'string'
-              ? shell.account.displayName.trim()
+            typeof selectedProfile?.displayName === 'string'
+              ? selectedProfile.displayName.trim()
               : '';
+          let avatarUrl;
+          const candidate = selectedProfile?.avatarUrl;
+          if (
+            typeof candidate === 'string' &&
+            candidate.length <= 2048 &&
+            /^https?:\/\//.test(candidate) &&
+            !/[\s"'<>\\]/.test(candidate) &&
+            !Array.from(candidate).some(
+              (char) => char.charCodeAt(0) < 32 || char.charCodeAt(0) === 127,
+            )
+          ) {
+            try {
+              const parsed = new URL(candidate);
+              if (
+                parsed.hostname &&
+                !parsed.username &&
+                !parsed.password &&
+                !parsed.hash &&
+                parsed.port !== '0'
+              )
+                avatarUrl = candidate;
+            } catch {
+              /* Optional presentation data must not interrupt login. */
+            }
+          }
           const empNo =
             uacSignedIn && typeof uac?.empNo === 'string'
               ? uac.empNo.trim()
               : '';
           const primaryLabel = signedIn
             ? displayName || empNo || t('launcherSignedIn')
-            : t('launcherSignIn');
-          const secondaryLabel =
-            signedIn && displayName && empNo && !displayName.includes(empNo)
-              ? empNo
-              : '';
+            : t(unknown ? 'launcherUnknown' : 'launcherSignIn');
+          const localLabel = t(
+            uacSignedIn
+              ? 'launcherLocal'
+              : !uac || uac.reason
+                ? 'launcherLocalUnknown'
+                : hasLocalUac
+                  ? 'launcherLocalSignedOut'
+                  : 'launcherLocalUnconfigured',
+          );
+          const secondaryLabel = [
+            displayName && empNo && !displayName.includes(empNo) ? empNo : '',
+            uac?.department ?? '',
+            localLabel,
+            t(
+              !shell
+                ? 'launcherPlatformUnknown'
+                : platformSignedIn
+                  ? shell.connected
+                    ? 'launcherPlatform'
+                    : 'launcherPlatformSignedIn'
+                  : 'launcherPlatformOffline',
+            ),
+          ]
+            .filter(Boolean)
+            .join('，');
           const avatarGlyph = signedIn
             ? displayName
               ? Array.from(displayName)[0].toUpperCase()
@@ -3551,8 +3704,8 @@ window.__ModuleLoader__.load({
             : null;
           const beginSignIn = () => {
             setOpen(false);
-            const target = hasLocalUac && !uacSignedIn ? 'uac' : 'inline_login';
-            if (!openPlatformLogin(target)) {
+            if (!openPlatformLogin()) {
+              notify({ level: 'warning', message: t('loginEntryUnavailable') });
               ctx.get?.('layout')?.selectPanel?.(PANEL_ID);
             }
           };
@@ -3582,11 +3735,26 @@ window.__ModuleLoader__.load({
             'span',
             {
               className: 'auriga-launcher-avatar',
-              'data-signed-out': !signedIn ? 'true' : undefined,
+              'data-signed-out': !signedIn && !unknown ? 'true' : undefined,
               'aria-hidden': true,
             },
             signedIn
-              ? avatarGlyph
+              ? avatarUrl && failedAvatar !== avatarUrl
+                ? h('img', {
+                    src: avatarUrl,
+                    alt: '',
+                    referrerPolicy: 'no-referrer',
+                    draggable: false,
+                    width: 24,
+                    height: 24,
+                    style: {
+                      width: '100%',
+                      height: '100%',
+                      objectFit: 'cover',
+                    },
+                    onError: () => setFailedAvatar(avatarUrl),
+                  })
+                : avatarGlyph
               : IconUserOutlineMedium
                 ? h(IconUserOutlineMedium, { size: 14 })
                 : IconEllipsisOutlineMedium
@@ -3600,7 +3768,7 @@ window.__ModuleLoader__.load({
               type: 'button',
               className: 'auriga-launcher-trigger',
               'data-collapsed': !wide ? 'true' : undefined,
-              'data-signed-out': !signedIn ? 'true' : undefined,
+              'data-signed-out': !signedIn && !unknown ? 'true' : undefined,
               'aria-label': t('launcherMenu'),
               'aria-haspopup': 'menu',
               'aria-expanded': open,
@@ -3634,19 +3802,26 @@ window.__ModuleLoader__.load({
                 ? { shortcut: settingsShortcut }
                 : {}),
             },
-            signedIn
-              ? {
-                  id: 'signout',
-                  label: t('launcherSignOut'),
-                  disabled: busy,
-                }
-              : {
-                  id: 'signin',
-                  label: t('launcherSignIn'),
-                  ...(IconUserOutlineMedium
-                    ? { icon: h(IconUserOutlineMedium, { size: 16 }) }
-                    : {}),
-                },
+            ...(!signedIn
+              ? [
+                  {
+                    id: 'signin',
+                    label: t('launcherSignIn'),
+                    ...(IconUserOutlineMedium
+                      ? { icon: h(IconUserOutlineMedium, { size: 16 }) }
+                      : {}),
+                  },
+                ]
+              : []),
+            ...(uacSignedIn || platformSignedIn
+              ? [
+                  {
+                    id: 'signout',
+                    label: t('launcherSignOut'),
+                    disabled: busy,
+                  },
+                ]
+              : []),
           ];
           const onSelect = (id) => {
             if (id === 'settings') {

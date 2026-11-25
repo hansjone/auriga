@@ -11,6 +11,8 @@ import java.time.*;
 import java.util.*;
 import java.util.function.Supplier;
 import org.junit.jupiter.api.*;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.mock.web.MockHttpServletResponse;
 import tools.jackson.databind.node.ObjectNode;
@@ -126,6 +128,34 @@ class StandardDeviceProfileTest {
     device.put("revoked", false);
     when(sessions.activeById(sessionId)).thenReturn(null);
     assertThrows(AurigaException.class, this::profile);
+  }
+
+  @ParameterizedTest
+  @ValueSource(strings = {"https://profile.example.com/avatar.png", "http://192.0.2.10/avatar.png"})
+  void profileIncludesOnlySafeHttpAvatar(String avatar) {
+    accountRow.put("avatarUrl", avatar);
+    assertEquals(avatar, profile().path("account").path("avatarUrl").asString());
+  }
+
+  @ParameterizedTest
+  @ValueSource(
+      strings = {
+        "javascript:alert(1)",
+        "data:image/png;base64,a",
+        "file:///avatar.png",
+        "//profile.example.com/avatar.png",
+        "https://alice:secret@example.com/avatar",
+        "https://example.com/\\avatar",
+        "https://example.com/<avatar>",
+        "https://example.com/white space",
+        "https://example.com/avatar#fragment",
+        "https://example.com:70000/avatar"
+      })
+  void profileOmitsUnsafeAvatarWithoutLosingIdentity(String avatar) {
+    accountRow.put("avatarUrl", avatar);
+    var result = profile().path("account");
+    assertEquals(account, result.path("id").asString());
+    assertFalse(result.has("avatarUrl"));
   }
 
   @Test

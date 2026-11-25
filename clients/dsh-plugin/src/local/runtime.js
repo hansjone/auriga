@@ -16,7 +16,11 @@ import { createBroker } from './broker.js';
 import { connectPackagedBroker } from './broker-package.js';
 import { createEnterpriseAuth } from './enterprise.js';
 import { createEnterpriseEnvironment } from './enterprise-environment.js';
-import { memberName } from './member-profile.js';
+import {
+  memberName,
+  memberAvatar,
+  memberProfileBinding,
+} from './member-profile.js';
 import {
   connectionReason,
   DIAGNOSTIC_PATH,
@@ -70,7 +74,7 @@ export async function createConnectRuntime({
   /** @type {Set<(identity:any)=>Promise<void>>} */ const gates = new Set();
 
   /** @type {any} */ let principal;
-  /** @type {{displayName:string}|undefined} */ let memberProfile;
+  /** @type {{displayName?:string,avatarUrl?:string}|undefined} */ let memberProfile;
   /** @type {{reachable:boolean,lastSuccessAt:string}|undefined} */ let probeEvidence;
   /** @type {ReturnType<typeof createHostContexts>|undefined} */ let contexts;
   /** @type {ReturnType<typeof createHostContexts>|undefined} */ let enterpriseContexts;
@@ -279,7 +283,14 @@ export async function createConnectRuntime({
       )
         return;
       const displayName = memberName(result.body.displayName);
-      memberProfile = displayName ? { displayName } : undefined;
+      const avatarUrl = memberAvatar(result.body.avatarUrl);
+      memberProfile =
+        displayName || avatarUrl
+          ? {
+              ...(displayName ? { displayName } : {}),
+              ...(avatarUrl ? { avatarUrl } : {}),
+            }
+          : undefined;
       for (const listener of listeners)
         void Promise.resolve()
           .then(listener)
@@ -615,6 +626,7 @@ export async function createConnectRuntime({
         account: who
           ? {
               subject: who.ownerId,
+              profileBinding: memberProfileBinding(s),
               ...(memberProfile ? memberProfile : {}),
             }
           : null,
@@ -627,6 +639,13 @@ export async function createConnectRuntime({
     },
     prepare(/** @type {any} */ req) {
       return { body: this.status(req) };
+    },
+    /** One verified snapshot for cross-route presentation correlation only. */
+    platformIdentity() {
+      const s = broker.state.current();
+      return s?.state === 'authenticated' && s.identity?.empNo
+        ? { empNo: s.identity.empNo, profileBinding: memberProfileBinding(s) }
+        : undefined;
     },
     /** Platform-verified employee number, used only to show local UAC association. */
     platformEmployee() {

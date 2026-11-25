@@ -148,6 +148,7 @@ export async function apply(ctx, config) {
         sameOrigin: (req, write) => admission.sameOrigin(req, write),
         identity: () => localUac,
         platformEmployee: () => current()?.runtime.platformEmployee?.(),
+        platformIdentity: () => current()?.runtime.platformIdentity?.(),
       });
       ctx.effect(
         () =>

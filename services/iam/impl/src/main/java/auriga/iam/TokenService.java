@@ -124,10 +124,39 @@ public final class TokenService
       Instant stepUp,
       String scope,
       String memberType) {
+    return access(
+        tenant,
+        subject,
+        audience,
+        principalType,
+        context,
+        session,
+        device,
+        authTime,
+        stepUp,
+        scope,
+        memberType,
+        null);
+  }
+
+  String access(
+      UUID tenant,
+      String subject,
+      String audience,
+      String principalType,
+      String context,
+      UUID session,
+      UUID device,
+      Instant authTime,
+      Instant stepUp,
+      String scope,
+      String memberType,
+      JsonNode uacSessionBinding) {
     IamError.require(
         !"internal_service".equals(principalType) && !"auriga.internal".equals(audience),
         "invalid_audience",
         400);
+    IamError.validate(uacSessionBinding == null || "device".equals(context));
     // Instance tokens can only be issued after the dedicated internal workspace checks.
     IamError.validate(
         tenant != null
@@ -169,6 +198,7 @@ public final class TokenService
     if (stepUp != null) claims.put("stepup_time", stepUp.getEpochSecond());
     if ("user".equals(principalType) || "device".equals(principalType))
       claims.put("mtyp", memberType);
+    if (uacSessionBinding != null) claims.set("uacSessionBinding", uacSessionBinding);
     return signAccess(claims);
   }
 
@@ -264,7 +294,8 @@ public final class TokenService
       DeviceAccessAuthority.Identity identity,
       Instant authTime,
       String memberType,
-      Set<String> effective) {
+      Set<String> effective,
+      JsonNode uacSessionBinding) {
     if (!effective.contains(DeviceAiResource.INVOKE)) return null;
     long expiry =
         Math.min(
@@ -284,6 +315,7 @@ public final class TokenService
     claims.put("mtyp", memberType);
     claims.put("auth_time", authTime.getEpochSecond());
     claims.set("perms", Json.MAPPER.valueToTree(List.of(DeviceAiResource.INVOKE)));
+    if (uacSessionBinding != null) claims.set("uacSessionBinding", uacSessionBinding);
     return new IssuedToken(signAccess(claims), Instant.ofEpochSecond(expiry));
   }
 

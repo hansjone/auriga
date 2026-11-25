@@ -5,6 +5,24 @@ import { requestPinnedEnterpriseHttps } from '../enterprise.js';
 
 export { MAX_ENTERPRISE_BODY as MAX_BODY } from '../enterprise.js';
 
+/** Only fixed, non-sensitive transport diagnostics may leave this boundary.
+ * @param {unknown} error */
+export function uacTransportReason(error) {
+  const code = /** @type {{code?:string}} */ (error)?.code;
+  return typeof code === 'string' &&
+    [
+      'destination_not_allowed',
+      'dns_address_mismatch',
+      'dns_unavailable',
+    ].includes(code)
+    ? code
+    : 'transport_error';
+}
+
+/** @param {string} code */
+const rejected = (code) =>
+  Object.assign(new Error('UAC destination rejected'), { code });
+
 /** @param {URL} url */
 export function originKey(url) {
   const port = url.port || (url.protocol === 'https:' ? '443' : '80');
@@ -97,7 +115,7 @@ export function createUacHttp(settings, options = {}) {
       (base && url.search) ||
       (!unrestricted && !destinations.has(originKey(url)))
     )
-      throw new Error('UAC destination rejected');
+      throw rejected('destination_not_allowed');
   }
 
   /**
@@ -116,20 +134,20 @@ export function createUacHttp(settings, options = {}) {
     const resolved = literal
       ? [literal]
       : await new Promise((done, fail) => {
-          const cancelled = () => fail(signal.reason);
+          const cancelled = () => fail(rejected('dns_unavailable'));
           signal.addEventListener('abort', cancelled, { once: true });
           void resolve(host)
-            .then(done, fail)
+            .then(done, () => fail(rejected('dns_unavailable')))
             .finally(() => signal.removeEventListener('abort', cancelled));
         });
     const checked = resolved.map(({ address, family }) => {
       const ip = parseIpAddress(address);
       if (!ip || ip.family !== family || (allowed && !allowed.has(ip.address)))
-        throw new Error('UAC destination rejected');
+        throw rejected('dns_address_mismatch');
       return ip;
     });
     const pinned = checked[0];
-    if (!pinned) throw new Error('UAC destination rejected');
+    if (!pinned) throw rejected('dns_unavailable');
     const payload = Buffer.from(JSON.stringify(body), 'utf8');
     const response = await requestPinnedEnterpriseHttps(url, pinned, {
       method: 'POST',

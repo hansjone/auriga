@@ -446,6 +446,11 @@ class NativeConnectPostgresTest {
           ObjectNode connected = connected();
           String raw = connected.path("access_token").asString();
           ObjectNode identity = oauth.nativeIdentity(raw, false);
+          assertFalse(tokens.verify(raw).has("uacSessionBinding"));
+          assertFalse(identity.has("uacSessionBinding"));
+          var refreshed = rotate(connected);
+          assertFalse(
+              tokens.verify(refreshed.path("access_token").asString()).has("uacSessionBinding"));
           assertEquals("native_tx", identity.path("authorizationMode").asString());
           assertEquals(provider.toString(), identity.path("providerId").asString());
           assertEquals(account.toString(), identity.path("accountId").asString());

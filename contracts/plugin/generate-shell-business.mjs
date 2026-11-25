@@ -432,14 +432,23 @@ for (const [operation, input, output] of [
   [
     'profile_read',
     obj({}),
-    obj({
-      memberId: {
-        ...uuid,
-        description:
-          'Authoritative memberId from /me/device-session; never inferred from account.id. Profile account.id must match verified device JWT sub (accountId).',
+    obj(
+      {
+        memberId: {
+          ...uuid,
+          description:
+            'Authoritative memberId from /me/device-session; never inferred from account.id. Profile account.id must match verified device JWT sub (accountId).',
+        },
+        displayName: { type: 'string', maxLength: 256 },
+        avatarUrl: {
+          type: 'string',
+          format: 'uri',
+          maxLength: 2048,
+          pattern: '^https?://',
+        },
       },
-      displayName: { type: 'string', maxLength: 256 },
-    }),
+      ['memberId', 'displayName'],
+    ),
   ],
   ['provider_diagnostic', obj({}), obj({ available: { type: 'boolean' } })],
 ]) {

@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { setImmediate } from 'node:timers/promises';
 import { createSettingsView } from '../../src/settings/view.js';
 
-function harness(fetcher, locale = 'zh', gotoOverview) {
+function harness(fetcher, locale = 'zh', gotoOverview, openLogin) {
   const values = [],
     effects = [];
   let cursor = 0,
@@ -43,6 +43,7 @@ function harness(fetcher, locale = 'zh', gotoOverview) {
   const View = createSettingsView(React, {
     localURL: (p) => 'https://example.com/' + p,
     fetcher,
+    openLogin,
     navigate: (to) => {
       navigated = to;
     },
@@ -113,6 +114,85 @@ const signedIn = {
   network: { connected: true, state: 'ready' },
   models: { available: false },
 };
+
+test('settings keeps local UAC identity distinct while platform status is unavailable', async (t) => {
+  const f = harness(async (url) => {
+    if (url.endsWith('/auriga/uac/status'))
+      return Response.json({
+        available: true,
+        state: 'authenticated',
+        empNo: 'A1001',
+        displayName: 'Alice Example',
+        department: 'Engineering',
+      });
+    if (url.endsWith('/auriga/shell/status'))
+      return new Response('{}', { status: 503 });
+    return Response.json(settings);
+  });
+  t.after(() => f.dispose());
+  f.render();
+  await setImmediate();
+  const result = text(f.render());
+  assert.match(result, /本地身份/);
+  assert.match(result, /Alice Example/);
+  assert.match(result, /平台连接/);
+  assert.doesNotMatch(result, /未登录/);
+});
+
+test('settings can sign out the local identity without a platform connection', async (t) => {
+  const posts = [];
+  const f = harness(async (url, init) => {
+    if (init.method === 'POST') {
+      posts.push({ url, init });
+      return Response.json({ ok: true });
+    }
+    if (url.endsWith('/auriga/uac/status'))
+      return Response.json({
+        available: true,
+        state: 'authenticated',
+        empNo: 'A1001',
+        csrf: 'local-csrf',
+      });
+    if (url.endsWith('/auriga/shell/status'))
+      return new Response('{}', { status: 503 });
+    return Response.json(settings);
+  });
+  t.after(() => f.dispose());
+  assert.doesNotMatch(text(f.render()), /未登录/);
+  await setImmediate();
+  await button(f.render(), '退出登录').props.onClick();
+  assert.equal(posts.length, 1);
+  assert.ok(posts[0].url.endsWith('/auriga/uac/logout'));
+  assert.equal(posts[0].init.headers['x-auriga-csrf'], 'local-csrf');
+});
+
+test('settings local login uses the shared action despite an unavailable platform', async (t) => {
+  let opened = 0;
+  const f = harness(
+    async (url) => {
+      if (url.endsWith('/auriga/uac/status'))
+        return Response.json({
+          available: true,
+          state: 'signed_out',
+          csrf: 'local-csrf',
+        });
+      if (url.endsWith('/auriga/shell/status'))
+        return new Response('{}', { status: 503 });
+      return Response.json(settings);
+    },
+    'zh',
+    undefined,
+    () => {
+      opened++;
+      return true;
+    },
+  );
+  t.after(() => f.dispose());
+  f.render();
+  await setImmediate();
+  await button(f.render(), '登录').props.onClick();
+  assert.equal(opened, 1);
+});
 
 test('native settings imports a selected public file while signed out and offers the signed receipt', async (t) => {
   const calls = [];
@@ -495,8 +575,8 @@ for (const locale of ['zh', 'en'])
             assert.match(
               content,
               locale === 'zh'
-                ? /本地可正常使用，平台功能暂停/
-                : /Local DSH available/,
+                ? /平台功能暂不可用/
+                : /Platform features are unavailable/,
             );
           if (phase === 'invalid')
             assert.match(

@@ -394,20 +394,7 @@ final class StandardDevices {
             var account = store.get("account", valid.account(), false);
             if (account == null || !"active".equals(account.path("status").asString()))
               throw new AurigaException(CommonErrors.UNAUTHENTICATED);
-            var projected =
-                Json.object(
-                    "account",
-                    Json.object(
-                        "id",
-                        valid.account(),
-                        "tenantId",
-                        valid.tenant(),
-                        "displayName",
-                        account.path("displayName").asString("")));
-            new ContractSchemas()
-                .validate(
-                    "auth/standard-device.schema.json#/$defs/StandardDeviceProfile", projected);
-            return projected;
+            return DeviceProfile.project(account, valid.account(), valid.tenant());
           }
 
           var result =

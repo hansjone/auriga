@@ -214,6 +214,18 @@ async function fixture(http, options = {}) {
         modal: false,
         reloadShell() {},
       }),
+    async renderLocalIdentity(uac) {
+      const overlay = await this.renderLogin();
+      const card = all(overlay).find(
+        (node) => node.type?.name === 'LocalIdentityCard',
+      );
+      assert.ok(card);
+      return renderSurface('local-card', card.type, {
+        ...card.props,
+        uac,
+        active: false,
+      });
+    },
     async renderLoginContent() {
       const overlay = await this.renderLogin();
       if (!overlay) {
@@ -1014,7 +1026,9 @@ test('settings.launcher replaces DSH bottom-left account slot with Auriga avatar
   let uacState = {
     available: true,
     state: 'authenticated',
-    empNo: '10329667',
+    empNo: 'A1001',
+    platformLink: 'matched',
+    platformBinding: 'c'.repeat(64),
     csrf: 'uac-csrf',
   };
   let shellState = {
@@ -1022,7 +1036,7 @@ test('settings.launcher replaces DSH bottom-left account slot with Auriga avatar
     brokerAvailable: true,
     loggedIn: true,
     connected: true,
-    account: { displayName: '张三' },
+    account: { displayName: '张三', profileBinding: 'c'.repeat(64) },
     csrf: 'shell-csrf',
   };
   const f = await fixture(async (url, init = {}) => {
@@ -1045,7 +1059,7 @@ test('settings.launcher replaces DSH bottom-left account slot with Auriga avatar
     const renderedText = text(signedTree);
     assert.match(renderedText, /张/);
     assert.match(renderedText, /张三/);
-    assert.match(renderedText, /10329667/);
+    assert.match(renderedText, /A1001/);
     // Open fallback menu and trigger settings + sign-out
     const trigger = all(signedTree).find((n) => n.type === 'button');
     trigger.props.onClick();
@@ -1070,3 +1084,235 @@ test('settings.launcher replaces DSH bottom-left account slot with Auriga avatar
     f.close();
   }
 });
+
+for (const shellState of [
+  null,
+  { configured: false, brokerAvailable: false, loggedIn: false },
+])
+  test(
+    'manual account login keeps local UAC visible while platform is unavailable: ' +
+      (shellState ? 'unconfigured' : 'unknown'),
+    async () => {
+      const f = await fixture(
+        async (url) =>
+          String(url).includes('/auriga/uac/status')
+            ? {
+                ok: true,
+                json: async () => ({
+                  available: true,
+                  state: 'signed_out',
+                  csrf: 'uac-csrf',
+                }),
+              }
+            : shellState
+              ? { ok: true, json: async () => shellState }
+              : { ok: false, status: 503 },
+        { skipped: true },
+      );
+      try {
+        await f.renderLogin();
+        const launcher = await f.renderLauncher();
+        all(launcher)
+          .find((n) => n.type === 'button')
+          .props.onClick();
+        const menu = await f.renderLauncher();
+        all(menu)
+          .find((n) => n.props?.role === 'menuitem' && /登录/.test(text(n)))
+          .props.onClick();
+        const overlay = await f.renderLogin();
+        assert.ok(
+          overlay,
+          'local login must not be gated by platform readiness',
+        );
+        assert.ok(
+          all(overlay).some((n) => n.type?.name === 'LocalIdentityCard'),
+        );
+      } finally {
+        f.close();
+      }
+    },
+  );
+
+test('account launcher preserves unknown state and renders safe local avatar with glyph fallback', async () => {
+  let uac = null;
+  const f = await fixture(async (url) =>
+    String(url).includes('/auriga/uac/status') && uac
+      ? { ok: true, json: async () => uac }
+      : { ok: false, status: 503 },
+  );
+  try {
+    const unknown = await f.renderLauncher();
+    assert.match(text(unknown), /状态未知|正在确认/);
+    uac = {
+      available: true,
+      state: 'authenticated',
+      empNo: 'A1001',
+      displayName: 'Alice Example',
+      avatarUrl: 'https://profile.example.com/alice.png',
+    };
+    for (const timer of f.intervals.values()) timer.fn();
+    await new Promise((resolve) => setImmediate(resolve));
+    const signed = await f.renderLauncher();
+    assert.match(text(signed), /Alice Example/);
+    const avatar = all(signed).find((n) => n.type === 'img');
+    assert.equal(avatar.props.src, uac.avatarUrl);
+    assert.equal(avatar.props.referrerPolicy, 'no-referrer');
+    avatar.props.onError();
+    const fallback = await f.renderLauncher();
+    assert.ok(!all(fallback).some((n) => n.type === 'img'));
+    assert.match(text(fallback), /A/);
+  } finally {
+    f.close();
+  }
+});
+
+for (const local of [
+  { available: true, state: 'signed_out' },
+  { available: true, reason: 'status_unavailable' },
+])
+  test(
+    'platform login cannot replace a separate local identity state: ' +
+      (local.state ?? local.reason),
+    async () => {
+      const f = await fixture(async (url) => ({
+        ok: true,
+        json: async () =>
+          String(url).includes('/auriga/uac/status')
+            ? local
+            : {
+                configured: true,
+                brokerAvailable: true,
+                loggedIn: true,
+                connected: true,
+                account: { displayName: 'Platform Only' },
+                csrf: 'shell-csrf',
+              },
+      }));
+      try {
+        const launcher = await f.renderLauncher();
+        assert.doesNotMatch(text(launcher), /Platform Only/);
+        assert.match(text(launcher), /平台已连接/);
+        assert.match(
+          text(launcher),
+          local.reason ? /本地身份状态未知/ : /本地身份未登录/,
+        );
+        if (local.reason)
+          assert.ok(
+            !all(launcher).some((n) => n.props?.['data-signed-out'] === 'true'),
+          );
+      } finally {
+        f.close();
+      }
+    },
+  );
+
+for (const [reason, hint] of [
+  ['v20_app_bound', /不支持静默 SSO.*扫码/],
+  ['browser_store_unreadable', /可能被占用.*关闭浏览器.*扫码/],
+  ['dns_address_mismatch', /受控配置.*管理员.*DNS/],
+])
+  test('local login shows an actionable diagnostic: ' + reason, async () => {
+    const uac = {
+      available: true,
+      state: 'signed_out',
+      csrf: 'synthetic',
+      ssoDiagnostic: reason,
+    };
+    const f = await fixture(async (url) => ({
+      ok: true,
+      json: async () =>
+        String(url).includes('/auriga/uac/status')
+          ? uac
+          : { configured: false, loggedIn: false },
+    }));
+    try {
+      assert.match(text(await f.renderLocalIdentity(uac)), hint);
+    } finally {
+      f.close();
+    }
+  });
+
+for (const change of ['account', 'generation'])
+  test(
+    'launcher binds platform profile to the same UAC snapshot during ' +
+      change +
+      ' changes',
+    async () => {
+      const initialBinding = 'a'.repeat(64),
+        nextBinding = 'b'.repeat(64);
+      let shell = {
+        configured: true,
+        brokerAvailable: true,
+        loggedIn: true,
+        connected: true,
+        account: {
+          subject: 'account-a',
+          displayName: 'Alice Example',
+          avatarUrl: 'https://profile.example.com/alice.png',
+          profileBinding: initialBinding,
+        },
+        csrf: 'shell-csrf',
+      };
+      let local = {
+        available: true,
+        state: 'authenticated',
+        empNo: 'A1001',
+        platformLink: 'matched',
+        platformBinding: initialBinding,
+        csrf: 'uac-csrf',
+      };
+      let hold = false,
+        release;
+      const f = await fixture(async (url) => {
+        if (String(url).includes('/auriga/uac/status')) {
+          if (hold)
+            return new Promise((resolve) => {
+              release = () => resolve({ ok: true, json: async () => local });
+            });
+          return { ok: true, json: async () => local };
+        }
+        return { ok: true, json: async () => shell };
+      });
+      try {
+        assert.match(text(await f.renderLauncher()), /Alice Example/);
+        hold = true;
+        shell = {
+          ...shell,
+          account: {
+            subject: change === 'account' ? 'account-b' : 'account-a',
+            displayName: 'New Identity',
+            avatarUrl: 'https://profile.example.com/new.png',
+            profileBinding: nextBinding,
+          },
+        };
+        for (const timer of f.intervals.values()) timer.fn();
+        await new Promise((resolve) => setImmediate(resolve));
+        let current = await f.renderLauncher();
+        assert.doesNotMatch(text(current), /New Identity/);
+        assert.ok(
+          !all(current).some((n) => n.props?.src === shell.account.avatarUrl),
+        );
+        assert.match(text(current), /A1001/);
+        release?.();
+        await new Promise((resolve) => setImmediate(resolve));
+        assert.doesNotMatch(
+          text(await f.renderLauncher()),
+          /New Identity/,
+          'late old matched status cannot bind the new snapshot',
+        );
+        hold = false;
+        local = {
+          ...local,
+          platformBinding: nextBinding,
+          empNo: change === 'account' ? 'B2002' : 'A1001',
+        };
+        for (const timer of f.intervals.values()) timer.fn();
+        await new Promise((resolve) => setImmediate(resolve));
+        current = await f.renderLauncher();
+        assert.match(text(current), /New Identity/);
+      } finally {
+        release?.();
+        f.close();
+      }
+    },
+  );
