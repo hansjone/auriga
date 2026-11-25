@@ -241,6 +241,12 @@ sh deploy-nas/scripts/status.sh
 NAS 首次激活入口不接受带历史的 next/retired 输入；轮换使用独立的公开 key-rotation 入口，保留原审批源。
 版本化回执、expired-old 恢复及小时巡检/人工根签流程见 [NAS network 续期说明](../../docs/dev/nas-network-renewal.md)。
 
+rotation 通过本机 Engine 的 `/version` 在 API 1.41–1.52 范围内协商并缓存版本，
+协商失败、版本区间不相容或响应异常时停止，不回退固定版本；协议失败与本地镜像缺失分别诊断。
+Compose 来源检查接受固定配方的 shared-runtime/oneclick overlay，以及安装父目录下规范的
+`.auriga-compose.<suffix>` / `.auriga-runtime-compose.<suffix>` 临时目录里的官方 `shared.yml`；
+仍拒绝任意 YAML、嵌套目录和路径逃逸，诊断包含被拒文件路径。
+
 Compose 自动选入 `collab-compose.yml`。独立 collab 使用同一 platform 镜像、uid10002，
 容器安装模式由离线 helper 校验私有激活收据，并在既有受保护 env 导出流中附带启用标记；
 普通宿主用户不需要遍历 root 私有收据目录，缺失或无效标记拒绝执行 Compose。

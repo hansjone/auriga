@@ -20,9 +20,26 @@ func waitHealthy(s state) error {
 
 // waitHealthyFor 等待全部服务健康，超时返回最后一次的不健康原因（deploy 用 server.healthTimeout，默认 10 分钟）。
 func waitHealthyFor(s state, timeout time.Duration) error {
+	return waitHealthyWithPolicy(s, timeout, false)
+}
+
+// Only deployment/rollback callers that explicitly start in message maintenance
+// mode use this policy. A collab receipt alone must never relax doctor/start checks.
+func waitDeployHealthyFor(s state, timeout time.Duration) error {
+	offline := collabSourcePresent(s.Data)
+	err := waitHealthyWithPolicy(s, timeout, offline)
+	if err != nil && offline {
+		return fmt.Errorf("%s；%w", deployMessageOfflineNote, err)
+	}
+	return err
+}
+
+const deployMessageOfflineNote = "消息网络因离线维护被主动停止（collab/network/network-broker）；本次只验核心服务健康，消息网络就绪须单独恢复并验收"
+
+func waitHealthyWithPolicy(s state, timeout time.Duration, messageOffline bool) error {
 	deadline := time.Now().Add(timeout)
 	for {
-		err := health(s)
+		err := healthWithPolicy(s, messageOffline)
 		if err == nil {
 			return nil
 		}
@@ -34,14 +51,22 @@ func waitHealthyFor(s state, timeout time.Duration) error {
 }
 
 func health(s state) error {
+	return healthWithPolicy(s, false)
+}
+
+func healthWithPolicy(s state, messageOffline bool) error {
 	var out bytes.Buffer
 	if err := compose(s, &out, "ps", "--all", "--format", "json"); err != nil {
 		return err
 	}
-	return healthyContainers(out.Bytes())
+	return healthyContainersWithPolicy(out.Bytes(), messageOffline)
 }
 
 func healthyContainers(raw []byte) error {
+	return healthyContainersWithPolicy(raw, false)
+}
+
+func healthyContainersWithPolicy(raw []byte, messageOffline bool) error {
 	type container struct {
 		Service, State, Health string
 		ExitCode               int
@@ -68,6 +93,13 @@ func healthyContainers(raw []byte) error {
 	seen := map[string]bool{}
 	for _, c := range records {
 		seen[c.Service] = true
+		if messageOffline {
+			switch c.Service {
+			case "collab", "network", "network-broker", "collab-db":
+				// collab-db is the message profile's one-shot initializer.
+				continue
+			}
+		}
 		if strings.HasSuffix(c.Service, "-prepare") && c.State == "exited" && c.ExitCode == 0 {
 			continue
 		}

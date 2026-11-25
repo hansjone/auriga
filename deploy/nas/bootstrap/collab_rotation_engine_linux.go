@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/binary"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -15,7 +16,9 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"golang.org/x/sys/unix"
@@ -23,9 +26,20 @@ import (
 
 const nasRotationProject = "auriga-nas-test"
 
+const (
+	nasRotationAPIMin = 41
+	nasRotationAPIMax = 52
+)
+
+var nasRotationAPIVersion = regexp.MustCompile(`^1\.(0|[1-9][0-9]{0,2})$`)
+var nasRotationComposeDirectory = regexp.MustCompile(`^\.auriga-(compose|runtime-compose)\.[A-Za-z0-9]+$`)
+
 type nasRotationEngine struct {
-	client *http.Client
-	self   string
+	client      *http.Client
+	self        string
+	versionOnce sync.Once
+	apiVersion  string
+	versionErr  error
 }
 type nasRotationContainer struct {
 	ID     string `json:"Id"`
@@ -47,7 +61,54 @@ type nasRotationContainer struct {
 	}
 }
 
+// Rotation uses only the API 1.41 request fields. Cap negotiation at the newest
+// explicitly supported protocol rather than adopting arbitrary future schemas.
+func (e *nasRotationEngine) version() (string, error) {
+	e.versionOnce.Do(func() {
+		b, err := e.request("GET", "/version", nil)
+		if err != nil {
+			e.versionErr = fmt.Errorf("NAS rotation Engine API negotiation failed: %w", err)
+			return
+		}
+		var v struct {
+			Maximum string `json:"ApiVersion"`
+			Minimum string `json:"MinAPIVersion"`
+		}
+		if len(b) > 65536 || json.Unmarshal(b, &v) != nil {
+			e.versionErr = fmt.Errorf("NAS rotation Engine API version response refused")
+			return
+		}
+		parse := func(s string) (int, bool) {
+			if !nasRotationAPIVersion.MatchString(s) {
+				return 0, false
+			}
+			n, err := strconv.Atoi(strings.TrimPrefix(s, "1."))
+			return n, err == nil
+		}
+		maximum, maxOK := parse(v.Maximum)
+		minimum, minOK := parse(v.Minimum)
+		if !maxOK || !minOK || minimum > maximum {
+			e.versionErr = fmt.Errorf("NAS rotation Engine API version range refused")
+			return
+		}
+		if maximum < nasRotationAPIMin || minimum > nasRotationAPIMax {
+			e.versionErr = fmt.Errorf("NAS rotation Engine API incompatible with supported range 1.%d-1.%d", nasRotationAPIMin, nasRotationAPIMax)
+			return
+		}
+		e.apiVersion = "1." + strconv.Itoa(min(maximum, nasRotationAPIMax))
+	})
+	return e.apiVersion, e.versionErr
+}
+
 func (e *nasRotationEngine) call(method, path string, body any) ([]byte, error) {
+	v, err := e.version()
+	if err != nil {
+		return nil, err
+	}
+	return e.request(method, "/v"+v+path, body)
+}
+
+func (e *nasRotationEngine) request(method, path string, body any) ([]byte, error) {
 	var input io.Reader
 	if body != nil {
 		b, err := json.Marshal(body)
@@ -58,21 +119,55 @@ func (e *nasRotationEngine) call(method, path string, body any) ([]byte, error) 
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 150*time.Second)
 	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, method, "http://docker/v1.41"+path, input)
+	req, err := http.NewRequestWithContext(ctx, method, "http://docker"+path, input)
 	if err != nil {
 		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	resp, err := e.client.Do(req)
+	client := *e.client
+	client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	resp, err := client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("NAS rotation Engine unavailable")
 	}
 	defer func() { _ = resp.Body.Close() }()
 	b, err := io.ReadAll(io.LimitReader(resp.Body, 8<<20+1))
-	if err != nil || len(b) > 8<<20 || resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("NAS rotation Engine rejected %s (status %d)", method, resp.StatusCode)
+	if err != nil || len(b) > 8<<20 {
+		return nil, fmt.Errorf("NAS rotation Engine response refused")
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 || path == "/version" && resp.StatusCode != http.StatusOK {
+		return nil, &nasRotationEngineHTTPError{method: method, status: resp.StatusCode}
 	}
 	return b, nil
+}
+
+type nasRotationEngineHTTPError struct {
+	method string
+	status int
+}
+
+func (e *nasRotationEngineHTTPError) Error() string {
+	return fmt.Sprintf("NAS rotation Engine API rejected %s (status %d)", e.method, e.status)
+}
+
+func (e *nasRotationEngine) approvedImage(image string) (string, error) {
+	b, err := e.call("GET", "/images/"+url.PathEscape(image)+"/json", nil)
+	if err != nil {
+		var status *nasRotationEngineHTTPError
+		if errors.As(err, &status) && status.status == http.StatusNotFound && e.versionErr == nil {
+			return "", fmt.Errorf("NAS rotation approved image missing locally: %w", err)
+		}
+		return "", fmt.Errorf("NAS rotation approved image inspection failed: %w", err)
+	}
+	var info struct {
+		ID           string `json:"Id"`
+		OS           string `json:"Os"`
+		Architecture string
+	}
+	if json.Unmarshal(b, &info) != nil || !strings.HasPrefix(info.ID, "sha256:") || !nasRotationDigest.MatchString(strings.TrimPrefix(info.ID, "sha256:")) || info.OS != "linux" || info.Architecture != "amd64" {
+		return "", fmt.Errorf("NAS rotation approved image response or platform refused")
+	}
+	return info.ID, nil
 }
 func (e *nasRotationEngine) inspect(id string) (nasRotationContainer, error) {
 	var c nasRotationContainer
@@ -123,6 +218,8 @@ func (e *nasRotationEngine) owned(r *nasRotation, c nasRotationContainer) error 
 			main = true
 			continue
 		case filepath.Join(r.recipe, "collab-compose.yml"),
+			filepath.Join(r.recipe, "shared-runtime-compose.yml"),
+			filepath.Join(r.recipe, "oneclick-compose.yml"),
 			filepath.Join(r.recipe, "managed-identity-compose.yml"),
 			filepath.Join(r.recipe, "resource-downgrade-compose.yml"):
 			continue
@@ -133,11 +230,11 @@ func (e *nasRotationEngine) owned(r *nasRotation, c nasRotationContainer) error 
 			}
 			continue
 		}
-		parent := filepath.Dir(r.data)
-		if (strings.HasPrefix(f, parent+"/.auriga-compose.") || strings.HasPrefix(f, parent+"/.auriga-runtime-compose.")) && (filepath.Base(f) == "override.yml" || filepath.Base(f) == "runtime.yml" || filepath.Base(f) == "rotation.yml") {
+		dir := filepath.Dir(f)
+		if filepath.IsAbs(f) && filepath.Clean(f) == f && filepath.Dir(dir) == filepath.Dir(r.data) && nasRotationComposeDirectory.MatchString(filepath.Base(dir)) && (filepath.Base(f) == "override.yml" || filepath.Base(f) == "runtime.yml" || filepath.Base(f) == "rotation.yml" || filepath.Base(f) == "shared.yml") {
 			continue
 		}
-		return fmt.Errorf("NAS rotation foreign Compose file refused")
+		return fmt.Errorf("NAS rotation foreign Compose file refused: %q", f)
 	}
 	if !main {
 		return fmt.Errorf("NAS rotation missing fixed recipe")
@@ -567,6 +664,10 @@ func nasRotationEngineOpen() (*nasRotationEngine, error) {
 		return (&net.Dialer{Timeout: 5 * time.Second}).DialContext(ctx, "unix", "/var/run/docker.sock")
 	}}
 	e := &nasRotationEngine{client: &http.Client{Transport: t}}
+	if _, err := e.version(); err != nil {
+		e.client.CloseIdleConnections()
+		return nil, err
+	}
 	host, err := os.Hostname()
 	if err == nil && len(host) >= 12 && len(host) <= 64 {
 		c, err := e.inspect(host)
@@ -620,16 +721,10 @@ func nasRotationCommand(args []string, stdout io.Writer) error {
 			if !regexp.MustCompile(`^(sha256:|[^\s]+@sha256:)[a-f0-9]{64}$`).MatchString(*image) {
 				return fmt.Errorf("NAS rotation immutable local image required")
 			}
-			b, err := engine.call("GET", "/images/"+url.PathEscape(*image)+"/json", nil)
-			var info struct {
-				ID           string `json:"Id"`
-				OS           string `json:"Os"`
-				Architecture string
+			*image, err = engine.approvedImage(*image)
+			if err != nil {
+				return err
 			}
-			if err != nil || json.Unmarshal(b, &info) != nil || !strings.HasPrefix(info.ID, "sha256:") || !nasRotationDigest.MatchString(strings.TrimPrefix(info.ID, "sha256:")) || info.OS != "linux" || info.Architecture != "amd64" {
-				return fmt.Errorf("NAS rotation approved image unavailable")
-			}
-			*image = info.ID
 		}
 	}
 	openImage := *image

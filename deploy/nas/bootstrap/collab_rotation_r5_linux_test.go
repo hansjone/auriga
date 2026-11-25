@@ -124,6 +124,9 @@ func TestNASRotationR5StoppedDatabaseNeverStartedByObserver(t *testing.T) {
 	r := &nasRotation{data: "/srv/data", recipe: "/srv/recipe"}
 	id := strings.Repeat("a", 64)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, q *http.Request) {
+		if nasRotationVersionFixture(w, q) {
+			return
+		}
 		if q.Method != "GET" {
 			t.Error("observer attempted database mutation")
 			http.Error(w, "denied", 500)
