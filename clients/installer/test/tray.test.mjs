@@ -170,7 +170,7 @@ if (command === 'status') {
         .split('\n')
         .find((l) => l.startsWith('launch ')),
     );
-    assert.match(launchLine, /--stdin-control -- --no-open/);
+    assert.match(launchLine, /--stdin-control -- --no-open --port 12721/);
     const launcherPid = Number(launchLine.split(' ')[1]);
     // Startup opens DSH directly and never requests the loopback login page.
     await delay(500);

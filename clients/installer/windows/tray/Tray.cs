@@ -501,7 +501,7 @@ sealed class TrayApp : ApplicationContext
     {
         if (launcher != null && !launcher.HasExited) return;
         dshUrl = null; platformState = null; platformReason = null;
-        var start = Desktop.NodeStart(root, "launch --root " + Desktop.Quote(root) + " --stdin-control -- --no-open");
+        var start = Desktop.NodeStart(root, "launch --root " + Desktop.Quote(root) + " --stdin-control -- --no-open --port 12721");
         start.RedirectStandardInput = true;
         try
         {

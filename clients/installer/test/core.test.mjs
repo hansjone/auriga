@@ -14,7 +14,9 @@ import { tmpdir } from 'node:os';
 import { delimiter, dirname, join, parse } from 'node:path';
 import {
   CrashError,
+  DESKTOP_DSH_PORT,
   defaultSmoke,
+  desktopLaunchArgs,
   install,
   launchEnv,
   nodeBin,
@@ -27,6 +29,21 @@ import {
 import { buildPayload, tempBase } from './helpers.mjs';
 
 const noSmoke = () => {};
+
+test('desktop launch defaults DSH to the published port', () => {
+  assert.equal(DESKTOP_DSH_PORT, 12721);
+  assert.deepEqual(desktopLaunchArgs(['--no-open']), [
+    '--no-open',
+    '--port',
+    '12721',
+  ]);
+  assert.deepEqual(desktopLaunchArgs(['--port', '3080', '--no-open']), [
+    '--port',
+    '3080',
+    '--no-open',
+  ]);
+  assert.deepEqual(desktopLaunchArgs([]), ['--port', '12721']);
+});
 
 test('default smoke distinguishes command and missing-plugin failures with a safe reason code', (t) => {
   const base = tempBase(t);
