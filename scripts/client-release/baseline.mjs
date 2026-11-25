@@ -9,6 +9,10 @@ export const BASELINE_FILENAME = 'client-tools-baseline.json';
 export const TOOLS_BASELINE_MISMATCH =
   'Windows 更新导致系统工具变化，请重新 deps baseline --client';
 
+export function toolsBaselineOption() {
+  return process.env.AURIGA_CLIENT_TOOLS_BASELINE || null;
+}
+
 export function baselinePath(cacheDir) {
   return join(resolve(cacheDir), BASELINE_FILENAME);
 }

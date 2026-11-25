@@ -40,6 +40,7 @@ import {
 } from '../runtime/verify.mjs';
 import { sha256File, assertNoSecrets, listFiles } from './lib/files.mjs';
 import { verifyInputs } from '../../../scripts/client-release/inputs.mjs';
+import { toolsBaselineOption } from '../../../scripts/client-release/baseline.mjs';
 import { assemblePython } from './python-runtime.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -296,7 +297,14 @@ export async function build(args) {
   );
   const offline = args.offline === true;
   const inputs = offline
-    ? verifyInputs(args['offline-inputs'], args['offline-inputs-sha256'])
+    ? verifyInputs(
+        args['offline-inputs'],
+        args['offline-inputs-sha256'],
+        undefined,
+        {
+          toolsBaseline: toolsBaselineOption(),
+        },
+      )
     : null;
   if (offline && args.upstream && args.upstream !== config.dsh)
     throw new Error('离线构建不能更换未批准的 DSH 版本');

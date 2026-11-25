@@ -1,15 +1,16 @@
 import { parseArgs } from 'node:util';
 import { existsSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
 import { join, resolve } from 'node:path';
+import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { buildWorker } from './build.mjs';
 import { startBuild } from './online.mjs';
 import { generateDesktopKeys, assertPrivateKey } from './keys.mjs';
 import { publish } from './publish.mjs';
-import { physical } from './inputs.mjs';
+import { physical, ROOT } from './inputs.mjs';
 import { cleanSource } from './source.mjs';
 import { clientPlatform } from './platform.mjs';
-import { safeDiagnostic } from './diagnostics.mjs';
+import { buildErrorPaths, safeDiagnostic } from './diagnostics.mjs';
 import {
   reviewRelease,
   signRelease,
@@ -55,7 +56,13 @@ export function normalizeBuildAliases(options) {
   return normalized;
 }
 
-export function formatCliError(action, error, argv = [], env = process.env) {
+export function formatCliError(
+  action,
+  error,
+  argv = [],
+  env = process.env,
+  buildOptions = {},
+) {
   const privatePaths = [];
   for (let index = 0; index < argv.length; index++) {
     if (argv[index] === '--key-file') privatePaths.push(argv[++index]);
@@ -63,17 +70,35 @@ export function formatCliError(action, error, argv = [], env = process.env) {
       privatePaths.push(argv[index].slice('--key-file='.length));
   }
   const causes = [];
+  const buildRoots =
+    action === 'build' || action === '_build-worker'
+      ? [
+          ROOT,
+          buildOptions['source-root'],
+          buildOptions.out,
+          buildOptions['site-devkit'],
+          buildOptions.temp ?? tmpdir(),
+        ].filter(Boolean)
+      : [];
+  const options = { privatePaths, env, limit: 6000 };
   for (
     let current = error;
     current && causes.length < 4;
     current = current.cause
   ) {
+    const visiblePaths = buildErrorPaths(
+      current,
+      buildRoots,
+      buildOptions['uac-config-dir'],
+      options,
+    );
+    const message = safeDiagnostic(current.message ?? current, {
+      ...options,
+      visiblePaths,
+    });
+    const paths = visiblePaths.filter((path) => !message.includes(path));
     causes.push(
-      safeDiagnostic(current.message ?? current, {
-        privatePaths,
-        env,
-        limit: 6000,
-      }),
+      paths.length ? `${message}（构建路径：${paths.join(' → ')}）` : message,
     );
   }
   const summary =
@@ -155,9 +180,9 @@ export function signCommand(o) {
     sha256: signed.sha256,
   };
 }
-export async function main(argv) {
+export async function main(argv, diagnostics = {}) {
   if (argv[0] === '_build-worker' && argv.length === 2)
-    return buildWorker(argv[1]);
+    return buildWorker(argv[1], { diagnostics });
   if (!argv.length || argv.includes('--help')) {
     console.log(HELP + KEY_HELP);
     return;
@@ -239,7 +264,10 @@ export async function main(argv) {
     if (!o.out) throw new Error('缺少 --out');
     return generateDesktopKeys(o.out);
   }
-  if (command === 'build') return startBuild(normalizeBuildAliases(o));
+  if (command === 'build') {
+    Object.assign(diagnostics, o);
+    return startBuild(normalizeBuildAliases(o));
+  }
   if (command === 'sign') return signCommand(o);
   for (const name of ['dir', 'public-key', 'admin-origin', 'portal-origin'])
     if (!o[name]) throw new Error(`缺少 --${name}`);
@@ -265,12 +293,21 @@ if (
   process.argv[1] &&
   resolve(process.argv[1]) === fileURLToPath(import.meta.url)
 ) {
+  const diagnostics = {};
   try {
-    const result = await main(process.argv.slice(2));
+    const result = await main(process.argv.slice(2), diagnostics);
     if (result) console.log(JSON.stringify(result, null, 2));
   } catch (error) {
     const action = process.argv[2];
-    console.error(formatCliError(action, error, process.argv.slice(2)));
+    console.error(
+      formatCliError(
+        action,
+        error,
+        process.argv.slice(2),
+        process.env,
+        diagnostics,
+      ),
+    );
     process.exitCode = 1;
   }
 }
