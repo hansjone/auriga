@@ -5,6 +5,7 @@ import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
 import auriga.common.audit.AuditLogger;
+import auriga.common.error.AurigaException;
 import auriga.common.events.EventPublisher;
 import auriga.common.persistence.*;
 import auriga.iam.api.IdentityPolicyHooks;
@@ -31,7 +32,7 @@ class UacFirstLoginRecoveryPostgresTest {
   private static final String EMPLOYEE = "009Xy";
 
   @Test
-  void aFreshScanCanFinishRequiredMfaAfterOrgCommitAndNativeGrantExpiry() {
+  void aFreshScanRecoversAfterOrgCommitAndNativeGrantExpiryWithoutPlatformMfa() {
     UUID tenant = UUID.randomUUID();
     DataSource iamData = migrate("iam");
     DataSource orgData = migrate("org");
@@ -124,7 +125,7 @@ class UacFirstLoginRecoveryPostgresTest {
               clock,
               ORIGIN);
       login.uacEstablished(uac::established);
-      login.nativeDevices(
+      var oauth =
           new OAuthProvider(
               store,
               sessions,
@@ -139,7 +140,8 @@ class UacFirstLoginRecoveryPostgresTest {
                       Set.of("auriga.connect"),
                       Set.of(OAuthProvider.DEVICE, "refresh_token"),
                       true,
-                      true))));
+                      true)));
+      login.nativeDevices(oauth);
       var flow = new UacFlow(store, config, providers, adapter, uac, login, sessions, clock);
       String provider = UUID.randomUUID().toString();
       store.tenant(
@@ -164,6 +166,7 @@ class UacFirstLoginRecoveryPostgresTest {
             providers.encryptConfig(row, Json.object("baseUrl", ORIGIN, "systemCode", "test"));
             return store.insert("idp_provider", provider, row, null);
           });
+      String verifier = Secrets.random();
       var request =
           Json.object(
               "providerId",
@@ -171,13 +174,14 @@ class UacFirstLoginRecoveryPostgresTest {
               "nativeConnect",
               Json.object(
                   "clientId", "recovery-test",
-                  "codeChallenge", OAuthProvider.challenge(Secrets.random()),
+                  "codeChallenge", OAuthProvider.challenge(verifier),
                   "codeChallengeMethod", "S256"));
       var first = verifiedScan(store, tenant, flow, uac, request, null);
-      var rejected = submitOtp(store, tenant, login, first, clock);
-      assertNull(rejected.session());
       assertEquals(
-          "iam.invalid_grant", rejected.transaction().path("step").path("code").asString());
+          "iam.invalid_grant",
+          assertThrows(AurigaException.class, () -> completeScan(store, tenant, flow, first))
+              .errorCode()
+              .code());
       UUID account =
           org.tenant(
               tenant,
@@ -187,24 +191,46 @@ class UacFirstLoginRecoveryPostgresTest {
           () -> {
             for (String table : List.of("account", "identity", "team_totp", "session"))
               assertTrue(store.all(table).isEmpty(), table);
+            var grant = store.get("oauth_grant", first.grant(), false);
+            // Completion rolled back; the prior pending grant stays expired and unapproved.
+            assertEquals("pending", grant.path("status").asString());
+            assertFalse(grant.path("used").asBoolean());
+            assertFalse(grant.has("sessionId"));
+            assertTrue(clock.instant().isAfter(Instant.parse(grant.path("expiresAt").asString())));
             assertEquals(
-                "denied", store.get("oauth_grant", first.grant(), false).path("status").asString());
+                "expired_token",
+                oauth
+                    .token(
+                        Map.of(
+                            "grant_type",
+                            OAuthProvider.DEVICE,
+                            "client_id",
+                            "recovery-test",
+                            "device_code",
+                            first.deviceCode(),
+                            "code_verifier",
+                            verifier))
+                    .path("error")
+                    .asString());
             return null;
           });
 
       var retry = verifiedScan(store, tenant, flow, uac, request, first.binding());
-      var completed = submitOtp(store, tenant, login, retry, clock);
+      var completed = completeScan(store, tenant, flow, retry);
       assertNotNull(completed.session());
+      assertEquals("complete", completed.transaction().path("step").path("type").asString());
       assertEquals(account.toString(), completed.session().session().path("accountId").asString());
       assertEquals("portal", completed.session().session().path("audience").asString());
-      assertTrue(completed.session().session().path("mfa").asBoolean());
+      assertFalse(completed.session().session().path("mfa").asBoolean());
       verify(hooks, times(1)).provisionVerifiedUacMember(any(), anyString(), any(), anyString());
       store.tenant(
           tenant,
           () -> {
-            for (String table : List.of("account", "identity", "team_totp", "session"))
+            for (String table : List.of("account", "identity", "session"))
               assertEquals(1, store.all(table).size(), table);
-            assertTrue(team.hasTotp(account));
+            assertTrue(store.all("team_totp").isEmpty());
+            assertFalse(team.hasTotp(account));
+            assertTrue(store.byId("uac_challenge", first.id(), false).path("replaced").asBoolean());
             assertEquals(
                 "member",
                 store.get("account", account.toString(), false).path("memberType").asString());
@@ -232,9 +258,9 @@ class UacFirstLoginRecoveryPostgresTest {
     }
   }
 
-  private record Pending(String id, String binding, String grant, String secret) {}
+  private record VerifiedScan(String id, String binding, String grant, String deviceCode) {}
 
-  private static Pending verifiedScan(
+  private static VerifiedScan verifiedScan(
       IamStore store,
       UUID tenant,
       UacFlow flow,
@@ -255,36 +281,16 @@ class UacFirstLoginRecoveryPostgresTest {
                   Json.object("empNo", EMPLOYEE, "token", Secrets.random()),
                   challenge.path("providerId").asString()));
           store.save("uac_challenge", challenge);
-          var pending = flow.complete(id, created.binding(), "portal", ORIGIN);
-          assertNull(pending.session());
-          var tx = pending.transaction();
-          assertEquals("first_totp", tx.path("step").path("formId").asString());
-          String label = tx.path("step").path("fields").get(0).path("label").path("en").asString();
-          return new Pending(
-              tx.path("id").asString(),
-              created.binding(),
-              Secrets.hash(created.challenge().path("nativeDevice").path("deviceCode").asString()),
-              label.substring(label.lastIndexOf(' ') + 1));
+          String deviceCode =
+              created.challenge().path("nativeDevice").path("deviceCode").asString();
+          return new VerifiedScan(id, created.binding(), Secrets.hash(deviceCode), deviceCode);
         });
   }
 
-  private static LoginManager.Result submitOtp(
-      IamStore store, UUID tenant, LoginManager login, Pending pending, Clock clock) {
-    return store.tenant(
-        tenant,
-        () ->
-            login.advance(
-                pending.id(),
-                pending.binding(),
-                Json.object(
-                    "type",
-                    "form",
-                    "formId",
-                    "first_totp",
-                    "values",
-                    Json.object(
-                        "otp", Totp.code(pending.secret(), clock.instant().getEpochSecond() / 30))),
-                false));
+  private static LoginManager.Result completeScan(
+      IamStore store, UUID tenant, UacFlow flow, VerifiedScan scan) {
+    // Match separate create/complete requests so a failed completion cannot erase the grant.
+    return store.tenant(tenant, () -> flow.complete(scan.id(), scan.binding(), "portal", ORIGIN));
   }
 
   private static DataSource migrate(String schema) {
