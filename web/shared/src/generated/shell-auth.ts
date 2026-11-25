@@ -3659,6 +3659,8 @@ export interface components {
          */
         memberId: string;
         displayName: string;
+        /** Format: uri */
+        avatarUrl?: string;
       };
     };
     ShellAuthOutput_provider_diagnostic: {
