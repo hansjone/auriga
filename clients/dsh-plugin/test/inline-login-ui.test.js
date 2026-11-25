@@ -1028,6 +1028,7 @@ test('settings.launcher replaces DSH bottom-left account slot with Auriga avatar
     state: 'authenticated',
     empNo: 'A1001',
     platformLink: 'matched',
+    platformBinding: 'c'.repeat(64),
     csrf: 'uac-csrf',
   };
   let shellState = {
@@ -1035,7 +1036,7 @@ test('settings.launcher replaces DSH bottom-left account slot with Auriga avatar
     brokerAvailable: true,
     loggedIn: true,
     connected: true,
-    account: { displayName: '张三' },
+    account: { displayName: '张三', profileBinding: 'c'.repeat(64) },
     csrf: 'shell-csrf',
   };
   const f = await fixture(async (url, init = {}) => {
@@ -1230,3 +1231,88 @@ for (const [reason, hint] of [
       f.close();
     }
   });
+
+for (const change of ['account', 'generation'])
+  test(
+    'launcher binds platform profile to the same UAC snapshot during ' +
+      change +
+      ' changes',
+    async () => {
+      const initialBinding = 'a'.repeat(64),
+        nextBinding = 'b'.repeat(64);
+      let shell = {
+        configured: true,
+        brokerAvailable: true,
+        loggedIn: true,
+        connected: true,
+        account: {
+          subject: 'account-a',
+          displayName: 'Alice Example',
+          avatarUrl: 'https://profile.example.com/alice.png',
+          profileBinding: initialBinding,
+        },
+        csrf: 'shell-csrf',
+      };
+      let local = {
+        available: true,
+        state: 'authenticated',
+        empNo: 'A1001',
+        platformLink: 'matched',
+        platformBinding: initialBinding,
+        csrf: 'uac-csrf',
+      };
+      let hold = false,
+        release;
+      const f = await fixture(async (url) => {
+        if (String(url).includes('/auriga/uac/status')) {
+          if (hold)
+            return new Promise((resolve) => {
+              release = () => resolve({ ok: true, json: async () => local });
+            });
+          return { ok: true, json: async () => local };
+        }
+        return { ok: true, json: async () => shell };
+      });
+      try {
+        assert.match(text(await f.renderLauncher()), /Alice Example/);
+        hold = true;
+        shell = {
+          ...shell,
+          account: {
+            subject: change === 'account' ? 'account-b' : 'account-a',
+            displayName: 'New Identity',
+            avatarUrl: 'https://profile.example.com/new.png',
+            profileBinding: nextBinding,
+          },
+        };
+        for (const timer of f.intervals.values()) timer.fn();
+        await new Promise((resolve) => setImmediate(resolve));
+        let current = await f.renderLauncher();
+        assert.doesNotMatch(text(current), /New Identity/);
+        assert.ok(
+          !all(current).some((n) => n.props?.src === shell.account.avatarUrl),
+        );
+        assert.match(text(current), /A1001/);
+        release?.();
+        await new Promise((resolve) => setImmediate(resolve));
+        assert.doesNotMatch(
+          text(await f.renderLauncher()),
+          /New Identity/,
+          'late old matched status cannot bind the new snapshot',
+        );
+        hold = false;
+        local = {
+          ...local,
+          platformBinding: nextBinding,
+          empNo: change === 'account' ? 'B2002' : 'A1001',
+        };
+        for (const timer of f.intervals.values()) timer.fn();
+        await new Promise((resolve) => setImmediate(resolve));
+        current = await f.renderLauncher();
+        assert.match(text(current), /New Identity/);
+      } finally {
+        release?.();
+        f.close();
+      }
+    },
+  );

@@ -16,7 +16,11 @@ import { createBroker } from './broker.js';
 import { connectPackagedBroker } from './broker-package.js';
 import { createEnterpriseAuth } from './enterprise.js';
 import { createEnterpriseEnvironment } from './enterprise-environment.js';
-import { memberName, memberAvatar } from './member-profile.js';
+import {
+  memberName,
+  memberAvatar,
+  memberProfileBinding,
+} from './member-profile.js';
 import {
   connectionReason,
   DIAGNOSTIC_PATH,
@@ -622,6 +626,7 @@ export async function createConnectRuntime({
         account: who
           ? {
               subject: who.ownerId,
+              profileBinding: memberProfileBinding(s),
               ...(memberProfile ? memberProfile : {}),
             }
           : null,
@@ -634,6 +639,13 @@ export async function createConnectRuntime({
     },
     prepare(/** @type {any} */ req) {
       return { body: this.status(req) };
+    },
+    /** One verified snapshot for cross-route presentation correlation only. */
+    platformIdentity() {
+      const s = broker.state.current();
+      return s?.state === 'authenticated' && s.identity?.empNo
+        ? { empNo: s.identity.empNo, profileBinding: memberProfileBinding(s) }
+        : undefined;
     },
     /** Platform-verified employee number, used only to show local UAC association. */
     platformEmployee() {
