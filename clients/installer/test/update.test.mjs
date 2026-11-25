@@ -629,6 +629,35 @@ test('取消保留部分字节，刷新状态仍显示下载中，重建更新�
   );
 });
 
+test('下载完成后按阶段上报校验进度，而不是笼统 verifying', async (t) => {
+  const f = fixture(t);
+  const manifest = signed({ packageId: f.next.id });
+  const stages = [];
+  const updater = resumedUpdater(
+    f,
+    async (url) =>
+      url.endsWith('/latest')
+        ? new Response(JSON.stringify(manifest))
+        : new Response('zip'),
+    {
+      defer: true,
+      onState: (state) => {
+        if (state.phase === 'verifying' && state.stage)
+          stages.push(state.stage);
+      },
+    },
+  );
+  await updater.check();
+  await updater.update();
+  assert.deepEqual(stages, [
+    'verify-archive',
+    'extract',
+    'verify-package',
+    'check-release',
+  ]);
+  assert.equal(updater.status().restartRequired, true);
+});
+
 test('强制最低版本绕过零灰度及检查偏好，不能关闭或切渠道逃避', async (t) => {
   const f = fixture(t);
   const manifest = signed({

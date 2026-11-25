@@ -476,21 +476,24 @@ sealed class TrayApp : ApplicationContext
     void UpdateMenu()
     {
         bool running = launcher != null && !launcher.HasExited;
-        statusItem.Text = updateApplying
-            ? (updateStageText ?? "正在安装更新…")
-            : restarting ? "正在重启…"
+        statusItem.Text = exiting ? "正在退出…"
+            : updateApplying ? (updateStageText ?? "正在安装更新…")
+            : restarting ? "正在安装更新…"
             : running ? "运行中 · 版本 " + (Desktop.Str(info, "version") ?? "?")
             : "未运行（点“打开 Auriga”启动）";
         platformItem.Text = running ? Desktop.PlatformText(platformState, platformReason) : "平台：未运行";
         updateItem.Visible = availableVersion != null && !restartRequired && !updateApplying;
         updateItem.Text = "立即更新到 " + availableVersion;
-        updateItem.Enabled = !busy && !updateApplying;
-        restartItem.Visible = restartRequired || updateApplying;
-        if (updateApplying) restartItem.Text = "正在安装更新…（查看进度）";
-        fallbackLoginItem.Enabled = launcher != null && !launcher.HasExited && platformState != "authenticated";
-        checkItem.Enabled = !busy && !updateApplying && Desktop.Flag(info, "updatesConfigured");
-        pythonResetItem.Enabled = !busy && !restarting && !updateApplying;
-        string tip = Desktop.Brand + " · " + (updateApplying ? "正在更新" : running ? (platformState == "authenticated" ? "已连接" : "运行中") : "未运行");
+        updateItem.Enabled = !busy && !updateApplying && !exiting;
+        restartItem.Visible = (restartRequired || updateApplying || restarting) && !exiting;
+        if (updateApplying || restarting) restartItem.Text = "正在安装更新…（查看进度）";
+        else restartItem.Text = "重启以完成更新";
+        fallbackLoginItem.Enabled = launcher != null && !launcher.HasExited && platformState != "authenticated" && !exiting;
+        checkItem.Enabled = !busy && !updateApplying && !exiting && Desktop.Flag(info, "updatesConfigured");
+        pythonResetItem.Enabled = !busy && !restarting && !updateApplying && !exiting;
+        exitItem.Enabled = !exiting;
+        exitItem.Text = exiting ? "正在退出…" : "退出";
+        string tip = Desktop.Brand + " · " + (exiting ? "正在退出" : updateApplying || restarting ? "正在更新" : running ? (platformState == "authenticated" ? "已连接" : "运行中") : "未运行");
         icon.Text = tip.Substring(0, Math.Min(63, tip.Length));
     }
 
@@ -552,32 +555,59 @@ sealed class TrayApp : ApplicationContext
 
     static string UpdateStageMessage(string phase, string stage)
     {
-        if (phase == "retrying") return "正在重试安装更新（" + (string.IsNullOrEmpty(stage) ? "安装" : stage) + "），请稍候…";
+        if (phase == "retrying")
+            return "正在重试：" + UpdateStageDetail(stage) + "（请稍候）";
+        if (phase == "verifying" || phase == "downloading")
+            return UpdateDownloadMessage(phase, stage);
+        return UpdateStageDetail(stage);
+    }
+
+    static string UpdateDownloadMessage(string phase, string stage)
+    {
+        if (phase == "downloading" && (string.IsNullOrEmpty(stage) || stage == "download"))
+            return null; // caller formats byte progress
+        return UpdateStageDetail(string.IsNullOrEmpty(stage) ? "verify-archive" : stage);
+    }
+
+    static string UpdateStageDetail(string stage)
+    {
         switch (stage)
         {
-            case "verify-release":
-            case "check-release": return "正在核验更新发布信息…";
-            case "verify-archive": return "正在校验更新包完整性…";
-            case "extract": return "正在解压新版本文件…";
-            case "verify": return "正在校验新版本文件清单…";
-            case "copy": return "正在复制新版本文件，请稍候…";
+            case "download": return "正在下载更新包…";
+            case "verify-current": return "正在读取当前安装信息…";
+            case "verify-release": return "正在核验更新签名…";
+            case "check-release": return "正在确认发布仍有效…";
+            case "verify-archive": return "正在校验安装包完整性（整包摘要）…";
+            case "extract": return "正在解压更新包…";
+            case "verify-package":
+            case "verify": return "正在校验包内文件清单…";
+            case "install": return "正在准备写入新版本…";
+            case "copy": return "正在复制程序文件…";
             case "verify-copy": return "正在校验已复制的文件…";
             case "profile": return "正在同步配置与插件…";
-            case "smoke": return "正在验证新版本启动环境…";
+            case "smoke": return "正在验证新版本能否启动…";
             case "commit": return "正在切换至新版本…";
-            default: return "正在安装更新，请稍候…";
+            case "done": return "更新步骤已完成…";
+            default: return string.IsNullOrEmpty(stage)
+                ? "正在安装更新，请稍候…"
+                : "正在安装更新（" + stage + "）…";
         }
     }
 
-    void ShowOrUpdateProgress(string message)
+    void ShowOrUpdateProgress(string message, string title = null)
     {
         if (updateForm != null && !updateForm.IsDisposed)
         {
+            if (!string.IsNullOrEmpty(title)) updateForm.Text = title;
             updateForm.Report(message, -1);
+            updateForm.BringToFront();
+            updateForm.Activate();
             return;
         }
-        updateForm = new ProgressForm("正在安装更新", message, false);
+        updateForm = new ProgressForm(title ?? "正在安装更新", message, false);
         updateForm.Show();
+        updateForm.BringToFront();
+        updateForm.Activate();
     }
 
     void CloseUpdateProgress()
@@ -846,7 +876,17 @@ sealed class TrayApp : ApplicationContext
                         long done = Convert.ToInt64(value.ContainsKey("downloadedBytes") ? value["downloadedBytes"] : 0);
                         long total = Convert.ToInt64(value.ContainsKey("totalBytes") ? value["totalBytes"] : 0);
                         string phase = Desktop.Str(value, "phase");
-                        Post(delegate { form.Report(phase == "verifying" ? "正在校验签名和文件…" : string.Format("已下载 {0:0.0} / {1:0.0} MB", done / 1048576.0, total / 1048576.0), total > 0 ? (int)(done * 100 / total) : -1); });
+                        string stage = Desktop.Str(value, "stage");
+                        Post(delegate
+                        {
+                            string detail = UpdateDownloadMessage(phase, stage);
+                            if (detail != null)
+                                form.Report(detail, -1);
+                            else
+                                form.Report(
+                                    string.Format("已下载 {0:0.0} / {1:0.0} MB", done / 1048576.0, total / 1048576.0),
+                                    total > 0 ? (int)(done * 100 / total) : -1);
+                        });
                     }
                     child.WaitForExit();
                     if (child.ExitCode != 0) last = null;
@@ -881,13 +921,26 @@ sealed class TrayApp : ApplicationContext
 
     void RestartForUpdate()
     {
-        if (updateApplying)
+        // Never silently ignore a click: always surface the progress window or an explanation.
+        if (updateApplying || restarting)
         {
-            ShowOrUpdateProgress(updateStageText ?? "正在安装更新，请稍候…");
-            if (updateForm != null && !updateForm.IsDisposed) updateForm.BringToFront();
+            ShowOrUpdateProgress(updateStageText ?? (restarting ? "正在准备安装更新，请稍候…" : "正在安装更新，请稍候…"));
             return;
         }
-        if (busy || restarting) return;
+        if (exiting) return;
+        if (busy)
+        {
+            MessageBox.Show("当前有其他操作进行中（如下载或检查更新）。请稍候再点击“重启以完成更新”。",
+                Desktop.Brand, MessageBoxButtons.OK, MessageBoxIcon.Information);
+            return;
+        }
+        if (!File.Exists(Path.Combine(root, "desktop-pending", "release.json")))
+        {
+            restartRequired = false;
+            UpdateMenu();
+            MessageBox.Show("没有待安装的更新。", Desktop.Brand, MessageBoxButtons.OK, MessageBoxIcon.Information);
+            return;
+        }
         restarting = true; busy = true; UpdateMenu();
         string before = Desktop.Current(root);
         ShowOrUpdateProgress("正在准备安装更新，请稍候…");
@@ -922,30 +975,50 @@ sealed class TrayApp : ApplicationContext
             Post(delegate
             {
                 if (exiting) { CloseUpdateProgress(); busy = false; restarting = false; return; }
-                if (updateForm != null && !updateForm.IsDisposed)
-                    updateForm.Report("正在停止 Auriga 并安装更新，请稍候…", -1);
+                ShowOrUpdateProgress("正在停止 Auriga 并安装更新，请稍候…");
                 if (launcher == null || launcher.HasExited) StartLauncher();
                 ThreadPool.QueueUserWorkItem(delegate
                 {
-                    bool stopped = StopLauncher(300);
+                    // Keep the progress window open: applyPending reports stages over stdout while stopping.
+                    // Idle/max must stay wide: extract/copy may report a stage only once without heartbeat.
+                    bool stopped = StopLauncher(120, 300, 1800);
                     Post(delegate
                     {
-                        CloseUpdateProgress();
                         busy = false;
-                        if (exiting) { restarting = false; return; }
+                        if (exiting) { restarting = false; CloseUpdateProgress(); return; }
                         string after = Desktop.Current(root);
                         if (stopped && after != before)
                         {
                             Log("update installed " + before + " -> " + after);
+                            ShowOrUpdateProgress("更新完成，正在启动新版本…");
                             // Continue from the new version's tray (new menu, runtime and icon).
                             string next = Path.Combine(root, "versions", after, "auriga", "tray", "AurigaDesktop.exe");
                             if (File.Exists(next))
                             {
                                 exiting = true;
-                                Process.Start(new ProcessStartInfo(next, "/restarted /updated") { UseShellExecute = false });
+                                UpdateMenu();
+                                try
+                                {
+                                    Process.Start(new ProcessStartInfo(next, "/restarted /updated") { UseShellExecute = false });
+                                }
+                                catch (Exception e)
+                                {
+                                    Log("failed to start updated tray: " + e.Message);
+                                    CloseUpdateProgress();
+                                    restarting = false;
+                                    exiting = false;
+                                    restartRequired = false;
+                                    RefreshInfo();
+                                    StartLauncher();
+                                    MessageBox.Show("新版本已安装，但无法自动启动托盘程序。请从开始菜单重新打开 " + Desktop.Brand + "。",
+                                        Desktop.Brand, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                                    UpdateMenu();
+                                    return;
+                                }
                                 Quit();
                                 return;
                             }
+                            CloseUpdateProgress();
                             restarting = false;
                             restartRequired = false;
                             RefreshInfo();
@@ -954,6 +1027,7 @@ sealed class TrayApp : ApplicationContext
                         }
                         else
                         {
+                            CloseUpdateProgress();
                             restarting = false;
                             RefreshInfo();
                             if (stopped) StartLauncher();
@@ -1019,7 +1093,7 @@ sealed class TrayApp : ApplicationContext
             Dictionary<string, object> result = null;
             try
             {
-                if (!StopLauncher(300)) failureReason = "python_user.stop_failed";
+                if (!StopLauncher(20, 10, 45)) failureReason = "python_user.stop_failed";
                 else
                 {
                     result = Desktop.RunJson(root, "python reset --root " + Desktop.Quote(root), out error, StartUpdateWorker);
@@ -1076,8 +1150,21 @@ sealed class TrayApp : ApplicationContext
     {
         if (exiting) return;
         exiting = true;
-        icon.Text = Desktop.Brand + " · 正在退出";
-        ThreadPool.QueueUserWorkItem(delegate { StopUpdateWorker(); StopLauncher(300); Post(Quit); });
+        UpdateMenu();
+        ShowOrUpdateProgress(
+            updateApplying || restarting ? "正在退出（等待更新步骤结束）…" : "正在退出 Auriga…",
+            "正在退出");
+        // Normal exit must not wait minutes for a graceful stop; force after a short grace.
+        // Updates still get a longer window so an in-flight apply can finish or roll back cleanly.
+        int stopSeconds = updateApplying || restarting ? 60 : 15;
+        int idleUpdateSeconds = updateApplying || restarting ? 60 : 10;
+        int maxTotalSeconds = updateApplying || restarting ? 180 : 30;
+        ThreadPool.QueueUserWorkItem(delegate
+        {
+            StopUpdateWorker();
+            StopLauncher(stopSeconds, idleUpdateSeconds, maxTotalSeconds);
+            Post(Quit);
+        });
     }
 
     public void ShowRequested() { OpenAuriga(); }
@@ -1100,9 +1187,9 @@ sealed class TrayApp : ApplicationContext
 
 sealed class ProgressForm : Form
 {
-    readonly Label label = new Label { Left = 20, Top = 20, Width = 380, Height = 40 };
-    readonly ProgressBar bar = new ProgressBar { Left = 20, Top = 66, Width = 380, Height = 18, Style = ProgressBarStyle.Marquee };
-    readonly Button cancel = new Button { Text = "取消", Left = 310, Top = 98, Width = 90 };
+    readonly Label label = new Label { Left = 20, Top = 18, Width = 380, Height = 48 };
+    readonly ProgressBar bar = new ProgressBar { Left = 20, Top = 72, Width = 380, Height = 18, Style = ProgressBarStyle.Marquee };
+    readonly Button cancel = new Button { Text = "取消", Left = 310, Top = 104, Width = 90 };
     public event EventHandler Cancelled;
     public bool WasCancelled { get; private set; }
 
@@ -1111,10 +1198,12 @@ sealed class ProgressForm : Form
         Text = title;
         Icon = Desktop.AppIcon();
         AutoScaleMode = AutoScaleMode.Dpi;
-        ClientSize = new Size(420, cancellable ? 136 : 100);
+        ClientSize = new Size(420, cancellable ? 142 : 108);
         FormBorderStyle = FormBorderStyle.FixedDialog;
         MaximizeBox = false; MinimizeBox = false; ControlBox = false;
         StartPosition = FormStartPosition.CenterScreen;
+        ShowInTaskbar = true;
+        TopMost = true;
         Font = new Font("Microsoft YaHei UI", 9);
         label.Text = text;
         Controls.Add(label); Controls.Add(bar);
