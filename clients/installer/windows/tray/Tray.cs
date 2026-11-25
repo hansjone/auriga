@@ -262,6 +262,7 @@ sealed class TrayApp : ApplicationContext
             checkItem, updateItem, restartItem, new ToolStripSeparator(),
             settings, logsItem, aboutItem, new ToolStripSeparator(), exitItem });
         icon.ContextMenuStrip = menu;
+        menu.Opening += delegate { SyncCurrentVersionIfChanged(); UpdateMenu(); };
         icon.MouseDoubleClick += delegate (object s, MouseEventArgs e) { if (e.Button == MouseButtons.Left) OpenAuriga(); };
         icon.BalloonTipClicked += delegate { if (restartRequired) RestartForUpdate(); else if (availableVersion != null) DownloadUpdate(); };
         icon.Visible = true;
@@ -270,6 +271,7 @@ sealed class TrayApp : ApplicationContext
         pendingTimer.Interval = 30 * 1000;
         pendingTimer.Tick += delegate
         {
+            SyncCurrentVersionIfChanged();
             bool queued = File.Exists(Path.Combine(root, "desktop-pending", "release.json"));
             if (queued && !restartRequired && !busy && !updateApplying)
             {
@@ -309,6 +311,17 @@ sealed class TrayApp : ApplicationContext
         catch (Exception) { }
     }
 
+    void SyncCurrentVersionIfChanged()
+    {
+        if (busy || restarting || updateApplying) return;
+        string active = null;
+        try { active = Desktop.Current(root); } catch (Exception) { return; }
+        string known = Desktop.Str(info, "packageId");
+        if (string.IsNullOrEmpty(active) || string.Equals(active, known, StringComparison.Ordinal)) return;
+        RefreshInfo();
+        RefreshShellIntegration();
+    }
+
     void RefreshInfo()
     {
         string error;
@@ -328,6 +341,10 @@ sealed class TrayApp : ApplicationContext
         {
             var failure = Desktop.Obj(update, "failure");
             restartItem.Text = "重试更新（" + (Desktop.Str(failure, "code") ?? "updateFailed") + "/" + (Desktop.Str(failure, "stage") ?? "unknown") + "）";
+        }
+        else if (!updateApplying)
+        {
+            restartItem.Text = "重启以完成更新";
         }
         string origin = Desktop.Str(info, "platformOrigin");
         originItem.Text = "平台地址：" + (origin ?? "未配置") + (origin != null ? "（点击复制）" : "");
@@ -636,7 +653,12 @@ sealed class TrayApp : ApplicationContext
         if (which != launcher) return;
         updateApplying = false;
         updateStageText = null;
-        if (!restarting) CloseUpdateProgress();
+        restartItem.Text = "重启以完成更新";
+        if (!restarting)
+        {
+            CloseUpdateProgress();
+            SyncCurrentVersionIfChanged();
+        }
         int code = -1;
         try { code = which.ExitCode; } catch (Exception) { }
         Log("launcher exited " + code);
