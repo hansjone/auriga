@@ -272,6 +272,9 @@ esac
 				RW                  bool
 			}{filepath.Join(data, "data/postgres"), "/var/lib/postgresql/data", true})
 			server := &http.Server{ReadHeaderTimeout: time.Second, Handler: http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+				if nasRotationVersionFixture(w, request) {
+					return
+				}
 				path := strings.TrimPrefix(request.URL.Path, "/v1.41")
 				switch {
 				case strings.HasPrefix(path, "/images/"):

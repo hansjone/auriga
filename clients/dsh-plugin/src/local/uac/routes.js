@@ -19,20 +19,30 @@ function json(res, status, body) {
  * additionally require exact same-origin and this process's CSRF token.
  * @param {{auth:{requestRejection(req:any):number|undefined},sameOrigin:(req:any,write:boolean)=>boolean,
  *   identity:()=>ReturnType<typeof import('./session.js').createLocalUacIdentity>|undefined,
- *   platformEmployee?:()=>string|undefined}} options
+ *   platformEmployee?:()=>string|undefined,
+ *   platformIdentity?:()=>{empNo:string,profileBinding?:string}|undefined}} options
  */
 export function createUacRoutes({
   auth,
   sameOrigin,
   identity,
   platformEmployee,
+  platformIdentity,
 }) {
   const csrf = randomBytes(32).toString('base64url');
   const view = (/** @type {any} */ status) => {
-    const platform = platformEmployee?.();
+    const snapshot = platformIdentity?.();
+    const platform = snapshot?.empNo ?? platformEmployee?.();
+    const matched =
+      status.state === 'authenticated' &&
+      platform &&
+      fold(platform) === fold(status.empNo);
     return {
       ...status,
       csrf,
+      ...(matched && snapshot?.profileBinding
+        ? { platformBinding: snapshot.profileBinding }
+        : {}),
       // Association is informational: a local UAC session never stands in
       // for platform authorization, and a mismatch is surfaced, not merged.
       platformLink:

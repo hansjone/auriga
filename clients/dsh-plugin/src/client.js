@@ -3660,7 +3660,13 @@ window.__ModuleLoader__.load({
             : !uac || !shell;
           const selectedProfile = uacSignedIn
             ? {
-                ...(uac.platformLink === 'matched' ? shell?.account : {}),
+                ...(platformSignedIn &&
+                uac.platformLink === 'matched' &&
+                typeof uac.platformBinding === 'string' &&
+                /^[0-9a-f]{64}$/.test(uac.platformBinding) &&
+                uac.platformBinding === shell?.account?.profileBinding
+                  ? shell.account
+                  : {}),
                 ...uac,
               }
             : !hasLocalUac

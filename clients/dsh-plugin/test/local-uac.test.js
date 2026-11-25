@@ -1246,6 +1246,10 @@ test('local UAC routes: native auth, same-origin, CSRF and platform association'
       !write || req.headers.origin === 'http://dsh.test',
     identity: () => env.identity,
     platformEmployee: () => platform,
+    platformIdentity: () =>
+      platform
+        ? { empNo: platform, profileBinding: 'd'.repeat(64) }
+        : undefined,
   });
   const call = async (method, path, body, headers = {}) => {
     const chunks =
@@ -1313,7 +1317,15 @@ test('local UAC routes: native auth, same-origin, CSRF and platform association'
     (await call('GET', '/auriga/uac/status')).payload.platformLink,
     'matched',
   );
+  assert.equal(
+    (await call('GET', '/auriga/uac/status')).payload.platformBinding,
+    'd'.repeat(64),
+  );
   platform = 'B2002';
+  assert.equal(
+    (await call('GET', '/auriga/uac/status')).payload.platformBinding,
+    undefined,
+  );
   assert.equal(
     (await call('GET', '/auriga/uac/status')).payload.platformLink,
     'mismatch',

@@ -628,6 +628,10 @@ func deploySwitch(ctx context.Context, ops siteOps, cfg *siteConfig, s *state, p
 	}
 	timeout := healthTimeout(cfg)
 	fmt.Fprintf(w, "切换到 r%d（%s）…\n", rec.Seq, formatSwitchPlanLine(plan))
+	if plan.HasCollab && (plan.Mode == switchModeFull || plan.Mode == switchModeContainers) {
+		rc.Notes = append(rc.Notes, deployMessageOfflineNote)
+		fmt.Fprintln(w, deployMessageOfflineNote)
+	}
 	err = startRecord(ops, s, cur, timeout, plan)
 	if err == nil {
 		rc.Health = "healthy"

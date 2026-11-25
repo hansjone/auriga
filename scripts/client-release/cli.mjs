@@ -9,6 +9,7 @@ import { publish } from './publish.mjs';
 import { physical } from './inputs.mjs';
 import { cleanSource } from './source.mjs';
 import { clientPlatform } from './platform.mjs';
+import { safeDiagnostic } from './diagnostics.mjs';
 import {
   reviewRelease,
   signRelease,
@@ -31,6 +32,54 @@ const HELP = `独立客户端发行（auriga-client.cmd / Node cli.mjs）
   auriga-client sign --dir <构建输出目录> --key-file <私钥.pem> --confirm-sha256 <审阅摘要>
   auriga-client publish --dir <构建输出目录> --public-key <现场公钥.pem> --admin-origin <管理入口origin> --portal-origin <门户origin>
 发布会话由 AURIGA_CLIENT_ADMIN_AUTH 环境变量提供 JSON {cookie,csrf}，先在正常管理台完成近期身份验证。`;
+const KEY_HELP = `
+公钥用途：
+  --verify-key（别名 --devkit-verify-key）：独立批准的套件/源码发行验签公钥；套件自带 release-public.pem 不能自证信任。
+  --release-public-key（别名 --site-release-public-key）：站点桌面发行公钥，将写入安装包；与套件验签公钥分开。
+  --trust-fingerprint：从独立可信渠道取得的套件/源码发行公钥 SPKI SHA-256，不能从待验套件自取后当作批准值。
+  --uac-config-dir <目录>：可选，包含 adapter.json 与 provider.json；实际写入包内 payload/auriga/uac/。未提供则不含本地 UAC 配置。`;
+
+export function normalizeBuildAliases(options) {
+  const normalized = { ...options };
+  for (const [alias, name] of [
+    ['devkit-verify-key', 'verify-key'],
+    ['site-release-public-key', 'release-public-key'],
+  ]) {
+    if (normalized[alias] !== undefined) {
+      if (normalized[name] !== undefined)
+        throw new Error(`--${alias} 与 --${name} 互斥，请仅提供一个`);
+      normalized[name] = normalized[alias];
+      delete normalized[alias];
+    }
+  }
+  return normalized;
+}
+
+export function formatCliError(action, error, argv = [], env = process.env) {
+  const privatePaths = [];
+  for (let index = 0; index < argv.length; index++) {
+    if (argv[index] === '--key-file') privatePaths.push(argv[++index]);
+    else if (argv[index].startsWith('--key-file='))
+      privatePaths.push(argv[index].slice('--key-file='.length));
+  }
+  const causes = [];
+  for (
+    let current = error;
+    current && causes.length < 4;
+    current = current.cause
+  ) {
+    causes.push(
+      safeDiagnostic(current.message ?? current, {
+        privatePaths,
+        env,
+        limit: 6000,
+      }),
+    );
+  }
+  const summary =
+    action === 'sign' ? '客户端发行审阅或签名失败' : '客户端发行失败';
+  return `${summary}：${causes.join('；原因：')}\n下一步：${action === 'sign' ? '按上述原因核对制品、构建记录、私钥权限和确认摘要；修复后重新审阅再签名。' : '按上述原因修复参数或环境；发布失败时先核对管理台发行账本，再决定是否重试。'}`;
+}
 export function parseAdminAuth(raw) {
   try {
     return JSON.parse(raw ?? 'null');
@@ -110,7 +159,7 @@ export async function main(argv) {
   if (argv[0] === '_build-worker' && argv.length === 2)
     return buildWorker(argv[1]);
   if (!argv.length || argv.includes('--help')) {
-    console.log(HELP);
+    console.log(HELP + KEY_HELP);
     return;
   }
   const command = argv[0];
@@ -122,9 +171,11 @@ export async function main(argv) {
         'target',
         'devkit-sha256',
         'verify-key',
+        'devkit-verify-key',
         'trust-fingerprint',
         'out',
         'release-public-key',
+        'site-release-public-key',
         'resource-trust-json',
         'uac-config-dir',
         'version',
@@ -188,7 +239,7 @@ export async function main(argv) {
     if (!o.out) throw new Error('缺少 --out');
     return generateDesktopKeys(o.out);
   }
-  if (command === 'build') return startBuild(o);
+  if (command === 'build') return startBuild(normalizeBuildAliases(o));
   if (command === 'sign') return signCommand(o);
   for (const name of ['dir', 'public-key', 'admin-origin', 'portal-origin'])
     if (!o[name]) throw new Error(`缺少 --${name}`);
@@ -219,11 +270,7 @@ if (
     if (result) console.log(JSON.stringify(result, null, 2));
   } catch (error) {
     const action = process.argv[2];
-    console.error(
-      action === 'sign'
-        ? '客户端发行审阅或签名失败，请核对制品、私钥权限和确认摘要。'
-        : `客户端发行失败：${error.message}`,
-    );
+    console.error(formatCliError(action, error, process.argv.slice(2)));
     process.exitCode = 1;
   }
 }

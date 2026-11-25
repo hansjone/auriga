@@ -1,7 +1,12 @@
+/* global structuredClone */
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { shellRuntimePeer } from './shell-runtime-peer.js';
-import { memberName, memberAvatar } from '../src/local/member-profile.js';
+import {
+  memberName,
+  memberAvatar,
+  memberProfileBinding,
+} from '../src/local/member-profile.js';
 import { setImmediate as nextTurn } from 'node:timers/promises';
 import { randomUUID } from 'node:crypto';
 function profilePeer(reply) {
@@ -103,4 +108,86 @@ test('unsafe or unavailable profile data never invents a name or changes verifie
     f.runtime.status(f.request).account.subject,
     f.connection.identity.memberId,
   );
+});
+
+test('profile correlation changes with shell epoch, revision, account and UAC generation', () => {
+  const snapshot = {
+    state: 'authenticated',
+    shellEpoch: randomUUID(),
+    revision: 1,
+    identity: {
+      tenantId: randomUUID(),
+      memberId: randomUUID(),
+      deviceId: randomUUID(),
+      providerId: randomUUID(),
+      empNo: '001Ab',
+      uacSessionBinding: {
+        providerId: randomUUID(),
+        sourceSessionId: randomUUID(),
+        authGeneration: 1,
+      },
+    },
+  };
+  const first = memberProfileBinding(snapshot);
+  assert.match(first, /^[0-9a-f]{64}$/);
+  assert.equal(first, memberProfileBinding(structuredClone(snapshot)));
+  for (const mutate of [
+    (s) => {
+      s.shellEpoch = randomUUID();
+    },
+    (s) => {
+      s.revision++;
+    },
+    (s) => {
+      s.identity.memberId = randomUUID();
+    },
+    (s) => {
+      s.identity.uacSessionBinding.authGeneration++;
+    },
+    (s) => {
+      s.identity.empNo = '002Cd';
+    },
+  ]) {
+    const next = structuredClone(snapshot);
+    mutate(next);
+    assert.notEqual(first, memberProfileBinding(next));
+  }
+  assert.equal(
+    memberProfileBinding({ ...snapshot, state: 'signed_out' }),
+    undefined,
+  );
+});
+
+test('runtime emits the same profile binding for shell and local-UAC association from one snapshot', async (t) => {
+  const f = await shellRuntimePeer(t, {
+    configure(c) {
+      const sourceBinding = c.identity.uacSessionBinding;
+      delete c.identity.uacSessionBinding;
+      c.identity.empNo = '001Ab';
+      c.identity.uacSessionBinding = sourceBinding;
+      profilePeer((peer) => ({
+        memberId: peer.identity.memberId,
+        displayName: 'Alice',
+      }))(c);
+    },
+  });
+  await nextTurn();
+  const initial = f.runtime.status(f.request).account.profileBinding;
+  assert.match(initial, /^[0-9a-f]{64}$/);
+  assert.deepEqual(f.runtime.platformIdentity(), {
+    empNo: '001Ab',
+    profileBinding: initial,
+  });
+  f.connection.transition('authenticated', {
+    uacSessionBinding: {
+      ...f.connection.identity.uacSessionBinding,
+      authGeneration: 2,
+    },
+  });
+  await nextTurn();
+  const changed = f.runtime.status(f.request).account.profileBinding;
+  assert.notEqual(changed, initial);
+  assert.equal(f.runtime.platformIdentity().profileBinding, changed);
+  f.connection.logout();
+  assert.equal(f.runtime.platformIdentity(), undefined);
 });
