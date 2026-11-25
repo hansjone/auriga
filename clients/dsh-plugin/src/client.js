@@ -3550,9 +3550,7 @@ window.__ModuleLoader__.load({
             setOpen(false);
             const target = hasLocalUac && !uacSignedIn ? 'uac' : 'inline_login';
             if (!openPlatformLogin(target)) {
-              ctx.inject?.(['layout'], (scope) => {
-                scope.layout?.selectPanel?.(PANEL_ID);
-              });
+              ctx.get?.('layout')?.selectPanel?.(PANEL_ID);
             }
           };
           const signOut = () => {
