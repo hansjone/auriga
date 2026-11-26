@@ -4,7 +4,7 @@
   "privateNetwork": true,
   "adminPasswordFile": "/run/secrets/bifrost_admin_password",
   "encryptionKeyFile": "/run/secrets/bifrost_encryption_key",
-  "allowPrivateProviders": false,
+  "allowPrivateProviders": true,
   "postgres": {
     "host": "postgres",
     "port": 5432,
