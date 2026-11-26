@@ -17,5 +17,6 @@ Rollback: <InstallDir>/bin/rollback.sh
 Remove:   <InstallDir>/bin/uninstall.sh [--purge-data]
 
 Based on the open-source DSH (MIT); see licenses/NOTICE.txt inside the package.
-Tray and Unix shell-auth helper land in later commits on this branch; until then
-the launcher starts DSH in the browser without the Windows tray shell.
+Without arguments, auriga-desktop starts the Linux tray supervisor (notify-send +
+browser). Platform auth uses Unix-socket shell-auth; managed Python is still
+Windows-first on this branch.

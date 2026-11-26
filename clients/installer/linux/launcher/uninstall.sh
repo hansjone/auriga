@@ -19,6 +19,7 @@ Cli="$Ver/auriga/runtime/cli.mjs"
 Tray="$Ver/auriga/tray/auriga-desktop-tray"
 
 if [[ -x "$Tray" ]]; then
+  export AURIGA_INSTALL_DIR="$Root"
   "$Tray" --stop "$Root" || true
 fi
 

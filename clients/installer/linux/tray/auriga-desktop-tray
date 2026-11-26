@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+# Wrapper so the launcher can exec a single path without knowing Node layout.
+set -euo pipefail
+Here=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+# Installed layout: <root>/versions/<id>/auriga/tray/auriga-desktop-tray
+VersionDir=$(cd -- "$Here/../.." && pwd)
+Root=$(cd -- "$VersionDir/../.." && pwd)
+Node="$VersionDir/upstream/node/bin/node"
+if [[ ! -x "$Node" ]]; then
+  Node=$(command -v node)
+fi
+exec "$Node" "$Here/auriga-desktop-tray.mjs" --root "${AURIGA_INSTALL_DIR:-$Root}" "$@"

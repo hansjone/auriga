@@ -9,7 +9,8 @@ Cli="$Ver/auriga/runtime/cli.mjs"
 Tray="$Ver/auriga/tray/auriga-desktop-tray"
 
 if [[ $# -eq 0 && -x "$Tray" ]]; then
-  exec "$Tray"
+  export AURIGA_INSTALL_DIR="$Root"
+  exec "$Tray" --root "$Root"
 fi
 
 if [[ "${1:-}" == "diagnostics" ]]; then

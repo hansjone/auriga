@@ -688,9 +688,20 @@ export async function build(args) {
       const file = join(payload, 'auriga', 'launcher', name);
       if (existsSync(file)) chmodSync(file, 0o755);
     }
+    cpSync(
+      join(installerDir, 'linux', 'tray'),
+      join(payload, 'auriga', 'tray'),
+      { recursive: true },
+    );
+    for (const name of ['auriga-desktop-tray', 'auriga-desktop-tray.mjs']) {
+      const file = join(payload, 'auriga', 'tray', name);
+      if (existsSync(file)) chmodSync(file, 0o755);
+    }
     const png = resolve(installerDir, '../../assets/brand/auriga-dsh.png');
-    if (existsSync(png))
+    if (existsSync(png)) {
       cpSync(png, join(payload, 'auriga', 'launcher', 'auriga.png'));
+      cpSync(png, join(payload, 'auriga', 'tray', 'auriga.png'));
+    }
     cpSync(join(installerDir, 'linux', 'install.sh'), join(stage, 'install.sh'));
     cpSync(join(installerDir, 'linux', 'README.txt'), join(stage, 'README.txt'));
     chmodSync(join(stage, 'install.sh'), 0o755);
