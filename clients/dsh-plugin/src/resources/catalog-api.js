@@ -65,10 +65,9 @@ export function catalogApi({
     )
       refuse('common.validation_failed');
     check();
-
-    check();
     const response = await resourceStage('platform', () =>
       resourceRequest(runtime, path, {
+        check,
         method: body === undefined && !form ? 'GET' : 'POST',
         credentials: 'omit',
         redirect: 'error',

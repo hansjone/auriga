@@ -7,6 +7,11 @@ import java.util.UUID;
 public interface DevicePermissionAuthority {
   boolean allowed(UUID tenant, String account, String device, String permission);
 
+  /** Verifies the current source session of a member-authorized desktop device. */
+  default boolean desktopSessionActive(UUID tenant, String account, String device) {
+    return false;
+  }
+
   /** Resolves the current managed installation target. Empty means a verified desktop device. */
   default Optional<UUID> installationInstance(UUID tenant, String account, String device) {
     throw new UnsupportedOperationException("Device installation authority is unavailable");

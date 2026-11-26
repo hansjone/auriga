@@ -129,6 +129,15 @@ defs.ShellAuthBusinessError = obj(
     upstreamStatus: { type: 'integer', minimum: 400, maximum: 599 },
     retryable: { type: 'boolean' },
     retryAfterSeconds: { type: 'integer', minimum: 0, maximum: 300 },
+    rule: {
+      type: 'string',
+      enum: [
+        'bundled_dependency_required',
+        'lifecycle_scripts_disallowed',
+        'bundle_patch_missing',
+        'native_build_disallowed',
+      ],
+    },
   },
   ['code', 'retryable'],
 );

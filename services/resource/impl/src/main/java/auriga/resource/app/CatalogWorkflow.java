@@ -8,6 +8,7 @@ import auriga.common.error.*;
 import auriga.common.events.EventPublisher;
 import auriga.common.persistence.UuidV7;
 import auriga.common.security.AurigaPrincipal;
+import auriga.common.security.PrincipalType;
 import auriga.resource.archive.PluginArchiveValidator;
 import auriga.resource.archive.SkillArchiveValidator;
 import auriga.resource.objectstore.ObjectStore;
@@ -84,6 +85,34 @@ public final class CatalogWorkflow {
     if (etag == null || key == null) throw invalid();
     return operations.operation(
         a, permission, admin, "catalog/" + op, key, body, etag, guard, action, replayResponse);
+  }
+
+  public void requireSubmissionAccess(AurigaPrincipal actor, String permission, boolean stepUp) {
+    access.catalogWriter(actor, permission, clock.instant(), stepUp);
+  }
+
+  private JsonNode mutateSubmission(
+      AurigaPrincipal actor,
+      String permission,
+      boolean stepUp,
+      String op,
+      String key,
+      String etag,
+      ObjectNode body,
+      Consumer<ResourceAccess.Reader> guard,
+      Function<ResourceAccess.Reader, JsonNode> action) {
+    if (!writes.getAsBoolean()) throw new AurigaException(CommonErrors.UNAVAILABLE);
+    if (etag == null || key == null) throw invalid();
+    return operations.operation(
+        actor,
+        "catalog/" + op,
+        key,
+        body,
+        etag,
+        guard,
+        action,
+        true,
+        () -> access.catalogWriter(actor, permission, clock.instant(), stepUp));
   }
 
   private static void match(String etag, long rev) {
@@ -221,7 +250,7 @@ public final class CatalogWorkflow {
         }
       }
     }
-    return mutate(
+    return mutateSubmission(
         actor,
         ResourceAccess.UPLOAD,
         false,
@@ -258,6 +287,27 @@ public final class CatalogWorkflow {
           operations.recorded(r, "resource.package.create", id);
           return packageJson(pkg(r, id, true));
         });
+  }
+
+  private Map<String, Object> ownedSubmissionPackage(ResourceAccess.Reader reader, UUID id) {
+    var pack = pkg(reader, id, true);
+    if (!Set.of("skill", "plugin").contains(pack.get("kind"))) throw forbidden();
+    return pack;
+  }
+
+  public JsonNode packageDetail(AurigaPrincipal actor, UUID id) {
+    if (actor.type() == PrincipalType.DEVICE) {
+      ResourceAccess.Reader reader;
+      try {
+        reader = access.member(actor);
+      } catch (AurigaException failure) {
+        if (!failure.errorCode().equals(CommonErrors.FORBIDDEN)) throw failure;
+        var contributor = access.desktopContributor(actor);
+        return tx.write(() -> packageJson(ownedSubmissionPackage(contributor, id)));
+      }
+      return tx.write(() -> packageJson(pkg(reader, id, false)));
+    }
+    return detail(actor, id, null, false);
   }
 
   public JsonNode detail(AurigaPrincipal actor, UUID p, UUID v, boolean admin) {
@@ -378,8 +428,11 @@ public final class CatalogWorkflow {
       List<InputStream> inputs,
       String key,
       String etag) {
-    var r = access.writer(actor);
-    var pack = tx.write(() -> pkg(r, p, true));
+    var r = access.catalogWriter(actor, ResourceAccess.UPLOAD, clock.instant(), true);
+    boolean desktop = actor.type() == PrincipalType.DEVICE;
+    Function<ResourceAccess.Reader, Map<String, Object>> ownerPackage =
+        reader -> desktop ? ownedSubmissionPackage(reader, p) : pkg(reader, p, true);
+    var pack = tx.write(() -> ownerPackage.apply(r));
     String version = text(metadata, "version", 128),
         expected = text(metadata, "expectedDigest", 71);
     var m = CatalogManifest.parse(raw, pack.get("name").toString(), version, expected);
@@ -408,17 +461,17 @@ public final class CatalogWorkflow {
       final String risk = floor;
       var fingerprint = metadata.deepCopy();
       fingerprint.put("rawDigest", expected);
-      return mutate(
+      return mutateSubmission(
           actor,
           ResourceAccess.UPLOAD,
-          false,
+          true,
           "upload/" + p,
           key,
           etag,
           fingerprint,
-          x -> pkg(x, p, true),
+          ownerPackage::apply,
           x -> {
-            var locked = pkg(x, p, true);
+            var locked = ownerPackage.apply(x);
             match(etag, number(locked, "revision"));
             UUID id = UuidV7.next();
             for (var s : staged) {
@@ -494,15 +547,16 @@ public final class CatalogWorkflow {
   public JsonNode submit(
       AurigaPrincipal actor, UUID p, UUID v, ObjectNode body, String key, String etag) {
     text(body, "reason", 1024);
-    return mutate(
+    return mutateSubmission(
         actor,
         "resource.versions.submit",
-        false,
+        true,
         "submit/" + p + "/" + v,
         key,
         etag,
         body,
         r -> {
+          if (actor.type() == PrincipalType.DEVICE) ownedSubmissionPackage(r, p);
           var row = ver(r, p, v, false);
           if (!r.account().equals(row.get("author_id"))) throw forbidden();
         },
