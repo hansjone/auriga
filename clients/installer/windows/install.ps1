@@ -65,23 +65,28 @@ if ($LASTEXITCODE -eq 2 -and $CancelFile) { exit 2 }
 if ($LASTEXITCODE -ne 0) { throw "install failed ($LASTEXITCODE)" }
 
 # When installed elevated (e.g. into Program Files or a restricted drive), grant the
-# installing user Modify rights on the install root (DACL only, without rewriting Owner)
-# so the standard-privilege tray can persist settings, logs, and in-app updates.
+# installing user Modify rights on the install root and the kept data home (DACL only,
+# without rewriting Owner) so the standard-privilege tray can persist settings, logs,
+# in-app updates, and reuse profile files after a keep-data uninstall/reinstall.
 # Inherited rules do not override the protected read-only ACL on versions\<id>\runtime\python.
+# Node install already repairs data-home writability before smoke; this post-step covers the tray.
 try {
   $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
   $isAdmin = ([Security.Principal.WindowsPrincipal]::new($identity)).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
-  if ($isAdmin -and (Test-Path -LiteralPath $InstallDir -PathType Container)) {
-    $dirItem = Get-Item -LiteralPath $InstallDir
-    $acl = $dirItem.GetAccessControl([Security.AccessControl.AccessControlSections]::Access)
+  if ($isAdmin) {
     $inherit = [Security.AccessControl.InheritanceFlags]'ContainerInherit, ObjectInherit'
     $propagate = [Security.AccessControl.PropagationFlags]::None
     $rule = New-Object Security.AccessControl.FileSystemAccessRule($identity.User, 'Modify', $inherit, $propagate, 'Allow')
-    $acl.AddAccessRule($rule)
-    [IO.Directory]::SetAccessControl($InstallDir, $acl)
+    foreach ($path in @($InstallDir, $DataHome)) {
+      if (-not (Test-Path -LiteralPath $path -PathType Container)) { continue }
+      $dirItem = Get-Item -LiteralPath $path
+      $acl = $dirItem.GetAccessControl([Security.AccessControl.AccessControlSections]::Access)
+      $acl.AddAccessRule($rule)
+      [IO.Directory]::SetAccessControl($path, $acl)
+    }
   }
 } catch {
-  Write-Warning "Failed to grant user maintenance permissions on ${InstallDir}: $_"
+  Write-Warning "Failed to grant user maintenance permissions on ${InstallDir} / ${DataHome}: $_"
 }
 
 # Shell integration (best effort: the installation itself already succeeded).

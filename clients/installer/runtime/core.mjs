@@ -83,6 +83,7 @@ import {
   pythonUserFailureReason,
   pythonUserFailureStage,
 } from './python-user.mjs';
+import { ensureDataHomeWritable } from './data-home-access.mjs';
 
 export const PROFILE = 'auriga';
 /** Fixed loopback port for the published Auriga desktop DSH web UI. */
@@ -559,6 +560,7 @@ export function pythonCommand(root, action, { index } = {}) {
 
 /** Default smoke check: the upstream CLI must load the profile with the plugin row. */
 export function defaultSmoke(dir, dataHome) {
+  ensureDataHomeWritable(dataHome);
   const result = spawnSync(
     nodeBin(dir),
     [dshBin(dir), '--profile', PROFILE, '--dump-config'],
@@ -1089,6 +1091,9 @@ function installStopped({
     id = manifest.id;
     const state = readState(root);
     const dataOwner = claimDataHome(root, dataHome, state, created);
+    // Kept data from a prior uninstall must be writable before profile seed/smoke;
+    // upstream dump-config always rewrites cordis.yml.
+    ensureDataHomeWritable(dataHome);
     previous = state?.current ?? null;
     const target = versionDir(root, id);
     let fresh = !existsSync(target);
