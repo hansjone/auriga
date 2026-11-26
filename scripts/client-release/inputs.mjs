@@ -143,7 +143,12 @@ export function inventory(root, prefix = '') {
   }
   return rows.sort((a, b) => a.path.localeCompare(b.path, 'en'));
 }
-export function sealInputs(directory, tools, root = ROOT, target = CLIENT_TARGET) {
+export function sealInputs(
+  directory,
+  tools,
+  root = ROOT,
+  target = CLIENT_TARGET,
+) {
   const platform = clientPlatform(target);
   const identity = lockIdentity(root, target);
   const files = inventory(directory);
@@ -242,9 +247,7 @@ export function verifyInputs(
     manifest.lockSha256 !== identity.lockSha256 ||
     canonical(manifest.locks) !== canonical(identity.locks)
   )
-    throw new Error(
-      LOCK_HINT('客户端套件依赖锁不匹配，请准备对应锁摘要套件'),
-    );
+    throw new Error(LOCK_HINT('客户端套件依赖锁不匹配，请准备对应锁摘要套件'));
   if (!Array.isArray(manifest.files) || !manifest.files.length)
     throw new Error('客户端套件输入清单为空');
   const actual = inventory(directory);
@@ -313,7 +316,9 @@ function resolveToolsBaseline(value, target = CLIENT_TARGET) {
 export function systemTools(target = CLIENT_TARGET) {
   const platform = clientPlatform(target);
   if (process.platform !== platform.os || process.arch !== platform.arch)
-    throw new Error(`${platform.target} 构建机必需（${platform.os}/${platform.arch}）`);
+    throw new Error(
+      `${platform.target} 构建机必需（${platform.os}/${platform.arch}）`,
+    );
   if (platform.target === 'linux-x64') {
     // Linux tray/runtime uses Node + notify-send/xdg-open; packaging needs tar.
     return ['/bin/tar', '/usr/bin/tar']

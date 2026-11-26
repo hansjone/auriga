@@ -64,7 +64,8 @@ export function clientPlatform(target = CLIENT_TARGET) {
 /** Map the running OS/arch to a Desktop target when packaging locally. */
 export function hostClientTarget() {
   if (process.platform === 'win32' && process.arch === 'x64') return 'win-x64';
-  if (process.platform === 'linux' && process.arch === 'x64') return 'linux-x64';
+  if (process.platform === 'linux' && process.arch === 'x64')
+    return 'linux-x64';
   throw new Error(
     `本机 ${process.platform}/${process.arch} 尚无 Desktop 客户端构建配方`,
   );

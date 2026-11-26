@@ -219,9 +219,7 @@ export async function prepareInputs(parent, options = {}) {
       );
     await download(`https://nodejs.org/dist/v${version}/${name}`, archive);
     if (sha256File(archive) !== pinned)
-      throw new Error(
-        `Node 归档摘要不符：${name}（期望仓库钉死 ${pinned}）`,
-      );
+      throw new Error(`Node 归档摘要不符：${name}（期望仓库钉死 ${pinned}）`);
     if (version === BUILD_NODE) {
       run(tar, ['-xf', archive, '-C', work], root);
       cpSync(
