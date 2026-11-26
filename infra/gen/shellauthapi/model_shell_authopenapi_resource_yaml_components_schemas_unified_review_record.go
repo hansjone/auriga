@@ -22,13 +22,15 @@ var _ MappedNullable = &ShellAuthopenapiResourceYamlComponentsSchemasUnifiedRevi
 
 // ShellAuthopenapiResourceYamlComponentsSchemasUnifiedReviewRecord struct for ShellAuthopenapiResourceYamlComponentsSchemasUnifiedReviewRecord
 type ShellAuthopenapiResourceYamlComponentsSchemasUnifiedReviewRecord struct {
-	ReviewerId      string    `json:"reviewerId"`
-	Role            string    `json:"role"`
-	Decision        string    `json:"decision"`
-	Reason          string    `json:"reason"`
-	VersionRevision int64     `json:"versionRevision"`
-	Digest          string    `json:"digest" validate:"regexp=^sha256:[0-9a-f]{64}$"`
-	CreatedAt       time.Time `json:"createdAt"`
+	ReviewerId         string    `json:"reviewerId"`
+	ReviewerName       *string   `json:"reviewerName,omitempty"`
+	ReviewerDepartment *string   `json:"reviewerDepartment,omitempty"`
+	Role               string    `json:"role"`
+	Decision           string    `json:"decision"`
+	Reason             string    `json:"reason"`
+	VersionRevision    int64     `json:"versionRevision"`
+	Digest             string    `json:"digest" validate:"regexp=^sha256:[0-9a-f]{64}$"`
+	CreatedAt          time.Time `json:"createdAt"`
 }
 
 type _ShellAuthopenapiResourceYamlComponentsSchemasUnifiedReviewRecord ShellAuthopenapiResourceYamlComponentsSchemasUnifiedReviewRecord
@@ -79,6 +81,70 @@ func (o *ShellAuthopenapiResourceYamlComponentsSchemasUnifiedReviewRecord) GetRe
 // SetReviewerId sets field value
 func (o *ShellAuthopenapiResourceYamlComponentsSchemasUnifiedReviewRecord) SetReviewerId(v string) {
 	o.ReviewerId = v
+}
+
+// GetReviewerName returns the ReviewerName field value if set, zero value otherwise.
+func (o *ShellAuthopenapiResourceYamlComponentsSchemasUnifiedReviewRecord) GetReviewerName() string {
+	if o == nil || IsNil(o.ReviewerName) {
+		var ret string
+		return ret
+	}
+	return *o.ReviewerName
+}
+
+// GetReviewerNameOk returns a tuple with the ReviewerName field value if set, nil otherwise
+// and a boolean to check if the value has been set.
+func (o *ShellAuthopenapiResourceYamlComponentsSchemasUnifiedReviewRecord) GetReviewerNameOk() (*string, bool) {
+	if o == nil || IsNil(o.ReviewerName) {
+		return nil, false
+	}
+	return o.ReviewerName, true
+}
+
+// HasReviewerName returns a boolean if a field has been set.
+func (o *ShellAuthopenapiResourceYamlComponentsSchemasUnifiedReviewRecord) HasReviewerName() bool {
+	if o != nil && !IsNil(o.ReviewerName) {
+		return true
+	}
+
+	return false
+}
+
+// SetReviewerName gets a reference to the given string and assigns it to the ReviewerName field.
+func (o *ShellAuthopenapiResourceYamlComponentsSchemasUnifiedReviewRecord) SetReviewerName(v string) {
+	o.ReviewerName = &v
+}
+
+// GetReviewerDepartment returns the ReviewerDepartment field value if set, zero value otherwise.
+func (o *ShellAuthopenapiResourceYamlComponentsSchemasUnifiedReviewRecord) GetReviewerDepartment() string {
+	if o == nil || IsNil(o.ReviewerDepartment) {
+		var ret string
+		return ret
+	}
+	return *o.ReviewerDepartment
+}
+
+// GetReviewerDepartmentOk returns a tuple with the ReviewerDepartment field value if set, nil otherwise
+// and a boolean to check if the value has been set.
+func (o *ShellAuthopenapiResourceYamlComponentsSchemasUnifiedReviewRecord) GetReviewerDepartmentOk() (*string, bool) {
+	if o == nil || IsNil(o.ReviewerDepartment) {
+		return nil, false
+	}
+	return o.ReviewerDepartment, true
+}
+
+// HasReviewerDepartment returns a boolean if a field has been set.
+func (o *ShellAuthopenapiResourceYamlComponentsSchemasUnifiedReviewRecord) HasReviewerDepartment() bool {
+	if o != nil && !IsNil(o.ReviewerDepartment) {
+		return true
+	}
+
+	return false
+}
+
+// SetReviewerDepartment gets a reference to the given string and assigns it to the ReviewerDepartment field.
+func (o *ShellAuthopenapiResourceYamlComponentsSchemasUnifiedReviewRecord) SetReviewerDepartment(v string) {
+	o.ReviewerDepartment = &v
 }
 
 // GetRole returns the Role field value
@@ -236,6 +302,12 @@ func (o ShellAuthopenapiResourceYamlComponentsSchemasUnifiedReviewRecord) Marsha
 func (o ShellAuthopenapiResourceYamlComponentsSchemasUnifiedReviewRecord) ToMap() (map[string]interface{}, error) {
 	toSerialize := map[string]interface{}{}
 	toSerialize["reviewerId"] = o.ReviewerId
+	if !IsNil(o.ReviewerName) {
+		toSerialize["reviewerName"] = o.ReviewerName
+	}
+	if !IsNil(o.ReviewerDepartment) {
+		toSerialize["reviewerDepartment"] = o.ReviewerDepartment
+	}
 	toSerialize["role"] = o.Role
 	toSerialize["decision"] = o.Decision
 	toSerialize["reason"] = o.Reason

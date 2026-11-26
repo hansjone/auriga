@@ -13361,6 +13361,54 @@
               "null"
             ],
             "format": "uuid"
+          },
+          "latestVersion": {
+            "type": "object",
+            "properties": {
+              "versionId": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "version": {
+                "type": "string"
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "draft",
+                  "pending_review",
+                  "approved",
+                  "rejected",
+                  "published",
+                  "deprecated",
+                  "withdrawn"
+                ]
+              },
+              "description": {
+                "type": "string"
+              },
+              "authorName": {
+                "type": "string"
+              },
+              "authorDepartment": {
+                "type": "string"
+              },
+              "publishedVersion": {
+                "type": "string"
+              },
+              "createdAt": {
+                "type": "string",
+                "format": "date-time"
+              }
+            },
+            "required": [
+              "versionId",
+              "version",
+              "state",
+              "description",
+              "createdAt"
+            ],
+            "additionalProperties": false
           }
         },
         "required": [
@@ -13458,6 +13506,20 @@
             "maxLength": 512,
             "pattern": "^/api/resource/v1/catalog/packages/[0-9a-f-]{36}/versions/[0-9a-f-]{36}/manifest$",
             "description": "Same-origin locator for exact immutable raw manifest UTF-8 bytes, not a bearer URL. Every request checks tenant/package/version ACL; caller must verify digest/envelope. Published and draft reads use the current corresponding ACL."
+          },
+          "authorId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "authorName": {
+            "type": "string"
+          },
+          "authorDepartment": {
+            "type": "string"
+          },
+          "changeNotes": {
+            "type": "string",
+            "maxLength": 4096
           }
         },
         "required": [
@@ -13721,6 +13783,12 @@
             "type": "string",
             "format": "uuid"
           },
+          "reviewerName": {
+            "type": "string"
+          },
+          "reviewerDepartment": {
+            "type": "string"
+          },
           "role": {
             "type": "string",
             "enum": [
@@ -13775,6 +13843,28 @@
           "authorId": {
             "type": "string",
             "format": "uuid"
+          },
+          "authorName": {
+            "type": "string"
+          },
+          "authorDepartment": {
+            "type": "string"
+          },
+          "submitReason": {
+            "type": "string",
+            "maxLength": 1024
+          },
+          "submittedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "previousPublishedVersionId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "previousPublishedVersion": {
+            "type": "string",
+            "maxLength": 128
           },
           "version": {
             "$ref": "#/components/schemas/UnifiedVersion"

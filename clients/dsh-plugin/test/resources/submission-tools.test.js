@@ -13,7 +13,6 @@ const input = {
   kind: 'skill',
   directory: 'skills/example',
   metadata: {
-    author: 'Example',
     license: 'MIT',
     version: '1.0.0',
     permissions: { tools: [], outboundHosts: [], dataAccess: [] },
@@ -21,7 +20,7 @@ const input = {
 };
 const result = { packageId, versionId, state: 'pending_review' };
 
-function setup(t, { submit, prepare, now, registry } = {}) {
+function setup(t, { submit, prepare, now, registry, ownedPackages } = {}) {
   const f = fixture();
   const agent = f.attach('session-a');
   const registered = new Map();
@@ -65,6 +64,7 @@ function setup(t, { submit, prepare, now, registry } = {}) {
         ? submit(args, assertCurrent)
         : { ...result, extra: 'internal detail' };
     },
+    ...(ownedPackages ? { ownedPackages } : {}),
   };
   const install = () =>
     installSubmissionTools(ctx, {
@@ -111,11 +111,15 @@ function setup(t, { submit, prepare, now, registry } = {}) {
   };
 }
 
-test('uses the exact native session cwd, advertises two tools, and exposes only safe fields', async (t) => {
+test('uses the exact native session cwd, advertises three tools, rejects author and exposes only safe fields', async (t) => {
   const f = setup(t);
   assert.deepEqual(
     [...f.registered.keys()],
-    ['auriga_resource_prepare', 'auriga_resource_submit'],
+    [
+      'auriga_resource_list',
+      'auriga_resource_prepare',
+      'auriga_resource_submit',
+    ],
   );
   await assert.rejects(
     f.call('prepare', { ...input, cwd: '/elsewhere' }),
@@ -123,6 +127,13 @@ test('uses the exact native session cwd, advertises two tools, and exposes only 
   );
   await assert.rejects(
     f.call('prepare', { ...input, kind: 'tool' }),
+    /common.validation_failed/,
+  );
+  await assert.rejects(
+    f.call('prepare', {
+      ...input,
+      metadata: { ...input.metadata, author: 'Spoofed' },
+    }),
     /common.validation_failed/,
   );
   await assert.rejects(
@@ -140,10 +151,17 @@ test('uses the exact native session cwd, advertises two tools, and exposes only 
   assert.deepEqual(f.calls[0], ['prepare', { cwd: '/work/project', ...input }]);
   assert.deepEqual(preflight, {
     handle: preflight.handle,
+    mode: 'unknown',
     kind: 'skill',
     name: 'example',
     version: '1.0.0',
+    description: '',
+    license: '',
+    permissions: { tools: [], outboundHosts: [], dataAccess: [] },
     archiveBytes: 17,
+    fileCount: 0,
+    files: [],
+    estimatedRisk: 'r1',
   });
   const submission = { handle: preflight.handle, reason: 'Review this skill' };
   await assert.rejects(
@@ -151,6 +169,99 @@ test('uses the exact native session cwd, advertises two tools, and exposes only 
     /common.validation_failed/,
   );
   assert.deepEqual(await f.call('submit', submission), result);
+});
+
+test('lists owned packages, detects upgrade mode, warns on duplicate version and forwards changeNotes', async (t) => {
+  const existingId = '00000000-0000-0000-0000-000000000099';
+  const f = setup(t, {
+    ownedPackages: async (kind) => [
+      {
+        packageId: existingId,
+        kind: kind ?? 'plugin',
+        name: 'my-decoration',
+        visibility: 'tenant',
+        enabled: true,
+        defaultVersionId: versionId,
+        publishedVersion: '1.0.0',
+        latestVersion: '1.0.0',
+        latestState: 'published',
+        description: 'Decoration plugin',
+      },
+    ],
+    prepare: async (args) => ({
+      manifest: {
+        kind: args.kind,
+        name: 'my-decoration',
+        version: args.metadata.version ?? '1.1.0',
+        description: 'Decoration plugin v2',
+        license: 'MIT',
+        permissions: args.metadata.permissions,
+        plugin: {
+          packageName: '@local/my-decoration',
+          dshVersionRange: '>=0.2.1-rc.3',
+        },
+      },
+      archive: Buffer.from('upgrade snapshot'),
+      files: ['package.json', 'cordis.patch.yml', 'index.js'],
+      changeNotes: args.metadata.changeNotes,
+    }),
+  });
+
+  const listed = await f.call('list', { kind: 'plugin' });
+  assert.equal(listed.items.length, 1);
+  assert.equal(listed.items[0].packageId, existingId);
+
+  const dup = await f.call('prepare', {
+    kind: 'plugin',
+    directory: 'plugins/my-decoration',
+    metadata: {
+      version: '1.0.0',
+      permissions: { tools: [], outboundHosts: [], dataAccess: [] },
+    },
+  });
+  assert.equal(dup.mode, 'upgrade');
+  assert.equal(dup.existingPackage.packageId, existingId);
+  assert.ok(dup.warnings?.some((w) => w.includes('1.0.0')));
+
+  const preflight = await f.call('prepare', {
+    kind: 'plugin',
+    directory: 'plugins/my-decoration',
+    metadata: {
+      version: '1.1.0',
+      changeNotes: '新增导出能力',
+      permissions: { tools: [], outboundHosts: [], dataAccess: [] },
+    },
+  });
+  assert.equal(preflight.mode, 'upgrade');
+  assert.equal(preflight.fileCount, 3);
+  assert.equal(preflight.estimatedRisk, 'r2');
+  assert.equal(preflight.warnings, undefined);
+
+  await f.call('submit', {
+    handle: preflight.handle,
+    reason: '升级到 1.1.0',
+  });
+  const submitCall = f.calls.find(([kind]) => kind === 'submit');
+  assert.equal(submitCall[1].packageId, existingId);
+  assert.equal(submitCall[1].changeNotes, '新增导出能力');
+});
+
+test('marks mode unknown and warns when catalog listing is incomplete or fails', async (t) => {
+  const truncated = setup(t, {
+    ownedPackages: async () => ({ items: [], complete: false }),
+  });
+  const res1 = await truncated.call('prepare', input);
+  assert.equal(res1.mode, 'unknown');
+  assert.ok(res1.warnings?.some((w) => w.includes('packageId')));
+
+  const failed = setup(t, {
+    ownedPackages: async () => {
+      throw new Error('network down');
+    },
+  });
+  const res2 = await failed.call('prepare', input);
+  assert.equal(res2.mode, 'unknown');
+  assert.ok(res2.warnings?.some((w) => w.includes('packageId')));
 });
 
 test('freezes bytes, coalesces concurrent submits and retries only the frozen operation', async (t) => {

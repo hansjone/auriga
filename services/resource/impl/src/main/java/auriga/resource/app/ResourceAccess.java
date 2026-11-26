@@ -27,6 +27,16 @@ public final class ResourceAccess {
         member(reader.tenant(), reader.account()).getDisplayName(), inputs.authorDepartment(actor));
   }
 
+  Optional<String> displayName(UUID tenant, UUID account) {
+    if (tenant == null || account == null) return Optional.empty();
+    try {
+      String name = member(tenant, account).getDisplayName();
+      return name != null && !name.isBlank() ? Optional.of(name) : Optional.empty();
+    } catch (RuntimeException e) {
+      return Optional.empty();
+    }
+  }
+
   private final ResourceAccessInputs inputs;
   private final auriga.iam.api.DevicePermissionAuthority devices;
 

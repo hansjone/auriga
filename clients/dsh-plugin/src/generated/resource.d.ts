@@ -1530,6 +1530,26 @@ export interface components {
       enabled: boolean;
       /** Format: uuid */
       defaultVersionId: string | null;
+      latestVersion?: {
+        /** Format: uuid */
+        versionId: string;
+        version: string;
+        /** @enum {string} */
+        state:
+          | 'draft'
+          | 'pending_review'
+          | 'approved'
+          | 'rejected'
+          | 'published'
+          | 'deprecated'
+          | 'withdrawn';
+        description: string;
+        authorName?: string;
+        authorDepartment?: string;
+        publishedVersion?: string;
+        /** Format: date-time */
+        createdAt: string;
+      };
     };
     /** @description Draft version. Reviews bind manifest digest and version revision. Published manifests and artifacts are immutable. */
     UnifiedVersion: {
@@ -1568,6 +1588,11 @@ export interface components {
       readonly risk: components['schemas']['UnifiedRiskAssessment'];
       /** @description Same-origin locator for exact immutable raw manifest UTF-8 bytes, not a bearer URL. Every request checks tenant/package/version ACL; caller must verify digest/envelope. Published and draft reads use the current corresponding ACL. */
       manifestDownloadPath: string;
+      /** Format: uuid */
+      authorId?: string;
+      authorName?: string;
+      authorDepartment?: string;
+      changeNotes?: string;
     };
     /** @description Draft multipart upload. expectedDigest is exact manifest bytes SHA-256. Include manifest as a binary part, plus one binary artifacts part per manifest artifact in array order. Online tools use no artifacts. Validate all hashes before committing the immutable version. */
     UnifiedUploadMetadata: {
@@ -1622,6 +1647,8 @@ export interface components {
     UnifiedReviewRecord: {
       /** Format: uuid */
       reviewerId: string;
+      reviewerName?: string;
+      reviewerDepartment?: string;
       /** @enum {string} */
       role: 'general' | 'security';
       /** @enum {string} */
@@ -1639,6 +1666,14 @@ export interface components {
       reviewId: string;
       /** Format: uuid */
       authorId: string;
+      authorName?: string;
+      authorDepartment?: string;
+      submitReason?: string;
+      /** Format: date-time */
+      submittedAt?: string;
+      /** Format: uuid */
+      previousPublishedVersionId?: string;
+      previousPublishedVersion?: string;
       version: components['schemas']['UnifiedVersion'];
       /** Format: int64 */
       revision: number;

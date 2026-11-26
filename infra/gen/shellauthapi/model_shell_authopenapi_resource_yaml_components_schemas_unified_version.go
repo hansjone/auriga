@@ -37,7 +37,11 @@ type ShellAuthopenapiResourceYamlComponentsSchemasUnifiedVersion struct {
 	Kind             string                                                             `json:"kind"`
 	Risk             ShellAuthopenapiResourceYamlComponentsSchemasUnifiedRiskAssessment `json:"risk"`
 	// Same-origin locator for exact immutable raw manifest UTF-8 bytes, not a bearer URL. Every request checks tenant/package/version ACL; caller must verify digest/envelope. Published and draft reads use the current corresponding ACL.
-	ManifestDownloadPath string `json:"manifestDownloadPath" validate:"regexp=^/api/resource/v1/catalog/packages/[0-9a-f-]{36}/versions/[0-9a-f-]{36}/manifest$"`
+	ManifestDownloadPath string  `json:"manifestDownloadPath" validate:"regexp=^/api/resource/v1/catalog/packages/[0-9a-f-]{36}/versions/[0-9a-f-]{36}/manifest$"`
+	AuthorId             *string `json:"authorId,omitempty"`
+	AuthorName           *string `json:"authorName,omitempty"`
+	AuthorDepartment     *string `json:"authorDepartment,omitempty"`
+	ChangeNotes          *string `json:"changeNotes,omitempty"`
 }
 
 type _ShellAuthopenapiResourceYamlComponentsSchemasUnifiedVersion ShellAuthopenapiResourceYamlComponentsSchemasUnifiedVersion
@@ -430,6 +434,134 @@ func (o *ShellAuthopenapiResourceYamlComponentsSchemasUnifiedVersion) SetManifes
 	o.ManifestDownloadPath = v
 }
 
+// GetAuthorId returns the AuthorId field value if set, zero value otherwise.
+func (o *ShellAuthopenapiResourceYamlComponentsSchemasUnifiedVersion) GetAuthorId() string {
+	if o == nil || IsNil(o.AuthorId) {
+		var ret string
+		return ret
+	}
+	return *o.AuthorId
+}
+
+// GetAuthorIdOk returns a tuple with the AuthorId field value if set, nil otherwise
+// and a boolean to check if the value has been set.
+func (o *ShellAuthopenapiResourceYamlComponentsSchemasUnifiedVersion) GetAuthorIdOk() (*string, bool) {
+	if o == nil || IsNil(o.AuthorId) {
+		return nil, false
+	}
+	return o.AuthorId, true
+}
+
+// HasAuthorId returns a boolean if a field has been set.
+func (o *ShellAuthopenapiResourceYamlComponentsSchemasUnifiedVersion) HasAuthorId() bool {
+	if o != nil && !IsNil(o.AuthorId) {
+		return true
+	}
+
+	return false
+}
+
+// SetAuthorId gets a reference to the given string and assigns it to the AuthorId field.
+func (o *ShellAuthopenapiResourceYamlComponentsSchemasUnifiedVersion) SetAuthorId(v string) {
+	o.AuthorId = &v
+}
+
+// GetAuthorName returns the AuthorName field value if set, zero value otherwise.
+func (o *ShellAuthopenapiResourceYamlComponentsSchemasUnifiedVersion) GetAuthorName() string {
+	if o == nil || IsNil(o.AuthorName) {
+		var ret string
+		return ret
+	}
+	return *o.AuthorName
+}
+
+// GetAuthorNameOk returns a tuple with the AuthorName field value if set, nil otherwise
+// and a boolean to check if the value has been set.
+func (o *ShellAuthopenapiResourceYamlComponentsSchemasUnifiedVersion) GetAuthorNameOk() (*string, bool) {
+	if o == nil || IsNil(o.AuthorName) {
+		return nil, false
+	}
+	return o.AuthorName, true
+}
+
+// HasAuthorName returns a boolean if a field has been set.
+func (o *ShellAuthopenapiResourceYamlComponentsSchemasUnifiedVersion) HasAuthorName() bool {
+	if o != nil && !IsNil(o.AuthorName) {
+		return true
+	}
+
+	return false
+}
+
+// SetAuthorName gets a reference to the given string and assigns it to the AuthorName field.
+func (o *ShellAuthopenapiResourceYamlComponentsSchemasUnifiedVersion) SetAuthorName(v string) {
+	o.AuthorName = &v
+}
+
+// GetAuthorDepartment returns the AuthorDepartment field value if set, zero value otherwise.
+func (o *ShellAuthopenapiResourceYamlComponentsSchemasUnifiedVersion) GetAuthorDepartment() string {
+	if o == nil || IsNil(o.AuthorDepartment) {
+		var ret string
+		return ret
+	}
+	return *o.AuthorDepartment
+}
+
+// GetAuthorDepartmentOk returns a tuple with the AuthorDepartment field value if set, nil otherwise
+// and a boolean to check if the value has been set.
+func (o *ShellAuthopenapiResourceYamlComponentsSchemasUnifiedVersion) GetAuthorDepartmentOk() (*string, bool) {
+	if o == nil || IsNil(o.AuthorDepartment) {
+		return nil, false
+	}
+	return o.AuthorDepartment, true
+}
+
+// HasAuthorDepartment returns a boolean if a field has been set.
+func (o *ShellAuthopenapiResourceYamlComponentsSchemasUnifiedVersion) HasAuthorDepartment() bool {
+	if o != nil && !IsNil(o.AuthorDepartment) {
+		return true
+	}
+
+	return false
+}
+
+// SetAuthorDepartment gets a reference to the given string and assigns it to the AuthorDepartment field.
+func (o *ShellAuthopenapiResourceYamlComponentsSchemasUnifiedVersion) SetAuthorDepartment(v string) {
+	o.AuthorDepartment = &v
+}
+
+// GetChangeNotes returns the ChangeNotes field value if set, zero value otherwise.
+func (o *ShellAuthopenapiResourceYamlComponentsSchemasUnifiedVersion) GetChangeNotes() string {
+	if o == nil || IsNil(o.ChangeNotes) {
+		var ret string
+		return ret
+	}
+	return *o.ChangeNotes
+}
+
+// GetChangeNotesOk returns a tuple with the ChangeNotes field value if set, nil otherwise
+// and a boolean to check if the value has been set.
+func (o *ShellAuthopenapiResourceYamlComponentsSchemasUnifiedVersion) GetChangeNotesOk() (*string, bool) {
+	if o == nil || IsNil(o.ChangeNotes) {
+		return nil, false
+	}
+	return o.ChangeNotes, true
+}
+
+// HasChangeNotes returns a boolean if a field has been set.
+func (o *ShellAuthopenapiResourceYamlComponentsSchemasUnifiedVersion) HasChangeNotes() bool {
+	if o != nil && !IsNil(o.ChangeNotes) {
+		return true
+	}
+
+	return false
+}
+
+// SetChangeNotes gets a reference to the given string and assigns it to the ChangeNotes field.
+func (o *ShellAuthopenapiResourceYamlComponentsSchemasUnifiedVersion) SetChangeNotes(v string) {
+	o.ChangeNotes = &v
+}
+
 func (o ShellAuthopenapiResourceYamlComponentsSchemasUnifiedVersion) MarshalJSON() ([]byte, error) {
 	toSerialize, err := o.ToMap()
 	if err != nil {
@@ -460,6 +592,18 @@ func (o ShellAuthopenapiResourceYamlComponentsSchemasUnifiedVersion) ToMap() (ma
 	toSerialize["kind"] = o.Kind
 	toSerialize["risk"] = o.Risk
 	toSerialize["manifestDownloadPath"] = o.ManifestDownloadPath
+	if !IsNil(o.AuthorId) {
+		toSerialize["authorId"] = o.AuthorId
+	}
+	if !IsNil(o.AuthorName) {
+		toSerialize["authorName"] = o.AuthorName
+	}
+	if !IsNil(o.AuthorDepartment) {
+		toSerialize["authorDepartment"] = o.AuthorDepartment
+	}
+	if !IsNil(o.ChangeNotes) {
+		toSerialize["changeNotes"] = o.ChangeNotes
+	}
 	return toSerialize, nil
 }
 

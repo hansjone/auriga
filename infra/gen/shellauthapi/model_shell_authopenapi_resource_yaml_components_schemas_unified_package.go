@@ -21,18 +21,19 @@ var _ MappedNullable = &ShellAuthopenapiResourceYamlComponentsSchemasUnifiedPack
 
 // ShellAuthopenapiResourceYamlComponentsSchemasUnifiedPackage Shared unified resource. Installation mode is selected per scoped assignment; packages carry no governance level.
 type ShellAuthopenapiResourceYamlComponentsSchemasUnifiedPackage struct {
-	Market               *ShellAuthopenapiResourceYamlComponentsSchemasUnifiedPackageMarket `json:"market,omitempty"`
-	Id                   string                                                             `json:"id"`
-	TenantId             string                                                             `json:"tenantId"`
-	Name                 string                                                             `json:"name" validate:"regexp=^[a-z0-9]+(?:-[a-z0-9]+)*$"`
-	Kind                 string                                                             `json:"kind"`
-	OwnerId              string                                                             `json:"ownerId"`
-	Visibility           string                                                             `json:"visibility"`
-	GroupIds             []string                                                           `json:"groupIds"`
-	Revision             int64                                                              `json:"revision"`
-	CreatedAt            time.Time                                                          `json:"createdAt"`
-	Enabled              bool                                                               `json:"enabled"`
-	DefaultVersionId     NullableString                                                     `json:"defaultVersionId"`
+	Market               *ShellAuthopenapiResourceYamlComponentsSchemasUnifiedPackageMarket        `json:"market,omitempty"`
+	Id                   string                                                                    `json:"id"`
+	TenantId             string                                                                    `json:"tenantId"`
+	Name                 string                                                                    `json:"name" validate:"regexp=^[a-z0-9]+(?:-[a-z0-9]+)*$"`
+	Kind                 string                                                                    `json:"kind"`
+	OwnerId              string                                                                    `json:"ownerId"`
+	Visibility           string                                                                    `json:"visibility"`
+	GroupIds             []string                                                                  `json:"groupIds"`
+	Revision             int64                                                                     `json:"revision"`
+	CreatedAt            time.Time                                                                 `json:"createdAt"`
+	Enabled              bool                                                                      `json:"enabled"`
+	DefaultVersionId     NullableString                                                            `json:"defaultVersionId"`
+	LatestVersion        *ShellAuthopenapiResourceYamlComponentsSchemasUnifiedPackageLatestVersion `json:"latestVersion,omitempty"`
 	AdditionalProperties map[string]interface{}
 }
 
@@ -364,6 +365,38 @@ func (o *ShellAuthopenapiResourceYamlComponentsSchemasUnifiedPackage) SetDefault
 	o.DefaultVersionId.Set(&v)
 }
 
+// GetLatestVersion returns the LatestVersion field value if set, zero value otherwise.
+func (o *ShellAuthopenapiResourceYamlComponentsSchemasUnifiedPackage) GetLatestVersion() ShellAuthopenapiResourceYamlComponentsSchemasUnifiedPackageLatestVersion {
+	if o == nil || IsNil(o.LatestVersion) {
+		var ret ShellAuthopenapiResourceYamlComponentsSchemasUnifiedPackageLatestVersion
+		return ret
+	}
+	return *o.LatestVersion
+}
+
+// GetLatestVersionOk returns a tuple with the LatestVersion field value if set, nil otherwise
+// and a boolean to check if the value has been set.
+func (o *ShellAuthopenapiResourceYamlComponentsSchemasUnifiedPackage) GetLatestVersionOk() (*ShellAuthopenapiResourceYamlComponentsSchemasUnifiedPackageLatestVersion, bool) {
+	if o == nil || IsNil(o.LatestVersion) {
+		return nil, false
+	}
+	return o.LatestVersion, true
+}
+
+// HasLatestVersion returns a boolean if a field has been set.
+func (o *ShellAuthopenapiResourceYamlComponentsSchemasUnifiedPackage) HasLatestVersion() bool {
+	if o != nil && !IsNil(o.LatestVersion) {
+		return true
+	}
+
+	return false
+}
+
+// SetLatestVersion gets a reference to the given ShellAuthopenapiResourceYamlComponentsSchemasUnifiedPackageLatestVersion and assigns it to the LatestVersion field.
+func (o *ShellAuthopenapiResourceYamlComponentsSchemasUnifiedPackage) SetLatestVersion(v ShellAuthopenapiResourceYamlComponentsSchemasUnifiedPackageLatestVersion) {
+	o.LatestVersion = &v
+}
+
 func (o ShellAuthopenapiResourceYamlComponentsSchemasUnifiedPackage) MarshalJSON() ([]byte, error) {
 	toSerialize, err := o.ToMap()
 	if err != nil {
@@ -388,6 +421,9 @@ func (o ShellAuthopenapiResourceYamlComponentsSchemasUnifiedPackage) ToMap() (ma
 	toSerialize["createdAt"] = o.CreatedAt
 	toSerialize["enabled"] = o.Enabled
 	toSerialize["defaultVersionId"] = o.DefaultVersionId.Get()
+	if !IsNil(o.LatestVersion) {
+		toSerialize["latestVersion"] = o.LatestVersion
+	}
 
 	for key, value := range o.AdditionalProperties {
 		toSerialize[key] = value
@@ -453,6 +489,7 @@ func (o *ShellAuthopenapiResourceYamlComponentsSchemasUnifiedPackage) UnmarshalJ
 		delete(additionalProperties, "createdAt")
 		delete(additionalProperties, "enabled")
 		delete(additionalProperties, "defaultVersionId")
+		delete(additionalProperties, "latestVersion")
 		o.AdditionalProperties = additionalProperties
 	}
 

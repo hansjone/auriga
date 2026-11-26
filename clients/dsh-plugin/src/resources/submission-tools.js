@@ -11,16 +11,48 @@ const maxArchiveBytes = 64 * 1024 * 1024;
 const handleTtl = 15 * 60 * 1000;
 const maxHandles = 8;
 const maxReviewReason = 1024;
+const maxChangeNotes = 4096;
+const maxPreviewFiles = 30;
 const str = { type: 'string', minLength: 1 };
 const tags = documents.package.$defs.Plugin.properties.tags;
 const permissionsSchema = documents.package.$defs.Permissions;
 const metadataFields = {
-  name: str,
-  version: str,
-  description: str,
-  author: str,
-  license: str,
-  dshVersionRange: str,
+  name: {
+    ...str,
+    maxLength: 64,
+    description:
+      '可选。目录资源名，仅允许小写字母、数字和短横线（^[a-z0-9]+(-[a-z0-9]+)*$），不要带 npm @scope；留空将自动从 package.json 或 SKILL.md 提取。/ Optional catalog slug (lowercase kebab-case without @scope). Omit to auto-derive.',
+  },
+  version: {
+    ...str,
+    maxLength: 128,
+    description:
+      '严格 SemVer 版本号，如 1.0.0。技能必填；插件默认读取 package.json 的 version，升级时须递增。/ Strict SemVer (e.g. 1.0.0). Required for skills; plugins use package.json version.',
+  },
+  description: {
+    ...str,
+    maxLength: 1024,
+    description:
+      '资源简介（1-1024 字符）。插件默认读取 package.json 的 description，技能须与 SKILL.md 一致。请写明用途与适用场景。/ Clear resource summary (1-1024 chars).',
+  },
+  license: {
+    ...str,
+    maxLength: 128,
+    description:
+      '许可证（如 MIT、Apache-2.0、Proprietary）。技能必填；插件留空时自动读取 package.json 的 license。/ License identifier; plugins fall back to package.json license.',
+  },
+  dshVersionRange: {
+    ...str,
+    maxLength: 128,
+    description:
+      '可选。兼容的 DSH 版本范围（如 >=0.2.1-rc.3）。插件若声明了 engines.dsh 须与其一致。/ Optional compatible DSH SemVer range.',
+  },
+  changeNotes: {
+    ...str,
+    maxLength: maxChangeNotes,
+    description:
+      '可选（升级版本强烈建议填写）。本次发布或升级的变更说明，审核员将在审核页直接看到。/ Optional release/upgrade change notes displayed to reviewers.',
+  },
 };
 const validationFailed = () => refuse('common.validation_failed');
 const unauthorized = () => refuse('common.unauthenticated');
@@ -67,7 +99,7 @@ function diagnosticText(value, size) {
 }
 
 /** The SDK displays Error.message. Use local preflight context and fixed platform replies.
- * @param {any} error @param {'prepare'|'submit'} action */
+ * @param {any} error @param {'prepare'|'submit'|'list'} action */
 function toolFailure(error, action) {
   const { code } = diagnoseResource(error, 'catalog').body;
   const stage =
@@ -111,11 +143,12 @@ function checkPrepare(args) {
   const { permissions, tags: pluginTags, ...fields } = args.metadata;
   if (
     Object.entries(fields).some(
-      ([key, value]) => !Object.hasOwn(metadataFields, key) || !text(value),
+      ([key, value]) =>
+        !Object.hasOwn(metadataFields, key) ||
+        !text(value, key === 'changeNotes' ? maxChangeNotes : 1024),
     ) ||
-    !text(fields.author) ||
-    !text(fields.license) ||
-    (args.kind === 'skill' && !text(fields.version)) ||
+    (args.kind === 'skill' &&
+      (!text(fields.version) || !text(fields.license))) ||
     (pluginTags !== undefined &&
       (args.kind !== 'plugin' ||
         !Array.isArray(pluginTags) ||
@@ -132,11 +165,21 @@ function checkPrepare(args) {
     validationFailed();
 }
 
-/** @typedef {{manifest:any,archive:Buffer}} Prepared */
+/** @param {'plugin'|'skill'} kind @param {any} permissions */
+function estimateRisk(kind, permissions) {
+  if (kind === 'plugin') return 'r2';
+  const hasPermissions =
+    (permissions?.tools?.length ?? 0) > 0 ||
+    (permissions?.outboundHosts?.length ?? 0) > 0 ||
+    (permissions?.dataAccess?.length ?? 0) > 0;
+  return hasPermissions ? 'r2' : 'r1';
+}
+
+/** @typedef {{manifest:any,archive:Buffer,files?:string[],changeNotes?:string}} Prepared */
 /** @typedef {{cwd:string,directory:string,kind:'plugin'|'skill',metadata:any}} PrepareInput */
 /** @typedef {{packageId:string,versionId:string,state:'pending_review'}} Receipt */
-/** @typedef {{reason:string,packageId?:string,key:string}} Operation */
-/** @typedef {{prepared:Prepared, session:any, cwd:string, expires:number, operation?:Operation, pending?:Promise<Receipt>, receipt?:Receipt}} Snapshot */
+/** @typedef {{reason:string,packageId?:string,changeNotes?:string,key:string}} Operation */
+/** @typedef {{prepared:Prepared, session:any, cwd:string, expires:number, existingPackageId?:string, operation?:Operation, pending?:Promise<Receipt>, receipt?:Receipt}} Snapshot */
 
 /** Register with the desktop host. Scope changes retire every handle created under the previous login.
  * @param {any} ctx
@@ -225,9 +268,34 @@ export function installSubmissionTools(
       }
 
       /** @param {any} args @param {any} execution */
+      async function listTool(args, execution) {
+        if (
+          args !== undefined &&
+          (typeof args !== 'object' ||
+            args === null ||
+            Array.isArray(args) ||
+            Object.keys(args).some((k) => k !== 'kind') ||
+            (args.kind !== undefined &&
+              !['plugin', 'skill'].includes(args.kind)))
+        )
+          return validationFailed();
+        const { source, check, verify } = await admitted(execution);
+        check();
+        const svc = service(source.runtime);
+        if (typeof svc?.ownedPackages !== 'function')
+          return refuse('common.unavailable');
+        const result = await svc.ownedPackages(args?.kind, verify);
+        check();
+        return Array.isArray(result)
+          ? { items: result, complete: true }
+          : { items: result.items, complete: !!result.complete };
+      }
+
+      /** @param {any} args @param {any} execution */
       async function prepareTool(args, execution) {
         checkPrepare(args);
-        const { native, session, check } = await admitted(execution);
+        const { native, session, source, check, verify } =
+          await admitted(execution);
         check();
         if (!isAbsolute(native.cwd)) return refuse('common.forbidden');
         if (preparing || handles.size >= maxHandles)
@@ -236,7 +304,7 @@ export function installSubmissionTools(
         try {
           const { directory, kind, metadata } = args;
           /** @type {Prepared} */
-          const { manifest, archive } = await prepare({
+          const { manifest, archive, files, changeNotes } = await prepare({
             cwd: native.cwd,
             directory,
             kind,
@@ -257,22 +325,116 @@ export function installSubmissionTools(
             archive.length,
           );
           if (retained > maxArchiveBytes) return refuse('common.rate_limited');
+
+          // Best-effort lookup to detect upgrade mode against an existing owned package.
+          /** @type {{packageId:string,latestVersion:string|null,latestState:string|null,publishedVersion:string|null,versionsComplete:boolean}|undefined} */
+          let existingPackage;
+          /** @type {'create'|'upgrade'|'unknown'} */
+          let mode = 'unknown';
+          const warnings = [];
+          try {
+            const svc = service(source.runtime);
+            if (typeof svc?.ownedPackages === 'function') {
+              const raw = await svc.ownedPackages(kind, verify);
+              const owned = Array.isArray(raw) ? raw : (raw?.items ?? []);
+              const complete = Array.isArray(raw) ? true : !!raw?.complete;
+              const match = owned.find(
+                (/** @type {any} */ item) =>
+                  item.kind === kind && item.name === manifest.name,
+              );
+              if (match) {
+                mode = 'upgrade';
+                existingPackage = {
+                  packageId: match.packageId,
+                  latestVersion: match.latestVersion ?? null,
+                  latestState: match.latestState ?? null,
+                  publishedVersion: match.publishedVersion ?? null,
+                  versionsComplete: match.versionsComplete !== false,
+                };
+                if (
+                  match.latestVersion === manifest.version ||
+                  match.publishedVersion === manifest.version
+                ) {
+                  warnings.push(
+                    `版本 ${manifest.version} 已存在，升级请先递增版本号后重新预检。`,
+                  );
+                } else if (match.versionsComplete === false) {
+                  warnings.push(
+                    '目标资源历史版本超过分页上限，未能查全最新版本，请确认新版本号未与已有版本冲突。',
+                  );
+                }
+              } else if (complete) {
+                mode = 'create';
+              } else {
+                mode = 'unknown';
+                warnings.push(
+                  '目录分页超过上限，未能完整核对是否已有同名资源；如为升级请先确认并显式传入 packageId。',
+                );
+              }
+            }
+          } catch {
+            mode = 'unknown';
+            warnings.push(
+              '未能查询当前目录已有资源，无法自动判断首次发布或升级；如为升级请显式传入 packageId。',
+            );
+          }
+          check();
+
+          const normalizedChangeNotes =
+            typeof changeNotes === 'string' && changeNotes.trim()
+              ? changeNotes.trim()
+              : typeof metadata.changeNotes === 'string' &&
+                  metadata.changeNotes.trim()
+                ? metadata.changeNotes.trim()
+                : undefined;
+
           const handle = randomUUID();
           handles.set(handle, {
             prepared: {
               manifest: globalThis.structuredClone(manifest),
               archive: Buffer.from(archive),
+              ...(Array.isArray(files) ? { files: [...files] } : {}),
+              ...(normalizedChangeNotes
+                ? { changeNotes: normalizedChangeNotes }
+                : {}),
             },
             session,
             cwd: native.cwd,
             expires: now() + handleTtl,
+            ...(existingPackage
+              ? { existingPackageId: existingPackage.packageId }
+              : {}),
           });
+
+          const fileList = Array.isArray(files) ? files : [];
+          const dshVersionRange =
+            kind === 'plugin'
+              ? manifest.plugin?.dshVersionRange
+              : manifest.skill?.dshVersionRange;
           return {
             handle,
+            mode,
             kind,
             name: manifest.name,
             version: manifest.version,
+            description: manifest.description ?? '',
+            license: manifest.license ?? '',
+            ...(dshVersionRange ? { dshVersionRange } : {}),
+            ...(kind === 'plugin' && Array.isArray(manifest.plugin?.tags)
+              ? { tags: [...manifest.plugin.tags] }
+              : {}),
+            permissions: manifest.permissions
+              ? globalThis.structuredClone(manifest.permissions)
+              : { tools: [], outboundHosts: [], dataAccess: [] },
+            ...(normalizedChangeNotes
+              ? { changeNotes: normalizedChangeNotes }
+              : {}),
             archiveBytes: archive.length,
+            fileCount: fileList.length,
+            files: fileList.slice(0, maxPreviewFiles),
+            estimatedRisk: estimateRisk(kind, manifest.permissions),
+            ...(existingPackage ? { existingPackage } : {}),
+            ...(warnings.length ? { warnings } : {}),
           };
         } catch (error) {
           check();
@@ -284,14 +446,25 @@ export function installSubmissionTools(
 
       /** @param {any} args @param {any} execution */
       async function submitTool(args, execution) {
+        const keys = args && typeof args === 'object' ? Object.keys(args) : [];
+        const allowedKeys = new Set([
+          'handle',
+          'reason',
+          'packageId',
+          'changeNotes',
+        ]);
         if (
-          !(
-            exact(args, ['handle', 'reason']) ||
-            exact(args, ['handle', 'reason', 'packageId'])
-          ) ||
+          !args ||
+          typeof args !== 'object' ||
+          Array.isArray(args) ||
+          !Object.hasOwn(args, 'handle') ||
+          !Object.hasOwn(args, 'reason') ||
+          keys.some((k) => !allowedKeys.has(k)) ||
           !uuid(args.handle) ||
           !text(args.reason, maxReviewReason) ||
-          (Object.hasOwn(args, 'packageId') && !uuid(args.packageId))
+          (Object.hasOwn(args, 'packageId') && !uuid(args.packageId)) ||
+          (Object.hasOwn(args, 'changeNotes') &&
+            !text(args.changeNotes, maxChangeNotes))
         )
           return validationFailed();
         const { handle, reason, packageId } = args;
@@ -306,12 +479,22 @@ export function installSubmissionTools(
           row.expires <= now()
         )
           return refuse('common.not_found');
+        const resolvedPackageId = packageId ?? row.existingPackageId;
+        const resolvedChangeNotes =
+          (Object.hasOwn(args, 'changeNotes')
+            ? args.changeNotes.trim()
+            : row.prepared.changeNotes) ?? undefined;
         const operation = (row.operation ??= {
           reason,
           key: randomUUID(),
-          ...(packageId ? { packageId } : {}),
+          ...(resolvedPackageId ? { packageId: resolvedPackageId } : {}),
+          ...(resolvedChangeNotes ? { changeNotes: resolvedChangeNotes } : {}),
         });
-        if (operation.reason !== reason || operation.packageId !== packageId)
+        if (
+          operation.reason !== reason ||
+          operation.packageId !== resolvedPackageId ||
+          operation.changeNotes !== resolvedChangeNotes
+        )
           return refuse('common.conflict');
         if (row.receipt) return row.receipt;
         const pending = (row.pending ??= (async () => {
@@ -346,8 +529,8 @@ export function installSubmissionTools(
         }
       }
 
-      /** @param {any} tool */
-      function register(tool, /** @type {'prepare'|'submit'} */ action) {
+      /** @param {any} tool @param {'prepare'|'submit'|'list'} action */
+      function register(tool, action) {
         return host.tools.register({
           ...tool,
           output: {
@@ -379,26 +562,55 @@ export function installSubmissionTools(
           disposers.push(
             register(
               {
-                name: 'auriga_resource_prepare',
+                name: 'auriga_resource_list',
                 description:
-                  '预检当前会话工作目录内的 DSH 插件或技能，返回短期送审句柄。技能目录需有 SKILL.md，metadata.version 必填。插件目录需有 package.json 及其声明的 DSH patch。/ Preflight a plugin or skill directory relative to this session and return a short-lived submission handle.',
+                  '查询当前登录用户在 Auriga 目录中已发布的或待审核的插件/技能，获取 packageId、当前最新版本和状态，用于升级已有资源或追踪审核状态。/ List catalog plugins and skills owned by the authenticated user for upgrades and status checks.',
                 parameters: {
                   type: 'object',
                   properties: {
-                    kind: { type: 'string', enum: ['plugin', 'skill'] },
+                    kind: {
+                      type: 'string',
+                      enum: ['plugin', 'skill'],
+                      description:
+                        '可选，按资源类型过滤（plugin 或 skill）。/ Optional kind filter.',
+                    },
+                  },
+                  additionalProperties: false,
+                },
+                execute: listTool,
+              },
+              'list',
+            ),
+          );
+          disposers.push(
+            register(
+              {
+                name: 'auriga_resource_prepare',
+                description:
+                  '预检当前会话工作目录内的 DSH 插件或技能，返回短期送审句柄及完整摘要（含是否命中已有资源升级）。提交人身份由平台根据登录认证自动记录，无需也不应填写作者字段。/ Preflight a plugin or skill directory relative to this session and return a short-lived handle and summary. Author identity is resolved automatically by the platform.',
+                parameters: {
+                  type: 'object',
+                  properties: {
+                    kind: {
+                      type: 'string',
+                      enum: ['plugin', 'skill'],
+                      description: '资源类型：plugin 或 skill。',
+                    },
                     directory: {
                       ...str,
                       description:
-                        '相对会话工作目录，例如 skills/example / Relative directory, e.g. skills/example',
+                        '相对会话工作目录，例如 skills/example 或 plugins/my-plugin / Relative directory, e.g. skills/example',
                     },
                     metadata: {
                       type: 'object',
+                      description:
+                        '资源元数据。作者身份由平台认证信息自动填充，请勿填写 author。',
                       properties: {
                         ...metadataFields,
                         tags,
                         permissions: permissionsSchema,
                       },
-                      required: ['author', 'license', 'permissions'],
+                      required: ['permissions'],
                       additionalProperties: false,
                     },
                   },
@@ -415,13 +627,31 @@ export function installSubmissionTools(
               {
                 name: 'auriga_resource_submit',
                 description:
-                  '使用同一会话的预检句柄提交成员资源审核。按用户授权提交并说明理由，追加版本时传入已有资源的 packageId。/ Submit the prepared resource for member review when the user requests it.',
+                  '使用同一会话的预检句柄提交成员资源审核（支持首次发布与版本升级）。升级已有资源时自动关联预检匹配的 packageId 或显式传入 packageId，并建议提供变更说明 changeNotes。/ Submit the prepared resource for review (create or upgrade).',
                 parameters: {
                   type: 'object',
                   properties: {
-                    handle: str,
-                    reason: { ...str, maxLength: maxReviewReason },
-                    packageId: str,
+                    handle: {
+                      ...str,
+                      description: 'auriga_resource_prepare 返回的预检句柄。',
+                    },
+                    reason: {
+                      ...str,
+                      maxLength: maxReviewReason,
+                      description:
+                        '送审理由（1-1024 字符），将展示给审核员，请简明说明本次提交/升级目的。',
+                    },
+                    packageId: {
+                      ...str,
+                      description:
+                        '可选。向已有资源升级追加新版本时指定目标资源 packageId（预检命中同名已有资源时会自动关联）。',
+                    },
+                    changeNotes: {
+                      ...str,
+                      maxLength: maxChangeNotes,
+                      description:
+                        '可选。本次发布或升级的详细变更说明（若预检时已传则可省略）。',
+                    },
                   },
                   required: ['handle', 'reason'],
                   additionalProperties: false,

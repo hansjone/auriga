@@ -2718,6 +2718,26 @@ export interface components {
       enabled: boolean;
       /** Format: uuid */
       defaultVersionId: string | null;
+      latestVersion?: {
+        /** Format: uuid */
+        versionId: string;
+        version: string;
+        /** @enum {string} */
+        state:
+          | 'draft'
+          | 'pending_review'
+          | 'approved'
+          | 'rejected'
+          | 'published'
+          | 'deprecated'
+          | 'withdrawn';
+        description: string;
+        authorName?: string;
+        authorDepartment?: string;
+        publishedVersion?: string;
+        /** Format: date-time */
+        createdAt: string;
+      };
     };
     ShellAuthopenapi_resource_yaml_components_schemas_UnifiedPackagePage: {
       items: components['schemas']['ShellAuthopenapi_resource_yaml_components_schemas_UnifiedPackage'][];
@@ -3056,6 +3076,11 @@ export interface components {
       risk: components['schemas']['ShellAuthopenapi_resource_yaml_components_schemas_UnifiedRiskAssessment'];
       /** @description Same-origin locator for exact immutable raw manifest UTF-8 bytes, not a bearer URL. Every request checks tenant/package/version ACL; caller must verify digest/envelope. Published and draft reads use the current corresponding ACL. */
       manifestDownloadPath: string;
+      /** Format: uuid */
+      authorId?: string;
+      authorName?: string;
+      authorDepartment?: string;
+      changeNotes?: string;
     };
     ShellAuthopenapi_resource_yaml_components_schemas_UnifiedVersionPage: {
       items: components['schemas']['ShellAuthopenapi_resource_yaml_components_schemas_UnifiedVersion'][];
@@ -3097,6 +3122,8 @@ export interface components {
     ShellAuthopenapi_resource_yaml_components_schemas_UnifiedReviewRecord: {
       /** Format: uuid */
       reviewerId: string;
+      reviewerName?: string;
+      reviewerDepartment?: string;
       /** @enum {string} */
       role: 'general' | 'security';
       /** @enum {string} */
@@ -3114,6 +3141,14 @@ export interface components {
       reviewId: string;
       /** Format: uuid */
       authorId: string;
+      authorName?: string;
+      authorDepartment?: string;
+      submitReason?: string;
+      /** Format: date-time */
+      submittedAt?: string;
+      /** Format: uuid */
+      previousPublishedVersionId?: string;
+      previousPublishedVersion?: string;
       version: components['schemas']['ShellAuthopenapi_resource_yaml_components_schemas_UnifiedVersion'];
       /** Format: int64 */
       revision: number;
