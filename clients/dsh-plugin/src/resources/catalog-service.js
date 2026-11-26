@@ -1161,7 +1161,10 @@ export function catalogService(options) {
               visibility: pack.visibility,
               enabled: !!pack.enabled,
               defaultVersionId: pack.defaultVersionId ?? null,
-              publishedVersion: pack.market?.version ?? null,
+              publishedVersion:
+                pack.latestVersion?.publishedVersion ??
+                pack.market?.version ??
+                null,
               latestVersion:
                 pack.latestVersion?.version ?? pack.market?.version ?? null,
               latestState:
@@ -1173,12 +1176,12 @@ export function catalogService(options) {
             });
           }
         }
-        if (!result.value.nextCursor) return items;
+        if (!result.value.nextCursor) return { items, complete: true };
         if (result.value.nextCursor === cursor)
           refuse('common.validation_failed');
         cursor = result.value.nextCursor;
       }
-      return items;
+      return { items, complete: false };
     },
   };
 }

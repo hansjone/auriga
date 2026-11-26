@@ -43,11 +43,24 @@ export type PreviewFile = {
   sizeBytes?: number;
 };
 
+export type PreviewArchiveResult = {
+  files: PreviewFile[];
+  truncated: boolean;
+};
+
 export async function archivePreview(
   response: Response,
   kind: 'skill' | 'plugin',
 ): Promise<PreviewFile[]> {
-  if (kind === 'skill') return skillPreview(response);
+  return (await archivePreviewWithMeta(response, kind)).files;
+}
+
+export async function archivePreviewWithMeta(
+  response: Response,
+  kind: 'skill' | 'plugin',
+): Promise<PreviewArchiveResult> {
+  if (kind === 'skill')
+    return { files: await skillPreview(response), truncated: false };
   if (!response.body) throw new Error('Missing body');
   const bytes = await boundedBytes(response.body);
   const raw =
@@ -58,18 +71,28 @@ export async function archivePreview(
             .pipeThrough(new DecompressionStream('gzip')),
         )
       : bytes;
-  return tarArchiveEntries(raw);
+  return tarArchiveEntriesWithMeta(raw);
 }
 
 export function tarArchiveEntries(raw: Uint8Array): PreviewFile[] {
+  return tarArchiveEntriesWithMeta(raw).files;
+}
+
+export function tarArchiveEntriesWithMeta(
+  raw: Uint8Array,
+): PreviewArchiveResult {
   const headerDecoder = new TextDecoder('utf-8', { fatal: true });
   const textDecoder = new TextDecoder('utf-8', { fatal: true });
   const result: PreviewFile[] = [];
   const seen = new Set<string>();
+  let truncated = false;
   for (let offset = 0, count = 0; offset + 512 <= raw.length; count++) {
-    if (count > 512) break;
     const header = raw.subarray(offset, offset + 512);
-    if (header.every((b) => b === 0)) return result;
+    if (header.every((b) => b === 0)) return { files: result, truncated };
+    if (count >= 512) {
+      truncated = true;
+      break;
+    }
     const str = (start: number, end: number) =>
       headerDecoder.decode(header.subarray(start, end)).split('\0')[0]!;
     const name = str(0, 100),
@@ -127,7 +150,7 @@ export function tarArchiveEntries(raw: Uint8Array): PreviewFile[] {
     }
     offset += 512 + Math.ceil(size / 512) * 512;
   }
-  return result;
+  return { files: result, truncated };
 }
 export function tarText(raw: Uint8Array) {
   const decoder = new TextDecoder('utf-8', { fatal: true }),

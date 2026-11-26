@@ -1546,6 +1546,7 @@ export interface components {
         description: string;
         authorName?: string;
         authorDepartment?: string;
+        publishedVersion?: string;
         /** Format: date-time */
         createdAt: string;
       };

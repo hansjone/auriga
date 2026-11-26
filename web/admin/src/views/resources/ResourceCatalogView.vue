@@ -29,7 +29,7 @@ import {
 } from '../../admin/resourceCatalogPolicy';
 import {
   skillPreview,
-  archivePreview,
+  archivePreviewWithMeta,
   type PreviewFile,
 } from '../../admin/resourceSkillPreview';
 import type { CatalogKind } from '../../admin/resourceCatalogUpload';
@@ -81,6 +81,7 @@ const instance = ref(''),
 const files = shallowRef<PreviewFile[]>([]),
   previous = shallowRef<PreviewFile[]>([]),
   previousVersion = shallowRef<CatalogVersion>(),
+  previewTruncated = ref(false),
   comparison = ref(''),
   previewError = ref('');
 const upgradeTarget = shallowRef<{
@@ -265,6 +266,7 @@ function clearDetail() {
   files.value = [];
   previous.value = [];
   previousVersion.value = undefined;
+  previewTruncated.value = false;
   comparison.value = '';
   previewError.value = '';
   distributionDetail.value = undefined;
@@ -589,11 +591,16 @@ async function preview(compare = false, targetVersionId?: string) {
       );
       if (currPayload) {
         const currResp = await api.artifact(v.packageId, v.id, currPayload.id);
-        const currFiles =
-          v.kind === 'plugin'
-            ? await archivePreview(currResp, 'plugin')
-            : await skillPreview(currResp);
-        if (alive && e === detailEpoch) files.value = currFiles;
+        if (v.kind === 'plugin') {
+          const currMeta = await archivePreviewWithMeta(currResp, 'plugin');
+          if (alive && e === detailEpoch) {
+            files.value = currMeta.files;
+            if (currMeta.truncated) previewTruncated.value = true;
+          }
+        } else {
+          const currFiles = await skillPreview(currResp);
+          if (alive && e === detailEpoch) files.value = currFiles;
+        }
       }
     }
     const compareId = (targetVersionId ?? comparison.value).trim();
@@ -609,11 +616,17 @@ async function preview(compare = false, targetVersionId?: string) {
     const payload = value.manifest.artifacts.find((a) => a.role === 'payload');
     if (!payload) throw new Error('Missing payload');
     const resp = await api.artifact(value.packageId, value.id, payload.id);
-    const result =
-      value.kind === 'plugin'
-        ? await archivePreview(resp, 'plugin')
-        : await skillPreview(resp);
+    let result: PreviewFile[];
+    let truncated = false;
+    if (value.kind === 'plugin') {
+      const meta = await archivePreviewWithMeta(resp, 'plugin');
+      result = meta.files;
+      truncated = meta.truncated;
+    } else {
+      result = await skillPreview(resp);
+    }
     if (alive && e === detailEpoch) {
+      if (truncated) previewTruncated.value = true;
       if (compare) {
         previous.value = result;
         previousVersion.value = value;
@@ -817,9 +830,7 @@ onBeforeUnmount(() => {
               <td>
                 {{
                   formatPerson(
-                    r.authorName ??
-                      r.version.authorName ??
-                      r.version.manifest.author.displayName,
+                    r.authorName ?? r.version.authorName,
                     r.authorDepartment ?? r.version.authorDepartment,
                     r.authorId,
                   )
@@ -1046,9 +1057,7 @@ onBeforeUnmount(() => {
             <dd>
               {{
                 formatPerson(
-                  review?.authorName ??
-                    selected.authorName ??
-                    selected.manifest.author.displayName,
+                  review?.authorName ?? selected.authorName,
                   review?.authorDepartment ?? selected.authorDepartment,
                   review?.authorId ?? selected.authorId,
                 )
@@ -1056,8 +1065,16 @@ onBeforeUnmount(() => {
             </dd>
           </div>
           <div>
-            <dt>{{ t('submittedAt') }}</dt>
-            <dd>{{ formatTime(review?.submittedAt ?? selected.createdAt) }}</dd>
+            <dt>{{ t(review ? 'submittedAt' : 'createdAt') }}</dt>
+            <dd>
+              {{
+                review
+                  ? review.submittedAt
+                    ? formatTime(review.submittedAt)
+                    : t('unknownTime')
+                  : formatTime(selected.createdAt)
+              }}
+            </dd>
           </div>
           <div>
             <dt>{{ t('license') }}</dt>
@@ -1207,6 +1224,13 @@ onBeforeUnmount(() => {
             </button>
           </div>
           <p>{{ t('previewNote') }}</p>
+          <p
+            v-if="previewTruncated"
+            role="alert"
+            data-testid="preview-truncated"
+          >
+            {{ t('previewTruncated') }}
+          </p>
           <p v-if="previewError" role="alert">{{ previewError }}</p>
           <section v-for="f in files" :key="f.path">
             <h3>{{ f.path }}</h3>
@@ -1244,10 +1268,17 @@ onBeforeUnmount(() => {
             <div v-for="f in changes" :key="f.path">
               <h4>{{ f.path }}</h4>
               <pre
-                v-for="line in f.lines.filter((l) => l.changed)"
+                v-for="line in f.lines.filter((l) => l.changed).slice(0, 200)"
                 :key="line.line"
                 >{{ line.line }} − {{ line.before }}
 {{ line.line }} + {{ line.after }}</pre>
+              <p v-if="f.lines.filter((l) => l.changed).length > 200">
+                {{
+                  t('diffTruncated', {
+                    count: f.lines.filter((l) => l.changed).length - 200,
+                  })
+                }}
+              </p>
             </div>
           </section>
         </section>

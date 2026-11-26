@@ -151,7 +151,7 @@ test('uses the exact native session cwd, advertises three tools, rejects author 
   assert.deepEqual(f.calls[0], ['prepare', { cwd: '/work/project', ...input }]);
   assert.deepEqual(preflight, {
     handle: preflight.handle,
-    mode: 'create',
+    mode: 'unknown',
     kind: 'skill',
     name: 'example',
     version: '1.0.0',
@@ -244,6 +244,24 @@ test('lists owned packages, detects upgrade mode, warns on duplicate version and
   const submitCall = f.calls.find(([kind]) => kind === 'submit');
   assert.equal(submitCall[1].packageId, existingId);
   assert.equal(submitCall[1].changeNotes, '新增导出能力');
+});
+
+test('marks mode unknown and warns when catalog listing is incomplete or fails', async (t) => {
+  const truncated = setup(t, {
+    ownedPackages: async () => ({ items: [], complete: false }),
+  });
+  const res1 = await truncated.call('prepare', input);
+  assert.equal(res1.mode, 'unknown');
+  assert.ok(res1.warnings?.some((w) => w.includes('packageId')));
+
+  const failed = setup(t, {
+    ownedPackages: async () => {
+      throw new Error('network down');
+    },
+  });
+  const res2 = await failed.call('prepare', input);
+  assert.equal(res2.mode, 'unknown');
+  assert.ok(res2.warnings?.some((w) => w.includes('packageId')));
 });
 
 test('freezes bytes, coalesces concurrent submits and retries only the frozen operation', async (t) => {

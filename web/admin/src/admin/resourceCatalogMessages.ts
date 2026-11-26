@@ -51,6 +51,11 @@ export const catalogMessages = {
     submitter: '提交人',
     submitterAutoHint: '提交人姓名与部门由平台根据当前登录认证信息自动记录。',
     submittedAt: '提交时间',
+    createdAt: '创建时间',
+    unknownTime: '未知',
+    previewTruncated:
+      '注意：归档条目超过 512 项，仅展示部分预览，差异对比可能不完整。',
+    diffTruncated: '（差异行数过多，已省略后续 {count} 行变更）',
     submitReason: '送审理由',
     submitReasonPlaceholder: '简明说明本次提交或升级的目的，将展示给审核员',
     changeNotes: '版本变更说明',
@@ -345,6 +350,11 @@ export const catalogMessages = {
     submitterAutoHint:
       'Submitter name and department are recorded automatically from your authenticated account.',
     submittedAt: 'Submitted at',
+    createdAt: 'Created at',
+    unknownTime: 'Unknown',
+    previewTruncated:
+      'Partial preview: archive exceeds 512 entries; diff comparison may be incomplete.',
+    diffTruncated: '({count} more changed lines omitted)',
     submitReason: 'Submission reason',
     submitReasonPlaceholder:
       'Briefly explain the purpose of this release or upgrade for reviewers',

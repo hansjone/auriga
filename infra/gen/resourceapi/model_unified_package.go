@@ -21,18 +21,19 @@ var _ MappedNullable = &UnifiedPackage{}
 
 // UnifiedPackage Shared unified resource. Installation mode is selected per scoped assignment; packages carry no governance level.
 type UnifiedPackage struct {
-	Market               *UnifiedPackageMarket `json:"market,omitempty"`
-	Id                   string                `json:"id"`
-	TenantId             string                `json:"tenantId"`
-	Name                 string                `json:"name" validate:"regexp=^[a-z0-9]+(?:-[a-z0-9]+)*$"`
-	Kind                 string                `json:"kind"`
-	OwnerId              string                `json:"ownerId"`
-	Visibility           string                `json:"visibility"`
-	GroupIds             []string              `json:"groupIds"`
-	Revision             int64                 `json:"revision"`
-	CreatedAt            time.Time             `json:"createdAt"`
-	Enabled              bool                  `json:"enabled"`
-	DefaultVersionId     NullableString        `json:"defaultVersionId"`
+	Market               *UnifiedPackageMarket        `json:"market,omitempty"`
+	Id                   string                       `json:"id"`
+	TenantId             string                       `json:"tenantId"`
+	Name                 string                       `json:"name" validate:"regexp=^[a-z0-9]+(?:-[a-z0-9]+)*$"`
+	Kind                 string                       `json:"kind"`
+	OwnerId              string                       `json:"ownerId"`
+	Visibility           string                       `json:"visibility"`
+	GroupIds             []string                     `json:"groupIds"`
+	Revision             int64                        `json:"revision"`
+	CreatedAt            time.Time                    `json:"createdAt"`
+	Enabled              bool                         `json:"enabled"`
+	DefaultVersionId     NullableString               `json:"defaultVersionId"`
+	LatestVersion        *UnifiedPackageLatestVersion `json:"latestVersion,omitempty"`
 	AdditionalProperties map[string]interface{}
 }
 
@@ -364,6 +365,38 @@ func (o *UnifiedPackage) SetDefaultVersionId(v string) {
 	o.DefaultVersionId.Set(&v)
 }
 
+// GetLatestVersion returns the LatestVersion field value if set, zero value otherwise.
+func (o *UnifiedPackage) GetLatestVersion() UnifiedPackageLatestVersion {
+	if o == nil || IsNil(o.LatestVersion) {
+		var ret UnifiedPackageLatestVersion
+		return ret
+	}
+	return *o.LatestVersion
+}
+
+// GetLatestVersionOk returns a tuple with the LatestVersion field value if set, nil otherwise
+// and a boolean to check if the value has been set.
+func (o *UnifiedPackage) GetLatestVersionOk() (*UnifiedPackageLatestVersion, bool) {
+	if o == nil || IsNil(o.LatestVersion) {
+		return nil, false
+	}
+	return o.LatestVersion, true
+}
+
+// HasLatestVersion returns a boolean if a field has been set.
+func (o *UnifiedPackage) HasLatestVersion() bool {
+	if o != nil && !IsNil(o.LatestVersion) {
+		return true
+	}
+
+	return false
+}
+
+// SetLatestVersion gets a reference to the given UnifiedPackageLatestVersion and assigns it to the LatestVersion field.
+func (o *UnifiedPackage) SetLatestVersion(v UnifiedPackageLatestVersion) {
+	o.LatestVersion = &v
+}
+
 func (o UnifiedPackage) MarshalJSON() ([]byte, error) {
 	toSerialize, err := o.ToMap()
 	if err != nil {
@@ -388,6 +421,9 @@ func (o UnifiedPackage) ToMap() (map[string]interface{}, error) {
 	toSerialize["createdAt"] = o.CreatedAt
 	toSerialize["enabled"] = o.Enabled
 	toSerialize["defaultVersionId"] = o.DefaultVersionId.Get()
+	if !IsNil(o.LatestVersion) {
+		toSerialize["latestVersion"] = o.LatestVersion
+	}
 
 	for key, value := range o.AdditionalProperties {
 		toSerialize[key] = value
@@ -453,6 +489,7 @@ func (o *UnifiedPackage) UnmarshalJSON(data []byte) (err error) {
 		delete(additionalProperties, "createdAt")
 		delete(additionalProperties, "enabled")
 		delete(additionalProperties, "defaultVersionId")
+		delete(additionalProperties, "latestVersion")
 		o.AdditionalProperties = additionalProperties
 	}
 

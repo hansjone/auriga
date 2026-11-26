@@ -284,9 +284,11 @@ export function installSubmissionTools(
         const svc = service(source.runtime);
         if (typeof svc?.ownedPackages !== 'function')
           return refuse('common.unavailable');
-        const items = await svc.ownedPackages(args?.kind, verify);
+        const result = await svc.ownedPackages(args?.kind, verify);
         check();
-        return { items };
+        return Array.isArray(result)
+          ? { items: result, complete: true }
+          : { items: result.items, complete: !!result.complete };
       }
 
       /** @param {any} args @param {any} execution */
@@ -327,16 +329,21 @@ export function installSubmissionTools(
           // Best-effort lookup to detect upgrade mode against an existing owned package.
           /** @type {{packageId:string,latestVersion:string|null,latestState:string|null,publishedVersion:string|null}|undefined} */
           let existingPackage;
+          /** @type {'create'|'upgrade'|'unknown'} */
+          let mode = 'unknown';
           const warnings = [];
           try {
             const svc = service(source.runtime);
             if (typeof svc?.ownedPackages === 'function') {
-              const owned = await svc.ownedPackages(kind, verify);
+              const raw = await svc.ownedPackages(kind, verify);
+              const owned = Array.isArray(raw) ? raw : (raw?.items ?? []);
+              const complete = Array.isArray(raw) ? true : !!raw?.complete;
               const match = owned.find(
                 (/** @type {any} */ item) =>
                   item.kind === kind && item.name === manifest.name,
               );
               if (match) {
+                mode = 'upgrade';
                 existingPackage = {
                   packageId: match.packageId,
                   latestVersion: match.latestVersion ?? null,
@@ -351,10 +358,20 @@ export function installSubmissionTools(
                     `版本 ${manifest.version} 已存在，升级请先递增版本号后重新预检。`,
                   );
                 }
+              } else if (complete) {
+                mode = 'create';
+              } else {
+                mode = 'unknown';
+                warnings.push(
+                  '目录分页超过上限，未能完整核对是否已有同名资源；如为升级请先确认并显式传入 packageId。',
+                );
               }
             }
           } catch {
-            /* Keep local preflight usable even if catalog lookup is transiently unavailable. */
+            mode = 'unknown';
+            warnings.push(
+              '未能查询当前目录已有资源，无法自动判断首次发布或升级；如为升级请显式传入 packageId。',
+            );
           }
           check();
 
@@ -391,7 +408,7 @@ export function installSubmissionTools(
               : manifest.skill?.dshVersionRange;
           return {
             handle,
-            mode: existingPackage ? 'upgrade' : 'create',
+            mode,
             kind,
             name: manifest.name,
             version: manifest.version,

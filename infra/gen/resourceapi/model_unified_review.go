@@ -14,6 +14,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"time"
 )
 
 // checks if the UnifiedReview type satisfies the MappedNullable interface at compile time
@@ -21,12 +22,18 @@ var _ MappedNullable = &UnifiedReview{}
 
 // UnifiedReview Review identity and immutable decision history for the exact version revision. Version contains kind and server risk/quorum. Failed author/qualification/quorum checks cannot approve/publish.
 type UnifiedReview struct {
-	ReviewId  string                `json:"reviewId"`
-	AuthorId  string                `json:"authorId"`
-	Version   UnifiedVersion        `json:"version"`
-	Revision  int64                 `json:"revision"`
-	Status    string                `json:"status"`
-	Decisions []UnifiedReviewRecord `json:"decisions"`
+	ReviewId                   string                `json:"reviewId"`
+	AuthorId                   string                `json:"authorId"`
+	AuthorName                 *string               `json:"authorName,omitempty"`
+	AuthorDepartment           *string               `json:"authorDepartment,omitempty"`
+	SubmitReason               *string               `json:"submitReason,omitempty"`
+	SubmittedAt                *time.Time            `json:"submittedAt,omitempty"`
+	PreviousPublishedVersionId *string               `json:"previousPublishedVersionId,omitempty"`
+	PreviousPublishedVersion   *string               `json:"previousPublishedVersion,omitempty"`
+	Version                    UnifiedVersion        `json:"version"`
+	Revision                   int64                 `json:"revision"`
+	Status                     string                `json:"status"`
+	Decisions                  []UnifiedReviewRecord `json:"decisions"`
 }
 
 type _UnifiedReview UnifiedReview
@@ -100,6 +107,198 @@ func (o *UnifiedReview) GetAuthorIdOk() (*string, bool) {
 // SetAuthorId sets field value
 func (o *UnifiedReview) SetAuthorId(v string) {
 	o.AuthorId = v
+}
+
+// GetAuthorName returns the AuthorName field value if set, zero value otherwise.
+func (o *UnifiedReview) GetAuthorName() string {
+	if o == nil || IsNil(o.AuthorName) {
+		var ret string
+		return ret
+	}
+	return *o.AuthorName
+}
+
+// GetAuthorNameOk returns a tuple with the AuthorName field value if set, nil otherwise
+// and a boolean to check if the value has been set.
+func (o *UnifiedReview) GetAuthorNameOk() (*string, bool) {
+	if o == nil || IsNil(o.AuthorName) {
+		return nil, false
+	}
+	return o.AuthorName, true
+}
+
+// HasAuthorName returns a boolean if a field has been set.
+func (o *UnifiedReview) HasAuthorName() bool {
+	if o != nil && !IsNil(o.AuthorName) {
+		return true
+	}
+
+	return false
+}
+
+// SetAuthorName gets a reference to the given string and assigns it to the AuthorName field.
+func (o *UnifiedReview) SetAuthorName(v string) {
+	o.AuthorName = &v
+}
+
+// GetAuthorDepartment returns the AuthorDepartment field value if set, zero value otherwise.
+func (o *UnifiedReview) GetAuthorDepartment() string {
+	if o == nil || IsNil(o.AuthorDepartment) {
+		var ret string
+		return ret
+	}
+	return *o.AuthorDepartment
+}
+
+// GetAuthorDepartmentOk returns a tuple with the AuthorDepartment field value if set, nil otherwise
+// and a boolean to check if the value has been set.
+func (o *UnifiedReview) GetAuthorDepartmentOk() (*string, bool) {
+	if o == nil || IsNil(o.AuthorDepartment) {
+		return nil, false
+	}
+	return o.AuthorDepartment, true
+}
+
+// HasAuthorDepartment returns a boolean if a field has been set.
+func (o *UnifiedReview) HasAuthorDepartment() bool {
+	if o != nil && !IsNil(o.AuthorDepartment) {
+		return true
+	}
+
+	return false
+}
+
+// SetAuthorDepartment gets a reference to the given string and assigns it to the AuthorDepartment field.
+func (o *UnifiedReview) SetAuthorDepartment(v string) {
+	o.AuthorDepartment = &v
+}
+
+// GetSubmitReason returns the SubmitReason field value if set, zero value otherwise.
+func (o *UnifiedReview) GetSubmitReason() string {
+	if o == nil || IsNil(o.SubmitReason) {
+		var ret string
+		return ret
+	}
+	return *o.SubmitReason
+}
+
+// GetSubmitReasonOk returns a tuple with the SubmitReason field value if set, nil otherwise
+// and a boolean to check if the value has been set.
+func (o *UnifiedReview) GetSubmitReasonOk() (*string, bool) {
+	if o == nil || IsNil(o.SubmitReason) {
+		return nil, false
+	}
+	return o.SubmitReason, true
+}
+
+// HasSubmitReason returns a boolean if a field has been set.
+func (o *UnifiedReview) HasSubmitReason() bool {
+	if o != nil && !IsNil(o.SubmitReason) {
+		return true
+	}
+
+	return false
+}
+
+// SetSubmitReason gets a reference to the given string and assigns it to the SubmitReason field.
+func (o *UnifiedReview) SetSubmitReason(v string) {
+	o.SubmitReason = &v
+}
+
+// GetSubmittedAt returns the SubmittedAt field value if set, zero value otherwise.
+func (o *UnifiedReview) GetSubmittedAt() time.Time {
+	if o == nil || IsNil(o.SubmittedAt) {
+		var ret time.Time
+		return ret
+	}
+	return *o.SubmittedAt
+}
+
+// GetSubmittedAtOk returns a tuple with the SubmittedAt field value if set, nil otherwise
+// and a boolean to check if the value has been set.
+func (o *UnifiedReview) GetSubmittedAtOk() (*time.Time, bool) {
+	if o == nil || IsNil(o.SubmittedAt) {
+		return nil, false
+	}
+	return o.SubmittedAt, true
+}
+
+// HasSubmittedAt returns a boolean if a field has been set.
+func (o *UnifiedReview) HasSubmittedAt() bool {
+	if o != nil && !IsNil(o.SubmittedAt) {
+		return true
+	}
+
+	return false
+}
+
+// SetSubmittedAt gets a reference to the given time.Time and assigns it to the SubmittedAt field.
+func (o *UnifiedReview) SetSubmittedAt(v time.Time) {
+	o.SubmittedAt = &v
+}
+
+// GetPreviousPublishedVersionId returns the PreviousPublishedVersionId field value if set, zero value otherwise.
+func (o *UnifiedReview) GetPreviousPublishedVersionId() string {
+	if o == nil || IsNil(o.PreviousPublishedVersionId) {
+		var ret string
+		return ret
+	}
+	return *o.PreviousPublishedVersionId
+}
+
+// GetPreviousPublishedVersionIdOk returns a tuple with the PreviousPublishedVersionId field value if set, nil otherwise
+// and a boolean to check if the value has been set.
+func (o *UnifiedReview) GetPreviousPublishedVersionIdOk() (*string, bool) {
+	if o == nil || IsNil(o.PreviousPublishedVersionId) {
+		return nil, false
+	}
+	return o.PreviousPublishedVersionId, true
+}
+
+// HasPreviousPublishedVersionId returns a boolean if a field has been set.
+func (o *UnifiedReview) HasPreviousPublishedVersionId() bool {
+	if o != nil && !IsNil(o.PreviousPublishedVersionId) {
+		return true
+	}
+
+	return false
+}
+
+// SetPreviousPublishedVersionId gets a reference to the given string and assigns it to the PreviousPublishedVersionId field.
+func (o *UnifiedReview) SetPreviousPublishedVersionId(v string) {
+	o.PreviousPublishedVersionId = &v
+}
+
+// GetPreviousPublishedVersion returns the PreviousPublishedVersion field value if set, zero value otherwise.
+func (o *UnifiedReview) GetPreviousPublishedVersion() string {
+	if o == nil || IsNil(o.PreviousPublishedVersion) {
+		var ret string
+		return ret
+	}
+	return *o.PreviousPublishedVersion
+}
+
+// GetPreviousPublishedVersionOk returns a tuple with the PreviousPublishedVersion field value if set, nil otherwise
+// and a boolean to check if the value has been set.
+func (o *UnifiedReview) GetPreviousPublishedVersionOk() (*string, bool) {
+	if o == nil || IsNil(o.PreviousPublishedVersion) {
+		return nil, false
+	}
+	return o.PreviousPublishedVersion, true
+}
+
+// HasPreviousPublishedVersion returns a boolean if a field has been set.
+func (o *UnifiedReview) HasPreviousPublishedVersion() bool {
+	if o != nil && !IsNil(o.PreviousPublishedVersion) {
+		return true
+	}
+
+	return false
+}
+
+// SetPreviousPublishedVersion gets a reference to the given string and assigns it to the PreviousPublishedVersion field.
+func (o *UnifiedReview) SetPreviousPublishedVersion(v string) {
+	o.PreviousPublishedVersion = &v
 }
 
 // GetVersion returns the Version field value
@@ -210,6 +409,24 @@ func (o UnifiedReview) ToMap() (map[string]interface{}, error) {
 	toSerialize := map[string]interface{}{}
 	toSerialize["reviewId"] = o.ReviewId
 	toSerialize["authorId"] = o.AuthorId
+	if !IsNil(o.AuthorName) {
+		toSerialize["authorName"] = o.AuthorName
+	}
+	if !IsNil(o.AuthorDepartment) {
+		toSerialize["authorDepartment"] = o.AuthorDepartment
+	}
+	if !IsNil(o.SubmitReason) {
+		toSerialize["submitReason"] = o.SubmitReason
+	}
+	if !IsNil(o.SubmittedAt) {
+		toSerialize["submittedAt"] = o.SubmittedAt
+	}
+	if !IsNil(o.PreviousPublishedVersionId) {
+		toSerialize["previousPublishedVersionId"] = o.PreviousPublishedVersionId
+	}
+	if !IsNil(o.PreviousPublishedVersion) {
+		toSerialize["previousPublishedVersion"] = o.PreviousPublishedVersion
+	}
 	toSerialize["version"] = o.Version
 	toSerialize["revision"] = o.Revision
 	toSerialize["status"] = o.Status

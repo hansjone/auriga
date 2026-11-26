@@ -150,11 +150,17 @@ async function choose(files: File[]) {
   try {
     const value = await parseResourceSource(files, props.kind, props.author);
     if (!alive || e !== epoch) return;
+    if (
+      props.upgradeTarget &&
+      value.manifest.name !== props.upgradeTarget.name
+    ) {
+      error.value = t('upgradeNameMismatch', {
+        name: props.upgradeTarget.name,
+      });
+      return;
+    }
     source.value = value;
     manifest.value = JSON.parse(JSON.stringify(value.manifest));
-    if (props.upgradeTarget && manifest.value) {
-      manifest.value.name = props.upgradeTarget.name;
-    }
     tools.value = value.manifest.permissions.tools.join(', ');
     hosts.value = value.manifest.permissions.outboundHosts.join(', ');
   } catch (e2) {

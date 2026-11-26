@@ -2549,6 +2549,9 @@
             "authorDepartment": {
               "type": "string"
             },
+            "publishedVersion": {
+              "type": "string"
+            },
             "createdAt": {
               "type": "string",
               "format": "date-time"
