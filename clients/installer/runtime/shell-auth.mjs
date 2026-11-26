@@ -52,7 +52,9 @@ export async function startShellAuth({
       );
       createLog(
         join(dataHome, 'auriga', 'logs'),
-        join(directory, 'windows', 'shell-helper.exe'),
+        process.platform === 'win32'
+          ? join(directory, 'windows', 'shell-helper.exe')
+          : null,
       )(event);
     } catch {
       // Missing helper/sink must not create an unprotected fallback file or

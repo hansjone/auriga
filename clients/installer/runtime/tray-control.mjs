@@ -1,4 +1,3 @@
-/* global AbortController */
 /**
  * Tray-owned launcher control. The tray writes one command per line to the
  * launcher's stdin: "stop" (or the end of stdin, e.g. the tray exited or

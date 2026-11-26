@@ -1,12 +1,15 @@
-/** Fixed, wheel-only Windows Python. No resolver, pip, build backend or install hook. */
+/** Fixed, wheel-only Desktop Python. No resolver, pip, build backend or install hook. */
 import { spawnSync } from 'node:child_process';
 import {
+  chmodSync,
   cpSync,
   existsSync,
   lstatSync,
   mkdirSync,
   readFileSync,
+  readdirSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -15,19 +18,41 @@ import { listFiles, sha256File } from '../runtime/verify.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 export const PYTHON_LOCK = join(here, '../locks/python-win-x64.json');
+export const PYTHON_LOCK_LINUX = join(here, '../locks/python-linux-x64.json');
 const HASH = /^[a-f0-9]{64}$/;
 const normalized = (name) => name.toLowerCase().replace(/[-_.]+/g, '_');
 
+const TARGETS = {
+  'win-x64-cp312': {
+    archiveName: (lock) =>
+      `cpython-${lock.version}+${lock.release}-x86_64-pc-windows-msvc-install_only.tar.gz`,
+    wheelTag: /^(?:cp312-cp312-win_amd64|py3-none-any|py2\.py3-none-any)\.whl$/,
+  },
+  'linux-x64-cp312': {
+    archiveName: (lock) =>
+      `cpython-${lock.version}+${lock.release}-x86_64-unknown-linux-gnu-install_only.tar.gz`,
+    wheelTag:
+      /^(?:cp312-cp312-manylinux[_0-9]+_x86_64(?:\.manylinux[_0-9]+_x86_64)*|py3-none-any|py2\.py3-none-any)\.whl$/,
+  },
+};
+
+export function pythonLockForTarget(target) {
+  if (target === 'linux-x64' || target === 'linux-x64-cp312')
+    return PYTHON_LOCK_LINUX;
+  return PYTHON_LOCK;
+}
+
 export function validatePythonLock(lock) {
   if (!lock || typeof lock !== 'object') throw new Error('invalid Python pin');
-  const filename = `cpython-${lock.version}+${lock.release}-x86_64-pc-windows-msvc-install_only.tar.gz`;
+  const recipe = TARGETS[lock.target];
+  if (!recipe) throw new Error('invalid Python pin');
+  const filename = recipe.archiveName(lock);
   const archive = lock.archive;
   if (
     lock.schema !== 1 ||
     lock.implementation !== 'CPython' ||
     !/^3\.12\.\d+$/.test(lock.version) ||
     !/^\d{8}$/.test(lock.release) ||
-    lock.target !== 'win-x64-cp312' ||
     !archive ||
     archive.filename !== filename ||
     archive.url !==
@@ -52,9 +77,7 @@ export function validatePythonLock(lock) {
       seen.has(name) ||
       !/^\d+(?:\.\d+)*(?:\.post\d+)?$/.test(wheel.version) ||
       !wheel.filename?.startsWith(prefix) ||
-      !/^(?:cp312-cp312-win_amd64|py3-none-any|py2\.py3-none-any)\.whl$/.test(
-        tags,
-      ) ||
+      !recipe.wheelTag.test(tags) ||
       !wheel.url?.startsWith('https://files.pythonhosted.org/packages/') ||
       new URL(wheel.url).pathname.split('/').pop() !== wheel.filename ||
       !HASH.test(wheel.sha256) ||
@@ -188,6 +211,21 @@ function run(command, args) {
   return result.stdout;
 }
 
+function linuxStdlib(directory) {
+  const lib = join(directory, 'lib');
+  const match = existsSync(lib)
+    ? readdirSync(lib).find((name) => /^python3\.\d+$/.test(name))
+    : null;
+  if (!match) throw new Error('linux Python stdlib missing');
+  return join(lib, match);
+}
+
+export function packagedPythonBin(directory, target) {
+  if (String(target).startsWith('linux'))
+    return join(directory, 'bin', 'python3');
+  return join(directory, 'python.exe');
+}
+
 export async function assemblePython({
   payload,
   inputs,
@@ -195,6 +233,7 @@ export async function assemblePython({
   lockFile = PYTHON_LOCK,
 }) {
   const lock = readPythonLock(lockFile);
+  const linux = lock.target.startsWith('linux');
   if (!offline) await downloadPythonInputs(lock, inputs);
   verifyPythonInputs(lock, inputs); // Every byte checked before invoking any runtime.
   const directory = join(payload, 'runtime/python');
@@ -220,18 +259,28 @@ export async function assemblePython({
     rmSync(staging, { recursive: true });
   }
   // install_only includes build/debug artifacts and pip. Ship exactly our wheel set.
-  for (const path of [
-    'include',
-    'libs',
-    'Scripts',
-    'Lib/site-packages',
-    'Lib/ensurepip',
-  ])
-    rmSync(join(directory, path), { recursive: true, force: true });
+  if (linux) {
+    for (const path of ['include', 'share'])
+      rmSync(join(directory, path), { recursive: true, force: true });
+    const stdlib = linuxStdlib(directory);
+    rmSync(join(stdlib, 'ensurepip'), { recursive: true, force: true });
+    rmSync(join(stdlib, 'site-packages'), { recursive: true, force: true });
+    mkdirSync(join(stdlib, 'site-packages'), { recursive: true });
+  } else {
+    for (const path of [
+      'include',
+      'libs',
+      'Scripts',
+      'Lib/site-packages',
+      'Lib/ensurepip',
+    ])
+      rmSync(join(directory, path), { recursive: true, force: true });
+  }
   for (const path of listFiles(directory))
     if (path.endsWith('.pdb') || path.endsWith('.pyc'))
       rmSync(join(directory, path));
-  const python = join(directory, 'python.exe');
+  const python = packagedPythonBin(directory, lock.target);
+  if (linux) chmodSync(python, 0o755);
   const bootstrap = join(payload, 'auriga/python');
   mkdirSync(bootstrap, { recursive: true });
   cpSync(
@@ -246,10 +295,10 @@ export async function assemblePython({
     join(here, 'lib/bootstrap-pip.py'),
     join(bootstrap, 'bootstrap-pip.py'),
   );
-  cpSync(
-    join(here, 'lib/python-sitecustomize.py'),
-    join(directory, 'Lib/sitecustomize.py'),
-  );
+  const siteCustomize = linux
+    ? join(linuxStdlib(directory), 'sitecustomize.py')
+    : join(directory, 'Lib/sitecustomize.py');
+  cpSync(join(here, 'lib/python-sitecustomize.py'), siteCustomize);
   const installed = JSON.parse(
     run(python, [
       '-I',
@@ -261,8 +310,21 @@ export async function assemblePython({
       directory,
     ]),
   );
-  // Real executables also work in bash and direct subprocess calls (unlike .cmd aliases).
-  cpSync(python, join(directory, 'python3.exe'));
+  if (linux) {
+    const bin = join(directory, 'bin');
+    const alias = join(bin, 'python');
+    if (!existsSync(alias))
+      try {
+        symlinkSync('python3', alias);
+      } catch {
+        cpSync(python, alias);
+        chmodSync(alias, 0o755);
+      }
+  } else {
+    // Real executables also work in bash and direct subprocess calls (unlike .cmd aliases).
+    cpSync(python, join(directory, 'python3.exe'));
+  }
+  const libRoot = linux ? linuxStdlib(directory) : join(directory, 'Lib');
   run(python, [
     '-I',
     '-S',
@@ -275,7 +337,7 @@ export async function assemblePython({
     '-f',
     '-d',
     'auriga-python/Lib',
-    join(directory, 'Lib'),
+    libRoot,
   ]);
   const manifest = runtimeManifest(lock, sha256File(lockFile), installed);
   writeFileSync(

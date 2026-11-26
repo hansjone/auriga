@@ -32,7 +32,7 @@ import {
 } from '../../../scripts/client-release/keys.mjs';
 import { publish } from '../../../scripts/client-release/publish.mjs';
 import { canonical, RELEASE_KID } from '../runtime/release.mjs';
-import { buildPayload, wrapSetupFixture } from './helpers.mjs';
+import { buildPayload, wrapSetupFixture, writeStageZip } from './helpers.mjs';
 import { makeRelease } from '../scripts/make-release.mjs';
 import { reviewRelease } from '../scripts/sign-release.mjs';
 import {
@@ -292,10 +292,6 @@ test('site-sign-review requires explicit site profile, current review digest and
   const stage = join(dir, 'stage');
   mkdirSync(stage);
   const archive = join(dir, 'AurigaDSH-Setup-1.0.0.exe');
-  const tar =
-    process.platform === 'win32'
-      ? join(process.env.SystemRoot, 'System32/tar.exe')
-      : 'tar';
   const evidence = {
     schema: 1,
     inputsSha256: 'a'.repeat(64),
@@ -306,15 +302,7 @@ test('site-sign-review requires explicit site profile, current review digest and
   };
   // cpSync retains all manifest-checked bytes.
   cpSync(payload.dir, join(stage, 'payload'), { recursive: true });
-  const zipped = spawnSync(tar, [
-    '-a',
-    '-cf',
-    archive + '.zip',
-    '-C',
-    stage,
-    '.',
-  ]);
-  assert.equal(zipped.status, 0);
+  writeStageZip(stage, archive + '.zip');
   writeFileSync(archive, readFileSync(archive + '.zip'));
   wrapSetupFixture(archive);
   makeRelease({

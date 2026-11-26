@@ -1,4 +1,3 @@
-/* global setInterval, clearInterval */
 import { BRAND_NAME } from './brand.mjs';
 import { updateOrigin, normalizePlatformBinding } from './platform-origin.mjs';
 import {
@@ -501,6 +500,8 @@ export function launchEnv(dir, dataHome, base = process.env) {
   const pathKey =
     Object.keys(base).find((k) => k.toLowerCase() === 'path') ?? 'PATH';
   const python = join(dir, 'runtime', 'python');
+  const pythonPath =
+    process.platform === 'win32' ? python : join(python, 'bin');
   let personal;
   try {
     personal = preparePythonUser(dir, dataHome, base);
@@ -511,7 +512,7 @@ export function launchEnv(dir, dataHome, base = process.env) {
   }
   const extra = [
     personal?.bin,
-    python,
+    existsSync(python) ? pythonPath : null,
     join(dir, 'tools', 'bin'),
     dirname(nodeBin(dir)),
   ].filter(Boolean);
@@ -627,7 +628,16 @@ function writeLaunchers(root, dir, fault) {
   ];
   for (const name of readdirSync(source)) {
     if (keepMaintenance && maintenance.includes(name)) continue;
-    writeAtomic(join(bin, name), readFileSync(join(source, name)));
+    const destination = join(bin, name);
+    writeAtomic(destination, readFileSync(join(source, name)));
+    if (process.platform !== 'win32') {
+      try {
+        const mode = lstatSync(join(source, name)).mode & 0o777;
+        chmodSync(destination, mode || 0o755);
+      } catch {
+        chmodSync(destination, 0o755);
+      }
+    }
     fault('launcher-file');
   }
 }
@@ -641,8 +651,18 @@ function restoreLaunchers(root) {
   for (const name of existsSync(bin) ? readdirSync(bin) : [])
     if (!old.has(name)) rmSync(join(bin, name), { force: true });
   mkdirSync(bin, { recursive: true });
-  for (const name of old)
-    writeAtomic(join(bin, name), readFileSync(join(prev, name)));
+  for (const name of old) {
+    const destination = join(bin, name);
+    writeAtomic(destination, readFileSync(join(prev, name)));
+    if (process.platform !== 'win32') {
+      try {
+        const mode = lstatSync(join(prev, name)).mode & 0o777;
+        chmodSync(destination, mode || 0o755);
+      } catch {
+        chmodSync(destination, 0o755);
+      }
+    }
+  }
 }
 
 /** Put everything back as it was before the transaction started. */
@@ -805,11 +825,10 @@ function copyTreeSteps(from, to, step) {
  * process (e.g. `upstream/node/node.exe` or `auriga/launcher`).
  */
 function movePayloadToStaging(payload, staging, step) {
-  const hasWinPython =
-    process.platform === 'win32' && existsSync(join(payload, 'runtime/python'));
+  const hasProtectedPython = existsSync(join(payload, 'runtime/python'));
   // Fast path: whole-directory rename succeeds when the running Node is outside
-  // `payload` and no Windows Python directory needs createPythonDirectory() owner setup.
-  if (!hasWinPython) {
+  // `payload` and no protected Python directory needs createPythonDirectory() setup.
+  if (!hasProtectedPython) {
     try {
       renameWithRetry(payload, staging, { retries: 2 });
       step(1);
@@ -840,7 +859,7 @@ function movePayloadToStaging(payload, staging, step) {
   let done = 0;
   for (const entry of topEntries) {
     const name = entry.name;
-    if (name === 'runtime' && entry.isDirectory() && hasWinPython) {
+    if (name === 'runtime' && entry.isDirectory() && hasProtectedPython) {
       for (const sub of readdirSync(join(payload, 'runtime'))) {
         if (sub === 'python') {
           createPythonDirectory(staging);

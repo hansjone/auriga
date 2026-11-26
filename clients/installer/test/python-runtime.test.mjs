@@ -348,9 +348,11 @@ test('Python environment follows installed version and rollback without mutating
     PYTHONINSPECT: '1',
   };
   const env = launchEnv(versionDir(root, b.id), dataHome, parent);
+  const pathKey = Object.keys(env).find((key) => key.toLowerCase() === 'path');
+  const pythonRoot = join(versionDir(root, b.id), 'runtime/python');
   assert.equal(
-    env.Path.split(delimiter)[0],
-    join(versionDir(root, b.id), 'runtime/python'),
+    env[pathKey].split(delimiter)[0],
+    process.platform === 'win32' ? pythonRoot : join(pythonRoot, 'bin'),
   );
   assert.equal(env.PYTHONHOME, undefined);
   assert.equal(env.PYTHONPATH, undefined);

@@ -17,8 +17,22 @@ def normalize(name):
     return re.sub(r"[-_.]+", "_", name.lower())
 
 
+def site_packages(runtime):
+    windows = runtime / "Lib"
+    if windows.is_dir():
+        return windows / "site-packages"
+    lib = runtime / "lib"
+    if lib.is_dir():
+        versions = sorted(
+            path for path in lib.iterdir() if path.is_dir() and path.name.startswith("python3.")
+        )
+        if versions:
+            return versions[-1] / "site-packages"
+    raise ValueError("Python site-packages root missing")
+
+
 def install(lock, wheels, runtime):
-    site = runtime / "Lib" / "site-packages"
+    site = site_packages(runtime)
     site.mkdir(parents=True, exist_ok=True)
     result = []
     written = set()
@@ -56,7 +70,8 @@ def install(lock, wheels, runtime):
                 dest.parent.mkdir(parents=True, exist_ok=True)
                 dest.write_bytes(archive.read(entry))
                 if name.startswith(info_root) and re.search(r"licen[cs]e|copying|notice|authors", name, re.I):
-                    licenses.append("Lib/site-packages/" + name)
+                    rel = site.relative_to(runtime).as_posix()
+                    licenses.append(rel + "/" + name)
         if not licenses:
             raise ValueError("wheel license missing: " + row["filename"])
         result.append({"name": row["name"], "version": row["version"], "licenses": licenses, "omittedScripts": omitted_scripts})

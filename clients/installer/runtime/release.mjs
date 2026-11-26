@@ -100,7 +100,7 @@ export function verifyRelease(
         body.rolloutPercentage > 100 ||
         (body.rollbackFrom !== null &&
           typeof body.rollbackFrom !== 'string'))) ||
-    body.platform !== 'win-x64' ||
+    !['win-x64', 'linux-x64'].includes(body.platform) ||
     typeof body.packageId !== 'string' ||
     !/^[A-Za-z0-9.+-]{1,200}$/.test(body.packageId) ||
     typeof body.sha256 !== 'string' ||

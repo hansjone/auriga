@@ -3,11 +3,14 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { syncBuiltinESMExports } from 'node:module';
 import { join, basename } from 'node:path';
-import { spawnSync } from 'node:child_process';
 import { generateKeyPairSync, sign } from 'node:crypto';
 import { Buffer } from 'node:buffer';
-import { buildPayload, tempBase, wrapSetupFixture } from './helpers.mjs';
-import { systemTool } from '../runtime/system-tools.mjs';
+import {
+  buildPayload,
+  tempBase,
+  wrapSetupFixture,
+  writeStageZip,
+} from './helpers.mjs';
 import { makeRelease } from '../scripts/make-release.mjs';
 import { reviewRelease } from '../scripts/sign-release.mjs';
 import { publish } from '../../../scripts/client-release/publish.mjs';
@@ -114,11 +117,7 @@ function reviewFixture(t) {
   fs.mkdirSync(stage);
   fs.cpSync(payload.dir, join(stage, 'payload'), { recursive: true });
   const archive = join(base, 'setup.exe');
-  assert.equal(
-    spawnSync(systemTool('tar'), ['-a', '-cf', archive, '-C', stage, '.'])
-      .status,
-    0,
-  );
+  writeStageZip(stage, archive);
   wrapSetupFixture(archive);
   makeRelease({
     payload: payload.dir,

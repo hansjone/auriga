@@ -5,9 +5,13 @@ import { HostChannel } from './host.mjs';
 import { createInterface } from 'node:readline';
 import { once } from 'node:events';
 import { setTimeout as delay } from 'node:timers/promises';
+import { startUnixIpc, connectUnixIpc } from './linux/ipc-server.mjs';
 
-/** Windows helper authenticates SID, local pipe, process ancestry and capability. */
-export async function startIpc({ helper, broker, business }) {
+/** Windows helper authenticates SID, local pipe, process ancestry and capability.
+ * Linux uses an in-process Unix socket with capability + controlled-pid checks. */
+export async function startIpc({ helper, broker, business, directory }) {
+  if (process.platform === 'linux')
+    return startUnixIpc({ broker, business, directory });
   if (process.platform !== 'win32')
     throw new Error('OS peer verifier unavailable');
   const capability = randomBytes(32).toString('base64url');
@@ -225,6 +229,8 @@ export async function startIpc({ helper, broker, business }) {
 /** D calls this from the DSH backend, using descriptor read from inherited fd 3.
  * Do not serialize the descriptor into settings, argv, env, logs or HTTP. */
 export function connectIpc(descriptor) {
+  if (descriptor.transport === 'unix' || process.platform === 'linux')
+    return connectUnixIpc(descriptor);
   const child = spawn(descriptor.helperPath, ['client', descriptor.pipe], {
     windowsHide: true,
     stdio: ['pipe', 'pipe', 'pipe'],

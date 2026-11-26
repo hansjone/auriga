@@ -32,6 +32,7 @@ export function unsignedRelease({
   rolloutPercentage = 100,
   rollbackFrom = null,
   schema = 2,
+  platform,
 }) {
   const manifest = verifyPackage(payload);
   schema = Number(schema);
@@ -53,7 +54,7 @@ export function unsignedRelease({
     version: manifest.bundleVersion,
     packageId: manifest.id,
     channel,
-    platform: 'win-x64',
+    platform: platform ?? manifest.target ?? 'win-x64',
     sizeBytes: statSync(archive).size,
     sha256: sha256File(archive),
     minimumVersion,

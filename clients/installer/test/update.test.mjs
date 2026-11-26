@@ -1,4 +1,3 @@
-/* global Response, setImmediate */
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { generateKeyPairSync, sign, createHash } from 'node:crypto';
@@ -43,6 +42,10 @@ import {
   writeAtomic,
 } from '../runtime/core.mjs';
 import { buildPayload, tempBase } from './helpers.mjs';
+import {
+  desktopPlatform,
+  hostDesktopTarget,
+} from '../runtime/desktop-platform.mjs';
 
 const keys = generateKeyPairSync('ed25519');
 const now = Date.parse('2026-11-12T00:00:00Z');
@@ -58,7 +61,7 @@ function signed(changes = {}) {
       pluginVersion: '2.0.0',
     },
     channel: 'stable',
-    platform: 'win-x64',
+    platform: hostDesktopTarget(),
     sizeBytes: 3,
     sha256: createHash('sha256').update('zip').digest('hex'),
     minimumVersion: '1.0.0',
@@ -272,7 +275,7 @@ function fixture(
     publicKey: keys.publicKey,
     now: () => now,
     request: async (url) => {
-      if (url.endsWith('/latest'))
+      if (/\/latest(?:\?|$)/.test(url))
         return new Response(JSON.stringify(manifest));
       attempts++;
       if (interrupted && attempts <= 3) return new Response('zi');
@@ -498,7 +501,11 @@ test('HTTP install confirmation persists once and updater uses it', async (t) =>
     now: () => now,
     publicKey: keys.publicKey,
     request: async (url) => {
-      assert.equal(url, origin + '/api/resource/v1/desktop/latest');
+      assert.equal(
+        url,
+        origin +
+          `/api/resource/v1/desktop/latest?platform=${hostDesktopTarget()}`,
+      );
       return new Response(JSON.stringify(signed()));
     },
   });
@@ -584,7 +591,8 @@ test('取消保留部分字节，刷新状态仍显示下载中，重建更新�
     started = resolve;
   });
   const first = resumedUpdater(f, async (url, init) => {
-    if (url.endsWith('/latest')) return new Response(JSON.stringify(manifest));
+    if (/\/latest(?:\?|$)/.test(url))
+      return new Response(JSON.stringify(manifest));
     return {
       ok: true,
       status: 200,
@@ -612,7 +620,8 @@ test('取消保留部分字节，刷新状态仍显示下载中，重建更新�
   assert.equal(first.status().phase, 'cancelled');
   let range;
   const second = resumedUpdater(f, async (url, init) => {
-    if (url.endsWith('/latest')) return new Response(JSON.stringify(manifest));
+    if (/\/latest(?:\?|$)/.test(url))
+      return new Response(JSON.stringify(manifest));
     range = init.headers.Range;
     return new Response('p', {
       status: 206,
@@ -636,7 +645,7 @@ test('下载完成后按阶段上报校验进度，而不是笼统 verifying', a
   const updater = resumedUpdater(
     f,
     async (url) =>
-      url.endsWith('/latest')
+      /\/latest(?:\?|$)/.test(url)
         ? new Response(JSON.stringify(manifest))
         : new Response('zip'),
     {
@@ -689,7 +698,7 @@ test('普通零灰度不提供更新，下载完成时撤回不会安装', async
     rollbackFrom: null,
   });
   const updater = resumedUpdater(f, async (url) => {
-    if (url.endsWith('/latest'))
+    if (/\/latest(?:\?|$)/.test(url))
       return withdrawn
         ? new Response('', { status: 404 })
         : new Response(JSON.stringify(manifest));
@@ -715,7 +724,7 @@ test('下载后确认新的有效签名已替代发行，丢弃原包', async (t
   const f = fixture(t);
   let downloaded = false;
   const updater = resumedUpdater(f, async (url) => {
-    if (url.endsWith('/latest'))
+    if (/\/latest(?:\?|$)/.test(url))
       return new Response(
         JSON.stringify(
           signed({ packageId: f.next.id, sequence: downloaded ? 3 : 2 }),
@@ -916,7 +925,7 @@ for (const failure of ['network', 'unavailable']) {
       packages = 0,
       offline = true;
     const updater = resumedUpdater(f, async (url) => {
-      if (url.endsWith('/latest')) {
+      if (/\/latest(?:\?|$)/.test(url)) {
         latestCalls++;
         if (latestCalls > 1 && offline) {
           if (failure === 'network') throw new Error('network timeout');
@@ -930,7 +939,10 @@ for (const failure of ['network', 'unavailable']) {
     await updater.check();
     await assert.rejects(updater.update(), /timeout|unavailable/);
     assert.equal(
-      readFileSync(join(f.root, '.desktop-resume/desktop.exe'), 'utf8'),
+      readFileSync(
+        join(f.root, '.desktop-resume', desktopPlatform().stagedPackageName),
+        'utf8',
+      ),
       'zip',
     );
     assert.equal(readState(f.root).current, f.old.id);
@@ -946,7 +958,7 @@ for (const failure of ['network', 'unavailable']) {
     const updater = resumedUpdater(
       f,
       async (url) =>
-        url.endsWith('/latest')
+        /\/latest(?:\?|$)/.test(url)
           ? new Response(JSON.stringify(manifest))
           : new Response('zip'),
       { defer: true },
@@ -971,7 +983,10 @@ for (const failure of ['network', 'unavailable']) {
       /timeout|unavailable/,
     );
     assert.equal(
-      readFileSync(join(f.root, 'desktop-pending/desktop.exe'), 'utf8'),
+      readFileSync(
+        join(f.root, 'desktop-pending', desktopPlatform().stagedPackageName),
+        'utf8',
+      ),
       'zip',
     );
     assert.equal(readState(f.root).current, f.old.id);
@@ -991,7 +1006,7 @@ for (const reason of ['withdrawn', 'replaced']) {
     const updater = resumedUpdater(
       f,
       async (url) =>
-        url.endsWith('/latest')
+        /\/latest(?:\?|$)/.test(url)
           ? new Response(JSON.stringify(manifest))
           : new Response('zip'),
       { defer: true },
@@ -1029,7 +1044,7 @@ for (const failure of ['interrupted', 'temporary', 'persistent', 'smoke']) {
     const f = fixture(t);
     const manifest = signed({ packageId: f.next.id });
     const request = async (url) =>
-      url.endsWith('/latest')
+      /\/latest(?:\?|$)/.test(url)
         ? new Response(JSON.stringify(manifest))
         : new Response('zip');
     const updater = resumedUpdater(f, request, { defer: true });
@@ -1069,7 +1084,10 @@ for (const failure of ['interrupted', 'temporary', 'persistent', 'smoke']) {
       await assert.rejects(applyPending(f.root, options));
       assert.equal(readState(f.root).current, f.old.id);
       assert.equal(
-        readFileSync(join(f.root, 'desktop-pending', 'desktop.exe'), 'utf8'),
+        readFileSync(
+          join(f.root, 'desktop-pending', desktopPlatform().stagedPackageName),
+          'utf8',
+        ),
         'zip',
       );
       const saved = readUpdateState(f.root);
@@ -1109,7 +1127,7 @@ test('pending signature and archive hash failures discard unusable input', async
     const f = fixture(t);
     const manifest = signed({ packageId: f.next.id });
     const request = async (url) =>
-      url.endsWith('/latest')
+      /\/latest(?:\?|$)/.test(url)
         ? new Response(JSON.stringify(manifest))
         : new Response('zip');
     const updater = resumedUpdater(f, request, { defer: true });
@@ -1120,7 +1138,11 @@ test('pending signature and archive hash failures discard unusable input', async
         join(f.root, 'desktop-pending/release.json'),
         JSON.stringify({ ...manifest, notes: 'tampered' }),
       );
-    else writeFileSync(join(f.root, 'desktop-pending/desktop.exe'), 'tampered');
+    else
+      writeFileSync(
+        join(f.root, 'desktop-pending', desktopPlatform().stagedPackageName),
+        'tampered',
+      );
     await assert.rejects(
       applyPending(f.root, { publicKey: keys.publicKey, now, request }),
     );
@@ -1139,7 +1161,7 @@ test('a committed transaction with leftover pending input preserves the previous
   const f = fixture(t);
   const manifest = signed({ packageId: f.next.id });
   const request = async (url) =>
-    url.endsWith('/latest')
+    /\/latest(?:\?|$)/.test(url)
       ? new Response(JSON.stringify(manifest))
       : new Response('zip');
   const updater = resumedUpdater(f, request, { defer: true });
@@ -1171,7 +1193,7 @@ for (const lockTarget of ['scratch', 'launcher']) {
         const f = fixture(t);
         const manifest = signed({ packageId: f.next.id });
         const request = async (url) =>
-          url.endsWith('/latest')
+          /\/latest(?:\?|$)/.test(url)
             ? new Response(JSON.stringify(manifest))
             : new Response('zip');
         const updater = resumedUpdater(f, request, { defer: true });
@@ -1226,7 +1248,15 @@ for (const lockTarget of ['scratch', 'launcher']) {
             await assert.rejects(applyPending(f.root, options), (error) =>
               ['EPERM', 'EBUSY', 'EACCES'].includes(error.code),
             );
-            assert.ok(existsSync(join(f.root, 'desktop-pending/desktop.exe')));
+            assert.ok(
+              existsSync(
+                join(
+                  f.root,
+                  'desktop-pending',
+                  desktopPlatform().stagedPackageName,
+                ),
+              ),
+            );
             assert.equal(readState(f.root).current, f.old.id);
           } else releaseTimer = setTimeout(releaseLock, 400);
           if (persistent) releaseLock();
@@ -1243,13 +1273,17 @@ for (const lockTarget of ['scratch', 'launcher']) {
   }
 }
 
-for (const missing of ['empty', 'release.json', 'desktop.exe']) {
+for (const missing of [
+  'empty',
+  'release.json',
+  desktopPlatform().stagedPackageName,
+]) {
   for (const entry of ['launch', 'check']) {
     test(`incomplete pending (${missing}) recovers through ${entry} and discovers releases`, async (t) => {
       const f = fixture(t);
       const manifest = signed({ packageId: f.next.id });
       const request = async (url) =>
-        url.endsWith('/latest')
+        /\/latest(?:\?|$)/.test(url)
           ? new Response(JSON.stringify(manifest))
           : new Response('zip');
       const updater = resumedUpdater(f, request, { defer: true });
@@ -1278,7 +1312,7 @@ for (const missing of ['empty', 'release.json', 'desktop.exe']) {
       assert.equal(existsSync(queued), false);
       assert.equal(status.available.version, '2.0.0');
       await updater.update();
-      assert.ok(existsSync(join(queued, 'desktop.exe')));
+      assert.ok(existsSync(join(queued, desktopPlatform().stagedPackageName)));
     });
   }
 }
@@ -1286,7 +1320,7 @@ for (const missing of ['empty', 'release.json', 'desktop.exe']) {
 async function pausePending(f) {
   const manifest = signed({ packageId: f.next.id });
   const request = async (url) =>
-    url.endsWith('/latest')
+    /\/latest(?:\?|$)/.test(url)
       ? new Response(JSON.stringify(manifest))
       : new Response('zip');
   const updater = resumedUpdater(f, request, { defer: true });
@@ -1328,7 +1362,7 @@ test('three deterministic failures persist across launches and require explicit 
   const f = fixture(t);
   const manifest = signed({ packageId: f.next.id });
   const request = async (url) =>
-    url.endsWith('/latest')
+    /\/latest(?:\?|$)/.test(url)
       ? new Response(JSON.stringify(manifest))
       : new Response('zip');
   const updater = resumedUpdater(f, request, { defer: true });
@@ -1358,7 +1392,11 @@ test('three deterministic failures persist across launches and require explicit 
   await restarted.check();
   assert.equal(restarted.status().applyFailures, 3);
   assert.equal(restarted.status().failure.code, 'desktop.smoke_failed');
-  assert.ok(existsSync(join(f.root, 'desktop-pending/desktop.exe')));
+  assert.ok(
+    existsSync(
+      join(f.root, 'desktop-pending', desktopPlatform().stagedPackageName),
+    ),
+  );
   approvePending(f.root);
   assert.equal(restarted.status().manualRetryRequired, false);
   await applyPending(f.root, { ...options, smoke: () => {} });
@@ -1396,7 +1434,7 @@ test('each extraction retry rechecks the durable archive hash', async (t) => {
   const f = fixture(t);
   const manifest = signed({ packageId: f.next.id });
   const request = async (url) =>
-    url.endsWith('/latest')
+    /\/latest(?:\?|$)/.test(url)
       ? new Response(JSON.stringify(manifest))
       : new Response('zip');
   const updater = resumedUpdater(f, request, { defer: true });

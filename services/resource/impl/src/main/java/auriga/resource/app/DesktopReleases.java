@@ -19,6 +19,13 @@ import tools.jackson.databind.node.ObjectNode;
 public final class DesktopReleases {
   public static final String MANAGE = "resource.versions.publish";
   public static final long MAX_BYTES = 4294967296L;
+
+  /**
+   * Content-addressed blob suffix; historically ".exe" for Windows, reused for any platform bytes.
+   */
+  private static final String BLOB_SUFFIX = ".exe";
+
+  private static final Set<String> PLATFORMS = Set.of("win-x64", "linux-x64");
   private final Path root;
   private final PublicKey key;
   private final Clock clock;
@@ -103,7 +110,7 @@ public final class DesktopReleases {
                   || body.path("rolloutPercentage").asInt() > 100
                   || (!body.path("rollbackFrom").isNull()
                       && !ResourceSemver.valid(text(body, "rollbackFrom", 128)))))
-          || !text(body, "platform", 16).equals("win-x64")
+          || !PLATFORMS.contains(text(body, "platform", 16))
           || !text(body, "packageId", 200).matches("[A-Za-z0-9.+-]{1,200}")
           || !text(body, "sha256", 64).matches("[a-f0-9]{64}")
           || counter(body, "sizeBytes") < 1
@@ -146,12 +153,24 @@ public final class DesktopReleases {
     var actor = access.administrator(principal, MANAGE);
     publisher(actor.tenant());
     var result = store(publisherTenant).read();
+    // channels.<channel> stays the Windows latest for existing admin UI.
     var channels = result.putObject("channels");
     for (String channel : List.of("stable", "beta")) {
       try {
-        channels.set(channel, latest(channel, result));
+        channels.set(channel, latest(channel, "win-x64", result));
       } catch (AurigaException e) {
         if (!NOT_FOUND.equals(e.errorCode())) throw e;
+      }
+    }
+    var platforms = result.putObject("platforms");
+    for (String platform : PLATFORMS) {
+      var byChannel = platforms.putObject(platform);
+      for (String channel : List.of("stable", "beta")) {
+        try {
+          byChannel.set(channel, latest(channel, platform, result));
+        } catch (AurigaException e) {
+          if (!NOT_FOUND.equals(e.errorCode())) throw e;
+        }
       }
     }
     result.put("publicKeySpki", Base64.getEncoder().encodeToString(key.getEncoded()));
@@ -213,7 +232,7 @@ public final class DesktopReleases {
                     !body.path("rollbackFrom").isMissingNode()
                         && !body.path("rollbackFrom").isNull();
                 try {
-                  Path blob = store.root().resolve(body.path("sha256").asString() + ".exe");
+                  Path blob = store.root().resolve(body.path("sha256").asString() + BLOB_SUFFIX);
                   if (Files.exists(blob)) Files.delete(stage);
                   else Files.move(stage, blob, StandardCopyOption.ATOMIC_MOVE);
                 } catch (IOException e) {
@@ -244,9 +263,11 @@ public final class DesktopReleases {
     if (body.path("sequence").asLong() <= state.path("highestSequence").asLong())
       throw new AurigaException(CONFLICT);
     tools.jackson.databind.JsonNode previous = null;
+    String platform = body.path("platform").asString();
     for (var item : state.withArray("items")) {
       var candidate = item.path("manifest");
       if (candidate.path("channel").equals(body.path("channel"))
+          && platform.equals(candidate.path("platform").asString())
           && (previous == null
               || candidate.path("sequence").asLong() > previous.path("sequence").asLong()))
         previous = candidate;
@@ -330,22 +351,28 @@ public final class DesktopReleases {
   }
 
   public ObjectNode latest() {
-    return latest("stable");
+    return latest("stable", "win-x64");
   }
 
   public ObjectNode latest(String channel) {
-    if (!Set.of("stable", "beta").contains(channel)) throw invalid();
-    return latest(channel, store(publisherTenant).read());
+    return latest(channel, "win-x64");
   }
 
-  private ObjectNode latest(String channel, ObjectNode state) {
+  public ObjectNode latest(String channel, String platform) {
+    if (!Set.of("stable", "beta").contains(channel) || !PLATFORMS.contains(platform))
+      throw invalid();
+    return latest(channel, platform, store(publisherTenant).read());
+  }
+
+  private ObjectNode latest(String channel, String platform, ObjectNode state) {
     ObjectNode best = null;
     for (var item : state.withArray("items")) {
       if (item.path("withdrawn").asBoolean()) continue;
       var manifest = (ObjectNode) item.path("manifest");
       if (!channel.equals(manifest.path("channel").asString())) continue;
+      if (!platform.equals(manifest.path("platform").asString())) continue;
       if (!Files.isRegularFile(
-          store(publisherTenant).root().resolve(manifest.path("sha256").asString() + ".exe"),
+          store(publisherTenant).root().resolve(manifest.path("sha256").asString() + BLOB_SUFFIX),
           LinkOption.NOFOLLOW_LINKS)) continue;
       try {
         verify(manifest, true);
@@ -357,6 +384,13 @@ public final class DesktopReleases {
     }
     if (best == null) throw new AurigaException(NOT_FOUND);
     return best;
+  }
+
+  public static String packageFilename(tools.jackson.databind.JsonNode body) {
+    String version = body.path("version").asString();
+    return "linux-x64".equals(body.path("platform").asString())
+        ? "auriga-desktop-" + version + "-linux-x64.tar.gz"
+        : "AurigaDSH-Setup-" + version + ".exe";
   }
 
   public record Download(InputStream stream, long size, String filename) {}
@@ -372,12 +406,9 @@ public final class DesktopReleases {
               try {
                 var stream =
                     Files.newInputStream(
-                        store.root().resolve(body.path("sha256").asString() + ".exe"),
+                        store.root().resolve(body.path("sha256").asString() + BLOB_SUFFIX),
                         LinkOption.NOFOLLOW_LINKS);
-                return new Download(
-                    stream,
-                    body.path("sizeBytes").asLong(),
-                    "AurigaDSH-Setup-" + body.path("version").asString() + ".exe");
+                return new Download(stream, body.path("sizeBytes").asLong(), packageFilename(body));
               } catch (IOException e) {
                 throw new AurigaException(UNAVAILABLE);
               }

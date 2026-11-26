@@ -1,18 +1,20 @@
 import { normalizePlatformBinding } from '../runtime/platform-origin.mjs';
 /**
- * Build the Windows installer package.
+ * Build the Desktop installer package.
  *
- *   node scripts/build.mjs [--upstream <dsh version>] [--plugin-tgz <file>]
- *        [--out <dir>] [--cache <dir>] [--no-zip]
+ *   node scripts/build.mjs [--target win-x64|linux-x64] [--upstream <dsh version>]
+ *        [--plugin-tgz <file>] [--out <dir>] [--cache <dir>] [--no-zip]
  *
  * Upstream DSH is a replaceable, version-pinned component: changing
  * `--upstream` (or upstream.json) rebuilds the package against another DSH
  * release. Nothing of upstream is modified; it is installed from npm as-is.
+ * Default target follows the host OS; Windows still produces the SFX exe.
  */
 import { Buffer } from 'node:buffer';
 import { createPublicKey } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import {
+  chmodSync,
   cpSync,
   existsSync,
   lstatSync,
@@ -41,7 +43,11 @@ import {
 import { sha256File, assertNoSecrets, listFiles } from './lib/files.mjs';
 import { verifyInputs } from '../../../scripts/client-release/inputs.mjs';
 import { toolsBaselineOption } from '../../../scripts/client-release/baseline.mjs';
-import { assemblePython } from './python-runtime.mjs';
+import {
+  clientPlatform,
+  hostClientTarget,
+} from '../../../scripts/client-release/platform.mjs';
+import { assemblePython, pythonLockForTarget } from './python-runtime.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const installerDir = resolve(here, '..');
@@ -139,18 +145,21 @@ export function validateUacConfigDir(dir) {
   return { adapterBytes: adapter.bytes, providerBytes: provider.bytes };
 }
 const isWin = process.platform === 'win32';
-const NPM_FLAGS = [
-  '--omit=dev',
-  '--ignore-scripts',
-  '--no-audit',
-  '--no-fund',
-  '--os=win32',
-  '--cpu=x64',
-];
 // Git Bash's GNU tar treats `D:` as a remote host; use the Windows bsdtar.
 const TAR = isWin
   ? join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'tar.exe')
   : 'tar';
+
+function npmFlags(target) {
+  return [
+    '--omit=dev',
+    '--ignore-scripts',
+    '--no-audit',
+    '--no-fund',
+    `--os=${target.npmOs}`,
+    `--cpu=${target.npmCpu}`,
+  ];
+}
 
 function parseArgs(argv) {
   const out = {};
@@ -251,13 +260,19 @@ async function download(url, file) {
   writeFileSync(file, Buffer.from(await response.arrayBuffer()));
 }
 
-export async function nodeRuntime(version, expected, cache, offline = false) {
+export async function nodeRuntime(
+  version,
+  expected,
+  cache,
+  offline = false,
+  target = clientPlatform('win-x64'),
+) {
   if (!offline) mkdirSync(cache, { recursive: true });
-  const name = `node-v${version}-win-x64.zip`;
-  const zip = join(cache, name);
+  const name = target.nodeArchive(version);
+  const archive = join(cache, name);
   const base = `https://nodejs.org/dist/v${version}`;
   let sha = expected;
-  if (offline && (!sha || !existsSync(zip)))
+  if (offline && (!sha || !existsSync(archive)))
     throw new Error(`缺少离线输入：${name} 或固定摘要`);
   if (!sha) {
     const sums = join(cache, `SHASUMS256-${version}.txt`);
@@ -268,13 +283,13 @@ export async function nodeRuntime(version, expected, cache, offline = false) {
     if (!line) throw new Error(`no checksum for ${name}`);
     sha = line.trim().split(/\s+/)[0];
   }
-  if (!existsSync(zip)) await download(`${base}/${name}`, zip);
-  const actual = sha256File(zip);
+  if (!existsSync(archive)) await download(`${base}/${name}`, archive);
+  const actual = sha256File(archive);
   if (actual !== sha) {
-    if (!offline) rmSync(zip, { force: true });
+    if (!offline) rmSync(archive, { force: true });
     throw new Error(`node runtime checksum mismatch: ${actual} != ${sha}`);
   }
-  return { zip, sha256: actual };
+  return { zip: archive, archive, sha256: actual };
 }
 
 function readTgzPackageJson(tgz) {
@@ -284,6 +299,8 @@ function readTgzPackageJson(tgz) {
 export async function build(args) {
   if (typeof args['broker-artifact'] !== 'string')
     throw new Error('--broker-artifact is required');
+  const target = clientPlatform(args.target ?? hostClientTarget());
+  const flags = npmFlags(target);
   const resourceTrust = args['resource-trust-json']
     ? validateResourceRoots(
         JSON.parse(readFileSync(args['resource-trust-json'], 'utf8')),
@@ -303,6 +320,7 @@ export async function build(args) {
         undefined,
         {
           toolsBaseline: toolsBaselineOption(),
+          target: target.target,
         },
       )
     : null;
@@ -350,30 +368,47 @@ export async function build(args) {
   const bundleName = `${desktopVersion}-dsh${dshVersion}`;
 
   // 2. Stage the payload.
-  const stage = join(out, `auriga-desktop-${bundleName}-win-x64`);
+  const stage = join(out, `auriga-desktop-${bundleName}-${target.target}`);
   rmSync(stage, { recursive: true, force: true });
   const payload = join(stage, 'payload');
   mkdirSync(payload, { recursive: true });
 
+  const nodeSha = config[target.nodeShaField];
+  if (!nodeSha) throw new Error(`upstream.json missing ${target.nodeShaField}`);
   const node = await nodeRuntime(
     config.node,
-    config.nodeWinX64Sha256,
+    nodeSha,
     inputs ? join(inputs.directory, 'runtime') : cache,
     offline,
+    target,
   );
   const nodeTmp = join(work, 'node');
   mkdirSync(nodeTmp, { recursive: true });
-  run(TAR, ['-xf', node.zip, '-C', nodeTmp]);
-  const nodeSrc = join(nodeTmp, `node-v${config.node}-win-x64`);
+  run(TAR, ['-xf', node.archive, '-C', nodeTmp]);
+  const nodeSrc = join(nodeTmp, target.nodeExtractDir(config.node));
   mkdirSync(join(payload, 'upstream', 'node'), { recursive: true });
-  for (const f of ['node.exe', 'LICENSE'])
-    cpSync(join(nodeSrc, f), join(payload, 'upstream', 'node', f));
+  if (target.target === 'win-x64') {
+    for (const f of ['node.exe', 'LICENSE'])
+      cpSync(join(nodeSrc, f), join(payload, 'upstream', 'node', f));
+  } else {
+    // Keep the official linux layout (bin/node, lib, LICENSE, …).
+    for (const entry of readdirSync(nodeSrc)) {
+      if (entry === 'CHANGELOG.md' || entry === 'README.md') continue;
+      cpSync(join(nodeSrc, entry), join(payload, 'upstream', 'node', entry), {
+        recursive: true,
+      });
+    }
+    chmodSync(join(payload, 'upstream', 'node', 'bin', 'node'), 0o755);
+  }
 
-  await assemblePython({
-    payload,
-    inputs: inputs ? inputs.directory : cache,
-    offline,
-  });
+  if (target.target === 'win-x64' || target.target === 'linux-x64') {
+    await assemblePython({
+      payload,
+      inputs: inputs ? inputs.directory : cache,
+      offline,
+      lockFile: pythonLockForTarget(target.target),
+    });
+  }
 
   const app = join(payload, 'upstream', 'app');
   mkdirSync(app, { recursive: true });
@@ -404,9 +439,9 @@ export async function build(args) {
       throw new Error('离线 DSH 闭包与当前锁不符');
   } else if (locked) {
     cpSync(committedLock, join(app, 'package-lock.json'));
-    run('npm', ['ci', ...NPM_FLAGS], { cwd: app });
+    run('npm', ['ci', ...flags], { cwd: app });
   } else {
-    run('npm', ['install', ...NPM_FLAGS], { cwd: app });
+    run('npm', ['install', ...flags], { cwd: app });
   }
   const lockFile = join(app, 'package-lock.json');
   const lock = JSON.parse(readFileSync(lockFile, 'utf8'));
@@ -465,24 +500,24 @@ export async function build(args) {
       recursive: true,
     });
   } else {
-    run('npm', ['install', ...NPM_FLAGS, '--no-package-lock', tgz], {
+    run('npm', ['install', ...flags, '--no-package-lock', tgz], {
       cwd: plugin,
     });
   }
   cpSync(tgz, join(payload, 'auriga', 'plugin', 'auriga-dsh.tgz'));
   rmSync(join(plugin, 'package.json'));
 
-  // 3b. Size trimming (win-x64 only; no runtime code removed).
+  // 3b. Size trimming (no runtime code removed).
   const sizeBefore = dirSize(app) + dirSize(join(plugin, 'node_modules'));
   const removed = { files: 0 };
   slim(join(app, 'node_modules'), removed);
   slim(join(plugin, 'node_modules'), removed);
   const withoutLibreoffice = args['without-libreoffice'] === true;
   if (withoutLibreoffice)
-    rmSync(
-      join(app, 'node_modules', '@deepseek-ai', 'libreoffice-kit-win32-x64'),
-      { recursive: true, force: true },
-    );
+    rmSync(join(app, 'node_modules', '@deepseek-ai', target.libreofficeKit), {
+      recursive: true,
+      force: true,
+    });
   const sizeAfter = dirSize(app) + dirSize(join(plugin, 'node_modules'));
 
   // 3c. pnpm (the plugin manager shells out to it); pinned and verified against the registry.
@@ -500,7 +535,7 @@ export async function build(args) {
     cpSync(join(inputs.directory, 'payload-pnpm'), pnpmDir, {
       recursive: true,
     });
-  else run('npm', ['install', ...NPM_FLAGS], { cwd: pnpmDir });
+  else run('npm', ['install', ...flags], { cwd: pnpmDir });
   const pnpmLock = JSON.parse(
     readFileSync(join(pnpmDir, 'package-lock.json'), 'utf8'),
   );
@@ -515,10 +550,21 @@ export async function build(args) {
   if (config.pnpmIntegrity && config.pnpmIntegrity !== pnpmIntegrity)
     throw new Error('pnpm integrity differs from upstream.json pin');
   mkdirSync(join(payload, 'tools', 'bin'), { recursive: true });
-  writeFileSync(
-    join(payload, 'tools', 'bin', 'pnpm.cmd'),
-    '@echo off\r\n"%~dp0..\\..\\upstream\\node\\node.exe" "%~dp0..\\pnpm\\node_modules\\pnpm\\bin\\pnpm.cjs" %*\r\n',
-  );
+  if (target.target === 'win-x64') {
+    writeFileSync(
+      join(payload, 'tools', 'bin', 'pnpm.cmd'),
+      '@echo off\r\n"%~dp0..\\..\\upstream\\node\\node.exe" "%~dp0..\\pnpm\\node_modules\\pnpm\\bin\\pnpm.cjs" %*\r\n',
+    );
+  } else {
+    const pnpmSh = join(payload, 'tools', 'bin', 'pnpm');
+    writeFileSync(
+      pnpmSh,
+      '#!/usr/bin/env bash\n' +
+        'ROOT=$(cd -- "$(dirname -- "$0")/../.." && pwd)\n' +
+        'exec "$ROOT/upstream/node/bin/node" "$ROOT/tools/pnpm/node_modules/pnpm/bin/pnpm.cjs" "$@"\n',
+    );
+    chmodSync(pnpmSh, 0o755);
+  }
 
   // 3d. Licences: upstream MIT text is kept, product notice added.
   mkdirSync(join(payload, 'licenses'), { recursive: true });
@@ -549,7 +595,7 @@ export async function build(args) {
     );
   }
 
-  // 4. Our own runtime and Windows wrappers.
+  // 4. Our own runtime and platform wrappers.
   const shellAuthManifest = copyBrokerArtifact(
     args['broker-artifact'],
     join(payload, 'auriga', 'shell-auth'),
@@ -600,34 +646,74 @@ export async function build(args) {
       key.export({ type: 'spki', format: 'pem' }),
     );
   }
-  cpSync(
-    join(installerDir, 'windows', 'launcher'),
-    join(payload, 'auriga', 'launcher'),
-    { recursive: true },
-  );
-  // Older launchers are resumed by byte offset after an update (see the
-  // launcher header): the shipped bytes must be CRLF on any build machine.
-  for (const name of readdirSync(join(payload, 'auriga', 'launcher')))
-    if (name.endsWith('.cmd')) {
+  if (target.target === 'win-x64') {
+    cpSync(
+      join(installerDir, 'windows', 'launcher'),
+      join(payload, 'auriga', 'launcher'),
+      { recursive: true },
+    );
+    // Older launchers are resumed by byte offset after an update (see the
+    // launcher header): the shipped bytes must be CRLF on any build machine.
+    for (const name of readdirSync(join(payload, 'auriga', 'launcher')))
+      if (name.endsWith('.cmd')) {
+        const file = join(payload, 'auriga', 'launcher', name);
+        writeFileSync(
+          file,
+          readFileSync(file, 'latin1').replace(/\r?\n/g, '\r\n'),
+          'latin1',
+        );
+      }
+    cpSync(
+      resolve(installerDir, '../../assets/brand/auriga-dsh.ico'),
+      join(payload, 'auriga', 'launcher', 'auriga.ico'),
+    );
+    // Tray app (Start menu entry, update/exit owner), built with the Windows C# compiler.
+    compileTray(
+      join(payload, 'auriga', 'tray', 'AurigaDesktop.exe'),
+      resolve(installerDir, '../../assets/brand/auriga-dsh.ico'),
+    );
+    compileHelper(join(payload, 'auriga', 'runtime', 'auriga-win-helper.exe'));
+    for (const f of ['install.ps1', 'install.cmd', 'README.txt'])
+      cpSync(join(installerDir, 'windows', f), join(stage, f));
+  } else {
+    cpSync(
+      join(installerDir, 'linux', 'launcher'),
+      join(payload, 'auriga', 'launcher'),
+      { recursive: true },
+    );
+    for (const name of [
+      'auriga-desktop',
+      'rollback.sh',
+      'uninstall.sh',
+      'shell-integration.sh',
+    ]) {
       const file = join(payload, 'auriga', 'launcher', name);
-      writeFileSync(
-        file,
-        readFileSync(file, 'latin1').replace(/\r?\n/g, '\r\n'),
-        'latin1',
-      );
+      if (existsSync(file)) chmodSync(file, 0o755);
     }
-  cpSync(
-    resolve(installerDir, '../../assets/brand/auriga-dsh.ico'),
-    join(payload, 'auriga', 'launcher', 'auriga.ico'),
-  );
-  // Tray app (Start menu entry, update/exit owner), built with the Windows C# compiler.
-  compileTray(
-    join(payload, 'auriga', 'tray', 'AurigaDesktop.exe'),
-    resolve(installerDir, '../../assets/brand/auriga-dsh.ico'),
-  );
-  compileHelper(join(payload, 'auriga', 'runtime', 'auriga-win-helper.exe'));
-  for (const f of ['install.ps1', 'install.cmd', 'README.txt'])
-    cpSync(join(installerDir, 'windows', f), join(stage, f));
+    cpSync(
+      join(installerDir, 'linux', 'tray'),
+      join(payload, 'auriga', 'tray'),
+      { recursive: true },
+    );
+    for (const name of ['auriga-desktop-tray', 'auriga-desktop-tray.mjs']) {
+      const file = join(payload, 'auriga', 'tray', name);
+      if (existsSync(file)) chmodSync(file, 0o755);
+    }
+    const png = resolve(installerDir, '../../assets/brand/auriga-dsh.png');
+    if (existsSync(png)) {
+      cpSync(png, join(payload, 'auriga', 'launcher', 'auriga.png'));
+      cpSync(png, join(payload, 'auriga', 'tray', 'auriga.png'));
+    }
+    cpSync(
+      join(installerDir, 'linux', 'install.sh'),
+      join(stage, 'install.sh'),
+    );
+    cpSync(
+      join(installerDir, 'linux', 'README.txt'),
+      join(stage, 'README.txt'),
+    );
+    chmodSync(join(stage, 'install.sh'), 0o755);
+  }
 
   // 5. Manifest: component versions and checksums (upstream tree is pinned by the lock).
   const ours = listFiles(payload).filter((f) => !isPinnedPath(f));
@@ -642,7 +728,7 @@ export async function build(args) {
         join(payload, 'auriga/shell-auth/broker-manifest.json'),
       ),
     },
-    target: 'win-x64',
+    target: target.target,
     size: {
       upstreamAndPluginBeforeTrim: sizeBefore,
       afterTrim: sizeAfter,
@@ -682,25 +768,35 @@ export async function build(args) {
   );
   scanForSecrets(stage, tgz, work);
 
-  // 6. Zip.
+  // 6. Package archive.
   let zip = null;
+  let archive = null;
   if (!args['no-zip']) {
-    zip = `${stage}.zip`;
-    rmSync(zip, { force: true });
-    run(TAR, ['-a', '-cf', zip, '-C', stage, '.']);
+    if (target.target === 'win-x64') {
+      zip = `${stage}.zip`;
+      rmSync(zip, { force: true });
+      run(TAR, ['-a', '-cf', zip, '-C', stage, '.']);
+      archive = zip;
+    } else {
+      archive = join(out, target.setupName(desktopVersion));
+      rmSync(archive, { force: true });
+      run(TAR, ['-czf', archive, '-C', stage, '.']);
+    }
   }
   let exe = null;
   if (args.exe) {
+    if (target.target !== 'win-x64')
+      throw new Error('--exe is only supported for win-x64');
     exe = makeExe({
       stage,
       icon:
         args['installer-icon'] ??
         resolve(installerDir, '../../assets/brand/auriga-dsh.ico'),
       archive: zip,
-      out: join(out, `AurigaDSH-Setup-${desktopVersion}.exe`),
+      out: join(out, target.setupName(desktopVersion)),
     });
   }
-  return { id, stage, zip, exe, manifest };
+  return { id, stage, zip, archive, exe, manifest, target: target.target };
 }
 
 if (resolve(process.argv[1] ?? '') === fileURLToPath(import.meta.url)) {

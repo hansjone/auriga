@@ -5,5 +5,11 @@
     "https://nodejs.org/dist/v22.19.0/SHASUMS256.txt",
     "https://npmmirror.com/mirrors/node/v22.19.0/SHASUMS256.txt"
   ],
-  "winX64ZipSha256Note": "两源 SHASUMS256.txt 中 node-v22.19.0-win-x64.zip 行一致；准备与构建以本字段为准，下载的 SHASUMS256.txt 仅作参考比对（下载失败或无该行时告警继续，摘要不符则报错）"
+  "winX64ZipSha256Note": "两源 SHASUMS256.txt 中 node-v22.19.0-win-x64.zip 行一致；准备与构建以本字段为准，下载的 SHASUMS256.txt 仅作参考比对（下载失败或无该行时告警继续，摘要不符则报错）",
+  "linuxX64TarSha256": "c0649af18e6a24f6fe5535a3e86b341dd49a8e71117c8b68bde973ef834f16f2",
+  "linuxX64TarSha256Sources": [
+    "https://nodejs.org/dist/v22.19.0/SHASUMS256.txt",
+    "https://npmmirror.com/mirrors/node/v22.19.0/SHASUMS256.txt"
+  ],
+  "linuxX64TarSha256Note": "两源 SHASUMS256.txt 中 node-v22.19.0-linux-x64.tar.xz 行一致；linux-x64 套件准备与构建以本字段为准"
 }

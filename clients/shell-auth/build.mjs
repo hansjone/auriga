@@ -1,4 +1,5 @@
 import {
+  chmodSync,
   mkdirSync,
   readdirSync,
   realpathSync,
@@ -7,6 +8,7 @@ import {
   writeFileSync,
   existsSync,
 } from 'node:fs';
+import { spawnSync } from 'node:child_process';
 import { basename, join, dirname, resolve, delimiter } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
@@ -200,7 +202,10 @@ export function resolvePluginDependency(
   const pluginPkg = join(repoRoot, 'clients', 'dsh-plugin', 'package.json');
   return resolveWithNodePaths(pluginPkg, specifier, nodePaths);
 }
-export function buildBroker(output, { managedLinux = false } = {}) {
+export function buildBroker(
+  output,
+  { managedLinux = false, skipWindowsHelper = false } = {},
+) {
   output = resolve(output);
   safePath(output);
   if (output === source || (existsSync(output) && readdirSync(output).length))
@@ -235,9 +240,34 @@ export function buildBroker(output, { managedLinux = false } = {}) {
   for (const file of files)
     copyFileSync(join(source, file), join(output, file));
   if (!managedLinux) {
-    const helper = 'windows/shell-helper.exe';
-    buildHelper(join(output, helper));
-    files.push(helper);
+    if (!skipWindowsHelper) {
+      const helper = 'windows/shell-helper.exe';
+      buildHelper(join(output, helper));
+      files.push(helper);
+    }
+    // ipc.mjs statically imports the Linux Unix-socket peer; ship it in every
+    // Desktop broker so Windows packages still resolve the module graph.
+    mkdirSync(join(output, 'linux'), { recursive: true });
+    const linuxIpc = 'linux/ipc-server.mjs';
+    copyFileSync(join(source, linuxIpc), join(output, linuxIpc));
+    files.push(linuxIpc);
+    if (skipWindowsHelper) {
+      // Tiny SO_PEERCRED helper for Node builds that lack socket.getPeerCredentials.
+      const peercred = 'linux/peercred';
+      const peercredSrc = join(source, 'linux/peercred.c');
+      const peercredOut = join(output, peercred);
+      const compiled = spawnSync(
+        'cc',
+        ['-O2', '-o', peercredOut, peercredSrc],
+        { encoding: 'utf8' },
+      );
+      if (compiled.status !== 0)
+        throw new Error(
+          `linux peercred helper build failed: ${compiled.stderr || compiled.error}`,
+        );
+      chmodSync(peercredOut, 0o755);
+      files.push(peercred);
+    }
   }
   const repoRoot = resolve(source, '../..');
   const esbuild = resolveEsbuild(repoRoot);
@@ -356,7 +386,11 @@ export function buildBroker(output, { managedLinux = false } = {}) {
 
   const manifest = {
     version: 1,
-    ...(managedLinux ? { target: 'managed-linux' } : {}),
+    ...(managedLinux
+      ? { target: 'managed-linux' }
+      : skipWindowsHelper
+        ? { target: 'desktop-linux' }
+        : {}),
     files: files.sort().map((path) => ({
       path,
       sha256: createHash('sha256')
@@ -374,12 +408,18 @@ if (
   process.argv[1] &&
   resolve(process.argv[1]) === fileURLToPath(import.meta.url)
 ) {
-  const [output, target, ...extra] = process.argv.slice(2);
+  const [output, ...flags] = process.argv.slice(2);
+  const managedLinux = flags.includes('--managed-linux');
+  const skipWindowsHelper = flags.includes('--skip-windows-helper');
   if (
     !output ||
-    (target !== undefined && target !== '--managed-linux') ||
-    extra.length
+    flags.some(
+      (flag) => flag !== '--managed-linux' && flag !== '--skip-windows-helper',
+    ) ||
+    (managedLinux && skipWindowsHelper)
   )
-    throw new Error('usage: build.mjs <output> [--managed-linux]');
-  buildBroker(output, { managedLinux: target === '--managed-linux' });
+    throw new Error(
+      'usage: build.mjs <output> [--managed-linux | --skip-windows-helper]',
+    );
+  buildBroker(output, { managedLinux, skipWindowsHelper });
 }

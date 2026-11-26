@@ -15,10 +15,11 @@ export function signInputs(
   directory,
   keyFile,
   version,
-  { checkTools = true, root = ROOT } = {},
+  { checkTools = true, root = ROOT, target = CLIENT_TARGET } = {},
 ) {
+  const platform = clientPlatform(target);
   if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,95}$/.test(version ?? ''))
-    throw new Error('缺少有效 Windows 附件发行版本');
+    throw new Error('缺少有效客户端套件发行版本');
   for (const name of [
     'client-inputs-release.json',
     'SHA256SUMS',
@@ -27,8 +28,11 @@ export function signInputs(
   ])
     if (existsSync(join(directory, name)))
       throw new Error('输入附件签名材料已存在，禁止覆盖');
-  const manifestSha256 = sha256File(join(directory, 'windows-client.json'));
-  const kit = verifyInputs(directory, manifestSha256, root, { checkTools });
+  const manifestSha256 = sha256File(join(directory, platform.kitManifest));
+  const kit = verifyInputs(directory, manifestSha256, root, {
+    checkTools,
+    target,
+  });
   assertPrivateKey(keyFile);
   const key = createPrivateKey(readFileSync(keyFile));
   if (key.asymmetricKeyType !== 'ed25519')
@@ -37,13 +41,13 @@ export function signInputs(
   const metadata = stampRequires('client-inputs-release.json', {
     schemaVersion: 1,
     version,
-    platform: CLIENT_TARGET,
+    platform: platform.target,
     lockSha256: kit.lockSha256,
     manifestSha256,
-    buildNodeSha256: sha256File(join(directory, clientPlatform().buildNode)),
+    buildNodeSha256: sha256File(join(directory, platform.buildNode)),
   });
   const bytes = JSON.stringify(metadata, null, 2) + '\n';
-  const sums = `${digest(bytes)}  client-inputs-release.json\n${manifestSha256}  windows-client.json\n`;
+  const sums = `${digest(bytes)}  client-inputs-release.json\n${manifestSha256}  ${platform.kitManifest}\n`;
   for (const [name, content] of [
     ['client-inputs-release.json', bytes],
     ['release-public.pem', publicKey.export({ type: 'spki', format: 'pem' })],
@@ -71,16 +75,21 @@ if (
         devkit: { type: 'string' },
         'key-file': { type: 'string' },
         version: { type: 'string' },
+        target: { type: 'string', default: CLIENT_TARGET },
       },
     });
     if (!o.devkit || !o['key-file'])
       throw new Error('需 --devkit、--key-file、--version');
     console.log(
-      JSON.stringify(signInputs(o.devkit, o['key-file'], o.version), null, 2),
+      JSON.stringify(
+        signInputs(o.devkit, o['key-file'], o.version, { target: o.target }),
+        null,
+        2,
+      ),
     );
   } catch {
     console.error(
-      'Windows 输入附件签名失败，请检查输入清单、发行私钥权限和版本。',
+      '客户端输入附件签名失败，请检查输入清单、发行私钥权限和版本。',
     );
     process.exitCode = 1;
   }

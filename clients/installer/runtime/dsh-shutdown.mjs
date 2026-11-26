@@ -1,4 +1,3 @@
-/* global setInterval, clearInterval */
 // Node's Windows kill() terminates directly. Deliver the signal to the pinned
 // DSH CLI's own JS handler over its inherited private IPC channel instead.
 if (process.channel) {

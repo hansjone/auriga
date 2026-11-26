@@ -1,4 +1,4 @@
-/** Windows devkit identity. Approval of the manifest digest is independent of the kit. */
+/** Desktop client-kit identity. Approval of the manifest digest is independent of the kit. */
 import { createHash } from 'node:crypto';
 import {
   existsSync,
@@ -21,33 +21,8 @@ import { assertToolsAllowed, readBaseline } from './baseline.mjs';
 
 export const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 export const HASH = /^[a-f0-9]{64}$/;
-/** 读取并校验 scripts/client-release/build-node.json（版本 + 钉死的 win-x64 zip SHA-256）。 */
-export function readBuildNodePin(root = ROOT) {
-  const pin = JSON.parse(
-    readFileSync(join(root, 'scripts/client-release/build-node.json'), 'utf8'),
-  );
-  if (typeof pin.version !== 'string' || !/^\d+\.\d+\.\d+$/.test(pin.version))
-    throw new Error('Windows 目标源码的构建 Node 版本无效');
-  if (
-    typeof pin.winX64ZipSha256 !== 'string' ||
-    !HASH.test(pin.winX64ZipSha256)
-  )
-    throw new Error(
-      'build-node.json 缺少有效的 winX64ZipSha256（须为 64 位小写十六进制）',
-    );
-  return {
-    version: pin.version,
-    winX64ZipSha256: pin.winX64ZipSha256,
-    sources: Array.isArray(pin.winX64ZipSha256Sources)
-      ? pin.winX64ZipSha256Sources
-      : [],
-  };
-}
 
-export const BUILD_NODE_PIN = readBuildNodePin(ROOT);
-export const BUILD_NODE = BUILD_NODE_PIN.version;
-export const BUILD_NODE_ZIP_SHA256 = BUILD_NODE_PIN.winX64ZipSha256;
-export const LOCK_PATHS = [
+const SHARED_LOCK_PATHS = [
   'package.json',
   'pnpm-workspace.yaml',
   '.npmrc',
@@ -55,16 +30,50 @@ export const LOCK_PATHS = [
   'clients/dsh-plugin/package.json',
   'clients/dsh-plugin/package-lock.json',
   'clients/installer/upstream.json',
-  'clients/installer/locks/python-win-x64.json',
 ];
+
+/** 读取并校验 scripts/client-release/build-node.json（版本 + 各目标归档 SHA-256）。 */
+export function readBuildNodePin(root = ROOT, target = CLIENT_TARGET) {
+  const platform = clientPlatform(target);
+  const pin = JSON.parse(
+    readFileSync(join(root, 'scripts/client-release/build-node.json'), 'utf8'),
+  );
+  if (typeof pin.version !== 'string' || !/^\d+\.\d+\.\d+$/.test(pin.version))
+    throw new Error('目标源码的构建 Node 版本无效');
+  const shaField = platform.buildNodeShaField;
+  const sha = pin[shaField];
+  if (typeof sha !== 'string' || !HASH.test(sha))
+    throw new Error(
+      `build-node.json 缺少有效的 ${shaField}（须为 64 位小写十六进制）`,
+    );
+  const sourcesField = `${shaField}Sources`;
+  return {
+    version: pin.version,
+    shaField,
+    archiveSha256: sha,
+    // Back-compat for Windows callers that still read winX64ZipSha256.
+    winX64ZipSha256: pin.winX64ZipSha256,
+    linuxX64TarSha256: pin.linuxX64TarSha256,
+    sources: Array.isArray(pin[sourcesField]) ? pin[sourcesField] : [],
+  };
+}
+
+export const BUILD_NODE_PIN = readBuildNodePin(ROOT, CLIENT_TARGET);
+export const BUILD_NODE = BUILD_NODE_PIN.version;
+export const BUILD_NODE_ZIP_SHA256 = BUILD_NODE_PIN.winX64ZipSha256;
+export function lockPathsForTarget(target = CLIENT_TARGET) {
+  return [...SHARED_LOCK_PATHS, clientPlatform(target).pythonLock];
+}
+/** @deprecated Prefer lockPathsForTarget(target); default remains win-x64. */
+export const LOCK_PATHS = lockPathsForTarget(CLIENT_TARGET);
 export const digest = (value) =>
   createHash('sha256').update(value).digest('hex');
-export function dependencyLocks(root = ROOT) {
+export function dependencyLocks(root = ROOT, target = CLIENT_TARGET) {
   const config = JSON.parse(
     readFileSync(join(root, 'clients/installer/upstream.json')),
   );
   const paths = [
-    ...LOCK_PATHS,
+    ...lockPathsForTarget(target),
     `clients/installer/locks/dsh-${config.dsh}.package-lock.json`,
   ];
   // Every workspace manifest participates in the pnpm frozen-lockfile check.
@@ -86,22 +95,35 @@ export function dependencyLocks(root = ROOT) {
     [...new Set(paths)].sort().map((p) => [p, sha256File(join(root, p))]),
   );
 }
-export function lockIdentity(root = ROOT) {
-  const locks = dependencyLocks(root);
-  const buildNode = readBuildNodePin(root).version;
+export function lockIdentity(root = ROOT, target = CLIENT_TARGET) {
+  const platform = clientPlatform(target).target;
+  const locks = dependencyLocks(root, target);
+  const buildNode = readBuildNodePin(root, target).version;
   return {
     buildNode,
     locks,
     lockSha256: digest(
       canonical({
         schema: 1,
-        platform: CLIENT_TARGET,
+        platform,
         buildNode,
         locks,
       }),
     ),
   };
 }
+const KIT_META_FILES = new Set([
+  'windows-client.json',
+  'client-inputs-release.json',
+  'SHA256SUMS',
+  'SHA256SUMS.sig',
+  'release-public.pem',
+  // 现场联网派生套件的审阅清单：含派生后的清单摘要，只能在封存之后写入。
+  'site-dependencies.json',
+  // 可写缓存条目元数据（deps fetch/import），不参与套件内容摘要。
+  'auriga-origin.json',
+]);
+
 export function inventory(root, prefix = '') {
   const rows = [];
   for (const entry of readdirSync(join(root, prefix), {
@@ -112,19 +134,7 @@ export function inventory(root, prefix = '') {
     if (info.isSymbolicLink() || (!info.isFile() && !info.isDirectory()))
       throw new Error(`拒绝特殊输入：${path}`);
     if (info.isDirectory()) rows.push(...inventory(root, path));
-    else if (
-      ![
-        'windows-client.json',
-        'client-inputs-release.json',
-        'SHA256SUMS',
-        'SHA256SUMS.sig',
-        'release-public.pem',
-        // 现场联网派生套件的审阅清单：含派生后的清单摘要，只能在封存之后写入。
-        'site-dependencies.json',
-        // 可写缓存条目元数据（deps fetch/import），不参与套件内容摘要。
-        'auriga-origin.json',
-      ].includes(path)
-    )
+    else if (!KIT_META_FILES.has(path))
       rows.push({
         path,
         bytes: info.size,
@@ -133,19 +143,25 @@ export function inventory(root, prefix = '') {
   }
   return rows.sort((a, b) => a.path.localeCompare(b.path, 'en'));
 }
-export function sealInputs(directory, tools, root = ROOT) {
-  const identity = lockIdentity(root);
+export function sealInputs(
+  directory,
+  tools,
+  root = ROOT,
+  target = CLIENT_TARGET,
+) {
+  const platform = clientPlatform(target);
+  const identity = lockIdentity(root, target);
   const files = inventory(directory);
-  const manifest = stampRequires('windows-client.json', {
+  const manifest = stampRequires(platform.kitManifest, {
     schema: 1,
-    platform: CLIENT_TARGET,
+    platform: platform.target,
     ...identity,
     tools,
     files,
     bytes: files.reduce((n, f) => n + f.bytes, 0),
   });
   const bytes = JSON.stringify(manifest, null, 2) + '\n';
-  writeFileSync(join(directory, 'windows-client.json'), bytes, { flag: 'wx' });
+  writeFileSync(join(directory, platform.kitManifest), bytes, { flag: 'wx' });
   return { ...manifest, manifestSha256: digest(bytes) };
 }
 const LOCK_HINT = (message) =>
@@ -164,15 +180,17 @@ export function verifyInputs(
     // 现场系统工具基线：对象、基线 JSON 路径，或可写缓存目录（内含 client-tools-baseline.json）。
     // 只放宽系统工具比对，绝不绕过非工具输入摘要。
     toolsBaseline,
+    target = CLIENT_TARGET,
   } = {},
 ) {
   if (lockPolicy !== 'strict' && lockPolicy !== 'skip')
     throw new Error('lockPolicy 无效');
   if (lockPolicy === 'skip' && !verifyKey && !trustFingerprint)
     throw new Error('跳过依赖锁一致性的前提是套件经过发行签名校验');
+  const platform = clientPlatform(target);
   physical(directory);
-  const file = join(directory, 'windows-client.json');
-  const identity = lockIdentity(root);
+  const file = join(directory, platform.kitManifest);
+  const identity = lockIdentity(root, target);
   let signedLockSha256;
   if (verifyKey || trustFingerprint) {
     const signed = verifySignedInventory(directory, {
@@ -183,7 +201,7 @@ export function verifyInputs(
     checkRequires('client-inputs-release.json', release);
     if (
       release.schemaVersion !== 1 ||
-      release.platform !== CLIENT_TARGET ||
+      release.platform !== platform.target ||
       !HASH.test(release.manifestSha256 ?? '') ||
       !HASH.test(release.lockSha256 ?? '')
     )
@@ -198,17 +216,17 @@ export function verifyInputs(
   if (!lstatSync(file).isFile()) throw new Error('离线清单必须为普通文件');
   const manifestBytes = readFileSync(file);
   if (!HASH.test(expected ?? '') || digest(manifestBytes) !== expected)
-    throw new Error('Windows devkit 清单缺少独立批准摘要或摘要不符');
+    throw new Error('客户端套件清单缺少独立批准摘要或摘要不符');
   const manifest = JSON.parse(manifestBytes);
-  checkRequires('windows-client.json', manifest);
+  checkRequires(platform.kitManifest, manifest);
   if (lockPolicy === 'skip') {
-    if (manifest.schema !== 1 || manifest.platform !== CLIENT_TARGET)
-      throw new Error('Windows devkit 清单格式无效');
+    if (manifest.schema !== 1 || manifest.platform !== platform.target)
+      throw new Error('客户端套件清单格式无效');
     // 基础套件自洽：清单记录的锁必须与其 lockSha256 对应，再与签名元数据一致。
     const own = digest(
       canonical({
         schema: 1,
-        platform: CLIENT_TARGET,
+        platform: platform.target,
         buildNode: manifest.buildNode,
         locks: manifest.locks,
       }),
@@ -221,19 +239,17 @@ export function verifyInputs(
       manifest.lockSha256 !== signedLockSha256 ||
       Object.values(manifest.locks).some((v) => !HASH.test(v))
     )
-      throw new Error('Windows devkit 清单记录的依赖锁与其摘要不符');
+      throw new Error('客户端套件清单记录的依赖锁与其摘要不符');
   } else if (
     manifest.schema !== 1 ||
-    manifest.platform !== CLIENT_TARGET ||
+    manifest.platform !== platform.target ||
     manifest.buildNode !== identity.buildNode ||
     manifest.lockSha256 !== identity.lockSha256 ||
     canonical(manifest.locks) !== canonical(identity.locks)
   )
-    throw new Error(
-      LOCK_HINT('Windows devkit 依赖锁不匹配，请准备对应锁摘要套件'),
-    );
+    throw new Error(LOCK_HINT('客户端套件依赖锁不匹配，请准备对应锁摘要套件'));
   if (!Array.isArray(manifest.files) || !manifest.files.length)
-    throw new Error('Windows devkit 输入清单为空');
+    throw new Error('客户端套件输入清单为空');
   const actual = inventory(directory);
   const indexed = new Map(actual.map((f) => [f.path, f]));
   const seen = new Set();
@@ -264,8 +280,8 @@ export function verifyInputs(
     throw new Error('离线输入体积不符');
   let toolsMatch;
   if (checkTools) {
-    const tools = systemTools();
-    const baseline = resolveToolsBaseline(toolsBaseline);
+    const tools = systemTools(target);
+    const baseline = resolveToolsBaseline(toolsBaseline, target);
     toolsMatch = assertToolsAllowed(tools, manifest.tools, baseline);
   }
   return {
@@ -276,7 +292,7 @@ export function verifyInputs(
   };
 }
 
-function resolveToolsBaseline(value) {
+function resolveToolsBaseline(value, target = CLIENT_TARGET) {
   if (value == null || value === false) return null;
   if (typeof value === 'object' && Array.isArray(value.tools)) return value;
   if (typeof value === 'string') {
@@ -288,7 +304,7 @@ function resolveToolsBaseline(value) {
     const raw = JSON.parse(readFileSync(path, 'utf8'));
     if (
       raw?.schemaVersion !== 1 ||
-      raw.platform !== CLIENT_TARGET ||
+      raw.platform !== clientPlatform(target).target ||
       !Array.isArray(raw.tools) ||
       !raw.tools.length
     )
@@ -297,12 +313,19 @@ function resolveToolsBaseline(value) {
   }
   throw new Error('toolsBaseline 无效');
 }
-export function systemTools() {
-  if (
-    process.platform !== clientPlatform().os ||
-    process.arch !== clientPlatform().arch
-  )
-    throw new Error('Windows x64 构建机必需');
+export function systemTools(target = CLIENT_TARGET) {
+  const platform = clientPlatform(target);
+  if (process.platform !== platform.os || process.arch !== platform.arch)
+    throw new Error(
+      `${platform.target} 构建机必需（${platform.os}/${platform.arch}）`,
+    );
+  if (platform.target === 'linux-x64') {
+    // Linux tray/runtime uses Node + notify-send/xdg-open; packaging needs tar.
+    return ['/bin/tar', '/usr/bin/tar']
+      .filter((path) => existsSync(path))
+      .slice(0, 1)
+      .map((path) => ({ path, sha256: sha256File(path) }));
+  }
   const windows = process.env.SystemRoot ?? 'C:\\Windows';
   return [
     'System32/tar.exe',

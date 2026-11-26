@@ -1,5 +1,4 @@
-import { wrapSetupFixture } from './helpers.mjs';
-/* global fetch */
+import { wrapSetupFixture, writeStageZip } from './helpers.mjs';
 /** Isolated publisher/transport substitute, real archive checks and install transactions. */
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -14,9 +13,7 @@ import {
   existsSync,
 } from 'node:fs';
 import { join } from 'node:path';
-import { spawnSync } from 'node:child_process';
 import { signRelease, reviewRelease } from '../scripts/sign-release.mjs';
-import { systemTool } from '../runtime/system-tools.mjs';
 import {
   approvePending,
   createUpdater,
@@ -31,6 +28,10 @@ import {
   launchEnv,
 } from '../runtime/core.mjs';
 import { buildPayload, tempBase } from './helpers.mjs';
+import {
+  desktopPlatform,
+  hostDesktopTarget,
+} from '../runtime/desktop-platform.mjs';
 
 test('沙箱：发布、检测、点击、退出安装；坏包拒绝，旧数据保留', async (t) => {
   const base = tempBase(t),
@@ -53,10 +54,7 @@ test('沙箱：发布、检测、点击、退出安装；坏包拒绝，旧数�
   mkdirSync(stage);
   cpSync(next.dir, join(stage, 'payload'), { recursive: true });
   const zip = join(base, 'desktop.zip');
-  assert.equal(
-    spawnSync(systemTool('tar'), ['-a', '-cf', zip, '-C', stage, '.']).status,
-    0,
-  );
+  writeStageZip(stage, zip);
   wrapSetupFixture(zip);
   const signingOptions = {
     payload: next.dir,
@@ -66,6 +64,7 @@ test('沙箱：发布、检测、点击、退出安装；坏包拒绝，旧数�
     publishedAt: new Date().toISOString(),
     minimumVersion: '1.0.0',
     notAfter: new Date(Date.now() + 86400000).toISOString(),
+    platform: hostDesktopTarget(),
   };
   let manifest = signRelease({
     ...signingOptions,
@@ -79,7 +78,7 @@ test('沙箱：发布、检测、点击、退出安装；坏包拒绝，旧数�
     // The isolated publisher closes each reply; avoid stale keep-alive reuse
     // while Windows copies/scans the new runtime between requests.
     res.setHeader('Connection', 'close');
-    if (req.url.endsWith('/latest')) {
+    if (/\/latest(?:\?|$)/.test(req.url ?? '')) {
       if (withdrawn) {
         res.writeHead(404);
         res.end();
@@ -171,7 +170,12 @@ test('沙箱：发布、检测、点击、退出安装；坏包拒绝，旧数�
     readFileSync(join(profileDir(dataHome), 'conversations.json'), 'utf8'),
     'keep',
   );
-  assert.equal(existsSync(join(root, 'desktop-pending', 'desktop.exe')), true);
+  assert.equal(
+    existsSync(
+      join(root, 'desktop-pending', desktopPlatform().stagedPackageName),
+    ),
+    true,
+  );
   assert.equal(updater.status().restartRequired, true);
   await applyPending(root, {
     publicKey: keys.publicKey,

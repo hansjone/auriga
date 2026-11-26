@@ -218,6 +218,7 @@ export function startOfflineBuild(options, hooks = {}) {
   const kit = verifyInputs(options.devkit, options['devkit-sha256'], ROOT, {
     ...kitTrust(options),
     toolsBaseline: toolsBaselineOption(),
+    target: options.target,
   });
   launchOfflineBuild(options, kit, hooks);
 }
@@ -303,7 +304,7 @@ export function launchOfflineBuild(options, kit, hooks = {}) {
   try {
     copyBuildSource(sourceRoot, buildRoot);
     result = spawn(
-      join(kit.directory, clientPlatform().buildNode),
+      join(kit.directory, clientPlatform(options.target).buildNode),
       [
         join(buildRoot, 'scripts/client-release/cli.mjs'),
         '_build-worker',
@@ -424,6 +425,7 @@ export async function buildWorker(optionsFile, hooks = {}) {
   const kit = verifyInputs(o.devkit, o['devkit-sha256'], root, {
     ...kitTrust(o),
     toolsBaseline: toolsBaselineOption(),
+    target: o.target,
     ...(hooks.checkTools === false ? { checkTools: false } : {}),
   });
   // ROOT 是 <out>/build-src 里的副本；源码身份与“构建期间未变化”都按用户的源码目录。
@@ -471,7 +473,11 @@ export async function buildWorker(optionsFile, hooks = {}) {
       }
     : process.env;
   const broker = join(o.out, 'broker');
-  run([join(root, 'clients/shell-auth/build.mjs'), broker], brokerEnv);
+  const target = clientPlatform(o.target);
+  const brokerArgs = [join(root, 'clients/shell-auth/build.mjs'), broker];
+  // Linux Desktop packages use Unix IPC; skip the Windows helper compiler.
+  if (target.target === 'linux-x64') brokerArgs.push('--skip-windows-helper');
+  run(brokerArgs, brokerEnv);
   const pluginVersion = JSON.parse(
     readFileSync(join(root, 'clients/dsh-plugin/package.json')),
   ).version;
@@ -487,12 +493,13 @@ export async function buildWorker(optionsFile, hooks = {}) {
   ]);
   const result = await build({
     offline: true,
+    target: target.target,
     'offline-inputs': kit.directory,
     'offline-inputs-sha256': kit.manifestSha256,
     'broker-artifact': broker,
     'plugin-tgz': join(pluginOut, `auriga-dsh-${pluginVersion}.tgz`),
     out: o.out,
-    exe: true,
+    ...(target.target === 'win-x64' ? { exe: true } : {}),
     'desktop-version': o.version,
     'release-public-key': o['release-public-key'],
     'resource-trust-json': o['resource-trust-json'],
@@ -512,10 +519,11 @@ export async function buildWorker(optionsFile, hooks = {}) {
     throw new Error('源码在构建期间发生变化，请从新目录重建');
   if (readFileSync(process.env.AURIGA_CLIENT_NETWORK_LOG, 'utf8'))
     throw new Error('离线构建检测到被拒绝的联网尝试');
+  const packageArchive = result.exe ?? result.archive;
   const record = makeRelease({
     payload: join(result.stage, 'payload'),
-    archive: result.exe,
-    exe: result.exe,
+    archive: packageArchive,
+    ...(result.exe ? { exe: result.exe } : {}),
     output: o.out,
     sequence: policy.sequence,
     minimumVersion: policy.minimumVersion,
@@ -563,7 +571,8 @@ export async function buildWorker(optionsFile, hooks = {}) {
   console.log(
     JSON.stringify(
       {
-        exe: result.exe,
+        exe: result.exe ?? null,
+        archive: packageArchive,
         zip: result.zip,
         record: join(o.out, 'desktop-build.json'),
         unsignedManifest: join(o.out, 'desktop-release.unsigned.json'),

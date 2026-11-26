@@ -4,7 +4,6 @@ import {
   unpackSetup,
 } from './setup-archive.mjs';
 import { BRAND_NAME } from './brand.mjs';
-/* global clearTimeout, AbortController, AbortSignal, fetch */
 /** Anonymous transport is bound to the configured platform origin. */
 import {
   mkdirSync,
@@ -44,6 +43,22 @@ import {
   finishUpdateAttempt,
   updateWasRolledBack,
 } from './desktop-report.mjs';
+import { desktopPlatform } from './desktop-platform.mjs';
+
+function desktopHost() {
+  return desktopPlatform();
+}
+
+function latestPath(channel) {
+  const platform = desktopHost().target;
+  const query = new URLSearchParams({ platform });
+  if (channel && channel !== 'stable') query.set('channel', channel);
+  return `latest?${query}`;
+}
+
+function stagedPackagePath(rootOrDir) {
+  return join(rootOrDir, desktopHost().stagedPackageName);
+}
 
 function logUpdate(root, entry) {
   const file = join(root, 'desktop-update.log');
@@ -66,7 +81,7 @@ function discardIncompletePending(root) {
   const queued = join(root, 'desktop-pending');
   if (!existsSync(queued)) return false;
   try {
-    for (const name of ['release.json', 'desktop.exe']) {
+    for (const name of ['release.json', desktopHost().stagedPackageName]) {
       const file = statSync(join(queued, name));
       if (!file.isFile() || file.size === 0)
         throw Object.assign(new Error('pending input incomplete'), {
@@ -151,16 +166,67 @@ function findReusableSubtrees(oldDir, oldManifest, nextManifest) {
   return subtrees;
 }
 
-export function extractArchive(archive, directory, { reuse = null } = {}) {
-  mkdirSync(directory);
-  const zip = join(directory, 'payload.zip');
-  unpackSetup(archive, zip);
-  // Only a fully signature/hash-verified publisher archive reaches tar.
+/** Prefer archive content over host media so Linux CI can still unpack Win setup fixtures. */
+function isGzipDesktopPackage(archive) {
+  if (isZipSetupArchive(archive)) return false;
+  if (/\.tar\.gz$/i.test(archive) || /\.tgz$/i.test(archive)) return true;
+  return desktopHost().packageMedia === 'tar.gz';
+}
+
+/** GNU tar cannot read ZIP; Windows/bsdtar can. Fall back to python3 zipfile. */
+function listZipEntries(zip) {
   const listed = spawnSync(systemTool('tar'), ['-tf', zip], {
     encoding: 'utf8',
     maxBuffer: 32 * 1024 ** 2,
   });
-  const entries = listed.stdout.split(/\r?\n/).filter(Boolean);
+  if (listed.status === 0) return listed;
+  return spawnSync(
+    'python3',
+    [
+      '-c',
+      'import zipfile,sys\nprint("\\n".join(zipfile.ZipFile(sys.argv[1]).namelist()))\n',
+      zip,
+    ],
+    { encoding: 'utf8', maxBuffer: 32 * 1024 ** 2 },
+  );
+}
+
+function extractZipArchive(zip, directory, excludeArgs = []) {
+  const withTar = spawnSync(
+    systemTool('tar'),
+    ['-xf', zip, '-C', directory, ...excludeArgs],
+    { encoding: 'utf8' },
+  );
+  if (!withTar.error && withTar.status === 0) return withTar;
+  if (excludeArgs.length) return withTar;
+  return spawnSync(
+    'python3',
+    [
+      '-c',
+      'import zipfile,sys\nzipfile.ZipFile(sys.argv[1]).extractall(sys.argv[2])\n',
+      zip,
+      directory,
+    ],
+    { encoding: 'utf8' },
+  );
+}
+
+export function extractArchive(archive, directory, { reuse = null } = {}) {
+  mkdirSync(directory);
+  let zip = archive;
+  const gzip = isGzipDesktopPackage(archive);
+  if (!gzip) {
+    zip = join(directory, 'payload.zip');
+    unpackSetup(archive, zip);
+  }
+  // Only a fully signature/hash-verified publisher archive reaches extract.
+  const listed = gzip
+    ? spawnSync(systemTool('tar'), ['-tzf', zip], {
+        encoding: 'utf8',
+        maxBuffer: 32 * 1024 ** 2,
+      })
+    : listZipEntries(zip);
+  const entries = (listed.stdout || '').split(/\r?\n/).filter(Boolean);
   if (
     listed.status !== 0 ||
     entries.some(
@@ -186,11 +252,13 @@ export function extractArchive(archive, directory, { reuse = null } = {}) {
       excludeArgs.push('--exclude', `./payload/${sub}`);
       excludeArgs.push('--exclude', `./payload/${sub}/*`);
     }
-    const partial = spawnSync(
-      systemTool('tar'),
-      ['-xf', zip, '-C', directory, ...excludeArgs],
-      { encoding: 'utf8' },
-    );
+    const partial = gzip
+      ? spawnSync(
+          systemTool('tar'),
+          ['-xzf', zip, '-C', directory, ...excludeArgs],
+          { encoding: 'utf8' },
+        )
+      : extractZipArchive(zip, directory, excludeArgs);
     if (!partial.error && partial.status === 0) {
       try {
         for (const sub of reusable) {
@@ -207,16 +275,19 @@ export function extractArchive(archive, directory, { reuse = null } = {}) {
     }
   }
   if (!extracted) {
-    const result = spawnSync(systemTool('tar'), ['-xf', zip, '-C', directory], {
-      encoding: 'utf8',
-    });
+    const result = gzip
+      ? spawnSync(systemTool('tar'), ['-xzf', zip, '-C', directory], {
+          encoding: 'utf8',
+        })
+      : extractZipArchive(zip, directory);
     if (result.error) throw result.error;
     if (result.status !== 0)
       throw Object.assign(new Error('update archive extraction failed'), {
         code: 'desktop.extract_failed',
       });
   }
-  rmSync(zip);
+  // Only remove the intermediate ZIP peeled from a Windows setup archive.
+  if (zip !== archive) rmSync(zip);
   return payloadDir;
 }
 
@@ -272,13 +343,16 @@ export function createUpdater({
   const progress = (phase, extra = {}) =>
     change((state) => ({ ...state, phase, ...extra }));
   const verified = (envelope, state = load()) => {
-    return verifyRelease(envelope, {
+    const body = verifyRelease(envelope, {
       publicKey,
       now: now(),
       currentVersion: current().version,
       ...state.channelWatermarks?.[state.channel ?? 'stable'],
       channel: state.channel ?? 'stable',
     });
+    if (body.platform !== desktopHost().target)
+      throw new Error('release platform mismatch');
+    return body;
   };
   const status = (state) => {
     let available = state.available ?? null;
@@ -367,11 +441,7 @@ export function createUpdater({
         const observed = load();
         const channel = observed.channel ?? 'stable';
         const response = await request(
-          platformUrl(
-            origin,
-            channel === 'stable' ? 'latest' : 'latest?channel=beta',
-            binding,
-          ),
+          platformUrl(origin, latestPath(channel), binding),
           {
             redirect: 'error',
           },
@@ -513,7 +583,7 @@ export function createUpdater({
           )
             throw new Error('cannot secure update staging');
         }
-        const archive = join(temporary, 'desktop.exe');
+        const archive = stagedPackagePath(temporary);
         retain = true;
         progress('downloading', {
           error: null,
@@ -585,11 +655,7 @@ export function createUpdater({
         // A withdrawn or replaced release must not be queued after a long transfer.
         retain = true;
         const latestResponse = await request(
-          platformUrl(
-            origin,
-            body.channel === 'stable' ? 'latest' : 'latest?channel=beta',
-            binding,
-          ),
+          platformUrl(origin, latestPath(body.channel), binding),
           { redirect: 'error', signal: controller.signal },
         );
         if (latestResponse.status === 404) {
@@ -942,11 +1008,7 @@ async function applyPendingLocked(
     retain = true;
     note('check-release');
     const response = await request(
-      platformUrl(
-        binding.origin,
-        body.channel === 'stable' ? 'latest' : 'latest?channel=beta',
-        binding,
-      ),
+      platformUrl(binding.origin, latestPath(body.channel), binding),
       { redirect: 'error', signal: AbortSignal.timeout(15000) },
     );
     if (response.status === 404) {
@@ -989,7 +1051,7 @@ async function applyPendingLocked(
       return false;
     }
     note('verify-archive');
-    const archive = join(queued, 'desktop.exe');
+    const archive = stagedPackagePath(queued);
     const checkArchive = () => {
       if (pendingInput(() => sha256File(archive)) !== body.sha256) {
         retain = false;
