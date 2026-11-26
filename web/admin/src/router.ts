@@ -115,6 +115,16 @@ export const router = createRouter({
           }),
         },
         { path: 'members', component: MembersView },
+        {
+          path: 'members/:memberId',
+          component: () => import('./views/members/MemberMigrationDetail.vue'),
+          props: true,
+        },
+        {
+          path: 'instances/migration',
+          component: () =>
+            import('./views/placements/PlacementAdministration.vue'),
+        },
         { path: 'runtime/devices', component: DevicesView },
         { path: 'nodes', component: NodesView },
         { path: 'instances', component: InstancesView },

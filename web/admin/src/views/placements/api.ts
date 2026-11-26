@@ -101,7 +101,41 @@ const headers = (key: string, etag?: string) => ({
   'Idempotency-Key': key,
   ...(etag ? { 'If-Match': etag } : {}),
 });
+export type Candidate = Schemas['DshMigrationCandidate'];
+export function selectable(c: Candidate) {
+  return (
+    c.eligibility === 'eligible' &&
+    c.legacyInstances.length === 1 &&
+    !['disabled', 'offboarded'].includes(c.memberStatus || '')
+  );
+}
+export type Preflight = Schemas['DshPreflight'];
+export type Summary = Schemas['DshRebuildSummary'];
 export const placementAdminApi = {
+  candidates: (
+    q: string,
+    offset: number,
+    signal: AbortSignal,
+    memberId?: string,
+  ) => {
+    const query = new URLSearchParams({
+      q,
+      offset: String(offset),
+      limit: '50',
+    });
+    if (memberId) query.set('memberId', memberId);
+    return apiClient.get<Schemas['DshMigrationCandidates']>(
+      `${base}/placement-migration-candidates?${query}`,
+      { signal, cache: 'no-store' },
+    );
+  },
+  history: (signal: AbortSignal) =>
+    apiClient.get<Schemas['DshRebuildHistory']>(plans, {
+      signal,
+      cache: 'no-store',
+    }),
+  preflight: (members: PlanRequest['members'], signal: AbortSignal) =>
+    apiClient.post<Preflight>(plans + '/preflight', { members }, { signal }),
   plan: (id: string, signal: AbortSignal) =>
     readTagged<Plan>(`${plans}/${encodeURIComponent(id)}`, signal),
   create: (body: PlanRequest, key: string, signal: AbortSignal) =>

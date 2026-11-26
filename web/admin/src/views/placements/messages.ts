@@ -1,5 +1,6 @@
 export const placementMessages = {
   'zh-CN': {
+    migrateLegacy: '迁移到共享',
     abandonPending:
       '放弃原幂等键并重新读取？404无法证明操作未执行。请先核对原操作状态，再决定是否提交新切换。',
     placementStates: {
@@ -69,6 +70,7 @@ export const placementMessages = {
     },
   },
   en: {
+    migrateLegacy: 'Migrate to shared',
     abandonPending:
       'Abandon the original key and reread? A 404 cannot prove the operation never ran. Check its status before deciding to submit a new switch.',
     placementStates: {

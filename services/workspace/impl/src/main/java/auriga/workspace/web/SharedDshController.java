@@ -159,7 +159,11 @@ public class SharedDshController {
   }
 
   private AurigaPrincipal administrator(HttpServletRequest request, boolean write) {
-    var p = caller(request, write);
+    return administrator(request, write, write);
+  }
+
+  private AurigaPrincipal administrator(HttpServletRequest request, boolean write, boolean csrf) {
+    var p = caller(request, csrf);
     if (!p.isAdminContext()
         || !p.hasPermission("workspace.placements." + (write ? "write" : "read")))
       throw new AurigaException(CommonErrors.FORBIDDEN);
@@ -234,6 +238,36 @@ public class SharedDshController {
       HttpServletRequest request) {
     var p = administrator(request, false);
     return response(admin.lookup(UUID.fromString(p.subject()), memberId, key), false);
+  }
+
+  @GetMapping("/admin/placement-migration-candidates")
+  @AdminOnly
+  @RequiresPermission("workspace.placements.read")
+  public ResponseEntity<java.util.Map<String, Object>> candidates(
+      @RequestParam(defaultValue = "") String q,
+      @RequestParam(defaultValue = "50") int limit,
+      @RequestParam(defaultValue = "0") int offset,
+      @RequestParam(required = false) UUID memberId,
+      HttpServletRequest request) {
+    administrator(request, false);
+    return response(admin.candidates(q, limit, offset, memberId), false);
+  }
+
+  @GetMapping("/admin/placement-rebuild-plans")
+  @AdminOnly
+  @RequiresPermission("workspace.placements.read")
+  public ResponseEntity<java.util.Map<String, Object>> plans(HttpServletRequest request) {
+    administrator(request, false);
+    return response(admin.plans(), false);
+  }
+
+  @PostMapping("/admin/placement-rebuild-plans/preflight")
+  @AdminOnly
+  @RequiresPermission("workspace.placements.read")
+  public ResponseEntity<java.util.Map<String, Object>> preflight(
+      @RequestBody SharedDshAdmin.PreflightRequest body, HttpServletRequest request) {
+    administrator(request, false, true);
+    return response(admin.preflight(body), false);
   }
 
   @PostMapping("/admin/placement-rebuild-plans")
