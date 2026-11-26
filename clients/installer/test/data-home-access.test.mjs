@@ -56,8 +56,7 @@ test('ensureDataHomeWritable refuses a profile junction before mutating the outs
   chmodSync(outsideCordis, 0o444);
   const beforeMode = statSync(outsideCordis).mode & 0o222;
   assert.equal(beforeMode, 0);
-  const linkType =
-    process.platform === 'win32' ? 'junction' : 'dir';
+  const linkType = process.platform === 'win32' ? 'junction' : 'dir';
   symlinkSync(outside, join(profiles, 'auriga'), linkType);
   assert.throws(
     () => ensureDataHomeWritable(dataHome),
