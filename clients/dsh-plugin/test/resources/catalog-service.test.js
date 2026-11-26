@@ -14,6 +14,7 @@ import { join } from 'node:path';
 import { catalogService } from './broker-fixture.js';
 import { createPrivateSkills } from '../../src/resources/private-skills.js';
 import { sha } from '../../src/resources/desktop-skills.js';
+import { acquireHostLock } from '../../src/resources/host-lock.js';
 import { requireSchema } from '../../src/resources/schema.js';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
@@ -43,6 +44,29 @@ function service(f, extra = {}) {
     ...extra,
   });
 }
+
+test('catalog lists resources during host lock contention and reconciles shortly after release', async (t) => {
+  const f = catalogFixture(t);
+  let now = 0;
+  const s = service(f, { now: () => now });
+  const lock = acquireHostLock(f.home);
+  try {
+    const result = await s.list();
+    assert.equal(result.hostBusy, true);
+    assert.equal(result.pendingRestart, false);
+    assert.equal(result.reportPending, true);
+    assert.equal(result.items[0].resource.identity.packageId, f.packageId);
+    assert.equal(result.items[0].state, 'applying');
+    lock.check();
+  } finally {
+    lock.release();
+  }
+  const count = f.requests.length;
+  now = 1001;
+  await s.reconcile();
+  assert.ok(f.requests.length > count);
+  assert.equal((await s.list()).hostBusy, false);
+});
 test('Desktop writes frozen prepared files, waits outside the lock for E, then switches and only reports after actual source and bytes match', async (t) => {
   const f = catalogFixture(t),
     s = service(f);

@@ -6,6 +6,8 @@ import {
   writeFileSync,
   existsSync,
   unlinkSync,
+  mkdirSync,
+  rmdirSync,
 } from 'node:fs';
 import { join } from 'node:path';
 import { catalogFixture } from './catalog-fixture.js';
@@ -109,6 +111,66 @@ test('missing policy defaults true, but corrupt persisted policy denies until au
   assert.equal(damaged.read(), false);
   damaged.write(true);
   assert.equal(nativePluginPolicy(options).read(), true);
+});
+
+test('catalog remains readable after policy write failure and keeps the stricter policy until recovery', async (t) => {
+  const config = { allowPersonalPlugins: false };
+  const f = catalogFixture(t, undefined, config);
+  const enforced = [];
+  const service = catalogService({
+    ...f,
+    privateSkills: {},
+    host: {},
+    pluginHost: {
+      enforcePersonalPolicy: async (allowed) => {
+        enforced.push(allowed);
+        return { blocked: [], restartRequired: false };
+      },
+    },
+  });
+  await service.list();
+  const base = join(f.home, 'auriga/native-plugin-policy');
+  const parent = join(
+    base,
+    readdirSync(base)[0],
+    f.who.tenantId,
+    f.who.ownerId,
+  );
+  const name = f.who.hostId + '.json';
+  const file = join(parent, name);
+  const legacyTemporary = name + '.00000000-0000-4000-8000-000000000000.tmp';
+  writeFileSync(join(parent, legacyTemporary), 'existing temporary file');
+  const blockReplacement = () => {
+    unlinkSync(file);
+    mkdirSync(file);
+  };
+  blockReplacement();
+  config.allowPersonalPlugins = true;
+  const failedAllow = await service.list();
+  assert.equal(failedAllow.items.length, 1);
+  assert.equal(failedAllow.policyCacheUnavailable, true);
+  assert.equal(failedAllow.allowPersonalPlugins, false);
+  assert.deepEqual(readdirSync(parent).sort(), [name, legacyTemporary].sort());
+
+  rmdirSync(file);
+  const recovered = await service.list();
+  assert.equal(recovered.policyCacheUnavailable, false);
+  assert.equal(recovered.allowPersonalPlugins, true);
+  assert.equal(
+    JSON.parse(readFileSync(file, 'utf8')).allowPersonalPlugins,
+    true,
+  );
+
+  blockReplacement();
+  config.allowPersonalPlugins = false;
+  enforced.length = 0;
+  const failedDeny = await service.list();
+  assert.equal(failedDeny.items.length, 1);
+  assert.equal(failedDeny.policyCacheUnavailable, true);
+  assert.equal(failedDeny.allowPersonalPlugins, false);
+  assert.ok(enforced.length > 0);
+  assert.ok(enforced.every((allowed) => !allowed));
+  assert.deepEqual(readdirSync(parent).sort(), [name, legacyTemporary].sort());
 });
 
 test('waiting for the exact guardian permit does not repeatedly enter the C writer lock and a new generation invalidates the wait', async (t) => {

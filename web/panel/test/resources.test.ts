@@ -215,6 +215,21 @@ for (const kind of ['plugin', 'skill'] as const)
       const w = await render(kind, f.fetch);
       expect(w.text()).toContain('does not allow personal plugin');
     });
+    it('keeps the market visible and explains temporary host and cache problems', async () => {
+      const f = fixture(kind, {
+        hostBusy: true,
+        policyCacheUnavailable: true,
+        allowPersonalPlugins: false,
+      });
+      const w = await render(kind, f.fetch);
+      expect(w.text()).toContain(f.pack.name);
+      expect(w.text()).toContain('synchronizing shared resources');
+      expect(w.text()).toContain('Could not save the personal plugin policy');
+      expect(w.text()).toContain(
+        'Personal plugin installation remains restricted.',
+      );
+      expect(w.text()).not.toContain('Restart DSH');
+    });
     it('requires a guardian for installation', async () => {
       const f = fixture(kind, { sharedAvailable: false });
       const w = await render(kind, f.fetch);

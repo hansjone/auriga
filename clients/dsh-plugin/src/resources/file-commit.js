@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import { closeSync, fsyncSync, openSync, renameSync, statSync } from 'node:fs';
-import { dirname, isAbsolute } from 'node:path';
+import { dirname, isAbsolute, toNamespacedPath } from 'node:path';
 /** Persistent same-volume replacements. Windows uses MoveFileEx WRITE_THROUGH.
  * No generated executable, native npm module or credential on argv.
  * @param {[string,string][]} moves */
@@ -20,7 +20,12 @@ export function commitMoves(moves) {
         'powershell.exe',
         ['-NoProfile', '-NonInteractive', '-Command', script],
         {
-          input: JSON.stringify(moves),
+          input: JSON.stringify(
+            moves.map(([source, target]) => [
+              toNamespacedPath(source),
+              toNamespacedPath(target),
+            ]),
+          ),
           encoding: 'utf8',
           windowsHide: true,
           timeout: 10000,

@@ -6,7 +6,7 @@ import { memberIdentity } from './member-api.js';
 import { uuid, refuse } from './trust.js';
 import { parseStrictJson, canonicalize } from './json.js';
 import { requireSchema } from './schema.js';
-import { resourceStage } from './diagnostics.js';
+import { diagnoseResource, resourceStage } from './diagnostics.js';
 /** @param {any} runtime */
 export function catalogIdentity(runtime) {
   if (runtime?.resourceIdentity) {
@@ -38,6 +38,7 @@ export function catalogApi({
     source = instance ? 'node' : 'member',
     _origin = runtime.config.platformOrigin;
   let allowPersonalPlugins = policy?.read() ?? true;
+  let policyCacheUnavailable = false;
   function check() {
     if (runtime.vault?.snapshot?.().resourceIsolationPending)
       refuse('resource.storage_unavailable');
@@ -136,6 +137,7 @@ export function catalogApi({
     check,
     request,
     personalPluginsAllowed: () => allowPersonalPlugins,
+    policyCacheUnavailable: () => policyCacheUnavailable,
     async list() {
       const rows = [];
       let cursor;
@@ -186,9 +188,17 @@ export function catalogApi({
         }
         if (!value.nextCursor) {
           check();
-          policy?.write(pagePolicy);
+          try {
+            policy?.write(pagePolicy);
+            policyCacheUnavailable = false;
+            allowPersonalPlugins = pagePolicy;
+          } catch (error) {
+            // A failed write must never lift a known restriction.
+            allowPersonalPlugins = allowPersonalPlugins && pagePolicy;
+            policyCacheUnavailable = true;
+            diagnoseResource(error, 'policy_cache');
+          }
           check();
-          allowPersonalPlugins = pagePolicy;
           return rows;
         }
         if (value.nextCursor === cursor) refuse('common.validation_failed');

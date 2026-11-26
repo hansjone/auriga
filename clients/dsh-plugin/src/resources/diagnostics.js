@@ -1,4 +1,5 @@
 import { logEvent, newTraceparent } from '../observability/index.js';
+import { getSystemErrorMap } from 'node:util';
 
 const statuses = {
   'common.unauthenticated': 401,
@@ -23,6 +24,7 @@ const reasons = new Set([
   'signature_invalid',
   'platform_unreachable',
   'storage_unavailable',
+  'host_busy',
   'state_conflict',
   'runtime_unavailable',
   'installer_unavailable',
@@ -36,6 +38,7 @@ const reasons = new Set([
 ]);
 const stages = new Set([
   'catalog',
+  'policy_cache',
   'plugin',
   'storage',
   'trust_roots',
@@ -45,6 +48,19 @@ const stages = new Set([
   'runtime',
   'apply',
 ]);
+const errorNames = new Set([
+  'Error',
+  'TypeError',
+  'RangeError',
+  'ReferenceError',
+  'SyntaxError',
+  'AggregateError',
+  'AbortError',
+  'TimeoutError',
+]);
+const systemCodes = new Set(
+  Array.from(getSystemErrorMap().values(), ([code]) => code),
+);
 /** Local diagnostic reasons supplement existing contract error codes; no raw exception is returned.
  * @param {string} code @param {string} reason @param {string} stage */
 export function resourceFailure(code, reason, stage) {
@@ -67,16 +83,22 @@ export async function resourceStage(stage, work) {
 }
 /** @param {any} error @param {string} stage @param {typeof logEvent} [log] */
 export function diagnoseResource(error, stage, log = logEvent) {
-  const code = Object.hasOwn(statuses, error?.code)
-    ? error.code
-    : 'common.unavailable';
+  const hostBusy = error?.hostLockOccupied === true;
   stage = stages.has(error?.stage)
     ? error.stage
     : stages.has(stage)
       ? stage
       : 'catalog';
-  const reason = reasons.has(error?.reason)
-    ? error.reason
+  const code = hostBusy
+    ? 'common.conflict'
+    : stage === 'policy_cache'
+      ? 'resource.storage_unavailable'
+      : Object.hasOwn(statuses, error?.code)
+        ? error.code
+        : 'common.unavailable';
+  const suppliedReason = hostBusy ? 'host_busy' : error?.reason;
+  const reason = reasons.has(suppliedReason)
+    ? suppliedReason
     : stage === 'trust_roots'
       ? 'trust_roots_missing'
       : ['resource.signature_invalid', 'resource.digest_mismatch'].includes(
@@ -103,7 +125,11 @@ export function diagnoseResource(error, stage, log = logEvent) {
   const trace_id = newTraceparent().slice(3, 35);
   const body = { code, reason, stage, trace_id };
   // Only finite metadata: exception messages/stacks may contain resource content or credentials.
-  log('WARN', 'Resource operation failed', body);
+  log('WARN', 'Resource operation failed', {
+    ...body,
+    ...(errorNames.has(error?.name) ? { error_type: error.name } : {}),
+    ...(systemCodes.has(error?.code) ? { error_code: error.code } : {}),
+  });
   return {
     status: statuses[/** @type {keyof typeof statuses} */ (code)],
     body,
