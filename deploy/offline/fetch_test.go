@@ -48,6 +48,10 @@ func TestClassifyArtifactLocation(t *testing.T) {
 		{name: "win device namespace rejected", raw: `\\.\pipe\auriga`, isWindows: true, wantErr: "UNC"},
 		{name: "slash UNC rejected on windows", raw: `//server/share/desktop.tar`, isWindows: true, wantErr: "UNC"},
 		{name: "slash device rejected on windows", raw: `//?/C:/work/desktop.tar`, isWindows: true, wantErr: "UNC"},
+		{name: "mixed slash-backslash UNC rejected on windows", raw: `/\server\share\desktop.tar`, isWindows: true, wantErr: "UNC"},
+		{name: "mixed backslash-slash UNC rejected on windows", raw: `\/server\share\desktop.tar`, isWindows: true, wantErr: "UNC"},
+		{name: "mixed slash-backslash device rejected on windows", raw: `/\.\pipe\auriga`, isWindows: true, wantErr: "UNC"},
+		{name: "mixed backslash-slash verbatim device rejected on windows", raw: `\/?\C:\work\desktop.tar`, isWindows: true, wantErr: "UNC"},
 		{name: "slash UNC rejected on linux", raw: `//server/share/desktop.tar`, isWindows: false, wantErr: "UNC"},
 
 		// file: scheme explicitly rejected

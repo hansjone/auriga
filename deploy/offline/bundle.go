@@ -98,7 +98,7 @@ func classifyArtifactLocation(raw string, isWindows bool) (artifactLocationKind,
 	if raw == "" {
 		return artifactLocationLocal, nil, errors.New("发行路径不能为空")
 	}
-	if strings.HasPrefix(raw, `\\`) || strings.HasPrefix(raw, "//") {
+	if len(raw) >= 2 && (raw[0] == '\\' || raw[0] == '/') && (raw[1] == '\\' || raw[1] == '/') {
 		return artifactLocationLocal, nil, errors.New("发行本地路径不支持 UNC 或设备路径")
 	}
 	if isWindows && len(raw) >= 2 && isASCIIAlpha(raw[0]) && raw[1] == ':' {
