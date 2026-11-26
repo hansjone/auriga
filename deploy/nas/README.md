@@ -230,6 +230,11 @@ sh deploy-nas/scripts/start.sh
 sh deploy-nas/scripts/status.sh
 ```
 
+`status.sh` 的 `platform_health_http` 显示 mTLS 健康接口返回的 HTTP 状态码（例如 `200` 或 `503`）。
+`error` 表示请求或探测执行失败，`unavailable` 表示缺少端口、可读证书或探测工具。
+`platform_health_source=host` 检查宿主机发布端口。宿主缺少证书或工具时，脚本尝试在 Platform
+容器内检查 8081，标记为 `container`；此时宿主机发布端口的可达性仍待验证。
+
 `activate-collab.sh` 仅停止固定 NAS project 的 platform/edge/network/collab，保留数据卷与
 已有实例；容器安装模式使用原有离线 helper，无宿主 Go 编译需求。
 原 `config/materials` 和 bootstrap receipt 不重写。独立 `config/collab-source` 收据绑定原

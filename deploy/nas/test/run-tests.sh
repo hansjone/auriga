@@ -36,6 +36,9 @@ else fail_msg internal_dynamic_pool_excludes_edge 'dynamic allocation must not c
 if python3 -m unittest discover -s "$ROOT/test" -p 'ops_runtime*test.py'; then pass runtime_operations_worker
 else fail_msg runtime_operations_worker 'upgrade receipts, backup archive, schedule or locking failed'; fi
 
+if sh "$ROOT/test/status-platform-mtls.sh"; then pass status_platform_mtls
+else fail_msg status_platform_mtls 'Platform mTLS diagnostics failed'; fi
+
 if sh "$ROOT/test/join-node.sh"; then pass join_node_boundary
 else fail_msg join_node_boundary 'private join token import failed'; fi
 if sh "$ROOT/test/message-edge-recovery.sh"; then pass message_edge_recovery_fixture
@@ -487,7 +490,7 @@ if python3 "$ROOT/test/migrate_relay_test.py"; then pass migrate_relay_regressio
 else fail_msg migrate_relay_regressions "relay migration failed"; fi
 
 cr=0
-for f in "$ROOT"/scripts/*.sh "$ROOT"/docker/agent-entrypoint.sh "$ROOT"/test/run-tests.sh; do
+for f in "$ROOT"/scripts/*.sh "$ROOT"/docker/agent-entrypoint.sh "$ROOT"/test/*.sh; do
   [ -f "$f" ] || continue
   if od -An -tx1 "$f" 2>/dev/null | grep -q ' 0d'; then
     fail_msg "lf_$(basename "$f")" "CR found"
