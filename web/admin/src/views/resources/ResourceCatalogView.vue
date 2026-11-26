@@ -105,6 +105,8 @@ const confirming = ref(false);
 const assignmentLocked = ref(false);
 let epoch = 0,
   detailEpoch = 0,
+  previewEpoch = 0,
+  compareEpoch = 0,
   alive = true;
 const locked = computed(
   () =>
@@ -210,16 +212,34 @@ const permissionChanges = computed(() => {
 });
 async function startUpgrade(p: CatalogPackage) {
   let expectedPackageName: string | undefined;
+  error.value = '';
   if (p.kind === 'plugin') {
+    const knownVersionId = p.latestVersion?.versionId ?? p.defaultVersionId;
     try {
-      const page = await api.versions(p.id);
-      const newest = page.items.at(-1);
-      if (newest?.manifest.kind === 'plugin')
-        expectedPackageName = newest.manifest.plugin.packageName;
-    } catch {
-      /* Fall back to catalog name match when version list cannot be read. */
+      if (knownVersionId) {
+        const res = await api.version(p.id, knownVersionId);
+        if (res.data.manifest.kind === 'plugin')
+          expectedPackageName = res.data.manifest.plugin.packageName;
+      } else {
+        let vCursor: string | undefined;
+        const vSeen = new Set<string>();
+        let newest: CatalogVersion | undefined;
+        do {
+          const page = await api.versions(p.id, vCursor);
+          if (page.items.length) newest = page.items.at(-1);
+          vCursor = page.nextCursor;
+          if (vCursor && vSeen.has(vCursor)) break;
+          if (vCursor) vSeen.add(vCursor);
+        } while (vCursor);
+        if (newest?.manifest.kind === 'plugin')
+          expectedPackageName = newest.manifest.plugin.packageName;
+      }
+    } catch (err) {
+      if (alive) error.value = failure(err);
+      return;
     }
   }
+  if (!alive) return;
   upgradeTarget.value = {
     packageId: p.id,
     name: p.name,
@@ -276,6 +296,8 @@ function failure(e: unknown) {
 }
 function clearDetail() {
   ++detailEpoch;
+  ++previewEpoch;
+  ++compareEpoch;
   selected.value = undefined;
   review.value = undefined;
   reviewEtag.value = null;
@@ -601,9 +623,15 @@ async function preview(compare = false, targetVersionId?: string) {
   const v = selected.value;
   if (!v || locked.value) return;
   const e = detailEpoch;
+  const reqEpoch = compare ? ++compareEpoch : ++previewEpoch;
+  const isCurrent = () =>
+    alive &&
+    e === detailEpoch &&
+    (compare ? reqEpoch === compareEpoch : reqEpoch === previewEpoch);
   previewError.value = '';
   try {
     if (compare && !files.value.length) {
+      const currEpoch = ++previewEpoch;
       const currPayload = v.manifest.artifacts.find(
         (a) => a.role === 'payload',
       );
@@ -611,13 +639,13 @@ async function preview(compare = false, targetVersionId?: string) {
         const currResp = await api.artifact(v.packageId, v.id, currPayload.id);
         if (v.kind === 'plugin') {
           const currMeta = await archivePreviewWithMeta(currResp, 'plugin');
-          if (alive && e === detailEpoch) {
+          if (alive && e === detailEpoch && currEpoch === previewEpoch) {
             files.value = currMeta.files;
             currentTruncated.value = currMeta.truncated;
           }
         } else {
           const currFiles = await skillPreview(currResp);
-          if (alive && e === detailEpoch) {
+          if (alive && e === detailEpoch && currEpoch === previewEpoch) {
             files.value = currFiles;
             currentTruncated.value = false;
           }
@@ -646,7 +674,7 @@ async function preview(compare = false, targetVersionId?: string) {
     } else {
       result = await skillPreview(resp);
     }
-    if (alive && e === detailEpoch) {
+    if (isCurrent()) {
       if (compare) {
         previous.value = result;
         previousVersion.value = value;
@@ -658,7 +686,7 @@ async function preview(compare = false, targetVersionId?: string) {
       }
     }
   } catch {
-    if (alive && e === detailEpoch) previewError.value = t('previewFailed');
+    if (isCurrent()) previewError.value = t('previewFailed');
   }
 }
 async function verify() {

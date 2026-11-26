@@ -1166,25 +1166,51 @@ export function catalogService(options) {
               pack.latestVersion?.description ?? pack.market?.description ?? '';
             if (!pack.latestVersion) {
               try {
-                const verRes = await api.request(
-                  `/api/resource/v1/catalog/packages/${pack.id}/versions?limit=50`,
-                  { assertCurrent },
-                );
-                const vers = Array.isArray(verRes.value?.items)
-                  ? verRes.value.items
-                  : [];
-                const newest = vers.at(-1);
+                let vCursor;
+                const vSeen = new Set();
+                /** @type {any} */
+                let newest;
+                for (let vPage = 0; vPage < 20; vPage++) {
+                  const verRes = await api.request(
+                    `/api/resource/v1/catalog/packages/${pack.id}/versions?` +
+                      new URLSearchParams({
+                        limit: '50',
+                        ...(vCursor ? { cursor: vCursor } : {}),
+                      }),
+                    { assertCurrent },
+                  );
+                  const vers = Array.isArray(verRes.value?.items)
+                    ? verRes.value.items
+                    : [];
+                  if (vers.length) newest = vers.at(-1);
+                  if (pack.defaultVersionId && !publishedVersion) {
+                    const def = vers.find(
+                      (/** @type {any} */ v) =>
+                        v.id === pack.defaultVersionId &&
+                        v.state === 'published',
+                    );
+                    if (def?.version) publishedVersion = def.version;
+                  }
+                  const nextV = verRes.value?.nextCursor;
+                  if (!nextV || vSeen.has(nextV)) break;
+                  vSeen.add(nextV);
+                  vCursor = nextV;
+                }
                 if (newest) {
                   latestVersion = newest.version ?? latestVersion;
                   latestState = newest.state ?? latestState;
                   description = newest.manifest?.description ?? description;
                 }
-                if (pack.defaultVersionId) {
-                  const def = vers.find(
-                    (/** @type {any} */ v) =>
-                      v.id === pack.defaultVersionId && v.state === 'published',
+                if (pack.defaultVersionId && !publishedVersion) {
+                  const defRes = await api.request(
+                    `/api/resource/v1/catalog/packages/${pack.id}/versions/${pack.defaultVersionId}`,
+                    { assertCurrent },
                   );
-                  if (def?.version) publishedVersion = def.version;
+                  if (
+                    defRes.value?.state === 'published' &&
+                    typeof defRes.value?.version === 'string'
+                  )
+                    publishedVersion = defRes.value.version;
                 }
               } catch {
                 /* Keep package-level metadata when per-package version read fails. */

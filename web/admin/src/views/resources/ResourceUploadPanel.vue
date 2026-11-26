@@ -116,6 +116,18 @@ function updateFunctionalTags(event: Event) {
 }
 watch(locked, (v) => emit('locked', v));
 watch(
+  () => props.upgradeTarget,
+  () => {
+    source.value = undefined;
+    manifest.value = undefined;
+    savedDraft.value = undefined;
+    filename.value = '';
+    confirmed.value = false;
+    error.value = '';
+    notice.value = '';
+  },
+);
+watch(
   [tools, hosts, () => JSON.stringify(manifest.value?.permissions.dataAccess)],
   () => {
     confirmed.value = false;
@@ -268,14 +280,25 @@ async function start(submit: boolean) {
       throw new UploadParseError('groupsInvalid');
     const draft = await finalizeResourceUpload(source.value, m);
     if (!alive) return;
-    if (
-      props.upgradeTarget &&
-      draft.manifest.name !== props.upgradeTarget.name
-    ) {
-      error.value = t('upgradeNameMismatch', {
-        name: props.upgradeTarget.name,
-      });
-      return;
+    if (props.upgradeTarget) {
+      if (
+        props.kind === 'plugin' &&
+        draft.manifest.kind === 'plugin' &&
+        props.upgradeTarget.expectedPackageName &&
+        draft.manifest.plugin.packageName !==
+          props.upgradeTarget.expectedPackageName
+      ) {
+        error.value = t('upgradeNameMismatch', {
+          name: props.upgradeTarget.name,
+        });
+        return;
+      }
+      if (draft.manifest.name !== props.upgradeTarget.name) {
+        error.value = t('upgradeNameMismatch', {
+          name: props.upgradeTarget.name,
+        });
+        return;
+      }
     }
     const notes = changeNotes.value.trim();
     if (notes) draft.metadata = { ...draft.metadata, changeNotes: notes };
