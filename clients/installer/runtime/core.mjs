@@ -1242,6 +1242,11 @@ function installStopped({
         if (!preverifiedManifest || !moved) {
           progress('verify-copy', 0);
           verifyPackage(staging);
+        } else if (moved === 'partial') {
+          // Partial move copies runtime/python and active entries while renaming
+          // already-verified pinned trees; verify all listed files in staging.
+          progress('verify-copy', 0);
+          verifyPackage(staging, { trees: false });
         }
         protectPythonDirectory(staging);
         checkpoint();

@@ -1067,11 +1067,13 @@ async function applyPendingLocked(
       });
     }
     note('install');
+    let installAttempt = 0;
     await retry(async () => {
+      const retrying = installAttempt++ > 0;
       if (
         useRealExtract &&
-        !existsSync(payload) &&
-        !existsSync(versionDir(root, manifest.id))
+        !existsSync(versionDir(root, manifest.id)) &&
+        (retrying || !existsSync(join(payload, 'manifest.json')))
       ) {
         checkArchive();
         rmSync(unpacked, { recursive: true, force: true });
