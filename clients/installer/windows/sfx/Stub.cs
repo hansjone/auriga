@@ -296,8 +296,8 @@ static class Setup
 
     /// Create a temporary staging directory preferably on the same volume as
     /// `installRoot` (as a sibling of `installRoot`, never inside it so empty-dir
-    /// layout checks stay intact). Same-volume staging allows zero-copy rename
-    /// into `versions/<id>` and avoids slow cross-drive copies from C:\%TEMP%.
+    /// layout checks stay intact). Avoids dot-prefixed names that enterprise EDR
+    /// policies often flag on secondary drives.
     public static string CreateStagingDirectory(string installRoot)
     {
         string suffix = "auriga-desktop-setup-" + Guid.NewGuid().ToString("N");
@@ -307,18 +307,37 @@ static class Setup
             {
                 string full = Path.GetFullPath(installRoot).TrimEnd('\\');
                 string parent = Path.GetDirectoryName(full);
-                if (!string.IsNullOrEmpty(parent) && Directory.Exists(parent))
+                if (!string.IsNullOrEmpty(parent) && Directory.Exists(FileSystemPath(parent)))
                 {
-                    string sibling = Path.Combine(parent, "." + suffix);
-                    Directory.CreateDirectory(sibling);
+                    string sibling = Path.Combine(parent, suffix);
+                    Directory.CreateDirectory(FileSystemPath(sibling));
                     return sibling;
                 }
             }
         }
         catch (Exception) { }
         string fallback = Path.Combine(Path.GetTempPath(), suffix);
-        Directory.CreateDirectory(fallback);
+        Directory.CreateDirectory(FileSystemPath(fallback));
         return fallback;
+    }
+
+    public static void DeleteDirectoryBestEffort(string path)
+    {
+        if (string.IsNullOrEmpty(path)) return;
+        string fsPath = FileSystemPath(path);
+        for (int attempt = 0; attempt < 5; attempt++)
+        {
+            try
+            {
+                if (!Directory.Exists(fsPath)) return;
+                Directory.Delete(fsPath, true);
+                return;
+            }
+            catch (Exception)
+            {
+                if (attempt < 4) Thread.Sleep(200);
+            }
+        }
     }
 
     public static string PowerShell { get { return Path.Combine(Environment.SystemDirectory, "WindowsPowerShell", "v1.0", "powershell.exe"); } }
@@ -777,9 +796,8 @@ sealed class Wizard : Form
             logoTop,
             logoSize,
             logoSize);
-        int textWidth = Math.Max(120, logo.Left - heading.Left - 16);
-        heading.Width = textWidth;
-        subheading.Width = textWidth;
+        heading.Width = Math.Max(120, logo.Left - heading.Left - 16);
+        subheading.Width = Math.Max(120, logo.Left - subheading.Left - 16);
         headerLine.Width = ClientSize.Width;
         headerLine.Top = header.Bottom;
         int fullTop = headerLine.Bottom;
@@ -1070,7 +1088,7 @@ sealed class Wizard : Form
             try
             {
                 string package = Path.Combine(temp, "pkg");
-                Directory.CreateDirectory(package);
+                Directory.CreateDirectory(Setup.FileSystemPath(package));
                 Log("setup " + version + " -> " + root + (upgrade ? " (upgrade)" : ""));
                 AppendDetail("正在解包安装文件…");
                 FileStream file;
@@ -1137,7 +1155,7 @@ sealed class Wizard : Form
             finally
             {
                 canCancel = false;
-                try { Directory.Delete(Setup.FileSystemPath(temp), true); } catch (Exception) { }
+                Setup.DeleteDirectoryBestEffort(temp);
             }
             BeginInvoke((Action)delegate { Finished(code, failure); });
         }) { IsBackground = true };
