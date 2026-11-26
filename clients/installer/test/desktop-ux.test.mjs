@@ -559,9 +559,11 @@ test('tray status and update commands use the packaged key and verified origin',
       return { ok: false, status: 404 };
     },
   });
-  assert.deepEqual(urls, [
-    'https://example.com/api/resource/v1/desktop/latest',
-  ]);
+  assert.equal(urls.length, 1);
+  assert.match(
+    urls[0],
+    /^https:\/\/example\.com\/api\/resource\/v1\/desktop\/latest\?platform=(win|linux)-x64$/,
+  );
   assert.equal(printed[0].available, null);
   await updateCommand(root, 'configure', {
     enabled: false,

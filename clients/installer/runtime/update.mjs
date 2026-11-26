@@ -173,6 +173,44 @@ function isGzipDesktopPackage(archive) {
   return desktopHost().packageMedia === 'tar.gz';
 }
 
+/** GNU tar cannot read ZIP; Windows/bsdtar can. Fall back to python3 zipfile. */
+function listZipEntries(zip) {
+  const listed = spawnSync(systemTool('tar'), ['-tf', zip], {
+    encoding: 'utf8',
+    maxBuffer: 32 * 1024 ** 2,
+  });
+  if (listed.status === 0) return listed;
+  return spawnSync(
+    'python3',
+    [
+      '-c',
+      'import zipfile,sys\nprint("\\n".join(zipfile.ZipFile(sys.argv[1]).namelist()))\n',
+      zip,
+    ],
+    { encoding: 'utf8', maxBuffer: 32 * 1024 ** 2 },
+  );
+}
+
+function extractZipArchive(zip, directory, excludeArgs = []) {
+  const withTar = spawnSync(
+    systemTool('tar'),
+    ['-xf', zip, '-C', directory, ...excludeArgs],
+    { encoding: 'utf8' },
+  );
+  if (!withTar.error && withTar.status === 0) return withTar;
+  if (excludeArgs.length) return withTar;
+  return spawnSync(
+    'python3',
+    [
+      '-c',
+      'import zipfile,sys\nzipfile.ZipFile(sys.argv[1]).extractall(sys.argv[2])\n',
+      zip,
+      directory,
+    ],
+    { encoding: 'utf8' },
+  );
+}
+
 export function extractArchive(archive, directory, { reuse = null } = {}) {
   mkdirSync(directory);
   let zip = archive;
@@ -181,14 +219,14 @@ export function extractArchive(archive, directory, { reuse = null } = {}) {
     zip = join(directory, 'payload.zip');
     unpackSetup(archive, zip);
   }
-  const extractFlag = gzip ? '-xzf' : '-xf';
-  // Only a fully signature/hash-verified publisher archive reaches tar.
-  const listArgs = gzip ? ['-tzf', zip] : ['-tf', zip];
-  const listed = spawnSync(systemTool('tar'), listArgs, {
-    encoding: 'utf8',
-    maxBuffer: 32 * 1024 ** 2,
-  });
-  const entries = listed.stdout.split(/\r?\n/).filter(Boolean);
+  // Only a fully signature/hash-verified publisher archive reaches extract.
+  const listed = gzip
+    ? spawnSync(systemTool('tar'), ['-tzf', zip], {
+        encoding: 'utf8',
+        maxBuffer: 32 * 1024 ** 2,
+      })
+    : listZipEntries(zip);
+  const entries = (listed.stdout || '').split(/\r?\n/).filter(Boolean);
   if (
     listed.status !== 0 ||
     entries.some(
@@ -214,11 +252,13 @@ export function extractArchive(archive, directory, { reuse = null } = {}) {
       excludeArgs.push('--exclude', `./payload/${sub}`);
       excludeArgs.push('--exclude', `./payload/${sub}/*`);
     }
-    const partial = spawnSync(
-      systemTool('tar'),
-      [extractFlag, zip, '-C', directory, ...excludeArgs],
-      { encoding: 'utf8' },
-    );
+    const partial = gzip
+      ? spawnSync(
+          systemTool('tar'),
+          ['-xzf', zip, '-C', directory, ...excludeArgs],
+          { encoding: 'utf8' },
+        )
+      : extractZipArchive(zip, directory, excludeArgs);
     if (!partial.error && partial.status === 0) {
       try {
         for (const sub of reusable) {
@@ -235,13 +275,11 @@ export function extractArchive(archive, directory, { reuse = null } = {}) {
     }
   }
   if (!extracted) {
-    const result = spawnSync(
-      systemTool('tar'),
-      [extractFlag, zip, '-C', directory],
-      {
-        encoding: 'utf8',
-      },
-    );
+    const result = gzip
+      ? spawnSync(systemTool('tar'), ['-xzf', zip, '-C', directory], {
+          encoding: 'utf8',
+        })
+      : extractZipArchive(zip, directory);
     if (result.error) throw result.error;
     if (result.status !== 0)
       throw Object.assign(new Error('update archive extraction failed'), {
