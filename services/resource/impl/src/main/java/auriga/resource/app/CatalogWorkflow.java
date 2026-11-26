@@ -229,8 +229,55 @@ public final class CatalogWorkflow {
     return byPackage;
   }
 
-  private ObjectNode marketPackage(Map<String, Object> pack, Map<String, Object> release) {
+  private Map<Object, Map<String, Object>> latestVersions(
+      ResourceAccess.Reader reader, List<Map<String, Object>> visiblePackages) {
+    var ids = visiblePackages.stream().map(pack -> pack.get("id")).toList();
+    var byPackage = new HashMap<Object, Map<String, Object>>();
+    if (ids.isEmpty()) return byPackage;
+    for (var row :
+        db.rows(
+            """
+        SELECT DISTINCT ON (v.package_id) v.*
+        FROM resource.catalog_version v
+        WHERE v.tenant_id=:tenant AND v.package_id IN (:packages)
+          AND (v.author_id=:account OR v.state IN ('published','deprecated','withdrawn'))
+        ORDER BY v.package_id, v.id DESC
+        """,
+            db.args("packages", ids, "account", reader.account())))
+      byPackage.put(row.get("package_id"), row);
+    return byPackage;
+  }
+
+  private String resolveDisplayName(
+      ResourceAccess.Reader reader, Object storedName, Object accountId) {
+    if (storedName instanceof String name && !name.isBlank()) return name;
+    if (reader != null && accountId instanceof UUID account)
+      return access.displayName(reader.tenant(), account).orElse(null);
+    return null;
+  }
+
+  private ObjectNode marketPackage(
+      ResourceAccess.Reader reader,
+      Map<String, Object> pack,
+      Map<String, Object> release,
+      Map<String, Object> latest) {
     var result = packageJson(pack);
+    if (latest != null) {
+      var manifest = json(latest, "manifest");
+      var summary =
+          result
+              .putObject("latestVersion")
+              .put("versionId", latest.get("id").toString())
+              .put("version", latest.get("version").toString())
+              .put("state", latest.get("state").toString())
+              .put("description", manifest.path("description").asString())
+              .put("createdAt", instant(latest.get("created_at")).toString());
+      String authorName =
+          resolveDisplayName(reader, latest.get("market_author_name"), latest.get("author_id"));
+      if (authorName != null) summary.put("authorName", authorName);
+      if (latest.get("market_author_department") instanceof String department
+          && !department.isBlank()) summary.put("authorDepartment", department);
+    }
     if (release == null) return result;
     var manifest = json(release, "manifest");
     var market =
@@ -308,12 +355,23 @@ public final class CatalogWorkflow {
   }
 
   ObjectNode versionJson(Map<String, Object> v) {
+    return versionJson(null, v);
+  }
+
+  ObjectNode versionJson(ResourceAccess.Reader r, Map<String, Object> v) {
     var n = JSON.createObjectNode();
     for (String k : List.of("id", "version", "digest", "state")) n.put(k, v.get(k).toString());
     n.put("packageId", v.get("package_id").toString())
         .put("kind", json(v, "manifest").path("kind").asString())
         .put("revision", number(v, "revision"))
-        .put("createdAt", instant(v.get("created_at")).toString());
+        .put("createdAt", instant(v.get("created_at")).toString())
+        .put("authorId", v.get("author_id").toString());
+    String authorName = resolveDisplayName(r, v.get("market_author_name"), v.get("author_id"));
+    if (authorName != null) n.put("authorName", authorName);
+    if (v.get("market_author_department") instanceof String department && !department.isBlank())
+      n.put("authorDepartment", department);
+    if (v.get("change_notes") instanceof String changeNotes && !changeNotes.isBlank())
+      n.put("changeNotes", changeNotes);
     n.set("manifest", json(v, "manifest"));
     if (v.get("review_id") != null) n.put("reviewId", v.get("review_id").toString());
     n.set(
@@ -421,14 +479,19 @@ public final class CatalogWorkflow {
     var r = admin ? access.administrator(actor, "resource.versions.review") : access.member(actor);
     return tx.write(
         () -> {
-          if (v != null) return versionJson(ver(r, p, v, admin));
+          if (v != null) return versionJson(r, ver(r, p, v, admin));
           return visibleMarketPackage(r, p);
         });
   }
 
   private ObjectNode visibleMarketPackage(ResourceAccess.Reader reader, UUID id) {
     var pack = pkg(reader, id, false);
-    return marketPackage(pack, marketReleases(reader, List.of(pack)).get(id));
+    var single = List.of(pack);
+    return marketPackage(
+        reader,
+        pack,
+        marketReleases(reader, single).get(id),
+        latestVersions(reader, single).get(id));
   }
 
   public JsonNode list(
@@ -504,13 +567,15 @@ public final class CatalogWorkflow {
           boolean packagePage = p == null && phase == null;
           Map<Object, Map<String, Object>> releases =
               packagePage ? marketReleases(r, page) : Map.of();
+          Map<Object, Map<String, Object>> latest =
+              packagePage ? latestVersions(r, page) : Map.of();
           for (var row : page)
             items.add(
                 packagePage
-                    ? marketPackage(row, releases.get(row.get("id")))
+                    ? marketPackage(r, row, releases.get(row.get("id")), latest.get(row.get("id")))
                     : phase != null && phase.equals("review")
                         ? reviewJson(r, (UUID) row.get("review_id"))
-                        : versionJson(row));
+                        : versionJson(r, row));
           if (rows.size() > limit)
             result.put(
                 "nextCursor",
@@ -553,7 +618,12 @@ public final class CatalogWorkflow {
         reader -> desktop ? ownedSubmissionPackage(reader, p) : pkg(reader, p, true);
     var pack = tx.write(() -> ownerPackage.apply(r));
     String version = text(metadata, "version", 128),
-        expected = text(metadata, "expectedDigest", 71);
+        expected = text(metadata, "expectedDigest", 71),
+        changeNotes =
+            metadata.has("changeNotes")
+                ? auriga.common.observability.SensitiveDataMasker.mask(
+                    text(metadata, "changeNotes", 4096))
+                : null;
     var m = CatalogManifest.parse(raw, pack.get("name").toString(), version, expected);
     if (!pack.get("kind").equals(m.path("kind").asString())) throw invalid();
     if (inputs.size() != m.path("artifacts").size()) {
@@ -597,8 +667,9 @@ public final class CatalogWorkflow {
               db.lock("object/" + s.object().digest());
               store.commitIfAbsent(x.tenant(), s.id(), s.object());
             }
+            var author = access.authorSnapshot(actor, x);
             db.update(
-                "INSERT INTO resource.catalog_version(id,tenant_id,package_id,author_id,version,digest,manifest_bytes,manifest,state,minimum_risk,risk,created_at) VALUES(:id,:tenant,:p,:author,:version,:digest,:bytes,CAST(:manifest AS jsonb),'draft',:risk,:risk,:now)",
+                "INSERT INTO resource.catalog_version(id,tenant_id,package_id,author_id,version,digest,manifest_bytes,manifest,state,minimum_risk,risk,change_notes,market_author_name,market_author_department,created_at) VALUES(:id,:tenant,:p,:author,:version,:digest,:bytes,CAST(:manifest AS jsonb),'draft',:risk,:risk,:changeNotes,:authorName,:authorDepartment,:now)",
                 db.args(
                     "id",
                     id,
@@ -616,6 +687,12 @@ public final class CatalogWorkflow {
                     m.toString(),
                     "risk",
                     risk,
+                    "changeNotes",
+                    changeNotes,
+                    "authorName",
+                    author.name(),
+                    "authorDepartment",
+                    author.department(),
                     "now",
                     Timestamp.from(clock.instant())));
             for (var a : m.path("artifacts"))
@@ -640,7 +717,7 @@ public final class CatalogWorkflow {
                 "UPDATE resource.catalog_package SET revision=revision+1 WHERE tenant_id=:tenant AND id=:p",
                 db.args("p", p));
             operations.recorded(x, "resource.version.upload", id);
-            return versionJson(ver(x, p, id, false));
+            return versionJson(x, ver(x, p, id, false));
           });
     } finally {
       RuntimeException cleanup = null;
@@ -665,7 +742,7 @@ public final class CatalogWorkflow {
 
   public JsonNode submit(
       AurigaPrincipal actor, UUID p, UUID v, ObjectNode body, String key, String etag) {
-    text(body, "reason", 1024);
+    String reason = text(body, "reason", 1024);
     return mutateSubmission(
         actor,
         "resource.versions.submit",
@@ -685,22 +762,34 @@ public final class CatalogWorkflow {
           if (!List.of("draft", "rejected").contains(row.get("state"))) throw conflict();
           UUID review = UuidV7.next();
           long rev = number(row, "revision") + 1;
-          if ("plugin".equals(json(row, "manifest").path("kind").asString())) {
-            var author = access.authorSnapshot(actor, r);
-            db.update(
-                """
-                UPDATE resource.catalog_version
-                SET market_author_name=:name,market_author_department=:department
-                WHERE tenant_id=:tenant AND id=:id
-                """,
-                db.args("id", v, "name", author.name(), "department", author.department()));
-          }
+          var author = access.authorSnapshot(actor, r);
+          db.update(
+              """
+              UPDATE resource.catalog_version
+              SET market_author_name=:name,market_author_department=:department
+              WHERE tenant_id=:tenant AND id=:id
+              """,
+              db.args("id", v, "name", author.name(), "department", author.department()));
           db.update(
               "UPDATE resource.catalog_version SET state='pending_review',revision=:rev,review_id=:review WHERE tenant_id=:tenant AND id=:id",
               db.args("id", v, "rev", rev, "review", review));
           db.update(
-              "INSERT INTO resource.catalog_review(id,tenant_id,package_id,version_id,version_revision,digest,status) VALUES(:id,:tenant,:p,:v,:rev,:digest,'pending')",
-              db.args("id", review, "p", p, "v", v, "rev", rev, "digest", row.get("digest")));
+              "INSERT INTO resource.catalog_review(id,tenant_id,package_id,version_id,version_revision,digest,status,submit_reason,created_at) VALUES(:id,:tenant,:p,:v,:rev,:digest,'pending',:submitReason,:now)",
+              db.args(
+                  "id",
+                  review,
+                  "p",
+                  p,
+                  "v",
+                  v,
+                  "rev",
+                  rev,
+                  "digest",
+                  row.get("digest"),
+                  "submitReason",
+                  auriga.common.observability.SensitiveDataMasker.mask(reason),
+                  "now",
+                  Timestamp.from(clock.instant())));
           operations.recorded(r, "resource.version.submit", v);
           return reviewJson(r, review);
         });
@@ -724,7 +813,28 @@ public final class CatalogWorkflow {
             .put("authorId", v.get("author_id").toString())
             .put("revision", number(row, "revision"))
             .put("status", row.get("status").toString());
-    n.set("version", versionJson(v));
+    String authorName = resolveDisplayName(r, v.get("market_author_name"), v.get("author_id"));
+    if (authorName != null) n.put("authorName", authorName);
+    if (v.get("market_author_department") instanceof String department && !department.isBlank())
+      n.put("authorDepartment", department);
+    if (row.get("submit_reason") instanceof String submitReason && !submitReason.isBlank())
+      n.put("submitReason", submitReason);
+    Object submittedAt = row.get("created_at") != null ? row.get("created_at") : v.get("created_at");
+    if (submittedAt != null) n.put("submittedAt", instant(submittedAt).toString());
+    var previous =
+        db.rows(
+            """
+            SELECT id, version FROM resource.catalog_version
+            WHERE tenant_id=:tenant AND package_id=:p AND id<>:v AND state='published'
+            ORDER BY release_sequence DESC NULLS LAST, id DESC
+            LIMIT 1
+            """,
+            db.args("p", row.get("package_id"), "v", row.get("version_id")));
+    if (!previous.isEmpty()) {
+      n.put("previousPublishedVersionId", previous.getFirst().get("id").toString());
+      n.put("previousPublishedVersion", previous.getFirst().get("version").toString());
+    }
+    n.set("version", versionJson(r, v));
     var decisions = n.putArray("decisions");
     for (var d :
         db.rows(
@@ -739,6 +849,11 @@ public final class CatalogWorkflow {
               .put("digest", d.get("digest").toString())
               .put("versionRevision", number(d, "version_revision"))
               .put("createdAt", instant(d.get("created_at")).toString());
+      String reviewerName =
+          resolveDisplayName(r, d.get("reviewer_name"), d.get("reviewer_id"));
+      if (reviewerName != null) node.put("reviewerName", reviewerName);
+      if (d.get("reviewer_department") instanceof String reviewerDepartment
+          && !reviewerDepartment.isBlank()) node.put("reviewerDepartment", reviewerDepartment);
       decisions.add(node);
     }
     return n;
@@ -842,8 +957,9 @@ public final class CatalogWorkflow {
             }
           }
           if (number(review, "revision") >= 200) throw conflict();
+          var reviewer = access.authorSnapshot(actor, r);
           db.update(
-              "INSERT INTO resource.catalog_decision(id,tenant_id,review_id,reviewer_id,role,decision,reason,version_revision,digest,created_at) VALUES(:id,:tenant,:review,:reviewer,:role,:decision,:reason,:rev,:digest,:now)",
+              "INSERT INTO resource.catalog_decision(id,tenant_id,review_id,reviewer_id,reviewer_name,reviewer_department,role,decision,reason,version_revision,digest,created_at) VALUES(:id,:tenant,:review,:reviewer,:reviewerName,:reviewerDepartment,:role,:decision,:reason,:rev,:digest,:now)",
               db.args(
                   "id",
                   UuidV7.next(),
@@ -851,6 +967,10 @@ public final class CatalogWorkflow {
                   id,
                   "reviewer",
                   r.account(),
+                  "reviewerName",
+                  reviewer.name(),
+                  "reviewerDepartment",
+                  reviewer.department(),
                   "role",
                   role,
                   "decision",
@@ -951,7 +1071,7 @@ public final class CatalogWorkflow {
           var updated = ver(r, p, id, true);
           events.publish("resource.catalog_version_published", p.toString(), event(updated));
           operations.recorded(r, "resource.version.publish", id);
-          return versionJson(updated);
+          return versionJson(r, updated);
         });
   }
 
@@ -1054,7 +1174,7 @@ public final class CatalogWorkflow {
             events.publish("resource.catalog_version_withdrawn", a.get("package_id").toString(), e);
           }
           operations.recorded(r, "resource.version.withdraw", id);
-          return versionJson(ver(r, p, id, true));
+          return versionJson(r, ver(r, p, id, true));
         });
   }
 

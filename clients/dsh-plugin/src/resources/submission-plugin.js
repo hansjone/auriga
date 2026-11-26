@@ -308,5 +308,9 @@ export async function packPluginDirectory(source) {
   } catch {
     invalid('.', 'plugin archive failed the installation preflight');
   }
-  return { pkg, archive };
+  return {
+    pkg,
+    archive,
+    files: Object.keys(files).map((p) => p.replace(/^package\//, '')),
+  };
 }

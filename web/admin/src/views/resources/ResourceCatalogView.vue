@@ -27,7 +27,11 @@ import {
   distributionApplied,
   textDiff,
 } from '../../admin/resourceCatalogPolicy';
-import { skillPreview } from '../../admin/resourceSkillPreview';
+import {
+  skillPreview,
+  archivePreview,
+  type PreviewFile,
+} from '../../admin/resourceSkillPreview';
 import type { CatalogKind } from '../../admin/resourceCatalogUpload';
 import ResourceUploadPanel from './ResourceUploadPanel.vue';
 import ResourceAssignments from './ResourceAssignments.vue';
@@ -74,10 +78,17 @@ const role = ref<'general' | 'security'>('general'),
 const instance = ref(''),
   currentDistribution = ref(''),
   action = ref<'install' | 'enable' | 'disable' | 'remove'>('install');
-const files = shallowRef<{ path: string; text: string }[]>([]),
-  previous = shallowRef<{ path: string; text: string }[]>([]),
+const files = shallowRef<PreviewFile[]>([]),
+  previous = shallowRef<PreviewFile[]>([]),
+  previousVersion = shallowRef<CatalogVersion>(),
   comparison = ref(''),
   previewError = ref('');
+const upgradeTarget = shallowRef<{
+  packageId: string;
+  name: string;
+  latestVersion?: string;
+}>();
+const uploadPanelAnchor = ref<HTMLElement>();
 const pending = shallowRef<{
   label: string;
   run: () => Promise<unknown>;
@@ -119,6 +130,88 @@ const publicationIssues = computed(() =>
     ? publicationBlockers(review.value, member.value?.member.id ?? '')
     : [],
 );
+const reviewProgress = computed(() => {
+  if (!review.value) return undefined;
+  return reviewStats(review.value);
+});
+function reviewStats(r: CatalogReview) {
+  const v = r.version,
+    riskInfo = v.risk;
+  const current = r.decisions.filter(
+    (d) =>
+      d.versionRevision === v.revision &&
+      d.digest === v.digest &&
+      d.reviewerId !== r.authorId,
+  );
+  const latest = new Map(current.map((d) => [d.reviewerId, d]));
+  const approvals = [...latest.values()].filter(
+    (d) => d.decision === 'approve',
+  );
+  const high =
+    v.kind === 'plugin' ||
+    riskInfo.level !== 'r1' ||
+    riskInfo.minimumLevel !== 'r1';
+  const required = Math.max(riskInfo.requiredReviewers, high ? 2 : 1);
+  const secRequired = Math.max(
+    riskInfo.requiredSecurityReviewers,
+    high ? 1 : 0,
+  );
+  const secActual = approvals.filter((d) => d.role === 'security').length;
+  return {
+    actual: approvals.length,
+    required,
+    secActual,
+    secRequired,
+  };
+}
+function formatPerson(name?: string, department?: string, fallbackId?: string) {
+  const label = name?.trim() || fallbackId || t('unknownSubmitter');
+  return department?.trim() ? `${label} · ${department.trim()}` : label;
+}
+function formatTime(iso?: string) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  return d.toLocaleString();
+}
+function hasAnyPermissions(p: CatalogVersion['manifest']['permissions']) {
+  return (
+    p.tools.length > 0 || p.outboundHosts.length > 0 || p.dataAccess.length > 0
+  );
+}
+const permissionChanges = computed(() => {
+  if (!selected.value || !previousVersion.value) return undefined;
+  const curr = selected.value.manifest.permissions;
+  const prev = previousVersion.value.manifest.permissions;
+  const diffList = (a: string[], b: string[]) => ({
+    added: b.filter((x) => !a.includes(x)),
+    removed: a.filter((x) => !b.includes(x)),
+  });
+  const tools = diffList(prev.tools, curr.tools);
+  const hosts = diffList(prev.outboundHosts, curr.outboundHosts);
+  const data = diffList(prev.dataAccess, curr.dataAccess);
+  const added = [
+    ...tools.added.map((x) => `${t('permissionTools')}: ${x}`),
+    ...hosts.added.map((x) => `${t('permissionHosts')}: ${x}`),
+    ...data.added.map((x) => t(x)),
+  ];
+  const removed = [
+    ...tools.removed.map((x) => `${t('permissionTools')}: ${x}`),
+    ...hosts.removed.map((x) => `${t('permissionHosts')}: ${x}`),
+    ...data.removed.map((x) => t(x)),
+  ];
+  return { added, removed, unchanged: !added.length && !removed.length };
+});
+function startUpgrade(p: CatalogPackage) {
+  upgradeTarget.value = {
+    packageId: p.id,
+    name: p.name,
+    latestVersion: p.latestVersion?.version ?? p.market?.version,
+  };
+  void nextTick(() =>
+    uploadPanelAnchor.value?.scrollIntoView?.({ block: 'start' }),
+  );
+}
 const distributionDetail = shallowRef<CatalogDistribution>();
 async function inspectDistribution(id: string) {
   if (locked.value) return;
@@ -171,6 +264,7 @@ function clearDetail() {
   versionEtag.value = null;
   files.value = [];
   previous.value = [];
+  previousVersion.value = undefined;
   comparison.value = '';
   previewError.value = '';
   distributionDetail.value = undefined;
@@ -483,25 +577,50 @@ async function distribute() {
     if (alive) busy.value = false;
   }
 }
-async function preview(compare = false) {
+async function preview(compare = false, targetVersionId?: string) {
   const v = selected.value;
   if (!v || locked.value) return;
   const e = detailEpoch;
   previewError.value = '';
   try {
+    if (compare && !files.value.length) {
+      const currPayload = v.manifest.artifacts.find(
+        (a) => a.role === 'payload',
+      );
+      if (currPayload) {
+        const currResp = await api.artifact(v.packageId, v.id, currPayload.id);
+        const currFiles =
+          v.kind === 'plugin'
+            ? await archivePreview(currResp, 'plugin')
+            : await skillPreview(currResp);
+        if (alive && e === detailEpoch) files.value = currFiles;
+      }
+    }
+    const compareId = (targetVersionId ?? comparison.value).trim();
     const value = compare
-      ? (await api.version(v.packageId, comparison.value.trim())).data
+      ? (await api.version(v.packageId, compareId)).data
       : v;
-    if (value.kind !== 'skill' || value.packageId !== v.packageId)
+    if (
+      !['skill', 'plugin'].includes(value.kind) ||
+      value.kind !== v.kind ||
+      value.packageId !== v.packageId
+    )
       throw new Error('Invalid comparison');
     const payload = value.manifest.artifacts.find((a) => a.role === 'payload');
     if (!payload) throw new Error('Missing payload');
-    const result = await skillPreview(
-      await api.artifact(value.packageId, value.id, payload.id),
-    );
+    const resp = await api.artifact(value.packageId, value.id, payload.id);
+    const result =
+      value.kind === 'plugin'
+        ? await archivePreview(resp, 'plugin')
+        : await skillPreview(resp);
     if (alive && e === detailEpoch) {
-      if (compare) previous.value = result;
-      else files.value = result;
+      if (compare) {
+        previous.value = result;
+        previousVersion.value = value;
+        comparison.value = compareId;
+      } else {
+        files.value = result;
+      }
     }
   } catch {
     if (alive && e === detailEpoch) previewError.value = t('previewFailed');
@@ -542,17 +661,24 @@ onBeforeUnmount(() => {
       <button @click="confirming = true">{{ t('retry') }}</button>
     </p>
     <template v-if="can(permission)">
-      <ResourceUploadPanel
-        v-if="phase === 'directory' && can('resource.packages.upload')"
-        :key="kind"
-        :kind="kind"
-        :author="member?.member.displayName || ''"
-        :can-submit="can('resource.versions.submit')"
-        :disabled="busy || !!pending || loading"
-        @locked="uploadLocked = $event"
-        @completed="load(cursor)"
-        @resume-draft="resumeDraft($event)"
-      />
+      <div ref="uploadPanelAnchor">
+        <ResourceUploadPanel
+          v-if="phase === 'directory' && can('resource.packages.upload')"
+          :key="kind"
+          :kind="kind"
+          :author="member?.member.displayName || ''"
+          :can-submit="can('resource.versions.submit')"
+          :disabled="busy || !!pending || loading"
+          :upgrade-target="upgradeTarget"
+          @locked="uploadLocked = $event"
+          @cancel-upgrade="upgradeTarget = undefined"
+          @completed="
+            upgradeTarget = undefined;
+            load(cursor);
+          "
+          @resume-draft="resumeDraft($event)"
+        />
+      </div>
       <ResourceAssignments
         v-if="phase === 'distribution'"
         :kind="kind"
@@ -597,12 +723,24 @@ onBeforeUnmount(() => {
       <div class="market-table">
         <table>
           <thead>
-            <tr>
+            <tr v-if="phase === 'directory'">
               <th>{{ t('name') }}</th>
-              <th>
-                {{ t(phase === 'directory' ? 'kind' : 'version') }}
-              </th>
-              <th>{{ t(phase === 'directory' ? 'visibility' : 'status') }}</th>
+              <th>{{ t('latestVersionCol') }}</th>
+              <th>{{ t('submitter') }}</th>
+              <th>{{ t('visibility') }}</th>
+              <th>{{ t('actionsCol') }}</th>
+            </tr>
+            <tr v-else-if="phase === 'review'">
+              <th>{{ t('name') }}</th>
+              <th>{{ t('version') }}</th>
+              <th>{{ t('submitter') }}</th>
+              <th>{{ t('reviewProgress') }}</th>
+              <th>{{ t('status') }}</th>
+            </tr>
+            <tr v-else>
+              <th>{{ t('name') }}</th>
+              <th>{{ t('version') }}</th>
+              <th>{{ t('status') }}</th>
             </tr>
           </thead>
           <tbody>
@@ -611,9 +749,46 @@ onBeforeUnmount(() => {
                 <button :disabled="locked" @click="openPackage(p)">
                   {{ p.name }}
                 </button>
+                <small class="catalog-desc">{{
+                  p.latestVersion?.description ||
+                  p.market?.description ||
+                  t('noDescription')
+                }}</small>
               </td>
-              <td>{{ t(p.kind) }}</td>
+              <td>
+                <template v-if="p.latestVersion">
+                  v{{ p.latestVersion.version }} ·
+                  {{ t(p.latestVersion.state) }}
+                </template>
+                <template v-else-if="p.market">
+                  v{{ p.market.version }} · {{ t('published') }}
+                </template>
+                <template v-else>—</template>
+              </td>
+              <td>
+                {{
+                  formatPerson(
+                    p.latestVersion?.authorName ?? p.market?.authorName,
+                    p.latestVersion?.authorDepartment ??
+                      p.market?.authorDepartment,
+                    p.ownerId,
+                  )
+                }}
+              </td>
               <td>{{ t(p.visibility) }}</td>
+              <td>
+                <button
+                  v-if="
+                    can('resource.packages.upload') &&
+                    p.ownerId === member?.member.id
+                  "
+                  data-testid="catalog-upgrade"
+                  :disabled="locked"
+                  @click="startUpgrade(p)"
+                >
+                  {{ t('upgradeAction') }}
+                </button>
+              </td>
             </tr>
             <tr v-for="r in reviews" :key="r.reviewId">
               <td>
@@ -624,8 +799,41 @@ onBeforeUnmount(() => {
                 >
                   {{ r.version.manifest.name }}
                 </button>
+                <small class="catalog-desc">{{
+                  r.version.manifest.description || t('noDescription')
+                }}</small>
               </td>
-              <td>{{ r.version.version }}</td>
+              <td>
+                <span>v{{ r.version.version }}</span>
+                <span
+                  v-if="r.previousPublishedVersion"
+                  class="catalog-badge catalog-badge-upgrade"
+                >
+                  {{
+                    t('upgradeBadge', { version: r.previousPublishedVersion })
+                  }}
+                </span>
+              </td>
+              <td>
+                {{
+                  formatPerson(
+                    r.authorName ??
+                      r.version.authorName ??
+                      r.version.manifest.author.displayName,
+                    r.authorDepartment ?? r.version.authorDepartment,
+                    r.authorId,
+                  )
+                }}
+                <small v-if="r.submittedAt">{{
+                  formatTime(r.submittedAt)
+                }}</small>
+              </td>
+              <td>
+                <span class="catalog-badge">{{
+                  r.version.risk.level.toUpperCase()
+                }}</span>
+                <small>{{ t('reviewProgressSummary', reviewStats(r)) }}</small>
+              </td>
               <td>{{ t(r.status) }}</td>
             </tr>
             <tr v-for="v in phase === 'directory' ? [] : versions" :key="v.id">
@@ -637,8 +845,11 @@ onBeforeUnmount(() => {
                 >
                   {{ v.manifest.name }}
                 </button>
+                <small class="catalog-desc">{{
+                  v.manifest.description || t('noDescription')
+                }}</small>
               </td>
-              <td>{{ v.version }}</td>
+              <td>v{{ v.version }}</td>
               <td>{{ t(v.state) }}</td>
             </tr>
             <tr v-for="d in distributions" :key="d.distributionId">
@@ -802,10 +1013,152 @@ onBeforeUnmount(() => {
         </button>
       </footer>
       <article v-if="selected" ref="detailPanel" class="catalog-detail">
-        <h2>{{ selected.manifest.name }} {{ selected.version }}</h2>
+        <header class="catalog-detail-header">
+          <div>
+            <h2>{{ selected.manifest.name }} {{ selected.version }}</h2>
+            <p class="catalog-detail-desc" data-testid="catalog-description">
+              {{ selected.manifest.description || t('noDescription') }}
+            </p>
+          </div>
+          <div class="catalog-badges">
+            <span class="catalog-badge">{{ t(selected.kind) }}</span>
+            <span class="catalog-badge">{{
+              selected.risk.level.toUpperCase()
+            }}</span>
+            <span class="catalog-badge">{{ t(selected.state) }}</span>
+            <span
+              v-if="review?.previousPublishedVersion"
+              data-testid="catalog-upgrade-badge"
+              class="catalog-badge catalog-badge-upgrade"
+            >
+              {{
+                t('upgradeBadge', {
+                  version: review.previousPublishedVersion,
+                })
+              }}
+            </span>
+          </div>
+        </header>
+
+        <dl class="catalog-meta-grid" data-testid="catalog-meta">
+          <div>
+            <dt>{{ t('submitter') }}</dt>
+            <dd>
+              {{
+                formatPerson(
+                  review?.authorName ??
+                    selected.authorName ??
+                    selected.manifest.author.displayName,
+                  review?.authorDepartment ?? selected.authorDepartment,
+                  review?.authorId ?? selected.authorId,
+                )
+              }}
+            </dd>
+          </div>
+          <div>
+            <dt>{{ t('submittedAt') }}</dt>
+            <dd>{{ formatTime(review?.submittedAt ?? selected.createdAt) }}</dd>
+          </div>
+          <div>
+            <dt>{{ t('license') }}</dt>
+            <dd>{{ selected.manifest.license }}</dd>
+          </div>
+          <div>
+            <dt>{{ t('dshRange') }}</dt>
+            <dd>
+              {{
+                selected.manifest.kind === 'plugin'
+                  ? selected.manifest.plugin.dshVersionRange
+                  : selected.manifest.kind === 'skill'
+                    ? selected.manifest.skill.dshVersionRange
+                    : '—'
+              }}
+            </dd>
+          </div>
+          <div v-if="selected.manifest.kind === 'plugin'">
+            <dt>{{ t('npmName') }}</dt>
+            <dd>{{ selected.manifest.plugin.packageName }}</dd>
+          </div>
+          <div
+            v-if="
+              selected.manifest.kind === 'plugin' &&
+              selected.manifest.plugin.tags?.length
+            "
+          >
+            <dt>{{ t('functionalTags') }}</dt>
+            <dd class="catalog-badges">
+              <span
+                v-for="tag in selected.manifest.plugin.tags"
+                :key="tag"
+                class="catalog-badge"
+                >{{ tag }}</span
+              >
+            </dd>
+          </div>
+        </dl>
+
+        <section
+          v-if="selected.changeNotes || review?.submitReason"
+          class="catalog-notes"
+          data-testid="catalog-notes"
+        >
+          <div v-if="selected.changeNotes">
+            <h3>{{ t('changeNotes') }}</h3>
+            <p>{{ selected.changeNotes }}</p>
+          </div>
+          <div v-if="review?.submitReason">
+            <h3>{{ t('submitReason') }}</h3>
+            <p>{{ review.submitReason }}</p>
+          </div>
+        </section>
+
+        <section class="catalog-permissions" data-testid="catalog-permissions">
+          <h3>{{ t('permissions') }}</h3>
+          <p v-if="!hasAnyPermissions(selected.manifest.permissions)">
+            {{ t('noExtraPermissions') }}
+          </p>
+          <dl v-else class="catalog-meta-grid">
+            <div>
+              <dt>{{ t('permissionTools') }}</dt>
+              <dd>
+                {{
+                  selected.manifest.permissions.tools.length
+                    ? selected.manifest.permissions.tools.join(', ')
+                    : t('none')
+                }}
+              </dd>
+            </div>
+            <div>
+              <dt>{{ t('permissionHosts') }}</dt>
+              <dd>
+                {{
+                  selected.manifest.permissions.outboundHosts.length
+                    ? selected.manifest.permissions.outboundHosts.join(', ')
+                    : t('none')
+                }}
+              </dd>
+            </div>
+            <div>
+              <dt>{{ t('permissions') }}</dt>
+              <dd>
+                {{
+                  selected.manifest.permissions.dataAccess.length
+                    ? selected.manifest.permissions.dataAccess
+                        .map((item) => t(item))
+                        .join(', ')
+                    : t('none')
+                }}
+              </dd>
+            </div>
+          </dl>
+        </section>
+
         <details>
           <summary>{{ t('advanced') }}</summary>
-          <p>{{ selected.digest }}</p>
+          <p v-if="review">{{ t('reviewId') }}: {{ review.reviewId }}</p>
+          <p>{{ t('packageId') }}: {{ selected.packageId }}</p>
+          <p>{{ t('versionId') }}: {{ selected.id }}</p>
+          <p>{{ t('digest') }}: {{ selected.digest }}</p>
           <p v-if="selected.manifest.kind === 'plugin'">
             {{ t('npmName') }}: {{ selected.manifest.plugin.packageName }}
           </p>
@@ -824,33 +1177,68 @@ onBeforeUnmount(() => {
             {{ t('reviewers') }}: {{ selected.risk.requiredReviewers }} /
             {{ selected.risk.requiredSecurityReviewers }}
           </p>
-          <h3>{{ t('permissions') }}</h3>
-          <pre>{{
-            JSON.stringify(selected.manifest.permissions, null, 2)
-          }}</pre>
           <h3>{{ t('manifest') }}</h3>
           <pre>{{ JSON.stringify(selected.manifest, null, 2) }}</pre>
         </details>
 
-        <template v-if="selected.kind === 'skill'"
-          ><button :disabled="locked" @click="preview()">
-            {{ t('preview') }}
-          </button>
+        <section
+          v-if="selected.kind === 'skill' || selected.kind === 'plugin'"
+          class="catalog-preview"
+        >
+          <div class="market-toolbar">
+            <button
+              data-testid="catalog-preview-btn"
+              :disabled="locked"
+              @click="preview()"
+            >
+              {{ t(selected.kind === 'skill' ? 'preview' : 'previewArchive') }}
+            </button>
+            <button
+              v-if="review?.previousPublishedVersionId"
+              data-testid="catalog-compare-previous"
+              :disabled="locked"
+              @click="preview(true, review.previousPublishedVersionId)"
+            >
+              {{
+                t('comparePrevious', {
+                  version: review.previousPublishedVersion,
+                })
+              }}
+            </button>
+          </div>
           <p>{{ t('previewNote') }}</p>
           <p v-if="previewError" role="alert">{{ previewError }}</p>
           <section v-for="f in files" :key="f.path">
             <h3>{{ f.path }}</h3>
             <pre data-testid="skill-text">{{ f.text }}</pre>
           </section>
-          <label
-            >{{ t('before')
-            }}<input v-model="comparison" :disabled="locked" /></label
-          ><button
-            :disabled="locked || !comparison.trim()"
-            @click="preview(true)"
-          >
-            {{ t('compare') }}
-          </button>
+          <div class="market-toolbar">
+            <label
+              >{{ t('before')
+              }}<input v-model="comparison" :disabled="locked" /></label
+            ><button
+              :disabled="locked || !comparison.trim()"
+              @click="preview(true)"
+            >
+              {{ t('compare') }}
+            </button>
+          </div>
+          <section v-if="permissionChanges" class="catalog-permission-diff">
+            <h3>{{ t('permissionDiff') }}</h3>
+            <p v-if="permissionChanges.unchanged">
+              {{ t('permissionUnchanged') }}
+            </p>
+            <template v-else>
+              <p v-if="permissionChanges.added.length">
+                <strong>{{ t('permissionAdded') }}:</strong>
+                {{ permissionChanges.added.join('；') }}
+              </p>
+              <p v-if="permissionChanges.removed.length">
+                <strong>{{ t('permissionRemoved') }}:</strong>
+                {{ permissionChanges.removed.join('；') }}
+              </p>
+            </template>
+          </section>
           <section v-if="previous.length">
             <h3>{{ t('changes') }}</h3>
             <div v-for="f in changes" :key="f.path">
@@ -862,19 +1250,33 @@ onBeforeUnmount(() => {
 {{ line.line }} + {{ line.after }}</pre>
             </div>
           </section>
-        </template>
-        <template v-if="review"
-          ><h3>{{ t('history') }}</h3>
-          <p>{{ review.reviewId }} / {{ review.authorId }}</p>
-          <p v-for="(d, index) in review.decisions" :key="index">
-            {{ d.reviewerId }} · {{ t(d.role) }} · {{ d.decision }} ·
-            {{ d.reason }} · {{ d.versionRevision }} · {{ d.createdAt }}
+        </section>
+
+        <section v-if="review" class="catalog-review-history">
+          <h3>{{ t('history') }}</h3>
+          <p v-if="reviewProgress" class="catalog-progress">
+            {{ t('reviewProgress') }}：{{
+              t('reviewProgressSummary', reviewProgress)
+            }}
           </p>
-          <p v-if="author">{{ t('author') }}</p>
-          <p v-for="issue in publicationIssues" :key="issue.code">
+          <p v-if="!review.decisions.length">{{ t('noDecisionsYet') }}</p>
+          <ul v-else class="catalog-decision-list">
+            <li v-for="(d, index) in review.decisions" :key="index">
+              <strong>{{
+                formatPerson(d.reviewerName, d.reviewerDepartment, d.reviewerId)
+              }}</strong>
+              · {{ t(d.role) }} · {{ t(d.decision) }} · {{ d.reason }}
+              <small>{{ formatTime(d.createdAt) }}</small>
+            </li>
+          </ul>
+          <p
+            v-for="issue in publicationIssues"
+            :key="issue.code"
+            class="catalog-blocker"
+          >
             {{ t(issue.code, issue) }}
-          </p></template
-        >
+          </p>
+        </section>
         <fieldset :disabled="locked">
           <label
             >{{ t('reason')
@@ -1021,6 +1423,87 @@ onBeforeUnmount(() => {
   border: 1px solid var(--auriga-border);
   border-radius: 16px;
   background: var(--auriga-surface);
+}
+.catalog-detail-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-bottom: 16px;
+}
+.catalog-detail-header h2 {
+  margin: 0 0 6px;
+}
+.catalog-detail-desc {
+  margin: 0;
+  color: var(--auriga-muted);
+  line-height: 1.6;
+}
+.catalog-desc {
+  margin-top: 4px;
+  max-width: 420px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+.catalog-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+.catalog-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  border: 1px solid var(--auriga-border-strong);
+  background: var(--auriga-field-bg);
+  color: var(--auriga-text);
+}
+.catalog-badge-upgrade {
+  border-color: var(--auriga-accent);
+  color: var(--auriga-accent);
+  background: var(--admin-blue-soft);
+}
+.catalog-meta-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px 20px;
+  margin: 16px 0;
+  padding: 14px 16px;
+  border-radius: 10px;
+  background: var(--auriga-field-bg);
+}
+.catalog-meta-grid dt {
+  font-size: 12px;
+  color: var(--auriga-muted);
+}
+.catalog-meta-grid dd {
+  margin: 4px 0 0;
+}
+.catalog-notes,
+.catalog-permissions,
+.catalog-preview,
+.catalog-review-history {
+  margin: 16px 0;
+  padding-top: 12px;
+  border-top: 1px solid var(--auriga-border);
+}
+.catalog-notes p {
+  white-space: pre-wrap;
+  margin: 6px 0 12px;
+}
+.catalog-decision-list {
+  padding-left: 18px;
+  line-height: 1.7;
+}
+.catalog-blocker {
+  color: var(--auriga-muted);
+  margin: 4px 0;
 }
 .catalog-detail pre {
   white-space: pre-wrap;

@@ -469,7 +469,7 @@ export function catalogService(options) {
   }
   /** @type {Map<string,{fingerprint:string,etag?:string,retryPackageId?:string,expires:number}>} */
   const submissions = new Map();
-  /** @typedef {{manifest:any,archive:Uint8Array,reason:string,key:string,packageId?:string}} PreparedSubmission */
+  /** @typedef {{manifest:any,archive:Uint8Array,reason:string,key:string,packageId?:string,changeNotes?:string}} PreparedSubmission */
   /** @template T @param {'package'|'upload'|'submit'} stage @param {()=>Promise<T>} action */
   async function submissionStage(stage, action) {
     try {
@@ -496,6 +496,10 @@ export function catalogService(options) {
       typeof input.reason !== 'string' ||
       !input.reason.trim() ||
       input.reason.length > 1024 ||
+      (input.changeNotes !== undefined &&
+        (typeof input.changeNotes !== 'string' ||
+          !input.changeNotes.trim() ||
+          input.changeNotes.length > 4096)) ||
       (input.packageId !== undefined && !uuid(input.packageId)) ||
       !(input.archive instanceof Uint8Array) ||
       !['skill', 'plugin'].includes(input.manifest?.kind) ||
@@ -506,7 +510,7 @@ export function catalogService(options) {
     const { kind, name, version, artifacts } = parseStrictJson(bytes, true);
     if (bytes.length > 262144 || bytes.length + input.archive.length > 67108864)
       refuse('common.validation_failed');
-    const { key, reason, packageId } = input;
+    const { key, reason, packageId, changeNotes } = input;
     const manifestDigest = sha(bytes);
     if (
       artifacts.length !== 1 ||
@@ -523,6 +527,7 @@ export function catalogService(options) {
       packageId ?? null,
       manifestDigest,
       reason,
+      changeNotes ?? null,
     ]);
     const time = now();
     for (const [key, attempt] of submissions) {
@@ -562,9 +567,18 @@ export function catalogService(options) {
     const form = new FormData();
     form.append(
       'metadata',
-      new Blob([JSON.stringify({ version, expectedDigest: manifestDigest })], {
-        type: 'application/json',
-      }),
+      new Blob(
+        [
+          JSON.stringify({
+            version,
+            expectedDigest: manifestDigest,
+            ...(changeNotes ? { changeNotes } : {}),
+          }),
+        ],
+        {
+          type: 'application/json',
+        },
+      ),
     );
     form.append(
       'manifest',
@@ -1106,6 +1120,65 @@ export function catalogService(options) {
      * @param {PreparedSubmission} input @param {()=>Promise<void>} [assertCurrent] */
     submitPrepared(input, assertCurrent) {
       return serial(() => sendPrepared(input, assertCurrent));
+    },
+    /** List catalog packages owned by the current authenticated member.
+     * @param {'plugin'|'skill'|undefined} [kind] @param {()=>Promise<void>} [assertCurrent] */
+    async ownedPackages(kind, assertCurrent) {
+      if (assertCurrent) await assertCurrent();
+      api.check();
+      const items = [];
+      let cursor;
+      const seen = new Set();
+      for (let page = 0; page < 20; page++) {
+        const result = await api.request(
+          '/api/resource/v1/catalog/packages?' +
+            new URLSearchParams({
+              ...(kind ? { kind } : {}),
+              limit: '200',
+              ...(cursor ? { cursor } : {}),
+            }),
+          { assertCurrent },
+        );
+        if (
+          !Array.isArray(result.value?.items) ||
+          result.value.items.length > 200
+        )
+          refuse('common.validation_failed');
+        for (const pack of result.value.items) {
+          if (
+            ['plugin', 'skill'].includes(pack.kind) &&
+            (!kind || pack.kind === kind) &&
+            pack.ownerId === who.ownerId &&
+            pack.tenantId === who.tenantId &&
+            uuid(pack.id) &&
+            !seen.has(pack.id)
+          ) {
+            seen.add(pack.id);
+            items.push({
+              packageId: pack.id,
+              kind: pack.kind,
+              name: pack.name,
+              visibility: pack.visibility,
+              enabled: !!pack.enabled,
+              defaultVersionId: pack.defaultVersionId ?? null,
+              publishedVersion: pack.market?.version ?? null,
+              latestVersion:
+                pack.latestVersion?.version ?? pack.market?.version ?? null,
+              latestState:
+                pack.latestVersion?.state ?? (pack.market ? 'published' : null),
+              description:
+                pack.latestVersion?.description ??
+                pack.market?.description ??
+                '',
+            });
+          }
+        }
+        if (!result.value.nextCursor) return items;
+        if (result.value.nextCursor === cursor)
+          refuse('common.validation_failed');
+        cursor = result.value.nextCursor;
+      }
+      return items;
     },
   };
 }

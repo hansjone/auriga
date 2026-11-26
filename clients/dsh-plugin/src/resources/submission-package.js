@@ -69,7 +69,11 @@ async function packSkillDirectory(source) {
     invalid('SKILL.md', 'invalid skill front matter');
   }
   try {
-    return { skill, archive: packSkill(files, skill) };
+    return {
+      skill,
+      archive: packSkill(files, skill),
+      files: Object.keys(files),
+    };
   } catch {
     invalid(
       '.',
@@ -127,9 +131,9 @@ function rangeValid(range) {
  * @param {{
  *  cwd:string, directory:string, kind:'plugin'|'skill',
  *  metadata:{
- *    name?:string, version?:string, description?:string, author:string, license:string,
+ *    name?:string, version?:string, description?:string, author?:string, license?:string,
  *    permissions:{tools:string[],outboundHosts:string[],dataAccess:string[]},
- *    dshVersionRange?:string, tags?:string[]
+ *    dshVersionRange?:string, tags?:string[], changeNotes?:string
  *  }
  * }} input
  */
@@ -138,9 +142,20 @@ export async function prepareDirectory({ cwd, directory, kind, metadata }) {
     invalid('metadata', 'expected plugin or skill submission metadata');
 
   const source = submissionFiles(await openSubmissionDirectory(cwd, directory));
-  let name, version, description, archive, detail, dshVersionRange;
+  let name,
+    version,
+    description,
+    license,
+    archive,
+    files,
+    detail,
+    dshVersionRange;
   if (kind === 'plugin') {
-    const { pkg, archive: payload } = await packPluginDirectory(source);
+    const {
+      pkg,
+      archive: payload,
+      files: packedFiles,
+    } = await packPluginDirectory(source);
     dshVersionRange =
       metadata.dshVersionRange ?? pkg.engines?.dsh ?? defaultDshRange;
     if (
@@ -154,6 +169,11 @@ export async function prepareDirectory({ cwd, directory, kind, metadata }) {
     name = metadata.name ?? pkg.name.split('/').at(-1);
     version = pkg.version;
     description = metadata.description ?? pkg.description;
+    license =
+      metadata.license ??
+      (typeof pkg.license === 'string' && pkg.license.trim()
+        ? pkg.license.trim()
+        : undefined);
     detail = {
       plugin: {
         packageName: pkg.name,
@@ -162,10 +182,15 @@ export async function prepareDirectory({ cwd, directory, kind, metadata }) {
       },
     };
     archive = payload;
+    files = packedFiles;
   } else {
     if (metadata.tags !== undefined)
       invalid('metadata.tags', 'feature tags apply to plugins only');
-    const { skill, archive: payload } = await packSkillDirectory(source);
+    const {
+      skill,
+      archive: payload,
+      files: packedFiles,
+    } = await packSkillDirectory(source);
     if (
       (metadata.name !== undefined && metadata.name !== skill.name) ||
       (metadata.description !== undefined &&
@@ -178,6 +203,7 @@ export async function prepareDirectory({ cwd, directory, kind, metadata }) {
     name = skill.name;
     version = metadata.version;
     description = skill.description;
+    license = metadata.license;
     dshVersionRange = metadata.dshVersionRange ?? defaultDshRange;
     detail = {
       skill: {
@@ -187,17 +213,83 @@ export async function prepareDirectory({ cwd, directory, kind, metadata }) {
       },
     };
     archive = payload;
+    files = packedFiles;
   }
+
+  if (
+    typeof name !== 'string' ||
+    name.length < 1 ||
+    name.length > 64 ||
+    !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(name)
+  )
+    invalid(
+      'metadata.name',
+      `catalog name must match ^[a-z0-9]+(-[a-z0-9]+)*$ without npm @scope (got ${JSON.stringify(name)}); omit metadata.name to derive automatically`,
+    );
+  if (
+    typeof version !== 'string' ||
+    !schemaValid('package', 'Version', version)
+  )
+    invalid(
+      'metadata.version',
+      `version must be strict SemVer such as 1.0.0 (got ${JSON.stringify(version)})`,
+    );
+  if (
+    typeof description !== 'string' ||
+    !description.trim() ||
+    description.length > 1024
+  )
+    invalid(
+      'metadata.description',
+      'description must be 1..1024 non-empty characters (provide in package.json, SKILL.md or metadata.description)',
+    );
+  if (typeof license !== 'string' || !license.trim() || license.length > 128)
+    invalid(
+      'metadata.license',
+      'license must be 1..128 characters (e.g. MIT, Apache-2.0, Proprietary)',
+    );
+  if (
+    metadata.changeNotes !== undefined &&
+    (typeof metadata.changeNotes !== 'string' ||
+      !metadata.changeNotes.trim() ||
+      metadata.changeNotes.length > 4096)
+  )
+    invalid(
+      'metadata.changeNotes',
+      'changeNotes must be 1..4096 non-empty characters when provided',
+    );
+  if (!schemaValid('package', 'Permissions', metadata.permissions))
+    invalid(
+      'metadata.permissions',
+      'permissions must contain tools[], outboundHosts[] and dataAccess[]',
+    );
+  if (!rangeValid(dshVersionRange))
+    invalid('metadata.dshVersionRange', 'invalid dshVersionRange');
+  if (!metadata.permissions.outboundHosts.every(hostValid))
+    invalid(
+      'metadata.permissions.outboundHosts',
+      'outboundHosts must contain canonical DNS names or literal IP addresses',
+    );
+
+  // Author identity is resolved authoritatively by the server from the authenticated member.
+  const authorDisplayName =
+    typeof metadata.author === 'string' && metadata.author.trim()
+      ? metadata.author.trim().slice(0, 128)
+      : 'Authenticated Member';
 
   const manifest = {
     schemaVersion: 1,
     kind,
     name,
     version,
-    description,
-    author: { displayName: metadata.author },
-    license: metadata.license,
-    permissions: metadata.permissions,
+    description: description.trim(),
+    author: { displayName: authorDisplayName },
+    license: license.trim(),
+    permissions: {
+      tools: [...metadata.permissions.tools],
+      outboundHosts: [...metadata.permissions.outboundHosts],
+      dataAccess: [...metadata.permissions.dataAccess],
+    },
     runtimes: [],
     artifacts: [
       {
@@ -214,21 +306,13 @@ export async function prepareDirectory({ cwd, directory, kind, metadata }) {
     ...detail,
   };
   if (!schemaValid('package', 'Manifest', manifest))
-    invalid(
-      'metadata',
-      'invalid catalog name, version, description, author, license or permissions',
-    );
-  if (!rangeValid(dshVersionRange))
-    invalid('metadata', 'invalid dshVersionRange');
-  if (!metadata.permissions.outboundHosts.every(hostValid))
-    invalid(
-      'metadata',
-      'outboundHosts must contain canonical DNS names or literal IP addresses',
-    );
-  manifest.permissions = {
-    tools: [...metadata.permissions.tools],
-    outboundHosts: [...metadata.permissions.outboundHosts],
-    dataAccess: [...metadata.permissions.dataAccess],
+    invalid('metadata', 'invalid catalog manifest fields after normalization');
+  return {
+    manifest,
+    archive,
+    files,
+    ...(metadata.changeNotes
+      ? { changeNotes: metadata.changeNotes.trim() }
+      : {}),
   };
-  return { manifest, archive };
 }

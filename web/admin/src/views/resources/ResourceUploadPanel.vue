@@ -35,11 +35,17 @@ const props = defineProps<{
   author: string;
   canSubmit: boolean;
   disabled?: boolean;
+  upgradeTarget?: {
+    packageId: string;
+    name: string;
+    latestVersion?: string;
+  };
 }>();
 const emit = defineEmits<{
   completed: [];
   locked: [value: boolean];
   resumeDraft: [version: CatalogVersion];
+  cancelUpgrade: [];
 }>();
 const { t } = useI18n({ useScope: 'local', messages: catalogMessages });
 const source = shallowRef<ResourceSource>();
@@ -54,7 +60,9 @@ const parsing = ref(false),
 const visibility = ref<'tenant' | 'members' | 'groups'>('tenant'),
   groups = ref('');
 const tools = ref(''),
-  hosts = ref('');
+  hosts = ref(''),
+  changeNotes = ref(''),
+  submitReason = ref('');
 const folderInput = ref<HTMLInputElement>(),
   archiveInput = ref<HTMLInputElement>();
 const filename = ref('');
@@ -144,6 +152,9 @@ async function choose(files: File[]) {
     if (!alive || e !== epoch) return;
     source.value = value;
     manifest.value = JSON.parse(JSON.stringify(value.manifest));
+    if (props.upgradeTarget && manifest.value) {
+      manifest.value.name = props.upgradeTarget.name;
+    }
     tools.value = value.manifest.permissions.tools.join(', ');
     hosts.value = value.manifest.permissions.outboundHosts.join(', ');
   } catch (e2) {
@@ -229,6 +240,18 @@ async function start(submit: boolean) {
       throw new UploadParseError('groupsInvalid');
     const draft = await finalizeResourceUpload(source.value, m);
     if (!alive) return;
+    if (
+      props.upgradeTarget &&
+      draft.manifest.name !== props.upgradeTarget.name
+    ) {
+      error.value = t('upgradeNameMismatch', {
+        name: props.upgradeTarget.name,
+      });
+      return;
+    }
+    const notes = changeNotes.value.trim();
+    if (notes) draft.metadata = { ...draft.metadata, changeNotes: notes };
+    const reasonText = submitReason.value.trim() || t('uploadReviewReason');
     intent.value = {
       draft,
       submit,
@@ -237,7 +260,7 @@ async function start(submit: boolean) {
       createKey: catalogKey(),
       uploadKey: catalogKey(),
       submitKey: catalogKey(),
-      reason: t('uploadReviewReason'),
+      reason: reasonText,
       at: Date.now(),
     };
   } catch (e) {
@@ -260,19 +283,25 @@ async function run() {
   stepup.value = false;
   try {
     if (!i.pack) {
-      i.pack = await findPackage(i.draft.manifest.name);
-      if (!alive) return;
-      if (!i.pack)
-        i.pack = await api.create(
-          {
-            name: i.draft.manifest.name,
-            kind: props.kind,
-            visibility: i.visibility,
-            groupIds: i.groupIds,
-          },
-          i.createKey,
-        );
-      if (!alive) return;
+      if (props.upgradeTarget) {
+        const target = await api.get(props.upgradeTarget.packageId);
+        if (!alive) return;
+        i.pack = target.data;
+      } else {
+        i.pack = await findPackage(i.draft.manifest.name);
+        if (!alive) return;
+        if (!i.pack)
+          i.pack = await api.create(
+            {
+              name: i.draft.manifest.name,
+              kind: props.kind,
+              visibility: i.visibility,
+              groupIds: i.groupIds,
+            },
+            i.createKey,
+          );
+        if (!alive) return;
+      }
     }
     if (!i.version) {
       if (!i.etag) {
@@ -319,6 +348,8 @@ async function run() {
     intent.value = undefined;
     source.value = undefined;
     manifest.value = undefined;
+    changeNotes.value = '';
+    submitReason.value = '';
     confirmed.value = false;
     busy.value = false;
     await nextTick();
@@ -372,6 +403,27 @@ onBeforeUnmount(() => {
     <header>
       <h2>{{ t('uploadTitle', { kind: t(kind) }) }}</h2>
       <p>{{ t(kind === 'plugin' ? 'uploadPluginHint' : 'uploadSkillHint') }}</p>
+      <div
+        v-if="upgradeTarget"
+        data-testid="upgrade-banner"
+        class="upgrade-banner"
+      >
+        <div>
+          <strong>{{
+            t('upgradingTitle', { name: upgradeTarget.name })
+          }}</strong>
+          <small v-if="upgradeTarget.latestVersion">{{
+            t('upgradingCurrent', { version: upgradeTarget.latestVersion })
+          }}</small>
+        </div>
+        <button
+          type="button"
+          :disabled="locked || disabled"
+          @click="emit('cancelUpgrade')"
+        >
+          {{ t('cancelUpgrade') }}
+        </button>
+      </div>
     </header>
     <div class="upload-drop" @dragover.prevent @drop.prevent="drop">
       <input
@@ -465,6 +517,7 @@ onBeforeUnmount(() => {
               v-model="manifest.name"
               data-testid="upload-name"
               maxlength="64"
+              :readonly="!!upgradeTarget"
               required
           /></label>
           <label
@@ -496,7 +549,8 @@ onBeforeUnmount(() => {
               data-testid="upload-author"
               maxlength="128"
               required
-          /></label>
+            /><small>{{ t('submitterAutoHint') }}</small></label
+          >
           <label
             >{{ t('license')
             }}<input
@@ -538,6 +592,25 @@ onBeforeUnmount(() => {
           <label v-if="visibility === 'groups'" class="full-width"
             >{{ t('groupIds') }}<input v-model="groups" required
           /></label>
+          <label class="full-width"
+            >{{ t('changeNotes')
+            }}<textarea
+              v-model="changeNotes"
+              data-testid="upload-change-notes"
+              rows="2"
+              maxlength="4096"
+              :placeholder="t('changeNotesPlaceholder')"
+            />
+          </label>
+          <label v-if="canSubmit" class="full-width"
+            >{{ t('submitReason')
+            }}<input
+              v-model="submitReason"
+              data-testid="upload-submit-reason"
+              maxlength="1024"
+              :placeholder="t('submitReasonPlaceholder')"
+            />
+          </label>
         </div>
         <section class="upload-permissions">
           <h3>{{ t('permissions') }}</h3>
@@ -641,6 +714,20 @@ onBeforeUnmount(() => {
 }
 .upload-panel header p {
   margin: 0 0 20px;
+}
+.upgrade-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 16px;
+  margin-bottom: 16px;
+  border: 1px solid var(--auriga-accent);
+  border-radius: 8px;
+  background: var(--admin-blue-soft);
+}
+.upgrade-banner strong {
+  display: block;
 }
 .upload-drop {
   display: flex;
