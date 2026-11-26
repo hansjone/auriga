@@ -50,6 +50,18 @@ function clearReadOnly(file) {
   } catch {
     /* Probe below reports a durable failure. */
   }
+  if (process.platform === 'win32') {
+    // Node open('w') on Windows also fails with EPERM when FILE_ATTRIBUTE_HIDDEN
+    // or FILE_ATTRIBUTE_SYSTEM is set; clear them best-effort via attrib.exe.
+    try {
+      spawnSync(systemTool('attrib'), ['-R', '-H', '-S', file], {
+        windowsHide: true,
+        timeout: 10000,
+      });
+    } catch {
+      /* Probe below reports a durable failure. */
+    }
+  }
 }
 
 function grantCurrentUserModify(directory) {

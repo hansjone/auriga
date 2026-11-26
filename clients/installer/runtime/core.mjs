@@ -572,13 +572,16 @@ export function defaultSmoke(dir, dataHome) {
     [dshBin(dir), '--profile', PROFILE, '--dump-config'],
     { env: launchEnv(dir, dataHome), encoding: 'utf8', timeout: 120000 },
   );
-  if (result.status !== 0)
+  if (result.status !== 0) {
+    const tail = (result.stderr || result.stdout || '').slice(-600);
+    const epermHint = /\b(?:EPERM|EACCES)\b/.test(tail)
+      ? '（文件写入被拒绝：请先完全退出旧版客户端，或将安装目录与用户数据目录加入杀软/安全软件白名单后重试）'
+      : '';
     throw Object.assign(
-      new Error(
-        `smoke failed (exit ${result.status}): ${(result.stderr || result.stdout || '').slice(-600)}`,
-      ),
+      new Error(`smoke failed (exit ${result.status})${epermHint}: ${tail}`),
       { code: 'desktop.smoke_failed' },
     );
+  }
   if (!/auriga-dsh/.test(result.stdout))
     throw Object.assign(
       new Error('smoke failed: effective config does not list auriga-dsh'),
