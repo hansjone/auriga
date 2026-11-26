@@ -14,6 +14,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 )
@@ -78,63 +79,112 @@ func readJSON(path string, output any) error {
 	return nil
 }
 
+type artifactLocationKind int
+
+const (
+	artifactLocationLocal artifactLocationKind = iota
+	artifactLocationHTTPS
+)
+
+func isASCIIAlpha(b byte) bool {
+	return (b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z')
+}
+
+// classifyArtifactLocation distinguishes approved local filesystem paths from
+// remote HTTPS download URLs according to host OS semantics without weakening
+// HTTPS-only download enforcement or expanding local file access to UNC/device
+// paths or Windows drive-relative paths.
+func classifyArtifactLocation(raw string, isWindows bool) (artifactLocationKind, *url.URL, error) {
+	if raw == "" {
+		return artifactLocationLocal, nil, errors.New("发行路径不能为空")
+	}
+	if len(raw) >= 2 && (raw[0] == '\\' || raw[0] == '/') && (raw[1] == '\\' || raw[1] == '/') {
+		return artifactLocationLocal, nil, errors.New("发行本地路径不支持 UNC 或设备路径")
+	}
+	if isWindows && len(raw) >= 2 && isASCIIAlpha(raw[0]) && raw[1] == ':' {
+		if len(raw) >= 3 && (raw[2] == '\\' || raw[2] == '/') {
+			return artifactLocationLocal, nil, nil
+		}
+		return artifactLocationLocal, nil, errors.New("发行本地路径不支持盘符相对路径")
+	}
+	u, err := url.Parse(raw)
+	if err != nil {
+		return artifactLocationLocal, nil, err
+	}
+	if u.Scheme == "" {
+		return artifactLocationLocal, nil, nil
+	}
+	if u.Scheme != "https" || u.Hostname() == "" || u.User != nil {
+		return artifactLocationHTTPS, nil, errors.New("发行下载仅接受 HTTPS，无 URL 内凭据")
+	}
+	return artifactLocationHTTPS, u, nil
+}
+
+func fetchRedirectPolicy(req *http.Request, via []*http.Request) error {
+	if len(via) >= 5 || req.URL.Scheme != "https" || req.URL.Host != via[0].URL.Host {
+		return errors.New("拒绝跨主机或非 HTTPS 重定向")
+	}
+	return nil
+}
+
 func fetchContext(ctx context.Context, a artifact, target string) error {
 	if !hex64.MatchString(a.SHA256) {
 		return errors.New("发行索引需要独立批准的 SHA256")
 	}
-	u, err := url.Parse(a.URL)
+	kind, u, err := classifyArtifactLocation(a.URL, runtime.GOOS == "windows")
 	if err != nil {
 		return err
 	}
-	if u.Scheme == "" {
+	if kind == artifactLocationLocal {
 		if err := copyFileContext(ctx, a.URL, target, 0644); err != nil {
 			return err
 		}
 	} else {
-		if u.Scheme != "https" || u.User != nil {
-			return errors.New("发行下载仅接受 HTTPS，无 URL 内凭据")
-		}
-		client := &http.Client{Timeout: 60 * time.Minute, CheckRedirect: func(req *http.Request, via []*http.Request) error {
-			if len(via) >= 5 || req.URL.Scheme != "https" || req.URL.Host != via[0].URL.Host {
-				return errors.New("拒绝跨主机或非 HTTPS 重定向")
-			}
-			return nil
-		}}
-		request, err := http.NewRequestWithContext(ctx, http.MethodGet, a.URL, nil)
-		if err != nil {
-			return err
-		}
-		if token := os.Getenv("AURIGA_BUNDLE_TOKEN"); token != "" {
-			if os.Getenv("AURIGA_BUNDLE_AUTH_HOST") == u.Host {
-				request.Header.Set("Authorization", "Bearer "+token)
-			}
-		}
-		response, err := client.Do(request)
-		if err != nil {
-			return errors.Join(err, ctx.Err())
-		}
-		defer func() { _ = response.Body.Close() }()
-		if response.StatusCode != 200 {
-			return fmt.Errorf("发行下载 HTTP %d", response.StatusCode)
-		}
-		out, err := os.OpenFile(target, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0644)
-		if err != nil {
-			return err
-		}
-		_, err = io.Copy(out, cancellationReader(ctx, io.LimitReader(response.Body, (128<<30)+1)))
-		closeErr := out.Close()
-		if err != nil {
-			return err
-		}
-		if closeErr != nil {
-			return closeErr
+		client := &http.Client{Timeout: 60 * time.Minute, CheckRedirect: fetchRedirectPolicy}
+		return fetchHTTPSContext(ctx, client, a, u, target)
+	}
+	return verifyFetchedDigest(ctx, target, a.SHA256)
+}
+
+func fetchHTTPSContext(ctx context.Context, client *http.Client, a artifact, u *url.URL, target string) error {
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, a.URL, nil)
+	if err != nil {
+		return err
+	}
+	if token := os.Getenv("AURIGA_BUNDLE_TOKEN"); token != "" {
+		if os.Getenv("AURIGA_BUNDLE_AUTH_HOST") == u.Host {
+			request.Header.Set("Authorization", "Bearer "+token)
 		}
 	}
+	response, err := client.Do(request)
+	if err != nil {
+		return errors.Join(err, ctx.Err())
+	}
+	defer func() { _ = response.Body.Close() }()
+	if response.StatusCode != 200 {
+		return fmt.Errorf("发行下载 HTTP %d", response.StatusCode)
+	}
+	out, err := os.OpenFile(target, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0644)
+	if err != nil {
+		return err
+	}
+	_, err = io.Copy(out, cancellationReader(ctx, io.LimitReader(response.Body, (128<<30)+1)))
+	closeErr := out.Close()
+	if err != nil {
+		return err
+	}
+	if closeErr != nil {
+		return closeErr
+	}
+	return verifyFetchedDigest(ctx, target, a.SHA256)
+}
+
+func verifyFetchedDigest(ctx context.Context, target, expectedSHA string) error {
 	hash, err := digestContext(ctx, target)
 	if err != nil {
 		return err
 	}
-	if hash != a.SHA256 {
+	if hash != expectedSHA {
 		return errors.New("下载摘要不匹配，拒绝打包")
 	}
 	return nil

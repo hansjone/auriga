@@ -1,9 +1,9 @@
 name: Go
 on:
   push:
-    paths: ['infra/**', 'third_party/bifrost/**', 'deploy/bootstrap/**', 'deploy/nas/**', 'deploy/offline/**', 'deploy/site/**', 'auriga', 'contracts/proto/**', 'contracts/buf.yaml', '.github/workflows/go.yml', '.github/scripts/*artifact*', '.github/scripts/prepare-postgres.ps1', '.github/scripts/n1-*.sh']
+    paths: ['infra/**', 'third_party/bifrost/**', 'deploy/bootstrap/**', 'deploy/nas/**', 'deploy/offline/**', 'deploy/site/**', 'auriga', 'contracts/proto/**', 'contracts/buf.yaml', 'scripts/client-release/build-node.json', '.github/workflows/go.yml', '.github/scripts/*artifact*', '.github/scripts/prepare-postgres.ps1', '.github/scripts/n1-*.sh']
   pull_request:
-    paths: ['infra/**', 'third_party/bifrost/**', 'deploy/bootstrap/**', 'deploy/nas/**', 'deploy/offline/**', 'deploy/site/**', 'auriga', 'contracts/proto/**', 'contracts/buf.yaml', '.github/workflows/go.yml', '.github/scripts/*artifact*', '.github/scripts/prepare-postgres.ps1', '.github/scripts/n1-*.sh']
+    paths: ['infra/**', 'third_party/bifrost/**', 'deploy/bootstrap/**', 'deploy/nas/**', 'deploy/offline/**', 'deploy/site/**', 'auriga', 'contracts/proto/**', 'contracts/buf.yaml', 'scripts/client-release/build-node.json', '.github/workflows/go.yml', '.github/scripts/*artifact*', '.github/scripts/prepare-postgres.ps1', '.github/scripts/n1-*.sh']
 permissions:
   contents: read
 jobs:
