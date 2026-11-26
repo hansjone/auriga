@@ -95,6 +95,7 @@ const localBoot = (connected) => ({
 
 test('desktop login starts verified market prefetch before the Auriga main panel is opened', async () => {
   let loggedIn = false;
+  let generation = 'a'.repeat(64);
   const ownerId = '01900000-0000-7000-8000-000000000001';
   const prefetched = [];
   const cleared = [];
@@ -105,7 +106,9 @@ test('desktop login starts verified market prefetch before the Auriga main panel
         return response(200, {
           loggedIn,
           connected: loggedIn,
-          account: loggedIn ? { subject: ownerId } : null,
+          account: loggedIn
+            ? { subject: ownerId, catalogGeneration: generation }
+            : null,
         });
       if (path.endsWith('/auriga/uac/status'))
         return response(200, { available: false });
@@ -141,6 +144,7 @@ test('desktop login starts verified market prefetch before the Auriga main panel
     await flush();
     assert.equal(prefetched.length, 1);
     assert.equal(prefetched[0].ownerId, ownerId);
+    assert.equal(prefetched[0].generation, generation);
     const main = host.mount('main');
     await flush();
     const panel = main.root.querySelector('auriga-team-panel');
@@ -148,12 +152,70 @@ test('desktop login starts verified market prefetch before the Auriga main panel
     host.expire(15000);
     await flush();
     assert.equal(prefetched.length, 1);
-    loggedIn = false;
+    generation = 'b'.repeat(64);
     host.expire(4000);
     await flush();
     assert.equal(cleared[0], prefetched[0]);
+    assert.equal(prefetched.length, 2);
+    assert.equal(prefetched[1].generation, generation);
+    assert.equal(panel.context.catalogSession, prefetched[1]);
+    loggedIn = false;
+    host.expire(4000);
+    await flush();
+    assert.equal(cleared[1], prefetched[1]);
     assert.equal(panel.context, undefined);
     main.close();
+    launcher.close();
+    host.dispose();
+  } finally {
+    host.close();
+  }
+});
+
+test('a desktop login prefetch survives the Auriga main panel closing during verified bundle loading', async () => {
+  let loggedIn = false;
+  const prefetched = [];
+  const host = surfaceHost(
+    async (url) => {
+      const path = new URL(url).pathname;
+      if (path.endsWith('/auriga/shell/status'))
+        return response(200, {
+          loggedIn,
+          account: loggedIn ? { subject: 'fixture-member' } : null,
+        });
+      if (path.endsWith('/auriga/uac/status'))
+        return response(200, { available: false });
+      return response(200, localBoot(true));
+    },
+    { defined: false, accountLauncher: true, url: 'http://127.0.0.1:12345/' },
+  );
+  try {
+    const main = host.mount('main');
+    const launcher = host.mount('settings.launcher');
+    await flush();
+    const first = host.document.querySelector('script[data-auriga-panel]');
+    assert.ok(first);
+    loggedIn = true;
+    host.expire(15000);
+    await flush();
+    assert.equal(
+      host.document.querySelector('script[data-auriga-panel]'),
+      first,
+    );
+    main.close();
+    await flush();
+    const retry = host.document.querySelector('script[data-auriga-panel]');
+    assert.ok(retry && retry !== first);
+    host.completeScript(
+      retry,
+      class extends host.window.HTMLElement {
+        static prefetchCatalog(context) {
+          prefetched.push(context.catalogSession.ownerId);
+        }
+      },
+    );
+    await flush();
+    assert.deepEqual(prefetched, ['fixture-member']);
     launcher.close();
     host.dispose();
   } finally {

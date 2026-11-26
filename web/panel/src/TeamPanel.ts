@@ -17,7 +17,7 @@ export class AurigaTeamPanel extends HTMLElement {
       return undefined;
     let value = this.desktopCatalogs.get(scope);
     if (!value) {
-      value = new DesktopCatalog(context.fetch!, scope.ownerId);
+      value = new DesktopCatalog(context.fetch!, scope);
       this.desktopCatalogs.set(scope, value);
     }
     return value;

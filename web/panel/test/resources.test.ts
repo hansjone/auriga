@@ -155,22 +155,23 @@ it('uses one login prefetch across tabs and even after remounting the desktop pa
 it('keeps the old desktop snapshot until a manual refresh completes and retains it on temporary failure', async () => {
   const f = desktopFixture();
   const oldName = f.pack.name;
-  let fail = false;
+  let failingPath = '';
+  let slowSummary = false;
   let releaseSummary: (() => void) | undefined;
-  let summaryBlocked: Promise<void> | undefined;
+  const summaryBlocked = new Promise<void>((resolve) => {
+    releaseSummary = resolve;
+  });
   const w = await render(
     'plugin',
     async (path, init) => {
-      if (fail && path === 'catalog/installations') return json({}, 503);
-      if (path.includes('/versions/')) await summaryBlocked;
+      if (failingPath && path.includes(failingPath)) return json({}, 503);
+      if (slowSummary && path.includes('/versions/')) await summaryBlocked;
       return f.fetch(path, init);
     },
     { catalogSession: { ownerId: desktopOwner.ownerId } },
   );
   expect(w.text()).toContain(oldName);
-  summaryBlocked = new Promise<void>((resolve) => {
-    releaseSummary = resolve;
-  });
+  slowSummary = true;
   f.pack.name = 'Refreshed package';
   f.version.manifest.description = 'Refreshed description';
   await click(w, 'Refresh');
@@ -183,10 +184,16 @@ it('keeps the old desktop snapshot until a manual refresh completes and retains 
   expect(w.text()).toContain(f.version.manifest.description);
   expect(w.text()).not.toContain(oldName);
 
-  fail = true;
-  await click(w, 'Refresh');
-  expect(w.text()).toContain(f.pack.name);
-  expect(w.find('[role="alert"]').exists()).toBe(true);
+  const refreshedName = f.pack.name;
+  f.pack.name = 'Incomplete refresh';
+  for (const path of ['catalog/installations', '/versions/']) {
+    failingPath = path;
+    await click(w, 'Refresh');
+    expect(w.text()).toContain(refreshedName);
+    expect(w.text()).toContain(f.version.manifest.description);
+    expect(w.text()).not.toContain(f.pack.name);
+    expect(w.find('[role="alert"]').exists()).toBe(true);
+  }
 });
 
 it('clears a desktop snapshot on authorization failure and fences an old login during account change', async () => {
@@ -223,6 +230,33 @@ it('clears a desktop snapshot on authorization failure and fences an old login d
   await flushPromises();
   expect(w.text()).toContain(replacement.pack.name);
   expect(w.text()).not.toContain(f.pack.name);
+});
+
+it('updates the shared installation snapshot when an action completes on another tab', async () => {
+  const f = desktopFixture();
+  let complete: ((value: Response) => void) | undefined;
+  let actionSignal: AbortSignal | null | undefined;
+  const w = await render(
+    'plugin',
+    (path, init) => {
+      if (path === 'catalog/installations')
+        return Promise.resolve(json({ identity: desktopOwner, items: [] }));
+      if (path !== 'catalog/actions') return f.fetch(path, init);
+      actionSignal = init?.signal;
+      return new Promise<Response>((resolve) => {
+        complete = resolve;
+      });
+    },
+    { catalogSession: { ownerId: desktopOwner.ownerId } },
+  );
+  await click(w, 'Install 1.0.0');
+  expect(complete).toBeDefined();
+  await click(w, 'My resources');
+  expect(actionSignal?.aborted).toBe(false);
+  complete!(json({ accepted: true, installation: f.row }, 202));
+  await flushPromises();
+  expect(w.text()).toContain(f.pack.name);
+  expect(w.text()).toContain('applying');
 });
 for (const kind of ['plugin', 'skill'] as const)
   describe('unified ' + kind, () => {

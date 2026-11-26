@@ -1988,6 +1988,11 @@ window.__ModuleLoader__.load({
           const panel = customElements.get(ELEMENT);
           return panel && loadedPanels.has(panel) ? panel : undefined;
         };
+        const catalogGenerationOf = (account) =>
+          typeof account?.catalogGeneration === 'string' &&
+          /^[0-9a-f]{64}$/.test(account.catalogGeneration)
+            ? account.catalogGeneration
+            : undefined;
         const updateDesktopCatalog = (status, sequence) => {
           if (
             typeof status?.loggedIn !== 'boolean' ||
@@ -1999,9 +2004,16 @@ window.__ModuleLoader__.load({
             status.loggedIn && typeof status.account?.subject === 'string'
               ? status.account.subject
               : undefined;
-          if (desktopCatalog?.ownerId === ownerId) return;
+          const generation = catalogGenerationOf(status.account);
+          if (
+            desktopCatalog?.ownerId === ownerId &&
+            desktopCatalog?.generation === generation
+          )
+            return;
           if (desktopCatalog) verifiedPanel()?.clearCatalog?.(desktopCatalog);
-          desktopCatalog = ownerId ? Object.freeze({ ownerId }) : undefined;
+          desktopCatalog = ownerId
+            ? Object.freeze({ ownerId, generation })
+            : undefined;
           emit();
           if (
             !desktopCatalog ||
@@ -2018,7 +2030,20 @@ window.__ModuleLoader__.load({
             if (!panel) {
               const boot = await requestBootstrap(controller.signal);
               if (boot.mode !== 'connect' || desktopCatalog !== scope) return;
-              await ensurePanel(boot, controller.signal);
+              const sharedLoad = !!panelPending;
+              try {
+                await ensurePanel(boot, controller.signal);
+              } catch (error) {
+                // A main-panel unmount can cancel the shared script attempt.
+                if (
+                  !sharedLoad ||
+                  error?.reason !== 'unavailable' ||
+                  controller.signal.aborted ||
+                  desktopCatalog !== scope
+                )
+                  throw error;
+                await ensurePanel(boot, controller.signal);
+              }
               panel = verifiedPanel();
             }
             if (disposed || desktopCatalog !== scope) return;
@@ -3386,7 +3411,8 @@ window.__ModuleLoader__.load({
             : boot?.mode === 'managed' && boot.connection?.connected === true;
           const catalogSession =
             boot?.mode === 'connect' &&
-            desktopCatalog?.ownerId === shell?.account?.subject
+            desktopCatalog?.ownerId === shell?.account?.subject &&
+            desktopCatalog?.generation === catalogGenerationOf(shell?.account)
               ? desktopCatalog
               : undefined;
           const resourcesReady =

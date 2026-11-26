@@ -91,7 +91,11 @@ export class SkillPanel {
     if (needsAuth) this.authenticationRequired();
   };
   private get pending() {
-    return this.busy || this.desktop?.loading === true;
+    return (
+      this.busy ||
+      this.desktop?.loading === true ||
+      this.desktop?.mutating === true
+    );
   }
   present(context: PanelContext) {
     this.context = context;
@@ -162,7 +166,7 @@ export class SkillPanel {
         path,
         this.controller?.signal,
         body,
-        this.context.catalogSession?.ownerId,
+        this.context.catalogSession,
       );
     } catch (error) {
       if (!this.desktop && catalogStatus(error) === 401)
@@ -181,7 +185,11 @@ export class SkillPanel {
       await work();
     } catch (error) {
       if (this.epoch === epoch) {
-        if (this.desktop && catalogStatus(error) === 401)
+        if (
+          this.desktop &&
+          this.desktop.error !== error &&
+          catalogStatus(error) === 401
+        )
           this.desktop.rejectAuth(error);
         this.failed = true;
         if (!this.desktop) {
@@ -320,14 +328,17 @@ export class SkillPanel {
       const old = this.rows.find(
         (row) => row.resource.identity.packageId === packageId,
       );
-      const result = await this.request('actions', {
+      const input = {
         packageId,
         versionId,
         action,
         revision: old?.installationRevision ?? 0,
         key,
         ...(confirmation ? { confirmation } : {}),
-      });
+      };
+      const result = this.desktop
+        ? await this.desktop.act(input)
+        : await this.request('actions', input);
       if (result.confirmationRequired) {
         this.confirmation = {
           packageId,
@@ -354,14 +365,11 @@ export class SkillPanel {
         '已接受请求，等待实际安装回报。关闭或卸载后请新建会话。',
         'Request accepted; waiting for observed installation. Start a new session after disabling or removing.',
       );
-      if (result.installation) {
-        if (this.desktop) this.desktop.updateInstallation(result.installation);
-        else {
-          this.rows = this.rows.filter(
-            (row) => row.resource.identity.packageId !== packageId,
-          );
-          this.rows.push(result.installation);
-        }
+      if (!this.desktop && result.installation) {
+        this.rows = this.rows.filter(
+          (row) => row.resource.identity.packageId !== packageId,
+        );
+        this.rows.push(result.installation);
       }
     });
   }

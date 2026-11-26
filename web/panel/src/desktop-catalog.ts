@@ -10,6 +10,7 @@ import type {
 } from './resources';
 
 type HostFetch = NonNullable<PanelContext['fetch']>;
+type CatalogScope = NonNullable<PanelContext['catalogSession']>;
 type Kind = 'plugin' | 'skill';
 
 export interface InstallationSnapshot {
@@ -64,7 +65,7 @@ export async function catalogRequest(
   path: string,
   parent?: AbortSignal,
   body?: unknown,
-  ownerId?: string,
+  scope?: CatalogScope,
 ) {
   const controller = new AbortController();
   let cancel: (() => void) | undefined;
@@ -90,7 +91,10 @@ export async function catalogRequest(
           signal: controller.signal,
           headers: {
             accept: 'application/json',
-            ...(ownerId ? { 'x-auriga-catalog-owner': ownerId } : {}),
+            ...(scope ? { 'x-auriga-catalog-owner': scope.ownerId } : {}),
+            ...(scope?.generation
+              ? { 'x-auriga-catalog-generation': scope.generation }
+              : {}),
             ...(body === undefined
               ? {}
               : {
@@ -140,11 +144,12 @@ export class DesktopCatalog {
   snapshot?: Snapshot;
   error?: unknown;
   loading = false;
+  mutating = false;
   private started = false;
   private lifetime = new AbortController();
   constructor(
     private fetch: HostFetch,
-    private ownerId: string,
+    private scope: CatalogScope,
   ) {}
 
   prefetch() {
@@ -173,11 +178,11 @@ export class DesktopCatalog {
   }
 
   private get(path: string, signal: AbortSignal = this.lifetime.signal) {
-    return catalogRequest(this.fetch, path, signal, undefined, this.ownerId);
+    return catalogRequest(this.fetch, path, signal, undefined, this.scope);
   }
 
   private async run(work: (signal: AbortSignal) => Promise<void>) {
-    if (this.loading || this.lifetime.signal.aborted) return;
+    if (this.loading || this.mutating || this.lifetime.signal.aborted) return;
     this.loading = true;
     this.error = undefined;
     this.emit();
@@ -235,13 +240,15 @@ export class DesktopCatalog {
               signal,
             );
             if (
-              version.kind === pack.kind &&
-              version.packageId === pack.id &&
-              version.id === pack.defaultVersionId
+              version?.kind !== pack.kind ||
+              version.packageId !== pack.id ||
+              version.id !== pack.defaultVersionId
             )
-              result.set(pack.id, version);
+              throw new Error('invalid');
+            result.set(pack.id, version);
           } catch (error) {
-            if (catalogStatus(error) === 401 || signal.aborted) throw error;
+            // The default can be withdrawn between the catalog and version reads.
+            if (catalogStatus(error) !== 404) throw error;
           }
         }),
       );
@@ -257,7 +264,7 @@ export class DesktopCatalog {
         this.packages('skill', signal),
         this.get('installations', signal).then(validateInstallations),
       ]);
-      if (installations.identity?.ownerId !== this.ownerId)
+      if (installations.identity?.ownerId !== this.scope.ownerId)
         throw Object.assign(new ResourceDiagnosticError('unauthenticated'), {
           status: 401,
         });
@@ -333,6 +340,36 @@ export class DesktopCatalog {
     if (!active.aborted && current === this.snapshot?.market)
       this.versions.set(pack.id, result);
     return result;
+  }
+
+  async act(body: unknown) {
+    const signal = this.lifetime.signal;
+    if (this.loading || this.mutating || signal.aborted)
+      throw new Error('unavailable');
+    this.mutating = true;
+    this.error = undefined;
+    this.emit();
+    try {
+      const result = await catalogRequest(
+        this.fetch,
+        'actions',
+        signal,
+        body,
+        this.scope,
+      );
+      if (!signal.aborted && result.installation)
+        this.updateInstallation(result.installation);
+      return result;
+    } catch (error) {
+      if (!signal.aborted) {
+        if (catalogStatus(error) === 401) this.rejectAuth(error);
+        else this.error = error;
+      }
+      throw error;
+    } finally {
+      this.mutating = false;
+      this.emit();
+    }
   }
 
   updateInstallation(row: SkillInstallation) {

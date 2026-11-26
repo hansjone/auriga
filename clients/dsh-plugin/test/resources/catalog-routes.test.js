@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { Readable } from 'node:stream';
-import { catalogRoutes } from './broker-fixture.js';
+import { catalogRoutes, catalogService } from './broker-fixture.js';
 import { createResourceHandler } from './broker-fixture.js';
 import { catalogFixture } from './catalog-fixture.js';
 function response() {
@@ -164,4 +164,70 @@ test('desktop catalog requests are fenced to the current native owner', async (t
     assert.equal(res.status, status);
   }
   assert.equal(calls, 1);
+});
+
+test('a live desktop runtime creates installation services for each owner and native generation', async (t) => {
+  const f = catalogFixture(t);
+  let owner = f.who.ownerId;
+  let generation = 'a'.repeat(64);
+  const snapshot = f.runtime.vault.snapshot;
+  f.runtime.vault.snapshot = () => {
+    const original = snapshot();
+    return {
+      credential: { claims: { ...original.credential.claims, sub: owner } },
+    };
+  };
+  f.runtime.catalogGeneration = () => generation;
+  const fetchImpl = async () => Response.json({ items: [] });
+  let created = 0;
+  const route = catalogRoutes({
+    ...f,
+    fetchImpl,
+    service: (runtime) => {
+      created++;
+      return catalogService({
+        ...f,
+        runtime,
+        home: undefined,
+        desktop: undefined,
+        fetchImpl,
+      });
+    },
+  });
+  const list = async (ownerHeader, generationHeader) => {
+    const res = response();
+    await route(
+      {
+        method: 'GET',
+        url: '/auriga/resources/catalog/installations',
+        headers: {
+          'x-auriga-catalog-owner': ownerHeader,
+          'x-auriga-catalog-generation': generationHeader,
+        },
+      },
+      res,
+    );
+    return res;
+  };
+  assert.equal(
+    JSON.parse((await list(owner, generation)).body).identity.ownerId,
+    owner,
+  );
+  assert.equal((await list(owner, generation)).status, 200);
+  assert.equal(created, 1);
+  const firstOwner = owner;
+  const firstGeneration = generation;
+  owner = '019a0000-0000-7000-8000-000000000099';
+  generation = 'b'.repeat(64);
+  assert.equal((await list(firstOwner, generation)).status, 401);
+  assert.equal(
+    JSON.parse((await list(owner, generation)).body).identity.ownerId,
+    owner,
+  );
+  assert.equal(created, 2);
+  generation = 'c'.repeat(64);
+  assert.equal((await list(owner, 'b'.repeat(64))).status, 401);
+  assert.equal((await list(owner, generation)).status, 200);
+  assert.equal(created, 3);
+  assert.equal((await list(firstOwner, firstGeneration)).status, 401);
 });
