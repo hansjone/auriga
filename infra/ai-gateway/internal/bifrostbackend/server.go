@@ -31,14 +31,19 @@ type PostgreSQL struct {
 	SSLMode               string `json:"sslMode"`
 }
 type Config struct {
-	AccessFile            string     `json:"accessFile"`
-	Listen                string     `json:"listen"`
-	PrivateNetwork        bool       `json:"privateNetwork"`
-	MemberPasswordFile    string     `json:"memberPasswordFile"`
-	AdminPasswordFile     string     `json:"adminPasswordFile"`
-	EncryptionKeyFile     string     `json:"encryptionKeyFile"`
-	PostgreSQL            PostgreSQL `json:"postgres"`
-	AllowPrivateProviders bool       `json:"allowPrivateProviders"`
+	AccessFile         string     `json:"accessFile"`
+	Listen             string     `json:"listen"`
+	PrivateNetwork     bool       `json:"privateNetwork"`
+	MemberPasswordFile string     `json:"memberPasswordFile"`
+	AdminPasswordFile  string     `json:"adminPasswordFile"`
+	EncryptionKeyFile  string     `json:"encryptionKeyFile"`
+	PostgreSQL         PostgreSQL `json:"postgres"`
+	// Nil or omitted defaults to true so private/HTTP upstreams work out of the box.
+	AllowPrivateProviders *bool `json:"allowPrivateProviders"`
+}
+
+func (c Config) allowPrivateProviders() bool {
+	return c.AllowPrivateProviders == nil || *c.AllowPrivateProviders
 }
 
 func readSecret(path string) (string, error) {
@@ -144,7 +149,7 @@ func Serve(ctx context.Context, path string) error {
 		return e
 	}
 	defer db.Close()
-	backend, e := New(db, master, admin, memberPassword, c.AllowPrivateProviders)
+	backend, e := New(db, master, admin, memberPassword, c.allowPrivateProviders())
 	if e != nil {
 		return e
 	}

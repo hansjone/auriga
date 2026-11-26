@@ -232,7 +232,7 @@ const zh = {
   ofTotal: '共 {total}',
   memberKeyCount: '成员 {count}',
   apiRootNote:
-    '填写 HTTPS 根地址，不附加 /v1；修改地址或种类会清除原密钥，须重新录入。',
+    '填写根地址（https 或 http），不附加 /v1；修改地址或种类会清除原密钥，须重新录入。',
 };
 const en: Record<keyof typeof zh, string> = {
   writeUncertain:
@@ -489,7 +489,7 @@ const en: Record<keyof typeof zh, string> = {
   ofTotal: 'of {total}',
   memberKeyCount: '{count} members',
   apiRootNote:
-    'Use an HTTPS origin without /v1. Changing the origin or type clears the saved credential; enter it again.',
+    'Use an https or http origin without /v1. Changing the origin or type clears the saved credential; enter it again.',
   inactive: 'Disabled',
 };
 export const useRelayI18n = () =>

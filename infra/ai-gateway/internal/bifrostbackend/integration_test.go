@@ -92,8 +92,11 @@ func testPostgresMemberKeyBudgetsRPMRevocationAndUsage(t *testing.T, tenant stri
 	}
 	m := api.RelayMemberEnsure{TenantId: tenant, AccountId: member, MonthlyBudgetMicros: 1000, RequestsPerMinute: 60}
 	var wg sync.WaitGroup
-	tokens := make(chan string, 12)
-	for range 12 {
+	// Keep this high enough to surface the dual unique-index race on
+	// relay_key (tenant_id,id) vs (tenant_id,name) under concurrent ensure.
+	const concurrentEnsures = 32
+	tokens := make(chan string, concurrentEnsures)
+	for range concurrentEnsures {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()

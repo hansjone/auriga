@@ -27,6 +27,7 @@ import (
 	"github.com/hansjone/auriga/infra/ai-gateway/internal/store"
 	api "github.com/hansjone/auriga/infra/gen/aiapi"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 const maxInteger int64 = 9007199254740991
@@ -108,6 +109,14 @@ func memberName(tenant, account string) string {
 	raw, _ := json.Marshal([]string{tenant, account})
 	sum := sha256.Sum256(raw)
 	return "auriga-member:" + hex.EncodeToString(sum[:])
+}
+
+// uniqueConstraint reports PostgreSQL unique_violation (23505). Concurrent
+// EnsureMember can hit the secondary (tenant_id,name) index even though the
+// INSERT uses ON CONFLICT (tenant_id,id); both identify the same member row.
+func uniqueConstraint(err error) bool {
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && pgErr.Code == "23505"
 }
 func (b *Backend) encrypt(tenant, id, secret string) ([]byte, error) {
 	nonce := make([]byte, 1+b.aead.NonceSize())
@@ -212,24 +221,29 @@ func (b *Backend) EnsureMember(ctx context.Context, m api.RelayMemberEnsure) (ap
 	if e != nil {
 		return out, e
 	}
-	if e = b.db.Transaction(ctx, m.TenantId, func(tx pgx.Tx) error {
-		var created bool
-		e := tx.QueryRow(ctx, `INSERT INTO ai.relay_key(tenant_id,id,name,document) VALUES($1,$2,$3,$4) ON CONFLICT (tenant_id,id) DO UPDATE SET document=ai.relay_key.document || jsonb_build_object('meteringOnly',EXCLUDED.document->'meteringOnly','monthlyBudgetMicros',EXCLUDED.document->'monthlyBudgetMicros','requestsPerMinute',EXCLUDED.document->'requestsPerMinute','maxConcurrency',EXCLUDED.document->'maxConcurrency','maxInFlightTokens',EXCLUDED.document->'maxInFlightTokens') WHERE ai.relay_key.document->>'policyOrigin'='default' AND ROW(ai.relay_key.document->'meteringOnly',ai.relay_key.document->'monthlyBudgetMicros',ai.relay_key.document->'requestsPerMinute',ai.relay_key.document->'maxConcurrency',ai.relay_key.document->'maxInFlightTokens') IS DISTINCT FROM ROW(EXCLUDED.document->'meteringOnly',EXCLUDED.document->'monthlyBudgetMicros',EXCLUDED.document->'requestsPerMinute',EXCLUDED.document->'maxConcurrency',EXCLUDED.document->'maxInFlightTokens') RETURNING (xmax=0)`, m.TenantId, m.AccountId, k.Name, raw).Scan(&created)
-		if errors.Is(e, pgx.ErrNoRows) {
-			return nil
+	for attempt := 0; attempt < 8; attempt++ {
+		e = b.db.Transaction(ctx, m.TenantId, func(tx pgx.Tx) error {
+			var created bool
+			err := tx.QueryRow(ctx, `INSERT INTO ai.relay_key(tenant_id,id,name,document) VALUES($1,$2,$3,$4) ON CONFLICT (tenant_id,id) DO UPDATE SET document=ai.relay_key.document || jsonb_build_object('meteringOnly',EXCLUDED.document->'meteringOnly','monthlyBudgetMicros',EXCLUDED.document->'monthlyBudgetMicros','requestsPerMinute',EXCLUDED.document->'requestsPerMinute','maxConcurrency',EXCLUDED.document->'maxConcurrency','maxInFlightTokens',EXCLUDED.document->'maxInFlightTokens') WHERE ai.relay_key.document->>'policyOrigin'='default' AND ROW(ai.relay_key.document->'meteringOnly',ai.relay_key.document->'monthlyBudgetMicros',ai.relay_key.document->'requestsPerMinute',ai.relay_key.document->'maxConcurrency',ai.relay_key.document->'maxInFlightTokens') IS DISTINCT FROM ROW(EXCLUDED.document->'meteringOnly',EXCLUDED.document->'monthlyBudgetMicros',EXCLUDED.document->'requestsPerMinute',EXCLUDED.document->'maxConcurrency',EXCLUDED.document->'maxInFlightTokens') RETURNING (xmax=0)`, m.TenantId, m.AccountId, k.Name, raw).Scan(&created)
+			if errors.Is(err, pgx.ErrNoRows) {
+				return nil
+			}
+			if err != nil {
+				return err
+			}
+			action := "ai.relay_key.budget.update"
+			auditCtx := audit.WithSystemActor(ctx)
+			if created {
+				action = "ai.relay_key.create"
+				auditCtx = ctx
+			}
+			return audit.Record(auditCtx, tx, m.TenantId, action, "relay_key", m.AccountId)
+		})
+		if e == nil || !uniqueConstraint(e) {
+			break
 		}
-		if e != nil {
-			return e
-		}
-		action := "ai.relay_key.budget.update"
-		auditCtx := audit.WithSystemActor(ctx)
-		if created {
-			action = "ai.relay_key.create"
-			auditCtx = ctx
-		}
-		return audit.Record(auditCtx, tx, m.TenantId, action, "relay_key", m.AccountId)
-
-	}); e != nil {
+	}
+	if e != nil {
 		return out, e
 	}
 	k, e = b.readKey(ctx, m.TenantId, m.AccountId, false)
