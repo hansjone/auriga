@@ -502,6 +502,11 @@ export interface components {
           }
         | {
             /** @constant */
+            operation: 'UnifiedSetPluginStar';
+            input: components['schemas']['ShellAuthInput_UnifiedSetPluginStar'];
+          }
+        | {
+            /** @constant */
             operation: 'UnifiedListResourceVersions';
             input: components['schemas']['ShellAuthInput_UnifiedListResourceVersions'];
           }
@@ -846,6 +851,13 @@ export interface components {
           /** Format: uuid */
           requestId: string;
           /** @constant */
+          operation: 'UnifiedSetPluginStar';
+          output: components['schemas']['ShellAuthOutput_UnifiedSetPluginStar'];
+        }
+      | {
+          /** Format: uuid */
+          requestId: string;
+          /** @constant */
           operation: 'UnifiedListResourceVersions';
           output: components['schemas']['ShellAuthOutput_UnifiedListResourceVersions'];
         }
@@ -1147,6 +1159,7 @@ export interface components {
             | 'UnifiedListResourcePackages'
             | 'UnifiedCreateResourcePackage'
             | 'UnifiedGetResourcePackage'
+            | 'UnifiedSetPluginStar'
             | 'UnifiedListResourceVersions'
             | 'UnifiedUploadResourceVersion'
             | 'UnifiedGetResourceVersion'
@@ -1853,6 +1866,17 @@ export interface components {
     ShellAuthInput_UnifiedGetResourcePackage: {
       /** Format: uuid */
       packageId: string;
+    };
+    ShellAuthInput_UnifiedSetPluginStar: {
+      /** Format: uuid */
+      packageId: string;
+      headers?: {
+        'if-match'?: string;
+        'idempotency-key'?: string;
+      };
+      body: {
+        starred: boolean;
+      };
     };
     ShellAuthInput_UnifiedListResourceVersions: {
       /** Format: uuid */
@@ -2652,6 +2676,23 @@ export interface components {
     };
     /** @description Shared unified resource. Installation mode is selected per scoped assignment; packages carry no governance level. */
     ShellAuthopenapi_resource_yaml_components_schemas_UnifiedPackage: {
+      market?: {
+        /** Format: uuid */
+        authorId: string;
+        authorName?: string;
+        authorDepartment?: string;
+        /** Format: date-time */
+        publishedAt?: string;
+        version: string;
+        dshVersionRange: string;
+        description: string;
+        tags: string[];
+        /** Format: int64 */
+        installationCount: number;
+        /** Format: int64 */
+        starCount: number;
+        starred: boolean;
+      };
       /** Format: uuid */
       id: string;
       /** Format: uuid */
@@ -2709,6 +2750,21 @@ export interface components {
       };
       body: components['schemas']['ShellAuthopenapi_resource_yaml_components_schemas_UnifiedPackage'];
     };
+    ShellAuthOutput_UnifiedSetPluginStar: {
+      statusCode: number;
+      headers?: {
+        etag?: string;
+        'content-type'?: string;
+        'content-length'?: string;
+        'content-range'?: string;
+        'retry-after'?: string;
+      };
+      body: {
+        starred: boolean;
+        /** Format: int64 */
+        starCount: number;
+      };
+    };
     ShellAuthresource_package_schema_json__defs_Name: string;
     ShellAuthresource_package_schema_json__defs_Statement: {
       /** @constant */
@@ -2758,6 +2814,7 @@ export interface components {
       arch: 'any';
     };
     ShellAuthresource_package_schema_json__defs_Plugin: {
+      tags?: string[];
       packageName: string;
       dshVersionRange: string;
     };

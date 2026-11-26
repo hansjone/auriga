@@ -6151,6 +6151,147 @@
         "x-auriga-contract-stage": "frozen"
       }
     },
+    "/api/resource/v1/catalog/packages/{packageId}/star": {
+      "post": {
+        "operationId": "UnifiedSetPluginStar",
+        "tags": [
+          "Resource"
+        ],
+        "description": "Set the current member’s star on a visible published plugin. The same state may be sent again.",
+        "x-permission": "resource.packages.read",
+        "x-auth-context": [
+          "portal",
+          "admin",
+          "device"
+        ],
+        "x-error-codes": [
+          "common.unauthenticated",
+          "common.forbidden",
+          "common.validation_failed",
+          "common.not_found",
+          "common.unavailable",
+          "common.internal"
+        ],
+        "x-events": [],
+        "parameters": [
+          {
+            "name": "packageId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "starred": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "starred"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Current star and aggregate count",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "starred": {
+                      "type": "boolean"
+                    },
+                    "starCount": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    }
+                  },
+                  "required": [
+                    "starred",
+                    "starCount"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "common.validation_failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "common.unauthenticated",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "common.forbidden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "common.not_found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "common.internal",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "common.unavailable",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/resource/v1/catalog/packages/{packageId}/versions": {
       "get": {
         "operationId": "UnifiedListResourceVersions",
@@ -13070,6 +13211,68 @@
       "UnifiedPackage": {
         "type": "object",
         "properties": {
+          "market": {
+            "type": "object",
+            "properties": {
+              "authorId": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "authorName": {
+                "type": "string"
+              },
+              "authorDepartment": {
+                "type": "string"
+              },
+              "publishedAt": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "version": {
+                "type": "string"
+              },
+              "dshVersionRange": {
+                "type": "string"
+              },
+              "description": {
+                "type": "string"
+              },
+              "tags": {
+                "type": "array",
+                "maxItems": 5,
+                "uniqueItems": true,
+                "items": {
+                  "type": "string",
+                  "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
+                  "maxLength": 32
+                }
+              },
+              "installationCount": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "starCount": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "starred": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "authorId",
+              "version",
+              "dshVersionRange",
+              "description",
+              "tags",
+              "installationCount",
+              "starCount",
+              "starred"
+            ],
+            "additionalProperties": false
+          },
           "id": {
             "type": "string",
             "format": "uuid"

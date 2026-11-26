@@ -19,6 +19,13 @@ import java.util.stream.Collectors;
 public final class ResourceAccess {
   public static final String READ = "resource.packages.read";
   public static final String UPLOAD = "resource.packages.upload";
+
+  record AuthorSnapshot(String name, String department) {}
+
+  AuthorSnapshot authorSnapshot(AurigaPrincipal actor, Reader reader) {
+    return new AuthorSnapshot(
+        member(reader.tenant(), reader.account()).getDisplayName(), inputs.authorDepartment(actor));
+  }
   private final ResourceAccessInputs inputs;
   private final auriga.iam.api.DevicePermissionAuthority devices;
 

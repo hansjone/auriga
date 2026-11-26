@@ -50,6 +50,9 @@ export const catalogMessages = {
     authorName: '作者',
     license: '许可证',
     dshRange: '兼容的 DSH 版本',
+    functionalTags: '功能标签',
+    functionalTagsHint:
+      '最多 5 个英文标签，用逗号分隔，例如 data-analysis, operations。',
     visibilityHint: '已有同名资源沿用原可见范围；此项仅在首次创建时生效。',
     pluginVersionHint: '版本来自包内 package.json；更新版本请重新打包。',
     permissionsHint:
@@ -310,6 +313,9 @@ export const catalogMessages = {
     authorName: 'Author',
     license: 'License',
     dshRange: 'Compatible DSH versions',
+    functionalTags: 'Feature tags',
+    functionalTagsHint:
+      'Enter up to five comma-separated tags, such as data-analysis, operations.',
     visibilityHint:
       'Existing packages keep their visibility. This choice applies only to new packages.',
     pluginVersionHint:

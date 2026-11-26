@@ -61,6 +61,14 @@ public class CatalogController {
     return response(workflow.detail(actor(), p, null, false), 200);
   }
 
+  @PostMapping("/catalog/packages/{p}/star")
+  @RequiresPermission(ResourceAccess.READ)
+  public ResponseEntity<JsonNode> star(@PathVariable UUID p, HttpServletRequest r) {
+    var body = read(r, Set.of("starred"), Set.of("starred"));
+    if (!body.path("starred").isBoolean()) throw invalid();
+    return response(workflow.star(actor(), p, body.path("starred").asBoolean()), 200);
+  }
+
   @GetMapping("/catalog/packages/{p}/versions")
   @RequiresPermission(ResourceAccess.READ)
   public ResponseEntity<JsonNode> versions(
