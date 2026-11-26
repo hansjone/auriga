@@ -172,6 +172,7 @@ export function installSubmissionTools(
       /** @param {any} execution */
       async function admitted(execution) {
         const source = active();
+        /** @type {ReturnType<typeof registrationSession>} */
         let native;
         try {
           native = registrationSession(host, execution);

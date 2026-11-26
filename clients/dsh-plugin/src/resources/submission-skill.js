@@ -10,6 +10,7 @@ const markdown = new URL(
 /** Register the packaged instructions in the DSH skill registry. @param {any} ctx */
 export function installSubmissionSkill(ctx) {
   ctx.inject(['skills'], (/** @type {any} */ host) => {
+    if (typeof host.skills?.register !== 'function') return;
     const raw = readFileSync(markdown, 'utf8');
     const frontmatter = /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/u.exec(raw);
     const metadata = frontmatter && parse(frontmatter[1]);
