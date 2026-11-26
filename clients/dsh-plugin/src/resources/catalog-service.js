@@ -485,8 +485,9 @@ export function catalogService(options) {
       );
     }
   }
-  /** @param {PreparedSubmission} input */
-  async function sendPrepared(input) {
+  /** @param {PreparedSubmission} input @param {()=>Promise<void>} [assertCurrent] */
+  async function sendPrepared(input, assertCurrent) {
+    if (assertCurrent) await assertCurrent();
     api.check();
     if (
       !input ||
@@ -538,11 +539,12 @@ export function catalogService(options) {
     const targetId = packageId ?? attempt.retryPackageId;
     const pack = await submissionStage('package', () =>
       targetId
-        ? api.request(base + '/' + targetId)
+        ? api.request(base + '/' + targetId, { assertCurrent })
         : api.request(base, {
             body: { name, kind, visibility: 'tenant' },
             etag: '"0"',
             key: key + 'p',
+            assertCurrent,
           }),
     );
     if (
@@ -579,14 +581,17 @@ export function catalogService(options) {
           form,
           etag,
           key: key + 'v',
+          assertCurrent,
         }),
       );
     } catch (error) {
       if (
         /** @type {{code?:string}} */ (error).code ===
         'common.precondition_failed'
-      )
+      ) {
         attempt.etag = undefined;
+        attempt.retryPackageId = pack.value.id;
+      }
       throw error;
     }
     if (
@@ -610,6 +615,7 @@ export function catalogService(options) {
           body: { reason },
           etag: submissionEtag(uploaded),
           key: key + 's',
+          assertCurrent,
         },
       ),
     );
@@ -1097,9 +1103,9 @@ export function catalogService(options) {
       });
     },
     /** Trusted host callers submit only a prepared immutable payload.
-     * @param {PreparedSubmission} input */
-    submitPrepared(input) {
-      return serial(() => sendPrepared(input));
+     * @param {PreparedSubmission} input @param {()=>Promise<void>} [assertCurrent] */
+    submitPrepared(input, assertCurrent) {
+      return serial(() => sendPrepared(input, assertCurrent));
     },
   };
 }

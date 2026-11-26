@@ -175,7 +175,6 @@ export function installSubmissionTools(
         let native;
         try {
           native = registrationSession(host, execution);
-          await native.verify();
         } catch {
           return refuse('common.forbidden');
         }
@@ -190,10 +189,26 @@ export function installSubmissionTools(
             return refuse('common.forbidden');
           }
         };
-        check();
+        async function verify() {
+          check();
+          try {
+            await native.verify();
+          } catch {
+            check();
+            return refuse('common.forbidden');
+          }
+          check();
+        }
+        await verify();
         for (const [handle, row] of handles)
           if (row.expires <= now()) handles.delete(handle);
-        return { native, source, check, session: host.sessions.get(native.id) };
+        return {
+          native,
+          source,
+          check,
+          verify,
+          session: host.sessions.get(native.id),
+        };
       }
 
       /** @param {any} args @param {any} execution */
@@ -267,7 +282,8 @@ export function installSubmissionTools(
         )
           return validationFailed();
         const { handle, reason, packageId } = args;
-        const { native, session, source, check } = await admitted(execution);
+        const { native, session, source, check, verify } =
+          await admitted(execution);
         check();
         const row = handles.get(handle);
         if (
@@ -288,11 +304,14 @@ export function installSubmissionTools(
         const pending = (row.pending ??= (async () => {
           const { packageId, versionId, state } = await service(
             source.runtime,
-          ).submitPrepared({
-            manifest: globalThis.structuredClone(row.prepared.manifest),
-            archive: Buffer.from(row.prepared.archive),
-            ...operation,
-          });
+          ).submitPrepared(
+            {
+              manifest: globalThis.structuredClone(row.prepared.manifest),
+              archive: Buffer.from(row.prepared.archive),
+              ...operation,
+            },
+            verify,
+          );
           if (
             !uuid(packageId) ||
             !uuid(versionId) ||
@@ -303,7 +322,7 @@ export function installSubmissionTools(
         })());
         try {
           const receipt = await pending;
-          check();
+          await verify();
           row.receipt = receipt;
           return receipt;
         } catch (error) {

@@ -81,9 +81,10 @@ export async function resourceRequest(runtime, path, options = {}) {
           ? JSON.parse(options.body)
           : options.body;
   }
+  if (options.assertCurrent) await options.assertCurrent();
+  options.check?.();
   let output;
   try {
-    options.check?.();
     output = await dispatchResource(runtime.broker, operation.operation, input);
   } catch (error) {
     // Keep the adapters' post-response identity fence and HTTP-category mapping.
@@ -107,6 +108,11 @@ export async function resourceRequest(runtime, path, options = {}) {
     }[/** @type {{code?:string}} */ (error)?.code ?? ''];
     if (!status) throw error;
     return Response.json({}, { status });
+  } finally {
+    if (options.assertCurrent) {
+      await options.assertCurrent();
+      options.check?.();
+    }
   }
   let value = output.body;
   if (

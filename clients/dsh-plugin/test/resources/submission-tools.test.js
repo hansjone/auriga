@@ -59,9 +59,11 @@ function setup(t, { submit, prepare, now, registry } = {}) {
     },
   });
   const service = {
-    async submitPrepared(args) {
+    async submitPrepared(args, assertCurrent) {
       calls.push(['submit', args]);
-      return submit ? submit(args) : { ...result, extra: 'internal detail' };
+      return submit
+        ? submit(args, assertCurrent)
+        : { ...result, extra: 'internal detail' };
     },
   };
   const install = () =>
@@ -101,10 +103,10 @@ function setup(t, { submit, prepare, now, registry } = {}) {
       if ('generation' in values) generation = values.generation;
       if ('runtime' in values) current = values.runtime;
     },
-    call(name, args, caller = agent) {
+    call(name, args, caller = agent, signal) {
       return registered
         .get('auriga_resource_' + name)
-        .execute(args, { agent: caller });
+        .execute(args, { agent: caller, signal });
     },
   };
 }
@@ -401,3 +403,41 @@ test(
     );
   },
 );
+
+for (const change of ['archive', 'cwd', 'cancel', 'resolve', 'login']) {
+  test(`original execution fences later writes after ${change}`, async (t) => {
+    const controller = new AbortController();
+    const writes = [];
+    const f = setup(t, {
+      async submit(_input, assertCurrent) {
+        await assertCurrent();
+        writes.push('package');
+        if (change === 'archive')
+          f.ctx.workspaceRegistry.archivedSessionIds.push(f.agent.id);
+        if (change === 'cwd') f.agent.session.header.cwd = '/work/other';
+        if (change === 'cancel') controller.abort();
+        if (change === 'resolve')
+          f.ctx.sessionController.resolveAgent = async () => ({
+            error: 'closed',
+          });
+        if (change === 'login') f.change({ generation: 'login-2' });
+        await assertCurrent();
+        writes.push('upload');
+        await assertCurrent();
+        writes.push('submit');
+        return result;
+      },
+    });
+    const { handle } = await f.call('prepare', input);
+    await assert.rejects(
+      f.call(
+        'submit',
+        { handle, reason: 'Review' },
+        f.agent,
+        controller.signal,
+      ),
+      change === 'login' ? /common.unauthenticated/ : /common.forbidden/,
+    );
+    assert.deepEqual(writes, ['package']);
+  });
+}
