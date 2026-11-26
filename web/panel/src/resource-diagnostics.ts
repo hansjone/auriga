@@ -23,6 +23,10 @@ const hints: Record<string, [string, string]> = {
     '本机资源目录不可用。请确认目录可写且使用本机真实路径，然后刷新。',
     'Local resource storage is unavailable. Check write access and use a real local filesystem path, then refresh.',
   ],
+  host_busy: [
+    '客户端正在同步共享资源，请稍后刷新重试。',
+    'The client is synchronizing shared resources. Wait a moment, then refresh and retry.',
+  ],
   state_conflict: [
     '资源版本或安装状态已变化。请刷新并重新选择要操作的精确版本。',
     'The resource version or installation state changed. Refresh and select the exact version again.',

@@ -501,56 +501,63 @@ export function catalogService(options) {
           throw error;
         }
         await enforcePersonalPolicy();
+        let hostBusy = false;
         let waiting = false,
-          waitExpired = false;
+          waitExpired = false,
+          localApplying = false,
+          personal,
+          synchronized;
         try {
-          waiting = !!(!cloud && desktop?.awaitingGuardian(who, items));
-        } catch (error) {
-          if (!(/** @type {any} */ (error).guardianWaitExpired)) throw error;
-          desktop?.failGuardianWait(who, items);
-          waitExpired = true;
-        }
-        if (!waiting && !waitExpired) {
           try {
-            await finish();
+            waiting = !!(!cloud && desktop?.awaitingGuardian(who, items));
           } catch (error) {
-            if (!occupied(error)) throw error;
-            pendingRestart = true;
+            if (!(/** @type {any} */ (error).guardianWaitExpired)) throw error;
+            desktop?.failGuardianWait(who, items);
+            waitExpired = true;
           }
-          if (
-            !cloud &&
-            !pendingRestart &&
-            desktop?.needsPreparation(who, items)
-          ) {
-            await prepareRows(items);
-            await finish();
-          }
-          await syncPlugins(items);
-          waiting = !!(!cloud && desktop?.awaitingGuardian(who, items));
-        }
-        const personal = await enforcePersonalPolicy();
-        const synchronized = waiting
-          ? {
-              items: items.map((r) =>
-                desiredState(r.resource) === 'ENABLED'
-                  ? { ...r, state: 'applying' }
-                  : r,
-              ),
-              reportPending: false,
+          if (!waiting && !waitExpired) {
+            try {
+              await finish();
+            } catch (error) {
+              if (!occupied(error)) throw error;
+              pendingRestart = true;
             }
-          : await syncReports(items);
-        fastFollow =
-          waiting ||
-          !!(
-            !pendingRestart &&
-            desktop
+            if (
+              !cloud &&
+              !pendingRestart &&
+              desktop?.needsPreparation(who, items)
+            ) {
+              await prepareRows(items);
+              await finish();
+            }
+            await syncPlugins(items);
+            waiting = !!(!cloud && desktop?.awaitingGuardian(who, items));
+          }
+          personal = await enforcePersonalPolicy();
+          if (!waiting) synchronized = await syncReports(items);
+          if (!waiting && !pendingRestart)
+            localApplying = !!desktop
               ?.read(who)
               ?.installations.some(
                 (/** @type {any} */ r) =>
                   desiredState(r.resource) === 'ENABLED' &&
                   r.state === 'applying',
-              )
-          );
+              );
+        } catch (error) {
+          if (/** @type {any} */ (error).hostLockOccupied !== true) throw error;
+          hostBusy = true;
+          synchronized = undefined;
+        }
+        personal ??= await enforcePersonalPolicy();
+        synchronized ??= {
+          items: items.map((r) =>
+            desiredState(r.resource) === 'ENABLED'
+              ? { ...r, state: 'applying' }
+              : r,
+          ),
+          reportPending: hostBusy,
+        };
+        fastFollow = hostBusy || waiting || localApplying;
         nextRefresh = now() + (fastFollow ? 1000 : 60000);
         failures = 0;
         retryAfter = 0;
@@ -562,7 +569,9 @@ export function catalogService(options) {
             storageReason ??
             (!cloud && !desktop ? 'guardian_missing' : undefined),
           pendingRestart,
+          hostBusy,
           allowPersonalPlugins: api.personalPluginsAllowed(),
+          policyCacheUnavailable: api.policyCacheUnavailable(),
           blockedPersonalPlugins: personal.blocked,
           personalPluginPolicyPendingRestart: personal.restartRequired === true,
           ...synchronized,

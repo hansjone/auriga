@@ -125,19 +125,30 @@ export function durableJson(file, value) {
 /** @param {[string,any][]} records */
 export function durableRecords(records) {
   /** @type {[string,string][]} */ const moves = [];
-  for (const [file, value] of records) {
-    assertLocalPath(file);
-    const temporary = file + '.' + randomUUID() + '.tmp';
-    const fd = openSync(temporary, 'wx', 0o600);
-    try {
-      writeFileSync(fd, JSON.stringify(value) + '\n');
-      fsyncSync(fd);
-    } finally {
-      closeSync(fd);
+  try {
+    for (const [file, value] of records) {
+      assertLocalPath(file);
+      const temporary = file + '.' + randomUUID() + '.tmp';
+      const fd = openSync(temporary, 'wx', 0o600);
+      moves.push([temporary, file]);
+      try {
+        writeFileSync(fd, JSON.stringify(value) + '\n');
+        fsyncSync(fd);
+      } finally {
+        closeSync(fd);
+      }
     }
-    moves.push([temporary, file]);
+    commitMoves(moves);
+  } catch (error) {
+    for (const [temporary] of moves) {
+      try {
+        unlinkSync(temporary);
+      } catch {
+        // A partial commit may already have moved this file. Keep the original error.
+      }
+    }
+    throw error;
   }
-  commitMoves(moves);
 }
 
 /** @param {string} dataHome @param {'C'} [role] @param {typeof hostTime} [time] */
@@ -148,7 +159,17 @@ export function acquireHostLock(dataHome, role = 'C', time = hostTime) {
   assertLocalPath(parent);
   const lock = join(parent, 'host.lock.d');
   const stamp = time();
-  mkdirSync(lock); // EEXIST is always a losing contender, including incomplete owner records.
+  try {
+    mkdirSync(lock);
+  } catch (error) {
+    // Only a collision on this lock directory indicates another writer.
+    if (
+      error instanceof Error &&
+      /** @type {NodeJS.ErrnoException} */ (error).code === 'EEXIST'
+    )
+      throw Object.assign(error, { hostLockOccupied: true });
+    throw error;
+  }
   const owner = {
     schemaVersion: 1,
     lockId: randomUUID(),

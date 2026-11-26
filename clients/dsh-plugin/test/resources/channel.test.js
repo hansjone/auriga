@@ -197,6 +197,43 @@ test('unsigned catalogue protocol failures never claim a signature verification 
     assert.equal(JSON.parse(res.body).reason, 'platform_unreachable');
   }
 });
+test('resource diagnostics log bounded error metadata without exposing raw exceptions', () => {
+  const logged = [];
+  const log = (_level, _message, fields) => logged.push(fields);
+  const error = Object.assign(new Error('fixture-path-and-token'), {
+    code: 'EEXIST',
+    hostLockOccupied: true,
+  });
+  const busy = diagnoseResource(error, 'catalog', log);
+  assert.equal(busy.status, 409);
+  assert.equal(busy.body.reason, 'host_busy');
+  assert.equal(logged[0].trace_id, busy.body.trace_id);
+  assert.equal(logged[0].error_type, 'Error');
+  assert.equal(logged[0].error_code, 'EEXIST');
+  assert.equal(Object.hasOwn(busy.body, 'error_code'), false);
+
+  const collision = diagnoseResource(
+    Object.assign(new Error('fixture-path-and-token'), { code: 'EEXIST' }),
+    'catalog',
+    log,
+  );
+  assert.equal(collision.body.reason, 'internal_error');
+  const storage = diagnoseResource(
+    Object.assign(new Error('fixture-path-and-token'), {
+      name: 'fixture-path-and-token',
+      code: 'fixture-path-and-token',
+    }),
+    'policy_cache',
+    log,
+  );
+  assert.equal(storage.body.reason, 'storage_unavailable');
+  assert.equal(logged[2].stage, 'policy_cache');
+  assert.doesNotMatch(
+    JSON.stringify({ logged, busy, collision, storage }),
+    /fixture-path-and-token/,
+  );
+});
+
 test('a genuine Ed25519 verification failure retains signature_invalid diagnostics', async () => {
   const key = generateKeyPairSync('ed25519');
   const original = { name: 'signed resource' };

@@ -2,6 +2,7 @@ import { element, resourceHeading, fieldList } from './market-ui';
 import {
   resourceResponseError,
   resourceErrorMessage,
+  ResourceDiagnosticError,
 } from './resource-diagnostics';
 import type {
   PanelContext,
@@ -23,6 +24,8 @@ export class SkillPanel {
   private sharedAvailable?: boolean;
   private summaries = new Map<string, Version>();
   private pendingRestart = false;
+  private hostBusy = false;
+  private policyCacheUnavailable = false;
   private search = '';
   private blockedPersonalPlugins: string[] = [];
   private personalPluginPolicyPendingRestart = false;
@@ -64,6 +67,8 @@ export class SkillPanel {
     sharedAvailable?: boolean;
     sharedUnavailableReason?: string;
     pendingRestart?: boolean;
+    hostBusy?: boolean;
+    policyCacheUnavailable?: boolean;
     blockedPersonalPlugins?: string[];
     personalPluginPolicyPendingRestart?: boolean;
     allowPersonalPlugins?: boolean;
@@ -73,6 +78,8 @@ export class SkillPanel {
       [
         'sharedAvailable',
         'pendingRestart',
+        'hostBusy',
+        'policyCacheUnavailable',
         'personalPluginPolicyPendingRestart',
         'allowPersonalPlugins',
       ].some(
@@ -104,6 +111,8 @@ export class SkillPanel {
     this.sharedAvailable = value.sharedAvailable !== false;
     this.sharedReason = value.sharedUnavailableReason;
     this.pendingRestart = !!value.pendingRestart;
+    this.hostBusy = value.hostBusy === true;
+    this.policyCacheUnavailable = value.policyCacheUnavailable === true;
     this.blockedPersonalPlugins = blocked;
     this.personalPluginPolicyPendingRestart =
       value.personalPluginPolicyPendingRestart === true;
@@ -492,6 +501,17 @@ export class SkillPanel {
       };
       toolbar.append(search);
     }
+    if (this.policyCacheUnavailable)
+      this.root.append(
+        element(
+          'p',
+          this.text(
+            '本机无法保存个人插件策略。请检查客户端数据目录权限后刷新。',
+            'Could not save the personal plugin policy. Check permissions on the client data directory, then refresh.',
+          ),
+          'notice',
+        ),
+      );
     if (
       !this.allowPersonalPlugins ||
       this.blockedPersonalPlugins.length ||
@@ -507,10 +527,15 @@ export class SkillPanel {
               '以下个人插件已按组织策略停用：',
               'Personal plugins disabled by organization policy: ',
             )
-          : this.text(
-              '组织策略不允许自行安装个人插件。',
-              'Organization policy does not allow personal plugin installation.',
-            );
+          : this.policyCacheUnavailable
+            ? this.text(
+                '当前保留个人插件安装限制。',
+                'Personal plugin installation remains restricted.',
+              )
+            : this.text(
+                '组织策略不允许自行安装个人插件。',
+                'Organization policy does not allow personal plugin installation.',
+              );
       const notice = element(
         'p',
         text +
@@ -546,7 +571,18 @@ export class SkillPanel {
           'notice',
         ),
       );
-    if (this.pendingRestart)
+    if (this.hostBusy)
+      this.root.append(
+        element(
+          'p',
+          resourceErrorMessage(
+            new ResourceDiagnosticError('host_busy'),
+            !this.zh,
+          ),
+          'notice',
+        ),
+      );
+    else if (this.pendingRestart)
       this.root.append(
         element(
           'p',
