@@ -119,6 +119,7 @@ it('sets the desired plugin like using the portal session and CSRF token', async
   expect(init?.method).toBe('POST');
   expect(init?.credentials).toBe('same-origin');
   expect(new Headers(init?.headers).get('X-Auriga-CSRF')).toBe('csrf-test');
+  expect(new Headers(init?.headers).get('Idempotency-Key')).toBeTruthy();
   expect(JSON.parse(init?.body as string)).toEqual({ starred: false });
   expect(result).toEqual({ starred: false, starCount: 4 });
 });

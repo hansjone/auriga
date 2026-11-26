@@ -213,7 +213,8 @@ public final class CatalogWorkflow {
             """
         SELECT v.*,
          (SELECT COUNT(DISTINCT client_id) FROM resource.catalog_installation
-           WHERE tenant_id=:tenant AND package_id=v.package_id AND market_installed)
+           WHERE tenant_id=:tenant AND package_id=v.package_id
+             AND COALESCE(market_installed, document->'report'->>'state' IN ('applied','disabled')))
          + (SELECT COUNT(*) FROM resource.catalog_instance_installation
            WHERE tenant_id=:tenant AND package_id=v.package_id AND market_installed) AS installs,
          (SELECT COUNT(*) FROM resource.catalog_plugin_star
@@ -257,13 +258,23 @@ public final class CatalogWorkflow {
     return result;
   }
 
-  public JsonNode star(AurigaPrincipal actor, UUID id, boolean starred) {
+  public JsonNode star(AurigaPrincipal actor, UUID id, ObjectNode body, String key) {
     if (!writes.getAsBoolean()) throw new AurigaException(CommonErrors.UNAVAILABLE);
-    var reader = access.member(actor);
-    return tx.write(
-        () -> {
+    if (!body.path("starred").isBoolean()) throw invalid();
+    boolean starred = body.path("starred").asBoolean();
+    return operations.operation(
+        actor,
+        ResourceAccess.READ,
+        false,
+        "catalog/star/" + id,
+        key,
+        body,
+        null,
+        reader -> {
           var pack = pkg(reader, id, false);
           if (!marketReleases(reader, List.of(pack)).containsKey(id)) throw missing();
+        },
+        reader -> {
           var args = db.args("pkg", id, "account", reader.account());
           if (starred)
             db.update(

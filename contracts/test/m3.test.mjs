@@ -276,7 +276,7 @@ test('AI/资源每个操作引用唯一权限和错误目录，管理面标注�
       }
     }
   }
-  assert.equal(count, 100);
+  assert.equal(count, 101);
   assert(ids.has('UnifiedGetAssignment'));
   assert(ids.has('listRelayProviderModels'));
   assert.equal(assertSensitiveAdminStepup(apiSpecs).length, 35);
@@ -840,7 +840,12 @@ test('通用路径替换本轮Skill路径，查询按kind筛选且上传保留�
   const paths = Object.entries(spec.paths).filter(([p]) =>
     p.includes('/catalog/'),
   );
-  assert.equal(paths.length, 25);
+  assert.equal(paths.length, 26);
+  assert.equal(
+    spec.paths['/api/resource/v1/catalog/packages/{packageId}/star'].post
+      .operationId,
+    'UnifiedSetPluginStar',
+  );
   for (const [path, methods] of paths) {
     for (const [method, operation] of Object.entries(methods)) {
       assert(operation.operationId.startsWith('Unified'));

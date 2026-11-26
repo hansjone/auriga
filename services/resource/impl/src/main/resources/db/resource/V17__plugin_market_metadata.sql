@@ -12,15 +12,11 @@ CREATE TABLE catalog_plugin_star (
 SELECT auriga_enable_tenant_rls('catalog_plugin_star');
 
 -- Keep the latest positive/negative observation across changes of the desired version.
+-- Existing rows fall back to their stored member report under their original tenant policy.
 ALTER TABLE catalog_installation ADD COLUMN market_installed boolean;
-ALTER TABLE catalog_installation DISABLE ROW LEVEL SECURITY;
-UPDATE catalog_installation
- SET market_installed = (document->'report'->>'state' IN ('applied','disabled'))
- WHERE document->'report'->>'state' IN ('applied','disabled','removed');
-ALTER TABLE catalog_installation ENABLE ROW LEVEL SECURITY;
-ALTER TABLE catalog_installation FORCE ROW LEVEL SECURITY;
 CREATE INDEX catalog_market_installed_by_package
- ON catalog_installation(tenant_id, package_id, client_id) WHERE market_installed;
+ ON catalog_installation(tenant_id, package_id, client_id)
+ WHERE COALESCE(market_installed, document->'report'->>'state' IN ('applied','disabled'));
 
 ALTER TABLE catalog_instance_installation ADD COLUMN market_installed boolean;
 CREATE INDEX catalog_market_instance_installed_by_package

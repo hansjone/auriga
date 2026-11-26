@@ -1029,7 +1029,7 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** @description Set the current member’s star on a visible published plugin. The same state may be sent again. */
+    /** @description Set the current member’s star on a visible published plugin. Idempotency-Key is bound to the requested state. */
     post: operations['UnifiedSetPluginStar'];
     delete?: never;
     options?: never;
@@ -10338,7 +10338,10 @@ export interface operations {
   UnifiedSetPluginStar: {
     parameters: {
       query?: never;
-      header?: never;
+      header: {
+        /** @description Required idempotency key bound to the complete request fingerprint. */
+        'Idempotency-Key': string;
+      };
       path: {
         packageId: string;
       };
@@ -10394,6 +10397,15 @@ export interface operations {
       };
       /** @description common.not_found */
       404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.conflict */
+      409: {
         headers: {
           [name: string]: unknown;
         };

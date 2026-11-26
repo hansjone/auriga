@@ -2052,9 +2052,9 @@ export interface components {
     ShellAuthInput_UnifiedSetPluginStar: {
       /** Format: uuid */
       packageId: string;
-      headers?: {
+      headers: {
+        'idempotency-key': string;
         'if-match'?: string;
-        'idempotency-key'?: string;
       };
       body: {
         starred: boolean;

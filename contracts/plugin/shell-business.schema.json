@@ -5964,18 +5964,20 @@
           "type": "object",
           "additionalProperties": false,
           "properties": {
-            "if-match": {
+            "idempotency-key": {
               "type": "string",
               "minLength": 1,
               "maxLength": 128
             },
-            "idempotency-key": {
+            "if-match": {
               "type": "string",
               "minLength": 1,
               "maxLength": 128
             }
           },
-          "required": []
+          "required": [
+            "idempotency-key"
+          ]
         },
         "body": {
           "type": "object",
@@ -5992,6 +5994,7 @@
       },
       "required": [
         "packageId",
+        "headers",
         "body"
       ]
     },

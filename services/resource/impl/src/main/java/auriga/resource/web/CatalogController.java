@@ -67,8 +67,7 @@ public class CatalogController {
   @RequiresPermission(ResourceAccess.READ)
   public ResponseEntity<JsonNode> star(@PathVariable UUID p, HttpServletRequest r) {
     var body = read(r, Set.of("starred"), Set.of("starred"));
-    if (!body.path("starred").isBoolean()) throw invalid();
-    return response(workflow.star(actor(), p, body.path("starred").asBoolean()), 200);
+    return response(workflow.star(actor(), p, body, header(r, "Idempotency-Key")), 200);
   }
 
   @GetMapping("/catalog/packages/{p}/versions")

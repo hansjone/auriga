@@ -20,9 +20,9 @@ var _ MappedNullable = &ShellAuthInputUnifiedSetPluginStar{}
 
 // ShellAuthInputUnifiedSetPluginStar struct for ShellAuthInputUnifiedSetPluginStar
 type ShellAuthInputUnifiedSetPluginStar struct {
-	PackageId            string                                     `json:"packageId"`
-	Headers              *ShellAuthInputUnifiedSetPluginStarHeaders `json:"headers,omitempty"`
-	Body                 ShellAuthInputUnifiedSetPluginStarBody     `json:"body"`
+	PackageId            string                                    `json:"packageId"`
+	Headers              ShellAuthInputUnifiedSetPluginStarHeaders `json:"headers"`
+	Body                 ShellAuthInputUnifiedSetPluginStarBody    `json:"body"`
 	AdditionalProperties map[string]interface{}
 }
 
@@ -32,9 +32,10 @@ type _ShellAuthInputUnifiedSetPluginStar ShellAuthInputUnifiedSetPluginStar
 // This constructor will assign default values to properties that have it defined,
 // and makes sure properties required by API are set, but the set of arguments
 // will change when the set of required properties is changed
-func NewShellAuthInputUnifiedSetPluginStar(packageId string, body ShellAuthInputUnifiedSetPluginStarBody) *ShellAuthInputUnifiedSetPluginStar {
+func NewShellAuthInputUnifiedSetPluginStar(packageId string, headers ShellAuthInputUnifiedSetPluginStarHeaders, body ShellAuthInputUnifiedSetPluginStarBody) *ShellAuthInputUnifiedSetPluginStar {
 	this := ShellAuthInputUnifiedSetPluginStar{}
 	this.PackageId = packageId
+	this.Headers = headers
 	this.Body = body
 	return &this
 }
@@ -71,36 +72,28 @@ func (o *ShellAuthInputUnifiedSetPluginStar) SetPackageId(v string) {
 	o.PackageId = v
 }
 
-// GetHeaders returns the Headers field value if set, zero value otherwise.
+// GetHeaders returns the Headers field value
 func (o *ShellAuthInputUnifiedSetPluginStar) GetHeaders() ShellAuthInputUnifiedSetPluginStarHeaders {
-	if o == nil || IsNil(o.Headers) {
+	if o == nil {
 		var ret ShellAuthInputUnifiedSetPluginStarHeaders
 		return ret
 	}
-	return *o.Headers
+
+	return o.Headers
 }
 
-// GetHeadersOk returns a tuple with the Headers field value if set, nil otherwise
+// GetHeadersOk returns a tuple with the Headers field value
 // and a boolean to check if the value has been set.
 func (o *ShellAuthInputUnifiedSetPluginStar) GetHeadersOk() (*ShellAuthInputUnifiedSetPluginStarHeaders, bool) {
-	if o == nil || IsNil(o.Headers) {
+	if o == nil {
 		return nil, false
 	}
-	return o.Headers, true
+	return &o.Headers, true
 }
 
-// HasHeaders returns a boolean if a field has been set.
-func (o *ShellAuthInputUnifiedSetPluginStar) HasHeaders() bool {
-	if o != nil && !IsNil(o.Headers) {
-		return true
-	}
-
-	return false
-}
-
-// SetHeaders gets a reference to the given ShellAuthInputUnifiedSetPluginStarHeaders and assigns it to the Headers field.
+// SetHeaders sets field value
 func (o *ShellAuthInputUnifiedSetPluginStar) SetHeaders(v ShellAuthInputUnifiedSetPluginStarHeaders) {
-	o.Headers = &v
+	o.Headers = v
 }
 
 // GetBody returns the Body field value
@@ -138,9 +131,7 @@ func (o ShellAuthInputUnifiedSetPluginStar) MarshalJSON() ([]byte, error) {
 func (o ShellAuthInputUnifiedSetPluginStar) ToMap() (map[string]interface{}, error) {
 	toSerialize := map[string]interface{}{}
 	toSerialize["packageId"] = o.PackageId
-	if !IsNil(o.Headers) {
-		toSerialize["headers"] = o.Headers
-	}
+	toSerialize["headers"] = o.Headers
 	toSerialize["body"] = o.Body
 
 	for key, value := range o.AdditionalProperties {
@@ -156,6 +147,7 @@ func (o *ShellAuthInputUnifiedSetPluginStar) UnmarshalJSON(data []byte) (err err
 	// that every required field exists as a key in the generic map.
 	requiredProperties := []string{
 		"packageId",
+		"headers",
 		"body",
 	}
 

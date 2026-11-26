@@ -215,7 +215,13 @@ public final class CatalogDelivery implements UnifiedResourceResolution {
 
   private void saveInstallation(Map<String, Object> row, ObjectNode document, long revision) {
     db.update(
-        "UPDATE resource.catalog_installation SET document=CAST(:doc AS jsonb),revision=:rev,version_id=:v,collected_generation=NULL WHERE tenant_id=:tenant AND id=:id",
+        """
+        UPDATE resource.catalog_installation SET document=CAST(:doc AS jsonb),revision=:rev,version_id=:v,
+          collected_generation=NULL,market_installed=COALESCE(market_installed,
+            CASE document->'report'->>'state' WHEN 'applied' THEN true
+              WHEN 'disabled' THEN true WHEN 'removed' THEN false END)
+        WHERE tenant_id=:tenant AND id=:id
+        """,
         db.args(
             "id",
             row.get("id"),

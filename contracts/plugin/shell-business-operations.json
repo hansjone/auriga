@@ -751,8 +751,8 @@
       "audience": "auriga",
       "stream": false,
       "requestHeaders": [
-        "if-match",
-        "idempotency-key"
+        "idempotency-key",
+        "if-match"
       ],
       "responseHeaders": [
         "etag",

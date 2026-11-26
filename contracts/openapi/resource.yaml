@@ -11540,10 +11540,11 @@
     "/api/resource/v1/catalog/packages/{packageId}/star": {
       "post": {
         "operationId": "UnifiedSetPluginStar",
+        "x-auriga-contract-stage": "frozen",
         "tags": [
           "Resource"
         ],
-        "description": "Set the current member’s star on a visible published plugin. The same state may be sent again.",
+        "description": "Set the current member’s star on a visible published plugin. Idempotency-Key is bound to the requested state.",
         "x-permission": "resource.packages.read",
         "x-auth-context": [
           "portal",
@@ -11555,11 +11556,23 @@
           "common.forbidden",
           "common.validation_failed",
           "common.not_found",
+          "common.conflict",
           "common.unavailable",
           "common.internal"
         ],
         "x-events": [],
         "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            "description": "Required idempotency key bound to the complete request fingerprint."
+          },
           {
             "name": "packageId",
             "in": "path",
@@ -11612,6 +11625,16 @@
                     "starCount"
                   ],
                   "additionalProperties": false
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "common.conflict",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "./common.yaml#/components/schemas/Problem"
                 }
               }
             }

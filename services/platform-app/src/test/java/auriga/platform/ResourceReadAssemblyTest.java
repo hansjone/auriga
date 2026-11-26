@@ -653,10 +653,35 @@ class ResourceReadAssemblyTest {
     assertEquals("operations", market.path("tags").get(0).asString());
     assertEquals(0, market.path("installationCount").asInt());
     assertFalse(market.path("starred").asBoolean());
+    admin.update(
+        """
+        INSERT INTO resource.catalog_installation(id,tenant_id,owner_id,client_id,
+          package_id,version_id,revision,document)
+        VALUES(?,?,?,?,?,?,1,'{"report":{"state":"applied"}}')
+        """,
+        UuidV7.next(),
+        T1,
+        ALICE,
+        a.device(),
+        pack,
+        version);
+    var previous = deviceRequest(path, a.token(), null);
+    deviceStatus(200, previous);
+    assertEquals(
+        1, JSON.readTree(previous.body()).path("market").path("installationCount").asInt());
+    admin.update(
+        "UPDATE resource.catalog_installation SET market_installed=false WHERE tenant_id=? AND package_id=?",
+        T1,
+        pack);
+    var removed = deviceRequest(path, a.token(), null);
+    deviceStatus(200, removed);
+    assertEquals(0, JSON.readTree(removed.body()).path("market").path("installationCount").asInt());
     var like = "{\"starred\":true}";
     var first = catalogPost(path + "/star", a.token(), like, "0", "first-star", 200);
     assertEquals(first, catalogPost(path + "/star", a.token(), like, "0", "repeat-star", 200));
     assertEquals(1, first.path("starCount").asInt());
+    assertEquals(first, catalogPost(path + "/star", a.token(), like, "0", "first-star", 200));
+    catalogPost(path + "/star", a.token(), "{\"starred\":false}", "0", "first-star", 409);
     var second = catalogPost(path + "/star", b.token(), like, "0", "bob-star", 200);
     assertEquals(2, second.path("starCount").asInt());
     var clear = catalogPost(path + "/star", a.token(), "{\"starred\":false}", "0", "unstar", 200);

@@ -11,7 +11,9 @@ API version: 1.0.0
 package shellauthapi
 
 import (
+	"bytes"
 	"encoding/json"
+	"fmt"
 )
 
 // checks if the ShellAuthInputUnifiedSetPluginStarHeaders type satisfies the MappedNullable interface at compile time
@@ -19,16 +21,19 @@ var _ MappedNullable = &ShellAuthInputUnifiedSetPluginStarHeaders{}
 
 // ShellAuthInputUnifiedSetPluginStarHeaders struct for ShellAuthInputUnifiedSetPluginStarHeaders
 type ShellAuthInputUnifiedSetPluginStarHeaders struct {
+	IdempotencyKey string  `json:"idempotency-key"`
 	IfMatch        *string `json:"if-match,omitempty"`
-	IdempotencyKey *string `json:"idempotency-key,omitempty"`
 }
+
+type _ShellAuthInputUnifiedSetPluginStarHeaders ShellAuthInputUnifiedSetPluginStarHeaders
 
 // NewShellAuthInputUnifiedSetPluginStarHeaders instantiates a new ShellAuthInputUnifiedSetPluginStarHeaders object
 // This constructor will assign default values to properties that have it defined,
 // and makes sure properties required by API are set, but the set of arguments
 // will change when the set of required properties is changed
-func NewShellAuthInputUnifiedSetPluginStarHeaders() *ShellAuthInputUnifiedSetPluginStarHeaders {
+func NewShellAuthInputUnifiedSetPluginStarHeaders(idempotencyKey string) *ShellAuthInputUnifiedSetPluginStarHeaders {
 	this := ShellAuthInputUnifiedSetPluginStarHeaders{}
+	this.IdempotencyKey = idempotencyKey
 	return &this
 }
 
@@ -38,6 +43,30 @@ func NewShellAuthInputUnifiedSetPluginStarHeaders() *ShellAuthInputUnifiedSetPlu
 func NewShellAuthInputUnifiedSetPluginStarHeadersWithDefaults() *ShellAuthInputUnifiedSetPluginStarHeaders {
 	this := ShellAuthInputUnifiedSetPluginStarHeaders{}
 	return &this
+}
+
+// GetIdempotencyKey returns the IdempotencyKey field value
+func (o *ShellAuthInputUnifiedSetPluginStarHeaders) GetIdempotencyKey() string {
+	if o == nil {
+		var ret string
+		return ret
+	}
+
+	return o.IdempotencyKey
+}
+
+// GetIdempotencyKeyOk returns a tuple with the IdempotencyKey field value
+// and a boolean to check if the value has been set.
+func (o *ShellAuthInputUnifiedSetPluginStarHeaders) GetIdempotencyKeyOk() (*string, bool) {
+	if o == nil {
+		return nil, false
+	}
+	return &o.IdempotencyKey, true
+}
+
+// SetIdempotencyKey sets field value
+func (o *ShellAuthInputUnifiedSetPluginStarHeaders) SetIdempotencyKey(v string) {
+	o.IdempotencyKey = v
 }
 
 // GetIfMatch returns the IfMatch field value if set, zero value otherwise.
@@ -72,38 +101,6 @@ func (o *ShellAuthInputUnifiedSetPluginStarHeaders) SetIfMatch(v string) {
 	o.IfMatch = &v
 }
 
-// GetIdempotencyKey returns the IdempotencyKey field value if set, zero value otherwise.
-func (o *ShellAuthInputUnifiedSetPluginStarHeaders) GetIdempotencyKey() string {
-	if o == nil || IsNil(o.IdempotencyKey) {
-		var ret string
-		return ret
-	}
-	return *o.IdempotencyKey
-}
-
-// GetIdempotencyKeyOk returns a tuple with the IdempotencyKey field value if set, nil otherwise
-// and a boolean to check if the value has been set.
-func (o *ShellAuthInputUnifiedSetPluginStarHeaders) GetIdempotencyKeyOk() (*string, bool) {
-	if o == nil || IsNil(o.IdempotencyKey) {
-		return nil, false
-	}
-	return o.IdempotencyKey, true
-}
-
-// HasIdempotencyKey returns a boolean if a field has been set.
-func (o *ShellAuthInputUnifiedSetPluginStarHeaders) HasIdempotencyKey() bool {
-	if o != nil && !IsNil(o.IdempotencyKey) {
-		return true
-	}
-
-	return false
-}
-
-// SetIdempotencyKey gets a reference to the given string and assigns it to the IdempotencyKey field.
-func (o *ShellAuthInputUnifiedSetPluginStarHeaders) SetIdempotencyKey(v string) {
-	o.IdempotencyKey = &v
-}
-
 func (o ShellAuthInputUnifiedSetPluginStarHeaders) MarshalJSON() ([]byte, error) {
 	toSerialize, err := o.ToMap()
 	if err != nil {
@@ -114,13 +111,48 @@ func (o ShellAuthInputUnifiedSetPluginStarHeaders) MarshalJSON() ([]byte, error)
 
 func (o ShellAuthInputUnifiedSetPluginStarHeaders) ToMap() (map[string]interface{}, error) {
 	toSerialize := map[string]interface{}{}
+	toSerialize["idempotency-key"] = o.IdempotencyKey
 	if !IsNil(o.IfMatch) {
 		toSerialize["if-match"] = o.IfMatch
 	}
-	if !IsNil(o.IdempotencyKey) {
-		toSerialize["idempotency-key"] = o.IdempotencyKey
-	}
 	return toSerialize, nil
+}
+
+func (o *ShellAuthInputUnifiedSetPluginStarHeaders) UnmarshalJSON(data []byte) (err error) {
+	// This validates that all required properties are included in the JSON object
+	// by unmarshalling the object into a generic map with string keys and checking
+	// that every required field exists as a key in the generic map.
+	requiredProperties := []string{
+		"idempotency-key",
+	}
+
+	allProperties := make(map[string]interface{})
+
+	err = json.Unmarshal(data, &allProperties)
+
+	if err != nil {
+		return err
+	}
+
+	for _, requiredProperty := range requiredProperties {
+		if _, exists := allProperties[requiredProperty]; !exists {
+			return fmt.Errorf("no value given for required property %v", requiredProperty)
+		}
+	}
+
+	varShellAuthInputUnifiedSetPluginStarHeaders := _ShellAuthInputUnifiedSetPluginStarHeaders{}
+
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.DisallowUnknownFields()
+	err = decoder.Decode(&varShellAuthInputUnifiedSetPluginStarHeaders)
+
+	if err != nil {
+		return err
+	}
+
+	*o = ShellAuthInputUnifiedSetPluginStarHeaders(varShellAuthInputUnifiedSetPluginStarHeaders)
+
+	return err
 }
 
 type NullableShellAuthInputUnifiedSetPluginStarHeaders struct {

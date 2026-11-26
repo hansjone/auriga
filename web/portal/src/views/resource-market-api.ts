@@ -69,7 +69,7 @@ export function createResourceMarketApi(client: ApiClient) {
         await client.post<unknown>(
           `${base}/packages/${encodeURIComponent(id)}/star`,
           { starred },
-          { signal },
+          { signal, headers: { 'Idempotency-Key': placementRequestKey() } },
         ),
       ),
     async latest(pack: ResourcePackage, signal: AbortSignal) {
