@@ -41,11 +41,13 @@ public class CatalogController {
   }
 
   @PostMapping("/catalog/packages")
-  @RequiresPermission(ResourceAccess.UPLOAD)
+  @AuthenticatedOnly
   public ResponseEntity<JsonNode> create(HttpServletRequest r) {
+    var current = actor();
+    workflow.requireSubmissionAccess(current, ResourceAccess.UPLOAD, false);
     return response(
         workflow.create(
-            actor(),
+            current,
             read(
                 r,
                 Set.of("name", "kind", "visibility", "groupIds"),
@@ -56,9 +58,9 @@ public class CatalogController {
   }
 
   @GetMapping("/catalog/packages/{p}")
-  @RequiresPermission(ResourceAccess.READ)
+  @AuthenticatedOnly
   public ResponseEntity<JsonNode> detail(@PathVariable UUID p) {
-    return response(workflow.detail(actor(), p, null, false), 200);
+    return response(workflow.packageDetail(actor(), p), 200);
   }
 
   @GetMapping("/catalog/packages/{p}/versions")
@@ -77,9 +79,10 @@ public class CatalogController {
   }
 
   @PostMapping(value = "/catalog/packages/{p}/versions", consumes = "multipart/form-data")
-  @RequiresPermission(ResourceAccess.UPLOAD)
-  @RequiresRecentStepUp
+  @AuthenticatedOnly
   public ResponseEntity<JsonNode> upload(@PathVariable UUID p, HttpServletRequest r) {
+    var current = actor();
+    workflow.requireSubmissionAccess(current, ResourceAccess.UPLOAD, true);
     var streams = new ArrayList<java.io.InputStream>();
     try {
       var parts = r.getParts();
@@ -102,7 +105,7 @@ public class CatalogController {
         if (part.getName().equals("artifacts")) streams.add(part.getInputStream());
       return response(
           workflow.upload(
-              actor(),
+              current,
               p,
               body,
               manifest,
@@ -123,13 +126,14 @@ public class CatalogController {
   }
 
   @PostMapping("/catalog/packages/{p}/versions/{v}/submissions")
-  @RequiresPermission("resource.versions.submit")
-  @RequiresRecentStepUp
+  @AuthenticatedOnly
   public ResponseEntity<JsonNode> submit(
       @PathVariable UUID p, @PathVariable UUID v, HttpServletRequest r) {
+    var current = actor();
+    workflow.requireSubmissionAccess(current, "resource.versions.submit", true);
     return response(
         workflow.submit(
-            actor(),
+            current,
             p,
             v,
             read(r, Set.of("reason"), Set.of("reason")),

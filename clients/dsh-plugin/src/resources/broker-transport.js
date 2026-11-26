@@ -63,10 +63,12 @@ export async function resourceRequest(runtime, path, options = {}) {
           body.metadata = parseStrictJson(bytes, true);
         } else if (typeof value === 'string') body[key] = value;
         else {
+          options.check?.();
           const ref = await runtime.upload(
             Buffer.from(await value.arrayBuffer()),
             value.type,
           );
+          options.check?.();
           if (key === 'artifacts') (body.artifacts ??= []).push(ref);
           else body[key] = ref;
         }
@@ -79,12 +81,21 @@ export async function resourceRequest(runtime, path, options = {}) {
           ? JSON.parse(options.body)
           : options.body;
   }
+  if (options.assertCurrent) await options.assertCurrent();
+  options.check?.();
   let output;
   try {
     output = await dispatchResource(runtime.broker, operation.operation, input);
   } catch (error) {
     // Keep the adapters' post-response identity fence and HTTP-category mapping.
     // Broker errors carry no upstream body or credentials across this boundary.
+    if (
+      operation.operation === 'UnifiedUploadResourceVersion' &&
+      /** @type {{rule?:string}} */ (error)?.rule
+    ) {
+      options.check?.();
+      throw error;
+    }
     const status = {
       'common.validation_failed': 400,
       'common.unauthenticated': 401,
@@ -97,6 +108,11 @@ export async function resourceRequest(runtime, path, options = {}) {
     }[/** @type {{code?:string}} */ (error)?.code ?? ''];
     if (!status) throw error;
     return Response.json({}, { status });
+  } finally {
+    if (options.assertCurrent) {
+      await options.assertCurrent();
+      options.check?.();
+    }
   }
   let value = output.body;
   if (

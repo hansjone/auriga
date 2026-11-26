@@ -10,6 +10,7 @@ import (
 )
 
 var resourceUploadPath = regexp.MustCompile(`^/api/resource/v1/packages/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/versions$`)
+var catalogUploadPath = regexp.MustCompile(`^/api/resource/v1/catalog/packages/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/versions$`)
 
 var desktopPackagePath = regexp.MustCompile(`^/api/resource/v1/desktop/packages/[1-9][0-9]{0,15}$`)
 

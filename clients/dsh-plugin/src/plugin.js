@@ -113,6 +113,7 @@ export async function apply(ctx, config) {
         'auriga: enterprise skill compatibility',
       );
       installResourceChannel(ctx, {
+        desktopSubmission: true,
         auth: admission.nativeAuth,
         current: () => current()?.runtime,
         memberHandler: (runtime, req, res) =>

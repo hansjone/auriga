@@ -108,7 +108,29 @@ class PluginArchiveValidatorTest {
     }
     files.put("package/package.json", pkg.toString());
     files.put("package/node_modules/vendored/package.json", nested.toString());
-    assertThrows(AurigaException.class, () -> validate(files), scenario);
+    var failure = assertThrows(AurigaException.class, () -> validate(files), scenario);
+    String expectedRule =
+        switch (scenario) {
+          case "scripts", "nestedScripts" -> "lifecycle_scripts_disallowed";
+          case "dependency",
+              "optionalDependency",
+              "missingBundled",
+              "nestedDependency",
+              "reservedDependency" ->
+              "bundled_dependency_required";
+          case "binding",
+              "mixedCaseBinding",
+              "nestedBinding",
+              "gypfile",
+              "nestedGypfile",
+              "onlyBuiltDependencies",
+              "allowBuilds",
+              "nestedBuild" ->
+              "native_build_disallowed";
+          case "missingPatch", "absentBundle" -> "bundle_patch_missing";
+          default -> null;
+        };
+    assertEquals(expectedRule, failure.params().get("rule"), scenario);
   }
 
   @Test

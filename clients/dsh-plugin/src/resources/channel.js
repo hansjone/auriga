@@ -2,6 +2,8 @@ import { diagnoseResource, resourceFailure } from './diagnostics.js';
 import { resourceRequest } from './broker-transport.js';
 /* global AbortSignal */
 import { catalogRoutes, watchCatalogIdentity } from './catalog-routes.js';
+import { installSubmissionSkill } from './submission-skill.js';
+import { installSubmissionTools } from './submission-tools.js';
 const prefix = '/auriga/resources';
 const uuid =
   '[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}';
@@ -246,10 +248,13 @@ export function createResourceHandler({
       return send(failure.status, failure.body);
     }
   };
-  return Object.assign(handle, { reconcileCatalog: catalog.reconcile });
+  return Object.assign(handle, {
+    reconcileCatalog: catalog.reconcile,
+    memberService: catalog.memberService,
+  });
 }
 
-/** @param {any} ctx @param {{auth: {requestRejection(req: any): number | undefined}, current: () => any,memberHandler?:(runtime:any,req:any,res:any)=>Promise<any>}} options */
+/** @param {any} ctx @param {{auth: {requestRejection(req: any): number | undefined}, current: () => any,memberHandler?:(runtime:any,req:any,res:any)=>Promise<any>,desktopSubmission?:boolean}} options */
 export function installResourceChannel(ctx, options) {
   if (
     typeof ctx.effect !== 'function' ||
@@ -257,6 +262,17 @@ export function installResourceChannel(ctx, options) {
   )
     return false;
   const handler = createResourceHandler({ ...options, ctx });
+  if (options.desktopSubmission) {
+    installSubmissionSkill(ctx);
+    installSubmissionTools(ctx, {
+      current: options.current,
+      service: handler.memberService,
+      prepare: async (input) => {
+        const { prepareDirectory } = await import('./submission-package.js');
+        return prepareDirectory(input);
+      },
+    });
+  }
   ctx.effect(
     () =>
       ctx.webServer.register({

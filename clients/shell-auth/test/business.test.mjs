@@ -433,3 +433,128 @@ test('upload is durable, digest checked, owner-bound, one-use and removed after 
   streams.close();
   await f.broker.close();
 });
+
+test('catalog upload sends fixed multipart and only returns recognized corrections', async (t) => {
+  const directory = mkdtempSync(join(tmpdir(), 'auriga-catalog-upload-'));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const f = fixture();
+  await login(f);
+  const packageId = randomUUID();
+  const manifest = Buffer.from('{"schemaVersion":1}');
+  const archive = Buffer.from('fixture archive');
+  const expectedDigest =
+    'sha256:' + createHash('sha256').update(manifest).digest('hex');
+  let rule = 'bundle_patch_missing';
+  let requests = 0;
+  const proxy = new BusinessProxy(
+    f.broker,
+    async (url, options) => {
+      requests++;
+      const path = new URL(url).pathname;
+      if (path.endsWith('/versions')) {
+        assert.equal(
+          path,
+          '/api/resource/v1/catalog/packages/' + packageId + '/versions',
+        );
+        assert.equal(options.method, 'POST');
+        assert.equal(
+          options.headers.Authorization,
+          'Bearer ' + f.tokens.access_token,
+        );
+        assert.equal(options.headers['if-match'], '"1"');
+        assert.equal(options.headers['idempotency-key'], 'upload');
+        assert.equal(options.headers['Content-Type'], undefined);
+        assert.deepEqual(
+          JSON.parse(await options.body.get('metadata').text()),
+          {
+            version: '1.0.0',
+            expectedDigest,
+          },
+        );
+        assert.deepEqual(
+          Buffer.from(await options.body.get('manifest').arrayBuffer()),
+          manifest,
+        );
+        assert.deepEqual(
+          Buffer.from(await options.body.get('artifacts').arrayBuffer()),
+          archive,
+        );
+      }
+      return Response.json(
+        {
+          code: 'common.validation_failed',
+          detail: 'private upstream message',
+          params: { rule, path: '/private/file' },
+        },
+        { status: 400 },
+      );
+    },
+    directory,
+  );
+  t.after(async () => {
+    proxy.close();
+    await f.broker.close();
+  });
+  const context = f.broker.guard();
+  const stage = (bytes, mediaType) => {
+    const upload = proxy.streams.openUpload(
+      {
+        sizeBytes: bytes.length,
+        sha256: createHash('sha256').update(bytes).digest('hex'),
+        mediaType,
+      },
+      context,
+      OWNER,
+    ).body;
+    proxy.streams.command(
+      {
+        streamId: upload.streamId,
+        shellEpoch: f.broker.epoch,
+        expectedRevision: f.broker.revision,
+        action: 'upload_chunk',
+        sequence: 0,
+        data: bytes.toString('base64'),
+      },
+      OWNER,
+    );
+    return proxy.streams.finishUpload(upload.uploadId, context, OWNER).body;
+  };
+  const input = () => ({
+    packageId,
+    headers: { 'if-match': '"1"', 'idempotency-key': 'upload' },
+    body: {
+      metadata: { version: '1.0.0', expectedDigest },
+      manifest: stage(manifest, 'application/json'),
+      artifacts: [stage(archive, 'application/gzip')],
+    },
+  });
+  const post = call(f.broker, 'UnifiedUploadResourceVersion', input());
+  const failure = await proxy.call(post, OWNER);
+  assert.deepEqual(failure.error, {
+    code: 'common.validation_failed',
+    retryable: false,
+    upstreamStatus: 400,
+    rule,
+  });
+  assert.deepEqual(await proxy.call(post, OWNER), failure);
+  assert.equal(requests, 1);
+  assert.equal(
+    (
+      await proxy.call(
+        call(f.broker, 'UnifiedGetResourcePackage', { packageId }),
+        OWNER,
+      )
+    ).error.rule,
+    undefined,
+  );
+  rule = '/private/file';
+  assert.equal(
+    (
+      await proxy.call(
+        call(f.broker, 'UnifiedUploadResourceVersion', input()),
+        OWNER,
+      )
+    ).error.rule,
+    undefined,
+  );
+});

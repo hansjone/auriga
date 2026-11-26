@@ -1207,7 +1207,6 @@ class ResourceReadAssemblyTest {
     for (String path :
         List.of(
             "/packages",
-            "/catalog/packages",
             "/distributions",
             "/packages/" + pkg + "/versions/" + version + "/submissions",
             "/admin/reviews/" + UUID.randomUUID() + "/decisions",
@@ -1221,8 +1220,7 @@ class ResourceReadAssemblyTest {
     assertEquals("common.forbidden", JSON.readTree(distribution.body()).path("code").asString());
     String multipart =
         "--device-resource\r\nContent-Disposition: form-data; name=\"metadata\"\r\n\r\n{}\r\n--device-resource--\r\n";
-    for (String path :
-        List.of("/packages/" + pkg + "/versions", "/catalog/packages/" + skill + "/versions")) {
+    for (String path : List.of("/packages/" + pkg + "/versions")) {
       var denied =
           deviceRequest(
               path, grant.token(), multipart, "multipart/form-data; boundary=device-resource");
@@ -1231,6 +1229,207 @@ class ResourceReadAssemblyTest {
     }
     deviceCredentials.revoke(T1, grant.device());
     deviceStatus(403, deviceRequest("/revocations", grant.token(), null));
+  }
+
+  @org.junit.jupiter.params.ParameterizedTest
+  @org.junit.jupiter.params.provider.ValueSource(strings = {"standard", "native"})
+  void desktopMemberOwnCatalogSubmission(String kind) throws Exception {
+    CATALOG_WRITES.set(true);
+    admin.update("UPDATE org.role SET permissions=ARRAY['auriga.connect'] WHERE id=?", ROLE);
+    var grant = deviceCredentials.issue(T1, ALICE, kind, kind.equals("native"));
+    var foreign = deviceCredentials.issue(T1, BOB, "standard");
+    var external = deviceCredentials.issue(T1, EXTERNAL, "standard");
+    // Keep the managed credential live while Alice's desktop has only the platform login role.
+    UUID managedRole = UuidV7.next();
+    admin.update(
+        "INSERT INTO org.role(id,tenant_id,key,name_en,name_zh,permissions) VALUES(?,?,'managed-fixture','Managed fixture','测试角色',ARRAY['auriga.connect.collab.use'])",
+        managedRole,
+        T1);
+    admin.update(
+        "INSERT INTO org.role_binding(id,tenant_id,role_id,subject_type,subject_id) VALUES(?,?,?,'member',?)",
+        UuidV7.next(),
+        T1,
+        managedRole,
+        BOB);
+    var managed = deviceCredentials.issue(T1, BOB, "managed");
+    assertFalse(managed.token().isBlank());
+    assertEquals(
+        Optional.of(managed.instance()),
+        TenantContext.call(
+            T1,
+            () ->
+                deviceCredentials
+                    .authority()
+                    .installationInstance(T1, BOB.toString(), managed.device().toString())));
+    var legacy = deviceCredentials.issue(T1, ALICE, "legacy");
+    var base = "/catalog/packages";
+    String create =
+        """
+        {"name":"example-skill","kind":"skill","visibility":"tenant"}
+        """;
+    for (var denied : List.of(external, managed, legacy))
+      catalogPost(base, denied.token(), create, "0", "denied", 403);
+    catalogPost("/packages", grant.token(), create, "0", "legacy-route", 403);
+    var original = SignedJWT.parse(grant.token());
+    var ai =
+        new SignedJWT(
+            original.getHeader(),
+            new JWTClaimsSet.Builder(original.getJWTClaimsSet())
+                .audience("auriga.ai-gateway")
+                .build());
+    ai.sign(new ECDSASigner(KEY));
+    catalogPost(base, ai.serialize(), create, "0", "ai-token", 401);
+    var pack = catalogPost(base, grant.token(), create, "0", "create", 201);
+    var path = base + "/" + pack.path("id").asString();
+    admin.update("UPDATE org.role SET permissions=ARRAY['auriga.connect'] WHERE id=?", id(16));
+    var crossTenant = deviceCredentials.issue(T2, id(15), "standard");
+    deviceStatus(404, deviceRequest(path, crossTenant.token(), null));
+    assertEquals(ALICE.toString(), pack.path("ownerId").asString());
+    deviceStatus(200, deviceRequest(path, grant.token(), null));
+    deviceStatus(403, deviceRequest(path, foreign.token(), null));
+    var compressed = new java.io.ByteArrayOutputStream();
+    try (var gzip =
+            new org.apache.commons.compress.compressors.gzip.GzipCompressorOutputStream(
+                compressed);
+        var tar = new org.apache.commons.compress.archivers.tar.TarArchiveOutputStream(gzip)) {
+      var file = new org.apache.commons.compress.archivers.tar.TarArchiveEntry("SKILL.md");
+      byte[] contents =
+          "---\nname: example-skill\ndescription: Review fixture\n---\nExample.\n"
+              .getBytes(StandardCharsets.UTF_8);
+      file.setSize(contents.length);
+      tar.putArchiveEntry(file);
+      tar.write(contents);
+      tar.closeArchiveEntry();
+    }
+    byte[] archive = compressed.toByteArray();
+    byte[] manifest =
+        """
+        {"schemaVersion":1,"kind":"skill","name":"example-skill","version":"1.0.0",
+         "description":"Review fixture","author":{"displayName":"Fixture"},"license":"MIT",
+         "permissions":{"tools":[],"outboundHosts":[],"dataAccess":[]},"runtimes":[],
+         "signature":{"mode":"detached","algorithm":"Ed25519"},
+         "artifacts":[{"id":"payload","role":"payload","digest":"%s","sizeBytes":%d,
+          "mediaType":"application/gzip","os":"any","arch":"any"}],
+         "skill":{"entry":"SKILL.md","contentProfile":"text-only","dshVersionRange":">=0.2.1-rc.3"}}
+        """
+            .formatted(auriga.resource.app.CatalogManifest.digest(archive), archive.length)
+            .getBytes(StandardCharsets.UTF_8);
+    String digest = auriga.resource.app.CatalogManifest.digest(manifest);
+    var multipart = new java.io.ByteArrayOutputStream();
+    for (var part :
+        List.of(
+            Map.entry(
+                "metadata",
+                ("{\"version\":\"1.0.0\",\"expectedDigest\":\"" + digest + "\"}")
+                    .getBytes(StandardCharsets.UTF_8)),
+            Map.entry("manifest", manifest),
+            Map.entry("artifacts", archive))) {
+      multipart.write(
+          ("--catalog-fixture\r\nContent-Disposition: form-data; name=\""
+                  + part.getKey()
+                  + "\"; filename=\"fixture\"\r\nContent-Type: "
+                  + (part.getKey().equals("artifacts") ? "application/gzip" : "application/json")
+                  + "\r\n\r\n")
+              .getBytes(StandardCharsets.UTF_8));
+      multipart.write(part.getValue());
+      multipart.write("\r\n".getBytes(StandardCharsets.UTF_8));
+    }
+    multipart.write("--catalog-fixture--\r\n".getBytes(StandardCharsets.UTF_8));
+    catalogPost(
+        path + "/versions",
+        foreign.token(),
+        HttpRequest.BodyPublishers.ofByteArray(multipart.toByteArray()),
+        "multipart/form-data; boundary=catalog-fixture",
+        pack.path("revision").asString(),
+        "foreign",
+        403);
+    var uploaded =
+        catalogPost(
+            path + "/versions",
+            grant.token(),
+            HttpRequest.BodyPublishers.ofByteArray(multipart.toByteArray()),
+            "multipart/form-data; boundary=catalog-fixture",
+            pack.path("revision").asString(),
+            "upload",
+            201);
+    assertEquals(digest, uploaded.path("digest").asString());
+    var version = path + "/versions/" + uploaded.path("id").asString();
+    var submit = version + "/submissions";
+    var reason = "{\"reason\":\"Review fixture\"}";
+    String revision = uploaded.path("revision").asString();
+    catalogPost(submit, foreign.token(), reason, revision, "foreign-submit", 403);
+    var review = catalogPost(submit, grant.token(), reason, revision, "submit", 201);
+    assertEquals("pending_review", review.path("version").path("state").asString());
+    assertEquals(review, catalogPost(submit, grant.token(), reason, revision, "submit", 201));
+    admin.update("UPDATE org.member SET status='disabled' WHERE id=?", ALICE);
+    catalogPost(submit, grant.token(), reason, revision, "submit", 403);
+    admin.update("UPDATE org.member SET status='active' WHERE id=?", ALICE);
+    admin.update(
+        "UPDATE org.role SET permissions=permissions || ARRAY['resource.packages.read','resource.versions.review','resource.versions.publish'] WHERE id=?",
+        ROLE);
+    var decision = "/admin/catalog/reviews/" + review.path("reviewId").asString() + "/decisions";
+    var publication = version.replace("/catalog/", "/admin/catalog/") + "/publications";
+    var approve =
+        JSON.createObjectNode()
+            .put("decision", "approve")
+            .put("role", "general")
+            .put("reason", "Approved fixture")
+            .put("digest", digest)
+            .put("versionRevision", review.path("version").path("revision").asLong())
+            .toString();
+    String reviewRevision = review.path("revision").asString();
+    catalogPost(decision, grant.token(), approve, reviewRevision, "device-approve", 403);
+    catalogPost(publication, grant.token(), reason, revision, "device-publish", 403);
+    catalogPost(decision, workflowToken(ALICE), approve, reviewRevision, "self-approve", 403);
+    var approved =
+        catalogPost(decision, workflowToken(BOB), approve, reviewRevision, "approve", 200);
+    String approvedRevision = approved.path("version").path("revision").asString();
+    catalogPost(publication, workflowToken(ALICE), reason, approvedRevision, "self-publish", 403);
+    var published =
+        catalogPost(publication, workflowToken(BOB), reason, approvedRevision, "publish", 201);
+    assertEquals("published", published.path("state").asString());
+    var visible = deviceRequest(version, workflowToken(BOB), null);
+    deviceStatus(200, visible);
+    assertEquals("published", JSON.readTree(visible.body()).path("state").asString());
+    deviceCredentials.revoke(T1, grant.device());
+    catalogPost(submit, grant.token(), reason, revision, "submit", 403);
+  }
+
+  JsonNode catalogPost(
+      String path, String token, String body, String revision, String key, int status)
+      throws Exception {
+    return catalogPost(
+        path,
+        token,
+        HttpRequest.BodyPublishers.ofString(body),
+        "application/json",
+        revision,
+        key,
+        status);
+  }
+
+  JsonNode catalogPost(
+      String path,
+      String token,
+      HttpRequest.BodyPublisher body,
+      String contentType,
+      String revision,
+      String key,
+      int status)
+      throws Exception {
+    var response =
+        http.send(
+            HttpRequest.newBuilder(
+                    URI.create("http://127.0.0.1:" + port + "/api/resource/v1" + path))
+                .header("Authorization", "Bearer " + token)
+                .header("Content-Type", contentType)
+                .header("Idempotency-Key", key)
+                .header("If-Match", "\"" + revision + "\"")
+                .POST(body)
+                .build(),
+            HttpResponse.BodyHandlers.ofString());
+    assertEquals(status, response.statusCode(), response.body());
+    return JSON.readTree(response.body());
   }
 
   @org.junit.jupiter.params.ParameterizedTest

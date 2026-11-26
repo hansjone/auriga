@@ -87,7 +87,16 @@ public final class ResourceDeviceFixture {
                 Set.of("auriga.connect"),
                 Set.of(OAuthProvider.DEVICE, "refresh_token"),
                 true,
-                false)),
+                false),
+            new OAuthClient(
+                "auriga-dsh-native",
+                tenant,
+                null,
+                Set.of(),
+                Set.of("auriga.connect"),
+                Set.of(OAuthProvider.DEVICE, "refresh_token"),
+                true,
+                true)),
         authorization);
   }
 
@@ -110,6 +119,10 @@ public final class ResourceDeviceFixture {
         return authority(tenant).allowed(tenant, account, device, permission);
       }
 
+      public boolean desktopSessionActive(UUID tenant, String account, String device) {
+        return authority(tenant).desktopSessionActive(tenant, account, device);
+      }
+
       public Optional<UUID> installationInstance(UUID tenant, String account, String device) {
         return authority(tenant).installationInstance(tenant, account, device);
       }
@@ -117,6 +130,10 @@ public final class ResourceDeviceFixture {
   }
 
   public Grant issue(UUID tenant, UUID account, String kind) {
+    return issue(tenant, account, kind, false);
+  }
+
+  public Grant issue(UUID tenant, UUID account, String kind, boolean strong) {
     return TenantContext.call(
         tenant,
         () -> {
@@ -152,7 +169,7 @@ public final class ResourceDeviceFixture {
                             account,
                             provider,
                             "portal",
-                            false,
+                            strong,
                             Duration.ofHours(1),
                             Duration.ofHours(1))
                         .session();
@@ -177,6 +194,64 @@ public final class ResourceDeviceFixture {
             String token = response.path("access_token").asString();
             return new Grant(token, UUID.fromString(tokens.verify(token).path("did").asString()));
           }
+          if (strong) {
+            String verifier = "v".repeat(43);
+            String transaction = UUID.randomUUID().toString();
+            var code =
+                store.tx(
+                    () -> {
+                      var tx =
+                          Json.object(
+                              "id",
+                              transaction,
+                              "tenantId",
+                              tenant,
+                              "providerId",
+                              provider,
+                              "audience",
+                              "portal",
+                              "origin",
+                              "https://example.com",
+                              "bindingHash",
+                              "fixture",
+                              "status",
+                              "pending",
+                              "expiresAt",
+                              clock.instant().plusSeconds(300).toString());
+                      store.insert("login_tx", transaction, tx, clock.instant().plusSeconds(300));
+                      var started =
+                          oauth.beginNative(
+                              tx,
+                              Json.object(
+                                  "clientId",
+                                  "auriga-dsh-native",
+                                  "codeChallenge",
+                                  OAuthProvider.challenge(verifier),
+                                  "deviceName",
+                                  "Fixture DSH"));
+                      tx.put("nativeStartedAt", source.path("stepUpAt").asString());
+                      oauth.approveNative(tx, source);
+                      tx.put("status", "completed");
+                      store.save("login_tx", tx);
+                      return started.path("deviceCode").asString();
+                    });
+            var response =
+                oauth.token(
+                    Map.of(
+                        "client_id",
+                        "auriga-dsh-native",
+                        "grant_type",
+                        OAuthProvider.DEVICE,
+                        "device_code",
+                        code,
+                        "code_verifier",
+                        verifier));
+            String token = response.path("access_token").asString();
+            if (token.isEmpty())
+              throw new IllegalStateException(
+                  "Native exchange failed: " + response.path("error").asString());
+            return new Grant(token, UUID.fromString(tokens.verify(token).path("did").asString()));
+          }
           UUID device = UUID.randomUUID();
           return store.tx(
               () -> {
@@ -194,8 +269,12 @@ public final class ResourceDeviceFixture {
                         "auriga.connect",
                         "clientId",
                         "auriga-dsh-native",
+                        "kind",
+                        "dsh_connect",
+                        "providerId",
+                        provider,
                         "authorizationMode",
-                        "native_tx",
+                        kind.equals("legacy") ? "manual" : "native_tx",
                         "revoked",
                         false),
                     null);

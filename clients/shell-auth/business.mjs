@@ -11,6 +11,12 @@ const operations = new Map(
     contractFile('plugin/shell-business-operations.json'),
   ).operations.map((o) => [o.operation, o]),
 );
+const catalogArchiveRules = new Set([
+  'bundled_dependency_required',
+  'lifecycle_scripts_disallowed',
+  'bundle_patch_missing',
+  'native_build_disallowed',
+]);
 const error = (code, retryable = false) => ({ code, retryable });
 export function mapBusinessError(status, code, retryAfter) {
   const mapped = {
@@ -379,14 +385,21 @@ export class BusinessProxy {
       } catch {
         throw new Error('invalid business response');
       }
-      if (!response.ok)
-        throw Object.assign(new Error('business failure'), {
-          businessError: mapBusinessError(
-            response.status,
-            body.code,
-            response.headers.get('retry-after'),
-          ),
-        });
+      if (!response.ok) {
+        const businessError = mapBusinessError(
+          response.status,
+          body?.code,
+          response.headers.get('retry-after'),
+        );
+        const rule = body?.params?.rule;
+        if (
+          definition.operation === 'UnifiedUploadResourceVersion' &&
+          businessError.code === 'common.validation_failed' &&
+          catalogArchiveRules.has(rule)
+        )
+          Object.assign(businessError, { rule });
+        throw Object.assign(new Error('business failure'), { businessError });
+      }
       if (definition.operation === 'profile_read') {
         if (
           !body?.account ||

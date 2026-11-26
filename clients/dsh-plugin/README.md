@@ -250,3 +250,7 @@ relative time and HTTP status; they omit URLs, credentials and response bodies.
 本批不实现离线新发送排队。`auriga_send_message` 沿用现有 source、owner 和 consent 门禁；完全断网后新调用可能被拒绝，不能解释为“已排队”。`queued` 只统计已经落盘且还没有取得结果的记录，不代表已投递，也不证明总部未接受；恢复重试沿用原幂等标识及既有规则。
 
 隔离宿主复核脚本为 `test/real-host/base-tools-smoke.mjs`，配套探针只供测试，不进入默认启动。先把 `deploy/compose/real-dsh` 的 package.json 与 package-lock.json 复制到工位内 `.agent-evidence/base-tools-r2/host-install` 并运行 `npm ci --prefix`，再从仓库根运行 `node clients/dsh-plugin/test/real-host/base-tools-smoke.mjs`。脚本使用实际 DSH 0.2.1-rc.3 CLI、独立 DSH_HOME、随机回环端口及真实 SessionController/Agent/ToolRuntime，检查模型可见 schemas 和实际工具执行，并关闭测试进程。也可用两个位置参数分别指定证据目录和已安装的隔离宿主目录；例如 `node clients/dsh-plugin/test/real-host/base-tools-smoke.mjs .agent-evidence/base-tools-r3 .agent-evidence/base-tools-r2/host-install` 会复用锁定安装，并验证未配置、不可达、可达本机只读平台及无托管设备文件四个场景。结果保存到对应证据目录的 `summary.json`；原始宿主日志含临时启动凭据，不应发布。该验证不调用外部模型 API，也不替代正常用户页面验收或生产部署。
+
+## 桌面对话送审
+
+在已连接 Auriga 的桌面 DSH 中，打开工作目录包含源码的主会话。对 Agent 说「把这个技能发布到 Auriga」可使用内置 `auriga-resource-submit` 技能。它会预检当前会话中的目录，并按你的要求提交成员审核。提交成功时可用返回的资源和版本 ID 跟踪待审核记录。参数、两类目录示例和错误处理见 [auriga-resource-submit](skills/auriga-resource-submit/SKILL.md)。
