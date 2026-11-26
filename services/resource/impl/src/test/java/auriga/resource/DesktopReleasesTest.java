@@ -312,8 +312,7 @@ class DesktopReleasesTest {
         CommonErrors.VALIDATION_FAILED);
     releases.publish(actor, valid, zip());
     assertEquals(valid, releases.list(actor).path("channels").path("stable"));
-    assertEquals(
-        valid, releases.list(actor).path("platforms").path("win-x64").path("stable"));
+    assertEquals(valid, releases.list(actor).path("platforms").path("win-x64").path("stable"));
     rejects(() -> releases.preflight(actor, valid), CommonErrors.CONFLICT);
     releases.withdraw(actor, 2);
     assertTrue(releases.list(actor).path("channels").isEmpty());

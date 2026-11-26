@@ -19,8 +19,12 @@ import tools.jackson.databind.node.ObjectNode;
 public final class DesktopReleases {
   public static final String MANAGE = "resource.versions.publish";
   public static final long MAX_BYTES = 4294967296L;
-  /** Content-addressed blob suffix; historically ".exe" for Windows, reused for any platform bytes. */
+
+  /**
+   * Content-addressed blob suffix; historically ".exe" for Windows, reused for any platform bytes.
+   */
   private static final String BLOB_SUFFIX = ".exe";
+
   private static final Set<String> PLATFORMS = Set.of("win-x64", "linux-x64");
   private final Path root;
   private final PublicKey key;
