@@ -49,6 +49,43 @@ class UacConfiguredAdapterTest {
       var missing = adapter.verifyProof(config, credential);
       assertFalse(missing.path("success").asBoolean());
       assertEquals("missing_subject", missing.path("faultReason").asString());
+
+      var either =
+          new UacConfiguredAdapter(
+              privateConfig.deepCopy().put("proofSubjectPolicy", "either"), true);
+      var verified = either.verifyProof(config, credential);
+      assertTrue(verified.path("success").asBoolean());
+      assertEquals("001Ab", verified.path("empNo").asString());
+      assertEquals("replacement-synthetic", verified.path("token").asString());
+      assertEquals("001Ab", observed.get().path("account").asString());
+
+      var other = response.get().withObject("/other");
+      other.put("account", " 001AB ");
+      assertEquals("001AB", either.verifyProof(config, credential).path("empNo").asString());
+      other.put("account", "1Ab");
+      assertEquals(
+          "identity_mismatch",
+          either.verifyProof(config, credential).path("failureClass").asString());
+      other.putNull("account");
+      assertEquals(
+          "invalid_success_payload",
+          either.verifyProof(config, credential).path("faultReason").asString());
+      other.remove("account");
+      other.putNull("token");
+      assertEquals(
+          "invalid_success_payload",
+          either.verifyProof(config, credential).path("faultReason").asString());
+      response.get().withObject("/bo").put("code", "9999");
+      assertEquals(
+          "business_rejected",
+          either.verifyProof(config, credential).path("failureClass").asString());
+
+      for (var invalid : List.of("claimed", "", "EITHER"))
+        assertThrows(
+            IllegalArgumentException.class,
+            () ->
+                new UacConfiguredAdapter(
+                    privateConfig.deepCopy().put("proofSubjectPolicy", invalid), true));
     } finally {
       server.stop(0);
     }

@@ -74,14 +74,20 @@ final class UacTokenVerification {
   }
 
   static Decision evaluate(int status, byte[] body, String verifiedAccount) {
-    return evaluate(status, body, verifiedAccount, false);
+    return evaluate(status, body, verifiedAccount, false, false);
   }
 
-  static Decision evaluateProof(int status, byte[] body, String claimedAccount) {
-    return evaluate(status, body, claimedAccount, true);
+  static Decision evaluateProof(
+      int status, byte[] body, String requestedAccount, boolean allowVerifiedAccount) {
+    return evaluate(status, body, requestedAccount, true, allowVerifiedAccount);
   }
 
-  private static Decision evaluate(int status, byte[] body, String verifiedAccount, boolean proof) {
+  private static Decision evaluate(
+      int status,
+      byte[] body,
+      String verifiedAccount,
+      boolean proof,
+      boolean allowVerifiedAccount) {
     IamError.validate(validUser(verifiedAccount));
     if (status != 200) return fault("http_error");
     if (body == null || body.length == 0 || body.length > MAX_BODY) return fault("invalid_json");
@@ -118,7 +124,7 @@ final class UacTokenVerification {
           return new Decision("identity_mismatch", null, null, null);
         user = account;
       }
-      if (user.isMissingNode()) return fault("missing_subject");
+      if (user.isMissingNode() && !allowVerifiedAccount) return fault("missing_subject");
     }
     boolean echoed = !user.isMissingNode();
     if ((echoed && (!user.isString() || !validUser(user.asString())))

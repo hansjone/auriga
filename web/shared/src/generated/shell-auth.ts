@@ -286,7 +286,8 @@ export interface components {
         | 'cancel_login'
         | 'logout'
         | 'inline_login'
-        | 'inline_advance';
+        | 'inline_advance'
+        | 'retry_local_uac';
       input?: components['schemas']['ShellAuthInlineInput'];
     } & unknown;
     ShellAuthEvent: {

@@ -374,6 +374,7 @@ export function createShellState(options) {
           'inline_advance',
           'cancel_login',
           'logout',
+          'retry_local_uac',
         ].includes(action)
       )
         throw fail('common.validation_failed');
@@ -405,7 +406,7 @@ export function createShellState(options) {
           accept(event.snapshot);
         return;
       }
-      if (['open_login', 'inline_login'].includes(action))
+      if (['open_login', 'inline_login', 'retry_local_uac'].includes(action))
         loginCommands.set(command.requestId, {
           revision: command.expectedRevision,
           interrupted: false,

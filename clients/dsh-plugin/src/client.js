@@ -228,7 +228,11 @@ window.__ModuleLoader__.load({
       loginBrowserHint: '请在系统浏览器完成本站登录，并核对当前设备的用户码。',
       loginLinking: '正在连接平台，请稍候。',
       loginRateLimited: '平台请求过于频繁，稍后会自动重试。',
-      loginProofRequired: '平台无法验证当前身份，请重新扫码登录。',
+      loginProofRequired:
+        '平台无法验证本机身份。可以重试，或请管理员核对平台配置。',
+      loginPlatformFailed: '平台连接需要重试',
+      retryLocalUac: '用本机身份重新连接平台',
+      loginDetails: '错误详情',
       loginCompare: '请核对门户预填的确认码与此处一致，仅确认自己发起的登录：',
       loginRejected: '平台拒绝了登录请求，请联系管理员检查客户端配置。',
       loginBadCredentials: '口令或验证码错误，请重试。',
@@ -474,7 +478,10 @@ window.__ModuleLoader__.load({
       loginLinking: 'Connecting to the platform. Please wait.',
       loginRateLimited: 'Too many platform requests. Retrying shortly.',
       loginProofRequired:
-        'The platform could not verify this identity. Scan again to sign in.',
+        'The platform could not verify your local identity. Try again or ask your administrator to check the platform configuration.',
+      loginPlatformFailed: 'Platform connection needs attention',
+      retryLocalUac: 'Reconnect with local identity',
+      loginDetails: 'Error details',
       loginBrowserHint:
         'Finish sign-in in your system browser and compare the code for this device.',
       loginCompare:
@@ -2496,9 +2503,7 @@ window.__ModuleLoader__.load({
         const loginRequests = new Set();
         const openPlatformLogin = (action) => {
           if (!loginRequests.size) return false;
-          loginRequests.forEach((open) =>
-            open(action === 'uac' ? 'uac' : 'inline_login'),
-          );
+          loginRequests.forEach((open) => open(action));
           return true;
         };
         function PlatformLogin() {
@@ -2717,12 +2722,13 @@ window.__ModuleLoader__.load({
             attempted.current = true;
             if (shell.inlineLogin || shell.platform === 'authenticating')
               return;
+            if (uacSignedIn && !manualPlatform.current) return;
             postLocal('auriga/shell/command', shell.csrf, {
               action: loginAction.current,
             })
               .catch(() => {})
               .finally(reloadShell);
-          }, [open, loginTab, ownsLogin, shell]);
+          }, [open, loginTab, ownsLogin, shell, uacSignedIn]);
           if (!open) return null;
           const activeTab =
             hasLocalUac && (loginTab === 'uac' || !platformAvailable)
@@ -2875,6 +2881,8 @@ window.__ModuleLoader__.load({
           const [inlineFallback, setInlineFallback] = React.useState(false);
           const intent = React.useRef(null);
           const view = platformView(boot, shell);
+          const canRetryLocal = shell?.canRetryLocalUac === true;
+          const proofFailed = canRetryLocal && !!shell?.loginError;
           const previous = React.useRef(view.kind);
           React.useEffect(() => {
             const before = previous.current;
@@ -2885,7 +2893,9 @@ window.__ModuleLoader__.load({
               view.kind === 'connected' || view.kind === 'degraded'
                 ? 'loginDone'
                 : view.kind === 'reauth'
-                  ? 'loginExpired'
+                  ? shell?.reason === 'expired'
+                    ? 'loginExpired'
+                    : ''
                   : view.kind === 'unreachable'
                     ? 'loginUnreachable'
                     : intent.current === 'cancel'
@@ -3137,9 +3147,15 @@ window.__ModuleLoader__.load({
               'div',
               { className: 'auriga-row' },
               h(Dot, { tone: view.tone }),
-              h('strong', { role: 'status' }, t('platform_' + view.kind)),
+              h(
+                'strong',
+                { role: 'status' },
+                t(
+                  proofFailed ? 'loginPlatformFailed' : 'platform_' + view.kind,
+                ),
+              ),
             ),
-            !modal && h('p', null, t('platformHint_' + hint)),
+            !modal && !proofFailed && h('p', null, t('platformHint_' + hint)),
             shell?.loggedIn &&
               h(
                 'dl',
@@ -3159,7 +3175,8 @@ window.__ModuleLoader__.load({
                 null,
                 t(shell?.localUacProof ? 'loginLinking' : 'loginBrowserHint'),
               ),
-            ['signedOut', 'reauth'].includes(view.kind) &&
+            !canRetryLocal &&
+              ['signedOut', 'reauth'].includes(view.kind) &&
               h('p', { className: 'auriga-muted' }, t('loginMethods')),
             (modal ||
               !loginOverlayAvailable ||
@@ -3177,6 +3194,7 @@ window.__ModuleLoader__.load({
                 h('strong', null, shell.deviceAttempt.userCode),
               ),
             shell?.reason === 'rate_limited' &&
+              view.kind === 'unreachable' &&
               h('p', { role: 'status' }, t('loginRateLimited')),
             [
               'iam.uac_proof_subject_required',
@@ -3198,8 +3216,9 @@ window.__ModuleLoader__.load({
               ),
             shell?.loginError &&
               h(
-                'p',
+                'details',
                 { className: 'auriga-muted' },
+                h('summary', null, t('loginDetails')),
                 shell.loginError.code,
                 ' / ',
                 shell.loginError.correlationId,
@@ -3216,15 +3235,29 @@ window.__ModuleLoader__.load({
                   { primary: true, onClick: gotoSettings },
                   t('configurePlatform'),
                 ),
-              ['signedOut', 'reauth'].includes(view.kind) &&
+              canRetryLocal &&
                 h(
                   Action,
                   {
                     primary: true,
                     disabled: busy || !shell?.csrf,
+                    onClick: () => command('retry_local_uac'),
+                  },
+                  t('retryLocalUac'),
+                ),
+              ['signedOut', 'reauth'].includes(view.kind) &&
+                h(
+                  Action,
+                  {
+                    primary: !canRetryLocal,
+                    disabled: busy || !shell?.csrf,
                     onClick: !modal
                       ? () => {
-                          if (!openPlatformLogin('inline_login')) {
+                          if (
+                            !openPlatformLogin(
+                              canRetryLocal ? 'platform' : 'inline_login',
+                            )
+                          ) {
                             setInlineFallback(true);
                             command('inline_login');
                           }

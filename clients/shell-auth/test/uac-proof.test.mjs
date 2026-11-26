@@ -2,7 +2,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { EventEmitter } from 'node:events';
-import { fixture, command, OWNER } from './fixtures.mjs';
+import { fixture, command, OWNER, OTHER } from './fixtures.mjs';
+import { redact } from '../diagnostics.mjs';
 
 function setup() {
   const f = fixture();
@@ -225,6 +226,87 @@ test('permanent proof rejection and disabled provider require user action withou
   }
 });
 
+test('a newly authenticated local generation recovers from an earlier proof rejection', async () => {
+  const f = setup();
+  const correlationId = randomUUID();
+  const code = 'iam.uac_proof_subject_required';
+  f.fail(
+    Object.assign(new Error('synthetic private detail'), {
+      status: 403,
+      code,
+      correlationId,
+    }),
+  );
+  await f.publish();
+  await f.broker.check();
+  assert.equal(f.saved.at(-1).proofFailureGeneration, f.credential.generation);
+  assert.deepEqual(f.broker.snapshot().loginError, { code, correlationId });
+  const entry = f.logs.map(redact).find((event) => event.code === code);
+  assert.equal(entry.httpStatus, 403);
+  assert.equal(entry.correlationId, correlationId);
+  assert.doesNotMatch(JSON.stringify(f.logs), /synthetic private detail/);
+  f.fail(undefined);
+  await f.publish({ ...f.credential, generation: randomUUID() });
+  await f.broker.check();
+  assert.equal(f.exchanges(), 1);
+  assert.equal(f.broker.snapshot().state, 'authenticated');
+  assert.equal(f.broker.snapshot().loginError, undefined);
+  assert.equal(f.saved.at(-1).proofFailureGeneration, undefined);
+  await f.broker.close();
+});
+
+test('explicit retry repairs an old vault only for the live local credential owner', async () => {
+  const f = setup();
+  await f.vault.save({ manualLoginRequired: true, revocations: [] });
+  await f.broker.initialize();
+  await assert.rejects(
+    f.broker.command(command(f.broker, 'retry_local_uac'), OWNER),
+    /common.conflict/,
+  );
+  await f.publish();
+  await f.broker.check();
+  assert.equal(f.requests.length, 0);
+  await assert.rejects(
+    f.broker.command(command(f.broker, 'retry_local_uac'), OTHER),
+    /common.conflict/,
+  );
+  const retry = command(f.broker, 'retry_local_uac');
+  await assert.rejects(
+    f.broker.pageCommand(retry, OWNER),
+    /common.validation_failed/,
+  );
+  const response = await f.broker.command(retry, OWNER);
+  assert.equal(response.snapshot.state, 'authenticating');
+  await Promise.all(f.broker.inflight);
+  assert.equal(f.broker.snapshot().state, 'authenticated');
+  assert.equal(f.exchanges(), 1);
+  assert.deepEqual(await f.broker.command(retry, OWNER), response);
+  assert.equal(f.exchanges(), 1);
+  await f.broker.close();
+});
+
+test('transient proof retries stop after five attempts for the same local generation', async () => {
+  const f = setup();
+  let elapsed = 0;
+  f.broker.mono = () => elapsed;
+  f.fail(
+    Object.assign(new Error('limited'), {
+      status: 429,
+      code: 'iam.rate_limited',
+    }),
+  );
+  for (let i = 0; i < 24; i++) {
+    await f.publish();
+    await f.broker.check();
+    elapsed += 5000;
+  }
+  assert.equal(f.requests.length, 5);
+  assert.equal(f.broker.snapshot().state, 'reauth_required');
+  assert.equal(f.broker.snapshot().reason, 'rate_limited');
+  assert.equal(f.exchanges(), 0);
+  await f.broker.close();
+});
+
 test('lost single-use exchange response persists a recovery gate across broker restarts', async () => {
   const f = setup();
   f.platform.nativePoll = async () => {
@@ -266,7 +348,7 @@ test('explicit logout and remote revocation cannot silently recreate a device', 
       assert.equal(f.broker.snapshot().state, 'revoked');
     } else await f.broker.logout();
     for (let i = 0; i < 4; i++) {
-      await f.publish();
+      await f.publish({ ...f.credential, generation: randomUUID() });
       await f.broker.check();
     }
     assert.equal(f.exchanges(), 1);
