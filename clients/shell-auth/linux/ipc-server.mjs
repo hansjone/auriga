@@ -43,12 +43,27 @@ function controlled(children, pid) {
   if (!children.has(pid)) return false;
   try {
     return (
-      children.get(pid) === startTicks(pid) &&
-      peerUid(pid) === process.getuid()
+      children.get(pid) === startTicks(pid) && peerUid(pid) === process.getuid()
     );
   } catch {
     return false;
   }
+}
+
+/** Kernel SO_PEERCRED identity for an accepted Unix-domain connection. */
+function peerCredentials(socket) {
+  const handle = socket?._handle;
+  if (!handle || typeof handle.getPeerCredentials !== 'function')
+    throw new Error('peer credentials unavailable');
+  const creds = handle.getPeerCredentials();
+  if (
+    !creds ||
+    !Number.isSafeInteger(creds.pid) ||
+    creds.pid < 1 ||
+    !Number.isSafeInteger(creds.uid)
+  )
+    throw new Error('peer credentials unavailable');
+  return creds;
 }
 
 export async function startUnixIpc({ broker, business, directory }) {
@@ -63,6 +78,7 @@ export async function startUnixIpc({ broker, business, directory }) {
   const peers = new Map();
   const subscriptions = new Map();
   const children = new Map();
+  const sockets = new Set();
   let closed = false;
   let active = 0;
 
@@ -74,6 +90,14 @@ export async function startUnixIpc({ broker, business, directory }) {
     if (!business.host) host.close();
     for (const stop of subscriptions.values()) stop();
     subscriptions.clear();
+    for (const socket of sockets) {
+      try {
+        socket.destroy();
+      } catch {
+        /* best effort */
+      }
+    }
+    sockets.clear();
     try {
       server.close();
     } catch {
@@ -162,6 +186,7 @@ export async function startUnixIpc({ broker, business, directory }) {
       return;
     }
     active += 1;
+    sockets.add(socket);
     let connectionId = null;
     let peerPid = null;
     const lines = createInterface({ input: socket });
@@ -173,6 +198,7 @@ export async function startUnixIpc({ broker, business, directory }) {
     const finish = () => {
       clearInterval(lease);
       active -= 1;
+      sockets.delete(socket);
       lines.close();
       if (connectionId) {
         host.disconnect(peers.get(connectionId));
@@ -195,24 +221,31 @@ export async function startUnixIpc({ broker, business, directory }) {
       }
       try {
         if (!connectionId) {
+          let creds;
+          try {
+            creds = peerCredentials(socket);
+          } catch {
+            socket.destroy();
+            return;
+          }
           if (
             typeof message.capability !== 'string' ||
             message.capability !== capability ||
-            !Number.isSafeInteger(message.pid) ||
-            message.pid < 1 ||
-            !controlled(children, message.pid)
+            creds.uid !== process.getuid() ||
+            !controlled(children, creds.pid) ||
+            (Number.isSafeInteger(message.pid) && message.pid !== creds.pid)
           ) {
             socket.destroy();
             return;
           }
-          peerPid = message.pid;
+          peerPid = creds.pid;
           connectionId = randomUUID();
           peers.set(
             connectionId,
             host.connect({
               verified: true,
               connectionId,
-              sid: String(process.getuid()),
+              sid: String(creds.uid),
               processStart: children.get(peerPid),
               role: 'plugin-backend',
             }),

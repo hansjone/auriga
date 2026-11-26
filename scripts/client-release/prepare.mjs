@@ -119,7 +119,7 @@ export function installPluginDeps(
   runner(
     join(kit, platform.buildNode),
     [
-      join(kit, 'build-node/node_modules/npm/bin/npm-cli.js'),
+      npmCliPath(kit, platform),
       'ci',
       '--omit=dev',
       '--omit=peer',
@@ -128,6 +128,25 @@ export function installPluginDeps(
     plugin,
     env,
   );
+}
+
+/** Official Node layout: Windows keeps npm under node_modules/; Linux under lib/. */
+export function npmCliPath(kit, platform) {
+  const candidates =
+    platform.target === 'linux-x64'
+      ? [
+          'build-node/lib/node_modules/npm/bin/npm-cli.js',
+          'build-node/node_modules/npm/bin/npm-cli.js',
+        ]
+      : [
+          'build-node/node_modules/npm/bin/npm-cli.js',
+          'build-node/lib/node_modules/npm/bin/npm-cli.js',
+        ];
+  for (const relative of candidates) {
+    const path = join(kit, relative);
+    if (existsSync(path)) return path;
+  }
+  throw new Error(`套件缺少 npm CLI（${platform.target}）`);
 }
 /**
  * 准备 Desktop 客户端输入套件（默认 win-x64；linux-x64 须在 Linux x64 主机上跑）。
@@ -230,7 +249,7 @@ export async function prepareInputs(parent, options = {}) {
     }
   }
   const node = join(kit, platform.buildNode);
-  const npm = join(kit, 'build-node/node_modules/npm/bin/npm-cli.js');
+  const npm = npmCliPath(kit, platform);
   const env = {
     ...process.env,
     NODE_OPTIONS: '',

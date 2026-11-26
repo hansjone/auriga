@@ -47,10 +47,18 @@ function parseArgs(argv) {
 
 function notify(message) {
   try {
-    spawn('notify-send', [`--app-name=${BRAND}`, BRAND, message], {
-      stdio: 'ignore',
-      detached: true,
-    }).unref();
+    const child = spawn(
+      'notify-send',
+      [`--app-name=${BRAND}`, BRAND, message],
+      {
+        stdio: 'ignore',
+        detached: true,
+      },
+    );
+    child.on('error', () => {
+      console.error(message);
+    });
+    child.unref();
   } catch {
     console.error(message);
   }
@@ -62,6 +70,9 @@ function openUi() {
     const child = spawn('xdg-open', [url], {
       stdio: 'ignore',
       detached: true,
+    });
+    child.on('error', () => {
+      notify(`请在浏览器打开 ${url}`);
     });
     child.unref();
   } catch {

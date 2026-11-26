@@ -301,24 +301,38 @@ export async function connectPackagedBroker(options = {}) {
       options.directory ??
       fileURLToPath(new URL('../../shell-auth/', import.meta.url));
     const artifact = await verifyBrokerPackage(directory);
-    const helper = artifact.manifest.files.find(
-      (/** @type {any} */ e) => e.path === 'windows/shell-helper.exe',
-    );
+    const unix =
+      descriptor.transport === 'unix' || process.platform === 'linux';
     if (
       descriptor.protocolVersion !== 1 ||
       typeof descriptor.pipe !== 'string' ||
-      !/^auriga-shell-[a-f0-9]{32}$/.test(descriptor.pipe) ||
-      !/^[A-Za-z0-9_-]{43}$/.test(descriptor.capability) ||
-      typeof descriptor.helperPath !== 'string'
+      !/^[A-Za-z0-9_-]{43}$/.test(descriptor.capability)
     )
       throw new Error('broker descriptor invalid');
-    const actual = await realpath(descriptor.helperPath);
-    if (
-      createHash('sha256')
-        .update(await readFile(actual))
-        .digest('hex') !== helper.sha256
-    )
-      throw new Error('broker helper version mismatch');
+    if (unix) {
+      if (
+        !/[/\\]auriga-shell-[a-f0-9]{32}\.sock$/.test(descriptor.pipe) ||
+        (descriptor.helperPath != null &&
+          typeof descriptor.helperPath !== 'string')
+      )
+        throw new Error('broker descriptor invalid');
+    } else {
+      const helper = artifact.manifest.files.find(
+        (/** @type {any} */ e) => e.path === 'windows/shell-helper.exe',
+      );
+      if (
+        !/^auriga-shell-[a-f0-9]{32}$/.test(descriptor.pipe) ||
+        typeof descriptor.helperPath !== 'string'
+      )
+        throw new Error('broker descriptor invalid');
+      const actual = await realpath(descriptor.helperPath);
+      if (
+        createHash('sha256')
+          .update(await readFile(actual))
+          .digest('hex') !== helper.sha256
+      )
+        throw new Error('broker helper version mismatch');
+    }
     const { connectIpc } = await import(
       pathToFileURL(resolve(artifact.base, 'ipc.mjs')).href
     );

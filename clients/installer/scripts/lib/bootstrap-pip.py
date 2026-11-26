@@ -11,7 +11,12 @@ wheel = pathlib.Path(wheel)
 environment = pathlib.Path(environment)
 if hashlib.sha256(wheel.read_bytes()).hexdigest() != digest:
     raise ValueError("pip wheel digest mismatch")
-site = environment / "Lib" / "site-packages"
+# Windows venv: Lib/site-packages; POSIX venv: lib/pythonX.Y/site-packages.
+if sys.platform == "win32":
+    site = environment / "Lib" / "site-packages"
+else:
+    major, minor = sys.version_info[:2]
+    site = environment / "lib" / f"python{major}.{minor}" / "site-packages"
 with tempfile.TemporaryDirectory(prefix="pip-bootstrap-", dir=environment) as temporary:
     staging = pathlib.Path(temporary)
     with zipfile.ZipFile(wheel) as archive:

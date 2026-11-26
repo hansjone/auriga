@@ -200,7 +200,10 @@ export function resolvePluginDependency(
   const pluginPkg = join(repoRoot, 'clients', 'dsh-plugin', 'package.json');
   return resolveWithNodePaths(pluginPkg, specifier, nodePaths);
 }
-export function buildBroker(output, { managedLinux = false } = {}) {
+export function buildBroker(
+  output,
+  { managedLinux = false, skipWindowsHelper = false } = {},
+) {
   output = resolve(output);
   safePath(output);
   if (output === source || (existsSync(output) && readdirSync(output).length))
@@ -235,9 +238,11 @@ export function buildBroker(output, { managedLinux = false } = {}) {
   for (const file of files)
     copyFileSync(join(source, file), join(output, file));
   if (!managedLinux) {
-    const helper = 'windows/shell-helper.exe';
-    buildHelper(join(output, helper));
-    files.push(helper);
+    if (!skipWindowsHelper) {
+      const helper = 'windows/shell-helper.exe';
+      buildHelper(join(output, helper));
+      files.push(helper);
+    }
     // ipc.mjs statically imports the Linux Unix-socket peer; ship it in every
     // Desktop broker so Windows packages still resolve the module graph.
     mkdirSync(join(output, 'linux'), { recursive: true });
@@ -380,12 +385,18 @@ if (
   process.argv[1] &&
   resolve(process.argv[1]) === fileURLToPath(import.meta.url)
 ) {
-  const [output, target, ...extra] = process.argv.slice(2);
+  const [output, ...flags] = process.argv.slice(2);
+  const managedLinux = flags.includes('--managed-linux');
+  const skipWindowsHelper = flags.includes('--skip-windows-helper');
   if (
     !output ||
-    (target !== undefined && target !== '--managed-linux') ||
-    extra.length
+    flags.some(
+      (flag) => flag !== '--managed-linux' && flag !== '--skip-windows-helper',
+    ) ||
+    (managedLinux && skipWindowsHelper)
   )
-    throw new Error('usage: build.mjs <output> [--managed-linux]');
-  buildBroker(output, { managedLinux: target === '--managed-linux' });
+    throw new Error(
+      'usage: build.mjs <output> [--managed-linux | --skip-windows-helper]',
+    );
+  buildBroker(output, { managedLinux, skipWindowsHelper });
 }

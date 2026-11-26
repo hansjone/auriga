@@ -76,8 +76,9 @@ function chmodTreeReadOnly(root) {
     if (info.isSymbolicLink()) return;
     if (info.isDirectory()) {
       for (const entry of readdirSync(path)) walk(join(path, entry));
-      // Owner may traverse and delete entries during version cleanup; no create/write.
-      chmodSync(path, 0o555);
+      // Owner needs directory write to unlink children during cleanup/rollback.
+      // Files below stay read-only so contents cannot be rewritten in place.
+      chmodSync(path, 0o755);
     } else if (info.isFile()) {
       const executable = (info.mode & 0o111) !== 0;
       chmodSync(path, executable ? 0o555 : 0o444);

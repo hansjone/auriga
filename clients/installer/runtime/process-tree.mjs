@@ -113,9 +113,12 @@ function assertLocalLinuxVolume(home) {
     })
     .filter((row) => row.mount && row.fs)
     .sort((a, b) => b.mount.length - a.mount.length);
-  const match = mounts.find(
-    (row) => real === row.mount || real.startsWith(row.mount + '/'),
-  );
+  const match = mounts.find((row) => {
+    if (real === row.mount) return true;
+    // Root mount is "/" — prefix must stay a single slash, not "//".
+    const prefix = row.mount === '/' ? '/' : row.mount + '/';
+    return real.startsWith(prefix);
+  });
   if (!match) throw new Error('unable to resolve local volume');
   if (REMOTE_FS.test(match.fs))
     throw new Error('only local fixed volumes are supported');

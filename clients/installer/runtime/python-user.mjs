@@ -350,6 +350,8 @@ export function preparePythonUser(dir, dataHome, base = process.env) {
               'venv',
               '--without-pip',
               '--system-site-packages',
+              // Real files so assertLocalPath accepts bin/python on Linux upgrades.
+              ...(windows ? [] : ['--copies']),
               paths.environment,
             ],
             env,

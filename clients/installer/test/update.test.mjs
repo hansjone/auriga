@@ -271,7 +271,7 @@ function fixture(
     publicKey: keys.publicKey,
     now: () => now,
     request: async (url) => {
-      if (url.endsWith('/latest'))
+      if (/\/latest(?:\?|$)/.test(url))
         return new Response(JSON.stringify(manifest));
       attempts++;
       if (interrupted && attempts <= 3) return new Response('zi');
@@ -497,7 +497,10 @@ test('HTTP install confirmation persists once and updater uses it', async (t) =>
     now: () => now,
     publicKey: keys.publicKey,
     request: async (url) => {
-      assert.equal(url, origin + '/api/resource/v1/desktop/latest');
+      assert.equal(
+        url,
+        origin + '/api/resource/v1/desktop/latest?platform=win-x64',
+      );
       return new Response(JSON.stringify(signed()));
     },
   });
@@ -583,7 +586,8 @@ test('取消保留部分字节，刷新状态仍显示下载中，重建更新�
     started = resolve;
   });
   const first = resumedUpdater(f, async (url, init) => {
-    if (url.endsWith('/latest')) return new Response(JSON.stringify(manifest));
+    if (/\/latest(?:\?|$)/.test(url))
+      return new Response(JSON.stringify(manifest));
     return {
       ok: true,
       status: 200,
@@ -611,7 +615,8 @@ test('取消保留部分字节，刷新状态仍显示下载中，重建更新�
   assert.equal(first.status().phase, 'cancelled');
   let range;
   const second = resumedUpdater(f, async (url, init) => {
-    if (url.endsWith('/latest')) return new Response(JSON.stringify(manifest));
+    if (/\/latest(?:\?|$)/.test(url))
+      return new Response(JSON.stringify(manifest));
     range = init.headers.Range;
     return new Response('p', {
       status: 206,
@@ -635,7 +640,7 @@ test('下载完成后按阶段上报校验进度，而不是笼统 verifying', a
   const updater = resumedUpdater(
     f,
     async (url) =>
-      url.endsWith('/latest')
+      /\/latest(?:\?|$)/.test(url)
         ? new Response(JSON.stringify(manifest))
         : new Response('zip'),
     {
@@ -688,7 +693,7 @@ test('普通零灰度不提供更新，下载完成时撤回不会安装', async
     rollbackFrom: null,
   });
   const updater = resumedUpdater(f, async (url) => {
-    if (url.endsWith('/latest'))
+    if (/\/latest(?:\?|$)/.test(url))
       return withdrawn
         ? new Response('', { status: 404 })
         : new Response(JSON.stringify(manifest));
@@ -714,7 +719,7 @@ test('下载后确认新的有效签名已替代发行，丢弃原包', async (t
   const f = fixture(t);
   let downloaded = false;
   const updater = resumedUpdater(f, async (url) => {
-    if (url.endsWith('/latest'))
+    if (/\/latest(?:\?|$)/.test(url))
       return new Response(
         JSON.stringify(
           signed({ packageId: f.next.id, sequence: downloaded ? 3 : 2 }),
@@ -915,7 +920,7 @@ for (const failure of ['network', 'unavailable']) {
       packages = 0,
       offline = true;
     const updater = resumedUpdater(f, async (url) => {
-      if (url.endsWith('/latest')) {
+      if (/\/latest(?:\?|$)/.test(url)) {
         latestCalls++;
         if (latestCalls > 1 && offline) {
           if (failure === 'network') throw new Error('network timeout');
@@ -945,7 +950,7 @@ for (const failure of ['network', 'unavailable']) {
     const updater = resumedUpdater(
       f,
       async (url) =>
-        url.endsWith('/latest')
+        /\/latest(?:\?|$)/.test(url)
           ? new Response(JSON.stringify(manifest))
           : new Response('zip'),
       { defer: true },
@@ -990,7 +995,7 @@ for (const reason of ['withdrawn', 'replaced']) {
     const updater = resumedUpdater(
       f,
       async (url) =>
-        url.endsWith('/latest')
+        /\/latest(?:\?|$)/.test(url)
           ? new Response(JSON.stringify(manifest))
           : new Response('zip'),
       { defer: true },
@@ -1028,7 +1033,7 @@ for (const failure of ['interrupted', 'temporary', 'persistent', 'smoke']) {
     const f = fixture(t);
     const manifest = signed({ packageId: f.next.id });
     const request = async (url) =>
-      url.endsWith('/latest')
+      /\/latest(?:\?|$)/.test(url)
         ? new Response(JSON.stringify(manifest))
         : new Response('zip');
     const updater = resumedUpdater(f, request, { defer: true });
@@ -1108,7 +1113,7 @@ test('pending signature and archive hash failures discard unusable input', async
     const f = fixture(t);
     const manifest = signed({ packageId: f.next.id });
     const request = async (url) =>
-      url.endsWith('/latest')
+      /\/latest(?:\?|$)/.test(url)
         ? new Response(JSON.stringify(manifest))
         : new Response('zip');
     const updater = resumedUpdater(f, request, { defer: true });
@@ -1138,7 +1143,7 @@ test('a committed transaction with leftover pending input preserves the previous
   const f = fixture(t);
   const manifest = signed({ packageId: f.next.id });
   const request = async (url) =>
-    url.endsWith('/latest')
+    /\/latest(?:\?|$)/.test(url)
       ? new Response(JSON.stringify(manifest))
       : new Response('zip');
   const updater = resumedUpdater(f, request, { defer: true });
@@ -1170,7 +1175,7 @@ for (const lockTarget of ['scratch', 'launcher']) {
         const f = fixture(t);
         const manifest = signed({ packageId: f.next.id });
         const request = async (url) =>
-          url.endsWith('/latest')
+          /\/latest(?:\?|$)/.test(url)
             ? new Response(JSON.stringify(manifest))
             : new Response('zip');
         const updater = resumedUpdater(f, request, { defer: true });
@@ -1248,7 +1253,7 @@ for (const missing of ['empty', 'release.json', 'desktop.exe']) {
       const f = fixture(t);
       const manifest = signed({ packageId: f.next.id });
       const request = async (url) =>
-        url.endsWith('/latest')
+        /\/latest(?:\?|$)/.test(url)
           ? new Response(JSON.stringify(manifest))
           : new Response('zip');
       const updater = resumedUpdater(f, request, { defer: true });
@@ -1285,7 +1290,7 @@ for (const missing of ['empty', 'release.json', 'desktop.exe']) {
 async function pausePending(f) {
   const manifest = signed({ packageId: f.next.id });
   const request = async (url) =>
-    url.endsWith('/latest')
+    /\/latest(?:\?|$)/.test(url)
       ? new Response(JSON.stringify(manifest))
       : new Response('zip');
   const updater = resumedUpdater(f, request, { defer: true });
@@ -1327,7 +1332,7 @@ test('three deterministic failures persist across launches and require explicit 
   const f = fixture(t);
   const manifest = signed({ packageId: f.next.id });
   const request = async (url) =>
-    url.endsWith('/latest')
+    /\/latest(?:\?|$)/.test(url)
       ? new Response(JSON.stringify(manifest))
       : new Response('zip');
   const updater = resumedUpdater(f, request, { defer: true });
@@ -1395,7 +1400,7 @@ test('each extraction retry rechecks the durable archive hash', async (t) => {
   const f = fixture(t);
   const manifest = signed({ packageId: f.next.id });
   const request = async (url) =>
-    url.endsWith('/latest')
+    /\/latest(?:\?|$)/.test(url)
       ? new Response(JSON.stringify(manifest))
       : new Response('zip');
   const updater = resumedUpdater(f, request, { defer: true });

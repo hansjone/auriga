@@ -43,17 +43,10 @@ import {
   finishUpdateAttempt,
   updateWasRolledBack,
 } from './desktop-report.mjs';
-import {
-  clientPlatform,
-  hostClientTarget,
-} from '../../../scripts/client-release/platform.mjs';
+import { desktopPlatform } from './desktop-platform.mjs';
 
 function desktopHost() {
-  try {
-    return clientPlatform(hostClientTarget());
-  } catch {
-    return clientPlatform('win-x64');
-  }
+  return desktopPlatform();
 }
 
 function latestPath(channel) {
@@ -173,12 +166,26 @@ function findReusableSubtrees(oldDir, oldManifest, nextManifest) {
   return subtrees;
 }
 
+function isTarGzPackage(archive) {
+  return (
+    desktopHost().packageMedia === 'tar.gz' ||
+    /\.tar\.gz$/i.test(archive) ||
+    /\.tgz$/i.test(archive)
+  );
+}
+
 export function extractArchive(archive, directory, { reuse = null } = {}) {
   mkdirSync(directory);
-  const zip = join(directory, 'payload.zip');
-  unpackSetup(archive, zip);
+  let zip = archive;
+  const gzip = isTarGzPackage(archive);
+  if (!gzip) {
+    zip = join(directory, 'payload.zip');
+    unpackSetup(archive, zip);
+  }
+  const extractFlag = gzip ? '-xzf' : '-xf';
   // Only a fully signature/hash-verified publisher archive reaches tar.
-  const listed = spawnSync(systemTool('tar'), ['-tf', zip], {
+  const listArgs = gzip ? ['-tzf', zip] : ['-tf', zip];
+  const listed = spawnSync(systemTool('tar'), listArgs, {
     encoding: 'utf8',
     maxBuffer: 32 * 1024 ** 2,
   });
@@ -210,7 +217,7 @@ export function extractArchive(archive, directory, { reuse = null } = {}) {
     }
     const partial = spawnSync(
       systemTool('tar'),
-      ['-xf', zip, '-C', directory, ...excludeArgs],
+      [extractFlag, zip, '-C', directory, ...excludeArgs],
       { encoding: 'utf8' },
     );
     if (!partial.error && partial.status === 0) {
@@ -229,16 +236,21 @@ export function extractArchive(archive, directory, { reuse = null } = {}) {
     }
   }
   if (!extracted) {
-    const result = spawnSync(systemTool('tar'), ['-xf', zip, '-C', directory], {
-      encoding: 'utf8',
-    });
+    const result = spawnSync(
+      systemTool('tar'),
+      [extractFlag, zip, '-C', directory],
+      {
+        encoding: 'utf8',
+      },
+    );
     if (result.error) throw result.error;
     if (result.status !== 0)
       throw Object.assign(new Error('update archive extraction failed'), {
         code: 'desktop.extract_failed',
       });
   }
-  rmSync(zip);
+  // Only remove the intermediate ZIP peeled from a Windows setup archive.
+  if (zip !== archive) rmSync(zip);
   return payloadDir;
 }
 
@@ -294,13 +306,16 @@ export function createUpdater({
   const progress = (phase, extra = {}) =>
     change((state) => ({ ...state, phase, ...extra }));
   const verified = (envelope, state = load()) => {
-    return verifyRelease(envelope, {
+    const body = verifyRelease(envelope, {
       publicKey,
       now: now(),
       currentVersion: current().version,
       ...state.channelWatermarks?.[state.channel ?? 'stable'],
       channel: state.channel ?? 'stable',
     });
+    if (body.platform !== desktopHost().target)
+      throw new Error('release platform mismatch');
+    return body;
   };
   const status = (state) => {
     let available = state.available ?? null;

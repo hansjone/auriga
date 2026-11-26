@@ -320,6 +320,7 @@ export async function build(args) {
         undefined,
         {
           toolsBaseline: toolsBaselineOption(),
+          target: target.target,
         },
       )
     : null;

@@ -628,7 +628,16 @@ function writeLaunchers(root, dir, fault) {
   ];
   for (const name of readdirSync(source)) {
     if (keepMaintenance && maintenance.includes(name)) continue;
-    writeAtomic(join(bin, name), readFileSync(join(source, name)));
+    const destination = join(bin, name);
+    writeAtomic(destination, readFileSync(join(source, name)));
+    if (process.platform !== 'win32') {
+      try {
+        const mode = lstatSync(join(source, name)).mode & 0o777;
+        chmodSync(destination, mode || 0o755);
+      } catch {
+        chmodSync(destination, 0o755);
+      }
+    }
     fault('launcher-file');
   }
 }
@@ -642,8 +651,18 @@ function restoreLaunchers(root) {
   for (const name of existsSync(bin) ? readdirSync(bin) : [])
     if (!old.has(name)) rmSync(join(bin, name), { force: true });
   mkdirSync(bin, { recursive: true });
-  for (const name of old)
-    writeAtomic(join(bin, name), readFileSync(join(prev, name)));
+  for (const name of old) {
+    const destination = join(bin, name);
+    writeAtomic(destination, readFileSync(join(prev, name)));
+    if (process.platform !== 'win32') {
+      try {
+        const mode = lstatSync(join(prev, name)).mode & 0o777;
+        chmodSync(destination, mode || 0o755);
+      } catch {
+        chmodSync(destination, 0o755);
+      }
+    }
+  }
 }
 
 /** Put everything back as it was before the transaction started. */
