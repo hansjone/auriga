@@ -643,8 +643,9 @@ func fetchEcosystem(ctx context.Context, cfg *siteConfig, r *depsResolver, sourc
 	}
 	seed, _ := newestCacheEntry(cfg.Deps.Cache, eco, lock.Digest)
 	seedMount := ""
+	seedRW := false
 	if seed != "" {
-		if seedMount, _, err = prepareCache(ctx, eco, seed, staging); err != nil {
+		if seedMount, seedRW, err = prepareCache(ctx, eco, seed, staging); err != nil {
 			return err
 		}
 	}
@@ -653,9 +654,9 @@ func fetchEcosystem(ctx context.Context, cfg *siteConfig, r *depsResolver, sourc
 		return err
 	}
 	fmt.Fprintf(w, "准备 %s 依赖（锁摘要 %s，依赖源 %s）…\n", eco, lock.Digest, depsSourceLabel(cfg.Deps, eco))
-	args, env := prepareDockerArgs(prepareRun{Kind: eco, Tool: ref, Source: source, Out: out, Cache: seedMount, Budget: budget, Extra: extra}, lookup)
+	args, env := prepareDockerArgs(prepareRun{Kind: eco, Tool: ref, Source: source, Out: out, Cache: seedMount, CacheRW: seedRW, Budget: budget, Extra: extra}, lookup)
 	if err := runOnlineDocker(ctx, env, args...); err != nil {
-		return fmt.Errorf("检查依赖源、代理与 caFile：%w", err)
+		return fmt.Errorf("准备容器执行失败（请查看上方容器输出，并核对依赖源、代理、caFile 与缓存目录权限）：%w", err)
 	}
 	got, err := os.ReadFile(filepath.Join(out, "source-locks.sha256"))
 	if err != nil {
