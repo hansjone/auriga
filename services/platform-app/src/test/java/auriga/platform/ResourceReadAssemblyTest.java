@@ -1239,7 +1239,28 @@ class ResourceReadAssemblyTest {
     var grant = deviceCredentials.issue(T1, ALICE, kind, kind.equals("native"));
     var foreign = deviceCredentials.issue(T1, BOB, "standard");
     var external = deviceCredentials.issue(T1, EXTERNAL, "standard");
-    var managed = deviceCredentials.issue(T1, ALICE, "managed");
+    // Keep the managed credential live while Alice's desktop has only the platform login role.
+    UUID managedRole = UuidV7.next();
+    admin.update(
+        "INSERT INTO org.role(id,tenant_id,key,name_en,name_zh,permissions) VALUES(?,?,'managed-fixture','Managed fixture','测试角色',ARRAY['auriga.connect.collab.use'])",
+        managedRole,
+        T1);
+    admin.update(
+        "INSERT INTO org.role_binding(id,tenant_id,role_id,subject_type,subject_id) VALUES(?,?,?,'member',?)",
+        UuidV7.next(),
+        T1,
+        managedRole,
+        BOB);
+    var managed = deviceCredentials.issue(T1, BOB, "managed");
+    assertFalse(managed.token().isBlank());
+    assertEquals(
+        Optional.of(managed.instance()),
+        TenantContext.call(
+            T1,
+            () ->
+                deviceCredentials
+                    .authority()
+                    .installationInstance(T1, BOB.toString(), managed.device().toString())));
     var legacy = deviceCredentials.issue(T1, ALICE, "legacy");
     var base = "/catalog/packages";
     String create =
