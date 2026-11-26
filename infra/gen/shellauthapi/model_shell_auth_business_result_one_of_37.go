@@ -21,9 +21,9 @@ var _ MappedNullable = &ShellAuthBusinessResultOneOf37{}
 
 // ShellAuthBusinessResultOneOf37 struct for ShellAuthBusinessResultOneOf37
 type ShellAuthBusinessResultOneOf37 struct {
-	RequestId string                        `json:"requestId"`
-	Operation string                        `json:"operation"`
-	Output    ShellAuthOutputTeamInitialize `json:"output"`
+	RequestId string                                      `json:"requestId"`
+	Operation string                                      `json:"operation"`
+	Output    ShellAuthOutputCreateAiChatCompletionStream `json:"output"`
 }
 
 type _ShellAuthBusinessResultOneOf37 ShellAuthBusinessResultOneOf37
@@ -32,7 +32,7 @@ type _ShellAuthBusinessResultOneOf37 ShellAuthBusinessResultOneOf37
 // This constructor will assign default values to properties that have it defined,
 // and makes sure properties required by API are set, but the set of arguments
 // will change when the set of required properties is changed
-func NewShellAuthBusinessResultOneOf37(requestId string, operation string, output ShellAuthOutputTeamInitialize) *ShellAuthBusinessResultOneOf37 {
+func NewShellAuthBusinessResultOneOf37(requestId string, operation string, output ShellAuthOutputCreateAiChatCompletionStream) *ShellAuthBusinessResultOneOf37 {
 	this := ShellAuthBusinessResultOneOf37{}
 	this.RequestId = requestId
 	this.Operation = operation
@@ -97,9 +97,9 @@ func (o *ShellAuthBusinessResultOneOf37) SetOperation(v string) {
 }
 
 // GetOutput returns the Output field value
-func (o *ShellAuthBusinessResultOneOf37) GetOutput() ShellAuthOutputTeamInitialize {
+func (o *ShellAuthBusinessResultOneOf37) GetOutput() ShellAuthOutputCreateAiChatCompletionStream {
 	if o == nil {
-		var ret ShellAuthOutputTeamInitialize
+		var ret ShellAuthOutputCreateAiChatCompletionStream
 		return ret
 	}
 
@@ -108,7 +108,7 @@ func (o *ShellAuthBusinessResultOneOf37) GetOutput() ShellAuthOutputTeamInitiali
 
 // GetOutputOk returns a tuple with the Output field value
 // and a boolean to check if the value has been set.
-func (o *ShellAuthBusinessResultOneOf37) GetOutputOk() (*ShellAuthOutputTeamInitialize, bool) {
+func (o *ShellAuthBusinessResultOneOf37) GetOutputOk() (*ShellAuthOutputCreateAiChatCompletionStream, bool) {
 	if o == nil {
 		return nil, false
 	}
@@ -116,7 +116,7 @@ func (o *ShellAuthBusinessResultOneOf37) GetOutputOk() (*ShellAuthOutputTeamInit
 }
 
 // SetOutput sets field value
-func (o *ShellAuthBusinessResultOneOf37) SetOutput(v ShellAuthOutputTeamInitialize) {
+func (o *ShellAuthBusinessResultOneOf37) SetOutput(v ShellAuthOutputCreateAiChatCompletionStream) {
 	o.Output = v
 }
 

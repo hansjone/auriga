@@ -2714,6 +2714,18 @@ class CatalogWorkflowTest {
             var acknowledged =
                 new UnifiedResourceWorkspace.Snapshot(
                     instance, GENERAL, node, 3, 4, 4, true, List.of(report), List.of(tombstone));
+            var installationKey =
+                db.args(
+                    "instance",
+                    instance,
+                    "packageId",
+                    UUID.fromString(tombstone.getIdentity().getPackageId()));
+            tx.write(
+                () ->
+                    db.update(
+                        "UPDATE resource.catalog_instance_installation SET market_installed=true"
+                            + " WHERE tenant_id=:tenant AND instance_id=:instance AND package_id=:packageId",
+                        installationKey));
             current.set(acknowledged);
             when(workspace.refresh(eq(TENANT), eq(instance), eq(GENERAL), eq(3L), any()))
                 .thenAnswer(
@@ -2738,6 +2750,15 @@ class CatalogWorkflowTest {
                     });
             reconcile(d);
             assertEquals(1, acknowledged.resources().size());
+            assertEquals(
+                Boolean.FALSE,
+                tx.write(
+                    () ->
+                        db.row(
+                                "SELECT market_installed FROM resource.catalog_instance_installation"
+                                    + " WHERE tenant_id=:tenant AND instance_id=:instance AND package_id=:packageId",
+                                installationKey)
+                            .get("market_installed")));
             assertEquals(4, acknowledged.generation());
             assertEquals(
                 0,

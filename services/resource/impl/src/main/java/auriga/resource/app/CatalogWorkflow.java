@@ -196,6 +196,113 @@ public final class CatalogWorkflow {
     return n;
   }
 
+  private Map<Object, Map<String, Object>> marketReleases(
+      ResourceAccess.Reader reader, List<Map<String, Object>> visiblePackages) {
+    var versions =
+        visiblePackages.stream()
+            .filter(
+                pack ->
+                    "plugin".equals(pack.get("kind")) && Boolean.TRUE.equals(pack.get("enabled")))
+            .map(pack -> pack.get("default_version_id"))
+            .filter(Objects::nonNull)
+            .toList();
+    var byPackage = new HashMap<Object, Map<String, Object>>();
+    if (versions.isEmpty()) return byPackage;
+    for (var release :
+        db.rows(
+            """
+        SELECT v.*,
+         (SELECT COUNT(DISTINCT client_id) FROM resource.catalog_installation
+           WHERE tenant_id=:tenant AND package_id=v.package_id
+             AND COALESCE(market_installed, document->'report'->>'state' IN ('applied','disabled')))
+         + (SELECT COUNT(*) FROM resource.catalog_instance_installation
+           WHERE tenant_id=:tenant AND package_id=v.package_id AND market_installed) AS installs,
+         (SELECT COUNT(*) FROM resource.catalog_plugin_star
+           WHERE tenant_id=:tenant AND package_id=v.package_id) AS stars,
+         EXISTS (SELECT 1 FROM resource.catalog_plugin_star
+           WHERE tenant_id=:tenant AND package_id=v.package_id AND account_id=:account) AS starred
+        FROM resource.catalog_version v
+        WHERE v.tenant_id=:tenant AND v.id IN (:versions) AND v.state='published'
+        """,
+            db.args("versions", versions, "account", reader.account())))
+      byPackage.put(release.get("package_id"), release);
+    return byPackage;
+  }
+
+  private ObjectNode marketPackage(Map<String, Object> pack, Map<String, Object> release) {
+    var result = packageJson(pack);
+    if (release == null) return result;
+    var manifest = json(release, "manifest");
+    var market =
+        result
+            .putObject("market")
+            .put("authorId", release.get("author_id").toString())
+            .put("version", release.get("version").toString())
+            .put("dshVersionRange", manifest.path("plugin").path("dshVersionRange").asString())
+            .put("description", manifest.path("description").asString())
+            .put("installationCount", number(release, "installs"))
+            .put("starCount", number(release, "stars"))
+            .put("starred", Boolean.TRUE.equals(release.get("starred")));
+    var tags = market.putArray("tags");
+    manifest.path("plugin").path("tags").forEach(tags::add);
+    if (release.get("market_author_name") instanceof String name && !name.isBlank())
+      market.put("authorName", name);
+    if (release.get("market_author_department") instanceof String department
+        && !department.isBlank()) market.put("authorDepartment", department);
+    if (release.get("market_published_at") != null)
+      market.put("publishedAt", instant(release.get("market_published_at")).toString());
+    else {
+      var issuedAt = json(release, "envelope").path("statement").path("issuedAt");
+      if (issuedAt.isString()) market.put("publishedAt", issuedAt.asString());
+    }
+    return result;
+  }
+
+  public JsonNode star(AurigaPrincipal actor, UUID id, ObjectNode body, String key) {
+    if (!writes.getAsBoolean()) throw new AurigaException(CommonErrors.UNAVAILABLE);
+    if (!body.path("starred").isBoolean()) throw invalid();
+    boolean starred = body.path("starred").asBoolean();
+    return operations.operation(
+        actor,
+        ResourceAccess.READ,
+        false,
+        "catalog/star/" + id,
+        key,
+        body,
+        null,
+        reader -> {
+          var pack = pkg(reader, id, false);
+          if (!marketReleases(reader, List.of(pack)).containsKey(id)) throw missing();
+        },
+        reader -> {
+          var args = db.args("pkg", id, "account", reader.account());
+          if (starred)
+            db.update(
+                """
+            INSERT INTO resource.catalog_plugin_star(tenant_id,package_id,account_id)
+            VALUES(:tenant,:pkg,:account) ON CONFLICT DO NOTHING
+            """,
+                args);
+          else
+            db.update(
+                """
+            DELETE FROM resource.catalog_plugin_star
+            WHERE tenant_id=:tenant AND package_id=:pkg AND account_id=:account
+            """,
+                args);
+          var count =
+              db.row(
+                  """
+          SELECT COUNT(*) AS total FROM resource.catalog_plugin_star
+          WHERE tenant_id=:tenant AND package_id=:pkg
+          """,
+                  args);
+          return JSON.createObjectNode()
+              .put("starred", starred)
+              .put("starCount", number(count, "total"));
+        });
+  }
+
   private static Instant instant(Object t) {
     return t instanceof Timestamp x ? x.toInstant() : ((OffsetDateTime) t).toInstant();
   }
@@ -305,7 +412,7 @@ public final class CatalogWorkflow {
         var contributor = access.desktopContributor(actor);
         return tx.write(() -> packageJson(ownedSubmissionPackage(contributor, id)));
       }
-      return tx.write(() -> packageJson(pkg(reader, id, false)));
+      return tx.write(() -> visibleMarketPackage(reader, id));
     }
     return detail(actor, id, null, false);
   }
@@ -313,7 +420,15 @@ public final class CatalogWorkflow {
   public JsonNode detail(AurigaPrincipal actor, UUID p, UUID v, boolean admin) {
     var r = admin ? access.administrator(actor, "resource.versions.review") : access.member(actor);
     return tx.write(
-        () -> v == null ? packageJson(pkg(r, p, false)) : versionJson(ver(r, p, v, admin)));
+        () -> {
+          if (v != null) return versionJson(ver(r, p, v, admin));
+          return visibleMarketPackage(r, p);
+        });
+  }
+
+  private ObjectNode visibleMarketPackage(ResourceAccess.Reader reader, UUID id) {
+    var pack = pkg(reader, id, false);
+    return marketPackage(pack, marketReleases(reader, List.of(pack)).get(id));
   }
 
   public JsonNode list(
@@ -385,10 +500,14 @@ public final class CatalogWorkflow {
                   a);
           var result = JSON.createObjectNode();
           var items = result.putArray("items");
-          for (var row : rows.subList(0, Math.min(limit, rows.size())))
+          var page = rows.subList(0, Math.min(limit, rows.size()));
+          boolean packagePage = p == null && phase == null;
+          Map<Object, Map<String, Object>> releases =
+              packagePage ? marketReleases(r, page) : Map.of();
+          for (var row : page)
             items.add(
-                p == null && phase == null
-                    ? packageJson(row)
+                packagePage
+                    ? marketPackage(row, releases.get(row.get("id")))
                     : phase != null && phase.equals("review")
                         ? reviewJson(r, (UUID) row.get("review_id"))
                         : versionJson(row));
@@ -566,6 +685,16 @@ public final class CatalogWorkflow {
           if (!List.of("draft", "rejected").contains(row.get("state"))) throw conflict();
           UUID review = UuidV7.next();
           long rev = number(row, "revision") + 1;
+          if ("plugin".equals(json(row, "manifest").path("kind").asString())) {
+            var author = access.authorSnapshot(actor, r);
+            db.update(
+                """
+                UPDATE resource.catalog_version
+                SET market_author_name=:name,market_author_department=:department
+                WHERE tenant_id=:tenant AND id=:id
+                """,
+                db.args("id", v, "name", author.name(), "department", author.department()));
+          }
           db.update(
               "UPDATE resource.catalog_version SET state='pending_review',revision=:rev,review_id=:review WHERE tenant_id=:tenant AND id=:id",
               db.args("id", v, "rev", rev, "review", review));
@@ -806,8 +935,16 @@ public final class CatalogWorkflow {
           if (seq > ResourceOperations.MAX) throw conflict();
           var env = envelope(r, v, seq);
           db.update(
-              "UPDATE resource.catalog_version SET state='published',revision=revision+1,release_sequence=:seq,envelope=CAST(:env AS jsonb) WHERE tenant_id=:tenant AND id=:id",
-              db.args("id", id, "seq", seq, "env", env.toString()));
+              "UPDATE resource.catalog_version SET state='published',revision=revision+1,release_sequence=:seq,envelope=CAST(:env AS jsonb),market_published_at=:published WHERE tenant_id=:tenant AND id=:id",
+              db.args(
+                  "id",
+                  id,
+                  "seq",
+                  seq,
+                  "env",
+                  env.toString(),
+                  "published",
+                  Timestamp.from(clock.instant())));
           db.update(
               "UPDATE resource.catalog_package SET enabled=true,default_version_id=:v,release_high_water=:seq,revision=revision+1 WHERE tenant_id=:tenant AND id=:p",
               db.args("p", p, "v", id, "seq", seq));

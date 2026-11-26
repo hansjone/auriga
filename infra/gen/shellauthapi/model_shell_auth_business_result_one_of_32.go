@@ -21,9 +21,9 @@ var _ MappedNullable = &ShellAuthBusinessResultOneOf32{}
 
 // ShellAuthBusinessResultOneOf32 struct for ShellAuthBusinessResultOneOf32
 type ShellAuthBusinessResultOneOf32 struct {
-	RequestId string                        `json:"requestId"`
-	Operation string                        `json:"operation"`
-	Output    ShellAuthOutputListOwnAiUsage `json:"output"`
+	RequestId string                              `json:"requestId"`
+	Operation string                              `json:"operation"`
+	Output    ShellAuthOutputUnifiedSetPluginStar `json:"output"`
 }
 
 type _ShellAuthBusinessResultOneOf32 ShellAuthBusinessResultOneOf32
@@ -32,7 +32,7 @@ type _ShellAuthBusinessResultOneOf32 ShellAuthBusinessResultOneOf32
 // This constructor will assign default values to properties that have it defined,
 // and makes sure properties required by API are set, but the set of arguments
 // will change when the set of required properties is changed
-func NewShellAuthBusinessResultOneOf32(requestId string, operation string, output ShellAuthOutputListOwnAiUsage) *ShellAuthBusinessResultOneOf32 {
+func NewShellAuthBusinessResultOneOf32(requestId string, operation string, output ShellAuthOutputUnifiedSetPluginStar) *ShellAuthBusinessResultOneOf32 {
 	this := ShellAuthBusinessResultOneOf32{}
 	this.RequestId = requestId
 	this.Operation = operation
@@ -97,9 +97,9 @@ func (o *ShellAuthBusinessResultOneOf32) SetOperation(v string) {
 }
 
 // GetOutput returns the Output field value
-func (o *ShellAuthBusinessResultOneOf32) GetOutput() ShellAuthOutputListOwnAiUsage {
+func (o *ShellAuthBusinessResultOneOf32) GetOutput() ShellAuthOutputUnifiedSetPluginStar {
 	if o == nil {
-		var ret ShellAuthOutputListOwnAiUsage
+		var ret ShellAuthOutputUnifiedSetPluginStar
 		return ret
 	}
 
@@ -108,7 +108,7 @@ func (o *ShellAuthBusinessResultOneOf32) GetOutput() ShellAuthOutputListOwnAiUsa
 
 // GetOutputOk returns a tuple with the Output field value
 // and a boolean to check if the value has been set.
-func (o *ShellAuthBusinessResultOneOf32) GetOutputOk() (*ShellAuthOutputListOwnAiUsage, bool) {
+func (o *ShellAuthBusinessResultOneOf32) GetOutputOk() (*ShellAuthOutputUnifiedSetPluginStar, bool) {
 	if o == nil {
 		return nil, false
 	}
@@ -116,7 +116,7 @@ func (o *ShellAuthBusinessResultOneOf32) GetOutputOk() (*ShellAuthOutputListOwnA
 }
 
 // SetOutput sets field value
-func (o *ShellAuthBusinessResultOneOf32) SetOutput(v ShellAuthOutputListOwnAiUsage) {
+func (o *ShellAuthBusinessResultOneOf32) SetOutput(v ShellAuthOutputUnifiedSetPluginStar) {
 	o.Output = v
 }
 

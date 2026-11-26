@@ -21,8 +21,8 @@ var _ MappedNullable = &ShellAuthBusinessCallCallOneOf43{}
 
 // ShellAuthBusinessCallCallOneOf43 struct for ShellAuthBusinessCallCallOneOf43
 type ShellAuthBusinessCallCallOneOf43 struct {
-	Operation string                    `json:"operation"`
-	Input     ShellAuthInputNetworkSend `json:"input"`
+	Operation string                     `json:"operation"`
+	Input     ShellAuthInputUploadFinish `json:"input"`
 }
 
 type _ShellAuthBusinessCallCallOneOf43 ShellAuthBusinessCallCallOneOf43
@@ -31,7 +31,7 @@ type _ShellAuthBusinessCallCallOneOf43 ShellAuthBusinessCallCallOneOf43
 // This constructor will assign default values to properties that have it defined,
 // and makes sure properties required by API are set, but the set of arguments
 // will change when the set of required properties is changed
-func NewShellAuthBusinessCallCallOneOf43(operation string, input ShellAuthInputNetworkSend) *ShellAuthBusinessCallCallOneOf43 {
+func NewShellAuthBusinessCallCallOneOf43(operation string, input ShellAuthInputUploadFinish) *ShellAuthBusinessCallCallOneOf43 {
 	this := ShellAuthBusinessCallCallOneOf43{}
 	this.Operation = operation
 	this.Input = input
@@ -71,9 +71,9 @@ func (o *ShellAuthBusinessCallCallOneOf43) SetOperation(v string) {
 }
 
 // GetInput returns the Input field value
-func (o *ShellAuthBusinessCallCallOneOf43) GetInput() ShellAuthInputNetworkSend {
+func (o *ShellAuthBusinessCallCallOneOf43) GetInput() ShellAuthInputUploadFinish {
 	if o == nil {
-		var ret ShellAuthInputNetworkSend
+		var ret ShellAuthInputUploadFinish
 		return ret
 	}
 
@@ -82,7 +82,7 @@ func (o *ShellAuthBusinessCallCallOneOf43) GetInput() ShellAuthInputNetworkSend 
 
 // GetInputOk returns a tuple with the Input field value
 // and a boolean to check if the value has been set.
-func (o *ShellAuthBusinessCallCallOneOf43) GetInputOk() (*ShellAuthInputNetworkSend, bool) {
+func (o *ShellAuthBusinessCallCallOneOf43) GetInputOk() (*ShellAuthInputUploadFinish, bool) {
 	if o == nil {
 		return nil, false
 	}
@@ -90,7 +90,7 @@ func (o *ShellAuthBusinessCallCallOneOf43) GetInputOk() (*ShellAuthInputNetworkS
 }
 
 // SetInput sets field value
-func (o *ShellAuthBusinessCallCallOneOf43) SetInput(v ShellAuthInputNetworkSend) {
+func (o *ShellAuthBusinessCallCallOneOf43) SetInput(v ShellAuthInputUploadFinish) {
 	o.Input = v
 }
 

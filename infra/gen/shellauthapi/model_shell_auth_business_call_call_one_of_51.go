@@ -21,8 +21,8 @@ var _ MappedNullable = &ShellAuthBusinessCallCallOneOf51{}
 
 // ShellAuthBusinessCallCallOneOf51 struct for ShellAuthBusinessCallCallOneOf51
 type ShellAuthBusinessCallCallOneOf51 struct {
-	Operation string                          `json:"operation"`
-	Input     ShellAuthInputTeamListEndpoints `json:"input"`
+	Operation string                 `json:"operation"`
+	Input     map[string]interface{} `json:"input"`
 }
 
 type _ShellAuthBusinessCallCallOneOf51 ShellAuthBusinessCallCallOneOf51
@@ -31,7 +31,7 @@ type _ShellAuthBusinessCallCallOneOf51 ShellAuthBusinessCallCallOneOf51
 // This constructor will assign default values to properties that have it defined,
 // and makes sure properties required by API are set, but the set of arguments
 // will change when the set of required properties is changed
-func NewShellAuthBusinessCallCallOneOf51(operation string, input ShellAuthInputTeamListEndpoints) *ShellAuthBusinessCallCallOneOf51 {
+func NewShellAuthBusinessCallCallOneOf51(operation string, input map[string]interface{}) *ShellAuthBusinessCallCallOneOf51 {
 	this := ShellAuthBusinessCallCallOneOf51{}
 	this.Operation = operation
 	this.Input = input
@@ -71,9 +71,9 @@ func (o *ShellAuthBusinessCallCallOneOf51) SetOperation(v string) {
 }
 
 // GetInput returns the Input field value
-func (o *ShellAuthBusinessCallCallOneOf51) GetInput() ShellAuthInputTeamListEndpoints {
+func (o *ShellAuthBusinessCallCallOneOf51) GetInput() map[string]interface{} {
 	if o == nil {
-		var ret ShellAuthInputTeamListEndpoints
+		var ret map[string]interface{}
 		return ret
 	}
 
@@ -82,15 +82,15 @@ func (o *ShellAuthBusinessCallCallOneOf51) GetInput() ShellAuthInputTeamListEndp
 
 // GetInputOk returns a tuple with the Input field value
 // and a boolean to check if the value has been set.
-func (o *ShellAuthBusinessCallCallOneOf51) GetInputOk() (*ShellAuthInputTeamListEndpoints, bool) {
+func (o *ShellAuthBusinessCallCallOneOf51) GetInputOk() (map[string]interface{}, bool) {
 	if o == nil {
-		return nil, false
+		return map[string]interface{}{}, false
 	}
-	return &o.Input, true
+	return o.Input, true
 }
 
 // SetInput sets field value
-func (o *ShellAuthBusinessCallCallOneOf51) SetInput(v ShellAuthInputTeamListEndpoints) {
+func (o *ShellAuthBusinessCallCallOneOf51) SetInput(v map[string]interface{}) {
 	o.Input = v
 }
 

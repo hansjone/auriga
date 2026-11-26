@@ -215,7 +215,13 @@ public final class CatalogDelivery implements UnifiedResourceResolution {
 
   private void saveInstallation(Map<String, Object> row, ObjectNode document, long revision) {
     db.update(
-        "UPDATE resource.catalog_installation SET document=CAST(:doc AS jsonb),revision=:rev,version_id=:v,collected_generation=NULL WHERE tenant_id=:tenant AND id=:id",
+        """
+        UPDATE resource.catalog_installation SET document=CAST(:doc AS jsonb),revision=:rev,version_id=:v,
+          collected_generation=NULL,market_installed=COALESCE(market_installed,
+            CASE document->'report'->>'state' WHEN 'applied' THEN true
+              WHEN 'disabled' THEN true WHEN 'removed' THEN false END)
+        WHERE tenant_id=:tenant AND id=:id
+        """,
         db.args(
             "id",
             row.get("id"),
@@ -590,6 +596,19 @@ public final class CatalogDelivery implements UnifiedResourceResolution {
           report.put("reportSource", "member");
           doc.set("report", report);
           doc.put("state", state);
+          if (Set.of("applied", "disabled", "removed").contains(state))
+            db.update(
+                "UPDATE resource.catalog_installation SET market_installed=:installed"
+                    + " WHERE tenant_id=:tenant AND owner_id=:owner AND client_id=:client AND package_id=:pkg",
+                db.args(
+                    "installed",
+                    !state.equals("removed"),
+                    "owner",
+                    r.account(),
+                    "client",
+                    c,
+                    "pkg",
+                    uuid(body.path("identity"), "packageId")));
           saveInstallation(
               installation(r, c, uuid(body.path("identity"), "packageId")),
               doc,
@@ -2191,7 +2210,7 @@ public final class CatalogDelivery implements UnifiedResourceResolution {
           || !CatalogStatePolicy.desired(json(durable, "resource")).equals("REMOVED"))
         throw CatalogStatePolicy.conflict();
       db.update(
-          "UPDATE resource.catalog_instance_installation SET collected_generation=:generation WHERE tenant_id=:tenant AND instance_id=:instance AND package_id=:pkg AND revision=:revision AND selection_revision=:selection",
+          "UPDATE resource.catalog_instance_installation SET collected_generation=:generation,market_installed=false WHERE tenant_id=:tenant AND instance_id=:instance AND package_id=:pkg AND revision=:revision AND selection_revision=:selection",
           db.args(
               "generation",
               observed.generation(),
@@ -2396,6 +2415,29 @@ public final class CatalogDelivery implements UnifiedResourceResolution {
       ResolveUnifiedResourcesResponse resolution) {
     Instant due = null;
     for (var resource : resolution.getResourcesList()) {
+      if (resource.getIdentity().getKind().equals("plugin"))
+        snapshot.reports().stream()
+            .filter(report -> Set.of("applied", "disabled", "removed").contains(report.getState()))
+            .filter(report -> CatalogStatePolicy.currentNodeReport(resource, snapshot, report))
+            .findFirst()
+            .ifPresent(
+                report ->
+                    db.update(
+                        "UPDATE resource.catalog_instance_installation SET market_installed=:installed"
+                            + " WHERE tenant_id=:tenant AND instance_id=:instance AND package_id=:pkg"
+                            + " AND revision=:revision AND selection_revision=:selection"
+                            + " AND market_installed IS DISTINCT FROM :installed",
+                        db.args(
+                            "installed",
+                            !report.getState().equals("removed"),
+                            "instance",
+                            snapshot.instance(),
+                            "pkg",
+                            UUID.fromString(resource.getIdentity().getPackageId()),
+                            "revision",
+                            report.getInstallationRevision(),
+                            "selection",
+                            report.getSelectionRevision())));
       if (CatalogStatePolicy.desired(resource).equals("ENABLED")) {
         Instant lease = Instant.parse(resource.getLease().getExpiresAt()).minusSeconds(300);
         if (due == null || lease.isBefore(due)) due = lease;

@@ -99,3 +99,27 @@ it('chooses only the highest published release across all version pages', async 
   );
   expect(result?.id).toBe('new');
 });
+
+it('sets the desired plugin like using the portal session and CSRF token', async () => {
+  const fetch = vi.fn<
+    (path: RequestInfo | URL, init?: RequestInit) => Promise<Response>
+  >(async () => Response.json({ starred: false, starCount: 4 }));
+  const client = createApiClient({
+    fetch,
+    getCookie: () => 'auriga_csrf=csrf-test',
+  });
+  const api = createResourceMarketApi(client);
+  const result = await api.star(
+    'plugin-id',
+    false,
+    new AbortController().signal,
+  );
+  const [path, init] = fetch.mock.calls[0];
+  expect(path).toBe('/api/resource/v1/catalog/packages/plugin-id/star');
+  expect(init?.method).toBe('POST');
+  expect(init?.credentials).toBe('same-origin');
+  expect(new Headers(init?.headers).get('X-Auriga-CSRF')).toBe('csrf-test');
+  expect(new Headers(init?.headers).get('Idempotency-Key')).toBeTruthy();
+  expect(JSON.parse(init?.body as string)).toEqual({ starred: false });
+  expect(result).toEqual({ starred: false, starCount: 4 });
+});

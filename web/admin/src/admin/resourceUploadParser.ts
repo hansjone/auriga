@@ -724,10 +724,25 @@ export function validateManifest(
     fail('manifestInvalid');
   const partKeys =
     m.kind === 'plugin'
-      ? ['packageName', 'dshVersionRange']
+      ? ['packageName', 'dshVersionRange', 'tags']
       : ['entry', 'contentProfile', 'dshVersionRange'];
   if (Object.keys(part).some((k) => !partKeys.includes(k)))
     fail('manifestInvalid');
+  if (m.kind === 'plugin' && m.plugin.tags !== undefined) {
+    const tags = m.plugin.tags;
+    if (
+      !Array.isArray(tags) ||
+      tags.length > 5 ||
+      new Set(tags).size !== tags.length ||
+      tags.some(
+        (tag) =>
+          typeof tag !== 'string' ||
+          tag.length > 32 ||
+          !/^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/.test(tag),
+      )
+    )
+      fail('manifestInvalid');
+  }
   const range = part.dshVersionRange;
   if (!preview && !validRange(range)) fail('rangeInvalid');
   const p = m.permissions;

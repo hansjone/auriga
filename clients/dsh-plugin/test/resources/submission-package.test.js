@@ -71,11 +71,16 @@ test('scoped plugin uses explicit payload, a different catalog slug and frozen b
   await put('src/credentials.json', 'excluded-sample');
   await put('unlisted.txt', 'excluded-sample');
   const { manifest, archive } = await prepare('plugin', {
-    metadata: { ...metadata, name: 'catalog-name' },
+    metadata: {
+      ...metadata,
+      name: 'catalog-name',
+      tags: ['operations', 'network'],
+    },
   });
   const tar = gunzipSync(archive).toString();
   assert.equal(manifest.name, 'catalog-name');
   assert.equal(manifest.plugin.packageName, '@example/hello');
+  assert.deepEqual(manifest.plugin.tags, ['operations', 'network']);
   assert.equal(
     manifest.artifacts[0].digest,
     'sha256:' + createHash('sha256').update(archive).digest('hex'),

@@ -1020,6 +1020,23 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  '/api/resource/v1/catalog/packages/{packageId}/star': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** @description Set the current member’s star on a visible published plugin. Idempotency-Key is bound to the requested state. */
+    post: operations['UnifiedSetPluginStar'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -1477,6 +1494,23 @@ export interface components {
     };
     /** @description Shared unified resource. Installation mode is selected per scoped assignment; packages carry no governance level. */
     UnifiedPackage: {
+      market?: {
+        /** Format: uuid */
+        authorId: string;
+        authorName?: string;
+        authorDepartment?: string;
+        /** Format: date-time */
+        publishedAt?: string;
+        version: string;
+        dshVersionRange: string;
+        description: string;
+        tags: string[];
+        /** Format: int64 */
+        installationCount: number;
+        /** Format: int64 */
+        starCount: number;
+        starred: boolean;
+      };
       /** Format: uuid */
       id: string;
       /** Format: uuid */
@@ -2232,6 +2266,7 @@ export interface components {
       arch: 'any';
     };
     Plugin: {
+      tags?: string[];
       packageName: string;
       dshVersionRange: string;
     };
@@ -10282,6 +10317,104 @@ export interface operations {
       409: components['responses']['Conflict'];
       /** @description common.precondition_failed */
       412: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+    };
+  };
+  UnifiedSetPluginStar: {
+    parameters: {
+      query?: never;
+      header: {
+        /** @description Required idempotency key bound to the complete request fingerprint. */
+        'Idempotency-Key': string;
+      };
+      path: {
+        packageId: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': {
+          starred: boolean;
+        };
+      };
+    };
+    responses: {
+      /** @description Current star and aggregate count */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            starred: boolean;
+            /** Format: int64 */
+            starCount: number;
+          };
+        };
+      };
+      /** @description common.validation_failed */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.unauthenticated */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.not_found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.internal */
+      500: {
         headers: {
           [name: string]: unknown;
         };

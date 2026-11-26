@@ -2391,6 +2391,70 @@
     "ShellAuthopenapi_resource_yaml_components_schemas_UnifiedPackage": {
       "type": "object",
       "properties": {
+        "market": {
+          "type": "object",
+          "properties": {
+            "authorId": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "authorName": {
+              "type": "string"
+            },
+            "authorDepartment": {
+              "type": "string"
+            },
+            "publishedAt": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "version": {
+              "type": "string"
+            },
+            "dshVersionRange": {
+              "type": "string"
+            },
+            "description": {
+              "type": "string"
+            },
+            "tags": {
+              "type": "array",
+              "maxItems": 5,
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
+                "maxLength": 32
+              }
+            },
+            "installationCount": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "starCount": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "starred": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "authorId",
+            "version",
+            "dshVersionRange",
+            "description",
+            "tags",
+            "installationCount",
+            "starCount",
+            "starred"
+          ],
+          "additionalProperties": false
+        },
         "id": {
           "type": "string",
           "format": "uuid"
@@ -3164,6 +3228,16 @@
     "ShellAuthresource_package_schema_json__defs_Plugin": {
       "type": "object",
       "properties": {
+        "tags": {
+          "type": "array",
+          "maxItems": 5,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
+            "maxLength": 32
+          }
+        },
         "packageName": {
           "type": "string",
           "minLength": 1,
@@ -5871,6 +5945,113 @@
           "required": [
             "streamId"
           ]
+        }
+      },
+      "required": [
+        "statusCode",
+        "body"
+      ]
+    },
+    "ShellAuthInput_UnifiedSetPluginStar": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "packageId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "headers": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "idempotency-key": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            "if-match": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          },
+          "required": [
+            "idempotency-key"
+          ]
+        },
+        "body": {
+          "type": "object",
+          "properties": {
+            "starred": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "starred"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "packageId",
+        "headers",
+        "body"
+      ]
+    },
+    "ShellAuthOutput_UnifiedSetPluginStar": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "statusCode": {
+          "type": "integer",
+          "minimum": 200,
+          "maximum": 299
+        },
+        "headers": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "etag": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "content-type": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "content-length": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "content-range": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "retry-after": {
+              "type": "string",
+              "maxLength": 1024
+            }
+          },
+          "required": []
+        },
+        "body": {
+          "type": "object",
+          "properties": {
+            "starred": {
+              "type": "boolean"
+            },
+            "starCount": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            }
+          },
+          "required": [
+            "starred",
+            "starCount"
+          ],
+          "additionalProperties": false
         }
       },
       "required": [
@@ -9141,6 +9322,23 @@
               "additionalProperties": false,
               "properties": {
                 "operation": {
+                  "const": "UnifiedSetPluginStar",
+                  "type": "string"
+                },
+                "input": {
+                  "$ref": "#/$defs/ShellAuthInput_UnifiedSetPluginStar"
+                }
+              },
+              "required": [
+                "operation",
+                "input"
+              ]
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "operation": {
                   "const": "listOwnAiUsage",
                   "type": "string"
                 },
@@ -10340,6 +10538,28 @@
             },
             "operation": {
               "type": "string",
+              "const": "UnifiedSetPluginStar"
+            },
+            "output": {
+              "$ref": "#/$defs/ShellAuthOutput_UnifiedSetPluginStar"
+            }
+          },
+          "required": [
+            "requestId",
+            "operation",
+            "output"
+          ]
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "requestId": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "operation": {
+              "type": "string",
               "const": "listOwnAiUsage"
             },
             "output": {
@@ -10989,6 +11209,7 @@
                 "UnifiedReportInstallation",
                 "UnifiedRenewInstallation",
                 "UnifiedDownloadVersionArtifact",
+                "UnifiedSetPluginStar",
                 "listOwnAiUsage",
                 "listAiModels",
                 "createAiChatCompletion",

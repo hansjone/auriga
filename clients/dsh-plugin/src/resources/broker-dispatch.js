@@ -42,6 +42,8 @@ export function dispatchResource(broker, operation, input) {
       return broker.call('UnifiedCreateResourcePackage', input);
     case 'UnifiedGetResourcePackage':
       return broker.call('UnifiedGetResourcePackage', input);
+    case 'UnifiedSetPluginStar':
+      return broker.call('UnifiedSetPluginStar', input);
     case 'UnifiedListResourceVersions':
       return broker.call('UnifiedListResourceVersions', input);
     case 'UnifiedUploadResourceVersion':

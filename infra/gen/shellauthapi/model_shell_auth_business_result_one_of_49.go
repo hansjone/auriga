@@ -21,9 +21,9 @@ var _ MappedNullable = &ShellAuthBusinessResultOneOf49{}
 
 // ShellAuthBusinessResultOneOf49 struct for ShellAuthBusinessResultOneOf49
 type ShellAuthBusinessResultOneOf49 struct {
-	RequestId string                     `json:"requestId"`
-	Operation string                     `json:"operation"`
-	Output    ShellAuthOutputProfileRead `json:"output"`
+	RequestId string                               `json:"requestId"`
+	Operation string                               `json:"operation"`
+	Output    ShellAuthOutputConfirmNetworkControl `json:"output"`
 }
 
 type _ShellAuthBusinessResultOneOf49 ShellAuthBusinessResultOneOf49
@@ -32,7 +32,7 @@ type _ShellAuthBusinessResultOneOf49 ShellAuthBusinessResultOneOf49
 // This constructor will assign default values to properties that have it defined,
 // and makes sure properties required by API are set, but the set of arguments
 // will change when the set of required properties is changed
-func NewShellAuthBusinessResultOneOf49(requestId string, operation string, output ShellAuthOutputProfileRead) *ShellAuthBusinessResultOneOf49 {
+func NewShellAuthBusinessResultOneOf49(requestId string, operation string, output ShellAuthOutputConfirmNetworkControl) *ShellAuthBusinessResultOneOf49 {
 	this := ShellAuthBusinessResultOneOf49{}
 	this.RequestId = requestId
 	this.Operation = operation
@@ -97,9 +97,9 @@ func (o *ShellAuthBusinessResultOneOf49) SetOperation(v string) {
 }
 
 // GetOutput returns the Output field value
-func (o *ShellAuthBusinessResultOneOf49) GetOutput() ShellAuthOutputProfileRead {
+func (o *ShellAuthBusinessResultOneOf49) GetOutput() ShellAuthOutputConfirmNetworkControl {
 	if o == nil {
-		var ret ShellAuthOutputProfileRead
+		var ret ShellAuthOutputConfirmNetworkControl
 		return ret
 	}
 
@@ -108,7 +108,7 @@ func (o *ShellAuthBusinessResultOneOf49) GetOutput() ShellAuthOutputProfileRead 
 
 // GetOutputOk returns a tuple with the Output field value
 // and a boolean to check if the value has been set.
-func (o *ShellAuthBusinessResultOneOf49) GetOutputOk() (*ShellAuthOutputProfileRead, bool) {
+func (o *ShellAuthBusinessResultOneOf49) GetOutputOk() (*ShellAuthOutputConfirmNetworkControl, bool) {
 	if o == nil {
 		return nil, false
 	}
@@ -116,7 +116,7 @@ func (o *ShellAuthBusinessResultOneOf49) GetOutputOk() (*ShellAuthOutputProfileR
 }
 
 // SetOutput sets field value
-func (o *ShellAuthBusinessResultOneOf49) SetOutput(v ShellAuthOutputProfileRead) {
+func (o *ShellAuthBusinessResultOneOf49) SetOutput(v ShellAuthOutputConfirmNetworkControl) {
 	o.Output = v
 }
 

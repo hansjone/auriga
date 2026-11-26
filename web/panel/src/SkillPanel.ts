@@ -1,3 +1,15 @@
+import {
+  allPluginPackages,
+  filterPlugins,
+  marketAuthor,
+  marketDate,
+  marketDepartment,
+  marketOptions,
+  PluginPaginationError,
+  validateStar,
+  type MarketSort,
+  type PluginMarket,
+} from '../../shared/src/plugin-market';
 import { element, resourceHeading, fieldList } from './market-ui';
 import {
   resourceErrorMessage,
@@ -33,6 +45,12 @@ export class SkillPanel {
   private hostBusy = false;
   private policyCacheUnavailable = false;
   private search = '';
+  private filters = {
+    author: '',
+    department: '',
+    tag: '',
+    sort: '' as MarketSort,
+  };
   private blockedPersonalPlugins: string[] = [];
   private personalPluginPolicyPendingRestart = false;
   private allowPersonalPlugins = true;
@@ -199,7 +217,7 @@ export class SkillPanel {
           this.rows = [];
           this.summaries.clear();
         }
-        this.notice = resourceErrorMessage(error, !this.zh);
+        this.notice = this.errorMessage(error);
       }
     } finally {
       if (this.epoch === epoch) {
@@ -228,33 +246,49 @@ export class SkillPanel {
         if (epoch !== this.epoch) return;
         this.installationSnapshot(value);
       } else {
-        const value = await this.request(
-          'packages?limit=50&kind=' +
-            this.kind +
-            (more && this.cursor
-              ? '&cursor=' + encodeURIComponent(this.cursor)
-              : ''),
-        );
+        const read = async (cursor?: string) => {
+          const value = await this.request(
+            'packages?limit=50&kind=' +
+              this.kind +
+              (cursor ? '&cursor=' + encodeURIComponent(cursor) : ''),
+          );
+          if (
+            !Array.isArray(value.items) ||
+            value.items.length > 200 ||
+            value.items.some((p: Package) => p?.kind !== this.kind) ||
+            (value.nextCursor !== undefined &&
+              typeof value.nextCursor !== 'string') ||
+            (this.kind === 'skill' &&
+              value.nextCursor &&
+              value.nextCursor === cursor)
+          )
+            throw new Error('invalid');
+          return {
+            packages: value.items as Package[],
+            cursor: value.nextCursor || undefined,
+          };
+        };
+        const value =
+          this.kind === 'plugin'
+            ? await allPluginPackages(read)
+            : await read(more ? this.cursor : undefined);
         if (epoch !== this.epoch) return;
-        if (
-          !Array.isArray(value.items) ||
-          value.items.length > 200 ||
-          value.items.some((p: Package) => p.kind !== this.kind)
-        )
-          throw new Error('invalid');
-        if (more && value.nextCursor && value.nextCursor === this.cursor)
-          throw new Error('invalid');
-        const merged = more ? [...this.packages, ...value.items] : value.items;
-        if (new Set(merged.map((p: Package) => p.id)).size !== merged.length)
+        const merged = more
+          ? [...this.packages, ...value.packages]
+          : value.packages;
+        if (new Set(merged.map((p) => p.id)).size !== merged.length)
           throw new Error('invalid');
         this.packages = merged;
-        this.cursor = value.nextCursor;
+        this.cursor = value.cursor;
         const installed = await this.request('installations');
         if (epoch !== this.epoch) return;
         this.installationSnapshot(installed);
         if (!more) this.summaries.clear();
         const displayed = this.packages.filter(
-          (pack) => pack.defaultVersionId && !this.summaries.has(pack.id),
+          (pack) =>
+            pack.defaultVersionId &&
+            !pack.market &&
+            !this.summaries.has(pack.id),
         );
         for (let index = 0; index < displayed.length; index += 4) {
           await Promise.allSettled(
@@ -390,7 +424,9 @@ export class SkillPanel {
         value.items.some(
           (v: Version) => v.kind !== this.kind || v.packageId !== pack.id,
         ) ||
-        (value.nextCursor && value.nextCursor === cursor)
+        (this.kind === 'skill' &&
+          value.nextCursor &&
+          value.nextCursor === cursor)
       )
         throw new Error('invalid');
       const merged = [...this.versions, ...value.items];
@@ -457,6 +493,128 @@ export class SkillPanel {
       ],
     ]);
   }
+  private errorMessage(error: unknown) {
+    return error instanceof PluginPaginationError
+      ? this.text(
+          '无法读取完整插件目录，请刷新后重试。',
+          'The full plugin catalog could not be loaded. Refresh and try again.',
+        )
+      : resourceErrorMessage(error, !this.zh);
+  }
+
+  private marketSelect(
+    key: keyof SkillPanel['filters'],
+    label: string,
+    options: [string, string][],
+  ) {
+    const field = element('label', label);
+    const select = element('select');
+    select.dataset.marketFilter = key;
+    select.disabled = this.pending;
+    for (const [value, name] of options) {
+      const option = element('option', name);
+      option.value = value;
+      select.append(option);
+    }
+    select.value = this.filters[key];
+    select.onchange = () => {
+      Object.assign(this.filters, { [key]: select.value });
+      this.render();
+      this.root
+        .querySelector<HTMLSelectElement>(`[data-market-filter="${key}"]`)
+        ?.focus();
+    };
+    field.append(select);
+    return field;
+  }
+
+  private marketFilters() {
+    const locale = this.zh ? 'zh-CN' : 'en';
+    const options = marketOptions(this.packages, locale);
+    const filters = element('div', undefined, 'resource-market-filters');
+    const all = this.text('全部', 'All');
+    const unknown = this.text('未知', 'Unknown');
+    filters.append(
+      this.marketSelect('author', this.text('作者', 'Author'), [
+        ['', all],
+        ...options.authors.map(([id, name]): [string, string] => [
+          id,
+          name ?? `${unknown} (${id})`,
+        ]),
+      ]),
+      this.marketSelect('department', this.text('部门', 'Department'), [
+        ['', all],
+        ...options.departments.map((value): [string, string] => [value, value]),
+      ]),
+      this.marketSelect('tag', this.text('标签', 'Tag'), [
+        ['', all],
+        ...options.tags.map((value): [string, string] => [value, value]),
+      ]),
+      this.marketSelect('sort', this.text('排序', 'Sort by'), [
+        ['', this.text('目录顺序', 'Catalog order')],
+        ['publishedAt', this.text('发布时间', 'Publication date')],
+        ['installationCount', this.text('安装数', 'Installations')],
+        ['starCount', this.text('点赞数', 'Likes')],
+      ]),
+    );
+    return filters;
+  }
+
+  private marketFacts(market: PluginMarket) {
+    const unknown = this.text('未知', 'Unknown');
+    const timestamp = marketDate(market);
+    return fieldList([
+      [this.text('作者', 'Author'), marketAuthor(market) ?? unknown],
+      [this.text('部门', 'Department'), marketDepartment(market) ?? unknown],
+      [
+        this.text('发布时间', 'Published'),
+        timestamp === undefined
+          ? unknown
+          : new Intl.DateTimeFormat(this.zh ? 'zh-CN' : 'en', {
+              dateStyle: 'medium',
+              timeStyle: 'short',
+            }).format(timestamp),
+      ],
+      [this.text('版本', 'Version'), market.version],
+      [this.text('DSH 兼容范围', 'DSH compatibility'), market.dshVersionRange],
+      [this.text('标签', 'Tags'), market.tags.join(' · ') || '—'],
+      [this.text('安装数', 'Installations'), String(market.installationCount)],
+      [this.text('点赞数', 'Likes'), String(market.starCount)],
+    ]);
+  }
+
+  private starButton(pack: Package) {
+    const market = pack.market!;
+    const button = this.button(
+      market.starred
+        ? this.text('取消点赞', 'Unlike')
+        : this.text('点赞', 'Like'),
+      () => {
+        if (this.desktop) {
+          void this.desktop.star(pack).catch(() => undefined);
+          return;
+        }
+        void this.run(async () => {
+          const epoch = this.epoch;
+          const result = validateStar(
+            await this.request(
+              'packages/' + encodeURIComponent(pack.id) + '/star',
+              { starred: !market.starred },
+            ),
+          );
+          if (epoch !== this.epoch) return;
+          const updated = { ...pack, market: { ...market, ...result } };
+          this.packages = this.packages.map((item) =>
+            item.id === pack.id ? updated : item,
+          );
+          if (this.selected?.id === pack.id) this.selected = updated;
+        });
+      },
+    );
+    button.setAttribute('aria-pressed', String(market.starred));
+    return button;
+  }
+
   render() {
     this.root.replaceChildren();
     this.root.setAttribute('aria-busy', String(this.pending));
@@ -488,21 +646,36 @@ export class SkillPanel {
       }),
     );
     this.root.append(toolbar);
-    if (!this.mine) {
+    if (!this.mine && !this.selected) {
       const search = element('input');
       search.type = 'search';
       search.value = this.search;
-      search.setAttribute(
-        'aria-label',
-        this.text('搜索资源', 'Search resources'),
-      );
-      search.placeholder = this.text('搜索资源', 'Search resources');
-      search.oninput = () => {
+      const placeholder =
+        this.kind === 'plugin'
+          ? this.text(
+              '搜索名称、简介或标签',
+              'Search names, descriptions or tags',
+            )
+          : this.text('搜索资源', 'Search resources');
+      search.setAttribute('aria-label', placeholder);
+      search.placeholder = placeholder;
+      const searchChanged = () => {
+        if (this.search === search.value) return;
         this.search = search.value;
+        const { selectionStart, selectionEnd } = search;
         this.render();
-        this.root.querySelector<HTMLInputElement>('input')?.focus();
+        const updated =
+          this.root.querySelector<HTMLInputElement>('input[type=search]');
+        updated?.focus();
+        updated?.setSelectionRange(selectionStart, selectionEnd);
       };
+      search.oninput = (event) => {
+        if (!(event as InputEvent).isComposing) searchChanged();
+      };
+      search.addEventListener('compositionend', searchChanged);
       toolbar.append(search);
+      if (this.kind === 'plugin' && this.packages.some((pack) => pack.market))
+        this.root.append(this.marketFilters());
     }
     if (this.policyCacheUnavailable)
       this.root.append(
@@ -552,7 +725,7 @@ export class SkillPanel {
     }
     const failed = this.failed || this.desktopError !== undefined;
     const message = this.desktopError
-      ? resourceErrorMessage(this.desktopError, !this.zh)
+      ? this.errorMessage(this.desktopError)
       : this.notice;
     if (message) {
       const notice = element('p', message, 'notice');
@@ -620,6 +793,12 @@ export class SkillPanel {
         }),
         resourceHeading(pack.name, this.kind, this.label),
       );
+      if (pack.market)
+        this.root.append(
+          element('p', pack.market.description, 'resource-description'),
+          this.marketFacts(pack.market),
+          this.starButton(pack),
+        );
       const identity = element('details', undefined, 'resource-origin');
       identity.append(
         element(
@@ -632,6 +811,14 @@ export class SkillPanel {
             pack.ownerId ?? '—',
           ],
           [this.text('资源 ID', 'Resource ID'), pack.id],
+          ...(pack.market
+            ? [
+                [this.text('作者 ID', 'Author ID'), pack.market.authorId] as [
+                  string,
+                  string,
+                ],
+              ]
+            : []),
         ]),
       );
       this.root.append(
@@ -697,6 +884,10 @@ export class SkillPanel {
               [
                 this.text('npm 包名', 'npm package'),
                 version.manifest.plugin?.packageName ?? '—',
+              ],
+              [
+                this.text('DSH 兼容范围', 'DSH compatibility'),
+                version.manifest.plugin?.dshVersionRange ?? '—',
               ],
             ]),
           );
@@ -766,9 +957,26 @@ export class SkillPanel {
           cards.append(card);
         }
       } else {
-        for (const pack of this.packages.filter((p) =>
-          p.name.toLowerCase().includes(this.search.toLowerCase()),
-        )) {
+        const displayed =
+          this.kind === 'plugin'
+            ? filterPlugins(
+                this.packages,
+                { ...this.filters, search: this.search },
+                (pack) => this.summaries.get(pack.id)?.manifest.description,
+              )
+            : this.packages.filter((pack) =>
+                pack.name.toLowerCase().includes(this.search.toLowerCase()),
+              );
+        if (this.packages.length && !displayed.length && !this.pending) {
+          const notice = element(
+            'p',
+            this.text('没有符合条件的资源。', 'No matching resources.'),
+            'notice',
+          );
+          notice.setAttribute('role', 'status');
+          cards.append(notice);
+        }
+        for (const pack of displayed) {
           const version = this.summaries.get(pack.id),
             row = this.installation(pack.id);
           const card = element('article', undefined, 'card resource-card');
@@ -776,7 +984,8 @@ export class SkillPanel {
             resourceHeading(pack.name, this.kind, this.label),
             element(
               'p',
-              version?.manifest.description ??
+              pack.market?.description ??
+                version?.manifest.description ??
                 this.text(
                   '查看版本、权限与来源，选择适合的技能。',
                   'Review versions, permissions and source to choose a skill.',
@@ -812,16 +1021,21 @@ export class SkillPanel {
               element('span', version.version, 'resource-version-label'),
             );
           card.append(metadata);
-          if (version?.manifest.author?.displayName)
+          if (pack.market) card.append(this.marketFacts(pack.market));
+          else if (version?.manifest.author?.displayName)
             card.append(
               element('p', version.manifest.author.displayName, 'muted'),
             );
           const actions = element('div', undefined, 'resource-actions');
-          if (version) {
+          const defaultId =
+            version?.id ?? (pack.market && pack.defaultVersionId);
+          const defaultVersion = version?.version ?? pack.market?.version;
+          if (defaultId && defaultVersion) {
             const install = this.button(
-              this.text('安装', 'Install') + ' ' + version.version,
-              () => this.action(pack.id, version.id, 'install'),
-              !this.sharedAvailable || version.state !== 'published',
+              this.text('安装', 'Install') + ' ' + defaultVersion,
+              () => this.action(pack.id, defaultId, 'install'),
+              !this.sharedAvailable ||
+                (version && version.state !== 'published'),
             );
             install.className = 'primary';
             actions.append(install);
@@ -834,6 +1048,7 @@ export class SkillPanel {
               },
             ),
           );
+          if (pack.market) actions.append(this.starButton(pack));
           card.append(actions);
           cards.append(card);
         }

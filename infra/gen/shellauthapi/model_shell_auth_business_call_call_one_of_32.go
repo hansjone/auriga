@@ -21,8 +21,8 @@ var _ MappedNullable = &ShellAuthBusinessCallCallOneOf32{}
 
 // ShellAuthBusinessCallCallOneOf32 struct for ShellAuthBusinessCallCallOneOf32
 type ShellAuthBusinessCallCallOneOf32 struct {
-	Operation string                       `json:"operation"`
-	Input     ShellAuthInputListOwnAiUsage `json:"input"`
+	Operation string                             `json:"operation"`
+	Input     ShellAuthInputUnifiedSetPluginStar `json:"input"`
 }
 
 type _ShellAuthBusinessCallCallOneOf32 ShellAuthBusinessCallCallOneOf32
@@ -31,7 +31,7 @@ type _ShellAuthBusinessCallCallOneOf32 ShellAuthBusinessCallCallOneOf32
 // This constructor will assign default values to properties that have it defined,
 // and makes sure properties required by API are set, but the set of arguments
 // will change when the set of required properties is changed
-func NewShellAuthBusinessCallCallOneOf32(operation string, input ShellAuthInputListOwnAiUsage) *ShellAuthBusinessCallCallOneOf32 {
+func NewShellAuthBusinessCallCallOneOf32(operation string, input ShellAuthInputUnifiedSetPluginStar) *ShellAuthBusinessCallCallOneOf32 {
 	this := ShellAuthBusinessCallCallOneOf32{}
 	this.Operation = operation
 	this.Input = input
@@ -71,9 +71,9 @@ func (o *ShellAuthBusinessCallCallOneOf32) SetOperation(v string) {
 }
 
 // GetInput returns the Input field value
-func (o *ShellAuthBusinessCallCallOneOf32) GetInput() ShellAuthInputListOwnAiUsage {
+func (o *ShellAuthBusinessCallCallOneOf32) GetInput() ShellAuthInputUnifiedSetPluginStar {
 	if o == nil {
-		var ret ShellAuthInputListOwnAiUsage
+		var ret ShellAuthInputUnifiedSetPluginStar
 		return ret
 	}
 
@@ -82,7 +82,7 @@ func (o *ShellAuthBusinessCallCallOneOf32) GetInput() ShellAuthInputListOwnAiUsa
 
 // GetInputOk returns a tuple with the Input field value
 // and a boolean to check if the value has been set.
-func (o *ShellAuthBusinessCallCallOneOf32) GetInputOk() (*ShellAuthInputListOwnAiUsage, bool) {
+func (o *ShellAuthBusinessCallCallOneOf32) GetInputOk() (*ShellAuthInputUnifiedSetPluginStar, bool) {
 	if o == nil {
 		return nil, false
 	}
@@ -90,7 +90,7 @@ func (o *ShellAuthBusinessCallCallOneOf32) GetInputOk() (*ShellAuthInputListOwnA
 }
 
 // SetInput sets field value
-func (o *ShellAuthBusinessCallCallOneOf32) SetInput(v ShellAuthInputListOwnAiUsage) {
+func (o *ShellAuthBusinessCallCallOneOf32) SetInput(v ShellAuthInputUnifiedSetPluginStar) {
 	o.Input = v
 }
 

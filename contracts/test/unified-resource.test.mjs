@@ -522,9 +522,11 @@ for (const fixture of fixtureIndex.cases) {
   });
 }
 
-test('all Unified mutations require If-Match and advertise success ETags', () => {
+test('versioned Unified mutations require If-Match and advertise success ETags', () => {
   const spec = read('openapi/resource.yaml');
-  for (const methods of Object.values(spec.paths))
+  const memberPreferencePath =
+    '/api/resource/v1/catalog/packages/{packageId}/star';
+  for (const [path, methods] of Object.entries(spec.paths))
     for (const [method, operation] of Object.entries(methods)) {
       if (
         !operation.operationId?.startsWith('Unified') ||
@@ -534,16 +536,25 @@ test('all Unified mutations require If-Match and advertise success ETags', () =>
       assert(
         operation.parameters.some(
           (p) =>
-            p.in === 'header' && p.name === 'If-Match' && p.required === true,
-        ),
-        operation.operationId,
-      );
-      assert(
-        operation.parameters.some(
-          (p) =>
             p.in === 'header' &&
             p.name === 'Idempotency-Key' &&
             p.required === true,
+        ),
+        operation.operationId,
+      );
+      if (path === memberPreferencePath && method === 'post') {
+        assert.equal(operation.operationId, 'UnifiedSetPluginStar');
+        assert.equal(operation['x-permission'], 'resource.packages.read');
+        assert.deepEqual(
+          operation.requestBody.content['application/json'].schema.required,
+          ['starred'],
+        );
+        continue;
+      }
+      assert(
+        operation.parameters.some(
+          (p) =>
+            p.in === 'header' && p.name === 'If-Match' && p.required === true,
         ),
         operation.operationId,
       );

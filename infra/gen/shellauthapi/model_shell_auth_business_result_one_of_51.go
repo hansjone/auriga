@@ -21,9 +21,9 @@ var _ MappedNullable = &ShellAuthBusinessResultOneOf51{}
 
 // ShellAuthBusinessResultOneOf51 struct for ShellAuthBusinessResultOneOf51
 type ShellAuthBusinessResultOneOf51 struct {
-	RequestId string                           `json:"requestId"`
-	Operation string                           `json:"operation"`
-	Output    ShellAuthOutputTeamListEndpoints `json:"output"`
+	RequestId string                            `json:"requestId"`
+	Operation string                            `json:"operation"`
+	Output    ShellAuthOutputProviderDiagnostic `json:"output"`
 }
 
 type _ShellAuthBusinessResultOneOf51 ShellAuthBusinessResultOneOf51
@@ -32,7 +32,7 @@ type _ShellAuthBusinessResultOneOf51 ShellAuthBusinessResultOneOf51
 // This constructor will assign default values to properties that have it defined,
 // and makes sure properties required by API are set, but the set of arguments
 // will change when the set of required properties is changed
-func NewShellAuthBusinessResultOneOf51(requestId string, operation string, output ShellAuthOutputTeamListEndpoints) *ShellAuthBusinessResultOneOf51 {
+func NewShellAuthBusinessResultOneOf51(requestId string, operation string, output ShellAuthOutputProviderDiagnostic) *ShellAuthBusinessResultOneOf51 {
 	this := ShellAuthBusinessResultOneOf51{}
 	this.RequestId = requestId
 	this.Operation = operation
@@ -97,9 +97,9 @@ func (o *ShellAuthBusinessResultOneOf51) SetOperation(v string) {
 }
 
 // GetOutput returns the Output field value
-func (o *ShellAuthBusinessResultOneOf51) GetOutput() ShellAuthOutputTeamListEndpoints {
+func (o *ShellAuthBusinessResultOneOf51) GetOutput() ShellAuthOutputProviderDiagnostic {
 	if o == nil {
-		var ret ShellAuthOutputTeamListEndpoints
+		var ret ShellAuthOutputProviderDiagnostic
 		return ret
 	}
 
@@ -108,7 +108,7 @@ func (o *ShellAuthBusinessResultOneOf51) GetOutput() ShellAuthOutputTeamListEndp
 
 // GetOutputOk returns a tuple with the Output field value
 // and a boolean to check if the value has been set.
-func (o *ShellAuthBusinessResultOneOf51) GetOutputOk() (*ShellAuthOutputTeamListEndpoints, bool) {
+func (o *ShellAuthBusinessResultOneOf51) GetOutputOk() (*ShellAuthOutputProviderDiagnostic, bool) {
 	if o == nil {
 		return nil, false
 	}
@@ -116,7 +116,7 @@ func (o *ShellAuthBusinessResultOneOf51) GetOutputOk() (*ShellAuthOutputTeamList
 }
 
 // SetOutput sets field value
-func (o *ShellAuthBusinessResultOneOf51) SetOutput(v ShellAuthOutputTeamListEndpoints) {
+func (o *ShellAuthBusinessResultOneOf51) SetOutput(v ShellAuthOutputProviderDiagnostic) {
 	o.Output = v
 }
 

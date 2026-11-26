@@ -21,8 +21,8 @@ var _ MappedNullable = &ShellAuthBusinessCallCallOneOf52{}
 
 // ShellAuthBusinessCallCallOneOf52 struct for ShellAuthBusinessCallCallOneOf52
 type ShellAuthBusinessCallCallOneOf52 struct {
-	Operation string                       `json:"operation"`
-	Input     ShellAuthInputTeamOpenThread `json:"input"`
+	Operation string                          `json:"operation"`
+	Input     ShellAuthInputTeamListEndpoints `json:"input"`
 }
 
 type _ShellAuthBusinessCallCallOneOf52 ShellAuthBusinessCallCallOneOf52
@@ -31,7 +31,7 @@ type _ShellAuthBusinessCallCallOneOf52 ShellAuthBusinessCallCallOneOf52
 // This constructor will assign default values to properties that have it defined,
 // and makes sure properties required by API are set, but the set of arguments
 // will change when the set of required properties is changed
-func NewShellAuthBusinessCallCallOneOf52(operation string, input ShellAuthInputTeamOpenThread) *ShellAuthBusinessCallCallOneOf52 {
+func NewShellAuthBusinessCallCallOneOf52(operation string, input ShellAuthInputTeamListEndpoints) *ShellAuthBusinessCallCallOneOf52 {
 	this := ShellAuthBusinessCallCallOneOf52{}
 	this.Operation = operation
 	this.Input = input
@@ -71,9 +71,9 @@ func (o *ShellAuthBusinessCallCallOneOf52) SetOperation(v string) {
 }
 
 // GetInput returns the Input field value
-func (o *ShellAuthBusinessCallCallOneOf52) GetInput() ShellAuthInputTeamOpenThread {
+func (o *ShellAuthBusinessCallCallOneOf52) GetInput() ShellAuthInputTeamListEndpoints {
 	if o == nil {
-		var ret ShellAuthInputTeamOpenThread
+		var ret ShellAuthInputTeamListEndpoints
 		return ret
 	}
 
@@ -82,7 +82,7 @@ func (o *ShellAuthBusinessCallCallOneOf52) GetInput() ShellAuthInputTeamOpenThre
 
 // GetInputOk returns a tuple with the Input field value
 // and a boolean to check if the value has been set.
-func (o *ShellAuthBusinessCallCallOneOf52) GetInputOk() (*ShellAuthInputTeamOpenThread, bool) {
+func (o *ShellAuthBusinessCallCallOneOf52) GetInputOk() (*ShellAuthInputTeamListEndpoints, bool) {
 	if o == nil {
 		return nil, false
 	}
@@ -90,7 +90,7 @@ func (o *ShellAuthBusinessCallCallOneOf52) GetInputOk() (*ShellAuthInputTeamOpen
 }
 
 // SetInput sets field value
-func (o *ShellAuthBusinessCallCallOneOf52) SetInput(v ShellAuthInputTeamOpenThread) {
+func (o *ShellAuthBusinessCallCallOneOf52) SetInput(v ShellAuthInputTeamListEndpoints) {
 	o.Input = v
 }
 

@@ -743,6 +743,30 @@
       "scope": "auriga.connect"
     },
     {
+      "operation": "UnifiedSetPluginStar",
+      "method": "post",
+      "route": "/api/resource/v1/catalog/packages/{packageId}/star",
+      "source": "openapi/resource.yaml",
+      "permission": "resource.packages.read",
+      "audience": "auriga",
+      "stream": false,
+      "requestHeaders": [
+        "idempotency-key",
+        "if-match"
+      ],
+      "responseHeaders": [
+        "etag",
+        "content-type",
+        "content-length",
+        "content-range",
+        "retry-after"
+      ],
+      "retry": "explicit_idempotency_only",
+      "input": "ShellAuthInput_UnifiedSetPluginStar",
+      "output": "ShellAuthOutput_UnifiedSetPluginStar",
+      "scope": "auriga.connect"
+    },
+    {
       "operation": "listOwnAiUsage",
       "method": "get",
       "route": "/api/ai/v1/me/usage",

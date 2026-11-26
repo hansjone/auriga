@@ -11,6 +11,11 @@
   <dependencies>
     <dependency>
       <groupId>auriga</groupId>
+      <artifactId>common</artifactId>
+      <version>${project.version}</version>
+    </dependency>
+    <dependency>
+      <groupId>auriga</groupId>
       <artifactId>contracts</artifactId>
       <version>${project.version}</version>
     </dependency>

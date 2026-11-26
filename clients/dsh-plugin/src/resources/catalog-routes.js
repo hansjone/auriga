@@ -6,7 +6,7 @@ import { catalogApi, catalogIdentity } from './catalog-api.js';
 import { catalogHost } from './catalog-host.js';
 import { resourceHost } from './host.js';
 import { createPrivateSkills } from './private-skills.js';
-import { exact, refuse } from './trust.js';
+import { exact, refuse, uuid } from './trust.js';
 import { parseStrictJson, canonicalize } from './json.js';
 import { existsSync, lstatSync, readFileSync } from 'node:fs';
 import { assertLocalPath } from './host-lock.js';
@@ -217,6 +217,20 @@ export function catalogRoutes(options) {
         chunks.push(chunk);
       }
       const input = parseStrictJson(Buffer.concat(chunks));
+      const star = /^packages\/([a-f0-9-]{36})\/star$/.exec(path);
+      if (star) {
+        if (
+          !exact(input, ['starred']) ||
+          typeof input.starred !== 'boolean' ||
+          !uuid(star[1])
+        )
+          refuse('common.validation_failed');
+        const { value } = await api.request(
+          '/api/resource/v1/catalog/packages/' + star[1] + '/star',
+          { body: input },
+        );
+        return send(200, value);
+      }
       let result;
       if (
         path === 'actions' &&

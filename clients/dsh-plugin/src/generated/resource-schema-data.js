@@ -335,6 +335,16 @@ export default {
       Plugin: {
         type: 'object',
         properties: {
+          tags: {
+            type: 'array',
+            maxItems: 5,
+            uniqueItems: true,
+            items: {
+              type: 'string',
+              pattern: '^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$',
+              maxLength: 32,
+            },
+          },
           packageName: {
             type: 'string',
             minLength: 1,

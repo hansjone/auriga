@@ -1,4 +1,8 @@
 import {
+  allPluginPackages,
+  validateStar,
+} from '../../shared/src/plugin-market';
+import {
   ResourceDiagnosticError,
   resourceResponseError,
 } from './resource-diagnostics';
@@ -219,7 +223,8 @@ export class DesktopCatalog {
       !Array.isArray(items) ||
       items.length > 200 ||
       items.some((pack) => !pack || pack.kind !== kind) ||
-      (nextCursor && (typeof nextCursor !== 'string' || nextCursor === cursor))
+      (nextCursor !== undefined && typeof nextCursor !== 'string') ||
+      (kind === 'skill' && nextCursor && nextCursor === cursor)
     )
       throw new Error('invalid');
     return {
@@ -229,7 +234,9 @@ export class DesktopCatalog {
   }
 
   private async summaries(packages: SkillPackage[], signal: AbortSignal) {
-    const pending = packages.filter((pack) => pack.defaultVersionId);
+    const pending = packages.filter(
+      (pack) => pack.defaultVersionId && !pack.market,
+    );
     const result = new Map<string, SkillVersion>();
     for (let index = 0; index < pending.length; index += 6) {
       await Promise.all(
@@ -260,7 +267,7 @@ export class DesktopCatalog {
     this.started = true;
     await this.run(async (signal) => {
       const [plugin, skill, installations] = await Promise.all([
-        this.packages('plugin', signal),
+        allPluginPackages((cursor) => this.packages('plugin', signal, cursor)),
         this.packages('skill', signal),
         this.get('installations', signal).then(validateInstallations),
       ]);
@@ -342,14 +349,40 @@ export class DesktopCatalog {
     return result;
   }
 
+  async star(pack: SkillPackage) {
+    const market = pack.market;
+    if (!market) return;
+    await this.mutate(async (signal) => {
+      const result = validateStar(
+        await catalogRequest(
+          this.fetch,
+          'packages/' + encodeURIComponent(pack.id) + '/star',
+          signal,
+          { starred: !market.starred },
+          this.scope,
+        ),
+      );
+      const listing = this.snapshot?.market.plugin;
+      if (signal.aborted || !this.snapshot || !listing) return;
+      this.snapshot = {
+        ...this.snapshot,
+        market: {
+          ...this.snapshot.market,
+          plugin: {
+            ...listing,
+            packages: listing.packages.map((item) =>
+              item.id === pack.id && item.market
+                ? { ...item, market: { ...item.market, ...result } }
+                : item,
+            ),
+          },
+        },
+      };
+    });
+  }
+
   async act(body: unknown) {
-    const signal = this.lifetime.signal;
-    if (this.loading || this.mutating || signal.aborted)
-      throw new Error('unavailable');
-    this.mutating = true;
-    this.error = undefined;
-    this.emit();
-    try {
+    return this.mutate(async (signal) => {
       const result = await catalogRequest(
         this.fetch,
         'actions',
@@ -360,6 +393,18 @@ export class DesktopCatalog {
       if (!signal.aborted && result.installation)
         this.updateInstallation(result.installation);
       return result;
+    });
+  }
+
+  private async mutate<T>(work: (signal: AbortSignal) => Promise<T>) {
+    const signal = this.lifetime.signal;
+    if (this.loading || this.mutating || signal.aborted)
+      throw new Error('unavailable');
+    this.mutating = true;
+    this.error = undefined;
+    this.emit();
+    try {
+      return await work(signal);
     } catch (error) {
       if (!signal.aborted) {
         if (catalogStatus(error) === 401) this.rejectAuth(error);

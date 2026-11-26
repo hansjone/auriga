@@ -120,3 +120,73 @@ it('an expired session clears controls and offers a fresh login', async () => {
   expect(api.post).not.toHaveBeenCalled();
   view.unmount();
 });
+
+it('shows the selected published plugin version permissions, including empty declarations', async () => {
+  const previousGet = api.get.getMockImplementation()!;
+  const pack = {
+    id: 'plugin-pack',
+    kind: 'plugin',
+    name: 'Document editor',
+    enabled: true,
+  };
+  api.get.mockImplementation(async (path: string) => {
+    if (path.includes('kind=plugin')) return { items: [pack] };
+    if (path.includes('/packages/plugin-pack/versions'))
+      return {
+        items: [
+          {
+            id: 'published',
+            state: 'published',
+            version: '2.1.0',
+            releaseSequence: 3,
+            manifest: {
+              kind: 'plugin',
+              plugin: { dshVersionRange: '^4.0.0' },
+              permissions: {
+                tools: ['format_document'],
+                outboundHosts: [],
+                dataAccess: ['workspace_read', 'user_selected_files'],
+              },
+            },
+          },
+          {
+            id: 'draft',
+            state: 'draft',
+            version: '3.0.0',
+            releaseSequence: 4,
+            manifest: {
+              kind: 'plugin',
+              permissions: { tools: ['draft_only'] },
+            },
+          },
+        ],
+      };
+    return previousGet(path);
+  });
+  const view = setup();
+  await flushPromises();
+  await view
+    .findAll('button')
+    .find((b) => b.text() === '插件')!
+    .trigger('click');
+  await flushPromises();
+  await view
+    .findAll('button')
+    .find((b) => b.text() === '查看最新发布')!
+    .trigger('click');
+  await flushPromises();
+  const detail = view.get('section[aria-label="Document editor"]');
+  expect(detail.text()).toContain('^4.0.0');
+  expect(detail.findAll('dt').map((field) => field.text())).toEqual([
+    '工具',
+    '外连主机',
+    '数据访问',
+  ]);
+  expect(detail.findAll('dd').map((field) => field.text())).toEqual([
+    'format_document',
+    '无声明',
+    '读取工作区 · 用户选定的文件',
+  ]);
+  expect(detail.text()).not.toContain('draft_only');
+  view.unmount();
+});

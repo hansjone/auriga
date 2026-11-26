@@ -21,9 +21,9 @@ var _ MappedNullable = &ShellAuthBusinessResultOneOf58{}
 
 // ShellAuthBusinessResultOneOf58 struct for ShellAuthBusinessResultOneOf58
 type ShellAuthBusinessResultOneOf58 struct {
-	RequestId string                     `json:"requestId"`
-	Operation string                     `json:"operation"`
-	Output    ShellAuthOutputTeamNodeAck `json:"output"`
+	RequestId string                      `json:"requestId"`
+	Operation string                      `json:"operation"`
+	Output    ShellAuthOutputTeamNodePull `json:"output"`
 }
 
 type _ShellAuthBusinessResultOneOf58 ShellAuthBusinessResultOneOf58
@@ -32,7 +32,7 @@ type _ShellAuthBusinessResultOneOf58 ShellAuthBusinessResultOneOf58
 // This constructor will assign default values to properties that have it defined,
 // and makes sure properties required by API are set, but the set of arguments
 // will change when the set of required properties is changed
-func NewShellAuthBusinessResultOneOf58(requestId string, operation string, output ShellAuthOutputTeamNodeAck) *ShellAuthBusinessResultOneOf58 {
+func NewShellAuthBusinessResultOneOf58(requestId string, operation string, output ShellAuthOutputTeamNodePull) *ShellAuthBusinessResultOneOf58 {
 	this := ShellAuthBusinessResultOneOf58{}
 	this.RequestId = requestId
 	this.Operation = operation
@@ -97,9 +97,9 @@ func (o *ShellAuthBusinessResultOneOf58) SetOperation(v string) {
 }
 
 // GetOutput returns the Output field value
-func (o *ShellAuthBusinessResultOneOf58) GetOutput() ShellAuthOutputTeamNodeAck {
+func (o *ShellAuthBusinessResultOneOf58) GetOutput() ShellAuthOutputTeamNodePull {
 	if o == nil {
-		var ret ShellAuthOutputTeamNodeAck
+		var ret ShellAuthOutputTeamNodePull
 		return ret
 	}
 
@@ -108,7 +108,7 @@ func (o *ShellAuthBusinessResultOneOf58) GetOutput() ShellAuthOutputTeamNodeAck 
 
 // GetOutputOk returns a tuple with the Output field value
 // and a boolean to check if the value has been set.
-func (o *ShellAuthBusinessResultOneOf58) GetOutputOk() (*ShellAuthOutputTeamNodeAck, bool) {
+func (o *ShellAuthBusinessResultOneOf58) GetOutputOk() (*ShellAuthOutputTeamNodePull, bool) {
 	if o == nil {
 		return nil, false
 	}
@@ -116,7 +116,7 @@ func (o *ShellAuthBusinessResultOneOf58) GetOutputOk() (*ShellAuthOutputTeamNode
 }
 
 // SetOutput sets field value
-func (o *ShellAuthBusinessResultOneOf58) SetOutput(v ShellAuthOutputTeamNodeAck) {
+func (o *ShellAuthBusinessResultOneOf58) SetOutput(v ShellAuthOutputTeamNodePull) {
 	o.Output = v
 }
 

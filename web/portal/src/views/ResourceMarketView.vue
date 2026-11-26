@@ -3,6 +3,17 @@ import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { ElButton } from 'element-plus';
 import { isApiError } from '@auriga/shared';
+import {
+  allPluginPackages,
+  filterPlugins,
+  marketAuthor,
+  marketDate,
+  marketDepartment,
+  marketOptions,
+  PluginPaginationError,
+  type MarketSort,
+  type PluginMarket,
+} from '../../../shared/src/plugin-market';
 import { apiClient } from '../api';
 import { createPlacementApi, type Placement } from './placement-api';
 import {
@@ -16,14 +27,67 @@ import {
 } from './resource-market-api';
 import { resourceMarketMessages } from './resource-market-messages';
 
-const { t } = useI18n({ useScope: 'local', messages: resourceMarketMessages });
+const { t, locale } = useI18n({
+  useScope: 'local',
+  messages: resourceMarketMessages,
+});
 const api = createResourceMarketApi(apiClient);
 const placement = ref<Placement>();
 const state = ref<InstallationPage>();
 const packages = ref<ResourcePackage[]>([]);
+const filters = ref({
+  search: '',
+  author: '',
+  department: '',
+  tag: '',
+  sort: '' as MarketSort,
+});
+const hasMarket = computed(() => packages.value.some((pack) => pack.market));
+const options = computed(() => marketOptions(packages.value, locale.value));
+const displayed = computed(() =>
+  kind.value === 'plugin'
+    ? filterPlugins(packages.value, filters.value)
+    : packages.value,
+);
+function facts(market: PluginMarket): [string, string | number][] {
+  const date = marketDate(market);
+  return [
+    ['author', marketAuthor(market) ?? t('unknown')],
+    ['department', marketDepartment(market) ?? t('unknown')],
+    [
+      'publishedAt',
+      date === undefined
+        ? t('unknown')
+        : new Intl.DateTimeFormat(locale.value, {
+            dateStyle: 'medium',
+            timeStyle: 'short',
+          }).format(date),
+    ],
+    ['version', market.version],
+    ['dshRange', market.dshVersionRange],
+    ['tags', market.tags.join(' · ') || '—'],
+    ['installationCount', market.installationCount],
+    ['starCount', market.starCount],
+  ];
+}
 const names = ref<Record<string, string>>({});
 const selected = ref<ResourcePackage>();
 const latest = ref<ResourceVersion>();
+const pluginPermissions = computed(() => {
+  const manifest = latest.value?.manifest;
+  if (manifest?.kind !== 'plugin') return undefined;
+  const permissions = manifest.permissions;
+  return [
+    { label: 'tools', values: permissions?.tools },
+    { label: 'outboundHosts', values: permissions?.outboundHosts },
+    {
+      label: 'dataAccess',
+      values: permissions?.dataAccess?.map((value) =>
+        t('permissions.scopes.' + value),
+      ),
+    },
+  ];
+});
 const kind = ref<'plugin' | 'skill'>('skill');
 const next = ref<string>();
 const busy = ref(false),
@@ -59,10 +123,12 @@ function fail(value: unknown) {
     t(
       expired.value
         ? 'expired'
-        : isApiError(value) &&
-            value.problem.code === 'resource.shared_requires_dedicated'
-          ? 'sharedHint'
-          : 'failed',
+        : value instanceof PluginPaginationError
+          ? 'incomplete'
+          : isApiError(value) &&
+              value.problem.code === 'resource.shared_requires_dedicated'
+            ? 'sharedHint'
+            : 'failed',
     ) + (isApiError(value) ? ` (${value.problem.code})` : '');
 }
 async function run(action: (signal: globalThis.AbortSignal) => Promise<void>) {
@@ -83,6 +149,7 @@ async function run(action: (signal: globalThis.AbortSignal) => Promise<void>) {
 async function load(signal: globalThis.AbortSignal) {
   state.value = undefined;
   packages.value = [];
+  next.value = undefined;
   names.value = {};
   selected.value = undefined;
   latest.value = undefined;
@@ -119,20 +186,52 @@ async function load(signal: globalThis.AbortSignal) {
   if (value.mode === 'dedicated') await catalog(signal);
 }
 async function catalog(signal: globalThis.AbortSignal, cursor?: string) {
-  const result = await api.packages(kind.value, signal, cursor);
+  const requestedKind = kind.value;
+  const read = async (cursor?: string) => {
+    const result = await api.packages(requestedKind, signal, cursor);
+    if (
+      !Array.isArray(result.items) ||
+      result.items.length > 200 ||
+      result.items.some((pack) => !pack || pack.kind !== requestedKind) ||
+      (result.nextCursor !== undefined && typeof result.nextCursor !== 'string')
+    )
+      throw new Error('Invalid resource page');
+    return { packages: result.items, cursor: result.nextCursor || undefined };
+  };
+  const result =
+    requestedKind === 'plugin'
+      ? await allPluginPackages(read)
+      : await read(cursor);
   if (signal.aborted) return;
-  packages.value = cursor ? [...packages.value, ...result.items] : result.items;
-  result.items.forEach((pack) => {
+  packages.value = cursor
+    ? [...packages.value, ...result.packages]
+    : result.packages;
+  result.packages.forEach((pack) => {
     names.value[pack.id] = pack.name;
   });
-  next.value = result.nextCursor;
+  next.value = result.cursor;
 }
 function filter(value: 'plugin' | 'skill') {
-  if (busy.value) return;
+  if (busy.value || expired.value || value === kind.value) return;
   kind.value = value;
+  packages.value = [];
+  next.value = undefined;
   selected.value = undefined;
   latest.value = undefined;
   run((signal) => catalog(signal));
+}
+function star(pack: ResourcePackage) {
+  const market = pack.market;
+  if (!market) return;
+  run(async (signal) => {
+    const result = await api.star(pack.id, !market.starred, signal);
+    if (signal.aborted) return;
+    const updated = { ...pack, market: { ...market, ...result } };
+    packages.value = packages.value.map((item) =>
+      item.id === pack.id ? updated : item,
+    );
+    if (selected.value?.id === pack.id) selected.value = updated;
+  });
 }
 function choose(pack: ResourcePackage) {
   run(async (signal) => {
@@ -253,9 +352,89 @@ onBeforeUnmount(() => {
             >{{ t(value) }}</ElButton
           >
         </div>
+        <div v-if="kind === 'plugin' && packages.length" class="market-filters">
+          <input
+            v-model="filters.search"
+            type="search"
+            :aria-label="t('search')"
+            :placeholder="t('search')"
+          />
+          <template v-if="hasMarket">
+            <label
+              >{{ t('author') }}
+              <select v-model="filters.author">
+                <option value="">{{ t('all') }}</option>
+                <option
+                  v-for="[id, name] in options.authors"
+                  :key="id"
+                  :value="id"
+                >
+                  {{ name ?? `${t('unknown')} (${id})` }}
+                </option>
+              </select>
+            </label>
+            <label
+              >{{ t('department') }}
+              <select v-model="filters.department">
+                <option value="">{{ t('all') }}</option>
+                <option v-for="value in options.departments" :key="value">
+                  {{ value }}
+                </option>
+              </select>
+            </label>
+            <label
+              >{{ t('tags') }}
+              <select v-model="filters.tag">
+                <option value="">{{ t('all') }}</option>
+                <option v-for="value in options.tags" :key="value">
+                  {{ value }}
+                </option>
+              </select>
+            </label>
+            <label
+              >{{ t('sort') }}
+              <select v-model="filters.sort">
+                <option value="">{{ t('catalogOrder') }}</option>
+                <option
+                  v-for="value in [
+                    'publishedAt',
+                    'installationCount',
+                    'starCount',
+                  ]"
+                  :key="value"
+                  :value="value"
+                >
+                  {{ t(value) }}
+                </option>
+              </select>
+            </label>
+          </template>
+        </div>
+        <p v-if="packages.length && !displayed.length" role="status">
+          {{ t('noMatches') }}
+        </p>
         <ul class="resource-list">
-          <li v-for="pack in packages" :key="pack.id">
+          <li v-for="pack in displayed" :key="pack.id">
             <strong>{{ pack.name }}</strong>
+            <template v-if="pack.market">
+              <p>{{ pack.market.description }}</p>
+              <dl class="market-facts">
+                <template
+                  v-for="[label, value] in facts(pack.market)"
+                  :key="label"
+                >
+                  <dt>{{ t(label) }}</dt>
+                  <dd>{{ value }}</dd>
+                </template>
+              </dl>
+              <ElButton
+                :disabled="busy || expired"
+                :aria-pressed="pack.market.starred"
+                @click="star(pack)"
+              >
+                {{ t(pack.market.starred ? 'unstar' : 'star') }}
+              </ElButton>
+            </template>
             <ElButton :disabled="busy || !pack.enabled" @click="choose(pack)">{{
               t('versions')
             }}</ElButton>
@@ -269,8 +448,28 @@ onBeforeUnmount(() => {
         >
         <section v-if="selected" class="version" :aria-label="selected.name">
           <h3>{{ selected.name }}</h3>
+          <p v-if="selected.market">
+            {{ t('authorId') }} {{ selected.market.authorId }}
+          </p>
           <template v-if="latest">
             <p>{{ latest.version }}</p>
+            <p
+              v-if="
+                latest.manifest.kind === 'plugin' &&
+                latest.manifest.plugin?.dshVersionRange
+              "
+            >
+              {{ t('dshRange') }} {{ latest.manifest.plugin.dshVersionRange }}
+            </p>
+            <dl v-if="pluginPermissions" class="market-facts">
+              <template
+                v-for="{ label, values } in pluginPermissions"
+                :key="label"
+              >
+                <dt>{{ t('permissions.' + label) }}</dt>
+                <dd>{{ values?.join(' · ') || t('permissions.none') }}</dd>
+              </template>
+            </dl>
             <p v-if="same">{{ t('same') }}</p>
             <ElButton
               type="primary"
@@ -347,6 +546,40 @@ a {
 }
 .actions :deep(.el-button + .el-button) {
   margin-left: 0;
+}
+.market-filters {
+  display: flex;
+  align-items: end;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin: 0.75rem 0;
+}
+.market-filters label {
+  display: grid;
+  gap: 0.25rem;
+  font-size: 0.8125rem;
+}
+.market-filters :is(input, select) {
+  max-width: min(100%, 250px);
+  font: inherit;
+  color: inherit;
+  background: var(--auriga-surface, Canvas);
+  border: 1px solid var(--auriga-border);
+  border-radius: 4px;
+  padding: 0.35rem 0.5rem;
+}
+.market-facts {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  column-gap: 1rem;
+  row-gap: 0.25rem;
+  font-size: 0.8125rem;
+}
+.market-facts dd {
+  margin: 0;
+}
+.market-facts dt {
+  color: var(--auriga-muted);
 }
 .version {
   margin-top: 1rem;

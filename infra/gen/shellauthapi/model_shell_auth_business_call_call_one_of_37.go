@@ -21,8 +21,8 @@ var _ MappedNullable = &ShellAuthBusinessCallCallOneOf37{}
 
 // ShellAuthBusinessCallCallOneOf37 struct for ShellAuthBusinessCallCallOneOf37
 type ShellAuthBusinessCallCallOneOf37 struct {
-	Operation string                       `json:"operation"`
-	Input     ShellAuthInputTeamInitialize `json:"input"`
+	Operation string                                     `json:"operation"`
+	Input     ShellAuthInputCreateAiChatCompletionStream `json:"input"`
 }
 
 type _ShellAuthBusinessCallCallOneOf37 ShellAuthBusinessCallCallOneOf37
@@ -31,7 +31,7 @@ type _ShellAuthBusinessCallCallOneOf37 ShellAuthBusinessCallCallOneOf37
 // This constructor will assign default values to properties that have it defined,
 // and makes sure properties required by API are set, but the set of arguments
 // will change when the set of required properties is changed
-func NewShellAuthBusinessCallCallOneOf37(operation string, input ShellAuthInputTeamInitialize) *ShellAuthBusinessCallCallOneOf37 {
+func NewShellAuthBusinessCallCallOneOf37(operation string, input ShellAuthInputCreateAiChatCompletionStream) *ShellAuthBusinessCallCallOneOf37 {
 	this := ShellAuthBusinessCallCallOneOf37{}
 	this.Operation = operation
 	this.Input = input
@@ -71,9 +71,9 @@ func (o *ShellAuthBusinessCallCallOneOf37) SetOperation(v string) {
 }
 
 // GetInput returns the Input field value
-func (o *ShellAuthBusinessCallCallOneOf37) GetInput() ShellAuthInputTeamInitialize {
+func (o *ShellAuthBusinessCallCallOneOf37) GetInput() ShellAuthInputCreateAiChatCompletionStream {
 	if o == nil {
-		var ret ShellAuthInputTeamInitialize
+		var ret ShellAuthInputCreateAiChatCompletionStream
 		return ret
 	}
 
@@ -82,7 +82,7 @@ func (o *ShellAuthBusinessCallCallOneOf37) GetInput() ShellAuthInputTeamInitiali
 
 // GetInputOk returns a tuple with the Input field value
 // and a boolean to check if the value has been set.
-func (o *ShellAuthBusinessCallCallOneOf37) GetInputOk() (*ShellAuthInputTeamInitialize, bool) {
+func (o *ShellAuthBusinessCallCallOneOf37) GetInputOk() (*ShellAuthInputCreateAiChatCompletionStream, bool) {
 	if o == nil {
 		return nil, false
 	}
@@ -90,7 +90,7 @@ func (o *ShellAuthBusinessCallCallOneOf37) GetInputOk() (*ShellAuthInputTeamInit
 }
 
 // SetInput sets field value
-func (o *ShellAuthBusinessCallCallOneOf37) SetInput(v ShellAuthInputTeamInitialize) {
+func (o *ShellAuthBusinessCallCallOneOf37) SetInput(v ShellAuthInputCreateAiChatCompletionStream) {
 	o.Input = v
 }
 

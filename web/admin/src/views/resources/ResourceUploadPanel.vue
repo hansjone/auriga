@@ -92,6 +92,19 @@ const range = computed({
       manifest.value.skill.dshVersionRange = v;
   },
 });
+const functionalTags = computed(() =>
+  manifest.value?.kind === 'plugin'
+    ? (manifest.value.plugin.tags ?? []).join(', ')
+    : '',
+);
+function updateFunctionalTags(event: Event) {
+  if (manifest.value?.kind !== 'plugin') return;
+  manifest.value.plugin.tags = (event.target as HTMLInputElement).value
+    .split(/[,，]/)
+    .map((tag) => tag.trim().toLowerCase())
+    .filter(Boolean);
+  confirmed.value = false;
+}
 watch(locked, (v) => emit('locked', v));
 watch(
   [tools, hosts, () => JSON.stringify(manifest.value?.permissions.dataAccess)],
@@ -500,6 +513,16 @@ onBeforeUnmount(() => {
               maxlength="128"
               required
           /></label>
+          <label v-if="manifest.kind === 'plugin'">
+            {{ t('functionalTags') }}
+            <input
+              :value="functionalTags"
+              data-testid="upload-functional-tags"
+              maxlength="164"
+              @change="updateFunctionalTags"
+            />
+            <small>{{ t('functionalTagsHint') }}</small>
+          </label>
           <label
             >{{ t('visibility')
             }}<select v-model="visibility">
