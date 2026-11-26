@@ -1,5 +1,4 @@
 import { createHash } from 'node:crypto';
-import { isIP } from 'node:net';
 import { TextDecoder } from 'node:util';
 import { validatePrivateSkill } from './private-skills.js';
 import { schemaValid } from './schema.js';
@@ -81,17 +80,26 @@ async function packSkillDirectory(source) {
 
 /** @param {string} host */
 function hostValid(host) {
-  return (
-    host === host.toLowerCase() &&
-    host.length <= 253 &&
-    (isIP(host) === 4 ||
-      (isIP(host) === 6 && /^[0-9a-f:]+$/.test(host)) ||
-      (!/^[0-9.]+$/.test(host) &&
-        host
-          .split('.')
-          .every((part) =>
-            /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(part),
-          )))
+  if (host !== host.toLowerCase() || host.length > 253) return false;
+  if (host.includes(':')) {
+    if (!/^[0-9a-f:]+$/.test(host)) return false;
+    // Brackets restrict the URL parser to an IPv6 literal. Parsing does no I/O.
+    try {
+      return new URL('http://[' + host + ']').hostname.startsWith('[');
+    } catch {
+      return false;
+    }
+  }
+  const parts = host.split('.');
+  if (/^[0-9.]+$/.test(host))
+    return (
+      parts.length === 4 &&
+      parts.every(
+        (part) => /^(?:0|[1-9][0-9]{0,2})$/.test(part) && Number(part) <= 255,
+      )
+    );
+  return parts.every((part) =>
+    /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(part),
   );
 }
 

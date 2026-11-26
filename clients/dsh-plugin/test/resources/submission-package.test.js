@@ -200,3 +200,35 @@ test('source preflight rejects oversized skill files before packaging', async (t
     /assets\/large.txt.*size limit/,
   );
 });
+
+test('submission outbound hosts admit DNS labels and unambiguous bare IP literals', async (t) => {
+  const { plugin, prepare } = await fixture(t);
+  await plugin();
+  const options = (outboundHosts) => ({
+    metadata: {
+      ...metadata,
+      permissions: { ...metadata.permissions, outboundHosts },
+    },
+  });
+  const hosts = ['example.com', '192.0.2.10', '2001:db8::5', '::1'];
+  assert.deepEqual(
+    (await prepare('plugin', options(hosts))).manifest.permissions
+      .outboundHosts,
+    hosts,
+  );
+  for (const malformed of [
+    '127.1',
+    '192.000.2.10',
+    '192.0.2.256',
+    '2001:::5',
+    '[2001:db8::5]:80',
+    'fe80::1%eth0',
+    'https://example.com',
+    'Example.com',
+  ]) {
+    await assert.rejects(
+      prepare('plugin', options([malformed])),
+      /outboundHosts/,
+    );
+  }
+});

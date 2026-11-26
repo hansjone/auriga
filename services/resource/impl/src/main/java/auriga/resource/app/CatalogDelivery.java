@@ -2204,7 +2204,7 @@ public final class CatalogDelivery implements UnifiedResourceResolution {
           || !CatalogStatePolicy.desired(json(durable, "resource")).equals("REMOVED"))
         throw CatalogStatePolicy.conflict();
       db.update(
-          "UPDATE resource.catalog_instance_installation SET collected_generation=:generation WHERE tenant_id=:tenant AND instance_id=:instance AND package_id=:pkg AND revision=:revision AND selection_revision=:selection",
+          "UPDATE resource.catalog_instance_installation SET collected_generation=:generation,market_installed=false WHERE tenant_id=:tenant AND instance_id=:instance AND package_id=:pkg AND revision=:revision AND selection_revision=:selection",
           db.args(
               "generation",
               observed.generation(),

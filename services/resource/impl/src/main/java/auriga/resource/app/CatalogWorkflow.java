@@ -401,7 +401,7 @@ public final class CatalogWorkflow {
         var contributor = access.desktopContributor(actor);
         return tx.write(() -> packageJson(ownedSubmissionPackage(contributor, id)));
       }
-      return tx.write(() -> packageJson(pkg(reader, id, false)));
+      return tx.write(() -> visibleMarketPackage(reader, id));
     }
     return detail(actor, id, null, false);
   }
@@ -411,9 +411,13 @@ public final class CatalogWorkflow {
     return tx.write(
         () -> {
           if (v != null) return versionJson(ver(r, p, v, admin));
-          var pack = pkg(r, p, false);
-          return marketPackage(pack, marketReleases(r, List.of(pack)).get(p));
+          return visibleMarketPackage(r, p);
         });
+  }
+
+  private ObjectNode visibleMarketPackage(ResourceAccess.Reader reader, UUID id) {
+    var pack = pkg(reader, id, false);
+    return marketPackage(pack, marketReleases(reader, List.of(pack)).get(id));
   }
 
   public JsonNode list(
