@@ -292,10 +292,6 @@ test('site-sign-review requires explicit site profile, current review digest and
   const stage = join(dir, 'stage');
   mkdirSync(stage);
   const archive = join(dir, 'AurigaDSH-Setup-1.0.0.exe');
-  const tar =
-    process.platform === 'win32'
-      ? join(process.env.SystemRoot, 'System32/tar.exe')
-      : 'tar';
   const evidence = {
     schema: 1,
     inputsSha256: 'a'.repeat(64),
