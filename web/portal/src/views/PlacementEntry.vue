@@ -21,6 +21,7 @@ const api = createPlacementApi(apiClient),
   busy = ref(false),
   error = ref(''),
   empty = ref(false),
+  migration = ref(false),
   expired = ref(false);
 let generation = 0;
 let abort = new globalThis.AbortController();
@@ -31,6 +32,7 @@ async function run(open = false) {
   abort = new globalThis.AbortController();
   busy.value = true;
   error.value = '';
+  empty.value = migration.value = false;
   try {
     if (open) {
       const result = await api.open(placementRequestKey(), abort.signal);
@@ -40,10 +42,12 @@ async function run(open = false) {
     } else {
       const result = await api.read(abort.signal);
       if (version !== generation) return;
-      if (!['shared', 'dedicated'].includes(result.mode))
-        throw new Error('mode');
+      if (
+        !['shared', 'dedicated'].includes(result.mode) ||
+        !['ready', 'pending', 'switching', 'unavailable'].includes(result.state)
+      )
+        throw new Error('Invalid placement');
       placement.value = result;
-      empty.value = false;
     }
   } catch (e) {
     if (version !== generation) return;
@@ -55,8 +59,14 @@ async function run(open = false) {
       e.problem.code === 'common.not_found'
     )
       empty.value = true;
+    else if (
+      open &&
+      isApiError(e) &&
+      e.status === 409 &&
+      e.problem.code === 'shared.legacy_migration_required'
+    )
+      migration.value = true;
     else {
-      empty.value = false;
       expired.value = isApiError(e) && e.status === 401;
       error.value =
         t(expired.value ? 'expired' : 'failed') +
@@ -94,9 +104,16 @@ onBeforeUnmount(() => {
     <p v-if="placement">
       {{ t(placement.mode) }} · {{ t('states.' + placement.state) }}
     </p>
-    <p v-if="placement && placement.state !== 'ready'" role="status">
+    <p v-if="placement?.state === 'pending'" role="status">
       {{ t('waiting') }}
     </p>
+    <p v-if="placement?.state === 'switching'" role="status">
+      {{ t('switching') }} {{ t('refreshLater') }}
+    </p>
+    <p v-if="placement?.state === 'unavailable'" role="alert">
+      {{ t('unavailable') }}
+    </p>
+    <p v-if="migration" role="status">{{ t('migration') }}</p>
     <p v-if="empty">{{ t('empty') }}</p>
     <p v-if="error" role="alert">{{ error }}</p>
     <a v-if="expired" href="/login">{{ t('signIn') }}</a>
@@ -111,15 +128,12 @@ onBeforeUnmount(() => {
         t('refresh')
       }}</ElButton>
       <ElButton
-        v-if="!expired && (empty || error)"
+        v-if="empty || migration"
         data-testid="fallback-personal"
         @click="emit('fallback')"
         >{{ t('fallbackAction') }}</ElButton
       >
     </div>
-    <p v-if="!expired && (empty || error)" role="status">
-      {{ t('fallbackHint') }}
-    </p>
     <p v-if="placement?.state === 'ready'" class="market">
       <a href="/resources">{{ t('market') }}</a>
     </p>

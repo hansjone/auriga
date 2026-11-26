@@ -114,6 +114,28 @@ function button(text: string, selector = 'button') {
   expect(result, `button ${text}`).toBeDefined();
   return result!;
 }
+function enablePlacement() {
+  document.head.insertAdjacentHTML(
+    'beforeend',
+    '<meta name="auriga-shared-placement-enabled" content="true">',
+  );
+}
+const migration = () =>
+  json({ status: 409, code: 'shared.legacy_migration_required' }, 409);
+async function showMigration() {
+  enablePlacement();
+  fetcher
+    .mockResolvedValueOnce(
+      json({
+        ...me,
+        account: { ...me.account, displayName: 'Demo Member' },
+        session: { ...me.session, id: 'private-session-marker' },
+      }),
+    )
+    .mockResolvedValueOnce(migration());
+  render();
+  await flush();
+}
 function field(name: string, value: string) {
   root.querySelector<HTMLInputElement>(`input[name="${name}"]`)!.value = value;
 }
@@ -382,23 +404,31 @@ describe('native cloud sign-in', () => {
     ]);
   });
 
-  it.each(['ready', 'pending', 'ready-after-conflict'])(
-    'opens the configured shared placement through its ticket from %s',
-    async (initialState) => {
-      document.head.insertAdjacentHTML(
-        'beforeend',
-        '<meta name="auriga-shared-placement-enabled" content="true">',
-      );
+  it.each([
+    ['ready', 'shared'],
+    ['pending', 'shared'],
+    ['ready-after-conflict', 'shared'],
+    ['switching', 'dedicated'],
+    ['ready', 'dedicated'],
+  ])(
+    'opens an authoritative %s placement in %s mode through its ticket',
+    async (initialState, mode) => {
+      enablePlacement();
       const pool = '01900000-0000-7000-8000-000000000012';
       const exchangeUrl = `/i/${pool}/_auriga/placement-ticket`;
       const keys: (string | null)[] = [];
+      let reads = 0;
       fetcher.mockImplementation(async (input, init) => {
         const path = String(input);
         if (path.endsWith('/me')) return json(me);
         if (path.endsWith('/me/placement')) {
+          reads++;
           return json({
-            mode: 'shared',
-            state: initialState === 'pending' ? 'pending' : 'ready',
+            mode,
+            state:
+              initialState === 'ready-after-conflict' || reads > 1
+                ? 'ready'
+                : initialState,
           });
         }
         if (path.endsWith('/me/placement/open')) {
@@ -410,7 +440,7 @@ describe('native cloud sign-in', () => {
             return json({ status: 409, code: 'common.conflict' }, 409);
           }
           return json({
-            placement: { mode: 'shared', state: 'ready' },
+            placement: { mode, state: 'ready' },
             exchangeUrl,
             ticket: 'test-placement-proof',
             expiresAt: Date.now() / 1000 + 60,
@@ -429,10 +459,14 @@ describe('native cloud sign-in', () => {
       });
       render();
       await flush();
-      if (initialState === 'pending') {
-        expect(root.textContent).toContain('正在等待 DSH 就绪');
+      if (initialState === 'pending' || initialState === 'switching') {
+        expect(root.textContent).toContain(
+          initialState === 'pending' ? '正在等待 DSH 就绪' : '模式正在切换中',
+        );
+        expect(button('继续进入现有独享实例').hidden).toBe(true);
         expect(navigate).not.toHaveBeenCalled();
         await vi.advanceTimersByTimeAsync(2000);
+        expect(reads).toBe(2);
       }
       expect(keys).toHaveLength(initialState === 'ready' ? 1 : 2);
       expect(new Set(keys).size).toBe(1);
@@ -447,27 +481,156 @@ describe('native cloud sign-in', () => {
       ).toBe(false);
     },
   );
-  it('stops on an allocation conflict that is not pending and does not open a personal instance', async () => {
-    document.head.insertAdjacentHTML(
-      'beforeend',
-      '<meta name="auriga-shared-placement-enabled" content="true">',
+  it.each([
+    [() => json({ mode: 'shared', state: 'unavailable' }), '当前实例暂不可用'],
+    [() => json({ mode: 'shared', state: 'blocked' }), '当前实例暂不可用'],
+    [
+      () => json({ status: 404, code: 'common.not_found' }, 404),
+      '分配冲突或尚未就绪',
+    ],
+  ] as const)(
+    'stops on a conflict without legacy fallback (%s)',
+    async (read, message) => {
+      enablePlacement();
+      fetcher
+        .mockResolvedValueOnce(json(me))
+        .mockResolvedValueOnce(
+          json({ status: 409, code: 'common.conflict' }, 409),
+        )
+        .mockResolvedValueOnce(read());
+      render();
+      await flush();
+      expect(root.textContent).toContain(message);
+      expect(button('继续进入现有独享实例').hidden).toBe(true);
+      await vi.advanceTimersByTimeAsync(6000);
+      expect(fetcher.mock.calls.map(([path]) => path)).toEqual([
+        '/api/iam/v1/me',
+        '/api/workspace/v1/me/placement/open',
+        '/api/workspace/v1/me/placement',
+      ]);
+      expect(navigate).not.toHaveBeenCalled();
+    },
+  );
+  it('stops after one ready retry when opening still conflicts', async () => {
+    enablePlacement();
+    fetcher.mockResolvedValueOnce(json(me));
+    const states = ['ready', 'switching', 'ready'];
+    fetcher.mockImplementation(async (path) =>
+      String(path).endsWith('/placement/open')
+        ? json({ status: 409, code: 'common.conflict' }, 409)
+        : json({ mode: 'shared', state: states.shift() }),
     );
-    fetcher
-      .mockResolvedValueOnce(json(me))
-      .mockResolvedValueOnce(
-        json({ status: 409, code: 'common.conflict' }, 409),
-      )
-      .mockResolvedValueOnce(json({ mode: 'shared', state: 'unavailable' }));
     render();
     await flush();
-    await vi.advanceTimersByTimeAsync(6000);
+    await vi.advanceTimersByTimeAsync(121_000);
+    expect(root.textContent).toContain('分配冲突或尚未就绪');
+    expect(button('继续进入现有独享实例').hidden).toBe(true);
     expect(fetcher.mock.calls.map(([path]) => path)).toEqual([
       '/api/iam/v1/me',
       '/api/workspace/v1/me/placement/open',
       '/api/workspace/v1/me/placement',
+      '/api/workspace/v1/me/placement/open',
+      '/api/workspace/v1/me/placement',
+      '/api/workspace/v1/me/placement',
     ]);
     expect(navigate).not.toHaveBeenCalled();
   });
+
+  it('shows migration and account information, and retries only the placement', async () => {
+    await showMigration();
+    await vi.advanceTimersByTimeAsync(121_000);
+    expect(root.textContent).toContain('管理台完成维护迁移');
+    expect(root.textContent).toContain('Demo Member · owner');
+    expect(root.textContent).not.toContain('private-session-marker');
+    page!.setLocale('en');
+    expect(root.textContent).toContain('admin console');
+    expect(button('Continue to existing dedicated instance').hidden).toBe(
+      false,
+    );
+    fetcher.mockResolvedValueOnce(json(me)).mockResolvedValueOnce(migration());
+    button('Retry').click();
+    await flush();
+    const request = ['/api/iam/v1/me', '/api/workspace/v1/me/placement/open'];
+    expect(fetcher.mock.calls.map(([path]) => path)).toEqual([
+      ...request,
+      ...request,
+    ]);
+    expect(navigate).not.toHaveBeenCalled();
+  });
+
+  it('enters a ready existing instance only after a click and observation', async () => {
+    await showMigration();
+    fetcher
+      .mockResolvedValueOnce(json({ items: [starting] }))
+      .mockResolvedValueOnce(json({ instance: starting, created: false }))
+      .mockResolvedValueOnce(json(ready));
+    const action = button('继续进入现有独享实例');
+    action.click();
+    action.click();
+    await flush();
+    expect(navigate).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(fetcher.mock.calls.map(([path]) => path)).toEqual([
+      '/api/iam/v1/me',
+      '/api/workspace/v1/me/placement/open',
+      '/api/workspace/v1/me/instances',
+      '/api/workspace/v1/me/instance/open',
+      '/api/workspace/v1/instances/' + encodeURIComponent(starting.id),
+    ]);
+    expect(navigate).toHaveBeenCalledExactlyOnceWith(
+      '/open/' + encodeURIComponent(ready.id),
+    );
+  });
+
+  it.each([
+    [[{ ...ready, phase: 'stopped' }], '已停止'],
+    [[{ ...ready, phase: 'failed' }], '启动失败'],
+    [[{ ...ready, desired: 'stopped' }], '已停止'],
+    [[], '暂时无法进入'],
+  ] as const)(
+    'shows why a legacy instance cannot open (%s)',
+    async (items, reason) => {
+      await showMigration();
+      fetcher.mockResolvedValueOnce(json({ items }));
+      button('继续进入现有独享实例').click();
+      await flush();
+      await vi.advanceTimersByTimeAsync(121_000);
+      expect(root.textContent).toContain(reason);
+      expect(fetcher.mock.calls.map(([path]) => path)).toEqual([
+        '/api/iam/v1/me',
+        '/api/workspace/v1/me/placement/open',
+        '/api/workspace/v1/me/instances',
+      ]);
+      expect(navigate).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([
+    [
+      () => json({ status: 409, code: 'common.conflict' }, 409),
+      '确认维护迁移进度',
+    ],
+    [
+      () => json({ instance: { ...ready, phase: 'stopped' }, created: false }),
+      '已停止',
+    ],
+    [() => json({ instance: ready, created: true }), '暂时无法进入'],
+  ] as const)(
+    'handles a legacy state change during manual open (%s)',
+    async (open, reason) => {
+      await showMigration();
+      fetcher
+        .mockResolvedValueOnce(json({ items: [ready] }))
+        .mockResolvedValueOnce(open());
+      button('继续进入现有独享实例').click();
+      await flush();
+      await vi.advanceTimersByTimeAsync(121_000);
+      expect(root.textContent).toContain(reason);
+      expect(fetcher).toHaveBeenCalledTimes(4);
+      expect(navigate).not.toHaveBeenCalled();
+    },
+  );
+
   it('opens the workspace without waiting for department information and updates the identity area later', async () => {
     let reads = 0;
     fetcher.mockImplementation(async (input) => {

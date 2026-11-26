@@ -226,14 +226,13 @@ public final class SharedDshPlacements implements SharedDshAuthority {
                   member);
           if (existing.isEmpty()) {
             // Existing dedicated users require an explicit maintenance export/rebuild window.
-            conflict(
+            long legacyInstances =
                 store.jdbc.queryForObject(
-                        "SELECT count(*) FROM instance WHERE tenant_id=? AND owner_id=? AND NOT"
-                            + " deleted",
-                        Long.class,
-                        tenant(),
-                        member)
-                    == 0);
+                    "SELECT count(*) FROM instance WHERE tenant_id=? AND owner_id=? AND NOT deleted",
+                    Long.class,
+                    tenant(),
+                    member);
+            if (legacyInstances > 0) throw new AurigaException(LEGACY_MIGRATION_REQUIRED);
             UUID id = UuidV7.next(), pool = reserve(member, "shared");
             store.jdbc.update(
                 "INSERT INTO shared_dsh_placement(id,tenant_id,member_id,pool_id,mode)"

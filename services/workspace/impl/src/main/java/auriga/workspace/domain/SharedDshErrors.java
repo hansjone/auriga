@@ -11,6 +11,9 @@ public final class SharedDshErrors {
   public static final ErrorCode STOP_UNCONFIRMED =
       ErrorCode.of("shared.stop_unconfirmed", 409, Status.Code.FAILED_PRECONDITION);
 
+  public static final ErrorCode LEGACY_MIGRATION_REQUIRED =
+      ErrorCode.of("shared.legacy_migration_required", 409, Status.Code.FAILED_PRECONDITION);
+
   private SharedDshErrors() {}
 
   public static void matched(boolean valid) {

@@ -1359,6 +1359,51 @@ class SharedDshPostgresTest {
     return id;
   }
 
+  @Test
+  void stoppedLegacyInstanceRequiresMigrationAndIsPreserved() {
+    UUID member = UUID.randomUUID(), id = legacy(member);
+    run(
+        () ->
+            store.tx(
+                () ->
+                    store.jdbc.update(
+                        "UPDATE instance SET phase='stopped',ready=false WHERE id=?", id)));
+    var before = instanceSnapshot(id);
+    var error = assertThrows(auriga.common.error.AurigaException.class, () -> allocate(member));
+    assertEquals("shared.legacy_migration_required", error.errorCode().code());
+    assertEquals(409, error.errorCode().httpStatus());
+    assertEquals(before, instanceSnapshot(id));
+    assertEquals(
+        0L,
+        run(
+            () ->
+                store.tx(
+                    () ->
+                        store.jdbc.queryForObject(
+                            "SELECT count(*) FROM shared_dsh_placement WHERE tenant_id=? AND member_id=?",
+                            Long.class,
+                            tenant,
+                            member))));
+  }
+
+  private String instanceSnapshot(UUID id) {
+    return run(
+        () ->
+            store.tx(
+                () ->
+                    store.jdbc.queryForObject(
+                        "SELECT to_jsonb(i)::text FROM instance i WHERE id=?", String.class, id)));
+  }
+
+  @Test
+  void firstAllocationWithoutLegacyInstanceCreatesSharedPlacement() {
+    UUID member = UUID.randomUUID();
+    var created = allocate(member);
+    assertEquals(
+        "shared", auriga.workspace.domain.SharedDshPolicy.mode(created.binding().getMode()));
+    assertEquals(created, run(() -> service.current(member, session)));
+  }
+
   auriga.workspace.app.SharedDshMaintenance maintenance() {
     return new auriga.workspace.app.SharedDshMaintenance(store, service, inputs, clock);
   }

@@ -21,6 +21,7 @@ import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 class SharedDshAdminHttpTest {
   final UUID member = UUID.randomUUID(), actor = UUID.randomUUID(), tenant = UUID.randomUUID();
   final Instant now = Instant.ofEpochSecond(1000);
+  final SharedDshTickets tickets = mock(SharedDshTickets.class);
   final SharedDshAdmin admin = mock(SharedDshAdmin.class);
   final SharedDshController.RequestGate gate = mock(SharedDshController.RequestGate.class);
   final PlacementAuthorization authorization = mock(PlacementAuthorization.class);
@@ -50,7 +51,7 @@ class SharedDshAdminHttpTest {
     var controller =
         new SharedDshController(
             mock(SharedDshPlacements.class),
-            mock(SharedDshTickets.class),
+            tickets,
             gate,
             Clock.fixed(now, ZoneOffset.UTC),
             admin,
@@ -68,6 +69,17 @@ class SharedDshAdminHttpTest {
   @AfterEach
   void cleanup() {
     SecurityContextHolder.clearContext();
+  }
+
+  @Test
+  void portalOpenReturnsLegacyMigrationProblem() throws Exception {
+    login(TokenContext.PORTAL, Set.of(), now);
+    when(tickets.open(eq(actor), any(UUID.class), eq("open-key")))
+        .thenThrow(
+            new AurigaException(auriga.workspace.domain.SharedDshErrors.LEGACY_MIGRATION_REQUIRED));
+    mvc.perform(post("/api/workspace/v1/me/placement/open").header("Idempotency-Key", "open-key"))
+        .andExpect(status().isConflict())
+        .andExpect(jsonPath("$.code").value("shared.legacy_migration_required"));
   }
 
   @Test
