@@ -1158,10 +1158,8 @@ export function catalogService(options) {
               pack.latestVersion?.publishedVersion ??
               pack.market?.version ??
               null;
-            let latestVersion =
-              pack.latestVersion?.version ?? pack.market?.version ?? null;
-            let latestState =
-              pack.latestVersion?.state ?? (pack.market ? 'published' : null);
+            let latestVersion = pack.latestVersion?.version ?? null;
+            let latestState = pack.latestVersion?.state ?? null;
             let description =
               pack.latestVersion?.description ?? pack.market?.description ?? '';
             let versionsComplete = !!pack.latestVersion;

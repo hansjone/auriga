@@ -211,6 +211,10 @@ const permissionChanges = computed(() => {
   ];
   return { added, removed, unchanged: !added.length && !removed.length };
 });
+function cancelUpgrade() {
+  ++upgradeEpoch;
+  upgradeTarget.value = undefined;
+}
 async function startUpgrade(p: CatalogPackage) {
   const reqEpoch = ++upgradeEpoch;
   let expectedPackageName: string | undefined;
@@ -739,9 +743,9 @@ onBeforeUnmount(() => {
           :disabled="busy || !!pending || loading"
           :upgrade-target="upgradeTarget"
           @locked="uploadLocked = $event"
-          @cancel-upgrade="upgradeTarget = undefined"
+          @cancel-upgrade="cancelUpgrade"
           @completed="
-            upgradeTarget = undefined;
+            cancelUpgrade();
             load(cursor);
           "
           @resume-draft="resumeDraft($event)"

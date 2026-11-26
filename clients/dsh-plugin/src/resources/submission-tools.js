@@ -327,7 +327,7 @@ export function installSubmissionTools(
           if (retained > maxArchiveBytes) return refuse('common.rate_limited');
 
           // Best-effort lookup to detect upgrade mode against an existing owned package.
-          /** @type {{packageId:string,latestVersion:string|null,latestState:string|null,publishedVersion:string|null}|undefined} */
+          /** @type {{packageId:string,latestVersion:string|null,latestState:string|null,publishedVersion:string|null,versionsComplete:boolean}|undefined} */
           let existingPackage;
           /** @type {'create'|'upgrade'|'unknown'} */
           let mode = 'unknown';
@@ -349,6 +349,7 @@ export function installSubmissionTools(
                   latestVersion: match.latestVersion ?? null,
                   latestState: match.latestState ?? null,
                   publishedVersion: match.publishedVersion ?? null,
+                  versionsComplete: match.versionsComplete !== false,
                 };
                 if (
                   match.latestVersion === manifest.version ||
