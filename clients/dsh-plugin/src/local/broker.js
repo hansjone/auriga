@@ -218,6 +218,7 @@ export async function createBroker({
         throw Object.assign(unavailable(result.error.code), {
           status: result.error.upstreamStatus,
           retryable: result.error.retryable,
+          ...(result.error.rule ? { rule: result.error.rule } : {}),
         });
       return result.output;
     },

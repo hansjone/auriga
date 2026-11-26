@@ -51,6 +51,11 @@ public final class IamDevicePermissionAuthority implements DevicePermissionAutho
   }
 
   @Override
+  public boolean desktopSessionActive(UUID tenant, String account, String device) {
+    return devices.desktopSessionActive(tenant.toString(), account, device);
+  }
+
+  @Override
   public Optional<UUID> installationInstance(UUID tenant, String account, String device) {
     return devices.installationInstance(tenant.toString(), account, device);
   }

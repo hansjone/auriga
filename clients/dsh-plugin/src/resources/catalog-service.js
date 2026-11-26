@@ -467,6 +467,181 @@ export function catalogService(options) {
       refuse('resource.apply_failed');
     return result;
   }
+  /** @type {Map<string,{fingerprint:string,etag?:string,retryPackageId?:string,expires:number}>} */
+  const submissions = new Map();
+  /** @typedef {{manifest:any,archive:Uint8Array,reason:string,key:string,packageId?:string}} PreparedSubmission */
+  /** @template T @param {'package'|'upload'|'submit'} stage @param {()=>Promise<T>} action */
+  async function submissionStage(stage, action) {
+    try {
+      return await action();
+    } catch (error) {
+      throw Object.assign(
+        error instanceof Error ? error : new Error('common.unavailable'),
+        {
+          code:
+            /** @type {{code?:string}} */ (error)?.code ?? 'common.unavailable',
+          stage,
+        },
+      );
+    }
+  }
+  /** @param {PreparedSubmission} input */
+  async function sendPrepared(input) {
+    api.check();
+    if (
+      !input ||
+      typeof input.key !== 'string' ||
+      !/^[A-Za-z0-9_-]{1,64}$/.test(input.key) ||
+      typeof input.reason !== 'string' ||
+      !input.reason.trim() ||
+      input.reason.length > 1024 ||
+      (input.packageId !== undefined && !uuid(input.packageId)) ||
+      !(input.archive instanceof Uint8Array) ||
+      !['skill', 'plugin'].includes(input.manifest?.kind) ||
+      !schemaValid('package', 'Manifest', input.manifest)
+    )
+      refuse('common.validation_failed');
+    const bytes = Buffer.from(JSON.stringify(input.manifest));
+    const { kind, name, version, artifacts } = parseStrictJson(bytes, true);
+    if (bytes.length > 262144 || bytes.length + input.archive.length > 67108864)
+      refuse('common.validation_failed');
+    const { key, reason, packageId } = input;
+    const manifestDigest = sha(bytes);
+    if (
+      artifacts.length !== 1 ||
+      artifacts[0].sizeBytes !== input.archive.length ||
+      artifacts[0].digest !== sha(input.archive)
+    )
+      refuse('resource.digest_mismatch');
+
+    const archive = new Blob([new Uint8Array(input.archive)], {
+      type: 'application/gzip',
+    });
+    const base = '/api/resource/v1/catalog/packages';
+    const fingerprint = canonicalize([
+      packageId ?? null,
+      manifestDigest,
+      reason,
+    ]);
+    const time = now();
+    for (const [key, attempt] of submissions) {
+      if (attempt.expires <= time) submissions.delete(key);
+    }
+    let attempt = submissions.get(key);
+    if (attempt && attempt.fingerprint !== fingerprint)
+      refuse('common.conflict');
+    if (!attempt) {
+      if (submissions.size >= 256) refuse('common.rate_limited');
+      attempt = { fingerprint, expires: time + 86400000 };
+      submissions.set(key, attempt);
+    }
+    const targetId = packageId ?? attempt.retryPackageId;
+    const pack = await submissionStage('package', () =>
+      targetId
+        ? api.request(base + '/' + targetId)
+        : api.request(base, {
+            body: { name, kind, visibility: 'tenant' },
+            etag: '"0"',
+            key: key + 'p',
+          }),
+    );
+    if (
+      !uuid(pack.value?.id) ||
+      (targetId !== undefined && pack.value.id !== targetId) ||
+      pack.value.tenantId !== who.tenantId ||
+      pack.value.ownerId !== who.ownerId ||
+      pack.value.kind !== kind ||
+      pack.value.name !== name
+    )
+      refuse('common.forbidden');
+    // Attach reads the current revision again on retry. The server receipt
+    // fingerprints the original If-Match, including after a lost response.
+    attempt.etag ??= submissionEtag(pack);
+    const form = new FormData();
+    form.append(
+      'metadata',
+      new Blob([JSON.stringify({ version, expectedDigest: manifestDigest })], {
+        type: 'application/json',
+      }),
+    );
+    form.append(
+      'manifest',
+      new Blob([bytes], { type: 'application/json' }),
+      'auriga-resource.json',
+    );
+    form.append('artifacts', archive, 'payload.tgz');
+
+    let uploaded;
+    try {
+      const etag = attempt.etag;
+      uploaded = await submissionStage('upload', () =>
+        api.request(base + '/' + pack.value.id + '/versions', {
+          form,
+          etag,
+          key: key + 'v',
+        }),
+      );
+    } catch (error) {
+      if (
+        /** @type {{code?:string}} */ (error).code ===
+        'common.precondition_failed'
+      )
+        attempt.etag = undefined;
+      throw error;
+    }
+    if (
+      !uuid(uploaded.value?.id) ||
+      uploaded.value.packageId !== pack.value.id ||
+      uploaded.value.kind !== kind ||
+      uploaded.value.version !== version ||
+      uploaded.value.state !== 'draft' ||
+      uploaded.value.digest !== manifestDigest
+    )
+      refuse('resource.digest_mismatch');
+    const review = await submissionStage('submit', () =>
+      api.request(
+        base +
+          '/' +
+          pack.value.id +
+          '/versions/' +
+          uploaded.value.id +
+          '/submissions',
+        {
+          body: { reason },
+          etag: submissionEtag(uploaded),
+          key: key + 's',
+        },
+      ),
+    );
+    const result = review.value;
+    if (
+      !uuid(result?.reviewId) ||
+      result.authorId !== who.ownerId ||
+      result.status !== 'pending' ||
+      result.version?.id !== uploaded.value.id ||
+      result.version?.packageId !== pack.value.id ||
+      result.version?.kind !== kind ||
+      result.version?.version !== version ||
+      result.version?.digest !== manifestDigest ||
+      result.version?.state !== 'pending_review'
+    )
+      refuse('common.validation_failed');
+    return {
+      packageId: pack.value.id,
+      versionId: uploaded.value.id,
+      state: result.version.state,
+      manifestDigest,
+    };
+  }
+  /** @param {{value:any,etag:string|null}} response */
+  function submissionEtag({ value, etag }) {
+    const revision = value?.revision;
+    if (!Number.isSafeInteger(revision) || revision < 0)
+      refuse('common.validation_failed');
+    const expected = '"' + revision + '"';
+    if (etag !== null && etag !== expected) refuse('common.validation_failed');
+    return expected;
+  }
   return {
     who,
     cloud,
@@ -887,14 +1062,7 @@ export function catalogService(options) {
      * @param {{snapshotId:string,version:string,license:string,author:string,reason:string,permissions:any,key:string,packageId?:string}} input */
     submit(input) {
       return serial(async () => {
-        if (
-          !input ||
-          !/^[A-Za-z0-9_-]{1,64}$/.test(input.key) ||
-          typeof input.reason !== 'string' ||
-          !input.reason.trim() ||
-          input.reason.length > 4096
-        )
-          refuse('common.validation_failed');
+        api.check();
         const frozen = await options.privateSkills.frozen(input.snapshotId),
           archive = packSkill(frozen.files, frozen);
         const manifest = {
@@ -925,100 +1093,13 @@ export function catalogService(options) {
             dshVersionRange: '>=0.2.1-rc.3',
           },
         };
-        if (!schemaValid('package', 'Manifest', manifest))
-          refuse('common.validation_failed');
-        const bytes = Buffer.from(JSON.stringify(manifest));
-        let pack;
-        if (input.packageId) {
-          if (!uuid(input.packageId)) refuse('common.validation_failed');
-          pack = await api.request(
-            '/api/resource/v1/catalog/packages/' + input.packageId,
-          );
-          if (
-            pack.value.ownerId !== who.ownerId ||
-            pack.value.name !== frozen.name
-          )
-            refuse('common.forbidden');
-        } else
-          pack = await api.request('/api/resource/v1/catalog/packages', {
-            body: { name: frozen.name, kind: 'skill', visibility: 'tenant' },
-            etag: '"0"',
-            key: input.key + 'p',
-          });
-        if (
-          !uuid(pack.value.id) ||
-          pack.value.kind !== 'skill' ||
-          pack.value.tenantId !== who.tenantId ||
-          pack.value.ownerId !== who.ownerId ||
-          pack.value.name !== frozen.name
-        )
-          refuse('common.validation_failed');
-        const form = new FormData();
-        form.append(
-          'metadata',
-          new Blob(
-            [
-              JSON.stringify({
-                version: input.version,
-                expectedDigest: sha(bytes),
-              }),
-            ],
-            { type: 'application/json' },
-          ),
-        );
-        form.append(
-          'manifest',
-          new Blob([bytes], { type: 'application/json' }),
-          'auriga-resource.json',
-        );
-        form.append(
-          'artifacts',
-          new Blob([archive], { type: 'application/gzip' }),
-          'payload.tgz',
-        );
-        const version = await api.request(
-          '/api/resource/v1/catalog/packages/' + pack.value.id + '/versions',
-          {
-            form,
-            etag: pack.etag ?? '"' + pack.value.revision + '"',
-            key: input.key + 'v',
-          },
-        );
-        if (
-          !uuid(version.value.id) ||
-          version.value.packageId !== pack.value.id ||
-          version.value.digest !== sha(bytes)
-        )
-          refuse('resource.digest_mismatch');
-        const review = await api.request(
-          '/api/resource/v1/catalog/packages/' +
-            pack.value.id +
-            '/versions/' +
-            version.value.id +
-            '/submissions',
-          {
-            body: { reason: input.reason },
-            etag: version.etag ?? '"' + version.value.revision + '"',
-            key: input.key + 's',
-          },
-        );
-        if (
-          !uuid(review.value.reviewId) ||
-          review.value.authorId !== who.ownerId ||
-          review.value.status !== 'pending' ||
-          review.value.version?.id !== version.value.id ||
-          review.value.version?.packageId !== pack.value.id ||
-          review.value.version?.digest !== sha(bytes) ||
-          review.value.version?.state !== 'pending_review'
-        )
-          refuse('common.validation_failed');
-        return {
-          packageId: pack.value.id,
-          versionId: version.value.id,
-          state: review.value.version.state,
-          manifestDigest: sha(bytes),
-        };
+        return sendPrepared({ ...input, manifest, archive });
       });
+    },
+    /** Trusted host callers submit only a prepared immutable payload.
+     * @param {PreparedSubmission} input */
+    submitPrepared(input) {
+      return serial(() => sendPrepared(input));
     },
   };
 }

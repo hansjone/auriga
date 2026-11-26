@@ -152,6 +152,30 @@ public final class DeviceAccessAuthority {
         });
   }
 
+  boolean desktopSessionActive(String tenant, String account, String device) {
+    return store.tx(
+        () -> {
+          var snapshot = credentialSnapshot(tenant, account, device);
+          if (snapshot == null) return false;
+          var row = store.get("device", device, false);
+          var source = store.byId("session", snapshot.session(), false);
+          if (row == null
+              || source == null
+              || !"dsh_connect".equals(row.path("kind").asString())
+              || !Set.of(StandardDevices.MODE, "native_tx")
+                  .contains(row.path("authorizationMode").asString())
+              || row.has("managedInstance")
+              || row.has("managedVersion")
+              || "managed".equals(row.path("deviceType").asString())
+              || "managed_device".equals(source.path("kind").asString())
+              || source.has("managedInstance")
+              || source.has("managedVersion")
+              || !source.path("providerId").equals(row.path("providerId"))) return false;
+          var provider = store.get("idp_provider", source.path("providerId").asString(), false);
+          return provider != null && provider.path("enabled").asBoolean();
+        });
+  }
+
   private static AurigaException forbidden() {
     return new AurigaException(CommonErrors.FORBIDDEN);
   }

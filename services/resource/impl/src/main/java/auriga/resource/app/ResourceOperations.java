@@ -20,6 +20,7 @@ import java.util.Objects;
 import java.util.UUID;
 import java.util.function.Consumer;
 import java.util.function.Function;
+import java.util.function.Supplier;
 import org.springframework.dao.DataIntegrityViolationException;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.node.ObjectNode;
@@ -82,7 +83,29 @@ public final class ResourceOperations {
       Consumer<ResourceAccess.Reader> guard,
       Function<ResourceAccess.Reader, JsonNode> action,
       boolean replayResponse) {
-    authorize(actor, permission, admin);
+    return operation(
+        actor,
+        op,
+        key,
+        body,
+        etag,
+        guard,
+        action,
+        replayResponse,
+        () -> authorize(actor, permission, admin));
+  }
+
+  JsonNode operation(
+      AurigaPrincipal actor,
+      String op,
+      String key,
+      ObjectNode body,
+      String etag,
+      Consumer<ResourceAccess.Reader> guard,
+      Function<ResourceAccess.Reader, JsonNode> action,
+      boolean replayResponse,
+      Supplier<ResourceAccess.Reader> authorize) {
+    authorize.get();
     if (key == null || !key.matches("[\\x21-\\x7E]{1,128}")) throw invalid();
     String fingerprint;
     try {
@@ -95,7 +118,7 @@ public final class ResourceOperations {
       return resources.write(
           () -> {
             db.lock(actor.subject() + ":" + op + ":" + key);
-            var r = authorize(actor, permission, admin);
+            var r = authorize.get();
             guard.accept(r);
             var replay = db.replay(r.account(), op, key, fingerprint, clock.instant());
             if (replay.isPresent()) {

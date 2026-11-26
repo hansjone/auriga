@@ -72,6 +72,9 @@ test('submission uploads the exact frozen private snapshot and its declarations,
           id: f.versionId,
           packageId: f.packageId,
           digest: manifestDigest,
+          kind: 'skill',
+          version: '1.0.0',
+          state: 'draft',
           revision: 2,
         },
         { status: 201, headers: { etag: '"2"' } },
@@ -91,6 +94,8 @@ test('submission uploads the exact frozen private snapshot and its declarations,
             id: f.versionId,
             packageId: f.packageId,
             digest: manifestDigest,
+            kind: 'skill',
+            version: '1.0.0',
             state: 'pending_review',
           },
         },
@@ -134,4 +139,151 @@ test('submission uploads the exact frozen private snapshot and its declarations,
   );
   row = await privateSkills.read('example', true);
   assert.match(row.files['SKILL.md'], /LATER PRIVATE EDIT/);
+});
+
+test('prepared plugin submission replays attach with its initial ETag and fresh upload refs', async (t) => {
+  const f = catalogFixture(t, undefined, { kind: 'plugin' });
+  const base = '/api/resource/v1/catalog/packages/' + f.packageId;
+  const pack = {
+    id: f.packageId,
+    kind: 'plugin',
+    tenantId: f.who.tenantId,
+    ownerId: f.who.ownerId,
+    name: f.manifest.name,
+    revision: 1,
+  };
+  const version = {
+    id: f.versionId,
+    packageId: f.packageId,
+    kind: 'plugin',
+    version: f.manifest.version,
+    state: 'draft',
+    revision: 1,
+    digest: sha(Buffer.from(JSON.stringify(f.manifest))),
+  };
+  const submitKeys = [];
+  let uploadAttempts = 0;
+  const s = catalogService({
+    ...f,
+    privateSkills: {},
+    host: {},
+    fetchImpl: async (url, options) => {
+      if (url.pathname === base)
+        return Response.json(pack, {
+          headers: { etag: '"' + pack.revision + '"' },
+        });
+      if (url.pathname === base + '/versions') {
+        assert.equal(options.headers['idempotency-key'], 'attachv');
+        assert.equal(options.headers['if-match'], '"1"');
+        assert.deepEqual(
+          JSON.parse(await options.body.get('metadata').text()),
+          {
+            version: f.manifest.version,
+            expectedDigest: version.digest,
+          },
+        );
+        assert.deepEqual(
+          Buffer.from(await options.body.get('artifacts').arrayBuffer()),
+          f.archive,
+        );
+        if (++uploadAttempts === 1) {
+          pack.revision++;
+          return Response.json({}, { status: 503 });
+        }
+        return Response.json(version, {
+          status: 201,
+          headers: { etag: '"1"' },
+        });
+      }
+      assert.equal(
+        url.pathname,
+        base + '/versions/' + f.versionId + '/submissions',
+      );
+      assert.equal(options.headers['if-match'], '"1"');
+      submitKeys.push(options.headers['idempotency-key']);
+      return Response.json(
+        {
+          authorId: f.who.ownerId,
+          reviewId: '019a0000-0000-7000-8000-000000000055',
+          status: 'pending',
+          version: { ...version, state: 'pending_review' },
+        },
+        { status: 201 },
+      );
+    },
+  });
+  const input = {
+    manifest: f.manifest,
+    archive: f.archive,
+    packageId: f.packageId,
+    key: 'attach',
+    reason: 'review prepared plugin',
+  };
+  await assert.rejects(
+    s.submitPrepared({ ...input, archive: Buffer.from('modified') }),
+    {
+      code: 'resource.digest_mismatch',
+    },
+  );
+  await assert.rejects(s.submitPrepared(input), { code: 'common.unavailable' });
+  await assert.rejects(
+    s.submitPrepared({ ...input, reason: 'changed intent' }),
+    {
+      code: 'common.conflict',
+    },
+  );
+  await assert.rejects(s.submitPrepared({ ...input, packageId: f.versionId }), {
+    code: 'common.conflict',
+  });
+  const result = await s.submitPrepared(input);
+  assert.deepEqual(result, {
+    packageId: f.packageId,
+    versionId: f.versionId,
+    state: 'pending_review',
+    manifestDigest: version.digest,
+  });
+  assert.equal(uploadAttempts, 2);
+  assert.deepEqual(submitKeys, ['attachs']);
+});
+
+test('prepared submission fences a device generation change during broker staging', async (t) => {
+  const f = catalogFixture(t, undefined, { kind: 'plugin' });
+  let generation = 1;
+  f.runtime.catalogGeneration = () => generation;
+  const calls = [];
+  const s = catalogService({
+    ...f,
+    privateSkills: {},
+    host: {},
+    fetchImpl: async (url, options) => {
+      calls.push([url.pathname, options.method]);
+      return Response.json(
+        {
+          id: f.packageId,
+          ownerId: f.who.ownerId,
+          tenantId: f.who.tenantId,
+          kind: 'plugin',
+          name: f.manifest.name,
+          revision: 1,
+        },
+        { status: 201, headers: { etag: '"1"' } },
+      );
+    },
+  });
+  const stage = f.runtime.upload;
+  f.runtime.upload = async (bytes, type) => {
+    const ref = await stage(bytes, type);
+    generation++;
+    return ref;
+  };
+  await assert.rejects(
+    s.submitPrepared({
+      manifest: f.manifest,
+      archive: f.archive,
+      key: 'new',
+      reason: 'review',
+    }),
+    { code: 'common.unauthenticated' },
+  );
+  assert.deepEqual(calls, [['/api/resource/v1/catalog/packages', 'POST']]);
 });

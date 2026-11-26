@@ -63,10 +63,12 @@ export async function resourceRequest(runtime, path, options = {}) {
           body.metadata = parseStrictJson(bytes, true);
         } else if (typeof value === 'string') body[key] = value;
         else {
+          options.check?.();
           const ref = await runtime.upload(
             Buffer.from(await value.arrayBuffer()),
             value.type,
           );
+          options.check?.();
           if (key === 'artifacts') (body.artifacts ??= []).push(ref);
           else body[key] = ref;
         }
@@ -81,10 +83,18 @@ export async function resourceRequest(runtime, path, options = {}) {
   }
   let output;
   try {
+    options.check?.();
     output = await dispatchResource(runtime.broker, operation.operation, input);
   } catch (error) {
     // Keep the adapters' post-response identity fence and HTTP-category mapping.
     // Broker errors carry no upstream body or credentials across this boundary.
+    if (
+      operation.operation === 'UnifiedUploadResourceVersion' &&
+      /** @type {{rule?:string}} */ (error)?.rule
+    ) {
+      options.check?.();
+      throw error;
+    }
     const status = {
       'common.validation_failed': 400,
       'common.unauthenticated': 401,
