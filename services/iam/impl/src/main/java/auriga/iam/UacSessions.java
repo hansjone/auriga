@@ -4,13 +4,14 @@ import auriga.common.context.TenantContext;
 import auriga.common.error.*;
 import auriga.common.security.*;
 import auriga.iam.api.UacEnterpriseAdapter;
+import auriga.iam.api.VerifiedAuthorDepartment;
 import java.time.*;
 import java.util.*;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.node.ObjectNode;
 
 /** Credentials, session generation and work registration commit in the session transaction. */
-final class UacSessions {
+final class UacSessions implements VerifiedAuthorDepartment {
   static boolean boundTo(ObjectNode holder, ObjectNode session) {
     return session.has("uacCredentialId")
         ? session.has("uacSessionBinding")
@@ -279,6 +280,69 @@ final class UacSessions {
             || clock
                 .instant()
                 .isBefore(Instant.parse(credential.path("retryDeadline").asString())));
+  }
+
+  @Override
+  public String authorDepartment(AurigaPrincipal actor) {
+    if (actor == null || TenantContext.current().filter(actor.tenantId()::equals).isEmpty())
+      return "";
+    return store.tx(
+        () -> {
+          ObjectNode session =
+              switch (actor.type()) {
+                case USER -> authorUserSession(actor);
+                case DEVICE -> authorDeviceSession(actor);
+                default -> null;
+              };
+          if (session == null
+              || !actor.subject().equals(session.path("accountId").asString())
+              || !session.hasNonNull("uacCredentialId")
+              || !session.path("uacSessionBinding").isObject()
+              || !sessions.valid(session)) return "";
+          var info = session.path("uacLoginInfo");
+          var department = info.path("department");
+          return "login_info".equals(info.path("purpose").asString())
+                  && "available".equals(info.path("status").asString())
+                  && department.isString()
+              ? department.asString().strip()
+              : "";
+        });
+  }
+
+  private ObjectNode authorUserSession(AurigaPrincipal actor) {
+    String sid = actor.sessionId();
+    if (sid == null
+        || (actor.context() != TokenContext.PORTAL && actor.context() != TokenContext.ADMIN))
+      return null;
+    var session = store.byId("session", sid, true);
+    return session != null
+            && sid.equals(session.path("sessionId").asString())
+            && actor.context().claimValue().equals(session.path("audience").asString())
+        ? session
+        : null;
+  }
+
+  private ObjectNode authorDeviceSession(AurigaPrincipal actor) {
+    if (actor.context() != TokenContext.DEVICE || actor.deviceId() == null) return null;
+    var device = store.get("device", actor.deviceId(), false);
+    if (device == null || !actor.subject().equals(device.path("accountId").asString())) return null;
+    String sourceId = device.path("uacSessionBinding").path("sourceSessionId").asString();
+    if (sourceId.isEmpty() || !sourceId.equals(device.path("sessionId").asString())) return null;
+    var session = store.byId("session", sourceId, true);
+    if (session == null
+        || !sourceId.equals(session.path("sessionId").asString())
+        || !"portal".equals(session.path("audience").asString())) return null;
+    // Follow the same lock order as device refresh and confirm the binding after both reads.
+    device = store.get("device", actor.deviceId(), true);
+    if (device == null
+        || device.path("revoked").asBoolean()
+        || !actor.subject().equals(device.path("accountId").asString())
+        || !sourceId.equals(device.path("sessionId").asString())
+        || !StandardDevices.scopes(device.path("scope").asString()).contains("auriga.connect")
+        || (device.hasNonNull("expiresAt")
+            && !clock.instant().isBefore(Instant.parse(device.path("expiresAt").asString())))
+        || !boundTo(device, session)) return null;
+    return session;
   }
 
   ObjectNode credentials(AurigaPrincipal principal) {
