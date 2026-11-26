@@ -12,8 +12,6 @@ const here = dirname(fileURLToPath(import.meta.url));
 
 export function winHelperPath() {
   if (process.platform !== 'win32') return null;
-  const override = process.env.AURIGA_WIN_HELPER;
-  if (override && existsSync(override)) return override;
   const bundled = join(here, 'auriga-win-helper.exe');
   return existsSync(bundled) ? bundled : null;
 }

@@ -71,7 +71,12 @@ import {
 } from 'node:path';
 import { spawnSync, spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { computeId, verifyPackage, verifyPackageAsync } from './verify.mjs';
+import {
+  PRODUCT,
+  computeId,
+  verifyPackage,
+  verifyPackageAsync,
+} from './verify.mjs';
 import {
   createPythonDirectory,
   protectPythonDirectory,
@@ -797,19 +802,24 @@ function copyTreeSteps(from, to, step) {
  * process (e.g. `upstream/node/node.exe` or `auriga/launcher`).
  */
 function movePayloadToStaging(payload, staging, step) {
+  const hasWinPython =
+    process.platform === 'win32' && existsSync(join(payload, 'runtime/python'));
   // Fast path: whole-directory rename succeeds when the running Node is outside
-  // `payload` (e.g. applyPending during in-app updates).
-  try {
-    renameWithRetry(payload, staging, { retries: 2 });
-    step(1);
-    return true;
-  } catch (error) {
-    if (!['EXDEV', 'EPERM', 'EBUSY', 'EACCES'].includes(error.code))
-      throw error;
-    if (error.code === 'EXDEV') return false;
+  // `payload` and no Windows Python directory needs createPythonDirectory() owner setup.
+  if (!hasWinPython) {
+    try {
+      renameWithRetry(payload, staging, { retries: 2 });
+      step(1);
+      return 'whole';
+    } catch (error) {
+      if (!['EXDEV', 'EPERM', 'EBUSY', 'EACCES'].includes(error.code))
+        throw error;
+      if (error.code === 'EXDEV') return false;
+    }
   }
-  // Running Node is inside payload (e.g. setup.exe fresh install): move heavy
-  // subtrees with zero-copy rename and copy only the small active entries.
+  // Move heavy subtrees with zero-copy rename; copy small active entries and
+  // materialize Windows runtime/python via createPythonDirectory() so its
+  // explicit current-user Owner + protected DACL contract is always preserved.
   mkdirSync(staging, { recursive: true });
   const moveEntry = (rel) => {
     const src = join(payload, rel);
@@ -827,7 +837,19 @@ function movePayloadToStaging(payload, staging, step) {
   let done = 0;
   for (const entry of topEntries) {
     const name = entry.name;
-    if (name === 'upstream' && entry.isDirectory()) {
+    if (name === 'runtime' && entry.isDirectory() && hasWinPython) {
+      for (const sub of readdirSync(join(payload, 'runtime'))) {
+        if (sub === 'python') {
+          createPythonDirectory(staging);
+          copyTree(
+            join(payload, 'runtime', 'python'),
+            join(staging, 'runtime', 'python'),
+          );
+        } else {
+          moveEntry(join('runtime', sub));
+        }
+      }
+    } else if (name === 'upstream' && entry.isDirectory()) {
       for (const sub of readdirSync(join(payload, 'upstream'))) {
         if (sub === 'node')
           copyTree(
@@ -848,7 +870,7 @@ function movePayloadToStaging(payload, staging, step) {
     done++;
     step(done / Math.max(1, topEntries.length));
   }
-  return true;
+  return 'partial';
 }
 
 /** Remove only the empty directories and marker a failed first install created. */
@@ -1144,17 +1166,28 @@ function installStopped({
   } else if (movePayload) {
     const manifestFile = join(payload, 'manifest.json');
     if (!existsSync(manifestFile)) throw new Error('manifest.json missing');
-    manifest = readJson(manifestFile);
+    try {
+      manifest = readJson(manifestFile);
+    } catch {
+      throw new Error('manifest.json is not valid JSON');
+    }
     if (
       manifest.schema !== 1 ||
+      manifest.product !== PRODUCT ||
       typeof manifest.id !== 'string' ||
-      computeId(manifest) !== manifest.id
+      !Array.isArray(manifest.files) ||
+      !manifest.upstream ||
+      !manifest.plugin ||
+      !manifest.pnpm ||
+      !Array.isArray(manifest.trees)
     )
+      throw new Error('manifest is malformed');
+    if (computeId(manifest) !== manifest.id)
       throw new Error('manifest id does not match its component digest');
   } else {
     manifest = verifyPackage(payload, { trees: false });
   }
-  assertGuardianCompatible(payload, dataHome);
+  if (existsSync(payload)) assertGuardianCompatible(payload, dataHome);
   checkpoint();
   const created = {
     root: !existsSync(root),
@@ -1190,8 +1223,8 @@ function installStopped({
     if (fresh) {
       const staging = `${target}.partial`;
       rmSync(staging, { recursive: true, force: true });
+      let moved = false;
       try {
-        let moved = false;
         if (movePayload) {
           moved = movePayloadToStaging(payload, staging, (fraction) => {
             progress('copy', fraction);
@@ -1212,13 +1245,24 @@ function installStopped({
         }
         protectPythonDirectory(staging);
         checkpoint();
+        renameWithRetry(staging, target);
       } catch (error) {
-        rmSync(staging, { recursive: true, force: true });
+        if (moved === 'whole' && existsSync(staging) && !existsSync(payload)) {
+          try {
+            renameWithRetry(staging, payload, { retries: 2 });
+          } catch {
+            rmSync(staging, { recursive: true, force: true });
+          }
+        } else {
+          rmSync(staging, { recursive: true, force: true });
+        }
         throw error;
       }
-      renameWithRetry(staging, target);
     }
-    if (!fresh) protectPythonDirectory(target);
+    if (!fresh) {
+      assertGuardianCompatible(target, dataHome);
+      protectPythonDirectory(target);
+    }
     transition({
       root,
       dataHome,

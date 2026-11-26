@@ -135,11 +135,11 @@ function retargetVenvConfig(pyvenvCfg, pythonDir, pythonExe) {
   if (!existsSync(pyvenvCfg)) return false;
   const raw = readFileSync(pyvenvCfg, 'utf8');
   if (!/^home\s*=/im.test(raw)) return false;
-  let updated = raw.replace(/^home\s*=.*$/im, `home = ${pythonDir}`);
+  let updated = raw.replace(/^home\s*=.*$/im, () => `home = ${pythonDir}`);
   if (/^executable\s*=/im.test(updated))
     updated = updated.replace(
       /^executable\s*=.*$/im,
-      `executable = ${pythonExe}`,
+      () => `executable = ${pythonExe}`,
     );
   if (updated !== raw) durableWrite(pyvenvCfg, updated);
   return true;
@@ -254,7 +254,20 @@ export function preparePythonUser(dir, dataHome, base = process.env) {
     const envReady = existsSync(join(paths.bin, 'python.exe'));
     const exactMatch =
       envReady && JSON.stringify(previous) === JSON.stringify(identity);
-    let needsProbe = !exactMatch;
+    const venvFiles = [
+      'pyvenv.cfg',
+      'Scripts/python.exe',
+      'Scripts/python3.exe',
+      'Scripts/pythonw.exe',
+    ];
+    const probeInterpreter = () => {
+      stage = 'interpreter_probe';
+      run(
+        join(paths.bin, 'python.exe'),
+        ['-I', '-B', '-c', 'import sys; assert sys.prefix != sys.base_prefix'],
+        env,
+      );
+    };
     if (!exactMatch) {
       // Fast path on version upgrade: when ABI and pip wheel are unchanged,
       // retarget pyvenv.cfg to the new bundled Python instead of recreating the venv.
@@ -263,33 +276,34 @@ export function preparePythonUser(dir, dataHome, base = process.env) {
         previous?.abi === PYTHON_ABI &&
         previous?.pipSha256 === pip.sha256 &&
         existsSync(join(paths.environment, 'pyvenv.cfg'));
-      let retargeted = false;
+      let ready = false;
       if (canRetarget) {
         stage = 'venv_paths';
-        assertLocalPath(join(paths.environment, 'pyvenv.cfg'));
-        retargeted = retargetVenvConfig(
-          join(paths.environment, 'pyvenv.cfg'),
-          pythonDir,
-          python,
-        );
-        if (retargeted) {
-          stage = 'marker_write';
-          durableJson(marker, identity);
+        for (const file of venvFiles)
+          assertLocalPath(join(paths.environment, file));
+        if (
+          retargetVenvConfig(
+            join(paths.environment, 'pyvenv.cfg'),
+            pythonDir,
+            python,
+          )
+        ) {
+          try {
+            probeInterpreter();
+            ready = true;
+          } catch {
+            // Damaged venv on disk: fall back to a clean rebuild below.
+          }
         }
       }
-      if (!retargeted) {
+      if (!ready) {
         stage = 'pip_wheel';
         if (sha256File(wheel) !== pip.sha256)
           throw Object.assign(new Error('pip wheel 校验失败'), {
             reason: 'python_user.bootstrap_digest_mismatch',
           });
         stage = 'venv_paths';
-        for (const file of [
-          'pyvenv.cfg',
-          'Scripts/python.exe',
-          'Scripts/python3.exe',
-          'Scripts/pythonw.exe',
-        ])
+        for (const file of venvFiles)
           assertLocalPath(join(paths.environment, file));
         stage = 'venv_create';
         run(
@@ -321,17 +335,12 @@ export function preparePythonUser(dir, dataHome, base = process.env) {
           ],
           env,
         );
-        stage = 'marker_write';
-        durableJson(marker, identity);
+        probeInterpreter();
       }
-    }
-    if (needsProbe) {
-      stage = 'interpreter_probe';
-      run(
-        join(paths.bin, 'python.exe'),
-        ['-I', '-B', '-c', 'import sys; assert sys.prefix != sys.base_prefix'],
-        env,
-      );
+      // Persist marker only after interpreter_probe succeeds so a failed setup
+      // is never permanently cached as healthy.
+      stage = 'marker_write';
+      durableJson(marker, identity);
     }
     // A damaged pip does not block launching DSH or importing the built-in packages.
     stage = 'index_config';

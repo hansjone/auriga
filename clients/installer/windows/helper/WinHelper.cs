@@ -148,7 +148,12 @@ static class WinHelper
         {
             current = Path.Combine(current, parts[i]);
             uint attr = GetFileAttributesW(LongPath(current));
-            if (attr == INVALID_FILE_ATTRIBUTES) continue;
+            if (attr == INVALID_FILE_ATTRIBUTES)
+            {
+                int err = Marshal.GetLastWin32Error();
+                if (err == 2 || err == 3) continue; // ERROR_FILE_NOT_FOUND / ERROR_PATH_NOT_FOUND
+                throw new IOException("GetFileAttributesW failed (" + err + ") for " + current);
+            }
             if ((attr & FILE_ATTRIBUTE_REPARSE_POINT) != 0)
             {
                 reparse = true;

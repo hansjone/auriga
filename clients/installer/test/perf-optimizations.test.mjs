@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { Buffer } from 'node:buffer';
 import { execFileSync } from 'node:child_process';
 import { EventEmitter } from 'node:events';
 import {
@@ -13,7 +14,11 @@ import { join } from 'node:path';
 import { PassThrough } from 'node:stream';
 import { compileHelper, makeExe } from '../scripts/make-exe.mjs';
 import { verifyPackage, verifyPackageAsync } from '../runtime/verify.mjs';
-import { readSetupManifest } from '../runtime/setup-archive.mjs';
+import {
+  readSetupEntry,
+  readSetupManifest,
+} from '../runtime/setup-archive.mjs';
+import { install } from '../runtime/core.mjs';
 import { extractArchive } from '../runtime/update.mjs';
 import { createControl } from '../runtime/tray-control.mjs';
 import { superviseDsh } from '../runtime/desktop-supervision.mjs';
@@ -180,5 +185,80 @@ test(
       Array.isArray(probe.processes) &&
         probe.processes.some((p) => p.pid === process.pid),
     );
+
+    const list = JSON.parse(
+      execFileSync(helper, ['proc-list'], {
+        encoding: 'utf8',
+        windowsHide: true,
+        maxBuffer: 32 * 1024 * 1024,
+      }),
+    );
+    assert.ok(Array.isArray(list) && list.some((p) => p.pid === process.pid));
+
+    const pyDir = join(base, 'py-protected');
+    execFileSync(helper, ['protect-python', pyDir, 'create'], {
+      windowsHide: true,
+    });
+    assert.ok(existsSync(pyDir));
+    execFileSync(helper, ['protect-python', pyDir, 'seal'], {
+      windowsHide: true,
+    });
+
+    const dataDir = join(base, 'data-grant');
+    mkdirSync(dataDir, { recursive: true });
+    execFileSync(helper, ['grant-modify', dataDir], { windowsHide: true });
   },
 );
+
+test('movePayload restores staging back to payload on failure and succeeds on clean install', (t) => {
+  const base = tempBase(t);
+  const root = join(base, 'root');
+  const dataHome = join(base, 'data');
+  const { dir: badPayload } = buildPayload(base, { name: 'bad' });
+  // Corrupt a file so verifyPackage(staging) fails after whole-dir rename.
+  writeFileSync(join(badPayload, 'auriga/runtime/core.mjs'), 'corrupted');
+  assert.throws(() =>
+    install({
+      payload: badPayload,
+      root,
+      dataHome,
+      movePayload: true,
+      smoke: () => {},
+    }),
+  );
+  // Source payload must be restored so a retry or diagnostic still sees it.
+  assert.ok(existsSync(join(badPayload, 'manifest.json')));
+
+  const { dir: goodPayload, manifest } = buildPayload(base, { name: 'good' });
+  const res = install({
+    payload: goodPayload,
+    root,
+    dataHome,
+    movePayload: true,
+    smoke: () => {},
+  });
+  assert.equal(res.id, manifest.id);
+  assert.ok(existsSync(join(root, 'versions', manifest.id, 'manifest.json')));
+});
+
+test('readSetupEntry rejects malformed or out-of-bounds ZIP payloads', (t) => {
+  const base = tempBase(t);
+  const malformed = join(base, 'bad.exe');
+  // Fake MZ header + garbage ZIP bytes + valid AURZIP01 trailer
+  const zipBody = Buffer.alloc(64, 0);
+  // Put an EOCD signature with bogus cdOffset > length
+  zipBody.writeUInt32LE(0x06054b50, 42);
+  zipBody.writeUInt32LE(100, 42 + 12);
+  zipBody.writeUInt32LE(9999, 42 + 16);
+  const trailer = Buffer.alloc(16);
+  trailer.write('AURZIP01', 0, 'ascii');
+  trailer.writeBigInt64LE(BigInt(zipBody.length), 8);
+  writeFileSync(
+    malformed,
+    Buffer.concat([Buffer.from('MZstub'), zipBody, trailer]),
+  );
+  assert.throws(
+    () => readSetupEntry(malformed, 'payload/manifest.json'),
+    /invalid setup zip directory bounds/,
+  );
+});

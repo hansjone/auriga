@@ -1,4 +1,8 @@
-import { readSetupManifest, unpackSetup } from './setup-archive.mjs';
+import {
+  isZipSetupArchive,
+  readSetupManifest,
+  unpackSetup,
+} from './setup-archive.mjs';
 import { BRAND_NAME } from './brand.mjs';
 /* global clearTimeout, AbortController, AbortSignal, fetch */
 /** Anonymous transport is bound to the configured platform origin. */
@@ -553,7 +557,7 @@ export function createUpdater({
         // For deferred real-archive updates, validate manifest.json directly
         // from the embedded ZIP without unpacking tens of thousands of files
         // twice (applyPending unpacks once directly into the target volume).
-        if (defer && extract === extractArchive) {
+        if (defer && extract === extractArchive && isZipSetupArchive(archive)) {
           progress('verifying', { stage: 'verify-package' });
           installStage = 'verify-package';
           manifest = readSetupManifest(archive);
@@ -996,13 +1000,15 @@ async function applyPendingLocked(
     };
     const unpacked = join(queued, 'apply');
     const useRealExtract = extract === extractArchive;
-    const payload = await retry(async () => {
+    let usedReuse = false;
+    let payload = await retry(async () => {
       note('verify-archive');
       checkArchive();
       note('extract');
       // The signed archive is the durable input. Rebuild scratch output after
       // interruption or failed extraction, while holding the transfer lock.
       rmSync(unpacked, { recursive: true, force: true });
+      usedReuse = false;
       if (useRealExtract) {
         let reuse = null;
         try {
@@ -1012,6 +1018,7 @@ async function applyPendingLocked(
         } catch {
           /* Fall back to standard full extraction if manifest peek fails. */
         }
+        usedReuse = Boolean(reuse);
         return await extract(archive, unpacked, { reuse });
       }
       return await extract(archive, unpacked);
@@ -1021,11 +1028,34 @@ async function applyPendingLocked(
     try {
       manifest = await verifyPackageAsync(payload);
     } catch (error) {
-      if (!error.code || !/^(E[A-Z]+)$/.test(error.code)) {
-        retain = false;
-        error.code ??= 'desktop.package_invalid';
+      if (usedReuse) {
+        // An unchanged subtree in the old version may have been damaged on disk.
+        // Fall back to a clean full extraction from the verified archive before
+        // declaring the pending update package invalid.
+        note('extract');
+        rmSync(unpacked, { recursive: true, force: true });
+        payload = await retry(async () => {
+          checkArchive();
+          rmSync(unpacked, { recursive: true, force: true });
+          return await extract(archive, unpacked, { reuse: null });
+        });
+        note('verify-package');
+        try {
+          manifest = await verifyPackageAsync(payload);
+        } catch (fullError) {
+          if (!fullError.code || !/^(E[A-Z]+)$/.test(fullError.code)) {
+            retain = false;
+            fullError.code ??= 'desktop.package_invalid';
+          }
+          throw fullError;
+        }
+      } else {
+        if (!error.code || !/^(E[A-Z]+)$/.test(error.code)) {
+          retain = false;
+          error.code ??= 'desktop.package_invalid';
+        }
+        throw error;
       }
-      throw error;
     }
     if (
       manifest.id !== body.packageId ||
@@ -1037,8 +1067,18 @@ async function applyPendingLocked(
       });
     }
     note('install');
-    await retry(() =>
-      install({
+    await retry(async () => {
+      if (
+        useRealExtract &&
+        !existsSync(payload) &&
+        !existsSync(versionDir(root, manifest.id))
+      ) {
+        checkArchive();
+        rmSync(unpacked, { recursive: true, force: true });
+        payload = await extract(archive, unpacked, { reuse: null });
+        await verifyPackageAsync(payload);
+      }
+      return install({
         root,
         payload,
         dataHome: current.dataHome,
@@ -1048,8 +1088,8 @@ async function applyPendingLocked(
         movePayload: useRealExtract,
         preverifiedManifest: useRealExtract ? manifest : null,
         progress: (step) => note(step),
-      }),
-    );
+      });
+    });
     retain = false;
     finishUpdateAttempt(root, 'succeeded');
     changeUpdateState(root, (state) => ({

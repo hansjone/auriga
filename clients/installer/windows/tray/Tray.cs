@@ -74,13 +74,15 @@ static class Desktop
     public static string Node(string root) { return Path.Combine(VersionDir(root), "upstream", "node", "node.exe"); }
     public static string Cli(string root) { return Path.Combine(VersionDir(root), "auriga", "runtime", "cli.mjs"); }
 
+    static readonly Regex SafeVersionId = new Regex("^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$");
+
     /// Fast local read matching `cli.mjs status` without spawning a Node.js subprocess.
     public static Dictionary<string, object> ReadDesktopInfo(string root)
     {
         var state = ReadJson(Path.Combine(root, "install.json"));
         string current = Str(state, "current");
         string dataHome = Str(state, "dataHome");
-        if (string.IsNullOrEmpty(current) || string.IsNullOrEmpty(dataHome)) return null;
+        if (string.IsNullOrEmpty(current) || !SafeVersionId.IsMatch(current) || string.IsNullOrEmpty(dataHome)) return null;
         string verDir = Path.Combine(root, "versions", current);
         var manifest = ReadJson(Path.Combine(verDir, "manifest.json"));
         if (manifest == null) return null;
@@ -94,7 +96,8 @@ static class Desktop
         string origin = Str(binding, "origin");
         bool updatesConfigured = !string.IsNullOrEmpty(origin) &&
             File.Exists(Path.Combine(verDir, "auriga", "runtime", "release-public-key.txt"));
-        bool updateEnabled = !update.ContainsKey("enabled") || Flag(update, "enabled");
+        object rawEnabled;
+        bool updateEnabled = !update.TryGetValue("enabled", out rawEnabled) || !(rawEnabled is bool) || (bool)rawEnabled;
         var updateSummary = new Dictionary<string, object>
         {
             { "enabled", updateEnabled },
@@ -283,6 +286,7 @@ sealed class TrayApp : ApplicationContext
     Process launcher;
     string dshUrl, platformState, platformReason, availableVersion, logFile, updateStageText;
     readonly object updateLock = new object();
+    readonly object logLock = new object();
     Process updateWorker;
     ProgressForm updateForm;
     long lastUpdateActivityTicks;
@@ -344,9 +348,15 @@ sealed class TrayApp : ApplicationContext
         RefreshInfo();
         openWhenReady = !autostart;
         StartLauncher();
-        var initialSnapshot = info;
-        ThreadPool.QueueUserWorkItem(delegate { RefreshShellIntegration(initialSnapshot); });
+        StartShellRefreshThread(info);
         checkTimer.Start();
+    }
+
+    void StartShellRefreshThread(Dictionary<string, object> snapshot)
+    {
+        var thread = new Thread(() => RefreshShellIntegration(snapshot)) { IsBackground = true };
+        thread.SetApartmentState(ApartmentState.STA);
+        thread.Start();
     }
 
     public void Post(Action action)
@@ -357,17 +367,20 @@ sealed class TrayApp : ApplicationContext
     void Log(string line)
     {
         if (logFile == null) return;
-        try
+        lock (logLock)
         {
-            line = Regex.Replace(line, "token=[A-Za-z0-9_\\-]+", "token=REDACTED");
-            if (File.Exists(logFile) && new FileInfo(logFile).Length > 5 * 1024 * 1024)
+            try
             {
-                File.Copy(logFile, logFile + ".1", true);
-                File.WriteAllText(logFile, "");
+                line = Regex.Replace(line, "token=[A-Za-z0-9_\\-]+", "token=REDACTED");
+                if (File.Exists(logFile) && new FileInfo(logFile).Length > 5 * 1024 * 1024)
+                {
+                    File.Copy(logFile, logFile + ".1", true);
+                    File.WriteAllText(logFile, "");
+                }
+                File.AppendAllText(logFile, DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss ") + line + Environment.NewLine, Encoding.UTF8);
             }
-            File.AppendAllText(logFile, DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss ") + line + Environment.NewLine, Encoding.UTF8);
+            catch (Exception) { }
         }
-        catch (Exception) { }
     }
 
     void SyncCurrentVersionIfChanged()
@@ -401,8 +414,7 @@ sealed class TrayApp : ApplicationContext
                 }
                 nextSyncAttemptUtc = DateTime.MinValue;
                 ApplyInfo(next);
-                var snapshot = next;
-                ThreadPool.QueueUserWorkItem(delegate { RefreshShellIntegration(snapshot); });
+                StartShellRefreshThread(next);
             });
         });
     }

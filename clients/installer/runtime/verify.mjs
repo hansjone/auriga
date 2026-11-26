@@ -66,6 +66,7 @@ async function sha256FileAsync(file, buffer) {
 async function mapConcurrent(items, concurrency, fn) {
   const results = new Array(items.length);
   let next = 0;
+  let firstError = null;
   const workerCount = Math.min(Math.max(1, concurrency), items.length);
   const workers = [];
   for (let w = 0; w < workerCount; w++) {
@@ -73,14 +74,21 @@ async function mapConcurrent(items, concurrency, fn) {
     workers.push(
       (async () => {
         for (;;) {
+          if (firstError) return;
           const i = next++;
           if (i >= items.length) return;
-          results[i] = await fn(items[i], i, buffer);
+          try {
+            results[i] = await fn(items[i], i, buffer);
+          } catch (error) {
+            if (!firstError) firstError = error;
+            return;
+          }
         }
       })(),
     );
   }
-  await Promise.all(workers);
+  await Promise.allSettled(workers);
+  if (firstError) throw firstError;
   return results;
 }
 

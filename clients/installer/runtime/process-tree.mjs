@@ -10,6 +10,7 @@ import {
 } from 'node:fs';
 import { join, parse } from 'node:path';
 import { randomUUID } from 'node:crypto';
+import { performance } from 'node:perf_hooks';
 import { assertLocalPath, durableJson, seedBootId } from './host-lock.mjs';
 import { parseStrictJson } from './json.mjs';
 import { execWinHelper } from './win-helper.mjs';
@@ -48,13 +49,13 @@ export function primeStartupProbe(home) {
   const data = JSON.parse(raw);
   if (data.ntfs) {
     validateNtfsInfo(data.ntfs);
-    cachedNtfs = { home: home.toLowerCase(), at: Date.now() };
+    cachedNtfs = { home: home.toLowerCase(), at: performance.now() };
   }
   if (data.bootId) seedBootId(data.bootId);
   if (Array.isArray(data.processes)) {
     const me = data.processes.find((p) => p.pid === process.pid);
     if (me) ownIdentity = me;
-    cachedStartupProcesses = { list: data.processes, at: Date.now() };
+    cachedStartupProcesses = { list: data.processes, at: performance.now() };
   }
   return true;
 }
@@ -66,7 +67,7 @@ export function assertNTFS(home) {
   if (
     cachedNtfs &&
     cachedNtfs.home === home.toLowerCase() &&
-    Date.now() - cachedNtfs.at < 5000
+    performance.now() - cachedNtfs.at < 5000
   )
     return;
   const root = parse(home).root;
@@ -101,7 +102,10 @@ export function assertNTFS(home) {
 }
 
 export function processList() {
-  if (cachedStartupProcesses && Date.now() - cachedStartupProcesses.at < 1500) {
+  if (
+    cachedStartupProcesses &&
+    performance.now() - cachedStartupProcesses.at < 1500
+  ) {
     const list = cachedStartupProcesses.list;
     cachedStartupProcesses = null;
     return list;
@@ -223,7 +227,9 @@ export class ProcessTree {
         same(
           processes.find((p) => p.pid === old.process.pid),
           old.process,
-        )
+        ) ||
+        (this.list === processList &&
+          same(processIdentity(old.process.pid), old.process))
       )
         throw new Error('guardian already running');
       // No writer can start through this launcher until the new singleton is acquired.
