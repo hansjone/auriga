@@ -819,7 +819,8 @@ public final class CatalogWorkflow {
       n.put("authorDepartment", department);
     if (row.get("submit_reason") instanceof String submitReason && !submitReason.isBlank())
       n.put("submitReason", submitReason);
-    Object submittedAt = row.get("created_at") != null ? row.get("created_at") : v.get("created_at");
+    Object submittedAt =
+        row.get("created_at") != null ? row.get("created_at") : v.get("created_at");
     if (submittedAt != null) n.put("submittedAt", instant(submittedAt).toString());
     var previous =
         db.rows(
@@ -849,8 +850,7 @@ public final class CatalogWorkflow {
               .put("digest", d.get("digest").toString())
               .put("versionRevision", number(d, "version_revision"))
               .put("createdAt", instant(d.get("created_at")).toString());
-      String reviewerName =
-          resolveDisplayName(r, d.get("reviewer_name"), d.get("reviewer_id"));
+      String reviewerName = resolveDisplayName(r, d.get("reviewer_name"), d.get("reviewer_id"));
       if (reviewerName != null) node.put("reviewerName", reviewerName);
       if (d.get("reviewer_department") instanceof String reviewerDepartment
           && !reviewerDepartment.isBlank()) node.put("reviewerDepartment", reviewerDepartment);
