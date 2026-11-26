@@ -60,6 +60,8 @@ description: 用户说“发布到 Auriga”“帮我把这个技能送审”“
 
 ## 提交参数与修正
 
+插件预检可用 `metadata.tags` 填最多五个功能标签，例如 `["data-analysis", "operations"]`。标签由小写字母、数字和短横线组成，每个最多 32 个字符。优先沿用市场已有标签。作者在市场上的姓名和部门由平台根据当前成员身份保存。
+
 `auriga_resource_submit` 接受 `handle` 和 1 至 1024 字符的非空 `reason`。向已有资源追加版本时，提供该资源的 `packageId`。句柄在同一登录、设备和会话中有效 15 分钟。
 
 - `common.validation_failed` 时，检查相对目录、种类、清单字段、版本、权限和归档内容。修正后重新预检。

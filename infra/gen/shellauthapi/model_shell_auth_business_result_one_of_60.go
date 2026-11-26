@@ -21,9 +21,9 @@ var _ MappedNullable = &ShellAuthBusinessResultOneOf60{}
 
 // ShellAuthBusinessResultOneOf60 struct for ShellAuthBusinessResultOneOf60
 type ShellAuthBusinessResultOneOf60 struct {
-	RequestId string                 `json:"requestId"`
-	Operation string                 `json:"operation"`
-	Error     ShellAuthBusinessError `json:"error"`
+	RequestId string                        `json:"requestId"`
+	Operation string                        `json:"operation"`
+	Output    ShellAuthOutputTeamNodeRevoke `json:"output"`
 }
 
 type _ShellAuthBusinessResultOneOf60 ShellAuthBusinessResultOneOf60
@@ -32,11 +32,11 @@ type _ShellAuthBusinessResultOneOf60 ShellAuthBusinessResultOneOf60
 // This constructor will assign default values to properties that have it defined,
 // and makes sure properties required by API are set, but the set of arguments
 // will change when the set of required properties is changed
-func NewShellAuthBusinessResultOneOf60(requestId string, operation string, error_ ShellAuthBusinessError) *ShellAuthBusinessResultOneOf60 {
+func NewShellAuthBusinessResultOneOf60(requestId string, operation string, output ShellAuthOutputTeamNodeRevoke) *ShellAuthBusinessResultOneOf60 {
 	this := ShellAuthBusinessResultOneOf60{}
 	this.RequestId = requestId
 	this.Operation = operation
-	this.Error = error_
+	this.Output = output
 	return &this
 }
 
@@ -96,28 +96,28 @@ func (o *ShellAuthBusinessResultOneOf60) SetOperation(v string) {
 	o.Operation = v
 }
 
-// GetError returns the Error field value
-func (o *ShellAuthBusinessResultOneOf60) GetError() ShellAuthBusinessError {
+// GetOutput returns the Output field value
+func (o *ShellAuthBusinessResultOneOf60) GetOutput() ShellAuthOutputTeamNodeRevoke {
 	if o == nil {
-		var ret ShellAuthBusinessError
+		var ret ShellAuthOutputTeamNodeRevoke
 		return ret
 	}
 
-	return o.Error
+	return o.Output
 }
 
-// GetErrorOk returns a tuple with the Error field value
+// GetOutputOk returns a tuple with the Output field value
 // and a boolean to check if the value has been set.
-func (o *ShellAuthBusinessResultOneOf60) GetErrorOk() (*ShellAuthBusinessError, bool) {
+func (o *ShellAuthBusinessResultOneOf60) GetOutputOk() (*ShellAuthOutputTeamNodeRevoke, bool) {
 	if o == nil {
 		return nil, false
 	}
-	return &o.Error, true
+	return &o.Output, true
 }
 
-// SetError sets field value
-func (o *ShellAuthBusinessResultOneOf60) SetError(v ShellAuthBusinessError) {
-	o.Error = v
+// SetOutput sets field value
+func (o *ShellAuthBusinessResultOneOf60) SetOutput(v ShellAuthOutputTeamNodeRevoke) {
+	o.Output = v
 }
 
 func (o ShellAuthBusinessResultOneOf60) MarshalJSON() ([]byte, error) {
@@ -132,7 +132,7 @@ func (o ShellAuthBusinessResultOneOf60) ToMap() (map[string]interface{}, error) 
 	toSerialize := map[string]interface{}{}
 	toSerialize["requestId"] = o.RequestId
 	toSerialize["operation"] = o.Operation
-	toSerialize["error"] = o.Error
+	toSerialize["output"] = o.Output
 	return toSerialize, nil
 }
 
@@ -143,7 +143,7 @@ func (o *ShellAuthBusinessResultOneOf60) UnmarshalJSON(data []byte) (err error) 
 	requiredProperties := []string{
 		"requestId",
 		"operation",
-		"error",
+		"output",
 	}
 
 	allProperties := make(map[string]interface{})

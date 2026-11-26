@@ -11,7 +11,6 @@ API version: 1.0.0
 package resourceapi
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
 	"time"
@@ -22,17 +21,19 @@ var _ MappedNullable = &UnifiedPackage{}
 
 // UnifiedPackage Shared unified resource. Installation mode is selected per scoped assignment; packages carry no governance level.
 type UnifiedPackage struct {
-	Id               string         `json:"id"`
-	TenantId         string         `json:"tenantId"`
-	Name             string         `json:"name" validate:"regexp=^[a-z0-9]+(?:-[a-z0-9]+)*$"`
-	Kind             string         `json:"kind"`
-	OwnerId          string         `json:"ownerId"`
-	Visibility       string         `json:"visibility"`
-	GroupIds         []string       `json:"groupIds"`
-	Revision         int64          `json:"revision"`
-	CreatedAt        time.Time      `json:"createdAt"`
-	Enabled          bool           `json:"enabled"`
-	DefaultVersionId NullableString `json:"defaultVersionId"`
+	Market               *UnifiedPackageMarket `json:"market,omitempty"`
+	Id                   string                `json:"id"`
+	TenantId             string                `json:"tenantId"`
+	Name                 string                `json:"name" validate:"regexp=^[a-z0-9]+(?:-[a-z0-9]+)*$"`
+	Kind                 string                `json:"kind"`
+	OwnerId              string                `json:"ownerId"`
+	Visibility           string                `json:"visibility"`
+	GroupIds             []string              `json:"groupIds"`
+	Revision             int64                 `json:"revision"`
+	CreatedAt            time.Time             `json:"createdAt"`
+	Enabled              bool                  `json:"enabled"`
+	DefaultVersionId     NullableString        `json:"defaultVersionId"`
+	AdditionalProperties map[string]interface{}
 }
 
 type _UnifiedPackage UnifiedPackage
@@ -63,6 +64,38 @@ func NewUnifiedPackage(id string, tenantId string, name string, kind string, own
 func NewUnifiedPackageWithDefaults() *UnifiedPackage {
 	this := UnifiedPackage{}
 	return &this
+}
+
+// GetMarket returns the Market field value if set, zero value otherwise.
+func (o *UnifiedPackage) GetMarket() UnifiedPackageMarket {
+	if o == nil || IsNil(o.Market) {
+		var ret UnifiedPackageMarket
+		return ret
+	}
+	return *o.Market
+}
+
+// GetMarketOk returns a tuple with the Market field value if set, nil otherwise
+// and a boolean to check if the value has been set.
+func (o *UnifiedPackage) GetMarketOk() (*UnifiedPackageMarket, bool) {
+	if o == nil || IsNil(o.Market) {
+		return nil, false
+	}
+	return o.Market, true
+}
+
+// HasMarket returns a boolean if a field has been set.
+func (o *UnifiedPackage) HasMarket() bool {
+	if o != nil && !IsNil(o.Market) {
+		return true
+	}
+
+	return false
+}
+
+// SetMarket gets a reference to the given UnifiedPackageMarket and assigns it to the Market field.
+func (o *UnifiedPackage) SetMarket(v UnifiedPackageMarket) {
+	o.Market = &v
 }
 
 // GetId returns the Id field value
@@ -341,6 +374,9 @@ func (o UnifiedPackage) MarshalJSON() ([]byte, error) {
 
 func (o UnifiedPackage) ToMap() (map[string]interface{}, error) {
 	toSerialize := map[string]interface{}{}
+	if !IsNil(o.Market) {
+		toSerialize["market"] = o.Market
+	}
 	toSerialize["id"] = o.Id
 	toSerialize["tenantId"] = o.TenantId
 	toSerialize["name"] = o.Name
@@ -352,6 +388,11 @@ func (o UnifiedPackage) ToMap() (map[string]interface{}, error) {
 	toSerialize["createdAt"] = o.CreatedAt
 	toSerialize["enabled"] = o.Enabled
 	toSerialize["defaultVersionId"] = o.DefaultVersionId.Get()
+
+	for key, value := range o.AdditionalProperties {
+		toSerialize[key] = value
+	}
+
 	return toSerialize, nil
 }
 
@@ -389,15 +430,31 @@ func (o *UnifiedPackage) UnmarshalJSON(data []byte) (err error) {
 
 	varUnifiedPackage := _UnifiedPackage{}
 
-	decoder := json.NewDecoder(bytes.NewReader(data))
-	decoder.DisallowUnknownFields()
-	err = decoder.Decode(&varUnifiedPackage)
+	err = json.Unmarshal(data, &varUnifiedPackage)
 
 	if err != nil {
 		return err
 	}
 
 	*o = UnifiedPackage(varUnifiedPackage)
+
+	additionalProperties := make(map[string]interface{})
+
+	if err = json.Unmarshal(data, &additionalProperties); err == nil {
+		delete(additionalProperties, "market")
+		delete(additionalProperties, "id")
+		delete(additionalProperties, "tenantId")
+		delete(additionalProperties, "name")
+		delete(additionalProperties, "kind")
+		delete(additionalProperties, "ownerId")
+		delete(additionalProperties, "visibility")
+		delete(additionalProperties, "groupIds")
+		delete(additionalProperties, "revision")
+		delete(additionalProperties, "createdAt")
+		delete(additionalProperties, "enabled")
+		delete(additionalProperties, "defaultVersionId")
+		o.AdditionalProperties = additionalProperties
+	}
 
 	return err
 }

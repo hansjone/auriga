@@ -75,6 +75,7 @@ type ShellAuthBusinessCallCall struct {
 	ShellAuthBusinessCallCallOneOf58 *ShellAuthBusinessCallCallOneOf58
 	ShellAuthBusinessCallCallOneOf59 *ShellAuthBusinessCallCallOneOf59
 	ShellAuthBusinessCallCallOneOf6  *ShellAuthBusinessCallCallOneOf6
+	ShellAuthBusinessCallCallOneOf60 *ShellAuthBusinessCallCallOneOf60
 	ShellAuthBusinessCallCallOneOf7  *ShellAuthBusinessCallCallOneOf7
 	ShellAuthBusinessCallCallOneOf8  *ShellAuthBusinessCallCallOneOf8
 	ShellAuthBusinessCallCallOneOf9  *ShellAuthBusinessCallCallOneOf9
@@ -476,6 +477,13 @@ func ShellAuthBusinessCallCallOneOf59AsShellAuthBusinessCallCall(v *ShellAuthBus
 func ShellAuthBusinessCallCallOneOf6AsShellAuthBusinessCallCall(v *ShellAuthBusinessCallCallOneOf6) ShellAuthBusinessCallCall {
 	return ShellAuthBusinessCallCall{
 		ShellAuthBusinessCallCallOneOf6: v,
+	}
+}
+
+// ShellAuthBusinessCallCallOneOf60AsShellAuthBusinessCallCall is a convenience function that returns ShellAuthBusinessCallCallOneOf60 wrapped in ShellAuthBusinessCallCall
+func ShellAuthBusinessCallCallOneOf60AsShellAuthBusinessCallCall(v *ShellAuthBusinessCallCallOneOf60) ShellAuthBusinessCallCall {
+	return ShellAuthBusinessCallCall{
+		ShellAuthBusinessCallCallOneOf60: v,
 	}
 }
 
@@ -1473,6 +1481,23 @@ func (dst *ShellAuthBusinessCallCall) UnmarshalJSON(data []byte) error {
 		dst.ShellAuthBusinessCallCallOneOf6 = nil
 	}
 
+	// try to unmarshal data into ShellAuthBusinessCallCallOneOf60
+	err = newStrictDecoder(data).Decode(&dst.ShellAuthBusinessCallCallOneOf60)
+	if err == nil {
+		jsonShellAuthBusinessCallCallOneOf60, _ := json.Marshal(dst.ShellAuthBusinessCallCallOneOf60)
+		if string(jsonShellAuthBusinessCallCallOneOf60) == "{}" { // empty struct
+			dst.ShellAuthBusinessCallCallOneOf60 = nil
+		} else {
+			if err = validator.Validate(dst.ShellAuthBusinessCallCallOneOf60); err != nil {
+				dst.ShellAuthBusinessCallCallOneOf60 = nil
+			} else {
+				match++
+			}
+		}
+	} else {
+		dst.ShellAuthBusinessCallCallOneOf60 = nil
+	}
+
 	// try to unmarshal data into ShellAuthBusinessCallCallOneOf7
 	err = newStrictDecoder(data).Decode(&dst.ShellAuthBusinessCallCallOneOf7)
 	if err == nil {
@@ -1583,6 +1608,7 @@ func (dst *ShellAuthBusinessCallCall) UnmarshalJSON(data []byte) error {
 		dst.ShellAuthBusinessCallCallOneOf58 = nil
 		dst.ShellAuthBusinessCallCallOneOf59 = nil
 		dst.ShellAuthBusinessCallCallOneOf6 = nil
+		dst.ShellAuthBusinessCallCallOneOf60 = nil
 		dst.ShellAuthBusinessCallCallOneOf7 = nil
 		dst.ShellAuthBusinessCallCallOneOf8 = nil
 		dst.ShellAuthBusinessCallCallOneOf9 = nil
@@ -1827,6 +1853,10 @@ func (src ShellAuthBusinessCallCall) MarshalJSON() ([]byte, error) {
 
 	if src.ShellAuthBusinessCallCallOneOf6 != nil {
 		return json.Marshal(&src.ShellAuthBusinessCallCallOneOf6)
+	}
+
+	if src.ShellAuthBusinessCallCallOneOf60 != nil {
+		return json.Marshal(&src.ShellAuthBusinessCallCallOneOf60)
 	}
 
 	if src.ShellAuthBusinessCallCallOneOf7 != nil {
@@ -2077,6 +2107,10 @@ func (obj *ShellAuthBusinessCallCall) GetActualInstance() interface{} {
 		return obj.ShellAuthBusinessCallCallOneOf6
 	}
 
+	if obj.ShellAuthBusinessCallCallOneOf60 != nil {
+		return obj.ShellAuthBusinessCallCallOneOf60
+	}
+
 	if obj.ShellAuthBusinessCallCallOneOf7 != nil {
 		return obj.ShellAuthBusinessCallCallOneOf7
 	}
@@ -2321,6 +2355,10 @@ func (obj ShellAuthBusinessCallCall) GetActualInstanceValue() interface{} {
 
 	if obj.ShellAuthBusinessCallCallOneOf6 != nil {
 		return *obj.ShellAuthBusinessCallCallOneOf6
+	}
+
+	if obj.ShellAuthBusinessCallCallOneOf60 != nil {
+		return *obj.ShellAuthBusinessCallCallOneOf60
 	}
 
 	if obj.ShellAuthBusinessCallCallOneOf7 != nil {

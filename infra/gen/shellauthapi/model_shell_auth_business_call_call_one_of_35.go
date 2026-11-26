@@ -21,8 +21,8 @@ var _ MappedNullable = &ShellAuthBusinessCallCallOneOf35{}
 
 // ShellAuthBusinessCallCallOneOf35 struct for ShellAuthBusinessCallCallOneOf35
 type ShellAuthBusinessCallCallOneOf35 struct {
-	Operation string                           `json:"operation"`
-	Input     ShellAuthInputListNetworkSystems `json:"input"`
+	Operation string                               `json:"operation"`
+	Input     ShellAuthInputCreateAiChatCompletion `json:"input"`
 }
 
 type _ShellAuthBusinessCallCallOneOf35 ShellAuthBusinessCallCallOneOf35
@@ -31,7 +31,7 @@ type _ShellAuthBusinessCallCallOneOf35 ShellAuthBusinessCallCallOneOf35
 // This constructor will assign default values to properties that have it defined,
 // and makes sure properties required by API are set, but the set of arguments
 // will change when the set of required properties is changed
-func NewShellAuthBusinessCallCallOneOf35(operation string, input ShellAuthInputListNetworkSystems) *ShellAuthBusinessCallCallOneOf35 {
+func NewShellAuthBusinessCallCallOneOf35(operation string, input ShellAuthInputCreateAiChatCompletion) *ShellAuthBusinessCallCallOneOf35 {
 	this := ShellAuthBusinessCallCallOneOf35{}
 	this.Operation = operation
 	this.Input = input
@@ -71,9 +71,9 @@ func (o *ShellAuthBusinessCallCallOneOf35) SetOperation(v string) {
 }
 
 // GetInput returns the Input field value
-func (o *ShellAuthBusinessCallCallOneOf35) GetInput() ShellAuthInputListNetworkSystems {
+func (o *ShellAuthBusinessCallCallOneOf35) GetInput() ShellAuthInputCreateAiChatCompletion {
 	if o == nil {
-		var ret ShellAuthInputListNetworkSystems
+		var ret ShellAuthInputCreateAiChatCompletion
 		return ret
 	}
 
@@ -82,7 +82,7 @@ func (o *ShellAuthBusinessCallCallOneOf35) GetInput() ShellAuthInputListNetworkS
 
 // GetInputOk returns a tuple with the Input field value
 // and a boolean to check if the value has been set.
-func (o *ShellAuthBusinessCallCallOneOf35) GetInputOk() (*ShellAuthInputListNetworkSystems, bool) {
+func (o *ShellAuthBusinessCallCallOneOf35) GetInputOk() (*ShellAuthInputCreateAiChatCompletion, bool) {
 	if o == nil {
 		return nil, false
 	}
@@ -90,7 +90,7 @@ func (o *ShellAuthBusinessCallCallOneOf35) GetInputOk() (*ShellAuthInputListNetw
 }
 
 // SetInput sets field value
-func (o *ShellAuthBusinessCallCallOneOf35) SetInput(v ShellAuthInputListNetworkSystems) {
+func (o *ShellAuthBusinessCallCallOneOf35) SetInput(v ShellAuthInputCreateAiChatCompletion) {
 	o.Input = v
 }
 

@@ -601,6 +601,71 @@ class ResourceReadAssemblyTest {
     }
   }
 
+  @Test
+  void pluginMarketShowsPublishedMetadataAndIdempotentMemberStars() throws Exception {
+    CATALOG_WRITES.set(true);
+    admin.update(
+        "UPDATE org.role SET permissions=ARRAY['auriga.connect','auriga.connect.resources.use','resource.packages.read'] WHERE id=?",
+        ROLE);
+    UUID pack = id(8290), version = id(8291);
+    String manifest =
+        """
+        {"kind":"plugin","name":"market-example","version":"1.2.3",
+         "description":"Synthetic market fixture",
+         "plugin":{"dshVersionRange":">=0.2.1-rc.3","tags":["operations","network"]}}
+        """;
+    byte[] bytes = manifest.getBytes(StandardCharsets.UTF_8);
+    admin.update(
+        """
+        INSERT INTO resource.catalog_package(id,tenant_id,owner_id,name,kind,visibility,enabled,release_high_water,created_at)
+        VALUES(?,?,?,'market-example','plugin','tenant',true,1,now())
+        """,
+        pack,
+        T1,
+        ALICE);
+    admin.update(
+        """
+        INSERT INTO resource.catalog_version(id,tenant_id,package_id,author_id,version,digest,
+          manifest_bytes,manifest,state,minimum_risk,risk,release_sequence,created_at,
+          market_author_name,market_author_department,market_published_at)
+        VALUES(?,?,?,?,'1.2.3',?,?,?::jsonb,'published','r2','r2',1,now(),
+          'Trusted author','Operations','2026-11-26T00:00:00Z')
+        """,
+        version,
+        T1,
+        pack,
+        ALICE,
+        auriga.resource.app.CatalogManifest.digest(bytes),
+        bytes,
+        manifest);
+    admin.update(
+        "UPDATE resource.catalog_package SET default_version_id=? WHERE id=?", version, pack);
+    var a = deviceCredentials.issue(T1, ALICE, "standard");
+    var b = deviceCredentials.issue(T1, BOB, "standard");
+    var path = "/catalog/packages/" + pack;
+    var details = deviceRequest(path, a.token(), null);
+    deviceStatus(200, details);
+    var market = JSON.readTree(details.body()).path("market");
+    assertEquals("Trusted author", market.path("authorName").asString());
+    assertEquals("Operations", market.path("authorDepartment").asString());
+    assertEquals("2026-11-26T00:00:00Z", market.path("publishedAt").asString());
+    assertEquals("1.2.3", market.path("version").asString());
+    assertEquals("operations", market.path("tags").get(0).asString());
+    assertEquals(0, market.path("installationCount").asInt());
+    assertFalse(market.path("starred").asBoolean());
+    var like = "{\"starred\":true}";
+    var first = catalogPost(path + "/star", a.token(), like, "0", "first-star", 200);
+    assertEquals(first, catalogPost(path + "/star", a.token(), like, "0", "repeat-star", 200));
+    assertEquals(1, first.path("starCount").asInt());
+    var second = catalogPost(path + "/star", b.token(), like, "0", "bob-star", 200);
+    assertEquals(2, second.path("starCount").asInt());
+    var clear = catalogPost(path + "/star", a.token(), "{\"starred\":false}", "0", "unstar", 200);
+    assertEquals(1, clear.path("starCount").asInt());
+    assertFalse(clear.path("starred").asBoolean());
+    admin.update("UPDATE resource.catalog_package SET enabled=false WHERE id=?", pack);
+    catalogPost(path + "/star", b.token(), like, "0", "disabled-star", 404);
+  }
+
   private JsonNode marketPackage(int number, long sequence, String name) {
     UUID pkg = id(number), versionId = id(number + 1);
     String manifest =

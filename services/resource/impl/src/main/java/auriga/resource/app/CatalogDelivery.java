@@ -594,8 +594,15 @@ public final class CatalogDelivery implements UnifiedResourceResolution {
             db.update(
                 "UPDATE resource.catalog_installation SET market_installed=:installed"
                     + " WHERE tenant_id=:tenant AND owner_id=:owner AND client_id=:client AND package_id=:pkg",
-                db.args("installed", !state.equals("removed"), "owner", r.account(),
-                    "client", c, "pkg", uuid(body.path("identity"), "packageId")));
+                db.args(
+                    "installed",
+                    !state.equals("removed"),
+                    "owner",
+                    r.account(),
+                    "client",
+                    c,
+                    "pkg",
+                    uuid(body.path("identity"), "packageId")));
           saveInstallation(
               installation(r, c, uuid(body.path("identity"), "packageId")),
               doc,
@@ -2407,14 +2414,24 @@ public final class CatalogDelivery implements UnifiedResourceResolution {
             .filter(report -> Set.of("applied", "disabled", "removed").contains(report.getState()))
             .filter(report -> CatalogStatePolicy.currentNodeReport(resource, snapshot, report))
             .findFirst()
-            .ifPresent(report -> db.update(
-                "UPDATE resource.catalog_instance_installation SET market_installed=:installed"
-                    + " WHERE tenant_id=:tenant AND instance_id=:instance AND package_id=:pkg"
-                    + " AND revision=:revision AND selection_revision=:selection"
-                    + " AND market_installed IS DISTINCT FROM :installed",
-                db.args("installed", !report.getState().equals("removed"),
-                    "instance", snapshot.instance(), "pkg", UUID.fromString(resource.getIdentity().getPackageId()),
-                    "revision", report.getInstallationRevision(), "selection", report.getSelectionRevision())));
+            .ifPresent(
+                report ->
+                    db.update(
+                        "UPDATE resource.catalog_instance_installation SET market_installed=:installed"
+                            + " WHERE tenant_id=:tenant AND instance_id=:instance AND package_id=:pkg"
+                            + " AND revision=:revision AND selection_revision=:selection"
+                            + " AND market_installed IS DISTINCT FROM :installed",
+                        db.args(
+                            "installed",
+                            !report.getState().equals("removed"),
+                            "instance",
+                            snapshot.instance(),
+                            "pkg",
+                            UUID.fromString(resource.getIdentity().getPackageId()),
+                            "revision",
+                            report.getInstallationRevision(),
+                            "selection",
+                            report.getSelectionRevision())));
       if (CatalogStatePolicy.desired(resource).equals("ENABLED")) {
         Instant lease = Instant.parse(resource.getLease().getExpiresAt()).minusSeconds(300);
         if (due == null || lease.isBefore(due)) due = lease;

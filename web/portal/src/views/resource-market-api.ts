@@ -1,3 +1,4 @@
+import { validateStar } from '../../../shared/src/plugin-market';
 import type { ApiClient } from '@auriga/shared';
 import type { components } from '../../../shared/src/generated/resource';
 import { placementRequestKey } from './placement-api';
@@ -55,12 +56,21 @@ export function createResourceMarketApi(client: ApiClient) {
       signal: AbortSignal,
       cursor?: string,
     ) =>
-      client.get<Schemas['UnifiedPackagePage']>(
-        base + '/packages' + page(cursor) + '&kind=' + kind,
-        {
-          signal,
-          cache: 'no-store',
-        },
+      client.get<
+        Omit<Schemas['UnifiedPackagePage'], 'items'> & {
+          items: ResourcePackage[];
+        }
+      >(base + '/packages' + page(cursor) + '&kind=' + kind, {
+        signal,
+        cache: 'no-store',
+      }),
+    star: async (id: string, starred: boolean, signal: AbortSignal) =>
+      validateStar(
+        await client.post<unknown>(
+          `${base}/packages/${encodeURIComponent(id)}/star`,
+          { starred },
+          { signal },
+        ),
       ),
     async latest(pack: ResourcePackage, signal: AbortSignal) {
       let cursor: string | undefined;

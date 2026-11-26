@@ -21,9 +21,9 @@ var _ MappedNullable = &ShellAuthBusinessResultOneOf39{}
 
 // ShellAuthBusinessResultOneOf39 struct for ShellAuthBusinessResultOneOf39
 type ShellAuthBusinessResultOneOf39 struct {
-	RequestId string                  `json:"requestId"`
-	Operation string                  `json:"operation"`
-	Output    ShellAuthOutputTeamPing `json:"output"`
+	RequestId string                       `json:"requestId"`
+	Operation string                       `json:"operation"`
+	Output    ShellAuthOutputTeamListTools `json:"output"`
 }
 
 type _ShellAuthBusinessResultOneOf39 ShellAuthBusinessResultOneOf39
@@ -32,7 +32,7 @@ type _ShellAuthBusinessResultOneOf39 ShellAuthBusinessResultOneOf39
 // This constructor will assign default values to properties that have it defined,
 // and makes sure properties required by API are set, but the set of arguments
 // will change when the set of required properties is changed
-func NewShellAuthBusinessResultOneOf39(requestId string, operation string, output ShellAuthOutputTeamPing) *ShellAuthBusinessResultOneOf39 {
+func NewShellAuthBusinessResultOneOf39(requestId string, operation string, output ShellAuthOutputTeamListTools) *ShellAuthBusinessResultOneOf39 {
 	this := ShellAuthBusinessResultOneOf39{}
 	this.RequestId = requestId
 	this.Operation = operation
@@ -97,9 +97,9 @@ func (o *ShellAuthBusinessResultOneOf39) SetOperation(v string) {
 }
 
 // GetOutput returns the Output field value
-func (o *ShellAuthBusinessResultOneOf39) GetOutput() ShellAuthOutputTeamPing {
+func (o *ShellAuthBusinessResultOneOf39) GetOutput() ShellAuthOutputTeamListTools {
 	if o == nil {
-		var ret ShellAuthOutputTeamPing
+		var ret ShellAuthOutputTeamListTools
 		return ret
 	}
 
@@ -108,7 +108,7 @@ func (o *ShellAuthBusinessResultOneOf39) GetOutput() ShellAuthOutputTeamPing {
 
 // GetOutputOk returns a tuple with the Output field value
 // and a boolean to check if the value has been set.
-func (o *ShellAuthBusinessResultOneOf39) GetOutputOk() (*ShellAuthOutputTeamPing, bool) {
+func (o *ShellAuthBusinessResultOneOf39) GetOutputOk() (*ShellAuthOutputTeamListTools, bool) {
 	if o == nil {
 		return nil, false
 	}
@@ -116,7 +116,7 @@ func (o *ShellAuthBusinessResultOneOf39) GetOutputOk() (*ShellAuthOutputTeamPing
 }
 
 // SetOutput sets field value
-func (o *ShellAuthBusinessResultOneOf39) SetOutput(v ShellAuthOutputTeamPing) {
+func (o *ShellAuthBusinessResultOneOf39) SetOutput(v ShellAuthOutputTeamListTools) {
 	o.Output = v
 }
 

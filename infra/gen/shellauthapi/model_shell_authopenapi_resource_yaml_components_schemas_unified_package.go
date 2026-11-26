@@ -11,7 +11,6 @@ API version: 1.0.0
 package shellauthapi
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
 	"time"
@@ -22,17 +21,19 @@ var _ MappedNullable = &ShellAuthopenapiResourceYamlComponentsSchemasUnifiedPack
 
 // ShellAuthopenapiResourceYamlComponentsSchemasUnifiedPackage Shared unified resource. Installation mode is selected per scoped assignment; packages carry no governance level.
 type ShellAuthopenapiResourceYamlComponentsSchemasUnifiedPackage struct {
-	Id               string         `json:"id"`
-	TenantId         string         `json:"tenantId"`
-	Name             string         `json:"name" validate:"regexp=^[a-z0-9]+(?:-[a-z0-9]+)*$"`
-	Kind             string         `json:"kind"`
-	OwnerId          string         `json:"ownerId"`
-	Visibility       string         `json:"visibility"`
-	GroupIds         []string       `json:"groupIds"`
-	Revision         int64          `json:"revision"`
-	CreatedAt        time.Time      `json:"createdAt"`
-	Enabled          bool           `json:"enabled"`
-	DefaultVersionId NullableString `json:"defaultVersionId"`
+	Market               *ShellAuthopenapiResourceYamlComponentsSchemasUnifiedPackageMarket `json:"market,omitempty"`
+	Id                   string                                                             `json:"id"`
+	TenantId             string                                                             `json:"tenantId"`
+	Name                 string                                                             `json:"name" validate:"regexp=^[a-z0-9]+(?:-[a-z0-9]+)*$"`
+	Kind                 string                                                             `json:"kind"`
+	OwnerId              string                                                             `json:"ownerId"`
+	Visibility           string                                                             `json:"visibility"`
+	GroupIds             []string                                                           `json:"groupIds"`
+	Revision             int64                                                              `json:"revision"`
+	CreatedAt            time.Time                                                          `json:"createdAt"`
+	Enabled              bool                                                               `json:"enabled"`
+	DefaultVersionId     NullableString                                                     `json:"defaultVersionId"`
+	AdditionalProperties map[string]interface{}
 }
 
 type _ShellAuthopenapiResourceYamlComponentsSchemasUnifiedPackage ShellAuthopenapiResourceYamlComponentsSchemasUnifiedPackage
@@ -63,6 +64,38 @@ func NewShellAuthopenapiResourceYamlComponentsSchemasUnifiedPackage(id string, t
 func NewShellAuthopenapiResourceYamlComponentsSchemasUnifiedPackageWithDefaults() *ShellAuthopenapiResourceYamlComponentsSchemasUnifiedPackage {
 	this := ShellAuthopenapiResourceYamlComponentsSchemasUnifiedPackage{}
 	return &this
+}
+
+// GetMarket returns the Market field value if set, zero value otherwise.
+func (o *ShellAuthopenapiResourceYamlComponentsSchemasUnifiedPackage) GetMarket() ShellAuthopenapiResourceYamlComponentsSchemasUnifiedPackageMarket {
+	if o == nil || IsNil(o.Market) {
+		var ret ShellAuthopenapiResourceYamlComponentsSchemasUnifiedPackageMarket
+		return ret
+	}
+	return *o.Market
+}
+
+// GetMarketOk returns a tuple with the Market field value if set, nil otherwise
+// and a boolean to check if the value has been set.
+func (o *ShellAuthopenapiResourceYamlComponentsSchemasUnifiedPackage) GetMarketOk() (*ShellAuthopenapiResourceYamlComponentsSchemasUnifiedPackageMarket, bool) {
+	if o == nil || IsNil(o.Market) {
+		return nil, false
+	}
+	return o.Market, true
+}
+
+// HasMarket returns a boolean if a field has been set.
+func (o *ShellAuthopenapiResourceYamlComponentsSchemasUnifiedPackage) HasMarket() bool {
+	if o != nil && !IsNil(o.Market) {
+		return true
+	}
+
+	return false
+}
+
+// SetMarket gets a reference to the given ShellAuthopenapiResourceYamlComponentsSchemasUnifiedPackageMarket and assigns it to the Market field.
+func (o *ShellAuthopenapiResourceYamlComponentsSchemasUnifiedPackage) SetMarket(v ShellAuthopenapiResourceYamlComponentsSchemasUnifiedPackageMarket) {
+	o.Market = &v
 }
 
 // GetId returns the Id field value
@@ -341,6 +374,9 @@ func (o ShellAuthopenapiResourceYamlComponentsSchemasUnifiedPackage) MarshalJSON
 
 func (o ShellAuthopenapiResourceYamlComponentsSchemasUnifiedPackage) ToMap() (map[string]interface{}, error) {
 	toSerialize := map[string]interface{}{}
+	if !IsNil(o.Market) {
+		toSerialize["market"] = o.Market
+	}
 	toSerialize["id"] = o.Id
 	toSerialize["tenantId"] = o.TenantId
 	toSerialize["name"] = o.Name
@@ -352,6 +388,11 @@ func (o ShellAuthopenapiResourceYamlComponentsSchemasUnifiedPackage) ToMap() (ma
 	toSerialize["createdAt"] = o.CreatedAt
 	toSerialize["enabled"] = o.Enabled
 	toSerialize["defaultVersionId"] = o.DefaultVersionId.Get()
+
+	for key, value := range o.AdditionalProperties {
+		toSerialize[key] = value
+	}
+
 	return toSerialize, nil
 }
 
@@ -389,15 +430,31 @@ func (o *ShellAuthopenapiResourceYamlComponentsSchemasUnifiedPackage) UnmarshalJ
 
 	varShellAuthopenapiResourceYamlComponentsSchemasUnifiedPackage := _ShellAuthopenapiResourceYamlComponentsSchemasUnifiedPackage{}
 
-	decoder := json.NewDecoder(bytes.NewReader(data))
-	decoder.DisallowUnknownFields()
-	err = decoder.Decode(&varShellAuthopenapiResourceYamlComponentsSchemasUnifiedPackage)
+	err = json.Unmarshal(data, &varShellAuthopenapiResourceYamlComponentsSchemasUnifiedPackage)
 
 	if err != nil {
 		return err
 	}
 
 	*o = ShellAuthopenapiResourceYamlComponentsSchemasUnifiedPackage(varShellAuthopenapiResourceYamlComponentsSchemasUnifiedPackage)
+
+	additionalProperties := make(map[string]interface{})
+
+	if err = json.Unmarshal(data, &additionalProperties); err == nil {
+		delete(additionalProperties, "market")
+		delete(additionalProperties, "id")
+		delete(additionalProperties, "tenantId")
+		delete(additionalProperties, "name")
+		delete(additionalProperties, "kind")
+		delete(additionalProperties, "ownerId")
+		delete(additionalProperties, "visibility")
+		delete(additionalProperties, "groupIds")
+		delete(additionalProperties, "revision")
+		delete(additionalProperties, "createdAt")
+		delete(additionalProperties, "enabled")
+		delete(additionalProperties, "defaultVersionId")
+		o.AdditionalProperties = additionalProperties
+	}
 
 	return err
 }

@@ -22,8 +22,9 @@ var _ MappedNullable = &Plugin{}
 
 // Plugin struct for Plugin
 type Plugin struct {
-	PackageName     string `json:"packageName" validate:"regexp=^(?:@[a-z0-9-][a-z0-9._-]*[/])?[a-z0-9-][a-z0-9._-]*$"`
-	DshVersionRange string `json:"dshVersionRange"`
+	Tags            []string `json:"tags,omitempty"`
+	PackageName     string   `json:"packageName" validate:"regexp=^(?:@[a-z0-9-][a-z0-9._-]*[/])?[a-z0-9-][a-z0-9._-]*$"`
+	DshVersionRange string   `json:"dshVersionRange"`
 }
 
 type _Plugin Plugin
@@ -64,6 +65,38 @@ func NewPlugin(packageName string, dshVersionRange string) *Plugin {
 func NewPluginWithDefaults() *Plugin {
 	this := Plugin{}
 	return &this
+}
+
+// GetTags returns the Tags field value if set, zero value otherwise.
+func (o *Plugin) GetTags() []string {
+	if o == nil || IsNil(o.Tags) {
+		var ret []string
+		return ret
+	}
+	return o.Tags
+}
+
+// GetTagsOk returns a tuple with the Tags field value if set, nil otherwise
+// and a boolean to check if the value has been set.
+func (o *Plugin) GetTagsOk() ([]string, bool) {
+	if o == nil || IsNil(o.Tags) {
+		return nil, false
+	}
+	return o.Tags, true
+}
+
+// HasTags returns a boolean if a field has been set.
+func (o *Plugin) HasTags() bool {
+	if o != nil && !IsNil(o.Tags) {
+		return true
+	}
+
+	return false
+}
+
+// SetTags gets a reference to the given []string and assigns it to the Tags field.
+func (o *Plugin) SetTags(v []string) {
+	o.Tags = v
 }
 
 // GetPackageName returns the PackageName field value
@@ -124,6 +157,9 @@ func (o Plugin) MarshalJSON() ([]byte, error) {
 
 func (o Plugin) ToMap() (map[string]interface{}, error) {
 	toSerialize := map[string]interface{}{}
+	if !IsNil(o.Tags) {
+		toSerialize["tags"] = o.Tags
+	}
 	toSerialize["packageName"] = o.PackageName
 	toSerialize["dshVersionRange"] = o.DshVersionRange
 	return toSerialize, nil

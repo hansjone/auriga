@@ -21,8 +21,8 @@ var _ MappedNullable = &ShellAuthBusinessCallCallOneOf39{}
 
 // ShellAuthBusinessCallCallOneOf39 struct for ShellAuthBusinessCallCallOneOf39
 type ShellAuthBusinessCallCallOneOf39 struct {
-	Operation string                 `json:"operation"`
-	Input     ShellAuthInputTeamPing `json:"input"`
+	Operation string                      `json:"operation"`
+	Input     ShellAuthInputTeamListTools `json:"input"`
 }
 
 type _ShellAuthBusinessCallCallOneOf39 ShellAuthBusinessCallCallOneOf39
@@ -31,7 +31,7 @@ type _ShellAuthBusinessCallCallOneOf39 ShellAuthBusinessCallCallOneOf39
 // This constructor will assign default values to properties that have it defined,
 // and makes sure properties required by API are set, but the set of arguments
 // will change when the set of required properties is changed
-func NewShellAuthBusinessCallCallOneOf39(operation string, input ShellAuthInputTeamPing) *ShellAuthBusinessCallCallOneOf39 {
+func NewShellAuthBusinessCallCallOneOf39(operation string, input ShellAuthInputTeamListTools) *ShellAuthBusinessCallCallOneOf39 {
 	this := ShellAuthBusinessCallCallOneOf39{}
 	this.Operation = operation
 	this.Input = input
@@ -71,9 +71,9 @@ func (o *ShellAuthBusinessCallCallOneOf39) SetOperation(v string) {
 }
 
 // GetInput returns the Input field value
-func (o *ShellAuthBusinessCallCallOneOf39) GetInput() ShellAuthInputTeamPing {
+func (o *ShellAuthBusinessCallCallOneOf39) GetInput() ShellAuthInputTeamListTools {
 	if o == nil {
-		var ret ShellAuthInputTeamPing
+		var ret ShellAuthInputTeamListTools
 		return ret
 	}
 
@@ -82,7 +82,7 @@ func (o *ShellAuthBusinessCallCallOneOf39) GetInput() ShellAuthInputTeamPing {
 
 // GetInputOk returns a tuple with the Input field value
 // and a boolean to check if the value has been set.
-func (o *ShellAuthBusinessCallCallOneOf39) GetInputOk() (*ShellAuthInputTeamPing, bool) {
+func (o *ShellAuthBusinessCallCallOneOf39) GetInputOk() (*ShellAuthInputTeamListTools, bool) {
 	if o == nil {
 		return nil, false
 	}
@@ -90,7 +90,7 @@ func (o *ShellAuthBusinessCallCallOneOf39) GetInputOk() (*ShellAuthInputTeamPing
 }
 
 // SetInput sets field value
-func (o *ShellAuthBusinessCallCallOneOf39) SetInput(v ShellAuthInputTeamPing) {
+func (o *ShellAuthBusinessCallCallOneOf39) SetInput(v ShellAuthInputTeamListTools) {
 	o.Input = v
 }
 

@@ -2429,15 +2429,15 @@
             },
             "installationCount": {
               "type": "integer",
+              "format": "int64",
               "minimum": 0,
-              "maximum": 9007199254740991,
-              "format": "int64"
+              "maximum": 9007199254740991
             },
             "starCount": {
               "type": "integer",
+              "format": "int64",
               "minimum": 0,
-              "maximum": 9007199254740991,
-              "format": "int64"
+              "maximum": 9007199254740991
             },
             "starred": {
               "type": "boolean"
@@ -2752,110 +2752,6 @@
         },
         "body": {
           "$ref": "#/$defs/ShellAuthopenapi_resource_yaml_components_schemas_UnifiedPackage"
-        }
-      },
-      "required": [
-        "statusCode",
-        "body"
-      ]
-    },
-    "ShellAuthInput_UnifiedSetPluginStar": {
-      "type": "object",
-      "additionalProperties": false,
-      "properties": {
-        "packageId": {
-          "type": "string",
-          "format": "uuid"
-        },
-        "headers": {
-          "type": "object",
-          "additionalProperties": false,
-          "properties": {
-            "if-match": {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 128
-            },
-            "idempotency-key": {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 128
-            }
-          },
-          "required": []
-        },
-        "body": {
-          "type": "object",
-          "properties": {
-            "starred": {
-              "type": "boolean"
-            }
-          },
-          "required": [
-            "starred"
-          ],
-          "additionalProperties": false
-        }
-      },
-      "required": [
-        "packageId",
-        "body"
-      ]
-    },
-    "ShellAuthOutput_UnifiedSetPluginStar": {
-      "type": "object",
-      "additionalProperties": false,
-      "properties": {
-        "statusCode": {
-          "type": "integer",
-          "minimum": 200,
-          "maximum": 299
-        },
-        "headers": {
-          "type": "object",
-          "additionalProperties": false,
-          "properties": {
-            "etag": {
-              "type": "string",
-              "maxLength": 1024
-            },
-            "content-type": {
-              "type": "string",
-              "maxLength": 1024
-            },
-            "content-length": {
-              "type": "string",
-              "maxLength": 1024
-            },
-            "content-range": {
-              "type": "string",
-              "maxLength": 1024
-            },
-            "retry-after": {
-              "type": "string",
-              "maxLength": 1024
-            }
-          },
-          "required": []
-        },
-        "body": {
-          "type": "object",
-          "properties": {
-            "starred": {
-              "type": "boolean"
-            },
-            "starCount": {
-              "type": "integer",
-              "minimum": 0,
-              "maximum": 9007199254740991,
-              "format": "int64"
-            }
-          },
-          "required": [
-            "starred",
-            "starCount"
-          ],
-          "additionalProperties": false
         }
       },
       "required": [
@@ -6056,6 +5952,110 @@
         "body"
       ]
     },
+    "ShellAuthInput_UnifiedSetPluginStar": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "packageId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "headers": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "if-match": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            "idempotency-key": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          },
+          "required": []
+        },
+        "body": {
+          "type": "object",
+          "properties": {
+            "starred": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "starred"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "packageId",
+        "body"
+      ]
+    },
+    "ShellAuthOutput_UnifiedSetPluginStar": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "statusCode": {
+          "type": "integer",
+          "minimum": 200,
+          "maximum": 299
+        },
+        "headers": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "etag": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "content-type": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "content-length": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "content-range": {
+              "type": "string",
+              "maxLength": 1024
+            },
+            "retry-after": {
+              "type": "string",
+              "maxLength": 1024
+            }
+          },
+          "required": []
+        },
+        "body": {
+          "type": "object",
+          "properties": {
+            "starred": {
+              "type": "boolean"
+            },
+            "starCount": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            }
+          },
+          "required": [
+            "starred",
+            "starCount"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "statusCode",
+        "body"
+      ]
+    },
     "ShellAuthInput_listOwnAiUsage": {
       "type": "object",
       "additionalProperties": false,
@@ -9115,23 +9115,6 @@
               "additionalProperties": false,
               "properties": {
                 "operation": {
-                  "const": "UnifiedSetPluginStar",
-                  "type": "string"
-                },
-                "input": {
-                  "$ref": "#/$defs/ShellAuthInput_UnifiedSetPluginStar"
-                }
-              },
-              "required": [
-                "operation",
-                "input"
-              ]
-            },
-            {
-              "type": "object",
-              "additionalProperties": false,
-              "properties": {
-                "operation": {
                   "const": "UnifiedListResourceVersions",
                   "type": "string"
                 },
@@ -9324,6 +9307,23 @@
                 },
                 "input": {
                   "$ref": "#/$defs/ShellAuthInput_UnifiedDownloadVersionArtifact"
+                }
+              },
+              "required": [
+                "operation",
+                "input"
+              ]
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "operation": {
+                  "const": "UnifiedSetPluginStar",
+                  "type": "string"
+                },
+                "input": {
+                  "$ref": "#/$defs/ShellAuthInput_UnifiedSetPluginStar"
                 }
               },
               "required": [
@@ -10271,28 +10271,6 @@
             },
             "operation": {
               "type": "string",
-              "const": "UnifiedSetPluginStar"
-            },
-            "output": {
-              "$ref": "#/$defs/ShellAuthOutput_UnifiedSetPluginStar"
-            }
-          },
-          "required": [
-            "requestId",
-            "operation",
-            "output"
-          ]
-        },
-        {
-          "type": "object",
-          "additionalProperties": false,
-          "properties": {
-            "requestId": {
-              "type": "string",
-              "format": "uuid"
-            },
-            "operation": {
-              "type": "string",
               "const": "UnifiedListResourceVersions"
             },
             "output": {
@@ -10539,6 +10517,28 @@
             },
             "output": {
               "$ref": "#/$defs/ShellAuthOutput_UnifiedDownloadVersionArtifact"
+            }
+          },
+          "required": [
+            "requestId",
+            "operation",
+            "output"
+          ]
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "requestId": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "operation": {
+              "type": "string",
+              "const": "UnifiedSetPluginStar"
+            },
+            "output": {
+              "$ref": "#/$defs/ShellAuthOutput_UnifiedSetPluginStar"
             }
           },
           "required": [
@@ -11194,7 +11194,6 @@
                 "UnifiedListResourcePackages",
                 "UnifiedCreateResourcePackage",
                 "UnifiedGetResourcePackage",
-                "UnifiedSetPluginStar",
                 "UnifiedListResourceVersions",
                 "UnifiedUploadResourceVersion",
                 "UnifiedGetResourceVersion",
@@ -11207,6 +11206,7 @@
                 "UnifiedReportInstallation",
                 "UnifiedRenewInstallation",
                 "UnifiedDownloadVersionArtifact",
+                "UnifiedSetPluginStar",
                 "listOwnAiUsage",
                 "listAiModels",
                 "createAiChatCompletion",

@@ -21,10 +21,11 @@ var _ MappedNullable = &ShellAuthBusinessError{}
 
 // ShellAuthBusinessError struct for ShellAuthBusinessError
 type ShellAuthBusinessError struct {
-	Code              string `json:"code"`
-	UpstreamStatus    *int32 `json:"upstreamStatus,omitempty"`
-	Retryable         bool   `json:"retryable"`
-	RetryAfterSeconds *int32 `json:"retryAfterSeconds,omitempty"`
+	Code              string  `json:"code"`
+	UpstreamStatus    *int32  `json:"upstreamStatus,omitempty"`
+	Retryable         bool    `json:"retryable"`
+	RetryAfterSeconds *int32  `json:"retryAfterSeconds,omitempty"`
+	Rule              *string `json:"rule,omitempty"`
 }
 
 type _ShellAuthBusinessError ShellAuthBusinessError
@@ -160,6 +161,38 @@ func (o *ShellAuthBusinessError) SetRetryAfterSeconds(v int32) {
 	o.RetryAfterSeconds = &v
 }
 
+// GetRule returns the Rule field value if set, zero value otherwise.
+func (o *ShellAuthBusinessError) GetRule() string {
+	if o == nil || IsNil(o.Rule) {
+		var ret string
+		return ret
+	}
+	return *o.Rule
+}
+
+// GetRuleOk returns a tuple with the Rule field value if set, nil otherwise
+// and a boolean to check if the value has been set.
+func (o *ShellAuthBusinessError) GetRuleOk() (*string, bool) {
+	if o == nil || IsNil(o.Rule) {
+		return nil, false
+	}
+	return o.Rule, true
+}
+
+// HasRule returns a boolean if a field has been set.
+func (o *ShellAuthBusinessError) HasRule() bool {
+	if o != nil && !IsNil(o.Rule) {
+		return true
+	}
+
+	return false
+}
+
+// SetRule gets a reference to the given string and assigns it to the Rule field.
+func (o *ShellAuthBusinessError) SetRule(v string) {
+	o.Rule = &v
+}
+
 func (o ShellAuthBusinessError) MarshalJSON() ([]byte, error) {
 	toSerialize, err := o.ToMap()
 	if err != nil {
@@ -177,6 +210,9 @@ func (o ShellAuthBusinessError) ToMap() (map[string]interface{}, error) {
 	toSerialize["retryable"] = o.Retryable
 	if !IsNil(o.RetryAfterSeconds) {
 		toSerialize["retryAfterSeconds"] = o.RetryAfterSeconds
+	}
+	if !IsNil(o.Rule) {
+		toSerialize["rule"] = o.Rule
 	}
 	return toSerialize, nil
 }

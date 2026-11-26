@@ -575,7 +575,7 @@ export interface paths {
     /** @description P1-K frozen contract; implementation follows in consuming work lines. Catalog covers unified L3 plugin/skill; legacy IDs are separate and return 404. Enforce live tenant ACL, ETag, idempotency, step-up and author separation. Upload permission alone does not authorize a tool kind/delivery or security reviewer role; server policy must authorize them. */
     get: operations['UnifiedListResourcePackages'];
     put?: never;
-    /** @description P1-K frozen contract; implementation follows in consuming work lines. Catalog covers unified L3 plugin/skill; legacy IDs are separate and return 404. Enforce live tenant ACL, ETag, idempotency, step-up and author separation. Upload permission alone does not authorize a tool kind/delivery or security reviewer role; server policy must authorize them. */
+    /** @description Creates a unified catalog plugin or skill. Portal and admin users need upload permission. An active internal member with a live standard or native desktop platform session can create a package for their own tenant. No additional catalog role or step-up applies to that desktop channel. */
     post: operations['UnifiedCreateResourcePackage'];
     delete?: never;
     options?: never;
@@ -590,27 +590,10 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** @description P1-K frozen contract; implementation follows in consuming work lines. Catalog covers unified L3 plugin/skill; legacy IDs are separate and return 404. Enforce live tenant ACL, ETag, idempotency, step-up and author separation. Upload permission alone does not authorize a tool kind/delivery or security reviewer role; server policy must authorize them. */
+    /** @description Reads unified catalog package metadata and its ETag. Standard read authorization applies. For attachment, an active internal member with a live standard or native desktop platform session can also read their own plugin or skill package without catalog read permission. */
     get: operations['UnifiedGetResourcePackage'];
     put?: never;
     post?: never;
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
-  '/api/resource/v1/catalog/packages/{packageId}/star': {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    get?: never;
-    put?: never;
-    /** @description Set the current member’s star on a visible published plugin. The same state may be sent again. */
-    post: operations['UnifiedSetPluginStar'];
     delete?: never;
     options?: never;
     head?: never;
@@ -627,7 +610,7 @@ export interface paths {
     /** @description P1-K frozen contract; implementation follows in consuming work lines. Catalog covers unified L3 plugin/skill; legacy IDs are separate and return 404. Enforce live tenant ACL, ETag, idempotency, step-up and author separation. Upload permission alone does not authorize a tool kind/delivery or security reviewer role; server policy must authorize them. */
     get: operations['UnifiedListResourceVersions'];
     put?: never;
-    /** @description P1-K frozen contract; implementation follows in consuming work lines. Catalog covers unified L3 plugin/skill; legacy IDs are separate and return 404. Enforce live tenant ACL, ETag, idempotency, step-up and author separation. Upload permission alone does not authorize a tool kind/delivery or security reviewer role; server policy must authorize them. */
+    /** @description Uploads immutable unified catalog plugin or skill bytes. Portal and admin users retain upload permission and their existing step-up policy. An active internal member with a live standard or native desktop platform session can upload to their own package without an additional catalog role or step-up. If archive validation supplies a rule, its params.rule value identifies one of bundled_dependency_required, lifecycle_scripts_disallowed, bundle_patch_missing or native_build_disallowed. */
     post: operations['UnifiedUploadResourceVersion'];
     delete?: never;
     options?: never;
@@ -661,7 +644,7 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** @description P1-K frozen contract; implementation follows in consuming work lines. Catalog covers unified L3 plugin/skill; legacy IDs are separate and return 404. Enforce live tenant ACL, ETag, idempotency, step-up and author separation. Upload permission alone does not authorize a tool kind/delivery or security reviewer role; server policy must authorize them. */
+    /** @description Submits a unified catalog draft for independent review. Portal and admin users retain submit permission and their existing step-up policy. An active internal member with a live standard or native desktop platform session can submit their own version in their own plugin or skill package without an additional catalog role or step-up. This operation cannot review or publish. */
     post: operations['UnifiedSubmitResourceVersion'];
     delete?: never;
     options?: never;
@@ -1031,6 +1014,23 @@ export interface paths {
      * @description The server derives tenant/member/pool from the current portal sid and W placement. A shared placement returns resource.shared_requires_dedicated; requesting a resource never grants dedicated mode. First selection in an epoch uses If-Match: "0"; later requests use selectionRevision. The idempotent 202 response is applying until current signed resources are loaded and acknowledged by the current Node.
      */
     post: operations['UnifiedSelectPlacementInstallations'];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  '/api/resource/v1/catalog/packages/{packageId}/star': {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** @description Set the current member’s star on a visible published plugin. The same state may be sent again. */
+    post: operations['UnifiedSetPluginStar'];
     delete?: never;
     options?: never;
     head?: never;
@@ -1505,7 +1505,9 @@ export interface components {
         dshVersionRange: string;
         description: string;
         tags: string[];
+        /** Format: int64 */
         installationCount: number;
+        /** Format: int64 */
         starCount: number;
         starred: boolean;
       };
@@ -6932,91 +6934,6 @@ export interface operations {
       };
     };
   };
-  UnifiedSetPluginStar: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path: {
-        packageId: string;
-      };
-      cookie?: never;
-    };
-    requestBody: {
-      content: {
-        'application/json': {
-          starred: boolean;
-        };
-      };
-    };
-    responses: {
-      /** @description Current star and aggregate count */
-      200: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          'application/json': {
-            starred: boolean;
-            starCount: number;
-          };
-        };
-      };
-      /** @description common.validation_failed */
-      400: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          'application/problem+json': components['schemas']['Problem'];
-        };
-      };
-      /** @description common.unauthenticated */
-      401: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          'application/problem+json': components['schemas']['Problem'];
-        };
-      };
-      /** @description common.forbidden */
-      403: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          'application/problem+json': components['schemas']['Problem'];
-        };
-      };
-      /** @description common.not_found */
-      404: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          'application/problem+json': components['schemas']['Problem'];
-        };
-      };
-      /** @description common.internal */
-      500: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          'application/problem+json': components['schemas']['Problem'];
-        };
-      };
-      /** @description common.unavailable */
-      503: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          'application/problem+json': components['schemas']['Problem'];
-        };
-      };
-    };
-  };
   UnifiedListResourceVersions: {
     parameters: {
       query?: {
@@ -10400,6 +10317,92 @@ export interface operations {
       409: components['responses']['Conflict'];
       /** @description common.precondition_failed */
       412: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+    };
+  };
+  UnifiedSetPluginStar: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        packageId: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        'application/json': {
+          starred: boolean;
+        };
+      };
+    };
+    responses: {
+      /** @description Current star and aggregate count */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/json': {
+            starred: boolean;
+            /** Format: int64 */
+            starCount: number;
+          };
+        };
+      };
+      /** @description common.validation_failed */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.unauthenticated */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.not_found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          'application/problem+json': components['schemas']['Problem'];
+        };
+      };
+      /** @description common.internal */
+      500: {
         headers: {
           [name: string]: unknown;
         };

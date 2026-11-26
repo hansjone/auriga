@@ -26,6 +26,7 @@ public final class ResourceAccess {
     return new AuthorSnapshot(
         member(reader.tenant(), reader.account()).getDisplayName(), inputs.authorDepartment(actor));
   }
+
   private final ResourceAccessInputs inputs;
   private final auriga.iam.api.DevicePermissionAuthority devices;
 

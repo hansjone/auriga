@@ -12,6 +12,7 @@ const handleTtl = 15 * 60 * 1000;
 const maxHandles = 8;
 const maxReviewReason = 1024;
 const str = { type: 'string', minLength: 1 };
+const tags = documents.package.$defs.Plugin.properties.tags;
 const permissionsSchema = documents.package.$defs.Permissions;
 const metadataFields = {
   name: str,
@@ -107,7 +108,7 @@ function checkPrepare(args) {
     Array.isArray(args.metadata)
   )
     validationFailed();
-  const { permissions, ...fields } = args.metadata;
+  const { permissions, tags: pluginTags, ...fields } = args.metadata;
   if (
     Object.entries(fields).some(
       ([key, value]) => !Object.hasOwn(metadataFields, key) || !text(value),
@@ -115,6 +116,17 @@ function checkPrepare(args) {
     !text(fields.author) ||
     !text(fields.license) ||
     (args.kind === 'skill' && !text(fields.version)) ||
+    (pluginTags !== undefined &&
+      (args.kind !== 'plugin' ||
+        !Array.isArray(pluginTags) ||
+        pluginTags.length > 5 ||
+        new Set(pluginTags).size !== pluginTags.length ||
+        pluginTags.some(
+          (tag) =>
+            typeof tag !== 'string' ||
+            tag.length > 32 ||
+            !/^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/.test(tag),
+        ))) ||
     !schemaValid('package', 'Permissions', permissions)
   )
     validationFailed();
@@ -382,6 +394,7 @@ export function installSubmissionTools(
                       type: 'object',
                       properties: {
                         ...metadataFields,
+                        tags,
                         permissions: permissionsSchema,
                       },
                       required: ['author', 'license', 'permissions'],

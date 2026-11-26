@@ -502,11 +502,6 @@ export interface components {
           }
         | {
             /** @constant */
-            operation: 'UnifiedSetPluginStar';
-            input: components['schemas']['ShellAuthInput_UnifiedSetPluginStar'];
-          }
-        | {
-            /** @constant */
             operation: 'UnifiedListResourceVersions';
             input: components['schemas']['ShellAuthInput_UnifiedListResourceVersions'];
           }
@@ -564,6 +559,11 @@ export interface components {
             /** @constant */
             operation: 'UnifiedDownloadVersionArtifact';
             input: components['schemas']['ShellAuthInput_UnifiedDownloadVersionArtifact'];
+          }
+        | {
+            /** @constant */
+            operation: 'UnifiedSetPluginStar';
+            input: components['schemas']['ShellAuthInput_UnifiedSetPluginStar'];
           }
         | {
             /** @constant */
@@ -851,13 +851,6 @@ export interface components {
           /** Format: uuid */
           requestId: string;
           /** @constant */
-          operation: 'UnifiedSetPluginStar';
-          output: components['schemas']['ShellAuthOutput_UnifiedSetPluginStar'];
-        }
-      | {
-          /** Format: uuid */
-          requestId: string;
-          /** @constant */
           operation: 'UnifiedListResourceVersions';
           output: components['schemas']['ShellAuthOutput_UnifiedListResourceVersions'];
         }
@@ -937,6 +930,13 @@ export interface components {
           /** @constant */
           operation: 'UnifiedDownloadVersionArtifact';
           output: components['schemas']['ShellAuthOutput_UnifiedDownloadVersionArtifact'];
+        }
+      | {
+          /** Format: uuid */
+          requestId: string;
+          /** @constant */
+          operation: 'UnifiedSetPluginStar';
+          output: components['schemas']['ShellAuthOutput_UnifiedSetPluginStar'];
         }
       | {
           /** Format: uuid */
@@ -1159,7 +1159,6 @@ export interface components {
             | 'UnifiedListResourcePackages'
             | 'UnifiedCreateResourcePackage'
             | 'UnifiedGetResourcePackage'
-            | 'UnifiedSetPluginStar'
             | 'UnifiedListResourceVersions'
             | 'UnifiedUploadResourceVersion'
             | 'UnifiedGetResourceVersion'
@@ -1172,6 +1171,7 @@ export interface components {
             | 'UnifiedReportInstallation'
             | 'UnifiedRenewInstallation'
             | 'UnifiedDownloadVersionArtifact'
+            | 'UnifiedSetPluginStar'
             | 'listOwnAiUsage'
             | 'listAiModels'
             | 'createAiChatCompletion'
@@ -1280,6 +1280,12 @@ export interface components {
       upstreamStatus?: number;
       retryable: boolean;
       retryAfterSeconds?: number;
+      /** @enum {string} */
+      rule?:
+        | 'bundled_dependency_required'
+        | 'lifecycle_scripts_disallowed'
+        | 'bundle_patch_missing'
+        | 'native_build_disallowed';
     };
     ShellAuthUploadReference: {
       /** Format: uuid */
@@ -1867,17 +1873,6 @@ export interface components {
       /** Format: uuid */
       packageId: string;
     };
-    ShellAuthInput_UnifiedSetPluginStar: {
-      /** Format: uuid */
-      packageId: string;
-      headers?: {
-        'if-match'?: string;
-        'idempotency-key'?: string;
-      };
-      body: {
-        starred: boolean;
-      };
-    };
     ShellAuthInput_UnifiedListResourceVersions: {
       /** Format: uuid */
       packageId: string;
@@ -2053,6 +2048,17 @@ export interface components {
       /** Format: uuid */
       versionId: string;
       artifactId: string;
+    };
+    ShellAuthInput_UnifiedSetPluginStar: {
+      /** Format: uuid */
+      packageId: string;
+      headers?: {
+        'if-match'?: string;
+        'idempotency-key'?: string;
+      };
+      body: {
+        starred: boolean;
+      };
     };
     ShellAuthInput_listOwnAiUsage: {
       /** @default 50 */
@@ -2750,21 +2756,6 @@ export interface components {
       };
       body: components['schemas']['ShellAuthopenapi_resource_yaml_components_schemas_UnifiedPackage'];
     };
-    ShellAuthOutput_UnifiedSetPluginStar: {
-      statusCode: number;
-      headers?: {
-        etag?: string;
-        'content-type'?: string;
-        'content-length'?: string;
-        'content-range'?: string;
-        'retry-after'?: string;
-      };
-      body: {
-        starred: boolean;
-        /** Format: int64 */
-        starCount: number;
-      };
-    };
     ShellAuthresource_package_schema_json__defs_Name: string;
     ShellAuthresource_package_schema_json__defs_Statement: {
       /** @constant */
@@ -3378,6 +3369,21 @@ export interface components {
       body: {
         /** Format: uuid */
         streamId: string;
+      };
+    };
+    ShellAuthOutput_UnifiedSetPluginStar: {
+      statusCode: number;
+      headers?: {
+        etag?: string;
+        'content-type'?: string;
+        'content-length'?: string;
+        'content-range'?: string;
+        'retry-after'?: string;
+      };
+      body: {
+        starred: boolean;
+        /** Format: int64 */
+        starCount: number;
       };
     };
     ShellAuthopenapi_ai_yaml_components_schemas_Usage: {

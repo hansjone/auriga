@@ -121,7 +121,7 @@ function rangeValid(range) {
  *  metadata:{
  *    name?:string, version?:string, description?:string, author:string, license:string,
  *    permissions:{tools:string[],outboundHosts:string[],dataAccess:string[]},
- *    dshVersionRange?:string
+ *    dshVersionRange?:string, tags?:string[]
  *  }
  * }} input
  */
@@ -146,9 +146,17 @@ export async function prepareDirectory({ cwd, directory, kind, metadata }) {
     name = metadata.name ?? pkg.name.split('/').at(-1);
     version = pkg.version;
     description = metadata.description ?? pkg.description;
-    detail = { plugin: { packageName: pkg.name, dshVersionRange } };
+    detail = {
+      plugin: {
+        packageName: pkg.name,
+        dshVersionRange,
+        ...(metadata.tags === undefined ? {} : { tags: metadata.tags }),
+      },
+    };
     archive = payload;
   } else {
+    if (metadata.tags !== undefined)
+      invalid('metadata.tags', 'feature tags apply to plugins only');
     const { skill, archive: payload } = await packSkillDirectory(source);
     if (
       (metadata.name !== undefined && metadata.name !== skill.name) ||
