@@ -272,6 +272,7 @@ class ResourceReadAssemblyTest {
     admin.execute(
         "TRUNCATE resource.resource_revoked_artifact, resource.resource_revocation_delivery, resource.outbox_event, resource.resource_operation, resource.resource_distribution, resource.resource_download, resource.resource_revocations, resource.resource_package_creation, resource.resource_package_group, resource.resource_package, resource.resource_version CASCADE");
     admin.execute("TRUNCATE resource.catalog_package CASCADE");
+    admin.execute("TRUNCATE iam.rate_limit");
     admin.execute(
         "DELETE FROM org.role_binding; DELETE FROM org.group_member; DELETE FROM org.member; DELETE FROM org.role WHERE builtin=false; DELETE FROM org.\"group\"");
     admin.update(
