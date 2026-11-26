@@ -115,6 +115,61 @@ function desktopFixture() {
   return { ...f, fetch };
 }
 
+it('loads plugin market metadata from later pages and scopes likes to the native account generation', async () => {
+  const f = desktopFixture();
+  const projected = {
+    ...f.pack,
+    id: id(10),
+    name: 'Later plugin',
+    market: {
+      authorId: id(3),
+      version: '2.0.0',
+      dshVersionRange: '^4.0.0',
+      description: 'Editor tools',
+      tags: ['Docs'],
+      installationCount: 6,
+      starCount: 2,
+      starred: false,
+    },
+  };
+  const fetch = vi.fn(async (path: string, init?: RequestInit) => {
+    if (path === 'catalog/packages/' + projected.id + '/star')
+      return json({ starred: true, starCount: 3 });
+    if (path.includes('kind=plugin'))
+      return json(
+        path.includes('cursor=next')
+          ? { items: [projected] }
+          : { items: [f.pack], nextCursor: 'next' },
+      );
+    return f.fetch(path, init);
+  });
+  const w = await render('plugin', fetch, {
+    catalogSession: {
+      ownerId: desktopOwner.ownerId,
+      generation: 'generation-2',
+    },
+  });
+  await w.get('input').setValue('Docs');
+  expect(w.text()).toContain(projected.name);
+  expect(w.text()).toContain('^4.0.0');
+  expect(w.text()).toContain('Unknown');
+  expect(w.text()).not.toContain(f.pack.name);
+  await click(w, 'Like');
+  const req = fetch.mock.calls.find(([path]) => path.endsWith('/star'))?.[1];
+  expect(req?.method).toBe('POST');
+  expect(req?.headers).toMatchObject({
+    'x-auriga-catalog': '1',
+    'x-auriga-catalog-owner': desktopOwner.ownerId,
+    'x-auriga-catalog-generation': 'generation-2',
+  });
+  expect(req?.body).toBe(JSON.stringify({ starred: true }));
+  const liked = w
+    .findAll('button')
+    .find((button) => button.text() === 'Unlike');
+  expect(liked?.element?.getAttribute('aria-pressed')).toBe('true');
+  expect(w.text()).toContain('Likes3');
+});
+
 it('uses one login prefetch across tabs and even after remounting the desktop panel', async () => {
   const f = desktopFixture();
   const fetch = vi.fn(f.fetch);
@@ -413,7 +468,7 @@ for (const kind of ['plugin', 'skill'] as const)
             )
           : f.fetch(p, i),
       );
-      await click(w, 'Load more');
+      if (kind === 'skill') await click(w, 'Load more');
       expect(w.text()).toContain(f.pack.name);
       expect(w.findAll('button').some((b) => b.text() === 'Load more')).toBe(
         false,
@@ -429,8 +484,9 @@ for (const kind of ['plugin', 'skill'] as const)
             })
           : f.fetch(p, i),
       );
-      await click(w, 'Load more');
+      if (kind === 'skill') await click(w, 'Load more');
       expect(w.find('[role="alert"]').exists()).toBe(true);
+      if (kind === 'plugin') expect(w.text()).not.toContain(f.pack.name);
     });
     it('refuses the wrong kind returned by the server', async () => {
       const f = fixture(kind === 'plugin' ? 'skill' : 'plugin');

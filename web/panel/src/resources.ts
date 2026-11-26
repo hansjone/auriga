@@ -4,7 +4,9 @@ export type ResourcePackage = components['schemas']['Package'];
 export type ResourceVersion = components['schemas']['Version'];
 export type PackagePage = components['schemas']['PackagePage'];
 export type VersionPage = components['schemas']['VersionPage'];
-export type SkillPackage = components['schemas']['UnifiedPackage'];
+export type SkillPackage = components['schemas']['UnifiedPackage'] & {
+  market?: import('./plugin-market').PluginMarket | null;
+};
 export type SkillVersion = components['schemas']['UnifiedVersion'];
 export type SkillInstallation = components['schemas']['UnifiedInstallation'];
 

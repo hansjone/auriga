@@ -293,3 +293,25 @@ button.primary:hover {
   line-height: 1.6;
   color: var(--dsw-alias-label-secondary, inherit);
 }
+
+.resource-market-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-bottom: 20px;
+}
+.resource-market-filters label {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  font-size: 13px;
+}
+.resource-market-filters select {
+  max-width: min(100%, 250px);
+  padding: 6px;
+  color: inherit;
+  font: inherit;
+  border: 1px solid var(--dsw-alias-border-l1, currentColor);
+  border-radius: 7px;
+  background: var(--dsw-alias-bg-layer-1, Canvas);
+}
