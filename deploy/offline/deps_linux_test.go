@@ -371,3 +371,193 @@ func TestDepsStatusJSONShape(t *testing.T) {
 		}
 	}
 }
+
+func TestDepsFetchJavaSeedCacheRWAndIsolation(t *testing.T) {
+	stubSiteOwner(t, nil)
+	src := fakeSourceTree(t)
+
+	oldPomBody := "<project><artifactId>old</artifactId></project>\n"
+	newJarBody := "new-reactor-common-jar"
+	oldPomHash := lockDigestOf([]byte(oldPomBody))
+	newJarHash := lockDigestOf([]byte(newJarBody))
+
+	// 模拟新增 POM/构件后的新源码树与锁文件。
+	writeTestFileAt(t, filepath.Join(src, "services", "iam", "api", "pom.xml"), "<project><artifactId>iam-api</artifactId></project>\n")
+	writeTestFileAt(t, filepath.Join(src, filepath.FromSlash(mavenDepsLockRel)),
+		"org.old:lib:pom:1.0 "+oldPomHash+"\n"+
+			"org.new:reactor-common:jar:2.0 "+newJarHash+"\n")
+
+	locksSlice, err := sourceEcosystemLocks(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	locks := map[string]ecosystemLock{}
+	for _, l := range locksSlice {
+		locks[l.Ecosystem] = l
+	}
+
+	cache := filepath.Join(t.TempDir(), "cache")
+	if _, err := ensureDepsCache(cache, true); err != nil {
+		t.Fatal(err)
+	}
+	npm := "https://npm.internal.example"
+	maven := "https://maven.internal.example/repo"
+	cfg := &siteConfig{
+		SchemaVersion: 1,
+		Deps: &siteDeps{
+			Cache: cache,
+			Sources: siteSources{
+				Go:    []string{"https://goproxy.internal.example"},
+				NPM:   &npm,
+				Maven: &maven,
+			},
+		},
+	}
+
+	makeImageRecord(t, cache, "tool-go", false)
+	makeImageRecord(t, cache, "tool-web", false)
+	makeImageRecord(t, cache, "tool-java", false)
+
+	// 写入旧缓存条目作为增量 seed（锁内容与当前源码不同）。
+	oldGoLock := []byte("old-go-lock\n")
+	oldWebLock := []byte("old-web-lock\n")
+	oldJavaLock := []byte("old-java-lock\n")
+	oldGoSeed := makeInputEntry(t, cache, "go", oldGoLock, map[string]string{
+		"download/example.com/old/@v/v1.0.0.zip": "old-zip",
+	})
+	oldWebSeed := makeInputEntry(t, cache, "web", oldWebLock, map[string]string{
+		"web-cache.tar.gz": "old-store",
+		"corepack.tgz":     "old-pnpm",
+	})
+	oldJavaSeed := makeInputEntry(t, cache, "java", oldJavaLock, map[string]string{
+		"repository/org/old/lib/1.0/lib-1.0.pom": oldPomBody,
+		"npm-cacache/x":                          "old-npm",
+		"wrapper/dists/d":                        "old-wrapper",
+	})
+
+	oldRun, oldImage, oldReady, oldLookup := runOnlineDocker, ensureDepsImage, depsDockerReady, lookupOnlineEnv
+	t.Cleanup(func() {
+		runOnlineDocker, ensureDepsImage, depsDockerReady, lookupOnlineEnv = oldRun, oldImage, oldReady, oldLookup
+	})
+	lookupOnlineEnv = fakeEnv(nil)
+	ensureDepsImage = func(_ context.Context, img imageHit) (string, error) { return img.Image.runtimeRef(), nil }
+	depsDockerReady = func(context.Context, buildBudget) error { return nil }
+
+	seenRW := map[string]bool{}
+	seenCache := map[string]string{}
+	runOnlineDocker = func(_ context.Context, _ []string, args ...string) error {
+		kind := strings.TrimSuffix(filepath.Base(args[len(args)-3]), "-inputs.sh")
+		mounts := mountsOf(args)
+		out := mounts["/output"]
+		cacheDir := mounts["/prepare-cache"]
+		_, rw := mountsRW(args)
+		seenCache[kind] = cacheDir
+		seenRW[kind] = rw
+
+		files := map[string]string{}
+		switch kind {
+		case "go":
+			if cacheDir == "" || rw {
+				return fmt.Errorf("go 缓存挂载异常：cache=%q rw=%v", cacheDir, rw)
+			}
+			files["download/example.com/m/@v/v1.0.0.zip"] = "zip"
+		case "web":
+			if cacheDir == "" || rw {
+				return fmt.Errorf("web 缓存挂载异常：cache=%q rw=%v", cacheDir, rw)
+			}
+			files["web-cache.tar.gz"] = "store"
+			files["corepack.tgz"] = "pnpm"
+		case "java":
+			if cacheDir == "" {
+				return errors.New("java 缺少 /prepare-cache 挂载")
+			}
+			// 复现容器只读挂载时的真实失败行为。
+			if !rw {
+				return errors.New("cp: cannot create regular file '/prepare-cache/source-locks': Read-only file system")
+			}
+			// 验证 prepareCache 布局已到位。
+			for _, rel := range []string{"repository/org/old/lib/1.0/lib-1.0.pom", "npm-cache/_cacache/x", "maven/wrapper/dists/d"} {
+				if _, err := os.Stat(filepath.Join(cacheDir, filepath.FromSlash(rel))); err != nil {
+					return fmt.Errorf("java seed 副本缺少 %s：%w", rel, err)
+				}
+			}
+			// 模拟 java-inputs.sh:278-282 写入 /prepare-cache/source-locks 与新构件缓存。
+			if err := os.WriteFile(filepath.Join(cacheDir, "source-locks"), locks["java"].Raw, 0644); err != nil {
+				return err
+			}
+			writeTestFileAt(t, filepath.Join(cacheDir, "repository", "org", "new", "reactor-common", "2.0", "reactor-common-2.0.jar"), newJarBody)
+
+			files["repository/org/old/lib/1.0/lib-1.0.pom"] = oldPomBody
+			files["repository/org/new/reactor-common/2.0/reactor-common-2.0.jar"] = newJarBody
+			files["npm-cacache/x"] = "old-npm"
+			files["wrapper/dists/d"] = "old-wrapper"
+		}
+
+		rawLock := locks[kind].Raw
+		writeTestFileAt(t, filepath.Join(out, "source-locks.sha256"), string(rawLock))
+		var sums strings.Builder
+		for name, body := range files {
+			writeTestFileAt(t, filepath.Join(out, filepath.FromSlash(name)), body)
+			sum, _ := digest(filepath.Join(out, filepath.FromSlash(name)))
+			fmt.Fprintf(&sums, "%s  %s\n", sum, name)
+		}
+		fmt.Fprintf(&sums, "%s  source-locks.sha256\n", lockDigestOf(rawLock))
+		writeTestFileAt(t, filepath.Join(out, "SHA256SUMS"), sums.String())
+		return nil
+	}
+
+	var out bytes.Buffer
+	err = depsFetch(context.Background(), cfg, "site.json", src, depsFetchOptions{
+		Accept: true,
+		Out:    &out,
+		Budget: buildBudget{MemoryMiB: 4096, CPUs: 2},
+	})
+	// python 和 system 未配置/不可自动补，期望只报这两项；go/web/java 应全部成功。
+	if err == nil || strings.Contains(err.Error(), "java") || !strings.Contains(err.Error(), "system") {
+		t.Fatalf("期望 go/web/java 成功，仅拒绝 python/system，得到：%v", err)
+	}
+	if !seenRW["java"] || seenRW["go"] || seenRW["web"] {
+		t.Fatalf("只有 Java seed 副本应可写，其余保持只读：%+v", seenRW)
+	}
+	if seenCache["go"] != filepath.Join(oldGoSeed, "download") {
+		t.Fatalf("go 应只读挂载旧 seed download：%q", seenCache["go"])
+	}
+	if seenCache["web"] != oldWebSeed {
+		t.Fatalf("web 应只读挂载旧 seed：%q", seenCache["web"])
+	}
+	if seenCache["java"] == oldJavaSeed || strings.HasPrefix(seenCache["java"], oldJavaSeed+string(filepath.Separator)) {
+		t.Fatalf("java 不可把旧只读正式输入直接挂可写：mount=%q oldSeed=%q", seenCache["java"], oldJavaSeed)
+	}
+	if !strings.Contains(seenCache["java"], ".staging-") {
+		t.Fatalf("java 可写缓存应位于暂存隔离目录：%q", seenCache["java"])
+	}
+
+	// 新 Java 缓存条目应通过完整性与新源码 Maven 锁校验。
+	newJavaDir := filepath.Join(cache, "inputs", "java", locks["java"].Digest)
+	if err := verifyInputEntry(newJavaDir, "java", locks["java"].Digest); err != nil {
+		t.Fatalf("新 Java 缓存条目校验失败：%v", err)
+	}
+	if err := verifyImportedJavaAgainstLock(src, newJavaDir); err != nil {
+		t.Fatalf("新 Java 缓存条目未通过源码锁校验：%v", err)
+	}
+
+	// 旧只读正式输入条目必须保持原样、未被写入 source-locks 或新构件。
+	if _, err := os.Stat(filepath.Join(oldJavaSeed, "source-locks")); !os.IsNotExist(err) {
+		t.Fatalf("旧 Java 正式输入不应被写入 source-locks：%v", err)
+	}
+	if err := verifyInputEntry(oldJavaSeed, "java", lockDigestOf(oldJavaLock)); err != nil {
+		t.Fatalf("旧 Java 正式输入应保持完整未改动：%v", err)
+	}
+	if leftovers, _ := filepath.Glob(filepath.Join(cache, ".staging-*")); len(leftovers) != 0 {
+		t.Fatalf("暂存目录应清理：%v", leftovers)
+	}
+
+	// 容器失败时错误提示不应仅归因于网络。
+	runOnlineDocker = func(_ context.Context, _ []string, _ ...string) error {
+		return errors.New("docker 执行失败 exit status 1")
+	}
+	err = fetchEcosystem(context.Background(), cfg, newDepsResolver(cfg), src, locks["java"], buildBudget{MemoryMiB: 4096, CPUs: 2}, &bytes.Buffer{})
+	if err == nil || !strings.Contains(err.Error(), "准备容器执行失败") {
+		t.Fatalf("容器失败应给出准确错误提示：%v", err)
+	}
+}
