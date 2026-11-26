@@ -14,6 +14,7 @@ import {
   readdirSync,
   statSync,
 } from 'node:fs';
+import { open as openAsync, stat as statAsync } from 'node:fs/promises';
 import { isAbsolute, join, relative, sep } from 'node:path';
 import { satisfiesMin } from './semver-lite.mjs';
 
@@ -28,20 +29,73 @@ export const PINNED_TREES = [
 export const isPinnedPath = (path) =>
   PINNED_TREES.some((prefix) => path.startsWith(prefix));
 
+// Reuse a single 1 MiB scratch buffer for synchronous hashing so verifying
+// thousands of small files does not allocate gigabytes of short-lived buffers.
+const syncHashBuffer = Buffer.allocUnsafe(1 << 20);
+
 export function sha256File(file) {
   const hash = createHash('sha256');
   const fd = openSync(file, 'r');
   try {
-    const buffer = Buffer.allocUnsafe(1 << 20);
     for (;;) {
-      const read = readSync(fd, buffer, 0, buffer.length, null);
+      const read = readSync(fd, syncHashBuffer, 0, syncHashBuffer.length, null);
       if (read === 0) break;
-      hash.update(buffer.subarray(0, read));
+      hash.update(syncHashBuffer.subarray(0, read));
     }
   } finally {
     closeSync(fd);
   }
   return hash.digest('hex');
+}
+
+async function sha256FileAsync(file, buffer) {
+  const hash = createHash('sha256');
+  const handle = await openAsync(file, 'r');
+  try {
+    for (;;) {
+      const { bytesRead } = await handle.read(buffer, 0, buffer.length, null);
+      if (bytesRead === 0) break;
+      hash.update(buffer.subarray(0, bytesRead));
+    }
+  } finally {
+    await handle.close();
+  }
+  return hash.digest('hex');
+}
+
+async function mapConcurrent(items, concurrency, fn) {
+  const results = new Array(items.length);
+  let next = 0;
+  const workerCount = Math.min(Math.max(1, concurrency), items.length);
+  const workers = [];
+  for (let w = 0; w < workerCount; w++) {
+    const buffer = Buffer.allocUnsafe(256 * 1024);
+    workers.push(
+      (async () => {
+        for (;;) {
+          const i = next++;
+          if (i >= items.length) return;
+          results[i] = await fn(items[i], i, buffer);
+        }
+      })(),
+    );
+  }
+  await Promise.all(workers);
+  return results;
+}
+
+async function treeDigestAsync(payload, root, concurrency = 12) {
+  const base = join(payload, ...root.split('/'));
+  const files = listFiles(base);
+  const entries = await mapConcurrent(files, concurrency, async (f, _, buf) => {
+    const full = join(base, f);
+    const info = await statAsync(full);
+    const digest = await sha256FileAsync(full, buf);
+    return `${f}\t${info.size}\t${digest}\n`;
+  });
+  const hash = createHash('sha256');
+  for (const line of entries) hash.update(line);
+  return { root, files: files.length, sha256: hash.digest('hex') };
 }
 
 /**
@@ -182,6 +236,114 @@ export function verifyPackage(payload, { trees = true } = {}) {
       if (!PINNED_TREES.includes(t.root + '/'))
         throw new Error(`unexpected tree in manifest: ${t.root}`);
       const actual = treeDigest(payload, t.root);
+      if (actual.files !== t.files || actual.sha256 !== t.sha256)
+        throw new Error(
+          `distributed files differ from the manifest: ${t.root} (${actual.files} files, expected ${t.files})`,
+        );
+    }
+  }
+
+  const dshPkg = join(
+    payload,
+    'upstream/app/node_modules/@deepseek-ai/dsh/package.json',
+  );
+  if (!existsSync(dshPkg)) throw new Error('upstream dsh package missing');
+  const dsh = readJson(dshPkg);
+  if (dsh.version !== manifest.upstream.version)
+    throw new Error(
+      `upstream dsh is ${dsh.version}, manifest says ${manifest.upstream.version}`,
+    );
+  const lock = readJson(join(payload, 'upstream/app/package-lock.json'));
+  if (
+    lock.packages?.['node_modules/@deepseek-ai/dsh']?.integrity !==
+    manifest.upstream.integrity
+  )
+    throw new Error('upstream lock integrity differs from manifest');
+
+  const pluginPkg = readJson(
+    join(payload, 'auriga/plugin/node_modules/auriga-dsh/package.json'),
+  );
+  if (pluginPkg.version !== manifest.plugin.version)
+    throw new Error('plugin version differs from manifest');
+  if (!satisfiesMin(manifest.upstream.version, pluginPkg.engines?.dsh))
+    throw new Error(
+      `plugin requires dsh ${pluginPkg.engines?.dsh}, package has ${manifest.upstream.version}`,
+    );
+  if (
+    sha256File(join(payload, 'auriga/plugin/auriga-dsh.tgz')) !==
+    manifest.plugin.tgzSha256
+  )
+    throw new Error('plugin tarball checksum differs from manifest');
+  const pnpmPkg = join(payload, 'tools/pnpm/node_modules/pnpm/package.json');
+  if (
+    !existsSync(pnpmPkg) ||
+    readJson(pnpmPkg).version !== manifest.pnpm.version
+  )
+    throw new Error('pnpm version differs from manifest');
+  return manifest;
+}
+
+/**
+ * Concurrent async variant of verifyPackage(): identical security checks and
+ * error codes, but hashes files in parallel (default 12 workers) to speed up
+ * startup, install and update verification on Windows NTFS/NVMe.
+ */
+export async function verifyPackageAsync(
+  payload,
+  { trees = true, concurrency = 12 } = {},
+) {
+  const manifestFile = join(payload, 'manifest.json');
+  if (!existsSync(manifestFile)) throw new Error('manifest.json missing');
+  let manifest;
+  try {
+    manifest = readJson(manifestFile);
+  } catch {
+    throw new Error('manifest.json is not valid JSON');
+  }
+  if (
+    manifest.schema !== 1 ||
+    manifest.product !== PRODUCT ||
+    typeof manifest.id !== 'string' ||
+    !Array.isArray(manifest.files) ||
+    !manifest.upstream ||
+    !manifest.plugin ||
+    !manifest.pnpm ||
+    !Array.isArray(manifest.trees) ||
+    PINNED_TREES.some(
+      (p) => !manifest.trees.some((t) => t.root === p.slice(0, -1)),
+    )
+  )
+    throw new Error('manifest is malformed');
+  if (computeId(manifest) !== manifest.id)
+    throw new Error('manifest id does not match its component digest');
+
+  const listed = new Set();
+  for (const f of manifest.files) {
+    if (unsafe(f.path)) throw new Error(`unsafe manifest path: ${f.path}`);
+    if (listed.has(f.path))
+      throw new Error(`duplicate manifest path: ${f.path}`);
+    listed.add(f.path);
+  }
+  await mapConcurrent(manifest.files, concurrency, async (f, _, buf) => {
+    const full = join(payload, ...f.path.split('/'));
+    if (!existsSync(full))
+      throw packageFileError(f.path, 'listed file missing');
+    const info = await statAsync(full);
+    if (info.size !== f.size) throw packageFileError(f.path, 'size mismatch');
+    if ((await sha256FileAsync(full, buf)) !== f.sha256)
+      throw packageFileError(f.path, 'checksum mismatch');
+  });
+  for (const path of listFiles(payload)) {
+    if (path === 'manifest.json' || isPinnedPath(path)) continue;
+    if (!listed.has(path))
+      throw packageFileError(path, 'unlisted file in package');
+  }
+
+  if (trees) {
+    for (const t of manifest.trees) {
+      if (!PINNED_TREES.includes(t.root + '/'))
+        throw new Error(`unexpected tree in manifest: ${t.root}`);
+      const actual = await treeDigestAsync(payload, t.root, concurrency);
       if (actual.files !== t.files || actual.sha256 !== t.sha256)
         throw new Error(
           `distributed files differ from the manifest: ${t.root} (${actual.files} files, expected ${t.files})`,

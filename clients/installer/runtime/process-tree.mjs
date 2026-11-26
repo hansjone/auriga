@@ -10,8 +10,9 @@ import {
 } from 'node:fs';
 import { join, parse } from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { assertLocalPath, durableJson } from './host-lock.mjs';
+import { assertLocalPath, durableJson, seedBootId } from './host-lock.mjs';
 import { parseStrictJson } from './json.mjs';
+import { execWinHelper } from './win-helper.mjs';
 
 const ps = (code) =>
   execFileSync(
@@ -24,12 +25,57 @@ const ps = (code) =>
     ],
     { encoding: 'utf8', timeout: 15000, windowsHide: true },
   );
+
+let cachedNtfs = null;
+let cachedStartupProcesses = null;
+
+function validateNtfsInfo(info) {
+  if (info.type !== 3 || info.fs !== 'NTFS')
+    throw new Error('only local fixed NTFS volumes are supported');
+  if (info.reparse) throw new Error('reparse point rejected');
+}
+
+/**
+ * Run a single native helper invocation at startup to collect NTFS validation,
+ * host bootId, and the initial process snapshot in one shot (~150-200ms total
+ * instead of 10+ sequential PowerShell cold starts).
+ */
+export function primeStartupProbe(home) {
+  if (process.platform !== 'win32') return false;
+  assertLocalPath(home);
+  const raw = execWinHelper(['startup-probe', home], { timeout: 15000 });
+  if (raw === null) return false;
+  const data = JSON.parse(raw);
+  if (data.ntfs) {
+    validateNtfsInfo(data.ntfs);
+    cachedNtfs = { home: home.toLowerCase(), at: Date.now() };
+  }
+  if (data.bootId) seedBootId(data.bootId);
+  if (Array.isArray(data.processes)) {
+    const me = data.processes.find((p) => p.pid === process.pid);
+    if (me) ownIdentity = me;
+    cachedStartupProcesses = { list: data.processes, at: Date.now() };
+  }
+  return true;
+}
+
 export function assertNTFS(home) {
   assertLocalPath(home);
   if (process.platform !== 'win32')
     throw new Error('Desktop guardian requires local Windows NTFS');
+  if (
+    cachedNtfs &&
+    cachedNtfs.home === home.toLowerCase() &&
+    Date.now() - cachedNtfs.at < 5000
+  )
+    return;
   const root = parse(home).root;
   if (!/^[A-Za-z]:\\$/.test(root)) throw new Error('invalid local drive');
+  const helperOut = execWinHelper(['ntfs-check', home], { timeout: 15000 });
+  if (helperOut !== null) {
+    validateNtfsInfo(JSON.parse(helperOut));
+    return;
+  }
   const drive = root[0];
   const info = JSON.parse(
     ps(
@@ -55,6 +101,16 @@ export function assertNTFS(home) {
 }
 
 export function processList() {
+  if (cachedStartupProcesses && Date.now() - cachedStartupProcesses.at < 1500) {
+    const list = cachedStartupProcesses.list;
+    cachedStartupProcesses = null;
+    return list;
+  }
+  const helperOut = execWinHelper(['proc-list'], { timeout: 15000 });
+  if (helperOut !== null) {
+    const list = JSON.parse(helperOut);
+    return Array.isArray(list) ? list : [list];
+  }
   const output = ps(
     "@(Get-CimInstance Win32_Process | ForEach-Object { @{pid=[int]$_.ProcessId; parent=[int]$_.ParentProcessId; createdAt=$_.CreationDate.ToUniversalTime().ToString('o'); executable=$_.ExecutablePath} }) | ConvertTo-Json -Compress",
   );
@@ -67,8 +123,15 @@ export function processIdentity(pid) {
     throw new Error('invalid process id');
   if (pid === process.pid && ownIdentity) return ownIdentity;
   try {
-    const output = ps(
-      `$p=Get-CimInstance Win32_Process -Filter "ProcessId=${pid}"; if ($p -and $p.CreationDate) { @{pid=[int]$p.ProcessId; createdAt=$p.CreationDate.ToUniversalTime().ToString('o'); executable=$p.ExecutablePath} | ConvertTo-Json -Compress }`,
+    const helperOut = execWinHelper(['proc-info', String(pid)], {
+      timeout: 15000,
+    });
+    const output = (
+      helperOut !== null
+        ? helperOut
+        : ps(
+            `$p=Get-CimInstance Win32_Process -Filter "ProcessId=${pid}"; if ($p -and $p.CreationDate) { @{pid=[int]$p.ProcessId; createdAt=$p.CreationDate.ToUniversalTime().ToString('o'); executable=$p.ExecutablePath} | ConvertTo-Json -Compress }`,
+          )
     ).trim();
     const identity = output ? JSON.parse(output) : null;
     if (pid === process.pid) ownIdentity = identity;
@@ -184,10 +247,14 @@ export class ProcessTree {
     };
   }
   attach(pid) {
-    const process = this.list().find((p) => p.pid === pid);
-    if (!process)
+    // Query only the newly spawned PID (~20-50ms) instead of enumerating every process on the host.
+    const info =
+      this.list === processList
+        ? processIdentity(pid)
+        : this.list().find((p) => p.pid === pid);
+    if (!info)
       throw new Error('DSH exited before process identity was recorded');
-    this.record.root = process;
+    this.record.root = info;
     this.record.children = [];
     this.save();
   }
@@ -223,6 +290,7 @@ export class ProcessTree {
     return live;
   }
   async stopTree() {
+    if (!this.record.root && this.record.children.length === 0) return;
     const live = this.refresh();
     this.stoppedWriters = [this.record.root, ...this.record.children].filter(
       Boolean,
@@ -244,21 +312,21 @@ export class ProcessTree {
       )
         throw new Error('owned process tree stop failed');
     }
-    if (!(await this.isStopped()))
+    if (live.length > 0 && !(await this.isStopped()))
       throw new Error('owned processes remain alive');
     this.record.root = null;
     this.record.children = [];
     this.save();
   }
   async isStopped() {
+    const known = [this.record.root, ...this.record.children].filter(Boolean);
+    if (known.length === 0) return true;
     const processes = this.list();
-    return ![this.record.root, ...this.record.children]
-      .filter(Boolean)
-      .some((p) =>
-        same(
-          processes.find((x) => x.pid === p.pid),
-          p,
-        ),
-      );
+    return !known.some((p) =>
+      same(
+        processes.find((x) => x.pid === p.pid),
+        p,
+      ),
+    );
   }
 }

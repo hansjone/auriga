@@ -15,31 +15,47 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { dirname, isAbsolute, join, parse, resolve } from 'node:path';
+import { execWinHelper } from './win-helper.mjs';
 
 const processStartedAt = new Date(
   Date.now() - process.uptime() * 1000,
 ).toISOString();
 
 let bootId;
+const WIN_BOOT_ID_RE = /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{7}Z$/;
+
+export function seedBootId(value) {
+  if (
+    process.platform === 'win32' &&
+    typeof value === 'string' &&
+    WIN_BOOT_ID_RE.test(value) &&
+    Number.isFinite(Date.parse(value))
+  ) {
+    bootId = value;
+  }
+}
+
 // C/E host-lock sources: raw UTC boot identity and OS uptime, never process uptime.
 export function hostTime() {
   if (!bootId && process.platform === 'linux')
     bootId = readFileSync('/proc/sys/kernel/random/boot_id', 'utf8').trim();
   if (!bootId && process.platform === 'win32') {
-    const result = execFileSync(
-      'powershell.exe',
-      [
-        '-NoProfile',
-        '-NonInteractive',
-        '-Command',
-        "$ErrorActionPreference='Stop'; (Get-CimInstance Win32_OperatingSystem).LastBootUpTime.ToUniversalTime().ToString('o')",
-      ],
-      { encoding: 'utf8', windowsHide: true, timeout: 10000 },
+    const helperOut = execWinHelper(['boot-id'], { timeout: 10000 });
+    const result = (
+      helperOut !== null
+        ? helperOut
+        : execFileSync(
+            'powershell.exe',
+            [
+              '-NoProfile',
+              '-NonInteractive',
+              '-Command',
+              "$ErrorActionPreference='Stop'; (Get-CimInstance Win32_OperatingSystem).LastBootUpTime.ToUniversalTime().ToString('o')",
+            ],
+            { encoding: 'utf8', windowsHide: true, timeout: 10000 },
+          )
     ).trim();
-    if (
-      !/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{7}Z$/.test(result) ||
-      !Number.isFinite(Date.parse(result))
-    )
+    if (!WIN_BOOT_ID_RE.test(result) || !Number.isFinite(Date.parse(result)))
       throw new Error('unable to read boot identity');
     bootId = result;
   }

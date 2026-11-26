@@ -219,6 +219,8 @@ static class Setup
     public static void Extract(ZipArchive zip, string package, Func<bool> cancelled, Action<string, long> progress)
     {
         foreach (var entry in zip.Entries) EntryPath(entry);
+        string packageRoot = Path.GetFullPath(package).TrimEnd('\\') + "\\";
+        var createdDirs = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         long done = 0;
         foreach (var entry in zip.Entries)
         {
@@ -226,11 +228,12 @@ static class Setup
             string name = EntryPath(entry);
             if (name == null) continue;
             string target = Path.GetFullPath(Path.Combine(package, name.Replace('/', '\\')));
-            if (!target.StartsWith(Path.GetFullPath(package).TrimEnd('\\') + "\\", StringComparison.OrdinalIgnoreCase))
+            if (!target.StartsWith(packageRoot, StringComparison.OrdinalIgnoreCase))
                 throw new IOException("unsafe package entry");
             // Explicit extended syntax also works when Windows LongPathsEnabled
             // is off. Only validated, canonical paths reach these file APIs.
-            Directory.CreateDirectory(FileSystemPath(Path.GetDirectoryName(target)));
+            string dir = Path.GetDirectoryName(target);
+            if (createdDirs.Add(dir)) Directory.CreateDirectory(FileSystemPath(dir));
             entry.ExtractToFile(FileSystemPath(target), false);
             done += entry.Length;
             progress(name, done);
@@ -1036,13 +1039,20 @@ sealed class Wizard : Form
                 using (file)
                 using (var zip = new ZipArchive(payload, ZipArchiveMode.Read))
                 {
+                    long lastReportTicks = 0;
+                    const long ReportIntervalTicks = 80 * TimeSpan.TicksPerMillisecond;
                     Setup.Extract(zip, package, () => cancelRequested, (name, done) =>
-                        Report("正在解包安装文件… " + Path.GetFileName(name), 0.35 * done / Math.Max(1, unpackedBytes)));
+                    {
+                        long now = DateTime.UtcNow.Ticks;
+                        if (done < unpackedBytes && now - lastReportTicks < ReportIntervalTicks) return;
+                        lastReportTicks = now;
+                        Report("正在解包安装文件… " + Path.GetFileName(name), 0.35 * done / Math.Max(1, unpackedBytes));
+                    });
                 }
                 if (cancelRequested) throw new OperationCanceledException();
                 string arguments = "-NoProfile -ExecutionPolicy Bypass -File " + Setup.Quote(Path.Combine(package, "install.ps1"))
                     + " -InstallDir " + Setup.Quote(root)
-                    + " -Progress -CancelFile " + Setup.Quote(cancelFile)
+                    + " -Progress -MovePayload -CancelFile " + Setup.Quote(cancelFile)
                     + (desktop || upgrade ? "" : " -NoDesktopShortcut")
                     + (autostart ? " -Autostart" : " -NoAutostart");
                 string lastError = null;

@@ -91,11 +91,20 @@ function indexUrl(value) {
   return url.href;
 }
 
+function writeIfChanged(file, content) {
+  try {
+    if (existsSync(file) && readFileSync(file, 'utf8') === content) return;
+  } catch {
+    /* Rewrite unreadable file. */
+  }
+  durableWrite(file, content);
+}
+
 function writeConfig(paths, index) {
   assertLocalPath(paths.root);
   assertLocalPath(paths.config);
   mkdirSync(paths.root, { recursive: true });
-  durableWrite(
+  writeIfChanged(
     paths.config,
     [
       '[global]',
@@ -120,6 +129,20 @@ function writeConfig(paths, index) {
       '',
     ].join('\n'),
   );
+}
+
+function retargetVenvConfig(pyvenvCfg, pythonDir, pythonExe) {
+  if (!existsSync(pyvenvCfg)) return false;
+  const raw = readFileSync(pyvenvCfg, 'utf8');
+  if (!/^home\s*=/im.test(raw)) return false;
+  let updated = raw.replace(/^home\s*=.*$/im, `home = ${pythonDir}`);
+  if (/^executable\s*=/im.test(updated))
+    updated = updated.replace(
+      /^executable\s*=.*$/im,
+      `executable = ${pythonExe}`,
+    );
+  if (updated !== raw) durableWrite(pyvenvCfg, updated);
+  return true;
 }
 
 export function configurePythonIndex(dataHome, value) {
@@ -206,11 +229,8 @@ export function preparePythonUser(dir, dataHome, base = process.env) {
     stage = 'pip_wheel';
     const pip = JSON.parse(readFileSync(join(bootstrap, 'pip.json'), 'utf8'));
     const wheel = join(bootstrap, pip.filename);
-    if (sha256File(wheel) !== pip.sha256)
-      throw Object.assign(new Error('pip wheel 校验失败'), {
-        reason: 'python_user.bootstrap_digest_mismatch',
-      });
-    const python = join(dir, 'runtime/python/python.exe');
+    const pythonDir = join(dir, 'runtime/python');
+    const python = join(pythonDir, 'python.exe');
     stage = 'marker_read';
     const marker = join(paths.environment, 'auriga-python.json');
     assertLocalPath(marker);
@@ -231,64 +251,95 @@ export function preparePythonUser(dir, dataHome, base = process.env) {
       abi: PYTHON_ABI,
     };
     const env = { ...cleanPythonEnv(base), PYTHONDONTWRITEBYTECODE: '1' };
-    if (
-      JSON.stringify(previous) !== JSON.stringify(identity) ||
-      !existsSync(join(paths.bin, 'python.exe'))
-    ) {
-      stage = 'venv_paths';
-      for (const file of [
-        'pyvenv.cfg',
-        'Scripts/python.exe',
-        'Scripts/python3.exe',
-        'Scripts/pythonw.exe',
-      ])
-        assertLocalPath(join(paths.environment, file));
-      stage = 'venv_create';
-      run(
-        python,
-        [
-          '-I',
-          '-B',
-          '-m',
-          'venv',
-          '--without-pip',
-          '--system-site-packages',
-          paths.environment,
-        ],
-        env,
-      );
-      stage = 'alias_copy';
-      cpSync(join(paths.bin, 'python.exe'), join(paths.bin, 'python3.exe'));
-      stage = 'pip_bootstrap';
-      run(
-        python,
-        [
-          '-I',
-          '-S',
-          '-B',
-          join(bootstrap, 'bootstrap-pip.py'),
-          wheel,
-          paths.environment,
-          pip.sha256,
-        ],
-        env,
-      );
-      stage = 'marker_write';
-      durableJson(marker, identity);
+    const envReady = existsSync(join(paths.bin, 'python.exe'));
+    const exactMatch =
+      envReady && JSON.stringify(previous) === JSON.stringify(identity);
+    let needsProbe = !exactMatch;
+    if (!exactMatch) {
+      // Fast path on version upgrade: when ABI and pip wheel are unchanged,
+      // retarget pyvenv.cfg to the new bundled Python instead of recreating the venv.
+      const canRetarget =
+        envReady &&
+        previous?.abi === PYTHON_ABI &&
+        previous?.pipSha256 === pip.sha256 &&
+        existsSync(join(paths.environment, 'pyvenv.cfg'));
+      let retargeted = false;
+      if (canRetarget) {
+        stage = 'venv_paths';
+        assertLocalPath(join(paths.environment, 'pyvenv.cfg'));
+        retargeted = retargetVenvConfig(
+          join(paths.environment, 'pyvenv.cfg'),
+          pythonDir,
+          python,
+        );
+        if (retargeted) {
+          stage = 'marker_write';
+          durableJson(marker, identity);
+        }
+      }
+      if (!retargeted) {
+        stage = 'pip_wheel';
+        if (sha256File(wheel) !== pip.sha256)
+          throw Object.assign(new Error('pip wheel 校验失败'), {
+            reason: 'python_user.bootstrap_digest_mismatch',
+          });
+        stage = 'venv_paths';
+        for (const file of [
+          'pyvenv.cfg',
+          'Scripts/python.exe',
+          'Scripts/python3.exe',
+          'Scripts/pythonw.exe',
+        ])
+          assertLocalPath(join(paths.environment, file));
+        stage = 'venv_create';
+        run(
+          python,
+          [
+            '-I',
+            '-B',
+            '-m',
+            'venv',
+            '--without-pip',
+            '--system-site-packages',
+            paths.environment,
+          ],
+          env,
+        );
+        stage = 'alias_copy';
+        cpSync(join(paths.bin, 'python.exe'), join(paths.bin, 'python3.exe'));
+        stage = 'pip_bootstrap';
+        run(
+          python,
+          [
+            '-I',
+            '-S',
+            '-B',
+            join(bootstrap, 'bootstrap-pip.py'),
+            wheel,
+            paths.environment,
+            pip.sha256,
+          ],
+          env,
+        );
+        stage = 'marker_write';
+        durableJson(marker, identity);
+      }
     }
-    stage = 'interpreter_probe';
-    run(
-      join(paths.bin, 'python.exe'),
-      ['-I', '-B', '-c', 'import sys; assert sys.prefix != sys.base_prefix'],
-      env,
-    );
+    if (needsProbe) {
+      stage = 'interpreter_probe';
+      run(
+        join(paths.bin, 'python.exe'),
+        ['-I', '-B', '-c', 'import sys; assert sys.prefix != sys.base_prefix'],
+        env,
+      );
+    }
     // A damaged pip does not block launching DSH or importing the built-in packages.
     stage = 'index_config';
     const index = configuredIndex(paths);
     writeConfig(paths, index);
     stage = 'constraints';
     assertLocalPath(paths.constraints);
-    durableWrite(
+    writeIfChanged(
       paths.constraints,
       [
         ...manifest.packages.map((p) => `${p.name}==${p.version}`),

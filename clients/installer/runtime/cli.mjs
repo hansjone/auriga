@@ -73,6 +73,7 @@ try {
       payload,
       root: values.root,
       dataHome: values['data-home'],
+      movePayload: values['move-payload'] === true,
       platformBinding:
         typeof values['platform-origin'] === 'string'
           ? {

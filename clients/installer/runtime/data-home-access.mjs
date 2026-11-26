@@ -17,6 +17,7 @@ import {
 import { dirname, join, resolve } from 'node:path';
 import { assertLocalPath } from './host-lock.mjs';
 import { systemTool } from './system-tools.mjs';
+import { spawnWinHelper } from './win-helper.mjs';
 
 const PROFILE = 'auriga';
 
@@ -52,16 +53,18 @@ function clearReadOnly(file) {
 }
 
 function grantCurrentUserModify(directory) {
-  const result = spawnSync(
-    systemTool('WindowsPowerShell/v1.0/powershell'),
-    ['-NoProfile', '-NonInteractive', '-Command', grantScript],
-    {
-      env: { ...process.env, AURIGA_DATA_HOME_PATH: directory },
-      windowsHide: true,
-      encoding: 'utf8',
-      timeout: 60000,
-    },
-  );
+  const result =
+    spawnWinHelper(['grant-modify', directory], { timeout: 60000 }) ??
+    spawnSync(
+      systemTool('WindowsPowerShell/v1.0/powershell'),
+      ['-NoProfile', '-NonInteractive', '-Command', grantScript],
+      {
+        env: { ...process.env, AURIGA_DATA_HOME_PATH: directory },
+        windowsHide: true,
+        encoding: 'utf8',
+        timeout: 60000,
+      },
+    );
   if (result.status !== 0)
     throw Object.assign(
       new Error(

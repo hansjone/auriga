@@ -16,10 +16,14 @@ export async function superviseDsh({
   session,
   notify,
   attach = async () => {},
-  poll = () => delay(1000),
+  stopSignal,
+  poll = () =>
+    stopSignal
+      ? delay(1000, undefined, { signal: stopSignal }).catch(() => {})
+      : delay(1000),
   now = () => Math.floor(uptime() * 1000),
   stopRequested = () => false,
-  graceMs = 15000,
+  graceMs = 5000,
 }) {
   for (;;) {
     // An exit requested by the owner (tray) is a clean application exit.

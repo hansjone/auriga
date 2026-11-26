@@ -89,6 +89,29 @@ export function compileTray(output, icon) {
   return output;
 }
 
+/** Native Win32 helper (windows/helper/WinHelper.cs): fast NTFS/process/ACL ops without PowerShell cold starts. */
+export function compileHelper(output) {
+  if (!existsSync(CSC)) throw new Error(`C# compiler not found: ${CSC}`);
+  mkdirSync(dirname(output), { recursive: true });
+  const result = spawnSync(
+    CSC,
+    [
+      '/nologo',
+      '/codepage:65001',
+      '/target:exe',
+      '/optimize+',
+      '/r:System.Web.Extensions.dll',
+      '/r:System.Management.dll',
+      `/out:${output}`,
+      join(here, '..', 'windows', 'helper', 'WinHelper.cs'),
+    ],
+    { encoding: 'utf8' },
+  );
+  if (result.status !== 0)
+    throw new Error(`csc failed: ${result.stdout}${result.stderr}`);
+  return output;
+}
+
 export function makeExe({ stage, out, icon, archive, manifest }) {
   stage = resolve(stage);
   out = resolve(out);
