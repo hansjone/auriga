@@ -135,4 +135,57 @@ class SharedDshAdminHttpTest {
         .andExpect(status().isBadRequest());
     verifyNoInteractions(admin);
   }
+
+  @Test
+  void discoveryHistoryAndPreflightRequirePlacementRead() throws Exception {
+    String base = "/api/workspace/v1/admin/";
+    login(TokenContext.ADMIN, Set.of("workspace.placements.write"), now);
+    mvc.perform(get(base + "placement-migration-candidates")).andExpect(status().isForbidden());
+    mvc.perform(get(base + "placement-rebuild-plans")).andExpect(status().isForbidden());
+    mvc.perform(
+            post(base + "placement-rebuild-plans/preflight")
+                .contentType("application/json")
+                .content("{\"members\":[]}"))
+        .andExpect(status().isForbidden());
+    verifyNoInteractions(admin);
+    login(TokenContext.ADMIN, Set.of("workspace.placements.read"), null);
+    var empty = new SharedDshAdmin.Result(Map.of("items", List.of(), "total", 0), "\"discovery\"");
+    when(admin.candidates("研发", 50, 0, member)).thenReturn(empty);
+    when(admin.plans()).thenReturn(empty);
+    when(admin.preflight(any()))
+        .thenReturn(
+            new SharedDshAdmin.Result(
+                Map.of("capacityStatus", "unknown", "items", List.of()), "\"preflight\""));
+    mvc.perform(
+            get(base + "placement-migration-candidates")
+                .param("q", "研发")
+                .param("memberId", member.toString()))
+        .andExpect(status().isOk())
+        .andExpect(header().string("Cache-Control", "no-store"));
+    mvc.perform(get(base + "placement-rebuild-plans")).andExpect(status().isOk());
+    mvc.perform(
+            post(base + "placement-rebuild-plans/preflight")
+                .contentType("application/json")
+                .content("{\"members\":[]}"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.capacityStatus").value("unknown"));
+    verify(authorization, times(3)).requireRead();
+    verify(authorization, never()).requireWrite();
+    verify(gate, atLeastOnce()).require(any(), any(), eq(true));
+  }
+
+  @Test
+  void expiredStepUpCannotStartSavedPlan() throws Exception {
+    login(TokenContext.ADMIN, Set.of("workspace.placements.write"), now.minusSeconds(601));
+    doThrow(new AurigaException(CommonErrors.STEP_UP_REQUIRED)).when(authorization).requireWrite();
+    mvc.perform(
+            post("/api/workspace/v1/admin/placement-rebuild-plans/{id}/start", member)
+                .header("Idempotency-Key", "start")
+                .header("If-Match", "\"opaque\"")
+                .contentType("application/json")
+                .content(
+                    "{\"exportConfirmed\":true,\"sessionPolicy\":\"discard\",\"filePolicy\":\"archive-and-reset\"}"))
+        .andExpect(status().isForbidden());
+    verifyNoInteractions(admin);
+  }
 }

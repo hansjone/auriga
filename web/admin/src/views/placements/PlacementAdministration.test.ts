@@ -1,8 +1,12 @@
+import { routeLocationKey } from 'vue-router';
 import { mount, flushPromises } from '@vue/test-utils';
 import { beforeEach, expect, it, vi } from 'vitest';
 import { createAurigaI18n, ApiError } from '@auriga/shared';
 import View from './PlacementAdministration.vue';
 const mock = vi.hoisted(() => ({
+  history: vi.fn(),
+  candidates: vi.fn(),
+  preflight: vi.fn(),
   membership: vi.fn(),
   capacity: vi.fn(),
   create: vi.fn(),
@@ -34,8 +38,14 @@ const plan = {
   reason: 'maintenance',
   members,
 };
-function view() {
-  return mount(View, { global: { plugins: [createAurigaI18n('zh-CN')] } });
+function view(query = {}) {
+  return mount(View, {
+    global: {
+      plugins: [createAurigaI18n('zh-CN')],
+      provide: { [routeLocationKey as symbol]: { query } },
+      stubs: { RouterLink: true },
+    },
+  });
 }
 async function click(wrapper: ReturnType<typeof view>, label: string) {
   await wrapper
@@ -45,11 +55,45 @@ async function click(wrapper: ReturnType<typeof view>, label: string) {
   await flushPromises();
 }
 async function load(wrapper: ReturnType<typeof view>) {
-  await wrapper.find('input').setValue(planId);
-  await click(wrapper, '读取计划');
+  await click(wrapper, '打开计划');
 }
 beforeEach(() => {
   vi.clearAllMocks();
+  mock.history.mockResolvedValue({
+    items: [{ ...plan, started: false, memberCount: 1 }],
+  });
+  mock.candidates.mockResolvedValue({
+    total: 2,
+    items: [
+      {
+        memberId,
+        displayName: '王芳',
+        dedicatedEntitled: true,
+        eligibility: 'eligible',
+        currentMode: 'legacy',
+        legacyInstances: [
+          {
+            instanceId: members[0].legacyInstanceId,
+            name: '研发环境',
+            phase: 'running',
+            ready: true,
+          },
+        ],
+      },
+      {
+        memberId: planId,
+        displayName: '同名账号',
+        currentMode: 'legacy',
+        eligibility: 'multiple_legacy_instances',
+        eligibilityReason: '存在多个旧实例',
+        legacyInstances: [],
+      },
+    ],
+  });
+  mock.preflight.mockResolvedValue({
+    items: [{ memberId, eligible: true, reason: '可迁移' }],
+    capacityStatus: 'unknown',
+  });
   mock.membership.mockResolvedValue({
     permissions: ['workspace.placements.read', 'workspace.placements.write'],
   });
@@ -83,22 +127,40 @@ it('does not read capacity without permission', async () => {
   await flushPromises();
   expect(mock.capacity).not.toHaveBeenCalled();
   expect(w.find('[role=alert]').exists()).toBe(false);
-  expect(w.find('fieldset').attributes('disabled')).toBeDefined();
+  expect(w.find('fieldset').exists()).toBe(false);
+  expect(mock.candidates).not.toHaveBeenCalled();
   w.unmount();
 });
 it('saves remain-dedicated lists without starting or deleting sessions', async () => {
-  const w = view();
+  const w = view({ memberId });
   await flushPromises();
-  const row = w.find('.member-row');
-  const inputs = row.findAll('input');
-  await inputs[0].setValue(memberId);
-  await inputs[1].setValue(members[0].legacyInstanceId);
-  await row.find('select').setValue('dedicated');
+  expect(mock.candidates).toHaveBeenCalledWith(
+    '',
+    0,
+    expect.any(AbortSignal),
+    memberId,
+  );
+  expect(w.findAll('input[type=checkbox]')[0].element).toHaveProperty(
+    'checked',
+    true,
+  );
+  expect(
+    w.findAll('input[type=checkbox]')[1].attributes('disabled'),
+  ).toBeDefined();
+  await click(w, '目标与预检');
+  await w.find('select').setValue('dedicated');
+  await click(w, '重新预检');
+  expect(w.text()).toContain('共享池容量未知');
+  await click(w, '导出与维护窗口');
   await w.find('textarea').setValue('maintenance');
-  await w.find('form').trigger('submit');
-  await flushPromises();
+  await w.find('input[type=datetime-local]').setValue('2026-10-01T08:30');
+  await click(w, '保存草稿');
   expect(mock.create).toHaveBeenCalledWith(
-    { reason: 'maintenance', members },
+    {
+      reason: 'maintenance',
+      members,
+      exportUntil: new Date('2026-10-01T08:30').getTime() / 1000,
+    },
     expect.any(String),
     expect.any(AbortSignal),
   );
@@ -106,20 +168,22 @@ it('saves remain-dedicated lists without starting or deleting sessions', async (
   expect(w.text()).toContain('名单已保存');
   w.unmount();
 });
-it('rejects duplicate members rather than truncating the list', async () => {
-  const w = view();
+it('blocks continuation when authoritative preflight finds changed ownership', async () => {
+  mock.preflight.mockResolvedValue({
+    items: [{ memberId, eligible: false, reason: '归属已变更' }],
+    capacityStatus: 'unknown',
+  });
+  const w = view({ memberId });
   await flushPromises();
-  await load(w);
-  await click(w, '添加成员');
-  const rows = w.findAll('.member-row');
-  await rows[1].findAll('input')[0].setValue(memberId);
-  await rows[1]
-    .findAll('input')[1]
-    .setValue('44444444-4444-4444-8444-444444444444');
-  await w.find('form').trigger('submit');
-  await flushPromises();
-  expect(mock.update).not.toHaveBeenCalled();
-  expect(w.text()).toContain('不重复');
+  await click(w, '目标与预检');
+  expect(w.text()).toContain('归属已变更');
+  expect(
+    w
+      .findAll('button')
+      .find((b) => b.text() === '导出与维护窗口')!
+      .attributes('disabled'),
+  ).toBeDefined();
+  expect(mock.create).not.toHaveBeenCalled();
   w.unmount();
 });
 it('requires explicit export confirmation, preserves ETag, and treats 202 only as registered', async () => {
@@ -128,10 +192,17 @@ it('requires explicit export confirmation, preserves ETag, and treats 202 only a
   await load(w);
   await w.findAll('.auriga-hint-trigger').at(-1)!.trigger('click');
   expect(w.text()).toContain('审计记在被冒用者名下');
-  expect(w.find('details').exists()).toBe(false);
+  expect(w.find('details').exists()).toBe(true);
   await click(w, '确认导出并开始重建');
   expect(mock.start).not.toHaveBeenCalled();
-  await w.find('input[type=checkbox]').setValue(true);
+  await w.findAll('input[type=checkbox]')[0].setValue(true);
+  expect(
+    w
+      .findAll('button')
+      .find((b) => b.text() === '确认导出并开始重建')!
+      .attributes('disabled'),
+  ).toBeDefined();
+  await w.findAll('input[type=checkbox]')[1].setValue(true);
   await click(w, '确认导出并开始重建');
   expect(mock.start).toHaveBeenCalledWith(
     planId,
@@ -164,7 +235,14 @@ it('retries an uncertain start with the same key and label, without automatic re
   const w = view();
   await flushPromises();
   await load(w);
-  await w.find('input[type=checkbox]').setValue(true);
+  await w.findAll('input[type=checkbox]')[0].setValue(true);
+  expect(
+    w
+      .findAll('button')
+      .find((b) => b.text() === '确认导出并开始重建')!
+      .attributes('disabled'),
+  ).toBeDefined();
+  await w.findAll('input[type=checkbox]')[1].setValue(true);
   await click(w, '确认导出并开始重建');
   const args = mock.start.mock.calls[0];
   expect(mock.start).toHaveBeenCalledTimes(1);
@@ -183,7 +261,14 @@ it('clears stale ETag on 412 and requires reread before a new write', async () =
   const w = view();
   await flushPromises();
   await load(w);
-  await w.find('input[type=checkbox]').setValue(true);
+  await w.findAll('input[type=checkbox]')[0].setValue(true);
+  expect(
+    w
+      .findAll('button')
+      .find((b) => b.text() === '确认导出并开始重建')!
+      .attributes('disabled'),
+  ).toBeDefined();
+  await w.findAll('input[type=checkbox]')[1].setValue(true);
   await click(w, '确认导出并开始重建');
   expect(w.text()).toContain('重新读取权威状态');
   expect(
@@ -232,14 +317,17 @@ it('renders unknown telemetry, expired admission and retained blocked pool impac
 it('rejects a completed response that omitted the planned member', async () => {
   const w = view();
   await flushPromises();
-  await load(w);
+  mock.plan.mockResolvedValue({
+    data: { ...plan, state: 'running' },
+    etag: '"state"',
+  });
   mock.progress.mockResolvedValue({
     planId,
     revision: 4,
     state: 'completed',
     members: [],
   });
-  await click(w, '读取进度');
+  await load(w);
   expect(w.text()).toContain('请求未完成');
   expect(
     w.findAll('[role=status]').some((v) => v.text().includes('全部成功')),
@@ -267,5 +355,80 @@ it('uses unknown text for an unrecognized impact reason and state', async () => 
   expect(w.text()).not.toContain('reasons.future-reason');
   expect(w.text()).not.toContain('impactStates.future-state');
   expect(w.text()).toContain('未知');
+  w.unmount();
+});
+it('restores mixed progress from history and polls the running member without resending a write', async () => {
+  const secondId = '44444444-4444-4444-8444-444444444444';
+  const second = {
+    memberId: secondId,
+    legacyInstanceId: '55555555-5555-4555-8555-555555555555',
+    targetMode: 'shared',
+    displayName: '林悦',
+  };
+  mock.plan.mockResolvedValue({
+    data: {
+      ...plan,
+      state: 'blocked',
+      members: [{ ...members[0], displayName: '王芳' }, second],
+    },
+    etag: '"restored"',
+  });
+  const first = {
+    memberId,
+    state: 'blocked',
+    failureCode: 'stop-unconfirmed',
+    revision: 2,
+    sessionsDiscarded: false,
+    workspaceEmpty: false,
+  };
+  mock.progress.mockResolvedValue({
+    planId,
+    state: 'blocked',
+    revision: 2,
+    members: [
+      first,
+      {
+        memberId: secondId,
+        state: 'accepted',
+        revision: 2,
+        sessionsDiscarded: false,
+        workspaceEmpty: false,
+      },
+    ],
+  });
+  vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+  const w = view();
+  try {
+    await flushPromises();
+    await load(w);
+    expect(w.text()).toContain('林悦');
+    expect(w.text()).toContain('无法确认旧执行已停止');
+    expect(mock.progress).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(5000);
+    await flushPromises();
+    expect(mock.progress).toHaveBeenCalledTimes(2);
+    expect(mock.start).not.toHaveBeenCalled();
+  } finally {
+    w.unmount();
+    vi.useRealTimers();
+  }
+});
+it('keeps future drafts locked even after both acknowledgements', async () => {
+  mock.plan.mockResolvedValue({
+    data: { ...plan, exportUntil: Math.floor(Date.now() / 1000) + 3600 },
+    etag: '"future"',
+  });
+  const w = view();
+  await flushPromises();
+  await load(w);
+  for (const box of w.findAll('input[type=checkbox]')) await box.setValue(true);
+  expect(w.text()).toContain('尚未到达导出截止时间');
+  expect(
+    w
+      .findAll('button')
+      .find((b) => b.text() === '确认导出并开始重建')!
+      .attributes('disabled'),
+  ).toBeDefined();
+  expect(mock.start).not.toHaveBeenCalled();
   w.unmount();
 });

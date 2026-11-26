@@ -6,6 +6,8 @@ import { adminApi } from '../../admin/api';
 import { placementMessages } from './messages';
 import {
   placementPort,
+  placementAdminApi,
+  selectable,
   placementPortKey,
   intentKey,
   type MemberPlacementSnapshot,
@@ -29,7 +31,8 @@ const entitlementIntent = ref<{
   etag: string;
   key: string;
 }>();
-const saved = ref(false);
+const saved = ref(false),
+  migratable = ref(false);
 const target = ref<'shared' | 'dedicated'>('dedicated');
 let generation = 0;
 let abort = new globalThis.AbortController();
@@ -55,6 +58,7 @@ async function load() {
   abort.abort();
   abort = new globalThis.AbortController();
   snapshot.value = undefined;
+  migratable.value = false;
   permissions.value = [];
   confirmed.value = false;
   error.value = '';
@@ -75,6 +79,19 @@ async function load() {
     )
       throw new Error('binding');
     snapshot.value = value;
+    if (!value.placement && writable.value) {
+      void placementAdminApi
+        .candidates('', 0, abort.signal, props.memberId)
+        .then((candidates) => {
+          if (version === generation)
+            migratable.value = candidates.items.some(
+              (c) => c.memberId === props.memberId && selectable(c),
+            );
+        })
+        .catch(() => {
+          if (version === generation) migratable.value = false;
+        });
+    }
     target.value = value.placement?.mode === 'shared' ? 'dedicated' : 'shared';
   } catch (e) {
     if (version === generation)
@@ -306,6 +323,11 @@ onBeforeUnmount(() => {
       {{ t('placementStates.' + snapshot.placement.state) }}
     </p>
     <p v-else-if="snapshot">{{ t('unassigned') }}</p>
+    <RouterLink
+      v-if="migratable && writable && !disabled && !busy && !entitlementIntent"
+      :to="{ path: '/instances/migration', query: { memberId } }"
+      >{{ t('migrateLegacy') }}</RouterLink
+    >
     <p v-if="saved" role="status">{{ t('entitlementSaved') }}</p>
     <p v-if="pendingKey" role="alert">
       {{ t('uncertain') }} <code>{{ pendingKey.slice(0, 8) }}</code>

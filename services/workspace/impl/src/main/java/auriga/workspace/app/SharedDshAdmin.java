@@ -5,6 +5,7 @@ import static auriga.workspace.domain.SharedDshPolicy.*;
 import auriga.common.error.*;
 import auriga.common.persistence.UuidV7;
 import auriga.workspace.api.SharedDshAuthority.Inputs;
+import auriga.workspace.api.WorkspaceInputs;
 import auriga.workspace.persistence.WorkspaceStore;
 import java.time.Clock;
 import java.util.*;
@@ -16,7 +17,36 @@ public final class SharedDshAdmin {
 
   public record Member(UUID memberId, UUID legacyInstanceId, String targetMode) {}
 
-  public record PlanRequest(List<Member> members, String reason) {}
+  @com.fasterxml.jackson.annotation.JsonInclude(
+      com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+  public record PlanRequest(List<Member> members, String reason, Long exportUntil) {
+    public PlanRequest(List<Member> members, String reason) {
+      this(members, reason, null);
+    }
+  }
+
+  public record PreflightRequest(List<Member> members) {}
+
+  public record Legacy(
+      UUID instanceId, String name, String phase, boolean ready, boolean sharedRebuildHold) {}
+
+  private record Inventory(
+      List<Legacy> instances, String mode, boolean dedicated, boolean maintenance) {
+    String eligibility() {
+      if (mode != null) return "already_migrated";
+      if (maintenance || instances.stream().anyMatch(Legacy::sharedRebuildHold))
+        return "rebuild_hold";
+      if (instances.isEmpty()) return "no_legacy_instance";
+      return instances.size() == 1 ? "eligible" : "multiple_legacy_instances";
+    }
+  }
+
+  private WorkspaceInputs directory;
+
+  @org.springframework.beans.factory.annotation.Autowired
+  public void memberDirectory(WorkspaceInputs directory) {
+    this.directory = directory;
+  }
 
   private final WorkspaceStore store;
   private final SharedDshPlacements placements;
@@ -298,18 +328,127 @@ public final class SharedDshAdmin {
         });
   }
 
-  private void validatePlan(PlanRequest request) {
-    valid(
-        request != null
-            && request.reason() != null
-            && !request.reason().isBlank()
-            && request.reason().length() <= 512
-            && request.members() != null
-            && !request.members().isEmpty()
-            && request.members().size() <= 1000);
+  // Scope every join to the tenant. Group before paging so one owner with several instances
+  // stays on one page. Include maintenance reservations created by other administration paths.
+  private Map<UUID, Inventory> inventory(UUID owner) {
+    String sql =
+        """
+        SELECT i.owner_id,i.id,i.name,i.phase,i.ready,i.shared_rebuild_hold,
+               p.mode,coalesce(e.granted,false) AS dedicated,(m.member_id IS NOT NULL) AS maintenance
+          FROM instance i
+          LEFT JOIN shared_dsh_placement p ON (p.tenant_id,p.member_id)=(i.tenant_id,i.owner_id)
+          LEFT JOIN shared_dsh_entitlement e ON (e.tenant_id,e.member_id)=(i.tenant_id,i.owner_id)
+          LEFT JOIN shared_dsh_maintenance m ON (m.tenant_id,m.member_id)=(i.tenant_id,i.owner_id)
+         WHERE i.tenant_id=? AND NOT i.deleted
+        """;
+    Object[] args =
+        owner == null ? new Object[] {store.tenant()} : new Object[] {store.tenant(), owner};
+    var rows =
+        store.jdbc.queryForList(
+            sql + (owner == null ? "" : " AND i.owner_id=?") + " ORDER BY i.owner_id,i.id", args);
+    var result = new LinkedHashMap<UUID, Inventory>();
+    for (var row : rows) {
+      var entry =
+          result.computeIfAbsent(
+              (UUID) row.get("owner_id"),
+              ignored ->
+                  new Inventory(
+                      new ArrayList<>(),
+                      (String) row.get("mode"),
+                      Boolean.TRUE.equals(row.get("dedicated")),
+                      Boolean.TRUE.equals(row.get("maintenance"))));
+      entry
+          .instances()
+          .add(
+              new Legacy(
+                  (UUID) row.get("id"),
+                  (String) row.get("name"),
+                  (String) row.get("phase"),
+                  Boolean.TRUE.equals(row.get("ready")),
+                  Boolean.TRUE.equals(row.get("shared_rebuild_hold"))));
+    }
+    return result;
+  }
+
+  private Map<String, Object> identity(UUID owner) {
+    var fields = new LinkedHashMap<String, Object>();
+    if (directory == null) return fields;
+    try {
+      var profile = directory.member(store.tenant(), owner);
+      if (profile != null
+          && owner.toString().equals(profile.getAccountId())
+          && store.tenant().toString().equals(profile.getTenantId())) {
+        fields.put("displayName", profile.getDisplayName());
+        fields.put("email", profile.getEmail());
+        fields.put(
+            "memberType",
+            profile.getMemberType().name().replace("MEMBER_TYPE_", "").toLowerCase(Locale.ROOT));
+        fields.put(
+            "memberStatus",
+            profile.getStatus().name().replace("MEMBER_STATUS_", "").toLowerCase(Locale.ROOT));
+      }
+    } catch (RuntimeException unavailable) {
+      // Presentation is best effort. All mutations still require the live member authority.
+    }
+    return fields;
+  }
+
+  private static String reason(String code) {
+    return switch (code) {
+      case "eligible" -> "可迁移";
+      case "already_migrated" -> "成员已有分配";
+      case "multiple_legacy_instances" -> "存在多个旧实例，请先核对归属";
+      case "rebuild_hold" -> "旧实例已在维护中";
+      default -> "没有可迁移的旧实例";
+    };
+  }
+
+  public Result candidates(String q, int limit, int offset, UUID owner) {
+    valid(limit > 0 && limit <= 200 && offset >= 0 && (q == null || q.length() <= 256));
+    String needle = Objects.toString(q, "").strip().toLowerCase(Locale.ROOT);
+    var inventory = store.tx(() -> inventory(owner));
+    var items = new ArrayList<Map<String, Object>>();
+    int total = 0;
+    for (var entry : inventory.entrySet()) {
+      var member = entry.getKey();
+      var inv = entry.getValue();
+      if (needle.isEmpty() && (total < offset || items.size() == limit)) {
+        total++;
+        continue;
+      }
+      var body = identity(member);
+      if (!needle.isEmpty()
+          && !member.toString().contains(needle)
+          && !List.of("displayName", "email").stream()
+              .anyMatch(
+                  k -> Objects.toString(body.get(k), "").toLowerCase(Locale.ROOT).contains(needle))
+          && inv.instances().stream()
+              .noneMatch(
+                  i ->
+                      i.name().toLowerCase(Locale.ROOT).contains(needle)
+                          || i.instanceId().toString().contains(needle))) continue;
+      if (++total <= offset || items.size() == limit) continue;
+      body.put("memberId", member);
+      body.put("dedicatedEntitled", inv.dedicated());
+      body.put("hasPlacement", inv.mode() != null);
+      body.put("currentMode", Objects.toString(inv.mode(), "legacy"));
+      body.put("legacyInstances", inv.instances());
+      body.put("eligibility", inv.eligibility());
+      body.put("eligibilityReason", reason(inv.eligibility()));
+      items.add(body);
+    }
+    return result(Map.of("items", items, "total", total));
+  }
+
+  private Result result(Map<String, Object> body) {
+    return new Result(body, tag(List.of(store.tenant(), body)));
+  }
+
+  private static void validateMembers(List<Member> list) {
+    valid(list != null && !list.isEmpty() && list.size() <= 1000);
     var members = new HashSet<UUID>();
     var instances = new HashSet<UUID>();
-    for (var m : request.members()) {
+    for (var m : list) {
       valid(
           m != null
               && m.memberId() != null
@@ -317,19 +456,89 @@ public final class SharedDshAdmin {
               && m.targetMode() != null
               && Set.of("shared", "dedicated").contains(m.targetMode()));
       conflict(members.add(m.memberId()) && instances.add(m.legacyInstanceId()));
+    }
+  }
+
+  private record Check(String issue, ErrorCode error, Legacy legacy, boolean dedicatedEntitled) {}
+
+  private Check check(Member m) {
+    try {
       inputs.requireMember(store.tenant(), m.memberId());
-      var legacy = store.instance(m.legacyInstanceId());
-      if (!legacy.get("owner_id").equals(m.memberId()))
-        throw new AurigaException(CommonErrors.NOT_FOUND);
-      conflict(
-          store.jdbc.queryForObject(
-                  "SELECT count(*) FROM instance WHERE tenant_id=? AND owner_id=? AND NOT deleted",
-                  Long.class,
-                  store.tenant(),
-                  m.memberId())
-              == 1);
-      conflict(placement(m.memberId()).isEmpty());
-      entitled(m.memberId(), m.targetMode());
+    } catch (AurigaException e) {
+      if (e.errorCode().equals(CommonErrors.FORBIDDEN)
+          || e.errorCode().equals(CommonErrors.NOT_FOUND))
+        return new Check("成员不存在或当前不可迁移", e.errorCode(), null, false);
+      throw e;
+    } catch (IllegalStateException unavailable) {
+      throw new AurigaException(CommonErrors.UNAVAILABLE);
+    }
+    var inv = inventory(m.memberId()).get(m.memberId());
+    if (inv == null
+        || inv.instances().stream().noneMatch(i -> i.instanceId().equals(m.legacyInstanceId())))
+      return new Check("旧实例已删除或归属已变更", CommonErrors.NOT_FOUND, null, false);
+    if (!inv.eligibility().equals("eligible"))
+      return new Check(reason(inv.eligibility()), CommonErrors.CONFLICT, null, inv.dedicated());
+    if (m.targetMode().equals("dedicated") && !inv.dedicated())
+      return new Check("请先授予独享授权", CommonErrors.FORBIDDEN, null, false);
+    return new Check(reason("eligible"), null, inv.instances().getFirst(), inv.dedicated());
+  }
+
+  public Result preflight(PreflightRequest request) {
+    valid(request != null);
+    validateMembers(request.members());
+    return store.tx(
+        () -> {
+          var items = new ArrayList<Map<String, Object>>();
+          for (var m : request.members()) {
+            var check = check(m);
+            items.add(
+                Map.of(
+                    "memberId",
+                    m.memberId(),
+                    "eligible",
+                    check.error() == null,
+                    "reason",
+                    check.issue(),
+                    "dedicatedEntitled",
+                    check.dedicatedEntitled()));
+          }
+          return result(Map.of("items", items, "capacityStatus", "unknown"));
+        });
+  }
+
+  private List<Map<String, Object>> validatePlan(PlanRequest request, boolean snapshotNames) {
+    valid(
+        request != null
+            && request.reason() != null
+            && !request.reason().isBlank()
+            && request.reason().length() <= 512
+            && (request.exportUntil() == null
+                || (request.exportUntil() >= 0 && request.exportUntil() <= 9007199254740991L)));
+    validateMembers(request.members());
+    var labels = new ArrayList<Map<String, Object>>();
+    for (var m : request.members()) {
+      store.instance(m.legacyInstanceId()); // Keep ownership locked until save/start commits.
+      var check = check(m);
+      if (check.error() != null) throw new AurigaException(check.error());
+      if (snapshotNames) {
+        var label = new LinkedHashMap<String, Object>();
+        label.put("legacyInstanceName", check.legacy().name());
+        var name = identity(m.memberId()).get("displayName");
+        if (name != null) label.put("displayName", name);
+        labels.add(label);
+      }
+    }
+    return labels;
+  }
+
+  private record Stored(
+      List<Member> members, String reason, Long exportUntil, List<Map<String, Object>> labels) {
+    PlanRequest request() {
+      return new PlanRequest(members, reason, exportUntil);
+    }
+
+    Map<String, Object> labels(int index) {
+      return labels == null ? Map.of() : labels.get(index);
     }
   }
 
@@ -338,30 +547,74 @@ public final class SharedDshAdmin {
         "SELECT * FROM shared_dsh_rebuild_plan WHERE tenant_id=? AND id=?", store.tenant(), plan);
   }
 
-  private PlanRequest request(Map<String, Object> row) {
-    return WorkspaceService.JSON.readValue(row.get("request").toString(), PlanRequest.class);
+  private Stored request(Map<String, Object> row) {
+    return WorkspaceService.JSON.readValue(row.get("request").toString(), Stored.class);
   }
 
   private Result planView(UUID id) {
     var row = planRow(id);
     var r = request(row);
-    String state =
-        Boolean.TRUE.equals(row.get("started"))
-            ? progressView(id).body().get("state").toString()
-            : "draft";
-    var body =
-        Map.<String, Object>of(
-            "planId",
-            id,
-            "revision",
-            row.get("revision"),
-            "state",
-            state,
-            "members",
-            r.members(),
-            "reason",
-            r.reason());
-    return new Result(body, tag(List.of(store.tenant(), body)));
+    var body = summary(row, r);
+    body.remove("memberCount");
+    body.remove("started");
+    var members = new ArrayList<Map<String, Object>>();
+    for (var m : r.members()) {
+      var item = new LinkedHashMap<>(r.labels(members.size()));
+      item.put("memberId", m.memberId());
+      item.put("legacyInstanceId", m.legacyInstanceId());
+      item.put("targetMode", m.targetMode());
+      members.add(item);
+    }
+    body.put("members", members);
+    return result(body);
+  }
+
+  private Map<String, Object> summary(Map<String, Object> row, Stored r) {
+    var body = new LinkedHashMap<String, Object>();
+    var id = (UUID) row.get("id");
+    boolean started = Boolean.TRUE.equals(row.get("started"));
+    body.put("planId", id);
+    body.put("revision", row.get("revision"));
+    body.put("reason", r.reason());
+    if (r.exportUntil() != null) body.put("exportUntil", r.exportUntil());
+    body.put("started", started);
+    body.put("memberCount", r.members().size());
+    String state = "draft";
+    if (started) {
+      var counts =
+          store.one(
+              """
+          SELECT count(*) FILTER (WHERE o.state='succeeded') AS done,
+                 count(*) FILTER (WHERE o.state IN ('failed','blocked') OR o.id IS NULL) AS blocked
+            FROM shared_dsh_maintenance m LEFT JOIN shared_dsh_operation o
+              ON o.tenant_id=m.tenant_id AND o.id=m.operation_id
+           WHERE m.tenant_id=? AND m.batch_id=?
+          """,
+              store.tenant(),
+              id);
+      state =
+          number(counts, "done") == r.members().size()
+              ? "completed"
+              : number(counts, "blocked") > 0 ? "blocked" : "running";
+    }
+    body.put("state", state);
+    return body;
+  }
+
+  public Result plans() {
+    return store.tx(
+        () ->
+            result(
+                Map.of(
+                    "items",
+                    store
+                        .jdbc
+                        .queryForList(
+                            "SELECT * FROM shared_dsh_rebuild_plan WHERE tenant_id=? ORDER BY id DESC",
+                            store.tenant())
+                        .stream()
+                        .map(row -> summary(row, request(row)))
+                        .toList())));
   }
 
   public Result plan(UUID id) {
@@ -383,18 +636,21 @@ public final class SharedDshAdmin {
             match(etag, planView(id).etag());
             conflict(!Boolean.TRUE.equals(planRow(id).get("started")));
           }
-          validatePlan(request);
+          var labels = validatePlan(request, true);
+          String stored =
+              WorkspaceService.JSON.writeValueAsString(
+                  new Stored(request.members(), request.reason(), request.exportUntil(), labels));
           UUID plan = id == null ? UuidV7.next() : id;
           if (id == null)
             store.jdbc.update(
                 "INSERT INTO shared_dsh_rebuild_plan(tenant_id,id,request) VALUES(?,?,?)",
                 store.tenant(),
                 plan,
-                WorkspaceService.JSON.writeValueAsString(request));
+                stored);
           else
             store.jdbc.update(
                 "UPDATE shared_dsh_rebuild_plan SET request=?,revision=revision+1 WHERE tenant_id=? AND id=?",
-                WorkspaceService.JSON.writeValueAsString(request),
+                stored,
                 store.tenant(),
                 id);
           return planView(plan);
@@ -415,12 +671,12 @@ public final class SharedDshAdmin {
           var row = planRow(id);
           conflict(!Boolean.TRUE.equals(row.get("started")));
           var r = request(row);
-          validatePlan(r);
-          maintenance.plan(
+          validatePlan(r.request(), false);
+          maintenance.planForStart(
               actor,
               session,
               id,
-              now(),
+              r.exportUntil() == null ? now() : r.exportUntil(),
               r.members().stream()
                   .map(
                       m ->
@@ -448,7 +704,8 @@ public final class SharedDshAdmin {
     var row = planRow(id);
     conflict(Boolean.TRUE.equals(row.get("started")));
     var members = new ArrayList<Map<String, Object>>();
-    for (var m : request(row).members()) {
+    var stored = request(row);
+    for (var m : stored.members()) {
       var found =
           store.jdbc.queryForList(
               "SELECT o.* FROM shared_dsh_maintenance m LEFT JOIN shared_dsh_operation o ON o.tenant_id=m.tenant_id AND o.id=m.operation_id WHERE m.tenant_id=? AND m.batch_id=? AND m.member_id=?",
@@ -456,12 +713,13 @@ public final class SharedDshAdmin {
               id,
               m.memberId());
       var p = placement(m.memberId());
-      var v = new LinkedHashMap<String, Object>();
+      var v = new LinkedHashMap<String, Object>(stored.labels(members.size()));
       v.put("memberId", m.memberId());
       v.put("revision", p.isEmpty() ? 1L : p.getFirst().get("revision"));
       var op = found.isEmpty() ? Map.<String, Object>of() : found.getFirst();
       String state = Objects.toString(op.get("state"), "blocked");
       v.put("state", state);
+      if (op.get("action") != null) v.put("action", op.get("action"));
       v.put("sessionsDiscarded", Boolean.TRUE.equals(op.get("sessions_discarded")));
       v.put("workspaceEmpty", state.equals("succeeded"));
       if (op.get("id") != null) v.put("operationId", op.get("id"));

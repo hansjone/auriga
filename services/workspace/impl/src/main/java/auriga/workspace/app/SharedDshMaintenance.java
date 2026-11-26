@@ -66,6 +66,21 @@ public final class SharedDshMaintenance {
    */
   public void plan(
       UUID actor, UUID adminSession, UUID batch, long exportUntil, List<Choice> choices) {
+    recordPlan(actor, adminSession, batch, exportUntil, choices, false);
+  }
+
+  /** A saved browser draft starts only once its recorded export window has closed. */
+  void planForStart(UUID actor, UUID session, UUID batch, long exportUntil, List<Choice> choices) {
+    recordPlan(actor, session, batch, exportUntil, choices, true);
+  }
+
+  private void recordPlan(
+      UUID actor,
+      UUID adminSession,
+      UUID batch,
+      long exportUntil,
+      List<Choice> choices,
+      boolean windowClosed) {
     valid(
         batch != null
             && exportUntil >= 0
@@ -92,7 +107,7 @@ public final class SharedDshMaintenance {
             }
             return null;
           }
-          conflict(exportUntil >= now());
+          conflict(windowClosed ? exportUntil <= now() : exportUntil >= now());
           for (var choice : choices) {
             inputs.requireMember(store.tenant(), choice.member());
             var legacy = store.instance(choice.legacyInstance());

@@ -31,13 +31,419 @@ paths:
   /admin/members/{memberId}/placement-switches/lookup:
     $ref: 'shared-dsh-admin.yaml#/paths/~1admin~1members~1{memberId}~1placement-switches~1lookup'
   /admin/placement-rebuild-plans:
-    $ref: 'shared-dsh-admin.yaml#/paths/~1admin~1placement-rebuild-plans'
+    post:
+      tags:
+        - placements
+      operationId: createDshRebuildPlan
+      summary: 持久化维护名单及继续独立选择
+      x-admin-only: true
+      x-permission: workspace.placements.write
+      x-step-up-max-age-seconds: 600
+      description: 租户来自可信认证上下文；目标对象跨租户或不存在均404。每次重新检查有效管理会话和权限。写入还要求 Origin/CSRF
+        和严格600秒内step-up；未来时间拒绝。幂等键按租户、操作者、操作、目标及完整请求指纹24小时持久化；同键异请求409，先查已有幂等结果再核原If-Match。
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 128
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DshRebuildPlanRequest"
+      responses:
+        "200":
+          description: 权威快照；仅管理会话，同租户。
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+            ETag:
+              description: 服务端不透明强标签，客户端原样回传，禁止由 revision 拼装。
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DshRebuildPlan"
+        "400":
+          $ref: shared-dsh-admin.yaml#/paths/~1admin~1placement-capacity/get/responses/400
+        "401":
+          $ref: shared-dsh-admin.yaml#/paths/~1admin~1placement-capacity/get/responses/401
+        "403":
+          $ref: shared-dsh-admin.yaml#/paths/~1admin~1placement-capacity/get/responses/403
+        "404":
+          $ref: shared-dsh-admin.yaml#/paths/~1admin~1placement-capacity/get/responses/404
+        "409":
+          $ref: shared-dsh-admin.yaml#/paths/~1admin~1placement-rebuild-plans~1{planId}/put/responses/409
+        "503":
+          $ref: shared-dsh-admin.yaml#/paths/~1admin~1placement-capacity/get/responses/503
+    get:
+      tags:
+        - placements
+      operationId: listDshRebuildPlans
+      summary: 读取历史维护计划
+      x-admin-only: true
+      x-permission: workspace.placements.read
+      description: 租户来自可信认证上下文；目标对象跨租户或不存在均404。每次重新检查有效管理会话和权限。
+      parameters: []
+      responses:
+        "200":
+          description: 权威快照；仅管理会话，同租户。
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+            ETag:
+              description: 服务端不透明强标签，客户端原样回传，禁止由 revision 拼装。
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DshRebuildHistory"
+        "400":
+          $ref: shared-dsh-admin.yaml#/paths/~1admin~1placement-capacity/get/responses/400
+        "401":
+          $ref: shared-dsh-admin.yaml#/paths/~1admin~1placement-capacity/get/responses/401
+        "403":
+          $ref: shared-dsh-admin.yaml#/paths/~1admin~1placement-capacity/get/responses/403
+        "404":
+          $ref: shared-dsh-admin.yaml#/paths/~1admin~1placement-capacity/get/responses/404
+        "503":
+          $ref: shared-dsh-admin.yaml#/paths/~1admin~1placement-capacity/get/responses/503
   /admin/placement-rebuild-plans/{planId}:
-    $ref: 'shared-dsh-admin.yaml#/paths/~1admin~1placement-rebuild-plans~1{planId}'
+    get:
+      tags:
+        - placements
+      operationId: getDshRebuildPlan
+      summary: 读取维护名单
+      x-admin-only: true
+      x-permission: workspace.placements.read
+      description: 租户来自可信认证上下文；目标对象跨租户或不存在均404。每次重新检查有效管理会话和权限。
+      parameters:
+        - name: planId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: 权威快照；仅管理会话，同租户。
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+            ETag:
+              description: 服务端不透明强标签，客户端原样回传，禁止由 revision 拼装。
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DshRebuildPlan"
+        "400":
+          $ref: shared-dsh-admin.yaml#/paths/~1admin~1placement-capacity/get/responses/400
+        "401":
+          $ref: shared-dsh-admin.yaml#/paths/~1admin~1placement-capacity/get/responses/401
+        "403":
+          $ref: shared-dsh-admin.yaml#/paths/~1admin~1placement-capacity/get/responses/403
+        "404":
+          $ref: shared-dsh-admin.yaml#/paths/~1admin~1placement-capacity/get/responses/404
+        "503":
+          $ref: shared-dsh-admin.yaml#/paths/~1admin~1placement-capacity/get/responses/503
+    put:
+      tags:
+        - placements
+      operationId: updateDshRebuildPlan
+      summary: 替换尚未执行的维护名单
+      x-admin-only: true
+      x-permission: workspace.placements.write
+      x-step-up-max-age-seconds: 600
+      description: 租户来自可信认证上下文；目标对象跨租户或不存在均404。每次重新检查有效管理会话和权限。写入还要求 Origin/CSRF
+        和严格600秒内step-up；未来时间拒绝。幂等键按租户、操作者、操作、目标及完整请求指纹24小时持久化；同键异请求409，先查已有幂等结果再核原If-Match。
+      parameters:
+        - name: planId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: If-Match
+          in: header
+          required: true
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 128
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 128
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DshRebuildPlanRequest"
+      responses:
+        "200":
+          description: 权威快照；仅管理会话，同租户。
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+            ETag:
+              description: 服务端不透明强标签，客户端原样回传，禁止由 revision 拼装。
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DshRebuildPlan"
+        "400":
+          $ref: shared-dsh-admin.yaml#/paths/~1admin~1placement-capacity/get/responses/400
+        "401":
+          $ref: shared-dsh-admin.yaml#/paths/~1admin~1placement-capacity/get/responses/401
+        "403":
+          $ref: shared-dsh-admin.yaml#/paths/~1admin~1placement-capacity/get/responses/403
+        "404":
+          $ref: shared-dsh-admin.yaml#/paths/~1admin~1placement-capacity/get/responses/404
+        "409":
+          $ref: shared-dsh-admin.yaml#/paths/~1admin~1placement-rebuild-plans~1{planId}/put/responses/409
+        "412":
+          $ref: shared-dsh-admin.yaml#/paths/~1admin~1placement-rebuild-plans~1{planId}/put/responses/412
+        "428":
+          $ref: shared-dsh-admin.yaml#/paths/~1admin~1placement-rebuild-plans~1{planId}/put/responses/428
+        "503":
+          $ref: shared-dsh-admin.yaml#/paths/~1admin~1placement-capacity/get/responses/503
   /admin/placement-rebuild-plans/{planId}/start:
-    $ref: 'shared-dsh-admin.yaml#/paths/~1admin~1placement-rebuild-plans~1{planId}~1start'
+    post:
+      tags:
+        - placements
+      operationId: startDshRebuildPlan
+      summary: 确认导出窗口后批量重建
+      x-admin-only: true
+      x-permission: workspace.placements.write
+      x-step-up-max-age-seconds: 600
+      description: 租户来自可信认证上下文；目标对象跨租户或不存在均404。每次重新检查有效管理会话和权限。写入还要求 Origin/CSRF
+        和严格600秒内step-up；未来时间拒绝。幂等键按租户、操作者、操作、目标及完整请求指纹24小时持久化；同键异请求409，先查已有幂等结果再核原If-Match。
+      parameters:
+        - name: planId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: If-Match
+          in: header
+          required: true
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 128
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 128
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: shared-dsh-admin.yaml#/components/schemas/DshRebuildStartRequest
+      responses:
+        "202":
+          description: 权威快照；仅管理会话，同租户。
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+            ETag:
+              description: 服务端不透明强标签，客户端原样回传，禁止由 revision 拼装。
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DshRebuildProgress"
+        "400":
+          $ref: shared-dsh-admin.yaml#/paths/~1admin~1placement-capacity/get/responses/400
+        "401":
+          $ref: shared-dsh-admin.yaml#/paths/~1admin~1placement-capacity/get/responses/401
+        "403":
+          $ref: shared-dsh-admin.yaml#/paths/~1admin~1placement-capacity/get/responses/403
+        "404":
+          $ref: shared-dsh-admin.yaml#/paths/~1admin~1placement-capacity/get/responses/404
+        "409":
+          $ref: shared-dsh-admin.yaml#/paths/~1admin~1placement-rebuild-plans~1{planId}/put/responses/409
+        "412":
+          $ref: shared-dsh-admin.yaml#/paths/~1admin~1placement-rebuild-plans~1{planId}/put/responses/412
+        "428":
+          $ref: shared-dsh-admin.yaml#/paths/~1admin~1placement-rebuild-plans~1{planId}/put/responses/428
+        "503":
+          $ref: shared-dsh-admin.yaml#/paths/~1admin~1placement-capacity/get/responses/503
   /admin/placement-rebuild-plans/{planId}/progress:
-    $ref: 'shared-dsh-admin.yaml#/paths/~1admin~1placement-rebuild-plans~1{planId}~1progress'
+    get:
+      tags:
+        - placements
+      operationId: getDshRebuildProgress
+      summary: 读取逐成员持久化进度
+      x-admin-only: true
+      x-permission: workspace.placements.read
+      description: 租户来自可信认证上下文；目标对象跨租户或不存在均404。每次重新检查有效管理会话和权限。
+      parameters:
+        - name: planId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: 权威快照；仅管理会话，同租户。
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+            ETag:
+              description: 服务端不透明强标签，客户端原样回传，禁止由 revision 拼装。
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DshRebuildProgress"
+        "400":
+          $ref: shared-dsh-admin.yaml#/paths/~1admin~1placement-capacity/get/responses/400
+        "401":
+          $ref: shared-dsh-admin.yaml#/paths/~1admin~1placement-capacity/get/responses/401
+        "403":
+          $ref: shared-dsh-admin.yaml#/paths/~1admin~1placement-capacity/get/responses/403
+        "404":
+          $ref: shared-dsh-admin.yaml#/paths/~1admin~1placement-capacity/get/responses/404
+        "503":
+          $ref: shared-dsh-admin.yaml#/paths/~1admin~1placement-capacity/get/responses/503
+  /admin/placement-migration-candidates:
+    get:
+      tags:
+        - placements
+      operationId: listDshMigrationCandidates
+      summary: 发现待迁移成员和旧实例
+      x-admin-only: true
+      x-permission: workspace.placements.read
+      description: 租户来自可信认证上下文；目标对象跨租户或不存在均404。每次重新检查有效管理会话和权限。
+      parameters:
+        - name: q
+          in: query
+          schema:
+            type: string
+            maxLength: 256
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+            minimum: 1
+            maximum: 200
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            default: 0
+            minimum: 0
+        - name: memberId
+          in: query
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: 权威快照；仅管理会话，同租户。
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+            ETag:
+              description: 服务端不透明强标签，客户端原样回传，禁止由 revision 拼装。
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DshMigrationCandidates"
+        "400":
+          $ref: shared-dsh-admin.yaml#/paths/~1admin~1placement-capacity/get/responses/400
+        "401":
+          $ref: shared-dsh-admin.yaml#/paths/~1admin~1placement-capacity/get/responses/401
+        "403":
+          $ref: shared-dsh-admin.yaml#/paths/~1admin~1placement-capacity/get/responses/403
+        "404":
+          $ref: shared-dsh-admin.yaml#/paths/~1admin~1placement-capacity/get/responses/404
+        "503":
+          $ref: shared-dsh-admin.yaml#/paths/~1admin~1placement-capacity/get/responses/503
+  /admin/placement-rebuild-plans/preflight:
+    post:
+      tags:
+        - placements
+      operationId: preflightDshRebuildPlan
+      summary: 预检所选成员和目标模式
+      x-admin-only: true
+      x-permission: workspace.placements.read
+      description: 租户来自可信认证上下文；目标对象跨租户或不存在均404。每次重新检查有效管理会话和权限。
+      parameters: []
+      responses:
+        "200":
+          description: 权威快照；仅管理会话，同租户。
+          headers:
+            Cache-Control:
+              schema:
+                type: string
+                const: no-store
+            ETag:
+              description: 服务端不透明强标签，客户端原样回传，禁止由 revision 拼装。
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DshPreflight"
+        "400":
+          $ref: shared-dsh-admin.yaml#/paths/~1admin~1placement-capacity/get/responses/400
+        "401":
+          $ref: shared-dsh-admin.yaml#/paths/~1admin~1placement-capacity/get/responses/401
+        "403":
+          $ref: shared-dsh-admin.yaml#/paths/~1admin~1placement-capacity/get/responses/403
+        "404":
+          $ref: shared-dsh-admin.yaml#/paths/~1admin~1placement-capacity/get/responses/404
+        "409":
+          $ref: shared-dsh-admin.yaml#/paths/~1admin~1placement-rebuild-plans~1{planId}/put/responses/409
+        "503":
+          $ref: shared-dsh-admin.yaml#/paths/~1admin~1placement-capacity/get/responses/503
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DshPreflightRequest"
   /admin/placement-capacity:
     $ref: 'shared-dsh-admin.yaml#/paths/~1admin~1placement-capacity'
   /me/placement/open:
@@ -503,6 +909,379 @@ components:
     bearerAuth: { $ref: 'common.yaml#/components/securitySchemes/bearerAuth' }
     instanceToken: { $ref: 'common.yaml#/components/securitySchemes/instanceToken' }
   schemas:
+    DshRebuildPlanRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - members
+        - reason
+      properties:
+        members:
+          type: array
+          items:
+            $ref: shared-dsh-admin.yaml#/components/schemas/DshRebuildMember
+          minItems: 1
+          maxItems: 1000
+        reason:
+          type: string
+          minLength: 1
+          maxLength: 512
+        exportUntil:
+          type: integer
+          format: int64
+          minimum: 0
+          maximum: 9007199254740991
+    DshRebuildPlan:
+      type: object
+      additionalProperties: false
+      required:
+        - planId
+        - revision
+        - state
+        - members
+        - reason
+      properties:
+        planId:
+          type: string
+          format: uuid
+        revision:
+          type: integer
+          minimum: 1
+          maximum: 9007199254740991
+          format: int64
+        state:
+          type: string
+          enum:
+            - draft
+            - running
+            - completed
+            - blocked
+        members:
+          type: array
+          items:
+            $ref: "#/components/schemas/DshRebuildPlanMember"
+          minItems: 1
+          maxItems: 1000
+        reason:
+          type: string
+          minLength: 1
+          maxLength: 512
+        exportUntil:
+          type: integer
+          format: int64
+          minimum: 0
+          maximum: 9007199254740991
+    DshRebuildProgress:
+      type: object
+      additionalProperties: false
+      required:
+        - planId
+        - revision
+        - state
+        - members
+      properties:
+        planId:
+          type: string
+          format: uuid
+        revision:
+          type: integer
+          minimum: 1
+          maximum: 9007199254740991
+          format: int64
+        state:
+          type: string
+          enum:
+            - running
+            - completed
+            - blocked
+        members:
+          type: array
+          items:
+            $ref: "#/components/schemas/DshRebuildMemberProgress"
+    DshRebuildMemberProgress:
+      type: object
+      additionalProperties: false
+      required:
+        - memberId
+        - revision
+        - sessionsDiscarded
+        - workspaceEmpty
+        - state
+      properties:
+        memberId:
+          type: string
+          format: uuid
+        operationId:
+          type: string
+          format: uuid
+        revision:
+          type: integer
+          minimum: 1
+          maximum: 9007199254740991
+          format: int64
+        sessionsDiscarded:
+          type: boolean
+        workspaceEmpty:
+          type: boolean
+        state:
+          type: string
+          enum:
+            - accepted
+            - fencing
+            - draining
+            - preparing
+            - committing
+            - succeeded
+            - failed
+            - blocked
+        failureCode:
+          type: string
+          enum:
+            - capacity
+            - stop-unconfirmed
+            - prepare-failed
+            - revoked
+            - recovery-required
+        displayName:
+          type: string
+        legacyInstanceName:
+          type: string
+        action:
+          type: string
+      allOf:
+        - if:
+            properties:
+              state:
+                enum:
+                  - failed
+                  - blocked
+            required:
+              - state
+          then:
+            properties:
+              failureCode:
+                type: string
+            required:
+              - failureCode
+        - if:
+            properties:
+              state:
+                const: succeeded
+            required:
+              - state
+          then:
+            required:
+              - operationId
+            properties:
+              operationId:
+                type: string
+                format: uuid
+              failureCode: false
+              sessionsDiscarded:
+                const: true
+              workspaceEmpty:
+                const: true
+    DshRebuildPlanMember:
+      type: object
+      additionalProperties: false
+      required:
+        - memberId
+        - legacyInstanceId
+        - targetMode
+      properties:
+        memberId:
+          type: string
+          format: uuid
+        legacyInstanceId:
+          type: string
+          format: uuid
+        targetMode:
+          $ref: shared-dsh.yaml#/components/schemas/DshInstanceMode
+        displayName:
+          type: string
+        legacyInstanceName:
+          type: string
+    DshLegacyInstance:
+      type: object
+      additionalProperties: false
+      required:
+        - instanceId
+        - name
+        - phase
+        - ready
+        - sharedRebuildHold
+      properties:
+        instanceId:
+          type: string
+          format: uuid
+        name:
+          type: string
+        phase:
+          type: string
+        ready:
+          type: boolean
+        sharedRebuildHold:
+          type: boolean
+    DshMigrationCandidate:
+      type: object
+      additionalProperties: false
+      required:
+        - memberId
+        - dedicatedEntitled
+        - hasPlacement
+        - currentMode
+        - legacyInstances
+        - eligibility
+        - eligibilityReason
+      properties:
+        memberId:
+          type: string
+          format: uuid
+        displayName:
+          type: string
+        email:
+          type: string
+        memberType:
+          type: string
+        memberStatus:
+          type: string
+        dedicatedEntitled:
+          type: boolean
+        hasPlacement:
+          type: boolean
+        currentMode:
+          type: string
+          enum:
+            - legacy
+            - shared
+            - dedicated
+        legacyInstances:
+          type: array
+          items:
+            $ref: "#/components/schemas/DshLegacyInstance"
+        eligibility:
+          type: string
+          enum:
+            - eligible
+            - multiple_legacy_instances
+            - already_migrated
+            - rebuild_hold
+            - no_legacy_instance
+        eligibilityReason:
+          type: string
+    DshMigrationCandidates:
+      type: object
+      additionalProperties: false
+      required:
+        - items
+        - total
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/DshMigrationCandidate"
+        total:
+          type: integer
+          format: int64
+          minimum: 0
+          maximum: 9007199254740991
+    DshRebuildSummary:
+      type: object
+      additionalProperties: false
+      required:
+        - planId
+        - revision
+        - state
+        - reason
+        - memberCount
+        - started
+      properties:
+        planId:
+          type: string
+          format: uuid
+        revision:
+          type: integer
+          minimum: 1
+          maximum: 9007199254740991
+          format: int64
+        state:
+          type: string
+          enum:
+            - draft
+            - running
+            - completed
+            - blocked
+        reason:
+          type: string
+          minLength: 1
+          maxLength: 512
+        exportUntil:
+          type: integer
+          format: int64
+          minimum: 0
+          maximum: 9007199254740991
+        memberCount:
+          type: integer
+          format: int64
+          minimum: 0
+          maximum: 9007199254740991
+        started:
+          type: boolean
+    DshRebuildHistory:
+      type: object
+      additionalProperties: false
+      required:
+        - items
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/DshRebuildSummary"
+    DshPreflightRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - members
+      properties:
+        members:
+          type: array
+          items:
+            $ref: shared-dsh-admin.yaml#/components/schemas/DshRebuildMember
+          minItems: 1
+          maxItems: 1000
+    DshMemberCheck:
+      type: object
+      additionalProperties: false
+      required:
+        - memberId
+        - eligible
+        - reason
+        - dedicatedEntitled
+      properties:
+        dedicatedEntitled:
+          type: boolean
+        memberId:
+          type: string
+          format: uuid
+        eligible:
+          type: boolean
+        reason:
+          type: string
+    DshPreflight:
+      type: object
+      additionalProperties: false
+      required:
+        - items
+        - capacityStatus
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/DshMemberCheck"
+        capacityStatus:
+          type: string
+          enum:
+            - unknown
     InstancePhase:
       type: string
       description: 与 NodeControl 的 InstancePhase 对应；scheduling 是还没分配到节点。

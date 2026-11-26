@@ -197,15 +197,38 @@ class WorkspaceIntegrationTest {
     var placements = new SharedDshPlacements(store, port, b -> true, clock);
     var maintenance = new SharedDshMaintenance(store, placements, port, clock);
     var browser = new SharedDshAdmin(store, placements, maintenance, port, clock);
+    browser.memberDirectory(inputs);
+    assertEquals(
+        1,
+        TenantContext.call(tenant, () -> browser.candidates("ALICE", 50, 0, null))
+            .body()
+            .get("total"));
+    assertEquals(
+        0,
+        TenantContext.call(UUID.randomUUID(), () -> browser.candidates("", 50, 0, null))
+            .body()
+            .get("total"));
+    long cutoff = clock.instant().getEpochSecond() + 60;
     UUID session = UUID.randomUUID();
     var choices =
         new SharedDshAdmin.PlanRequest(
-            List.of(new SharedDshAdmin.Member(owner, id, "shared")), "maintenance");
+            List.of(new SharedDshAdmin.Member(owner, id, "shared")), "maintenance", cutoff);
     var saved =
         TenantContext.call(
             tenant, () -> browser.save(owner, session, null, choices, "create", null));
     UUID batch = UUID.fromString(saved.body().get("planId").toString());
     assertEquals("draft", saved.body().get("state"));
+    assertEquals(cutoff, saved.body().get("exportUntil"));
+    var history = TenantContext.call(tenant, browser::plans);
+    assertEquals(
+        batch, ((List<Map<String, Object>>) history.body().get("items")).getFirst().get("planId"));
+    assertThrows(
+        AurigaException.class,
+        () ->
+            TenantContext.call(
+                tenant, () -> browser.start(owner, session, batch, "early", saved.etag())));
+    assertFalse(store.in(tenant, () -> (boolean) store.instance(id).get("shared_rebuild_hold")));
+    clock.now = clock.instant().plusSeconds(61);
     assertEquals(saved.etag(), TenantContext.call(tenant, () -> browser.plan(batch)).etag());
     assertFalse(store.in(tenant, () -> (Boolean) store.instance(id).get("shared_rebuild_hold")));
     var replaced =
@@ -221,6 +244,21 @@ class WorkspaceIntegrationTest {
         TenantContext.call(
             tenant, () -> browser.start(owner, session, batch, "start", replaced.etag()));
     assertEquals("running", started.body().get("state"));
+    assertEquals(
+        "alice",
+        ((List<Map<String, Object>>) started.body().get("members")).getFirst().get("displayName"));
+    assertEquals(
+        cutoff,
+        store
+            .in(
+                tenant,
+                () ->
+                    store.jdbc.queryForObject(
+                        "SELECT export_until FROM shared_dsh_maintenance WHERE tenant_id=? AND batch_id=?",
+                        Long.class,
+                        tenant,
+                        batch))
+            .longValue());
     assertEquals(
         started.etag(),
         TenantContext.call(

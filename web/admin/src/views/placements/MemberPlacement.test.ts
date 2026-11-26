@@ -1,4 +1,4 @@
-import { mount, flushPromises } from '@vue/test-utils';
+import { mount, flushPromises, RouterLinkStub } from '@vue/test-utils';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 afterEach(() => vi.restoreAllMocks());
 import { createAurigaI18n, ApiError } from '@auriga/shared';
@@ -6,6 +6,7 @@ import { placementMessages } from './messages';
 import MemberPlacement from './MemberPlacement.vue';
 import {
   placementPortKey,
+  placementAdminApi,
   type MemberPlacementSnapshot,
   type PlacementPort,
 } from './api';
@@ -49,6 +50,7 @@ function setup(locale: 'zh-CN' | 'en' = 'zh-CN') {
     props: { memberId: 'm' },
     global: {
       plugins: [createAurigaI18n(locale)],
+      stubs: { RouterLink: RouterLinkStub },
       provide: { [placementPortKey as symbol]: port },
     },
   });
@@ -218,6 +220,28 @@ it('discards a late read after changing members', async () => {
   view.unmount();
 });
 it('grants entitlement for an unassigned member without allocating or switching', async () => {
+  vi.spyOn(placementAdminApi, 'candidates').mockResolvedValue({
+    total: 1,
+    items: [
+      {
+        memberId: 'm',
+        dedicatedEntitled: false,
+        hasPlacement: false,
+        currentMode: 'legacy',
+        eligibility: 'eligible',
+        eligibilityReason: '可迁移',
+        legacyInstances: [
+          {
+            instanceId: 'i',
+            name: '环境',
+            phase: 'running',
+            ready: true,
+            sharedRebuildHold: false,
+          },
+        ],
+      },
+    ],
+  });
   const { view, port } = setup();
   vi.mocked(port.readMember).mockResolvedValue({
     etag: '"composite"',
@@ -225,6 +249,10 @@ it('grants entitlement for an unassigned member without allocating or switching'
   });
   await flushPromises();
   expect(view.text()).toContain('尚未分配');
+  expect(view.getComponent(RouterLinkStub).props('to')).toEqual({
+    path: '/instances/migration',
+    query: { memberId: 'm' },
+  });
   await view.find('textarea').setValue('approval');
   await view.find('input[type=checkbox]').setValue(true);
   await view
