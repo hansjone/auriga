@@ -73,6 +73,21 @@ function facts(market: PluginMarket): [string, string | number][] {
 const names = ref<Record<string, string>>({});
 const selected = ref<ResourcePackage>();
 const latest = ref<ResourceVersion>();
+const pluginPermissions = computed(() => {
+  const manifest = latest.value?.manifest;
+  if (manifest?.kind !== 'plugin') return undefined;
+  const permissions = manifest.permissions;
+  return [
+    { label: 'tools', values: permissions?.tools },
+    { label: 'outboundHosts', values: permissions?.outboundHosts },
+    {
+      label: 'dataAccess',
+      values: permissions?.dataAccess?.map((value) =>
+        t('permissions.scopes.' + value),
+      ),
+    },
+  ];
+});
 const kind = ref<'plugin' | 'skill'>('skill');
 const next = ref<string>();
 const busy = ref(false),
@@ -446,6 +461,15 @@ onBeforeUnmount(() => {
             >
               {{ t('dshRange') }} {{ latest.manifest.plugin.dshVersionRange }}
             </p>
+            <dl v-if="pluginPermissions" class="market-facts">
+              <template
+                v-for="{ label, values } in pluginPermissions"
+                :key="label"
+              >
+                <dt>{{ t('permissions.' + label) }}</dt>
+                <dd>{{ values?.join(' · ') || t('permissions.none') }}</dd>
+              </template>
+            </dl>
             <p v-if="same">{{ t('same') }}</p>
             <ElButton
               type="primary"
