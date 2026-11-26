@@ -4,7 +4,7 @@ set -eu
 . "$(CDPATH= cd -P -- "$(dirname -- "$0")" && pwd)/lib.sh"
 case "${1:-}" in
   init|render|render-core|render-collab|check|prepare-socket|export-env|activate-collab|runtime-path|runtime-attach|runtime-stage|runtime-commit|runtime-rollback|collab-publish|collab-install|collab-status|collab-history-check|collab-history-check-pg|collab-startup-check|collab-path|collab-check|collab-stop|collab-prepare|collab-renew|collab-prepare-recovery|collab-recover-expired|collab-queue-prepare|collab-queue-export|collab-queue-import|collab-recover-pending|collab-pause|collab-resume|materials-stage|materials-commit|materials-rollback|materials-status|materials-check|materials-path|materials-project|materials-project-core) operation=$1 ;;
-  shared-source-check|shared-stage|shared-set-model|shared-set-profile|shared-commit|shared-project|shared-check|shared-path|shared-status|shared-replay-stage|shared-replay-prepare-path|shared-replay-final-path|shared-replay-provision|shared-replay-verify-final|shared-replay-close|shared-replay-check|shared-replay-rebind) operation=$1 ;;
+  shared-source-check|shared-stage|shared-set-model|shared-set-profile|shared-set-adapter|shared-commit|shared-project|shared-check|shared-path|shared-status|shared-replay-stage|shared-replay-prepare-path|shared-replay-final-path|shared-replay-provision|shared-replay-verify-final|shared-replay-close|shared-replay-check|shared-replay-rebind) operation=$1 ;;
   *) die 'Usage: sh installer.sh init|render|check|prepare-socket|export-env|activate-collab' ;;
 esac
 upgrade_bundle=
@@ -13,7 +13,7 @@ upgrade_image=
 materials_expected=
 rotation_input=
 shared_base=; shared_profile=; shared_profile_sha=; shared_model=
-shared_adapter=; shared_adapter_sha=; shared_team=false
+shared_adapter=; shared_adapter_sha=; shared_previous_adapter_sha=; shared_team=false
 shared_dedicated=; shared_dedicated_sha=
 case "$operation" in
   shared-stage)
@@ -30,7 +30,16 @@ case "$operation" in
   shared-set-profile)
     [ "$#" = 4 ] || die 'shared set-profile requires approved base hash, profile file and profile SHA256'
     shared_base=$2; shared_profile=$3; shared_profile_sha=$4 ;;
-  shared-commit) [ "$#" = 2 ] || die 'shared commit requires approved base hash'; shared_base=$2 ;;
+  shared-set-adapter)
+    [ "$#" = 5 ] || die 'shared set-adapter requires approved base hash, new adapter file, current adapter SHA256 and new adapter SHA256'
+    shared_base=$2; shared_adapter=$3; shared_previous_adapter_sha=$4; shared_adapter_sha=$5 ;;
+  shared-commit)
+    case "$#" in
+      2) ;;
+      4) shared_previous_adapter_sha=${3:?}; shared_adapter_sha=${4:?} ;;
+      *) die 'shared commit requires approved base hash and optional current and new adapter hashes' ;;
+    esac
+    shared_base=$2 ;;
   collab-publish|collab-install|collab-recover-expired|collab-queue-import)
     [ "$#" = 2 ] || die 'collab rotation requires an approved directory'
     rotation_input=$2 ;;
@@ -116,6 +125,10 @@ if [ "$operation" = shared-stage ]; then
     *) die 'invalid explicit team-only decision' ;;
   esac
 fi
+if [ "$operation" = shared-set-adapter ]; then
+  validate_input_path "$shared_adapter"
+  set -- "$@" --mount "type=bind,src=$shared_adapter,dst=$shared_adapter,readonly"
+fi
 if [ -n "$rotation_input" ]; then
   case "$rotation_input" in
     "$AURIGA_DATA_ROOT/config/collab-operations/requests/"*)
@@ -169,6 +182,7 @@ esac
     --env "NAS_SHARED_PROFILE_SHA=$shared_profile_sha" --env "NAS_SHARED_MODEL=$shared_model" \
     --env "NAS_SHARED_DEDICATED_PROFILE=$shared_dedicated" --env "NAS_SHARED_DEDICATED_PROFILE_SHA=$shared_dedicated_sha" \
     --env "NAS_SHARED_ADAPTER=$shared_adapter" --env "NAS_SHARED_ADAPTER_SHA=$shared_adapter_sha" --env "NAS_SHARED_TEAM=$shared_team" \
+    --env "NAS_SHARED_PREVIOUS_ADAPTER_SHA=$shared_previous_adapter_sha" \
     --env "NAS_SHARED_BACKEND=${NAS_SHARED_BACKEND:-}" --env "NAS_SHARED_QUOTA_MOUNT=${NAS_SHARED_QUOTA_MOUNT:-}" \
     --env "NAS_SHARED_QUOTA_BINARY=${NAS_SHARED_QUOTA_BINARY:-}" \
     --env "NAS_SHARED_PROJECT_FIRST=${NAS_SHARED_PROJECT_FIRST:-}" --env "NAS_SHARED_PROJECT_LAST=${NAS_SHARED_PROJECT_LAST:-}" \

@@ -160,7 +160,9 @@ func testNASSharedSourceVariant(t *testing.T, parent, binary, input string, team
 	}
 	out := filepath.Join(data, "config/shared-source")
 	stageArgs := []string{"-adapter-file", adapter, "-adapter-sha256", sharedSHA([]byte(sharedApprovedAdapterFixture)), "-profile-file", profile, "-profile-sha256", sharedSHA(profileRaw), "-model", "gpt-6.1-sol"}
-	if teamOnly {
+	if !teamOnly {
+		stageArgs = append(stageArgs[:len(stageArgs)-2], "-backend", "xfs", "-quota-mount", filepath.Join(data, "data/agent/pools"), "-project-first", "17000", "-project-last", "19000", "-model", "gpt-6.1-sol")
+	} else {
 		stageArgs = []string{"-team-only", "-profile-file", profile, "-profile-sha256", sharedSHA(profileRaw), "-model", "gpt-6.1-sol"}
 	}
 	var dedicatedRaw []byte
@@ -178,7 +180,7 @@ func testNASSharedSourceVariant(t *testing.T, parent, binary, input string, team
 	run := func(action string, success bool, extra ...string) string {
 		t.Helper()
 		arguments := []string{"shared-runtime", "-action", action, "-base", base, "-out", out}
-		if action == "stage" || action == "set-model" || action == "set-profile" || action == "commit" || action == "rollback" {
+		if action == "stage" || action == "set-model" || action == "set-profile" || action == "set-adapter" || action == "commit" || action == "rollback" {
 			arguments = append(arguments, "-expected-base-sha256", baseSHA)
 		}
 		arguments = append(arguments, extra...)
@@ -348,7 +350,7 @@ func testNASSharedSourceVariant(t *testing.T, parent, binary, input string, team
 		testNASSharedExplicitRotations(t, parent, base, out, generation, baseBefore, staged, stageArgs, profile, profileRaw, run)
 	}
 	t.Log("actual sealed bootstrap + signed runtime + enrolled public Node + umask077 stage/resume/commit/check completed without services")
-	testNASSharedRoleAndReplayPreparation(t, data, base, binary, run, runtimeAction)
+	testNASSharedRoleAndReplayPreparation(t, data, base, binary, teamOnly, run, runtimeAction)
 }
 
 func testNASSharedExplicitRotations(t *testing.T, parent, base, out, generation, baseBefore, committedSnapshot string, stageArgs []string, profilePath string, profileRaw []byte, run func(string, bool, ...string) string) {
@@ -522,7 +524,7 @@ func mustRead(t *testing.T, path string) []byte {
 	return raw
 }
 
-func testNASSharedRoleAndReplayPreparation(t *testing.T, data, base, binary string, run func(string, bool, ...string) string, runtimeAction func(string, bool)) {
+func testNASSharedRoleAndReplayPreparation(t *testing.T, data, base, binary string, teamOnly bool, run func(string, bool, ...string) string, runtimeAction func(string, bool)) {
 	t.Helper()
 	natsDir := filepath.Join(data, "config/nats")
 	if err := os.Mkdir(natsDir, 0755); err != nil {
@@ -678,6 +680,143 @@ func testNASSharedRoleAndReplayPreparation(t *testing.T, data, base, binary stri
 	checkDedicated(newProjection)    // signed runtime upgrade keeps the same approved profile
 	runtimeAction("rollback", false) // original contract: no implicit rollback after commit
 	t.Log("actual role projection and temporary replay source/config stage passed with umask077; readiness remained closed without real NATS provisioning/revocation")
+	testNASSharedAdapterRotation(t, data, teamOnly, run, replay)
+}
+
+func testNASSharedAdapterRotation(t *testing.T, data string, teamOnly bool, run func(string, bool, ...string) string, replay func(string, bool) string) {
+	t.Helper()
+	out := filepath.Join(data, "config/shared-source")
+	generation := filepath.Join(out, sharedInstallationGeneration)
+	root := filepath.Join(data, "config/shared-replay-source")
+	file := filepath.Join(filepath.Dir(data), "approved-next-adapter.json")
+	old := mustRead(t, filepath.Join(generation, "platform/uac-adapter.json"))
+	next := []byte(strings.Replace(sharedApprovedAdapterFixture, "{", `{"proofSubjectPolicy":"either",`, 1))
+	save := func(path string, raw []byte) {
+		t.Helper()
+		if err := os.WriteFile(path, raw, 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	save(file, next)
+	approvals := []string{"-expected-adapter-sha256", sharedSHA(old), "-adapter-sha256", sharedSHA(next)}
+	args := append([]string{"-adapter-file", file}, approvals...)
+	before := nasSnapshot(t, out)
+	if teamOnly {
+		run("set-adapter", false, args...)
+		if nasSnapshot(t, out) != before {
+			t.Fatal("team-only source changed")
+		}
+		return
+	}
+	run("set-adapter", false, args[:2]...)
+	run("set-adapter", false, "-adapter-file", file, "-expected-adapter-sha256", strings.Repeat("f", 64), "-adapter-sha256", sharedSHA(next))
+	run("set-adapter", false, "-adapter-file", file, "-expected-adapter-sha256", sharedSHA(old), "-adapter-sha256", strings.Repeat("f", 64))
+	for _, invalid := range []string{`{}`, `{"proofSubjectPolicy":null}`, `{"proofSubjectPolicy":"either","proofSubjectPolicy":"echo"}`} {
+		save(file, []byte(invalid))
+		run("set-adapter", false, "-adapter-file", file, "-expected-adapter-sha256", sharedSHA(old), "-adapter-sha256", sharedSHA([]byte(invalid)))
+	}
+	save(file, next)
+	if err := os.Chmod(file, 0644); err != nil {
+		t.Fatal(err)
+	}
+	run("set-adapter", false, args...)
+	if err := os.Chmod(file, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if nasSnapshot(t, out) != before {
+		t.Fatal("rejected approval changed the original source")
+	}
+	run("set-adapter", true, args...)
+	run("set-adapter", true, args...)
+	run("set-profile", false, "-profile-file", file, "-profile-sha256", sharedSHA(next))
+	run("project", false)
+	run("rollback", true)
+	if nasSnapshot(t, out) != before {
+		t.Fatal("staged rollback did not restore source and history")
+	}
+
+	sourcePath := filepath.Join(root, "source/source.receipt")
+	activationPath := filepath.Join(root, "activation.receipt")
+	var source sharedReplaySourceReceipt
+	var activation sharedReplayActivation
+	if json.Unmarshal(mustRead(t, sourcePath), &source) != nil || json.Unmarshal(mustRead(t, activationPath), &activation) != nil {
+		t.Fatal("could not read synthetic replay receipts")
+	}
+	seed := mustRead(t, filepath.Join(root, "source/installer.seed"))
+	created := time.Date(2026, 11, 21, 1, 2, 3, 0, time.UTC)
+	bucket := sharedReplayBucketReceipt{Version: 1, Source: source.Source, Created: created}
+	activation.Open = true // File-only fixture, network provisioning is tested separately.
+	write := func(path string, value any) {
+		t.Helper()
+		raw, err := json.Marshal(value)
+		if err != nil {
+			t.Fatal(err)
+		}
+		save(path, raw)
+	}
+	write(activationPath, activation)
+	write(filepath.Join(root, "bucket.receipt"), bucket)
+	replay("check", true)
+
+	run("set-adapter", true, args...)
+	run("commit", false, "-expected-adapter-sha256", sharedSHA(next), "-adapter-sha256", sharedSHA(old))
+	archivedEvents, err := readSharedRotationEvents(filepath.Join(out, sharedRotationDir))
+	if err != nil || len(archivedEvents) == 0 {
+		t.Fatal("missing archived approval events", err)
+	}
+	archivedEvent := filepath.Join(out, sharedRotationDir, archivedEvents[len(archivedEvents)-1])
+	priorEvent := mustRead(t, archivedEvent)
+	save(archivedEvent, append(bytes.Clone(priorEvent), ' '))
+	run("commit", false, approvals...)
+	save(archivedEvent, priorEvent)
+	wrong := source
+	wrong.Source = strings.Repeat("8", 64)
+	write(sourcePath, wrong)
+	run("commit", false, approvals...)
+	if !strings.Contains(run("status", true), "state=adapter-replay-pending") {
+		t.Fatal("incomplete replay rebind was not reported")
+	}
+	run("check", false)
+	run("rollback", false)
+	run("set-adapter", true, args...) // same public command can resume commit
+	write(sourcePath, source)
+	var receipt sharedInstallationReceipt
+	if json.Unmarshal(mustRead(t, filepath.Join(generation, "installation.receipt")), &receipt) != nil ||
+		receipt.AdapterRotation == nil || receipt.AdapterRotation.BaseAdapter != sharedSHA(old) ||
+		receipt.AdapterRotation.PreviousAdapter != sharedSHA(old) || receipt.StorageBackend != "xfs" ||
+		receipt.ProjectFirst != 17000 || receipt.ProjectLast != 19000 {
+		t.Fatal("rotation did not retain base and XFS approvals")
+	}
+	binding, err := sharedReplayBinding(&receipt)
+	if err != nil || binding == source.Source {
+		t.Fatal("new adapter did not change replay binding", err)
+	}
+	// Simulate an interruption after the dependent receipt was prepared.
+	activation.Source = binding
+	write(filepath.Join(root, ".activation.receipt.rebind"), activation)
+	run("commit", true, approvals...)
+	run("set-adapter", true, args...)
+	run("commit", true, approvals...)
+	replay("check", true)
+	if json.Unmarshal(mustRead(t, filepath.Join(root, "bucket.receipt")), &bucket) != nil ||
+		bucket.Source != binding || !bucket.Created.Equal(created) || !bytes.Equal(seed, mustRead(t, filepath.Join(root, "source/installer.seed"))) {
+		t.Fatal("rotation replaced the replay bucket or identity")
+	}
+	projected := run("project", true)
+	private, err := sharedRoleReadLeaf(filepath.Join(projected, "platform/uac-adapter.json"), 10001, 0600, 2<<20)
+	if err != nil || !bytes.Equal(private, next) {
+		t.Fatal("Platform did not get the approved adapter", err)
+	}
+	if bytes.Contains(mustRead(t, filepath.Join(generation, "public/host.json")), []byte("proofSubjectPolicy")) {
+		t.Fatal("Host projection exposed a private adapter field")
+	}
+	save(file, old)
+	run("set-adapter", true, "-adapter-file", file, "-expected-adapter-sha256", sharedSHA(next), "-adapter-sha256", sharedSHA(old))
+	run("commit", true)
+	replay("check", true)
+	if !bytes.Equal(mustRead(t, filepath.Join(generation, "platform/uac-adapter.json")), old) {
+		t.Fatal("explicit reverse rotation did not restore the original adapter")
+	}
 }
 
 func testNASSharedSignedUpgrade(t *testing.T, data, base, binary string, r runtimeInputs) func(string, bool) {
