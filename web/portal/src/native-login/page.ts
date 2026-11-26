@@ -25,6 +25,7 @@ import {
   exchangePlacement,
   placementRequestKey,
 } from '../views/placement-api';
+import { placementMessages } from '../views/placement-messages';
 import { readPlacementConfig } from '../views/placement-config';
 import {
   createIamApi,
@@ -44,6 +45,17 @@ const transactionIdPattern =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const messages = {
   'zh-CN': {
+    migration: placementMessages['zh-CN'].migration,
+    fallbackAction: placementMessages['zh-CN'].fallbackAction,
+    switching: placementMessages['zh-CN'].switching,
+    unavailable: placementMessages['zh-CN'].unavailable,
+    account: '账号',
+    conflict: '分配冲突或尚未就绪，请稍后重试或联系管理员。',
+    legacyStopped:
+      '现有独享实例已停止、正在停止或正在删除，无法进入。请联系管理员确认实例状态。',
+    legacyFailed: '现有独享实例启动失败，无法进入。请联系管理员检查实例。',
+    legacyBlocked:
+      '现有独享实例暂时无法进入，请刷新状态或联系管理员确认维护迁移进度。',
     title: '登录并进入我的 DSH',
     scope: '选择团队账号或企业登录，成功后准备并进入本人的 DSH。',
     portal: '打开原有登录门户',
@@ -71,6 +83,19 @@ const messages = {
     logout: '退出登录',
   },
   en: {
+    migration: placementMessages['en'].migration,
+    fallbackAction: placementMessages['en'].fallbackAction,
+    switching: placementMessages['en'].switching,
+    unavailable: placementMessages['en'].unavailable,
+    account: 'Account',
+    conflict:
+      'Placement is in conflict or is not ready. Retry later or contact your administrator.',
+    legacyStopped:
+      'The existing dedicated instance is stopped, stopping, or being deleted. Contact your administrator to check its status.',
+    legacyFailed:
+      'The existing dedicated instance failed to start. Ask your administrator to check it.',
+    legacyBlocked:
+      'The existing dedicated instance cannot be opened. Refresh its status or ask your administrator to check its migration.',
     title: 'Sign in and enter my DSH',
     scope:
       'Sign in with a team account or company identity, then prepare and enter your DSH.',
@@ -140,6 +165,8 @@ export function mountInstanceLogin(
   let uacView: ReturnType<typeof createUacLoginView> | undefined;
   let infoMonitor: ReturnType<typeof watchLoginInfo> | undefined;
   let loginInfo: components['schemas']['UacLoginInfo'] | undefined;
+  let account:
+    Pick<components['schemas']['Account'], 'id' | 'displayName'> | undefined;
   let workAbort: AbortController | undefined;
   let timeout: ReturnType<typeof setTimeout> | undefined;
   let pollTimer: ReturnType<typeof setTimeout> | undefined;
@@ -174,8 +201,9 @@ export function mountInstanceLogin(
   const retry = doc.createElement('button');
   const cancel = doc.createElement('button');
   const change = doc.createElement('button');
-  for (const button of [retry, cancel, change]) button.type = 'button';
-  actions.append(retry, cancel, change);
+  const legacy = doc.createElement('button');
+  for (const button of [legacy, retry, cancel, change]) button.type = 'button';
+  actions.append(legacy, retry, cancel, change);
   const portal = doc.createElement('a');
   portal.className = 'portal-link';
   // The legacy Vue router cannot HTTP-load this independent HTML entry from
@@ -228,7 +256,17 @@ export function mountInstanceLogin(
     language.setAttribute('aria-label', words().language);
     language.disabled = authBusy;
     notice.textContent = words()[status];
-    identity.textContent = loginInfoText(loginInfo, locale);
+    const accountText =
+      status === 'migration' && account
+        ? words().account +
+          ' · ' +
+          [account.displayName, account.id].filter(Boolean).join(' · ')
+        : '';
+    identity.textContent = [accountText, loginInfoText(loginInfo, locale)]
+      .filter(Boolean)
+      .join(' · ');
+    legacy.hidden = status !== 'migration';
+    legacy.textContent = words().fallbackAction;
     identity.hidden = !authenticated || !identity.textContent;
     notice.setAttribute('role', alert ? 'alert' : 'status');
     shell.setAttribute('aria-busy', String(authBusy || workBusy));
@@ -273,11 +311,17 @@ export function mountInstanceLogin(
     timeout = pollTimer = undefined;
   }
 
+  function finishWork(message: Message, isAlert = true) {
+    stopWork();
+    show(message, isAlert, true);
+  }
+
   function invalidate() {
     epoch++;
     infoMonitor?.dispose();
     infoMonitor = undefined;
     loginInfo = undefined;
+    account = undefined;
     stopWork();
     win!.clearTimeout(retryTimer);
     retryTimer = undefined;
@@ -602,21 +646,25 @@ export function mountInstanceLogin(
     else show(providers.length ? 'providers' : 'empty');
   }
 
+  function beginWork(version: number) {
+    workBusy = true;
+    workAbort = new globalThis.AbortController();
+    timeout = setTimeout(() => {
+      if (!current(version)) return;
+      invalidate();
+      show('timeout', true, true);
+    }, 120_000);
+    return workAbort.signal;
+  }
+
   async function verifyAndOpen() {
     if (disposed || authBusy || workBusy) return;
     const completing = tx?.status === 'completed';
     restoreRetry = false;
     invalidate();
     const version = epoch;
-    workBusy = true;
-    workAbort = new globalThis.AbortController();
-    const signal = workAbort.signal;
+    const signal = beginWork(version);
     show('checking');
-    timeout = setTimeout(() => {
-      if (!current(version)) return;
-      invalidate();
-      show('timeout', true, true);
-    }, 120_000);
     try {
       const me = await iam.getMe();
       if (!current(version)) return;
@@ -628,6 +676,7 @@ export function mountInstanceLogin(
       )
         throw new Error('Portal session required');
       authenticated = true;
+      account = { id: me.account.id, displayName: me.account.displayName };
       infoMonitor = watchLoginInfo(me, () => iam.getMe(), {
         onInfo: (info) => {
           loginInfo = info;
@@ -691,29 +740,20 @@ export function mountInstanceLogin(
       opened = await api.open(key, signal);
     } catch (error) {
       if (!current(version) || signal.aborted) return;
-      if (
-        retriedReady ||
-        !isApiError(error) ||
-        error.status !== 409 ||
-        error.problem.code !== 'common.conflict'
-      )
-        throw error;
-      const currentPlacement = await api.read(signal);
-      if (!current(version) || signal.aborted) return;
-      if (currentPlacement.state === 'ready') {
-        await openPlacement(api, key, version, signal, true);
+      if (!isApiError(error) || error.status !== 409) throw error;
+      if (error.problem.code === 'shared.legacy_migration_required') {
+        finishWork('migration', false);
         return;
       }
-      if (currentPlacement.state !== 'pending') throw error;
-      show('waiting');
-      pollTimer = setTimeout(() => {
-        void openPlacement(api, key, version, signal).catch((next) => {
-          if (current(version)) fail(next);
-        });
-      }, 2000);
+      if (error.problem.code !== 'common.conflict') throw error;
+      await pollPlacement(api, key, version, signal, retriedReady);
       return;
     }
     if (!current(version) || signal.aborted) return;
+    if (opened.placement.state !== 'ready') {
+      finishWork('unavailable');
+      return;
+    }
     show('entering');
     await exchangePlacement(opened, signal, {
       fetch: options.fetch,
@@ -721,12 +761,124 @@ export function mountInstanceLogin(
     });
   }
 
+  async function pollPlacement(
+    api: ReturnType<typeof createPlacementApi>,
+    key: string,
+    version: number,
+    signal: AbortSignal,
+    retriedReady: boolean,
+  ) {
+    if (!current(version) || signal.aborted) return;
+    let currentPlacement;
+    try {
+      currentPlacement = await api.read(signal);
+    } catch (readError) {
+      if (!current(version) || signal.aborted) return;
+      if (!isApiError(readError) || readError.status !== 404) throw readError;
+      finishWork('conflict');
+      return;
+    }
+    if (!current(version) || signal.aborted) return;
+    if (currentPlacement.state === 'ready') {
+      if (retriedReady) {
+        finishWork('conflict');
+      } else await openPlacement(api, key, version, signal, true);
+      return;
+    }
+    if (
+      currentPlacement.state !== 'pending' &&
+      currentPlacement.state !== 'switching'
+    ) {
+      finishWork('unavailable');
+      return;
+    }
+    show(currentPlacement.state === 'switching' ? 'switching' : 'waiting');
+    pollTimer = setTimeout(() => {
+      void pollPlacement(api, key, version, signal, retriedReady).catch(
+        (next) => {
+          if (current(version)) fail(next);
+        },
+      );
+    }, 2000);
+  }
+
+  function legacyObstacle(value: Instance): Message | undefined {
+    if (value.phase === 'failed' || value.error) return 'legacyFailed';
+    if (
+      value.desired === 'stopped' ||
+      ['stopped', 'stopping', 'deleting'].includes(value.phase)
+    )
+      return 'legacyStopped';
+    if (
+      ![
+        'scheduling',
+        'absent',
+        'preparing',
+        'starting',
+        'running',
+        'pending_restart',
+      ].includes(value.phase)
+    )
+      return 'legacyBlocked';
+  }
+
+  async function enterLegacy() {
+    if (
+      disposed ||
+      workBusy ||
+      !authenticated ||
+      status !== 'migration' ||
+      !account
+    )
+      return;
+    const version = epoch;
+    const signal = beginWork(version);
+    show('preparing');
+    try {
+      // open can start a stopped instance or create a missing one. Check the current
+      // user's existing instance first, then verify the result before navigating.
+      const { items } = await workspace.list(signal);
+      if (!current(version) || signal.aborted) return;
+      const existing = items[0];
+      const obstacle =
+        items.length === 1 && existing?.id && existing.ownerId === account.id
+          ? legacyObstacle(existing)
+          : 'legacyBlocked';
+      if (obstacle) {
+        finishWork(obstacle);
+        return;
+      }
+      const opened = await workspace.open(signal);
+      if (!current(version) || signal.aborted) return;
+      if (opened.created || !opened.instance) {
+        finishWork('legacyBlocked');
+        return;
+      }
+      await observe(opened.instance, version, signal, existing.id);
+    } catch (error) {
+      if (!current(version) || signal.aborted) return;
+      if (isApiError(error) && [404, 409].includes(error.status)) {
+        finishWork('legacyBlocked');
+      } else fail(error);
+    }
+  }
+
   async function observe(
     value: Instance,
     version: number,
     signal: AbortSignal,
+    legacyId?: string,
   ) {
     if (!current(version) || signal.aborted) return;
+    const obstacle =
+      legacyId &&
+      (value?.id !== legacyId || value.ownerId !== account?.id
+        ? 'legacyBlocked'
+        : legacyObstacle(value));
+    if (obstacle) {
+      finishWork(obstacle);
+      return;
+    }
     if (!value?.id) throw new Error('Missing instance');
     if (value.phase === 'failed' || value.error) {
       stopWork();
@@ -751,6 +903,7 @@ export function mountInstanceLogin(
               await workspace.get(value.id, signal),
               version,
               signal,
+              legacyId,
             );
           } catch (error) {
             if (current(version)) fail(error);
@@ -803,6 +956,7 @@ export function mountInstanceLogin(
     if (!retry.disabled && !disposed)
       void (restoreRetry ? start() : verifyAndOpen());
   };
+  const onLegacy = () => void enterLegacy();
   const onCancel = () => void cancelAuthentication();
   const onChange = () => void cancelAuthentication();
   function dispose() {
@@ -814,6 +968,7 @@ export function mountInstanceLogin(
     if (!authBusy) void cancelTransaction(previous).catch(() => {});
     client.invalidatePendingRequests();
     language.removeEventListener('change', onLanguage);
+    legacy.removeEventListener('click', onLegacy);
     retry.removeEventListener('click', onRetry);
     cancel.removeEventListener('click', onCancel);
     change.removeEventListener('click', onChange);
@@ -822,6 +977,7 @@ export function mountInstanceLogin(
     shell.remove();
   }
   language.addEventListener('change', onLanguage);
+  legacy.addEventListener('click', onLegacy);
   retry.addEventListener('click', onRetry);
   cancel.addEventListener('click', onCancel);
   change.addEventListener('click', onChange);
