@@ -18,7 +18,7 @@ import { pathToFileURL, fileURLToPath } from 'node:url';
 
 /** Verify all artifact bytes before importing executable code or starting helper.
  * @param {string} directory
- * @param {'desktop'|'managed'|'managed-linux'} target */
+ * @param {'desktop'|'managed'|'managed-linux'|'desktop-linux'} target */
 export async function verifyBrokerPackage(directory, target = 'desktop') {
   if ((await lstat(directory)).isSymbolicLink())
     throw new Error('broker linked path rejected');

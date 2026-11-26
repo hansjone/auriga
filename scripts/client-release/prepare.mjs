@@ -336,6 +336,8 @@ export async function prepareInputs(parent, options = {}) {
   if (!work.startsWith(kit + '\\') && !work.startsWith(kit + '/'))
     throw new Error('非法准备工作路径');
   rmSync(work, { recursive: true, force: true });
+  // npm/.bin and other package links appear after installs; flatten before seal.
+  if (platform.target === 'linux-x64') materializeSymlinks(kit);
   const manifest = sealInputs(kit, tools, root, target);
   const summary = {
     directory: kit,
