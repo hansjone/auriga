@@ -232,7 +232,6 @@ export async function createConnectRuntime({
   const taskContexts = createHostContexts({
     broker,
     identity,
-    catalogGeneration,
     ctx,
     pinSessionOwner: !!expectedIdentity,
   });
@@ -576,6 +575,7 @@ export async function createConnectRuntime({
     enterprise,
     operations: installed?.operations ?? [],
     identity,
+    catalogGeneration,
     // Compatibility for resource lifecycle subscriptions, with no credential store.
     vault: {
       snapshot: () => ({

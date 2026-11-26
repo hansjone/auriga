@@ -177,6 +177,7 @@ test('runtime emits the same profile binding for shell and local-UAC association
   const initial = account.profileBinding;
   assert.match(initial, /^[0-9a-f]{64}$/);
   assert.match(account.catalogGeneration, /^[0-9a-f]{64}$/);
+  assert.equal(account.catalogGeneration, f.runtime.catalogGeneration());
   assert.notEqual(
     account.catalogGeneration,
     f.runtime.broker.state.authorization(),
