@@ -12,19 +12,34 @@ import { BusinessProxy } from './business.mjs';
 import { createLog } from './diagnostics.mjs';
 
 export async function openSystemBrowser(url) {
-  if (process.platform !== 'win32')
-    throw new Error('supported system browser launcher unavailable');
   const parsed = new URL(url);
   if (!['https:', 'http:'].includes(parsed.protocol))
     throw new Error('invalid browser target');
   // argv boundary documented by design: only launch ticket, never platform token.
   await new Promise((resolve, reject) => {
-    const child = spawn(
-      join(process.env.SystemRoot ?? 'C:\\Windows', 'System32/rundll32.exe'),
-      ['url.dll,FileProtocolHandler', parsed.href],
-      { windowsHide: true, stdio: 'ignore' },
-    );
+    let child;
+    if (process.platform === 'win32') {
+      child = spawn(
+        join(process.env.SystemRoot ?? 'C:\\Windows', 'System32/rundll32.exe'),
+        ['url.dll,FileProtocolHandler', parsed.href],
+        { windowsHide: true, stdio: 'ignore' },
+      );
+    } else if (process.platform === 'linux') {
+      child = spawn('xdg-open', [parsed.href], {
+        stdio: 'ignore',
+        detached: true,
+      });
+      child.unref?.();
+    } else {
+      reject(new Error('supported system browser launcher unavailable'));
+      return;
+    }
     child.once('error', () => reject(new Error('browser launch failed')));
+    // xdg-open often exits immediately after handing off; treat spawn success as OK.
+    if (process.platform === 'linux') {
+      child.once('spawn', () => resolve(undefined));
+      return;
+    }
     child.once('exit', (code) =>
       code === 0
         ? resolve(undefined)
@@ -32,6 +47,12 @@ export async function openSystemBrowser(url) {
     );
   });
 }
+
+function shellHelperPath() {
+  if (process.platform !== 'win32') return null;
+  return fileURLToPath(new URL('./windows/shell-helper.exe', import.meta.url));
+}
+
 export async function startDesktopAuth({
   root,
   dataHome,
@@ -42,9 +63,7 @@ export async function startDesktopAuth({
   if (!existsSync(originFile)) return undefined;
   const installation = JSON.parse(readFileSync(originFile, 'utf8'));
   const origin = installation.origin;
-  const helper = fileURLToPath(
-    new URL('./windows/shell-helper.exe', import.meta.url),
-  );
+  const helper = shellHelperPath();
   const vault = new Vault(join(dataHome, 'auriga', 'shell-auth'), helper);
   let broker, ipc, loopback, business;
   const log = createLog(join(dataHome, 'auriga', 'logs'), helper, () => {

@@ -2,7 +2,7 @@
 
 本目录由 C 维护。`build.mjs` 生成同一个自包含制品，含 Windows helper、冻结 schema、锁定 Ajv 闭包、NATS/WSS 与验签代码闭包，以及逐文件 SHA-256 清单。Desktop 放在 `auriga/shell-auth/`，独立插件由 D 负责引用及打包。网络闭包复用仓库现有协议实现，运行时无需插件源码目录；未增加或升级依赖。
 
-**Desktop 目前只出 Windows 版。** Unix 尚无真实对端校验，平台认证继续失败关闭；独立插件在 Unix 上也不能宣称具备该平台通道。
+**Desktop 以 Windows 为首发；`feat/linux-desktop-client` 正在补齐 Linux。** Linux 使用 Unix 套接字 IPC（能力令牌 + 受控子进程 `/proc` 校验）与目录内 AES-GCM 凭据封存（0600 密钥文件）；完整托盘与受管 Python 仍在推进。未就绪时平台认证仍失败关闭并保留本地 DSH。
 
 `startDesktopAuth({root,dataHome})` 读取安装级 `desktop-origin.json`，启动本用户 broker、随机端口控制页及 OS IPC。平台未配置或 helper 不可用时保留本地 DSH。设备登录只打开 HTTPS 门户 `/device`，不创建云端实例。控制页同步显示本窗口尝试的用户码、期限和人工核对提示；其他窗口及插件快照不接收该尝试。设备码及平台令牌始终留在 broker。取消、跳过、完成和超时清除用户码；之后可重新登录。退出后仅附加减少自动行为的 `mode=manual`，不自动填码或批准设备。
 

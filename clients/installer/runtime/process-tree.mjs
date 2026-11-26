@@ -2,18 +2,25 @@ import { BRAND_NAME } from './brand.mjs';
 import { execFileSync, spawnSync } from 'node:child_process';
 import {
   existsSync,
+  lstatSync,
   mkdirSync,
   readFileSync,
+  readdirSync,
   renameSync,
   rmdirSync,
+  realpathSync,
   unlinkSync,
 } from 'node:fs';
-import { join, parse } from 'node:path';
+import { join, parse, resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { performance } from 'node:perf_hooks';
+import { setTimeout as delay } from 'node:timers/promises';
 import { assertLocalPath, durableJson, seedBootId } from './host-lock.mjs';
 import { parseStrictJson } from './json.mjs';
 import { execWinHelper } from './win-helper.mjs';
+
+const REMOTE_FS =
+  /^(nfs|nfs4|cifs|smb|smbfs|fuse\.sshfs|fuse\.davfs|fuse\.rclone|afs|9p)$/i;
 
 const ps = (code) =>
   execFileSync(
@@ -60,10 +67,67 @@ export function primeStartupProbe(home) {
   return true;
 }
 
+function linuxBootSeconds() {
+  const text = readFileSync('/proc/stat', 'utf8');
+  const line = text.split('\n').find((row) => row.startsWith('btime '));
+  if (!line) throw new Error('unable to read boot time');
+  const value = Number(line.slice(6).trim());
+  if (!Number.isFinite(value) || value < 1) throw new Error('invalid boot time');
+  return value;
+}
+
+function linuxClockTicks() {
+  try {
+    const value = Number(
+      execFileSync('getconf', ['CLK_TCK'], {
+        encoding: 'utf8',
+        timeout: 5000,
+      }).trim(),
+    );
+    if (Number.isFinite(value) && value > 0) return value;
+  } catch {
+    /* fall through */
+  }
+  return 100;
+}
+
+function assertLocalLinuxVolume(home) {
+  const absolute = resolve(home);
+  if (!absolute.startsWith('/') || absolute.startsWith('//'))
+    throw new Error('invalid local path');
+  let current = '/';
+  for (const part of absolute.slice(1).split('/').filter(Boolean)) {
+    current = join(current, part);
+    if (!existsSync(current)) continue;
+    if (lstatSync(current).isSymbolicLink())
+      throw new Error('reparse point rejected');
+  }
+  const real = realpathSync.native(existsSync(absolute) ? absolute : home);
+  const mounts = readFileSync('/proc/mounts', 'utf8')
+    .split('\n')
+    .filter(Boolean)
+    .map((line) => {
+      const parts = line.split(' ');
+      return { mount: parts[1]?.replace(/\\040/g, ' '), fs: parts[2] };
+    })
+    .filter((row) => row.mount && row.fs)
+    .sort((a, b) => b.mount.length - a.mount.length);
+  const match = mounts.find(
+    (row) => real === row.mount || real.startsWith(row.mount + '/'),
+  );
+  if (!match) throw new Error('unable to resolve local volume');
+  if (REMOTE_FS.test(match.fs))
+    throw new Error('only local fixed volumes are supported');
+}
+
 export function assertNTFS(home) {
   assertLocalPath(home);
+  if (process.platform === 'linux') {
+    assertLocalLinuxVolume(home);
+    return;
+  }
   if (process.platform !== 'win32')
-    throw new Error('Desktop guardian requires local Windows NTFS');
+    throw new Error('Desktop guardian requires local Windows NTFS or Linux volume');
   if (
     cachedNtfs &&
     cachedNtfs.home === home.toLowerCase() &&
@@ -101,6 +165,47 @@ export function assertNTFS(home) {
   }
 }
 
+function parseLinuxStat(pid) {
+  const raw = readFileSync(`/proc/${pid}/stat`, 'utf8');
+  const close = raw.lastIndexOf(')');
+  if (close < 0) return null;
+  const rest = raw.slice(close + 2).split(' ');
+  // fields after comm: 1=state … 2=ppid … 20=starttime (1-based from start of rest → index 19)
+  const parent = Number(rest[1]);
+  const startTicks = Number(rest[19]);
+  if (!Number.isSafeInteger(parent) || parent < 0 || !Number.isFinite(startTicks))
+    return null;
+  let executable = null;
+  try {
+    executable = realpathSync.native(`/proc/${pid}/exe`);
+  } catch {
+    executable = null;
+  }
+  const createdAt = new Date(
+    (linuxBootSeconds() + startTicks / linuxClockTicks()) * 1000,
+  ).toISOString();
+  return {
+    pid: Number(pid),
+    parent,
+    createdAt,
+    executable,
+  };
+}
+
+function linuxProcessList() {
+  const list = [];
+  for (const name of readdirSync('/proc')) {
+    if (!/^\d+$/.test(name)) continue;
+    try {
+      const info = parseLinuxStat(name);
+      if (info) list.push(info);
+    } catch {
+      /* process exited */
+    }
+  }
+  return list;
+}
+
 export function processList() {
   if (
     cachedStartupProcesses &&
@@ -110,6 +215,7 @@ export function processList() {
     cachedStartupProcesses = null;
     return list;
   }
+  if (process.platform === 'linux') return linuxProcessList();
   const helperOut = execWinHelper(['proc-list'], { timeout: 15000 });
   if (helperOut !== null) {
     const list = JSON.parse(helperOut);
@@ -127,6 +233,11 @@ export function processIdentity(pid) {
     throw new Error('invalid process id');
   if (pid === process.pid && ownIdentity) return ownIdentity;
   try {
+    if (process.platform === 'linux') {
+      const identity = parseLinuxStat(pid);
+      if (pid === process.pid) ownIdentity = identity;
+      return identity;
+    }
     const helperOut = execWinHelper(['proc-info', String(pid)], {
       timeout: 15000,
     });
@@ -165,6 +276,12 @@ function notifyDesktop(message) {
         `$w=New-Object -ComObject WScript.Shell; $null=$w.Popup('${message.replaceAll("'", "''")}',8,'${BRAND_NAME}',64)`,
       ],
       { windowsHide: true, timeout: 10000, stdio: 'ignore' },
+    );
+  else if (process.platform === 'linux')
+    spawnSync(
+      'notify-send',
+      ['--app-name=' + BRAND_NAME, BRAND_NAME, message],
+      { timeout: 10000, stdio: 'ignore' },
     );
 }
 
@@ -304,6 +421,14 @@ export class ProcessTree {
     for (const owned of live) {
       const current = this.list().find((p) => p.pid === owned.pid);
       if (!same(current, owned)) continue;
+      if (process.platform === 'linux') {
+        try {
+          process.kill(owned.pid, 'SIGTERM');
+        } catch (error) {
+          if (error.code !== 'ESRCH') throw error;
+        }
+        continue;
+      }
       const result = spawnSync(
         'taskkill.exe',
         ['/PID', String(owned.pid), '/T', '/F'],
@@ -317,6 +442,27 @@ export class ProcessTree {
         )
       )
         throw new Error('owned process tree stop failed');
+    }
+    if (process.platform === 'linux' && live.length > 0) {
+      const deadline = performance.now() + 5000;
+      while (performance.now() < deadline && !(await this.isStopped()))
+        await delay(100);
+      for (const owned of [this.record.root, ...this.record.children].filter(
+        Boolean,
+      )) {
+        if (
+          !same(
+            this.list().find((p) => p.pid === owned.pid),
+            owned,
+          )
+        )
+          continue;
+        try {
+          process.kill(owned.pid, 'SIGKILL');
+        } catch (error) {
+          if (error.code !== 'ESRCH') throw error;
+        }
+      }
     }
     if (live.length > 0 && !(await this.isStopped()))
       throw new Error('owned processes remain alive');
