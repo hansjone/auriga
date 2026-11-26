@@ -1,14 +1,20 @@
-import { unpackSetup } from './setup-archive.mjs';
+import {
+  isZipSetupArchive,
+  readSetupManifest,
+  unpackSetup,
+} from './setup-archive.mjs';
 import { BRAND_NAME } from './brand.mjs';
 /* global clearTimeout, AbortController, AbortSignal, fetch */
 /** Anonymous transport is bound to the configured platform origin. */
 import {
   mkdirSync,
   readFileSync,
+  readdirSync,
   writeFileSync,
   renameSync,
   rmSync,
   existsSync,
+  linkSync,
   openSync,
   closeSync,
   writeSync,
@@ -21,7 +27,7 @@ import { spawnSync } from 'node:child_process';
 import { Buffer } from 'node:buffer';
 import { randomUUID, createHash } from 'node:crypto';
 import { verifyRelease, releaseDigest } from './release.mjs';
-import { verifyPackage, sha256File } from './verify.mjs';
+import { verifyPackageAsync, sha256File } from './verify.mjs';
 import { install, openVersionSession, readState, versionDir } from './core.mjs';
 import {
   changeUpdateState,
@@ -102,7 +108,50 @@ export function platformUrl(origin, path, binding) {
   return new URL('/api/resource/v1/desktop/' + path, origin).href;
 }
 
-export function extractArchive(archive, directory) {
+function linkTreeSync(from, to) {
+  mkdirSync(to, { recursive: true });
+  for (const entry of readdirSync(from, { withFileTypes: true })) {
+    const src = join(from, entry.name);
+    const dst = join(to, entry.name);
+    if (entry.isDirectory()) linkTreeSync(src, dst);
+    else if (entry.isFile()) linkSync(src, dst);
+    else throw new Error(`unsupported entry for hardlink reuse: ${src}`);
+  }
+}
+
+/**
+ * Determine unchanged immutable subtrees (node_modules, node binary) that can
+ * be hard-linked from the current verified version on the same volume instead
+ * of extracting tens of thousands of identical files. Never touches
+ * `runtime/python` because it carries protected read-only ACLs.
+ */
+function findReusableSubtrees(oldDir, oldManifest, nextManifest) {
+  if (!oldDir || !oldManifest || !nextManifest) return [];
+  const subtrees = [];
+  const oldTrees = new Map((oldManifest.trees ?? []).map((t) => [t.root, t]));
+  for (const nextTree of nextManifest.trees ?? []) {
+    const prev = oldTrees.get(nextTree.root);
+    if (
+      prev &&
+      prev.files === nextTree.files &&
+      prev.sha256 === nextTree.sha256 &&
+      existsSync(join(oldDir, ...nextTree.root.split('/')))
+    ) {
+      subtrees.push(nextTree.root);
+    }
+  }
+  if (
+    oldManifest.upstream?.nodeZipSha256 &&
+    oldManifest.upstream.nodeZipSha256 ===
+      nextManifest.upstream?.nodeZipSha256 &&
+    existsSync(join(oldDir, 'upstream', 'node'))
+  ) {
+    subtrees.push('upstream/node');
+  }
+  return subtrees;
+}
+
+export function extractArchive(archive, directory, { reuse = null } = {}) {
   mkdirSync(directory);
   const zip = join(directory, 'payload.zip');
   unpackSetup(archive, zip);
@@ -111,32 +160,64 @@ export function extractArchive(archive, directory) {
     encoding: 'utf8',
     maxBuffer: 32 * 1024 ** 2,
   });
+  const entries = listed.stdout.split(/\r?\n/).filter(Boolean);
   if (
     listed.status !== 0 ||
-    listed.stdout
-      .split(/\r?\n/)
-      .filter(Boolean)
-      .some(
-        (p) =>
-          p.startsWith('/') ||
-          p.includes('\\') ||
-          p.includes(':') ||
-          p.split('/').includes('..'),
-      )
+    entries.some(
+      (p) =>
+        p.startsWith('/') ||
+        p.includes('\\') ||
+        p.includes(':') ||
+        p.split('/').includes('..'),
+    )
   )
     throw Object.assign(new Error('unsafe update archive'), {
       code: 'desktop.extract_failed',
     });
-  const result = spawnSync(systemTool('tar'), ['-xf', zip, '-C', directory], {
-    encoding: 'utf8',
-  });
-  if (result.error) throw result.error;
-  if (result.status !== 0)
-    throw Object.assign(new Error('update archive extraction failed'), {
-      code: 'desktop.extract_failed',
+
+  const payloadDir = join(directory, 'payload');
+  const reusable = reuse?.subtrees?.length ? reuse.subtrees : [];
+  let extracted = false;
+  if (reusable.length) {
+    const excludeArgs = [];
+    for (const sub of reusable) {
+      excludeArgs.push('--exclude', `payload/${sub}`);
+      excludeArgs.push('--exclude', `payload/${sub}/*`);
+      excludeArgs.push('--exclude', `./payload/${sub}`);
+      excludeArgs.push('--exclude', `./payload/${sub}/*`);
+    }
+    const partial = spawnSync(
+      systemTool('tar'),
+      ['-xf', zip, '-C', directory, ...excludeArgs],
+      { encoding: 'utf8' },
+    );
+    if (!partial.error && partial.status === 0) {
+      try {
+        for (const sub of reusable) {
+          const src = join(reuse.sourceDir, ...sub.split('/'));
+          const dst = join(payloadDir, ...sub.split('/'));
+          rmSync(dst, { recursive: true, force: true });
+          linkTreeSync(src, dst);
+        }
+        extracted = true;
+      } catch {
+        // Cross-volume or ACL mismatch: fall back cleanly to full extraction.
+        rmSync(payloadDir, { recursive: true, force: true });
+      }
+    }
+  }
+  if (!extracted) {
+    const result = spawnSync(systemTool('tar'), ['-xf', zip, '-C', directory], {
+      encoding: 'utf8',
     });
+    if (result.error) throw result.error;
+    if (result.status !== 0)
+      throw Object.assign(new Error('update archive extraction failed'), {
+        code: 'desktop.extract_failed',
+      });
+  }
   rmSync(zip);
-  return join(directory, 'payload');
+  return payloadDir;
 }
 
 export function createUpdater({
@@ -441,7 +522,7 @@ export function createUpdater({
         });
         let lastProgress = 0,
           lastBytes = 0;
-        await downloadPackage(
+        const downloadResult = await downloadPackage(
           request,
           platformUrl(origin, `packages/${body.sequence}`, binding),
           archive,
@@ -469,19 +550,35 @@ export function createUpdater({
         // envelope was already checked before the transfer started.
         progress('verifying', { stage: 'verify-archive' });
         installStage = 'verify-archive';
-        if (sha256File(archive) !== body.sha256)
-          throw new Error('package SHA mismatch');
-        progress('verifying', { stage: 'extract' });
-        installStage = 'extract';
-        const payload = await extract(archive, join(temporary, 'unpacked'));
-        progress('verifying', { stage: 'verify-package' });
-        installStage = 'verify-package';
-        const manifest = verifyPackage(payload);
-        if (
-          manifest.id !== body.packageId ||
-          manifest.bundleVersion !== body.version
-        )
-          throw new Error('package ID/version mismatch');
+        const actualSha = downloadResult?.sha256 ?? sha256File(archive);
+        if (actualSha !== body.sha256) throw new Error('package SHA mismatch');
+        let payload;
+        let manifest;
+        // For deferred real-archive updates, validate manifest.json directly
+        // from the embedded ZIP without unpacking tens of thousands of files
+        // twice (applyPending unpacks once directly into the target volume).
+        if (defer && extract === extractArchive && isZipSetupArchive(archive)) {
+          progress('verifying', { stage: 'verify-package' });
+          installStage = 'verify-package';
+          manifest = readSetupManifest(archive);
+          if (
+            manifest.id !== body.packageId ||
+            manifest.bundleVersion !== body.version
+          )
+            throw new Error('package ID/version mismatch');
+        } else {
+          progress('verifying', { stage: 'extract' });
+          installStage = 'extract';
+          payload = await extract(archive, join(temporary, 'unpacked'));
+          progress('verifying', { stage: 'verify-package' });
+          installStage = 'verify-package';
+          manifest = await verifyPackageAsync(payload);
+          if (
+            manifest.id !== body.packageId ||
+            manifest.bundleVersion !== body.version
+          )
+            throw new Error('package ID/version mismatch');
+        }
         progress('verifying', { stage: 'check-release' });
         installStage = 'check-release';
         verified(pending); // expiry may have elapsed during the download
@@ -635,6 +732,7 @@ export async function downloadPackage(
         offset = 0; // server ignored Range: restart safely
       else throw new Error('invalid package response');
       const fd = openSync(file, offset ? 'a' : 'w', 0o600);
+      const streamHash = offset === 0 ? createHash('sha256') : null;
       let count = offset;
       try {
         for await (const chunk of response.body) {
@@ -642,13 +740,14 @@ export async function downloadPackage(
           count += chunk.length;
           if (count > expected) throw new Error('package size mismatch');
           const bytes = Buffer.from(chunk);
+          streamHash?.update(bytes);
           let written = 0;
           while (written < bytes.length)
             written += writeSync(fd, bytes, written, bytes.length - written);
           onProgress(count);
         }
         if (count !== expected) throw new Error('interrupted package download');
-        return;
+        return { sha256: streamHash ? streamHash.digest('hex') : null };
       } finally {
         closeSync(fd);
       }
@@ -723,6 +822,7 @@ async function applyPendingLocked(
     request = fetch,
     session,
     transfer,
+    verifiedCurrentManifest = null,
     onState = () => {},
   } = {},
 ) {
@@ -795,9 +895,11 @@ async function applyPendingLocked(
     const saved = readUpdateState(root);
     const current = readState(root);
     previousId = current.current;
-    const old = verifyPackage(versionDir(root, current.current), {
-      trees: false,
-    });
+    const oldDir = versionDir(root, current.current);
+    const old =
+      verifiedCurrentManifest && verifiedCurrentManifest.id === current.current
+        ? verifiedCurrentManifest
+        : await verifyPackageAsync(oldDir, { trees: false });
     note('verify-release');
     const envelope = rejectInvalid(() =>
       JSON.parse(
@@ -897,20 +999,64 @@ async function applyPendingLocked(
       }
     };
     const unpacked = join(queued, 'apply');
-    const payload = await retry(async () => {
+    const useRealExtract = extract === extractArchive;
+    let usedReuse = false;
+    let payload = await retry(async () => {
       note('verify-archive');
       checkArchive();
       note('extract');
       // The signed archive is the durable input. Rebuild scratch output after
       // interruption or failed extraction, while holding the transfer lock.
       rmSync(unpacked, { recursive: true, force: true });
+      usedReuse = false;
+      if (useRealExtract) {
+        let reuse = null;
+        try {
+          const nextManifest = readSetupManifest(archive);
+          const subtrees = findReusableSubtrees(oldDir, old, nextManifest);
+          if (subtrees.length) reuse = { sourceDir: oldDir, subtrees };
+        } catch {
+          /* Fall back to standard full extraction if manifest peek fails. */
+        }
+        usedReuse = Boolean(reuse);
+        return await extract(archive, unpacked, { reuse });
+      }
       return await extract(archive, unpacked);
     });
     note('verify-package');
-    const manifest = rejectInvalid(
-      () => verifyPackage(payload),
-      'desktop.package_invalid',
-    );
+    let manifest;
+    try {
+      manifest = await verifyPackageAsync(payload);
+    } catch (error) {
+      if (usedReuse) {
+        // An unchanged subtree in the old version may have been damaged on disk.
+        // Fall back to a clean full extraction from the verified archive before
+        // declaring the pending update package invalid.
+        note('extract');
+        rmSync(unpacked, { recursive: true, force: true });
+        payload = await retry(async () => {
+          checkArchive();
+          rmSync(unpacked, { recursive: true, force: true });
+          return await extract(archive, unpacked, { reuse: null });
+        });
+        note('verify-package');
+        try {
+          manifest = await verifyPackageAsync(payload);
+        } catch (fullError) {
+          if (!fullError.code || !/^(E[A-Z]+)$/.test(fullError.code)) {
+            retain = false;
+            fullError.code ??= 'desktop.package_invalid';
+          }
+          throw fullError;
+        }
+      } else {
+        if (!error.code || !/^(E[A-Z]+)$/.test(error.code)) {
+          retain = false;
+          error.code ??= 'desktop.package_invalid';
+        }
+        throw error;
+      }
+    }
     if (
       manifest.id !== body.packageId ||
       manifest.bundleVersion !== body.version
@@ -921,17 +1067,31 @@ async function applyPendingLocked(
       });
     }
     note('install');
-    await retry(() =>
-      install({
+    let installAttempt = 0;
+    await retry(async () => {
+      const retrying = installAttempt++ > 0;
+      if (
+        useRealExtract &&
+        !existsSync(versionDir(root, manifest.id)) &&
+        (retrying || !existsSync(join(payload, 'manifest.json')))
+      ) {
+        checkArchive();
+        rmSync(unpacked, { recursive: true, force: true });
+        payload = await extract(archive, unpacked, { reuse: null });
+        await verifyPackageAsync(payload);
+      }
+      return install({
         root,
         payload,
         dataHome: current.dataHome,
         smoke,
         session,
         transfer,
+        movePayload: useRealExtract,
+        preverifiedManifest: useRealExtract ? manifest : null,
         progress: (step) => note(step),
-      }),
-    );
+      });
+    });
     retain = false;
     finishUpdateAttempt(root, 'succeeded');
     changeUpdateState(root, (state) => ({

@@ -1,3 +1,4 @@
+/* global AbortController */
 /**
  * Tray-owned launcher control. The tray writes one command per line to the
  * launcher's stdin: "stop" (or the end of stdin, e.g. the tray exited or
@@ -9,9 +10,12 @@ export function createControl({
   write = (text) => process.stdout.write(text),
 } = {}) {
   let requested = false;
+  const controller = new AbortController();
   const handlers = new Map();
   const stop = () => {
+    if (requested) return;
     requested = true;
+    controller.abort();
   };
   let buffer = '';
   input.setEncoding?.('utf8');
@@ -31,6 +35,9 @@ export function createControl({
   return {
     get requested() {
       return requested;
+    },
+    get signal() {
+      return controller.signal;
     },
     on(command, handler) {
       handlers.set(command, handler);

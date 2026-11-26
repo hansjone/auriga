@@ -74,6 +74,66 @@ static class Desktop
     public static string Node(string root) { return Path.Combine(VersionDir(root), "upstream", "node", "node.exe"); }
     public static string Cli(string root) { return Path.Combine(VersionDir(root), "auriga", "runtime", "cli.mjs"); }
 
+    static readonly Regex SafeVersionId = new Regex("^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$");
+
+    /// Fast local read matching `cli.mjs status` without spawning a Node.js subprocess.
+    public static Dictionary<string, object> ReadDesktopInfo(string root)
+    {
+        var state = ReadJson(Path.Combine(root, "install.json"));
+        string current = Str(state, "current");
+        string dataHome = Str(state, "dataHome");
+        if (string.IsNullOrEmpty(current) || !SafeVersionId.IsMatch(current) || string.IsNullOrEmpty(dataHome)) return null;
+        string verDir = Path.Combine(root, "versions", current);
+        var manifest = ReadJson(Path.Combine(verDir, "manifest.json"));
+        if (manifest == null) return null;
+        var binding = ReadJson(Path.Combine(root, "desktop-origin.json"));
+        var update = ReadJson(Path.Combine(root, "desktop-update.json")) ?? new Dictionary<string, object>();
+        var upstream = Obj(manifest, "upstream");
+        var plugin = Obj(manifest, "plugin");
+        var pnpm = Obj(manifest, "pnpm");
+        var available = Obj(update, "available");
+        var applyRetry = Obj(update, "applyRetry");
+        string origin = Str(binding, "origin");
+        bool updatesConfigured = !string.IsNullOrEmpty(origin) &&
+            File.Exists(Path.Combine(verDir, "auriga", "runtime", "release-public-key.txt"));
+        object rawEnabled;
+        bool updateEnabled = !update.TryGetValue("enabled", out rawEnabled) || !(rawEnabled is bool) || (bool)rawEnabled;
+        var updateSummary = new Dictionary<string, object>
+        {
+            { "enabled", updateEnabled },
+            { "channel", Str(update, "channel") ?? "stable" },
+            { "phase", Str(update, "phase") ?? "idle" },
+            { "available", Str(available, "version") },
+            { "required", Obj(update, "requiredRelease") != null },
+            { "error", Str(update, "error") },
+            { "stage", Str(update, "stage") },
+            { "failure", Obj(update, "failure") },
+            { "manualRetryRequired", Flag(applyRetry, "manualRequired") },
+            { "restartRequired", Directory.Exists(Path.Combine(root, "desktop-pending")) },
+        };
+        return new Dictionary<string, object>
+        {
+            { "product", Str(manifest, "product") },
+            { "version", Str(manifest, "bundleVersion") },
+            { "packageId", Str(manifest, "id") },
+            { "previous", Str(state, "previous") },
+            { "components", new Dictionary<string, object>
+                {
+                    { "dsh", Str(upstream, "version") },
+                    { "node", Str(upstream, "nodeVersion") },
+                    { "plugin", Str(plugin, "version") },
+                    { "pnpm", Str(pnpm, "version") },
+                }
+            },
+            { "dataHome", dataHome },
+            { "logs", Path.Combine(dataHome, "auriga", "logs") },
+            { "platformOrigin", origin },
+            { "accessMode", Str(binding, "accessMode") ?? (binding != null ? "domain" : null) },
+            { "updatesConfigured", updatesConfigured },
+            { "update", updateSummary },
+        };
+    }
+
     public static string Quote(string value) { return "\"" + value.Replace("\"", "\\\"") + "\""; }
 
     public static ProcessStartInfo NodeStart(string root, string arguments)
@@ -226,6 +286,7 @@ sealed class TrayApp : ApplicationContext
     Process launcher;
     string dshUrl, platformState, platformReason, availableVersion, logFile, updateStageText;
     readonly object updateLock = new object();
+    readonly object logLock = new object();
     Process updateWorker;
     ProgressForm updateForm;
     long lastUpdateActivityTicks;
@@ -285,10 +346,17 @@ sealed class TrayApp : ApplicationContext
         pendingTimer.Start();
         checkTimer.Interval = 60 * 1000;
         RefreshInfo();
-        RefreshShellIntegration();
         openWhenReady = !autostart;
         StartLauncher();
+        StartShellRefreshThread(info);
         checkTimer.Start();
+    }
+
+    void StartShellRefreshThread(Dictionary<string, object> snapshot)
+    {
+        var thread = new Thread(() => RefreshShellIntegration(snapshot)) { IsBackground = true };
+        thread.SetApartmentState(ApartmentState.STA);
+        thread.Start();
     }
 
     public void Post(Action action)
@@ -299,17 +367,20 @@ sealed class TrayApp : ApplicationContext
     void Log(string line)
     {
         if (logFile == null) return;
-        try
+        lock (logLock)
         {
-            line = Regex.Replace(line, "token=[A-Za-z0-9_\\-]+", "token=REDACTED");
-            if (File.Exists(logFile) && new FileInfo(logFile).Length > 5 * 1024 * 1024)
+            try
             {
-                File.Copy(logFile, logFile + ".1", true);
-                File.WriteAllText(logFile, "");
+                line = Regex.Replace(line, "token=[A-Za-z0-9_\\-]+", "token=REDACTED");
+                if (File.Exists(logFile) && new FileInfo(logFile).Length > 5 * 1024 * 1024)
+                {
+                    File.Copy(logFile, logFile + ".1", true);
+                    File.WriteAllText(logFile, "");
+                }
+                File.AppendAllText(logFile, DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss ") + line + Environment.NewLine, Encoding.UTF8);
             }
-            File.AppendAllText(logFile, DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss ") + line + Environment.NewLine, Encoding.UTF8);
+            catch (Exception) { }
         }
-        catch (Exception) { }
     }
 
     void SyncCurrentVersionIfChanged()
@@ -325,7 +396,11 @@ sealed class TrayApp : ApplicationContext
         {
             Dictionary<string, object> next = null;
             string error = null;
-            try { next = Desktop.RunJson(root, "status --root " + Desktop.Quote(root), out error); }
+            try
+            {
+                next = Desktop.ReadDesktopInfo(root);
+                if (next == null) next = Desktop.RunJson(root, "status --root " + Desktop.Quote(root), out error);
+            }
             catch (Exception e) { error = e.Message; }
             Post(delegate
             {
@@ -339,8 +414,7 @@ sealed class TrayApp : ApplicationContext
                 }
                 nextSyncAttemptUtc = DateTime.MinValue;
                 ApplyInfo(next);
-                var snapshot = next;
-                ThreadPool.QueueUserWorkItem(delegate { RefreshShellIntegration(snapshot); });
+                StartShellRefreshThread(next);
             });
         });
     }
@@ -349,7 +423,11 @@ sealed class TrayApp : ApplicationContext
     {
         Dictionary<string, object> next = null;
         string error = null;
-        try { next = Desktop.RunJson(root, "status --root " + Desktop.Quote(root), out error); }
+        try
+        {
+            next = Desktop.ReadDesktopInfo(root);
+            if (next == null) next = Desktop.RunJson(root, "status --root " + Desktop.Quote(root), out error);
+        }
         catch (Exception e) { error = e.Message; }
         if (next == null)
         {

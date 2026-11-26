@@ -3,6 +3,7 @@ import { existsSync, mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { assertLocalPath } from './host-lock.mjs';
 import { systemTool } from './system-tools.mjs';
+import { spawnWinHelper } from './win-helper.mjs';
 
 // Explicit current-user SID avoids OWNER RIGHTS/default Administrators ownership.
 // DELETE and WriteAttributes support Windows/libuv unlink during version cleanup.
@@ -37,20 +38,22 @@ if ($env:AURIGA_PYTHON_RUNTIME_MODE -eq 'create') {
 
 function apply(directory, mode) {
   assertLocalPath(directory);
-  const result = spawnSync(
-    systemTool('WindowsPowerShell/v1.0/powershell'),
-    ['-NoProfile', '-NonInteractive', '-Command', script],
-    {
-      env: {
-        ...process.env,
-        AURIGA_PYTHON_RUNTIME_DIRECTORY: directory,
-        AURIGA_PYTHON_RUNTIME_MODE: mode,
+  const result =
+    spawnWinHelper(['protect-python', directory, mode], { timeout: 120000 }) ??
+    spawnSync(
+      systemTool('WindowsPowerShell/v1.0/powershell'),
+      ['-NoProfile', '-NonInteractive', '-Command', script],
+      {
+        env: {
+          ...process.env,
+          AURIGA_PYTHON_RUNTIME_DIRECTORY: directory,
+          AURIGA_PYTHON_RUNTIME_MODE: mode,
+        },
+        windowsHide: true,
+        encoding: 'utf8',
+        timeout: 120000,
       },
-      windowsHide: true,
-      encoding: 'utf8',
-      timeout: 120000,
-    },
-  );
+    );
   if (result.status !== 0)
     throw Object.assign(
       new Error(

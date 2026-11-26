@@ -16,6 +16,7 @@ param(
   [switch]$NoAutostart,
   # Setup wizard: machine-readable steps on stdout, and cancellation by creating this file.
   [switch]$Progress,
+  [switch]$MovePayload,
   [string]$CancelFile
 )
 $ErrorActionPreference = 'Stop'
@@ -56,6 +57,7 @@ if ($oldShell -and -not $installArgs.ContainsKey('NoDesktopShortcut')) {
 }
 $argList = @($cli, 'install', '--payload', $payload, '--root', $InstallDir, '--data-home', $DataHome)
 if ($Progress) { $argList += '--progress' }
+if ($MovePayload) { $argList += '--move-payload' }
 if ($CancelFile) { $argList += @('--cancel-file', $CancelFile) }
 if ($PlatformOrigin) { $argList += @('--platform-origin', $PlatformOrigin) }
 if ($PlatformAccessMode) { $argList += @('--platform-access-mode', $PlatformAccessMode) }
@@ -91,7 +93,9 @@ try {
 
 # Shell integration (best effort: the installation itself already succeeded).
 try {
-  $manifest = Get-Content -Raw -Encoding UTF8 -LiteralPath (Join-Path $payload 'manifest.json') | ConvertFrom-Json
+  $installedState = Get-Content -Raw -Encoding UTF8 -LiteralPath $stateFile | ConvertFrom-Json
+  $installedVersionDir = Join-Path $InstallDir "versions\$($installedState.current)"
+  $manifest = Get-Content -Raw -Encoding UTF8 -LiteralPath (Join-Path $installedVersionDir 'manifest.json') | ConvertFrom-Json
   $launcher = Join-Path $InstallDir 'bin\auriga-desktop.cmd'
   $suffix = Get-DesktopRootSuffix $InstallDir
   $links = @()
@@ -147,9 +151,17 @@ try {
       UninstallString = $uninstall
       QuietUninstallString = "$uninstall -Quiet"
     }
-    # Apps & features size, in KiB, of the installed version.
-    $bytes = 0
-    foreach ($file in [IO.Directory]::EnumerateFiles((Join-Path $InstallDir "versions\$($manifest.id)"), '*', 'AllDirectories')) { $bytes += ([IO.FileInfo]$file).Length }
+    # Apps & features size, in KiB, of the installed version (computed from manifest to avoid walking tens of thousands of files).
+    [long]$bytes = 0
+    if ($manifest.files) {
+      foreach ($entry in $manifest.files) { $bytes += [long]$entry.size }
+    }
+    if ($manifest.size -and $manifest.size.afterTrim) {
+      $bytes += [long]$manifest.size.afterTrim
+    }
+    if ($bytes -le 0) {
+      foreach ($file in [IO.Directory]::EnumerateFiles($installedVersionDir, '*', 'AllDirectories')) { $bytes += ([IO.FileInfo]$file).Length }
+    }
     $values.EstimatedSize = [int]($bytes / 1024)
     $values.NoModify = 1
     $values.NoRepair = 1

@@ -9,14 +9,15 @@ import {
 } from './update-state.mjs';
 import { createRequire } from 'node:module';
 import { upgradeSkillPatch, yamlParser } from './skill-config.mjs';
-import {
+import * as processTreeModule from './process-tree.mjs';
+const {
   ProcessTree,
   processIdentity,
   sameProcess,
   assertNTFS,
   notifyPrivateOnly,
   notifySharedRestart,
-} from './process-tree.mjs';
+} = processTreeModule;
 import { Supervisor, packagedTrust } from './supervisor.mjs';
 import { resourcePluginControl } from './resource-plugins.mjs';
 import { superviseDsh } from './desktop-supervision.mjs';
@@ -70,7 +71,12 @@ import {
 } from 'node:path';
 import { spawnSync, spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { verifyPackage } from './verify.mjs';
+import {
+  PRODUCT,
+  computeId,
+  verifyPackage,
+  verifyPackageAsync,
+} from './verify.mjs';
 import {
   createPythonDirectory,
   protectPythonDirectory,
@@ -789,6 +795,84 @@ function copyTreeSteps(from, to, step) {
   });
 }
 
+/**
+ * Move heavy subtrees from a caller-owned staging payload into `staging` via
+ * same-volume rename (zero-copy, milliseconds) while safely copying tiny
+ * directories that may still be open by the running installer Node/PowerShell
+ * process (e.g. `upstream/node/node.exe` or `auriga/launcher`).
+ */
+function movePayloadToStaging(payload, staging, step) {
+  const hasWinPython =
+    process.platform === 'win32' && existsSync(join(payload, 'runtime/python'));
+  // Fast path: whole-directory rename succeeds when the running Node is outside
+  // `payload` and no Windows Python directory needs createPythonDirectory() owner setup.
+  if (!hasWinPython) {
+    try {
+      renameWithRetry(payload, staging, { retries: 2 });
+      step(1);
+      return 'whole';
+    } catch (error) {
+      if (!['EXDEV', 'EPERM', 'EBUSY', 'EACCES'].includes(error.code))
+        throw error;
+      if (error.code === 'EXDEV') return false;
+    }
+  }
+  // Move heavy subtrees with zero-copy rename; copy small active entries and
+  // materialize Windows runtime/python via createPythonDirectory() so its
+  // explicit current-user Owner + protected DACL contract is always preserved.
+  mkdirSync(staging, { recursive: true });
+  const moveEntry = (rel) => {
+    const src = join(payload, rel);
+    const dst = join(staging, rel);
+    mkdirSync(dirname(dst), { recursive: true });
+    try {
+      renameWithRetry(src, dst, { retries: 2 });
+    } catch (error) {
+      if (!['EXDEV', 'EPERM', 'EBUSY', 'EACCES'].includes(error.code))
+        throw error;
+      copyTree(src, dst);
+    }
+  };
+  const topEntries = readdirSync(payload, { withFileTypes: true });
+  let done = 0;
+  for (const entry of topEntries) {
+    const name = entry.name;
+    if (name === 'runtime' && entry.isDirectory() && hasWinPython) {
+      for (const sub of readdirSync(join(payload, 'runtime'))) {
+        if (sub === 'python') {
+          createPythonDirectory(staging);
+          copyTree(
+            join(payload, 'runtime', 'python'),
+            join(staging, 'runtime', 'python'),
+          );
+        } else {
+          moveEntry(join('runtime', sub));
+        }
+      }
+    } else if (name === 'upstream' && entry.isDirectory()) {
+      for (const sub of readdirSync(join(payload, 'upstream'))) {
+        if (sub === 'node')
+          copyTree(
+            join(payload, 'upstream', sub),
+            join(staging, 'upstream', sub),
+          );
+        else moveEntry(join('upstream', sub));
+      }
+    } else if (name === 'auriga' && entry.isDirectory()) {
+      for (const sub of readdirSync(join(payload, 'auriga'))) {
+        if (sub === 'launcher' || sub === 'runtime')
+          copyTree(join(payload, 'auriga', sub), join(staging, 'auriga', sub));
+        else moveEntry(join('auriga', sub));
+      }
+    } else {
+      moveEntry(name);
+    }
+    done++;
+    step(done / Math.max(1, topEntries.length));
+  }
+  return 'partial';
+}
+
 /** Remove only the empty directories and marker a failed first install created. */
 function cleanupFreshInstall(root, dataHome, created) {
   const removeEmpty = (dir) => {
@@ -1033,6 +1117,8 @@ function installStopped({
   progress = () => {},
   cancelled = () => false,
   beginCommit = () => {},
+  movePayload = false,
+  preverifiedManifest = null,
 }) {
   const checkpoint = () => {
     if (cancelled()) throw new CancelledError();
@@ -1070,9 +1156,38 @@ function installStopped({
         'moving data is not supported, uninstall first or keep the same directory',
     );
   // Verify before anything is copied into place or executed.
+  // When movePayload is true, the caller unpacked a fresh staging directory on
+  // the target volume (or preverified it concurrently); we validate the manifest
+  // id here and run the single full verifyPackage() after moving into staging.
   progress('verify', 0);
-  const manifest = verifyPackage(payload, { trees: false });
-  assertGuardianCompatible(payload, dataHome);
+  let manifest;
+  if (preverifiedManifest) {
+    manifest = preverifiedManifest;
+  } else if (movePayload) {
+    const manifestFile = join(payload, 'manifest.json');
+    if (!existsSync(manifestFile)) throw new Error('manifest.json missing');
+    try {
+      manifest = readJson(manifestFile);
+    } catch {
+      throw new Error('manifest.json is not valid JSON');
+    }
+    if (
+      manifest.schema !== 1 ||
+      manifest.product !== PRODUCT ||
+      typeof manifest.id !== 'string' ||
+      !Array.isArray(manifest.files) ||
+      !manifest.upstream ||
+      !manifest.plugin ||
+      !manifest.pnpm ||
+      !Array.isArray(manifest.trees)
+    )
+      throw new Error('manifest is malformed');
+    if (computeId(manifest) !== manifest.id)
+      throw new Error('manifest id does not match its component digest');
+  } else {
+    manifest = verifyPackage(payload, { trees: false });
+  }
+  if (existsSync(payload)) assertGuardianCompatible(payload, dataHome);
   checkpoint();
   const created = {
     root: !existsSync(root),
@@ -1108,24 +1223,51 @@ function installStopped({
     if (fresh) {
       const staging = `${target}.partial`;
       rmSync(staging, { recursive: true, force: true });
+      let moved = false;
       try {
-        if (existsSync(join(payload, 'runtime/python')))
-          createPythonDirectory(staging);
-        copyTreeSteps(payload, staging, (fraction) => {
-          progress('copy', fraction);
-          checkpoint();
-        });
-        progress('verify-copy', 0);
-        verifyPackage(staging);
+        if (movePayload) {
+          moved = movePayloadToStaging(payload, staging, (fraction) => {
+            progress('copy', fraction);
+            checkpoint();
+          });
+        }
+        if (!moved) {
+          if (existsSync(join(payload, 'runtime/python')))
+            createPythonDirectory(staging);
+          copyTreeSteps(payload, staging, (fraction) => {
+            progress('copy', fraction);
+            checkpoint();
+          });
+        }
+        if (!preverifiedManifest || !moved) {
+          progress('verify-copy', 0);
+          verifyPackage(staging);
+        } else if (moved === 'partial') {
+          // Partial move copies runtime/python and active entries while renaming
+          // already-verified pinned trees; verify all listed files in staging.
+          progress('verify-copy', 0);
+          verifyPackage(staging, { trees: false });
+        }
         protectPythonDirectory(staging);
         checkpoint();
+        renameWithRetry(staging, target);
       } catch (error) {
-        rmSync(staging, { recursive: true, force: true });
+        if (moved === 'whole' && existsSync(staging) && !existsSync(payload)) {
+          try {
+            renameWithRetry(staging, payload, { retries: 2 });
+          } catch {
+            rmSync(staging, { recursive: true, force: true });
+          }
+        } else {
+          rmSync(staging, { recursive: true, force: true });
+        }
         throw error;
       }
-      renameWithRetry(staging, target);
     }
-    if (!fresh) protectPythonDirectory(target);
+    if (!fresh) {
+      assertGuardianCompatible(target, dataHome);
+      protectPythonDirectory(target);
+    }
     transition({
       root,
       dataHome,
@@ -1453,7 +1595,13 @@ async function launchLocked({
   assertOwned(root);
   const initial = readState(root);
   if (!initial) throw new Error('installation state missing');
-  verifyPackage(versionDir(root, initial.current), { trees: false });
+  // Run a single native startup probe (NTFS + bootId + process snapshot) and
+  // concurrent manifest verification to avoid 10+ sequential PowerShell starts.
+  processTreeModule.primeStartupProbe?.(initial.dataHome);
+  const initialManifest = await verifyPackageAsync(
+    versionDir(root, initial.current),
+    { trees: false },
+  );
   assertNTFS(initial.dataHome);
   const tree = new ProcessTree(initial.dataHome);
   const writers = desktopWriters(root, initial.dataHome);
@@ -1500,7 +1648,7 @@ async function launchLocked({
     revokeForeignDataClaim(root, current.dataHome, current.dataOwner);
     cleanupDownloads(root);
     const { applyPending } = await import('./update.mjs');
-    const apply = async () => {
+    const apply = async (verifiedCurrentManifest) => {
       try {
         if (
           existsSync(join(root, 'desktop-pending')) &&
@@ -1510,10 +1658,14 @@ async function launchLocked({
         if (
           await applyPending(root, {
             session: versionSession,
+            verifiedCurrentManifest,
             onState: (state) => report({ event: 'update', ...state }),
           })
-        )
+        ) {
           report({ event: 'update', phase: 'installed' });
+          return true;
+        }
+        return false;
       } catch (error) {
         report({
           event: 'update',
@@ -1530,14 +1682,16 @@ async function launchLocked({
             ? `${BRAND_NAME} 更新失败，已保留旧版。[desktop.smoke_failed]`
             : `${BRAND_NAME} 更新失败，已保留旧版。[${error.updateFailure?.code ?? 'updateFailed'}/${error.updateFailure?.stage ?? 'unknown'}]`,
         );
+        return false;
       }
     };
-    await apply();
+    const updatedBeforeLaunch = await apply(initialManifest);
     if (control?.requested) return 0;
     const state = readState(root);
     const dir = versionDir(root, state.current);
-    // The update transaction may have changed packaged trust or profile bytes.
-    verifyPackage(dir, { trees: false });
+    // Only re-verify if an update transaction actually switched versions.
+    if (updatedBeforeLaunch || state.current !== initial.current)
+      await verifyPackageAsync(dir, { trees: false });
     syncBundledUacConfig(profileDir(state.dataHome), dir);
     supervisor.trust = packagedTrust(dir);
     if (existsSync(join(dir, 'auriga/shell-auth/desktop.mjs'))) {
@@ -1577,6 +1731,7 @@ async function launchLocked({
       notifyPrivateOnly();
     const status = await superviseDsh({
       stopRequested: () => Boolean(control?.requested),
+      stopSignal: control?.signal,
       tree,
       supervisor,
       session,

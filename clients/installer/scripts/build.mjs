@@ -25,7 +25,7 @@ import {
 } from 'node:fs';
 import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { compileTray, makeExe } from './make-exe.mjs';
+import { compileHelper, compileTray, makeExe } from './make-exe.mjs';
 import {
   copyBrokerArtifact,
   verifyBrokerArtifact,
@@ -625,6 +625,7 @@ export async function build(args) {
     join(payload, 'auriga', 'tray', 'AurigaDesktop.exe'),
     resolve(installerDir, '../../assets/brand/auriga-dsh.ico'),
   );
+  compileHelper(join(payload, 'auriga', 'runtime', 'auriga-win-helper.exe'));
   for (const f of ['install.ps1', 'install.cmd', 'README.txt'])
     cpSync(join(installerDir, 'windows', f), join(stage, f));
 
