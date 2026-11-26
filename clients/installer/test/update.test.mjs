@@ -42,6 +42,10 @@ import {
   writeAtomic,
 } from '../runtime/core.mjs';
 import { buildPayload, tempBase } from './helpers.mjs';
+import {
+  desktopPlatform,
+  hostDesktopTarget,
+} from '../runtime/desktop-platform.mjs';
 
 const keys = generateKeyPairSync('ed25519');
 const now = Date.parse('2026-11-12T00:00:00Z');
@@ -57,7 +61,7 @@ function signed(changes = {}) {
       pluginVersion: '2.0.0',
     },
     channel: 'stable',
-    platform: 'win-x64',
+    platform: hostDesktopTarget(),
     sizeBytes: 3,
     sha256: createHash('sha256').update('zip').digest('hex'),
     minimumVersion: '1.0.0',
@@ -499,7 +503,8 @@ test('HTTP install confirmation persists once and updater uses it', async (t) =>
     request: async (url) => {
       assert.equal(
         url,
-        origin + '/api/resource/v1/desktop/latest?platform=win-x64',
+        origin +
+          `/api/resource/v1/desktop/latest?platform=${hostDesktopTarget()}`,
       );
       return new Response(JSON.stringify(signed()));
     },
@@ -934,7 +939,10 @@ for (const failure of ['network', 'unavailable']) {
     await updater.check();
     await assert.rejects(updater.update(), /timeout|unavailable/);
     assert.equal(
-      readFileSync(join(f.root, '.desktop-resume/desktop.exe'), 'utf8'),
+      readFileSync(
+        join(f.root, '.desktop-resume', desktopPlatform().stagedPackageName),
+        'utf8',
+      ),
       'zip',
     );
     assert.equal(readState(f.root).current, f.old.id);
@@ -975,7 +983,10 @@ for (const failure of ['network', 'unavailable']) {
       /timeout|unavailable/,
     );
     assert.equal(
-      readFileSync(join(f.root, 'desktop-pending/desktop.exe'), 'utf8'),
+      readFileSync(
+        join(f.root, 'desktop-pending', desktopPlatform().stagedPackageName),
+        'utf8',
+      ),
       'zip',
     );
     assert.equal(readState(f.root).current, f.old.id);
@@ -1073,7 +1084,10 @@ for (const failure of ['interrupted', 'temporary', 'persistent', 'smoke']) {
       await assert.rejects(applyPending(f.root, options));
       assert.equal(readState(f.root).current, f.old.id);
       assert.equal(
-        readFileSync(join(f.root, 'desktop-pending', 'desktop.exe'), 'utf8'),
+        readFileSync(
+          join(f.root, 'desktop-pending', desktopPlatform().stagedPackageName),
+          'utf8',
+        ),
         'zip',
       );
       const saved = readUpdateState(f.root);
@@ -1124,7 +1138,11 @@ test('pending signature and archive hash failures discard unusable input', async
         join(f.root, 'desktop-pending/release.json'),
         JSON.stringify({ ...manifest, notes: 'tampered' }),
       );
-    else writeFileSync(join(f.root, 'desktop-pending/desktop.exe'), 'tampered');
+    else
+      writeFileSync(
+        join(f.root, 'desktop-pending', desktopPlatform().stagedPackageName),
+        'tampered',
+      );
     await assert.rejects(
       applyPending(f.root, { publicKey: keys.publicKey, now, request }),
     );
@@ -1230,7 +1248,15 @@ for (const lockTarget of ['scratch', 'launcher']) {
             await assert.rejects(applyPending(f.root, options), (error) =>
               ['EPERM', 'EBUSY', 'EACCES'].includes(error.code),
             );
-            assert.ok(existsSync(join(f.root, 'desktop-pending/desktop.exe')));
+            assert.ok(
+              existsSync(
+                join(
+                  f.root,
+                  'desktop-pending',
+                  desktopPlatform().stagedPackageName,
+                ),
+              ),
+            );
             assert.equal(readState(f.root).current, f.old.id);
           } else releaseTimer = setTimeout(releaseLock, 400);
           if (persistent) releaseLock();
@@ -1247,7 +1273,11 @@ for (const lockTarget of ['scratch', 'launcher']) {
   }
 }
 
-for (const missing of ['empty', 'release.json', 'desktop.exe']) {
+for (const missing of [
+  'empty',
+  'release.json',
+  desktopPlatform().stagedPackageName,
+]) {
   for (const entry of ['launch', 'check']) {
     test(`incomplete pending (${missing}) recovers through ${entry} and discovers releases`, async (t) => {
       const f = fixture(t);
@@ -1282,7 +1312,7 @@ for (const missing of ['empty', 'release.json', 'desktop.exe']) {
       assert.equal(existsSync(queued), false);
       assert.equal(status.available.version, '2.0.0');
       await updater.update();
-      assert.ok(existsSync(join(queued, 'desktop.exe')));
+      assert.ok(existsSync(join(queued, desktopPlatform().stagedPackageName)));
     });
   }
 }
@@ -1362,7 +1392,11 @@ test('three deterministic failures persist across launches and require explicit 
   await restarted.check();
   assert.equal(restarted.status().applyFailures, 3);
   assert.equal(restarted.status().failure.code, 'desktop.smoke_failed');
-  assert.ok(existsSync(join(f.root, 'desktop-pending/desktop.exe')));
+  assert.ok(
+    existsSync(
+      join(f.root, 'desktop-pending', desktopPlatform().stagedPackageName),
+    ),
+  );
   approvePending(f.root);
   assert.equal(restarted.status().manualRetryRequired, false);
   await applyPending(f.root, { ...options, smoke: () => {} });

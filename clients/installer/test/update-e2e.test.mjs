@@ -30,6 +30,10 @@ import {
   launchEnv,
 } from '../runtime/core.mjs';
 import { buildPayload, tempBase } from './helpers.mjs';
+import {
+  desktopPlatform,
+  hostDesktopTarget,
+} from '../runtime/desktop-platform.mjs';
 
 test('沙箱：发布、检测、点击、退出安装；坏包拒绝，旧数据保留', async (t) => {
   const base = tempBase(t),
@@ -65,6 +69,7 @@ test('沙箱：发布、检测、点击、退出安装；坏包拒绝，旧数�
     publishedAt: new Date().toISOString(),
     minimumVersion: '1.0.0',
     notAfter: new Date(Date.now() + 86400000).toISOString(),
+    platform: hostDesktopTarget(),
   };
   let manifest = signRelease({
     ...signingOptions,
@@ -78,7 +83,7 @@ test('沙箱：发布、检测、点击、退出安装；坏包拒绝，旧数�
     // The isolated publisher closes each reply; avoid stale keep-alive reuse
     // while Windows copies/scans the new runtime between requests.
     res.setHeader('Connection', 'close');
-    if (req.url.endsWith('/latest')) {
+    if (/\/latest(?:\?|$)/.test(req.url ?? '')) {
       if (withdrawn) {
         res.writeHead(404);
         res.end();
@@ -170,7 +175,12 @@ test('沙箱：发布、检测、点击、退出安装；坏包拒绝，旧数�
     readFileSync(join(profileDir(dataHome), 'conversations.json'), 'utf8'),
     'keep',
   );
-  assert.equal(existsSync(join(root, 'desktop-pending', 'desktop.exe')), true);
+  assert.equal(
+    existsSync(
+      join(root, 'desktop-pending', desktopPlatform().stagedPackageName),
+    ),
+    true,
+  );
   assert.equal(updater.status().restartRequired, true);
   await applyPending(root, {
     publicKey: keys.publicKey,

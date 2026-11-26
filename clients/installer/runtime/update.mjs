@@ -166,18 +166,17 @@ function findReusableSubtrees(oldDir, oldManifest, nextManifest) {
   return subtrees;
 }
 
-function isTarGzPackage(archive) {
-  return (
-    desktopHost().packageMedia === 'tar.gz' ||
-    /\.tar\.gz$/i.test(archive) ||
-    /\.tgz$/i.test(archive)
-  );
+/** Prefer archive content over host media so Linux CI can still unpack Win setup fixtures. */
+function isGzipDesktopPackage(archive) {
+  if (isZipSetupArchive(archive)) return false;
+  if (/\.tar\.gz$/i.test(archive) || /\.tgz$/i.test(archive)) return true;
+  return desktopHost().packageMedia === 'tar.gz';
 }
 
 export function extractArchive(archive, directory, { reuse = null } = {}) {
   mkdirSync(directory);
   let zip = archive;
-  const gzip = isTarGzPackage(archive);
+  const gzip = isGzipDesktopPackage(archive);
   if (!gzip) {
     zip = join(directory, 'payload.zip');
     unpackSetup(archive, zip);
