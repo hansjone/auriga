@@ -2,12 +2,15 @@ package main
 
 import (
 	"errors"
+	"math"
 	"mime"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
 	"regexp"
+	"strconv"
 	"strings"
+	"unicode/utf8"
 )
 
 const adminCSRFBootstrapPath = "/api/iam/v1/admin/session/csrf-tokens"
@@ -21,6 +24,7 @@ var placementSwitchReadPath = regexp.MustCompile(`^/api/workspace/v1/admin/place
 
 const placementUUID = `[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}`
 
+var placementUUIDPattern = regexp.MustCompile(`^` + placementUUID + `$`)
 var placementMemberReadPath = regexp.MustCompile(`^/api/workspace/v1/admin/members/` + placementUUID + `/placement$`)
 var placementEntitlementPath = regexp.MustCompile(`^/api/workspace/v1/admin/members/` + placementUUID + `/dedicated-entitlement$`)
 var placementSwitchLookupPath = regexp.MustCompile(`^/api/workspace/v1/admin/members/` + placementUUID + `/placement-switches/lookup$`)
@@ -28,22 +32,98 @@ var placementRebuildReadPath = regexp.MustCompile(`^/api/workspace/v1/admin/plac
 var placementRebuildStartPath = regexp.MustCompile(`^/api/workspace/v1/admin/placement-rebuild-plans/` + placementUUID + `/start$`)
 var placementRebuildProgressPath = regexp.MustCompile(`^/api/workspace/v1/admin/placement-rebuild-plans/` + placementUUID + `/progress$`)
 
+func parseDecimalInt(raw string) (int, bool) {
+	if raw == "" {
+		return 0, false
+	}
+	for i := 0; i < len(raw); i++ {
+		if raw[i] < '0' || raw[i] > '9' {
+			return 0, false
+		}
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil {
+		return 0, false
+	}
+	return n, true
+}
+
+func validPlacementCandidatesQuery(raw string) bool {
+	if raw == "" {
+		return true
+	}
+	if strings.ContainsRune(raw, ';') {
+		return false
+	}
+	seen := make(map[string]struct{}, 4)
+	for _, part := range strings.Split(raw, "&") {
+		if part == "" {
+			return false
+		}
+		key, rawVal, ok := strings.Cut(part, "=")
+		if !ok || key == "" {
+			return false
+		}
+		if _, dup := seen[key]; dup {
+			return false
+		}
+		seen[key] = struct{}{}
+		switch key {
+		case "q":
+			val, err := url.QueryUnescape(rawVal)
+			if err != nil || !utf8.ValidString(val) || utf8.RuneCountInString(val) > 256 {
+				return false
+			}
+			for _, ch := range val {
+				if ch < 0x20 || ch == 0x7f {
+					return false
+				}
+			}
+		case "limit":
+			n, ok := parseDecimalInt(rawVal)
+			if !ok || n < 1 || n > 200 {
+				return false
+			}
+		case "offset":
+			n, ok := parseDecimalInt(rawVal)
+			if !ok || n < 0 || n > math.MaxInt32 {
+				return false
+			}
+		case "memberId":
+			if !placementUUIDPattern.MatchString(rawVal) {
+				return false
+			}
+		default:
+			return false
+		}
+	}
+	return true
+}
+
 // Only these W endpoints revalidate the actual browser cookie and trusted
 // entry metadata. Other component proxies retain their ordinary JWT boundary.
 func placementBrowserOperation(r *http.Request) bool {
-	if r.URL.EscapedPath() != r.URL.Path || r.URL.RawQuery != "" || r.URL.ForceQuery {
+	if r.URL.EscapedPath() != r.URL.Path || r.URL.ForceQuery {
+		return false
+	}
+	if r.Method == http.MethodGet && r.URL.Path == "/api/workspace/v1/admin/placement-migration-candidates" {
+		return validPlacementCandidatesQuery(r.URL.RawQuery)
+	}
+	if r.URL.RawQuery != "" {
 		return false
 	}
 	switch r.Method {
 	case http.MethodGet:
 		return r.URL.Path == "/api/workspace/v1/me/placement" ||
 			r.URL.Path == "/api/workspace/v1/admin/placement-capacity" ||
+			r.URL.Path == "/api/workspace/v1/admin/placement-rebuild-plans" ||
 			placementSwitchReadPath.MatchString(r.URL.Path) || placementMemberReadPath.MatchString(r.URL.Path) ||
 			placementSwitchLookupPath.MatchString(r.URL.Path) || placementRebuildReadPath.MatchString(r.URL.Path) ||
 			placementRebuildProgressPath.MatchString(r.URL.Path)
 	case http.MethodPost:
 		return r.URL.Path == "/api/workspace/v1/me/placement/open" ||
 			r.URL.Path == "/api/workspace/v1/admin/placement-rebuild-plans" ||
+			r.URL.Path == "/api/workspace/v1/admin/placement-rebuild-plans/preflight" ||
 			placementSwitchCreatePath.MatchString(r.URL.Path) || placementRebuildStartPath.MatchString(r.URL.Path)
 	case http.MethodPut:
 		return placementEntitlementPath.MatchString(r.URL.Path) || placementRebuildReadPath.MatchString(r.URL.Path)
