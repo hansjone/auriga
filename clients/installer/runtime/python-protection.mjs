@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync } from 'node:fs';
+import { chmodSync, existsSync, lstatSync, mkdirSync, readdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { assertLocalPath } from './host-lock.mjs';
 import { systemTool } from './system-tools.mjs';
@@ -63,15 +63,33 @@ function apply(directory, mode) {
     );
 }
 
+function chmodTreeReadOnly(root) {
+  assertLocalPath(root);
+  const walk = (path) => {
+    const info = lstatSync(path);
+    if (info.isSymbolicLink()) return;
+    if (info.isDirectory()) {
+      for (const entry of readdirSync(path)) walk(join(path, entry));
+      // Owner may traverse and delete entries during version cleanup; no create/write.
+      chmodSync(path, 0o555);
+    } else if (info.isFile()) {
+      const executable = (info.mode & 0o111) !== 0;
+      chmodSync(path, executable ? 0o555 : 0o444);
+    }
+  };
+  walk(root);
+}
+
 export function createPythonDirectory(version) {
   const directory = join(version, 'runtime/python');
   mkdirSync(dirname(directory), { recursive: true });
   if (process.platform === 'win32') apply(directory, 'create');
-  else mkdirSync(directory);
+  else mkdirSync(directory, { recursive: true, mode: 0o755 });
 }
 
 export function protectPythonDirectory(version) {
   const directory = join(version, 'runtime/python');
-  if (process.platform === 'win32' && existsSync(directory))
-    apply(directory, 'seal');
+  if (!existsSync(directory)) return;
+  if (process.platform === 'win32') apply(directory, 'seal');
+  else if (process.platform === 'linux') chmodTreeReadOnly(directory);
 }

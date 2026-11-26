@@ -47,7 +47,10 @@ import {
   clientPlatform,
   hostClientTarget,
 } from '../../../scripts/client-release/platform.mjs';
-import { assemblePython } from './python-runtime.mjs';
+import {
+  assemblePython,
+  pythonLockForTarget,
+} from './python-runtime.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const installerDir = resolve(here, '..');
@@ -400,11 +403,12 @@ export async function build(args) {
     chmodSync(join(payload, 'upstream', 'node', 'bin', 'node'), 0o755);
   }
 
-  if (target.target === 'win-x64') {
+  if (target.target === 'win-x64' || target.target === 'linux-x64') {
     await assemblePython({
       payload,
       inputs: inputs ? inputs.directory : cache,
       offline,
+      lockFile: pythonLockForTarget(target.target),
     });
   }
 

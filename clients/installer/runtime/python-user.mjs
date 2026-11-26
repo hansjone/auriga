@@ -65,11 +65,15 @@ export function pythonUserFailureReason(error) {
 export function pythonUserPaths(dataHome) {
   const root = join(resolve(dataHome), 'python-user');
   const environment = join(root, PYTHON_ABI);
+  const windows = process.platform === 'win32';
   return {
     root,
     environment,
-    bin: join(environment, 'Scripts'),
-    site: join(environment, 'Lib/site-packages'),
+    bin: join(environment, windows ? 'Scripts' : 'bin'),
+    site: join(
+      environment,
+      windows ? 'Lib/site-packages' : 'lib/python3.12/site-packages',
+    ),
     config: join(root, 'pip.conf'),
     constraints: join(root, 'constraints.txt'),
     settings: join(resolve(dataHome), 'auriga/python.json'),
@@ -246,7 +250,11 @@ export function preparePythonUser(dir, dataHome, base = process.env) {
     const pip = JSON.parse(readFileSync(join(bootstrap, 'pip.json'), 'utf8'));
     const wheel = join(bootstrap, pip.filename);
     const pythonDir = join(dir, 'runtime/python');
-    const python = join(pythonDir, 'python.exe');
+    const windows = process.platform === 'win32';
+    const python = join(
+      pythonDir,
+      windows ? 'python.exe' : 'bin/python3',
+    );
     stage = 'marker_read';
     const marker = join(paths.environment, 'auriga-python.json');
     assertLocalPath(marker);
@@ -267,7 +275,10 @@ export function preparePythonUser(dir, dataHome, base = process.env) {
       abi: PYTHON_ABI,
     };
     const env = { ...cleanPythonEnv(base), PYTHONDONTWRITEBYTECODE: '1' };
-    const venvPython = join(paths.bin, 'python.exe');
+    const venvPython = join(
+      paths.bin,
+      windows ? 'python.exe' : 'python3',
+    );
     const venvCfg = join(paths.environment, 'pyvenv.cfg');
     const envReady = existsSync(venvPython);
     const currentExeStamp = fileStamp(venvPython);
@@ -283,12 +294,14 @@ export function preparePythonUser(dir, dataHome, base = process.env) {
       previous?.exeStamp === currentExeStamp &&
       Boolean(currentCfgStamp) &&
       previous?.cfgStamp === currentCfgStamp;
-    const venvFiles = [
-      'pyvenv.cfg',
-      'Scripts/python.exe',
-      'Scripts/python3.exe',
-      'Scripts/pythonw.exe',
-    ];
+    const venvFiles = windows
+      ? [
+          'pyvenv.cfg',
+          'Scripts/python.exe',
+          'Scripts/python3.exe',
+          'Scripts/pythonw.exe',
+        ]
+      : ['pyvenv.cfg', 'bin/python', 'bin/python3'];
     const probeInterpreter = () => {
       stage = 'interpreter_probe';
       run(
@@ -348,7 +361,13 @@ export function preparePythonUser(dir, dataHome, base = process.env) {
             env,
           );
           stage = 'alias_copy';
-          cpSync(venvPython, join(paths.bin, 'python3.exe'));
+          if (windows) {
+            // Real executables also work in bash and direct subprocess calls.
+            cpSync(venvPython, join(paths.bin, 'python3.exe'));
+          } else {
+            const alias = join(paths.bin, 'python');
+            if (!existsSync(alias)) cpSync(venvPython, alias);
+          }
           stage = 'pip_bootstrap';
           run(
             python,

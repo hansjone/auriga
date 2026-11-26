@@ -501,6 +501,8 @@ export function launchEnv(dir, dataHome, base = process.env) {
   const pathKey =
     Object.keys(base).find((k) => k.toLowerCase() === 'path') ?? 'PATH';
   const python = join(dir, 'runtime', 'python');
+  const pythonPath =
+    process.platform === 'win32' ? python : join(python, 'bin');
   let personal;
   try {
     personal = preparePythonUser(dir, dataHome, base);
@@ -511,7 +513,7 @@ export function launchEnv(dir, dataHome, base = process.env) {
   }
   const extra = [
     personal?.bin,
-    python,
+    existsSync(python) ? pythonPath : null,
     join(dir, 'tools', 'bin'),
     dirname(nodeBin(dir)),
   ].filter(Boolean);
@@ -805,11 +807,10 @@ function copyTreeSteps(from, to, step) {
  * process (e.g. `upstream/node/node.exe` or `auriga/launcher`).
  */
 function movePayloadToStaging(payload, staging, step) {
-  const hasWinPython =
-    process.platform === 'win32' && existsSync(join(payload, 'runtime/python'));
+  const hasProtectedPython = existsSync(join(payload, 'runtime/python'));
   // Fast path: whole-directory rename succeeds when the running Node is outside
-  // `payload` and no Windows Python directory needs createPythonDirectory() owner setup.
-  if (!hasWinPython) {
+  // `payload` and no protected Python directory needs createPythonDirectory() setup.
+  if (!hasProtectedPython) {
     try {
       renameWithRetry(payload, staging, { retries: 2 });
       step(1);
