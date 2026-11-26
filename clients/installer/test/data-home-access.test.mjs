@@ -5,6 +5,8 @@ import {
   existsSync,
   mkdirSync,
   readFileSync,
+  statSync,
+  symlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { join } from 'node:path';
@@ -40,6 +42,29 @@ test('ensureDataHomeWritable does not seed profile dirs on an empty data home', 
   mkdirSync(dataHome);
   assert.equal(ensureDataHomeWritable(dataHome).repaired, true);
   assert.equal(existsSync(join(dataHome, 'profiles')), false);
+});
+
+test('ensureDataHomeWritable refuses a profile junction before mutating the outside target', (t) => {
+  const base = tempBase(t);
+  const dataHome = join(base, 'home');
+  const outside = join(base, 'outside-profile');
+  const profiles = join(dataHome, 'profiles');
+  mkdirSync(profiles, { recursive: true });
+  mkdirSync(outside);
+  const outsideCordis = join(outside, 'cordis.yml');
+  writeFileSync(outsideCordis, '[]\n');
+  chmodSync(outsideCordis, 0o444);
+  const beforeMode = statSync(outsideCordis).mode & 0o222;
+  assert.equal(beforeMode, 0);
+  const linkType =
+    process.platform === 'win32' ? 'junction' : 'dir';
+  symlinkSync(outside, join(profiles, 'auriga'), linkType);
+  assert.throws(
+    () => ensureDataHomeWritable(dataHome),
+    /guardian path contains a link|guardian path alias/,
+  );
+  assert.equal(statSync(outsideCordis).mode & 0o222, 0);
+  assert.equal(readFileSync(outsideCordis, 'utf8'), '[]\n');
 });
 
 test('keep-data uninstall then reinstall reuses profile despite read-only cordis.yml', (t) => {

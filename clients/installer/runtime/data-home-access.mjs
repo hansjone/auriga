@@ -120,10 +120,21 @@ export function ensureDataHomeWritable(dataHome) {
   const hadProfile = existsSync(profile);
   // Fresh installs must not create profile directories here: first-install cancel
   // and failure cleanup expect an empty or wholly owned data home.
+  // Reject junctions/reparse points before any chmod or ACL mutation so a
+  // linked profile cannot clear read-only bits on an outside target.
+  const candidates = hadProfile
+    ? [
+        ...PROFILE_REWRITE_FILES.map((name) => join(profile, name)),
+        join(dataHome, 'cordis.patch.yml'),
+      ]
+    : [];
   if (hadProfile) {
-    for (const name of PROFILE_REWRITE_FILES)
-      clearReadOnly(join(profile, name));
-    clearReadOnly(join(dataHome, 'cordis.patch.yml'));
+    assertLocalPath(profile);
+    for (const file of candidates) {
+      if (!existsSync(file)) continue;
+      assertLocalPath(file);
+      clearReadOnly(file);
+    }
   }
 
   if (process.platform === 'win32') grantCurrentUserModify(dataHome);
