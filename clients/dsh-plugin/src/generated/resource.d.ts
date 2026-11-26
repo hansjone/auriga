@@ -575,7 +575,7 @@ export interface paths {
     /** @description P1-K frozen contract; implementation follows in consuming work lines. Catalog covers unified L3 plugin/skill; legacy IDs are separate and return 404. Enforce live tenant ACL, ETag, idempotency, step-up and author separation. Upload permission alone does not authorize a tool kind/delivery or security reviewer role; server policy must authorize them. */
     get: operations['UnifiedListResourcePackages'];
     put?: never;
-    /** @description P1-K frozen contract; implementation follows in consuming work lines. Catalog covers unified L3 plugin/skill; legacy IDs are separate and return 404. Enforce live tenant ACL, ETag, idempotency, step-up and author separation. Upload permission alone does not authorize a tool kind/delivery or security reviewer role; server policy must authorize them. */
+    /** @description Creates a unified catalog plugin or skill. Portal and admin users need upload permission. An active internal member with a live standard or native desktop platform session can create a package for their own tenant. No additional catalog role or step-up applies to that desktop channel. */
     post: operations['UnifiedCreateResourcePackage'];
     delete?: never;
     options?: never;
@@ -590,7 +590,7 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** @description P1-K frozen contract; implementation follows in consuming work lines. Catalog covers unified L3 plugin/skill; legacy IDs are separate and return 404. Enforce live tenant ACL, ETag, idempotency, step-up and author separation. Upload permission alone does not authorize a tool kind/delivery or security reviewer role; server policy must authorize them. */
+    /** @description Reads unified catalog package metadata and its ETag. Standard read authorization applies. For attachment, an active internal member with a live standard or native desktop platform session can also read their own plugin or skill package without catalog read permission. */
     get: operations['UnifiedGetResourcePackage'];
     put?: never;
     post?: never;
@@ -610,7 +610,7 @@ export interface paths {
     /** @description P1-K frozen contract; implementation follows in consuming work lines. Catalog covers unified L3 plugin/skill; legacy IDs are separate and return 404. Enforce live tenant ACL, ETag, idempotency, step-up and author separation. Upload permission alone does not authorize a tool kind/delivery or security reviewer role; server policy must authorize them. */
     get: operations['UnifiedListResourceVersions'];
     put?: never;
-    /** @description P1-K frozen contract; implementation follows in consuming work lines. Catalog covers unified L3 plugin/skill; legacy IDs are separate and return 404. Enforce live tenant ACL, ETag, idempotency, step-up and author separation. Upload permission alone does not authorize a tool kind/delivery or security reviewer role; server policy must authorize them. */
+    /** @description Uploads immutable unified catalog plugin or skill bytes. Portal and admin users retain upload permission and their existing step-up policy. An active internal member with a live standard or native desktop platform session can upload to their own package without an additional catalog role or step-up. If archive validation supplies a rule, its params.rule value identifies one of bundled_dependency_required, lifecycle_scripts_disallowed, bundle_patch_missing or native_build_disallowed. */
     post: operations['UnifiedUploadResourceVersion'];
     delete?: never;
     options?: never;
@@ -644,7 +644,7 @@ export interface paths {
     };
     get?: never;
     put?: never;
-    /** @description P1-K frozen contract; implementation follows in consuming work lines. Catalog covers unified L3 plugin/skill; legacy IDs are separate and return 404. Enforce live tenant ACL, ETag, idempotency, step-up and author separation. Upload permission alone does not authorize a tool kind/delivery or security reviewer role; server policy must authorize them. */
+    /** @description Submits a unified catalog draft for independent review. Portal and admin users retain submit permission and their existing step-up policy. An active internal member with a live standard or native desktop platform session can submit their own version in their own plugin or skill package without an additional catalog role or step-up. This operation cannot review or publish. */
     post: operations['UnifiedSubmitResourceVersion'];
     delete?: never;
     options?: never;

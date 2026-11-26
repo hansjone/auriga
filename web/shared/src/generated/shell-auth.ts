@@ -1267,6 +1267,12 @@ export interface components {
       upstreamStatus?: number;
       retryable: boolean;
       retryAfterSeconds?: number;
+      /** @enum {string} */
+      rule?:
+        | 'bundled_dependency_required'
+        | 'lifecycle_scripts_disallowed'
+        | 'bundle_patch_missing'
+        | 'native_build_disallowed';
     };
     ShellAuthUploadReference: {
       /** Format: uuid */
