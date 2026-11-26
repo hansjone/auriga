@@ -599,11 +599,13 @@ public final class CatalogWorkflow {
           var items = result.putArray("items");
           var page = rows.subList(0, Math.min(limit, rows.size()));
           boolean packagePage = p == null && phase == null;
+          boolean extended = actor.type() != PrincipalType.DEVICE;
           Map<Object, Map<String, Object>> releases =
               packagePage ? marketReleases(r, page) : Map.of();
           Map<Object, Map<String, Object>> latest =
-              packagePage ? latestVersions(r, page) : Map.of();
-          Map<Object, String> published = packagePage ? publishedVersions(page) : Map.of();
+              packagePage && extended ? latestVersions(r, page) : Map.of();
+          Map<Object, String> published =
+              packagePage && extended ? publishedVersions(page) : Map.of();
           for (var row : page)
             items.add(
                 packagePage
@@ -614,8 +616,8 @@ public final class CatalogWorkflow {
                         latest.get(row.get("id")),
                         published.get(row.get("id")))
                     : phase != null && phase.equals("review")
-                        ? reviewJson(r, (UUID) row.get("review_id"))
-                        : versionJson(r, row));
+                        ? reviewJson(r, (UUID) row.get("review_id"), extended)
+                        : versionJson(r, row, extended));
           if (rows.size() > limit)
             result.put(
                 "nextCursor",

@@ -1154,6 +1154,42 @@ export function catalogService(options) {
             !seen.has(pack.id)
           ) {
             seen.add(pack.id);
+            let publishedVersion =
+              pack.latestVersion?.publishedVersion ??
+              pack.market?.version ??
+              null;
+            let latestVersion =
+              pack.latestVersion?.version ?? pack.market?.version ?? null;
+            let latestState =
+              pack.latestVersion?.state ?? (pack.market ? 'published' : null);
+            let description =
+              pack.latestVersion?.description ?? pack.market?.description ?? '';
+            if (!pack.latestVersion) {
+              try {
+                const verRes = await api.request(
+                  `/api/resource/v1/catalog/packages/${pack.id}/versions?limit=50`,
+                  { assertCurrent },
+                );
+                const vers = Array.isArray(verRes.value?.items)
+                  ? verRes.value.items
+                  : [];
+                const newest = vers.at(-1);
+                if (newest) {
+                  latestVersion = newest.version ?? latestVersion;
+                  latestState = newest.state ?? latestState;
+                  description = newest.manifest?.description ?? description;
+                }
+                if (pack.defaultVersionId) {
+                  const def = vers.find(
+                    (/** @type {any} */ v) =>
+                      v.id === pack.defaultVersionId && v.state === 'published',
+                  );
+                  if (def?.version) publishedVersion = def.version;
+                }
+              } catch {
+                /* Keep package-level metadata when per-package version read fails. */
+              }
+            }
             items.push({
               packageId: pack.id,
               kind: pack.kind,
@@ -1161,18 +1197,10 @@ export function catalogService(options) {
               visibility: pack.visibility,
               enabled: !!pack.enabled,
               defaultVersionId: pack.defaultVersionId ?? null,
-              publishedVersion:
-                pack.latestVersion?.publishedVersion ??
-                pack.market?.version ??
-                null,
-              latestVersion:
-                pack.latestVersion?.version ?? pack.market?.version ?? null,
-              latestState:
-                pack.latestVersion?.state ?? (pack.market ? 'published' : null),
-              description:
-                pack.latestVersion?.description ??
-                pack.market?.description ??
-                '',
+              publishedVersion,
+              latestVersion,
+              latestState,
+              description,
             });
           }
         }

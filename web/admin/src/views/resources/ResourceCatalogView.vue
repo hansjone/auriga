@@ -81,13 +81,18 @@ const instance = ref(''),
 const files = shallowRef<PreviewFile[]>([]),
   previous = shallowRef<PreviewFile[]>([]),
   previousVersion = shallowRef<CatalogVersion>(),
-  previewTruncated = ref(false),
+  currentTruncated = ref(false),
+  previousTruncated = ref(false),
+  previewTruncated = computed(
+    () => currentTruncated.value || previousTruncated.value,
+  ),
   comparison = ref(''),
   previewError = ref('');
 const upgradeTarget = shallowRef<{
   packageId: string;
   name: string;
   latestVersion?: string;
+  expectedPackageName?: string;
 }>();
 const uploadPanelAnchor = ref<HTMLElement>();
 const pending = shallowRef<{
@@ -203,11 +208,23 @@ const permissionChanges = computed(() => {
   ];
   return { added, removed, unchanged: !added.length && !removed.length };
 });
-function startUpgrade(p: CatalogPackage) {
+async function startUpgrade(p: CatalogPackage) {
+  let expectedPackageName: string | undefined;
+  if (p.kind === 'plugin') {
+    try {
+      const page = await api.versions(p.id);
+      const newest = page.items.at(-1);
+      if (newest?.manifest.kind === 'plugin')
+        expectedPackageName = newest.manifest.plugin.packageName;
+    } catch {
+      /* Fall back to catalog name match when version list cannot be read. */
+    }
+  }
   upgradeTarget.value = {
     packageId: p.id,
     name: p.name,
     latestVersion: p.latestVersion?.version ?? p.market?.version,
+    ...(expectedPackageName ? { expectedPackageName } : {}),
   };
   void nextTick(() =>
     uploadPanelAnchor.value?.scrollIntoView?.({ block: 'start' }),
@@ -266,7 +283,8 @@ function clearDetail() {
   files.value = [];
   previous.value = [];
   previousVersion.value = undefined;
-  previewTruncated.value = false;
+  currentTruncated.value = false;
+  previousTruncated.value = false;
   comparison.value = '';
   previewError.value = '';
   distributionDetail.value = undefined;
@@ -595,11 +613,14 @@ async function preview(compare = false, targetVersionId?: string) {
           const currMeta = await archivePreviewWithMeta(currResp, 'plugin');
           if (alive && e === detailEpoch) {
             files.value = currMeta.files;
-            if (currMeta.truncated) previewTruncated.value = true;
+            currentTruncated.value = currMeta.truncated;
           }
         } else {
           const currFiles = await skillPreview(currResp);
-          if (alive && e === detailEpoch) files.value = currFiles;
+          if (alive && e === detailEpoch) {
+            files.value = currFiles;
+            currentTruncated.value = false;
+          }
         }
       }
     }
@@ -626,13 +647,14 @@ async function preview(compare = false, targetVersionId?: string) {
       result = await skillPreview(resp);
     }
     if (alive && e === detailEpoch) {
-      if (truncated) previewTruncated.value = true;
       if (compare) {
         previous.value = result;
         previousVersion.value = value;
+        previousTruncated.value = truncated;
         comparison.value = compareId;
       } else {
         files.value = result;
+        currentTruncated.value = truncated;
       }
     }
   } catch {
