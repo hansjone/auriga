@@ -357,6 +357,10 @@ export function installSubmissionTools(
                   warnings.push(
                     `版本 ${manifest.version} 已存在，升级请先递增版本号后重新预检。`,
                   );
+                } else if (match.versionsComplete === false) {
+                  warnings.push(
+                    '目标资源历史版本超过分页上限，未能查全最新版本，请确认新版本号未与已有版本冲突。',
+                  );
                 }
               } else if (complete) {
                 mode = 'create';

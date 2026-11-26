@@ -1164,6 +1164,7 @@ export function catalogService(options) {
               pack.latestVersion?.state ?? (pack.market ? 'published' : null);
             let description =
               pack.latestVersion?.description ?? pack.market?.description ?? '';
+            let versionsComplete = !!pack.latestVersion;
             if (!pack.latestVersion) {
               try {
                 let vCursor;
@@ -1192,11 +1193,15 @@ export function catalogService(options) {
                     if (def?.version) publishedVersion = def.version;
                   }
                   const nextV = verRes.value?.nextCursor;
-                  if (!nextV || vSeen.has(nextV)) break;
+                  if (!nextV) {
+                    versionsComplete = true;
+                    break;
+                  }
+                  if (vSeen.has(nextV)) break;
                   vSeen.add(nextV);
                   vCursor = nextV;
                 }
-                if (newest) {
+                if (versionsComplete && newest) {
                   latestVersion = newest.version ?? latestVersion;
                   latestState = newest.state ?? latestState;
                   description = newest.manifest?.description ?? description;
@@ -1226,6 +1231,7 @@ export function catalogService(options) {
               publishedVersion,
               latestVersion,
               latestState,
+              versionsComplete,
               description,
             });
           }

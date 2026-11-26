@@ -107,6 +107,7 @@ let epoch = 0,
   detailEpoch = 0,
   previewEpoch = 0,
   compareEpoch = 0,
+  upgradeEpoch = 0,
   alive = true;
 const locked = computed(
   () =>
@@ -211,6 +212,7 @@ const permissionChanges = computed(() => {
   return { added, removed, unchanged: !added.length && !removed.length };
 });
 async function startUpgrade(p: CatalogPackage) {
+  const reqEpoch = ++upgradeEpoch;
   let expectedPackageName: string | undefined;
   error.value = '';
   if (p.kind === 'plugin') {
@@ -235,11 +237,11 @@ async function startUpgrade(p: CatalogPackage) {
           expectedPackageName = newest.manifest.plugin.packageName;
       }
     } catch (err) {
-      if (alive) error.value = failure(err);
+      if (alive && reqEpoch === upgradeEpoch) error.value = failure(err);
       return;
     }
   }
-  if (!alive) return;
+  if (!alive || reqEpoch !== upgradeEpoch) return;
   upgradeTarget.value = {
     packageId: p.id,
     name: p.name,
@@ -700,6 +702,8 @@ async function verify() {
 watch(
   () => [props.phase, kind.value],
   () => {
+    ++upgradeEpoch;
+    upgradeTarget.value = undefined;
     cursor.value = undefined;
     history.value = [];
     void load();
@@ -710,6 +714,7 @@ onBeforeUnmount(() => {
   alive = false;
   ++epoch;
   ++detailEpoch;
+  ++upgradeEpoch;
   pending.value = undefined;
 });
 </script>
