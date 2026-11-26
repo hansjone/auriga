@@ -18,6 +18,7 @@ export interface PanelContext {
   fetch?: (path: string, init?: RequestInit) => Promise<Response>;
   listInstalled?: () => Promise<unknown>;
   resourceIdentity?: { tenantId: string; ownerId: string; instanceId: string };
+  catalogSession?: { ownerId: string };
   resourceDistributionAvailable?: boolean;
   memberResources?: {
     list: (signal: AbortSignal) => Promise<unknown>;

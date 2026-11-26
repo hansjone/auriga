@@ -172,7 +172,9 @@ test('runtime emits the same profile binding for shell and local-UAC association
     },
   });
   await nextTurn();
-  const initial = f.runtime.status(f.request).account.profileBinding;
+  const account = f.runtime.status(f.request).account;
+  assert.equal(account.empNo, '001Ab');
+  const initial = account.profileBinding;
   assert.match(initial, /^[0-9a-f]{64}$/);
   assert.deepEqual(f.runtime.platformIdentity(), {
     empNo: '001Ab',

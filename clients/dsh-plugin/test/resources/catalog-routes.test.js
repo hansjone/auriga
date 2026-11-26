@@ -137,3 +137,31 @@ test('catalog readers allow plugin/skill with native access token, rejecting arb
   }
   assert.equal(calls, 3);
 });
+
+test('desktop catalog requests are fenced to the current native owner', async (t) => {
+  const f = catalogFixture(t);
+  let calls = 0;
+  const route = catalogRoutes({
+    ...f,
+    fetchImpl: async () => {
+      calls++;
+      return Response.json({ items: [] });
+    },
+  });
+  for (const [owner, status] of [
+    ['019a0000-0000-7000-8000-000000000099', 401],
+    [f.who.ownerId, 200],
+  ]) {
+    const res = response();
+    await route(
+      {
+        method: 'GET',
+        url: '/auriga/resources/catalog/packages?kind=plugin',
+        headers: { 'x-auriga-catalog-owner': owner },
+      },
+      res,
+    );
+    assert.equal(res.status, status);
+  }
+  assert.equal(calls, 1);
+});

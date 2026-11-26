@@ -638,6 +638,7 @@ export async function createConnectRuntime({
           ? {
               subject: who.ownerId,
               profileBinding: memberProfileBinding(s),
+              ...(s.identity?.empNo ? { empNo: s.identity.empNo } : {}),
               ...(memberProfile ? memberProfile : {}),
             }
           : null,

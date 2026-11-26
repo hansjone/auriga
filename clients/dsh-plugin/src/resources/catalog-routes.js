@@ -158,6 +158,9 @@ export function catalogRoutes(options) {
         current: options.current,
         fetchImpl: options.fetchImpl,
       });
+      const owner = req.headers['x-auriga-catalog-owner'];
+      if (owner !== undefined && owner !== api.who.ownerId)
+        refuse('common.unauthenticated');
       if (
         !write &&
         /^packages(?:\/[a-f0-9-]{36}(?:\/versions(?:\/[a-f0-9-]{36})?)?)?(?:\?[^#\\]*)?$/.test(

@@ -1,9 +1,15 @@
 import { element, resourceHeading, fieldList } from './market-ui';
 import {
-  resourceResponseError,
   resourceErrorMessage,
   ResourceDiagnosticError,
 } from './resource-diagnostics';
+import {
+  catalogRequest,
+  catalogStatus,
+  validateInstallations,
+  type DesktopCatalog,
+  type InstallationSnapshot,
+} from './desktop-catalog';
 import type {
   PanelContext,
   SkillPackage as Package,
@@ -46,12 +52,46 @@ export class SkillPanel {
     private context: PanelContext,
     private mine: boolean,
     private kind: 'plugin' | 'skill' = 'skill',
+    private desktop?: DesktopCatalog,
   ) {
-    void this.load();
+    if (desktop) {
+      this.controller = new AbortController();
+      desktop.listeners.add(this.syncDesktop);
+      desktop.prefetch();
+      this.syncDesktop();
+    } else void this.load();
   }
   dispose() {
+    this.desktop?.listeners.delete(this.syncDesktop);
     this.epoch++;
     this.controller?.abort();
+  }
+  private desktopError?: unknown;
+  private syncDesktop = () => {
+    const desktop = this.desktop!;
+    const snapshot = desktop.snapshot;
+    const listing = snapshot?.market[this.kind];
+    this.packages = listing?.packages ?? [];
+    this.summaries = listing?.summaries ?? new Map();
+    this.cursor = listing?.cursor;
+    this.installationSnapshot(snapshot?.installations ?? { items: [] });
+    if (this.selected) {
+      this.selected = this.packages.find(
+        (pack) => pack.id === this.selected?.id,
+      );
+      const details = this.selected && desktop.versions.get(this.selected.id);
+      this.versions = details?.items ?? [];
+      this.versionCursor = details?.nextCursor;
+    }
+    const needsAuth =
+      desktop.error !== this.desktopError &&
+      catalogStatus(desktop.error) === 401;
+    this.desktopError = desktop.error;
+    this.render();
+    if (needsAuth) this.authenticationRequired();
+  };
+  private get pending() {
+    return this.busy || this.desktop?.loading === true;
   }
   present(context: PanelContext) {
     this.context = context;
@@ -62,49 +102,9 @@ export class SkillPanel {
       ? this.text('插件', 'Plugin')
       : this.text('技能', 'Skill');
   }
-  private installationSnapshot(value: {
-    items: Installation[];
-    sharedAvailable?: boolean;
-    sharedUnavailableReason?: string;
-    pendingRestart?: boolean;
-    hostBusy?: boolean;
-    policyCacheUnavailable?: boolean;
-    blockedPersonalPlugins?: string[];
-    personalPluginPolicyPendingRestart?: boolean;
-    allowPersonalPlugins?: boolean;
-  }) {
-    if (
-      !value ||
-      [
-        'sharedAvailable',
-        'pendingRestart',
-        'hostBusy',
-        'policyCacheUnavailable',
-        'personalPluginPolicyPendingRestart',
-        'allowPersonalPlugins',
-      ].some(
-        (key) =>
-          key in value && typeof value[key as keyof typeof value] !== 'boolean',
-      )
-    )
-      throw new Error('invalid');
-    if (
-      !Array.isArray(value.items) ||
-      value.items.length > 10000 ||
-      value.items.some(
-        (r: Installation) =>
-          !r.resource?.identity ||
-          !['plugin', 'skill'].includes(r.resource.identity.kind),
-      )
-    )
-      throw new Error('invalid');
+  private installationSnapshot(value: InstallationSnapshot) {
+    validateInstallations(value);
     const blocked = value.blockedPersonalPlugins ?? [];
-    if (
-      !Array.isArray(blocked) ||
-      blocked.length > 10000 ||
-      blocked.some((v: unknown) => typeof v !== 'string' || v.length > 214)
-    )
-      throw new Error('invalid');
     this.rows = value.items.filter(
       (r: Installation) => r.resource.identity.kind === this.kind,
     );
@@ -146,66 +146,32 @@ export class SkillPanel {
     };
     return this.zh ? (zh[value] ?? '未知状态') : value.replaceAll('_', ' ');
   }
+  private authenticationRequired() {
+    this.root.dispatchEvent(
+      new CustomEvent('auriga-auth-required', {
+        bubbles: true,
+        composed: true,
+      }),
+    );
+  }
   private async request(path: string, body?: unknown) {
     if (!this.context.fetch) throw new Error('unavailable');
-    const abort = new AbortController();
-    const parent = this.controller?.signal;
-    let rejectAbort: (() => void) | undefined;
-    const cancel = () => {
-      abort.abort();
-      rejectAbort?.();
-    };
-    parent?.addEventListener('abort', cancel, { once: true });
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    let response: Response;
     try {
-      response = await Promise.race([
-        this.context.fetch('catalog/' + path, {
-          method: body === undefined ? 'GET' : 'POST',
-          cache: 'no-store',
-          redirect: 'error',
-          signal: abort.signal,
-          headers: {
-            accept: 'application/json',
-            ...(body === undefined
-              ? {}
-              : {
-                  'content-type': 'application/json',
-                  'x-auriga-catalog': '1',
-                }),
-          },
-          body: body === undefined ? undefined : JSON.stringify(body),
-        }),
-        new Promise<never>((_, reject) => {
-          rejectAbort = () => reject(new Error('unavailable'));
-          if (abort.signal.aborted) rejectAbort();
-          timer = setTimeout(
-            () => {
-              abort.abort();
-              reject(new Error('unavailable'));
-            },
-            body === undefined ? 15000 : 90000,
-          );
-        }),
-      ]);
-    } finally {
-      clearTimeout(timer);
-      parent?.removeEventListener('abort', cancel);
-    }
-    if (response.status === 401)
-      this.root.dispatchEvent(
-        new CustomEvent('auriga-auth-required', {
-          bubbles: true,
-          composed: true,
-        }),
+      return await catalogRequest(
+        this.context.fetch,
+        path,
+        this.controller?.signal,
+        body,
+        this.context.catalogSession?.ownerId,
       );
-    if (!response.ok) throw await resourceResponseError(response);
-    if (!response.headers.get('content-type')?.startsWith('application/json'))
-      throw new Error('invalid');
-    return response.json();
+    } catch (error) {
+      if (!this.desktop && catalogStatus(error) === 401)
+        this.authenticationRequired();
+      throw error;
+    }
   }
   private async run(work: () => Promise<void>) {
-    if (this.busy) return;
+    if (this.pending) return;
     const epoch = this.epoch;
     this.busy = true;
     this.notice = '';
@@ -215,12 +181,16 @@ export class SkillPanel {
       await work();
     } catch (error) {
       if (this.epoch === epoch) {
+        if (this.desktop && catalogStatus(error) === 401)
+          this.desktop.rejectAuth(error);
         this.failed = true;
-        this.packages = [];
-        this.versions = [];
-        this.selected = undefined;
-        this.rows = [];
-        this.summaries.clear();
+        if (!this.desktop) {
+          this.packages = [];
+          this.versions = [];
+          this.selected = undefined;
+          this.rows = [];
+          this.summaries.clear();
+        }
         this.notice = resourceErrorMessage(error, !this.zh);
       }
     } finally {
@@ -231,6 +201,14 @@ export class SkillPanel {
     }
   }
   private async load(more = false) {
+    if (this.desktop) {
+      this.notice = '';
+      this.failed = false;
+      this.confirmation = undefined;
+      if (more) await this.desktop.more(this.kind);
+      else await this.desktop.refresh(this.selected);
+      return;
+    }
     this.controller?.abort();
     this.controller = new AbortController();
     const epoch = ++this.epoch;
@@ -307,15 +285,17 @@ export class SkillPanel {
     const b = document.createElement('button');
     b.type = 'button';
     b.textContent = label;
-    b.disabled = this.busy || disabled;
+    b.disabled = this.pending || disabled;
     b.onclick = action;
     return b;
   }
   private async open(pack: Package) {
     await this.run(async () => {
-      const value = await this.request(
-        'packages/' + encodeURIComponent(pack.id) + '/versions?limit=200',
-      );
+      const value = this.desktop
+        ? await this.desktop.versionsFor(pack, this.controller!.signal)
+        : await this.request(
+            'packages/' + encodeURIComponent(pack.id) + '/versions?limit=200',
+          );
       if (
         !Array.isArray(value.items) ||
         value.items.some(
@@ -375,10 +355,13 @@ export class SkillPanel {
         'Request accepted; waiting for observed installation. Start a new session after disabling or removing.',
       );
       if (result.installation) {
-        this.rows = this.rows.filter(
-          (row) => row.resource.identity.packageId !== packageId,
-        );
-        this.rows.push(result.installation);
+        if (this.desktop) this.desktop.updateInstallation(result.installation);
+        else {
+          this.rows = this.rows.filter(
+            (row) => row.resource.identity.packageId !== packageId,
+          );
+          this.rows.push(result.installation);
+        }
       }
     });
   }
@@ -407,6 +390,10 @@ export class SkillPanel {
         throw new Error('invalid');
       this.versions = merged;
       this.versionCursor = value.nextCursor || undefined;
+      this.desktop?.versions.set(pack.id, {
+        items: merged,
+        nextCursor: this.versionCursor,
+      });
     });
   }
   private observe(row: Installation) {
@@ -423,8 +410,16 @@ export class SkillPanel {
         '已在新建的 standard 会话中检查实际来源。',
         'Checked actual source in a new standard session.',
       );
-      const current = await this.request('installations');
-      this.rows = current.items;
+      const current = validateInstallations(
+        await this.request('installations'),
+      );
+      const installation = current.items.find(
+        (item) =>
+          item.resource.identity.packageId === row.resource.identity.packageId,
+      );
+      if (this.desktop) {
+        if (installation) this.desktop.updateInstallation(installation);
+      } else this.installationSnapshot(current);
     });
   }
   private badge(text: string) {
@@ -456,7 +451,7 @@ export class SkillPanel {
   }
   render() {
     this.root.replaceChildren();
-    this.root.setAttribute('aria-busy', String(this.busy));
+    this.root.setAttribute('aria-busy', String(this.pending));
     const toolbar = element('div', undefined, 'toolbar');
     const title = element('div', undefined, 'market-title');
     title.append(
@@ -547,12 +542,16 @@ export class SkillPanel {
       notice.setAttribute('role', 'status');
       this.root.append(notice);
     }
-    if (this.notice) {
-      const notice = element('p', this.notice, 'notice');
-      notice.setAttribute('role', this.failed ? 'alert' : 'status');
+    const failed = this.failed || this.desktopError !== undefined;
+    const message = this.desktopError
+      ? resourceErrorMessage(this.desktopError, !this.zh)
+      : this.notice;
+    if (message) {
+      const notice = element('p', message, 'notice');
+      notice.setAttribute('role', failed ? 'alert' : 'status');
       this.root.append(notice);
     }
-    if (this.sharedAvailable === false && !this.busy)
+    if (this.sharedAvailable === false && !this.pending)
       this.root.append(
         element(
           'p',
@@ -593,10 +592,12 @@ export class SkillPanel {
           'notice',
         ),
       );
-    if (this.busy) {
+    if (this.pending) {
       const loading = element(
         'p',
-        this.text('正在读取资源…', 'Loading resources…'),
+        this.desktop?.snapshot && this.desktop.loading
+          ? this.text('正在刷新资源…', 'Refreshing resources…')
+          : this.text('正在读取资源…', 'Loading resources…'),
         'muted',
       );
       loading.setAttribute('role', 'status');
@@ -693,7 +694,7 @@ export class SkillPanel {
           );
         this.root.append(card);
       }
-      if (!this.versions.length && !this.busy)
+      if (!this.versions.length && !this.pending)
         this.root.append(
           element(
             'p',
@@ -831,8 +832,8 @@ export class SkillPanel {
       }
       if (
         !(this.mine ? this.rows : this.packages).length &&
-        !this.busy &&
-        !this.notice
+        !this.pending &&
+        !message
       )
         this.root.append(
           element(

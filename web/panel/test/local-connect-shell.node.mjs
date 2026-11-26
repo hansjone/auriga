@@ -93,6 +93,74 @@ const localBoot = (connected) => ({
   fetchBase: null,
 });
 
+test('desktop login starts verified market prefetch before the Auriga main panel is opened', async () => {
+  let loggedIn = false;
+  const ownerId = '01900000-0000-7000-8000-000000000001';
+  const prefetched = [];
+  const cleared = [];
+  const host = surfaceHost(
+    async (url) => {
+      const path = new URL(url).pathname;
+      if (path.endsWith('/auriga/shell/status'))
+        return response(200, {
+          loggedIn,
+          connected: loggedIn,
+          account: loggedIn ? { subject: ownerId } : null,
+        });
+      if (path.endsWith('/auriga/uac/status'))
+        return response(200, { available: false });
+      assert.ok(path.endsWith('/auriga/bootstrap'), path);
+      return response(200, localBoot(true));
+    },
+    { defined: false, accountLauncher: true, url: 'http://127.0.0.1:12345/' },
+  );
+  try {
+    const launcher = host.mount('settings.launcher');
+    await flush();
+    assert.equal(
+      host.document.querySelector('script[data-auriga-panel]'),
+      null,
+    );
+    loggedIn = true;
+    host.expire(15000);
+    await flush();
+    const script = host.document.querySelector('script[data-auriga-panel]');
+    assert.ok(script);
+    assert.equal(prefetched.length, 0);
+    host.completeScript(
+      script,
+      class extends host.window.HTMLElement {
+        static prefetchCatalog(context) {
+          prefetched.push(context.catalogSession);
+        }
+        static clearCatalog(scope) {
+          cleared.push(scope);
+        }
+      },
+    );
+    await flush();
+    assert.equal(prefetched.length, 1);
+    assert.equal(prefetched[0].ownerId, ownerId);
+    const main = host.mount('main');
+    await flush();
+    const panel = main.root.querySelector('auriga-team-panel');
+    assert.equal(panel.context.catalogSession, prefetched[0]);
+    host.expire(15000);
+    await flush();
+    assert.equal(prefetched.length, 1);
+    loggedIn = false;
+    host.expire(4000);
+    await flush();
+    assert.equal(cleared[0], prefetched[0]);
+    assert.equal(panel.context, undefined);
+    main.close();
+    launcher.close();
+    host.dispose();
+  } finally {
+    host.close();
+  }
+});
+
 test('connect resource elements remain hidden until platform sign-in', async () => {
   const host = surfaceHost(async (url) =>
     response(
