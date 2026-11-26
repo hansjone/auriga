@@ -2,9 +2,10 @@ import { gzipSync, gunzipSync } from 'node:zlib';
 import { TextDecoder } from 'node:util';
 import { validatePrivateSkill } from './private-skills.js';
 import { refuse } from './trust.js';
+import { encodeUstar } from './ustar.js';
 const decoder = new TextDecoder('utf-8', { fatal: true });
 /** @param {string} path */
-function pathValid(path) {
+export function skillPathValid(path) {
   return (
     Buffer.byteLength(path) <= 240 &&
     path.split('/').length <= 8 &&
@@ -30,7 +31,7 @@ function validateFiles(files, expected) {
   let total = 0;
   for (const [path, bytes] of Object.entries(files)) {
     if (
-      !pathValid(path) ||
+      !skillPathValid(path) ||
       seen.has(path.normalize('NFC').toLowerCase()) ||
       bytes.length > (path === 'SKILL.md' ? 262144 : 2097152) ||
       (total += bytes.length) > 20971520 ||
@@ -100,11 +101,11 @@ export function unpackSkill(archive, expected) {
       if (
         size ||
         !['references', 'assets'].includes(dir.split('/')[0]) ||
-        !pathValid(dir + '/file.txt')
+        !skillPathValid(dir + '/file.txt')
       )
         refuse('common.validation_failed');
     } else {
-      if (![0, 48].includes(type) || !pathValid(path))
+      if (![0, 48].includes(type) || !skillPathValid(path))
         refuse('common.validation_failed');
       files[path] = Buffer.from(tar.subarray(pos, pos + size));
     }
@@ -115,42 +116,15 @@ export function unpackSkill(archive, expected) {
   return files;
 }
 /** Freeze original local text bytes as a deterministic non-executable USTAR.
- * @param {Record<string,string>} source @param {{name:string,description:string}} expected */
+ * @param {Record<string,string|Buffer>} source @param {{name:string,description:string}} expected */
 export function packSkill(source, expected) {
   const files = Object.fromEntries(
     Object.entries(source).map(([k, v]) => [k, Buffer.from(v)]),
   );
   validateFiles(files, expected);
-  const chunks = [];
-  for (const path of Object.keys(files).sort()) {
-    const bytes = files[path],
-      h = Buffer.alloc(512);
-    const split = Buffer.byteLength(path) <= 100 ? -1 : path.lastIndexOf('/');
-    const leaf = split < 0 ? path : path.slice(split + 1),
-      prefix = split < 0 ? '' : path.slice(0, split);
-    if (Buffer.byteLength(leaf) > 100 || Buffer.byteLength(prefix) > 155)
-      refuse('common.validation_failed');
-    h.write(leaf, 0, 100, 'utf8');
-    h.write(prefix, 345, 155, 'utf8');
-    h.write('0000600\0', 100);
-    h.write('0000000\0', 108);
-    h.write('0000000\0', 116);
-    h.write(bytes.length.toString(8).padStart(11, '0') + '\0', 124);
-    h.write('00000000000\0', 136);
-    h.fill(32, 148, 156);
-    h[156] = 48;
-    h.write('ustar\0' + '00', 257);
-    h.write(
-      h
-        .reduce((n, b) => n + b, 0)
-        .toString(8)
-        .padStart(6, '0') + '\0 ',
-      148,
-    );
-    chunks.push(h, bytes, Buffer.alloc((512 - (bytes.length % 512)) % 512));
-  }
-  chunks.push(Buffer.alloc(1024));
-  const archive = gzipSync(Buffer.concat(chunks));
+  const archive = gzipSync(
+    encodeUstar(files, () => refuse('common.validation_failed')),
+  );
   unpackSkill(archive, expected);
   return archive;
 }

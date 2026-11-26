@@ -2,6 +2,8 @@ package auriga.resource.archive;
 
 import static auriga.resource.web.ResourceBody.*;
 
+import auriga.common.error.AurigaException;
+import auriga.common.error.CommonErrors;
 import auriga.resource.app.CatalogManifest;
 import auriga.resource.objectstore.ObjectStore;
 import java.util.*;
@@ -19,8 +21,9 @@ public final class PluginArchiveValidator {
     var result = new TarGzipArchiveValidator(store).validatePlugin(tenant, stage);
     var files = new HashSet<String>();
     for (var entry : result.inventory()) {
-      if (!entry.path().startsWith("package/")
-          || entry.path().toLowerCase(Locale.ROOT).endsWith("/binding.gyp")) throw invalid();
+      if (!entry.path().startsWith("package/")) throw invalid();
+      if (entry.path().toLowerCase(Locale.ROOT).endsWith("/binding.gyp"))
+        throw invalidRule("native_build_disallowed");
       files.add(entry.path());
     }
     if (result.packageManifest() == null || !files.contains("package/package.json"))
@@ -36,10 +39,12 @@ public final class PluginArchiveValidator {
           && !text(manifest.path("plugin"), "dshVersionRange", 128)
               .equals(text(pkg.path("engines"), "dsh", 128))) throw invalid();
     }
-    String patch = text(pkg.path("dsh").path("bundle"), "patch", 240);
+    var bundle = pkg.path("dsh").path("bundle");
+    if (!bundle.hasNonNull("patch")) throw invalidRule("bundle_patch_missing");
+    String patch = text(bundle, "patch", 240);
     if (patch.startsWith("./")) patch = patch.substring(2);
     CatalogManifest.path(patch);
-    if (!files.contains("package/" + patch)) throw invalid();
+    if (!files.contains("package/" + patch)) throw invalidRule("bundle_patch_missing");
     for (var entry : result.packageManifests().entrySet())
       validateMetadata(entry.getKey(), metadata(entry.getValue(), Set.of()), files);
     return "r2";
@@ -55,14 +60,20 @@ public final class PluginArchiveValidator {
     }
   }
 
+  private static AurigaException invalidRule(String rule) {
+    return AurigaException.of(CommonErrors.VALIDATION_FAILED, "rule", rule);
+  }
+
   private static boolean validPackageName(String name) {
     return name.matches(PACKAGE_NAME) && !Set.of("node_modules", "favicon.ico").contains(name);
   }
 
   private static void validateMetadata(String path, JsonNode pkg, Set<String> files) {
-    if (!pkg.isObject() || pkg.has("gypfile")) throw invalid();
+    if (!pkg.isObject()) throw invalid();
+    if (pkg.has("gypfile")) throw invalidRule("native_build_disallowed");
     if (pkg.hasNonNull("scripts")
-        && (!pkg.path("scripts").isObject() || !pkg.path("scripts").isEmpty())) throw invalid();
+        && (!pkg.path("scripts").isObject() || !pkg.path("scripts").isEmpty()))
+      throw invalidRule("lifecycle_scripts_disallowed");
     if (pkg.hasNonNull("pnpm")) {
       var pnpm = pkg.path("pnpm");
       if (!pnpm.isObject()) throw invalid();
@@ -71,7 +82,8 @@ public final class PluginArchiveValidator {
               "onlyBuiltDependencies",
               "allowBuilds",
               "onlyBuiltDependenciesFile",
-              "dangerouslyAllowAllBuilds")) if (pnpm.has(declaration)) throw invalid();
+              "dangerouslyAllowAllBuilds"))
+        if (pnpm.has(declaration)) throw invalidRule("native_build_disallowed");
     }
     String base = path.substring(0, path.length() - "package.json".length());
     var bundled =
@@ -87,7 +99,8 @@ public final class PluginArchiveValidator {
           for (var item : bundled) included |= item.isString() && item.asString().equals(dep);
         if (!validPackageName(dep)
             || !included
-            || !files.contains(base + "node_modules/" + dep + "/package.json")) throw invalid();
+            || !files.contains(base + "node_modules/" + dep + "/package.json"))
+          throw invalidRule("bundled_dependency_required");
       }
     }
     var peers = pkg.path("peerDependencies");

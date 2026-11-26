@@ -112,6 +112,52 @@ public final class ResourceAccess {
     return resolve(principal, permission);
   }
 
+  Reader catalogWriter(
+      AurigaPrincipal principal, String permission, java.time.Instant now, boolean stepUp) {
+    if (principal != null && principal.type() == PrincipalType.DEVICE)
+      return desktopContributor(principal);
+    var reader = memberWriter(principal, permission);
+    if (stepUp
+        && !principal.isAdminContext()
+        && !principal.steppedUpWithin(java.time.Duration.ofMinutes(10), now))
+      throw AurigaException.of(CommonErrors.STEP_UP_REQUIRED, "maxAgeSeconds", 600L);
+    return reader;
+  }
+
+  Reader desktopContributor(AurigaPrincipal principal) {
+    if (principal == null) throw new AurigaException(CommonErrors.UNAUTHENTICATED);
+    UUID tenant = principal.tenantId();
+    if (principal.type() != PrincipalType.DEVICE
+        || principal.context() != auriga.common.security.TokenContext.DEVICE
+        || !tenant.equals(TenantContext.require())
+        || principal.deviceId() == null
+        || !devices.desktopSessionActive(tenant, principal.subject(), principal.deviceId()))
+      throw new AurigaException(CommonErrors.FORBIDDEN);
+    UUID account = UUID.fromString(principal.subject());
+    try {
+      var member = member(tenant, account);
+      if (!member.getTenantId().equals(tenant.toString())
+          || !member.getAccountId().equals(account.toString())
+          || member.getStatus() != MemberStatus.MEMBER_STATUS_ACTIVE
+          || member.getMemberType() != MemberType.MEMBER_TYPE_MEMBER)
+        throw new AurigaException(CommonErrors.FORBIDDEN);
+      return new Reader(
+          tenant,
+          account,
+          false,
+          member.getGroupIdsList().stream()
+              .map(UUID::fromString)
+              .collect(Collectors.toUnmodifiableSet()),
+          false);
+    } catch (AurigaException e) {
+      if (e.errorCode().equals(CommonErrors.NOT_FOUND))
+        throw new AurigaException(CommonErrors.FORBIDDEN);
+      throw e;
+    } catch (RuntimeException e) {
+      throw new AurigaException(CommonErrors.UNAVAILABLE);
+    }
+  }
+
   public Reader owner(AurigaPrincipal principal) {
     var reader = administrator(principal, "resource.levels.admin");
     if (!member(reader.tenant(), reader.account()).getRoleKeysList().contains("owner"))

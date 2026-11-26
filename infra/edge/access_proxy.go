@@ -266,6 +266,9 @@ func (g *Gateway) proxyAccessAPI(w http.ResponseWriter, r *http.Request, target 
 		if target == g.resourceURL && r.Method == http.MethodPost && resourceUploadPath.MatchString(r.URL.Path) {
 			limit = (64 << 20) + 131072 // Contract archive bytes plus bounded multipart metadata/framing.
 		}
+		if target == g.resourceURL && r.Method == http.MethodPost && catalogUploadPath.MatchString(r.URL.Path) {
+			limit = (64 << 20) + (256 << 10) + 131072 // Catalog includes a separate manifest part.
+		}
 		r.Body = http.MaxBytesReader(w, r.Body, limit)
 	}
 	transport := g.APITransports[target]

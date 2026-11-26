@@ -61,6 +61,21 @@
       ]
     }
   ],
+  "desktopSelfSubmission": {
+    "principal": "device",
+    "audience": "auriga",
+    "authorizationModes": ["standard_device", "native_tx"],
+    "membership": "active-internal-member",
+    "requiresLiveBoundPortalSession": true,
+    "kinds": ["plugin", "skill"],
+    "ownedPackageRequired": true,
+    "operations": [
+      "UnifiedCreateResourcePackage",
+      "UnifiedGetResourcePackage",
+      "UnifiedUploadResourceVersion",
+      "UnifiedSubmitResourceVersion"
+    ]
+  },
   "securityReviewRoleRequiresQualification": true,
   "rawDownloadRequires": [
     "authenticated-tenant",

@@ -72,6 +72,9 @@ test('submission uploads the exact frozen private snapshot and its declarations,
           id: f.versionId,
           packageId: f.packageId,
           digest: manifestDigest,
+          kind: 'skill',
+          version: '1.0.0',
+          state: 'draft',
           revision: 2,
         },
         { status: 201, headers: { etag: '"2"' } },
@@ -91,6 +94,8 @@ test('submission uploads the exact frozen private snapshot and its declarations,
             id: f.versionId,
             packageId: f.packageId,
             digest: manifestDigest,
+            kind: 'skill',
+            version: '1.0.0',
             state: 'pending_review',
           },
         },
@@ -134,4 +139,290 @@ test('submission uploads the exact frozen private snapshot and its declarations,
   );
   row = await privateSkills.read('example', true);
   assert.match(row.files['SKILL.md'], /LATER PRIVATE EDIT/);
+});
+
+test('prepared plugin submission replays attach with its initial ETag and fresh upload refs', async (t) => {
+  const f = catalogFixture(t, undefined, { kind: 'plugin' });
+  const base = '/api/resource/v1/catalog/packages/' + f.packageId;
+  const pack = {
+    id: f.packageId,
+    kind: 'plugin',
+    tenantId: f.who.tenantId,
+    ownerId: f.who.ownerId,
+    name: f.manifest.name,
+    revision: 1,
+  };
+  const version = {
+    id: f.versionId,
+    packageId: f.packageId,
+    kind: 'plugin',
+    version: f.manifest.version,
+    state: 'draft',
+    revision: 1,
+    digest: sha(Buffer.from(JSON.stringify(f.manifest))),
+  };
+  const submitKeys = [];
+  let uploadAttempts = 0;
+  const s = catalogService({
+    ...f,
+    privateSkills: {},
+    host: {},
+    fetchImpl: async (url, options) => {
+      if (url.pathname === base)
+        return Response.json(pack, {
+          headers: { etag: '"' + pack.revision + '"' },
+        });
+      if (url.pathname === base + '/versions') {
+        assert.equal(options.headers['idempotency-key'], 'attachv');
+        assert.equal(options.headers['if-match'], '"1"');
+        assert.deepEqual(
+          JSON.parse(await options.body.get('metadata').text()),
+          {
+            version: f.manifest.version,
+            expectedDigest: version.digest,
+          },
+        );
+        assert.deepEqual(
+          Buffer.from(await options.body.get('artifacts').arrayBuffer()),
+          f.archive,
+        );
+        if (++uploadAttempts === 1) {
+          pack.revision++;
+          return Response.json({}, { status: 503 });
+        }
+        return Response.json(version, {
+          status: 201,
+          headers: { etag: '"1"' },
+        });
+      }
+      assert.equal(
+        url.pathname,
+        base + '/versions/' + f.versionId + '/submissions',
+      );
+      assert.equal(options.headers['if-match'], '"1"');
+      submitKeys.push(options.headers['idempotency-key']);
+      return Response.json(
+        {
+          authorId: f.who.ownerId,
+          reviewId: '019a0000-0000-7000-8000-000000000055',
+          status: 'pending',
+          version: { ...version, state: 'pending_review' },
+        },
+        { status: 201 },
+      );
+    },
+  });
+  const input = {
+    manifest: f.manifest,
+    archive: f.archive,
+    packageId: f.packageId,
+    key: 'attach',
+    reason: 'review prepared plugin',
+  };
+  await assert.rejects(
+    s.submitPrepared({ ...input, archive: Buffer.from('modified') }),
+    {
+      code: 'resource.digest_mismatch',
+    },
+  );
+  await assert.rejects(s.submitPrepared(input), { code: 'common.unavailable' });
+  await assert.rejects(
+    s.submitPrepared({ ...input, reason: 'changed intent' }),
+    {
+      code: 'common.conflict',
+    },
+  );
+  await assert.rejects(s.submitPrepared({ ...input, packageId: f.versionId }), {
+    code: 'common.conflict',
+  });
+  const result = await s.submitPrepared(input);
+  assert.deepEqual(result, {
+    packageId: f.packageId,
+    versionId: f.versionId,
+    state: 'pending_review',
+    manifestDigest: version.digest,
+  });
+  assert.equal(uploadAttempts, 2);
+  assert.deepEqual(submitKeys, ['attachs']);
+});
+
+test('prepared submission fences a device generation change during broker staging', async (t) => {
+  const f = catalogFixture(t, undefined, { kind: 'plugin' });
+  let generation = 1;
+  f.runtime.catalogGeneration = () => generation;
+  const calls = [];
+  const s = catalogService({
+    ...f,
+    privateSkills: {},
+    host: {},
+    fetchImpl: async (url, options) => {
+      calls.push([url.pathname, options.method]);
+      return Response.json(
+        {
+          id: f.packageId,
+          ownerId: f.who.ownerId,
+          tenantId: f.who.tenantId,
+          kind: 'plugin',
+          name: f.manifest.name,
+          revision: 1,
+        },
+        { status: 201, headers: { etag: '"1"' } },
+      );
+    },
+  });
+  const stage = f.runtime.upload;
+  f.runtime.upload = async (bytes, type) => {
+    const ref = await stage(bytes, type);
+    generation++;
+    return ref;
+  };
+  await assert.rejects(
+    s.submitPrepared({
+      manifest: f.manifest,
+      archive: f.archive,
+      key: 'new',
+      reason: 'review',
+    }),
+    { code: 'common.unauthenticated' },
+  );
+  assert.deepEqual(calls, [['/api/resource/v1/catalog/packages', 'POST']]);
+});
+
+for (const loseDuring of [
+  'queue entry',
+  'multipart staging',
+  'upload response',
+]) {
+  test(
+    'prepared submission stops when trusted execution ends at ' + loseDuring,
+    async (t) => {
+      const f = catalogFixture(t, undefined, { kind: 'plugin' });
+      const requests = [];
+      let active = loseDuring !== 'queue entry';
+      const s = catalogService({
+        ...f,
+        privateSkills: {},
+        host: {},
+        fetchImpl: async (url) => {
+          requests.push(url.pathname);
+          if (url.pathname.endsWith('/versions')) {
+            active = false;
+            return Response.json({}, { status: 201 });
+          }
+          return Response.json(
+            {
+              id: f.packageId,
+              ownerId: f.who.ownerId,
+              tenantId: f.who.tenantId,
+              kind: 'plugin',
+              name: f.manifest.name,
+              revision: 1,
+            },
+            { status: 201, headers: { etag: '"1"' } },
+          );
+        },
+      });
+      const upload = f.runtime.upload;
+      let staged = 0;
+      f.runtime.upload = async (bytes, type) => {
+        const ref = await upload(bytes, type);
+        if (++staged === 2 && loseDuring === 'multipart staging')
+          active = false;
+        return ref;
+      };
+      await assert.rejects(
+        s.submitPrepared(
+          {
+            manifest: f.manifest,
+            archive: f.archive,
+            key: 'cancelled',
+            reason: 'review',
+          },
+          async () => {
+            await Promise.resolve();
+            if (!active)
+              throw Object.assign(new Error('execution ended'), {
+                code: 'common.forbidden',
+              });
+          },
+        ),
+        { code: 'common.forbidden' },
+      );
+      const base = '/api/resource/v1/catalog/packages';
+      assert.deepEqual(
+        requests,
+        loseDuring === 'queue entry'
+          ? []
+          : loseDuring === 'multipart staging'
+            ? [base]
+            : [base, base + '/' + f.packageId + '/versions'],
+      );
+    },
+  );
+}
+
+test('new package upload refreshes its verified package after a definite 412', async (t) => {
+  const f = catalogFixture(t, undefined, { kind: 'plugin' });
+  const base = '/api/resource/v1/catalog/packages';
+  const packagePath = base + '/' + f.packageId;
+  const pack = {
+    id: f.packageId,
+    ownerId: f.who.ownerId,
+    tenantId: f.who.tenantId,
+    kind: 'plugin',
+    name: f.manifest.name,
+  };
+  const version = {
+    id: f.versionId,
+    packageId: f.packageId,
+    kind: 'plugin',
+    version: f.manifest.version,
+    revision: 1,
+    state: 'draft',
+    digest: sha(Buffer.from(JSON.stringify(f.manifest))),
+  };
+  const requests = [];
+  const s = catalogService({
+    ...f,
+    privateSkills: {},
+    host: {},
+    fetchImpl: async (url, options) => {
+      const path = url.pathname;
+      const etag = options.headers['if-match'];
+      requests.push([path, options.method, etag]);
+      if (path === base)
+        return Response.json({ ...pack, revision: 1 }, { status: 201 });
+      if (path === packagePath) return Response.json({ ...pack, revision: 2 });
+      if (path.endsWith('/versions'))
+        return etag === '"1"'
+          ? Response.json({}, { status: 412 })
+          : Response.json(version, { status: 201 });
+      return Response.json(
+        {
+          authorId: f.who.ownerId,
+          reviewId: '019a0000-0000-7000-8000-000000000055',
+          status: 'pending',
+          version: { ...version, state: 'pending_review' },
+        },
+        { status: 201 },
+      );
+    },
+  });
+  const input = {
+    manifest: f.manifest,
+    archive: f.archive,
+    key: 'fresh',
+    reason: 'review',
+  };
+  await assert.rejects(s.submitPrepared(input), {
+    code: 'common.precondition_failed',
+  });
+  assert.equal((await s.submitPrepared(input)).state, 'pending_review');
+  assert.deepEqual(requests, [
+    [base, 'POST', '"0"'],
+    [packagePath + '/versions', 'POST', '"1"'],
+    [packagePath, 'GET', undefined],
+    [packagePath + '/versions', 'POST', '"2"'],
+    [packagePath + '/versions/' + f.versionId + '/submissions', 'POST', '"1"'],
+  ]);
 });

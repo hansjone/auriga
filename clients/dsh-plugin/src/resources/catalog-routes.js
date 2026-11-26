@@ -287,6 +287,12 @@ export function catalogRoutes(options) {
     }
   };
   return Object.assign(handle, {
+    /** Reuse the current member catalogue for desktop tools. @param {any} runtime */
+    memberService(runtime) {
+      if (options.current() !== runtime || runtime?.resourceIdentity)
+        return refuse('common.unauthenticated');
+      return service(runtime, catalogIdentity(runtime));
+    },
     /** @param {{changed?:boolean}} [event] */
     async reconcile(event) {
       const runtime = options.current();

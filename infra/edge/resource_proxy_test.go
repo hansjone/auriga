@@ -124,6 +124,10 @@ func TestResourceUploadBodyLimitIsSpecificToArchiveRoute(t *testing.T) {
 	}{
 		{"/api/resource/v1/packages/01900000-0000-7000-8000-000000000001/versions", 2 << 20, true},
 		{"/api/resource/v1/packages/01900000-0000-7000-8000-000000000001/versions", (64 << 20) + 131072 + 1, false},
+		{"/api/resource/v1/catalog/packages/01900000-0000-7000-8000-000000000001/versions", 2 << 20, true},
+		{"/api/resource/v1/catalog/packages/01900000-0000-7000-8000-000000000001/versions", (64 << 20) + (256 << 10) + 131072 + 1, false},
+		{"/api/resource/v1/catalog/packages/invalid/versions", 2 << 20, false},
+		{"/api/resource/v1/catalog/packages/01900000-0000-7000-8000-000000000001/versions/01900000-0000-7000-8000-000000000001/submissions", 2 << 20, false},
 		{"/api/resource/v1/packages", 2 << 20, false},
 	} {
 		req, err := http.NewRequest("POST", "http://"+addresses["admin"]+tc.path, bytes.NewReader(make([]byte, tc.length)))
