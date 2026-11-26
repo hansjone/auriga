@@ -1,5 +1,4 @@
 import { wrapSetupFixture } from './helpers.mjs';
-/* global fetch */
 /** Isolated publisher/transport substitute, real archive checks and install transactions. */
 import test from 'node:test';
 import assert from 'node:assert/strict';

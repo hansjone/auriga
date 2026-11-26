@@ -1,4 +1,3 @@
-/* global fetch */
 /** Explicit isolated Windows evidence run. No user DSH, profile, or fixed port is touched. */
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';

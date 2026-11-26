@@ -47,10 +47,7 @@ import {
   clientPlatform,
   hostClientTarget,
 } from '../../../scripts/client-release/platform.mjs';
-import {
-  assemblePython,
-  pythonLockForTarget,
-} from './python-runtime.mjs';
+import { assemblePython, pythonLockForTarget } from './python-runtime.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const installerDir = resolve(here, '..');
@@ -516,10 +513,10 @@ export async function build(args) {
   slim(join(plugin, 'node_modules'), removed);
   const withoutLibreoffice = args['without-libreoffice'] === true;
   if (withoutLibreoffice)
-    rmSync(
-      join(app, 'node_modules', '@deepseek-ai', target.libreofficeKit),
-      { recursive: true, force: true },
-    );
+    rmSync(join(app, 'node_modules', '@deepseek-ai', target.libreofficeKit), {
+      recursive: true,
+      force: true,
+    });
   const sizeAfter = dirSize(app) + dirSize(join(plugin, 'node_modules'));
 
   // 3c. pnpm (the plugin manager shells out to it); pinned and verified against the registry.
@@ -706,8 +703,14 @@ export async function build(args) {
       cpSync(png, join(payload, 'auriga', 'launcher', 'auriga.png'));
       cpSync(png, join(payload, 'auriga', 'tray', 'auriga.png'));
     }
-    cpSync(join(installerDir, 'linux', 'install.sh'), join(stage, 'install.sh'));
-    cpSync(join(installerDir, 'linux', 'README.txt'), join(stage, 'README.txt'));
+    cpSync(
+      join(installerDir, 'linux', 'install.sh'),
+      join(stage, 'install.sh'),
+    );
+    cpSync(
+      join(installerDir, 'linux', 'README.txt'),
+      join(stage, 'README.txt'),
+    );
     chmodSync(join(stage, 'install.sh'), 0o755);
   }
 

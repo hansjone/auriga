@@ -1,4 +1,3 @@
-/* global fetch, Response */
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { EventEmitter, once } from 'node:events';

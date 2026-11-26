@@ -4,7 +4,6 @@ import {
   unpackSetup,
 } from './setup-archive.mjs';
 import { BRAND_NAME } from './brand.mjs';
-/* global clearTimeout, AbortController, AbortSignal, fetch */
 /** Anonymous transport is bound to the configured platform origin. */
 import {
   mkdirSync,
@@ -604,11 +603,7 @@ export function createUpdater({
         // A withdrawn or replaced release must not be queued after a long transfer.
         retain = true;
         const latestResponse = await request(
-          platformUrl(
-            origin,
-            latestPath(body.channel),
-            binding,
-          ),
+          platformUrl(origin, latestPath(body.channel), binding),
           { redirect: 'error', signal: controller.signal },
         );
         if (latestResponse.status === 404) {
@@ -961,11 +956,7 @@ async function applyPendingLocked(
     retain = true;
     note('check-release');
     const response = await request(
-      platformUrl(
-        binding.origin,
-        latestPath(body.channel),
-        binding,
-      ),
+      platformUrl(binding.origin, latestPath(body.channel), binding),
       { redirect: 'error', signal: AbortSignal.timeout(15000) },
     );
     if (response.status === 404) {

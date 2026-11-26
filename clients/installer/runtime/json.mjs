@@ -1,4 +1,3 @@
-/* global TextDecoder */
 import { Buffer } from 'node:buffer';
 
 /** @param {string} detail */

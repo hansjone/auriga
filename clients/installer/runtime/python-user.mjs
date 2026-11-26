@@ -251,10 +251,7 @@ export function preparePythonUser(dir, dataHome, base = process.env) {
     const wheel = join(bootstrap, pip.filename);
     const pythonDir = join(dir, 'runtime/python');
     const windows = process.platform === 'win32';
-    const python = join(
-      pythonDir,
-      windows ? 'python.exe' : 'bin/python3',
-    );
+    const python = join(pythonDir, windows ? 'python.exe' : 'bin/python3');
     stage = 'marker_read';
     const marker = join(paths.environment, 'auriga-python.json');
     assertLocalPath(marker);
@@ -275,10 +272,7 @@ export function preparePythonUser(dir, dataHome, base = process.env) {
       abi: PYTHON_ABI,
     };
     const env = { ...cleanPythonEnv(base), PYTHONDONTWRITEBYTECODE: '1' };
-    const venvPython = join(
-      paths.bin,
-      windows ? 'python.exe' : 'python3',
-    );
+    const venvPython = join(paths.bin, windows ? 'python.exe' : 'python3');
     const venvCfg = join(paths.environment, 'pyvenv.cfg');
     const envReady = existsSync(venvPython);
     const currentExeStamp = fileStamp(venvPython);

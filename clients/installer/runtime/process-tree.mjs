@@ -72,7 +72,8 @@ function linuxBootSeconds() {
   const line = text.split('\n').find((row) => row.startsWith('btime '));
   if (!line) throw new Error('unable to read boot time');
   const value = Number(line.slice(6).trim());
-  if (!Number.isFinite(value) || value < 1) throw new Error('invalid boot time');
+  if (!Number.isFinite(value) || value < 1)
+    throw new Error('invalid boot time');
   return value;
 }
 
@@ -127,7 +128,9 @@ export function assertNTFS(home) {
     return;
   }
   if (process.platform !== 'win32')
-    throw new Error('Desktop guardian requires local Windows NTFS or Linux volume');
+    throw new Error(
+      'Desktop guardian requires local Windows NTFS or Linux volume',
+    );
   if (
     cachedNtfs &&
     cachedNtfs.home === home.toLowerCase() &&
@@ -173,7 +176,11 @@ function parseLinuxStat(pid) {
   // fields after comm: 1=state … 2=ppid … 20=starttime (1-based from start of rest → index 19)
   const parent = Number(rest[1]);
   const startTicks = Number(rest[19]);
-  if (!Number.isSafeInteger(parent) || parent < 0 || !Number.isFinite(startTicks))
+  if (
+    !Number.isSafeInteger(parent) ||
+    parent < 0 ||
+    !Number.isFinite(startTicks)
+  )
     return null;
   let executable = null;
   try {

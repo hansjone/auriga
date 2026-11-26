@@ -238,6 +238,12 @@ export function buildBroker(output, { managedLinux = false } = {}) {
     const helper = 'windows/shell-helper.exe';
     buildHelper(join(output, helper));
     files.push(helper);
+    // ipc.mjs statically imports the Linux Unix-socket peer; ship it in every
+    // Desktop broker so Windows packages still resolve the module graph.
+    mkdirSync(join(output, 'linux'), { recursive: true });
+    const linuxIpc = 'linux/ipc-server.mjs';
+    copyFileSync(join(source, linuxIpc), join(output, linuxIpc));
+    files.push(linuxIpc);
   }
   const repoRoot = resolve(source, '../..');
   const esbuild = resolveEsbuild(repoRoot);

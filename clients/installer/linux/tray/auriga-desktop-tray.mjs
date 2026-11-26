@@ -123,7 +123,10 @@ function acquireSingleton(root) {
           closeSync(fd);
           throw new Error('tray already running');
         } catch (error) {
-          if (error.code !== 'ESRCH' && error.message !== 'tray already running')
+          if (
+            error.code !== 'ESRCH' &&
+            error.message !== 'tray already running'
+          )
             throw error;
           if (error.message === 'tray already running') throw error;
         }

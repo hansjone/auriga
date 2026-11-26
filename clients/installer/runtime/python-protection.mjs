@@ -1,5 +1,11 @@
 import { spawnSync } from 'node:child_process';
-import { chmodSync, existsSync, lstatSync, mkdirSync, readdirSync } from 'node:fs';
+import {
+  chmodSync,
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  readdirSync,
+} from 'node:fs';
 import { dirname, join } from 'node:path';
 import { assertLocalPath } from './host-lock.mjs';
 import { systemTool } from './system-tools.mjs';

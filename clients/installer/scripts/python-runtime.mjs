@@ -26,8 +26,7 @@ const TARGETS = {
   'win-x64-cp312': {
     archiveName: (lock) =>
       `cpython-${lock.version}+${lock.release}-x86_64-pc-windows-msvc-install_only.tar.gz`,
-    wheelTag:
-      /^(?:cp312-cp312-win_amd64|py3-none-any|py2\.py3-none-any)\.whl$/,
+    wheelTag: /^(?:cp312-cp312-win_amd64|py3-none-any|py2\.py3-none-any)\.whl$/,
   },
   'linux-x64-cp312': {
     archiveName: (lock) =>

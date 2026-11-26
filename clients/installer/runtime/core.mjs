@@ -1,4 +1,3 @@
-/* global setInterval, clearInterval */
 import { BRAND_NAME } from './brand.mjs';
 import { updateOrigin, normalizePlatformBinding } from './platform-origin.mjs';
 import {
@@ -841,7 +840,7 @@ function movePayloadToStaging(payload, staging, step) {
   let done = 0;
   for (const entry of topEntries) {
     const name = entry.name;
-    if (name === 'runtime' && entry.isDirectory() && hasWinPython) {
+    if (name === 'runtime' && entry.isDirectory() && hasProtectedPython) {
       for (const sub of readdirSync(join(payload, 'runtime'))) {
         if (sub === 'python') {
           createPythonDirectory(staging);
