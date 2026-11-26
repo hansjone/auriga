@@ -19,7 +19,7 @@ case "${1:-}" in
   shared-source-check)
     exec "$(bootstrap_binary)" shared-runtime -base "$AURIGA_DATA_ROOT/config/materials" \
       -out "$AURIGA_DATA_ROOT/config/shared-source" -action check ;;
-  shared-stage|shared-set-model|shared-set-profile|shared-commit)
+  shared-stage|shared-set-model|shared-set-profile|shared-set-adapter|shared-commit)
     _action=${1#shared-}
     set -- -base "$AURIGA_DATA_ROOT/config/materials" -out "$AURIGA_DATA_ROOT/config/shared-source" \
       -action "$_action" -expected-base-sha256 "${NAS_SHARED_EXPECTED_BASE:?}"
@@ -44,6 +44,13 @@ case "${1:-}" in
     fi
     if [ "$_action" = set-profile ]; then
       set -- "$@" -profile-file "${NAS_SHARED_PROFILE:?}" -profile-sha256 "${NAS_SHARED_PROFILE_SHA:?}"
+    fi
+    if [ "$_action" = set-adapter ]; then
+      set -- "$@" -adapter-file "${NAS_SHARED_ADAPTER:?}" -adapter-sha256 "${NAS_SHARED_ADAPTER_SHA:?}" \
+        -expected-adapter-sha256 "${NAS_SHARED_PREVIOUS_ADAPTER_SHA:?}"
+    fi
+    if [ "$_action" = commit ] && [ -n "${NAS_SHARED_PREVIOUS_ADAPTER_SHA:-}${NAS_SHARED_ADAPTER_SHA:-}" ]; then
+      set -- "$@" -expected-adapter-sha256 "${NAS_SHARED_PREVIOUS_ADAPTER_SHA:?}" -adapter-sha256 "${NAS_SHARED_ADAPTER_SHA:?}"
     fi
     exec "$(bootstrap_binary)" shared-runtime "$@" ;;
   shared-project|shared-check|shared-path|shared-status)

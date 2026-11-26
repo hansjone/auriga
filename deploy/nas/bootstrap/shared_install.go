@@ -15,6 +15,7 @@ const sharedInstallationGeneration = "v-00000000000000000001"
 const sharedRotationDir = ".rotation"
 const sharedRotationKindModel = "model"
 const sharedRotationKindProfile = "profile"
+const sharedRotationKindAdapter = "adapter"
 const sharedTeamOnlyAdapter = "{}"
 
 func sharedApprovedModelID(model string) error {
@@ -30,23 +31,30 @@ type sharedRotationMeta struct {
 }
 
 type sharedInstallationReceipt struct {
-	Version          int    `json:"version"`
-	Base             string `json:"base"`
-	Tenant           string `json:"tenant"`
-	Node             string `json:"node"`
-	CA               string `json:"ca"`
-	Adapter          string `json:"adapter"`
-	Profile          string `json:"profile"`
-	DedicatedProfile string `json:"dedicatedProfile,omitempty"`
-	InitialRuntime   string `json:"initialRuntime"`
-	Model            string `json:"model"`
-	Files            string `json:"files"`
-	TeamOnly         bool   `json:"teamOnly,omitempty"`
-	StorageBackend   string `json:"storageBackend,omitempty"`
-	QuotaMount       string `json:"quotaMount,omitempty"`
-	QuotaBinary      string `json:"quotaBinary,omitempty"`
-	ProjectFirst     uint32 `json:"projectFirst,omitempty"`
-	ProjectLast      uint32 `json:"projectLast,omitempty"`
+	Version          int                    `json:"version"`
+	Base             string                 `json:"base"`
+	Tenant           string                 `json:"tenant"`
+	Node             string                 `json:"node"`
+	CA               string                 `json:"ca"`
+	Adapter          string                 `json:"adapter"`
+	AdapterRotation  *sharedAdapterRotation `json:"adapterRotation,omitempty"`
+	Profile          string                 `json:"profile"`
+	DedicatedProfile string                 `json:"dedicatedProfile,omitempty"`
+	InitialRuntime   string                 `json:"initialRuntime"`
+	Model            string                 `json:"model"`
+	Files            string                 `json:"files"`
+	TeamOnly         bool                   `json:"teamOnly,omitempty"`
+	StorageBackend   string                 `json:"storageBackend,omitempty"`
+	QuotaMount       string                 `json:"quotaMount,omitempty"`
+	QuotaBinary      string                 `json:"quotaBinary,omitempty"`
+	ProjectFirst     uint32                 `json:"projectFirst,omitempty"`
+	ProjectLast      uint32                 `json:"projectLast,omitempty"`
+}
+
+type sharedAdapterRotation struct {
+	BaseAdapter     string `json:"baseAdapter,omitempty"`
+	PreviousAdapter string `json:"previousAdapter"`
+	PreviousEvent   string `json:"previousEvent"`
 }
 
 const (

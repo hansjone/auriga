@@ -119,6 +119,26 @@ sh deploy/nas/scripts/start.sh
 
 一次维护窗口若两者都要做，推荐顺序：先 `set-profile` 新 profile 并 commit，再 `set-model auto` 并 commit，最后 `render`/`start.sh`。新版生产策略不接受旧 profile，`set-profile` 起始时只对即将被替换的旧 profile 免检生产策略（回执、摘要、事件、权限照常校验），而 `set-model` 读当前代时要求 profile 已符合新策略，所以必须先换 profile。二者不能交叠（一种仍 staged 时另一种会拒绝）。同参数重入幂等；不同参数冲突拒绝；profile 须字节与独立 SHA 一致且通过生产 `ValidateSharedProfile`（`agent-default-model` 固定为 `auto`）。commit 与 render 之后必须再跑 `start.sh`；一般无需清共享池。
 
+## 显式更换已安装的公司 UAC adapter
+
+在维护窗口，使用待升级版本的 `auriga-nas-bootstrap` 与 NAS 脚本。对照现场批准记录，分别核对原 sealed base receipt、当前共享源的 `platform/uac-adapter.json` 和新私有 adapter 的 SHA-256。新文件使用数据根之外的规范绝对路径，属主 root:root、权限 0600。原 sealed base 内的 adapter 保持初装字节和权限。
+
+```sh
+sh deploy/nas/scripts/shared-install.sh \
+  --set-adapter "$NEW_ADAPTER" \
+  --expected-adapter-sha256 "$CURRENT_ADAPTER_SHA256" \
+  --adapter-sha256 "$NEW_ADAPTER_SHA256" \
+  --expected-base-sha256 "$BASE_SHA256"
+```
+
+脚本在 host 和 container 模式均执行暂存、核对双摘要并提交、更新 replay 收据绑定及重新渲染。共享安装身份、密钥、profile、runtime、XFS 配额配置、replay 桶和池账本沿用原值。`--set-adapter` 只用于已有非空公司 adapter 的共享安装，与模型或 profile 轮换分开执行。仅当 token-verify 服务会拒绝错误的工号与令牌配对时，现场才可在新私有 adapter 顶层设 `"proofSubjectPolicy": "either"`。
+
+需要分步核验时，可用 `shared-runtime -action set-adapter`，传入固定 `-base`、`-out`、`-expected-base-sha256`、`-adapter-file`、`-expected-adapter-sha256` 和 `-adapter-sha256`，并在提交前用 `-action rollback` 恢复原共享源。提交或渲染中断后，用同一份新文件和三项摘要重跑公开脚本。提交后若需恢复旧 adapter，可用同一入口反向轮换并重新独立核对双摘要。
+
+随后按计划完成正式部署或运行 `start.sh` 让 Platform 载入新投影，再用正常桌面入口测试自动关联，并从 `status.sh` 确认共享模式与 replay 状态。Adapter 的私有内容仅投影给 Platform，Host 仍只收到允许公开的出站参数。
+
+## 启动与 replay 核验
+
 `start` 先停止公开Edge，沿公开 `shared-replay-prepare.sh` 生成独立临时安装NKey（root0700私有源），启动只有本阶段才含该身份的NATS配置。短命helper只连接固定项目内部网络的 `nats:4222`，没有Docker socket、任意endpoint或通用命令转发。它只可AccountInfo、固定桶INFO/CREATE；已有同名桶必须符合固定subjects、无Sources/Mirror/transform、文件存储、history1、TTL至少12小时、DiscardNew及无限聚合count/bytes，拒绝自动改桶/删桶/清墓碑。安装receipt记实际StreamInfo.Created，之后丢桶/换桶拒绝重建。
 
 预建后强制重建NATS为无安装身份的常驻配置；核固定project/service、旧容器确已停止或移除、新容器运行，再确认临时身份收到明确Authorization拒绝、Edge身份成功读取同一桶，才开启本地readiness gate。超时/断网不能当撤权成功。常驻Edge没有CREATE/UPDATE，W仍只有原四项读取权限，五个旧password用户不加权。失败恢复常驻配置；恢复失败则停固定项目Edge/NATS，保留材料与桶。没有完成此流程时，普通Compose up/restart拒绝且不会回个人池；stop/检查仍可执行。这里只是原部署状态记录，不是新的签名信任或proof。

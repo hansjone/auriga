@@ -24,13 +24,18 @@ import (
 )
 
 func nasSharedRuntime(args []string, stdout io.Writer) error {
+	return runSharedRuntime(args, stdout, "")
+}
+
+func runSharedRuntime(args []string, stdout io.Writer, replayAction string) error {
 	f := flag.NewFlagSet("shared-runtime", flag.ContinueOnError)
 	base := f.String("base", "", "original sealed NAS materials")
 	out := f.String("out", "", "fixed config/shared-source sibling")
-	action := f.String("action", "status", "stage, set-model, set-profile, commit, rollback, check, path, project or status")
+	action := f.String("action", "status", "stage, set-model, set-profile, set-adapter, commit, rollback, check, path, project or status")
 	expected := f.String("expected-base-sha256", "", "independently approved original receipt SHA256")
 	adapter := f.String("adapter-file", "", "approved private UAC adapter containing sharedOutbound")
 	adapterSHA := f.String("adapter-sha256", "", "independently approved private adapter SHA256")
+	previousAdapter := f.String("expected-adapter-sha256", "", "independently approved current shared adapter SHA256 for set-adapter")
 	profile := f.String("profile-file", "", "approved complete shared runtime profile")
 	profileSHA := f.String("profile-sha256", "", "independently approved profile SHA256")
 	dedicatedProfile := f.String("dedicated-profile-file", "", "optional independently approved complete dedicated profile")
@@ -48,7 +53,7 @@ func nasSharedRuntime(args []string, stdout io.Writer) error {
 	if f.NArg() != 0 || os.Geteuid() != 0 || !sharedCanonicalPath(*base) || *out != filepath.Join(filepath.Dir(*base), "shared-source") {
 		return fmt.Errorf("shared installation requires root and canonical fixed sibling paths")
 	}
-	mutating := *action == "stage" || *action == "set-model" || *action == "set-profile" || *action == "commit" || *action == "rollback"
+	mutating := *action == "stage" || *action == "set-model" || *action == "set-profile" || *action == "set-adapter" || *action == "commit" || *action == "rollback"
 	if !mutating && *action != "status" && *action != "check" && *action != "path" && *action != "project" {
 		return fmt.Errorf("unsupported shared installation operation")
 	}
@@ -59,6 +64,9 @@ func nasSharedRuntime(args []string, stdout io.Writer) error {
 		return fmt.Errorf("dedicated profile file and approval SHA256 must be supplied together")
 	}
 	hasStorageFlags := *backend != "" || *quotaMount != "" || *quotaBinary != "" || *projectFirst != 0 || *projectLast != 0
+	if *previousAdapter != "" && *action != "set-adapter" && *action != "commit" {
+		return fmt.Errorf("current adapter approval is only accepted by set-adapter or its commit")
+	}
 	var storageSpec sharedStorageSpec
 	switch *action {
 	case "set-model":
@@ -74,6 +82,20 @@ func nasSharedRuntime(args []string, stdout io.Writer) error {
 		}
 		if *profile == "" || *profileSHA == "" {
 			return fmt.Errorf("set-profile requires profile file and independent SHA256")
+		}
+	case "set-adapter":
+		if *profile != "" || *profileSHA != "" || *model != "" || *dedicatedProfile != "" || *dedicatedSHA != "" || *teamOnly || hasStorageFlags {
+			return fmt.Errorf("set-adapter only accepts the new adapter file and current, new and base approvals")
+		}
+		if *adapter == "" || !sharedCanonicalSHA(*adapterSHA) || !sharedCanonicalSHA(*previousAdapter) || *adapterSHA == *previousAdapter {
+			return fmt.Errorf("set-adapter requires a file and distinct canonical current and new adapter SHA256 approvals")
+		}
+	case "commit":
+		if *adapter != "" || *profile != "" || *profileSHA != "" || *dedicatedProfile != "" || *dedicatedSHA != "" || *model != "" || *teamOnly || hasStorageFlags {
+			return fmt.Errorf("commit only accepts base approval and optional adapter approvals")
+		}
+		if (*previousAdapter != "" || *adapterSHA != "") && (!sharedCanonicalSHA(*previousAdapter) || !sharedCanonicalSHA(*adapterSHA)) {
+			return fmt.Errorf("adapter commit requires both canonical SHA256 approvals")
 		}
 	case "stage":
 		if uint64(*projectFirst) > math.MaxUint32 || uint64(*projectLast) > math.MaxUint32 {
@@ -171,7 +193,12 @@ func nasSharedRuntime(args []string, stdout io.Writer) error {
 		return err
 	}
 	defer sharedClear(files)
-	if *action == "stage" {
+	if *action == "commit" && *previousAdapter != "" &&
+		(receipt.AdapterRotation == nil || receipt.AdapterRotation.PreviousAdapter != *previousAdapter || receipt.Adapter != *adapterSHA ||
+			(hasRotation && rotationKind != sharedRotationKindAdapter)) {
+		return fmt.Errorf("commit does not match the approved adapter rotation")
+	}
+	if *action == "stage" && rotationKind != sharedRotationKindAdapter {
 		approvedAdapter := *adapterSHA
 		if *teamOnly {
 			approvedAdapter = sharedSHA([]byte(sharedTeamOnlyAdapter))
@@ -187,19 +214,22 @@ func nasSharedRuntime(args []string, stdout io.Writer) error {
 		return err
 	}
 	generationHash := sharedSHA(receiptRaw)
-	var records []sharedInstallationRecord
-	for _, name := range eventNames {
-		raw, err := runtimeReadLeaf(filepath.Join(*out, name), 0600, 65536)
-		if err != nil {
-			return err
-		}
-		records = append(records, sharedInstallationRecord{Name: name, Raw: raw})
-	}
-	state, previous, err := sharedInstallationHistory(generationHash, records)
+	state, previous, err := readSharedInstallationHistory(*out, generationHash, eventNames)
 	if err != nil {
 		return err
 	}
+	if rotationKind == sharedRotationKindAdapter {
+		if *action == "stage" {
+			return fmt.Errorf("shared adapter rotation in progress; retry set-adapter or commit")
+		}
+		if state == "committed" && *action != "commit" && *action != "status" && *action != "set-adapter" {
+			return fmt.Errorf("shared adapter rotation replay binding is pending; retry commit")
+		}
+	}
 	if *action == "status" {
+		if rotationKind == sharedRotationKindAdapter && state == "committed" {
+			state = "adapter-replay-pending"
+		}
 		storageSpec, err := sharedStorageSpecFromReceipt(receipt)
 		if err != nil {
 			return err
@@ -217,6 +247,9 @@ func nasSharedRuntime(args []string, stdout io.Writer) error {
 	if *action == "set-profile" {
 		return stageSharedProfileRotation(*base, *out, generation, baseHash, receipt, files, state, rotationKind, eventNames, *profile, *profileSHA)
 	}
+	if *action == "set-adapter" {
+		return stageSharedAdapterRotation(*base, *out, generation, baseHash, receipt, files, state, rotationKind, eventNames, previous, *adapter, *previousAdapter, *adapterSHA)
+	}
 	if *action == "check" || *action == "path" || *action == "project" {
 		if state != "committed" {
 			return fmt.Errorf("shared installation is not committed; ingress remains disabled")
@@ -225,6 +258,9 @@ func nasSharedRuntime(args []string, stdout io.Writer) error {
 			projected, err := projectSharedInstallation(*base, receipt, files)
 			if err != nil {
 				return err
+			}
+			if replayAction != "" {
+				return runSharedReplay(*base, receipt, files, generationHash, replayAction, stdout)
 			}
 			_, err = fmt.Fprint(stdout, projected)
 			return err
@@ -239,7 +275,12 @@ func nasSharedRuntime(args []string, stdout io.Writer) error {
 	}
 	if *action == "rollback" && hasRotation {
 		if state != "staged" {
-			return fmt.Errorf("shared rotation rollback requires a staged set-model or set-profile generation")
+			return fmt.Errorf("shared rotation rollback requires a staged generation")
+		}
+		if rotationKind == sharedRotationKindAdapter {
+			if _, err := sharedAdapterPredecessor(*base, *out, baseHash, receipt, files); err != nil {
+				return err
+			}
 		}
 		return restoreSharedRotation(*out, generation)
 	}
@@ -252,10 +293,7 @@ func nasSharedRuntime(args []string, stdout io.Writer) error {
 	}
 	if eventAction == "commit" && state == "committed" {
 		if hasRotation {
-			if err := os.RemoveAll(filepath.Join(*out, sharedRotationDir)); err != nil {
-				return err
-			}
-			return runtimeSyncDir(*out)
+			return finishSharedRotation(*base, *out, baseHash, rotationKind, receipt, files, stdout)
 		}
 		return nil
 	}
@@ -268,6 +306,11 @@ func nasSharedRuntime(args []string, stdout io.Writer) error {
 	if eventAction == "commit" {
 		if err := checkSharedInstallationEnvironment(*base, receipt); err != nil {
 			return err
+		}
+		if rotationKind == sharedRotationKindAdapter {
+			if _, err := sharedAdapterPredecessor(*base, *out, baseHash, receipt, files); err != nil {
+				return err
+			}
 		}
 	}
 	if fresh, err := verifyNASCollabBase(*base); err != nil || fresh != baseHash {
@@ -282,12 +325,21 @@ func nasSharedRuntime(args []string, stdout io.Writer) error {
 		return err
 	}
 	if eventAction == "commit" && hasRotation {
-		if err := os.RemoveAll(filepath.Join(*out, sharedRotationDir)); err != nil {
-			return err
-		}
-		return runtimeSyncDir(*out)
+		return finishSharedRotation(*base, *out, baseHash, rotationKind, receipt, files, stdout)
 	}
 	return nil
+}
+
+func readSharedInstallationHistory(dir, generationHash string, eventNames []string) (string, string, error) {
+	var records []sharedInstallationRecord
+	for _, name := range eventNames {
+		raw, err := runtimeReadLeaf(filepath.Join(dir, name), 0600, 65536)
+		if err != nil {
+			return "", "", err
+		}
+		records = append(records, sharedInstallationRecord{Name: name, Raw: raw})
+	}
+	return sharedInstallationHistory(generationHash, records)
 }
 
 func sharedCanonicalPath(path string) bool {
@@ -578,7 +630,8 @@ func readSharedRotationKind(out string) (string, error) {
 		return "", fmt.Errorf("shared rotation metadata refused: %w", err)
 	}
 	var meta sharedRotationMeta
-	if sharedUniqueJSON(raw) != nil || runtimeDecode(raw, &meta) != nil || meta.Version != 1 || (meta.Kind != sharedRotationKindModel && meta.Kind != sharedRotationKindProfile) {
+	if sharedUniqueJSON(raw) != nil || runtimeDecode(raw, &meta) != nil || meta.Version != 1 ||
+		(meta.Kind != sharedRotationKindModel && meta.Kind != sharedRotationKindProfile && meta.Kind != sharedRotationKindAdapter) {
 		return "", fmt.Errorf("shared rotation metadata refused")
 	}
 	return meta.Kind, nil
@@ -602,7 +655,7 @@ func stageSharedModelRotation(base, out, generation, baseHash string, receipt *s
 			return fmt.Errorf("initial shared staging is not a model rotation; use stage with the approved model")
 		}
 		if rotationKind != sharedRotationKindModel {
-			return fmt.Errorf("shared profile rotation in progress; overlapping set-model refused")
+			return fmt.Errorf("another shared rotation is in progress; overlapping set-model refused")
 		}
 		if receipt.Model == model {
 			return nil
@@ -635,7 +688,7 @@ func stageSharedProfileRotation(base, out, generation, baseHash string, receipt 
 			return fmt.Errorf("initial shared staging is not a profile rotation; use stage with the approved profile")
 		}
 		if rotationKind != sharedRotationKindProfile {
-			return fmt.Errorf("shared model rotation in progress; overlapping set-profile refused")
+			return fmt.Errorf("another shared rotation is in progress; overlapping set-profile refused")
 		}
 		if receipt.Profile == profileSHA {
 			approved, err := sharedApprovedFile(profile, profileSHA, false)
@@ -655,25 +708,29 @@ func stageSharedProfileRotation(base, out, generation, baseHash string, receipt 
 
 func replaceSharedModel(base, out, generation, baseHash string, receipt *sharedInstallationReceipt, files map[string][]byte, eventNames []string, model string) error {
 	return replaceSharedRotation(base, out, generation, baseHash, receipt, files, eventNames, sharedRotationKindModel, func(stage string, stagedFiles map[string][]byte, next *sharedInstallationReceipt) error {
-		if err := installation.RenderSharedHostConfig(installation.SharedHostInputs{
-			IdentityKeysFile:     filepath.Join(stage, "public/identity.jwks.json"),
-			EnterpriseKeysFile:   filepath.Join(stage, "public/enterprise.jwks.json"),
-			ModelKeysFile:        filepath.Join(stage, "public/model.jwks.json"),
-			MessageKeysFile:      filepath.Join(stage, "public/message.jwks.json"),
-			EnterprisePolicyFile: filepath.Join(stage, "public/enterprise-policy.json"),
-			Model:                model,
-			OutputFile:           filepath.Join(stage, "public/host.json"),
-		}); err != nil {
-			return err
-		}
-		host, err := runtimeReadLeaf(filepath.Join(stage, "public/host.json"), 0444, 256<<10)
-		if err != nil {
-			return err
-		}
-		stagedFiles["public/host.json"] = host
 		next.Model = model
-		return nil
+		return renderSharedRotationHost(stage, stagedFiles, model)
 	})
+}
+
+func renderSharedRotationHost(stage string, files map[string][]byte, model string) error {
+	if err := installation.RenderSharedHostConfig(installation.SharedHostInputs{
+		IdentityKeysFile:     filepath.Join(stage, "public/identity.jwks.json"),
+		EnterpriseKeysFile:   filepath.Join(stage, "public/enterprise.jwks.json"),
+		ModelKeysFile:        filepath.Join(stage, "public/model.jwks.json"),
+		MessageKeysFile:      filepath.Join(stage, "public/message.jwks.json"),
+		EnterprisePolicyFile: filepath.Join(stage, "public/enterprise-policy.json"),
+		Model:                model,
+		OutputFile:           filepath.Join(stage, "public/host.json"),
+	}); err != nil {
+		return err
+	}
+	host, err := runtimeReadLeaf(filepath.Join(stage, "public/host.json"), 0444, 256<<10)
+	if err != nil {
+		return err
+	}
+	files["public/host.json"] = host
+	return nil
 }
 
 func replaceSharedProfile(base, out, generation, baseHash string, receipt *sharedInstallationReceipt, files map[string][]byte, eventNames []string, profile, profileSHA string) error {
@@ -721,7 +778,7 @@ func replaceSharedRotation(base, out, generation, baseHash string, receipt *shar
 		}
 		path := filepath.Join(stage, filepath.FromSlash(name))
 		switch {
-		case name == "public/host.json" && kind == sharedRotationKindModel:
+		case name == "public/host.json" && (kind == sharedRotationKindModel || kind == sharedRotationKindAdapter):
 			// Re-rendered exclusively below; never stage a 0600 placeholder that
 			// would block the public renderer or leak into the published tree.
 			continue
@@ -790,6 +847,9 @@ func replaceSharedRotation(base, out, generation, baseHash string, receipt *shar
 	if _, err := runtimeReadLeaf(hostPath, 0444, 256<<10); err != nil {
 		return fmt.Errorf("shared host mode lost after rotation publish: %w", err)
 	}
+	if err := runtimeSyncDir(rotation); err != nil {
+		return err
+	}
 	return runtimeSyncDir(out)
 }
 
@@ -805,20 +865,9 @@ func restoreSharedRotation(out, generation string) error {
 	if err := materialsPrivateDirectory(previous); err != nil {
 		return err
 	}
-	entries, err := os.ReadDir(rotation)
+	eventNames, err := readSharedRotationEvents(rotation)
 	if err != nil {
 		return err
-	}
-	var eventNames []string
-	for _, entry := range entries {
-		name := entry.Name()
-		if name == "generation" || name == "rotation.json" {
-			continue
-		}
-		if !regexp.MustCompile(`^e-[0-9]{20}\.json$`).MatchString(name) {
-			return fmt.Errorf("unknown or interrupted shared rotation; preserve source for inspection")
-		}
-		eventNames = append(eventNames, name)
 	}
 	if err := os.RemoveAll(generation); err != nil {
 		return err
@@ -835,6 +884,25 @@ func restoreSharedRotation(out, generation string) error {
 		return err
 	}
 	return runtimeSyncDir(out)
+}
+
+func readSharedRotationEvents(rotation string) ([]string, error) {
+	entries, err := os.ReadDir(rotation)
+	if err != nil {
+		return nil, err
+	}
+	var names []string
+	for _, entry := range entries {
+		name := entry.Name()
+		if name == "generation" || name == "rotation.json" {
+			continue
+		}
+		if !regexp.MustCompile(`^e-[0-9]{20}\.json$`).MatchString(name) {
+			return nil, fmt.Errorf("unknown or interrupted shared rotation; preserve source for inspection")
+		}
+		names = append(names, name)
+	}
+	return names, nil
 }
 
 func stageSharedInstallation(base, out, baseHash, adapter, adapterSHA, profile, profileSHA, dedicatedProfile, dedicatedSHA, model string, teamOnly bool, storage sharedStorageSpec) error {
@@ -966,10 +1034,6 @@ func stageSharedInstallation(base, out, baseHash, adapter, adapterSHA, profile, 
 	return runtimeSyncDir(out)
 }
 
-func readSharedInstallation(base, generation, baseHash string) (*sharedInstallationReceipt, map[string][]byte, error) {
-	return readSharedInstallationPolicy(base, generation, baseHash, false)
-}
-
 func readSharedInstallationPolicy(base, generation, baseHash string, replacingProfile bool) (*sharedInstallationReceipt, map[string][]byte, error) {
 	raw, err := runtimeReadLeaf(filepath.Join(generation, "installation.receipt"), 0600, 65536)
 	if err != nil {
@@ -1030,7 +1094,7 @@ func readSharedInstallationPolicy(base, generation, baseHash string, replacingPr
 	if receipt.TeamOnly && !bytes.Equal(files["platform/uac-adapter.json"], []byte(sharedTeamOnlyAdapter)) {
 		return nil, nil, fmt.Errorf("team-only source cannot replace an existing identity adapter")
 	}
-	if err := sharedPreserveUACSource(base, files["platform/uac-adapter.json"], receipt.TeamOnly); err != nil {
+	if err := verifySharedAdapterBinding(base, &receipt, files["platform/uac-adapter.json"]); err != nil {
 		return nil, nil, err
 	}
 	legacy, err := sharedLegacyPublic(base)

@@ -13,13 +13,16 @@ _shared_backend=; _shared_quota_mount=; _shared_quota_binary=
 _shared_project_first=; _shared_project_last=
 _shared_set_model=
 _shared_set_profile=false
+_shared_set_adapter=
+_shared_previous_adapter_sha=
 _usage='Usage: shared-install.sh --profile-file /approved/profile.yml --profile-sha256 SHA --model ID --expected-base-sha256 SHA [--dedicated-profile-file /approved/dedicated.yml --dedicated-profile-sha256 SHA] [--backend ext4-image|xfs --quota-mount /path [--quota-binary /usr/sbin/xfs_quota] [--project-first N --project-last N]] [--team-only | --adapter-file /approved/adapter.json --adapter-sha256 SHA]
    or: shared-install.sh --set-model ID --expected-base-sha256 SHA
-   or: shared-install.sh --set-profile /approved/profile.yml --profile-sha256 SHA --expected-base-sha256 SHA'
+   or: shared-install.sh --set-profile /approved/profile.yml --profile-sha256 SHA --expected-base-sha256 SHA
+   or: shared-install.sh --set-adapter /approved/adapter.json --expected-adapter-sha256 CURRENT_SHA --adapter-sha256 NEW_SHA --expected-base-sha256 SHA'
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --team-only) [ "$_shared_team" = false ] || die 'duplicate team-only'; _shared_team=true; shift ;;
-    --set-model|--set-profile|--profile-file|--profile-sha256|--dedicated-profile-file|--dedicated-profile-sha256|--model|--expected-base-sha256|--adapter-file|--adapter-sha256|--backend|--quota-mount|--quota-binary|--project-first|--project-last)
+    --set-model|--set-profile|--set-adapter|--profile-file|--profile-sha256|--dedicated-profile-file|--dedicated-profile-sha256|--model|--expected-base-sha256|--expected-adapter-sha256|--adapter-file|--adapter-sha256|--backend|--quota-mount|--quota-binary|--project-first|--project-last)
       [ "$#" -ge 2 ] && [ -n "$2" ] || die 'shared installation flag requires a value'
       case "$1" in
         --set-model) [ -z "$_shared_set_model" ] || die 'duplicate set-model'; _shared_set_model=$2 ;;
@@ -29,11 +32,13 @@ while [ "$#" -gt 0 ]; do
           _shared_set_profile=true
           _shared_profile=$2 ;;
         --profile-file) [ -z "$_shared_profile" ] || die 'duplicate profile'; _shared_profile=$2 ;;
+        --set-adapter) [ -z "$_shared_set_adapter" ] || die 'duplicate set-adapter'; _shared_set_adapter=$2 ;;
         --profile-sha256) [ -z "$_shared_profile_sha" ] || die 'duplicate profile hash'; _shared_profile_sha=$2 ;;
         --dedicated-profile-file) [ -z "$_shared_dedicated" ] || die 'duplicate dedicated profile'; _shared_dedicated=$2 ;;
         --dedicated-profile-sha256) [ -z "$_shared_dedicated_sha" ] || die 'duplicate dedicated profile hash'; _shared_dedicated_sha=$2 ;;
         --model) [ -z "$_shared_model" ] || die 'duplicate model'; _shared_model=$2 ;;
         --expected-base-sha256) [ -z "$_shared_base_sha" ] || die 'duplicate base hash'; _shared_base_sha=$2 ;;
+        --expected-adapter-sha256) [ -z "$_shared_previous_adapter_sha" ] || die 'duplicate current adapter hash'; _shared_previous_adapter_sha=$2 ;;
         --adapter-file) [ -z "$_shared_adapter" ] || die 'duplicate adapter'; _shared_adapter=$2 ;;
         --adapter-sha256) [ -z "$_shared_adapter_sha" ] || die 'duplicate adapter hash'; _shared_adapter_sha=$2 ;;
         --backend) [ -z "$_shared_backend" ] || die 'duplicate backend'; _shared_backend=$2 ;;
@@ -46,6 +51,28 @@ while [ "$#" -gt 0 ]; do
     *) die "$_usage" ;;
   esac
 done
+if [ -n "$_shared_set_adapter" ]; then
+  [ -n "$_shared_previous_adapter_sha" ] && [ -n "$_shared_adapter_sha" ] && [ -n "$_shared_base_sha" ] \
+    || die 'set-adapter requires current and new adapter SHA256 approvals and the original base SHA256'
+  [ "$_shared_set_profile" = false ] && [ "$_shared_team" = false ] && \
+    [ -z "$_shared_set_model$_shared_profile$_shared_profile_sha$_shared_model$_shared_adapter$_shared_dedicated$_shared_dedicated_sha$_shared_backend$_shared_quota_mount$_shared_quota_binary$_shared_project_first$_shared_project_last" ] \
+    || die 'set-adapter only accepts the new adapter file and current, new and base approvals'
+  if [ "${AURIGA_INSTALL_MODE:-host}" = container ]; then
+    sh "$NAS_ROOT/scripts/installer.sh" shared-set-adapter "$_shared_base_sha" "$_shared_set_adapter" "$_shared_previous_adapter_sha" "$_shared_adapter_sha"
+    sh "$NAS_ROOT/scripts/installer.sh" shared-commit "$_shared_base_sha" "$_shared_previous_adapter_sha" "$_shared_adapter_sha"
+  else
+    "$(bootstrap_binary)" shared-runtime -base "$AURIGA_DATA_ROOT/config/materials" -out "$AURIGA_DATA_ROOT/config/shared-source" \
+      -action set-adapter -expected-base-sha256 "$_shared_base_sha" -adapter-file "$_shared_set_adapter" \
+      -expected-adapter-sha256 "$_shared_previous_adapter_sha" -adapter-sha256 "$_shared_adapter_sha"
+    "$(bootstrap_binary)" shared-runtime -base "$AURIGA_DATA_ROOT/config/materials" -out "$AURIGA_DATA_ROOT/config/shared-source" \
+      -action commit -expected-base-sha256 "$_shared_base_sha" \
+      -expected-adapter-sha256 "$_shared_previous_adapter_sha" -adapter-sha256 "$_shared_adapter_sha"
+  fi
+  sh "$NAS_ROOT/scripts/render.sh" --core-only
+  info 'shared adapter committed and role files re-rendered; run start.sh so Platform reloads the adapter'
+  exit 0
+fi
+[ -z "$_shared_previous_adapter_sha" ] || die 'current adapter approval is only accepted by set-adapter'
 if [ -n "$_shared_set_model" ] && [ "$_shared_set_profile" = true ]; then
   die 'set-model and set-profile are mutually exclusive in one invocation; run them sequentially'
 fi
