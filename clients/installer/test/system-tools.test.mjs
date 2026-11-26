@@ -1,11 +1,10 @@
-import { wrapSetupFixture } from './helpers.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { join, delimiter } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { writeFileSync, mkdirSync } from 'node:fs';
 import { systemTool } from '../runtime/system-tools.mjs';
-import { tempBase } from './helpers.mjs';
+import { tempBase, wrapSetupFixture, writeStageZip } from './helpers.mjs';
 import { extractArchive } from '../runtime/update.mjs';
 
 test(
@@ -42,11 +41,7 @@ test(
       mkdirSync(join(stage, 'payload'));
       writeFileSync(join(stage, 'payload', 'ok'), 'yes');
       const archive = join(base, 'test.zip');
-      assert.equal(
-        spawnSync(systemTool('tar'), ['-a', '-cf', archive, '-C', stage, '.'])
-          .status,
-        0,
-      );
+      writeStageZip(stage, archive);
       wrapSetupFixture(archive);
       assert.equal(
         extractArchive(archive, join(base, 'expanded')),

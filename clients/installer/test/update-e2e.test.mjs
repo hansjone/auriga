@@ -1,4 +1,4 @@
-import { wrapSetupFixture } from './helpers.mjs';
+import { wrapSetupFixture, writeStageZip } from './helpers.mjs';
 /** Isolated publisher/transport substitute, real archive checks and install transactions. */
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -13,9 +13,7 @@ import {
   existsSync,
 } from 'node:fs';
 import { join } from 'node:path';
-import { spawnSync } from 'node:child_process';
 import { signRelease, reviewRelease } from '../scripts/sign-release.mjs';
-import { systemTool } from '../runtime/system-tools.mjs';
 import {
   approvePending,
   createUpdater,
@@ -56,10 +54,7 @@ test('沙箱：发布、检测、点击、退出安装；坏包拒绝，旧数�
   mkdirSync(stage);
   cpSync(next.dir, join(stage, 'payload'), { recursive: true });
   const zip = join(base, 'desktop.zip');
-  assert.equal(
-    spawnSync(systemTool('tar'), ['-a', '-cf', zip, '-C', stage, '.']).status,
-    0,
-  );
+  writeStageZip(stage, zip);
   wrapSetupFixture(zip);
   const signingOptions = {
     payload: next.dir,

@@ -1,4 +1,4 @@
-import { wrapSetupFixture } from './helpers.mjs';
+import { wrapSetupFixture, writeStageZip } from './helpers.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
@@ -12,7 +12,6 @@ import { fileURLToPath } from 'node:url';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { createHash, generateKeyPairSync } from 'node:crypto';
-import { systemTool } from '../runtime/system-tools.mjs';
 import { unsignedRelease } from '../scripts/sign-release.mjs';
 import { makeRelease } from '../scripts/make-release.mjs';
 import { verifyRelease } from '../runtime/release.mjs';
@@ -28,11 +27,7 @@ test('CI 制品记录与离线审阅确认绑定，变更后必须重新审阅',
   const stage = join(base, 'stage');
   mkdirSync(stage);
   cpSync(payload.dir, join(stage, 'payload'), { recursive: true });
-  assert.equal(
-    spawnSync(systemTool('tar'), ['-a', '-cf', archive, '-C', stage, '.'])
-      .status,
-    0,
-  );
+  writeStageZip(stage, archive);
   wrapSetupFixture(archive);
   const record = makeRelease({
     payload: payload.dir,

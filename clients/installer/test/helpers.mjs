@@ -1,4 +1,5 @@
 import { Buffer } from 'node:buffer';
+import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import {
   mkdirSync,
@@ -149,6 +150,37 @@ export function tempBase(t) {
     }),
   );
   return base;
+}
+
+/** Write a real PKZIP of stageDirectory (GNU tar -a is not portable ZIP). */
+export function writeStageZip(stageDirectory, zipPath) {
+  const script =
+    'import os,sys,zipfile\n' +
+    'root,out=sys.argv[1:3]\n' +
+    'with zipfile.ZipFile(out,"w",zipfile.ZIP_DEFLATED) as archive:\n' +
+    '  for dirpath,_,names in os.walk(root):\n' +
+    '    for name in names:\n' +
+    '      path=os.path.join(dirpath,name)\n' +
+    '      archive.write(path, os.path.relpath(path, root).replace(os.sep,"/"))\n';
+  const runners =
+    process.platform === 'win32'
+      ? [['py', '-3'], ['python'], ['python3']]
+      : [['python3'], ['python']];
+  let last;
+  for (const [command, ...args] of runners) {
+    last = spawnSync(
+      command,
+      [...args, '-c', script, stageDirectory, zipPath],
+      {
+        encoding: 'utf8',
+        windowsHide: true,
+      },
+    );
+    if (last.status === 0) return zipPath;
+  }
+  throw new Error(
+    `unable to write zip fixture: ${last?.stderr || last?.error || last?.status}`,
+  );
 }
 
 export function wrapSetupFixture(archive) {
