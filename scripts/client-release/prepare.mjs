@@ -11,11 +11,11 @@ import {
   lstatSync,
   realpathSync,
   unlinkSync,
-  rmSync,
   writeFileSync,
 } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { removeDirSafely } from './cleanup.mjs';
 import {
   ROOT,
   BUILD_NODE,
@@ -100,6 +100,21 @@ export function stageWorkspaceLocks(root, locks, workspace) {
   }
 }
 /**
+ * 构造仅用于临时 workspace `pnpm fetch` 的隔离环境：
+ * 显式关闭 symlink（PNPM_CONFIG_SYMLINK=false），避免 pnpm 在临时虚拟 store 内创建
+ * 包间 NTFS Junction（导致 Windows 清理 _prepare 时出现悬空 Junction ENOTEMPTY）；
+ * 仅作用于本次 fetch 子进程，不影响外部环境或离线构建时的 pnpm install。
+ */
+export function pnpmFetchEnv(env = process.env) {
+  const next = {};
+  for (const [key, value] of Object.entries(env ?? {})) {
+    if (/^(pnpm|npm)_config_symlink$/i.test(key)) continue;
+    next[key] = value;
+  }
+  next.PNPM_CONFIG_SYMLINK = 'false';
+  return next;
+}
+/**
  * 用套件自带的 build-node 与 build-pnpm 取回 pnpm store（已有内容作为起点，只下新增），
  * 完成后去掉机器相关的项目引用。
  */
@@ -123,7 +138,7 @@ export function fetchPnpmStore(
       store,
     ],
     workspace,
-    env,
+    pnpmFetchEnv(env),
   );
   removeProjectReferences(store);
 }
@@ -137,7 +152,10 @@ export function installPluginDeps(
 ) {
   const platform = clientPlatform(target);
   const plugin = join(kit, 'plugin-deps');
-  rmSync(plugin, { recursive: true, force: true });
+  removeDirSafely(plugin, {
+    within: kit,
+    phase: 'install-plugin-deps-reset',
+  });
   mkdirSync(plugin);
   for (const file of ['package.json', 'package-lock.json'])
     cpSync(join(root, 'clients/dsh-plugin', file), join(plugin, file));
@@ -332,10 +350,13 @@ export async function prepareInputs(parent, options = {}) {
   const workspace = join(work, 'workspace');
   stageWorkspaceLocks(root, locks, workspace);
   fetchPnpmStore(kit, workspace, join(kit, 'pnpm-store'), env, run, target);
+  console.error('[prepare] pnpm fetch 完成，正在清理临时工作目录 _prepare…');
   // Every recursive removal is a new directory inside this exclusively reserved kit.
-  if (!work.startsWith(kit + '\\') && !work.startsWith(kit + '/'))
-    throw new Error('非法准备工作路径');
-  rmSync(work, { recursive: true, force: true });
+  removeDirSafely(work, {
+    within: kit,
+    phase: 'prepare-workspace-cleanup',
+  });
+  console.error('[prepare] 临时工作目录清理完成，正在封存套件清单…');
   // npm/.bin and other package links appear after installs; flatten before seal.
   if (platform.target === 'linux-x64') materializeSymlinks(kit);
   const manifest = sealInputs(kit, tools, root, target);

@@ -208,6 +208,61 @@ func TestWindowsReleaseRejectsChangedBuildNode(t *testing.T) {
 	}
 }
 
+func TestWindowsReleaseBuildNodePinStrictPolicy(t *testing.T) {
+	source := t.TempDir()
+	fixtureDSHReleaseInput(t, source)
+	key, public := testSigningKeys(t)
+	archive, hash, _ := fixtureWindowsReleaseInput(t, source, t.TempDir(), key)
+	pinPath := filepath.Join(source, "scripts/client-release/build-node.json")
+
+	winSHA := strings.Repeat("a", 64)
+	linuxSHA := strings.Repeat("b", 64)
+	linuxSHAB := strings.Repeat("c", 64)
+
+	t.Run("windows-only legacy pin accepted", func(t *testing.T) {
+		writeReleaseFixture(t, pinPath, []byte(`{"version":"22.19.0","winX64ZipSha256":"`+winSHA+`","winX64ZipSha256Sources":["https://nodejs.org/dist/v22.19.0/SHASUMS256.txt"],"winX64ZipSha256Note":"win"}`))
+		if _, err := verifyWindowsRelease(t.Context(), archive, hash, source, public, t.TempDir()); err != nil {
+			t.Fatalf("rejected legacy Windows-only build-node pin: %v", err)
+		}
+	})
+
+	t.Run("multi-platform pin accepted and linux sha isolated from windows verification", func(t *testing.T) {
+		writeReleaseFixture(t, pinPath, []byte(`{"version":"22.19.0","winX64ZipSha256":"`+winSHA+`","winX64ZipSha256Sources":["https://nodejs.org/dist/v22.19.0/SHASUMS256.txt"],"winX64ZipSha256Note":"win","linuxX64TarSha256":"`+linuxSHA+`","linuxX64TarSha256Sources":["https://nodejs.org/dist/v22.19.0/SHASUMS256.txt"],"linuxX64TarSha256Note":"linux"}`))
+		if _, err := verifyWindowsRelease(t.Context(), archive, hash, source, public, t.TempDir()); err != nil {
+			t.Fatalf("rejected multi-platform build-node pin: %v", err)
+		}
+		writeReleaseFixture(t, pinPath, []byte(`{"version":"22.19.0","winX64ZipSha256":"`+winSHA+`","linuxX64TarSha256":"`+linuxSHAB+`"}`))
+		if _, err := verifyWindowsRelease(t.Context(), archive, hash, source, public, t.TempDir()); err != nil {
+			t.Fatalf("changing valid linuxX64TarSha256 unexpectedly broke Windows verification: %v", err)
+		}
+	})
+
+	t.Run("unknown field still rejected by strict reader", func(t *testing.T) {
+		writeReleaseFixture(t, pinPath, []byte(`{"version":"22.19.0","linuxX64TarSha256Typo":"`+linuxSHA+`"}`))
+		if _, err := verifyWindowsRelease(t.Context(), archive, hash, source, public, t.TempDir()); err == nil || !strings.Contains(err.Error(), "unknown field") {
+			t.Fatalf("accepted unknown field in build-node.json: %v", err)
+		}
+	})
+
+	t.Run("trailing JSON still rejected", func(t *testing.T) {
+		writeReleaseFixture(t, pinPath, []byte(`{"version":"22.19.0"}{"extra":true}`))
+		if _, err := verifyWindowsRelease(t.Context(), archive, hash, source, public, t.TempDir()); err == nil || !strings.Contains(err.Error(), "多余数据") {
+			t.Fatalf("accepted trailing JSON in build-node.json: %v", err)
+		}
+	})
+
+	t.Run("invalid windows or linux sha256 rejected", func(t *testing.T) {
+		writeReleaseFixture(t, pinPath, []byte(`{"version":"22.19.0","winX64ZipSha256":"not-a-sha"}`))
+		if _, err := verifyWindowsRelease(t.Context(), archive, hash, source, public, t.TempDir()); err == nil || !strings.Contains(err.Error(), "zip 摘要无效") {
+			t.Fatalf("accepted invalid winX64ZipSha256: %v", err)
+		}
+		writeReleaseFixture(t, pinPath, []byte(`{"version":"22.19.0","winX64ZipSha256":"`+winSHA+`","linuxX64TarSha256":"NOTHEX"}`))
+		if _, err := verifyWindowsRelease(t.Context(), archive, hash, source, public, t.TempDir()); err == nil || !strings.Contains(err.Error(), "Linux 构建 Node tar 摘要无效") {
+			t.Fatalf("accepted invalid linuxX64TarSha256: %v", err)
+		}
+	})
+}
+
 func TestDSHReleaseSourcePinnedArchive(t *testing.T) {
 	source, input := t.TempDir(), os.Getenv("AURIGA_TEST_DSH_SOURCE")
 	if input == "" {

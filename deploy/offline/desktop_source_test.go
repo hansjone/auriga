@@ -18,19 +18,12 @@ func TestBuildNodePinNodeInterop(t *testing.T) {
 		t.Skip("Node not installed; cross-language check runs on Windows toolchain")
 	}
 	root := repoRoot(t)
-	raw, err := os.ReadFile(filepath.Join(root, "scripts", "client-release", "build-node.json"))
-	if err != nil {
+	var pin buildNodePin
+	if err := readJSON(filepath.Join(root, "scripts", "client-release", "build-node.json"), &pin); err != nil {
 		t.Fatal(err)
 	}
-	var pin struct {
-		Version         string   `json:"version"`
-		WinX64ZipSha256 string   `json:"winX64ZipSha256"`
-		Sources         []string `json:"winX64ZipSha256Sources"`
-	}
-	if err := json.Unmarshal(raw, &pin); err != nil {
-		t.Fatal(err)
-	}
-	if pin.Version == "" || len(pin.WinX64ZipSha256) != 64 || len(pin.Sources) < 2 {
+	if pin.Version == "" || !hex64.MatchString(pin.WinX64ZipSha256) || len(pin.WinX64ZipSha256Sources) < 2 ||
+		!hex64.MatchString(pin.LinuxX64TarSha256) || len(pin.LinuxX64TarSha256Sources) < 2 {
 		t.Fatalf("build-node.json 钉死字段不完整：%+v", pin)
 	}
 	module, err := filepath.Abs(filepath.Join(root, "scripts", "client-release", "inputs.mjs"))
@@ -42,19 +35,20 @@ func TestBuildNodePinNodeInterop(t *testing.T) {
 		path = "/" + path
 	}
 	uri := (&url.URL{Scheme: "file", Path: path}).String()
-	script := `const m=await import(process.argv[1]);console.log(JSON.stringify({version:m.BUILD_NODE,sha:m.BUILD_NODE_ZIP_SHA256}));`
+	script := `const m=await import(process.argv[1]);const lp=m.readBuildNodePin(m.ROOT,'linux-x64');console.log(JSON.stringify({version:m.BUILD_NODE,sha:m.BUILD_NODE_ZIP_SHA256,linuxSha:lp.linuxX64TarSha256}));`
 	out, err := exec.Command(node, "--input-type=module", "-e", script, uri).CombinedOutput()
 	if err != nil {
 		t.Fatalf("Node failed: %v %s", err, out)
 	}
 	var actual struct {
-		Version string `json:"version"`
-		SHA     string `json:"sha"`
+		Version  string `json:"version"`
+		SHA      string `json:"sha"`
+		LinuxSHA string `json:"linuxSha"`
 	}
 	if err := json.Unmarshal(out, &actual); err != nil {
 		t.Fatal(err)
 	}
-	if actual.Version != pin.Version || actual.SHA != pin.WinX64ZipSha256 {
+	if actual.Version != pin.Version || actual.SHA != pin.WinX64ZipSha256 || actual.LinuxSHA != pin.LinuxX64TarSha256 {
 		t.Fatalf("Go↔Node build-node 钉死不一致：go=%+v node=%+v", pin, actual)
 	}
 }
