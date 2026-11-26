@@ -455,12 +455,19 @@ test('build-node.json 钉死 win-x64 zip SHA-256，缺字段或非法摘要拒�
   const pin = readBuildNodePin(ROOT);
   assert.equal(pin.version, BUILD_NODE);
   assert.equal(pin.winX64ZipSha256, BUILD_NODE_ZIP_SHA256);
+  assert.equal(pin.archiveSha256, BUILD_NODE_ZIP_SHA256);
   assert.ok(pin.sources.length >= 2, '须记录至少两个独立核对来源');
+  const linux = readBuildNodePin(ROOT, 'linux-x64');
+  assert.equal(linux.version, BUILD_NODE);
+  assert.match(linux.linuxX64TarSha256, HASH);
+  assert.equal(linux.archiveSha256, linux.linuxX64TarSha256);
+  assert.ok(linux.sources.length >= 2);
   const dir = temporary(t);
   const path = join(dir, 'scripts/client-release/build-node.json');
   mkdirSync(join(dir, 'scripts/client-release'), { recursive: true });
   writeFileSync(path, JSON.stringify({ version: '22.19.0' }));
   assert.throws(() => readBuildNodePin(dir), /winX64ZipSha256/);
+  assert.throws(() => readBuildNodePin(dir, 'linux-x64'), /linuxX64TarSha256/);
   writeFileSync(
     path,
     JSON.stringify({ version: '22.19.0', winX64ZipSha256: 'ZZ' }),

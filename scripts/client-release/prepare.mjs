@@ -16,15 +16,17 @@ import { fileURLToPath } from 'node:url';
 import {
   ROOT,
   BUILD_NODE,
-  BUILD_NODE_ZIP_SHA256,
+  readBuildNodePin,
   lockIdentity,
   systemTools,
   sealInputs,
 } from './inputs.mjs';
+import { CLIENT_TARGET, clientPlatform } from './platform.mjs';
 import { createDownloader } from './files-source.mjs';
 import { sha256File } from '../../clients/installer/runtime/verify.mjs';
 import {
   downloadPythonInputs,
+  pythonLockForTarget,
   readPythonLock,
 } from '../../clients/installer/scripts/python-runtime.mjs';
 
@@ -51,13 +53,18 @@ export function removeProjectReferences(store) {
   }
 }
 /** npm 安装的公共参数：联网准备与现场联网派生共用，保证两处行为一致。 */
-export const NPM_FLAGS = [
-  '--ignore-scripts',
-  '--no-audit',
-  '--no-fund',
-  '--os=win32',
-  '--cpu=x64',
-];
+export function npmFlagsForTarget(target = CLIENT_TARGET) {
+  const platform = clientPlatform(target);
+  return [
+    '--ignore-scripts',
+    '--no-audit',
+    '--no-fund',
+    `--os=${platform.npmOs}`,
+    `--cpu=${platform.npmCpu}`,
+  ];
+}
+/** @deprecated Prefer npmFlagsForTarget(target); default remains win-x64. */
+export const NPM_FLAGS = npmFlagsForTarget(CLIENT_TARGET);
 /** 把依赖锁与各 workspace 的 package.json 摆进临时 workspace，供 pnpm fetch 使用。 */
 export function stageWorkspaceLocks(root, locks, workspace) {
   mkdirSync(workspace, { recursive: true });
@@ -71,9 +78,17 @@ export function stageWorkspaceLocks(root, locks, workspace) {
  * 用套件自带的 build-node 与 build-pnpm 取回 pnpm store（已有内容作为起点，只下新增），
  * 完成后去掉机器相关的项目引用。
  */
-export function fetchPnpmStore(kit, workspace, store, env, runner = run) {
+export function fetchPnpmStore(
+  kit,
+  workspace,
+  store,
+  env,
+  runner = run,
+  target = CLIENT_TARGET,
+) {
+  const platform = clientPlatform(target);
   runner(
-    join(kit, 'build-node/node.exe'),
+    join(kit, platform.buildNode),
     [
       join(kit, 'build-pnpm/node_modules/pnpm/bin/pnpm.cjs'),
       'fetch',
@@ -88,28 +103,35 @@ export function fetchPnpmStore(kit, workspace, store, env, runner = run) {
   removeProjectReferences(store);
 }
 /** 重建 plugin-deps：旧依赖整个删除，复制源码里的 package.json/lock 后 npm ci。 */
-export function installPluginDeps(kit, root, env, runner = run) {
+export function installPluginDeps(
+  kit,
+  root,
+  env,
+  runner = run,
+  target = CLIENT_TARGET,
+) {
+  const platform = clientPlatform(target);
   const plugin = join(kit, 'plugin-deps');
   rmSync(plugin, { recursive: true, force: true });
   mkdirSync(plugin);
   for (const file of ['package.json', 'package-lock.json'])
     cpSync(join(root, 'clients/dsh-plugin', file), join(plugin, file));
   runner(
-    join(kit, 'build-node/node.exe'),
+    join(kit, platform.buildNode),
     [
       join(kit, 'build-node/node_modules/npm/bin/npm-cli.js'),
       'ci',
       '--omit=dev',
       '--omit=peer',
-      ...NPM_FLAGS,
+      ...npmFlagsForTarget(target),
     ],
     plugin,
     env,
   );
 }
 /**
- * 准备 Windows 客户端输入套件。
- * options：filesSource、allowPublic（默认 true，兼容维护机直连公网）、
+ * 准备 Desktop 客户端输入套件（默认 win-x64；linux-x64 须在 Linux x64 主机上跑）。
+ * options：target、filesSource、allowPublic（默认 true，兼容维护机直连公网）、
  * npmRegistry、caFile（内部依赖源私有 CA，curl --cacert 与 npm cafile）、
  * download（注入下载器，测试用）、root。
  */
@@ -121,12 +143,17 @@ export async function prepareInputs(parent, options = {}) {
     caFile,
     download: injectedDownload,
     root = ROOT,
+    target = CLIENT_TARGET,
   } = options;
+  const platform = clientPlatform(target);
   const download =
     injectedDownload ?? createDownloader({ filesSource, allowPublic, caFile });
-  const tools = systemTools();
-  const { lockSha256, locks } = lockIdentity(root);
-  const kit = join(resolve(parent), `auriga-client-windows-${lockSha256}`);
+  const tools = systemTools(target);
+  if (!tools.length)
+    throw new Error(`${platform.target} 构建机缺少必需的系统 tar`);
+  const buildNodePin = readBuildNodePin(root, target);
+  const { lockSha256, locks } = lockIdentity(root, target);
+  const kit = join(resolve(parent), `${platform.kitPrefix}-${lockSha256}`);
   mkdirSync(kit, { recursive: false });
   const work = join(kit, '_prepare');
   mkdirSync(work);
@@ -138,20 +165,33 @@ export async function prepareInputs(parent, options = {}) {
   ).packageManager;
   const pnpmBuildVersion = packageManager.match(/^pnpm@(\d+\.\d+\.\d+)$/)?.[1];
   if (!pnpmBuildVersion) throw new Error('pnpm 必须固定精确版本');
-  const tar = join(process.env.SystemRoot ?? 'C:\\Windows', 'System32/tar.exe');
-  await downloadPythonInputs(readPythonLock(), kit, download);
+  const tar =
+    platform.target === 'linux-x64'
+      ? tools[0].path
+      : join(process.env.SystemRoot ?? 'C:\\Windows', 'System32/tar.exe');
+  await downloadPythonInputs(
+    readPythonLock(pythonLockForTarget(target)),
+    kit,
+    download,
+  );
   mkdirSync(join(kit, 'runtime'));
   mkdirSync(join(kit, 'build-node'));
+  const runtimeNodeSha = runtime[platform.nodeShaField];
+  if (
+    typeof runtimeNodeSha !== 'string' ||
+    !/^[a-f0-9]{64}$/.test(runtimeNodeSha)
+  )
+    throw new Error(`upstream.json 缺少有效的 ${platform.nodeShaField}`);
   for (const version of [...new Set([BUILD_NODE, runtime.node])]) {
-    const name = `node-v${version}-win-x64.zip`;
-    const zip = join(
+    const name = platform.nodeArchive(version);
+    const archive = join(
       version === runtime.node ? join(kit, 'runtime') : work,
       name,
     );
-    // 构建 Node：以仓库 build-node.json 的 winX64ZipSha256 为准；runtime Node：以
+    // 构建 Node：以仓库 build-node.json 目标归档摘要为准；runtime Node：以
     // upstream.json 为准。下载的 SHASUMS256.txt 仅作参考比对，不得覆盖仓库钉死摘要。
     const pinned =
-      version === BUILD_NODE ? BUILD_NODE_ZIP_SHA256 : runtime.nodeWinX64Sha256;
+      version === BUILD_NODE ? buildNodePin.archiveSha256 : runtimeNodeSha;
     const sums = join(work, `SHASUMS256-${version}.txt`);
     let listed;
     try {
@@ -166,7 +206,7 @@ export async function prepareInputs(parent, options = {}) {
         .split(/\s+/)[0];
     } catch (err) {
       console.warn(
-        `警告：无法取得 SHASUMS256.txt（${err.message}），仍按仓库钉死摘要核 zip`,
+        `警告：无法取得 SHASUMS256.txt（${err.message}），仍按仓库钉死摘要核归档`,
       );
     }
     if (listed && listed !== pinned)
@@ -175,19 +215,23 @@ export async function prepareInputs(parent, options = {}) {
       );
     if (listed === undefined && existsSync(sums))
       console.warn(
-        `警告：SHASUMS256.txt 无 ${name} 行，仍按仓库钉死摘要核 zip`,
+        `警告：SHASUMS256.txt 无 ${name} 行，仍按仓库钉死摘要核归档`,
       );
-    await download(`https://nodejs.org/dist/v${version}/${name}`, zip);
-    if (sha256File(zip) !== pinned)
-      throw new Error(`Node zip 摘要不符：${name}（期望仓库钉死 ${pinned}）`);
+    await download(`https://nodejs.org/dist/v${version}/${name}`, archive);
+    if (sha256File(archive) !== pinned)
+      throw new Error(
+        `Node 归档摘要不符：${name}（期望仓库钉死 ${pinned}）`,
+      );
     if (version === BUILD_NODE) {
-      run(tar, ['-xf', zip, '-C', work], root);
-      cpSync(join(work, `node-v${version}-win-x64`), join(kit, 'build-node'), {
-        recursive: true,
-      });
+      run(tar, ['-xf', archive, '-C', work], root);
+      cpSync(
+        join(work, platform.nodeExtractDir(version)),
+        join(kit, 'build-node'),
+        { recursive: true },
+      );
     }
   }
-  const node = join(kit, 'build-node/node.exe');
+  const node = join(kit, platform.buildNode);
   const npm = join(kit, 'build-node/node_modules/npm/bin/npm-cli.js');
   const env = {
     ...process.env,
@@ -197,7 +241,7 @@ export async function prepareInputs(parent, options = {}) {
     ...(npmRegistry ? { npm_config_registry: npmRegistry } : {}),
     ...(caFile ? { npm_config_cafile: caFile } : {}),
   };
-  const flags = NPM_FLAGS;
+  const flags = npmFlagsForTarget(target);
   for (const [name, version, integrity] of [
     ['build-pnpm', pnpmBuildVersion, null],
     ['payload-pnpm', runtime.pnpm, runtime.pnpmIntegrity],
@@ -240,21 +284,22 @@ export async function prepareInputs(parent, options = {}) {
   if (dsh.version !== runtime.dsh || dsh.integrity !== runtime.dshIntegrity)
     throw new Error('DSH pin 与锁不符');
   run(node, [npm, 'ci', '--omit=dev', ...flags], app, env);
-  installPluginDeps(kit, root, env);
+  installPluginDeps(kit, root, env, run, target);
   const workspace = join(work, 'workspace');
   stageWorkspaceLocks(root, locks, workspace);
-  fetchPnpmStore(kit, workspace, join(kit, 'pnpm-store'), env);
+  fetchPnpmStore(kit, workspace, join(kit, 'pnpm-store'), env, run, target);
   // Every recursive removal is a new directory inside this exclusively reserved kit.
   if (!work.startsWith(kit + '\\') && !work.startsWith(kit + '/'))
     throw new Error('非法准备工作路径');
   rmSync(work, { recursive: true, force: true });
-  const manifest = sealInputs(kit, tools, root);
+  const manifest = sealInputs(kit, tools, root, target);
   const summary = {
     directory: kit,
     lockSha256,
     manifestSha256: manifest.manifestSha256,
     files: manifest.files.length,
     bytes: manifest.bytes,
+    platform: platform.target,
   };
   console.log(JSON.stringify(summary, null, 2));
   return { ...manifest, ...summary };
@@ -262,9 +307,13 @@ export async function prepareInputs(parent, options = {}) {
 if (resolve(process.argv[1] ?? '') === fileURLToPath(import.meta.url)) {
   try {
     const parent = process.argv[2];
+    const targetArg = process.argv.find((arg) => arg.startsWith('--target='));
+    const target = targetArg
+      ? targetArg.slice('--target='.length)
+      : CLIENT_TARGET;
     if (!parent || !existsSync(parent))
-      throw new Error('请提供已存在的专用 Windows devkit 输出父目录');
-    await prepareInputs(parent);
+      throw new Error('请提供已存在的专用客户端套件输出父目录');
+    await prepareInputs(parent, { target });
   } catch (error) {
     console.error(error.message);
     process.exitCode = 1;

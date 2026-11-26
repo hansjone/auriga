@@ -218,6 +218,7 @@ export function startOfflineBuild(options, hooks = {}) {
   const kit = verifyInputs(options.devkit, options['devkit-sha256'], ROOT, {
     ...kitTrust(options),
     toolsBaseline: toolsBaselineOption(),
+    target: options.target,
   });
   launchOfflineBuild(options, kit, hooks);
 }
@@ -303,7 +304,7 @@ export function launchOfflineBuild(options, kit, hooks = {}) {
   try {
     copyBuildSource(sourceRoot, buildRoot);
     result = spawn(
-      join(kit.directory, clientPlatform().buildNode),
+      join(kit.directory, clientPlatform(options.target).buildNode),
       [
         join(buildRoot, 'scripts/client-release/cli.mjs'),
         '_build-worker',
@@ -424,6 +425,7 @@ export async function buildWorker(optionsFile, hooks = {}) {
   const kit = verifyInputs(o.devkit, o['devkit-sha256'], root, {
     ...kitTrust(o),
     toolsBaseline: toolsBaselineOption(),
+    target: o.target,
     ...(hooks.checkTools === false ? { checkTools: false } : {}),
   });
   // ROOT 是 <out>/build-src 里的副本；源码身份与“构建期间未变化”都按用户的源码目录。
