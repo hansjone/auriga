@@ -9,6 +9,7 @@
   </parent>
   <artifactId>iam-api</artifactId>
   <dependencies>
+    <dependency><groupId>auriga</groupId><artifactId>common</artifactId><version>${project.version}</version></dependency>
     <dependency><groupId>tools.jackson.core</groupId><artifactId>jackson-databind</artifactId></dependency>
     <dependency><groupId>auriga</groupId><artifactId>contracts</artifactId><version>${project.version}</version></dependency>
   </dependencies>

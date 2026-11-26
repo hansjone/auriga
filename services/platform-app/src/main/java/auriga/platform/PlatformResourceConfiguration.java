@@ -6,12 +6,15 @@ import auriga.common.events.OutboxForwarder;
 import auriga.common.observability.EventMetrics;
 import auriga.common.persistence.CommonMigrations;
 import auriga.common.persistence.TenantTransactionManager;
+import auriga.common.security.AurigaPrincipal;
 import auriga.contracts.org.v1.*;
+import auriga.iam.api.VerifiedAuthorDepartment;
 import auriga.org.OrgService;
 import auriga.resource.api.ResourceAccessInputs;
 import com.zaxxer.hikari.HikariDataSource;
 import java.time.Clock;
 import java.time.Duration;
+import java.util.Optional;
 import java.util.UUID;
 import javax.sql.DataSource;
 import org.flywaydb.core.Flyway;
@@ -118,8 +121,14 @@ public class PlatformResourceConfiguration {
   }
 
   @Bean
-  ResourceAccessInputs combinedResourceInputs(OrgService org) {
+  ResourceAccessInputs combinedResourceInputs(
+      OrgService org, Optional<VerifiedAuthorDepartment> iam) {
     return new ResourceAccessInputs() {
+      @Override
+      public String authorDepartment(AurigaPrincipal actor) {
+        return iam.map(source -> source.authorDepartment(actor)).orElse("");
+      }
+
       @Override
       public Member member(UUID tenantId, UUID accountId) {
         return TenantContext.call(
@@ -130,6 +139,7 @@ public class PlatformResourceConfiguration {
                   Member.newBuilder()
                       .setTenantId(tenantId.toString())
                       .setAccountId(value.path("id").asString())
+                      .setDisplayName(value.path("displayName").asString(""))
                       .setStatus(status(value.path("status").asString()))
                       .setMemberType(type(value.path("memberType").asString()));
               value.path("groupIds").forEach(id -> member.addGroupIds(id.asString()));
