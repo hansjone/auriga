@@ -157,7 +157,7 @@ class DesktopReleasesTest {
     var first = envelope();
     releases.publish(actor, first, zip());
     var controller = new DesktopController(releases);
-    assertEquals(200, controller.latest("stable").getStatusCode().value());
+    assertEquals(200, controller.latest("stable", "win-x64").getStatusCode().value());
     var response = controller.download(2, null);
     assertEquals(200, response.getStatusCode().value());
     assertEquals(
@@ -165,7 +165,7 @@ class DesktopReleasesTest {
         response.getHeaders().getFirst("Content-Disposition"));
     assertEquals(
         "AurigaDSH-Setup-2.0.0.exe",
-        controller.latest("stable").getHeaders().getFirst("X-Desktop-Filename"));
+        controller.latest("stable", "win-x64").getHeaders().getFirst("X-Desktop-Filename"));
     response.getBody().getInputStream().close();
     rejects(controller::list, CommonErrors.UNAUTHENTICATED);
     var second = sign(envelope().put("version", "3.0.0").put("sequence", 3));
@@ -312,9 +312,39 @@ class DesktopReleasesTest {
         CommonErrors.VALIDATION_FAILED);
     releases.publish(actor, valid, zip());
     assertEquals(valid, releases.list(actor).path("channels").path("stable"));
+    assertEquals(
+        valid, releases.list(actor).path("platforms").path("win-x64").path("stable"));
     rejects(() -> releases.preflight(actor, valid), CommonErrors.CONFLICT);
     releases.withdraw(actor, 2);
     assertTrue(releases.list(actor).path("channels").isEmpty());
+  }
+
+  @Test
+  void linuxPlatformPublishesIndependentlyOfWindows() throws Exception {
+    var windows = envelope();
+    releases.publish(actor, windows, zip());
+    byte[] linuxBytes = "linux-zip".getBytes(StandardCharsets.UTF_8);
+    var linux =
+        sign(
+            envelope()
+                .put("platform", "linux-x64")
+                .put("sequence", 3)
+                .put("packageId", "package-linux-2")
+                .put("sizeBytes", linuxBytes.length)
+                .put(
+                    "sha256",
+                    HexFormat.of()
+                        .formatHex(MessageDigest.getInstance("SHA-256").digest(linuxBytes))));
+    releases.publish(actor, linux, new ByteArrayInputStream(linuxBytes));
+    assertEquals("win-x64", releases.latest("stable", "win-x64").path("platform").asString());
+    assertEquals("linux-x64", releases.latest("stable", "linux-x64").path("platform").asString());
+    var controller = new DesktopController(releases);
+    assertEquals(
+        "auriga-desktop-2.0.0-linux-x64.tar.gz",
+        controller.latest("stable", "linux-x64").getHeaders().getFirst("X-Desktop-Filename"));
+    assertEquals(
+        "attachment; filename=\"auriga-desktop-2.0.0-linux-x64.tar.gz\"",
+        controller.download(3, null).getHeaders().getFirst("Content-Disposition"));
   }
 
   @Test

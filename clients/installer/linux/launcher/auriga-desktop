@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+# Without arguments start the tray app when present; otherwise launch DSH directly.
+set -euo pipefail
+Root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
+Cur=$(tr -d '\r\n' <"$Root/current.txt")
+Ver="$Root/versions/$Cur"
+Node="$Ver/upstream/node/bin/node"
+Cli="$Ver/auriga/runtime/cli.mjs"
+Tray="$Ver/auriga/tray/auriga-desktop-tray"
+
+if [[ $# -eq 0 && -x "$Tray" ]]; then
+  exec "$Tray"
+fi
+
+if [[ "${1:-}" == "diagnostics" ]]; then
+  exec "$Node" "$Cli" "$@" --root "$Root"
+fi
+
+exec "$Node" "$Cli" launch --root "$Root" -- "$@"

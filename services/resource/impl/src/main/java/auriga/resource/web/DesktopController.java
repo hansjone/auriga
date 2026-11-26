@@ -85,12 +85,13 @@ public class DesktopController {
 
   @GetMapping("/desktop/latest")
   @PublicEndpoint
-  public ResponseEntity<JsonNode> latest(@RequestParam(defaultValue = "stable") String channel) {
-    var manifest = releases.latest(channel);
+  public ResponseEntity<JsonNode> latest(
+      @RequestParam(defaultValue = "stable") String channel,
+      @RequestParam(defaultValue = "win-x64") String platform) {
+    var manifest = releases.latest(channel, platform);
     return ResponseEntity.ok()
         .cacheControl(CacheControl.noStore())
-        .header(
-            "X-Desktop-Filename", "AurigaDSH-Setup-" + manifest.path("version").asString() + ".exe")
+        .header("X-Desktop-Filename", DesktopReleases.packageFilename(manifest))
         .body(manifest);
   }
 

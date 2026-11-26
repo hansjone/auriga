@@ -53,7 +53,7 @@ export function unsignedRelease({
     version: manifest.bundleVersion,
     packageId: manifest.id,
     channel,
-    platform: 'win-x64',
+    platform: options.platform ?? manifest.target ?? 'win-x64',
     sizeBytes: statSync(archive).size,
     sha256: sha256File(archive),
     minimumVersion,

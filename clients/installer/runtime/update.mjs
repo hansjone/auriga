@@ -44,6 +44,29 @@ import {
   finishUpdateAttempt,
   updateWasRolledBack,
 } from './desktop-report.mjs';
+import {
+  clientPlatform,
+  hostClientTarget,
+} from '../../../scripts/client-release/platform.mjs';
+
+function desktopHost() {
+  try {
+    return clientPlatform(hostClientTarget());
+  } catch {
+    return clientPlatform('win-x64');
+  }
+}
+
+function latestPath(channel) {
+  const platform = desktopHost().target;
+  const query = new URLSearchParams({ platform });
+  if (channel && channel !== 'stable') query.set('channel', channel);
+  return `latest?${query}`;
+}
+
+function stagedPackagePath(rootOrDir) {
+  return join(rootOrDir, desktopHost().stagedPackageName);
+}
 
 function logUpdate(root, entry) {
   const file = join(root, 'desktop-update.log');
@@ -66,7 +89,7 @@ function discardIncompletePending(root) {
   const queued = join(root, 'desktop-pending');
   if (!existsSync(queued)) return false;
   try {
-    for (const name of ['release.json', 'desktop.exe']) {
+    for (const name of ['release.json', desktopHost().stagedPackageName]) {
       const file = statSync(join(queued, name));
       if (!file.isFile() || file.size === 0)
         throw Object.assign(new Error('pending input incomplete'), {
@@ -367,11 +390,7 @@ export function createUpdater({
         const observed = load();
         const channel = observed.channel ?? 'stable';
         const response = await request(
-          platformUrl(
-            origin,
-            channel === 'stable' ? 'latest' : 'latest?channel=beta',
-            binding,
-          ),
+          platformUrl(origin, latestPath(channel), binding),
           {
             redirect: 'error',
           },
@@ -513,7 +532,7 @@ export function createUpdater({
           )
             throw new Error('cannot secure update staging');
         }
-        const archive = join(temporary, 'desktop.exe');
+        const archive = stagedPackagePath(temporary);
         retain = true;
         progress('downloading', {
           error: null,
@@ -587,7 +606,7 @@ export function createUpdater({
         const latestResponse = await request(
           platformUrl(
             origin,
-            body.channel === 'stable' ? 'latest' : 'latest?channel=beta',
+            latestPath(body.channel),
             binding,
           ),
           { redirect: 'error', signal: controller.signal },
@@ -944,7 +963,7 @@ async function applyPendingLocked(
     const response = await request(
       platformUrl(
         binding.origin,
-        body.channel === 'stable' ? 'latest' : 'latest?channel=beta',
+        latestPath(body.channel),
         binding,
       ),
       { redirect: 'error', signal: AbortSignal.timeout(15000) },
@@ -989,7 +1008,7 @@ async function applyPendingLocked(
       return false;
     }
     note('verify-archive');
-    const archive = join(queued, 'desktop.exe');
+    const archive = stagedPackagePath(queued);
     const checkArchive = () => {
       if (pendingInput(() => sha256File(archive)) !== body.sha256) {
         retain = false;
