@@ -287,3 +287,142 @@ test('prepared submission fences a device generation change during broker stagin
   );
   assert.deepEqual(calls, [['/api/resource/v1/catalog/packages', 'POST']]);
 });
+
+for (const loseDuring of [
+  'queue entry',
+  'multipart staging',
+  'upload response',
+]) {
+  test(
+    'prepared submission stops when trusted execution ends at ' + loseDuring,
+    async (t) => {
+      const f = catalogFixture(t, undefined, { kind: 'plugin' });
+      const requests = [];
+      let active = loseDuring !== 'queue entry';
+      const s = catalogService({
+        ...f,
+        privateSkills: {},
+        host: {},
+        fetchImpl: async (url) => {
+          requests.push(url.pathname);
+          if (url.pathname.endsWith('/versions')) {
+            active = false;
+            return Response.json({}, { status: 201 });
+          }
+          return Response.json(
+            {
+              id: f.packageId,
+              ownerId: f.who.ownerId,
+              tenantId: f.who.tenantId,
+              kind: 'plugin',
+              name: f.manifest.name,
+              revision: 1,
+            },
+            { status: 201, headers: { etag: '"1"' } },
+          );
+        },
+      });
+      const upload = f.runtime.upload;
+      let staged = 0;
+      f.runtime.upload = async (bytes, type) => {
+        const ref = await upload(bytes, type);
+        if (++staged === 2 && loseDuring === 'multipart staging')
+          active = false;
+        return ref;
+      };
+      await assert.rejects(
+        s.submitPrepared(
+          {
+            manifest: f.manifest,
+            archive: f.archive,
+            key: 'cancelled',
+            reason: 'review',
+          },
+          async () => {
+            await Promise.resolve();
+            if (!active)
+              throw Object.assign(new Error('execution ended'), {
+                code: 'common.forbidden',
+              });
+          },
+        ),
+        { code: 'common.forbidden' },
+      );
+      const base = '/api/resource/v1/catalog/packages';
+      assert.deepEqual(
+        requests,
+        loseDuring === 'queue entry'
+          ? []
+          : loseDuring === 'multipart staging'
+            ? [base]
+            : [base, base + '/' + f.packageId + '/versions'],
+      );
+    },
+  );
+}
+
+test('new package upload refreshes its verified package after a definite 412', async (t) => {
+  const f = catalogFixture(t, undefined, { kind: 'plugin' });
+  const base = '/api/resource/v1/catalog/packages';
+  const packagePath = base + '/' + f.packageId;
+  const pack = {
+    id: f.packageId,
+    ownerId: f.who.ownerId,
+    tenantId: f.who.tenantId,
+    kind: 'plugin',
+    name: f.manifest.name,
+  };
+  const version = {
+    id: f.versionId,
+    packageId: f.packageId,
+    kind: 'plugin',
+    version: f.manifest.version,
+    revision: 1,
+    state: 'draft',
+    digest: sha(Buffer.from(JSON.stringify(f.manifest))),
+  };
+  const requests = [];
+  const s = catalogService({
+    ...f,
+    privateSkills: {},
+    host: {},
+    fetchImpl: async (url, options) => {
+      const path = url.pathname;
+      const etag = options.headers['if-match'];
+      requests.push([path, options.method, etag]);
+      if (path === base)
+        return Response.json({ ...pack, revision: 1 }, { status: 201 });
+      if (path === packagePath) return Response.json({ ...pack, revision: 2 });
+      if (path.endsWith('/versions'))
+        return etag === '"1"'
+          ? Response.json({}, { status: 412 })
+          : Response.json(version, { status: 201 });
+      return Response.json(
+        {
+          authorId: f.who.ownerId,
+          reviewId: '019a0000-0000-7000-8000-000000000055',
+          status: 'pending',
+          version: { ...version, state: 'pending_review' },
+        },
+        { status: 201 },
+      );
+    },
+  });
+  const input = {
+    manifest: f.manifest,
+    archive: f.archive,
+    key: 'fresh',
+    reason: 'review',
+  };
+  await assert.rejects(s.submitPrepared(input), {
+    code: 'common.precondition_failed',
+  });
+  assert.equal((await s.submitPrepared(input)).state, 'pending_review');
+  assert.deepEqual(requests, [
+    [base, 'POST', '"0"'],
+    [packagePath + '/versions', 'POST', '"1"'],
+    [packagePath, 'GET', undefined],
+    [packagePath + '/versions', 'POST', '"2"'],
+    [packagePath + '/versions/' + f.versionId + '/submissions', 'POST', '"1"'],
+  ]);
+});

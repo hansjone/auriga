@@ -51,10 +51,18 @@ export function catalogApi({
     )
       refuse('common.unauthenticated');
   }
-  /** @param {string} path @param {{body?:any,etag?:string,key?:string,binary?:boolean,max?:number,form?:FormData}} [options] */
+  /** @param {string} path @param {{body?:any,etag?:string,key?:string,binary?:boolean,max?:number,form?:FormData,assertCurrent?:()=>Promise<void>}} [options] */
   async function request(
     path,
-    { body, etag, key, binary = false, max = 2097152, form } = {},
+    {
+      body,
+      etag,
+      key,
+      binary = false,
+      max = 2097152,
+      form,
+      assertCurrent,
+    } = {},
   ) {
     if (
       !path.startsWith('/api/resource/v1/') ||
@@ -68,6 +76,7 @@ export function catalogApi({
     const response = await resourceStage('platform', () =>
       resourceRequest(runtime, path, {
         check,
+        assertCurrent,
         method: body === undefined && !form ? 'GET' : 'POST',
         credentials: 'omit',
         redirect: 'error',
