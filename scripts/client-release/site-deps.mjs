@@ -25,6 +25,7 @@ import {
 import { CLIENT_TARGET } from './platform.mjs';
 import { verifySignedInventory } from './trust.mjs';
 import { prepareInputs } from './prepare.mjs';
+import { cleanupAfterError, removeDirSafely } from './cleanup.mjs';
 import {
   BASELINE_FILENAME,
   registerBaseline,
@@ -250,6 +251,7 @@ export async function clientFetch(options) {
     npmRegistry,
     caFile,
     prepare = prepareInputs,
+    cleanupDir = removeDirSafely,
     log = console.log,
   } = options;
   const cache = resolve(cacheDir);
@@ -283,7 +285,10 @@ export async function clientFetch(options) {
     );
 
   const stagingParent = join(cache, '_client-fetch-staging');
-  rmSync(stagingParent, { recursive: true, force: true });
+  cleanupDir(stagingParent, {
+    within: cache,
+    phase: 'client-fetch-staging-reset',
+  });
   mkdirSync(stagingParent, { recursive: true });
   const target = clientCacheEntry(cache, identity.lockSha256);
   mkdirSync(dirname(target), { recursive: true });
@@ -329,7 +334,10 @@ export async function clientFetch(options) {
       sumsSha256: manifest.manifestSha256,
     });
     renameSync(prepared, target);
-    rmSync(stagingParent, { recursive: true, force: true });
+    cleanupDir(stagingParent, {
+      within: cache,
+      phase: 'client-fetch-staging-finalize',
+    });
     log(
       JSON.stringify(
         {
@@ -351,8 +359,15 @@ export async function clientFetch(options) {
       manifestSha256: manifest.manifestSha256,
     };
   } catch (error) {
-    rmSync(stagingParent, { recursive: true, force: true });
-    throw error;
+    cleanupAfterError(
+      error,
+      () =>
+        cleanupDir(stagingParent, {
+          within: cache,
+          phase: 'client-fetch-staging-cleanup',
+        }),
+      { phase: 'client-fetch-staging-cleanup', path: stagingParent },
+    );
   }
 }
 
@@ -393,7 +408,10 @@ export function clientImport({
     throw new Error('--trust-fingerprint 需要 SHA256:<64 位小写十六进制>');
   mkdirSync(dirname(target), { recursive: true });
   const staging = join(cache, '_client-import-staging');
-  rmSync(staging, { recursive: true, force: true });
+  removeDirSafely(staging, {
+    within: cache,
+    phase: 'client-import-staging-reset',
+  });
   try {
     cpSync(src, staging, { recursive: true, verbatimSymlinks: true });
     let expected;
@@ -449,8 +467,15 @@ export function clientImport({
     });
     renameSync(staging, target);
   } catch (error) {
-    rmSync(staging, { recursive: true, force: true });
-    throw error;
+    cleanupAfterError(
+      error,
+      () =>
+        removeDirSafely(staging, {
+          within: cache,
+          phase: 'client-import-staging-cleanup',
+        }),
+      { phase: 'client-import-staging-cleanup', path: staging },
+    );
   }
   log(
     JSON.stringify(

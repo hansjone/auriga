@@ -14,7 +14,6 @@ import {
   existsSync,
   mkdirSync,
   readFileSync,
-  rmSync,
   writeFileSync,
 } from 'node:fs';
 import { basename, dirname, join, resolve } from 'node:path';
@@ -42,6 +41,7 @@ import {
   run,
   stageWorkspaceLocks,
 } from './prepare.mjs';
+import { cleanupAfterError, removeDirSafely } from './cleanup.mjs';
 
 /** 派生现场套件时不复制：它们属于基础套件的发行签名，派生套件不再有效。 */
 export const SIGNATURE_FILES = [
@@ -399,7 +399,10 @@ export function deriveSiteDevkit({
         join(site, 'plugin-deps/package.json'),
         { force: true },
       );
-    rmSync(work, { recursive: true, force: true });
+    removeDirSafely(work, {
+      within: site,
+      phase: 'online-work-cleanup',
+    });
     const manifest = sealInputs(site, base.tools, root);
     const report = {
       schemaVersion: 1,
@@ -426,7 +429,17 @@ export function deriveSiteDevkit({
     return { manifest, report };
   } catch (error) {
     // 只清理本次创建的派生目录；基础套件从未被写入。
-    if (created) rmSync(site, { recursive: true, force: true });
+    if (created) {
+      cleanupAfterError(
+        error,
+        () =>
+          removeDirSafely(site, {
+            within: dirname(resolve(site)),
+            phase: 'online-derive-rollback',
+          }),
+        { phase: 'online-derive-rollback', path: site },
+      );
+    }
     throw error;
   }
 }
