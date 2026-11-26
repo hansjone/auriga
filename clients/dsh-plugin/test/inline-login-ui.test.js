@@ -1026,7 +1026,8 @@ test('settings.launcher replaces DSH bottom-left account slot with Auriga avatar
   let uacState = {
     available: true,
     state: 'authenticated',
-    empNo: 'A1001',
+    empNo: '001001',
+    department: '部门测试名',
     platformLink: 'matched',
     platformBinding: 'c'.repeat(64),
     csrf: 'uac-csrf',
@@ -1059,9 +1060,11 @@ test('settings.launcher replaces DSH bottom-left account slot with Auriga avatar
     const renderedText = text(signedTree);
     assert.match(renderedText, /张/);
     assert.match(renderedText, /张三/);
-    assert.match(renderedText, /A1001/);
+    assert.match(renderedText, /001001/);
+    assert.doesNotMatch(renderedText, /部门测试名|本地身份|平台已连接/);
     // Open fallback menu and trigger settings + sign-out
     const trigger = all(signedTree).find((n) => n.type === 'button');
+    assert.equal(trigger.props.title, '张三 (001001)');
     trigger.props.onClick();
     const opened = await f.renderLauncher({
       wide: true,

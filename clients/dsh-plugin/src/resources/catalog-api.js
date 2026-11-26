@@ -35,6 +35,7 @@ export function catalogApi({
 }) {
   const who = catalogIdentity(runtime),
     instance = runtime.resourceIdentity?.instanceId,
+    generation = runtime.catalogGeneration?.(),
     source = instance ? 'node' : 'member',
     _origin = runtime.config.platformOrigin;
   let allowPersonalPlugins = policy?.read() ?? true;
@@ -44,6 +45,7 @@ export function catalogApi({
       refuse('resource.storage_unavailable');
     if (
       current() !== runtime ||
+      runtime.catalogGeneration?.() !== generation ||
       runtime.resourceIdentity?.instanceId !== instance ||
       canonicalize(catalogIdentity(runtime)) !== canonicalize(who)
     )

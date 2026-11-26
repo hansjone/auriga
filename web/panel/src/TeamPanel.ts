@@ -1,11 +1,34 @@
 ﻿import { messages } from './messages';
 import style from './panel.css?inline';
 import { SkillPanel } from './SkillPanel';
+import { DesktopCatalog } from './desktop-catalog';
 import { element } from './market-ui';
 import { canReadResources, type PanelContext } from './resources';
 
 /** Both resource kinds use the same authenticated catalog and installation view. */
 export class AurigaTeamPanel extends HTMLElement {
+  private static desktopCatalogs = new WeakMap<
+    NonNullable<PanelContext['catalogSession']>,
+    DesktopCatalog
+  >();
+  private static desktopCatalog(context: PanelContext) {
+    const scope = context.catalogSession;
+    if (context.mode !== 'connect' || !scope || !canReadResources(context))
+      return undefined;
+    let value = this.desktopCatalogs.get(scope);
+    if (!value) {
+      value = new DesktopCatalog(context.fetch!, scope);
+      this.desktopCatalogs.set(scope, value);
+    }
+    return value;
+  }
+  static prefetchCatalog(context: PanelContext) {
+    this.desktopCatalog(context)?.prefetch();
+  }
+  static clearCatalog(scope: NonNullable<PanelContext['catalogSession']>) {
+    this.desktopCatalogs.get(scope)?.dispose();
+    this.desktopCatalogs.delete(scope);
+  }
   private value?: PanelContext;
   private kind: 'plugin' | 'skill' = 'plugin';
   private tab: 'market' | 'mine' = 'market';
@@ -30,7 +53,8 @@ export class AurigaTeamPanel extends HTMLElement {
       !previous ||
       previous.mode !== value?.mode ||
       previous.protocol !== value?.protocol ||
-      previous.fetch !== value?.fetch ||
+      previous.catalogSession !== value?.catalogSession ||
+      (!value?.catalogSession && previous.fetch !== value?.fetch) ||
       JSON.stringify(previous.resourceIdentity) !==
         JSON.stringify(value?.resourceIdentity);
     this.value = value;
@@ -136,6 +160,7 @@ export class AurigaTeamPanel extends HTMLElement {
         this.value!,
         this.tab === 'mine',
         this.kind,
+        AurigaTeamPanel.desktopCatalog(this.value!),
       );
     }
   }

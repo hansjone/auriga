@@ -1,6 +1,7 @@
 ﻿import { afterEach, describe, expect, it, vi } from 'vitest';
 import { mountPanel, flushPromises, type NativeWrapper } from './native-host';
 import type { PanelContext } from '../src/resources';
+import { AurigaTeamPanel } from '../src';
 const id = (n: number) =>
   `01900000-0000-7000-8000-${String(n).padStart(12, '0')}`;
 const wrappers: NativeWrapper[] = [];
@@ -103,6 +104,160 @@ async function render(
   await flushPromises();
   return w;
 }
+
+const desktopOwner = { ownerId: id(3), tenantId: id(1) };
+function desktopFixture() {
+  const f = fixture('plugin', { identity: desktopOwner });
+  const fetch: NonNullable<PanelContext['fetch']> = (path, init) =>
+    path.includes('kind=skill')
+      ? Promise.resolve(json({ items: [] }))
+      : f.fetch(path, init);
+  return { ...f, fetch };
+}
+
+it('uses one login prefetch across tabs and even after remounting the desktop panel', async () => {
+  const f = desktopFixture();
+  const fetch = vi.fn(f.fetch);
+  const catalogSession = { ownerId: desktopOwner.ownerId };
+  const context = {
+    mode: 'connect',
+    protocol: 1,
+    fetch,
+    catalogSession,
+  } as const;
+  AurigaTeamPanel.prefetchCatalog(context);
+  await flushPromises();
+  const paths = fetch.mock.calls.map(([path]) => path);
+  expect(paths.filter((path) => path === 'catalog/installations')).toHaveLength(
+    1,
+  );
+  expect(paths.some((path) => path.includes('kind=plugin'))).toBe(true);
+  expect(paths.some((path) => path.includes('kind=skill'))).toBe(true);
+  expect(fetch.mock.calls[0][1]?.headers).toMatchObject({
+    'x-auriga-catalog-owner': catalogSession.ownerId,
+  });
+  const requestCount = fetch.mock.calls.length;
+  const w = await render('plugin', fetch, { catalogSession });
+  expect(w.text()).toContain(f.pack.name);
+  await click(w, 'My resources');
+  expect(w.text()).toContain(f.pack.name);
+  await click(w, 'Skills');
+  await click(w, 'Plugins');
+  await click(w, 'Resource market');
+  expect(w.text()).toContain(f.pack.name);
+  w.unmount();
+  const remounted = await render('plugin', fetch, { catalogSession });
+  expect(remounted.text()).toContain(f.pack.name);
+  expect(fetch.mock.calls).toHaveLength(requestCount);
+  AurigaTeamPanel.clearCatalog(catalogSession);
+});
+
+it('keeps the old desktop snapshot until a manual refresh completes and retains it on temporary failure', async () => {
+  const f = desktopFixture();
+  const oldName = f.pack.name;
+  let failingPath = '';
+  let slowSummary = false;
+  let releaseSummary: (() => void) | undefined;
+  const summaryBlocked = new Promise<void>((resolve) => {
+    releaseSummary = resolve;
+  });
+  const w = await render(
+    'plugin',
+    async (path, init) => {
+      if (failingPath && path.includes(failingPath)) return json({}, 503);
+      if (slowSummary && path.includes('/versions/')) await summaryBlocked;
+      return f.fetch(path, init);
+    },
+    { catalogSession: { ownerId: desktopOwner.ownerId } },
+  );
+  expect(w.text()).toContain(oldName);
+  slowSummary = true;
+  f.pack.name = 'Refreshed package';
+  f.version.manifest.description = 'Refreshed description';
+  await click(w, 'Refresh');
+  expect(w.text()).toContain(oldName);
+  expect(w.text()).toContain('Refreshing resources');
+  expect(w.text()).not.toContain(f.pack.name);
+  releaseSummary!();
+  await flushPromises();
+  expect(w.text()).toContain(f.pack.name);
+  expect(w.text()).toContain(f.version.manifest.description);
+  expect(w.text()).not.toContain(oldName);
+
+  const refreshedName = f.pack.name;
+  f.pack.name = 'Incomplete refresh';
+  for (const path of ['catalog/installations', '/versions/']) {
+    failingPath = path;
+    await click(w, 'Refresh');
+    expect(w.text()).toContain(refreshedName);
+    expect(w.text()).toContain(f.version.manifest.description);
+    expect(w.text()).not.toContain(f.pack.name);
+    expect(w.find('[role="alert"]').exists()).toBe(true);
+  }
+});
+
+it('clears a desktop snapshot on authorization failure and fences an old login during account change', async () => {
+  const f = desktopFixture();
+  const catalogSession = { ownerId: desktopOwner.ownerId };
+  let status = 200;
+  const w = await render(
+    'plugin',
+    (path, init) =>
+      status === 200 ? f.fetch(path, init) : Promise.resolve(json({}, status)),
+    { catalogSession },
+  );
+  const auth = vi.fn();
+  w.element.addEventListener('auriga-auth-required', auth);
+  status = 401;
+  await click(w, 'Refresh');
+  expect(auth).toHaveBeenCalledOnce();
+  expect(w.text()).not.toContain(f.pack.name);
+
+  const other = { ownerId: id(7), tenantId: desktopOwner.tenantId };
+  const replacement = fixture('plugin', { identity: other });
+  replacement.pack.name = 'Different account';
+  AurigaTeamPanel.clearCatalog(catalogSession);
+  await w.setProps({
+    context: {
+      ...w.element.context,
+      catalogSession: { ownerId: other.ownerId },
+      fetch: (path, init) =>
+        path.includes('kind=skill')
+          ? Promise.resolve(json({ items: [] }))
+          : replacement.fetch(path, init),
+    },
+  });
+  await flushPromises();
+  expect(w.text()).toContain(replacement.pack.name);
+  expect(w.text()).not.toContain(f.pack.name);
+});
+
+it('updates the shared installation snapshot when an action completes on another tab', async () => {
+  const f = desktopFixture();
+  let complete: ((value: Response) => void) | undefined;
+  let actionSignal: AbortSignal | null | undefined;
+  const w = await render(
+    'plugin',
+    (path, init) => {
+      if (path === 'catalog/installations')
+        return Promise.resolve(json({ identity: desktopOwner, items: [] }));
+      if (path !== 'catalog/actions') return f.fetch(path, init);
+      actionSignal = init?.signal;
+      return new Promise<Response>((resolve) => {
+        complete = resolve;
+      });
+    },
+    { catalogSession: { ownerId: desktopOwner.ownerId } },
+  );
+  await click(w, 'Install 1.0.0');
+  expect(complete).toBeDefined();
+  await click(w, 'My resources');
+  expect(actionSignal?.aborted).toBe(false);
+  complete!(json({ accepted: true, installation: f.row }, 202));
+  await flushPromises();
+  expect(w.text()).toContain(f.pack.name);
+  expect(w.text()).toContain('applying');
+});
 for (const kind of ['plugin', 'skill'] as const)
   describe('unified ' + kind, () => {
     it('uses catalog reads and never the old member port or global transport', async () => {

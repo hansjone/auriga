@@ -172,12 +172,26 @@ test('runtime emits the same profile binding for shell and local-UAC association
     },
   });
   await nextTurn();
-  const initial = f.runtime.status(f.request).account.profileBinding;
+  const account = f.runtime.status(f.request).account;
+  assert.equal(account.empNo, '001Ab');
+  const initial = account.profileBinding;
   assert.match(initial, /^[0-9a-f]{64}$/);
+  assert.match(account.catalogGeneration, /^[0-9a-f]{64}$/);
+  assert.equal(account.catalogGeneration, f.runtime.catalogGeneration());
+  assert.notEqual(
+    account.catalogGeneration,
+    f.runtime.broker.state.authorization(),
+  );
   assert.deepEqual(f.runtime.platformIdentity(), {
     empNo: '001Ab',
     profileBinding: initial,
   });
+  f.connection.transition('authenticated');
+  await nextTurn();
+  assert.equal(
+    f.runtime.status(f.request).account.catalogGeneration,
+    account.catalogGeneration,
+  );
   f.connection.transition('authenticated', {
     uacSessionBinding: {
       ...f.connection.identity.uacSessionBinding,
@@ -185,9 +199,13 @@ test('runtime emits the same profile binding for shell and local-UAC association
     },
   });
   await nextTurn();
-  const changed = f.runtime.status(f.request).account.profileBinding;
-  assert.notEqual(changed, initial);
-  assert.equal(f.runtime.platformIdentity().profileBinding, changed);
+  const changed = f.runtime.status(f.request).account;
+  assert.notEqual(changed.profileBinding, initial);
+  assert.notEqual(changed.catalogGeneration, account.catalogGeneration);
+  assert.equal(
+    f.runtime.platformIdentity().profileBinding,
+    changed.profileBinding,
+  );
   f.connection.logout();
   assert.equal(f.runtime.platformIdentity(), undefined);
 });

@@ -2,7 +2,7 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { diagnoseResource } from './diagnostics.js';
 import { catalogService } from './catalog-service.js';
-import { catalogApi } from './catalog-api.js';
+import { catalogApi, catalogIdentity } from './catalog-api.js';
 import { catalogHost } from './catalog-host.js';
 import { resourceHost } from './host.js';
 import { createPrivateSkills } from './private-skills.js';
@@ -89,12 +89,13 @@ export function watchCatalogIdentity({
  * @param {{current:()=>any,ctx?:any,fetchImpl?:typeof fetch,service?:(runtime:any)=>any}} options */
 export function catalogRoutes(options) {
   const services = new WeakMap();
-  /** @param {any} runtime */
-  function service(runtime) {
-    let value = services.get(runtime);
-    if (!value) {
+  /** @param {any} runtime @param {ReturnType<typeof catalogIdentity>} who */
+  function service(runtime, who) {
+    const key = canonicalize([who, runtime.catalogGeneration?.() ?? null]);
+    let cached = services.get(runtime);
+    if (cached?.key !== key) {
       const home = process.env.DSH_HOME || join(homedir(), '.dsh');
-      value =
+      const value =
         options.service?.(runtime) ??
         catalogService({
           runtime,
@@ -106,9 +107,10 @@ export function catalogRoutes(options) {
           trustFile: process.env.AURIGA_RESOURCE_TRUST_FILE,
           fetchImpl: options.fetchImpl,
         });
-      services.set(runtime, value);
+      cached = { key, value };
+      services.set(runtime, cached);
     }
-    return value;
+    return cached.value;
   }
   const handle = async (/** @type {any} */ req, /** @type {any} */ res) => {
     const send = (/** @type {number} */ status, /** @type {any} */ body) => {
@@ -158,6 +160,14 @@ export function catalogRoutes(options) {
         current: options.current,
         fetchImpl: options.fetchImpl,
       });
+      const owner = req.headers?.['x-auriga-catalog-owner'];
+      const generation = req.headers?.['x-auriga-catalog-generation'];
+      if (
+        (owner !== undefined && owner !== api.who.ownerId) ||
+        (generation !== undefined &&
+          generation !== runtime.catalogGeneration?.())
+      )
+        refuse('common.unauthenticated');
       if (
         !write &&
         /^packages(?:\/[a-f0-9-]{36}(?:\/versions(?:\/[a-f0-9-]{36})?)?)?(?:\?[^#\\]*)?$/.test(
@@ -193,8 +203,12 @@ export function catalogRoutes(options) {
           refuse('common.validation_failed');
         return send(200, value);
       }
-      const s = service(runtime);
-      if (!write && path === 'installations') return send(200, await s.list());
+      const s = service(runtime, api.who);
+      if (!write && path === 'installations') {
+        const result = await s.list();
+        api.check();
+        return send(200, result);
+      }
       if (!write) return send(404, {});
       const chunks = [];
       let bytes = 0;
@@ -262,8 +276,12 @@ export function catalogRoutes(options) {
     /** @param {{changed?:boolean}} [event] */
     async reconcile(event) {
       const runtime = options.current();
-      if (runtime && !runtime.resourceIdentity)
-        await service(runtime).reconcile(event);
+      if (!runtime || runtime.resourceIdentity) return;
+      if (!runtime.identity?.()) {
+        services.delete(runtime);
+        return;
+      }
+      await service(runtime, catalogIdentity(runtime)).reconcile(event);
     },
   });
 }

@@ -18,10 +18,12 @@ export function surfaceHost(
     settingsFetch,
     remote,
     hash = '',
+    url = 'https://instance.example.com/i/example/',
+    accountLauncher = false,
   } = {},
 ) {
   const dom = new JSDOM('<html><head></head><body></body></html>', {
-    url: 'https://instance.example.com/i/example/',
+    url,
   });
   const { window } = dom;
   const { document } = window;
@@ -239,6 +241,7 @@ export function surfaceHost(
     ['sidebar.brand.mark', 'single'],
     ['sidebar.brand.name', 'single'],
   ]);
+  if (accountLauncher) declarations.set('settings.launcher', 'single');
   const counts = { registered: 0, unregistered: 0, timers: new Map() };
   let dictionary,
     plugin,
@@ -346,7 +349,11 @@ export function surfaceHost(
       window: new Proxy(window, {
         get(target, key) {
           if (key === 'location')
-            return { hash, assign: (url) => navigations.push(String(url)) };
+            return {
+              hash,
+              hostname: window.location.hostname,
+              assign: (url) => navigations.push(String(url)),
+            };
           return Reflect.get(target, key);
         },
       }),

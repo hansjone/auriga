@@ -216,6 +216,16 @@ export async function createConnectRuntime({
   if (principal) models.login();
   const identity = () =>
     broker.state.current()?.state === 'authenticated' ? principal : undefined;
+  // A public cache fence derived from the native state, never a credential.
+  const catalogGeneration = () => {
+    const authorization = broker.state.authorization?.();
+    return authorization
+      ? createHash('sha256')
+          .update('auriga-desktop-catalog:')
+          .update(authorization)
+          .digest('hex')
+      : undefined;
+  };
   contexts = createHostContexts({ broker, identity, ctx });
   // A native desktop session uses the current platform login for each new tool.
   // Keep these handles separate from the existing Team and network sessions.
@@ -565,6 +575,7 @@ export async function createConnectRuntime({
     enterprise,
     operations: installed?.operations ?? [],
     identity,
+    catalogGeneration,
     // Compatibility for resource lifecycle subscriptions, with no credential store.
     vault: {
       snapshot: () => ({
@@ -638,6 +649,8 @@ export async function createConnectRuntime({
           ? {
               subject: who.ownerId,
               profileBinding: memberProfileBinding(s),
+              catalogGeneration: catalogGeneration(),
+              ...(s.identity?.empNo ? { empNo: s.identity.empNo } : {}),
               ...(memberProfile ? memberProfile : {}),
             }
           : null,

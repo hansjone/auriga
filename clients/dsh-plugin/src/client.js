@@ -1981,6 +1981,86 @@ window.__ModuleLoader__.load({
         const identityChanged = () => {
           for (const listener of identityListeners) listener();
         };
+        let desktopCatalog;
+        let shellReadSequence = 0;
+        let latestShellRead = 0;
+        const verifiedPanel = () => {
+          const panel = customElements.get(ELEMENT);
+          return panel && loadedPanels.has(panel) ? panel : undefined;
+        };
+        const catalogGenerationOf = (account) =>
+          typeof account?.catalogGeneration === 'string' &&
+          /^[0-9a-f]{64}$/.test(account.catalogGeneration)
+            ? account.catalogGeneration
+            : undefined;
+        const updateDesktopCatalog = (status, sequence) => {
+          if (
+            typeof status?.loggedIn !== 'boolean' ||
+            sequence <= latestShellRead
+          )
+            return;
+          latestShellRead = sequence;
+          const ownerId =
+            status.loggedIn && typeof status.account?.subject === 'string'
+              ? status.account.subject
+              : undefined;
+          const generation = catalogGenerationOf(status.account);
+          if (
+            desktopCatalog?.ownerId === ownerId &&
+            desktopCatalog?.generation === generation
+          )
+            return;
+          if (desktopCatalog) verifiedPanel()?.clearCatalog?.(desktopCatalog);
+          desktopCatalog = ownerId
+            ? Object.freeze({ ownerId, generation })
+            : undefined;
+          emit();
+          if (
+            !desktopCatalog ||
+            !['127.0.0.1', '[::1]', 'localhost'].includes(
+              window.location.hostname,
+            )
+          )
+            return;
+          const scope = desktopCatalog;
+          const controller = new AbortController();
+          controllers.add(controller);
+          void (async () => {
+            let panel = verifiedPanel();
+            if (!panel) {
+              const boot = await requestBootstrap(controller.signal);
+              if (boot.mode !== 'connect' || desktopCatalog !== scope) return;
+              const sharedLoad = !!panelPending;
+              try {
+                await ensurePanel(boot, controller.signal);
+              } catch (error) {
+                // A main-panel unmount can cancel the shared script attempt.
+                if (
+                  !sharedLoad ||
+                  error?.reason !== 'unavailable' ||
+                  controller.signal.aborted ||
+                  desktopCatalog !== scope
+                )
+                  throw error;
+                await ensurePanel(boot, controller.signal);
+              }
+              panel = verifiedPanel();
+            }
+            if (disposed || desktopCatalog !== scope) return;
+            panel?.prefetchCatalog?.({
+              mode: 'connect',
+              protocol: 1,
+              fetch: makeFetch({
+                fetchBase: localURL('auriga/resources/').href,
+              }),
+              catalogSession: scope,
+            });
+          })()
+            .catch(() => {
+              // The mounted panel can prefetch once its verified bundle is ready.
+            })
+            .finally(() => controllers.delete(controller));
+        };
         // Polls one authenticated local JSON status route. Errors become null.
         const useLocalStatus = (
           path,
@@ -2010,6 +2090,8 @@ window.__ModuleLoader__.load({
               }
               reading = true;
               const started = revision.current;
+              const shellRead =
+                path === 'auriga/shell/status' ? ++shellReadSequence : 0;
               const next = await fetch(localURL(path), {
                 credentials: 'same-origin',
                 cache: 'no-store',
@@ -2021,7 +2103,8 @@ window.__ModuleLoader__.load({
                 )
                 .catch(() => null);
               reading = false;
-              if (live && !disposed && revision.current === started)
+              if (live && !disposed && revision.current === started) {
+                if (shellRead) updateDesktopCatalog(next, shellRead);
                 setValue(
                   (previous) =>
                     next ??
@@ -2029,6 +2112,7 @@ window.__ModuleLoader__.load({
                       ? { available: true, reason: 'status_unavailable' }
                       : null),
                 );
+              }
               if (live && readAgain) {
                 readAgain = false;
                 void read();
@@ -2065,6 +2149,8 @@ window.__ModuleLoader__.load({
           if (!response.ok)
             throw Object.assign(failure(), { status: response.status });
           const value = await response.json();
+          if (path === 'auriga/shell/command' && body.action === 'logout')
+            updateDesktopCatalog({ loggedIn: false }, ++shellReadSequence);
           identityChanged();
           return value;
         };
@@ -3323,35 +3409,51 @@ window.__ModuleLoader__.load({
           const teamReady = local
             ? shell?.loggedIn === true && shell.connected === true
             : boot?.mode === 'managed' && boot.connection?.connected === true;
+          const catalogSession =
+            boot?.mode === 'connect' &&
+            desktopCatalog?.ownerId === shell?.account?.subject &&
+            desktopCatalog?.generation === catalogGenerationOf(shell?.account)
+              ? desktopCatalog
+              : undefined;
           const resourcesReady =
             !!boot &&
             (boot.mode === 'managed' ||
-              (boot.mode === 'connect' && shell?.loggedIn === true));
+              (boot.mode === 'connect' &&
+                shell?.loggedIn === true &&
+                (!shell.account?.subject || !!catalogSession)));
           React.useEffect(() => {
             const el = ref.current;
             if (!el || !boot) return;
-            el.context = {
-              mode: boot.mode,
-              protocol: boot.protocol,
-              locale: host.locale,
-              theme: host.theme,
-              apiBase: '',
-              fetch: boot.fetch,
-              listInstalled,
-              memberResources:
-                boot.mode === 'connect' && boot.memberResourcesAvailable
-                  ? memberResources
-                  : undefined,
-              resourceIdentity: boot.resourceIdentity,
-              resourceDistributionAvailable: boot.resourceDistributionAvailable,
-            };
-          }, [boot, host.locale, host.theme]);
+            el.context =
+              boot.mode === 'connect' && !resourcesReady
+                ? undefined
+                : {
+                    mode: boot.mode,
+                    protocol: boot.protocol,
+                    locale: host.locale,
+                    theme: host.theme,
+                    apiBase: '',
+                    fetch: boot.fetch,
+                    listInstalled,
+                    memberResources:
+                      boot.mode === 'connect' && boot.memberResourcesAvailable
+                        ? memberResources
+                        : undefined,
+                    resourceIdentity: boot.resourceIdentity,
+                    resourceDistributionAvailable:
+                      boot.resourceDistributionAvailable,
+                    catalogSession,
+                  };
+          }, [boot, resourcesReady, catalogSession, host.locale, host.theme]);
           React.useEffect(() => {
             const el = ref.current;
             if (!el || !boot) return;
             const onNav = (ev) => navigate(ev.detail?.to);
             const onNotify = (ev) => notify(ev.detail);
-            const onAuth = () => setAuthRequired(true);
+            const onAuth = () => {
+              setAuthRequired(true);
+              if (local) reloadShell();
+            };
             el.addEventListener('auriga-navigate', onNav);
             el.addEventListener('auriga-notify', onNotify);
             el.addEventListener('auriga-auth-required', onAuth);
@@ -3735,8 +3837,8 @@ window.__ModuleLoader__.load({
             }
           }
           const empNo =
-            uacSignedIn && typeof uac?.empNo === 'string'
-              ? uac.empNo.trim()
+            signedIn && typeof selectedProfile?.empNo === 'string'
+              ? selectedProfile.empNo.trim()
               : '';
           const primaryLabel = signedIn
             ? displayName || empNo || t('launcherSignedIn')
@@ -3750,22 +3852,22 @@ window.__ModuleLoader__.load({
                   ? 'launcherLocalSignedOut'
                   : 'launcherLocalUnconfigured',
           );
-          const secondaryLabel = [
-            displayName && empNo && !displayName.includes(empNo) ? empNo : '',
-            uac?.department ?? '',
-            localLabel,
-            t(
-              !shell
-                ? 'launcherPlatformUnknown'
-                : platformSignedIn
-                  ? shell.connected
-                    ? 'launcherPlatform'
-                    : 'launcherPlatformSignedIn'
-                  : 'launcherPlatformOffline',
-            ),
-          ]
-            .filter(Boolean)
-            .join('，');
+          const secondaryLabel = signedIn
+            ? displayName && empNo && !displayName.includes(empNo)
+              ? empNo
+              : ''
+            : [
+                localLabel,
+                t(
+                  !shell
+                    ? 'launcherPlatformUnknown'
+                    : platformSignedIn
+                      ? shell.connected
+                        ? 'launcherPlatform'
+                        : 'launcherPlatformSignedIn'
+                      : 'launcherPlatformOffline',
+                ),
+              ].join('，');
           const avatarGlyph = signedIn
             ? displayName
               ? Array.from(displayName)[0].toUpperCase()
@@ -4269,6 +4371,7 @@ window.__ModuleLoader__.load({
         const dispose = () => {
           if (disposed) return;
           disposed = true;
+          if (desktopCatalog) verifiedPanel()?.clearCatalog?.(desktopCatalog);
           controllers.forEach((controller) => controller.abort());
           controllers.clear();
           scripts.forEach((el) => el.cancel());
