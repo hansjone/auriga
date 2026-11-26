@@ -230,16 +230,22 @@ func verifyWindowsClientManifest(ctx context.Context, source string, release win
 		return errors.New("Windows 输入清单和归档不一致")
 	}
 	var buildNode struct {
-		Version                string   `json:"version"`
-		WinX64ZipSha256        string   `json:"winX64ZipSha256"`
-		WinX64ZipSha256Sources []string `json:"winX64ZipSha256Sources"`
-		WinX64ZipSha256Note    string   `json:"winX64ZipSha256Note"`
+		Version                  string   `json:"version"`
+		WinX64ZipSha256          string   `json:"winX64ZipSha256"`
+		WinX64ZipSha256Sources   []string `json:"winX64ZipSha256Sources"`
+		WinX64ZipSha256Note      string   `json:"winX64ZipSha256Note"`
+		LinuxX64TarSha256        string   `json:"linuxX64TarSha256"`
+		LinuxX64TarSha256Sources []string `json:"linuxX64TarSha256Sources"`
+		LinuxX64TarSha256Note    string   `json:"linuxX64TarSha256Note"`
 	}
 	if err := readJSON(filepath.Join(source, windowsBuildNodePin), &buildNode); err != nil {
 		return fmt.Errorf("读取 Windows 目标源码的构建 Node 版本: %w", err)
 	}
 	if buildNode.WinX64ZipSha256 != "" && !hex64.MatchString(buildNode.WinX64ZipSha256) {
 		return errors.New("Windows 目标源码的构建 Node zip 摘要无效")
+	}
+	if buildNode.LinuxX64TarSha256 != "" && !hex64.MatchString(buildNode.LinuxX64TarSha256) {
+		return errors.New("Linux 目标源码的构建 Node tar 摘要无效")
 	}
 	if !windowsBuildNodeVersion.MatchString(buildNode.Version) || m.BuildNode != buildNode.Version {
 		return errors.New("Windows 输入引导 Node 版本与目标源码不匹配")
