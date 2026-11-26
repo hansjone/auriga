@@ -294,6 +294,52 @@ static class Setup
         }
     }
 
+    /// Create a temporary staging directory preferably on the same volume as
+    /// `installRoot` (as a sibling of `installRoot`, never inside it so empty-dir
+    /// layout checks stay intact). Avoids dot-prefixed names that enterprise EDR
+    /// policies often flag on secondary drives.
+    public static string CreateStagingDirectory(string installRoot)
+    {
+        string suffix = "auriga-desktop-setup-" + Guid.NewGuid().ToString("N");
+        try
+        {
+            if (!string.IsNullOrEmpty(installRoot))
+            {
+                string full = Path.GetFullPath(installRoot).TrimEnd('\\');
+                string parent = Path.GetDirectoryName(full);
+                if (!string.IsNullOrEmpty(parent) && Directory.Exists(FileSystemPath(parent)))
+                {
+                    string sibling = Path.Combine(parent, suffix);
+                    Directory.CreateDirectory(FileSystemPath(sibling));
+                    return sibling;
+                }
+            }
+        }
+        catch (Exception) { }
+        string fallback = Path.Combine(Path.GetTempPath(), suffix);
+        Directory.CreateDirectory(FileSystemPath(fallback));
+        return fallback;
+    }
+
+    public static void DeleteDirectoryBestEffort(string path)
+    {
+        if (string.IsNullOrEmpty(path)) return;
+        string fsPath = FileSystemPath(path);
+        for (int attempt = 0; attempt < 5; attempt++)
+        {
+            try
+            {
+                if (!Directory.Exists(fsPath)) return;
+                Directory.Delete(fsPath, true);
+                return;
+            }
+            catch (Exception)
+            {
+                if (attempt < 4) Thread.Sleep(200);
+            }
+        }
+    }
+
     public static string PowerShell { get { return Path.Combine(Environment.SystemDirectory, "WindowsPowerShell", "v1.0", "powershell.exe"); } }
 
     /// Stable per-user directory for setup logs, falling back to TEMP when it is unusable.
@@ -741,6 +787,18 @@ sealed class Wizard : Form
         int contentBottom = footerLine.Top;
         int sideLeft = sidebar.Right;
         sidebarBody.Bounds = new Rectangle(sideLeft, 0, Math.Max(0, ClientSize.Width - sideLeft), Math.Max(0, contentBottom));
+        header.Width = ClientSize.Width;
+        int logoSize = Math.Max(24, Math.Min(48, (int)Math.Round(header.ClientSize.Height * 0.56)));
+        int logoTop = Math.Max(4, (header.ClientSize.Height - logoSize) / 2);
+        int logoRightPad = Math.Max(16, logoSize / 2);
+        logo.Bounds = new Rectangle(
+            Math.Max(0, header.ClientSize.Width - logoSize - logoRightPad),
+            logoTop,
+            logoSize,
+            logoSize);
+        heading.Width = Math.Max(120, logo.Left - heading.Left - 16);
+        subheading.Width = Math.Max(120, logo.Left - subheading.Left - 16);
+        headerLine.Width = ClientSize.Width;
         headerLine.Top = header.Bottom;
         int fullTop = headerLine.Bottom;
         body.Bounds = new Rectangle(0, fullTop, ClientSize.Width, Math.Max(0, contentBottom - fullTop));
@@ -1004,8 +1062,7 @@ sealed class Wizard : Form
 
     void StartInstall()
     {
-        temp = Path.Combine(Path.GetTempPath(), "auriga-desktop-setup-" + Guid.NewGuid().ToString("N"));
-        try { Directory.CreateDirectory(temp); }
+        try { temp = Setup.CreateStagingDirectory(folder.Text); }
         catch (Exception e) { Fail("无法准备临时安装目录：" + e.Message); return; }
         cancelFile = Path.Combine(temp, "decision");
         installing = true;
@@ -1031,7 +1088,7 @@ sealed class Wizard : Form
             try
             {
                 string package = Path.Combine(temp, "pkg");
-                Directory.CreateDirectory(package);
+                Directory.CreateDirectory(Setup.FileSystemPath(package));
                 Log("setup " + version + " -> " + root + (upgrade ? " (upgrade)" : ""));
                 AppendDetail("正在解包安装文件…");
                 FileStream file;
@@ -1098,7 +1155,7 @@ sealed class Wizard : Form
             finally
             {
                 canCancel = false;
-                try { Directory.Delete(Setup.FileSystemPath(temp), true); } catch (Exception) { }
+                Setup.DeleteDirectoryBestEffort(temp);
             }
             BeginInvoke((Action)delegate { Finished(code, failure); });
         }) { IsBackground = true };

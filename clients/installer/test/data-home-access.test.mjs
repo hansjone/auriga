@@ -9,8 +9,10 @@ import {
   symlinkSync,
   writeFileSync,
 } from 'node:fs';
+import { spawnSync } from 'node:child_process';
 import { join } from 'node:path';
 import { ensureDataHomeWritable } from '../runtime/data-home-access.mjs';
+import { systemTool } from '../runtime/system-tools.mjs';
 import { install, profileDir, uninstall } from '../runtime/core.mjs';
 import { buildPayload, tempBase } from './helpers.mjs';
 
@@ -105,3 +107,27 @@ test('keep-data uninstall then reinstall reuses profile despite read-only cordis
   assert.equal(readFileSync(session, 'utf8'), 'keep-me');
   assert.equal(readFileSync(cordis, 'utf8'), '# smoked\n');
 });
+
+test(
+  'ensureDataHomeWritable clears Hidden and ReadOnly attributes on Windows cordis.yml',
+  { skip: process.platform !== 'win32' },
+  (t) => {
+    const base = tempBase(t);
+    const dataHome = join(base, 'home');
+    const profile = join(dataHome, 'profiles', 'auriga');
+    mkdirSync(profile, { recursive: true });
+    const cordis = join(profile, 'cordis.yml');
+    writeFileSync(cordis, 'plugins: {}\n');
+    assert.equal(
+      spawnSync(systemTool('attrib'), ['+R', '+H', cordis], {
+        windowsHide: true,
+      }).status,
+      0,
+    );
+
+    const result = ensureDataHomeWritable(dataHome);
+    assert.equal(result.repaired, true);
+    writeFileSync(cordis, 'plugins:\n  auriga-dsh: {}\n');
+    assert.match(readFileSync(cordis, 'utf8'), /auriga-dsh/);
+  },
+);
