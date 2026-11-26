@@ -217,6 +217,12 @@ test('package contains standalone runtime, version and matching digest; rebuild 
       'scripts/private.js',
     ])
       await writeFile(join(plugin, file), file);
+    const submissionSkill = 'skills/auriga-resource-submit/SKILL.md';
+    const submissionInstructions = await readFile(
+      new URL('../../clients/dsh-plugin/' + submissionSkill, import.meta.url),
+    );
+    await mkdir(join(plugin, 'skills/auriga-resource-submit'));
+    await writeFile(join(plugin, submissionSkill), submissionInstructions);
     const brokerArtifact = join(root, 'broker');
     await mkdir(join(brokerArtifact, 'windows'), { recursive: true });
     const files = [];
@@ -282,6 +288,11 @@ test('package contains standalone runtime, version and matching digest; rebuild 
       ),
       await readFile(join(brokerArtifact, 'windows/shell-helper.exe')),
     );
+    assert.deepEqual(
+      await readFile(join(extraction, 'package', submissionSkill)),
+      submissionInstructions,
+    );
+    assert.ok(receipt.files.includes(submissionSkill));
     assert.equal(packed.version, '1.2.3-rc.1');
     assert.equal(packed.engines.dsh, '>=0.2.1-rc.3');
     assert.equal(packed.dependencies.ws, manifest.dependencies.ws);
