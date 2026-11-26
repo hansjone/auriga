@@ -1,12 +1,15 @@
 /** Connected maintainer only. Field build never invokes this module. */
 import { spawnSync } from 'node:child_process';
 import {
+  chmodSync,
+  copyFileSync,
   cpSync,
   existsSync,
   mkdirSync,
   readFileSync,
   readdirSync,
   lstatSync,
+  realpathSync,
   unlinkSync,
   rmSync,
   writeFileSync,
@@ -39,6 +42,28 @@ export function run(command, args, cwd, env = process.env) {
   });
   if (result.status !== 0)
     throw new Error(`输入准备命令失败（${result.status}）：${command}`);
+}
+
+/** Replace package-internal symlinks with real files so kit inventory stays link-free. */
+export function materializeSymlinks(root) {
+  const walk = (directory) => {
+    for (const entry of readdirSync(directory, { withFileTypes: true })) {
+      const path = join(directory, entry.name);
+      if (entry.isSymbolicLink()) {
+        const target = realpathSync(path);
+        const info = lstatSync(target);
+        unlinkSync(path);
+        if (info.isDirectory()) cpSync(target, path, { recursive: true });
+        else {
+          copyFileSync(target, path);
+          chmodSync(path, info.mode & 0o777);
+        }
+        continue;
+      }
+      if (entry.isDirectory()) walk(path);
+    }
+  };
+  walk(root);
 }
 export function removeProjectReferences(store) {
   // pnpm keeps machine-local junctions to previous virtual stores. They are
@@ -246,6 +271,8 @@ export async function prepareInputs(parent, options = {}) {
         join(kit, 'build-node'),
         { recursive: true },
       );
+      if (platform.target === 'linux-x64')
+        materializeSymlinks(join(kit, 'build-node'));
     }
   }
   const node = join(kit, platform.buildNode);

@@ -1,5 +1,6 @@
 /** In-process Unix domain socket IPC for Desktop shell-auth (linux-x64). */
 import { createServer, createConnection } from 'node:net';
+import { spawnSync } from 'node:child_process';
 import {
   chmodSync,
   existsSync,
@@ -8,12 +9,18 @@ import {
   readFileSync,
   unlinkSync,
 } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { tmpdir } from 'node:os';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { createInterface } from 'node:readline';
 import { HostChannel } from '../host.mjs';
 import { requireValid } from '../schema.mjs';
+
+const PEERCRED_HELPER = join(
+  dirname(fileURLToPath(import.meta.url)),
+  'peercred',
+);
 
 function runtimeDir() {
   const base = process.env.XDG_RUNTIME_DIR || tmpdir();
@@ -52,18 +59,67 @@ function controlled(children, pid) {
 
 /** Kernel SO_PEERCRED identity for an accepted Unix-domain connection. */
 function peerCredentials(socket) {
+  if (typeof socket?.getPeerCredentials === 'function') {
+    const creds = socket.getPeerCredentials();
+    if (
+      creds &&
+      Number.isSafeInteger(creds.pid) &&
+      creds.pid >= 1 &&
+      Number.isSafeInteger(creds.uid)
+    )
+      return creds;
+  }
   const handle = socket?._handle;
-  if (!handle || typeof handle.getPeerCredentials !== 'function')
+  if (handle && typeof handle.getPeerCredentials === 'function') {
+    const creds = handle.getPeerCredentials();
+    if (
+      creds &&
+      Number.isSafeInteger(creds.pid) &&
+      creds.pid >= 1 &&
+      Number.isSafeInteger(creds.uid)
+    )
+      return creds;
+  }
+  const fd = handle?.fd;
+  if (!Number.isInteger(fd) || fd < 0)
     throw new Error('peer credentials unavailable');
-  const creds = handle.getPeerCredentials();
+  const stdio = ['ignore', 'pipe', 'pipe', fd];
+  let result;
+  if (existsSync(PEERCRED_HELPER))
+    result = spawnSync(PEERCRED_HELPER, [], {
+      encoding: 'utf8',
+      timeout: 3000,
+      stdio,
+    });
+  else {
+    // Source-tree / test fallback when the packaged helper is not built yet.
+    result = spawnSync(
+      'python3',
+      [
+        '-c',
+        'import os,socket,struct\n' +
+          's=socket.fromfd(3,socket.AF_UNIX,socket.SOCK_STREAM)\n' +
+          'c=s.getsockopt(1,17,struct.calcsize("3i"))\n' +
+          'pid,uid,gid=struct.unpack("3i",c)\n' +
+          'print(pid,uid,gid)\n' +
+          'os.close(s.fileno())\n',
+      ],
+      { encoding: 'utf8', timeout: 3000, stdio },
+    );
+  }
+  if (result.status !== 0) throw new Error('peer credentials unavailable');
+  const [pidText, uidText, gidText] = (result.stdout || '').trim().split(/\s+/);
+  const pid = Number(pidText),
+    uid = Number(uidText),
+    gid = Number(gidText);
   if (
-    !creds ||
-    !Number.isSafeInteger(creds.pid) ||
-    creds.pid < 1 ||
-    !Number.isSafeInteger(creds.uid)
+    !Number.isSafeInteger(pid) ||
+    pid < 1 ||
+    !Number.isSafeInteger(uid) ||
+    !Number.isSafeInteger(gid)
   )
     throw new Error('peer credentials unavailable');
-  return creds;
+  return { pid, uid, gid };
 }
 
 export async function startUnixIpc({ broker, business, directory }) {

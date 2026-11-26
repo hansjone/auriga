@@ -1,4 +1,5 @@
 import {
+  chmodSync,
   mkdirSync,
   readdirSync,
   realpathSync,
@@ -7,6 +8,7 @@ import {
   writeFileSync,
   existsSync,
 } from 'node:fs';
+import { spawnSync } from 'node:child_process';
 import { basename, join, dirname, resolve, delimiter } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
@@ -249,6 +251,23 @@ export function buildBroker(
     const linuxIpc = 'linux/ipc-server.mjs';
     copyFileSync(join(source, linuxIpc), join(output, linuxIpc));
     files.push(linuxIpc);
+    if (skipWindowsHelper) {
+      // Tiny SO_PEERCRED helper for Node builds that lack socket.getPeerCredentials.
+      const peercred = 'linux/peercred';
+      const peercredSrc = join(source, 'linux/peercred.c');
+      const peercredOut = join(output, peercred);
+      const compiled = spawnSync(
+        'cc',
+        ['-O2', '-o', peercredOut, peercredSrc],
+        { encoding: 'utf8' },
+      );
+      if (compiled.status !== 0)
+        throw new Error(
+          `linux peercred helper build failed: ${compiled.stderr || compiled.error}`,
+        );
+      chmodSync(peercredOut, 0o755);
+      files.push(peercred);
+    }
   }
   const repoRoot = resolve(source, '../..');
   const esbuild = resolveEsbuild(repoRoot);
@@ -367,7 +386,11 @@ export function buildBroker(
 
   const manifest = {
     version: 1,
-    ...(managedLinux ? { target: 'managed-linux' } : {}),
+    ...(managedLinux
+      ? { target: 'managed-linux' }
+      : skipWindowsHelper
+        ? { target: 'desktop-linux' }
+        : {}),
     files: files.sort().map((path) => ({
       path,
       sha256: createHash('sha256')

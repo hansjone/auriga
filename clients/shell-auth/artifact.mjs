@@ -17,12 +17,20 @@ export function verifyBrokerArtifact(source) {
     safePath(join(source, 'broker-manifest.json')),
   );
   const manifest = JSON.parse(manifestBytes);
+  const desktopLinux = manifest.target === 'desktop-linux';
+  const required = desktopLinux
+    ? [
+        'desktop.mjs',
+        'broker.mjs',
+        'ipc.mjs',
+        'linux/ipc-server.mjs',
+        'linux/peercred',
+      ]
+    : ['windows/shell-helper.exe', 'desktop.mjs', 'broker.mjs'];
   if (
     manifest.version !== 1 ||
     !Array.isArray(manifest.files) ||
-    !['windows/shell-helper.exe', 'desktop.mjs', 'broker.mjs'].every((path) =>
-      manifest.files.some((file) => file.path === path),
-    )
+    !required.every((path) => manifest.files.some((file) => file.path === path))
   )
     throw new Error('incomplete broker artifact');
   const seen = new Set();

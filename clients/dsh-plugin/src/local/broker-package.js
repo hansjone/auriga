@@ -29,11 +29,13 @@ export async function verifyBrokerPackage(directory, target = 'desktop') {
     await readFile(join(base, 'broker-manifest.json'), 'utf8'),
   );
   const managedLinux = manifest.target === 'managed-linux';
+  const desktopLinux = manifest.target === 'desktop-linux';
   if (
     manifest.version !== 1 ||
-    (manifest.target !== undefined && !managedLinux) ||
+    (manifest.target !== undefined && !managedLinux && !desktopLinux) ||
     (target === 'desktop' && managedLinux) ||
     (target === 'managed-linux' && !managedLinux) ||
+    (target === 'desktop-linux' && !desktopLinux) ||
     !Array.isArray(manifest.files) ||
     manifest.files.length > 10000
   )
@@ -80,9 +82,13 @@ export async function verifyBrokerPackage(directory, target = 'desktop') {
   }
   await walk(base);
   const required = ['schema.mjs'];
-  if (!managedLinux) required.push('ipc.mjs', 'windows/shell-helper.exe');
+  if (desktopLinux)
+    required.push('ipc.mjs', 'linux/ipc-server.mjs', 'linux/peercred');
+  else if (!managedLinux) required.push('ipc.mjs', 'windows/shell-helper.exe');
   else if ([...seen].some((name) => name.startsWith('windows/')))
     throw new Error('broker managed-linux contains desktop helper files');
+  if (desktopLinux && [...seen].some((name) => name.startsWith('windows/')))
+    throw new Error('broker desktop-linux contains windows helper files');
   if (target !== 'desktop')
     required.push(
       'business.mjs',
