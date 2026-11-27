@@ -251,7 +251,7 @@ it('keeps the old desktop snapshot until a manual refresh completes and retains 
   }
 });
 
-it('clears a desktop snapshot on authorization failure and fences an old login during account change', async () => {
+it('keeps a desktop snapshot on authorization blips and fences an old login during account change', async () => {
   const f = desktopFixture();
   const catalogSession = { ownerId: desktopOwner.ownerId };
   let status = 200;
@@ -266,7 +266,9 @@ it('clears a desktop snapshot on authorization failure and fences an old login d
   status = 401;
   await click(w, 'Refresh');
   expect(auth).toHaveBeenCalledOnce();
-  expect(w.text()).not.toContain(f.pack.name);
+  // Transient 401 must not wipe the resident market; only logout / identity
+  // switch (clearCatalog) may discard the previous account's rows.
+  expect(w.text()).toContain(f.pack.name);
 
   const other = { ownerId: id(7), tenantId: desktopOwner.tenantId };
   const replacement = fixture('plugin', { identity: other });
