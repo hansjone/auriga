@@ -321,7 +321,13 @@ export function createSettingsIcons(h) {
           [19.66, 49.99],
           [12.03, 26.51],
         ].map(([cx, cy]) =>
-          h('circle', { key: String(cx) + ',' + String(cy), cx, cy, r: 3, fill: '#8fb9d6' }),
+          h('circle', {
+            key: String(cx) + ',' + String(cy),
+            cx,
+            cy,
+            r: 3,
+            fill: '#8fb9d6',
+          }),
         ),
       );
     },

@@ -157,11 +157,7 @@ export function createSettingsUI(React) {
         ),
       ),
       isStatus
-        ? h(
-            'div',
-            { className: 'auriga-setting-row-status' },
-            status || null,
-          )
+        ? h('div', { className: 'auriga-setting-row-status' }, status || null)
         : null,
       isStatus
         ? h(
@@ -519,8 +515,7 @@ export function createSettingsUI(React) {
             'span',
             {
               className:
-                'auriga-setting-readonly-value' +
-                (muted ? ' is-muted' : ''),
+                'auriga-setting-readonly-value' + (muted ? ' is-muted' : ''),
             },
             value,
           ),

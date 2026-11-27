@@ -205,7 +205,8 @@ const messages = {
     navConsent: 'Consent policy',
     navSkills: 'Private skills',
     navDiagnostics: 'Diagnostics',
-    diagnosticsHint: 'Read-only details for connection and runtime troubleshooting',
+    diagnosticsHint:
+      'Read-only details for connection and runtime troubleshooting',
     copy: 'Copy',
     copyAll: 'Copy all',
     copied: 'Copied',
@@ -274,7 +275,8 @@ const messages = {
     reconnect: 'Reconnect',
     reauthenticate: 'Reauthenticate',
     retryConnect: 'Retry connection',
-    loginEntryUnavailable: 'Sign-in overlay is not ready. Please try again shortly.',
+    loginEntryUnavailable:
+      'Sign-in overlay is not ready. Please try again shortly.',
     managed: 'System managed',
     managedExpired: 'Instance session has expired. Re-enter from the portal.',
     managedVerifying: 'Verifying instance session',
@@ -825,9 +827,7 @@ export function createSettingsView(
           notice: proxy.degraded
             ? h(SettingStatus, { tone: 'warn' }, t.proxyDegraded)
             : null,
-          footer: dirty
-            ? h('span', { role: 'status' }, t.proxyUnsaved)
-            : null,
+          footer: dirty ? h('span', { role: 'status' }, t.proxyUnsaved) : null,
           actions: [
             canReset
               ? h(
@@ -1263,8 +1263,7 @@ export function createSettingsView(
           ),
         desktop.phase === 'cancelled' &&
           h(StatusIndicator, { tone: 'idle', label: t.updatePaused }),
-        desktop.error &&
-          h(SettingStatus, { tone: 'error' }, t.updateFailed),
+        desktop.error && h(SettingStatus, { tone: 'error' }, t.updateFailed),
         restartRequired &&
           h(StatusIndicator, {
             tone: 'success',
@@ -1285,8 +1284,7 @@ export function createSettingsView(
           control: h(SettingSwitch, {
             'aria-label': t.autoCheck,
             checked: !!desktop.enabled,
-            disabled:
-              busy || desktop.confirmationRequired || desktop.required,
+            disabled: busy || desktop.confirmationRequired || desktop.required,
             onChange: (/** @type {boolean} */ enabled) =>
               onToggleEnabled(enabled),
           }),
@@ -1298,10 +1296,7 @@ export function createSettingsView(
             'aria-label': t.updateChannel,
             value: desktop.channel ?? 'stable',
             disabled:
-              busy ||
-              downloading ||
-              desktop.required ||
-              restartRequired,
+              busy || downloading || desktop.required || restartRequired,
             options: [
               { value: 'stable', label: t.stable },
               { value: 'beta', label: t.beta },
@@ -2003,7 +1998,11 @@ export function createSettingsView(
           : t.localUnknown;
     const localAction =
       !managed && localUac?.available && !localSignedIn
-        ? h(SettingAction, { compact: true, disabled: busy, onClick: enter }, t.login)
+        ? h(
+            SettingAction,
+            { compact: true, disabled: busy, onClick: enter },
+            t.login,
+          )
         : !managed && localSignedIn
           ? h(
               SettingAction,
@@ -2069,7 +2068,11 @@ export function createSettingsView(
     const cloudAction = managed
       ? null
       : statusError
-        ? h(SettingAction, { compact: true, disabled: busy, onClick: reload }, t.retry)
+        ? h(
+            SettingAction,
+            { compact: true, disabled: busy, onClick: reload },
+            t.retry,
+          )
         : !configured
           ? h(
               SettingAction,
@@ -2176,15 +2179,11 @@ export function createSettingsView(
       boot?.protocol != null && String(boot.protocol) !== ''
         ? String(boot.protocol)
         : '';
-    const versionValue = boot?.pluginVersion
-      ? String(boot.pluginVersion)
-      : '';
+    const versionValue = boot?.pluginVersion ? String(boot.pluginVersion) : '';
     const sourceValue = boot?.source ? String(boot.source) : '';
     const reasonRaw = network?.reason ?? account?.communication;
     const reasonValue =
-      reasonRaw != null && String(reasonRaw) !== ''
-        ? String(reasonRaw)
-        : '';
+      reasonRaw != null && String(reasonRaw) !== '' ? String(reasonRaw) : '';
     const modelTone = managed
       ? 'idle'
       : account?.models?.available
@@ -2413,8 +2412,9 @@ export function createSettingsView(
                           ? t.reachable
                           : result.reason === 'http'
                             ? t.http + result.status
-                            : (t[/** @type {keyof typeof t} */ (result.reason)] ??
-                              t.unavailable),
+                            : (t[
+                                /** @type {keyof typeof t} */ (result.reason)
+                              ] ?? t.unavailable),
                       );
                     }),
                 },
@@ -2638,11 +2638,7 @@ export function createSettingsView(
             h(
               'div',
               { className: 'auriga-network-info-row' },
-              h(
-                'span',
-                { className: 'auriga-network-info-label' },
-                t.received,
-              ),
+              h('span', { className: 'auriga-network-info-label' }, t.received),
               h(
                 'div',
                 { className: 'auriga-network-info-value' },

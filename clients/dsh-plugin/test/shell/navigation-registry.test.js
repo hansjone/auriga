@@ -64,8 +64,14 @@ test('visible and permission filters hide entries', () => {
     },
   ]);
   assert.ok(!registry.list('top').some((item) => item.id === 'hidden'));
-  assert.ok(!registry.list('bottom', { can: () => false }).some((i) => i.id === 'admin'));
-  assert.ok(registry.list('bottom', { can: () => true }).some((i) => i.id === 'admin'));
+  assert.ok(
+    !registry
+      .list('bottom', { can: () => false })
+      .some((i) => i.id === 'admin'),
+  );
+  assert.ok(
+    registry.list('bottom', { can: () => true }).some((i) => i.id === 'admin'),
+  );
 });
 
 test('activity bar expanded preference persists', () => {

@@ -267,8 +267,7 @@ window.__ModuleLoader__.load({
       overviewCloudOff: '未连接',
       overviewNetworkOn: '就绪',
       overviewNetworkOff: '未就绪',
-      overviewLocalOnly:
-        '本地功能仍可用，部分云平台功能暂不可用。',
+      overviewLocalOnly: '本地功能仍可用，部分云平台功能暂不可用。',
       overviewUpdateTitle: '发现新版本',
       overviewUpdateAction: '前往更新',
       overviewConsentTitle: '待处理授权请求',
@@ -2004,14 +2003,16 @@ window.__ModuleLoader__.load({
           const memberPrimary = (source) => {
             for (const key of ['displayName', 'name', 'userId']) {
               const value = source?.[key];
-              if (typeof value === 'string' && value.trim()) return value.trim();
+              if (typeof value === 'string' && value.trim())
+                return value.trim();
             }
             return '';
           };
           const memberSecondary = (source) => {
             for (const key of ['empNo', 'employeeNo']) {
               const value = source?.[key];
-              if (typeof value === 'string' && value.trim()) return value.trim();
+              if (typeof value === 'string' && value.trim())
+                return value.trim();
             }
             const node = [source?.realm, source?.node]
               .filter((v) => typeof v === 'string' && v.trim())
@@ -2020,7 +2021,9 @@ window.__ModuleLoader__.load({
           };
           const memberDepartment = (source) => {
             const value = source?.department;
-            return typeof value === 'string' && value.trim() ? value.trim() : '';
+            return typeof value === 'string' && value.trim()
+              ? value.trim()
+              : '';
           };
           const modeOptions = [
             'ask_each',
@@ -2283,7 +2286,9 @@ window.__ModuleLoader__.load({
                     const rules = view.rules.filter(
                       (rule) => rule.choice === choice,
                     );
-                    const query = (listQuery[choice] || '').trim().toLowerCase();
+                    const query = (listQuery[choice] || '')
+                      .trim()
+                      .toLowerCase();
                     const visible = query
                       ? rules.filter((rule) => {
                           const hay = [
@@ -4597,8 +4602,7 @@ window.__ModuleLoader__.load({
                 ),
               ),
             );
-          if (!View)
-            return h('p', { className: 'auriga-muted' }, t('loading'));
+          if (!View) return h('p', { className: 'auriga-muted' }, t('loading'));
           const {
             OverviewPage,
             OverviewWelcome,
@@ -4765,9 +4769,7 @@ window.__ModuleLoader__.load({
             }),
             // No formal activity feed API yet — hide without real data.
             h(OverviewActivity, { items: undefined }),
-            phase?.status &&
-              phase.status !== 'ready' &&
-              notice(phase, retry),
+            phase?.status && phase.status !== 'ready' && notice(phase, retry),
           );
         }
         function Main() {

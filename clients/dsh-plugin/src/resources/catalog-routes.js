@@ -180,14 +180,9 @@ export function catalogRoutes(options) {
         const params = new URLSearchParams(query);
         for (const [key, value] of params) {
           if (
-            ![
-              'cursor',
-              'limit',
-              'kind',
-              'page',
-              'search',
-              'sort',
-            ].includes(key) ||
+            !['cursor', 'limit', 'kind', 'page', 'search', 'sort'].includes(
+              key,
+            ) ||
             (key === 'kind' && !['plugin', 'skill'].includes(value)) ||
             params.getAll(key).length !== 1 ||
             (key === 'limit' &&

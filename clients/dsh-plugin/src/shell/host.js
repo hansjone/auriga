@@ -26,10 +26,7 @@ function trustedOrigin(value) {
 export function installShellUi(
   ctx,
   config,
-  {
-    uiOrigin = process.env.AURIGA_SETTINGS_UI_ORIGIN,
-    nativeAuth,
-  } = {},
+  { uiOrigin = process.env.AURIGA_SETTINGS_UI_ORIGIN, nativeAuth } = {},
 ) {
   if (typeof ctx.inject !== 'function' || !ctx.webServer?.register) return;
   const browser =
@@ -59,7 +56,10 @@ export function createShellUiHandler({ auth, uiOrigin }) {
     /** @type {import('node:http').IncomingMessage} */ req,
     /** @type {import('node:http').ServerResponse} */ res,
   ) => {
-    const reject = (/** @type {number} */ code, /** @type {string} */ reason) => {
+    const reject = (
+      /** @type {number} */ code,
+      /** @type {string} */ reason,
+    ) => {
       res.writeHead(code, {
         'content-type': 'application/json',
         'cache-control': 'no-store',

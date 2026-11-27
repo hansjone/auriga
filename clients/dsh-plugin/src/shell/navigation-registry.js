@@ -86,14 +86,17 @@ export const AURIGA_NAVIGATION_ENTRIES = [
 /**
  * @param {AurigaNavigationEntry[]} [seed]
  */
-export function createAurigaNavigationRegistry(seed = AURIGA_NAVIGATION_ENTRIES) {
+export function createAurigaNavigationRegistry(
+  seed = AURIGA_NAVIGATION_ENTRIES,
+) {
   /** @type {AurigaNavigationEntry[]} */
   const entries = seed.map((entry) => ({ ...entry }));
 
   const sortEntries = () =>
     entries.sort(
       (a, b) =>
-        (a.order ?? 0) - (b.order ?? 0) || String(a.id).localeCompare(String(b.id)),
+        (a.order ?? 0) - (b.order ?? 0) ||
+        String(a.id).localeCompare(String(b.id)),
     );
 
   sortEntries();
@@ -102,7 +105,9 @@ export function createAurigaNavigationRegistry(seed = AURIGA_NAVIGATION_ENTRIES)
     /** @param {AurigaNavigationEntry} entry */
     register(entry) {
       if (!entry?.id || !entry.placement || !entry.route || !entry.icon) {
-        throw new TypeError('navigation entry requires id, placement, route, icon');
+        throw new TypeError(
+          'navigation entry requires id, placement, route, icon',
+        );
       }
       const index = entries.findIndex((item) => item.id === entry.id);
       if (index >= 0) entries.splice(index, 1, { ...entry });
@@ -155,7 +160,10 @@ export function readActivityBarExpanded(storage = globalThis.localStorage) {
   }
 }
 
-export function writeActivityBarExpanded(expanded, storage = globalThis.localStorage) {
+export function writeActivityBarExpanded(
+  expanded,
+  storage = globalThis.localStorage,
+) {
   try {
     storage?.setItem?.(AURIGA_ACTIVITY_BAR_STORAGE_KEY, expanded ? '1' : '0');
   } catch {

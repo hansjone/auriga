@@ -767,6 +767,7 @@ export class SkillPanel {
       this.page = 1;
       if (this.searchTimer) clearTimeout(this.searchTimer);
       this.searchTimer = setTimeout(() => {
+        this.searchTimer = undefined;
         void this.load({ force: true });
       }, 300);
     };
@@ -1183,12 +1184,19 @@ export class SkillPanel {
 
   render() {
     const marketList = !this.mine && !this.selected;
+    const rootNode = this.root.getRootNode();
+    const active =
+      rootNode instanceof ShadowRoot
+        ? rootNode.activeElement
+        : document.activeElement;
+    const searchFocused = !!this.searchInput && active === this.searchInput;
+    // Keep the list chrome mounted for ordinary result updates. Rebuild when
+    // leaving the list or when the sort menu needs a fresh render pass.
     const keepChrome =
       marketList &&
       !!this.chromeEl &&
       this.chromeEl.parentElement === this.root &&
-      !!this.searchInput &&
-      (document.activeElement === this.searchInput || !!this.searchTimer);
+      !this.sortMenuOpen;
     if (keepChrome) {
       while (this.chromeEl!.nextSibling) this.chromeEl!.nextSibling.remove();
       this.syncMarketChrome();
@@ -1203,6 +1211,13 @@ export class SkillPanel {
       if (marketList) this.marketChrome();
       else if (this.mine && !this.actionsHost)
         this.root.append(this.refreshButton());
+      if (searchFocused && this.searchInput) {
+        this.searchInput.focus();
+        const start = this.searchInput.selectionStart;
+        const end = this.searchInput.selectionEnd;
+        if (start != null && end != null)
+          this.searchInput.setSelectionRange(start, end);
+      }
     }
     this.root.setAttribute('aria-busy', String(this.pending));
     this.headerActions();

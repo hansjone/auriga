@@ -25,10 +25,7 @@ export function createOverviewUI(React) {
     'aria-label': ariaLabel = '欢迎',
   }) {
     const resolvedTitle =
-      title ||
-      (signedIn
-        ? '欢迎回来，' + (name || '成员')
-        : '欢迎使用 Auriga');
+      title || (signedIn ? '欢迎回来，' + (name || '成员') : '欢迎使用 Auriga');
     const initials = String(name || 'A')
       .trim()
       .slice(0, 1)
@@ -39,11 +36,7 @@ export function createOverviewUI(React) {
       h(
         'div',
         { className: 'auriga-overview-welcome-copy' },
-        h(
-          'h1',
-          { className: 'auriga-overview-welcome-title' },
-          resolvedTitle,
-        ),
+        h('h1', { className: 'auriga-overview-welcome-title' }, resolvedTitle),
         h('p', { className: 'auriga-overview-welcome-tagline' }, tagline),
       ),
       avatar !== false
@@ -136,12 +129,8 @@ export function createOverviewUI(React) {
           h(
             'div',
             { className: 'auriga-overview-notice-copy' },
-            item.title
-              ? h('strong', null, item.title)
-              : null,
-            item.detail
-              ? h('span', null, item.detail)
-              : null,
+            item.title ? h('strong', null, item.title) : null,
+            item.detail ? h('span', null, item.detail) : null,
           ),
           item.action
             ? h(
@@ -187,11 +176,7 @@ export function createOverviewUI(React) {
         }),
       ),
       h('div', { className: 'auriga-overview-capability-title' }, title),
-      h(
-        'p',
-        { className: 'auriga-overview-capability-desc' },
-        description,
-      ),
+      h('p', { className: 'auriga-overview-capability-desc' }, description),
     );
   }
 
@@ -301,11 +286,7 @@ export function createOverviewUI(React) {
     return h(
       'div',
       { className: 'auriga-overview' },
-      h(
-        'div',
-        { className: 'auriga-overview-inner' },
-        ...childList(children),
-      ),
+      h('div', { className: 'auriga-overview-inner' }, ...childList(children)),
     );
   }
 

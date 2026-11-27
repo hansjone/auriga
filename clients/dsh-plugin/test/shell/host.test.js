@@ -1,9 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import {
-  createShellUiHandler,
-  installShellUi,
-} from '../../src/shell/host.js';
+import { createShellUiHandler, installShellUi } from '../../src/shell/host.js';
 import { createOverviewUI } from '../../src/shell/overview.js';
 
 test('installShellUi serves overview and icons modules when admitted', async () => {
@@ -109,12 +106,7 @@ test('shell-ui rejects unauthenticated and cross-origin requests', async () => {
         host: '127.0.0.1:18789',
         origin: 'https://evil.example',
       },
-      rawHeaders: [
-        'host',
-        '127.0.0.1:18789',
-        'origin',
-        'https://evil.example',
-      ],
+      rawHeaders: ['host', '127.0.0.1:18789', 'origin', 'https://evil.example'],
     },
     {
       writeHead(status) {

@@ -388,7 +388,10 @@ async function mockFetch(url, init = {}) {
       };
       return Response.json(settingsState);
     }
-    if (path === 'auriga/settings/proxy' || path === 'auriga/settings/proxy/reset') {
+    if (
+      path === 'auriga/settings/proxy' ||
+      path === 'auriga/settings/proxy/reset'
+    ) {
       settingsState = {
         ...settingsState,
         proxy: {
@@ -512,7 +515,8 @@ async function mockFetch(url, init = {}) {
       };
       return Response.json({ ok: true });
     }
-    if (path === 'auriga/shell/messaging/receive') return Response.json({ ok: true });
+    if (path === 'auriga/shell/messaging/receive')
+      return Response.json({ ok: true });
     if (path === 'auriga/shell/command') {
       if (body?.action === 'retry_local_uac') {
         account.loggedIn = true;
@@ -747,11 +751,7 @@ function Dot({ tone }) {
   });
 }
 
-function OverviewPanel({
-  onNavigate,
-  pendingCount = 0,
-  desktop,
-}) {
+function OverviewPanel({ onNavigate, pendingCount = 0, desktop }) {
   const {
     OverviewPage,
     OverviewWelcome,
@@ -778,11 +778,7 @@ function OverviewPanel({
     },
     {
       id: 'cloud',
-      tone: cloudConnected
-        ? 'success'
-        : account.loggedIn
-          ? 'warn'
-          : 'idle',
+      tone: cloudConnected ? 'success' : account.loggedIn ? 'warn' : 'idle',
       label: '云平台',
       detail: cloudConnected
         ? '已连接'
@@ -991,9 +987,7 @@ function ResourcesBrowser({ mode, items, onChange }) {
       ? h(
           'p',
           { className: 'notice', role: 'status' },
-          mine
-            ? '暂无共享资源，请前往资源市场选择。'
-            : '没有符合条件的资源。',
+          mine ? '暂无共享资源，请前往资源市场选择。' : '没有符合条件的资源。',
         )
       : h(
           'div',
@@ -1016,12 +1010,15 @@ function ResourcesBrowser({ mode, items, onChange }) {
                     h(
                       'span',
                       { className: 'resource-kind' },
-                      kindLabel(pack.kind) +
-                        (pack.private ? ' · 私有' : ''),
+                      kindLabel(pack.kind) + (pack.private ? ' · 私有' : ''),
                     ),
                   ),
                 ),
-                h('span', { className: 'resource-version-corner' }, pack.version),
+                h(
+                  'span',
+                  { className: 'resource-version-corner' },
+                  pack.version,
+                ),
               ),
               h('p', { className: 'resource-description' }, pack.description),
               h(
@@ -1230,7 +1227,9 @@ function InboxPanel({ pending, onDecide }) {
                   'div',
                   { className: 'preview-inbox-desc' },
                   [
-                    item.layer === 'conversation' ? '请求建立对话' : '请求自动执行',
+                    item.layer === 'conversation'
+                      ? '请求建立对话'
+                      : '请求自动执行',
                     item.source.empNo,
                     item.source.department,
                     item.source.realm + '.' + item.source.node,
@@ -1274,7 +1273,8 @@ function ActivityBar({ value, onChange, expanded, onToggle, badges }) {
     const Icon = icons[item.icon];
     const active = value === item.route;
     const badge = badges?.[item.id];
-    const label = labels[expanded ? item.labelKey : item.shortLabelKey || item.labelKey];
+    const label =
+      labels[expanded ? item.labelKey : item.shortLabelKey || item.labelKey];
     return h(
       'button',
       {
@@ -1310,7 +1310,11 @@ function ActivityBar({ value, onChange, expanded, onToggle, badges }) {
         ? h('span', { className: 'auriga-nav-label' }, labels.nav_collapse)
         : null,
     ),
-    h('div', { className: 'auriga-activity-bar-top', role: 'list' }, ...top.map(renderItem)),
+    h(
+      'div',
+      { className: 'auriga-activity-bar-top', role: 'list' },
+      ...top.map(renderItem),
+    ),
     h(
       'div',
       { className: 'auriga-activity-bar-bottom', role: 'list' },
@@ -1321,7 +1325,9 @@ function ActivityBar({ value, onChange, expanded, onToggle, badges }) {
 
 function App() {
   const [tab, setTab] = React.useState('overview');
-  const [expanded, setExpanded] = React.useState(() => readActivityBarExpanded());
+  const [expanded, setExpanded] = React.useState(() =>
+    readActivityBarExpanded(),
+  );
   const [pending, setPending] = React.useState(consentState.pending);
   const [packages, setPackages] = React.useState(catalogPackages);
 

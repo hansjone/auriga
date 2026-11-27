@@ -384,8 +384,7 @@ for (const phase of ['signed-out', 'unavailable', 'pending'])
         const content = text(
           nodes(tree).find(
             (n) =>
-              n.type === 'section' &&
-              n.props?.['aria-label'] === '身份信息',
+              n.type === 'section' && n.props?.['aria-label'] === '身份信息',
           ),
         );
         assert.doesNotMatch(content, /未登录/);
@@ -447,9 +446,7 @@ for (const managed of [false, true])
         await setImmediate();
         const tree = fixture.render();
         const diagnostics = nodes(tree).find(
-          (n) =>
-            n.type === 'section' &&
-            n.props?.['aria-label'] === '诊断',
+          (n) => n.type === 'section' && n.props?.['aria-label'] === '诊断',
         );
         assert.match(text(diagnostics), /00000000/);
         assert.match(text(diagnostics), /诊断信息/);
@@ -460,8 +457,7 @@ for (const managed of [false, true])
         );
         assert.equal(
           nodes(diagnostics).filter(
-            (n) =>
-              n.type === 'h2' && text(n).includes('诊断信息'),
+            (n) => n.type === 'h2' && text(n).includes('诊断信息'),
           ).length,
           0,
         );
@@ -470,9 +466,7 @@ for (const managed of [false, true])
           /成员 ID[\s\S]*协议版本[\s\S]*插件版本[\s\S]*界面来源[\s\S]*模型[\s\S]*原因/,
         );
         const account = nodes(tree).find(
-          (n) =>
-            n.type === 'section' &&
-            n.props?.['aria-label'] === '身份信息',
+          (n) => n.type === 'section' && n.props?.['aria-label'] === '身份信息',
         );
         assert.doesNotMatch(
           text(account),
@@ -581,9 +575,7 @@ for (const locale of ['zh', 'en'])
               (n) =>
                 n.type === 'input' &&
                 n.props['aria-label'] ===
-                  (locale === 'zh'
-                    ? '云平台地址'
-                    : 'Cloud platform address'),
+                  (locale === 'zh' ? '云平台地址' : 'Cloud platform address'),
             ),
             !managed,
           );

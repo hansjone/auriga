@@ -40,10 +40,38 @@ export function createAurigaIcons(h) {
     LayoutDashboard: (props) =>
       icon(
         [
-          h('rect', { key: 'a', width: '7', height: '7', x: '3', y: '3', rx: '1' }),
-          h('rect', { key: 'b', width: '7', height: '7', x: '14', y: '3', rx: '1' }),
-          h('rect', { key: 'c', width: '7', height: '7', x: '14', y: '14', rx: '1' }),
-          h('rect', { key: 'd', width: '7', height: '7', x: '3', y: '14', rx: '1' }),
+          h('rect', {
+            key: 'a',
+            width: '7',
+            height: '7',
+            x: '3',
+            y: '3',
+            rx: '1',
+          }),
+          h('rect', {
+            key: 'b',
+            width: '7',
+            height: '7',
+            x: '14',
+            y: '3',
+            rx: '1',
+          }),
+          h('rect', {
+            key: 'c',
+            width: '7',
+            height: '7',
+            x: '14',
+            y: '14',
+            rx: '1',
+          }),
+          h('rect', {
+            key: 'd',
+            width: '7',
+            height: '7',
+            x: '3',
+            y: '14',
+            rx: '1',
+          }),
         ],
         props,
       ),
@@ -54,8 +82,14 @@ export function createAurigaIcons(h) {
             key: 'a',
             d: 'm2 7 4.41-4.41A2 2 0 0 1 7.83 2h8.34a2 2 0 0 1 1.42.59L22 7',
           }),
-          h('path', { key: 'b', d: 'M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8' }),
-          h('path', { key: 'c', d: 'M15 22v-4a2 2 0 0 0-2-2h-2a2 2 0 0 0-2 2v4' }),
+          h('path', {
+            key: 'b',
+            d: 'M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8',
+          }),
+          h('path', {
+            key: 'c',
+            d: 'M15 22v-4a2 2 0 0 0-2-2h-2a2 2 0 0 0-2 2v4',
+          }),
           h('path', { key: 'd', d: 'M2 7h20' }),
           h('path', {
             key: 'e',
@@ -88,14 +122,20 @@ export function createAurigaIcons(h) {
         [
           h('path', { key: 'a', d: 'M18 21a8 8 0 0 0-16 0' }),
           h('circle', { key: 'b', cx: '10', cy: '8', r: '5' }),
-          h('path', { key: 'c', d: 'M22 20c0-3.37-2-6.5-4-8a5 5 0 0 0-.45-8.3' }),
+          h('path', {
+            key: 'c',
+            d: 'M22 20c0-3.37-2-6.5-4-8a5 5 0 0 0-.45-8.3',
+          }),
         ],
         props,
       ),
     Inbox: (props) =>
       icon(
         [
-          h('polyline', { key: 'a', points: '22 12 16 12 14 15 10 15 8 12 2 12' }),
+          h('polyline', {
+            key: 'a',
+            points: '22 12 16 12 14 15 10 15 8 12 2 12',
+          }),
           h('path', {
             key: 'b',
             d: 'M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z',
@@ -159,7 +199,10 @@ export function createAurigaIcons(h) {
     User: (props) =>
       icon(
         [
-          h('path', { key: 'a', d: 'M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2' }),
+          h('path', {
+            key: 'a',
+            d: 'M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2',
+          }),
           h('circle', { key: 'b', cx: '12', cy: '7', r: '4' }),
         ],
         props,
@@ -183,7 +226,10 @@ export function createAurigaIcons(h) {
       icon(
         [
           h('circle', { key: 'a', cx: '12', cy: '12', r: '10' }),
-          h('path', { key: 'b', d: 'M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20' }),
+          h('path', {
+            key: 'b',
+            d: 'M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20',
+          }),
           h('path', { key: 'c', d: 'M2 12h20' }),
         ],
         props,
@@ -191,7 +237,10 @@ export function createAurigaIcons(h) {
     Download: (props) =>
       icon(
         [
-          h('path', { key: 'a', d: 'M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4' }),
+          h('path', {
+            key: 'a',
+            d: 'M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4',
+          }),
           h('polyline', { key: 'b', points: '7 10 12 15 17 10' }),
           h('line', { key: 'c', x1: '12', x2: '12', y1: '15', y2: '3' }),
         ],
@@ -235,9 +284,15 @@ export function createAurigaIcons(h) {
     RefreshCw: (props) =>
       icon(
         [
-          h('path', { key: 'a', d: 'M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8' }),
+          h('path', {
+            key: 'a',
+            d: 'M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8',
+          }),
           h('path', { key: 'b', d: 'M21 3v5h-5' }),
-          h('path', { key: 'c', d: 'M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16' }),
+          h('path', {
+            key: 'c',
+            d: 'M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16',
+          }),
           h('path', { key: 'd', d: 'M8 16H3v5' }),
         ],
         props,
