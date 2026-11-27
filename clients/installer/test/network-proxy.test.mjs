@@ -252,6 +252,9 @@ test('layered store resolves user override > bundled defaults.json > builtin dir
 
     const parsedBounded = readBoundedJsonFile(defaultsFile);
     assert.equal(parsedBounded.networkProxy.mode, 'proxy');
+    assert.throws(() => readBoundedJsonFile(defaultsFile, 16), {
+      code: 'invalidProxyFile',
+    });
 
     const store = createProxyConfigStore({ dataHome, defaultsFile });
     const initial = store.snapshot();
@@ -442,6 +445,22 @@ test('local routing proxy forwards HTTP, real bidirectional CONNECT, rejects sel
 
   const router = await startLocalProxyServer({
     getConfig: () => activeConfig,
+    lookup: (hostname, opts, cb) => {
+      const callback = typeof opts === 'function' ? opts : cb;
+      if (hostname === 'loop-alias.example.test') {
+        if (typeof opts === 'object' && opts?.all) {
+          callback(null, [{ address: '127.0.0.1', family: 4 }]);
+        } else {
+          callback(null, '127.0.0.1', 4);
+        }
+        return;
+      }
+      if (typeof opts === 'object' && opts?.all) {
+        callback(null, [{ address: '127.0.0.1', family: 4 }]);
+      } else {
+        callback(null, '127.0.0.1', 4);
+      }
+    },
   });
 
   const httpViaRouter = (targetUrl) =>
@@ -480,9 +499,34 @@ test('local routing proxy forwards HTTP, real bidirectional CONNECT, rejects sel
       `Basic ${Buffer.from('u1:p1').toString('base64')}`,
     );
 
-    // Self-loop HTTP target rejected with 502
+    // Self-loop HTTP target rejected with 502 (both literal loopback and DNS alias)
     const loopRes = await httpViaRouter(`http://127.0.0.1:${router.port}/self`);
     assert.equal(loopRes.status, 502);
+    const savedCfg = activeConfig;
+    activeConfig = validateProxyConfig({
+      mode: 'direct',
+      globalProxy: '',
+      noProxy: [],
+      rules: [],
+    });
+    const aliasLoopRes = await httpViaRouter(
+      `http://loop-alias.example.test:${router.port}/self`,
+    );
+    assert.equal(aliasLoopRes.status, 502);
+    const aliasConnectRes = await new Promise((resolve, reject) => {
+      const sock = net.connect(router.port, '127.0.0.1', () => {
+        sock.write(
+          `CONNECT loop-alias.example.test:${router.port} HTTP/1.1\r\nHost: loop-alias.example.test:${router.port}\r\n\r\n`,
+        );
+      });
+      sock.once('data', (d) => {
+        sock.destroy();
+        resolve(d.toString('latin1'));
+      });
+      sock.on('error', reject);
+    });
+    assert.match(aliasConnectRes, /^HTTP\/1\.1 502 /);
+    activeConfig = savedCfg;
 
     // Other domain -> Global Proxy B
     const resB = await httpViaRouter('http://beta.example.test/world');

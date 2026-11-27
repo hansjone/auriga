@@ -1223,14 +1223,17 @@ export function createSettingsView(
       let first = true;
       const update = async () => {
         // Each read owns its cancellation guard; unmounted windows never publish.
+        const seq = ++stateSeqRef.current;
         try {
           const next = await call('auriga/settings/state');
           const identity = await call('auriga/shell/status').catch((error) => ({
             readError: explain(error),
           }));
           if (!live) return;
-          setState(next);
-          if (first) setAddress(next.platformOrigin ?? '');
+          if (seq === stateSeqRef.current) {
+            setState(next);
+            if (first) setAddress(next.platformOrigin ?? '');
+          }
           first = false;
           if (
             identity.readError ||

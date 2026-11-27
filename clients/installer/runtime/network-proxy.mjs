@@ -12,8 +12,10 @@
  * - Zero external dependencies (Node built-ins only).
  */
 import { Buffer } from 'node:buffer';
+import dns from 'node:dns';
 import {
   closeSync,
+  constants as fsConstants,
   existsSync,
   fstatSync,
   lstatSync,
@@ -26,7 +28,7 @@ import {
   statSync,
   writeFileSync,
 } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { dirname, join, resolve as resolvePath } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import http from 'node:http';
 import https from 'node:https';
@@ -105,8 +107,27 @@ export function createDirectHttpsAgent(options = {}) {
 }
 
 /**
+ * Walk every existing ancestor segment of `absPath` to ensure no symlink
+ * sits in the path hierarchy.
+ * @param {string} absPath
+ */
+function assertNoSymlinkPath(absPath) {
+  let cur = resolvePath(absPath);
+  for (;;) {
+    const st = lstatSync(cur);
+    if (st.isSymbolicLink()) {
+      throw proxyError('invalidProxyFile', '默认代理文件路径包含符号链接');
+    }
+    const parent = dirname(cur);
+    if (parent === cur) break;
+    cur = parent;
+  }
+}
+
+/**
  * Read a regular, non-symlink JSON file from a single file descriptor with a
- * strict byte ceiling to avoid lstat/readFile TOCTOU races.
+ * strict byte ceiling (`maxBytes + 1` buffer) to avoid TOCTOU races and
+ * symlink traversal.
  * @param {string} file
  * @param {number} [maxBytes]
  */
@@ -114,17 +135,27 @@ export function readBoundedJsonFile(
   file,
   maxBytes = MAX_DEFAULT_PROXY_FILE_BYTES,
 ) {
-  const lst = lstatSync(file);
+  const abs = resolvePath(String(file));
+  assertNoSymlinkPath(abs);
+  const lst = lstatSync(abs, { bigint: true });
   if (!lst.isFile() || lst.isSymbolicLink()) {
     throw proxyError('invalidProxyFile', '默认代理文件必须是普通文件');
   }
-  const fd = openSync(file, 'r');
+  const flags =
+    fsConstants.O_RDONLY |
+    (typeof fsConstants.O_NOFOLLOW === 'number' ? fsConstants.O_NOFOLLOW : 0);
+  const fd = openSync(abs, flags);
   try {
-    const fst = fstatSync(fd);
-    if (!fst.isFile() || fst.size > maxBytes) {
+    const fst = fstatSync(fd, { bigint: true });
+    if (
+      !fst.isFile() ||
+      fst.dev !== lst.dev ||
+      fst.ino !== lst.ino ||
+      fst.size > BigInt(maxBytes)
+    ) {
       throw proxyError('invalidProxyFile', '默认代理文件无效或超过大小上限');
     }
-    const buf = Buffer.allocUnsafe(fst.size + 1);
+    const buf = Buffer.allocUnsafe(maxBytes + 1);
     let offset = 0;
     while (offset < buf.length) {
       const n = readSync(fd, buf, offset, buf.length - offset, null);
@@ -945,6 +976,34 @@ function stripHopByHop(headers) {
   return out;
 }
 
+function createLoopGuardLookup(
+  targetPort,
+  getSelfPort,
+  baseLookup = dns.lookup,
+) {
+  return (hostname, options, callback) => {
+    const cb = typeof options === 'function' ? options : callback;
+    const opts = typeof options === 'function' ? {} : options;
+    baseLookup(hostname, opts, (err, address, family) => {
+      if (err) {
+        cb(err);
+        return;
+      }
+      const selfPort = getSelfPort();
+      if (selfPort && Number(targetPort) === selfPort) {
+        const list = Array.isArray(address)
+          ? address.map((item) => item.address)
+          : [address];
+        if (list.some((addr) => isLoopbackHost(addr))) {
+          cb(proxyError('proxy_loop', '目标地址解析到客户端本地分流端口'));
+          return;
+        }
+      }
+      cb(null, address, family);
+    });
+  };
+}
+
 /**
  * Start the local loopback routing proxy on 127.0.0.1:<random free port>.
  * All DSH & child processes point HTTP_PROXY/HTTPS_PROXY here so:
@@ -953,12 +1012,13 @@ function stripHopByHop(headers) {
  * - Config updates apply live without restarting DSH.
  * - Upstream proxy credentials never enter child process environments.
  *
- * @param {{ getConfig: () => ReturnType<typeof validateProxyConfig>, connectTimeoutMs?: number, idleTimeoutMs?: number }} options
+ * @param {{ getConfig: () => ReturnType<typeof validateProxyConfig>, connectTimeoutMs?: number, idleTimeoutMs?: number, lookup?: typeof dns.lookup }} options
  */
 export async function startLocalProxyServer({
   getConfig,
   connectTimeoutMs = 15_000,
   idleTimeoutMs = 120_000,
+  lookup = dns.lookup,
 }) {
   let selfPort = 0;
   const activeSockets = new Set();
@@ -1012,6 +1072,7 @@ export async function startLocalProxyServer({
           method: clientReq.method,
           path: `${target.pathname}${target.search}`,
           headers: { ...headers, host: target.host },
+          lookup: createLoopGuardLookup(targetPort, () => selfPort, lookup),
           agent:
             target.protocol === 'https:' ? directHttpsAgent : directHttpAgent,
           timeout: idleTimeoutMs,
@@ -1157,7 +1218,11 @@ export async function startLocalProxyServer({
       };
 
       if (decision.action === 'direct') {
-        const upstream = net.connect({ host: targetHost, port: targetPort });
+        const upstream = net.connect({
+          host: targetHost,
+          port: targetPort,
+          lookup: createLoopGuardLookup(targetPort, () => selfPort, lookup),
+        });
         const timer = setTimeout(() => {
           upstream.destroy(proxyError('timeout', 'connect timeout'));
         }, connectTimeoutMs);
