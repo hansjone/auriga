@@ -128,10 +128,9 @@ export class Broker extends EventEmitter {
       .catch(() => {})
       .then(async () => {
         await this.vault.save(value);
-        if (Array.isArray(value.revocations)) {
-          for (const token of value.revocations)
-            this.committedRevocations.add(token);
-        }
+        this.committedRevocations = new Set(
+          Array.isArray(value.revocations) ? value.revocations : [],
+        );
       });
     return this.persistence;
   }
@@ -704,7 +703,6 @@ export class Broker extends EventEmitter {
       chain: 'revocation',
     });
     this.record.revocationBindings ??= {};
-    const added = [];
     for (const token of [tokens.refresh_token, tokens.access_token])
       if (
         typeof token === 'string' &&
@@ -715,10 +713,8 @@ export class Broker extends EventEmitter {
         this.record.revocationBindings[
           createHash('sha256').update(token).digest('hex')
         ] = metadata;
-        added.push(token);
       }
     await this.save();
-    for (const token of added) this.committedRevocations.add(token);
     this.log({
       ...metadata,
       stage: 'session_revoke',
@@ -1149,7 +1145,7 @@ export class Broker extends EventEmitter {
     let refreshedResult;
     try {
       refreshedResult = await Promise.race([
-        this.refreshTokens(forceRefresh),
+        this.refreshTokens(forceRefresh, anchorGeneration),
         new Promise((resolve, reject) => {
           onInvalidated = () =>
             reject(
@@ -1210,19 +1206,22 @@ export class Broker extends EventEmitter {
     );
     return run;
   }
-  refreshTokens(forceRefresh = false) {
+  refreshTokens(forceRefresh = false, expectedGeneration = this.generation) {
+    const targetGeneration = expectedGeneration;
+    if (this.closed || this.generation !== targetGeneration) {
+      return Promise.resolve({ rotated: false, generation: this.generation });
+    }
     if (this.tokenRefreshing) {
       if (
-        this.tokenRefreshingGeneration !== this.generation ||
+        this.tokenRefreshingGeneration !== targetGeneration ||
         (forceRefresh && !this.tokenRefreshingForce)
       ) {
         return this.tokenRefreshing
           .finally(() => {})
-          .then(() => this.refreshTokens(forceRefresh));
+          .then(() => this.refreshTokens(forceRefresh, targetGeneration));
       }
       return this.tokenRefreshing;
     }
-    const targetGeneration = this.generation;
     this.tokenRefreshingForce = forceRefresh;
     this.tokenRefreshingGeneration = targetGeneration;
     let toRevoke;

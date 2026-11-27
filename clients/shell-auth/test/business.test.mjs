@@ -1206,4 +1206,38 @@ test('BusinessProxy preserves active revision past 60s, waits for rotated bearer
   assert.ok(bRes.output, bRes.error?.code);
   assert.equal(bAttempts, 2);
   assert.equal(bBearers[1], 'Bearer fresh-b-rotated-bearer');
+
+  // 8) Queued refresh for account B waiting behind A must not refresh account C after switching to C.
+  const f6 = fixture();
+  await login(f6);
+  let releaseA6;
+  let refreshCalls6 = 0;
+  const origRefresh6 = f6.platform.refresh.bind(f6.platform);
+  f6.platform.refresh = async (...args) => {
+    refreshCalls6++;
+    if (refreshCalls6 === 1) {
+      await new Promise((r) => {
+        releaseA6 = r;
+      });
+    }
+    return origRefresh6(...args);
+  };
+  t.after(async () => {
+    releaseA6?.();
+    await f6.broker.close();
+  });
+  const inflightA6 = f6.broker.refreshTokens(true);
+  await new Promise((r) => setTimeout(r, 10));
+  await f6.broker.logout();
+  f6.identity.memberId = randomUUID();
+  await login(f6);
+  const queuedB6 = f6.broker.refreshTokens(true);
+  await f6.broker.logout();
+  f6.identity.memberId = randomUUID();
+  await login(f6);
+  releaseA6?.();
+  const [resA6, resB6] = await Promise.all([inflightA6, queuedB6]);
+  assert.equal(resA6.rotated, false);
+  assert.equal(resB6.rotated, false);
+  assert.equal(refreshCalls6, 1);
 });
