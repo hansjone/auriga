@@ -5,7 +5,7 @@ import { randomUUID, createHash } from 'node:crypto';
 import { mkdtempSync, rmSync, readdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { fixture, login } from './fixtures.mjs';
+import { fixture, login, command } from './fixtures.mjs';
 import { BusinessProxy, mapBusinessError } from '../business.mjs';
 import { Streams } from '../streams.mjs';
 import { valid } from '../schema.mjs';
@@ -1017,4 +1017,47 @@ test('BusinessProxy preserves active revision past 60s, waits for rotated bearer
   assert.equal(expRes.error?.code, 'common.unavailable');
   assert.equal(fetched, 0);
   assert.equal(leakProxy.controllers.size, 0);
+
+  // 4) Hanging remote revocation from an earlier session must not block AI audience exchange after re-login.
+  const f2 = fixture();
+  await login(f2);
+  const aiProxy = new BusinessProxy(f2.broker, async () =>
+    Response.json({ object: 'list', data: [] }),
+  );
+  const pendingRevokes = [];
+  let allowRevoke = false;
+  const releaseAllRevokes = () => {
+    allowRevoke = true;
+    while (pendingRevokes.length) pendingRevokes.shift()();
+  };
+  t.after(async () => {
+    releaseAllRevokes();
+    aiProxy.close();
+    await f2.broker.close();
+  });
+  f2.platform.revoke = () => {
+    if (allowRevoke) return Promise.resolve({ correlationId: randomUUID() });
+    return new Promise((resolve) => {
+      pendingRevokes.push(() => resolve({ correlationId: randomUUID() }));
+    });
+  };
+  await f2.broker.logout();
+  const pendingCheck = f2.broker.check();
+  await new Promise((r) => setTimeout(r, 10));
+  const authed = new Promise((resolve) => {
+    const onChange = (snap) => {
+      if (snap.state === 'authenticated') {
+        f2.broker.off('changed', onChange);
+        resolve();
+      }
+    };
+    f2.broker.on('changed', onChange);
+  });
+  await f2.broker.command(command(f2.broker, 'open_login'), OWNER);
+  await authed;
+  f2.platform.audience = async () => f2.tokens;
+  const aiRes = await aiProxy.call(call(f2.broker, 'listAiModels', {}), OWNER);
+  assert.ok(aiRes.output, aiRes.error?.code);
+  releaseAllRevokes();
+  await pendingCheck;
 });

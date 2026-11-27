@@ -1165,6 +1165,15 @@ export class Broker extends EventEmitter {
       code: 'common.unauthenticated',
     });
   }
+  withTokenLock(work) {
+    const prev = this.tokenQueue ?? Promise.resolve();
+    const run = prev.catch(() => {}).then(work);
+    this.tokenQueue = run.then(
+      () => {},
+      () => {},
+    );
+    return run;
+  }
   async checkOnce(forceRefresh = false) {
     if (this.closed) return;
     if (this.localSource && this.localSource.until <= this.mono())
@@ -1174,59 +1183,68 @@ export class Broker extends EventEmitter {
       await this.drainRevocations();
       return;
     }
-    const generation = this.generation,
-      old = this.record.tokens;
-    let next;
-    try {
-      const refreshMargin = Math.max(
-        60000,
-        Math.min(300000, Math.floor((this.tokenLifetimeMs ?? 0) * 0.2)),
-      );
-      const refresh =
-        forceRefresh ||
-        !this.claims ||
-        this.tokenUntil - this.now() < refreshMargin ||
-        this.mono() >= this.tokenMonoUntil - refreshMargin ||
-        this.state === 'unreachable' ||
-        this.state === 'reauth_required';
-      next = refresh
-        ? await this.platform.refresh(old.refresh_token, old.client_id)
-        : old;
-      if (generation !== this.generation || this.closed) {
-        if (next !== old) await this.queueRevoke(next);
-        return;
-      }
-      const verified = await this.validateTokens(next, this.claims);
-      if (generation !== this.generation || this.closed) {
-        if (next !== old) await this.queueRevoke(next);
-        return;
-      }
-      this.record.tokens = next;
-      await this.save();
-      if (generation !== this.generation || this.closed) {
-        if (next !== old) await this.queueRevoke(next);
-        return;
-      }
-      this.acceptVerified(verified);
-      if (
-        this.state !== 'authenticated' ||
-        JSON.stringify(verified.projection) !== JSON.stringify(this.projection)
-      )
-        this.transition('authenticated', undefined, verified.projection);
-      this.emit('auth_refreshed', { rotated: next !== old });
-    } catch (error) {
-      if (generation !== this.generation || this.closed) return;
-      if ([400, 401, 403].includes(error.status)) {
-        this.generation++;
-        delete this.record.tokens;
-        this.record.manualLoginRequired = true;
-        delete this.record.proofFailureGeneration;
-        this.transition('revoked', reasonFor(error));
+    let toRevoke;
+    await this.withTokenLock(async () => {
+      if (this.closed || !this.record.tokens || this.attempt) return;
+      const generation = this.generation,
+        old = this.record.tokens;
+      let next;
+      try {
+        const refreshMargin = Math.max(
+          60000,
+          Math.min(300000, Math.floor((this.tokenLifetimeMs ?? 0) * 0.2)),
+        );
+        const refresh =
+          forceRefresh ||
+          !this.claims ||
+          this.tokenUntil - this.now() < refreshMargin ||
+          this.mono() >= this.tokenMonoUntil - refreshMargin ||
+          this.state === 'unreachable' ||
+          this.state === 'reauth_required';
+        next = refresh
+          ? await this.platform.refresh(old.refresh_token, old.client_id)
+          : old;
+        if (generation !== this.generation || this.closed) {
+          if (next !== old) toRevoke = next;
+          return;
+        }
+        const verified = await this.validateTokens(next, this.claims);
+        if (generation !== this.generation || this.closed) {
+          if (next !== old) toRevoke = next;
+          return;
+        }
+        this.record.tokens = next;
         await this.save();
-        this.track(this.queueRevoke(next ?? old));
-      } else this.transition('unreachable', 'offline');
+        if (generation !== this.generation || this.closed) {
+          if (next !== old) toRevoke = next;
+          return;
+        }
+        this.acceptVerified(verified);
+        if (
+          this.state !== 'authenticated' ||
+          JSON.stringify(verified.projection) !==
+            JSON.stringify(this.projection)
+        )
+          this.transition('authenticated', undefined, verified.projection);
+        this.emit('auth_refreshed', { rotated: next !== old });
+      } catch (error) {
+        if (generation !== this.generation || this.closed) return;
+        if ([400, 401, 403].includes(error.status)) {
+          this.generation++;
+          delete this.record.tokens;
+          this.record.manualLoginRequired = true;
+          delete this.record.proofFailureGeneration;
+          this.transition('revoked', reasonFor(error));
+          await this.save();
+          toRevoke = next ?? old;
+        } else this.transition('unreachable', 'offline');
+      }
+    });
+    if (toRevoke) {
+      await this.queueRevoke(toRevoke);
+      return;
     }
-    this.track(this.drainRevocations());
+    await this.drainRevocations();
   }
   async logout() {
     const tokens = this.record.tokens,
@@ -1260,35 +1278,28 @@ export class Broker extends EventEmitter {
   async tokenFor(audience, context) {
     this.assert(context);
     if (audience === 'auriga') return this.record.tokens.access_token;
-    const acquire = this.health
-      .catch(() => {})
-      .then(async () => {
-        this.assert(context);
-        const result = await this.platform.audience(
-          this.record.tokens.refresh_token,
-          this.claims,
-          audience,
-          this.record.tokens.client_id,
-        );
-        if (context.generation !== this.generation || this.closed) {
-          await this.queueRevoke(result);
-          throw conflict();
-        }
-        if (typeof result.refresh_token !== 'string' || !result.refresh_token)
-          throw unavailable();
-        this.record.tokens = {
-          ...this.record.tokens,
-          refresh_token: result.refresh_token,
-        };
-        await this.save();
-        this.assert(context);
-        return result.access_token;
-      });
-    this.health = acquire.then(
-      () => {},
-      () => {},
-    );
-    return acquire;
+    return this.withTokenLock(async () => {
+      this.assert(context);
+      const result = await this.platform.audience(
+        this.record.tokens.refresh_token,
+        this.claims,
+        audience,
+        this.record.tokens.client_id,
+      );
+      if (context.generation !== this.generation || this.closed) {
+        this.track(this.queueRevoke(result));
+        throw conflict();
+      }
+      if (typeof result.refresh_token !== 'string' || !result.refresh_token)
+        throw unavailable();
+      this.record.tokens = {
+        ...this.record.tokens,
+        refresh_token: result.refresh_token,
+      };
+      await this.save();
+      this.assert(context);
+      return result.access_token;
+    });
   }
   async close() {
     this.closed = true;
@@ -1296,7 +1307,11 @@ export class Broker extends EventEmitter {
     this.generation++;
     this.attempt?.controller.abort();
     this.attempt = undefined;
-    await Promise.allSettled([...this.inflight, this.health]);
+    await Promise.allSettled([
+      ...this.inflight,
+      this.health,
+      this.tokenQueue ?? Promise.resolve(),
+    ]);
     await this.persistence;
     this.removeAllListeners();
   }
