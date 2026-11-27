@@ -1,0 +1,465 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Auriga UI · 本地全界面预览</title>
+    <style>
+      :root,
+      html[data-theme='dark'] {
+        color-scheme: dark;
+        --dsw-alias-bg-layer-1: #1b1d21;
+        --dsw-alias-bg-layer-2: #2a2d33;
+        --dsw-alias-label-primary: #f2f4f7;
+        --dsw-alias-label-secondary: #9aa3af;
+        --dsw-alias-label-tertiary: #6b7280;
+        --dsw-alias-border-l1: #32363e;
+        --dsw-alias-border-l2: #4b5563;
+        --dsw-alias-interactive-bg-hover: #32363e;
+        --dsw-alias-interactive-bg-selected: #2f3540;
+        --dsw-alias-state-business-primary: #5b8def;
+        --dsw-alias-button-primary-fill: #3b82f6;
+        --dsw-alias-label-primary-foreground: #ffffff;
+        --dsw-alias-state-error-primary: #ef4444;
+        --dsw-alias-state-error-label: #f87171;
+        --dsw-alias-state-warn-primary: #f59e0b;
+        --dsw-alias-state-warn-label: #fbbf24;
+        --dsw-alias-state-success-primary: #5f8f6a;
+        --dsw-alias-state-success-label: #9bb5a1;
+        --dsw-alias-brand-primary: #1f6feb;
+        --dsw-focus-ring-color: #5b8def;
+        --preview-page-bg: #111317;
+        --preview-banner-bg: #2a2418;
+        --preview-banner-border: #5c4a22;
+        --preview-banner-fg: #e8d5a3;
+      }
+      html[data-theme='light'] {
+        color-scheme: light;
+        --dsw-alias-bg-layer-1: #ffffff;
+        --dsw-alias-bg-layer-2: #f4f6f8;
+        --dsw-alias-label-primary: #1f2328;
+        --dsw-alias-label-secondary: #59636e;
+        --dsw-alias-label-tertiary: #818b98;
+        --dsw-alias-border-l1: #d8dee4;
+        --dsw-alias-border-l2: #c7ced6;
+        --dsw-alias-interactive-bg-hover: #eef1f4;
+        --dsw-alias-interactive-bg-selected: #e7eef8;
+        --dsw-alias-state-business-primary: #2563eb;
+        --dsw-alias-button-primary-fill: #2563eb;
+        --dsw-alias-label-primary-foreground: #ffffff;
+        --dsw-alias-state-error-primary: #dc2626;
+        --dsw-alias-state-error-label: #b91c1c;
+        --dsw-alias-state-warn-primary: #d97706;
+        --dsw-alias-state-warn-label: #b45309;
+        --dsw-alias-state-success-primary: #3f7a4c;
+        --dsw-alias-state-success-label: #2f5d3a;
+        --dsw-alias-brand-primary: #1f6feb;
+        --dsw-focus-ring-color: #2563eb;
+        --preview-page-bg: #e8ecf1;
+        --preview-banner-bg: #fff8e8;
+        --preview-banner-border: #e7d39a;
+        --preview-banner-fg: #6b5420;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+      }
+      body {
+        min-height: 100vh;
+        font-family:
+          'Segoe UI',
+          'PingFang SC',
+          'Microsoft YaHei',
+          system-ui,
+          sans-serif;
+        background: var(--preview-page-bg);
+        color: var(--dsw-alias-label-primary);
+      }
+      .preview-chrome {
+        height: 100vh;
+        display: flex;
+        flex-direction: column;
+        padding: 12px 16px 16px;
+        gap: 10px;
+      }
+      .preview-toolbar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        flex: none;
+        flex-wrap: wrap;
+      }
+      .preview-banner {
+        margin: 0;
+        padding: 8px 12px;
+        border-radius: 10px;
+        background: var(--preview-banner-bg);
+        border: 1px solid var(--preview-banner-border);
+        color: var(--preview-banner-fg);
+        font-size: 13px;
+        line-height: 1.5;
+        flex: 1;
+        min-width: 240px;
+      }
+      .preview-actions {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        flex: none;
+      }
+      .preview-actions button {
+        font: inherit;
+        font-size: 13px;
+        min-height: 32px;
+        padding: 0 12px;
+        border-radius: 8px;
+        border: 1px solid var(--dsw-alias-border-l2);
+        background: var(--dsw-alias-bg-layer-1);
+        color: var(--dsw-alias-label-primary);
+        cursor: pointer;
+      }
+      .preview-actions button[aria-pressed='true'] {
+        border-color: var(--dsw-alias-state-business-primary);
+        color: var(--dsw-alias-state-business-primary);
+      }
+      .preview-frame {
+        flex: 1;
+        min-height: 0;
+        border: 1px solid var(--dsw-alias-border-l1);
+        border-radius: 12px;
+        overflow: hidden;
+        background: var(--dsw-alias-bg-layer-1);
+      }
+      .preview-frame > #root,
+      .preview-frame > #root > .auriga-shell {
+        height: 100%;
+      }
+      .preview-frame .auriga-main-body {
+        padding: 0;
+      }
+      .preview-frame .auriga-tabpanel {
+        box-sizing: border-box;
+        padding: 24px 28px 32px;
+      }
+      .preview-frame .auriga-tabpanel:has(>.auriga-overview):not([hidden]),
+      .preview-frame .auriga-tabpanel:has(>.resources):not([hidden]),
+      .preview-frame .auriga-tabpanel:has(>.auriga-settings):not([hidden]) {
+        padding: 0;
+        overflow: hidden;
+        display: flex;
+        flex-direction: column;
+      }
+      .resources {
+        box-sizing: border-box;
+        display: flex;
+        flex-direction: column;
+        flex: 1;
+        min-height: 0;
+        height: 100%;
+        padding: 16px 20px 12px;
+        overflow: hidden;
+        background: var(--dsw-alias-bg-layer-1);
+        color: var(--dsw-alias-label-primary);
+      }
+      .resources .market-chrome {
+        display: grid;
+        gap: 12px;
+        flex: none;
+        margin-bottom: 12px;
+      }
+      .resources .market-search {
+        position: relative;
+        display: block;
+      }
+      .resources .market-search-icon {
+        position: absolute;
+        inset-inline-start: 12px;
+        top: 50%;
+        transform: translateY(-50%);
+        width: 16px;
+        height: 16px;
+        color: var(--dsw-alias-label-tertiary);
+        pointer-events: none;
+      }
+      .resources .market-search input[type='search'] {
+        width: 100%;
+        min-height: 40px;
+        padding: 8px 12px 8px 36px;
+        border: 1px solid var(--dsw-alias-border-l1);
+        border-radius: 10px;
+        background: var(--dsw-alias-bg-layer-2);
+        color: inherit;
+        font: inherit;
+      }
+      .resources .market-toolbar {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 10px 12px;
+      }
+      .resources .market-kind-filters {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+      }
+      .resources .market-kind-filter {
+        min-height: 32px;
+        padding: 0 12px;
+        border: 1px solid transparent;
+        border-radius: 999px;
+        background: transparent;
+        color: var(--dsw-alias-label-secondary);
+        font: inherit;
+        font-size: 13px;
+        cursor: pointer;
+      }
+      .resources .market-kind-filter:hover {
+        background: var(--dsw-alias-interactive-bg-hover);
+        color: var(--dsw-alias-label-primary);
+      }
+      .resources .market-kind-filter[aria-pressed='true'] {
+        background: var(--dsw-alias-interactive-bg-selected);
+        color: var(--dsw-alias-state-business-primary);
+        font-weight: 600;
+      }
+      .resources .market-toolbar-tools {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-inline-start: auto;
+      }
+      .resources .market-count {
+        margin: 0;
+        font-size: 12px;
+        color: var(--dsw-alias-label-secondary);
+      }
+      .resources .cards {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(min(100%, 300px), 1fr));
+        gap: 14px;
+        flex: 1 1 auto;
+        min-height: 0;
+        overflow: auto;
+        align-content: start;
+        padding-bottom: 12px;
+      }
+      .resources .card.resource-card {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        min-width: 0;
+        height: 100%;
+        padding: 16px 18px;
+        border: 1px solid var(--dsw-alias-border-l1);
+        border-radius: 12px;
+        background: var(--dsw-alias-bg-layer-2);
+      }
+      .resources .card.resource-card:hover {
+        border-color: var(--dsw-alias-border-l2);
+      }
+      .resources .resource-card-top {
+        display: flex;
+        align-items: flex-start;
+        gap: 12px;
+      }
+      .resources .resource-heading {
+        display: flex;
+        align-items: flex-start;
+        gap: 12px;
+        margin: 0;
+        flex: 1;
+        min-width: 0;
+      }
+      .resources .resource-heading > div {
+        min-width: 0;
+        display: grid;
+        gap: 2px;
+      }
+      .resources .resource-heading h3 {
+        margin: 0;
+        font-size: 15px;
+        font-weight: 600;
+        line-height: 1.35;
+      }
+      .resources .resource-kind {
+        font-size: 12px;
+        color: var(--dsw-alias-label-secondary);
+      }
+      .resources .resource-icon {
+        flex: none;
+        width: 40px;
+        height: 40px;
+        border-radius: 11px;
+        display: grid;
+        place-items: center;
+        background: var(--dsw-alias-interactive-bg-hover);
+        color: var(--dsw-alias-state-business-primary);
+      }
+      .resources .resource-version-corner {
+        flex: none;
+        margin-top: 2px;
+        font-size: 12px;
+        color: var(--dsw-alias-label-tertiary);
+      }
+      .resources .resource-description {
+        margin: 0;
+        font-size: 13px;
+        line-height: 1.55;
+        color: var(--dsw-alias-label-secondary);
+        display: -webkit-box;
+        -webkit-box-orient: vertical;
+        -webkit-line-clamp: 2;
+        overflow: hidden;
+        min-height: calc(1.55em * 2);
+      }
+      .resources .resource-attribution {
+        margin: 0;
+        display: flex;
+        align-items: baseline;
+        gap: 0;
+        min-height: 1.4em;
+        font-size: 12px;
+        color: var(--dsw-alias-label-secondary);
+        overflow: hidden;
+      }
+      .resources .resource-author {
+        flex: none;
+        max-width: 40%;
+        color: var(--dsw-alias-label-primary);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .resources .resource-attribution-sep {
+        flex: none;
+        padding-inline: 2px;
+      }
+      .resources .resource-department {
+        flex: 1;
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .resources .resource-card-footer {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px 12px;
+        margin-top: auto;
+        padding-top: 10px;
+        border-top: 1px solid var(--dsw-alias-border-l1);
+      }
+      .resources .resource-card-meta {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 8px 12px;
+        font-size: 12px;
+        color: var(--dsw-alias-label-secondary);
+      }
+      .resources .resource-stat {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+      }
+      .resources .resource-badge {
+        display: inline-flex;
+        align-items: center;
+        padding: 2px 8px;
+        font-size: 12px;
+        line-height: 1.4;
+        border-radius: 999px;
+        background: var(--dsw-alias-interactive-bg-hover);
+        color: var(--dsw-alias-label-secondary);
+      }
+      .resources .resource-badge.is-success {
+        color: var(--dsw-alias-state-success-label);
+      }
+      .resources .resource-badge.is-warn {
+        color: var(--dsw-alias-state-warn-label);
+      }
+      .resources .resource-actions {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 8px;
+      }
+      .resources button {
+        font: inherit;
+        color: inherit;
+        border: 1px solid var(--dsw-alias-border-l1);
+        border-radius: 7px;
+        background: transparent;
+        padding: 8px 12px;
+        cursor: pointer;
+      }
+      .resources button.primary {
+        background: var(--dsw-alias-button-primary-fill);
+        color: var(--dsw-alias-label-primary-foreground);
+        border-color: transparent;
+      }
+      .resources button.resource-card-action {
+        min-height: 32px;
+        padding: 0 12px;
+        font-size: 13px;
+      }
+      .resources .notice {
+        border: 1px solid var(--dsw-alias-border-l1);
+        border-radius: 8px;
+        padding: 18px;
+        line-height: 1.7;
+        margin: 16px 0;
+        color: var(--dsw-alias-label-secondary);
+      }
+      .preview-inbox-item {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 12px;
+        padding: 12px 0;
+        border-bottom: 1px solid var(--dsw-alias-border-l1);
+      }
+      .preview-inbox-item:last-child {
+        border-bottom: 0;
+      }
+      .preview-inbox-meta {
+        min-width: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+      }
+      .preview-inbox-title {
+        font-size: 14px;
+        font-weight: 600;
+      }
+      .preview-inbox-desc {
+        font-size: 12px;
+        color: var(--dsw-alias-label-secondary);
+      }
+    </style>
+  </head>
+  <body>
+    <div class="preview-chrome">
+      <div class="preview-toolbar">
+        <p class="preview-banner">
+          本地全界面假数据预览（与正式插件同构）：概览 / 设置已接真实模块，其余页按壳层样式模拟。不连 DSH / 平台。
+        </p>
+        <div class="preview-actions">
+          <button type="button" id="theme-dark" aria-pressed="true">深色</button>
+          <button type="button" id="theme-light" aria-pressed="false">浅色</button>
+        </div>
+      </div>
+      <div class="preview-frame">
+        <div id="root"></div>
+      </div>
+    </div>
+    <script type="module" src="./main.jsx"></script>
+  </body>
+</html>

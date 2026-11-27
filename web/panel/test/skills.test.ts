@@ -97,7 +97,13 @@ it('offers a next step for empty skill markets and installations', async () => {
     mode: 'connect',
     protocol: 1,
     locale: 'en',
-    fetch: vi.fn(async () => Response.json({ items: [] })),
+    fetch: vi.fn(async (path: string) =>
+      Response.json(
+        path.startsWith('catalog/packages?')
+          ? { items: [], total: 0 }
+          : { items: [] },
+      ),
+    ),
   };
   document.body.append(panel);
   await settle();
@@ -139,6 +145,7 @@ it.each([false, true])(
             );
           return Response.json({
             items: [],
+            ...(path.startsWith('catalog/packages?') ? { total: 0 } : {}),
             ...(available === undefined ? {} : { sharedAvailable: available }),
           });
         },
@@ -149,17 +156,17 @@ it.each([false, true])(
       await vi.waitFor(() => expect(root.textContent).toContain('invalid'));
       expect(root.textContent).not.toContain('trusted guardian');
       failed = false;
-      root.querySelector('button')!.click();
+      clickRefresh(root);
       await vi.waitFor(() =>
         expect(root.textContent).toContain('trusted guardian'),
       );
       failed = true;
-      root.querySelector('button')!.click();
+      clickRefresh(root);
       await vi.waitFor(() => expect(root.textContent).toContain('invalid'));
       expect(root.textContent).not.toContain('trusted guardian');
       failed = false;
       available = undefined;
-      root.querySelector('button')!.click();
+      clickRefresh(root);
       await vi.waitFor(() => expect(root.textContent).not.toContain('invalid'));
       expect(root.textContent).not.toContain('trusted guardian');
     } finally {
@@ -169,9 +176,17 @@ it.each([false, true])(
 );
 function click(panel: AurigaTeamPanel, label: string) {
   const button = [...panel.shadowRoot!.querySelectorAll('button')].find(
-    (b) => b.textContent === label,
+    (b) =>
+      b.textContent === label || b.getAttribute('aria-label') === label,
   );
   expect(button, label).toBeTruthy();
+  button!.click();
+}
+function clickRefresh(root: HTMLElement) {
+  const button =
+    root.querySelector<HTMLButtonElement>('button[aria-label="Refresh"]') ||
+    [...root.querySelectorAll('button')].find((b) => b.textContent === 'Refresh');
+  expect(button, 'Refresh').toBeTruthy();
   button!.click();
 }
 it('separates Skill reads from legacy plugin APIs, installs the selected exact version and keeps 202 distinct from applied', async () => {
@@ -179,9 +194,31 @@ it('separates Skill reads from legacy plugin APIs, installs the selected exact v
   const fetch = vi.fn(async (path: string, init?: RequestInit) => {
     if (path.startsWith('/api/resource/v1/packages'))
       return Response.json({ items: [] });
-    if (path === 'catalog/packages?limit=50&kind=skill')
+    if (
+      path.startsWith('catalog/packages?') &&
+      path.includes('kind=skill')
+    )
       return Response.json({
-        items: [{ id: packageId, kind: 'skill', name: 'example' }],
+        items: [
+          {
+            id: packageId,
+            kind: 'skill',
+            name: 'example',
+            defaultVersionId: versionId,
+          },
+        ],
+        total: 1,
+      });
+    if (path.startsWith('catalog/packages?'))
+      return Response.json({ items: [], total: 0 });
+    if (path === `catalog/packages/${packageId}/versions/${versionId}`)
+      return Response.json({
+        id: versionId,
+        packageId,
+        kind: 'skill',
+        version: '1.0.0',
+        state: 'published',
+        manifest: { description: '<img src=x onerror=alert(1)>' },
       });
     if (path === `catalog/packages/${packageId}/versions?limit=200`)
       return Response.json({
@@ -222,18 +259,13 @@ it('separates Skill reads from legacy plugin APIs, installs the selected exact v
   await settle();
   click(panel, '技能');
   await vi.waitFor(() =>
-    expect(panel.shadowRoot!.textContent).toContain('选择版本／更新'),
+    expect(panel.shadowRoot!.textContent).toContain('<img src=x'),
   );
   const legacyCount = fetch.mock.calls.filter(([p]) =>
     p.startsWith('/api/'),
   ).length;
-  click(panel, '选择版本／更新');
-  await vi.waitFor(() =>
-    expect(panel.shadowRoot!.textContent).toContain('安装此精确版本'),
-  );
   expect(panel.shadowRoot!.querySelector('img')).toBeNull();
-  expect(panel.shadowRoot!.textContent).toContain('<img src=x');
-  click(panel, '安装此精确版本');
+  click(panel, '安装');
   await vi.waitFor(() =>
     expect(panel.shadowRoot!.textContent).toContain('已接受请求'),
   );
@@ -263,13 +295,16 @@ it('discards an old identity response after the panel context changes', async ()
   await settle();
   const nextFetch = vi.fn(async (path: string) =>
     Response.json({
-      items: path.startsWith('catalog/packages')
-        ? [{ id: packageId, kind: 'skill', name: 'new-identity' }]
-        : [],
+      items:
+        path.includes('kind=skill')
+          ? [{ id: packageId, kind: 'skill', name: 'new-identity' }]
+          : [],
+      total: path.includes('kind=skill') ? 1 : 0,
     }),
   );
   panel.context = { mode: 'connect', protocol: 1, fetch: nextFetch };
   await settle();
+  click(panel, '技能');
   resolveOld(
     Response.json({
       items: [{ id: packageId, kind: 'skill', name: 'old-identity' }],
@@ -285,6 +320,7 @@ it('shows readable Chinese guardian and file-occupation hints, without replaceme
   const fetch = vi.fn(async (path: string) =>
     Response.json({
       items: [],
+      ...(path.startsWith('catalog/packages?') ? { total: 0 } : {}),
       ...(path === 'catalog/installations'
         ? { sharedAvailable: false, pendingRestart: true }
         : {}),
@@ -317,6 +353,15 @@ it('waits for explicit collision confirmation before retrying an exact install',
             },
       );
     }
+    if (path === `catalog/packages/${packageId}/versions/${versionId}`)
+      return Response.json({
+        id: versionId,
+        packageId,
+        kind: 'skill',
+        state: 'published',
+        version: '1.0.0',
+        manifest: { description: 'Example' },
+      });
     if (path.includes('/versions?'))
       return Response.json({
         items: [
@@ -330,12 +375,19 @@ it('waits for explicit collision confirmation before retrying an exact install',
           },
         ],
       });
-    return Response.json({
-      items:
-        path === 'catalog/packages?limit=50&kind=skill'
-          ? [{ id: packageId, kind: 'skill', name: 'example' }]
-          : [],
-    });
+    if (path.startsWith('catalog/packages?') && path.includes('kind=skill'))
+      return Response.json({
+        items: [
+          {
+            id: packageId,
+            kind: 'skill',
+            name: 'example',
+            defaultVersionId: versionId,
+          },
+        ],
+        total: 1,
+      });
+    return Response.json({ items: [], total: 0 });
   });
   const panel = document.createElement('auriga-test-skills') as AurigaTeamPanel;
   panel.context = { mode: 'connect', protocol: 1, locale: 'zh-CN', fetch };
@@ -343,13 +395,13 @@ it('waits for explicit collision confirmation before retrying an exact install',
   await settle();
   click(panel, '技能');
   await vi.waitFor(() =>
-    expect(panel.shadowRoot!.textContent).toContain('选择版本／更新'),
+    expect(
+      [...panel.shadowRoot!.querySelectorAll('button')].some(
+        (b) => b.textContent === '安装',
+      ),
+    ).toBe(true),
   );
-  click(panel, '选择版本／更新');
-  await vi.waitFor(() =>
-    expect(panel.shadowRoot!.textContent).toContain('安装此精确版本'),
-  );
-  click(panel, '安装此精确版本');
+  click(panel, '安装');
   await vi.waitFor(() =>
     expect(panel.shadowRoot!.textContent).toContain('发现同名私有或宿主技能'),
   );
@@ -410,7 +462,7 @@ it('lays out skill cards and version permissions without exposing owner UUIDs in
     locale: 'zh-CN',
     fetch: async (path) =>
       Response.json(
-        path === 'catalog/packages?limit=50&kind=skill'
+        path.startsWith('catalog/packages?') && path.includes('kind=skill')
           ? {
               items: [
                 {
@@ -421,6 +473,7 @@ it('lays out skill cards and version permissions without exposing owner UUIDs in
                   defaultVersionId: versionId,
                 },
               ],
+              total: 1,
             }
           : path.startsWith('catalog/packages/')
             ? path.includes('?')
@@ -444,7 +497,9 @@ it('lays out skill cards and version permissions without exposing owner UUIDs in
                   version: '1.0.0',
                   manifest,
                 }
-            : { items: [] },
+            : path.startsWith('catalog/packages?')
+              ? { items: [], total: 0 }
+              : { items: [] },
       ),
   };
   document.body.append(panel);
@@ -455,9 +510,6 @@ it('lays out skill cards and version permissions without exposing owner UUIDs in
   );
   expect(panel.shadowRoot!.querySelector('.cards .resource-card')).toBeTruthy();
   expect(panel.shadowRoot!.textContent).not.toContain(ownerId);
-  click(panel, '选择版本／更新');
-  await vi.waitFor(() =>
-    expect(panel.shadowRoot!.textContent).toContain('task.read'),
-  );
-  expect(panel.shadowRoot!.querySelector('.resource-version')).toBeTruthy();
+  expect(panel.shadowRoot!.textContent).toContain('安装');
+  expect(panel.shadowRoot!.textContent).not.toContain('选择版本／更新');
 });

@@ -1603,6 +1603,8 @@ export interface components {
     UnifiedPackagePage: {
       items: components['schemas']['UnifiedPackage'][];
       nextCursor?: string;
+      /** Total matching packages when page mode is used. */
+      total?: number;
     };
     UnifiedVersionPage: {
       items: components['schemas']['UnifiedVersion'][];
@@ -6624,6 +6626,12 @@ export interface operations {
         /** @description 上一页响应里的 nextCursor。 */
         cursor?: components['parameters']['Cursor'];
         kind?: 'plugin' | 'skill' | 'tool';
+        /** @description 1-based page index for numeric market pagination. Mutually exclusive with cursor; when set, response includes total. */
+        page?: number;
+        /** @description Case-insensitive substring match on name, description, author, department, or tags. Only with page. */
+        search?: string;
+        /** @description Market sort. Empty or omitted keeps default catalog order. Only with page. */
+        sort?: 'publishedAt' | 'installationCount' | 'starCount' | 'name';
       };
       header?: never;
       path?: never;

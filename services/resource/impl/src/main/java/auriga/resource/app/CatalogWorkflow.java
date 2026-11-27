@@ -530,15 +530,39 @@ public final class CatalogWorkflow {
 
   public JsonNode list(
       AurigaPrincipal actor, UUID p, String kind, int limit, String cursor, String phase) {
+    return list(actor, p, kind, limit, cursor, phase, null, null, null);
+  }
+
+  public JsonNode list(
+      AurigaPrincipal actor,
+      UUID p,
+      String kind,
+      int limit,
+      String cursor,
+      String phase,
+      Integer page,
+      String search,
+      String sort) {
     if (limit < 1
         || limit > 200
         || kind != null && !Set.of("plugin", "skill", "tool").contains(kind)) throw invalid();
+    if (page != null) {
+      if (cursor != null || p != null || phase != null) throw invalid();
+      if (page < 1
+          || (search != null && search.length() > 200)
+          || (sort != null
+              && !sort.isBlank()
+              && !Set.of("publishedAt", "installationCount", "starCount", "name").contains(sort)))
+        throw invalid();
+    } else if ((search != null && !search.isBlank()) || (sort != null && !sort.isBlank()))
+      throw invalid();
     var r =
         phase == null
             ? access.member(actor)
             : access.administrator(
                 actor,
                 phase.equals("review") ? "resource.versions.review" : "resource.versions.publish");
+    if (page != null) return tx.write(() -> listPage(r, actor, kind, limit, page, search, sort));
     return tx.write(
         () -> {
           if (p != null) pkg(r, p, false);
@@ -629,6 +653,108 @@ public final class CatalogWorkflow {
                         (UUID) rows.get(limit - 1).get("id"), pos.ceiling(), pos.expires())));
           return result;
         });
+  }
+
+  private JsonNode listPage(
+      ResourceAccess.Reader r,
+      AurigaPrincipal actor,
+      String kind,
+      int limit,
+      int page,
+      String search,
+      String sort) {
+    String query = search == null ? "" : search.trim().toLowerCase(Locale.ROOT);
+    String from =
+        """
+        resource.catalog_package p
+        LEFT JOIN resource.catalog_version dv
+          ON dv.tenant_id=p.tenant_id AND dv.id=p.default_version_id AND dv.state='published'
+        """;
+    String where =
+        " WHERE p.tenant_id=:tenant"
+            + visible(r)
+            + (kind == null ? "" : " AND p.kind=:kind");
+    if (!query.isEmpty())
+      where +=
+          """
+           AND (
+             lower(p.name) LIKE :q ESCAPE '\\'
+             OR lower(coalesce(dv.manifest->>'description','')) LIKE :q ESCAPE '\\'
+             OR lower(coalesce(dv.market_author_name,'')) LIKE :q ESCAPE '\\'
+             OR lower(coalesce(dv.market_author_department,'')) LIKE :q ESCAPE '\\'
+             OR EXISTS (
+               SELECT 1 FROM jsonb_array_elements_text(
+                 coalesce(dv.manifest->'plugin'->'tags','[]'::jsonb)) AS tag
+               WHERE lower(tag) LIKE :q ESCAPE '\\')
+             OR EXISTS (
+               SELECT 1 FROM jsonb_array_elements_text(
+                 coalesce(dv.manifest->'skill'->'tags','[]'::jsonb)) AS tag
+               WHERE lower(tag) LIKE :q ESCAPE '\\')
+           )
+          """;
+    String order =
+        switch (sort == null || sort.isBlank() ? "" : sort) {
+          case "name" -> "p.name ASC, p.id ASC";
+          case "publishedAt" ->
+              """
+              coalesce(
+                dv.market_published_at,
+                CASE
+                  WHEN (dv.envelope->'statement'->>'issuedAt') ~ '^[0-9]{4}-'
+                  THEN (dv.envelope->'statement'->>'issuedAt')::timestamptz
+                  ELSE NULL
+                END
+              ) DESC NULLS LAST, p.id DESC
+              """;
+          case "installationCount" ->
+              """
+              (
+                (SELECT COUNT(DISTINCT client_id) FROM resource.catalog_installation
+                  WHERE tenant_id=p.tenant_id AND package_id=p.id
+                    AND COALESCE(market_installed,
+                      document->'report'->>'state' IN ('applied','disabled')))
+                + (SELECT COUNT(*) FROM resource.catalog_instance_installation
+                  WHERE tenant_id=p.tenant_id AND package_id=p.id AND market_installed)
+              ) DESC, p.id DESC
+              """;
+          case "starCount" ->
+              """
+              (SELECT COUNT(*) FROM resource.catalog_plugin_star
+                WHERE tenant_id=p.tenant_id AND package_id=p.id) DESC, p.id DESC
+              """;
+          default -> "p.id DESC";
+        };
+    var a = args(r, "kind", kind, "limit", limit, "offset", (long) (page - 1) * limit);
+    if (!query.isEmpty())
+      a.put(
+          "q",
+          "%"
+              + query.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+              + "%");
+    int total =
+        ((Number)
+                db.row("SELECT COUNT(*)::bigint AS total FROM " + from + where, a).get("total"))
+            .intValue();
+    var rows =
+        db.rows(
+            "SELECT p.* FROM " + from + where + " ORDER BY " + order + " LIMIT :limit OFFSET :offset",
+            a);
+    var result = JSON.createObjectNode();
+    var items = result.putArray("items");
+    boolean extended = actor.type() != PrincipalType.DEVICE;
+    Map<Object, Map<String, Object>> releases = marketReleases(r, rows);
+    Map<Object, Map<String, Object>> latest = extended ? latestVersions(r, rows) : Map.of();
+    Map<Object, String> published = extended ? publishedVersions(rows) : Map.of();
+    for (var row : rows)
+      items.add(
+          marketPackage(
+              r,
+              row,
+              releases.get(row.get("id")),
+              latest.get(row.get("id")),
+              published.get(row.get("id")));
+    result.put("total", total);
+    return result;
   }
 
   public JsonNode upload(

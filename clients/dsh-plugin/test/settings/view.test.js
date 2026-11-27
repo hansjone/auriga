@@ -11,11 +11,18 @@ function harness(fetcher, locale = 'zh', gotoOverview, openLogin) {
     navigated;
   const React = {
     Fragment: Symbol('Fragment'),
-    createElement: (type, props, ...children) => ({
-      type,
-      props: props ?? {},
-      children: children.flat(Infinity),
-    }),
+    createElement: (type, props, ...children) => {
+      const flat = children.flat(Infinity);
+      if (typeof type === 'function') {
+        const merged = { ...(props ?? {}) };
+        if (flat.length === 1) merged.children = flat[0];
+        else if (flat.length > 1) merged.children = flat;
+        return type(merged);
+      }
+      if (type === React.Fragment)
+        return { type, props: props ?? {}, children: flat };
+      return { type, props: props ?? {}, children: flat };
+    },
     useRef(initial) {
       const i = cursor++;
       if (!(i in values)) values[i] = { current: initial };
@@ -139,8 +146,9 @@ test('settings keeps local UAC identity distinct while platform status is unavai
   f.render();
   await setImmediate();
   const result = text(f.render());
-  assert.match(result, /本地身份/);
+  assert.match(result, /姓名|工号|部门/);
   assert.match(result, /Alice Example/);
+  assert.match(result, /A1001|Engineering/);
   assert.match(result, /平台连接/);
   assert.doesNotMatch(result, /未登录/);
 });
@@ -225,7 +233,7 @@ test('native settings imports a selected public file while signed out and offers
     target: { files: [{ size: 42, text: async () => 'original public JSON' }] },
   });
   tree = f.render();
-  const submit = button(tree, '导入控制包');
+  const submit = button(tree, '导入');
   assert.equal(submit.props.disabled, false);
   await submit.props.onClick();
   assert.deepEqual(JSON.parse(calls[0].body), {
@@ -372,14 +380,17 @@ for (const phase of ['signed-out', 'unavailable', 'pending'])
       try {
         fixture.render();
         await setImmediate();
-        const content = fixture
-          .render()
-          .children.filter((n) => n?.type !== 'details')
-          .map(text)
-          .join(' ');
-        assert.doesNotMatch(content, /未登录|未提供/);
-        assert.match(content, /系统托管/);
-        assert.match(content, /实例会话已失效，请从门户重新进入/);
+        const tree = fixture.render();
+        const content = text(
+          nodes(tree).find(
+            (n) =>
+              n.type === 'section' &&
+              n.props?.['aria-label'] === '身份信息',
+          ),
+        );
+        assert.doesNotMatch(content, /未登录/);
+        assert.match(text(tree), /系统托管/);
+        assert.match(text(tree), /实例会话已失效，请从门户重新进入/);
       } finally {
         fixture.dispose();
       }
@@ -435,19 +446,39 @@ for (const managed of [false, true])
         fixture.render();
         await setImmediate();
         const tree = fixture.render();
-        const content = tree.children
-          .filter((n) => n?.type !== 'details')
-          .map(text)
-          .join(' ');
+        const diagnostics = nodes(tree).find(
+          (n) =>
+            n.type === 'section' &&
+            n.props?.['aria-label'] === '诊断',
+        );
+        assert.match(text(diagnostics), /00000000/);
+        assert.match(text(diagnostics), /诊断信息/);
+        assert.ok(
+          nodes(diagnostics).some(
+            (n) => n.type === 'button' && /复制全部/.test(text(n)),
+          ),
+        );
+        assert.equal(
+          nodes(diagnostics).filter(
+            (n) =>
+              n.type === 'h2' && text(n).includes('诊断信息'),
+          ).length,
+          0,
+        );
         assert.match(
-          text(nodes(tree).find((n) => n.type === 'details')),
-          /00000000/,
+          text(diagnostics),
+          /成员 ID[\s\S]*协议版本[\s\S]*插件版本[\s\S]*界面来源[\s\S]*模型[\s\S]*原因/,
+        );
+        const account = nodes(tree).find(
+          (n) =>
+            n.type === 'section' &&
+            n.props?.['aria-label'] === '身份信息',
         );
         assert.doesNotMatch(
-          content,
+          text(account),
           /00000000|设备名|登录时间|本机端点|未提供姓名|当前凭据未提供/,
         );
-        assert.match(content, /成员/);
+        assert.match(text(account), /姓名|Name/);
       } finally {
         fixture.dispose();
       }
@@ -550,7 +581,9 @@ for (const locale of ['zh', 'en'])
               (n) =>
                 n.type === 'input' &&
                 n.props['aria-label'] ===
-                  (locale === 'zh' ? '平台地址' : 'Platform address'),
+                  (locale === 'zh'
+                    ? '云平台地址'
+                    : 'Cloud platform address'),
             ),
             !managed,
           );
@@ -560,15 +593,26 @@ for (const locale of ['zh', 'en'])
           );
           assert.equal(
             !!button(tree, locale === 'zh' ? '退出登录' : 'Sign out'),
-            !managed && ['ready', 'offline'].includes(phase),
+            !managed && phase === 'ready',
           );
           assert.equal(
-            !!button(tree, locale === 'zh' ? '登录' : 'Sign in'),
-            !managed && ['signed-out', 'expired'].includes(phase),
+            !!button(tree, locale === 'zh' ? '重新连接' : 'Reconnect'),
+            !managed && phase === 'offline',
+          );
+          assert.equal(
+            !!button(tree, locale === 'zh' ? '连接' : 'Connect'),
+            !managed && phase === 'signed-out',
+          );
+          assert.equal(
+            !!button(tree, locale === 'zh' ? '重新认证' : 'Reauthenticate'),
+            !managed && phase === 'expired',
           );
           assert.ok(
             nodes(tree).some(
-              (n) => n.type === 'details' && n.props.open !== true,
+              (n) =>
+                n.type === 'section' &&
+                n.props?.['aria-label'] ===
+                  (locale === 'zh' ? '诊断' : 'Diagnostics'),
             ),
           );
           assert.doesNotMatch(
@@ -581,8 +625,8 @@ for (const locale of ['zh', 'en'])
             assert.match(
               content,
               locale === 'zh'
-                ? /平台功能暂不可用/
-                : /Platform features are unavailable/,
+                ? /本地功能仍可用|云平台相关功能暂不可用/
+                : /Local features remain available|cloud features are temporarily unavailable/,
             );
           if (phase === 'invalid')
             assert.match(
@@ -590,19 +634,29 @@ for (const locale of ['zh', 'en'])
               locale === 'zh' ? /状态响应格式无效/ : /Invalid status response/,
             );
           const sections = nodes(tree)
-            .filter((n) => n.type === 'section' && n.props['aria-label'])
+            .filter(
+              (n) =>
+                n.type === 'section' &&
+                n.props['aria-label'] &&
+                [
+                  'Auriga DSH status',
+                  locale === 'zh' ? '身份信息' : 'Profile',
+                  locale === 'zh' ? '平台' : 'Platform',
+                  locale === 'zh' ? '消息网络' : 'Message network',
+                ].includes(n.props['aria-label']),
+            )
             .map((n) => n.props['aria-label']);
           assert.deepEqual(
             sections,
             managed
               ? [
                   'Auriga DSH status',
-                  locale === 'zh' ? '账号' : 'Account',
+                  locale === 'zh' ? '身份信息' : 'Profile',
                   locale === 'zh' ? '消息网络' : 'Message network',
                 ]
               : [
                   'Auriga DSH status',
-                  locale === 'zh' ? '账号' : 'Account',
+                  locale === 'zh' ? '身份信息' : 'Profile',
                   locale === 'zh' ? '平台' : 'Platform',
                   locale === 'zh' ? '消息网络' : 'Message network',
                 ],
@@ -613,9 +667,10 @@ for (const locale of ['zh', 'en'])
       });
 
 for (const locale of ['zh', 'en'])
-  test(`settings sign-in starts browser login and opens Overview with CSRF: ${locale}`, async (t) => {
-    const calls = [];
+  test(`settings sign-in opens the platform login overlay: ${locale}`, async (t) => {
+    let opened = 0;
     let overviewCount = 0;
+    const calls = [];
     const fixture = harness(
       async (url, init) => {
         if (url.endsWith('/shell/command')) {
@@ -632,30 +687,34 @@ for (const locale of ['zh', 'en'])
       () => {
         overviewCount++;
       },
+      () => {
+        opened++;
+        return true;
+      },
     );
     t.after(() => fixture.dispose());
     fixture.render();
     await setImmediate();
     await button(
       fixture.render(),
-      locale === 'zh' ? '登录' : 'Sign in',
+      locale === 'zh' ? '连接' : 'Connect',
     ).props.onClick();
     await setImmediate();
-    assert.equal(calls.length, 1);
-    assert.equal(calls[0].method, 'POST');
-    assert.equal(calls[0].headers['x-auriga-csrf'], 'test-csrf');
-    assert.equal(calls[0].credentials, 'same-origin');
-    assert.deepEqual(JSON.parse(calls[0].body), { action: 'inline_login' });
-    assert.equal(overviewCount, 1);
+    assert.equal(opened, 1);
+    assert.equal(calls.length, 0);
+    assert.equal(overviewCount, 0);
     assert.equal(fixture.navigated, undefined);
   });
 
-test('failed settings browser sign-in shows its error before any Overview transition', async (t) => {
+test('settings sign-in without overlay reports unavailable and stays put', async (t) => {
   let overviewCount = 0;
+  const calls = [];
   const fixture = harness(
-    async (url) => {
-      if (url.endsWith('/shell/command'))
-        return Response.json({}, { status: 503 });
+    async (url, init) => {
+      if (url.endsWith('/shell/command')) {
+        calls.push(init);
+        return Response.json({});
+      }
       return Response.json(
         url.endsWith('/status')
           ? { loggedIn: false, connected: false, csrf: 'test-csrf' }
@@ -670,11 +729,54 @@ test('failed settings browser sign-in shows its error before any Overview transi
   t.after(() => fixture.dispose());
   fixture.render();
   await setImmediate();
-  await button(fixture.render(), '登录').props.onClick();
+  await button(fixture.render(), '连接').props.onClick();
   await setImmediate();
+  assert.equal(calls.length, 0);
   assert.equal(overviewCount, 0);
-  assert.match(text(fixture.render()), /状态接口返回 HTTP 503/);
+  assert.match(text(fixture.render()), /登录弹层暂未就绪/);
   assert.equal(fixture.navigated, undefined);
+});
+
+test('settings cloud retry reconnects with local identity without QR', async (t) => {
+  const calls = [];
+  const fixture = harness(
+    async (url, init) => {
+      if (url.endsWith('/auriga/uac/status'))
+        return Response.json({
+          available: true,
+          state: 'authenticated',
+          empNo: 'Z001',
+          displayName: 'Zhou',
+          csrf: 'local-csrf',
+        });
+      if (url.endsWith('/shell/command')) {
+        calls.push(init);
+        return Response.json({});
+      }
+      return Response.json(
+        url.endsWith('/status')
+          ? {
+              loggedIn: false,
+              connected: false,
+              csrf: 'test-csrf',
+              canRetryLocalUac: true,
+            }
+          : settings,
+      );
+    },
+    'zh',
+    undefined,
+    () => true,
+  );
+  t.after(() => fixture.dispose());
+  fixture.render();
+  await setImmediate();
+  await button(fixture.render(), '重试连接').props.onClick();
+  await setImmediate();
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].method, 'POST');
+  assert.equal(calls[0].headers['x-auriga-csrf'], 'test-csrf');
+  assert.deepEqual(JSON.parse(calls[0].body), { action: 'retry_local_uac' });
 });
 
 test('R2 logout sends the explicit shell command with CSRF and refreshes status', async () => {
@@ -778,8 +880,11 @@ for (const locale of ['zh', 'en'])
         assert.equal(
           nodes(tree).find(
             (n) =>
-              n.type === 'input' &&
-              n.props.type === 'checkbox' &&
+              n.props?.role === 'switch' &&
+              n.props?.['aria-label'] ===
+                (locale === 'en'
+                  ? 'Check for updates automatically'
+                  : '自动检查更新') &&
               n.props.disabled === true,
           )?.props.disabled,
           true,
@@ -828,12 +933,19 @@ test('刷新后下载进度可见并可取消，强制更新不能关闭检查�
       1048576,
     );
     assert.equal(
-      nodes(tree).find((n) => n.type === 'select').props.disabled,
+      nodes(tree).find(
+        (n) =>
+          n.props?.['aria-label'] === '更新渠道' &&
+          n.props?.['aria-haspopup'] === 'listbox',
+      ).props.disabled,
       true,
     );
     assert.equal(
-      nodes(tree).find((n) => n.type === 'input' && n.props.type === 'checkbox')
-        .props.disabled,
+      nodes(tree).find(
+        (n) =>
+          n.props?.role === 'switch' &&
+          n.props?.['aria-label'] === '自动检查更新',
+      ).props.disabled,
       true,
     );
     await button(tree, '取消下载（保留进度）').props.onClick();

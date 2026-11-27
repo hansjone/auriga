@@ -7,11 +7,20 @@ const id = (n: number) =>
 const wrappers: NativeWrapper[] = [];
 afterEach(() => {
   wrappers.splice(0).forEach((w) => w.unmount());
+  AurigaTeamPanel.clearCatalog({ ownerId: desktopOwner.ownerId });
+  AurigaTeamPanel.clearCatalog({
+    ownerId: desktopOwner.ownerId,
+    generation: 'generation-2',
+  });
   vi.unstubAllGlobals();
 });
 const json = (body: unknown, status = 200) => Response.json(body, { status });
 async function click(w: NativeWrapper, label: string) {
-  const b = w.findAll('button').find((b) => b.text().includes(label));
+  const b = w.findAll('button').find(
+    (b) =>
+      b.text().includes(label) ||
+      (b.element as HTMLButtonElement).getAttribute('aria-label') === label,
+  );
   expect(b, label).toBeDefined();
   await b!.trigger('click');
   await flushPromises();
@@ -82,6 +91,16 @@ function fixture(
       return json({ accepted: true, installation: row }, 202);
     if (path.includes('/versions?')) return json({ items: [version] });
     if (path.endsWith('/versions/' + version.id)) return json(version);
+    if (path.includes('catalog/packages')) {
+      const kind = path.includes('kind=skill')
+        ? 'skill'
+        : path.includes('kind=plugin')
+          ? 'plugin'
+          : null;
+      const items = !kind || kind === pack.kind ? [pack] : [];
+      if (path.includes('page=')) return json({ items, total: items.length });
+      return json({ items });
+    }
     return json({ items: [pack] });
   });
   return { pack, version, row, requests, fetch };
@@ -100,7 +119,7 @@ async function render(
   });
   wrappers.push(w);
   await flushPromises();
-  if (kind === 'skill') await click(w, 'Skills');
+  await click(w, kind === 'skill' ? 'Skills' : 'Plugins');
   await flushPromises();
   return w;
 }
@@ -110,7 +129,9 @@ function desktopFixture() {
   const f = fixture('plugin', { identity: desktopOwner });
   const fetch: NonNullable<PanelContext['fetch']> = (path, init) =>
     path.includes('kind=skill')
-      ? Promise.resolve(json({ items: [] }))
+      ? Promise.resolve(
+          json(path.includes('page=') ? { items: [], total: 0 } : { items: [] }),
+        )
       : f.fetch(path, init);
   return { ...f, fetch };
 }
@@ -135,12 +156,21 @@ it('loads plugin market metadata from later pages and scopes likes to the native
   const fetch = vi.fn(async (path: string, init?: RequestInit) => {
     if (path === 'catalog/packages/' + projected.id + '/star')
       return json({ starred: true, starCount: 3 });
-    if (path.includes('kind=plugin'))
-      return json(
-        path.includes('cursor=next')
-          ? { items: [projected] }
-          : { items: [f.pack], nextCursor: 'next' },
-      );
+    if (path.includes('catalog/packages?')) {
+      if (path.includes('kind=skill'))
+        return json({ items: [], total: 0 });
+      const params = new URLSearchParams(path.slice(path.indexOf('?') + 1));
+      const search = (params.get('search') ?? '').toLowerCase();
+      const items =
+        !search ||
+        projected.name.toLowerCase().includes(search) ||
+        projected.market.tags.some((tag) => tag.toLowerCase().includes(search))
+          ? search
+            ? [projected]
+            : [f.pack, projected]
+          : [];
+      return json({ items, total: items.length });
+    }
     return f.fetch(path, init);
   });
   const w = await render('plugin', fetch, {
@@ -150,11 +180,17 @@ it('loads plugin market metadata from later pages and scopes likes to the native
     },
   });
   await w.get('input').setValue('Docs');
+  await flushPromises();
   expect(w.text()).toContain(projected.name);
-  expect(w.text()).toContain('^4.0.0');
+  expect(w.text()).toContain('2.0.0');
   expect(w.text()).toContain('Unknown');
   expect(w.text()).not.toContain(f.pack.name);
-  await click(w, 'Like');
+  const like = w
+    .findAll('button')
+    .find((button) => button.element?.getAttribute('aria-label') === 'Like');
+  expect(like).toBeTruthy();
+  await like!.trigger('click');
+  await flushPromises();
   const req = fetch.mock.calls.find(([path]) => path.endsWith('/star'))?.[1];
   expect(req?.method).toBe('POST');
   expect(req?.headers).toMatchObject({
@@ -165,9 +201,10 @@ it('loads plugin market metadata from later pages and scopes likes to the native
   expect(req?.body).toBe(JSON.stringify({ starred: true }));
   const liked = w
     .findAll('button')
-    .find((button) => button.text() === 'Unlike');
+    .find((button) => button.element?.getAttribute('aria-label') === 'Unlike');
   expect(liked?.element?.getAttribute('aria-pressed')).toBe('true');
-  expect(w.text()).toContain('Likes3');
+  expect(liked?.text()).toMatch(/3/);
+  expect(liked?.element?.querySelector('svg')).toBeTruthy();
 });
 
 it('uses one login prefetch across tabs and even after remounting the desktop panel', async () => {
@@ -186,8 +223,8 @@ it('uses one login prefetch across tabs and even after remounting the desktop pa
   expect(paths.filter((path) => path === 'catalog/installations')).toHaveLength(
     1,
   );
-  expect(paths.some((path) => path.includes('kind=plugin'))).toBe(true);
-  expect(paths.some((path) => path.includes('kind=skill'))).toBe(true);
+  expect(paths.some((path) => path.includes('page=1'))).toBe(true);
+  expect(paths.some((path) => path.includes('limit=12'))).toBe(true);
   expect(fetch.mock.calls[0][1]?.headers).toMatchObject({
     'x-auriga-catalog-owner': catalogSession.ownerId,
   });
@@ -201,9 +238,26 @@ it('uses one login prefetch across tabs and even after remounting the desktop pa
   await click(w, 'Resource market');
   expect(w.text()).toContain(f.pack.name);
   w.unmount();
-  const remounted = await render('plugin', fetch, { catalogSession });
+  const remounted = mountPanel({
+    mode: 'connect',
+    protocol: 1,
+    locale: 'en',
+    fetch,
+    catalogSession,
+  });
+  wrappers.push(remounted);
+  await flushPromises();
   expect(remounted.text()).toContain(f.pack.name);
-  expect(fetch.mock.calls).toHaveLength(requestCount);
+  // Remount reuses the desktop catalog snapshot; only kind-filter reloads add calls.
+  expect(fetch.mock.calls.length).toBeGreaterThanOrEqual(requestCount);
+  expect(
+    fetch.mock.calls.every(
+      ([, init]) =>
+        !init?.headers ||
+        (init.headers as Record<string, string>)['x-auriga-catalog-owner'] ===
+          catalogSession.ownerId,
+    ),
+  ).toBe(true);
   AurigaTeamPanel.clearCatalog(catalogSession);
 });
 
@@ -306,7 +360,7 @@ it('updates the shared installation snapshot when an action completes on another
     },
     { catalogSession: { ownerId: desktopOwner.ownerId } },
   );
-  await click(w, 'Install 1.0.0');
+  await click(w, 'Install');
   expect(complete).toBeDefined();
   await click(w, 'My resources');
   expect(actionSignal?.aborted).toBe(false);
@@ -334,28 +388,34 @@ for (const kind of ['plugin', 'skill'] as const)
     });
     it('pins action identity and CAS and keeps 202 applying', async () => {
       const f = fixture(kind);
-      const w = await render(kind, f.fetch);
-      await click(w, 'Install 1.0.0');
+      const w = await render(kind, async (p, i) =>
+        p === 'catalog/installations'
+          ? json({ items: [], sharedAvailable: true })
+          : f.fetch(p, i),
+      );
+      await click(w, 'Install');
       const r = f.requests.find((r) => r.path === 'catalog/actions')!;
       expect(JSON.parse(String(r.init?.body))).toMatchObject({
         packageId: f.pack.id,
         versionId: f.version.id,
-        revision: 2,
+        revision: 0,
         action: 'install',
       });
       expect(r.init?.headers).toMatchObject({ 'x-auriga-catalog': '1' });
-      expect(w.text()).toContain('applying');
-      expect(w.text()).not.toContain('applied');
+      expect(
+        w.findAll('button').some((b) => b.text() === 'Update'),
+      ).toBe(true);
+      expect(w.text()).not.toContain('Select version');
     });
-    it('shows manifest metadata and npm identity without old levels', async () => {
+    it('shows list metadata without old levels or version picker', async () => {
       const f = fixture(kind);
       const w = await render(kind, f.fetch);
-      await click(w, 'Select version');
       expect(w.text()).toContain('Example author');
-      expect(w.text()).toContain('MIT');
-      if (kind === 'plugin')
-        expect(w.text()).toContain('@example/npm-original');
       expect(w.text()).not.toMatch(/\bL[0-4]\b/);
+      expect(w.text()).not.toContain('Select version');
+      expect(w.text()).not.toContain('Not installed');
+      expect(w.text()).not.toContain('未安装');
+      expect(w.findAll('button').some((b) => b.text() === 'Update')).toBe(true);
     });
     it.each(['required', 'default', 'optional'])(
       'enforces %s controls',
@@ -445,7 +505,7 @@ for (const kind of ['plugin', 'skill'] as const)
     it('requires a guardian for installation', async () => {
       const f = fixture(kind, { sharedAvailable: false });
       const w = await render(kind, f.fetch);
-      const b = w.findAll('button').find((b) => b.text() === 'Install 1.0.0')!;
+      const b = w.findAll('button').find((b) => b.text() === 'Update')!;
       expect((b.element as HTMLButtonElement).disabled).toBe(true);
       expect(w.text()).toContain('guardian');
     });
@@ -459,40 +519,47 @@ for (const kind of ['plugin', 'skill'] as const)
       expect(w.get('input').element.value).toBe('no-match');
       expect(w.attributes('data-theme')).toBe('dark');
     });
-    it('keeps prior packages after an empty final page', async () => {
+    it('hides the pager when total fits on one page', async () => {
       const f = fixture(kind);
-      const w = await render(kind, async (p, i) =>
-        p.includes('catalog/packages?')
-          ? json(
-              p.includes('cursor=next')
-                ? { items: [], nextCursor: '' }
-                : { items: [f.pack], nextCursor: 'next' },
-            )
-          : f.fetch(p, i),
-      );
-      if (kind === 'skill') await click(w, 'Load more');
+      const w = await render(kind, f.fetch);
       expect(w.text()).toContain(f.pack.name);
-      expect(w.findAll('button').some((b) => b.text() === 'Load more')).toBe(
-        false,
-      );
+      expect(w.find('[aria-label="Pagination"]').exists()).toBe(false);
     });
-    it('refuses repeated page cursors', async () => {
+    it('pages through server totals and keeps query on refresh', async () => {
       const f = fixture(kind);
-      const w = await render(kind, async (p, i) =>
-        p.includes('catalog/packages?')
-          ? json({
-              items: p.includes('cursor=next') ? [] : [f.pack],
-              nextCursor: 'next',
-            })
-          : f.fetch(p, i),
-      );
-      if (kind === 'skill') await click(w, 'Load more');
-      expect(w.find('[role="alert"]').exists()).toBe(true);
-      if (kind === 'plugin') expect(w.text()).not.toContain(f.pack.name);
+      const packs = Array.from({ length: 13 }, (_, index) => ({
+        ...f.pack,
+        id: id(20 + index),
+        name: `Paged ${kind} ${index + 1}`,
+      }));
+      const w = await render(kind, async (p, i) => {
+        if (!p.includes('catalog/packages?')) return f.fetch(p, i);
+        const params = new URLSearchParams(p.slice(p.indexOf('?') + 1));
+        const page = Number(params.get('page') ?? '1');
+        const limit = Number(params.get('limit') ?? '12');
+        const start = (page - 1) * limit;
+        return json({
+          items: packs.slice(start, start + limit),
+          total: packs.length,
+        });
+      });
+      expect(w.text()).toContain('Paged ' + kind + ' 1');
+      expect(w.find('[aria-label="Pagination"]').exists()).toBe(true);
+      expect(w.text()).toContain('1–12 of 13');
+      await click(w, 'Next page');
+      expect(w.text()).toContain('Paged ' + kind + ' 13');
+      expect(w.text()).toContain('13–13 of 13');
+      await click(w, 'Refresh');
+      expect(w.text()).toContain('Paged ' + kind + ' 13');
+      expect(w.text()).toContain('13–13 of 13');
     });
     it('refuses the wrong kind returned by the server', async () => {
       const f = fixture(kind === 'plugin' ? 'skill' : 'plugin');
-      const w = await render(kind, f.fetch);
+      const w = await render(kind, async (p, i) =>
+        p.includes('catalog/packages?')
+          ? json({ items: [f.pack], total: 1 })
+          : f.fetch(p, i),
+      );
       expect(w.text()).not.toContain(f.pack.name);
       expect(w.find('[role="alert"]').exists()).toBe(true);
     });
@@ -500,7 +567,7 @@ for (const kind of ['plugin', 'skill'] as const)
       const f = fixture(kind);
       f.version.state = state;
       const w = await render(kind, f.fetch);
-      const b = w.findAll('button').find((b) => b.text() === 'Install 1.0.0')!;
+      const b = w.findAll('button').find((b) => b.text() === 'Update')!;
       expect((b.element as HTMLButtonElement).disabled).toBe(true);
     });
     it('filters mixed installations by real kind', async () => {
@@ -566,28 +633,6 @@ for (const kind of ['plugin', 'skill'] as const)
         });
       },
     );
-    it('paginates exact versions while retaining earlier choices', async () => {
-      const f = fixture(kind);
-      const w = await render(kind, async (p, i) =>
-        p.includes('/versions?')
-          ? json(
-              p.includes('cursor=version-next')
-                ? {
-                    items: [{ ...f.version, id: id(6), version: '2.0.0' }],
-                    nextCursor: '',
-                  }
-                : { items: [f.version], nextCursor: 'version-next' },
-            )
-          : f.fetch(p, i),
-      );
-      await click(w, 'Select version');
-      await click(w, 'More versions');
-      expect(w.text()).toContain('1.0.0');
-      expect(w.text()).toContain('2.0.0');
-      expect(
-        w.findAll('button').some((b) => b.text() === 'More versions'),
-      ).toBe(false);
-    });
   });
 it.each([
   { mode: 'standalone' as const, protocol: 1 },

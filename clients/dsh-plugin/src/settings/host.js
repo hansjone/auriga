@@ -185,6 +185,24 @@ export function createSettingsHandler({
         res.end(await readFile(new URL('./view.js', import.meta.url)));
         return;
       }
+      if (req.method === 'GET' && path === '/auriga/settings/ui.js') {
+        res.writeHead(200, {
+          'content-type': 'text/javascript; charset=utf-8',
+          'cache-control': 'no-store',
+          'x-content-type-options': 'nosniff',
+        });
+        res.end(await readFile(new URL('./ui.js', import.meta.url)));
+        return;
+      }
+      if (req.method === 'GET' && path === '/auriga/settings/icons.js') {
+        res.writeHead(200, {
+          'content-type': 'text/javascript; charset=utf-8',
+          'cache-control': 'no-store',
+          'x-content-type-options': 'nosniff',
+        });
+        res.end(await readFile(new URL('./icons.js', import.meta.url)));
+        return;
+      }
       if (req.method === 'GET' && path === '/auriga/settings/state')
         return json(200, snapshot());
       if (write && path === '/auriga/settings/network-control') {

@@ -5697,6 +5697,41 @@
                 "tool"
               ]
             }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "description": "1-based page index for numeric market pagination. Mutually exclusive with cursor; when set, response includes total.",
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          },
+          {
+            "name": "search",
+            "in": "query",
+            "required": false,
+            "description": "Case-insensitive substring match on name, description, author, department, or tags. Only with page.",
+            "schema": {
+              "type": "string",
+              "maxLength": 200
+            }
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "required": false,
+            "description": "Market sort. Empty or omitted keeps default catalog order. Only with page.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "publishedAt",
+                "installationCount",
+                "starCount",
+                "name"
+              ]
+            }
           }
         ],
         "responses": {
@@ -13575,6 +13610,11 @@
             "type": "string",
             "minLength": 1,
             "maxLength": 2048
+          },
+          "total": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Total matching packages when page mode is used."
           }
         },
         "required": [

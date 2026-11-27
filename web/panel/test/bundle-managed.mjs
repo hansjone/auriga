@@ -169,12 +169,11 @@ try {
     item.name,
   );
   assert.ok(
-    [...card.querySelectorAll('.resource-meta .resource-badge')].some(
-      (badge) => badge.textContent === 'Setup required',
-    ),
+    card.textContent.includes('Setup required'),
+    'unavailable shared installation explains setup is required',
   );
   assert.equal(
-    card.querySelector('.resource-actions .primary').disabled,
+    card.querySelector('.resource-card-footer .primary').disabled,
     true,
     'unavailable shared installation must keep install disabled',
   );
@@ -186,23 +185,14 @@ try {
       `${base}/packages/${packageId}/versions/${versionId}`,
     ],
   );
-  button('Select version / update').click();
-  await flush();
   assert.equal(
     root.querySelector('.resource-heading h3').textContent,
     item.name,
   );
-  const builtVersion = root.querySelector('.resource-version');
-  assert.equal(builtVersion.querySelector('h4').textContent, version.version);
-  assert.equal(
-    builtVersion.querySelector('.resource-badge').textContent,
-    'published',
-  );
-  assert.ok(builtVersion.textContent.includes('@example/managed-plugin'));
-  assert.equal(builtVersion.querySelector('.primary').disabled, true);
-  assert.equal(
-    calls.at(-1).url.pathname + calls.at(-1).url.search,
-    `${base}/packages/${packageId}/versions?limit=200`,
+  assert.ok(
+    ['Install', 'Update'].includes(
+      card.querySelector('.resource-card-footer .primary').textContent,
+    ),
   );
   // Even an explicit caller override cannot switch the managed adapter to cookies.
   await panel.context.fetch('catalog/packages?limit=50&kind=plugin', {
@@ -265,8 +255,6 @@ try {
     await flush();
     button('Refresh').click();
     await flush();
-    button('Select version / update').click();
-    await flush();
     authorizationStatus = status;
     button('Refresh').click();
     await flush();
@@ -283,7 +271,7 @@ try {
       main.root.querySelector('auriga-team-panel')?.shadowRoot;
     assert.ok(currentRoot, 'the shell retains its mounted resource panel');
     assert.equal(
-      currentRoot.querySelector('.resource-version'),
+      currentRoot.querySelector('.resource-card'),
       null,
       'failed authorization clears the old resource',
     );

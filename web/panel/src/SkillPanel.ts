@@ -1,16 +1,20 @@
 import {
-  allPluginPackages,
-  filterPlugins,
   marketAuthor,
   marketDate,
   marketDepartment,
   marketOptions,
-  PluginPaginationError,
   validateStar,
   type MarketSort,
   type PluginMarket,
 } from '../../shared/src/plugin-market';
-import { element, resourceHeading, fieldList } from './market-ui';
+import {
+  element,
+  lucideIcon,
+  pageWindow,
+  refreshCwIcon,
+  resourceHeading,
+  fieldList,
+} from './market-ui';
 import {
   resourceErrorMessage,
   ResourceDiagnosticError,
@@ -21,6 +25,7 @@ import {
   validateInstallations,
   type DesktopCatalog,
   type InstallationSnapshot,
+  type MarketListQuery,
 } from './desktop-catalog';
 import type {
   PanelContext,
@@ -45,6 +50,12 @@ export class SkillPanel {
   private hostBusy = false;
   private policyCacheUnavailable = false;
   private search = '';
+  private kindFilter: 'all' | 'plugin' | 'skill' = 'all';
+  private page = 1;
+  private pageSize = 12;
+  private total = 0;
+  private sortMenuOpen = false;
+  private sortMenuCloser?: () => void;
   private filters = {
     author: '',
     department: '',
@@ -71,6 +82,8 @@ export class SkillPanel {
     private mine: boolean,
     private kind: 'plugin' | 'skill' = 'skill',
     private desktop?: DesktopCatalog,
+    private actionsHost?: HTMLElement,
+    private onMarketKind?: (kind: 'all' | 'plugin' | 'skill') => void,
   ) {
     if (desktop) {
       this.controller = new AbortController();
@@ -81,17 +94,67 @@ export class SkillPanel {
   }
   dispose() {
     this.desktop?.listeners.delete(this.syncDesktop);
+    this.closeSortMenu(false);
     this.epoch++;
     this.controller?.abort();
   }
+
+  private closeSortMenu(render = true) {
+    this.sortMenuCloser?.();
+    this.sortMenuCloser = undefined;
+    if (!this.sortMenuOpen) return;
+    this.sortMenuOpen = false;
+    if (render) this.render();
+  }
   private desktopError?: unknown;
+  private activeKinds(): ('plugin' | 'skill')[] {
+    if (this.mine) return [this.kind];
+    if (this.kindFilter === 'all') return ['plugin', 'skill'];
+    return [this.kindFilter];
+  }
+
+  private marketQuery(): MarketListQuery {
+    return {
+      page: this.page,
+      pageSize: this.pageSize,
+      kind: this.kindFilter === 'all' ? undefined : this.kindFilter,
+      search: this.search,
+      sort: this.filters.sort,
+    };
+  }
+
   private syncDesktop = () => {
     const desktop = this.desktop!;
     const snapshot = desktop.snapshot;
-    const listing = snapshot?.market[this.kind];
-    this.packages = listing?.packages ?? [];
-    this.summaries = listing?.summaries ?? new Map();
-    this.cursor = listing?.cursor;
+    if (this.mine) {
+      const listing = snapshot?.market[this.kind];
+      this.packages = listing?.packages ?? [];
+      this.summaries = listing?.summaries ?? new Map();
+      this.cursor = listing?.cursor;
+      this.total = this.packages.length;
+    } else if (snapshot?.marketPage) {
+      const page = snapshot.marketPage;
+      this.packages = page.packages;
+      this.summaries = page.summaries;
+      this.cursor = undefined;
+      this.total = page.total;
+      this.page = page.query.page;
+      this.pageSize = page.query.pageSize;
+    } else if (snapshot) {
+      const kinds = this.activeKinds();
+      this.packages = kinds.flatMap((kind) => snapshot.market[kind].packages);
+      this.summaries = new Map();
+      for (const kind of kinds)
+        for (const [id, version] of snapshot.market[kind].summaries)
+          this.summaries.set(id, version);
+      this.cursor = undefined;
+      this.total = this.packages.length;
+    } else {
+      this.packages = [];
+      this.summaries = new Map();
+      this.cursor = undefined;
+      this.total = 0;
+    }
     this.installationSnapshot(snapshot?.installations ?? { items: [] });
     if (this.selected) {
       this.selected = this.packages.find(
@@ -127,8 +190,9 @@ export class SkillPanel {
   private installationSnapshot(value: InstallationSnapshot) {
     validateInstallations(value);
     const blocked = value.blockedPersonalPlugins ?? [];
-    this.rows = value.items.filter(
-      (r: Installation) => r.resource.identity.kind === this.kind,
+    const kinds = this.activeKinds();
+    this.rows = value.items.filter((r: Installation) =>
+      kinds.includes(r.resource.identity.kind as 'plugin' | 'skill'),
     );
     this.sharedAvailable = value.sharedAvailable !== false;
     this.sharedReason = value.sharedUnavailableReason;
@@ -258,8 +322,8 @@ export class SkillPanel {
       throw error;
     }
   }
-  private async run(work: () => Promise<void>) {
-    if (this.pending) return;
+  private async run(work: () => Promise<void>, restart = false) {
+    if (this.pending && !restart) return;
     const epoch = this.epoch;
     this.busy = true;
     this.notice = '';
@@ -292,13 +356,29 @@ export class SkillPanel {
       }
     }
   }
-  private async load(more = false) {
+  private sameMarketQuery(query: MarketListQuery) {
+    const current = this.desktop?.snapshot?.marketPage?.query;
+    return (
+      !!current &&
+      current.page === query.page &&
+      current.pageSize === query.pageSize &&
+      current.kind === query.kind &&
+      current.search === query.search &&
+      current.sort === query.sort
+    );
+  }
+
+  private async load(options?: { force?: boolean }) {
     if (this.desktop) {
       this.notice = '';
       this.failed = false;
       this.confirmation = undefined;
-      if (more) await this.desktop.more(this.kind);
-      else await this.desktop.refresh(this.selected);
+      if (this.mine) await this.desktop.refresh(this.selected);
+      else {
+        const query = this.marketQuery();
+        if (!options?.force && this.sameMarketQuery(query)) this.syncDesktop();
+        else await this.desktop.refresh(this.selected, query);
+      }
       return;
     }
     this.controller?.abort();
@@ -312,59 +392,55 @@ export class SkillPanel {
         if (epoch !== this.epoch) return;
         this.installationSnapshot(value);
       } else {
-        const read = async (cursor?: string) => {
-          const value = await this.request(
-            'packages?limit=50&kind=' +
-              this.kind +
-              (cursor ? '&cursor=' + encodeURIComponent(cursor) : ''),
-          );
-          if (
-            !Array.isArray(value.items) ||
-            value.items.length > 200 ||
-            value.items.some((p: Package) => p?.kind !== this.kind) ||
-            (value.nextCursor !== undefined &&
-              typeof value.nextCursor !== 'string') ||
-            (this.kind === 'skill' &&
-              value.nextCursor &&
-              value.nextCursor === cursor)
-          )
-            throw new Error('invalid');
-          return {
-            packages: value.items as Package[],
-            cursor: value.nextCursor || undefined,
-          };
-        };
-        const value =
-          this.kind === 'plugin'
-            ? await allPluginPackages(read)
-            : await read(more ? this.cursor : undefined);
-        if (epoch !== this.epoch) return;
-        const merged = more
-          ? [...this.packages, ...value.packages]
-          : value.packages;
-        if (new Set(merged.map((p) => p.id)).size !== merged.length)
+        const query = this.marketQuery();
+        const params = new URLSearchParams({
+          limit: String(query.pageSize),
+          page: String(query.page),
+        });
+        if (query.kind) params.set('kind', query.kind);
+        if (query.search.trim()) params.set('search', query.search.trim());
+        if (query.sort) params.set('sort', query.sort);
+        const value = await this.request('packages?' + params);
+        if (
+          !Array.isArray(value.items) ||
+          value.items.length > query.pageSize ||
+          value.items.some(
+            (p: Package) =>
+              !p ||
+              !['plugin', 'skill'].includes(p.kind) ||
+              (query.kind && p.kind !== query.kind),
+          ) ||
+          typeof value.total !== 'number' ||
+          !Number.isSafeInteger(value.total) ||
+          value.total < 0
+        )
           throw new Error('invalid');
-        this.packages = merged;
-        this.cursor = value.cursor;
+        if (epoch !== this.epoch) return;
+        const packages = value.items as Package[];
+        if (new Set(packages.map((p) => p.id)).size !== packages.length)
+          throw new Error('invalid');
+        this.packages = packages;
+        this.total = value.total;
+        this.cursor = undefined;
         const installed = await this.request('installations');
         if (epoch !== this.epoch) return;
         this.installationSnapshot(installed);
-        if (!more) this.summaries.clear();
-        const displayed = this.packages.filter(
+        this.summaries.clear();
+        const pendingVersions = this.packages.filter(
           (pack) =>
             pack.defaultVersionId &&
             !pack.market &&
             !this.summaries.has(pack.id),
         );
-        for (let index = 0; index < displayed.length; index += 4) {
+        for (let index = 0; index < pendingVersions.length; index += 4) {
           await Promise.allSettled(
-            displayed.slice(index, index + 4).map(async (pack) => {
+            pendingVersions.slice(index, index + 4).map(async (pack) => {
               const version = await this.request(
                 'packages/' + pack.id + '/versions/' + pack.defaultVersionId,
               );
               if (
                 epoch === this.epoch &&
-                version.kind === this.kind &&
+                version.kind === pack.kind &&
                 version.packageId === pack.id &&
                 version.id === pack.defaultVersionId
               )
@@ -380,14 +456,29 @@ export class SkillPanel {
             !Array.isArray(detail.items) ||
             detail.items.some(
               (v: Version) =>
-                v.kind !== this.kind || v.packageId !== this.selected!.id,
+                v.kind !== this.selected!.kind ||
+                v.packageId !== this.selected!.id,
             )
           )
             throw new Error('invalid');
           if (epoch === this.epoch) this.versions = detail.items;
         }
       }
-    });
+    }, true);
+  }
+
+  private scrollToMarketList() {
+    const cards = this.root.querySelector('.cards');
+    if (cards && typeof cards.scrollIntoView === 'function')
+      cards.scrollIntoView({ block: 'start', behavior: 'smooth' });
+  }
+
+  private goToPage(page: number) {
+    const totalPages = Math.max(1, Math.ceil(this.total / this.pageSize));
+    const next = Math.min(Math.max(1, page), totalPages);
+    if (next === this.page) return;
+    this.page = next;
+    void this.load().then(() => this.scrollToMarketList());
   }
   private button(label: string, action: () => void, disabled = false) {
     const b = document.createElement('button');
@@ -565,12 +656,7 @@ export class SkillPanel {
     ]);
   }
   private errorMessage(error: unknown) {
-    return error instanceof PluginPaginationError
-      ? this.text(
-          '无法读取完整插件目录，请刷新后重试。',
-          'The full plugin catalog could not be loaded. Refresh and try again.',
-        )
-      : resourceErrorMessage(error, !this.zh);
+    return resourceErrorMessage(error, !this.zh);
   }
 
   private marketSelect(
@@ -599,6 +685,7 @@ export class SkillPanel {
     return field;
   }
 
+  /** Filter dropdown UI kept for later; list view currently searches these fields. */
   private marketFilters() {
     const locale = this.zh ? 'zh-CN' : 'en';
     const options = marketOptions(this.packages, locale);
@@ -631,6 +718,257 @@ export class SkillPanel {
     return filters;
   }
 
+  private searchControl() {
+    const wrap = element('div', undefined, 'market-search');
+    const icon = element('span', undefined, 'market-search-icon');
+    icon.setAttribute('aria-hidden', 'true');
+    icon.append(lucideIcon('search', 16));
+    const search = element('input');
+    search.type = 'search';
+    search.value = this.search;
+    const placeholder = this.text(
+      '搜索资源名称、简介、作者或标签…',
+      'Search names, descriptions, authors or tags…',
+    );
+    search.setAttribute('aria-label', placeholder);
+    search.placeholder = placeholder;
+    const searchChanged = () => {
+      if (this.search === search.value) return;
+      this.search = search.value;
+      this.page = 1;
+      const { selectionStart, selectionEnd } = search;
+      void this.load().then(() => {
+        const updated = this.root.querySelector<HTMLInputElement>(
+          'input[type=search]',
+        );
+        updated?.focus();
+        updated?.setSelectionRange(selectionStart, selectionEnd);
+      });
+    };
+    search.oninput = (event) => {
+      if (!(event as InputEvent).isComposing) searchChanged();
+    };
+    search.addEventListener('compositionend', searchChanged);
+    wrap.append(icon, search);
+    return wrap;
+  }
+
+  private sortOptions(): [MarketSort, string][] {
+    return [
+      ['', this.text('默认排序', 'Default order')],
+      ['publishedAt', this.text('最新发布', 'Newest')],
+      ['installationCount', this.text('安装最多', 'Most installed')],
+      ['starCount', this.text('点赞最多', 'Most liked')],
+      ['name', this.text('名称排序', 'Name')],
+    ];
+  }
+
+  private sortControl() {
+    const options = this.sortOptions();
+    const current =
+      options.find(([value]) => value === this.filters.sort)?.[1] ??
+      options[0][1];
+    const root = element('div', undefined, 'market-sort');
+    const trigger = document.createElement('button');
+    trigger.type = 'button';
+    trigger.className = 'market-sort-trigger';
+    trigger.setAttribute('aria-label', this.text('排序', 'Sort'));
+    trigger.setAttribute('aria-haspopup', 'listbox');
+    trigger.setAttribute('aria-expanded', String(this.sortMenuOpen));
+    trigger.disabled = this.pending;
+    const label = element('span', current);
+    trigger.append(label, lucideIcon('chevron-down', 14));
+    trigger.onclick = () => {
+      if (this.sortMenuOpen) this.closeSortMenu();
+      else {
+        this.sortMenuOpen = true;
+        this.render();
+        const closer = (event: Event) => {
+          const target = event.target as Node | null;
+          const menu = this.root.querySelector('.market-sort');
+          if (menu && target && menu.contains(target)) return;
+          this.closeSortMenu();
+        };
+        queueMicrotask(() => {
+          document.addEventListener('pointerdown', closer, true);
+          this.sortMenuCloser = () =>
+            document.removeEventListener('pointerdown', closer, true);
+        });
+      }
+    };
+    root.append(trigger);
+    if (this.sortMenuOpen) {
+      const menu = element('div', undefined, 'market-sort-menu');
+      menu.setAttribute('role', 'listbox');
+      menu.setAttribute('aria-label', this.text('排序', 'Sort'));
+      for (const [value, text] of options) {
+        const option = document.createElement('button');
+        option.type = 'button';
+        option.className = 'market-sort-option';
+        option.setAttribute('role', 'option');
+        option.setAttribute(
+          'aria-selected',
+          String(value === this.filters.sort),
+        );
+        option.append(element('span', text));
+        if (value === this.filters.sort) option.append(lucideIcon('check', 14));
+        option.onclick = () => {
+          if (this.filters.sort === value) {
+            this.closeSortMenu();
+            return;
+          }
+          this.filters.sort = value;
+          this.page = 1;
+          this.closeSortMenu(false);
+          void this.load();
+        };
+        menu.append(option);
+      }
+      root.append(menu);
+    }
+    return root;
+  }
+
+  private refreshButton() {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.disabled = this.pending;
+    button.onclick = () => {
+      void this.load({ force: true });
+    };
+    button.classList.add('resource-refresh');
+    button.setAttribute('aria-label', this.text('刷新', 'Refresh'));
+    button.title = this.text('刷新', 'Refresh');
+    button.append(refreshCwIcon());
+    return button;
+  }
+
+  private headerActions() {
+    const host = this.actionsHost;
+    if (!host) return;
+    host.replaceChildren(this.refreshButton());
+  }
+
+  private marketChrome() {
+    const chrome = element('div', undefined, 'market-chrome');
+    const toolbar = element('div', undefined, 'market-toolbar');
+    const kinds = element('div', undefined, 'market-kind-filters');
+    for (const value of ['all', 'plugin', 'skill'] as const) {
+      const button = element(
+        'button',
+        value === 'all'
+          ? this.text('全部', 'All')
+          : value === 'plugin'
+            ? this.text('插件', 'Plugins')
+            : this.text('技能', 'Skills'),
+      );
+      button.type = 'button';
+      button.className = 'market-kind-filter';
+      button.setAttribute('aria-pressed', String(this.kindFilter === value));
+      button.onclick = () => {
+        if (this.kindFilter === value) return;
+        this.kindFilter = value;
+        this.page = 1;
+        if (value !== 'all') this.kind = value;
+        this.onMarketKind?.(value);
+        void this.load();
+      };
+      kinds.append(button);
+    }
+    const tools = element('div', undefined, 'market-toolbar-tools');
+    tools.append(this.sortControl(), this.refreshButton());
+    toolbar.append(kinds, tools);
+    chrome.append(
+      this.searchControl(),
+      toolbar,
+      element(
+        'p',
+        this.text('共 ' + this.total + ' 个资源', this.total + ' resources'),
+        'market-count',
+      ),
+    );
+    this.root.append(chrome);
+  }
+
+  private pageSizeControl() {
+    const wrap = element('div', undefined, 'market-page-size');
+    wrap.append(
+      element('span', this.text('每页', 'Per page'), 'market-page-size-label'),
+    );
+    const select = element('select');
+    select.setAttribute('aria-label', this.text('每页数量', 'Page size'));
+    select.disabled = this.pending;
+    for (const size of [12, 24, 48] as const) {
+      const option = element('option', String(size));
+      option.value = String(size);
+      if (size === this.pageSize) option.selected = true;
+      select.append(option);
+    }
+    select.onchange = () => {
+      const next = Number(select.value);
+      if (![12, 24, 48].includes(next) || next === this.pageSize) return;
+      this.pageSize = next;
+      this.page = 1;
+      void this.load();
+    };
+    wrap.append(select);
+    return wrap;
+  }
+
+  private marketPager() {
+    if (this.total <= this.pageSize) return;
+    const totalPages = Math.max(1, Math.ceil(this.total / this.pageSize));
+    const start = this.total === 0 ? 0 : (this.page - 1) * this.pageSize + 1;
+    const end = Math.min(this.page * this.pageSize, this.total);
+    const pager = element('div', undefined, 'market-pager');
+    pager.setAttribute('role', 'navigation');
+    pager.setAttribute('aria-label', this.text('分页', 'Pagination'));
+    pager.append(
+      element(
+        'p',
+        this.text(
+          `第 ${start}–${end} 个，共 ${this.total} 个`,
+          `${start}–${end} of ${this.total}`,
+        ),
+        'market-pager-range',
+      ),
+    );
+    const pages = element('div', undefined, 'market-pager-pages');
+    const prev = document.createElement('button');
+    prev.type = 'button';
+    prev.className = 'market-pager-nav';
+    prev.disabled = this.pending || this.page <= 1;
+    prev.setAttribute('aria-label', this.text('上一页', 'Previous page'));
+    prev.append(lucideIcon('chevron-left', 16));
+    prev.onclick = () => this.goToPage(this.page - 1);
+    pages.append(prev);
+    for (const item of pageWindow(this.page, totalPages)) {
+      if (item === '…') {
+        pages.append(element('span', '…', 'market-pager-ellipsis'));
+        continue;
+      }
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'market-pager-page';
+      button.textContent = String(item);
+      button.disabled = this.pending;
+      button.setAttribute('aria-label', this.text('第 ' + item + ' 页', 'Page ' + item));
+      button.setAttribute('aria-current', item === this.page ? 'page' : 'false');
+      button.onclick = () => this.goToPage(item);
+      pages.append(button);
+    }
+    const next = document.createElement('button');
+    next.type = 'button';
+    next.className = 'market-pager-nav';
+    next.disabled = this.pending || this.page >= totalPages;
+    next.setAttribute('aria-label', this.text('下一页', 'Next page'));
+    next.append(lucideIcon('chevron-right', 16));
+    next.onclick = () => this.goToPage(this.page + 1);
+    pages.append(next);
+    pager.append(pages, this.pageSizeControl());
+    this.root.append(pager);
+  }
+
   private marketFacts(market: PluginMarket) {
     const unknown = this.text('未知', 'Unknown');
     const timestamp = marketDate(market);
@@ -656,98 +994,131 @@ export class SkillPanel {
 
   private starButton(pack: Package) {
     const market = pack.market!;
-    const button = this.button(
-      market.starred
-        ? this.text('取消点赞', 'Unlike')
-        : this.text('点赞', 'Like'),
-      () => {
-        if (this.desktop) {
-          void this.desktop.star(pack).catch(() => undefined);
-          return;
-        }
-        void this.run(async () => {
-          const epoch = this.epoch;
-          const result = validateStar(
-            await this.request(
-              'packages/' + encodeURIComponent(pack.id) + '/star',
-              { starred: !market.starred },
-            ),
-          );
-          if (epoch !== this.epoch) return;
-          const updated = { ...pack, market: { ...market, ...result } };
-          this.packages = this.packages.map((item) =>
-            item.id === pack.id ? updated : item,
-          );
-          if (this.selected?.id === pack.id) this.selected = updated;
-        });
-      },
-    );
+    const label = market.starred
+      ? this.text('取消点赞', 'Unlike')
+      : this.text('点赞', 'Like');
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.disabled = this.pending;
+    button.className = 'resource-star';
+    button.setAttribute('aria-label', label);
+    button.title = label;
     button.setAttribute('aria-pressed', String(market.starred));
+    button.append(
+      lucideIcon('heart', 14, { filled: market.starred }),
+      document.createTextNode(String(market.starCount)),
+    );
+    button.onclick = () => {
+      if (this.desktop) {
+        void this.desktop.star(pack).catch(() => undefined);
+        return;
+      }
+      void this.run(async () => {
+        const epoch = this.epoch;
+        const result = validateStar(
+          await this.request(
+            'packages/' + encodeURIComponent(pack.id) + '/star',
+            { starred: !market.starred },
+          ),
+        );
+        if (epoch !== this.epoch) return;
+        const updated = { ...pack, market: { ...market, ...result } };
+        this.packages = this.packages.map((item) =>
+          item.id === pack.id ? updated : item,
+        );
+        if (this.selected?.id === pack.id) this.selected = updated;
+      });
+    };
     return button;
+  }
+
+  /** List shows one install/update action; open() remains for version detail. */
+  private marketPrimaryButton(
+    pack: Package,
+    row: Installation | undefined,
+    version: Version | undefined,
+  ) {
+    const defaultId = version?.id ?? pack.defaultVersionId;
+    const defaultVersion = version?.version ?? pack.market?.version;
+    if (!defaultId || !defaultVersion) return undefined;
+    const retry = this.retryPluginInstall(row, defaultId);
+    const installed = !!row;
+    const label = retry
+      ? this.text('重试', 'Retry')
+      : installed
+        ? this.text('更新', 'Update')
+        : this.text('安装', 'Install');
+    const button = this.button(
+      label,
+      () => this.action(pack.id, defaultId, 'install'),
+      !this.sharedAvailable ||
+        this.pluginInProgress(pack.id, row, defaultId) ||
+        (version && version.state !== 'published'),
+    );
+    button.className = installed || retry ? 'primary' : 'secondary';
+    button.classList.add('resource-card-action');
+    return button;
+  }
+
+  private packLabel(pack: Package) {
+    return pack.kind === 'plugin'
+      ? this.text('插件', 'Plugin')
+      : this.text('技能', 'Skill');
+  }
+
+  private displayedMarketPackages() {
+    return this.packages;
+  }
+
+  private marketAttribution(pack: Package, version: Version | undefined) {
+    const author =
+      (pack.market && marketAuthor(pack.market)) ||
+      version?.manifest.author?.displayName ||
+      this.text('未知', 'Unknown');
+    const department =
+      (pack.market && marketDepartment(pack.market)) || undefined;
+    const line = element('p', undefined, 'resource-attribution');
+    line.append(element('span', author, 'resource-author'));
+    if (department) {
+      line.append(
+        element('span', ' · ', 'resource-attribution-sep'),
+        element('span', department, 'resource-department'),
+      );
+    }
+    return line;
+  }
+
+  private marketCardFooter(
+    pack: Package,
+    row: Installation | undefined,
+    version: Version | undefined,
+  ) {
+    const footer = element('div', undefined, 'resource-card-footer');
+    const meta = element('div', undefined, 'resource-card-meta');
+    if (pack.market) {
+      const installs = element('span', undefined, 'resource-stat');
+      installs.title = this.text('安装数', 'Installations');
+      installs.append(
+        lucideIcon('download', 14),
+        document.createTextNode(String(pack.market.installationCount)),
+      );
+      meta.append(installs, this.starButton(pack));
+    }
+    footer.append(meta);
+    const primary = this.marketPrimaryButton(pack, row, version);
+    if (primary) footer.append(primary);
+    return footer;
   }
 
   render() {
     this.root.replaceChildren();
     this.root.setAttribute('aria-busy', String(this.pending));
-    const toolbar = element('div', undefined, 'toolbar');
-    const title = element('div', undefined, 'market-title');
-    title.append(
-      element(
-        'h2',
-        this.text(
-          this.mine ? '我的共享' + this.label : this.label + '市场',
-          this.mine
-            ? 'My shared ' + this.label.toLowerCase() + 's'
-            : this.label + ' market',
-        ),
-      ),
-      element(
-        'p',
-        this.text(
-          '为新会话添加经过签名验证的能力。',
-          'Add signed capabilities to new sessions.',
-        ),
-        'muted',
-      ),
-    );
-    toolbar.append(
-      title,
-      this.button(this.text('刷新', 'Refresh'), () => {
-        void this.load();
-      }),
-    );
-    this.root.append(toolbar);
-    if (!this.mine && !this.selected) {
-      const search = element('input');
-      search.type = 'search';
-      search.value = this.search;
-      const placeholder =
-        this.kind === 'plugin'
-          ? this.text(
-              '搜索名称、简介或标签',
-              'Search names, descriptions or tags',
-            )
-          : this.text('搜索资源', 'Search resources');
-      search.setAttribute('aria-label', placeholder);
-      search.placeholder = placeholder;
-      const searchChanged = () => {
-        if (this.search === search.value) return;
-        this.search = search.value;
-        const { selectionStart, selectionEnd } = search;
-        this.render();
-        const updated =
-          this.root.querySelector<HTMLInputElement>('input[type=search]');
-        updated?.focus();
-        updated?.setSelectionRange(selectionStart, selectionEnd);
-      };
-      search.oninput = (event) => {
-        if (!(event as InputEvent).isComposing) searchChanged();
-      };
-      search.addEventListener('compositionend', searchChanged);
-      toolbar.append(search);
-      if (this.kind === 'plugin' && this.packages.some((pack) => pack.market))
-        this.root.append(this.marketFilters());
-    }
+    this.headerActions();
+    const marketList = !this.mine && !this.selected;
+    const displayed = marketList ? this.displayedMarketPackages() : [];
+    if (marketList) this.marketChrome();
+    else if (this.mine && !this.actionsHost)
+      this.root.append(this.refreshButton());
     if (this.policyCacheUnavailable)
       this.root.append(
         element(
@@ -1041,16 +1412,6 @@ export class SkillPanel {
           cards.append(card);
         }
       } else {
-        const displayed =
-          this.kind === 'plugin'
-            ? filterPlugins(
-                this.packages,
-                { ...this.filters, search: this.search },
-                (pack) => this.summaries.get(pack.id)?.manifest.description,
-              )
-            : this.packages.filter((pack) =>
-                pack.name.toLowerCase().includes(this.search.toLowerCase()),
-              );
         if (this.packages.length && !displayed.length && !this.pending) {
           const notice = element(
             'p',
@@ -1064,8 +1425,17 @@ export class SkillPanel {
           const version = this.summaries.get(pack.id),
             row = this.installation(pack.id);
           const card = element('article', undefined, 'card resource-card');
+          const top = element('div', undefined, 'resource-card-top');
+          top.append(
+            resourceHeading(pack.name, pack.kind, this.packLabel(pack)),
+          );
+          const shownVersion = version?.version ?? pack.market?.version;
+          if (shownVersion)
+            top.append(
+              element('span', shownVersion, 'resource-version-corner'),
+            );
           card.append(
-            resourceHeading(pack.name, this.kind, this.label),
+            top,
             element(
               'p',
               pack.market?.description ??
@@ -1076,70 +1446,32 @@ export class SkillPanel {
                 ),
               'resource-description',
             ),
+            this.marketAttribution(pack, version),
           );
-          const metadata = element('div', undefined, 'resource-meta');
-          metadata.append(
-            this.badge(
-              this.text(
-                { required: '必装', default: '默认安装', optional: '自选' }[
-                  row?.resource.installationMode ?? 'optional'
-                ],
-                row?.resource.installationMode ?? 'optional',
-              ),
-            ),
-            this.badge(
-              row
-                ? this.status(row.state)
-                : this.sharedAvailable
-                  ? this.text('未安装', 'Not installed')
-                  : this.sharedAvailable === false
-                    ? this.text('安装待配置', 'Setup required')
-                    : this.text(
-                        '安装状态未知',
-                        'Installation status unavailable',
-                      ),
-            ),
-          );
-          if (version)
-            metadata.append(
-              element('span', version.version, 'resource-version-label'),
-            );
-          card.append(metadata);
-          this.pluginFailure(card, row);
-          if (pack.market) card.append(this.marketFacts(pack.market));
-          else if (version?.manifest.author?.displayName)
+          if (
+            row?.resource.installationMode === 'required' ||
+            row?.resource.installationMode === 'default'
+          )
             card.append(
-              element('p', version.manifest.author.displayName, 'muted'),
+              this.badge(
+                this.text(
+                  { required: '必装', default: '默认安装' }[
+                    row.resource.installationMode
+                  ],
+                  row.resource.installationMode,
+                ),
+              ),
             );
-          const actions = element('div', undefined, 'resource-actions');
-          const defaultId =
-            version?.id ?? (pack.market && pack.defaultVersionId);
-          const defaultVersion = version?.version ?? pack.market?.version;
-          if (defaultId && defaultVersion) {
-            const install = this.button(
-              (this.retryPluginInstall(row, defaultId)
-                ? this.text('重试', 'Retry')
-                : this.text('安装', 'Install')) +
-                ' ' +
-                defaultVersion,
-              () => this.action(pack.id, defaultId, 'install'),
-              !this.sharedAvailable ||
-                this.pluginInProgress(pack.id, row, defaultId) ||
-                (version && version.state !== 'published'),
+          this.pluginFailure(card, row);
+          if (this.sharedAvailable === false && !row)
+            card.append(
+              element(
+                'p',
+                this.text('安装待配置', 'Setup required'),
+                'resource-setup-hint',
+              ),
             );
-            install.className = 'primary';
-            actions.append(install);
-          }
-          actions.append(
-            this.button(
-              this.text('选择版本／更新', 'Select version / update'),
-              () => {
-                void this.open(pack);
-              },
-            ),
-          );
-          if (pack.market) actions.append(this.starButton(pack));
-          card.append(actions);
+          card.append(this.marketCardFooter(pack, row, version));
           cards.append(card);
         }
       }
@@ -1147,34 +1479,34 @@ export class SkillPanel {
         !(this.mine ? this.rows : this.packages).length &&
         !this.pending &&
         !message
-      )
+      ) {
+        const kindLabel =
+          this.mine || this.kindFilter !== 'all'
+            ? this.label
+            : this.text('资源', 'resource');
         this.root.append(
           element(
             'p',
             this.mine
               ? this.text(
-                  '暂无共享' + this.label + '，请前往资源市场选择。',
+                  '暂无共享' + kindLabel + '，请前往资源市场选择。',
                   'No shared ' +
-                    this.label.toLowerCase() +
+                    kindLabel.toLowerCase() +
                     's. Choose a resource from the market.',
                 )
               : this.text(
                   '市场暂无共享' +
-                    this.label +
+                    kindLabel +
                     '，请联系管理员前往管理台发布后刷新。',
                   'No shared ' +
-                    this.label.toLowerCase() +
+                    kindLabel.toLowerCase() +
                     's in the market. Ask an administrator to publish from the admin console, then refresh.',
                 ),
             'notice',
           ),
         );
-      if (!this.mine && this.cursor)
-        this.root.append(
-          this.button(this.text('加载更多', 'Load more'), () => {
-            void this.load(true);
-          }),
-        );
+      }
+      if (marketList) this.marketPager();
     }
     if (this.confirmation) {
       const pending = this.confirmation;

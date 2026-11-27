@@ -118,9 +118,19 @@ window.__ModuleLoader__.load({
       scope: '持续规则范围',
       chooseScope: '请选择范围',
       ask_each: '每次询问（推荐）',
+      ask_eachHint: '每次首联都需确认',
       same_org: '同组织自动允许',
+      same_orgHint: '同组织来源自动放行',
       allowlist: '仅白名单自动允许',
+      allowlistHint: '仅名单内来源自动放行',
       deny_all: '全部拒绝',
+      deny_allHint: '拒绝全部首联请求',
+      conversationLayerHint: '是否允许对方建立对话',
+      executionLayerHint: '是否允许自动执行工具',
+      defaultPolicy: '默认授权策略',
+      allowLists: '授权名单',
+      listOpen: '查看',
+      listCount: '项',
       locked: '由组织政策锁定，来源版本：',
       persistent: '总是允许名单',
       blocked: '屏蔽名单',
@@ -128,12 +138,19 @@ window.__ModuleLoader__.load({
       empty: '暂无待处理请求',
       noRules: '暂无规则',
       revokeHint: '撤销后重新核权；已执行的动作无法撤回，拒绝冷却仍然有效。',
+      listSearch: '搜索名单',
       tab_overview: '概览',
       tab_market: '资源市场',
+      tab_market_short: '市场',
       tab_mine: '我的资源',
+      tab_mine_short: '资源',
       tab_team: 'Team 工具',
+      tab_team_short: '团队',
       tab_inbox: '收件箱',
       tab_settings: '设置',
+      nav_expand: '展开导航',
+      nav_collapse: '收起导航',
+      nav_label: 'Auriga 导航',
       signedOut: '未登录',
       localIdentity: '本机身份',
       uacMethod: 'UAC 扫码',
@@ -235,6 +252,32 @@ window.__ModuleLoader__.load({
         '平台无法验证本机身份。可以重试，或请管理员核对平台配置。',
       loginPlatformFailed: '平台连接需要重试',
       retryLocalUac: '用本机身份重新连接平台',
+      retryConnect: '重试连接',
+      overviewWelcome: '欢迎使用 Auriga',
+      overviewWelcomeBack: '欢迎回来，',
+      overviewTagline: '探索更多能力，连接无限可能。',
+      overviewExplore: '探索 Auriga',
+      overviewLocal: '本地登录',
+      overviewCloud: '云平台',
+      overviewNetwork: '消息网络',
+      overviewStatusOn: '已登录',
+      overviewStatusOff: '未登录',
+      overviewCloudOn: '已连接',
+      overviewCloudAuth: '已认证，未连接',
+      overviewCloudOff: '未连接',
+      overviewNetworkOn: '就绪',
+      overviewNetworkOff: '未就绪',
+      overviewLocalOnly:
+        '本地功能仍可用，部分云平台功能暂不可用。',
+      overviewUpdateTitle: '发现新版本',
+      overviewUpdateAction: '前往更新',
+      overviewConsentTitle: '待处理授权请求',
+      overviewConsentAction: '去处理',
+      overviewConsentDetail: ' 项',
+      cap_market_desc: '发现插件与技能，拓展 AI 能力。',
+      cap_mine_desc: '管理已安装的插件与技能。',
+      cap_team_desc: '连接团队能力，协同完成工作。',
+      cap_inbox_desc: '查看成员消息与请求。',
       loginDetails: '错误详情',
       loginCompare: '请核对门户预填的确认码与此处一致，仅确认自己发起的登录：',
       loginRejected: '平台拒绝了登录请求，请联系管理员检查客户端配置。',
@@ -355,9 +398,19 @@ window.__ModuleLoader__.load({
       scope: 'Persistent rule scope',
       chooseScope: 'Choose a scope',
       ask_each: 'Ask each time (recommended)',
+      ask_eachHint: 'Confirm every first contact',
       same_org: 'Automatically allow same organization',
+      same_orgHint: 'Auto-allow sources from the same organization',
       allowlist: 'Automatically allow listed sources only',
+      allowlistHint: 'Auto-allow listed sources only',
       deny_all: 'Deny all',
+      deny_allHint: 'Deny every first-contact request',
+      conversationLayerHint: 'Whether peers may open a conversation',
+      executionLayerHint: 'Whether automatic tool execution is allowed',
+      defaultPolicy: 'Default authorization policy',
+      allowLists: 'Authorization lists',
+      listOpen: 'View',
+      listCount: 'items',
       locked: 'Locked by organization policy, source revision: ',
       persistent: 'Always-allow list',
       blocked: 'Block list',
@@ -366,12 +419,19 @@ window.__ModuleLoader__.load({
       noRules: 'No rules',
       revokeHint:
         'Revocation requires authorization again. Completed actions cannot be undone; rejection cooldowns remain active.',
+      listSearch: 'Search list',
       tab_overview: 'Overview',
       tab_market: 'Marketplace',
+      tab_market_short: 'Market',
       tab_mine: 'My resources',
+      tab_mine_short: 'Library',
       tab_team: 'Team tools',
+      tab_team_short: 'Team',
       tab_inbox: 'Inbox',
       tab_settings: 'Settings',
+      nav_expand: 'Expand navigation',
+      nav_collapse: 'Collapse navigation',
+      nav_label: 'Auriga navigation',
       signedOut: 'Signed out',
       localIdentity: 'Local identity',
       uacMethod: 'UAC scan',
@@ -487,6 +547,32 @@ window.__ModuleLoader__.load({
         'The platform could not verify your local identity. Try again or ask your administrator to check the platform configuration.',
       loginPlatformFailed: 'Platform connection needs attention',
       retryLocalUac: 'Reconnect with local identity',
+      retryConnect: 'Retry connection',
+      overviewWelcome: 'Welcome to Auriga',
+      overviewWelcomeBack: 'Welcome back, ',
+      overviewTagline: 'Explore more capabilities and stay connected.',
+      overviewExplore: 'Explore Auriga',
+      overviewLocal: 'Local sign-in',
+      overviewCloud: 'Cloud platform',
+      overviewNetwork: 'Message network',
+      overviewStatusOn: 'Signed in',
+      overviewStatusOff: 'Signed out',
+      overviewCloudOn: 'Connected',
+      overviewCloudAuth: 'Authenticated, not connected',
+      overviewCloudOff: 'Disconnected',
+      overviewNetworkOn: 'Ready',
+      overviewNetworkOff: 'Not ready',
+      overviewLocalOnly:
+        'Local features remain available; some cloud features are temporarily unavailable.',
+      overviewUpdateTitle: 'Update available',
+      overviewUpdateAction: 'Go to update',
+      overviewConsentTitle: 'Pending authorization requests',
+      overviewConsentAction: 'Review',
+      overviewConsentDetail: ' items',
+      cap_market_desc: 'Discover plugins and skills to extend AI capabilities.',
+      cap_mine_desc: 'Manage installed plugins and skills.',
+      cap_team_desc: 'Connect team capabilities and collaborate.',
+      cap_inbox_desc: 'Review member messages and requests.',
       loginDetails: 'Error details',
       loginBrowserHint:
         'Finish sign-in in your system browser and compare the code for this device.',
@@ -517,34 +603,305 @@ window.__ModuleLoader__.load({
 .auriga-login-modal{pointer-events:auto;position:fixed;inset:0;margin:auto;z-index:1000;width:min(544px,calc(100vw - 32px));max-height:85vh;overflow:auto;padding:24px;border:1px solid var(--dsw-alias-border-l2,currentColor);border-radius:16px;background:var(--dsw-alias-bg-layer-1,Canvas);color:var(--dsw-alias-label-primary,CanvasText);font:inherit;box-shadow:0 0 0 100vmax #0006}
 
 .auriga-shell{box-sizing:border-box;color:var(--dsw-alias-label-primary,inherit);font:inherit;min-width:0}
-.auriga-shell button:not(.auriga-host-control,.auriga-tabs button,.auriga-tabs-fallback button){font:inherit;padding:5px 10px;border:1px solid var(--dsw-alias-border-l2,currentColor);border-radius:6px;background:var(--dsw-alias-bg-layer-1,transparent);color:var(--dsw-alias-label-primary,inherit);cursor:pointer}
-.auriga-shell button:not(.auriga-host-control,.auriga-tabs button,.auriga-tabs-fallback button):hover,.auriga-tabs-fallback button:hover{background:var(--dsw-alias-interactive-bg-hover,transparent)}
-.auriga-shell button:not(.auriga-host-control,.auriga-tabs button,.auriga-tabs-fallback button):focus-visible,.auriga-tabs-fallback button:focus-visible,.auriga-shell summary:focus-visible{outline:var(--dsw-focus-ring-width,2px) solid var(--dsw-focus-ring-color,var(--dsw-alias-state-business-primary,currentColor));outline-offset:2px}
-.auriga-shell button:not(.auriga-host-control,.auriga-tabs button,.auriga-tabs-fallback button):disabled{opacity:.5;cursor:default}
+.auriga-shell button:not(.auriga-host-control,.auriga-nav-item,.auriga-nav-toggle,.auriga-settings-nav-item,.auriga-setting-icon-btn,.auriga-setting-switch,.auriga-setting-action,.auriga-tabs button,.auriga-tabs-fallback button){font:inherit;padding:5px 10px;border:1px solid var(--dsw-alias-border-l2,currentColor);border-radius:6px;background:var(--dsw-alias-bg-layer-1,transparent);color:var(--dsw-alias-label-primary,inherit);cursor:pointer}
+.auriga-shell button:not(.auriga-host-control,.auriga-nav-item,.auriga-nav-toggle,.auriga-settings-nav-item,.auriga-setting-icon-btn,.auriga-setting-switch,.auriga-setting-action,.auriga-tabs button,.auriga-tabs-fallback button):hover,.auriga-tabs-fallback button:hover{background:var(--dsw-alias-interactive-bg-hover,transparent)}
+.auriga-shell button:not(.auriga-host-control,.auriga-nav-item,.auriga-nav-toggle,.auriga-settings-nav-item,.auriga-setting-icon-btn,.auriga-setting-switch,.auriga-setting-action,.auriga-tabs button,.auriga-tabs-fallback button):focus-visible,.auriga-nav-item:focus-visible,.auriga-nav-toggle:focus-visible,.auriga-settings-nav-item:focus-visible,.auriga-setting-icon-btn:focus-visible,.auriga-tabs-fallback button:focus-visible,.auriga-shell summary:focus-visible{outline:var(--dsw-focus-ring-width,2px) solid var(--dsw-focus-ring-color,var(--dsw-alias-state-business-primary,currentColor));outline-offset:2px}
+.auriga-shell button:not(.auriga-host-control,.auriga-nav-item,.auriga-nav-toggle,.auriga-settings-nav-item,.auriga-setting-icon-btn,.auriga-setting-switch,.auriga-setting-action,.auriga-tabs button,.auriga-tabs-fallback button):disabled{opacity:.5;cursor:default}
 .auriga-shell-status{padding:14px 0;display:flex;gap:12px;align-items:center;flex-wrap:wrap}
-.auriga-settings{padding:4px 4px 24px;font-size:13px;line-height:1.5}
-.auriga-settings h2{font-size:20px;font-weight:600;margin:0 0 24px}
-.auriga-settings h3{font-size:14px;font-weight:600;margin:24px 0 0}
-.auriga-settings p{color:var(--dsw-alias-label-secondary,inherit);font-size:12px;margin:8px 0 16px;overflow-wrap:anywhere}
+.auriga-settings{box-sizing:border-box;height:100%;min-height:0;padding:0;font-size:14px;line-height:1.5;display:flex;flex-direction:column;overflow:hidden}
+.auriga-settings>h2{font-size:22px;font-weight:600;margin:0 0 8px;padding:16px 24px 0;flex:none}
+.auriga-settings-shell{flex:1;min-height:0;display:flex;overflow:hidden}
+.auriga-settings-nav{box-sizing:border-box;flex:none;width:176px;height:100%;overflow:auto;padding:12px 8px;border:0;border-inline-end:1px solid var(--dsw-alias-border-l1,currentColor);background:transparent}
+.auriga-settings-nav-group{margin-bottom:16px}
+.auriga-settings-nav-group-label{padding:4px 10px 8px;font-size:11px;font-weight:600;letter-spacing:.04em;color:var(--dsw-alias-label-tertiary,var(--dsw-alias-label-secondary,inherit));text-transform:uppercase}
+.auriga-settings-nav-item{display:flex;align-items:center;gap:8px;width:100%;box-sizing:border-box;height:36px;margin:0 0 2px;padding:0 10px;border:0;border-radius:6px;background:transparent;color:var(--dsw-alias-label-secondary,inherit);font:inherit;font-size:13px;text-align:start;cursor:pointer}
+.auriga-settings-nav-item:hover{background:var(--dsw-alias-interactive-bg-hover,transparent);color:var(--dsw-alias-label-primary,inherit)}
+.auriga-settings-nav-item[aria-current=page]{background:var(--dsw-alias-interactive-bg-selected,var(--dsw-alias-bg-layer-2,transparent));color:var(--dsw-alias-state-business-primary,var(--dsw-alias-label-primary,inherit));font-weight:600}
+.auriga-settings-nav-icon{flex:none;display:inline-flex;width:16px;height:16px;align-items:center;justify-content:center}
+.auriga-settings-nav-label{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.auriga-settings-main{flex:1;min-width:0;min-height:0;display:flex;flex-direction:column;overflow:hidden}
+.auriga-settings-main-inner{flex:1;min-height:0;overflow:auto;padding:32px;max-width:720px;width:100%;box-sizing:border-box;margin:0}
+.auriga-settings-notice{flex:none;margin:0;padding:10px 32px 16px;max-width:720px;color:var(--dsw-alias-label-secondary,inherit);font-size:12px}
+.auriga-settings-panel[hidden]{display:none}
+.auriga-settings-page-title{margin:0 0 20px;font-size:22px;font-weight:600;line-height:1.3}
+.auriga-settings-section{margin:0 0 24px}
+.auriga-settings-section-title{margin:0 0 8px;font-size:14px;font-weight:600}
+.auriga-settings-section-desc{margin:0 0 12px;color:var(--dsw-alias-label-secondary,inherit);font-size:12px}
+.auriga-settings-section-body{display:flex;flex-direction:column;gap:0}
+.auriga-setting-row{display:flex;align-items:center;justify-content:space-between;gap:16px;box-sizing:border-box;min-height:44px;padding:0;border-bottom:1px solid var(--dsw-alias-border-l1,currentColor)}
+.auriga-setting-row.is-readonly{display:grid;grid-template-columns:minmax(96px,140px) minmax(0,1fr);align-items:center;column-gap:12px;min-height:44px}
+.auriga-setting-row.is-readonly.has-copy{grid-template-columns:minmax(96px,140px) minmax(0,1fr) 28px}
+.auriga-setting-row.is-status{display:grid;grid-template-columns:minmax(0,1fr) auto 80px;align-items:center;column-gap:16px;min-height:44px;padding:0;border-bottom:1px solid var(--dsw-alias-border-l1,currentColor)}
+.auriga-setting-row-stack{flex-direction:column;align-items:stretch;min-height:0}
+.auriga-setting-row-meta{min-width:0;flex:1;display:flex;align-items:center;gap:10px}
+.auriga-setting-row-icon{flex:none;color:var(--dsw-alias-label-secondary,inherit)}
+.auriga-setting-row-copy{min-width:0;flex:1}
+.auriga-setting-row-label{font-size:14px;font-weight:500;color:var(--dsw-alias-label-secondary,inherit)}
+.auriga-setting-row.is-status .auriga-setting-row-label{color:var(--dsw-alias-label-primary,inherit);font-weight:500}
+.auriga-setting-row-desc{margin-top:2px;font-size:12px;color:var(--dsw-alias-label-secondary,inherit);overflow-wrap:anywhere}
+.auriga-setting-row-control{flex:none;display:flex;align-items:center;justify-content:flex-end;gap:8px;min-width:0}
+.auriga-setting-row-stack .auriga-setting-row-control{width:100%;justify-content:stretch}
+.auriga-setting-row-status{min-width:0;display:flex;align-items:center;justify-content:flex-end}
+.auriga-setting-row-action{display:flex;align-items:center;justify-content:flex-end;width:80px;min-width:80px}
+.auriga-setting-row-action-slot{display:block;width:100%;min-height:28px}
+.auriga-setting-row-action-slot.is-icon{width:28px;min-width:28px;min-height:28px}
+.auriga-setting-row-actions{display:inline-flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:flex-end}
+.auriga-setting-input{box-sizing:border-box;width:100%;min-width:180px;height:36px;padding:0 10px;border:1px solid var(--dsw-alias-border-l2,currentColor);border-radius:8px;background:var(--dsw-alias-bg-layer-1,transparent);color:inherit;font:inherit}
+.auriga-setting-textarea{height:auto;padding:8px 10px;resize:vertical}
+.auriga-setting-filepicker{position:relative;display:flex;align-items:center;gap:6px;min-width:0;flex:1}
+.auriga-setting-filepicker-input{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);border:0}
+.auriga-setting-filepicker-trigger{box-sizing:border-box;display:inline-flex;align-items:center;min-width:0;flex:1;height:36px;padding:0 10px;border:1px solid var(--dsw-alias-border-l2,currentColor);border-radius:8px;background:var(--dsw-alias-bg-layer-1,transparent);color:inherit;font:inherit;text-align:start;cursor:pointer}
+.auriga-setting-filepicker-trigger:disabled{opacity:.5;cursor:default}
+.auriga-setting-filepicker-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--dsw-alias-label-primary,inherit)}
+.auriga-setting-filepicker-placeholder{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--dsw-alias-label-tertiary,var(--dsw-alias-label-secondary,inherit))}
+.auriga-setting-filepicker-clear{box-sizing:border-box;display:inline-flex;align-items:center;justify-content:center;flex:none;width:28px;height:28px;padding:0;border:0;border-radius:6px;background:transparent;color:var(--dsw-alias-label-secondary,inherit);cursor:pointer}
+.auriga-setting-filepicker-clear:hover{background:var(--dsw-alias-interactive-bg-hover,transparent);color:var(--dsw-alias-label-primary,inherit)}
+.auriga-setting-filepicker-clear:disabled{opacity:.5;cursor:default}
+.auriga-network-info{display:flex;flex-direction:column;gap:0;min-width:0}
+.auriga-network-info-row{display:flex;align-items:center;justify-content:space-between;gap:12px;min-height:40px;border-bottom:1px solid var(--dsw-alias-border-l1,currentColor)}
+.auriga-network-info-row:last-child{border-bottom:0}
+.auriga-network-info-label{flex:none;font-size:13px;color:var(--dsw-alias-label-secondary,inherit)}
+.auriga-network-info-value{min-width:0;flex:1;display:flex;align-items:center;justify-content:flex-end;gap:6px;font-size:14px;color:var(--dsw-alias-label-primary,inherit)}
+.auriga-network-info-text{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:end}
+.auriga-control-import-row{display:flex;align-items:center;gap:8px;min-width:0}
+.auriga-control-import-row .auriga-setting-filepicker{flex:1}
+.auriga-control-import-row .auriga-setting-action{flex:none;min-width:88px}
+.auriga-receive-toolbar{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:8px;flex-wrap:wrap}
+.auriga-receive-search{flex:1;min-width:160px;max-width:280px}
+.auriga-receive-count{font-size:12px;color:var(--dsw-alias-label-secondary,inherit);white-space:nowrap}
+.auriga-receive-list{display:flex;flex-direction:column;gap:0;min-width:0;max-height:360px;overflow:auto}
+.auriga-receive-list .auriga-setting-row:last-child{border-bottom:0}
+.auriga-setting-action,.auriga-settings a.auriga-setting-action{box-sizing:border-box;display:inline-flex;align-items:center;justify-content:center;gap:0;min-height:32px;padding:0 12px;border:1px solid var(--dsw-alias-border-l2,currentColor);border-radius:8px;background:var(--dsw-alias-bg-layer-1,transparent);color:var(--dsw-alias-label-primary,inherit);font:inherit;font-size:13px;cursor:pointer;text-decoration:none}
+.auriga-setting-action.has-icon{gap:6px}
+.auriga-setting-action-icon{flex:none}
+.auriga-setting-action.is-primary{background:var(--dsw-alias-button-primary-fill,var(--dsw-alias-state-business-primary,transparent));border-color:transparent;color:var(--dsw-alias-label-primary-foreground,inherit)}
+.auriga-setting-action.is-danger{color:var(--dsw-alias-state-error-label,var(--dsw-alias-state-error-primary,inherit));border-color:var(--dsw-alias-state-error-primary,currentColor);background:transparent}
+.auriga-setting-action.is-quiet{border-color:transparent;background:transparent;padding-inline:8px}
+.auriga-setting-action.is-compact{min-height:28px;padding:0 10px;border-radius:6px;font-size:12px}
+.auriga-setting-action.is-danger.is-compact{border-color:var(--dsw-alias-border-l2,currentColor);color:var(--dsw-alias-label-secondary,inherit);background:transparent}
+.auriga-setting-action.is-danger.is-compact:hover{border-color:var(--dsw-alias-state-error-primary,currentColor);color:var(--dsw-alias-state-error-label,var(--dsw-alias-state-error-primary,inherit));background:var(--dsw-alias-interactive-bg-hover,transparent)}
+.auriga-setting-action:disabled{opacity:.5;cursor:default}
+.auriga-setting-icon-btn{box-sizing:border-box;display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;padding:0;border:0;border-radius:6px;background:transparent;color:var(--dsw-alias-label-secondary,inherit);cursor:pointer}
+.auriga-setting-icon-btn:hover{background:var(--dsw-alias-interactive-bg-hover,transparent);color:var(--dsw-alias-label-primary,inherit)}
+.auriga-setting-icon-btn:disabled{opacity:.5;cursor:default}
+.auriga-setting-icon-btn.is-success{color:var(--dsw-alias-state-success-primary,#5f8f6a)}
+.auriga-setting-icon-btn.is-busy svg{animation:auriga-settings-spin .8s linear infinite}
+@keyframes auriga-settings-spin{to{transform:rotate(360deg)}}
+.auriga-setting-actions{display:flex;gap:8px;flex-wrap:wrap;margin:8px 0}
+.auriga-setting-status{margin:8px 0;font-size:12px;color:var(--dsw-alias-label-secondary,inherit);overflow-wrap:anywhere}
+.auriga-setting-status.is-error{color:var(--dsw-alias-state-error-label,var(--dsw-alias-state-error-primary,inherit))}
+.auriga-setting-status.is-warn{color:var(--dsw-alias-state-warn-label,var(--dsw-alias-state-warn-primary,inherit))}
+.auriga-status-indicator{display:inline-flex;align-items:center;gap:6px;min-height:28px;font-size:12px;color:var(--dsw-alias-label-secondary,inherit);white-space:nowrap}
+.auriga-status-indicator-dot{flex:none;width:7px;height:7px;border-radius:50%;background:var(--dsw-alias-label-tertiary,var(--dsw-alias-label-secondary,currentColor))}
+.auriga-status-indicator-label{line-height:1.3}
+.auriga-status-indicator.is-success{color:var(--dsw-alias-state-success-label,var(--dsw-alias-label-secondary,inherit))}
+.auriga-status-indicator.is-success .auriga-status-indicator-dot{background:var(--dsw-alias-state-success-primary,#5f8f6a)}
+.auriga-status-indicator.is-processing{color:var(--dsw-alias-state-warn-label,var(--dsw-alias-label-secondary,inherit))}
+.auriga-status-indicator.is-processing .auriga-status-indicator-dot{background:var(--dsw-alias-state-warn-primary,currentColor)}
+.auriga-status-indicator.is-warn{color:var(--dsw-alias-state-warn-label,var(--dsw-alias-label-secondary,inherit))}
+.auriga-status-indicator.is-warn .auriga-status-indicator-dot{background:var(--dsw-alias-state-warn-primary,currentColor)}
+.auriga-status-indicator.is-error{color:var(--dsw-alias-state-error-label,var(--dsw-alias-state-error-primary,inherit))}
+.auriga-status-indicator.is-error .auriga-status-indicator-dot{background:var(--dsw-alias-state-error-primary,currentColor)}
+.auriga-status-indicator.is-idle{color:var(--dsw-alias-label-secondary,inherit)}
+.auriga-setting-switch{position:relative;width:40px;height:22px;padding:0;border:0;border-radius:999px;background:var(--dsw-alias-bg-layer-2,transparent);cursor:pointer;flex:none}
+.auriga-setting-switch::after{content:"";position:absolute;top:2px;inset-inline-start:2px;width:18px;height:18px;border-radius:50%;background:var(--dsw-alias-bg-layer-1,Canvas);transition:transform 150ms ease}
+.auriga-setting-switch[aria-checked=true]{background:var(--dsw-alias-state-business-primary,currentColor)}
+.auriga-setting-switch[aria-checked=true]::after{transform:translateX(18px)}
+.auriga-setting-select{position:relative;min-width:140px}
+.auriga-setting-select-trigger{box-sizing:border-box;display:inline-flex;align-items:center;justify-content:space-between;gap:8px;width:100%;min-width:140px;height:36px;padding:0 10px;border:1px solid var(--dsw-alias-border-l2,currentColor);border-radius:8px;background:var(--dsw-alias-bg-layer-1,transparent);color:inherit;font:inherit;cursor:pointer}
+.auriga-setting-select-menu{position:absolute;z-index:5;inset-inline-end:0;top:calc(100% + 4px);min-width:100%;padding:4px;border:1px solid var(--dsw-alias-border-l1,currentColor);border-radius:8px;background:var(--dsw-alias-bg-layer-2,var(--dsw-alias-bg-layer-1,Canvas))}
+.auriga-setting-select-option{display:block;width:100%;padding:8px 10px;border:0;border-radius:6px;background:transparent;color:inherit;font:inherit;text-align:start;cursor:pointer}
+.auriga-setting-select-option:hover,.auriga-setting-select-option[aria-selected=true],.auriga-setting-select-option.is-selected{background:var(--dsw-alias-interactive-bg-hover,transparent)}
+.auriga-setting-select.is-rich{min-width:220px}
+.auriga-setting-select-option.is-rich{display:flex;align-items:flex-start;justify-content:space-between;gap:10px}
+.auriga-setting-select-option-copy{min-width:0;display:flex;flex-direction:column;gap:2px}
+.auriga-setting-select-option-label{font-size:13px;line-height:1.3;color:var(--dsw-alias-label-primary,inherit)}
+.auriga-setting-select-option-desc{font-size:12px;line-height:1.35;color:var(--dsw-alias-label-secondary,inherit)}
+.auriga-setting-select-check{flex:none;margin-top:2px;color:var(--dsw-alias-state-business-primary,var(--dsw-alias-label-primary,inherit))}
+.auriga-consent-settings{display:flex;flex-direction:column;gap:0;min-width:0}
+.auriga-consent-settings>.auriga-settings-card{margin-bottom:24px}
+.auriga-consent-settings>.auriga-settings-card:last-child{margin-bottom:0}
+.auriga-consent-list-entry{display:flex;align-items:center;justify-content:space-between;gap:12px;min-height:44px;padding:0;border-bottom:1px solid var(--dsw-alias-border-l1,currentColor);cursor:pointer;list-style:none}
+.auriga-consent-list-entry:last-of-type{border-bottom:0}
+.auriga-consent-list-entry-meta{min-width:0;display:flex;flex-direction:column;gap:2px}
+.auriga-consent-list-entry-title{font-size:14px;font-weight:500;color:var(--dsw-alias-label-primary,inherit)}
+.auriga-consent-list-entry-count{font-size:12px;color:var(--dsw-alias-label-secondary,inherit)}
+.auriga-consent-list-panel{padding:8px 0 4px;display:flex;flex-direction:column;gap:0;max-height:320px;overflow:auto}
+.auriga-consent-member{display:flex;align-items:center;justify-content:space-between;gap:12px;min-height:44px;padding:6px 0;border-bottom:1px solid var(--dsw-alias-border-l1,currentColor)}
+.auriga-consent-member:last-child{border-bottom:0}
+.auriga-consent-member-copy{min-width:0;flex:1;display:flex;flex-direction:column;gap:2px}
+.auriga-consent-member-name{display:flex;align-items:baseline;gap:8px;min-width:0;flex-wrap:wrap}
+.auriga-consent-member-primary{font-size:14px;font-weight:500;color:var(--dsw-alias-label-primary,inherit)}
+.auriga-consent-member-secondary{font-size:12px;color:var(--dsw-alias-label-secondary,inherit)}
+.auriga-consent-member-desc{font-size:12px;color:var(--dsw-alias-label-secondary,inherit);overflow-wrap:anywhere}
+.auriga-consent-list-search{margin:0 0 8px}
+.auriga-setting-readonly{display:flex;align-items:center;gap:8px;max-width:100%}
+.auriga-setting-readonly-value-wrap{min-width:0;display:flex;align-items:center;justify-content:flex-end}
+.auriga-setting-readonly-value{color:var(--dsw-alias-label-primary,inherit);overflow-wrap:anywhere;text-align:end;font-size:14px;line-height:1.35}
+.auriga-setting-readonly-value.is-muted{color:var(--dsw-alias-label-tertiary,var(--dsw-alias-label-secondary,inherit))}
+.auriga-account-card{box-sizing:border-box;margin:0 0 24px;padding:16px 18px;border:1px solid var(--dsw-alias-border-l1,currentColor);border-radius:10px;background:var(--dsw-alias-bg-layer-2,var(--dsw-alias-bg-layer-1,transparent))}
+.auriga-account-card-header{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.auriga-account-card-profile{display:flex;align-items:center;gap:14px;min-width:0;flex:1}
+.auriga-account-avatar{flex:none;width:48px;height:48px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;background:var(--dsw-alias-bg-layer-1,transparent);color:var(--dsw-alias-label-primary,inherit);font-size:16px;font-weight:600}
+.auriga-account-card-identity{display:flex;align-items:center;gap:10px;min-width:0;flex-wrap:wrap}
+.auriga-account-card-name{font-size:20px;font-weight:600;line-height:1.2;overflow-wrap:normal}
+.auriga-account-card-empno{font-size:13px;line-height:1.2;color:var(--dsw-alias-label-secondary,inherit);white-space:nowrap}
+.auriga-account-card-refresh{flex:none;display:flex;align-items:center}
+.auriga-account-card-status{margin-top:14px;padding-top:4px;border-top:1px solid var(--dsw-alias-border-l1,currentColor)}
+.auriga-account-card-status .auriga-setting-row.is-status:last-child{border-bottom:0}
+.auriga-platform-card{box-sizing:border-box;margin:0 0 24px;padding:20px;border:1px solid var(--dsw-alias-border-l1,currentColor);border-radius:10px;background:var(--dsw-alias-bg-layer-2,var(--dsw-alias-bg-layer-1,transparent))}
+.auriga-platform-card-header{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:16px}
+.auriga-platform-card-brand{display:flex;align-items:center;gap:10px;min-width:0}
+.auriga-platform-card-icon{flex:none;color:var(--dsw-alias-label-secondary,inherit)}
+.auriga-platform-card-title{font-size:16px;font-weight:600;line-height:1.3;color:var(--dsw-alias-label-primary,inherit)}
+.auriga-platform-card-body{min-width:0}
+.auriga-platform-card-fields{display:flex;flex-direction:column;gap:14px}
+.auriga-platform-field{display:flex;flex-direction:column;gap:6px;min-width:0}
+.auriga-platform-field-label{font-size:12px;line-height:1.3;color:var(--dsw-alias-label-secondary,inherit)}
+.auriga-platform-address{position:relative;display:flex;align-items:center}
+.auriga-platform-address-icon{position:absolute;inset-inline-start:12px;z-index:1;color:var(--dsw-alias-label-secondary,inherit);pointer-events:none}
+.auriga-platform-address .auriga-setting-input{padding-inline-start:36px}
+.auriga-platform-card-actions{display:flex;align-items:center;justify-content:flex-end;flex-wrap:wrap;gap:8px;margin-top:16px}
+.auriga-platform-card .auriga-setting-status{margin:12px 0 0}
+.auriga-settings-card{box-sizing:border-box;margin:0 0 24px;padding:20px;border:1px solid var(--dsw-alias-border-l1,currentColor);border-radius:10px;background:var(--dsw-alias-bg-layer-2,var(--dsw-alias-bg-layer-1,transparent))}
+.auriga-settings-card-header{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:8px}
+.auriga-settings-card-header>.auriga-setting-action,.auriga-settings-card-header>.auriga-status-indicator{flex:none;margin-top:0}
+.auriga-settings-card-brand{display:flex;align-items:flex-start;gap:10px;min-width:0;flex:1}
+.auriga-settings-card-icon{flex:none;margin-top:2px;color:var(--dsw-alias-label-secondary,inherit)}
+.auriga-settings-card-copy{min-width:0;display:flex;flex-direction:column;gap:2px}
+.auriga-settings-card-title{font-size:16px;font-weight:600;line-height:1.3;color:var(--dsw-alias-label-primary,inherit)}
+.auriga-settings-card-desc{margin:0;font-size:12px;line-height:1.45;color:var(--dsw-alias-label-secondary,inherit)}
+.auriga-settings-card-header+.auriga-settings-card-body{margin-top:8px}
+.auriga-settings-card-body{min-width:0;display:flex;flex-direction:column;gap:0}
+.auriga-settings-card-body>.auriga-setting-row:last-child{border-bottom:0}
+.auriga-settings-card-group{display:flex;flex-direction:column;gap:6px;margin-top:16px;min-width:0}
+.auriga-settings-card-group-label{font-size:14px;font-weight:500;color:var(--dsw-alias-label-secondary,inherit)}
+.auriga-settings-card-group-hint{font-size:12px;line-height:1.4;color:var(--dsw-alias-label-tertiary,var(--dsw-alias-label-secondary,inherit))}
+.auriga-settings-card-group-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:16px;margin-bottom:8px}
+.auriga-settings-card-group-head .auriga-settings-card-group-label{margin:0}
+.auriga-settings-card-empty{margin:0;padding:12px 0;font-size:12px;color:var(--dsw-alias-label-secondary,inherit)}
+.auriga-settings-card .auriga-setting-status{margin:12px 0 0}
+.auriga-settings-card-footer{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-top:16px}
+.auriga-settings-card-footer-left{min-width:0;flex:1;font-size:12px;color:var(--dsw-alias-label-secondary,inherit)}
+.auriga-settings-card-actions{display:flex;align-items:center;justify-content:flex-end;flex-wrap:wrap;gap:8px;margin-inline-start:auto}
+.auriga-proxy-rules{display:flex;flex-direction:column;gap:0;min-width:0}
+.auriga-proxy-rule{display:grid;grid-template-columns:auto minmax(0,1.2fr) minmax(100px,0.8fr) minmax(0,1fr) auto auto auto;gap:6px;align-items:center;padding:8px 0;border-bottom:1px solid var(--dsw-alias-border-l1,currentColor)}
+.auriga-proxy-rule:last-child{border-bottom:0}
+.auriga-proxy-rule .auriga-setting-input{min-width:0;height:32px}
+.auriga-proxy-rule .auriga-setting-select{min-width:100px}
+.auriga-proxy-rule .auriga-setting-select-trigger{height:32px;min-width:100px}
+.auriga-proxy-test-row{display:flex;align-items:center;gap:8px;min-width:0}
+.auriga-proxy-test-row .auriga-setting-input{flex:1;min-width:0}
+.auriga-proxy-test-row .auriga-setting-action{flex:none;min-width:96px}
+.auriga-proxy-test-result{margin-top:12px;display:flex;flex-direction:column;gap:6px;min-width:0}
+.auriga-proxy-test-result-detail{margin:0;font-size:12px;line-height:1.45;color:var(--dsw-alias-label-secondary,inherit);overflow-wrap:anywhere}
+.auriga-desktop-summary-card{box-sizing:border-box;margin:0 0 24px;padding:20px;border:1px solid var(--dsw-alias-border-l1,currentColor);border-radius:10px;background:var(--dsw-alias-bg-layer-2,var(--dsw-alias-bg-layer-1,transparent))}
+.auriga-desktop-summary-header{display:flex;align-items:center;justify-content:space-between;gap:16px}
+.auriga-desktop-summary-brand{display:flex;align-items:center;gap:14px;min-width:0;flex:1}
+.auriga-desktop-summary-logo{flex:none;border-radius:12px}
+.auriga-desktop-summary-copy{min-width:0;display:flex;flex-direction:column;gap:4px}
+.auriga-desktop-summary-title{font-size:20px;font-weight:600;line-height:1.2;color:var(--dsw-alias-label-primary,inherit)}
+.auriga-desktop-summary-version{font-size:13px;line-height:1.3;color:var(--dsw-alias-label-secondary,inherit)}
+.auriga-desktop-summary-action{flex:none;display:flex;align-items:center}
+.auriga-desktop-summary-body{margin-top:16px;display:flex;flex-direction:column;gap:10px;min-width:0}
+.auriga-desktop-summary-body .auriga-setting-status{margin:0}
+.auriga-desktop-progress-meta{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
+.auriga-setting-progress{display:grid;gap:8px;margin:0;font-size:12px;color:var(--dsw-alias-label-secondary,inherit)}
+.auriga-setting-progress progress{width:100%;height:6px}
 .auriga-setting{padding:14px 0;border-bottom:1px solid var(--dsw-alias-border-l1,currentColor);display:flex;align-items:center;gap:12px;flex-wrap:wrap}
 .auriga-setting>span:first-child{flex:1}.auriga-setting-value{color:var(--dsw-alias-label-secondary,inherit);overflow-wrap:anywhere}
-.auriga-settings-content{width:100%;display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,400px),1fr));gap:16px;align-items:start;padding-bottom:24px}.auriga-settings-content>section,.auriga-settings-content>details{border:1px solid var(--dsw-alias-border-l2,currentColor);border-radius:12px;padding:16px 20px;background:var(--dsw-alias-bg-layer-1,transparent);min-width:0}.auriga-settings-content>.auriga-status-card,.auriga-settings-content>details,.auriga-settings-content>p{grid-column:1/-1}.auriga-settings-content>p{margin:0}.auriga-settings-content h3{margin:0 0 4px;font-size:15px}.auriga-settings-content .auriga-setting{padding:10px 0}.auriga-settings-content .auriga-setting:last-of-type{border-bottom:0}.auriga-setting select{font:inherit;color:inherit;background:var(--dsw-alias-bg-layer-1,transparent);border:1px solid var(--dsw-alias-border-l2,currentColor);border-radius:6px;padding:4px 8px}.auriga-setting input[type=checkbox]{flex:none;min-width:auto}.auriga-status-card{border:1px solid var(--dsw-alias-border-l2,currentColor);border-radius:10px;padding:16px;display:flex;align-items:center;gap:12px;flex-wrap:wrap}.auriga-status-card p:first-child{font-size:14px;font-weight:600;flex:1;min-width:220px;color:inherit}.auriga-status-card p{margin:0}.auriga-status-card p+ p{flex-basis:100%;order:2}.auriga-setting-actions{display:flex;gap:8px;margin:12px 0}.auriga-setting input{font:inherit;color:inherit;background:var(--dsw-alias-bg-layer-1,transparent);border:1px solid var(--dsw-alias-border-l2,currentColor);border-radius:6px;padding:8px;min-width:0;flex:2}.auriga-settings details{display:block}.auriga-settings summary{cursor:pointer}.auriga-settings details p{margin-bottom:0}
+.auriga-settings-content{width:100%}
+.auriga-status-card{border:1px solid var(--dsw-alias-border-l2,currentColor);border-radius:10px;padding:16px;display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.auriga-status-card p:first-child{font-size:14px;font-weight:600;flex:1;min-width:220px;color:inherit}.auriga-status-card p{margin:0}.auriga-status-card p+ p{flex-basis:100%;order:2}
 .auriga-consent{padding:16px 0;min-width:0;overflow:auto}
+.auriga-consent.auriga-consent-settings{padding:0}
 .auriga-consent article{padding:16px 0;border-bottom:1px solid var(--dsw-alias-border-l1,currentColor)}
 .auriga-consent pre{white-space:pre-wrap;overflow-wrap:anywhere;font:inherit;max-height:12em;overflow:auto;unicode-bidi:plaintext}
 .auriga-consent select{font:inherit;max-width:100%;padding:6px 9px;border:1px solid var(--dsw-alias-border-l2,currentColor);border-radius:6px;background:var(--dsw-alias-bg-layer-1,transparent);color:var(--dsw-alias-label-primary,inherit)}
 .auriga-consent select:focus-visible{outline:2px solid var(--dsw-alias-label-secondary,currentColor)}
 .auriga-consent-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
 .auriga-consent p{overflow-wrap:anywhere}.auriga-consent small{color:var(--dsw-alias-label-secondary,inherit)}
-.auriga-app{height:100%;display:flex;flex-direction:column;gap:12px;padding:20px 24px 0;overflow:auto}
-.auriga-banner{display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:8px 12px;border-radius:8px;background:var(--dsw-alias-bg-layer-2,transparent);font-size:13px}
+.auriga-consent-list>summary{list-style:none}
+.auriga-consent-list>summary::-webkit-details-marker{display:none}
+.auriga-app{height:100%;display:flex;flex-direction:row;gap:0;padding:0;overflow:hidden;min-height:0}
+.auriga-activity-bar{box-sizing:border-box;flex:none;width:64px;height:100%;min-height:0;display:flex;flex-direction:column;padding:8px 6px;border-inline-end:1px solid var(--dsw-alias-border-l1,currentColor);background:var(--dsw-alias-bg-layer-1,transparent);transition:width 180ms ease;overflow:hidden}
+.auriga-app[data-nav-expanded=true] .auriga-activity-bar{width:176px}
+.auriga-activity-bar-top{flex:1;min-height:0;overflow-x:hidden;overflow-y:auto;display:flex;flex-direction:column;gap:4px}
+.auriga-activity-bar-bottom{flex:none;display:flex;flex-direction:column;gap:4px;margin-top:8px;padding-top:8px;border-top:1px solid var(--dsw-alias-border-l1,currentColor)}
+.auriga-nav-toggle,.auriga-nav-item{box-sizing:border-box;display:flex;align-items:center;justify-content:center;width:100%;margin:0;padding:0;border:0;border-radius:8px;background:transparent;color:var(--dsw-alias-label-secondary,inherit);font:inherit;cursor:pointer;transition:background-color 150ms ease,color 150ms ease}
+.auriga-nav-toggle{flex:none;height:36px;margin-bottom:4px;gap:8px}
+.auriga-app[data-nav-expanded=true] .auriga-nav-toggle{justify-content:flex-start;padding:0 10px}
+.auriga-nav-item{position:relative;flex-direction:column;gap:4px;min-height:52px;padding:8px 4px;text-align:center}
+.auriga-app[data-nav-expanded=true] .auriga-nav-item{flex-direction:row;justify-content:flex-start;gap:10px;min-height:36px;height:36px;padding:0 10px;text-align:start}
+.auriga-nav-item:hover,.auriga-nav-toggle:hover{background:var(--dsw-alias-interactive-bg-hover,transparent);color:var(--dsw-alias-label-primary,inherit)}
+.auriga-nav-item[aria-current=page]{background:var(--dsw-alias-bg-layer-2,transparent);color:var(--dsw-alias-state-business-primary,var(--dsw-alias-label-primary,inherit))}
+.auriga-nav-item[aria-current=page] .auriga-nav-label{color:inherit;font-weight:600}
+.auriga-nav-item:disabled{opacity:.45;cursor:default}
+.auriga-nav-icon{display:inline-flex;flex:none;width:20px;height:20px;align-items:center;justify-content:center}
+.auriga-nav-label{display:block;min-width:0;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px;line-height:1.2;color:inherit}
+.auriga-app[data-nav-expanded=true] .auriga-nav-label{font-size:13px;line-height:1.3}
+.auriga-nav-badge{position:absolute;top:4px;inset-inline-end:4px;min-width:16px;height:16px;padding:0 4px;border-radius:8px;background:var(--dsw-alias-state-business-primary,currentColor);color:var(--dsw-alias-bg-layer-1,Canvas);font-size:10px;line-height:16px;font-weight:600}
+.auriga-app[data-nav-expanded=true] .auriga-nav-badge{position:static;margin-inline-start:auto}
+.auriga-main{flex:1;min-width:0;min-height:0;display:flex;flex-direction:column;overflow:hidden}
+.auriga-main-body{flex:1;min-height:0;min-width:0;display:flex;flex-direction:column;overflow:hidden;padding:20px 24px 0}
+.auriga-banner{display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:8px 12px;border-radius:8px;background:var(--dsw-alias-bg-layer-2,transparent);font-size:13px;flex:none;margin:12px 24px 0}
+.auriga-main>.auriga-banner{margin-inline:24px}
 .auriga-tabs-scroll{box-sizing:border-box;flex:none;min-width:0;width:100%;overflow-x:auto}
 .auriga-tabs{box-sizing:border-box;min-width:max-content;width:100%;white-space:nowrap}
 .auriga-tabs button{flex:none;white-space:nowrap}
 .auriga-tabs-fallback{display:flex;gap:4px;border-bottom:1px solid var(--dsw-alias-border-l1,currentColor)}
 .auriga-tabs-fallback>button{font:inherit;cursor:pointer;border:0;border-bottom:2px solid transparent;border-radius:0;background:transparent;padding:8px 12px;color:var(--dsw-alias-label-secondary,inherit);white-space:nowrap}
 .auriga-tabs-fallback>button[aria-selected=true]{color:var(--dsw-alias-label-primary,inherit);border-bottom-color:var(--dsw-alias-state-business-primary,currentColor);font-weight:600}
-.auriga-tabpanel{min-width:0}.auriga-tabpanel[hidden],.auriga-tabpanel>auriga-team-panel[hidden]{display:none}
+.auriga-tabpanel{min-width:0;min-height:0;flex:1;overflow:auto}.auriga-tabpanel[hidden],.auriga-tabpanel>auriga-team-panel[hidden]{display:none!important}
+.auriga-tabpanel:has(>auriga-team-panel):not([hidden]){display:flex;flex-direction:column;overflow:hidden}
+.auriga-tabpanel>auriga-team-panel{flex:1;min-height:0}
+.auriga-overview{box-sizing:border-box;height:100%;min-height:0;overflow:auto;padding:24px 28px 32px}
+.auriga-overview-inner{box-sizing:border-box;width:100%;max-width:1200px;margin:0;display:flex;flex-direction:column;gap:24px}
+.auriga-overview-welcome{display:flex;align-items:center;justify-content:space-between;gap:16px;min-width:0}
+.auriga-overview-welcome-copy{min-width:0;flex:1}
+.auriga-overview-welcome-title{margin:0;font-size:28px;font-weight:650;letter-spacing:-.02em;line-height:1.25;color:var(--dsw-alias-label-primary,inherit)}
+.auriga-overview-welcome-tagline{margin:8px 0 0;font-size:14px;line-height:1.5;color:var(--dsw-alias-label-secondary,inherit)}
+.auriga-overview-welcome-avatar{flex:none;width:48px;height:48px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;background:var(--dsw-alias-bg-layer-2,transparent);color:var(--dsw-alias-label-primary,inherit);font-size:18px;font-weight:600}
+.auriga-overview-status{display:flex;flex-direction:column;gap:12px;min-width:0}
+.auriga-overview-status-row{display:flex;flex-wrap:wrap;align-items:center;gap:8px 20px;min-width:0}
+.auriga-overview-status-item{display:inline-flex;align-items:center;gap:8px;min-width:0}
+.auriga-overview-status-dot{flex:none;width:7px;height:7px;border-radius:50%;background:var(--dsw-alias-label-tertiary,currentColor)}
+.auriga-overview-status-dot.is-success{background:var(--dsw-alias-state-success-primary,#5f8f6a)}
+.auriga-overview-status-dot.is-processing,.auriga-overview-status-dot.is-warn{background:var(--dsw-alias-state-warn-primary,currentColor)}
+.auriga-overview-status-dot.is-error{background:var(--dsw-alias-state-error-primary,currentColor)}
+.auriga-overview-status-dot.is-idle{background:var(--dsw-alias-label-tertiary,currentColor)}
+.auriga-overview-status-copy{min-width:0;display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 8px}
+.auriga-overview-status-label{font-size:13px;color:var(--dsw-alias-label-secondary,inherit)}
+.auriga-overview-status-detail{font-size:13px;color:var(--dsw-alias-label-primary,inherit)}
+.auriga-overview-status-alert{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:12px;padding:12px 14px;border:1px solid var(--dsw-alias-border-l1,currentColor);border-radius:10px;background:var(--dsw-alias-bg-layer-2,transparent)}
+.auriga-overview-status-alert p{margin:0;font-size:13px;line-height:1.5;color:var(--dsw-alias-label-secondary,inherit)}
+.auriga-overview-status-actions{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
+.auriga-overview-notifications{display:flex;flex-direction:column;gap:8px}
+.auriga-overview-notice{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 14px;border:1px solid var(--dsw-alias-border-l1,currentColor);border-radius:10px;background:var(--dsw-alias-bg-layer-2,transparent)}
+.auriga-overview-notice-copy{min-width:0;display:flex;flex-wrap:wrap;align-items:baseline;gap:6px 10px;font-size:13px;line-height:1.45;color:var(--dsw-alias-label-secondary,inherit)}
+.auriga-overview-notice-copy strong{font-weight:600;color:var(--dsw-alias-label-primary,inherit)}
+.auriga-overview-notice-action{flex:none;margin-inline-start:auto}
+.auriga-overview-section-title{margin:0;font-size:16px;font-weight:600;line-height:1.3;color:var(--dsw-alias-label-primary,inherit)}
+.auriga-overview-capabilities{display:flex;flex-direction:column;gap:14px;min-width:0}
+.auriga-overview-capability-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,220px),1fr));gap:12px}
+.auriga-overview-capability{box-sizing:border-box;display:flex;flex-direction:column;gap:10px;min-height:132px;padding:16px;border:1px solid var(--dsw-alias-border-l1,currentColor);border-radius:12px;background:var(--dsw-alias-bg-layer-2,var(--dsw-alias-bg-layer-1,transparent));color:inherit;font:inherit;text-align:start;cursor:pointer}
+.auriga-overview-capability:hover{border-color:var(--dsw-alias-border-l2,currentColor);background:var(--dsw-alias-interactive-bg-hover,var(--dsw-alias-bg-layer-2,transparent))}
+.auriga-overview-capability-top{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}
+.auriga-overview-capability-icon{flex:none;color:var(--dsw-alias-label-secondary,inherit)}
+.auriga-overview-capability-arrow{flex:none;color:var(--dsw-alias-label-tertiary,var(--dsw-alias-label-secondary,inherit))}
+.auriga-overview-capability-title{font-size:15px;font-weight:600;line-height:1.3;color:var(--dsw-alias-label-primary,inherit)}
+.auriga-overview-capability-desc{margin:0;font-size:13px;line-height:1.45;color:var(--dsw-alias-label-secondary,inherit)}
+.auriga-overview-activity{display:flex;flex-direction:column;gap:12px;min-width:0}
+.auriga-overview-activity-head{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.auriga-overview-more{border:0;background:transparent;color:var(--dsw-alias-state-business-primary,inherit);font:inherit;font-size:13px;cursor:pointer;padding:0}
+.auriga-overview-activity-list{list-style:none;margin:0;padding:0;border:1px solid var(--dsw-alias-border-l1,currentColor);border-radius:12px;background:var(--dsw-alias-bg-layer-2,transparent);overflow:hidden}
+.auriga-overview-activity-row{box-sizing:border-box;display:flex;align-items:center;gap:12px;width:100%;padding:12px 14px;border:0;border-bottom:1px solid var(--dsw-alias-border-l1,currentColor);background:transparent;color:inherit;font:inherit;text-align:start;cursor:pointer}
+.auriga-overview-activity-list>li:last-child .auriga-overview-activity-row{border-bottom:0}
+.auriga-overview-activity-row:hover{background:var(--dsw-alias-interactive-bg-hover,transparent)}
+.auriga-overview-activity-icon{flex:none;width:32px;height:32px;border-radius:9px;display:inline-flex;align-items:center;justify-content:center;background:var(--dsw-alias-interactive-bg-hover,transparent);color:var(--dsw-alias-state-business-primary,inherit);font-size:12px;font-weight:600}
+.auriga-overview-activity-copy{min-width:0;flex:1}
+.auriga-overview-activity-title{font-size:14px;font-weight:500;color:var(--dsw-alias-label-primary,inherit);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.auriga-overview-activity-meta{margin-top:2px;font-size:12px;color:var(--dsw-alias-label-secondary,inherit);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .auriga-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,320px),1fr));gap:16px;width:100%;padding-bottom:24px}
 .auriga-card{border:1px solid var(--dsw-alias-border-l2,currentColor);border-radius:12px;padding:18px 20px;display:flex;flex-direction:column;gap:10px;min-width:0;background:var(--dsw-alias-bg-layer-1,transparent)}
 .auriga-card header{display:flex;align-items:center;justify-content:space-between;gap:8px}
@@ -577,7 +934,11 @@ window.__ModuleLoader__.load({
 .auriga-brand-name{display:inline-flex;align-items:baseline;gap:5px;font-size:16px;font-weight:700;letter-spacing:.02em;color:var(--dsw-alias-label-primary,inherit);white-space:nowrap}.auriga-brand-suffix{font-size:11px;font-weight:600;letter-spacing:.12em;color:var(--dsw-alias-label-secondary,inherit)}
 .auriga-launcher-root{flex:1;min-width:0;position:relative}.auriga-launcher-anchor{width:100%}.auriga-launcher-trigger{user-select:none;display:flex;align-items:center;width:100%;height:44px;gap:8px;padding:6px;border:0;border-radius:var(--dsw-radius-md,8px);background:transparent;color:var(--dsw-alias-label-primary,inherit);font:inherit;font-size:14px;cursor:pointer;text-align:left}.auriga-launcher-trigger[data-collapsed="true"]{box-sizing:border-box;width:36px;height:36px;justify-content:center;gap:0;padding:0}.auriga-launcher-trigger:hover{background:var(--dsw-alias-interactive-bg-hover,rgba(128,128,128,.12))}.auriga-launcher-trigger[data-signed-out="true"]:not([data-collapsed="true"]){height:36px;padding:6px}.auriga-launcher-avatar{display:inline-flex;align-items:center;justify-content:center;flex:none;width:24px;height:24px;border-radius:50%;background:var(--dsw-alias-brand-primary,#1f6feb);color:#fff;font-size:12px;font-weight:600;line-height:1;overflow:hidden}.auriga-launcher-avatar[data-signed-out="true"]{background:var(--dsw-alias-bg-skeleton,rgba(128,128,128,.18));color:var(--dsw-alias-label-secondary,inherit)}.auriga-launcher-text{display:flex;flex-direction:row;align-items:baseline;gap:8px;min-width:0;flex:1;line-height:1.25}.auriga-launcher-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px;font-weight:500}.auriga-launcher-sub{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:none;font-size:12px;font-weight:400;color:var(--dsw-alias-label-primary,inherit);opacity:.82}.auriga-launcher-fallback-menu{position:absolute;left:0;bottom:calc(100% + 6px);min-width:168px;padding:4px;border-radius:var(--dsw-radius-md,8px);border:1px solid var(--dsw-alias-border-primary,rgba(128,128,128,.22));background:var(--dsw-alias-bg-elevated,#fff);box-shadow:0 8px 24px rgba(0,0,0,.16);z-index:100;display:flex;flex-direction:column;gap:2px}.auriga-launcher-fallback-item{display:flex;align-items:center;gap:8px;width:100%;padding:8px 10px;border:0;border-radius:6px;background:transparent;color:var(--dsw-alias-label-primary,inherit);font:inherit;font-size:13px;cursor:pointer;text-align:left}.auriga-launcher-fallback-item:hover{background:var(--dsw-alias-interactive-bg-hover,rgba(128,128,128,.12))}
 .auriga-tools{margin:0;padding-left:18px;font-size:13px;display:grid;gap:4px}
-.auriga-app>.auriga-settings,.auriga-tabpanel .auriga-settings{padding-top:0}
+.auriga-app>.auriga-settings,.auriga-tabpanel .auriga-settings{padding:0;height:100%;min-height:0}
+.auriga-tabpanel:has(>.auriga-settings):not([hidden]){overflow:hidden;display:flex;flex-direction:column}
+.auriga-tabpanel>.auriga-settings{flex:1;min-height:0}
+.auriga-tabpanel:has(>.auriga-overview):not([hidden]){overflow:hidden;display:flex;flex-direction:column;padding:0}
+.auriga-tabpanel>.auriga-overview{flex:1;min-height:0}
 
 .auriga-platform-login-dialog{width:min(544px,calc(100vw - 32px));max-width:calc(100vw - 32px)}
 .auriga-login-content{display:flex;flex-direction:column;gap:20px;min-width:0}
@@ -1562,6 +1923,11 @@ window.__ModuleLoader__.load({
           const [status, setStatus] = React.useState('checking');
           const [revision, reload] = React.useReducer((n) => n + 1, 0);
           const [scopes, setScopes] = React.useState({});
+          const [listQuery, setListQuery] = React.useState({
+            allow_source: '',
+            block: '',
+          });
+          const [openSelect, setOpenSelect] = React.useState('');
           const active = React.useRef(false);
           const busy = React.useRef(false);
           const generation = React.useRef(0);
@@ -1571,6 +1937,7 @@ window.__ModuleLoader__.load({
             let current = true;
             setView(null);
             setStatus('checking');
+            setOpenSelect('');
             if (api) {
               Promise.resolve()
                 .then(() => readSnapshot())
@@ -1591,6 +1958,17 @@ window.__ModuleLoader__.load({
               active.current = false;
             };
           }, [api, revision]);
+          React.useEffect(() => {
+            if (!openSelect) return;
+            const close = () => setOpenSelect('');
+            const timer = setTimeout(() => {
+              document.addEventListener('click', close);
+            }, 0);
+            return () => {
+              clearTimeout(timer);
+              document.removeEventListener('click', close);
+            };
+          }, [openSelect]);
           const change = async (operation) => {
             if (busy.current || !active.current) return;
             const attempt = generation.current;
@@ -1623,6 +2001,428 @@ window.__ModuleLoader__.load({
             );
           const sourceName = (source) =>
             `${source.realm}.${source.node} / ${source.userId}`;
+          const memberPrimary = (source) => {
+            for (const key of ['displayName', 'name', 'userId']) {
+              const value = source?.[key];
+              if (typeof value === 'string' && value.trim()) return value.trim();
+            }
+            return '';
+          };
+          const memberSecondary = (source) => {
+            for (const key of ['empNo', 'employeeNo']) {
+              const value = source?.[key];
+              if (typeof value === 'string' && value.trim()) return value.trim();
+            }
+            const node = [source?.realm, source?.node]
+              .filter((v) => typeof v === 'string' && v.trim())
+              .join('.');
+            return node;
+          };
+          const memberDepartment = (source) => {
+            const value = source?.department;
+            return typeof value === 'string' && value.trim() ? value.trim() : '';
+          };
+          const modeOptions = [
+            'ask_each',
+            'same_org',
+            'allowlist',
+            'deny_all',
+          ].map((mode) => ({
+            value: mode,
+            label: t(mode),
+            description: t(mode + 'Hint'),
+          }));
+          const iconSvg = (paths, size = 18) =>
+            h(
+              'svg',
+              {
+                width: size,
+                height: size,
+                viewBox: '0 0 24 24',
+                fill: 'none',
+                stroke: 'currentColor',
+                strokeWidth: 1.8,
+                strokeLinecap: 'round',
+                strokeLinejoin: 'round',
+                'aria-hidden': true,
+                className: 'auriga-settings-card-icon',
+              },
+              ...paths.map((d, i) => h('path', { key: i, d })),
+            );
+          const settingsContent =
+            status === 'ready' &&
+            h(
+              React.Fragment,
+              null,
+              h(
+                'section',
+                { className: 'auriga-settings-card' },
+                h(
+                  'div',
+                  { className: 'auriga-settings-card-header' },
+                  h(
+                    'div',
+                    { className: 'auriga-settings-card-brand' },
+                    iconSvg([
+                      'M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z',
+                      'm9 12 2 2 4-4',
+                    ]),
+                    h(
+                      'span',
+                      { className: 'auriga-settings-card-title' },
+                      t('defaultPolicy'),
+                    ),
+                  ),
+                  h(
+                    'button',
+                    {
+                      type: 'button',
+                      className: 'auriga-setting-action is-quiet is-compact',
+                      onClick: () => reload(),
+                    },
+                    t('refresh'),
+                  ),
+                ),
+                h(
+                  'div',
+                  { className: 'auriga-settings-card-body' },
+                  ...['conversation', 'execution'].map((layer) => {
+                    const locked = view.organization[layer] !== 'allow';
+                    const value = locked
+                      ? view.organization[layer]
+                      : view.defaults[layer];
+                    return h(
+                      'div',
+                      { key: layer },
+                      h(
+                        'div',
+                        { className: 'auriga-setting-row' },
+                        h(
+                          'div',
+                          { className: 'auriga-setting-row-meta' },
+                          h(
+                            'div',
+                            { className: 'auriga-setting-row-copy' },
+                            h(
+                              'div',
+                              { className: 'auriga-setting-row-label' },
+                              layerName(layer),
+                            ),
+                            h(
+                              'div',
+                              { className: 'auriga-setting-row-desc' },
+                              t(
+                                layer === 'conversation'
+                                  ? 'conversationLayerHint'
+                                  : 'executionLayerHint',
+                              ),
+                            ),
+                          ),
+                        ),
+                        h(
+                          'div',
+                          { className: 'auriga-setting-row-control' },
+                          (() => {
+                            const open = openSelect === layer;
+                            const selected =
+                              modeOptions.find((o) => o.value === value) ??
+                              modeOptions[0];
+                            return h(
+                              'div',
+                              {
+                                className:
+                                  'auriga-setting-select is-rich' +
+                                  (open ? ' is-open' : ''),
+                              },
+                              h(
+                                'button',
+                                {
+                                  type: 'button',
+                                  className: 'auriga-setting-select-trigger',
+                                  'aria-label': layerName(layer),
+                                  'aria-haspopup': 'listbox',
+                                  'aria-expanded': open,
+                                  disabled: !!locked,
+                                  onClick: (event) => {
+                                    event.stopPropagation();
+                                    if (!locked)
+                                      setOpenSelect(open ? '' : layer);
+                                  },
+                                },
+                                selected?.label ?? value ?? '',
+                                h(
+                                  'span',
+                                  {
+                                    className: 'auriga-setting-select-chevron',
+                                    'aria-hidden': true,
+                                  },
+                                  '▾',
+                                ),
+                              ),
+                              open &&
+                                h(
+                                  'div',
+                                  {
+                                    className: 'auriga-setting-select-menu',
+                                    role: 'listbox',
+                                  },
+                                  ...modeOptions.map((option) => {
+                                    const active = option.value === value;
+                                    return h(
+                                      'button',
+                                      {
+                                        key: option.value,
+                                        type: 'button',
+                                        role: 'option',
+                                        className:
+                                          'auriga-setting-select-option is-rich' +
+                                          (active ? ' is-selected' : ''),
+                                        'aria-selected': active,
+                                        onClick: (event) => {
+                                          event.stopPropagation();
+                                          setOpenSelect('');
+                                          if (option.value !== value && !locked)
+                                            return change(() =>
+                                              api.setDefault(
+                                                layer,
+                                                option.value,
+                                              ),
+                                            );
+                                        },
+                                      },
+                                      h(
+                                        'span',
+                                        {
+                                          className:
+                                            'auriga-setting-select-option-copy',
+                                        },
+                                        h(
+                                          'span',
+                                          {
+                                            className:
+                                              'auriga-setting-select-option-label',
+                                          },
+                                          option.label,
+                                        ),
+                                        option.description
+                                          ? h(
+                                              'span',
+                                              {
+                                                className:
+                                                  'auriga-setting-select-option-desc',
+                                              },
+                                              option.description,
+                                            )
+                                          : null,
+                                      ),
+                                      active
+                                        ? h(
+                                            'svg',
+                                            {
+                                              className:
+                                                'auriga-setting-select-check',
+                                              width: 14,
+                                              height: 14,
+                                              viewBox: '0 0 24 24',
+                                              fill: 'none',
+                                              stroke: 'currentColor',
+                                              strokeWidth: 1.8,
+                                              strokeLinecap: 'round',
+                                              strokeLinejoin: 'round',
+                                              'aria-hidden': true,
+                                            },
+                                            h('path', {
+                                              d: 'M20 6 9 17l-5-5',
+                                            }),
+                                          )
+                                        : null,
+                                    );
+                                  }),
+                                ),
+                            );
+                          })(),
+                        ),
+                      ),
+                      locked &&
+                        h(
+                          'p',
+                          { className: 'auriga-settings-card-group-hint' },
+                          t('locked') + view.organization.revision,
+                        ),
+                    );
+                  }),
+                ),
+              ),
+              h(
+                'section',
+                { className: 'auriga-settings-card' },
+                h(
+                  'div',
+                  { className: 'auriga-settings-card-header' },
+                  h(
+                    'div',
+                    { className: 'auriga-settings-card-brand' },
+                    iconSvg([
+                      'm3 17 2 2 4-4',
+                      'm3 7 2 2 4-4',
+                      'M13 6h8',
+                      'M13 12h8',
+                      'M13 18h8',
+                    ]),
+                    h(
+                      'span',
+                      { className: 'auriga-settings-card-title' },
+                      t('allowLists'),
+                    ),
+                  ),
+                ),
+                h(
+                  'div',
+                  { className: 'auriga-settings-card-body' },
+                  ...['allow_source', 'block'].map((choice) => {
+                    const rules = view.rules.filter(
+                      (rule) => rule.choice === choice,
+                    );
+                    const query = (listQuery[choice] || '').trim().toLowerCase();
+                    const visible = query
+                      ? rules.filter((rule) => {
+                          const hay = [
+                            memberPrimary(rule.source),
+                            memberSecondary(rule.source),
+                            memberDepartment(rule.source),
+                            sourceName(rule.source),
+                            layerName(rule.layer),
+                            t(rule.scope),
+                          ]
+                            .filter(Boolean)
+                            .join(' ')
+                            .toLowerCase();
+                          return hay.includes(query);
+                        })
+                      : rules;
+                    return h(
+                      'details',
+                      { key: choice, className: 'auriga-consent-list' },
+                      h(
+                        'summary',
+                        { className: 'auriga-consent-list-entry' },
+                        h(
+                          'div',
+                          { className: 'auriga-consent-list-entry-meta' },
+                          h(
+                            'div',
+                            { className: 'auriga-consent-list-entry-title' },
+                            t(choice === 'block' ? 'blocked' : 'persistent'),
+                          ),
+                          h(
+                            'div',
+                            { className: 'auriga-consent-list-entry-count' },
+                            `${rules.length} ${t('listCount')}`,
+                          ),
+                        ),
+                        h(
+                          'span',
+                          { className: 'auriga-consent-list-entry-count' },
+                          t('listOpen'),
+                        ),
+                      ),
+                      h(
+                        'div',
+                        { className: 'auriga-consent-list-panel' },
+                        rules.length > 8 &&
+                          h('input', {
+                            className:
+                              'auriga-setting-input auriga-consent-list-search',
+                            'aria-label': t('listSearch'),
+                            placeholder: t('listSearch'),
+                            value: listQuery[choice] || '',
+                            onChange: (event) =>
+                              setListQuery((old) => ({
+                                ...old,
+                                [choice]: event.target.value,
+                              })),
+                          }),
+                        rules.length === 0 &&
+                          h(
+                            'p',
+                            { className: 'auriga-settings-card-empty' },
+                            t('noRules'),
+                          ),
+                        ...visible.map((rule) => {
+                          const primary = memberPrimary(rule.source);
+                          const secondary = memberSecondary(rule.source);
+                          const department = memberDepartment(rule.source);
+                          return h(
+                            'div',
+                            {
+                              key: rule.id,
+                              className: 'auriga-consent-member',
+                            },
+                            h(
+                              'div',
+                              { className: 'auriga-consent-member-copy' },
+                              h(
+                                'div',
+                                { className: 'auriga-consent-member-name' },
+                                h(
+                                  'span',
+                                  {
+                                    className: 'auriga-consent-member-primary',
+                                  },
+                                  primary || sourceName(rule.source),
+                                ),
+                                secondary
+                                  ? h(
+                                      'span',
+                                      {
+                                        className:
+                                          'auriga-consent-member-secondary',
+                                      },
+                                      secondary,
+                                    )
+                                  : null,
+                              ),
+                              h(
+                                'div',
+                                { className: 'auriga-consent-member-desc' },
+                                [
+                                  layerName(rule.layer),
+                                  t(rule.scope),
+                                  department,
+                                ]
+                                  .filter(Boolean)
+                                  .join(' · '),
+                              ),
+                            ),
+                            h(
+                              'button',
+                              {
+                                type: 'button',
+                                className:
+                                  'auriga-setting-action is-compact is-quiet',
+                                onClick: () =>
+                                  change(() =>
+                                    api.revoke({
+                                      layer: rule.layer,
+                                      ruleId: rule.id,
+                                    }),
+                                  ),
+                              },
+                              t('revoke'),
+                            ),
+                          );
+                        }),
+                      ),
+                    );
+                  }),
+                  h(
+                    'p',
+                    { className: 'auriga-settings-card-group-hint' },
+                    t('revokeHint'),
+                  ),
+                ),
+              ),
+            );
           const content = !api
             ? h('p', { role: 'status' }, t('consentMissing'))
             : status !== 'ready'
@@ -1644,97 +2444,7 @@ window.__ModuleLoader__.load({
                     ),
                 )
               : settings
-                ? h(
-                    'div',
-                    null,
-                    ...['conversation', 'execution'].map((layer) => {
-                      const locked = view.organization[layer] !== 'allow';
-                      return h(
-                        'div',
-                        { key: layer, className: 'auriga-setting' },
-                        h(
-                          'label',
-                          null,
-                          layerName(layer),
-                          h(
-                            'select',
-                            {
-                              'aria-label': layerName(layer),
-                              disabled: locked,
-                              value: locked
-                                ? view.organization[layer]
-                                : view.defaults[layer],
-                              onChange: (event) => {
-                                if (!locked)
-                                  return change(() =>
-                                    api.setDefault(layer, event.target.value),
-                                  );
-                              },
-                            },
-                            ...[
-                              'ask_each',
-                              'same_org',
-                              'allowlist',
-                              'deny_all',
-                            ].map((mode) =>
-                              h('option', { key: mode, value: mode }, t(mode)),
-                            ),
-                          ),
-                        ),
-                        locked &&
-                          h(
-                            'small',
-                            null,
-                            t('locked') + view.organization.revision,
-                          ),
-                      );
-                    }),
-                    ...['allow_source', 'block'].map((choice) => {
-                      const rules = view.rules.filter(
-                        (rule) => rule.choice === choice,
-                      );
-                      return h(
-                        'details',
-                        { key: choice, open: true },
-                        h(
-                          'summary',
-                          null,
-                          t(choice === 'block' ? 'blocked' : 'persistent'),
-                        ),
-                        rules.length === 0 && h('p', null, t('noRules')),
-                        ...rules.map((rule) =>
-                          h(
-                            'div',
-                            { key: rule.id, className: 'auriga-setting' },
-                            h(
-                              'span',
-                              null,
-                              layerName(rule.layer) +
-                                ' · ' +
-                                sourceName(rule.source) +
-                                ' · ' +
-                                t(rule.scope),
-                            ),
-                            h(
-                              'button',
-                              {
-                                type: 'button',
-                                onClick: () =>
-                                  change(() =>
-                                    api.revoke({
-                                      layer: rule.layer,
-                                      ruleId: rule.id,
-                                    }),
-                                  ),
-                              },
-                              t('revoke'),
-                            ),
-                          ),
-                        ),
-                      );
-                    }),
-                    h('p', null, t('revokeHint')),
-                  )
+                ? settingsContent
                 : h(
                     'div',
                     null,
@@ -1833,11 +2543,13 @@ window.__ModuleLoader__.load({
           return h(
             'section',
             {
-              className: 'auriga-consent',
+              className:
+                'auriga-consent' + (settings ? ' auriga-consent-settings' : ''),
               'aria-label': t(settings ? 'consent' : 'inbox'),
             },
-            h('h3', null, t(settings ? 'consent' : 'inbox')),
-            api &&
+            !settings && h('h3', null, t('inbox')),
+            !settings &&
+              api &&
               status === 'ready' &&
               h(
                 'button',
@@ -1865,9 +2577,7 @@ window.__ModuleLoader__.load({
                     module.createSettingsView(React, {
                       localURL,
                       fetcher: fetch,
-                      openLogin: loginOverlayAvailable
-                        ? () => openPlatformLogin()
-                        : undefined,
+                      openLogin: () => openPlatformLogin(),
                       subscribeIdentity,
                       identityChanged,
                       navigate: (url) => window.location.assign(url),
@@ -2231,70 +2941,448 @@ window.__ModuleLoader__.load({
                 'data-tone': tone,
                 'aria-hidden': true,
               });
-        const TABS = [
-          'overview',
-          'market',
-          'mine',
-          'team',
-          'inbox',
-          'settings',
+        const NAV_EXPANDED_KEY = 'auriga.activityBar.expanded';
+        const AURIGA_NAV_ENTRIES = [
+          {
+            id: 'overview',
+            labelKey: 'tab_overview',
+            shortLabelKey: 'tab_overview',
+            icon: 'LayoutDashboard',
+            route: 'overview',
+            group: 'workspace',
+            order: 10,
+            placement: 'top',
+          },
+          {
+            id: 'market',
+            labelKey: 'tab_market',
+            shortLabelKey: 'tab_market_short',
+            icon: 'Store',
+            route: 'market',
+            group: 'workspace',
+            order: 20,
+            placement: 'top',
+          },
+          {
+            id: 'mine',
+            labelKey: 'tab_mine',
+            shortLabelKey: 'tab_mine_short',
+            icon: 'LibraryBig',
+            route: 'mine',
+            group: 'workspace',
+            order: 30,
+            placement: 'top',
+          },
+          {
+            id: 'team',
+            labelKey: 'tab_team',
+            shortLabelKey: 'tab_team_short',
+            icon: 'UsersRound',
+            route: 'team',
+            group: 'workspace',
+            order: 40,
+            placement: 'top',
+          },
+          {
+            id: 'inbox',
+            labelKey: 'tab_inbox',
+            shortLabelKey: 'tab_inbox',
+            icon: 'Inbox',
+            route: 'inbox',
+            group: 'system',
+            order: 10,
+            placement: 'bottom',
+          },
+          {
+            id: 'settings',
+            labelKey: 'tab_settings',
+            shortLabelKey: 'tab_settings',
+            icon: 'Settings',
+            route: 'settings',
+            group: 'system',
+            order: 20,
+            placement: 'bottom',
+          },
         ];
-        function Tabs({ value, onChange }) {
-          const items = TABS.map((id) => ({
-            value: id,
-            label: t('tab_' + id),
-            id: 'auriga-tab-' + id,
-            panelId: 'auriga-panel-' + id,
-          }));
-          if (HostSegmentedTabs)
-            return h(
-              'div',
-              { className: 'auriga-tabs-scroll' },
-              h(HostSegmentedTabs, {
-                items,
-                value,
-                onChange,
-                label: t('panel'),
-                className: 'auriga-tabs',
-              }),
+        function createAurigaNavigationRegistry(seed = AURIGA_NAV_ENTRIES) {
+          const entries = seed.map((entry) => ({ ...entry }));
+          const sortEntries = () =>
+            entries.sort(
+              (a, b) =>
+                (a.order ?? 0) - (b.order ?? 0) ||
+                String(a.id).localeCompare(String(b.id)),
             );
+          sortEntries();
+          return {
+            register(entry) {
+              const index = entries.findIndex((item) => item.id === entry.id);
+              if (index >= 0) entries.splice(index, 1, { ...entry });
+              else entries.push({ ...entry });
+              sortEntries();
+              return this;
+            },
+            list(placement, ctx = {}) {
+              return entries.filter((item) => {
+                if (item.placement !== placement) return false;
+                if (item.visible === false) return false;
+                if (typeof item.visible === 'function' && !item.visible(ctx))
+                  return false;
+                if (
+                  item.permission &&
+                  typeof ctx.can === 'function' &&
+                  !ctx.can(item.permission)
+                )
+                  return false;
+                return true;
+              });
+            },
+            get(id) {
+              return entries.find((item) => item.id === id);
+            },
+          };
+        }
+        const aurigaNavRegistry = createAurigaNavigationRegistry();
+        function lucideIcon(children, props = {}) {
+          return h(
+            'svg',
+            {
+              xmlns: 'http://www.w3.org/2000/svg',
+              width: 20,
+              height: 20,
+              viewBox: '0 0 24 24',
+              fill: 'none',
+              stroke: 'currentColor',
+              strokeWidth: 1.8,
+              strokeLinecap: 'round',
+              strokeLinejoin: 'round',
+              'aria-hidden': true,
+              focusable: 'false',
+              ...props,
+            },
+            ...children,
+          );
+        }
+        const AurigaIcons = {
+          LayoutDashboard: (props) =>
+            lucideIcon(
+              [
+                h('rect', {
+                  key: 'a',
+                  width: '7',
+                  height: '7',
+                  x: '3',
+                  y: '3',
+                  rx: '1',
+                }),
+                h('rect', {
+                  key: 'b',
+                  width: '7',
+                  height: '7',
+                  x: '14',
+                  y: '3',
+                  rx: '1',
+                }),
+                h('rect', {
+                  key: 'c',
+                  width: '7',
+                  height: '7',
+                  x: '14',
+                  y: '14',
+                  rx: '1',
+                }),
+                h('rect', {
+                  key: 'd',
+                  width: '7',
+                  height: '7',
+                  x: '3',
+                  y: '14',
+                  rx: '1',
+                }),
+              ],
+              props,
+            ),
+          Store: (props) =>
+            lucideIcon(
+              [
+                h('path', {
+                  key: 'a',
+                  d: 'm2 7 4.41-4.41A2 2 0 0 1 7.83 2h8.34a2 2 0 0 1 1.42.59L22 7',
+                }),
+                h('path', {
+                  key: 'b',
+                  d: 'M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8',
+                }),
+                h('path', {
+                  key: 'c',
+                  d: 'M15 22v-4a2 2 0 0 0-2-2h-2a2 2 0 0 0-2 2v4',
+                }),
+                h('path', { key: 'd', d: 'M2 7h20' }),
+                h('path', {
+                  key: 'e',
+                  d: 'M22 7v3a2 2 0 0 1-2 2 2.7 2.7 0 0 1-1.59-.63.7.7 0 0 0-.82 0A2.7 2.7 0 0 1 16 12a2.7 2.7 0 0 1-1.59-.63.7.7 0 0 0-.82 0A2.7 2.7 0 0 1 12 12a2.7 2.7 0 0 1-1.59-.63.7.7 0 0 0-.82 0A2.7 2.7 0 0 1 8 12a2.7 2.7 0 0 1-1.59-.63.7.7 0 0 0-.82 0A2.7 2.7 0 0 1 4 12a2 2 0 0 1-2-2V7',
+                }),
+              ],
+              props,
+            ),
+          LibraryBig: (props) =>
+            lucideIcon(
+              [
+                h('rect', {
+                  key: 'a',
+                  width: '8',
+                  height: '18',
+                  x: '3',
+                  y: '3',
+                  rx: '1',
+                }),
+                h('path', { key: 'b', d: 'M7 3v18' }),
+                h('path', {
+                  key: 'c',
+                  d: 'M20.4 18.9c.2.5-.1 1.1-.6 1.3l-1.9.7c-.5.2-1.1-.1-1.3-.6L11.1 5.1c-.2-.5.1-1.1.6-1.3l1.9-.7c.5-.2 1.1.1 1.3.6Z',
+                }),
+              ],
+              props,
+            ),
+          UsersRound: (props) =>
+            lucideIcon(
+              [
+                h('path', { key: 'a', d: 'M18 21a8 8 0 0 0-16 0' }),
+                h('circle', { key: 'b', cx: '10', cy: '8', r: '5' }),
+                h('path', {
+                  key: 'c',
+                  d: 'M22 20c0-3.37-2-6.5-4-8a5 5 0 0 0-.45-8.3',
+                }),
+              ],
+              props,
+            ),
+          Inbox: (props) =>
+            lucideIcon(
+              [
+                h('polyline', {
+                  key: 'a',
+                  points: '22 12 16 12 14 15 10 15 8 12 2 12',
+                }),
+                h('path', {
+                  key: 'b',
+                  d: 'M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z',
+                }),
+              ],
+              props,
+            ),
+          Settings: (props) =>
+            lucideIcon(
+              [
+                h('path', {
+                  key: 'a',
+                  d: 'M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z',
+                }),
+                h('circle', { key: 'b', cx: '12', cy: '12', r: '3' }),
+              ],
+              props,
+            ),
+          PanelLeftOpen: (props) =>
+            lucideIcon(
+              [
+                h('rect', {
+                  key: 'a',
+                  width: '18',
+                  height: '18',
+                  x: '3',
+                  y: '3',
+                  rx: '2',
+                }),
+                h('path', { key: 'b', d: 'M9 3v18' }),
+                h('path', { key: 'c', d: 'm14 9 3 3-3 3' }),
+              ],
+              props,
+            ),
+          PanelLeftClose: (props) =>
+            lucideIcon(
+              [
+                h('rect', {
+                  key: 'a',
+                  width: '18',
+                  height: '18',
+                  x: '3',
+                  y: '3',
+                  rx: '2',
+                }),
+                h('path', { key: 'b', d: 'M9 3v18' }),
+                h('path', { key: 'c', d: 'm16 15-3-3 3-3' }),
+              ],
+              props,
+            ),
+        };
+        function readNavExpanded() {
+          try {
+            return localStorage.getItem(NAV_EXPANDED_KEY) === '1';
+          } catch {
+            return false;
+          }
+        }
+        function writeNavExpanded(expanded) {
+          try {
+            localStorage.setItem(NAV_EXPANDED_KEY, expanded ? '1' : '0');
+          } catch {
+            /* private mode */
+          }
+        }
+        function AurigaNavigationItem({
+          item,
+          active,
+          expanded,
+          badge,
+          onSelect,
+          onKeyNav,
+        }) {
+          const label = t(item.labelKey);
+          const shortLabel = t(item.shortLabelKey || item.labelKey);
+          const Icon = AurigaIcons[item.icon];
+          const disabled =
+            item.disabled === true ||
+            (typeof item.disabled === 'function' && item.disabled());
+          const shown = expanded ? label : shortLabel;
+          return h(
+            'button',
+            {
+              type: 'button',
+              id: 'auriga-tab-' + item.id,
+              className: 'auriga-nav-item',
+              'aria-current': active ? 'page' : undefined,
+              'aria-controls': 'auriga-panel-' + item.id,
+              'aria-label': label,
+              title: expanded ? undefined : label,
+              disabled: disabled || undefined,
+              tabIndex: active ? 0 : -1,
+              onClick: () => !disabled && onSelect(item.route),
+              onKeyDown: onKeyNav,
+            },
+            h('span', { className: 'auriga-nav-icon' }, Icon && h(Icon)),
+            h('span', { className: 'auriga-nav-label' }, shown),
+            badge
+              ? h(
+                  'span',
+                  { className: 'auriga-nav-badge', 'aria-hidden': true },
+                  badge > 99 ? '99+' : String(badge),
+                )
+              : null,
+          );
+        }
+        function AurigaActivityBar({
+          value,
+          onChange,
+          expanded,
+          onToggle,
+          badges = {},
+        }) {
+          const top = aurigaNavRegistry.list('top');
+          const bottom = aurigaNavRegistry.list('bottom');
+          const items = [...top, ...bottom];
+          const focusNav = (event, index) => {
+            const next = {
+              ArrowUp: (index + items.length - 1) % items.length,
+              ArrowDown: (index + 1) % items.length,
+              ArrowLeft: (index + items.length - 1) % items.length,
+              ArrowRight: (index + 1) % items.length,
+              Home: 0,
+              End: items.length - 1,
+            }[event.key];
+            if (next === undefined) return;
+            event.preventDefault();
+            const target = items[next];
+            onChange(target.route);
+            event.currentTarget
+              .closest('.auriga-activity-bar')
+              ?.querySelector('#auriga-tab-' + target.id)
+              ?.focus();
+          };
+          const ToggleIcon = expanded
+            ? AurigaIcons.PanelLeftClose
+            : AurigaIcons.PanelLeftOpen;
+          return h(
+            'nav',
+            {
+              className: 'auriga-activity-bar',
+              'aria-label': t('nav_label'),
+            },
+            h(
+              'button',
+              {
+                type: 'button',
+                className: 'auriga-nav-toggle',
+                'aria-label': t(expanded ? 'nav_collapse' : 'nav_expand'),
+                'aria-expanded': expanded,
+                title: t(expanded ? 'nav_collapse' : 'nav_expand'),
+                onClick: onToggle,
+              },
+              h('span', { className: 'auriga-nav-icon' }, h(ToggleIcon)),
+              expanded
+                ? h(
+                    'span',
+                    { className: 'auriga-nav-label' },
+                    t('nav_collapse'),
+                  )
+                : null,
+            ),
+            h(
+              'div',
+              { className: 'auriga-activity-bar-top', role: 'list' },
+              ...top.map((item, index) =>
+                h(AurigaNavigationItem, {
+                  key: item.id,
+                  item,
+                  active: value === item.route,
+                  expanded,
+                  badge: badges[item.id],
+                  onSelect: onChange,
+                  onKeyNav: (event) => focusNav(event, index),
+                }),
+              ),
+            ),
+            h(
+              'div',
+              { className: 'auriga-activity-bar-bottom', role: 'list' },
+              ...bottom.map((item, index) =>
+                h(AurigaNavigationItem, {
+                  key: item.id,
+                  item,
+                  active: value === item.route,
+                  expanded,
+                  badge: badges[item.id],
+                  onSelect: onChange,
+                  onKeyNav: (event) => focusNav(event, top.length + index),
+                }),
+              ),
+            ),
+          );
+        }
+        function AurigaLayout({
+          tab,
+          onTabChange,
+          expanded,
+          onToggleExpanded,
+          badges,
+          banners,
+          children,
+        }) {
           return h(
             'div',
             {
-              role: 'tablist',
-              'aria-label': t('panel'),
-              className: 'auriga-tabs-scroll auriga-tabs-fallback',
+              className: 'auriga-shell auriga-app',
+              'data-nav-expanded': expanded ? 'true' : 'false',
             },
-            ...items.map((item, index) =>
-              h(
-                'button',
-                {
-                  key: item.value,
-                  type: 'button',
-                  role: 'tab',
-                  id: item.id,
-                  'aria-selected': value === item.value,
-                  'aria-controls': item.panelId,
-                  tabIndex: value === item.value ? 0 : -1,
-                  onClick: () => onChange(item.value),
-                  onKeyDown: (event) => {
-                    const next = {
-                      ArrowLeft: (index + items.length - 1) % items.length,
-                      ArrowRight: (index + 1) % items.length,
-                      Home: 0,
-                      End: items.length - 1,
-                    }[event.key];
-                    if (next === undefined) return;
-                    event.preventDefault();
-                    event.currentTarget.parentElement
-                      ?.querySelectorAll('[role="tab"]')
-                      .item(next)
-                      ?.focus();
-                    onChange(items[next].value);
-                  },
-                },
-                item.label,
-              ),
+            h(AurigaActivityBar, {
+              value: tab,
+              onChange: onTabChange,
+              expanded,
+              onToggle: onToggleExpanded,
+              badges,
+            }),
+            h(
+              'div',
+              { className: 'auriga-main' },
+              ...(banners || []),
+              h('div', { className: 'auriga-main-body' }, children),
             ),
           );
         }
@@ -3457,12 +4545,239 @@ window.__ModuleLoader__.load({
             ),
           );
         }
+        function OverviewHome({
+          shell,
+          uac,
+          desktop,
+          pendingCount = 0,
+          onNavigate,
+          onLogin,
+          onRetryLocal,
+          phase,
+          retry,
+        }) {
+          const [View, setView] = React.useState(null);
+          const [loadFailed, setLoadFailed] = React.useState(false);
+          React.useEffect(() => {
+            let live = true;
+            import(localURL('auriga/shell-ui/overview.js'))
+              .then((module) => {
+                if (live && !disposed)
+                  setView(() => module.createOverviewUI(React));
+              })
+              .catch(() => {
+                if (live && !disposed) setLoadFailed(true);
+              });
+            return () => {
+              live = false;
+            };
+          }, []);
+          if (loadFailed)
+            return h(
+              'div',
+              { className: 'auriga-card', role: 'alert' },
+              h('p', null, t('failed')),
+              h(
+                'div',
+                { className: 'auriga-actions' },
+                h(
+                  Action,
+                  {
+                    onClick: () => {
+                      setLoadFailed(false);
+                      setView(null);
+                      import(localURL('auriga/shell-ui/overview.js'))
+                        .then((module) =>
+                          setView(() => module.createOverviewUI(React)),
+                        )
+                        .catch(() => setLoadFailed(true));
+                    },
+                  },
+                  t('retry'),
+                ),
+              ),
+            );
+          if (!View)
+            return h('p', { className: 'auriga-muted' }, t('loading'));
+          const {
+            OverviewPage,
+            OverviewWelcome,
+            OverviewStatus,
+            OverviewNotifications,
+            OverviewCapabilities,
+            OverviewActivity,
+          } = View;
+          const localSignedIn =
+            uac?.available === true && uac.state === 'authenticated';
+          const cloudConnected =
+            shell?.loggedIn === true && shell?.connected === true;
+          const networkReady = shell?.network?.connected === true;
+          const displayName =
+            (localSignedIn && (uac.displayName || uac.empNo)) ||
+            shell?.account?.displayName ||
+            shell?.account?.empNo ||
+            '';
+          const signedIn = localSignedIn || shell?.loggedIn === true;
+          const canRetryLocal =
+            localSignedIn &&
+            (shell?.canRetryLocalUac === true || shell?.loggedIn !== true);
+          const statusItems = [
+            {
+              id: 'local',
+              tone: localSignedIn ? 'success' : 'idle',
+              label: t('overviewLocal'),
+              detail: localSignedIn
+                ? t('overviewStatusOn')
+                : t('overviewStatusOff'),
+            },
+            {
+              id: 'cloud',
+              tone: cloudConnected
+                ? 'success'
+                : shell?.loggedIn
+                  ? 'warn'
+                  : 'idle',
+              label: t('overviewCloud'),
+              detail: cloudConnected
+                ? t('overviewCloudOn')
+                : shell?.loggedIn
+                  ? t('overviewCloudAuth')
+                  : t('overviewCloudOff'),
+            },
+            {
+              id: 'network',
+              tone: networkReady ? 'success' : 'idle',
+              label: t('overviewNetwork'),
+              detail: networkReady
+                ? t('overviewNetworkOn')
+                : t('overviewNetworkOff'),
+            },
+          ];
+          const notices = [];
+          if (desktop?.available && !desktop.required) {
+            notices.push({
+              id: 'desktop-update',
+              title: t('overviewUpdateTitle'),
+              detail: desktop.available.version,
+              action: h(
+                Action,
+                {
+                  primary: true,
+                  onClick: () => onNavigate('settings'),
+                },
+                t('overviewUpdateAction'),
+              ),
+            });
+          }
+          if (pendingCount > 0) {
+            notices.push({
+              id: 'pending-consent',
+              title: t('overviewConsentTitle'),
+              detail: pendingCount + t('overviewConsentDetail'),
+              action: h(
+                Action,
+                { onClick: () => onNavigate('inbox') },
+                t('overviewConsentAction'),
+              ),
+            });
+          }
+          const actions = [];
+          if (!signedIn) {
+            actions.push(
+              h(
+                Action,
+                {
+                  key: 'login',
+                  primary: true,
+                  onClick: onLogin,
+                },
+                t('platformLogin'),
+              ),
+            );
+          } else if (canRetryLocal) {
+            actions.push(
+              h(
+                Action,
+                {
+                  key: 'retry-local',
+                  primary: true,
+                  disabled: !shell?.csrf,
+                  onClick: onRetryLocal,
+                },
+                t('retryConnect'),
+              ),
+            );
+          }
+          const capabilities = [
+            {
+              id: 'market',
+              route: 'market',
+              icon: 'Store',
+              title: t('tab_market'),
+              description: t('cap_market_desc'),
+            },
+            {
+              id: 'mine',
+              route: 'mine',
+              icon: 'LibraryBig',
+              title: t('tab_mine'),
+              description: t('cap_mine_desc'),
+            },
+            {
+              id: 'team',
+              route: 'team',
+              icon: 'UsersRound',
+              title: t('tab_team'),
+              description: t('cap_team_desc'),
+            },
+            {
+              id: 'inbox',
+              route: 'inbox',
+              icon: 'Inbox',
+              title: t('tab_inbox'),
+              description: t('cap_inbox_desc'),
+            },
+          ];
+          return h(
+            OverviewPage,
+            null,
+            h(OverviewWelcome, {
+              name: displayName,
+              signedIn,
+              title: signedIn
+                ? t('overviewWelcomeBack') + (displayName || t('identityLabel'))
+                : t('overviewWelcome'),
+              tagline: t('overviewTagline'),
+            }),
+            h(OverviewStatus, {
+              items: statusItems,
+              alert:
+                localSignedIn && !cloudConnected
+                  ? t('overviewLocalOnly')
+                  : null,
+              actions: actions.length ? actions : null,
+            }),
+            h(OverviewNotifications, { items: notices }),
+            h(OverviewCapabilities, {
+              title: t('overviewExplore'),
+              items: capabilities,
+              onNavigate,
+            }),
+            // No formal activity feed API yet — hide without real data.
+            h(OverviewActivity, { items: undefined }),
+            phase?.status &&
+              phase.status !== 'ready' &&
+              notice(phase, retry),
+          );
+        }
         function Main() {
           const [desktop, desktopAction] = useDesktopUpdate();
           const host = useHostState();
           const [phase, retry] = useBootstrap(true);
           const [authRequired, setAuthRequired] = React.useState(false);
           const [tab, setTab] = React.useState('overview');
+          const [navExpanded, setNavExpanded] = React.useState(readNavExpanded);
+          const [inboxBadge, setInboxBadge] = React.useState(0);
           const ref = React.useRef(null);
           const boot = phase.status === 'ready' ? phase.boot : undefined;
           // Desktop is a loopback DSH host. Start its identity route even
@@ -3555,15 +4870,43 @@ window.__ModuleLoader__.load({
           React.useEffect(() => {
             const root = ref.current?.shadowRoot;
             if (!root || !boot) return;
-            // Panel versions already distributed before host tabs still render
-            // their own first navigation. The verified panel keeps handling all
-            // resource actions and only its duplicate tablist is suppressed.
+            // Activity Bar owns Auriga navigation; hide the panel's duplicate chrome.
             const style = document.createElement('style');
             style.textContent =
-              'aside.resources > nav[role="tablist"] { display: none }';
+              'aside.resources > .resource-header,aside.resources > nav[role="tablist"]{display:none}';
             root.append(style);
             return () => style.remove();
           }, [boot]);
+          React.useEffect(() => {
+            let cancelled = false;
+            const refreshBadge = () => {
+              Promise.resolve()
+                .then(() => consentBridge?.snapshot?.())
+                .then((snapshot) => {
+                  if (cancelled) return;
+                  const count = Array.isArray(snapshot?.pending)
+                    ? snapshot.pending.length
+                    : 0;
+                  setInboxBadge(count);
+                })
+                .catch(() => {
+                  if (!cancelled) setInboxBadge(0);
+                });
+            };
+            refreshBadge();
+            const timer = setInterval(refreshBadge, 15000);
+            return () => {
+              cancelled = true;
+              clearInterval(timer);
+            };
+          }, [tab]);
+          const toggleNavExpanded = () => {
+            setNavExpanded((current) => {
+              const next = !current;
+              writeNavExpanded(next);
+              return next;
+            });
+          };
           const gotoOverview = h(
             Action,
             { onClick: () => setTab('overview') },
@@ -3589,14 +4932,16 @@ window.__ModuleLoader__.load({
               ...children,
             );
           const resourceTab = tab === 'market' || tab === 'mine';
-          return h(
-            'div',
-            { className: 'auriga-shell auriga-app' },
+          const banners = [
             desktop &&
-              (desktop.available || desktop.restartRequired || desktop.error) &&
+              (desktop.required ||
+                desktop.restartRequired ||
+                desktop.error ||
+                desktop.downloading) &&
               h(
                 'section',
                 {
+                  key: 'desktop-update',
                   role: desktop.required ? 'alert' : 'status',
                   className: 'auriga-shell-status auriga-banner',
                 },
@@ -3638,37 +4983,47 @@ window.__ModuleLoader__.load({
               h(
                 'div',
                 {
+                  key: 'host-toast',
                   role: 'status',
                   'data-level': host.toast.level,
                   className: 'auriga-banner',
                 },
                 host.toast.message,
               ),
-            h(Tabs, { value: tab, onChange: setTab }),
+          ].filter(Boolean);
+          return h(
+            AurigaLayout,
+            {
+              tab,
+              onTabChange: setTab,
+              expanded: navExpanded,
+              onToggleExpanded: toggleNavExpanded,
+              badges: { inbox: inboxBadge || undefined },
+              banners,
+            },
             panel(
               'overview',
-              h(
-                'div',
-                { className: 'auriga-grid' },
-                uac?.available &&
-                  h(LocalIdentityCard, {
-                    uac,
-                    setUac,
-                    reload: reloadUac,
-                    active: tab === 'overview' && !desktop?.required,
-                  }),
-                h(PlatformCard, {
-                  boot: phase.boot,
-                  shell: local ? shell : undefined,
-                  reloadShell: () => {
-                    reloadShell();
-                    retry();
-                  },
-                  setShell: local ? setShell : undefined,
-                  gotoSettings: () => setTab('settings'),
-                }),
-              ),
-              phase.status !== 'ready' && notice(phase, retry),
+              h(OverviewHome, {
+                shell: local ? shell : undefined,
+                uac: local ? uac : undefined,
+                desktop,
+                pendingCount: inboxBadge,
+                phase,
+                retry,
+                onNavigate: setTab,
+                onLogin: () => openPlatformLogin(),
+                onRetryLocal: () => {
+                  if (!shell?.csrf) return;
+                  postLocal('auriga/shell/command', shell.csrf, {
+                    action: 'retry_local_uac',
+                  })
+                    .catch(() => {})
+                    .finally(() => {
+                      reloadShell();
+                      reloadUac();
+                    });
+                },
+              }),
             ),
             panel(tab === 'mine' ? 'market' : 'mine'),
             panel(
@@ -3744,15 +5099,26 @@ window.__ModuleLoader__.load({
               tab === 'settings' &&
                 h(Settings, {
                   embedded: true,
-                  gotoOverview: () => {
-                    setTab('overview');
-                    reloadShell();
-                    openPlatformLogin();
-                  },
+                  gotoOverview: () => setTab('overview'),
                 }),
             ),
           );
         }
+        effect(() => {
+          try {
+            return ctx.slots.inject('auriga.platform-card', () =>
+              ctx.slots.register(
+                {
+                  name: 'auriga.platform-card',
+                  locale: NS,
+                },
+                PlatformCard,
+              ),
+            );
+          } catch {
+            /* Hosts without this seat skip the login-card harness registration. */
+          }
+        }, 'auriga-shell: platform card harness');
         effect(
           () =>
             ctx.slots.inject('sidebar.panellist', () =>

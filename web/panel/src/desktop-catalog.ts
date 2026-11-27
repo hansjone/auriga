@@ -1,6 +1,7 @@
 import {
   allPluginPackages,
   validateStar,
+  type MarketSort,
 } from '../../shared/src/plugin-market';
 import {
   ResourceDiagnosticError,
@@ -144,8 +145,22 @@ type Listing = {
   summaries: Map<string, SkillVersion>;
 };
 type VersionPage = { items: SkillVersion[]; nextCursor?: string };
+export type MarketListQuery = {
+  page: number;
+  pageSize: number;
+  kind?: Kind;
+  search: string;
+  sort: MarketSort;
+};
+export type MarketPage = {
+  packages: SkillPackage[];
+  summaries: Map<string, SkillVersion>;
+  total: number;
+  query: MarketListQuery;
+};
 type Snapshot = {
   market: Record<Kind, Listing>;
+  marketPage?: MarketPage;
   installations: InstallationSnapshot;
 };
 
@@ -169,7 +184,13 @@ export class DesktopCatalog {
   ) {}
 
   prefetch() {
-    if (!this.started) void this.refresh();
+    if (!this.started)
+      void this.refresh(undefined, {
+        page: 1,
+        pageSize: 12,
+        search: '',
+        sort: '',
+      });
   }
 
   dispose() {
@@ -379,6 +400,39 @@ export class DesktopCatalog {
     };
   }
 
+  private async packagesPage(query: MarketListQuery, signal: AbortSignal) {
+    const params = new URLSearchParams({
+      limit: String(query.pageSize),
+      page: String(query.page),
+    });
+    if (query.kind) params.set('kind', query.kind);
+    if (query.search.trim()) params.set('search', query.search.trim());
+    if (query.sort) params.set('sort', query.sort);
+    const value = await this.get('packages?' + params, signal);
+    if (
+      !Array.isArray(value.items) ||
+      value.items.length > query.pageSize ||
+      value.items.some(
+        (pack: SkillPackage) =>
+          !pack ||
+          !['plugin', 'skill'].includes(pack.kind) ||
+          (query.kind && pack.kind !== query.kind),
+      ) ||
+      typeof value.total !== 'number' ||
+      !Number.isSafeInteger(value.total) ||
+      value.total < 0
+    )
+      throw new Error('invalid');
+    const packages = value.items as SkillPackage[];
+    const summaries = await this.summaries(packages, signal);
+    return {
+      packages,
+      summaries,
+      total: value.total as number,
+      query,
+    } satisfies MarketPage;
+  }
+
   private async summaries(packages: SkillPackage[], signal: AbortSignal) {
     const pending = packages.filter(
       (pack) => pack.defaultVersionId && !pack.market,
@@ -409,9 +463,40 @@ export class DesktopCatalog {
     return result;
   }
 
-  async refresh(selected?: SkillPackage) {
+  async refresh(selected?: SkillPackage, query?: MarketListQuery) {
     this.started = true;
     await this.run(async (signal) => {
+      if (query) {
+        const [marketPage, installations] = await Promise.all([
+          this.packagesPage(query, signal),
+          this.readInstallations(signal),
+        ]);
+        const current =
+          selected &&
+          marketPage.packages.find((pack) => pack.id === selected.id);
+        const details = current && (await this.readVersions(current, signal));
+        if (signal.aborted) return;
+        this.versions.clear();
+        if (current && details) this.versions.set(current.id, details);
+        const byKind = (kind: Kind): Listing => ({
+          packages: marketPage.packages.filter((pack) => pack.kind === kind),
+          summaries: new Map(
+            [...marketPage.summaries].filter(([id]) =>
+              marketPage.packages.some(
+                (pack) => pack.id === id && pack.kind === kind,
+              ),
+            ),
+          ),
+        });
+        this.snapshot = {
+          market: { plugin: byKind('plugin'), skill: byKind('skill') },
+          marketPage,
+          installations,
+        };
+        this.readPluginSelection(installations);
+        if (this.waitingForPlugin) this.pollUntil = Date.now() + 300000;
+        return;
+      }
       const [plugin, skill, installations] = await Promise.all([
         allPluginPackages((cursor) => this.packages('plugin', signal, cursor)),
         this.packages('skill', signal),
@@ -434,6 +519,7 @@ export class DesktopCatalog {
           plugin: { ...plugin, summaries },
           skill: { ...skill, summaries },
         },
+        marketPage: this.snapshot?.marketPage,
         installations,
       };
       this.readPluginSelection(installations);
@@ -506,21 +592,28 @@ export class DesktopCatalog {
           this.scope,
         ),
       );
-      const listing = this.snapshot?.market.plugin;
-      if (signal.aborted || !this.snapshot || !listing) return;
+      if (signal.aborted || !this.snapshot) return;
+      const patch = (item: SkillPackage) =>
+        item.id === pack.id && item.market
+          ? { ...item, market: { ...item.market, ...result } }
+          : item;
+      const listing = this.snapshot.market.plugin;
+      const marketPage = this.snapshot.marketPage;
       this.snapshot = {
         ...this.snapshot,
         market: {
           ...this.snapshot.market,
           plugin: {
             ...listing,
-            packages: listing.packages.map((item) =>
-              item.id === pack.id && item.market
-                ? { ...item, market: { ...item.market, ...result } }
-                : item,
-            ),
+            packages: listing.packages.map(patch),
           },
         },
+        marketPage: marketPage
+          ? {
+              ...marketPage,
+              packages: marketPage.packages.map(patch),
+            }
+          : marketPage,
       };
     });
   }

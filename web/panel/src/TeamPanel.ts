@@ -35,6 +35,11 @@ export class AurigaTeamPanel extends HTMLElement {
   private view?: SkillPanel;
   private viewKey?: string;
   private content = document.createElement('section');
+  private header = element('div', undefined, 'resource-header');
+  private tabs = element('nav');
+  private kindsBar = element('div', undefined, 'resource-kinds-bar');
+  private kinds = element('nav', undefined, 'resource-kinds');
+  private actions = element('div', undefined, 'resource-header-actions');
   private root: HTMLElement;
   constructor() {
     super();
@@ -42,6 +47,9 @@ export class AurigaTeamPanel extends HTMLElement {
     const css = document.createElement('style');
     css.textContent = style;
     this.root = element('aside', undefined, 'resources');
+    this.tabs.setAttribute('role', 'tablist');
+    this.header.append(this.tabs);
+    this.kindsBar.append(this.kinds, this.actions);
     shadow.append(css, this.root);
   }
   get context() {
@@ -83,9 +91,8 @@ export class AurigaTeamPanel extends HTMLElement {
     else delete this.root.dataset.theme;
     this.root.setAttribute('aria-label', text.panel);
     this.root.replaceChildren(element('span', text.panel, 'sr-only'));
-    const tabs = element('nav');
-    tabs.setAttribute('role', 'tablist');
-    tabs.setAttribute('aria-label', text.panel);
+    this.tabs.setAttribute('aria-label', text.panel);
+    this.tabs.replaceChildren();
     for (const value of ['market', 'mine'] as const) {
       const button = element('button', text[value]);
       button.type = 'button';
@@ -106,37 +113,47 @@ export class AurigaTeamPanel extends HTMLElement {
                   ? 'mine'
                   : 'market',
           );
-          this.root
+          this.tabs
             .querySelector<HTMLButtonElement>('[aria-selected="true"]')
             ?.focus();
         }
       };
-      tabs.append(button);
+      this.tabs.append(button);
     }
-    const kinds = element('nav');
-    for (const kind of ['plugin', 'skill'] as const) {
-      const button = element(
-        'button',
-        kind === 'plugin'
-          ? this.value?.locale?.startsWith('en')
-            ? 'Plugins'
-            : '插件'
-          : this.value?.locale?.startsWith('en')
-            ? 'Skills'
-            : '技能',
+    this.root.append(this.header);
+    if (this.tab === 'mine') {
+      this.kinds.replaceChildren();
+      for (const kind of ['plugin', 'skill'] as const) {
+        const button = element(
+          'button',
+          kind === 'plugin'
+            ? this.value?.locale?.startsWith('en')
+              ? 'Plugins'
+              : '插件'
+            : this.value?.locale?.startsWith('en')
+              ? 'Skills'
+              : '技能',
+        );
+        button.type = 'button';
+        button.className = 'resource-kind-tab';
+        button.setAttribute('aria-pressed', String(kind === this.kind));
+        button.onclick = () => {
+          this.kind = kind;
+          this.render();
+        };
+        this.kinds.append(button);
+      }
+      this.kinds.setAttribute(
+        'aria-label',
+        this.value?.locale?.startsWith('en') ? 'Resource kind' : '资源类型',
       );
-      button.type = 'button';
-      button.setAttribute('aria-pressed', String(kind === this.kind));
-      button.onclick = () => {
-        this.kind = kind;
-        this.render();
-      };
-      kinds.append(button);
-    }
-    this.root.append(tabs, kinds);
+      this.root.append(this.kindsBar);
+    } else this.actions.replaceChildren();
     if (!canReadResources(this.value)) {
       this.view?.dispose();
       this.view = undefined;
+      this.viewKey = undefined;
+      this.actions.replaceChildren();
       const notice = element(
         'p',
         this.value?.protocol !== undefined && this.value.protocol !== 1
@@ -151,7 +168,8 @@ export class AurigaTeamPanel extends HTMLElement {
       return;
     }
     this.root.append(this.content);
-    const key = this.kind + ':' + this.tab;
+    const key =
+      this.tab === 'market' ? 'market' : 'mine:' + this.kind;
     if (!this.view || this.viewKey !== key) {
       this.view?.dispose();
       this.viewKey = key;
@@ -159,8 +177,12 @@ export class AurigaTeamPanel extends HTMLElement {
         this.content,
         this.value!,
         this.tab === 'mine',
-        this.kind,
+        this.tab === 'mine' ? this.kind : 'plugin',
         AurigaTeamPanel.desktopCatalog(this.value!),
+        this.tab === 'mine' ? this.actions : undefined,
+        (filter) => {
+          if (filter === 'plugin' || filter === 'skill') this.kind = filter;
+        },
       );
     }
   }
