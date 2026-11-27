@@ -190,7 +190,7 @@ export class Broker extends EventEmitter {
       this.lastAuthenticatedGeneration = undefined;
     }
     if (state === 'authenticated' && nextIdentityKey) {
-      this.lastAuthenticatedRevisions ??= new Set();
+      this.lastAuthenticatedRevisions ??= new Map();
       if (
         this.lastAuthenticatedGeneration !== this.generation ||
         this.lastAuthenticatedIdentityKey !== nextIdentityKey
@@ -199,14 +199,14 @@ export class Broker extends EventEmitter {
       }
       this.lastAuthenticatedGeneration = this.generation;
       this.lastAuthenticatedIdentityKey = nextIdentityKey;
-      this.lastAuthenticatedRevisions.add(this.revision);
+      this.recordAuthenticatedRevision(this.revision);
     } else if (
       !invalidated &&
       ['unreachable', 'reauth_required'].includes(state) &&
       this.lastAuthenticatedGeneration === this.generation &&
       this.lastAuthenticatedIdentityKey
     ) {
-      this.lastAuthenticatedRevisions?.add(this.revision);
+      this.recordAuthenticatedRevision(this.revision);
     }
     const snapshot = this.snapshot();
     this.log({
@@ -1023,6 +1023,27 @@ export class Broker extends EventEmitter {
     });
     return this.checking;
   }
+  recordAuthenticatedRevision(revision) {
+    this.lastAuthenticatedRevisions ??= new Map();
+    const now = this.mono();
+    this.lastAuthenticatedRevisions.set(revision, now + 60000);
+    for (const [rev, until] of this.lastAuthenticatedRevisions) {
+      if (until <= now) this.lastAuthenticatedRevisions.delete(rev);
+    }
+    while (this.lastAuthenticatedRevisions.size > 32) {
+      const oldest = this.lastAuthenticatedRevisions.keys().next().value;
+      this.lastAuthenticatedRevisions.delete(oldest);
+    }
+  }
+  hasAuthenticatedRevision(revision) {
+    const until = this.lastAuthenticatedRevisions?.get(revision);
+    if (until === undefined) return false;
+    if (until <= this.mono()) {
+      this.lastAuthenticatedRevisions.delete(revision);
+      return false;
+    }
+    return true;
+  }
   async ensureAuthenticated({
     forceRefresh = false,
     timeoutMs = 8000,
@@ -1040,7 +1061,7 @@ export class Broker extends EventEmitter {
       expectedIdentityKey ?? this.lastAuthenticatedIdentityKey;
     if (
       expectedRevision !== undefined &&
-      !this.lastAuthenticatedRevisions?.has(expectedRevision)
+      !this.hasAuthenticatedRevision(expectedRevision)
     ) {
       throw conflict();
     }
@@ -1082,17 +1103,28 @@ export class Broker extends EventEmitter {
     const deadline = this.mono() + Math.max(1000, timeoutMs);
     let timer;
     let onInvalidated;
+    let onRefreshed;
     try {
       await Promise.race([
         this.check(forceRefresh),
-        new Promise((_, reject) => {
+        new Promise((resolve, reject) => {
           onInvalidated = () =>
             reject(
               Object.assign(new Error('common.unauthenticated'), {
                 code: 'common.unauthenticated',
               }),
             );
+          onRefreshed = () => {
+            if (
+              this.state === 'authenticated' &&
+              this.generation === anchorGeneration &&
+              this.identityKey() === anchorIdentityKey
+            ) {
+              resolve(undefined);
+            }
+          };
           this.once('identity_invalidated', onInvalidated);
+          this.on('auth_refreshed', onRefreshed);
           timer = setTimeout(
             () => reject(unavailable()),
             Math.max(1000, deadline - this.mono()),
@@ -1103,6 +1135,7 @@ export class Broker extends EventEmitter {
     } finally {
       clearTimeout(timer);
       if (onInvalidated) this.off('identity_invalidated', onInvalidated);
+      if (onRefreshed) this.off('auth_refreshed', onRefreshed);
     }
     const after = this.snapshot().state;
     if (after === 'authenticated') {
@@ -1162,6 +1195,7 @@ export class Broker extends EventEmitter {
         JSON.stringify(verified.projection) !== JSON.stringify(this.projection)
       )
         this.transition('authenticated', undefined, verified.projection);
+      this.emit('auth_refreshed');
     } catch (error) {
       if (generation !== this.generation || this.closed) return;
       if ([400, 401, 403].includes(error.status)) {

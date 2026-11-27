@@ -100,6 +100,10 @@ export class BusinessProxy {
         .update(JSON.stringify(message))
         .digest('hex'),
       previous = this.requests.get(message.requestId);
+    const isStreamOp =
+      operation === 'network_open' ||
+      operation === 'createAiChatCompletionStream' ||
+      Boolean(definition?.stream);
     if (previous) {
       if (previous.owner !== owner || previous.hash !== hash)
         return response({ error: error('common.conflict') });
@@ -108,29 +112,33 @@ export class BusinessProxy {
         if (previous.context) {
           this.broker.assert(
             previous.context,
-            typeof this.broker.canSelfHeal === 'function'
+            !isStreamOp && typeof this.broker.canSelfHeal === 'function'
               ? { allowRevisionAdvance: true }
               : undefined,
           );
         }
-        if (operation === 'network_open') {
-          this.host.resolve(owner, input.executionContextId, 'session');
+        if (isStreamOp) {
+          if (operation === 'network_open')
+            this.host.resolve(owner, input.executionContextId, 'session');
           const cached = await previous.result;
-          if (cached.output) {
+          if (cached.output?.body?.streamId) {
             this.streams.get(cached.output.body.streamId, owner);
-            return response({
-              output: {
-                ...cached.output,
-                body: {
-                  ...cached.output.body,
-                  registration: {
-                    ...cached.output.body.registration,
-                    created: false,
+            if (operation === 'network_open') {
+              return response({
+                output: {
+                  ...cached.output,
+                  body: {
+                    ...cached.output.body,
+                    registration: {
+                      ...cached.output.body.registration,
+                      created: false,
+                    },
                   },
                 },
-              },
-            });
+              });
+            }
           }
+          return cached;
         }
       } catch {
         return response({ error: error('common.unauthenticated') });
@@ -175,7 +183,10 @@ export class BusinessProxy {
             });
           }
         } else {
-          return response({ error: error(e.code ?? 'common.unauthenticated') });
+          const code = e.code ?? 'common.unauthenticated';
+          return response({
+            error: error(code, code === 'common.conflict'),
+          });
         }
       }
       const remainingAfterHeal = deadline - Date.now();
@@ -190,6 +201,7 @@ export class BusinessProxy {
           context,
           remainingAfterHeal,
           owner,
+          deadline,
         );
         return response({ output });
       } catch (e) {
@@ -214,7 +226,22 @@ export class BusinessProxy {
     this.requests.set(message.requestId, entry);
     return entry.result;
   }
-  async execute(definition, input, context, remaining, owner) {
+  async execute(
+    definition,
+    input,
+    context,
+    remaining,
+    owner,
+    deadline = Date.now() + remaining,
+  ) {
+    const remainingMs = () => {
+      const left = deadline - Date.now();
+      if (left <= 0)
+        throw Object.assign(new Error('common.unavailable'), {
+          code: 'common.unavailable',
+        });
+      return left;
+    };
     if (
       [
         'network_open',
@@ -231,7 +258,7 @@ export class BusinessProxy {
         input,
         context,
         owner,
-        AbortSignal.timeout(remaining),
+        AbortSignal.timeout(remainingMs()),
       );
     if (definition.operation === 'upload_open')
       return this.streams.openUpload(input, context, owner);
@@ -309,7 +336,7 @@ export class BusinessProxy {
     this.broker.assert(activeContext, { allowRevisionAdvance: true });
     const controller = new AbortController();
     this.controllers.add(controller);
-    const timeout = setTimeout(() => controller.abort(), remaining);
+    const timeout = setTimeout(() => controller.abort(), remainingMs());
     timeout.unref();
     try {
       if (
@@ -393,22 +420,17 @@ export class BusinessProxy {
         this.broker.canSelfHeal?.()
       ) {
         await response.body?.cancel?.().catch(() => {});
+        const leftBeforeReplay = remainingMs();
         const expectedIdentityKey = this.broker.identityKey?.({
           identity: context.identity,
         });
         try {
           activeContext = await this.broker.ensureAuthenticated({
             forceRefresh: true,
-            timeoutMs: Math.min(remaining, 8000),
+            timeoutMs: Math.min(leftBeforeReplay, 8000),
             expectedGeneration: context.generation,
             expectedIdentityKey,
           });
-          this.broker.assert(activeContext, { allowRevisionAdvance: true });
-          token = await this.broker.tokenFor(
-            definition.audience,
-            activeContext,
-            definition.operation,
-          );
           this.broker.assert(activeContext, { allowRevisionAdvance: true });
         } catch (healError) {
           if (healError?.code === 'common.unavailable')
@@ -419,6 +441,34 @@ export class BusinessProxy {
             code: 'common.unauthenticated',
           });
         }
+        remainingMs();
+        try {
+          token = await this.broker.tokenFor(
+            definition.audience,
+            activeContext,
+            definition.operation,
+          );
+          this.broker.assert(activeContext, { allowRevisionAdvance: true });
+        } catch (tokenError) {
+          const authRejected =
+            [
+              'common.unauthenticated',
+              'common.forbidden',
+              'common.conflict',
+            ].includes(tokenError?.code) ||
+            [400, 401, 403].includes(tokenError?.status);
+          throw Object.assign(
+            new Error(
+              authRejected ? 'common.unauthenticated' : 'common.unavailable',
+            ),
+            {
+              code: authRejected
+                ? 'common.unauthenticated'
+                : 'common.unavailable',
+            },
+          );
+        }
+        remainingMs();
         response = await sendFetch(token);
       }
       const resolveStreamContext = () => {

@@ -196,7 +196,12 @@ export async function createBroker({
   async function waitForAuthenticated(timeoutMs = authWaitMs) {
     if (closed) throw unavailable('common.unauthenticated');
     const initial = state.current();
-    if (initial?.state === 'authenticated') return;
+    if (initial?.state === 'authenticated') {
+      return {
+        anchorKey: state.authorization?.() ?? null,
+        anchorSnap: initial,
+      };
+    }
     if (stateFactory) throw unavailable('common.unauthenticated');
     const anchorKey = state.authorization?.() ?? null;
     const anchorSnap = lastAuthenticatedSnapshot;
@@ -258,6 +263,7 @@ export async function createBroker({
       }, timeoutMs);
       check();
     });
+    return { anchorKey, anchorSnap };
   }
   const envelope = (requireAccess = true) => {
     if (requireAccess) checkBusinessAccess?.();
@@ -339,10 +345,14 @@ export async function createBroker({
         throw unavailable('common.conflict');
     },
     async call(/** @type {string} */ operation, /** @type {any} */ input) {
-      await waitForAuthenticated();
+      const anchor = await waitForAuthenticated();
+      const matchesAnchor = (/** @type {any} */ snap) =>
+        sameAuthenticatedIdentity(anchor.anchorSnap, snap) &&
+        (stateFactory || state.authorization?.() === anchor.anchorKey);
       for (let attempt = 0; attempt < 2; attempt++) {
         const snapBefore = state.current();
-        const anchorAuthKey = state.authorization?.() ?? null;
+        if (!matchesAnchor(snapBefore))
+          throw unavailable('common.unauthenticated');
         const check = state.fence(),
           command = { ...envelope(), call: { operation, input } };
         validate('ShellAuthBusinessCall', command);
@@ -358,12 +368,13 @@ export async function createBroker({
         if (
           attempt === 0 &&
           result.error?.code === 'common.conflict' &&
+          result.error.retryable === true &&
           result.error.upstreamStatus === undefined &&
           snapBefore?.shellEpoch
         ) {
           const snapAfter = state.current();
           if (
-            sameAuthenticatedIdentity(snapBefore, snapAfter) &&
+            matchesAnchor(snapAfter) &&
             snapAfter.revision !== snapBefore.revision
           ) {
             continue;
@@ -374,11 +385,11 @@ export async function createBroker({
         } catch (error) {
           const cur = state.current();
           const stillSameSession =
-            sameAuthenticatedIdentity(snapBefore, cur) ||
+            matchesAnchor(cur) ||
             (!stateFactory &&
               cur?.state === 'unreachable' &&
-              Boolean(anchorAuthKey) &&
-              state.authorization?.() === anchorAuthKey);
+              Boolean(anchor.anchorKey) &&
+              state.authorization?.() === anchor.anchorKey);
           if (!stillSameSession) throw error;
         }
         if (result.error)

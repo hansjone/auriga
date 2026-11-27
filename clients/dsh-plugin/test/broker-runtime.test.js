@@ -367,37 +367,54 @@ test('broker.call retries once when same-identity revision advances and causes c
   assert.equal(attempts, 2);
 });
 
-test('broker.call rejects queued call when account switches during unreachable recovery', async (t) => {
+test('broker.call rejects queued call when account switches immediately after recovery', async (t) => {
   const { runtime, connection } = await fixture(t);
+  const before = connection.calls.length;
   connection.transition('unreachable');
   const pending = runtime.broker.call('UnifiedListResourcePackages', {
     limit: 10,
     kind: 'skill',
   });
   await new Promise((r) => setTimeout(r, 20));
+  // Back-to-back delivery: A recovers, then immediately switches to B before microtask resumes.
+  connection.transition('authenticated');
   connection.transition('authenticated', { memberId: randomUUID() });
   await assert.rejects(pending, { code: 'common.unauthenticated' });
+  assert.equal(connection.calls.length, before);
 });
 
-test('broker.call never retries upstream HTTP 409 business conflict', async (t) => {
+test('broker.call never retries upstream HTTP 409 or non-retryable post-exec conflict even when revision advances', async (t) => {
   const { runtime, connection } = await fixture(t);
   const origCall = connection.ipc.call;
   let attempts = 0;
+  let errorPayload = {
+    code: 'common.conflict',
+    retryable: false,
+    upstreamStatus: 409,
+  };
   connection.ipc.call = async (message) => {
     if (message.call?.operation === 'UnifiedListResourcePackages') {
       attempts++;
+      connection.transition('authenticated');
       return {
         requestId: message.requestId,
         operation: 'UnifiedListResourcePackages',
-        error: {
-          code: 'common.conflict',
-          retryable: false,
-          upstreamStatus: 409,
-        },
+        error: errorPayload,
       };
     }
     return origCall(message);
   };
+  await assert.rejects(
+    runtime.broker.call('UnifiedListResourcePackages', {
+      limit: 10,
+      kind: 'skill',
+    }),
+    { code: 'common.conflict' },
+  );
+  assert.equal(attempts, 1);
+
+  attempts = 0;
+  errorPayload = { code: 'common.conflict', retryable: false };
   await assert.rejects(
     runtime.broker.call('UnifiedListResourcePackages', {
       limit: 10,

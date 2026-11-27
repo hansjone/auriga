@@ -847,3 +847,76 @@ test('BusinessProxy preserves 401 mapping for managed authorities without self-h
   );
   assert.equal(res.error?.code, 'common.unauthenticated');
 });
+
+test('BusinessProxy enforces absolute expiresAt after AI token exchange, maps AI exchange 5xx to unavailable, and rejects stale cached SSE stream', async (t) => {
+  const f = fixture();
+  await login(f);
+  let upstreamCalls = 0;
+  const proxy = new BusinessProxy(f.broker, async () => {
+    upstreamCalls++;
+    return new Response(
+      JSON.stringify({ error: { code: 'common.unauthenticated' } }),
+      { status: 401, headers: { 'content-type': 'application/json' } },
+    );
+  });
+  t.after(async () => {
+    proxy.close();
+    await f.broker.close();
+  });
+
+  // 1) AI audience token exchange exceeds expiresAt -> never hits upstream.
+  f.platform.audience = async () => {
+    await new Promise((r) => setTimeout(r, 80));
+    return f.tokens;
+  };
+  const shortReq = {
+    ...call(f.broker, 'listAiModels', {}),
+    expiresAt: new Date(Date.now() + 30).toISOString(),
+  };
+  const expiredRes = await proxy.call(shortReq, OWNER);
+  assert.equal(expiredRes.error?.code, 'common.unavailable');
+  assert.equal(expiredRes.error?.retryable, true);
+  assert.equal(upstreamCalls, 0);
+
+  // 2) Upstream 401 on GET listAiModels -> refresh succeeds, AI audience exchange hits 503 -> common.unavailable (retryable).
+  let audienceCount = 0;
+  f.platform.audience = async () => {
+    audienceCount++;
+    if (audienceCount === 1) return f.tokens;
+    throw Object.assign(new Error('iam 503'), { status: 503 });
+  };
+  const ai503Res = await proxy.call(call(f.broker, 'listAiModels', {}), OWNER);
+  assert.equal(ai503Res.error?.code, 'common.unavailable');
+  assert.equal(ai503Res.error?.retryable, true);
+
+  // 3) Cached SSE stream request must not return a closed stream ID after same-identity revision advance.
+  f.platform.audience = async () => f.tokens;
+  const sseProxy = new BusinessProxy(
+    f.broker,
+    async () =>
+      new Response(
+        new ReadableStream({
+          start(controller) {
+            controller.enqueue(Buffer.from('data: {"ok":true}\n\ndata: [DONE]\n\n'));
+            controller.close();
+          },
+        }),
+        { headers: { 'content-type': 'text/event-stream' } },
+      ),
+  );
+  t.after(() => sseProxy.close());
+  const sseReq = call(f.broker, 'createAiChatCompletionStream', {
+    body: {
+      model: 'test',
+      max_tokens: 16,
+      messages: [{ role: 'user', content: 'hi' }],
+      stream: true,
+    },
+  });
+  const firstSse = await sseProxy.call(sseReq, OWNER);
+  assert.ok(firstSse.output?.body?.streamId);
+  const projection = structuredClone(f.broker.projection);
+  f.broker.transition('authenticated', undefined, projection);
+  const cachedSse = await sseProxy.call(sseReq, OWNER);
+  assert.equal(cachedSse.error?.code, 'common.unauthenticated');
+});
