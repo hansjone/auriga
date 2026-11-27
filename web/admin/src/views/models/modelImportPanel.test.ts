@@ -468,9 +468,9 @@ it('shows a concrete message for rejected effectiveAt instead of unconfirmed sav
   await flushPromises();
   expect(w.text()).toContain('计价生效时间不被服务器接受');
   expect(w.text()).not.toContain('未确认保存结果');
-  expect(vi.mocked(relayApi.createPool).mock.calls[0][0].price.effectiveAt).toEqual(
-    expect.any(String),
-  );
+  expect(
+    vi.mocked(relayApi.createPool).mock.calls[0][0].price.effectiveAt,
+  ).toEqual(expect.any(String));
   const submitted = Date.parse(
     vi.mocked(relayApi.createPool).mock.calls[0][0].price.effectiveAt,
   );
