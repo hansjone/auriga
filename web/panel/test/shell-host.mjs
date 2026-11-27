@@ -173,9 +173,8 @@ export function surfaceHost(
       if (!oldNode) {
         const anchor = document.createComment('fragment');
         parent.append(anchor);
-        let cursor = anchor;
         for (const child of fragChildren) {
-          cursor = patch(parent, null, child, owner);
+          patch(parent, null, child, owner);
         }
         return anchor;
       }

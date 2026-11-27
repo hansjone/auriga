@@ -23,6 +23,8 @@ var _ MappedNullable = &UnifiedPackagePage{}
 type UnifiedPackagePage struct {
 	Items      []UnifiedPackage `json:"items"`
 	NextCursor *string          `json:"nextCursor,omitempty"`
+	// Total matching packages when page mode is used.
+	Total *int32 `json:"total,omitempty"`
 }
 
 type _UnifiedPackagePage UnifiedPackagePage
@@ -101,6 +103,38 @@ func (o *UnifiedPackagePage) SetNextCursor(v string) {
 	o.NextCursor = &v
 }
 
+// GetTotal returns the Total field value if set, zero value otherwise.
+func (o *UnifiedPackagePage) GetTotal() int32 {
+	if o == nil || IsNil(o.Total) {
+		var ret int32
+		return ret
+	}
+	return *o.Total
+}
+
+// GetTotalOk returns a tuple with the Total field value if set, nil otherwise
+// and a boolean to check if the value has been set.
+func (o *UnifiedPackagePage) GetTotalOk() (*int32, bool) {
+	if o == nil || IsNil(o.Total) {
+		return nil, false
+	}
+	return o.Total, true
+}
+
+// HasTotal returns a boolean if a field has been set.
+func (o *UnifiedPackagePage) HasTotal() bool {
+	if o != nil && !IsNil(o.Total) {
+		return true
+	}
+
+	return false
+}
+
+// SetTotal gets a reference to the given int32 and assigns it to the Total field.
+func (o *UnifiedPackagePage) SetTotal(v int32) {
+	o.Total = &v
+}
+
 func (o UnifiedPackagePage) MarshalJSON() ([]byte, error) {
 	toSerialize, err := o.ToMap()
 	if err != nil {
@@ -114,6 +148,9 @@ func (o UnifiedPackagePage) ToMap() (map[string]interface{}, error) {
 	toSerialize["items"] = o.Items
 	if !IsNil(o.NextCursor) {
 		toSerialize["nextCursor"] = o.NextCursor
+	}
+	if !IsNil(o.Total) {
+		toSerialize["total"] = o.Total
 	}
 	return toSerialize, nil
 }

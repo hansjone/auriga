@@ -22,6 +22,9 @@ type ShellAuthInputUnifiedListResourcePackages struct {
 	Limit  *int32  `json:"limit,omitempty"`
 	Cursor *string `json:"cursor,omitempty"`
 	Kind   *string `json:"kind,omitempty"`
+	Page   *int32  `json:"page,omitempty"`
+	Search *string `json:"search,omitempty"`
+	Sort   *string `json:"sort,omitempty"`
 }
 
 // NewShellAuthInputUnifiedListResourcePackages instantiates a new ShellAuthInputUnifiedListResourcePackages object
@@ -141,6 +144,102 @@ func (o *ShellAuthInputUnifiedListResourcePackages) SetKind(v string) {
 	o.Kind = &v
 }
 
+// GetPage returns the Page field value if set, zero value otherwise.
+func (o *ShellAuthInputUnifiedListResourcePackages) GetPage() int32 {
+	if o == nil || IsNil(o.Page) {
+		var ret int32
+		return ret
+	}
+	return *o.Page
+}
+
+// GetPageOk returns a tuple with the Page field value if set, nil otherwise
+// and a boolean to check if the value has been set.
+func (o *ShellAuthInputUnifiedListResourcePackages) GetPageOk() (*int32, bool) {
+	if o == nil || IsNil(o.Page) {
+		return nil, false
+	}
+	return o.Page, true
+}
+
+// HasPage returns a boolean if a field has been set.
+func (o *ShellAuthInputUnifiedListResourcePackages) HasPage() bool {
+	if o != nil && !IsNil(o.Page) {
+		return true
+	}
+
+	return false
+}
+
+// SetPage gets a reference to the given int32 and assigns it to the Page field.
+func (o *ShellAuthInputUnifiedListResourcePackages) SetPage(v int32) {
+	o.Page = &v
+}
+
+// GetSearch returns the Search field value if set, zero value otherwise.
+func (o *ShellAuthInputUnifiedListResourcePackages) GetSearch() string {
+	if o == nil || IsNil(o.Search) {
+		var ret string
+		return ret
+	}
+	return *o.Search
+}
+
+// GetSearchOk returns a tuple with the Search field value if set, nil otherwise
+// and a boolean to check if the value has been set.
+func (o *ShellAuthInputUnifiedListResourcePackages) GetSearchOk() (*string, bool) {
+	if o == nil || IsNil(o.Search) {
+		return nil, false
+	}
+	return o.Search, true
+}
+
+// HasSearch returns a boolean if a field has been set.
+func (o *ShellAuthInputUnifiedListResourcePackages) HasSearch() bool {
+	if o != nil && !IsNil(o.Search) {
+		return true
+	}
+
+	return false
+}
+
+// SetSearch gets a reference to the given string and assigns it to the Search field.
+func (o *ShellAuthInputUnifiedListResourcePackages) SetSearch(v string) {
+	o.Search = &v
+}
+
+// GetSort returns the Sort field value if set, zero value otherwise.
+func (o *ShellAuthInputUnifiedListResourcePackages) GetSort() string {
+	if o == nil || IsNil(o.Sort) {
+		var ret string
+		return ret
+	}
+	return *o.Sort
+}
+
+// GetSortOk returns a tuple with the Sort field value if set, nil otherwise
+// and a boolean to check if the value has been set.
+func (o *ShellAuthInputUnifiedListResourcePackages) GetSortOk() (*string, bool) {
+	if o == nil || IsNil(o.Sort) {
+		return nil, false
+	}
+	return o.Sort, true
+}
+
+// HasSort returns a boolean if a field has been set.
+func (o *ShellAuthInputUnifiedListResourcePackages) HasSort() bool {
+	if o != nil && !IsNil(o.Sort) {
+		return true
+	}
+
+	return false
+}
+
+// SetSort gets a reference to the given string and assigns it to the Sort field.
+func (o *ShellAuthInputUnifiedListResourcePackages) SetSort(v string) {
+	o.Sort = &v
+}
+
 func (o ShellAuthInputUnifiedListResourcePackages) MarshalJSON() ([]byte, error) {
 	toSerialize, err := o.ToMap()
 	if err != nil {
@@ -159,6 +258,15 @@ func (o ShellAuthInputUnifiedListResourcePackages) ToMap() (map[string]interface
 	}
 	if !IsNil(o.Kind) {
 		toSerialize["kind"] = o.Kind
+	}
+	if !IsNil(o.Page) {
+		toSerialize["page"] = o.Page
+	}
+	if !IsNil(o.Search) {
+		toSerialize["search"] = o.Search
+	}
+	if !IsNil(o.Sort) {
+		toSerialize["sort"] = o.Sort
 	}
 	return toSerialize, nil
 }
