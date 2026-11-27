@@ -301,6 +301,9 @@ for (const needsRestart of [false, true])
       privateSkills: {},
       host: {},
       pluginHost: {
+        async selected(name) {
+          return actual.get(name)?.enabled === true;
+        },
         async observe(name) {
           return actual.get(name);
         },

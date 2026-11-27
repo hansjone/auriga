@@ -343,3 +343,23 @@ test('native install events are filtered by request and registry details are omi
   ]);
   assert.equal(disposed, true);
 });
+
+test('a corrupt bundle remains selected until native disable is observed', async () => {
+  let enabled = true;
+  const manager = {
+    listBundles: async () => [
+      { name: 'damaged', enabled, error: { code: 'operation-error' } },
+    ],
+    installBundle() {},
+    async setBundleEnabled(target, next) {
+      enabled = next;
+      return { target, application: 'applied' };
+    },
+    removeBundle() {},
+  };
+  const host = resourceHost({ get: () => manager });
+  assert.equal(await host.observe('damaged'), undefined);
+  assert.equal(await host.selected('damaged'), true);
+  await host.enable('damaged', false);
+  assert.equal(await host.selected('damaged'), false);
+});

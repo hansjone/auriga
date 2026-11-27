@@ -56,6 +56,13 @@ export function resourceHost(ctx) {
       }
       return { blocked, restartRequired };
     },
+    /** A missing or corrupt package may still be selected in the native profile.
+     * @param {string} name */
+    async selected(name) {
+      const rows = await manager().listBundles();
+      if (!Array.isArray(rows)) return refuse('resource.apply_failed');
+      return rows.some((row) => row.name === name && row.enabled === true);
+    },
     /** @param {string} name */
     async observe(name) {
       const rows = await manager().listBundles();

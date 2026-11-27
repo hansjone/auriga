@@ -406,8 +406,7 @@ export function catalogService(options) {
         if (plugins?.waiting(plugins.read(failure, name), failure))
           return { candidates: [], restartRequired: true };
         api.check();
-        const current = await host.observe(name);
-        if (current?.enabled) {
+        if (await host.selected(name)) {
           const selected = (await api.list()).find(
             (row) =>
               row.resource.identity.packageId ===
@@ -429,7 +428,7 @@ export function catalogService(options) {
             await plugins?.write(failure, name, false, 'disable');
             return { candidates: [], restartRequired: true };
           }
-          if ((await host.observe(name))?.enabled)
+          if (await host.selected(name))
             throw resourceFailure(
               'resource.apply_failed',
               'plugin_not_active',
