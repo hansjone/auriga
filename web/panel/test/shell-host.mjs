@@ -61,8 +61,7 @@ export function surfaceHost(
         index = view.index++;
       // Match React lazy initializers: useState(fn) calls fn once.
       if (!(index in view.hooks))
-        view.hooks[index] =
-          typeof initial === 'function' ? initial() : initial;
+        view.hooks[index] = typeof initial === 'function' ? initial() : initial;
       return [
         view.hooks[index],
         (next) => {
@@ -265,8 +264,7 @@ export function surfaceHost(
       }
       // Prefer React key; fall back to id/title so repeated siblings of the same
       // component type (SettingsPanel / SettingsCard) keep stable identity.
-      child.propsId =
-        value.props?.key ?? value.props?.id ?? value.props?.title;
+      child.propsId = value.props?.key ?? value.props?.id ?? value.props?.title;
       const previous = current;
       current = child;
       child.index = 0;
@@ -345,10 +343,13 @@ export function surfaceHost(
     const previous = [...node.childNodes];
     const claimed = new Set();
     const takeMatch = (child, preferred) => {
-      if (!child || typeof child !== 'object' || typeof child.type !== 'function')
+      if (
+        !child ||
+        typeof child !== 'object' ||
+        typeof child.type !== 'function'
+      )
         return preferred && !claimed.has(preferred) ? preferred : undefined;
-      const id =
-        child.props?.key ?? child.props?.id ?? child.props?.title;
+      const id = child.props?.key ?? child.props?.id ?? child.props?.title;
       const matches = (candidate) => {
         if (!candidate || claimed.has(candidate)) return false;
         const inst = findInstance(candidate, child.type, owner);
@@ -473,8 +474,7 @@ export function surfaceHost(
     configurable: true,
     value: {
       request(_name, options, callback) {
-        const run =
-          typeof options === 'function' ? options : callback;
+        const run = typeof options === 'function' ? options : callback;
         return Promise.resolve().then(() => run?.());
       },
     },
@@ -622,8 +622,7 @@ export function surfaceHost(
             clearTimeout: window.clearTimeout.bind(window),
           });
           const loadSettingsModule = async (href, sourceText) => {
-            const source =
-              sourceText ?? readFileSync(new URL(href), 'utf8');
+            const source = sourceText ?? readFileSync(new URL(href), 'utf8');
             const module = new vm.SourceTextModule(source, {
               identifier: String(href),
               context: settingsContext,
@@ -860,4 +859,3 @@ export function ensureOverlay(host) {
   host._overlayView = host.mount('shell.overlay');
   return host._overlayView;
 }
-

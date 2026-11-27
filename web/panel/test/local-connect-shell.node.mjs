@@ -49,7 +49,11 @@ function waitForSettings(host, root, statusBody, timeout = 5000) {
         (button) => button.textContent === '保存',
       );
       // Save stays disabled while the loaded address already matches state.
-      if (input?.value === 'https://example.com' && /alice/.test(root.textContent) && save)
+      if (
+        input?.value === 'https://example.com' &&
+        /alice/.test(root.textContent) &&
+        save
+      )
         finish();
     };
     const observer = new host.window.MutationObserver(check);
@@ -693,9 +697,8 @@ test('consent children use independent hooks and the authenticated HTTP bridge w
     await flush();
     await flush();
     assert.equal(
-      settings.root.querySelectorAll(
-        '.auriga-consent .auriga-setting-select',
-      ).length,
+      settings.root.querySelectorAll('.auriga-consent .auriga-setting-select')
+        .length,
       2,
     );
     const allow = [...inbox.querySelectorAll('button')].find(
@@ -843,7 +846,10 @@ test('local UAC scan works without a platform: waiting → scanned → signed in
       assert.match(text(), /已扫码，请在手机上确认/);
       host.expire(2000);
       await flush();
-      assert.match(text(), /已登录本机.*工号A1001|本地登录已登录[\s\S]*A1001|欢迎回来，A1001/);
+      assert.match(
+        text(),
+        /已登录本机.*工号A1001|本地登录已登录[\s\S]*A1001|欢迎回来，A1001/,
+      );
       assert.equal(
         overlay.root.querySelector('svg[role="img"]') ||
           main.root.querySelector('svg[role="img"]'),
@@ -880,10 +886,7 @@ test('local UAC scan works without a platform: waiting → scanned → signed in
           ),
           main.root.textContent,
         );
-        assert.equal(
-          overlay.root.querySelector('svg[role="img"]'),
-          null,
-        );
+        assert.equal(overlay.root.querySelector('svg[role="img"]'), null);
       }
       main.close();
       overlay?.close();
