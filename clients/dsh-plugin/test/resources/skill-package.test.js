@@ -8,17 +8,25 @@ const files = {
     '---\nname: example\ndescription: "Public fixture"\n---\nFixture body.',
   'references/note.md': 'Public attachment.',
 };
-test('text-only bundle round trips exact bytes without lifecycle scripts', () => {
-  const archive = packSkill(files, meta),
+test('text-only bundle with scripts and root dependency manifests round trips exact bytes', () => {
+  const withScripts = {
+    ...files,
+    'requirements.txt': 'requests==2.32.3\n',
+    'scripts/run.py': 'print("ok")\n',
+    'scripts/helper.sh': 'echo ok\n',
+  };
+  const archive = packSkill(withScripts, meta),
     restored = unpackSkill(archive, meta);
-  for (const [key, value] of Object.entries(files))
+  for (const [key, value] of Object.entries(withScripts))
     assert.equal(restored[key].toString('utf8'), value);
-  assert.deepEqual(archive, packSkill(files, meta));
+  assert.deepEqual(archive, packSkill(withScripts, meta));
 });
-test('script files, escape paths, aliases, metadata mismatch and executable archive members are refused', () => {
+test('disallowed paths, script outside scripts/, escape paths, aliases, metadata mismatch and executable archive members are refused', () => {
   for (const path of [
-    'scripts/run.sh',
     'assets/run.js',
+    'references/run.sh',
+    'scripts/binary.exe',
+    'other/file.txt',
     'references/../escape.md',
     'assets/CON.txt',
     'assets/a//b.txt',

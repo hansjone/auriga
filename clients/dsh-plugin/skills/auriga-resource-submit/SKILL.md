@@ -21,22 +21,27 @@ description: 用户说“发布到 Auriga”“帮我把这个技能送审”“
    - 如实声明实际所需权限 `permissions`（`tools`、`outboundHosts`、`dataAccess`），插件如 `package.json` 已有 `license` 可省略 `metadata.license`。
    - **不要把 npm 带 `@scope/` 的包名填进 `metadata.name`**；留空 `metadata.name` 即可自动派生合法的目录名（小写字母、数字和短横线）。
 3. **预检（`auriga_resource_prepare`）**：
-   - 调用 `auriga_resource_prepare`，工具会自动检测是 `create`（首次发布）还是 `upgrade`（命中当前用户同名资源，返回 `existingPackage`）。
+   - 调用 `auriga_resource_prepare`，工具会在本地打包 `.tar.gz` 归档并计算 `digest`（`sha256:...`），同时自动检测是 `create`（首次发布）还是 `upgrade`（命中当前用户同名资源，返回 `existingPackage`）。
    - 若返回的 `warnings` 提示版本号冲突，请先递增版本号再重新预检。
-   - 若用户只要求预检，或资料尚待确认，向用户展示预检摘要（名称、版本、模式、简介、权限、变更说明、文件数、预估风险等级）后再决定是否送审。目录文件有改动时须重新预检。
+   - 若目录中存在不支持的文件类型或目录，预检会直接报错并指明路径，不会静默丢弃文件。
+   - 若用户只要求预检，或资料尚待确认，向用户展示预检摘要（名称、版本、模式、简介、权限、变更说明、文件数、归档大小、`digest`、预估风险等级）后再决定是否送审。目录文件有改动时须重新预检。
 4. **提交送审（`auriga_resource_submit`）**：
    - 用户明确要求提交/升级且资料齐全时，用同一会话的句柄调用 `auriga_resource_submit`，填写清晰的 `reason`（送审理由）与 `changeNotes`（变更说明，升级强烈建议提供）。
    - 升级已有资源时，可显式传入 `packageId`（预检命中同名已有资源时也会自动关联该 `packageId`）。
-   - 返回 `state: "pending_review"` 后，告知用户已进入审核队列，并提供 `packageId` 与 `versionId` 供跟踪。
+   - 平台校验归档通过后返回 `state: "pending_review"` 与平台确认的 `digest`（与预检 `digest` 一致），告知用户已进入审核队列，并提供 `packageId`、`versionId` 与 `digest` 供跟踪。
 
 ## 技能目录示例
 
 ```text
 <会话工作目录>/
   skills/example/SKILL.md
+  skills/example/requirements.txt      # 可选：根目录依赖清单（requirements.txt / pyproject.toml / package.json / uv.lock / poetry.lock）
+  skills/example/scripts/run.py        # 可选：UTF-8 脚本（.py / .sh / .ps1 / .js / .ts 等）
+  skills/example/references/guide.md   # 可选：参考文档与配置
+  skills/example/assets/template.json  # 可选：文本模板与数据文件
 ```
 
-`SKILL.md` 需要 YAML front matter，包含 `name` 和 `description`，其余内容使用纯文本技能格式。
+`SKILL.md` 需要 YAML front matter，包含 `name` 和 `description`。包含 `scripts/` 或依赖清单的技能将自动定级至少 `R2`（需安全审核）。
 
 ```json
 {

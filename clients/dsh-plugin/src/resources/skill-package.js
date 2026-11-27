@@ -4,13 +4,48 @@ import { validatePrivateSkill } from './private-skills.js';
 import { refuse } from './trust.js';
 import { encodeUstar } from './ustar.js';
 const decoder = new TextDecoder('utf-8', { fatal: true });
+export const skillRootDependencyFiles = new Set([
+  'requirements.txt',
+  'pyproject.toml',
+  'package.json',
+  'uv.lock',
+  'poetry.lock',
+]);
+
+/** @param {string} path */
+export function skillDirectoryValid(path) {
+  return (
+    Buffer.byteLength(path) <= 240 &&
+    path.split('/').length <= 7 &&
+    /^(?:references|assets|scripts)(?:\/.+)?$/.test(path) &&
+    path
+      .split('/')
+      .every(
+        (p) =>
+          p &&
+          p !== '.' &&
+          p !== '..' &&
+          !/[. ]$/.test(p) &&
+          !/[\\:]/.test(p) &&
+          ![...p].some((c) => c.charCodeAt(0) < 32) &&
+          !/^(con|prn|aux|nul|com[0-9]|lpt[0-9])(?:\.|$)/i.test(p),
+      )
+  );
+}
+
 /** @param {string} path */
 export function skillPathValid(path) {
   return (
     Buffer.byteLength(path) <= 240 &&
     path.split('/').length <= 8 &&
     (path === 'SKILL.md' ||
-      /^(references|assets)\/.+\.(md|txt|json|yaml|yml)$/.test(path)) &&
+      skillRootDependencyFiles.has(path) ||
+      /^(?:references|assets)\/.+\.(?:md|txt|json|yaml|yml|toml|ini|cfg|csv|sql)$/i.test(
+        path,
+      ) ||
+      /^scripts\/.+\.(?:py|sh|bash|ps1|js|mjs|cjs|ts|mts|cts|md|txt|json|yaml|yml|toml|ini|cfg|csv|sql|lock)$/i.test(
+        path,
+      )) &&
     path
       .split('/')
       .every(
@@ -100,7 +135,7 @@ export function unpackSkill(archive, expected) {
       const dir = path.replace(/\/$/, '');
       if (
         size ||
-        !['references', 'assets'].includes(dir.split('/')[0]) ||
+        !['references', 'assets', 'scripts'].includes(dir.split('/')[0]) ||
         !skillPathValid(dir + '/file.txt')
       )
         refuse('common.validation_failed');

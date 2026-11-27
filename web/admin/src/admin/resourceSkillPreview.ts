@@ -157,7 +157,7 @@ export function tarText(raw: Uint8Array) {
     result: { path: string; text: string }[] = [];
   const seen = new Set<string>();
   for (let offset = 0, count = 0; offset + 512 <= raw.length; count++) {
-    if (count > 128) throw new Error('Entry budget');
+    if (count > 512) throw new Error('Entry budget');
     const header = raw.subarray(offset, offset + 512);
     if (header.every((b) => b === 0)) return result;
     const str = (start: number, end: number) =>

@@ -9,6 +9,7 @@ import { installSubmissionTools } from '../../src/resources/submission-tools.js'
 
 const packageId = '00000000-0000-0000-0000-000000000001';
 const versionId = '00000000-0000-0000-0000-000000000002';
+const sampleDigest = 'sha256:' + 'a'.repeat(64);
 const input = {
   kind: 'skill',
   directory: 'skills/example',
@@ -18,7 +19,12 @@ const input = {
     permissions: { tools: [], outboundHosts: [], dataAccess: [] },
   },
 };
-const result = { packageId, versionId, state: 'pending_review' };
+const result = {
+  packageId,
+  versionId,
+  state: 'pending_review',
+  digest: sampleDigest,
+};
 
 function setup(t, { submit, prepare, now, registry, ownedPackages } = {}) {
   const f = fixture();
@@ -82,6 +88,14 @@ function setup(t, { submit, prepare, now, registry, ownedPackages } = {}) {
                 kind: args.kind,
                 name: 'example',
                 version: '1.0.0',
+                artifacts: [
+                  {
+                    id: 'payload',
+                    role: 'payload',
+                    digest: sampleDigest,
+                    sizeBytes: 17,
+                  },
+                ],
                 details: 'internal detail',
               },
               archive: Buffer.from('portable snapshot'),
@@ -158,17 +172,49 @@ test('uses the exact native session cwd, advertises three tools, rejects author 
     description: '',
     license: '',
     permissions: { tools: [], outboundHosts: [], dataAccess: [] },
+    digest: sampleDigest,
     archiveBytes: 17,
     fileCount: 0,
-    files: [],
     estimatedRisk: 'r1',
   });
+  assert.equal('files' in preflight, false);
   const submission = { handle: preflight.handle, reason: 'Review this skill' };
   await assert.rejects(
     f.call('submit', { ...submission, origin: 'https://example.com' }),
     /common.validation_failed/,
   );
   assert.deepEqual(await f.call('submit', submission), result);
+});
+
+test('verifies digest match on submit and elevates risk for skills with scripts', async (t) => {
+  const f = setup(t, {
+    prepare: async (args) => ({
+      manifest: {
+        kind: args.kind,
+        name: 'scripted-skill',
+        version: '1.0.1',
+        artifacts: [{ id: 'payload', role: 'payload', digest: sampleDigest }],
+      },
+      archive: Buffer.from('scripted archive'),
+      files: ['SKILL.md', 'requirements.txt', 'scripts/run.py'],
+      hasScripts: true,
+    }),
+    submit: async () => ({
+      packageId,
+      versionId,
+      state: 'pending_review',
+      digest: 'sha256:' + 'b'.repeat(64),
+    }),
+  });
+  const preflight = await f.call('prepare', input);
+  assert.equal(preflight.digest, sampleDigest);
+  assert.equal(preflight.estimatedRisk, 'r2');
+  assert.equal(preflight.fileCount, 3);
+  assert.equal('files' in preflight, false);
+  await assert.rejects(
+    f.call('submit', { handle: preflight.handle, reason: 'Submit scripted' }),
+    /common.unavailable/,
+  );
 });
 
 test('lists owned packages, detects upgrade mode, warns on duplicate version and forwards changeNotes', async (t) => {
@@ -200,6 +246,7 @@ test('lists owned packages, detects upgrade mode, warns on duplicate version and
           packageName: '@local/my-decoration',
           dshVersionRange: '>=0.2.1-rc.3',
         },
+        artifacts: [{ id: 'payload', role: 'payload', digest: sampleDigest }],
       },
       archive: Buffer.from('upgrade snapshot'),
       files: ['package.json', 'cordis.patch.yml', 'index.js'],

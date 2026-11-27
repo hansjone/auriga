@@ -240,6 +240,7 @@ test('prepared plugin submission replays attach with its initial ETag and fresh 
     packageId: f.packageId,
     versionId: f.versionId,
     state: 'pending_review',
+    digest: input.manifest.artifacts[0].digest,
     manifestDigest: version.digest,
   });
   assert.equal(uploadAttempts, 2);

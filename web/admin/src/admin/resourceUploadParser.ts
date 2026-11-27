@@ -565,7 +565,19 @@ export async function parseResourceSource(
         e.path.split('/').length > 8 ||
         !(
           e.path === 'SKILL.md' ||
-          /^(references|assets)\/.+\.(md|txt|json|yaml|yml)$/.test(e.path)
+          [
+            'requirements.txt',
+            'pyproject.toml',
+            'package.json',
+            'uv.lock',
+            'poetry.lock',
+          ].includes(e.path) ||
+          /^(?:references|assets)\/.+\.(?:md|txt|json|yaml|yml|toml|ini|cfg|csv|sql)$/i.test(
+            e.path,
+          ) ||
+          /^scripts\/.+\.(?:py|sh|bash|ps1|js|mjs|cjs|ts|mts|cts|md|txt|json|yaml|yml|toml|ini|cfg|csv|sql|lock)$/i.test(
+            e.path,
+          )
         )
       )
         fail('skillFileInvalid', e.path);

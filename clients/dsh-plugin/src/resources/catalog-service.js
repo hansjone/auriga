@@ -614,7 +614,10 @@ export function catalogService(options) {
       uploaded.value.kind !== kind ||
       uploaded.value.version !== version ||
       uploaded.value.state !== 'draft' ||
-      uploaded.value.digest !== manifestDigest
+      uploaded.value.digest !== manifestDigest ||
+      (Array.isArray(uploaded.value.artifacts) &&
+        uploaded.value.artifacts.length > 0 &&
+        uploaded.value.artifacts[0]?.digest !== artifacts[0].digest)
     )
       refuse('resource.digest_mismatch');
     const review = await submissionStage('submit', () =>
@@ -650,6 +653,7 @@ export function catalogService(options) {
       packageId: pack.value.id,
       versionId: uploaded.value.id,
       state: result.version.state,
+      digest: artifacts[0].digest,
       manifestDigest,
     };
   }

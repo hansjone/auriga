@@ -35,7 +35,7 @@ export function safePath(path) {
 export function excluded(name) {
   return (
     name.startsWith('.') ||
-    /^(?:node_modules|coverage|tests?|__tests__|fixtures|secrets?|credentials|private[-_]?keys?|Dockerfile|Makefile|(?:docker-)?compose(?:\..*)?\.(?:yaml|yml)|(?:package-lock|npm-shrinkwrap)\.json|(?:pnpm-lock|pnpm-workspace)\.ya?ml|yarn\.lock|bun\.lockb?)$/i.test(
+    /^(?:node_modules|__pycache__|venv|coverage|tests?|__tests__|fixtures|secrets?|credentials|private[-_]?keys?|Dockerfile|Makefile|(?:docker-)?compose(?:\..*)?\.(?:yaml|yml)|(?:package-lock|npm-shrinkwrap)\.json|(?:pnpm-lock|pnpm-workspace)\.ya?ml|yarn\.lock|bun\.lockb?)$/i.test(
       name,
     ) ||
     /\.(?:pem|key|p12|pfx|jks|keystore|crt|cer|kdbx|sqlite3?|db|log|bak|tgz|zip)$/i.test(

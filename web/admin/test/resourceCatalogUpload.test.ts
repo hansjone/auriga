@@ -97,9 +97,18 @@ it('freezes a folder snapshot and writes the actual packed digest into a new man
     actual,
   );
 });
+it('packs skill folder containing scripts and root dependency manifest', async () => {
+  const archive = await packSkillFolder([
+    file('sample/SKILL.md', '---\nname: sample\ndescription: Sample\n---\nBody'),
+    file('sample/requirements.txt', 'requests>=2.32\n'),
+    file('sample/scripts/run.py', 'print("ok")\n'),
+  ]);
+  expect(archive.size).toBeGreaterThan(0);
+});
 it.each([
   '../SKILL.md',
-  'scripts/a.md',
+  'other/a.md',
+  'scripts/a.exe',
   'assets/a.js',
   'assets/CON.txt',
   'assets/a..txt/../x.md',

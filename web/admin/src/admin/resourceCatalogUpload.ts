@@ -117,7 +117,19 @@ export async function packSkillFolder(files: File[]): Promise<File> {
       ) ||
       !(
         path === 'SKILL.md' ||
-        /^(references|assets)\/.+\.(md|txt|json|yaml|yml)$/i.test(path)
+        [
+          'requirements.txt',
+          'pyproject.toml',
+          'package.json',
+          'uv.lock',
+          'poetry.lock',
+        ].includes(path) ||
+        /^(?:references|assets)\/.+\.(?:md|txt|json|yaml|yml|toml|ini|cfg|csv|sql)$/i.test(
+          path,
+        ) ||
+        /^scripts\/.+\.(?:py|sh|bash|ps1|js|mjs|cjs|ts|mts|cts|md|txt|json|yaml|yml|toml|ini|cfg|csv|sql|lock)$/i.test(
+          path,
+        )
       ) ||
       file.size > (path === 'SKILL.md' ? 262144 : 2 * 1024 * 1024)
     )

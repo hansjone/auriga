@@ -97,6 +97,40 @@ func unifiedRead(file string, value any) error {
 	return decoder.Decode(value)
 }
 
+func unifiedSkillRootFile(name string) bool {
+	switch name {
+	case "SKILL.md", "requirements.txt", "pyproject.toml", "package.json", "uv.lock", "poetry.lock":
+		return true
+	default:
+		return false
+	}
+}
+
+func unifiedSkillFileAllowed(name string) bool {
+	if unifiedSkillRootFile(name) {
+		return true
+	}
+	ext := strings.ToLower(path.Ext(name))
+	if strings.HasPrefix(name, "references/") || strings.HasPrefix(name, "assets/") {
+		switch ext {
+		case ".md", ".txt", ".json", ".yaml", ".yml", ".toml", ".ini", ".cfg", ".csv", ".sql":
+			return true
+		default:
+			return false
+		}
+	}
+	if strings.HasPrefix(name, "scripts/") {
+		switch ext {
+		case ".py", ".sh", ".bash", ".ps1", ".js", ".mjs", ".cjs", ".ts", ".mts", ".cts",
+			".md", ".txt", ".json", ".yaml", ".yml", ".toml", ".ini", ".cfg", ".csv", ".sql", ".lock":
+			return true
+		default:
+			return false
+		}
+	}
+	return false
+}
+
 func unifiedArchivePath(name string) (string, error) {
 	if !utf8.ValidString(name) || len(name) > 240 || strings.ContainsAny(name, "\\:\x00") || strings.HasPrefix(name, "/") {
 		return "", fmt.Errorf("unsafe skill archive path")
@@ -116,7 +150,10 @@ func unifiedArchivePath(name string) (string, error) {
 			}
 		}
 	}
-	if parts[0] != "SKILL.md" && parts[0] != "references" && parts[0] != "assets" {
+	if len(parts) == 1 && unifiedSkillRootFile(parts[0]) {
+		return name, nil
+	}
+	if parts[0] != "references" && parts[0] != "assets" && parts[0] != "scripts" {
 		return "", fmt.Errorf("skill archive root refused")
 	}
 	return name, nil
@@ -179,7 +216,7 @@ func ExtractUnifiedSkill(raw []byte, directory string) error {
 			return err
 		}
 		if header.Typeflag == tar.TypeDir {
-			if header.Size != 0 || name == "SKILL.md" {
+			if header.Size != 0 || unifiedSkillRootFile(name) {
 				return fmt.Errorf("unsafe skill directory")
 			}
 			if err := os.MkdirAll(target, 0755); err != nil {
@@ -190,10 +227,8 @@ func ExtractUnifiedSkill(raw []byte, directory string) error {
 		if header.Typeflag != tar.TypeReg && header.Typeflag != 0 {
 			return fmt.Errorf("skill links/devices refused")
 		}
-		switch strings.ToLower(path.Ext(name)) {
-		case ".md", ".txt", ".json", ".yaml", ".yml":
-		default:
-			return fmt.Errorf("skill attachment is not text-only")
+		if !unifiedSkillFileAllowed(name) {
+			return fmt.Errorf("skill attachment is not allowed")
 		}
 		content, err := io.ReadAll(io.LimitReader(archive, 2*1024*1024+1))
 		if err != nil {

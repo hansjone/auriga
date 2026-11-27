@@ -241,7 +241,7 @@ export function createPrivateSkills({ home }) {
           stat = await lstat(target);
         if (stat.isSymbolicLink()) refuse('common.validation_failed');
         if (stat.isDirectory()) {
-          if (!['references', 'assets'].includes(path.split('/')[0]))
+          if (!['references', 'assets', 'scripts'].includes(path.split('/')[0]))
             refuse('common.validation_failed');
           await visit(target, path + '/');
         } else {
@@ -250,8 +250,19 @@ export function createPrivateSkills({ home }) {
             stat.size > 2097152 ||
             (process.platform !== 'win32' && stat.mode & 0o111) ||
             (path !== 'SKILL.md' &&
-              (!/^(references|assets)\//.test(path) ||
-                !/\.(md|txt|json|yaml|yml)$/.test(path)))
+              ![
+                'requirements.txt',
+                'pyproject.toml',
+                'package.json',
+                'uv.lock',
+                'poetry.lock',
+              ].includes(path) &&
+              !/^(?:references|assets)\/.+\.(?:md|txt|json|yaml|yml|toml|ini|cfg|csv|sql)$/i.test(
+                path,
+              ) &&
+              !/^scripts\/.+\.(?:py|sh|bash|ps1|js|mjs|cjs|ts|mts|cts|md|txt|json|yaml|yml|toml|ini|cfg|csv|sql|lock)$/i.test(
+                path,
+              ))
           )
             refuse('common.validation_failed');
           const bytes = await readFile(target);
