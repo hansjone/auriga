@@ -120,5 +120,15 @@ class SkillArchiveValidatorTest {
         () ->
             SkillArchiveValidator.validate(
                 new ByteArrayInputStream(setuidBytes), setuidBytes.length, manifest()));
+    var collisionFiles = new LinkedHashMap<String, String>();
+    collisionFiles.put("SKILL.md", SKILL_MD);
+    collisionFiles.put("scripts/\u0398.txt", "a\n");
+    collisionFiles.put("scripts/\u03f4.txt", "b\n");
+    byte[] collisionBytes = tarGz(collisionFiles);
+    assertThrows(
+        AurigaException.class,
+        () ->
+            SkillArchiveValidator.validate(
+                new ByteArrayInputStream(collisionBytes), collisionBytes.length, manifest()));
   }
 }

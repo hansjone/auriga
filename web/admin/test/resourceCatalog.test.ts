@@ -465,6 +465,52 @@ it('rejects preview traversal, links, invalid UTF-8 and oversized streams', asyn
   expect(a.contentHash).not.toBe(b.contentHash);
 });
 
+it('renders truncated tail diff notice in review comparison when visible prefix matches', async () => {
+  const view = setup();
+  vi.spyOn(api, 'version').mockResolvedValue({
+    data: { ...v, id: 'v0', version: '0.9.0' },
+    etag: '"1"',
+  });
+  vi.spyOn(api, 'artifact').mockResolvedValue({} as Response);
+  const spy = vi.spyOn(preview, 'archivePreviewWithMeta');
+  spy.mockResolvedValueOnce({
+    files: [
+      {
+        path: 'scripts/big.py',
+        text: 'same-prefix',
+        sizeBytes: 300000,
+        truncated: true,
+        contentHash: 'aaaaaaaaaaaaaaaa',
+      },
+    ],
+    truncated: false,
+  });
+  spy.mockResolvedValueOnce({
+    files: [
+      {
+        path: 'scripts/big.py',
+        text: 'same-prefix',
+        sizeBytes: 300000,
+        truncated: true,
+        contentHash: 'bbbbbbbbbbbbbbbb',
+      },
+    ],
+    truncated: false,
+  });
+  await flushPromises();
+  await view.get('[data-testid="catalog-review"]').trigger('click');
+  await flushPromises();
+  const compareInput = view.get('input:not([data-testid="catalog-reason"])');
+  await compareInput.setValue('v0');
+  const compareBtn = view
+    .findAll('button')
+    .find((b) => b.text().trim() === '对比');
+  expect(compareBtn).toBeTruthy();
+  await compareBtn!.trigger('click');
+  await flushPromises();
+  expect(view.text()).toContain('截断预览外内容已变更');
+});
+
 it('enforces plugin R2 and distinct security quorum even on a malformed lower server assessment', () => {
   const pluginReview = {
     ...r,

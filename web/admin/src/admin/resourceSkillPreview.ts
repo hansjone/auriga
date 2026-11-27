@@ -75,7 +75,7 @@ export async function archivePreviewWithMeta(
 ): Promise<PreviewArchiveResult> {
   if (kind === 'skill') {
     const files = await skillPreview(response);
-    return { files, truncated: files.some((f) => Boolean(f.truncated)) };
+    return { files, truncated: false };
   }
   if (!response.body) throw new Error('Missing body');
   const bytes = await boundedBytes(response.body);
@@ -200,10 +200,10 @@ export function tarText(raw: Uint8Array): PreviewFile[] {
       const fullSlice = raw.subarray(offset + 512, offset + 512 + size);
       const fullText = decoder.decode(fullSlice);
       if (fullText.includes('\0')) throw new Error('Binary content');
-      const truncated = size > maxTextPreviewBytes;
+      const truncated = fullText.length > maxTextPreviewBytes;
       const text = truncated
         ? fullText.slice(0, maxTextPreviewBytes) +
-          `\n\n[文件较大 (${size} bytes)，仅展示前 256 KiB 预览]`
+          `\n\n[文件较大 (${size} bytes)，仅展示前 256K 字符预览]`
         : fullText;
       result.push(
         truncated

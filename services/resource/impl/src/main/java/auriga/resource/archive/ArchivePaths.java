@@ -29,10 +29,11 @@ final class ArchivePaths {
             || key.endsWith(" ")
             || key.chars().anyMatch(c -> "<>:\"|?*".indexOf(c) >= 0))
           throw StrictUstarInputStream.bad();
-        key = key.toUpperCase(Locale.ROOT);
-        String base = key.split("\\.", 2)[0].replaceAll("[ .]+$", "");
+        String upper = key.toUpperCase(Locale.ROOT);
+        String base = upper.split("\\.", 2)[0].replaceAll("[ .]+$", "");
         if (Set.of("CON", "PRN", "AUX", "NUL", "CONIN$", "CONOUT$").contains(base)
             || base.matches("(?:COM|LPT)[1-9¹²³]")) throw StrictUstarInputStream.bad();
+        key = Normalizer.normalize(upper.toLowerCase(Locale.ROOT), Normalizer.Form.NFC);
       }
       segments.add(key);
     }
