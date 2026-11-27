@@ -32,7 +32,7 @@ const profileDir = join(home, 'profiles', profileName);
 const [mode, ...args] = process.argv.slice(2);
 const pnpm = {
   command: process.execPath,
-  args: [join(dir, 'tools/pnpm/node_modules/pnpm/bin/pnpm.cjs')],
+  args: [fileURLToPath(new URL('./desktop-pnpm.mjs', import.meta.url)), home],
   env: { npm_config_store_dir: join(home, 'pnpm-store') },
 };
 
@@ -66,14 +66,28 @@ if (mode === 'plugin') {
     'dsh',
     join(core, 'cordis.patch.yml'),
   );
-  const config = profile.patches
-    .filter(
-      (patch) =>
-        patch.id === coreName &&
-        !patch.insert &&
-        (!patch.name || patch.name === coreName),
-    )
-    .findLast((patch) => Object.hasOwn(patch, 'config'))?.config;
+  // Reuse DSH's normal bundle, profile and home precedence to read the
+  // effective core configuration before pinning the executable and enablement.
+  const coreLayer = { packageName: coreName, patches: packaged };
+  const layers = profile.layers.some((layer) => layer.packageName === coreName)
+    ? profile.layers.map((layer) =>
+        layer.packageName === coreName ? coreLayer : layer,
+      )
+    : [...profile.layers, coreLayer];
+  const config = boot
+    .composeEntries([
+      boot.readProfilePatches(
+        'dsh',
+        {
+          dir: profileDir,
+          home,
+          patchPath: profile.patchPath,
+          overlays: [],
+        },
+        { ...profile, layers },
+      ),
+    ])
+    .find((row) => row.id === coreName && row.name === coreName)?.config;
   const coreEntries = packaged
     .flatMap((patch) => patch.insert ?? [])
     .filter((row) => row.id === coreName && row.name === coreName);

@@ -419,6 +419,26 @@ try {
       'package',
     ]);
     check(packedFailure.status === 0, 'pack failing business plugin fixture');
+    writeFileSync(
+      join(failingSource, 'package.json'),
+      JSON.stringify({
+        name: 'auriga-dsh',
+        version: '99.0.0',
+        dsh: { bundle: { patch: './patch.yml' } },
+      }),
+    );
+    const collisionTar = join(sandbox, 'same-name-plugin.tgz');
+    const packedCollision = run('tar.exe', [
+      '-czf',
+      collisionTar,
+      '-C',
+      join(failingSource, '..'),
+      'package',
+    ]);
+    check(
+      packedCollision.status === 0,
+      'pack same-name business plugin fixture',
+    );
     const before = treeDigest(versionDir, DESKTOP_CORE_DIR);
     await withDsh(async (dsh) => {
       const { call } = dsh;
@@ -473,6 +493,18 @@ try {
         refused.application === 'failed' &&
           refused.packageResult?.output.includes('missing-dependency'),
         'native dependency installation failure was reported',
+      );
+      const collision = await install(collisionTar);
+      check(
+        collision.application === 'failed' &&
+          collision.packageResult?.output.includes(
+            'reserved for the release core',
+          ) &&
+          !Object.hasOwn(
+            readJson(join(profile, 'package.json')).dependencies,
+            'auriga-dsh',
+          ),
+        'native package manager refuses a same-name package',
       );
       await pluginChecks(dsh, expectOrigin ?? '', 'after-install-failure');
     });

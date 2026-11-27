@@ -102,6 +102,7 @@ import {
   pythonUserFailureStage,
 } from './python-user.mjs';
 import { ensureDataHomeWritable } from './data-home-access.mjs';
+import { desktopPnpmLayout } from './desktop-pnpm-layout.mjs';
 
 export const PROFILE = 'auriga';
 /** Fixed loopback port for the published Auriga desktop DSH web UI. */
@@ -595,13 +596,8 @@ function migrateLegacyPluginTree(target, dataHome) {
           'install',
           '--offline',
           '--ignore-scripts',
-          '--ignore-pnpmfile',
           '--no-frozen-lockfile',
-          '--ignore-workspace',
-          '--store-dir',
-          join(dataHome, 'pnpm-store'),
-          '--config.node-linker=isolated',
-          '--config.virtual-store-dir=node_modules/.pnpm',
+          ...desktopPnpmLayout(stage, join(dataHome, 'pnpm-store')),
         ],
         { cwd: stage, env, timeout: 120000, windowsHide: true },
       );
@@ -617,6 +613,12 @@ function migrateLegacyPluginTree(target, dataHome) {
           },
         );
       rebaseStagedLinks(join(stage, modules), stage, profile);
+      // pnpm 11 records an explicitly configured virtual store as an absolute
+      // path. The promoted tree has the same '.pnpm' directory under modules.
+      const modulesMetadata = join(stage, modules, '.modules.yaml');
+      const metadata = readJson(modulesMetadata);
+      metadata.virtualStoreDir = '.pnpm';
+      writeJsonAtomic(modulesMetadata, metadata);
     }
     rmSync(join(profile, modules), { recursive: true, force: true });
     rmSync(join(profile, lock), { force: true });
@@ -627,6 +629,43 @@ function migrateLegacyPluginTree(target, dataHome) {
     rmSync(oldBundle, { force: true });
   } finally {
     rmSync(stage, { recursive: true, force: true });
+  }
+}
+
+/** Clear only plugin inputs after transition() has sealed a complete backup. */
+function recoverPluginProfile(target, dataHome) {
+  const profile = profileDir(dataHome);
+  assertLocalPath(profile);
+  for (const name of [
+    'node_modules',
+    'package.json',
+    'pnpm-lock.yaml',
+    'pnpm-workspace.yaml',
+    '.auriga/auriga-dsh.tgz',
+  ]) {
+    const file = join(profile, name);
+    assertLocalPath(file);
+    rmSync(file, { recursive: name === 'node_modules', force: true });
+  }
+  const patch = join(profile, 'cordis.patch.yml');
+  assertLocalPath(patch);
+  if (existsSync(patch)) {
+    const require = createRequire(join(target, 'upstream/app/package.json'));
+    const parse = yamlParser(require('yaml'));
+    let config;
+    try {
+      config = parse(readFileSync(patch, 'utf8'))?.findLast(
+        (row) => row?.id === PLUGIN && !row.insert && row.config,
+      )?.config;
+    } catch {
+      /* The original patch is preserved in the transaction's backup. */
+    }
+    if (config && typeof config === 'object' && !Array.isArray(config))
+      writeAtomic(
+        patch,
+        `- id: auriga-dsh\n  config: ${JSON.stringify(config)}\n`,
+      );
+    else rmSync(patch);
   }
 }
 
@@ -735,6 +774,7 @@ export function defaultSmoke(dir, dataHome) {
         : [dshBin(dir), '--profile', PROFILE, '--dump-config'],
       {
         env: launchEnv(dir, smokeHome ?? dataHome),
+        ...(smokeHome ? { cwd: smokeHome } : {}),
         encoding: 'utf8',
         timeout: 120000,
       },
@@ -1345,6 +1385,7 @@ function installStopped({
   cancelled = () => false,
   beginCommit = () => {},
   movePayload = false,
+  recoverPlugins = false,
   preverifiedManifest = null,
 }) {
   const checkpoint = () => {
@@ -1516,7 +1557,13 @@ function installStopped({
         progress('profile', 0);
         created.profile = !existsSync(profileDir(dataHome));
         const isolated = scopedCore(target);
-        if (isolated) migrateLegacyPluginTree(target, dataHome);
+        if (recoverPlugins) {
+          if (!isolated || created.profile)
+            throw new Error(
+              '离线插件恢复需要已有 profile 和安装级核心发行包。',
+            );
+          recoverPluginProfile(target, dataHome);
+        } else if (isolated) migrateLegacyPluginTree(target, dataHome);
         seedProfile(dataHome, { platformOrigin, target, isolated });
         if (!isolated) syncPlugin(target, dataHome);
         checkpoint();

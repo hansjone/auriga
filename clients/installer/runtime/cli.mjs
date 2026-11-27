@@ -75,6 +75,7 @@ try {
       root: values.root,
       dataHome: values['data-home'],
       movePayload: values['move-payload'] === true,
+      recoverPlugins: values['recover-plugin-profile'] === true,
       platformBinding:
         typeof values['platform-origin'] === 'string'
           ? {

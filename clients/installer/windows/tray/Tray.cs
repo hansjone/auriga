@@ -1219,8 +1219,13 @@ sealed class TrayApp : ApplicationContext
         UpdateMenu();
         ThreadPool.QueueUserWorkItem(delegate
         {
-            string error;
-            var result = Desktop.RunJson(root, "diagnostics startup --root " + Desktop.Quote(root), out error);
+            Dictionary<string, object> result = null;
+            try
+            {
+                string error;
+                result = Desktop.RunJson(root, "diagnostics startup --root " + Desktop.Quote(root), out error);
+            }
+            catch (Exception) { Log("Startup diagnostics could not start"); }
             Post(delegate
             {
                 busy = false;

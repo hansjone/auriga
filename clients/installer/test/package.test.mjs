@@ -143,6 +143,7 @@ test(
       'upstream/app/node_modules/auriga-dsh/desktop-bundle.yml',
       'upstream/app/node_modules/auriga-dsh/cordis.patch.yml',
       'auriga/runtime/desktop-dsh.mjs',
+      'auriga/runtime/desktop-pnpm.mjs',
       'auriga/runtime/core.mjs',
       'auriga/runtime/desktop-core-policy.mjs',
       'auriga/runtime/cli.mjs',

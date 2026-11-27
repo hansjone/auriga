@@ -197,6 +197,32 @@ test('missing offline dependencies undo the migration and keep the previous vers
   assert.deepEqual(snapshot(f), before);
 });
 
+test('explicit offline profile recovery preserves the unusable original and user state', (t) => {
+  const f = fixture(t);
+  const old = put(f, { name: 'old' });
+  const profile = profileDir(f.dataHome);
+  writeFileSync(join(profile, 'package.json'), '{broken');
+  rmSync(join(profile, 'cordis.patch.yml'));
+  writeFileSync(join(profile, 'user-state.txt'), 'preserved');
+  const next = put(
+    f,
+    { name: 'next', pluginVersion: '1.1.0', isolated: true },
+    { recoverPlugins: true },
+  );
+  assert.equal(readState(f.root).current, next.id);
+  assert.deepEqual(JSON.parse(profileManifest(f.dataHome)).dependencies, {});
+  assert.equal(text(join(profile, 'user-state.txt')), 'preserved');
+  const backup = join(
+    f.dataHome,
+    'profile-backups',
+    'auriga',
+    old.id,
+    'profile',
+  );
+  assert.equal(text(join(backup, 'package.json')), '{broken');
+  assert.ok(existsSync(join(backup, 'node_modules/auriga-dsh/package.json')));
+});
+
 test('fresh install seeds profile, plugin, ownership marker and platform address', (t) => {
   const f = fixture(t);
   const result = put(
