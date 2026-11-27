@@ -8,6 +8,7 @@ import {
   readdirSync,
   renameSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -27,6 +28,7 @@ import {
   uninstall,
 } from '../runtime/core.mjs';
 import { buildPayload, tempBase } from './helpers.mjs';
+import { DESKTOP_CORE_DIR, verifyPackage } from '../runtime/verify.mjs';
 
 const noSmoke = () => {};
 
@@ -135,6 +137,115 @@ function installA(f) {
   writeFileSync(join(profile, 'package.json'), JSON.stringify(manifest));
   return a;
 }
+
+test('fresh desktop release keeps the verified core and its closure out of the package-manager tree', (t) => {
+  const f = fixture(t);
+  const result = put(f, { isolated: true });
+  const profile = profileDir(f.dataHome);
+  const dir = join(f.root, 'versions', result.id);
+  assert.deepEqual(JSON.parse(profileManifest(f.dataHome)).dependencies, {});
+  assert.ok(!existsSync(join(profile, '.auriga', 'auriga-dsh.tgz')));
+  assert.deepEqual(readdirSync(join(profile, 'node_modules')), []);
+  const dependency = join(
+    DESKTOP_CORE_DIR,
+    'node_modules/@nats-io/nats-core/package.json',
+  );
+  assert.ok(existsSync(join(dir, dependency)));
+  writeFileSync(join(dir, dependency), 'changed');
+  assert.throws(
+    () => verifyPackage(dir, { trees: false }),
+    /size mismatch.*nats-core/,
+  );
+});
+
+test('upgrading a damaged mixed profile retains user state and never rolls back into the mixed layout', (t) => {
+  const f = fixture(t);
+  put(f, { name: 'old' });
+  const profile = profileDir(f.dataHome);
+  const modules = join(profile, 'node_modules');
+  mkdirSync(join(modules, '.ignored'));
+  renameSync(
+    join(modules, 'auriga-dsh'),
+    join(modules, '.ignored', 'auriga-dsh'),
+  );
+  const settings = join(profile, 'auriga-settings-fixture.json');
+  writeFileSync(settings, 'saved');
+  const newVersion = put(f, {
+    name: 'new',
+    pluginVersion: '1.1.0',
+    isolated: true,
+  });
+  assert.equal(readState(f.root).current, newVersion.id);
+  assert.equal(text(settings), 'saved');
+  assert.deepEqual(readdirSync(modules), []);
+  assert.deepEqual(JSON.parse(profileManifest(f.dataHome)).dependencies, {});
+  assert.throws(() => rollback({ root: f.root, smoke: noSmoke }), {
+    code: 'desktop.plugin_layout_rollback',
+  });
+  assert.equal(readState(f.root).current, newVersion.id);
+});
+
+test('missing offline dependencies undo the migration and keep the previous version and profile', (t) => {
+  const f = fixture(t);
+  installA(f);
+  const before = snapshot(f);
+  assert.throws(
+    () => put(f, { name: 'new', pluginVersion: '1.1.0', isolated: true }),
+    {
+      code: 'desktop.plugin_migration_failed',
+    },
+  );
+  assert.deepEqual(snapshot(f), before);
+});
+
+test('offline migration rejects a pnpm store link before changing the existing profile', (t) => {
+  const f = fixture(t);
+  installA(f);
+  const before = snapshot(f);
+  const outside = join(f.base, 'outside');
+  mkdirSync(outside);
+  symlinkSync(
+    outside,
+    join(f.dataHome, 'pnpm-store'),
+    process.platform === 'win32' ? 'junction' : 'dir',
+  );
+  assert.throws(
+    () => put(f, { name: 'next', pluginVersion: '1.1.0', isolated: true }),
+    /guardian path contains a link/,
+  );
+  assert.deepEqual(readdirSync(outside), []);
+  assert.deepEqual(snapshot(f), before);
+});
+
+test('explicit offline profile recovery preserves the unusable original and user state', (t) => {
+  const f = fixture(t);
+  put(f, { name: 'old' });
+  const profile = profileDir(f.dataHome);
+  writeFileSync(join(profile, 'package.json'), '{broken');
+  rmSync(join(profile, 'cordis.patch.yml'));
+  writeFileSync(join(profile, 'user-state.txt'), 'preserved');
+  const next = put(
+    f,
+    { name: 'next', pluginVersion: '1.1.0', isolated: true },
+    { recoverPlugins: true },
+  );
+  assert.equal(readState(f.root).current, next.id);
+  assert.deepEqual(JSON.parse(profileManifest(f.dataHome)).dependencies, {});
+  assert.equal(text(join(profile, 'user-state.txt')), 'preserved');
+  const backup = next.profileBackup;
+  assert.equal(text(join(backup, 'package.json')), '{broken');
+  assert.ok(existsSync(join(backup, 'node_modules/auriga-dsh/package.json')));
+
+  rmSync(join(profile, 'cordis.patch.yml'));
+  const second = put(
+    f,
+    { name: 'next', pluginVersion: '1.1.0', isolated: true },
+    { recoverPlugins: true },
+  );
+  assert.equal(second.id, next.id);
+  assert.notEqual(second.profileBackup, backup);
+  assert.equal(text(join(backup, 'package.json')), '{broken');
+});
 
 test('fresh install seeds profile, plugin, ownership marker and platform address', (t) => {
   const f = fixture(t);

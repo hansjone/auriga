@@ -28,6 +28,7 @@ import { randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { setTimeout as delay } from 'node:timers/promises';
 import { launchEnv } from '../runtime/core.mjs';
+import { DESKTOP_CORE_DIR, treeDigest } from '../runtime/verify.mjs';
 
 const args = Object.fromEntries(
   process.argv.slice(2).reduce((acc, v, i, all) => {
@@ -272,17 +273,16 @@ async function pluginChecks({ base, call }, expected, label) {
   );
 }
 
-const pluginVersion = () =>
-  readJson(
-    join(
-      dataHome,
-      'profiles',
-      'auriga',
-      'node_modules',
-      'auriga-dsh',
-      'package.json',
-    ),
-  ).version;
+const pluginVersion = () => {
+  const id = readJson(join(root, 'install.json')).current;
+  const dir = join(root, 'versions', id);
+  const manifest = readJson(join(dir, 'manifest.json'));
+  const core =
+    manifest.plugin.scope === 'installation'
+      ? join(dir, DESKTOP_CORE_DIR)
+      : join(dataHome, 'profiles/auriga/node_modules/auriga-dsh');
+  return readJson(join(core, 'package.json')).version;
+};
 
 try {
   // 1. install the old package (zip directory or single-file exe)
@@ -293,9 +293,23 @@ try {
   );
   const profile = join(dataHome, 'profiles', 'auriga');
   const versionDir = join(root, 'versions', first.id);
+  const scoped = manifestOld.plugin.scope === 'installation';
+  const profileCore = join(
+    profile,
+    'node_modules',
+    'auriga-dsh',
+    'package.json',
+  );
   check(
-    existsSync(join(profile, 'node_modules', 'auriga-dsh', 'package.json')),
-    'plugin copied into profile',
+    scoped
+      ? existsSync(join(versionDir, DESKTOP_CORE_DIR, 'package.json')) &&
+          !existsSync(profileCore) &&
+          !Object.hasOwn(
+            readJson(join(profile, 'package.json')).dependencies,
+            'auriga-dsh',
+          )
+      : existsSync(profileCore),
+    'core ownership matches the release layout',
   );
 
   // 2. shell integration: shortcuts and Apps & features entry (current user)
@@ -369,9 +383,11 @@ try {
       name: 'e2e-tiny-plugin',
       version: '1.0.0',
       main: 'index.js',
+      dsh: { bundle: { patch: './patch.yml' } },
     }),
   );
   writeFileSync(join(tiny, 'index.js'), 'module.exports = {};\n');
+  writeFileSync(join(tiny, 'patch.yml'), '[]\n');
   const pack = spawnSync('npm', ['pack', '--silent'], {
     cwd: tiny,
     env,
@@ -379,19 +395,144 @@ try {
     shell: true,
   });
   const tgz = join(tiny, pack.stdout.trim().split(/\r?\n/).pop());
-  const added = spawnSync(
-    join(versionDir, 'upstream', 'node', 'node.exe'),
-    [dshBin, 'plugin', '--profile', 'auriga', 'add', tgz],
-    { env: launchEnvironment, cwd: sandbox, encoding: 'utf8', timeout: 600000 },
-  );
-  writeFileSync(join(sandbox, 'plugin-add.log'), added.stdout + added.stderr);
-  check(
-    added.status === 0 &&
-      existsSync(join(profile, 'node_modules', 'e2e-tiny-plugin')) &&
-      existsSync(join(profile, 'node_modules', 'auriga-dsh', 'package.json')),
-    'dsh plugin add through bundled pnpm keeps the Auriga plugin',
-    String(added.status),
-  );
+  if (scoped) {
+    const failingSource = join(sandbox, 'failing-plugin', 'package');
+    mkdirSync(failingSource, { recursive: true });
+    writeFileSync(
+      join(failingSource, 'package.json'),
+      JSON.stringify({
+        name: 'e2e-failing-plugin',
+        version: '1.0.0',
+        dsh: { bundle: { patch: './patch.yml' } },
+        dependencies: {
+          'e2e-missing-dependency': 'file:./missing-dependency.tgz',
+        },
+      }),
+    );
+    writeFileSync(join(failingSource, 'patch.yml'), '[]\n');
+    const failingTar = join(sandbox, 'failing-plugin.tgz');
+    const packedFailure = run('tar.exe', [
+      '-czf',
+      failingTar,
+      '-C',
+      join(failingSource, '..'),
+      'package',
+    ]);
+    check(packedFailure.status === 0, 'pack failing business plugin fixture');
+    writeFileSync(
+      join(failingSource, 'package.json'),
+      JSON.stringify({
+        name: 'auriga-dsh',
+        version: '99.0.0',
+        dsh: { bundle: { patch: './patch.yml' } },
+      }),
+    );
+    const collisionTar = join(sandbox, 'same-name-plugin.tgz');
+    const packedCollision = run('tar.exe', [
+      '-czf',
+      collisionTar,
+      '-C',
+      join(failingSource, '..'),
+      'package',
+    ]);
+    check(
+      packedCollision.status === 0,
+      'pack same-name business plugin fixture',
+    );
+    const before = treeDigest(versionDir, DESKTOP_CORE_DIR);
+    await withDsh(async (dsh) => {
+      const { call } = dsh;
+      const manage = async (operation, args) => {
+        const method = 'pluginManager/' + operation;
+        const response = await call('/api/' + method, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            type: 'client-request',
+            rpcId: randomUUID(),
+            method,
+            payload: { args },
+          }),
+        });
+        check(
+          response.status === 200,
+          'native plugin installer responded',
+          String(response.status),
+        );
+        const { result } = await response.json();
+        check(
+          result?.ok === true,
+          'native plugin RPC accepted the request',
+          result?.error?.code,
+        );
+        return result.value;
+      };
+      const install = (file) =>
+        manage('installBundle', {
+          spec: 'file:' + file,
+          options: { enabled: false, requestId: randomUUID() },
+        });
+      const blocked = await manage('setBundleEnabled', {
+        name: 'auriga-dsh',
+        enabled: false,
+      });
+      check(
+        blocked.error?.code === 'management-required',
+        'native manager protects core enablement',
+      );
+      const added = await install(tgz);
+      check(
+        added.bundle === 'e2e-tiny-plugin' &&
+          !added.error &&
+          existsSync(join(profile, 'node_modules', 'e2e-tiny-plugin')),
+        'native plugin installer created the business dependency',
+        added.application,
+      );
+      const refused = await install(failingTar);
+      check(
+        refused.application === 'failed' &&
+          refused.packageResult?.output.includes('missing-dependency'),
+        'native dependency installation failure was reported',
+      );
+      const collision = await install(collisionTar);
+      check(
+        collision.application === 'failed' &&
+          collision.packageResult?.output.includes(
+            'reserved for the release core',
+          ) &&
+          !Object.hasOwn(
+            readJson(join(profile, 'package.json')).dependencies,
+            'auriga-dsh',
+          ),
+        'native package manager refuses a same-name package',
+      );
+      await pluginChecks(dsh, expectOrigin ?? '', 'after-install-failure');
+    });
+    check(
+      treeDigest(versionDir, DESKTOP_CORE_DIR).sha256 === before.sha256 &&
+        !existsSync(profileCore),
+      'business install and failure preserved the release core and dependency closure',
+    );
+  } else {
+    const added = spawnSync(
+      join(versionDir, 'upstream', 'node', 'node.exe'),
+      [dshBin, 'plugin', '--profile', 'auriga', 'add', tgz],
+      {
+        env: launchEnvironment,
+        cwd: sandbox,
+        encoding: 'utf8',
+        timeout: 600000,
+      },
+    );
+    writeFileSync(join(sandbox, 'plugin-add.log'), added.stdout + added.stderr);
+    check(
+      added.status === 0 &&
+        existsSync(join(profile, 'node_modules', 'e2e-tiny-plugin')) &&
+        existsSync(profileCore),
+      'legacy plugin install through bundled pnpm',
+      String(added.status),
+    );
+  }
 
   // 4. launch, plugin loaded, default platform address, configurable
   const defaultOrigin = expectOrigin ?? '';
@@ -555,12 +696,17 @@ try {
     });
     // 7. rollback
     const rb = run(join(root, 'bin', 'rollback.cmd'), [], { shell: true });
+    const crossesLayout =
+      !scoped && manifestNew.plugin.scope === 'installation';
     check(
-      rb.status === 0 &&
-        readFileSync(join(root, 'current.txt'), 'utf8').trim() ===
-          manifestOld.id,
-      'rollback to old version',
-      rb.stdout.trim(),
+      crossesLayout
+        ? rb.status !== 0 &&
+            readJson(join(root, 'install.json')).current === manifestNew.id
+        : rb.status === 0 &&
+            readJson(join(root, 'install.json')).current === manifestOld.id,
+      crossesLayout
+        ? 'rollback into legacy mixed layout refused'
+        : 'rollback to old version',
     );
     await withDsh(async (dsh) =>
       pluginChecks(dsh, 'https://team.example.org', 'rolled-back'),

@@ -55,15 +55,18 @@ import {
   existsSync,
   lstatSync,
   mkdirSync,
+  mkdtempSync,
   openSync,
   closeSync,
   readdirSync,
+  readlinkSync,
   readFileSync,
   realpathSync,
   renameSync,
   rmSync,
   rmdirSync,
   statSync,
+  symlinkSync,
   writeFileSync,
 } from 'node:fs';
 import {
@@ -77,7 +80,9 @@ import {
   sep,
 } from 'node:path';
 import { spawnSync, spawn } from 'node:child_process';
+import { clearInterval, setInterval } from 'node:timers';
 import { randomUUID } from 'node:crypto';
+import { tmpdir } from 'node:os';
 import {
   PRODUCT,
   computeId,
@@ -97,6 +102,7 @@ import {
   pythonUserFailureStage,
 } from './python-user.mjs';
 import { ensureDataHomeWritable } from './data-home-access.mjs';
+import { desktopPnpmLayout } from './desktop-pnpm-layout.mjs';
 
 export const PROFILE = 'auriga';
 /** Fixed loopback port for the published Auriga desktop DSH web UI. */
@@ -229,6 +235,17 @@ export function dshBin(dir) {
   return join(pkgDir, bin);
 }
 
+const scopedCore = (dir) =>
+  readJson(join(dir, 'manifest.json')).plugin.scope === 'installation';
+
+function dshArgs(dir, args, mode = 'profile') {
+  if (scopedCore(dir))
+    return [join(dir, 'auriga/runtime/desktop-dsh.mjs'), mode, ...args];
+  if (mode === 'plugin')
+    return [dshBin(dir), 'plugin', '--profile', PROFILE, ...args];
+  return [dshBin(dir), '--profile', PROFILE, ...args];
+}
+
 export function nodeBin(dir) {
   return join(
     dir,
@@ -297,12 +314,15 @@ function assertOwned(root) {
 // --------------------------------------------------------------- profile --
 
 /** Seed profile manifest and (only when absent) the patch with the platform address. */
-function seedProfile(dataHome, { platformOrigin, target }) {
+function seedProfile(dataHome, { platformOrigin, target, isolated = false }) {
   const dir = profileDir(dataHome);
   mkdirSync(join(dir, 'node_modules'), { recursive: true });
   writeFileSync(join(dir, DATA_MARKER), 'Auriga Desktop profile\n');
   const manifestFile = join(dir, 'package.json');
   const existing = existsSync(manifestFile) ? readJson(manifestFile) : {};
+  const dependencies = { ...existing.dependencies };
+  if (isolated) delete dependencies[PLUGIN];
+  else dependencies[PLUGIN] = PLUGIN_SPEC;
   const bundles = [...(existing.dsh?.profile?.bundles ?? [])];
   for (const b of BUNDLES) if (!bundles.includes(b)) bundles.push(b);
   writeFileSync(
@@ -312,7 +332,7 @@ function seedProfile(dataHome, { platformOrigin, target }) {
         ...existing,
         name: existing.name ?? 'auriga-desktop-profile',
         private: true,
-        dependencies: { ...existing.dependencies, [PLUGIN]: PLUGIN_SPEC },
+        dependencies,
         dsh: {
           ...existing.dsh,
           profile: { ...existing.dsh?.profile, bundles },
@@ -505,6 +525,158 @@ function syncPlugin(dir, dataHome) {
   }
 }
 
+/** A staged pnpm tree may contain absolute NTFS junctions to its own paths. */
+function rebaseStagedLinks(dir, stage, destination) {
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const path = join(dir, entry.name);
+    if (entry.isDirectory()) rebaseStagedLinks(path, stage, destination);
+    if (!entry.isSymbolicLink()) continue;
+    const link = readlinkSync(path);
+    if (!isAbsolute(link) || !isInside(stage, link)) continue;
+    const kind = statSync(path).isDirectory()
+      ? process.platform === 'win32'
+        ? 'junction'
+        : 'dir'
+      : 'file';
+    rmSync(path);
+    symlinkSync(join(destination, relative(stage, link)), path, kind);
+  }
+}
+
+function migrateLegacyPluginTree(target, dataHome) {
+  const profile = profileDir(dataHome);
+  const manifestFile = join(profile, 'package.json');
+  if (!existsSync(manifestFile)) return;
+  assertLocalPath(profile);
+  assertLocalPath(manifestFile);
+  const manifest = readJson(manifestFile);
+  const oldBundle = join(profile, '.auriga', 'auriga-dsh.tgz');
+  assertLocalPath(oldBundle);
+  if (
+    !Object.hasOwn(manifest.dependencies ?? {}, PLUGIN) &&
+    !existsSync(oldBundle) &&
+    !existsSync(join(profile, 'node_modules', PLUGIN))
+  )
+    return;
+
+  const stage = mkdtempSync(
+    join(dirname(profile), '.auriga-package-migration-'),
+  );
+  try {
+    const dependencies = { ...manifest.dependencies };
+    delete dependencies[PLUGIN];
+    writeJsonAtomic(join(stage, 'package.json'), { ...manifest, dependencies });
+    const specs = [
+      ...Object.values(dependencies),
+      ...Object.values(manifest.optionalDependencies ?? {}),
+      ...Object.values(manifest.devDependencies ?? {}),
+    ];
+    const lock = 'pnpm-lock.yaml';
+    const modules = 'node_modules';
+    if (specs.length) {
+      const lockFile = join(profile, lock);
+      assertLocalPath(lockFile);
+      if (existsSync(lockFile)) cpSync(lockFile, join(stage, lock));
+      for (const spec of specs) {
+        const local = /^(?:file|link):(.+)$/.exec(spec)?.[1];
+        if (!local || isAbsolute(local)) continue;
+        const source = resolve(profile, local);
+        if (source === profile || !isInside(profile, source)) continue;
+        assertLocalPath(source);
+        const staged = join(stage, relative(profile, source));
+        mkdirSync(dirname(staged), { recursive: true });
+        copyTree(source, staged);
+      }
+      const env = Object.fromEntries(
+        Object.entries(launchEnv(target, dataHome)).filter(
+          ([key]) =>
+            !/^(?:npm_config_|pnpm_|node_options$|node_path$)/i.test(key),
+        ),
+      );
+      const result = spawnSync(
+        nodeBin(target),
+        [
+          join(target, 'tools/pnpm/node_modules/pnpm/bin/pnpm.cjs'),
+          'install',
+          '--offline',
+          '--ignore-scripts',
+          '--no-frozen-lockfile',
+          ...desktopPnpmLayout(stage, join(dataHome, 'pnpm-store')),
+        ],
+        { cwd: stage, env, timeout: 120000, windowsHide: true },
+      );
+      if (
+        result.status !== 0 ||
+        !existsSync(join(stage, modules)) ||
+        !existsSync(join(stage, lock))
+      )
+        throw Object.assign(
+          new Error('无法从本地缓存重建业务插件依赖，已保留原 profile'),
+          {
+            code: 'desktop.plugin_migration_failed',
+          },
+        );
+      rebaseStagedLinks(join(stage, modules), stage, profile);
+      // pnpm 11 records an explicitly configured virtual store as an absolute
+      // path. The promoted tree has the same '.pnpm' directory under modules.
+      const modulesMetadata = join(stage, modules, '.modules.yaml');
+      const metadata = readJson(modulesMetadata);
+      metadata.virtualStoreDir = '.pnpm';
+      writeJsonAtomic(modulesMetadata, metadata);
+    }
+    rmSync(join(profile, modules), { recursive: true, force: true });
+    rmSync(join(profile, lock), { force: true });
+    if (specs.length) {
+      renameWithRetry(join(stage, modules), join(profile, modules));
+      renameWithRetry(join(stage, lock), join(profile, lock));
+    }
+    rmSync(oldBundle, { force: true });
+  } finally {
+    rmSync(stage, { recursive: true, force: true });
+  }
+}
+
+/** Clear only plugin inputs after transition() has sealed a complete backup. */
+function recoverPluginProfile(target, dataHome) {
+  const profile = profileDir(dataHome);
+  assertLocalPath(profile);
+  for (const name of [
+    'node_modules',
+    'package.json',
+    'pnpm-lock.yaml',
+    'pnpm-workspace.yaml',
+    '.auriga/auriga-dsh.tgz',
+  ]) {
+    const file = join(profile, name);
+    assertLocalPath(file);
+    rmSync(file, { recursive: name === 'node_modules', force: true });
+  }
+  const patch = join(profile, 'cordis.patch.yml');
+  assertLocalPath(patch);
+  if (existsSync(patch)) {
+    const require = createRequire(join(target, 'upstream/app/package.json'));
+    const parse = yamlParser(require('yaml'));
+    let config;
+    try {
+      config = parse(readFileSync(patch, 'utf8'))?.findLast(
+        (row) =>
+          row?.id === PLUGIN &&
+          !row.insert &&
+          (!row.name || row.name === PLUGIN) &&
+          row.config,
+      )?.config;
+    } catch {
+      /* The original patch is preserved in the transaction's backup. */
+    }
+    if (config && typeof config === 'object' && !Array.isArray(config))
+      writeAtomic(
+        patch,
+        `- id: auriga-dsh\n  config: ${JSON.stringify(config)}\n`,
+      );
+    else rmSync(patch);
+  }
+}
+
 // ----------------------------------------------------------------- smoke --
 
 /** Environment inherited by DSH and its shell tools; never changes system settings. */
@@ -533,7 +705,11 @@ export function launchEnv(
     join(dir, 'tools', 'bin'),
     dirname(nodeBin(dir)),
   ].filter(Boolean);
-  const clean = stripSystemProxyEnv(cleanPythonEnv(base));
+  const clean = Object.fromEntries(
+    Object.entries(stripSystemProxyEnv(cleanPythonEnv(base))).filter(
+      ([key]) => !/^NODE_(OPTIONS|PATH)$/i.test(key),
+    ),
+  );
   const proxyEnv = localProxy
     ? localProxy.env()
     : {
@@ -592,13 +768,32 @@ export function pythonCommand(root, action, { index } = {}) {
 /** Default smoke check: the upstream CLI must load the profile with the plugin row. */
 export function defaultSmoke(dir, dataHome) {
   ensureDataHomeWritable(dataHome);
-  const result = spawnSync(
-    nodeBin(dir),
-    [dshBin(dir), '--profile', PROFILE, '--dump-config'],
-    { env: launchEnv(dir, dataHome), encoding: 'utf8', timeout: 120000 },
-  );
+  const isolated = existsSync(join(dir, 'manifest.json')) && scopedCore(dir);
+  // Setup can be elevated. Only the release composition may execute in smoke.
+  const smokeHome = isolated
+    ? mkdtempSync(join(tmpdir(), 'auriga-core-smoke-'))
+    : null;
+  let result;
+  try {
+    result = spawnSync(
+      nodeBin(dir),
+      isolated
+        ? dshArgs(dir, [], 'check')
+        : [dshBin(dir), '--profile', PROFILE, '--dump-config'],
+      {
+        env: launchEnv(dir, smokeHome ?? dataHome),
+        ...(smokeHome ? { cwd: smokeHome } : {}),
+        encoding: 'utf8',
+        timeout: 120000,
+      },
+    );
+  } finally {
+    if (smokeHome) rmSync(smokeHome, { recursive: true, force: true });
+  }
   if (result.status !== 0) {
-    const tail = (result.stderr || result.stdout || '').slice(-600);
+    const tail = (result.stderr || result.stdout || '')
+      .replace(/token=[A-Za-z0-9_-]+/g, 'token=REDACTED')
+      .slice(-600);
     const epermHint = /\b(?:EPERM|EACCES)\b/.test(tail)
       ? '（文件写入被拒绝：请先完全退出旧版客户端，或将安装目录与用户数据目录加入杀软/安全软件白名单后重试）'
       : '';
@@ -607,11 +802,45 @@ export function defaultSmoke(dir, dataHome) {
       { code: 'desktop.smoke_failed' },
     );
   }
-  if (!/auriga-dsh/.test(result.stdout))
+  if (!(isolated ? /^auriga-core-active$/m : /auriga-dsh/).test(result.stdout))
     throw Object.assign(
-      new Error('smoke failed: effective config does not list auriga-dsh'),
+      new Error('smoke failed: auriga-dsh startup marker missing'),
       { code: 'desktop.smoke_failed' },
     );
+}
+
+/** Inspect the installed release independently of the user's plugin profile. */
+export async function diagnoseStartup(root) {
+  root = resolve(root);
+  assertOwned(root);
+  const state = readState(root);
+  if (!state) throw new Error('installation state missing');
+  const dir = versionDir(root, state.current);
+  try {
+    const manifest = await verifyPackageAsync(dir, { trees: false });
+    if (manifest.id !== state.current) return { core: 'release_invalid' };
+  } catch {
+    return { core: 'release_invalid' };
+  }
+  if (!scopedCore(dir)) return { core: 'legacy_layout' };
+  const scratch = mkdtempSync(join(tmpdir(), 'auriga-core-diagnostics-'));
+  try {
+    defaultSmoke(dir, scratch);
+  } catch {
+    return { core: 'startup_failed' };
+  } finally {
+    rmSync(scratch, { recursive: true, force: true });
+  }
+  const manifest = join(profileDir(state.dataHome), 'package.json');
+  try {
+    assertLocalPath(manifest);
+    const value = readJson(manifest);
+    if (!Array.isArray(value?.dsh?.profile?.bundles))
+      return { core: 'ready', profile: 'invalid' };
+  } catch {
+    return { core: 'ready', profile: 'invalid' };
+  }
+  return { core: 'ready', profile: 'readable' };
 }
 
 // ----------------------------------------------------------- transaction --
@@ -759,10 +988,11 @@ function transition({
   apply,
   fault,
   dataOwner = from?.dataOwner,
+  backupLabel = from?.current ?? 'initial',
 }) {
   const profile = profileDir(dataHome);
   const profileExisted = existsSync(profile);
-  const label = from?.current ?? 'initial';
+  const label = backupLabel;
   if (profileExisted) snapshotProfile(dataHome, label);
   const txn = {
     phase: 'prepare',
@@ -1164,6 +1394,7 @@ function installStopped({
   cancelled = () => false,
   beginCommit = () => {},
   movePayload = false,
+  recoverPlugins = false,
   preverifiedManifest = null,
 }) {
   const checkpoint = () => {
@@ -1241,6 +1472,9 @@ function installStopped({
     profile: false,
   };
   const firstInstall = !existing;
+  const recoveryBackup = recoverPlugins
+    ? 'plugin-recovery-' + randomUUID()
+    : undefined;
   mkdirSync(join(root, 'versions'), { recursive: true });
   writeFileSync(
     join(root, INSTALL_MARKER),
@@ -1251,6 +1485,14 @@ function installStopped({
     recover(root);
     id = manifest.id;
     const state = readState(root);
+    if (
+      state &&
+      manifest.plugin.scope !== 'installation' &&
+      scopedCore(versionDir(root, state.current))
+    )
+      throw Object.assign(new Error('旧版使用混合插件目录，无法覆盖隔离版。'), {
+        code: 'desktop.plugin_layout_rollback',
+      });
     const dataOwner = claimDataHome(root, dataHome, state, created);
     // Kept data from a prior uninstall must be writable before profile seed/smoke;
     // upstream dump-config always rewrites cordis.yml.
@@ -1323,11 +1565,20 @@ function installStopped({
       target,
       fault,
       dataOwner,
+      backupLabel: recoveryBackup,
       apply() {
         progress('profile', 0);
         created.profile = !existsSync(profileDir(dataHome));
-        seedProfile(dataHome, { platformOrigin, target });
-        syncPlugin(target, dataHome);
+        const isolated = scopedCore(target);
+        if (recoverPlugins) {
+          if (!isolated || created.profile)
+            throw new Error(
+              '离线插件恢复需要已有 profile 和安装级核心发行包。',
+            );
+          recoverPluginProfile(target, dataHome);
+        } else if (isolated) migrateLegacyPluginTree(target, dataHome);
+        seedProfile(dataHome, { platformOrigin, target, isolated });
+        if (!isolated) syncPlugin(target, dataHome);
         checkpoint();
         progress('smoke', 0);
         smoke(target, dataHome);
@@ -1344,7 +1595,14 @@ function installStopped({
   progress('done', 1);
   if (selectedBinding && (explicitConfirmation || !previousBinding))
     writeJsonAtomic(bindingFile, selectedBinding);
-  return { id, previous, upgraded: Boolean(previous && previous !== id) };
+  return {
+    id,
+    previous,
+    upgraded: Boolean(previous && previous !== id),
+    ...(recoveryBackup && {
+      profileBackup: completeSnapshot(dataHome, recoveryBackup),
+    }),
+  };
 }
 
 /** Switch back to the previous version and restore its plugin files. */
@@ -1374,6 +1632,14 @@ function rollbackStopped({ root, smoke = defaultSmoke, fault = noFault }) {
   if (!existsSync(dir))
     throw new Error(`previous version missing: ${state.previous}`);
   verifyPackage(dir);
+  const isolated = scopedCore(dir);
+  if (!isolated && scopedCore(versionDir(root, state.current)))
+    throw Object.assign(
+      new Error('旧版使用混合插件目录，无法作为隔离版的回滚目标。'),
+      {
+        code: 'desktop.plugin_layout_rollback',
+      },
+    );
   protectPythonDirectory(dir);
   assertGuardianCompatible(dir, state.dataHome);
   revokeForeignDataClaim(root, state.dataHome, state.dataOwner);
@@ -1386,7 +1652,10 @@ function rollbackStopped({ root, smoke = defaultSmoke, fault = noFault }) {
     target: dir,
     fault,
     apply() {
-      if (!restorePluginParts(state.dataHome, state.previous)) {
+      if (isolated) {
+        migrateLegacyPluginTree(dir, state.dataHome);
+        seedProfile(state.dataHome, { target: dir, isolated });
+      } else if (!restorePluginParts(state.dataHome, state.previous)) {
         seedProfile(state.dataHome, { target: dir });
         syncPlugin(dir, state.dataHome);
       }
@@ -1648,6 +1917,8 @@ async function launchLocked({
     versionDir(root, initial.current),
     { trees: false },
   );
+  if (initialManifest.id !== initial.current)
+    throw new Error('installed release does not match its version pointer');
   assertNTFS(initial.dataHome);
   const tree = new ProcessTree(initial.dataHome);
   const writers = desktopWriters(root, initial.dataHome);
@@ -1663,7 +1934,7 @@ async function launchLocked({
         const dir = versionDir(root, readState(root).current);
         const result = spawnSync(
           nodeBin(dir),
-          [dshBin(dir), 'plugin', '--profile', PROFILE, 'remove', ...names],
+          dshArgs(dir, ['remove', ...names], 'plugin'),
           {
             env: {
               ...launchEnv(dir, initial.dataHome, env),
@@ -1741,8 +2012,11 @@ async function launchLocked({
     const state = readState(root);
     const dir = versionDir(root, state.current);
     // Only re-verify if an update transaction actually switched versions.
-    if (updatedBeforeLaunch || state.current !== initial.current)
-      await verifyPackageAsync(dir, { trees: false });
+    if (updatedBeforeLaunch || state.current !== initial.current) {
+      const manifest = await verifyPackageAsync(dir, { trees: false });
+      if (manifest.id !== state.current)
+        throw new Error('updated release does not match its version pointer');
+    }
     syncBundledUacConfig(profileDir(state.dataHome), dir);
     supervisor.trust = packagedTrust(dir);
     const proxyStore = createProxyConfigStore({
@@ -1822,10 +2096,7 @@ async function launchLocked({
                   new URL('./dsh-shutdown.mjs', import.meta.url).href,
                 ]
               : []),
-            dshBin(dir),
-            '--profile',
-            PROFILE,
-            ...desktopLaunchArgs(args),
+            ...dshArgs(dir, desktopLaunchArgs(args)),
           ],
           {
             // In tray mode stdin is the tray's control pipe; DSH must not own it.

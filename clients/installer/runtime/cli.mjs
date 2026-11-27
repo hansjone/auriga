@@ -4,6 +4,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import {
   CancelledError,
+  diagnoseStartup,
   install,
   launch,
   rollback,
@@ -74,6 +75,7 @@ try {
       root: values.root,
       dataHome: values['data-home'],
       movePayload: values['move-payload'] === true,
+      recoverPlugins: values['recover-plugin-profile'] === true,
       platformBinding:
         typeof values['platform-origin'] === 'string'
           ? {
@@ -98,6 +100,8 @@ try {
         }),
       ),
     );
+  } else if (command === 'diagnostics' && positional[0] === 'startup') {
+    console.log(JSON.stringify(await diagnoseStartup(values.root)));
   } else if (command === 'diagnostics' && positional[0] === 'export') {
     const packaged = join(here, '../shell-auth/diagnostics.mjs');
     const source = existsSync(packaged)
