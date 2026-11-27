@@ -182,36 +182,42 @@ prepare_contract_node() {
         echo "缺少 contracts Node $node_version 的唯一锁定摘要" >&2
         return 2
     fi
-    node_input=$node_archive
-    if [ ! -f "$node_archive" ]; then
-        node_path="dist/$node_version/$node_file"
-        case "${AURIGA_JAVA_FILES:-}" in
-            file:///*)
-                node_source=${AURIGA_JAVA_FILES#file://}
-                node_input="$node_source/$node_path"
-                if [ ! -f "$node_input" ]; then node_input="$node_source/$node_file"; fi
-                ;;
-            https://?*)
-                node_url=${AURIGA_JAVA_FILES%/}
-                node_input="$scratch/$node_file"
-                java "$src/deploy/nas/offline-build/DownloadJavaInput.java" \
-                    "$node_url/$node_path" "$node_url/$node_file" "$node_input"
-                ;;
-            *)
-                echo "缺少 contracts Node $node_version，配置 deps.sources.files 或导入已验证套件" >&2
-                return 2
-                ;;
-        esac
-    fi
-    if [ ! -f "$node_input" ] || [ -L "$node_input" ] ||
-        ! printf '%s  %s\n' "$node_hash" "$node_input" | sha256sum -c --status; then
-        echo "contracts Node 归档缺失或摘要不符：$node_file" >&2
-        return 2
-    fi
-    if [ "$node_input" != "$node_archive" ]; then
-        mkdir -p -- "$(dirname -- "$node_archive")"
-        cp -- "$node_input" "$node_archive"
-    fi
+    (
+        node_input=$node_archive
+        if [ ! -f "$node_archive" ]; then
+            mkdir -p -- "$(dirname -- "$node_archive")"
+            node_input=$(mktemp "$node_archive.XXXXXX.tmp")
+            trap 'rm -f -- "$node_input"' EXIT
+            node_path="dist/$node_version/$node_file"
+            case "${AURIGA_JAVA_FILES:-}" in
+                file:///*)
+                    node_source=${AURIGA_JAVA_FILES#file://}
+                    node_source_file="$node_source/$node_path"
+                    if [ ! -f "$node_source_file" ]; then node_source_file="$node_source/$node_file"; fi
+                    if [ -f "$node_source_file" ]; then
+                        cp -P -- "$node_source_file" "$node_input"
+                    fi
+                    ;;
+                https://?*)
+                    node_url=${AURIGA_JAVA_FILES%/}
+                    java "$src/deploy/nas/offline-build/DownloadJavaInput.java" \
+                        "$node_url/$node_path" "$node_url/$node_file" "$node_input"
+                    ;;
+                *)
+                    echo "缺少 contracts Node $node_version，配置 deps.sources.files 或导入已验证套件" >&2
+                    exit 2
+                    ;;
+            esac
+        fi
+        if [ ! -f "$node_input" ] || [ -L "$node_input" ] ||
+            ! printf '%s  %s\n' "$node_hash" "$node_input" | sha256sum -c --status; then
+            echo "contracts Node 归档缺失或摘要不符：$node_file" >&2
+            exit 2
+        fi
+        if [ "$node_input" != "$node_archive" ]; then
+            mv -T -- "$node_input" "$node_archive"
+        fi
+    )
 }
 
 # stage_verified_maven_distribution 输入dists目录 目标dists目录 [maven-wrapper.properties]：
@@ -401,11 +407,15 @@ if [ "$mode" = prepare ]; then
     if [ -n "${AURIGA_JAVA_CA_FILE:-}" ]; then
         configure_maven_ca "$AURIGA_JAVA_CA_FILE"
     fi
-    if [ -n "${AURIGA_JAVA_FILES:-}" ] || [ "${AURIGA_JAVA_NO_PUBLIC:-}" = 1 ]; then
+    if [ "${AURIGA_JAVA_NO_PUBLIC:-}" = 1 ]; then
+        if [ -z "${AURIGA_MAVEN_MIRROR_URL:-}" ]; then
+            echo "Java 禁用公网源时必须设置 Maven 镜像" >&2
+            exit 2
+        fi
         prepare_contract_node
-    fi
-    if [ "${AURIGA_JAVA_NO_PUBLIC:-}" = 1 ] && [ -z "${npm_config_registry:-}" ]; then
-        export npm_config_offline=true
+        if [ -z "${npm_config_registry:-}" ]; then
+            export npm_config_offline=true
+        fi
     fi
     # -C makes Maven fail on a checksum mismatch instead of warning. It only
     # compares against checksums served by the same Central or mirror, so it does
@@ -424,8 +434,12 @@ if [ "$mode" = prepare ]; then
             echo "AURIGA_MAVEN_MIRROR_URL must be an https URL of letters, digits and ._~:/?%+=,-" >&2
             exit 2
         fi
-        unset MVNW_REPOURL
-        prepare_mirrored_maven_distribution "$AURIGA_MAVEN_MIRROR_URL"
+        if [ "${AURIGA_JAVA_NO_PUBLIC:-}" = 1 ]; then
+            unset MVNW_REPOURL
+            prepare_mirrored_maven_distribution "$AURIGA_MAVEN_MIRROR_URL"
+        else
+            sh .mvn/wrapper/bootstrap.sh
+        fi
         xml_url=$(printf '%s' "$AURIGA_MAVEN_MIRROR_URL" | sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g')
         # The mirror id must be "central": the local repository records the
         # repository id of every downloaded artifact (_remote.repositories), and
@@ -447,7 +461,7 @@ SETTINGS
         sh mvnw -B -C "-Dmaven.repo.local=$repo" -pl services/platform-app -am -DskipTests package
     fi
     mkdir "$out/wrapper"
-    if [ -n "${AURIGA_MAVEN_MIRROR_URL:-}" ]; then
+    if [ "${AURIGA_JAVA_NO_PUBLIC:-}" = 1 ]; then
         pm_relative=${MAVEN_DISTRIBUTION_ZIP#"$MAVEN_USER_HOME/wrapper/dists"/}
         mkdir -p -- "$out/wrapper/dists/$(dirname -- "$pm_relative")"
         cp -- "$MAVEN_DISTRIBUTION_ZIP" "$out/wrapper/dists/$pm_relative"

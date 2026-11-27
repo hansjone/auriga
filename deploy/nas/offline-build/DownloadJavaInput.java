@@ -2,6 +2,7 @@ import java.io.IOException;
 import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import javax.net.ssl.HttpsURLConnection;
 
 /** Downloads an input from a site mirror. The caller verifies the pinned digest before use. */
@@ -31,7 +32,7 @@ class DownloadJavaInput {
                 throw new IOException("构建输入镜像返回 HTTP " + status + "：" + uri);
             }
             try (var input = connection.getInputStream()) {
-                Files.copy(input, destination);
+                Files.copy(input, destination, StandardCopyOption.REPLACE_EXISTING);
             }
             return true;
         } finally {

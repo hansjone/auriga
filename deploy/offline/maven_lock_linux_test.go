@@ -344,9 +344,16 @@ func TestPrepareContractNodeUsesLockedFileMirror(t *testing.T) {
 cd "$fixture"
 repo="$fixture/repository"
 export AURIGA_JAVA_FILES="file://$fixture/mirror"
+mirror_file="$fixture/mirror/dist/v` + version + `/` + name + `"
+sha256sum() {
+    command sha256sum "$@" || return $?
+    printf '%s' 'changed after validation' > "$mirror_file"
+}
 prepare_contract_node
 test "$(cat "$node_archive")" = 'locked linux Node tarball'
-rm "$fixture/mirror/dist/v` + version + `/` + name + `"
+test "$(cat "$mirror_file")" = 'changed after validation'
+unset -f sha256sum
+rm "$mirror_file"
 prepare_contract_node
 rm "$node_archive"
 printf '%s' 'invalid' > "$fixture/mirror/` + name + `"

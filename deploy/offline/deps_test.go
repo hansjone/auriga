@@ -390,6 +390,16 @@ func TestWebAndCAPrepareEnv(t *testing.T) {
 		!hasPair(javaArgs, "--add-host", "registry.npmjs.org:127.0.0.1") {
 		t.Fatalf("Java prepare 未接线私有 CA 或默认公网源隔离：%v", javaArgs)
 	}
+	lookup, _, err = depsPrepareSettings(&siteDeps{
+		AllowPublic: true, Sources: siteSources{Maven: &maven, Files: &files},
+	}, "java", fakeEnv(nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, javaEnv = prepareDockerArgs(prepareRun{Kind: "java"}, lookup)
+	if len(javaEnv) != 1 || javaEnv[0] != "AURIGA_MAVEN_MIRROR_URL="+maven {
+		t.Fatalf("允许公网时应沿用现有 Java Wrapper 和 Node 下载路径：%v", javaEnv)
+	}
 }
 
 const lockWithIntegrity = `lockfileVersion: '9.0'

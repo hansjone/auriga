@@ -240,7 +240,7 @@ func depsPrepareSettings(d *siteDeps, eco string, host func(string) (string, boo
 		if !d.AllowPublic {
 			values["AURIGA_JAVA_NO_PUBLIC"] = "1"
 		}
-		if d.Sources.Files != nil {
+		if !d.AllowPublic && d.Sources.Files != nil {
 			if err := checkDepsURL("deps.sources.files", *d.Sources.Files); err != nil {
 				return nil, nil, err
 			}
@@ -260,7 +260,7 @@ func depsPrepareSettings(d *siteDeps, eco string, host func(string) (string, boo
 				const mount = "/auriga-deps-sources/java-files"
 				extra = append(extra, mountArg(files.Path, mount, true)...)
 				values["AURIGA_JAVA_FILES"] = "file://" + mount
-			case !d.AllowPublic && isPublic(files):
+			case isPublic(files):
 				return nil, nil, fmt.Errorf("allowPublic=false 时不能把公网默认源 %s 配为 deps.sources.files", files.Hostname())
 			default:
 				values["AURIGA_JAVA_FILES"] = *d.Sources.Files
