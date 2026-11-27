@@ -1769,6 +1769,7 @@ async function launchLocked({
     desktopReporter = createDesktopReporter({
       root,
       getAuth: () => shellAuth,
+      fetcher: controlledFetch,
     }).start();
     if (control) {
       let last = '';

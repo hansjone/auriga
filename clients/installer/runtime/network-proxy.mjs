@@ -4,17 +4,23 @@
  *
  * Design invariants:
  * - Default mode is `direct` (ignores OS / inherited environment proxies).
- * - Loopback targets (localhost, 127.0.0.1, ::1, 127.0.0.0/8) are ALWAYS direct.
+ * - Loopback targets (localhost, localhost., 127.0.0.0/8, ::1, ::ffff:127.0.0.0/104) are ALWAYS direct.
  * - Layered config resolution:
  *     1) User override: <dataHome>/auriga/network-proxy.json (mode 0600)
- *     2) Bundled site defaults: <versionDir>/auriga/defaults.json -> networkProxy
+ *     2) Bundled site defaults: <versionDir>/auriga/defaults.json -> networkProxy (no credentials)
  *     3) Builtin fallback: direct (no proxy)
  * - Zero external dependencies (Node built-ins only).
  */
+import { Buffer } from 'node:buffer';
 import {
+  closeSync,
   existsSync,
+  fstatSync,
+  lstatSync,
   mkdirSync,
+  openSync,
   readFileSync,
+  readSync,
   renameSync,
   rmSync,
   statSync,
@@ -31,6 +37,7 @@ import { Readable } from 'node:stream';
 export const PROXY_SCHEMA_VERSION = 1;
 export const MAX_PROXY_RULES = 200;
 export const MAX_NO_PROXY_ENTRIES = 200;
+export const MAX_DEFAULT_PROXY_FILE_BYTES = 65536;
 export const BUILTIN_LOOPBACK_NO_PROXY = Object.freeze([
   'localhost',
   '127.0.0.1',
@@ -70,8 +77,67 @@ const HOP_BY_HOP_HEADERS = new Set([
 
 const CREDENTIAL_PLACEHOLDER = '__AURIGA_KEEP_PASSWORD__';
 
+const LOOPBACK_BLOCKLIST = new BlockList();
+LOOPBACK_BLOCKLIST.addSubnet('127.0.0.0', 8, 'ipv4');
+LOOPBACK_BLOCKLIST.addAddress('::1', 'ipv6');
+LOOPBACK_BLOCKLIST.addSubnet('::ffff:127.0.0.0', 104, 'ipv6');
+
 function proxyError(code, message) {
   return Object.assign(new Error(message ?? code), { code });
+}
+
+function bareHost(hostname) {
+  return String(hostname ?? '')
+    .trim()
+    .replace(/^\[|\]$/g, '');
+}
+
+/**
+ * Create an HTTP/HTTPS Agent that explicitly bypasses Node's built-in
+ * environment proxy resolution (Node 24+ `proxyEnv: {}`).
+ */
+export function createDirectHttpAgent(options = {}) {
+  return new http.Agent({ proxyEnv: {}, ...options });
+}
+
+export function createDirectHttpsAgent(options = {}) {
+  return new https.Agent({ proxyEnv: {}, ...options });
+}
+
+/**
+ * Read a regular, non-symlink JSON file from a single file descriptor with a
+ * strict byte ceiling to avoid lstat/readFile TOCTOU races.
+ * @param {string} file
+ * @param {number} [maxBytes]
+ */
+export function readBoundedJsonFile(
+  file,
+  maxBytes = MAX_DEFAULT_PROXY_FILE_BYTES,
+) {
+  const lst = lstatSync(file);
+  if (!lst.isFile() || lst.isSymbolicLink()) {
+    throw proxyError('invalidProxyFile', '默认代理文件必须是普通文件');
+  }
+  const fd = openSync(file, 'r');
+  try {
+    const fst = fstatSync(fd);
+    if (!fst.isFile() || fst.size > maxBytes) {
+      throw proxyError('invalidProxyFile', '默认代理文件无效或超过大小上限');
+    }
+    const buf = Buffer.allocUnsafe(fst.size + 1);
+    let offset = 0;
+    while (offset < buf.length) {
+      const n = readSync(fd, buf, offset, buf.length - offset, null);
+      if (n === 0) break;
+      offset += n;
+    }
+    if (offset > maxBytes) {
+      throw proxyError('invalidProxyFile', '默认代理文件超过大小上限');
+    }
+    return JSON.parse(buf.subarray(0, offset).toString('utf8'));
+  } finally {
+    closeSync(fd);
+  }
 }
 
 /**
@@ -92,10 +158,13 @@ export function stripSystemProxyEnv(base = process.env) {
  * Normalize and validate an HTTP/HTTPS proxy URL.
  * Empty string is allowed when `optional` is true.
  * @param {unknown} input
- * @param {{ optional?: boolean }} [options]
+ * @param {{ optional?: boolean, allowCredentials?: boolean }} [options]
  * @returns {string}
  */
-export function normalizeProxyUrl(input, { optional = false } = {}) {
+export function normalizeProxyUrl(
+  input,
+  { optional = false, allowCredentials = true } = {},
+) {
   if (input === undefined || input === null || input === '') {
     if (optional) return '';
     throw proxyError('invalidProxyUrl', '代理地址不能为空');
@@ -127,6 +196,15 @@ export function normalizeProxyUrl(input, { optional = false } = {}) {
     (url.pathname && url.pathname !== '/')
   ) {
     throw proxyError('invalidProxyUrl', '代理地址不能包含路径、查询参数或片段');
+  }
+  if (!allowCredentials && (url.username || url.password)) {
+    throw proxyError('invalidProxyUrl', '内置默认代理不允许包含用户名或密码');
+  }
+  try {
+    decodeURIComponent(url.username);
+    decodeURIComponent(url.password);
+  } catch {
+    throw proxyError('invalidProxyUrl', '代理用户名或密码包含无效的百分号编码');
   }
   const port = url.port
     ? Number(url.port)
@@ -171,7 +249,7 @@ export function maskProxyUrl(raw) {
 }
 
 /**
- * Validate a domain / wildcard suffix / IP / CIDR match pattern.
+ * Validate a domain / wildcard suffix / IP (IPv4/IPv6) / CIDR match pattern.
  * @param {unknown} input
  * @returns {string}
  */
@@ -180,11 +258,7 @@ export function normalizeMatchPattern(input) {
     throw proxyError('invalidPattern', '匹配规则必须是字符串');
   }
   const raw = input.trim().toLowerCase();
-  if (
-    !raw ||
-    raw.length > 255 ||
-    /[\s/\\:?#@"'\r\n\0]/.test(raw.replace(/\/\d+$/, ''))
-  ) {
+  if (!raw || raw.length > 255 || /[\s\\?#@"'`\r\n\0]/.test(raw)) {
     throw proxyError('invalidPattern', `无效的域名或网段规则: ${input}`);
   }
   if (raw.includes('://')) {
@@ -193,13 +267,13 @@ export function normalizeMatchPattern(input) {
       '规则请填写域名、IP 或 CIDR，不要包含协议头',
     );
   }
-  // CIDR check
+  // 1. CIDR check (IPv4 or IPv6)
   if (raw.includes('/')) {
     const [ipPart, prefixPart, extra] = raw.split('/');
     if (extra !== undefined || !/^\d{1,3}$/.test(prefixPart)) {
       throw proxyError('invalidPattern', `无效的 CIDR 规则: ${input}`);
     }
-    const bareIp = ipPart.replace(/^\[|\]$/g, '');
+    const bareIp = bareHost(ipPart);
     const family = isIP(bareIp);
     const prefix = Number(prefixPart);
     if (
@@ -210,11 +284,16 @@ export function normalizeMatchPattern(input) {
     }
     throw proxyError('invalidPattern', `无效的 CIDR 规则: ${input}`);
   }
-  // Bare IP (IPv4 or bracketed/unbracketed IPv6)
-  const bareIp = raw.replace(/^\[|\]$/g, '');
+  // 2. Bare or bracketed IP (IPv4 or IPv6)
+  const bareIp = bareHost(raw);
   if (isIP(bareIp)) return bareIp;
 
-  // Wildcard suffix: *.example.com or .example.com
+  // Remaining forms must be domain/wildcard hostnames (no colons or slashes)
+  if (raw.includes(':') || raw.includes('/')) {
+    throw proxyError('invalidPattern', `无效的域名规则: ${input}`);
+  }
+
+  // 3. Wildcard suffix: *.example.com or .example.com
   if (raw.startsWith('*.') || raw.startsWith('.')) {
     const suffix = raw.startsWith('*.') ? raw.slice(2) : raw.slice(1);
     if (!suffix || suffix.includes('*') || !isValidHostname(suffix)) {
@@ -223,7 +302,7 @@ export function normalizeMatchPattern(input) {
     return `*.${suffix}`;
   }
 
-  // Exact hostname
+  // 4. Exact hostname
   if (raw.includes('*') || !isValidHostname(raw)) {
     throw proxyError('invalidPattern', `无效的域名规则: ${input}`);
   }
@@ -280,8 +359,13 @@ function preserveMaskedPassword(incoming, previous) {
  * Validate and normalize a full proxy config object.
  * @param {unknown} input
  * @param {ReturnType<typeof validateProxyConfig> | null} [previous]
+ * @param {{ allowCredentials?: boolean }} [options]
  */
-export function validateProxyConfig(input, previous = null) {
+export function validateProxyConfig(
+  input,
+  previous = null,
+  { allowCredentials = true } = {},
+) {
   if (!input || typeof input !== 'object' || Array.isArray(input)) {
     throw proxyError('invalidSettings', '代理配置格式无效');
   }
@@ -298,7 +382,10 @@ export function validateProxyConfig(input, previous = null) {
     typeof obj.globalProxy === 'string' && previous?.globalProxy
       ? preserveMaskedPassword(obj.globalProxy, previous.globalProxy)
       : obj.globalProxy;
-  const globalProxy = normalizeProxyUrl(rawGlobal ?? '', { optional: true });
+  const globalProxy = normalizeProxyUrl(rawGlobal ?? '', {
+    optional: true,
+    allowCredentials,
+  });
 
   const rawNoProxy = obj.noProxy ?? [];
   if (!Array.isArray(rawNoProxy) || rawNoProxy.length > MAX_NO_PROXY_ENTRIES) {
@@ -342,7 +429,10 @@ export function validateProxyConfig(input, previous = null) {
         typeof item.proxy === 'string' && prevRule?.proxy
           ? preserveMaskedPassword(item.proxy, prevRule.proxy)
           : item.proxy;
-      proxy = normalizeProxyUrl(candidate, { optional: false });
+      proxy = normalizeProxyUrl(candidate, {
+        optional: false,
+        allowCredentials,
+      });
     }
     rules.push({ id, enabled, pattern, action: item.action, proxy });
   }
@@ -386,27 +476,22 @@ export function redactProxyConfig(config) {
 
 /**
  * Built-in loopback protection: never proxy local endpoints.
+ * Handles localhost, trailing-dot localhost., 127.0.0.0/8, ::1, and
+ * IPv4-mapped IPv6 loopback (e.g. ::ffff:127.0.0.1 / ::ffff:7f00:1).
  * @param {string} hostname
  */
 export function isLoopbackHost(hostname) {
-  const host = String(hostname ?? '')
-    .trim()
-    .toLowerCase()
-    .replace(/^\[|\]$/g, '');
+  const host = bareHost(hostname).toLowerCase().replace(/\.+$/, '');
   if (!host) return false;
-  if (host === 'localhost' || host.endsWith('.localhost') || host === '::1') {
+  if (host === 'localhost' || host.endsWith('.localhost')) {
     return true;
   }
   const family = isIP(host);
   if (family === 4) {
-    return host.startsWith('127.');
+    return LOOPBACK_BLOCKLIST.check(host, 'ipv4');
   }
   if (family === 6) {
-    return (
-      host === '::1' ||
-      host === '0:0:0:0:0:0:0:1' ||
-      host.startsWith('::ffff:127.')
-    );
+    return LOOPBACK_BLOCKLIST.check(host, 'ipv6');
   }
   return false;
 }
@@ -417,10 +502,7 @@ export function isLoopbackHost(hostname) {
  * @param {string} pattern
  */
 export function matchesPattern(targetHost, pattern) {
-  const host = String(targetHost ?? '')
-    .trim()
-    .toLowerCase()
-    .replace(/^\[|\]$/g, '');
+  const host = bareHost(targetHost).toLowerCase().replace(/\.+$/, '');
   if (!host || !pattern) return false;
 
   if (pattern.includes('/')) {
@@ -435,7 +517,11 @@ export function matchesPattern(targetHost, pattern) {
 
   const patIpFamily = isIP(pattern);
   if (patIpFamily) {
-    return host === pattern;
+    const hostFamily = isIP(host);
+    if (patIpFamily !== hostFamily) return false;
+    const list = new BlockList();
+    list.addAddress(pattern, patIpFamily === 4 ? 'ipv4' : 'ipv6');
+    return list.check(host, hostFamily === 4 ? 'ipv4' : 'ipv6');
   }
 
   if (pattern.startsWith('*.')) {
@@ -455,21 +541,22 @@ export function matchesPattern(targetHost, pattern) {
  *  5) globalProxy -> proxy (if set) else direct
  *
  * @param {string} targetHost
- * @param {number | undefined} _targetPort
+ * @param {number | undefined} targetPort
  * @param {ReturnType<typeof validateProxyConfig>} config
  * @param {{ selfPort?: number }} [options]
  * @returns {{ action: 'direct' | 'proxy', proxy: string, matchedBy: string, ruleId?: string }}
  */
 export function resolveProxy(
   targetHost,
-  _targetPort,
+  targetPort,
   config,
   { selfPort } = {},
 ) {
-  const host = String(targetHost ?? '')
-    .trim()
-    .toLowerCase()
-    .replace(/^\[|\]$/g, '');
+  const host = bareHost(targetHost).toLowerCase().replace(/\.+$/, '');
+
+  if (selfPort && isLoopbackHost(host) && Number(targetPort) === selfPort) {
+    throw proxyError('proxy_loop', '目标地址不能指向客户端本地分流端口');
+  }
 
   if (isLoopbackHost(host)) {
     return { action: 'direct', proxy: '', matchedBy: 'builtin_loopback' };
@@ -559,7 +646,9 @@ function readBundledProxyDefault(defaultsFile) {
   try {
     const parsed = JSON.parse(readFileSync(defaultsFile, 'utf8'));
     if (!parsed?.networkProxy) return null;
-    return validateProxyConfig(parsed.networkProxy);
+    return validateProxyConfig(parsed.networkProxy, null, {
+      allowCredentials: false,
+    });
   } catch {
     return null;
   }
@@ -677,8 +766,14 @@ export function createProxyConfigStore({
 
 function buildProxyAuthHeader(proxyUrl) {
   if (!proxyUrl.username && !proxyUrl.password) return undefined;
-  const user = decodeURIComponent(proxyUrl.username);
-  const pass = decodeURIComponent(proxyUrl.password);
+  let user = '';
+  let pass = '';
+  try {
+    user = decodeURIComponent(proxyUrl.username);
+    pass = decodeURIComponent(proxyUrl.password);
+  } catch {
+    throw proxyError('invalidProxyUrl', '代理凭据编码无效');
+  }
   return `Basic ${Buffer.from(`${user}:${pass}`).toString('base64')}`;
 }
 
@@ -698,17 +793,27 @@ export function connectViaHttpProxy(
   targetPort,
   { timeoutMs = 15_000, signal } = {},
 ) {
-  const proxyUrl = new URL(proxyUrlStr);
+  let proxyUrl;
+  let authHeader;
+  try {
+    proxyUrl = new URL(proxyUrlStr);
+    authHeader = buildProxyAuthHeader(proxyUrl);
+  } catch (err) {
+    return Promise.reject(
+      err?.code ? err : proxyError('invalidProxyUrl', '代理地址无效'),
+    );
+  }
+  const proxyHost = bareHost(proxyUrl.hostname);
   const proxyPort = proxyUrl.port
     ? Number(proxyUrl.port)
     : proxyUrl.protocol === 'https:'
       ? 443
       : 80;
+  const cleanTarget = bareHost(targetHost);
   const hostHeader =
-    isIP(targetHost) === 6
-      ? `[${targetHost}]:${targetPort}`
-      : `${targetHost}:${targetPort}`;
-  const authHeader = buildProxyAuthHeader(proxyUrl);
+    isIP(cleanTarget) === 6
+      ? `[${cleanTarget}]:${targetPort}`
+      : `${cleanTarget}:${targetPort}`;
 
   return new Promise((resolve, reject) => {
     if (signal?.aborted) {
@@ -722,14 +827,14 @@ export function connectViaHttpProxy(
     const socket =
       proxyUrl.protocol === 'https:'
         ? tls.connect({
-            host: proxyUrl.hostname,
+            host: proxyHost,
             port: proxyPort,
-            servername: isIP(proxyUrl.hostname) ? undefined : proxyUrl.hostname,
+            servername: isIP(proxyHost) ? undefined : proxyHost,
           })
-        : net.connect({ host: proxyUrl.hostname, port: proxyPort });
+        : net.connect({ host: proxyHost, port: proxyPort });
 
     const cleanupListeners = () => {
-      clearTimeout(timer);
+      globalThis.clearTimeout(timer);
       signal?.removeEventListener('abort', onAbort);
       socket.removeListener('data', onData);
       socket.removeListener('error', onError);
@@ -857,92 +962,127 @@ export async function startLocalProxyServer({
 }) {
   let selfPort = 0;
   const activeSockets = new Set();
+  const directHttpAgent = createDirectHttpAgent({ keepAlive: false });
+  const directHttpsAgent = createDirectHttpsAgent({ keepAlive: false });
 
   const server = http.createServer((clientReq, clientRes) => {
-    const rawUrl = clientReq.url ?? '';
-    let target;
     try {
-      target = new URL(
-        /^https?:\/\//i.test(rawUrl)
-          ? rawUrl
-          : `http://${clientReq.headers.host ?? ''}${rawUrl}`,
-      );
-    } catch {
-      clientRes.writeHead(400, { 'content-type': 'text/plain' });
-      clientRes.end('Bad Request');
-      return;
-    }
+      const rawUrl = clientReq.url ?? '';
+      let target;
+      try {
+        target = new URL(
+          /^https?:\/\//i.test(rawUrl)
+            ? rawUrl
+            : `http://${clientReq.headers.host ?? ''}${rawUrl}`,
+        );
+      } catch {
+        clientRes.writeHead(400, { 'content-type': 'text/plain' });
+        clientRes.end('Bad Request');
+        return;
+      }
 
-    const targetPort = target.port
-      ? Number(target.port)
-      : target.protocol === 'https:'
-        ? 443
-        : 80;
-
-    let decision;
-    try {
-      decision = resolveProxy(target.hostname, targetPort, getConfig(), {
-        selfPort,
-      });
-    } catch (err) {
-      clientRes.writeHead(502, { 'content-type': 'text/plain' });
-      clientRes.end(
-        err?.code === 'proxy_loop' ? 'Proxy Loop Detected' : 'Bad Gateway',
-      );
-      return;
-    }
-
-    const headers = stripHopByHop(clientReq.headers);
-    let upstreamReq;
-
-    if (decision.action === 'direct') {
-      const mod = target.protocol === 'https:' ? https : http;
-      upstreamReq = mod.request({
-        hostname: target.hostname,
-        port: targetPort,
-        method: clientReq.method,
-        path: `${target.pathname}${target.search}`,
-        headers: { ...headers, host: target.host },
-        timeout: idleTimeoutMs,
-      });
-    } else {
-      const proxyUrl = new URL(decision.proxy);
-      const proxyPort = proxyUrl.port
-        ? Number(proxyUrl.port)
-        : proxyUrl.protocol === 'https:'
+      const targetHost = bareHost(target.hostname);
+      const targetPort = target.port
+        ? Number(target.port)
+        : target.protocol === 'https:'
           ? 443
           : 80;
-      const authHeader = buildProxyAuthHeader(proxyUrl);
-      const mod = proxyUrl.protocol === 'https:' ? https : http;
-      upstreamReq = mod.request({
-        hostname: proxyUrl.hostname,
-        port: proxyPort,
-        method: clientReq.method,
-        path: target.href,
-        headers: {
-          ...headers,
-          host: target.host,
-          ...(authHeader ? { 'proxy-authorization': authHeader } : {}),
-        },
-        timeout: idleTimeoutMs,
-      });
-    }
 
-    upstreamReq.on('response', (upstreamRes) => {
-      clientRes.writeHead(upstreamRes.statusCode ?? 502, upstreamRes.headers);
-      upstreamRes.pipe(clientRes);
-    });
-    upstreamReq.on('timeout', () => {
-      upstreamReq.destroy(proxyError('timeout', 'Gateway Timeout'));
-    });
-    upstreamReq.on('error', () => {
-      if (!clientRes.headersSent) {
+      let decision;
+      try {
+        decision = resolveProxy(targetHost, targetPort, getConfig(), {
+          selfPort,
+        });
+      } catch (err) {
         clientRes.writeHead(502, { 'content-type': 'text/plain' });
+        clientRes.end(
+          err?.code === 'proxy_loop' ? 'Proxy Loop Detected' : 'Bad Gateway',
+        );
+        return;
       }
-      clientRes.end('Bad Gateway');
-    });
-    clientReq.on('aborted', () => upstreamReq.destroy());
-    clientReq.pipe(upstreamReq);
+
+      const headers = stripHopByHop(clientReq.headers);
+      let upstreamReq;
+
+      if (decision.action === 'direct') {
+        const mod = target.protocol === 'https:' ? https : http;
+        upstreamReq = mod.request({
+          hostname: targetHost,
+          port: targetPort,
+          method: clientReq.method,
+          path: `${target.pathname}${target.search}`,
+          headers: { ...headers, host: target.host },
+          agent:
+            target.protocol === 'https:' ? directHttpsAgent : directHttpAgent,
+          timeout: idleTimeoutMs,
+        });
+      } else {
+        const proxyUrl = new URL(decision.proxy);
+        const proxyHost = bareHost(proxyUrl.hostname);
+        const proxyPort = proxyUrl.port
+          ? Number(proxyUrl.port)
+          : proxyUrl.protocol === 'https:'
+            ? 443
+            : 80;
+        const authHeader = buildProxyAuthHeader(proxyUrl);
+        const mod = proxyUrl.protocol === 'https:' ? https : http;
+        upstreamReq = mod.request({
+          hostname: proxyHost,
+          port: proxyPort,
+          method: clientReq.method,
+          path: target.href,
+          headers: {
+            ...headers,
+            host: target.host,
+            ...(authHeader ? { 'proxy-authorization': authHeader } : {}),
+          },
+          agent:
+            proxyUrl.protocol === 'https:' ? directHttpsAgent : directHttpAgent,
+          timeout: idleTimeoutMs,
+        });
+      }
+
+      let upstreamResRef = null;
+      const cancelUpstream = () => {
+        if (!upstreamReq.destroyed) upstreamReq.destroy();
+        if (upstreamResRef && !upstreamResRef.destroyed) {
+          upstreamResRef.destroy();
+        }
+      };
+
+      upstreamReq.on('response', (upstreamRes) => {
+        upstreamResRef = upstreamRes;
+        upstreamRes.on('error', () => {
+          if (!clientRes.destroyed) clientRes.destroy();
+        });
+        clientRes.writeHead(upstreamRes.statusCode ?? 502, upstreamRes.headers);
+        upstreamRes.pipe(clientRes);
+      });
+      upstreamReq.on('timeout', () => {
+        upstreamReq.destroy(proxyError('timeout', 'Gateway Timeout'));
+      });
+      upstreamReq.on('error', () => {
+        if (!clientRes.headersSent && !clientRes.destroyed) {
+          clientRes.writeHead(502, { 'content-type': 'text/plain' });
+          clientRes.end('Bad Gateway');
+        } else if (!clientRes.destroyed) {
+          clientRes.destroy();
+        }
+      });
+      clientReq.on('aborted', cancelUpstream);
+      clientReq.on('error', cancelUpstream);
+      clientRes.on('close', () => {
+        if (!clientRes.writableEnded) cancelUpstream();
+      });
+      clientReq.pipe(upstreamReq);
+    } catch {
+      if (!clientRes.headersSent && !clientRes.destroyed) {
+        clientRes.writeHead(502, { 'content-type': 'text/plain' });
+        clientRes.end('Bad Gateway');
+      } else if (!clientRes.destroyed) {
+        clientRes.destroy();
+      }
+    }
   });
 
   server.on('connect', (req, clientSocket, head) => {
@@ -950,100 +1090,126 @@ export async function startLocalProxyServer({
     clientSocket.once('close', () => activeSockets.delete(clientSocket));
     clientSocket.setTimeout(idleTimeoutMs, () => clientSocket.destroy());
 
-    const authority = req.url ?? '';
-    let targetHost = '';
-    let targetPort = 443;
-    const ipv6Match = authority.match(/^\[([^\]]+)\]:(\d+)$/);
-    if (ipv6Match) {
-      targetHost = ipv6Match[1];
-      targetPort = Number(ipv6Match[2]);
-    } else {
-      const idx = authority.lastIndexOf(':');
-      if (idx > 0) {
-        targetHost = authority.slice(0, idx);
-        targetPort = Number(authority.slice(idx + 1));
-      }
-    }
-    if (
-      !targetHost ||
-      !Number.isInteger(targetPort) ||
-      targetPort < 1 ||
-      targetPort > 65535
-    ) {
-      clientSocket.end('HTTP/1.1 400 Bad Request\r\n\r\n');
-      return;
-    }
-
-    let decision;
     try {
-      decision = resolveProxy(targetHost, targetPort, getConfig(), {
-        selfPort,
-      });
-    } catch {
-      clientSocket.end('HTTP/1.1 502 Bad Gateway\r\n\r\n');
-      return;
-    }
-
-    const wireTunnel = (upstreamSocket, buffered = Buffer.alloc(0)) => {
-      activeSockets.add(upstreamSocket);
-      upstreamSocket.once('close', () => activeSockets.delete(upstreamSocket));
-      upstreamSocket.setTimeout(idleTimeoutMs, () => upstreamSocket.destroy());
-
-      if (clientSocket.destroyed) {
-        upstreamSocket.destroy();
+      const authority = req.url ?? '';
+      let targetHost = '';
+      let targetPort = 443;
+      const ipv6Match = authority.match(/^\[([^\]]+)\]:(\d+)$/);
+      if (ipv6Match) {
+        targetHost = ipv6Match[1];
+        targetPort = Number(ipv6Match[2]);
+      } else {
+        const idx = authority.lastIndexOf(':');
+        if (idx > 0) {
+          targetHost = authority.slice(0, idx);
+          targetPort = Number(authority.slice(idx + 1));
+        }
+      }
+      targetHost = bareHost(targetHost);
+      if (
+        !targetHost ||
+        !Number.isInteger(targetPort) ||
+        targetPort < 1 ||
+        targetPort > 65535
+      ) {
+        clientSocket.end('HTTP/1.1 400 Bad Request\r\n\r\n');
         return;
       }
-      clientSocket.write('HTTP/1.1 200 Connection Established\r\n\r\n');
-      if (buffered.length > 0) clientSocket.write(buffered);
-      if (head && head.length > 0) upstreamSocket.write(head);
 
-      upstreamSocket.pipe(clientSocket);
-      clientSocket.pipe(upstreamSocket);
+      let decision;
+      try {
+        decision = resolveProxy(targetHost, targetPort, getConfig(), {
+          selfPort,
+        });
+      } catch {
+        clientSocket.end('HTTP/1.1 502 Bad Gateway\r\n\r\n');
+        return;
+      }
 
-      const teardown = () => {
-        if (!clientSocket.destroyed) clientSocket.destroy();
-        if (!upstreamSocket.destroyed) upstreamSocket.destroy();
+      const wireTunnel = (upstreamSocket, buffered = Buffer.alloc(0)) => {
+        activeSockets.add(upstreamSocket);
+        upstreamSocket.once('close', () =>
+          activeSockets.delete(upstreamSocket),
+        );
+        upstreamSocket.setTimeout(idleTimeoutMs, () =>
+          upstreamSocket.destroy(),
+        );
+
+        if (clientSocket.destroyed) {
+          upstreamSocket.destroy();
+          return;
+        }
+        clientSocket.write('HTTP/1.1 200 Connection Established\r\n\r\n');
+        if (buffered.length > 0) clientSocket.write(buffered);
+        if (head && head.length > 0) upstreamSocket.write(head);
+
+        upstreamSocket.pipe(clientSocket);
+        clientSocket.pipe(upstreamSocket);
+
+        const teardown = () => {
+          if (!clientSocket.destroyed) clientSocket.destroy();
+          if (!upstreamSocket.destroyed) upstreamSocket.destroy();
+        };
+        clientSocket.on('error', teardown);
+        upstreamSocket.on('error', teardown);
+        clientSocket.once('close', teardown);
+        upstreamSocket.once('close', teardown);
       };
-      clientSocket.on('error', teardown);
-      upstreamSocket.on('error', teardown);
-    };
 
-    if (decision.action === 'direct') {
-      const upstream = net.connect({ host: targetHost, port: targetPort });
-      const timer = setTimeout(() => {
-        upstream.destroy(proxyError('timeout', 'connect timeout'));
-      }, connectTimeoutMs);
-      timer.unref?.();
+      if (decision.action === 'direct') {
+        const upstream = net.connect({ host: targetHost, port: targetPort });
+        const timer = setTimeout(() => {
+          upstream.destroy(proxyError('timeout', 'connect timeout'));
+        }, connectTimeoutMs);
+        timer.unref?.();
 
-      upstream.once('connect', () => {
-        clearTimeout(timer);
-        wireTunnel(upstream);
-      });
-      upstream.once('error', () => {
-        clearTimeout(timer);
-        if (!clientSocket.destroyed) {
-          clientSocket.end('HTTP/1.1 502 Bad Gateway\r\n\r\n');
-        }
-      });
-      clientSocket.once('close', () => {
-        clearTimeout(timer);
-        upstream.destroy();
-      });
-      return;
+        const onClientClose = () => {
+          globalThis.clearTimeout(timer);
+          upstream.destroy();
+        };
+        clientSocket.once('close', onClientClose);
+
+        upstream.once('connect', () => {
+          globalThis.clearTimeout(timer);
+          clientSocket.removeListener('close', onClientClose);
+          wireTunnel(upstream);
+        });
+        upstream.once('error', () => {
+          globalThis.clearTimeout(timer);
+          clientSocket.removeListener('close', onClientClose);
+          if (!clientSocket.destroyed) {
+            clientSocket.end('HTTP/1.1 502 Bad Gateway\r\n\r\n');
+          }
+        });
+        return;
+      }
+
+      const handshakeAbort = new globalThis.AbortController();
+      const onClientCloseBeforeReady = () => handshakeAbort.abort();
+      clientSocket.once('close', onClientCloseBeforeReady);
+
+      connectViaHttpProxy(decision.proxy, targetHost, targetPort, {
+        timeoutMs: connectTimeoutMs,
+        signal: handshakeAbort.signal,
+      })
+        .then(({ socket, buffered }) => {
+          clientSocket.removeListener('close', onClientCloseBeforeReady);
+          wireTunnel(socket, buffered);
+        })
+        .catch((err) => {
+          clientSocket.removeListener('close', onClientCloseBeforeReady);
+          if (!clientSocket.destroyed) {
+            const code = err?.statusCode === 407 ? 407 : 502;
+            const text =
+              code === 407 ? 'Proxy Authentication Required' : 'Bad Gateway';
+            clientSocket.end(`HTTP/1.1 ${code} ${text}\r\n\r\n`);
+          }
+        });
+    } catch {
+      if (!clientSocket.destroyed) {
+        clientSocket.end('HTTP/1.1 502 Bad Gateway\r\n\r\n');
+      }
     }
-
-    connectViaHttpProxy(decision.proxy, targetHost, targetPort, {
-      timeoutMs: connectTimeoutMs,
-    })
-      .then(({ socket, buffered }) => wireTunnel(socket, buffered))
-      .catch((err) => {
-        if (!clientSocket.destroyed) {
-          const code = err?.statusCode === 407 ? 407 : 502;
-          const text =
-            code === 407 ? 'Proxy Authentication Required' : 'Bad Gateway';
-          clientSocket.end(`HTTP/1.1 ${code} ${text}\r\n\r\n`);
-        }
-      });
   });
 
   await new Promise((resolve, reject) => {
@@ -1069,11 +1235,15 @@ export async function startLocalProxyServer({
         https_proxy: url,
         NO_PROXY: noProxy,
         no_proxy: noProxy,
+        // Enable Node 24+ native fetch/http/https to route through our loopback router.
+        NODE_USE_ENV_PROXY: '1',
       };
     },
     async close() {
       for (const s of activeSockets) s.destroy();
       activeSockets.clear();
+      directHttpAgent.destroy();
+      directHttpsAgent.destroy();
       await new Promise((resolve) => server.close(() => resolve(undefined)));
     },
   };
@@ -1095,7 +1265,7 @@ export function createProxyTunnelAgent(
   const Base = isTls ? https.Agent : http.Agent;
   class ProxyTunnelAgent extends Base {
     createConnection(options, callback) {
-      const targetHost = options.host ?? options.hostname;
+      const targetHost = bareHost(options.host ?? options.hostname);
       const targetPort = Number(options.port ?? (isTls ? 443 : 80));
       connectViaHttpProxy(proxyUrlStr, targetHost, targetPort, { timeoutMs })
         .then(({ socket, buffered }) => {
@@ -1120,13 +1290,15 @@ export function createProxyTunnelAgent(
         .catch((err) => callback(err));
     }
   }
-  return new ProxyTunnelAgent({ keepAlive: false });
+  return new ProxyTunnelAgent({ keepAlive: false, proxyEnv: {} });
 }
 
 /**
- * Create a WebSocket Agent factory for `ws` based on dynamic proxy configuration.
- * Returns `undefined` when direct (so `ws` connects directly without system proxy).
+ * Create a WebSocket Agent for `ws` based on dynamic proxy configuration.
+ * Always returns an explicit proxy-isolated Agent (direct uses `proxyEnv: {}`
+ * so Node 24+ never falls back to inherited host proxy env vars).
  *
+ * @param {string} urlStr
  * @param {() => ReturnType<typeof validateProxyConfig>} getConfig
  * @param {{ ca?: any, rejectUnauthorized?: boolean, timeoutMs?: number }} [tlsOpts]
  */
@@ -1134,8 +1306,18 @@ export function resolveWsProxyAgent(urlStr, getConfig, tlsOpts = {}) {
   const parsed = new URL(urlStr);
   const isTls = parsed.protocol === 'wss:' || parsed.protocol === 'https:';
   const port = parsed.port ? Number(parsed.port) : isTls ? 443 : 80;
-  const decision = resolveProxy(parsed.hostname, port, getConfig());
-  if (decision.action === 'direct') return undefined;
+  const decision = resolveProxy(bareHost(parsed.hostname), port, getConfig());
+  if (decision.action === 'direct') {
+    return isTls
+      ? createDirectHttpsAgent({
+          keepAlive: false,
+          ...(tlsOpts.ca !== undefined ? { ca: tlsOpts.ca } : {}),
+          ...(tlsOpts.rejectUnauthorized !== undefined
+            ? { rejectUnauthorized: tlsOpts.rejectUnauthorized }
+            : {}),
+        })
+      : createDirectHttpAgent({ keepAlive: false });
+  }
   return createProxyTunnelAgent(decision.proxy, {
     isTls,
     tlsOptions: {
@@ -1148,15 +1330,44 @@ export function resolveWsProxyAgent(urlStr, getConfig, tlsOpts = {}) {
   });
 }
 
-async function bodyToBuffer(body) {
-  if (body === undefined || body === null) return null;
-  if (typeof body === 'string') return Buffer.from(body, 'utf8');
-  if (Buffer.isBuffer(body)) return body;
-  if (body instanceof Uint8Array)
-    return Buffer.from(body.buffer, body.byteOffset, body.byteLength);
-  if (body instanceof ArrayBuffer) return Buffer.from(body);
-  if (body instanceof URLSearchParams)
-    return Buffer.from(body.toString(), 'utf8');
+async function bodyToPayload(body) {
+  if (body === undefined || body === null) {
+    return { buffer: null, contentType: null };
+  }
+  if (
+    (typeof globalThis.FormData !== 'undefined' &&
+      body instanceof globalThis.FormData) ||
+    (typeof globalThis.Blob !== 'undefined' && body instanceof globalThis.Blob)
+  ) {
+    const encoded = new globalThis.Response(body);
+    const contentType = encoded.headers.get('content-type');
+    const buffer = Buffer.from(await encoded.arrayBuffer());
+    return { buffer, contentType };
+  }
+  if (typeof body === 'string') {
+    return { buffer: Buffer.from(body, 'utf8'), contentType: null };
+  }
+  if (Buffer.isBuffer(body)) {
+    return { buffer: body, contentType: null };
+  }
+  if (body instanceof Uint8Array) {
+    return {
+      buffer: Buffer.from(body.buffer, body.byteOffset, body.byteLength),
+      contentType: null,
+    };
+  }
+  if (body instanceof ArrayBuffer) {
+    return { buffer: Buffer.from(body), contentType: null };
+  }
+  if (
+    typeof globalThis.URLSearchParams !== 'undefined' &&
+    body instanceof globalThis.URLSearchParams
+  ) {
+    return {
+      buffer: Buffer.from(body.toString(), 'utf8'),
+      contentType: 'application/x-www-form-urlencoded;charset=UTF-8',
+    };
+  }
   if (typeof body.getReader === 'function') {
     const reader = body.getReader();
     const chunks = [];
@@ -1165,14 +1376,14 @@ async function bodyToBuffer(body) {
       if (done) break;
       chunks.push(Buffer.from(value));
     }
-    return Buffer.concat(chunks);
+    return { buffer: Buffer.concat(chunks), contentType: null };
   }
   if (typeof body[Symbol.asyncIterator] === 'function') {
     const chunks = [];
     for await (const chunk of body) chunks.push(Buffer.from(chunk));
-    return Buffer.concat(chunks);
+    return { buffer: Buffer.concat(chunks), contentType: null };
   }
-  return Buffer.from(String(body), 'utf8');
+  return { buffer: Buffer.from(String(body), 'utf8'), contentType: null };
 }
 
 function normalizeHeaders(headersInit) {
@@ -1202,8 +1413,8 @@ function normalizeHeaders(headersInit) {
  * @returns {typeof globalThis.fetch}
  */
 export function createControlledFetch(getConfig) {
-  const directHttpAgent = new http.Agent({ keepAlive: true });
-  const directHttpsAgent = new https.Agent({ keepAlive: true });
+  const directHttpAgent = createDirectHttpAgent({ keepAlive: true });
+  const directHttpsAgent = createDirectHttpsAgent({ keepAlive: true });
 
   return async function controlledFetch(input, init = {}) {
     const urlStr =
@@ -1213,6 +1424,7 @@ export function createControlledFetch(getConfig) {
           ? input.href
           : input.url;
     const url = new URL(urlStr);
+    const targetHost = bareHost(url.hostname);
     const isHttps = url.protocol === 'https:';
     const port = url.port ? Number(url.port) : isHttps ? 443 : 80;
     const method = (
@@ -1221,7 +1433,13 @@ export function createControlledFetch(getConfig) {
     ).toUpperCase();
     const headers = normalizeHeaders(init.headers);
     const signal = init.signal;
-    const bodyBuf = await bodyToBuffer(init.body);
+    const { buffer: bodyBuf, contentType } = await bodyToPayload(init.body);
+    if (
+      contentType &&
+      !Object.keys(headers).some((k) => k.toLowerCase() === 'content-type')
+    ) {
+      headers['content-type'] = contentType;
+    }
     if (
       bodyBuf &&
       !Object.keys(headers).some((k) => k.toLowerCase() === 'content-length')
@@ -1229,60 +1447,74 @@ export function createControlledFetch(getConfig) {
       headers['content-length'] = String(bodyBuf.length);
     }
 
-    const decision = resolveProxy(url.hostname, port, getConfig());
+    const decision = resolveProxy(targetHost, port, getConfig());
 
     return new Promise((resolve, reject) => {
       if (signal?.aborted) {
         reject(
           signal.reason ??
-            proxyError('AbortError', 'The operation was aborted'),
+            Object.assign(new Error('The operation was aborted'), {
+              name: 'AbortError',
+            }),
         );
         return;
       }
 
       let req;
-      if (decision.action === 'direct') {
-        const mod = isHttps ? https : http;
-        req = mod.request({
-          hostname: url.hostname,
-          port,
-          method,
-          path: `${url.pathname}${url.search}`,
-          headers,
-          agent: isHttps ? directHttpsAgent : directHttpAgent,
-        });
-      } else if (isHttps) {
-        const agent = createProxyTunnelAgent(decision.proxy, { isTls: true });
-        req = https.request({
-          hostname: url.hostname,
-          port,
-          method,
-          path: `${url.pathname}${url.search}`,
-          headers,
-          agent,
-        });
-      } else {
-        const proxyUrl = new URL(decision.proxy);
-        const proxyPort = proxyUrl.port
-          ? Number(proxyUrl.port)
-          : proxyUrl.protocol === 'https:'
-            ? 443
-            : 80;
-        const authHeader = buildProxyAuthHeader(proxyUrl);
-        const mod = proxyUrl.protocol === 'https:' ? https : http;
-        req = mod.request({
-          hostname: proxyUrl.hostname,
-          port: proxyPort,
-          method,
-          path: url.href,
-          headers: {
-            ...headers,
-            host: url.host,
-            ...(authHeader ? { 'proxy-authorization': authHeader } : {}),
-          },
-          agent: false,
-        });
+      try {
+        if (decision.action === 'direct') {
+          const mod = isHttps ? https : http;
+          req = mod.request({
+            hostname: targetHost,
+            port,
+            method,
+            path: `${url.pathname}${url.search}`,
+            headers,
+            agent: isHttps ? directHttpsAgent : directHttpAgent,
+          });
+        } else if (isHttps) {
+          const agent = createProxyTunnelAgent(decision.proxy, { isTls: true });
+          req = https.request({
+            hostname: targetHost,
+            port,
+            method,
+            path: `${url.pathname}${url.search}`,
+            headers,
+            agent,
+          });
+        } else {
+          const proxyUrl = new URL(decision.proxy);
+          const proxyHost = bareHost(proxyUrl.hostname);
+          const proxyPort = proxyUrl.port
+            ? Number(proxyUrl.port)
+            : proxyUrl.protocol === 'https:'
+              ? 443
+              : 80;
+          const authHeader = buildProxyAuthHeader(proxyUrl);
+          const mod = proxyUrl.protocol === 'https:' ? https : http;
+          req = mod.request({
+            hostname: proxyHost,
+            port: proxyPort,
+            method,
+            path: url.href,
+            headers: {
+              ...headers,
+              host: url.host,
+              ...(authHeader ? { 'proxy-authorization': authHeader } : {}),
+            },
+            agent:
+              proxyUrl.protocol === 'https:'
+                ? directHttpsAgent
+                : directHttpAgent,
+          });
+        }
+      } catch (err) {
+        reject(err);
+        return;
       }
+
+      let settled = false;
+      let activeRes = null;
 
       const onAbort = () => {
         const err =
@@ -1290,19 +1522,28 @@ export function createControlledFetch(getConfig) {
           Object.assign(new Error('The operation was aborted'), {
             name: 'AbortError',
           });
-        req.destroy(err);
-        reject(err);
+        if (activeRes && !activeRes.destroyed) activeRes.destroy(err);
+        if (!req.destroyed) req.destroy(err);
+        if (!settled) {
+          settled = true;
+          reject(err);
+        }
       };
       signal?.addEventListener('abort', onAbort, { once: true });
 
       req.once('error', (err) => {
-        signal?.removeEventListener('abort', onAbort);
-        reject(err);
+        if (!activeRes) signal?.removeEventListener('abort', onAbort);
+        if (!settled) {
+          settled = true;
+          reject(err);
+        }
       });
 
       req.once('response', (res) => {
-        signal?.removeEventListener('abort', onAbort);
+        activeRes = res;
         const status = res.statusCode ?? 502;
+        const cleanupAbort = () =>
+          signal?.removeEventListener('abort', onAbort);
 
         // Honor redirect: 'error' (used by shell-auth & updater).
         if (
@@ -1311,8 +1552,12 @@ export function createControlledFetch(getConfig) {
           status < 400 &&
           res.headers.location
         ) {
+          cleanupAbort();
           res.resume();
-          reject(new TypeError('Failed to fetch: unexpected redirect'));
+          if (!settled) {
+            settled = true;
+            reject(new TypeError('Failed to fetch: unexpected redirect'));
+          }
           return;
         }
 
@@ -1331,15 +1576,26 @@ export function createControlledFetch(getConfig) {
           status === 205 ||
           status === 304 ||
           method === 'HEAD';
-        const stream = nullBody ? null : Readable.toWeb(res);
-        if (nullBody) res.resume();
+        if (nullBody) {
+          cleanupAbort();
+          res.resume();
+        } else {
+          // Keep abort signal active throughout body consumption!
+          res.once('end', cleanupAbort);
+          res.once('close', cleanupAbort);
+          res.once('error', cleanupAbort);
+        }
 
+        const stream = nullBody ? null : Readable.toWeb(res);
         const response = new globalThis.Response(stream, {
           status,
           statusText: res.statusMessage ?? '',
           headers: respHeaders,
         });
-        resolve(response);
+        if (!settled) {
+          settled = true;
+          resolve(response);
+        }
       });
 
       if (bodyBuf) req.end(bodyBuf);
@@ -1386,13 +1642,13 @@ export async function testProxyTarget(
       ? 443
       : 80;
   const config = getConfig();
-  const decision = resolveProxy(url.hostname, port, config);
+  const decision = resolveProxy(bareHost(url.hostname), port, config);
   const redactedProxy = decision.proxy
     ? maskProxyUrl(decision.proxy).display
     : '';
 
   const startedAt = Date.now();
-  const controller = new AbortController();
+  const controller = new globalThis.AbortController();
   const timer = setTimeout(
     () => controller.abort(proxyError('timeout', '连接超时')),
     timeoutMs,
@@ -1407,6 +1663,18 @@ export async function testProxyTarget(
       signal: controller.signal,
     });
     await response.body?.cancel().catch(() => {});
+    if (decision.action === 'proxy' && response.status === 407) {
+      return {
+        url: url.href,
+        action: decision.action,
+        proxy: redactedProxy,
+        matchedBy: decision.matchedBy,
+        reachable: false,
+        status: 407,
+        reason: 'proxy_auth_required',
+        latencyMs: Date.now() - startedAt,
+      };
+    }
     return {
       url: url.href,
       action: decision.action,
@@ -1446,7 +1714,7 @@ export async function testProxyTarget(
       latencyMs: Date.now() - startedAt,
     };
   } finally {
-    clearTimeout(timer);
+    globalThis.clearTimeout(timer);
   }
 }
 

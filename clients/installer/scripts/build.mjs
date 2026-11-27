@@ -1,5 +1,8 @@
 import { normalizePlatformBinding } from '../runtime/platform-origin.mjs';
-import { validateProxyConfig } from '../runtime/network-proxy.mjs';
+import {
+  readBoundedJsonFile,
+  validateProxyConfig,
+} from '../runtime/network-proxy.mjs';
 /**
  * Build the Desktop installer package.
  *
@@ -594,12 +597,10 @@ export async function build(args) {
   }
   if (args['default-proxy-file']) {
     const proxyFile = resolve(String(args['default-proxy-file']));
-    const st = lstatSync(proxyFile);
-    if (!st.isFile() || st.isSymbolicLink() || st.size > 65536) {
-      throw new Error('invalid --default-proxy-file');
-    }
     defaultsPayload.networkProxy = validateProxyConfig(
-      JSON.parse(readFileSync(proxyFile, 'utf8')),
+      readBoundedJsonFile(proxyFile),
+      null,
+      { allowCredentials: false },
     );
   }
   if (Object.keys(defaultsPayload).length > 0) {

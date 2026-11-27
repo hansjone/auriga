@@ -417,14 +417,24 @@ export function createSettingsView(
             },
       body: body === undefined ? undefined : JSON.stringify(body),
     });
-    if (!response.ok)
+    if (!response.ok) {
+      let reason = '';
+      if (response.status === 400) {
+        try {
+          const errBody = await response.json();
+          if (typeof errBody?.reason === 'string') reason = errBody.reason;
+        } catch {
+          /* ignore non-JSON error body */
+        }
+      }
       throw new Error(
         response.status === 401
           ? 'auth'
           : response.status === 403
             ? 'forbidden'
-            : 'statusHttp:' + response.status,
+            : reason || 'statusHttp:' + response.status,
       );
+    }
     try {
       const value = await response.json();
       if (
@@ -827,7 +837,7 @@ export function createSettingsView(
   }
 
   function NetworkProxyView(
-    /** @type {{t:typeof messages.zh,proxy:any,busy:boolean,onSave:(payload:any)=>Promise<void>,onReset:()=>Promise<void>,onTest:(url:string)=>Promise<any>}} */ {
+    /** @type {{t:typeof messages.zh,proxy:any,busy:boolean,onSave:(payload:any)=>Promise<boolean>,onReset:()=>Promise<boolean>,onTest:(url:string)=>Promise<any>}} */ {
       t,
       proxy,
       busy,
@@ -846,23 +856,40 @@ export function createSettingsView(
     const [rules, setRules] = React.useState(
       (proxy.rules ?? []).map((/** @type {any} */ r) => ({ ...r })),
     );
+    const [dirty, setDirty] = React.useState(false);
     const [testUrl, setTestUrl] = React.useState('');
     const [testResult, setTestResult] = React.useState(null);
+    const proxyFingerprint = JSON.stringify({
+      mode: proxy.mode ?? 'direct',
+      globalProxy: proxy.globalProxy ?? '',
+      noProxy: proxy.noProxy ?? [],
+      rules: proxy.rules ?? [],
+      source: proxy.source ?? '',
+    });
+    const lastSyncedRef = React.useRef(proxyFingerprint);
     React.useEffect(() => {
+      if (dirty || proxyFingerprint === lastSyncedRef.current) return;
+      lastSyncedRef.current = proxyFingerprint;
       setMode(proxy.mode ?? 'direct');
       setGlobalProxy(proxy.globalProxy ?? '');
       setNoProxyText((proxy.noProxy ?? []).join(', '));
       setRules((proxy.rules ?? []).map((/** @type {any} */ r) => ({ ...r })));
-    }, [proxy]);
+    }, [proxyFingerprint, dirty, proxy]);
 
     const updateRule = (
       /** @type {number} */ idx,
       /** @type {Record<string, any>} */ patch,
-    ) =>
+    ) => {
+      setDirty(true);
       setRules((/** @type {any[]} */ prev) =>
         prev.map((item, i) => (i === idx ? { ...item, ...patch } : item)),
       );
-    const moveRule = (/** @type {number} */ idx, /** @type {number} */ delta) =>
+    };
+    const moveRule = (
+      /** @type {number} */ idx,
+      /** @type {number} */ delta,
+    ) => {
+      setDirty(true);
       setRules((/** @type {any[]} */ prev) => {
         const next = [...prev];
         const target = idx + delta;
@@ -870,9 +897,13 @@ export function createSettingsView(
         [next[idx], next[target]] = [next[target], next[idx]];
         return next;
       });
-    const removeRule = (/** @type {number} */ idx) =>
+    };
+    const removeRule = (/** @type {number} */ idx) => {
+      setDirty(true);
       setRules((/** @type {any[]} */ prev) => prev.filter((_, i) => i !== idx));
-    const addRule = () =>
+    };
+    const addRule = () => {
+      setDirty(true);
       setRules((/** @type {any[]} */ prev) => [
         ...prev,
         {
@@ -883,6 +914,7 @@ export function createSettingsView(
           proxy: '',
         },
       ]);
+    };
 
     const buildPayload = () => ({
       schemaVersion: 1,
@@ -925,7 +957,10 @@ export function createSettingsView(
             'aria-label': t.proxyMode,
             value: mode,
             disabled: busy,
-            onChange: (/** @type {any} */ e) => setMode(e.target.value),
+            onChange: (/** @type {any} */ e) => {
+              setDirty(true);
+              setMode(e.target.value);
+            },
           },
           h('option', { value: 'direct' }, t.proxyModeDirect),
           h('option', { value: 'proxy' }, t.proxyModeCustom),
@@ -944,8 +979,10 @@ export function createSettingsView(
               value: globalProxy,
               placeholder: t.proxyGlobalPlaceholder,
               disabled: busy,
-              onChange: (/** @type {any} */ e) =>
-                setGlobalProxy(e.target.value),
+              onChange: (/** @type {any} */ e) => {
+                setDirty(true);
+                setGlobalProxy(e.target.value);
+              },
             }),
           ),
           h(
@@ -958,8 +995,10 @@ export function createSettingsView(
               value: noProxyText,
               placeholder: t.proxyNoProxyPlaceholder,
               disabled: busy,
-              onChange: (/** @type {any} */ e) =>
-                setNoProxyText(e.target.value),
+              onChange: (/** @type {any} */ e) => {
+                setDirty(true);
+                setNoProxyText(e.target.value);
+              },
             }),
           ),
           h(
@@ -1057,7 +1096,13 @@ export function createSettingsView(
           {
             type: 'button',
             disabled: busy,
-            onClick: () => onSave(buildPayload()),
+            onClick: async () => {
+              const saved = await onSave(buildPayload());
+              if (saved) {
+                lastSyncedRef.current = '';
+                setDirty(false);
+              }
+            },
           },
           t.save,
         ),
@@ -1067,7 +1112,13 @@ export function createSettingsView(
             {
               type: 'button',
               disabled: busy,
-              onClick: () => onReset(),
+              onClick: async () => {
+                const reset = await onReset();
+                if (reset) {
+                  lastSyncedRef.current = '';
+                  setDirty(false);
+                }
+              },
             },
             t.proxyReset,
           ),
@@ -1145,10 +1196,14 @@ export function createSettingsView(
             ? t.loadNetwork
             : (t[/** @type {keyof typeof t} */ (error.message)] ??
               t.unavailable);
+    const stateSeqRef = React.useRef(0);
     const readState = async () => {
+      const seq = ++stateSeqRef.current;
       const next = await call('auriga/settings/state');
-      setState(next);
-      setAddress(next.platformOrigin ?? '');
+      if (seq === stateSeqRef.current) {
+        setState(next);
+        setAddress(next.platformOrigin ?? '');
+      }
       try {
         const identity = await call('auriga/shell/status');
         if (
@@ -1648,18 +1703,28 @@ export function createSettingsView(
           t,
           proxy: state.proxy,
           busy,
-          onSave: (/** @type {any} */ payload) =>
-            run(async () => {
+          onSave: async (/** @type {any} */ payload) => {
+            let ok = false;
+            await run(async () => {
+              const seq = ++stateSeqRef.current;
               const next = await call('auriga/settings/proxy', payload);
-              setState(next);
+              if (seq === stateSeqRef.current) setState(next);
               setNotice(t.saved);
-            }),
-          onReset: () =>
-            run(async () => {
+              ok = true;
+            });
+            return ok;
+          },
+          onReset: async () => {
+            let ok = false;
+            await run(async () => {
+              const seq = ++stateSeqRef.current;
               const next = await call('auriga/settings/proxy/reset', {});
-              setState(next);
+              if (seq === stateSeqRef.current) setState(next);
               setNotice(t.proxyResetDone);
-            }),
+              ok = true;
+            });
+            return ok;
+          },
           onTest: async (/** @type {string} */ url) => {
             let result = null;
             await run(async () => {

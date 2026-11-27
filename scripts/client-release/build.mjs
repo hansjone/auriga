@@ -5,7 +5,6 @@ import {
   cpSync,
   copyFileSync,
   existsSync,
-  lstatSync,
   realpathSync,
   mkdirSync,
   readFileSync,
@@ -30,7 +29,10 @@ import {
 } from '../../clients/installer/runtime/release.mjs';
 import { sign, generateKeyPairSync } from 'node:crypto';
 import { parse as parseVersion } from '../../clients/installer/runtime/semver-lite.mjs';
-import { validateProxyConfig } from '../../clients/installer/runtime/network-proxy.mjs';
+import {
+  readBoundedJsonFile,
+  validateProxyConfig,
+} from '../../clients/installer/runtime/network-proxy.mjs';
 import {
   validateResourceRoots,
   validateUacConfigDir,
@@ -196,13 +198,9 @@ export function validateBuildOptions(o) {
   }
   if (o['default-proxy-file']) {
     physical(o['default-proxy-file']);
-    const st = lstatSync(o['default-proxy-file']);
-    if (!st.isFile() || st.isSymbolicLink() || st.size > 65536) {
-      throw new Error('invalid --default-proxy-file');
-    }
-    validateProxyConfig(
-      JSON.parse(readFileSync(o['default-proxy-file'], 'utf8')),
-    );
+    validateProxyConfig(readBoundedJsonFile(o['default-proxy-file']), null, {
+      allowCredentials: false,
+    });
   }
   return unsigned;
 }

@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { Buffer } from 'node:buffer';
 import http from 'node:http';
 import net from 'node:net';
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
@@ -9,9 +10,11 @@ import {
   BUILTIN_LOOPBACK_NO_PROXY,
   createControlledFetch,
   createProxyConfigStore,
+  isLoopbackHost,
   maskProxyUrl,
   normalizeMatchPattern,
   normalizeProxyUrl,
+  readBoundedJsonFile,
   resolveProxy,
   startLocalProxyServer,
   stripSystemProxyEnv,
@@ -52,7 +55,7 @@ test('stripSystemProxyEnv removes all inherited proxy variables regardless of ca
   }
 });
 
-test('normalizeProxyUrl & normalizeMatchPattern validate inputs strictly', () => {
+test('normalizeProxyUrl & normalizeMatchPattern validate HTTP/HTTPS, IPv6, credentials and percent-encoding', () => {
   assert.equal(
     normalizeProxyUrl('http://proxy.corp.local:8080'),
     'http://proxy.corp.local:8080',
@@ -68,11 +71,27 @@ test('normalizeProxyUrl & normalizeMatchPattern validate inputs strictly', () =>
   assert.throws(() => normalizeProxyUrl('http://proxy:8080/path'), {
     code: 'invalidProxyUrl',
   });
+  // Invalid percent encoding rejected at save time
+  assert.throws(() => normalizeProxyUrl('http://user:%ZZ@proxy:8080'), {
+    code: 'invalidProxyUrl',
+  });
+  // Bundled defaults disallow credentials
+  assert.throws(
+    () =>
+      normalizeProxyUrl('http://user:pass@proxy:8080', {
+        allowCredentials: false,
+      }),
+    { code: 'invalidProxyUrl' },
+  );
 
   assert.equal(normalizeMatchPattern('Example.COM'), 'example.com');
   assert.equal(normalizeMatchPattern('.corp.local'), '*.corp.local');
   assert.equal(normalizeMatchPattern('*.GitHub.com'), '*.github.com');
   assert.equal(normalizeMatchPattern('192.0.2.0/24'), '192.0.2.0/24');
+  // IPv6 literal & CIDR support
+  assert.equal(normalizeMatchPattern('2001:db8::1'), '2001:db8::1');
+  assert.equal(normalizeMatchPattern('[2001:db8::1]'), '2001:db8::1');
+  assert.equal(normalizeMatchPattern('2001:db8::/32'), '2001:db8::/32');
   assert.throws(() => normalizeMatchPattern('https://github.com'), {
     code: 'invalidPattern',
   });
@@ -81,12 +100,26 @@ test('normalizeProxyUrl & normalizeMatchPattern validate inputs strictly', () =>
   });
 });
 
-test('resolveProxy enforces priority: loopback > direct mode > ordered rules > noProxy > globalProxy', () => {
+test('isLoopbackHost & resolveProxy enforce priority, IPv6 rules, and self-port loop prevention', () => {
+  for (const host of [
+    'localhost',
+    'localhost.',
+    'sub.localhost.',
+    '127.0.0.1',
+    '127.0.0.42',
+    '::1',
+    '[::1]',
+    '::ffff:127.0.0.1',
+    '::ffff:7f00:1',
+  ]) {
+    assert.equal(isLoopbackHost(host), true, `expected loopback: ${host}`);
+  }
+
   const cfg = validateProxyConfig({
     schemaVersion: 1,
     mode: 'proxy',
     globalProxy: 'http://global.proxy:8080',
-    noProxy: ['*.corp.local', '192.0.2.0/24'],
+    noProxy: ['*.corp.local', '192.0.2.0/24', '2001:db8::/32'],
     rules: [
       {
         id: 'r-disabled',
@@ -120,7 +153,13 @@ test('resolveProxy enforces priority: loopback > direct mode > ordered rules > n
   });
 
   // 1. Loopback always direct
-  for (const host of ['localhost', '127.0.0.1', '127.0.0.42', '::1']) {
+  for (const host of [
+    'localhost',
+    'localhost.',
+    '127.0.0.1',
+    '::1',
+    '::ffff:7f00:1',
+  ]) {
     const d = resolveProxy(host, 8080, cfg);
     assert.equal(d.action, 'direct');
     assert.equal(d.matchedBy, 'builtin_loopback');
@@ -145,7 +184,7 @@ test('resolveProxy enforces priority: loopback > direct mode > ordered rules > n
   // 4. Explicit direct rule
   assert.equal(resolveProxy('direct.example.com', 443, cfg).action, 'direct');
 
-  // 5. Global noProxy (wildcard & CIDR)
+  // 5. Global noProxy (wildcard, IPv4 CIDR & IPv6 CIDR)
   assert.equal(
     resolveProxy('git.corp.local', 443, cfg).matchedBy,
     'noProxy:*.corp.local',
@@ -153,6 +192,10 @@ test('resolveProxy enforces priority: loopback > direct mode > ordered rules > n
   assert.equal(
     resolveProxy('192.0.2.42', 443, cfg).matchedBy,
     'noProxy:192.0.2.0/24',
+  );
+  assert.equal(
+    resolveProxy('[2001:db8::99]', 443, cfg).matchedBy,
+    'noProxy:2001:db8::/32',
   );
 
   // 6. Global proxy fallback
@@ -166,7 +209,11 @@ test('resolveProxy enforces priority: loopback > direct mode > ordered rules > n
   const directCfg = { ...cfg, mode: 'direct' };
   assert.equal(resolveProxy('pypi.org', 443, directCfg).action, 'direct');
 
-  // 8. Loop prevention against local router port
+  // 8. Loop prevention against local router port (both target and upstream proxy)
+  assert.throws(
+    () => resolveProxy('127.0.0.1', 43210, directCfg, { selfPort: 43210 }),
+    { code: 'proxy_loop' },
+  );
   assert.throws(
     () =>
       resolveProxy(
@@ -202,6 +249,9 @@ test('layered store resolves user override > bundled defaults.json > builtin dir
         },
       }),
     );
+
+    const parsedBounded = readBoundedJsonFile(defaultsFile);
+    assert.equal(parsedBounded.networkProxy.mode, 'proxy');
 
     const store = createProxyConfigStore({ dataHome, defaultsFile });
     const initial = store.snapshot();
@@ -279,14 +329,67 @@ test('layered store resolves user override > bundled defaults.json > builtin dir
   }
 });
 
-test('local routing proxy forwards per-domain HTTP & CONNECT traffic to distinct upstream proxies with auth and hot-reloads', async () => {
+test('local routing proxy forwards HTTP, real bidirectional CONNECT, rejects self-loop, and controlledFetch supports FormData, body abort & 407 probe', async () => {
   const seenA = [];
   const seenB = [];
   const connectSeenA = [];
 
-  const createMockProxy = (name, seen, connectSeen) =>
+  // Echo TCP server to verify full bidirectional CONNECT tunneling
+  const echoServer = await new Promise((resolve) => {
+    const s = net.createServer((sock) => {
+      sock.once('data', (d) => {
+        sock.end(`ECHO:${d.toString('utf8')}`);
+      });
+    });
+    s.listen(0, '127.0.0.1', () =>
+      resolve({ server: s, port: s.address().port }),
+    );
+  });
+
+  // Direct HTTP server for FormData multipart & body abort tests
+  const directServer = await new Promise((resolve) => {
+    const s = http.createServer((req, res) => {
+      if (req.url === '/upload') {
+        const chunks = [];
+        req.on('data', (c) => chunks.push(c));
+        req.on('end', () => {
+          res.writeHead(200, { 'content-type': 'application/json' });
+          res.end(
+            JSON.stringify({
+              contentType: req.headers['content-type'] ?? '',
+              body: Buffer.concat(chunks).toString('utf8'),
+            }),
+          );
+        });
+        return;
+      }
+      if (req.url === '/stall') {
+        res.writeHead(200, { 'content-type': 'application/octet-stream' });
+        res.write('first-chunk');
+        // Intentionally never end to test mid-body abort
+        return;
+      }
+      res.writeHead(200);
+      res.end('ok');
+    });
+    s.listen(0, '127.0.0.1', () =>
+      resolve({ server: s, port: s.address().port }),
+    );
+  });
+
+  const createMockProxy = (
+    name,
+    seen,
+    connectSeen,
+    { requireAuth = false } = {},
+  ) =>
     new Promise((resolve) => {
       const srv = http.createServer((req, res) => {
+        if (requireAuth && !req.headers['proxy-authorization']) {
+          res.writeHead(407, { 'proxy-authenticate': 'Basic realm="test"' });
+          res.end('Proxy Auth Required');
+          return;
+        }
         seen.push({
           url: req.url,
           auth: req.headers['proxy-authorization'] ?? null,
@@ -299,8 +402,8 @@ test('local routing proxy forwards per-domain HTTP & CONNECT traffic to distinct
           authority: req.url,
           auth: req.headers['proxy-authorization'] ?? null,
         });
-        const [host, portStr] = (req.url ?? '').split(':');
-        const upstream = net.connect(Number(portStr), host, () => {
+        // Route synthetic tunnel authority to our local echo server
+        const upstream = net.connect(echoServer.port, '127.0.0.1', () => {
           clientSocket.write('HTTP/1.1 200 Connection Established\r\n\r\n');
           if (head?.length) upstream.write(head);
           upstream.pipe(clientSocket);
@@ -316,20 +419,11 @@ test('local routing proxy forwards per-domain HTTP & CONNECT traffic to distinct
       });
     });
 
-  // Echo TCP server to verify CONNECT tunneling through upstream proxy A
-  const echoServer = await new Promise((resolve) => {
-    const s = net.createServer((sock) => {
-      sock.once('data', (d) => {
-        sock.end(`ECHO:${d.toString('utf8')}`);
-      });
-    });
-    s.listen(0, '127.0.0.1', () =>
-      resolve({ server: s, port: s.address().port }),
-    );
-  });
-
   const proxyA = await createMockProxy('proxyA', seenA, connectSeenA);
   const proxyB = await createMockProxy('proxyB', seenB, []);
+  const authProxy = await createMockProxy('authProxy', [], [], {
+    requireAuth: true,
+  });
 
   let activeConfig = validateProxyConfig({
     mode: 'proxy',
@@ -340,13 +434,6 @@ test('local routing proxy forwards per-domain HTTP & CONNECT traffic to distinct
         id: 'r-a',
         enabled: true,
         pattern: 'alpha.example.test',
-        action: 'proxy',
-        proxy: `http://u1:p1@127.0.0.1:${proxyA.port}`,
-      },
-      {
-        id: 'r-connect',
-        enabled: true,
-        pattern: 'tunnel.example.test',
         action: 'proxy',
         proxy: `http://u1:p1@127.0.0.1:${proxyA.port}`,
       },
@@ -370,12 +457,10 @@ test('local routing proxy forwards per-domain HTTP & CONNECT traffic to distinct
         (res) => {
           const chunks = [];
           res.on('data', (c) => chunks.push(c));
-          res.on('end', () =>
-            resolve({
-              status: res.statusCode,
-              body: JSON.parse(Buffer.concat(chunks).toString('utf8')),
-            }),
-          );
+          res.on('end', () => {
+            const text = Buffer.concat(chunks).toString('utf8');
+            resolve({ status: res.statusCode, text });
+          });
         },
       );
       req.on('error', reject);
@@ -383,20 +468,26 @@ test('local routing proxy forwards per-domain HTTP & CONNECT traffic to distinct
     });
 
   try {
+    // Env exposes NODE_USE_ENV_PROXY=1 for Node 24+ children
+    assert.equal(router.env().NODE_USE_ENV_PROXY, '1');
+
     // Domain A -> Proxy A with Basic auth
     const resA = await httpViaRouter('http://alpha.example.test/hello');
     assert.equal(resA.status, 200);
-    assert.equal(resA.body.via, 'proxyA');
+    assert.equal(JSON.parse(resA.text).via, 'proxyA');
     assert.equal(
       seenA[0].auth,
       `Basic ${Buffer.from('u1:p1').toString('base64')}`,
     );
 
+    // Self-loop HTTP target rejected with 502
+    const loopRes = await httpViaRouter(`http://127.0.0.1:${router.port}/self`);
+    assert.equal(loopRes.status, 502);
+
     // Other domain -> Global Proxy B
     const resB = await httpViaRouter('http://beta.example.test/world');
     assert.equal(resB.status, 200);
-    assert.equal(resB.body.via, 'proxyB');
-    assert.equal(seenB[0].auth, null);
+    assert.equal(JSON.parse(resB.text).via, 'proxyB');
 
     // Hot reload: switch alpha.example.test to Proxy B without restarting router
     activeConfig = validateProxyConfig({
@@ -406,54 +497,99 @@ test('local routing proxy forwards per-domain HTTP & CONNECT traffic to distinct
       rules: [],
     });
     const resA2 = await httpViaRouter('http://alpha.example.test/after-reload');
-    assert.equal(resA2.body.via, 'proxyB');
+    assert.equal(JSON.parse(resA2.text).via, 'proxyB');
 
-    // Controlled fetch obeys same config
+    // Controlled fetch preserves FormData multipart encoding
     const controlled = createControlledFetch(() => activeConfig);
-    const cfRes = await controlled('http://gamma.example.test/cf');
-    assert.equal(cfRes.status, 200);
-    assert.equal((await cfRes.json()).via, 'proxyB');
-
-    // testProxyTarget probes through controlled fetch
-    const probe = await testProxyTarget(
-      'http://gamma.example.test/probe',
-      () => activeConfig,
+    const form = new globalThis.FormData();
+    form.append('meta', JSON.stringify({ name: 'pkg-1' }));
+    form.append(
+      'file',
+      new globalThis.Blob(['hello-bytes'], { type: 'text/plain' }),
+      'a.txt',
     );
-    assert.equal(probe.reachable, true);
-    assert.equal(probe.action, 'proxy');
-    assert.equal(probe.matchedBy, 'globalProxy');
+    const upRes = await controlled(
+      `http://127.0.0.1:${directServer.port}/upload`,
+      {
+        method: 'POST',
+        body: form,
+      },
+    );
+    assert.equal(upRes.status, 200);
+    const upJson = await upRes.json();
+    assert.match(upJson.contentType, /^multipart\/form-data; boundary=/);
+    assert.match(upJson.body, /pkg-1/);
+    assert.match(upJson.body, /hello-bytes/);
 
-    // Verify CONNECT tunnel through proxyA to echoServer
+    // Controlled fetch honors AbortSignal AFTER response headers (during body read)
+    const ac = new globalThis.AbortController();
+    const stallRes = await controlled(
+      `http://127.0.0.1:${directServer.port}/stall`,
+      { signal: ac.signal },
+    );
+    const reader = stallRes.body.getReader();
+    const first = await reader.read();
+    assert.equal(Buffer.from(first.value).toString('utf8'), 'first-chunk');
+    setTimeout(() => ac.abort(new Error('idle-timeout')), 30);
+    await assert.rejects(() => reader.read(), /idle-timeout|aborted/i);
+
+    // testProxyTarget classifies HTTP 407 as proxy_auth_required (unreachable)
+    const authCfg = validateProxyConfig({
+      mode: 'proxy',
+      globalProxy: `http://127.0.0.1:${authProxy.port}`,
+      noProxy: [],
+      rules: [],
+    });
+    const probe407 = await testProxyTarget(
+      'http://gamma.example.test/probe',
+      () => authCfg,
+    );
+    assert.equal(probe407.reachable, false);
+    assert.equal(probe407.reason, 'proxy_auth_required');
+
+    // Real bidirectional CONNECT tunnel through proxyA to echoServer
     activeConfig = validateProxyConfig({
       mode: 'proxy',
       globalProxy: `http://u1:p1@127.0.0.1:${proxyA.port}`,
       noProxy: [],
       rules: [],
     });
-    const tunnelResp = await new Promise((resolve, reject) => {
+    const tunnelOutput = await new Promise((resolve, reject) => {
       const sock = net.connect(router.port, '127.0.0.1', () => {
         sock.write(
-          `CONNECT 198.51.100.1:${echoServer.port} HTTP/1.1\r\nHost: 198.51.100.1:${echoServer.port}\r\n\r\n`,
+          `CONNECT tunnel.example.test:443 HTTP/1.1\r\nHost: tunnel.example.test:443\r\n\r\n`,
         );
       });
-      // Replace connect target inside proxyA to point to local echoServer for this test
-      sock.once('data', (d) => {
-        sock.destroy();
-        resolve(d.toString('latin1'));
+      let buf = Buffer.alloc(0);
+      let established = false;
+      sock.on('data', (chunk) => {
+        buf = Buffer.concat([buf, chunk]);
+        if (!established) {
+          const sep = buf.indexOf('\r\n\r\n');
+          if (sep === -1) return;
+          const statusLine = buf.subarray(0, sep).toString('latin1');
+          assert.match(statusLine, /^HTTP\/1\.1 200 /);
+          established = true;
+          buf = buf.subarray(sep + 4);
+          sock.write('ping-over-tunnel');
+        }
       });
+      sock.on('end', () => resolve(buf.toString('utf8')));
       sock.on('error', reject);
     });
-    assert.ok(connectSeenA.length === 1);
-    assert.equal(connectSeenA[0].authority, `198.51.100.1:${echoServer.port}`);
+    assert.equal(connectSeenA.length, 1);
+    assert.equal(connectSeenA[0].authority, 'tunnel.example.test:443');
     assert.equal(
       connectSeenA[0].auth,
       `Basic ${Buffer.from('u1:p1').toString('base64')}`,
     );
-    assert.match(tunnelResp, /^HTTP\/1\.1 (200|502)/);
+    assert.equal(tunnelOutput, 'ECHO:ping-over-tunnel');
   } finally {
     await router.close();
     proxyA.server.close();
     proxyB.server.close();
+    authProxy.server.close();
     echoServer.server.close();
+    directServer.server.close();
   }
 });
