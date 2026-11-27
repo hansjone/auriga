@@ -2,6 +2,7 @@ package bifrostbackend
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -90,7 +91,7 @@ func TestPoolCapabilitiesMatchCatalogConsumerLowerBound(t *testing.T) {
 		}
 	}
 	pool := api.RelayPool{Id: "auto", ContextWindow: 1, Routes: []api.RelayRoute{{ProviderId: "019a0000-0000-7000-8000-000000000001", Model: "fixture", Weight: 1}}, Price: api.Price{Currency: "USD", Version: "fixture", EffectiveAt: time.Now().Add(-time.Minute), InputMicrosPerMillionTokens: 1, OutputMicrosPerMillionTokens: 1}}
-	if err := (&Backend{}).SavePool(t.Context(), "tenant", pool); err != invalid {
+	if err := (&Backend{}).SavePool(t.Context(), "tenant", pool); !errors.Is(err, invalid) {
 		t.Fatal("invalid context reached persistence")
 	}
 }

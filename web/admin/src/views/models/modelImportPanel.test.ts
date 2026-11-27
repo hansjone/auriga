@@ -405,8 +405,9 @@ it('allows correcting a preflight conflict to a new alias and preserves the orig
   w.unmount();
 });
 it.each([
-  ['2026-01-01T00:00:00.12Z', true],
-  ['2026-01-01T00:00:00.120000001Z', false],
+  // Import mints effectiveAt at Date.now()-60s; samePool allows ≤2m clamp skew.
+  ['2025-12-31T23:59:00.12Z', true],
+  ['2025-12-31T23:56:59.120Z', false],
 ] as const)(
   'handles interrupted-save readback timestamp %s without resending',
   async (effectiveAt, same) => {
@@ -452,6 +453,54 @@ it.each([
     w.unmount();
   },
 );
+it('shows a concrete message for rejected effectiveAt and remints on retry', async () => {
+  vi.mocked(relayApi.createPool).mockRejectedValue(
+    new ApiError({
+      status: 400,
+      code: 'common.validation_failed',
+      title: 'Bad Request',
+      params: { field: '/price/effectiveAt' },
+    }),
+  );
+  const w = make();
+  await prepare(w);
+  await w.get('[data-testid="import-run"]').trigger('click');
+  await flushPromises();
+  expect(w.text()).toContain('计价生效时间不被服务器接受');
+  expect(w.text()).not.toContain('未确认保存结果');
+  const first = vi.mocked(relayApi.createPool).mock.calls[0][0].price
+    .effectiveAt;
+  expect(first).toEqual(expect.any(String));
+  const submitted = Date.parse(first);
+  expect(Date.now() - submitted).toBeGreaterThanOrEqual(50_000);
+  expect(Date.now() - submitted).toBeLessThan(120_000);
+  await w.get('[name="importConfirmed"]').setValue(true);
+  await w.get('[data-testid="import-run"]').trigger('click');
+  await flushPromises();
+  // prepare() selects two models; each run attempts both after reminting bodies.
+  expect(relayApi.createPool).toHaveBeenCalledTimes(4);
+  const retried = vi.mocked(relayApi.createPool).mock.calls[2][0].price
+    .effectiveAt;
+  expect(Date.now() - Date.parse(retried)).toBeGreaterThanOrEqual(50_000);
+  expect(Date.now() - Date.parse(retried)).toBeLessThan(120_000);
+  w.unmount();
+});
+it('shows generic invalid for other definite 400 rejections', async () => {
+  vi.mocked(relayApi.createPool).mockRejectedValue(
+    new ApiError({
+      status: 400,
+      code: 'common.validation_failed',
+      title: 'Bad Request',
+    }),
+  );
+  const w = make();
+  await prepare(w);
+  await w.get('[data-testid="import-run"]').trigger('click');
+  await flushPromises();
+  expect(w.text()).toContain('请检查填写内容');
+  expect(w.text()).not.toContain('未确认保存结果');
+  w.unmount();
+});
 it('stops subsequent writes when fresh permissions are revoked', async () => {
   vi.mocked(adminApi.membership)
     .mockResolvedValueOnce({ permissions } as Awaited<

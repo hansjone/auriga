@@ -225,7 +225,8 @@ const freshPool = (): RelayPool => ({
     inputMicrosPerMillionTokens: 0,
     outputMicrosPerMillionTokens: 0,
     version: browserUuid(),
-    effectiveAt: new Date().toISOString(),
+    // Leave headroom for browser/server clock skew on first save.
+    effectiveAt: new Date(Date.now() - 60_000).toISOString(),
   },
 });
 async function load() {

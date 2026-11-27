@@ -312,7 +312,9 @@ async function run() {
               inputMicrosPerMillionTokens: Number(inputPrice.value),
               outputMicrosPerMillionTokens: Number(outputPrice.value),
               version: browserUuid(),
-              effectiveAt: new Date().toISOString(),
+              // Leave headroom for browser/server clock skew; the server also
+              // tolerates a short lead, but the browser clock is not authority.
+              effectiveAt: new Date(Date.now() - 60_000).toISOString(),
             },
           };
           candidate.capabilities = createCapabilityPolicy(candidate);
@@ -351,7 +353,9 @@ async function run() {
         }
         signal.throwIfAborted();
         row.attempted = true;
-        await relayApi.createPool(row.body, row.key, signal);
+        // Keep the persisted document (server may clamp effectiveAt) so a later
+        // interrupted-save readback still matches this attempt.
+        row.body = await relayApi.createPool(row.body, row.key, signal);
         row.status = 'saved';
       } catch (e) {
         row.status =
@@ -365,7 +369,23 @@ async function run() {
               ? t('stepup')
               : isApiError(e) && [401, 403].includes(e.status)
                 ? t('forbidden')
-                : t('importWriteUnknown');
+                : isApiError(e) && e.status === 400
+                  ? e.problem.params?.field === '/price/effectiveAt'
+                    ? t('importInvalidEffectiveAt')
+                    : t('invalid')
+                  : isApiError(e) && e.status === 429
+                    ? t('limited')
+                    : t('importWriteUnknown');
+        // Definite effectiveAt rejection: drop the frozen body so retry remints
+        // a fresh slightly-past timestamp after clocks are corrected.
+        if (
+          isApiError(e) &&
+          e.status === 400 &&
+          e.problem.params?.field === '/price/effectiveAt'
+        ) {
+          row.body = undefined;
+          row.attempted = false;
+        }
         if (signal.aborted || (isApiError(e) && [401, 403].includes(e.status)))
           break;
       }

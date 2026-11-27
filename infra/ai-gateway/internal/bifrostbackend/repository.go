@@ -42,6 +42,22 @@ const invalid = fault("common.validation_failed")
 const denied = fault("common.forbidden")
 const missing = fault("common.not_found")
 
+// Clients mint price.effectiveAt from the browser clock. Allow a short lead so
+// ordinary NTP skew does not reject otherwise valid pool saves.
+const priceEffectiveSkew = 2 * time.Minute
+
+type validationProblem struct {
+	code  fault
+	field string
+}
+
+func (e validationProblem) Error() string { return string(e.code) }
+func (e validationProblem) Unwrap() error { return e.code }
+
+func invalidField(field string) error {
+	return validationProblem{code: invalid, field: field}
+}
+
 type Backend struct {
 	tenant         string
 	db             *store.Store
@@ -503,8 +519,8 @@ func (b *Backend) savePool(ctx context.Context, tenant string, p api.RelayPool, 
 	if err != nil {
 		return err
 	}
-	if !modelID.MatchString(p.Id) || len(p.Routes) < 1 || len(p.Routes) > 8 || !validPoolCapabilities(p.ContextWindow, p.MaxOutputTokens) || p.Price.Currency != "USD" || p.Price.Version == "" || p.Price.EffectiveAt.IsZero() || p.Price.EffectiveAt.After(time.Now()) || p.Price.InputMicrosPerMillionTokens <= 0 || p.Price.OutputMicrosPerMillionTokens <= 0 || p.Price.InputMicrosPerMillionTokens > maxInteger || p.Price.OutputMicrosPerMillionTokens > maxInteger {
-		return invalid
+	if err := normalizePoolSave(&p); err != nil {
+		return err
 	}
 	providers, err := routeProviders(p.Routes)
 	if err != nil {
@@ -548,6 +564,41 @@ func (b *Backend) savePool(ctx context.Context, tenant string, p api.RelayPool, 
 		}
 		return audit.Record(ctx, tx, tenant, action, "relay_pool", p.Id)
 	})
+}
+
+// normalizePoolSave validates a pool document and clamps a slightly-future
+// effectiveAt (within priceEffectiveSkew) down to server now so save and later
+// budget admission share the same "not future" rule.
+func normalizePoolSave(p *api.RelayPool) error {
+	if !modelID.MatchString(p.Id) {
+		return invalidField("/id")
+	}
+	if len(p.Routes) < 1 || len(p.Routes) > 8 {
+		return invalidField("/routes")
+	}
+	if !validPoolCapabilities(p.ContextWindow, p.MaxOutputTokens) {
+		return invalidField("/contextWindow")
+	}
+	if p.Price.Currency != "USD" {
+		return invalidField("/price/currency")
+	}
+	if p.Price.Version == "" {
+		return invalidField("/price/version")
+	}
+	now := time.Now()
+	if p.Price.EffectiveAt.IsZero() || p.Price.EffectiveAt.After(now.Add(priceEffectiveSkew)) {
+		return invalidField("/price/effectiveAt")
+	}
+	if p.Price.EffectiveAt.After(now) {
+		p.Price.EffectiveAt = now
+	}
+	if p.Price.InputMicrosPerMillionTokens <= 0 || p.Price.InputMicrosPerMillionTokens > maxInteger {
+		return invalidField("/price/inputMicrosPerMillionTokens")
+	}
+	if p.Price.OutputMicrosPerMillionTokens <= 0 || p.Price.OutputMicrosPerMillionTokens > maxInteger {
+		return invalidField("/price/outputMicrosPerMillionTokens")
+	}
+	return nil
 }
 
 func routeProviders(routes []api.RelayRoute) (map[string]bool, error) {

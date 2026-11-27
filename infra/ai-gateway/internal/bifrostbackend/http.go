@@ -34,6 +34,7 @@ func reject(w http.ResponseWriter, err error) {
 	status, code := 503, "common.unavailable"
 	var f fault
 	var be *budget.Error
+	var problem validationProblem
 	if errors.As(err, &f) {
 		code = string(f)
 	} else if errors.As(err, &be) {
@@ -55,9 +56,13 @@ func reject(w http.ResponseWriter, err error) {
 	case "common.precondition_failed":
 		status = 412
 	}
+	body := map[string]any{"status": status, "code": code, "title": http.StatusText(status)}
+	if errors.As(err, &problem) && problem.field != "" {
+		body["params"] = map[string]string{"field": problem.field}
+	}
 	w.Header().Set("Content-Type", "application/problem+json")
 	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(map[string]any{"status": status, "code": code, "title": http.StatusText(status)})
+	_ = json.NewEncoder(w).Encode(body)
 }
 func decode(w http.ResponseWriter, r *http.Request, value any) error {
 	limit := int64(1 << 20)
@@ -303,6 +308,9 @@ func (b *Backend) management(w http.ResponseWriter, r *http.Request, tenant stri
 		}
 		p, err = resolvePoolCapabilities(p)
 		if err != nil {
+			return err
+		}
+		if err = normalizePoolSave(&p); err != nil {
 			return err
 		}
 		if createOnly {

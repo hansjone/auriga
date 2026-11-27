@@ -134,11 +134,30 @@ describe('model import limits and identity', () => {
           effectiveAt: '2026-01-01T00:00:00.120000001Z',
         },
       }),
-    ).toBe(false);
+    ).toBe(true);
     expect(
       samePool(canonical, {
         ...canonical,
         price: { ...canonical.price, effectiveAt: '2026-01-01T00:00:00.121Z' },
+      }),
+    ).toBe(true);
+    // Server may clamp a slightly-future client stamp within 2 minutes.
+    expect(
+      samePool(canonical, {
+        ...canonical,
+        price: {
+          ...canonical.price,
+          effectiveAt: '2026-01-01T00:01:00.120Z',
+        },
+      }),
+    ).toBe(true);
+    expect(
+      samePool(canonical, {
+        ...canonical,
+        price: {
+          ...canonical.price,
+          effectiveAt: '2026-01-01T00:02:00.121Z',
+        },
       }),
     ).toBe(false);
     expect(
