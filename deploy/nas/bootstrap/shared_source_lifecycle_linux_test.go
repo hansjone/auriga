@@ -457,7 +457,7 @@ func testNASSharedExplicitRotations(t *testing.T, parent, base, out, generation,
 		t.Fatal("commit left rotation evidence")
 	}
 	run("set-model", true, "-model", "auriga") // committed same-model idempotent
-	run("rollback", false)                   // committed rollback still refused
+	run("rollback", false)                     // committed rollback still refused
 	run("stage", false, append(append([]string{}, stageArgs[:len(stageArgs)-2]...), "-model", "gpt-6.1-sol")...)
 
 	modelCommitted := nasSnapshot(t, generation)
@@ -509,7 +509,7 @@ func testNASSharedExplicitRotations(t *testing.T, parent, base, out, generation,
 	run("commit", true)
 	run("check", true)
 	run("set-profile", true, "-profile-file", newProfile, "-profile-sha256", newProfileSHA) // committed same-profile idempotent
-	run("set-model", true, "-model", "auriga")                                                // alternate after profile commit
+	run("set-model", true, "-model", "auriga")                                              // alternate after profile commit
 	if nasSnapshot(t, base) != baseBefore {
 		t.Fatal("explicit rotations changed sealed base")
 	}
