@@ -64,40 +64,34 @@ const hints: Record<string, [string, string]> = {
     'The resource could not be applied locally. Refresh its state and check client diagnostic logs.',
   ],
   plugin_install_network: [
-    '无法下载插件依赖。请检查安装源和代理后重试。',
-    'Plugin dependencies could not be downloaded. Check the registry and proxy, then retry.',
+    '依赖下载失败，请检查安装源和代理。',
+    'Dependency download failed. Check the registry and proxy.',
   ],
   plugin_install_timeout: [
-    '插件安装超时。请检查网络后重试。',
-    'Plugin installation timed out. Check the connection and retry.',
+    '安装超时，请检查网络。',
+    'Install timed out. Check your connection.',
   ],
   plugin_install_dependency: [
-    '找不到插件所需的依赖版本。请确认安装源已有该版本。',
-    'A required dependency version is missing from the registry.',
+    '安装源缺少所需的依赖版本。',
+    'The registry is missing a required dependency version.',
   ],
-  plugin_install_disk_full: [
-    '磁盘空间不足，插件安装已停止。',
-    'Plugin installation stopped because the disk is full.',
-  ],
+  plugin_install_disk_full: ['磁盘空间不足。', 'The disk is full.'],
   plugin_install_permission: [
-    '无法写入本机插件目录。请检查目录权限。',
-    'Could not write to the local plugin directory. Check its permissions.',
+    '没有插件目录写入权限。',
+    'Cannot write to the plugin directory.',
   ],
   plugin_install_build_blocked: [
-    '依赖的安装脚本未获批准，插件安装已停止。',
-    'Plugin installation stopped because a dependency script is not approved.',
+    '依赖安装脚本未经批准。',
+    'A dependency install script requires approval.',
   ],
   plugin_install_incompatible: [
-    '插件与当前 DSH 版本不兼容。',
-    'The plugin is incompatible with this DSH version.',
+    '插件不兼容此 DSH 版本。',
+    'Incompatible DSH version.',
   ],
-  plugin_install_cancelled: [
-    '插件安装已取消。',
-    'Plugin installation was cancelled.',
-  ],
+  plugin_install_cancelled: ['安装已取消。', 'Install cancelled.'],
   plugin_not_active: [
-    'DSH 未确认插件已加载。请查看诊断日志。',
-    'DSH did not confirm that the plugin loaded. Check the diagnostic logs.',
+    'DSH 未确认插件加载，请查看日志。',
+    'DSH could not confirm plugin activation.',
   ],
   internal_error: [
     '操作未完成。请刷新确认状态；若仍失败，请将关联编号提供给管理员查询客户端日志。',

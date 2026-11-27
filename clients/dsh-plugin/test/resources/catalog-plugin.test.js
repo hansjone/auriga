@@ -1,5 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { generateKeyPairSync } from 'node:crypto';
 import { mkdirSync, readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { resourceHost } from '../../src/resources/host.js';
@@ -247,6 +248,101 @@ test('native disk-full remains visible and is not retried when the failure recor
     first.pluginFailure,
   );
   assert.equal(installs, 1);
+});
+
+test('one failed download does not block another signed plugin from being removed', async (t) => {
+  const keys = {
+    release: generateKeyPairSync('ed25519'),
+    revocation: generateKeyPairSync('ed25519'),
+    nowMillis: Date.now(),
+  };
+  const broken = catalogFixture(t, undefined, { kind: 'plugin', ...keys });
+  const other = catalogFixture(t, undefined, {
+    ...keys,
+    kind: 'plugin',
+    name: 'another-plugin',
+    packageName: '@example/another-plugin',
+    packageId: '019a0000-0000-7000-8000-000000000192',
+    versionId: '019a0000-0000-7000-8000-000000000194',
+  });
+  const otherName = other.manifest.plugin.packageName;
+  broken.desktop.prepare(
+    broken.who,
+    [other.getRow()],
+    [
+      {
+        manifest: other.raw,
+        artifacts: [other.archive],
+        revocations: Buffer.from(JSON.stringify(other.revoked)),
+      },
+    ],
+  );
+  let actual = {
+    enabled: true,
+    version: '1.0.0',
+    installed: true,
+    active: true,
+  };
+  let removals = 0;
+  let downloadAttempts = 0;
+  const service = catalogService({
+    ...broken,
+    privateSkills: {},
+    host: {},
+    pluginHost: {
+      async observe(name) {
+        return name === otherName ? actual : undefined;
+      },
+      async enable(name, enabled) {
+        assert.equal(name, otherName);
+        assert.equal(enabled, false);
+        actual = { ...actual, enabled, active: false };
+        return { restartRequired: false };
+      },
+      async remove(name) {
+        assert.equal(name, otherName);
+        actual = undefined;
+        removals++;
+        return { restartRequired: false };
+      },
+    },
+    fetchImpl: async (url, options) => {
+      const path = url.pathname.split('/').at(-1);
+      if (path === 'installations' && options.method === 'GET')
+        return Response.json({ items: [broken.getRow(), other.getRow()] });
+      const body = options.body && JSON.parse(options.body);
+      if (path === 'downloads') {
+        downloadAttempts++;
+        return Response.json({ code: 'common.unavailable' }, { status: 503 });
+      }
+      if (
+        body?.selection?.identity.packageId === other.packageId ||
+        body?.identity?.packageId === other.packageId ||
+        url.pathname.includes(other.packageId)
+      )
+        return other.fetchImpl(url, options);
+      return broken.fetchImpl(url, options);
+    },
+  });
+  const brokenResult = await service.list();
+  assert.equal(
+    brokenResult.items.find(
+      (row) => row.resource.identity.packageId === broken.packageId,
+    ).state,
+    'failed',
+  );
+  assert.equal(downloadAttempts, 2);
+  const result = await service.apply({
+    packageId: other.packageId,
+    versionId: other.versionId,
+    action: 'remove',
+    revision: 1,
+    key: 'remove-another-plugin',
+  });
+  assert.equal(result.installation.state, 'removed');
+  assert.equal(other.getRow().state, 'removed');
+  assert.equal(removals, 1);
+  assert.equal(downloadAttempts, 2);
 });
 
 test('all-disabled native entries never prove the bundle active', async () => {

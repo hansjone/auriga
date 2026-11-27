@@ -106,7 +106,7 @@ describe('plugin market', () => {
           'plugin',
         );
         const timedOut = lostResponse
-          ? expect(installingPlugin).rejects.toThrow('unavailable')
+          ? expect(installingPlugin).resolves.toEqual({ awaitingResult: true })
           : undefined;
         await vi.advanceTimersByTimeAsync(1000);
         expect(catalog.pluginOperation).toEqual(operation);
@@ -136,6 +136,7 @@ describe('plugin market', () => {
         expect(catalog.snapshot?.installations.items).toEqual([failure]);
         expect(catalog.pluginOperation).toBeUndefined();
         expect(catalog.isTrackingPlugin('tool')).toBe(false);
+        expect(catalog.error).toBeUndefined();
         const progressReads = host.mock.calls.filter(
           ([path]) => path === 'catalog/plugin-progress',
         ).length;

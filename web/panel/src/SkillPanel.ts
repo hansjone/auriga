@@ -187,29 +187,13 @@ export class SkillPanel {
   private pluginProgress() {
     if (this.kind !== 'plugin' || !this.desktop) return;
     const operation = this.desktop.pluginOperation;
-    if (!operation) {
-      if (this.desktop.checkingPluginSelection)
-        this.root.append(
-          element(
-            'p',
-            this.text('正在确认安装任务', 'Checking the installation request'),
-            'notice',
-          ),
-        );
-      return;
-    }
+    if (!operation) return;
     const phase: Record<string, [string, string]> = {
-      downloading: ['正在下载插件包', 'Downloading plugin package'],
-      verifying: ['正在校验签名和内容', 'Verifying signature and contents'],
-      installing_dependencies: [
-        'DSH 正在安装插件依赖',
-        'DSH is installing plugin dependencies',
-      ],
-      checking_installation: [
-        'DSH 正在确认安装结果',
-        'DSH is checking the installation',
-      ],
-      enabling: ['正在启用插件', 'Enabling the plugin'],
+      downloading: ['下载插件包', 'Downloading'],
+      verifying: ['校验签名', 'Verifying'],
+      installing_dependencies: ['安装依赖', 'Installing dependencies'],
+      checking_installation: ['确认加载', 'Checking installation'],
+      enabling: ['启用插件', 'Enabling'],
     };
     if (!Object.hasOwn(phase, operation.phase)) return;
     const label = phase[operation.phase];
@@ -220,10 +204,7 @@ export class SkillPanel {
       (pack ? pack.name + ' · ' : '') +
         this.text(...label) +
         (attempt
-          ? this.text(
-              `（安装源 ${attempt.index}/${attempt.total}）`,
-              ` (registry ${attempt.index}/${attempt.total})`,
-            )
+          ? ` · ${this.text('安装源', 'Registry')} ${attempt.index}/${attempt.total}`
           : ''),
       'notice',
     );
@@ -231,11 +212,17 @@ export class SkillPanel {
     this.root.append(progress);
   }
 
-  private pluginInProgress(row: Installation | undefined, versionId: string) {
+  private pluginInProgress(
+    packageId: string,
+    row?: Installation,
+    versionId?: string,
+  ) {
     return (
       this.kind === 'plugin' &&
-      row?.resource.identity.versionId === versionId &&
-      ['applying', 'pending_restart'].includes(row.state)
+      (this.desktop?.isTrackingPlugin(packageId) ||
+        (row &&
+          row.resource.identity.versionId === versionId &&
+          ['applying', 'pending_restart'].includes(row.state)))
     );
   }
   private retryPluginInstall(row: Installation | undefined, versionId: string) {
@@ -451,20 +438,9 @@ export class SkillPanel {
         key,
         ...(confirmation ? { confirmation } : {}),
       };
-      let result;
-      try {
-        result = this.desktop
-          ? await this.desktop.act(input, this.kind)
-          : await this.request('actions', input);
-      } catch (error) {
-        if (
-          this.kind === 'plugin' &&
-          this.desktop?.isTrackingPlugin(packageId) &&
-          catalogStatus(error) === undefined
-        )
-          return;
-        throw error;
-      }
+      const result = this.desktop
+        ? await this.desktop.act(input, this.kind)
+        : await this.request('actions', input);
       if (result.confirmationRequired) {
         this.confirmation = {
           packageId,
@@ -941,8 +917,7 @@ export class SkillPanel {
           () => this.action(pack.id, version.id, 'install'),
           version.state !== 'published' ||
             !this.sharedAvailable ||
-            this.desktop?.isTrackingPlugin(pack.id) ||
-            this.pluginInProgress(installed, version.id),
+            this.pluginInProgress(pack.id, installed, version.id),
         );
         action.className = 'primary';
         header.append(label, action);
@@ -1041,10 +1016,11 @@ export class SkillPanel {
                 this.text(zh, en),
                 () => this.action(id.packageId, id.versionId, action),
                 !this.sharedAvailable ||
-                  (this.kind === 'plugin' &&
-                    this.desktop?.isTrackingPlugin(id.packageId)) ||
-                  (action === 'enable' &&
-                    this.pluginInProgress(row, id.versionId)) ||
+                  this.pluginInProgress(
+                    id.packageId,
+                    row,
+                    action === 'enable' ? id.versionId : undefined,
+                  ) ||
                   (row.resource.installationMode === 'required' &&
                     ['disable', 'remove'].includes(action)),
               ),
@@ -1148,8 +1124,7 @@ export class SkillPanel {
                 defaultVersion,
               () => this.action(pack.id, defaultId, 'install'),
               !this.sharedAvailable ||
-                this.desktop?.isTrackingPlugin(pack.id) ||
-                this.pluginInProgress(row, defaultId) ||
+                this.pluginInProgress(pack.id, row, defaultId) ||
                 (version && version.state !== 'published'),
             );
             install.className = 'primary';

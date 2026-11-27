@@ -142,12 +142,15 @@ export function catalogService(options) {
     if (!cloud) {
       const local = desktop?.read(who);
       for (const row of items) {
+        if (row.pluginFailure) continue;
         const recorded = local?.installations.find(
           (/** @type {any} */ i) =>
             i.resource.identity.packageId === row.resource.identity.packageId &&
             i.installationRevision === row.installationRevision &&
             i.selectionRevision === row.selectionRevision &&
-            i.generation === row.generation,
+            i.generation === row.generation &&
+            canonicalize(i.resource.identity) ===
+              canonicalize(row.resource.identity),
         );
         if (
           row.resource.identity.kind === 'plugin' &&
@@ -259,6 +262,41 @@ export function catalogService(options) {
     row.state = 'failed';
     row.pluginFailure = diagnostic;
   }
+  /** @param {any[]} rows */
+  async function restorePreparationFailures(rows) {
+    for (const row of rows) {
+      if (
+        row.resource.identity.kind !== 'plugin' ||
+        desiredState(row.resource) !== 'ENABLED' ||
+        row.pluginFailure
+      )
+        continue;
+      const attempt = plugins?.readFailure(row);
+      const previous =
+        attempt?.phase === 'prepare' && plugins?.failure(attempt, row);
+      if (previous) await recordPluginFailure(row, 'prepare', previous, true);
+    }
+  }
+  /** @param {any[]} rows */
+  function preparationCandidates(rows) {
+    const ready = rows.filter((row) => !row.pluginFailure);
+    if (!ready.length || ready.length === rows.length) return ready;
+    const previous = desktop?.read(who)?.installations ?? [];
+    const { selectionRevision, generation } = ready[0];
+    for (const failed of rows.filter((row) => row.pluginFailure)) {
+      const old = previous.find(
+        (/** @type {any} */ item) =>
+          item.resource.identity.packageId ===
+          failed.resource.identity.packageId,
+      );
+      if (old) {
+        const retained = { ...old, selectionRevision, generation };
+        delete retained.report;
+        ready.push(retained);
+      }
+    }
+    return ready;
+  }
   /** Revalidate and stage the exact current server selection; never resolve latest on retry.
    * @param {any[]} rows */
   async function prepareRows(rows) {
@@ -266,26 +304,12 @@ export function catalogService(options) {
     desktop.available();
     const downloads = [];
     const pluginNames = new Set();
-    const roots = rows.some((r) => desiredState(r.resource) === 'ENABLED')
-      ? await trust()
-      : undefined;
+    await restorePreparationFailures(rows);
+    const enabled = rows.filter(
+      (r) => !r.pluginFailure && desiredState(r.resource) === 'ENABLED',
+    );
+    const roots = enabled.length ? await trust() : undefined;
     const { verifyTrust } = await import('./unified-trust.js');
-    const enabled = rows.filter((r) => desiredState(r.resource) === 'ENABLED');
-    let failed = false;
-    for (const row of enabled.filter(
-      (r) => r.resource.identity.kind === 'plugin',
-    )) {
-      const attempt = plugins?.readFailure(row);
-      const previous =
-        attempt?.phase === 'prepare' && plugins?.failure(attempt, row);
-      if (previous) {
-        await recordPluginFailure(row, 'prepare', previous, true);
-        failed = true;
-      }
-    }
-    // The guardian accepts a complete snapshot. Keep its previous snapshot
-    // when this selection still has a failed download or verification.
-    if (failed) return false;
     for (const installation of enabled) {
       const plugin = installation.resource.identity.kind === 'plugin';
       try {
@@ -373,18 +397,30 @@ export function catalogService(options) {
           'prepare',
           diagnoseResource(error, 'verification').body,
         );
-        return false;
       }
     }
 
+    const candidates = preparationCandidates(rows);
+    if (!candidates.length) return candidates;
+    for (const candidate of candidates) {
+      if (
+        rows.includes(candidate) ||
+        desiredState(candidate.resource) !== 'ENABLED'
+      )
+        continue;
+      // A failed update can retain the previous bytes, which the guardian will independently verify.
+      const name = desktop.pluginName(who, candidate);
+      if (pluginNames.has(name)) refuse('resource.state_conflict');
+      pluginNames.add(name);
+    }
     api.check();
     desktop?.acceptRevocations(
       who,
       downloads.map((d) => d.revocations),
     );
     api.check();
-    desktop?.prepare(who, rows, downloads);
-    return true;
+    desktop.prepare(who, candidates, downloads);
+    return candidates;
   }
   /** Public host observations, never the selection's 202, determine application.
    * @param {any[]} rows */
@@ -392,7 +428,7 @@ export function catalogService(options) {
     if (cloud || !desktop) return;
     const host = options.pluginHost;
     for (const row of rows.filter(
-      (r) => r.resource.identity.kind === 'plugin',
+      (r) => r.resource.identity.kind === 'plugin' && !r.pluginFailure,
     )) {
       if (!host) refuse('resource.apply_failed');
       if (!plugins) refuse('resource.storage_unavailable');
@@ -406,7 +442,9 @@ export function catalogService(options) {
         !local ||
         local.installationRevision !== row.installationRevision ||
         local.selectionRevision !== row.selectionRevision ||
-        local.generation !== row.generation
+        local.generation !== row.generation ||
+        canonicalize(local.resource.identity) !==
+          canonicalize(row.resource.identity)
       )
         continue;
       const enabled =
@@ -867,11 +905,13 @@ export function catalogService(options) {
           personal,
           synchronized;
         try {
+          if (!cloud && desktop) await restorePreparationFailures(items);
+          let candidates = preparationCandidates(items);
           try {
-            waiting = !!(!cloud && desktop?.awaitingGuardian(who, items));
+            waiting = !!(!cloud && desktop?.awaitingGuardian(who, candidates));
           } catch (error) {
             if (!(/** @type {any} */ (error).guardianWaitExpired)) throw error;
-            desktop?.failGuardianWait(who, items);
+            desktop?.failGuardianWait(who, candidates);
             waitExpired = true;
           }
           if (!waiting && !waitExpired) {
@@ -884,12 +924,13 @@ export function catalogService(options) {
             if (
               !cloud &&
               !pendingRestart &&
-              desktop?.needsPreparation(who, items)
+              desktop?.needsPreparation(who, candidates)
             ) {
-              if (await prepareRows(items)) await finish();
+              candidates = await prepareRows(items);
+              if (candidates.length) await finish();
             }
             await syncPlugins(items);
-            waiting = !!(!cloud && desktop?.awaitingGuardian(who, items));
+            waiting = !!(!cloud && desktop?.awaitingGuardian(who, candidates));
           }
           personal = await enforcePersonalPolicy();
           if (!waiting) synchronized = await syncReports(items);
@@ -916,7 +957,7 @@ export function catalogService(options) {
         personal ??= await enforcePersonalPolicy();
         synchronized ??= {
           items: items.map((r) =>
-            desiredState(r.resource) === 'ENABLED'
+            desiredState(r.resource) === 'ENABLED' && !r.pluginFailure
               ? { ...r, state: 'applying' }
               : r,
           ),
@@ -1101,13 +1142,6 @@ export function catalogService(options) {
           !rows.some((r) => r.resource.identity.packageId === input.packageId)
         )
           rows.push(row);
-        for (const candidate of rows)
-          if (
-            candidate.resource.identity.packageId === input.packageId &&
-            desiredState(candidate.resource) !== 'ENABLED'
-          )
-            candidate.state =
-              input.action === 'remove' ? 'removed' : 'disabled';
         if (
           !rows.some(
             (r) =>
@@ -1117,13 +1151,13 @@ export function catalogService(options) {
         )
           refuse('common.conflict');
         try {
-          if (!(await prepareRows(rows)))
+          const candidates = await prepareRows(rows);
+          const selected = rows.find(
+            (item) => item.resource.identity.packageId === input.packageId,
+          );
+          if (selected?.pluginFailure || !candidates.length)
             return {
-              installation:
-                rows.find(
-                  (item) =>
-                    item.resource.identity.packageId === input.packageId,
-                ) ?? row,
+              installation: selected?.pluginFailure ? selected : row,
               accepted: true,
               cloud: false,
             };
