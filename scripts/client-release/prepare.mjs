@@ -10,6 +10,7 @@ import {
   readdirSync,
   lstatSync,
   realpathSync,
+  rmdirSync,
   unlinkSync,
   writeFileSync,
 } from 'node:fs';
@@ -68,13 +69,36 @@ export function materializeSymlinks(root) {
 export function removeProjectReferences(store) {
   // pnpm keeps machine-local junctions to previous virtual stores. They are
   // not package inputs and must never point out of a portable devkit.
-  const projects = join(store, 'v11/projects');
-  if (!existsSync(projects)) return;
+  const version = join(store, 'v11');
+  const projects = join(version, 'projects');
+  for (const directory of [store, version, projects]) {
+    const info = lstatSync(directory, { throwIfNoEntry: false });
+    if (!info) return;
+    if (!info.isDirectory())
+      throw new Error(`pnpm projects 的路径包含非普通目录：${directory}`);
+  }
   for (const name of readdirSync(projects)) {
     const path = join(projects, name);
-    if (!lstatSync(path).isSymbolicLink())
-      throw new Error('不认识的 pnpm projects 内容，保留供人工核验');
-    unlinkSync(path); // Remove the junction itself, never its target.
+    const info = lstatSync(path);
+    if (info.isSymbolicLink()) {
+      unlinkSync(path); // Remove the link itself, never its target.
+      continue;
+    }
+    // Some Windows environments report pnpm project references as directories
+    // rather than symbolic links. Use non-recursive rmdir: it cannot traverse
+    // a target; nonempty ordinary directories remain for manual inspection.
+    // Empty ordinary reference directories are also safe to remove.
+    if (info.isDirectory()) {
+      try {
+        rmdirSync(path);
+        continue;
+      } catch (cause) {
+        throw new Error(`无法清理 pnpm projects 条目，已保留：${path}`, {
+          cause,
+        });
+      }
+    }
+    throw new Error(`无法清理 pnpm projects 条目，已保留：${path}`);
   }
 }
 /** npm 安装的公共参数：联网准备与现场联网派生共用，保证两处行为一致。 */
