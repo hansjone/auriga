@@ -231,6 +231,9 @@ func prepareDockerArgs(run prepareRun, lookup func(string) (string, bool)) (args
 		}
 	case "java":
 		pass("AURIGA_MAVEN_MIRROR_URL", "AURIGA_MAVEN_MIRROR_URL")
+		pass("AURIGA_JAVA_FILES", "AURIGA_JAVA_FILES")
+		pass("AURIGA_JAVA_NO_PUBLIC", "AURIGA_JAVA_NO_PUBLIC")
+		pass("npm_config_registry", "npm_config_registry")
 		if run.Cache != "" {
 			args = append(args, "--env", "AURIGA_JAVA_PREP_CACHE_DIR="+onlineCacheDir)
 		}

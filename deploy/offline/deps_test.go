@@ -369,12 +369,26 @@ func TestWebAndCAPrepareEnv(t *testing.T) {
 		t.Fatal("npm file:// 暂不支持自动准备")
 	}
 	maven := "https://maven.internal.example/repo"
-	lookup, _, err = depsPrepareSettings(&siteDeps{Cache: "/srv/auriga/cache", Sources: siteSources{Maven: &maven}}, "java", fakeEnv(nil))
+	files := "https://files.internal.example/node"
+	lookup, extra, err = depsPrepareSettings(&siteDeps{
+		Cache: "/srv/auriga/cache", CAFile: &ca, Sources: siteSources{Maven: &maven, NPM: &npm, Files: &files},
+	}, "java", fakeEnv(nil))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if v, _ := lookup("AURIGA_MAVEN_MIRROR_URL"); v != maven {
 		t.Fatalf("Maven 镜像应由配置生成：%q", v)
+	}
+	javaArgs, javaEnv := prepareDockerArgs(prepareRun{Kind: "java", Extra: extra}, lookup)
+	for _, want := range []string{"AURIGA_JAVA_FILES=" + files, "npm_config_registry=" + npm, "AURIGA_JAVA_NO_PUBLIC=1"} {
+		if !contains(javaEnv, want) {
+			t.Errorf("Java prepare 缺少 %s：%v", want, javaEnv)
+		}
+	}
+	if !hasPair(javaArgs, "--env", "AURIGA_JAVA_CA_FILE="+depsCAMount+"/ca.pem") ||
+		!hasPair(javaArgs, "--add-host", "nodejs.org:127.0.0.1") ||
+		!hasPair(javaArgs, "--add-host", "registry.npmjs.org:127.0.0.1") {
+		t.Fatalf("Java prepare 未接线私有 CA 或默认公网源隔离：%v", javaArgs)
 	}
 }
 

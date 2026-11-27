@@ -278,3 +278,85 @@ func TestVerifyMavenDistribution(t *testing.T) {
 		t.Fatalf("缺 zip 应失败：err=%v stderr=%s", err, stderr)
 	}
 }
+
+func TestPrepareMirroredMavenDistributionKeepsCanonicalCache(t *testing.T) {
+	if _, err := exec.LookPath("java"); err != nil {
+		t.Skip("需要 JDK")
+	}
+	funcs := mavenLockScript(t)
+	root, err := filepath.Abs(filepath.Join("..", ".."))
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	for _, name := range []string{"maven-wrapper.jar", "DistributionCachePath.java"} {
+		data, err := os.ReadFile(filepath.Join(root, ".mvn", "wrapper", name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		putFile(t, filepath.Join(dir, ".mvn", "wrapper", name), string(data), 0644)
+	}
+	const name = "apache-maven-3.9.16-bin.zip"
+	const content = "pinned Maven ZIP bytes"
+	putFile(t, filepath.Join(dir, ".mvn", "wrapper", "maven-wrapper.properties"),
+		"distributionUrl=https://repo.maven.apache.org/maven2/org/apache/maven/apache-maven/3.9.16/"+name+"\n"+
+			"distributionSha256Sum="+sha256Hex([]byte(content))+"\n", 0644)
+	putFile(t, filepath.Join(dir, ".mvn", "wrapper", "bootstrap.sh"), `#!/bin/sh
+set -eu
+test "$MVNW_REPOURL" = https://mirror.example/maven
+mkdir -p "$MAVEN_USER_HOME/wrapper/dists/mirror-key"
+printf '%s' 'pinned Maven ZIP bytes' > "$MAVEN_USER_HOME/wrapper/dists/mirror-key/`+name+`"
+touch "$scratch/downloaded"
+`, 0644)
+	body := `
+cd "$fixture"
+src="$fixture"
+export scratch="$fixture/work"
+export MAVEN_USER_HOME="$fixture/cache"
+prepare_mirrored_maven_distribution https://mirror.example/maven
+test -f "$scratch/downloaded"
+test "$MAVEN_DISTRIBUTION_ZIP" = "$MAVEN_USER_HOME/wrapper/dists/apache-maven-3.9.16-bin/4200fbc6/` + name + `"
+test "$(cat "$MAVEN_DISTRIBUTION_ZIP")" = 'pinned Maven ZIP bytes'
+rm "$scratch/downloaded"
+prepare_mirrored_maven_distribution https://mirror.example/maven
+test ! -e "$scratch/downloaded"
+printf '%s' 'tampered' > "$MAVEN_DISTRIBUTION_ZIP"
+prepare_mirrored_maven_distribution https://mirror.example/maven
+`
+	_, stderr, err := runMavenLockScript(t, funcs, body, "fixture="+dir)
+	if err == nil || !strings.Contains(stderr, "Maven 发行包摘要不符") {
+		t.Fatalf("应从镜像预填并复用已验证的 canonical 缓存，拒绝替换字节：%v\n%s", err, stderr)
+	}
+}
+
+func TestPrepareContractNodeUsesLockedFileMirror(t *testing.T) {
+	funcs := mavenLockScript(t)
+	dir := t.TempDir()
+	const version = "22.19.0"
+	const name = "node-v" + version + "-linux-x64.tar.gz"
+	const fixture = "locked linux Node tarball"
+	putFile(t, filepath.Join(dir, "services", "contracts", "pom.xml"),
+		"<nodeVersion>v"+version+"</nodeVersion>\n", 0644)
+	putFile(t, filepath.Join(dir, "services", "maven-deps.sha256"),
+		"com.github.eirslett:node:linux-x64:tar.gz:"+version+" "+sha256Hex([]byte(fixture))+"\n", 0644)
+	putFile(t, filepath.Join(dir, "mirror", "dist", "v"+version, name), fixture, 0644)
+	body := `
+cd "$fixture"
+repo="$fixture/repository"
+export AURIGA_JAVA_FILES="file://$fixture/mirror"
+prepare_contract_node
+test "$(cat "$node_archive")" = 'locked linux Node tarball'
+rm "$fixture/mirror/dist/v` + version + `/` + name + `"
+prepare_contract_node
+rm "$node_archive"
+printf '%s' 'invalid' > "$fixture/mirror/` + name + `"
+prepare_contract_node
+`
+	_, stderr, err := runMavenLockScript(t, funcs, body, "fixture="+dir)
+	if err == nil || !strings.Contains(stderr, "contracts Node 归档缺失或摘要不符") {
+		t.Fatalf("应从站点目录预填并复用锁定归档，拒绝被换字节的镜像：%v\n%s", err, stderr)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "repository", "com", "github", "eirslett", "node", version, "node-"+version+"-linux-x64.tar.gz")); !os.IsNotExist(err) {
+		t.Fatalf("摘要失败不应写入本地 Maven 缓存：%v", err)
+	}
+}

@@ -126,6 +126,94 @@ verify_maven_distribution() {
     VERIFIED_MAVEN_ZIP=$v_zip
 }
 
+# Seed the canonical wrapper location with the exact same pinned ZIP from the
+# mirror. The wrapper derives its cache directory from the download URL.
+prepare_mirrored_maven_distribution() {
+    pm_mirror=$1
+    MAVEN_DISTRIBUTION_ZIP=$(MVNW_REPOURL= java -cp .mvn/wrapper/maven-wrapper.jar \
+        .mvn/wrapper/DistributionCachePath.java "$MAVEN_USER_HOME")
+    if [ -f "$MAVEN_DISTRIBUTION_ZIP" ]; then
+        verify_maven_distribution "$(dirname -- "$MAVEN_DISTRIBUTION_ZIP")"
+        return
+    fi
+    pm_download="$scratch/maven-wrapper-download"
+    MAVEN_USER_HOME="$pm_download" MVNW_REPOURL="$pm_mirror" sh .mvn/wrapper/bootstrap.sh
+    verify_maven_distribution "$pm_download/wrapper/dists"
+    mkdir -p -- "$(dirname -- "$MAVEN_DISTRIBUTION_ZIP")"
+    cp -- "$VERIFIED_MAVEN_ZIP" "$MAVEN_DISTRIBUTION_ZIP"
+}
+
+configure_maven_ca() {
+    ca_bundle=$1
+    ca_dir="$scratch/java-ca"
+    mkdir -- "$ca_dir"
+    cp -- "${JAVA_HOME:?}/lib/security/cacerts" "$ca_dir/cacerts"
+    awk -v dir="$ca_dir" '
+        /^-----BEGIN CERTIFICATE-----[[:space:]]*$/ {
+            if (open) exit 2
+            file = dir "/ca-" ++count ".pem"
+            open = 1
+        }
+        open { print > file }
+        /^-----END CERTIFICATE-----[[:space:]]*$/ {
+            if (!open) exit 2
+            close(file)
+            open = 0
+        }
+        END { if (!count || open) exit 2 }
+    ' "$ca_bundle"
+    for ca_cert in "$ca_dir"/ca-*.pem; do
+        keytool -importcert -noprompt -alias "auriga-site-$(basename -- "$ca_cert")" \
+            -keystore "$ca_dir/cacerts" -storepass changeit -file "$ca_cert"
+    done
+    JDK_JAVA_OPTIONS="${JDK_JAVA_OPTIONS:+$JDK_JAVA_OPTIONS }-Djavax.net.ssl.trustStore=\"$ca_dir/cacerts\" -Djavax.net.ssl.trustStorePassword=changeit"
+    export JDK_JAVA_OPTIONS
+}
+
+prepare_contract_node() {
+    node_version=$(sed -n 's/^[[:space:]]*<nodeVersion>\([^<]*\)<\/nodeVersion>[[:space:]]*$/\1/p' services/contracts/pom.xml)
+    printf '%s\n' "$node_version" | grep -Exq 'v[0-9]+\.[0-9]+\.[0-9]+'
+    version=${node_version#v}
+    node_file="node-$node_version-linux-x64.tar.gz"
+    node_archive="$repo/com/github/eirslett/node/$version/node-$version-linux-x64.tar.gz"
+    node_hash=$(awk -v coordinate="com.github.eirslett:node:linux-x64:tar.gz:$version" \
+        '$1 == coordinate { hash = $2; count++ } END { if (count == 1) print hash }' services/maven-deps.sha256)
+    if ! printf '%s\n' "$node_hash" | grep -Exq '[0-9a-f]{64}'; then
+        echo "缺少 contracts Node $node_version 的唯一锁定摘要" >&2
+        return 2
+    fi
+    node_input=$node_archive
+    if [ ! -f "$node_archive" ]; then
+        node_path="dist/$node_version/$node_file"
+        case "${AURIGA_JAVA_FILES:-}" in
+            file:///*)
+                node_source=${AURIGA_JAVA_FILES#file://}
+                node_input="$node_source/$node_path"
+                if [ ! -f "$node_input" ]; then node_input="$node_source/$node_file"; fi
+                ;;
+            https://?*)
+                node_url=${AURIGA_JAVA_FILES%/}
+                node_input="$scratch/$node_file"
+                java "$src/deploy/nas/offline-build/DownloadJavaInput.java" \
+                    "$node_url/$node_path" "$node_url/$node_file" "$node_input"
+                ;;
+            *)
+                echo "缺少 contracts Node $node_version，配置 deps.sources.files 或导入已验证套件" >&2
+                return 2
+                ;;
+        esac
+    fi
+    if [ ! -f "$node_input" ] || [ -L "$node_input" ] ||
+        ! printf '%s  %s\n' "$node_hash" "$node_input" | sha256sum -c --status; then
+        echo "contracts Node 归档缺失或摘要不符：$node_file" >&2
+        return 2
+    fi
+    if [ "$node_input" != "$node_archive" ]; then
+        mkdir -p -- "$(dirname -- "$node_archive")"
+        cp -- "$node_input" "$node_archive"
+    fi
+}
+
 # stage_verified_maven_distribution 输入dists目录 目标dists目录 [maven-wrapper.properties]：
 # 先按 distributionSha256Sum 复核输入里的发行 zip，再只拷贝该 zip 到目标目录并现解开，
 # 不信任、不拷贝输入里已预先解压的目录。
@@ -310,7 +398,15 @@ if [ "$mode" = prepare ]; then
         mkdir -p "$cache/npm-cache" services/contracts/target
         ln -s "$cache/npm-cache" "$npm_cache"
     fi
-    sh .mvn/wrapper/bootstrap.sh
+    if [ -n "${AURIGA_JAVA_CA_FILE:-}" ]; then
+        configure_maven_ca "$AURIGA_JAVA_CA_FILE"
+    fi
+    if [ -n "${AURIGA_JAVA_FILES:-}" ] || [ "${AURIGA_JAVA_NO_PUBLIC:-}" = 1 ]; then
+        prepare_contract_node
+    fi
+    if [ "${AURIGA_JAVA_NO_PUBLIC:-}" = 1 ] && [ -z "${npm_config_registry:-}" ]; then
+        export npm_config_offline=true
+    fi
     # -C makes Maven fail on a checksum mismatch instead of warning. It only
     # compares against checksums served by the same Central or mirror, so it does
     # NOT protect against a malicious or compromised mirror: pom.xml pins no
@@ -328,6 +424,8 @@ if [ "$mode" = prepare ]; then
             echo "AURIGA_MAVEN_MIRROR_URL must be an https URL of letters, digits and ._~:/?%+=,-" >&2
             exit 2
         fi
+        unset MVNW_REPOURL
+        prepare_mirrored_maven_distribution "$AURIGA_MAVEN_MIRROR_URL"
         xml_url=$(printf '%s' "$AURIGA_MAVEN_MIRROR_URL" | sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g')
         # The mirror id must be "central": the local repository records the
         # repository id of every downloaded artifact (_remote.repositories), and
@@ -345,10 +443,17 @@ if [ "$mode" = prepare ]; then
 SETTINGS
         sh mvnw -B -C -s "$scratch/settings.xml" "-Dmaven.repo.local=$repo" -pl services/platform-app -am -DskipTests package
     else
+        sh .mvn/wrapper/bootstrap.sh
         sh mvnw -B -C "-Dmaven.repo.local=$repo" -pl services/platform-app -am -DskipTests package
     fi
     mkdir "$out/wrapper"
-    cp -a -- "$MAVEN_USER_HOME/wrapper/dists" "$out/wrapper/dists"
+    if [ -n "${AURIGA_MAVEN_MIRROR_URL:-}" ]; then
+        pm_relative=${MAVEN_DISTRIBUTION_ZIP#"$MAVEN_USER_HOME/wrapper/dists"/}
+        mkdir -p -- "$out/wrapper/dists/$(dirname -- "$pm_relative")"
+        cp -- "$MAVEN_DISTRIBUTION_ZIP" "$out/wrapper/dists/$pm_relative"
+    else
+        cp -a -- "$MAVEN_USER_HOME/wrapper/dists" "$out/wrapper/dists"
+    fi
     # 保留发行 zip，并按源码 distributionSha256Sum 复核，供离线 build 再次核对。
     verify_maven_distribution "$out/wrapper/dists"
     cp -a -- "$repo" "$out/repository"
