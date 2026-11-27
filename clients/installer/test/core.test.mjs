@@ -27,6 +27,7 @@ import {
   uninstall,
 } from '../runtime/core.mjs';
 import { buildPayload, tempBase } from './helpers.mjs';
+import { DESKTOP_CORE_DIR, verifyPackage } from '../runtime/verify.mjs';
 
 const noSmoke = () => {};
 
@@ -135,6 +136,66 @@ function installA(f) {
   writeFileSync(join(profile, 'package.json'), JSON.stringify(manifest));
   return a;
 }
+
+test('fresh desktop release keeps the verified core and its closure out of the package-manager tree', (t) => {
+  const f = fixture(t);
+  const result = put(f, { isolated: true });
+  const profile = profileDir(f.dataHome);
+  const dir = join(f.root, 'versions', result.id);
+  assert.deepEqual(JSON.parse(profileManifest(f.dataHome)).dependencies, {});
+  assert.ok(!existsSync(join(profile, '.auriga', 'auriga-dsh.tgz')));
+  assert.deepEqual(readdirSync(join(profile, 'node_modules')), []);
+  const dependency = join(
+    DESKTOP_CORE_DIR,
+    'node_modules/@nats-io/nats-core/package.json',
+  );
+  assert.ok(existsSync(join(dir, dependency)));
+  writeFileSync(join(dir, dependency), 'changed');
+  assert.throws(
+    () => verifyPackage(dir, { trees: false }),
+    /size mismatch.*nats-core/,
+  );
+});
+
+test('upgrading a damaged mixed profile retains user state and never rolls back into the mixed layout', (t) => {
+  const f = fixture(t);
+  put(f, { name: 'old' });
+  const profile = profileDir(f.dataHome);
+  const modules = join(profile, 'node_modules');
+  mkdirSync(join(modules, '.ignored'));
+  renameSync(
+    join(modules, 'auriga-dsh'),
+    join(modules, '.ignored', 'auriga-dsh'),
+  );
+  const settings = join(profile, 'auriga-settings-fixture.json');
+  writeFileSync(settings, 'saved');
+  const newVersion = put(f, {
+    name: 'new',
+    pluginVersion: '1.1.0',
+    isolated: true,
+  });
+  assert.equal(readState(f.root).current, newVersion.id);
+  assert.equal(text(settings), 'saved');
+  assert.deepEqual(readdirSync(modules), []);
+  assert.deepEqual(JSON.parse(profileManifest(f.dataHome)).dependencies, {});
+  assert.throws(() => rollback({ root: f.root, smoke: noSmoke }), {
+    code: 'desktop.plugin_layout_rollback',
+  });
+  assert.equal(readState(f.root).current, newVersion.id);
+});
+
+test('missing offline dependencies undo the migration and keep the previous version and profile', (t) => {
+  const f = fixture(t);
+  installA(f);
+  const before = snapshot(f);
+  assert.throws(
+    () => put(f, { name: 'new', pluginVersion: '1.1.0', isolated: true }),
+    {
+      code: 'desktop.plugin_migration_failed',
+    },
+  );
+  assert.deepEqual(snapshot(f), before);
+});
 
 test('fresh install seeds profile, plugin, ownership marker and platform address', (t) => {
   const f = fixture(t);

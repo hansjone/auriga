@@ -25,6 +25,7 @@ import {
   readdirSync,
   mkdirSync,
   readFileSync,
+  renameSync,
   rmSync,
   statSync,
   writeFileSync,
@@ -40,6 +41,7 @@ import { parse as parseVersion } from '../runtime/semver-lite.mjs';
 import { satisfiesMin } from '../runtime/semver-lite.mjs';
 import {
   PINNED_TREES,
+  DESKTOP_CORE_DIR,
   computeId,
   isPinnedPath,
   treeDigest,
@@ -212,7 +214,9 @@ const NOTICE = [
  */
 export function scanForSecrets(stage, tgz, work) {
   const thirdParty = (p) =>
-    p.startsWith('/payload/upstream/app/node_modules/') ||
+    (p.startsWith('/payload/upstream/app/node_modules/') &&
+      (!p.startsWith('/payload/' + DESKTOP_CORE_DIR + '/') ||
+        p.startsWith('/payload/' + DESKTOP_CORE_DIR + '/node_modules/'))) ||
     p.startsWith('/payload/tools/pnpm/node_modules/') ||
     p.startsWith('/payload/upstream/node/') ||
     (p.startsWith('/payload/runtime/python/') &&
@@ -478,7 +482,7 @@ export async function build(args) {
   }
 
   // 3. Plugin closure (production dependencies only, no install scripts).
-  const plugin = join(payload, 'auriga', 'plugin');
+  const plugin = join(work, 'plugin-closure');
   mkdirSync(plugin, { recursive: true });
   writeFileSync(
     join(plugin, 'package.json'),
@@ -504,12 +508,12 @@ export async function build(args) {
       recursive: true,
     });
   } else {
-    run('npm', ['install', ...flags, '--no-package-lock', tgz], {
+    run('npm', ['install', ...flags, '--omit=peer', '--no-package-lock', tgz], {
       cwd: plugin,
     });
   }
+  mkdirSync(join(payload, 'auriga', 'plugin'), { recursive: true });
   cpSync(tgz, join(payload, 'auriga', 'plugin', 'auriga-dsh.tgz'));
-  rmSync(join(plugin, 'package.json'));
 
   // 3b. Size trimming (no runtime code removed).
   const sizeBefore = dirSize(app) + dirSize(join(plugin, 'node_modules'));
@@ -523,6 +527,20 @@ export async function build(args) {
       force: true,
     });
   const sizeAfter = dirSize(app) + dirSize(join(plugin, 'node_modules'));
+  const core = join(payload, DESKTOP_CORE_DIR);
+  renameSync(join(plugin, 'node_modules', 'auriga-dsh'), core);
+  renameSync(join(plugin, 'node_modules'), join(core, 'node_modules'));
+  const anchor = join(app, 'package.json');
+  const appPackage = JSON.parse(readFileSync(anchor, 'utf8'));
+  appPackage.dependencies['auriga-dsh'] = pluginPkg.version;
+  writeFileSync(anchor, JSON.stringify(appPackage, null, 2) + '\n');
+  const coreManifest = join(core, 'package.json');
+  const corePackage = JSON.parse(readFileSync(coreManifest, 'utf8'));
+  // The desktop entry adds the mandatory Loader row. A profile-level toggle
+  // only selects this empty bundle metadata and cannot duplicate the row.
+  corePackage.dsh.bundle.patch = './desktop-bundle.yml';
+  writeFileSync(coreManifest, JSON.stringify(corePackage, null, 2) + '\n');
+  writeFileSync(join(core, 'desktop-bundle.yml'), '[]\n');
 
   // 3c. pnpm (the plugin manager shells out to it); pinned and verified against the registry.
   const pnpmDir = join(payload, 'tools', 'pnpm');
@@ -616,7 +634,7 @@ export async function build(args) {
     args['broker-artifact'],
     join(payload, 'auriga', 'shell-auth'),
   );
-  const pluginBroker = join(plugin, 'node_modules', 'auriga-dsh', 'shell-auth');
+  const pluginBroker = join(core, 'shell-auth');
   verifyBrokerArtifact(pluginBroker);
   for (const path of [
     'broker-manifest.json',
@@ -764,6 +782,7 @@ export async function build(args) {
     },
     plugin: {
       name: pluginPkg.name,
+      scope: 'installation',
       version: pluginPkg.version,
       enginesDsh: pluginPkg.engines.dsh,
       tgzSha256: sha256File(tgz),

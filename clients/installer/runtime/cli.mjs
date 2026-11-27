@@ -4,6 +4,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import {
   CancelledError,
+  diagnoseStartup,
   install,
   launch,
   rollback,
@@ -98,6 +99,8 @@ try {
         }),
       ),
     );
+  } else if (command === 'diagnostics' && positional[0] === 'startup') {
+    console.log(JSON.stringify(await diagnoseStartup(values.root)));
   } else if (command === 'diagnostics' && positional[0] === 'export') {
     const packaged = join(here, '../shell-auth/diagnostics.mjs');
     const source = existsSync(packaged)

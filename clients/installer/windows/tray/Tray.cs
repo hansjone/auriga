@@ -317,12 +317,13 @@ sealed class TrayApp : ApplicationContext
         var settings = new ToolStripMenuItem("设置");
         settings.DropDownItems.AddRange(new ToolStripItem[] { autostartItem, autoCheckItem, autoDownloadItem, new ToolStripSeparator(), originItem, pythonResetItem });
         logsItem = new ToolStripMenuItem("打开日志目录", null, delegate { OpenLogs(); });
+        var startupDiagnosticsItem = new ToolStripMenuItem("诊断客户端启动", null, delegate { DiagnoseStartup(); });
         aboutItem = new ToolStripMenuItem("关于 " + Desktop.Brand, null, delegate { About(); });
         exitItem = new ToolStripMenuItem("退出", null, delegate { ExitApp(); });
         menu.Items.AddRange(new ToolStripItem[] {
             openItem, fallbackLoginItem, statusItem, platformItem, new ToolStripSeparator(),
             checkItem, updateItem, restartItem, new ToolStripSeparator(),
-            settings, logsItem, aboutItem, new ToolStripSeparator(), exitItem });
+            settings, startupDiagnosticsItem, logsItem, aboutItem, new ToolStripSeparator(), exitItem });
         icon.ContextMenuStrip = menu;
         menu.Opening += delegate { SyncCurrentVersionIfChanged(); UpdateMenu(); };
         icon.MouseDoubleClick += delegate (object s, MouseEventArgs e) { if (e.Button == MouseButtons.Left) OpenAuriga(); };
@@ -1209,6 +1210,31 @@ sealed class TrayApp : ApplicationContext
     {
         string logs = Desktop.Str(info, "logs");
         if (logs != null) { Directory.CreateDirectory(logs); Desktop.Open(logs); }
+    }
+
+    void DiagnoseStartup()
+    {
+        if (busy || restarting) return;
+        busy = true;
+        UpdateMenu();
+        ThreadPool.QueueUserWorkItem(delegate
+        {
+            string error;
+            var result = Desktop.RunJson(root, "diagnostics startup --root " + Desktop.Quote(root), out error);
+            Post(delegate
+            {
+                busy = false;
+                if (exiting) return;
+                UpdateMenu();
+                var core = Desktop.Str(result, "core");
+                var profile = Desktop.Str(result, "profile");
+                var message = core == "ready"
+                    ? (profile == "invalid" ? "内置核心可以启动。业务插件配置损坏，请保留用户数据并查看日志。" : "内置核心可以启动，业务插件清单可读取。")
+                    : "客户端核心校验或启动失败。请保留用户数据，使用同版本签名安装包离线修复。";
+                MessageBox.Show(message, Desktop.Brand, MessageBoxButtons.OK,
+                    core == "ready" && profile == "readable" ? MessageBoxIcon.Information : MessageBoxIcon.Warning);
+            });
+        });
     }
 
     void About()

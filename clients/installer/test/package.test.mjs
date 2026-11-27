@@ -138,10 +138,13 @@ test(
     for (const required of [
       'upstream/node/node.exe',
       'auriga/plugin/auriga-dsh.tgz',
-      'auriga/plugin/node_modules/auriga-dsh/package.json',
-      'auriga/plugin/node_modules/auriga-dsh/ui/auriga-team-panel.js',
-      'auriga/plugin/node_modules/auriga-dsh/cordis.patch.yml',
+      'upstream/app/node_modules/auriga-dsh/package.json',
+      'upstream/app/node_modules/auriga-dsh/ui/auriga-team-panel.js',
+      'upstream/app/node_modules/auriga-dsh/desktop-bundle.yml',
+      'upstream/app/node_modules/auriga-dsh/cordis.patch.yml',
+      'auriga/runtime/desktop-dsh.mjs',
       'auriga/runtime/core.mjs',
+      'auriga/runtime/desktop-core-policy.mjs',
       'auriga/runtime/cli.mjs',
       'auriga/launcher/auriga-desktop.cmd',
       'auriga/launcher/uninstall.ps1',
@@ -176,7 +179,7 @@ test(
       manifest.upstream.lockSha256,
     );
     const plugin = readJson(
-      join(payload, 'auriga/plugin/node_modules/auriga-dsh/package.json'),
+      join(payload, 'upstream/app/node_modules/auriga-dsh/package.json'),
     );
     assert.equal(plugin.version, manifest.plugin.version);
     assert.equal(
