@@ -1413,7 +1413,7 @@ export interface components {
       expiresAt: string;
       uacSessionBinding?: components['schemas']['UacSessionBinding'];
     };
-    /** @description 标准设备AI票，不改变native_tx模型专票。IAM按当前授权交集签发，至少一种权限；实际验签、<=300秒/来源期限、UAC来源必带绑定及在线检查见standard-device.md；schema不能替代这些运行时检查。 */
+    /** @description 标准设备AI票，不改变native_tx模型专票。IAM按当前授权交集签发，至少一种权限；实际验签、<=3天/来源期限、UAC来源必带绑定及在线检查见standard-device.md；schema不能替代这些运行时检查。 */
     StandardDeviceAiClaims: {
       /** Format: uri */
       iss: string;
