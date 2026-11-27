@@ -186,6 +186,7 @@ export class Broker extends EventEmitter {
       identityChanged;
     if (invalidated) {
       this.lastAuthenticatedRevisions?.clear();
+      this.currentAuthenticatedRevision = undefined;
       this.lastAuthenticatedIdentityKey = '';
       this.lastAuthenticatedGeneration = undefined;
     }
@@ -1026,16 +1027,32 @@ export class Broker extends EventEmitter {
   recordAuthenticatedRevision(revision) {
     this.lastAuthenticatedRevisions ??= new Map();
     const now = this.mono();
-    this.lastAuthenticatedRevisions.set(revision, now + 60000);
+    if (
+      this.currentAuthenticatedRevision !== undefined &&
+      this.currentAuthenticatedRevision !== revision &&
+      this.lastAuthenticatedRevisions.has(this.currentAuthenticatedRevision)
+    ) {
+      this.lastAuthenticatedRevisions.set(
+        this.currentAuthenticatedRevision,
+        now + 60000,
+      );
+    }
+    this.currentAuthenticatedRevision = revision;
+    this.lastAuthenticatedRevisions.set(revision, Infinity);
     for (const [rev, until] of this.lastAuthenticatedRevisions) {
-      if (until <= now) this.lastAuthenticatedRevisions.delete(rev);
+      if (rev !== revision && until <= now)
+        this.lastAuthenticatedRevisions.delete(rev);
     }
     while (this.lastAuthenticatedRevisions.size > 32) {
-      const oldest = this.lastAuthenticatedRevisions.keys().next().value;
+      const oldest = [...this.lastAuthenticatedRevisions.keys()].find(
+        (k) => k !== revision,
+      );
+      if (oldest === undefined) break;
       this.lastAuthenticatedRevisions.delete(oldest);
     }
   }
   hasAuthenticatedRevision(revision) {
+    if (revision === this.currentAuthenticatedRevision) return true;
     const until = this.lastAuthenticatedRevisions?.get(revision);
     if (until === undefined) return false;
     if (until <= this.mono()) {
@@ -1114,8 +1131,9 @@ export class Broker extends EventEmitter {
                 code: 'common.unauthenticated',
               }),
             );
-          onRefreshed = () => {
+          onRefreshed = (info) => {
             if (
+              (!forceRefresh || info?.rotated) &&
               this.state === 'authenticated' &&
               this.generation === anchorGeneration &&
               this.identityKey() === anchorIdentityKey
@@ -1195,7 +1213,7 @@ export class Broker extends EventEmitter {
         JSON.stringify(verified.projection) !== JSON.stringify(this.projection)
       )
         this.transition('authenticated', undefined, verified.projection);
-      this.emit('auth_refreshed');
+      this.emit('auth_refreshed', { rotated: next !== old });
     } catch (error) {
       if (generation !== this.generation || this.closed) return;
       if ([400, 401, 403].includes(error.status)) {
@@ -1205,10 +1223,10 @@ export class Broker extends EventEmitter {
         delete this.record.proofFailureGeneration;
         this.transition('revoked', reasonFor(error));
         await this.save();
-        await this.queueRevoke(next ?? old);
+        this.track(this.queueRevoke(next ?? old));
       } else this.transition('unreachable', 'offline');
     }
-    await this.drainRevocations();
+    this.track(this.drainRevocations());
   }
   async logout() {
     const tokens = this.record.tokens,

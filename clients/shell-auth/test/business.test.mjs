@@ -920,3 +920,101 @@ test('BusinessProxy enforces absolute expiresAt after AI token exchange, maps AI
   const cachedSse = await sseProxy.call(sseReq, OWNER);
   assert.equal(cachedSse.error?.code, 'common.unauthenticated');
 });
+
+test('BusinessProxy preserves active revision past 60s, waits for rotated bearer when 401 interleaves with normal check, and avoids controller leak on expiry', async (t) => {
+  const f = fixture();
+  await login(f);
+  const proxy = new BusinessProxy(f.broker, async () =>
+    Response.json({ items: [] }),
+  );
+  t.after(async () => {
+    proxy.close();
+    await f.broker.close();
+  });
+
+  // 1) Active revision remains valid for self-heal even after >60s steady uptime.
+  const revBeforeDrop = f.broker.revision;
+  const origMono = f.broker.mono.bind(f.broker);
+  let monoOffset = 120000;
+  f.broker.mono = () => origMono() + monoOffset;
+  f.broker.transition('unreachable', 'offline');
+  const healedAfter120s = await proxy.call(
+    {
+      ...call(f.broker, 'UnifiedListResourcePackages', {
+        limit: 10,
+        kind: 'skill',
+      }),
+      expectedRevision: revBeforeDrop,
+    },
+    OWNER,
+  );
+  assert.ok(healedAfter120s.output, healedAfter120s.error?.code);
+  f.broker.mono = origMono;
+
+  // 2) Normal check (reusing old token) interleaved with 401 forceRefresh must wait for rotated token.
+  let releaseProfile;
+  const origProfile = f.platform.profile.bind(f.platform);
+  let holdNextProfile = true;
+  f.platform.profile = async (...args) => {
+    if (holdNextProfile) {
+      holdNextProfile = false;
+      await new Promise((r) => {
+        releaseProfile = r;
+      });
+    }
+    return origProfile(...args);
+  };
+  const origRefresh = f.platform.refresh.bind(f.platform);
+  f.platform.refresh = async (...args) => ({
+    ...(await origRefresh(...args)),
+    access_token: 'rotated-bearer-after-normal-check',
+  });
+  const normalCheck = f.broker.check(false);
+  await new Promise((r) => setTimeout(r, 10));
+  const seenBearers = [];
+  let attempts = 0;
+  const interleaveProxy = new BusinessProxy(f.broker, async (_url, options) => {
+    seenBearers.push(options.headers.Authorization);
+    attempts++;
+    if (attempts === 1) {
+      releaseProfile?.();
+      return new Response(
+        JSON.stringify({ error: { code: 'common.unauthenticated' } }),
+        { status: 401, headers: { 'content-type': 'application/json' } },
+      );
+    }
+    return Response.json({ items: [] });
+  });
+  t.after(() => interleaveProxy.close());
+  const replayRes = await interleaveProxy.call(
+    call(f.broker, 'UnifiedListResourcePackages', { limit: 10, kind: 'skill' }),
+    OWNER,
+  );
+  await normalCheck;
+  assert.ok(replayRes.output, replayRes.error?.code);
+  assert.equal(attempts, 2);
+  assert.equal(seenBearers[1], 'Bearer rotated-bearer-after-normal-check');
+  assert.notEqual(seenBearers[0], seenBearers[1]);
+
+  // 3) Expired deadline before controller registration must not leak controller.
+  f.platform.audience = async () => {
+    await new Promise((r) => setTimeout(r, 50));
+    return f.tokens;
+  };
+  let fetched = 0;
+  const leakProxy = new BusinessProxy(f.broker, async () => {
+    fetched++;
+    return Response.json({ items: [] });
+  });
+  t.after(() => leakProxy.close());
+  const expRes = await leakProxy.call(
+    {
+      ...call(f.broker, 'listAiModels', {}),
+      expiresAt: new Date(Date.now() + 20).toISOString(),
+    },
+    OWNER,
+  );
+  assert.equal(expRes.error?.code, 'common.unavailable');
+  assert.equal(fetched, 0);
+  assert.equal(leakProxy.controllers.size, 0);
+});

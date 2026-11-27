@@ -334,9 +334,10 @@ export class BusinessProxy {
           definition.operation,
         );
     this.broker.assert(activeContext, { allowRevisionAdvance: true });
+    const initialRemaining = remainingMs();
     const controller = new AbortController();
     this.controllers.add(controller);
-    const timeout = setTimeout(() => controller.abort(), remainingMs());
+    const timeout = setTimeout(() => controller.abort(), initialRemaining);
     timeout.unref();
     try {
       if (
@@ -395,8 +396,9 @@ export class BusinessProxy {
         requestBody = form;
         contentType = undefined;
       }
-      const sendFetch = (bearer) =>
-        this.fetcher(url.href, {
+      const sendFetch = (bearer) => {
+        remainingMs();
+        return this.fetcher(url.href, {
           method,
           redirect: 'error',
           credentials: 'omit',
@@ -408,6 +410,7 @@ export class BusinessProxy {
           },
           ...(requestBody !== undefined ? { body: requestBody } : {}),
         });
+      };
       let response = await sendFetch(token);
       const canReplayOn401 =
         !isMultipartUpload &&
