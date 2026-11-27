@@ -184,7 +184,8 @@ try {
   assert.deepEqual(
     calls.map((call) => call.url.pathname + call.url.search),
     [
-      `${base}/packages?limit=12&page=1&kind=plugin`,
+      // Default market filter is "all" (no kind=).
+      `${base}/packages?limit=12&page=1`,
       `${base}/installations`,
       `${base}/packages/${packageId}/versions/${versionId}`,
     ],
