@@ -266,6 +266,7 @@ export async function createConnectRuntime({
         });
     },
   });
+  /** @param {{keepModels:boolean}} opts */
   function retireBoundSessions({ keepModels }) {
     if (!keepModels) {
       models?.logout();
@@ -283,6 +284,7 @@ export async function createConnectRuntime({
     teamVault = undefined;
     communication = 'idle';
   }
+  /** @param {{keepPresentation:boolean}} opts */
   function clearResidentAuth({ keepPresentation }) {
     principal = undefined;
     if (!keepPresentation) {
