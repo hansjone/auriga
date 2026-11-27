@@ -274,13 +274,32 @@ const changes = computed(() =>
       ...previous.value.map((f) => f.path),
       ...files.value.map((f) => f.path),
     ]),
-  ].map((path) => ({
-    path,
-    lines: textDiff(
-      previous.value.find((f) => f.path === path)?.text ?? '',
-      files.value.find((f) => f.path === path)?.text ?? '',
-    ),
-  })),
+  ].map((path) => {
+    const prevFile = previous.value.find((f) => f.path === path);
+    const currFile = files.value.find((f) => f.path === path);
+    const lines = textDiff(prevFile?.text ?? '', currFile?.text ?? '');
+    if (
+      lines.every((l) => l.type === 'same') &&
+      (prevFile?.truncated || currFile?.truncated) &&
+      (prevFile?.contentHash !== currFile?.contentHash ||
+        prevFile?.sizeBytes !== currFile?.sizeBytes)
+    ) {
+      return {
+        path,
+        lines: [
+          {
+            type: 'del' as const,
+            text: `[截断预览外内容已变更 · 旧版 ${prevFile?.sizeBytes ?? 0} bytes · hash ${prevFile?.contentHash ?? '-'}]`,
+          },
+          {
+            type: 'add' as const,
+            text: `[截断预览外内容已变更 · 新版 ${currFile?.sizeBytes ?? 0} bytes · hash ${currFile?.contentHash ?? '-'}]`,
+          },
+        ],
+      };
+    }
+    return { path, lines };
+  }),
 );
 function failure(e: unknown) {
   if (isApiError(e)) {

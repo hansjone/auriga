@@ -160,7 +160,10 @@ export async function packSkillFolder(files: File[]): Promise<File> {
           p === '.' ||
           p === '..' ||
           /[\\:<>"|?*]/.test(p) ||
-          [...p].some((c) => c.charCodeAt(0) < 32) ||
+          [...p].some((c) => {
+            const code = c.charCodeAt(0);
+            return code < 32 || (code >= 0x7f && code <= 0x9f);
+          }) ||
           /[. ]$/.test(p) ||
           /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i.test(p),
       ) ||
@@ -202,12 +205,7 @@ export async function packSkillFolder(files: File[]): Promise<File> {
   )) {
     const bytes = new Uint8Array(await file.arrayBuffer());
     const text = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
-    if (
-      [...text].some(
-        (c) => c.charCodeAt(0) < 32 && !['\t', '\n', '\r'].includes(c),
-      )
-    )
-      throw invalid();
+    if (text.includes('\0')) throw invalid();
     const header = tar.subarray(offset, offset + 512);
     const put = (s: string, at: number) => header.set(encoder.encode(s), at);
     const octal = (n: number, width: number) =>

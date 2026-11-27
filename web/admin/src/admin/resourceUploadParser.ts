@@ -92,7 +92,7 @@ function validRange(value: unknown): value is string {
 }
 function safePath(path: string) {
   // eslint-disable-next-line no-control-regex
-  const unsafeCharacters = /[\\:<>"|?*\x00-\x1f\x7f]/;
+  const unsafeCharacters = /[\\:<>"|?*\x00-\x1f\x7f-\x9f]/;
   if (
     !path ||
     path.startsWith('/') ||
@@ -626,9 +626,7 @@ export async function parseResourceSource(
       if (e.sizeBytes > (e.path === 'SKILL.md' ? 262144 : 2097152))
         fail('sizeLimit', e.path);
       const content = text(entryBytes(e), e.path);
-      // eslint-disable-next-line no-control-regex
-      if (/[\x00-\x08\x0b\x0c\x0e-\x1f]/.test(content))
-        fail('textInvalid', e.path);
+      if (content.includes('\0')) fail('textInvalid', e.path);
       skillFiles.push(skillFile(e.path, content));
     }
     base = {

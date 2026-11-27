@@ -234,7 +234,11 @@ export function createPrivateSkills({ home }) {
           /^(con|prn|aux|nul|com[0-9]|lpt[0-9])(?:\.|$)/i.test(entry.name)
         )
           refuse('common.validation_failed');
-        const key = path.normalize('NFC').toLowerCase();
+        const key = path
+          .normalize('NFC')
+          .toUpperCase()
+          .toLowerCase()
+          .normalize('NFC');
         if (seen.has(key)) refuse('common.validation_failed');
         seen.add(key);
         const target = join(parent, entry.name),

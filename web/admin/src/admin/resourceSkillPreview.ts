@@ -42,12 +42,25 @@ export type PreviewFile = {
   text: string;
   binary?: boolean;
   sizeBytes?: number;
+  truncated?: boolean;
+  contentHash?: string;
 };
 
 export type PreviewArchiveResult = {
   files: PreviewFile[];
   truncated: boolean;
 };
+
+function fnv1a64Hex(bytes: Uint8Array): string {
+  let hash = 0xcbf29ce484222325n;
+  const prime = 0x100000001b3n;
+  const mask = 0xffffffffffffffffn;
+  for (let i = 0; i < bytes.length; i++) {
+    hash ^= BigInt(bytes[i]!);
+    hash = (hash * prime) & mask;
+  }
+  return hash.toString(16).padStart(16, '0');
+}
 
 export async function archivePreview(
   response: Response,
@@ -60,8 +73,10 @@ export async function archivePreviewWithMeta(
   response: Response,
   kind: 'skill' | 'plugin',
 ): Promise<PreviewArchiveResult> {
-  if (kind === 'skill')
-    return { files: await skillPreview(response), truncated: false };
+  if (kind === 'skill') {
+    const files = await skillPreview(response);
+    return { files, truncated: files.some((f) => Boolean(f.truncated)) };
+  }
   if (!response.body) throw new Error('Missing body');
   const bytes = await boundedBytes(response.body);
   const raw =
@@ -153,9 +168,9 @@ export function tarArchiveEntriesWithMeta(
   }
   return { files: result, truncated };
 }
-export function tarText(raw: Uint8Array) {
+export function tarText(raw: Uint8Array): PreviewFile[] {
   const decoder = new TextDecoder('utf-8', { fatal: true }),
-    result: { path: string; text: string }[] = [];
+    result: PreviewFile[] = [];
   const seen = new Set<string>();
   for (let offset = 0, count = 0; offset + 512 <= raw.length; count++) {
     if (count > 512) throw new Error('Entry budget');
@@ -184,18 +199,20 @@ export function tarText(raw: Uint8Array) {
     if (type !== '5') {
       const fullSlice = raw.subarray(offset + 512, offset + 512 + size);
       const fullText = decoder.decode(fullSlice);
-      if (
-        [...fullText].some(
-          (c) => c.charCodeAt(0) < 32 && !['\t', '\n', '\r'].includes(c),
-        )
-      )
-        throw new Error('Binary content');
-      const text =
-        size > maxTextPreviewBytes
-          ? fullText.slice(0, maxTextPreviewBytes) +
-            `\n\n[文件较大 (${size} bytes)，仅展示前 256 KiB 预览]`
-          : fullText;
-      result.push({ path, text });
+      if (fullText.includes('\0')) throw new Error('Binary content');
+      const truncated = size > maxTextPreviewBytes;
+      const text = truncated
+        ? fullText.slice(0, maxTextPreviewBytes) +
+          `\n\n[文件较大 (${size} bytes)，仅展示前 256 KiB 预览]`
+        : fullText;
+      result.push({
+        path,
+        text,
+        sizeBytes: size,
+        ...(truncated
+          ? { truncated: true, contentHash: fnv1a64Hex(fullSlice) }
+          : {}),
+      });
     }
     offset += 512 + Math.ceil(size / 512) * 512;
   }

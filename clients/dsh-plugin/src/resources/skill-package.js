@@ -12,11 +12,19 @@ export const skillRootDependencyFiles = new Set([
   'poetry.lock',
 ]);
 
+/** @param {string} part */
+function hasIsoControl(part) {
+  return [...part].some((c) => {
+    const code = c.charCodeAt(0);
+    return code < 32 || (code >= 0x7f && code <= 0x9f);
+  });
+}
+
 /** @param {string} path */
 export function skillDirectoryValid(path) {
   return (
     Buffer.byteLength(path) <= 240 &&
-    path.split('/').length <= 7 &&
+    path.split('/').length <= 8 &&
     /^(?:references|assets|scripts)(?:\/.+)?$/.test(path) &&
     path
       .split('/')
@@ -27,7 +35,7 @@ export function skillDirectoryValid(path) {
           p !== '..' &&
           !/[. ]$/.test(p) &&
           !/[\\:]/.test(p) &&
-          ![...p].some((c) => c.charCodeAt(0) < 32) &&
+          !hasIsoControl(p) &&
           !/^(con|prn|aux|nul|com[0-9]|lpt[0-9])(?:\.|$)/i.test(p),
       )
   );
@@ -94,7 +102,7 @@ export function skillPathValid(path) {
           p !== '..' &&
           !/[. ]$/.test(p) &&
           !/[\\:]/.test(p) &&
-          ![...p].some((c) => c.charCodeAt(0) < 32) &&
+          !hasIsoControl(p) &&
           !/^(con|prn|aux|nul|com[0-9]|lpt[0-9])(?:\.|$)/i.test(p),
       )
   );
@@ -180,12 +188,7 @@ export function unpackSkill(archive, expected) {
     seen.set(key, isDir);
     if (type === 53) {
       const dir = path.replace(/\/$/, '');
-      if (
-        size ||
-        !['references', 'assets', 'scripts'].includes(dir.split('/')[0]) ||
-        !skillPathValid(dir + '/file.txt')
-      )
-        refuse('common.validation_failed');
+      if (size || !skillDirectoryValid(dir)) refuse('common.validation_failed');
     } else {
       if (![0, 48].includes(type) || !skillPathValid(path))
         refuse('common.validation_failed');

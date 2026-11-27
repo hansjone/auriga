@@ -9,6 +9,7 @@ import {
   skillRootDependencyFiles,
 } from './skill-package.js';
 import {
+  excluded,
   invalid,
   openSubmissionDirectory,
   safePath,
@@ -19,24 +20,29 @@ import { packPluginDirectory } from './submission-plugin.js';
 const decoder = new TextDecoder('utf-8', { fatal: true });
 const defaultDshRange = '>=0.2.1-rc.3';
 
-/** Skill-specific ignore filter: ignores VCS/cache dirs and secret files without silently dropping valid script configs like scripts/config.json.
- * @param {string} name */
-function skillExcluded(name) {
-  return (
-    name.startsWith('.') ||
-    /^(?:node_modules|__pycache__|venv|coverage|tests?|__tests__|fixtures|secrets?|credentials|private[-_]?keys?|Dockerfile|Makefile)$/i.test(
-      name,
-    ) ||
-    /\.(?:pem|key|p12|pfx|jks|keystore|crt|cer|kdbx|sqlite3?|db|log|bak|tgz|zip)$/i.test(
-      name,
-    ) ||
-    /^(?:env|secrets?|credentials|tokens?|private[-_]?keys?|id_(?:rsa|ed25519|ecdsa))(?:\.|$)/i.test(
-      name,
-    ) ||
-    /^(?:config|settings|application|appsettings)\.(?:local|dev|development|prod|production|test)\.(?:json|toml|ini|ya?ml|properties)$/i.test(
-      name,
-    )
-  );
+/** Skill-specific ignore filter: keeps shared excluded() outside scripts/, adds Python caches (__pycache__/venv),
+ * and allows non-env script configs (e.g. scripts/config.json) inside scripts/.
+ * @param {string} parent @param {string} name */
+function skillExcluded(parent, name) {
+  if (/^(?:__pycache__|venv)$/i.test(name)) return true;
+  if (parent === 'scripts' || parent.startsWith('scripts/')) {
+    return (
+      name.startsWith('.') ||
+      /^(?:node_modules|coverage|tests?|__tests__|fixtures|secrets?|credentials|private[-_]?keys?|Dockerfile|Makefile)$/i.test(
+        name,
+      ) ||
+      /\.(?:pem|key|p12|pfx|jks|keystore|crt|cer|kdbx|sqlite3?|db|log|bak|tgz|zip)$/i.test(
+        name,
+      ) ||
+      /^(?:env|secrets?|credentials|tokens?|private[-_]?keys?|id_(?:rsa|ed25519|ecdsa))(?:\.|$)/i.test(
+        name,
+      ) ||
+      /^(?:config|settings|application|appsettings)\.(?:local|dev|development|prod|production|test)\.(?:json|toml|ini|ya?ml|properties)$/i.test(
+        name,
+      )
+    );
+  }
+  return excluded(name);
 }
 
 /** @param {ReturnType<typeof submissionFiles>} source */
@@ -66,7 +72,7 @@ async function packSkillDirectory(source) {
           'unsupported skill directory (only references/, assets/, scripts/ are allowed)',
         );
       for await (const name of source.children(path))
-        if (!skillExcluded(name)) await visit(path + '/' + name);
+        if (!skillExcluded(path, name)) await visit(path + '/' + name);
       return;
     }
     if (path === 'assets' || path === 'references' || path === 'scripts')
@@ -95,7 +101,7 @@ async function packSkillDirectory(source) {
   }
 
   for await (const name of source.children('')) {
-    if (!skillExcluded(name)) await visit(name);
+    if (!skillExcluded('', name)) await visit(name);
   }
   if (!files['SKILL.md'])
     invalid('SKILL.md', 'missing required SKILL.md at skill root');

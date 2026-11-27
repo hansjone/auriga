@@ -7,6 +7,7 @@ import {
   packSkillFolder,
   prepareFolderUpload,
 } from '../src/admin/resourceCatalogUpload';
+import { parseResourceSource } from '../src/admin/resourceUploadParser';
 import { tarText } from '../src/admin/resourceSkillPreview';
 
 Object.defineProperty(globalThis, 'crypto', {
@@ -97,7 +98,7 @@ it('freezes a folder snapshot and writes the actual packed digest into a new man
     actual,
   );
 });
-it('packs skill folder containing scripts and root dependency manifest', async () => {
+it('packs skill folder containing scripts and root dependency manifest and parses back through archive entry', async () => {
   const archive = await packSkillFolder([
     file(
       'sample/SKILL.md',
@@ -107,6 +108,13 @@ it('packs skill folder containing scripts and root dependency manifest', async (
     file('sample/scripts/run.py', 'print("ok")\n'),
   ]);
   expect(archive.size).toBeGreaterThan(0);
+  const parsed = await parseResourceSource([archive], 'skill', 'Alice');
+  expect(parsed.manifest.name).toBe('sample');
+  expect(parsed.skillFiles?.map((f) => f.webkitRelativePath).sort()).toEqual([
+    'skill/SKILL.md',
+    'skill/requirements.txt',
+    'skill/scripts/run.py',
+  ]);
 });
 it.each([
   '../SKILL.md',

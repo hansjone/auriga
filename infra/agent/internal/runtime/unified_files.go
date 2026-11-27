@@ -145,7 +145,7 @@ func unifiedArchivePath(name string) (string, error) {
 			return "", fmt.Errorf("unsafe skill archive path")
 		}
 		for _, r := range part {
-			if r < 32 || r == 127 {
+			if r < 32 || (r >= 0x7f && r <= 0x9f) {
 				return "", fmt.Errorf("unsafe skill archive path")
 			}
 		}

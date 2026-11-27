@@ -135,6 +135,7 @@ test('skill validates metadata, packs scripts and dependency manifests, and reje
   await put('scripts/run.py', 'print("hello")\n');
   await put('scripts/config.json', '{"mode":"safe"}\n');
   await put('references/readme.txt', '﻿hello\r\n');
+  await put('references/config.json', '{"ignored":true}\n');
   await put('references/secret.txt', 'excluded-sample');
   await put('__pycache__/run.cpython-312.pyc', 'excluded-cache');
   const { manifest, archive, hasScripts } = await prepare('skill', {
