@@ -19,6 +19,8 @@ import { isAbsolute, join, relative, sep } from 'node:path';
 import { satisfiesMin } from './semver-lite.mjs';
 
 export const PRODUCT = 'Auriga Desktop';
+export const DESKTOP_CORE_DIR = 'upstream/app/node_modules/auriga-dsh';
+const LEGACY_CORE_DIR = 'auriga/plugin/node_modules/auriga-dsh';
 
 /** Trees pinned by registry integrity (upstream lock / pnpm) instead of per-file hashes. */
 export const PINNED_TREES = [
@@ -27,6 +29,7 @@ export const PINNED_TREES = [
 ];
 
 export const isPinnedPath = (path) =>
+  !path.startsWith(DESKTOP_CORE_DIR + '/') &&
   PINNED_TREES.some((prefix) => path.startsWith(prefix));
 
 // Reuse a single 1 MiB scratch buffer for synchronous hashing so verifying
@@ -156,7 +159,11 @@ export function computeId(manifest) {
     ],
     pnpm: [manifest.pnpm.version, manifest.pnpm.integrity],
     trees: (manifest.trees ?? []).map((t) => [t.root, t.files, t.sha256]),
-    plugin: [manifest.plugin.version, manifest.plugin.tgzSha256],
+    plugin: [
+      manifest.plugin.version,
+      manifest.plugin.tgzSha256,
+      ...(manifest.plugin.scope === 'installation' ? ['installation'] : []),
+    ],
   });
   const digest = createHash('sha256').update(material).digest('hex');
   return `${manifest.bundleVersion}-dsh${manifest.upstream.version}-${digest.slice(0, 12)}`;
@@ -173,6 +180,23 @@ function unsafe(path) {
 }
 
 const readJson = (file) => JSON.parse(readFileSync(file, 'utf8'));
+
+function readPackagedPlugin(payload, manifest) {
+  const scoped = manifest.plugin.scope === 'installation';
+  if (manifest.plugin.scope !== undefined && !scoped)
+    throw new Error('unsupported desktop plugin installation scope');
+  const directory = scoped ? DESKTOP_CORE_DIR : LEGACY_CORE_DIR;
+  const plugin = readJson(join(payload, directory, 'package.json'));
+  if (scoped) {
+    const app = readJson(join(payload, 'upstream/app/package.json'));
+    if (
+      plugin.name !== 'auriga-dsh' ||
+      app.dependencies?.['auriga-dsh'] !== plugin.version
+    )
+      throw new Error('desktop core is missing from the installation anchor');
+  }
+  return plugin;
+}
 
 function packageFileError(path, reason) {
   if (path.startsWith('runtime/python/'))
@@ -268,9 +292,7 @@ export function verifyPackage(payload, { trees = true } = {}) {
   )
     throw new Error('upstream lock integrity differs from manifest');
 
-  const pluginPkg = readJson(
-    join(payload, 'auriga/plugin/node_modules/auriga-dsh/package.json'),
-  );
+  const pluginPkg = readPackagedPlugin(payload, manifest);
   if (pluginPkg.version !== manifest.plugin.version)
     throw new Error('plugin version differs from manifest');
   if (!satisfiesMin(manifest.upstream.version, pluginPkg.engines?.dsh))
@@ -376,9 +398,7 @@ export async function verifyPackageAsync(
   )
     throw new Error('upstream lock integrity differs from manifest');
 
-  const pluginPkg = readJson(
-    join(payload, 'auriga/plugin/node_modules/auriga-dsh/package.json'),
-  );
+  const pluginPkg = readPackagedPlugin(payload, manifest);
   if (pluginPkg.version !== manifest.plugin.version)
     throw new Error('plugin version differs from manifest');
   if (!satisfiesMin(manifest.upstream.version, pluginPkg.engines?.dsh))

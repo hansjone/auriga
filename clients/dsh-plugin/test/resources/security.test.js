@@ -304,3 +304,62 @@ test('public host adapter installs only the verified local file and never approv
     host.install('https://example.com/plugin.tgz', 'example'),
   );
 });
+
+test('native install events are filtered by request and registry details are omitted', async () => {
+  let onState;
+  let disposed = false;
+  const manager = {
+    listBundles: async () => [],
+    installBundle: async (_spec, { requestId }) => {
+      onState({ requestId: 'unrelated', phase: 'applying' });
+      onState({
+        requestId,
+        phase: 'installing',
+        attempt: { index: 2, total: 3, registry: 'private-url' },
+      });
+      onState({ requestId, phase: 'applying' });
+      return { target: 'example', application: 'applied' };
+    },
+    setBundleEnabled() {},
+    removeBundle() {},
+  };
+  const host = resourceHost({
+    get: () => manager,
+    on(event, callback) {
+      assert.equal(event, 'plugin-manager/install-state');
+      onState = callback;
+      return () => {
+        disposed = true;
+      };
+    },
+  });
+  const progress = [];
+  await host.install(join(tmpdir(), 'verified.tgz'), 'example', (...args) =>
+    progress.push(args),
+  );
+  assert.deepEqual(progress, [
+    ['installing_dependencies', { index: 2, total: 3 }],
+    ['checking_installation'],
+  ]);
+  assert.equal(disposed, true);
+});
+
+test('a corrupt bundle remains selected until native disable is observed', async () => {
+  let enabled = true;
+  const manager = {
+    listBundles: async () => [
+      { name: 'damaged', enabled, error: { code: 'operation-error' } },
+    ],
+    installBundle() {},
+    async setBundleEnabled(target, next) {
+      enabled = next;
+      return { target, application: 'applied' };
+    },
+    removeBundle() {},
+  };
+  const host = resourceHost({ get: () => manager });
+  assert.equal(await host.observe('damaged'), undefined);
+  assert.equal(await host.selected('damaged'), true);
+  await host.enable('damaged', false);
+  assert.equal(await host.selected('damaged'), false);
+});

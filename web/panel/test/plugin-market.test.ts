@@ -1,4 +1,5 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+import { DesktopCatalog } from '../src/desktop-catalog';
 import {
   allPluginPackages,
   filterPlugins,
@@ -43,6 +44,118 @@ const filters = {
 };
 
 describe('plugin market', () => {
+  it.each([false, true])(
+    'tracks a queued failure after the action response is lost (%s)',
+    async (lostResponse) => {
+      vi.useFakeTimers();
+      const ownerId = 'member';
+      const plugin = {
+        state: 'applying',
+        installationRevision: 1,
+        resource: {
+          identity: { packageId: 'tool', versionId: 'v1', kind: 'plugin' },
+        },
+      };
+      const operation = {
+        packageId: 'tool',
+        versionId: 'v1',
+        phase: 'installing_dependencies',
+        attempt: { index: 2, total: 3 },
+      };
+      const failure = {
+        ...plugin,
+        state: 'failed',
+        pluginFailure: {
+          reason: 'plugin_install_network',
+          trace_id: 'a'.repeat(32),
+        },
+      };
+      let installing = false;
+      let finish!: (response: Response) => void;
+      const action = new Promise<Response>((resolve) => {
+        finish = resolve;
+      });
+      const host = vi.fn(async (path: string) => {
+        if (path.startsWith('catalog/packages'))
+          return Response.json({ items: [] });
+        if (path === 'catalog/actions') {
+          installing = true;
+          return action;
+        }
+        if (path === 'catalog/plugin-progress')
+          return Response.json({ operation: installing ? operation : null });
+        if (path === 'catalog/installations')
+          return Response.json({
+            identity: { ownerId },
+            items: host.mock.calls.some(([path]) => path === 'catalog/actions')
+              ? [failure]
+              : [],
+          });
+        throw new Error(path);
+      });
+      const catalog = new DesktopCatalog(host, { ownerId });
+      try {
+        await catalog.refresh();
+        const installingPlugin = catalog.act(
+          {
+            action: 'install',
+            packageId: 'tool',
+            versionId: 'v1',
+            revision: 0,
+          },
+          'plugin',
+        );
+        const timedOut = lostResponse
+          ? expect(installingPlugin).resolves.toEqual({ awaitingResult: true })
+          : undefined;
+        await vi.advanceTimersByTimeAsync(1000);
+        expect(catalog.pluginOperation).toEqual(operation);
+        expect(catalog.mutating).toBe(true);
+        if (timedOut) {
+          await vi.advanceTimersByTimeAsync(90000);
+          await timedOut;
+          expect(catalog.isTrackingPlugin('tool')).toBe(true);
+          await expect(
+            catalog.act(
+              {
+                action: 'install',
+                packageId: 'tool',
+                versionId: 'v1',
+                revision: 0,
+              },
+              'plugin',
+            ),
+          ).rejects.toThrow('unavailable');
+        }
+        installing = false;
+        if (!lostResponse) {
+          finish(Response.json({ installation: plugin }, { status: 202 }));
+          await installingPlugin;
+        }
+        await vi.advanceTimersByTimeAsync(1000);
+        expect(catalog.snapshot?.installations.items).toEqual([failure]);
+        expect(catalog.pluginOperation).toBeUndefined();
+        expect(catalog.isTrackingPlugin('tool')).toBe(false);
+        expect(catalog.error).toBeUndefined();
+        const progressReads = host.mock.calls.filter(
+          ([path]) => path === 'catalog/plugin-progress',
+        ).length;
+        await vi.advanceTimersByTimeAsync(5000);
+        expect(
+          host.mock.calls.filter(([path]) => path === 'catalog/actions'),
+        ).toHaveLength(1);
+        expect(
+          host.mock.calls.filter(
+            ([path]) => path === 'catalog/plugin-progress',
+          ),
+        ).toHaveLength(progressReads);
+      } finally {
+        catalog.dispose();
+        vi.useRealTimers();
+      }
+    },
+  );
+
   it('builds filters and sorts over packages from every page', async () => {
     const { packages } = await allPluginPackages(async (cursor) =>
       cursor

@@ -17,6 +17,7 @@ param(
   # Setup wizard: machine-readable steps on stdout, and cancellation by creating this file.
   [switch]$Progress,
   [switch]$MovePayload,
+  [switch]$RecoverPluginProfile,
   [string]$CancelFile
 )
 $ErrorActionPreference = 'Stop'
@@ -58,6 +59,7 @@ if ($oldShell -and -not $installArgs.ContainsKey('NoDesktopShortcut')) {
 $argList = @($cli, 'install', '--payload', $payload, '--root', $InstallDir, '--data-home', $DataHome)
 if ($Progress) { $argList += '--progress' }
 if ($MovePayload) { $argList += '--move-payload' }
+if ($RecoverPluginProfile) { $argList += '--recover-plugin-profile' }
 if ($CancelFile) { $argList += @('--cancel-file', $CancelFile) }
 if ($PlatformOrigin) { $argList += @('--platform-origin', $PlatformOrigin) }
 if ($PlatformAccessMode) { $argList += @('--platform-access-mode', $PlatformAccessMode) }

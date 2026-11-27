@@ -6,7 +6,9 @@ export type PackagePage = components['schemas']['PackagePage'];
 export type VersionPage = components['schemas']['VersionPage'];
 export type SkillPackage = components['schemas']['UnifiedPackage'];
 export type SkillVersion = components['schemas']['UnifiedVersion'];
-export type SkillInstallation = components['schemas']['UnifiedInstallation'];
+export type SkillInstallation = components['schemas']['UnifiedInstallation'] & {
+  pluginFailure?: { reason: string; trace_id: string };
+};
 
 // The host owns authentication. Never fall back to window.fetch or apiBase.
 export interface PanelContext {

@@ -16,7 +16,11 @@ import {
   refuse,
   uuid,
 } from './trust.js';
-import { resourceStage, resourceFailure } from './diagnostics.js';
+import {
+  diagnoseResource,
+  resourceStage,
+  resourceFailure,
+} from './diagnostics.js';
 import { validateArchive } from './archive.js';
 /** @param {{runtime:any,current:()=>any,home?:string,privateSkills:any,host:any,pluginHost?:any,trustFile?:string,roots?:()=>Promise<any>,fetchImpl?:typeof fetch,desktop?:ReturnType<typeof desktopSkills>,now?:()=>number}} options */
 export function catalogService(options) {
@@ -63,6 +67,30 @@ export function catalogService(options) {
       ? pluginState({ home: options.home, who })
       : undefined;
   const now = options.now ?? (() => performance.now());
+  /** @type {{packageId:string,versionId:string,phase:string,attempt?:{index:number,total:number}}|undefined} */
+  let activePlugin;
+  /** @template T @param {any} row @param {string} phase @param {(progress:(phase:string,attempt?:{index:number,total:number})=>void)=>Promise<T>} work */
+  async function pluginProgress(row, phase, work) {
+    const { kind, packageId, versionId } = row.resource.identity;
+    if (kind !== 'plugin') return work(() => {});
+    const progress = (
+      /** @type {string} */ phase,
+      /** @type {{index:number,total:number}|undefined} */ attempt = undefined,
+    ) => {
+      activePlugin = {
+        packageId,
+        versionId,
+        phase,
+        ...(attempt && { attempt }),
+      };
+    };
+    progress(phase);
+    try {
+      return await work(progress);
+    } finally {
+      activePlugin = undefined;
+    }
+  }
   let nextRefresh = 0,
     retryAfter = 0,
     failures = 0,
@@ -114,12 +142,15 @@ export function catalogService(options) {
     if (!cloud) {
       const local = desktop?.read(who);
       for (const row of items) {
+        if (row.pluginFailure) continue;
         const recorded = local?.installations.find(
           (/** @type {any} */ i) =>
             i.resource.identity.packageId === row.resource.identity.packageId &&
             i.installationRevision === row.installationRevision &&
             i.selectionRevision === row.selectionRevision &&
-            i.generation === row.generation,
+            i.generation === row.generation &&
+            canonicalize(i.resource.identity) ===
+              canonicalize(row.resource.identity),
         );
         if (
           row.resource.identity.kind === 'plugin' &&
@@ -183,6 +214,72 @@ export function catalogService(options) {
   /** @param {any} error */
   const occupied = (error) =>
     ['EBUSY', 'EPERM', 'EACCES', 'ENOTEMPTY'].includes(error?.code);
+  /** @param {any} error */
+  const selectionChanged = (error) =>
+    [
+      'common.unauthenticated',
+      'common.forbidden',
+      'common.conflict',
+      'common.precondition_failed',
+    ].includes(error?.code);
+  /** @param {any} row @param {string} state */
+  const pluginReport = (row, state) => ({
+    clientId: who.hostId,
+    identity: row.resource.identity,
+    installationRevision: row.installationRevision,
+    selectionRevision: row.selectionRevision,
+    generation: row.generation,
+    observedGeneration: row.generation,
+    state,
+    reportSource: 'member',
+    observedAt: new Date().toISOString(),
+    ...(['failed', 'expired', 'revoked'].includes(state)
+      ? { errorCode: 'resource.apply_failed' }
+      : {}),
+  });
+  /** @param {any} row @param {'prepare'|'host'} phase @param {{reason:string,trace_id:string}} value @param {boolean} [recorded] */
+  async function recordPluginFailure(row, phase, value, recorded = false) {
+    api.check();
+    const diagnostic = { reason: value.reason, trace_id: value.trace_id };
+    if (!recorded && plugins) {
+      try {
+        await plugins.writeFailure(row, phase, diagnostic);
+      } catch (error) {
+        // The disk can be full. The process still holds the failure for this selection.
+        diagnoseResource(error, 'storage');
+      }
+    }
+    api.check();
+    if (row.state !== 'failed') {
+      try {
+        await api.report(pluginReport(row, 'failed'));
+      } catch (error) {
+        api.check();
+        if (selectionChanged(error)) throw error;
+        diagnoseResource(error, 'platform');
+      }
+    }
+    row.state = 'failed';
+    row.pluginFailure = diagnostic;
+  }
+  /** @param {any[]} rows */
+  async function restorePreparationFailures(rows) {
+    for (const row of rows) {
+      if (
+        row.resource.identity.kind !== 'plugin' ||
+        desiredState(row.resource) !== 'ENABLED' ||
+        row.pluginFailure
+      )
+        continue;
+      const attempt = plugins?.readFailure(row);
+      const previous =
+        attempt?.phase === 'prepare' && plugins?.failure(attempt, row);
+      if (previous) await recordPluginFailure(row, 'prepare', previous, true);
+    }
+  }
+  /** @param {any[]} rows */
+  const preparationCandidates = (rows) =>
+    rows.filter((row) => !row.pluginFailure);
   /** Revalidate and stage the exact current server selection; never resolve latest on retry.
    * @param {any[]} rows */
   async function prepareRows(rows) {
@@ -190,97 +287,164 @@ export function catalogService(options) {
     desktop.available();
     const downloads = [];
     const pluginNames = new Set();
-    const roots = rows.some((r) => desiredState(r.resource) === 'ENABLED')
-      ? await trust()
-      : undefined;
+    await restorePreparationFailures(rows);
+    const enabled = rows.filter(
+      (r) => !r.pluginFailure && desiredState(r.resource) === 'ENABLED',
+    );
+    const roots = enabled.length ? await trust() : undefined;
     const { verifyTrust } = await import('./unified-trust.js');
-    for (const installation of rows.filter(
-      (r) => desiredState(r.resource) === 'ENABLED',
-    )) {
-      const download = await resourceStage('download', () =>
-          api.download(installation),
-        ),
-        manifest = parseStrictJson(download.manifest);
-      const release = {
-        protocol: 2,
-        envelope: download.ref.envelope,
-        rawManifest: download.manifest.toString('utf8'),
-        artifactBytes: Object.fromEntries(
-          download.ref.artifacts.map(
-            (/** @type {any} */ a, /** @type {number} */ i) => [
-              a.artifactId,
-              download.artifacts[i].toString('base64'),
-            ],
+    for (const installation of enabled) {
+      const plugin = installation.resource.identity.kind === 'plugin';
+      try {
+        const download = await pluginProgress(installation, 'downloading', () =>
+            resourceStage('download', () => api.download(installation)),
           ),
-        ),
-        expected: download.ref.identity,
-        now: new Date().toISOString(),
-      };
-      await resourceStage('verification', async () =>
-        verifyTrust(
-          'revocation',
-          { release, list: parseStrictJson(download.revocations) },
-          roots,
-        ),
-      );
-      if (
-        !['skill', 'plugin'].includes(manifest.kind) ||
-        manifest.kind !== download.ref.identity.kind ||
-        download.ref.releaseSequence !==
-          download.ref.envelope.releaseSequence ||
-        sha(download.manifest) !== download.ref.identity.manifestDigest ||
-        manifest.version !== download.ref.identity.version ||
-        canonicalize(
-          download.ref.artifacts
-            .map((/** @type {any} */ a) => [
-              a.artifactId,
-              a.digest,
-              a.sizeBytes,
-            ])
-            .sort(),
-        ) !==
-          canonicalize(
-            manifest.artifacts
-              .map((/** @type {any} */ a) => [a.id, a.digest, a.sizeBytes])
-              .sort(),
-          )
-      )
-        refuse('resource.signature_invalid');
-      if (manifest.kind === 'plugin') {
+          manifest = parseStrictJson(download.manifest);
+        const release = {
+          protocol: 2,
+          envelope: download.ref.envelope,
+          rawManifest: download.manifest.toString('utf8'),
+          artifactBytes: Object.fromEntries(
+            download.ref.artifacts.map(
+              (/** @type {any} */ a, /** @type {number} */ i) => [
+                a.artifactId,
+                download.artifacts[i].toString('base64'),
+              ],
+            ),
+          ),
+          expected: download.ref.identity,
+          now: new Date().toISOString(),
+        };
+        await pluginProgress(installation, 'verifying', () =>
+          resourceStage('verification', async () =>
+            verifyTrust(
+              'revocation',
+              { release, list: parseStrictJson(download.revocations) },
+              roots,
+            ),
+          ),
+        );
         if (
-          manifest.plugin.packageName === 'auriga-dsh' ||
-          pluginNames.has(manifest.plugin.packageName)
+          !['skill', 'plugin'].includes(manifest.kind) ||
+          manifest.kind !== download.ref.identity.kind ||
+          download.ref.releaseSequence !==
+            download.ref.envelope.releaseSequence ||
+          sha(download.manifest) !== download.ref.identity.manifestDigest ||
+          manifest.version !== download.ref.identity.version ||
+          canonicalize(
+            download.ref.artifacts
+              .map((/** @type {any} */ a) => [
+                a.artifactId,
+                a.digest,
+                a.sizeBytes,
+              ])
+              .sort(),
+          ) !==
+            canonicalize(
+              manifest.artifacts
+                .map((/** @type {any} */ a) => [a.id, a.digest, a.sizeBytes])
+                .sort(),
+            )
         )
-          refuse('resource.state_conflict');
-        pluginNames.add(manifest.plugin.packageName);
-        await validateArchive(download.artifacts[0], {
-          name: manifest.plugin.packageName,
-          version: manifest.version,
-        });
-      }
-      const lease = download.ref.lease,
-        list = parseStrictJson(download.revocations);
-      if (
-        lease.envelopeNotAfter !== release.envelope.notAfter ||
-        lease.revocationsExpiresAt !== list.expiresAt ||
-        lease.revocationRevision !== list.revision ||
-        Date.parse(lease.expiresAt) !==
-          Math.min(
-            Date.parse(lease.envelopeNotAfter),
-            Date.parse(lease.revocationsExpiresAt),
+          refuse('resource.signature_invalid');
+        if (manifest.kind === 'plugin') {
+          if (
+            manifest.plugin.packageName === 'auriga-dsh' ||
+            pluginNames.has(manifest.plugin.packageName)
           )
-      )
-        refuse('resource.signature_invalid');
-      downloads.push(download);
+            refuse('resource.state_conflict');
+          pluginNames.add(manifest.plugin.packageName);
+          await validateArchive(download.artifacts[0], {
+            name: manifest.plugin.packageName,
+            version: manifest.version,
+          });
+        }
+        const lease = download.ref.lease,
+          list = parseStrictJson(download.revocations);
+        if (
+          lease.envelopeNotAfter !== release.envelope.notAfter ||
+          lease.revocationsExpiresAt !== list.expiresAt ||
+          lease.revocationRevision !== list.revision ||
+          Date.parse(lease.expiresAt) !==
+            Math.min(
+              Date.parse(lease.envelopeNotAfter),
+              Date.parse(lease.revocationsExpiresAt),
+            )
+        )
+          refuse('resource.signature_invalid');
+        downloads.push(download);
+      } catch (error) {
+        if (!plugin || occupied(error) || selectionChanged(error)) throw error;
+        await recordPluginFailure(
+          installation,
+          'prepare',
+          diagnoseResource(error, 'verification').body,
+        );
+      }
     }
 
+    const candidates = preparationCandidates(rows);
+    if (!candidates.length) return { candidates };
+    const failedIds = new Set(
+      rows
+        .filter((row) => row.pluginFailure)
+        .map((row) => row.resource.identity.packageId),
+    );
+    if (failedIds.size) {
+      const host = options.pluginHost;
+      const previous = desktop.read(who)?.installations ?? [];
+      for (const old of previous.filter((/** @type {any} */ row) =>
+        failedIds.has(row.resource.identity.packageId),
+      )) {
+        if (!host) refuse('resource.apply_failed');
+        const name = desktop.pluginName(who, old);
+        if (pluginNames.has(name)) refuse('resource.state_conflict');
+        const failure = rows.find(
+          (row) =>
+            row.resource.identity.packageId === old.resource.identity.packageId,
+        );
+        if (plugins?.waiting(plugins.read(failure, name), failure))
+          return { candidates: [], restartRequired: true };
+        api.check();
+        if (await host.selected(name)) {
+          const selected = (await api.list()).find(
+            (row) =>
+              row.resource.identity.packageId ===
+              old.resource.identity.packageId,
+          );
+          if (
+            !selected ||
+            selected.installationRevision !== failure.installationRevision ||
+            selected.selectionRevision !== failure.selectionRevision ||
+            selected.generation !== failure.generation ||
+            canonicalize(selected.resource.identity) !==
+              canonicalize(failure.resource.identity)
+          )
+            refuse('common.conflict');
+          api.check();
+          const stopped = await host.enable(name, false);
+          api.check();
+          if (stopped.restartRequired) {
+            await plugins?.write(failure, name, false, 'disable');
+            return { candidates: [], restartRequired: true };
+          }
+          if (await host.selected(name))
+            throw resourceFailure(
+              'resource.apply_failed',
+              'plugin_not_active',
+              'plugin',
+            );
+        }
+      }
+    }
     api.check();
     desktop?.acceptRevocations(
       who,
       downloads.map((d) => d.revocations),
     );
     api.check();
-    desktop?.prepare(who, rows, downloads);
+    desktop.prepare(who, candidates, downloads, failedIds);
+    return { candidates };
   }
   /** Public host observations, never the selection's 202, determine application.
    * @param {any[]} rows */
@@ -288,7 +452,7 @@ export function catalogService(options) {
     if (cloud || !desktop) return;
     const host = options.pluginHost;
     for (const row of rows.filter(
-      (r) => r.resource.identity.kind === 'plugin',
+      (r) => r.resource.identity.kind === 'plugin' && !r.pluginFailure,
     )) {
       if (!host) refuse('resource.apply_failed');
       if (!plugins) refuse('resource.storage_unavailable');
@@ -302,7 +466,9 @@ export function catalogService(options) {
         !local ||
         local.installationRevision !== row.installationRevision ||
         local.selectionRevision !== row.selectionRevision ||
-        local.generation !== row.generation
+        local.generation !== row.generation ||
+        canonicalize(local.resource.identity) !==
+          canonicalize(row.resource.identity)
       )
         continue;
       const enabled =
@@ -311,6 +477,8 @@ export function catalogService(options) {
           local.state,
         );
       let state = local.state;
+      /** @type {{reason:string,trace_id:string}|undefined} */ let diagnostic;
+      let recordedFailure = false;
       /** @type {string|undefined} */ let name;
       async function checkSelection() {
         const selected = (await api.list()).find(
@@ -332,7 +500,14 @@ export function catalogService(options) {
       }
       /** @param {string} action @param {boolean} installed @param {()=>Promise<any>} work */
       async function operation(action, installed, work) {
-        const outcome = await work();
+        let outcome;
+        try {
+          outcome = await work();
+        } catch (error) {
+          if (!(/** @type {any} */ (error).nativePluginOperation)) throw error;
+          diagnostic = diagnoseResource(error, 'plugin').body;
+          return false;
+        }
         api.check();
         await plugins?.write(
           row,
@@ -353,7 +528,11 @@ export function catalogService(options) {
         });
         let actual = await host.observe(name);
         const proof = plugins?.read(row, name);
-        let ready = !plugins?.waiting(proof, row);
+        const previousFailure = plugins.readFailure(row);
+        diagnostic = plugins.failure(previousFailure, row);
+        if (!diagnostic && row.state === 'failed') continue;
+        recordedFailure = !!diagnostic;
+        let ready = !diagnostic && !plugins.waiting(proof, row);
         if (
           ready &&
           (!proof?.installed ||
@@ -368,7 +547,9 @@ export function catalogService(options) {
           api.check();
           if (ready)
             ready = await operation('install', true, () =>
-              host.install(bundle.file, name),
+              pluginProgress(row, 'installing_dependencies', (progress) =>
+                host.install(bundle.file, name, progress),
+              ),
             );
         }
         api.check();
@@ -377,9 +558,20 @@ export function catalogService(options) {
         if (!desktop.pluginBundle(who, row))
           refuse('resource.signature_invalid');
         actual = await host.observe(name);
-        if (ready && !actual?.enabled)
+        const retryInactive = !!(
+          previousFailure &&
+          actual?.enabled &&
+          !actual.active
+        );
+        if (ready && retryInactive) {
+          ready = await operation('disable', true, () =>
+            host.enable(name, false),
+          );
+          await checkSelection();
+        }
+        if (ready && (!actual?.enabled || retryInactive))
           ready = await operation('enable', true, () =>
-            host.enable(name, true),
+            pluginProgress(row, 'enabling', () => host.enable(name, true)),
           );
         actual = await host.observe(name);
         api.check();
@@ -390,11 +582,30 @@ export function catalogService(options) {
           actual.active === true &&
           actual.version === row.resource.identity.version
             ? 'applied'
-            : 'pending_restart';
+            : diagnostic
+              ? 'failed'
+              : ready
+                ? 'failed'
+                : 'pending_restart';
+        if (state === 'failed' && !diagnostic)
+          diagnostic = diagnoseResource(
+            resourceFailure(
+              'resource.apply_failed',
+              'plugin_not_active',
+              'plugin',
+            ),
+            'plugin',
+          ).body;
       } else {
         name = /** @type {string} */ (desktop.pluginName(who, row));
         const proof = plugins?.read(row, name);
-        let ready = !plugins?.waiting(proof, row);
+        if (
+          desiredState(row.resource) !== 'ENABLED' &&
+          !['expired', 'revoked'].includes(local.state)
+        )
+          diagnostic = plugins.failure(plugins.readFailure(row), row);
+        recordedFailure = !!diagnostic;
+        let ready = !diagnostic && !plugins.waiting(proof, row);
         const actual = await host.observe(name);
         if (ready && actual?.enabled)
           ready = await operation('disable', proof?.installed === true, () =>
@@ -409,28 +620,20 @@ export function catalogService(options) {
           ready = await operation('remove', false, () => host.remove(name));
         const observed = await host.observe(name);
         if (
+          diagnostic ||
           !ready ||
           observed?.enabled ||
           (desiredState(row.resource) === 'REMOVED' && observed?.installed)
         )
-          state = 'pending_restart';
+          state = diagnostic || ready ? 'failed' : 'pending_restart';
       }
-      const report = {
-        clientId: who.hostId,
-        identity: row.resource.identity,
-        installationRevision: row.installationRevision,
-        selectionRevision: row.selectionRevision,
-        generation: row.generation,
-        observedGeneration: row.generation,
-        state,
-        reportSource: 'member',
-        observedAt: new Date().toISOString(),
-        ...(['failed', 'expired', 'revoked'].includes(state)
-          ? { errorCode: 'resource.apply_failed' }
-          : {}),
-      };
+      const report = pluginReport(row, state);
       api.check();
       await checkSelection();
+      if (diagnostic) {
+        await recordPluginFailure(row, 'host', diagnostic, recordedFailure);
+        continue;
+      }
       if (row.state !== state) await api.report(report);
       if (state === 'applied' && local.state !== 'applied')
         desktop.acknowledge(who, report);
@@ -684,6 +887,10 @@ export function catalogService(options) {
   return {
     who,
     cloud,
+    pluginOperation() {
+      api.check();
+      return activePlugin ?? null;
+    },
     async list() {
       return serial(async () => {
         let pendingRestart = false;
@@ -722,11 +929,13 @@ export function catalogService(options) {
           personal,
           synchronized;
         try {
+          if (!cloud && desktop) await restorePreparationFailures(items);
+          let candidates = preparationCandidates(items);
           try {
-            waiting = !!(!cloud && desktop?.awaitingGuardian(who, items));
+            waiting = !!(!cloud && desktop?.awaitingGuardian(who, candidates));
           } catch (error) {
             if (!(/** @type {any} */ (error).guardianWaitExpired)) throw error;
-            desktop?.failGuardianWait(who, items);
+            desktop?.failGuardianWait(who, candidates);
             waitExpired = true;
           }
           if (!waiting && !waitExpired) {
@@ -739,13 +948,15 @@ export function catalogService(options) {
             if (
               !cloud &&
               !pendingRestart &&
-              desktop?.needsPreparation(who, items)
+              desktop?.needsPreparation(who, candidates)
             ) {
-              await prepareRows(items);
-              await finish();
+              const prepared = await prepareRows(items);
+              candidates = prepared.candidates;
+              pendingRestart = prepared.restartRequired === true;
+              if (candidates.length) await finish();
             }
             await syncPlugins(items);
-            waiting = !!(!cloud && desktop?.awaitingGuardian(who, items));
+            waiting = !!(!cloud && desktop?.awaitingGuardian(who, candidates));
           }
           personal = await enforcePersonalPolicy();
           if (!waiting) synchronized = await syncReports(items);
@@ -755,7 +966,14 @@ export function catalogService(options) {
               ?.installations.some(
                 (/** @type {any} */ r) =>
                   desiredState(r.resource) === 'ENABLED' &&
-                  r.state === 'applying',
+                  r.state === 'applying' &&
+                  (r.resource.identity.kind !== 'plugin' ||
+                    !items.some(
+                      (item) =>
+                        item.resource.identity.packageId ===
+                          r.resource.identity.packageId &&
+                        item.state !== 'applying',
+                    )),
               );
         } catch (error) {
           if (/** @type {any} */ (error).hostLockOccupied !== true) throw error;
@@ -765,7 +983,7 @@ export function catalogService(options) {
         personal ??= await enforcePersonalPolicy();
         synchronized ??= {
           items: items.map((r) =>
-            desiredState(r.resource) === 'ENABLED'
+            desiredState(r.resource) === 'ENABLED' && !r.pluginFailure
               ? { ...r, state: 'applying' }
               : r,
           ),
@@ -812,8 +1030,8 @@ export function catalogService(options) {
         throw error;
       }
     },
-    /** @param {{packageId:string,versionId:string,action:string,revision:number,key:string,confirmation?:string}} input */
-    apply(input) {
+    /** @param {{packageId:string,versionId:string,action:string,revision:number,key:string,confirmation?:string}} input @param {boolean} [deferPlugin] */
+    apply(input, deferPlugin = false) {
       return serial(async () => {
         fastFollow = true;
         nextRefresh = now() + 1000;
@@ -938,19 +1156,18 @@ export function catalogService(options) {
         retryAfter = 0;
         if (cloud) return { installation: row, accepted: true, cloud: true }; // D alone downloads and materializes cloud files.
         desktop?.switchIdentity(who);
+        if (
+          deferPlugin &&
+          identity.kind === 'plugin' &&
+          ['install', 'enable'].includes(input.action)
+        )
+          return { installation: row, accepted: true, cloud: false };
         const rows = await api.list();
         if (
           input.action === 'remove' &&
           !rows.some((r) => r.resource.identity.packageId === input.packageId)
         )
           rows.push(row);
-        for (const candidate of rows)
-          if (
-            candidate.resource.identity.packageId === input.packageId &&
-            desiredState(candidate.resource) !== 'ENABLED'
-          )
-            candidate.state =
-              input.action === 'remove' ? 'removed' : 'disabled';
         if (
           !rows.some(
             (r) =>
@@ -960,10 +1177,25 @@ export function catalogService(options) {
         )
           refuse('common.conflict');
         try {
-          await prepareRows(rows);
+          const { candidates } = await prepareRows(rows);
+          const selected = rows.find(
+            (item) => item.resource.identity.packageId === input.packageId,
+          );
+          if (selected?.pluginFailure || !candidates.length)
+            return {
+              installation: selected?.pluginFailure ? selected : row,
+              accepted: true,
+              cloud: false,
+            };
           await finish();
         } catch (error) {
           if (!occupied(error)) throw error;
+          if (identity.kind === 'plugin')
+            throw resourceFailure(
+              'resource.storage_unavailable',
+              'storage_unavailable',
+              'storage',
+            );
           await api.report({
             clientId: who.hostId,
             identity: row.resource.identity,

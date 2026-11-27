@@ -63,6 +63,36 @@ const hints: Record<string, [string, string]> = {
     '本机应用资源失败。请刷新确认安装状态，并检查客户端诊断日志。',
     'The resource could not be applied locally. Refresh its state and check client diagnostic logs.',
   ],
+  plugin_install_network: [
+    '依赖下载失败，请检查安装源和代理。',
+    'Dependency download failed. Check the registry and proxy.',
+  ],
+  plugin_install_timeout: [
+    '安装超时，请检查网络。',
+    'Install timed out. Check your connection.',
+  ],
+  plugin_install_dependency: [
+    '安装源缺少所需的依赖版本。',
+    'The registry is missing a required dependency version.',
+  ],
+  plugin_install_disk_full: ['磁盘空间不足。', 'The disk is full.'],
+  plugin_install_permission: [
+    '没有插件目录写入权限。',
+    'Cannot write to the plugin directory.',
+  ],
+  plugin_install_build_blocked: [
+    '依赖安装脚本未经批准。',
+    'A dependency install script requires approval.',
+  ],
+  plugin_install_incompatible: [
+    '插件不兼容此 DSH 版本。',
+    'Incompatible DSH version.',
+  ],
+  plugin_install_cancelled: ['安装已取消。', 'Install cancelled.'],
+  plugin_not_active: [
+    'DSH 未确认插件加载，请查看日志。',
+    'DSH could not confirm plugin activation.',
+  ],
   internal_error: [
     '操作未完成。请刷新确认状态；若仍失败，请将关联编号提供给管理员查询客户端日志。',
     'The operation did not complete. Refresh its state; if this persists, give the trace ID to an administrator to check client logs.',
