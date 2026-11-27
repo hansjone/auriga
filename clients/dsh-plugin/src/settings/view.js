@@ -290,6 +290,10 @@ export function createSettingsView(
   },
 ) {
   const h = React.createElement;
+  const useRef = (/** @type {any} */ initial) =>
+    typeof React.useRef === 'function'
+      ? React.useRef(initial)
+      : React.useState({ current: initial })[0];
   function useReceiveSettings(
     /** @type {{t:typeof messages.zh,account:any,revision:number}} */ {
       t,
@@ -866,7 +870,7 @@ export function createSettingsView(
       rules: proxy.rules ?? [],
       source: proxy.source ?? '',
     });
-    const lastSyncedRef = React.useRef(proxyFingerprint);
+    const lastSyncedRef = useRef(proxyFingerprint);
     React.useEffect(() => {
       if (dirty || proxyFingerprint === lastSyncedRef.current) return;
       lastSyncedRef.current = proxyFingerprint;
@@ -1196,8 +1200,8 @@ export function createSettingsView(
             ? t.loadNetwork
             : (t[/** @type {keyof typeof t} */ (error.message)] ??
               t.unavailable);
-    const stateSeqRef = React.useRef(0);
-    const writeInFlightRef = React.useRef(0);
+    const stateSeqRef = useRef(0);
+    const writeInFlightRef = useRef(0);
     const readState = async () => {
       const seq = ++stateSeqRef.current;
       const next = await call('auriga/settings/state');
