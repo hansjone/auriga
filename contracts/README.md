@@ -60,7 +60,7 @@
 | 浏览器（管理台，独立Origin） | cookie `__Host-auriga_admin_session` | 同上，仅管理入口消费。edge按受信listener及完整scheme/authority映射tenant/audience，不接受客户端指定；IP两端口不隔离cookie，转实例前必须剥离 |
 | 门户和domain管理台的写请求 | cookie `__Host-auriga_csrf` + 请求头 `X-Auriga-CSRF` | `POST` / `PUT` / `PATCH` / `DELETE`时头等于cookie，且SHA-256等于会话csrfHash；同时校完整Origin |
 | IP管理台的写请求（IP0，待实现） | 仅内存CSRF token + `X-Auriga-CSRF` | 精确同源POST登记，IAM存最多32条15分钟hash，管理写逐次内部RPC核权威会话；不下发可读CSRF cookie、不退回旧csrfHash。接口、重试/并发/到期见deployment/README.md |
-| edge → 业务服务 | `Authorization: Bearer <访问令牌>` | edge 校验会话后换成 iam 签发的访问令牌（JWT，5 分钟，见 `auth/access-token.schema.json`）。业务服务只认 Bearer，不认 cookie |
+| edge → 业务服务 | `Authorization: Bearer <访问令牌>` | edge 校验会话后换成 iam 签发的访问令牌（JWT，最长 3 天，见 `auth/access-token.schema.json`）。业务服务只认 Bearer，不认 cookie |
 | 服务账号、外部系统 | OAuth 2.0 client credentials 换到的访问令牌 | `ptyp=service_account`、`ctx=service`；角色由 org 的角色绑定管理 |
 | 服务 → 服务（gRPC） | 元数据 `authorization: Bearer <内部服务令牌>` | 内部服务令牌：`aud` 只有 `auriga.internal`、`ptyp=internal_service`、`ctx=service`、`sub=svc:<服务名>`，iam 只发给平台内置服务（安装时配置的凭据，不经 org 的服务账号）。gRPC 只接受这种令牌，外部 client credentials 令牌一律拒绝。代租户调用用元数据 `auriga-tenant-id`，被调方按配置的 `sub` 白名单决定谁可以代哪些租户。合并部署时是本地调用，不经过网络；分开部署时必须 mTLS，没配 TLS 只能绑回环地址 |
 | DSH 实例 → 平台 | `Authorization: Bearer ait_…`（实例令牌） | 不透明，每实例一个，可吊销；edge 原样转给 workspace 校验 |

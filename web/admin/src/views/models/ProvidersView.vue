@@ -34,6 +34,7 @@ import {
 } from './poolCapabilities';
 const importProvider = ref(''),
   poolSearch = ref(''),
+  poolGroupFilter = ref(''),
   capabilityNotice = ref('');
 const importSession = ref(0),
   importRunning = ref(false);
@@ -211,6 +212,8 @@ function modelChanged(model: string) {
 const freshPool = (): RelayPool => ({
   id: '',
   enabled: true,
+  audience: 'both',
+  group: '',
   contextWindow: 0,
   maxOutputTokens: 0,
   capabilities: {
@@ -231,7 +234,7 @@ const freshPool = (): RelayPool => ({
 });
 async function load() {
   poolsReady.value = false;
-  if (draft.value?.id === 'auto' && !unresolved.value) {
+  if (draft.value?.id === 'auriga' && !unresolved.value) {
     close();
     pending.value = undefined;
   }
@@ -312,11 +315,13 @@ function editProvider(row?: RelayProvider) {
 }
 function editPool(row?: RelayPool) {
   if (!canPrepare()) return;
-  // A failed or in-flight snapshot never proves that auto is absent.
+  // A failed or in-flight snapshot never proves that auriga is absent.
   if (!poolsReady.value || loading.value) return;
   close();
   selected.value = row?.id ?? '';
   draft.value = row ? globalThis.structuredClone(row) : freshPool();
+  draft.value.audience ??= row?.id === 'auriga' ? 'member' : 'both';
+  draft.value.group ??= '';
   draft.value.capabilities ??= createCapabilityPolicy(draft.value, 'manual');
   editor.value = 'pool';
 }
@@ -369,9 +374,17 @@ function askPool() {
     capabilityNotice.value = t('capabilityRefreshPending');
     return;
   }
-  if (draft.value.id === 'auto' && (!poolsReady.value || loading.value)) return;
-  const createOnly = draft.value.id === 'auto' && !selected.value;
+  if (draft.value.id === 'auriga' && (!poolsReady.value || loading.value)) return;
+  if (bodyIdBlocked(draft.value.id)) {
+    error.value = t('invalid');
+    return;
+  }
   const body = JSON.parse(JSON.stringify(draft.value)) as RelayPool;
+  body.audience ??= body.id === 'auriga' ? 'member' : 'both';
+  if (body.group !== undefined) {
+    body.group = body.group.trim();
+    if (!body.group) delete body.group;
+  }
   normalizeBlankCapabilities(body);
   body.routes.forEach((route) => {
     route.model = route.model.trim();
@@ -395,16 +408,20 @@ function askPool() {
     body.price.inputMicrosPerMillionTokens,
     body.price.outputMicrosPerMillionTokens,
   ];
+  const emptyAuriga = body.id === 'auriga' && body.routes.length === 0;
   if (
     !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(body.id) ||
+    !['member', 'external', 'both'].includes(body.audience) ||
+    (body.group !== undefined &&
+      !/^[A-Za-z0-9][A-Za-z0-9._\- ]{0,63}$/.test(body.group)) ||
     !validCapabilityPolicy(body) ||
     ints.some((v) => !Number.isSafeInteger(v) || v < 0) ||
     body.contextWindow === 1 ||
     (body.contextWindow > 0 && body.maxOutputTokens >= body.contextWindow) ||
     body.price.inputMicrosPerMillionTokens < 1 ||
     body.price.outputMicrosPerMillionTokens < 1 ||
-    body.routes.length < 1 ||
     body.routes.length > 8 ||
+    (!emptyAuriga && body.routes.length < 1) ||
     body.routes.some(
       (r) =>
         !r.providerId ||
@@ -412,11 +429,12 @@ function askPool() {
         !Number.isFinite(r.weight) ||
         r.weight < 0,
     ) ||
-    body.routes.every((r) => r.weight === 0)
+    (!emptyAuriga && body.routes.every((r) => r.weight === 0))
   ) {
     error.value = t('invalid');
     return;
   }
+  const createOnly = body.id === 'auriga' && !selected.value;
   pending.value = writeIntent.createAction(
     'ai.providers.write',
     t('confirmSave', { name: body.id }),
@@ -428,19 +446,44 @@ function askPool() {
     load,
   );
 }
+function bodyIdBlocked(id: string) {
+  return id === 'auto';
+}
+const poolGroups = computed(() =>
+  [
+    ...new Set(
+      pools.value
+        .map((pool) => pool.group?.trim())
+        .filter((value): value is string => !!value),
+    ),
+  ].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' })),
+);
 const visiblePools = computed(() => {
   const query = poolSearch.value.toLowerCase();
-  return pools.value.filter((pool) =>
-    [
+  const group = poolGroupFilter.value;
+  return pools.value.filter((pool) => {
+    if (group && (pool.group?.trim() ?? '') !== group) return false;
+    return [
       pool.id,
+      pool.group ?? '',
+      pool.audience ?? '',
       ...pool.routes.flatMap((r) => [
         r.model,
         providers.value.find((p) => p.id === r.providerId)?.configuration
           .name ?? '',
       ]),
-    ].some((value) => value.toLowerCase().includes(query)),
-  );
+    ].some((value) => value.toLowerCase().includes(query));
+  });
 });
+function audienceLabel(pool: RelayPool) {
+  return t(
+    pool.audience === 'member'
+      ? 'audienceMember'
+      : pool.audience === 'external'
+        ? 'audienceExternal'
+        : 'audienceBoth',
+  );
+}
 function openImport(row: RelayProvider) {
   if (importRunning.value || !canPrepare()) return;
   close();
@@ -722,6 +765,15 @@ async function confirm() {
         type="search"
         :placeholder="t('publicSearch')"
     /></label>
+    <label class="relay-search"
+      >{{ t('poolGroup')
+      }}<select v-model="poolGroupFilter" name="poolGroupFilter">
+        <option value="">{{ t('poolGroupAll') }}</option>
+        <option v-for="group in poolGroups" :key="group" :value="group">
+          {{ group }}
+        </option>
+      </select></label
+    >
     <p v-if="!pools.length && !loading">{{ t('modelEmpty') }}</p>
     <div class="usage-table">
       <table>
@@ -729,6 +781,8 @@ async function confirm() {
           <tr>
             <th>{{ t('poolId') }}</th>
             <th>{{ t('status') }}</th>
+            <th>{{ t('audience') }}</th>
+            <th>{{ t('poolGroup') }}</th>
             <th>{{ t('routes') }}</th>
             <th>{{ t('capabilityColumn') }}</th>
             <th>{{ t('edit') }}</th>
@@ -739,7 +793,7 @@ async function confirm() {
             <td class="relay-strong">
               {{ pool.id
               }}<span
-                v-if="pool.id === 'auto'"
+                v-if="pool.id === 'auriga'"
                 class="relay-badge relay-default"
                 >{{ t('defaultPool') }}</span
               >
@@ -751,7 +805,12 @@ async function confirm() {
                 >{{ t(pool.enabled ? 'enabled' : 'disabled') }}</span
               >
             </td>
+            <td>{{ audienceLabel(pool) }}</td>
+            <td>{{ pool.group || '—' }}</td>
             <td>
+              <p v-if="!pool.routes.length" class="relay-wide">
+                {{ t('emptyRoutes') }}
+              </p>
               <div
                 v-for="route in pool.routes"
                 :key="JSON.stringify([route.providerId, route.model])"
@@ -818,12 +877,15 @@ async function confirm() {
         <fieldset :disabled="busy || !!pending || !!unresolved">
           <legend>{{ t('pools') }}</legend>
           <p>{{ t('aliasNote') }}</p>
+          <p v-if="draft.id === 'auriga' && !draft.routes.length">
+            {{ t('emptyAurigaHint') }}
+          </p>
           <label
             >{{ t('poolId')
             }}<input
               v-model="draft.id"
               name="poolId"
-              :disabled="!!selected"
+              :disabled="!!selected || draft.id === 'auriga'"
               pattern="[A-Za-z0-9][A-Za-z0-9._-]{0,127}"
               required /></label
           ><label
@@ -832,7 +894,22 @@ async function confirm() {
               name="poolEnabled"
               type="checkbox"
             />{{ t('enabled') }}</label
-          >
+          ><label
+            >{{ t('audience')
+            }}<select v-model="draft.audience" name="poolAudience" required>
+              <option value="member">{{ t('audienceMember') }}</option>
+              <option value="external">{{ t('audienceExternal') }}</option>
+              <option value="both">{{ t('audienceBoth') }}</option>
+            </select></label
+          ><label
+            >{{ t('poolGroup')
+            }}<input
+              v-model="draft.group"
+              name="poolGroup"
+              maxlength="64"
+              pattern="[A-Za-z0-9][A-Za-z0-9._\- ]{0,63}"
+              :placeholder="t('poolGroupPlaceholder')"
+          /></label>
           <PoolCapabilitiesEditor
             v-model="draft"
             :providers="providers"

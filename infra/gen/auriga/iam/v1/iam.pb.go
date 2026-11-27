@@ -555,7 +555,7 @@ type VerifyDeviceAiAccessResponse struct {
 	AccountId string `protobuf:"bytes,3,opt,name=account_id,json=accountId,proto3" json:"account_id,omitempty"`
 	DeviceId  string `protobuf:"bytes,4,opt,name=device_id,json=deviceId,proto3" json:"device_id,omitempty"`
 	// Minimum of the AI JWT and current backing deadlines; future at completion.
-	// Managed model keys receive at most a 300-second lease, never their full 30-day lifetime.
+	// Managed model keys receive at most a 3-day lease, never their full 30-day lifetime.
 	ExpiresAt     *timestamppb.Timestamp `protobuf:"bytes,5,opt,name=expires_at,json=expiresAt,proto3" json:"expires_at,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache

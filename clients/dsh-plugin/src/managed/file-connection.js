@@ -330,7 +330,7 @@ export async function createManagedFileConnection(options) {
           result.scope !== 'auriga.connect' ||
           !Number.isSafeInteger(result.expires_in) ||
           result.expires_in < 1 ||
-          result.expires_in > 300
+          result.expires_in > 259200
         )
           throw fail();
         const claims = await platform.verifyDevice(result.access_token, {
@@ -338,7 +338,7 @@ export async function createManagedFileConnection(options) {
           sub: material.ownerId,
           did: material.deviceId,
         });
-        if (claims.exp - claims.iat > 300 || claims.exp <= claims.iat)
+        if (claims.exp - claims.iat > 259200 || claims.exp <= claims.iat)
           throw fail();
         if (closed || expected !== generation || !currentMaterial()) return;
         const until = Math.min(

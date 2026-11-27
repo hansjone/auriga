@@ -19,7 +19,7 @@ RelayPool容量为给客户端的能力信息，0表示未知，公开目录省�
 
 - 管理面只接受 `aud=auriga/ctx=admin`，每操作显式权限；敏感操作要求 `stepup_time` 在 600 秒内。
   门户令牌必须剔除 `catalog/m3.json` 的全部 `adminOnly` 权限，不能仅按 key 后缀猜测。
-- 数据面只接受单一 AI audience 的 `at+jwt/ES256`，最长 300 秒。
+- 数据面只接受单一 AI audience 的 `at+jwt/ES256`，最长 3 天。
   `instance/ptyp=user` 的 `sub` 是主人，`instanceId/credentialVersion` 必填，
   `perms` 是主人有效权限与 `{ai.models.invoke,ai.usage.read}` 的交集，不能从 roles 再扩权。
   `device/ptyp=device` 必须有 `did`，仍仅用 `auriga.connect.*`；

@@ -296,7 +296,7 @@ func validatePoolConfig(row poolProfileRow) error {
 		"tools":                     {"mode": "native", "maxParallelSubCalls": 1},
 		"agent-loop":                {"agents": []any{}, "maxParallelToolCalls": 1},
 		"agent-preset-registry":     {"default": "auriga-shared"},
-		"agent-default-model":       {"provider": "auriga-shared", "model": "auto"},
+		"agent-default-model":       {"provider": "auriga-shared", "model": "auriga"},
 		"skill-filesystem":          {"providerName": "auriga-shared", "includeDefaultRoots": false, "customSkillDirs": []any{"/run/auriga/skills-active/current"}},
 		"credentials-local":         {"path": "/home/dsh/.host/.dsh/shared-host-credentials.yaml", "watch": false},
 		"client-connection":         {"trustedHosts": []any{}},

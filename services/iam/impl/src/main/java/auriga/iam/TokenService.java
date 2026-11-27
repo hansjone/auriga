@@ -12,6 +12,9 @@ import tools.jackson.databind.node.ObjectNode;
 
 public final class TokenService
     implements InternalTokenIssuer, auriga.iam.api.CredentialMetadataSource {
+  /** Max platform/AI access JWT and managed-model verification lease; capped by backing expiry. */
+  static final long ACCESS_TTL_SECONDS = Duration.ofDays(3).toSeconds();
+
   private final java.util.concurrent.ConcurrentMap<
           String, auriga.iam.api.CredentialMetadataSource.Entry>
       credentialMetadata = new java.util.concurrent.ConcurrentHashMap<>();
@@ -242,7 +245,7 @@ public final class TokenService
       String memberType) {
     ObjectNode claims =
         base(UUID.fromString(identity.tenant()), identity.account(), audience, "device", "device");
-    Instant expiry = clock.instant().plusSeconds(300);
+    Instant expiry = clock.instant().plusSeconds(ACCESS_TTL_SECONDS);
     if (identity.expiresAt().isBefore(expiry)) expiry = identity.expiresAt();
     expiry = expiry.truncatedTo(java.time.temporal.ChronoUnit.SECONDS);
     IamError.require(clock.instant().isBefore(expiry), "invalid_grant", 400);
@@ -284,7 +287,7 @@ public final class TokenService
                     .contains(p));
     claims.set(
         "perms", Json.MAPPER.valueToTree(devicePermissions(granted).stream().sorted().toList()));
-    Instant expiry = clock.instant().plusSeconds(300);
+    Instant expiry = clock.instant().plusSeconds(ACCESS_TTL_SECONDS);
     if (expiresAt.isBefore(expiry)) expiry = expiresAt;
     claims.put("exp", expiry.getEpochSecond());
     return new IssuedToken(signAccess(claims), expiry);
@@ -299,7 +302,7 @@ public final class TokenService
     if (!effective.contains(DeviceAiResource.INVOKE)) return null;
     long expiry =
         Math.min(
-            clock.instant().plusSeconds(300).getEpochSecond(),
+            clock.instant().plusSeconds(ACCESS_TTL_SECONDS).getEpochSecond(),
             identity.expiresAt().getEpochSecond());
     if (expiry <= clock.instant().getEpochSecond()) return null;
     ObjectNode claims =
@@ -352,7 +355,7 @@ public final class TokenService
         "nbf",
         now,
         "exp",
-        now + 300,
+        now + ACCESS_TTL_SECONDS,
         "jti",
         Secrets.random(),
         "tid",

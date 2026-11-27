@@ -13,7 +13,7 @@ IAM 保存散列和按 tenant/instance/version 作 AAD 的加密副本，以支�
 - `credential`：43 字符 base64url 随机机密。
 
 租户由原可信 edge hop/部署入口选择，不能用表单声明。未知字段拒绝。
-响应沿 OAuth token 结构：access_token、token_type=Bearer、scope=auriga.connect、expires_in（最大300秒）。
+响应沿 OAuth token 结构：access_token、token_type=Bearer、scope=auriga.connect、expires_in（最大3天）。
 只授予 `auriga.connect.collab.use`，不含模型、管理员、普通用户或实例权限。
 无效绑定/成员/凭据、已吊销或已到期返回 `common.forbidden`；依赖不可用失败关闭。
 所有响应 no-store。不在日志输出表单或令牌。只有凭据核验失败才计入5分钟失败桶：实例60、租户3000、

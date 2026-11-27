@@ -21,9 +21,15 @@ var _ MappedNullable = &RelayPool{}
 
 // RelayPool struct for RelayPool
 type RelayPool struct {
-	Id      string       `json:"id" validate:"regexp=^[A-Za-z0-9][A-Za-z0-9._-]{0\\,127}$"`
-	Enabled bool         `json:"enabled"`
-	Routes  []RelayRoute `json:"routes"`
+	// 公开模型 ID。固定 ID auriga 为 DSH 默认内置模型；允许空路由占位，绑上游前调用会明确失败。
+	Id      string `json:"id" validate:"regexp=^[A-Za-z0-9][A-Za-z0-9._-]{0\\,127}$"`
+	Enabled bool   `json:"enabled"`
+	// 上游路由。固定池 auriga 允许空数组作为未绑定占位；非空时总权重须大于 0。其它池保存时至少一条正权重路由。
+	Routes []RelayRoute `json:"routes"`
+	// 成员可见性。member：仅成员目录（成员 Key 的 * 展开）；external：仅对外 Key 显式勾选；both：两者。缺省按 both。内置 auriga 默认 member。
+	Audience *string `json:"audience,omitempty"`
+	// 管理用组别，仅筛选归类，不参与鉴权。
+	Group *string `json:"group,omitempty" validate:"regexp=^[A-Za-z0-9][A-Za-z0-9._\\- ]{0\\,63}$"`
 	// 上下文能力为0（未知）或至少2的安全整数，供客户端压缩与请求参数使用，不是中转裁限；可显式从上游目录更新，公开目录省略未知值。
 	ContextWindow int64 `json:"contextWindow"`
 	// 模型能力信息，供客户端压缩与请求参数使用，不是中转裁限；0表示未知；可显式从上游目录更新，公开目录省略未知值。
@@ -43,6 +49,8 @@ func NewRelayPool(id string, enabled bool, routes []RelayRoute, contextWindow in
 	this.Id = id
 	this.Enabled = enabled
 	this.Routes = routes
+	var audience string = "both"
+	this.Audience = &audience
 	this.ContextWindow = contextWindow
 	this.MaxOutputTokens = maxOutputTokens
 	this.Price = price
@@ -54,6 +62,8 @@ func NewRelayPool(id string, enabled bool, routes []RelayRoute, contextWindow in
 // but it doesn't guarantee that properties required by API are set
 func NewRelayPoolWithDefaults() *RelayPool {
 	this := RelayPool{}
+	var audience string = "both"
+	this.Audience = &audience
 	return &this
 }
 
@@ -127,6 +137,70 @@ func (o *RelayPool) GetRoutesOk() ([]RelayRoute, bool) {
 // SetRoutes sets field value
 func (o *RelayPool) SetRoutes(v []RelayRoute) {
 	o.Routes = v
+}
+
+// GetAudience returns the Audience field value if set, zero value otherwise.
+func (o *RelayPool) GetAudience() string {
+	if o == nil || IsNil(o.Audience) {
+		var ret string
+		return ret
+	}
+	return *o.Audience
+}
+
+// GetAudienceOk returns a tuple with the Audience field value if set, nil otherwise
+// and a boolean to check if the value has been set.
+func (o *RelayPool) GetAudienceOk() (*string, bool) {
+	if o == nil || IsNil(o.Audience) {
+		return nil, false
+	}
+	return o.Audience, true
+}
+
+// HasAudience returns a boolean if a field has been set.
+func (o *RelayPool) HasAudience() bool {
+	if o != nil && !IsNil(o.Audience) {
+		return true
+	}
+
+	return false
+}
+
+// SetAudience gets a reference to the given string and assigns it to the Audience field.
+func (o *RelayPool) SetAudience(v string) {
+	o.Audience = &v
+}
+
+// GetGroup returns the Group field value if set, zero value otherwise.
+func (o *RelayPool) GetGroup() string {
+	if o == nil || IsNil(o.Group) {
+		var ret string
+		return ret
+	}
+	return *o.Group
+}
+
+// GetGroupOk returns a tuple with the Group field value if set, nil otherwise
+// and a boolean to check if the value has been set.
+func (o *RelayPool) GetGroupOk() (*string, bool) {
+	if o == nil || IsNil(o.Group) {
+		return nil, false
+	}
+	return o.Group, true
+}
+
+// HasGroup returns a boolean if a field has been set.
+func (o *RelayPool) HasGroup() bool {
+	if o != nil && !IsNil(o.Group) {
+		return true
+	}
+
+	return false
+}
+
+// SetGroup gets a reference to the given string and assigns it to the Group field.
+func (o *RelayPool) SetGroup(v string) {
+	o.Group = &v
 }
 
 // GetContextWindow returns the ContextWindow field value
@@ -246,6 +320,12 @@ func (o RelayPool) ToMap() (map[string]interface{}, error) {
 	toSerialize["id"] = o.Id
 	toSerialize["enabled"] = o.Enabled
 	toSerialize["routes"] = o.Routes
+	if !IsNil(o.Audience) {
+		toSerialize["audience"] = o.Audience
+	}
+	if !IsNil(o.Group) {
+		toSerialize["group"] = o.Group
+	}
 	toSerialize["contextWindow"] = o.ContextWindow
 	toSerialize["maxOutputTokens"] = o.MaxOutputTokens
 	if !IsNil(o.Capabilities) {

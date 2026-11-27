@@ -34,7 +34,7 @@ refresh grant 和真实设备都必须来自 `authorizationMode=native_tx`，绑
 }
 ```
 
-`expires_in` 为实际剩余整数秒，正数且不超过 300；示例不是固定寿命。
+`expires_in` 为实际剩余整数秒，正数且不超过 3 天（259200 秒）；示例不是固定寿命。
 JWT 复用 IAM 当前 ES256 签名器和 JWKS，JOSE `typ=at+jwt`、带 `kid`。
 claims：`iss` 为当前 issuer，`sub/tid` 为真实账号/租户，`aud` 为唯一字符串
 `auriga.ai-gateway`，`ptyp=device`、`ctx=device`、`did` 为真实设备 id、
@@ -42,7 +42,7 @@ claims：`iss` 为当前 issuer，`sub/tid` 为真实账号/租户，`aud` 为�
 没有该权限则拒绝，不从 roles 扩权，不包含 collab、admin、instance 权限或 `sid/instanceId`。
 `mtyp` 取在线有效成员类型，`auth_time` 保留原登录时间。
 UAC 来源同时携带由 IAM 从已验证来源会话复制的 `uacSessionBinding`，与该设备的平台票及 refresh lineage 逐字段一致；非 UAC 来源省略。
-`exp` 不超过签发时间加 300 秒、当前门户会话绝对期限和 idle 期限的最小值。
+`exp` 不超过签发时间加 3 天、当前门户会话绝对期限和 idle 期限的最小值。
 AI 换票不更新绝对或 idle 期限。数据面每次准入仍须按 D1 在线核成员、设备、模型 ACL 和预算。
 
 ## 每次准入的专用在线核验
@@ -55,7 +55,7 @@ AI 换票不更新绝对或 idle 期限。数据面每次准入仍须按 D1 在�
 此方法复用 IAM 验签、schema、issuer、`typ=at+jwt`、ES256 和 kid 校验，
 仅接受唯一 AI audience（字符串或单元素数组）、`ptyp/ctx=device`、规范 UUID 的
 `tid/sub/did`，权限恰为 `auriga.connect.models.invoke`；不接受非空 roles、sid 或实例身份。
-不依赖平台 `scope` 字段作为 AI 准入条件。显式检查 `exp>iat`、寿命不超过 300 秒，
+不依赖平台 `scope` 字段作为 AI 准入条件。显式检查 `exp>iat`、寿命不超过 3 天，
 `iat/nbf` 最多允许既有 30 秒未来时钟偏差；到期没有宽限。
 平台/Team、instance、服务票、`ait_`、坏签、宽 audience 或宽权限均不能混作设备 AI 票。
 

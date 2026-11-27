@@ -38,7 +38,7 @@ type DeviceAccessServiceClient interface {
 	VerifyDeviceAccess(ctx context.Context, in *VerifyDeviceAccessRequest, opts ...grpc.CallOption) (*VerifyDeviceAccessResponse, error)
 	// Only svc:ai-gateway with an internal service JWT, a delegated non-platform
 	// tenant and the existing authenticated internal transport. Accepts only the
-	// single-AI-audience device JWT (at+jwt/ES256, <=300s) or the independent
+	// single-AI-audience device JWT (at+jwt/ES256, <=3d) or the independent
 	// managed model key (auth/managed-model.md), never a platform/Team,
 	// instance, service token or ait_. Online checks current member/model-invoke
 	// permission plus device/account/backing session; no idle touch or refresh use.
@@ -51,7 +51,7 @@ type DeviceAccessServiceClient interface {
 	VerifyDeviceCredential(ctx context.Context, in *VerifyDeviceCredentialRequest, opts ...grpc.CallOption) (*VerifyDeviceCredentialResponse, error)
 	// Standard RFC8628 lineage only; additive to the native/model-only RPCs.
 	// Only svc:ai-gateway with delegated non-platform tenant and authenticated
-	// internal transport. Verify at+jwt/ES256, exact AI audience, <=300s lifetime,
+	// internal transport. Verify at+jwt/ES256, exact AI audience, <=3d lifetime,
 	// requested permission in signed AND current permissions, device/client/member
 	// and authoritative source binding/generation. Never touch idle or use refresh.
 	// Invalid => inactive/empty identity; dependency failure => UNAVAILABLE.
@@ -119,7 +119,7 @@ type DeviceAccessServiceServer interface {
 	VerifyDeviceAccess(context.Context, *VerifyDeviceAccessRequest) (*VerifyDeviceAccessResponse, error)
 	// Only svc:ai-gateway with an internal service JWT, a delegated non-platform
 	// tenant and the existing authenticated internal transport. Accepts only the
-	// single-AI-audience device JWT (at+jwt/ES256, <=300s) or the independent
+	// single-AI-audience device JWT (at+jwt/ES256, <=3d) or the independent
 	// managed model key (auth/managed-model.md), never a platform/Team,
 	// instance, service token or ait_. Online checks current member/model-invoke
 	// permission plus device/account/backing session; no idle touch or refresh use.
@@ -132,7 +132,7 @@ type DeviceAccessServiceServer interface {
 	VerifyDeviceCredential(context.Context, *VerifyDeviceCredentialRequest) (*VerifyDeviceCredentialResponse, error)
 	// Standard RFC8628 lineage only; additive to the native/model-only RPCs.
 	// Only svc:ai-gateway with delegated non-platform tenant and authenticated
-	// internal transport. Verify at+jwt/ES256, exact AI audience, <=300s lifetime,
+	// internal transport. Verify at+jwt/ES256, exact AI audience, <=3d lifetime,
 	// requested permission in signed AND current permissions, device/client/member
 	// and authoritative source binding/generation. Never touch idle or use refresh.
 	// Invalid => inactive/empty identity; dependency failure => UNAVAILABLE.
@@ -829,7 +829,7 @@ const (
 type InstanceAiTokenServiceClient interface {
 	// 只允许 svc:workspace 在授权委派租户内调用；org 有效成员检查失败关闭。
 	// perms 必须为主人有效权限与 {ai.models.invoke,ai.usage.read} 的交集，不携带管理角色。
-	// JWT: ptyp=user,ctx=instance,aud=auriga.ai-gateway,sub=owner_id；最大有效期 300 秒。
+	// JWT: ptyp=user,ctx=instance,aud=auriga.ai-gateway,sub=owner_id；最大有效期 3 天。
 	// common.unauthenticated/forbidden/not_found/unavailable，参数错误 common.validation_failed。
 	IssueInstanceAiToken(ctx context.Context, in *IssueInstanceAiTokenRequest, opts ...grpc.CallOption) (*IssueInstanceAiTokenResponse, error)
 }
@@ -860,7 +860,7 @@ func (c *instanceAiTokenServiceClient) IssueInstanceAiToken(ctx context.Context,
 type InstanceAiTokenServiceServer interface {
 	// 只允许 svc:workspace 在授权委派租户内调用；org 有效成员检查失败关闭。
 	// perms 必须为主人有效权限与 {ai.models.invoke,ai.usage.read} 的交集，不携带管理角色。
-	// JWT: ptyp=user,ctx=instance,aud=auriga.ai-gateway,sub=owner_id；最大有效期 300 秒。
+	// JWT: ptyp=user,ctx=instance,aud=auriga.ai-gateway,sub=owner_id；最大有效期 3 天。
 	// common.unauthenticated/forbidden/not_found/unavailable，参数错误 common.validation_failed。
 	IssueInstanceAiToken(context.Context, *IssueInstanceAiTokenRequest) (*IssueInstanceAiTokenResponse, error)
 	mustEmbedUnimplementedInstanceAiTokenServiceServer()

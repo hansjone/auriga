@@ -88,7 +88,7 @@
       "additionalProperties": false
     },
     "UserPermissionsChanged": {
-      "description": "type `user.permissions_changed`：角色绑定或所属组变化导致有效权限变化。iam 让该用户现有的访问令牌尽快刷新（不等 5 分钟过期）。",
+      "description": "type `user.permissions_changed`：角色绑定或所属组变化导致有效权限变化。iam 让该用户现有的访问令牌尽快刷新（不等自然过期）。",
       "type": "object",
       "properties": {
         "userId": { "type": "string", "format": "uuid" },

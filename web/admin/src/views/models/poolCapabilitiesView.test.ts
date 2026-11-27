@@ -38,7 +38,7 @@ const global = {
   },
 };
 const legacy = (): RelayPool => ({
-  id: 'auto',
+  id: 'auriga',
   enabled: true,
   contextWindow: 1000000,
   maxOutputTokens: 4096,

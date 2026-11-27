@@ -184,7 +184,7 @@ func (b *Backend) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 					return
 				}
 				for _, p := range pools.Items {
-					if p.Enabled && (slices.Contains(k.Models, "*") || slices.Contains(k.Models, p.Id)) {
+					if catalogAllows(k, p) {
 						data = append(data, publicModel(p))
 					}
 					page.After = p.Id
@@ -453,17 +453,21 @@ func (b *Backend) chat(w http.ResponseWriter, r *http.Request, tenant string, ke
 		reject(w, invalid)
 		return
 	}
+	if model == legacyDefaultPoolID {
+		model = defaultPoolID
+		fields["model"], _ = json.Marshal(model)
+	}
 	if v := fields["stream"]; v != nil && json.Unmarshal(v, &stream) != nil {
 		reject(w, invalid)
-		return
-	}
-	if !slices.Contains(key.Models, "*") && !slices.Contains(key.Models, model) {
-		reject(w, denied)
 		return
 	}
 	pool, routes, e := b.poolRoutes(r.Context(), tenant, model)
 	if e != nil {
 		reject(w, e)
+		return
+	}
+	if !chatAllows(key, pool) {
+		reject(w, denied)
 		return
 	}
 	if e = b.reconcileSubject(r.Context(), tenant, key.Id); e != nil {

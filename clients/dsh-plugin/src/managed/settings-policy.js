@@ -88,6 +88,12 @@ function managedModel(value) {
   )
     throw refuse();
 }
+const BUILTIN_MODEL_ID = 'auriga';
+const hasBuiltinModel = (/** @type {any[]} */ models) =>
+  models.some(
+    (model) => object(model) && model.id === BUILTIN_MODEL_ID,
+  );
+
 /** @param {any} value */
 function managedProvider(value) {
   if (
@@ -96,35 +102,51 @@ function managedProvider(value) {
   )
     throw refuse();
   if (Object.hasOwn(value, 'models')) {
-    if (!Array.isArray(value.models) || value.models.length > 256)
+    if (
+      !Array.isArray(value.models) ||
+      value.models.length > 256 ||
+      !hasBuiltinModel(value.models)
+    )
       throw refuse();
     value.models.forEach(managedModel);
   }
 }
-/** @param {any} op */
-function managedOperation(op) {
+/** @param {any} op @param {any} [current] */
+function managedOperation(op, current) {
   const path = op.path.slice(2);
   if (path[0] === 'displayName' && path.length === 1) return;
   if (path[0] !== 'models') throw refuse();
   if (path.length === 1) {
     if (op.op === 'set') managedProvider({ models: op.value });
+    if (op.op === 'unset') throw refuse();
     return;
   }
   if (!/^(0|[1-9][0-9]*)$/.test(path[1]) || Number(path[1]) > 255)
     throw refuse();
+  const index = Number(path[1]);
+  const existing = Array.isArray(current?.models)
+    ? current.models[index]
+    : undefined;
+  const touchingBuiltin =
+    object(existing) && existing.id === BUILTIN_MODEL_ID;
   if (path.length === 2) {
-    if (op.op === 'set') managedModel(op.value);
+    if (op.op === 'unset' && touchingBuiltin) throw refuse();
+    if (op.op === 'set') {
+      managedModel(op.value);
+      if (touchingBuiltin && op.value.id !== BUILTIN_MODEL_ID) throw refuse();
+    }
     return;
   }
+  if (touchingBuiltin && path[2] === 'id') throw refuse();
   if (!MODEL_FIELDS.has(path[2])) throw refuse();
   if (path.length > 3 && !['input', 'reasoningEfforts'].includes(path[2]))
     throw refuse();
 }
 
 /** Validate an entire write before delegating once; never partially apply ops.
- * @param {string} method @param {string} ns @param {any} input
+ * @param {string} method @param {string} ns @param {any} input @param {any} [managed]
  */
-function authorize(method, ns, input) {
+function authorize(method, ns, input, managed) {
   const fields = PERSONAL_FIELDS.get(ns);
   if (!fields && ns !== 'llm-pi-ai') throw refuse();
   safeValue(input);
@@ -157,7 +179,7 @@ function authorize(method, ns, input) {
       throw refuse();
     if (ns === 'llm-pi-ai') {
       if (op.path.length < 2 || op.path[0] !== 'providers') throw refuse();
-      if (op.path[1] === 'auriga-managed') managedOperation(op);
+      if (op.path[1] === 'auriga-managed') managedOperation(op, managed);
       if (
         op.op === 'set' &&
         op.path.at(-1) === 'apiKeyEnv' &&
@@ -206,7 +228,14 @@ export function guardManagedSettings(settings) {
     (method, args) => {
       // Native document editing bypasses per-field authorization altogether.
       if (method === 'prepareDocument') throw refuse();
-      authorize(method, args[0], args[1]);
+      let managed;
+      if (args[0] === 'llm-pi-ai' && typeof settings?.describe === 'function') {
+        const row = settings
+          .describe()
+          ?.namespaces?.find((/** @type {any} */ item) => item.ns === 'llm-pi-ai');
+        managed = row?.value?.providers?.['auriga-managed'];
+      }
+      authorize(method, args[0], args[1], managed);
     },
   );
 }

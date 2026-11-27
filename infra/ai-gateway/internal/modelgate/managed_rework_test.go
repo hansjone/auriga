@@ -10,11 +10,11 @@ import (
 func TestManagedIAMClockSkewBound(t *testing.T) {
 	s, a, _ := controlFixture(t)
 	s.raw = "amc." + tenant + "." + account + "." + account + "." + device + "." + strings.Repeat("a", 43)
-	s.verify.ExpiresAt = timestamppb.New(s.now.Add(303 * time.Second))
+	s.verify.ExpiresAt = timestamppb.New(s.now.Add(managedMaxLease + 3*time.Second))
 	if _, err := a.Check(t.Context(), s.raw); err != nil {
 		t.Fatal("IAM three seconds ahead must remain valid", err)
 	}
-	s.verify.ExpiresAt = timestamppb.New(s.now.Add(306 * time.Second))
+	s.verify.ExpiresAt = timestamppb.New(s.now.Add(managedMaxLease + 6*time.Second))
 	_, err := a.Check(t.Context(), s.raw)
 	wantCode(t, err, "common.unauthenticated")
 	s.verify.ExpiresAt = timestamppb.New(s.now)

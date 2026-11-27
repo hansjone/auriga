@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { modelDirectory } from '../../src/ai/catalog.js';
 
 const row = {
-  id: 'auto',
+  id: 'auriga',
   object: 'model',
   created: 0,
   owned_by: 'auriga',

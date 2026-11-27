@@ -415,7 +415,7 @@ public final class OAuthProvider {
         "token_type",
         "Bearer",
         "expires_in",
-        300,
+        TokenService.ACCESS_TTL_SECONDS,
         "scope",
         scope);
   }
@@ -532,7 +532,7 @@ public final class OAuthProvider {
             "expires_in",
             issued != null
                 ? issued.expiresAt().getEpochSecond() - clock.instant().getEpochSecond()
-                : 300,
+                : TokenService.ACCESS_TTL_SECONDS,
             "scope",
             scope);
     if (scopes(scope).contains("openid") && !device)

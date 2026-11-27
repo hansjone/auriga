@@ -10,7 +10,7 @@ import {
 
 const make = (): RelayPool => {
   const pool: RelayPool = {
-    id: 'auto',
+    id: 'auriga',
     enabled: true,
     contextWindow: 0,
     maxOutputTokens: 0,

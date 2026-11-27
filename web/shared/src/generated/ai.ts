@@ -741,9 +741,19 @@ export interface components {
       weight: number;
     };
     RelayPool: {
+      /** @description 公开模型 ID。固定 ID auriga 为 DSH 默认内置模型；允许空路由占位，绑上游前调用会明确失败。 */
       id: string;
       enabled: boolean;
+      /** @description 上游路由。固定池 auriga 允许空数组作为未绑定占位；非空时总权重须大于 0。其它池保存时至少一条正权重路由。 */
       routes: components['schemas']['RelayRoute'][];
+      /**
+       * @description 成员可见性。member：仅成员目录（成员 Key 的 * 展开）；external：仅对外 Key 显式勾选；both：两者。缺省按 both。内置 auriga 默认 member。
+       * @default both
+       * @enum {string}
+       */
+      audience: 'member' | 'external' | 'both';
+      /** @description 管理用组别，仅筛选归类，不参与鉴权。 */
+      group?: string;
       /**
        * Format: int64
        * @description 上下文能力为0（未知）或至少2的安全整数，供客户端压缩与请求参数使用，不是中转裁限；可显式从上游目录更新，公开目录省略未知值。

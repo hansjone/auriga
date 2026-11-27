@@ -17,7 +17,7 @@
 
 普通刷新不带 resource，继续得到 aud=auriga。AI 沿已有 refresh_token 请求加唯一 `resource=urn:auriga:ai-gateway`，不是 token-exchange 或任意 audience 参数。`StandardDeviceRefreshRequest` 定义公共客户端单值表单；原始表单先拒绝重复键、多 resource、audience、未知身份参数。scope 若提供只能缩小原授权，不增加权限。非法目标在消费 refresh 前拒绝 invalid_target，字段非法 invalid_request，scope 扩大 invalid_scope。无有效来源、缺权限、伪造/到期/撤销 refresh 返回 invalid_grant；控制面故障失败关闭，不签票、不消费旧 refresh。
 
-标准设备 AI JWT 为 at+jwt/ES256、唯一字符串 aud=auriga.ai-gateway、ptyp=ctx=device、真实 did/sub/tid，寿命为 now+300秒、device/source绝对及 idle 截止的最小值；iat/nbf 沿已有最多30秒偏差，到期无宽限。perms 是当前有效授权与 `{auriga.connect.models.invoke, auriga.connect.collab.use}` 的非空交集，不含 roles、管理、instance 或其他能力。UAC 来源绑定由 IAM 签入且须与权威 lineage 一致，auth_time 保留原登录时间。资源指示符只选 audience，不是授权来源。Team 与模型各自仍须对应权限；模型 ACL/预算及组织业务权限不由此豁免。
+标准设备 AI JWT 为 at+jwt/ES256、唯一字符串 aud=auriga.ai-gateway、ptyp=ctx=device、真实 did/sub/tid，寿命为 now+3天、device/source绝对及 idle 截止的最小值；iat/nbf 沿已有最多30秒偏差，到期无宽限。perms 是当前有效授权与 `{auriga.connect.models.invoke, auriga.connect.collab.use}` 的非空交集，不含 roles、管理、instance 或其他能力。UAC 来源绑定由 IAM 签入且须与权威 lineage 一致，auth_time 保留原登录时间。资源指示符只选 audience，不是授权来源。Team 与模型各自仍须对应权限；模型 ACL/预算及组织业务权限不由此豁免。
 
 新增内部 `DeviceAccessService.VerifyStandardDeviceAiAccess` 仅 svc:ai-gateway 使用内部服务 JWT、受委派的非平台 tenant 和既有受认证内部传输调用。请求为原始 JWT 和固定所需 permission（只许 models.invoke 或 collab.use 的完整权限键）。IAM 验签、issuer/typ/时间、AI单audience、standard_device lineage、该权限同时在签名票与当前有效授权中，及上述权威来源状态；跨委托tenant拒绝。有效返回 tenant/account/device 与最早截止，invalid 返回 active=false 且其他字段为空；依赖故障 UNAVAILABLE，错误调用方 PERMISSION_DENIED，缺内部身份 UNAUTHENTICATED。不更新 idle，不消费 refresh。原 VerifyDeviceAiAccess 保留 native/独立模型凭据语义，原 VerifyDeviceAccess 保留平台 audience；不把 AI票放到旧平台核验入口。
 

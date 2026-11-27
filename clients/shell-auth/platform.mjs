@@ -271,9 +271,9 @@ export function createPlatform(config, fetcher = globalThis.fetch) {
       audience === 'auriga.ai-gateway' &&
       (header.typ !== 'at+jwt' ||
         !requireValid('StandardDeviceAiClaims', claims) ||
-        claims.exp - claims.iat > 300 ||
+        claims.exp - claims.iat > 259200 ||
         claims.exp <= claims.iat ||
-        claims.exp > now + 330)
+        claims.exp > now + 259230)
     )
       throw new Error('invalid AI credential');
     if (

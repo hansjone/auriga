@@ -128,7 +128,7 @@ public final class SessionManager implements Sessions {
             "openid",
             row.path("memberType").asString("member"));
     row.put("accessToken", access);
-    row.put("accessTokenExpiresAt", now.plusSeconds(300).toString());
+    row.put("accessTokenExpiresAt", now.plusSeconds(TokenService.ACCESS_TTL_SECONDS).toString());
     store.save("session", row);
     cache(row);
   }

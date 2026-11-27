@@ -40,7 +40,7 @@ async function fixture(t, locale = 'zh') {
   };
   const saved = [
     {
-      id: 'auto',
+      id: 'auriga',
       name: 'My Auto',
       contextWindow: 32768,
       maxTokens: 4096,
@@ -55,7 +55,7 @@ async function fixture(t, locale = 'zh') {
     writes = 0,
     fail = false;
   let directory = [
-    { id: 'auto', name: 'auto', contextWindow: 1000000, maxTokens: 131072 },
+    { id: 'auriga', name: 'auriga', contextWindow: 1000000, maxTokens: 131072 },
     { id: 'new', contextWindow: 64000, maxTokens: 8192 },
   ];
   const remote = {
@@ -231,7 +231,7 @@ test('manual native sync previews updated same-ID capacity and applies once with
   await button(tree, '应用更新').props.onClick();
   assert.deepEqual(f.saved, [
     {
-      id: 'auto',
+      id: 'auriga',
       name: 'My Auto',
       contextWindow: 1000000,
       maxTokens: 131072,
@@ -265,19 +265,19 @@ test('a concurrent native edit rejects the preview CAS without retry or overwrit
 });
 test('unchanged capacities do not produce a save and English labels are available', async (t) => {
   const f = await fixture(t, 'en');
-  f.directory([{ id: 'auto', contextWindow: 32768, maxTokens: 4096 }]);
+  f.directory([{ id: 'auriga', contextWindow: 32768, maxTokens: 4096 }]);
   await button(f.render(), 'Sync existing model capabilities').props.onClick();
   assert.equal(f.counts.writes, 0);
   assert.match(text(f.render()), /No known capability changes/);
 });
 test('unknown upstream capability preserves that local value and invalid capacity rejects before preview', async (t) => {
   const f = await fixture(t);
-  f.directory([{ id: 'auto', contextWindow: 1000000 }]);
+  f.directory([{ id: 'auriga', contextWindow: 1000000 }]);
   await button(f.render(), '同步已有模型能力').props.onClick();
   await button(f.render(), '应用更新').props.onClick();
   assert.equal(f.saved[0].contextWindow, 1000000);
   assert.equal(f.saved[0].maxTokens, 4096);
-  f.directory([{ id: 'auto', contextWindow: Infinity }]);
+  f.directory([{ id: 'auriga', contextWindow: Infinity }]);
   await button(f.render(), '同步已有模型能力').props.onClick();
   assert.equal(f.counts.writes, 1);
   assert.equal(button(f.render(), '应用更新'), undefined);

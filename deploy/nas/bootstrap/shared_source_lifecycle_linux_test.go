@@ -390,20 +390,20 @@ func testNASSharedExplicitRotations(t *testing.T, parent, base, out, generation,
 	}
 	newProfileSHA := sharedSHA(newProfileRaw)
 	invalidProfile := filepath.Join(parent, "approved-profile-invalid.yml")
-	if err := os.WriteFile(invalidProfile, bytes.Replace(profileRaw, []byte("model: auto"), []byte("model: not-approved"), 1), 0644); err != nil {
+	if err := os.WriteFile(invalidProfile, bytes.Replace(profileRaw, []byte("model: auriga"), []byte("model: not-approved"), 1), 0644); err != nil {
 		t.Fatal(err)
 	}
 
-	run("stage", false, append(append([]string{}, stageArgs[:len(stageArgs)-2]...), "-model", "auto")...) // implicit stage still refused
+	run("stage", false, append(append([]string{}, stageArgs[:len(stageArgs)-2]...), "-model", "auriga")...) // implicit stage still refused
 	run("set-model", false, "-model", " auto")
 	run("set-model", false, "-model", "auto\n")
 	run("set-model", false, "-model", "")
-	run("set-model", true, "-model", "auto")
+	run("set-model", true, "-model", "auriga")
 	if !strings.Contains(run("status", true), "state=staged") {
 		t.Fatal("set-model did not leave a staged generation")
 	}
 	run("check", false)
-	run("set-model", true, "-model", "auto") // same-parameter reentry
+	run("set-model", true, "-model", "auriga") // same-parameter reentry
 	run("set-model", false, "-model", "other-model")
 	run("set-profile", false, "-profile-file", newProfile, "-profile-sha256", newProfileSHA) // overlap refused
 	if kind, err := readSharedRotationKind(out); err != nil || kind != sharedRotationKindModel {
@@ -416,7 +416,7 @@ func testNASSharedExplicitRotations(t *testing.T, parent, base, out, generation,
 	var host struct {
 		Model string `json:"model"`
 	}
-	if json.Unmarshal(hostRaw, &host) != nil || host.Model != "auto" {
+	if json.Unmarshal(hostRaw, &host) != nil || host.Model != "auriga" {
 		t.Fatal("set-model did not re-render host.json model")
 	}
 	receiptRaw, err := runtimeReadLeaf(filepath.Join(generation, "installation.receipt"), 0600, 65536)
@@ -424,7 +424,7 @@ func testNASSharedExplicitRotations(t *testing.T, parent, base, out, generation,
 		t.Fatal(err)
 	}
 	var rotated sharedInstallationReceipt
-	if json.Unmarshal(receiptRaw, &rotated) != nil || rotated.Model != "auto" || rotated.Adapter != oldReceipt.Adapter || rotated.Profile != oldReceipt.Profile || rotated.Node != oldReceipt.Node || rotated.CA != oldReceipt.CA || rotated.Tenant != oldReceipt.Tenant || rotated.InitialRuntime != oldReceipt.InitialRuntime || rotated.TeamOnly != oldReceipt.TeamOnly || rotated.DedicatedProfile != oldReceipt.DedicatedProfile || rotated.Files == oldReceipt.Files {
+	if json.Unmarshal(receiptRaw, &rotated) != nil || rotated.Model != "auriga" || rotated.Adapter != oldReceipt.Adapter || rotated.Profile != oldReceipt.Profile || rotated.Node != oldReceipt.Node || rotated.CA != oldReceipt.CA || rotated.Tenant != oldReceipt.Tenant || rotated.InitialRuntime != oldReceipt.InitialRuntime || rotated.TeamOnly != oldReceipt.TeamOnly || rotated.DedicatedProfile != oldReceipt.DedicatedProfile || rotated.Files == oldReceipt.Files {
 		t.Fatal("set-model changed non-model receipt fields or left files digest unchanged", rotated)
 	}
 	secretAfter, err := runtimeReadLeaf(filepath.Join(generation, "platform/agent-secret/installation.secret"), 0600, 1<<20)
@@ -450,13 +450,13 @@ func testNASSharedExplicitRotations(t *testing.T, parent, base, out, generation,
 		t.Fatal("rollback did not restore committed state")
 	}
 	run("check", true)
-	run("set-model", true, "-model", "auto")
+	run("set-model", true, "-model", "auriga")
 	run("commit", true)
 	run("check", true)
 	if _, err := os.Stat(filepath.Join(out, sharedRotationDir)); !os.IsNotExist(err) {
 		t.Fatal("commit left rotation evidence")
 	}
-	run("set-model", true, "-model", "auto") // committed same-model idempotent
+	run("set-model", true, "-model", "auriga") // committed same-model idempotent
 	run("rollback", false)                   // committed rollback still refused
 	run("stage", false, append(append([]string{}, stageArgs[:len(stageArgs)-2]...), "-model", "gpt-6.1-sol")...)
 
@@ -482,7 +482,7 @@ func testNASSharedExplicitRotations(t *testing.T, parent, base, out, generation,
 	if err != nil {
 		t.Fatal(err)
 	}
-	if json.Unmarshal(gotHost, &host) != nil || host.Model != "auto" {
+	if json.Unmarshal(gotHost, &host) != nil || host.Model != "auriga" {
 		t.Fatal("set-profile must preserve the committed host model")
 	}
 	if bytes.Equal(gotHost, hostBefore) {
@@ -493,7 +493,7 @@ func testNASSharedExplicitRotations(t *testing.T, parent, base, out, generation,
 		t.Fatal(err)
 	}
 	var profileRotated sharedInstallationReceipt
-	if json.Unmarshal(receiptRaw, &profileRotated) != nil || profileRotated.Profile != newProfileSHA || profileRotated.Model != "auto" || profileRotated.Adapter != oldReceipt.Adapter || profileRotated.Node != oldReceipt.Node || profileRotated.CA != oldReceipt.CA || profileRotated.Tenant != oldReceipt.Tenant || profileRotated.InitialRuntime != oldReceipt.InitialRuntime || profileRotated.TeamOnly != oldReceipt.TeamOnly || profileRotated.DedicatedProfile != oldReceipt.DedicatedProfile || profileRotated.Files == rotated.Files {
+	if json.Unmarshal(receiptRaw, &profileRotated) != nil || profileRotated.Profile != newProfileSHA || profileRotated.Model != "auriga" || profileRotated.Adapter != oldReceipt.Adapter || profileRotated.Node != oldReceipt.Node || profileRotated.CA != oldReceipt.CA || profileRotated.Tenant != oldReceipt.Tenant || profileRotated.InitialRuntime != oldReceipt.InitialRuntime || profileRotated.TeamOnly != oldReceipt.TeamOnly || profileRotated.DedicatedProfile != oldReceipt.DedicatedProfile || profileRotated.Files == rotated.Files {
 		t.Fatal("set-profile changed non-profile receipt fields or left files digest unchanged", profileRotated)
 	}
 	secretAfter, err = runtimeReadLeaf(filepath.Join(generation, "platform/agent-secret/installation.secret"), 0600, 1<<20)
@@ -509,7 +509,7 @@ func testNASSharedExplicitRotations(t *testing.T, parent, base, out, generation,
 	run("commit", true)
 	run("check", true)
 	run("set-profile", true, "-profile-file", newProfile, "-profile-sha256", newProfileSHA) // committed same-profile idempotent
-	run("set-model", true, "-model", "auto")                                                // alternate after profile commit
+	run("set-model", true, "-model", "auriga")                                                // alternate after profile commit
 	if nasSnapshot(t, base) != baseBefore {
 		t.Fatal("explicit rotations changed sealed base")
 	}

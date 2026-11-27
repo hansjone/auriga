@@ -249,7 +249,7 @@ class DeviceAiAccessAuthorityTest {
         List.of(
             new long[] {now, now},
             new long[] {now - 300, now - 1},
-            new long[] {now, now + 301},
+            new long[] {now, now + TokenService.ACCESS_TTL_SECONDS + 1},
             new long[] {now + 31, now + 300},
             new long[] {now + 20, now + 19},
             new long[] {Long.MIN_VALUE, now + 1})) {
