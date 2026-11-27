@@ -179,8 +179,13 @@ export class DesktopCatalog {
   }
 
   rejectAuth(error: unknown) {
-    this.clear();
-    this.lifetime = new AbortController();
+    // Keep resident market rows; logout / identity switch clears via dispose.
+    // Stop install-progress polling so a 401 blip does not hammer catalog.
+    clearTimeout(this.progressTimer);
+    this.progressTimer = undefined;
+    this.pollUntil = 0;
+    this.pluginOperation = undefined;
+    this.pendingPlugin = undefined;
     this.error = error;
     this.emit();
   }
@@ -340,10 +345,8 @@ export class DesktopCatalog {
     } catch (error) {
       if (lifetime.aborted) return;
       this.error = error;
-      if ([401, 403].includes(catalogStatus(error) ?? 0)) {
-        this.snapshot = undefined;
-        this.versions.clear();
-      }
+      // Keep the last loaded market snapshot on auth blips. Explicit sign-out /
+      // scope clearCatalog owns wiping resident cache, not a transient 401.
     } finally {
       operation.abort();
       this.loading = false;

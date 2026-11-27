@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, rm, mkdir, writeFile, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+import { setImmediate as nextTurn } from 'node:timers/promises';
 import { createConnectRuntime } from '../src/local/runtime.js';
 import { resourceRequest } from '../src/resources/broker-transport.js';
 import { createVault } from '../src/local/vault.js';
@@ -423,4 +424,92 @@ test('broker.call never retries upstream HTTP 409 or non-retryable post-exec con
     { code: 'common.conflict' },
   );
   assert.equal(attempts, 1);
+});
+
+test('transient unreachable keeps shell identity and account projection for UI', async (t) => {
+  const { runtime, connection, req } = await fixture(t);
+  assert.equal(runtime.status(req).loggedIn, true);
+  const before = runtime.status(req).account?.subject;
+  assert.ok(before);
+  connection.transition('unreachable');
+  await nextTurn();
+  const status = runtime.status(req);
+  assert.equal(status.loggedIn, true);
+  assert.equal(status.recovering, true);
+  assert.equal(status.connected, false);
+  assert.equal(status.platform, 'unreachable');
+  assert.equal(status.account?.subject, before);
+  // Ops identity is gated to authenticated; presentation stays resident.
+  assert.equal(runtime.identity(), undefined);
+});
+
+test('true sign-out after unreachable still clears retained identity', async (t) => {
+  const { runtime, connection, req } = await fixture(t);
+  connection.transition('unreachable');
+  await nextTurn();
+  assert.equal(runtime.status(req).loggedIn, true);
+  connection.logout();
+  await new Promise((r) => setTimeout(r, 20));
+  assert.equal(runtime.status(req).loggedIn, false);
+  assert.equal(runtime.status(req).recovering, false);
+  assert.equal(runtime.status(req).account, null);
+});
+
+test('revoked and reauth keep resident account/catalog but drop ops identity until logout', async (t) => {
+  const { runtime, connection, req } = await fixture(t);
+  const before = runtime.status(req);
+  assert.equal(before.loggedIn, true);
+  assert.ok(before.account?.catalogGeneration);
+  connection.transition('reauth_required');
+  await nextTurn();
+  let status = runtime.status(req);
+  assert.equal(status.loggedIn, true);
+  assert.equal(status.recovering, false);
+  assert.equal(status.account?.subject, before.account.subject);
+  assert.equal(
+    status.account?.catalogGeneration,
+    before.account.catalogGeneration,
+  );
+  assert.equal(runtime.identity(), undefined);
+  connection.transition('revoked');
+  await nextTurn();
+  status = runtime.status(req);
+  assert.equal(status.loggedIn, true);
+  assert.equal(
+    status.account?.catalogGeneration,
+    before.account.catalogGeneration,
+  );
+  assert.equal(runtime.identity(), undefined);
+  connection.logout();
+  await new Promise((r) => setTimeout(r, 20));
+  assert.equal(runtime.status(req).loggedIn, false);
+  assert.equal(runtime.status(req).account?.catalogGeneration, undefined);
+});
+
+test('broker.call waits for reauth_required to recover when local identity is retained', async (t) => {
+  const { runtime, connection } = await fixture(t);
+  connection.transition('reauth_required');
+  const pending = runtime.broker.call('UnifiedListResourcePackages', {
+    limit: 10,
+    kind: 'skill',
+  });
+  await new Promise((r) => setTimeout(r, 20));
+  connection.transition('authenticated');
+  const output = await pending;
+  assert.equal(output.statusCode, 200);
+});
+
+test('broker.call survives reauth_required then unreachable before same-identity recovery', async (t) => {
+  const { runtime, connection } = await fixture(t);
+  connection.transition('reauth_required');
+  const pending = runtime.broker.call('UnifiedListResourcePackages', {
+    limit: 10,
+    kind: 'skill',
+  });
+  await new Promise((r) => setTimeout(r, 20));
+  connection.transition('unreachable');
+  await new Promise((r) => setTimeout(r, 20));
+  connection.transition('authenticated');
+  const output = await pending;
+  assert.equal(output.statusCode, 200);
 });

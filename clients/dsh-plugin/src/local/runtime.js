@@ -10,6 +10,7 @@ import { createModelLifecycle } from '../ai/installation.js';
 import { randomBytes, createHash } from 'node:crypto';
 import { readFileSync, lstatSync } from 'node:fs';
 import { join } from 'node:path';
+import { setImmediate as defer } from 'node:timers';
 import { desktopUpdater, desktopStartupFailure } from './desktop.js';
 import { createVault } from './vault.js';
 import { revokeLegacyCredentials } from './legacy-revocation.js';
@@ -76,6 +77,8 @@ export async function createConnectRuntime({
   /** @type {Set<(identity:any)=>Promise<void>>} */ const gates = new Set();
 
   /** @type {any} */ let principal;
+  /** Resident account projection for UI; survives ops fences until logout. */
+  /** @type {any} */ let presentation;
   /** @type {{displayName?:string,avatarUrl?:string}|undefined} */ let memberProfile;
   /** @type {{reachable:boolean,lastSuccessAt:string}|undefined} */ let probeEvidence;
   /** @type {ReturnType<typeof createHostContexts>|undefined} */ let contexts;
@@ -118,6 +121,8 @@ export async function createConnectRuntime({
         proxyController,
       }).catch(desktopStartupFailure)
     : undefined;
+  /** @type {any} */ let latestShell;
+  /** @type {{current:(()=>any)|null}} */ const shellNow = { current: null };
   const broker = await createBroker({
     signal,
     ipc: installed?.ipc,
@@ -127,28 +132,80 @@ export async function createConnectRuntime({
       if (desktop?.status().required) return refuse('desktop.update_required');
     },
     onInvalidate() {
+      // Fence ops immediately (including resolve()). Keep `presentation` for UI
+      // until onChange / expiry decides the resident outcome.
       principal = undefined;
-      memberProfile = undefined;
-      probeEvidence = undefined;
-      models?.logout();
-      network?.logout();
-      key = '';
-      contexts?.invalidate();
-      enterpriseContexts?.invalidate();
-      teamGeneration++;
-      startingTeam?.close();
-      void closeStorage(startingVault);
-      team?.close();
-      team = undefined;
-      void closeStorage(teamVault);
-      teamVault = undefined;
-      communication = 'idle';
-      for (const listener of listeners)
-        void Promise.resolve()
-          .then(listener)
-          .catch(() => {});
+      retireBoundSessions({ keepModels: false });
+      defer(() => {
+        if (closed) return;
+        const s = shellNow.current?.() ?? latestShell;
+        if (
+          presentation &&
+          s &&
+          [
+            'authenticated',
+            'unreachable',
+            'reauth_required',
+            'revoked',
+            'authenticating',
+          ].includes(s.state)
+        ) {
+          if (s.state === 'unreachable') models?.login();
+          for (const listener of listeners)
+            void Promise.resolve()
+              .then(listener)
+              .catch(() => {});
+          return;
+        }
+        presentation = undefined;
+        memberProfile = undefined;
+        probeEvidence = undefined;
+        for (const listener of listeners)
+          void Promise.resolve()
+            .then(listener)
+            .catch(() => {});
+      });
     },
     onChange(snapshot) {
+      latestShell = snapshot;
+      if (snapshot?.state === 'signed_out') {
+        principal = undefined;
+        presentation = undefined;
+        memberProfile = undefined;
+        probeEvidence = undefined;
+        for (const listener of listeners)
+          void Promise.resolve()
+            .then(listener)
+            .catch(() => {});
+        return;
+      }
+      if (presentation && snapshot && snapshot.state !== 'authenticated') {
+        if (snapshot.state === 'unreachable') {
+          models?.login();
+          for (const listener of listeners)
+            void Promise.resolve()
+              .then(listener)
+              .catch(() => {});
+          return;
+        }
+        if (
+          ['reauth_required', 'revoked', 'authenticating'].includes(
+            snapshot.state,
+          )
+        ) {
+          for (const listener of listeners)
+            void Promise.resolve()
+              .then(listener)
+              .catch(() => {});
+          return;
+        }
+      } else if (!snapshot && presentation) {
+        for (const listener of listeners)
+          void Promise.resolve()
+            .then(listener)
+            .catch(() => {});
+        return;
+      }
       const candidate =
         snapshot?.state === 'authenticated' ? snapshot.identity : undefined;
       const next =
@@ -187,6 +244,7 @@ export async function createConnectRuntime({
                 empNo: next.empNo,
               })
             : undefined;
+          presentation = principal;
           isolationPending = false;
           if (principal) {
             models?.login();
@@ -208,6 +266,39 @@ export async function createConnectRuntime({
         });
     },
   });
+  /** @param {{keepModels:boolean}} opts */
+  function retireBoundSessions({ keepModels }) {
+    if (!keepModels) {
+      models?.logout();
+      network?.logout();
+    }
+    key = '';
+    contexts?.invalidate();
+    enterpriseContexts?.invalidate();
+    teamGeneration++;
+    startingTeam?.close();
+    void closeStorage(startingVault);
+    team?.close();
+    team = undefined;
+    void closeStorage(teamVault);
+    teamVault = undefined;
+    communication = 'idle';
+  }
+  /** @param {{keepPresentation:boolean}} opts */
+  function clearResidentAuth({ keepPresentation }) {
+    principal = undefined;
+    if (!keepPresentation) {
+      presentation = undefined;
+      memberProfile = undefined;
+      probeEvidence = undefined;
+    }
+    retireBoundSessions({ keepModels: false });
+    for (const listener of listeners)
+      void Promise.resolve()
+        .then(listener)
+        .catch(() => {});
+  }
+  shellNow.current = () => broker.state.current();
   const stopLocalProof = installed?.ipc
     ? bindLocalUacProof({ identity: localUac, broker })
     : () => {};
@@ -216,17 +307,45 @@ export async function createConnectRuntime({
     origin: config.platformOrigin || 'https://unconfigured.invalid',
   });
   if (principal) models.login();
+  const recoveringPlatform = (/** @type {any} */ s) =>
+    Boolean(presentation && s?.state === 'unreachable');
+  // Ops/admission identity only while authenticated after isolation gates.
+  // Presentation stays resident across retainable non-logout projections.
   const identity = () =>
     broker.state.current()?.state === 'authenticated' ? principal : undefined;
-  // A public cache fence derived from the native state, never a credential.
+  const presentationIdentity = () => {
+    if (!presentation) return undefined;
+    const s = broker.state.current();
+    if (
+      !s ||
+      ![
+        'authenticated',
+        'unreachable',
+        'reauth_required',
+        'revoked',
+        'authenticating',
+      ].includes(s.state)
+    )
+      return undefined;
+    return presentation;
+  };
+  // Fence by verified member/device identity, not the rotating shell authorization
+  // UUID. Token self-heal remints authorization and must not bust the marketplace
+  // cache or force a full catalog prefetch.
   const catalogGeneration = () => {
-    const authorization = broker.state.authorization?.();
-    return authorization
-      ? createHash('sha256')
-          .update('auriga-desktop-catalog:')
-          .update(authorization)
-          .digest('hex')
-      : undefined;
+    const who = presentationIdentity();
+    if (!who) return undefined;
+    return createHash('sha256')
+      .update('auriga-desktop-catalog-identity:')
+      .update(
+        JSON.stringify([
+          who.tenantId,
+          who.ownerId,
+          who.clientId,
+          who.providerId,
+        ]),
+      )
+      .digest('hex');
   };
   contexts = createHostContexts({ broker, identity, ctx });
   // A native desktop session uses the current platform login for each new tool.
@@ -614,14 +733,36 @@ export async function createConnectRuntime({
     },
     status(/** @type {any} */ req) {
       const s = broker.state.current(),
-        who = requests.has(req) ? identity() : undefined;
+        live = requests.has(req) ? identity() : undefined,
+        who = requests.has(req) ? presentationIdentity() : undefined,
+        recovering = recoveringPlatform(s);
+      // Unreachable / reauth / revoked snapshots omit identity; rebuild a
+      // presentation binding from the retained principal for resident UI.
+      const bindingSource =
+        s?.state === 'authenticated'
+          ? s
+          : who && s
+            ? {
+                state: 'authenticated',
+                shellEpoch: s.shellEpoch,
+                revision: s.revision,
+                identity: {
+                  tenantId: who.tenantId,
+                  memberId: who.ownerId,
+                  deviceId: who.clientId,
+                  providerId: who.providerId,
+                  ...(who.empNo ? { empNo: who.empNo } : {}),
+                },
+              }
+            : s;
       return {
         available: true,
         configured: !!config.platformOrigin,
         loggedIn: !!who,
-        connected: !!who && communication === 'ready',
+        connected: !!live && !recovering && communication === 'ready',
+        recovering,
         communication,
-        connection: who && team ? team.summary : null,
+        connection: live && team ? team.summary : null,
         platform: s?.state ?? 'unreachable',
         reason: s?.reason,
         ...(requests.has(req) && s?.inlineLogin
@@ -650,17 +791,21 @@ export async function createConnectRuntime({
         account: who
           ? {
               subject: who.ownerId,
-              profileBinding: memberProfileBinding(s),
+              profileBinding: memberProfileBinding(bindingSource),
               catalogGeneration: catalogGeneration(),
-              ...(s.identity?.empNo ? { empNo: s.identity.empNo } : {}),
+              ...(s?.identity?.empNo
+                ? { empNo: s.identity.empNo }
+                : who.empNo
+                  ? { empNo: who.empNo }
+                  : {}),
               ...(memberProfile ? memberProfile : {}),
             }
           : null,
         csrf: requests.has(req) ? csrf : undefined,
-        ...(who && s.uacLoginInfo ? { uacLoginInfo: s.uacLoginInfo } : {}),
+        ...(live && s?.uacLoginInfo ? { uacLoginInfo: s.uacLoginInfo } : {}),
         network: network.status,
         models: models?.status ?? { available: false, state: 'idle' },
-        capabilities: { consent: !!who && network.consentAvailable },
+        capabilities: { consent: !!live && network.consentAvailable },
       };
     },
     prepare(/** @type {any} */ req) {
@@ -669,14 +814,35 @@ export async function createConnectRuntime({
     /** One verified snapshot for cross-route presentation correlation only. */
     platformIdentity() {
       const s = broker.state.current();
-      return s?.state === 'authenticated' && s.identity?.empNo
-        ? { empNo: s.identity.empNo, profileBinding: memberProfileBinding(s) }
-        : undefined;
+      const who = presentationIdentity();
+      if (s?.state === 'authenticated' && s.identity?.empNo)
+        return {
+          empNo: s.identity.empNo,
+          profileBinding: memberProfileBinding(s),
+        };
+      if (who?.empNo && s)
+        return {
+          empNo: who.empNo,
+          profileBinding: memberProfileBinding({
+            state: 'authenticated',
+            shellEpoch: s.shellEpoch,
+            revision: s.revision,
+            identity: {
+              tenantId: who.tenantId,
+              memberId: who.ownerId,
+              deviceId: who.clientId,
+              providerId: who.providerId,
+              empNo: who.empNo,
+            },
+          }),
+        };
+      return undefined;
     },
     /** Platform-verified employee number, used only to show local UAC association. */
     platformEmployee() {
       const s = broker.state.current();
-      return s?.state === 'authenticated' ? s.identity?.empNo : undefined;
+      if (s?.state === 'authenticated') return s.identity?.empNo;
+      return presentationIdentity()?.empNo;
     },
     async command(
       /** @type {any} */ req,
@@ -687,10 +853,15 @@ export async function createConnectRuntime({
       if (action === 'reconnect') {
         if (!broker.state.current()) await broker.state.connect();
         if (identity()) void beginTeam();
-      } else await broker.state.command(action, input);
+      } else {
+        // Explicit logout must drop resident UI before the remote round-trip.
+        if (action === 'logout') clearResidentAuth({ keepPresentation: false });
+        await broker.state.command(action, input);
+      }
       return this.status(req);
     },
     async resetAuthentication() {
+      clearResidentAuth({ keepPresentation: false });
       broker.close();
     },
     attachNetwork: network.attach,

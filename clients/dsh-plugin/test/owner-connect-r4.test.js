@@ -45,8 +45,10 @@ test('R4 unreachable shell can recover by an authenticated push without restarti
   });
   f.connection.transition('unreachable');
   assert.equal(f.runtime.resolve(f.request), undefined);
+  assert.equal(f.runtime.status(f.request).loggedIn, true);
+  assert.equal(f.runtime.status(f.request).recovering, true);
   await f.rpc('aurigaAuth/cancel');
-  assert.equal(f.runtime.status(f.request).loggedIn, false);
+  assert.equal(f.runtime.status(f.request).loggedIn, true);
   f.connection.transition('authenticated');
   await nextTurn();
   assert.equal(f.runtime.status(f.request).loggedIn, true);
