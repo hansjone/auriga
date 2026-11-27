@@ -118,6 +118,7 @@ export class Broker extends EventEmitter {
     this.cache = new Map();
     this.inflight = new Set();
     this.record = { manualLoginRequired: false, revocations: [] };
+    this.committedRevocations = new Set();
     this.persistence = Promise.resolve();
     this.health = Promise.resolve();
   }
@@ -132,6 +133,8 @@ export class Broker extends EventEmitter {
     this.record = (await this.vault.load()) ?? this.record;
     if (!Array.isArray(this.record.revocations))
       throw new Error('invalid vault');
+    for (const token of this.record.revocations)
+      this.committedRevocations.add(token);
     if (this.record.tokens && !this.record.manualLoginRequired) {
       this.state = 'unreachable';
       this.reason = 'shell_restarted';
@@ -695,6 +698,7 @@ export class Broker extends EventEmitter {
       chain: 'revocation',
     });
     this.record.revocationBindings ??= {};
+    const added = [];
     for (const token of [tokens.refresh_token, tokens.access_token])
       if (
         typeof token === 'string' &&
@@ -705,8 +709,10 @@ export class Broker extends EventEmitter {
         this.record.revocationBindings[
           createHash('sha256').update(token).digest('hex')
         ] = metadata;
+        added.push(token);
       }
     await this.save();
+    for (const token of added) this.committedRevocations.add(token);
     this.log({
       ...metadata,
       stage: 'session_revoke',
@@ -717,9 +723,20 @@ export class Broker extends EventEmitter {
     await this.drainRevocations();
   }
   async drainRevocations() {
-    if (this.draining) return this.draining;
+    if (this.draining) {
+      await this.draining;
+      if (
+        !this.closed &&
+        this.record.revocations.some((t) => this.committedRevocations.has(t))
+      ) {
+        return this.drainRevocations();
+      }
+      return;
+    }
     this.draining = (async () => {
-      for (const token of [...this.record.revocations].slice(0, 4)) {
+      for (const token of [...this.record.revocations]
+        .filter((t) => this.committedRevocations.has(t))
+        .slice(0, 4)) {
         const hash = createHash('sha256').update(token).digest('hex'),
           metadata = this.record.revocationBindings?.[hash] ?? {
             correlationId: randomUUID(),
@@ -738,6 +755,7 @@ export class Broker extends EventEmitter {
           this.record.revocations = this.record.revocations.filter(
             (t) => t !== token,
           );
+          this.committedRevocations.delete(token);
           if (this.record.revocationBindings)
             delete this.record.revocationBindings[hash];
           try {
@@ -745,6 +763,7 @@ export class Broker extends EventEmitter {
           } catch (error) {
             if (!this.record.revocations.includes(token))
               this.record.revocations.push(token);
+            this.committedRevocations.add(token);
             this.record.revocationBindings ??= {};
             this.record.revocationBindings[hash] = metadata;
             throw error;
@@ -1123,7 +1142,7 @@ export class Broker extends EventEmitter {
     let onRefreshed;
     try {
       await Promise.race([
-        this.check(forceRefresh),
+        this.refreshTokens(forceRefresh),
         new Promise((resolve, reject) => {
           onInvalidated = () =>
             reject(
@@ -1174,17 +1193,18 @@ export class Broker extends EventEmitter {
     );
     return run;
   }
-  async checkOnce(forceRefresh = false) {
-    if (this.closed) return;
-    if (this.localSource && this.localSource.until <= this.mono())
-      await this.clearLocalUac(this.localSource.owner);
-    if (!this.record.tokens || this.attempt) {
-      await this.checkProof();
-      await this.drainRevocations();
-      return;
+  refreshTokens(forceRefresh = false) {
+    if (this.tokenRefreshing) {
+      if (forceRefresh && !this.tokenRefreshingForce) {
+        return this.tokenRefreshing
+          .finally(() => {})
+          .then(() => this.refreshTokens(true));
+      }
+      return this.tokenRefreshing;
     }
+    this.tokenRefreshingForce = forceRefresh;
     let toRevoke;
-    await this.withTokenLock(async () => {
+    const run = this.withTokenLock(async () => {
       if (this.closed || !this.record.tokens || this.attempt) return;
       const generation = this.generation,
         old = this.record.tokens;
@@ -1239,11 +1259,24 @@ export class Broker extends EventEmitter {
           toRevoke = next ?? old;
         } else this.transition('unreachable', 'offline');
       }
+    }).finally(() => {
+      this.tokenRefreshing = undefined;
+      this.tokenRefreshingForce = false;
+      if (toRevoke) this.track(this.queueRevoke(toRevoke));
     });
-    if (toRevoke) {
-      await this.queueRevoke(toRevoke);
+    this.tokenRefreshing = run;
+    return run;
+  }
+  async checkOnce(forceRefresh = false) {
+    if (this.closed) return;
+    if (this.localSource && this.localSource.until <= this.mono())
+      await this.clearLocalUac(this.localSource.owner);
+    if (!this.record.tokens || this.attempt) {
+      await this.checkProof();
+      await this.drainRevocations();
       return;
     }
+    await this.refreshTokens(forceRefresh);
     await this.drainRevocations();
   }
   async logout() {

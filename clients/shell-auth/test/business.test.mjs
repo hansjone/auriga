@@ -1018,14 +1018,26 @@ test('BusinessProxy preserves active revision past 60s, waits for rotated bearer
   assert.equal(fetched, 0);
   assert.equal(leakProxy.controllers.size, 0);
 
-  // 4) Hanging remote revocation from an earlier session must not block AI audience exchange after re-login.
+  // 4) Hanging remote revocation from an earlier session must not block new account 401 refresh + AI audience exchange.
   const f2 = fixture();
   await login(f2);
-  const aiProxy = new BusinessProxy(f2.broker, async () =>
-    Response.json({ object: 'list', data: [] }),
-  );
+  let aiUpstreamAttempts = 0;
+  const aiProxy = new BusinessProxy(f2.broker, async () => {
+    aiUpstreamAttempts++;
+    if (aiUpstreamAttempts === 1) {
+      return new Response(
+        JSON.stringify({ error: { code: 'common.unauthenticated' } }),
+        { status: 401, headers: { 'content-type': 'application/json' } },
+      );
+    }
+    return Response.json({ object: 'list', data: [] });
+  });
   const pendingRevokes = [];
   let allowRevoke = false;
+  let markRevokeEntered;
+  const revokeEntered = new Promise((resolve) => {
+    markRevokeEntered = resolve;
+  });
   const releaseAllRevokes = () => {
     allowRevoke = true;
     while (pendingRevokes.length) pendingRevokes.shift()();
@@ -1037,13 +1049,19 @@ test('BusinessProxy preserves active revision past 60s, waits for rotated bearer
   });
   f2.platform.revoke = () => {
     if (allowRevoke) return Promise.resolve({ correlationId: randomUUID() });
+    markRevokeEntered?.();
     return new Promise((resolve) => {
       pendingRevokes.push(() => resolve({ correlationId: randomUUID() }));
     });
   };
   await f2.broker.logout();
   const pendingCheck = f2.broker.check();
-  await new Promise((r) => setTimeout(r, 10));
+  await revokeEntered;
+  assert.ok(pendingRevokes.length >= 1);
+  // Re-login with a distinct account and fresh tokens while old revocation is still hanging.
+  f2.identity.memberId = randomUUID();
+  f2.tokens.access_token = 'account-b-access';
+  f2.tokens.refresh_token = 'account-b-refresh';
   const authed = new Promise((resolve) => {
     const onChange = (snap) => {
       if (snap.state === 'authenticated') {
@@ -1055,9 +1073,54 @@ test('BusinessProxy preserves active revision past 60s, waits for rotated bearer
   });
   await f2.broker.command(command(f2.broker, 'open_login'), OWNER);
   await authed;
-  f2.platform.audience = async () => f2.tokens;
+  const origRefresh2 = f2.platform.refresh.bind(f2.platform);
+  f2.platform.refresh = async (...args) => ({
+    ...(await origRefresh2(...args)),
+    access_token: 'account-b-refreshed-access',
+  });
+  f2.platform.audience = async () => ({
+    ...f2.tokens,
+    access_token: 'account-b-ai-token',
+  });
   const aiRes = await aiProxy.call(call(f2.broker, 'listAiModels', {}), OWNER);
   assert.ok(aiRes.output, aiRes.error?.code);
+  assert.equal(aiUpstreamAttempts, 2);
+  assert.ok(pendingRevokes.length >= 1);
   releaseAllRevokes();
   await pendingCheck;
+
+  // 5) drainRevocations never sends remote revoke before queueRevoke commits to vault.
+  const f3 = fixture();
+  await login(f3);
+  let revokeCallsWhileSaving = 0;
+  let holdSave = true;
+  let releaseSave;
+  const origVaultSave = f3.vault.save.bind(f3.vault);
+  f3.vault.save = async (value) => {
+    if (holdSave && value.revocations?.length) {
+      holdSave = false;
+      await new Promise((r) => {
+        releaseSave = r;
+      });
+    }
+    return origVaultSave(value);
+  };
+  f3.platform.revoke = async () => {
+    revokeCallsWhileSaving++;
+    return { correlationId: randomUUID() };
+  };
+  t.after(async () => {
+    releaseSave?.();
+    await f3.broker.close();
+  });
+  const queuing = f3.broker.queueRevoke({
+    refresh_token: 'uncommitted-refresh',
+    access_token: 'uncommitted-access',
+  });
+  await new Promise((r) => setTimeout(r, 10));
+  await f3.broker.drainRevocations();
+  assert.equal(revokeCallsWhileSaving, 0);
+  releaseSave?.();
+  await queuing;
+  assert.ok(revokeCallsWhileSaving >= 1);
 });
