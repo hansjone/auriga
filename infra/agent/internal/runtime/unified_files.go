@@ -115,7 +115,7 @@ func unifiedSkillFileAllowed(name string) bool {
 	ext := strings.ToLower(path.Ext(name))
 	if strings.HasPrefix(name, "references/") || strings.HasPrefix(name, "assets/") {
 		switch ext {
-		case ".md", ".txt", ".json", ".yaml", ".yml", ".toml", ".ini", ".cfg", ".csv", ".sql":
+		case ".md", ".txt", ".json", ".yaml", ".yml":
 			return true
 		default:
 			return false

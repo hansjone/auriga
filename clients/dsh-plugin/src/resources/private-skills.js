@@ -276,18 +276,7 @@ export function createPrivateSkills({ home }) {
               !(
                 (path.startsWith('references/') ||
                   path.startsWith('assets/')) &&
-                [
-                  '.md',
-                  '.txt',
-                  '.json',
-                  '.yaml',
-                  '.yml',
-                  '.toml',
-                  '.ini',
-                  '.cfg',
-                  '.csv',
-                  '.sql',
-                ].includes(ext)
+                ['.md', '.txt', '.json', '.yaml', '.yml'].includes(ext)
               ) &&
               !(
                 path.startsWith('scripts/') &&

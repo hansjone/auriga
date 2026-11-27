@@ -48,20 +48,14 @@ export function skillDirectoryValid(path) {
   );
 }
 
-const docExtensions = new Set([
-  '.md',
-  '.txt',
-  '.json',
-  '.yaml',
-  '.yml',
+const docExtensions = new Set(['.md', '.txt', '.json', '.yaml', '.yml']);
+const scriptExtensions = new Set([
+  ...docExtensions,
   '.toml',
   '.ini',
   '.cfg',
   '.csv',
   '.sql',
-]);
-const scriptExtensions = new Set([
-  ...docExtensions,
   '.py',
   '.sh',
   '.bash',

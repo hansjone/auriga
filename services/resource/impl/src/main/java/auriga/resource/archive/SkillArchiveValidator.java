@@ -38,8 +38,7 @@ public final class SkillArchiveValidator {
     String ext = extensionLower(path);
     if (path.startsWith("references/") || path.startsWith("assets/")) {
       return switch (ext) {
-        case ".md", ".txt", ".json", ".yaml", ".yml", ".toml", ".ini", ".cfg", ".csv", ".sql" ->
-            SkillFileClass.DOC;
+        case ".md", ".txt", ".json", ".yaml", ".yml" -> SkillFileClass.DOC;
         default -> SkillFileClass.INVALID;
       };
     }

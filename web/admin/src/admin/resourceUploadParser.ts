@@ -620,18 +620,7 @@ export async function parseResourceSource(
           'poetry.lock',
         ].includes(e.path) ||
         ((e.path.startsWith('references/') || e.path.startsWith('assets/')) &&
-          [
-            '.md',
-            '.txt',
-            '.json',
-            '.yaml',
-            '.yml',
-            '.toml',
-            '.ini',
-            '.cfg',
-            '.csv',
-            '.sql',
-          ].includes(ext)) ||
+          ['.md', '.txt', '.json', '.yaml', '.yml'].includes(ext)) ||
         (e.path.startsWith('scripts/') &&
           [
             '.py',

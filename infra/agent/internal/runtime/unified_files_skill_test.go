@@ -62,13 +62,13 @@ func TestExtractUnifiedSkillWithScriptsAndDependencies(t *testing.T) {
 		{name: "requirements.txt", body: "requests>=2.32\n", mode: 0644},
 		{name: "scripts/run.py", body: "print('ok')\n", mode: 0644},
 		{name: "scripts/run.sh", body: "echo ok\n", mode: 0644},
-		{name: "assets/data.toml", body: "key = 'value'\n", mode: 0644},
+		{name: "scripts/data.toml", body: "key = 'value'\n", mode: 0644},
 	})
 	dir := filepath.Join(t.TempDir(), "staged")
 	if err := ExtractUnifiedSkill(raw, dir); err != nil {
 		t.Fatalf("ExtractUnifiedSkill rejected valid scripted skill: %v", err)
 	}
-	for _, rel := range []string{"SKILL.md", "requirements.txt", "scripts/run.py", "scripts/run.sh", "assets/data.toml"} {
+	for _, rel := range []string{"SKILL.md", "requirements.txt", "scripts/run.py", "scripts/run.sh", "scripts/data.toml"} {
 		info, err := os.Stat(filepath.Join(dir, filepath.FromSlash(rel)))
 		if err != nil {
 			t.Fatalf("expected extracted file %s: %v", rel, err)

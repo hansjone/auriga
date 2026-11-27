@@ -115,18 +115,7 @@ export async function packSkillFolder(files: File[]): Promise<File> {
         'poetry.lock',
       ].includes(path) ||
       ((path.startsWith('references/') || path.startsWith('assets/')) &&
-        [
-          '.md',
-          '.txt',
-          '.json',
-          '.yaml',
-          '.yml',
-          '.toml',
-          '.ini',
-          '.cfg',
-          '.csv',
-          '.sql',
-        ].includes(ext)) ||
+        ['.md', '.txt', '.json', '.yaml', '.yml'].includes(ext)) ||
       (path.startsWith('scripts/') &&
         [
           '.py',
