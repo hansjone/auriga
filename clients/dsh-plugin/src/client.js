@@ -207,6 +207,7 @@ window.__ModuleLoader__.load({
       platform_unconfigured: '未配置平台',
       platform_authenticating: '正在登录平台',
       platform_unreachable: '平台不可达',
+      platform_recovering: '平台暂不可达，正在自动恢复',
       platform_reauth: '平台登录已过期',
       platform_signedOut: '未登录平台',
       platform_connected: '平台已连接',
@@ -215,6 +216,8 @@ window.__ModuleLoader__.load({
       platformHint_unconfigured: '在“设置”中填写团队平台地址后即可登录平台。',
       platformHint_authenticating: '请完成当前登录和设备确认。',
       platformHint_unreachable: '本机 DSH 照常可用；网络恢复后可重新连接。',
+      platformHint_recovering:
+        '仍保持当前登录信息，正在用已有身份重连；多次失败后再提示重新登录。',
       platformHint_reauth: '请重新登录平台；本机 DSH 和已有任务不受影响。',
       platformHint_signedOut: '登录平台后可使用资源市场、Team 工具和云端互通。',
       platformHint_connected: '资源市场、我的资源和 Team 工具可用。',
@@ -450,6 +453,7 @@ window.__ModuleLoader__.load({
       platform_unconfigured: 'Platform not configured',
       platform_authenticating: 'Signing in to platform',
       platform_unreachable: 'Platform unreachable',
+      platform_recovering: 'Platform unreachable; reconnecting',
       platform_reauth: 'Platform sign-in expired',
       platform_signedOut: 'Not signed in to platform',
       platform_connected: 'Platform connected',
@@ -461,6 +465,8 @@ window.__ModuleLoader__.load({
         'Complete this sign-in and device confirmation.',
       platformHint_unreachable:
         'Local DSH keeps working. Reconnect when the network returns.',
+      platformHint_recovering:
+        'Keeping the current sign-in while reconnecting with saved identity. Ask to sign in again only after repeated failures.',
       platformHint_reauth:
         'Sign in to the platform again. Local DSH and running tasks are unaffected.',
       platformHint_signedOut:
@@ -2000,20 +2006,39 @@ window.__ModuleLoader__.load({
           )
             return;
           latestShellRead = sequence;
+          // Marketplace cache is resident until explicit sign-out. Transient
+          // offline / reauth must not clearCatalog or force a full prefetch.
+          if (!status.loggedIn) {
+            if (desktopCatalog) verifiedPanel()?.clearCatalog?.(desktopCatalog);
+            desktopCatalog = undefined;
+            emit();
+            return;
+          }
           const ownerId =
-            status.loggedIn && typeof status.account?.subject === 'string'
+            typeof status.account?.subject === 'string'
               ? status.account.subject
-              : undefined;
-          const generation = catalogGenerationOf(status.account);
+              : desktopCatalog?.ownerId;
+          const generation =
+            catalogGenerationOf(status.account) ?? desktopCatalog?.generation;
+          if (!ownerId) return;
           if (
             desktopCatalog?.ownerId === ownerId &&
             desktopCatalog?.generation === generation
           )
             return;
+          // Same owner with a healed generation: retarget without wiping cache.
+          if (
+            desktopCatalog?.ownerId === ownerId &&
+            desktopCatalog &&
+            generation &&
+            desktopCatalog.generation !== generation
+          ) {
+            desktopCatalog = Object.freeze({ ownerId, generation });
+            emit();
+            return;
+          }
           if (desktopCatalog) verifiedPanel()?.clearCatalog?.(desktopCatalog);
-          desktopCatalog = ownerId
-            ? Object.freeze({ ownerId, generation })
-            : undefined;
+          desktopCatalog = Object.freeze({ ownerId, generation });
           emit();
           if (
             !desktopCatalog ||
@@ -2104,14 +2129,16 @@ window.__ModuleLoader__.load({
                 .catch(() => null);
               reading = false;
               if (live && !disposed && revision.current === started) {
-                if (shellRead) updateDesktopCatalog(next, shellRead);
-                setValue(
-                  (previous) =>
-                    next ??
-                    (keepAvailability && previous?.available
-                      ? { available: true, reason: 'status_unavailable' }
-                      : null),
-                );
+                if (shellRead && next) updateDesktopCatalog(next, shellRead);
+                setValue((previous) => {
+                  if (next) return next;
+                  // Keep the last good shell/account projection across poll
+                  // failures so marketplace and identity stay resident.
+                  if (path === 'auriga/shell/status' && previous) return previous;
+                  if (keepAvailability && previous?.available)
+                    return { available: true, reason: 'status_unavailable' };
+                  return null;
+                });
               }
               if (live && readAgain) {
                 readAgain = false;
@@ -2285,6 +2312,13 @@ window.__ModuleLoader__.load({
                     : 'signedOut',
               tone: shell.platform === 'unreachable' ? 'warning' : 'idle',
             };
+          if (shell.platform === 'revoked')
+            return { kind: 'reauth', tone: 'warning' };
+          if (
+            shell.recovering ||
+            ['unreachable', 'reauth_required'].includes(shell.platform)
+          )
+            return { kind: 'recovering', tone: 'warning' };
           return shell.connected
             ? { kind: 'connected', tone: 'done' }
             : { kind: 'degraded', tone: 'warning' };
@@ -3358,7 +3392,9 @@ window.__ModuleLoader__.load({
                   { disabled: busy, onClick: () => command('cancel_login') },
                   t('cancel'),
                 ),
-              ['unreachable', 'degraded', 'connected'].includes(view.kind) &&
+              ['unreachable', 'recovering', 'degraded', 'connected'].includes(
+                view.kind,
+              ) &&
                 h(
                   Action,
                   {

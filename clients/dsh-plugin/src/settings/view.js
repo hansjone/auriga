@@ -1309,16 +1309,20 @@ export function createSettingsView(
     const localName = localSignedIn
       ? localUac.displayName || localUac.empNo || t.localSignedIn
       : '';
+    const recovering =
+      account?.recovering === true ||
+      (!loggedIn && account?.resumeAvailable === true);
     const platformConnection =
       statusError ||
       (!account
         ? t.localUnknown
-        : loggedIn
-          ? account.connected
-            ? t.platformConnected
-            : t.platformSignedIn
-          : t.platformDisconnected);
-    const recovering = !loggedIn && account?.resumeAvailable === true;
+        : recovering
+          ? t.recovering
+          : loggedIn
+            ? account.connected
+              ? t.platformConnected
+              : t.platformSignedIn
+            : t.platformDisconnected);
     const network = account?.network;
     const ready = network?.connected === true;
     const name =

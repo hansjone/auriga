@@ -424,3 +424,72 @@ test('broker.call never retries upstream HTTP 409 or non-retryable post-exec con
   );
   assert.equal(attempts, 1);
 });
+
+test('transient unreachable keeps shell identity and account projection for UI', async (t) => {
+  const { runtime, connection, req } = await fixture(t);
+  assert.equal(runtime.status(req).loggedIn, true);
+  const before = runtime.status(req).account?.subject;
+  assert.ok(before);
+  connection.transition('unreachable');
+  await new Promise((r) => queueMicrotask(r));
+  const status = runtime.status(req);
+  assert.equal(status.loggedIn, true);
+  assert.equal(status.recovering, true);
+  assert.equal(status.connected, false);
+  assert.equal(status.platform, 'unreachable');
+  assert.equal(status.account?.subject, before);
+  assert.equal(runtime.identity()?.ownerId, connection.identity.memberId);
+});
+
+test('true sign-out after unreachable still clears retained identity', async (t) => {
+  const { runtime, connection, req } = await fixture(t);
+  connection.transition('unreachable');
+  await new Promise((r) => queueMicrotask(r));
+  assert.equal(runtime.status(req).loggedIn, true);
+  connection.logout();
+  await new Promise((r) => setTimeout(r, 20));
+  assert.equal(runtime.status(req).loggedIn, false);
+  assert.equal(runtime.status(req).recovering, false);
+  assert.equal(runtime.status(req).account, null);
+});
+
+test('revoked and reauth keep resident identity and stable catalog generation until logout', async (t) => {
+  const { runtime, connection, req } = await fixture(t);
+  const before = runtime.status(req);
+  assert.equal(before.loggedIn, true);
+  assert.ok(before.account?.catalogGeneration);
+  connection.transition('reauth_required');
+  await new Promise((r) => queueMicrotask(r));
+  let status = runtime.status(req);
+  assert.equal(status.loggedIn, true);
+  assert.equal(status.account?.subject, before.account.subject);
+  assert.equal(
+    status.account?.catalogGeneration,
+    before.account.catalogGeneration,
+  );
+  connection.transition('revoked');
+  await new Promise((r) => queueMicrotask(r));
+  status = runtime.status(req);
+  assert.equal(status.loggedIn, true);
+  assert.equal(
+    status.account?.catalogGeneration,
+    before.account.catalogGeneration,
+  );
+  connection.logout();
+  await new Promise((r) => setTimeout(r, 20));
+  assert.equal(runtime.status(req).loggedIn, false);
+  assert.equal(runtime.status(req).account?.catalogGeneration, undefined);
+});
+
+test('broker.call waits for reauth_required to recover when local identity is retained', async (t) => {
+  const { runtime, connection } = await fixture(t);
+  connection.transition('reauth_required');
+  const pending = runtime.broker.call('UnifiedListResourcePackages', {
+    limit: 10,
+    kind: 'skill',
+  });
+  await new Promise((r) => setTimeout(r, 20));
+  connection.transition('authenticated');
+  const output = await pending;
+  assert.equal(output.statusCode, 200);
+});

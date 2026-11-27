@@ -22,11 +22,13 @@ for (const outcome of ['authenticated', 'revoked'])
     assert.equal(f.runtime.status(f.request).loggedIn, true);
     f.connection.transition(outcome);
     await nextTurn();
-    assert.equal(
-      f.runtime.status(f.request).loggedIn,
-      outcome === 'authenticated',
-    );
+    // Resident until explicit logout: revoked keeps the last verified identity.
+    assert.equal(f.runtime.status(f.request).loggedIn, true);
     assert.equal(f.runtime.getAccess, undefined);
+    if (outcome === 'revoked') {
+      await f.runtime.command(f.request, 'logout');
+      assert.equal(f.runtime.status(f.request).loggedIn, false);
+    }
   });
 test('status refreshes preserve shell identity and never mint browser sessions', async (t) => {
   const f = await teamRuntimePeer(t);
