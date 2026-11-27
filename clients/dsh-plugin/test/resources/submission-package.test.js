@@ -133,6 +133,7 @@ test('skill validates metadata, packs scripts and dependency manifests, and reje
   await put('SKILL.md', skill);
   await put('requirements.txt', 'pydantic>=2.0\n');
   await put('scripts/run.py', 'print("hello")\n');
+  await put('scripts/config.json', '{"mode":"safe"}\n');
   await put('references/readme.txt', '﻿hello\r\n');
   await put('references/secret.txt', 'excluded-sample');
   await put('__pycache__/run.cpython-312.pyc', 'excluded-cache');
@@ -145,11 +146,13 @@ test('skill validates metadata, packs scripts and dependency manifests, and reje
   assert.equal(files['SKILL.md'].toString(), skill);
   assert.equal(files['requirements.txt'].toString(), 'pydantic>=2.0\n');
   assert.equal(files['scripts/run.py'].toString(), 'print("hello")\n');
+  assert.equal(files['scripts/config.json'].toString(), '{"mode":"safe"}\n');
   assert.equal(files['references/readme.txt'].toString(), '﻿hello\r\n');
   assert.deepEqual(Object.keys(files).sort(), [
     'SKILL.md',
     'references/readme.txt',
     'requirements.txt',
+    'scripts/config.json',
     'scripts/run.py',
   ]);
   await assert.rejects(

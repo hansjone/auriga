@@ -19,14 +19,25 @@ class SkillArchiveValidatorTest {
       "---\nname: example-skill\ndescription: Example skill\n---\nUse this guide.\n";
 
   private static byte[] tarGz(Map<String, String> files) throws IOException {
+    return tarGz(files, 0644, false);
+  }
+
+  private static byte[] tarGz(
+      Map<String, String> files, int fileMode, boolean includeScriptsDirEntry) throws IOException {
     var out = new ByteArrayOutputStream();
     try (var gz = new GZIPOutputStream(out);
         var tar = new TarArchiveOutputStream(gz)) {
+      if (includeScriptsDirEntry) {
+        var dir = new TarArchiveEntry("scripts/");
+        dir.setMode(0755);
+        tar.putArchiveEntry(dir);
+        tar.closeArchiveEntry();
+      }
       for (var entry : files.entrySet()) {
         byte[] data = entry.getValue().getBytes(StandardCharsets.UTF_8);
         var header = new TarArchiveEntry(entry.getKey());
         header.setSize(data.length);
-        header.setMode(0644);
+        header.setMode(fileMode);
         tar.putArchiveEntry(header);
         tar.write(data);
         tar.closeArchiveEntry();
@@ -58,13 +69,21 @@ class SkillArchiveValidatorTest {
   }
 
   @Test
-  void acceptsScriptsAndRootDependencyManifestAndElevatesRiskToR2() throws Exception {
+  void acceptsScriptsOnlyAndElevatesRiskToR2() throws Exception {
+    var files = new LinkedHashMap<String, String>();
+    files.put("SKILL.md", SKILL_MD);
+    files.put("scripts/helper.txt", "plain helper text without commands\n");
+    byte[] bytes = tarGz(files, 0644, true);
+    assertEquals(
+        "r2",
+        SkillArchiveValidator.validate(new ByteArrayInputStream(bytes), bytes.length, manifest()));
+  }
+
+  @Test
+  void acceptsRootDependencyManifestOnlyAndElevatesRiskToR2() throws Exception {
     var files = new LinkedHashMap<String, String>();
     files.put("SKILL.md", SKILL_MD);
     files.put("requirements.txt", "pydantic>=2.0\n");
-    files.put("scripts/run.py", "print('hello')\n");
-    files.put("scripts/helper.sh", "echo ok\n");
-    files.put("references/config.toml", "mode = 'safe'\n");
     byte[] bytes = tarGz(files);
     assertEquals(
         "r2",
@@ -72,9 +91,16 @@ class SkillArchiveValidatorTest {
   }
 
   @Test
-  void rejectsDisallowedPathsAndBinaryExtensions() throws Exception {
+  void rejectsDisallowedPathsMixedCaseDirsAndSpecialModeBits() throws Exception {
     for (String bad :
-        new String[] {"assets/payload.sh", "references/run.py", "scripts/bin.exe", "other/a.txt"}) {
+        new String[] {
+          "assets/payload.sh",
+          "references/run.py",
+          "Scripts/run.py",
+          "References/guide.md",
+          "scripts/bin.exe",
+          "other/a.txt"
+        }) {
       var files = new LinkedHashMap<String, String>();
       files.put("SKILL.md", SKILL_MD);
       files.put(bad, "content\n");
@@ -86,5 +112,13 @@ class SkillArchiveValidatorTest {
                   new ByteArrayInputStream(bytes), bytes.length, manifest()),
           "expected rejection for " + bad);
     }
+    var setuidFiles = new LinkedHashMap<String, String>();
+    setuidFiles.put("SKILL.md", SKILL_MD);
+    byte[] setuidBytes = tarGz(setuidFiles, 04644, false);
+    assertThrows(
+        AurigaException.class,
+        () ->
+            SkillArchiveValidator.validate(
+                new ByteArrayInputStream(setuidBytes), setuidBytes.length, manifest()));
   }
 }

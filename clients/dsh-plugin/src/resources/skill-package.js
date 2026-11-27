@@ -33,19 +33,58 @@ export function skillDirectoryValid(path) {
   );
 }
 
+const docExtensions = new Set([
+  '.md',
+  '.txt',
+  '.json',
+  '.yaml',
+  '.yml',
+  '.toml',
+  '.ini',
+  '.cfg',
+  '.csv',
+  '.sql',
+]);
+const scriptExtensions = new Set([
+  ...docExtensions,
+  '.py',
+  '.sh',
+  '.bash',
+  '.ps1',
+  '.js',
+  '.mjs',
+  '.cjs',
+  '.ts',
+  '.mts',
+  '.cts',
+  '.lock',
+]);
+
+/** @param {string} path */
+function collisionKey(path) {
+  return path.normalize('NFC').toUpperCase().toLowerCase().normalize('NFC');
+}
+
+/** @param {string} path */
+function extensionLower(path) {
+  const slash = path.lastIndexOf('/');
+  const dot = path.lastIndexOf('.');
+  return dot > slash ? path.slice(dot).toLowerCase() : '';
+}
+
 /** @param {string} path */
 export function skillPathValid(path) {
+  const ext = extensionLower(path);
+  const allowed =
+    path === 'SKILL.md' ||
+    skillRootDependencyFiles.has(path) ||
+    ((path.startsWith('references/') || path.startsWith('assets/')) &&
+      docExtensions.has(ext)) ||
+    (path.startsWith('scripts/') && scriptExtensions.has(ext));
   return (
     Buffer.byteLength(path) <= 240 &&
     path.split('/').length <= 8 &&
-    (path === 'SKILL.md' ||
-      skillRootDependencyFiles.has(path) ||
-      /^(?:references|assets)\/.+\.(?:md|txt|json|yaml|yml|toml|ini|cfg|csv|sql)$/i.test(
-        path,
-      ) ||
-      /^scripts\/.+\.(?:py|sh|bash|ps1|js|mjs|cjs|ts|mts|cts|md|txt|json|yaml|yml|toml|ini|cfg|csv|sql|lock)$/i.test(
-        path,
-      )) &&
+    allowed &&
     path
       .split('/')
       .every(
@@ -65,15 +104,16 @@ function validateFiles(files, expected) {
   const seen = new Set();
   let total = 0;
   for (const [path, bytes] of Object.entries(files)) {
+    const key = collisionKey(path);
     if (
       !skillPathValid(path) ||
-      seen.has(path.normalize('NFC').toLowerCase()) ||
+      seen.has(key) ||
       bytes.length > (path === 'SKILL.md' ? 262144 : 2097152) ||
       (total += bytes.length) > 20971520 ||
       decoder.decode(bytes).includes('\0')
     )
       refuse('common.validation_failed');
-    seen.add(path.normalize('NFC').toLowerCase());
+    seen.add(key);
   }
   if (!files['SKILL.md'] || seen.size > 512) refuse('common.validation_failed');
   const meta = validatePrivateSkill(decoder.decode(files['SKILL.md']));
@@ -89,7 +129,7 @@ export function unpackSkill(archive, expected) {
   if (tar.length % 512 || tar.length > archive.length * 100)
     refuse('common.validation_failed');
   /** @type {Record<string,Buffer>} */ const files = Object.create(null);
-  const seen = new Set();
+  /** @type {Map<string, boolean>} */ const seen = new Map();
   let pos = 0,
     entries = 0,
     ended = false;
@@ -119,18 +159,25 @@ export function unpackSkill(archive, expected) {
     const prefix = string(h.subarray(345, 500)),
       leaf = string(h.subarray(0, 100));
     const path = (prefix ? prefix + '/' : '') + leaf;
-    const key = path.replace(/\/$/, '').normalize('NFC').toLowerCase();
     const size = octal(h.subarray(124, 136)),
       mode = octal(h.subarray(100, 108)),
       type = h[156];
+    const isDir = type === 53;
+    const key = collisionKey(path.replace(/\/$/, ''));
     if (
       seen.has(key) ||
-      mode & 0o7111 ||
+      [...seen.entries()].some(
+        ([existing, existingDir]) =>
+          (!existingDir && key.startsWith(existing + '/')) ||
+          (!isDir && existing.startsWith(key + '/')),
+      ) ||
+      mode & 0o7000 ||
+      (!isDir && mode & 0o111) ||
       pos + Math.ceil(size / 512) * 512 > tar.length ||
       h.subarray(157, 257).some((b) => b !== 0)
     )
       refuse('common.validation_failed');
-    seen.add(key);
+    seen.set(key, isDir);
     if (type === 53) {
       const dir = path.replace(/\/$/, '');
       if (

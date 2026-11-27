@@ -520,20 +520,20 @@ export function installSubmissionTools(
             },
             verify,
           );
-          const verifiedDigest =
-            typeof digest === 'string' && digest ? digest : expectedDigest;
           if (
             !uuid(packageId) ||
             !uuid(versionId) ||
             state !== 'pending_review' ||
-            (expectedDigest && verifiedDigest !== expectedDigest)
+            typeof digest !== 'string' ||
+            !digest ||
+            (expectedDigest && digest !== expectedDigest)
           )
             return refuse('common.unavailable');
           return Object.freeze({
             packageId,
             versionId,
             state,
-            digest: verifiedDigest,
+            digest,
           });
         })());
         try {

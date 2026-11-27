@@ -41,7 +41,7 @@ description: 用户说“发布到 Auriga”“帮我把这个技能送审”“
   skills/example/assets/template.json  # 可选：文本模板与数据文件
 ```
 
-`SKILL.md` 需要 YAML front matter，包含 `name` 和 `description`。包含 `scripts/` 或依赖清单的技能将自动定级至少 `R2`（需安全审核）。
+`SKILL.md` 需要 YAML front matter，包含 `name` 和 `description`。风险下限以实际打入归档的文件为准：只要归档内包含 `scripts/` 下的文件或根目录依赖清单，服务端将自动定级至少 `R2`（需安全审核）。
 
 ```json
 {

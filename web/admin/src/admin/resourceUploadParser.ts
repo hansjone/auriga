@@ -231,11 +231,17 @@ async function archive(file: File, kind: CatalogKind): Promise<Entry[]> {
       directory &&
       path !== 'references' &&
       path !== 'assets' &&
+      path !== 'scripts' &&
       !path.startsWith('references/') &&
-      !path.startsWith('assets/')
+      !path.startsWith('assets/') &&
+      !path.startsWith('scripts/')
     )
       fail('skillFileInvalid', path);
-    const key = path.normalize('NFC').toLowerCase();
+    const key = path
+      .normalize('NFC')
+      .toUpperCase()
+      .toLowerCase()
+      .normalize('NFC');
     if (
       seen.has(key) ||
       [...seen].some(
@@ -254,7 +260,8 @@ async function archive(file: File, kind: CatalogKind): Promise<Entry[]> {
       end > raw.length
     )
       fail('archiveInvalid');
-    if (kind === 'skill' && !directory && octal(100, 108) & 0o111)
+    const mode = octal(100, 108);
+    if (kind === 'skill' && (mode & 0o7000 || (!directory && mode & 0o111)))
       fail('archiveUnsafe');
     if (!directory) {
       if (kind === 'plugin' && path.endsWith('/package.json')) {
@@ -556,30 +563,65 @@ export async function parseResourceSource(
     skillFiles = [];
     for (const e of entries) {
       safePath(e.path);
-      const key = e.path.normalize('NFC').toLowerCase();
+      const key = e.path
+        .normalize('NFC')
+        .toUpperCase()
+        .toLowerCase()
+        .normalize('NFC');
       if (seen.has(key)) fail('pathCollision', e.path);
       seen.add(key);
       if (e.path === 'auriga.manifest.json') continue;
       if (systemFile(e.path)) fail('systemFile', e.path);
-      if (
-        e.path.split('/').length > 8 ||
-        !(
-          e.path === 'SKILL.md' ||
+      const slash = e.path.lastIndexOf('/');
+      const dot = e.path.lastIndexOf('.');
+      const ext = dot > slash ? e.path.slice(dot).toLowerCase() : '';
+      const allowedSkillPath =
+        e.path === 'SKILL.md' ||
+        [
+          'requirements.txt',
+          'pyproject.toml',
+          'package.json',
+          'uv.lock',
+          'poetry.lock',
+        ].includes(e.path) ||
+        ((e.path.startsWith('references/') || e.path.startsWith('assets/')) &&
           [
-            'requirements.txt',
-            'pyproject.toml',
-            'package.json',
-            'uv.lock',
-            'poetry.lock',
-          ].includes(e.path) ||
-          /^(?:references|assets)\/.+\.(?:md|txt|json|yaml|yml|toml|ini|cfg|csv|sql)$/i.test(
-            e.path,
-          ) ||
-          /^scripts\/.+\.(?:py|sh|bash|ps1|js|mjs|cjs|ts|mts|cts|md|txt|json|yaml|yml|toml|ini|cfg|csv|sql|lock)$/i.test(
-            e.path,
-          )
-        )
-      )
+            '.md',
+            '.txt',
+            '.json',
+            '.yaml',
+            '.yml',
+            '.toml',
+            '.ini',
+            '.cfg',
+            '.csv',
+            '.sql',
+          ].includes(ext)) ||
+        (e.path.startsWith('scripts/') &&
+          [
+            '.py',
+            '.sh',
+            '.bash',
+            '.ps1',
+            '.js',
+            '.mjs',
+            '.cjs',
+            '.ts',
+            '.mts',
+            '.cts',
+            '.md',
+            '.txt',
+            '.json',
+            '.yaml',
+            '.yml',
+            '.toml',
+            '.ini',
+            '.cfg',
+            '.csv',
+            '.sql',
+            '.lock',
+          ].includes(ext));
+      if (e.path.split('/').length > 8 || !allowedSkillPath)
         fail('skillFileInvalid', e.path);
       if (e.sizeBytes > (e.path === 'SKILL.md' ? 262144 : 2097152))
         fail('sizeLimit', e.path);

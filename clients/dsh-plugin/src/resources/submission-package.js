@@ -9,7 +9,6 @@ import {
   skillRootDependencyFiles,
 } from './skill-package.js';
 import {
-  excluded,
   invalid,
   openSubmissionDirectory,
   safePath,
@@ -19,6 +18,26 @@ import { packPluginDirectory } from './submission-plugin.js';
 
 const decoder = new TextDecoder('utf-8', { fatal: true });
 const defaultDshRange = '>=0.2.1-rc.3';
+
+/** Skill-specific ignore filter: ignores VCS/cache dirs and secret files without silently dropping valid script configs like scripts/config.json.
+ * @param {string} name */
+function skillExcluded(name) {
+  return (
+    name.startsWith('.') ||
+    /^(?:node_modules|__pycache__|venv|coverage|tests?|__tests__|fixtures|secrets?|credentials|private[-_]?keys?|Dockerfile|Makefile)$/i.test(
+      name,
+    ) ||
+    /\.(?:pem|key|p12|pfx|jks|keystore|crt|cer|kdbx|sqlite3?|db|log|bak|tgz|zip)$/i.test(
+      name,
+    ) ||
+    /^(?:env|secrets?|credentials|tokens?|private[-_]?keys?|id_(?:rsa|ed25519|ecdsa))(?:\.|$)/i.test(
+      name,
+    ) ||
+    /^(?:config|settings|application|appsettings)\.(?:local|dev|development|prod|production|test)\.(?:json|toml|ini|ya?ml|properties)$/i.test(
+      name,
+    )
+  );
+}
 
 /** @param {ReturnType<typeof submissionFiles>} source */
 async function packSkillDirectory(source) {
@@ -33,7 +52,11 @@ async function packSkillDirectory(source) {
     if (!safePath(path)) invalid(path, 'unsafe skill path');
     const info = await source.stat(path, optional);
     if (!info) return;
-    const key = path.normalize('NFC').toLowerCase();
+    const key = path
+      .normalize('NFC')
+      .toUpperCase()
+      .toLowerCase()
+      .normalize('NFC');
     if (names.has(key)) invalid(path, 'skill path collides with another entry');
     names.add(key);
     if (info.isDirectory()) {
@@ -43,7 +66,7 @@ async function packSkillDirectory(source) {
           'unsupported skill directory (only references/, assets/, scripts/ are allowed)',
         );
       for await (const name of source.children(path))
-        if (!excluded(name)) await visit(path + '/' + name);
+        if (!skillExcluded(name)) await visit(path + '/' + name);
       return;
     }
     if (path === 'assets' || path === 'references' || path === 'scripts')
@@ -72,7 +95,7 @@ async function packSkillDirectory(source) {
   }
 
   for await (const name of source.children('')) {
-    if (!excluded(name)) await visit(name);
+    if (!skillExcluded(name)) await visit(name);
   }
   if (!files['SKILL.md'])
     invalid('SKILL.md', 'missing required SKILL.md at skill root');

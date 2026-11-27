@@ -19,15 +19,58 @@ public final class SkillArchiveValidator {
   private static final Set<String> ROOT_DEPENDENCY_FILES =
       Set.of("requirements.txt", "pyproject.toml", "package.json", "uv.lock", "poetry.lock");
 
-  private static boolean isAllowedSkillFile(String path) {
-    if (path.equals("SKILL.md") || ROOT_DEPENDENCY_FILES.contains(path)) return true;
-    String lower = path.toLowerCase(Locale.ROOT);
-    if (lower.startsWith("references/") || lower.startsWith("assets/"))
-      return lower.matches(".*\\.(md|txt|json|yaml|yml|toml|ini|cfg|csv|sql)$");
-    if (lower.startsWith("scripts/"))
-      return lower.matches(
-          ".*\\.(py|sh|bash|ps1|js|mjs|cjs|ts|mts|cts|md|txt|json|yaml|yml|toml|ini|cfg|csv|sql|lock)$");
-    return false;
+  private enum SkillFileClass {
+    ENTRY,
+    DOC,
+    SCRIPT_OR_DEP,
+    INVALID
+  }
+
+  private static String extensionLower(String path) {
+    int slash = path.lastIndexOf('/');
+    int dot = path.lastIndexOf('.');
+    return dot > slash ? path.substring(dot).toLowerCase(Locale.ROOT) : "";
+  }
+
+  private static SkillFileClass classifySkillFile(String path) {
+    if (path.equals("SKILL.md")) return SkillFileClass.ENTRY;
+    if (ROOT_DEPENDENCY_FILES.contains(path)) return SkillFileClass.SCRIPT_OR_DEP;
+    String ext = extensionLower(path);
+    if (path.startsWith("references/") || path.startsWith("assets/")) {
+      return switch (ext) {
+        case ".md", ".txt", ".json", ".yaml", ".yml", ".toml", ".ini", ".cfg", ".csv", ".sql" ->
+            SkillFileClass.DOC;
+        default -> SkillFileClass.INVALID;
+      };
+    }
+    if (path.startsWith("scripts/")) {
+      return switch (ext) {
+        case ".py",
+            ".sh",
+            ".bash",
+            ".ps1",
+            ".js",
+            ".mjs",
+            ".cjs",
+            ".ts",
+            ".mts",
+            ".cts",
+            ".md",
+            ".txt",
+            ".json",
+            ".yaml",
+            ".yml",
+            ".toml",
+            ".ini",
+            ".cfg",
+            ".csv",
+            ".sql",
+            ".lock" ->
+            SkillFileClass.SCRIPT_OR_DEP;
+        default -> SkillFileClass.INVALID;
+      };
+    }
+    return SkillFileClass.INVALID;
   }
 
   private static boolean isAllowedSkillDirectory(String path) {
@@ -68,13 +111,14 @@ public final class SkillArchiveValidator {
             CatalogManifest.path(path);
             if (path.getBytes(StandardCharsets.UTF_8).length > 240
                 || path.split("/").length > 8
-                || (entry.getMode() & 0111) != 0 && !entry.isDirectory()) throw invalid();
+                || (entry.getMode() & 07000) != 0
+                || ((entry.getMode() & 0111) != 0 && !entry.isDirectory())) throw invalid();
             if (entry.isDirectory()) {
               if (!isAllowedSkillDirectory(path)) throw invalid();
             } else {
-              if (!isAllowedSkillFile(path)) throw invalid();
-              if (path.startsWith("scripts/") || ROOT_DEPENDENCY_FILES.contains(path))
-                hasScriptsOrDeps = true;
+              SkillFileClass kind = classifySkillFile(path);
+              if (kind == SkillFileClass.INVALID) throw invalid();
+              if (kind == SkillFileClass.SCRIPT_OR_DEP) hasScriptsOrDeps = true;
               byte[] bytes = tar.readNBytes(2097153);
               if (bytes.length != entry.getSize()) throw invalid();
               String decoded = CatalogManifest.utf8(bytes);

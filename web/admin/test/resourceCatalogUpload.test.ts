@@ -99,7 +99,10 @@ it('freezes a folder snapshot and writes the actual packed digest into a new man
 });
 it('packs skill folder containing scripts and root dependency manifest', async () => {
   const archive = await packSkillFolder([
-    file('sample/SKILL.md', '---\nname: sample\ndescription: Sample\n---\nBody'),
+    file(
+      'sample/SKILL.md',
+      '---\nname: sample\ndescription: Sample\n---\nBody',
+    ),
     file('sample/requirements.txt', 'requests>=2.32\n'),
     file('sample/scripts/run.py', 'print("ok")\n'),
   ]);
@@ -108,6 +111,7 @@ it('packs skill folder containing scripts and root dependency manifest', async (
 it.each([
   '../SKILL.md',
   'other/a.md',
+  'Scripts/a.py',
   'scripts/a.exe',
   'assets/a.js',
   'assets/CON.txt',

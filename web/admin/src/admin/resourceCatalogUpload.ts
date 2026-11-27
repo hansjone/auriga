@@ -102,6 +102,55 @@ export async function packSkillFolder(files: File[]): Promise<File> {
     if (!root || !relative.startsWith(root + '/')) throw invalid();
     const path = relative.slice(root.length + 1),
       parts = path.split('/');
+    const slash = path.lastIndexOf('/');
+    const dot = path.lastIndexOf('.');
+    const ext = dot > slash ? path.slice(dot).toLowerCase() : '';
+    const allowedSkillPath =
+      path === 'SKILL.md' ||
+      [
+        'requirements.txt',
+        'pyproject.toml',
+        'package.json',
+        'uv.lock',
+        'poetry.lock',
+      ].includes(path) ||
+      ((path.startsWith('references/') || path.startsWith('assets/')) &&
+        [
+          '.md',
+          '.txt',
+          '.json',
+          '.yaml',
+          '.yml',
+          '.toml',
+          '.ini',
+          '.cfg',
+          '.csv',
+          '.sql',
+        ].includes(ext)) ||
+      (path.startsWith('scripts/') &&
+        [
+          '.py',
+          '.sh',
+          '.bash',
+          '.ps1',
+          '.js',
+          '.mjs',
+          '.cjs',
+          '.ts',
+          '.mts',
+          '.cts',
+          '.md',
+          '.txt',
+          '.json',
+          '.yaml',
+          '.yml',
+          '.toml',
+          '.ini',
+          '.cfg',
+          '.csv',
+          '.sql',
+          '.lock',
+        ].includes(ext));
     if (
       parts.length > 8 ||
       encoder.encode(path).length > 240 ||
@@ -115,31 +164,26 @@ export async function packSkillFolder(files: File[]): Promise<File> {
           /[. ]$/.test(p) ||
           /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i.test(p),
       ) ||
-      !(
-        path === 'SKILL.md' ||
-        [
-          'requirements.txt',
-          'pyproject.toml',
-          'package.json',
-          'uv.lock',
-          'poetry.lock',
-        ].includes(path) ||
-        /^(?:references|assets)\/.+\.(?:md|txt|json|yaml|yml|toml|ini|cfg|csv|sql)$/i.test(
-          path,
-        ) ||
-        /^scripts\/.+\.(?:py|sh|bash|ps1|js|mjs|cjs|ts|mts|cts|md|txt|json|yaml|yml|toml|ini|cfg|csv|sql|lock)$/i.test(
-          path,
-        )
-      ) ||
+      !allowedSkillPath ||
       file.size > (path === 'SKILL.md' ? 262144 : 2 * 1024 * 1024)
     )
       throw invalid();
-    const normalized = path.normalize('NFC').toLowerCase();
+    const normalized = path
+      .normalize('NFC')
+      .toUpperCase()
+      .toLowerCase()
+      .normalize('NFC');
     if (seen.has(normalized)) throw invalid();
     seen.add(normalized);
     for (let i = 1; i < parts.length; i++)
       directories.add(
-        parts.slice(0, i).join('/').normalize('NFC').toLowerCase(),
+        parts
+          .slice(0, i)
+          .join('/')
+          .normalize('NFC')
+          .toUpperCase()
+          .toLowerCase()
+          .normalize('NFC'),
       );
     entries.push({ path, file });
     size += 512 + Math.ceil(file.size / 512) * 512;

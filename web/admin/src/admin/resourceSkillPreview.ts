@@ -1,5 +1,6 @@
 /* global ReadableStream */
-const max = 10 * 1024 * 1024;
+const max = 20 * 1024 * 1024;
+const maxTextPreviewBytes = 256 * 1024;
 export async function boundedBytes(stream: ReadableStream<Uint8Array>) {
   const reader = stream.getReader(),
     chunks: Uint8Array[] = [];
@@ -175,21 +176,25 @@ export function tarText(raw: Uint8Array) {
       path.split('/').some((s) => s === '.' || s === '..') ||
       seen.has(path) ||
       !['', '0', '5'].includes(type) ||
-      size > 1024 * 1024 ||
+      size > 2 * 1024 * 1024 ||
       offset + 512 + size > raw.length
     )
       throw new Error('Unsafe preview');
     seen.add(path);
     if (type !== '5') {
-      const text = decoder.decode(
-        raw.subarray(offset + 512, offset + 512 + size),
-      );
+      const fullSlice = raw.subarray(offset + 512, offset + 512 + size);
+      const fullText = decoder.decode(fullSlice);
       if (
-        [...text].some(
+        [...fullText].some(
           (c) => c.charCodeAt(0) < 32 && !['\t', '\n', '\r'].includes(c),
         )
       )
         throw new Error('Binary content');
+      const text =
+        size > maxTextPreviewBytes
+          ? fullText.slice(0, maxTextPreviewBytes) +
+            `\n\n[文件较大 (${size} bytes)，仅展示前 256 KiB 预览]`
+          : fullText;
       result.push({ path, text });
     }
     offset += 512 + Math.ceil(size / 512) * 512;

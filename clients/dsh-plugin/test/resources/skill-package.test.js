@@ -21,10 +21,12 @@ test('text-only bundle with scripts and root dependency manifests round trips ex
     assert.equal(restored[key].toString('utf8'), value);
   assert.deepEqual(archive, packSkill(withScripts, meta));
 });
-test('disallowed paths, script outside scripts/, escape paths, aliases, metadata mismatch and executable archive members are refused', () => {
+test('disallowed paths, mixed-case dirs, script outside scripts/, escape paths, aliases, metadata mismatch and executable archive members are refused', () => {
   for (const path of [
     'assets/run.js',
     'references/run.sh',
+    'Scripts/run.py',
+    'References/note.md',
     'scripts/binary.exe',
     'other/file.txt',
     'references/../escape.md',

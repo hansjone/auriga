@@ -608,6 +608,19 @@ export function catalogService(options) {
       }
       throw error;
     }
+    /** @param {any} ver @returns {string|null} */
+    function receiptPayloadDigest(ver) {
+      if (ver?.manifest == null) return null;
+      const list = ver.manifest?.artifacts;
+      if (
+        !Array.isArray(list) ||
+        list.length !== 1 ||
+        typeof list[0]?.digest !== 'string'
+      )
+        refuse('resource.digest_mismatch');
+      return list[0].digest;
+    }
+    const uploadedPayloadDigest = receiptPayloadDigest(uploaded.value);
     if (
       !uuid(uploaded.value?.id) ||
       uploaded.value.packageId !== pack.value.id ||
@@ -615,9 +628,8 @@ export function catalogService(options) {
       uploaded.value.version !== version ||
       uploaded.value.state !== 'draft' ||
       uploaded.value.digest !== manifestDigest ||
-      (Array.isArray(uploaded.value.artifacts) &&
-        uploaded.value.artifacts.length > 0 &&
-        uploaded.value.artifacts[0]?.digest !== artifacts[0].digest)
+      (uploadedPayloadDigest !== null &&
+        uploadedPayloadDigest !== artifacts[0].digest)
     )
       refuse('resource.digest_mismatch');
     const review = await submissionStage('submit', () =>
@@ -637,6 +649,7 @@ export function catalogService(options) {
       ),
     );
     const result = review.value;
+    const submittedPayloadDigest = receiptPayloadDigest(result?.version);
     if (
       !uuid(result?.reviewId) ||
       result.authorId !== who.ownerId ||
@@ -646,14 +659,17 @@ export function catalogService(options) {
       result.version?.kind !== kind ||
       result.version?.version !== version ||
       result.version?.digest !== manifestDigest ||
-      result.version?.state !== 'pending_review'
+      result.version?.state !== 'pending_review' ||
+      (submittedPayloadDigest !== null &&
+        submittedPayloadDigest !== artifacts[0].digest)
     )
       refuse('common.validation_failed');
     return {
       packageId: pack.value.id,
       versionId: uploaded.value.id,
       state: result.version.state,
-      digest: artifacts[0].digest,
+      digest:
+        submittedPayloadDigest ?? uploadedPayloadDigest ?? artifacts[0].digest,
       manifestDigest,
     };
   }

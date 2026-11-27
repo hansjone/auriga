@@ -245,6 +245,9 @@ export function createPrivateSkills({ home }) {
             refuse('common.validation_failed');
           await visit(target, path + '/');
         } else {
+          const slash = path.lastIndexOf('/');
+          const dot = path.lastIndexOf('.');
+          const ext = dot > slash ? path.slice(dot).toLowerCase() : '';
           if (
             !stat.isFile() ||
             stat.size > 2097152 ||
@@ -257,11 +260,47 @@ export function createPrivateSkills({ home }) {
                 'uv.lock',
                 'poetry.lock',
               ].includes(path) &&
-              !/^(?:references|assets)\/.+\.(?:md|txt|json|yaml|yml|toml|ini|cfg|csv|sql)$/i.test(
-                path,
+              !(
+                (path.startsWith('references/') ||
+                  path.startsWith('assets/')) &&
+                [
+                  '.md',
+                  '.txt',
+                  '.json',
+                  '.yaml',
+                  '.yml',
+                  '.toml',
+                  '.ini',
+                  '.cfg',
+                  '.csv',
+                  '.sql',
+                ].includes(ext)
               ) &&
-              !/^scripts\/.+\.(?:py|sh|bash|ps1|js|mjs|cjs|ts|mts|cts|md|txt|json|yaml|yml|toml|ini|cfg|csv|sql|lock)$/i.test(
-                path,
+              !(
+                path.startsWith('scripts/') &&
+                [
+                  '.py',
+                  '.sh',
+                  '.bash',
+                  '.ps1',
+                  '.js',
+                  '.mjs',
+                  '.cjs',
+                  '.ts',
+                  '.mts',
+                  '.cts',
+                  '.md',
+                  '.txt',
+                  '.json',
+                  '.yaml',
+                  '.yml',
+                  '.toml',
+                  '.ini',
+                  '.cfg',
+                  '.csv',
+                  '.sql',
+                  '.lock',
+                ].includes(ext)
               ))
           )
             refuse('common.validation_failed');
